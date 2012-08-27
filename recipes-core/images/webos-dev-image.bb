@@ -15,11 +15,14 @@ MACHINE_EXTRA_INSTALL_tuna = " \
   libsamsung-ipc \
   libsamsung-ipc-tools \
   samsung-fb-console \
-  brcm-patchram-plus"
+  brcm-patchram-plus \
+  samsung-modem-mgr"
 
 IMAGE_INSTALL += " \
   opkg \
   mingetty \
   serial-forward \
+  pulseaudio \
+  mdbus2 \
   \
   ${MACHINE_EXTRA_INSTALL}"
