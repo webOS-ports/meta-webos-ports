@@ -3,6 +3,7 @@ PV = "1.10+git${SRCPV}"
 PRINC := "${@int(PRINC) + 1}"
 
 DEPENDS += "libsamsung-ipc"
+DEFAULT_PREFERENCE = "-1"
 
 SRC_URI  = " \
   git://github.com/morphis/ofono.git;branch=morphis/samsung-ipc \
