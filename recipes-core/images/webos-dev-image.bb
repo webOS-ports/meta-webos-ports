@@ -24,5 +24,7 @@ IMAGE_INSTALL += " \
   serial-forward \
   pulseaudio \
   mdbus2 \
+  wireless-tools \
   \
+  ${MACHINE_EXTRA_RDEPENDS} \
   ${MACHINE_EXTRA_INSTALL}"
