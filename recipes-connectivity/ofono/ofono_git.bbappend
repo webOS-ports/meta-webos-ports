@@ -5,5 +5,5 @@ PRINC := "${@int(PRINC) + 1}"
 DEPENDS += "libsamsung-ipc"
 
 SRC_URI  = " \
-  git://github.com/morphis/ofono.git;branch=morphis/samsung-ipc \
+  git://git.kernel.org/pub/scm/network/ofono/ofono.git;protocol=git;branch=master \
   file://ofono"
