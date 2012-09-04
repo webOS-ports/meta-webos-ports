@@ -22,7 +22,7 @@ IMAGE_INSTALL += " \
   opkg \
   mingetty \
   serial-forward \
-  pulseaudio \
+  pulseaudio-server \
   mdbus2 \
   wireless-tools \
   \
