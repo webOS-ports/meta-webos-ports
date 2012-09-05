@@ -1,7 +1,7 @@
 require recipes-multimedia/pulseaudio/pulseaudio.inc
 
 PR = "r0"
-PV	 = "2.1-git${SRCPV}"
+PV	 = "2.1+gitr${SRCPV}"
 DEPENDS += "libjson gdbm speex libxml-parser-perl-native"
 
 inherit gettext perlnative
