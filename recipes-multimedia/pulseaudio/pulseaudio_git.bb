@@ -1,7 +1,7 @@
 require recipes-multimedia/pulseaudio/pulseaudio.inc
 
-PR = "r0"
-PV	 = "2.1+gitr${SRCPV}"
+PR = "r1"
+PV = "2.1+gitr${SRCPV}"
 DEPENDS += "libjson gdbm speex libxml-parser-perl-native"
 
 inherit gettext perlnative
@@ -28,3 +28,31 @@ do_compile_prepend() {
     mkdir -p ${S}/libltdl
     cp ${STAGING_LIBDIR}/libltdl* ${S}/libltdl
 }
+
+# overwrite from pulseaudio.inc
+# module-cork-music-on-phone was renamed to module-role-cork
+# http://cgit.freedesktop.org/pulseaudio/pulseaudio/commit/?id=3c5cc345472302b9511c19244b3eceb4a3674d8c
+# remove this when we have fixed oe-core version in layers.txt
+RDEPENDS_pulseaudio-server = " \
+    pulseaudio-module-filter-apply \
+    pulseaudio-module-filter-heuristics \
+    pulseaudio-module-udev-detect \
+    pulseaudio-module-null-sink \
+    pulseaudio-module-device-restore \
+    pulseaudio-module-stream-restore \
+    pulseaudio-module-card-restore \
+    pulseaudio-module-augment-properties \
+    pulseaudio-module-detect \
+    pulseaudio-module-alsa-sink \
+    pulseaudio-module-alsa-source \
+    pulseaudio-module-alsa-card \
+    pulseaudio-module-native-protocol-unix \
+    pulseaudio-module-default-device-restore \
+    pulseaudio-module-intended-roles \
+    pulseaudio-module-rescue-streams \
+    pulseaudio-module-always-sink \
+    pulseaudio-module-suspend-on-idle \
+    pulseaudio-module-console-kit \
+    pulseaudio-module-position-event-sounds \
+    pulseaudio-module-role-cork "
+
