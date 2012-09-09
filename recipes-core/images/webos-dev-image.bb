@@ -20,6 +20,7 @@ MACHINE_EXTRA_INSTALL_tuna = " \
 
 IMAGE_INSTALL += " \
   opkg \
+  distro-feed-configs \
   mingetty \
   serial-forward \
   pulseaudio-server \
