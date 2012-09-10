@@ -27,5 +27,11 @@ IMAGE_INSTALL += " \
   mdbus2 \
   wireless-tools \
   \
+  alsa-utils-alsamixer \
+  alsa-utils-alsactl \
+  alsa-utils-alsaucm \
+  alsa-utils-aplay \
+  alsa-utils-amixer \
+  \
   ${MACHINE_EXTRA_RDEPENDS} \
   ${MACHINE_EXTRA_INSTALL}"
