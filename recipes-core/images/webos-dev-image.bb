@@ -26,6 +26,8 @@ IMAGE_INSTALL += " \
   pulseaudio-server \
   mdbus2 \
   wireless-tools \
+  connman \
+  bluez4 \
   \
   alsa-utils-alsamixer \
   alsa-utils-alsactl \
