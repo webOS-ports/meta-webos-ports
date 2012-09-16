@@ -1,6 +1,6 @@
 require recipes-multimedia/pulseaudio/pulseaudio.inc
 
-PR = "r2"
+PR = "r3"
 PV = "2.1+gitr${SRCPV}"
 DEPENDS += "libjson gdbm speex libxml-parser-perl-native"
 
@@ -59,7 +59,9 @@ RDEPENDS_pulseaudio-server = " \
 # Config files from ${sysconfdir} should go into ${PN}-conf package and not
 # into ${PN}-server so we fix this here until oe-core version we're using
 # contains the relevant patch for this.
+PACKAGES =+ " ${PN}-conf"
 FILES_${PN}-server = "${bindir}/pulseaudio ${bindir}/start-* ${bindir}/pactl ${base_libdir}/udev/rules.d/*.rules"
+FILES_${PN}-conf = "${sysconfdir}/pulse"
 CONFFILES_pulseaudio-server = ""
 CONFFILES_pulseaudio-conf = " \
   ${sysconfdir}/pulse/default.pa \
