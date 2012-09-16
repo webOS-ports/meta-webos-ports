@@ -24,6 +24,7 @@ IMAGE_INSTALL += " \
   mingetty \
   serial-forward \
   pulseaudio-server \
+  pulseaudio-machine-conf \
   mdbus2 \
   wireless-tools \
   connman \
