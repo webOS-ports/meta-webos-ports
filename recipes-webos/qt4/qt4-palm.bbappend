@@ -1,7 +1,5 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
-PRINC := "${@int(PRINC) + 1}"
-
-SRC_URI += " file://remove-dependency-on-libhid-and-fix-errors.patch"
+PRINC := "${@int(PRINC) + 2}"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
