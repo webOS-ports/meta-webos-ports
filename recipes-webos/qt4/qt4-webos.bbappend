@@ -1,5 +1,5 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
-PRINC := "${@int(PRINC) + 3}"
+PRINC := "${@int(PRINC) + 4}"
 
 SRC_URI_append_tuna = " \
     file://enable-palm-platform-plugin.patch \
@@ -10,7 +10,7 @@ DEPENDS_append_tuna = " virtual/egl"
 
 do_install_append() {
     if [ "${MACHINE}" = "tuna" ]; then
-        oe_libinstall -C ${PALM_BUILD_DIR}/plugins/platforms -so libqpalm ${D}/usr/lib
+        install -m 555 ${PALM_BUILD_DIR}/plugins/platforms/libqpalm.so ${D}${libdir}
         # oe_libinstall -C ${PALM_BUILD_DIR}/plugins/platforms -so libqwebos ${D}/usr/lib
 
         install -d ${D}/usr/plugins/platforms
