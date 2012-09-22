@@ -1,8 +1,7 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
-PRINC := "${@int(PRINC) + 4}"
+PRINC := "${@int(PRINC) + 5}"
 
 SRC_URI_append_tuna = " \
-    file://enable-palm-platform-plugin.patch \
     file://fix-webos-platform-plugin-compilation.patch \
     file://fix-webos-platform-plugin-configuration.patch"
 
