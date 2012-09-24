@@ -16,7 +16,8 @@ MACHINE_EXTRA_INSTALL_tuna = " \
   libsamsung-ipc-tools \
   samsung-fb-console \
   brcm-patchram-plus \
-  samsung-modem-mgr"
+  samsung-modem-mgr \
+  pulseaudio-machine-conf"
 
 IMAGE_INSTALL += " \
   opkg \
@@ -24,7 +25,6 @@ IMAGE_INSTALL += " \
   mingetty \
   serial-forward \
   pulseaudio-server \
-  pulseaudio-machine-conf \
   mdbus2 \
   wireless-tools \
   connman \
