@@ -1,5 +1,5 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
-PRINC := "${@int(PRINC) + 6}"
+PRINC := "${@int(PRINC) + 7}"
 
 # NOTE: We're disabling accelerated graphics support with the
 # add-tuna-support-for-palm-plugin.patch here. It will force the plugin to use plain
