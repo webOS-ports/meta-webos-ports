@@ -1,14 +1,9 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
-PRINC := "${@int(PRINC) + 7}"
+PRINC := "${@int(PRINC) + 8}"
 
-# NOTE: We're disabling accelerated graphics support with the
-# add-tuna-support-for-palm-plugin.patch here. It will force the plugin to use plain
-# framebuffer graphic rendering. If we want to enable accelerated graphics later again we
-# have to remove this patch and the palm plugin switches back to default rendering (which
-# is using eglfs).
 SRC_URI_append_tuna = " \
     file://dont-link-against-libhid.patch \
-    file://add-tuna-support-for-palm-plugin.patch"
+    file://no-keyboard-support.patch"
 
 DEPENDS_append_tuna = " virtual/egl"
 
