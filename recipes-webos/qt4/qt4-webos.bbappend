@@ -1,9 +1,9 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
-PRINC := "${@int(PRINC) + 8}"
+PRINC := "${@int(PRINC) + 9}"
 
 SRC_URI_append_tuna = " \
     file://dont-link-against-libhid.patch \
-    file://no-keyboard-support.patch"
+    file://keyboard-support-compilation-fix.patch"
 
 DEPENDS_append_tuna = " virtual/egl"
 
