@@ -1,11 +1,19 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
-PRINC := "${@int(PRINC) + 10}"
+PRINC := "${@int(PRINC) + 11}"
 
 SRC_URI_append_tuna = " \
     file://dont-link-against-libhid.patch \
     file://keyboard-support-compilation-fix.patch"
 
 DEPENDS_append_tuna = " virtual/egl"
+
+# Enable dbus support needed for some components inside webos-ports
+DEPENDS += "dbus"
+QT_CONFIG_FLAGS += "-dbus"
+
+do_install_append() {
+    oe_libinstall -C ${PALM_BUILD_DIR}/lib/ -so libQtDBus ${D}/usr/lib
+}
 
 do_install_append_tuna() {
     oe_libinstall -C ${PALM_BUILD_DIR}/lib/ -so libQtOpenGL ${D}/usr/lib
