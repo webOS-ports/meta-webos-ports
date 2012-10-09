@@ -1,8 +1,6 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 PRINC := "${@int(PRINC) + 4}"
 
-SRC_URI += " \
-    file://exclude-with-machine-public-quirks.patch \
-    file://dont-use-private-opengl-stuff.patch"
+inherit webos-ports-submissions
 
-SRC_URI_append_tuna = " file://add-support-for-tuna-device.patch"
+SRCREV = "a35d99e807a60d1c7b5e2f4d4e637d625bd20bac"
