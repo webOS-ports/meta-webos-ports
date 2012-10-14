@@ -21,3 +21,6 @@ inherit webos_system_bus
 WEBOS_GIT_TAG = "submissions/${WEBOS_SUBMISSION}"
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
+
+SRC_URI += "file://use-wakelockd-for-suspend.patch"
+RDEPENDS_${PN} = "wakelockd"
