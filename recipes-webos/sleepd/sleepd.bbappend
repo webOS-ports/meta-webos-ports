@@ -1,6 +1,6 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
-PRINC := "${@int(PRINC) + 1}"
+PRINC := "${@int(PRINC) + 2}"
 
-RDEPENDS = "wakelockd"
+RDEPENDS_${PN} = "wakelockd"
 
 SRC_URI += "file://use-wakelockd-for-suspend.patch"
