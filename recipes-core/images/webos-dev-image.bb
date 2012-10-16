@@ -20,21 +20,7 @@ MACHINE_EXTRA_INSTALL_tuna = " \
   pulseaudio-machine-conf"
 
 IMAGE_INSTALL += " \
-  opkg \
-  distro-feed-configs \
-  mingetty \
-  serial-forward \
-  pulseaudio-server \
-  mdbus2 \
-  wireless-tools \
-  connman \
-  bluez4 \
-  \
-  alsa-utils-alsamixer \
-  alsa-utils-alsactl \
-  alsa-utils-alsaucm \
-  alsa-utils-aplay \
-  alsa-utils-amixer \
-  \
+  packagegroup-webos-ports-extended \
+  packagegroup-webos-ports-development \
   ${MACHINE_EXTRA_RDEPENDS} \
   ${MACHINE_EXTRA_INSTALL}"
