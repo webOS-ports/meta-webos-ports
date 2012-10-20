@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=751419260aa954499f7abaabaa882bbe"
 
 DEPENDS = "glib-2.0"
 
-SRCREV = "7ff6cccb7090577ef7e7d8132c301e32c69fb158"
+SRCREV = "ec6d5386ea6ea0d398f9ff6a89e15a3d25813da4"
 SRC_URI = "git://github.com/webOS-ports/wakelockd;protocol=git;branch=master"
 S = "${WORKDIR}/git"
 
