@@ -12,34 +12,14 @@ SRC_URI = " \
 S = "${WORKDIR}/git"
 
 PV = "0.2.2+gitr${SRCPV}"
-PR = "r2"
+PR = "r3"
 
 # NOTE: We're not using qmake2.bbclass here as qt4-webos isn't compatible with it yet.
 # When qt4-webos-tools-native is available or upstream changed to qt4-tools-native we can
 # start to use qmake2.bbclass. Until this happens we have to add some manual
 # configurations lines for qmake-palm here.
-
-EXTRA_OEMAKE = " MAKEFLAGS= "
-
-export STRIP_TMP="${STRIP}"
-export F77_TMP="${F77}"
-export QMAKE_MKSPEC_PATH_TMP="${QMAKE_MKSPEC_PATH}"
-export CC_TMP="${CC}"
-export CPPFLAGS_TMP="${CPPFLAGS}"
-export RANLIB_TMP="${RANLIB}"
-export CXX_TMP="${CXX}"
-export OBJCOPY_TMP="${OBJCOPY}"
-export CCLD_TMP="${CCLD}"
-export CFLAGS_TMP="${CFLAGS}"
-export TARGET_LDFLAGS_TMP="${TARGET_LDFLAGS}"
-export LDFLAGS_TMP="${LDFLAGS}"
-export AS_TMP="${AS}"
-export AR_TMP="${AR}"
-export CPP_TMP="${CPP}"
-export TARGET_CPPFLAGS_TMP="${TARGET_CPPFLAGS}"
-export CXXFLAGS_TMP="${CXXFLAGS}"
-export OBJDUMP_TMP="${OBJDUMP}"
-export LD_TMP="${LD}"
+inherit webos_qmake
+inherit webos_machine_dep
 
 do_configure() {
     export STAGING_INCDIR="${STAGING_INCDIR}"
