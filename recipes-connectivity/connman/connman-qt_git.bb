@@ -6,11 +6,13 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "qt4-webos"
 
 SRCREV = "aeb22e6822d6a3f7beb2889901ee4ac6225ee46d"
-SRC_URI = "git://github.com/morphis/libconnman-qt.git;protocol=git;branch=master"
+SRC_URI = " \
+    git://github.com/morphis/libconnman-qt.git;protocol=git;branch=master \
+    file://remove-qdbusxml2cpp-dependency.patch"
 S = "${WORKDIR}/git"
 
 PV = "0.2.2+gitr${SRCPV}"
-PR = "r1"
+PR = "r2"
 
 # NOTE: We're not using qmake2.bbclass here as qt4-webos isn't compatible with it yet.
 # When qt4-webos-tools-native is available or upstream changed to qt4-tools-native we can
