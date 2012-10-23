@@ -1,13 +1,13 @@
 DESCRIPTION = "Connman service adapter for Open webOS"
 SECTION = "libs"
 LICENSE = "Apache-2.0"
-LIC_FILES_CHKSUM = "file://README.md;md5=d103e97a58c1ee82c5051799d25fa394"
+LIC_FILES_CHKSUM = "file://README.md;md5=3b3ebec2970835ab0bdc6868b4e78873"
 
 DEPENDS = "qt4-webos glib-2.0 luna-service2 connman-qt"
 
 inherit webos_system_bus
 
-SRCREV = "110375b2525ad1c97dca0db98174842046630663"
+SRCREV = "009b0589c2ce0b5c409ba43db0f4b4f14f733e11"
 SRC_URI = "git://github.com/webOS-ports/connman-adapter;protocol=git;branch=master"
 S = "${WORKDIR}/git"
 
