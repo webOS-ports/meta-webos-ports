@@ -10,7 +10,7 @@ SRC_URI = "git://github.com/morphis/libconnman-qt.git;protocol=git;branch=master
 S = "${WORKDIR}/git"
 
 PV = "0.2.2+gitr${SRCPV}"
-PR = "r0"
+PR = "r1"
 
 # NOTE: We're not using qmake2.bbclass here as qt4-webos isn't compatible with it yet.
 # When qt4-webos-tools-native is available or upstream changed to qt4-tools-native we can
@@ -49,3 +49,14 @@ do_compile_prepend() {
     export STAGING_INCDIR="${STAGING_INCDIR}"
     export STAGING_LIBDIR="${STAGING_LIBDIR}"
 }
+
+do_install() {
+    # We just want to install the library and nothing more
+    cd ${S}/libconnman-qt
+    oe_runmake INSTALL_ROOT=${D} install
+
+    install -d ${D}${libdir}/pkgconfig
+    mv ${D}${libdir}/connman-qt4.pc ${D}${libdir}/pkgconfig
+}
+
+FILES_${PN} += "${libdir}/libconnman-qt4.prl"
