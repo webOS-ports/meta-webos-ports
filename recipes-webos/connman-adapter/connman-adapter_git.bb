@@ -7,7 +7,7 @@ DEPENDS = "qt4-webos glib-2.0 luna-service2 connman-qt"
 
 inherit webos_system_bus
 
-SRCREV = "e5e4aecb80f4d03438a85da4bce5e52cb1a69e50"
+SRCREV = "ea3ad70deadab648925f9aaf9cedd23fa3eed046"
 SRC_URI = "git://github.com/webOS-ports/connman-adapter;protocol=git;branch=master"
 S = "${WORKDIR}/git"
 
