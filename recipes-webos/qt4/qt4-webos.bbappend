@@ -1,5 +1,5 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
-PRINC := "${@int(PRINC) + 12}"
+PRINC := "${@int(PRINC) + 13}"
 
 SRC_URI_append_armv7a = " \
     file://dont-link-against-libhid.patch \
@@ -12,11 +12,14 @@ DEPENDS += "dbus"
 QT_CONFIG_FLAGS += "-dbus"
 
 do_install_append() {
-    oe_libinstall -C ${PALM_BUILD_DIR}/lib/ -so libQtDBus ${D}/usr/lib
+    # libqpalm installation was removed in 
+    # https://github.com/openwebos/meta-webos/commit/0479fb1a1cc0d3fad2877fd74ff0291550d84d1f
+    oe_libinstall -C ${PALM_BUILD_DIR}/plugins/platforms -so libqpalm ${D}/${libdir}
+    oe_libinstall -C ${PALM_BUILD_DIR}/lib/ -so libQtDBus ${D}/${libdir}
 }
 
 do_install_append_armv7a() {
-    oe_libinstall -C ${PALM_BUILD_DIR}/lib/ -so libQtOpenGL ${D}/usr/lib
+    oe_libinstall -C ${PALM_BUILD_DIR}/lib/ -so libQtOpenGL ${D}/${libdir}
 
     # NOTE: We can't use accelerated graphics yet but we install QML shader support
     # anyway to have it in place once we can use the PowerVR chip inside the device.
