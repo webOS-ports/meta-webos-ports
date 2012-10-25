@@ -12,7 +12,7 @@ SRC_URI = " \
 S = "${WORKDIR}/git"
 
 PV = "0.2.2+gitr${SRCPV}"
-PR = "r3"
+PR = "r4"
 
 # NOTE: We're not using qmake2.bbclass here as qt4-webos isn't compatible with it yet.
 # When qt4-webos-tools-native is available or upstream changed to qt4-tools-native we can
@@ -21,6 +21,12 @@ PR = "r3"
 inherit webos_qmake
 inherit webos_machine_dep
 
+do_configure_prepend() {
+    sed -i 's/SUBDIRS += libconnman-qt test plugin/SUBDIRS += libconnman-qt plugin/g' ${S}/connman-qt.pro
+}
+do_configure_prepend_armv7a() {
+
+}
 do_configure() {
     export STAGING_INCDIR="${STAGING_INCDIR}"
     export STAGING_LIBDIR="${STAGING_LIBDIR}"
