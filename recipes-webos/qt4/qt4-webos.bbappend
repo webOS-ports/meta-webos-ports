@@ -1,11 +1,11 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
-PRINC := "${@int(PRINC) + 11}"
+PRINC := "${@int(PRINC) + 12}"
 
-SRC_URI_append_tuna = " \
+SRC_URI_append_armv7a = " \
     file://dont-link-against-libhid.patch \
     file://keyboard-support-compilation-fix.patch"
 
-DEPENDS_append_tuna = " virtual/egl"
+DEPENDS_append_armv7a = " virtual/egl"
 
 # Enable dbus support needed for some components inside webos-ports
 DEPENDS += "dbus"
@@ -15,7 +15,7 @@ do_install_append() {
     oe_libinstall -C ${PALM_BUILD_DIR}/lib/ -so libQtDBus ${D}/usr/lib
 }
 
-do_install_append_tuna() {
+do_install_append_armv7a() {
     oe_libinstall -C ${PALM_BUILD_DIR}/lib/ -so libQtOpenGL ${D}/usr/lib
 
     # NOTE: We can't use accelerated graphics yet but we install QML shader support
