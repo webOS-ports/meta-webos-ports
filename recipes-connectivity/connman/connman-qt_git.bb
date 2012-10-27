@@ -5,9 +5,9 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "qt4-webos"
 
-SRCREV = "aeb22e6822d6a3f7beb2889901ee4ac6225ee46d"
+SRCREV = "3bcfa72208e91dff0f555fb0a93706edc6a4fab2"
 SRC_URI = " \
-    git://github.com/morphis/libconnman-qt.git;protocol=git;branch=master \
+    git://github.com/morphis/libconnman-qt.git;protocol=git;branch=webOS-ports/master \
     file://remove-qdbusxml2cpp-dependency.patch"
 S = "${WORKDIR}/git"
 
