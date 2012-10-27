@@ -8,6 +8,7 @@ DEPENDS = "qt4-webos qmake-webos-native"
 SRCREV = "3bcfa72208e91dff0f555fb0a93706edc6a4fab2"
 SRC_URI = " \
     git://github.com/morphis/libconnman-qt.git;protocol=git;branch=webOS-ports/master \
+    file://0001-don-t-throw-exceptions.patch \
     file://remove-qdbusxml2cpp-dependency.patch"
 S = "${WORKDIR}/git"
 
