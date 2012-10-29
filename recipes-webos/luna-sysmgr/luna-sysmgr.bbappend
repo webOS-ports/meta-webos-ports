@@ -3,4 +3,4 @@ PRINC := "${@int(PRINC) + 4}"
 
 inherit webos-ports-submissions
 
-SRCREV = "d080760a4a1e1641622a61dfd5290a593353e9c9"
+SRCREV = "88f582687099b395f8da90094a56b220a4af7256"
