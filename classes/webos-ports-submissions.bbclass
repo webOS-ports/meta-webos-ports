@@ -2,4 +2,6 @@
 # and is different to what openwebos provides.
 PR_append = "+wop+gitr${SRCPV}"
 
-SRC_URI = "git://github.com/webOS-ports/${PN};branch=webOS-ports/master;protocol=git"
+COMPONENT_NAME ?= "${PN}"
+
+SRC_URI = "git://github.com/webOS-ports/${COMPONENT_NAME};branch=webOS-ports/master;protocol=git"
