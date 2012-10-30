@@ -7,4 +7,4 @@ WEBOS_TARGET_MACHINE_IMPL_tuna = "device"
 
 inherit webos-ports-submissions
 
-SRCREV = "543b765880fd69fc808ed359cba266fd771f4acf"
+SRCREV = "9cbf89ba1418d803766f8b45209197ab961d77af"
