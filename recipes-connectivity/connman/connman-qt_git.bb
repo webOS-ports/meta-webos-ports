@@ -5,10 +5,9 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "qt4-webos qmake-webos-native"
 
-SRCREV = "34632b55df58fcc19ca211d26b503e5e45858e8c"
+SRCREV = "0aca86947cc12aa9e2a4b5d23b40ae0cc98d3ae0"
 SRC_URI = " \
     git://github.com/morphis/libconnman-qt.git;protocol=git;branch=webOS-ports/master \
-    file://0001-don-t-throw-exceptions.patch \
     file://remove-qdbusxml2cpp-dependency.patch"
 S = "${WORKDIR}/git"
 
