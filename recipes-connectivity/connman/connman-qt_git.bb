@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "qt4-webos qmake-webos-native"
 
-SRCREV = "3bcfa72208e91dff0f555fb0a93706edc6a4fab2"
+SRCREV = "34632b55df58fcc19ca211d26b503e5e45858e8c"
 SRC_URI = " \
     git://github.com/morphis/libconnman-qt.git;protocol=git;branch=webOS-ports/master \
     file://0001-don-t-throw-exceptions.patch \
