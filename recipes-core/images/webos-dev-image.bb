@@ -8,7 +8,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 IMAGE_FEATURES += "debug-tweaks ssh-server-openssh"
 
-inherit webos-image
+inherit webos-ports-image
 
 MACHINE_EXTRA_INSTALL = ""
 MACHINE_EXTRA_INSTALL_tuna = " \
