@@ -4,4 +4,4 @@ PRINC := "${@int(PRINC) + 4}"
 inherit webos-ports-submissions
 
 COMPONENT_NAME = "isis-browser"
-SRCREV = "37906c2738e1920fcc1e80ec3a78f157413322c3"
+SRCREV = "57f91972e6d1abc8c32e476920e1683d026b4d3e"
