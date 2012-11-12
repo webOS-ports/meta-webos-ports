@@ -9,7 +9,7 @@ inherit webos_system_bus
 inherit webos_qmake
 inherit webos_machine_dep
 
-SRCREV = "6710cfadd2eab478bcb6e114c74ed17494f5e08d"
+SRCREV = "f7e532e77ed8d2e945467087d97e53b08f95d3ad"
 SRC_URI = "git://github.com/webOS-ports/connman-adapter;protocol=git;branch=master"
 S = "${WORKDIR}/git"
 
