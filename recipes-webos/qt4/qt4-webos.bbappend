@@ -1,8 +1,7 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
-PRINC := "${@int(PRINC) + 13}"
+PRINC := "${@int(PRINC) + 14}"
 
 SRC_URI_append_armv7a = " \
-    file://dont-link-against-libhid.patch \
     file://keyboard-support-compilation-fix.patch"
 
 DEPENDS_append_armv7a = " virtual/egl"
