@@ -20,6 +20,7 @@ MACHINE_EXTRA_INSTALL_tuna = " \
   pulseaudio-machine-conf"
 
 IMAGE_INSTALL += " \
+  packagegroup-webos-upstart \
   packagegroup-webos-ports-extended \
   packagegroup-webos-ports-development \
   ${MACHINE_EXTRA_RDEPENDS} \
