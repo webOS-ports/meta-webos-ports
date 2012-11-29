@@ -18,6 +18,7 @@ MACHINE_EXTRA_INSTALL_tuna = " \
   brcm-patchram-plus \
   samsung-modem-mgr \
   pulseaudio-machine-conf \
+  samsung-tuna-firmware-nonfree \
 "
 
 IMAGE_INSTALL_append = " \
