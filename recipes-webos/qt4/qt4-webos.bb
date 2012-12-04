@@ -5,7 +5,7 @@ require qt4-webos.inc
 
 # XXX We don't depend on qmake-webos-native because we continue to build qmake-palm during
 # do_configure() -- see commentary in qmake-webos-native.bb
-DEPENDS = "freetype jpeg libpng zlib glib-2.0 nyx-lib icu"
+DEPENDS = "freetype jpeg libpng zlib glib-2.0 nyx-lib icu fontconfig"
 
 PR = "${INC_PR}.4"
 
