@@ -5,7 +5,7 @@ require qt4-webos.inc
 
 # XXX We don't depend on qmake-webos-native because we continue to build qmake-palm during
 # do_configure() -- see commentary in qmake-webos-native.bb
-DEPENDS = "freetype jpeg libpng zlib glib-2.0 nyx-lib icu"
+DEPENDS = "freetype jpeg libpng zlib glib-2.0 icu fontconfig"
 
 inherit webos_public_repo
 inherit webos_oe_runmake_no_env_override
@@ -42,7 +42,12 @@ do_configure_prepend() {
     set_endian
 }
 
-SRC_URI += "file://0013-configure-add-crossarch-option.patch"
+SRC_URI += " \
+    file://0013-configure-add-crossarch-option.patch \
+    file://keyboard-support-compilation-fix.patch \
+    file://disable-webos-qpa-plugins.patch \
+    file://0001-Extended-QPlatformWindow-class-to-provide-a-method-t.patch \
+"
 
 QT_CONFIG_FLAGS += " \
   ${QT_ENDIAN} \
@@ -77,6 +82,10 @@ do_install() {
     install -d ${D}${QT4_STAGING_BUILD_DIR}/git/src
     cp -ra ${S}/src/gui ${D}${QT4_STAGING_BUILD_DIR}/git/src
     cp -ra ${S}/src/corelib ${D}${QT4_STAGING_BUILD_DIR}/git/src
+
+    # Needed to build palm QPA out of qt build
+    install -d ${D}${QT4_STAGING_BUILD_DIR}/git/src/plugins/platforms
+    cp -ra ${S}/src/plugins/platforms/fontdatabases ${D}${QT4_STAGING_BUILD_DIR}/git/src/plugins/platforms
 
     install -d ${D}${QT4_STAGING_BUILD_DIR}/git/src/3rdparty
     cp -ra ${S}/src/3rdparty/harfbuzz ${D}${QT4_STAGING_BUILD_DIR}/git/src/3rdparty
@@ -127,3 +136,24 @@ FILES_${PN}-dbg += "${webos_qtpluginsdir}/*/.debug"
 QT_CONFIGURE_IMPORTS_PATH = "${webos_qtpluginsdir}/imports"
 FILES_${PN}-dbg += "${QT_CONFIGURE_IMPORTS_PATH}/Qt/labs/shaders/.debug"
 FILES_${PN}-buildsrc += "${QT4_STAGING_BUILD_DIR}"
+
+DEPENDS_append_armv7a = " virtual/egl"
+
+# Enable dbus support needed for some components inside webos-ports
+DEPENDS += "dbus"
+QT_CONFIG_FLAGS += "-dbus"
+
+do_install_append() {
+    oe_libinstall -C ${PALM_BUILD_DIR}/lib/ -so libQtDBus ${D}/${libdir}
+
+    cp -ra ${S}/src/opengl ${D}${QT4_STAGING_BUILD_DIR}/git/src
+}
+
+do_install_append_armv7a() {
+    oe_libinstall -C ${PALM_BUILD_DIR}/lib/ -so libQtOpenGL ${D}/${libdir}
+
+    # NOTE: We can't use accelerated graphics yet but we install QML shader support
+    # anyway to have it in place once we can use the PowerVR chip inside the device.
+    install -d ${D}/usr/plugins/imports/Qt/labs/shaders
+    install -m 555 ${PALM_BUILD_DIR}/imports/Qt/labs/shaders/* ${D}/usr/plugins/imports/Qt/labs/shaders/
+}
