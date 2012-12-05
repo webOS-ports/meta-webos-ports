@@ -11,9 +11,9 @@ inherit webos_cmake
 inherit webos_daemon
 inherit webos_system_bus
 
-PV = "0.1.0"
 PR = "r0"
-WEBOS_COMPONENT_VERSION = "${PV}"
+WEBOS_COMPONENT_VERSION = "0.1.0"
+PV = "${WEBOS_COMPONENT_VERSION}+git${SRCPV}"
 WEBOS_SUBMISSION = "0"
 SRCREV = "994bcedb81f0482a4ee9b89485b84895ebc059eb"
 
