@@ -1,8 +1,4 @@
-#
-# This is the the openwebos-ports development image not suited for release
-#
-
-DESCRIPTION = "Developer Open WebOS image."
+DESCRIPTION = "Developer webOS Ports image."
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
