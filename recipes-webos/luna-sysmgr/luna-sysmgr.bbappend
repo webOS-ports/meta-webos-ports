@@ -1,8 +1,8 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
-PRINC := "${@int(PRINC) + 7}"
+PRINC := "${@int(PRINC) + 8}"
 
 SRC_URI_append = " \
-    file://disable-start-of-firstuse-app.patch \
+    file://enable-webosports-first-use.patch \
     file://dont-spawn-bootanimation-process.patch"
 
 inherit webos-ports-submissions
