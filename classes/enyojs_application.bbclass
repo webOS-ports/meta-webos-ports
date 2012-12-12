@@ -1,3 +1,5 @@
+DEPENDS += " nodejs-native "
+
 do_compile() {
     # FIXME: use native node from sysroot
     node enyo/tools/deploy.js -o ${S}/deploy/${PN}
