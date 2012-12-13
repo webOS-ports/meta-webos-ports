@@ -8,11 +8,8 @@ inherit webos-ports-image
 
 MACHINE_EXTRA_INSTALL = ""
 MACHINE_EXTRA_INSTALL_tuna = " \
-  libsamsung-ipc \
-  libsamsung-ipc-tools \
   samsung-fb-console \
   brcm-patchram-plus \
-  samsung-modem-mgr \
   pulseaudio-machine-conf \
   samsung-tuna-firmware-nonfree \
 "
