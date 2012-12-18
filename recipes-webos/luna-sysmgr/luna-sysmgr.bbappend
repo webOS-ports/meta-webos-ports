@@ -7,4 +7,4 @@ SRC_URI_append = " \
 
 inherit webos-ports-submissions
 
-SRCREV = "040828a737d26673e960d0bf2d4eb4ec5f5c7b59"
+SRCREV = "32bdd6045e57f81c5130419d193d22f504b667ab"
