@@ -22,6 +22,7 @@ RDEPENDS_${PN} = " \
   \
   org.webosports.app.firstuse \
   org.webosports.app.memos \
+  org.webosports.app.settings \
 "
 
 RDEPENDS_${PN}_append_tuna = " \
