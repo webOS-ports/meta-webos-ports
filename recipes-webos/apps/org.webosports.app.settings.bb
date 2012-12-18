@@ -1,4 +1,4 @@
-SUMMARY = "Settings app re-written from scratch for Open webOS"
+SUMMARY = "Settings app written from scratch for Open webOS"
 SECTION = "webos/apps"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
@@ -10,6 +10,6 @@ inherit enyojs_application
 PV = "0.3.0+gitr${SRCPV}"
 PR = "r1"
 
-SRCREV = "db4add27c4b8e11174fb06fd252b2f8a3045a298"
+SRCREV = "465fee918671ac3440cf770a5419f79c1fe2158d"
 SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git"
 S = "${WORKDIR}/git"
