@@ -1,9 +1,10 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
-PRINC := "${@int(PRINC) + 8}"
+PRINC := "${@int(PRINC) + 9}"
 
 SRC_URI_append = " \
     file://enable-webosports-first-use.patch \
-    file://dont-spawn-bootanimation-process.patch"
+    file://dont-spawn-bootanimation-process.patch \
+    file://use-webosports-wifi-settings-app.patch"
 
 inherit webos-ports-submissions
 
