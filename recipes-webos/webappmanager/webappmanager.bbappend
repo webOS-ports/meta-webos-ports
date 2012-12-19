@@ -5,4 +5,4 @@ SRC_URI_append = " file://use-minimal-qpa.patch"
 
 inherit webos-ports-submissions
 
-SRCREV = "b7cd3c5919114f14f74358ba2021b8ccedc5a144"
+SRCREV = "471ba9b80ec7e711b4b6d6c60e9a818c159054c0"
