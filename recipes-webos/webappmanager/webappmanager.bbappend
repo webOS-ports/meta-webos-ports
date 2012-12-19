@@ -1,5 +1,7 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
-PRINC := "${@int(PRINC) + 0}"
+PRINC := "${@int(PRINC) + 1}"
+
+SRC_URI_append = " file://use-minimal-qpa.patch"
 
 inherit webos-ports-submissions
 
