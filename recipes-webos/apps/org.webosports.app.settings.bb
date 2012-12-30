@@ -10,6 +10,6 @@ inherit enyojs_application
 PV = "0.3.0+gitr${SRCPV}"
 PR = "r1"
 
-SRCREV = "465fee918671ac3440cf770a5419f79c1fe2158d"
+SRCREV = "b601b0501030984f66d5fc9ad8cec76a8a8a92f0"
 SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git"
 S = "${WORKDIR}/git"
