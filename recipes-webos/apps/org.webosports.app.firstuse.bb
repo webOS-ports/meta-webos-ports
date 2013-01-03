@@ -7,9 +7,9 @@ inherit webos_public_repo
 inherit webos_arch_indep
 inherit enyojs_application
 
-PV = "0.1.0+gitr${SRCPV}"
+PV = "0.2.0+gitr${SRCPV}"
 PR = "r0"
 
-SRCREV = "3fe6bcdfd3db18876e84c1e218a6c3fd31d7ed65"
+SRCREV = "ece38b63f181b8644f939955729794315b5296a0"
 SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git"
 S = "${WORKDIR}/git"
