@@ -7,4 +7,4 @@ inherit webos-ports-submissions
 
 COMPONENT_NAME = "BrowserServer"
 
-SRCREV = "dc6e53892b0b175457fcf4ce2a35a93bdb5d1d94"
+SRCREV = "58ec890291dfa1a927faba069f8b0f1d8ac94e2d"

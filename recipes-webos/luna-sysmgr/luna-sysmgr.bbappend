@@ -8,6 +8,6 @@ SRC_URI_append = " \
 
 inherit webos-ports-submissions
 
-SRCREV = "ed891201828766953a2a7c68cc6c44a732af3e89"
+SRCREV = "eccf064d3308c189e9124406ee0fb7c73529e11a"
 
 RDEPENDS_${PN} += "webappmanager keyboard-efigs"
