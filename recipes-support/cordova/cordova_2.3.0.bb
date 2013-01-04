@@ -5,8 +5,10 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=aa80bcec645b0f6ec37d5954ee6dc056"
 
 PR = "r0"
 
-SRC_URI = "git://github.com/phonegap/phonegap.git;protocol=git;tag=${PV}"
+inherit webos-ports-submissions
+
 S = "${WORKDIR}/git"
+SRCREV = "269ddc7fc3b65932d7535071041bc4b8f1ab3e42"
 
 do_install() {
     install -d ${D}${webos_frameworksdir}/cordova/
