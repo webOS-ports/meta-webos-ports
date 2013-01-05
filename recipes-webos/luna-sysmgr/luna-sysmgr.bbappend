@@ -9,3 +9,6 @@ SRC_URI_append = " \
 inherit webos-ports-submissions
 
 SRCREV = "30675bc413658d5f651a452e13f893f00283cb2f"
+
+SRC_URI_append_a500 = "\
+                       file://luna-sysmgr-a500.patch "
