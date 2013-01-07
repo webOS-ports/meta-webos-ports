@@ -22,3 +22,6 @@ UPDATERCPN = "${PN}-sysvinit"
 
 # and we want only upstart in webOS images
 RDEPENDS_${PN} += "${PN}-upstart"
+
+# to include allow-nopw.patch
+DISTRO_TYPE = "debug"
