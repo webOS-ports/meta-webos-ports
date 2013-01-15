@@ -13,7 +13,8 @@ require conf/distro/include/webos-repositories.inc
 
 EXTRAOPKGCONFIG = ""
 
-WEBOS_DISTRO_RELEASE_CODENAME = "${DISTRO}-${@base_get_metadata_git_branch('.', None).strip()}"
+WEBOS_PORTS_CODENAME = "ports"
+WEBOS_DISTRO_RELEASE_CODENAME = "${DISTRO}-${WEBOS_PORTS_CODENAME}"
 WEBOS_DISTRO_PRERELEASE ?= "devel"
 
 # All of the types of official build jobs should override this in the following
@@ -29,8 +30,9 @@ WEBOS_IMAGE_NAME_SUFFIX = "${@ base_conditional( \
                                   'WEBOS_DISTRO_BUILD_ID', 'unofficial', \
                                   '${DATETIME}', '${WEBOS_DISTRO_BUILD_ID}', d) }"
 IMAGE_NAME = "${IMAGE_BASENAME}-${MACHINE}-${WEBOS_IMAGE_NAME_SUFFIX}"
-KERNEL_IMAGE_BASE_NAME = "${KERNEL_IMAGETYPE}-${PKGE}-${PKGV}-${PKGR}-${MACHINE}-${WEBOS_IMAGE_NAME_SUFFIX}"
-MODULE_IMAGE_BASE_NAME = "modules-${PKGE}-${PKGV}-${PKGR}-${MACHINE}-${WEBOS_IMAGE_NAME_SUFFIX}"
+KERNEL_IMAGE_BASE_NAME = "${KERNEL_IMAGETYPE}-${PKGE}-${PKGV}-${PKGR}-${MACHINE}-${DATETIME}-${WEBOS_IMAGE_NAME_SUFFIX}"
+MODULE_IMAGE_BASE_NAME = "modules-${PKGE}-${PKGV}-${PKGR}-${MACHINE}-${DATETIME}-${WEBOS_IMAGE_NAME_SUFFIX}"
+
 # Don't rebuild the kernel (or the rootfs) images if the only thing that's changed
 # is the start time of the build or the build number.
 BB_HASHBASE_WHITELIST_append = " WEBOS_IMAGE_NAME_SUFFIX"
@@ -120,8 +122,9 @@ QEMU_TARGETS ?= "arm i386"
 
 # Default WEBOS_TARGET_* values (see webos_cmake.bbclass)
 WEBOS_TARGET_CORE_OS ?= "rockhopper"
-WEBOS_TARGET_MACHINE_IMPL ?= "emulator"
-
+WEBOS_TARGET_MACHINE_IMPL ?= "device"
+# For qemu we build for the emulator but for all other targets for a real device
+WEBOS_TARGET_MACHINE_IMPL_qemuall = "emulator"
 
 # Drop this when upgrading oe-core to 1.6 release or newer, with this fix:
 # http://lists.openembedded.org/pipermail/openembedded-core/2013-November/087115.html
@@ -172,4 +175,5 @@ CONNECTIVITY_CHECK_URIS ?= "git://git.yoctoproject.org/yocto-firewall-test;proto
 SANITY_TESTED_DISTROS ?= " \
             Ubuntu-12.04 \n \
             Ubuntu-12.10 \n \
+            Ubuntu-13.04 \n \
             "
