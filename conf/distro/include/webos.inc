@@ -25,14 +25,19 @@ require conf/distro/include/webos-sdk.inc
 # It is expected that other distros will override these definitions based on
 # their codename schemes.
 #
-WEBOS_DISTRO_PLATFORM_CODENAME ?= "${DISTRO}"
-WEBOS_DISTRO_VERSION_CODENAME ?= "${@base_get_metadata_git_branch('.', None).strip().translate(None, '()/')}"
-WEBOS_DISTRO_RELEASE_CODENAME ?= "${WEBOS_DISTRO_PLATFORM_CODENAME}-${WEBOS_DISTRO_VERSION_CODENAME}"
+
+# It is expected that other distros will override these definitions.
+WEBOS_PORTS_CODENAME = "ports"
+WEBOS_DISTRO_PLATFORM_CODENAME ?= "${DISTRO}-${WEBOS_PORTS_CODENAME}"
+WEBOS_DISTRO_VERSION_CODENAME ?= ""
+# WEBOS_DISTRO_VERSION_CODENAME ?= "${@base_get_metadata_git_branch('.', None).strip().translate(None, '()/')}"
+WEBOS_DISTRO_RELEASE_CODENAME ?= "${WEBOS_DISTRO_PLATFORM_CODENAME}${@ base_conditional( 'WEBOS_DISTRO_VERSION_CODENAME', '', '', '-${WEBOS_DISTRO_VERSION_CODENAME}', d) }"
 
 # This is the codename for the series of builds that are made from a branch.
 # It appears in the image filenames. It is expected that other distros will
 # override this based on their codename schemes.
-WEBOS_DISTRO_BUILD_CODENAME ?= "${@base_get_metadata_git_branch('.', None).strip().translate(None, '()/')}"
+WEBOS_DISTRO_BUILD_CODENAME ?= ""
+# WEBOS_DISTRO_BUILD_CODENAME ?= "${@base_get_metadata_git_branch('.', None).strip().translate(None, '()/')}"
 
 WEBOS_DISTRO_PRERELEASE ?= "devel"
 
@@ -49,24 +54,12 @@ WEBOS_DISTRO_PRERELEASE ?= "devel"
 #
 WEBOS_DISTRO_BUILD_ID ?= "unofficial"
 
-# Only suffix image names with DATETIME when the build is unofficial; otherwise,
-# use WEBOS_DISTRO_BUILD_ID. By default, the build codename (or, if it's defined,
-# WEBOS_DISTRO_BRANCHPOINT_MICRO_VERSION with its hyphen replaced with a period)
-# is always prepended to the suffix, but this can be overridden.
-WEBOS_IMAGE_BUILD_CODENAME ?= "${@ \
-    '-' + d.getVar('WEBOS_DISTRO_BRANCHPOINT_MICRO_VERSION', True).replace('-', '.') \
-    if d.getVar('WEBOS_DISTRO_BRANCHPOINT_MICRO_VERSION', True) else \
-    '-${WEBOS_DISTRO_BUILD_CODENAME}' \
-}"
-
-WEBOS_IMAGE_NAME_SUFFIX = "${WEBOS_IMAGE_BUILD_CODENAME}-${@ base_conditional( \
-                                  'WEBOS_DISTRO_BUILD_ID', 'unofficial', \
-                                  '${DATETIME}', '${WEBOS_DISTRO_BUILD_ID}', d) }"
-
-IMAGE_NAME = "${IMAGE_BASENAME}-${MACHINE}${WEBOS_IMAGE_NAME_SUFFIX}"
-
-KERNEL_IMAGE_BASE_NAME = "${KERNEL_IMAGETYPE}-${PKGE}-${PKGV}-${PKGR}-${MACHINE}${WEBOS_IMAGE_NAME_SUFFIX}"
-MODULE_IMAGE_BASE_NAME = "modules-${PKGE}-${PKGV}-${PKGR}-${MACHINE}${WEBOS_IMAGE_NAME_SUFFIX}"
+# use WEBOS_DISTRO_BUILD_ID.
+WEBOS_IMAGE_NAME_SUFFIX = "${@ base_conditional( 'WEBOS_DISTRO_BUILD_CODENAME', '', '', '-${WEBOS_DISTRO_BUILD_CODENAME}', d) }"
+WEBOS_IMAGE_NAME_SUFFIX .= "${@ base_conditional( 'WEBOS_DISTRO_BUILD_ID', 'unofficial', '', '-${WEBOS_DISTRO_BUILD_ID}', d) }"
+IMAGE_NAME = "${IMAGE_BASENAME}-${MACHINE}-${DATETIME}${WEBOS_IMAGE_NAME_SUFFIX}"
+KERNEL_IMAGE_BASE_NAME = "${KERNEL_IMAGETYPE}-${PKGE}-${PKGV}-${PKGR}-${MACHINE}-${DATETIME}${WEBOS_IMAGE_NAME_SUFFIX}"
+MODULE_IMAGE_BASE_NAME = "modules-${PKGE}-${PKGV}-${PKGR}-${MACHINE}-${DATETIME}${WEBOS_IMAGE_NAME_SUFFIX}"
 
 # Don't rebuild the kernel (or the rootfs) images if the only thing that's changed
 # is the start time of the build or the build number.
@@ -158,8 +151,9 @@ QEMU_TARGETS ?= "arm i386"
 
 # Default WEBOS_TARGET_* values (see webos_cmake.bbclass)
 WEBOS_TARGET_CORE_OS ?= "rockhopper"
-WEBOS_TARGET_MACHINE_IMPL ?= "emulator"
-
+WEBOS_TARGET_MACHINE_IMPL ?= "device"
+# For qemu we build for the emulator but for all other targets for a real device
+WEBOS_TARGET_MACHINE_IMPL_qemuall = "emulator"
 
 # Drop this when upgrading oe-core to 1.6 release or newer, with this fix:
 # http://lists.openembedded.org/pipermail/openembedded-core/2013-November/087115.html
@@ -213,4 +207,5 @@ CONNECTIVITY_CHECK_URIS ?= "git://git.yoctoproject.org/yocto-firewall-test;proto
 SANITY_TESTED_DISTROS ?= " \
             Ubuntu-12.04 \n \
             Ubuntu-12.10 \n \
+            Ubuntu-13.04 \n \
             "
