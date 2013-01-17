@@ -13,9 +13,9 @@ inherit webos_system_bus
 
 PR = "r0"
 WEBOS_COMPONENT_VERSION = "0.1.0"
-PV = "${WEBOS_COMPONENT_VERSION}+git${SRCPV}"
+PV = "${WEBOS_COMPONENT_VERSION}+gitr${SRCPV}"
 WEBOS_SUBMISSION = "0"
-SRCREV = "994bcedb81f0482a4ee9b89485b84895ebc059eb"
+SRCREV = "25433524af73e0167aa60fbd57ad5426ffdfbca2"
 
 SRC_URI = "git://github.com/webOS-ports/${PN};branch=master;protocol=git"
 S = "${WORKDIR}/git"
