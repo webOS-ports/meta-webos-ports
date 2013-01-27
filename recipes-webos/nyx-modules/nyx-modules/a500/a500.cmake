@@ -22,9 +22,9 @@
 set(MODULE_SYSTEM_WEBOS_LINUX			YES)
 set(MODULE_KEYS_WEBOS_LINUX			YES)
 set(MODULE_TOUCHPANEL_WEBOS_LINUX		YES)
-set(MODULE_LED_CONTROLLER_WEBOS_LINUX		NO)
+set(MODULE_LED_CONTROLLER_WEBOS_LINUX		YES)
 
-add_definitions(-DKEYPAD_INPUT_DEVICE=\"/dev/input/event4\")
+add_definitions(-DKEYPAD_INPUT_DEVICE=\"/dev/input/event1\")
 add_definitions(-DBATTERY_SYSFS_PATH=\"/sys/class/power_supply/battery/\")
 add_definitions(-DDISPLAY_SYSFS_PATH=\"/sys/class/nvhost/nvhost-display/\")
 add_definitions(-DBACKLIGHT_SYSFS_PATH=\"/sys/class/backlight/pwm-backlight/\")
