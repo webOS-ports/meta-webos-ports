@@ -16,9 +16,9 @@ WEBOS_COMPONENT_VERSION = "2.0.0"
 PV = "${WEBOS_COMPONENT_VERSION}+git${SRCPV}"
 WEBOS_SUBMISSION = "0"
 
-SRCREV = "73b46c0a13548e3360d421795b452c4708e4aebd"
-SRC_URI = "git://github.com/webOS-ports/preware;branch=master;protocol=git"
-S = "${WORKDIR}/git"
+SRCREV = "b83d9e575f74b5af453c52999a1aa3106432a2c6"
+SRC_URI = "git://github.com/webOS-ports/preware;protocol=git"
+S = "${WORKDIR}/git/service"
 
 pkg_postinst_${PN}() {
     #!/bin/sh -e
