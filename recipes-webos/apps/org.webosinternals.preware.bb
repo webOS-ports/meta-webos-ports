@@ -12,5 +12,5 @@ PV = "2.0.0+gitr${SRCPV}"
 PR = "r0"
 
 SRCREV = "b83d9e575f74b5af453c52999a1aa3106432a2c6"
-SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git"
+SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git;branch=master"
 S = "${WORKDIR}/git/enyo2"
