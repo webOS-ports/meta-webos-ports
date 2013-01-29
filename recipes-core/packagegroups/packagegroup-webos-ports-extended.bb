@@ -26,6 +26,7 @@ RDEPENDS_${PN} = " \
   org.webosports.app.memos \
   org.webosports.app.settings \
   org.webosinternals.preware \
+  org.webosports.app.calendar \
   \
   ca-certificates \
 "
