@@ -10,6 +10,8 @@ DEPENDS_append_armv7a = " virtual/egl"
 DEPENDS += "dbus"
 QT_CONFIG_FLAGS += "-dbus"
 
+QT4_MACHINE_CONFIG_FLAGS_append_a500 = " -no-neon"
+
 do_install_append() {
     # libqpalm installation was removed in 
     # https://github.com/openwebos/meta-webos/commit/0479fb1a1cc0d3fad2877fd74ff0291550d84d1f
