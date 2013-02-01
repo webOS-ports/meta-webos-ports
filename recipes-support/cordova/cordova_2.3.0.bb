@@ -9,7 +9,7 @@ COMPONENT_NAME = "phonegap"
 inherit webos-ports-submissions
 
 S = "${WORKDIR}/git"
-SRCREV = "2ae7d8884c7a3713fb3536bc90627aec90428cd7"
+SRCREV = "368e2da0c0db11f219560ec1c10ca0417df0c1c4"
 
 do_install() {
     install -d ${D}${webos_frameworksdir}/cordova/
