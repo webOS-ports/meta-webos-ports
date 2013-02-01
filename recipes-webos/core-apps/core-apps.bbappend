@@ -3,7 +3,7 @@ PRINC := "${@int(PRINC) + 5}"
 
 inherit webos-ports-submissions
 
-SRCREV = "e4c97d90d05acab78eb7cff2299943a1556f5b94"
+SRCREV = "8ac6fe5262ad7dc22ddc6678e1b7fee4c78f08b5"
 
 do_install_append() {
     # Drop the notes application, we ship our own
