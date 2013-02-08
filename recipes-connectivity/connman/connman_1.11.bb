@@ -1,7 +1,7 @@
 require connman.inc
 
-# 1.9 tag
-SRCREV = "4bf217329babf4f7792b43d70228af8269c3332c"
+# 1.11 tag
+SRCREV = "f419c26f637f464ec1c63212bc4f2d069f728947"
 SRC_URI  = "git://git.kernel.org/pub/scm/network/connman/connman.git \
             file://0001-plugin.h-Change-visibility-to-default-for-debug-symb.patch \
             file://add_xuser_dbus_permission.patch \
