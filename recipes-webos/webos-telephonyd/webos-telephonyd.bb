@@ -15,7 +15,7 @@ PR = "r0"
 WEBOS_COMPONENT_VERSION = "0.1.0"
 PV = "${WEBOS_COMPONENT_VERSION}+gitr${SRCPV}"
 WEBOS_SUBMISSION = "0"
-SRCREV = "25433524af73e0167aa60fbd57ad5426ffdfbca2"
+SRCREV = "200d41ede09d0667fcb748e60cca5e4ff7f2a72d"
 
 SRC_URI = "git://github.com/webOS-ports/${PN};branch=master;protocol=git"
 S = "${WORKDIR}/git"

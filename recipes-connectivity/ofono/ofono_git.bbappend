@@ -1,4 +1,4 @@
-SRCREV = "11817cf623a2be4efcbbdfdff18ce8746ab4c4f3"
+SRCREV = "3208d1cbab8ba81604d4c4d00bcdc78030a7d3fe"
 PV = "1.12+git${SRCPV}"
 PRINC := "${@int(PRINC) + 1}"
 
