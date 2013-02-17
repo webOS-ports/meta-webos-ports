@@ -1,6 +1,8 @@
+FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
+
 SRCREV = "3208d1cbab8ba81604d4c4d00bcdc78030a7d3fe"
 PV = "1.12+git${SRCPV}"
-PRINC := "${@int(PRINC) + 1}"
+PRINC := "${@int(PRINC) + 2}"
 
 DEPENDS += "libsamsung-ipc"
 # NOTE: Needed for GPRS provisioning support
@@ -12,4 +14,16 @@ RDEPENDS_${PN}_tuna = "samsung-rfs-mgr"
 
 SRC_URI  = " \
   git://github.com/webOS-ports/ofono.git;protocol=git;branch=webOS-ports/master \
-  file://ofono"
+  file://ofono \
+  file://ofono.upstart"
+
+do_install_append() {
+    install -d ${D}${sysconfdir}/event.d
+    install -m 0644 ${WORKDIR}/ofono.upstart ${D}${sysconfdir}/event.d/ofono
+}
+
+INITSCRIPT_PACKAGES = "${PN}-sysvinit"
+
+PACKAGES =+ "${PN}-sysvinit ${PN}-upstart"
+FILES_${PN}-sysvinit = "${sysconfdir}/init.d/ofono"
+FILES_${PN}-upstart = "${sysconfdir}/event.d/ofono"
