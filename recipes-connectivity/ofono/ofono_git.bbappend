@@ -1,12 +1,12 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
-SRCREV = "3208d1cbab8ba81604d4c4d00bcdc78030a7d3fe"
+SRCREV = "a059b470b47b2375aa94faed5c1a58e96a6567e2"
 PV = "1.12+git${SRCPV}"
 PRINC := "${@int(PRINC) + 2}"
 
 DEPENDS += "libsamsung-ipc"
 # NOTE: Needed for GPRS provisioning support
-RDEPENDS_${PN} += "mobile-broadband-provider-info"
+RDEPENDS_${PN}_append = " android-apn-database"
 
 # NOTE: When samsung-ipc support is part of a ofono release this should go into
 # meta-samsung layer as bbappend to oe-core.
