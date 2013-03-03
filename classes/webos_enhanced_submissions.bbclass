@@ -6,28 +6,7 @@
 #
 #    <component-version>-<enhanced-submission>
 #
-# setting WEBOS_COMPONENT_VERSION and WEBOS_SUBMISSION, where
-# <enhanced-submission> is of the form:
-#
-#    <submission>[_<recipe-PR>]
-#
-# Note that until this change can be applied to findPreferredProvider(), the
-# optional _<recipe-PR> can not be used:
-#
-#  diff --git a/lib/bb/providers.py b/lib/bb/providers.py
-#  index 24cb217..b598f02 100644
-#  --- a/lib/bb/providers.py
-#  +++ b/lib/bb/providers.py
-#  @@ -127,7 +127,7 @@ def findPreferredProvider(pn, cfgData, dataCache, pkg_pn = None, item = None):
-#   
-#       preferred_v = localdata.getVar('PREFERRED_VERSION', True)
-#       if preferred_v:
-#  -        m = re.match('(\d+:)*(.*)(_.*)*', preferred_v)
-#  +        m = re.match('(\d+:)*([^_]*)(_.*)*', preferred_v)
-#           if m:
-#               if m.group(1):
-#                   preferred_e = int(m.group(1)[:-1])
-#
+# setting WEBOS_COMPONENT_VERSION and WEBOS_SUBMISSION
 #
 # Explicitly inheriting from this bbclass also implies that the component uses
 # the Open webOS convention for submission tags, i.e., they are of the form:
@@ -38,13 +17,12 @@
 # from webos_submissions instead.
 #
 
-
-# PV is the first underscore-separated field in PREFERRED_VERSION_<packagename>,
+# PV is the same as PREFERRED_VERSION_<packagename>,
 # i.e., it includes the submission. If there is no PREFERRED_VERSION_<packagename>
 # setting, '0' will be returned.
 def webos_enhsub_get_pv(pn, d):
     preferred_v = d.getVar('PREFERRED_VERSION_' + pn, True) or '0'
-    return preferred_v.split('_')[0]
+    return preferred_v
 
 # The component version is PREFERRED_VERSION_<packagename> with the last hyphen-
 # separated field removed; i.e., it does not include the submission. If there is
@@ -55,7 +33,7 @@ def webos_enhsub_get_component_version(pn, d):
     if len(split_preferred_v) == 1:
         # If there's no submission, then the component version can't
         # contain a hyphen
-        return preferred_v.split('_')[0]
+        return preferred_v
     return "-".join(split_preferred_v[:-1])
 
 # The submission is the first underscore-separated field in the enhanced
@@ -68,7 +46,7 @@ def webos_enhsub_get_submission(pn, d):
     if len(split_preferred_v) == 1:
         # If there no hyphen, that means there's no submission
         return '0'
-    return split_preferred_v[-1].split('_')[0]
+    return split_preferred_v[-1]
 
 
 PV = "${@webos_enhsub_get_pv('${PN}', d)}"
