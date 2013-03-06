@@ -1,8 +1,9 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
-PRINC := "${@int(PRINC) + 14}"
+PRINC := "${@int(PRINC) + 15}"
 
 SRC_URI_append_armv7a = " \
-    file://keyboard-support-compilation-fix.patch"
+    file://keyboard-support-compilation-fix.patch \
+    file://disable-webos-qpa-plugin.patch"
 
 DEPENDS_append_armv7a = " virtual/egl"
 
@@ -15,6 +16,8 @@ do_install_append() {
     # https://github.com/openwebos/meta-webos/commit/0479fb1a1cc0d3fad2877fd74ff0291550d84d1f
     oe_libinstall -C ${PALM_BUILD_DIR}/plugins/platforms -so libqpalm ${D}/${libdir}
     oe_libinstall -C ${PALM_BUILD_DIR}/lib/ -so libQtDBus ${D}/${libdir}
+
+    cp -ra ${S}/src/opengl ${D}${QT4_STAGING_BUILD_DIR}/git/src
 }
 
 do_install_append_armv7a() {
