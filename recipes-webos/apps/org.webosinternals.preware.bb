@@ -11,6 +11,6 @@ inherit cordova_application
 PV = "2.0.0+gitr${SRCPV}"
 PR = "r0"
 
-SRCREV = "d0cccf0ea82aaf0ea53501fa05e0eb11284fc46a"
+SRCREV = "926b81fad8e603a9a4a6352703e7ad4ae91056fb"
 SRC_URI = "git://github.com/webOS-ports/preware;protocol=git;branch=master"
 S = "${WORKDIR}/git/enyo2"
