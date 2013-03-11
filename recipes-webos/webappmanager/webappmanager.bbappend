@@ -1,5 +1,7 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
-PRINC := "${@int(PRINC) + 2}"
+PRINC := "${@int(PRINC) + 3}"
+
+RDEPENDS_${PN} += "qt-webos-plugin"
 
 inherit webos-ports-submissions
 
