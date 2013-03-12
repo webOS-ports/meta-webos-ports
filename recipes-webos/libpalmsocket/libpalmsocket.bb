@@ -7,6 +7,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "pmloglib glib-2.0 openssl c-ares pmstatemachineengine"
 
+# corresponds to tag submissions/30
+SRCREV = "d2c9c3ed769552c4852d7a8f962408720af90cf4"
 PV = "2.0.0-30"
 PR = "r2"
 

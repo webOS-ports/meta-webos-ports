@@ -7,6 +7,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "jemalloc db8 mojomail-common boost icu libpalmsocket libsandbox pmloglib glib-2.0 cjson luna-service2 c-ares"
 
+# corresponds to tag submissions/99
+SRCREV = "9a4316e6bcb76445673d48a310b0bd446b280f94"
 PV = "2.0.0-99"
 PR = "r3"
 

@@ -19,6 +19,8 @@ SECTION = "webos/libs"
 
 DEPENDS = "glib-2.0"
 
+# corresponds to tag submissions/66
+SRCREV = "ee6565636f8061e0a2946824b8d4fcfed715d722"
 PV = "5.1.0-66"
 PR = "r6"
 

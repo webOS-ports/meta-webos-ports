@@ -7,6 +7,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "nodejs boost"
 
+# corresponds to tag submissions/11
+SRCREV = "6932254b5f8dfbb13dfef593e7690a87c2d474ac"
 PV = "2.0.0-11"
 PR = "r2"
 
