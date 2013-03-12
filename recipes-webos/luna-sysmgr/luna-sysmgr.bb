@@ -15,6 +15,8 @@ RDEPENDS_${PN} = "ptmalloc3"
 RDEPENDS_${PN} += "util-linux"
 #RDEPENDS_${PN} += "jail" #TODO
 
+# corresponds to tag submissions/3
+SRCREV = "1bcdb5bd8b97d148a3e46ae002fcf091b6d202f6"
 PV = "3.0.0-3"
 PR = "r13"
 

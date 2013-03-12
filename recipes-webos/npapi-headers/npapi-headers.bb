@@ -9,6 +9,8 @@ inherit webos_public_repo
 inherit webos_submissions
 inherit webos_arch_indep
 
+# corresponds to tag 0.4
+SRCREV = "84cba6a49d976f938f29ab593e6c32bd14e4598e"
 PV = "3.0.0-0.4"
 PR = "r3"
 

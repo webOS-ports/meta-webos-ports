@@ -5,6 +5,8 @@ SECTION = "webos/libs"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
+# corresponds to tag submissions/28
+SRCREV = "1e0a5717ade3261a5e019b437f6dd1d587b28754"
 PV = "3.0.0-28"
 PR = "r0"
 
@@ -20,5 +22,5 @@ OECMAKE_BUILDPATH = "${S}/BUILD-${PACKAGE_ARCH}-private"
 EXTRA_OECMAKE += "-DBUILD_PRIVATE=ON"
 
 WEBOS_GIT_TAG = "submissions/${WEBOS_SUBMISSION}"
-SRC_URI = "${OPENWEBOS_GIT_REPO}/pmloglib;tag=${WEBOS_GIT_TAG}"
+SRC_URI = "${OPENWEBOS_GIT_REPO}/pmloglib"
 S = "${WORKDIR}/git"
