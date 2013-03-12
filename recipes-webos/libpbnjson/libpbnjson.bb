@@ -7,6 +7,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "yajl"
 
+# corresponds to tag submissions/13
+SRCREV = "42c1559c878d1c4758794c86415739bcf7e4b17e"
 PV = "1.3.0-13"
 PR = "r2"
 

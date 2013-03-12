@@ -8,6 +8,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "luna-service2 cjson sqlite3 glib-2.0"
 
+# corresponds to tag submissions/1.01
+SRCREV = "1b8182fe4373d29fa728345825c8988db138b23b"
 PV = "2.0.0-1.01"
 PR = "r9"
 

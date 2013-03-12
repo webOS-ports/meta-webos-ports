@@ -7,6 +7,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "glib-2.0 npapi-headers"
 
+# corresponds to tag 0.2
+SRCREV = "8896cabe6b6f9d8e6a35e7c8899bea1ae8039487"
 PV = "3.0.0-0.2"
 PR = "r3"
 

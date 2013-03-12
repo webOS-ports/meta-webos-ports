@@ -11,6 +11,8 @@ DEPENDS = "pmloglib zlib glib-2.0 librdx libpbnjson pmloglib-private"
 # provided by busybox.
 RDEPENDS_${PN} = "busybox"
 
+# corresponds to tag submissions/105
+SRCREV = "40d4e06b2be0926ae102666da97543824458ce1b"
 PV = "3.0.0-105"
 PR = "r5"
 
