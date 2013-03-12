@@ -7,6 +7,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "adapterbase browserserver libpng npapi-headers glib-2.0 qt4-webos"
 
+PV = "3.0.0-0.4"
 PR = "r7"
 
 inherit webos_public_repo

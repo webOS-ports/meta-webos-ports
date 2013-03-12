@@ -9,6 +9,7 @@ inherit webos_public_repo
 inherit webos_submissions
 inherit webos_arch_indep
 
+PV = "3.0.0-0.4"
 PR = "r3"
 
 WEBOS_GIT_TAG = "${WEBOS_SUBMISSION}"

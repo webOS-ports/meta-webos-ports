@@ -10,6 +10,7 @@ PROVIDES = "mojodb"
 
 DEPENDS = "luna-service2 jemalloc icu pmloglib curl glib-2.0 leveldb"
 
+PV = "2.0.0-75"
 PR = "r13"
 
 # ensure leveldb is installed in image

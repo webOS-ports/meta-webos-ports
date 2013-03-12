@@ -7,6 +7,7 @@ inherit webos_public_repo
 inherit webos_arch_indep
 inherit webos_enhanced_submissions
 
+PV = "1.0.0-0.1"
 PR = "r0"
 # The tag doesn't follow our normal conventions
 WEBOS_GIT_TAG = "v${WEBOS_SUBMISSION}"

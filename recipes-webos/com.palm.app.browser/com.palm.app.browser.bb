@@ -5,6 +5,7 @@ SECTION = "webos/apps"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
+PV = "4.0.0-0.21"
 PR = "r3"
 
 inherit webos_public_repo

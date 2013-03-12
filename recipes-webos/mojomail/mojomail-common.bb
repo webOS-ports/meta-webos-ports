@@ -7,6 +7,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "jemalloc db8 boost curl libpalmsocket libsandbox pmloglib icu"
 
+PV = "2.0.0-99"
 PR = "r1"
 
 inherit webos_component

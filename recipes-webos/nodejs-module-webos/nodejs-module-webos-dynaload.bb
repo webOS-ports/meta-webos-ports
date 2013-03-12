@@ -7,6 +7,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "nodejs boost"
 
+PV = "2.0.0-11"
 PR = "r2"
 
 inherit webos_component
