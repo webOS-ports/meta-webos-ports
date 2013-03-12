@@ -5,6 +5,7 @@ SECTION = "libs"
 LICENSE = "BSD"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/BSD;md5=3775480a712fc46a69647678acb234cb"
 
+PV = "0.20080828a-0webos9-11"
 PR = "r1"
 
 inherit webos_upstream_from_repo

@@ -9,6 +9,7 @@ DEPENDS = "boost libpbnjson"
 # fork_server.js wants to load these:
 RDEPENDS_${PN} = "nodejs-module-webos-dynaload nodejs-module-webos-pmlog nodejs-module-webos-sysbus mojoloader"
 
+PV = "2.0.0-71"
 PR = "r4"
 
 inherit webos_component

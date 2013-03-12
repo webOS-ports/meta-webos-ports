@@ -7,6 +7,7 @@ SECTION = "webos/devel"
 
 DEPENDS = "luna-sysmgr-ipc luna-webkit-api"
 
+PV = "2.0.0-1.02"
 PR = "r3"
 
 inherit webos_component
