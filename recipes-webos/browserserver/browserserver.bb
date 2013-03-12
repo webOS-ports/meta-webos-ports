@@ -9,6 +9,7 @@ DEPENDS = "libpbnjson flex-native qt4-webos webkit-webos jemalloc glib-2.0 pmcer
 # libptmalloc3.so is preloaded by /etc/event.d/browerserver
 RDEPENDS_${PN} = "ptmalloc3 isis-fonts"
 
+PV = "3.0.0-0.7.2"
 PR = "r8"
 
 inherit webos_public_repo
