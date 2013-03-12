@@ -20,6 +20,7 @@ SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE} \
            file://0002-webkit2-set-OUTPUT_DIR-value-if-empty.patch \
 "
 S = "${WORKDIR}/git"
+PV = "4.8.3-4"
 INC_PR = "r20"
 
 EXTRA_OEMAKE += "-C ${PALM_BUILD_DIR}"

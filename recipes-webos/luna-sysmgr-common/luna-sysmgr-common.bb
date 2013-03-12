@@ -7,6 +7,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "qt4-webos glib-2.0 luna-prefs luna-service2 cjson nyx-lib libpbnjson luna-webkit-api luna-sysmgr-ipc luna-sysmgr-ipc-messages sqlite3 pmloglib librolegen serviceinstaller"
 
+PV = "3.0.0-3"
 PR = "r3"
 
 # Don't uncomment until all of the do_*() tasks have been moved out of the recipe

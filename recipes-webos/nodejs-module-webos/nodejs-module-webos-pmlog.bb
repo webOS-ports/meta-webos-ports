@@ -9,6 +9,7 @@ DEPENDS = "nodejs pmloglib"
 # XXX Add to ASSUME_PROVIDED -- it's part of vim
 # DEPENDS += "xxd-native"
 
+PV = "2.0.0-10"
 PR = "r2"
 
 inherit webos_component

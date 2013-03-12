@@ -10,6 +10,7 @@ PROVIDES = "mojodb"
 
 DEPENDS = "db luna-service2 jemalloc icu pmloglib curl glib-2.0"
 
+PV = "2.0.0-62"
 PR = "r9"
 
 inherit webos_component

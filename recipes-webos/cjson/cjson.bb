@@ -11,6 +11,7 @@ inherit webos_enhanced_submissions
 inherit webos_library
 inherit webos_public_repo
 
+PV = "1.8.0-35"
 PR = "r3"
 
 WEBOS_GIT_TAG = "submissions/${WEBOS_SUBMISSION}"
