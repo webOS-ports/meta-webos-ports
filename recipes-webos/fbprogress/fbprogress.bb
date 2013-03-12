@@ -7,6 +7,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 RDEPENDS_${PN} = "tar"
 
+PV = "2.0.0-22"
 PR = "r3"
 
 inherit webos_component

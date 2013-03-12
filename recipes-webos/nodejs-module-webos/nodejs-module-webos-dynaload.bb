@@ -7,6 +7,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "boost node-gyp-native"
 
+PV = "3.0.1-13"
 PR = "r3"
 
 inherit webos_component
