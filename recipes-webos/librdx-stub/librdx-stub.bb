@@ -7,6 +7,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 PROVIDES = "librdx"
 
+# corresponds to tag submissions/9
+SRCREV = "f226cb05b15bca20903a28ffa2753909d9ad35da"
 PV = "2.0.0-9"
 PR = "r4"
 

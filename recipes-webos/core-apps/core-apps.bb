@@ -5,6 +5,8 @@ SECTION = "webos/apps"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
+# corresponds to tag submissions/2
+SRCREV = "ce42a473c1e101ce80a847aac5f0bc19e2ed374b"
 PV = "3.0.0-2"
 PR = "r5"
 

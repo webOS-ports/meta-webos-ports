@@ -9,6 +9,8 @@ DEPENDS = "luna-service2 libpbnjson qt4-webos uriparser libxml2 sqlite3"
 
 RDEPENDS_${PN} = "sntp"
 
+# corresponds to tag submissions/6
+SRCREV = "eb716d1311c36bec22ed5bcd2ae057d6262f4051"
 PV = "2.0.1-6"
 PR = "r7"
 

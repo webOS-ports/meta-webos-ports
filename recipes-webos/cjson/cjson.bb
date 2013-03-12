@@ -10,6 +10,8 @@ inherit webos_enhanced_submissions
 inherit webos_library
 inherit webos_public_repo
 
+# corresponds to tag submissions/35
+SRCREV = "43de024867b8d38f607f04cfede8608ce532a8e6"
 PV = "1.8.0-35"
 PR = "r3"
 

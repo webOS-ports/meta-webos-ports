@@ -6,6 +6,8 @@ SECTION = "webos/dameons"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 DEPENDS = "luna-service2 db8 boost openssl glib-2.0 pmloglib"
+# corresponds to tag submissions/112
+SRCREV = "0d135215110c0b625bd21c56dc2d228960047965"
 PV = "2.0.0-112"
 PR = "r3"
 

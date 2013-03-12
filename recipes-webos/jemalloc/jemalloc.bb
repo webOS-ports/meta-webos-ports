@@ -5,6 +5,8 @@ SECTION = "libs"
 LICENSE = "BSD"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/BSD;md5=3775480a712fc46a69647678acb234cb"
 
+# corresponds to tag submissions/11
+SRCREV = "757da381d0331eea928022cc85aa4ea9c20c8ac6"
 PV = "0.20080828a-0webos9-11"
 PR = "r1"
 

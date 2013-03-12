@@ -11,6 +11,8 @@ DEPENDS = "qt4-webos glib-2.0 luna-prefs luna-service2 cjson nyx-lib libpbnjson 
 # http://lists.openembedded.org/pipermail/openembedded-core/2013-July/080893.html
 DEPENDS += "virtual/${TARGET_PREFIX}binutils"
 
+# corresponds to tag submissions/3
+SRCREV = "197f440025a5c5daa46e2b6857521c42a5d40490"
 PV = "3.0.0-3"
 PR = "r4"
 
