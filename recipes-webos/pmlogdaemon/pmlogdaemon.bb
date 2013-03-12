@@ -11,6 +11,7 @@ DEPENDS = "pmloglib zlib glib-2.0 librdx libpbnjson pmloglib-private"
 # provided by busybox.
 RDEPENDS_${PN} = "busybox"
 
+PV = "3.0.0-103"
 PR = "r5"
 
 inherit webos_component

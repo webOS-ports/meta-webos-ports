@@ -8,6 +8,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "libpbnjson cjson glib-2.0 luna-service2 icu hunspell"
 
+PV = "3.0.0-4"
 PR = "r3"
 
 #Uncomment once do_install() has been moved out of the recipe
