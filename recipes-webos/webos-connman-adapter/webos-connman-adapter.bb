@@ -8,6 +8,7 @@ SECTION = "webos/services"
 DEPENDS = "luna-service2 libpbnjson glib-2.0 luna-prefs openssl"
 RDEPENDS_${PN} = "connman"
 
+PV = "1.0.0-10"
 PR = "r1"
 
 inherit webos_component

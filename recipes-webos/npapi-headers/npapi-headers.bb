@@ -5,6 +5,7 @@ SECTION = "webos/devel"
 LICENSE = "MPL-1.1"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MPL-1.1;md5=1d38e87ed8d522c49f04e1efe0fab3ab"
 
+PV = "3.0.0-0.4"
 PR = "r4"
 
 inherit webos_public_repo

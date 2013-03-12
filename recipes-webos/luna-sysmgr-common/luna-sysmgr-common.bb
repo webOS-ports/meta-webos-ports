@@ -11,6 +11,7 @@ DEPENDS = "qt4-webos glib-2.0 luna-prefs luna-service2 cjson nyx-lib libpbnjson 
 # http://lists.openembedded.org/pipermail/openembedded-core/2013-July/080893.html
 DEPENDS += "virtual/${TARGET_PREFIX}binutils"
 
+PV = "3.0.0-3"
 PR = "r4"
 
 # Don't uncomment until all of the do_*() tasks have been moved out of the recipe

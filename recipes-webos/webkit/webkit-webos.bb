@@ -7,6 +7,7 @@ LIC_FILES_CHKSUM =  "file://Source/WebCore/LICENSE-LGPL-2.1;md5=a778a33ef338abba
 
 DEPENDS = "qt4-webos luna-service2 sqlite3 gperf-native"
 
+PV = "1.3-0.54"
 PR = "r12"
 
 inherit webos_public_repo
