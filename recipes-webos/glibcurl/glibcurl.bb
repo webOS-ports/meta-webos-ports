@@ -9,6 +9,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda
 
 DEPENDS = "glib-2.0 curl"
 
+# corresponds to tag submissions/5
+SRCREV = "719023f7fcf4e97eff594dd73bbf2d6c4de02d09"
 PV = "0.7.3-5"
 PR = "r1"
 

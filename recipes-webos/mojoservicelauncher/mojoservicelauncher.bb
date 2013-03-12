@@ -9,6 +9,8 @@ DEPENDS = "boost libpbnjson"
 # fork_server.js wants to load these:
 RDEPENDS_${PN} = "nodejs-module-webos-dynaload nodejs-module-webos-pmlog nodejs-module-webos-sysbus mojoloader"
 
+# corresponds to tag submissions/74
+SRCREV = "4d6512dcc44a36f32131acb56c348245af59530c"
 PV = "2.0.1-74"
 PR = "r4"
 

@@ -9,6 +9,8 @@ DEPENDS = "nodejs pmloglib"
 # XXX Add to ASSUME_PROVIDED -- it's part of vim
 # DEPENDS += "xxd-native"
 
+# corresponds to tag submissions/14
+SRCREV = "a7e83a90222a01d9d411f1ade736652b98fc98d4"
 PV = "3.0.0-14"
 PR = "r2"
 

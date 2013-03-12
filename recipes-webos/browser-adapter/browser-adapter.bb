@@ -7,6 +7,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "adapterbase browserserver libpng npapi-headers glib-2.0 qt4-webos"
 
+# corresponds to tag 0.4
+SRCREV = "7c4cb757dcaac08a18e0ea1699e2c748710bdbc5"
 PV = "3.0.0-0.4"
 PR = "r7"
 

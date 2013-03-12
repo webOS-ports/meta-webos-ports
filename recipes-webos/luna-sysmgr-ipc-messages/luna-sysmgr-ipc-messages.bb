@@ -7,6 +7,8 @@ SECTION = "webos/devel"
 
 DEPENDS = "luna-sysmgr-ipc luna-webkit-api"
 
+# corresponds to tag submissions/1.02
+SRCREV = "6d4f9949f3d5ce31a260f61ee407e43376a4af65"
 PV = "2.0.0-1.02"
 PR = "r3"
 

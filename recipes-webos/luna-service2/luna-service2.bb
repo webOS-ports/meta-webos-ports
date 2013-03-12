@@ -7,6 +7,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "pmloglib cjson glib-2.0"
 
+# corresponds to tag submissions/151
+SRCREV = "5dc9b3bc13f0e1abea48bbf005c5ce2e29c9feae"
 PV = "3.4.0-151"
 PR = "r9"
 

@@ -8,6 +8,8 @@ SECTION = "webos/services"
 DEPENDS = "luna-service2 libpbnjson glib-2.0 luna-prefs openssl"
 RDEPENDS_${PN} = "connman"
 
+# corresponds to tag submissions/10
+SRCREV = "81b7d1370a7bf7449f47e24fa1df21b21143a8ba"
 PV = "1.0.0-10"
 PR = "r1"
 

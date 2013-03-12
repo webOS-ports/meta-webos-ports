@@ -7,6 +7,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "qt4-webos webkit-webos"
 
+# corresponds to tag 0.5
+SRCREV = "70fb05fd340ab342c5132dc8bfa174dbe6c9d330"
 PV = "2.0.0-0.5"
 PR = "r7"
 

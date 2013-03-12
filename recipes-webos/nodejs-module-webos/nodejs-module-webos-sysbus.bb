@@ -7,6 +7,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "nodejs luna-service2"
 
+# corresponds to tag submissions/25
+SRCREV = "e9d90d36a265ed3500274e40ba98a5959d89747f"
 PV = "2.0.0-25"
 PR = "r3"
 

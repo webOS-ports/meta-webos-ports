@@ -7,6 +7,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "jemalloc luna-service2 db8 glibmm boost libsandbox glib-2.0 libsigc++-2.0"
 
+# corresponds to tag submissions/56
+SRCREV = "d0fd836495c448f6c08706d14c62f92b87436dda"
 PV = "2.0.0-56"
 PR = "r4"
 

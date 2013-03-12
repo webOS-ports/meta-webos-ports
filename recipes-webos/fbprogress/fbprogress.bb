@@ -7,6 +7,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 RDEPENDS_${PN} = "tar"
 
+# corresponds to tag submissions/22
+SRCREV = "dab06df8a5f9c5144bf13efd528ee05d6f5fce14"
 PV = "2.0.0-22"
 PR = "r3"
 

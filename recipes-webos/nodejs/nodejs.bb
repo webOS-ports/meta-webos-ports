@@ -9,6 +9,8 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=d6237f3a840aef5b7880fb4e49eecfe5"
 # We want node_crypto support
 DEPENDS = "openssl"
 
+# corresponds to tag submissions/34
+SRCREV = "887307a8745e28659d9607799512d6aed206a9f4"
 PV = "0.4.12-0webos3-34"
 PR = "r4"
 
