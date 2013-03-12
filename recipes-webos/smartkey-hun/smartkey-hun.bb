@@ -7,6 +7,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "qt4-webos libpbnjson cjson glib-2.0 luna-service2 icu hunspell luna-prefs boost"
 
+# corresponds to tag submissions/7
+SRCREV = "584ccd045c0c3bb81f665ced3041f9590554235a"
 PV = "3.0.0-7"
 PR = "r4"
 

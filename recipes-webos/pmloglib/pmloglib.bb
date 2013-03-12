@@ -7,6 +7,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "glib-2.0 libpbnjson"
 
+# corresponds to tag submissions/38
+SRCREV = "2582ddbe3b7dee77ae027725e9fa950b96e9282a"
 PV = "3.0.1-38"
 PR = "r5"
 

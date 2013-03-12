@@ -7,6 +7,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 RDEPENDS_${PN} = "upstart"
 
+# corresponds to tag submissions/123
+SRCREV = "e0a37c804adee5fa58e5ed40d527b08bba912c86"
 PV = "2.0.0-123"
 PR = "r1"
 

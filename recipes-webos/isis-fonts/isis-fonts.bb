@@ -7,6 +7,8 @@ inherit webos_public_repo
 inherit webos_arch_indep
 inherit webos_enhanced_submissions
 
+# corresponds to tag v0.1
+SRCREV = "4b9cfe22e7f344db454aa87a53c77ba2e95a1ce5"
 PV = "1.0.0-0.1"
 PR = "r0"
 # The tag doesn't follow our normal conventions

@@ -7,6 +7,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 RPROVIDES_${PN} = "rdx-utils"
 
+# corresponds to tag submissions/1
+SRCREV = "381cc3df3ef488694ec6935492dbc162a557b87b"
 PV = "2.0.0-1"
 PR = "r2"
 

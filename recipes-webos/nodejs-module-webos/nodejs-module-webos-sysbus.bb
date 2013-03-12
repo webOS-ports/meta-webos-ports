@@ -7,6 +7,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "luna-service2 node-gyp-native"
 
+# corresponds to tag submissions/29
+SRCREV = "706d63157737c281c52038eb644528adf8fc059a"
 PV = "3.0.1-29"
 PR = "r4"
 

@@ -7,6 +7,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "nyx-lib"
 
+# corresponds to tag submissions/11
+SRCREV = "30a5c469dcdc3f7ceef3bb965501da5abd316028"
 PV = "1.0.0-11"
 PR = "r0"
 
