@@ -10,6 +10,8 @@ DEPENDS = "pmloglib zlib glib-2.0 librdx"
 # provided by busybox.
 RDEPENDS_${PN} = "busybox pmlogconf"
 
+# corresponds to tag submissions/102
+SRCREV = "83c27d03d66db4169a8e1dce2a039dfcc6501fca"
 PV = "2.0.0-102"
 PR = "r4"
 

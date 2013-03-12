@@ -7,6 +7,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 RPROVIDES_${PN} = "cpushareholder"
 
+# corresponds to tag submissions/2
+SRCREV = "57c6d94aec48214b830237b02a8f17b5a0d1f623"
 PV = "2.0.1-2"
 PR = "r2"
 

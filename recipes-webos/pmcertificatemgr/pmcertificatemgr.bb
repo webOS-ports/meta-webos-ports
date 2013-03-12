@@ -8,6 +8,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "openssl"
 RDEPENDS_${PN} = "ca-certificates"
 
+# corresponds to tag submissions/27
+SRCREV = "32389b80060159c8f15a9501cd0e7f387e9700d7"
 PV = "2.0.0-27"
 PR = "r4"
 

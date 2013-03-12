@@ -5,6 +5,8 @@ SECTION = "webos/frameworks"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
+# corresponds to tag 1.0.1
+SRCREV = "51d36e8333639144cdb10fc01768f7b1f28bc542"
 PV = "1.0-1.0.1"
 PR = "r4"
 
