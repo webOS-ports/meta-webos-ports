@@ -20,6 +20,8 @@ SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE} \
            file://0002-webkit2-set-OUTPUT_DIR-value-if-empty.patch \
 "
 S = "${WORKDIR}/git"
+# corresponds to tag submissions/4
+SRCREV = "7dd334c87bbc78c32176cafafc8d08a830242704"
 PV = "4.8.3-4"
 INC_PR = "r20"
 

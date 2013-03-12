@@ -5,6 +5,8 @@ SECTION = "webos/libs"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
+# corresponds to tag 16
+SRCREV = "7aa394eea6bd76618337772894f7615d0ae8e13a"
 PV = "2.0.0-16"
 PR = "r1"
 

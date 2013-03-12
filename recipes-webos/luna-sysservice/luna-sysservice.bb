@@ -7,6 +7,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "luna-service2 libpbnjson qt4-webos uriparser"
 
+# corresponds to tag submissions/1.04
+SRCREV = "e19d2962fca7f03df92825827c55254e32200feb"
 PV = "2.0.1-1.04"
 PR = "r5"
 
