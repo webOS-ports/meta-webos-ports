@@ -1,16 +1,4 @@
-PRINC := "${@int(PRINC) + 2}"
-
-# Config files from ${sysconfdir} should go into ${PN}-conf package and not
-# into ${PN}-server so we fix this here until oe-core version we're using
-# contains the relevant patch for this.
-PACKAGES =+ " ${PN}-conf"
-FILES_${PN}-server = "${bindir}/pulseaudio ${bindir}/start-* ${bindir}/pactl ${base_libdir}/udev/rules.d/*.rules"
-FILES_${PN}-conf = "${sysconfdir}/pulse"
-CONFFILES_pulseaudio-server = ""
-CONFFILES_pulseaudio-conf = " \
-  ${sysconfdir}/pulse/default.pa \
-  ${sysconfdir}/pulse/daemon.conf \
-  ${sysconfdir}/pulse/client.conf"
+PRINC := "${@int(PRINC) + 3}"
 
 # work around for https://bugzilla.yoctoproject.org/show_bug.cgi?id=3498
 # webos has x11 DISTRO_FEATURE included so pulseaudio-module-console-kit is added to
