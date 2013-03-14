@@ -5,16 +5,7 @@ WEBOS_PORTS_IMAGE_DEFAULT_FEATURES = "debug-tweaks ssh-server-openssh package-ma
 
 inherit webos-image
 
-MACHINE_EXTRA_INSTALL = ""
-MACHINE_EXTRA_INSTALL_tuna = " \
-  samsung-fb-console \
-  brcm-patchram-plus \
-  pulseaudio-machine-conf \
-  samsung-tuna-firmware-nonfree \
-"
-
 IMAGE_INSTALL_append = " \
   packagegroup-webos-upstart \
   ${MACHINE_EXTRA_RDEPENDS} \
-  ${MACHINE_EXTRA_INSTALL} \
 "
