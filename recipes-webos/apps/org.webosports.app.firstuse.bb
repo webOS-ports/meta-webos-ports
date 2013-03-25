@@ -11,6 +11,6 @@ inherit cordova_application
 PV = "0.2.0+gitr${SRCPV}"
 PR = "r0"
 
-SRCREV = "7682496dfddd92e9154ae533c106f9d64be1bfb6"
-SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git"
+SRCREV = "35825a101aebfc912f9102e758ab6c5f7e9f66f7"
+SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git;branch=master"
 S = "${WORKDIR}/git"
