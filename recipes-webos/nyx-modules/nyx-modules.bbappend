@@ -10,4 +10,4 @@ inherit webos-ports-submissions
 
 DEPENDS += "mtdev"
 
-SRCREV = "c6724e0064f8f3b5d2fe7895c3fa601a2854ec66"
+SRCREV = "af0a4ebd65b98ee5749cff56a9cda43d4a06a20a"
