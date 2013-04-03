@@ -10,7 +10,6 @@ DEPENDS = "openssl glib-2.0"
 RDEPENDS_${PN} = "ca-certificates"
 
 WEBOS_VERSION = "2.0.0-29_3cec1b22765db57b9c0c9bbba8e3cee0a2c4e2cb"
-PR = "r5"
 
 inherit webos_component
 inherit webos_public_repo

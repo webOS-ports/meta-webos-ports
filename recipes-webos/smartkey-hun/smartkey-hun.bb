@@ -2,8 +2,6 @@
 
 require ${BPN}.inc
 
-PR = "${INC_PR}.0"
-
 DEPENDS += "qt4-webos"
 inherit webos_qmake
 
