@@ -13,7 +13,6 @@ RDEPENDS_${PN} = "ptmalloc3 ${VIRTUAL-RUNTIME_browser_fonts}"
 PE = "1"
 PV = "0.7.2"
 SRCREV = "e2506f5828457d662853e5aeec9f4f269c9a1952"
-PR = "r12"
 
 inherit webos_public_repo
 inherit webos_daemon
