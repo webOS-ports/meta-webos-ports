@@ -8,7 +8,6 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "pmloglib cjson glib-2.0"
 
 WEBOS_VERSION = "3.5.1-156_aa74ac64ad1580e16c7c572bed80aac0718bbdde"
-PR = "r10"
 
 inherit webos_component
 inherit webos_public_repo
