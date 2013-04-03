@@ -10,7 +10,6 @@ DEPENDS = "jemalloc db8 mojomail-common boost icu libpalmsocket libsandbox pmlog
 # corresponds to tag submissions/99
 SRCREV = "9a4316e6bcb76445673d48a310b0bd446b280f94"
 PV = "2.0.0-99"
-PR = "r2"
 
 inherit webos_component
 inherit webos_public_repo

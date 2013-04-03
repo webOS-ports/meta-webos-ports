@@ -10,7 +10,6 @@ DEPENDS = "luna-service2 cjson sqlite3 glib-2.0"
 # corresponds to tag submissions/1.01
 SRCREV = "1b8182fe4373d29fa728345825c8988db138b23b"
 PV = "2.0.0-1.01"
-PR = "r9"
 
 #inherit webos_component
 inherit webos_public_repo

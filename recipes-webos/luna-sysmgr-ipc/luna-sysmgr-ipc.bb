@@ -10,7 +10,6 @@ DEPENDS = "glib-2.0"
 # corresponds to tag submissions/1.01
 SRCREV = "d62291fe7d0fda12cc57f63d82ca4eea1fce8155"
 PV = "2.0.0-1.01"
-PR = "r3"
 
 inherit webos_component
 inherit webos_public_repo

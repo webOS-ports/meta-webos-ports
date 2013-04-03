@@ -10,7 +10,6 @@ DEPENDS = "jemalloc luna-service2 db8 glibmm boost libsandbox glib-2.0 libsigc++
 # corresponds to tag submissions/56
 SRCREV = "d0fd836495c448f6c08706d14c62f92b87436dda"
 PV = "2.0.0-56"
-PR = "r4"
 
 inherit webos_component
 inherit webos_public_repo

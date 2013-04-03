@@ -11,7 +11,6 @@ RDEPENDS_${PN} = "connman"
 # corresponds to tag submissions/10
 SRCREV = "81b7d1370a7bf7449f47e24fa1df21b21143a8ba"
 PV = "1.0.0-10"
-PR = "r1"
 
 inherit webos_component
 inherit webos_public_repo

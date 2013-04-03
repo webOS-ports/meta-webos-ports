@@ -11,7 +11,6 @@ RDEPENDS_${PN} = "ca-certificates"
 # corresponds to tag submissions/28
 SRCREV = "b621daee845da9ec6aa6b6de81b3fe3b8f8632b4"
 PV = "2.0.0-28"
-PR = "r4"
 
 inherit webos_component
 inherit webos_public_repo

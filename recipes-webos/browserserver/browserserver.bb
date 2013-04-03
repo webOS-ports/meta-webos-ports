@@ -12,7 +12,6 @@ RDEPENDS_${PN} = "ptmalloc3 ${VIRTUAL-RUNTIME_browser_fonts}"
 # corresponds to tag 0.7.2
 SRCREV = "e2506f5828457d662853e5aeec9f4f269c9a1952"
 PV = "3.0.0-0.7.2"
-PR = "r10"
 
 inherit webos_public_repo
 inherit webos_enhanced_submissions

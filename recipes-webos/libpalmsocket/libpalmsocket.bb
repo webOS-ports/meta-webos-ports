@@ -10,7 +10,6 @@ DEPENDS = "pmloglib glib-2.0 openssl c-ares pmstatemachineengine"
 # corresponds to tag submissions/30
 SRCREV = "d2c9c3ed769552c4852d7a8f962408720af90cf4"
 PV = "2.0.0-30"
-PR = "r2"
 
 inherit webos_component
 inherit webos_public_repo

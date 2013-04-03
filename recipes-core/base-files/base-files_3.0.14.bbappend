@@ -1,7 +1,5 @@
 # Copyright (c) 2013 LG Electronics, Inc.
 
-PR_append = "webos1"
-
 dirs700 += " \
     ${webos_db8datadir} \
     ${webos_db8datadir}/temp \

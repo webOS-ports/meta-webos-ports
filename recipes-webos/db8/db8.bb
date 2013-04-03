@@ -13,7 +13,6 @@ DEPENDS = "luna-service2 jemalloc icu pmloglib curl glib-2.0 leveldb boost"
 # corresponds to tag submissions/79
 SRCREV = "0fa1367ccc942f5fc74d4f2330e1c156fd47dcee"
 PV = "2.0.0-79"
-PR = "r14"
 
 # ensure leveldb is installed in image
 RDEPENDS_${PN} = "leveldb"

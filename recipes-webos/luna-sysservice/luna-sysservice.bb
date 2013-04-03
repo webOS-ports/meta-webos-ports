@@ -12,7 +12,6 @@ RDEPENDS_${PN} = "sntp"
 # corresponds to tag submissions/6
 SRCREV = "eb716d1311c36bec22ed5bcd2ae057d6262f4051"
 PV = "2.0.1-6"
-PR = "r7"
 
 inherit webos_component
 inherit webos_public_repo

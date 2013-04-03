@@ -10,7 +10,6 @@ DEPENDS = "yajl glib-2.0"
 # corresponds to tag submissions/18
 SRCREV = "5f799a2519c0c8f5dee9faffa4cc655dd0a0d85d"
 PV = "2.0.0-18"
-PR = "r2"
 
 inherit webos_component
 inherit webos_public_repo
