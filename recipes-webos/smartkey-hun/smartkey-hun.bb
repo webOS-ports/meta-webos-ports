@@ -8,7 +8,6 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "qt4-webos libpbnjson cjson glib-2.0 luna-service2 icu hunspell luna-prefs boost"
 
 WEBOS_VERSION = "3.0.0-9_eaf7016ffac51497d753dc28ecb099730e83060a"
-PR = "r5"
 
 #Uncomment once do_install() has been moved out of the recipe
 inherit webos_component
