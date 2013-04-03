@@ -6,8 +6,6 @@ LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=694e396551033371686c80d3a1a69e88"
 DEPENDS = "nodejs-native node-gyp-packages-native"
 
-PR = "r2"
-
 SRC_URI = "https://github.com/TooTallNate/node-gyp/archive/v${PV}.tar.gz"
 SRC_URI[md5sum] = "bbd667edd17df54c687d6224b8619f24"
 SRC_URI[sha256sum] = "3992e62c2480552b3e847ec7ac0e03009ab5391bdecf78a25b8688cb6e159d95"

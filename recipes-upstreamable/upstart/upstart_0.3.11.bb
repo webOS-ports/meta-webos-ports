@@ -9,8 +9,6 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=4325afd396febcb659c36b49533135d4"
 DEPENDS = ""
 RRECOMMENDS_${PN} += "libupstart upstart-sysvcompat"
 
-PR = "r13"
-
 SRC_URI = "http://upstart.ubuntu.com/download/0.3/upstart-${PV}.tar.bz2;name=upstart \
     http://upstart.ubuntu.com/download/example-jobs/0.3/example-jobs-${PV}.tar.gz;name=compat \
     file://init/rcS-default file://init/rc file://init/rcS \

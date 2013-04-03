@@ -9,8 +9,6 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=44ac4678311254db62edf8fd39cb8124"
 
 RDEPENDS_${PN} = "python-pycairo python-compression python-image"
 
-PR = "r1"
-
 inherit autotools
 inherit systemd
 inherit update-alternatives
