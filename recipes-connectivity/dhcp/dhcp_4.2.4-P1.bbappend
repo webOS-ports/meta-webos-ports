@@ -1,7 +1,7 @@
 # Copyright (c) 2012 Hewlett-Packard Development Company, L.P.
 # Copyright (c) 2013 LG Electronics, Inc.
 
-PR_append = "webos3"
+PRINC := "${@int(PRINC) + 3}"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 

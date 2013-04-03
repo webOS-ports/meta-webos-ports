@@ -1,6 +1,6 @@
 # Copyright (c) 2012 Hewlett-Packard Development Company, L.P.
 
-PR_append = "webos1"
+PRINC := "${@int(PRINC) + 1}"
 
 # We don't want bash to ever be /bin/sh: our upstart conf files don't work when
 # it is -- apparently it handles quotes on the command line differently from

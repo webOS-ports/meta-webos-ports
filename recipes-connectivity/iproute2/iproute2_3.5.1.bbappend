@@ -1,5 +1,5 @@
 # Copyright (c) 2012 Hewlett-Packard Development Company, L.P.
 
-PR_append = "webos1"
+PRINC := "${@int(PRINC) + 1}"
 
 DEPENDS += "iptables"

@@ -2,7 +2,7 @@
 
 INHIBIT_UPDATERCD_BBCLASS = "1"
 
-PR_append = "webos1"
+PRINC := "${@int(PRINC) + 1}"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${BPN}:"
 
