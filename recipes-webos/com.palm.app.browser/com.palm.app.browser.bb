@@ -9,7 +9,6 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 PE = "1"
 PV = "0.21"
 SRCREV = "0f2a339d30023018d1d0d435b2aa0350a32c83e4"
-PR = "r5"
 
 inherit webos_public_repo
 inherit webos_arch_indep
