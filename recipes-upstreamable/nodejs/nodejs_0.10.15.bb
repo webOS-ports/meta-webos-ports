@@ -5,8 +5,6 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=1b19aee7bf088151c559f3ec9f830b44"
 
 DEPENDS = "openssl"
 
-PR = "r5"
-
 SRC_URI = "http://nodejs.org/dist/v${PV}/node-v${PV}.tar.gz"
 SRC_URI[md5sum] = "59f295b0a30dc8dbdb46407c2d9b2923"
 SRC_URI[sha256sum] = "87345ab3b96aa02c5250d7b5ae1d80e620e8ae2a7f509f7fa18c4aaa340953e8"
