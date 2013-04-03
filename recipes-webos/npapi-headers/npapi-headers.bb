@@ -9,7 +9,6 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MPL-1.1;md5=1d38e87ed8d522c49f0
 PE = "1"
 PV = "0.4"
 SRCREV = "84cba6a49d976f938f29ab593e6c32bd14e4598e"
-PR = "r5"
 
 inherit webos_public_repo
 inherit webos_arch_indep
