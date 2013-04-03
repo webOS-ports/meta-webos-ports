@@ -2,8 +2,6 @@
 
 INHIBIT_UPDATERCD_BBCLASS = "1"
 
-PR_append = "webos1"
-
 FILESEXTRAPATHS_prepend := "${THISDIR}/${BPN}:"
 
 SRC_URI += "file://connman.upstart"

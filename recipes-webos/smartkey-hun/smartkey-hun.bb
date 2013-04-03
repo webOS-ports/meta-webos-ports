@@ -11,7 +11,6 @@ DEPENDS = "libpbnjson cjson glib-2.0 luna-service2 icu hunspell"
 # corresponds to tag submissions/4
 SRCREV = "75a4ea405b600c179f13a2633e81371c69017fab"
 PV = "3.0.0-4"
-PR = "r3"
 
 #Uncomment once do_install() has been moved out of the recipe
 inherit webos_component

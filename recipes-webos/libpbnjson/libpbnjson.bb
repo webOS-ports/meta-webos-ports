@@ -10,7 +10,6 @@ DEPENDS = "yajl"
 # corresponds to tag submissions/12
 SRCREV = "ca5e80106b561d8779304f3df68544edc003e199"
 PV = "1.3.0-12"
-PR = "r2"
 
 inherit webos_component
 inherit webos_public_repo

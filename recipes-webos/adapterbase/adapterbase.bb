@@ -10,7 +10,6 @@ DEPENDS = "glib-2.0 npapi-headers"
 # corresponds to tag 0.2
 SRCREV = "8896cabe6b6f9d8e6a35e7c8899bea1ae8039487"
 PV = "3.0.0-0.2"
-PR = "r3"
 
 inherit webos_public_repo
 inherit webos_submissions

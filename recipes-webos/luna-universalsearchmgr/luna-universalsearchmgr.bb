@@ -10,7 +10,6 @@ DEPENDS = "libxml2 luna-service2 glib-2.0 cjson sqlite3 "
 # corresponds to tag submissions/1.00
 SRCREV = "a9a7751d97888f88b1b9a0bfa9b7997201d4f4cc"
 PV = "2.0.0-1.00"
-PR = "r6"
 
 inherit webos_component
 inherit webos_public_repo
@@ -28,6 +27,5 @@ do_install_append() {
     install -d ${D}${webos_prefix}/universalsearchmgr/resources/en_us
     install -v -m 0644 ${S}/desktop-support/UniversalSearchList.json ${D}${webos_prefix}/universalsearchmgr/resources/en_us
 }
-
 
 FILES_${PN} += "${webos_prefix}"

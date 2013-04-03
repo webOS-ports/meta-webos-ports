@@ -1,7 +1,5 @@
 # Copyright (c) 2013 LG Electronics, Inc.
 
-PR_append = "webos1"
-
 # Remove sysprof, because it depends on 
 # 'libglade', 'gconf', 'polkit', 'consolekit', 'virtual/libx11
 # and x11 is not available without x11 in DISTRO_FEATURES
