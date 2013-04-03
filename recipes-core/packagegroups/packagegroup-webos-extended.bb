@@ -5,7 +5,6 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 # You don't need to change this value when you're changing just RDEPENDS_${PN} variable.
-PR = "r24"
 
 inherit packagegroup
 
@@ -49,7 +48,6 @@ WEBOS_PACKAGESET_BROWSER = " \
     webkit-supplemental \
     webkit-webos \
 "
-
 
 # Enyo 1 and related framework packages
 WEBOS_PACKAGESET_ENYO_1 = " \
