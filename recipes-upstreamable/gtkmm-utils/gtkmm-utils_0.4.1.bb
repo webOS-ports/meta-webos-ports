@@ -7,8 +7,6 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=9740aaebee0708fe3dd67fdc3f6902b2"
 
 DEPENDS = "glibmm"
 
-PR = "r1"
-
 SRC_URI = "http://${BPN}.googlecode.com/files/${BP}.tar.gz \
     file://0001-configure-add-option-to-disable-building-gtkmm-utils.patch \
     file://0002-Fix-includes-with-newer-glib.patch \
