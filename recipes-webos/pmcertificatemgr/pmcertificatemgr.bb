@@ -9,7 +9,6 @@ DEPENDS = "openssl"
 RDEPENDS_${PN} = "ca-certificates"
 
 WEBOS_VERSION = "2.0.0-28_b621daee845da9ec6aa6b6de81b3fe3b8f8632b4"
-PR = "r4"
 
 inherit webos_component
 inherit webos_public_repo
