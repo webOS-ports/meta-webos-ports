@@ -2,8 +2,6 @@
 # webOS system should be ready to have read-only /etc folder
 # thus we move timezone/localtime to other place (in volatile partition)
 
-EXTENDPRAUTO_append = "webos1"
-
 do_install_append() {
     install -d "${D}/${webos_sysmgr_localstatedir}/preferences"
 

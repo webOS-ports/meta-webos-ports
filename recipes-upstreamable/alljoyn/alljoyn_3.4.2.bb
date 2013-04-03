@@ -8,8 +8,6 @@ LIC_FILES_CHKSUM = "file://alljoyn_core/NOTICE.txt;md5=c80318e464aeed6671097df52
 
 DEPENDS = "openssl xulrunner"
 
-PR = "r0"
-
 SRC_URI = "https://www.alljoyn.org/sites/default/files/resources/alljoyn-${PV}-src.tgz;name=alljoyncore \
            file://alljoyn.pc \
            file://alljoyn.upstart \
