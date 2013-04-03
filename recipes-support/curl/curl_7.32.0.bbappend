@@ -1,7 +1,6 @@
 # Copyright (c) 2012-2014 LG Electronics, Inc.
 
 PKGV .= "-0webos1"
-EXTENDPRAUTO_append = "webos2"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${BP}:"
 

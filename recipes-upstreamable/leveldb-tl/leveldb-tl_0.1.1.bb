@@ -8,7 +8,6 @@ SECTION = "libs"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://LICENSE.txt;md5=3b83ef96387f14655fc854ddc3c6bd57"
 DEPENDS = "leveldb gtest"
-PR = "r0"
 
 SRC_URI = "git://github.com/ony/leveldb-tl.git;branch=gcc-4.7"
 

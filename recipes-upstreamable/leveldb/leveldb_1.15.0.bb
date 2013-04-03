@@ -13,8 +13,6 @@ HOMEPAGE = "http://leveldb.googlecode.com"
 LICENSE = "BSD-3-Clause"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=92d1b128950b11ba8495b64938fc164d"
 
-PR = "r6"
-
 SRC_URI = "http://${BPN}.googlecode.com/files/${BP}.tar.gz \
     file://explicitly.disable.tcmalloc.patch \
 "

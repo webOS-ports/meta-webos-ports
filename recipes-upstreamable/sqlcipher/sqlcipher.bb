@@ -7,7 +7,6 @@ LICENSE = "BSD"
 DEPENDS = "tcl-native openssl"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=7edde5c030f9654613438a18b9b56308"
 
-PR = "r1"
 PV = "3.0.0"
 
 inherit autotools

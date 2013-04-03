@@ -6,7 +6,6 @@
 # http://code.ohloh.net/file?fid=I7lyTfvG7SNVE8nSLab-cInPx3g&cid=P9m-lyBa7_I&s=&fp=306441&mp=&projSelected=true#L0
 
 PKGV .= "-0webos1"
-EXTENDPRAUTO_append = "webos1"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${BP}:"
 

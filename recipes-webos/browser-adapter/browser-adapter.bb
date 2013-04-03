@@ -11,7 +11,6 @@ DEPENDS = "adapterbase browserserver libpng npapi-headers glib-2.0 qt4-webos"
 PE = "1"
 PV = "0.4"
 SRCREV = "7c4cb757dcaac08a18e0ea1699e2c748710bdbc5"
-PR = "r10"
 
 inherit webos_public_repo
 inherit webos_library
@@ -28,7 +27,6 @@ EXTRA_OEMAKE += "STAGING_INC_DIR=${STAGING_INCDIR}"
 EXTRA_OEMAKE += "STAGING_LIB_DIR=${STAGING_LIBDIR}"
 # The Qt headers are expected to be found under QT_INSTALL_PREFIX/include
 EXTRA_OEMAKE += "QT_INSTALL_PREFIX=${STAGING_INCDIR}/.."
-
 
 do_install() {
     # This target only installs BrowserAdapter.so

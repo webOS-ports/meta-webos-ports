@@ -4,7 +4,6 @@
 LICENSE = "LGPLv2.1+ & MIT & GPLv2"
 
 PKGV .= "-0webos1"
-EXTENDPRAUTO_append = "webos2"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${BP}:"
 

@@ -6,8 +6,6 @@ LICENSE = "GPL-2.0"
 LIC_FILES_CHKSUM = "file://COPYING;md5=59530bdf33659b29e73d4adb9f9f6552"
 DEPENDS = "util-linux ncurses popt icu"
 
-PR = "r0"
-
 SRC_URI = "${SOURCEFORGE_MIRROR}/project/${PN}/${PN}/${PV}/${BP}.tar.gz \
            file://gptfdisk-0.8.10-convenience-1.patch"
 

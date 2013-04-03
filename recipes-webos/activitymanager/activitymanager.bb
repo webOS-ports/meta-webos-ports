@@ -9,7 +9,6 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "luna-service2 db8 boost openssl glib-2.0 pmloglib nyx-lib"
 
 WEBOS_VERSION = "3.0.0-123_36477172ae0857eb02f3af2e54860a237afbd660"
-PR = "r4"
 
 inherit webos_component
 inherit webos_public_repo

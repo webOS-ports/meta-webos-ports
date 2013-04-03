@@ -13,8 +13,6 @@ FILESEXTRAPATHS_prepend := "${THISDIR}/${BP}:"
 
 SRC_URI += "file://0001-explicit-bool-cast.patch"
 
-PR = "r1"
-
 # GTest developers recommend to use source code instead of linking
 # against a prebuilt library.
 do_install() {

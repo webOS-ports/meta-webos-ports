@@ -11,7 +11,6 @@ inherit webos_library
 inherit webos_public_repo
 
 WEBOS_VERSION = "1.8.0-35_9d595a24768fc270bc716e60d3bb2ee10feb6310"
-PR = "r3"
 
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

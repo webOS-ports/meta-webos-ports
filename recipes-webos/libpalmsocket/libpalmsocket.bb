@@ -8,7 +8,6 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "pmloglib glib-2.0 openssl c-ares pmstatemachineengine"
 
 WEBOS_VERSION = "2.0.0-32_0319a6fba4e81dd624ed22cff09a972df389f391"
-PR = "r2"
 
 inherit webos_component
 inherit webos_public_repo

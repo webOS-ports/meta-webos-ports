@@ -8,7 +8,6 @@
 # http://scripts.mit.edu/trac/changeset/1433
 
 PKGV .= "-0webos1"
-EXTENDPRAUTO_append = "webos1"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${BP}:"
 SRC_URI += "file://gzip-cve-2009-2624.patch"

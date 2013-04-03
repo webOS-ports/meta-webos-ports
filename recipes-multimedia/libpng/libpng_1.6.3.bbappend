@@ -5,7 +5,6 @@
 # CVE-2013-6954: https://lists.fedoraproject.org/pipermail/scm-commits/Week-of-Mon-20140127/1181090.html
 
 PKGV .= "-0webos1"
-EXTENDPRAUTO_append = "webos1"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${BP}:"
 

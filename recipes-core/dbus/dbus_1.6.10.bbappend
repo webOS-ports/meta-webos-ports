@@ -4,7 +4,6 @@
 # Path: http://cgit.freedesktop.org/dbus/dbus/commit/?id=954d75b2b64e4799f360d2a6bf9cff6d9fee37e7
 
 PKGV .= "-0webos1"
-EXTENDPRAUTO_append = "webos1"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${BP}:"
 

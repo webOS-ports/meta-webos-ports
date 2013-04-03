@@ -7,7 +7,6 @@
 # http://patch-tracker.debian.org/patch/series/view/lighttpd/1.4.28-2+squeeze1.5/cve-2013-4560.patch
 
 PKGV .= "-0webos1"
-EXTENDPRAUTO_append = "webos1"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${BP}:"
 

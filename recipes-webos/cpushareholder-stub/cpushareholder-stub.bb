@@ -8,7 +8,6 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 RPROVIDES_${PN} = "cpushareholder"
 
 WEBOS_VERSION = "2.0.1-2_3a3169ca2863ce7e159feb86dff2651a7e02ef2e"
-PR = "r2"
 
 inherit webos_component
 inherit webos_public_repo

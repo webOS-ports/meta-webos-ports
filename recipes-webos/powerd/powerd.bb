@@ -9,7 +9,6 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "nyx-lib luna-service2 cjson glib-2.0"
 
 WEBOS_VERSION = "4.0.0-25_87309ff87bf5d3d6c54095075be9acdf3e403a2c"
-PR = "r3"
 
 inherit webos_component
 inherit webos_public_repo

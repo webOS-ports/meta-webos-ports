@@ -6,8 +6,6 @@ HOMEPAGE = "https://code.google.com/p/uchardet/"
 LICENSE = "MPLv1.1"
 LIC_FILES_CHKSUM = "file://COPYING;md5=bfe1f75d606912a4111c90743d6c7325"
 
-PR = "r0"
-
 SRC_URI = "https://uchardet.googlecode.com/files/${BP}.tar.gz"
 
 SRC_URI[md5sum] = "9c17f0aca38c66c95d400691a9160b1b"

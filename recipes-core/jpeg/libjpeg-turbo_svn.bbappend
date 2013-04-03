@@ -4,7 +4,6 @@
 # CVE-2013-6629бб CVE-2013-6630: https://lists.fedoraproject.org/pipermail/scm-commits/Week-of-Mon-20131216/1161751.html
 
 PKGV .= "-0webos1"
-EXTENDPRAUTO_append = "webos1"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${BP}:"
 
