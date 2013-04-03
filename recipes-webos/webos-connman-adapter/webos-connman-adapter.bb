@@ -10,7 +10,6 @@ DEPENDS = "luna-service2 libpbnjson glib-2.0 luna-prefs openssl"
 RDEPENDS_${PN} = "connman connman-client"
 
 WEBOS_VERSION = "1.0.0-10_750466b3e842e8fff0906390524b92e28b0af972"
-PR = "r3"
 
 inherit webos_component
 inherit webos_public_repo
