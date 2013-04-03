@@ -12,7 +12,6 @@ DEPENDS = "openssl"
 # corresponds to tag submissions/34
 SRCREV = "887307a8745e28659d9607799512d6aed206a9f4"
 PV = "0.4.12-0webos3-34"
-PR = "r4"
 
 inherit pythonnative
 inherit webos_public_repo

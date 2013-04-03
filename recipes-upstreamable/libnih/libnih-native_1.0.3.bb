@@ -8,8 +8,6 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=751419260aa954499f7abaabaa882bbe"
 
 DEPENDS = "dbus"
 
-PR = "r0"
-
 SRC_URI = "https://launchpad.net/${BPN}/1.0/${PV}/+download/${BP}.tar.gz"
 
 SRC_URI[md5sum] = "db7990ce55e01daffe19006524a1ccb0"

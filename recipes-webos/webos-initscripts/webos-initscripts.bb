@@ -10,7 +10,6 @@ RDEPENDS_${PN} = "upstart"
 # corresponds to tag submissions/123
 SRCREV = "e0a37c804adee5fa58e5ed40d527b08bba912c86"
 PV = "2.0.0-123"
-PR = "r1"
 
 inherit webos_component
 inherit webos_public_repo

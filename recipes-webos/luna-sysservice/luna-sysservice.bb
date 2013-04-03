@@ -10,7 +10,6 @@ DEPENDS = "luna-service2 libpbnjson qt4-webos uriparser libxml2 sqlite3"
 # corresponds to tag submissions/5
 SRCREV = "e9a46216cc795799266fdf7b139ad350c8d9029f"
 PV = "2.0.1-5"
-PR = "r6"
 
 inherit webos_component
 inherit webos_public_repo

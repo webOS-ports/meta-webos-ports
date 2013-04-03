@@ -10,7 +10,6 @@ DEPENDS = "qt4-webos glib-2.0 luna-prefs luna-service2 luna-webkit-api libpbnjso
 # corresponds to tag submissions/2
 SRCREV = "af9ae855efd01e3f60b277cd55ee4d1ff5505fb7"
 PV = "3.0.0-2"
-PR = "r3"
 
 inherit webos_public_repo
 inherit webos_qmake

@@ -10,7 +10,6 @@ RPROVIDES_${PN} = "rdx-utils"
 # corresponds to tag submissions/1
 SRCREV = "381cc3df3ef488694ec6935492dbc162a557b87b"
 PV = "2.0.0-1"
-PR = "r2"
 
 inherit webos_component
 inherit webos_public_repo

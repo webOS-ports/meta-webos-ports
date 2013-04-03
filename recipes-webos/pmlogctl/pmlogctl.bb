@@ -10,7 +10,6 @@ DEPENDS = "pmloglib"
 # corresponds to tag submissions/13
 SRCREV = "d1a431402d526fa015cbc6d5040cf521f319d12f"
 PV = "3.0.0-13"
-PR = "r3"
 
 inherit webos_component
 inherit webos_public_repo
