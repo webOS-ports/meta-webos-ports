@@ -1,7 +1,5 @@
 # Copyright (c) 2013 LG Electronics, Inc.
 
-EXTENDPRAUTO_append = "webos6"
-
 dirs700 = " \
     ${webos_db8datadir} \
     ${webos_db8datadir}/temp \

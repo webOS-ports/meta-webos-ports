@@ -11,7 +11,6 @@ RDEPENDS_${PN} = "nodejs"
 RDEPENDS_${PN} += "nodejs-module-webos-dynaload nodejs-module-webos-pmlog nodejs-module-webos-sysbus mojoloader"
 
 WEBOS_VERSION = "3.0.1-80_2cdbe7336b8641d4ca708ff29d90fcbefa7c777f"
-PR = "r5"
 
 inherit webos_component
 inherit webos_public_repo
