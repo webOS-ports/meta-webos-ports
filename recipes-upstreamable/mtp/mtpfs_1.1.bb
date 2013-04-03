@@ -6,7 +6,6 @@ SECTION = "console/utils"
 LICENSE = "GPL-3.0"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 DEPENDS = "libusb libid3tag glib-2.0 libmtp fuse"
-PR = "r2"
 
 SRC_URI = "http://www.adebenham.com/files/mtp/mtpfs-${PV}.tar.gz \
     file://subfolder_error.patch \
