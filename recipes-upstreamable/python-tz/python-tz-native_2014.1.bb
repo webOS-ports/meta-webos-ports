@@ -8,8 +8,6 @@ HOMEPAGE = "https://pypi.python.org/pypi/pytz/"
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://LICENSE.txt;md5=22b38951eb857cf285a4560a914b7cd6"
 
-PR = "r0"
-
 SRC_URI = "https://pypi.python.org/packages/source/p/pytz/pytz-${PV}.tar.gz"
 
 SRC_URI[md5sum] = "2c53d81a34aad3ad33f2545ca3ff910f"
