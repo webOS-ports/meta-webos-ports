@@ -11,7 +11,6 @@ DEPENDS = "glib-2.0 npapi-headers"
 PE = "1"
 PV = "0.2"
 SRCREV = "8896cabe6b6f9d8e6a35e7c8899bea1ae8039487"
-PR = "r6"
 
 inherit webos_public_repo
 inherit webos_library

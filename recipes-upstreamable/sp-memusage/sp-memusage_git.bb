@@ -8,7 +8,6 @@ DEPENDS = "sp-measure"
 RDEPENDS_${PN} = "sp-measure"
 
 SRCREV = "65e6a729ce04cd90206689ae28fbabc4baf801f6"
-PR = "r2"
 PV = "1.3.2+git${SRCPV}"
 
 inherit autotools
