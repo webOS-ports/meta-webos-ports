@@ -1,7 +1,5 @@
 # Copyright (c) 2012-2013 LG Electronics, Inc.
 
-EXTENDPRAUTO_append = "webos3"
-
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
 # Override default fbsetup script with our own script which sets the screen resolution
