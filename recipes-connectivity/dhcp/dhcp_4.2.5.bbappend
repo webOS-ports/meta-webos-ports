@@ -1,8 +1,6 @@
 # Copyright (c) 2012 Hewlett-Packard Development Company, L.P.
 # Copyright (c) 2013 LG Electronics, Inc.
 
-PR_append = "webos3"
-
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
 SRC_URI += "file://no_bash_required-webos.patch \

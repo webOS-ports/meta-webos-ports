@@ -14,7 +14,6 @@ RDEPENDS_${PN} = "busybox"
 # corresponds to tag submissions/105
 SRCREV = "40d4e06b2be0926ae102666da97543824458ce1b"
 PV = "3.0.0-105"
-PR = "r5"
 
 inherit webos_component
 inherit webos_public_repo

@@ -10,7 +10,6 @@ DEPENDS = "nodejs luna-service2"
 # corresponds to tag submissions/25
 SRCREV = "e9d90d36a265ed3500274e40ba98a5959d89747f"
 PV = "2.0.0-25"
-PR = "r3"
 
 inherit webos_component
 inherit webos_public_repo

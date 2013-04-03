@@ -2,8 +2,6 @@
 
 require vboxguestdrivers.inc
 
-PR = "${INC_PR}.0"
-
 VBOX_NAME = "VirtualBox-${PV}"
 
 SRC_URI = "http://download.virtualbox.org/virtualbox/${PV}/${VBOX_NAME}.tar.bz2"

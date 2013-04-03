@@ -7,8 +7,6 @@ LIC_FILES_CHKSUM = "file://NOTICE.txt;md5=c80318e464aeed6671097df52cae13eb"
 
 DEPENDS = "openssl"
 
-PR = "r0"
-
 # Remove xulrunner fetch once [GF-7675] is implemented.
 SRC_URI = "https://www.alljoyn.org/sites/default/files/resources/alljoyn-${PV}-src.tgz;name=alljoyncore \
            http://ftp.mozilla.org/pub/mozilla.org/xulrunner/releases/3.6.27/sdk/xulrunner-3.6.27.en-US.linux-i686.sdk.tar.bz2;name=xulrunner-sdk \

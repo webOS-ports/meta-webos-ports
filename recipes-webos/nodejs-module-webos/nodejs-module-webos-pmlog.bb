@@ -12,7 +12,6 @@ DEPENDS = "nodejs pmloglib"
 # corresponds to tag submissions/13
 SRCREV = "93169c8f322ef57bed0020181b28e4caac6c5775"
 PV = "3.0.0-13"
-PR = "r2"
 
 inherit webos_component
 inherit webos_public_repo

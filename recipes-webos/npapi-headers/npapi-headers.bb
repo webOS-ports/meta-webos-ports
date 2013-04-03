@@ -12,7 +12,6 @@ inherit webos_arch_indep
 # corresponds to tag 0.4
 SRCREV = "84cba6a49d976f938f29ab593e6c32bd14e4598e"
 PV = "3.0.0-0.4"
-PR = "r3"
 
 WEBOS_GIT_TAG = "${WEBOS_SUBMISSION}"
 SRC_URI = "${ISIS_PROJECT_GIT_REPO_COMPLETE}"
