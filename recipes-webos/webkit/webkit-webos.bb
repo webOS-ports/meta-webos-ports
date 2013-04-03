@@ -10,7 +10,6 @@ DEPENDS = "qt4-webos luna-service2 sqlite3 gperf-native"
 # isis-project components don't have submissions
 PE = "1"
 PV = "0.54"
-PR = "r16"
 
 inherit webos_public_repo
 inherit webos_qmake
@@ -54,12 +53,10 @@ python do_unpack_append () {
     os.system("mv -v " + s + glob_suffix + " " + s)
 }
 
-
 # Unfortunately, build-webkit does the configure and compile steps indivisibly.
 do_configure() {
     :
 }
-
 
 do_compile() {
     # QTDIR needs to be defined, but its value doesn't matter.
@@ -81,7 +78,6 @@ do_compile() {
         $QMAKE_LINK_ARGS
 }
 
-
 do_install() {
     # WebKit stages header files that include other header files. We can't just
     # copy their staged header files because the path won't be correct so we
@@ -98,7 +94,6 @@ do_install() {
     install -v -m 555 ${PALM_BUILD_DIR}/imports/QtWebKit/* ${D}${QT_CONFIGURE_IMPORTS_PATH}/QtWebKit
 }
 
-
 addtask makeclean
 do_makeclean() {
     if [ -d ${WEBKITOUTPUTDIR} -a -x ${S}/Tools/Scripts/build-webkit ]; then
@@ -111,7 +106,6 @@ do_makeclean() {
         rm -rf ${WEBKITOUTPUTDIR}
     fi
 }
-
 
 FILES_${PN} += "${libdir}/libQtWebKit.so*"
 FILES_${PN} += "${QT_CONFIGURE_IMPORTS_PATH}/QtWebKit/qmldir"
