@@ -19,7 +19,6 @@ SECTION = "webos/libs"
 DEPENDS = "glib-2.0"
 
 WEBOS_VERSION = "5.2.0-67_840f318a07ebf7b0deccf5effcacd66eb48c4db5"
-PR = "r6"
 
 inherit webos_component
 inherit webos_public_repo

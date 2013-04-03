@@ -10,7 +10,6 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=c46082167a314d785d012a244748d803 \
 X11DEPENDS = "virtual/libx11"
 DEPENDS = "${@base_contains('DISTRO_FEATURES', 'x11', '${X11DEPENDS}', '', d)}"
 
-PR = "r0"
 SRCREV = "13429"
 PV = "3.8.1+svnr${SRCPV}"
 
