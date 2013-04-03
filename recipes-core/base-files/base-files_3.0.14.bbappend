@@ -2,8 +2,6 @@
 
 AUTHOR = "Herb Kuta <herb.kuta@lge.com>"
 
-EXTENDPRAUTO_append = "webos9"
-
 dirs700 = " \
     ${webos_db8datadir} \
     ${webos_db8datadir}/temp \
