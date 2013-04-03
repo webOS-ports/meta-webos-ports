@@ -13,7 +13,6 @@ RDEPENDS_${PN} = "ptmalloc3"
 RDEPENDS_${PN} += "util-linux"
 
 WEBOS_VERSION = "3.0.0-3_9305987f31cc2f84f99e2bd442c2bf2a330fb961"
-PR = "r5"
 
 # Don't uncomment until all of the do_*() tasks have been moved out of the recipe
 #inherit webos_component

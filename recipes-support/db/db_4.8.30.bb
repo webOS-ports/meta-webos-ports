@@ -14,7 +14,6 @@ HOMEPAGE = "http://www.sleepycat.com"
 LICENSE = "Sleepycat"
 VIRTUAL_NAME ?= "virtual/db"
 RCONFLICTS_${PN} = "db3"
-PR = "r1"
 
 SRC_URI = "http://download.oracle.com/berkeley-db/db-${PV}.tar.gz"
 SRC_URI[md5sum] = "f80022099c5742cd179343556179aa8c"
