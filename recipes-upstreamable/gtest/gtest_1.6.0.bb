@@ -9,8 +9,6 @@ SRC_URI = "https://googletest.googlecode.com/files/${BP}.zip"
 SRC_URI[md5sum] = "4577b49f2973c90bf9ba69aa8166b786"
 SRC_URI[sha256sum] = "5ec97df8e75b4ee796604e74716d1b50582beba22c5502edd055a7e67a3965d8"
 
-PR = "r0"
-
 # GTest developers recommend to use source code instead of linking
 # against a prebuilt library.
 do_install() {
