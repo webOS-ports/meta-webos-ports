@@ -15,7 +15,6 @@ RRECOMMENDS_${PN} = "libupstart"
 # initctl-set-env.patch extends the initctl set-env command => mark its package version
 # to indicate that it's a webOS edition
 PKGV .= "-0webos1"
-PR = "r4"
 
 SRC_URI[md5sum] = "01e3dd4b787d5ec8fcdbe904b2ceec31"
 SRC_URI[sha256sum] = "1cc368da85c56a339bb611c566d194e3fdfbab9e8314a85c7d09cc16a67fc8c3"
