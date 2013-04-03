@@ -5,8 +5,6 @@ HOMEPAGE = "https://github.com/TooTallNate/node-gyp"
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=694e396551033371686c80d3a1a69e88"
 
-PR = "r1"
-
 SRC_URI = "https://github.com/TooTallNate/node-gyp/archive/v${PV}.tar.gz"
 SRC_URI[md5sum] = "35fbdcd6a48a20d3ba99989748743b51"
 SRC_URI[sha256sum] = "18e6e5fd0670c9ee8cf89dfa91831b5fa1abc68d92dc800a669b33c7bae260f0"
