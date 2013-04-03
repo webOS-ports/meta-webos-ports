@@ -7,8 +7,6 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=ecab6c36b7ba82c675581dd0afde36f7"
 
 DEPENDS = "sg3-utils"
 
-PR = "r2"
-
 SRC_URI = "http://sg.danny.cz/sg/p/${BP}.tgz \
     file://01_memory_leak.patch"
 

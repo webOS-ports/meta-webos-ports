@@ -8,7 +8,6 @@ PE = "1"
 PV = "0.1"
 # NB. Tag is "v${PV}"
 SRCREV = "4b9cfe22e7f344db454aa87a53c77ba2e95a1ce5"
-PR = "r1"
 
 inherit webos_public_repo
 inherit webos_arch_indep
