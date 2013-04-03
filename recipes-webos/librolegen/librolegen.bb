@@ -7,7 +7,6 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 WEBOS_VERSION = "2.1.0-20_cef54033f9a0e6a2c0dbf0c8cf3f9fcbb39979d9"
-PR = "r4"
 
 inherit webos_component
 inherit webos_public_repo

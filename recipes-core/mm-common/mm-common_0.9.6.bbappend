@@ -1,7 +1,5 @@
 # Copyright (c) 2012-2014 LG Electronics, Inc.
 
-EXTENDPRAUTO_append = "webos3"
-
 # All the original recipe does is stage a tarball and some autotools files;
 # nothing compiled.
 inherit allarch

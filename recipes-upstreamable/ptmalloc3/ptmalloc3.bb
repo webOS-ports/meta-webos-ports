@@ -6,8 +6,6 @@ HOMEPAGE = "http://www.malloc.de/en/"
 LICENSE = "BSD"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/BSD;md5=3775480a712fc46a69647678acb234cb"
 
-PR = "r2"
-
 SRC_URI = "http://www.malloc.de/malloc/ptmalloc3-current.tar.gz \
            file://ptmalloc3-current-webos.patch "
 
