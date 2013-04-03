@@ -10,7 +10,6 @@ DEPENDS = "glib-2.0 libpbnjson"
 # corresponds to tag submissions/38
 SRCREV = "2582ddbe3b7dee77ae027725e9fa950b96e9282a"
 PV = "3.0.1-38"
-PR = "r5"
 
 inherit webos_component
 inherit webos_public_repo

@@ -10,7 +10,6 @@ DEPENDS = "nyx-lib luna-service2 cjson libxml2 sqlite3 glib-2.0 powerd"
 # corresponds to tag submissions/16
 SRCREV = "2e20c003b9e5c21dad8d5b02a91b0269b95c63a4"
 PV = "1.1.1-16"
-PR = "r3"
 
 inherit webos_component
 inherit webos_public_repo

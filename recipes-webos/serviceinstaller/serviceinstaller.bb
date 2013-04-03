@@ -10,7 +10,6 @@ DEPENDS = "librolegen glib-2.0 libpbnjson luna-service2"
 # corresponds to tag submissions/2
 SRCREV = "a579f1ee97a839dd501b4b8abc206ebb48f634cb"
 PV = "2.0.0-2"
-PR = "r2"
 
 inherit webos_component
 inherit webos_public_repo

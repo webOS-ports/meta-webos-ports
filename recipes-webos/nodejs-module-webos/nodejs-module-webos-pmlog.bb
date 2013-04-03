@@ -10,7 +10,6 @@ DEPENDS = "pmloglib node-gyp-native"
 # corresponds to tag submissions/15
 SRCREV = "7f02b885268a1016a163fd3cd34123cc6f17d54a"
 PV = "3.0.1-15"
-PR = "r3"
 
 inherit webos_component
 inherit webos_public_repo

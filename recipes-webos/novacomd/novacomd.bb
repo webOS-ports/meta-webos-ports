@@ -6,7 +6,6 @@ SECTION = "webos/base"
 # corresponds to tag submissions/124
 SRCREV = "ff6abcb3c3d3244ead3b48851f761da92f5ff62b"
 PV = "2.0.0-124"
-PR = "r0"
 
 inherit webos_component
 inherit webos_public_repo

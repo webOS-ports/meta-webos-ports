@@ -10,7 +10,6 @@ DEPENDS = "qt4-webos libpbnjson cjson glib-2.0 luna-service2 icu hunspell luna-p
 # corresponds to tag submissions/7
 SRCREV = "584ccd045c0c3bb81f665ced3041f9590554235a"
 PV = "3.0.0-7"
-PR = "r4"
 
 #Uncomment once do_install() has been moved out of the recipe
 inherit webos_component

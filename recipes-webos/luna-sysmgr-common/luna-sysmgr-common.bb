@@ -14,7 +14,6 @@ DEPENDS += "virtual/${TARGET_PREFIX}binutils"
 # corresponds to tag submissions/3
 SRCREV = "197f440025a5c5daa46e2b6857521c42a5d40490"
 PV = "3.0.0-3"
-PR = "r4"
 
 # Don't uncomment until all of the do_*() tasks have been moved out of the recipe
 #inherit webos_component

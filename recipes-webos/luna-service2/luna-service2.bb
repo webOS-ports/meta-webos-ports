@@ -10,7 +10,6 @@ DEPENDS = "pmloglib cjson glib-2.0"
 # corresponds to tag submissions/152
 SRCREV = "6a91952ca2a2187ff929048ce267ba8438470f20"
 PV = "3.4.0-152"
-PR = "r9"
 
 inherit webos_component
 inherit webos_public_repo

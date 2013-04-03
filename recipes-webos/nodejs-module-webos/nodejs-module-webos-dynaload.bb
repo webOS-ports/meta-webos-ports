@@ -10,7 +10,6 @@ DEPENDS = "boost node-gyp-native"
 # corresponds to tag submissions/13
 SRCREV = "4086bc5e4a6206786fa4670da20503767750590e"
 PV = "3.0.1-13"
-PR = "r3"
 
 inherit webos_component
 inherit webos_public_repo

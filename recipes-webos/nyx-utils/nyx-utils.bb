@@ -10,7 +10,6 @@ DEPENDS = "nyx-lib"
 # corresponds to tag submissions/11
 SRCREV = "30a5c469dcdc3f7ceef3bb965501da5abd316028"
 PV = "1.0.0-11"
-PR = "r0"
 
 inherit webos_component
 inherit webos_public_repo

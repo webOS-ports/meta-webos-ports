@@ -10,7 +10,6 @@ DEPENDS = "luna-service2 node-gyp-native"
 # corresponds to tag submissions/29
 SRCREV = "706d63157737c281c52038eb644528adf8fc059a"
 PV = "3.0.1-29"
-PR = "r4"
 
 inherit webos_component
 inherit webos_public_repo
