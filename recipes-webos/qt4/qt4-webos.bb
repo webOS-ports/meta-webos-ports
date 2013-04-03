@@ -6,8 +6,6 @@ require qt4-webos.inc
 # do_configure() -- see commentary in qmake-webos-native.bb
 DEPENDS = "freetype jpeg libpng zlib glib-2.0 nyx-lib icu openssl"
 
-PR = "${INC_PR}.5"
-
 inherit webos_machine_dep
 
 QT4_MACHINE_CONFIG_ARCH_LITE_QPA = "-qpa"
