@@ -1,6 +1,6 @@
 # Copyright (c) 2012 Hewlett-Packard Development Company, L.P.
 
-PR_append = "webos2"
+PRINC := "${@int(PRINC) + 2}"
 
 # All the original recipe does is stage a tarball and some autotools files;
 # nothing compiled.

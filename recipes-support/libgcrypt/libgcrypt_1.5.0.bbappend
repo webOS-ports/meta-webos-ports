@@ -1,6 +1,6 @@
 # Copyright (c) 2012 Hewlett-Packard Development Company, L.P.
 
-PR_append = "webos2"
+PRINC := "${@int(PRINC) + 2}"
 
 EXTRA_OECONF =+ " --disable-static"
 

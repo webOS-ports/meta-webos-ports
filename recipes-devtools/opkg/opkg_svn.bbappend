@@ -1,6 +1,6 @@
 # Copyright (c) 2013 Hewlett-Packard Development Company, L.P.
 
-PR_append = "webos2"
+PRINC := "${@int(PRINC) + 2}"
 
 # for all 3 opkg classes use only prefix (/usr) because recipe itself appends /lib to it.
 target_localstatedir := "${prefix}"

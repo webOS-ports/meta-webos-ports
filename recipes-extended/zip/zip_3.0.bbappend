@@ -1,6 +1,6 @@
 # Copyright (c) 2013 Hewlett-Packard Development Company, L.P.
 
-PR_append = "webos1"
+PRINC := "${@int(PRINC) + 1}"
 
 # Explictly disable bzip2 support. Backport patch from oe-core
 # http://lists.linuxtogo.org/pipermail/openembedded-core/2013-February/035778.html
