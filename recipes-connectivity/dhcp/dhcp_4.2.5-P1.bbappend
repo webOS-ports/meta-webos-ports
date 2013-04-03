@@ -1,7 +1,5 @@
 # Copyright (c) 2012-2013 LG Electronics, Inc.
 
-EXTENDPRAUTO_append = "webos4"
-
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
 # [GF-43279] Override the RDEPENDS of dhcp-client on bash
