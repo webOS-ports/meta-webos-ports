@@ -22,8 +22,6 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=751419260aa954499f7abaabaa882bbe"
 DEPENDS = "dbus libnih-native"
 DEPENDS_class-native = "dbus-native"
 
-PR = "r2-4ubuntu16"
-
 SRC_URI = "https://launchpad.net/${BPN}/1.0/${PV}/+download/${BP}.tar.gz;name=tarball"
 SRC_URI += "file://libnih_1.0.3-4ubuntu16.patch;name=patch"
 
