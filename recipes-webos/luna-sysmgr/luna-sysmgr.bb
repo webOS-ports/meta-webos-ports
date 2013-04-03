@@ -16,7 +16,6 @@ RDEPENDS_${PN} += "util-linux"
 #RDEPENDS_${PN} += "jail" #TODO
 
 WEBOS_VERSION = "3.0.0-3_b7c8f26142bcf5941f3f2ebdd33647709f1bb74c"
-PR = "r14"
 
 # Don't uncomment until all of the do_*() tasks have been moved out of the recipe
 #inherit webos_component
