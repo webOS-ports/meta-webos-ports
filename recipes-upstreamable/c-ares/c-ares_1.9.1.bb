@@ -12,7 +12,6 @@ inherit pkgconfig
 SRC_URI = "http://c-ares.haxx.se/download/c-ares-${PV}.tar.gz"
 
 S = "${WORKDIR}/c-ares-${PV}"
-PR = "r1"
 
 EXTRA_OECONF = "--enable-shared"
 
