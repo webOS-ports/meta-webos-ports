@@ -12,7 +12,6 @@ RDEPENDS_${PN} = "nodejs-module-webos-dynaload nodejs-module-webos-pmlog nodejs-
 # corresponds to tag submissions/71
 SRCREV = "8ed954566fe77432e9b5a3c30f7654a0ec9c6466"
 PV = "2.0.0-71"
-PR = "r4"
 
 inherit webos_component
 inherit webos_public_repo

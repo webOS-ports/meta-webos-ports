@@ -10,7 +10,6 @@ RDEPENDS_${PN} = "tar"
 # corresponds to tag submissions/22
 SRCREV = "dab06df8a5f9c5144bf13efd528ee05d6f5fce14"
 PV = "2.0.0-22"
-PR = "r3"
 
 inherit webos_component
 inherit webos_public_repo

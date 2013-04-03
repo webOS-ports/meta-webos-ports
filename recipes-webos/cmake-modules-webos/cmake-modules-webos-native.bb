@@ -8,7 +8,6 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 # corresponds to tag submissions/14
 SRCREV = "ba219557afb33d5df0b520e0ac52018dd487d343"
 PV = "1.0.0~rc4-14"
-PR = "r0"
 
 inherit webos_component
 inherit webos_public_repo

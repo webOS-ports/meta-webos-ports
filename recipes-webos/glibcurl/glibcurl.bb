@@ -12,7 +12,6 @@ DEPENDS = "glib-2.0 curl"
 # corresponds to tag submissions/5
 SRCREV = "719023f7fcf4e97eff594dd73bbf2d6c4de02d09"
 PV = "0.7.3-5"
-PR = "r1"
 
 inherit webos_upstream_from_repo
 inherit webos_public_repo

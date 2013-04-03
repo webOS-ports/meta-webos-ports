@@ -9,7 +9,6 @@ DEPENDS = "luna-service2 db8 boost openssl glib-2.0"
 # corresponds to tag submissions/110
 SRCREV = "84ac0d7e9a87f5bb190a553ff827458e2dd1426c"
 PV = "2.0.0-110"
-PR = "r2"
 
 inherit webos_component
 inherit webos_public_repo

@@ -18,7 +18,6 @@ RDEPENDS_${PN} += "util-linux"
 # corresponds to tag submissions/3
 SRCREV = "1bcdb5bd8b97d148a3e46ae002fcf091b6d202f6"
 PV = "3.0.0-3"
-PR = "r13"
 
 # Don't uncomment until all of the do_*() tasks have been moved out of the recipe
 #inherit webos_component

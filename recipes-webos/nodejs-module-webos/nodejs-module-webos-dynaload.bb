@@ -10,7 +10,6 @@ DEPENDS = "nodejs boost"
 # corresponds to tag submissions/11
 SRCREV = "6932254b5f8dfbb13dfef593e7690a87c2d474ac"
 PV = "2.0.0-11"
-PR = "r2"
 
 inherit webos_component
 inherit webos_public_repo
