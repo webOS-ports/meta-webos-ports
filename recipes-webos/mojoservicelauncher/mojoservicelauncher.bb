@@ -10,7 +10,6 @@ DEPENDS = "boost libpbnjson"
 RDEPENDS_${PN} = "nodejs-module-webos-dynaload nodejs-module-webos-pmlog nodejs-module-webos-sysbus mojoloader"
 
 WEBOS_VERSION = "3.0.1-76_528a59b5b65f79f2bad3704870c7043fe3579875"
-PR = "r4"
 
 inherit webos_component
 inherit webos_public_repo

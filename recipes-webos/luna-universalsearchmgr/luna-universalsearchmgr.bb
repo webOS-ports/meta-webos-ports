@@ -8,7 +8,6 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "libxml2 luna-service2 glib-2.0 cjson sqlite3 "
 
 WEBOS_VERSION = "2.0.0-1.00_a9a7751d97888f88b1b9a0bfa9b7997201d4f4cc"
-PR = "r6"
 
 inherit webos_component
 inherit webos_public_repo
@@ -25,6 +24,5 @@ do_install_append() {
     install -d ${D}${webos_prefix}/universalsearchmgr/resources/en_us
     install -v -m 0644 ${S}/desktop-support/UniversalSearchList.json ${D}${webos_prefix}/universalsearchmgr/resources/en_us
 }
-
 
 FILES_${PN} += "${webos_prefix}"

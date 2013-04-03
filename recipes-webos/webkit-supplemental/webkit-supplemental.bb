@@ -8,7 +8,6 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "qt4-webos webkit-webos"
 
 WEBOS_VERSION = "2.0.0-0.5_70fb05fd340ab342c5132dc8bfa174dbe6c9d330"
-PR = "r8"
 
 inherit webos_public_repo
 inherit webos_qmake
@@ -61,7 +60,6 @@ do_configure() {
     sed -i -e 's:-I/usr/include/*[^ ]* ::g' -e 's:-I/usr/include/*[^ ]*$::g' ${WEBOS_BUILD_DIR}/misc/Makefile.WebKitSupplemental
 }
 
-
 do_install() {
     oe_runmake INSTALL_ROOT=${D} install
 
@@ -81,7 +79,6 @@ do_install() {
         install -v -m 644 -t ${D}${datadir}/fonts qbsplugin/fonts/*
     fi
 }
-
 
 FILES_${PN} += "${webos_qtpluginsdir}/platforms/libqbsplugin.so"
 FILES_${PN} += "${webos_qtpluginsdir}/webkit/libqtwebkitplugin.so"

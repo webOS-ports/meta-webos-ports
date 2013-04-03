@@ -5,8 +5,6 @@ SECTION = "console/utils"
 LICENSE = "BSD"
 LIC_FILES_CHKSUM = "file://COPYING;md5=ecab6c36b7ba82c675581dd0afde36f7"
 
-PR = "r0"
-
 SRC_URI = "http://sg.danny.cz/sg/p/${BP}.tgz"
 
 SRC_URI[md5sum] = "be5786f37499018ef44f409597c92d42"
