@@ -12,7 +12,6 @@ VIRTUAL-RUNTIME_rdx-utils ?= "rdx-utils-stub"
 RDEPENDS_${PN} = "${VIRTUAL-RUNTIME_cpushareholder} ${VIRTUAL-RUNTIME_rdx-utils}"
 
 WEBOS_VERSION = "3.5.3-170_3a4aad34469d8b7602aebfc9185fd6eb78fc57b4"
-PR = "r15"
 
 WEBOS_DISTRO_PRERELEASE ??= ""
 EXTRA_OECMAKE += "${@ '-DWEBOS_DISTRO_PRERELEASE:STRING="devel"' \

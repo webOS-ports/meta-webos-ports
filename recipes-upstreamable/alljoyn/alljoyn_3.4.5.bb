@@ -8,8 +8,6 @@ LIC_FILES_CHKSUM = "file://alljoyn_c/src/AuthListener.cc;beginline=7;endline=21;
 
 DEPENDS = "openssl xulrunner"
 
-PR = "r0"
-
 SRC_URI = "https://git.allseenalliance.org/cgit/core/alljoyn.git/snapshot/alljoyn-legacy-03.04.05-generated.tar.gz;name=alljoyncore \
            file://alljoyn.pc \
            file://alljoyn.upstart \
