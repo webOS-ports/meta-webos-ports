@@ -2,8 +2,6 @@
 
 INHIBIT_UPDATERCD_BBCLASS = "1"
 
-EXTENDPRAUTO_append = "webos3"
-
 FILESEXTRAPATHS_prepend := "${THISDIR}/${BPN}:"
 
 SRC_URI += " \
