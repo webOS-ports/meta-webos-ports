@@ -10,7 +10,6 @@ DEPENDS = "libpbnjson flex-native qt4-webos webkit-webos jemalloc glib-2.0 pmcer
 RDEPENDS_${PN} = "ptmalloc3 ${VIRTUAL-RUNTIME_browser_fonts}"
 
 WEBOS_VERSION = "3.0.0-0.7.2_e2506f5828457d662853e5aeec9f4f269c9a1952"
-PR = "r10"
 
 inherit webos_public_repo
 inherit webos_enhanced_submissions

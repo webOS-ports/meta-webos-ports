@@ -8,7 +8,6 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 RDEPENDS_${PN} = "upstart"
 
 WEBOS_VERSION = "2.0.0-123_e0a37c804adee5fa58e5ed40d527b08bba912c86"
-PR = "r1"
 
 inherit webos_component
 inherit webos_public_repo
