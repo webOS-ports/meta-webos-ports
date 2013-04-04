@@ -6,6 +6,7 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 DEPENDS = "nyx-lib glib-2.0 luna-service2 openssl"
+DEPENDS += "mtdev"
 
 VBOX_RDEPENDS = ""
 VBOX_RDEPENDS_qemux86 = "vboxguestdrivers"
@@ -39,5 +40,10 @@ inherit webos_core_os_dep
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
+inherit webos-ports-submissions
+SRCREV = "daab3e726eb1512a124f9cc6a2a9bbd0968531ba"
+
+PACKAGES += "${PN}-tests"
 FILES_${PN} += "${libdir}/nyx/modules/*"
 FILES_${PN}-dbg += "${libdir}/nyx/modules/.debug/*"
+FILES_${PN}-tests += "${bindir}/nyx-test-ledcontroller"
