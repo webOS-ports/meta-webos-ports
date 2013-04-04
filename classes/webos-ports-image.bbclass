@@ -9,6 +9,5 @@ USE_DEVFS = "1"
 inherit webos-image
 
 IMAGE_INSTALL_append = " \
-  packagegroup-webos-upstart \
   ${MACHINE_EXTRA_RDEPENDS} \
 "
