@@ -24,6 +24,9 @@ WEBOS_GIT_TAG = "submissions/${WEBOS_SUBMISSION}"
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
+inherit webos-ports-submissions
+SRCREV = "dd32678cf594cf407fffd6c1578a17a671cdb3a4"
+
 EXTRA_OEMAKE += "MACHINE=${MACHINE}"
 
 do_configure() {
