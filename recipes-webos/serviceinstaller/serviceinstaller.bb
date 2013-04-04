@@ -19,6 +19,4 @@ S = "${WORKDIR}/git"
 
 WEBOS_NO_STATIC_LIBRARIES_WHITELIST = "libserviceinstaller.a"
 
-SRC_URI += "file://0001-When-running-install-make-target-install-header-file.patch"
-
 ALLOW_EMPTY_${PN} = "1"
