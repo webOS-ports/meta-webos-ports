@@ -67,7 +67,7 @@ OVERRIDES[vardepsexclude] += "WEBOS_EXTRA_MACHINEOVERRIDES"
 
 OPKGLIBDIR_forcevariable := "${libdir}"
 
-INHERIT_DISTRO ?= "debian devshell sstate license webos_base buildstats-summary"
+INHERIT_DISTRO ?= "debian devshell sstate license webos_base buildstats buildstats-summary"
 
 # Remove version-going-backwards from ERROR_QA when oe-core is upgraded to include:
 # http://lists.openembedded.org/pipermail/openembedded-core/2013-August/082351.html
