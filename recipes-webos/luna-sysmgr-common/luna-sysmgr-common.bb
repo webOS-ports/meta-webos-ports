@@ -5,8 +5,10 @@ SECTION = "webos/libs"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-DEPENDS = "qt4-webos glib-2.0 luna-prefs luna-service2 cjson nyx-lib libpbnjson luna-webkit-api luna-sysmgr-ipc luna-sysmgr-ipc-messages sqlite3 pmloglib librolegen serviceinstaller"
-DEPENDS += "qt-palm-plugin"
+DEPENDS = "glib-2.0 luna-prefs luna-service2 cjson nyx-lib libpbnjson sqlite3 pmloglib librolegen serviceinstaller"
+DEPENDS += "luna-webkit-api"
+DEPENDS += "luna-sysmgr-ipc luna-sysmgr-ipc-messages"
+DEPENDS += "qtbase"
 
 # temporary until we have oe-core with this patch included
 # http://lists.openembedded.org/pipermail/openembedded-core/2013-July/080893.html
@@ -17,34 +19,19 @@ WEBOS_VERSION = "3.0.0-3_00754405740b7f9d08ae0897f490b00123e17c2c"
 # Don't uncomment until all of the do_*() tasks have been moved out of the recipe
 #inherit webos_component
 inherit webos_public_repo
-inherit webos_qmake
 inherit webos_enhanced_submissions
 inherit webos_library
-inherit webos_machine_dep
+
+# We need to warrant the correct order for the following two inherits as webos_cmake is
+# setting the build dir to be outside of the source dir which is overriden by cmake_qt5
+# again if we inherit it afterwards.
+inherit cmake_qt5
+inherit webos_cmake
 
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-EXTRA_OEMAKE += "MACHINE=${MACHINE}"
+inherit webos-ports-submissions
+SRCREV = "a79b6fd25d33f2b23a7363e0126fbbbb633ca8ea"
 
-do_configure() {
-    MACHINE=${MACHINE} ${QMAKE}
-
-    # We want the shared libraries to have an SONAME records => remove the empty -Wl,-soname,
-    # argument that qmake adds (why is it doing this?).
-    find . -name Makefile | xargs sed -i -e 's/-Wl,-soname, //' -e 's/-Wl,-soname,$//'
-}
-
-do_install() {
-    oe_runmake install
-
-    install -d ${D}${libdir}
-    install -d ${D}${includedir}/luna-sysmgr-common
-
-    oe_libinstall -C release-${MACHINE} -so libLunaSysMgrCommon ${D}${libdir}
-
-    install -v -m 644 ${S}/include/*.h ${D}${includedir}/luna-sysmgr-common
-}
-
-# /usr/lib/libLunaSysMgrCommon.so.1.0.0 contains RPATH pointing to sysroot
-INSANE_SKIP_${PN} = "rpaths"
+OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
