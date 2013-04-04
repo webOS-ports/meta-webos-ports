@@ -15,6 +15,9 @@ inherit webos_machine_dep
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
+inherit webos-ports-submissions
+SRCREV = "e497bc1e349dbe73f56eb0e95c8da8c1f7be2b28"
+
 do_install() {
     #COPY ENTIRE APP
     install -d ${D}${webos_sysmgr_datadir}/system/luna-applauncher
