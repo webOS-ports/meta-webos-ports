@@ -10,7 +10,7 @@ RDEPENDS_${PN} = "upstart"
 # corresponds to tag submissions/123
 SRCREV = "e0a37c804adee5fa58e5ed40d527b08bba912c86"
 PV = "2.0.0-123"
-PR = "r1"
+PR = "r2"
 
 inherit webos_component
 inherit webos_public_repo
@@ -21,3 +21,10 @@ inherit webos_arch_indep
 WEBOS_GIT_TAG = "submissions/${WEBOS_SUBMISSION}"
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
+
+SRC_URI += "file://cpufreq-setup.upstart"
+
+do_install_append() {
+    install -d ${D}${sysconfdir}/event.d
+    install -m 0644 ${WORKDIR}/cpufreq-setup.upstart ${D}${sysconfdir}/event.d/cpufreq-setup
+}
