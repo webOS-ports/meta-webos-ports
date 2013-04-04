@@ -22,5 +22,7 @@ inherit webos_daemon
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
+SRC_URI += "file://disable-jailing-per-default.patch"
+
 FILES_${PN} += "${webos_prefix}/nodejs ${webos_servicesdir} ${webos_frameworksdir}"
 FILES_${PN}-dbg += "${webos_prefix}/nodejs/.debug/*"
