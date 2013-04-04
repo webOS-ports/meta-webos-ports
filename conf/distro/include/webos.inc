@@ -146,7 +146,7 @@ MACHINEOVERRIDES =. "${WEBOS_EXTRA_MACHINEOVERRIDES}"
 MACHINEOVERRIDES[vardepsexclude] += "WEBOS_EXTRA_MACHINEOVERRIDES"
 OVERRIDES[vardepsexclude] += "WEBOS_EXTRA_MACHINEOVERRIDES"
 
-INHERIT_DISTRO ?= "debian devshell sstate license buildstats-summary webos_base webos_no_static_libraries"
+INHERIT_DISTRO ?= "debian devshell sstate license buildstats buildstats-summary webos_base webos_no_static_libraries"
 
 # Remove version-going-backwards from ERROR_QA when oe-core is upgraded to include:
 # http://lists.openembedded.org/pipermail/openembedded-core/2013-August/082351.html
