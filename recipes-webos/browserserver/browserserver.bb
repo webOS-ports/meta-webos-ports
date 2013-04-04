@@ -12,7 +12,7 @@ RDEPENDS_${PN} = "ptmalloc3 isis-fonts"
 # corresponds to tag 0.7.2
 SRCREV = "e2506f5828457d662853e5aeec9f4f269c9a1952"
 PV = "3.0.0-0.7.2"
-PR = "r8"
+PR = "r9"
 
 inherit webos_public_repo
 inherit webos_submissions
@@ -22,8 +22,14 @@ inherit webos_machine_dep
 
 WEBOS_GIT_TAG = "${WEBOS_SUBMISSION}"
 WEBOS_REPO_NAME = "BrowserServer"
-SRC_URI = "${ISIS_PROJECT_GIT_REPO_COMPLETE}"
+SRC_URI = "${ISIS_PROJECT_GIT_REPO_COMPLETE} \
+           file://0001-Don-t-depend-on-not-existing-upstart-script-for-font.patch \
+"
 S = "${WORKDIR}/git"
+
+inherit webos-ports-submissions
+WEBOS_PORTS_REPO_NAME = "BrowserServer"
+SRCREV = "58ec890291dfa1a927faba069f8b0f1d8ac94e2d"
 
 PARALLEL_MAKE = ""
 
