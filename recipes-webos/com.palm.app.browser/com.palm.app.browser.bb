@@ -8,7 +8,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 # corresponds to tag 0.21
 SRCREV = "0f2a339d30023018d1d0d435b2aa0350a32c83e4"
 PV = "4.0.0-0.21"
-PR = "r3"
+PR = "r7"
 
 inherit webos_public_repo
 inherit webos_submissions
@@ -18,6 +18,10 @@ WEBOS_GIT_TAG = "${WEBOS_SUBMISSION}"
 WEBOS_REPO_NAME = "isis-browser"
 SRC_URI = "${ISIS_PROJECT_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
+
+inherit webos-ports-submissions
+WEBOS_PORTS_REPO_NAME = "isis-browser"
+SRCREV = "57f91972e6d1abc8c32e476920e1683d026b4d3e"
 
 do_install() {
     # WEBOS_INSTALL_WEBOS_COREAPPSDIR
