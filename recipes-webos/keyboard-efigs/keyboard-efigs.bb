@@ -18,6 +18,9 @@ inherit webos_machine_dep
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
+inherit webos-ports-submissions
+SRCREV = "fc69babb308f11ee3f42334af393f51a2d9be198"
+
 EXTRA_OEMAKE += "MACHINE=${MACHINE}"
 
 do_configure() {
