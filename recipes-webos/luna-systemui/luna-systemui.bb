@@ -8,7 +8,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 # corresponds to tag submissions/1.02
 SRCREV = "9db5f65a072d2f5af7070efbf38af41705232990"
 PV = "2.0.0-1.02"
-PR = "r8"
+PR = "r9"
 
 inherit webos_enhanced_submissions
 inherit webos_arch_indep
@@ -18,6 +18,9 @@ inherit webos_public_repo
 WEBOS_GIT_TAG = "submissions/${WEBOS_SUBMISSION}"
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
+
+inherit webos-ports-submissions
+SRCREV = "b2f4734c28b1991b3f077ee66aa4c3f8c478672f"
 
 do_install() {
     #COPY ENTIRE APP
