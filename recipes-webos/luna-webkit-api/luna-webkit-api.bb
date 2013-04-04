@@ -19,5 +19,8 @@ WEBOS_GIT_TAG = "submissions/${WEBOS_SUBMISSION}"
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S ="${WORKDIR}/git"
 
+inherit webos-ports-submissions
+SRCREV = "d0b393ac0c8134eabf9fcde0fa09a5c3543055c0"
+
 ALLOW_EMPTY_${PN} = "1"
 
