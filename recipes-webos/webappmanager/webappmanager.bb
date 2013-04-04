@@ -7,6 +7,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "cjson luna-service2 sqlite3 luna-sysmgr-common luna-sysmgr-ipc luna-sysmgr-ipc-messages qt4-webos librolegen nyx-lib openssl luna-webkit-api webkit-webos luna-prefs libpbnjson npapi-headers freetype serviceinstaller"
 
+DEPENDS_append = " ${@base_conditional('WEBOS_TARGET_MACHINE_IMPL','device','qt-webos-plugin','',d)}"
+
 # webappmgr's upstart conf expects to be able to LD_PRELOAD ptmalloc3
 RDEPENDS_${PN} = "ptmalloc3"
 # webappmgr's upstart conf expects to have ionice available. Under OE-core, this is supplied by util-linux.
@@ -16,6 +18,8 @@ VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 RDEPENDS_${PN} += "${VIRTUAL-RUNTIME_cpushareholder}"
 
 WEBOS_VERSION = "3.0.0-3_9305987f31cc2f84f99e2bd442c2bf2a330fb961"
+
+RDEPENDS_${PN}_append = " ${@base_conditional('WEBOS_TARGET_MACHINE_IMPL','device','qt-webos-plugin','',d)}"
 
 # Don't uncomment until all of the do_*() tasks have been moved out of the recipe
 #inherit webos_component
@@ -27,6 +31,9 @@ inherit webos_machine_dep
 
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
+
+inherit webos-ports-submissions
+SRCREV = "811afcf9ba31f7c058a49fa29ed3087c51ebc3a1"
 
 EXTRA_OEMAKE += "MACHINE=${MACHINE}"
 
