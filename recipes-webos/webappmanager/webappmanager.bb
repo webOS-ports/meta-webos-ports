@@ -12,10 +12,13 @@ RDEPENDS_${PN} = "ptmalloc3"
 # webappmgr's upstart conf expects to have ionice available. Under OE-core, this is supplied by util-linux.
 RDEPENDS_${PN} += "util-linux"
 
+RDEPENDS_${PN}_append_tuna = " qt-webos-plugin"
+RDEPENDS_${PN}_append_grouper = " qt-webos-plugin"
+
 # corresponds to tag submissions/3
 SRCREV = "a08b4bc8aa68953c6098910518cf7e66b8a9f532"
 PV = "3.0.0-3"
-PR = "r5"
+PR = "r9"
 
 # Don't uncomment until all of the do_*() tasks have been moved out of the recipe
 #inherit webos_component
@@ -28,6 +31,9 @@ inherit webos_machine_dep
 WEBOS_GIT_TAG = "submissions/${WEBOS_SUBMISSION}"
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
+
+inherit webos-ports-submissions
+SRCREV = "3fcd503d5b38999b7df96556ef8e7baeb2e7cd91"
 
 EXTRA_OEMAKE += "MACHINE=${MACHINE}"
 
