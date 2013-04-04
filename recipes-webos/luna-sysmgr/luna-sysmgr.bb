@@ -18,7 +18,7 @@ RDEPENDS_${PN} += "util-linux"
 # corresponds to tag submissions/3
 SRCREV = "1bcdb5bd8b97d148a3e46ae002fcf091b6d202f6"
 PV = "3.0.0-3"
-PR = "r13"
+PR = "r22"
 
 # Don't uncomment until all of the do_*() tasks have been moved out of the recipe
 #inherit webos_component
@@ -33,6 +33,14 @@ inherit webos_machine_dep
 WEBOS_GIT_TAG = "submissions/${WEBOS_SUBMISSION}"
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
+
+inherit webos-ports-submissions
+SRCREV = "049bde975ad9cd15d1a9009abb6e19ef101c34b2"
+
+SRC_URI_append = " \
+    file://enable-webosports-first-use.patch \
+    file://dont-spawn-bootanimation-process.patch \
+    file://use-webosports-wifi-settings-app.patch"
 
 EXTRA_OEMAKE += "MACHINE=${MACHINE}"
 
