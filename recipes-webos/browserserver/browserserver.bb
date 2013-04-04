@@ -11,8 +11,9 @@ RDEPENDS_${PN} = "ptmalloc3 ${VIRTUAL-RUNTIME_browser_fonts}"
 
 # isis-project components don't have submissions
 PE = "1"
-PV = "0.7.2"
-SRCREV = "e2506f5828457d662853e5aeec9f4f269c9a1952"
+PV = "0.7.2+wop+gitr${SRCPV}"
+
+SRCREV = "58ec890291dfa1a927faba069f8b0f1d8ac94e2d"
 
 inherit webos_public_repo
 inherit webos_daemon
@@ -20,7 +21,9 @@ inherit webos_system_bus
 inherit webos_machine_dep
 
 WEBOS_REPO_NAME = "BrowserServer"
-SRC_URI = "${ISIS_PROJECT_GIT_REPO_COMPLETE}"
+#SRC_URI = "${ISIS_PROJECT_GIT_REPO_COMPLETE}"
+WEBOS_PORTS_BRANCH ??= "webOS-ports/master"
+SRC_URI = "git://github.com/webOS-ports/${WEBOS_REPO_NAME};branch=${WEBOS_PORTS_BRANCH}"
 S = "${WORKDIR}/git"
 
 WEBOS_NO_STATIC_LIBRARIES_WHITELIST = "libYap.a"
