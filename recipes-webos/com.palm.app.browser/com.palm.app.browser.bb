@@ -7,14 +7,16 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 # isis-project components don't have submissions
 PE = "1"
-PV = "0.21"
-SRCREV = "0f2a339d30023018d1d0d435b2aa0350a32c83e4"
+PV = "0.21+wop+gitr${SRCPV}"
+SRCREV = "57f91972e6d1abc8c32e476920e1683d026b4d3e"
 
 inherit webos_public_repo
 inherit webos_arch_indep
 
 WEBOS_REPO_NAME = "isis-browser"
-SRC_URI = "${ISIS_PROJECT_GIT_REPO_COMPLETE}"
+#SRC_URI = "${ISIS_PROJECT_GIT_REPO_COMPLETE}"
+WEBOS_PORTS_BRANCH ??= "webOS-ports/master"
+SRC_URI = "git://github.com/webOS-ports/${WEBOS_REPO_NAME};branch=${WEBOS_PORTS_BRANCH}"
 S = "${WORKDIR}/git"
 
 do_install() {
