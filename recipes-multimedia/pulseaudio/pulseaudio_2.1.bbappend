@@ -1,4 +1,4 @@
-PRINC := "${@int(PRINC) + 1}"
+PRINC := "${@int(PRINC) + 5}"
 
 # drop ${@base_contains('DISTRO_FEATURES', 'x11', 'virtual/libx11 libxtst libice libsm libxcb gtk+', '', d)}"
 DEPENDS = "libatomics-ops liboil avahi libsamplerate0 libsndfile1 libtool"
@@ -24,7 +24,10 @@ EXTRA_OECONF = "\
                 --disable-openssl \
 "
 
-# Overwrite
+# work around for https://bugzilla.yoctoproject.org/show_bug.cgi?id=3498
+# webos has x11 DISTRO_FEATURE included so pulseaudio-module-console-kit is added to
+# RDEPENDS in oe-core recipe, one possible solution is to add consolekit to
+# packagegroup-webos-ports-extended, but we don't really need it, so remove it here
 # RDEPENDS_pulseaudio-server += "\
 #         ${@base_contains('DISTRO_FEATURES', 'x11', 'pulseaudio-module-console-kit', '', d)}"
 RDEPENDS_pulseaudio-server = " \
@@ -47,5 +50,16 @@ RDEPENDS_pulseaudio-server = " \
     pulseaudio-module-always-sink \
     pulseaudio-module-suspend-on-idle \
     pulseaudio-module-position-event-sounds \
-    pulseaudio-module-role-cork "
+    pulseaudio-module-role-cork \
+    pulseaudio-module-switch-on-port-available"
 
+DEFAULT_CONF = "${D}${sysconfdir}/pulse/default.pa"
+DEFAULT_CONF_TMP = "${DEFAULT_CONF}.temp"
+
+do_install_append() {
+    # Modify configuration to load android alsa plugin instead of default one
+    grep -v "^load-module module-alsa" ${DEFAULT_CONF} > ${DEFAULT_CONF_TMP}
+    echo "load-module module-alsa-sink device=android alternate_rate=16000 control=\"Master\"" >> ${DEFAULT_CONF_TMP}
+    echo "load-module module-alsa-source device=android alternate_rate=16000 channels=1" >> ${DEFAULT_CONF_TMP}
+    mv ${DEFAULT_CONF_TMP} ${DEFAULT_CONF}
+}
