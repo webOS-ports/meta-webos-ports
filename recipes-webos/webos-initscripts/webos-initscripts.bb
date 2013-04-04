@@ -23,3 +23,10 @@ inherit webos_machine_dep
 
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
+
+SRC_URI += "file://cpufreq-setup.upstart"
+
+do_install_append() {
+    install -d ${D}${webos_upstartconfdir}
+    install -m 0644 ${WORKDIR}/cpufreq-setup.upstart ${D}${webos_upstartconfdir}/cpufreq-setup
+}
