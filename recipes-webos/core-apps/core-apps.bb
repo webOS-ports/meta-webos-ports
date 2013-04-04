@@ -17,6 +17,9 @@ inherit webos_machine_dep
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
+inherit webos-ports-submissions
+SRCREV = "8ac6fe5262ad7dc22ddc6678e1b7fee4c78f08b5"
+
 do_install() {
     # WEBOS_INSTALL_WEBOS_COREAPPSDIR
     install -d ${D}${webos_applicationsdir}
@@ -44,6 +47,10 @@ do_install() {
             cp -vrf $COREAPPS/configuration/activities/* ${D}${webos_sysconfdir}/activities/
         fi
     done
+    # Drop the notes application, we ship our own
+    rm -rf ${D}${webos_applicationsdir}/com.palm.app.notes
+    rm -rf ${D}${sysconfdir}/palm/db/permissions/com.palm.note
+    rm -rf ${D}${sysconfdir}/palm/db/kinds/com.palm.note
 }
 
 FILES_${PN} += "${webos_applicationsdir} ${webos_sysconfdir}"
