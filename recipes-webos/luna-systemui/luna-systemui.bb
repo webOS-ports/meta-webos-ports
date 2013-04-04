@@ -18,6 +18,9 @@ WEBOS_GIT_TAG = "submissions/${WEBOS_SUBMISSION}"
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
+inherit webos-ports-submissions
+SRCREV = "40a40f5db63b53b7ed157326729f809db062480f"
+
 do_install() {
     #COPY ENTIRE APP
     install -d ${D}${webos_sysmgr_datadir}/system/luna-systemui
