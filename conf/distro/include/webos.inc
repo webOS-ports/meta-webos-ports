@@ -101,7 +101,7 @@ OVERRIDES[vardepsexclude] += "WEBOS_EXTRA_MACHINEOVERRIDES"
 
 OPKGLIBDIR_forcevariable := "${libdir}"
 
-INHERIT_DISTRO ?= "debian devshell sstate license webos_base buildstats-summary"
+INHERIT_DISTRO ?= "debian devshell sstate license webos_base buildstats buildstats-summary"
 
 # Inherit icecc here, so that all builders have the same sstate signatures
 INHERIT_DISTRO += "icecc"
