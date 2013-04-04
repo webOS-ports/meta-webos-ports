@@ -5,7 +5,7 @@ SECTION = "webos/base"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-DEPENDS = "cjson luna-service2 sqlite3 luna-sysmgr-ipc luna-sysmgr-ipc-messages pmloglib qt4-webos librolegen nyx-lib openssl luna-webkit-api luna-prefs libpbnjson freetype"
+DEPENDS = "cjson luna-service2 sqlite3 luna-sysmgr-ipc luna-sysmgr-ipc-messages pmloglib qt4-webos librolegen nyx-lib openssl luna-webkit-api luna-prefs libpbnjson freetype luna-sysmgr-common"
 DEPENDS += "serviceinstaller"
 #DEPENDS += "localization" #TODO
 DEPENDS += "libwebos-gui qt-palm-plugin"
@@ -31,6 +31,9 @@ inherit webos_machine_dep
 
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
+
+inherit webos-ports-submissions
+SRCREV = "76bcd21147364f94ee87785042e6b23e737ee09a"
 
 EXTRA_OEMAKE += "MACHINE=${MACHINE}"
 
