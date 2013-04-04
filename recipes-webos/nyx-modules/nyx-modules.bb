@@ -7,6 +7,7 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 DEPENDS = "nyx-lib glib-2.0 luna-service2 openssl"
+DEPENDS += "mtdev"
 
 VBOX_RDEPENDS = ""
 VBOX_RDEPENDS_qemux86 = "vboxguestdrivers"
@@ -16,6 +17,11 @@ RDEPENDS_${PN} = "lsb ${VBOX_RDEPENDS}"
 SRCREV = "504a8fdbda57a9ade272b985852cef4d2c51f2d6"
 PV = "5.1.0-87"
 PR = "r8"
+
+# For the tuna device we specify here a different machine implementation than for
+# everything else to enable special modules to build.
+WEBOS_TARGET_MACHINE_IMPL_tuna = "device"
+WEBOS_TARGET_MACHINE_IMPL_grouper = "device"
 
 EXTRA_OECMAKE += "-DDISTRO_VERSION:STRING='${DISTRO_VERSION}' -DDISTRO_NAME:STRING='${DISTRO_NAME}' \
                   -DWEBOS_DISTRO_API_VERSION:STRING='${WEBOS_DISTRO_API_VERSION}' \
@@ -34,6 +40,9 @@ inherit webos_core_os_dep
 WEBOS_GIT_TAG = "submissions/${WEBOS_SUBMISSION}"
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
+
+inherit webos-ports-submissions
+SRCREV = "af0a4ebd65b98ee5749cff56a9cda43d4a06a20a"
 
 FILES_${PN} += "${libdir}/nyx/modules/*"
 FILES_${PN}-dbg += "${libdir}/nyx/modules/.debug/*"
