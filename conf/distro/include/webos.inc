@@ -134,7 +134,7 @@ MACHINEOVERRIDES =. "${WEBOS_EXTRA_MACHINEOVERRIDES}"
 MACHINEOVERRIDES[vardepsexclude] += "WEBOS_EXTRA_MACHINEOVERRIDES"
 OVERRIDES[vardepsexclude] += "WEBOS_EXTRA_MACHINEOVERRIDES"
 
-INHERIT_DISTRO ?= "debian devshell sstate license buildstats-summary webos_base webos_no_static_libraries"
+INHERIT_DISTRO ?= "debian devshell sstate license buildstats buildstats-summary webos_base webos_no_static_libraries"
 
 # Inherit icecc here, so that all builders have the same sstate signatures
 INHERIT_DISTRO += "icecc"
