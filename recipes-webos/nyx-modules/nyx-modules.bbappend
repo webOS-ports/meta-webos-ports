@@ -1,4 +1,3 @@
-FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 PRINC := "${@int(PRINC) + 6}"
 
 # For the tuna device we specify here a different machine implementation than for
