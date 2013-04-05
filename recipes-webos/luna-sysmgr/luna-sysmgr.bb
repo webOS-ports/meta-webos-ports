@@ -8,6 +8,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "cjson luna-service2 sqlite3 luna-sysmgr-ipc luna-sysmgr-ipc-messages pmloglib qt4-webos librolegen nyx-lib openssl luna-webkit-api luna-prefs libpbnjson freetype"
 DEPENDS += "serviceinstaller"
 #DEPENDS += "localization" #TODO
+DEPENDS += "webos-hybris-compositor"
 
 # luna-sysmgr's upstart conf expects to be able to LD_PRELOAD ptmalloc3
 RDEPENDS_${PN} = "ptmalloc3"
@@ -35,7 +36,7 @@ SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit webos-ports-submissions
-SRCREV = "049bde975ad9cd15d1a9009abb6e19ef101c34b2"
+SRCREV = "c44d39b9074a281b4c53152bec44a20444629582"
 
 SRC_URI_append = " \
     file://enable-webosports-first-use.patch \
