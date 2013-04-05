@@ -1,4 +1,3 @@
-FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 PRINC := "${@int(PRINC) + 4}"
 
 RDEPENDS_${PN}_append_tuna = " qt-webos-plugin"
