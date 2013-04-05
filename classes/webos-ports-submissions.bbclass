@@ -2,6 +2,8 @@
 # and is different to what openwebos provides.
 PR_append = "+wop+gitr${SRCPV}"
 
-COMPONENT_NAME ?= "${PN}"
+# The default repo name is the "base" component name (no -native, etc.)
+WEBOS_PORTS_REPO_NAME ??= "${BPN}"
+WEBOS_PORTS_BRANCH ??= "webOS-ports/master"
 
-SRC_URI = "git://github.com/webOS-ports/${COMPONENT_NAME};branch=webOS-ports/master;protocol=git"
+SRC_URI = "git://github.com/webOS-ports/${WEBOS_PORTS_REPO_NAME};branch=${WEBOS_PORTS_BRANCH}"

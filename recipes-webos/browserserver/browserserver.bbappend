@@ -5,6 +5,6 @@ SRC_URI += "file://0001-Don-t-depend-on-not-existing-upstart-script-for-font.pat
 
 inherit webos-ports-submissions
 
-COMPONENT_NAME = "BrowserServer"
+WEBOS_PORTS_REPO_NAME = "BrowserServer"
 
 SRCREV = "58ec890291dfa1a927faba069f8b0f1d8ac94e2d"

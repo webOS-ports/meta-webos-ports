@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=aa80bcec645b0f6ec37d5954ee6dc056"
 
 PR = "r0"
 
-COMPONENT_NAME = "phonegap"
+WEBOS_PORTS_REPO_NAME = "phonegap"
 inherit webos-ports-submissions
 
 S = "${WORKDIR}/git"
