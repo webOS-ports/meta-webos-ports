@@ -6,7 +6,7 @@ SECTION = "webos/libs"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-DEPENDS = "qt4-webos luna-sysmgr-ipc luna-sysmgr-ipc-messages"
+DEPENDS = "qt4-webos luna-sysmgr-ipc luna-sysmgr-ipc-messages webos-hybris-compositor"
 
 PV = "0.1.0+gitr${SRCPV}"
 PR = "r0"
@@ -16,7 +16,7 @@ inherit webos_qmake
 inherit webos_library
 inherit webos_machine_dep
 
-SRCREV = "7d8958ef99283ab2b74c09015431d7665b1665e5"
+SRCREV = "8bad9ca145771d2e2f57616ca37ed881e7ea439b"
 SRC_URI = "git://github.com/webOS-ports/qt-webos-plugin;branch=master;protocol=git"
 S = "${WORKDIR}/git"
 
@@ -39,7 +39,6 @@ do_configure() {
 
     mkdir -p ${WEBOS_BUILD_DIR}
 
-    export STAGING_INCDIR=${includedir}
     export STAGING_LIBDIR=${libdir}
     (cd ${WEBOS_BUILD_DIR}; ${QMAKE} ${S}/webos.pro -o Makefile.qtwebosplugin)
 }
