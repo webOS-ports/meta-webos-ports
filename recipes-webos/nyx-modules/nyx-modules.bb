@@ -44,5 +44,7 @@ S = "${WORKDIR}/git"
 inherit webos-ports-submissions
 SRCREV = "af0a4ebd65b98ee5749cff56a9cda43d4a06a20a"
 
+PACKAGES += "${PN}-tests"
 FILES_${PN} += "${libdir}/nyx/modules/*"
 FILES_${PN}-dbg += "${libdir}/nyx/modules/.debug/*"
+FILES_${PN}-tests += "${bindir}/nyx-test-ledcontroller"
