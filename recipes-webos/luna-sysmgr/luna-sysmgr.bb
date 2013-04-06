@@ -39,6 +39,9 @@ S = "${WORKDIR}/git"
 inherit webos-ports-submissions
 SRCREV = "87c11826bd56f0ddcbdfafde5f43aff25f53cc0b"
 
+SRC_URI_append_a500 = " \
+                        file://luna-sysmgr-a500.patch "
+
 EXTRA_OEMAKE += "MACHINE=${MACHINE}"
 
 do_configure() {
