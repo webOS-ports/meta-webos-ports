@@ -31,8 +31,16 @@ RDEPENDS_${PN} = " \
   ca-certificates \
 "
 
-RDEPENDS_${PN}_append_tuna = " token-generator"
-RDEPENDS_${PN}_append_grouper = " token-generator"
+LIBHYBRIS_RDEPENDS = "${VIRTUAL-RUNTIME_android-system-image}"
+
+# NOTE: We cannot add MACHINE specific extra RDEPENDS to TUNE_PKGARCH ofono
+# directly, that's why we add samsung-rfs-mgr here
+# NOTE: When samsung-ipc support is part of a ofono release this should go into
+# meta-samsung layer as bbappend to oe-core.
+OFONO_RDEPENDS = "samsung-rfs-mgr"
+
+RDEPENDS_${PN}_append_tuna = " token-generator ${LIBHYBRIS_RDEPENDS} ${OFONO_RDEPENDS}"
+RDEPENDS_${PN}_append_grouper = " token-generator ${LIBHYBRIS_RDEPENDS}"
 
 RDEPENDS_${PN}_append_arm = " \
   crash-handler \
