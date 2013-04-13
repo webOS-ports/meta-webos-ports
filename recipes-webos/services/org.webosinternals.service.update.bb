@@ -11,7 +11,10 @@ inherit webos_cmake
 inherit webos_daemon
 inherit webos_system_bus
 
-PR = "r0"
+inherit webos-ports-package-metadata-extensions
+PACKAGE_NEEDS_DEVICE_RESTART = "1"
+
+PR = "r1"
 WEBOS_COMPONENT_VERSION = "0.1.0"
 PV = "${WEBOS_COMPONENT_VERSION}+gitr${SRCPV}"
 WEBOS_SUBMISSION = "0"
