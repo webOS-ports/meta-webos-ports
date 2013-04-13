@@ -7,6 +7,9 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "cjson luna-service2 sqlite3 luna-sysmgr-common luna-sysmgr-ipc luna-sysmgr-ipc-messages qt4-webos librolegen nyx-lib openssl luna-webkit-api webkit-webos luna-prefs libpbnjson npapi-headers freetype serviceinstaller"
 
+DEPENDS_append_tuna = " qt-webos-plugin"
+DEPENDS_append_grouper = " qt-webos-plugin"
+
 # webappmgr's upstart conf expects to be able to LD_PRELOAD ptmalloc3
 RDEPENDS_${PN} = "ptmalloc3"
 # webappmgr's upstart conf expects to have ionice available. Under OE-core, this is supplied by util-linux.
@@ -33,7 +36,7 @@ SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit webos-ports-submissions
-SRCREV = "3fcd503d5b38999b7df96556ef8e7baeb2e7cd91"
+SRCREV = "cae69dcde8ff467b0b5ecc697912056d7af4069a"
 
 EXTRA_OEMAKE += "MACHINE=${MACHINE}"
 
