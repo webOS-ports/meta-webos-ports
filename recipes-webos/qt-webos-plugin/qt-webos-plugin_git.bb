@@ -16,7 +16,7 @@ inherit webos_qmake
 inherit webos_library
 inherit webos_machine_dep
 
-SRCREV = "8bad9ca145771d2e2f57616ca37ed881e7ea439b"
+SRCREV = "69b5359f0378488dc2e85ce87f1ea358451156cc"
 SRC_URI = "git://github.com/webOS-ports/qt-webos-plugin;branch=master;protocol=git"
 S = "${WORKDIR}/git"
 
@@ -38,8 +38,6 @@ do_configure() {
     echo "QT_BUILD_TREE = \$\$quote(${STAGING_DIR_HOST}${webos_srcdir}/qt4-webos/build)" >> .qmake.cache
 
     mkdir -p ${WEBOS_BUILD_DIR}
-
-    export STAGING_LIBDIR=${libdir}
     (cd ${WEBOS_BUILD_DIR}; ${QMAKE} ${S}/webos.pro -o Makefile.qtwebosplugin)
 }
 
