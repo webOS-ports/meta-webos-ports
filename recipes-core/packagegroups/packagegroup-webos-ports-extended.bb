@@ -2,7 +2,7 @@ DESCRIPTION = "Basic set of components use by the webOS ports project"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-PR = "r20"
+PR = "r21"
 
 inherit packagegroup
 
@@ -12,6 +12,10 @@ RDEPENDS_${PN} = " \
   distro-feed-configs \
   pulseaudio-server \
   wireless-tools \
+  \
+  gst-meta-base \
+  gst-meta-audio \
+  gst-meta-video \
   \
   webos-connman-adapter \
   ${@base_contains('MACHINE_FEATURES', 'phone', 'packagegroup-webos-telephony', '',d)} \
