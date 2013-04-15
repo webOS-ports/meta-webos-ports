@@ -8,7 +8,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "cjson luna-service2 sqlite3 luna-sysmgr-ipc luna-sysmgr-ipc-messages pmloglib qt4-webos librolegen nyx-lib openssl luna-webkit-api luna-prefs libpbnjson freetype"
 DEPENDS += "serviceinstaller"
 #DEPENDS += "localization" #TODO
-DEPENDS += "webos-hybris-compositor"
+DEPENDS += "libwebos-gui"
 
 # luna-sysmgr's upstart conf expects to be able to LD_PRELOAD ptmalloc3
 RDEPENDS_${PN} = "ptmalloc3"
@@ -19,7 +19,7 @@ RDEPENDS_${PN} += "util-linux"
 # corresponds to tag submissions/3
 SRCREV = "1bcdb5bd8b97d148a3e46ae002fcf091b6d202f6"
 PV = "3.0.0-3"
-PR = "r22"
+PR = "r23"
 
 # Don't uncomment until all of the do_*() tasks have been moved out of the recipe
 #inherit webos_component

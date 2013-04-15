@@ -6,10 +6,10 @@ SECTION = "webos/libs"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-DEPENDS = "qt4-webos luna-sysmgr-ipc luna-sysmgr-ipc-messages webos-hybris-compositor"
+DEPENDS = "qt4-webos luna-sysmgr-ipc luna-sysmgr-ipc-messages libwebos-gui"
 
 PV = "0.1.0+gitr${SRCPV}"
-PR = "r0"
+PR = "r1"
 
 inherit webos_public_repo
 inherit webos_qmake
