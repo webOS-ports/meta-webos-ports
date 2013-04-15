@@ -7,8 +7,8 @@ WEBOS_APPLICATION_NAME = "com.palm.app.phone"
 
 inherit webos_public_repo
 inherit webos_arch_indep
-inherit enyojs_application
-inherit cordova_application
+inherit webos_enyojs_application
+inherit webos_cordova_application
 
 PV = "0.1.0+gitr${SRCPV}"
 PR = "r0"
