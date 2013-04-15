@@ -36,7 +36,7 @@ SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit webos-ports-submissions
-SRCREV = "6d57bca16ec75efdbe7e1c4fba26b3b939303539"
+SRCREV = "90beb42b60651d9ffd76aaccdc3dc1d31ba7a32d"
 
 SRC_URI_append = " \
     file://enable-webosports-first-use.patch \
