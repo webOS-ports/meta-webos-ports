@@ -132,7 +132,8 @@ FILES_${PN}-buildsrc += "${QT4_STAGING_BUILD_DIR}"
 
 SRC_URI_append_armv7a = " \
     file://keyboard-support-compilation-fix.patch \
-    file://disable-webos-qpa-plugin.patch"
+    file://disable-webos-qpa-plugin.patch \
+    file://0001-Extended-QPlatformWindow-class-to-provide-a-method-t.patch"
 
 DEPENDS_append_armv7a = " virtual/egl"
 
