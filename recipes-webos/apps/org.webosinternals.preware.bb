@@ -5,8 +5,8 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=eb723b61539feef013de476e68b5c50a"
 
 inherit webos_public_repo
 inherit webos_arch_indep
-inherit enyojs_application
-inherit cordova_application
+inherit webos_enyojs_application
+inherit webos_cordova_application
 
 PV = "2.0.0+gitr${SRCPV}"
 PR = "r0"
