@@ -22,7 +22,7 @@ WEBOS_GIT_TAG = "submissions/${WEBOS_SUBMISSION}"
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S ="${WORKDIR}/git"
 
-SRC_URI += "file://0001-Rework-ViewHost_PrepareAddWindow-ViewHost_PrepareAdd.patch"
-
 ALLOW_EMPTY_${PN} = "1"
 
+inherit webos-ports-submissions
+SRCREV = "ffde740819085a2594087462f3c6922544d316a0"
