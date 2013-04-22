@@ -5,7 +5,7 @@ SECTION = "webos/base"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-DEPENDS = "cjson luna-service2 sqlite3 luna-sysmgr-ipc luna-sysmgr-ipc-messages pmloglib qt4-webos librolegen nyx-lib openssl luna-webkit-api luna-prefs libpbnjson freetype"
+DEPENDS = "cjson luna-service2 sqlite3 luna-sysmgr-ipc luna-sysmgr-ipc-messages pmloglib qt4-webos librolegen nyx-lib openssl luna-webkit-api luna-prefs libpbnjson freetype luna-sysmgr-common"
 DEPENDS += "serviceinstaller"
 #DEPENDS += "localization" #TODO
 DEPENDS += "libwebos-gui"
@@ -36,12 +36,7 @@ SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit webos-ports-submissions
-SRCREV = "90beb42b60651d9ffd76aaccdc3dc1d31ba7a32d"
-
-SRC_URI_append = " \
-    file://enable-webosports-first-use.patch \
-    file://dont-spawn-bootanimation-process.patch \
-    file://use-webosports-wifi-settings-app.patch"
+SRCREV = "655e7df2e614109c04b2d68e9cda2abe9f6db6f7"
 
 EXTRA_OEMAKE += "MACHINE=${MACHINE}"
 

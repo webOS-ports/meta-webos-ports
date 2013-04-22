@@ -36,7 +36,7 @@ SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit webos-ports-submissions
-SRCREV = "2e812da08a1e43e8a6448f058f73def0cd1d3494"
+SRCREV = "6a4ff259358dba02e2c12d6e58d2792a1f756e95"
 
 EXTRA_OEMAKE += "MACHINE=${MACHINE}"
 
