@@ -7,7 +7,7 @@ require qt4-webos.inc
 # do_configure() -- see commentary in qmake-webos-native.bb
 DEPENDS = "freetype jpeg libpng zlib glib-2.0 nyx-lib icu fontconfig"
 
-PR = "${INC_PR}.4"
+PR = "${INC_PR}.5"
 
 inherit webos_public_repo
 inherit webos_oe_runmake_no_env_override
@@ -132,7 +132,7 @@ FILES_${PN}-buildsrc += "${QT4_STAGING_BUILD_DIR}"
 
 SRC_URI_append_armv7a = " \
     file://keyboard-support-compilation-fix.patch \
-    file://disable-webos-qpa-plugin.patch \
+    file://disable-webos-qpa-plugins.patch \
     file://0001-Extended-QPlatformWindow-class-to-provide-a-method-t.patch"
 
 DEPENDS_append_armv7a = " virtual/egl"
@@ -142,9 +142,6 @@ DEPENDS += "dbus"
 QT_CONFIG_FLAGS += "-dbus"
 
 do_install_append() {
-    # libqpalm installation was removed in 
-    # https://github.com/openwebos/meta-webos/commit/0479fb1a1cc0d3fad2877fd74ff0291550d84d1f
-    oe_libinstall -C ${PALM_BUILD_DIR}/plugins/platforms -so libqpalm ${D}/${libdir}
     oe_libinstall -C ${PALM_BUILD_DIR}/lib/ -so libQtDBus ${D}/${libdir}
 
     cp -ra ${S}/src/opengl ${D}${QT4_STAGING_BUILD_DIR}/git/src
