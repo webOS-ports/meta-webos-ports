@@ -7,7 +7,7 @@ require qt4-webos.inc
 # do_configure() -- see commentary in qmake-webos-native.bb
 DEPENDS = "freetype jpeg libpng zlib glib-2.0 nyx-lib icu fontconfig"
 
-PR = "${INC_PR}.5"
+PR = "${INC_PR}.6"
 
 inherit webos_public_repo
 inherit webos_oe_runmake_no_env_override
@@ -79,6 +79,10 @@ do_install() {
     install -d ${D}${QT4_STAGING_BUILD_DIR}/git/src
     cp -ra ${S}/src/gui ${D}${QT4_STAGING_BUILD_DIR}/git/src
     cp -ra ${S}/src/corelib ${D}${QT4_STAGING_BUILD_DIR}/git/src
+
+    # Needed to build palm QPA out of qt build
+    install -d ${D}${QT4_STAGING_BUILD_DIR}/git/src/plugins/platforms
+    cp -ra ${S}/src/plugins/platforms/fontdatabases ${D}${QT4_STAGING_BUILD_DIR}/git/src/plugins/platforms
 
     install -d ${D}${QT4_STAGING_BUILD_DIR}/git/src/3rdparty
     cp -ra ${S}/src/3rdparty/harfbuzz ${D}${QT4_STAGING_BUILD_DIR}/git/src/3rdparty
