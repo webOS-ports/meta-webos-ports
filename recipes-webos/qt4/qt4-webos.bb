@@ -7,7 +7,7 @@ require qt4-webos.inc
 # do_configure() -- see commentary in qmake-webos-native.bb
 DEPENDS = "freetype jpeg libpng zlib glib-2.0 nyx-lib icu fontconfig"
 
-PR = "${INC_PR}.6"
+PR = "${INC_PR}.7"
 
 inherit webos_public_repo
 inherit webos_oe_runmake_no_env_override
@@ -159,12 +159,3 @@ do_install_append_armv7a() {
     install -d ${D}/usr/plugins/imports/Qt/labs/shaders
     install -m 555 ${PALM_BUILD_DIR}/imports/Qt/labs/shaders/* ${D}/usr/plugins/imports/Qt/labs/shaders/
 }
-
-# NOTE: luna-sysmgr has to be linked against libqpalm.so and as it's just a plugin it
-# can't be installed in ${libdir} path as part of the default ${PN} package. Cause of this
-# we put it into a separate package and make it a runtime dependency of the ${PN} package.
-# Once upstream change luna-sysmgr to not link against libqpalm anymore this can be
-# removed.
-PACKAGES =+ "${PN}-support"
-FILES_${PN}-support = "${libdir}/libqpalm.so"
-RDEPENDS_${PN} += "${PN}-support"
