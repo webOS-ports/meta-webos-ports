@@ -2,7 +2,7 @@ DESCRIPTION = "Basic set of components use by the webOS ports project"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-PR = "r18"
+PR = "r19"
 
 inherit packagegroup
 
@@ -13,7 +13,6 @@ RDEPENDS_${PN} = " \
   pulseaudio-server \
   wireless-tools \
   bluez4 \
-  android-audiosystem \
   \
   webos-connman-adapter \
   ${@base_contains('MACHINE_FEATURES', 'phone', 'packagegroup-webos-telephony', '',d)} \
@@ -32,6 +31,7 @@ RDEPENDS_${PN} = " \
   ca-certificates \
 "
 
+ANDROID_RDEPENDS = "android-audiosystem"
 LIBHYBRIS_RDEPENDS = "${VIRTUAL-RUNTIME_android-system-image}"
 
 # NOTE: We cannot add MACHINE specific extra RDEPENDS to TUNE_PKGARCH ofono
@@ -40,8 +40,8 @@ LIBHYBRIS_RDEPENDS = "${VIRTUAL-RUNTIME_android-system-image}"
 # meta-samsung layer as bbappend to oe-core.
 OFONO_RDEPENDS = "samsung-rfs-mgr"
 
-RDEPENDS_${PN}_append_tuna = " token-generator ${LIBHYBRIS_RDEPENDS} ${OFONO_RDEPENDS}"
-RDEPENDS_${PN}_append_grouper = " token-generator ${LIBHYBRIS_RDEPENDS}"
+RDEPENDS_${PN}_append_tuna = " token-generator ${LIBHYBRIS_RDEPENDS} ${ANDROID_RDEPENDS} ${OFONO_RDEPENDS}"
+RDEPENDS_${PN}_append_grouper = " token-generator ${LIBHYBRIS_RDEPENDS} ${ANDROID_RDEPENDS}"
 
 RDEPENDS_${PN}_append_arm = " \
   crash-handler \
