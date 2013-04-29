@@ -9,7 +9,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "qt4-webos"
 
 PV = "0.1.0+gitr${SRCPV}"
-PR = "r0"
+PR = "r1"
 
 inherit webos_public_repo
 inherit webos_qmake
@@ -36,6 +36,7 @@ do_configure() {
     # .qmake.cache is not part of qt4-webos checkout, so let's try to create fake one, pointing to your stored stuff
     echo "QT_SOURCE_TREE = \$\$quote(${STAGING_DIR_HOST}${webos_srcdir}/qt4-webos/git)" > .qmake.cache
     echo "QT_BUILD_TREE = \$\$quote(${STAGING_DIR_HOST}${webos_srcdir}/qt4-webos/build)" >> .qmake.cache
+    echo "CONFIG += ${MACHINE}" >> .qmake.cache
 
     mkdir -p ${PALM_BUILD_DIR}
     (cd ${PALM_BUILD_DIR}; ${QMAKE} ${S}/palm.pro -o Makefile.qtpalmplugin)
