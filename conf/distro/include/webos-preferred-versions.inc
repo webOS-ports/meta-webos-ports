@@ -4,7 +4,6 @@
 # NOTE: Keep the lists in alphabetical order
 #
 
-PREFERRED_VERSION_connman ?= "1.12"
 PREFERRED_VERSION_db ?= "4.8.30"
 PREFERRED_VERSION_libnih-native ?= "1.0.3"
 PREFERRED_VERSION_libsoup-2.4 ?= "2.40.3"
