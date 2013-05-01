@@ -44,7 +44,12 @@ do_configure_prepend() {
     set_endian
 }
 
-SRC_URI += "file://0013-configure-add-crossarch-option.patch"
+SRC_URI += " \
+    file://0013-configure-add-crossarch-option.patch \
+    file://keyboard-support-compilation-fix.patch \
+    file://disable-webos-qpa-plugins.patch \
+    file://0001-Extended-QPlatformWindow-class-to-provide-a-method-t.patch \
+"
 
 QT_CONFIG_FLAGS += " \
   ${QT_ENDIAN} \
@@ -133,11 +138,6 @@ FILES_${PN}-dbg += "${webos_qtpluginsdir}/*/.debug"
 QT_CONFIGURE_IMPORTS_PATH = "${webos_qtpluginsdir}/imports"
 FILES_${PN}-dbg += "${QT_CONFIGURE_IMPORTS_PATH}/Qt/labs/shaders/.debug"
 FILES_${PN}-buildsrc += "${QT4_STAGING_BUILD_DIR}"
-
-SRC_URI_append_armv7a = " \
-    file://keyboard-support-compilation-fix.patch \
-    file://disable-webos-qpa-plugins.patch \
-    file://0001-Extended-QPlatformWindow-class-to-provide-a-method-t.patch"
 
 DEPENDS_append_armv7a = " virtual/egl"
 
