@@ -11,7 +11,7 @@ RDEPENDS_${PN} = "connman"
 # corresponds to tag submissions/9
 SRCREV = "f8ed0216e9ad4063a3bafefecd66637fafb2f840"
 PV = "1.0.0-9"
-PR = "r1"
+PR = "r2"
 
 inherit webos_component
 inherit webos_public_repo
@@ -27,3 +27,5 @@ inherit webos_machine_dep
 WEBOS_GIT_TAG = "submissions/${WEBOS_SUBMISSION}"
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
+
+SRC_URI += "file://0001-Don-t-treat-none-as-security-type.patch"
