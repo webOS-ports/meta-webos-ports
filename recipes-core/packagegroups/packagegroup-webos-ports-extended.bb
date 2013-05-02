@@ -12,10 +12,10 @@ RDEPENDS_${PN} = " \
   distro-feed-configs \
   pulseaudio-server \
   wireless-tools \
-  bluez4 \
   \
   webos-connman-adapter \
   ${@base_contains('MACHINE_FEATURES', 'phone', 'packagegroup-webos-telephony', '',d)} \
+  ${@base_contains('MACHINE_FEATURES', 'bluetooth', 'bluez4', '',d)} \
   \
   org.webosports.service.licenses \
   org.webosinternals.service.upstartmgr \
