@@ -1,6 +1,6 @@
 # NOTE: -wop prefix is here to indicate the source is being modified by the webos-ports project
 # and is different to what openwebos provides.
-PR_append = "+wop+gitr${SRCPV}"
+PV_append = "+wop+gitr${SRCPV}"
 
 # The default repo name is the "base" component name (no -native, etc.)
 WEBOS_PORTS_REPO_NAME ??= "${BPN}"
