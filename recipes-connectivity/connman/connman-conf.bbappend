@@ -2,7 +2,7 @@ PRINC := "${@int(PRINC) + 2}"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${BPN}:"
 
-SRC_URI += "file://wired-setup"
+SRC_URI += "file://wired-setup "
 
 do_install_append() {
     # We have only wired-setup, remove test for wired.confg
