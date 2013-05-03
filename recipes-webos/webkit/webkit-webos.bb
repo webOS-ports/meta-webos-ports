@@ -8,7 +8,7 @@ LIC_FILES_CHKSUM =  "file://Source/WebCore/LICENSE-LGPL-2.1;md5=a778a33ef338abba
 DEPENDS = "qt4-webos luna-service2 sqlite3 gperf-native"
 
 PV = "1.3-0.54"
-PR = "r12"
+PR = "r13"
 
 inherit webos_public_repo
 inherit webos_qmake
@@ -24,6 +24,8 @@ SRC_URI = "${ISIS_PROJECT_DOWNLOAD}/WebKit/WebKit_${WEBOS_SUBMISSION}s.zip \
 # extraneous empty "-W1,-soname," that qmake adds to link command lines.
 # Eventually, arrange for qmake to do the right thing.
 SRC_URI += "file://remove-empty-soname-arg.patch"
+
+SRC_URI += "file://fullscreenvideowidget-remove-cursor-use.patch"
 
 SRC_URI[md5sum] = "ed3995d6dd54a81c4db5d9ea92f30ef4"
 SRC_URI[sha256sum] = "7835d2cb953724f67670e421a614022767865fa9bfc52f8bdccbc95605be8b4e"
@@ -69,7 +71,6 @@ do_compile() {
     # (How did we get away with not having this before qmake was a separate component?)
     ${S}/Tools/Scripts/build-webkit --qt \
         --release \
-        --no-video \
         --no-webgl \
         --only-webkit \
         --no-webkit2 \
@@ -78,6 +79,7 @@ do_compile() {
         --qmakearg="DEFINES+=QT_SHARED" \
         --qmakearg="DEFINES+=PALM_DEVICE" \
         --qmakearg="DEFINES+=ENABLE_PALM_SERVICE_BRIDGE=1" \
+        --qmakearg="DEFINES+=USE_GSTREAMER=1" \
         $QMAKE_LINK_ARGS
 }
 
