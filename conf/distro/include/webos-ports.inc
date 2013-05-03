@@ -2,3 +2,5 @@
 
 DEPLOY_DIR_IMAGE = "${DEPLOY_DIR}/images/${MACHINE}"
 LICENSE_CREATE_PACKAGE = "1"
+
+require conf/distro/include/defaulttunes.inc
