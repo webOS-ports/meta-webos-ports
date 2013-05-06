@@ -1,4 +1,7 @@
-PRINC := "${@int(PRINC) + 6}"
+PRINC := "${@int(PRINC) + 7}"
+
+FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
+SRC_URI += "file://0200-fixing_snd_mixer_poll_descriptors_count_when_zero.patch"
 
 DEFAULT_CONF = "${D}${sysconfdir}/pulse/default.pa"
 DEFAULT_CONF_TMP = "${DEFAULT_CONF}.temp"
