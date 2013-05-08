@@ -1,0 +1,80 @@
+From d3d79f499580ad3d9be43ead7a5c62e1597818f6 Mon Sep 17 00:00:00 2001
+From: Mikko Harju <mikko.harju@jolla.com>
+Date: Tue, 6 Aug 2013 11:12:47 +0000
+Subject: [PATCH 5/5] Added rotation parameter to qevdevtouch
+
+In some cases the event coordinates reported by evdev are in different
+orientation compared to the primary orientation of the platform window.
+This commit adds plugin parameter rotate=[90, 180, 270] to rotate the
+normalized coordinate system before reporting the touch event.
+
+Change-Id: Ic830a2d259f9d3c5fb63b80afb795d8b400c2ece
+Reviewed-by: Andy Nichols <andy.nichols@digia.com>
+
+Upstream-Status: Pending
+---
+ .../input/evdevtouch/qevdevtouch.cpp               | 25 ++++++++++++++++++++--
+ 1 file changed, 23 insertions(+), 2 deletions(-)
+
+diff --git a/src/platformsupport/input/evdevtouch/qevdevtouch.cpp b/src/platformsupport/input/evdevtouch/qevdevtouch.cpp
+index b05ea0d..5e493ac 100644
+--- a/src/platformsupport/input/evdevtouch/qevdevtouch.cpp
++++ b/src/platformsupport/input/evdevtouch/qevdevtouch.cpp
+@@ -125,6 +125,7 @@ public:
+     bool m_forceToActiveWindow;
+     QTouchDevice *m_device;
+     bool m_typeB;
++    QTransform m_rotate;
+ };
+ 
+ QEvdevTouchScreenData::QEvdevTouchScreenData(QEvdevTouchScreenHandler *q_ptr, const QStringList &args)
+@@ -177,10 +178,24 @@ QEvdevTouchScreenHandler::QEvdevTouchScreenHandler(const QString &specification,
+ 
+     QStringList args = spec.split(QLatin1Char(':'));
+ 
++    int rotationAngle = 0;
+     for (int i = 0; i < args.count(); ++i) {
+-        if (args.at(i).startsWith(QLatin1String("/dev/"))) {
++        if (args.at(i).startsWith(QLatin1String("/dev/")) && dev.isEmpty()) {
+             dev = args.at(i);
+-            break;
++        } else if (args.at(i).startsWith(QLatin1String("rotate"))) {
++            QString rotateArg = args.at(i).section(QLatin1Char('='), 1, 1);
++            bool ok;
++            uint argValue = rotateArg.toUInt(&ok);
++            if (ok) {
++                switch (argValue) {
++                case 90:
++                case 180:
++                case 270:
++                    rotationAngle = argValue;
++                default:
++                    break;
++                }
++            }
+         }
+     }
+ 
+@@ -265,6 +280,9 @@ QEvdevTouchScreenHandler::QEvdevTouchScreenHandler(const QString &specification,
+ #endif
+     qDebug("Protocol type %c %s", d->m_typeB ? 'B' : 'A', mtdevStr);
+ 
++    if (rotationAngle)
++        d->m_rotate = QTransform::fromTranslate(0.5, 0.5).rotate(rotationAngle).translate(-0.5, -0.5);
++
+     d->registerDevice();
+ }
+ 
+@@ -421,6 +439,9 @@ void QEvdevTouchScreenData::processInputEvent(input_event *data)
+             tp.normalPosition = QPointF((contact.x - hw_range_x_min) / qreal(hw_range_x_max - hw_range_x_min),
+                                         (contact.y - hw_range_y_min) / qreal(hw_range_y_max - hw_range_y_min));
+ 
++            if (!m_rotate.isIdentity())
++                tp.normalPosition = m_rotate.map(tp.normalPosition);
++
+             tp.rawPositions.append(QPointF(contact.x, contact.y));
+ 
+             m_touchPoints.append(tp);
+-- 
+1.8.1.2
+
