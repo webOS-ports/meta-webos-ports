@@ -23,3 +23,7 @@ PREFERRED_VERSION_yajl ?= "1.0.12"
 # Version for webos components is now defined directly in the recipes.
 # Instead of setting PREFERRED_VERSION_foo = "version-submission" here, put it in foo.bb recipe as
 # WEBOS_VERSION = "version-submission_revision" (revision is SHA-1 identifier of annotated submissions tag)
+
+QT5_VERSION = "5.1.0"
+QT5_VERSION_WAYLAND = "5.1.0+git%"
+require conf/distro/include/qt5-versions.inc
