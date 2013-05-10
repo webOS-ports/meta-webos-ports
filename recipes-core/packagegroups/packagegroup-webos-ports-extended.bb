@@ -37,6 +37,8 @@ RDEPENDS_${PN} = " \
   org.webosports.app.calendar \
   \
   ca-certificates \
+  \
+  qt5-webos-plugin \
 "
 
 ANDROID_RDEPENDS = "android-audiosystem"
