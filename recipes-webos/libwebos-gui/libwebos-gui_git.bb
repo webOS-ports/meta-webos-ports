@@ -10,6 +10,6 @@ PR = "r0"
 
 inherit autotools
 
-SRCREV = "82829bc553b29f643bbe9e82cb3285f96fc5b33d"
+SRCREV = "96dbf384193440505083124168b29fb45898b43f"
 SRC_URI = "git://github.com/webOS-ports/${PN};branch=master;protocol=git"
 S = "${WORKDIR}/git"
