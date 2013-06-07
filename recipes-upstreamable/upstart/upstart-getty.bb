@@ -61,7 +61,7 @@ EOF
 }
 
 FILES_${PN} = "${webos_upstartconfdir}"
-OLD_UPSTART = "0.3.11-r10.0"
+OLD_UPSTART = "0.3.11-r0.0"
 RCONFLICTS_${PN} = "upstart (< ${OLD_UPSTART})"
 RREPLACES_${PN} = "upstart (< ${OLD_UPSTART})"
 RDEPENDS_${PN} = "upstart"
