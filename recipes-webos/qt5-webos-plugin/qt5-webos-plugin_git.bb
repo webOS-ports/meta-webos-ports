@@ -9,7 +9,7 @@ PR = "r0"
 DEPENDS = "qtbase qtdeclarative qtwebkit"
 
 SRC_URI = "git://github.com/webOS-ports/qt5-webos-plugin.git;protocol=git;branch=master"
-SRCREV = "09b45a1de2453c8c5224710ea644ea428fc82f20"
+SRCREV = "f0283c9148a7e070f0e042085c92ba003acc5443"
 S = "${WORKDIR}/git"
 
 inherit qmake5

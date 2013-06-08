@@ -15,7 +15,7 @@ inherit webos_qmake
 inherit webos_library
 inherit webos_machine_dep
 
-SRCREV = "b2e832dc6dbca6e3c81496ccf6775b6496e55ebd"
+SRCREV = "4c8e295bee73fe97cd96ac268bfaeab08a20f27c"
 SRC_URI = "git://github.com/webOS-ports/qt-webos-plugin;branch=master;protocol=git"
 S = "${WORKDIR}/git"
 

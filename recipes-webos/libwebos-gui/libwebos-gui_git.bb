@@ -9,6 +9,6 @@ PV = "1.0.0+gitr${SRCPV}"
 
 inherit autotools
 
-SRCREV = "bee653bbd491371cc2e33b50414b2790e608e717"
+SRCREV = "bfed85b4ad44b924b17de7bc9be75e9280826390"
 SRC_URI = "git://github.com/webOS-ports/${PN};branch=master;protocol=git"
 S = "${WORKDIR}/git"
