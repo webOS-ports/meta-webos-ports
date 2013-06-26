@@ -13,10 +13,11 @@
 #
 
 BUILDHISTORY_FEATURES ?= "image package sdk"
-BUILDHISTORY_DIR ?= "${TMPDIR}/buildhistory"
+BUILDHISTORY_DIR ?= "${TOPDIR}/buildhistory"
 BUILDHISTORY_DIR_IMAGE = "${BUILDHISTORY_DIR}/images/${MACHINE_ARCH}/${TCLIBC}/${IMAGE_BASENAME}"
 BUILDHISTORY_DIR_PACKAGE = "${BUILDHISTORY_DIR}/packages/${MULTIMACH_TARGET_SYS}/${PN}"
-BUILDHISTORY_DIR_SDK = "${BUILDHISTORY_DIR}/sdk/${SDK_NAME}"
+BUILDHISTORY_DIR_SDK = "${BUILDHISTORY_DIR}/sdk/${SDK_NAME}/${IMAGE_BASENAME}"
+BUILDHISTORY_IMAGE_FILES ?= "/etc/passwd /etc/group"
 BUILDHISTORY_COMMIT ?= "0"
 BUILDHISTORY_COMMIT_AUTHOR ?= "buildhistory <buildhistory@${DISTRO}>"
 BUILDHISTORY_PUSH_REPO ?= ""
@@ -327,7 +328,11 @@ buildhistory_get_installed() {
 	list_installed_packages file | sort > $pkgcache
 
 	cat $pkgcache | awk '{ print $1 }' > $1/installed-package-names.txt
-	cat $pkgcache | awk '{ print $2 }' | xargs -n1 basename > $1/installed-packages.txt
+	if [ -s $pkgcache ] ; then
+		cat $pkgcache | awk '{ print $2 }' | xargs -n1 basename > $1/installed-packages.txt
+	else
+		printf "" > $1/installed-packages.txt
+	fi
 
 	# Produce dependency graph
 	# First, filter out characters that cause issues for dot
@@ -404,6 +409,15 @@ buildhistory_get_imageinfo() {
 	fi
 
 	buildhistory_list_files ${IMAGE_ROOTFS} ${BUILDHISTORY_DIR_IMAGE}/files-in-image.txt
+
+	# Collect files requested in BUILDHISTORY_IMAGE_FILES
+	rm -rf ${BUILDHISTORY_DIR_IMAGE}/image-files
+	for f in ${BUILDHISTORY_IMAGE_FILES}; do
+		if [ -f ${IMAGE_ROOTFS}/$f ] ; then
+			mkdir -p ${BUILDHISTORY_DIR_IMAGE}/image-files/`dirname $f`
+			cp ${IMAGE_ROOTFS}/$f ${BUILDHISTORY_DIR_IMAGE}/image-files/$f
+		fi
+	done
 
 	# Record some machine-readable meta-information about the image
 	printf ""  > ${BUILDHISTORY_DIR_IMAGE}/image-info.txt
@@ -509,7 +523,7 @@ END
 		repostatus=`git status --porcelain | grep -v " metadata-revs$"`
 		HOSTNAME=`hostname 2>/dev/null || echo unknown`
 		if [ "$repostatus" != "" ] ; then
-			git add .
+			git add -A .
 			# porcelain output looks like "?? packages/foo/bar"
 			# Ensure we commit metadata-revs with the first commit
 			for entry in `echo "$repostatus" | awk '{print $2}' | awk -F/ '{print $1}' | sort | uniq` ; do
@@ -524,13 +538,13 @@ END
 }
 
 python buildhistory_eventhandler() {
-    if isinstance(e, bb.event.BuildCompleted):
-        if e.data.getVar('BUILDHISTORY_FEATURES', True).strip():
-            if e.data.getVar("BUILDHISTORY_COMMIT", True) == "1":
-                bb.build.exec_func("buildhistory_commit", e.data)
+    if e.data.getVar('BUILDHISTORY_FEATURES', True).strip():
+        if e.data.getVar("BUILDHISTORY_COMMIT", True) == "1":
+            bb.build.exec_func("buildhistory_commit", e.data)
 }
 
 addhandler buildhistory_eventhandler
+buildhistory_eventhandler[eventmask] = "bb.event.BuildCompleted"
 
 
 # FIXME this ought to be moved into the fetcher
@@ -553,7 +567,10 @@ def _get_srcrev_values(d):
         ud = urldata[scm]
         for name in ud.names:
             rev = ud.method.sortable_revision(scm, ud, d, name)
-            if rev.startswith(autoinc_templ):
+            # Clean this up when we next bump bitbake version
+            if type(rev) != str:
+                autoinc, rev = rev
+            elif rev.startswith(autoinc_templ):
                 rev = rev[len(autoinc_templ):]
             dict_srcrevs[name] = rev
             if 'tag' in ud.parm:
