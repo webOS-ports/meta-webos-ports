@@ -12,3 +12,6 @@ inherit autotools
 SRCREV = "bfed85b4ad44b924b17de7bc9be75e9280826390"
 SRC_URI = "git://github.com/webOS-ports/${PN};branch=master;protocol=git"
 S = "${WORKDIR}/git"
+
+FILES_${PN} += " /usr/lib/libhybris/eglplatform_offscreen.so"
+
