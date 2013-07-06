@@ -8,6 +8,8 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 RDEPENDS_${PN} = " \
   android-system-compat \
+  android-system \
+  android-tools \
   \
   distro-feed-configs \
   pulseaudio-server \
@@ -39,14 +41,29 @@ RDEPENDS_${PN} = " \
   \
   ca-certificates \
   \
-  qt5-webos-plugin \
+  qtwayland \
+  qtwayland-plugins \
+  qtbase-plugins \
+  qtbase-fonts \
+  qtbase-fonts-ttf-dejavu \
+  qtbase-fonts-ttf-vera \
+  \
+  luna-next-cardshell \
+  luna-sysmgr \
+  luna-sysmgr-conf \
+  \
+  webos-systemd-services \
 "
 
-ANDROID_RDEPENDS = "android-audiosystem"
 LIBHYBRIS_RDEPENDS = "${VIRTUAL-RUNTIME_android-system-image}"
 
-RDEPENDS_${PN}_append_tuna = " token-generator ${LIBHYBRIS_RDEPENDS} ${ANDROID_RDEPENDS}"
-RDEPENDS_${PN}_append_grouper = " token-generator ${LIBHYBRIS_RDEPENDS} ${ANDROID_RDEPENDS}"
+RDEPENDS_${PN}_append_tuna = " token-generator ${LIBHYBRIS_RDEPENDS}"
+RDEPENDS_${PN}_append_grouper = " token-generator ${LIBHYBRIS_RDEPENDS}"
+
+MESA_RDEPENDS = "libegl-gallium mesa-driver-swrast"
+
+RDEPENDS_${PN}_append_qemux86 = " ${MESA_RDEPENDS} qt5-plugin-generic-vboxtouch"
+RDEPENDS_${PN}_append_qemux86-64 = " ${MESA_RDEPENDS} qt5-plugin-generic-vboxtouch"
 
 RDEPENDS_${PN}_append_arm = " \
   crash-handler \
