@@ -60,6 +60,12 @@ WEBOS_PACKAGESET_SYSTEMAPPS = " \
     mojomail-smtp \
 "
 
+WEBOS_PACKAGESET_UI = " \
+    ${VIRTUAL-RUNTIME_webappmanager} \
+    ${VIRTUAL-RUNTIME_webos-compositor} \
+    ${VIRTUAL-RUNTIME_webos-ime} \
+"
+
 # nyx-lib needs nyx-modules at runtime, but a runtime dependency is not defined
 # in its recipe because nyx-modules is MACHINE_ARCH (e.g. qemux86), while nyx-lib is
 # TUNE_PKGARCH  (e.g. i586). Instead, it is pulled into the image by adding it here.
@@ -70,7 +76,6 @@ RDEPENDS_${PN} = " \
     configurator \
     enyo-1.0 \
     filecache \
-    ${VIRTUAL-RUNTIME_webos-ime} \
     ${VIRTUAL-RUNTIME_librdx} \
     ${VIRTUAL-RUNTIME_novacomd} \
     luna-init \
@@ -81,15 +86,17 @@ RDEPENDS_${PN} = " \
     pmlogctl \
     pmlogdaemon \
     sleepd \
-    ${VIRTUAL-RUNTIME_webappmanager} \
-    ${VIRTUAL-RUNTIME_webos-compositor} \
     webos-connman-adapter \
     webos-shutdownscripts \
-    ${WEBOS_PACKAGESET_BROWSER} \
-    ${WEBOS_PACKAGESET_SYSTEMAPPS} \
     ${WEBOS_MISSING_FROM_RDEPENDS} \
     ${WEBOS_FOSS_MISSING_FROM_RDEPENDS} \
 "
+
+# Removed for next generation graphics stack
+#    keyboard-efigs
+#    ${WEBOS_PACKAGESET_UI}
+#    ${WEBOS_PACKAGESET_BROWSER}
+#    ${WEBOS_PACKAGESET_SYSTEMAPPS}
 
 # XXX These non-top-level components must be explicitly added because they are
 # missing from the RDEPENDS lists of the components that expect them to be
