@@ -39,7 +39,8 @@ RDEPENDS_${PN} = " \
   \
   ca-certificates \
   \
-  qt5-webos-plugin \
+  qtwayland \
+  qtwayland-plugins \
 "
 
 ANDROID_RDEPENDS = "android-audiosystem"
