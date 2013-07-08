@@ -6,7 +6,7 @@ SECTION = "webos/base"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-DEPENDS = "luna-service2 libpbnjson qt4-webos uriparser libxml2 sqlite3 pmloglib cjson nyx-lib"
+DEPENDS = "luna-service2 libpbnjson qtbase uriparser libxml2 sqlite3 pmloglib cjson nyx-lib"
 
 RDEPENDS_${PN} = "sntp"
 
