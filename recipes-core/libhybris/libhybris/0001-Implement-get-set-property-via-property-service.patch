@@ -1,0 +1,873 @@
+From 4ed2c04c4b9656a9f81d866ecc730855db5430a0 Mon Sep 17 00:00:00 2001
+From: Ricardo Salveti de Araujo <ricardo.salveti@canonical.com>
+Date: Mon, 22 Jul 2013 17:36:19 -0300
+Subject: [PATCH 1/2] Implement get/set property via property service
+
+The property service is running inside the android init daemon and
+creates a socket in /dev/socket/property_service which we can use
+for setting properties (getting is done via an extra android patch
+to add 'get' and 'list' support in the property service).
+
+If the extra get/list support is not available, it just returns NULL.
+
+Also separated the get/set calls in a different library, so it can be
+used by external applications without necessarily depending on
+hybris-common.
+
+Additional patches for the Android init system can be found at
+http://people.canonical.com/~rsalveti/properties/
+
+Based on a similar patch by Simon Busch <morphis@gravedo.de>.
+
+Signed-off-by: Ricardo Salveti de Araujo <ricardo.salveti@canonical.com>
+---
+ hybris/Makefile.am                            |   5 +-
+ hybris/common/Makefile.am                     |   2 +-
+ hybris/common/hooks.c                         |   3 +-
+ hybris/common/properties.c                    | 179 ----------------
+ hybris/common/properties.h                    |  26 ---
+ hybris/configure.ac                           |   2 +
+ hybris/include/Makefile.am                    |   3 +
+ hybris/include/hybris/properties/properties.h |  58 ++++++
+ hybris/properties/Makefile.am                 |  10 +
+ hybris/properties/properties.c                | 287 ++++++++++++++++++++++++++
+ hybris/utils/Makefile.am                      |  15 ++
+ hybris/utils/getprop.c                        |  75 +++++++
+ hybris/utils/setprop.c                        |  35 ++++
+ 13 files changed, 490 insertions(+), 210 deletions(-)
+ delete mode 100644 hybris/common/properties.c
+ delete mode 100644 hybris/common/properties.h
+ create mode 100644 hybris/include/hybris/properties/properties.h
+ create mode 100644 hybris/properties/Makefile.am
+ create mode 100644 hybris/properties/properties.c
+ create mode 100644 hybris/utils/Makefile.am
+ create mode 100644 hybris/utils/getprop.c
+ create mode 100644 hybris/utils/setprop.c
+
+diff --git a/hybris/Makefile.am b/hybris/Makefile.am
+index 467735c..52252ff 100644
+--- a/hybris/Makefile.am
++++ b/hybris/Makefile.am
+@@ -1,4 +1,4 @@
+-SUBDIRS = include common hardware
++SUBDIRS = include properties common hardware
+ 
+ if HAS_ANDROID_4_2_0
+ SUBDIRS += libsync
+@@ -8,8 +8,7 @@ SUBDIRS += egl glesv1 glesv2 ui sf input camera
+ if HAS_LIBNFC_NXP_HEADERS
+ SUBDIRS += libnfc_nxp libnfc_ndef_nxp
+ endif
+-SUBDIRS += tests
+-
++SUBDIRS += utils tests
+ 
+ MAINTAINERCLEANFILES = \
+ 	aclocal.m4 compile config.guess config.sub \
+diff --git a/hybris/common/Makefile.am b/hybris/common/Makefile.am
+index ddece59..0b78b96 100644
+--- a/hybris/common/Makefile.am
++++ b/hybris/common/Makefile.am
+@@ -17,7 +17,6 @@ endif
+ libhybris_common_la_SOURCES = \
+ 	hooks.c \
+ 	hooks_shm.c \
+-	properties.c \
+ 	strlcpy.c \
+ 	logging.c
+ libhybris_common_la_CFLAGS = \
+@@ -33,4 +32,5 @@ libhybris_common_la_LDFLAGS = \
+ 	-ldl \
+ 	-lrt \
+ 	-pthread \
++	$(top_builddir)/properties/libandroid-properties.la \
+ 	-version-info "$(LT_CURRENT)":"$(LT_REVISION)":"$(LT_AGE)"
+diff --git a/hybris/common/hooks.c b/hybris/common/hooks.c
+index 01bf264..d309985 100644
+--- a/hybris/common/hooks.c
++++ b/hybris/common/hooks.c
+@@ -19,7 +19,6 @@
+ 
+ #include <hybris/internal/floating_point_abi.h>
+ 
+-#include "properties.h"
+ #include "hooks_shm.h"
+ 
+ #define _GNU_SOURCE
+@@ -48,6 +47,8 @@
+ #include <syslog.h>
+ #include <locale.h>
+ 
++#include <hybris/properties/properties.h>
++
+ static locale_t hybris_locale;
+ static int locale_inited = 0;
+ /* TODO:
+diff --git a/hybris/common/properties.c b/hybris/common/properties.c
+deleted file mode 100644
+index 8ed27fd..0000000
+--- a/hybris/common/properties.c
++++ /dev/null
+@@ -1,179 +0,0 @@
+-/*
+- * Copyright (c) 2012 Carsten Munk <carsten.munk@gmail.com>
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- * http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- *
+- */
+-
+-#include <stddef.h>
+-#include <string.h>
+-#include <stdio.h>
+-#include <stdlib.h>
+-#include <fcntl.h>
+-#include <sys/types.h>
+-#include <sys/stat.h>
+-#include "logging.h"
+-
+-#define PROP_NAME_MAX 32
+-
+-static char *find_key(const char *key)
+-{
+-	FILE *f = fopen("/system/build.prop", "r");
+-	char buf[1024];
+-	char *mkey, *value;
+-
+-	if (!f)
+-		return NULL;
+-
+-	while (fgets(buf, 1024, f) != NULL) {
+-		if (strchr(buf, '\r'))
+-			*(strchr(buf, '\r')) = '\0';
+-		if (strchr(buf, '\n'))
+-			*(strchr(buf, '\n')) = '\0';
+-
+-		mkey = strtok(buf, "=");
+-
+-		if (!mkey)
+-			continue;
+-
+-		value = strtok(NULL, "=");
+-		if (!value)
+-			continue;
+-
+-		if (strcmp(key, mkey) == 0) {
+-			fclose(f);
+-			return strdup(value);
+-		}
+-	}
+-
+-	fclose(f);
+-	return NULL;
+-}
+-
+-static char *find_key_kernel_cmdline(const char *key)
+-{
+-	char cmdline[1024];
+-	char *ptr;
+-	int fd;
+-
+-	fd = open("/proc/cmdline", O_RDONLY);
+-	if (fd >= 0) {
+-		int n = read(fd, cmdline, 1023);
+-		if (n < 0) n = 0;
+-
+-		/* get rid of trailing newline, it happens */
+-		if (n > 0 && cmdline[n-1] == '\n') n--;
+-
+-		cmdline[n] = 0;
+-		close(fd);
+-	} else {
+-		cmdline[0] = 0;
+-	}
+-
+-	ptr = cmdline;
+-
+-	while (ptr && *ptr) {
+-		char *x = strchr(ptr, ' ');
+-		if (x != 0) *x++ = 0;
+-
+-		char *name = ptr;
+-		ptr = x;
+-
+-		char *value = strchr(name, '=');
+-		int name_len = strlen(name);
+-
+-		if (value == 0) continue;
+-		*value++ = 0;
+-		if (name_len == 0) continue;
+-
+-		if (!strncmp(name, "androidboot.", 12) && name_len > 12) {
+-			const char *boot_prop_name = name + 12;
+-			char prop[PROP_NAME_MAX];
+-			snprintf(prop, sizeof(prop), "ro.%s", boot_prop_name);
+-			if (strcmp(prop, key) == 0)
+-				return strdup(value);
+-		}
+-	}
+-
+-	return NULL;
+-}
+-
+-int property_get(const char *key, char *value, const char *default_value)
+-{
+-	char *ret = NULL; 
+-
+-	//printf("property_get: %s\n", key);
+-
+-	/* default */
+-	ret = find_key(key);
+-
+-#if 0
+- if (strcmp(key, "ro.kernel.qemu") == 0)
+- {
+-    ret = "0";
+- }  
+- else if (strcmp(key, "ro.hardware") == 0)
+- { 
+-    ret = "tenderloin";
+- } 
+- else if (strcmp(key, "ro.product.board") == 0)
+- {
+-    ret = "tenderloin";
+- }
+- else if (strcmp(key, "ro.board.platform") == 0)
+- { 
+-    ret = "msm8660";
+- }
+- else if (strcmp(key, "ro.arch") == 0)
+- {
+-    ret = "armeabi";
+- }
+- else if (strcmp(key, "debug.composition.type") == 0)
+- {
+-    ret = "c2d"; 
+- }
+- else if (strcmp(key, "debug.sf.hw") == 0)
+- {
+-   ret = "1";
+- }
+- else if (strcmp(key, "debug.gr.numframebuffers") == 0)
+- { 
+-   ret = "1"; 
+- }  
+-#endif
+-	if (ret == NULL) {
+-		/* Property might be available via /proc/cmdline */
+-		ret = find_key_kernel_cmdline(key);
+-	}
+-
+-	if (ret) {
+-		TRACE("found %s for %s\n", key, ret);
+-		strcpy(value, ret);
+-		free(ret);
+-		return strlen(value);
+-	} else if (default_value != NULL) {
+-		strcpy(value, default_value);
+-		return strlen(value);
+-	}
+-
+-	return 0;
+-}
+-
+-int property_set(const char *key, const char *value)
+-{
+-	printf("property_set: %s %s\n", key, value);
+-	TRACE("property_set: %s %s\n", key, value);
+-	return 0;
+-}
+-
+-// vim:ts=4:sw=4:noexpandtab
+diff --git a/hybris/common/properties.h b/hybris/common/properties.h
+deleted file mode 100644
+index ea4e28f..0000000
+--- a/hybris/common/properties.h
++++ /dev/null
+@@ -1,26 +0,0 @@
+-/*
+- * Copyright (c) 2012 Carsten Munk <carsten.munk@gmail.com>
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- * http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- *
+- */
+-
+-#ifndef PROPERTIES_H_
+-#define PROPERTIES_H_
+-
+-int property_set(const char *key, const char *value);
+-int property_get(const char *key, char *value, const char *default_value);
+-
+-#endif
+-
+-// vim:ts=4:sw=4:noexpandtab
+diff --git a/hybris/configure.ac b/hybris/configure.ac
+index 2ea6cbb..c8b959b 100644
+--- a/hybris/configure.ac
++++ b/hybris/configure.ac
+@@ -135,6 +135,7 @@ AM_CONDITIONAL([HAS_LIBNFC_NXP_HEADERS], [test -f ${android_headers_path}/libnfc
+ 
+ AC_CONFIG_FILES([
+ 	Makefile
++	properties/Makefile
+ 	common/Makefile
+ 	common/gingerbread/Makefile
+ 	common/ics/Makefile
+@@ -166,6 +167,7 @@ AC_CONFIG_FILES([
+ 	input/Makefile
+ 	camera/Makefile
+ 	include/Makefile
++	utils/Makefile
+ 	tests/Makefile
+ ])
+ 
+diff --git a/hybris/include/Makefile.am b/hybris/include/Makefile.am
+index a8d95bc..bec37a7 100644
+--- a/hybris/include/Makefile.am
++++ b/hybris/include/Makefile.am
+@@ -61,4 +61,7 @@ camerainclude_HEADERS = \
+ 	hybris/camera/camera_compatibility_layer_configuration_translator.h \
+ 	hybris/camera/camera_compatibility_layer.h
+ 
++propertiesincludedir = $(includedir)/hybris/properties
++propertiesinclude_HEADERS = \
++	hybris/properties/properties.h
+ 
+diff --git a/hybris/include/hybris/properties/properties.h b/hybris/include/hybris/properties/properties.h
+new file mode 100644
+index 0000000..12d56b6
+--- /dev/null
++++ b/hybris/include/hybris/properties/properties.h
+@@ -0,0 +1,58 @@
++/*
++ * Copyright (c) 2012 Carsten Munk <carsten.munk@gmail.com>
++ *               2013 Simon Busch <morphis@gravedo.de>
++ *               2008 The Android Open Source Project
++ *               2013 Canonical Ltd
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ *
++ */
++
++#ifndef PROPERTIES_H_
++#define PROPERTIES_H_
++
++#include <stdint.h>
++#include <unistd.h>
++#include <stdint.h>
++
++/* Based on Android */
++#define PROP_SERVICE_NAME "property_service"
++
++#define PROP_NAME_MAX 32
++#define PROP_VALUE_MAX 92
++
++/* Only SETPROP is defined by Android, for GETPROP and LISTPROP to work
++ * an extended Android init service needs to be in place */
++#define PROP_MSG_SETPROP 1
++#define PROP_MSG_GETPROP 2
++#define PROP_MSG_LISTPROP 3
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++	typedef struct prop_msg_s {
++		unsigned cmd;
++		char name[PROP_NAME_MAX];
++		char value[PROP_VALUE_MAX];
++	} prop_msg_t;
++
++	int property_set(const char *key, const char *value);
++	int property_get(const char *key, char *value, const char *default_value);
++	int property_list(void (*propfn)(const char *key, const char *value, void *cookie), void *cookie);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif // PROPERTIES_H_
+diff --git a/hybris/properties/Makefile.am b/hybris/properties/Makefile.am
+new file mode 100644
+index 0000000..00f5d8d
+--- /dev/null
++++ b/hybris/properties/Makefile.am
+@@ -0,0 +1,10 @@
++lib_LTLIBRARIES = \
++	libandroid-properties.la
++
++libandroid_properties_la_SOURCES = properties.c
++libandroid_properties_la_CFLAGS = -I$(top_srcdir)/include
++if WANT_DEBUG
++libandroid_properties_la_CFLAGS += -ggdb -O0
++endif
++libandroid_properties_la_LDFLAGS = \
++	-version-info "1":"0":"0"
+diff --git a/hybris/properties/properties.c b/hybris/properties/properties.c
+new file mode 100644
+index 0000000..cc350e2
+--- /dev/null
++++ b/hybris/properties/properties.c
+@@ -0,0 +1,287 @@
++/*
++ * Copyright (c) 2012 Carsten Munk <carsten.munk@gmail.com>
++ *               2008 The Android Open Source Project
++ *               2013 Simon Busch <morphis@gravedo.de>
++ *               2013 Canonical Ltd
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ *
++ */
++
++#include <stddef.h>
++#include <string.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <fcntl.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#define __USE_GNU
++#include <unistd.h>
++#include <errno.h>
++#include <sys/socket.h>
++#include <sys/un.h>
++#include <sys/select.h>
++#include <sys/types.h>
++#include <netinet/in.h>
++#include <poll.h>
++
++#include <hybris/properties/properties.h>
++
++static const char property_service_socket[] = "/dev/socket/" PROP_SERVICE_NAME;
++
++/* Find a key value from a static /system/build.prop file */
++static char *find_key(const char *key)
++{
++	FILE *f = fopen("/system/build.prop", "r");
++	char buf[1024];
++	char *mkey, *value;
++
++	if (!f)
++		return NULL;
++
++	while (fgets(buf, 1024, f) != NULL) {
++		if (strchr(buf, '\r'))
++			*(strchr(buf, '\r')) = '\0';
++		if (strchr(buf, '\n'))
++			*(strchr(buf, '\n')) = '\0';
++
++		mkey = strtok(buf, "=");
++
++		if (!mkey)
++			continue;
++
++		value = strtok(NULL, "=");
++		if (!value)
++			continue;
++
++		if (strcmp(key, mkey) == 0) {
++			fclose(f);
++			return strdup(value);
++		}
++	}
++
++	fclose(f);
++	return NULL;
++}
++
++/* Find a key value from the kernel command line, which is parsed
++ * by Android at init (on an Android working system) */
++static char *find_key_kernel_cmdline(const char *key)
++{
++	char cmdline[1024];
++	char *ptr;
++	int fd;
++
++	fd = open("/proc/cmdline", O_RDONLY);
++	if (fd >= 0) {
++		int n = read(fd, cmdline, 1023);
++		if (n < 0) n = 0;
++
++		/* get rid of trailing newline, it happens */
++		if (n > 0 && cmdline[n-1] == '\n') n--;
++
++		cmdline[n] = 0;
++		close(fd);
++	} else {
++		cmdline[0] = 0;
++	}
++
++	ptr = cmdline;
++
++	while (ptr && *ptr) {
++		char *x = strchr(ptr, ' ');
++		if (x != 0) *x++ = 0;
++
++		char *name = ptr;
++		ptr = x;
++
++		char *value = strchr(name, '=');
++		int name_len = strlen(name);
++
++		if (value == 0) continue;
++		*value++ = 0;
++		if (name_len == 0) continue;
++
++		if (!strncmp(name, "androidboot.", 12) && name_len > 12) {
++			const char *boot_prop_name = name + 12;
++			char prop[PROP_NAME_MAX];
++			snprintf(prop, sizeof(prop), "ro.%s", boot_prop_name);
++			if (strcmp(prop, key) == 0)
++				return strdup(value);
++		}
++	}
++
++	return NULL;
++}
++
++/* Get/Set a property from the Android Init property socket */
++static int send_prop_msg(prop_msg_t *msg,
++		void (*propfn)(const char *, const char *, void *),
++		void *cookie)
++{
++	struct pollfd pollfds[1];
++	union {
++		struct sockaddr_un addr;
++		struct sockaddr addr_g;
++	} addr;
++	socklen_t alen;
++	size_t namelen;
++	int s;
++	int r;
++	int result = -1;
++
++	s = socket(AF_LOCAL, SOCK_STREAM, 0);
++	if (s < 0) {
++		return result;
++	}
++
++	memset(&addr, 0, sizeof(addr));
++	namelen = strlen(property_service_socket);
++	strncpy(addr.addr.sun_path, property_service_socket,
++			sizeof(addr.addr.sun_path));
++	addr.addr.sun_family = AF_LOCAL;
++	alen = namelen + offsetof(struct sockaddr_un, sun_path) + 1;
++
++	if (TEMP_FAILURE_RETRY(connect(s, &addr.addr_g, alen) < 0)) {
++		close(s);
++		return result;
++	}
++
++	r = TEMP_FAILURE_RETRY(send(s, msg, sizeof(prop_msg_t), 0));
++
++	if (r == sizeof(prop_msg_t)) {
++		pollfds[0].fd = s;
++		pollfds[0].events = 0;
++		// We successfully wrote to the property server, so use recv
++		// in case we need to get a property. Once the other side is
++		// finished, the socket is closed.
++		while ((r = recv(s, msg, sizeof(prop_msg_t), 0)) > 0) {
++			if (r != sizeof(prop_msg_t)) {
++				close(s);
++				return result;
++			}
++
++			if (propfn)
++				propfn(msg->name, msg->value, cookie);
++		}
++
++		if (r >= 0)
++			result = 0;
++	}
++
++	close(s);
++	return result;
++}
++
++int property_list(void (*propfn)(const char *key, const char *value, void *cookie),
++		void *cookie)
++{
++	int err;
++	prop_msg_t msg;
++
++	memset(&msg, 0, sizeof(msg));
++	msg.cmd = PROP_MSG_LISTPROP;
++
++	err = send_prop_msg(&msg, propfn, cookie);
++	if (err < 0) {
++		return err;
++	}
++
++	return 0;
++}
++
++static int property_get_socket(const char *key, char *value, const char *default_value)
++{
++	int err;
++	int len;
++	prop_msg_t msg;
++
++	memset(&msg, 0, sizeof(msg));
++	msg.cmd = PROP_MSG_GETPROP;
++
++	if (key) {
++		strncpy(msg.name, key, sizeof(msg.name));
++		err = send_prop_msg(&msg, NULL, NULL);
++		if (err < 0)
++			return err;
++	}
++
++	/* In case it's null, just use the default */
++	if ((strlen(msg.value) == 0) && (default_value)) {
++		if (strlen(default_value) >= PROP_VALUE_MAX) return -1;
++		len = strlen(default_value);
++		memcpy(msg.value, default_value, len + 1);
++	}
++
++	strncpy(value, msg.value, sizeof(msg.value));
++
++	return 0;
++}
++
++int property_get(const char *key, char *value, const char *default_value)
++{
++	char *ret = NULL;
++
++	if ((key) && (strlen(key) >= PROP_NAME_MAX)) return -1;
++
++	if (property_get_socket(key, value, default_value) == 0) {
++		if (value)
++			return strlen(value);
++		else
++			return 0;
++	}
++
++	/* In case the socket is not available, parse the file by hand */
++	if ((ret = find_key(key)) == NULL) {
++		/* Property might be available via /proc/cmdline */
++		ret = find_key_kernel_cmdline(key);
++	}
++
++	if (ret) {
++		strcpy(value, ret);
++		free(ret);
++		return strlen(value);
++	} else if (default_value != NULL) {
++		strcpy(value, default_value);
++		return strlen(value);
++	} else {
++		value = '\0';
++	}
++
++	return 0;
++}
++
++int property_set(const char *key, const char *value)
++{
++	int err;
++	prop_msg_t msg;
++
++	if (key == 0) return -1;
++	if (value == 0) value = "";
++	if (strlen(key) >= PROP_NAME_MAX) return -1;
++	if (strlen(value) >= PROP_VALUE_MAX) return -1;
++
++	memset(&msg, 0, sizeof(msg));
++	msg.cmd = PROP_MSG_SETPROP;
++	strncpy(msg.name, key, sizeof(msg.name));
++	strncpy(msg.value, value, sizeof(msg.value));
++
++	err = send_prop_msg(&msg, NULL, NULL);
++	if (err < 0) {
++		return err;
++	}
++
++	return 0;
++}
++
++// vim:ts=4:sw=4:noexpandtab
+diff --git a/hybris/utils/Makefile.am b/hybris/utils/Makefile.am
+new file mode 100644
+index 0000000..47dcc62
+--- /dev/null
++++ b/hybris/utils/Makefile.am
+@@ -0,0 +1,15 @@
++bin_PROGRAMS = \
++	getprop \
++	setprop
++
++getprop_SOURCES = getprop.c
++getprop_CFLAGS = \
++	-I$(top_srcdir)/include
++getprop_LDADD = \
++	$(top_builddir)/properties/libandroid-properties.la
++
++setprop_SOURCES = setprop.c
++setprop_CFLAGS = \
++	-I$(top_srcdir)/include
++setprop_LDADD = \
++	$(top_builddir)/properties/libandroid-properties.la
+diff --git a/hybris/utils/getprop.c b/hybris/utils/getprop.c
+new file mode 100644
+index 0000000..c0110d1
+--- /dev/null
++++ b/hybris/utils/getprop.c
+@@ -0,0 +1,75 @@
++/*
++ * Copyright (c) 2008 The Android Open Source Project
++ *               2013 Canonical Ltd
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ *
++ */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++#include <hybris/properties/properties.h>
++
++typedef struct {
++	int count;
++	char** items;
++} list_t;
++
++static void record_prop(const char* key, const char* name, void* opaque)
++{
++	list_t *list = (list_t *) opaque;
++
++	char temp[PROP_VALUE_MAX + PROP_NAME_MAX + 16];
++	snprintf(temp, sizeof(temp), "[%s]: [%s]", key, name);
++	list->items = realloc(list->items, (list->count + 1) * sizeof(char **));
++	list->items[list->count++] = strdup(temp);
++}
++
++static void list_properties(void)
++{
++	int n;
++
++	list_t list;
++	memset(&list, 0, sizeof(list_t));
++
++	/* Record properties in the string list */
++	if (property_list(record_prop, &list) < 0)
++		return;
++
++	for (n = 0; n < list.count; n++) {
++		printf("%s\n", (char *) list.items[n]);
++	}
++}
++
++int main(int argc, char *argv[])
++{
++	int n = 0;
++
++	if (argc == 1) {
++		list_properties();
++	} else {
++		char value[PROP_VALUE_MAX];
++		char *default_value;
++		if (argc > 2) {
++			default_value = argv[2];
++		} else {
++			default_value = "";
++		}
++
++		property_get(argv[1], value, default_value);
++		printf("%s\n", value);
++	}
++	return 0;
++}
+diff --git a/hybris/utils/setprop.c b/hybris/utils/setprop.c
+new file mode 100644
+index 0000000..fc08178
+--- /dev/null
++++ b/hybris/utils/setprop.c
+@@ -0,0 +1,35 @@
++/*
++ * Copyright (c) 2008 The Android Open Source Project
++ *               2013 Canonical Ltd
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ *
++ */
++
++#include <stdio.h>
++#include <hybris/properties/properties.h>
++
++int main(int argc, char *argv[])
++{
++	if (argc != 3) {
++		fprintf(stderr, "usage: setprop <key> <value>\n");
++		return 1;
++	}
++
++	if (property_set(argv[1], argv[2])){
++		fprintf(stderr, "could not set property\n");
++		return 1;
++	}
++
++	return 0;
++}
+-- 
+1.8.1.2
+
