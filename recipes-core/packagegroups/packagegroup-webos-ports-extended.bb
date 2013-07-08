@@ -41,6 +41,12 @@ RDEPENDS_${PN} = " \
   \
   qtwayland \
   qtwayland-plugins \
+  qtbase-plugins \
+  qtbase-fonts \
+  qtbase-fonts-ttf-dejavu \
+  qtbase-fonts-ttf-vera \
+  \
+  luna-next \
 "
 
 ANDROID_RDEPENDS = "android-audiosystem"
