@@ -5,8 +5,10 @@ SECTION = "webos/libs"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-DEPENDS = "qt4-webos glib-2.0 luna-prefs luna-service2 cjson nyx-lib libpbnjson luna-webkit-api luna-sysmgr-ipc luna-sysmgr-ipc-messages sqlite3 pmloglib librolegen serviceinstaller"
-DEPENDS += "qt-palm-plugin"
+DEPENDS = "glib-2.0 luna-prefs luna-service2 cjson nyx-lib libpbnjson sqlite3 pmloglib librolegen serviceinstaller"
+DEPENDS += "luna-webkit-api"
+DEPENDS += "luna-sysmgr-ipc luna-sysmgr-ipc-messages"
+DEPENDS += "qtbase"
 
 # temporary until we have oe-core with this patch included
 # http://lists.openembedded.org/pipermail/openembedded-core/2013-July/080893.html
@@ -19,23 +21,20 @@ PV = "3.0.0-3"
 # Don't uncomment until all of the do_*() tasks have been moved out of the recipe
 #inherit webos_component
 inherit webos_public_repo
-inherit webos_qmake
 inherit webos_enhanced_submissions
 inherit webos_library
-inherit webos_machine_dep
+inherit webos_qmake5
 
 WEBOS_GIT_TAG = "submissions/${WEBOS_SUBMISSION}"
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit webos-ports-submissions
-SRCREV = "67ff08574618582a2f74626929cddaad2fbfcb4f"
+SRCREV = "2fdc5b7b11f2e1b9757656db284bdb25aa94ada2"
 
-EXTRA_OEMAKE += "MACHINE=${MACHINE}"
+OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 
-do_configure() {
-    MACHINE=${MACHINE} ${QMAKE}
-
+do_configure_append() {
     # We want the shared libraries to have an SONAME records => remove the empty -Wl,-soname,
     # argument that qmake adds (why is it doing this?).
     find . -name Makefile | xargs sed -i -e 's/-Wl,-soname, //' -e 's/-Wl,-soname,$//'
@@ -44,10 +43,13 @@ do_configure() {
 do_install() {
     oe_runmake install
 
-    install -d ${D}${libdir}
+    install -d ${D}${libdir}/pkgconfig
     install -d ${D}${includedir}/luna-sysmgr-common
 
-    oe_libinstall -C release-${MACHINE} -so libLunaSysMgrCommon ${D}${libdir}
+    oe_libinstall -C release-common -so libLunaSysMgrCommon ${D}${libdir}
 
     install -v -m 644 ${S}/include/*.h ${D}${includedir}/luna-sysmgr-common
+
+    sed -i -e s:${PKG_CONFIG_SYSROOT_DIR}::g release-common/LunaSysMgrCommon.pc
+    install -v -m 644 release-common/LunaSysMgrCommon.pc ${D}${libdir}/pkgconfig
 }
