@@ -21,3 +21,7 @@ PREFERRED_VERSION_yajl ?= "1.0.12"
 
 # Components that inherit from either webos_enhanced_submissions or webos_submissions
 # must have a PREFERRED_VERSION with format: <component-version>-<submission>
+
+QT5_VERSION = "5.1.0"
+QT5_VERSION_WAYLAND = "5.1.0+git%"
+require conf/distro/include/qt5-versions.inc
