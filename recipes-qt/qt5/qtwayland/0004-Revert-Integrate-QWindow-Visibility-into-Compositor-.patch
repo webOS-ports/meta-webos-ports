@@ -1,0 +1,342 @@
+From 447962a5edda77495c05e842aaf85bc14968ab6e Mon Sep 17 00:00:00 2001
+From: Simon Busch <morphis@gravedo.de>
+Date: Sat, 24 Aug 2013 00:59:09 +0200
+Subject: [PATCH 4/4] Revert "Integrate QWindow::Visibility into Compositor
+ API"
+
+This breaks the rendering on client site:
+
+QOpenGLFramebufferObject: Framebuffer incomplete attachment.
+QOpenGLFramebufferObject: Framebuffer incomplete attachment.
+QOpenGLFramebufferObject: Framebuffer incomplete attachment.
+
+On kernel site:
+
+[ 2761.781860] PVR_K:(Error): BM_Alloc: AllocMemory FAILED [1257,
+drivers/gpu/pvr/buffer_manager.c]
+[ 2761.782012] PVR_K:(Error): AllocDeviceMem: BM_Alloc Failed [398,
+drivers/gpu/pvr/devicemem.c]
+[ 2761.782196] PVR_K:(Error): MMU_Alloc: RA_Alloc of VMArena failed [2658,
+drivers/gpu/pvr/sgx/mmu.c]
+[ 2761.782348] PVR_K:(Error): MMU_Alloc: Alloc of DevVAddr failed from heap General
+ID117440512 [2661, drivers/gpu/pvr/sgx/mmu.c]
+[ 2761.782470] PVR_K:(Error): DevMemoryAlloc ERROR MMU_Alloc [1637,
+drivers/gpu/pvr/buffer_manager.c]
+[ 2761.782592] PVR_K:(Error): BM_ImportMemory: DevMemoryAlloc(0x12c000) failed [2349,
+drivers/gpu/pvr/buffer_manager.c]
+[ 2761.782806] PVR_K:(Error): AllocMemory: RA_Alloc(0x12c000) FAILED [115,
+drivers/gpu/pvr/buffer_manager.c]
+[ 2761.782928] PVR_K:(Error): BM_Alloc: AllocMemory FAILED [1257,
+drivers/gpu/pvr/buffer_manager.c]
+[ 2761.783020] PVR_K:(Error): AllocDeviceMem: BM_Alloc Failed [398,
+drivers/gpu/pvr/devicemem.c]
+
+This reverts commit 155363561757575f147ccd8c250699ae17af0d6f.
+
+Upstream-Status: Inappropiate [disable feature]
+---
+ src/compositor/compositor_api/qwaylandsurface.cpp      | 18 ++----------------
+ src/compositor/compositor_api/qwaylandsurface.h        |  7 +------
+ src/compositor/wayland_wrapper/qwlextendedsurface.cpp  | 14 ++++----------
+ src/compositor/wayland_wrapper/qwlextendedsurface_p.h  |  6 +-----
+ src/compositor/wayland_wrapper/qwlshellsurface.cpp     | 15 ---------------
+ .../wayland_common/qwaylandextendedsurface.cpp         | 14 ++++++++++++--
+ .../platforms/wayland_common/qwaylandextendedsurface.h |  6 +++++-
+ .../platforms/wayland_common/qwaylandwindow.cpp        | 13 ++++++++++++-
+ src/plugins/platforms/wayland_common/qwaylandwindow.h  |  2 ++
+ 9 files changed, 39 insertions(+), 56 deletions(-)
+
+diff --git a/src/compositor/compositor_api/qwaylandsurface.cpp b/src/compositor/compositor_api/qwaylandsurface.cpp
+index a51e190..8daf9d2 100644
+--- a/src/compositor/compositor_api/qwaylandsurface.cpp
++++ b/src/compositor/compositor_api/qwaylandsurface.cpp
+@@ -290,25 +290,11 @@ QWaylandSurface *QWaylandSurface::transientParent() const
+     return 0;
+ }
+ 
+-QWindow::Visibility QWaylandSurface::visibility() const
+-{
+-    Q_D(const QWaylandSurface);
+-    if (d->surface->extendedSurface())
+-        return d->surface->extendedSurface()->visibility();
+-
+-    return QWindow::AutomaticVisibility;
+-}
+-
+-void QWaylandSurface::setVisibility(QWindow::Visibility visibility)
++void QWaylandSurface::sendOnScreenVisibilityChange(bool visible)
+ {
+     Q_D(QWaylandSurface);
+     if (d->surface->extendedSurface())
+-        d->surface->extendedSurface()->setVisibility(visibility);
+-}
+-
+-void QWaylandSurface::sendOnScreenVisibilityChange(bool visible)
+-{
+-    setVisibility(visible ? QWindow::AutomaticVisibility : QWindow::Hidden);
++        d->surface->extendedSurface()->sendOnScreenVisibility(visible);
+ }
+ 
+ QString QWaylandSurface::className() const
+diff --git a/src/compositor/compositor_api/qwaylandsurface.h b/src/compositor/compositor_api/qwaylandsurface.h
+index b4f786b..5349f89 100644
+--- a/src/compositor/compositor_api/qwaylandsurface.h
++++ b/src/compositor/compositor_api/qwaylandsurface.h
+@@ -45,7 +45,6 @@
+ 
+ #include <QtCore/QScopedPointer>
+ #include <QtGui/QImage>
+-#include <QtGui/QWindow>
+ #include <QtCore/QVariantMap>
+ 
+ #include <QtGui/QOpenGLContext>
+@@ -80,7 +79,6 @@ class Q_COMPOSITOR_EXPORT QWaylandSurface : public QObject
+     Q_PROPERTY(QString className READ className NOTIFY classNameChanged)
+     Q_PROPERTY(QString title READ title NOTIFY titleChanged)
+     Q_PROPERTY(Qt::ScreenOrientations orientationUpdateMask READ orientationUpdateMask NOTIFY orientationUpdateMaskChanged)
+-    Q_PROPERTY(QWindow::Visibility visibility READ visibility WRITE setVisibility NOTIFY visibilityChanged)
+ 
+     Q_ENUMS(WindowFlag)
+     Q_FLAGS(WindowFlag WindowFlags)
+@@ -128,9 +126,7 @@ public:
+     uint texture(QOpenGLContext *context) const;
+ #endif
+ 
+-    QWindow::Visibility visibility() const;
+-    void setVisibility(QWindow::Visibility visibility);
+-    Q_INVOKABLE void sendOnScreenVisibilityChange(bool visible); // Compat
++    Q_INVOKABLE void sendOnScreenVisibilityChange(bool visible);
+ 
+     void frameFinished();
+ 
+@@ -179,7 +175,6 @@ signals:
+     void titleChanged();
+     void raiseRequested();
+     void lowerRequested();
+-    void visibilityChanged();
+ };
+ 
+ QT_END_NAMESPACE
+diff --git a/src/compositor/wayland_wrapper/qwlextendedsurface.cpp b/src/compositor/wayland_wrapper/qwlextendedsurface.cpp
+index 4f1791d..0f6ce8c 100644
+--- a/src/compositor/wayland_wrapper/qwlextendedsurface.cpp
++++ b/src/compositor/wayland_wrapper/qwlextendedsurface.cpp
+@@ -83,19 +83,13 @@ void ExtendedSurface::sendGenericProperty(const QString &name, const QVariant &v
+ 
+ }
+ 
+-void ExtendedSurface::setVisibility(QWindow::Visibility visibility, bool updateClient)
++void ExtendedSurface::sendOnScreenVisibility(bool visible)
+ {
+-    if (visibility == m_visibility)
+-        return;
+-
+-    m_visibility = visibility;
+-    emit m_surface->waylandSurface()->visibilityChanged();
+-
+-    // If this change came from the client, we shouldn't update it
+-    if (updateClient)
+-        send_onscreen_visibility(m_visibility);
++    int32_t visibleInt = visible;
++    send_onscreen_visibility(visibleInt);
+ }
+ 
++
+ void ExtendedSurface::extended_surface_update_generic_property(Resource *resource,
+                                                                const QString &name,
+                                                                struct wl_array *value)
+diff --git a/src/compositor/wayland_wrapper/qwlextendedsurface_p.h b/src/compositor/wayland_wrapper/qwlextendedsurface_p.h
+index ecf2f49..4ce34ce 100644
+--- a/src/compositor/wayland_wrapper/qwlextendedsurface_p.h
++++ b/src/compositor/wayland_wrapper/qwlextendedsurface_p.h
+@@ -49,7 +49,6 @@
+ 
+ #include <QtCore/QVariant>
+ #include <QtCore/QLinkedList>
+-#include <QtGui/QWindow>
+ 
+ QT_BEGIN_NAMESPACE
+ 
+@@ -78,9 +77,7 @@ public:
+     ~ExtendedSurface();
+ 
+     void sendGenericProperty(const QString &name, const QVariant &variant);
+-
+-    QWindow::Visibility visibility() const { return m_visibility; }
+-    void setVisibility(QWindow::Visibility visibility, bool updateClient = true);
++    void sendOnScreenVisibility(bool visible);
+ 
+     void setSubSurface(ExtendedSurface *subSurface,int x, int y);
+     void removeSubSurface(ExtendedSurface *subSurfaces);
+@@ -102,7 +99,6 @@ private:
+     Qt::ScreenOrientation m_contentOrientation;
+ 
+     QWaylandSurface::WindowFlags m_windowFlags;
+-    QWindow::Visibility m_visibility;
+ 
+     QByteArray m_authenticationToken;
+     QVariantMap m_windowProperties;
+diff --git a/src/compositor/wayland_wrapper/qwlshellsurface.cpp b/src/compositor/wayland_wrapper/qwlshellsurface.cpp
+index a1e6bb3..c6e67c0 100644
+--- a/src/compositor/wayland_wrapper/qwlshellsurface.cpp
++++ b/src/compositor/wayland_wrapper/qwlshellsurface.cpp
+@@ -45,7 +45,6 @@
+ #include "qwlinputdevice_p.h"
+ #include "qwlsubsurface_p.h"
+ #include "qwlpointer_p.h"
+-#include "qwlextendedsurface_p.h"
+ 
+ #include <QtCore/qglobal.h>
+ #include <QtCore/QDebug>
+@@ -209,8 +208,6 @@ void ShellSurface::shell_surface_set_toplevel(Resource *resource)
+     m_xOffset = 0;
+     m_yOffset = 0;
+ 
+-    if (m_surface->extendedSurface())
+-        m_surface->extendedSurface()->setVisibility(QWindow::Windowed, false);
+ }
+ 
+ void ShellSurface::shell_surface_set_transient(Resource *resource,
+@@ -228,9 +225,6 @@ void ShellSurface::shell_surface_set_transient(Resource *resource,
+     m_yOffset = y;
+     if (flags & WL_SHELL_SURFACE_TRANSIENT_INACTIVE)
+         surface()->setTransientInactive(true);
+-
+-    if (m_surface->extendedSurface())
+-        m_surface->extendedSurface()->setVisibility(QWindow::AutomaticVisibility, false);
+ }
+ 
+ void ShellSurface::shell_surface_set_fullscreen(Resource *resource,
+@@ -244,9 +238,6 @@ void ShellSurface::shell_surface_set_fullscreen(Resource *resource,
+     Q_UNUSED(output);
+     QSize defaultScreenSize = m_surface->compositor()->outputGeometry().size();
+     send_configure(resize_bottom_right, defaultScreenSize.width(), defaultScreenSize.height());
+-
+-    if (m_surface->extendedSurface())
+-        m_surface->extendedSurface()->setVisibility(QWindow::FullScreen, false);
+ }
+ 
+ void ShellSurface::shell_surface_set_popup(Resource *resource, wl_resource *input_device, uint32_t time, wl_resource *parent, int32_t x, int32_t y, uint32_t flags)
+@@ -258,9 +249,6 @@ void ShellSurface::shell_surface_set_popup(Resource *resource, wl_resource *inpu
+     Q_UNUSED(x);
+     Q_UNUSED(y);
+     Q_UNUSED(flags);
+-
+-    if (m_surface->extendedSurface())
+-        m_surface->extendedSurface()->setVisibility(QWindow::AutomaticVisibility, false);
+ }
+ 
+ void ShellSurface::shell_surface_set_maximized(Resource *resource,
+@@ -270,9 +258,6 @@ void ShellSurface::shell_surface_set_maximized(Resource *resource,
+     Q_UNUSED(output);
+     QSize defaultScreenSize = m_surface->compositor()->outputGeometry().size();
+     send_configure(resize_bottom_right, defaultScreenSize.width(), defaultScreenSize.height());
+-
+-    if (m_surface->extendedSurface())
+-        m_surface->extendedSurface()->setVisibility(QWindow::Maximized, false);
+ }
+ 
+ void ShellSurface::shell_surface_pong(Resource *resource,
+diff --git a/src/plugins/platforms/wayland_common/qwaylandextendedsurface.cpp b/src/plugins/platforms/wayland_common/qwaylandextendedsurface.cpp
+index 58eb0a8..3576d73 100644
+--- a/src/plugins/platforms/wayland_common/qwaylandextendedsurface.cpp
++++ b/src/plugins/platforms/wayland_common/qwaylandextendedsurface.cpp
+@@ -58,6 +58,7 @@ QT_BEGIN_NAMESPACE
+ QWaylandExtendedSurface::QWaylandExtendedSurface(QWaylandWindow *window, struct ::qt_extended_surface *extended_surface)
+     : QtWayland::qt_extended_surface(extended_surface)
+     , m_window(window)
++    , m_exposed(true)
+ {
+ }
+ 
+@@ -111,9 +112,18 @@ QVariant QWaylandExtendedSurface::property(const QString &name, const QVariant &
+     return m_properties.value(name,defaultValue);
+ }
+ 
+-void QWaylandExtendedSurface::extended_surface_onscreen_visibility(int32_t visibility)
++void QWaylandExtendedSurface::extended_surface_onscreen_visibility(int32_t visible)
+ {
+-    m_window->window()->setVisibility(static_cast<QWindow::Visibility>(visibility));
++    // Do not send events when the state is not changing...
++    if (visible == m_exposed)
++        return;
++
++    m_exposed = visible;
++    QWaylandWindow *w = m_window;
++    QWindowSystemInterface::handleExposeEvent(w->window(),
++                                              visible
++                                              ? QRegion(w->geometry())
++                                              : QRegion());
+ }
+ 
+ void QWaylandExtendedSurface::extended_surface_set_generic_property(const QString &name, wl_array *value)
+diff --git a/src/plugins/platforms/wayland_common/qwaylandextendedsurface.h b/src/plugins/platforms/wayland_common/qwaylandextendedsurface.h
+index 4bef5e0..dc30d46 100644
+--- a/src/plugins/platforms/wayland_common/qwaylandextendedsurface.h
++++ b/src/plugins/platforms/wayland_common/qwaylandextendedsurface.h
+@@ -69,13 +69,17 @@ public:
+ 
+     Qt::WindowFlags setWindowFlags(Qt::WindowFlags flags);
+ 
++    bool isExposed() const { return m_exposed; }
++
+ private:
+-    void extended_surface_onscreen_visibility(int32_t visibility) Q_DECL_OVERRIDE;
++    void extended_surface_onscreen_visibility(int32_t visible) Q_DECL_OVERRIDE;
+     void extended_surface_set_generic_property(const QString &name, wl_array *value) Q_DECL_OVERRIDE;
+     void extended_surface_close() Q_DECL_OVERRIDE;
+ 
+     QWaylandWindow *m_window;
+     QVariantMap m_properties;
++
++    bool m_exposed;
+ };
+ 
+ QT_END_NAMESPACE
+diff --git a/src/plugins/platforms/wayland_common/qwaylandwindow.cpp b/src/plugins/platforms/wayland_common/qwaylandwindow.cpp
+index e30fdc8..8e0c3a8 100644
+--- a/src/plugins/platforms/wayland_common/qwaylandwindow.cpp
++++ b/src/plugins/platforms/wayland_common/qwaylandwindow.cpp
+@@ -211,7 +211,7 @@ void QWaylandWindow::setVisible(bool visible)
+         // there was no frame before it will be stuck at the waitForFrameSync() in
+         // QWaylandShmBackingStore::beginPaint().
+     } else {
+-        QWindowSystemInterface::handleExposeEvent(window(), QRegion());
++        QWindowSystemInterface::handleExposeEvent(window(), QRect(QPoint(), geometry().size()));
+         attach(static_cast<QWaylandBuffer *>(0), 0, 0);
+     }
+     damage(QRect(QPoint(0,0),geometry().size()));
+@@ -232,6 +232,17 @@ void QWaylandWindow::lower()
+         mExtendedWindow->lower();
+ }
+ 
++
++bool QWaylandWindow::isExposed() const
++{
++    if (!window()->isVisible())
++        return false;
++    if (mExtendedWindow)
++        return mExtendedWindow->isExposed();
++    return true;
++}
++
++
+ void QWaylandWindow::configure(uint32_t edges, int32_t width, int32_t height)
+ {
+     QMutexLocker resizeLocker(&mResizeLock);
+diff --git a/src/plugins/platforms/wayland_common/qwaylandwindow.h b/src/plugins/platforms/wayland_common/qwaylandwindow.h
+index 8fd104d..c5c2bbe 100644
+--- a/src/plugins/platforms/wayland_common/qwaylandwindow.h
++++ b/src/plugins/platforms/wayland_common/qwaylandwindow.h
+@@ -136,6 +136,8 @@ public:
+     void raise() Q_DECL_OVERRIDE;
+     void lower() Q_DECL_OVERRIDE;
+ 
++    bool isExposed() const;
++
+     QWaylandDecoration *decoration() const;
+     void setDecoration(QWaylandDecoration *decoration);
+ 
+-- 
+1.8.1.2
+
