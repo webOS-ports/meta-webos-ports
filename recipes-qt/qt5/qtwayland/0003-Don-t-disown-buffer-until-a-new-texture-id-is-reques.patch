@@ -1,0 +1,78 @@
+From 0f782d044fa05ad1b56d84ac64fc1453f5a62e63 Mon Sep 17 00:00:00 2001
+From: Aaron Kennedy <aaron.kennedy@jollamobile.com>
+Date: Mon, 15 Jul 2013 07:48:14 +0000
+Subject: [PATCH 3/3] Don't disown() buffer until a new texture id is requested
+
+Upstream-Status: Pending [https://qt.gitorious.org/qt/qtwayland]
+---
+ src/compositor/wayland_wrapper/qwlsurface.cpp | 23 +++++++++++++++++++++--
+ src/compositor/wayland_wrapper/qwlsurface_p.h |  5 +++++
+ 2 files changed, 26 insertions(+), 2 deletions(-)
+
+diff --git a/src/compositor/wayland_wrapper/qwlsurface.cpp b/src/compositor/wayland_wrapper/qwlsurface.cpp
+index f3a9aa4..7574175 100644
+--- a/src/compositor/wayland_wrapper/qwlsurface.cpp
++++ b/src/compositor/wayland_wrapper/qwlsurface.cpp
+@@ -85,6 +85,8 @@ Surface::Surface(struct wl_client *client, uint32_t id, Compositor *compositor)
+     , m_shellSurface(0)
+     , m_transientInactive(false)
+     , m_isCursorSurface(false)
++    , m_textureIdBufferNeedsDisown(false)
++    , m_textureIdBuffer(0)
+ {
+     wl_list_init(&m_frame_callback_list);
+ 
+@@ -212,6 +214,14 @@ GLuint Surface::textureId(QOpenGLContext *context) const
+         QWaylandGraphicsHardwareIntegration *hwIntegration = m_compositor->graphicsHWIntegration();
+         const_cast<SurfaceBuffer *>(surfacebuffer)->createTexture(hwIntegration,context);
+     }
++
++    if (m_textureIdBufferNeedsDisown) {
++        Q_ASSERT(m_textureIdBuffer);
++        const_cast<SurfaceBuffer *>(m_textureIdBuffer)->disown();
++        m_textureIdBufferNeedsDisown = false;
++    }
++    m_textureIdBuffer = surfacebuffer;
++
+     return surfacebuffer->texture();
+ }
+ #endif // QT_COMPOSITOR_WAYLAND_GL
+@@ -221,8 +231,17 @@ void Surface::sendFrameCallback()
+     SurfaceBuffer *surfacebuffer = currentSurfaceBuffer();
+     surfacebuffer->setDisplayed();
+     if (m_backBuffer) {
+-        if (m_frontBuffer)
+-            m_frontBuffer->disown();
++        if (m_frontBuffer) {
++#ifdef QT_COMPOSITOR_WAYLAND_GL
++            if (m_textureIdBuffer == m_frontBuffer) {
++                m_textureIdBufferNeedsDisown = true;
++            } else {
++#endif
++                m_frontBuffer->disown();
++#ifdef QT_COMPOSITOR_WAYLAND_GL
++            }
++#endif
++        }
+         m_frontBuffer = m_backBuffer;
+     }
+ 
+diff --git a/src/compositor/wayland_wrapper/qwlsurface_p.h b/src/compositor/wayland_wrapper/qwlsurface_p.h
+index a4817d7..32a597d 100644
+--- a/src/compositor/wayland_wrapper/qwlsurface_p.h
++++ b/src/compositor/wayland_wrapper/qwlsurface_p.h
+@@ -168,6 +168,11 @@ private:
+     bool m_transientInactive;
+     bool m_isCursorSurface;
+ 
++#ifdef QT_COMPOSITOR_WAYLAND_GL
++    mutable bool m_textureIdBufferNeedsDisown;
++    mutable const SurfaceBuffer *m_textureIdBuffer;
++#endif
++
+     inline SurfaceBuffer *currentSurfaceBuffer() const;
+     void damage(const QRect &rect);
+     bool advanceBufferQueue();
+-- 
+1.8.1.2
+
