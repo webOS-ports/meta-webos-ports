@@ -1,0 +1,625 @@
+From 8189fb8cd11dccc454e429ec25bf289056348096 Mon Sep 17 00:00:00 2001
+From: Simon Busch <morphis@gravedo.de>
+Date: Tue, 23 Jul 2013 21:03:05 +0000
+Subject: [PATCH] Import various changes from Mer's variant of qtwayland
+
+Repository is at: https://github.com/mer-packages/qtwayland.git
+SRCREV: 2e6d0aae26603b022ec96531aac6270bd2e76b54
+
+Signed-off-by: Simon Busch <morphis@gravedo.de>
+---
+ examples/qml-compositor/WindowContainer.qml        |  4 +-
+ examples/qml-compositor/main.cpp                   |  4 +-
+ examples/qml-compositor/qml-compositor.pro         |  2 +-
+ src/compositor/compositor_api/qwaylandsurface.h    |  3 +-
+ .../compositor_api/qwaylandsurfaceitem.cpp         |  1 +
+ .../wayland_wrapper/qwlextendedsurface.cpp         | 10 +++++
+ .../wayland_wrapper/qwlextendedsurface_p.h         |  2 +
+ src/compositor/wayland_wrapper/qwlsurface.cpp      | 23 +++++++++-
+ src/compositor/wayland_wrapper/qwlsurface_p.h      |  5 +++
+ src/extensions/surface-extension.xml               |  6 +++
+ src/plugins/platforms/platforms.pro                |  2 +
+ .../platforms/qwayland-egl/qwaylandglcontext.cpp   | 29 +++---------
+ .../platforms/qwayland-egl/qwaylandglcontext.h     |  2 -
+ .../platforms/wayland_common/qwaylanddisplay.cpp   | 13 +++++-
+ .../wayland_common/qwaylandeventthread.cpp         |  6 ++-
+ .../wayland_common/qwaylandintegration.cpp         | 21 ++++++++-
+ .../wayland_common/qwaylandshmbackingstore.cpp     |  3 +-
+ .../platforms/wayland_common/qwaylandwindow.cpp    | 52 ++++++++++++++++++----
+ .../platforms/wayland_common/qwaylandwindow.h      | 10 ++++-
+ .../wayland_common/wayland_common_share.pri        |  6 ++-
+ .../wayland-egl/waylandeglintegration.cpp          |  3 ++
+ 21 files changed, 156 insertions(+), 51 deletions(-)
+
+diff --git a/examples/qml-compositor/WindowContainer.qml b/examples/qml-compositor/WindowContainer.qml
+index 701b46d..701d9e2 100644
+--- a/examples/qml-compositor/WindowContainer.qml
++++ b/examples/qml-compositor/WindowContainer.qml
+@@ -101,7 +101,7 @@ Item {
+         enabled: true;
+         NumberAnimation { easing.type: Easing.Linear; duration: 250; }
+     }
+-
++/*
+     ContrastEffect {
+         id: effect
+         source: child
+@@ -115,7 +115,7 @@ Item {
+             NumberAnimation { easing.type: Easing.Linear; duration: 200; }
+         }
+     }
+-
++*/
+     transform: [
+         Scale { id: scaleTransform; origin.x: container.width / 2; origin.y: container.height / 2; xScale: 1; yScale: 1 }
+     ]
+diff --git a/examples/qml-compositor/main.cpp b/examples/qml-compositor/main.cpp
+index d481a25..2bfe371 100644
+--- a/examples/qml-compositor/main.cpp
++++ b/examples/qml-compositor/main.cpp
+@@ -159,8 +159,8 @@ int main(int argc, char *argv[])
+     QmlCompositor compositor;
+     compositor.setTitle(QLatin1String("QML Compositor"));
+     compositor.setGeometry(0, 0, 1024, 768);
+-    compositor.show();
+-
++    compositor.showFullScreen();
++    
+     compositor.rootContext()->setContextProperty("compositor", &compositor);
+ 
+     QObject::connect(&compositor, SIGNAL(windowAdded(QVariant)), compositor.rootObject(), SLOT(windowAdded(QVariant)));
+diff --git a/examples/qml-compositor/qml-compositor.pro b/examples/qml-compositor/qml-compositor.pro
+index 0bc0b02..e397002 100644
+--- a/examples/qml-compositor/qml-compositor.pro
++++ b/examples/qml-compositor/qml-compositor.pro
+@@ -2,7 +2,7 @@ DEFINES += QT_COMPOSITOR_QUICK
+ 
+ LIBS += -L ../../lib
+ 
+-QT += quick qml v8
++QT += quick qml
+ QT += quick-private
+ 
+ QT += compositor
+diff --git a/src/compositor/compositor_api/qwaylandsurface.h b/src/compositor/compositor_api/qwaylandsurface.h
+index 0147927..5349f89 100644
+--- a/src/compositor/compositor_api/qwaylandsurface.h
++++ b/src/compositor/compositor_api/qwaylandsurface.h
+@@ -173,7 +173,8 @@ signals:
+     void extendedSurfaceReady();
+     void classNameChanged();
+     void titleChanged();
+-
++    void raiseRequested();
++    void lowerRequested();
+ };
+ 
+ QT_END_NAMESPACE
+diff --git a/src/compositor/compositor_api/qwaylandsurfaceitem.cpp b/src/compositor/compositor_api/qwaylandsurfaceitem.cpp
+index f60a3fa..7c597ab 100644
+--- a/src/compositor/compositor_api/qwaylandsurfaceitem.cpp
++++ b/src/compositor/compositor_api/qwaylandsurfaceitem.cpp
+@@ -110,6 +110,7 @@ QWaylandSurfaceItem::QWaylandSurfaceItem(QWaylandSurface *surface, QQuickItem *p
+     , m_useTextureAlpha(false)
+     , m_clientRenderingEnabled(true)
+     , m_touchEventsEnabled(false)
++    , m_resizeSurfaceToItem(false)
+ {
+     init(surface);
+ }
+diff --git a/src/compositor/wayland_wrapper/qwlextendedsurface.cpp b/src/compositor/wayland_wrapper/qwlextendedsurface.cpp
+index 3ab8864..e3797f5 100644
+--- a/src/compositor/wayland_wrapper/qwlextendedsurface.cpp
++++ b/src/compositor/wayland_wrapper/qwlextendedsurface.cpp
+@@ -161,6 +161,16 @@ void ExtendedSurface::extended_surface_destroy_resource(Resource *)
+     delete this;
+ }
+ 
++void ExtendedSurface::extended_surface_raise(Resource *)
++{
++    m_surface->waylandSurface()->raiseRequested();
++}
++
++void ExtendedSurface::extended_surface_lower(Resource *)
++{
++    m_surface->waylandSurface()->lowerRequested();
++}
++
+ }
+ 
+ QT_END_NAMESPACE
+diff --git a/src/compositor/wayland_wrapper/qwlextendedsurface_p.h b/src/compositor/wayland_wrapper/qwlextendedsurface_p.h
+index a28ed1b..4ce34ce 100644
+--- a/src/compositor/wayland_wrapper/qwlextendedsurface_p.h
++++ b/src/compositor/wayland_wrapper/qwlextendedsurface_p.h
+@@ -114,6 +114,8 @@ private:
+                                            int32_t flags) Q_DECL_OVERRIDE;
+ 
+     void extended_surface_destroy_resource(Resource *) Q_DECL_OVERRIDE;
++    void extended_surface_raise(Resource *) Q_DECL_OVERRIDE;
++    void extended_surface_lower(Resource *) Q_DECL_OVERRIDE;
+ };
+ 
+ }
+diff --git a/src/compositor/wayland_wrapper/qwlsurface.cpp b/src/compositor/wayland_wrapper/qwlsurface.cpp
+index de4aa24..44d884a 100644
+--- a/src/compositor/wayland_wrapper/qwlsurface.cpp
++++ b/src/compositor/wayland_wrapper/qwlsurface.cpp
+@@ -85,6 +85,8 @@ Surface::Surface(struct wl_client *client, uint32_t id, Compositor *compositor)
+     , m_shellSurface(0)
+     , m_transientInactive(false)
+     , m_isCursorSurface(false)
++    , m_textureIdBufferNeedsDisown(false)
++    , m_textureIdBuffer(0)
+ {
+     wl_list_init(&m_frame_callback_list);
+ 
+@@ -212,6 +214,14 @@ GLuint Surface::textureId(QOpenGLContext *context) const
+         QWaylandGraphicsHardwareIntegration *hwIntegration = m_compositor->graphicsHWIntegration();
+         const_cast<SurfaceBuffer *>(surfacebuffer)->createTexture(hwIntegration,context);
+     }
++
++    if (m_textureIdBufferNeedsDisown) {
++        Q_ASSERT(m_textureIdBuffer);
++        const_cast<SurfaceBuffer *>(m_textureIdBuffer)->disown();
++        m_textureIdBufferNeedsDisown = false;
++    }
++    m_textureIdBuffer = surfacebuffer;
++
+     return surfacebuffer->texture();
+ }
+ #endif // QT_COMPOSITOR_WAYLAND_GL
+@@ -221,8 +231,17 @@ void Surface::sendFrameCallback()
+     SurfaceBuffer *surfacebuffer = currentSurfaceBuffer();
+     surfacebuffer->setDisplayed();
+     if (m_backBuffer) {
+-        if (m_frontBuffer)
+-            m_frontBuffer->disown();
++        if (m_frontBuffer) {
++#ifdef QT_COMPOSITOR_WAYLAND_GL
++            if (m_textureIdBuffer == m_frontBuffer) {
++                m_textureIdBufferNeedsDisown = true;
++            } else {
++#endif
++                m_frontBuffer->disown();
++#ifdef QT_COMPOSITOR_WAYLAND_GL
++            }
++#endif
++        }
+         m_frontBuffer = m_backBuffer;
+     }
+ 
+diff --git a/src/compositor/wayland_wrapper/qwlsurface_p.h b/src/compositor/wayland_wrapper/qwlsurface_p.h
+index 0a4413a..dd418cc 100644
+--- a/src/compositor/wayland_wrapper/qwlsurface_p.h
++++ b/src/compositor/wayland_wrapper/qwlsurface_p.h
+@@ -171,6 +171,11 @@ private:
+     bool m_transientInactive;
+     bool m_isCursorSurface;
+ 
++#ifdef QT_COMPOSITOR_WAYLAND_GL
++    mutable bool m_textureIdBufferNeedsDisown;
++    mutable const SurfaceBuffer *m_textureIdBuffer;
++#endif
++
+     inline SurfaceBuffer *currentSurfaceBuffer() const;
+     void damage(const QRect &rect);
+     bool advanceBufferQueue();
+diff --git a/src/extensions/surface-extension.xml b/src/extensions/surface-extension.xml
+index ccc6579..a2c9688 100644
+--- a/src/extensions/surface-extension.xml
++++ b/src/extensions/surface-extension.xml
+@@ -84,5 +84,11 @@
+             <arg name="flags" type="int"/>
+         </request>
+ 
++        <request name="raise">
++        </request>
++
++        <request name="lower">
++        </request>
++
+     </interface>
+ </protocol>
+diff --git a/src/plugins/platforms/platforms.pro b/src/plugins/platforms/platforms.pro
+index 1676029..0d556c1 100644
+--- a/src/plugins/platforms/platforms.pro
++++ b/src/plugins/platforms/platforms.pro
+@@ -2,6 +2,8 @@ TEMPLATE=subdirs
+ CONFIG+=ordered
+ SUBDIRS += wayland_common
+ 
++isEmpty(QT_WAYLAND_GL_CONFIG):QT_WAYLAND_GL_CONFIG = $$(QT_WAYLAND_GL_CONFIG)
++
+ equals(QT_WAYLAND_GL_CONFIG, nogl) {
+     SUBDIRS += qwayland-nogl
+ } else {
+diff --git a/src/plugins/platforms/qwayland-egl/qwaylandglcontext.cpp b/src/plugins/platforms/qwayland-egl/qwaylandglcontext.cpp
+index ccfa008..2233753 100644
+--- a/src/plugins/platforms/qwayland-egl/qwaylandglcontext.cpp
++++ b/src/plugins/platforms/qwayland-egl/qwaylandglcontext.cpp
+@@ -64,7 +64,6 @@ QWaylandGLContext::QWaylandGLContext(EGLDisplay eglDisplay, const QSurfaceFormat
+     , m_format(q_glFormatFromConfig(m_eglDisplay, m_config))
+     , m_blitProgram(0)
+     , m_textureCache(0)
+-    , m_currentOnSurface(0)
+ {
+     m_shareEGLContext = share ? static_cast<QWaylandGLContext *>(share)->eglContext() : EGL_NO_CONTEXT;
+ 
+@@ -93,20 +92,12 @@ QWaylandGLContext::~QWaylandGLContext()
+ bool QWaylandGLContext::makeCurrent(QPlatformSurface *surface)
+ {
+     QWaylandEglWindow *window = static_cast<QWaylandEglWindow *>(surface);
+-    if (m_currentOnSurface != window) {
+-        if (m_currentOnSurface) {
+-            QWaylandWindow *oldWindow = m_currentOnSurface;
+-            m_currentOnSurface = 0;
+-            oldWindow->resizeMutex()->unlock();
+-        }
+-        window->resizeMutex()->lock();
+-        m_currentOnSurface = window;
+-    }
++
++    window->setCanResize(false);
+ 
+     EGLSurface eglSurface = window->eglSurface();
+     if (!eglMakeCurrent(m_eglDisplay, eglSurface, eglSurface, m_context)) {
+         qWarning("QEGLPlatformContext::makeCurrent: eglError: %x, this: %p \n", eglGetError(), this);
+-        m_currentOnSurface->resizeMutex()->unlock();
+         return false;
+     }
+ 
+@@ -118,11 +109,6 @@ bool QWaylandGLContext::makeCurrent(QPlatformSurface *surface)
+ void QWaylandGLContext::doneCurrent()
+ {
+     eglMakeCurrent(m_eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+-    if (m_currentOnSurface) {
+-        QWaylandWindow *window = m_currentOnSurface;
+-        m_currentOnSurface = 0;
+-        window->resizeMutex()->unlock();
+-    }
+ }
+ 
+ void QWaylandGLContext::swapBuffers(QPlatformSurface *surface)
+@@ -135,9 +121,9 @@ void QWaylandGLContext::swapBuffers(QPlatformSurface *surface)
+         makeCurrent(surface);
+         if (!m_blitProgram) {
+             m_blitProgram = new QOpenGLShaderProgram();
+-            m_blitProgram->addShaderFromSourceCode(QOpenGLShader::Vertex, "attribute vec4 position;\n\
+-                                                                        attribute vec4 texCoords;\n\
+-                                                                        varying vec2 outTexCoords;\n\
++            m_blitProgram->addShaderFromSourceCode(QOpenGLShader::Vertex, "attribute highp vec4 position;\n\
++                                                                        attribute highp vec4 texCoords;\n\
++                                                                        varying highp vec2 outTexCoords;\n\
+                                                                         void main()\n\
+                                                                         {\n\
+                                                                             gl_Position = position;\n\
+@@ -218,11 +204,8 @@ void QWaylandGLContext::swapBuffers(QPlatformSurface *surface)
+     }
+ 
+     eglSwapBuffers(m_eglDisplay, eglSurface);
+-    if (m_currentOnSurface == window) {
+-        m_currentOnSurface = 0;
+-        window->resizeMutex()->unlock();
+-    }
+ 
++    window->setCanResize(true);
+ }
+ 
+ GLuint QWaylandGLContext::defaultFramebufferObject(QPlatformSurface *surface) const
+diff --git a/src/plugins/platforms/qwayland-egl/qwaylandglcontext.h b/src/plugins/platforms/qwayland-egl/qwaylandglcontext.h
+index b421683..bc231e8 100644
+--- a/src/plugins/platforms/qwayland-egl/qwaylandglcontext.h
++++ b/src/plugins/platforms/qwayland-egl/qwaylandglcontext.h
+@@ -86,8 +86,6 @@ private:
+     QSurfaceFormat m_format;
+     QOpenGLShaderProgram *m_blitProgram;
+     QOpenGLTextureCache *m_textureCache;
+-
+-    QWaylandWindow *m_currentOnSurface;
+ };
+ 
+ QT_END_NAMESPACE
+diff --git a/src/plugins/platforms/wayland_common/qwaylanddisplay.cpp b/src/plugins/platforms/wayland_common/qwaylanddisplay.cpp
+index 4586ff8..2726dd2 100644
+--- a/src/plugins/platforms/wayland_common/qwaylanddisplay.cpp
++++ b/src/plugins/platforms/wayland_common/qwaylanddisplay.cpp
+@@ -62,6 +62,7 @@
+ #include "qwaylandqtkey.h"
+ 
+ #include <QtCore/QAbstractEventDispatcher>
++#include <QtCore/QCoreApplication>
+ #include <QtGui/private/qguiapplication_p.h>
+ 
+ #include <QtCore/QDebug>
+@@ -162,13 +163,21 @@ QWaylandDisplay::~QWaylandDisplay(void)
+ 
+ void QWaylandDisplay::flushRequests()
+ {
+-    wl_display_dispatch_queue_pending(mDisplay, mEventQueue);
++    int ret = wl_display_dispatch_queue_pending(mDisplay, mEventQueue);
++    if (ret < 0) {
++        qWarning("The wayland connection broke (error %d). Did the wayland compositor die?", errno);
++        QCoreApplication::exit(1);
++    }
+     wl_display_flush(mDisplay);
+ }
+ 
+ void QWaylandDisplay::blockingReadEvents()
+ {
+-    wl_display_dispatch_queue(mDisplay, mEventQueue);
++    int ret = wl_display_dispatch_queue(mDisplay, mEventQueue);
++    if (ret < 0) {
++        qWarning("The wayland connection broke (error %d). Did the wayland compositor die?", errno);
++        QCoreApplication::exit(1);
++    }
+ }
+ 
+ QWaylandScreen *QWaylandDisplay::screenForOutput(struct wl_output *output) const
+diff --git a/src/plugins/platforms/wayland_common/qwaylandeventthread.cpp b/src/plugins/platforms/wayland_common/qwaylandeventthread.cpp
+index 17fa744..d735e09 100644
+--- a/src/plugins/platforms/wayland_common/qwaylandeventthread.cpp
++++ b/src/plugins/platforms/wayland_common/qwaylandeventthread.cpp
+@@ -1,5 +1,6 @@
+ #include "qwaylandeventthread.h"
+ #include <QtCore/QSocketNotifier>
++#include <QtCore/QCoreApplication>
+ 
+ #include <unistd.h>
+ #include <fcntl.h>
+@@ -31,7 +32,10 @@ void QWaylandEventThread::displayConnect()
+ 
+ void QWaylandEventThread::readWaylandEvents()
+ {
+-    wl_display_dispatch(m_display);
++    if (wl_display_dispatch(m_display) < 0) {
++        qWarning("The wayland connection broke (error %d). Did the wayland compositor die?", errno);
++        QCoreApplication::exit(1);
++    }
+     emit newEventsRead();
+ }
+ 
+diff --git a/src/plugins/platforms/wayland_common/qwaylandintegration.cpp b/src/plugins/platforms/wayland_common/qwaylandintegration.cpp
+index a4ddbc9..3087470 100644
+--- a/src/plugins/platforms/wayland_common/qwaylandintegration.cpp
++++ b/src/plugins/platforms/wayland_common/qwaylandintegration.cpp
+@@ -71,6 +71,19 @@
+ 
+ QT_BEGIN_NAMESPACE
+ 
++class GenericWaylandTheme: public QGenericUnixTheme
++{
++public:
++    QVariant themeHint(ThemeHint hint) const
++    {
++        if (hint == QPlatformTheme::PasswordMaskDelay) {
++            return QVariant(1000);
++        }
++
++        return QGenericUnixTheme::themeHint(hint);
++    }
++};
++
+ QWaylandIntegration::QWaylandIntegration()
+     : mFontDb(new QGenericUnixFontDatabase())
+     , mEventDispatcher(createUnixEventDispatcher())
+@@ -205,12 +218,16 @@ QWaylandDisplay *QWaylandIntegration::display() const
+ 
+ QStringList QWaylandIntegration::themeNames() const
+ {
+-    return QGenericUnixTheme::themeNames();
++    return QStringList("generic_wayland");
+ }
+ 
+ QPlatformTheme *QWaylandIntegration::createPlatformTheme(const QString &name) const
+ {
+-    return QGenericUnixTheme::createUnixTheme(name);
++    if (name == "generic_wayland") {
++        return new GenericWaylandTheme;
++    }
++
++    return 0;
+ }
+ 
+ QT_END_NAMESPACE
+diff --git a/src/plugins/platforms/wayland_common/qwaylandshmbackingstore.cpp b/src/plugins/platforms/wayland_common/qwaylandshmbackingstore.cpp
+index 1c11bef..00a4b13 100644
+--- a/src/plugins/platforms/wayland_common/qwaylandshmbackingstore.cpp
++++ b/src/plugins/platforms/wayland_common/qwaylandshmbackingstore.cpp
+@@ -172,11 +172,13 @@ void QWaylandShmBackingStore::beginPaint(const QRegion &)
+         waylandWindow->waitForFrameSync();
+     }
+ 
++    waylandWindow()->setCanResize(false);
+ }
+ 
+ void QWaylandShmBackingStore::endPaint()
+ {
+     mPainting = false;
++    waylandWindow()->setCanResize(true);
+ }
+ 
+ void QWaylandShmBackingStore::ensureSize()
+@@ -226,7 +228,6 @@ void QWaylandShmBackingStore::flush(QWindow *window, const QRegion &region, cons
+     }
+     waylandWindow()->commit();
+     mFrontBufferIsDirty = false;
+-    waylandWindow()->doResize();
+ }
+ 
+ void QWaylandShmBackingStore::resize(const QSize &size, const QRegion &)
+diff --git a/src/plugins/platforms/wayland_common/qwaylandwindow.cpp b/src/plugins/platforms/wayland_common/qwaylandwindow.cpp
+index 1d62eaa..c8e897a 100644
+--- a/src/plugins/platforms/wayland_common/qwaylandwindow.cpp
++++ b/src/plugins/platforms/wayland_common/qwaylandwindow.cpp
+@@ -74,7 +74,8 @@ QWaylandWindow::QWaylandWindow(QWindow *window)
+     , mBuffer(0)
+     , mWaitingForFrameSync(false)
+     , mFrameCallback(0)
+-    , mResizeExposedSent(false)
++    , mRequestResizeSent(false)
++    , mCanResize(true)
+     , mSentInitialResize(false)
+     , mState(Qt::WindowNoState)
+ {
+@@ -195,6 +196,20 @@ void QWaylandWindow::setVisible(bool visible)
+ }
+ 
+ 
++void QWaylandWindow::raise()
++{
++    if (mExtendedWindow)
++        mExtendedWindow->raise();
++}
++
++
++void QWaylandWindow::lower()
++{
++    if (mExtendedWindow)
++        mExtendedWindow->lower();
++}
++
++
+ bool QWaylandWindow::isExposed() const
+ {
+     if (!window()->isVisible())
+@@ -207,19 +222,19 @@ bool QWaylandWindow::isExposed() const
+ 
+ void QWaylandWindow::configure(uint32_t edges, int32_t width, int32_t height)
+ {
++    QMutexLocker resizeLocker(&mResizeLock);
+     mConfigure.edges |= edges;
+     mConfigure.width = width;
+     mConfigure.height = height;
+ 
+-    if (!mResizeExposedSent) {
+-        mResizeExposedSent = true;
+-        QMetaObject::invokeMethod(this, "doResize", Qt::QueuedConnection);
++    if (!mRequestResizeSent && !mConfigure.isEmpty()) {
++        mRequestResizeSent= true;
++        QMetaObject::invokeMethod(this, "requestResize", Qt::QueuedConnection);
+     }
+ }
+ 
+ void QWaylandWindow::doResize()
+ {
+-    mResizeExposedSent = false;
+     if (mConfigure.isEmpty()) {
+         return;
+     }
+@@ -242,13 +257,34 @@ void QWaylandWindow::doResize()
+     }
+     mOffset += QPoint(x, y);
+ 
+-    mResizeLock.lock();
+     setGeometry(geometry);
+-    mResizeLock.unlock();
+ 
+     mConfigure.clear();
+     QWindowSystemInterface::handleGeometryChange(window(), geometry);
+-    QWindowSystemInterface::handleExposeEvent(window(), QRegion(geometry));
++}
++
++void QWaylandWindow::setCanResize(bool canResize)
++{
++    QMutexLocker lock(&mResizeLock);
++    mCanResize = canResize;
++
++    if (canResize && !mConfigure.isEmpty()) {
++        doResize();
++        QWindowSystemInterface::handleExposeEvent(window(), geometry());
++    }
++}
++
++void QWaylandWindow::requestResize()
++{
++    QMutexLocker lock(&mResizeLock);
++
++    if (mCanResize) {
++        doResize();
++    }
++
++    mRequestResizeSent = false;
++    lock.unlock();
++    QWindowSystemInterface::handleExposeEvent(window(), geometry());
+     QWindowSystemInterface::flushWindowSystemEvents();
+ }
+ 
+diff --git a/src/plugins/platforms/wayland_common/qwaylandwindow.h b/src/plugins/platforms/wayland_common/qwaylandwindow.h
+index d5eefaa..d6e8312 100644
+--- a/src/plugins/platforms/wayland_common/qwaylandwindow.h
++++ b/src/plugins/platforms/wayland_common/qwaylandwindow.h
+@@ -133,6 +133,9 @@ public:
+     void setWindowState(Qt::WindowState state);
+     void setWindowFlags(Qt::WindowFlags flags);
+ 
++    void raise();
++    void lower();
++
+     bool isExposed() const;
+ 
+     QWaylandDecoration *decoration() const;
+@@ -154,8 +157,10 @@ public:
+     inline bool isFullscreen() const { return mState == Qt::WindowFullScreen; }
+ 
+     QMutex *resizeMutex() { return &mResizeLock; }
+-public slots:
+     void doResize();
++    void setCanResize(bool canResize);
++public slots:
++    void requestResize();
+ 
+ protected:
+     QWaylandDisplay *mDisplay;
+@@ -175,7 +180,8 @@ protected:
+ 
+     QMutex mResizeLock;
+     QWaylandWindowConfigure mConfigure;
+-    bool mResizeExposedSent;
++    bool mRequestResizeSent;
++    bool mCanResize;
+ 
+     bool mSentInitialResize;
+     QPoint mOffset;
+diff --git a/src/plugins/platforms/wayland_common/wayland_common_share.pri b/src/plugins/platforms/wayland_common/wayland_common_share.pri
+index a9a990b..4f99eef 100644
+--- a/src/plugins/platforms/wayland_common/wayland_common_share.pri
++++ b/src/plugins/platforms/wayland_common/wayland_common_share.pri
+@@ -1,6 +1,8 @@
+ QT += core-private gui-private platformsupport-private
+ CONFIG += link_pkgconfig qpa/genericunixfontdatabase
+ 
++isEmpty(QT_WAYLAND_GL_CONFIG):QT_WAYLAND_GL_CONFIG = $$(QT_WAYLAND_GL_CONFIG)
++
+ !equals(QT_WAYLAND_GL_CONFIG, nogl) {
+     DEFINES += QT_WAYLAND_GL_SUPPORT
+ }
+@@ -16,9 +18,9 @@ config_xkbcommon {
+ }
+ 
+ !contains(QT_CONFIG, no-pkg-config) {
+-    PKGCONFIG += wayland-client wayland-cursor
++    PKGCONFIG += wayland-client wayland-cursor glib-2.0
+ } else {
+-    LIBS += -lwayland-client -lwayland-cursor
++    LIBS += -lwayland-client -lwayland-cursor -lglib2.0
+ }
+ 
+ INCLUDEPATH += $$PWD/../../../shared
+diff --git a/src/plugins/waylandcompositors/wayland-egl/waylandeglintegration.cpp b/src/plugins/waylandcompositors/wayland-egl/waylandeglintegration.cpp
+index f77bdc2..b1977e6 100644
+--- a/src/plugins/waylandcompositors/wayland-egl/waylandeglintegration.cpp
++++ b/src/plugins/waylandcompositors/wayland-egl/waylandeglintegration.cpp
+@@ -115,6 +115,9 @@ void WaylandEglIntegration::initializeHardware(QtWayland::Display *waylandDispla
+     QPlatformNativeInterface *nativeInterface = QGuiApplication::platformNativeInterface();
+     if (nativeInterface) {
+         d->egl_display = nativeInterface->nativeResourceForWindow("EglDisplay", m_compositor->window());
++	if (!d->egl_display) {
++		d->egl_display = nativeInterface->nativeResourceForIntegration("EglDisplay");
++	}
+         if (d->egl_display) {
+             const char *extensionString = eglQueryString(d->egl_display, EGL_EXTENSIONS);
+             if (extensionString && strstr(extensionString, "EGL_WL_bind_wayland_display"))
+-- 
+1.8.1.2
+
