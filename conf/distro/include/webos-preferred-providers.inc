@@ -25,3 +25,6 @@ VIRTUAL-RUNTIME_init_manager = "upstart"
 # http://lists.openembedded.org/pipermail/openembedded-core/2013-November/086901.html
 BAD_RECOMMENDATIONS += "update-rc.d"
 UPDATERCD_class-target = ""
+
+# We're basing our efforts on the phablet headers
+PREFERRED_PROVIDER_virtual/android-headers = "phablet-headers"
