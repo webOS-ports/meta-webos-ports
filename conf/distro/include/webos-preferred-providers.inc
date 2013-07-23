@@ -26,3 +26,6 @@ VIRTUAL-RUNTIME_init_manager = "upstart"
 # Weak assignment is OK here, because we're not changing existing
 # PREFERRED_PROVIDER, we're just backporting this line from newer default-providers.inc
 PREFERRED_PROVIDER_udev ?= "${@base_contains('DISTRO_FEATURES','systemd','systemd','udev',d)}"
+
+# We're basing our efforts on the phablet headers
+PREFERRED_PROVIDER_virtual/android-headers = "phablet-headers"
