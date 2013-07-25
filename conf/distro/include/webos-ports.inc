@@ -14,3 +14,10 @@ MACHINE_CLASS ?= "${MACHINE}"
 MACHINEOVERRIDES .= ":${MACHINE_CLASS}"
 MACHINEOVERRIDES[vardepsexclude] = "MACHINE MACHINE_CLASS"
 OVERRIDES[vardepsexclude] = "MACHINE MACHINE_CLASS"
+
+# switch from upstart to systemd
+WEBOS_DISTRO_FEATURES_INIT = "systemd"
+WEBOS_DISTRO_FEATURES_INIT_CONSIDERED = "sysvinit"
+VIRTUAL-RUNTIME_initscripts = ""
+VIRTUAL-RUNTIME_init_manager = "systemd systemd-compat-units systemd-machine-units"
+BAD_RECOMMENDATIONS = "update-rc.d"
