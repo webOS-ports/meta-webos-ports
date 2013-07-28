@@ -9,6 +9,7 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 RDEPENDS_${PN} = " \
   android-system-compat \
   android-system \
+  android-tools \
   \
   distro-feed-configs \
   pulseaudio-server \
