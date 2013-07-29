@@ -17,3 +17,15 @@ SRCREV = "54d9c7935ac7d26ec79de98189fce6cd637c178d"
 S = "${WORKDIR}/git"
 
 inherit cmake_qt5
+inherit systemd
+
+SYSTEMD_PACKAGES = "${PN}"
+SYSTEMD_SERVICE_${PN} = "luna-next.service"
+
+do_install_append() {
+    install -d ${D}${systemd_unitdir}/system
+    install -m 0644 ${S}/files/systemd/luna-next.service ${D}${systemd_unitdir}/system/
+}
+
+FILES_${PN} += "${OE_QMAKE_PATH_IMPORTS}/LunaNext"
+FILES_${PN}-dbg += "${OE_QMAKE_PATH_IMPORTS}/LunaNext/.debug"
