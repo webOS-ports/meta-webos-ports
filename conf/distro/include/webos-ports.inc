@@ -21,3 +21,6 @@ WEBOS_DISTRO_FEATURES_INIT_CONSIDERED = "sysvinit"
 VIRTUAL-RUNTIME_initscripts = ""
 VIRTUAL-RUNTIME_init_manager = "systemd systemd-compat-units systemd-machine-units"
 BAD_RECOMMENDATIONS = "update-rc.d"
+
+# Enable adb support
+DISTRO_FEATURES += "adb"
