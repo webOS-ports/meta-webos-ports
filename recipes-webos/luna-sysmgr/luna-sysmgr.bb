@@ -5,17 +5,16 @@ SECTION = "webos/base"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-DEPENDS = "cjson luna-service2 sqlite3 luna-sysmgr-ipc luna-sysmgr-ipc-messages pmloglib qt4-webos librolegen nyx-lib openssl luna-webkit-api luna-prefs libpbnjson freetype luna-sysmgr-common"
+DEPENDS = "cjson luna-service2 sqlite3 luna-sysmgr-ipc luna-sysmgr-ipc-messages pmloglib librolegen nyx-lib openssl luna-webkit-api luna-prefs libpbnjson freetype luna-sysmgr-common"
+DEPENDS += "qtbase qtquick1"
 DEPENDS += "serviceinstaller"
 #DEPENDS += "localization" #TODO
-DEPENDS += "libwebos-gui qt-palm-plugin"
 
 # luna-sysmgr's upstart conf expects to be able to LD_PRELOAD ptmalloc3
 RDEPENDS_${PN} = "ptmalloc3"
 # luna-sysmgr's upstart conf expects to have ionice available. Under OE-core, this is supplied by util-linux.
 RDEPENDS_${PN} += "util-linux"
 #RDEPENDS_${PN} += "jail" #TODO
-RDEPENDS_${PN} += "qt-palm-plugin"
 
 WEBOS_VERSION = "3.0.0-3_1bcdb5bd8b97d148a3e46ae002fcf091b6d202f6"
 
@@ -23,23 +22,18 @@ WEBOS_VERSION = "3.0.0-3_1bcdb5bd8b97d148a3e46ae002fcf091b6d202f6"
 #inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
-inherit webos_qmake
+inherit webos_qmake5
 inherit webos_system_bus
 # Uncomment once installing into /usr/sbin instead of /usr/bin
 #inherit webos_daemon
-inherit webos_machine_dep
 
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit webos-ports-submissions
-SRCREV = "76bcd21147364f94ee87785042e6b23e737ee09a"
+SRCREV = "527ab0dacc0d59ba7b3525ebccd1b278b9266985"
 
-EXTRA_OEMAKE += "MACHINE=${MACHINE}"
-
-do_configure() {
-    MACHINE=${MACHINE} ${QMAKE}
-}
+OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 
 #install_loc() {
 #    # generate all the localized files in the resources directory
@@ -59,35 +53,11 @@ do_configure() {
 #    ln -sf es_us ${D}${webos_sysmgrdir}/localization/es_mx
 #}
 
-install_launcher3_support() {
-    install -d ${D}${webos_sysconfdir}/launcher3/
-    # install all the base conf files
-    cd ${S}
-    if [ -d conf/launcher3 ]
-    then
-        find conf/launcher3/ -maxdepth 1 -name "*.conf" -not -name "*[-]*.conf" -print0 | xargs -0 -I file install -v -m 644 file ${D}${webos_sysconfdir}/launcher3/
-    fi
-    
-    # and all the platform specific conf files
-    # (no good way to do this with find/xargs, given the <base>-<machine>.conf -> <base>-platform.conf name change needed on the install copy)
-    # (do them all individually)
-    if [ -f conf/launcher3/launcher_icon_layout_settings-${MACHINE}.conf ]
-    then
-        install	-v -m 644 conf/launcher3/launcher_icon_layout_settings-${MACHINE}.conf ${D}${webos_sysconfdir}/launcher3/launcher_icon_layout_settings-platform.conf
-    fi
-
-    #install the default designator mapping and tab/page definition - default is in ${webos_sysconfdir}/launcher3/app-keywords-to-designator-map.txt
-    if [ -f conf/launcher3/app-keywords-to-designator-map.txt ]
-    then
-        install -v -m 644 conf/launcher3/app-keywords-to-designator-map.txt ${D}${webos_sysconfdir}/launcher3/
-    fi
-}
-
 do_install() {
     oe_runmake install
 #    bbnote "Installing luna-sysmgr"
     install -d ${D}${bindir}
-    install -v -m 750 release-${MACHINE}/LunaSysMgr ${D}${bindir}
+    install -v -m 750 release-common/LunaSysMgr ${D}${bindir}
 
     # install images & low-memory files
 #    bbnote "install images and low-memory files"
@@ -134,8 +104,6 @@ do_install() {
     # Install launcher things
 #    bbnote "Install launcher things"
     
-    install_launcher3_support
-    
     # install sysmgr builtins apps
 #    bbnote "install sysmgr builtins apps"
     cd ${S}
@@ -178,36 +146,6 @@ do_install() {
     # install all the platform specific conf files
     # (no good way to do this with find/xargs, given the <base>-<machine>.conf -> <base>-platform.conf
         # name change needed on the install copy => do them all individually)
-
-    # install the platform luna.conf file
-#    bbnote "install the platform luna.conf file"
-    if [ -f conf/luna-${MACHINE}.conf ]
-    then
-        install -v -m 644 conf/luna-${MACHINE}.conf ${D}${webos_sysconfdir}/luna-platform.conf
-    fi
-
-    # install the platform lunaAnimations.conf file
-    if [ -f conf/lunaAnimations-${MACHINE}.conf ]
-    then
-        install -v -m 644 conf/lunaAnimations-${MACHINE}.conf ${D}${webos_sysconfdir}/lunaAnimations-platform.conf
-    fi
-
-    # install the platform defaultPreferences.txt file
-#    bbnote "install the platform defaultPreferences.txt file"
-    if [ -f conf/defaultPreferences-${MACHINE}.txt ]
-    then
-        install -v -m 644 conf/defaultPreferences-${MACHINE}.txt ${D}${webos_sysconfdir}/defaultPreferences-platform.txt
-    fi
-
-    if [ -d platform/${MACHINE} ]
-    then
-        # copy over platform specific images
-        if [ -d platform/${MACHINE}/images ]
-        then
-            cd ${S}/platform/${MACHINE} && tar --exclude-vcs --exclude-backups -cf - images | tar xf - -C ${D}${webos_sysmgrdir}
-            cd ${S}
-        fi
-    fi
 
     # install the mojodb file to register schema for different security policies
     install -d ${D}${webos_sysconfdir}/db_kinds
