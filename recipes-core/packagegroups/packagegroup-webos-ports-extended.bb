@@ -49,6 +49,7 @@ RDEPENDS_${PN} = " \
   qtbase-fonts-ttf-vera \
   \
   luna-next \
+  luna-sysmgr \
   \
   webos-systemd-services \
 "
