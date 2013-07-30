@@ -26,4 +26,8 @@ RDEPENDS_${PN} = " \
   gst-meta-debug \
   \
   org.webosports.app.testr \
+  \
+  systemd-analyze \
+  qt5-opengles2-test \
+  qtwayland-examples \
 "
