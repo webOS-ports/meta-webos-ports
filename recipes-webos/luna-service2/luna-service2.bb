@@ -5,7 +5,7 @@ SECTION = "webos/base"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-DEPENDS = "pmloglib cjson glib-2.0"
+DEPENDS = "pmloglib cjson glib-2.0 systemd"
 
 WEBOS_VERSION = "3.5.1-158_44b5daa6766c95c3bb39f2ca1165f557e8bfa966"
 
@@ -27,6 +27,9 @@ inherit webos_prerelease_dep
 
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
+
+inherit webos-ports-submissions
+SRCREV = "ad2c1be298750b54568cec72d0ec70be172316e2"
 
 # This fix-up will be removed shortly. luna-service2 headers must be included
 # using '#include <luna-service2/*.h>'
