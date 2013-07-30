@@ -49,6 +49,8 @@ RDEPENDS_${PN} = " \
   qtbase-fonts-ttf-vera \
   \
   luna-next \
+  \
+  webos-systemd-services \
 "
 
 ANDROID_RDEPENDS = "android-audiosystem"
