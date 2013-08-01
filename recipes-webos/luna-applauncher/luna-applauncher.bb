@@ -12,7 +12,6 @@ PV = "3.0.0-1.00"
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_arch_indep
-inherit webos_machine_dep
 
 WEBOS_GIT_TAG = "submissions/${WEBOS_SUBMISSION}"
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
