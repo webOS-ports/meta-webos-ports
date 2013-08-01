@@ -18,7 +18,6 @@ inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit webos_system_bus
-inherit webos_machine_dep
 inherit webos_daemon
 
 WEBOS_GIT_TAG = "submissions/${WEBOS_SUBMISSION}"
