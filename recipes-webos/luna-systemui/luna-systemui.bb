@@ -9,7 +9,6 @@ WEBOS_VERSION = "2.0.0-1.02_9db5f65a072d2f5af7070efbf38af41705232990"
 
 inherit webos_enhanced_submissions
 inherit webos_arch_indep
-inherit webos_machine_dep
 inherit webos_public_repo
 
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
