@@ -13,7 +13,7 @@ RDEPENDS_${PN} = " \
 "
 
 SRC_URI = "git://github.com/webOS-ports/luna-next.git;branch=master;protocol=git"
-SRCREV = "54d9c7935ac7d26ec79de98189fce6cd637c178d"
+SRCREV = "3739ad5fd29d76814b7ac28e8ca064da75352aee"
 S = "${WORKDIR}/git"
 
 inherit cmake_qt5
@@ -27,5 +27,5 @@ do_install_append() {
     install -m 0644 ${S}/files/systemd/luna-next.service ${D}${systemd_unitdir}/system/
 }
 
-FILES_${PN} += "${OE_QMAKE_PATH_IMPORTS}/LunaNext"
-FILES_${PN}-dbg += "${OE_QMAKE_PATH_IMPORTS}/LunaNext/.debug"
+FILES_${PN} += "${OE_QMAKE_PATH_QML}/LunaNext"
+FILES_${PN}-dbg += "${OE_QMAKE_PATH_QML}/LunaNext/.debug"
