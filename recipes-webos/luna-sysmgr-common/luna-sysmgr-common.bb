@@ -34,12 +34,6 @@ SRCREV = "6f08a6948da82bea02d52b0c1a264a6d453212ee"
 
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 
-do_configure_append() {
-    # We want the shared libraries to have an SONAME records => remove the empty -Wl,-soname,
-    # argument that qmake adds (why is it doing this?).
-    find . -name Makefile | xargs sed -i -e 's/-Wl,-soname, //' -e 's/-Wl,-soname,$//'
-}
-
 do_install() {
     oe_runmake install
 
