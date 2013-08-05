@@ -28,4 +28,5 @@ RDEPENDS_${PN} = " \
   org.webosports.app.testr \
   \
   systemd-analyze \
+  qt5-opengles2-test \
 "
