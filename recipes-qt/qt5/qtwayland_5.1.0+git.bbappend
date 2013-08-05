@@ -3,8 +3,9 @@ FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 # We're not yet using xkb for anything so disable it
 XKB_DEPENDS = ""
 
-SRC_URI = " \
-    git://gitorious.org/qt/qtwayland.git;protocol=git;branch=master \
-    file://0001-Import-various-changes-from-Mer-s-variant-of-qtwayla.patch"
+SRC_URI = "git://gitorious.org/qt/qtwayland.git;protocol=git;branch=master \
+           file://0001-Try-one-more-option-to-get-a-valid-EGLDisplay-instan.patch \
+           file://0002-Explicitly-state-precision-of-variables-in-shader.patch \
+           file://0003-Handle-connection-error-by-exiting-the-application.patch"
 
-SRCREV = "fa9c133cc3799bfcf027e6b3d4983bd4cfd5db6d"
+SRCREV = "5082ea72c10c4e88d96c2869d9bed06dcd33b247"
