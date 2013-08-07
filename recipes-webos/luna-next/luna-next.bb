@@ -13,7 +13,7 @@ RDEPENDS_${PN} = " \
 "
 
 SRC_URI = "git://github.com/webOS-ports/luna-next.git;branch=master;protocol=git"
-SRCREV = "3739ad5fd29d76814b7ac28e8ca064da75352aee"
+SRCREV = "d567214869dec445beff3d6f1ced8d7f31eb8d39"
 S = "${WORKDIR}/git"
 
 inherit cmake_qt5
