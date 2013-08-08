@@ -50,6 +50,7 @@ RDEPENDS_${PN} = " \
   \
   luna-next \
   luna-sysmgr \
+  luna-sysmgr-conf \
   \
   webos-systemd-services \
 "
