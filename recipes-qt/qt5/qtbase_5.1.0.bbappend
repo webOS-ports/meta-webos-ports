@@ -11,3 +11,5 @@ SRC_URI += " \
     file://0004-Prevent-touch-coordinates-outside-target-geometry.patch \
     file://0005-Added-rotation-parameter-to-qevdevtouch.patch \
 "
+
+EXTRA_OECONF += "-qpa wayland-egl"
