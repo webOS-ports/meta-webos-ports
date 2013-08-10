@@ -2,7 +2,7 @@ DESCRIPTION = "Next generation webOS UI which meant to be a complete replacement
 LunaSysMgr/WebAppMgr and is completely based on well known open source technologies like \
 Qt 5 and Wayland."
 LICENSE = "GPL-3.0 & Apache-2.0"
-LIC_FILES_CHKSUM = "file://COPYING;md5=fc045d5b44f26b8b01a2fba30ceb524f"
+LIC_FILES_CHKSUM = "file://COPYING;md5=5736de35059c8187d58720417f59ec09"
 
 PV = "0.1.0+gitr${SRCPV}"
 
@@ -13,7 +13,7 @@ RDEPENDS_${PN} = " \
 "
 
 SRC_URI = "git://github.com/webOS-ports/luna-next.git;branch=master;protocol=git"
-SRCREV = "d567214869dec445beff3d6f1ced8d7f31eb8d39"
+SRCREV = "63cd0b462c724d5b88f9ca08c315a9141460be21"
 S = "${WORKDIR}/git"
 
 inherit cmake_qt5
