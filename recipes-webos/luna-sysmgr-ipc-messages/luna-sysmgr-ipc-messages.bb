@@ -21,4 +21,4 @@ S ="${WORKDIR}/git"
 ALLOW_EMPTY_${PN} = "1"
 
 inherit webos-ports-submissions
-SRCREV = "52c2b3cc5f1512935a9529dbb97a09eb2b6722fd"
+SRCREV = "79155bd3f19d25077d7f0ab4edc7ad6be269ec09"
