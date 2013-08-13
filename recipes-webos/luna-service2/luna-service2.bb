@@ -27,7 +27,8 @@ SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 SRC_URI += "file://0001-Instead-of-relying-on-existing-service-role-director.patch \
-            file://0002-Add-support-for-systemd.patch"
+            file://0002-Add-support-for-systemd.patch \
+            file://0003-Add-additional-search-path-to-pkgconfig-configuratio.patch"
 
 # This fix-up will be removed shortly. luna-service2 headers must be included
 # using '#include <luna-service2/*.h>'
