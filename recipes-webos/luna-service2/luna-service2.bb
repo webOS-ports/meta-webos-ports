@@ -5,7 +5,7 @@ SECTION = "webos/base"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-DEPENDS = "pmloglib cjson glib-2.0"
+DEPENDS = "pmloglib cjson glib-2.0 systemd"
 
 # corresponds to tag submissions/152
 SRCREV = "6a91952ca2a2187ff929048ce267ba8438470f20"
