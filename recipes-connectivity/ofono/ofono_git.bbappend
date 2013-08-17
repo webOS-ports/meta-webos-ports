@@ -1,9 +1,7 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
-SRCREV = "a54f4eb6fab735503f1a40c3a9607f94ba637bd6"
+SRCREV = "7fe16c7df411c5093a80eddee56a844ae4c7f920"
 PV = "1.12+git${SRCPV}"
-
-DEPENDS += "android-audiosystem"
 
 # NOTE: Needed for GPRS provisioning support
 RDEPENDS_${PN}_append = " android-apn-database"
@@ -11,7 +9,9 @@ RDEPENDS_${PN}_append = " android-apn-database"
 SRC_URI  = " \
   git://github.com/webOS-ports/ofono-ubuntu.git;protocol=git;branch=master \
   file://ofono \
-  file://ofono.upstart"
+  file://ofono.upstart \
+  file://0001-Disable-support-for-android-audiosystem.patch \
+"
 
 do_configure_prepend() {
     # Workaround missing bootstrap script which is required by our base recipe
