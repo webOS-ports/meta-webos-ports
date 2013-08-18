@@ -24,3 +24,7 @@ BAD_RECOMMENDATIONS = "update-rc.d"
 
 # Enable adb support
 DISTRO_FEATURES += "adb"
+
+# For proper support of wayland through the whole stack we need to set it as distro
+# feature (e.g. mesa requiers it to be set to compile the egl platform module)
+DISTRO_FEATURES += "wayland"
