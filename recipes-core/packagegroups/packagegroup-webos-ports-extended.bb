@@ -62,6 +62,11 @@ LIBHYBRIS_RDEPENDS = "${VIRTUAL-RUNTIME_android-system-image}"
 RDEPENDS_${PN}_append_tuna = " token-generator ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS_${PN}_append_grouper = " token-generator ${LIBHYBRIS_RDEPENDS}"
 
+MESA_RDEPENDS = "libegl-gallium mesa-driver-swrast"
+
+RDEPENDS_${PN}_append_qemux86 = " ${MESA_RDEPENDS}"
+RDEPENDS_${PN}_append_qemux86-64 = " ${MESA_RDEPENDS}"
+
 RDEPENDS_${PN}_append_arm = " \
   crash-handler \
 "
