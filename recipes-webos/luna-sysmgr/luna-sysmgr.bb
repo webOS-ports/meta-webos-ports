@@ -24,17 +24,22 @@ PV = "3.0.0-3"
 #inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
-inherit webos_qmake5
 inherit webos_system_bus
 # Uncomment once installing into /usr/sbin instead of /usr/bin
 #inherit webos_daemon
+
+# We need to warrant the correct order for the following two inherits as webos_cmake is
+# setting the build dir to be outside of the source dir which is overriden by cmake_qt5
+# again if we inherit it afterwards.
+inherit cmake_qt5
+inherit webos_cmake
 
 WEBOS_GIT_TAG = "submissions/${WEBOS_SUBMISSION}"
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit webos-ports-submissions
-SRCREV = "2283f66002c4e04b264591953cd1bd172ea76014"
+SRCREV = "758ba095b7d815882a4fd0b4c7524f8568e2dc34"
 
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 
@@ -56,12 +61,7 @@ OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 #    ln -sf es_us ${D}${webos_sysmgrdir}/localization/es_mx
 #}
 
-do_install() {
-    oe_runmake install
-#    bbnote "Installing luna-sysmgr"
-    install -d ${D}${bindir}
-    install -v -m 750 release-common/LunaSysMgr ${D}${bindir}
-
+do_install_append() {
     # install images & low-memory files
 #    bbnote "install images and low-memory files"
     install -d ${D}${webos_sysmgrdir}
