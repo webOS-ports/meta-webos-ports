@@ -23,27 +23,18 @@ PV = "3.0.0-3"
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_library
-inherit webos_qmake5
+
+# We need to warrant the correct order for the following two inherits as webos_cmake is
+# setting the build dir to be outside of the source dir which is overriden by cmake_qt5
+# again if we inherit it afterwards.
+inherit cmake_qt5
+inherit webos_cmake
 
 WEBOS_GIT_TAG = "submissions/${WEBOS_SUBMISSION}"
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit webos-ports-submissions
-SRCREV = "87c7dc68d660b196aad18f21046082ade720fa70"
+SRCREV = "ab09c2fb2413eab5867ba6c7ec1e0e2dbd3a1af6"
 
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
-
-do_install() {
-    oe_runmake install
-
-    install -d ${D}${libdir}/pkgconfig
-    install -d ${D}${includedir}/luna-sysmgr-common
-
-    oe_libinstall -C release-common -so libLunaSysMgrCommon ${D}${libdir}
-
-    install -v -m 644 ${S}/include/*.h ${D}${includedir}/luna-sysmgr-common
-
-    sed -i -e s:${PKG_CONFIG_SYSROOT_DIR}::g release-common/LunaSysMgrCommon.pc
-    install -v -m 644 release-common/LunaSysMgrCommon.pc ${D}${libdir}/pkgconfig
-}
