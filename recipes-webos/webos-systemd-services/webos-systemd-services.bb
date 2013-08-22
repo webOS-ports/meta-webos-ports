@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 PV = "1.0+gitr${SRCPV}"
 
 SRC_URI = "git://github.com/webOS-ports/webos-systemd-services.git;branch=master;protocol=git"
-SRCREV = "dc97c754fd8c6c2805b4bd204b65c14fc84c353a"
+SRCREV = "2ff87680a7ddd70aff5eb9952ce85bdd4d000ea9"
 S = "${WORKDIR}/git"
 
 inherit systemd
