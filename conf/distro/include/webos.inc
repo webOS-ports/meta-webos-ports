@@ -116,4 +116,5 @@ CONNECTIVITY_CHECK_URIS ?= "git://git.yoctoproject.org/yocto-firewall-test;proto
 SANITY_TESTED_DISTROS ?= " \
             Ubuntu-12.04 \n \
             Ubuntu-12.10 \n \
+            Ubuntu-13.04 \n \
             "
