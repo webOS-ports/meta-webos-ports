@@ -1,0 +1,205 @@
+From 6b00d4f27d43dc8ada0b612405c4653b3872b598 Mon Sep 17 00:00:00 2001
+From: Simon Busch <morphis@gravedo.de>
+Date: Wed, 14 Aug 2013 10:22:01 +0200
+Subject: [PATCH] Implement additional properties for QQuickWebView to control
+ injection of user scripts
+
+Upstream-Status: Inappropiate [enable feature]
+
+Signed-off-by: Simon Busch <morphis@gravedo.de>
+---
+ Source/WebKit2/UIProcess/API/qt/qquickwebview.cpp  | 32 +++++++++++++++++++++-
+ Source/WebKit2/UIProcess/API/qt/qquickwebview_p.h  |  8 ++++++
+ .../WebKit2/UIProcess/API/qt/qquickwebview_p_p.h   |  2 ++
+ Source/WebKit2/UIProcess/WebPageProxy.h            |  2 +-
+ Source/WebKit2/UIProcess/qt/WebPageProxyQt.cpp     |  4 +--
+ Source/WebKit2/WebProcess/WebPage/WebPage.h        |  2 +-
+ .../WebKit2/WebProcess/WebPage/WebPage.messages.in |  2 +-
+ Source/WebKit2/WebProcess/WebPage/qt/WebPageQt.cpp |  9 ++++--
+ 8 files changed, 52 insertions(+), 9 deletions(-)
+
+diff --git a/Source/WebKit2/UIProcess/API/qt/qquickwebview.cpp b/Source/WebKit2/UIProcess/API/qt/qquickwebview.cpp
+index c3e372b..7bc843c 100644
+--- a/Source/WebKit2/UIProcess/API/qt/qquickwebview.cpp
++++ b/Source/WebKit2/UIProcess/API/qt/qquickwebview.cpp
+@@ -269,6 +269,8 @@ QQuickWebViewPrivate::QQuickWebViewPrivate(QQuickWebView* viewport)
+     , filePicker(0)
+     , databaseQuotaDialog(0)
+     , colorChooser(0)
++    , userScriptsInjectAtStart(false)
++    , userScriptsForAllFrames(false)
+     , m_betweenLoadCommitAndFirstFrame(false)
+     , m_useDefaultContentItemSize(true)
+     , m_navigatorQtObjectEnabled(false)
+@@ -769,7 +771,7 @@ void QQuickWebViewPrivate::updateUserScripts()
+         scripts.append(String(contents));
+     }
+ 
+-    webPageProxy->setUserScripts(scripts);
++    webPageProxy->setUserScripts(scripts, userScriptsInjectAtStart, userScriptsForAllFrames);
+ }
+ 
+ QPointF QQuickWebViewPrivate::contentPos() const
+@@ -1273,6 +1275,34 @@ void QQuickWebViewExperimental::setUserScripts(const QList<QUrl>& userScripts)
+     emit userScriptsChanged();
+ }
+ 
++bool QQuickWebViewExperimental::userScriptsInjectAtStart() const
++{
++    Q_D(const QQuickWebView);
++    return d->userScriptsInjectAtStart;
++}
++
++void QQuickWebViewExperimental::setUserScriptsInjectAtStart(bool injectAtStart)
++{
++    Q_D(QQuickWebView);
++    d->userScriptsInjectAtStart = injectAtStart;
++    d->updateUserScripts();
++    emit userScriptsInjectAtStartChanged();
++}
++
++bool QQuickWebViewExperimental::userScriptsForAllFrames() const
++{
++    Q_D(const QQuickWebView);
++    return d->userScriptsForAllFrames;
++}
++
++void QQuickWebViewExperimental::setUserScriptsForAllFrames(bool forAllFrames)
++{
++    Q_D(QQuickWebView);
++    d->userScriptsForAllFrames = forAllFrames;
++    d->updateUserScripts();
++    emit userScriptsForAllFramesChanged();
++}
++
+ QUrl QQuickWebViewExperimental::remoteInspectorUrl() const
+ {
+ #if ENABLE(INSPECTOR_SERVER)
+diff --git a/Source/WebKit2/UIProcess/API/qt/qquickwebview_p.h b/Source/WebKit2/UIProcess/API/qt/qquickwebview_p.h
+index 1b372fa..9c38951 100644
+--- a/Source/WebKit2/UIProcess/API/qt/qquickwebview_p.h
++++ b/Source/WebKit2/UIProcess/API/qt/qquickwebview_p.h
+@@ -275,6 +275,8 @@ class QWEBKIT_EXPORT QQuickWebViewExperimental : public QObject {
+     Q_PROPERTY(QQmlListProperty<QQuickUrlSchemeDelegate> urlSchemeDelegates READ schemeDelegates)
+     Q_PROPERTY(QString userAgent READ userAgent WRITE setUserAgent NOTIFY userAgentChanged)
+     Q_PROPERTY(QList<QUrl> userScripts READ userScripts WRITE setUserScripts NOTIFY userScriptsChanged)
++    Q_PROPERTY(bool userScriptsInjectAtStart READ userScriptsInjectAtStart WRITE setUserScriptsInjectAtStart NOTIFY userScriptsInjectAtStartChanged)
++    Q_PROPERTY(bool userScriptsForAllFrames READ userScriptsForAllFrames WRITE setUserScriptsForAllFrames NOTIFY userScriptsForAllFramesChanged)
+     Q_PROPERTY(QUrl remoteInspectorUrl READ remoteInspectorUrl NOTIFY remoteInspectorUrlChanged FINAL)
+     Q_ENUMS(NavigationRequestActionExperimental)
+ 
+@@ -313,6 +315,10 @@ public:
+     void setDeviceHeight(int);
+     QList<QUrl> userScripts() const;
+     void setUserScripts(const QList<QUrl>& userScripts);
++    bool userScriptsInjectAtStart() const;
++    void setUserScriptsInjectAtStart(bool);
++    bool userScriptsForAllFrames() const;
++    void setUserScriptsForAllFrames(bool);
+     QUrl remoteInspectorUrl() const;
+ 
+     QWebKitTest* test();
+@@ -371,6 +377,8 @@ Q_SIGNALS:
+     void enterFullScreenRequested();
+     void exitFullScreenRequested();
+     void userScriptsChanged();
++    void userScriptsInjectAtStartChanged();
++    void userScriptsForAllFramesChanged();
+     void preferredMinimumContentsWidthChanged();
+     void remoteInspectorUrlChanged();
+ 
+diff --git a/Source/WebKit2/UIProcess/API/qt/qquickwebview_p_p.h b/Source/WebKit2/UIProcess/API/qt/qquickwebview_p_p.h
+index adedb6a..b43e50e 100644
+--- a/Source/WebKit2/UIProcess/API/qt/qquickwebview_p_p.h
++++ b/Source/WebKit2/UIProcess/API/qt/qquickwebview_p_p.h
+@@ -187,6 +187,8 @@ protected:
+     QQmlComponent* colorChooser;
+ 
+     QList<QUrl> userScripts;
++    bool userScriptsInjectAtStart;
++    bool userScriptsForAllFrames;
+ 
+     bool m_betweenLoadCommitAndFirstFrame;
+     bool m_useDefaultContentItemSize;
+diff --git a/Source/WebKit2/UIProcess/WebPageProxy.h b/Source/WebKit2/UIProcess/WebPageProxy.h
+index 1b2e9a2..52b4724 100644
+--- a/Source/WebKit2/UIProcess/WebPageProxy.h
++++ b/Source/WebKit2/UIProcess/WebPageProxy.h
+@@ -373,7 +373,7 @@ public:
+     void authenticationRequiredRequest(const String& hostname, const String& realm, const String& prefilledUsername, String& username, String& password);
+     void certificateVerificationRequest(const String& hostname, bool& ignoreErrors);
+     void proxyAuthenticationRequiredRequest(const String& hostname, uint16_t port, const String& prefilledUsername, String& username, String& password);
+-    void setUserScripts(const Vector<String>&);
++    void setUserScripts(const Vector<String>&, bool injectAtStart, bool forAllFrames);
+ #endif // PLATFORM(QT).
+ #if PLATFORM(EFL)
+     void setThemePath(const String&);
+diff --git a/Source/WebKit2/UIProcess/qt/WebPageProxyQt.cpp b/Source/WebKit2/UIProcess/qt/WebPageProxyQt.cpp
+index 8a205f9..47532c2 100644
+--- a/Source/WebKit2/UIProcess/qt/WebPageProxyQt.cpp
++++ b/Source/WebKit2/UIProcess/qt/WebPageProxyQt.cpp
+@@ -111,9 +111,9 @@ void WebPageProxy::sendApplicationSchemeReply(const QQuickNetworkReply* reply)
+ #endif
+ }
+ 
+-void WebPageProxy::setUserScripts(const Vector<String>& scripts)
++void WebPageProxy::setUserScripts(const Vector<String>& scripts, bool injectAtStart, bool forAllFrames)
+ {
+-    process()->send(Messages::WebPage::SetUserScripts(scripts), m_pageID);
++    process()->send(Messages::WebPage::SetUserScripts(scripts, injectAtStart, forAllFrames), m_pageID);
+ }
+ 
+ void WebPageProxy::didFindZoomableArea(const IntPoint& target, const IntRect& area)
+diff --git a/Source/WebKit2/WebProcess/WebPage/WebPage.h b/Source/WebKit2/WebProcess/WebPage/WebPage.h
+index d4817c0..d318364 100644
+--- a/Source/WebKit2/WebProcess/WebPage/WebPage.h
++++ b/Source/WebKit2/WebProcess/WebPage/WebPage.h
+@@ -567,7 +567,7 @@ public:
+     void registerApplicationScheme(const String& scheme);
+     void applicationSchemeReply(const QtNetworkReplyData&);
+     void receivedApplicationSchemeRequest(const QNetworkRequest&, QtNetworkReply*);
+-    void setUserScripts(const Vector<String>&);
++    void setUserScripts(const Vector<String>&, bool injectAtStart, bool forAllFrames);
+ #endif
+     void wheelEvent(const WebWheelEvent&);
+ #if ENABLE(GESTURE_EVENTS)
+diff --git a/Source/WebKit2/WebProcess/WebPage/WebPage.messages.in b/Source/WebKit2/WebProcess/WebPage/WebPage.messages.in
+index ad4292b..c3c195a 100644
+--- a/Source/WebKit2/WebProcess/WebPage/WebPage.messages.in
++++ b/Source/WebKit2/WebProcess/WebPage/WebPage.messages.in
+@@ -74,7 +74,7 @@ messages -> WebPage {
+ #if PLATFORM(QT)
+     ApplicationSchemeReply(WebKit::QtNetworkReplyData reply)
+     RegisterApplicationScheme(WTF::String scheme)
+-    SetUserScripts(WTF::Vector<WTF::String> script)
++    SetUserScripts(WTF::Vector<WTF::String> script, bool injectAtStart, bool forAllFrames)
+ #endif
+ 
+     StopLoadingFrame(uint64_t frameID)
+diff --git a/Source/WebKit2/WebProcess/WebPage/qt/WebPageQt.cpp b/Source/WebKit2/WebProcess/WebPage/qt/WebPageQt.cpp
+index 721be46..cb6a74f 100644
+--- a/Source/WebKit2/WebProcess/WebPage/qt/WebPageQt.cpp
++++ b/Source/WebKit2/WebProcess/WebPage/qt/WebPageQt.cpp
+@@ -417,13 +417,16 @@ void WebPage::applicationSchemeReply(const QtNetworkReplyData& replyData)
+     networkReply->finalize();
+ }
+ 
+-void WebPage::setUserScripts(const Vector<String>& scripts)
++void WebPage::setUserScripts(const Vector<String>& scripts, bool injectAtStart, bool forAllFrames)
+ {
+     // This works because we keep an unique page group for each Page.
+     PageGroup* pageGroup = PageGroup::pageGroup(this->pageGroup()->identifier());
+     pageGroup->removeUserScriptsFromWorld(mainThreadNormalWorld());
+-    for (unsigned i = 0; i < scripts.size(); ++i)
+-        pageGroup->addUserScriptToWorld(mainThreadNormalWorld(), scripts.at(i), KURL(), Vector<String>(), Vector<String>(), InjectAtDocumentEnd, InjectInTopFrameOnly);
++    for (unsigned i = 0; i < scripts.size(); ++i) {
++        UserScriptInjectionTime injectionTime = injectAtStart ? InjectAtDocumentStart : InjectAtDocumentEnd;
++        UserContentInjectedFrames injectionFrames = forAllFrames ? InjectInAllFrames : InjectInTopFrameOnly;
++        pageGroup->addUserScriptToWorld(mainThreadNormalWorld(), scripts.at(i), KURL(), Vector<String>(), Vector<String>(), injectionTime, injectionFrames);
++    }
+ }
+ 
+ void WebPage::selectedIndex(int32_t newIndex)
+-- 
+1.8.1.2
+
