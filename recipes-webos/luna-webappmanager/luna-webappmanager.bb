@@ -1,11 +1,14 @@
 SUMMARY = "This is the web application launcher for the Luna Next webOS UI platform."
-LICENSE = "GPL-3.0"
-LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
+LICENSE = "GPL-3.0 & Apache-2.0"
+LIC_FILES_CHKSUM = " \
+    file://COPYING;md5=0f93d2cf04b94ac3f04a789a1fb11ead \
+    file://COPYING-Apache-2.0;md5=3b83ef96387f14655fc854ddc3c6bd57 \
+"
 
 DEPENDS = "qtbase qtdeclarative qtwebkit"
 
 SRC_URI = "git://github.com/webOS-ports/luna-webappmanager.git;branch=master;protocol=git"
-SRCREV = "5203bb70978db27bacec4dc906941221f7b1e69e"
+SRCREV = "80f03a8d4647a1d5c07142b358846cdea56f918a"
 S = "${WORKDIR}/git"
 
 # For the sake of the webOS build system we need to provide the webOS component version
