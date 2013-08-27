@@ -27,4 +27,14 @@ inherit webos_system_bus
 inherit cmake_qt5
 inherit webos_cmake
 
+inherit systemd
+
+SYSTEMD_PACKAGES = "${PN}"
+SYSTEMD_SERVICE_${PN} = "luna-webappmanager.service"
+
+do_install_append() {
+    install -d ${D}${systemd_unitdir}/system
+    install -m 0644 ${S}/files/systemd/luna-webappmanager.service ${D}${systemd_unitdir}/system/
+}
+
 FILES_${PN} += "${webos_frameworksdir}"
