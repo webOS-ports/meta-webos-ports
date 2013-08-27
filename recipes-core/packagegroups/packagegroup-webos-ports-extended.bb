@@ -56,11 +56,10 @@ RDEPENDS_${PN} = " \
   webos-systemd-services \
 "
 
-ANDROID_RDEPENDS = "android-audiosystem"
 LIBHYBRIS_RDEPENDS = "${VIRTUAL-RUNTIME_android-system-image}"
 
-RDEPENDS_${PN}_append_tuna = " token-generator ${LIBHYBRIS_RDEPENDS} ${ANDROID_RDEPENDS}"
-RDEPENDS_${PN}_append_grouper = " token-generator ${LIBHYBRIS_RDEPENDS} ${ANDROID_RDEPENDS}"
+RDEPENDS_${PN}_append_tuna = " token-generator ${LIBHYBRIS_RDEPENDS}"
+RDEPENDS_${PN}_append_grouper = " token-generator ${LIBHYBRIS_RDEPENDS}"
 
 RDEPENDS_${PN}_append_arm = " \
   crash-handler \
