@@ -21,7 +21,6 @@ SYSTEMD_SERVICE_${PN} = " \
     ls-hubd_public.service \
     LunaSysService.service \
     LunaSysMgr.service \
-    node_fork_server.service \
     org.webosinternals.ipkgservice.service \
     PmKLogDaemon.service \
     PmLogDaemon.service \
@@ -32,6 +31,9 @@ SYSTEMD_SERVICE_${PN} = " \
     webos-base.target \
     webos-essential.target \
 "
+
+# disabled cause of https://github.com/openwebos/mojoservicelauncher/commit/7780a480155e018d1c42b8599b962aaea871720d
+# node_fork_server.service
 
 do_install() {
     install -d ${D}${systemd_unitdir}/system
