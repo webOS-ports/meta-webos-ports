@@ -10,4 +10,7 @@ SRC_URI = " \
     file://0001-Implement-additional-properties-for-QQuickWebView-to.patch \
     file://0002-Add-missing-.qmake.conf-which-contains-the-required-.patch \
 "
+# JIT compiler is causing problems currently on ARM so disable it
+SRC_URI_append_arm = " file://0003-Disable-the-JIT-compiler.patch"
+
 SRCREV = "7e1211827bf300da3197cc0cb9322b7c802f183c"
