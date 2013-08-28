@@ -1,0 +1,431 @@
+From dc9dfecfbe2268c48916a22e9d3e92f452a00762 Mon Sep 17 00:00:00 2001
+From: David Henningsson <david.henningsson@canonical.com>
+Date: Fri, 19 Jul 2013 10:50:07 +0200
+Subject: [PATCH 201/204] ALSA: Add extcon (Android switch) jack detection
+
+For headphone/headset only, so far.
+---
+ src/Makefile.am                     |    1 +
+ src/modules/alsa/alsa-extcon.c      |  283 +++++++++++++++++++++++++++++++++++
+ src/modules/alsa/alsa-extcon.h      |   33 ++++
+ src/modules/alsa/alsa-ucm.c         |    4 +-
+ src/modules/alsa/alsa-ucm.h         |    1 +
+ src/modules/alsa/module-alsa-card.c |    5 +
+ 6 files changed, 325 insertions(+), 2 deletions(-)
+ create mode 100644 src/modules/alsa/alsa-extcon.c
+ create mode 100644 src/modules/alsa/alsa-extcon.h
+
+diff --git a/src/Makefile.am b/src/Makefile.am
+index a621a30..471dc72 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -1704,6 +1704,7 @@ module_coreaudio_device_la_LIBADD = $(MODULE_LIBADD)
+ libalsa_util_la_SOURCES = \
+ 		modules/alsa/alsa-util.c modules/alsa/alsa-util.h \
+ 		modules/alsa/alsa-ucm.c modules/alsa/alsa-ucm.h \
++		modules/alsa/alsa-extcon.c modules/alsa/alsa-extcon.h \
+ 		modules/alsa/alsa-mixer.c modules/alsa/alsa-mixer.h \
+ 		modules/alsa/alsa-sink.c modules/alsa/alsa-sink.h \
+ 		modules/alsa/alsa-source.c modules/alsa/alsa-source.h \
+diff --git a/src/modules/alsa/alsa-extcon.c b/src/modules/alsa/alsa-extcon.c
+new file mode 100644
+index 0000000..5c60137
+--- /dev/null
++++ b/src/modules/alsa/alsa-extcon.c
+@@ -0,0 +1,283 @@
++/***
++  This file is part of PulseAudio.
++
++  Copyright 2013 David Henningsson, Canonical Ltd.
++
++  PulseAudio is free software; you can redistribute it and/or modify
++  it under the terms of the GNU Lesser General Public License as published
++  by the Free Software Foundation; either version 2.1 of the License,
++  or (at your option) any later version.
++
++  PulseAudio is distributed in the hope that it will be useful, but
++  WITHOUT ANY WARRANTY; without even the implied warranty of
++  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
++  General Public License for more details.
++
++  You should have received a copy of the GNU Lesser General Public License
++  along with PulseAudio; if not, write to the Free Software
++  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
++  USA.
++***/
++
++#ifdef HAVE_CONFIG_H
++#include <config.h>
++#endif
++
++#include <pulsecore/core-util.h>
++#include <pulsecore/device-port.h>
++#include <pulsecore/i18n.h>
++#include <libudev.h>
++
++#include "alsa-util.h"
++#include "alsa-extcon.h"
++
++/* IFDEF HAVE_UCM ? */
++#include <use-case.h>
++#include "alsa-ucm.h"
++/* ENDIF */
++
++/* For android */
++#define EXTCON_NAME "switch"
++/* For extcon */
++/* #define EXTCON_NAME "extcon" */
++
++
++/* TODO: Backport stuff to 4.0, remove before upstreaming */
++#ifndef PA_PORT_AVAILABLE_YES
++#define PA_PORT_AVAILABLE_YES PA_AVAILABLE_YES
++#define PA_PORT_AVAILABLE_NO PA_AVAILABLE_NO
++#define PA_PORT_AVAILABLE_UNKNOWN PA_AVAILABLE_UNKNOWN
++#define pa_port_available_t pa_available_t
++#endif
++
++static pa_port_available_t hp_avail(int state)
++{
++    return ((state & 3) != 0) ? PA_PORT_AVAILABLE_YES : PA_PORT_AVAILABLE_NO;
++}
++
++static pa_port_available_t hsmic_avail(int state)
++{
++    return (state & 1) ? PA_PORT_AVAILABLE_YES : PA_PORT_AVAILABLE_NO;
++}
++
++struct android_switch {
++    char *name;
++    uint32_t current_value;
++};
++
++static void android_switch_free(struct android_switch *as) {
++    if (!as)
++        return;
++    pa_xfree(as->name);
++    pa_xfree(as);
++}
++
++static struct android_switch *android_switch_new(const char *name) {
++
++    struct android_switch *as = NULL;
++    char *filename = pa_sprintf_malloc("/sys/class/%s/%s/state", EXTCON_NAME, name);
++    char *state = pa_read_line_from_file(filename);
++
++    if (state == NULL) {
++        pa_log_debug("Cannot open '%s'. Skipping.", filename);
++        pa_xfree(filename);
++        return NULL;
++    }
++    pa_xfree(filename);
++
++    as = pa_xnew0(struct android_switch, 1);
++    as->name = pa_xstrdup(name);
++
++    if (pa_atou(state, &as->current_value) < 0) {
++        pa_log_warn("Switch '%s' has invalid value '%s'", name, state);
++        pa_xfree(state);
++        android_switch_free(as);
++        return NULL;
++    }
++
++    return as;
++}
++
++struct udev_data {
++    struct udev *udev;
++    struct udev_monitor *monitor;
++    pa_io_event *event;
++};
++
++struct pa_alsa_extcon {
++    pa_card *card;
++    struct android_switch *h2w;
++    struct udev_data udev;
++};
++
++static struct android_switch *find_matching_switch(pa_alsa_extcon *u,
++                                                   const char *devpath) {
++
++    if (pa_streq(devpath, "/devices/virtual/" EXTCON_NAME "/h2w"))
++        return u->h2w;  /* To be extended if we ever support more switches */
++    return NULL;
++}
++
++static void notify_ports(pa_alsa_extcon *u, struct android_switch *as) {
++
++    pa_device_port *p;
++    void *state;
++
++    pa_assert(as == u->h2w); /* To be extended if we ever support more switches */
++
++    pa_log_debug("Value of switch %s is now %d.", as->name, as->current_value);
++
++    PA_HASHMAP_FOREACH(p, u->card->ports, state) {
++        if (p->is_output) {
++            if (!strcmp(p->name, "analog-output-headphones"))
++                 pa_device_port_set_available(p, hp_avail(as->current_value));
++/* IFDEF HAVE_UCM ? */
++            else if (pa_alsa_ucm_port_contains(p->name, SND_USE_CASE_DEV_HEADSET, true) ||
++                     pa_alsa_ucm_port_contains(p->name, SND_USE_CASE_DEV_HEADPHONES, true))
++                pa_device_port_set_available(p, hp_avail(as->current_value));
++/* ENDIF */
++        }
++        if (p->is_input) {
++            if (!strcmp(p->name, "analog-input-headset-mic"))
++                pa_device_port_set_available(p, hsmic_avail(as->current_value));
++/* IFDEF HAVE_UCM ? */
++            else if (pa_alsa_ucm_port_contains(p->name, SND_USE_CASE_DEV_HEADSET, false))
++                pa_device_port_set_available(p, hsmic_avail(as->current_value));
++/* ENDIF */
++        }
++    }
++}
++
++static void udev_cb(pa_mainloop_api *a, pa_io_event *e, int fd,
++                    pa_io_event_flags_t events, void *userdata) {
++
++    pa_alsa_extcon *u = userdata;
++    struct udev_device *d = udev_monitor_receive_device(u->udev.monitor);
++    struct udev_list_entry *entry;
++    struct android_switch *as;
++    const char *devpath, *state;
++
++    if (!d) {
++        pa_log("udev_monitor_receive_device failed.");
++        pa_assert(a);
++        a->io_free(u->udev.event);
++        u->udev.event = NULL;
++        return;
++    }
++
++    devpath = udev_device_get_devpath(d);
++    if (!devpath) {
++        pa_log("udev_device_get_devpath failed.");
++        goto out;
++    }
++    pa_log_debug("Got uevent with devpath=%s", devpath);
++
++    as = find_matching_switch(u, devpath);
++    if (!as)
++        goto out;
++
++    entry = udev_list_entry_get_by_name(
++            udev_device_get_properties_list_entry(d), "SWITCH_STATE");
++    if (!entry) {
++        pa_log("udev_list_entry_get_by_name failed to find 'SWITCH_STATE' entry.");
++        goto out;
++    }
++
++    state = udev_list_entry_get_value(entry);
++    if (!state) {
++        pa_log("udev_list_entry_get_by_name failed.");
++        goto out;
++    }
++
++    if (pa_atou(state, &as->current_value) < 0) {
++        pa_log_warn("Switch '%s' has invalid value '%s'", as->name, state);
++        goto out;
++    }
++
++    notify_ports(u, as);
++
++out:
++    udev_device_unref(d);
++}
++
++static bool init_udev(pa_alsa_extcon *u, pa_core *core) {
++
++    int fd;
++
++    u->udev.udev = udev_new();
++    if (!u->udev.udev) {
++        pa_log("udev_new failed.");
++        return false;
++    }
++
++    u->udev.monitor = udev_monitor_new_from_netlink(u->udev.udev, "udev");
++    if (!u->udev.monitor) {
++        pa_log("udev_monitor_new_from_netlink failed.");
++        return false;
++    }
++/*
++    if (udev_monitor_filter_add_match_subsystem_devtype(u->udev.monitor, EXTCON_NAME, NULL) < 0) {
++        pa_log("udev_monitor_filter_add_match_subsystem_devtype failed.");
++        return false;
++    }
++*/
++    if (udev_monitor_enable_receiving(u->udev.monitor) < 0) {
++        pa_log("udev_monitor_enable_receiving failed.");
++        return false;
++    }
++
++    fd = udev_monitor_get_fd(u->udev.monitor);
++    if (fd < 0) {
++        pa_log("udev_monitor_get_fd failed");
++        return false;
++    }
++
++    pa_assert_se(u->udev.event = core->mainloop->io_new(core->mainloop, fd,
++                 PA_IO_EVENT_INPUT, udev_cb, u));
++
++    return true;
++}
++
++pa_alsa_extcon *pa_alsa_extcon_new(pa_core *core, pa_card *card) {
++
++    pa_alsa_extcon *u = pa_xnew0(pa_alsa_extcon, 1);
++
++    pa_assert(core);
++    pa_assert(card);
++    /* pa_log_error("pa_alsa_extcon_new start 2"); */
++    u->card = card;
++    u->h2w = android_switch_new("h2w");
++    if (!u->h2w)
++        goto fail;
++
++    if (!init_udev(u, core))
++        goto fail;
++
++    notify_ports(u, u->h2w);
++    /* pa_log_error("pa_alsa_extcon_new finish"); */
++    return u;
++
++fail:
++    pa_alsa_extcon_free(u);
++    /* pa_log_error("pa_alsa_extcon_new fail"); */
++    return NULL;
++}
++
++void pa_alsa_extcon_free(pa_alsa_extcon *u) {
++
++    pa_assert(u);
++
++    if (u->udev.event)
++        u->card->core->mainloop->io_free(u->udev.event);
++
++    if (u->udev.monitor)
++        udev_monitor_unref(u->udev.monitor);
++
++    if (u->udev.udev)
++        udev_unref(u->udev.udev);
++
++    if (u->h2w)
++        android_switch_free(u->h2w);
++
++    pa_xfree(u);
++}
+diff --git a/src/modules/alsa/alsa-extcon.h b/src/modules/alsa/alsa-extcon.h
+new file mode 100644
+index 0000000..7655746
+--- /dev/null
++++ b/src/modules/alsa/alsa-extcon.h
+@@ -0,0 +1,33 @@
++#ifndef fooalsaextconhfoo
++#define fooalsaextconhfoo
++
++/***
++  This file is part of PulseAudio.
++
++  Copyright 2013 David Henningsson, Canonical Ltd.
++
++  PulseAudio is free software; you can redistribute it and/or modify
++  it under the terms of the GNU Lesser General Public License as published
++  by the Free Software Foundation; either version 2.1 of the License,
++  or (at your option) any later version.
++
++  PulseAudio is distributed in the hope that it will be useful, but
++  WITHOUT ANY WARRANTY; without even the implied warranty of
++  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
++  General Public License for more details.
++
++  You should have received a copy of the GNU Lesser General Public License
++  along with PulseAudio; if not, write to the Free Software
++  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
++  USA.
++***/
++
++/* TODO: Handle !HAVE_UDEV and !HAVE_UCM */
++
++typedef struct pa_alsa_extcon pa_alsa_extcon;
++
++pa_alsa_extcon *pa_alsa_extcon_new(pa_core *, pa_card *);
++
++void pa_alsa_extcon_free(pa_alsa_extcon *);
++
++#endif
+diff --git a/src/modules/alsa/alsa-ucm.c b/src/modules/alsa/alsa-ucm.c
+index f69ee89..ae90fec 100644
+--- a/src/modules/alsa/alsa-ucm.c
++++ b/src/modules/alsa/alsa-ucm.c
+@@ -719,7 +719,7 @@ static void ucm_add_port_combination(
+     }
+ }
+ 
+-static int ucm_port_contains(const char *port_name, const char *dev_name, bool is_sink) {
++int pa_alsa_ucm_port_contains(const char *port_name, const char *dev_name, bool is_sink) {
+     int ret = 0;
+     const char *r;
+     const char *state = NULL;
+@@ -973,7 +973,7 @@ int pa_alsa_ucm_set_port(pa_alsa_ucm_mapping_context *context, pa_device_port *p
+     PA_IDXSET_FOREACH(dev, context->ucm_devices, idx) {
+         const char *dev_name = pa_proplist_gets(dev->proplist, PA_ALSA_PROP_UCM_NAME);
+ 
+-        if (ucm_port_contains(port->name, dev_name, is_sink))
++        if (pa_alsa_ucm_port_contains(port->name, dev_name, is_sink))
+             enable_devs[enable_num++] = dev_name;
+         else {
+             pa_log_debug("Disable ucm device %s", dev_name);
+diff --git a/src/modules/alsa/alsa-ucm.h b/src/modules/alsa/alsa-ucm.h
+index cdeb469..8caa414 100644
+--- a/src/modules/alsa/alsa-ucm.h
++++ b/src/modules/alsa/alsa-ucm.h
+@@ -102,6 +102,7 @@ void pa_alsa_ucm_add_ports_combination(
+         pa_card_profile *cp,
+         pa_core *core);
+ int pa_alsa_ucm_set_port(pa_alsa_ucm_mapping_context *context, pa_device_port *port, bool is_sink);
++int pa_alsa_ucm_port_contains(const char *port_name, const char *dev_name, bool is_sink);
+ 
+ void pa_alsa_ucm_free(pa_alsa_ucm_config *ucm);
+ void pa_alsa_ucm_mapping_context_free(pa_alsa_ucm_mapping_context *context);
+diff --git a/src/modules/alsa/module-alsa-card.c b/src/modules/alsa/module-alsa-card.c
+index fe05e3d..eb8f4e7 100644
+--- a/src/modules/alsa/module-alsa-card.c
++++ b/src/modules/alsa/module-alsa-card.c
+@@ -38,6 +38,7 @@
+ 
+ #include "alsa-util.h"
+ #include "alsa-ucm.h"
++#include "alsa-extcon.h"
+ #include "alsa-sink.h"
+ #include "alsa-source.h"
+ #include "module-alsa-card-symdef.h"
+@@ -114,6 +115,7 @@ struct userdata {
+     snd_hctl_t *hctl_handle;
+     pa_hashmap *jacks;
+     pa_alsa_fdlist *mixer_fdl;
++    pa_alsa_extcon *extcon;
+ 
+     pa_card *card;
+ 
+@@ -752,6 +754,7 @@ int pa__init(pa_module *m) {
+     u->card->set_profile = card_set_profile;
+ 
+     init_jacks(u);
++    u->extcon = pa_alsa_extcon_new(m->core, u->card);
+     init_profile(u);
+     init_eld_ctls(u);
+ 
+@@ -817,6 +820,8 @@ void pa__done(pa_module*m) {
+     if (u->source_output_unlink_hook_slot)
+         pa_hook_slot_free(u->source_output_unlink_hook_slot);
+ 
++    if (u->extcon)
++        pa_alsa_extcon_free(u->extcon);
+     if (u->mixer_fdl)
+         pa_alsa_fdlist_free(u->mixer_fdl);
+     if (u->mixer_handle)
+-- 
+1.7.9.5
+
