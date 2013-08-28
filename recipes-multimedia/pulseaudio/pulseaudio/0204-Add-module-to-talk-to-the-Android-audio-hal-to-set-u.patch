@@ -1,0 +1,537 @@
+From 168eeef1e65553cc670ec32906000a010d99774e Mon Sep 17 00:00:00 2001
+From: David Henningsson <david.henningsson@canonical.com>
+Date: Tue, 13 Aug 2013 09:46:08 +0200
+Subject: [PATCH] Add module to talk to the Android audio hal to set up voice
+ calls
+
+---
+ configure.ac                                |   17 ++
+ src/Makefile.am                             |   12 +
+ src/daemon/default.pa.in                    |    4 +
+ src/modules/alsa/module-android-audio-hal.c |  420 +++++++++++++++++++++++++++
+ 4 files changed, 453 insertions(+)
+ create mode 100644 src/modules/alsa/module-android-audio-hal.c
+
+diff --git a/configure.ac b/configure.ac
+index 388fae2..610d1e1 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -783,6 +783,21 @@ AC_SUBST(HAVE_ALSA)
+ AM_CONDITIONAL([HAVE_ALSA], [test "x$HAVE_ALSA" = x1])
+ AS_IF([test "x$HAVE_ALSA" = "x1"], AC_DEFINE([HAVE_ALSA], 1, [Have ALSA?]))
+ 
++#### Android audio HAL support (optional) ####
++
++AC_ARG_ENABLE([android],
++    AS_HELP_STRING([--disable-android],[Disable optional Android audio HAL support]))
++
++AS_IF([test "x$enable_android" != "xno"],
++    [AC_CHECK_HEADERS([android/hardware/audio.h], HAVE_ANDROID=1, HAVE_ANDROID=0)],
++    HAVE_ANDROID=0)
++
++AS_IF([test "x$enable_android" = "xyes" && test "x$HAVE_ANDROID" = "x0"],
++    [AC_MSG_ERROR([*** Android audio HAL support not found])])
++
++AM_CONDITIONAL([HAVE_ANDROID], [test "x$HAVE_ANDROID" = "x1"])
++AS_IF([test "x$HAVE_ANDROID" = "x1"], AC_DEFINE([HAVE_ANDROID], 1, [Have Android audio HAL?]))
++
+ #### EsounD support (optional) ####
+ 
+ AC_ARG_ENABLE([esound],
+@@ -1402,6 +1417,7 @@ AS_IF([test "x$HAVE_X11" = "x1"], ENABLE_X11=yes, ENABLE_X11=no)
+ AS_IF([test "x$HAVE_OSS_OUTPUT" = "x1"], ENABLE_OSS_OUTPUT=yes, ENABLE_OSS_OUTPUT=no)
+ AS_IF([test "x$HAVE_OSS_WRAPPER" = "x1"], ENABLE_OSS_WRAPPER=yes, ENABLE_OSS_WRAPPER=no)
+ AS_IF([test "x$HAVE_ALSA" = "x1"], ENABLE_ALSA=yes, ENABLE_ALSA=no)
++AS_IF([test "x$HAVE_ANDROID" = "x1"], ENABLE_ANDROID=yes, ENABLE_ANDROID=no)
+ AS_IF([test "x$HAVE_COREAUDIO" = "x1"], ENABLE_COREAUDIO=yes, ENABLE_COREAUDIO=no)
+ AS_IF([test "x$HAVE_SOLARIS" = "x1"], ENABLE_SOLARIS=yes, ENABLE_SOLARIS=no)
+ AS_IF([test "x$HAVE_WAVEOUT" = "x1"], ENABLE_WAVEOUT=yes, ENABLE_WAVEOUT=no)
+@@ -1455,6 +1471,7 @@ echo "
+     Enable OSS Wrapper:            ${ENABLE_OSS_WRAPPER}
+     Enable EsounD:                 ${ENABLE_ESOUND}
+     Enable Alsa:                   ${ENABLE_ALSA}
++    Enable Android audio HAL:      ${ENABLE_ANDROID}
+     Enable CoreAudio:              ${ENABLE_COREAUDIO}
+     Enable Solaris:                ${ENABLE_SOLARIS}
+     Enable WaveOut:                ${ENABLE_WAVEOUT}
+diff --git a/src/Makefile.am b/src/Makefile.am
+index 471dc72..eeda8d6 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -1174,6 +1174,10 @@ modlibexec_LTLIBRARIES += \
+ 		module-alsa-source.la \
+ 		module-alsa-card.la
+ 
++if HAVE_ANDROID
++modlibexec_LTLIBRARIES += module-android-audio-hal.la
++endif
++
+ dist_alsaprofilesets_DATA = \
+ 		modules/alsa/mixer/profile-sets/default.conf \
+ 		modules/alsa/mixer/profile-sets/extra-hdmi.conf \
+@@ -1377,6 +1381,7 @@ SYMDEF_FILES = \
+ 		module-alsa-sink-symdef.h \
+ 		module-alsa-source-symdef.h \
+ 		module-alsa-card-symdef.h \
++		module-android-audio-hal-symdef.h \
+ 		module-coreaudio-detect-symdef.h \
+ 		module-coreaudio-device-symdef.h \
+ 		module-solaris-symdef.h \
+@@ -1725,6 +1730,13 @@ libalsa_util_la_LIBADD += $(DBUS_LIBS)
+ libalsa_util_la_CFLAGS += $(DBUS_CFLAGS)
+ endif
+ 
++if HAVE_ANDROID
++module_android_audio_hal_la_SOURCES = modules/alsa/module-android-audio-hal.c
++module_android_audio_hal_la_LDFLAGS = $(MODULE_LDFLAGS)
++module_android_audio_hal_la_LIBADD = $(MODULE_LIBADD) $(ASOUNDLIB_LIBS) libalsa-util.la -lhardware
++module_android_audio_hal_la_CFLAGS = $(AM_CFLAGS) $(ASOUNDLIB_CFLAGS)
++endif
++
+ module_alsa_sink_la_SOURCES = modules/alsa/module-alsa-sink.c
+ module_alsa_sink_la_LDFLAGS = $(MODULE_LDFLAGS)
+ module_alsa_sink_la_LIBADD = $(MODULE_LIBADD) $(ASOUNDLIB_LIBS) libalsa-util.la
+diff --git a/src/daemon/default.pa.in b/src/daemon/default.pa.in
+index f50d929..1b17689 100755
+--- a/src/daemon/default.pa.in
++++ b/src/daemon/default.pa.in
+@@ -78,6 +78,10 @@ load-module module-udev-detect
+ load-module module-detect
+ .endif
+ 
++.ifexists module-android-audio-hal@PA_SOEXT@
++load-module module-android-audio-hal
++.endif
++
+ ### Automatically connect sink and source if JACK server is present
+ .ifexists module-jackdbus-detect@PA_SOEXT@
+ .nofail
+diff --git a/src/modules/alsa/module-android-audio-hal.c b/src/modules/alsa/module-android-audio-hal.c
+new file mode 100644
+index 0000000..464082b
+--- /dev/null
++++ b/src/modules/alsa/module-android-audio-hal.c
+@@ -0,0 +1,420 @@
++/***
++  This file is part of PulseAudio.
++
++  Copyright 2013 David Henningsson, Canonical Ltd.
++
++  PulseAudio is free software; you can redistribute it and/or modify
++  it under the terms of the GNU Lesser General Public License as published
++  by the Free Software Foundation; either version 2.1 of the License,
++  or (at your option) any later version.
++
++  PulseAudio is distributed in the hope that it will be useful, but
++  WITHOUT ANY WARRANTY; without even the implied warranty of
++  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
++  General Public License for more details.
++
++  You should have received a copy of the GNU Lesser General Public License
++  along with PulseAudio; if not, write to the Free Software
++  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
++  USA.
++***/
++
++#ifdef HAVE_CONFIG_H
++#include <config.h>
++#endif
++
++#include "module-android-audio-hal-symdef.h"
++
++PA_MODULE_AUTHOR("David Henningsson");
++PA_MODULE_DESCRIPTION("Android Audio HAL (Voice call helper)");
++PA_MODULE_VERSION(PACKAGE_VERSION);
++PA_MODULE_LOAD_ONCE(TRUE);
++PA_MODULE_USAGE("");
++
++#include <stdbool.h>
++#include <stddef.h>
++
++#include <pulsecore/log.h>
++#include <pulsecore/card.h>
++#include <pulsecore/once.h>
++#include <pulsecore/core-util.h>
++
++#include <android/hardware/hardware.h>
++#include <android/hardware/audio.h>
++
++#include "alsa-mixer.h"
++
++const hw_module_t *primary_audio_module = NULL;
++
++typedef struct pa_android_audio_hal {
++    struct audio_hw_device *dev;
++    struct audio_stream_out *ostream;
++    struct audio_stream_in *istream;
++    int odevice; /* AUDIO_DEVICE_OUT_xxx */
++    int idevice; /* AUDIO_DEVICE_IN_xxx */
++} pa_android_audio_hal;
++
++static pa_android_audio_hal* pa_android_audio_hal_new()
++{
++    int r;
++    struct audio_hw_device *device;
++    struct pa_android_audio_hal *hal;
++
++    if (!primary_audio_module) {
++        r = hw_get_module_by_class("audio", "primary", &primary_audio_module);
++        if (r < 0 || primary_audio_module == NULL) {
++            pa_log("hw_get_module_by_class failed with error %d", r);
++            return NULL;
++        }
++        pa_log_debug("Opened Android module: '%s' - '%s', author: '%s'",
++                     primary_audio_module->id, primary_audio_module->name,
++                     primary_audio_module->author);
++    }
++
++    r = audio_hw_device_open(primary_audio_module, &device);
++    if (r || device == NULL) {
++        pa_log("audio_hw_device_open failed with error %d", r);
++        return NULL;
++    }
++    pa_log_debug("Opened audio hw device");
++
++    r = device->init_check(device);
++    if (r) {
++        pa_log("init_check failed with error %d", r);
++        audio_hw_device_close(device);
++        return NULL;
++    }
++    pa_log_debug("init_check succeeded");
++
++    hal = pa_xnew0(struct pa_android_audio_hal, 1);
++    hal->dev = device;
++    return hal;
++}
++
++static void print_err(int err, const char *func)
++{
++    if (err)
++        pa_log("%s returned error %d", func, err);
++    else
++        pa_log_debug("%s succeeded", func);
++}
++
++static void set_stream_device(struct audio_stream *stream, int device)
++{
++    char *s;
++
++    if (!stream->set_parameters) {
++        pa_log_warn("no set_parameters callback");
++        return;
++    }
++
++    s = pa_sprintf_malloc("routing=%d;", device);
++    pa_log_debug("Calling set_parameters with '%s'", s);
++    print_err(stream->set_parameters(stream, s), "set_parameters");
++
++    pa_xfree(s);
++}
++
++static void start_voice_call(pa_android_audio_hal *hal)
++{
++    pa_assert(hal);
++    pa_assert(hal->dev);
++
++    if (!hal->dev->set_mode)
++        pa_log_warn("no set_mode callback");
++    else
++        print_err(hal->dev->set_mode(hal->dev, AUDIO_MODE_IN_CALL), "set_mode");
++
++    if (!hal->ostream) {
++        if (!hal->dev->open_output_stream)
++            pa_log_warn("no open_output_stream callback");
++        else {
++            struct audio_config config = { .sample_rate = 8000,
++                .channel_mask = AUDIO_CHANNEL_OUT_MONO, .format = AUDIO_FORMAT_PCM_16_BIT };
++            print_err(hal->dev->open_output_stream(hal->dev, 1, hal->odevice,
++                AUDIO_OUTPUT_FLAG_PRIMARY,
++                &config, &hal->ostream), "open_output_stream");
++        }
++    }
++
++    if (hal->ostream)
++        set_stream_device(&hal->ostream->common, hal->odevice);
++
++    if (!hal->istream) {
++        if (!hal->dev->open_input_stream)
++            pa_log_warn("no open_input_stream callback");
++        else {
++            struct audio_config config = { .sample_rate = 8000,
++                .channel_mask = AUDIO_CHANNEL_IN_MONO, .format = AUDIO_FORMAT_PCM_16_BIT };
++            print_err(hal->dev->open_input_stream(hal->dev, 2, hal->idevice,
++                  &config, &hal->istream), "open_input_stream");
++        }
++    }
++
++    if (hal->istream)
++        set_stream_device(&hal->istream->common, hal->idevice);
++
++    if (!hal->dev->set_voice_volume)
++        pa_log_warn("no set_voice_volume callback");
++    else
++        print_err(hal->dev->set_voice_volume(hal->dev, 1.0f), "set_voice_volume");
++}
++
++static void stop_voice_call(pa_android_audio_hal *hal)
++{
++    pa_assert(hal);
++    pa_assert(hal->dev);
++
++    if (hal->ostream) {
++        if (!hal->dev->close_output_stream)
++            pa_log_warn("no close_output_stream callback");
++        else {
++            pa_log_debug("Closing output device");
++            hal->dev->close_output_stream(hal->dev, hal->ostream);
++            hal->ostream = NULL;
++        }
++    }
++
++    if (hal->istream) {
++        if (!hal->dev->close_input_stream)
++            pa_log_warn("no close_input_stream callback");
++        else {
++            pa_log_debug("Closing input device");
++            hal->dev->close_input_stream(hal->dev, hal->istream);
++            hal->istream = NULL;
++        }
++    }
++
++    if (hal->dev->set_parameters) {
++        pa_log_debug("Setting mode to normal through set_parameters (Nexus 4 workaround)");
++        print_err(hal->dev->set_parameters(hal->dev, "CALL_KEY=0;"), "device set_parameters");
++    }
++
++    if (!hal->dev->set_mode)
++        pa_log_warn("no set_mode callback");
++    else
++        print_err(hal->dev->set_mode(hal->dev, AUDIO_MODE_NORMAL), "set_mode");
++}
++
++static void update_devices(pa_android_audio_hal *hal)
++{
++    if (hal->ostream)
++        set_stream_device(&hal->ostream->common, hal->odevice);
++    if (hal->istream)
++        set_stream_device(&hal->istream->common, hal->idevice);
++}
++
++static void pa_android_audio_hal_free(pa_android_audio_hal *hal)
++{
++    if (hal->dev) {
++        stop_voice_call(hal);
++        audio_hw_device_close(hal->dev);
++    }
++
++    pa_xfree(hal);
++/*    android_dlclose(primary_audio_module->dso);
++    primary_audio_module = NULL; */
++}
++
++static bool card_has_voice_call(pa_card *c)
++{
++    pa_card_profile *p;
++    void *state;
++
++    PA_HASHMAP_FOREACH(p, c->profiles, state)
++        if (pa_streq(p->name, SND_USE_CASE_VERB_VOICECALL))
++            return true;
++
++    return false;
++}
++
++static bool profile_in_voice_call(pa_card_profile *p)
++{
++    return p && pa_streq(p->name, SND_USE_CASE_VERB_VOICECALL);
++}
++
++struct userdata {
++    pa_hook_slot
++        *card_profile_before_slot,
++        *card_profile_after_slot,
++        *sink_port_slot,
++        *source_port_slot;
++    pa_android_audio_hal *hal;
++    int savedidev, savedodev;
++};
++
++static bool get_devices_for_card(struct userdata *u, pa_card *card)
++{
++    pa_sink *sink;
++    pa_source *source;
++    uint32_t state;
++    int idev = 0, odev = 0;
++    bool hasports = false;
++
++    PA_IDXSET_FOREACH(sink, card->sinks, state) {
++        const char *n;
++        if (!sink->active_port)
++            continue;
++        n = sink->active_port->name;
++        hasports = true;
++
++        pa_log_debug("Current output port: %s", n);
++        if (pa_alsa_ucm_port_contains(n, SND_USE_CASE_DEV_EARPIECE, true))
++            odev |= AUDIO_DEVICE_OUT_EARPIECE;
++        if (pa_alsa_ucm_port_contains(n, SND_USE_CASE_DEV_SPEAKER, true))
++            odev |= AUDIO_DEVICE_OUT_SPEAKER;
++        if (pa_alsa_ucm_port_contains(n, SND_USE_CASE_DEV_HEADSET, true))
++            odev |= AUDIO_DEVICE_OUT_WIRED_HEADSET;
++        if (pa_alsa_ucm_port_contains(n, SND_USE_CASE_DEV_HEADPHONES, true))
++            odev |= AUDIO_DEVICE_OUT_WIRED_HEADPHONE;
++    }
++
++    PA_IDXSET_FOREACH(source, card->sources, state) {
++        const char *n;
++        if (!source->active_port)
++            continue;
++        n = source->active_port->name;
++        hasports = true;
++
++        pa_log_debug("Current input port: %s", n);
++        if (pa_alsa_ucm_port_contains(n, SND_USE_CASE_DEV_HANDSET, false))
++            idev |= AUDIO_DEVICE_IN_BUILTIN_MIC;
++        if (pa_alsa_ucm_port_contains(n, SND_USE_CASE_DEV_HEADSET, false))
++            idev |= AUDIO_DEVICE_IN_WIRED_HEADSET;
++    }
++
++    if (hasports) {
++        pa_log_debug("Card %s - active android devices: 0x%x (output) and 0x%x (input)",
++                     card->name, odev, idev);
++        u->savedidev = idev;
++        u->savedodev = odev;
++    }
++    if (u->hal) {
++        u->hal->idevice = u->savedidev;
++        u->hal->odevice = u->savedodev;
++    }
++
++    return hasports;
++}
++
++static bool setup_voice_call(struct userdata *u, pa_card *card)
++{
++    if (!u->hal) {
++        u->hal = pa_android_audio_hal_new();
++        if (!u->hal)
++            return false;
++    }
++
++    get_devices_for_card(u, card);
++    start_voice_call(u->hal);
++    return true;
++}
++
++
++static pa_hook_result_t sink_port_hook_callback(pa_core *c, pa_sink *sink, struct userdata* u) {
++
++    if (!sink->card)
++        return PA_HOOK_OK;
++    if (!card_has_voice_call(sink->card) || !profile_in_voice_call(sink->card->active_profile))
++        return PA_HOOK_OK;
++
++    get_devices_for_card(u, sink->card);
++    if (u->hal)
++        update_devices(u->hal);
++    return PA_HOOK_OK;
++}
++
++static pa_hook_result_t source_port_hook_callback(pa_core *c, pa_source *source, struct userdata* u) {
++
++    if (!source->card)
++        return PA_HOOK_OK;
++    if (!card_has_voice_call(source->card) || !profile_in_voice_call(source->card->active_profile))
++        return PA_HOOK_OK;
++
++    get_devices_for_card(u, source->card);
++    if (u->hal)
++        update_devices(u->hal);
++    return PA_HOOK_OK;
++}
++
++static pa_hook_result_t card_profile_before_hook_callback(pa_core *c, pa_card_profile *profile, struct userdata *u) {
++
++    if (!card_has_voice_call(profile->card))
++        return PA_HOOK_OK;
++
++    if (u->hal && !profile_in_voice_call(profile)) {
++        stop_voice_call(u->hal);
++/* This causes the N4 HAL to crash on 2nd call. :-( */
++/*        pa_android_audio_hal_free(u->hal);
++        u->hal = NULL; */
++    }
++
++    get_devices_for_card(u, profile->card); /* Save for later usage */
++    return PA_HOOK_OK;
++}
++
++
++static pa_hook_result_t card_profile_after_hook_callback(pa_core *c, pa_card *card, struct userdata *u) {
++
++    if (!card_has_voice_call(card))
++        return PA_HOOK_OK;
++
++    if (profile_in_voice_call(card->active_profile))
++        setup_voice_call(u, card);
++
++    return PA_HOOK_OK;
++}
++
++int pa__init(pa_module*m) {
++
++    pa_card *card;
++    uint32_t state;
++
++    struct userdata *u = pa_xnew0(struct userdata, 1);
++
++    u->card_profile_before_slot = pa_hook_connect(&m->core->hooks[PA_CORE_HOOK_CARD_PROFILE_CHANGING],
++        PA_HOOK_LATE+30, (pa_hook_cb_t) card_profile_before_hook_callback, u);
++    u->card_profile_after_slot = pa_hook_connect(&m->core->hooks[PA_CORE_HOOK_CARD_PROFILE_CHANGED],
++        PA_HOOK_LATE+30, (pa_hook_cb_t) card_profile_after_hook_callback, u);
++    u->sink_port_slot = pa_hook_connect(&m->core->hooks[PA_CORE_HOOK_SINK_PORT_CHANGED],
++        PA_HOOK_LATE+30, (pa_hook_cb_t) sink_port_hook_callback, u);
++    u->source_port_slot = pa_hook_connect(&m->core->hooks[PA_CORE_HOOK_SOURCE_PORT_CHANGED],
++        PA_HOOK_LATE+30, (pa_hook_cb_t) source_port_hook_callback, u);
++
++    PA_IDXSET_FOREACH(card, m->core->cards, state) {
++        if (!card_has_voice_call(card))
++            continue;
++
++/* This isn't working, because there are no devices on N4 if we start up in "Voice Call" mode. */
++/*        if (profile_in_voice_call(card->active_profile))
++            setup_voice_call(u, card);
++        else */
++            get_devices_for_card(u, card); /* Save for later usage */
++    }
++
++    return 0;
++}
++
++void pa__done(pa_module*m) {
++
++    struct userdata *u;
++
++    pa_assert(m);
++
++    if (!(u = m->userdata))
++        return;
++
++    if (u->card_profile_before_slot)
++        pa_hook_slot_free(u->card_profile_before_slot);
++    if (u->card_profile_after_slot)
++        pa_hook_slot_free(u->card_profile_after_slot);
++    if (u->sink_port_slot)
++        pa_hook_slot_free(u->sink_port_slot);
++    if (u->source_port_slot)
++        pa_hook_slot_free(u->source_port_slot);
++
++    if (u->hal)
++        pa_android_audio_hal_free(u->hal);
++
++    pa_xfree(u);
++}
+-- 
+1.7.9.5
+
