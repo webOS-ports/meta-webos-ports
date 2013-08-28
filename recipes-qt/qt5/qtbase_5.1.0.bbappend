@@ -1,7 +1,7 @@
 DEPENDS += "mtdev"
 
 PACKAGECONFIG_GL = "gles2"
-PACKAGECONFIG_DISTRO = "sql-sqlite icu glib"
+PACKAGECONFIG_DISTRO = "sql-sqlite icu glib accessibility"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 SRC_URI += " \
