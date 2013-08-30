@@ -17,6 +17,4 @@ inherit webos_cmake
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-SRC_URI += "file://0001-When-running-install-make-target-install-header-file.patch"
-	   
 ALLOW_EMPTY_${PN} = "1"
