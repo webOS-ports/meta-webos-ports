@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=14db2fc072fc4e73224a76f19e26b95a"
 
 DEPENDS = "qtbase qtdeclarative qtwayland qtwebkit luna-sysmgr-common"
 
-RDEPENDS_${PN} = " \
+RDEPENDS_${PN} += " \
     qtgraphicaleffects-qmlplugins \
 "
 
