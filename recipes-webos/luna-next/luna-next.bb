@@ -2,16 +2,12 @@ DESCRIPTION = "Next generation webOS UI which meant to be a complete replacement
 LunaSysMgr/WebAppMgr and is completely based on well known open source technologies like \
 Qt 5 and Wayland."
 LICENSE = "GPL-3.0 & Apache-2.0"
-LIC_FILES_CHKSUM = "file://COPYING;md5=14db2fc072fc4e73224a76f19e26b95a"
+LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
-DEPENDS = "qtbase qtdeclarative qtwayland qtwebkit luna-sysmgr-common"
-
-RDEPENDS_${PN} += " \
-    qtgraphicaleffects-qmlplugins \
-"
+DEPENDS = "qtbase qtdeclarative qtwayland luna-sysmgr-common"
 
 SRC_URI = "git://github.com/webOS-ports/luna-next.git;branch=master;protocol=git"
-SRCREV = "389d922c3f5668630915f8f5afe985e376577129"
+SRCREV = "8069de442231c5810538291001922729ce136e1b"
 S = "${WORKDIR}/git"
 
 # For the sake of the webOS build system we need to provide the webOS component version
