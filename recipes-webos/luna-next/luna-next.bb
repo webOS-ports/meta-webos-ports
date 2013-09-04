@@ -36,5 +36,7 @@ do_install_append() {
     install -m 0644 ${S}/files/systemd/luna-next.service ${D}${systemd_unitdir}/system/
 }
 
+RDEPENDS_${PN} = "luna-next-conf"
+
 FILES_${PN} += "${OE_QMAKE_PATH_QML}/LunaNext"
 FILES_${PN}-dbg += "${OE_QMAKE_PATH_QML}/LunaNext/.debug"
