@@ -75,11 +75,14 @@ def webos_enhsub_get_tag(d, webos_v):
 
 # Set WEBOS_SRCREV to value from WEBOS_VERSION.
 WEBOS_SRCREV = "${@webos_enhsub_get_srcrev(d, '${WEBOS_VERSION}')}"
-SRCREV = "${WEBOS_SRCREV}"
-SRCREV_main = "${WEBOS_SRCREV}"
+# use ??= to allow recipe to overwrite it
+SRCREV ??= "${WEBOS_SRCREV}"
+SRCREV_main ??= "${WEBOS_SRCREV}"
 
+GIT-PREFIX ?= "ow"
 # append WEBOS_PV_SUFFIX to PV when you're using 0 as WEBOS_SUBMISSION to make it clear which SHA-1 was built
-WEBOS_PV_SUFFIX = "+gitr${SRCPV}"
+WEBOS_PV_SUFFIX = "+${GIT-PREFIX}+gitr${SRCPV}"
+PV_append = "${WEBOS_PV_SUFFIX}"
 
 # srcrev is mandatory and enough, don't put tag= in SRC_URI
 # to reenable you need to set WEBOS_GIT_TAG to ";tag=${WEBOS_GIT_PARAM_TAG}"
@@ -289,9 +292,8 @@ python submission_sanity_check() {
             checkout = "%s/%s" % (workdir, destsuffix_param)
 
             # '0' in 'webos_submission' is used with AUTOREV -> so don't check AUTOREV against submissions/0 tag
-            if webos_submission != '0' and webos_git_repo_tag and rev:
+            if webos_submission != '0' and webos_git_repo_tag and rev and not bb.data.inherits_class('webos-ports-submissions', d):
                 webos_enhsub_tag_sanity_check(d, fetcher, u, pn, tag_param, rev, webos_git_repo_tag, checkout, file)
-
             if not 'nobranch' in urldata[u].parm or urldata[u].parm['nobranch'] != "1":
                 branch_in_src_uri = urldata[u].parm['branch'] if 'branch' in urldata[u].parm else 'master'
                 branch_in_webos_version = d.getVar('WEBOS_GIT_PARAM_BRANCH', True)
