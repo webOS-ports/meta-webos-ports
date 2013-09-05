@@ -60,10 +60,13 @@ def webos_enhsub_get_tag(d, webos_v):
 
 # Set WEBOS_SRCREV to value from WEBOS_VERSION.
 WEBOS_SRCREV = "${@webos_enhsub_get_srcrev(d, '${WEBOS_VERSION}')}"
-SRCREV = "${WEBOS_SRCREV}"
+# use ??= to allow recipe to overwrite it
+SRCREV ??= "${WEBOS_SRCREV}"
 
+GIT-PREFIX ?= "ow"
 # append WEBOS_PV_SUFFIX to PV when you're using 0 as WEBOS_SUBMISSION to make it clear which SHA-1 was built
-WEBOS_PV_SUFFIX = "+gitr${SRCPV}"
+WEBOS_PV_SUFFIX = "+${GIT-PREFIX}+gitr${SRCPV}"
+PV_append = "${WEBOS_PV_SUFFIX}"
 
 # srcrev is mandatory and enough, don't put tag= in SRC_URI
 # to reenable you need to set WEBOS_GIT_TAG to ";tag=${WEBOS_GIT_PARAM_TAG}"
@@ -134,7 +137,7 @@ python submission_sanity_check() {
             checkout = "%s/%s" % (workdir, destsuffix_param)
 
             # '0' in 'webos_submission' is used with AUTOREV -> so don't check AUTOREV against submissions/0 tag
-            if webos_submission != '0' and webos_git_repo_tag and srcrev:
+            if webos_submission != '0' and webos_git_repo_tag and srcrev and not bb.data.inherits_class('webos-ports-submissions', d):
                 bb.debug(2, "sanity check for pn '%s', tag_param '%s', srcrev '%s', webos_git_repo_tag '%s', checkout '%s'" % (pn, tag_param, srcrev, webos_git_repo_tag, checkout))
                 cmd = "cd %s && git tag -l 2>/dev/null | grep '^%s$' | wc -l" % (checkout, webos_git_repo_tag)
                 tag_exists = bb.fetch.runfetchcmd(cmd, d).strip()
