@@ -4,7 +4,7 @@
 WEBOS_REPO_NAME ??= "${BPN}"
 
 OPENWEBOS_GIT_REPO ?= "git://github.com/openwebos"
-OPENWEBOS_GIT_REPO_COMPLETE ?= "${OPENWEBOS_GIT_REPO}/${WEBOS_REPO_NAME};tag=${WEBOS_GIT_PARAM_TAG}"
+OPENWEBOS_GIT_REPO_COMPLETE ?= "${OPENWEBOS_GIT_REPO}/${WEBOS_REPO_NAME}"
 
 ISIS_PROJECT_GIT_REPO ?= "git://github.com/isis-project"
 # isis-project components don't have submissions => treat like any other upstream
