@@ -33,3 +33,5 @@ SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 FILES_${PN}-dbg += "${libdir}/${PN}/tests/.debug"
+
+SRC_URI += "file://0001-Fix-build-with-gcc-4.8.1.patch"
