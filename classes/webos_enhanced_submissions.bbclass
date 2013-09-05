@@ -48,8 +48,11 @@ def webos_enhsub_get_srcrev(d, webos_v):
 # inheriting this bbclass or from some config file with override will work and
 # checkout right revision without triggering a failure once a sanity check is
 # implemented.
+GIT-PREFIX ?= "ow"
+PV_append = "+${GIT-PREFIX}+gitr${SRCPV}"
 WEBOS_SRCREV = "${@webos_enhsub_get_srcrev(d, '${WEBOS_VERSION}')}"
-SRCREV = "${WEBOS_SRCREV}"
+# use ??= to allow recipe to overwrite it
+SRCREV ??= "${WEBOS_SRCREV}"
 WEBOS_GIT_PARAM_TAG = "${SRCREV}"
 # Don't set it in WEBOS_GIT_PARAM_BRANCH until we have fix for branches with '@'
 # in bitbake we're using:
@@ -119,7 +122,7 @@ python submission_sanity_check() {
             if webos_submission == '0':
                 msg = "WEBOS_VERSION '%s' for recipe '%s' (file '%s') contains submission 0, which indicates using AUTOREV" % (webos_version, pn, file)
                 package_qa_handle_error("webos-enh-sub-error", msg, d)
-            elif webos_git_repo_tag and webos_srcrev:
+            elif webos_git_repo_tag and webos_srcrev and not bb.data.inherits_class('webos-ports-submissions', d):
                 bb.debug(2, "sanity check for pn '%s', tag_param '%s', webos_srcrev '%s', webos_git_repo_tag '%s', checkout '%s'" % (pn, tag_param, webos_srcrev, webos_git_repo_tag, checkout))
                 cmd = "cd %s && git tag -l 2>/dev/null | grep '^%s$' | wc -l" % (checkout, webos_git_repo_tag)
                 tag_exists = bb.fetch.runfetchcmd(cmd, d).strip()
