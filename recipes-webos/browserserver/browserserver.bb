@@ -23,7 +23,6 @@ SRC_URI = "${ISIS_PROJECT_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit webos-ports-submissions
-WEBOS_PORTS_REPO_NAME = "BrowserServer"
 SRCREV = "58ec890291dfa1a927faba069f8b0f1d8ac94e2d"
 
 PARALLEL_MAKE = ""

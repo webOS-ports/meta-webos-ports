@@ -18,7 +18,6 @@ WEBOS_GIT_TAG = "submissions/${WEBOS_SUBMISSION}"
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-WEBOS_PORTS_REPO_NAME = "luna-sysmgr"
 inherit webos-ports-submissions
 SRCREV = "527ab0dacc0d59ba7b3525ebccd1b278b9266985"
 
