@@ -3,11 +3,13 @@ HOMEPAGE = "http://phonegap.com/"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=aa80bcec645b0f6ec37d5954ee6dc056"
 
-WEBOS_PORTS_REPO_NAME = "phonegap"
+WEBOS_REPO_NAME = "phonegap"
+WEBOS_VERSION = "2.3.0-0_368e2da0c0db11f219560ec1c10ca0417df0c1c4"
+
+inherit webos_enhanced_submissions
 inherit webos-ports-submissions
 
 S = "${WORKDIR}/git"
-SRCREV = "368e2da0c0db11f219560ec1c10ca0417df0c1c4"
 
 do_install() {
     install -d ${D}${webos_frameworksdir}/cordova/
