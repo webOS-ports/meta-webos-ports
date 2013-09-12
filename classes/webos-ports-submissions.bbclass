@@ -3,7 +3,12 @@
 GIT-PREFIX = "wop"
 
 # The default repo name is the "base" component name (no -native, etc.)
-WEBOS_PORTS_REPO_NAME ??= "${BPN}"
 WEBOS_PORTS_BRANCH ??= "webOS-ports/master"
 
-SRC_URI = "git://github.com/webOS-ports/${WEBOS_PORTS_REPO_NAME};branch=${WEBOS_PORTS_BRANCH}"
+SRC_URI = "git://github.com/webOS-ports/${WEBOS_REPO_NAME};branch=${WEBOS_PORTS_BRANCH}"
+
+python() {
+    if not bb.data.inherits_class('webos_enhanced_submissions', d):
+        file = d.getVar('FILE', True)
+        bb.fatal("%s: inherit webos_enhanced_submissions when the recipe is using webos-ports-submissions" % file)
+}
