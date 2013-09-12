@@ -65,8 +65,10 @@ WEBOS_PACKAGESET_SYSTEMAPPS = " \
 WEBOS_PACKAGESET_UI = " \
     ${VIRTUAL-RUNTIME_webappmanager} \
     ${VIRTUAL-RUNTIME_webos-compositor} \
-    ${VIRTUAL-RUNTIME_webos-ime} \
 "
+
+# Removed from WEBOS_PACKAGESET_UI
+# - ${VIRTUAL-RUNTIME_webos-ime}
 
 # nyx-lib needs nyx-modules at runtime, but a runtime dependency is not defined
 # in its recipe because nyx-modules is MACHINE_ARCH (e.g. qemux86), while nyx-lib is
@@ -92,13 +94,13 @@ RDEPENDS_${PN} = " \
     webos-shutdownscripts \
     ${WEBOS_MISSING_FROM_RDEPENDS} \
     ${WEBOS_FOSS_MISSING_FROM_RDEPENDS} \
+    ${WEBOS_PACKAGESET_SYSTEMAPPS} \
+    ${WEBOS_PACKAGESET_UI} \
 "
 
 # Removed for next generation graphics stack
 #    keyboard-efigs
-#    ${WEBOS_PACKAGESET_UI}
 #    ${WEBOS_PACKAGESET_BROWSER}
-#    ${WEBOS_PACKAGESET_SYSTEMAPPS}
 
 # XXX These non-top-level components must be explicitly added because they are
 # missing from the RDEPENDS lists of the components that expect them to be
