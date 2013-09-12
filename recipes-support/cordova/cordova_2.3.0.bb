@@ -3,6 +3,8 @@ HOMEPAGE = "http://phonegap.com/"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=aa80bcec645b0f6ec37d5954ee6dc056"
 
+inherit webos_enhanced_submissions
+
 WEBOS_PORTS_REPO_NAME = "phonegap"
 inherit webos-ports-submissions
 
