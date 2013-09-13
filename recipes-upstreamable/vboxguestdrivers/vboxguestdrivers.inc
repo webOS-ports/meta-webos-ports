@@ -7,11 +7,15 @@ LIC_FILES_CHKSUM = "file://${WORKDIR}/${VBOX_NAME}/COPYING;md5=e197d5641bb35b29d
 
 DEPENDS = "virtual/kernel"
 
-INC_PR = "r3"
-
 inherit module kernel-module-split
 
 COMPATIBLE_MACHINE = "(qemux86|qemux86-64)"
+
+VBOX_NAME = "VirtualBox-${PV}"
+
+SRC_URI = "http://download.virtualbox.org/virtualbox/${PV}/${VBOX_NAME}.tar.bz2 \
+           file://Makefile.utils \
+"
 
 S = "${WORKDIR}/vbox_module"
 
