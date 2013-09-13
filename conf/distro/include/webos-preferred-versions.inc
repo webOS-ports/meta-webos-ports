@@ -14,7 +14,6 @@ PREFERRED_VERSION_ntp ?= "4.2.6p5"
 PREFERRED_VERSION_udev ?= "182"
 PREFERRED_VERSION_upstart ?= "0.3.11"
 PREFERRED_VERSION_valgrind ?= "3.8.1+svnr13429"
-PREFERRED_VERSION_vboxguestdrivers ?= "4.2.6"
 # Newer upstream meta-oe already has yajl 2.0.3 which isn't compatible with our libpbnjson yet
 # https://github.com/openwebos/libpbnjson/pull/2
 PREFERRED_VERSION_yajl ?= "1.0.12"
