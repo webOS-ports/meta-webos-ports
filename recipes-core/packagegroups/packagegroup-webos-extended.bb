@@ -149,7 +149,7 @@ WEBOS_FOSS_MISSING_FROM_RDEPENDS = " \
 "
 
 # These packages that are installed in the qemux86 image only.
-RDEPENDS_${PN}_append_qemux86 = " \
+RDEPENDS_${PN}_append_qemuall = " \
     dhcp-client \
 "
 
