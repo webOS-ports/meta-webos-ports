@@ -10,6 +10,7 @@ DEPENDS += "mtdev"
 
 VBOX_RDEPENDS = ""
 VBOX_RDEPENDS_qemux86 = "vboxguestdrivers"
+VBOX_RDEPENDS_qemux86-64 = "vboxguestdrivers"
 RDEPENDS_${PN} = "lsb gzip ${VBOX_RDEPENDS}"
 
 WEBOS_VERSION = "6.0.0-92_d03ac4650579eb4590bdc35b88ae5897f5c04033"
