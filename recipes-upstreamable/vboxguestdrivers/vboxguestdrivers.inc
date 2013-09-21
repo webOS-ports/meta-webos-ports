@@ -20,6 +20,7 @@ SRC_URI = "http://download.virtualbox.org/virtualbox/${PV}/${VBOX_NAME}.tar.bz2 
 S = "${WORKDIR}/vbox_module"
 
 export BUILD_TARGET_ARCH="${ARCH}"
+export BUILD_TARGET_ARCH_x86-64="amd64"
 export KERN_DIR="${STAGING_KERNEL_DIR}"
 
 addtask export_sources before do_patch after do_unpack
