@@ -122,8 +122,7 @@ DISTRO_EXTRA_RDEPENDS += " ${WEBOS_DEFAULT_EXTRA_RDEPENDS}"
 DISTRO_EXTRA_RRECOMMENDS += " ${WEBOS_DEFAULT_EXTRA_RRECOMMENDS}"
 
 WEBOSQEMUDEPS = "${@base_contains("INCOMPATIBLE_LICENSE", "GPLv3", "", "qemu-config",d)}"
-DISTRO_EXTRA_RDEPENDS_append_qemuarm = " ${WEBOSQEMUDEPS}"
-DISTRO_EXTRA_RDEPENDS_append_qemux86 = " ${WEBOSQEMUDEPS}"
+DISTRO_EXTRA_RDEPENDS_append_qemuall = " ${WEBOSQEMUDEPS}"
 
 CACHE = "${TMPDIR}/cache/${TCMODE}-${TCLIBC}${@['', '/' + str(d.getVar('MACHINE', True))][bool(d.getVar('MACHINE', True))]}${@['', '/' + str(d.getVar('SDKMACHINE', True))][bool(d.getVar('SDKMACHINE', True))]}"
 
@@ -189,7 +188,7 @@ do_unpack[umask] = "022"
 
 # Redirect console output to keep it from spewing all over the VirtualBox window
 # (This is added to qemux86 kernel cmdline by openembedded-core/meta/classes/syslinux.bbclass)
-APPEND_append_qemux86 = " console=ttyS0"
+APPEND_append_qemuall = " console=ttyS0"
 
 MIRRORS =+ "\
 ftp://.*/.*      http://downloads.yoctoproject.org/mirror/sources/ \n \

@@ -5,7 +5,7 @@ PE = "1"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
-SRC_URI_append_qemux86 = " file://my_gfx.cfg \
+SRC_URI_append_qemuall = " file://my_gfx.cfg \
                            file://enable_uinput.cfg \
                            file://network_testing.cfg \
                          "
