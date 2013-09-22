@@ -95,10 +95,8 @@ WEBOS_PACKAGESET_TZDATA ?= " \
 WEBOS_PACKAGESET_UI = " \
     ${VIRTUAL-RUNTIME_webappmanager} \
     ${VIRTUAL-RUNTIME_webos-compositor} \
+    ${VIRTUAL-RUNTIME_webos-ime} \
 "
-
-# Removed from WEBOS_PACKAGESET_UI
-# - ${VIRTUAL-RUNTIME_webos-ime}
 
 # nyx-lib needs nyx-modules at runtime, but a runtime dependency is not defined
 # in its recipe because nyx-modules is MACHINE_ARCH (e.g. qemux86), while nyx-lib is
