@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 PV = "1.0+gitr${SRCPV}"
 
 SRC_URI = "git://github.com/webOS-ports/webos-systemd-services.git;branch=master;protocol=git"
-SRCREV = "2ff87680a7ddd70aff5eb9952ce85bdd4d000ea9"
+SRCREV = "563e531b0f103865d59dcd7f8f1d2853cd6d9981"
 S = "${WORKDIR}/git"
 
 inherit systemd
@@ -15,6 +15,7 @@ SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE_${PN} = " \
     activitymanager.service \
     configurator.service \
+    createLocalAccount.service \
     db8.service \
     filecache.service \
     ls-hubd_private.service \
@@ -41,4 +42,7 @@ do_install() {
     for f in *.target *.service ; do
         install -m 0644 ${S}/$f ${D}${systemd_unitdir}/system
     done
+
+    install -d ${D}${bindir}
+    install -m 0755 ${S}/createLocalAccount.sh ${D}${bindir}
 }
