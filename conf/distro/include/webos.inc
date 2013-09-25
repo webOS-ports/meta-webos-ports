@@ -130,11 +130,10 @@ INHERIT_DISTRO += "icecc"
 # ICECC_DISABLED = ""
 ICECC_DISABLED ??= "1"
 
-# Remove version-going-backwards from ERROR_QA when oe-core is upgraded to include:
-# http://lists.openembedded.org/pipermail/openembedded-core/2013-August/082351.html
-WARN_QA_append = " version-going-backwards webos-enh-sub-warning webos-enh-sub-autorev-error"
+WARN_QA_append = " version-going-backwards webos-enh-sub-warning"
 ERROR_QA_AUTOREV ?= "webos-enh-sub-autorev-error"
 ERROR_QA_append = " webos-enh-sub-error ${ERROR_QA_AUTOREV}"
+ERROR_QA_remove = " version-going-backwards"
 
 QEMU_TARGETS ?= "arm i386"
 
