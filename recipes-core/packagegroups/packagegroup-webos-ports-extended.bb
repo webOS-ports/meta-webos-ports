@@ -7,10 +7,6 @@ inherit packagegroup
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 RDEPENDS_${PN} = " \
-  android-system-compat \
-  android-system \
-  android-tools \
-  \
   distro-feed-configs \
   pulseaudio-server \
   pulseaudio-misc \
@@ -55,7 +51,12 @@ RDEPENDS_${PN} = " \
   webos-systemd-services \
 "
 
-LIBHYBRIS_RDEPENDS = "${VIRTUAL-RUNTIME_android-system-image}"
+LIBHYBRIS_RDEPENDS = " \
+    ${VIRTUAL-RUNTIME_android-system-image} \
+    android-system \
+    android-system-compat \
+    android-tools \
+"
 
 RDEPENDS_${PN}_append_tuna = " token-generator ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS_${PN}_append_grouper = " token-generator ${LIBHYBRIS_RDEPENDS}"
