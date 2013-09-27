@@ -4,9 +4,10 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 PV = "1.0+gitr${SRCPV}"
+PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 SRC_URI = "git://github.com/webOS-ports/webos-systemd-services.git;branch=master;protocol=git"
-SRCREV = "563e531b0f103865d59dcd7f8f1d2853cd6d9981"
+SRCREV = "8f31d8836006b11eb2a46a5f01df04c3d40dba8c"
 S = "${WORKDIR}/git"
 
 inherit systemd
@@ -15,6 +16,7 @@ SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE_${PN} = " \
     activitymanager.service \
     configurator.service \
+    configurator-async.service \
     createLocalAccount.service \
     db8.service \
     filecache.service \
@@ -28,18 +30,13 @@ SYSTEMD_SERVICE_${PN} = " \
     powerd.service \
     sleepd.service \
     webos-connman-adapter.service \
-    webos-telephonyd.service \
-    webos-base.target \
-    webos-essential.target \
+    ${@base_contains('MACHINE_FEATURES', 'phone', 'webos-telephonyd.service', '',d)} \
 "
-
-# disabled cause of https://github.com/openwebos/mojoservicelauncher/commit/7780a480155e018d1c42b8599b962aaea871720d
-# node_fork_server.service
 
 do_install() {
     install -d ${D}${systemd_unitdir}/system
 
-    for f in *.target *.service ; do
+    for f in *.service ; do
         install -m 0644 ${S}/$f ${D}${systemd_unitdir}/system
     done
 
