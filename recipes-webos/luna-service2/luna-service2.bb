@@ -26,7 +26,7 @@ S = "${WORKDIR}/git"
 SRC_URI += "file://0001-Instead-of-relying-on-existing-service-role-director.patch \
             file://0002-Add-support-for-systemd.patch \
             file://0003-Add-additional-search-path-to-pkgconfig-configuratio.patch \
-            file://0004-Change-path-to-WebAppMgr-in-pub-prv-hub-configuratio.patch"
+            file://0004-Change-path-to-QtWebProcess-executable-in-pub-prv-hu.patch"
 
 # This fix-up will be removed shortly. luna-service2 headers must be included
 # using '#include <luna-service2/*.h>'
