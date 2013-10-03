@@ -32,6 +32,6 @@ SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit webos-ports-submissions
-SRCREV = "a79b6fd25d33f2b23a7363e0126fbbbb633ca8ea"
+SRCREV = "c6c6d9d7e453f820caa1da3cf1570f345e89548a"
 
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
