@@ -11,8 +11,8 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=1d4476a7d98dd5691c53d4d43a510c72 \
                     file://src/wayland-server.c;endline=21;md5=079ae21dbf98ada52ec23744851b0a5c"
 
 SRC_URI = "http://wayland.freedesktop.org/releases/${BPN}-${PV}.tar.xz"
-SRC_URI[md5sum] = "d2dc9398a83692cafc16eba6e45f85d8"
-SRC_URI[sha256sum] = "2ef587cf1a0e52b6dee44eeb9c288110e8180819abf4e419d247dfe234867a5c"
+SRC_URI[md5sum] = "dc75d060f23c0ef17ae95307cd525240"
+SRC_URI[sha256sum] = "78062e2b081731d96de6a514a91322ad6e7cf6cacfa9c32997bbb3ad6e7f166f"
 
 SRC_URI_append_class-native = " file://just-scanner.patch"
 
