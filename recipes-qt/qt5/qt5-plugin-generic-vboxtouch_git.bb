@@ -24,3 +24,4 @@ inherit qmake5
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 
 FILES_${PN} += "${libdir}/qt5/plugins/generic/libvboxtouchplugin.so"
+FILES_${PN}-dbg += "${libdir}/qt5/plugins/generic/.debug/"
