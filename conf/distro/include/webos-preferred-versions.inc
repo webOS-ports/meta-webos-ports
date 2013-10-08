@@ -31,8 +31,4 @@ PREFERRED_VERSION_yajl ?= "1.0.12"
 # where <revision-hash> is the 40-character SHA-1 identifier of annotated
 # submissions tag.
 
-QT5_VERSION = "5.1.0"
-QT5_VERSION_WAYLAND = "5.1.0+git%"
-require conf/distro/include/qt5-versions.inc
-
 PREFERRED_VERSION_qtwebkit = "5.1.0+git%"
