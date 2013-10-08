@@ -9,4 +9,4 @@ SRC_URI = "git://gitorious.org/qt/qtwayland.git;protocol=git;branch=master \
            file://0003-Don-t-disown-buffer-until-a-new-texture-id-is-reques.patch \
            file://0004-Revert-Integrate-QWindow-Visibility-into-Compositor-.patch"
 
-SRCREV = "e8e5457165d6797b2a2d33a73c9b362e82688459"
+SRCREV = "184636c72b697b760b081175d8e581718540064a"
