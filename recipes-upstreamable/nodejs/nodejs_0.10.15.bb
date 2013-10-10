@@ -17,6 +17,24 @@ CCACHE = ""
 ARCHFLAGS_arm = "${@bb.utils.contains('TUNE_FEATURES', 'callconvention-hard', '--with-arm-float-abi=hard', '--with-arm-float-abi=softfp', d)}"
 ARCHFLAGS ?= ""
 
+do_configure_prepend_class-target() {
+    # use native tool even when BUILD_ARCH and TARGET_ARCH are both x64,
+    # fixes calling mksnapshot linked with incorrect ld-linux-x86-64.so.2 path
+    # e.g. Ubuntu uses /lib64/ld-linux-x86-64.so.2, but qemux86-64 target build has
+    # /lib/ld-linux-x86-64.so.2 in node-v0.10.15/out/Release/mksnapshot and do_compile
+    # fails with:
+    # |   LD_LIBRARY_PATH=/OE/tmp-eglibc/work/x86_64-webos-linux/nodejs/0.10.15-r0/node-v0.10.15/out/Release/lib.host:/OE/tmp-eglibc/work/x86_64-
+    # | /bin/sh: 1: /OE/tmp-eglibc/work/x86_64-webos-linux/nodejs/0.10.15-r0/node-v0.10.15/out/Release/mksnapshot: not found
+    # | make[1]: *** [/OE/tmp-eglibc/work/x86_64-webos-linux/nodejs/0.10.15-r0/node-v0.10.15/out/Release/obj.target/v8_snapshot/geni/snapshot.cc]
+
+    # $ ldd node-v0.10.15-qemux86-64/node-v0.10.15/out/Release/mksnapshot  | grep ld-linux
+    #   /lib/ld-linux-x86-64.so.2 => /lib64/ld-linux-x86-64.so.2 (0x00007f6b5f206000)
+    # $ ldd node-v0.10.15-native/node-v0.10.15/out/Release/mksnapshot | grep ld-linux
+    #   /lib64/ld-linux-x86-64.so.2 (0x00007fdef26d5000)
+
+    sed -i 's#<(PRODUCT_DIR)#${STAGING_BINDIR_NATIVE}#g' ${S}/deps/v8/tools/gyp/v8.gyp
+}
+
 # Node is way too cool to use proper autotools, so we install two wrappers to forcefully inject proper arch cflags to workaround gypi
 do_configure () {
     export LD="${CXX}"
@@ -48,11 +66,17 @@ do_install_append_class-native() {
     # when it exceeds 128 character shebang limit it's stripped to incorrect path
     # and npm fails to execute like in this case with 133 characters show in log.do_install:
     # updating shebang of /home/jenkins/workspace/build-webos-nightly/device/qemux86/label/open-webos-builder/BUILD-qemux86/work/x86_64-linux/nodejs-native/0.10.15-r0/image/home/jenkins/workspace/build-webos-nightly/device/qemux86/label/open-webos-builder/BUILD-qemux86/sysroots/x86_64-linux/usr/bin/npm to /home/jenkins/workspace/build-webos-nightly/device/qemux86/label/open-webos-builder/BUILD-qemux86/sysroots/x86_64-linux/usr/bin/node
-    sed "1s^.*^#\!/usr/bin/env node^g" -i ${D}${bindir}/npm
+    # /usr/bin/npm is symlink to /usr/lib/node_modules/npm/bin/npm-cli.js
+    # use sed on npm-cli.js because otherwise symlink is replaced with normal file and
+    # npm-cli.js continues to use old shebang
+    sed "1s^.*^#\!/usr/bin/env node^g" -i ${D}${libdir}/node_modules/npm/bin/npm-cli.js
+
+    # we need native mksnapshot to use it in target builds
+    install -v -m 755 ${B}/out/Release/mksnapshot ${D}/${bindir}
 }
 
 do_install_append_class-target() {
-    sed "1s^.*^#\!${bindir}/env node^g" -i ${D}${bindir}/npm
+    sed "1s^.*^#\!${bindir}/env node^g" -i ${D}${libdir}/node_modules/npm/bin/npm-cli.js
 }
 
 RDEPENDS_${PN} = "curl python-shell python-datetime python-subprocess python-textutils"
