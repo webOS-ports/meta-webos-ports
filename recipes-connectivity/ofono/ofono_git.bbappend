@@ -1,32 +1,19 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
-SRCREV = "7fe16c7df411c5093a80eddee56a844ae4c7f920"
+SRCREV = "351893629f08356e3565ecd5dbc62ce15adc276a"
 PV = "1.12+git${SRCPV}"
 
 # NOTE: Needed for GPRS provisioning support
 RDEPENDS_${PN}_append = " android-apn-database"
 
 SRC_URI  = " \
-  git://github.com/webOS-ports/ofono-ubuntu.git;protocol=git;branch=master \
+  git://github.com/rilmodem/ofono.git;protocol=git;branch=master \
   file://ofono \
-  file://ofono.upstart \
-  file://0001-Disable-support-for-android-audiosystem.patch \
+  file://missing-ssize_t.patch \
+  file://0001-Disable-backtrace-cause-linking-to-libdl-fails.patch \
 "
 
-do_configure_prepend() {
-    # Workaround missing bootstrap script which is required by our base recipe
-    touch ${S}/bootstrap
-    chmod +x ${S}/bootstrap
-}
-
-do_install_append() {
-    install -d ${D}${webos_upstartconfdir}
-    install -m 0644 ${WORKDIR}/ofono.upstart ${D}${webos_upstartconfdir}/ofono
-}
-
-# for update-rc.d.bbclass
+# Put sysvinit script into own package to move away from our image
 UPDATERCPN = "${PN}-sysvinit"
-
-PACKAGES =+ "${PN}-sysvinit ${PN}-upstart"
-FILES_${PN}-sysvinit = "${sysconfdir}/init.d/ofono"
-FILES_${PN}-upstart = "${webos_upstartconfdir}/ofono"
+PACKAGES =+ "${PN}-sysvinit"
+FILES_${PN}-sysvinit = "${sysconfdir}/"
