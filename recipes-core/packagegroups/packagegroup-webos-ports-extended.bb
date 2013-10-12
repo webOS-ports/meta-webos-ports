@@ -34,6 +34,7 @@ RDEPENDS_${PN} = " \
   org.webosinternals.preware \
   org.webosports.app.calendar \
   snowshoe \
+  web-apps \
   \
   ca-certificates \
   \
