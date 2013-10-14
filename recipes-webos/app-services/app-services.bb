@@ -35,6 +35,7 @@ do_install() {
         cp -vrf $SERVICE/activities/* ${D}${webos_sysconfdir}/activities/ 2> /dev/null || true
         # Copy services and roles files
         cp -vrf $SERVICE/files/sysbus/*.json ${D}${webos_sysbus_prvrolesdir} 2> /dev/null || true
+        cp -vrf $SERVICE/files/sysbus/*.json ${D}${webos_sysbus_pubrolesdir} 2> /dev/null || true
         cp -vrf $SERVICE/files/sysbus/*.service ${D}${webos_sysbus_prvservicesdir} 2> /dev/null || true
     done
 
