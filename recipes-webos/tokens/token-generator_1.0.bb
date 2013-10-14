@@ -5,17 +5,20 @@ LIC_FILES_CHKSUM = "file://${COREBASE}/meta/COPYING.MIT;md5=3da9cfbcb788c80a0384
 COMPATIBLE_MACHINE = "tuna|grouper"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-SRC_URI = "file://token-generator.sh"
+SRC_URI = " \
+    file://token-generator.sh \
+    file://token-generator.service \
+"
 
-PACKAGES = "${PN}"
-FILES_${PN} = " \
-  /etc/init.d/token-generator.sh \
-  /etc/rcS.d/S65token-generator.sh"
+inherit systemd
+
+SYSTEMD_PACKAGES = "${PN}"
+SYSTEMD_SERVICE_${PN} = "token-generator.service"
 
 do_install() {
-    mkdir -p ${D}${sysconfdir}/init.d
-    mkdir -p ${D}${sysconfdir}/rcS.d
-    cp ${WORKDIR}/token-generator.sh ${D}${sysconfdir}/init.d/
-    chmod +x ${D}${sysconfdir}/init.d/token-generator.sh
-    ln -sf ../init.d/token-generator.sh ${D}${sysconfdir}/rcS.d/S65token-generator.sh
+    install -d ${D}${bindir}
+    install -m 0755 ${WORKDIR}/token-generator.sh ${D}${bindir}
+
+    install -d ${D}${systemd_unitdir}/system
+    install -m 0644 ${WORKDIR}/token-generator.service ${D}${systemd_unitdir}/system
 }
