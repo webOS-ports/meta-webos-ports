@@ -33,3 +33,5 @@ VIRTUAL-RUNTIME_webappmanager = "luna-webappmanager"
 VIRTUAL-RUNTIME_webos-compositor = "luna-next"
 
 inherit android_image_types
+
+OPKGLIBDIR_forcevariable := "${localstatedir}/lib"
