@@ -11,6 +11,8 @@ RDEPENDS_${PN} = " \
   pulseaudio-server \
   pulseaudio-misc \
   wireless-tools \
+  udev-extraconf \
+  alsa-conf \
   \
   gst-meta-base \
   gst-meta-audio \
