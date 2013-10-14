@@ -8,6 +8,7 @@ LIC_FILES_CHKSUM = "file://Source/WebCore/rendering/RenderApplet.h;endline=22;md
 SRC_URI += " \
     file://0001-Implement-additional-properties-for-QQuickWebView-to.patch \
     file://0002-Add-PalmServiceBridge.patch \
+    file://0004-Implement-handling-of-window-management-related-call.patch \
 "
 
 SRC_URI_append_arm = " file://0003-Disable-low-level-interpreter.patch"
