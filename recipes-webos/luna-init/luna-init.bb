@@ -19,14 +19,15 @@ S = "${WORKDIR}/git"
 do_install_append() {
     # Expand fonts tarball
     if [ -e ${S}/files/conf/fonts/fonts.tgz ]; then
-        install -d ${D}${datadir}/fonts
-        tar xvzf ${S}/files/conf/fonts/fonts.tgz --directory=${D}${datadir}/fonts
-        # The CMakeLists.txt unintentionally installs the tarball!!
-        rm -f ${D}${datadir}/fonts/fonts.tgz
+        install -d ${D}${libdir}/fonts
+        tar xvzf ${S}/files/conf/fonts/fonts.tgz --directory=${D}${libdir}/fonts
     fi
+    # Remove fonts installed into the wrong location
+    rm -rf ${D}${datadir}/fonts
+
     install -d ${D}${webos_sysconfdir}
     install -v -m 644 ${S}/files/conf/locale.txt ${D}${webos_sysconfdir}
     install -v -m 644 ${S}/files/conf/defaultPreferences.txt ${D}${webos_sysconfdir}
 }
 
-FILES_${PN} += "${webos_prefix} ${webos_sysconfdir} ${datadir}/fonts"
+FILES_${PN} += "${webos_prefix} ${webos_sysconfdir} ${libdir}/fonts"
