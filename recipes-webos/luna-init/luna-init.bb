@@ -22,9 +22,12 @@ S = "${WORKDIR}/git"
 do_install_append() {
     # Expand fonts tarball
     if [ -e ${S}/files/conf/fonts/fonts.tgz ]; then
-        install -d ${D}${datadir}/fonts
-        tar xvzf ${S}/files/conf/fonts/fonts.tgz --directory=${D}${datadir}/fonts
+        install -d ${D}${libdir}/fonts
+        tar xvzf ${S}/files/conf/fonts/fonts.tgz --directory=${D}${libdir}/fonts
     fi
+    # Remove fonts installed into the wrong location
+    rm -rf ${D}${datadir}/fonts
+
     install -d ${D}${webos_sysconfdir}
     install -v -m 644 ${S}/files/conf/locale.txt ${D}${webos_sysconfdir}
     install -v -m 644 ${S}/files/conf/defaultPreferences.txt ${D}${webos_sysconfdir}
@@ -32,4 +35,4 @@ do_install_append() {
 
 PACKAGES =+ "${PN}-fonts"
 FILES_${PN} += "${webos_prefix} ${webos_sysconfdir}"
-FILES_${PN}-fonts += "${datadir}/fonts/"
+FILES_${PN}-fonts += "${libdir}/fonts/"
