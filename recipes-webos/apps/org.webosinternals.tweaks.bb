@@ -15,6 +15,11 @@ SRC_URI = " \
 "
 S = "${WORKDIR}/git"
 
+do_configure() {
+    # Drop makefile to be sure it's not executed
+    rm ${S}/Makefile
+}
+
 do_install() {
     install -d ${D}${webos_applicationsdir}/${PN}
     cp -rv ${S}/enjo-app/* ${D}${webos_applicationsdir}/${PN}
