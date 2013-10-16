@@ -15,8 +15,9 @@ SRC_URI = " \
 "
 S = "${WORKDIR}/git"
 
-do_compile() {
-    # Do not do anything here
+do_configure() {
+    # Drop makefile to be sure it's not executed
+    rm ${S}/Makefile
 }
 
 do_install() {
