@@ -15,6 +15,10 @@ SRC_URI = " \
 "
 S = "${WORKDIR}/git"
 
+do_compile() {
+    # Do not do anything here
+}
+
 do_install() {
     install -d ${D}${webos_applicationsdir}/${PN}
     cp -rv ${S}/enjo-app/* ${D}${webos_applicationsdir}/${PN}
