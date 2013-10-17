@@ -32,7 +32,9 @@ do_configure_prepend_class-target() {
     # $ ldd node-v0.10.15-native/node-v0.10.15/out/Release/mksnapshot | grep ld-linux
     #   /lib64/ld-linux-x86-64.so.2 (0x00007fdef26d5000)
 
-    sed -i 's#<(PRODUCT_DIR)#${STAGING_BINDIR_NATIVE}#g' ${S}/deps/v8/tools/gyp/v8.gyp
+    if [ "${TARGET_ARCH}" = "${BUILD_ARCH}" ]; then
+        sed -i 's#<(PRODUCT_DIR)#${STAGING_BINDIR_NATIVE}#g' ${S}/deps/v8/tools/gyp/v8.gyp
+    fi
 }
 
 # Node is way too cool to use proper autotools, so we install two wrappers to forcefully inject proper arch cflags to workaround gypi
