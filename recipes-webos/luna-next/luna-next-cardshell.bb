@@ -9,7 +9,7 @@ RDEPENDS_${PN} += " \
 "
 
 SRC_URI = "git://github.com/webOS-ports/luna-next-cardshell.git;branch=master;protocol=git"
-SRCREV = "d9b649aa150f9ea9d3238fc47b2eb00f7f387e51"
+SRCREV = "5fd9127d4e6d82ddc7ba26042cc967364c805dce"
 S = "${WORKDIR}/git"
 
 # For the sake of the webOS build system we need to provide the webOS component version
