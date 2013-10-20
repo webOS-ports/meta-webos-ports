@@ -26,6 +26,9 @@ pkg_postinst_${PN} () {
 pkg_postrm_${PN} () {
 }
 
+# Enable webos specific support within maliit
+EXTRA_QMAKEVARS_PRE += "CONFIG+=webos"
+
 # We want maliit to provide it's input context on it's own rather than qtbase doing this
 # so we build it here and package it. However the inputcontext within qtbase must be moved
 # into a separate package otherwise two packages will install the same file into the rootfs
