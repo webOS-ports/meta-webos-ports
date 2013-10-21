@@ -28,7 +28,7 @@ RDEPENDS_${PN} = " \
   org.webosports.service.licenses \
   org.webosinternals.service.upstartmgr \
   org.webosinternals.ipkgservice \
-  org.webosinternals.service.update \
+  org.webosports.service.update \
   \
   org.webosports.app.firstuse \
   org.webosports.app.memos \
@@ -36,6 +36,7 @@ RDEPENDS_${PN} = " \
   org.webosinternals.preware \
   org.webosports.app.calendar \
   org.webosinternals.tweaks \
+  org.webosports.app.update \
   snowshoe \
   web-apps \
   \
