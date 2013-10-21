@@ -63,5 +63,6 @@ do_install() {
 }
 
 FILES_${PN} += "${webos_servicesdir} ${webos_sysconfdir} ${sysconfdir}"
-FILES_${PN} += "${webos_sysbus_pubservicesdir} ${webos_sysbus_prvservicesdir} ${webos_sysbus_prvrolesdir}"
+FILES_${PN} += "${webos_sysbus_pubservicesdir} ${webos_sysbus_prvservicesdir}"
+FILES_${PN} += "${webos_sysbus_prvrolesdir} ${webos_sysbus_pubrolesdir}"
 FILES_${PN} += "${webos_accttemplatesdir}"
