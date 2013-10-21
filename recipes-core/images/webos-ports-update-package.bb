@@ -10,7 +10,7 @@ IMAGE_NAME = "webos-ports-dev-image"
 PV = "1.0+gitr${SRCPV}"
 
 SRC_URI = "git://github.com/webOS-ports/android-update-package.git;protocol=git;branch=master"
-SRCREV = "43d7e4fe343e1d9f7a99055e0ffa556ccf619554"
+SRCREV = "9af548e4cae44f2139cfb8fdc34e9b63fa8848a6"
 
 do_deploy() {
     if [ ! -e ${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}-${MACHINE}.tar.gz ] ; then
