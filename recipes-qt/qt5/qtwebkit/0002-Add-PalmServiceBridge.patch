@@ -1,7 +1,7 @@
-From 8ef3680683d150a01d85aa53b52b79cb3007bd92 Mon Sep 17 00:00:00 2001
+From d505b887068f076cbc2f56ddead7dad8a7ca2233 Mon Sep 17 00:00:00 2001
 From: Simon Busch <morphis@gravedo.de>
 Date: Wed, 25 Sep 2013 00:12:19 +0200
-Subject: [PATCH 2/3] Add PalmServiceBridge
+Subject: [PATCH 2/5] Add PalmServiceBridge
 
 Taken from https://github.com/isis-project/WebKit
 
@@ -14,11 +14,11 @@ Signed-off-by: Simon Busch <morphis@gravedo.de>
  Source/WebCore/WebCore.pri                         |   4 +
  Source/WebCore/platform/webos/LunaServiceMgr.cpp   | 288 ++++++++++++++++++++
  Source/WebCore/platform/webos/LunaServiceMgr.h     |  53 ++++
- .../WebCore/platform/webos/PalmServiceBridge.cpp   | 294 +++++++++++++++++++++
- Source/WebCore/platform/webos/PalmServiceBridge.h  |  77 ++++++
+ .../WebCore/platform/webos/PalmServiceBridge.cpp   | 295 +++++++++++++++++++++
+ Source/WebCore/platform/webos/PalmServiceBridge.h  |  79 ++++++
  .../WebCore/platform/webos/PalmServiceBridge.idl   |  15 ++
  Tools/qmake/mkspecs/features/features.pri          |   1 +
- 9 files changed, 746 insertions(+)
+ 9 files changed, 749 insertions(+)
  create mode 100644 Source/WebCore/platform/webos/LunaServiceMgr.cpp
  create mode 100644 Source/WebCore/platform/webos/LunaServiceMgr.h
  create mode 100644 Source/WebCore/platform/webos/PalmServiceBridge.cpp
@@ -431,10 +431,10 @@ index 0000000..f7188a9
 +#endif
 diff --git a/Source/WebCore/platform/webos/PalmServiceBridge.cpp b/Source/WebCore/platform/webos/PalmServiceBridge.cpp
 new file mode 100644
-index 0000000..78241f2
+index 0000000..47b0f16
 --- /dev/null
 +++ b/Source/WebCore/platform/webos/PalmServiceBridge.cpp
-@@ -0,0 +1,294 @@
+@@ -0,0 +1,295 @@
 +#include "config.h"
 +#include "PalmServiceBridge.h"
 +
@@ -544,13 +544,32 @@ index 0000000..78241f2
 +    : ActiveDOMObject(context),
 +      m_canceled(false),
 +      m_subscribed(subscribe),
-+      m_inServiceCallback(false)
++      m_inServiceCallback(false),
++      m_identifier(0),
++      m_isPrivileged(false)
 +{
 +    addToServicesByDocument(document(), this);
 +
 +#ifndef NDEBUG
 +    serviceBridgeCounter.increment();
 +#endif
++
++    JSValue identifier;
++    ExecState* exec = 0;
++    Frame *frame = document()->frame();
++    if (frame) {
++        identifier = frame->script()->executeScript(ScriptSourceCode("PalmSystem && PalmSystem.getIdentifier()")).jsValue();
++        JSGlobalObject* globalObject = frame->script()->bindingRootObject()->globalObject();
++        exec = globalObject->globalExec();
++
++        m_identifier = strdup(identifier.toString(exec)->value(exec).utf8().data());
++
++        /* check for privileged bus names */
++        if (strncmp(m_identifier, "com.palm", 8) == 0 ||
++            strncmp(m_identifier, "com.webos", 9) == 0 ||
++            strncmp(m_identifier, "org.webosports", 14) == 0)
++            m_isPrivileged = true;
++    }
 +}
 +
 +bool PalmServiceBridge::init(Document* d, bool subscribe)
@@ -566,6 +585,9 @@ index 0000000..78241f2
 +
 +    if (scriptExecutionContext() && document())
 +        removeFromServicesByDocument(document(), this);
++
++    if (m_identifier)
++        free(m_identifier);
 +
 +#ifndef NDEBUG
 +    serviceBridgeCounter.decrement();
@@ -622,28 +644,7 @@ index 0000000..78241f2
 +
 +int PalmServiceBridge::call(const String& uri, const String& payload, ExceptionCode& ec)
 +{
-+    bool usePrivateBus = false;
-+
-+    JSValue identifier;
-+    ExecState* exec = 0;
-+
-+    Frame *frame = document()->frame();
-+    if (frame) {
-+        identifier = frame->script()->executeScript(ScriptSourceCode("PalmSystem && PalmSystem.getIdentifier()")).jsValue();
-+        JSGlobalObject* globalObject = frame->script()->bindingRootObject()->globalObject();
-+        exec = globalObject->globalExec();
-+        usePrivateBus = true;
-+    }
-+
-+    /*
-+     *  Determine here whether the caller is privileged or not (public or private bus access. This is because 
-+     *  LunaServiceManagerListener doesn't expose a way to get to the document() fn of this object, and there's no RTTI
-+     *  on this platform to do a safe cast back up to PalmServiceBridge.
-+     * 
-+     * Instead, overloading LunaServiceManager::call() with a parameter to specify bus type...
-+     */
-+
-+    LunaServiceManager::instance()->call(uri.utf8().data(), payload.utf8().data(), this, identifier.toString(exec)->value(exec).utf8().data(), usePrivateBus);
++    LunaServiceManager::instance()->call(uri.utf8().data(), payload.utf8().data(), this, m_identifier, m_isPrivileged);
 +    if (LSMESSAGE_TOKEN_INVALID == listenerToken) {
 +        ExceptionCode ec;
 +        cancel(ec);
@@ -731,10 +732,10 @@ index 0000000..78241f2
 +} // namespace WebCore
 diff --git a/Source/WebCore/platform/webos/PalmServiceBridge.h b/Source/WebCore/platform/webos/PalmServiceBridge.h
 new file mode 100644
-index 0000000..694fce9
+index 0000000..6571738
 --- /dev/null
 +++ b/Source/WebCore/platform/webos/PalmServiceBridge.h
-@@ -0,0 +1,77 @@
+@@ -0,0 +1,79 @@
 +#ifndef PalmServiceBridge_h
 +#define PalmServiceBridge_h
 +
@@ -804,6 +805,8 @@ index 0000000..694fce9
 +        bool m_canceled;
 +        bool m_subscribed;
 +        bool m_inServiceCallback;
++        const char *m_identifier;
++        bool m_isPrivileged;
 +
 +        PalmServiceBridge(ScriptExecutionContext*, bool);
 +        PalmServiceBridge();
