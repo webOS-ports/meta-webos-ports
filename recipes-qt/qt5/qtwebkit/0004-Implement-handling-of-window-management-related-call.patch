@@ -1,7 +1,7 @@
-From 60c219c42ba2e0a5becb9b27ff4a1cfacba8551a Mon Sep 17 00:00:00 2001
+From e67cb941e206b620ab333a7b966c1449e719602b Mon Sep 17 00:00:00 2001
 From: Simon Busch <morphis@gravedo.de>
 Date: Mon, 14 Oct 2013 08:39:16 +0200
-Subject: [PATCH] Implement handling of window management related callbacks
+Subject: [PATCH 4/5] Implement handling of window management related callbacks
  from WebProcess
 
 Upstream-Status: pending [https://qt.gitorious.org/qt/qtwebkit/]
@@ -10,11 +10,11 @@ Signed-off-by: Simon Busch <morphis@gravedo.de>
 ---
  Source/WebKit2/Target.pri                          |   2 +
  Source/WebKit2/UIProcess/API/qt/qquickwebview_p.h  |   5 +
- .../UIProcess/API/qt/qwebnewpagerequest.cpp        |  89 ++++++++++++++++
- .../UIProcess/API/qt/qwebnewpagerequest_p.h        |  60 +++++++++++
- Source/WebKit2/UIProcess/qt/QtWebPageUIClient.cpp  | 113 +++++++++++++++++++++
+ .../UIProcess/API/qt/qwebnewpagerequest.cpp        |  89 ++++++++++++++++++
+ .../UIProcess/API/qt/qwebnewpagerequest_p.h        |  60 ++++++++++++
+ Source/WebKit2/UIProcess/qt/QtWebPageUIClient.cpp  | 102 +++++++++++++++++++++
  Source/WebKit2/UIProcess/qt/QtWebPageUIClient.h    |   8 ++
- 6 files changed, 277 insertions(+)
+ 6 files changed, 266 insertions(+)
  create mode 100644 Source/WebKit2/UIProcess/API/qt/qwebnewpagerequest.cpp
  create mode 100644 Source/WebKit2/UIProcess/API/qt/qwebnewpagerequest_p.h
 
@@ -223,7 +223,7 @@ index 0000000..3b9fa21
 +
 +#endif // qwebnewpagerequest_h
 diff --git a/Source/WebKit2/UIProcess/qt/QtWebPageUIClient.cpp b/Source/WebKit2/UIProcess/qt/QtWebPageUIClient.cpp
-index af88423..a4de460 100644
+index af88423..58b445b 100644
 --- a/Source/WebKit2/UIProcess/qt/QtWebPageUIClient.cpp
 +++ b/Source/WebKit2/UIProcess/qt/QtWebPageUIClient.cpp
 @@ -26,11 +26,16 @@
@@ -284,7 +284,7 @@ index af88423..a4de460 100644
  static QtWebPageUIClient* toQtWebPageUIClient(const void* clientInfo)
  {
      ASSERT(clientInfo);
-@@ -173,5 +205,86 @@ void QtWebPageUIClient::policyForNotificationPermissionRequest(WKPageRef page, W
+@@ -173,5 +205,75 @@ void QtWebPageUIClient::policyForNotificationPermissionRequest(WKPageRef page, W
      toQtWebPageUIClient(clientInfo)->permissionRequest(req);
  }
  
@@ -318,30 +318,6 @@ index af88423..a4de460 100644
 +    return qtModifiers;
 +}
 +
-+static inline WKTypeRef getWindowFeatureValue(WKDictionaryRef windowFeatures, const char* featureName)
-+{
-+    ASSERT(featureName);
-+    if (!windowFeatures)
-+        return 0;
-+
-+    WKRetainPtr<WKStringRef> key(AdoptWK, WKStringCreateWithUTF8CString(featureName));
-+    return WKDictionaryGetItemForKey(windowFeatures, key.get());
-+}
-+
-+static bool getWindowFeatureBoolValue(WKDictionaryRef windowFeatures, const char* featureName, bool defaultValue)
-+{
-+    WKBooleanRef value = static_cast<WKBooleanRef>(getWindowFeatureValue(windowFeatures, featureName));
-+
-+    return value ? WKBooleanGetValue(value) : defaultValue;
-+}
-+
-+static double getWindowFeatureDoubleValue(WKDictionaryRef windowFeatures, const char* featureName, double defaultValue)
-+{
-+    WKDoubleRef value = static_cast<WKDoubleRef>(getWindowFeatureValue(windowFeatures, featureName));
-+
-+    return value ?  WKDoubleGetValue(value) : defaultValue;
-+}
-+
 +WKPageRef QtWebPageUIClient::createNewPage(WKPageRef page, WKURLRequestRef request, WKDictionaryRef wkWindowFeatures, WKEventModifiers modifiers, WKEventMouseButton mouseButton, const void *clientInfo)
 +{
 +    WKRetainPtr<WKURLRef> requestURL(AdoptWK, WKURLRequestCopyURL(request));
@@ -349,11 +325,24 @@ index af88423..a4de460 100644
 +
 +    QVariantMap windowFeatures;
 +
-+    windowFeatures.insert("x", getWindowFeatureDoubleValue(wkWindowFeatures, "x", 0));
-+    windowFeatures.insert("y", getWindowFeatureDoubleValue(wkWindowFeatures, "y", 0));
-+    windowFeatures.insert("width", getWindowFeatureDoubleValue(wkWindowFeatures, "width", 0));
-+    windowFeatures.insert("height", getWindowFeatureDoubleValue(wkWindowFeatures, "height", 0));
-+    windowFeatures.insert("fullscreen", getWindowFeatureBoolValue(wkWindowFeatures, "fullscreen", false));
++    WKArrayRef keys = WKDictionaryCopyKeys(wkWindowFeatures);
++    for (int n = 0; n < WKArrayGetSize(keys); n++) {
++        WKStringRef key = static_cast<WKStringRef>(WKArrayGetItemAtIndex(keys, n));
++        WKTypeRef value = WKDictionaryGetItemForKey(wkWindowFeatures, key);
++        QString keyStr = WKStringCopyQString(key);
++        if (WKGetTypeID(value) == WKDoubleGetTypeID()) {
++            double doubleValue = WKDoubleGetValue(static_cast<WKDoubleRef>(value));
++            windowFeatures.insert(keyStr, QVariant(doubleValue));
++        }
++        else if (WKGetTypeID(value) == WKBooleanGetTypeID()) {
++            bool booleanValue = WKBooleanGetValue(static_cast<WKBooleanRef>(value));
++            windowFeatures.insert(keyStr, QVariant(booleanValue));
++        }
++        else if (WKGetTypeID(value) == WKStringGetTypeID()) {
++            QString stringValue = WKStringCopyQString(static_cast<WKStringRef>(value));
++            windowFeatures.insert(keyStr, QVariant(stringValue));
++        }
++    }
 +
 +    return toQtWebPageUIClient(clientInfo)->createNewPage(qUrl, windowFeatures,
 +        toQtKeyboardModifiers(modifiers), toQtMouseButton(mouseButton));
