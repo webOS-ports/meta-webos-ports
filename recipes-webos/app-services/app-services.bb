@@ -24,6 +24,7 @@ do_install() {
     install -d ${D}${webos_sysbus_pubservicesdir}
     install -d ${D}${webos_sysbus_prvservicesdir}
     install -d ${D}${webos_sysbus_prvrolesdir}
+    install -d ${D}${webos_sysbus_pubrolesdir}
 
     for SERVICE in `ls -d1 ${S}/com.palm.service.*` ; do
         SERVICE_DIR=`basename $SERVICE`
