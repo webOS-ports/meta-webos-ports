@@ -16,7 +16,8 @@ inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit pythonnative
 
-SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
+SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE} \
+    file://0001-Change-default-ringtone-as-Pr-one-isn-t-available.patch"
 S = "${WORKDIR}/git"
 
 do_install_append() {
