@@ -8,7 +8,7 @@ LIC_FILES_CHKSUM = " \
 DEPENDS = "qtbase qtdeclarative qtwebkit luna-sysmgr-common"
 
 SRC_URI = "git://github.com/webOS-ports/luna-webappmanager.git;branch=master;protocol=git"
-SRCREV = "99c8684dee863b12f27f2d4edb8220f5f3fe285a"
+SRCREV = "85b698c97db4ca85419d2d0764d4d033ba156f6c"
 S = "${WORKDIR}/git"
 
 # For the sake of the webOS build system we need to provide the webOS component version
