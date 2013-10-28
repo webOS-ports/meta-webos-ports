@@ -1,0 +1,172 @@
+From cae6eb69959a358b3876a8618a9f05fad9384049 Mon Sep 17 00:00:00 2001
+From: Andrew den Exter <andrew.den.exter@jollamobile.com>
+Date: Tue, 1 Oct 2013 03:12:22 +0000
+Subject: [PATCH 6/6] Add an extension for sending keys to specific windows.
+
+Upstream-Status: Pending [https://qt.gitorious.org/qt/qtwayland]
+---
+ src/compositor/wayland_wrapper/qwlinputdevice.cpp  |  2 +-
+ src/compositor/wayland_wrapper/qwlqtkey.cpp        | 23 ++++++++++++++++++++
+ src/compositor/wayland_wrapper/qwlqtkey_p.h        |  1 +
+ src/extensions/qtkey-extension.xml                 | 20 ++++++++++++++++-
+ .../platforms/wayland_common/qwaylandqtkey.cpp     | 25 ++++++++++++++++++++++
+ .../platforms/wayland_common/qwaylandqtkey.h       | 12 +++++++++++
+ 6 files changed, 81 insertions(+), 2 deletions(-)
+
+diff --git a/src/compositor/wayland_wrapper/qwlinputdevice.cpp b/src/compositor/wayland_wrapper/qwlinputdevice.cpp
+index f08ea74..3523ae3 100644
+--- a/src/compositor/wayland_wrapper/qwlinputdevice.cpp
++++ b/src/compositor/wayland_wrapper/qwlinputdevice.cpp
+@@ -207,7 +207,7 @@ void InputDevice::sendFullKeyEvent(Surface *surface, QKeyEvent *event)
+ {
+     QtKeyExtensionGlobal *ext = m_compositor->qtkeyExtension();
+     if (ext)
+-        ext->postQtKeyEvent(event, surface);
++        ext->postGlobalQtKeyEvent(event, surface);
+ }
+ 
+ void InputDevice::sendFullTouchEvent(QTouchEvent *event)
+diff --git a/src/compositor/wayland_wrapper/qwlqtkey.cpp b/src/compositor/wayland_wrapper/qwlqtkey.cpp
+index a2b99eb..0f5fe12 100644
+--- a/src/compositor/wayland_wrapper/qwlqtkey.cpp
++++ b/src/compositor/wayland_wrapper/qwlqtkey.cpp
+@@ -77,6 +77,29 @@ bool QtKeyExtensionGlobal::postQtKeyEvent(QKeyEvent *event, Surface *surface)
+     return false;
+ }
+ 
++bool QtKeyExtensionGlobal::postGlobalQtKeyEvent(QKeyEvent *event, Surface *surface)
++{
++    uint32_t time = m_compositor->currentTimeMsecs();
++
++    Resource *target = surface ? resourceMap().value(surface->resource()->client()) : 0;
++
++    if (target) {
++        send_globalqtkey(target->handle,
++                   surface->resource()->handle,
++                   time, event->type(), event->key(), event->modifiers(),
++                   event->nativeScanCode(),
++                   event->nativeVirtualKey(),
++                   event->nativeModifiers(),
++                   event->text(),
++                   event->isAutoRepeat(),
++                   event->count());
++
++        return true;
++    }
++
++    return false;
++}
++
+ }
+ 
+ QT_END_NAMESPACE
+diff --git a/src/compositor/wayland_wrapper/qwlqtkey_p.h b/src/compositor/wayland_wrapper/qwlqtkey_p.h
+index 012ef38..b24cd6e 100644
+--- a/src/compositor/wayland_wrapper/qwlqtkey_p.h
++++ b/src/compositor/wayland_wrapper/qwlqtkey_p.h
+@@ -61,6 +61,7 @@ public:
+     QtKeyExtensionGlobal(Compositor *compositor);
+ 
+     bool postQtKeyEvent(QKeyEvent *event, Surface *surface);
++    bool postGlobalQtKeyEvent(QKeyEvent *event, Surface *surface);
+ 
+ private:
+     Compositor *m_compositor;
+diff --git a/src/extensions/qtkey-extension.xml b/src/extensions/qtkey-extension.xml
+index 1d0db59..2562754 100644
+--- a/src/extensions/qtkey-extension.xml
++++ b/src/extensions/qtkey-extension.xml
+@@ -38,7 +38,7 @@
+  $QT_END_LICENSE$
+     </copyright>
+ 
+-    <interface name="qt_key_extension" version="1">
++    <interface name="qt_key_extension" version="2">
+         <event name="qtkey">
+           <description summary="qtkey event">
+              Serialized QKeyEvent
+@@ -56,6 +56,24 @@
+           <arg name="count" type="uint"/>
+         </event>
+ 
++        <event name="globalqtkey">
++          <description summary="globalqtkey event">
++             Global QKeyEvent
++          </description>
++
++          <arg name="surface" type="object" interface="wl_surface"/>
++          <arg name="time" type="uint"/>
++          <arg name="type" type="uint"/>
++          <arg name="key" type="uint"/>
++          <arg name="modifiers" type="uint"/>
++          <arg name="nativeScanCode" type="uint"/>
++          <arg name="nativeVirtualKey" type="uint"/>
++          <arg name="nativeModifiers" type="uint"/>
++          <arg name="text" type="string"/>
++          <arg name="autorepeat" type="uint"/>
++          <arg name="count" type="uint"/>
++        </event>
++
+         <request name="dummy">
+         </request>
+     </interface>
+diff --git a/src/plugins/platforms/wayland_common/qwaylandqtkey.cpp b/src/plugins/platforms/wayland_common/qwaylandqtkey.cpp
+index e723078..178887c 100644
+--- a/src/plugins/platforms/wayland_common/qwaylandqtkey.cpp
++++ b/src/plugins/platforms/wayland_common/qwaylandqtkey.cpp
+@@ -81,4 +81,29 @@ void QWaylandQtKeyExtension::key_extension_qtkey(uint32_t time,
+                                                    autorep, count);
+ }
+ 
++void QWaylandQtKeyExtension::key_extension_globalqtkey(struct wl_surface *surface,
++                                                   uint32_t time,
++                                                   uint32_t type,
++                                                   uint32_t key,
++                                                   uint32_t modifiers,
++                                                   uint32_t nativeScanCode,
++                                                   uint32_t nativeVirtualKey,
++                                                   uint32_t nativeModifiers,
++                                                   const QString &text,
++                                                   uint32_t autorep,
++                                                   uint32_t count)
++{
++    QWaylandWindow *win = QWaylandWindow::fromWlSurface(surface);
++
++    if (!win || !win->window()) {
++        qWarning("qt_key_extension: handle_globalqtkey: No keyboard focus");
++        return;
++    }
++
++    QWindow *window = win->window();
++    QWindowSystemInterface::handleExtendedKeyEvent(window, time, QEvent::Type(type), key, Qt::KeyboardModifiers(modifiers),
++                                                   nativeScanCode, nativeVirtualKey, nativeModifiers, text,
++                                                   autorep, count);
++}
++
+ QT_END_NAMESPACE
+diff --git a/src/plugins/platforms/wayland_common/qwaylandqtkey.h b/src/plugins/platforms/wayland_common/qwaylandqtkey.h
+index 17b758c..576dea2 100644
+--- a/src/plugins/platforms/wayland_common/qwaylandqtkey.h
++++ b/src/plugins/platforms/wayland_common/qwaylandqtkey.h
+@@ -67,6 +67,18 @@ private:
+                                const QString &text,
+                                uint32_t autorep,
+                                uint32_t count) Q_DECL_OVERRIDE;
++
++    void key_extension_globalqtkey(struct wl_surface *surface,
++                               uint32_t time,
++                               uint32_t type,
++                               uint32_t key,
++                               uint32_t modifiers,
++                               uint32_t nativeScanCode,
++                               uint32_t nativeVirtualKey,
++                               uint32_t nativeModifiers,
++                               const QString &text,
++                               uint32_t autorep,
++                               uint32_t count) Q_DECL_OVERRIDE;
+ };
+ 
+ QT_END_NAMESPACE
+-- 
+1.8.1.2
+
