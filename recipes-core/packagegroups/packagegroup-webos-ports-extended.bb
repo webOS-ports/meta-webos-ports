@@ -37,6 +37,7 @@ RDEPENDS_${PN} = " \
   org.webosports.app.calendar \
   org.webosinternals.tweaks \
   org.webosports.app.update \
+  org.webosports.service.devmode \
   snowshoe \
   web-apps \
   \
