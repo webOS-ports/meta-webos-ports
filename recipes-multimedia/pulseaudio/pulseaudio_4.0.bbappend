@@ -19,6 +19,8 @@ do_install_append() {
     # override configuration with our own
     rm ${D}${sysconfdir}/pulse/daemon.conf
     install -m 0644 ${WORKDIR}/daemon.conf ${D}${sysconfdir}/pulse
+    rm ${D}${sysconfdir}/pulse/system.pa
+    install -m 0644 ${WORKDIR}/system.pa ${D}${sysconfdir}/pulse
 
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${WORKDIR}/pulseaudio.service ${D}${systemd_unitdir}/system
@@ -26,8 +28,8 @@ do_install_append() {
 
 inherit systemd
 
-SYSTEMD_PACKAGES = "${PN}"
-SYSTEMD_SERVICE_${PN} = "pulseaudio.service"
+SYSTEMD_PACKAGES = "${PN}-server"
+SYSTEMD_SERVICE_${PN}-server = "pulseaudio.service"
 
 PACKAGES =+ "${PN}-upstart"
 FILES_${PN}-upstart = "${webos_upstartconfdir}"
