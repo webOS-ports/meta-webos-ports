@@ -14,5 +14,5 @@ EXTRA_OECONF += "-qpa wayland-egl"
 
 do_install_append() {
     # Remove unwanted maliit input context plugin
-    rm ${D}${libdir}/qt5/plugins/platforminputcontexts/libmaliitplatforminputcontextplugin.so
+    rm -f ${D}${libdir}/qt5/plugins/platforminputcontexts/libmaliitplatforminputcontextplugin.so
 }
