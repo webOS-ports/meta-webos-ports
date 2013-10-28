@@ -12,8 +12,3 @@ SRC_URI  = " \
   file://missing-ssize_t.patch \
   file://0001-Disable-backtrace-cause-linking-to-libdl-fails.patch \
 "
-
-# Put sysvinit script into own package to move away from our image
-UPDATERCPN = "${PN}-sysvinit"
-PACKAGES =+ "${PN}-sysvinit"
-FILES_${PN}-sysvinit = "${sysconfdir}/"
