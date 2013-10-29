@@ -7,7 +7,7 @@ PV = "1.0+gitr${SRCPV}"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 SRC_URI = "git://github.com/webOS-ports/webos-systemd-services.git;branch=master;protocol=git"
-SRCREV = "8f31d8836006b11eb2a46a5f01df04c3d40dba8c"
+SRCREV = "c0a9a411d38ed61af7a8a9c426181f9366c59c24"
 S = "${WORKDIR}/git"
 
 inherit systemd
@@ -17,7 +17,6 @@ SYSTEMD_SERVICE_${PN} = " \
     activitymanager.service \
     configurator.service \
     configurator-async.service \
-    createLocalAccount.service \
     db8.service \
     filecache.service \
     ls-hubd_private.service \
@@ -39,7 +38,4 @@ do_install() {
     for f in *.service ; do
         install -m 0644 ${S}/$f ${D}${systemd_unitdir}/system
     done
-
-    install -d ${D}${bindir}
-    install -m 0755 ${S}/createLocalAccount.sh ${D}${bindir}
 }
