@@ -29,3 +29,4 @@ inherit cmake_qt5
 inherit webos_cmake
 
 FILES_${PN} += "${webos_applicationsdir}/org.webosports.app.browser"
+FILES_${PN}-dbg += "${webos_applicationsdir}/org.webosports.app.browser/.debug"
