@@ -5,6 +5,11 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 PV = "0.1.0+gitr${SRCPV}"
 
+RDEPENDS_${PN} = " \
+    qtdeclarative-qmlplugins \
+    qtwebkit-qmlplugins \
+"
+
 SRCREV = "7a147f5a8aed46c7a7edbae718ced1870bd94d85"
 SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git;branch=master"
 S = "${WORKDIR}/git"
