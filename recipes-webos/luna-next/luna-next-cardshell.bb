@@ -3,6 +3,7 @@ LICENSE = "GPL-3.0 & Apache-2.0"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d7ea018afdcdcdd0dcc83d638cccf8b9"
 
 RDEPENDS_${PN} += " \
+    qtdeclarative-qmlplugins \
     qtgraphicaleffects-qmlplugins \
     qtquickcontrols-qmlplugins \
     luna-next \
