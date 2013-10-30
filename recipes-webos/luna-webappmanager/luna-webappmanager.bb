@@ -6,6 +6,10 @@ LIC_FILES_CHKSUM = " \
 "
 
 DEPENDS = "qtbase qtdeclarative qtwebkit luna-sysmgr-common"
+RDEPENDS_${PN} += " \
+    qtdeclarative-qmlplugins \
+    qtwebkit-qmlplugins \
+"
 
 SRC_URI = "git://github.com/webOS-ports/luna-webappmanager.git;branch=master;protocol=git"
 SRCREV = "586c3d37a01463a3c9642b53ac7c1845e908fbde"
