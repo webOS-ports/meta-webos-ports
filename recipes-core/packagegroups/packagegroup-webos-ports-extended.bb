@@ -38,7 +38,7 @@ RDEPENDS_${PN} = " \
   org.webosinternals.tweaks \
   org.webosports.app.update \
   org.webosports.service.devmode \
-  snowshoe \
+  org.webosports.app.browser \
   web-apps \
   \
   ca-certificates \
