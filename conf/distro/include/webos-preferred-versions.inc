@@ -15,7 +15,7 @@ PREFERRED_VERSION_tar ?= "1.17"
 # Stick to latest udev version provided by oe-core
 PREFERRED_VERSION_udev ?= "182"
 PREFERRED_VERSION_upstart ?= "0.3.11"
-PREFERRED_VERSION_valgrind ?= "3.8.1+svnr13429"
+PREFERRED_VERSION_valgrind ?= "3.8.1+svnr%"
 # Newer upstream meta-oe already has yajl 2.0.3, and we should upgrade to it soon,
 # because it's already compatible with our libpbnjson.
 PREFERRED_VERSION_yajl ?= "1.0.12"
