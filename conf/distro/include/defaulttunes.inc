@@ -13,8 +13,8 @@
 # and opkg -force-reinstall opkg-config-base distro-feed-configs
 # on target to get new /etc/opkg/arch.conf
 
-DEFAULTTUNE_tuna = "cortexa8t-neon"
-DEFAULTTUNE_grouper = "cortexa8t-neon"
+# DEFAULTTUNE_tuna = "cortexa8t-neon"
+# DEFAULTTUNE_grouper = "cortexa8t-neon"
 
 # or if you don't care about sharing binary feed between armv7a machines, 
 # add this to local.conf after that require line
