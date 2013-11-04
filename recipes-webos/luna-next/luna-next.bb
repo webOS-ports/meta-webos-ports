@@ -7,7 +7,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 DEPENDS = "qtbase qtdeclarative qtwayland luna-sysmgr-common"
 
 SRC_URI = "git://github.com/webOS-ports/luna-next.git;branch=master;protocol=git"
-SRCREV = "6d34ab4accd1cbb37c54b7007f14ac8826ad668e"
+SRCREV = "f0018b5fc714e1b8a747ce8fa0bd455869b0fedd"
 S = "${WORKDIR}/git"
 
 # For the sake of the webOS build system we need to provide the webOS component version
