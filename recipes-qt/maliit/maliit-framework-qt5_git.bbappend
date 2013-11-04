@@ -5,6 +5,7 @@ SRC_URI += " \
     file://0003-Add-webos-platform-implementation-to-set-correct-win.patch \
     file://maliit-server.conf \
     file://maliit-server.service \
+    file://maliit-env.conf \
 "
 
 inherit systemd
@@ -18,6 +19,9 @@ do_install_append() {
 
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${WORKDIR}/maliit-server.service ${D}${systemd_unitdir}/system/
+
+    install -d ${D}${sysconfdir}/luna-next
+    install -m 0644 ${WORKDIR}/maliit-env.conf ${D}${sysconfdir}/luna-next/
 }
 
 pkg_postinst_${PN} () {
