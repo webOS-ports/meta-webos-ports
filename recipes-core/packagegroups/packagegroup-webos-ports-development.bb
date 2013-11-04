@@ -16,6 +16,7 @@ RDEPENDS_${PN} = " \
   strace \
   opkg-utils \
   bc \
+  valgrind \
   \
   alsa-utils-alsamixer \
   alsa-utils-alsactl \
