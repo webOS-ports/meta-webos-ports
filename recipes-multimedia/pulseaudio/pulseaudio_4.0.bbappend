@@ -1,7 +1,12 @@
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 SRC_URI += " \
-    file://0200-fixing_snd_mixer_poll_descriptors_count_when_zero.patch \
+    file://0020-stream-Return-error-in-case-a-client-peeks-to-early.patch \
+    file://0022-inotify-wrapper-Quit-daemon-if-pid-file-is-removed.patch \
+    file://0023-fixing_snd_mixer_poll_descriptors_count_when_zero.patch \
+    file://0101-alsa-ucm-Make-combination-ports-have-lower-priority.patch \
+    file://0102-combine-Fix-crash-in-output-freeing.patch \
+    file://0103-resampler-Fix-peaks-resampler-s-channel-handling.patch \
     file://0201-ALSA-Add-extcon-Android-switch-jack-detection.patch \
     file://0202-dont-probe-ucm.patch \
     file://0203-card-Add-hook-before-profile-changes.patch \
