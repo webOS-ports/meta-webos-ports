@@ -15,7 +15,7 @@ WEBOS_COMPONENT_VERSION = "2.0.0"
 PV = "${WEBOS_COMPONENT_VERSION}+git${SRCPV}"
 WEBOS_SUBMISSION = "0"
 
-SRCREV = "65cb032e6d61a3190ff58bc76b485d4ccf864702"
+SRCREV = "54a7ac87daf6f18083af2dcf2d8d87494f550a5a"
 SRC_URI = "git://github.com/webOS-ports/preware;protocol=git;branch=master"
 S = "${WORKDIR}/git/oe-service"
 
@@ -27,7 +27,7 @@ pkg_postinst_${PN}() {
         APPS=/media/cryptofs/apps
 
         # Create the opkg config and database areas
-        mkdir -p $APPS/${sysconfdir}/opkg $APPS/${libdir}/opkg/cache
+        mkdir -p $APPS/${sysconfdir}/opkg $APPS/${localstatedir}/opkg/cache
 
         # Remove all list database cache files
         rm -f $APPS/${localstatedir}/lib/opkg/lists/*
@@ -45,48 +45,6 @@ pkg_postinst_${PN}() {
         echo "src/gz webosinternals http://ipkg.preware.org/feeds/webos-internals/all" > $APPS/${sysconfdir}/opkg/webos-internals.conf
         echo "src/gz webosinternals-`/bin/uname -m` http://ipkg.preware.org/feeds/webos-internals/`/bin/uname -m`" >> $APPS/${sysconfdir}/opkg/webos-internals.conf
         sed -i -e 's|armv7l|armv7|g' $APPS/${sysconfdir}/opkg/webos-internals.conf
-
-        # Install the alpha testing feeds (disabled by default)
-        if [ -f /var/preferences/org.webosinternals.preware/enable-alpha-feeds ] ; then
-
-          # Install alpha optware feeds
-          echo "src/gz alpha-optware http://ipkg.preware.org/alpha/optware/all" > $APPS/${sysconfdir}/opkg/alpha-optware.conf.new
-          echo "src/gz alpha-optware-`/bin/uname -m` http://ipkg.preware.org/alpha/optware/`/bin/uname -m`" >> $APPS/${sysconfdir}/opkg/alpha-optware.conf.new
-          sed -i -e 's|armv7l|armv7|g' $APPS/${sysconfdir}/opkg/alpha-optware.conf.new
-          sed -i -e 's|armv6l|armv6|g' $APPS/${sysconfdir}/opkg/alpha-optware.conf.new
-
-          # Install alpha apps feeds
-          echo "src/gz alpha-apps http://ipkg.preware.org/alpha/apps/all" > $APPS/${sysconfdir}/opkg/alpha-apps.conf.new
-          echo "src/gz alpha-apps-`/bin/uname -m` http://ipkg.preware.org/alpha/apps/`/bin/uname -m`" >> $APPS/${sysconfdir}/opkg/alpha-apps.conf.new
-          sed -i -e 's|armv7l|armv7|g' $APPS/${sysconfdir}/opkg/alpha-apps.conf.new
-          sed -i -e 's|armv6l|armv6|g' $APPS/${sysconfdir}/opkg/alpha-apps.conf.new
-
-          # Remove the obsolete testing feeds
-          rm -f $APPS/${sysconfdir}/opkg/webos-testing*.conf*
-          rm -f $APPS/${sysconfdir}/opkg/optware-testing*.conf*
-          rm -f $APPS/${sysconfdir}/opkg/webos-*-testing*.conf*
-        fi
-
-        # Install the beta testing feeds (disabled by default)
-        if [ -f /var/preferences/org.webosinternals.preware/enable-beta-feeds ] ; then
-
-          # Install beta optware feeds
-          echo "src/gz beta-optware http://ipkg.preware.org/beta/optware/all" > $APPS/${sysconfdir}/opkg/beta-optware.conf.new
-          echo "src/gz beta-optware-`/bin/uname -m` http://ipkg.preware.org/beta/optware/`/bin/uname -m`" >> $APPS/${sysconfdir}/opkg/beta-optware.conf.new
-          sed -i -e 's|armv7l|armv7|g' $APPS/${sysconfdir}/opkg/beta-optware.conf.new
-          sed -i -e 's|armv6l|armv6|g' $APPS/${sysconfdir}/opkg/beta-optware.conf.new
-
-          # Install beta apps feeds
-          echo "src/gz beta-apps http://ipkg.preware.org/beta/apps/all" > $APPS/${sysconfdir}/opkg/beta-apps.conf.new
-          echo "src/gz beta-apps-`/bin/uname -m` http://ipkg.preware.org/beta/apps/`/bin/uname -m`" >> $APPS/${sysconfdir}/opkg/beta-apps.conf.new
-          sed -i -e 's|armv7l|armv7|g' $APPS/${sysconfdir}/opkg/beta-apps.conf.new
-          sed -i -e 's|armv6l|armv6|g' $APPS/${sysconfdir}/opkg/beta-apps.conf.new
-
-          # Remove the old testing feeds
-          rm -f $APPS/${sysconfdir}/opkg/webos-testing*.conf*
-          rm -f $APPS/${sysconfdir}/opkg/optware-testing*.conf*
-          rm -f $APPS/${sysconfdir}/opkg/webos-*-testing*.conf*
-        fi
 
         # Retain disabled status of existing feeds
         if [ "`ls $APPS/${sysconfdir}/opkg/*.disabled`" ] ; then
