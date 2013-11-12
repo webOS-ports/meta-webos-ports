@@ -62,6 +62,7 @@ LIBHYBRIS_RDEPENDS = " \
     android-system \
     android-system-compat \
     android-tools \
+    nyx-modules-hybris \
 "
 
 RDEPENDS_${PN}_append_tuna = " token-generator ${LIBHYBRIS_RDEPENDS}"
