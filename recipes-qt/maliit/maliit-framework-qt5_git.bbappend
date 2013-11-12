@@ -22,6 +22,8 @@ do_install_append() {
 
     install -d ${D}${sysconfdir}/luna-next
     install -m 0644 ${WORKDIR}/maliit-env.conf ${D}${sysconfdir}/luna-next/
+
+    install -d ${D}${localstatedir}/lib/maliit
 }
 
 pkg_postinst_${PN} () {
