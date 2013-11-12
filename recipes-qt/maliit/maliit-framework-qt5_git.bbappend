@@ -8,6 +8,9 @@ SRC_URI += " \
     file://maliit-env.conf \
 "
 
+# Do not recomment maliit-plugins-qt5 as keyboard provider but webos-keyboard
+RRECOMMENDS_${PN} = "webos-keyboard"
+
 inherit systemd
 
 SYSTEMD_PACKAGES = "${PN}"
@@ -22,6 +25,8 @@ do_install_append() {
 
     install -d ${D}${sysconfdir}/luna-next
     install -m 0644 ${WORKDIR}/maliit-env.conf ${D}${sysconfdir}/luna-next/
+
+    install -d ${D}${localstatedir}/lib/maliit
 }
 
 pkg_postinst_${PN} () {
