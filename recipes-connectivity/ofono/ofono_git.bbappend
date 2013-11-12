@@ -11,4 +11,14 @@ SRC_URI  = " \
   file://ofono \
   file://missing-ssize_t.patch \
   file://0001-Disable-backtrace-cause-linking-to-libdl-fails.patch \
+  file://ofono.service \
+  file://wait-for-rild.sh \
 "
+
+do_install_append() {
+    # Override default system service configuration
+    cp -v ${WORKDIR}/ofono.service ${D}${systemd_unitdir}/system/ofono.service
+
+    install -d ${D}${bindir}
+    install -m 0744 ${WORKDIR}/wait-for-rild.sh ${D}${bindir}
+}
