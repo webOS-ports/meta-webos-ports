@@ -31,7 +31,7 @@ DISTRO_FEATURES += "wayland"
 
 VIRTUAL-RUNTIME_webappmanager = "luna-webappmanager"
 VIRTUAL-RUNTIME_webos-compositor = "luna-next"
-VIRTUAL-RUNTIME_webos-ime = "maliit-plugins-qt5"
+VIRTUAL-RUNTIME_webos-ime = "webos-keyboard"
 
 inherit android_image_types
 
