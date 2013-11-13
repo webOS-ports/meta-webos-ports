@@ -1,4 +1,4 @@
-SUMMARY = "Calendar app re-written from scratch for Open webOS"
+SUMMARY = "Calculator app re-written from scratch for Open webOS"
 SECTION = "webos/apps"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
@@ -10,6 +10,6 @@ inherit webos_cordova_application
 
 PV = "0.0.1+gitr${SRCPV}"
 
-SRCREV = "e998a846ce53186fde7e752dcc7d8c9e761951bc"
+SRCREV = "8ca6b68775e642d319df245b7b9ef9bc706ea060"
 SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git"
 S = "${WORKDIR}/git"
