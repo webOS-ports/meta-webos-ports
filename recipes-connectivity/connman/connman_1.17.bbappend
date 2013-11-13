@@ -5,7 +5,9 @@ INHIBIT_UPDATERCD_BBCLASS = "1"
 FILESEXTRAPATHS_prepend := "${THISDIR}/${BPN}:"
 
 SRC_URI += " \
-    file://connman.upstart"
+    file://connman.upstart \
+    file://connman.service \
+"
 
 do_install_append() {
     install -d ${D}${webos_upstartconfdir}
