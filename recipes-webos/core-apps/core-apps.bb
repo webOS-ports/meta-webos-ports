@@ -50,6 +50,7 @@ do_install() {
     rm -rf ${D}${webos_applicationsdir}/com.palm.app.notes
     rm -rf ${D}${sysconfdir}/palm/db/permissions/com.palm.note
     rm -rf ${D}${sysconfdir}/palm/db/kinds/com.palm.note
+    rm -rf ${D}${webos_applicationsdir}/com.palm.app.calculator
 }
 
 FILES_${PN} += "${webos_applicationsdir} ${webos_sysconfdir}"
