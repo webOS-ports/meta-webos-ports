@@ -10,11 +10,15 @@ inherit qmake5
 # actually it is ${includedir}/qt5
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 
-DEPENDS = "maliit-framework-qt5"
+DEPENDS = "maliit-framework-qt5 hunspell presage"
 
 RDEPENDS_${PN} += "qtsvg-plugins"
 
-SRC_URI = "git://github.com/webOS-ports/webos-keyboard;branch=master"
+FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
+
+SRC_URI = "git://github.com/webOS-ports/webos-keyboard;branch=master \
+           file://webos-keyboard.conf \
+          "
 SRCREV = "edf194dd3f283824a1c21e559b6b9c76a69848ec"
 PV = "0.99.0+git${SRCPV}"
 
@@ -29,7 +33,10 @@ EXTRA_QMAKEVARS_PRE = "\
     CONFIG+=enable-hunspell \
 "
 
-DEPENDS += "hunspell presage"
+do_install_append() {
+    install -d ${D}${sysconfdir}/qt5/webos-ports
+    install -m 0644 ${WORKDIR}/webos-keyboard.conf ${D}${sysconfdir}/qt5/webos-ports/
+}
 
 FILES_${PN} += "\
     ${libdir}/maliit \
