@@ -8,8 +8,8 @@ SRC_URI += " \
     file://maliit-env.conf \
 "
 
-# Do not recomment maliit-plugins-qt5 as keyboard provider but webos-keyboard
-RRECOMMENDS_${PN} = "webos-keyboard"
+# Do not recomment maliit-plugins-qt5 as keyboard provider
+RRECOMMENDS_${PN} = ""
 
 inherit systemd
 
