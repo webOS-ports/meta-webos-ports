@@ -66,6 +66,7 @@ LIBHYBRIS_RDEPENDS = " \
     nyx-modules-hybris \
     mtp-server \
     android-property-service \
+    qt5-qpa-hwcomposer-plugin \
 "
 
 RDEPENDS_${PN}_append_tuna = " token-generator ${LIBHYBRIS_RDEPENDS}"
