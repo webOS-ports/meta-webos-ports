@@ -19,7 +19,7 @@ FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 SRC_URI = "git://github.com/webOS-ports/webos-keyboard;branch=master \
            file://webos-keyboard.conf \
           "
-SRCREV = "edf194dd3f283824a1c21e559b6b9c76a69848ec"
+SRCREV = "ada19c5bb32a3804c9ff0653a20ec06274c0a14f"
 PV = "0.99.0+git${SRCPV}"
 
 EXTRA_QMAKEVARS_PRE = "\
