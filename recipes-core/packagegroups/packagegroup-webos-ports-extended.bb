@@ -56,6 +56,8 @@ RDEPENDS_${PN} = " \
   luna-sysmgr-conf \
   \
   webos-systemd-services \
+  \
+  audio-service \
 "
 
 LIBHYBRIS_RDEPENDS = " \
