@@ -34,7 +34,7 @@ SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit webos-ports-submissions
-SRCREV = "ad2c1be298750b54568cec72d0ec70be172316e2"
+SRCREV = "b9ffef32031d9ec4e87ef5bc1f73f5592e306b5e"
 
 # This fix-up will be removed shortly. luna-service2 headers must be included
 # using '#include <luna-service2/*.h>'
