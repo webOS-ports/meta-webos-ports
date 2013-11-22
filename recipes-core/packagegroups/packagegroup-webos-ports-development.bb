@@ -4,6 +4,11 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 inherit packagegroup
 
+VALGRIND = "valgrind"
+# only armv7a is supported
+VALGRIND_arm = ""
+VALGRIND_armv7a = "valgrind"
+
 RDEPENDS_${PN} = " \
   mingetty \
   serial-forward \
@@ -16,7 +21,7 @@ RDEPENDS_${PN} = " \
   strace \
   opkg-utils \
   bc \
-  valgrind \
+  ${VALGRIND} \
   \
   alsa-utils-alsamixer \
   alsa-utils-alsactl \
