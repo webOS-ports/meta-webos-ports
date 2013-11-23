@@ -12,14 +12,14 @@ OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 
 DEPENDS = "maliit-framework-qt5 hunspell presage"
 
-RDEPENDS_${PN} += "qtsvg-plugins"
+RDEPENDS_${PN} += "qtsvg-plugins qtmultimedia-qmlplugins"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
 SRC_URI = "git://github.com/webOS-ports/webos-keyboard;branch=master \
            file://webos-keyboard.conf \
           "
-SRCREV = "ada19c5bb32a3804c9ff0653a20ec06274c0a14f"
+SRCREV = "4122e8c20f739711228ffc7c268185d901930f95"
 PV = "0.99.0+git${SRCPV}"
 
 EXTRA_QMAKEVARS_PRE = "\
