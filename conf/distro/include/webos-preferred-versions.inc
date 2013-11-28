@@ -32,3 +32,4 @@ PREFERRED_VERSION_yajl ?= "1.0.12"
 # submissions tag.
 
 PREFERRED_VERSION_qtwebkit = "5.1.0+git%"
+PREFERRED_VERSION_libconnman-qt = "1.0.43+git%"
