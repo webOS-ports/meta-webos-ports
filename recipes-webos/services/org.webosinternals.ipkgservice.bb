@@ -27,7 +27,7 @@ pkg_postinst_${PN}() {
         APPS=/media/cryptofs/apps
 
         # Create the opkg config and database areas
-        mkdir -p $APPS/${sysconfdir}/opkg $APPS/${localstatedir}/opkg/cache
+        mkdir -p $APPS/${sysconfdir}/opkg $APPS/${localstatedir}/lib/opkg/cache
 
         # Remove all list database cache files
         rm -f $APPS/${localstatedir}/lib/opkg/lists/*
