@@ -25,4 +25,5 @@ inherit webos_machine_dep
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-SRC_URI += "file://0001-Don-t-treat-none-as-security-type.patch"
+SRC_URI += "file://0001-Don-t-treat-none-as-security-type.patch \
+            file://0001-Correctly-register-com.palm.connectionmanager-getsta.patch"
