@@ -12,7 +12,8 @@ PV = "0.0.1+bzr${SRCPV}"
 SRCREV = "35"
 
 SRC_URI = "bzr://bazaar.launchpad.net/~phablet-team/mtp/trunk;protocol=http \
-    file://use-media-internal.patch;striplevel=0"
+    file://use-media-internal.patch;striplevel=0 \
+    file://mtp-server.service"
 S = "${WORKDIR}/trunk"
 
 inherit cmake
