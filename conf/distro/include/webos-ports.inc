@@ -29,7 +29,7 @@ DISTRO_FEATURES += "adb"
 # feature (e.g. mesa requiers it to be set to compile the egl platform module)
 DISTRO_FEATURES += "wayland"
 
-VIRTUAL-RUNTIME_webappmanager = "luna-webappmanager"
+VIRTUAL-RUNTIME_webappmanager = "webapp-launcher"
 VIRTUAL-RUNTIME_webos-compositor = "luna-next"
 VIRTUAL-RUNTIME_webos-ime = "webos-keyboard"
 
