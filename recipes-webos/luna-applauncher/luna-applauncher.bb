@@ -15,12 +15,11 @@ SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit webos-ports-submissions
-SRCREV = "e497bc1e349dbe73f56eb0e95c8da8c1f7be2b28"
+SRCREV = "559a72b6d24eb14f29456374f726a80a9a0c528c"
 
 do_install() {
-    #COPY ENTIRE APP
-    install -d ${D}${webos_sysmgr_datadir}/system/luna-applauncher
-    cp -vrf ${S}/* ${D}${webos_sysmgr_datadir}/system/luna-applauncher
+    install -d ${D}${webos_applicationsdir}/com.palm.launcher
+    cp -vrf ${S}/* ${D}${webos_applicationsdir}/com.palm.launcher
 }
 
-FILES_${PN} += "${webos_sysmgr_datadir}/system"
+FILES_${PN} += "${webos_applicationsdir}/com.palm.launcher"
