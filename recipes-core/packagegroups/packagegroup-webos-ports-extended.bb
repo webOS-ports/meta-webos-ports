@@ -50,6 +50,8 @@ RDEPENDS_${PN} = " \
   qtbase-fonts \
   qtbase-fonts-ttf-dejavu \
   qtbase-fonts-ttf-vera \
+  qtmultimedia-plugins \
+  qtmultimedia-qmlplugins \
   \
   luna-next-cardshell \
   luna-sysmgr \
