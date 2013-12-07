@@ -21,7 +21,7 @@ inherit webos_library
 SRC_URI = "git://github.com/webOS-ports/nyx-modules-hybris;branch=master;protocol=git"
 S = "${WORKDIR}/git"
 
-SRCREV = "d7d00e046f1e45ee8db8b2e95185320e76c550c8"
+SRCREV = "b461e5d971afba072e5d320284d7f19696e95606"
 
 FILES_${PN} += "${libdir}/nyx/modules/*"
 FILES_${PN}-dbg += "${libdir}/nyx/modules/.debug/*"
