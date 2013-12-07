@@ -23,6 +23,8 @@ inherit webos_system_bus
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
+SRC_URI += "file://0001-Retrieve-WIFIoADDR-BToADDR-properties-also-from-nyx-.patch"
+
 do_install_append() {
     # CFISH-930: remove "other" perms granted by pmmakefiles (aka palmmake):
     chmod o-rwx ${D}${bindir}/luna-prefs-service
