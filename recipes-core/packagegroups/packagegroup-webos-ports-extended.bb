@@ -73,8 +73,8 @@ LIBHYBRIS_RDEPENDS = " \
     qt5-qpa-hwcomposer-plugin \
 "
 
-RDEPENDS_${PN}_append_tuna = " token-generator ${LIBHYBRIS_RDEPENDS}"
-RDEPENDS_${PN}_append_grouper = " token-generator ${LIBHYBRIS_RDEPENDS}"
+RDEPENDS_${PN}_append_tuna = " ${LIBHYBRIS_RDEPENDS}"
+RDEPENDS_${PN}_append_grouper = " ${LIBHYBRIS_RDEPENDS}"
 
 MESA_RDEPENDS = "libegl-gallium mesa-driver-swrast"
 
