@@ -1114,6 +1114,7 @@ PKGDESTWORK = "${WORKDIR}/pkgdata"
 
 python emit_pkgdata() {
     from glob import glob
+    import json
 
     def write_if_exists(f, pkg, var):
         def encode(str):
@@ -1129,14 +1130,6 @@ python emit_pkgdata() {
         if val:
             f.write('%s: %s\n' % (var, encode(val)))
         return
-
-    def get_directory_size(dir):
-        if os.listdir(dir):
-            with os.popen('du -sk %s' % dir) as f:
-                size = int(f.readlines()[0].split('\t')[0])
-        else:
-            size = 0
-        return size
 
     def write_extra_pkgs(variants, pn, packages, pkgdatadir):
         for variant in variants:
@@ -1177,26 +1170,28 @@ python emit_pkgdata() {
     workdir = d.getVar('WORKDIR', True)
 
     for pkg in packages.split():
-        items = {}
-        for files_list in pkgfiles[pkg]:
-             item_name = os.path.basename(files_list)
-             item_path = os.path.dirname(files_list)
-             if item_path not in items:
-                 items[item_path] = []
-             items[item_path].append(item_name)
-        subdata_file = pkgdatadir + "/runtime/%s" % pkg
-
         pkgval = d.getVar('PKG_%s' % pkg, True)
         if pkgval is None:
             pkgval = pkg
             d.setVar('PKG_%s' % pkg, pkg)
 
-        d.setVar('FILES_INFO', str(items))
+        pkgdestpkg = os.path.join(pkgdest, pkg)
+        files = {}
+        total_size = 0
+        for f in pkgfiles[pkg]:
+            relpth = os.path.relpath(f, pkgdestpkg)
+            fstat = os.lstat(f)
+            total_size += fstat.st_size
+            files[os.sep + relpth] = fstat.st_size
+        d.setVar('FILES_INFO', json.dumps(files))
 
+        subdata_file = pkgdatadir + "/runtime/%s" % pkg
         sf = open(subdata_file, 'w')
         write_if_exists(sf, pkg, 'PN')
+        write_if_exists(sf, pkg, 'PE')
         write_if_exists(sf, pkg, 'PV')
         write_if_exists(sf, pkg, 'PR')
+        write_if_exists(sf, pkg, 'PKGE')
         write_if_exists(sf, pkg, 'PKGV')
         write_if_exists(sf, pkg, 'PKGR')
         write_if_exists(sf, pkg, 'LICENSE')
@@ -1225,7 +1220,7 @@ python emit_pkgdata() {
         for dfile in (d.getVar('FILERDEPENDSFLIST_' + pkg, True) or "").split():
             write_if_exists(sf, pkg, 'FILERDEPENDS_' + dfile)
 
-        sf.write('%s_%s: %s\n' % ('PKGSIZE', pkg, get_directory_size(pkgdest + "/%s" % pkg)))
+        sf.write('%s_%s: %d\n' % ('PKGSIZE', pkg, total_size))
         sf.close()
 
         # Symlinks needed for reverse lookups (from the final package name)
