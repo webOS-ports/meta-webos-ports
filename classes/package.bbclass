@@ -3,12 +3,6 @@
 #
 # Changes from default oe-core version:
 #   http://git.openembedded.org/openembedded-core-contrib/log/?h=jansa/shlib-providers
-#   and few smaller changes backported from 1.6 like:
-#   http://git.openembedded.org/openembedded-core-contrib/commit/meta/classes/package.bbclass?h=jansa/shlib-providers&id=f91226553e39439bfd17ab2b06c56cb8bf41061b
-#   http://git.openembedded.org/openembedded-core-contrib/commit/meta/classes/package.bbclass?h=jansa/shlib-providers&id=1aa3fbb547b0e21455f0dcc9b72ded08dc0efd67
-#   http://git.openembedded.org/openembedded-core-contrib/commit/meta/classes/package.bbclass?h=jansa/shlib-providers&id=212471f81d210e596798db5e5d927418090a63a2
-#   this one wasn't backported, because it depends on changes to oe.utils
-#   http://git.openembedded.org/openembedded-core-contrib/commit/meta/classes/package.bbclass?h=jansa/shlib-providers&id=34179cc78b730ecb8ff3f4feb4beee2d17498ce3
 #   
 #
 # Executive summary: This class iterates over the functions listed in PACKAGEFUNCS
@@ -251,7 +245,7 @@ def splitdebuginfo(file, debugfile, debugsrcdir, sourcefile, d):
     #
     # sourcefile is also generated containing a list of debugsources
 
-    import commands, stat, subprocess
+    import stat
 
     dvar = d.getVar('PKGD', True)
     objcopy = d.getVar("OBJCOPY", True)
@@ -272,22 +266,22 @@ def splitdebuginfo(file, debugfile, debugsrcdir, sourcefile, d):
     # We need to extract the debug src information here...
     if debugsrcdir:
         cmd = "'%s' -b '%s' -d '%s' -i -l '%s' '%s'" % (debugedit, workparentdir, debugsrcdir, sourcefile, file)
-        retval = subprocess.call(cmd, shell=True)
+        (retval, output) = oe.utils.getstatusoutput(cmd)
         if retval:
-            bb.fatal("debugedit failed with exit code %s (cmd was %s)" % (retval, cmd))
+            bb.fatal("debugedit failed with exit code %s (cmd was %s)%s" % (retval, cmd, ":\n%s" % output if output else ""))
 
     bb.utils.mkdirhier(os.path.dirname(debugfile))
 
     cmd = "'%s' --only-keep-debug '%s' '%s'" % (objcopy, file, debugfile)
-    retval = subprocess.call(cmd, shell=True)
+    (retval, output) = oe.utils.getstatusoutput(cmd)
     if retval:
-        bb.fatal("objcopy failed with exit code %s (cmd was %s)" % (retval, cmd))
+        bb.fatal("objcopy failed with exit code %s (cmd was %s)%s" % (retval, cmd, ":\n%s" % output if output else ""))
 
     # Set the debuglink to have the view of the file path on the target
     cmd = "'%s' --add-gnu-debuglink='%s' '%s'" % (objcopy, debugfile, file)
-    retval = subprocess.call(cmd, shell=True)
+    (retval, output) = oe.utils.getstatusoutput(cmd)
     if retval:
-        bb.fatal("objcopy failed with exit code %s (cmd was %s)" % (retval, cmd))
+        bb.fatal("objcopy failed with exit code %s (cmd was %s)%s" % (retval, cmd, ":\n%s" % output if output else ""))
 
     if newmode:
         os.chmod(file, origmode)
@@ -298,7 +292,7 @@ def copydebugsources(debugsrcdir, d):
     # The debug src information written out to sourcefile is further procecessed
     # and copied to the destination here.
 
-    import commands, stat, subprocess
+    import stat
 
     sourcefile = d.expand("${WORKDIR}/debugsources.list")
     if debugsrcdir and os.path.isfile(sourcefile):
@@ -322,21 +316,27 @@ def copydebugsources(debugsrcdir, d):
         processdebugsrc =  "LC_ALL=C ; sort -z -u '%s' | egrep -v -z '(<internal>|<built-in>)$' | "
         # We need to ignore files that are not actually ours
         # we do this by only paying attention to items from this package
-        processdebugsrc += "fgrep -z '%s' | "
+        processdebugsrc += "fgrep -zw '%s' | "
         processdebugsrc += "(cd '%s' ; cpio -pd0mlL --no-preserve-owner '%s%s' 2>/dev/null)"
 
         cmd = processdebugsrc % (sourcefile, workbasedir, workparentdir, dvar, debugsrcdir)
-        retval = subprocess.call(cmd, shell=True)
+        (retval, output) = oe.utils.getstatusoutput(cmd)
         # Can "fail" if internal headers/transient sources are attempted
         #if retval:
         #    bb.fatal("debug source copy failed with exit code %s (cmd was %s)" % (retval, cmd))
 
+        # cpio seems to have a bug with -lL together and symbolic links are just copied, not dereferenced.
+        # Work around this by manually finding and copying any symbolic links that made it through.
+        cmd = "find %s%s -type l -print0 -delete | sed s#%s%s/##g | (cd '%s' ; cpio -pd0mL --no-preserve-owner '%s%s' 2>/dev/null)" % (dvar, debugsrcdir, dvar, debugsrcdir, workparentdir, dvar, debugsrcdir)
+        (retval, output) = oe.utils.getstatusoutput(cmd)
+        if retval:
+            bb.fatal("debugsrc symlink fixup failed with exit code %s (cmd was %s)" % (retval, cmd))
 
         # The copy by cpio may have resulted in some empty directories!  Remove these
         cmd = "find %s%s -empty -type d -delete" % (dvar, debugsrcdir)
-        retval = subprocess.call(cmd, shell=True)
+        (retval, output) = oe.utils.getstatusoutput(cmd)
         if retval:
-            bb.fatal("empty directory removal failed with exit code %s (cmd was %s)" % (retval, cmd))
+            bb.fatal("empty directory removal failed with exit code %s (cmd was %s)%s" % (retval, cmd, ":\n%s" % output if output else ""))
 
         # Also remove debugsrcdir if its empty
         for p in nosuchdir[::-1]:
@@ -390,7 +390,6 @@ python package_get_auto_pr() {
             auto_pr=prserv_get_pr_auto(d)
         except Exception as e:
             bb.fatal("Can NOT get PRAUTO, exception %s" %  str(e))
-            return
         if auto_pr is None:
             if d.getVar('PRSERV_LOCKDOWN', True):
                 bb.fatal("Can NOT get PRAUTO from lockdown exported file")
@@ -462,17 +461,16 @@ python package_do_split_locales() {
 }
 
 python perform_packagecopy () {
-    import subprocess
     dest = d.getVar('D', True)
     dvar = d.getVar('PKGD', True)
 
     # Start by package population by taking a copy of the installed
     # files to operate on
     # Preserve sparse files and hard links
-    cmd = 'tar -cf - -C %s -ps . | tar -xf - -C %s' % (dest, dvar)
-    retval = subprocess.call(cmd, shell=True)
+    cmd = 'tar -cf - -C %s -p . | tar -xf - -C %s' % (dest, dvar)
+    (retval, output) = oe.utils.getstatusoutput(cmd)
     if retval:
-        bb.fatal("file copy failed with exit code %s (cmd was %s)" % (retval, cmd))
+        bb.fatal("file copy failed with exit code %s (cmd was %s)%s" % (retval, cmd, ":\n%s" % output if output else ""))
 
     # replace RPATHs for the nativesdk binaries, to make them relocatable
     if bb.data.inherits_class('nativesdk', d) or bb.data.inherits_class('cross-canadian', d):
@@ -714,7 +712,7 @@ python fixup_perms () {
 }
 
 python split_and_strip_files () {
-    import commands, stat, errno, subprocess
+    import stat, errno
 
     dvar = d.getVar('PKGD', True)
     pn = d.getVar('PN', True)
@@ -753,7 +751,7 @@ python split_and_strip_files () {
     # 16 - kernel module
     def isELF(path):
         type = 0
-        ret, result = commands.getstatusoutput("file '%s'" % path)
+        ret, result = oe.utils.getstatusoutput("file \"%s\"" % path.replace("\"", "\\\""))
 
         if ret:
             msg = "split_and_strip_files: 'file %s' failed" % path
@@ -935,7 +933,7 @@ python split_and_strip_files () {
 }
 
 python populate_packages () {
-    import glob, re, subprocess
+    import glob, re
 
     workdir = d.getVar('WORKDIR', True)
     outdir = d.getVar('DEPLOY_DIR', True)
@@ -1324,17 +1322,8 @@ python package_do_filedeps() {
         d.setVar("FILERPROVIDESFLIST_" + pkg, " ".join(provides_files[pkg]))
 }
 
-def getshlibsdirs(d):
-    dirs = []
-    triplets = (d.getVar("PKGTRIPLETS") or "").split()
-    for t in triplets:
-        dirs.append("${TMPDIR}/pkgdata/" + t + "/shlibs/")
-    return " ".join(dirs)
-getshlibsdirs[vardepsexclude] = "PKGTRIPLETS"
-
-SHLIBSDIRS = "${@getshlibsdirs(d)}"
-SHLIBSDIR = "${TMPDIR}/pkgdata/${PACKAGE_ARCH}${TARGET_VENDOR}-${TARGET_OS}/shlibs"
-SHLIBSWORKDIR = "${PKGDESTWORK}/shlibs"
+SHLIBSDIRS = "${PKGDATA_DIR}/${MLPREFIX}shlibs"
+SHLIBSWORKDIR = "${PKGDESTWORK}/${MLPREFIX}shlibs"
 
 # default search path when searching for shlibs provided by package
 SHLIBSSEARCHDIRS ?= "${baselib} ${libdir}"
@@ -2021,6 +2010,7 @@ do_packagedata[sstate-name] = "packagedata"
 do_packagedata[sstate-inputdirs] = "${PKGDESTWORK}"
 do_packagedata[sstate-outputdirs] = "${PKGDATA_DIR}"
 do_packagedata[sstate-lockfile-shared] = "${PACKAGELOCK}"
+do_packagedata[stamp-extra-info] = "${MACHINE}"
 
 python do_packagedata_setscene () {
     sstate_setscene(d)
