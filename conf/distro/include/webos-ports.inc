@@ -36,3 +36,7 @@ VIRTUAL-RUNTIME_webos-ime = "webos-keyboard"
 inherit android_image_types
 
 OPKGLIBDIR_forcevariable := "${localstatedir}/lib"
+
+# needed in order to build gtk+ without x11 DISTRO_FEATURE
+PACKAGECONFIG_pn-cairo += "directfb"
+PACKAGECONFIG_pn-gtk+ += "directfb"
