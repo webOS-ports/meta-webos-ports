@@ -110,5 +110,13 @@ mount -o bind,rw $datadir/userdata /rfs/media/internal
 mkdir -p /rfs/media/internal/android
 mount -o bind,rw $ANDROID_MEDIA_DIR /rfs/media/internal/android
 
+if [ ! -e /rfs/SWAP.img ] ; then
+    info "Creating SWAP device ..."
+    dd if=/dev/zero of=/rfs/SWAP.img bs=4096 count=131072
+    chmod 600 /rfs/SWAP.img
+    chown 0:0 /rfs/SWAP.img
+    mkswap /rfs/SWAP.img
+fi
+
 info "Switching to rootfs..."
 exec switch_root /rfs /sbin/init
