@@ -1,7 +1,12 @@
 SUMMARY = "webOS on-screen keyboard based on the Ubuntu Touch keyboard"
 HOMEPAGE = "https://launchpad.net/ubuntu-keyboard"
-LICENSE = "GPL-3.0"
-LIC_FILES_CHKSUM = "file://COPYING;md5=6a6a8e020838b23406c81b19c1d46df6"
+LICENSE = "GPL-3.0 & BSD & Apache-2.0 & CC-BY-1.0"
+LIC_FILES_CHKSUM = " \
+    file://COPYING;md5=6a6a8e020838b23406c81b19c1d46df6 \
+    file://COPYING.BSD;md5=9b2310382ed07cfdae9c4953c8d29078 \
+    file://COPYING.Apache-2.0;beginline=37;endline=212;md5=e23fadd6ceef8c618fc1c65191d846fa \
+    file://COPYING.CC-BY;md5=c14dd4d440694f070fc6520d9c9a65eb \
+"
 
 inherit qmake5
 
@@ -19,7 +24,7 @@ FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 SRC_URI = "git://github.com/webOS-ports/webos-keyboard;branch=master \
            file://webos-keyboard.conf \
           "
-SRCREV = "4122e8c20f739711228ffc7c268185d901930f95"
+SRCREV = "4a33cda966b8c3a38aa32dd796e5ed49e7ff4572"
 PV = "0.99.0+git${SRCPV}"
 
 EXTRA_QMAKEVARS_PRE = "\
