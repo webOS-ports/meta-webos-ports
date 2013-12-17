@@ -7,7 +7,7 @@ PV = "1.0+gitr${SRCPV}"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 SRC_URI = "git://github.com/webOS-ports/webos-systemd-services.git;branch=master;protocol=git"
-SRCREV = "c15416df390c6ba1f7cbd22c96a83e82e82f2c56"
+SRCREV = "997d6d650c30d039acc122e1abb0941834003467"
 S = "${WORKDIR}/git"
 
 inherit systemd
@@ -38,4 +38,7 @@ do_install() {
     for f in *.service ; do
         install -m 0644 ${S}/$f ${D}${systemd_unitdir}/system
     done
+
+    install -d ${D}${bindir}
+    install -m 0755 ${S}/db8-prestart.sh ${D}${bindir}
 }
