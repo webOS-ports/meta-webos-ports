@@ -36,7 +36,6 @@ RDEPENDS_${PN} = " \
   org.webosinternals.preware \
   org.webosports.app.calendar \
   org.webosinternals.tweaks \
-  org.webosports.app.update \
   org.webosports.service.devmode \
   org.webosports.app.browser \
   org.webosports.app.calculator \
