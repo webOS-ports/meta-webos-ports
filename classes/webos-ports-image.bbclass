@@ -11,3 +11,10 @@ inherit webos-image
 IMAGE_INSTALL_append = " \
   ${MACHINE_EXTRA_RDEPENDS} \
 "
+
+# Enable swap image to extend available memory
+webos_swap_hook() {
+    echo "/SWAP.img none swap sw 0 0"
+}
+
+ROOTFS_POSTPROCESS_COMMAND += "webos_swap_hook;"
