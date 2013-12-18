@@ -7,7 +7,11 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 SRC_URI = "file://webos-ports-emulator.ovf"
 
-IMAGE_NAME = "webos-ports-dev-image"
+IMAGE_BASENAME = "webos-ports-dev"
+IMAGE_NAME = "${IMAGE_NAME}-image"
+
+ZIP_BASENAME = "${IMAGE_BASENAME}-emulator-${MACHINE}"
+ZIP_NAME = "${ZIP_BASENAME}-${DATETIME}-${WEBOS_IMAGE_NAME_SUFFIX}"
 
 do_deploy() {
     if [ ! -e ${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}-${MACHINE}.vmdk ] ; then
@@ -19,13 +23,12 @@ do_deploy() {
     cp ${WORKDIR}/webos-ports-emulator.ovf ${WORKDIR}/appliance
     ln -sf ${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}-${MACHINE}.vmdk ${WORKDIR}/appliance/webos-ports-emulator-disk.vmdk
 
-    (cd ${WORKDIR}/appliance ; zip ${DEPLOY_DIR_IMAGE}/webos-ports-emulator-${MACHINE}-${DATETIME}.zip \
+    (cd ${WORKDIR}/appliance ; zip ${DEPLOY_DIR_IMAGE}/${ZIP_NAME}.zip \
         webos-ports-emulator.ovf webos-ports-emulator-disk.vmdk)
 
-    ln -sf webos-ports-emulator-${MACHINE}-${DATETIME}.zip ${DEPLOY_DIR_IMAGE}/webos-ports-emulator-${MACHINE}.zip
+    ln -sf ${ZIP_NAME}.zip ${DEPLOY_DIR_IMAGE}/${ZIP_BASENAME}.zip
 }
 
-do_deploy[depends] += "webos-ports-dev-image:do_build"
-DEPENDS += "webos-ports-dev-image"
+do_deploy[depends] += "${IMAGE_NAME}:do_build"
 
 addtask deploy after do_install before do_package
