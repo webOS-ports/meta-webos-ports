@@ -131,6 +131,7 @@ RDEPENDS_${PN} = " \
 # aren't actually needed).
 WEBOS_FOSS_MISSING_FROM_RDEPENDS = " \
     bzip2 \
+    gzip \
     curl \
     e2fsprogs \
     hunspell \
