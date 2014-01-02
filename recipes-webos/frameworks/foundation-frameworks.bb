@@ -16,6 +16,8 @@ inherit webos_arch_indep
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
+SRC_URI += "file://0001-foundations-rework-error-to-string-conversion-to-not.patch"
+
 do_install() {
     install -d ${D}${webos_frameworksdir}
 
