@@ -11,3 +11,8 @@ do_compile() {
     # FIXME: use native node from sysroot
     node enyo/tools/deploy.js -o ${S}/deploy/${WEBOS_APPLICATION_NAME}
 }
+
+do_install_append() {
+    install -d ${D}${webos_applicationsdir}
+    cp -rf ${S}/deploy/${WEBOS_APPLICATION_NAME} ${D}${webos_applicationsdir}
+}
