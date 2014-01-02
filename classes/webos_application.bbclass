@@ -1,12 +1,11 @@
 WEBOS_APPLICATION_NAME ?= "${PN}"
 
 do_install_append() {
-    install -d ${D}${webos_applicationsdir}
-    cp -rf ${S}/deploy/${WEBOS_APPLICATION_NAME} ${D}${webos_applicationsdir}
-
     if [ ! -e ${S}/appinfo.json ] ; then
         bberror "Can't find appinfo.json file for application ${WEBOS_APPLICATION_NAME}"
     fi
+
+    install -d ${D}${webos_applicationsdir}/${WEBOS_APPLICATION_NAME}
 
     cp ${S}/appinfo.json ${D}${webos_applicationsdir}/${WEBOS_APPLICATION_NAME}
 
@@ -26,7 +25,6 @@ do_install_append() {
     fi
 }
 
-PACKAGES = "${PN}"
-FILES_${PN} = " \
+FILES_${PN} += " \
     ${webos_applicationsdir}/${WEBOS_APPLICATION_NAME} \
     ${webos_sysconfdir}"
