@@ -11,7 +11,7 @@ RDEPENDS_${PN} += " \
     qtwebkit-qmlplugins \
 "
 
-WEBOS_VERSION = "0.1.0-7_ad3abb82cdf2e1740edada97f0306bf0b6810d6c"
+WEBOS_VERSION = "0.1.0-10_fdb146bf897620353b5c360ac9285afc96c3d3ef"
 
 inherit webos_component
 inherit webos_public_repo
