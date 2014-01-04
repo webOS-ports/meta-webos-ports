@@ -26,7 +26,6 @@ inherit webos_daemon
 inherit webos_program
 inherit webos_system_bus
 inherit webos_core_os_dep
-inherit webos_machine_impl_dep
 inherit webos_prerelease_dep
 inherit webos_lttng
 
@@ -34,7 +33,7 @@ SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit webos-ports-submissions
-SRCREV = "78e27c61e9d33fadee3dab9bb0641aa585ecf160"
+SRCREV = "bac1c52d9a415b327ebf8b76f1cb724eb2b2a82b"
 
 # This fix-up will be removed shortly. luna-service2 headers must be included
 # using '#include <luna-service2/*.h>'
