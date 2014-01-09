@@ -5,13 +5,13 @@ LIC_FILES_CHKSUM = " \
     file://COPYING-Apache-2.0;md5=3b83ef96387f14655fc854ddc3c6bd57 \
 "
 
-DEPENDS = "qtbase qtdeclarative qtwebkit luna-sysmgr-common"
+DEPENDS = "qtbase qtdeclarative qtwebkit luna-sysmgr-common libwebos-application"
 RDEPENDS_${PN} += " \
     qtdeclarative-qmlplugins \
     qtwebkit-qmlplugins \
 "
 
-WEBOS_VERSION = "0.1.0-10_fdb146bf897620353b5c360ac9285afc96c3d3ef"
+WEBOS_VERSION = "0.1.0-11_784c704c76885471969d957d91c1d24460a39fd6"
 
 inherit webos_component
 inherit webos_public_repo
