@@ -8,8 +8,8 @@ inherit webos_arch_indep
 inherit webos_enyojs_application
 inherit webos_cordova_application
 
-PV = "0.0.1+gitr${SRCPV}"
+PV = "0.1.1+gitr${SRCPV}"
 
-SRCREV = "8ca6b68775e642d319df245b7b9ef9bc706ea060"
+SRCREV = "b50dc9586abf9703198605033d7a9fb7ad819f5c"
 SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git"
 S = "${WORKDIR}/git"
