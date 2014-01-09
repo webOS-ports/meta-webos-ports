@@ -1,6 +1,6 @@
 SUMMARY = "Card shell implementation for the next generation webOS UI"
 LICENSE = "GPL-3.0 & Apache-2.0"
-LIC_FILES_CHKSUM = "file://COPYING;md5=5340dda5a5599015e82b9796589180cc"
+LIC_FILES_CHKSUM = "file://COPYING;md5=88f260738df8472f0e269b664c5bb556"
 
 RDEPENDS_${PN} += " \
     qtdeclarative-qmlplugins \
@@ -10,7 +10,7 @@ RDEPENDS_${PN} += " \
 "
 
 SRC_URI = "git://github.com/webOS-ports/luna-next-cardshell.git;branch=master;protocol=git"
-SRCREV = "cb4fc0602a137369a1cbb17245f6afc060795db9"
+SRCREV = "0047be7c4c69b3e62fc7fece0e92cd4ba0533bcf"
 S = "${WORKDIR}/git"
 
 # For the sake of the webOS build system we need to provide the webOS component version
