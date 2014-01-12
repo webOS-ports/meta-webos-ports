@@ -40,7 +40,7 @@ SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit webos-ports-submissions
-SRCREV = "9c95a33af665c30ef9be4af75801d9b90c014266"
+SRCREV = "a2e046674bcb0ece2d7312b1e90f6f00dc1f9837"
 
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 
@@ -193,6 +193,14 @@ do_install_append() {
 
 do_clean_prepend() {
     os.system('cd ' + bb.data.expand('${S}', d) + ' && [ -f Makefile ] && make distclean')
+}
+
+pkg_postinst_${PN}() {
+    #!/bin/sh -e
+
+    # We need the lock directory for the application installer which will fail if this
+    # directory does not exist
+    mkdir -p ${webos_cryptofsdir}/apps/var/lock
 }
 
 FILES_${PN} += "${webos_sysmgrdir} ${webos_sysconfdir} ${webos_applicationsdir} ${webos_soundsdir}"
