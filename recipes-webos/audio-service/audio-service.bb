@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "luna-service2 cjson glib-2.0 pulseaudio"
 
-WEBOS_VERSION = "0.1.0-3_25c3cec1a0bdd1f8d6813257d8d6ba61849671bc"
+WEBOS_VERSION = "0.1.0-4_3b354491a7a1ab3654f71731f27d5b690b59eb83"
 
 inherit webos_component
 inherit webos_public_repo
