@@ -9,17 +9,14 @@ RDEPENDS_${PN} += " \
     luna-next \
 "
 
-SRC_URI = "git://github.com/webOS-ports/luna-next-cardshell.git;branch=master;protocol=git"
-SRCREV = "0047be7c4c69b3e62fc7fece0e92cd4ba0533bcf"
-S = "${WORKDIR}/git"
-
-# For the sake of the webOS build system we need to provide the webOS component version
-# and even a submission number, even if we don't use any.
-WEBOS_COMPONENT_VERSION = "0.1.0"
-WEBOS_SUBMISSION = "0"
-PV = "${WEBOS_COMPONENT_VERSION}+gitr${SRCPV}"
+WEBOS_VERSION = "0.1.0-2_ad37cc260fbe798188a835d93ea95beb514aeea9"
 
 inherit webos_component
+inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit webos_cmake
+
+SRC_URI = "git://github.com/webOS-ports/luna-next-cardshell.git;branch=master;protocol=git"
+S = "${WORKDIR}/git"
 
 FILES_${PN} += "${webos_prefix}/luna-next/shells/card"
