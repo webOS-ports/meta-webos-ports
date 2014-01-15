@@ -16,18 +16,7 @@ DEPENDS_append = " ${WEBOS_CMAKE_DEPENDS}"
 
 inherit cmake
 
-# There should always be a CMakeLists.txt in the root of the project
-OECMAKE_SOURCEPATH = "${S}"
-
-
-# If inheriting from webos_machine_dep, then use a separate build directory for
-# each value of MACHINE (as they'll be different). Note that do_clean() assumes this != ${S}
-OECMAKE_BUILDPATH_SUBDIR = "${@ 'BUILD-${MACHINE}' if bb.data.inherits_class('webos_machine_dep', d) and not bb.data.inherits_class('native', d) else 'BUILD-${PACKAGE_ARCH}' }"
-OECMAKE_BUILDPATH_SUBDIR[vardepvalue] = "${OECMAKE_BUILDPATH_SUBDIR}"
-
-OECMAKE_BUILDPATH = "${S}/${OECMAKE_BUILDPATH_SUBDIR}"
-
-WEBOS_PKGCONFIG_BUILDDIR = "${OECMAKE_BUILDPATH}"
+WEBOS_PKGCONFIG_BUILDDIR = "${B}"
 
 EXTRA_OECMAKE += "-DWEBOS_INSTALL_ROOT:PATH=/"
 
@@ -57,35 +46,16 @@ do_generate_toolchain_file_append() {
     sed '/CMAKE_SYSTEM_PROCESSOR/ s/i586/i686/' -i ${WORKDIR}/toolchain.cmake
 }
 
-
-# Always invoke CMake from an empty build directory. Our CMakeLists.txt-s have
-# not been written to handle incremental updates.
-do_configure_prepend() {
-    if [ $(readlink -f ${OECMAKE_SOURCEPATH}) != $(readlink -f ${OECMAKE_BUILDPATH}) ]; then
-        bbnote "Removing ${OECMAKE_BUILDPATH}"
-        rm -rf ${OECMAKE_BUILDPATH}
-    fi
-}
-
 # Record how cmake was invoked
 do_configure_append() {
     # Keep in sync with how cmake_do_configure() invokes cmake
     echo $(which cmake) \
       ${OECMAKE_SITEFILE} \
-      ${OECMAKE_SOURCEPATH} \
+      ${S} \
       -DCMAKE_INSTALL_PREFIX:PATH=${prefix} \
       -DCMAKE_INSTALL_SO_NO_EXE=0 \
       -DCMAKE_TOOLCHAIN_FILE=${WORKDIR}/toolchain.cmake \
       -DCMAKE_VERBOSE_MAKEFILE=1 \
       ${EXTRA_OECMAKE} \
       -Wno-dev > ${WORKDIR}/cmake.status
-}
-
-# We set OECMAKE_BUILDPATH to be different from S above, so there's no need to
-# test at run time.
-do_clean_append() {
-    buildpath = bb.data.getVar('OECMAKE_BUILDPATH', d, 1)
-    if buildpath and os.path.exists(buildpath):
-        bb.note('Removing ' + buildpath)
-        os.system('rm -rf ' + buildpath)
 }
