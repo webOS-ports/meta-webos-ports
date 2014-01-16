@@ -9,6 +9,7 @@ DEPENDS = "qtbase qtdeclarative qtwebkit luna-sysmgr-common libwebos-application
 RDEPENDS_${PN} += " \
     qtdeclarative-qmlplugins \
     qtwebkit-qmlplugins \
+    libconnman-qt \
 "
 
 WEBOS_VERSION = "0.1.0-12_4f7febd087de8b3ba922f5ec560a73dc8b96db9d"
