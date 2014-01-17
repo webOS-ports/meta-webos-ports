@@ -15,7 +15,7 @@ WEBOS_COMPONENT_VERSION = "2.0.0"
 PV = "${WEBOS_COMPONENT_VERSION}+git${SRCPV}"
 WEBOS_SUBMISSION = "0"
 
-SRCREV = "e3b5cfe77c337adfc585477e331ff8c237b89a27"
+SRCREV = "f777e02e8eefa79b75f9243a0a7ac3e1a1bdb039"
 SRC_URI = "git://github.com/webOS-ports/preware;protocol=git;branch=master"
 S = "${WORKDIR}/git/oe-service"
 
@@ -28,6 +28,9 @@ pkg_postinst_${PN}() {
 
         # Create the opkg config and database areas
         mkdir -p $APPS/${sysconfdir}/opkg $APPS/${localstatedir}/lib/opkg/cache
+
+        # We provide an empty status file to satisfy the ipkgservice
+        touch $APPS/${localstatedir}/lib/opkg/status
 
         # Remove all list database cache files
         rm -f $APPS/${localstatedir}/lib/opkg/lists/*
