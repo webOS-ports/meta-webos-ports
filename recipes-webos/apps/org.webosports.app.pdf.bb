@@ -6,10 +6,16 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 inherit webos_public_repo
 inherit webos_arch_indep
 inherit webos_enyojs_application
-inherit webos_cordova_application
 
 PV = "1.0.0+gitr${SRCPV}"
 
-SRCREV = "b2c279f78f08ecdfe42969833cd8d43ed9a77bc6"
+SRCREV = "63f176c0e9d0ec2d6e881a5bd3dce928b33dc0bf"
 SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git"
 S = "${WORKDIR}/git"
+
+do_install_append() {
+    install -d ${D}${webos_servicesdir}/org.webosports.app.pdf.service
+    cp -r ${S}/service/* ${D}${webos_servicesdir}/org.webosports.app.pdf.service/
+}
+
+FILES_${PN} += "${webos_servicesdir}/org.webosports.app.pdf.service"
