@@ -8,6 +8,9 @@
 # http://mailman.openwebosproject.org/pipermail/openwebos-general/2013-January/000177.html
 # https://docs.google.com/spreadsheet/ccc?key=0Avaa_xKWksbWdDBoWjU2LU1FTVFiZDJuZTlGNkgzcFE
 
+# Always check if recipes-core/meta/distro-feed-configs.bbappend includes all
+# feeds for given DEFAULTTUNE when changing this file
+
 # If you're changing this file then:
 # build image and reflash or at least rebuild opkg-config-base distro-feed-configs
 # and opkg -force-reinstall opkg-config-base distro-feed-configs
