@@ -34,6 +34,7 @@ RDEPENDS_${PN} = " \
   org.webosports.app.browser \
   org.webosports.app.calculator \
   org.webosports.app.pdf \
+  org.webosports.app.filemanager \
   web-apps \
   \
   ca-certificates \
