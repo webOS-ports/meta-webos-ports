@@ -1,5 +1,5 @@
 
-SUPPORTED_EXTRA_ARCHS ?= "armv7a-vfp-neon cortexa8-vfp-neon cortexa8t-vfp-neon cortexa9-vfp-neon cortexa9t-vfp-neon x86_64 x86"
+SUPPORTED_EXTRA_ARCHS ?= "armv7a-vfp-neon cortexa8-vfp-neon cortexa8t-vfp-neon cortexa9-vfp-neon cortexa9t-vfp-neon x86_64 i586"
 
 # this is just to prevent opkg installing something from e.g. armv4t feed on armv7a, 
 # just because some upgrade was available in armv4t feed sooner and when it gets
