@@ -2,14 +2,6 @@ import bb.siggen
 import oe.sstatesig
 
 # Imported from oe-core 421e927bd453259f4b3cdbd1676f6e12f97bf34f
-# Backports:
-# 3d59d0b sstate/sstatesig: Add populate_lic to list of arch invariant sstate tasks
-# 8629844 sstatesig: Correctly handle matches spanning stamps and sstatedir
-# (not this one) dbc1426 sstatesig: Update for the removal of sstate-name
-# 04fc682 sstatesig: Ensure we return all matches for find_sigdata
-# fd085f1 sstatesig.py: Fix image regeneration issue
-# 80b065f lib/oe/sstatesig: Ensure packagegroups don't continually rebuild
-# fafeb38 classes/recipes/lib: Fix various python whitespace issues
 
 # Our change:
 # GF-51950 Build doesn't recognize bbappend-ed cmake-modules-webos-native as having changed
@@ -86,89 +78,3 @@ class SignatureGeneratorOEBasicHashStrict(oe.sstatesig.SignatureGeneratorOEBasic
 
 # Insert these classes into siggen's namespace so it can see and select them
 bb.siggen.SignatureGeneratorOEBasicHashStrict = SignatureGeneratorOEBasicHashStrict
-
-def find_siginfo(pn, taskname, taskhashlist, d):
-    """ Find signature data files for comparison purposes """
-
-    import fnmatch
-    import glob
-
-    if taskhashlist:
-        hashfiles = {}
-
-    if not taskname:
-        # We have to derive pn and taskname
-        key = pn
-        splitit = key.split('.bb.')
-        taskname = splitit[1]
-        pn = os.path.basename(splitit[0]).split('_')[0]
-        if key.startswith('virtual:native:'):
-            pn = pn + '-native'
-
-    if taskname in ['do_fetch', 'do_unpack', 'do_patch', 'do_populate_lic']:
-        pn.replace("-native", "")
-
-    filedates = {}
-
-    # First search in stamps dir
-    localdata = d.createCopy()
-    localdata.setVar('MULTIMACH_TARGET_SYS', '*')
-    localdata.setVar('PN', pn)
-    localdata.setVar('PV', '*')
-    localdata.setVar('PR', '*')
-    localdata.setVar('EXTENDPE', '')
-    stamp = localdata.getVar('STAMP', True)
-    filespec = '%s.%s.sigdata.*' % (stamp, taskname)
-    foundall = False
-    import glob
-    for fullpath in glob.glob(filespec):
-        match = False
-        if taskhashlist:
-            for taskhash in taskhashlist:
-                if fullpath.endswith('.%s' % taskhash):
-                    hashfiles[taskhash] = fullpath
-                    if len(hashfiles) == len(taskhashlist):
-                        foundall = True
-                        break
-        else:
-            filedates[fullpath] = os.stat(fullpath).st_mtime
-
-    if not taskhashlist or (len(filedates) < 2 and not foundall):
-        # That didn't work, look in sstate-cache
-        hashes = taskhashlist or ['*']
-        localdata = bb.data.createCopy(d)
-        for hashval in hashes:
-            localdata.setVar('PACKAGE_ARCH', '*')
-            localdata.setVar('TARGET_VENDOR', '*')
-            localdata.setVar('TARGET_OS', '*')
-            localdata.setVar('PN', pn)
-            localdata.setVar('PV', '*')
-            localdata.setVar('PR', '*')
-            localdata.setVar('BB_TASKHASH', hashval)
-            if pn.endswith('-native') or pn.endswith('-crosssdk') or pn.endswith('-cross'):
-                localdata.setVar('SSTATE_EXTRAPATH', "${NATIVELSBSTRING}/")
-            sstatename = d.getVarFlag(taskname, "sstate-name")
-            if not sstatename:
-                sstatename = taskname
-            filespec = '%s_%s.*.siginfo' % (localdata.getVar('SSTATE_PKG', True), sstatename)
-
-            if hashval != '*':
-                sstatedir = "%s/%s" % (d.getVar('SSTATE_DIR', True), hashval[:2])
-            else:
-                sstatedir = d.getVar('SSTATE_DIR', True)
-
-            for root, dirs, files in os.walk(sstatedir):
-                for fn in files:
-                    fullpath = os.path.join(root, fn)
-                    if fnmatch.fnmatch(fullpath, filespec):
-                        if taskhashlist:
-                            hashfiles[hashval] = fullpath
-                        else:
-                            filedates[fullpath] = os.stat(fullpath).st_mtime
-
-    if taskhashlist:
-        return hashfiles
-    else:
-        return filedates
-
-bb.siggen.find_siginfo = find_siginfo
