@@ -14,12 +14,6 @@ RDEPENDS_${PN} = " \
   udev-extraconf \
   alsa-conf \
   \
-  gst-meta-base \
-  gst-meta-audio \
-  gst-meta-video \
-  gst-plugins-good-pulse \
-  gst-plugins-ugly-mad \
-  gst-plugins-ugly-lame \
   \
   webos-connman-adapter \
   ${@base_contains('MACHINE_FEATURES', 'phone', 'packagegroup-webos-telephony', '',d)} \

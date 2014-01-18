@@ -29,8 +29,6 @@ RDEPENDS_${PN} = " \
   alsa-utils-aplay \
   alsa-utils-amixer \
   \
-  gst-meta-debug \
-  \
   org.webosports.app.testr \
   \
   systemd-analyze \
