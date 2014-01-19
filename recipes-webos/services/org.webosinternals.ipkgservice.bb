@@ -15,7 +15,7 @@ WEBOS_COMPONENT_VERSION = "2.0.0"
 PV = "${WEBOS_COMPONENT_VERSION}+git${SRCPV}"
 WEBOS_SUBMISSION = "0"
 
-SRCREV = "f777e02e8eefa79b75f9243a0a7ac3e1a1bdb039"
+SRCREV = "633d567ce2e55f328c3f0dc1e5034923394a9eae"
 SRC_URI = "git://github.com/webOS-ports/preware;protocol=git;branch=master"
 S = "${WORKDIR}/git/oe-service"
 
