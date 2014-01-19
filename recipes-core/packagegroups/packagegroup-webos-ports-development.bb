@@ -33,7 +33,6 @@ RDEPENDS_${PN} = " \
   \
   systemd-analyze \
   qt5-opengles2-test \
-  qtwayland-examples \
   \
   connman-client \
 "
