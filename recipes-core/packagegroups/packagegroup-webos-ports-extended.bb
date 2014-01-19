@@ -23,6 +23,7 @@ RDEPENDS_${PN} = " \
   org.webosinternals.service.upstartmgr \
   org.webosinternals.ipkgservice \
   org.webosports.service.update \
+  org.webosports.cdav \
   \
   org.webosports.app.firstuse \
   org.webosports.app.memos \
