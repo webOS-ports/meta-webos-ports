@@ -53,6 +53,8 @@ RDEPENDS_${PN} = " \
   luna-sysmgr \
   luna-sysmgr-conf \
   \
+  webos-system-update \
+  \
   webos-systemd-services \
   \
   audio-service \

@@ -15,11 +15,6 @@ S = "${WORKDIR}/git/service"
 
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files"
 
-inherit systemd
-
-SYSTEMD_PACKAGES = "${PN}"
-SYSTEMD_SERVICE_${PN} = "webos-system-update.service"
-
 do_install() {
     # Install service and remove unecessary things
     install -d ${D}${webos_servicesdir}/${PN}
@@ -31,11 +26,7 @@ do_install() {
     cp -rv ${S}/activities/org.webosports.service.update ${D}${webos_sysconfdir}/activities/
 
     chmod +x ${D}${webos_servicesdir}/${PN}/start-update.sh
-    chmod +x ${D}${webos_servicesdir}/${PN}/run-update.sh
     chmod +x ${D}${webos_servicesdir}/${PN}/download-updates.sh
-
-    install -d ${D}${systemd_unitdir}/system
-    install -m 0644 ${S}/files/systemd/webos-system-update.service ${D}${systemd_unitdir}/system
 }
 
 FILES_${PN} += "${webos_servicesdir}/${PN}"
