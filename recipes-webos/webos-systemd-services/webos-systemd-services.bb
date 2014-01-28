@@ -6,8 +6,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 PV = "1.0+gitr${SRCPV}"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-SRC_URI = "git://github.com/webOS-ports/webos-systemd-services.git;branch=master;protocol=git"
-SRCREV = "148ab4ce36794321db3f38d462ee6c1166caf4c0"
+SRC_URI = "git://github.com/webOS-ports/webos-systemd-services.git;branch=master-next;protocol=git"
+SRCREV = "d09f7d81cf274f28e5de9e04a21b88a079ecbe1d"
 S = "${WORKDIR}/git"
 
 inherit systemd
@@ -17,7 +17,6 @@ SYSTEMD_SERVICE_${PN} = " \
     activitymanager.service \
     configurator.service \
     configurator-async.service \
-    db8.service \
     filecache.service \
     ls-hubd_private.service \
     ls-hubd_public.service \
@@ -42,3 +41,6 @@ do_install() {
     install -d ${D}${bindir}
     install -m 0755 ${S}/db8-prestart.sh ${D}${bindir}
 }
+
+# to catch .service files not listed in SYSTEMD_SERVICE (db8@.service and in some cases webos-telephonyd.service)
+FILES_${PN} += "${systemd_unitdir}/system"
