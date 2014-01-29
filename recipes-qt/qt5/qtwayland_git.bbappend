@@ -7,8 +7,9 @@ SRC_URI = "git://gitorious.org/qt/qtwayland.git;protocol=git;branch=stable \
            file://0001-Try-one-more-option-to-get-a-valid-EGLDisplay-instan.patch \
            file://0002-Explicitly-state-precision-of-variables-in-shader.patch \
            file://0003-Don-t-disown-buffer-until-a-new-texture-id-is-reques.patch \
-           file://0004-Adjust-cast-for-wayland-EGL-API-change.patch \
 "
+# only for our ARM MACHINEs with different EGL headers
+SRC_URI_append_arm = " file://0004-Adjust-cast-for-wayland-EGL-API-change.patch"
 
 SRCREV = "3209f61310cb5244704e7cfa4f16044420c96747"
 
