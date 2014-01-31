@@ -48,6 +48,22 @@ FILES_${PN}-doc = "${mandir} ${infodir}"
 FILES_${PN} += "${docdir}"
 FILES_${PN}-dbg += "${libexecdir}/lxc/.debug"
 
+do_configure_prepend() {
+	# drop -Werror until there is newer lxc version with subdir-objects enabled to fix build with automake-1.14
+	# | automake: warning: possible forward-incompatibility.
+	# | automake: At least a source file is in a subdirectory, but the 'subdir-objects'
+	# | automake: automake option hasn't been enabled.  For now, the corresponding output
+	# | automake: object file(s) will be placed in the top-level directory.  However,
+	# | automake: this behaviour will change in future Automake versions: they will
+	# | automake: unconditionally cause object files to be placed in the same subdirectory
+	# | automake: of the corresponding sources.
+	# | automake: You are advised to start using 'subdir-objects' option throughout your
+	# | automake: project, to avoid future incompatibilities.
+	# | src/lxc/Makefile.am:79: warning: source file '../include/lxcmntent.c' is in a subdirectory,
+	# | src/lxc/Makefile.am:79: but option 'subdir-objects' is disabled
+	sed 's/AM_INIT_AUTOMAKE(\[-Wall -Werror -Wno-portability\])/AM_INIT_AUTOMAKE([-Wall -Wno-portability])/g' -i ${S}/configure.ac
+}
+
 do_install_append() {
 	# The /var/cache/lxc directory created by the Makefile
 	# is wiped out in volatile, we need to create this at boot.
