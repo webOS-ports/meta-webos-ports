@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = " \
     file://NOTICE;md5=9645f39e9db895a4aa6e02cb57294595 \
 "
 
-DEPENDS += "boost"
+DEPENDS += "boost libhybris"
 
 PV = "0.0.1+bzr${SRCPV}"
 SRCREV = "35"
