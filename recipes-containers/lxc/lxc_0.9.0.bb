@@ -19,16 +19,18 @@ RDEPENDS_${PN} = " \
 		perl-module-exporter-heavy \
 "
 
-SRC_URI = "http://lxc.sourceforge.net/download/lxc/${PN}-${PV}.tar.gz \
+SRC_URI = "http://linuxcontainers.org/downloads/${BPN}-${PV}.tar.gz \
 	file://lxc-0.9.0-disable-udhcp-from-busybox-template.patch \
 	file://lxc-0.9.0-enable-chroot-chpasswd-functionality-for-busybox-hosts.patch \
-    file://lxc-0.9.0-check-when-bind-mounting-libdirs.patch \
-    file://lxc-0.9.0-don-t-let-LXC_PATH-end-in-failure.patch \
+	file://lxc-0.9.0-check-when-bind-mounting-libdirs.patch \
+	file://lxc-0.9.0-don-t-let-LXC_PATH-end-in-failure.patch \
+	file://lxc-0.9.0-setup_netdev-re-read-ifindex-in-LXC_NET_PHYS-case.patch \
+	file://lxc-0.9.0-use-susv3-head-arguments.patch \
 	"
 SRC_URI[md5sum] = "8552a4479090616f4bc04d8473765fc9"
 SRC_URI[sha256sum] = "1e1767eae6cc5fbf892c0e193d25da420ba19f2db203716c38f7cdea3b654120"
 
-S = "${WORKDIR}/${PN}-${PV}"
+S = "${WORKDIR}/${BPN}-${PV}"
 
 # Let's not configure for the host distro.
 #
@@ -39,7 +41,7 @@ PACKAGECONFIG[doc] = "--enable-doc,--disable-doc,,"
 PACKAGECONFIG[rpath] = "--enable-rpath,--disable-rpath,,"
 PACKAGECONFIG[apparmour] = "--enable-apparmor,--disable-apparmor,apparmor,apparmor"
 
-inherit autotools
+inherit autotools pkgconfig
 
 FILES_${PN}-doc = "${mandir} ${infodir}"
 # For LXC the docdir only contains example configuration files and should be included in the lxc package
