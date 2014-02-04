@@ -24,6 +24,6 @@ inherit webos_component
 inherit cmake_qt5
 inherit webos_cmake
 
-SRCREV = "292ff95e228797644e11cae29525c59fa3575055"
+SRCREV = "c2e84b60dfd2cfe5af12f3ad89dc48973ec46982"
 SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git"
 S = "${WORKDIR}/git"
