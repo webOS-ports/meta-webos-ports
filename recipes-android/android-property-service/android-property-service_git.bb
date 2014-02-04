@@ -9,11 +9,12 @@ inherit webos_public_repo
 inherit webos_cmake
 inherit webos_daemon
 inherit webos_system_bus
+inherit webos_systemd
 
 WEBOS_COMPONENT_VERSION = "0.1.0"
 PV = "${WEBOS_COMPONENT_VERSION}+gitr${SRCPV}"
 WEBOS_SUBMISSION = "0"
-SRCREV = "a736fd09ef0567343208de6b708b91b131c95abb"
+SRCREV = "30fcbef495a0037c73075e58f1fd9b1c8b790b1d"
 
 SRC_URI = "git://github.com/webOS-ports/android-property-service;branch=master;protocol=git"
 S = "${WORKDIR}/git"
