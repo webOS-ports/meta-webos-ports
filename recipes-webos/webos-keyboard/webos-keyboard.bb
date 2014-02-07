@@ -22,10 +22,8 @@ RDEPENDS_${PN} += "qtsvg-plugins qtmultimedia-qmlplugins"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
-SRC_URI = "git://github.com/webOS-ports/webos-keyboard;branch=master \
-           file://webos-keyboard.conf \
-          "
-SRCREV = "134d4b648ee206d73deeee83e3347246dc2f8e01"
+SRC_URI = "git://github.com/webOS-ports/webos-keyboard;branch=master"
+SRCREV = "5037344afd6700b6889a7765bffa17789819a970"
 PV = "0.99.0+git${SRCPV}"
 
 EXTRA_QMAKEVARS_PRE = "\
@@ -38,11 +36,6 @@ EXTRA_QMAKEVARS_PRE = "\
     CONFIG+=enable-presage \
     CONFIG+=enable-hunspell \
 "
-
-do_install_append() {
-    install -d ${D}${sysconfdir}/qt5/webos-ports
-    install -m 0644 ${WORKDIR}/webos-keyboard.conf ${D}${sysconfdir}/qt5/webos-ports/
-}
 
 FILES_${PN} += "\
     ${libdir}/maliit \
