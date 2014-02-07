@@ -74,10 +74,15 @@ LIBHYBRIS_RDEPENDS = " \
 RDEPENDS_${PN}_append_tuna = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS_${PN}_append_grouper = " ${LIBHYBRIS_RDEPENDS}"
 
-MESA_RDEPENDS = "libegl-gallium mesa-driver-swrast"
+QEMU_RDEPENDS = " \
+    libegl-gallium \
+    mesa-driver-swrast \
+    qt5-plugin-generic-vboxtouch \
+    alsa-utils-systemd \
+"
 
-RDEPENDS_${PN}_append_qemux86 = " ${MESA_RDEPENDS} qt5-plugin-generic-vboxtouch"
-RDEPENDS_${PN}_append_qemux86-64 = " ${MESA_RDEPENDS} qt5-plugin-generic-vboxtouch"
+RDEPENDS_${PN}_append_qemux86 = " ${QEMU_RDEPENDS}"
+RDEPENDS_${PN}_append_qemux86-64 = " ${QEMU_RDEPENDS}"
 
 RDEPENDS_${PN}_append_arm = " \
   crash-handler \
