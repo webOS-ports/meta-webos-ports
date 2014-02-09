@@ -9,8 +9,6 @@ SRC_URI = "git://gitorious.org/qt/qtwayland.git;protocol=git;branch=stable \
            file://0003-Don-t-disown-buffer-until-a-new-texture-id-is-reques.patch \
            file://0001-Don-t-use-internal-wayland-based-input-context.patch \
 "
-# only for our ARM MACHINEs with different EGL headers
-SRC_URI_append_arm = " file://0004-Adjust-cast-for-wayland-EGL-API-change.patch"
 
 SRCREV = "3209f61310cb5244704e7cfa4f16044420c96747"
 
