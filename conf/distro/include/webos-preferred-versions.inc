@@ -31,5 +31,5 @@ PREFERRED_VERSION_yajl ?= "1.0.12"
 # where <revision-hash> is the 40-character SHA-1 identifier of annotated
 # submissions tag.
 
-PREFERRED_VERSION_qtwebkit = "5.2.0+git%"
+PREFERRED_VERSION_qtwebkit = "5.2.1+git%"
 PREFERRED_VERSION_libconnman-qt = "1.0.43+git%"
