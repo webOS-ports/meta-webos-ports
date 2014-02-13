@@ -8,4 +8,4 @@ LIC_FILES_CHKSUM = "file://Source/WebCore/rendering/RenderApplet.h;endline=22;md
 DEPENDS += "luna-service2"
 
 SRC_URI = "git://github.com/webOS-ports/qtwebkit;branch=webOS-ports/master;protocol=git"
-SRCREV = "d101d060f37c530ef527b439ce660c05f6fa0fb4"
+SRCREV = "185683d256e6fe5b0af1a4efa3724959965e4be9"
