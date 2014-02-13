@@ -14,6 +14,8 @@ SRCREV = "ba898eba0bcca7074f3ce64552693ac16b93559e"
 SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git"
 S = "${WORKDIR}/git"
 
+WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/service/dbus"
+
 do_install_append() {
     install -d ${D}${webos_servicesdir}/org.webosports.app.pdf.service
     cp -r ${S}/service/* ${D}${webos_servicesdir}/org.webosports.app.pdf.service/
