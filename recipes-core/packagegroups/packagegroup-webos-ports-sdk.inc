@@ -3,6 +3,7 @@ SDK-BASE = " \
     libpbnjson-dev \
     cjson-dev \
     luna-prefs-dev \
+    libsdl2 \
 "
 
 SDK-EXTRAS ?= ""
