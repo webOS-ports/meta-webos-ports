@@ -58,6 +58,7 @@ RDEPENDS_${PN} = " \
   webos-systemd-services \
   \
   audio-service \
+  gstreamer1.0-plugins-bad \
 "
 
 LIBHYBRIS_RDEPENDS = " \
