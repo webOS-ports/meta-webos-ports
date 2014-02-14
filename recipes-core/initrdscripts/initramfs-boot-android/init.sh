@@ -93,18 +93,25 @@ if [ ! -e /rfs/.firstboot_done ] ; then
 
         # Copy initial content to new location outside rootfs
         cp -rav /rfs/$dir/* $datadir/$dir
+
+        # bind-mount the directory to its correct place
+        mount -o bind,rw $datadir/$dir /rfs/$dir
     done
+
+    # setup cryptofs which is not a real cryptofs yet
+    if [ -d $datadir/userdata/.cryptofs ] ; then
+        rm -rf $datadir/userdata/.cryptofs
+    fi
+    mkdir -p $datadir/userdata/.cryptofs
+
     # We're done with our first boot actions
     touch /rfs/.firstboot_done
 fi
 
-# bind-mount everything we need from the outside
-mount -o bind,rw $datadir/var /rfs/var
-mount -o bind,rw $datadir/home /rfs/home
-
 # finally setup the user data directory
 mkdir -p $datadir/userdata
 mount -o bind,rw $datadir/userdata /rfs/media/internal
+mount -o bind,rw $datadir/userdata/.cryptofs /rfs/media/cryptofs
 
 # ..and mount also the android user directory there
 mkdir -p /rfs/media/internal/android
