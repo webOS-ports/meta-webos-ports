@@ -9,11 +9,11 @@ inherit webos_system_bus
 
 PV = "0.1.0+gitr${SRCPV}"
 
-SRCREV = "52c65dee93adebb51fbd9899e2265bb862939298"
+SRCREV = "e0a44a60cc1f6f1efa60bc32b5113aa1c4d7933d"
 SRC_URI = "git://github.com/webOS-ports/org.webosports.service.devmode;protocol=git;branch=master"
 S = "${WORKDIR}/git"
 
-WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files"
+WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files/sysbus"
 
 do_install() {
     # Install service and remove unecessary things
