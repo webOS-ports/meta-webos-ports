@@ -14,7 +14,7 @@ IMAGE_INSTALL_append = " \
 
 # Enable swap image to extend available memory
 webos_swap_hook() {
-    echo "/SWAP.img none swap sw 0 0"
+    echo "/SWAP.img none swap sw 0 0" >> ${IMAGE_ROOTFS}/etc/fstab
 }
 
 ROOTFS_POSTPROCESS_COMMAND += "webos_swap_hook;"
