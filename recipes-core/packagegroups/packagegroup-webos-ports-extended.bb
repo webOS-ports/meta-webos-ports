@@ -59,6 +59,9 @@ RDEPENDS_${PN} = " \
   \
   audio-service \
   gstreamer1.0-plugins-bad \
+  \
+  node-sqlite3 \
+  node-dbus \
 "
 
 LIBHYBRIS_RDEPENDS = " \
