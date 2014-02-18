@@ -33,3 +33,4 @@ PREFERRED_VERSION_yajl ?= "1.0.12"
 
 PREFERRED_VERSION_qtwebkit = "5.2.1+git%"
 PREFERRED_VERSION_libconnman-qt = "1.0.43+git%"
+PREFERRED_VERSION_qtmultimedia = "5.2.1+git%"
