@@ -36,4 +36,5 @@ RDEPENDS_${PN} = " \
   sdl2-opengles-test \
   \
   connman-client \
+  qtdeclarative-tools \
 "
