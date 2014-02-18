@@ -21,7 +21,7 @@ SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 SRC_URI += " \
-    file://use-wakelockd-for-suspend.patch \
     file://0001-Use-com.palm.display-service-to-query-display-state-.patch \
+    file://0002-Use-wakelock-daemon-to-handle-device-state-while-in-.patch \
 "
 RDEPENDS_${PN} = "wakelockd"
