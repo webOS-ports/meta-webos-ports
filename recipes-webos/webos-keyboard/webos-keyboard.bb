@@ -16,7 +16,7 @@ inherit webos_system_bus
 # actually it is ${includedir}/qt5
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 
-DEPENDS = "maliit-framework-qt5 hunspell presage"
+DEPENDS = "maliit-framework-qt5 hunspell presage luna-service2"
 
 RDEPENDS_${PN} += "qtsvg-plugins qtmultimedia-qmlplugins"
 
