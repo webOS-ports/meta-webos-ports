@@ -8,6 +8,7 @@ WEBOS_VERSION = "2.3.0-1_368e2da0c0db11f219560ec1c10ca0417df0c1c4"
 
 inherit webos_enhanced_submissions
 inherit webos-ports-submissions
+inherit webos_public_repo
 
 S = "${WORKDIR}/git"
 
