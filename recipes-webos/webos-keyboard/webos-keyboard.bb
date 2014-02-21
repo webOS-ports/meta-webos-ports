@@ -37,12 +37,32 @@ EXTRA_QMAKEVARS_PRE = "\
     CONFIG+=enable-hunspell \
 "
 
+INSANE_SKIP_${PN} += "libdir"
+INSANE_SKIP_${PN}-dbg += "libdir"
+
 FILES_${PN} += "\
     ${libdir}/maliit \
     ${datadir} \
 "
 
-FILES_${PN}-dbg += "${libdir}/maliit/plugins/.debug"
+FILES_${PN}-dbg += "${libdir}/maliit/plugins/.debug \
+                    ${datadir}/maliit/plugins/com/ubuntu/lib/ar/.debug \
+                    ${datadir}/maliit/plugins/com/ubuntu/lib/cs/.debug \
+                    ${datadir}/maliit/plugins/com/ubuntu/lib/da/.debug \
+                    ${datadir}/maliit/plugins/com/ubuntu/lib/de/.debug \
+                    ${datadir}/maliit/plugins/com/ubuntu/lib/es/.debug \
+                    ${datadir}/maliit/plugins/com/ubuntu/lib/en/.debug \
+                    ${datadir}/maliit/plugins/com/ubuntu/lib/fi/.debug \
+                    ${datadir}/maliit/plugins/com/ubuntu/lib/fr/.debug \
+                    ${datadir}/maliit/plugins/com/ubuntu/lib/he/.debug \
+                    ${datadir}/maliit/plugins/com/ubuntu/lib/hu/.debug \
+                    ${datadir}/maliit/plugins/com/ubuntu/lib/it/.debug \
+                    ${datadir}/maliit/plugins/com/ubuntu/lib/nl/.debug \
+                    ${datadir}/maliit/plugins/com/ubuntu/lib/pl/.debug \
+                    ${datadir}/maliit/plugins/com/ubuntu/lib/pt/.debug \
+                    ${datadir}/maliit/plugins/com/ubuntu/lib/ru/.debug \
+                    ${datadir}/maliit/plugins/com/ubuntu/lib/sv/.debug \
+                    "
 
 S = "${WORKDIR}/git"
 
