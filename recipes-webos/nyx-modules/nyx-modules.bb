@@ -49,7 +49,7 @@ SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit webos-ports-submissions
-SRCREV = "4ef2b759e02ebd16ddfcd0a5ee5d4b29f272195f"
+SRCREV = "2bc66e23484ad42a477782708c244ad8dbdc2cca"
 
 PACKAGES += "${PN}-tests"
 FILES_${PN} += "${libdir}/nyx/modules/*"
