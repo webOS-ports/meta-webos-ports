@@ -3,9 +3,9 @@ SECTION = "libs"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://COPYING;md5=751419260aa954499f7abaabaa882bbe"
 
-DEPENDS = "glib-2.0"
+DEPENDS = "glib-2.0 libevdev libsuspend"
 
-SRCREV = "ec6d5386ea6ea0d398f9ff6a89e15a3d25813da4"
+SRCREV = "60223e00c85199c1f23d6a41cb3fb4423fe24309"
 SRC_URI = "git://github.com/webOS-ports/wakelockd;protocol=git;branch=master"
 S = "${WORKDIR}/git"
 
