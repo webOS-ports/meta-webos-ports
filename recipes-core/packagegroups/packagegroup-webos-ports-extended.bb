@@ -62,6 +62,7 @@ RDEPENDS_${PN} = " \
   \
   node-sqlite3 \
   node-dbus \
+  node-taglib \
 "
 
 LIBHYBRIS_RDEPENDS = " \
