@@ -7,4 +7,4 @@ EXTRA_OECONF += " \
 "
 
 SRC_URI = "git://github.com/webOS-ports/libhybris;branch=webOS-ports/master;protocol=git"
-SRCREV = "eddd65e379484b90cbd87909ae713034bfe4342b"
+SRCREV = "4825ed3ec9b720bf6807f82128dcf0031aa1a0b0"
