@@ -94,8 +94,9 @@ if [ ! -e /rfs/.firstboot_done ] ; then
         # Copy initial content to new location outside rootfs
         cp -rav /rfs/$dir/* $datadir/$dir
 
-        # bind-mount the directory to its correct place
-        mount -o bind,rw $datadir/$dir /rfs/$dir
+        # Remove old content so we know clearly when things are not
+        # mounted correctly
+        rm -rf /rfs/$dir/*
     done
 
     # setup cryptofs which is not a real cryptofs yet
@@ -107,6 +108,11 @@ if [ ! -e /rfs/.firstboot_done ] ; then
     # We're done with our first boot actions
     touch /rfs/.firstboot_done
 fi
+
+# bind-mount the directories to their correct place
+for dir in var home ; do
+    mount -o bind,rw $datadir/$dir /rfs/$dir
+done
 
 # finally setup the user data directory
 mkdir -p $datadir/userdata
