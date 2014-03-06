@@ -1,14 +1,18 @@
 DESCRIPTION = "Wakelock handling daemon for proper suspend/resume integration"
 SECTION = "libs"
 LICENSE = "GPLv2"
-LIC_FILES_CHKSUM = "file://COPYING;md5=751419260aa954499f7abaabaa882bbe"
+LIC_FILES_CHKSUM = "file://COPYING;md5=eb723b61539feef013de476e68b5c50a"
 
-DEPENDS = "glib-2.0 libevdev libsuspend"
+DEPENDS = "glib-2.0 libevdev libsuspend luna-service2 libpbnjson"
 
-SRCREV = "60223e00c85199c1f23d6a41cb3fb4423fe24309"
+WEBOS_VERSION = "0.1.0-1_a3ac3ca8c3a36fed58243826b8289cac65339394"
+
+inherit webos_component
+inherit webos_public_repo
+inherit webos_cmake
+inherit webos_daemon
+inherit webos_system_bus
+inherit webos_enhanced_submissions
+
 SRC_URI = "git://github.com/webOS-ports/wakelockd;protocol=git;branch=master"
 S = "${WORKDIR}/git"
-
-PV = "0.1.0+gitr${SRCPV}"
-
-inherit autotools
