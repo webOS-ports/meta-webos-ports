@@ -17,3 +17,5 @@ inherit webos_library
 
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
+
+SRC_URI += "file://0001-Disable-using-a-version-script-as-its-causing-us-rig.patch"
