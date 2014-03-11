@@ -23,7 +23,7 @@ RDEPENDS_${PN} += "qtsvg-plugins qtmultimedia-qmlplugins"
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
 SRC_URI = "git://github.com/webOS-ports/webos-keyboard;branch=master"
-SRCREV = "6980ae881de2f82904068e1efe008df5c009eea0"
+SRCREV = "2a0806c5c921625689118ce5217ad097a19b1340"
 PV = "0.99.0+git${SRCPV}"
 
 EXTRA_QMAKEVARS_PRE = "\
