@@ -24,6 +24,7 @@ RDEPENDS_${PN} = " \
   org.webosinternals.ipkgservice \
   org.webosports.service.update \
   org.webosports.cdav \
+  keymanager \
   \
   org.webosports.app.firstuse \
   org.webosports.app.memos \
