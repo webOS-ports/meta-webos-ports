@@ -11,4 +11,4 @@ DEPENDS += "luna-service2 qtmultimedia"
 RDEPENDS_${PN} += "qtmultimedia"
 
 SRC_URI = "git://github.com/webOS-ports/qtwebkit;branch=webOS-ports/master;protocol=git"
-SRCREV = "7d1921a7417cbfb3b0707a9f1f41f8df8a6c76ab"
+SRCREV = "630bf8a3a1a55769cf6b973c4953358bddba2052"
