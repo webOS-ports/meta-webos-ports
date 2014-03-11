@@ -24,6 +24,7 @@ RDEPENDS_${PN} = " \
   org.webosinternals.ipkgservice \
   org.webosports.service.update \
   org.webosports.cdav \
+  keymanager \
   \
   org.webosports.app.firstuse \
   org.webosports.app.memos \
@@ -58,7 +59,12 @@ RDEPENDS_${PN} = " \
   webos-systemd-services \
   \
   audio-service \
-  gstreamer1.0-plugins-bad \
+  mediaindexer \
+  \
+  gstreamer1.0-plugins-base-meta \
+  gstreamer1.0-plugins-good-meta \
+  gstreamer1.0-plugins-bad-meta \
+  gstreamer1.0-plugins-ugly-meta \
   \
   node-sqlite3 \
   node-dbus \
@@ -85,6 +91,7 @@ QEMU_RDEPENDS = " \
     mesa-driver-swrast \
     qt5-plugin-generic-vboxtouch \
     alsa-utils-systemd \
+    phonesim \
 "
 
 RDEPENDS_${PN}_append_qemux86 = " ${QEMU_RDEPENDS}"
