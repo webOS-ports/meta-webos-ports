@@ -1,5 +1,5 @@
 SUMMARY = "webOS Ports system update service"
-SECTION = "webos/apps"
+SECTION = "webos/services"
 LICENSE = "GPL-3.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-3.0;md5=c79ff39f19dfec6d293b95dea7b07891"
 
@@ -9,7 +9,7 @@ inherit webos_system_bus
 
 PV = "0.1.0+gitr${SRCPV}"
 
-SRCREV = "32304d64561d814e1e2626d4d0424db8d6277aab"
+SRCREV = "a5a6b077dfcea14dd20e50895ed64ba1b22d863f"
 SRC_URI = "git://github.com/webOS-ports/org.webosports.update;protocol=git;branch=master"
 S = "${WORKDIR}/git/service"
 
