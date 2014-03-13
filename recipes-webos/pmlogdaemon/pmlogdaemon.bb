@@ -13,6 +13,8 @@ RDEPENDS_${PN} = "busybox"
 
 WEBOS_VERSION = "3.0.0-118_b255ef47c6fca6bdb0e3ba169d9912f46854627b"
 
+EXTRA_OECMAKE += "-DENABLE_LOGGING:BOOL='YES'"
+
 inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
