@@ -21,9 +21,9 @@ inherit webos_system_bus
 inherit webos_machine_dep
 
 WEBOS_REPO_NAME = "BrowserServer"
-#SRC_URI = "${ISIS_PROJECT_GIT_REPO_COMPLETE}"
-WEBOS_PORTS_BRANCH ??= "webOS-ports/master"
-SRC_URI = "git://github.com/webOS-ports/${WEBOS_REPO_NAME};branch=${WEBOS_PORTS_BRANCH}"
+SRC_URI = "${ISIS_PROJECT_GIT_REPO_COMPLETE}"
+
+inherit webos-ports-repo
 S = "${WORKDIR}/git"
 
 WEBOS_NO_STATIC_LIBRARIES_WHITELIST = "libYap.a"

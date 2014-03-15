@@ -14,9 +14,9 @@ inherit webos_public_repo
 inherit webos_arch_indep
 
 WEBOS_REPO_NAME = "isis-browser"
-#SRC_URI = "${ISIS_PROJECT_GIT_REPO_COMPLETE}"
-WEBOS_PORTS_BRANCH ??= "webOS-ports/master"
-SRC_URI = "git://github.com/webOS-ports/${WEBOS_REPO_NAME};branch=${WEBOS_PORTS_BRANCH}"
+SRC_URI = "${ISIS_PROJECT_GIT_REPO_COMPLETE}"
+
+inherit webos-ports-repo
 S = "${WORKDIR}/git"
 
 do_install() {
