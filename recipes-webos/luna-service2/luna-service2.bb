@@ -11,7 +11,7 @@ VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 VIRTUAL-RUNTIME_rdx-utils ?= "rdx-utils-stub"
 RDEPENDS_${PN} = "${VIRTUAL-RUNTIME_cpushareholder} ${VIRTUAL-RUNTIME_rdx-utils}"
 
-WEBOS_VERSION = "3.7.0-176_4fa0ccf6e9a170c43175d5a1c4c57d30b793f937"
+WEBOS_VERSION = "3.7.0-176_4fa0ccf6e9a170c43175d5a1c4c57d30b793f937;branch=webOS-ports/master-next"
 
 WEBOS_DISTRO_PRERELEASE ??= ""
 EXTRA_OECMAKE += "${@ '-DWEBOS_DISTRO_PRERELEASE:STRING="devel"' \
@@ -33,7 +33,7 @@ SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit webos-ports-submissions
-SRCREV = "65ec4adfa20a5aeed9047096cc067a06c108de3c"
+SRCREV = "89ad298721f56c47b7a89cadc56048103938b8f8"
 
 # This fix-up will be removed shortly. luna-service2 headers must be included
 # using '#include <luna-service2/*.h>'
