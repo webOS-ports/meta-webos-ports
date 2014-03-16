@@ -17,7 +17,7 @@ SRC_URI = "${ENYOJS_GIT_REPO}/${PN}${WEBOS_GIT_TAG}"
 S = "${WORKDIR}/git"
 
 inherit webos-ports-submissions
-SRCREV = "07712ee4603247686f00d08480f95de46e3b722d"
+SRCREV = "05715cbed445646814895129e87fd1fa8a344d5a"
 
 do_install() {
     install -d ${D}${webos_frameworksdir}/enyo/0.10/framework
