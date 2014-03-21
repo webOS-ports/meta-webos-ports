@@ -59,10 +59,12 @@ RDEPENDS_${PN} = " \
   webos-systemd-services \
   \
   audio-service \
+  mediaindexer \
   \
+  gstreamer1.0-plugins-base-meta \
   gstreamer1.0-plugins-good-meta \
   gstreamer1.0-plugins-bad-meta \
-  gstreamer1.0-plugins-base-meta \
+  gstreamer1.0-plugins-ugly-meta \
   \
   node-sqlite3 \
   node-dbus \
