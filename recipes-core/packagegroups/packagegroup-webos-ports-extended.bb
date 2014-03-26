@@ -91,6 +91,7 @@ QEMU_RDEPENDS = " \
     mesa-driver-swrast \
     qt5-plugin-generic-vboxtouch \
     alsa-utils-systemd \
+    phonesim \
 "
 
 RDEPENDS_${PN}_append_qemux86 = " ${QEMU_RDEPENDS}"
