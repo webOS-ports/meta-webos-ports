@@ -1,6 +1,6 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
-SRCREV = "351893629f08356e3565ecd5dbc62ce15adc276a"
+SRCREV = "43fae27110a93b6d5ec0b4ca9d2b45f3c5277e6c"
 PV = "1.12+git${SRCPV}"
 
 # NOTE: Needed for GPRS provisioning support
@@ -11,6 +11,7 @@ SRC_URI  = " \
   file://ofono \
   file://missing-ssize_t.patch \
   file://0001-Disable-backtrace-cause-linking-to-libdl-fails.patch \
+  file://0001-Revert-unit-Fix-warnings.patch \
   file://ofono.service \
   file://wait-for-rild.sh \
 "
