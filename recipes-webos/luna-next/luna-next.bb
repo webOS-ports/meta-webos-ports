@@ -7,18 +7,14 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 DEPENDS = "qtbase qtdeclarative qtwayland luna-sysmgr-common"
 
 SRC_URI = "git://github.com/webOS-ports/luna-next.git;branch=master;protocol=git"
-SRCREV = "411738b05ff0bb3b553c2035ba1b4ace93e33d6e"
 S = "${WORKDIR}/git"
 
-# For the sake of the webOS build system we need to provide the webOS component version
-# and even a submission number, even if we don't use any.
-WEBOS_COMPONENT_VERSION = "0.1.0"
-WEBOS_SUBMISSION = "0"
-PV = "${WEBOS_COMPONENT_VERSION}+gitr${SRCPV}"
+WEBOS_VERSION = "0.1.0-1_e01fc58642f8b41d6ee36560c7ed8c7de53d0b92"
 
 inherit webos_component
 inherit webos_daemon
 inherit webos_system_bus
+inherit webos_enhanced_submissions
 
 # We need to warrant the correct order for the following two inherits as webos_cmake is
 # setting the build dir to be outside of the source dir which is overriden by cmake_qt5
