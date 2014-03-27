@@ -4,7 +4,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=e6a600fd5e1d9cbde2d983680233ad02"
 
 DEPENDS += "luna-service2"
 
-WEBOS_VERSION = "0.1.0-2_3c94bafac143f464da24501ee70f2d90472417fc"
+WEBOS_VERSION = "0.1.0-3_da907470c061be078684508bc0a845ceba59a00d"
 
 inherit webos_component
 inherit webos_public_repo
