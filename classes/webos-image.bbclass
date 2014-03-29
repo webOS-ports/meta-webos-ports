@@ -17,9 +17,9 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 #
 # and IMAGE_FEATURES from core-image
 
-PACKAGE_GROUP_webos-extended = "packagegroup-webos-extended"
-PACKAGE_GROUP_webos-test = "packagegroup-webos-test"
-PACKAGE_GROUP_webos-temp = "packagegroup-webos-temp"
+FEATURE_PACKAGES_webos-extended = "packagegroup-webos-extended"
+FEATURE_PACKAGES_webos-test = "packagegroup-webos-test"
+FEATURE_PACKAGES_webos-temp = "packagegroup-webos-temp"
 
 WEBOS_IMAGE_DEFAULT_SSH_IMAGE_FEATURE = "ssh-server-dropbear"
 WEBOS_IMAGE_DEFAULT_FEATURES = "webos-temp package-management"
