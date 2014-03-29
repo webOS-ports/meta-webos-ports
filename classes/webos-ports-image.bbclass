@@ -1,5 +1,5 @@
-PACKAGE_GROUP_webos-ports-extended = "packagegroup-webos-ports-extended"
-PACKAGE_GROUP_webos-ports-development = "packagegroup-webos-ports-development"
+FEATURE_PACKAGES_webos-ports-extended = "packagegroup-webos-ports-extended"
+FEATURE_PACKAGES_webos-ports-development = "packagegroup-webos-ports-development"
 
 WEBOS_PORTS_IMAGE_DEFAULT_FEATURES = "debug-tweaks ssh-server-openssh package-management webos-ports-extended"
 
