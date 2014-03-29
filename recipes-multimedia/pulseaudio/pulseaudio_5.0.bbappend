@@ -7,15 +7,14 @@ SRC_URI += " \
 
 SRC_URI += " \
     file://0001-core-make-dependencies-compile-for-64bit.patch \
-    file://0002-combine-Fix-crash-in-output-freeing.patch \
-    file://0003-build-Install-pulsecore-headers.patch \
-    file://0004-daemon-Set-default-resampler-to-speex-fixed-2.patch \
-    file://0005-bluetooth-Allow-leaving-transport-running-while-sink.patch \
-    file://0006-bluetooth-device-Do-not-lose-transport-pointer-after.patch \
-    file://0007-bluetooth-device-Default-to-using-A2DP-profile-initi.patch \
-    file://0008-module-rescue-streams-Add-parameters-to-define-targe.patch \
-    file://0009-bluetooth-util-Detect-transport-acquire-release-loop.patch \
-    file://0010-suspend-on-idle-Ensure-we-still-time-out-if-a-stream.patch \
+    file://0002-build-Install-pulsecore-headers.patch \
+    file://0003-daemon-Set-default-resampler-to-speex-fixed-2.patch \
+    file://0004-bluetooth-Allow-leaving-transport-running-while-sink.patch \
+    file://0005-bluetooth-device-Do-not-lose-transport-pointer-after.patch \
+    file://0006-bluetooth-device-Default-to-using-A2DP-profile-initi.patch \
+    file://0007-module-rescue-streams-Add-parameters-to-define-targe.patch \
+    file://0008-bluetooth-util-Detect-transport-acquire-release-loop.patch \
+    file://0009-suspend-on-idle-Ensure-we-still-time-out-if-a-stream.patch \
 "
 
 do_install_append() {
