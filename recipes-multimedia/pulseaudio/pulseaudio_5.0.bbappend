@@ -1,16 +1,14 @@
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 SRC_URI += " \
-    file://0020-stream-Return-error-in-case-a-client-peeks-to-early.patch \
-    file://0022-inotify-wrapper-Quit-daemon-if-pid-file-is-removed.patch \
-    file://0023-fixing_snd_mixer_poll_descriptors_count_when_zero.patch \
-    file://0101-alsa-ucm-Make-combination-ports-have-lower-priority.patch \
-    file://0102-combine-Fix-crash-in-output-freeing.patch \
-    file://0103-resampler-Fix-peaks-resampler-s-channel-handling.patch \
-    file://0201-ALSA-Add-extcon-Android-switch-jack-detection.patch \
-    file://0202-dont-probe-ucm.patch \
-    file://0203-card-Add-hook-before-profile-changes.patch \
-    file://0204-Add-module-to-talk-to-the-Android-audio-hal-to-set-u.patch \
+    file://0001-stream-Return-error-in-case-a-client-peeks-to-early.patch \
+    file://0002-inotify-wrapper-Quit-daemon-if-pid-file-is-removed.patch \
+    file://0003-Avoid-abort-when-poll-descriptor-is-0.patch \
+    file://0004-ALSA-Add-extcon-Android-switch-jack-detection.patch \
+    file://0005-alsa-ucm-trust-that-the-person-writing-the-UCM-file-.patch \
+    file://0006-card-Add-hook-before-profile-changes.patch \
+    file://0007-Add-module-to-talk-to-the-Android-audio-hal-to-set-u.patch \
+    file://0008-alsa-extcon-don-t-use-is_input.patch \
     file://pulseaudio.upstart \
     file://pulseaudio.service \
     file://system.pa \
