@@ -35,6 +35,9 @@ S = "${WORKDIR}/git"
 inherit webos-ports-submissions
 SRCREV = "b951cbc3f824e76d3a631d345ca0759d6e18c75d"
 
+# only for oe-core/master with systemd-210+
+SRC_URI += "file://0001-CMakeLists-check-only-for-libsystemd-pkg.patch"
+
 # This fix-up will be removed shortly. luna-service2 headers must be included
 # using '#include <luna-service2/*.h>'
 do_install_append() {
