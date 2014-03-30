@@ -38,6 +38,9 @@ PACKAGECONFIG[test] = "-DWEBOS_CONFIG_BUILD_TESTS:BOOL=True,,gtest boost,bash"
 inherit webos-ports-submissions
 SRCREV = "49d10ca2403e1be06aed58f8841219a078edc067"
 
+# only for oe-core/master with systemd-210+
+SRC_URI += "file://0001-CMakeLists-check-only-for-libsystemd-pkg.patch"
+
 # This fix-up will be removed shortly. luna-service2 headers must be included
 # using '#include <luna-service2/*.h>'
 do_install_append() {
