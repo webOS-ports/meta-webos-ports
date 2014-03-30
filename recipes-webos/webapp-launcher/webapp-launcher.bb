@@ -20,6 +20,12 @@ inherit webos_enhanced_submissions
 inherit webos_system_bus
 
 SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git;branch=master"
+
+# only for builds with oe-core/master with systemd-210+
+SRC_URI += "\
+    file://0003-CMakeLists-check-only-for-libsystemd-pkg.patch \
+"
+
 S = "${WORKDIR}/git"
 
 # We need to warrant the correct order for the following two inherits as webos_cmake is
