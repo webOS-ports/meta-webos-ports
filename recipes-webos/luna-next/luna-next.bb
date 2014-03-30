@@ -7,6 +7,8 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 DEPENDS = "qtbase qtdeclarative qtwayland luna-sysmgr-common"
 
 SRC_URI = "git://github.com/webOS-ports/luna-next.git;branch=master;protocol=git"
+# only for builds with oe-core/master with systemd-210+
+SRC_URI += "file://0001-CMakeLists-check-only-for-libsystemd-pkg.patch"
 S = "${WORKDIR}/git"
 
 WEBOS_VERSION = "0.1.0-12_6ad5a8a9e39616b3ef65b1ec972daaa72000eed9"
