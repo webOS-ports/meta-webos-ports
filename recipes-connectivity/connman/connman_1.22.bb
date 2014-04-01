@@ -1,4 +1,4 @@
-require recipes-connectivity/connman/connman.inc
+require connman.inc
 
 FILESEXTRAPATHS_prepend := "${COREBASE}/meta/recipes-connectivity/${BPN}/${BPN}:"
 
