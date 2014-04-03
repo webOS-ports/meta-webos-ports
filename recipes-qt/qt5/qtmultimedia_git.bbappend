@@ -8,3 +8,5 @@ SRCREV = "ba3f60d6d786f5f1842e7dc176d1f7ce7cf47e56"
 # Sadly we have to pass this here in order to make the new gstreamer 1.0/0.10 detection
 # algorithm work after we modified it in qtmultimedia.inc which we can't revert here ..
 EXTRA_QMAKEVARS_PRE += "CONFIG+=OE_GSTREAMER010_ENABLED"
+
+DEPENDS += "gstreamer1.0 gstreamer1.0-plugins-base"
