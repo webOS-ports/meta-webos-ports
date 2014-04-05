@@ -9,7 +9,7 @@ DEPENDS = "qtbase qtdeclarative qtwayland luna-sysmgr-common"
 SRC_URI = "git://github.com/webOS-ports/luna-next.git;branch=master;protocol=git"
 S = "${WORKDIR}/git"
 
-WEBOS_VERSION = "0.1.0-1_e01fc58642f8b41d6ee36560c7ed8c7de53d0b92"
+WEBOS_VERSION = "0.1.0-2_929295ceda66a6e0c3cbbad642d80d448d33cf51"
 
 inherit webos_component
 inherit webos_daemon
@@ -35,4 +35,4 @@ do_install_append() {
 RDEPENDS_${PN} = "luna-next-conf"
 
 FILES_${PN} += "${OE_QMAKE_PATH_QML}/LunaNext"
-FILES_${PN}-dbg += "${OE_QMAKE_PATH_QML}/LunaNext/.debug"
+FILES_${PN}-dbg += "${OE_QMAKE_PATH_QML}/LunaNext/*/.debug"
