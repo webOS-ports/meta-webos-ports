@@ -54,6 +54,7 @@ RDEPENDS_${PN} = " \
   luna-next-cardshell \
   luna-sysmgr \
   luna-sysmgr-conf \
+  luna-appmanager \
   \
   webos-system-update \
   \
