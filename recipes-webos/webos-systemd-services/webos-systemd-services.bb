@@ -7,7 +7,7 @@ PV = "1.0+gitr${SRCPV}"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 SRC_URI = "git://github.com/webOS-ports/webos-systemd-services.git;branch=master;protocol=git"
-SRCREV = "2b38de36845b085ea8dd04d9f8ba39958bd2ece1"
+SRCREV = "a32d930289a459987a1c9592161c9fbed8a1edf6"
 S = "${WORKDIR}/git"
 
 inherit systemd
@@ -22,6 +22,7 @@ SYSTEMD_SERVICE_${PN} = " \
     ls-hubd_public.service \
     LunaSysService.service \
     LunaSysMgr.service \
+    LunaAppManager.service \
     org.webosinternals.ipkgservice.service \
     PmKLogDaemon.service \
     PmLogDaemon.service \
