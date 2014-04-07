@@ -4,6 +4,7 @@ FILESEXTRAPATHS_prepend := "${THISDIR}/${BPN}:"
 SRC_URI += " \
     file://wired-setup \
     file://environment.conf \
+    file://main.conf \
 "
 
 do_install_append() {
@@ -15,6 +16,7 @@ do_install_append() {
 
     install -d ${D}${sysconfdir}/connman
     install -m 0644 ${WORKDIR}/environment.conf ${D}${sysconfdir}/connman/
+    install -m 0644 ${WORKDIR}/main.conf ${D}${sysconfdir}/connman/
 }
 
-FILES_${PN} += "${sysconfdir}/connman/environment.conf"
+FILES_${PN} += "${sysconfdir}/connman"
