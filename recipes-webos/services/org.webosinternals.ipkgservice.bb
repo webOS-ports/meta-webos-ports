@@ -39,38 +39,8 @@ pkg_postinst_${PN}() {
         rm -f $APPS/${sysconfdir}/opkg/arch.conf
         cp ${sysconfdir}/opkg/arch.conf $APPS/${sysconfdir}/opkg/arch.conf
 
-        # Install optware feeds
-        echo "src/gz optware http://ipkg.preware.org/feeds/optware/all" > $APPS/${sysconfdir}/opkg/optware.conf
-        echo "src/gz optware-`/bin/uname -m` http://ipkg.preware.org/feeds/optware/`/bin/uname -m`" >> $APPS/${sysconfdir}/opkg/optware.conf
-        sed -i -e 's|armv7l|armv7|g' $APPS/${sysconfdir}/opkg/optware.conf
-
-        # Install webosinternals feeds
-        echo "src/gz webosinternals http://ipkg.preware.org/feeds/webos-internals/all" > $APPS/${sysconfdir}/opkg/webos-internals.conf
-        echo "src/gz webosinternals-`/bin/uname -m` http://ipkg.preware.org/feeds/webos-internals/`/bin/uname -m`" >> $APPS/${sysconfdir}/opkg/webos-internals.conf
-        sed -i -e 's|armv7l|armv7|g' $APPS/${sysconfdir}/opkg/webos-internals.conf
-
-        # Retain disabled status of existing feeds
-        if [ "`ls $APPS/${sysconfdir}/opkg/*.disabled`" ] ; then
-          for f in $APPS/${sysconfdir}/opkg/*.disabled ; do
-            if [ -f $APPS/${sysconfdir}/opkg/`basename $f .disabled` ] ; then
-              rm -f $f
-              mv $APPS/${sysconfdir}/opkg/`basename $f .disabled` $f
-            fi
-          done
-        fi
-
-        # Assert disabled status of new feeds
-        if [ "`ls $APPS/${sysconfdir}/opkg/*.new`" ] ; then
-          for f in $APPS/${sysconfdir}/opkg/*.new ; do
-            if [ -f $APPS/${sysconfdir}/opkg/`basename $f .new` ] ; then
-              rm -f $APPS/${sysconfdir}/opkg/`basename $f .new`
-              mv $f $APPS/${sysconfdir}/opkg/`basename $f .new`
-            else
-              rm -f $APPS/${sysconfdir}/opkg/`basename $f .new`.disabled
-              mv $f $APPS/${sysconfdir}/opkg/`basename $f .new`.disabled
-            fi
-          done
-        fi
+        # Install webosports all-arch feeds
+        echo "src/gz webosports http://feeds.webos-ports.org/webos-ports/all" > $APPS/${sysconfdir}/opkg/webos-ports.conf
     else
         exit 1
     fi
