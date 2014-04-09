@@ -8,16 +8,11 @@ inherit webos_arch_indep
 
 PV = "3.0.1+gitr${SRCPV}"
 
-SRCREV = "8183f1cc70e5a1e05a60e57198d22912bd210d73"
-SRC_URI = " \
-    git://github.com/webos-internals/tweaks;protocol=git;branch=master \
-    file://0001-Fix-service-path.patch \
-"
+SRCREV = "7f7bea656b2c881ff4363b88cdc56d276df416d3"
+SRC_URI = "git://github.com/webOS-ports/tweaks;protocol=git;branch=master"
 S = "${WORKDIR}/git"
 
-do_configure() {
-    # Drop makefile to be sure it's not executed
-    rm ${S}/Makefile
+do_compile() {
 }
 
 do_install() {
@@ -26,6 +21,20 @@ do_install() {
 
     install -d ${D}${webos_servicesdir}/org.webosinternals.tweaks.prefs
     cp -rv ${S}/node-service/* ${D}${webos_servicesdir}/org.webosinternals.tweaks.prefs
+
+    # Install service configuration
+    mkdir -p ${D}${webos_sysbus_prvrolesdir}
+    cp ${D}${webos_servicesdir}/org.webosinternals.tweaks.prefs/org.webosinternals.tweaks.prefs.json \
+        ${D}${webos_sysbus_prvrolesdir}
+    mkdir -p ${D}${webos_sysbus_pubrolesdir}
+    cp ${D}${webos_servicesdir}/org.webosinternals.tweaks.prefs/org.webosinternals.tweaks.prefs.json \
+        ${D}${webos_sysbus_pubrolesdir}
+    mkdir -p ${D}${webos_sysbus_prvservicesdir}
+    cp ${D}${webos_servicesdir}/org.webosinternals.tweaks.prefs/org.webosinternals.tweaks.prefs.service \
+        ${D}${webos_sysbus_prvservicesdir}
+    mkdir -p ${D}${webos_sysbus_pubservicesdir}
+    cp ${D}${webos_servicesdir}/org.webosinternals.tweaks.prefs/org.webosinternals.tweaks.prefs.service \
+        ${D}${webos_sysbus_pubservicesdir}
 
     install -d ${D}${webos_sysconfdir}/db/kinds
     install -m 0644 ${S}/node-service/configuration/db/kinds/* ${D}${webos_sysconfdir}/db/kinds
@@ -38,4 +47,8 @@ PACKAGES = "${PN}"
 FILES_${PN} = " \
     ${webos_applicationsdir}/org.webosinternals.tweaks \
     ${webos_servicesdir}/org.webosinternals.tweaks.prefs \
-    ${webos_sysconfdir}"
+    ${webos_sysconfdir} \
+    ${webos_sysbus_prvrolesdir} \
+    ${webos_sysbus_pubrolesdir} \
+    ${webos_sysbus_prvservicesdir} \
+    ${webos_sysbus_pubservicesdir}"
