@@ -7,9 +7,9 @@ inherit webos_public_repo
 inherit webos_arch_indep
 inherit webos_system_bus
 
-PV = "0.2.3+gitr${SRCPV}"
+PV = "0.2.4+gitr${SRCPV}"
 
-SRCREV = "f141b9560e0999bd2ef1a9c2985f96d9f0045aa6"
+SRCREV = "525d1590de4888a3bc189919a597ad603
 SRC_URI = "git://github.com/webOS-ports/org.webosports.service.contacts.carddav;protocol=git;branch=master"
 S = "${WORKDIR}/git"
 
@@ -33,6 +33,9 @@ do_install() {
 
     install -d ${D}${webos_accttemplatesdir}/org.webosports.cdav.account.google.contacts
     cp -vrf ${S}/accounts-google-contacts/* ${D}${webos_accttemplatesdir}/org.webosports.cdav.account.google.contacts
+
+    install -d ${D}${webos_accttemplatesdir}/org.webosports.cdav.account.icloud
+    cp -vrf ${S}/accounts-icloud/* ${D}${webos_accttemplatesdir}/org.webosports.cdav.account.icloud
 
     # account creation application
     install -d ${D}${webos_applicationsdir}/org.webosports.cdav.app
