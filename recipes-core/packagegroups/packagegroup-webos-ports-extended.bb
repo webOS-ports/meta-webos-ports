@@ -40,6 +40,7 @@ RDEPENDS_${PN} = " \
   fingerterm \
   \
   ca-certificates \
+  pmcertificatemgr \
   \
   qtwayland \
   qtwayland-plugins \
