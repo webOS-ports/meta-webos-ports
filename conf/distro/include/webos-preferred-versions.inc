@@ -33,3 +33,13 @@ PREFERRED_VERSION_yajl ?= "1.0.12"
 
 PREFERRED_VERSION_qtwebkit = "5.2.1+git%"
 PREFERRED_VERSION_qtmultimedia = "5.2.1+git%"
+
+# We need to stick to 2.17 here as qtmultimedia/gstreamer/pulseaudio have problems with
+# newer versions. The problem only occurs with the combination of all three components.
+# See http://lists.openembedded.org/pipermail/openembedded-core/2013-August/083171.html
+# for the details
+PREFERRED_VERSION_eglibc-locale = "2.17"
+PREFERRED_VERSION_eglibc-mtrace = "2.17"
+PREFERRED_VERSION_eglibc-scripts = "2.17"
+PREFERRED_VERSION_eglibc-initial = "2.17"
+PREFERRED_VERSION_eglibc = "2.17"
