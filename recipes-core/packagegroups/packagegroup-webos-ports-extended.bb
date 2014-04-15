@@ -41,6 +41,7 @@ RDEPENDS_${PN} = " \
   \
   ca-certificates \
   pmcertificatemgr \
+  certmgrd \
   \
   qtwayland \
   qtwayland-plugins \
