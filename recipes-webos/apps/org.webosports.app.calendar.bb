@@ -7,6 +7,7 @@ inherit webos_public_repo
 inherit webos_arch_indep
 inherit webos_enyojs_application
 inherit webos_cordova_application
+inherit webos_application
 
 PV = "0.0.1+gitr${SRCPV}"
 
