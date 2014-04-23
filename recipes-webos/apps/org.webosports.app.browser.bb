@@ -12,7 +12,7 @@ RDEPENDS_${PN} = " \
     qtwebkit-qmlplugins \
 "
 
-SRCREV = "7a147f5a8aed46c7a7edbae718ced1870bd94d85"
+SRCREV = "ef3f9c48bab84751d0237009e6d1f0ac4e669025"
 SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git;branch=master"
 S = "${WORKDIR}/git"
 
