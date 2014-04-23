@@ -68,6 +68,7 @@ RDEPENDS_${PN} = " \
   gstreamer1.0-plugins-good-meta \
   gstreamer1.0-plugins-bad-meta \
   gstreamer1.0-plugins-ugly-meta \
+  gstreamer1.0-libav \
   \
   node-sqlite3 \
   node-dbus \
