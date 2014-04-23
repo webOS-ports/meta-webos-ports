@@ -5,10 +5,11 @@ LIC_FILES_CHKSUM = "file://Source/WebCore/rendering/RenderApplet.h;endline=22;md
                     file://Source/WebKit/gtk/webkit/webkit.h;endline=21;md5=b4fbe9f4a944f1d071dba1d2c76b3351 \
                     file://Source/JavaScriptCore/parser/Parser.h;endline=23;md5=1bd6945867ba62f5a6405bf97a7ee440"
 
-DEPENDS += "luna-service2 qtmultimedia"
-# We're using qtmultimedia as default audio/video backend instead of the direct gstreamer
-# use
-RDEPENDS_${PN} += "qtmultimedia"
+DEPENDS += "luna-service2"
 
-SRC_URI = "git://github.com/webOS-ports/qtwebkit;branch=webOS-ports/master;protocol=git"
-SRCREV = "fe0a1bdfdcdc698a23fe262e5e4b6a80bba60399"
+# Don't use qtmultimedia which is set by default PACKAGECONFIG
+PACKAGECONFIG = "gstreamer qtlocation qtsensors"
+
+SRC_URI = "git://github.com/webOS-ports/qtwebkit;branch=webOS-ports/master;protocol=git \
+           file://enable-needed-features.patch"
+SRCREV = "398a09a6ce7d3b5869bd7d9537cfd50fb548015c"
