@@ -11,12 +11,13 @@ RDEPENDS_${PN} += " \
     luna-next \
 "
 
-WEBOS_VERSION = "0.1.0-13_368ef6521c979fa9381ba816dc32d4a985998a97"
+WEBOS_VERSION = "0.1.0-14_bae00f0d8894fb375f03eb91f48003c5929810d0"
 
 inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake
+inherit webos_tweaks
 
 SRC_URI = "git://github.com/webOS-ports/luna-next-cardshell.git;branch=master;protocol=git"
 S = "${WORKDIR}/git"
