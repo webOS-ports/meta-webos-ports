@@ -1,4 +1,4 @@
-# Copyright (c) 2013-2014 LG Electronics, Inc.
+# Copyright (c) 2013 LG Electronics, Inc.
 
 inherit update-alternatives
 ALTERNATIVE_${PN} = "openssl-cnf"
