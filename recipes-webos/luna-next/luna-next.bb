@@ -32,7 +32,7 @@ do_install_append() {
     install -m 0644 ${S}/files/systemd/luna-next.service ${D}${systemd_unitdir}/system/
 }
 
-RDEPENDS_${PN} = "luna-next-conf"
+RDEPENDS_${PN} = "luna-next-conf xkeyboard-config"
 
 FILES_${PN} += "${OE_QMAKE_PATH_QML}/LunaNext"
 FILES_${PN}-dbg += " \
