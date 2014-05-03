@@ -62,6 +62,7 @@ RDEPENDS_${PN} = " \
   webos-systemd-services \
   \
   audio-service \
+  webos-systemsounds \
   mediaindexer \
   \
   gstreamer1.0-plugins-base-meta \
