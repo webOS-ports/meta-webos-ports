@@ -28,7 +28,8 @@ require conf/distro/include/webos-sdk.inc
 
 # It is expected that other distros will override these definitions.
 WEBOS_PORTS_CODENAME = "ports"
-WEBOS_DISTRO_PLATFORM_CODENAME ?= "${DISTRO}-${WEBOS_PORTS_CODENAME}"
+# WEBOS_DISTRO_PLATFORM_CODENAME ?= "${DISTRO}-${WEBOS_PORTS_CODENAME}"
+WEBOS_DISTRO_PLATFORM_CODENAME ?= "luneos"
 WEBOS_DISTRO_VERSION_CODENAME ?= "affogato"
 # WEBOS_DISTRO_VERSION_CODENAME ?= "${@base_get_metadata_git_branch('.', None).strip().translate(None, '()/')}"
 WEBOS_DISTRO_RELEASE_CODENAME ?= "${WEBOS_DISTRO_PLATFORM_CODENAME}${@ base_conditional( 'WEBOS_DISTRO_VERSION_CODENAME', '', '', '-${WEBOS_DISTRO_VERSION_CODENAME}', d) }"
