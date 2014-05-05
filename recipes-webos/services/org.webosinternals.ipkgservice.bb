@@ -5,17 +5,15 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=eb723b61539feef013de476e68b5c50a"
 
 DEPENDS = "luna-service2 glib-2.0 mjson"
 
+WEBOS_VERSION = "2.0.0-1_a0cb3142b02d133fad3356a21b6b9d1ae52425ff"
+
 inherit webos_component
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit webos_daemon
 inherit webos_system_bus
 
-WEBOS_COMPONENT_VERSION = "2.0.0"
-PV = "${WEBOS_COMPONENT_VERSION}+git${SRCPV}"
-WEBOS_SUBMISSION = "0"
-
-SRCREV = "633d567ce2e55f328c3f0dc1e5034923394a9eae"
 SRC_URI = "git://github.com/webOS-ports/preware;protocol=git;branch=master"
 S = "${WORKDIR}/git/oe-service"
 
