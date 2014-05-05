@@ -51,6 +51,11 @@ do_install() {
     rm -rf ${D}${sysconfdir}/palm/db/permissions/com.palm.note
     rm -rf ${D}${sysconfdir}/palm/db/kinds/com.palm.note
     rm -rf ${D}${webos_applicationsdir}/com.palm.app.calculator
+    rm -rf ${D}${webos_applicationsdir}/com.palm.app.clock
+    # NOTE we have to drop the contacts and calendar app here as we still need their db8
+    # configurations
+    rm -rf ${D}${webos_applicationsdir}/com.palm.app.contacts
+    rm -rf ${D}${webos_applicationsdir}/com.palm.app.calendar
 }
 
 FILES_${PN} += "${webos_applicationsdir} ${webos_sysconfdir}"
