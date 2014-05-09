@@ -34,3 +34,5 @@ PACKAGES =+ "${PN}-tests"
 
 FILES_${PN}-tests = "${libdir}/${PN}/tests/*"
 FILES_${PN}-dbg += "${libdir}/${PN}/tests/.debug"
+
+SRC_URI += "file://0001-Add-com.palm.mediapermissions-service-as-admin-for-m.patch"
