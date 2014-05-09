@@ -11,7 +11,7 @@ SRCREV = "c4fc6d761deb548b492735683efed1718935ed71"
 
 do_install() {
     install -d ${D}${datadir}/systemsounds
-    cp -rv ${S}/share/systemsounds ${D}${datadir}/systemsounds
+    cp -rv ${S}/share/systemsounds/* ${D}${datadir}/systemsounds
 }
 
 FILES_${PN} += "${datadir}/systemsounds"
