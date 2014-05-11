@@ -4,7 +4,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263"
 
 PV = "1.0.3+gitr${SRCPV}"
 
-DEPENDS = "qtbase"
+DEPENDS = "qtbase qtdeclarative"
 
 SRC_URI = " \
     git://github.com/webOS-ports/fingerterm.git;protocol=git;branch=webOS-ports/master \
