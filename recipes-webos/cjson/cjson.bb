@@ -19,8 +19,10 @@ EXTRA_OECONF += "--disable-static"
 
 EXTRA_OEMAKE += "all"
 
+# autotools-brokensep (autogen calls autoreconf in $B)
+B = "${S}"
 do_configure_prepend() {
     # Force a configure to happen
     rm -f ${S}/config.status
-    sh autogen.sh
+    sh ${S}/autogen.sh
 }
