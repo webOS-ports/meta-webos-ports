@@ -16,6 +16,6 @@ inherit autotools
 inherit qmake5_paths
 
 do_configure_append() {
-    sed -i -e s:/usr/bin/qt5/uic:${OE_QMAKE_PATH_EXTERNAL_HOST_BINS}/uic:g ${S}/Makefile
-    sed -i -e s:/usr/bin/qt5/moc:${OE_QMAKE_PATH_EXTERNAL_HOST_BINS}/moc:g ${S}/Makefile
+    sed -i -e s:/usr/bin/qt5/uic:${OE_QMAKE_PATH_EXTERNAL_HOST_BINS}/uic:g ${B}/Makefile
+    sed -i -e s:/usr/bin/qt5/moc:${OE_QMAKE_PATH_EXTERNAL_HOST_BINS}/moc:g ${B}/Makefile
 }
