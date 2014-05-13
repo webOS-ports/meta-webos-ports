@@ -31,8 +31,8 @@ do_install() {
     install -d ${D}${webos_accttemplatesdir}/org.webosports.cdav
     cp -vrf ${S}/accounts-enyo/* ${D}${webos_accttemplatesdir}/org.webosports.cdav
 
-    install -d ${D}${webos_accttemplatesdir}/org.webosports.cdav.account.google.contacts
-    cp -vrf ${S}/accounts-google-contacts/* ${D}${webos_accttemplatesdir}/org.webosports.cdav.account.google.contacts
+    install -d ${D}${webos_accttemplatesdir}/org.webosports.cdav.account.google
+    cp -vrf ${S}/accounts-google/* ${D}${webos_accttemplatesdir}/org.webosports.cdav.account.google
 
     install -d ${D}${webos_accttemplatesdir}/org.webosports.cdav.account.icloud
     cp -vrf ${S}/accounts-icloud/* ${D}${webos_accttemplatesdir}/org.webosports.cdav.account.icloud
