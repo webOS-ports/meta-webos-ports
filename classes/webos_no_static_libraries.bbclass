@@ -13,12 +13,15 @@
 
 # Needed by numerous components:
 WEBOS_NO_STATIC_LIBRARIES_WHITELIST_pn-eglibc = "libc_nonshared.a libpthread_nonshared.a"
+WEBOS_NO_STATIC_LIBRARIES_WHITELIST_pn-nativesdk-eglibc = "libc_nonshared.a libpthread_nonshared.a"
 # Needed by numerous components:
 WEBOS_NO_STATIC_LIBRARIES_WHITELIST_pn-libgcc = "libgcc.a"
 # Needed by busybox:
 WEBOS_NO_STATIC_LIBRARIES_WHITELIST_pn-libgcc += "libgcc_eh.a"
-# Needed by dhcp (svtest):
-WEBOS_NO_STATIC_LIBRARIES_WHITELIST_pn-bind = "libdns.a libisc.a"
+# Needed by numerous components:
+WEBOS_NO_STATIC_LIBRARIES_WHITELIST_pn-libgcc-initial = "libgcc.a"
+# Needed by dhcp (svtest), libirs and libisccfg is needed by for 4.3.0 dhcp version:
+WEBOS_NO_STATIC_LIBRARIES_WHITELIST_pn-bind = "libdns.a libisc.a libirs.a libisccfg.a"
 
 # Needed by libpam (fails to find yywrap symbol)
 WEBOS_NO_STATIC_LIBRARIES_WHITELIST_pn-flex = "libfl.a"
