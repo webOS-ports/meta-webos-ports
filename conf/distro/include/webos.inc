@@ -9,7 +9,6 @@ require conf/distro/include/webos-preferred-versions.inc
 require conf/distro/include/webos-features.inc
 require conf/distro/include/webos-toolchain.inc
 require conf/distro/include/webos-sdk.inc
-require conf/distro/include/webos-icecc-components-exclusion.inc
 
 
 #
@@ -72,16 +71,6 @@ BB_HASHBASE_WHITELIST_append = " WEBOS_IMAGE_NAME_SUFFIX"
 # as the "build configuration".
 BUILDCFG_VARS += "WEBOS_DISTRO_RELEASE_CODENAME WEBOS_DISTRO_BUILD_ID"
 
-
-# Apply fix from oe-core commit 89d7d46947d9bb8c7bf568c65e52d5bbe159027f
-# Drop zlib-native when upgrading oe-core to 1.6 release or newer
-DEPENDS_pn-cracklib-native_class-native = "zlib-native ${DEPENDS_GETTEXT}"
-
-# Drop virtual/kernel build-time dependency
-# Drop this when upgrading oe-core to 1.6 release or newer with this change:
-# http://lists.openembedded.org/pipermail/openembedded-core/2013-November/086514.html
-DEPENDS_pn-packagegroup-core-boot = ""
-
 # Build time dependency on TUNE_PKGARCH recipes base-passwd, shadow, shadow-sysroot
 # Drop this when upgrading oe-core to 1.6 release or newer with this change:
 # http://lists.openembedded.org/pipermail/openembedded-core/2013-November/085849.html
@@ -128,14 +117,6 @@ OVERRIDES[vardepsexclude] += "WEBOS_EXTRA_MACHINEOVERRIDES"
 
 INHERIT_DISTRO ?= "debian devshell sstate license buildstats buildstats-summary webos_base webos_no_static_libraries"
 
-# Inherit icecc here, so that all builders have the same sstate signatures
-INHERIT_DISTRO += "icecc"
-# and then disable its function by default (so that people still need to explicity
-# enable it in webos-local.conf if they have configured icecc and want to use it.
-# You need to set _empty_ value in webos-local.conf to enable icecc function:
-# ICECC_DISABLED = ""
-ICECC_DISABLED ??= "1"
-
 WARN_QA_append = " version-going-backwards webos-enh-sub-warning"
 WEBOS_ERROR_QA_AUTOREV ?= "webos-enh-sub-autorev-error"
 ERROR_QA_append = " webos-enh-sub-error ${WEBOS_ERROR_QA_AUTOREV}"
@@ -148,12 +129,6 @@ WEBOS_TARGET_CORE_OS ?= "rockhopper"
 WEBOS_TARGET_MACHINE_IMPL ?= "device"
 # For qemu we build for the emulator but for all other targets for a real device
 WEBOS_TARGET_MACHINE_IMPL_qemuall = "emulator"
-
-# Drop this when upgrading oe-core to 1.6 release or newer, with this fix:
-# http://lists.openembedded.org/pipermail/openembedded-core/2013-November/087115.html
-# Assign vardepvalue, because otherwise signature is changed before and after
-# perl is built (from None to real version in config.sh).
-get_perl_version[vardepvalue] = "${PERL_OWN_DIR}"
 
 # The Open webOS distro is packaged into these image types:
 IMAGE_FSTYPES ?= "tar.gz"
@@ -172,14 +147,6 @@ PATH_prepend = "${WEBOS_EXTRA_PATH}"
 
 EXTRAOPKGCONFIG = ""
 OPKGLIBDIR_forcevariable := "${libdir}"
-
-# Ensure that git checkout files have the same permissions when do_unpack
-# is executed on builders with different umask.
-# Drop this when upgrading oe-core to 1.6 release or newer, with this fix:
-# http://lists.openembedded.org/pipermail/openembedded-core/2013-November/086881.html
-# For details see:
-# https://bugzilla.yoctoproject.org/show_bug.cgi?id=5590
-do_unpack[umask] = "022"
 
 # Redirect console output to keep it from spewing all over the VirtualBox window
 # (This is added to qemux86 kernel cmdline by openembedded-core/meta/classes/syslinux.bbclass)
