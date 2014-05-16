@@ -9,7 +9,6 @@ require conf/distro/include/webos-preferred-versions.inc
 require conf/distro/include/webos-features.inc
 require conf/distro/include/webos-toolchain.inc
 require conf/distro/include/webos-sdk.inc
-require conf/distro/include/webos-icecc-components-exclusion.inc
 
 
 #
@@ -148,14 +147,6 @@ MACHINEOVERRIDES[vardepsexclude] += "WEBOS_EXTRA_MACHINEOVERRIDES"
 OVERRIDES[vardepsexclude] += "WEBOS_EXTRA_MACHINEOVERRIDES"
 
 INHERIT_DISTRO ?= "debian devshell sstate license buildstats-summary webos_base webos_no_static_libraries"
-
-# Inherit icecc here, so that all builders have the same sstate signatures
-INHERIT_DISTRO += "icecc"
-# and then disable its function by default (so that people still need to explicity
-# enable it in webos-local.conf if they have configured icecc and want to use it.
-# You need to set _empty_ value in webos-local.conf to enable icecc function:
-# ICECC_DISABLED = ""
-ICECC_DISABLED ??= "1"
 
 # Remove version-going-backwards from ERROR_QA when oe-core is upgraded to include:
 # http://lists.openembedded.org/pipermail/openembedded-core/2013-August/082351.html
