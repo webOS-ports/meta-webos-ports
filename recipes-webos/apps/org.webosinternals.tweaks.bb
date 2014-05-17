@@ -8,7 +8,7 @@ inherit webos_arch_indep
 
 PV = "3.0.1+gitr${SRCPV}"
 
-SRCREV = "056da00454eec292c32476c5d607b80cb0a3751a"
+SRCREV = "21c8072380c6d249a85dff84b8557fa8860099de"
 SRC_URI = "git://github.com/webOS-ports/tweaks;protocol=git;branch=master"
 S = "${WORKDIR}/git"
 
