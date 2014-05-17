@@ -9,7 +9,7 @@ inherit webos_system_bus
 
 PV = "0.3.0+gitr${SRCPV}"
 
-SRCREV = "d7c050f9673dac0489a63e1cf69f058c2d195c30"
+SRCREV = "5f3dd6dcc5e0d1d7fd02d2b74ba4a8eaa8b3a441"
 SRC_URI = "git://github.com/webOS-ports/org.webosports.service.contacts.carddav;protocol=git;branch=master"
 S = "${WORKDIR}/git"
 
