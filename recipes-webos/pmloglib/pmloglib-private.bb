@@ -5,7 +5,7 @@ SECTION = "webos/libs"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-WEBOS_VERSION = "3.0.2-49_3cba3ec7ce82beb8b059ffd5a737d3881e329e5b"
+WEBOS_VERSION = "3.1.0-52_351d8fc488337aee2b3261f02adcb7a377bb78f1"
 
 inherit webos_component
 inherit webos_public_repo
@@ -21,3 +21,7 @@ EXTRA_OECMAKE += "-DBUILD_PRIVATE=ON"
 WEBOS_REPO_NAME = "pmloglib"
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
+
+# Due to the nature of pmloglib-private the ${PN} package will be empty but is required
+# as dependency for pmlogdaemon-dev
+ALLOW_EMPTY_${PN} = "1"
