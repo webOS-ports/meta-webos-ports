@@ -19,7 +19,7 @@ do_install() {
     # the service itself
     install -d ${D}${webos_servicesdir}/com.palm.keymanager
     cp -rv ${S}/service/* ${D}${webos_servicesdir}/com.palm.keymanager
-    rm -rf ${D}${webos_servicesdir}/org.webosports.cdav.service/sysbus
+    rm -rf ${D}${webos_servicesdir}/com.palm.keymanager/sysbus
 }
 
 FILES_${PN} += "${webos_servicesdir}"
