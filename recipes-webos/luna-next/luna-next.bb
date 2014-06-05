@@ -9,7 +9,7 @@ DEPENDS = "qtbase qtdeclarative qtwayland luna-sysmgr-common"
 SRC_URI = "git://github.com/webOS-ports/luna-next.git;branch=master;protocol=git"
 S = "${WORKDIR}/git"
 
-WEBOS_VERSION = "0.1.0-4_6153a76c3d8b0a414aa1aa089cbcce19667c2bea"
+WEBOS_VERSION = "0.1.0-6_e4566ab9c5f8c86bd8bcec8a713d2ed172454c96"
 
 inherit webos_component
 inherit webos_daemon

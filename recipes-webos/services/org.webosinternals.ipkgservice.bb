@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=eb723b61539feef013de476e68b5c50a"
 
 DEPENDS = "luna-service2 glib-2.0 mjson"
 
-WEBOS_VERSION = "2.0.0-1_a0cb3142b02d133fad3356a21b6b9d1ae52425ff"
+WEBOS_VERSION = "2.0.0-2_b903f683da06760762fbd5afd926b52613e64631"
 
 inherit webos_component
 inherit webos_public_repo
