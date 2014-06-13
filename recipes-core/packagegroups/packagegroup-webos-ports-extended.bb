@@ -13,6 +13,7 @@ RDEPENDS_${PN} = " \
   wireless-tools \
   udev-extraconf \
   alsa-conf \
+  tar \
   \
   \
   webos-connman-adapter \
@@ -91,6 +92,7 @@ LIBHYBRIS_RDEPENDS = " \
 RDEPENDS_${PN}_append_tuna = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS_${PN}_append_grouper = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS_${PN}_append_mako = " ${LIBHYBRIS_RDEPENDS}"
+RDEPENDS_${PN}_append_tenderloin = " ${LIBHYBRIS_RDEPENDS}"
 
 QEMU_RDEPENDS = " \
     libegl-gallium \
