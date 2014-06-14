@@ -2,7 +2,7 @@ DESCRIPTION = "Generate needed tokens for Open webOS on device boot"
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COREBASE}/meta/COPYING.MIT;md5=3da9cfbcb788c80a0384361b4de20420"
 
-COMPATIBLE_MACHINE = "tuna|grouper|mako"
+COMPATIBLE_MACHINE = "tuna|grouper|mako|tenderloin"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 SRC_URI = " \
