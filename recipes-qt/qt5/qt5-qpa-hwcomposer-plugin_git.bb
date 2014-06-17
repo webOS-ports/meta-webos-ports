@@ -9,7 +9,7 @@ PV = "5.2.0+gitr${SRCPV}"
 DEPENDS = "qtbase libhybris qtwayland"
 
 SRC_URI = "git://github.com/webOS-ports/qt5-qpa-hwcomposer-plugin.git;branch=webOS-ports/master;protocol=git"
-SRCREV = "58e4447c389e74abe3bfd6823c8db33e6bfe8ec6"
+SRCREV = "d2b4f01af718600e34764c68f415016ae4e89b6e"
 S = "${WORKDIR}/git/hwcomposer"
 
 inherit qmake5
