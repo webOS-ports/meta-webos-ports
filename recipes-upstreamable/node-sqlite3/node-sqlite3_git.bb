@@ -7,7 +7,10 @@ DEPENDS = "node-gyp-native sqlite3"
 
 PV = "2.2.0+gitr${SRCPV}"
 
-SRC_URI = "git://github.com/mapbox/node-sqlite3.git;branch=master;protocol=git"
+SRC_URI = " \
+    git://github.com/mapbox/node-sqlite3.git;branch=master;protocol=git \
+    file://no-node-pre-gyp.patch \
+"
 SRCREV = "c4dff8b95c599508381b9c09678789cb219ea051"
 S = "${WORKDIR}/git"
 
@@ -24,8 +27,9 @@ do_compile() {
 }
 
 do_install() {
-    install -d ${D}${libdir}/nodejs
+    install -d ${D}${libdir}/nodejs/sqlite3
     install ${S}/build/Release/node_sqlite3.node ${D}${libdir}/nodejs/
+    install ${S}/lib/sqlite3.js ${D}${libdir}/nodejs/sqlite3/
 }
 
 FILES_${PN} += "${libdir}/nodejs"
