@@ -33,5 +33,4 @@ UPDATERCD_class-target = ""
 # Use --no-vmlinux option to opcontrol or install it manually if you need to see samples from kernel
 BAD_RECOMMENDATIONS_append_qemux86 = " kernel-vmlinux"
 
-# We're basing our efforts on the phablet headers
-PREFERRED_PROVIDER_virtual/android-headers = "phablet-headers"
+PREFERRED_PROVIDER_virtual/android-headers = "android-headers"
