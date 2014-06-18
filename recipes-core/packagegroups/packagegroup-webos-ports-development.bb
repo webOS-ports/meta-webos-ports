@@ -22,6 +22,7 @@ RDEPENDS_${PN} = " \
   opkg-utils \
   bc \
   ${VALGRIND} \
+  smemstat \
   \
   alsa-utils-alsamixer \
   alsa-utils-alsactl \
