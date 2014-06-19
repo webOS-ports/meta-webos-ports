@@ -15,5 +15,5 @@ do_compile() {
 }
 
 do_install() {
-    oe_runmake DESTDIR=${D}
+    oe_runmake DESTDIR=${D} install
 }
