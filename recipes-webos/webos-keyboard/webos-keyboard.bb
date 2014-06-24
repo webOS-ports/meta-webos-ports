@@ -37,7 +37,7 @@ EXTRA_QMAKEVARS_PRE = "\
     CONFIG+=enable-hunspell \
 "
 
-INSANE_SKIP_${PN} += "libdir"
+INSANE_SKIP_${PN} += "libdir staticdev"
 INSANE_SKIP_${PN}-dbg += "libdir"
 
 FILES_${PN} += "\
