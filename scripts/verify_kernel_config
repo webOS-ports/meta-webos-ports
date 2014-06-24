@@ -1,0 +1,167 @@
+#!/usr/bin/perl -w
+# Mer Kernel config specification checker
+# http://wiki.merproject.org/wiki/Adaptation_Guide
+
+# CONFIG must be set to one of the permitted values "," seperated and
+# multiple values permitted
+
+# y = set and enabled
+# m = set and module
+# n = must be unset (commented out)
+#
+# "value" = must be set to "value"
+# /regexp/ = "value" which matches regexp
+#
+# ! = Failure will be warned, not errored
+
+# Known issues with the basic parser:
+# * # in regexps or strings cause issues if there's no trailing #
+# * can't have "," in /regexp/
+
+use Text::ParseWords;
+use strict;
+
+my $debug = 0;
+my %config;
+
+while (<DATA>) {
+  next if /^\s*(#.*)?$/ ; # skip comments and blank lines
+  chomp;
+
+  my ($conf, $allowed) = split(' ', $_, 2);
+
+  # Remove and capture any trailing comment (dubious matching here
+  # since comments in a "" or // will be removed too)
+  my $comment;
+  if ($allowed =~ s/(#\s*)(.*)?$//) {
+    $comment = $2 if $2;
+  }
+
+  # http://perldoc.perl.org/Text/ParseWords.html
+  my @allowed = parse_line(",", 1, $allowed);
+
+  my $warning;
+  # Strip leading/trailing space for each value and check for warnings
+  foreach (@allowed) {
+    s/^\s+|\s+$//g;
+    $warning = 1 if $_ eq "!" ;
+  }
+
+  # Each CONFIG_* has an array of allowed values, a comment and a flag
+  # to say it's only a warning (in which case we print the comment)
+  $config{$conf} = {allowed => \@allowed,
+		    comment => $comment,
+		    warning => $warning };
+}
+
+print "\nScanning\n" if $debug;
+while (<>) {
+  next if /^\s*(#.*)?$/ ; # skip comments and blank lines
+  chomp;
+  my ($conf, $value) = split('=', $_, 2);
+
+  # Only check CONFIG_* values we know about
+  next unless $config{$conf};
+
+  my $c = $config{$conf};
+
+  print "$conf matched, checking..." if $debug;
+  $c->{"value"} = $value; # Store the value for later reporting
+
+  my $allowed = $c->{"allowed"};
+  for my $allow (@$allowed) {
+    if (substr($allow,1,1) eq '/') { # regexps
+      print "Do a regex match : \"$value\" =~ $allow\n" if $debug;
+
+    } elsif (substr($allow,1,1) eq '"') { # strings
+      print "Do a string match : $allow == $value\n" if $debug;
+      if ($value eq $allow) {$c->{"valid"} = 1; }
+
+    } else { # plain y/m values
+      print "match y/m : $value == $allow\n" if $debug;
+      if ($value eq $allow) {$c->{"valid"} = 1; }
+    }
+  }
+  if ($c->{"valid"}) { print "OK\n" if $debug;}
+}
+
+print "Results\n" if $debug;
+my $fatal = 0;
+for my $conf (keys %config) {
+  my $c = $config{$conf};
+
+  if (! $c->{"valid"}) { # Check for 'n' case
+    foreach my $allow (@{$c->{"allowed"}}) {
+      if (("$allow" eq "n") and ! $c->{"value"}) {
+	$c->{"valid"} = 1;
+      }
+    }
+  }
+
+  # Now report
+  if (! $c->{"valid"}) {
+    print defined($c->{"warning"}) ? "WARNING: " : "ERROR: ";
+    print "$conf is invalid\n";
+    if ($c->{"value"}) {
+      print "Value is: ". $c->{"value"} ."\n";
+    } else {
+      print "It is unset\n";
+    }
+    print "Allowed values : ".join(", ", @{$c->{"allowed"}}) ."\n";
+    print "Comment says: ". $c->{"comment"}."\n\n";
+    if (! $c->{"warning"}) {
+      $fatal = 1;
+    }
+  }
+}
+exit $fatal;
+
+
+
+
+
+
+
+
+__DATA__
+CONFIG_ANDROID_LOW_MEMORY_KILLER	n # not tested with Mer
+CONFIG_ANDROID_PARANOID_NETWORK	n       # not tested with Mer
+CONFIG_AUDIT			y,!	# optional, but recommended
+CONFIG_AUTOFS4_FS		y,m     # systemd: http://cgit.freedesktop.org/systemd/systemd/tree/README#n37
+CONFIG_BRIDGE			y,m,!   # connman (optional): support tethering: http://git.kernel.org/cgit/network/connman/connman.git/tree/README#n207
+CONFIG_CGROUPS			y       # systemd: http://cgit.freedesktop.org/systemd/systemd/tree/README#n36
+CONFIG_CGROUP_FREEZER		y,!	# systemd (optional): http://0pointer.de/blog/projects/cgroups-vs-cgroups.html
+CONFIG_CGROUP_DEVICE		y,!	# systemd (optional): http://0pointer.de/blog/projects/cgroups-vs-cgroups.html
+CONFIG_CGROUP_CPUACCT		y,!	# systemd (optional): http://0pointer.de/blog/projects/cgroups-vs-cgroups.html
+CONFIG_CGROUP_MEM_RES_CTLR	y,!	# systemd (optional): http://0pointer.de/blog/projects/cgroups-vs-cgroups.html
+CONFIG_CGROUP_MEM_RES_CTLR_SWAP	y,!	# systemd (optional): http://0pointer.de/blog/projects/cgroups-vs-cgroups.html
+CONFIG_CGROUP_MEM_RES_CTLR_KMEM	y,!	# systemd (optional): http://0pointer.de/blog/projects/cgroups-vs-cgroups.html
+CONFIG_CGROUP_PERF		y,!	# systemd (optional): http://0pointer.de/blog/projects/cgroups-vs-cgroups.html
+CONFIG_CGROUP_SCHED		y,!	# systemd (optional): http://0pointer.de/blog/projects/cgroups-vs-cgroups.html
+CONFIG_BLK_CGROUP		y,!	# systemd (optional): http://0pointer.de/blog/projects/cgroups-vs-cgroups.html
+CONFIG_NET_CLS_CGROUP		y,!	# systemd (optional): http://0pointer.de/blog/projects/cgroups-vs-cgroups.html
+CONFIG_NETPRIO_CGROUP		y,!	# systemd (optional): http://0pointer.de/blog/projects/cgroups-vs-cgroups.html
+CONFIG_DEVTMPFS_MOUNT		y	# systemd: http://cgit.freedesktop.org/systemd/systemd/tree/README#n35
+CONFIG_DEVTMPFS			y       # systemd: http://cgit.freedesktop.org/systemd/systemd/tree/README#n35 and udev http://git.kernel.org/?p=linux/hotplug/udev.git;a=blob;hb=HEAD;f=README#26
+CONFIG_DUMMY			n
+CONFIG_UNIX			y	# UNIX sockets option is required to run Mer
+CONFIG_SYSVIPC			y	# Inter Process Communication option is required to run Mer
+CONFIG_EXT4_FS			y,m,!	# Mer uses ext4 as rootfs by default
+CONFIG_FANOTIFY			y,!	# optional, required for systemd readahead.
+CONFIG_HOTPLUG			y       # udev http://git.kernel.org/?p=linux/hotplug/udev.git;a=blob;hb=HEAD;f=README#27
+CONFIG_INOTIFY_USER		y	# udev http://git.kernel.org/?p=linux/hotplug/udev.git;a=blob;hb=HEAD;f=README#28
+CONFIG_IP_NF_TARGET_MASQUERADE	y,m,!   # connman (optional): support tethering http://git.kernel.org/cgit/network/connman/connman.git/tree/README#n207
+CONFIG_IPV6			y,m,!	# systemd: http://cgit.freedesktop.org/systemd/systemd/tree/README#n37
+CONFIG_NET			y	# udev http://git.kernel.org/?p=linux/hotplug/udev.git;a=blob;hb=HEAD;f=README#29
+CONFIG_PROC_FS			y	# udev http://git.kernel.org/?p=linux/hotplug/udev.git;a=blob;hb=HEAD;f=README#30
+CONFIG_RTC_DRV_CMOS		y,!	# optional, but highly recommended
+CONFIG_SIGNALFD			y	# udev http://git.kernel.org/?p=linux/hotplug/udev.git;a=blob;hb=HEAD;f=README#31
+CONFIG_SYSFS_DEPRECATED*	n	# udev http://git.kernel.org/?p=linux/hotplug/udev.git;a=blob;hb=HEAD;f=README#33
+CONFIG_SYSFS			y	# udev http://git.kernel.org/?p=linux/hotplug/udev.git;a=blob;hb=HEAD;f=README#32
+CONFIG_TMPFS_POSIX_ACL		y,!	# recommended, if you want pam_systemd.so to setup your "seats"
+CONFIG_TUN                      y,m,!   # ofono: http://git.kernel.org/?p=network/ofono/ofono.git;a=blob;f=README;h=413d789e5f9e96024986f5116d3c8aff0c9f15b8;hb=HEAD#l28
+CONFIG_UEVENT_HELPER_PATH	"", !	# should be empty, if you want to use systemd without initramfs. Also udev http://git.kernel.org/?p=linux/hotplug/udev.git;a=blob;hb=HEAD;f=README#34
+CONFIG_VT			y	# Required for virtual consoles
+CONFIG_LBDAF			y,!	# ext4 filesystem requires this in order to support filesysetms with huge_file feature, which is enabled by default by mke2fs.ext4
+CONFIG_SECURITY			n	# We don't want any security system (like SELinux) yet
+
