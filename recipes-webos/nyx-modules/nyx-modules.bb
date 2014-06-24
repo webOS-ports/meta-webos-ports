@@ -11,7 +11,7 @@ DEPENDS += "mtdev"
 VBOX_RDEPENDS = ""
 VBOX_RDEPENDS_qemux86 = "vboxguestdrivers"
 VBOX_RDEPENDS_qemux86-64 = "vboxguestdrivers"
-RDEPENDS_${PN} = "lsb gzip ${VBOX_RDEPENDS}"
+RDEPENDS_${PN} = "lsb gzip ${VBOX_RDEPENDS} nyx-conf"
 
 WEBOS_VERSION = "6.1.0-94_6b9b8f002c2454e475d699064a118d5c50a79f48"
 
@@ -49,7 +49,7 @@ SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit webos-ports-submissions
-SRCREV = "255a1cd881e8edb595c4cefb307b8e5578e26468"
+SRCREV = "be28c1e521250c9bac70f9eb8d863866f01238f1"
 
 PACKAGES += "${PN}-tests"
 FILES_${PN} += "${libdir}/nyx/modules/*"
