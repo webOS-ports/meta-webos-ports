@@ -12,7 +12,7 @@ SRC_URI = "git://github.com/webOS-ports/pulseaudio-modules-droid;protocol=git;br
 S = "${WORKDIR}/git"
 
 # Latest revision compatible with pulseaudio 4.0
-SRCREV = "88b01a173bab833d05c1ca3441da1cffa59a11a4"
+SRCREV = "482905442fc1d175e1bcd6b2fee103bfe2c836d2"
 
 EXTRA_OECONF += " \
     --with-droid-device=${MACHINE} \
