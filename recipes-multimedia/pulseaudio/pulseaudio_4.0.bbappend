@@ -1,31 +1,26 @@
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 SRC_URI += " \
-    file://0020-stream-Return-error-in-case-a-client-peeks-to-early.patch \
-    file://0022-inotify-wrapper-Quit-daemon-if-pid-file-is-removed.patch \
-    file://0023-fixing_snd_mixer_poll_descriptors_count_when_zero.patch \
-    file://0101-alsa-ucm-Make-combination-ports-have-lower-priority.patch \
-    file://0102-combine-Fix-crash-in-output-freeing.patch \
-    file://0103-resampler-Fix-peaks-resampler-s-channel-handling.patch \
-    file://0201-ALSA-Add-extcon-Android-switch-jack-detection.patch \
-    file://0202-dont-probe-ucm.patch \
-    file://0203-card-Add-hook-before-profile-changes.patch \
-    file://0204-Add-module-to-talk-to-the-Android-audio-hal-to-set-u.patch \
     file://pulseaudio.upstart \
     file://pulseaudio.service \
-    file://system.pa \
-    file://daemon.conf \
+"
+
+SRC_URI += " \
+    file://0001-core-make-dependencies-compile-for-64bit.patch \
+    file://0002-combine-Fix-crash-in-output-freeing.patch \
+    file://0003-build-Install-pulsecore-headers.patch \
+    file://0004-daemon-Set-default-resampler-to-speex-fixed-2.patch \
+    file://0005-bluetooth-Allow-leaving-transport-running-while-sink.patch \
+    file://0006-bluetooth-device-Do-not-lose-transport-pointer-after.patch \
+    file://0007-bluetooth-device-Default-to-using-A2DP-profile-initi.patch \
+    file://0008-module-rescue-streams-Add-parameters-to-define-targe.patch \
+    file://0009-bluetooth-util-Detect-transport-acquire-release-loop.patch \
+    file://0010-suspend-on-idle-Ensure-we-still-time-out-if-a-stream.patch \
 "
 
 do_install_append() {
     install -d ${D}${webos_upstartconfdir}
     install -m 0644 ${WORKDIR}/pulseaudio.upstart ${D}${webos_upstartconfdir}/pulseaudio
-
-    # override configuration with our own
-    rm ${D}${sysconfdir}/pulse/daemon.conf
-    install -m 0644 ${WORKDIR}/daemon.conf ${D}${sysconfdir}/pulse
-    rm ${D}${sysconfdir}/pulse/system.pa
-    install -m 0644 ${WORKDIR}/system.pa ${D}${sysconfdir}/pulse
 
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${WORKDIR}/pulseaudio.service ${D}${systemd_unitdir}/system
