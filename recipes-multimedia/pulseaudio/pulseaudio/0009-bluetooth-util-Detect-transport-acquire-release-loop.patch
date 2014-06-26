@@ -1,0 +1,59 @@
+From cc04d1d881a24cb41e6cf40aaf4f416a2e2277b0 Mon Sep 17 00:00:00 2001
+From: Timo Honkonen <timo.honkonen@oss.tieto.com>
+Date: Mon, 30 Dec 2013 10:47:49 +0200
+Subject: [PATCH 09/10] bluetooth-util: Detect transport acquire-release loop.
+
+---
+ src/modules/bluetooth/bluetooth-util.c | 22 ++++++++++++++++++++++
+ 1 file changed, 22 insertions(+)
+
+diff --git a/src/modules/bluetooth/bluetooth-util.c b/src/modules/bluetooth/bluetooth-util.c
+index 5e4b77b..99fbea5 100644
+--- a/src/modules/bluetooth/bluetooth-util.c
++++ b/src/modules/bluetooth/bluetooth-util.c
+@@ -61,6 +61,8 @@
+     " </interface>"                                                     \
+     "</node>"
+ 
++#define RACE_CONDITION_TIME 1000000  // 1 second
++
+ struct pa_bluetooth_discovery {
+     PA_REFCNT_DECLARE;
+ 
+@@ -506,6 +508,9 @@ static int parse_audio_property(pa_bluetooth_device *d, const char *interface, D
+     DBusMessageIter variant_i;
+     bool is_audio_interface;
+     enum profile p = PROFILE_OFF;
++    pa_usec_t tstamp_now;
++    static pa_usec_t tstamp_prev = 0;
++    DBusMessage *m;
+ 
+     pa_assert(d);
+     pa_assert(interface);
+@@ -537,6 +542,23 @@ static int parse_audio_property(pa_bluetooth_device *d, const char *interface, D
+                 pa_bluetooth_transport_state_t old_state;
+ 
+                 pa_log_debug("Device %s interface %s property 'State' changed to value '%s'", d->path, interface, value);
++                /* Device may change state again (e.g. suspend itself) before previous state change
++                 * message has been parsed here. When this take place sink state in here and bluez
++                 * will be out-of-sync. This may generate endless transport acquire/release loop
++                 * which will be sustained by this module. When we notice this to be ongoing
++                 * message is ignored and current state is queried with GetProperties. */
++                if(pa_streq(interface, "org.bluez.AudioSink") && state==PA_BT_AUDIO_STATE_CONNECTED) {
++                   tstamp_now = pa_rtclock_now();
++                   if (tstamp_prev != 0 && tstamp_now - tstamp_prev < RACE_CONDITION_TIME) {
++                       pa_log_debug("Race condition. Message ignored.");
++                       tstamp_prev = 0;
++                       pa_assert_se(m = dbus_message_new_method_call("org.bluez", d->path, "org.bluez.AudioSink", "GetProperties"));
++                       send_and_add_to_pending(d->discovery, m, get_properties_reply, d);
++
++                       return 0;
++                   }
++                   tstamp_prev = tstamp_now;
++                }
+ 
+                 if (state == PA_BT_AUDIO_STATE_INVALID)
+                     return -1;
+-- 
+1.9.1
+
