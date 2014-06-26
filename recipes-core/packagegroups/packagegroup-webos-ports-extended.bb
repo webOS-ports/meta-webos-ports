@@ -8,6 +8,10 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 RDEPENDS_${PN} = " \
   distro-feed-configs \
+  \
+  pulseaudio-modules-droid \
+  pulseaudio-module-switch-on-connect \
+  pulseaudio-distro-conf \
   pulseaudio-server \
   pulseaudio-misc \
   wireless-tools \
