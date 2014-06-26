@@ -9,9 +9,7 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 RDEPENDS_${PN} = " \
   distro-feed-configs \
   \
-  pulseaudio-modules-droid \
   pulseaudio-module-switch-on-connect \
-  pulseaudio-distro-conf \
   pulseaudio-server \
   pulseaudio-misc \
   wireless-tools \
@@ -91,6 +89,8 @@ LIBHYBRIS_RDEPENDS = " \
     mtp-server \
     android-property-service \
     qt5-qpa-hwcomposer-plugin \
+    pulseaudio-modules-droid \
+    pulseaudio-distro-conf \
 "
 
 RDEPENDS_${PN}_append_tuna = " ${LIBHYBRIS_RDEPENDS}"
