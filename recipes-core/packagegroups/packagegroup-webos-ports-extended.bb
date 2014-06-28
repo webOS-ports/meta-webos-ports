@@ -59,6 +59,7 @@ RDEPENDS_${PN} = " \
   luna-sysmgr \
   luna-sysmgr-conf \
   luna-appmanager \
+  luna-qml-launcher \
   \
   webos-system-update \
   \
