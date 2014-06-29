@@ -12,4 +12,4 @@ PACKAGECONFIG = "gstreamer qtlocation qtsensors"
 
 SRC_URI = "git://github.com/webOS-ports/qtwebkit;branch=webOS-ports/master;protocol=git \
            file://enable-needed-features.patch"
-SRCREV = "a1d5ee4c2501accc6275c307655353b998e1329a"
+SRCREV = "0040aed6b2a1d8b2f0be7a074734052792923a62"
