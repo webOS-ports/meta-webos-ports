@@ -8,8 +8,12 @@ PV = "5.2.0+gitr${SRCPV}"
 
 DEPENDS = "qtbase libhybris qtwayland"
 
+# We need to be ${MACHINE_ARCH} as we need to compile the source against a specific
+# Android version we select per machine
+PACKAGE_ARCH = "${MACHINE_ARCH}"
+
 SRC_URI = "git://github.com/webOS-ports/qt5-qpa-hwcomposer-plugin.git;branch=webOS-ports/master;protocol=git"
-SRCREV = "58e4447c389e74abe3bfd6823c8db33e6bfe8ec6"
+SRCREV = "ee9a40af8f94212bbb41e41b2c046bfbbb634a35"
 S = "${WORKDIR}/git/hwcomposer"
 
 inherit qmake5
