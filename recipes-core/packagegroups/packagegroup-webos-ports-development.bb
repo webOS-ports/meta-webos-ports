@@ -23,6 +23,7 @@ RDEPENDS_${PN} = " \
   bc \
   ${VALGRIND} \
   smemstat \
+  binutils \
   \
   alsa-utils-alsamixer \
   alsa-utils-alsactl \
