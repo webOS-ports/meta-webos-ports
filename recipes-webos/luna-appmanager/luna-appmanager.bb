@@ -9,7 +9,7 @@ DEPENDS = "cjson luna-service2 sqlite3 luna-sysmgr-ipc luna-sysmgr-ipc-messages 
 DEPENDS += "qtbase qtquick1"
 DEPENDS += "serviceinstaller"
 
-WEBOS_VERSION = "1.0.0-2_8ca2493c411fcfc3ccd6bb266dcd20b2006071fa"
+WEBOS_VERSION = "1.0.0-4_498956e7603f3d168f03f617f961c8a0100dfc16"
 
 inherit webos_public_repo
 inherit webos_daemon
