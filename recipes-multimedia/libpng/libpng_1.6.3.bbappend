@@ -9,5 +9,9 @@ EXTENDPRAUTO_append = "webos1"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${BP}:"
 
-SRC_URI += "file://CVE-2013-6954.patch"
+# temporary dropped because it breaks compilation in 1.6.3
+# | pngset.c:418:9: error: 'num_palette' undeclared (first use in this function)
+# | pngset.c:418:9: note: each undeclared identifier is reported only once for each function it appears in
+# | pngset.c:418:28: error: 'palette' undeclared (first use in this function)
+# SRC_URI += "file://CVE-2013-6954.patch"
 SRC_URI += "file://patch-libpng-1.6.0-1.6.9-vu684412.diff"
