@@ -36,8 +36,7 @@ PACKAGECONFIG ??= ""
 PACKAGECONFIG[test] = "-DWEBOS_CONFIG_BUILD_TESTS:BOOL=True,,gtest boost,bash"
 
 inherit webos-ports-submissions
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/master-next"
-SRCREV = "49d10ca2403e1be06aed58f8841219a078edc067"
+SRCREV = "4e1a4fdc5a54778a119574d833591d24322e8d76"
 
 # This fix-up will be removed shortly. luna-service2 headers must be included
 # using '#include <luna-service2/*.h>'
