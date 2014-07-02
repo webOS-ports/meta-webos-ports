@@ -1,7 +1,5 @@
-FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
+SRC_URI = "git://github.com/webOS-ports/qtwayland;branch=webOS-ports/master-next;protocol=git"
+SRCREV = "4600a18b90740bea57ad5f027aedb18641aec969"
 
-SRC_URI = "git://github.com/webOS-ports/qtwayland;branch=webOS-ports/master;protocol=git"
-SRCREV = "0ddf2fe2699a388af3ba1ea1b8176b5197fc821e"
-
-FILES_${PN} += "${libdir}/qt5/plugins/wayland-graphics-integration"
-FILES_${PN}-dbg += "${libdir}/qt5/plugins/wayland-graphics-integration/*/.debug"
+FILES_${PN} += "${OE_QMAKE_PATH_PLUGINS}/wayland-graphics-integration"
+FILES_${PN}-dbg += "${OE_QMAKE_PATH_PLUGINS}/wayland-graphics-integration/*/.debug"
