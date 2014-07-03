@@ -11,7 +11,7 @@ SRC_URI = "git://github.com/webOS-ports/luna-next.git;branch=master;protocol=git
 SRC_URI += "file://0001-CMakeLists-check-only-for-libsystemd-pkg.patch"
 S = "${WORKDIR}/git"
 
-WEBOS_VERSION = "0.1.0-10_7cf803f86fcabf71828719d0e1fd6637d8334458"
+WEBOS_VERSION = "0.1.0-11_229d378be360747d4be2cdcbe423f8d1e3c8849f"
 
 inherit webos_component
 inherit webos_daemon
