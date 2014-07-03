@@ -3,7 +3,6 @@ PACKAGECONFIG_DISTRO = "sql-sqlite icu glib accessibility mtdev"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 SRC_URI += " \
-    file://0001-HACK-Add-capatibility-to-have-QT_QPA_EGLFS_DEPTH-.-i.patch \
     file://0002-qfont_qpa-Don-t-crash-when-platform-integration-isn-.patch \
     file://0001-Determine-devicePixelRatio-from-environment-variable.patch \
 "
