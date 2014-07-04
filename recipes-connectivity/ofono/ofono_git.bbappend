@@ -1,6 +1,6 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
-SRCREV = "43fae27110a93b6d5ec0b4ca9d2b45f3c5277e6c"
+SRCREV = "58d020425c7189b11e1f92de6d9d7a8ebcc904cc"
 PV = "1.12+git${SRCPV}"
 
 # NOTE: Needed for GPRS provisioning support
