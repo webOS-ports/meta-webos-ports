@@ -3,12 +3,12 @@ SECTION = "qt/libs"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-SRCREV = "190971080a36a89369be1d8ff79e9972b9672a90"
+SRCREV = "b98abe1b7fc83a9dcc90c3ff98a0b264de257cac"
 SRC_URI = "git://github.com/nemomobile/libconnman-qt.git;protocol=git;branch=master \
     file://0001-Don-t-use-MeeGo-as-prefix-in-order-to-make-this-a-co.patch"
 S = "${WORKDIR}/git"
 
-PV = "1.0.55+gitr${SRCPV}"
+PV = "1.0.74+gitr${SRCPV}"
 
 inherit qmake5
 
