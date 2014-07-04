@@ -7,7 +7,9 @@ DEPENDS = "node-gyp-native taglib"
 
 PV = "0.8.0+gitr${SRCPV}"
 
-SRC_URI = "git://github.com/nikhilm/node-taglib.git;branch=master;protocol=git"
+SRC_URI = "git://github.com/nikhilm/node-taglib.git \
+    file://0001-binding.gyp-Use-pkg-config-to-find-taglib-flags.patch \
+"
 SRCREV = "a61fbbd4c8a759e639f766132dc34060a98f3c23"
 S = "${WORKDIR}/git"
 
