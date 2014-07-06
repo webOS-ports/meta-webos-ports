@@ -28,3 +28,6 @@ inherit webos_library
 
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
+
+# Patch to support additional async suspend API's
+SRC_URI += "file://0001-Implement-asynchronous-suspend-resume-methods-for-sy.patch"
