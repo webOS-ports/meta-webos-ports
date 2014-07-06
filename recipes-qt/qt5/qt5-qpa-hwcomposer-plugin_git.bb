@@ -16,6 +16,10 @@ SRC_URI = "git://github.com/webOS-ports/qt5-qpa-hwcomposer-plugin.git;branch=web
 SRCREV = "ee9a40af8f94212bbb41e41b2c046bfbbb634a35"
 S = "${WORKDIR}/git/hwcomposer"
 
+SRC_URI_append_tenderloin = " \
+    file://0001-HACK-fix-support-for-HP-touchpad-with-hwcomposer-1.3.patch;striplevel=2 \
+"
+
 inherit qmake5
 
 # Set path of qt5 headers as qmake5_base.bbclass sets this to just ${includedir} but
