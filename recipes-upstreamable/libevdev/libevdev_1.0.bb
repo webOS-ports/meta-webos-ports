@@ -1,5 +1,5 @@
 SUMMARY= "A library for handling evdev kernel devices"
-LICENSE = "X11"
+LICENSE = "MIT-X"
 LIC_FILES_CHKSUM = "file://COPYING;md5=75aae0d38feea6fda97ca381cb9132eb"
 
 SRC_URI = "http://www.freedesktop.org/software/libevdev/libevdev-1.0.tar.xz"
