@@ -8,11 +8,10 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 PV = "4.0+gitr${SRCPV}"
 
-SRC_URI = "git://github.com/webOS-ports/pulseaudio-modules-droid;protocol=git;branch=webOS-ports/master"
+SRC_URI = "git://github.com/webOS-ports/pulseaudio-modules-droid;branch=webOS-ports/master-next"
 S = "${WORKDIR}/git"
 
-# Latest revision compatible with pulseaudio 4.0
-SRCREV = "482905442fc1d175e1bcd6b2fee103bfe2c836d2"
+SRCREV = "5eaf1405e1b48f128ffb3577bda3e7ddd0c75a8c"
 
 EXTRA_OECONF += " \
     --with-droid-device=${MACHINE} \
@@ -21,7 +20,7 @@ EXTRA_OECONF += " \
 
 inherit autotools
 
-FILES_${PN} += "${libdir}/pulse-4.0/modules/*.so"
-FILES_${PN}-dev += "${libdir}/pulse-4.0/modules/*.la"
-FILES_${PN}-staticdev += "${libdir}/pulse-4.0/modules/*.a"
-FILES_${PN}-dbg += "${libdir}/pulse-4.0/modules/.debug"
+FILES_${PN} += "${libdir}/pulse-5.0/modules/*.so"
+FILES_${PN}-dev += "${libdir}/pulse-5.0/modules/*.la"
+FILES_${PN}-staticdev += "${libdir}/pulse-5.0/modules/*.a"
+FILES_${PN}-dbg += "${libdir}/pulse-5.0/modules/.debug"
