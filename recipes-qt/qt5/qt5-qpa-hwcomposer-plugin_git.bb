@@ -12,8 +12,8 @@ DEPENDS = "qtbase libhybris qtwayland"
 # Android version we select per machine
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-SRC_URI = "git://github.com/webOS-ports/qt5-qpa-hwcomposer-plugin.git;branch=webOS-ports/master;protocol=git"
-SRCREV = "ee9a40af8f94212bbb41e41b2c046bfbbb634a35"
+SRC_URI = "git://github.com/webOS-ports/qt5-qpa-hwcomposer-plugin.git;branch=webOS-ports/master-next"
+SRCREV = "e20cc96a547b399a368341efa8aaf4e2e74cc8ac"
 S = "${WORKDIR}/git/hwcomposer"
 
 SRC_URI_append_tenderloin = " \
@@ -21,6 +21,14 @@ SRC_URI_append_tenderloin = " \
 "
 
 inherit qmake5
+
+# WARNING: The recipe qt5-qpa-hwcomposer-plugin is trying to install files into a shared area when those files already exist. Those files and their manifest location are:
+#   /OE/build/owpb/webos-ports/tmp-eglibc/sysroots/tenderloin/usr/lib/cmake/Qt5Gui/Qt5Gui_QEglFSIntegrationPlugin.cmake
+#   Matched in manifest-tenderloin-qtbase.populate_sysroot
+#   Please verify which package should provide the above files.
+do_install_append() {
+    rm -vf ${D}${libdir}/cmake/Qt5Gui/Qt5Gui_QEglFSIntegrationPlugin.cmake
+}
 
 # Set path of qt5 headers as qmake5_base.bbclass sets this to just ${includedir} but
 # actually it is ${includedir}/qt5
