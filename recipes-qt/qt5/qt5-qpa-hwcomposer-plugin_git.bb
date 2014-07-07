@@ -13,7 +13,7 @@ DEPENDS = "qtbase libhybris qtwayland"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 SRC_URI = "git://github.com/webOS-ports/qt5-qpa-hwcomposer-plugin.git;branch=webOS-ports/master;protocol=git"
-SRCREV = "ee9a40af8f94212bbb41e41b2c046bfbbb634a35"
+SRCREV = "864140fd8956ca8479c19f7ce6943f99e1fc1a66"
 S = "${WORKDIR}/git/hwcomposer"
 
 SRC_URI_append_tenderloin = " \
