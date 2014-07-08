@@ -16,6 +16,9 @@ inherit webos_arch_indep
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
+inherit webos-ports-submissions
+SRCREV = "296364eddeda2ddf1c7ef7c8b8ce84051b57e4b0"
+
 do_install() {
     install -d ${D}${webos_servicesdir}
     install -d ${D}${webos_sysconfdir}/db/kinds
