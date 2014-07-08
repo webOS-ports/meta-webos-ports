@@ -16,6 +16,9 @@ inherit webos_arch_indep
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
+inherit webos-ports-submissions
+SRCREV = "0baa0cd1bcd7c2182718a4927efcff9dbf901812"
+
 do_install() {
     install -d ${D}${webos_frameworksdir}
 
