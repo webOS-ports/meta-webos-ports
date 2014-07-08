@@ -11,7 +11,7 @@ inherit webos_system_bus
 
 PV = "0.1.0+gitr${SRCPV}"
 
-SRCREV = "6702f8fb107ab8051070d2fd59b821b38e472f94"
+SRCREV = "377444267c6e0d08935de78ddce53848dd410514"
 SRC_URI = "git://github.com/webOS-ports/keymanager;protocol=git;branch=master"
 S = "${WORKDIR}/git"
 
