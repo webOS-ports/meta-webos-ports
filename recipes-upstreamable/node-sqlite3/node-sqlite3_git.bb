@@ -31,7 +31,7 @@ do_install() {
     install ${S}/build/Release/node_sqlite3.node ${D}${libdir}/nodejs/
     install ${S}/lib/sqlite3.js ${D}${libdir}/nodejs/sqlite3/
     install ${S}/lib/index.js ${D}${libdir}/nodejs/sqlite3/
-    install ${S}/lib/tace.js ${D}${libdir}/nodejs/sqlite3/
+    install ${S}/lib/trace.js ${D}${libdir}/nodejs/sqlite3/
 }
 
 FILES_${PN} += "${libdir}/nodejs"
