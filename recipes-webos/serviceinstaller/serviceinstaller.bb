@@ -20,3 +20,7 @@ S = "${WORKDIR}/git"
 WEBOS_NO_STATIC_LIBRARIES_WHITELIST = "libserviceinstaller.a"
 
 ALLOW_EMPTY_${PN} = "1"
+
+inherit webos-ports-submissions
+
+SRCREV = "e54e3f2d8f48dfd41d313215d8d22cd20f73380a"
