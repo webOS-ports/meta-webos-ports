@@ -12,6 +12,7 @@ SRC_URI  = " \
   file://missing-ssize_t.patch \
   file://0001-Disable-backtrace-cause-linking-to-libdl-fails.patch \
   file://0001-Revert-unit-Fix-warnings.patch \
+  file://0001-gril-don-t-exit-when-not-being-able-to-initialize-mo.patch \
   file://ofono.service \
   file://wait-for-rild.sh \
 "
