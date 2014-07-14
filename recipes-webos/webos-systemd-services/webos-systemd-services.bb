@@ -7,7 +7,7 @@ PV = "1.0+gitr${SRCPV}"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 SRC_URI = "git://github.com/webOS-ports/webos-systemd-services.git;branch=master;protocol=git"
-SRCREV = "a32d930289a459987a1c9592161c9fbed8a1edf6"
+SRCREV = "38ea01bbe681213a0cfcf06b804c01fb5b445cc7"
 S = "${WORKDIR}/git"
 
 inherit systemd
