@@ -63,6 +63,4 @@ FILES_${PN} = "${base_sbindir}"
 ALLOW_EMPTY_${PN} = "1"
 
 # autoload if installed
-module_autoload_vboxguest = "vboxguest"
-module_autoload_vboxsf = "vboxsf"
-module_autoload_vboxvideo = "vboxvideo"
+KERNEL_MODULE_AUTOLOAD += "vboxguest vboxsf vboxvideo"
