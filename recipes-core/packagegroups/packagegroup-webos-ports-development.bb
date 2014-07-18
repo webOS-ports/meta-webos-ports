@@ -32,6 +32,7 @@ RDEPENDS_${PN} = " \
   alsa-utils-amixer \
   \
   org.webosports.app.testr \
+  nyx-utils \
   \
   systemd-analyze \
   qt5-opengles2-test \
