@@ -12,7 +12,7 @@ RDEPENDS_${PN} += " \
     libconnman-qt \
 "
 
-WEBOS_VERSION = "0.1.0-31_ebc50f0f867e558adc609cda26c89b5f39a728eb"
+WEBOS_VERSION = "0.1.0-32_a43218af34de00c4cf8def5cd4e134b339ab02ef"
 
 inherit webos_component
 inherit webos_public_repo
