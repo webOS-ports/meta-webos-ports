@@ -9,7 +9,7 @@ inherit webos_system_bus
 
 PV = "0.1.0+gitr${SRCPV}"
 
-SRCREV = "eb741f598f4f858ba7596212adcb746eb3d67b6b"
+SRCREV = "d7e0870414466c390ce04c46f6315c36db494285"
 SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git;branch=master"
 S = "${WORKDIR}/git"
 
@@ -20,6 +20,12 @@ do_install() {
     install -d ${D}${webos_servicesdir}/com.palm.mediapermissions
     cp -rv ${S}/service/* ${D}${webos_servicesdir}/com.palm.mediapermissions
     rm -rf ${D}${webos_servicesdir}/com.palm.mediapermissions/sysbus
+
+    # db8 kinds and permissions
+    install -d ${D}${webos_sysconfdir}/db/kinds
+    install -d ${D}${webos_sysconfdir}/db/permissions
+    cp -vrf ${S}/service/configuration/db/kinds/* ${D}${webos_sysconfdir}/db/kinds/
+    cp -vrf ${S}/service/configuration/db/permissions/* ${D}${webos_sysconfdir}/db/permissions/
 }
 
 FILES_${PN} += "${webos_servicesdir}"
