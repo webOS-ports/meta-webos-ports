@@ -18,7 +18,7 @@ EXTRA_OECONF += " \
     --enable-udev \
 "
 
-inherit autotools
+inherit autotools pkgconfig
 
 FILES_${PN} += "${libdir}/pulse-5.0/modules/*.so"
 FILES_${PN}-dev += "${libdir}/pulse-5.0/modules/*.la"
