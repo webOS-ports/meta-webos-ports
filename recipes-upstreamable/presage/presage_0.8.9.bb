@@ -9,7 +9,7 @@ DEPENDS_append_class-target = " presage-native"
 
 BBCLASSEXTEND = "native"
 
-inherit autotools gettext
+inherit autotools gettext pkgconfig
 
 SRC_URI = " \
     http://downloads.sourceforge.net/${BPN}/${BP}.tar.gz \

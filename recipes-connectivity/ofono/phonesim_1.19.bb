@@ -12,7 +12,7 @@ SRC_URI[sha256sum] = "1ce9f5fa99a24bf69baa8a8ef140a54c27624764558dcffbf9caf5be1b
 
 SRC_URI += "file://0001-Port-to-qt5.patch"
 
-inherit autotools
+inherit autotools pkgconfig
 inherit qmake5_paths
 
 do_configure_append() {
