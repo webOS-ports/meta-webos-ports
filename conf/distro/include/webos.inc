@@ -70,10 +70,11 @@ BB_HASHBASE_WHITELIST_append = " WEBOS_IMAGE_NAME_SUFFIX"
 # as the "build configuration".
 BUILDCFG_VARS += "WEBOS_DISTRO_RELEASE_CODENAME WEBOS_DISTRO_BUILD_ID"
 
-# Branch, revision and description of TOPDIR (build-* repository)
-WEBOS_DISTRO_TOPDIR_BRANCH ?= "${@base_get_metadata_git_branch('${TOPDIR}', None).strip()}"
-WEBOS_DISTRO_TOPDIR_REVISION ?= "${@base_get_metadata_git_revision('${TOPDIR}', None).strip()}"
-WEBOS_DISTRO_TOPDIR_DESCRIBE ?= "${@webos_base_get_metadata_git_describe('${TOPDIR}', None).strip()}"
+# Branch, revision and description of TOPDIR (webos-ports-setup repository)
+SETUP_COMMON_DIR = "${TOPDIR}/../common/"
+WEBOS_DISTRO_TOPDIR_BRANCH ?= "${@base_get_metadata_git_branch('${SETUP_COMMON_DIR}', None).strip()}"
+WEBOS_DISTRO_TOPDIR_REVISION ?= "${@base_get_metadata_git_revision('${SETUP_COMMON_DIR}', None).strip()}"
+WEBOS_DISTRO_TOPDIR_DESCRIBE ?= "${@webos_base_get_metadata_git_describe('${SETUP_COMMON_DIR}', None).strip()}"
 # Don't add WEBOS_DISTRO_TOPDIR_BRANCH, because in many cases it can be "(nobranch)"
 BUILDCFG_VARS += "WEBOS_DISTRO_TOPDIR_REVISION WEBOS_DISTRO_TOPDIR_DESCRIBE"
 
