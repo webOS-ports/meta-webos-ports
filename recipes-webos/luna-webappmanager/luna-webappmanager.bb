@@ -12,7 +12,7 @@ RDEPENDS_${PN} += " \
 "
 
 SRC_URI = "git://github.com/webOS-ports/luna-webappmanager.git;branch=master;protocol=git"
-SRCREV = "188618b4a1c4a78bc3eb69989dc5e304a604037d"
+SRCREV = "2358143be3ef9238d7f77495e63d99fd1c38a051"
 S = "${WORKDIR}/git"
 
 # For the sake of the webOS build system we need to provide the webOS component version
@@ -34,11 +34,11 @@ inherit webos_cmake
 inherit systemd
 
 SYSTEMD_PACKAGES = "${PN}"
-SYSTEMD_SERVICE_${PN} = "luna-webappmanager.service"
+SYSTEMD_SERVICE_${PN} = "LunaWebAppManager.service"
 
 do_install_append() {
     install -d ${D}${systemd_unitdir}/system
-    install -m 0644 ${S}/files/systemd/luna-webappmanager.service ${D}${systemd_unitdir}/system/
+    install -m 0644 ${S}/files/systemd/LunaWebAppManager.service ${D}${systemd_unitdir}/system/
 }
 
 FILES_${PN} += "${webos_frameworksdir}"
