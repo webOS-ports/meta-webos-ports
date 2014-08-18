@@ -8,8 +8,7 @@ DEPENDS = "qtbase qtdeclarative qtwayland luna-sysmgr-common"
 
 SRC_URI = "git://github.com/webOS-ports/luna-next.git;branch=master;protocol=git"
 # needed for newer qtwayland when used together with qtbase-5.2.1
-# SRC_URI += "file://0001-Revert-plugins-compositor-check-for-qt-5.2.1.patch"
-
+SRC_URI += "file://0001-Revert-plugins-compositor-check-for-qt-5.2.1.patch"
 S = "${WORKDIR}/git"
 
 WEBOS_VERSION = "0.1.0-20_878c72811863432a7c10ff162128e99b2901b4ea"
