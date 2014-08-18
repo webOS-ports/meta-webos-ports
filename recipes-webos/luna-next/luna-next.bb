@@ -7,8 +7,6 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 DEPENDS = "qtbase qtdeclarative qtwayland luna-sysmgr-common"
 
 SRC_URI = "git://github.com/webOS-ports/luna-next.git;branch=master;protocol=git"
-# needed for newer qtwayland when used together with qtbase-5.2.1
-# SRC_URI += "file://0001-Revert-plugins-compositor-check-for-qt-5.2.1.patch"
 
 S = "${WORKDIR}/git"
 

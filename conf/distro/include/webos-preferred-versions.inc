@@ -8,5 +8,7 @@
 # because it's already compatible with our libpbnjson.
 PREFERRED_VERSION_yajl ?= "1.0.12"
 
-PREFERRED_VERSION_qtwebkit = "5.2.1+git%"
-PREFERRED_VERSION_qtmultimedia = "5.2.1+git%"
+QT5_VERSION = "5.3.99+5.4.0%"
+require conf/distro/include/qt5-versions.inc
+#PREFERRED_VERSION_qtwebkit = "5.3.99+5.4.0-alpha1+git%"
+#PREFERRED_VERSION_qtmultimedia = "5.3.99+5.4.0-alpha1+git%"
