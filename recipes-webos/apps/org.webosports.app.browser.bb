@@ -24,7 +24,7 @@ inherit webos_component
 
 do_install_append() {
     install -d ${D}${webos_applicationsdir}/org.webosports.app.browser
-    cp -av ${S} ${D}${webos_applicationsdir}/org.webosports.app.browser
+    cp -av ${S}/* ${D}${webos_applicationsdir}/org.webosports.app.browser
 }
 
 FILES_${PN} += "${webos_applicationsdir}/org.webosports.app.browser"
