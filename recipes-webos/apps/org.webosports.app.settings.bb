@@ -3,12 +3,8 @@ SECTION = "webos/apps"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-DEPENDS += "libconnman-qt"
-
 inherit webos_public_repo
 inherit webos_application
-inherit webos_cordova_application
-inherit webos_webapp_plugin
 
 # For the sake of the webOS build system we need to provide the webOS component version
 # and even a submission number, even if we don't use any.
@@ -24,6 +20,6 @@ inherit webos_component
 inherit cmake_qt5
 inherit webos_cmake
 
-SRCREV = "5afd9feec66d5318b9e516f7a73519a3e625f38e"
+SRCREV = "d0f17f22817036557c3b50ab34f5daabcf5db069"
 SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git"
 S = "${WORKDIR}/git"
