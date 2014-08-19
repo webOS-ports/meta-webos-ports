@@ -5,14 +5,12 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 PV = "0.1.0+gitr${SRCPV}"
 
-DEPENDS = "qtwebkit"
-
 RDEPENDS_${PN} = " \
     qtdeclarative-qmlplugins \
     qtwebkit-qmlplugins \
 "
 
-SRCREV = "ef3f9c48bab84751d0237009e6d1f0ac4e669025"
+SRCREV = "548d4166d8fbab2e8394d780f0d2174efd6702ac"
 SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git;branch=master"
 S = "${WORKDIR}/git"
 
@@ -24,11 +22,9 @@ PV = "${WEBOS_COMPONENT_VERSION}+gitr${SRCPV}"
 
 inherit webos_component
 
-# We need to warrant the correct order for the following two inherits as webos_cmake is
-# setting the build dir to be outside of the source dir which is overriden by cmake_qt5
-# again if we inherit it afterwards.
-inherit cmake_qt5
-inherit webos_cmake
+do_install_append() {
+    install -d ${D}${webos_applicationsdir}/org.webosports.app.browser
+    cp -av ${S} ${D}${webos_applicationsdir}/org.webosports.app.browser
+}
 
 FILES_${PN} += "${webos_applicationsdir}/org.webosports.app.browser"
-FILES_${PN}-dbg += "${webos_applicationsdir}/org.webosports.app.browser/.debug"
