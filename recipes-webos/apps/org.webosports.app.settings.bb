@@ -14,12 +14,6 @@ PV = "${WEBOS_COMPONENT_VERSION}+gitr${SRCPV}"
 
 inherit webos_component
 
-# We need to warrant the correct order for the following two inherits as webos_cmake is
-# setting the build dir to be outside of the source dir which is overriden by cmake_qt5
-# again if we inherit it afterwards.
-inherit cmake_qt5
-inherit webos_cmake
-
 SRCREV = "d0f17f22817036557c3b50ab34f5daabcf5db069"
 SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git"
 S = "${WORKDIR}/git"
