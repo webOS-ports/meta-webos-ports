@@ -1,30 +1,30 @@
 SUMMARY = "Browser application written from scratch for webOS ports"
 SECTION = "webos/apps"
-LICENSE = "Apache-2.0"
-LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
-
-PV = "0.1.0+gitr${SRCPV}"
+LICENSE = "Apache-2.0 & GPL-3.0"
+LIC_FILES_CHKSUM = " \
+    file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10 \
+    file://COPYING;md5=695ec3e59e33436b5777c14079d9fc69 \
+"
 
 RDEPENDS_${PN} = " \
     qtdeclarative-qmlplugins \
     qtwebkit-qmlplugins \
 "
 
-SRCREV = "548d4166d8fbab2e8394d780f0d2174efd6702ac"
 SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git;branch=master"
 S = "${WORKDIR}/git"
 
-# For the sake of the webOS build system we need to provide the webOS component version
-# and even a submission number, even if we don't use any.
-WEBOS_COMPONENT_VERSION = "0.1.0"
-WEBOS_SUBMISSION = "0"
-PV = "${WEBOS_COMPONENT_VERSION}+gitr${SRCPV}"
+WEBOS_VERSION = "0.5.0-2_5f4a371e73b588a31aef5c69fccbe9be59aa504e"
 
 inherit webos_component
+inherit webos_daemon
+inherit webos_system_bus
+inherit webos_enhanced_submissions
+inherit webos_application
 
 do_install_append() {
-    install -d ${D}${webos_applicationsdir}/org.webosports.app.browser
-    cp -av ${S}/* ${D}${webos_applicationsdir}/org.webosports.app.browser
+    install -d ${D}${webos_applicationsdir}/org.webosports.app.browser/qml
+    cp -av ${S}/qml/* ${D}${webos_applicationsdir}/org.webosports.app.browser/qml/
 }
 
 FILES_${PN} += "${webos_applicationsdir}/org.webosports.app.browser"
