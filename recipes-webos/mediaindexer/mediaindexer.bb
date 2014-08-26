@@ -7,7 +7,7 @@ DEPENDS += "db8 glib-2.0 luna-service2 sqlite3 taglib"
 # We need this in order to have the mime based media detection working
 RDEPENDS_${PN} += "shared-mime-info"
 
-WEBOS_VERSION = "0.1.0-8_cfec7229a466b4cfeb9ed180c16a0ffc1eca5b0b"
+WEBOS_VERSION = "0.1.0-9_d229f72cf4837cf0b6600a1c5f8def89d0d59f20"
 
 inherit webos_component
 inherit webos_public_repo
