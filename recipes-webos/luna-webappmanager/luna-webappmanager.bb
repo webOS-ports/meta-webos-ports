@@ -12,7 +12,7 @@ RDEPENDS_${PN} += " \
 "
 
 SRC_URI = "git://github.com/webOS-ports/luna-webappmanager.git;branch=master;protocol=git"
-SRCREV = "86d635c91b7a939b0463716dab83aaecdcce447a"
+SRCREV = "d9136ed3b25659b907a05807f304625118b41da3"
 S = "${WORKDIR}/git"
 
 # For the sake of the webOS build system we need to provide the webOS component version

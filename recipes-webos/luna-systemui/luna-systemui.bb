@@ -15,16 +15,11 @@ SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit webos-ports-submissions
-SRCREV = "40a40f5db63b53b7ed157326729f809db062480f"
+SRCREV = "e1d99b165fa30acfc7ee1b7a3d5cf59deff05aee"
 
 do_install() {
-    #COPY ENTIRE APP
-    install -d ${D}${webos_sysmgr_datadir}/system/luna-systemui
-    cp -vrf ${S}/* ${D}${webos_sysmgr_datadir}/system/luna-systemui
-    if [ -e ${S}/images/wallpaper.tar ]; then
-        install -d ${D}${webos_sysmgr_datadir}/system/luna-systemui/images
-        tar xvf ${S}/images/wallpaper.tar --directory=${D}${webos_sysmgr_datadir}/system/luna-systemui/images
-    fi
+    install -d ${D}${webos_applicationsdir}/com.palm.systemui
+    cp -vrf ${S}/* ${D}${webos_applicationsdir}/com.palm.systemui/
 }
 
-FILES_${PN} += "${webos_sysmgr_datadir}/system"
+FILES_${PN} += "${webos_applicationsdir}/com.palm.systemui"

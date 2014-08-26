@@ -14,4 +14,4 @@ SRC_URI = "git://github.com/webOS-ports/qtwebkit;branch=webOS-ports/master;proto
            file://enable-needed-features.patch"
 SRCREV = "1495870e155ffe4452839aa3bd166bd12179df83"
 
-EXTRA_QMAKEVARS_PRE_append = " QMAKE_CXXFLAGS+=-mthumb"
+EXTRA_QMAKEVARS_PRE_arm_append = " QMAKE_CXXFLAGS+=-mthumb"

@@ -20,7 +20,7 @@ SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit webos-ports-submissions
-SRCREV = "c282ba450d736368d1f0c15fe628bf174a5d26e0"
+SRCREV = "594b691dad2a17c15d2402f298480819a97e1a29"
 
 do_install_append() {
     # Expand fonts tarball
