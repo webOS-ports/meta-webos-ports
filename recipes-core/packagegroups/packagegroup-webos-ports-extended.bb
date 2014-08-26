@@ -80,6 +80,8 @@ RDEPENDS_${PN} = " \
   node-sqlite3 \
   node-dbus \
   node-taglib \
+  \
+  luneos-default-wallpapers \
 "
 
 LIBHYBRIS_RDEPENDS = " \
