@@ -170,13 +170,13 @@ https://.*/.*    http://downloads.yoctoproject.org/mirror/sources/ \n"
 # The CONNECTIVITY_CHECK_URI's are used to test whether we can succesfully
 # fetch from the network (and warn you if not). To disable the test set
 # the variable to be empty.
-CONNECTIVITY_CHECK_URIS ?= "git://git.yoctoproject.org/yocto-firewall-test;protocol=git;rev=HEAD \
-                          https://eula-downloads.yoctoproject.org/index.php \
-                          http://bugzilla.yoctoproject.org/report.cgi"
+CONNECTIVITY_CHECK_URIS ?= "http://jenkins.nas-admin.org \
+                            http://build.webos-ports.org"
 
 # TODO can check on all these host machines.
 SANITY_TESTED_DISTROS ?= " \
             Ubuntu-12.04 \n \
             Ubuntu-12.10 \n \
             Ubuntu-13.04 \n \
+            Ubuntu-14.04 \n \
             "
