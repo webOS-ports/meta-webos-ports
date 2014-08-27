@@ -18,3 +18,6 @@ SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 FILES_${PN} += "${datadir}/rolegen"
+
+inherit webos-ports-submissions
+SRCREV = "196510e255ba809370b788b2f0010acf9f84b488"
