@@ -7,7 +7,7 @@ DEPENDS += "db8 glib-2.0 luna-service2 sqlite3 taglib"
 # We need this in order to have the mime based media detection working
 RDEPENDS_${PN} += "shared-mime-info"
 
-WEBOS_VERSION = "0.1.0-9_d229f72cf4837cf0b6600a1c5f8def89d0d59f20"
+WEBOS_VERSION = "0.1.0-10_b44703d71208b4f45963c7973b9010f1fa90dc73"
 
 inherit webos_component
 inherit webos_public_repo
@@ -22,6 +22,8 @@ S = "${WORKDIR}/git"
 do_install_append() {
     install -d ${D}${webos_sysconfdir}/db/kinds
     cp -rv ${S}/files/db8/kinds/* ${D}${webos_sysconfdir}/db/kinds
+    install -d ${D}${webos_sysconfdir}/db/permissions
+    cp -rv ${S}/files/db8/permissions/* ${D}${webos_sysconfdir}/db/permissions
 }
 
 FILES_${PN} += "${webos_sysconfdir}/db/kinds"
