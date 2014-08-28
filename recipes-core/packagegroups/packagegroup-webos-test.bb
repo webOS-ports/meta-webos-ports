@@ -6,9 +6,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 # You don't need to change this value when you're changing just RDEPENDS_${PN} variable.
 
-inherit packagegroup
-
 PACKAGE_ARCH = "${MACHINE_ARCH}"
+inherit packagegroup
 
 # A group of Python 2 packages to develop and exercise tests for
 # Open webOS processes.
