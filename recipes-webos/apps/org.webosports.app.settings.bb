@@ -14,6 +14,6 @@ PV = "${WEBOS_COMPONENT_VERSION}+gitr${SRCPV}"
 
 inherit webos_component
 
-SRCREV = "7fa9faa54caf5798c0c97356f4912255e778ed45"
+SRCREV = "858cb50a59f91f1447e2f32209be8ab24cb6aafc"
 SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git"
 S = "${WORKDIR}/git"
