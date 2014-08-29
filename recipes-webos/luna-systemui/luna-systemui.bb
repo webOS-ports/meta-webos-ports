@@ -15,7 +15,7 @@ SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit webos-ports-submissions
-SRCREV = "e1d99b165fa30acfc7ee1b7a3d5cf59deff05aee"
+SRCREV = "fcabcf7d984976aace1a3a4aa4f68e473f61b8a0"
 
 do_install() {
     install -d ${D}${webos_applicationsdir}/com.palm.systemui
