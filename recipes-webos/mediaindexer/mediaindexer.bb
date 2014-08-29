@@ -28,3 +28,5 @@ do_install_append() {
 }
 
 FILES_${PN} += "${webos_sysconfdir}/db/kinds"
+
+SRC_URI += "file://0001-Fix-fpermissive-issues.patch"
