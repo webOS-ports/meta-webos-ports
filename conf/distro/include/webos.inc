@@ -158,6 +158,10 @@ PATH_prepend = "${WEBOS_EXTRA_PATH}"
 EXTRAOPKGCONFIG = ""
 OPKGLIBDIR_forcevariable := "${libdir}"
 
+# drop -fpermissive also from OECMAKE_CXX_FLAGS
+# drop this when upgrading oe-core to 1.7 578124aedd3dbffd79ea01862d57223ffaa7216a or newer
+OECMAKE_CXX_FLAGS = "${HOST_CC_ARCH} ${TOOLCHAIN_OPTIONS} ${CXXFLAGS}"
+
 # Redirect console output to keep it from spewing all over the VirtualBox window
 # (This is added to qemux86 kernel cmdline by openembedded-core/meta/classes/syslinux.bbclass)
 APPEND_append_qemuall = " console=ttyS0"
