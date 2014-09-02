@@ -41,6 +41,7 @@ RDEPENDS_${PN} = " \
   org.webosports.app.pdf \
   org.webosports.app.filemanager \
   org.webosports.app.contacts \
+  org.webosports.app.messaging \
   fingerterm \
   \
   ca-certificates \
