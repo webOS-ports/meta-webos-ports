@@ -11,17 +11,13 @@ RDEPENDS_${PN} += " \
     qtwebkit-qmlplugins \
 "
 
+WEBOS_VERSION = "0.2.0-2_9ceb3e55d8a7e8c3c532f4fab6f34ab9d71568f6"
+
 SRC_URI = "git://github.com/webOS-ports/luna-webappmanager.git;branch=master;protocol=git"
-SRCREV = "af998fc2dd9407fa9470cf4ce4d0037e72720077"
 S = "${WORKDIR}/git"
 
-# For the sake of the webOS build system we need to provide the webOS component version
-# and even a submission number, even if we don't use any.
-WEBOS_COMPONENT_VERSION = "0.1.0"
-WEBOS_SUBMISSION = "0"
-PV = "${WEBOS_COMPONENT_VERSION}+gitr${SRCPV}"
-
 inherit webos_component
+inherit webos_enhanced_submissions
 inherit webos_daemon
 inherit webos_system_bus
 
