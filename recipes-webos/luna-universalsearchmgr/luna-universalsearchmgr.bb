@@ -26,3 +26,6 @@ do_install_append() {
 }
 
 FILES_${PN} += "${webos_prefix}"
+
+inherit webos-ports-submissions
+SRCREV = "9c01447450f8cf01f1b86e3106a8bbe9ad6ff909"
