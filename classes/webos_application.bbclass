@@ -16,7 +16,7 @@ do_install_append() {
 
     if [ -d ${S}/configuration/db/permissions ] ; then
         install -d ${D}${webos_sysconfdir}/db/permissions
-        install -v -m 644 $${S}/configuration/db/permissions/* ${D}${webos_sysconfdir}/db/permissions
+        install -v -m 644 ${S}/configuration/db/permissions/* ${D}${webos_sysconfdir}/db/permissions
     fi
 
     if [ -d ${S}/configuration/db/activities ] ; then
