@@ -44,6 +44,8 @@ SRCREV = "ec9de626bc966b20dc77e2dba436e9b8a01d8faa"
 
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 
+export TARGET_TYPE = "${MACHINE}"
+
 #install_loc() {
 #    # generate all the localized files in the resources directory
 #    COMPONENT_NAME=luna-sysmgr
