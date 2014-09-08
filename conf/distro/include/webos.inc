@@ -150,6 +150,10 @@ IMAGE_FSTYPES ?= "tar.gz"
 # overrides are expanded too late.
 IMAGE_FSTYPES := "${@ '${IMAGE_FSTYPES} vmdk' if '${MACHINE}'.startswith('qemux86') else '${IMAGE_FSTYPES}' }"
 
+# Give our emulator images some more space so developers have some more room
+# for various things they are doing
+IMAGE_ROOTFS_EXTRA_SPACE := "${@ '2097152' if '${MACHINE}'.startswith('qemux86') else '${IMAGE_ROOTFS_EXTRA_SPACE}' }"
+
 # "tar.bz2 ext3" is added by qemu.inc, replace tar.bz2 with tar.gz in it
 IMAGE_FSTYPES := "${@ ' ${IMAGE_FSTYPES} '.replace(' tar.bz2 ',' tar.gz ') }"
 
