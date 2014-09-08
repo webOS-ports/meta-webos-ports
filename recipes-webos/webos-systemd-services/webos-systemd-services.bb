@@ -25,8 +25,6 @@ SYSTEMD_SERVICE_${PN} = " \
     LunaSysMgr.service \
     LunaAppManager.service \
     org.webosinternals.ipkgservice.service \
-    PmKLogDaemon.service \
-    PmLogDaemon.service \
     powerd.service \
     sleepd.service \
     webos-connman-adapter.service \
