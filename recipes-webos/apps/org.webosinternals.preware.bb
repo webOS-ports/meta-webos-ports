@@ -9,6 +9,6 @@ inherit webos_enyojs_application
 
 PV = "2.0.2+gitr${SRCPV}"
 
-SRCREV = "8c832c1495bfab1293d1c458aacdfe898adeb178"
+SRCREV = "f0ebc02c5696c5df1ae529055f904232c18da04c"
 SRC_URI = "git://github.com/webOS-ports/preware;protocol=git;branch=master"
 S = "${WORKDIR}/git"
