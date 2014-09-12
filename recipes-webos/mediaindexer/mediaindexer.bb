@@ -2,17 +2,18 @@ SUMMARY = "The mediaindexer service component"
 LICENSE = "GPL-3.0"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
-DEPENDS += "db8 glib-2.0 luna-service2 sqlite3 taglib"
+DEPENDS += "db8 glib-2.0 luna-service2 sqlite3 taglib qtbase"
 
 # We need this in order to have the mime based media detection working
 RDEPENDS_${PN} += "shared-mime-info"
 
-WEBOS_VERSION = "0.1.0-10_b44703d71208b4f45963c7973b9010f1fa90dc73"
+WEBOS_VERSION = "0.1.0-11_ae017a677384a8c41c548df5712d306ae927aed5"
 
 inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_system_bus
+inherit cmake_qt5
 inherit webos_cmake
 inherit webos_systemd
 
