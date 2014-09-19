@@ -82,6 +82,9 @@ RDEPENDS_${PN} = " \
   gst-meta-base \
   gst-meta-audio \
   gst-meta-video \
+  gst-omx \
+  gst-jolla \
+  gst-colorconv \
   \
   node-sqlite3 \
   node-dbus \
