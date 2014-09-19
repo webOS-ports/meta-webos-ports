@@ -9,7 +9,6 @@
 PREFERRED_VERSION_yajl ?= "1.0.12"
 
 PREFERRED_VERSION_qtwebkit = "5.2.1+git%"
-PREFERRED_VERSION_qtmultimedia = "5.2.1+git%"
 
 # We have to stick with our git version of ofono and can't use any newer upstream
 # version from oe-core

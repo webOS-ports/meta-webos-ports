@@ -74,11 +74,14 @@ RDEPENDS_${PN} = " \
   mediaindexer \
   media-permission-service \
   \
-  gstreamer1.0-plugins-base-meta \
-  gstreamer1.0-plugins-good-meta \
-  gstreamer1.0-plugins-bad-meta \
-  gstreamer1.0-plugins-ugly-meta \
-  gstreamer1.0-libav \
+  gst-plugins-base-meta \
+  gst-plugins-good-meta \
+  gst-plugins-bad-meta \
+  gst-plugins-ugly-meta \
+  gst-ffmpeg \
+  gst-meta-base \
+  gst-meta-audio \
+  gst-meta-video \
   \
   node-sqlite3 \
   node-dbus \

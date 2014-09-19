@@ -13,8 +13,8 @@ INHERIT += "blacklist"
 
 include conf/distro/include/webos-recipe-blacklist-world.inc
 
-PNBLACKLIST[gst-plugins-bad] = "we prefer gstreamer1.0-plugins"
-PNBLACKLIST[gst-plugins-base] = "we prefer gstreamer1.0-plugins"
-PNBLACKLIST[gst-plugins-good] = "we prefer gstreamer1.0-plugins"
-PNBLACKLIST[gst-plugins-ugly] = "we prefer gstreamer1.0-plugins"
-PNBLACKLIST[gstreamer] = "we prefer gstreamer1.0"
+PNBLACKLIST[gstreamer1.0] = "We still have to use gstreamer 0.10"
+PNBLACKLIST[gstreamer1.0-plugins-bad] = "We still have to use gstreamer 0.10"
+PNBLACKLIST[gstreamer1.0-plugins-base] = "We still have to use gstreamer 0.10"
+PNBLACKLIST[gstreamer1.0-plugins-good] = "We still have to use gstreamer 0.10"
+PNBLACKLIST[gstreamer1.0-plugins-ugly] = "We still have to use gstreamer 0.10"

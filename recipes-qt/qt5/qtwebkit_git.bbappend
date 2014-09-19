@@ -8,7 +8,7 @@ LIC_FILES_CHKSUM = "file://Source/WebCore/rendering/RenderApplet.h;endline=22;md
 DEPENDS += "luna-service2"
 
 # Don't use qtmultimedia which is set by default PACKAGECONFIG
-PACKAGECONFIG = "gstreamer qtlocation qtsensors"
+PACKAGECONFIG = "gstreamer010 qtlocation qtsensors"
 
 SRC_URI = "git://github.com/webOS-ports/qtwebkit;branch=webOS-ports/master;protocol=git \
            file://enable-needed-features.patch"
