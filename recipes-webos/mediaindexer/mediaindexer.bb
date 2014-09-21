@@ -2,7 +2,7 @@ SUMMARY = "The mediaindexer service component"
 LICENSE = "GPL-3.0"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
-DEPENDS += "db8 glib-2.0 luna-service2 sqlite3 taglib qtbase"
+DEPENDS += "db8 glib-2.0 luna-service2 sqlite3 taglib qtbase luna-sysmgr-common"
 
 # We need this in order to have the mime based media detection working
 RDEPENDS_${PN} += "shared-mime-info"
