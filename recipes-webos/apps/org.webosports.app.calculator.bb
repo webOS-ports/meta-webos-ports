@@ -10,6 +10,6 @@ inherit webos_cordova_application
 
 PV = "0.1.1+gitr${SRCPV}"
 
-SRCREV = "6d50fa99f552a26bf51474fcb625cd9414eff6af"
+SRCREV = "773d80edbb3ab06fe49d9ce7c6fee25e8cba1d9f"
 SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git"
 S = "${WORKDIR}/git"
