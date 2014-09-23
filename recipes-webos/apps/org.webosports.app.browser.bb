@@ -24,6 +24,8 @@ inherit webos_application
 do_install_append() {
     install -d ${D}${webos_applicationsdir}/org.webosports.app.browser/qml
     cp -av ${S}/qml/* ${D}${webos_applicationsdir}/org.webosports.app.browser/qml/
+    cp icon.png ${D}${webos_applicationsdir}/org.webosports.app.browser/
+    cp icon-256x256.png ${D}${webos_applicationsdir}/org.webosports.app.browser/
 }
 
 FILES_${PN} += "${webos_applicationsdir}/org.webosports.app.browser"
