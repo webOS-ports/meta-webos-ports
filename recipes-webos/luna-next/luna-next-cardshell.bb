@@ -11,7 +11,7 @@ RDEPENDS_${PN} += " \
     luna-next \
 "
 
-WEBOS_VERSION = "0.1.0-32_0cddf40b72a2036cbbff555d1cbc7eb7261d3cf3"
+WEBOS_VERSION = "0.1.0-33_6214cb351a098142d0554e8ed7d41b6ee55f79d4"
 
 inherit webos_component
 inherit webos_public_repo
@@ -22,4 +22,24 @@ inherit webos_tweaks
 SRC_URI = "git://github.com/webOS-ports/luna-next-cardshell.git;branch=master;protocol=git"
 S = "${WORKDIR}/git"
 
-FILES_${PN} += "${webos_prefix}/luna-next/shells/card"
+# inheriting webos_application requires the appinfo.json file, which we don't have here.
+# so just install manually db8 permissions.
+do_install_append() {
+    if [ -d ${S}/configuration/db/kinds ] ; then
+        install -d ${D}${webos_sysconfdir}/db/kinds
+        install -m 0644 ${S}/configuration/db/kinds/* ${D}${webos_sysconfdir}/db/kinds
+    fi
+
+    if [ -d ${S}/configuration/db/permissions ] ; then
+        install -d ${D}${webos_sysconfdir}/db/permissions
+        install -v -m 644 ${S}/configuration/db/permissions/* ${D}${webos_sysconfdir}/db/permissions
+    fi
+
+    if [ -d ${S}/configuration/db/activities ] ; then
+        install -d ${D}${webos_sysconfdir}/activities
+        cp -vrf ${S}/configuration/activities/* ${D}${webos_sysconfdir}/activities/
+    fi
+}
+
+FILES_${PN} += "${webos_prefix}/luna-next/shells/card \
+                ${webos_sysconfdir}"
