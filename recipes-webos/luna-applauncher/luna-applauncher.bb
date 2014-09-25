@@ -15,7 +15,7 @@ SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit webos-ports-submissions
-SRCREV = "15bdd70e98c9648d18a0e184e59c39691cc3e35f"
+SRCREV = "bc30686ed2c2b9c311a73b34dc29019320a31102"
 
 do_install() {
     install -d ${D}${webos_applicationsdir}/com.palm.launcher
