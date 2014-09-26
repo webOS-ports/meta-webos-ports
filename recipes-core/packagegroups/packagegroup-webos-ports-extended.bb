@@ -12,6 +12,8 @@ RDEPENDS_${PN} = " \
   pulseaudio-module-switch-on-connect \
   pulseaudio-server \
   pulseaudio-misc \
+  pulseaudio-distro-conf \
+  \
   wireless-tools \
   udev-extraconf \
   alsa-conf \
@@ -95,7 +97,6 @@ LIBHYBRIS_RDEPENDS = " \
     android-property-service \
     qt5-qpa-hwcomposer-plugin \
     pulseaudio-modules-droid \
-    pulseaudio-distro-conf \
 "
 
 RDEPENDS_${PN}_append_tuna = " ${LIBHYBRIS_RDEPENDS}"
