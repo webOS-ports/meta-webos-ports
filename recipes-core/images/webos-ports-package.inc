@@ -14,7 +14,7 @@ ZIP_NAME = "${ZIP_BASENAME}-${DATETIME}${WEBOS_IMAGE_NAME_SUFFIX}"
 PV = "1.0+gitr${SRCPV}"
 
 SRC_URI = "git://github.com/webOS-ports/android-update-package.git;protocol=git;branch=master"
-SRCREV = "303bf4f34133a9825edf64d84090b245a1ca8c22"
+SRCREV = "cee2ff7dc109d250597a159b957212f97de7e7d6"
 
 do_deploy() {
     if [ ! -e ${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}-${MACHINE}.tar.gz ] ; then
