@@ -66,6 +66,9 @@ if [ -d /sdcard/media/0 ] ; then
     ANDROID_MEDIA_DIR="/sdcard/media/0"
 fi
 
+# Run any fixups needed to bring the system into the state we expect it to be in
+. /fixups.sh
+
 info "Checking for rootfs image on sdcard/nand ..."
 if [ -d $ANDROID_SDCARD_DIR/$distro_name ] ; then
     info "Rootfs folder found at $ANDROID_SDCARD_DIR/$distro_name; chrooting into ..."
