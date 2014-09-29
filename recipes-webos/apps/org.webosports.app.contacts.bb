@@ -14,6 +14,6 @@ PV = "0.0.1+gitr${SRCPV}"
 # app. Maybe possible to switch that later.
 WEBOS_APPLICATION_NAME = "com.palm.app.contacts"
 
-SRCREV = "2326890f273e381166e8c0f457ffb86e2fab1a49"
+SRCREV = "7559d412596bbb84a56f077bdb4eb4240b3714ff"
 SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git"
 S = "${WORKDIR}/git"
