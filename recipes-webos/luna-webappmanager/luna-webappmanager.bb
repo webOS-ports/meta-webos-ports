@@ -11,7 +11,7 @@ RDEPENDS_${PN} += " \
     qtwebkit-qmlplugins \
 "
 
-WEBOS_VERSION = "0.2.0-4_19330dfe0bf843bf92121fe9db842cbe6b007d55"
+WEBOS_VERSION = "0.2.0-5_3a16825a450500cc99133889d737504cdb2b23c8"
 
 SRC_URI = "git://github.com/webOS-ports/luna-webappmanager.git;branch=master;protocol=git"
 S = "${WORKDIR}/git"
