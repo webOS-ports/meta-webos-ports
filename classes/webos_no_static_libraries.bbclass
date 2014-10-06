@@ -12,8 +12,8 @@
 #
 
 # Needed by numerous components:
-WEBOS_NO_STATIC_LIBRARIES_WHITELIST_pn-eglibc = "libc_nonshared.a libpthread_nonshared.a"
-WEBOS_NO_STATIC_LIBRARIES_WHITELIST_pn-nativesdk-eglibc = "libc_nonshared.a libpthread_nonshared.a"
+WEBOS_NO_STATIC_LIBRARIES_WHITELIST_pn-glibc = "libc_nonshared.a libpthread_nonshared.a"
+WEBOS_NO_STATIC_LIBRARIES_WHITELIST_pn-nativesdk-glibc = "libc_nonshared.a libpthread_nonshared.a"
 # Needed by numerous components:
 WEBOS_NO_STATIC_LIBRARIES_WHITELIST_pn-libgcc = "libgcc.a"
 # Needed by busybox:
