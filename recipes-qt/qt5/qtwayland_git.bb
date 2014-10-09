@@ -5,7 +5,7 @@ require recipes-qt/qt5/${PN}.inc
 # qt5-git PV is only to indicate that this recipe is compatible with qt5 5.2.1
 
 SRC_URI = "git://github.com/webOS-ports/qtwayland;branch=webOS-ports/master;protocol=git"
-SRCREV = "69ce77c74641bf0c66f13af7e5d6df071d0c41fc"
+SRCREV = "90423c97622c3be61ceb05414841a94757082d45"
 
 FILES_${PN} += "${OE_QMAKE_PATH_PLUGINS}/wayland-graphics-integration"
 FILES_${PN}-dbg += "${OE_QMAKE_PATH_PLUGINS}/wayland-graphics-integration/*/.debug"
