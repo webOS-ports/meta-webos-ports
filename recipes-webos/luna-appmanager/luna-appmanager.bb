@@ -5,11 +5,14 @@ SECTION = "webos/base"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-DEPENDS = "cjson luna-service2 sqlite3 luna-sysmgr-ipc luna-sysmgr-ipc-messages pmloglib librolegen nyx-lib openssl luna-webkit-api luna-prefs libpbnjson freetype luna-sysmgr-common"
-DEPENDS += "qtbase qtquick1"
-DEPENDS += "serviceinstaller"
+DEPENDS = " \
+    cjson luna-service2 sqlite3 luna-sysmgr-ipc luna-sysmgr-ipc-messages \
+    pmloglib librolegen nyx-lib openssl luna-webkit-api luna-prefs \
+    libpbnjson freetype luna-sysmgr-common \
+    qtbase qtquick1 serviceinstaller \
+"
 
-WEBOS_VERSION = "1.0.0-15_a2c2213726aa01b8a213312dff622aebb2a5c0f4"
+WEBOS_VERSION = "1.0.0-16_cf27db9bee3f6c9f64c401508b173e4ebd85ebc6"
 
 inherit webos_public_repo
 inherit webos_daemon
