@@ -15,7 +15,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=12f884d2ae1ff87c09e5b7ccc2c4ca7e \
 
 DEPENDS  = "dbus glib-2.0 ppp iptables"
 
-INC_PR = "r21"
+INC_PR = "r20"
 
 EXTRA_OECONF += "\
     ac_cv_path_WPASUPPLICANT=${sbindir}/wpa_supplicant \
@@ -31,9 +31,9 @@ EXTRA_OECONF += "\
 "
 
 PACKAGECONFIG ??= "wispr \
-                   ${@base_contains('MACHINE_FEATURES', 'wifi','wifi', '', d)} \
-                   ${@base_contains('MACHINE_FEATURES', 'bluetooth','bluetooth', '', d)} \
-                   ${@base_contains('MACHINE_FEATURES', 'phone','3g', '', d)} \
+                   ${@base_contains('DISTRO_FEATURES', 'wifi','wifi', '', d)} \
+                   ${@base_contains('DISTRO_FEATURES', 'bluetooth','bluetooth', '', d)} \
+                   ${@base_contains('DISTRO_FEATURES', '3g','3g', '', d)} \
 "
 
 # If you want ConnMan to support VPN, add following statement into
