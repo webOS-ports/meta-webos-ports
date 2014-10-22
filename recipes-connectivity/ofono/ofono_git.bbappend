@@ -1,6 +1,6 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
-SRCREV = "7c8db19341b426fa0a7b96bfc044f6a8d29d507f"
+SRCREV = "8be724836e3e3c9f3331a4866317f61023f709e0"
 PV = "1.14+git${SRCPV}"
 
 RDEPENDS_${PN} += "mobile-broadband-provider-info"
@@ -13,6 +13,12 @@ SRC_URI  = " \
   file://wait-for-rild.sh \
 "
 S = "${WORKDIR}/git/ofono"
+
+# Can't build out of tree right now so we have to build in tree and
+# override ${SEPB} rather than ${B} as seperatebuilddir.inc has higher
+# priority than we have and ${B} getsoverriden again after we set it to
+# the right value here.
+SEPB = "${S}"
 
 EXTRA_OECONF_append = " --disable-pushforwarder"
 
