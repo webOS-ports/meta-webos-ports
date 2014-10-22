@@ -1,20 +1,18 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
-SRCREV = "7c8db19341b426fa0a7b96bfc044f6a8d29d507f"
-PV = "1.14+git${SRCPV}"
+SRCREV = "8d7f5b834a2465bb51a791e9950e722be948c823"
+PV = "1.12+git${SRCPV}"
 
 RDEPENDS_${PN} += "mobile-broadband-provider-info"
 
 SRC_URI  = " \
-  git://github.com/nemomobile-packages/ofono.git;protocol=git;branch=master \
+  git://github.com/rilmodem/ofono.git;protocol=git;branch=master \
   file://ofono \
   file://0001-Disable-backtrace-cause-linking-to-libdl-fails.patch \
   file://ofono.service \
   file://wait-for-rild.sh \
 "
 S = "${WORKDIR}/git/ofono"
-
-EXTRA_OECONF_append = " --disable-pushforwarder"
 
 do_install_append() {
     # Override default system service configuration
