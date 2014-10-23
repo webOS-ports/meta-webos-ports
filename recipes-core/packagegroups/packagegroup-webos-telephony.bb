@@ -7,6 +7,7 @@ inherit packagegroup
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 RDEPENDS_${PN} = " \
+    ofono \
     webos-telephonyd \
     org.webosports.app.phone \
 "
