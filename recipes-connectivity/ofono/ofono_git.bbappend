@@ -12,7 +12,7 @@ SRC_URI  = " \
   file://ofono.service \
   file://wait-for-rild.sh \
 "
-S = "${WORKDIR}/git/ofono"
+S = "${WORKDIR}/git"
 
 do_install_append() {
     # Override default system service configuration
