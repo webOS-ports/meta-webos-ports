@@ -20,4 +20,4 @@ S = "${WORKDIR}/git"
 FILES_${PN} += "${datadir}/rolegen"
 
 inherit webos-ports-submissions
-SRCREV = "196510e255ba809370b788b2f0010acf9f84b488"
+SRCREV = "b293a3f8b05f83b36b1b673c4e7dd1c18bfcf768"
