@@ -14,7 +14,7 @@ RDEPENDS_${PN} = " \
 SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git;branch=master"
 S = "${WORKDIR}/git"
 
-WEBOS_VERSION = "0.5.0-11_7241948c59e7e5595f6f4a78289b73fa89c10a99"
+WEBOS_VERSION = "0.5.0-12_046fd8db6b0f80ebd088f5982bc18b1d1c11a1f1"
 
 inherit webos_component
 inherit webos_daemon
