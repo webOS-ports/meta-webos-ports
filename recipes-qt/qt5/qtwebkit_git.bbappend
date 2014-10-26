@@ -12,7 +12,7 @@ PACKAGECONFIG = "gstreamer qtlocation qtsensors"
 
 SRC_URI = "git://github.com/webOS-ports/qtwebkit;branch=webOS-ports/master;protocol=git \
            file://enable-needed-features.patch"
-SRCREV = "1495870e155ffe4452839aa3bd166bd12179df83"
+SRCREV = "909f5704144b8218c19d760baaa6cd604ff58bbc"
 
 THUMB_SUPPORT = " QMAKE_CXXFLAGS+=-mthumb"
 # Build breaks for qemuarm with errors while building JavaScriptCore:
