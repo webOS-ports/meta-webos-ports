@@ -5,6 +5,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-3.0;md5=c79ff39f19dfec6d293
 
 WEBOS_VERSION = "0.3.0-2_32c8039276503365bff3fa20e5263fd3d82916e3"
 
+DEPENDS += "qtbase qtdeclarative"
+
 inherit webos_component
 inherit webos_enhanced_submissions
 inherit webos_public_repo
