@@ -12,7 +12,7 @@ SRC_URI = "git://github.com/webOS-ports/luna-next.git;branch=master;protocol=git
 
 S = "${WORKDIR}/git"
 
-WEBOS_VERSION = "0.1.0-21_52c193c0a6f6a70920b40467fc81ee72fb5a73b4"
+WEBOS_VERSION = "0.1.0-22_c9be911c3e0680d20ae47444670a1afee2454a43"
 
 inherit webos_component
 inherit webos_daemon
