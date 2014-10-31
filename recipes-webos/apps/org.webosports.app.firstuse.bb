@@ -22,6 +22,7 @@ SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git;branch=master"
 S = "${WORKDIR}/git"
 
 INSANE_SKIP_${PN} = "libdir"
+INSANE_SKIP_${PN}-dbg = "libdir"
 
 FILES_${PN} += "${datadir}/luneos-license-agreements"
 FILES_${PN}-dbg += "${webos_applicationsdir}/${PN}/firstuse/.debug"
