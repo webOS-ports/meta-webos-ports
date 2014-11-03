@@ -12,6 +12,10 @@ DEPENDS = " \
     qtbase qtquick1 serviceinstaller \
 "
 
+RDEPENDS_${PN} += " \
+    bash \
+"
+
 WEBOS_VERSION = "1.0.0-17_d6fe996abfb44b57d93a2cc4cf580e1eb7c9b164"
 
 inherit webos_public_repo
