@@ -6,5 +6,5 @@ EXTRA_OECONF += " \
     --enable-debug \
 "
 
-SRC_URI = "git://github.com/webOS-ports/libhybris;branch=webOS-ports/master;protocol=git"
-SRCREV = "253a57741890df90092e4ab4dce543804f03919b"
+SRC_URI = "git://github.com/webOS-ports/libhybris;branch=webOS-ports/master-next;protocol=git"
+SRCREV = "69d82b1aee617388c90c1888e1c5b5faf3a6ed1b"
