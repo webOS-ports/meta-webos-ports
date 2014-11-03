@@ -12,8 +12,8 @@ DEPENDS = "qtbase libhybris qtwayland"
 # Android version we select per machine
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-SRC_URI = "git://github.com/webOS-ports/qt5-qpa-hwcomposer-plugin.git;branch=webOS-ports/master-next"
-SRCREV = "e20cc96a547b399a368341efa8aaf4e2e74cc8ac"
+SRC_URI = "git://github.com/webOS-ports/qt5-qpa-hwcomposer-plugin.git;branch=webOS-ports/master"
+SRCREV = "cd9bf94cd899847b574ac0f2a04af4aa434201e4"
 S = "${WORKDIR}/git/hwcomposer"
 
 SRC_URI_append_tenderloin = " \
