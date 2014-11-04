@@ -13,8 +13,8 @@ DEPENDS = "luna-service2 jemalloc icu pmloglib curl glib-2.0 leveldb leveldb-tl 
 
 WEBOS_VERSION = "3.2.0-145_70aea26dea652fd257ac2a1d37d2214e59409773"
 
-# ensure leveldb is installed in image
-RDEPENDS_${PN} = "leveldb"
+RDEPENDS_${PN} += "leveldb bash"
+RDEPENDS_${PN}-tests += "bash"
 
 inherit webos_component
 inherit webos_public_repo
