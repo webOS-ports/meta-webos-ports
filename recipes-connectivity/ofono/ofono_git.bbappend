@@ -14,11 +14,8 @@ SRC_URI  = " \
 "
 S = "${WORKDIR}/git/ofono"
 
-# Can't build out of tree right now so we have to build in tree and
-# override ${SEPB} rather than ${B} as seperatebuilddir.inc has higher
-# priority than we have and ${B} getsoverriden again after we set it to
-# the right value here.
-SEPB = "${S}"
+# Can't build out of tree right now so we have to build in tree
+B = "${S}"
 
 EXTRA_OECONF_append = " --disable-pushforwarder"
 
