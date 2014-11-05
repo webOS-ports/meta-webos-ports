@@ -96,10 +96,6 @@ if [ ! -e /rfs/.firstboot_done ] ; then
 
         # Copy initial content to new location outside rootfs
         cp -rav /rfs/$dir/* $datadir/$dir
-
-        # Remove old content so we know clearly when things are not
-        # mounted correctly
-        rm -rf /rfs/$dir/*
     done
 
     # setup cryptofs which is not a real cryptofs yet
