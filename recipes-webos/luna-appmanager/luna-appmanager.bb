@@ -16,7 +16,7 @@ RDEPENDS_${PN} += " \
     bash \
 "
 
-WEBOS_VERSION = "1.0.0-17_d6fe996abfb44b57d93a2cc4cf580e1eb7c9b164"
+WEBOS_VERSION = "1.0.0-18_db483e2773abdaaa24efafd4df45a27f3c25ba1c"
 
 inherit webos_public_repo
 inherit webos_daemon
