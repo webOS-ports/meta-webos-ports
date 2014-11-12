@@ -11,7 +11,7 @@ RDEPENDS_${PN} += " \
     luna-next \
 "
 
-WEBOS_VERSION = "0.1.0-37_bd3d1f058b84ee4f134c647eea4f08cc21667082"
+WEBOS_VERSION = "0.1.0-38_9e9075213ac6fee755923d5b876c4da38315dc8f"
 
 inherit webos_component
 inherit webos_public_repo
