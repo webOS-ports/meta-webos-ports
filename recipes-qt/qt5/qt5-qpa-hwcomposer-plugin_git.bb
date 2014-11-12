@@ -16,8 +16,13 @@ SRC_URI = "git://github.com/webOS-ports/qt5-qpa-hwcomposer-plugin.git;branch=web
 SRCREV = "cd9bf94cd899847b574ac0f2a04af4aa434201e4"
 S = "${WORKDIR}/git/hwcomposer"
 
+SRC_URI_append_mako = " \
+    file://0001-Unblock-rendering-for-Android-4.4.4-and-hwcomposer-1.patch;striplevel=2 \
+"
+
 SRC_URI_append_tenderloin = " \
-    file://0001-HACK-fix-support-for-HP-touchpad-with-hwcomposer-1.3.patch;striplevel=2 \
+    file://0001-Unblock-rendering-for-Android-4.4.4-and-hwcomposer-1.patch;striplevel=2 \
+    file://0002-Add-QCOM_BSP-define-switch.patch;striplevel=2 \
 "
 
 inherit qmake5
