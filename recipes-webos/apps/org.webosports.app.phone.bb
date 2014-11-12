@@ -11,7 +11,7 @@ inherit webos_public_repo
 inherit webos_system_bus
 inherit webos_enhanced_submissions
 
-WEBOS_VERSION = "0.1.0-5_2115b8c2457ae13c28a7cbae1cc171a662fabe2e"
+WEBOS_VERSION = "0.1.0-6_03e94248261214db57d3ed1152c56888a02e774f"
 
 SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git"
 S = "${WORKDIR}/git"
