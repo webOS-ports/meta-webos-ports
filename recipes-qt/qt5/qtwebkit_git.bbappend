@@ -4,7 +4,7 @@ DEPENDS += "luna-service2"
 PACKAGECONFIG = "gstreamer qtlocation qtsensors"
 
 SRC_URI = "git://github.com/webOS-ports/qtwebkit;branch=webOS-ports/master;protocol=git"
-SRCREV = "c25994dc556f02af9ce65a85174d9c35bc51962a"
+SRCREV = "58a079d22df5433447bb1dd3f796a8a22ae977cf"
 
 THUMB_SUPPORT = " QMAKE_CXXFLAGS+=-mthumb"
 # Build breaks for qemuarm with errors while building JavaScriptCore:
