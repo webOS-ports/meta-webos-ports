@@ -3,8 +3,10 @@ SECTION = "webos/apps"
 LICENSE = "Apache-2.0 & GPL-3.0"
 LIC_FILES_CHKSUM = " \
     file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10 \
-    file://COPYING;md5=1d79dd5a6b0f3d9bd194c5e3a97986ad \
+    file://COPYING;md5=2839aa2093f43edc5a4d4be71c6e526d \
 "
+
+DEPENDS = "qtbase qtdeclarative qtwebkit"
 
 RDEPENDS_${PN} = " \
     qtdeclarative-qmlplugins \
@@ -14,18 +16,18 @@ RDEPENDS_${PN} = " \
 SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git;branch=master"
 S = "${WORKDIR}/git"
 
-WEBOS_VERSION = "0.5.0-12_046fd8db6b0f80ebd088f5982bc18b1d1c11a1f1"
+WEBOS_VERSION = "0.5.0-13_99b11f7eb841892d4701122913364d314f89c222"
 
 inherit webos_component
 inherit webos_daemon
 inherit webos_enhanced_submissions
 inherit webos_application
 
-do_install_append() {
-    install -d ${D}${webos_applicationsdir}/org.webosports.app.browser/qml
-    cp -av ${S}/qml/* ${D}${webos_applicationsdir}/org.webosports.app.browser/qml/
-    cp icon.png ${D}${webos_applicationsdir}/org.webosports.app.browser/
-    cp icon-256x256.png ${D}${webos_applicationsdir}/org.webosports.app.browser/
-}
+inherit cmake_qt5
+inherit webos_cmake
+
+INSANE_SKIP_${PN} = "libdir"
+INSANE_SKIP_${PN}-dbg = "libdir"
 
 FILES_${PN} += "${webos_applicationsdir}/org.webosports.app.browser"
+FILES_${PN}-dbg += "${webos_applicationsdir}/${PN}/browserutils/.debug"
