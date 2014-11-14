@@ -1,4 +1,8 @@
-SRC_URI = "git://github.com/webOS-ports/qtwayland;branch=webOS-ports/master-next;protocol=git"
+FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
+
+SRC_URI = "git://github.com/webOS-ports/qtwayland;branch=webOS-ports/master-next;protocol=git \
+           file://0001-Fix-touchevent-coordinates.patch \
+          "
 SRCREV = "56c40e2665313cd3f16371bdd23a573362f35f04"
 
 # don't remove create_cmake
