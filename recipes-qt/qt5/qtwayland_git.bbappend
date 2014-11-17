@@ -1,5 +1,5 @@
 SRC_URI = "git://github.com/webOS-ports/qtwayland;branch=webOS-ports/master-next;protocol=git"
-SRCREV = "56c40e2665313cd3f16371bdd23a573362f35f04"
+SRCREV = "a0c5ba81f4646e574eb1e436f87bde55da46942c"
 
 # don't remove create_cmake
 EXTRA_QMAKEVARS_POST_remove = "CONFIG-=create_cmake"
