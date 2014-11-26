@@ -10,6 +10,8 @@ SRC_URI  = " \
   git://github.com/nemomobile-packages/ofono.git;protocol=git;branch=master \
   file://0001-Disable-backtrace-cause-linking-to-libdl-fails.patch \
   file://0001-Enable-the-various-modem-plugins-we-support-again.patch;striplevel=2 \
+  file://0001-Disable-bluetooth-support-completely.patch;striplevel=2 \
+  file://0001-Add-support-for-the-Ericsson-F5521gw-modem.patch;striplevel=2 \
   file://ofono \
   file://ofono.service \
   file://wait-for-rild.sh \
