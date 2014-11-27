@@ -14,7 +14,6 @@ SRC_URI  = " \
   file://0001-Add-support-for-the-Ericsson-F5521gw-modem.patch;striplevel=2 \
   file://ofono \
   file://ofono.service \
-  file://wait-for-rild.sh \
 "
 S = "${WORKDIR}/git/ofono"
 
@@ -26,10 +25,7 @@ EXTRA_OECONF_append = " --disable-pushforwarder"
 do_install_append() {
     # Override default system service configuration
     cp -v ${WORKDIR}/ofono.service ${D}${systemd_unitdir}/system/ofono.service
-
-    install -d ${D}${bindir}
-    install -m 0744 ${WORKDIR}/wait-for-rild.sh ${D}${bindir}
 }
 
 # meta-systemd sets this to disable but we as distro want it to be enabled by default
-SYSTEMD_AUTO_ENABLE = "enable"
+SYSTEMD_AUTO_ENABLE_forcevariable = "enable"
