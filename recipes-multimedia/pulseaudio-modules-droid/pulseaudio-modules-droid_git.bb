@@ -6,12 +6,12 @@ DEPENDS += "pulseaudio virtual/libhardware virtual/android-headers dbus udev"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-PV = "4.0+gitr${SRCPV}"
+PV = "5.0.16+gitr${SRCPV}"
 
 SRC_URI = "git://github.com/webOS-ports/pulseaudio-modules-droid;branch=webOS-ports/master-next"
 S = "${WORKDIR}/git"
 
-SRCREV = "5eaf1405e1b48f128ffb3577bda3e7ddd0c75a8c"
+SRCREV = "cb861412b41bfdcbdac2e021c208808b1fcda986"
 
 EXTRA_OECONF += " \
     --with-droid-device=${MACHINE} \
@@ -24,3 +24,6 @@ FILES_${PN} += "${libdir}/pulse-5.0/modules/*.so"
 FILES_${PN}-dev += "${libdir}/pulse-5.0/modules/*.la"
 FILES_${PN}-staticdev += "${libdir}/pulse-5.0/modules/*.a"
 FILES_${PN}-dbg += "${libdir}/pulse-5.0/modules/.debug"
+
+# Add pulse user to audio group so he can access audio dev nodes from Android
+GROUPMEMS_PARAM_${PN} = "-a pulse -g audio"
