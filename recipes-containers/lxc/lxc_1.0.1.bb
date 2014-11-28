@@ -48,6 +48,7 @@ PACKAGECONFIG ??= ""
 PACKAGECONFIG[doc] = "--enable-doc,--disable-doc,,"
 PACKAGECONFIG[rpath] = "--enable-rpath,--disable-rpath,,"
 PACKAGECONFIG[apparmour] = "--enable-apparmor,--disable-apparmor,apparmor,apparmor"
+PACKAGECONFIG[python] = "--enable-python,--disable-python,python3,python3"
 
 inherit autotools pkgconfig ptest
 
