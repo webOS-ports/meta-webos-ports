@@ -1,4 +1,4 @@
-SRC_URI = "git://github.com/webOS-ports/qtwayland;branch=webOS-ports/master-next;protocol=git"
+SRC_URI = "git://github.com/webOS-ports/qtwayland;branch=webOS-ports/master;protocol=git"
 SRCREV = "a0c5ba81f4646e574eb1e436f87bde55da46942c"
 
 # don't remove create_cmake
