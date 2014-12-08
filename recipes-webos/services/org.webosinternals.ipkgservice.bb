@@ -40,11 +40,11 @@ pkg_postinst_${PN}() {
         # Install webosports all-arch feeds
         echo "src/gz webosports http://feeds.webos-ports.org/webos-ports/all" > $APPS/${sysconfdir}/opkg/webos-ports.conf
 	# Install Macaw 2 (LuneOS-compatible) feed
-	echo "src Macaw-enyo http://minego.net/preware/macaw-enyo" > $APPS/${sysconfdir}/opkg/macaw-enyo.conf
+	echo "src Macaw-enyo http://minego.net/preware/macaw-enyo" > $APPS/${sysconfdir}/opkg/macaw-enyo.conf.disabled
 	# Install Hominid Software feed
-	echo "src Hominid-Software http://hominidsoftware.com/preware" > $APPS/${sysconfdir}/opkg/hominid-software.conf
+	echo "src Hominid-Software http://hominidsoftware.com/preware" > $APPS/${sysconfdir}/opkg/hominid-software.conf.disabled
 	# Install FeedSpider2 feed
-	echo "src/gz FeedSpider2 http://feedspider.net/luneos" > $APPS/${sysconfdir}/opkg/feedspider.conf
+	echo "src/gz FeedSpider2 http://feedspider.net/luneos" > $APPS/${sysconfdir}/opkg/feedspider.conf.disabled
     else
         exit 1
     fi
