@@ -20,12 +20,7 @@ SRCREV = "f71008ebd443577d3ca1eb1600f37cf1354b4691"
 # Don't uncomment until all of the do_*() tasks have been moved out of the recipe
 inherit webos_ports_fork_repo
 inherit pkgconfig
-
-# We need to warrant the correct order for the following two inherits as webos_cmake is
-# setting the build dir to be outside of the source dir which is overriden by cmake_qt5
-# again if we inherit it afterwards.
-inherit cmake_qt5
-inherit webos_cmake
+inherit webos_cmake_qt5
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

@@ -17,16 +17,11 @@ SRCREV = "b3660ff2439274e3d68d48ddbd2b000502b46afe"
 
 inherit webos_ports_repo
 inherit webos_system_bus
+inherit webos_cmake_qt5
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     file://0003-CMakeLists-check-only-for-libsystemd-pkg.patch \
 "
 S = "${WORKDIR}/git"
-
-# We need to warrant the correct order for the following two inherits as webos_cmake is
-# setting the build dir to be outside of the source dir which is overriden by cmake_qt5
-# again if we inherit it afterwards.
-inherit cmake_qt5
-inherit webos_cmake
 
 FILES_${PN} += "${webos_frameworksdir}"

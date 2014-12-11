@@ -26,9 +26,4 @@ WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 inherit webos_ports_repo
 inherit pkgconfig
 inherit webos_system_bus
-
-# We need to warrant the correct order for the following two inherits as webos_cmake is
-# setting the build dir to be outside of the source dir which is overriden by cmake_qt5
-# again if we inherit it afterwards.
-inherit cmake_qt5
-inherit webos_cmake
+inherit webos_cmake_qt5
