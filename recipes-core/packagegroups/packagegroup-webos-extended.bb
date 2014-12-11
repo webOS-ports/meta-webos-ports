@@ -38,15 +38,6 @@ VIRTUAL-RUNTIME_novacomd ?= "novacomd"
 # .bbappend in meta-<distro> to do PR/PRINC/PR_append bump anyway so it's easier
 # to change this variable in .bbappend together with bump.
 #
-# XXX browserserver, webkit-supplemental, webkit-webos should be added to the
-# RDEPENDS of the top level components which need them.
-WEBOS_PACKAGESET_BROWSER = " \
-    browser-adapter \
-    com.palm.app.browser \
-    browserserver \
-    webkit-supplemental \
-    webkit-webos \
-"
 
 # Enyo 1 and related framework packages
 WEBOS_PACKAGESET_ENYO_1 = " \

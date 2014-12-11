@@ -15,9 +15,6 @@ PREFERRED_PROVIDER_libjson = "json-c"
 VIRTUAL-RUNTIME_cpushareholder = "cpushareholder-stub"
 VIRTUAL-RUNTIME_rdx-utils = "rdx-utils-stub"
 
-# Fonts used by the browser
-VIRTUAL-RUNTIME_browser_fonts = "isis-fonts"
-
 # TODO: find what is needed from initscripts and merge that to webos-initscripts
 VIRTUAL-RUNTIME_initscripts = "initscripts webos-initscripts webos-shutdownscripts"
 
