@@ -10,10 +10,6 @@ DEPENDS += "luna-webkit-api"
 DEPENDS += "luna-sysmgr-ipc luna-sysmgr-ipc-messages"
 DEPENDS += "qtbase"
 
-# temporary until we have oe-core with this patch included
-# http://lists.openembedded.org/pipermail/openembedded-core/2013-July/080893.html
-DEPENDS += "virtual/${TARGET_PREFIX}binutils"
-
 PV = "3.0.0-3+git${SRCPV}"
 SRCREV = "f71008ebd443577d3ca1eb1600f37cf1354b4691"
 
