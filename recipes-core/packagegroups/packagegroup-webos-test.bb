@@ -85,11 +85,6 @@ PYTHON = " \
     python-zlib \
 "
 
-# to replace task-webos-test by packagegroup-webos-test during upgrade on target
-RPROVIDES_${PN} = "task-webos-test"
-RREPLACES_${PN} = "task-webos-test"
-RCONFLICTS_${PN} = "task-webos-test"
-
 VALGRIND = "valgrind"
 # only armv7a is supported
 VALGRIND_arm = ""

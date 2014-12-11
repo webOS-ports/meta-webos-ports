@@ -12,17 +12,15 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 # Available IMAGE_FEATURES:
 #
 # - webos-test          - QA
-# - webos-temp          - temporary packages
 # - webos-extended      - webOS components
 #
 # and IMAGE_FEATURES from core-image
 
 FEATURE_PACKAGES_webos-extended = "packagegroup-webos-extended"
 FEATURE_PACKAGES_webos-test = "packagegroup-webos-test"
-FEATURE_PACKAGES_webos-temp = "packagegroup-webos-temp"
 
 WEBOS_IMAGE_DEFAULT_SSH_IMAGE_FEATURE = "ssh-server-dropbear"
-WEBOS_IMAGE_DEFAULT_FEATURES = "webos-temp package-management"
+WEBOS_IMAGE_DEFAULT_FEATURES = "package-management"
 
 WEBOS_IMAGE_DEFAULT_FEATURES_append = "${@ ' ${WEBOS_IMAGE_DEFAULT_SSH_IMAGE_FEATURE}' if d.getVar('WEBOS_DISTRO_PRERELEASE',True) != '' else ''}"
 WEBOS_IMAGE_DEFAULT_FEATURES_append_emulator = " ${WEBOS_IMAGE_DEFAULT_SSH_IMAGE_FEATURE}"
