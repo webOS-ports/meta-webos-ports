@@ -7,7 +7,6 @@ DEPENDS = "luna-service2 glib-2.0 mjson"
 
 WEBOS_VERSION = "2.0.0-2_b903f683da06760762fbd5afd926b52613e64631"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake

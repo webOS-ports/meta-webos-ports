@@ -14,7 +14,6 @@ RDEPENDS_${PN} += "${VIRTUAL-RUNTIME_ntp}"
 
 WEBOS_VERSION = "2.0.1-38_94a530276e37f97e1b6cac18b1db2429ca7de8eb"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake

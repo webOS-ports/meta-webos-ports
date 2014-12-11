@@ -11,7 +11,6 @@ RDEPENDS_${PN} = "ca-certificates"
 
 WEBOS_VERSION = "2.0.0-29_3cec1b22765db57b9c0c9bbba8e3cee0a2c4e2cb"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake

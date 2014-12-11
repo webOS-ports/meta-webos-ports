@@ -22,8 +22,9 @@ RDEPENDS_${PN} += "${VIRTUAL-RUNTIME_cpushareholder}"
 
 WEBOS_VERSION = "3.0.0-3_b7c8f26142bcf5941f3f2ebdd33647709f1bb74c"
 
+WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
+
 # Don't uncomment until all of the do_*() tasks have been moved out of the recipe
-#inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_system_bus

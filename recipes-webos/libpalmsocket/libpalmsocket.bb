@@ -9,7 +9,6 @@ DEPENDS = "pmloglib glib-2.0 openssl c-ares pmstatemachineengine"
 
 WEBOS_VERSION = "2.0.0-32_0319a6fba4e81dd624ed22cff09a972df389f391"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake

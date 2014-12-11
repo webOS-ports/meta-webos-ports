@@ -4,7 +4,6 @@ LIC_FILES_CHKSUM = "file://README.md;beginline=86;endline=105;md5=649a1e756b7d4e
 
 DEPENDS += "luna-service2 virtual/libandroid-properties libpbnjson"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_cmake
 inherit pkgconfig

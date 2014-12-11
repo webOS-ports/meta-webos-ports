@@ -9,7 +9,6 @@ DEPENDS = "tzdata python-tz-native"
 
 WEBOS_VERSION = "2.0.1-10_6ad92a6963f2af7ab347a52e3b1bfa248c2edd03"
 
-#inherit webos_component TODO
 inherit allarch
 inherit webos_public_repo
 inherit webos_enhanced_submissions

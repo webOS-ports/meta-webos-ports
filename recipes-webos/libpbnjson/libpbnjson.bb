@@ -9,7 +9,6 @@ DEPENDS = "yajl glib-2.0 gperf-native lemon-native gmp uriparser boost"
 
 WEBOS_VERSION = "2.9.0-38_5ffe5674feabf4f5a36ad168230c567933cf6586"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake

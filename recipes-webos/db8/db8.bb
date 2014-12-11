@@ -16,7 +16,6 @@ WEBOS_VERSION = "3.2.0-145_70aea26dea652fd257ac2a1d37d2214e59409773"
 RDEPENDS_${PN} += "leveldb bash"
 RDEPENDS_${PN}-tests += "bash"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake

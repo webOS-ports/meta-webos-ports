@@ -10,7 +10,6 @@ DEPENDS = "jemalloc luna-service2 db8 glibmm boost libsandbox glib-2.0 libsigc++
 
 WEBOS_VERSION = "2.0.0-63_a70163ed5f5bb473493daad751313bf42313607b"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake

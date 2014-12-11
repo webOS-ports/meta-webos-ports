@@ -9,7 +9,6 @@ DEPENDS = "jemalloc db8 boost curl libpalmsocket libsandbox pmloglib icu"
 
 WEBOS_VERSION = "2.0.0-99_3a433c00b37dbfc45210b30248b0b30a1503230e"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake

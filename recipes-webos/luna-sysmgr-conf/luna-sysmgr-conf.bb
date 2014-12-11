@@ -8,7 +8,6 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 WEBOS_VERSION = "3.0.0-3_1bcdb5bd8b97d148a3e46ae002fcf091b6d202f6"
 
 # Don't uncomment until all of the do_*() tasks have been moved out of the recipe
-#inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_machine_dep

@@ -7,7 +7,6 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 WEBOS_VERSION = "3.0.0-2_df161a4f0c8374ab8a33a295698154a612ceaf08"
 
-#inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 #inherit webos_cmake

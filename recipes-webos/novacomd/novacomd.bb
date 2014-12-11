@@ -5,7 +5,6 @@ SECTION = "webos/base"
 
 WEBOS_VERSION = "2.0.0-124_ff6abcb3c3d3244ead3b48851f761da92f5ff62b"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake

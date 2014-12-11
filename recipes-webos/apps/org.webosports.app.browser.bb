@@ -18,7 +18,6 @@ S = "${WORKDIR}/git"
 
 WEBOS_VERSION = "0.5.0-14_db4d164ae325efd3a7ec4166c91ce7f96640e616"
 
-inherit webos_component
 inherit pkgconfig
 inherit webos_enhanced_submissions
 inherit webos_application

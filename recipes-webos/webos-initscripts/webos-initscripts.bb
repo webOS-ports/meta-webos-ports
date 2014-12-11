@@ -10,7 +10,6 @@ RDEPENDS_${PN} = "upstart ${VIRTUAL-RUNTIME_rdx-utils}"
 
 WEBOS_VERSION = "2.0.0-123_8255bd94321e3ae79a55b7572aeac8868bd560fb"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake

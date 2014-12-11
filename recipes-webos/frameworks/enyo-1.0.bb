@@ -9,7 +9,6 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 # is parsed as 2nd submission from @128 branch and there is only master branch
 WEBOS_VERSION = "1.0-128.2_e68b0e2b0523179c6733982d91fafaf36e85e1bd;branch=master"
 
-#inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 #inherit webos_cmake

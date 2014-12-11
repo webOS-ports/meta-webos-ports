@@ -6,7 +6,6 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=4ddd17b0c9241d7b24a4960caefe8e40"
 DEPENDS = "qtbase qtdeclarative libwebos-application"
 RDEPENDS_${PN} += "qtdeclarative-qmlplugins libqofono"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_system_bus
 inherit webos_enhanced_submissions

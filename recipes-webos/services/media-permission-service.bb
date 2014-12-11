@@ -13,6 +13,7 @@ SRCREV = "d7e0870414466c390ce04c46f6315c36db494285"
 SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git;branch=master"
 S = "${WORKDIR}/git"
 
+WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/service/sysbus"
 
 do_install() {

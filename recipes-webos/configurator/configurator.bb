@@ -10,7 +10,6 @@ DEPENDS = "luna-service2 db8 cjson glib-2.0 pmloglib"
 
 WEBOS_VERSION = "3.0.0-59_f2c890c3b2116f61a561c6fac2a587be35a63620"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake

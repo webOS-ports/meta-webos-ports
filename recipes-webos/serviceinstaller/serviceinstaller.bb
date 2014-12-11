@@ -9,7 +9,6 @@ DEPENDS = "librolegen glib-2.0 libpbnjson luna-service2"
 
 WEBOS_VERSION = "2.0.0-2_0a0484add41dad82c0775419f291c5420326ab46"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake

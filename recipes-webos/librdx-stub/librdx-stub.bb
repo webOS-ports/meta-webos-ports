@@ -9,7 +9,6 @@ PROVIDES = "librdx"
 
 WEBOS_VERSION = "2.0.0-9_9d1561f235500fabaa9d9746849aa2b639855403"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake

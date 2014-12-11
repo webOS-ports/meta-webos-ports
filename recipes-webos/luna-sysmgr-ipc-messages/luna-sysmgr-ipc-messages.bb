@@ -9,7 +9,6 @@ DEPENDS = "luna-sysmgr-ipc luna-webkit-api"
 
 WEBOS_VERSION = "2.0.0-1_26ccf5166b228b18298d0ae068fcaf858eed59dc"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake

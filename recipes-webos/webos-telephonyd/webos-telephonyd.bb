@@ -7,7 +7,6 @@ DEPENDS = "luna-service2 cjson glib-2.0 luna-prefs"
 
 WEBOS_VERSION = "0.1.0-1_3d544cdeba57d068ce17bc4bc57f0e036ecfc6dd"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_cmake
 inherit pkgconfig

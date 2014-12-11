@@ -6,7 +6,6 @@ DEPENDS += "luna-service2"
 
 WEBOS_VERSION = "0.1.0-3_da907470c061be078684508bc0a845ceba59a00d"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake

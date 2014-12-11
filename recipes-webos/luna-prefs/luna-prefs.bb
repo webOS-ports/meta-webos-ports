@@ -12,7 +12,6 @@ WEBOS_VERSION = "2.0.0-7_f10f70b5d198460d38024c8fd02d31614669a73b"
 
 RDEPENDS_${PN} = "luna-prefs-data"
 
-#inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake

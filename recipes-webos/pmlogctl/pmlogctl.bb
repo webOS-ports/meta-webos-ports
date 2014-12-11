@@ -9,7 +9,6 @@ DEPENDS = "pmloglib"
 
 WEBOS_VERSION = "3.0.0-17_6ce8ed0938006ed7d1fb3235cb65bc64b713705a"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake

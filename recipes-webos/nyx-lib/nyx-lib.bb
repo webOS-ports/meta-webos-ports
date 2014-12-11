@@ -20,7 +20,6 @@ DEPENDS = "glib-2.0"
 
 WEBOS_VERSION = "6.1.0-70_7054fabb78bbcaaf0ff3bfb2ea7fde6b6905860a"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake

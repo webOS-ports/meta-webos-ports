@@ -13,6 +13,7 @@ SRCREV = "3f7717032088b51a5f8b03f995a9c1b4bb1a0f09"
 SRC_URI = "git://github.com/webOS-ports/org.webosports.service.contacts.carddav;protocol=git;branch=master"
 S = "${WORKDIR}/git"
 
+WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/service/sysbus"
 
 do_install() {

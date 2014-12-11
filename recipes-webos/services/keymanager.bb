@@ -15,6 +15,7 @@ SRCREV = "377444267c6e0d08935de78ddce53848dd410514"
 SRC_URI = "git://github.com/webOS-ports/keymanager;protocol=git;branch=master"
 S = "${WORKDIR}/git"
 
+WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/service/sysbus"
 
 do_install() {

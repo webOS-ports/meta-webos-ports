@@ -13,7 +13,6 @@ RDEPENDS_${PN} += "nodejs-module-webos-dynaload nodejs-module-webos-pmlog nodejs
 
 WEBOS_VERSION = "3.0.1-81_f5bf3e2b5aa411c0408e9694bc63cacd339a252d"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake

@@ -16,7 +16,6 @@ WEBOS_VERSION = "0.2.0-8_ee0bfa6ded53afa6f136d6f81b12f9df4d4e8883"
 SRC_URI = "git://github.com/webOS-ports/luna-webappmanager.git;branch=master;protocol=git"
 S = "${WORKDIR}/git"
 
-inherit webos_component
 inherit webos_enhanced_submissions
 inherit pkgconfig
 inherit webos_system_bus

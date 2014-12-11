@@ -11,7 +11,6 @@ RDEPENDS_${PN} = "connman connman-client"
 
 WEBOS_VERSION = "1.0.0-11_45a1c53d88b41c05de6c7b7e6040254f154a7e16"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake

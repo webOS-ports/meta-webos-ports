@@ -10,7 +10,6 @@ DEPENDS = "nyx-lib"
 
 WEBOS_VERSION = "1.1.2-17_aabac627dd546cef27dad81d56bb7d1a1196b7c1"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake

@@ -13,7 +13,6 @@ RDEPENDS_${PN} += " \
 
 WEBOS_VERSION = "0.1.0-43_dd16f1ce8df9f8d7566803943ce9d4ad3c0226b8"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake

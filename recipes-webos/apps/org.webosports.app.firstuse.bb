@@ -7,7 +7,6 @@ WEBOS_VERSION = "0.3.0-7_40200dc2451cc066bf67e6d06a39873cd152c21d"
 
 DEPENDS += "qtbase qtdeclarative"
 
-inherit webos_component
 inherit webos_enhanced_submissions
 inherit webos_public_repo
 inherit webos_application

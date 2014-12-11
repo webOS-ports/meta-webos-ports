@@ -7,7 +7,6 @@ DEPENDS = "luna-service2 cjson glib-2.0 pulseaudio"
 
 WEBOS_VERSION = "0.1.0-10_c729e0bdea1539a9ba68fceb037bb9776f5bde78"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake

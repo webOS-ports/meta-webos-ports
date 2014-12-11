@@ -16,6 +16,8 @@
 #     skipped.
 #
 
+WEBOS_SYSTEM_BUS_SKIP_DO_TASKS ?= "1"
+
 webos_system_bus_install_files () {
     local _LS_PRV_DIR="${D}$1"    # destination directory for private hub files
     local _LS_PUB_DIR="${D}$2"    # destination directory for public hub files

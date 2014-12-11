@@ -10,7 +10,6 @@ DEPENDS = "luna-service2 db8 boost openssl glib-2.0 pmloglib nyx-lib"
 
 WEBOS_VERSION = "3.0.0-123_36477172ae0857eb02f3af2e54860a237afbd660"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake

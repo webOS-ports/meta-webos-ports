@@ -13,7 +13,6 @@ WEBOS_COMPONENT_VERSION = "0.1.0"
 WEBOS_SUBMISSION = "0"
 PV = "${WEBOS_COMPONENT_VERSION}+gitr${SRCPV}"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_cmake
 inherit pkgconfig

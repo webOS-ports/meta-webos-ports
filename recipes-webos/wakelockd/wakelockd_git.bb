@@ -7,7 +7,6 @@ DEPENDS = "glib-2.0 libevdev libsuspend luna-service2 libpbnjson"
 
 WEBOS_VERSION = "0.1.0-1_a3ac3ca8c3a36fed58243826b8289cac65339394"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_cmake
 inherit pkgconfig

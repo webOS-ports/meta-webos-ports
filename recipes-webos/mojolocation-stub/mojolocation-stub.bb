@@ -7,7 +7,6 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 WEBOS_VERSION = "2.0.0-2_8d6e78b68385f729c0305f79f20fde3e30645c50"
 
-#inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 #inherit webos_cmake
@@ -17,6 +16,7 @@ inherit allarch
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
+WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files/sysbus"
 
 do_install() {

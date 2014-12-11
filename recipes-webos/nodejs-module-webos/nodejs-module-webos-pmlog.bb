@@ -9,7 +9,6 @@ DEPENDS = "pmloglib node-gyp-native"
 
 WEBOS_VERSION = "3.0.1-18_ea9849d556708c5f2801a85acb58dc7a19392ade"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 #inherit webos_cmake

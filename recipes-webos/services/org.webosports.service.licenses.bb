@@ -12,6 +12,7 @@ SRCREV = "fdd816e7c568a173e50d0e4b5d3bb2fcf1f84206"
 SRC_URI = "git://github.com/webOS-ports/${PN};branch=master;protocol=git"
 S = "${WORKDIR}/git"
 
+WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 PALM_DIR = "${prefix}/palm"
 
 do_install() {

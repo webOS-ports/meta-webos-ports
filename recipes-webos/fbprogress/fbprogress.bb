@@ -9,7 +9,6 @@ RDEPENDS_${PN} = "tar"
 
 WEBOS_VERSION = "2.0.0-22_0dc946ef1cb557383e59e499b3ac9194dfd08b4d"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake

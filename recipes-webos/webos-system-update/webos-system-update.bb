@@ -7,7 +7,6 @@ RDEPENDS_${PN} += "qtdeclarative-qmlplugins"
 
 WEBOS_VERSION = "1.0.0-4_09407bc2ef8a79f75b49bf2b08ec78039a8916ed"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 

@@ -10,7 +10,6 @@ DEPENDS = "nyx-lib luna-service2 cjson libxml2 sqlite3 glib-2.0 powerd"
 
 WEBOS_VERSION = "1.1.1-30_584a9370182e2f2ebc3ed6e352830d705f081e37"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake

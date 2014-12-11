@@ -8,7 +8,6 @@ WEBOS_VERSION = "0.0.1-2_e8c096f3b8690b29eb2a02a4f3dcc7ea84d40587"
 inherit webos_public_repo
 inherit webos_enyojs_application
 inherit webos_enhanced_submissions
-inherit webos_component
 
 SRC_URI = "git://github.com/webOS-ports/org.webosports.messaging;protocol=git"
 S = "${WORKDIR}/git/app"

@@ -9,7 +9,6 @@ RDEPENDS_${PN} += "shared-mime-info"
 
 WEBOS_VERSION = "0.1.0-14_eb7bcf346cda0671608a96c037aee3797ad8dc79"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_system_bus

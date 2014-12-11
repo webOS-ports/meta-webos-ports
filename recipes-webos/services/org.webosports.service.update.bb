@@ -13,6 +13,7 @@ SRCREV = "b8e50019b88c1053afd27086616d825e1f28ffea"
 SRC_URI = "git://github.com/webOS-ports/org.webosports.update;protocol=git;branch=master"
 S = "${WORKDIR}/git/service"
 
+WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files"
 
 do_install() {

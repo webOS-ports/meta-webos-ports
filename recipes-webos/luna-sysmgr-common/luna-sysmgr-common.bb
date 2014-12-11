@@ -17,7 +17,6 @@ DEPENDS += "virtual/${TARGET_PREFIX}binutils"
 WEBOS_VERSION = "3.0.0-3_00754405740b7f9d08ae0897f490b00123e17c2c"
 
 # Don't uncomment until all of the do_*() tasks have been moved out of the recipe
-#inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit pkgconfig

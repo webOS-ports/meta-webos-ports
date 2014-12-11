@@ -9,7 +9,6 @@ RDEPENDS_${PN} = "fbprogress"
 
 WEBOS_VERSION = "2.1.0-36_9d4d6a73e7f4bc33fa5cee21274400a23485784f"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake

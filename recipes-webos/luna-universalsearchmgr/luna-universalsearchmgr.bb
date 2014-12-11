@@ -9,7 +9,6 @@ DEPENDS = "libxml2 luna-service2 glib-2.0 cjson sqlite3 "
 
 WEBOS_VERSION = "2.0.0-1_718edcb850c05fe61d50e1fb2c2272696cca171b"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake

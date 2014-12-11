@@ -9,7 +9,6 @@ RPROVIDES_${PN} = "rdx-utils"
 
 WEBOS_VERSION = "2.0.0-1_51341059f7e53bbff150c728a2ac09daf90edf55"
 
-inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake
