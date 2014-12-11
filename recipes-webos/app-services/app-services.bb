@@ -17,7 +17,7 @@ SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit webos-ports-submissions
-SRCREV = "4d2cb023ab78d6f06311cbbe15c194f9140b9c67"
+SRCREV = "a95069e71297c8f75e0ec5b289805f48660bd009"
 
 do_install() {
     install -d ${D}${webos_servicesdir}
