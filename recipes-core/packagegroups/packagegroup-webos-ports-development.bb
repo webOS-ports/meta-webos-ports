@@ -40,4 +40,6 @@ RDEPENDS_${PN} = " \
   \
   connman-client \
   qtdeclarative-tools \
+  qtwebengine-qmlplugins \
+  qtwebengine-examples \
 "
