@@ -4,7 +4,7 @@ LICENSE = "GPL-2.0"
 LIC_FILES_CHKSUM = "file://COPYING;md5=eb723b61539feef013de476e68b5c50a"
 
 inherit webos_public_repo
-inherit webos_arch_indep
+inherit allarch
 inherit webos_system_bus
 
 PV = "0.1.0+gitr${SRCPV}"

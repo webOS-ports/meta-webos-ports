@@ -14,7 +14,7 @@ inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake
-inherit webos_arch_indep
+inherit allarch
 
 # Depends on TUNE_PKGARCH recipe upstart as detected by bitbake-diffsigs
 # Hash for dependent task upstart_0.3.11.bb.do_packagedata changed from 2729d5e2d0073efd8c32bb657e04f4ed to eb389aaea92547dfc9d8e85c4a9bfae6

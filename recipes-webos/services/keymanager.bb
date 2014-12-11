@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=6c4db32a2fa8717faffa1d4f10136f47"
 RDEPENDS_${PN} = "node-sqlite3"
 
 inherit webos_public_repo
-inherit webos_arch_indep
+inherit allarch
 inherit webos_system_bus
 
 PV = "0.1.0+gitr${SRCPV}"

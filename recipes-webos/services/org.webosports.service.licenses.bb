@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=eb723b61539feef013de476e68b5c50a"
 
 inherit webos_public_repo
 inherit webos_system_bus
-inherit webos_arch_indep
+inherit allarch
 
 PV = "0.1.0+gitr${SRCPV}"
 SRCREV = "fdd816e7c568a173e50d0e4b5d3bb2fcf1f84206"

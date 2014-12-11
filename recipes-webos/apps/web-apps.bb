@@ -10,7 +10,7 @@ SRC_URI = "git://github.com/webOS-ports/web-apps;protocol=git;branch=master"
 S = "${WORKDIR}/git"
 
 inherit webos_public_repo
-inherit webos_arch_indep
+inherit allarch
 
 do_install() {
     install -d ${D}${webos_applicationsdir}

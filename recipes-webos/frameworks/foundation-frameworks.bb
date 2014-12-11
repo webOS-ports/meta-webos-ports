@@ -11,7 +11,7 @@ WEBOS_VERSION = "1.1-3_fad6193643d768d75799cc20966c227f37e8a15f"
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 #inherit webos_cmake
-inherit webos_arch_indep
+inherit allarch
 
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

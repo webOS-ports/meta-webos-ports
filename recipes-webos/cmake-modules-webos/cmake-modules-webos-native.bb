@@ -10,7 +10,7 @@ WEBOS_VERSION = "1.0.0~rc7-19_5b5c38c7a5c51458f0fbba2f6b733061e0ec9df0"
 inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
-inherit webos_arch_indep
+inherit allarch
 inherit webos_cmake
 inherit native
 

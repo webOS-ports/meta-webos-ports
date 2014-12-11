@@ -13,7 +13,7 @@ WEBOS_VERSION = "1.0-128.2_e68b0e2b0523179c6733982d91fafaf36e85e1bd;branch=maste
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 #inherit webos_cmake
-inherit webos_arch_indep
+inherit allarch
 
 SRC_URI = "${ENYOJS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

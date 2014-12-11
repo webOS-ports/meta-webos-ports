@@ -11,7 +11,7 @@ PV = "0.21+wop+gitr${SRCPV}"
 SRCREV = "57f91972e6d1abc8c32e476920e1683d026b4d3e"
 
 inherit webos_public_repo
-inherit webos_arch_indep
+inherit allarch
 
 WEBOS_REPO_NAME = "isis-browser"
 SRC_URI = "${ISIS_PROJECT_GIT_REPO_COMPLETE}"

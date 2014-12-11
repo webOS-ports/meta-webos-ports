@@ -10,7 +10,7 @@ PV = "0.1"
 SRCREV = "4b9cfe22e7f344db454aa87a53c77ba2e95a1ce5"
 
 inherit webos_public_repo
-inherit webos_arch_indep
+inherit allarch
 
 SRC_URI = "${ISIS_PROJECT_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
