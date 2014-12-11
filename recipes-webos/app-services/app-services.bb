@@ -6,7 +6,7 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 PV = "3.0.1-4+git${SRCPV}"
-SRCREV = "4d2cb023ab78d6f06311cbbe15c194f9140b9c67"
+SRCREV = "a95069e71297c8f75e0ec5b289805f48660bd009"
 
 inherit webos_ports_fork_repo
 #inherit webos_cmake
@@ -14,7 +14,6 @@ inherit allarch
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
-
 
 do_install() {
     install -d ${D}${webos_servicesdir}
