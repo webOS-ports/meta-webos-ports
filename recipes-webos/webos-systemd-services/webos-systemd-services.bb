@@ -4,10 +4,13 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 PV = "1.0+gitr${SRCPV}"
+SRCREV = "24e606f01ea5ba84796dea642c86ced9c1ced736"
+
+inherit webos_ports_repo
+
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-SRC_URI = "git://github.com/webOS-ports/webos-systemd-services.git;branch=master;protocol=git"
-SRCREV = "24e606f01ea5ba84796dea642c86ced9c1ced736"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit systemd

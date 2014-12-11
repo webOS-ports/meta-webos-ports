@@ -10,6 +10,7 @@ LIC_FILES_CHKSUM = " \
 
 inherit qmake5
 inherit webos_system_bus
+inherit webos_ports_repo
 
 # Set path of qt5 headers as qmake5_base.bbclass sets this to just ${includedir}
 # but
@@ -22,9 +23,10 @@ RDEPENDS_${PN} += "qtsvg-plugins qtmultimedia-qmlplugins"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
-SRC_URI = "git://github.com/webOS-ports/webos-keyboard;branch=master"
 SRCREV = "29fc96470cb30aa06837c4c7ee8d75a9d463d338"
 PV = "0.99.0+git${SRCPV}"
+
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 EXTRA_QMAKEVARS_PRE = "\
     PREFIX=${prefix} \

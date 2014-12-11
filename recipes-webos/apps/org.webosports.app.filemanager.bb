@@ -3,15 +3,15 @@ SECTION = "webos/apps"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=ae6497158920d9524cf208c09cc4c984"
 
-inherit webos_public_repo
+inherit webos_ports_repo
 inherit allarch
 inherit webos_enyojs_application
 inherit webos_system_bus
 
 PV = "1.0.0+gitr${SRCPV}"
-
 SRCREV = "0b664e9e06c8381b84640c879b25b58a3a12aa84"
-SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git"
+
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""

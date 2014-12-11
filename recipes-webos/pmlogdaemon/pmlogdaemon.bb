@@ -11,12 +11,12 @@ DEPENDS = "pmloglib zlib glib-2.0 librdx libpbnjson pmloglib-private luna-servic
 # provided by busybox.
 RDEPENDS_${PN} = "busybox"
 
-WEBOS_VERSION = "3.0.0-120_bb96721e299049aa4486331e71d4c91b52a287ed"
+PV = "3.0.0-120+git${SRCPV}"
+SRCREV = "bb96721e299049aa4486331e71d4c91b52a287ed"
 
 EXTRA_OECMAKE += "-DENABLE_LOGGING:BOOL='YES'"
 
 inherit webos_public_repo
-inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus

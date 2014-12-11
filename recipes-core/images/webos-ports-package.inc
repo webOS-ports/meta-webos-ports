@@ -11,10 +11,13 @@ IMAGE_NAME = "${IMAGE_BASENAME}-image"
 ZIP_BASENAME = "${IMAGE_BASENAME}-package-${MACHINE}"
 ZIP_NAME = "${ZIP_BASENAME}-${DATETIME}${WEBOS_IMAGE_NAME_SUFFIX}"
 
-PV = "1.0+gitr${SRCPV}"
+inherit webos_ports_repo
 
-SRC_URI = "git://github.com/webOS-ports/android-update-package.git;protocol=git;branch=master"
+PV = "1.0.1+git${SRCPV}"
 SRCREV = "cee2ff7dc109d250597a159b957212f97de7e7d6"
+
+WEBOS_REPO_NAME = "android-update-package"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 do_deploy() {
     if [ ! -e ${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}-${MACHINE}.tar.gz ] ; then

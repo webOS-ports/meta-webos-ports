@@ -20,13 +20,13 @@ RDEPENDS_${PN} += "util-linux"
 VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 RDEPENDS_${PN} += "${VIRTUAL-RUNTIME_cpushareholder}"
 
-WEBOS_VERSION = "3.0.0-3_b7c8f26142bcf5941f3f2ebdd33647709f1bb74c"
+PV = "3.0.0-3+git${SRCPV}"
+SRCREV = "16d661f072de1a99f1c622f746deac68621fd429"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 
 # Don't uncomment until all of the do_*() tasks have been moved out of the recipe
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_fork_repo
 inherit webos_system_bus
 # Uncomment once installing into /usr/sbin instead of /usr/bin
 #inherit pkgconfig
@@ -37,11 +37,8 @@ inherit webos_system_bus
 inherit cmake_qt5
 inherit webos_cmake
 
-SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
-
-inherit webos-ports-submissions
-SRCREV = "16d661f072de1a99f1c622f746deac68621fd429"
 
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 

@@ -6,13 +6,13 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=4ddd17b0c9241d7b24a4960caefe8e40"
 DEPENDS = "qtbase qtdeclarative libwebos-application"
 RDEPENDS_${PN} += "qtdeclarative-qmlplugins libqofono"
 
-inherit webos_public_repo
+inherit webos_ports_repo
 inherit webos_system_bus
-inherit webos_enhanced_submissions
 
-WEBOS_VERSION = "0.1.0-6_03e94248261214db57d3ed1152c56888a02e774f"
+PV = "0.1.0-6+git${SRCPV}"
+SRCREV = "03e94248261214db57d3ed1152c56888a02e774f"
 
-SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 # We need to warrant the correct order for the following two inherits as webos_cmake is

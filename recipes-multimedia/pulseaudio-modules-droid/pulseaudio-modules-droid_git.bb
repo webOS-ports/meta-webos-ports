@@ -7,17 +7,17 @@ DEPENDS += "pulseaudio virtual/libhardware virtual/android-headers dbus udev"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 PV = "5.0.16+gitr${SRCPV}"
-
-SRC_URI = "git://github.com/webOS-ports/pulseaudio-modules-droid;branch=webOS-ports/master-next"
-S = "${WORKDIR}/git"
-
 SRCREV = "cb861412b41bfdcbdac2e021c208808b1fcda986"
+
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+S = "${WORKDIR}/git"
 
 EXTRA_OECONF += " \
     --with-droid-device=${MACHINE} \
     --enable-udev \
 "
 
+inherit webos_ports_repo
 inherit autotools pkgconfig
 
 FILES_${PN} += "${libdir}/pulse-5.0/modules/*.so"

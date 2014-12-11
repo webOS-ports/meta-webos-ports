@@ -7,20 +7,15 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "nyx-lib glib-2.0 libhybris libsuspend"
 
-# For the sake of the webOS build system we need to provide the webOS component version
-# and even a submission number, even if we don't use any.
-WEBOS_COMPONENT_VERSION = "0.1.0"
-WEBOS_SUBMISSION = "0"
-PV = "${WEBOS_COMPONENT_VERSION}+gitr${SRCPV}"
+PV = "0.1.0-1+git${SRCPV}"
+SRCREV = "a573fb21112c7dfe7db945d3498eccd390624f29"
 
-inherit webos_public_repo
+inherit webos_ports_repo
 inherit webos_cmake
 inherit pkgconfig
 
-SRC_URI = "git://github.com/webOS-ports/nyx-modules-hybris;branch=master;protocol=git"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
-
-SRCREV = "a573fb21112c7dfe7db945d3498eccd390624f29"
 
 FILES_${PN} += "${libdir}/nyx/modules/*"
 FILES_${PN}-dbg += "${libdir}/nyx/modules/.debug/*"

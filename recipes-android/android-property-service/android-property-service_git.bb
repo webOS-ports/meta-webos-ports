@@ -4,16 +4,14 @@ LIC_FILES_CHKSUM = "file://README.md;beginline=86;endline=105;md5=649a1e756b7d4e
 
 DEPENDS += "luna-service2 virtual/libandroid-properties libpbnjson"
 
-inherit webos_public_repo
+inherit webos_ports_repo
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
 inherit webos_systemd
 
-WEBOS_COMPONENT_VERSION = "0.1.0"
-PV = "${WEBOS_COMPONENT_VERSION}+gitr${SRCPV}"
-WEBOS_SUBMISSION = "0"
+PV = "0.1.0-1+git${SRCPV}"
 SRCREV = "30fcbef495a0037c73075e58f1fd9b1c8b790b1d"
 
-SRC_URI = "git://github.com/webOS-ports/android-property-service;branch=master;protocol=git"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

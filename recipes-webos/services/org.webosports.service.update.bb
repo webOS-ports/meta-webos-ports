@@ -3,14 +3,15 @@ SECTION = "webos/services"
 LICENSE = "GPL-3.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-3.0;md5=c79ff39f19dfec6d293b95dea7b07891"
 
-inherit webos_public_repo
+inherit webos_ports_repo
 inherit allarch
 inherit webos_system_bus
 
 PV = "0.1.0+gitr${SRCPV}"
-
 SRCREV = "b8e50019b88c1053afd27086616d825e1f28ffea"
-SRC_URI = "git://github.com/webOS-ports/org.webosports.update;protocol=git;branch=master"
+
+WEBOS_REPO_NAME = "org.webosports.update"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git/service"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""

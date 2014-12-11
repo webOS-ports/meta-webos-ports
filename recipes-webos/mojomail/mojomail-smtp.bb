@@ -7,10 +7,10 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "jemalloc db8 mojomail-common boost icu libpalmsocket libsandbox pmloglib glib-2.0 cjson luna-service2 c-ares curl"
 
-WEBOS_VERSION = "2.0.0-99_3a433c00b37dbfc45210b30248b0b30a1503230e"
+PV = "2.0.0-99+git${SRCPV}"
+SRCREV = "3a433c00b37dbfc45210b30248b0b30a1503230e"
 
 inherit webos_public_repo
-inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus

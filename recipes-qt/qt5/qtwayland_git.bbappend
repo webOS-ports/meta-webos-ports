@@ -1,4 +1,6 @@
-SRC_URI = "git://github.com/webOS-ports/qtwayland;branch=webOS-ports/master;protocol=git"
+inherit webos_ports_fork_repo
+
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 SRCREV = "a0c5ba81f4646e574eb1e436f87bde55da46942c"
 
 # don't remove create_cmake

@@ -7,10 +7,10 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "pmloglib node-gyp-native"
 
-WEBOS_VERSION = "3.0.1-18_ea9849d556708c5f2801a85acb58dc7a19392ade"
+PV = "3.0.1-18+git${SRCPV}"
+SRCREV = "ea9849d556708c5f2801a85acb58dc7a19392ade"
 
 inherit webos_public_repo
-inherit webos_enhanced_submissions
 #inherit webos_cmake
 inherit pkgconfig
 

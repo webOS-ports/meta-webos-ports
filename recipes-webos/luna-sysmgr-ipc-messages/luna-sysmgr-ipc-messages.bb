@@ -7,17 +7,14 @@ SECTION = "webos/devel"
 
 DEPENDS = "luna-sysmgr-ipc luna-webkit-api"
 
-WEBOS_VERSION = "2.0.0-1_26ccf5166b228b18298d0ae068fcaf858eed59dc"
+PV = "2.0.0-1+git${SRCPV}"
+SRCREV = "79155bd3f19d25077d7f0ab4edc7ad6be269ec09"
 
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_fork_repo
 inherit webos_cmake
 inherit allarch
 
-SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S ="${WORKDIR}/git"
 
 ALLOW_EMPTY_${PN} = "1"
-
-inherit webos-ports-submissions
-SRCREV = "79155bd3f19d25077d7f0ab4edc7ad6be269ec09"

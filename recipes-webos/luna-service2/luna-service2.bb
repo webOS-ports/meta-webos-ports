@@ -11,14 +11,14 @@ VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 VIRTUAL-RUNTIME_rdx-utils ?= "rdx-utils-stub"
 RDEPENDS_${PN} = "${VIRTUAL-RUNTIME_cpushareholder} ${VIRTUAL-RUNTIME_rdx-utils}"
 
-WEBOS_VERSION = "3.9.3-194_775e51a3afb671211156f9068286be67d29ff5e2"
+PV = "3.9.3-194+git${SRCPV}"
+SRCREV = "4e1a4fdc5a54778a119574d833591d24322e8d76"
 
 WEBOS_DISTRO_PRERELEASE ??= ""
 EXTRA_OECMAKE += "${@ '-DWEBOS_DISTRO_PRERELEASE:STRING="devel"' \
                   if d.getVar('WEBOS_DISTRO_PRERELEASE',True) != '' else ''}"
 
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_fork_repo
 inherit webos_cmake
 inherit pkgconfig
 inherit pkgconfig
@@ -28,17 +28,13 @@ inherit webos_core_os_dep
 inherit webos_prerelease_dep
 inherit webos_lttng
 
-SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
+    file://0001-CMakeLists-check-only-for-libsystemd-pkg.patch \
+"
 S = "${WORKDIR}/git"
 
 PACKAGECONFIG ??= ""
 PACKAGECONFIG[test] = "-DWEBOS_CONFIG_BUILD_TESTS:BOOL=True,,gtest boost,bash"
-
-inherit webos-ports-submissions
-SRCREV = "4e1a4fdc5a54778a119574d833591d24322e8d76"
-
-# only for oe-core/master with systemd-210+
-SRC_URI += "file://0001-CMakeLists-check-only-for-libsystemd-pkg.patch"
 
 # This fix-up will be removed shortly. luna-service2 headers must be included
 # using '#include <luna-service2/*.h>'

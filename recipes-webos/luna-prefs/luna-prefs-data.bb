@@ -5,10 +5,8 @@ SECTION = "webos/base"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-# Should be kept in sync with ${WEBOS_VERSION} of luna-prefs
-WEBOS_VERSION = "2.0.0-2"
-
-inherit webos_submissions
+# Should be kept in sync with ${PV} of luna-prefs
+PV = "2.0.0-2"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 

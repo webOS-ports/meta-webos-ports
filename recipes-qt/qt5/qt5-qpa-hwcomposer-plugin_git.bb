@@ -5,6 +5,7 @@ LICENSE = "LGPL-2.1"
 LIC_FILES_CHKSUM = "file://hwcomposer_backend.cpp;beginline=1;endline=40;md5=09c08382077db2dbc01b1b5536ec6665"
 
 PV = "5.2.0+gitr${SRCPV}"
+SRCREV = "cd9bf94cd899847b574ac0f2a04af4aa434201e4"
 
 DEPENDS = "qtbase libhybris qtwayland virtual/android-headers"
 
@@ -12,8 +13,7 @@ DEPENDS = "qtbase libhybris qtwayland virtual/android-headers"
 # Android version we select per machine
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-SRC_URI = "git://github.com/webOS-ports/qt5-qpa-hwcomposer-plugin.git;branch=webOS-ports/master"
-SRCREV = "cd9bf94cd899847b574ac0f2a04af4aa434201e4"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git/hwcomposer"
 
 SRC_URI_append_tenderloin = " \
@@ -21,6 +21,7 @@ SRC_URI_append_tenderloin = " \
     file://0002-Add-QCOM_BSP-define-switch.patch;striplevel=2 \
 "
 
+inherit webos_ports_fork_repo
 inherit qmake5
 
 # WARNING: The recipe qt5-qpa-hwcomposer-plugin is trying to install files into a shared area when those files already exist. Those files and their manifest location are:

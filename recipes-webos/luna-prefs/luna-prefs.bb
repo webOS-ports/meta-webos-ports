@@ -8,18 +8,17 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "luna-service2 cjson sqlite3 glib-2.0 nyx-lib"
 
-WEBOS_VERSION = "2.0.0-7_f10f70b5d198460d38024c8fd02d31614669a73b"
+PV = "2.0.0-7+git${SRCPV}"
+SRCREV = "3b7cad64f1c29cf2d10c3c8c9ef2f72d5903f0e4"
 
 RDEPENDS_${PN} = "luna-prefs-data"
 
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_fork_repo
 inherit webos_cmake
-inherit pkgconfig
 inherit pkgconfig
 inherit webos_system_bus
 
-SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 do_install_append() {
@@ -29,7 +28,3 @@ do_install_append() {
 
     install -d ${D}${sysconfdir}/prefs/properties
 }
-
-inherit webos-ports-submissions
-
-SRCREV = "3b7cad64f1c29cf2d10c3c8c9ef2f72d5903f0e4"

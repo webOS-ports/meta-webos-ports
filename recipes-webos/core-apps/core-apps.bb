@@ -5,18 +5,15 @@ SECTION = "webos/apps"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-WEBOS_VERSION = "3.0.0-2_df161a4f0c8374ab8a33a295698154a612ceaf08"
+PV = "3.0.0-2+git${SRCPV}"
+SRCREV = "69850dd71efc981ba3f1d0a786f3c9a958b1c3e5"
 
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_fork_repo
 #inherit webos_cmake
 inherit allarch
 
-SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
-
-inherit webos-ports-submissions
-SRCREV = "69850dd71efc981ba3f1d0a786f3c9a958b1c3e5"
 
 do_install() {
     # WEBOS_INSTALL_WEBOS_COREAPPSDIR

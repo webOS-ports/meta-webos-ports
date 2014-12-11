@@ -5,18 +5,14 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 SECTION = "webos/devel"
 
-WEBOS_VERSION = "2.0.0-1_db0b374eca2d986876b354fc38062abfe473c69d"
+PV = "2.0.0-1+git${SRCPV}"
+SRCREV = "d0b393ac0c8134eabf9fcde0fa09a5c3543055c0"
 
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_fork_repo
 inherit webos_cmake
 inherit allarch
 
-SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S ="${WORKDIR}/git"
 
-inherit webos-ports-submissions
-SRCREV = "d0b393ac0c8134eabf9fcde0fa09a5c3543055c0"
-
 ALLOW_EMPTY_${PN} = "1"
-

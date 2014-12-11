@@ -9,9 +9,11 @@ LIC_FILES_CHKSUM = " \
     file://mcternan-unwinder/LICENCE;md5=1b6c91f7832f201dbf0ce618a39abdd0"
 
 PV = "0.6+gitr${SRCPV}"
-
 SRCREV = "3633c18f924c3fc501b5f090ec9a760890002295"
-SRC_URI = "git://github.com/webOS-ports/crash-handler;branch=master;protocol=git"
+
+inherit webos_ports_repo
+
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 do_compile() {

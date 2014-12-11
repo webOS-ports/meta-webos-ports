@@ -11,14 +11,14 @@ RDEPENDS_${PN} += " \
     luna-next \
 "
 
-WEBOS_VERSION = "0.1.0-43_dd16f1ce8df9f8d7566803943ce9d4ad3c0226b8"
+PV = "0.1.0-43+git${SRCPV}"
+SRCREV = "dd16f1ce8df9f8d7566803943ce9d4ad3c0226b8"
 
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_repo
 inherit webos_cmake
 inherit webos_tweaks
 
-SRC_URI = "git://github.com/webOS-ports/luna-next-cardshell.git;branch=master;protocol=git"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 # inheriting webos_application requires the appinfo.json file, which we don't have here.

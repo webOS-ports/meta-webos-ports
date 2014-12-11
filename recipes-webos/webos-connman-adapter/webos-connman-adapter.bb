@@ -9,10 +9,10 @@ SECTION = "webos/services"
 DEPENDS = "luna-service2 libpbnjson glib-2.0 luna-prefs openssl"
 RDEPENDS_${PN} = "connman connman-client"
 
-WEBOS_VERSION = "1.0.0-11_45a1c53d88b41c05de6c7b7e6040254f154a7e16"
+PV = "1.0.0-11+git${SRCPV}"
+SRCREV = "45a1c53d88b41c05de6c7b7e6040254f154a7e16"
 
 inherit webos_public_repo
-inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus

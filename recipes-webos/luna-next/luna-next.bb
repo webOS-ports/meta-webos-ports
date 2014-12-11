@@ -6,15 +6,15 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 DEPENDS = "qtbase qtdeclarative qtwayland luna-sysmgr-common"
 
-SRC_URI = "git://github.com/webOS-ports/luna-next.git;branch=master;protocol=git"
-
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-WEBOS_VERSION = "0.1.0-26_718e1f8a1373d2ce1853d5d418047db98e004f78"
+PV = "0.1.0-26+git${SRCPV}"
+SRCREV = "718e1f8a1373d2ce1853d5d418047db98e004f78"
 
 inherit pkgconfig
+inherit webos_ports_repo
 inherit webos_system_bus
-inherit webos_enhanced_submissions
 
 # We need to warrant the correct order for the following two inherits as webos_cmake is
 # setting the build dir to be outside of the source dir which is overriden by cmake_qt5

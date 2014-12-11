@@ -3,14 +3,15 @@ SECTION = "webos/services"
 LICENSE = "GPL-3.0"
 LIC_FILES_CHKSUM = "file://LICENSE.txt;md5=d32239bcb673463ab874e80d47fae504"
 
-inherit webos_public_repo
+inherit webos_ports_repo
 inherit allarch
 inherit webos_system_bus
 
 PV = "0.3.18+gitr${SRCPV}"
-
 SRCREV = "3f7717032088b51a5f8b03f995a9c1b4bb1a0f09"
-SRC_URI = "git://github.com/webOS-ports/org.webosports.service.contacts.carddav;protocol=git;branch=master"
+
+WEBOS_REPO_NAME = "org.webosports.service.contacts.carddav"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""

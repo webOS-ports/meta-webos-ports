@@ -9,11 +9,11 @@ LIC_FILES_CHKSUM = " \
 DEPENDS += "boost virtual/libandroid-properties glog"
 
 PV = "0.0.3+gitr${SRCPV}"
-
-SRC_URI = "git://github.com/webOS-ports/mtp-server.git;protocol=git;branch=master"
-S = "${WORKDIR}/git"
-
 SRCREV = "ab1d45f472942bb8283e560f7d86605d15d56528"
+
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+S = "${WORKDIR}/git"
 
 inherit cmake
 inherit webos_systemd
+inherit webos_ports_repo

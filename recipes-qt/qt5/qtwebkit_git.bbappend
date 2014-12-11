@@ -3,7 +3,8 @@ DEPENDS += "luna-service2"
 # Don't use qtmultimedia which is set by default PACKAGECONFIG
 PACKAGECONFIG = "gstreamer qtlocation qtsensors"
 
-SRC_URI = "git://github.com/webOS-ports/qtwebkit;branch=webOS-ports/master;protocol=git"
+inherit webos_ports_fork_repo
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 SRCREV = "58a079d22df5433447bb1dd3f796a8a22ae977cf"
 
 THUMB_SUPPORT = " QMAKE_CXXFLAGS+=-mthumb"

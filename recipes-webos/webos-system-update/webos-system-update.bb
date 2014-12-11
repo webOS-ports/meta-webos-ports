@@ -5,10 +5,10 @@ LIC_FILES_CHKSUM = "file://COPYING.txt;md5=d32239bcb673463ab874e80d47fae504"
 DEPENDS = "qtbase qtdeclarative"
 RDEPENDS_${PN} += "qtdeclarative-qmlplugins"
 
-WEBOS_VERSION = "1.0.0-4_09407bc2ef8a79f75b49bf2b08ec78039a8916ed"
+PV = "1.0.0-4+git${SRCPV}"
+SRCREV = "09407bc2ef8a79f75b49bf2b08ec78039a8916ed"
 
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_repo
 
 inherit qmake5
 
@@ -16,7 +16,7 @@ inherit qmake5
 # actually it is ${includedir}/qt5
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 
-SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git;branch=master"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit systemd

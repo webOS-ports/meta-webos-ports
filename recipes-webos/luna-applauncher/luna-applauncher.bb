@@ -5,17 +5,14 @@ SECTION = "webos/apps"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-WEBOS_VERSION = "4.0.0-2_56cd14b8287a7db7a9a8b4310cc298260e5c545d"
+PV = "4.0.0-2+git${SRCPV}"
+SRCREV = "bc30686ed2c2b9c311a73b34dc29019320a31102"
 
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_fork_repo
 inherit allarch
 
-SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
-
-inherit webos-ports-submissions
-SRCREV = "bc30686ed2c2b9c311a73b34dc29019320a31102"
 
 do_install() {
     install -d ${D}${webos_applicationsdir}/com.palm.launcher

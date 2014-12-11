@@ -14,11 +14,11 @@ DEPENDS += "qtbase"
 # http://lists.openembedded.org/pipermail/openembedded-core/2013-July/080893.html
 DEPENDS += "virtual/${TARGET_PREFIX}binutils"
 
-WEBOS_VERSION = "3.0.0-3_00754405740b7f9d08ae0897f490b00123e17c2c"
+PV = "3.0.0-3+git${SRCPV}"
+SRCREV = "f71008ebd443577d3ca1eb1600f37cf1354b4691"
 
 # Don't uncomment until all of the do_*() tasks have been moved out of the recipe
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_fork_repo
 inherit pkgconfig
 
 # We need to warrant the correct order for the following two inherits as webos_cmake is
@@ -27,10 +27,7 @@ inherit pkgconfig
 inherit cmake_qt5
 inherit webos_cmake
 
-SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
-
-inherit webos-ports-submissions
-SRCREV = "f71008ebd443577d3ca1eb1600f37cf1354b4691"
 
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"

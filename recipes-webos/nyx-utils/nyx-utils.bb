@@ -8,10 +8,10 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "nyx-lib"
 
-WEBOS_VERSION = "1.1.2-17_aabac627dd546cef27dad81d56bb7d1a1196b7c1"
+PV = "1.1.2-17+git${SRCPV}"
+SRCREV = "aabac627dd546cef27dad81d56bb7d1a1196b7c1"
 
 inherit webos_public_repo
-inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit pkgconfig
 

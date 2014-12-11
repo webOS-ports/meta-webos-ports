@@ -6,8 +6,6 @@
 # uses CMake. It adds a dependency on cmake-modules-webos-native, which will be
 # extraneous until the component is converted, but who cares? 
 #
-# Expects that webos_submissions or webos_enhanced_submissions will also be
-# inherited (for WEBOS_COMPONENT_VERSION).
 
 # Extra variable is needed to be able to inhibit this dependency in case
 # we have some recipe which can reuse this bbclass but without this dependency
@@ -22,8 +20,6 @@ EXTRA_OECMAKE += "-DWEBOS_INSTALL_ROOT:PATH=/"
 
 WEBOS_TARGET_MACHINE_IMPL ?= "emulator"
 WEBOS_TARGET_CORE_OS ?= "rockhopper"
-# XXX Should error if WEBOS_COMPONENT_VERSION is unset
-EXTRA_OECMAKE += "-DWEBOS_COMPONENT_VERSION:STRING=${WEBOS_COMPONENT_VERSION}"
 EXTRA_OECMAKE += "${@ '-DWEBOS_TARGET_CORE_OS:STRING=${WEBOS_TARGET_CORE_OS}' if bb.data.inherits_class('webos_core_os_dep', d) else '' }"
 # XXX Add webos_kernel_dep() to webOS.cmake that adds WEBOS_TARGET_KERNEL_HEADERS to the search path
 EXTRA_OECMAKE_KERNEL_HEADERS = "${@ '-DWEBOS_TARGET_KERNEL_HEADERS:STRING=${STAGING_KERNEL_DIR}/include' if bb.data.inherits_class('webos_kernel_dep', d) and not bb.data.inherits_class('native', d) else '' }"

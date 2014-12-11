@@ -7,10 +7,10 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "boost node-gyp-native"
 
-WEBOS_VERSION = "3.0.1-14_d817785147cfecf13132e7bb03bc6877f24361bc"
+PV = "3.0.1-14+git${SRCPV}"
+SRCREV = "d817785147cfecf13132e7bb03bc6877f24361bc"
 
 inherit webos_public_repo
-inherit webos_enhanced_submissions
 inherit pkgconfig
 
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"

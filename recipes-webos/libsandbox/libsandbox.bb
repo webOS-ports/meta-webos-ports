@@ -5,10 +5,10 @@ SECTION = "webos/devel"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-WEBOS_VERSION = "2.0.0-16_3c461c5958adb6fa0671e68a77c75efa6deb7314"
+PV = "2.0.0-16+git${SRCPV}"
+SRCREV = "3c461c5958adb6fa0671e68a77c75efa6deb7314"
 
 inherit webos_public_repo
-inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_machine_impl_dep

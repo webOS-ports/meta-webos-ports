@@ -5,10 +5,10 @@ SECTION = "webos/frameworks"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-WEBOS_VERSION = "1.1-11_2315b05a477caa6501a966ac64490ef7456be8a5"
+PV = "1.1-11+git${SRCPV}"
+SRCREV = "2315b05a477caa6501a966ac64490ef7456be8a5"
 
 inherit webos_public_repo
-inherit webos_enhanced_submissions
 #inherit webos_cmake
 inherit allarch
 

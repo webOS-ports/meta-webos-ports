@@ -13,7 +13,8 @@ VBOX_RDEPENDS_qemux86 = "vboxguestdrivers"
 VBOX_RDEPENDS_qemux86-64 = "vboxguestdrivers"
 RDEPENDS_${PN} = "lsb gzip ${VBOX_RDEPENDS} nyx-conf"
 
-WEBOS_VERSION = "6.1.0-94_6b9b8f002c2454e475d699064a118d5c50a79f48"
+PV = "6.1.0-94+git${SRCPV}"
+SRCREV = "fd1687df37cbf22136898a69ca349bd2192d3240"
 
 EXTRA_OECMAKE += "-DDISTRO_VERSION:STRING='${DISTRO_VERSION}' -DDISTRO_NAME:STRING='${DISTRO_NAME}' \
                   -DWEBOS_DISTRO_API_VERSION:STRING='${WEBOS_DISTRO_API_VERSION}' \
@@ -35,8 +36,7 @@ WEBOS_DISTRO_PRERELEASE ??= ""
 EXTRA_OECMAKE += "${@ '-DWEBOS_DISTRO_PRERELEASE:STRING="${WEBOS_DISTRO_PRERELEASE}"' \
                   if d.getVar('WEBOS_DISTRO_PRERELEASE',True) != '' else ''}"
 
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_fork_repo
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_machine_dep
@@ -44,11 +44,8 @@ inherit webos_machine_impl_dep
 inherit webos_prerelease_dep
 inherit webos_core_os_dep
 
-SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
-
-inherit webos-ports-submissions
-SRCREV = "fd1687df37cbf22136898a69ca349bd2192d3240"
 
 PACKAGES += "${PN}-tests"
 FILES_${PN} += "${libdir}/nyx/modules/*"

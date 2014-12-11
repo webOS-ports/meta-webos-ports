@@ -12,19 +12,15 @@ RDEPENDS_${PN} += " \
     libconnman-qt \
 "
 
-WEBOS_VERSION = "0.1.0-33_b3660ff2439274e3d68d48ddbd2b000502b46afe"
+PV = "0.1.0-33+git${SRCPV}"
+SRCREV = "b3660ff2439274e3d68d48ddbd2b000502b46afe"
 
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_repo
 inherit webos_system_bus
 
-SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git;branch=master"
-
-# only for builds with oe-core/master with systemd-210+
-SRC_URI += "\
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     file://0003-CMakeLists-check-only-for-libsystemd-pkg.patch \
 "
-
 S = "${WORKDIR}/git"
 
 # We need to warrant the correct order for the following two inherits as webos_cmake is

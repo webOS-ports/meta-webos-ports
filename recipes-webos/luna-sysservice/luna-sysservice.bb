@@ -12,10 +12,10 @@ DEPENDS = "luna-service2 libpbnjson qtbase uriparser libxml2 sqlite3 pmloglib cj
 
 RDEPENDS_${PN} += "${VIRTUAL-RUNTIME_ntp}"
 
-WEBOS_VERSION = "2.0.1-38_94a530276e37f97e1b6cac18b1db2429ca7de8eb"
+PV = "2.0.1-38+git${SRCPV}"
+SRCREV = "94a530276e37f97e1b6cac18b1db2429ca7de8eb"
 
 inherit webos_public_repo
-inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit webos_system_bus
 inherit pkgconfig

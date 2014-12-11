@@ -5,20 +5,16 @@ SECTION = "webos/base"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-WEBOS_VERSION = "3.0.0-3_1bcdb5bd8b97d148a3e46ae002fcf091b6d202f6"
+PV = "3.0.0-3+git${SRCPV}"
+SRCREV = "ec9de626bc966b20dc77e2dba436e9b8a01d8faa"
 
 # Don't uncomment until all of the do_*() tasks have been moved out of the recipe
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_fork_repo
 inherit webos_machine_dep
 
 WEBOS_REPO_NAME = "luna-sysmgr"
-WEBOS_GIT_TAG = "submissions/${WEBOS_SUBMISSION}"
-SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
-
-inherit webos-ports-submissions
-SRCREV = "ec9de626bc966b20dc77e2dba436e9b8a01d8faa"
 
 do_install() {
     install -d ${D}${webos_sysconfdir}

@@ -7,19 +7,16 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "tzdata python-tz-native"
 
-WEBOS_VERSION = "2.0.1-10_6ad92a6963f2af7ab347a52e3b1bfa248c2edd03"
+PV = "2.0.1-10+git${SRCPV}"
+SRCREV = "0a8dcb285a9f13c7ede8b9570b2d7d83f9a47d11"
 
 inherit allarch
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_fork_repo
 inherit webos_cmake
 inherit pythonnative
 
-SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
-
-inherit webos-ports-submissions
-SRCREV = "0a8dcb285a9f13c7ede8b9570b2d7d83f9a47d11"
 
 do_install_append() {
     # Expand fonts tarball

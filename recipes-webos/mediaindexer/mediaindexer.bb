@@ -7,16 +7,16 @@ DEPENDS += "db8 glib-2.0 luna-service2 sqlite3 taglib qtbase luna-sysmgr-common"
 # We need this in order to have the mime based media detection working
 RDEPENDS_${PN} += "shared-mime-info"
 
-WEBOS_VERSION = "0.1.0-14_eb7bcf346cda0671608a96c037aee3797ad8dc79"
+PV = "0.1.0-14+git${SRCPV}"
+SRCREV = "eb7bcf346cda0671608a96c037aee3797ad8dc79"
 
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_repo
 inherit webos_system_bus
 inherit cmake_qt5
 inherit webos_cmake
 inherit webos_systemd
 
-SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git;branch=master"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 do_install_append() {

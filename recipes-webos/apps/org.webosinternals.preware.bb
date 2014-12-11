@@ -3,12 +3,13 @@ SECTION = "webos/apps"
 LICENSE = "GPLv2+"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=eb723b61539feef013de476e68b5c50a"
 
-inherit webos_public_repo
+inherit webos_ports_repo
 inherit allarch
 inherit webos_enyojs_application
 
 PV = "2.0.2+gitr${SRCPV}"
-
 SRCREV = "ff58185eaee3b72f240b89599386fbbf95206799"
-SRC_URI = "git://github.com/webOS-ports/preware;protocol=git;branch=master"
+
+WEBOS_REPO_NAME = "preware"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

@@ -4,12 +4,12 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=aa80bcec645b0f6ec37d5954ee6dc056"
 
 WEBOS_REPO_NAME = "phonegap"
-WEBOS_VERSION = "2.3.0-1_368e2da0c0db11f219560ec1c10ca0417df0c1c4"
+PV = "2.3.0-1+git${SRCPV}"
+SRCREV = "368e2da0c0db11f219560ec1c10ca0417df0c1c4"
 
-inherit webos_enhanced_submissions
-inherit webos-ports-submissions
-inherit webos_public_repo
+inherit webos_ports_fork_repo
 
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 do_install() {

@@ -16,13 +16,15 @@ RDEPENDS_${PN} += " \
     bash \
 "
 
-WEBOS_VERSION = "1.0.0-19_39b5eea313f804ef89d73f87103e683e73bec9be"
+PV = "1.0.0-19+git${SRCPV}"
+SRCREV = "39b5eea313f804ef89d73f87103e683e73bec9be"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+S = "${WORKDIR}/git"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 
-inherit webos_public_repo
+inherit webos_ports_repo
 inherit pkgconfig
-inherit webos_enhanced_submissions
 inherit webos_system_bus
 
 # We need to warrant the correct order for the following two inherits as webos_cmake is
@@ -30,6 +32,3 @@ inherit webos_system_bus
 # again if we inherit it afterwards.
 inherit cmake_qt5
 inherit webos_cmake
-
-SRC_URI = "git://github.com/webOS-ports/luna-appmanager.git;protocol=git;branch=master"
-S = "${WORKDIR}/git"

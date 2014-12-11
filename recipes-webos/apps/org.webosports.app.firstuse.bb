@@ -3,12 +3,12 @@ SECTION = "webos/apps"
 LICENSE = "GPL-3.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-3.0;md5=c79ff39f19dfec6d293b95dea7b07891"
 
-WEBOS_VERSION = "0.3.0-7_40200dc2451cc066bf67e6d06a39873cd152c21d"
+PV = "0.3.0-7+git${SRCPV}"
+SRCREV = "40200dc2451cc066bf67e6d06a39873cd152c21d"
 
 DEPENDS += "qtbase qtdeclarative"
 
-inherit webos_enhanced_submissions
-inherit webos_public_repo
+inherit webos_ports_repo
 inherit webos_application
 
 # We need to warrant the correct order for the following two inherits as webos_cmake is
@@ -17,7 +17,7 @@ inherit webos_application
 inherit cmake_qt5
 inherit webos_cmake
 
-SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git;branch=master"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 INSANE_SKIP_${PN} = "libdir"

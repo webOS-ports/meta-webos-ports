@@ -7,10 +7,10 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 PROVIDES = "librdx"
 
-WEBOS_VERSION = "2.0.0-9_9d1561f235500fabaa9d9746849aa2b639855403"
+PV = "2.0.0-9+git${SRCPV}"
+SRCREV = "9d1561f235500fabaa9d9746849aa2b639855403"
 
 inherit webos_public_repo
-inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit pkgconfig
 

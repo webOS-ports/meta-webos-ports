@@ -5,13 +5,13 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=4ddd17b0c9241d7b24a4960caefe8e40"
 DEPENDS = "qtbase qtdeclarative luna-sysmgr-common libwebos-application"
 RDEPENDS_${PN} += " qtdeclarative-qmlplugins"
 
-WEBOS_VERSION = "0.1.0-5_e3e00e960dfecd673ec593582bf0fd3ea4bfca8c"
+PV = "0.1.0-5+git${SRCPV}"
+SRCREV = "e3e00e960dfecd673ec593582bf0fd3ea4bfca8c"
 
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_repo
 inherit webos_system_bus
 
-SRC_URI = "git://github.com/webOS-ports/${PN};protocol=git;branch=master"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 # We need to warrant the correct order for the following two inherits as webos_cmake is

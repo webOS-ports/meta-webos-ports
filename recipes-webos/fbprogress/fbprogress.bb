@@ -7,10 +7,10 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 RDEPENDS_${PN} = "tar"
 
-WEBOS_VERSION = "2.0.0-22_0dc946ef1cb557383e59e499b3ac9194dfd08b4d"
+PV = "2.0.0-22+git${SRCPV}"
+SRCREV = "0dc946ef1cb557383e59e499b3ac9194dfd08b4d"
 
 inherit webos_public_repo
-inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_machine_dep

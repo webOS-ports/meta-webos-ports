@@ -5,17 +5,14 @@ SECTION = "webos/base"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-WEBOS_VERSION = "2.0.0-2_182a4568b13bbb359b8392593c3b139609d89eca"
-
-inherit webos_enhanced_submissions
-inherit allarch
-inherit webos_public_repo
-
-SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
-
-inherit webos-ports-submissions
+PV = "2.0.0-2+git${SRCPV}"
 SRCREV = "fcabcf7d984976aace1a3a4aa4f68e473f61b8a0"
+
+inherit allarch
+inherit webos_ports_fork_repo
+
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+S = "${WORKDIR}/git"
 
 do_install() {
     install -d ${D}${webos_applicationsdir}/com.palm.systemui

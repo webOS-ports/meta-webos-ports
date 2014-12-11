@@ -5,18 +5,15 @@ SECTION = "webos/frameworks"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-WEBOS_VERSION = "1.1-3_bd6e11957c1e0b53ab3bf8363c3b693d6a43467a"
+PV = "1.1-3+git${SRCPV}"
+SRCREV = "0baa0cd1bcd7c2182718a4927efcff9dbf901812"
 
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_fork_repo
 #inherit webos_cmake
 inherit allarch
 
-SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
-
-inherit webos-ports-submissions
-SRCREV = "0baa0cd1bcd7c2182718a4927efcff9dbf901812"
 
 do_install() {
     install -d ${D}${webos_frameworksdir}

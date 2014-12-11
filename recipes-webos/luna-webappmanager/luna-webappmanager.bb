@@ -11,14 +11,15 @@ RDEPENDS_${PN} += " \
     qtwebkit-qmlplugins \
 "
 
-WEBOS_VERSION = "0.2.0-8_ee0bfa6ded53afa6f136d6f81b12f9df4d4e8883"
+PV = "0.2.0-8+git${SRCPV}"
+SRCREV = "ee0bfa6ded53afa6f136d6f81b12f9df4d4e8883"
 
-SRC_URI = "git://github.com/webOS-ports/luna-webappmanager.git;branch=master;protocol=git"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-inherit webos_enhanced_submissions
 inherit pkgconfig
 inherit webos_system_bus
+inherit webos_ports_repo
 
 # We need to warrant the correct order for the following two inherits as webos_cmake is
 # setting the build dir to be outside of the source dir which is overriden by cmake_qt5

@@ -3,13 +3,14 @@ SECTION = "webos/apps"
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
-inherit webos_public_repo
+inherit webos_ports_repo
 inherit allarch
 
 PV = "3.0.1+gitr${SRCPV}"
-
 SRCREV = "21c8072380c6d249a85dff84b8557fa8860099de"
-SRC_URI = "git://github.com/webOS-ports/tweaks;protocol=git;branch=master"
+
+WEBOS_REPO_NAME = "tweaks"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 do_compile() {

@@ -5,14 +5,14 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=6c4db32a2fa8717faffa1d4f10136f47"
 
 RDEPENDS_${PN} = "node-sqlite3"
 
-inherit webos_public_repo
+inherit webos_ports_repo
 inherit allarch
 inherit webos_system_bus
 
 PV = "0.1.0+gitr${SRCPV}"
-
 SRCREV = "377444267c6e0d08935de78ddce53848dd410514"
-SRC_URI = "git://github.com/webOS-ports/keymanager;protocol=git;branch=master"
+
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""

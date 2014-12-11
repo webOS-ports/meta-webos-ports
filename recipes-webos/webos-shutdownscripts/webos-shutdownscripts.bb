@@ -7,10 +7,10 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 RDEPENDS_${PN} = "fbprogress"
 
-WEBOS_VERSION = "2.1.0-36_9d4d6a73e7f4bc33fa5cee21274400a23485784f"
+PV = "2.1.0-36+git${SRCPV}"
+SRCREV = "9d4d6a73e7f4bc33fa5cee21274400a23485784f"
 
 inherit webos_public_repo
-inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit allarch
 

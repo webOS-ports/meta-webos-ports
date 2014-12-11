@@ -3,15 +3,17 @@ LICENSE = "GPL-2.0"
 LIC_FILES_CHKSUM = "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263"
 
 PV = "1.0.3+gitr${SRCPV}"
+SRCREV = "ec5794a31b837b4f8202a1768e5ada3966db9570"
 
 DEPENDS = "qtbase qtdeclarative"
 
 SRC_URI = " \
-    git://github.com/webOS-ports/fingerterm.git;protocol=git;branch=webOS-ports/master \
-    file://appinfo.json"
-SRCREV = "ec5794a31b837b4f8202a1768e5ada3966db9570"
+    ${WEBOS_PORTS_GIT_REPO_COMPLETE} \
+    file://appinfo.json \
+"
 S = "${WORKDIR}/git"
 
+inherit webos_ports_fork_repo
 inherit qmake5
 
 # Set path of qt5 headers as qmake5_base.bbclass sets this to just ${includedir} but
