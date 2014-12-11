@@ -32,10 +32,6 @@ do_install_append() {
     rm -vf ${D}${libdir}/cmake/Qt5Gui/Qt5Gui_QEglFSIntegrationPlugin.cmake
 }
 
-# Set path of qt5 headers as qmake5_base.bbclass sets this to just ${includedir} but
-# actually it is ${includedir}/qt5
-OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
-
 FILES_${PN} += "${libdir}/qt5/plugins/platforms/libhwcomposer.so"
 FILES_${PN}-dbg += "${libdir}/qt5/plugins/platforms/.debug/libhwcomposer.so"
 FILES_${PN}-dev += "${libdir}/cmake"

@@ -12,11 +12,6 @@ inherit qmake5
 inherit webos_system_bus
 inherit webos_ports_repo
 
-# Set path of qt5 headers as qmake5_base.bbclass sets this to just ${includedir}
-# but
-# actually it is ${includedir}/qt5
-OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
-
 DEPENDS = "maliit-framework-qt5 hunspell presage luna-service2"
 
 RDEPENDS_${PN} += "qtsvg-plugins qtmultimedia-qmlplugins"

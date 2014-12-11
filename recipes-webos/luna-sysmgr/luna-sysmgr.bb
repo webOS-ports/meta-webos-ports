@@ -40,8 +40,6 @@ inherit webos_cmake
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
-
 do_install_append() {
     # install images & low-memory files
     install -d ${D}${webos_sysmgrdir}
