@@ -10,7 +10,7 @@ WEBOS_VERSION = "0.1.0-1_a3ac3ca8c3a36fed58243826b8289cac65339394"
 inherit webos_component
 inherit webos_public_repo
 inherit webos_cmake
-inherit webos_daemon
+inherit pkgconfig
 inherit webos_system_bus
 inherit webos_enhanced_submissions
 

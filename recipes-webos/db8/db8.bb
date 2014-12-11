@@ -21,8 +21,8 @@ inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit webos_system_bus
-inherit webos_daemon
-inherit webos_library
+inherit pkgconfig
+inherit pkgconfig
 inherit webos_system_bus
 
 EXTRA_OECMAKE += "-DWEBOS_CONFIG_BUILD_TESTS:BOOL=TRUE -DWEBOS_DB8_BACKEND:STRING='leveldb;sandwich' -DCMAKE_SKIP_RPATH:BOOL=TRUE"

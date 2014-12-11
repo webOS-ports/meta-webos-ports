@@ -7,7 +7,7 @@ DEPENDS += "luna-service2 virtual/libandroid-properties libpbnjson"
 inherit webos_component
 inherit webos_public_repo
 inherit webos_cmake
-inherit webos_daemon
+inherit pkgconfig
 inherit webos_system_bus
 inherit webos_systemd
 

@@ -20,7 +20,7 @@ WEBOS_VERSION = "3.0.0-3_00754405740b7f9d08ae0897f490b00123e17c2c"
 #inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
-inherit webos_library
+inherit pkgconfig
 
 # We need to warrant the correct order for the following two inherits as webos_cmake is
 # setting the build dir to be outside of the source dir which is overriden by cmake_qt5

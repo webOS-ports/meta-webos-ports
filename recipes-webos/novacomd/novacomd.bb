@@ -9,7 +9,7 @@ inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake
-inherit webos_daemon
+inherit pkgconfig
 inherit webos_machine_impl_dep
 
 DEPENDS = "${@base_conditional('WEBOS_TARGET_MACHINE_IMPL','host','libusb','nyx-lib',d)}"

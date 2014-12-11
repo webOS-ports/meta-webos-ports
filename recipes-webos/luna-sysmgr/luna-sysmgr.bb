@@ -28,7 +28,7 @@ inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_system_bus
 # Uncomment once installing into /usr/sbin instead of /usr/bin
-#inherit webos_daemon
+#inherit pkgconfig
 
 # We need to warrant the correct order for the following two inherits as webos_cmake is
 # setting the build dir to be outside of the source dir which is overriden by cmake_qt5

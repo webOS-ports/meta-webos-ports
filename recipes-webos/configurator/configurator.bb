@@ -15,7 +15,7 @@ inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit webos_system_bus
-inherit webos_daemon
+inherit pkgconfig
 inherit webos_machine_impl_dep
 
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"

@@ -11,7 +11,7 @@ inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake
-inherit webos_pkgconfig
+inherit pkgconfig
 
 # OECMAKE_BUILDPATH needs to be different from that of pmloglib so there's
 # no collision in the case of local development.

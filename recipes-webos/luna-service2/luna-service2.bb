@@ -21,9 +21,9 @@ inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake
-inherit webos_library
-inherit webos_daemon
-inherit webos_program
+inherit pkgconfig
+inherit pkgconfig
+inherit pkgconfig
 inherit webos_system_bus
 inherit webos_core_os_dep
 inherit webos_prerelease_dep

@@ -18,7 +18,7 @@ S = "${WORKDIR}/git"
 
 inherit webos_component
 inherit webos_enhanced_submissions
-inherit webos_daemon
+inherit pkgconfig
 inherit webos_system_bus
 
 # We need to warrant the correct order for the following two inherits as webos_cmake is

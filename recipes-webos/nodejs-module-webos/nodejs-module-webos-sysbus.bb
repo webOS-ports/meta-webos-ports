@@ -12,7 +12,7 @@ WEBOS_VERSION = "3.0.1-31_01532d4b2e7ddb02f02a7d9ce71b922037b99aeb"
 inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
-inherit webos_library
+inherit pkgconfig
 inherit webos_system_bus
 
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"

@@ -19,7 +19,7 @@ RDEPENDS_${PN} += " \
 WEBOS_VERSION = "1.0.0-19_39b5eea313f804ef89d73f87103e683e73bec9be"
 
 inherit webos_public_repo
-inherit webos_daemon
+inherit pkgconfig
 inherit webos_enhanced_submissions
 inherit webos_system_bus
 

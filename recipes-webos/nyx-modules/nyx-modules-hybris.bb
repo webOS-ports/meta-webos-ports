@@ -16,7 +16,7 @@ PV = "${WEBOS_COMPONENT_VERSION}+gitr${SRCPV}"
 inherit webos_component
 inherit webos_public_repo
 inherit webos_cmake
-inherit webos_library
+inherit pkgconfig
 
 SRC_URI = "git://github.com/webOS-ports/nyx-modules-hybris;branch=master;protocol=git"
 S = "${WORKDIR}/git"
