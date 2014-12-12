@@ -13,15 +13,13 @@ RDEPENDS_${PN} += " \
 "
 
 PV = "0.1.0-33+git${SRCPV}"
-SRCREV = "b3660ff2439274e3d68d48ddbd2b000502b46afe"
+SRCREV = "ac8349e5df7365fdd47a3d878957903cd570a31d"
 
 inherit webos_ports_repo
 inherit webos_system_bus
 inherit webos_cmake_qt5
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
-    file://0003-CMakeLists-check-only-for-libsystemd-pkg.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 FILES_${PN} += "${webos_frameworksdir}"

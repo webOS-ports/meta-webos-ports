@@ -12,7 +12,7 @@ VIRTUAL-RUNTIME_rdx-utils ?= "rdx-utils-stub"
 RDEPENDS_${PN} = "${VIRTUAL-RUNTIME_cpushareholder} ${VIRTUAL-RUNTIME_rdx-utils}"
 
 PV = "3.9.3-194+git${SRCPV}"
-SRCREV = "4e1a4fdc5a54778a119574d833591d24322e8d76"
+SRCREV = "734188a0e2de110e9c06164fd99ff4d350853ae2"
 
 WEBOS_DISTRO_PRERELEASE ??= ""
 EXTRA_OECMAKE += "${@ '-DWEBOS_DISTRO_PRERELEASE:STRING="devel"' \
@@ -28,9 +28,7 @@ inherit webos_core_os_dep
 inherit webos_prerelease_dep
 inherit webos_lttng
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
-    file://0001-CMakeLists-check-only-for-libsystemd-pkg.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 PACKAGECONFIG ??= ""
