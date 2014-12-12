@@ -18,7 +18,6 @@ EXTRA_OECMAKE += "-DENABLE_LOGGING:BOOL='YES'"
 inherit webos_public_repo
 inherit webos_cmake
 inherit pkgconfig
-inherit webos_prerelease_dep
 
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
