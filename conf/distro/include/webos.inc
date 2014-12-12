@@ -74,9 +74,8 @@ BUILDCFG_VARS += "WEBOS_DISTRO_RELEASE_CODENAME WEBOS_DISTRO_BUILD_ID"
 SETUP_COMMON_DIR = "${TOPDIR}/../common/"
 WEBOS_DISTRO_TOPDIR_BRANCH ?= "${@base_get_metadata_git_branch('${SETUP_COMMON_DIR}', None).strip()}"
 WEBOS_DISTRO_TOPDIR_REVISION ?= "${@base_get_metadata_git_revision('${SETUP_COMMON_DIR}', None).strip()}"
-WEBOS_DISTRO_TOPDIR_DESCRIBE ?= "${@webos_base_get_metadata_git_describe('${SETUP_COMMON_DIR}', None).strip()}"
 # Don't add WEBOS_DISTRO_TOPDIR_BRANCH, because in many cases it can be "(nobranch)"
-BUILDCFG_VARS += "WEBOS_DISTRO_TOPDIR_REVISION WEBOS_DISTRO_TOPDIR_DESCRIBE"
+BUILDCFG_VARS += "WEBOS_DISTRO_TOPDIR_REVISION"
 
 # Add build timestamp to what's displayed in build-id.txt for use in pruning script
 BUILDCFG_VARS += "DATETIME"
@@ -105,7 +104,7 @@ MACHINEOVERRIDES =. "${WEBOS_EXTRA_MACHINEOVERRIDES}"
 MACHINEOVERRIDES[vardepsexclude] += "WEBOS_EXTRA_MACHINEOVERRIDES"
 OVERRIDES[vardepsexclude] += "WEBOS_EXTRA_MACHINEOVERRIDES"
 
-INHERIT_DISTRO ?= "debian devshell sstate license buildstats buildstats-summary webos_base"
+INHERIT_DISTRO ?= "debian devshell sstate license buildstats buildstats-summary"
 
 WARN_QA_append = " version-going-backwards webos-enh-sub-warning"
 WEBOS_ERROR_QA_AUTOREV ?= "webos-enh-sub-autorev-error"
