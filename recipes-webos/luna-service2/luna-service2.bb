@@ -21,11 +21,8 @@ EXTRA_OECMAKE += "${@ '-DWEBOS_DISTRO_PRERELEASE:STRING="devel"' \
 inherit webos_ports_fork_repo
 inherit webos_cmake
 inherit pkgconfig
-inherit pkgconfig
-inherit pkgconfig
 inherit webos_system_bus
 inherit webos_core_os_dep
-inherit webos_lttng
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
