@@ -16,6 +16,4 @@ inherit webos_machine_impl_dep
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-WEBOS_NO_STATIC_LIBRARIES_WHITELIST = "libsandbox.a"
-
 ALLOW_EMPTY_${PN} = "1"

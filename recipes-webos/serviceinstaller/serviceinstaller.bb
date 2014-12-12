@@ -16,6 +16,4 @@ inherit webos_cmake
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-WEBOS_NO_STATIC_LIBRARIES_WHITELIST = "libserviceinstaller.a"
-
 ALLOW_EMPTY_${PN} = "1"

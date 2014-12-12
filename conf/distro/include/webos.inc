@@ -105,7 +105,7 @@ MACHINEOVERRIDES =. "${WEBOS_EXTRA_MACHINEOVERRIDES}"
 MACHINEOVERRIDES[vardepsexclude] += "WEBOS_EXTRA_MACHINEOVERRIDES"
 OVERRIDES[vardepsexclude] += "WEBOS_EXTRA_MACHINEOVERRIDES"
 
-INHERIT_DISTRO ?= "debian devshell sstate license buildstats buildstats-summary webos_base webos_no_static_libraries"
+INHERIT_DISTRO ?= "debian devshell sstate license buildstats buildstats-summary webos_base"
 
 WARN_QA_append = " version-going-backwards webos-enh-sub-warning"
 WEBOS_ERROR_QA_AUTOREV ?= "webos-enh-sub-autorev-error"
