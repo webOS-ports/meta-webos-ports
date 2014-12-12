@@ -90,8 +90,6 @@ DISTRO_EXTRA_RRECOMMENDS += " ${WEBOS_DEFAULT_EXTRA_RRECOMMENDS}"
 WEBOSQEMUDEPS = "${@base_contains("INCOMPATIBLE_LICENSE", "GPLv3", "", "qemu-config",d)}"
 DISTRO_EXTRA_RDEPENDS_append_qemuall = " ${WEBOSQEMUDEPS}"
 
-CACHE = "${TMPDIR}/cache/${TCMODE}-${TCLIBC}${@['', '/' + str(d.getVar('MACHINE', True))][bool(d.getVar('MACHINE', True))]}${@['', '/' + str(d.getVar('SDKMACHINE', True))][bool(d.getVar('SDKMACHINE', True))]}"
-
 USER_CLASSES ?= ""
 
 # WEBOS_EXTRA_MACHINEOVERRIDES will appear in OVERRIDES before what's added by
@@ -144,11 +142,6 @@ OPKGLIBDIR_forcevariable := "${libdir}"
 # Redirect console output to keep it from spewing all over the VirtualBox window
 # (This is added to qemux86 kernel cmdline by openembedded-core/meta/classes/syslinux.bbclass)
 APPEND_append_qemuall = " console=ttyS0"
-
-MIRRORS =+ "\
-ftp://.*/.*      http://downloads.yoctoproject.org/mirror/sources/ \n \
-http://.*/.*     http://downloads.yoctoproject.org/mirror/sources/ \n \
-https://.*/.*    http://downloads.yoctoproject.org/mirror/sources/ \n"
 
 # The CONNECTIVITY_CHECK_URI's are used to test whether we can succesfully
 # fetch from the network (and warn you if not). To disable the test set
