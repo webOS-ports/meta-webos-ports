@@ -10,7 +10,8 @@ SRCREV = "ec9de626bc966b20dc77e2dba436e9b8a01d8faa"
 
 # Don't uncomment until all of the do_*() tasks have been moved out of the recipe
 inherit webos_ports_fork_repo
-inherit webos_machine_dep
+
+PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 WEBOS_REPO_NAME = "luna-sysmgr"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"

@@ -16,7 +16,7 @@ inherit allarch
 
 # Depends on MACHINE_ARCH recipe fbprogress as detected by bitbake-diffsigs
 # Hash for dependent task fbprogress.bb.do_packagedata changed from 0f207eedf6f0279c8f8351d7e2067b9d to 85c28e7ff4dd0c99f301c4f61052ff89
-inherit webos_machine_dep
+PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

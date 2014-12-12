@@ -36,10 +36,11 @@ WEBOS_DISTRO_PRERELEASE ??= ""
 EXTRA_OECMAKE += "${@ '-DWEBOS_DISTRO_PRERELEASE:STRING="${WEBOS_DISTRO_PRERELEASE}"' \
                   if d.getVar('WEBOS_DISTRO_PRERELEASE',True) != '' else ''}"
 
+PACKAGE_ARCH = "${MACHINE_ARCH}"
+
 inherit webos_ports_fork_repo
 inherit webos_cmake
 inherit pkgconfig
-inherit webos_machine_dep
 inherit webos_machine_impl_dep
 inherit webos_prerelease_dep
 inherit webos_core_os_dep
