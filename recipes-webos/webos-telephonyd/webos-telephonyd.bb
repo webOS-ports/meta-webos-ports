@@ -7,7 +7,7 @@ DEPENDS = "luna-service2 cjson glib-2.0 luna-prefs"
 RRECOMMENDS_${PN} += "ofono"
 
 PV = "0.1.0-1+git${SRCPV}"
-SRCREV = "814db0e26025d6a4273c1e708a4236af0d25225b"
+SRCREV = "e67e9f8f91651578fcf6aaeab65a1a564585410f"
 
 inherit webos_ports_repo
 inherit webos_cmake
@@ -20,6 +20,9 @@ S = "${WORKDIR}/git"
 do_install_append() {
     install -d ${D}${webos_sysconfdir}/db/kinds
     install -m 0644 ${S}/files/db8/kinds/* ${D}${webos_sysconfdir}/db/kinds
+
+    install -d ${D}${webos_sysconfdir}/db/permissions
+    install -m 0644 ${S}/files/db8/permissions/* ${D}${webos_sysconfdir}/db/permissions
 
     install -d ${D}${webos_sysconfdir}/activities/com.palm.telephony
     install -v -m 644 ${S}/files/activities/com.palm.telephony/* \
