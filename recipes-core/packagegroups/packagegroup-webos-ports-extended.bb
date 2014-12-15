@@ -30,6 +30,7 @@ RDEPENDS_${PN} = " \
   org.webosports.cdav \
   keymanager \
   org.webosports.service.messaging \
+  location-service \
   \
   org.webosports.app.firstuse \
   org.webosports.app.memos \
