@@ -4,7 +4,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 inherit webos_ports_repo
 
-WEBOS_BRANCH = "cm-11.0"
+WEBOS_REPO_NAME = "phablet-headers"
+WEBOS_GIT_PARAM_BRANCH = "cm-11.0"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 

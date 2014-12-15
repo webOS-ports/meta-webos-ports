@@ -17,7 +17,7 @@ EXTRA_OECONF += " \
     --enable-udev \
 "
 
-inherit webos_ports_repo
+inherit webos_ports_fork_repo
 inherit autotools pkgconfig
 
 FILES_${PN} += "${libdir}/pulse-5.0/modules/*.so"
