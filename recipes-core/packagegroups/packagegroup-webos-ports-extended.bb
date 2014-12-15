@@ -29,6 +29,7 @@ RDEPENDS_${PN} = " \
   org.webosports.service.update \
   org.webosports.cdav \
   keymanager \
+  org.webosports.service.messaging \
   \
   org.webosports.app.firstuse \
   org.webosports.app.memos \
