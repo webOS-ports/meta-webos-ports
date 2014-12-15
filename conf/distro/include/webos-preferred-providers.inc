@@ -7,9 +7,6 @@
 PREFERRED_PROVIDER_jpeg = "libjpeg-turbo"
 PREFERRED_PROVIDER_jpeg-native = "libjpeg-turbo-native"
 
-# android-headers or phablet-headers
-PREFERRED_PROVIDER_virtual/android-headers = "android-headers"
-
 # Just for documentation; these values are the defaults set in the recipes that
 # use them.
 VIRTUAL-RUNTIME_cpushareholder = "cpushareholder-stub"
