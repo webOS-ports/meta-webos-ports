@@ -1,4 +1,5 @@
-PACKAGECONFIG_GL = "gles2"
+PACKAGECONFIG_GL = "gl"
+PACKAGECONFIG_X11 = ""
 PACKAGECONFIG_DISTRO = "sql-sqlite icu glib accessibility mtdev"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
