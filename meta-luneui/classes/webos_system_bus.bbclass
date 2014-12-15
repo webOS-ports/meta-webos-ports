@@ -16,6 +16,8 @@
 #     skipped.
 #
 
+inherit webos_system_bus_paths
+
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS ?= "1"
 
 webos_system_bus_install_files () {
