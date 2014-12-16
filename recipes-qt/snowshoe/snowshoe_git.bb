@@ -15,6 +15,7 @@ SRC_URI = " \
 SRCREV = "35afbe295043bd3e27357b8e987ec19b54bfd8c8"
 S = "${WORKDIR}/git"
 
+inherit webos_filesystem_paths
 inherit qmake5
 
 do_install() {

@@ -17,6 +17,7 @@ S = "${WORKDIR}/git"
 inherit pkgconfig
 inherit webos_ports_repo
 inherit webos_application
+inherit webos_filesystem_paths
 
 inherit cmake_qt5
 inherit webos_cmake

@@ -7,6 +7,7 @@ inherit webos_ports_repo
 inherit allarch
 inherit webos_enyojs_application
 inherit webos_system_bus
+inherit webos_filesystem_paths
 
 PV = "1.0.0+gitr${SRCPV}"
 SRCREV = "0b664e9e06c8381b84640c879b25b58a3a12aa84"

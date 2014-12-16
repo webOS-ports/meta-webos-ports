@@ -9,6 +9,7 @@ RDEPENDS_${PN} += "qtdeclarative-qmlplugins libqofono"
 inherit webos_ports_repo
 inherit webos_system_bus
 inherit webos_cmake_qt5
+inherit webos_filesystem_paths
 
 PV = "0.1.0-6+git${SRCPV}"
 SRCREV = "03e94248261214db57d3ed1152c56888a02e774f"

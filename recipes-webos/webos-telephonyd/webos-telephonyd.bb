@@ -10,6 +10,7 @@ PV = "0.1.0-1+git${SRCPV}"
 SRCREV = "33368bc8818d792d083333db93f8ff7f7e9ad717"
 
 inherit webos_ports_repo
+inherit webos_filesystem_paths
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus

@@ -12,6 +12,7 @@ SRCREV = "0a8dcb285a9f13c7ede8b9570b2d7d83f9a47d11"
 
 inherit allarch
 inherit webos_ports_fork_repo
+inherit webos_filesystem_paths
 inherit webos_cmake
 inherit pythonnative
 

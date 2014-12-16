@@ -114,3 +114,4 @@ ROOTFS_POSTPROCESS_COMMAND += '${@base_conditional("WEBOS_TARGET_MACHINE_IMPL", 
 
 inherit core-image
 inherit webos_machine_impl_dep
+inherit webos_filesystem_paths

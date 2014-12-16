@@ -6,6 +6,7 @@ LIC_FILES_CHKSUM = "file://${WORKDIR}/git/COPYING-Apache-2.0;md5=3b83ef96387f146
 inherit webos_ports_repo
 inherit allarch
 inherit webos_system_bus
+inherit webos_filesystem_paths
 
 PV = "0.1.0+gitr${SRCPV}"
 SRCREV = "1302b966e7eb665addd5e1fbe3691e3d955852a0"

@@ -7,6 +7,7 @@ PV = "0.0.1-2+git${SRCPV}"
 SRCREV = "e8c096f3b8690b29eb2a02a4f3dcc7ea84d40587"
 
 inherit webos_ports_repo
+inherit webos_filesystem_paths
 inherit webos_enyojs_application
 
 WEBOS_REPO_NAME = "org.webosports.messaging"

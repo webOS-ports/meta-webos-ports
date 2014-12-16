@@ -8,6 +8,7 @@ inherit allarch
 inherit webos_enyojs_application
 inherit webos_cordova_application
 inherit webos_application
+inherit webos_filesystem_paths
 
 PV = "0.0.1+gitr${SRCPV}"
 SRCREV = "6c1e757341badc990b5df7f4142b17b72a957da4"

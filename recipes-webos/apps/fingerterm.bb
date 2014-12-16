@@ -14,6 +14,7 @@ SRC_URI = " \
 S = "${WORKDIR}/git"
 
 inherit webos_ports_fork_repo
+inherit webos_filesystem_paths
 inherit qmake5
 
 do_install() {

@@ -4,6 +4,7 @@ LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
 inherit webos_system_bus_paths
+inherit webos_filesystem_paths
 inherit webos_ports_repo
 inherit allarch
 

@@ -5,6 +5,8 @@ LIC_FILES_CHKSUM = "file://main_glesv2.cpp;beginline=1;endline=26;md5=0d08cb5b4a
 
 DEPENDS += "libsdl2"
 
+inherit webos_filesystem_paths
+
 PV = "1.0.6+gitr${SRCPV}"
 SRC_URI = "git://github.com/thp/sdl2-opengles-test \
     file://sdl2_opengles1_test-appinfo.json \

@@ -6,6 +6,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 inherit webos_ports_repo
 inherit allarch
 inherit webos_enyojs_application
+inherit webos_filesystem_paths
 inherit webos_application
 
 PV = "0.0.1+gitr${SRCPV}"

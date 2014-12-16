@@ -9,6 +9,7 @@ PV = "1.1-3+git${SRCPV}"
 SRCREV = "fad6193643d768d75799cc20966c227f37e8a15f"
 
 inherit webos_public_repo
+inherit webos_filesystem_paths
 #inherit webos_cmake
 inherit allarch
 

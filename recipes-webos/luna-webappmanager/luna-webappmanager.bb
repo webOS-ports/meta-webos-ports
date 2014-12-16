@@ -21,6 +21,7 @@ inherit pkgconfig
 inherit webos_system_bus
 inherit webos_ports_repo
 inherit webos_cmake_qt5
+inherit webos_filesystem_paths
 inherit systemd
 
 SYSTEMD_PACKAGES = "${PN}"

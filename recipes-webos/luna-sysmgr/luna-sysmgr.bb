@@ -25,12 +25,10 @@ SRCREV = "d658460614c610793c5b38b7fd010a5ac236d3df"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 
-# Don't uncomment until all of the do_*() tasks have been moved out of the recipe
+inherit webos_filesystem_paths
 inherit webos_ports_fork_repo
 inherit webos_system_bus
 inherit webos_cmake_qt5
-# Uncomment once installing into /usr/sbin instead of /usr/bin
-#inherit pkgconfig
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

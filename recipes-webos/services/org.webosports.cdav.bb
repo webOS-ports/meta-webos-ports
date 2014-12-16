@@ -5,6 +5,7 @@ LIC_FILES_CHKSUM = "file://LICENSE.txt;md5=d32239bcb673463ab874e80d47fae504"
 
 inherit webos_ports_repo
 inherit allarch
+inherit webos_filesystem_paths
 inherit webos_system_bus
 
 PV = "0.3.18+gitr${SRCPV}"

@@ -2,6 +2,8 @@
 
 AUTHOR = "Herb Kuta <herb.kuta@lge.com>"
 
+inherit webos_filesystem_paths
+
 dirs700 = " \
     ${webos_db8datadir} \
     ${webos_db8datadir}/temp \
