@@ -24,10 +24,13 @@ do_install() {
     cp -rv ${S}/* ${D}${webos_servicesdir}/${PN}
 
     install -d ${D}${webos_sysconfdir}/db/kinds
-    install -m 0644 ${S}/files/db8/kinds/* ${D}${webos_sysconfdir}/db/kinds
+    install -m 0644 ${S}/configuration/db/kinds/* ${D}${webos_sysconfdir}/db/kinds
 
     install -d ${D}${webos_sysconfdir}/db/permissions
-    install -v -m 644 ${S}/files/db8/permissions/* ${D}${webos_sysconfdir}/db/permissions
+    install -v -m 644 ${S}/configuration/db/permissions/* ${D}${webos_sysconfdir}/db/permissions
+    
+    install -d ${D}${webos_sysconfdir}/activities
+    cp -rv ${S}/configuration/activities/org.webosports.service.messaging ${D}${webos_sysconfdir}/activities/
 
     # Remove things we don't want on the device
     rm -rf ${D}${webos_servicesdir}/${PN}/files
