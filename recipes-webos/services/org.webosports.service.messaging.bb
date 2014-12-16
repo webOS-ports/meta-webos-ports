@@ -8,7 +8,7 @@ inherit allarch
 inherit webos_system_bus
 
 PV = "0.1.0+gitr${SRCPV}"
-SRCREV = "796dc9fce03bd6e9c7276d92a3487523336c4780"
+SRCREV = "1302b966e7eb665addd5e1fbe3691e3d955852a0"
 
 WEBOS_REPO_NAME = "org.webosports.messaging"
 
@@ -24,10 +24,13 @@ do_install() {
     cp -rv ${S}/* ${D}${webos_servicesdir}/${PN}
 
     install -d ${D}${webos_sysconfdir}/db/kinds
-    install -m 0644 ${S}/files/db8/kinds/* ${D}${webos_sysconfdir}/db/kinds
+    install -m 0644 ${S}/configuration/db/kinds/* ${D}${webos_sysconfdir}/db/kinds
 
     install -d ${D}${webos_sysconfdir}/db/permissions
-    install -v -m 644 ${S}/files/db8/permissions/* ${D}${webos_sysconfdir}/db/permissions
+    install -v -m 644 ${S}/configuration/db/permissions/* ${D}${webos_sysconfdir}/db/permissions
+
+    install -d ${D}${webos_sysconfdir}/activities
+    cp -rv ${S}/configuration/activities/org.webosports.service.messaging ${D}${webos_sysconfdir}/activities/
 
     # Remove things we don't want on the device
     rm -rf ${D}${webos_servicesdir}/${PN}/files
