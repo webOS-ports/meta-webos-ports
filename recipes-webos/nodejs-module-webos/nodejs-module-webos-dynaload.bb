@@ -11,6 +11,7 @@ PV = "3.0.1-14+git${SRCPV}"
 SRCREV = "d817785147cfecf13132e7bb03bc6877f24361bc"
 
 inherit webos_public_repo
+inherit webos_filesystem_paths
 inherit pkgconfig
 
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"

@@ -7,6 +7,7 @@ WEBOS_REPO_NAME = "phonegap"
 PV = "2.3.0-1+git${SRCPV}"
 SRCREV = "368e2da0c0db11f219560ec1c10ca0417df0c1c4"
 
+inherit webos_filesystem_paths
 inherit webos_ports_fork_repo
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"

@@ -14,6 +14,7 @@ inherit webos_ports_repo
 inherit webos_system_bus
 inherit cmake_qt5
 inherit webos_cmake
+inherit webos_filesystem_paths
 inherit webos_systemd
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"

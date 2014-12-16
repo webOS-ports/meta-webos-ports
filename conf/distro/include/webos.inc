@@ -1,7 +1,5 @@
 # Copyright (c) 2012-2014 LG Electronics, Inc.
 
-require conf/distro/include/webos-filesystem-paths.inc
-
 require conf/distro/include/webos-component-head.inc
 require conf/distro/include/webos-preferred-providers.inc
 require conf/distro/include/webos-recipe-blacklist.inc

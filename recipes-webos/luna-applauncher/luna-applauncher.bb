@@ -9,6 +9,7 @@ PV = "4.0.0-2+git${SRCPV}"
 SRCREV = "bc30686ed2c2b9c311a73b34dc29019320a31102"
 
 inherit webos_ports_fork_repo
+inherit webos_filesystem_paths
 inherit allarch
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
