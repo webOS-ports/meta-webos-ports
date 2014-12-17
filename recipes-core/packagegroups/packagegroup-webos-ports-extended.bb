@@ -24,7 +24,6 @@ RDEPENDS_${PN} = " \
   ${@base_contains('MACHINE_FEATURES', 'bluetooth', 'bluez4', '',d)} \
   \
   org.webosports.service.licenses \
-  org.webosinternals.service.upstartmgr \
   org.webosinternals.ipkgservice \
   org.webosports.service.update \
   org.webosports.cdav \
