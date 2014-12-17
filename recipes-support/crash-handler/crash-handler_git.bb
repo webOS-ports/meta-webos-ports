@@ -23,7 +23,4 @@ do_compile() {
 do_install() {
     install -d ${D}${sbindir}
     install -m 0755 ${S}/crash_handler ${D}${sbindir}
-
-    install -d ${D}${webos_upstartconfdir}
-    install -m 0644 ${S}/upstart/coredump ${D}${webos_upstartconfdir}
 }
