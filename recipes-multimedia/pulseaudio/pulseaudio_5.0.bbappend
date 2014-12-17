@@ -1,7 +1,6 @@
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 SRC_URI += " \
-    file://pulseaudio.upstart \
     file://pulseaudio.service \
 "
 
@@ -18,9 +17,6 @@ SRC_URI += " \
 "
 
 do_install_append() {
-    install -d ${D}${webos_upstartconfdir}
-    install -m 0644 ${WORKDIR}/pulseaudio.upstart ${D}${webos_upstartconfdir}/pulseaudio
-
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${WORKDIR}/pulseaudio.service ${D}${systemd_unitdir}/system
 }
@@ -29,9 +25,6 @@ inherit systemd
 
 SYSTEMD_PACKAGES = "${PN}-server"
 SYSTEMD_SERVICE_${PN}-server = "pulseaudio.service"
-
-PACKAGES =+ "${PN}-upstart"
-FILES_${PN}-upstart = "${webos_upstartconfdir}"
 
 # Programs using pulseaudio as backend crashed with
 #  Assertion 'pthread_mutex_unlock(&m->mutex) == 0' failed at pulsecore/mutex-posix.c:106, function pa_mutex_unlock()
