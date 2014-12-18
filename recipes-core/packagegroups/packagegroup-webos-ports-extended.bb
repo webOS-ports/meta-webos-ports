@@ -100,9 +100,16 @@ LIBHYBRIS_RDEPENDS = " \
     pulseaudio-modules-droid \
 "
 
-RDEPENDS_${PN}_append_tuna = " ${LIBHYBRIS_RDEPENDS}"
-RDEPENDS_${PN}_append_grouper = " ${LIBHYBRIS_RDEPENDS}"
-RDEPENDS_${PN}_append_mako = " ${LIBHYBRIS_RDEPENDS}"
+MEMNOTIFY_RDEPENDS = " \
+    memnotify-module \
+"
+
+RDEPENDS_${PN}_append_tuna = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
+RDEPENDS_${PN}_append_grouper = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
+RDEPENDS_${PN}_append_mako = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
+# NOTE: we can't add memnotify support for tenderloin yet here as we build it's
+# kernel outside of OE and therefor have to ship the module with the kernel
+# package directly.
 RDEPENDS_${PN}_append_tenderloin = " ${LIBHYBRIS_RDEPENDS}"
 
 QEMU_RDEPENDS = " \
