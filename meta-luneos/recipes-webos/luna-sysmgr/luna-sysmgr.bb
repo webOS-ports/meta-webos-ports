@@ -5,7 +5,7 @@ SECTION = "webos/base"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-DEPENDS = "cjson luna-service2 sqlite3 luna-sysmgr-ipc luna-sysmgr-ipc-messages pmloglib librolegen nyx-lib openssl luna-webkit-api luna-prefs libpbnjson freetype luna-sysmgr-common"
+DEPENDS = "json-c luna-service2 sqlite3 luna-sysmgr-ipc luna-sysmgr-ipc-messages pmloglib librolegen nyx-lib openssl luna-webkit-api luna-prefs libpbnjson freetype luna-sysmgr-common"
 DEPENDS += "qtbase"
 DEPENDS += "serviceinstaller"
 #DEPENDS += "localization" #TODO
@@ -113,3 +113,5 @@ FILES_${PN} += "${webos_sysmgrdir} ${webos_sysconfdir} ${webos_applicationsdir} 
 
 # /usr/bin/LunaSysMgr contains RPATH pointing to sysroot
 INSANE_SKIP_${PN} = "rpaths"
+
+SRC_URI += "file://0001-replace-cjson-with-json-c.patch"
