@@ -31,6 +31,8 @@ RDEPENDS_${PN} = " \
   keymanager \
   org.webosports.service.messaging \
   location-service \
+  imaccountvalidator \
+  imlibpurpleservice \
   \
   org.webosports.app.firstuse \
   org.webosports.app.memos \
