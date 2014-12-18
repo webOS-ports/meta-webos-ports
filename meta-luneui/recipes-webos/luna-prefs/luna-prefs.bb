@@ -6,7 +6,7 @@ SECTION = "webos/base"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-DEPENDS = "luna-service2 cjson sqlite3 glib-2.0 nyx-lib"
+DEPENDS = "luna-service2 json-c sqlite3 glib-2.0 nyx-lib"
 
 PV = "2.0.0-7+git${SRCPV}"
 SRCREV = "3b7cad64f1c29cf2d10c3c8c9ef2f72d5903f0e4"
@@ -28,3 +28,8 @@ do_install_append() {
 
     install -d ${D}${sysconfdir}/prefs/properties
 }
+
+SRC_URI += "\
+    file://0001-Replace-cjson-with-json-c.patch \
+    file://0002-lunaprefs-remove-support-for-mjson.patch \
+"
