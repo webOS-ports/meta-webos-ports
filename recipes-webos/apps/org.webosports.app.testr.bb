@@ -9,7 +9,7 @@ inherit webos_enyojs_application
 inherit webos_cordova_application
 
 PV = "0.1.0+gitr${SRCPV}"
-SRCREV = "2778aaf251b663874273bf69dd9b52a0b1bf2bec"
+SRCREV = "814a1e56e42bd66eb3c1b406604e9a49aa2f9b47"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
