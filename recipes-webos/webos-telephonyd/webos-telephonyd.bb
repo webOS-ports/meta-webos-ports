@@ -7,7 +7,7 @@ DEPENDS = "luna-service2 cjson glib-2.0 luna-prefs"
 RRECOMMENDS_${PN} += "ofono"
 
 PV = "0.1.0-1+git${SRCPV}"
-SRCREV = "e67e9f8f91651578fcf6aaeab65a1a564585410f"
+SRCREV = "33368bc8818d792d083333db93f8ff7f7e9ad717"
 
 inherit webos_ports_repo
 inherit webos_cmake
