@@ -6,7 +6,7 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 DEPENDS = " \
-    cjson luna-service2 sqlite3 luna-sysmgr-ipc luna-sysmgr-ipc-messages \
+    json-c luna-service2 sqlite3 luna-sysmgr-ipc luna-sysmgr-ipc-messages \
     pmloglib librolegen nyx-lib openssl luna-webkit-api luna-prefs \
     libpbnjson freetype luna-sysmgr-common \
     qtbase qtquick1 serviceinstaller \
@@ -17,7 +17,7 @@ RDEPENDS_${PN} += " \
 "
 
 PV = "1.0.0-19+git${SRCPV}"
-SRCREV = "c89e414826bba73ac3014d2ba0493a8d82404fa8"
+SRCREV = "cf846aeb4ed7091b5cea67a3810f8614ff13d301"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
