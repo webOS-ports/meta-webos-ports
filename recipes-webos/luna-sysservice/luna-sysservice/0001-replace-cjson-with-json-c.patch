@@ -1,0 +1,1688 @@
+From 406bdb729f595ae7dfda3c1ee43550487010d4aa Mon Sep 17 00:00:00 2001
+From: Martin Jansa <Martin.Jansa@gmail.com>
+Date: Fri, 19 Dec 2014 18:52:09 +0100
+Subject: [PATCH] replace cjson with json-c
+
+* execute json_object_object_foreach inside own block,
+  otherwise it fails with couple errors like this:
+  In file included from sysroots/machine/usr/include/cjson/linkhash.h:16:0,
+      from sysroots/machine/usr/include/cjson/json.h:22,
+      from luna-sysservice/2.0.1-43-r1/git/Inc/PrefsHandler.h:25,
+      from luna-sysservice/2.0.1-43-r1/git/Inc/LocalePrefsHandler.h:21,
+      from luna-sysservice/2.0.1-43-r1/git/Src/PrefsFactory.cpp:34:
+    luna-sysservice/2.0.1-43-r1/git/Src/PrefsFactory.cpp:388:2: error:
+      crosses initialization of 'lh_entry* entry_nextkey'
+        json_object_object_foreach(root, key, val) {
+        ^
+  luna-sysservice/2.0.1-43-r1/git/Src/PrefsFactory.cpp:446:1: warning:
+    jump to label 'Done' [-fpermissive]
+     Done:
+     ^
+  luna-sysservice/2.0.1-43-r1/git/Src/PrefsFactory.cpp:376:8: warning:
+    from here [-fpermissive]
+       goto Done;
+            ^
+
+Signed-off-by: Martin Jansa <Martin.Jansa@gmail.com>
+---
+ CMakeLists.txt                    |   8 +-
+ Inc/BuildInfoHandler.h            |   2 +-
+ Inc/PrefsHandler.h                |   2 +-
+ Inc/TimeZoneService.h             |   2 +-
+ Inc/Utils.h                       |   4 +-
+ Inc/WallpaperPrefsHandler.h       |   2 +-
+ Makefile.inc                      |   2 +-
+ README.md                         |   2 +-
+ Src/BackupManager.cpp             |   2 +-
+ Src/BuildInfoHandler.cpp          |   2 +-
+ Src/DeviceInfoService.cpp         |   2 +-
+ Src/EraseHandler.cpp              |   2 +-
+ Src/ImageServices.cpp             |   2 +-
+ Src/NetworkConnectionListener.cpp |   2 +-
+ Src/OsInfoService.cpp             |   2 +-
+ Src/PrefsDb.cpp                   | 426 +++++++++++++++++++-------------------
+ Src/PrefsFactory.cpp              | 225 ++++++++++----------
+ Src/SystemRestore.cpp             |   2 +-
+ Src/TimePrefsHandler.cpp          |   4 +-
+ Src/TimeZoneService.cpp           |   2 +-
+ Src/WallpaperPrefsHandler.cpp     |   2 +-
+ 21 files changed, 355 insertions(+), 344 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 59cadea..0e71369 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -38,9 +38,9 @@ webos_add_compiler_flags(ALL ${GXML2_CFLAGS})
+ pkg_check_modules(SQLITE3 REQUIRED sqlite3)
+ webos_add_compiler_flags(ALL ${SQLITE3_CFLAGS})
+ 
+-# -- check for cjson
+-pkg_check_modules(CJSON REQUIRED cjson)
+-webos_add_compiler_flags(ALL ${CJSON_CFLAGS})
++# -- check for json-c
++pkg_check_modules(JSON REQUIRED json-c)
++webos_add_compiler_flags(ALL ${JSON_CFLAGS})
+ 
+ # -- check for pbnjson c and cpp libraries
+ pkg_check_modules(PBNJSON_C REQUIRED pbnjson_c)
+@@ -140,7 +140,7 @@ target_link_libraries(LunaSysService
+                       ${GLIB2_LDFLAGS} 
+                       ${GXML2_LDFLAGS}
+                       ${SQLITE3_LDFLAGS}
+-                      ${CJSON_LDFLAGS}
++                      ${JSON_LDFLAGS}
+                       ${MJSON_LDFLAGS}
+                       ${PBNJSON_C_LDFLAGS}
+                       ${PBNJSON_CPP_LDFLAGS}
+diff --git a/Inc/BuildInfoHandler.h b/Inc/BuildInfoHandler.h
+index 2345b4c..540bb85 100644
+--- a/Inc/BuildInfoHandler.h
++++ b/Inc/BuildInfoHandler.h
+@@ -22,7 +22,7 @@
+ #include <map>
+ #include <string>
+ #include <list>
+-#include <cjson/json.h>
++#include <json.h>
+ #include <luna-service2/lunaservice.h>
+ 
+ class BuildInfoHandler : public PrefsHandler
+diff --git a/Inc/PrefsHandler.h b/Inc/PrefsHandler.h
+index 4b4bde4..8c3297f 100644
+--- a/Inc/PrefsHandler.h
++++ b/Inc/PrefsHandler.h
+@@ -22,7 +22,7 @@
+ #include <list>
+ #include <map>
+ 
+-#include <cjson/json.h>
++#include <json.h>
+ #include <luna-service2/lunaservice.h>
+ 
+ class PrefsHandler
+diff --git a/Inc/TimeZoneService.h b/Inc/TimeZoneService.h
+index 85db6cb..d0be3a2 100644
+--- a/Inc/TimeZoneService.h
++++ b/Inc/TimeZoneService.h
+@@ -20,7 +20,7 @@
+ 
+ #include <luna-service2/lunaservice.h>
+ #include <stdint.h>
+-#include <cjson/json.h>
++#include <json.h>
+ 
+ #include <list>
+ 
+diff --git a/Inc/Utils.h b/Inc/Utils.h
+index 733894d..a3ec9f2 100644
+--- a/Inc/Utils.h
++++ b/Inc/Utils.h
+@@ -27,8 +27,8 @@
+ #include <list>
+ #include <string>
+ #include <vector>
+-#include <cjson/json.h>
+-#include <cjson/json_util.h>
++#include <json.h>
++#include <json_util.h>
+ #include <luna-service2/lunaservice.h>
+ 
+ #define SS_DEBUG_INFO	100
+diff --git a/Inc/WallpaperPrefsHandler.h b/Inc/WallpaperPrefsHandler.h
+index 131e897..9b2260b 100644
+--- a/Inc/WallpaperPrefsHandler.h
++++ b/Inc/WallpaperPrefsHandler.h
+@@ -20,7 +20,7 @@
+ 
+ #include "PrefsHandler.h"
+ 
+-#include <cjson/json.h>
++#include <json.h>
+ #include <QtGui/QImage>
+ 
+ class WallpaperPrefsHandler : public PrefsHandler {
+diff --git a/Makefile.inc b/Makefile.inc
+index 6d83fb8..7667bde 100644
+--- a/Makefile.inc
++++ b/Makefile.inc
+@@ -48,7 +48,7 @@ INCLUDES := $(INCLUDES) \
+ 	`pkg-config --cflags glib-2.0 freetype2`
+ 
+ LIBS := $(LIBS) \
+-	-lglib-2.0 -llunaservice -lcjson -lsqlite3 -luriparser -lluna-prefs -lpbnjson_cpp -lQtCore -lQtGui
++	-lglib-2.0 -llunaservice -ljson -lsqlite3 -luriparser -lluna-prefs -lpbnjson_cpp -lQtCore -lQtGui
+ 
+ LOCAL_CFLAGS := $(CFLAGS) -Wall -Werror $(FLAGS_OPT) $(ARCH_CFLAGS)
+ 
+diff --git a/README.md b/README.md
+index 33543b3..15933fc 100644
+--- a/README.md
++++ b/README.md
+@@ -126,7 +126,7 @@ Below are the tools and libraries (and their minimum versions) required to build
+ * glib-2.0
+ * liburiparser
+ * libxml-2.0
+-* openwebos/cjson
++* json-c 0.11
+ * openwebos/cmake-modules-webos 1.0.0 RC2
+ * openwebos/luna-service2
+ * openwebos/nyx-lib 6.0.0
+diff --git a/Src/BackupManager.cpp b/Src/BackupManager.cpp
+index ae264b6..2b34936 100644
+--- a/Src/BackupManager.cpp
++++ b/Src/BackupManager.cpp
+@@ -22,7 +22,7 @@
+ #include <string.h>
+ #include <map>
+ #include "BackupManager.h"
+-#include <cjson/json.h>
++#include <json.h>
+ #include "PrefsDb.h"
+ #include "PrefsFactory.h"
+ 
+diff --git a/Src/BuildInfoHandler.cpp b/Src/BuildInfoHandler.cpp
+index 0e32057..a15befd 100644
+--- a/Src/BuildInfoHandler.cpp
++++ b/Src/BuildInfoHandler.cpp
+@@ -32,7 +32,7 @@
+ #include "Logging.h"
+ #include "Utils.h"
+ 
+-#include <cjson/json_util.h>
++#include <json_util.h>
+ 
+ #define		BUILDINFO_FILE			WEBOS_INSTALL_WEBOS_SYSCONFDIR "/palm-customization-info"
+ 
+diff --git a/Src/DeviceInfoService.cpp b/Src/DeviceInfoService.cpp
+index 1fd42d6..57a899b 100644
+--- a/Src/DeviceInfoService.cpp
++++ b/Src/DeviceInfoService.cpp
+@@ -14,7 +14,7 @@
+  *  limitations under the License.
+  */
+ 
+-#include <cjson/json.h>
++#include <json.h>
+ 
+ #include "DeviceInfoService.h"
+ #include "Logging.h"
+diff --git a/Src/EraseHandler.cpp b/Src/EraseHandler.cpp
+index e96f36c..b032838 100644
+--- a/Src/EraseHandler.cpp
++++ b/Src/EraseHandler.cpp
+@@ -21,7 +21,7 @@
+ //for basename()...
+ #include <string.h>
+ #include <map>
+-#include <cjson/json.h>
++#include <json.h>
+ 
+ #include "EraseHandler.h"
+ #include "Logging.h"
+diff --git a/Src/ImageServices.cpp b/Src/ImageServices.cpp
+index e2a37ec..8cc1946 100644
+--- a/Src/ImageServices.cpp
++++ b/Src/ImageServices.cpp
+@@ -18,7 +18,7 @@
+ #include <glib.h>
+ #include <stdlib.h>
+ #include <memory.h>
+-#include "cjson/json.h"
++#include <json.h>
+ #include "Logging.h"
+ #include "Utils.h"
+ #include "errno.h"
+diff --git a/Src/NetworkConnectionListener.cpp b/Src/NetworkConnectionListener.cpp
+index 26f3929..1734cf7 100644
+--- a/Src/NetworkConnectionListener.cpp
++++ b/Src/NetworkConnectionListener.cpp
+@@ -15,7 +15,7 @@
+  */
+ 
+ 
+-#include <cjson/json.h>
++#include <json.h>
+ 
+ #include "PrefsFactory.h"
+ 
+diff --git a/Src/OsInfoService.cpp b/Src/OsInfoService.cpp
+index d6a4448..f31658e 100644
+--- a/Src/OsInfoService.cpp
++++ b/Src/OsInfoService.cpp
+@@ -14,7 +14,7 @@
+  *  limitations under the License.
+  */
+ 
+-#include <cjson/json.h>
++#include <json.h>
+ 
+ #include "OsInfoService.h"
+ #include "Logging.h"
+diff --git a/Src/PrefsDb.cpp b/Src/PrefsDb.cpp
+index 0f5bb18..278f6ce 100644
+--- a/Src/PrefsDb.cpp
++++ b/Src/PrefsDb.cpp
+@@ -1,6 +1,6 @@
+ /**
+  *  Copyright (c) 2010-2013 LG Electronics, Inc.
+- * 
++ *
+  *  Licensed under the Apache License, Version 2.0 (the "License");
+  *  you may not use this file except in compliance with the License.
+  *  You may obtain a copy of the License at
+@@ -16,7 +16,7 @@
+ 
+ 
+ #include <assert.h>
+-#include <cjson/json.h>
++#include <json.h>
+ #include <glib.h>
+ #include <string.h>
+ #include <strings.h>
+@@ -62,7 +62,7 @@ const char* PrefsDb::s_volumeIconFileAndPathDest = MEDIAPARTITIONPATH ".VolumeIc
+ 
+ const char* PrefsDb::s_sysDefaultWallpaperKey = ".prefsdb.setting.default.wallpaper";
+ const char* PrefsDb::s_sysDefaultRingtoneKey = ".prefsdb.setting.default.ringtone";
+-	
++
+ PrefsDb* PrefsDb::instance()
+ {
+ 	if (!s_instance)
+@@ -91,7 +91,7 @@ PrefsDb::PrefsDb()
+ , m_dbFilename(s_prefsDbPath)
+ , m_deleteOnDestroy(false)
+ {
+-    s_instance = this;
++	s_instance = this;
+ 	openPrefsDb();
+ }
+ 
+@@ -121,7 +121,7 @@ PrefsDb::~PrefsDb()
+ bool PrefsDb::setPref(const std::string& key, const std::string& value)
+ {
+ 	char * queryStr = 0;
+-	
++
+ 	if (!m_prefsDb)
+ 		return false;
+ 
+@@ -131,18 +131,18 @@ bool PrefsDb::setPref(const std::string& key, const std::string& value)
+ 	//gchar* queryStr = g_strdup_printf("INSERT INTO Preferences "
+ 	//								  "VALUES ('%s', '%s')",
+ 	//								  key.c_str(), value.c_str());
+-	
++
+ 	queryStr = sqlite3_mprintf("INSERT INTO Preferences "
+ 									  "VALUES (%Q, %Q)",
+ 									  key.c_str(), value.c_str());
+-	
++
+ 	if (!queryStr)
+ 		return false;
+ 
+ 	int ret = sqlite3_exec(m_prefsDb, queryStr, NULL, NULL, NULL);
+ 
+ 	if (ret) {
+-        qWarning("Failed to execute query for key %s", key.c_str());
++		qWarning("Failed to execute query for key %s", key.c_str());
+ 
+ 		sqlite3_free(queryStr);
+ 		return false;
+@@ -151,7 +151,7 @@ bool PrefsDb::setPref(const std::string& key, const std::string& value)
+ 	sqlite3_free(queryStr);
+ 
+ 	qDebug("set ( [%s] , [---, length %zu] )", key.c_str(), value.size());
+-	return true;    
++	return true;
+ }
+ 
+ std::string PrefsDb::getPref(const std::string& key)
+@@ -161,7 +161,7 @@ std::string PrefsDb::getPref(const std::string& key)
+ 	int ret = 0;
+ 	//gchar* queryStr = 0;
+ 	char * queryStr = 0;
+-	
++
+ 	std::string result="";
+ 
+ 	if (!m_prefsDb)
+@@ -179,7 +179,7 @@ std::string PrefsDb::getPref(const std::string& key)
+ 
+ 	ret = sqlite3_prepare(m_prefsDb, queryStr, -1, &statement, &tail);
+ 	if (ret) {
+-        qWarning("Failed to prepare sql statement: %s", queryStr);
++		qWarning("Failed to prepare sql statement: %s", queryStr);
+ 		goto Done;
+ 	}
+ 
+@@ -225,7 +225,7 @@ bool PrefsDb::getPref(const std::string& key,std::string& r_val)
+ 
+ 	ret = sqlite3_prepare(m_prefsDb, queryStr, -1, &statement, &tail);
+ 	if (ret) {
+-        qWarning("Failed to prepare sql statement: %s", queryStr);
++		qWarning("Failed to prepare sql statement: %s", queryStr);
+ 		goto Done;
+ 	}
+ 
+@@ -264,7 +264,7 @@ std::map<std::string,std::string> PrefsDb::getAllPrefs()
+ 
+ 	ret = sqlite3_prepare(m_prefsDb, query.c_str(), -1, &statement, &tail);
+ 	if (ret) {
+-        qWarning() << "Failed to prepare sql statement";
++		qWarning() << "Failed to prepare sql statement";
+ 		goto Done;
+ 	}
+ 
+@@ -301,18 +301,18 @@ int PrefsDb::merge(const std::string& sourceDbFilename,bool overwriteSameKeys)
+ 		bool sqlOk = runSqlCommand(attachCmd.c_str());
+ 		if (!sqlOk)
+ 		{
+-            qWarning() << "Failed to run ATTACH cmd to attach [" << sourceDbFilename.c_str() << "] to this db";
++			qWarning() << "Failed to run ATTACH cmd to attach [" << sourceDbFilename.c_str() << "] to this db";
+ 			return 0;
+ 		}
+ 		std::string mergeCmd = std::string("INSERT INTO main.Preferences SELECT * FROM backupDb.Preferences;");
+ 		sqlOk = runSqlCommand(mergeCmd.c_str());
+ 		if (!sqlOk)
+ 		{
+-            qWarning() << "Failed to run INSERT command to merge [" << sourceDbFilename.c_str() << "] into this db";
++			qWarning() << "Failed to run INSERT command to merge [" << sourceDbFilename.c_str() << "] into this db";
+ 		}
+ 		else
+ 		{
+-            qDebug("successfully merged [%s] into this db", sourceDbFilename.c_str());
++			qDebug("successfully merged [%s] into this db", sourceDbFilename.c_str());
+ 		}
+ 
+ 		closePrefsDb();
+@@ -320,7 +320,7 @@ int PrefsDb::merge(const std::string& sourceDbFilename,bool overwriteSameKeys)
+ 	}
+ 	else
+ 	{
+-        qWarning() << "Non-destructive merge not yet implemented! Nothing merged";
++		qWarning() << "Non-destructive merge not yet implemented! Nothing merged";
+ 		return 0;
+ 	}
+ 
+@@ -338,7 +338,7 @@ int PrefsDb::copyKeys(PrefsDb * p_sourceDb,const std::list<std::string>& keys,bo
+ 		return 0;
+ 
+ 	qDebug("source DB file: [%s] , target DB file: [%s] , overwriteSameKeys = %s",
+-            p_sourceDb->m_dbFilename.c_str(), m_dbFilename.c_str(),(overwriteSameKeys ? "YES" : "NO"));
++		p_sourceDb->m_dbFilename.c_str(), m_dbFilename.c_str(),(overwriteSameKeys ? "YES" : "NO"));
+ 	int n=0;
+ 	for (std::list<std::string>::const_iterator it = keys.begin();
+ 			it != keys.end();++it)
+@@ -349,8 +349,8 @@ int PrefsDb::copyKeys(PrefsDb * p_sourceDb,const std::list<std::string>& keys,bo
+ 			std::string myVal;
+ 			if (!getPref(*it,myVal) || overwriteSameKeys)
+ 			{
+-                PMLOG_TRACE("copying key,value = ( [%s] , [%s] ) , overwriting [%s] ",
+-                    (*it).c_str(),val.c_str(),myVal.c_str());
++				PMLOG_TRACE("copying key,value = ( [%s] , [%s] ) , overwriting [%s] ",
++					(*it).c_str(),val.c_str(),myVal.c_str());
+ 				setPref(*it,val);
+ 				++n;
+ 			}
+@@ -373,7 +373,7 @@ sqlite3_stmt* PrefsDb::runSqlQuery(const std::string& queryStr)
+ 
+ 	ret = sqlite3_prepare(m_prefsDb, queryStr.c_str(), -1, &statement, &tail);
+ 	if (ret != SQLITE_OK) {
+-        qWarning("Failed to prepare sql statement");
++		qWarning("Failed to prepare sql statement");
+ 		if (statement)
+ 		{
+ 			sqlite3_finalize(statement);
+@@ -396,7 +396,7 @@ bool PrefsDb::runSqlCommand(const std::string& cmdStr)
+ 
+ 	ret = sqlite3_exec(m_prefsDb, queryStr, NULL, NULL, &pErrMsg);
+ 	if (ret) {
+-        qWarning() << "Failed to execute cmd [" << queryStr << "] - extended error: [" << (pErrMsg ? pErrMsg : "<none>") << "]";
++		qWarning() << "Failed to execute cmd [" << queryStr << "] - extended error: [" << (pErrMsg ? pErrMsg : "<none>") << "]";
+ 		rc = false;
+ 	}
+ 	else
+@@ -437,7 +437,7 @@ std::map<std::string, std::string> PrefsDb::getPrefs(const std::list<std::string
+ 
+ 	ret = sqlite3_prepare(m_prefsDb, query.c_str(), -1, &statement, &tail);
+ 	if (ret) {
+-        qWarning() << "Failed to prepare sql statement";
++		qWarning() << "Failed to prepare sql statement";
+ 		goto Done;
+ 	}
+ 
+@@ -455,7 +455,7 @@ Done:
+ 	if (statement)
+ 		sqlite3_finalize(statement);
+ 
+-	return result;    
++	return result;
+ }
+ 
+ void PrefsDb::openPrefsDb()
+@@ -469,16 +469,16 @@ void PrefsDb::openPrefsDb()
+ 	gchar* prefsDirPath = g_path_get_dirname(m_dbFilename.c_str());
+ 	g_mkdir_with_parents(prefsDirPath, 0755);
+ 	g_free(prefsDirPath);
+-	
++
+ 	int ret = sqlite3_open(m_dbFilename.c_str(), &m_prefsDb);
+ 	if (ret) {
+-        qWarning() << "Failed to open preferences db [" << m_dbFilename.c_str() << "]";
++		qWarning() << "Failed to open preferences db [" << m_dbFilename.c_str() << "]";
+ 		return;
+ 	}
+ 
+ 	if (!checkTableConsistency()) {
+ 
+-        qWarning() << "Failed to create Preferences table";
++		qWarning() << "Failed to create Preferences table";
+ 		sqlite3_close(m_prefsDb);
+ 		m_prefsDb = 0;
+ 		return;
+@@ -489,7 +489,7 @@ void PrefsDb::openPrefsDb()
+ 					   "(key   TEXT NOT NULL ON CONFLICT FAIL UNIQUE ON CONFLICT REPLACE, "
+ 					   " value TEXT);", NULL, NULL, NULL);
+ 	if (ret) {
+-        qWarning() << "Failed to create Preferences table";
++		qWarning() << "Failed to create Preferences table";
+ 		sqlite3_close(m_prefsDb);
+ 		m_prefsDb = 0;
+ 		return;
+@@ -498,11 +498,11 @@ void PrefsDb::openPrefsDb()
+ 
+ void PrefsDb::closePrefsDb()
+ {
+-    if (!m_prefsDb)
++	if (!m_prefsDb)
+ 		return;
+ 
+ 	(void) sqlite3_close(m_prefsDb);
+-	m_prefsDb = 0;    
++	m_prefsDb = 0;
+ }
+ 
+ bool PrefsDb::checkTableConsistency()
+@@ -513,18 +513,18 @@ bool PrefsDb::checkTableConsistency()
+ 	int ret;
+ 	std::string query;
+ 	sqlite3_stmt* statement = 0;
+-	const char* tail = 0;	
++	const char* tail = 0;
+ 
+ 	if (!integrityCheckDb())
+ 	{
+-        qCritical("integrity check failed on prefs db and it cannot be recreated");
++		qCritical("integrity check failed on prefs db and it cannot be recreated");
+ 		return false;
+ 	}
+-	
++
+ 	query = "SELECT value FROM Preferences WHERE key='databaseVersion'";
+ 	ret = sqlite3_prepare(m_prefsDb, query.c_str(), -1, &statement, &tail);
+ 	if (ret) {
+-        qWarning("Failed to prepare sql statement: %s (%s)",
++		qWarning("Failed to prepare sql statement: %s (%s)",
+ 					  query.c_str(), sqlite3_errmsg(m_prefsDb));
+ 		sqlite3_finalize(statement);
+ 		goto Recreate;
+@@ -542,10 +542,10 @@ bool PrefsDb::checkTableConsistency()
+ 		// check to see if all the defaults from the s_defaultPrefsFile at least exist and if not, add them
+ 		synchronizeDefaults();
+ 		synchronizePlatformDefaults();
+-	
++
+ 		//check the same with the "customer care" file
+ 		synchronizeCustomerCareInfo();
+-	
++
+ 		updateWithCustomizationPrefOverrides();
+ 	}
+ 	//Everything is now ok.
+@@ -559,14 +559,14 @@ Recreate:
+ 					   "(key   TEXT NOT NULL ON CONFLICT FAIL UNIQUE ON CONFLICT REPLACE, "
+ 					   " value TEXT);", NULL, NULL, NULL);
+ 	if (ret) {
+-        qWarning() << "Failed to create Preferences table";
++		qWarning() << "Failed to create Preferences table";
+ 		return false;
+ 	}
+ 
+ 	ret = sqlite3_exec(m_prefsDb, "INSERT INTO Preferences VALUES ('databaseVersion', '1.0')",
+ 					   NULL, NULL, NULL);
+ 	if (ret) {
+-        qWarning() << "Failed to create Preferences table";
++		qWarning() << "Failed to create Preferences table";
+ 		return false;
+ 	}
+ 
+@@ -592,8 +592,8 @@ bool PrefsDb::integrityCheckDb()
+ 
+ 	ret = sqlite3_prepare(m_prefsDb, "PRAGMA integrity_check", -1, &statement, &tail);
+ 	if (ret) {
+-        qCritical() << "Failed to prepare sql statement for integrity_check";
+-	    goto CorruptDb;
++		qCritical() << "Failed to prepare sql statement for integrity_check";
++		goto CorruptDb;
+ 	}
+ 
+ 	ret = sqlite3_step(statement);
+@@ -614,14 +614,14 @@ bool PrefsDb::integrityCheckDb()
+ 
+ CorruptDb:
+ 
+-    qCritical() << "integrity check failed. recreating database";
++	qCritical() << "integrity check failed. recreating database";
+ 
+ 	sqlite3_close(m_prefsDb);
+ 	unlink(m_dbFilename.c_str());
+ 
+ 	ret = sqlite3_open_v2 (m_dbFilename.c_str(), &m_prefsDb, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, NULL);
+ 	if (ret) {
+-        qCritical() << "Failed to re-open prefs db at [" << m_dbFilename.c_str() << "]";
++		qCritical() << "Failed to re-open prefs db at [" << m_dbFilename.c_str() << "]";
+ 		return false;
+ 	}
+ 
+@@ -629,10 +629,10 @@ CorruptDb:
+ }
+ 
+ void PrefsDb::synchronizeDefaults() {
+-	
++
+ 	char* jsonStr = Utils::readFile(s_defaultPrefsFile);
+ 	if (!jsonStr) {
+-        qWarning() << "Failed to load default prefs file:" << s_defaultPrefsFile;
++		qWarning() << "Failed to load default prefs file:" << s_defaultPrefsFile;
+ 		return;
+ 	}
+ 
+@@ -644,7 +644,7 @@ void PrefsDb::synchronizeDefaults() {
+ 	root = json_tokener_parse(jsonStr);
+ 	if (!root || is_error(root)) {
+ 		delete [] jsonStr;
+-        qWarning() << "Failed to parse file contents into json";
++		qWarning() << "Failed to parse file contents into json";
+ 		return;
+ 	}
+ 
+@@ -657,35 +657,36 @@ void PrefsDb::synchronizeDefaults() {
+ 		return;
+ 	}
+ 
+-	json_object_object_foreach(label, key, val) {
+-
+-		if (val == NULL)
+-			continue;		//TODO: really should delete this key if it is in the database
+-		const char * p_cDbv = json_object_to_json_string(val);
+-		if (p_cDbv == NULL)
+-			continue;
+-		//check the key to see if it exists in the db already
+-
+-		std::string cv = getPref(key);
+-
+-		if ((cv.length() == 0) || ((strncmp(key,".sysservice",11) == 0))) {		//allow special keys to be overriden
+-			queryStr = g_strdup_printf("INSERT INTO Preferences "
+-					"VALUES ('%s', '%s')",
+-					key, json_object_to_json_string(val));
+-			if (!queryStr) {
+-                qWarning() << "PrefsDb::synchronizeDefaults(): Failed to allocate query string for key:" << key;
+-				continue;
+-			}
+-
+-			ret = sqlite3_exec(m_prefsDb, queryStr, NULL, NULL, NULL);
+-			g_free(queryStr);
++	{
++		json_object_object_foreach(label, key, val) {
+ 
+-			if (ret) {
+-                qWarning() << "Failed to execute query for key:" << key;
++			if (val == NULL)
++				continue;		//TODO: really should delete this key if it is in the database
++			const char * p_cDbv = json_object_to_json_string(val);
++			if (p_cDbv == NULL)
+ 				continue;
++			//check the key to see if it exists in the db already
++
++			std::string cv = getPref(key);
++
++			if ((cv.length() == 0) || ((strncmp(key,".sysservice",11) == 0))) {		//allow special keys to be overriden
++				queryStr = g_strdup_printf("INSERT INTO Preferences "
++						"VALUES ('%s', '%s')",
++						key, json_object_to_json_string(val));
++				if (!queryStr) {
++					qWarning() << "PrefsDb::synchronizeDefaults(): Failed to allocate query string for key:" << key;
++					continue;
++				}
++
++				ret = sqlite3_exec(m_prefsDb, queryStr, NULL, NULL, NULL);
++				g_free(queryStr);
++
++				if (ret) {
++					qWarning() << "Failed to execute query for key:" << key;
++					continue;
++				}
+ 			}
+ 		}
+-		
+ 	}
+ 
+ 	json_object_put(root);
+@@ -693,10 +694,10 @@ void PrefsDb::synchronizeDefaults() {
+ }
+ 
+ void PrefsDb::synchronizePlatformDefaults() {
+-	
++
+ 	char* jsonStr = Utils::readFile(s_defaultPlatformPrefsFile);
+ 	if (!jsonStr) {
+-        qWarning() << "Failed to load default platform prefs file:" << s_defaultPlatformPrefsFile;
++		qWarning() << "Failed to load default platform prefs file:" << s_defaultPlatformPrefsFile;
+ 		return;
+ 	}
+ 
+@@ -707,7 +708,7 @@ void PrefsDb::synchronizePlatformDefaults() {
+ 
+ 	root = json_tokener_parse(jsonStr);
+ 	if (!root || is_error(root)) {
+-        qWarning() << "Failed to parse file contents into json";
++		qWarning() << "Failed to parse file contents into json";
+ 		return;
+ 	}
+ 
+@@ -718,35 +719,35 @@ void PrefsDb::synchronizePlatformDefaults() {
+ 		return;
+ 	}
+ 
+-	json_object_object_foreach(label, key, val) {
+-
+-		if (val == NULL)
+-			continue;		//TODO: really should delete this key if it is in the database
+-		const char * p_cDbv = json_object_to_json_string(val);
+-		if (p_cDbv == NULL)
+-			continue;
+-		//check the key to see if it exists in the db already
+-
+-		std::string cv = getPref(key);
+-
+-		if (cv.length() == 0) {
+-			queryStr = g_strdup_printf("INSERT INTO Preferences "
+-					"VALUES ('%s', '%s')",
+-					key, json_object_to_json_string(val));
+-			if (!queryStr) {
+-                qWarning() << "Failed to allocate query string for key:" << key;
+-				continue;
+-			}
+-
+-			ret = sqlite3_exec(m_prefsDb, queryStr, NULL, NULL, NULL);
+-			g_free(queryStr);
+-
+-			if (ret) {
+-                qWarning() << "Failed to execute query for key:" << key;
++	{
++		json_object_object_foreach(label, key, val) {
++			if (val == NULL)
++				continue;		//TODO: really should delete this key if it is in the database
++			const char * p_cDbv = json_object_to_json_string(val);
++			if (p_cDbv == NULL)
+ 				continue;
++			//check the key to see if it exists in the db already
++
++			std::string cv = getPref(key);
++
++			if (cv.length() == 0) {
++				queryStr = g_strdup_printf("INSERT INTO Preferences "
++						"VALUES ('%s', '%s')",
++						key, json_object_to_json_string(val));
++				if (!queryStr) {
++					qWarning() << "Failed to allocate query string for key:" << key;
++					continue;
++				}
++
++				ret = sqlite3_exec(m_prefsDb, queryStr, NULL, NULL, NULL);
++				g_free(queryStr);
++
++				if (ret) {
++					qWarning() << "Failed to execute query for key:" << key;
++					continue;
++				}
+ 			}
+ 		}
+-		
+ 	}
+ 
+ 	json_object_put(root);
+@@ -754,10 +755,10 @@ void PrefsDb::synchronizePlatformDefaults() {
+ }
+ 
+ void PrefsDb::synchronizeCustomerCareInfo() {
+-	
++
+ 	char* jsonStr = Utils::readFile(s_custCareNumberFile);
+ 	if (!jsonStr) {
+-        qWarning() << "Failed to load customer care file:" << s_custCareNumberFile;
++		qWarning() << "Failed to load customer care file:" << s_custCareNumberFile;
+ 		return;
+ 	}
+ 
+@@ -770,39 +771,40 @@ void PrefsDb::synchronizeCustomerCareInfo() {
+ 		qWarning() << "Failed to parse file contents into valid json";
+ 		return;
+ 	}
+-	
+-	json_object_object_foreach(root, key, val) {
+ 
+-		if (val == NULL)
+-			continue;		//TODO: really should delete this key if it is in the database
+-		const char * p_cDbv = json_object_to_json_string(val);
+-		if (p_cDbv == NULL)
+-			continue;
+-		
+-		//check the key to see if it exists in the db already
+-		std::string cv = getPref(key);
+-		std::string dbv(p_cDbv);
+-		
+-		if (cv.length() == 0) {
+-			queryStr = g_strdup_printf("INSERT INTO Preferences "
+-					"VALUES ('%s', '%s')",
+-					key, json_object_to_json_string(val));
+-			if (!queryStr) {
+-                qWarning() << "Failed to allocate query string for key:" << key;
++	{
++		json_object_object_foreach(root, key, val) {
++			if (val == NULL)
++				continue;		//TODO: really should delete this key if it is in the database
++			const char * p_cDbv = json_object_to_json_string(val);
++			if (p_cDbv == NULL)
+ 				continue;
+-			}
+ 
+-			ret = sqlite3_exec(m_prefsDb, queryStr, NULL, NULL, NULL);
+-			g_free(queryStr);
+-
+-			if (ret) {
+-                qWarning() << "Failed to execute query for key:" << key;
+-				continue;
++			//check the key to see if it exists in the db already
++			std::string cv = getPref(key);
++			std::string dbv(p_cDbv);
++
++			if (cv.length() == 0) {
++				queryStr = g_strdup_printf("INSERT INTO Preferences "
++						"VALUES ('%s', '%s')",
++						key, json_object_to_json_string(val));
++				if (!queryStr) {
++					qWarning() << "Failed to allocate query string for key:" << key;
++					continue;
++				}
++
++				ret = sqlite3_exec(m_prefsDb, queryStr, NULL, NULL, NULL);
++				g_free(queryStr);
++
++				if (ret) {
++					qWarning() << "Failed to execute query for key:" << key;
++					continue;
++				}
++			}
++			else if (cv != dbv) {
++				//update
++				setPref(key,dbv);
+ 			}
+-		}
+-		else if (cv != dbv) {
+-			//update
+-			setPref(key,dbv);
+ 		}
+ 	}
+ 
+@@ -814,7 +816,7 @@ void PrefsDb::updateWithCustomizationPrefOverrides()
+ {
+ 	char* jsonStr = Utils::readFile(s_customizationOverridePrefsFile);
+ 	if (!jsonStr) {
+-        qWarning() << "Failed to customization's prefs override file:" << s_customizationOverridePrefsFile;
++		qWarning() << "Failed to customization's prefs override file:" << s_customizationOverridePrefsFile;
+ 		return;
+ 	}
+ 
+@@ -826,7 +828,7 @@ void PrefsDb::updateWithCustomizationPrefOverrides()
+ 	root = json_tokener_parse(jsonStr);
+ 	if (!root || is_error(root)) {
+ 		delete [] jsonStr;
+-        qWarning() << "Failed to parse file contents into json";
++		qWarning() << "Failed to parse file contents into json";
+ 		return;
+ 	}
+ 
+@@ -839,25 +841,27 @@ void PrefsDb::updateWithCustomizationPrefOverrides()
+ 		return;
+ 	}
+ 
+-	json_object_object_foreach(label, key, val) {
++	{
++		json_object_object_foreach(label, key, val) {
+ 
+-		if (val == NULL)
+-			continue;		//TODO: really should delete this key if it is in the database
++			if (val == NULL)
++				continue;		//TODO: really should delete this key if it is in the database
+ 
+-		queryStr = g_strdup_printf("INSERT INTO Preferences "
+-				"VALUES ('%s', '%s')",
+-				key, json_object_to_json_string(val));
+-		if (!queryStr) {
+-            qWarning() << "Failed to allocate query string for key:" << key;
+-			continue;
+-		}
++			queryStr = g_strdup_printf("INSERT INTO Preferences "
++					"VALUES ('%s', '%s')",
++					key, json_object_to_json_string(val));
++			if (!queryStr) {
++				qWarning() << "Failed to allocate query string for key:" << key;
++				continue;
++			}
+ 
+-		ret = sqlite3_exec(m_prefsDb, queryStr, NULL, NULL, NULL);
+-		g_free(queryStr);
++			ret = sqlite3_exec(m_prefsDb, queryStr, NULL, NULL, NULL);
++			g_free(queryStr);
+ 
+-		if (ret) {
+-            qWarning() << "Failed to execute query for key:" << key;
+-			continue;
++			if (ret) {
++				qWarning() << "Failed to execute query for key:" << key;
++				continue;
++			}
+ 		}
+ 	}
+ 
+@@ -872,7 +876,7 @@ void PrefsDb::loadDefaultPrefs()
+ {
+ 	char* jsonStr = Utils::readFile(s_defaultPrefsFile);
+ 	if (!jsonStr) {
+-        qWarning() << "Failed to load default prefs file:" << s_defaultPrefsFile;
++		qWarning() << "Failed to load default prefs file:" << s_defaultPrefsFile;
+ 		return;
+ 	}
+ 
+@@ -886,7 +890,7 @@ void PrefsDb::loadDefaultPrefs()
+ 
+ 	root = json_tokener_parse(jsonStr);
+ 	if (!root || is_error(root)) {
+-        qWarning() << "Failed to parse preferences file contents into json";
++		qWarning() << "Failed to parse preferences file contents into json";
+ 		goto Stage1a;
+ 	}
+ 
+@@ -896,29 +900,31 @@ void PrefsDb::loadDefaultPrefs()
+ 		goto Stage1a;
+ 	}
+ 
+-	json_object_object_foreach(label, key, val) {
++	{
++		json_object_object_foreach(label, key, val) {
+ 
+-		queryStr = g_strdup_printf("INSERT INTO Preferences "
+-										  "VALUES ('%s', '%s')",
+-										  key, json_object_to_json_string(val));
+-		if (!queryStr) {
+-            qWarning() << "Failed to allocate query string for key:" << key;
+-			continue;
+-		}
++			queryStr = g_strdup_printf("INSERT INTO Preferences "
++											  "VALUES ('%s', '%s')",
++											  key, json_object_to_json_string(val));
++			if (!queryStr) {
++				qWarning() << "Failed to allocate query string for key:" << key;
++				continue;
++			}
+ 
+-		ret = sqlite3_exec(m_prefsDb, queryStr, NULL, NULL, NULL);
+-		g_free(queryStr);
+-		queryStr = 0;
+-		
+-		if (ret) {
+-            qWarning() << "Failed to execute query for key:" << key;
+-			continue;
++			ret = sqlite3_exec(m_prefsDb, queryStr, NULL, NULL, NULL);
++			g_free(queryStr);
++			queryStr = 0;
++
++			if (ret) {
++				qWarning() << "Failed to execute query for key:" << key;
++				continue;
++			}
+ 		}
+ 	}
+ 
+ Stage1a:
+ 	// ----------------- Load in the db tokens that let the system service know what restore stage the system is in (after reformats, etc)
+-	
++
+ 	if (jsonStr) {
+ 		delete [] jsonStr;
+ 	}
+@@ -933,7 +939,7 @@ Stage1a:
+ 			"VALUES ('%s', '%s')",
+ 			s_DBNEWTOKEN[0],s_DBNEWTOKEN[1]);
+ 	if (!queryStr) {
+-        qWarning() << "Failed to allocate query string";
++		qWarning() << "Failed to allocate query string";
+ 		goto Stage2;
+ 	}
+ 
+@@ -941,7 +947,7 @@ Stage1a:
+ 	g_free(queryStr);
+ 
+ 	if (ret) {
+-        qWarning() << "Failed to execute query:" << queryStr;
++		qWarning() << "Failed to execute query:" << queryStr;
+ 	}
+ 
+ Stage2:
+@@ -949,7 +955,7 @@ Stage2:
+ 	//customer care number also...this is in a separate file
+ 	jsonStr = Utils::readFile(s_custCareNumberFile);
+ 	if (!jsonStr) {
+-        qWarning() << "Failed to load customer care # file:" << s_custCareNumberFile;
++		qWarning() << "Failed to load customer care # file:" << s_custCareNumberFile;
+ 		goto Stage3;
+ 	}
+ 
+@@ -959,31 +965,33 @@ Stage2:
+ 		goto Stage3;
+ 	}
+ 
+-	json_object_object_foreach(root, cc_key, cc_val) {
++	{
++		json_object_object_foreach(root, cc_key, cc_val) {
+ 
+-		if (cc_val == NULL)
+-			continue;		
+-		p_cDbv = json_object_to_json_string(cc_val);
+-		if (p_cDbv == NULL)
+-			continue;
++			if (cc_val == NULL)
++				continue;
++			p_cDbv = json_object_to_json_string(cc_val);
++			if (p_cDbv == NULL)
++				continue;
+ 
+-		queryStr = g_strdup_printf("INSERT INTO Preferences "
+-				"VALUES ('%s', '%s')",
+-				cc_key, json_object_to_json_string(cc_val));
+-		if (!queryStr) {
+-            qWarning() << "Failed to allocate query string for key:" << cc_key;
+-			continue;
+-		}
++			queryStr = g_strdup_printf("INSERT INTO Preferences "
++					"VALUES ('%s', '%s')",
++					cc_key, json_object_to_json_string(cc_val));
++			if (!queryStr) {
++				qWarning() << "Failed to allocate query string for key:" << cc_key;
++				continue;
++			}
+ 
+-		ret = sqlite3_exec(m_prefsDb, queryStr, NULL, NULL, NULL);
+-		g_free(queryStr);
+-		queryStr = 0;
++			ret = sqlite3_exec(m_prefsDb, queryStr, NULL, NULL, NULL);
++			g_free(queryStr);
++			queryStr = 0;
+ 
+-		if (ret) {
+-            qWarning() << "Failed to execute query:" << queryStr;
+-			continue;
++			if (ret) {
++				qWarning() << "Failed to execute query:" << queryStr;
++				continue;
++			}
++			qDebug("loaded key %s with value %s",cc_key, json_object_to_json_string(cc_val));
+ 		}
+-        qDebug("loaded key %s with value %s",cc_key, json_object_to_json_string(cc_val));
+ 	}
+ 
+ Stage3:
+@@ -1002,26 +1010,26 @@ Stage3:
+ 			"VALUES ('%s', '%s')",
+ 			s_DEFAULT_uaProf[0],s_DEFAULT_uaProf[1]);
+ 	if (!queryStr) {
+-        qWarning() << "[Stage 3] Failed to allocate query string";
++		qWarning() << "[Stage 3] Failed to allocate query string";
+ 		goto Done;
+ 	}
+ 
+ 	ret = sqlite3_exec(m_prefsDb, queryStr, NULL, NULL, NULL);
+ 	if (ret) {
+-        qWarning() << "[Stage 3] Failed to execute query:" << queryStr;
++		qWarning() << "[Stage 3] Failed to execute query:" << queryStr;
+ 	}
+ 	g_free(queryStr);
+ 	queryStr = g_strdup_printf("INSERT INTO Preferences "
+ 			"VALUES ('%s', '%s')",
+ 			s_DEFAULT_uaString[0],s_DEFAULT_uaString[1]);
+ 	if (!queryStr) {
+-        qWarning() << "[Stage 3] Failed to allocate query string";
++		qWarning() << "[Stage 3] Failed to allocate query string";
+ 		goto Done;
+ 	}
+ 
+ 	ret = sqlite3_exec(m_prefsDb, queryStr, NULL, NULL, NULL);
+ 	if (ret) {
+-        qWarning() << "Stage 3] Failed to execute query:" << queryStr;
++		qWarning() << "Stage 3] Failed to execute query:" << queryStr;
+ 	}
+ 	g_free(queryStr);
+ 	queryStr = 0;
+@@ -1041,7 +1049,7 @@ void PrefsDb::loadDefaultPlatformPrefs()
+ {
+ 	char* jsonStr = Utils::readFile(s_defaultPlatformPrefsFile);
+ 	if (!jsonStr) {
+-        qWarning() << "Failed to load platform default prefs file:" << s_defaultPlatformPrefsFile;
++		qWarning() << "Failed to load platform default prefs file:" << s_defaultPlatformPrefsFile;
+ 		return;
+ 	}
+ 
+@@ -1054,7 +1062,7 @@ void PrefsDb::loadDefaultPlatformPrefs()
+ 
+ 	root = json_tokener_parse(jsonStr);
+ 	if (!root || is_error(root)) {
+-        qWarning() << "Failed to parse preferences file contents into json";
++		qWarning() << "Failed to parse preferences file contents into json";
+ 		goto Done;
+ 	}
+ 
+@@ -1064,22 +1072,24 @@ void PrefsDb::loadDefaultPlatformPrefs()
+ 		goto Done;
+ 	}
+ 
+-	json_object_object_foreach(label, key, val) {
++	{
++		json_object_object_foreach(label, key, val) {
+ 
+-		queryStr = g_strdup_printf("INSERT INTO Preferences "
+-				"VALUES ('%s', '%s')",
+-				key, json_object_to_json_string(val));
+-		if (!queryStr) {
+-            qWarning() << "Failed to allocate query string for key:" << key;
+-			continue;
+-		}
++			queryStr = g_strdup_printf("INSERT INTO Preferences "
++					"VALUES ('%s', '%s')",
++					key, json_object_to_json_string(val));
++			if (!queryStr) {
++				qWarning() << "Failed to allocate query string for key:" << key;
++				continue;
++			}
+ 
+-		ret = sqlite3_exec(m_prefsDb, queryStr, NULL, NULL, NULL);
+-		g_free(queryStr);
++			ret = sqlite3_exec(m_prefsDb, queryStr, NULL, NULL, NULL);
++			g_free(queryStr);
+ 
+-		if (ret) {
+-            qWarning() << "Failed to execute query for key:" << key;
+-			continue;
++			if (ret) {
++				qWarning() << "Failed to execute query for key:" << key;
++				continue;
++			}
+ 		}
+ 	}
+ 
+@@ -1098,7 +1108,7 @@ Done:
+ 	SystemRestore::instance()->refreshDefaultSettings();
+ }
+ 
+-void PrefsDb::backupDefaultPrefs() 
++void PrefsDb::backupDefaultPrefs()
+ {
+ 	std::string prefStr = getPref("wallpaper");
+ 	setPref(PrefsDb::s_sysDefaultWallpaperKey,prefStr);
+diff --git a/Src/PrefsFactory.cpp b/Src/PrefsFactory.cpp
+index a473ec1..3498894 100644
+--- a/Src/PrefsFactory.cpp
++++ b/Src/PrefsFactory.cpp
+@@ -1,6 +1,6 @@
+ /**
+  *  Copyright (c) 2010-2013 LG Electronics, Inc.
+- * 
++ *
+  *  Licensed under the Apache License, Version 2.0 (the "License");
+  *  you may not use this file except in compliance with the License.
+  *  You may obtain a copy of the License at
+@@ -21,7 +21,7 @@
+ #include <sys/types.h>
+ #include <sys/stat.h>
+ #include <sys/socket.h>
+-#include <sys/statfs.h> 
++#include <sys/statfs.h>
+ 
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -72,7 +72,7 @@ static LSMethod s_methods[] = {
+ 
+ PrefsFactory* PrefsFactory::instance()
+ {
+-    if (!s_instance)
++	if (!s_instance)
+ 		new PrefsFactory;
+ 
+ 	return s_instance;
+@@ -92,24 +92,24 @@ PrefsFactory::~PrefsFactory()
+ 
+ void PrefsFactory::setServiceHandle(LSPalmService* service)
+ {
+-    m_service = service;
++	m_service = service;
+ 
+ 	bool result;
+ 	LSError lsError;
+ 	LSErrorInit(&lsError);
+-	
++
+ 	result = LSPalmServiceRegisterCategory( m_service, "/", s_methods, NULL,
+ 			NULL, this, &lsError);
+ 	if (!result) {
+-            //luna_critical(s_logChannel, "Failed to register methods: %s", lsError.message);
+-            qCritical() << "Failed to register methods:" << lsError.message;
+-			LSErrorFree(&lsError);
+-			return;
+-		}
++		//luna_critical(s_logChannel, "Failed to register methods: %s", lsError.message);
++		qCritical() << "Failed to register methods:" << lsError.message;
++		LSErrorFree(&lsError);
++		return;
++	}
+ 
+ 	m_serviceHandlePublic = LSPalmServiceGetPublicConnection(m_service);
+ 	m_serviceHandlePrivate = LSPalmServiceGetPrivateConnection(m_service);
+-		
++
+ 	// Now we can create all the prefs handlers
+ 	registerPrefHandler(new LocalePrefsHandler(service));
+ 	registerPrefHandler(new TimePrefsHandler(service));
+@@ -120,7 +120,7 @@ void PrefsFactory::setServiceHandle(LSPalmService* service)
+ 
+ LSPalmService* PrefsFactory::serviceHandle() const
+ {
+-	return m_service;    
++	return m_service;
+ }
+ 
+ PrefsHandler* PrefsFactory::getPrefsHandler(const std::string& key) const
+@@ -128,15 +128,15 @@ PrefsHandler* PrefsFactory::getPrefsHandler(const std::string& key) const
+ 	PrefsHandlerMap::const_iterator it = m_handlersMaps.find(key);
+ 	if (it == m_handlersMaps.end())
+ 		return 0;
+-	
+-    return (*it).second;
++
++	return (*it).second;
+ }
+ 
+ void PrefsFactory::registerPrefHandler(PrefsHandler* handler)
+ {
+ 	if (!handler)
+ 		return;
+-	
++
+ 	std::list<std::string> keys = handler->keys();
+ 	for (std::list<std::string>::const_iterator it = keys.begin(); it != keys.end(); ++it)
+ 		m_handlersMaps[*it] = handler;
+@@ -147,9 +147,9 @@ void PrefsFactory::postPrefChange(const std::string& keyStr,const std::string& v
+ 	LSSubscriptionIter *iter=NULL;
+ 	LSError lserror;
+ 	LSHandle * lsHandle;
+-	
++
+ 	LSErrorInit(&lserror);
+-	
++
+ 	std::string reply = std::string("{ \"")+keyStr+std::string("\":")+valueStr+std::string("}");
+ 	// Find out which handle this subscription needs to go to
+ 	bool retVal = LSSubscriptionAcquire(m_serviceHandlePublic, keyStr.c_str(), &iter, &lserror);
+@@ -169,7 +169,7 @@ void PrefsFactory::postPrefChange(const std::string& keyStr,const std::string& v
+ 	else {
+ 		LSErrorFree(&lserror);
+ 	}
+-	
++
+ 	LSErrorInit(&lserror);
+ 	iter=NULL;
+ 	retVal = LSSubscriptionAcquire(m_serviceHandlePrivate, keyStr.c_str(), &iter, &lserror);
+@@ -190,7 +190,7 @@ void PrefsFactory::postPrefChange(const std::string& keyStr,const std::string& v
+ 		LSErrorFree(&lserror);
+ 	}
+ 
+-	
++
+ }
+ 
+ void PrefsFactory::postPrefChangeValueIsCompleteString(const std::string& keyStr,const std::string& json_string)
+@@ -198,14 +198,14 @@ void PrefsFactory::postPrefChangeValueIsCompleteString(const std::string& keyStr
+ 	LSSubscriptionIter *iter=NULL;
+ 	LSError lserror;
+ 	LSHandle * lsHandle;
+-	
++
+ 	LSErrorInit(&lserror);
+ 	//std::string reply = std::string("{ \"")+keyStr+std::string("\":")+valueStr+std::string("}");
+ 	const std::string reply = json_string;
+ 	//**DEBUG validate for correct UTF-8 output
+ 	if (!g_utf8_validate (reply.c_str(), -1, NULL))
+ 	{
+-        qWarning() << "bus reply fails UTF-8 validity check! [" << reply.c_str() << "]";
++		qWarning() << "bus reply fails UTF-8 validity check! [" << reply.c_str() << "]";
+ 	}
+ 	// Find out which handle this subscription needs to go to
+ 	bool retVal = LSSubscriptionAcquire(m_serviceHandlePublic, keyStr.c_str(), &iter, &lserror);
+@@ -221,12 +221,12 @@ void PrefsFactory::postPrefChangeValueIsCompleteString(const std::string& keyStr
+ 		}
+ 
+ 		LSSubscriptionRelease(iter);
+-			
++
+ 	}
+ 	else  {
+ 		LSErrorFree(&lserror);
+ 	}
+-	
++
+ 	LSErrorInit(&lserror);
+ 	iter=NULL;
+ 	retVal = LSSubscriptionAcquire(m_serviceHandlePrivate, keyStr.c_str(), &iter, &lserror);
+@@ -277,20 +277,20 @@ void PrefsFactory::refreshAllKeys()
+ 
+ }
+ 
+-void PrefsFactory::runConsistencyChecksOnAllHandlers() 
++void PrefsFactory::runConsistencyChecksOnAllHandlers()
+ {
+ 	//go through all the handlers
+-	
++
+ 	for (PrefsHandlerMap::iterator it = m_handlersMaps.begin();it != m_handlersMaps.end();++it) {
+ 		std::string key = it->first;
+ 		PrefsHandler * handler = it->second;
+ 		if (handler) {
+ 			//run the verifier on this key to make sure the pref is correct
+ 			if (handler->isPrefConsistent() == false) {
+-                qWarning() << "reports inconsistency with key [" << key.c_str() << "]. Restoring default...";
++				qWarning() << "reports inconsistency with key [" << key.c_str() << "]. Restoring default...";
+ 				handler->restoreToDefault();		//something is wrong with this...try and restore it
+ 				std::string restoreVal = PrefsDb::instance()->getPref(key);
+-                qWarning() << "key [" << key.c_str() << "] restored to value [" << restoreVal.c_str() << "]";
++				qWarning() << "key [" << key.c_str() << "] restored to value [" << restoreVal.c_str() << "]";
+ 				PrefsFactory::instance()->postPrefChange(key,restoreVal);
+ 			}
+ 		}
+@@ -353,14 +353,14 @@ static bool cbSetPreferences(LSHandle* lsHandle, LSMessage* message,
+ {
+ 	json_object* root = 0;
+ 	bool result;
+-    bool success = true;
++	bool success = true;
+ 	LSError lsError;
+ 	LSErrorInit(&lsError);
+ 	std::string errorText;
+ 	int savecount=0;
+ 	int errcount=0;
+ 	std::string callerId;
+-	
++
+ 	const char* payload = LSMessageGetPayload(message);
+ 	if (!payload) {
+ 		success=false;
+@@ -382,80 +382,81 @@ static bool cbSetPreferences(LSHandle* lsHandle, LSMessage* message,
+ 		errorText = std::string("invalid payload type (should be object)");
+ 		goto Done;
+ 	}
+-	
++
+ 	callerId = (LSMessageGetApplicationID(message) != 0 ? LSMessageGetApplicationID(message) : "" );
+ 
+-	json_object_object_foreach(root, key, val) {
+-		// Is there a preferences handler for this?
++	{
++		json_object_object_foreach(root, key, val) {
++			// Is there a preferences handler for this?
++
++			bool savedPref = false;
++
++			PrefsHandler* handler = PrefsFactory::instance()->getPrefsHandler(key);
++
++			if (handler) {
++				PMLOG_TRACE("found handler for %s", key);
++				if (handler->validate(key, val, callerId)) {
++ 					qDebug("handler validated value for key [%s]",key);
++					savedPref = PrefsDb::instance()->setPref(key, json_object_to_json_string(val));
++				}
++				else {
++					qWarning() << "handler DID NOT validate value for key:" << key;
++				}
++			}
++			else {
++				qWarning() << "setPref did NOT find handler for:" << key;
+ 
+-		bool savedPref = false;
+-		
+-		PrefsHandler* handler = PrefsFactory::instance()->getPrefsHandler(key);
+-		
+-		if (handler) {
+-			PMLOG_TRACE("found handler for %s", key);
+-			if (handler->validate(key, val, callerId)) {
+- 				qDebug("handler validated value for key [%s]",key);
++				//filter out
+ 				savedPref = PrefsDb::instance()->setPref(key, json_object_to_json_string(val));
+ 			}
++			qDebug("setPref saved? %s",(savedPref ? "true" : "false"));
++
++			if (savedPref) {
++				++savecount;
++
++				// successfully set the preference. post a notification about it
++
++				json_object* json = 0;
++
++				json = json_object_new_object();
++				json_object_object_add(json, (char*) key, json_object_get(val));
++
++				std::string subKeyStr = std::string(key);
++				std::string subValStr = std::string(json_object_to_json_string(json));
++
++				PrefsFactory::instance()->postPrefChangeValueIsCompleteString(subKeyStr,subValStr);
++
++				// Inform the handler about the change
++				if (handler)
++					handler->valueChanged(key, val);
++
++				json_object_put(json);
++				success=true;
++			}
+ 			else {
+-                qWarning() << "handler DID NOT validate value for key:" << key;
++				++errcount;
+ 			}
+ 		}
+-		else {
+-            qWarning() << "setPref did NOT find handler for:" << key;
+-			
+-			//filter out 
+-			savedPref = PrefsDb::instance()->setPref(key, json_object_to_json_string(val));
+-		}
+-		qDebug("setPref saved? %s",(savedPref ? "true" : "false"));
+-		
+-		if (savedPref) {
+-			++savecount;
+-			
+-			// successfully set the preference. post a notification about it
+-
+-			json_object* json = 0;
+-			
+-			json = json_object_new_object();
+-			json_object_object_add(json, (char*) key, json_object_get(val));
+-				
+-			std::string subKeyStr = std::string(key);
+-			std::string subValStr = std::string(json_object_to_json_string(json));
+-			
+-			PrefsFactory::instance()->postPrefChangeValueIsCompleteString(subKeyStr,subValStr);
+-			
+-			// Inform the handler about the change
+-			if (handler)
+-				handler->valueChanged(key, val);
+-			
+-			json_object_put(json);
+-			success=true;
+-		}
+-		else {
+-			++errcount;
+-		}
+-		
+ 	}
+-	
++
+ 	if (errcount) {
+ 		success=false;
+ 		errorText=std::string("Some settings could not be saved");
+ 	}
+-	
++
+ Done:
+ 	json_object * result_object = json_object_new_object();
+ 	json_object_object_add(result_object,(char *)"returnValue",json_object_new_boolean(success));
+-    if (!success) {
++	if (!success) {
+ 		json_object_object_add(result_object,(char *)"errorText",json_object_new_string((char*) errorText.c_str()));
+-        qWarning() << errorText.c_str();
+-    }
+-	
++		qWarning() << errorText.c_str();
++	}
++
+ 	const char * r = json_object_to_json_string(result_object);
+ 	result = LSMessageReply(lsHandle, message, r, &lsError);
+ 	if (!result)
+ 		LSErrorFree (&lsError);
+-	
++
+ 	json_object_put(result_object);
+ 	if (root)
+ 		json_object_put(root);
+@@ -529,12 +530,12 @@ Example response for a failed call:
+ static bool cbGetPreferences(LSHandle* lsHandle, LSMessage* message,
+ 							 void* user_data)
+ {
+-    // {"subscribe": boolean, "keys": array}
+-    VALIDATE_SCHEMA_AND_RETURN(lsHandle,
+-                               message,
+-                               SCHEMA_2(REQUIRED(subscribe, boolean), REQUIRED(keys, array)));
++	// {"subscribe": boolean, "keys": array}
++	VALIDATE_SCHEMA_AND_RETURN(lsHandle,
++		message,
++		SCHEMA_2(REQUIRED(subscribe, boolean), REQUIRED(keys, array)));
+ 
+-    bool retVal;
++	bool retVal;
+ 	LSError lsError;
+ 	const char* r = 0;
+ 	std::string reply;
+@@ -544,23 +545,23 @@ static bool cbGetPreferences(LSHandle* lsHandle, LSMessage* message,
+ 	array_list* keyArray = 0;
+ 	std::list<std::string> keyList;
+ 	std::map<std::string, std::string> resultMap;
+-	bool subscription = false;	
++	bool subscription = false;
+ 	bool success = false;
+ 	std::string errorCode;
+ 	PrefsHandler* handler=NULL;
+ 	std::string key;
+ 	std::string restoreVal;
+-	
++
+ 	const char* payload = LSMessageGetPayload(message);
+ 	if (!payload)
+ 		return false;
+-	
++
+ 	LSErrorInit(&lsError);
+-	
++
+ 	root = json_tokener_parse(payload);
+ 	if (!root || is_error(root))
+ 		goto Done;
+-	
++
+ 	label = json_object_object_get(root, "subscribe");
+ 	if (label && !is_error(label))
+ 		subscription = json_object_get_boolean(label);
+@@ -604,8 +605,8 @@ static bool cbGetPreferences(LSHandle* lsHandle, LSMessage* message,
+ 
+ 	resultMap = PrefsDb::instance()->getPrefs(keyList);
+ 
+-	if (LSMessageIsSubscription(message)) {		
+-		
++	if (LSMessageIsSubscription(message)) {
++
+ 		for (std::list<std::string>::const_iterator it = keyList.begin();
+ 			 it != keyList.end(); ++it) {
+ 			(void) LSSubscriptionAdd(lsHandle, (*it).c_str(),
+@@ -617,7 +618,7 @@ static bool cbGetPreferences(LSHandle* lsHandle, LSMessage* message,
+ 		subscription = false;
+ 
+ 	replyRoot = json_object_new_object();
+-	
++
+ 	for (std::map<std::string, std::string>::const_iterator it = resultMap.begin();
+ 		 it != resultMap.end(); ++it) {
+ 		json_object* value = json_tokener_parse((*it).second.c_str());
+@@ -632,28 +633,28 @@ static bool cbGetPreferences(LSHandle* lsHandle, LSMessage* message,
+ 			goto Done;
+ 		}
+ 	}
+-        json_object_object_add(replyRoot,"subscribed",json_object_new_boolean(subscription));
++	json_object_object_add(replyRoot,"subscribed",json_object_new_boolean(subscription));
+ 	json_object_object_add(replyRoot,"returnValue",json_object_new_boolean(true));
+ 	success = true;
+-		
++
+ Done:
+ 
+ 	if (!is_error(replyRoot) && (success))
+ 		reply = json_object_to_json_string(replyRoot);
+-    else {
++	else {
+ 		reply = "{\"returnValue\":false,\"subscribed\":false , \"errorCode\":\""+errorCode+"\"}";
+-        qWarning() << errorCode.c_str();
+-    }
++		qWarning() << errorCode.c_str();
++	}
+ 
+ 	r = reply.c_str();
+-	
++
+ 	retVal = LSMessageReply(lsHandle, message, r, &lsError);
+ 	if (!retVal)
+ 		LSErrorFree (&lsError);
+ 
+ 	if (replyRoot && !is_error(replyRoot))
+ 		json_object_put(replyRoot);
+-	
++
+ 	if (root && !is_error(root))
+ 		json_object_put(root);
+ 
+@@ -729,12 +730,12 @@ Example response for a failed call:
+ static bool cbGetPreferenceValues(LSHandle* lsHandle, LSMessage* message,
+ 								  void* user_data)
+ {
+-    // {"key": string}
+-    VALIDATE_SCHEMA_AND_RETURN(lsHandle,
+-                               message,
+-                               SCHEMA_1(REQUIRED(key, string)));
++	// {"key": string}
++	VALIDATE_SCHEMA_AND_RETURN(lsHandle,
++		message,
++		SCHEMA_1(REQUIRED(key, string)));
+ 
+-    bool retVal;
++	bool retVal;
+ 	LSError lsError;
+ 	const char* reply = 0;
+ 	json_object* root = 0;
+@@ -743,17 +744,17 @@ static bool cbGetPreferenceValues(LSHandle* lsHandle, LSMessage* message,
+ 	PrefsHandler* handler = 0;
+ 	std::string key;
+ 	bool success = false;
+-	
++
+ 	const char* payload = LSMessageGetPayload(message);
+ 	if (!payload)
+ 		return false;
+ 
+ 	LSErrorInit(&lsError);
+-	
++
+ 	root = json_tokener_parse(payload);
+ 	if (!root || is_error(root))
+ 		goto Done;
+-	
++
+ 	label = json_object_object_get(root, "key");
+ 	if (!label || is_error(label))
+ 		goto Done;
+@@ -770,7 +771,7 @@ static bool cbGetPreferenceValues(LSHandle* lsHandle, LSMessage* message,
+ 	json_object_object_add(replyRoot,"returnValue",json_object_new_boolean(true));
+ 	reply = json_object_to_json_string(replyRoot);
+ 	success = true;
+-		
++
+ Done:
+ 
+ 	if (!success)
+@@ -782,7 +783,7 @@ Done:
+ 
+ 	if (replyRoot && !is_error(replyRoot))
+ 		json_object_put(replyRoot);
+-	
++
+ 	if (root && !is_error(root))
+ 		json_object_put(root);
+ 
+diff --git a/Src/SystemRestore.cpp b/Src/SystemRestore.cpp
+index dab9d6f..dfd519f 100644
+--- a/Src/SystemRestore.cpp
++++ b/Src/SystemRestore.cpp
+@@ -16,7 +16,7 @@
+ 
+ 
+ #include <assert.h>
+-#include <cjson/json.h>
++#include <json.h>
+ #include <glib.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+diff --git a/Src/TimePrefsHandler.cpp b/Src/TimePrefsHandler.cpp
+index 0d9bd5a..3b88da6 100644
+--- a/Src/TimePrefsHandler.cpp
++++ b/Src/TimePrefsHandler.cpp
+@@ -41,8 +41,8 @@
+ #include "Utils.h"
+ #include "JSONUtils.h"
+ 
+-#include <cjson/json.h>
+-#include <cjson/json_util.h>
++#include <json.h>
++#include <json_util.h>
+ 
+ static const char*	  s_tzFile	=	WEBOS_INSTALL_WEBOS_PREFIX "/ext-timezones.json";
+ static const char*    s_tzFilePath = WEBOS_INSTALL_SYSMGR_LOCALSTATEDIR "/preferences/localtime";
+diff --git a/Src/TimeZoneService.cpp b/Src/TimeZoneService.cpp
+index 4888a69..e541cac 100644
+--- a/Src/TimeZoneService.cpp
++++ b/Src/TimeZoneService.cpp
+@@ -17,7 +17,7 @@
+ #define __STDC_FORMAT_MACROS
+ 
+ #include <glib.h>
+-#include <cjson/json.h>
++#include <json.h>
+ #include <time.h>
+ #include <stdio.h>
+ #include <string.h>
+diff --git a/Src/WallpaperPrefsHandler.cpp b/Src/WallpaperPrefsHandler.cpp
+index 14ce556..4fffb4e 100644
+--- a/Src/WallpaperPrefsHandler.cpp
++++ b/Src/WallpaperPrefsHandler.cpp
+@@ -29,7 +29,7 @@
+ #include "SystemRestore.h"
+ #include "Settings.h"
+ 
+-#include <cjson/json.h>
++#include <json.h>
+ #include <glib.h>
+ #include "JSONUtils.h"
+ 
+-- 
+2.2.1
+
