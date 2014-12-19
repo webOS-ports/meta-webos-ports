@@ -5,10 +5,10 @@ SECTION = "webos/base"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-DEPENDS = "libxml2 luna-service2 glib-2.0 cjson sqlite3 "
+DEPENDS = "libxml2 luna-service2 glib-2.0 json-c sqlite3 "
 
 PV = "2.0.0-1+git${SRCPV}"
-SRCREV = "b182640cc53b7ec7a6595854ec8bd2ea12d7e743"
+SRCREV = "139df30b34e077553db1ecca7e0ce116cf0f89b3"
 
 inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
