@@ -1,0 +1,509 @@
+From de7c1e8e41bcc9e66cbdb7d46b4d9cc3a1e35de2 Mon Sep 17 00:00:00 2001
+From: Martin Jansa <Martin.Jansa@gmail.com>
+Date: Fri, 19 Dec 2014 19:00:40 +0100
+Subject: [PATCH] replace cjson with json-c
+
+* pwrevents: Add missing includes when building with json-c
+  Fails when json-c is used instead of cjson.
+  src/pwrevents/client.c:277:3: error: implicit declaration of function 'strcmp'
+  src/pwrevents/suspend_ipc.c:142:2: error: implicit declaration of function 'strlen'
+  src/pwrevents/shutdown.c:579:3: error: implicit declaration of function 'strcmp'
+
+* debug.h: Rename to sleepd_debug.h
+  json-c is also staging debug.h and wrong one is used in builds where
+  json-c is used instead of cjson.
+  json-c include paths appear before include/internal and build fails
+  with:
+  2.0.0-35-r6/git/src/utils/wait.c: In function 'WaitObjectWaitTimeSpec':
+  2.0.0-35-r6/git/src/utils/wait.c:126:9: error: implicit declaration of
+     function 'TRACE' [-Werror=implicit-function-declaration]
+           TRACE("%s: Error getting monotonic clock, "
+           ^
+  2.0.0-35-r6/git/src/pwrevents/shutdown.c: In function
+    'client_vote_clear':
+  2.0.0-35-r6/git/src/pwrevents/shutdown.c:277:2: error: implicit
+    declaration of function '_assert'
+    [-Werror=implicit-function-declaration]
+    _assert(client != NULL);
+    ^
+
+Signed-off-by: Martin Jansa <Martin.Jansa@gmail.com>
+---
+ CMakeLists.txt                  |   8 +--
+ README.md                       |   2 +-
+ include/internal/debug.h        | 120 ----------------------------------------
+ include/internal/sleepd_debug.h | 120 ++++++++++++++++++++++++++++++++++++++++
+ src/alarms/alarm.c              |   2 +-
+ src/alarms/timeout_alarm.c      |   2 +-
+ src/main.c                      |   2 +-
+ src/pwrevents/client.c          |   3 +-
+ src/pwrevents/machine.c         |   4 +-
+ src/pwrevents/shutdown.c        |   5 +-
+ src/pwrevents/suspend.c         |   4 +-
+ src/pwrevents/suspend_ipc.c     |   5 +-
+ src/utils/init.c                |   2 +-
+ src/utils/sysfs.c               |   2 +-
+ 14 files changed, 142 insertions(+), 139 deletions(-)
+ delete mode 100644 include/internal/debug.h
+ create mode 100644 include/internal/sleepd_debug.h
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index a7f6778..7c018bf 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -47,9 +47,9 @@ pkg_check_modules(LUNASERVICE2 REQUIRED luna-service2)
+ include_directories(${LUNASERVICE2_INCLUDE_DIRS})
+ webos_add_compiler_flags(ALL ${LUNASERVICE2_CFLAGS_OTHER})
+ 
+-pkg_check_modules(CJSON REQUIRED cjson)
+-include_directories(${CJSON_INCLUDE_DIRS})
+-webos_add_compiler_flags(ALL ${CJSON_CFLAGS_OTHER})
++pkg_check_modules(JSON REQUIRED json-c)
++include_directories(${JSON_INCLUDE_DIRS})
++webos_add_compiler_flags(ALL ${JSON_CFLAGS_OTHER})
+ 
+ pkg_check_modules(NYXLIB REQUIRED nyx)
+ include_directories(${NYXLIB_INCLUDE_DIRS})
+@@ -117,7 +117,7 @@ target_link_libraries(sleepd
+                         ${LIBXML2_LDFLAGS}
+                         ${SQLITE3_LDFLAGS}
+                         ${LUNASERVICE2_LDFLAGS}
+-                        ${CJSON_LDFLAGS}
++                        ${JSON_LDFLAGS}
+                         ${POWERD_LDFLAGS}
+                         ${NYXLIB_LDFLAGS}
+                         ${PMLOGLIB_LDFLAGS}
+diff --git a/README.md b/README.md
+index 020315d..d1952be 100644
+--- a/README.md
++++ b/README.md
+@@ -34,7 +34,7 @@ _sleepd_:
+ * glib-2.0 2.32.1
+ * libxml2 2.7.2
+ * make (any version)
+-* openwebos/cjson 1.8.0
++* json-c 0.11
+ * openwebos/cmake-modules-webos 1.0.0 RC4
+ * openwebos/luna-service2 3.0.0
+ * openwebos/nyx-lib 2.0.0
+diff --git a/include/internal/debug.h b/include/internal/debug.h
+deleted file mode 100644
+index 582a05a..0000000
+--- a/include/internal/debug.h
++++ /dev/null
+@@ -1,120 +0,0 @@
+-/* @@@LICENSE
+-*
+-*      Copyright (c) 2011-2013 LG Electronics, Inc.
+-*
+-* Licensed under the Apache License, Version 2.0 (the "License");
+-* you may not use this file except in compliance with the License.
+-* You may obtain a copy of the License at
+-*
+-* http://www.apache.org/licenses/LICENSE-2.0
+-*
+-* Unless required by applicable law or agreed to in writing, software
+-* distributed under the License is distributed on an "AS IS" BASIS,
+-* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-* See the License for the specific language governing permissions and
+-* limitations under the License.
+-*
+-* LICENSE@@@ */
+-
+-
+-
+-#include <stdio.h>
+-#include <assert.h>
+-#include <glib.h>
+-#include <string.h>
+-#include <stdbool.h>
+-
+-#ifndef _LOGDEBUG_H_
+-#define _LOGDEBUG_H_
+-
+-
+-/* define this to assert when BUG() macro is called */
+-#define ASSERT_ON_BUG
+-
+-#undef G_LOG_DOMAIN
+-#define G_LOG_DOMAIN "Sleepd"
+-
+-// TODO use common error codes
+-#define FATAL_ERROR -1
+-#define ERROR       1
+-#define PWREVENTS_ERROR_TIMEOUT 355
+-
+-/* Set the current log level */
+-void SetLogLevel(GLogLevelFlags newLogLevel);
+-
+-/* Set the destination of the log */
+-void SetUseSyslog(int useSyslog);
+-
+-/* Return the current log level */
+-GLogLevelFlags GetLogLevel();
+-
+-int DebugInit(void);
+-
+-void _good_assert(const char *cond_str, bool cond);
+-
+-#ifdef ASSERT_ON_BUG
+-#define BUG() {                     \
+-    *( (int*) NULL) = 0;            \
+-}
+-#else
+-#define BUG() {}
+-#endif
+-
+-#define _assert(cond)               \
+-do {                                \
+-    _good_assert(#cond, cond);      \
+-} while (0)
+-
+-#define g_critical_once(...)        \
+-do {                                \
+-    static int seen = 0;            \
+-    if (!seen)                      \
+-    {                               \
+-        seen = 1;                   \
+-        g_critical(__VA_ARGS__);    \
+-    }                               \
+-} while(0)
+-
+-#define g_info(...)                 \
+-    g_log (G_LOG_DOMAIN,            \
+-           G_LOG_LEVEL_INFO,        \
+-           __VA_ARGS__)
+-
+-#define g_perror(...)           \
+-do {                                   \
+-    char buf[512];                     \
+-    buf[0] = 0;                        \
+-    g_critical(__VA_ARGS__);           \
+-    strerror_r(errno, buf, 512);       \
+-    g_error(buf); \
+-} while(0)
+-
+-#define MESSAGE(...)                   \
+-do {                                \
+-    g_message(__VA_ARGS__);         \
+-} while (0)
+-
+-#define TRACE(...)                  \
+-do {                                \
+-    g_debug(__VA_ARGS__);         \
+-} while(0)
+-
+-#define TRACE_ERROR(...)  \
+-do {                      \
+-    g_error(__VA_ARGS__);        \
+-} while(0)
+-
+-#define TRACE_PERROR g_perror
+-
+-#define iferr(cond, text, goto_label) \
+-do {                                    \
+-    if (cond)                           \
+-    {                                   \
+-        TRACE_ERROR(text);              \
+-        goto goto_label;                \
+-    }                                   \
+-} while (0);
+-
+-void print_trace(void);
+-
+-#endif
+diff --git a/include/internal/sleepd_debug.h b/include/internal/sleepd_debug.h
+new file mode 100644
+index 0000000..582a05a
+--- /dev/null
++++ b/include/internal/sleepd_debug.h
+@@ -0,0 +1,120 @@
++/* @@@LICENSE
++*
++*      Copyright (c) 2011-2013 LG Electronics, Inc.
++*
++* Licensed under the Apache License, Version 2.0 (the "License");
++* you may not use this file except in compliance with the License.
++* You may obtain a copy of the License at
++*
++* http://www.apache.org/licenses/LICENSE-2.0
++*
++* Unless required by applicable law or agreed to in writing, software
++* distributed under the License is distributed on an "AS IS" BASIS,
++* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++* See the License for the specific language governing permissions and
++* limitations under the License.
++*
++* LICENSE@@@ */
++
++
++
++#include <stdio.h>
++#include <assert.h>
++#include <glib.h>
++#include <string.h>
++#include <stdbool.h>
++
++#ifndef _LOGDEBUG_H_
++#define _LOGDEBUG_H_
++
++
++/* define this to assert when BUG() macro is called */
++#define ASSERT_ON_BUG
++
++#undef G_LOG_DOMAIN
++#define G_LOG_DOMAIN "Sleepd"
++
++// TODO use common error codes
++#define FATAL_ERROR -1
++#define ERROR       1
++#define PWREVENTS_ERROR_TIMEOUT 355
++
++/* Set the current log level */
++void SetLogLevel(GLogLevelFlags newLogLevel);
++
++/* Set the destination of the log */
++void SetUseSyslog(int useSyslog);
++
++/* Return the current log level */
++GLogLevelFlags GetLogLevel();
++
++int DebugInit(void);
++
++void _good_assert(const char *cond_str, bool cond);
++
++#ifdef ASSERT_ON_BUG
++#define BUG() {                     \
++    *( (int*) NULL) = 0;            \
++}
++#else
++#define BUG() {}
++#endif
++
++#define _assert(cond)               \
++do {                                \
++    _good_assert(#cond, cond);      \
++} while (0)
++
++#define g_critical_once(...)        \
++do {                                \
++    static int seen = 0;            \
++    if (!seen)                      \
++    {                               \
++        seen = 1;                   \
++        g_critical(__VA_ARGS__);    \
++    }                               \
++} while(0)
++
++#define g_info(...)                 \
++    g_log (G_LOG_DOMAIN,            \
++           G_LOG_LEVEL_INFO,        \
++           __VA_ARGS__)
++
++#define g_perror(...)           \
++do {                                   \
++    char buf[512];                     \
++    buf[0] = 0;                        \
++    g_critical(__VA_ARGS__);           \
++    strerror_r(errno, buf, 512);       \
++    g_error(buf); \
++} while(0)
++
++#define MESSAGE(...)                   \
++do {                                \
++    g_message(__VA_ARGS__);         \
++} while (0)
++
++#define TRACE(...)                  \
++do {                                \
++    g_debug(__VA_ARGS__);         \
++} while(0)
++
++#define TRACE_ERROR(...)  \
++do {                      \
++    g_error(__VA_ARGS__);        \
++} while(0)
++
++#define TRACE_PERROR g_perror
++
++#define iferr(cond, text, goto_label) \
++do {                                    \
++    if (cond)                           \
++    {                                   \
++        TRACE_ERROR(text);              \
++        goto goto_label;                \
++    }                                   \
++} while (0);
++
++void print_trace(void);
++
++#endif
+diff --git a/src/alarms/alarm.c b/src/alarms/alarm.c
+index 7fe1237..08f5d9c 100644
+--- a/src/alarms/alarm.c
++++ b/src/alarms/alarm.c
+@@ -30,7 +30,7 @@
+ #include <string.h>
+ #include <luna-service2/lunaservice.h>
+ 
+-#include <cjson/json.h>
++#include <json.h>
+ 
+ #include <libxml/xmlmemory.h>
+ #include <libxml/parser.h>
+diff --git a/src/alarms/timeout_alarm.c b/src/alarms/timeout_alarm.c
+index 5359bed..a9e2b08 100644
+--- a/src/alarms/timeout_alarm.c
++++ b/src/alarms/timeout_alarm.c
+@@ -30,7 +30,7 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <stdbool.h>
+-#include <cjson/json.h>
++#include <json.h>
+ #include <sys/stat.h>
+ #include <luna-service2/lunaservice.h>
+ 
+diff --git a/src/main.c b/src/main.c
+index 29523e4..b593118 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -72,7 +72,7 @@
+ #include <stdbool.h>
+ #include <getopt.h>
+ #include <stdlib.h>
+-#include <cjson/json.h>
++#include <json.h>
+ #include <luna-service2/lunaservice.h>
+ 
+ #include "init.h"
+diff --git a/src/pwrevents/client.c b/src/pwrevents/client.c
+index bf6b6af..b5aed98 100644
+--- a/src/pwrevents/client.c
++++ b/src/pwrevents/client.c
+@@ -29,9 +29,10 @@
+ 
+ #include <glib.h>
+ #include <stdlib.h>
++#include <string.h>
+ 
+ #include "logging.h"
+-#include "debug.h"
++#include "sleepd_debug.h"
+ #include "client.h"
+ 
+ #define LOG_DOMAIN "PWREVENT-CLIENT: "
+diff --git a/src/pwrevents/machine.c b/src/pwrevents/machine.c
+index 7655baf..f031f0b 100644
+--- a/src/pwrevents/machine.c
++++ b/src/pwrevents/machine.c
+@@ -29,7 +29,7 @@
+ #include <sys/types.h>
+ #include <sys/stat.h>
+ #include <sys/utsname.h>
+-#include <cjson/json.h>
++#include <json.h>
+ #include <luna-service2/lunaservice.h>
+ 
+ #include "main.h"
+@@ -39,7 +39,7 @@
+ #include "sysfs.h"
+ 
+ #include "machine.h"
+-#include "debug.h"
++#include "sleepd_debug.h"
+ #include "logging.h"
+ #include "suspend.h"
+ #include "config.h"
+diff --git a/src/pwrevents/shutdown.c b/src/pwrevents/shutdown.c
+index e91f2f0..665e616 100644
+--- a/src/pwrevents/shutdown.c
++++ b/src/pwrevents/shutdown.c
+@@ -26,12 +26,13 @@
+ */
+ 
+ #include <glib.h>
+-#include <cjson/json.h>
++#include <json.h>
+ #include <syslog.h>
++#include <string.h>
+ #include <luna-service2/lunaservice.h>
+ 
+ #include "lunaservice_utils.h"
+-#include "debug.h"
++#include "sleepd_debug.h"
+ #include "main.h"
+ #include "logging.h"
+ #include "machine.h"
+diff --git a/src/pwrevents/suspend.c b/src/pwrevents/suspend.c
+index 09eee9e..64f4277 100644
+--- a/src/pwrevents/suspend.c
++++ b/src/pwrevents/suspend.c
+@@ -40,7 +40,7 @@
+ #include "clock.h"
+ #include "wait.h"
+ #include "machine.h"
+-#include "debug.h"
++#include "sleepd_debug.h"
+ #include "main.h"
+ #include "timersource.h"
+ #include "activity.h"
+@@ -55,7 +55,7 @@
+ #include "sawmill_logger.h"
+ #include "nyx/nyx_client.h"
+ 
+-#include <cjson/json.h>
++#include <json.h>
+ #include <luna-service2/lunaservice.h>
+ 
+ #define LOG_DOMAIN "PWREVENT-SUSPEND: "
+diff --git a/src/pwrevents/suspend_ipc.c b/src/pwrevents/suspend_ipc.c
+index 76908fa..792b888 100644
+--- a/src/pwrevents/suspend_ipc.c
++++ b/src/pwrevents/suspend_ipc.c
+@@ -25,13 +25,14 @@
+  */
+ 
+ #include <syslog.h>
+-#include <cjson/json.h>
++#include <string.h>
++#include <json.h>
+ #include <luna-service2/lunaservice.h>
+ 
+ #include "wait.h"
+ #include "init.h"
+ #include "main.h"
+-#include "debug.h"
++#include "sleepd_debug.h"
+ #include "client.h"
+ #include "shutdown.h"
+ #include "suspend.h"
+diff --git a/src/utils/init.c b/src/utils/init.c
+index 8a54aa8..693f411 100644
+--- a/src/utils/init.c
++++ b/src/utils/init.c
+@@ -23,7 +23,7 @@
+ #include "init.h"
+ #include "config.h"
+ #include "machine.h"
+-#include "debug.h"
++#include "sleepd_debug.h"
+ #include "logging.h"
+ 
+ typedef struct _GNamedHookList
+diff --git a/src/utils/sysfs.c b/src/utils/sysfs.c
+index e73a890..ff668fb 100644
+--- a/src/utils/sysfs.c
++++ b/src/utils/sysfs.c
+@@ -35,7 +35,7 @@
+ #include <glib.h>
+ 
+ #include "logging.h"
+-#include "debug.h"
++#include "sleepd_debug.h"
+ 
+ #define LOG_DOMAIN "sysfs:"
+ 
+-- 
+2.2.1
+
