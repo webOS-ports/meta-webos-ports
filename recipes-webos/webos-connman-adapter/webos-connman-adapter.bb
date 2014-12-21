@@ -10,7 +10,7 @@ DEPENDS = "luna-service2 libpbnjson glib-2.0 luna-prefs openssl"
 RDEPENDS_${PN} = "connman connman-client"
 
 PV = "1.0.0-11+git${SRCPV}"
-SRCREV = "45a1c53d88b41c05de6c7b7e6040254f154a7e16"
+SRCREV = "40a6036d142ad246ed9014ccf71d78e033651f22"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
@@ -25,6 +25,8 @@ inherit webos_system_bus
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-SRC_URI += "file://0001-Don-t-treat-none-as-security-type.patch \
-            file://0001-Correctly-register-com.palm.connectionmanager-getsta.patch \
-            file://0001-Drop-installation-of-connman-configuration-file.patch"
+SRC_URI += " \
+    file://0001-Correctly-register-com.palm.connectionmanager-getsta.patch \
+    file://0002-Drop-installation-of-connman-configuration-file.patch \
+    file://0003-Send-connection-manager-updates-also-for-getStatus-a.patch \
+"
