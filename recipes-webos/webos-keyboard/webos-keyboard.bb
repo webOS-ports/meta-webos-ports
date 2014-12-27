@@ -37,6 +37,8 @@ EXTRA_QMAKEVARS_PRE = "\
 INSANE_SKIP_${PN} += "libdir staticdev"
 INSANE_SKIP_${PN}-dbg += "libdir"
 
+WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
+
 FILES_${PN} += "\
     ${libdir}/maliit \
     ${datadir} \
