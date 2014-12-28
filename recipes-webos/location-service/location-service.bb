@@ -1,12 +1,16 @@
 SUMMARY = "LuneOS Location service"
 SECTION = "webos/services"
-LICENSE = "Apache-2.0"
-LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
+LICENSE = "GPLv3+ & Apache-2.0"
+LIC_FILES_CHKSUM = " \
+	file://${COMMON_LICENSE_DIR}/GPL-3.0;md5=c79ff39f19dfec6d293b95dea7b07891 \
+	file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10 \
+"
 
 DEPENDS = "luna-service2 glib-2.0 libpbnjson"
+RDEPENDS_${PN} = "geoclue"
 
 PV = "0.1.0+git${SRCPV}"
-SRCREV = "d064f98d3d5e0c376a6501a46da822e0fe02d306"
+SRCREV = "53453e944a06fc5dde633a8727dd4edf2ff573df"
 
 inherit webos_ports_repo
 inherit webos_cmake
