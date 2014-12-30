@@ -1,0 +1,297 @@
+From 5f79754a187b55ea4bb6793a796a84cd95f61b78 Mon Sep 17 00:00:00 2001
+From: Simon Busch <morphis@gravedo.de>
+Date: Sun, 28 Dec 2014 00:20:31 +0100
+Subject: [PATCH 5/5] Expose connman's cellular technology status also through
+ connection manager
+
+Signed-off-by: Simon Busch <morphis@gravedo.de>
+---
+ CMakeLists.txt                  |  1 +
+ src/connectionmanager_service.c | 34 +++++++++++++++++++++++++++
+ src/connman_common.h.in         |  1 +
+ src/connman_manager.c           | 51 ++++++++++++++++++++++++++++++++++++++---
+ src/connman_manager.h           |  3 +++
+ src/connman_service.c           | 10 ++++++++
+ src/connman_service.h           |  3 +++
+ 7 files changed, 100 insertions(+), 3 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index a4c0997..1097ee6 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -31,6 +31,7 @@ webos_component(1 0 0)
+ 
+ set(WIFI_IFACE_NAME "wlan0" CACHE STRING "WiFi interface name")
+ set(WIRED_IFACE_NAME "eth0" CACHE STRING "Wired interface name")
++set(CELLULAR_IFACE_NAME "rmnet_usb0" CACHE STRING "Cellular interface name")
+ 
+ find_program(GDBUS_CODEGEN_EXECUTABLE NAMES gdbus-codegen DOC "gdbus-codegen executable")
+ if(NOT GDBUS_CODEGEN_EXECUTABLE)
+diff --git a/src/connectionmanager_service.c b/src/connectionmanager_service.c
+index fd143cc..f9976e4 100644
+--- a/src/connectionmanager_service.c
++++ b/src/connectionmanager_service.c
+@@ -130,9 +130,12 @@ static void send_connection_status(jvalue_ref *reply)
+ 	jvalue_ref disconnected_wired_status = jobject_create();
+ 	jvalue_ref connected_wifi_status = jobject_create();
+ 	jvalue_ref disconnected_wifi_status = jobject_create();
++	jvalue_ref connected_cellular_status = jobject_create();
++	jvalue_ref disconnected_cellular_status = jobject_create();
+ 
+ 	jobject_put(disconnected_wired_status, J_CSTR_TO_JVAL("state"), jstring_create("disconnected"));
+ 	jobject_put(disconnected_wifi_status, J_CSTR_TO_JVAL("state"), jstring_create("disconnected"));
++	jobject_put(disconnected_cellular_status, J_CSTR_TO_JVAL("state"), jstring_create("disconnected"));
+ 
+ 	/* Get the service which is connecting or already in connected state */
+ 	connman_service_t *connected_wired_service = connman_manager_get_connected_service(manager->wired_services);
+@@ -160,6 +163,20 @@ static void send_connection_status(jvalue_ref *reply)
+ 		jobject_put(*reply, J_CSTR_TO_JVAL("wifi"), disconnected_wifi_status);
+ 		j_release(&connected_wifi_status);
+ 	}
++
++	connman_service_t *connected_cellular_service = connman_manager_get_connected_service(manager->cellular_services);
++	if (NULL != connected_cellular_service)
++	{
++		update_connection_status(connected_cellular_service, &connected_cellular_status);
++		jobject_put(*reply, J_CSTR_TO_JVAL("cellular"), connected_cellular_status);
++		j_release(&disconnected_cellular_status);
++	}
++	else
++	{
++		jobject_put(*reply, J_CSTR_TO_JVAL("cellular"), disconnected_cellular_status);
++		j_release(&connected_cellular_status);
++	}
++
+ }
+ 
+ 
+@@ -976,6 +993,13 @@ static LSMethod connectionmanager_public_methods[] = {
+     { },
+ };
+ 
++static gboolean check_cellular_status_cb(gpointer user_data)
++{
++	connman_technology_t *technology = connman_manager_find_cellular_technology(manager);
++	if (technology)
++		connman_technology_register_property_changed_cb(technology, technology_property_changed_callback);
++}
++
+ /**
+  *  @brief Initialize com.palm.connectionmanager service and all of its methods
+  *  Also initialize a manager instance
+@@ -1034,6 +1058,16 @@ int initialize_connectionmanager_ls2_calls( GMainLoop *mainloop )
+ 		connman_technology_register_property_changed_cb(technology, technology_property_changed_callback);
+ 	}
+ 
++	technology = connman_manager_find_cellular_technology(manager);
++	if (technology)
++	{
++		connman_technology_register_property_changed_cb(technology, technology_property_changed_callback);
++	}
++	else
++	{
++		g_timeout_add(500, check_cellular_status_cb, 0);
++	}
++
+ 	return 0;
+ 
+ Exit:
+diff --git a/src/connman_common.h.in b/src/connman_common.h.in
+index 1325746..78628a6 100644
+--- a/src/connman_common.h.in
++++ b/src/connman_common.h.in
+@@ -27,6 +27,7 @@
+ 
+ #define CONNMAN_WIFI_INTERFACE_NAME	"@WIFI_IFACE_NAME@"
+ #define CONNMAN_WIRED_INTERFACE_NAME	"@WIRED_IFACE_NAME@"
++#define CONNMAN_CELLULAR_INTERFACE_NAME	"@CELLULAR_IFACE_NAME@"
+ 
+ typedef void (*connman_property_changed_cb)(gpointer , const gchar *, GVariant *);
+ typedef void (*connman_state_changed_cb)(gpointer , const gchar *);
+diff --git a/src/connman_manager.c b/src/connman_manager.c
+index 622c807..51be15b 100644
+--- a/src/connman_manager.c
++++ b/src/connman_manager.c
+@@ -106,6 +106,11 @@ static connman_service_t *find_service_from_props(connman_manager_t *manager,
+ 		return service;
+ 
+ 	service = find_service_from_path(manager->wired_services, path);
++	if (NULL != service)
++		return service;
++
++	service = find_service_from_path(manager->cellular_services, path);
++
+ 	return service;
+ }
+ 
+@@ -179,13 +184,23 @@ static gboolean service_on_configured_iface(GVariant	*service_v)
+ 					GVariant *ifaceva = g_variant_get_variant(ifacev);
+ 					const gchar *iface = g_variant_get_string(ifaceva, NULL);
+ 					if(g_str_equal(iface,CONNMAN_WIFI_INTERFACE_NAME) ||
+-						g_str_equal(iface,CONNMAN_WIRED_INTERFACE_NAME))
++						g_str_equal(iface,CONNMAN_WIRED_INTERFACE_NAME) ||
++						g_str_equal(iface,CONNMAN_CELLULAR_INTERFACE_NAME))
+ 						return TRUE;
+ 					else
+ 						return FALSE;
+ 				}
+ 		  	}
+ 		}
++		else if (g_str_equal(key, "Type"))
++		{
++			GVariant *v = g_variant_get_child_value(property, 1);
++			GVariant *va = g_variant_get_variant(v);
++			const gchar *value = g_variant_get_string(va, NULL);
++
++			if (g_strcmp0(value, "cellular") == 0)
++				return TRUE;
++		}
+ 	}
+ 	return FALSE;
+ }
+@@ -222,6 +237,10 @@ static void add_service_to_list(connman_manager_t *manager, connman_service_t *s
+ 	{
+ 		manager->wired_services = g_slist_append(manager->wired_services, service);
+ 	}
++	else if (connman_service_type_cellular(service))
++	{
++		manager->cellular_services = g_slist_append(manager->cellular_services, service);
++	}
+ }
+ 
+ /**
+@@ -333,12 +352,13 @@ static gboolean connman_manager_remove_old_services(connman_manager_t *manager,
+ 	if(NULL == manager || NULL == services_removed)
+ 		return FALSE;
+ 
+-	gboolean wifi_services_removed = FALSE, wired_services_removed = FALSE;
++	gboolean wifi_services_removed = FALSE, wired_services_removed = FALSE, cellular_services_removed = FALSE;
+ 
+ 	wifi_services_removed = remove_services_from_list(&manager->wifi_services, services_removed);
+ 	wired_services_removed = remove_services_from_list(&manager->wired_services, services_removed);
++	cellular_services_removed = remove_services_from_list(&manager->cellular_services, services_removed);
+ 
+-	return (wifi_services_removed | wired_services_removed);
++	return (wifi_services_removed | wired_services_removed || cellular_services_removed);
+ }
+ 
+ /**
+@@ -359,6 +379,10 @@ static void connman_manager_free_services(connman_manager_t *manager)
+ 	g_slist_foreach(manager->wired_services, (GFunc) connman_service_free, NULL);
+ 	g_slist_free(manager->wired_services);
+ 	manager->wired_services = NULL;
++
++	g_slist_foreach(manager->cellular_services, (GFunc) connman_service_free, NULL);
++	g_slist_free(manager->cellular_services);
++	manager->cellular_services = NULL;
+ }
+ 
+ /**
+@@ -564,6 +588,26 @@ connman_technology_t *connman_manager_find_ethernet_technology (connman_manager_
+ 	return NULL;
+ }
+ 
++connman_technology_t *connman_manager_find_cellular_technology (connman_manager_t *manager)
++{
++	if(NULL == manager)
++		return NULL;
++
++	GSList *iter;
++
++	for (iter = manager->technologies; NULL != iter; iter = iter->next)
++	{
++		connman_technology_t *tech = (struct connman_technology *)(iter->data);
++
++		if (g_str_equal("cellular", tech->type))
++		{
++			return tech;
++		}
++	}
++
++	return NULL;
++}
++
+ /**
+  * Go through the manager's given services list and get the one which is in 
+  * "ready" or "online" state (see header for API details)
+@@ -846,6 +890,7 @@ connman_manager_t *connman_manager_new (void)
+ 
+ 	WCA_LOG_INFO("%d wifi services", g_slist_length(manager->wifi_services));
+ 	WCA_LOG_INFO("%d wired services", g_slist_length(manager->wired_services));
++	WCA_LOG_INFO("%d cellular services", g_slist_length(manager->cellular_services));
+ 	WCA_LOG_INFO("%d technologies", g_slist_length(manager->technologies));
+ 
+ 	return manager;
+diff --git a/src/connman_manager.h b/src/connman_manager.h
+index c34f2d9..9202f4f 100644
+--- a/src/connman_manager.h
++++ b/src/connman_manager.h
+@@ -51,6 +51,7 @@ typedef struct connman_manager
+ 	gchar   *state;
+ 	GSList	*wifi_services;
+ 	GSList	*wired_services;
++	GSList	*cellular_services;
+ 	GSList	*technologies;
+ 	connman_property_changed_cb	handle_property_change_fn;
+ 	connman_services_changed_cb	handle_services_change_fn;
+@@ -93,6 +94,8 @@ extern connman_technology_t *connman_manager_find_wifi_technology(connman_manage
+  */
+ extern connman_technology_t *connman_manager_find_ethernet_technology(connman_manager_t *manager);
+ 
++extern connman_technology_t *connman_manager_find_cellular_technology(connman_manager_t *manager);
++
+ /**
+  * Go through the manager's given services list and get the one which is in "ready" or 
+  * "online" state , i.e  one of the connected states.
+diff --git a/src/connman_service.c b/src/connman_service.c
+index 6d2adb8..ece11d1 100644
+--- a/src/connman_service.c
++++ b/src/connman_service.c
+@@ -52,6 +52,13 @@ gboolean connman_service_type_ethernet(connman_service_t *service)
+ 	return service->type == CONNMAN_SERVICE_TYPE_ETHERNET;
+ }
+ 
++gboolean connman_service_type_cellular(connman_service_t *service)
++{
++	if(NULL == service)
++		return FALSE;
++	return service->type == CONNMAN_SERVICE_TYPE_CELLULAR;
++}
++
+ /**
+  * Map the service connection status to corresponding webos state 
+  * (see header for API details)
+@@ -458,6 +465,9 @@ void connman_service_update_properties(connman_service_t *service, GVariant *pro
+ 
+ 			if (g_str_equal(v, "ethernet"))
+ 				service->type = CONNMAN_SERVICE_TYPE_ETHERNET;
++
++			if (g_str_equal(v, "cellular"))
++				service->type = CONNMAN_SERVICE_TYPE_CELLULAR;
+ 		}
+ 		else if (g_str_equal(key, "State"))
+ 		{
+diff --git a/src/connman_service.h b/src/connman_service.h
+index ab88f60..52b48bf 100644
+--- a/src/connman_service.h
++++ b/src/connman_service.h
+@@ -86,6 +86,7 @@ enum {
+ 	CONNMAN_SERVICE_TYPE_UNKNOWN = 0,
+ 	CONNMAN_SERVICE_TYPE_ETHERNET,
+ 	CONNMAN_SERVICE_TYPE_WIFI,
++	CONNMAN_SERVICE_TYPE_CELLULAR,
+ 	CONNMAN_SERVICE_TYPE_MAX
+ };
+ 
+@@ -126,6 +127,8 @@ extern gboolean connman_service_type_wifi(connman_service_t *service);
+  */
+ extern gboolean connman_service_type_ethernet(connman_service_t *service);
+ 
++extern gboolean connman_service_type_cellular(connman_service_t *service);
++
+ /**
+  * Stringify the service connection status to corresponding webos state
+  * This function is required to send appropriate connection status to the webos world.
+-- 
+2.1.0
+

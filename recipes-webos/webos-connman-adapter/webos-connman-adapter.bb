@@ -29,4 +29,6 @@ SRC_URI += " \
     file://0001-Correctly-register-com.palm.connectionmanager-getsta.patch \
     file://0002-Drop-installation-of-connman-configuration-file.patch \
     file://0003-Send-connection-manager-updates-also-for-getStatus-a.patch \
+    file://0004-Expose-connman-s-offline-mode-through-the-connection.patch \
+    file://0005-Expose-connman-s-cellular-technology-status-also-thr.patch \
 "
