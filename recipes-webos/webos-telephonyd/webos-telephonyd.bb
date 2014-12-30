@@ -4,10 +4,10 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 DEPENDS = "luna-service2 json-c glib-2.0 luna-prefs"
-RRECOMMENDS_${PN} += "ofono"
+RRECOMMENDS_${PN} += "ofono mmsd"
 
 PV = "0.1.0-1+git${SRCPV}"
-SRCREV = "33368bc8818d792d083333db93f8ff7f7e9ad717"
+SRCREV = "ee9c1c83f9e92265bdedbe1f3a5da814232073f3"
 
 inherit webos_ports_repo
 inherit webos_filesystem_paths
