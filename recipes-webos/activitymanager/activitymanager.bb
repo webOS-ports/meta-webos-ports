@@ -19,6 +19,3 @@ inherit webos_machine_impl_dep
 
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
-
-# Temporarily disable telephony support until webos-telephonyd is ready
-SRC_URI += "file://0001-Disable-telephony-support-until-our-service-is-in-pl.patch"
