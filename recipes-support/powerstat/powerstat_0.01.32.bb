@@ -8,7 +8,7 @@ SRC_URI = "http://kernel.ubuntu.com/~cking/tarballs/${BPN}/${BP}.tar.gz"
 SRC_URI[md5sum] = "1264baf2e06fb16a5aee11294b043174"
 SRC_URI[sha256sum] = "73967d673fa40597bdcf3e903c9dc203c1982d31b411b3e590395194bf710178"
 
-CFLAGS += "-Wall -Wextra -DVERSION='"\$(VERSION)"'"
+EXTRA_OEMAKE = "MAKEFLAGS="
 
 do_compile() {
     oe_runmake CC="${CC}"
