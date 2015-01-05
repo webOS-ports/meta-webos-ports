@@ -37,7 +37,6 @@ WEBOS_PACKAGESET_SYSTEMAPPS = " \
     luna-universalsearchmgr \
     app-services \
     core-apps \
-    mojolocation-stub \
     mojomail-imap \
     mojomail-pop \
     mojomail-smtp \
