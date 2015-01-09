@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = "file://${COREBASE}/LICENSE;md5=3f40d7994397109285ec7b81fdeb3
 
 ALLOW_EMPTY_${PN} = "1"
 
-require packagegroup-webos-ports-sdk.inc
+require packagegroup-luneos-sdk.inc
 
 PACKAGES = "${PN} ${PN}-dbg"
 

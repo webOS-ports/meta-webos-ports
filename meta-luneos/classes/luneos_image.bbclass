@@ -1,7 +1,7 @@
 FEATURE_PACKAGES_webos-ports-extended = "packagegroup-webos-ports-extended"
 FEATURE_PACKAGES_webos-ports-development = "packagegroup-webos-ports-development"
 
-WEBOS_PORTS_IMAGE_DEFAULT_FEATURES = "debug-tweaks ssh-server-openssh package-management webos-ports-extended"
+LUNEOS_IMAGE_DEFAULT_FEATURES = "debug-tweaks ssh-server-openssh package-management webos-ports-extended"
 
 # We're using devtmpfs so are not required to have a minimal populated /dev in our images
 USE_DEVFS = "1"

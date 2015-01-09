@@ -1,8 +1,8 @@
-require webos-ports-image.inc
+require luneos-image.inc
 
-DESCRIPTION = "Developers webOS Ports image"
+DESCRIPTION = "Developers LuneOS image"
 
-IMAGE_FEATURES += "webos-ports-development"
+IMAGE_FEATURES += "luneos-development"
 
 webos_enable_devmode() {
     install -d ${IMAGE_ROOTFS}/var/luna
