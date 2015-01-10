@@ -12,8 +12,8 @@ DEPENDS = "qtbase qtdeclarative qtwayland luna-sysmgr-common extra-cmake-modules
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-PV = "0.2.0-26+git${SRCPV}"
-SRCREV = "785e5161766af6bcbf69c7f2737820e4d60d5723"
+PV = "0.2.0-26+git${ASRCPV}"
+SRCREV = "33d1ca4ed9e9173c9349a4311ffc29272b10fb3e"
 
 inherit pkgconfig
 inherit webos_ports_repo
