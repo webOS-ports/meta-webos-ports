@@ -8,8 +8,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "nyx-lib"
 
-PV = "1.1.2-17+git${SRCPV}"
-SRCREV = "aabac627dd546cef27dad81d56bb7d1a1196b7c1"
+PV = "1.3.0-19+git${SRCPV}"
+SRCREV = "429f9cc5b4988842afbdfaaebf4087b38a6d12f4"
 
 inherit webos_public_repo
 inherit webos_cmake
@@ -20,3 +20,6 @@ S = "${WORKDIR}/git"
 
 FILES_${PN} += "${libdir}/nyx/nyxcmd/*"
 FILES_${PN}-dbg += "${libdir}/nyx/nyxcmd/.debug/*"
+
+# Fix builds with new -ferpmissive set by default
+SRC_URI += "file://0001-Fix-fpermissive-problems.patch"
