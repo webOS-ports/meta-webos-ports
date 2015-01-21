@@ -10,7 +10,7 @@ DEPENDS = "luna-service2 glib-2.0 libpbnjson"
 RDEPENDS_${PN} = "geoclue"
 
 PV = "0.1.0+git${SRCPV}"
-SRCREV = "53453e944a06fc5dde633a8727dd4edf2ff573df"
+SRCREV = "0c8b742813266eca4fe3ae8a584f549d09cb0e9d"
 
 inherit webos_ports_repo
 inherit webos_cmake
