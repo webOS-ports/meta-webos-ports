@@ -31,6 +31,7 @@ do_install_append() {
     install -d ${D}${webos_sysconfdir}
     install -v -m 644 ${S}/files/conf/locale.txt ${D}${webos_sysconfdir}
     install -v -m 644 ${S}/files/conf/defaultPreferences.txt ${D}${webos_sysconfdir}
+    install -v -m 644 ${S}/src/mccInfo.json ${D}${webos_sysconfdir}
 }
 
 PACKAGES =+ "${PN}-fonts"
