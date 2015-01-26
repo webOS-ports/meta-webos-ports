@@ -7,7 +7,7 @@ do_compile() {
         rm -rf ${S}/deploy
     fi
 
-    node ${S}/enyo/tools/deploy.js -o ${S}/deploy/${WEBOS_APPLICATION_NAME}
+    node ${S}/enyo/tools/deploy.js -v -o ${S}/deploy/${WEBOS_APPLICATION_NAME}
 }
 
 do_install_append() {
