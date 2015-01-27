@@ -15,3 +15,9 @@ SRCREV = "6c1e757341badc990b5df7f4142b17b72a957da4"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
+
+do_install_append() {
+    # Drop the firstrun activity for now as we don't want it to be executed right now
+    # unless we have support for this in the app.
+    rm ${D}${webos_sysconfdir}/activities/org.webosports.app.calendar/org.webosports.app.calendar.firstrun
+}
