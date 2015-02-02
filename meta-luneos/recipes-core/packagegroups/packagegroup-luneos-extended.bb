@@ -66,6 +66,7 @@ RDEPENDS_${PN} = " \
   luna-sysmgr-conf \
   luna-appmanager \
   luna-qml-launcher \
+  luneos-components \
   \
   webos-system-update \
   \
@@ -98,6 +99,7 @@ LIBHYBRIS_RDEPENDS = " \
     mtp-server \
     android-property-service \
     qt5-qpa-hwcomposer-plugin \
+    qtscenegraph-adaptation \
     pulseaudio-modules-droid \
 "
 
