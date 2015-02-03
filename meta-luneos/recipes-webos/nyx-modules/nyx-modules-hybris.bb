@@ -8,7 +8,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "nyx-lib glib-2.0 libhybris libsuspend"
 
 PV = "0.1.0-1+git${SRCPV}"
-SRCREV = "a573fb21112c7dfe7db945d3498eccd390624f29"
+SRCREV = "efa16eef9c47f56673f1b8ac757ec270c082ce06"
 
 inherit webos_ports_repo
 inherit webos_cmake
