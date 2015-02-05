@@ -13,7 +13,7 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 PV = "0.2.0-26+git${SRCPV}"
-SRCREV = "52b77a26ed76ce3cedf006c67c448ea592232af6"
+SRCREV = "67b95f738fe62852e82079341c7f05e1e72c12b4"
 
 inherit pkgconfig
 inherit webos_ports_repo
