@@ -1,7 +1,7 @@
 inherit webos_ports_fork_repo
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-SRCREV = "a0c5ba81f4646e574eb1e436f87bde55da46942c"
+SRCREV = "50d6c0ae941bfb7089743351f600e595e817828b"
 
 # don't remove create_cmake
 EXTRA_QMAKEVARS_POST_remove = "CONFIG-=create_cmake"
