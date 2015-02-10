@@ -9,7 +9,7 @@ WEBOS_GIT_PARAM_BRANCH = "cm-11.0"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-SRCREV = "8c9983e80b1419acf8f9ea153f3a6b47e5e4de6d"
+SRCREV = "890bef235d53ab09e140f02dcc27d1993df6e9df"
 PV = "4.4.3+gitr${SRCPV}"
 
 PROVIDES += "virtual/android-headers"
@@ -20,6 +20,11 @@ do_install() {
     install -d ${D}${includedir}/android
     cp -rv ${S}/* ${D}${includedir}/android/
     rm ${D}${includedir}/android/android-headers.pc
+
+    if [ -e ${S}/android-config_${MACHINE}.h ] ; then
+        rm ${D}${includedir}/android/android-config.h
+        install ${S}/android-config_${MACHINE}.h ${D}${includedir}/android-config.h
+    fi
 
     install -d ${D}${libdir}/pkgconfig
     install -m 0644 ${S}/android-headers.pc ${D}${libdir}/pkgconfig
