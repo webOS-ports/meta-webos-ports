@@ -43,6 +43,6 @@ do_deploy() {
     ln -sf ${ZIP_NAME}.zip ${DEPLOY_DIR_IMAGE}/${ZIP_BASENAME}.zip
 }
 
-do_deploy[depends] += "${IMAGE_NAME}:do_build"
+do_deploy[depends] += "${IMAGE_NAME}:do_build virtual/kernel:do_build"
 
 addtask deploy after do_install before do_package
