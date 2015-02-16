@@ -31,4 +31,5 @@ SRC_URI += " \
     file://0003-Send-connection-manager-updates-also-for-getStatus-a.patch \
     file://0004-Expose-connman-s-offline-mode-through-the-connection.patch \
     file://0005-Expose-connman-s-cellular-technology-status-also-thr.patch \
+    file://0006-Add-networkConfidenceLevel-field-required-by-activit.patch \
 "
