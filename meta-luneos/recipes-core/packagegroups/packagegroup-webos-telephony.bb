@@ -7,6 +7,7 @@ inherit packagegroup
 
 RDEPENDS_${PN} = " \
     ofono \
+    voicecall \
     webos-telephonyd \
     org.webosports.app.phone \
 "
