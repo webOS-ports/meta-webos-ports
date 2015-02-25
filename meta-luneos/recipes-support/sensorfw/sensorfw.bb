@@ -14,6 +14,7 @@ SRC_URI = " \
     git://github.com/mer-packages/sensorfw;branch=master;protocol=git \
     file://0001-Replace-android-headers-hard-coded-include-path-with.patch \
     file://0002-sensorfwd.service-Change-wanted-target-to-multi-user.patch \
+    file://0003-sensord-daemon-conf-setup-improve-check-for-libhybri.patch \
 "
 
 S = "${WORKDIR}/git"
@@ -22,6 +23,9 @@ inherit qmake5
 inherit systemd
 
 EXTRA_QMAKEVARS_PRE = "MAKE_DOCS=no"
+
+SYSTEMD_PACKAGES = "${PN}"
+SYSTEMD_SERVICE_${PN} = "sensorfwd.service"
 
 do_install_append() {
     install -d ${D}${systemd_unitdir}/system
@@ -39,5 +43,4 @@ FILES_${PN} = " \
   ${sbindir} \
   ${sysconfdir} \
   ${libdir} \
-  ${systemd_unitdir} \
 "
