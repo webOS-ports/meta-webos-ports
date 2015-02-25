@@ -101,6 +101,7 @@ LIBHYBRIS_RDEPENDS = " \
     qt5-qpa-hwcomposer-plugin \
     qtscenegraph-adaptation \
     pulseaudio-modules-droid \
+    sensorfw \
 "
 
 MEMNOTIFY_RDEPENDS = " \
