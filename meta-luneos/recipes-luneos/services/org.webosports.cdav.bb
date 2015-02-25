@@ -8,8 +8,8 @@ inherit allarch
 inherit webos_filesystem_paths
 inherit webos_system_bus
 
-PV = "0.3.19+gitr${SRCPV}"
-SRCREV = "27bbcdb0d8e2bcd63e035626e8128335390b80d9"
+PV = "0.3.23+gitr${SRCPV}"
+SRCREV = "c15259df0561aecf43c83728bab3181a9390032d"
 
 WEBOS_REPO_NAME = "org.webosports.service.contacts.carddav"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
@@ -46,6 +46,9 @@ do_install() {
     # account creation application
     install -d ${D}${webos_applicationsdir}/org.webosports.cdav.app
     cp -rv ${S}/app-enyo/* ${D}${webos_applicationsdir}/org.webosports.cdav.app/
+
+    # copy urlschemes.js from service dir to application dir
+    cp -v ${S}/service/javascript/urlschemes.js ${D}${webos_applicationsdir}/org.webosports.cdav.app/CrossAppTarget/
 }
 
 FILES_${PN} += "${webos_applicationsdir} ${webos_servicesdir} ${webos_accttemplatesdir}"
