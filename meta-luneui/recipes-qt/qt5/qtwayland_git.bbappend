@@ -1,10 +1,8 @@
 inherit webos_ports_fork_repo
 
+WEBOS_GIT_PARAM_BRANCH = "webOS-ports/master-next"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-SRCREV = "50d6c0ae941bfb7089743351f600e595e817828b"
-
-# don't remove create_cmake
-EXTRA_QMAKEVARS_POST_remove = "CONFIG-=create_cmake"
+SRCREV = "b2d181c5b5c732165a6ee791c07a39a849bc4d6d"
 
 FILES_${PN} += "${OE_QMAKE_PATH_PLUGINS}/wayland-graphics-integration"
 FILES_${PN}-dbg += "${OE_QMAKE_PATH_PLUGINS}/wayland-graphics-integration/*/.debug"
