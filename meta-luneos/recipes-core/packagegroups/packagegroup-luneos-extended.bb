@@ -128,7 +128,6 @@ RDEPENDS_${PN}_append_tenderloin = " ${LIBHYBRIS_RDEPENDS}"
 
 QEMU_RDEPENDS = " \
     alsa-utils-systemd \
-    libegl-gallium \
     mesa-driver-swrast \
     phonesim \
     qt5-plugin-generic-vboxtouch \
