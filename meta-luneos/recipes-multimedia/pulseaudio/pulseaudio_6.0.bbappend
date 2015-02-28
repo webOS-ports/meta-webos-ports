@@ -11,9 +11,8 @@ SRC_URI += " \
     file://0004-bluetooth-Allow-leaving-transport-running-while-sink.patch \
     file://0005-bluetooth-device-Do-not-lose-transport-pointer-after.patch \
     file://0006-bluetooth-device-Default-to-using-A2DP-profile-initi.patch \
-    file://0007-module-rescue-streams-Add-parameters-to-define-targe.patch \
-    file://0008-bluetooth-util-Detect-transport-acquire-release-loop.patch \
-    file://0009-suspend-on-idle-Ensure-we-still-time-out-if-a-stream.patch \
+    file://0007-bluetooth-util-Detect-transport-acquire-release-loop.patch \
+    file://0008-suspend-on-idle-Ensure-we-still-time-out-if-a-stream.patch \
 "
 
 do_install_append() {
