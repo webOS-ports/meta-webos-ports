@@ -120,7 +120,6 @@ RDEPENDS_${PN}_append_mako = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
 RDEPENDS_${PN}_append_tenderloin = " ${LIBHYBRIS_RDEPENDS}"
 
 QEMU_RDEPENDS = " \
-    libegl-gallium \
     mesa-driver-swrast \
     qt5-plugin-generic-vboxtouch \
     alsa-utils-systemd \
