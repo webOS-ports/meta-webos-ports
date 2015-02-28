@@ -1,4 +1,4 @@
-# Copyright (c) 2013 LG Electronics, Inc.
+# Copyright (c) 2013-2014 LG Electronics, Inc.
 
 SUMMARY = "VirtualBox Linux Guest Drivers"
 SECTION = "core"
@@ -16,6 +16,8 @@ VBOX_NAME = "VirtualBox-${PV}"
 SRC_URI = "http://download.virtualbox.org/virtualbox/${PV}/${VBOX_NAME}.tar.bz2 \
            file://Makefile.utils \
 "
+SRC_URI[md5sum] = "fc21ecc1044dc13cd6c6b601823c6df3"
+SRC_URI[sha256sum] = "0d41e044589d3371f765a98ddc071d9cf9788289f72b7efbb5db64f5488c8eba"
 
 S = "${WORKDIR}/vbox_module"
 
