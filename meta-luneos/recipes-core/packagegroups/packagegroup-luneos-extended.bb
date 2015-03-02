@@ -60,6 +60,8 @@ RDEPENDS_${PN} = " \
   qtbase-fonts-ttf-vera \
   qtmultimedia-plugins \
   qtmultimedia-qmlplugins \
+  qtsensors \
+  qtsensors-qmlplugins \
   \
   luna-next-cardshell \
   luna-sysmgr \
@@ -102,6 +104,7 @@ LIBHYBRIS_RDEPENDS = " \
     qtscenegraph-adaptation \
     pulseaudio-modules-droid \
     sensorfw \
+    qtsensors-sensorfw-plugin \
 "
 
 MEMNOTIFY_RDEPENDS = " \
