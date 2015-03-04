@@ -7,6 +7,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "json-c luna-service2 sqlite3 luna-sysmgr-ipc luna-sysmgr-ipc-messages pmloglib librolegen nyx-lib openssl luna-webkit-api luna-prefs libpbnjson freetype luna-sysmgr-common"
 DEPENDS += "qtbase"
+DEPENDS += "qtsensors"
 DEPENDS += "serviceinstaller"
 #DEPENDS += "localization" #TODO
 
@@ -21,7 +22,7 @@ VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 RDEPENDS_${PN} += "${VIRTUAL-RUNTIME_cpushareholder}"
 
 PV = "3.0.0-3+git${SRCPV}"
-SRCREV = "a2365ea4f086cb93abbd189466c5bcb749925c06"
+SRCREV = "54e9157b48790a054379b37e191696b6ac1f409b"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 
