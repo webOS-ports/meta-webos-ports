@@ -2,7 +2,7 @@ SUMMARY = "PulseAudio Droid HAL modules"
 LICENSE = "LGPL-2.1"
 LIC_FILES_CHKSUM = "file://COPYING;md5=f294906e6e4eac9d917503a0bbd139b4"
 
-DEPENDS += "pulseaudio virtual/libhardware virtual/android-headers dbus udev"
+DEPENDS += "pulseaudio libhybris virtual/android-headers dbus udev"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 

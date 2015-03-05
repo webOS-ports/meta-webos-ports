@@ -6,7 +6,9 @@ LIC_FILES_CHKSUM = " \
     file://NOTICE;md5=9645f39e9db895a4aa6e02cb57294595 \
 "
 
-DEPENDS += "boost virtual/libandroid-properties glog"
+DEPENDS += "boost libhybris glog"
+
+PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 PV = "0.0.3+gitr${SRCPV}"
 SRCREV = "ab1d45f472942bb8283e560f7d86605d15d56528"
