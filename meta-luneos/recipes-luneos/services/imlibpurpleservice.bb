@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = " \
     file://COPYRIGHT;md5=2ce083d13f0f21e5207b4115c8926450 \
 "
 
-DEPENDS = "glib-2.0 db8 pidgin luna-service2"
+DEPENDS = "glib-2.0 db8 pidgin luna-service2 tidy-html5"
 
 PV = "3.0.5+gitr${SRCPV}"
 SRCREV = "7f37f87aa2c4fd20afb14c3a7a9ce84c570afd64"
