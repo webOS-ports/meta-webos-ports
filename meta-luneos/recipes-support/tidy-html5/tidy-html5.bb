@@ -15,7 +15,10 @@ S = "${WORKDIR}/git"
 inherit autotools autotools-brokensep
 
 do_configure_prepend() {
-    touch ${S}/{NEWS,ChangeLog,AUTHORS,README}
+    touch ${S}/NEWS
+    touch ${S}/ChangeLog
+    touch ${S}/AUTHORS
+    touch ${S}/README
 }
 
 FILES_${PN} = " \
