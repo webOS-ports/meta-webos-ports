@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=e6a600fd5e1d9cbde2d983680233ad02"
 DEPENDS += "luna-service2"
 
 PV = "0.1.0-3+git${SRCPV}"
-SRCREV = "da907470c061be078684508bc0a845ceba59a00d"
+SRCREV = "8d5ce985fec7a9fc5b514be306a74193b6139f5b"
 
 inherit webos_ports_repo
 inherit webos_cmake
