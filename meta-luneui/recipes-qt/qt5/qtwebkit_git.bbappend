@@ -1,7 +1,6 @@
 DEPENDS += "luna-service2 pmloglib"
 
-# Don't use qtmultimedia which is set by default PACKAGECONFIG
-PACKAGECONFIG = "gstreamer qtlocation qtsensors"
+PACKAGECONFIG = "qtmultimedia qtlocation qtsensors libwebp"
 
 inherit webos_ports_fork_repo
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"

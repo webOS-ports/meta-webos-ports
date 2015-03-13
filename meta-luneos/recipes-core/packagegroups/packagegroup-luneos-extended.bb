@@ -9,6 +9,7 @@ RDEPENDS_${PN} = " \
   distro-feed-configs \
   \
   pulseaudio-module-switch-on-connect \
+  pulseaudio-module-role-ducking \
   pulseaudio-server \
   pulseaudio-misc \
   pulseaudio-distro-conf \
@@ -107,6 +108,8 @@ LIBHYBRIS_RDEPENDS = " \
     pulseaudio-modules-droid \
     sensorfw \
     qtsensors-sensorfw-plugin \
+    gst-droid \
+    nemo-qtmultimedia-plugins \
 "
 
 MEMNOTIFY_RDEPENDS = " \
