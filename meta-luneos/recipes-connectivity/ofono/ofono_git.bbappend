@@ -3,7 +3,7 @@ FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 SRCREV = "8be724836e3e3c9f3331a4866317f61023f709e0"
 PV = "1.14+gitr${SRCPV}"
 
-RDEPENDS_${PN} += "mobile-broadband-provider-info"
+RDEPENDS_${PN} += "mobile-broadband-provider-info ofono-conf"
 RDEPENDS_${PN}-tests += "python3"
 
 SRC_URI  = " \
