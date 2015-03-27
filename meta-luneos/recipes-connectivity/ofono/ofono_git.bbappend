@@ -1,17 +1,17 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
-SRCREV = "8be724836e3e3c9f3331a4866317f61023f709e0"
-PV = "1.14+gitr${SRCPV}"
+SRCREV = "7331c88b41287886cf90cf8c2e3cb51116814e59"
+PV = "1.16+gitr${SRCPV}"
 
 RDEPENDS_${PN} += "mobile-broadband-provider-info ofono-conf"
 RDEPENDS_${PN}-tests += "python3"
 
 SRC_URI  = " \
   git://github.com/nemomobile-packages/ofono.git;protocol=git;branch=master \
-  file://0001-Disable-backtrace-cause-linking-to-libdl-fails.patch \
   file://0001-Enable-the-various-modem-plugins-we-support-again.patch;striplevel=2 \
-  file://0001-Disable-bluetooth-support-completely.patch;striplevel=2 \
-  file://0001-Add-support-for-the-Ericsson-F5521gw-modem.patch;striplevel=2 \
+  file://0002-Disable-bluetooth-support-completely.patch;striplevel=2 \
+  file://0003-Add-support-for-the-Ericsson-F5521gw-modem.patch;striplevel=2 \
+  file://0004-Disable-backtrace-cause-linking-to-libdl-fails.patch;striplevel=2 \
   file://ofono \
   file://ofono.service \
 "

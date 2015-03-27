@@ -7,4 +7,4 @@
 QT5_VERSION = "5.4.0+git%"
 require conf/distro/include/qt5-versions.inc
 
-PREFERRED_VERSION_ofono = "1.14+gitr%"
+PREFERRED_VERSION_ofono = "1.16+gitr%"
