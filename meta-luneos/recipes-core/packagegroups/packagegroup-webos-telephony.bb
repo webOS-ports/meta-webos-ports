@@ -5,9 +5,13 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 inherit packagegroup
 
+PHONE_RDEPENDS = " \
+    voicecall \
+    org.webosports.app.phone \
+"
+
 RDEPENDS_${PN} = " \
     ofono \
-    voicecall \
     webos-telephonyd \
-    org.webosports.app.phone \
+    ${@base_contains('MACHINE_FEATURES', 'phone', '${PHONE_RDEPENDS}', '', d)} \
 "
