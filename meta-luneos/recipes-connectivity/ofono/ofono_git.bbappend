@@ -9,9 +9,8 @@ RDEPENDS_${PN}-tests += "python3"
 SRC_URI  = " \
   git://github.com/nemomobile-packages/ofono.git;protocol=git;branch=master \
   file://0001-Enable-the-various-modem-plugins-we-support-again.patch;striplevel=2 \
-  file://0002-Disable-bluetooth-support-completely.patch;striplevel=2 \
-  file://0003-Add-support-for-the-Ericsson-F5521gw-modem.patch;striplevel=2 \
-  file://0004-Disable-backtrace-cause-linking-to-libdl-fails.patch;striplevel=2 \
+  file://0002-Add-support-for-the-Ericsson-F5521gw-modem.patch;striplevel=2 \
+  file://0003-Disable-backtrace-cause-linking-to-libdl-fails.patch;striplevel=2 \
   file://ofono \
   file://ofono.service \
 "
