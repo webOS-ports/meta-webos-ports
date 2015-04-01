@@ -4,7 +4,7 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 PV = "1.0+gitr${SRCPV}"
-SRCREV = "24e606f01ea5ba84796dea642c86ced9c1ced736"
+SRCREV = "62d8b8e6e195c1d5687c442f023494ed30d957af"
 
 inherit webos_ports_repo
 
@@ -31,7 +31,6 @@ SYSTEMD_SERVICE_${PN} = " \
     powerd.service \
     sleepd.service \
     webos-connman-adapter.service \
-    ${@base_contains('MACHINE_FEATURES', 'phone', 'webos-telephonyd.service', '',d)} \
 "
 
 do_install() {
