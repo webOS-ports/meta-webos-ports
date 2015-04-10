@@ -33,6 +33,7 @@ RDEPENDS_${PN} = " \
   location-service \
   imaccountvalidator \
   imlibpurpleservice \
+  org.webosports.service.lumberjack \
   \
   org.webosports.app.firstuse \
   org.webosports.app.memos \
