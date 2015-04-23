@@ -6,3 +6,8 @@ SRCREV = "b2d181c5b5c732165a6ee791c07a39a849bc4d6d"
 
 FILES_${PN} += "${OE_QMAKE_PATH_PLUGINS}/wayland-graphics-integration"
 FILES_${PN}-dbg += "${OE_QMAKE_PATH_PLUGINS}/wayland-graphics-integration/*/.debug"
+
+FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
+SRC_URI += " \
+    file://0001-qsgtexture-Remove-Filtering-enum-options-to-resolve-.patch \
+"
