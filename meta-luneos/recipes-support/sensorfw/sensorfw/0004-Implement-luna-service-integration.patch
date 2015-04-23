@@ -1,0 +1,566 @@
+From 7cb630ca534cb4a4dddc1e4f5171ce1a209d1be7 Mon Sep 17 00:00:00 2001
+From: Nikolay Nizov <nizovn@gmail.com>
+Date: Tue, 21 Apr 2015 22:47:22 +0300
+Subject: [PATCH] Implement luna-service integration
+
+Signed-off-by: Nikolay Nizov <nizovn@gmail.com>
+---
+ LuneOS/sysbus/com.nokia.SensorService.json.prv    |  14 ++
+ LuneOS/sysbus/com.nokia.SensorService.service.prv |   4 +
+ LuneOS/systemd/sensorfwd.service                  |  17 ++
+ core/core.pro                                     |   8 +
+ core/deviceadaptor.cpp                            |   6 +-
+ core/lsclient.cpp                                 | 182 ++++++++++++++++++++++
+ core/lsclient.h                                   | 102 ++++++++++++
+ core/sensormanager.cpp                            |  29 ++++
+ core/sensormanager.h                              |  20 ++-
+ qt-api/abstractsensor_i.cpp                       |  10 ++
+ 10 files changed, 389 insertions(+), 3 deletions(-)
+ create mode 100644 LuneOS/sysbus/com.nokia.SensorService.json.prv
+ create mode 100644 LuneOS/sysbus/com.nokia.SensorService.service.prv
+ create mode 100644 LuneOS/systemd/sensorfwd.service
+ create mode 100644 core/lsclient.cpp
+ create mode 100644 core/lsclient.h
+
+diff --git a/LuneOS/sysbus/com.nokia.SensorService.json.prv b/LuneOS/sysbus/com.nokia.SensorService.json.prv
+new file mode 100644
+index 0000000..f0f6548
+--- /dev/null
++++ b/LuneOS/sysbus/com.nokia.SensorService.json.prv
+@@ -0,0 +1,14 @@
++{
++    "role": {
++        "exeName":"/usr/sbin/sensorfwd",
++        "type": "privileged",
++        "allowedNames": ["com.nokia.SensorService"]
++    },
++    "permissions": [
++        {
++            "service":"com.nokia.SensorService",
++            "inbound":["*"],
++            "outbound":["*"]
++        }
++    ]
++}
+diff --git a/LuneOS/sysbus/com.nokia.SensorService.service.prv b/LuneOS/sysbus/com.nokia.SensorService.service.prv
+new file mode 100644
+index 0000000..6e7d218
+--- /dev/null
++++ b/LuneOS/sysbus/com.nokia.SensorService.service.prv
+@@ -0,0 +1,4 @@
++[D-BUS Service]
++Name=com.nokia.SensorService
++Exec=/usr/sbin/sensrofwd
++Type=static
+diff --git a/LuneOS/systemd/sensorfwd.service b/LuneOS/systemd/sensorfwd.service
+new file mode 100644
+index 0000000..e480406
+--- /dev/null
++++ b/LuneOS/systemd/sensorfwd.service
+@@ -0,0 +1,17 @@
++[Unit]
++Description=Sensor daemon for sensor framework
++After=dbus.socket ls-hubd_private.service
++Requires=dbus.service ls-hubd_private.service
++Conflicts=actdead.target
++
++[Service]
++Type=forking
++BusName=com.nokia.SensorService
++ExecStartPre=/bin/sh /usr/bin/sensord-daemon-conf-setup
++ExecStart=/usr/sbin/sensorfwd -c=/etc/sensorfw/primaryuse.conf -d --log-level=warning --no-magnetometer-bg-calibration
++ExecReload=/bin/kill -HUP $MAINPID
++Restart=always
++RestartSec=1
++
++[Install]
++WantedBy=multi-user.target
+diff --git a/core/core.pro b/core/core.pro
+index ccd973b..cbeb402 100644
+--- a/core/core.pro
++++ b/core/core.pro
+@@ -79,6 +79,14 @@ mce {
+     HEADERS += mcewatcher.h
+     DEFINES += SENSORFW_MCE_WATCHER
+ }
++else:
++lunaservice {
++    SOURCES += lsclient.cpp
++    HEADERS += lsclient.h
++    DEFINES += SENSORFW_LUNA_SERVICE_CLIENT
++    PKGCONFIG += Qt5Gui json-c
++    PKGCONFIG += luna-service2 LunaSysMgrCommon LunaSysMgrIpcMessages
++}
+ 
+ contains(CONFIG,hybris) {
+ } else {
+diff --git a/core/deviceadaptor.cpp b/core/deviceadaptor.cpp
+index ca578db..738688f 100644
+--- a/core/deviceadaptor.cpp
++++ b/core/deviceadaptor.cpp
+@@ -83,7 +83,11 @@ DeviceAdaptor::DeviceAdaptor(const QString& id) :
+ #ifdef SENSORFW_MCE_WATCHER
+     screenBlanked_(!SensorManager::instance().MCEWatcher()->displayEnabled())
+ #else
+-    screenBlanked_(false)
++    #ifdef SENSORFW_LUNA_SERVICE_CLIENT
++        screenBlanked_(!SensorManager::instance().LSClient_instance()->displayEnabled())
++    #else
++        screenBlanked_(false)
++    #endif
+ #endif
+ {
+     setValid(true);
+diff --git a/core/lsclient.cpp b/core/lsclient.cpp
+new file mode 100644
+index 0000000..c94ae08
+--- /dev/null
++++ b/core/lsclient.cpp
+@@ -0,0 +1,182 @@
++/**
++   @file lsclient.cpp
++   @brief LunaService signal utility
++
++   <p>
++   Copyright (C) 2009-2010 Nokia Corporation
++
++   @author Timo Rongas <ext-timo.2.rongas@nokia.com>
++   @author Lihan Guo <ext-lihan.4.guo@nokia.com>
++   @author Nikolay Nizov <nizovn@gmail.com>
++
++   This file is part of Sensord.
++
++   Sensord is free software; you can redistribute it and/or modify
++   it under the terms of the GNU Lesser General Public License
++   version 2.1 as published by the Free Software Foundation.
++
++   Sensord is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with Sensord.  If not, see <http://www.gnu.org/licenses/>.
++   </p>
++ */
++
++#include "lsclient.h"
++#include "JSONUtils.h"
++#include "HostBase.h"
++#include <json.h>
++
++#define URI_SIGNAL_ADDMATCH "palm://com.palm.lunabus/signal/addmatch"
++#define JSON_CHARGER_SIGNAL_ADDMATCH "{\"category\":\"/com/palm/power\",\"method\":\"chargerStatus\"}"
++#define URI_DISPLAY_STATUS "palm://com.palm.display/control/status"
++#define JSON_DISPLAY_SUBSCRIBE "{\"subscribe\":true}"
++
++LSClient::LSClient(QObject* parent) : QObject(parent),
++                                      displayState(true),
++                                      powerSave(true)
++{
++    bool retVal;
++    LSError lserror;
++    LSErrorInit(&lserror);
++    LSHandle *serviceHandle;
++
++    retVal = LSRegister("com.nokia.SensorService", &serviceHandle, &lserror);
++    if (!retVal) goto error;
++
++    retVal = LSCall(serviceHandle, URI_SIGNAL_ADDMATCH, JSON_CHARGER_SIGNAL_ADDMATCH, LSClient::chargerCallback, this, NULL, &lserror);
++    if (!retVal) goto error;
++
++    retVal = LSCall(serviceHandle, URI_DISPLAY_STATUS, JSON_DISPLAY_SUBSCRIBE, LSClient::displayCallback, this, NULL, &lserror);
++    if (!retVal) goto error;
++
++    retVal = LSGmainAttach(serviceHandle, HostBase::instance()->mainLoop(), &lserror);
++    if (!retVal) goto error;
++
++    return;
++
++error:
++    if (LSErrorIsSet(&lserror)) {
++        LSErrorPrint(&lserror, stderr);
++        LSErrorFree(&lserror);
++    }
++
++    g_debug(":%s: Unable to start service", __PRETTY_FUNCTION__);
++}
++
++bool LSClient::displayEnabled() const
++{
++    return displayState;
++}
++
++bool LSClient::PSMEnabled() const
++{
++    return powerSave;
++}
++
++bool LSClient::chargerCallback(LSHandle *sh, LSMessage *message, void *ctx)
++{
++    LSError lserror;
++    LSErrorInit(&lserror);
++
++    // {"type": string, "connected": boolean}
++    VALIDATE_SCHEMA_AND_RETURN(sh,
++                               message,
++                               SCHEMA_2(REQUIRED(type, string), REQUIRED(connected, boolean)));
++
++    LSClient* lsclient = (LSClient*)ctx;
++
++    json_object* label = 0;
++    json_object* root = 0;
++    bool newState = true;
++    const char* str = LSMessageGetPayload(message);
++    if (!str)
++            goto error;
++
++    root = json_tokener_parse(str);
++    if (!root || is_error(root))
++            goto error;
++
++    label = json_object_object_get(root, "connected");
++    if (!label)
++            goto error;
++
++    newState = !json_object_get_boolean(label);
++
++    if (lsclient->powerSave != newState)
++    {
++        lsclient->powerSave = newState;
++        emit lsclient->devicePSMStateChanged(newState);
++    }
++
++error:
++
++    if (root && !is_error(root))
++        json_object_put(root);
++
++    return true;
++}
++
++bool LSClient::displayCallback(LSHandle *sh, LSMessage *message, void *ctx)
++{
++    LSError lserror;
++    LSErrorInit(&lserror);
++
++    VALIDATE_SCHEMA_AND_RETURN(sh,
++                               message,
++                               SCHEMA_7(
++                               REQUIRED(returnValue, boolean),
++                               REQUIRED(event, string),
++                               OPTIONAL(state, string),
++                               OPTIONAL(timeout, integer),
++                               OPTIONAL(blockDisplay, string),
++                               OPTIONAL(active, boolean),
++                               OPTIONAL(subscribed, boolean)
++                               ));
++
++    LSClient* lsclient = (LSClient*)ctx;
++
++    json_object* root = 0;
++    const char* value = 0;
++    bool newState = true;
++    bool ret = false;
++    const char* str = LSMessageGetPayload(message);
++    if (!str)
++            goto error;
++
++    root = json_tokener_parse(str);
++    if (!root || is_error(root))
++            goto error;
++
++    ret = json_object_get_boolean(json_object_object_get(root, "returnValue"));
++    if (!ret || is_error(ret))
++            goto error;
++
++    value = json_object_get_string(json_object_object_get(root, "event"));
++    if (!value || is_error(value))
++            goto error;
++
++    if (0 == strcmp (value, "displayOff"))
++        newState = false;
++
++    value = json_object_get_string(json_object_object_get(root, "state"));
++    if (value && !is_error(value))
++        if (0 == strcmp (value, "off"))
++            newState = false;
++
++    if (lsclient->displayState != newState)
++    {
++        lsclient->displayState = newState;
++        emit lsclient->displayStateChanged(newState);
++    }
++
++error:
++
++    if (root && !is_error(root))
++        json_object_put(root);
++
++    return true;
++}
+diff --git a/core/lsclient.h b/core/lsclient.h
+new file mode 100644
+index 0000000..6860f06
+--- /dev/null
++++ b/core/lsclient.h
+@@ -0,0 +1,102 @@
++/**
++   @file lsclient.h
++   @brief LunaService signal utility
++
++   <p>
++   Copyright (C) 2009-2010 Nokia Corporation
++
++   @author Timo Rongas <ext-timo.2.rongas@nokia.com>
++   @author Lihan Guo <ext-lihan.4.guo@nokia.com>
++   @author Antti Virtanen <antti.i.virtanen@nokia.com>
++   @author Nikolay Nizov <nizovn@gmail.com>
++
++   This file is part of Sensord.
++
++   Sensord is free software; you can redistribute it and/or modify
++   it under the terms of the GNU Lesser General Public License
++   version 2.1 as published by the Free Software Foundation.
++
++   Sensord is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with Sensord.  If not, see <http://www.gnu.org/licenses/>.
++   </p>
++ */
++
++#ifndef SENSORD_LUNA_SERVICE_CLIENT_H
++#define SENSORD_LUNA_SERVICE_CLIENT_H
++
++#include <QObject>
++#include <luna-service2/lunaservice.h>
++
++/**
++ * Class for monitoring various LS signals.
++ */
++class LSClient : public QObject
++{
++    Q_OBJECT
++    Q_DISABLE_COPY(LSClient)
++
++public:
++    /**
++     * Constructor.
++     *
++     * @param parent Parent object.
++     */
++    LSClient(QObject* parent = 0);
++
++    /**
++     * Get display state.
++     *
++     * @return display state.
++     */
++    bool displayEnabled() const;
++
++    /**
++     * Get powersave-mode state.
++     *
++     * @return powersave-mode state.
++     */
++    bool PSMEnabled() const;
++
++signals:
++    /**
++     * Emitted when display state has changed.
++     *
++     * @param displayOn \c true if display went to 'on' or 'dimmed',
++     *                  \c false if 'off'.
++     */
++    void displayStateChanged(bool displayOn);
++
++    /**
++     * Emitted when powersave-mode has changed.
++     *
++     * @param PSM is powersave-mode enabled or not.
++     */
++    void devicePSMStateChanged(bool PSM);
++
++private slots:
++    /**
++     * Slot for LS display state change signals.
++     *
++     * @param state name of the state.
++     */
++    static bool displayCallback(LSHandle *sh, LSMessage *message, void *ctx);
++
++    /**
++     * Slot for LS powersave-mode state change signals.
++     *
++     * @param mode is powersave-mode enabled or not.
++     */
++    static bool chargerCallback(LSHandle *sh, LSMessage *message, void *ctx);
++
++private:
++    bool displayState;       /**< current display state */
++    bool powerSave;          /**< current powersave-mode state */
++
++};
++
++#endif // SENSORD_LUNA_SERVICE_CLIENT_H
+diff --git a/core/sensormanager.cpp b/core/sensormanager.cpp
+index e46a822..3332acf 100644
+--- a/core/sensormanager.cpp
++++ b/core/sensormanager.cpp
+@@ -36,6 +36,9 @@
+ #ifdef SENSORFW_MCE_WATCHER
+ #include "mcewatcher.h"
+ #endif // SENSORFW_MCE_WATCHER
++#ifdef SENSORFW_LUNA_SERVICE_CLIENT
++#include "lsclient.h"
++#endif // SENSORFW_LUNA_SERVICE_CLIENT
+ #include <QSocketNotifier>
+ #include <errno.h>
+ #include "sockethandler.h"
+@@ -139,6 +142,17 @@ SensorManager::SensorManager()
+             this, SLOT(devicePSMStateChanged(const bool)));
+ 
+ #endif //SENSORFW_MCE_WATCHER
++
++#ifdef SENSORFW_LUNA_SERVICE_CLIENT
++
++    lsClient_ = new LSClient(this);
++    connect(lsClient_, SIGNAL(displayStateChanged(const bool)),
++            this, SLOT(displayStateChanged(const bool)));
++
++    connect(lsClient_, SIGNAL(devicePSMStateChanged(const bool)),
++            this, SLOT(devicePSMStateChanged(const bool)));
++
++#endif //SENSORFW_LUNA_SERVICE_CLIENT
+ }
+ 
+ SensorManager::~SensorManager()
+@@ -198,6 +212,10 @@ SensorManager::~SensorManager()
+ #ifdef SENSORFW_MCE_WATCHER
+     delete mceWatcher_;
+ #endif //SENSORFW_MCE_WATCHER
++
++#ifdef SENSORFW_LUNA_SERVICE_CLIENT
++    delete lsClient_;
++#endif //SENSORFW_LUNA_SERVICE_CLIENT
+ }
+ 
+ void SensorManager::setError(SensorManagerError errorCode, const QString& errorString)
+@@ -648,6 +666,10 @@ void SensorManager::displayStateChanged(bool displayState)
+         emit displayOn();
+ #ifdef SENSORFW_MCE_WATCHER
+         if (!mceWatcher_->PSMEnabled())
++#else
++	#ifdef SENSORFW_LUNA_SERVICE_CLIENT
++	if (!lsClient_->PSMEnabled())
++	#endif // SENSORFW_LUNA_SERVICE_CLIENT
+ #endif // SENSORFW_MCE_WATCHER
+         {
+             emit resumeCalibration();
+@@ -794,6 +816,13 @@ MceWatcher* SensorManager::MCEWatcher() const
+ }
+ #endif // SENSORFW_MCE_WATCHER
+ 
++#ifdef SENSORFW_LUNA_SERVICE_CLIENT
++LSClient* SensorManager::LSClient_instance() const
++{
++    return lsClient_;
++}
++#endif // SENSORFW_LUNA_SERVICE_CLIENT
++
+ #ifdef SM_PRINT
+ void SensorManager::print() const
+ {
+diff --git a/core/sensormanager.h b/core/sensormanager.h
+index b595e96..3288e6b 100644
+--- a/core/sensormanager.h
++++ b/core/sensormanager.h
+@@ -45,6 +45,12 @@
+ class MceWatcher;
+ #endif
+ 
++#ifdef SENSORFW_LUNA_SERVICE_CLIENT
++#include "lsclient.h"
++#else
++class LSClient;
++#endif
++
+ class QSocketNotifier;
+ class SocketHandler;
+ 
+@@ -322,6 +328,15 @@ public:
+     MceWatcher* MCEWatcher() const;
+ #endif
+ 
++#ifdef SENSORFW_LUNA_SERVICE_CLIENT
++    /**
++     * Get pointer to LSClient instance.
++     *
++     * @return LSClient instance pointer.
++     */
++    LSClient* LSClient_instance() const;
++#endif
++
+     double magneticDeviation();
+     void setMagneticDeviation(double level);
+ 
+@@ -334,14 +349,14 @@ private Q_SLOTS:
+     void lostClient(int sessionId);
+ 
+     /**
+-     * Callback for MCE display state change event.
++     * Callback for MCE or LS display state change event.
+      *
+      * @param displayState display state.
+      */
+     void displayStateChanged(bool displayState);
+ 
+     /**
+-     * Callback for MCE powersave mode change event.
++     * Callback for MCE or LS powersave mode change event.
+      *
+      * @param deviceMode device PSM state.
+      */
+@@ -450,6 +465,7 @@ private:
+ 
+     SocketHandler*                                 socketHandler_; /**< socket handler */
+     MceWatcher*                                    mceWatcher_; /**< MCE watcher */
++    LSClient*                                      lsClient_; /**< LS client */
+     SensorManagerError                             errorCode_; /** global error code */
+     QString                                        errorString_; /** global error description */
+     int                                            pipefds_[2]; /** pipe for sensor samples */
+diff --git a/qt-api/abstractsensor_i.cpp b/qt-api/abstractsensor_i.cpp
+index d4fba10..e7ac3dc 100644
+--- a/qt-api/abstractsensor_i.cpp
++++ b/qt-api/abstractsensor_i.cpp
+@@ -31,6 +31,9 @@
+ #ifdef SENSORFW_MCE_WATCHER
+ #include "mcewatcher.h"
+ #endif
++#ifdef SENSORFW_LUNA_SERVICE_CLIENT
++#include "lsclient.h"
++#endif
+ 
+ struct AbstractSensorChannelInterface::AbstractSensorChannelInterfaceImpl : public QDBusAbstractInterface
+ {
+@@ -80,6 +83,13 @@ AbstractSensorChannelInterface::AbstractSensorChannelInterface(const QString& pa
+     QObject::connect(mcewatcher,SIGNAL(displayStateChanged(bool)),
+                      this,SLOT(displayStateChanged(bool)),Qt::UniqueConnection);
+ #endif
++
++#ifdef SENSORFW_LUNA_SERVICE
++    LSClient *lsclient;
++    lsclient = new LSClient(this);
++    QObject::connect(lsclient,SIGNAL(displayStateChanged(bool)),
++                     this,SLOT(displayStateChanged(bool)),Qt::UniqueConnection);
++#endif
+ }
+ 
+ AbstractSensorChannelInterface::~AbstractSensorChannelInterface()
+-- 
+2.0.5
+
