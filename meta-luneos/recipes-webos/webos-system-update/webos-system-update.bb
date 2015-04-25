@@ -6,7 +6,7 @@ DEPENDS = "qtbase qtdeclarative"
 RDEPENDS_${PN} += "qtdeclarative-qmlplugins"
 
 PV = "1.0.0-4+git${SRCPV}"
-SRCREV = "09407bc2ef8a79f75b49bf2b08ec78039a8916ed"
+SRCREV = "a07b22bc8a47fb3160c9eeb8a2aafee19d750d8f"
 
 inherit webos_ports_repo
 
