@@ -14,7 +14,7 @@ ZIP_NAME = "${ZIP_BASENAME}-${DATETIME}${WEBOS_IMAGE_NAME_SUFFIX}"
 inherit webos_ports_repo
 
 PV = "1.0.1+git${SRCPV}"
-SRCREV = "cee2ff7dc109d250597a159b957212f97de7e7d6"
+SRCREV = "8d81d92fba311196e4ac32d51fabd942c406b8f3"
 
 WEBOS_REPO_NAME = "android-update-package"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
