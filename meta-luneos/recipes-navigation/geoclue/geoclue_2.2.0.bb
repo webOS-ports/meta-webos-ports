@@ -16,20 +16,21 @@ SYSTEMD_SERVICE_${PN} = "${PN}.service"
 inherit autotools pkgconfig gtk-doc systemd
 
 SRC_URI = " \
-    http://www.freedesktop.org/software/geoclue/releases/2.1/geoclue-${PV}.tar.xz \
+    http://www.freedesktop.org/software/geoclue/releases/2.2/geoclue-${PV}.tar.xz \
 "
 
-SRC_URI[md5sum] = "aaa6c7a2a48a8fa74838345722d80e9f"
-SRC_URI[sha256sum] = "f1d7e7a9c60633d3d747f55fee848299114b3222a4d65e955c2cbcd297d01c68"
+SRC_URI[md5sum] = "c1970e4ec6f2af6591a75294fc6fb4fa"
+SRC_URI[sha256sum] = "a490de0d4f97cb65f81e9fd0f687c7e84ef2c41509c214a1438964f541c7d446"
 
 EXTRA_OECONF += " \
     --with-dbus-service-user=root \
     --with-dbus-sys-dir=${sysconfdir}/dbus-1/system.d \
+    --with-systemdsystemunitdir=${systemd_unitdir}/system \
 "
 
 PACKAGECONFIG ??= ""
 PACKAGECONFIG[3g-source] = "--enable-3g-source,--disable-3g-source,networkmanager"
-PACKAGECONFIG[cdma-sozrce] = "--enable-cdma-source,--disable-cdma-source,networkmanager"
+PACKAGECONFIG[cdma-source] = "--enable-cdma-source,--disable-cdma-source,networkmanager"
 PACKAGECONFIG[modem-gps-source] = "--enable-modem-gps-source,--disable-modem-gps-source,networkmanager"
 
 PACKAGES += "${PN}-examples"
