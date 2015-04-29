@@ -26,6 +26,10 @@ inherit systemd
 inherit webos_system_bus
 
 EXTRA_QMAKEVARS_PRE = "MAKE_DOCS=no"
+# disable ls2 integration as it has bug which results
+# that sensors stop working after turn off screen on N4,
+# when it isn't connected to usb.
+# EXTRA_QMAKEVARS_PRE += "CONFIG+=lunaservice"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/LuneOS/sysbus"
