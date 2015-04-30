@@ -25,7 +25,10 @@ inherit qmake5
 inherit systemd
 inherit webos_system_bus
 
-EXTRA_QMAKEVARS_PRE = "MAKE_DOCS=no"
+EXTRA_QMAKEVARS_PRE = "MAKE_DOCS=no CONFIG+=lunaservice"
+
+WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
+WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/LuneOS/sysbus"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/LuneOS/sysbus"
