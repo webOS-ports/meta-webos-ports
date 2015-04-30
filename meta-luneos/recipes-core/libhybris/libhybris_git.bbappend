@@ -6,9 +6,4 @@ EXTRA_OECONF += " \
     --enable-debug \
 "
 
-inherit webos_ports_repo
-
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/master"
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-
-SRCREV = "69d82b1aee617388c90c1888e1c5b5faf3a6ed1b"
+SRCREV = "c42b4bf5ad392fdc34227d46dfc5caef05a01ba7"
