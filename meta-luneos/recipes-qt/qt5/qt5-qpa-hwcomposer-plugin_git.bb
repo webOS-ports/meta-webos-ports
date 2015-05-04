@@ -5,7 +5,7 @@ LICENSE = "LGPL-2.1"
 LIC_FILES_CHKSUM = "file://hwcomposer_backend.cpp;beginline=1;endline=40;md5=09c08382077db2dbc01b1b5536ec6665"
 
 PV = "5.2.0+gitr${SRCPV}"
-SRCREV = "cd9bf94cd899847b574ac0f2a04af4aa434201e4"
+SRCREV = "c53a127554adac25d252e424866e6e1b0315b0f6"
 
 DEPENDS = "qtbase libhybris qtwayland virtual/android-headers"
 
