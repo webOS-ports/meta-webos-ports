@@ -4,9 +4,8 @@ DEPENDS += "luna-service2 pmloglib"
 PACKAGECONFIG = "gstreamer qtlocation qtsensors"
 
 inherit webos_ports_fork_repo
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/master-next"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-SRCREV = "815b7d7a548fce2c178437a70fc770ddd71a01ea"
+SRCREV = "882e9b5f2cb580c450cde112477b030f58294ac6"
 
 THUMB_SUPPORT = " QMAKE_CXXFLAGS+=-mthumb"
 # Build breaks for qemuarm with errors while building JavaScriptCore:
