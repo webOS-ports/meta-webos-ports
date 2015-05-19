@@ -1,5 +1,7 @@
 #! /bin/sh
 
+create_swap_file=1
+
 . /machine.conf
 . /distro.conf
 
@@ -122,12 +124,14 @@ mount -o bind,rw $datadir/userdata/.cryptofs /rfs/media/cryptofs
 mkdir -p /rfs/media/internal/android
 mount -o bind,rw $ANDROID_MEDIA_DIR /rfs/media/internal/android
 
-if [ ! -e /rfs/SWAP.img ] ; then
-    info "Creating SWAP device ..."
-    dd if=/dev/zero of=/rfs/SWAP.img bs=4096 count=131072
-    chmod 600 /rfs/SWAP.img
-    chown 0:0 /rfs/SWAP.img
-    mkswap /rfs/SWAP.img
+if [ "$create_swap_file" -eq "1" ] ; then
+    if [ ! -e /rfs/SWAP.img ] ; then
+        info "Creating SWAP device ..."
+        dd if=/dev/zero of=/rfs/SWAP.img bs=4096 count=131072
+        chmod 600 /rfs/SWAP.img
+        chown 0:0 /rfs/SWAP.img
+        mkswap /rfs/SWAP.img
+    fi
 fi
 
 info "Switching to rootfs..."
