@@ -14,34 +14,42 @@ setup_devtmpfs() {
     test -c $1/dev/stderr || ln -sf fd/2 $1/dev/stderr
 }
 
+check_and_start_adb() {
+    mkdir -p /dev/pts
+    mount -t devpts devpts /dev/pts
+
+    # Check wether we need to start adbd for interactive debugging
+    /usr/bin/android-gadget-setup adb
+    /usr/bin/adbd
+}
+
 echo "Mounting relevant filesystems ..."
-mkdir -m 0755 /proc
+mkdir -p -m 0755 /proc
 mount -t proc proc /proc
-mkdir -m 0755 /sys
+mkdir -p -m 0755 /sys
 mount -t sysfs sys /sys
 mkdir -p /dev
 
 setup_devtmpfs ""
 
+log() {
+    echo "$1" > /dev/kmsg
+}
+
 info() {
-    echo "$1" > /dev/ttyprintk
+    log "info: $1"
+}
+
+error() {
+    log "error: $1"
 }
 
 fail() {
-    echo "Failed" > /dev/ttyprintk
-    echo "$1" > /dev/ttyprintk
-    echo "Waiting for 15 seconds before rebooting ..." > /dev/ttyprintk
+    log "error: $1"
+    log "Waiting 15 seconds before rebooting ..."
     sleep 15s
     reboot
 }
-
-# Check wether we need to start adbd for interactive debugging
-cat /proc/cmdline | grep enable_adb
-if [ $? -ne 1 ] ; then
-    /usr/bin/android-gadget-setup adb
-    /usr/bin/adbd
-fi
-
 
 mkdir -m 0755 /rfs
 
@@ -62,6 +70,7 @@ mount -t auto -o rw,noatime,nodiratime /dev/$sdcard_partition /sdcard
 
 ANDROID_SDCARD_DIR="/sdcard"
 ANDROID_MEDIA_DIR="/sdcard/media/"
+datadir=$ANDROID_SDCARD_DIR/$distro_name-data
 
 # Workaround for multi-user functionality in Android 4.2
 if [ -d /sdcard/media/0 ] ; then
@@ -73,7 +82,7 @@ fi
 
 info "Checking for rootfs image on sdcard/nand ..."
 if [ -d $ANDROID_SDCARD_DIR/$distro_name ] ; then
-    info "Rootfs folder found at $ANDROID_SDCARD_DIR/$distro_name; chrooting into ..."
+    info "Rootfs folder found at $ANDROID_SDCARD_DIR/$distro_name; mounting it ..."
     mount -o bind $ANDROID_SDCARD_DIR/$distro_name /rfs
     [ $? -eq 0 ] || fail "Failed to mount /rootfs"
 else
@@ -90,7 +99,6 @@ umount -l /sys
 # system so bind mount them from the outside into the rootfs. If we're
 # doing this the first time we have to remove the old data and copy the
 # initial data
-datadir=$ANDROID_SDCARD_DIR/$distro_name-data
 if [ ! -e /rfs/.firstboot_done ] ; then
     for dir in var home ; do
         rm -rf $datadir/$dir
@@ -105,24 +113,15 @@ if [ ! -e /rfs/.firstboot_done ] ; then
         rm -rf $datadir/userdata/.cryptofs
     fi
     mkdir -p $datadir/userdata/.cryptofs
+    cp -rav /rfs/media/cryptofs/* $datadir/userdata/.cryptofs
 
     # We're done with our first boot actions
     touch /rfs/.firstboot_done
 fi
 
-# bind-mount the directories to their correct place
-for dir in var home ; do
-    mount -o bind,rw $datadir/$dir /rfs/$dir
-done
-
-# finally setup the user data directory
-mkdir -p $datadir/userdata
-mount -o bind,rw $datadir/userdata /rfs/media/internal
-mount -o bind,rw $datadir/userdata/.cryptofs /rfs/media/cryptofs
-
-# ..and mount also the android user directory there
-mkdir -p /rfs/media/internal/android
-mount -o bind,rw $ANDROID_MEDIA_DIR /rfs/media/internal/android
+info "Creating userdata mount point ..."
+mkdir -p /rfs/userdata
+mount /dev/$sdcard_partition /rfs/userdata
 
 if [ "$create_swap_file" -eq "1" ] ; then
     if [ ! -e /rfs/SWAP.img ] ; then
@@ -134,5 +133,36 @@ if [ "$create_swap_file" -eq "1" ] ; then
     fi
 fi
 
+# Setup fstab
+info "Setting up new fstab ..."
+
+fstab=/rfs/etc/fstab
+new_fstab=/rfs/userdata/luneos-data/fstab
+temp_fstab=${new_fstab}.tmp
+
+[ -e $new_fstab ] && rm -f $new_fstab
+cp $fstab $temp_fstab
+
+sed -i '/^rootfs/,+0d' $temp_fstab
+cp ${temp_fstab} $new_fstab
+
+MOUNT="ro"
+if [ -e /rfs/.writable_image ] ; then
+    MOUNT="rw"
+fi
+echo "rootfs / auto defaults,bind,remount,$MOUNT 1 1" > $new_fstab
+cat $temp_fstab >> $new_fstab
+
+# Additional mounts we need for user writable data
+echo "/userdata/luneos-data/var /var none bind 0 0" >> $new_fstab
+echo "/userdata/luneos-data/home /home none bind 0 0" >> $new_fstab
+echo "/userdata/luneos-data/userdata /media/internal none bind 0 0" >> $new_fstab
+echo "/userdata/luneos-data/userdata/.cryptofs /media/cryptofs none bind 0 0" >> $new_fstab
+
+if [ "$create_swap_file" -eq "1" ] ; then
+    echo "/SWAP.img none swap sw 0 0" >> $new_fstab
+fi
+
+mount -o bind $new_fstab $fstab
 info "Switching to rootfs..."
 exec switch_root /rfs /sbin/init

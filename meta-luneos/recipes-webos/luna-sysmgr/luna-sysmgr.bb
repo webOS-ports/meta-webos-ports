@@ -100,17 +100,13 @@ do_install_append() {
         install -d ${D}${webos_sysconfdir}/pubsub_handlers
         install -v -m 0644 service/com.palm.appinstaller.pubsub ${D}${webos_sysconfdir}/pubsub_handlers/com.palm.appinstaller
     fi
-}
-
-pkg_postinst_${PN}() {
-    #!/bin/sh -e
 
     # We need the lock directory for the application installer which will fail if this
     # directory does not exist
-    mkdir -p ${webos_cryptofsdir}/apps/var/lock
+    mkdir -p ${D}${webos_cryptofsdir}/apps/var/lock
 }
 
-FILES_${PN} += "${webos_sysmgrdir} ${webos_sysconfdir} ${webos_applicationsdir} ${webos_soundsdir}"
+FILES_${PN} += "${webos_sysmgrdir} ${webos_sysconfdir} ${webos_applicationsdir} ${webos_soundsdir} ${webos_cryptofsdir}"
 
 # /usr/bin/LunaSysMgr contains RPATH pointing to sysroot
 INSANE_SKIP_${PN} = "rpaths"

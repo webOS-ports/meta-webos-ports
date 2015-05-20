@@ -1,5 +1,7 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
+RDEPENDS_${PN} += "sed"
+
 SRC_URI += "file://fixups.sh"
 
 do_install_append() {
