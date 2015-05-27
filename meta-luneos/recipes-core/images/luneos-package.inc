@@ -23,14 +23,25 @@ do_deploy() {
     if [ ! -e ${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}-${MACHINE}.tar.gz ] ; then
         bbfatal "Required base image is not available as tar.gz image!"
     fi
-    if [ ! -e ${DEPLOY_DIR_IMAGE}/zImage-${MACHINE}.fastboot ] ; then
-        bbfatal "Required kernel image is not available as fastboot image!"
+
+    KERNEL_IMAGE=""
+    TARGET_KERNEL_IMAGE=""
+    if [ -e ${DEPLOY_DIR_IMAGE}/zImage-${MACHINE}.fastboot ] ; then
+        KERNEL_IMAGE="${DEPLOY_DIR_IMAGE}/zImage-${MACHINE}.fastboot"
+        TARGET_KERNEL_IMAGE="boot.img"
+    elif [ -e ${DEPLOY_DIR_IMAGE}/uImage-${MACHINE}.bin ] ; then
+        KERNEL_IMAGE="${DEPLOY_DIR_IMAGE}/uImage-${MACHINE}.bin"
+        TARGET_KERNEL_IMAGE="uImage"
+    fi
+
+    if [ -z "$KERNEL_IMAGE" ] ; then
+        bbfatal "Required kernel image is not available as fastboot image or uImage!"
     fi
 
     rm -rf ${WORKDIR}/build
     mkdir -p ${WORKDIR}/build
     ln -sf ${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}-${MACHINE}.tar.gz ${WORKDIR}/build/webos-rootfs.tar.gz
-    ln -sf ${DEPLOY_DIR_IMAGE}/zImage-${MACHINE}.fastboot ${WORKDIR}/build/boot.img
+    ln -sf ${DEPLOY_DIR_IMAGE}/${KERNEL_IMAGE} ${WORKDIR}/${TARGET_KERNEL_IMAGE}
 
     cp -r ${WORKDIR}/git/* ${WORKDIR}/build
     chmod +x ${WORKDIR}/build/webos_deploy.sh

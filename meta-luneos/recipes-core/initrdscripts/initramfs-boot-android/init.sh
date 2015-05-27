@@ -89,6 +89,24 @@ else
     fail "Failed to find valid rootfs"
 fi
 
+if [ -e $datadir/system-update.zip ] ; then
+    info "Found system update package. Starting update process ..."
+
+    . system-updater.sh
+
+    update_rootfs /rfs $datadir/system-update.zip $datadir/update-work
+
+    if [ ! $? -eq 0 ] ; then
+        rm $datadir/system-update.zip
+        fail "Failed to apply system update!"
+        exit 1
+    fi
+
+    rm $datadir/system-update.zip
+
+    reboot
+fi
+
 setup_devtmpfs "/rfs"
 
 info "Umount not needed filesystems ..."
@@ -164,5 +182,6 @@ if [ "$create_swap_file" -eq "1" ] ; then
 fi
 
 mount -o bind $new_fstab $fstab
+
 info "Switching to rootfs..."
 exec switch_root /rfs /sbin/init
