@@ -1,0 +1,239 @@
+From ece2183da442fe0f8dffa0bafec7b190649806e7 Mon Sep 17 00:00:00 2001
+From: Jocelyn Turcotte <jocelyn.turcotte@digia.com>
+Date: Fri, 17 Oct 2014 17:36:57 +0200
+Subject: [PATCH] Allow setting the source rect on QSGSimpleTextureNode
+
+This allows the QtQuick 2D Renderer to get this information without
+having to extract it from the QSGGeometry.
+
+Change-Id: Iec99c4bc910fea9c7d0e6712a418787254a70cb2
+Reviewed-by: Allan Sandfeld Jensen <allan.jensen@theqtcompany.com>
+---
+ src/quick/scenegraph/util/qsgsimpletexturenode.cpp | 59 ++++++++++++++++++----
+ src/quick/scenegraph/util/qsgsimpletexturenode.h   |  4 ++
+ tests/auto/quick/nodes/tst_nodestest.cpp           | 58 +++++++++++++++++++++
+ 3 files changed, 111 insertions(+), 10 deletions(-)
+
+diff --git a/src/quick/scenegraph/util/qsgsimpletexturenode.cpp b/src/quick/scenegraph/util/qsgsimpletexturenode.cpp
+index 1fbeba8..34e00e0 100644
+--- a/src/quick/scenegraph/util/qsgsimpletexturenode.cpp
++++ b/src/quick/scenegraph/util/qsgsimpletexturenode.cpp
+@@ -42,12 +42,13 @@ class QSGSimpleTextureNodePrivate : public QSGGeometryNodePrivate
+ public:
+     QSGSimpleTextureNodePrivate()
+         : QSGGeometryNodePrivate()
+-        , m_texCoordMode(QSGSimpleTextureNode::NoTransform)
++        , texCoordMode(QSGSimpleTextureNode::NoTransform)
+         , isAtlasTexture(false)
+         , ownsTexture(false)
+     {}
+ 
+-    QSGSimpleTextureNode::TextureCoordinatesTransformMode m_texCoordMode;
++    QRectF sourceRect;
++    QSGSimpleTextureNode::TextureCoordinatesTransformMode texCoordMode;
+     uint isAtlasTexture : 1;
+     uint ownsTexture : 1;
+ };
+@@ -55,13 +56,16 @@ public:
+ static void qsgsimpletexturenode_update(QSGGeometry *g,
+                                         QSGTexture *texture,
+                                         const QRectF &rect,
++                                        QRectF sourceRect,
+                                         QSGSimpleTextureNode::TextureCoordinatesTransformMode texCoordMode)
+ {
+     if (!texture)
+         return;
+ 
+-    QSize ts = texture->textureSize();
+-    QRectF sourceRect(0, 0, ts.width(), ts.height());
++    if (!sourceRect.width() || !sourceRect.height()) {
++        QSize ts = texture->textureSize();
++        sourceRect = QRectF(0, 0, ts.width(), ts.height());
++    }
+ 
+     // Maybe transform the texture coordinates
+     if (texCoordMode.testFlag(QSGSimpleTextureNode::MirrorHorizontally)) {
+@@ -151,7 +155,7 @@ void QSGSimpleTextureNode::setRect(const QRectF &r)
+         return;
+     m_rect = r;
+     Q_D(QSGSimpleTextureNode);
+-    qsgsimpletexturenode_update(&m_geometry, texture(), m_rect, d->m_texCoordMode);
++    qsgsimpletexturenode_update(&m_geometry, texture(), m_rect, d->sourceRect, d->texCoordMode);
+     markDirty(DirtyGeometry);
+ }
+ 
+@@ -172,6 +176,41 @@ QRectF QSGSimpleTextureNode::rect() const
+ }
+ 
+ /*!
++    Sets the source rect of this texture node to \a r.
++
++    \since 5.5
++ */
++void QSGSimpleTextureNode::setSourceRect(const QRectF &r)
++{
++    Q_D(QSGSimpleTextureNode);
++    if (d->sourceRect == r)
++        return;
++    d->sourceRect = r;
++    qsgsimpletexturenode_update(&m_geometry, texture(), m_rect, d->sourceRect, d->texCoordMode);
++    markDirty(DirtyGeometry);
++}
++
++/*!
++    \fn void QSGSimpleTextureNode::setSourceRect(qreal x, qreal y, qreal w, qreal h)
++    \overload
++    \since 5.5
++
++    Sets the rectangle of this texture node to show its texture from (\a x, \a y) and
++    have width \a w and height \a h relatively to the QSGTexture::textureSize.
++ */
++
++/*!
++    Returns the source rect of this texture node.
++
++    \since 5.5
++ */
++QRectF QSGSimpleTextureNode::sourceRect() const
++{
++    Q_D(const QSGSimpleTextureNode);
++    return d->sourceRect;
++}
++
++/*!
+     Sets the texture of this texture node to \a texture.
+ 
+     Use setOwnsTexture() to set whether the node should take
+@@ -187,7 +226,7 @@ void QSGSimpleTextureNode::setTexture(QSGTexture *texture)
+     m_material.setTexture(texture);
+     m_opaque_material.setTexture(texture);
+     Q_D(QSGSimpleTextureNode);
+-    qsgsimpletexturenode_update(&m_geometry, texture, m_rect, d->m_texCoordMode);
++    qsgsimpletexturenode_update(&m_geometry, texture, m_rect, d->sourceRect, d->texCoordMode);
+ 
+     DirtyState dirty = DirtyMaterial;
+     // It would be tempting to skip the extra bit here and instead use
+@@ -236,10 +275,10 @@ QSGTexture *QSGSimpleTextureNode::texture() const
+ void QSGSimpleTextureNode::setTextureCoordinatesTransform(QSGSimpleTextureNode::TextureCoordinatesTransformMode mode)
+ {
+     Q_D(QSGSimpleTextureNode);
+-    if (d->m_texCoordMode == mode)
++    if (d->texCoordMode == mode)
+         return;
+-    d->m_texCoordMode = mode;
+-    qsgsimpletexturenode_update(&m_geometry, texture(), m_rect, d->m_texCoordMode);
++    d->texCoordMode = mode;
++    qsgsimpletexturenode_update(&m_geometry, texture(), m_rect, d->sourceRect, d->texCoordMode);
+     markDirty(DirtyMaterial);
+ }
+ 
+@@ -251,7 +290,7 @@ void QSGSimpleTextureNode::setTextureCoordinatesTransform(QSGSimpleTextureNode::
+ QSGSimpleTextureNode::TextureCoordinatesTransformMode QSGSimpleTextureNode::textureCoordinatesTransform() const
+ {
+     Q_D(const QSGSimpleTextureNode);
+-    return d->m_texCoordMode;
++    return d->texCoordMode;
+ }
+ 
+ /*!
+diff --git a/src/quick/scenegraph/util/qsgsimpletexturenode.h b/src/quick/scenegraph/util/qsgsimpletexturenode.h
+index 56f5c5a..60fa445 100644
+--- a/src/quick/scenegraph/util/qsgsimpletexturenode.h
++++ b/src/quick/scenegraph/util/qsgsimpletexturenode.h
+@@ -52,6 +52,10 @@ public:
+     inline void setRect(qreal x, qreal y, qreal w, qreal h) { setRect(QRectF(x, y, w, h)); }
+     QRectF rect() const;
+ 
++    void setSourceRect(const QRectF &r);
++    inline void setSourceRect(qreal x, qreal y, qreal w, qreal h) { setSourceRect(QRectF(x, y, w, h)); }
++    QRectF sourceRect() const;
++
+     void setTexture(QSGTexture *texture);
+     QSGTexture *texture() const;
+ 
+diff --git a/tests/auto/quick/nodes/tst_nodestest.cpp b/tests/auto/quick/nodes/tst_nodestest.cpp
+index 37a73cc..88138e3 100644
+--- a/tests/auto/quick/nodes/tst_nodestest.cpp
++++ b/tests/auto/quick/nodes/tst_nodestest.cpp
+@@ -47,6 +47,13 @@
+ #include <QtQuick/qsgsimpletexturenode.h>
+ #include <QtQuick/private/qsgtexture_p.h>
+ 
++QT_BEGIN_NAMESPACE
++inline bool operator==(const QSGGeometry::TexturedPoint2D& l, const QSGGeometry::TexturedPoint2D& r)
++{
++    return l.x == r.x && l.y == r.y && l.tx == r.tx && l.ty == r.ty;
++}
++QT_END_NAMESPACE
++
+ class NodesTest : public QObject
+ {
+     Q_OBJECT
+@@ -69,6 +76,7 @@ private Q_SLOTS:
+     void isBlockedCheck();
+ 
+     void textureNodeTextureOwnership();
++    void textureNodeRect();
+ 
+ private:
+     QOffscreenSurface *surface;
+@@ -288,6 +296,56 @@ void NodesTest::textureNodeTextureOwnership()
+     }
+ }
+ 
++void NodesTest::textureNodeRect()
++{
++    QSGPlainTexture texture;
++    texture.setTextureSize(QSize(400, 400));
++    QSGSimpleTextureNode tn;
++    tn.setTexture(&texture);
++    QSGGeometry::TexturedPoint2D *vertices = tn.geometry()->vertexDataAsTexturedPoint2D();
++
++    QSGGeometry::TexturedPoint2D topLeft, bottomLeft, topRight, bottomRight;
++    topLeft.set(0, 0, 0, 0);
++    bottomLeft.set(0, 0, 0, 1);
++    topRight.set(0, 0, 1, 0);
++    bottomRight.set(0, 0, 1, 1);
++    QCOMPARE(vertices[0], topLeft);
++    QCOMPARE(vertices[1], bottomLeft);
++    QCOMPARE(vertices[2], topRight);
++    QCOMPARE(vertices[3], bottomRight);
++
++    tn.setRect(1, 2, 100, 100);
++    topLeft.set(1, 2, 0, 0);
++    bottomLeft.set(1, 102, 0, 1);
++    topRight.set(101, 2, 1, 0);
++    bottomRight.set(101, 102, 1, 1);
++    QCOMPARE(vertices[0], topLeft);
++    QCOMPARE(vertices[1], bottomLeft);
++    QCOMPARE(vertices[2], topRight);
++    QCOMPARE(vertices[3], bottomRight);
++
++    tn.setRect(0, 0, 100, 100);
++    tn.setSourceRect(100, 100, 200, 200);
++    topLeft.set(0, 0, 0.25, 0.25);
++    bottomLeft.set(0, 100, 0.25, 0.75);
++    topRight.set(100, 0, 0.75, 0.25);
++    bottomRight.set(100, 100, 0.75, 0.75);
++    QCOMPARE(vertices[0], topLeft);
++    QCOMPARE(vertices[1], bottomLeft);
++    QCOMPARE(vertices[2], topRight);
++    QCOMPARE(vertices[3], bottomRight);
++
++    tn.setSourceRect(300, 300, -200, -200);
++    topLeft.set(0, 0, 0.75, 0.75);
++    bottomLeft.set(0, 100, 0.75, 0.25);
++    topRight.set(100, 0, 0.25, 0.75);
++    bottomRight.set(100, 100, 0.25, 0.25);
++    QCOMPARE(vertices[0], topLeft);
++    QCOMPARE(vertices[1], bottomLeft);
++    QCOMPARE(vertices[2], topRight);
++    QCOMPARE(vertices[3], bottomRight);
++}
++
+ QTEST_MAIN(NodesTest);
+ 
+ #include "tst_nodestest.moc"
+-- 
+2.1.4
+

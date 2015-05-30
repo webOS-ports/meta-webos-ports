@@ -65,6 +65,9 @@ RDEPENDS_${PN} = " \
   qtmultimedia-qmlplugins \
   qtsensors \
   qtsensors-qmlplugins \
+  qtwebengine \
+  qtwebengine-plugins \
+  qtwebengine-qmlplugins \
   \
   luna-next-cardshell \
   luna-sysmgr \
