@@ -116,7 +116,6 @@ WEBOS_FOSS_MISSING_FROM_RDEPENDS = " \
     procps \
     psmisc \
     sqlite3 \
-    sysvinit-pidof \
 "
 
 # These packages that are installed in the qemux86 image only.
