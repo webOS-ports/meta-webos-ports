@@ -21,10 +21,10 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 do_deploy() {
     if [ ! -e ${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}-${MACHINE}.tar.gz ] ; then
-        bbfatal "Required base image is not available as tar.gz image!"
+        bbfatal "Required base image is not available as tar.gz image! ${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}-${MACHINE}.tar.gz doesn't exist."
     fi
     if [ ! -e ${DEPLOY_DIR_IMAGE}/zImage-${MACHINE}.fastboot ] ; then
-        bbfatal "Required kernel image is not available as fastboot image!"
+        bbfatal "Required kernel image is not available as fastboot image! ${DEPLOY_DIR_IMAGE}/zImage-${MACHINE}.fastboot doesn't exist."
     fi
 
     rm -rf ${WORKDIR}/build
