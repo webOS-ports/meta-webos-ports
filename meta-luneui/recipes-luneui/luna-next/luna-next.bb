@@ -15,6 +15,12 @@ S = "${WORKDIR}/git"
 PV = "0.2.0-26+git${SRCPV}"
 SRCREV = "26ab70538caade39dc03ad2f7540ca48d37a31d3"
 
+# Otherwise there is conflict between None defined in Xlib.h and
+# qtdeclarative's /usr/include/qt5/QtQuick/qsgtexture.h:59
+# see http://lists.openembedded.org/pipermail/openembedded-core/2015-June/106351.html
+# for details
+CXXFLAGS += "-DMESA_EGL_NO_X11_HEADERS=1"
+
 inherit pkgconfig
 inherit webos_ports_repo
 inherit webos_system_bus
