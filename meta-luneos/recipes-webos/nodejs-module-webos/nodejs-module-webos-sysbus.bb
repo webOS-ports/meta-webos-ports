@@ -15,7 +15,9 @@ inherit webos_filesystem_paths
 inherit pkgconfig
 inherit webos_system_bus
 
-SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
+SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE} \
+    file://0001-Fix-build-for-node-v0.12.2.patch \
+"
 S = "${WORKDIR}/git"
 
 do_configure() {
