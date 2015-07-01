@@ -18,7 +18,7 @@ RDEPENDS_${PN} += "qtsvg-plugins qtmultimedia-qmlplugins"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
-SRCREV = "155b5165c91e931fd8464fdfcaab7a62e9c92e5e"
+SRCREV = "09e665cd7e33dab8081024510cda9a28687ef84a"
 PV = "0.99.0+git${SRCPV}"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
