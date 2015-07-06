@@ -8,8 +8,8 @@ inherit allarch
 inherit webos_filesystem_paths
 inherit webos_system_bus
 
-PV = "0.3.25+gitr${SRCPV}"
-SRCREV = "32a36be105ca5602dc594fd65ad02393cce5f7cf"
+PV = "0.3.32+gitr${SRCPV}"
+SRCREV = "fb8d0d550faf13e3816781c5da1d7a720b65d64f"
 
 WEBOS_REPO_NAME = "org.webosports.service.contacts.carddav"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
