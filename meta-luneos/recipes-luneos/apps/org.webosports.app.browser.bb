@@ -7,7 +7,7 @@ LIC_FILES_CHKSUM = " \
 "
 
 PV = "0.5.0-14+git${SRCPV}"
-SRCREV = "cb1377e5fa8ef184cc7f29c46c5b31c2b1af4c60"
+SRCREV = "5ef8597f00d6922af948addcc1d374f25a9dba9c"
 
 DEPENDS = "qtbase qtdeclarative qtwebkit"
 
@@ -18,6 +18,7 @@ inherit pkgconfig
 inherit webos_ports_repo
 inherit webos_application
 inherit webos_filesystem_paths
+inherit webos_tweaks
 
 inherit cmake_qt5
 inherit webos_cmake
