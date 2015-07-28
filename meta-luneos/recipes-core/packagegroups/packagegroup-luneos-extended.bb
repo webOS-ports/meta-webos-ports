@@ -8,54 +8,56 @@ inherit packagegroup
 RDEPENDS_${PN} = " \
   distro-feed-configs \
   \
+  pulseaudio-distro-conf \
+  pulseaudio-misc \
   pulseaudio-module-switch-on-connect \
   pulseaudio-server \
-  pulseaudio-misc \
-  pulseaudio-distro-conf \
   \
-  wireless-tools \
-  udev-extraconf \
   alsa-conf \
   tar \
-  \
-  \
+  udev-extraconf \
   webos-connman-adapter \
+  wireless-tools \
+  \
   ${@base_contains('MACHINE_FEATURES', 'phone', 'packagegroup-webos-telephony', '', d)} \
   ${@base_contains('MACHINE_FEATURES', 'cellular', 'packagegroup-webos-telephony', '', d)} \
   ${@base_contains('MACHINE_FEATURES', 'bluetooth', 'bluez4', '',d)} \
   \
-  org.webosports.service.licenses \
-  org.webosinternals.ipkgservice \
-  org.webosports.service.update \
-  org.webosports.cdav \
-  keymanager \
-  org.webosports.service.messaging \
-  location-service \
   imaccountvalidator \
   imlibpurpleservice \
-  org.webosports.service.lumberjack \
+  keymanager \
+  location-service \
   \
-  org.webosports.app.firstuse \
-  org.webosports.app.memos \
-  org.webosports.app.settings \
   org.webosinternals.preware \
-  org.webosports.app.calendar \
   org.webosinternals.tweaks \
-  org.webosports.service.devmode \
+  org.webosinternals.ipkgservice \
+  \
   org.webosports.app.browser \
   org.webosports.app.calculator \
-  org.webosports.app.pdf \
-  org.webosports.app.filemanager \
+  org.webosports.app.calendar \
   org.webosports.app.contacts \
+  org.webosports.app.filemanager \
+  org.webosports.app.firstuse \
+  org.webosports.app.maps \
+  org.webosports.app.memos \
   org.webosports.app.messaging \
+  org.webosports.app.pdf \
+  org.webosports.app.settings \
+  \
+  org.webosports.cdav \
+  \
+  org.webosports.service.devmode \
+  org.webosports.service.licenses \
+  org.webosports.service.lumberjack \
+  org.webosports.service.messaging \
+  org.webosports.service.update \
+  \
   fingerterm \
   \
   ca-certificates \
-  pmcertificatemgr \
   certmgrd \
+  pmcertificatemgr \
   \
-  qtwayland \
-  qtwayland-plugins \
   qtbase-plugins \
   qtbase-fonts \
   qtbase-fonts-ttf-dejavu \
@@ -64,12 +66,14 @@ RDEPENDS_${PN} = " \
   qtmultimedia-qmlplugins \
   qtsensors \
   qtsensors-qmlplugins \
+  qtwayland \
+  qtwayland-plugins \
   \
+  luna-appmanager \
   luna-next-cardshell \
+  luna-qml-launcher \
   luna-sysmgr \
   luna-sysmgr-conf \
-  luna-appmanager \
-  luna-qml-launcher \
   luneos-components \
   \
   webos-system-update \
@@ -77,18 +81,18 @@ RDEPENDS_${PN} = " \
   webos-systemd-services \
   \
   audio-service \
-  webos-systemsounds \
   mediaindexer \
   media-permission-service \
+  webos-systemsounds \
   \
+  gstreamer1.0-libav \
+  gstreamer1.0-plugins-bad-meta \
   gstreamer1.0-plugins-base-meta \
   gstreamer1.0-plugins-good-meta \
-  gstreamer1.0-plugins-bad-meta \
   gstreamer1.0-plugins-ugly-meta \
-  gstreamer1.0-libav \
   \
-  node-sqlite3 \
   node-dbus \
+  node-sqlite3 \
   node-taglib \
   \
   luneos-default-wallpapers \
@@ -96,17 +100,17 @@ RDEPENDS_${PN} = " \
 
 LIBHYBRIS_RDEPENDS = " \
     ${VIRTUAL-RUNTIME_android-system-image} \
+    android-property-service \
     android-system \
     android-system-compat \
     android-tools \
-    nyx-modules-hybris \
     mtp-server \
-    android-property-service \
+    nyx-modules-hybris \
+    pulseaudio-modules-droid \
     qt5-qpa-hwcomposer-plugin \
     qtscenegraph-adaptation \
-    pulseaudio-modules-droid \
-    sensorfw \
     qtsensors-sensorfw-plugin \
+    sensorfw \
 "
 
 MEMNOTIFY_RDEPENDS = " \
@@ -122,11 +126,11 @@ RDEPENDS_${PN}_append_mako = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
 RDEPENDS_${PN}_append_tenderloin = " ${LIBHYBRIS_RDEPENDS}"
 
 QEMU_RDEPENDS = " \
+    alsa-utils-systemd \
     libegl-gallium \
     mesa-driver-swrast \
-    qt5-plugin-generic-vboxtouch \
-    alsa-utils-systemd \
     phonesim \
+    qt5-plugin-generic-vboxtouch \
 "
 
 RDEPENDS_${PN}_append_qemux86 = " ${QEMU_RDEPENDS}"
