@@ -3,7 +3,7 @@ SECTION = "webos/apps"
 LICENSE = "Apache-2.0 & GPL-3.0"
 LIC_FILES_CHKSUM = " \
     file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10 \
-    file://COPYING;md5=2839aa2093f43edc5a4d4be71c6e526d \
+    file://COPYING;md5=b008dcd25823510aea3435df7f15257a \
 "
 
 PV = "0.5.0-14+git${SRCPV}"
