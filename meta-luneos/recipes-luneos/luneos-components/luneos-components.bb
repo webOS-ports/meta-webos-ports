@@ -3,7 +3,7 @@ LICENSE = "LGPL-2.1"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 PV = "0.1.0+gitr${SRCPV}"
-SRCREV = "900f40b1032b7a7d2023c13979ada33f3937f8fe"
+SRCREV = "9d973ddcd4def366f61b0b9a6daf2d262f3d8d2d"
 
 DEPENDS = "qtbase qtdeclarative luna-service2"
 
