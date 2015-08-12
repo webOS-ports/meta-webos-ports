@@ -42,6 +42,7 @@ RDEPENDS_${PN} = " \
   org.webosports.app.memos \
   org.webosports.app.messaging \
   org.webosports.app.pdf \
+  org.webosports.app.photos \
   org.webosports.app.settings \
   \
   org.webosports.cdav \
