@@ -5,6 +5,14 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 inherit packagegroup
 
+NOT_COMPATIBLE_WITH_CURRENT_NODEJS = " \
+  node-dbus \
+  node-sqlite3 \
+  node-taglib \
+  \
+  keymanager \
+"
+
 RDEPENDS_${PN} = " \
   distro-feed-configs \
   \
@@ -25,7 +33,6 @@ RDEPENDS_${PN} = " \
   \
   imaccountvalidator \
   imlibpurpleservice \
-  keymanager \
   location-service \
   \
   org.webosinternals.preware \
@@ -91,10 +98,6 @@ RDEPENDS_${PN} = " \
   gstreamer1.0-plugins-base-meta \
   gstreamer1.0-plugins-good-meta \
   gstreamer1.0-plugins-ugly-meta \
-  \
-  node-dbus \
-  node-sqlite3 \
-  node-taglib \
   \
   luneos-default-wallpapers \
 "
