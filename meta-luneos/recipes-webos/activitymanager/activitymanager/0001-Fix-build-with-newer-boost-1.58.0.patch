@@ -1,0 +1,111 @@
+From 501a15959a9b117ab26866b7165eabc7d8956351 Mon Sep 17 00:00:00 2001
+From: Martin Jansa <martin.jansa@gmail.com>
+Date: Fri, 04 Sep 2015 12:13:11 +0200
+Subject: [PATCH] Fix build with newer boost 1.58.0
+
+* boost::bind is now a bit stricter, use temporary variable to resolve it.
+* Use temporary variable as recommended in:
+  http://www.boost.org/doc/libs/1_58_0/libs/bind/doc/html/bind.html#bind.troubleshooting.binding_an_overloaded_function
+* Fixes following error:
+  activitymanager/3.0.0-132-r6/git/src/BusEntity.cpp:118:51:
+  error: call of overloaded 'bind(<unresolved overloaded function type>, boost::arg<1>&)' is ambiguous
+      (&ActivitySetAutoAssociation::GetActivity, _1),
+                                                   ^
+  sysroots/maguro/usr/include/boost/bind/bind_mf_cc.hpp:30:5:
+  note: boost::_bi::bind_t<R, boost::_mfi::cmf0<R, T>,
+  typename boost::_bi::list_av_1<A1>::type> boost::bind(R (T::*)() const, A1)
+  [with
+  R = boost::shared_ptr<const Activity>;
+  T = ActivityAutoAssociation;
+  A1 = boost::arg<1>;
+  typename boost::_bi::list_av_1<A1>::type = boost::_bi::list1<boost::arg<1> >]
+       BOOST_BIND(R (BOOST_BIND_MF_CC T::*f) () const, A1 a1)
+       ^
+  sysroots/maguro/usr/include/boost/bind/bind_mf_cc.hpp:40:5:
+  note: boost::_bi::bind_t<Rt2, boost::_mfi::mf0<R, T>,
+  typename boost::_bi::list_av_1<A1>::type> boost::bind(R (T::*)(), A1)
+  [with
+  Rt2 = boost::shared_ptr<const Activity>;
+  R = boost::shared_ptr<Activity>;
+  T = ActivityAutoAssociation;
+  A1 = boost::arg<1>;
+  typename boost::_bi::list_av_1<A1>::type = boost::_bi::list1<boost::arg<1> >]
+       BOOST_BIND(R (BOOST_BIND_MF_CC T::*f) (), A1 a1)
+       ^
+  sysroots/maguro/usr/include/boost/bind/bind_mf_cc.hpp:50:5:
+  note: boost::_bi::bind_t<Rt2, boost::_mfi::cmf0<R, T>,
+  typename boost::_bi::list_av_1<A1>::type> boost::bind(R (T::*)() const, A1)
+  [with
+  Rt2 = boost::shared_ptr<const Activity>;
+  R = boost::shared_ptr<const Activity>;
+  T = ActivityAutoAssociation;
+  A1 = boost::arg<1>;
+  typename boost::_bi::list_av_1<A1>::type = boost::_bi::list1<boost::arg<1> >]
+       BOOST_BIND(R (BOOST_BIND_MF_CC T::*f) () const, A1 a1)
+       ^
+
+---
+ src/ActivityManager.cpp | 7 +++----
+ src/BusEntity.cpp       | 4 ++--
+ src/PowerManager.cpp    | 4 ++--
+ 3 files changed, 7 insertions(+), 8 deletions(-)
+
+diff --git a/src/ActivityManager.cpp b/src/ActivityManager.cpp
+index 4138425..cb37116 100644
+--- a/src/ActivityManager.cpp
++++ b/src/ActivityManager.cpp
+@@ -910,13 +910,12 @@ MojErr ActivityManager::InfoToJson(MojObject& rep) const
+ 
+ 	std::vector<boost::shared_ptr<const Activity> > leaked;
+ 
++	boost::shared_ptr<const Activity> (Activity::*shared_from_this_ptr) () const = &Activity::shared_from_this;
+ 	std::set_difference(
+ 		boost::make_transform_iterator(m_idTable.cbegin(),
+-			boost::bind<boost::shared_ptr<const Activity> >
+-				(&Activity::shared_from_this, _1)),
++			boost::bind(shared_from_this_ptr, _1)),
+ 		boost::make_transform_iterator(m_idTable.cend(),
+-			boost::bind<boost::shared_ptr<const Activity> >
+-				(&Activity::shared_from_this, _1)),
++			boost::bind(shared_from_this_ptr, _1)),
+ 		boost::make_transform_iterator(m_activities.begin(),
+ 			boost::bind(&ActivityMap::value_type::second, _1)),
+ 		boost::make_transform_iterator(m_activities.end(),
+diff --git a/src/BusEntity.cpp b/src/BusEntity.cpp
+index a324933..6285e4e 100644
+--- a/src/BusEntity.cpp
++++ b/src/BusEntity.cpp
+@@ -111,11 +111,11 @@ MojErr BusEntity::ToJson(MojObject& rep, bool includeActivities) const
+ 
+ 	if (includeActivities) {
+ 		MojObject activities(MojObject::TypeArray);
++		boost::shared_ptr<const Activity> (ActivitySetAutoAssociation::*getActivityPtr) () const = &ActivitySetAutoAssociation::GetActivity;
+ 
+ 		std::for_each(m_associations.begin(), m_associations.end(),
+ 			boost::bind(&Activity::PushIdentityJson,
+-				boost::bind<boost::shared_ptr<const Activity> >
+-					(&ActivitySetAutoAssociation::GetActivity, _1),
++				boost::bind(getActivityPtr, _1),
+ 				boost::ref(activities)));
+ 
+ 		err = rep.put(_T("activities"), activities);
+diff --git a/src/PowerManager.cpp b/src/PowerManager.cpp
+index 49d1ffa..1214fb0 100644
+--- a/src/PowerManager.cpp
++++ b/src/PowerManager.cpp
+@@ -99,10 +99,10 @@ MojErr PowerManager::InfoToJson(MojObject& rep) const
+ 	if (!m_poweredActivities.empty()) {
+ 		MojObject poweredActivities(MojObject::TypeArray);
+ 
++		boost::shared_ptr<const Activity> (PowerActivity::*getActivityPtr) () const = &PowerActivity::GetActivity;
+ 		std::for_each(m_poweredActivities.begin(), m_poweredActivities.end(),
+ 			boost::bind(&Activity::PushIdentityJson,
+-				boost::bind<boost::shared_ptr<const Activity> >
+-					(&PowerActivity::GetActivity, _1),
++				boost::bind(getActivityPtr, _1),
+ 				boost::ref(poweredActivities)));
+ 
+ 		err = rep.put(_T("poweredActivities"), poweredActivities);
+-- 
+2.1.4
+
