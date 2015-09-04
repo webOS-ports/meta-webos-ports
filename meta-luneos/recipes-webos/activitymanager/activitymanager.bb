@@ -17,5 +17,7 @@ inherit webos_system_bus
 inherit pkgconfig
 inherit webos_machine_impl_dep
 
-SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
+SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE} \
+    file://0001-Fix-build-with-newer-boost-1.58.0.patch \
+"
 S = "${WORKDIR}/git"
