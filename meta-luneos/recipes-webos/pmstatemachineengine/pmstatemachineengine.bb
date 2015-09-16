@@ -17,4 +17,6 @@ inherit pkgconfig
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-SRC_URI += "file://0001-Disable-using-a-version-script-as-its-causing-us-rig.patch"
+SRC_URI += "file://0001-Disable-using-a-version-script-as-its-causing-us-rig.patch \
+    file://0001-FsmPrv.h-drop-FSM_CONFIG_INLINE_FUNC-and-use-normal-.patch \
+"
