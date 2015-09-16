@@ -15,7 +15,9 @@ inherit webos_cmake
 inherit pkgconfig
 inherit webos_machine_impl_dep
 
-SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
+SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE} \
+    file://0001-psl_build_config.h-don-t-use-extern-with-inline.patch \
+"
 S = "${WORKDIR}/git"
 
 do_install_append() {
