@@ -17,6 +17,7 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 SRC_URI = " \
     git://github.com/mer-hybris/qtscenegraph-adaptation \
     file://0001-Link-against-libEGL-to-satisfy-runtime-dependencies.patch \
+    file://0001-Fix-compilation-with-QT-5.5.patch \
 "
 S = "${WORKDIR}/git"
 
