@@ -22,3 +22,5 @@ S = "${WORKDIR}/git"
 do_install_append() {
     cp -rva ${S}/files/usr ${D}
 }
+
+CXXFLAGS += "-fpermissive"
