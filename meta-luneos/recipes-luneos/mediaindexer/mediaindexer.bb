@@ -28,3 +28,5 @@ do_install_append() {
 }
 
 FILES_${PN} += "${webos_sysconfdir}/db/kinds"
+
+CXXFLAGS += "-fpermissive"
