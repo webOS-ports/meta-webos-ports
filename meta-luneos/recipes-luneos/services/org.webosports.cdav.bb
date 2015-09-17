@@ -9,7 +9,7 @@ inherit webos_filesystem_paths
 inherit webos_system_bus
 
 PV = "0.3.33+gitr${SRCPV}"
-SRCREV = "dddcaebbaad189cc96e16117db846b9bb2bc1a78"
+SRCREV = "3f18e974ace34e54c604a999412f3512e5ce9b94"
 
 WEBOS_REPO_NAME = "org.webosports.service.contacts.carddav"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
