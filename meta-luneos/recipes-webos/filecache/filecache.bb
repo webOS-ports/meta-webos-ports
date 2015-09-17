@@ -19,3 +19,5 @@ inherit webos_machine_impl_dep
 
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
+
+CXXFLAGS += "-fpermissive"
