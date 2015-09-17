@@ -21,3 +21,5 @@ SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE} \
     file://0001-replace-cjson-with-json-c.patch \
 "
 S = "${WORKDIR}/git"
+
+CXXFLAGS += "-fpermissive"
