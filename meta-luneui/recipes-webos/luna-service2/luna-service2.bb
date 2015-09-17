@@ -30,6 +30,8 @@ S = "${WORKDIR}/git"
 PACKAGECONFIG ??= ""
 PACKAGECONFIG[test] = "-DWEBOS_CONFIG_BUILD_TESTS:BOOL=True,,gtest boost,bash"
 
+CFLAGS += "-fgnu89-inline"
+
 # This fix-up will be removed shortly. luna-service2 headers must be included
 # using '#include <luna-service2/*.h>'
 do_install_append() {
