@@ -5,7 +5,7 @@ PACKAGECONFIG = "gstreamer qtlocation qtsensors"
 
 inherit webos_ports_fork_repo
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-SRCREV = "6048c070793652af207531dcbe19ec11ca1816f7"
+SRCREV = "d425953a343bd5d3fe4d653ec04c0266e2b21744"
 
 THUMB_SUPPORT = " QMAKE_CXXFLAGS+=-mthumb"
 # Build breaks for qemuarm with errors while building JavaScriptCore:
