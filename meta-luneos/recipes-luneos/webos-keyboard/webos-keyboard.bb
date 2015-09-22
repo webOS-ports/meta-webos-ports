@@ -16,7 +16,6 @@ DEPENDS = "maliit-framework-qt5 hunspell presage luna-service2"
 
 RDEPENDS_${PN} += "qtsvg-plugins qtmultimedia-qmlplugins"
 
-WEBOS_GIT_PARAM_BRANCH = "master-next"
 SRCREV = "ca1a945e3f200bffb11fef88dacb458d1f3a1723"
 PV = "0.99.0+git${SRCPV}"
 

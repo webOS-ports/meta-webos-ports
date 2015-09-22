@@ -5,7 +5,6 @@ PACKAGECONFIG = "gstreamer qtlocation qtsensors"
 
 inherit webos_ports_fork_repo
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/master-next"
 SRCREV = "6048c070793652af207531dcbe19ec11ca1816f7"
 
 THUMB_SUPPORT = " QMAKE_CXXFLAGS+=-mthumb"
