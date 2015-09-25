@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = " \
 "
 
 PV = "5.4.0+gitr${SRCPV}"
-SRCREV = "2f3c4b735da52f146d327d5e47efd12c86a5d23f"
+SRCREV = "9b30eef992067848e2e99b3662694f4d0667b831"
 
 DEPENDS = "qtbase libhybris qtwayland virtual/android-headers"
 
@@ -17,7 +17,6 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 SRC_URI = " \
     git://github.com/mer-hybris/qtscenegraph-adaptation \
     file://0001-Link-against-libEGL-to-satisfy-runtime-dependencies.patch \
-    file://0001-Fix-compilation-with-QT-5.5.patch \
 "
 S = "${WORKDIR}/git"
 
