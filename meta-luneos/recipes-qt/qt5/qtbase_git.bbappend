@@ -1,5 +1,5 @@
 FILES_${PN}-fonts += " \
-                       ${D}/${datadir}/fonts"
+                       ${datadir}/fonts"
 
 do_install_append() {
     ### Fix up the fonts to work correctly with fontconfig
