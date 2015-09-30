@@ -2,6 +2,7 @@ require recipes-graphics/mesa/${BPN}.inc
 
 SRC_URI = "ftp://ftp.freedesktop.org/pub/mesa/older-versions/10.x/${PV}/MesaLib-${PV}.tar.bz2 \
     file://0001-Revert-egl-Check-for-NULL-native_window-in-eglCreate.patch \
+    file://0001-loader-include-sys-stat.h-for-non-sysfs-builds.patch \
 "
 
 SRC_URI[md5sum] = "8c540465ed7700a24dab7746d400326b"
