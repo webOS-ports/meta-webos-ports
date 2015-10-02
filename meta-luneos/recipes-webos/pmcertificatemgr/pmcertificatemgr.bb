@@ -12,7 +12,7 @@ RDEPENDS_${PN} = "ca-certificates"
 PV = "2.0.0-29+git${SRCPV}"
 SRCREV = "dc711d0788cd782e543bfa4c82eb23aee238825d"
 
-inherit webos_public_repo
+inherit webos_ports_repo
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_machine_impl_dep
