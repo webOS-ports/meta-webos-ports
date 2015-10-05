@@ -12,6 +12,7 @@ SRCREV = "0095c4d4db64c21d5c995df9989975d2d1a86f49"
 DEPENDS = "qtbase qtdeclarative qtwebkit"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+WEBOS_GIT_PARAM_BRANCH = "master-webengine"
 S = "${WORKDIR}/git"
 
 inherit pkgconfig
