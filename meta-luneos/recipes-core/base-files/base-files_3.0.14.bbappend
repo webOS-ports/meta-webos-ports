@@ -35,6 +35,10 @@ do_install_prepend() {
 do_install_append() {
     # additional entries for fstab
     bbnote "Adding entries to ${sysconfdir}/fstab"
+
+    install -d ${D}/opt
+    touch ${D}/opt/.keep
+
     generate_fstab_entries >> ${D}${sysconfdir}/fstab
 
     bbnote "Ensuring that fstab has exactly one record per mount-point"
