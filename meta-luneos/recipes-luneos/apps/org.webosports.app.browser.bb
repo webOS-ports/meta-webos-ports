@@ -7,11 +7,12 @@ LIC_FILES_CHKSUM = " \
 "
 
 PV = "0.5.0-14+git${SRCPV}"
-SRCREV = "0095c4d4db64c21d5c995df9989975d2d1a86f49"
+SRCREV = "f4a900cb79b49dd942c15442bb1ae4f9cc9acf01"
 
 DEPENDS = "qtbase qtdeclarative qtwebkit"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+WEBOS_GIT_PARAM_BRANCH = "master-webengine"
 S = "${WORKDIR}/git"
 
 inherit pkgconfig

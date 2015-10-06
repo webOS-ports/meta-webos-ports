@@ -10,9 +10,9 @@ DEPENDS = "openssl glib-2.0"
 RDEPENDS_${PN} = "ca-certificates"
 
 PV = "2.0.0-29+git${SRCPV}"
-SRCREV = "3cec1b22765db57b9c0c9bbba8e3cee0a2c4e2cb"
+SRCREV = "dc711d0788cd782e543bfa4c82eb23aee238825d"
 
-inherit webos_public_repo
+inherit webos_ports_repo
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_machine_impl_dep
@@ -22,7 +22,7 @@ ALTERNATIVE_${PN} = "openssl-cnf"
 ALTERNATIVE_LINK_NAME[openssl-cnf] = "${libdir}/ssl/openssl.cnf"
 ALTERNATIVE_PRIORITY[openssl-cnf] ?= "10"
 
-SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 do_install_append() {
