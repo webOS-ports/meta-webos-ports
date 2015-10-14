@@ -31,6 +31,6 @@ FILES_${PN}-dbg += "${webos_applicationsdir}/${PN}/browserutils/.debug"
 
 RDEPENDS_${PN} = " \
     qtdeclarative-qmlplugins \
-    qtwebkit-qmlplugins \
+    qtwebengine-qmlplugins \
 "
 
