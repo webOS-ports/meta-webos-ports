@@ -7,7 +7,7 @@ LIC_FILES_CHKSUM = " \
 "
 
 PV = "0.5.0-14+git${SRCPV}"
-SRCREV = "65f350c2cad1b3c50086297d7207e4ad76f78a8b"
+SRCREV = "2878ee0c6f09e0c3a96ba712fdf89a518994eb9c"
 
 DEPENDS = "qtbase qtdeclarative qtwebengine"
 
