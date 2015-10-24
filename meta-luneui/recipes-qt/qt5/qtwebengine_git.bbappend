@@ -1,6 +1,6 @@
 inherit webos_ports_fork_repo
 
-SRCREV_qtwebengine = "282f6b5ad2ff3a7c3d2bdc543235d1a90d5ac789"
+SRCREV_qtwebengine = "8d98906e26df952ddb59bdf7654aaf14d8096fcd"
 SRCREV_chromium = "643a53c0d84a1d9578d3011105eb34c68f1c0176"
 
 SRC_URI = " \
