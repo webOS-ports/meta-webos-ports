@@ -1,7 +1,7 @@
 inherit webos_ports_fork_repo
 
 SRCREV_qtwebengine = "8d98906e26df952ddb59bdf7654aaf14d8096fcd"
-SRCREV_chromium = "643a53c0d84a1d9578d3011105eb34c68f1c0176"
+SRCREV_chromium = "497eb33186d20f7d09fec55dee39a95edc744b7d"
 
 SRC_URI = " \
     ${WEBOS_PORTS_GIT_REPO_COMPLETE};name=qtwebengine \
