@@ -9,7 +9,7 @@ DEPENDS = " \
     json-c luna-service2 sqlite3 luna-sysmgr-ipc luna-sysmgr-ipc-messages \
     pmloglib librolegen nyx-lib openssl luna-webkit-api luna-prefs \
     libpbnjson freetype luna-sysmgr-common \
-    qtbase qtquick1 serviceinstaller \
+    qtbase qtdeclarative serviceinstaller \
 "
 
 RDEPENDS_${PN} += " \
