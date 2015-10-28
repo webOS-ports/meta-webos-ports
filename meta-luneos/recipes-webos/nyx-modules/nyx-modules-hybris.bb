@@ -5,9 +5,8 @@ SECTION = "webos/base"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-#Seems we don't have libcrypto yet in the build
-#DEPENDS = "nyx-lib glib-2.0 libhybris libsuspend virtual/android-headers libcrypto"
-DEPENDS = "nyx-lib glib-2.0 libhybris libsuspend virtual/android-headers"
+#libcrypto is a requirement and provided by openssl
+DEPENDS = "nyx-lib glib-2.0 libhybris libsuspend virtual/android-headers openssl"
 
 PV = "0.1.0-1+git${SRCPV}"
 SRCREV = "2aff48cef64cfce9747018e8de33dc1863e313ab"
