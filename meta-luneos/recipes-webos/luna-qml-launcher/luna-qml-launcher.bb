@@ -2,8 +2,8 @@ SUMMARY = "The qml application launcher for the Luna Next webOS UI platform."
 LICENSE = "GPL-3.0"
 LIC_FILES_CHKSUM = "file://COPYING;md5=4ddd17b0c9241d7b24a4960caefe8e40"
 
-DEPENDS = "qtbase qtdeclarative luna-sysmgr-common libwebos-application"
-RDEPENDS_${PN} += " qtdeclarative-qmlplugins"
+DEPENDS = "qtbase qtdeclarative qtwebengine luna-sysmgr-common libwebos-application"
+RDEPENDS_${PN} += "qtwebegine-qmlplugins qtdeclarative-qmlplugins"
 
 PV = "0.1.0-5+git${SRCPV}"
 SRCREV = "aea61dda75e9d4fc4485102688faf28b54661771"
