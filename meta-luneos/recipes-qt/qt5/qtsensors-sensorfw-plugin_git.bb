@@ -7,7 +7,7 @@ LIC_FILES_CHKSUM = " \
 "
 
 DEPENDS = "qtbase libhybris virtual/android-headers qtsensors sensorfw"
-RDEPENDS_${PN} = "sensorfw"
+RDEPENDS_${PN} = "sensorfw bash"
 
 # We're depending on libhybris so need to be MACHINE_ARCH
 PACKAGE_ARCH = "${MACHINE_ARCH}"
