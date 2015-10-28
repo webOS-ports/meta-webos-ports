@@ -11,7 +11,7 @@ DEPENDS += "luna-sysmgr-ipc luna-sysmgr-ipc-messages"
 DEPENDS += "qtbase"
 
 PV = "3.0.0-3+git${SRCPV}"
-SRCREV = "3a1d6de8c9d831066c9cce547b3ee9582c9ce5d2"
+SRCREV = "07e3d633ba816d7e6efec6c4c6cc4862f50ac2ae"
 
 # Don't uncomment until all of the do_*() tasks have been moved out of the recipe
 inherit webos_ports_fork_repo
