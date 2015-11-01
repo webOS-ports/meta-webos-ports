@@ -9,7 +9,7 @@ inherit webos_system_bus
 inherit webos_filesystem_paths
 
 PV = "0.1.0+gitr${SRCPV}"
-SRCREV = "58e881a0073acda29bc8e74cc0dc8995e7052c72"
+SRCREV = "5a8d8a5c8f448c7ce5daa89c670ecc1e74c5672e"
 
 WEBOS_REPO_NAME = "org.webosports.messaging"
 
