@@ -4,14 +4,14 @@ DEPENDS += "luna-service2 pmloglib qtlocation"
 EXTRA_QMAKEVARS_PRE += "WEBENGINE_CONFIG+=proprietary_codecs"
 
 inherit webos_ports_fork_repo
+WEBOS_GIT_PARAM_BRANCH = "webOS-ports/master-next"
 
-SRCREV_qtwebengine = "e31654aabfac010a6a0e8f24c933a0db9e7d6dfb"
-SRCREV_chromium = "55d8f2d6e3761e0dc6fb5efa13ac606322360f29"
+SRCREV_qtwebengine = "64dc919d31a6ecf818365025eea7b532c5db7eb3"
+SRCREV_chromium = "7e655fbb76c155541d8f3a7aa8164f1c551f2777"
+
+QT_MODULE_BRANCH_CHROMIUM = "${WEBOS_GIT_PARAM_BRANCH}"
 
 SRC_URI = " \
     ${WEBOS_PORTS_GIT_REPO_COMPLETE};name=qtwebengine \
-    ${WEBOS_PORTS_GIT_REPO}/qtwebengine-chromium${WEBOS_GIT_BRANCH};name=chromium;destsuffix=git/src/3rdparty \
+    ${WEBOS_PORTS_GIT_REPO}/qtwebengine-chromium;name=chromium;branch=${QT_MODULE_BRANCH_CHROMIUM};destsuffix=git/src/3rdparty \
 "
-
-do_fetch[vardeps] += "SRCREV_chromium"
-
