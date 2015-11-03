@@ -5,14 +5,14 @@ DEPENDS += "luna-service2 pmloglib"
 # PACKAGECONFIG = "gstreamer qtlocation qtsensors"
 
 inherit webos_ports_fork_repo
+WEBOS_GIT_PARAM_BRANCH = "webOS-ports/master-next"
 
-SRCREV_qtwebengine = "68af6c22758be628c6f859dd2d18840c15541ad8"
-SRCREV_chromium = "55d8f2d6e3761e0dc6fb5efa13ac606322360f29"
+SRCREV_qtwebengine = "6ded9295000039be360cd134542fb788d032958d"
+SRCREV_chromium = "3f6319f4faa731f4363a94ac94ee1b3e3d48576c"
+
+QT_MODULE_BRANCH_CHROMIUM = "${WEBOS_GIT_PARAM_BRANCH}"
 
 SRC_URI = " \
     ${WEBOS_PORTS_GIT_REPO_COMPLETE};name=qtwebengine \
-    ${WEBOS_PORTS_GIT_REPO}/qtwebengine-chromium${WEBOS_GIT_BRANCH};name=chromium;destsuffix=git/src/3rdparty \
+    ${WEBOS_PORTS_GIT_REPO}/qtwebengine-chromium;name=chromium;branch=${QT_MODULE_BRANCH_CHROMIUM};destsuffix=git/src/3rdparty \
 "
-
-do_fetch[vardeps] += "SRCREV_chromium"
-
