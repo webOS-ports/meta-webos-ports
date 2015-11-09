@@ -12,7 +12,7 @@ RDEPENDS_${PN} += " \
 "
 
 PV = "0.1.0-43+git${SRCPV}"
-SRCREV = "dd29488bc3da17d8aceb28cdced43ed2c811ab8a"
+SRCREV = "aa30c6db3a2819cdbf416f6fddb94f025d918904"
 
 inherit webos_ports_repo
 inherit webos_cmake
