@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 PV = "0.1.0+gitr${SRCPV}"
 SRCREV = "46ae32cb280f642c16c89d62f27935d9224b7383"
 
-DEPENDS = "qtbase qtdeclarative luna-service2"
+DEPENDS = "qtbase qtdeclarative qtlocation qtwebengine luna-service2"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
