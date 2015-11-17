@@ -6,6 +6,7 @@ PV = "0.1.0+gitr${SRCPV}"
 SRCREV = "46ae32cb280f642c16c89d62f27935d9224b7383"
 
 DEPENDS = "qtbase qtdeclarative qtlocation qtwebengine luna-service2"
+RRECOMMENDS_${PN} += "qtlocation"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
