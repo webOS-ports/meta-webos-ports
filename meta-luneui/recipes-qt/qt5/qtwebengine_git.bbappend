@@ -1,8 +1,7 @@
 DEPENDS += "luna-service2 pmloglib"
 
 # Don't use qtmultimedia which is set by default PACKAGECONFIG
-# Disabled for now, seems it also doesn't work with gstreamer currently.
-# PACKAGECONFIG = "gstreamer qtlocation qtsensors"
+PACKAGECONFIG = "gstreamer qtlocation qtsensors"
 
 inherit webos_ports_fork_repo
 
