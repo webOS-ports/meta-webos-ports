@@ -3,8 +3,6 @@ DEPENDS += "luna-service2 pmloglib"
 # Don't use qtmultimedia which is set by default PACKAGECONFIG
 PACKAGECONFIG = "gstreamer qtlocation qtsensors"
 
-DEPENDS = "qtlocation"
-
 inherit webos_ports_fork_repo
 
 SRCREV_qtwebengine = "a7aa3ccd707720a7ad53c99a35922be84ff6b378"
