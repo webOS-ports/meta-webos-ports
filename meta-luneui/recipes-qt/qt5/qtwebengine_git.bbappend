@@ -1,4 +1,4 @@
-DEPENDS += "luna-service2 pmloglib"
+DEPENDS += "luna-service2 pmloglib qtlocation"
 
 # Don't use qtmultimedia which is set by default PACKAGECONFIG
 PACKAGECONFIG = "gstreamer qtlocation qtsensors"
