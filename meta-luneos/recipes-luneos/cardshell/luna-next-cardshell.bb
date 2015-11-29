@@ -7,12 +7,13 @@ RDEPENDS_${PN} += " \
     qtgraphicaleffects-qmlplugins \
     qtquickcontrols-qmlplugins \
     libconnman-qt \
+    nemo-qml-plugin-dbus \
     libqofono \
     luna-next \
 "
 
 PV = "0.1.0-43+git${SRCPV}"
-SRCREV = "aa30c6db3a2819cdbf416f6fddb94f025d918904"
+SRCREV = "975fe2d709806b0f8a70a837eb834251c8feace7"
 
 inherit webos_ports_repo
 inherit webos_cmake
