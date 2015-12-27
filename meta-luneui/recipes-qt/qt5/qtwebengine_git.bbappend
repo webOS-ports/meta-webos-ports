@@ -5,7 +5,7 @@ PACKAGECONFIG = "gstreamer qtlocation qtsensors"
 
 inherit webos_ports_fork_repo
 
-SRCREV_qtwebengine = "a7aa3ccd707720a7ad53c99a35922be84ff6b378"
+SRCREV_qtwebengine = "b9b4a598dbe40c0ee7daf8a283f0c3b45435df14"
 SRCREV_chromium = "55d8f2d6e3761e0dc6fb5efa13ac606322360f29"
 
 SRC_URI = " \
