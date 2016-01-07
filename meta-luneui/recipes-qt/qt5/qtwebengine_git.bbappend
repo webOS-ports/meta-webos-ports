@@ -5,7 +5,7 @@ DEPENDS += "luna-service2 pmloglib qtlocation"
 
 inherit webos_ports_fork_repo
 
-SRCREV_qtwebengine = "6e66096ed2c8f5489abc427d6012c9b441184c8e"
+SRCREV_qtwebengine = "4ca5ff38d7fbe43233832207f08b147b6a14c496"
 SRCREV_chromium = "55d8f2d6e3761e0dc6fb5efa13ac606322360f29"
 
 SRC_URI = " \
