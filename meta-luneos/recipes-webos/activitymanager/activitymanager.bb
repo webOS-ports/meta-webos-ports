@@ -9,13 +9,13 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "luna-service2 db8 boost openssl glib-2.0 pmloglib nyx-lib"
 
 PV = "3.0.0-123+git${SRCPV}"
-SRCREV = "36477172ae0857eb02f3af2e54860a237afbd660"
+SRCREV = "59e8fe4fd4b446d0b3e587693a862c71e9898d22"
 
-inherit webos_public_repo
+inherit webos_ports_fork_repo
 inherit webos_cmake
 inherit webos_system_bus
 inherit pkgconfig
 inherit webos_machine_impl_dep
 
-SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
