@@ -22,5 +22,5 @@ S = "${WORKDIR}/git"
 do_install_append() {
 	# Add the empty alarms.xml file to /var/preferences/com.palm.sleep to avoid unnecessary warning messages
 	install -d ${D}${webos_preferencesdir}/com.palm.sleep
-	install -v -m 644 files/conf/alarms.xml ${D}${webos_preferencesdir}/com.palm.sleep
+	install -v -m 644 ${S}/files/conf/alarms.xml ${D}${webos_preferencesdir}/com.palm.sleep
 }
