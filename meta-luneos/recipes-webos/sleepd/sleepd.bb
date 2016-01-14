@@ -25,4 +25,3 @@ do_install_append() {
 	install -v -m 644 ${S}/files/conf/alarms.xml ${D}${webos_preferencesdir}/com.palm.sleep
 }
 
-FILES_${PN} = "${webos_preferencesdir}/com.palm.sleep"
