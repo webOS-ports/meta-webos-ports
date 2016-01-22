@@ -63,16 +63,16 @@ do_install_append() {
     fi
 
     # install the mojodb file to register schema for different security policies
-    install -d ${D}${webos_sysconfdir}/db_kinds
+    install -d ${D}${webos_sysconfdir}/db/kinds
     if [ -f mojodb/com.palm.securitypolicy ]
     then
-        install -v -m 644 mojodb/com.palm.securitypolicy ${D}${webos_sysconfdir}/db_kinds/com.palm.securitypolicy
+        install -v -m 644 mojodb/com.palm.securitypolicy ${D}${webos_sysconfdir}/db/kinds/com.palm.securitypolicy
     fi
 
     # install the mojodb file for the device security policy
     if [ -f mojodb/com.palm.securitypolicy.device ]
     then
-        install -v -m 644 mojodb/com.palm.securitypolicy.device ${D}${webos_sysconfdir}/db_kinds/com.palm.securitypolicy.device
+        install -v -m 644 mojodb/com.palm.securitypolicy.device ${D}${webos_sysconfdir}/db/kinds/com.palm.securitypolicy.device
     fi
 
     # install the mojodb file to set permissions on security policies
