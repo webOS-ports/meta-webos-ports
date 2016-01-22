@@ -12,9 +12,17 @@ inherit webos_cmake_qt5
 inherit webos_filesystem_paths
 
 PV = "0.1.0-6+git${SRCPV}"
-SRCREV = "ac50fd9f0668af9f5af75d430761838541d4375d"
+SRCREV = "c699bfb8949b2d23c58ca23293c0f92d4c717c8d"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
+do_install_append() {
+    install -d ${D}${webos_sysconfdir}/db/kinds
+    cp -rv ${S}/files/db8/kinds/* ${D}${webos_sysconfdir}/db/kinds
+    install -d ${D}${webos_sysconfdir}/db/permissions
+    cp -rv ${S}/files/db8/permissions/* ${D}${webos_sysconfdir}/db/permissions
+}
+
 FILES_${PN} += "${webos_applicationsdir}/${PN}"
+FILES_${PN} += "${webos_sysconfdir}/db/kinds"
