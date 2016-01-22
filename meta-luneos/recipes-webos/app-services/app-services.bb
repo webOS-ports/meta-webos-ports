@@ -22,6 +22,7 @@ do_install() {
     install -d ${D}${webos_sysconfdir}/db/kinds
     install -d ${D}${webos_sysconfdir}/db/permissions
     install -d ${D}${webos_sysconfdir}/activities
+    install -d ${D}${webos_sysconfdir}/filecache_types
     install -d ${D}${webos_sysbus_pubservicesdir}
     install -d ${D}${webos_sysbus_prvservicesdir}
     install -d ${D}${webos_sysbus_prvrolesdir}
@@ -35,6 +36,7 @@ do_install() {
         cp -vrf $SERVICE/db/kinds/* ${D}${webos_sysconfdir}/db/kinds/ 2> /dev/null || true
         cp -vrf $SERVICE/db/permissions/* ${D}${webos_sysconfdir}/db/permissions/ 2> /dev/null || true
         cp -vrf $SERVICE/activities/* ${D}${webos_sysconfdir}/activities/ 2> /dev/null || true
+        cp -vrf $SERVICE/filecache_types/* ${D}${webos_sysconfdir}/filecache_types/ 2> /dev/null || true
         # Copy services and roles files
         cp -vrf $SERVICE/files/sysbus/*.json ${D}${webos_sysbus_prvrolesdir} 2> /dev/null || true
         cp -vrf $SERVICE/files/sysbus/*.json ${D}${webos_sysbus_pubrolesdir} 2> /dev/null || true
