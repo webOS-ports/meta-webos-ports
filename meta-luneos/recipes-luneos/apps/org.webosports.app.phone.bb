@@ -24,5 +24,7 @@ do_install_append() {
     cp -rv ${S}/files/db8/permissions/* ${D}${webos_sysconfdir}/db/permissions
 }
 
-FILES_${PN} += "${webos_applicationsdir}/${PN}"
-FILES_${PN} += "${webos_sysconfdir}/db/kinds"
+FILES_${PN} += "\
+    ${webos_applicationsdir}/${PN} \
+    ${webos_sysconfdir}/db/kinds \
+    "
