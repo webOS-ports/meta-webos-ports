@@ -12,7 +12,7 @@ inherit webos_cmake_qt5
 inherit webos_filesystem_paths
 
 PV = "0.1.0-6+git${SRCPV}"
-SRCREV = "d215aad9fc9da6fc7773293f581c34978d0c5563"
+SRCREV = "ac50fd9f0668af9f5af75d430761838541d4375d"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
