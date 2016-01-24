@@ -10,6 +10,7 @@ inherit webos_ports_repo
 inherit webos_system_bus
 inherit webos_cmake_qt5
 inherit webos_filesystem_paths
+inherit webos_application
 
 PV = "0.1.0-6+git${SRCPV}"
 SRCREV = "bcae728c5bc97e204e43e9971660d36153276302"
