@@ -4,14 +4,15 @@ LIC_FILES_CHKSUM = "file://src/main.cpp;beginline=1;endline=18;md5=a513bca9b1708
 
 DEPENDS += "qtbase qtmultimedia libqofono"
 
-PV = "0.0.0+gitr${SRCPV}"
-SRCREV = "caecb1799b0b6d0cccb6061bd14d9a18878f98f4"
+PV = "0.6.6+gitr${SRCPV}"
+SRCREV = "b2c2b0abeeac5513e5226b97c1f7b4339eb54a3c"
 
-inherit webos_ports_repo
 inherit qmake5
 inherit systemd
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "git://git.merproject.org/mer-core/voicecall.git;protocol=git;branch=master \
+           file://0001-Adapt-thingstoworkinLuneOS.patch"
+
 S = "${WORKDIR}/git"
 
 # Separated build dirs doesn't work with this component currently due to the way it deals
