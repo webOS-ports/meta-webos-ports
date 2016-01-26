@@ -1,16 +1,15 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
-SRCREV = "7331c88b41287886cf90cf8c2e3cb51116814e59"
-PV = "1.16+gitr${SRCPV}"
+SRCREV = "c5b3357000161ff117f5b9207e9c727fc288b985"
+PV = "1.17+gitr${SRCPV}"
 
 RDEPENDS_${PN} += "mobile-broadband-provider-info ofono-conf"
 RDEPENDS_${PN}-tests += "python3"
 
 SRC_URI  = " \
-  git://github.com/nemomobile-packages/ofono.git;protocol=git;branch=master \
+  git://git.merproject.org/mer-core/ofono.git;protocol=git;branch=master \
   file://0001-Enable-the-various-modem-plugins-we-support-again.patch;striplevel=2 \
   file://0002-Add-support-for-the-Ericsson-F5521gw-modem.patch;striplevel=2 \
-  file://0003-Disable-backtrace-cause-linking-to-libdl-fails.patch;striplevel=2 \
   file://ofono \
   file://ofono.service \
 "
