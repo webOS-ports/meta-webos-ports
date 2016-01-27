@@ -11,7 +11,8 @@ inherit qmake5
 inherit systemd
 
 SRC_URI = "git://git.merproject.org/mer-core/voicecall.git;protocol=git;branch=master \
-           file://0001-Adapt-thingstoworkinLuneOS.patch"
+           file://0001-Adapt-thingstoworkinLuneOS.patch \
+           file://0002-WaitfortheofonoVoiceCalltobevalidbeforeaddingit.patch" 
 
 S = "${WORKDIR}/git"
 
