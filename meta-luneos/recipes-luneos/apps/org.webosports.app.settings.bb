@@ -8,7 +8,7 @@ inherit webos_enyojs_application
 inherit webos_filesystem_paths
 
 PV = "0.3.0-1+git${SRCPV}"
-SRCREV = "e6e98f7aeca376e80eb3568ee4e8edddedc4b4fb"
+SRCREV = "c2a3a924b11ca3aabe7561088dc0cdd2ad6bcc60"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
