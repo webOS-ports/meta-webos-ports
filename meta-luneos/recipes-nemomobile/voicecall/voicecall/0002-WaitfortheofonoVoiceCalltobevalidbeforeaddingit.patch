@@ -1,0 +1,154 @@
+From a1e9ac7835cd64f036fc096af2fecb76dc21ae07 Mon Sep 17 00:00:00 2001
+From: Christophe Chapuis <chris.chapuis@gmail.com>
+Date: Wed, 27 Jan 2016 21:34:55 +0100
+Subject: [PATCH] Ofono plugin: wait for the ofonoVoiceCall to be valid before
+ adding it
+
+Signed-off-by: Christophe Chapuis <chris.chapuis@gmail.com>
+---
+ .../providers/ofono/src/ofonovoicecallhandler.cpp  | 16 ++++++++--
+ .../providers/ofono/src/ofonovoicecallhandler.h    |  4 +++
+ .../providers/ofono/src/ofonovoicecallprovider.cpp | 36 +++++++++++++++++++---
+ .../providers/ofono/src/ofonovoicecallprovider.h   |  2 ++
+ 4 files changed, 52 insertions(+), 6 deletions(-)
+
+diff --git a/plugins/providers/ofono/src/ofonovoicecallhandler.cpp b/plugins/providers/ofono/src/ofonovoicecallhandler.cpp
+index f4dba57..504682e 100644
+--- a/plugins/providers/ofono/src/ofonovoicecallhandler.cpp
++++ b/plugins/providers/ofono/src/ofonovoicecallhandler.cpp
+@@ -60,7 +60,6 @@ OfonoVoiceCallHandler::OfonoVoiceCallHandler(const QString &handlerId, const QSt
+     Q_D(OfonoVoiceCallHandler);
+     d->ofonoVoiceCall = new QOfonoVoiceCall(this);
+     d->ofonoVoiceCall->setVoiceCallPath(path);
+-    d->isIncoming = d->ofonoVoiceCall->state() == QLatin1String("incoming");
+ 
+     QObject::connect(d->ofonoVoiceCall, SIGNAL(lineIdentificationChanged(QString)), SIGNAL(lineIdChanged(QString)));
+     QObject::connect(d->ofonoVoiceCall, SIGNAL(emergencyChanged(bool)), SIGNAL(emergencyChanged(bool)));
+@@ -68,7 +67,7 @@ OfonoVoiceCallHandler::OfonoVoiceCallHandler(const QString &handlerId, const QSt
+ 
+     QObject::connect(d->ofonoVoiceCall, SIGNAL(stateChanged(QString)), SLOT(onStatusChanged()));
+ 
+-    onStatusChanged();
++    QObject::connect(d->ofonoVoiceCall, SIGNAL(validChanged(bool)), SLOT(onValidChanged(bool)));
+ }
+ 
+ OfonoVoiceCallHandler::~OfonoVoiceCallHandler()
+@@ -78,6 +77,19 @@ OfonoVoiceCallHandler::~OfonoVoiceCallHandler()
+     delete d;
+ }
+ 
++void OfonoVoiceCallHandler::onValidChanged(bool isValid)
++{
++    Q_D(OfonoVoiceCallHandler);
++
++    if (isValid)
++    {
++        // Properties are now ready
++        d->isIncoming = d->ofonoVoiceCall->state() == QLatin1String("incoming");
++    }
++
++    emit validChanged(isValid);
++}
++
+ QString OfonoVoiceCallHandler::path() const
+ {
+     TRACE
+diff --git a/plugins/providers/ofono/src/ofonovoicecallhandler.h b/plugins/providers/ofono/src/ofonovoicecallhandler.h
+index 021e8c3..67d270f 100644
+--- a/plugins/providers/ofono/src/ofonovoicecallhandler.h
++++ b/plugins/providers/ofono/src/ofonovoicecallhandler.h
+@@ -52,6 +52,9 @@ public:
+ 
+     VoiceCallStatus status() const;
+ 
++Q_SIGNALS:
++    void validChanged(bool valid);
++
+ public Q_SLOTS:
+     void answer();
+     void hangup();
+@@ -61,6 +64,7 @@ public Q_SLOTS:
+ 
+ protected Q_SLOTS:
+     void onStatusChanged();
++    void onValidChanged(bool);
+ 
+ protected:
+     void timerEvent(QTimerEvent *event);
+diff --git a/plugins/providers/ofono/src/ofonovoicecallprovider.cpp b/plugins/providers/ofono/src/ofonovoicecallprovider.cpp
+index b874054..3ace56b 100644
+--- a/plugins/providers/ofono/src/ofonovoicecallprovider.cpp
++++ b/plugins/providers/ofono/src/ofonovoicecallprovider.cpp
+@@ -43,6 +43,7 @@ public:
+     QString modemPath;
+ 
+     QHash<QString,OfonoVoiceCallHandler*> voiceCalls;
++    QHash<QString,OfonoVoiceCallHandler*> invalidVoiceCalls;
+ 
+     QString errorString;
+     void setError(const QString &errorString)
+@@ -182,17 +183,44 @@ void OfonoVoiceCallProvider::onCallAdded(const QString &call)
+ 
+     qDebug() << "Adding call handler " << call;
+     OfonoVoiceCallHandler *handler = new OfonoVoiceCallHandler(d->manager->generateHandlerId(), call, this, d->ofonoManager);
+-    d->voiceCalls.insert(call, handler);
++    d->invalidVoiceCalls.insert(call, handler);
++    QObject::connect(handler, SIGNAL(validChanged(bool)), SLOT(onVoiceCallHandlerValidChanged(bool)));
++}
+ 
+-    emit this->voiceCallAdded(handler);
+-    emit this->voiceCallsChanged();
++void OfonoVoiceCallProvider::onVoiceCallHandlerValidChanged(bool isValid)
++{
++    TRACE
++    Q_D(OfonoVoiceCallProvider);
++
++    OfonoVoiceCallHandler *handler = (OfonoVoiceCallHandler *)QObject::sender();
++    if(handler)
++    {
++        QString call = handler->path();
++
++        if(isValid && !d->voiceCalls.contains(call))
++        {
++            d->voiceCalls.insert(call, handler);
++            d->invalidVoiceCalls.remove(call);
++            emit this->voiceCallAdded(handler);
++            emit this->voiceCallsChanged();
++        }
++    }
+ }
+ 
+ void OfonoVoiceCallProvider::onCallRemoved(const QString &call)
+ {
+     TRACE
+     Q_D(OfonoVoiceCallProvider);
+-    if(!d->voiceCalls.contains(call)) return;
++    if(!d->voiceCalls.contains(call))
++    {
++        if(d->invalidVoiceCalls.contains(call))
++        {
++            OfonoVoiceCallHandler *handler = d->invalidVoiceCalls.value(call);
++            d->invalidVoiceCalls.remove(call);
++            handler->deleteLater();
++        }
++        return;
++    }
+ 
+     OfonoVoiceCallHandler *handler = d->voiceCalls.value(call);
+     QString handlerId = handler->handlerId();
+diff --git a/plugins/providers/ofono/src/ofonovoicecallprovider.h b/plugins/providers/ofono/src/ofonovoicecallprovider.h
+index 28b99ea..bd48d94 100644
+--- a/plugins/providers/ofono/src/ofonovoicecallprovider.h
++++ b/plugins/providers/ofono/src/ofonovoicecallprovider.h
+@@ -55,6 +55,8 @@ protected Q_SLOTS:
+ 
+     void onDialComplete(const bool status);
+ 
++    void onVoiceCallHandlerValidChanged(bool isValid);
++
+ private:
+     void initialize();
+     class OfonoVoiceCallProviderPrivate *d_ptr;
+-- 
+1.8.1.2
+
