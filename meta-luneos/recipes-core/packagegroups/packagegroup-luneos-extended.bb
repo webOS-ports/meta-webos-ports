@@ -12,6 +12,10 @@ NOT_COMPATIBLE_WITH_CURRENT_NODEJS = " \
   \
   keymanager \
 "
+REMOVED_BECAUSE_OF_PIDGIN = " \
+  imaccountvalidator \
+  imlibpurpleservice \
+"
 
 RDEPENDS_${PN} = " \
   distro-feed-configs \
@@ -35,8 +39,6 @@ RDEPENDS_${PN} = " \
   ${@base_contains('MACHINE_FEATURES', 'cellular', 'packagegroup-webos-telephony', '', d)} \
   ${@base_contains('MACHINE_FEATURES', 'bluetooth', 'bluez4', '',d)} \
   \
-  imaccountvalidator \
-  imlibpurpleservice \
   location-service \
   \
   org.webosinternals.preware \
