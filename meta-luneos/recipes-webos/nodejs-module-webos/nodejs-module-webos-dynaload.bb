@@ -16,6 +16,7 @@ inherit pkgconfig
 
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE} \
     file://0001-Fix-build-for-node-v0.12.2.patch \
+    file://0001-external_string.h-make-it-compatible-with-node-4.2-a.patch \
 "
 S = "${WORKDIR}/git"
 
