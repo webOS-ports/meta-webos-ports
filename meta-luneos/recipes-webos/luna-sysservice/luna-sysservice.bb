@@ -13,7 +13,7 @@ DEPENDS = "luna-service2 libpbnjson qtbase uriparser libxml2 sqlite3 pmloglib js
 RDEPENDS_${PN} += "${VIRTUAL-RUNTIME_ntp}"
 
 PV = "2.0.1-38+git${SRCPV}"
-SRCREV = "d0d9f6bf321bd70a3301587bbe9372402a11cbf3"
+SRCREV = "0f7dff94b040e788d8e852c3b1c2d7ca09969269"
 
 inherit webos_ports_fork_repo
 inherit webos_cmake
@@ -22,6 +22,5 @@ inherit pkgconfig
 
 SRC_URI = " \
     ${WEBOS_PORTS_GIT_REPO_COMPLETE} \
-    file://0001-replace-cjson-with-json-c.patch \
 "
 S = "${WORKDIR}/git"
