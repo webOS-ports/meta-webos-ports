@@ -1,7 +1,7 @@
 DEPENDS += "luna-service2 pmloglib qtlocation"
 
 # Enable extra codecs
-EXTRA_QMAKEVARS_PRE = "WEBENGINE_CONFIG+=proprietary_codecs"
+EXTRA_QMAKEVARS_PRE += "WEBENGINE_CONFIG+=proprietary_codecs"
 
 inherit webos_ports_fork_repo
 
