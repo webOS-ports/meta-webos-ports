@@ -19,7 +19,7 @@ S = "${WORKDIR}/git"
 do_install() {
     install -d ${D}${webos_frameworksdir}
 
-    for FRAMEWORK in `ls -d1 ${S}/calendar* ${S}/contacts* ${S}/globalization` ; do
+    for FRAMEWORK in `ls -d1 ${S}/calendar* ${S}/contacts* ${S}/globalization ${S}/phonenumberlib` ; do
         FRAMEWORK_DIR=`basename $FRAMEWORK`
         install -d ${D}${webos_frameworksdir}/$FRAMEWORK_DIR/version/1.0/
         cp -vrf $FRAMEWORK/* ${D}${webos_frameworksdir}/$FRAMEWORK_DIR/version/1.0/
