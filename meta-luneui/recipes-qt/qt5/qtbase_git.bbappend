@@ -4,7 +4,6 @@ PACKAGECONFIG_DISTRO = "sql-sqlite icu glib accessibility mtdev examples"
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 SRC_URI += " \
     file://0001-Determine-devicePixelRatio-from-environment-variable.patch \
-    file://0002-qfont-Don-t-crash-when-platform-integration-isn-t-av.patch \
 "
 
 EXTRA_OECONF += "-qpa wayland-egl"
