@@ -43,7 +43,7 @@ FILES_${PN} += " \
 FILES_${PN}-dev += "${datadir}/dbus-1/interfaces"
 FILES_${PN}-dbg += "${libdir}/geoclue/geoclue-2.0/demos/.debug"
 
-#AVAHI is used for NMEA sources introduced in GeoClue 2.3.0
+#Avahi is used for NMEA sources introduced in GeoClue 2.3.0
 #For iio-sensor-proxy first need to see if it is of any use for our targets before including it as well in RRECOMMENDS. It would need its own recipe as well first too since it's not in OE yet.
 RRECOMMENDS_${PN} = "avahi-daemon"
 
