@@ -16,11 +16,11 @@ SYSTEMD_SERVICE_${PN} = "${PN}.service"
 inherit autotools pkgconfig gtk-doc systemd
 
 SRC_URI = " \
-    http://www.freedesktop.org/software/geoclue/releases/2.2/geoclue-${PV}.tar.xz \
+    http://www.freedesktop.org/software/geoclue/releases/2.4/geoclue-${PV}.tar.xz \
 "
 
-SRC_URI[md5sum] = "c1970e4ec6f2af6591a75294fc6fb4fa"
-SRC_URI[sha256sum] = "a490de0d4f97cb65f81e9fd0f687c7e84ef2c41509c214a1438964f541c7d446"
+SRC_URI[md5sum] = "3b4ccf1ce72cebd6becacedb20f52845"
+SRC_URI[sha256sum] = "9a19fd00f6064d6f29e791ee28afb839431e280fed3ad851aa04a0ddae0d34d4"
 
 EXTRA_OECONF += " \
     --with-dbus-service-user=root \
@@ -42,3 +42,13 @@ FILES_${PN} += " \
 "
 FILES_${PN}-dev += "${datadir}/dbus-1/interfaces"
 FILES_${PN}-dbg += "${libdir}/geoclue/geoclue-2.0/demos/.debug"
+
+#AVAHI is used for NMEA sources introduced in GeoClue 2.3.0
+#For iio-sensor-proxy first need to see if it is of any use for our targets before including it as well in RRECOMMENDS. It would need its own recipe as well first too since it's not in OE yet.
+RRECOMMENDS_${PN} = "avahi-daemon"
+
+RDEPENDS_${PN} = " \
+  libavahi-common \
+  libavahi-client \
+  libavahi-glib \
+"
