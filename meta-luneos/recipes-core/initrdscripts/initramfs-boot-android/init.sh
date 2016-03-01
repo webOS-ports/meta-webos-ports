@@ -98,6 +98,10 @@ if [ ! -e /rfs/.firstboot_done ] ; then
         cp -rav /rfs/$dir/* $datadir/$dir
     done
 
+    mkdir -p $datadir/userdata
+    # Copy initial media to userdata
+    cp -ravu /rfs/media/internal/* $datadir/userdata/
+
     # setup cryptofs which is not a real cryptofs yet
     if [ -d $datadir/userdata/.cryptofs ] ; then
         rm -rf $datadir/userdata/.cryptofs
@@ -114,7 +118,6 @@ for dir in var home ; do
 done
 
 # finally setup the user data directory
-mkdir -p $datadir/userdata
 mount -o bind,rw $datadir/userdata /rfs/media/internal
 mount -o bind,rw $datadir/userdata/.cryptofs /rfs/media/cryptofs
 
