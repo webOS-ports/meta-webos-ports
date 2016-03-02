@@ -100,7 +100,7 @@ if [ ! -e /rfs/.firstboot_done ] ; then
 
     mkdir -p $datadir/userdata
     # Copy initial media to userdata
-    cp -ravu /rfs/media/internal/* $datadir/userdata/
+    cp -rav /rfs/media/internal/* $datadir/userdata/
 
     # setup cryptofs which is not a real cryptofs yet
     if [ -d $datadir/userdata/.cryptofs ] ; then
