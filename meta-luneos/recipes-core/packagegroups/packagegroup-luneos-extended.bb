@@ -14,7 +14,7 @@ RDEPENDS_${PN} = " \
   pulseaudio-module-bluetooth-discover \ 
   pulseaudio-module-bluetooth-policy \
   pulseaudio-module-bluez4-device \
-  pulseaudio-module-bluez5-discover \
+  pulseaudio-module-bluez4-discover \
   pulseaudio-server \
   \
   alsa-conf \
