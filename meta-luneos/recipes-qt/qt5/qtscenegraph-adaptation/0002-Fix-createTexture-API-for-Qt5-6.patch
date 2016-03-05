@@ -1,0 +1,101 @@
+From 9c5775c4e925c2fc082843d593b67827de1adf52 Mon Sep 17 00:00:00 2001
+From: Christophe Chapuis <chris.chapuis@gmail.com>
+Date: Sat, 5 Mar 2016 20:03:03 +0100
+Subject: [PATCH] Fix createTexture API for Qt 5.6
+
+Signed-off-by: Christophe Chapuis <chris.chapuis@gmail.com>
+---
+ customcontext/context.cpp | 49 +++++++++++++++++++++++++++++++++++++++++++++++
+ customcontext/context.h   |  5 +++++
+ 2 files changed, 54 insertions(+)
+
+diff --git a/customcontext/context.cpp b/customcontext/context.cpp
+index 7b8022d..07e7efe 100644
+--- a/customcontext/context.cpp
++++ b/customcontext/context.cpp
+@@ -437,8 +437,55 @@ QSurfaceFormat Context::defaultSurfaceFormat() const
+ }
+ #endif
+ 
++#if QT_VERSION >= 0x050600
++QSGTexture *CONTEXT_CLASS::createTexture(const QImage &image, uint flags) const
++{
++    if(flags & CreateTexture_Atlas) {
++#ifdef CUSTOMCONTEXT_ATLASTEXTURE
++        if (m_atlasTexture) {
++            QSGTexture *t = const_cast<Context *>(this)->m_atlasManager.create(image);
++            if (t)
++                return t;
++        }
++#endif
+ 
++#ifdef CUSTOMCONTEXT_MACTEXTURE
++        if (m_macTexture)
++            return new MacTexture(image);
++#endif
++    }
++    else {
++#ifdef CUSTOMCONTEXT_EGLGRALLOCTEXTURE
++        if (static_cast<Context *>(sceneGraphContext())->hasEglGrallocTextures()) {
++
++            // Only use gralloc textures for textures created outside the render thread.
++            // They can still block for as long as normal texture, so better to not waste
++            // the precious resource.
++            if (openglContext() != 0 && openglContext()->thread() != QThread::currentThread()) {
++                EglGrallocTexture *t = EglGrallocTexture::create(image);
++                if (t)
++                    return t;
++            }
++        }
++#endif
++#ifdef CUSTOMCONTEXT_HYBRISTEXTURE
++        if (static_cast<Context *>(sceneGraphContext())->hasHybrisTextures()) {
++
++            // Only use hybris textures for textures created outside the render thread.
++            // They can still block for as long as normal texture, so better to not waste
++            // the precious resource.
++            if (openglContext() != 0 && openglContext()->thread() != QThread::currentThread()) {
++                HybrisTexture *t = HybrisTexture::create(image);
++                if (t)
++                    return t;
++            }
++        }
++#endif
++    }
+ 
++    return CONTEXT_CLASS_BASE::createTexture(image, flags);
++}
++#else
+ QSGTexture *CONTEXT_CLASS::createTexture(const QImage &image) const
+ {
+ #ifdef CUSTOMCONTEXT_ATLASTEXTURE
+@@ -491,6 +538,8 @@ QSGTexture *RenderContext::createTextureNoAtlas(const QImage &image) const
+ }
+ #endif
+ 
++#endif
++
+ 
+ 
+ QSGRenderer *CONTEXT_CLASS::createRenderer()
+diff --git a/customcontext/context.h b/customcontext/context.h
+index b4a3524..de35c9e 100644
+--- a/customcontext/context.h
++++ b/customcontext/context.h
+@@ -75,8 +75,13 @@ public:
+     void initialize(QOpenGLContext *context);
+     void invalidate();
+     void renderNextFrame(QSGRenderer *renderer, GLuint fbo);
++#if QT_VERSION >= 0x050600
++    QSGTexture *createTexture(const QImage &image, uint flags = CreateTexture_Alpha) const;
++#else
+     QSGTexture *createTexture(const QImage &image) const;
+     QSGTexture *createTextureNoAtlas(const QImage &image) const;
++#endif
++
+     QSGRenderer *createRenderer();
+ 
+ #ifdef PROGRAM_BINARY
+-- 
+1.8.1.2
+
