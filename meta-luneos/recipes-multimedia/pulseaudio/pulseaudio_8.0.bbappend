@@ -19,6 +19,8 @@ SRC_URI += " \
 do_install_append() {
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${WORKDIR}/pulseaudio.service ${D}${systemd_unitdir}/system
+    install -d ${D}${includedir}/pulsecore/filter
+    mv ${D}${includedir}/pulsecore/lfe-filter.h ${D}${includedir}/pulsecore/filter/
 }
 
 inherit systemd
