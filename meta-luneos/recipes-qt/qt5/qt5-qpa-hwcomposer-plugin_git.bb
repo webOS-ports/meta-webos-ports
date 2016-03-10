@@ -17,7 +17,6 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git/hwcomposer"
 
 SRC_URI_append_tenderloin = " \
-    file://0001-Unblock-rendering-for-Android-4.4.4-and-hwcomposer-1.patch;striplevel=2 \
     file://0002-Add-QCOM_BSP-define-switch.patch;striplevel=2 \
 "
 
