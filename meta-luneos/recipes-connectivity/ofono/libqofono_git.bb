@@ -11,7 +11,7 @@ S = "${WORKDIR}/git"
 
 PV = "0.87+gitr${SRCPV}"
 
-inherit qmake5
+require recipes-qt/qt5/qt5.inc
 
 PACKAGES += "${PN}-tests"
 FILES_${PN}-dbg += " \
