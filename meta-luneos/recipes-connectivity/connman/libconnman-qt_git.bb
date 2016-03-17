@@ -10,7 +10,7 @@ S = "${WORKDIR}/git"
 
 PV = "1.0.98+gitr${SRCPV}"
 
-inherit qmake5
+inherit webos_qmake
 
 DEPENDS += "qtbase qtdeclarative"
 
