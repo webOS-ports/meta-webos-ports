@@ -21,7 +21,7 @@ SRC_URI = " \
 "
 S = "${WORKDIR}/git"
 
-inherit qmake5
+require recipes-qt/qt5/qt5.inc
 
 EXTRA_QMAKEVARS_PRE += "CONFIG+=surfaceformat CONFIG+=programbinary CONFIG+=hybristexture"
 
