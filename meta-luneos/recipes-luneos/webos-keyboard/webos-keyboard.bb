@@ -8,7 +8,7 @@ LIC_FILES_CHKSUM = " \
     file://COPYING.CC-BY;md5=c14dd4d440694f070fc6520d9c9a65eb \
 "
 
-inherit qmake5
+require recipes-qt/qt5/qt5.inc
 inherit webos_system_bus
 inherit webos_ports_repo
 
