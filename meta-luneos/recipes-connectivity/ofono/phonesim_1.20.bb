@@ -12,7 +12,7 @@ SRC_URI[sha256sum] = "8a858acdb99bfc928ba16c8d983103af198bc0aa0e9101477d34336162
 SRC_URI += " file://0001-Port-to-qt5.patch"
 
 inherit autotools pkgconfig
-inherit qmake5_paths
+require recipes-qt/qt5/qt5.inc
 
 do_configure_append() {
     sed -i -e s:/usr/bin/qt5/uic:${OE_QMAKE_PATH_EXTERNAL_HOST_BINS}/uic:g ${B}/Makefile

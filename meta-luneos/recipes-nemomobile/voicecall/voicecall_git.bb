@@ -7,7 +7,7 @@ DEPENDS += "qtbase qtmultimedia libqofono"
 PV = "0.6.6+gitr${SRCPV}"
 SRCREV = "b2c2b0abeeac5513e5226b97c1f7b4339eb54a3c"
 
-inherit qmake5
+require recipes-qt/qt5/qt5.inc
 inherit systemd
 
 SRC_URI = "git://git.merproject.org/mer-core/voicecall.git;protocol=git;branch=master \
