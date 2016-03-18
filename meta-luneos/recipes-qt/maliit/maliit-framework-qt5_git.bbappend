@@ -8,6 +8,8 @@ SRC_URI += " \
     file://maliit-env.conf \
 "
 
+SRCREV = "62bd54bcde3c0d79337a0eb7361ff6d7375bc73c"
+
 # Do not recomment maliit-plugins-qt5 as keyboard provider
 RRECOMMENDS_${PN} = ""
 
