@@ -1,4 +1,5 @@
 # Copyright (c) 2012-2013 LG Electronics, Inc.
+# Copyright (c) 2016 Herman van Hazendonk <github.com@herrie.org>
 
 SECTION = "libs"
 DESCRIPTION = "Hunspell spell checker and morphological analyzer"
@@ -9,9 +10,7 @@ LIC_FILES_CHKSUM += "file://COPYING.MPL;md5=bfe1f75d606912a4111c90743d6c7325"
 
 inherit autotools-brokensep gettext
 
-SRC_URI = "http://downloads.sourceforge.net/hunspell/hunspell-${PV}.tar.gz"
-S = "${WORKDIR}/hunspell-${PV}"
+SRCREV = "6aae365af685822a61241cbb09cfcc11fda3e1c1"
 
-SRC_URI[md5sum] = "3121aaf3e13e5d88dfff13fb4a5f1ab8"
-SRC_URI[sha256sum] = "b4edd4a4ee944cb9f485b35473e46b729ed768e9d24da8e78e4c4c6ca56addbd"
-
+SRC_URI = "git://github.com/hunspell/hunspell.git;protocol=git;branch=master"
+S = "${WORKDIR}/git"
