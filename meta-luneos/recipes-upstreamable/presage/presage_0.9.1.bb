@@ -14,11 +14,10 @@ inherit autotools gettext pkgconfig
 SRC_URI = " \
     http://downloads.sourceforge.net/${BPN}/${BP}.tar.gz \
     file://disable-help2man.patch \
-    file://no-automake-werror.patch \
 "
 
-SRC_URI[md5sum] = "13221794c5f55f2fde5c5938c59c8548"
-SRC_URI[sha256sum] = "5541e9b350cc603a8d412704dcfa21342369b5b07c6da91947c7523c51678cd0"
+SRC_URI[md5sum] = "9667be297912fa0d432e748526d8dd9e"
+SRC_URI[sha256sum] = "5ed567e350402a1d72c9053c78ecec3be710b7e72153a0223c6d19a7fe58a366"
 
 EXTRA_OECONF = " \
     --disable-documentation \
