@@ -1,6 +1,8 @@
 # Copyright (c) 2016 Herman van Hazendonk <github.com@herrie.org>
 
 DESCRIPTION = "Hunspell dictionaries"
+#Provided by Titus Wormer (wooorm) https://github.com/wooorm/dictionaries
+
 LICENSE = "MIT"
 LICENSE_dictionaries/bg_BG = "LGPL 2.1"
 LICENSE_dictionaries/ca_ES-valencia = "LGPL-2.0"
