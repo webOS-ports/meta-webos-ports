@@ -17,8 +17,7 @@ LICENSE_dictionaries/en_GB = "LGPL-2.0"
 LICENSE_dictionaries/en_US = "MIT & BSD"
 LICENSE_dictionaries/en_ZA = "LGPL 2.1"
 LICENSE_dictionaries/es_ES = "GPL-3.0"
-#Missing, reported issue at the repo owner
-#LICENSE_dictionaries/eu_ES = "GPL-2.0"
+LICENSE_dictionaries/eu_ES = "GPL-2.0"
 LICENSE_dictionaries/fr_FR = "MPL-2.0"
 LICENSE_dictionaries/gl_ES = "GPL-3.0"
 LICENSE_dictionaries/hr_HR = "GPL-3.0"
@@ -38,6 +37,7 @@ LICENSE_dictionaries/sl_SI = "GPL-2.0"
 LICENSE_dictionaries/sr_RS-Latn = "LGPL 3.0"
 LICENSE_dictionaries/sr_RS = "LGPL 3.0"
 LICENSE_dictionaries/sv_SE = "LGPL 3.0"
+LICENSE_dictionaries/tr_TR = "MIT"
 LICENSE_dictionaries/uk_UA = "GPL 2.0"
 LICENSE_dictionaries/vi_VN = "GPL 2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
@@ -46,7 +46,7 @@ LIC_FILES_CHKSUM += "file://dictionaries/ca_ES-valencia/LICENSE;md5=2550636c8ed0
 LIC_FILES_CHKSUM += "file://dictionaries/ca_ES/LICENSE;md5=2550636c8ed09711515b0e8553112b54"
 LIC_FILES_CHKSUM += "file://dictionaries/cs_CZ/LICENSE;md5=636a0d4a35e0fef10df3eabd85cf4d73"
 LIC_FILES_CHKSUM += "file://dictionaries/da_DK/LICENSE;md5=d5ad84549d1b17456b4113df2cb93d03"
-LIC_FILES_CHKSUM += "file://dictionaries/de_AT/LICENSE;md5=f201f6e00aa34b7ac30ce461605c887f"
+LIC_FILES_CHKSUM += "file://dictionaries/de_AT/LICENSE;md5=abe102d0a2fed5d678163561c71378a7"
 LIC_FILES_CHKSUM += "file://dictionaries/de_CH/LICENSE;md5=f201f6e00aa34b7ac30ce461605c887f"
 LIC_FILES_CHKSUM += "file://dictionaries/de_DE/LICENSE;md5=f201f6e00aa34b7ac30ce461605c887f"
 LIC_FILES_CHKSUM += "file://dictionaries/el_GR/LICENSE;md5=b51ca4072e082f7d3a54a0eef6cc0ed7"
@@ -56,8 +56,7 @@ LIC_FILES_CHKSUM += "file://dictionaries/en_GB/LICENSE;md5=c1719597f97c5ef9b9eb9
 LIC_FILES_CHKSUM += "file://dictionaries/en_US/LICENSE;md5=253cb835bfa192c9a16e6f3dd82ab002"
 LIC_FILES_CHKSUM += "file://dictionaries/en_ZA/LICENSE;md5=56e4b4ca965de3bba6db42494cc34576"
 LIC_FILES_CHKSUM += "file://dictionaries/es_ES/LICENSE;md5=b41cabf4e6f2a7d951684246518bea4f"
-#See above file is missing
-#LIC_FILES_CHKSUM += "file://dictionaries/eu_ES/LICENSE;md5="
+LIC_FILES_CHKSUM += "file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd6425610833a22dbe6"
 LIC_FILES_CHKSUM += "file://dictionaries/fr_FR/LICENSE;md5=34f3149ebd19ae19c764ca3032f4dd18"
 LIC_FILES_CHKSUM += "file://dictionaries/gl_ES/LICENSE;md5=4fe869ee987a340198fb0d54c55c47f1"
 LIC_FILES_CHKSUM += "file://dictionaries/hr_HR/LICENSE;md5=a4adcc96a4c9db0cf73d424587f725f8"
@@ -84,11 +83,10 @@ inherit webos_filesystem_paths
 
 RDEPENDS_${PN} = "hunspell"
 
-SRCREV = "d55047698d8c1dc4067bb5e6b4aa250e16814908"
+SRCREV = "caa6dba5d58543463559b79d27d2013b0c03a236"
 
-SRC_URI = "git://github.com/webOS-ports/dictionaries.git;protocol=git;branch=webOS-ports/master"
+SRC_URI = "git://github.com/wooorm/dictionaries.git;protocol=git;branch=master"
 S = "${WORKDIR}/git"
-
 
 do_install() {
 
