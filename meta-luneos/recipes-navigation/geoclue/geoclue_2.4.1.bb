@@ -26,6 +26,7 @@ EXTRA_OECONF += " \
     --with-dbus-service-user=root \
     --with-dbus-sys-dir=${sysconfdir}/dbus-1/system.d \
     --with-systemdsystemunitdir=${systemd_unitdir}/system \
+    --disable-introspection \
 "
 
 PACKAGECONFIG ??= ""
