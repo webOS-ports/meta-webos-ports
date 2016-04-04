@@ -94,12 +94,12 @@ do_install() {
 
 for LANGUAGE in `ls -d1 ${S}/dictionaries/*` ; do
 	LANGUAGE_DIR=`basename $LANGUAGE`	
-	install -d ${D}${datadir}/dict/
-        cp -rv $LANGUAGE/index.dic ${D}${datadir}/dict/$LANGUAGE_DIR.dic
-        cp -rv $LANGUAGE/index.aff ${D}${datadir}/dict/$LANGUAGE_DIR.aff
-        cp -rv $LANGUAGE/LICENSE ${D}${datadir}/dict/LICENSE"-"$LANGUAGE_DIR 2>/dev/null || :
+	install -d ${D}${datadir}/hunspell/
+        cp -rv $LANGUAGE/index.dic ${D}${datadir}/hunspell/$LANGUAGE_DIR.dic
+        cp -rv $LANGUAGE/index.aff ${D}${datadir}/hunspell/$LANGUAGE_DIR.aff
+        cp -rv $LANGUAGE/LICENSE ${D}${datadir}/hunspell/LICENSE"-"$LANGUAGE_DIR 2>/dev/null || :
 done
 }
 
-FILES_${PN} = "${datadir}/dict"
+FILES_${PN} = "${datadir}/hunspell"
 
