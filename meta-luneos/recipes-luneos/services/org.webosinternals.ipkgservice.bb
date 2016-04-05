@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=eb723b61539feef013de476e68b5c50a"
 DEPENDS = "luna-service2 glib-2.0 json-c"
 
 PV = "2.0.0-2+git${SRCPV}"
-SRCREV = "43d7f3d00eaa4acd048000727091f931aced4e60"
+SRCREV = "67a4cb24fbcb1485dcb309247f8752bb49c64aef"
 
 inherit webos_ports_repo
 inherit webos_cmake
