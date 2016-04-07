@@ -13,13 +13,17 @@ IMAGE_NAME = "${IMAGE_BASENAME}-image"
 
 ZIP_BASENAME = "${IMAGE_BASENAME}-emulator-${MACHINE}"
 ZIP_NAME = "${ZIP_BASENAME}-${DATETIME}${WEBOS_IMAGE_NAME_SUFFIX}.zip"
+ZIP_NAME[vardepsexclude] += "DATETIME"
 
 VMDK_BASENAME = "${IMAGE_BASENAME}-emulator-${MACHINE}"
 VMDK_NAME = "${VMDK_BASENAME}-${DATETIME}${WEBOS_IMAGE_NAME_SUFFIX}.vmdk"
+VMDK_NAME[vardepsexclude] += "DATETIME"
 
 OVF_BASENAME = "${IMAGE_BASENAME}-emulator-${MACHINE}"
 OVF_NAME = "${OVF_BASENAME}-${DATETIME}${WEBOS_IMAGE_NAME_SUFFIX}.ovf"
+OVF_NAME[vardepsexclude] += "DATETIME"
 
+do_deploy[vardepsexclude] += "DATETIME"
 do_deploy() {
     if [ ! -e ${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}-${MACHINE}.vmdk ] ; then
         bbfatal "Required base image is not available as vmdk image!"
