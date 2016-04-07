@@ -37,8 +37,12 @@ pkg_postinst_${PN} () {
 pkg_postrm_${PN} () {
 }
 
-# Enable webos specific support within maliit
-EXTRA_QMAKEVARS_PRE += "CONFIG+=webos"
+# Enable LuneOS/webOS specific support within maliit
+EXTRA_QMAKEVARS_PRE += "\
+    CONFIG+=webos \
+    MALIIT_DEFAULT_HW_PLUGIN=libluneos-keyboard-plugin.so \
+    MALIIT_DEFAULT_PLUGIN=libluneos-keyboard-plugin.so \
+"
 
 # We want maliit to provide it's input context on it's own rather than qtbase doing this
 # so we build it here and package it. However the inputcontext within qtbase must be moved
