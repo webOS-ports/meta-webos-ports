@@ -10,6 +10,7 @@ IMAGE_NAME = "${IMAGE_BASENAME}-image"
 
 ZIP_BASENAME = "${IMAGE_BASENAME}-package-${MACHINE}"
 ZIP_NAME = "${ZIP_BASENAME}-${DATETIME}${WEBOS_IMAGE_NAME_SUFFIX}"
+ZIP_NAME[vardepsexclude] += "DATETIME"
 
 inherit webos_ports_repo
 
