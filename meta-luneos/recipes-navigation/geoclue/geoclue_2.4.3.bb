@@ -19,8 +19,8 @@ SRC_URI = " \
     http://www.freedesktop.org/software/geoclue/releases/2.4/geoclue-${PV}.tar.xz \
 "
 
-SRC_URI[md5sum] = "3b4ccf1ce72cebd6becacedb20f52845"
-SRC_URI[sha256sum] = "9a19fd00f6064d6f29e791ee28afb839431e280fed3ad851aa04a0ddae0d34d4"
+SRC_URI[md5sum] = "86381eeff164a890eb2178ceb5823cfe"
+SRC_URI[sha256sum] = "ada9dba870dd79e1b21923aeda4d82b66cbda39e57978fbe3d83d356cc3c605e"
 
 EXTRA_OECONF += " \
     --with-dbus-service-user=root \
