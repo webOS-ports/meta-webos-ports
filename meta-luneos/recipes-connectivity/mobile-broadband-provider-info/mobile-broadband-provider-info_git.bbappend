@@ -1,0 +1,3 @@
+PV = "20160331+gitr${SRCPV}"
+SRCREV = "ead3afa53766fba1d53c33fd5f720d398007c2dc"
+
