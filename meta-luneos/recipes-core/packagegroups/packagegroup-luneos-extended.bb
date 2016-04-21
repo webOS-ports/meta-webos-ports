@@ -6,10 +6,7 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 inherit packagegroup
 
 NOT_COMPATIBLE_WITH_CURRENT_NODEJS = " \
-  node-dbus \
   node-sqlite3 \
-  node-taglib \
-  \
   keymanager \
 "
 
@@ -45,7 +42,6 @@ RDEPENDS_${PN} = " \
   \
   org.webosports.app.browser \
   org.webosports.app.calculator \
-  org.webosports.app.calendar \
   org.webosports.app.contacts \
   org.webosports.app.filemanager \
   org.webosports.app.firstuse \
