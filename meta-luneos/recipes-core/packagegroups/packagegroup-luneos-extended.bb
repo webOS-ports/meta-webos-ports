@@ -69,9 +69,6 @@ RDEPENDS_${PN} = " \
   pmcertificatemgr \
   \
   qtbase-plugins \
-  qtbase-fonts \
-  qtbase-fonts-ttf-dejavu \
-  qtbase-fonts-ttf-vera \
   qtmultimedia-plugins \
   qtmultimedia-qmlplugins \
   qtsensors \
