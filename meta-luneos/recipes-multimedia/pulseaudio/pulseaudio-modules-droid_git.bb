@@ -7,7 +7,7 @@ DEPENDS += "pulseaudio libhybris virtual/android-headers dbus udev"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 PV = "8.0.47+gitr${SRCPV}"
-SRCREV = "d70af967656e1b415fc0f823b2697f1d851c4b8e"
+SRCREV = "b29908ac6e8c76a8d9baeae7675632283ba79a80"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 WEBOS_GIT_PARAM_BRANCH = "webOS-ports/master-next"
