@@ -7,9 +7,10 @@ DEPENDS += "pulseaudio libhybris virtual/android-headers dbus udev"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 PV = "8.0.47+gitr${SRCPV}"
-SRCREV = "4b01e83ceb8d04b9dbbc971d403674d36cce131c"
+SRCREV = "d70af967656e1b415fc0f823b2697f1d851c4b8e"
 
-SRC_URI = "git://github.com/mer-hybris/pulseaudio-modules-droid.git;branch=master;protocol=git"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+WEBOS_GIT_PARAM_BRANCH = "webOS-ports/master-next"
 
 SRC_URI += " \
     file://Use_pa_card_put_for_PulseAudio_8.patch \
