@@ -7,10 +7,9 @@ DEPENDS += "pulseaudio libhybris virtual/android-headers dbus udev"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 PV = "8.0.47+gitr${SRCPV}"
-SRCREV = "b29908ac6e8c76a8d9baeae7675632283ba79a80"
+SRCREV = "4b01e83ceb8d04b9dbbc971d403674d36cce131c"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/master-next"
+SRC_URI = "git://github.com/mer-hybris/pulseaudio-modules-droid.git;branch=master;protocol=git"
 
 SRC_URI += " \
     file://Use_pa_card_put_for_PulseAudio_8.patch \
@@ -23,7 +22,7 @@ EXTRA_OECONF += " \
     --enable-udev \
 "
 
-inherit webos_ports_fork_repo
+# inherit webos_ports_fork_repo
 inherit autotools pkgconfig
 
 FILES_${PN} += "${libdir}/pulse-8.0/modules/*.so"
