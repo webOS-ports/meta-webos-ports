@@ -12,7 +12,10 @@ SRCREV = "4b01e83ceb8d04b9dbbc971d403674d36cce131c"
 SRC_URI = "git://github.com/mer-hybris/pulseaudio-modules-droid.git;branch=master;protocol=git"
 
 SRC_URI += " \
-    file://Use_pa_card_put_for_PulseAudio_8.patch \
+    file://0001-add-support-for-detected-external-connection-changes.patch \
+    file://0002-droid-extcon-c-adapt-to-new-pulseaudio-5-apis.patch \
+    file://0003-remove-audio-bit-in-for-mako.patch \
+    file://0004-use-pa-card-put-for-pulseaudio-8.patch \
 "
 
 S = "${WORKDIR}/git"
