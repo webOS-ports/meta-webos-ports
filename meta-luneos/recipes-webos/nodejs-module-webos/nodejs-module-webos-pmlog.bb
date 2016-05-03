@@ -8,16 +8,14 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "pmloglib node-gyp-native"
 
 PV = "3.0.1-18+git${SRCPV}"
-SRCREV = "ea9849d556708c5f2801a85acb58dc7a19392ade"
+SRCREV = "ca359ed90389c5be085e7eac0548236312743d6a"
 
-inherit webos_public_repo
+inherit webos_ports_repo
 inherit webos_filesystem_paths
 #inherit webos_cmake
 inherit pkgconfig
 
-SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE} \
-    file://0001-Fix-build-for-node-v0.12.2.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 do_configure() {

@@ -8,16 +8,13 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "boost node-gyp-native"
 
 PV = "3.0.1-14+git${SRCPV}"
-SRCREV = "d817785147cfecf13132e7bb03bc6877f24361bc"
+SRCREV = "db45ace0672ddb2597dbaa8e748fbaa020fdfd55"
 
-inherit webos_public_repo
+inherit webos_ports_repo
 inherit webos_filesystem_paths
 inherit pkgconfig
 
-SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE} \
-    file://0001-Fix-build-for-node-v0.12.2.patch \
-    file://0001-external_string.h-make-it-compatible-with-node-4.2-a.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 do_configure() {

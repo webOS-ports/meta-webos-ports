@@ -8,16 +8,14 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "luna-service2 node-gyp-native"
 
 PV = "3.0.1-31+git${SRCPV}"
-SRCREV = "01532d4b2e7ddb02f02a7d9ce71b922037b99aeb"
+SRCREV = "6d92983f91ae22f9405e2a8ac0ec71fb06c531c3"
 
-inherit webos_public_repo
+inherit webos_ports_repo
 inherit webos_filesystem_paths
 inherit pkgconfig
 inherit webos_system_bus
 
-SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE} \
-    file://0001-Fix-build-for-node-v0.12.2.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 do_configure() {
