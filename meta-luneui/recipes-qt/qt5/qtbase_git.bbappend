@@ -6,7 +6,7 @@ SRC_URI += " \
     file://0001-Determine-devicePixelRatio-from-environment-variable.patch \
 "
 
-EXTRA_OECONF += "-qpa wayland-egl"
+QT_CONFIG_FLAGS += "-qpa wayland-egl"
 
 do_install_append() {
     # Remove unwanted maliit input context plugin
