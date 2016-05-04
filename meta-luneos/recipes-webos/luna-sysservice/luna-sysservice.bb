@@ -21,5 +21,8 @@ inherit webos_system_bus
 inherit pkgconfig
 inherit webos_systemd
 
-SRC_URI = " ${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = " \
+    ${WEBOS_PORTS_GIT_REPO_COMPLETE} \
+    file://0001-CMakeLists.txt-request-CXX-11.patch \
+"
 S = "${WORKDIR}/git"
