@@ -10,7 +10,7 @@ DEPENDS = "pmloglib node-gyp-native"
 PV = "3.0.1-18+git${SRCPV}"
 SRCREV = "ca359ed90389c5be085e7eac0548236312743d6a"
 
-inherit webos_ports_repo
+inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
 #inherit webos_cmake
 inherit pkgconfig

@@ -10,7 +10,7 @@ DEPENDS = "boost node-gyp-native"
 PV = "3.0.1-14+git${SRCPV}"
 SRCREV = "db45ace0672ddb2597dbaa8e748fbaa020fdfd55"
 
-inherit webos_ports_repo
+inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
 inherit pkgconfig
 

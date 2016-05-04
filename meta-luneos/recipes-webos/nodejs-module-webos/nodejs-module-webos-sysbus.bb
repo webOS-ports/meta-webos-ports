@@ -10,7 +10,7 @@ DEPENDS = "luna-service2 node-gyp-native"
 PV = "3.0.1-31+git${SRCPV}"
 SRCREV = "6d92983f91ae22f9405e2a8ac0ec71fb06c531c3"
 
-inherit webos_ports_repo
+inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
 inherit pkgconfig
 inherit webos_system_bus
