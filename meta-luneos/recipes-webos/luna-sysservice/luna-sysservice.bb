@@ -22,5 +22,6 @@ inherit pkgconfig
 
 SRC_URI = " \
     ${WEBOS_PORTS_GIT_REPO_COMPLETE} \
+    file://0001-CMakeLists.txt-request-CXX-11.patch \
 "
 S = "${WORKDIR}/git"
