@@ -4,9 +4,8 @@ EXTRA_OECONF += " \
     --with-x=no \
     --disable-gtkui \
     --disable-gstreamer \
-    --disable-farsight \
     --disable-vv \
 "
 
 # Remove various dependencies we don't need
-DEPENDS = "python avahi gnutls virtual/libintl dbus intltool-native libidn"
+DEPENDS = "python avahi gnutls virtual/libintl dbus intltool-native libidn libxml2 gconf dbus-glib"
