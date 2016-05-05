@@ -7,7 +7,6 @@ inherit packagegroup
 
 NOT_COMPATIBLE_WITH_CURRENT_NODEJS = " \
   node-sqlite3 \
-  keymanager \
 "
 
 
@@ -90,6 +89,7 @@ RDEPENDS_${PN} = " \
   webos-systemd-services \
   \
   audio-service \
+  keymanager \
   mediaindexer \
   media-permission-service \
   webos-systemsounds \
