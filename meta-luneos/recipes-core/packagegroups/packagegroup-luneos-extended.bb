@@ -9,10 +9,7 @@ NOT_COMPATIBLE_WITH_CURRENT_NODEJS = " \
   node-sqlite3 \
   keymanager \
 "
-REMOVED_BECAUSE_OF_PIDGIN = " \
-  imaccountvalidator \
-  imlibpurpleservice \
-"
+
 
 RDEPENDS_${PN} = " \
   distro-feed-configs \
@@ -37,6 +34,8 @@ RDEPENDS_${PN} = " \
   ${@base_contains('MACHINE_FEATURES', 'bluetooth', 'bluez4', '',d)} \
   \
   location-service \
+  imaccountvalidator \
+  imlibpurpleservice \
   \
   org.webosinternals.preware \
   org.webosinternals.tweaks \
