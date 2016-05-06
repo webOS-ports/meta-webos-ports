@@ -90,6 +90,7 @@ RDEPENDS_${PN} = " \
   \
   audio-service \
   keymanager \
+  downloadmanager \
   mediaindexer \
   media-permission-service \
   webos-systemsounds \
