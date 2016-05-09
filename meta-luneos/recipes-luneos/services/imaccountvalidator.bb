@@ -20,7 +20,7 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 do_install_append() {
-    cp -rva ${S}/files/usr ${D}
+    cp -R --no-dereference --preserve=mode,links -v ${S}/files/usr ${D}
 }
 
 CXXFLAGS += "-fpermissive"
