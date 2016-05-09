@@ -36,69 +36,68 @@ S = "${WORKDIR}/git"
 
 do_install_append() {
     # install images & low-memory files
-    install -d ${D}${webos_sysmgrdir}
-    cd ${S} && tar --exclude-vcs --exclude-backups -cf - images | tar xf - -C ${D}${webos_sysmgrdir}
-    cd ${S} && tar --exclude-vcs --exclude-backups -cf - uiComponents | tar xf - -C ${D}${webos_sysmgrdir}
+    install -d ${D}${webos_sysmgrdir}/images
+    install -v -m 644 ${S}/images/* ${D}${webos_sysmgrdir}/images
     install -d ${D}${webos_sysmgrdir}/low-memory
-    install -v -m 644 low-memory/* ${D}${webos_sysmgrdir}/low-memory
+    install -v -m 644 ${S}/low-memory/* ${D}${webos_sysmgrdir}/low-memory
 
     # install the schema files
     install -d ${D}${webos_sysconfdir}/schemas/
-    install -v -m 644 conf/launcher-conf.schema ${D}${webos_sysconfdir}/schemas/
+    install -v -m 644 ${S}/conf/launcher-conf.schema ${D}${webos_sysconfdir}/schemas/
 
     # install temporary sounds
     install -d ${D}${webos_soundsdir}
-    install -v -m 644 sounds/* ${D}${webos_soundsdir}
+    install -v -m 644 ${S}/sounds/* ${D}${webos_soundsdir}
 
     # install the luna.conf file if it exists in the source
-    if [ -f conf/luna.conf ]
+    if [ -f ${S}/conf/luna.conf ]
     then
         install -d ${D}${webos_sysconfdir}
-        install -v -m 644 conf/luna.conf ${D}${webos_sysconfdir}
-        install -v -m 644 conf/lunaAnimations.conf ${D}${webos_sysconfdir}
-        install -v -m 644 conf/timezone.txt ${D}${webos_sysconfdir}
-        install -v -m 644 conf/notificationPolicy.conf ${D}${webos_sysconfdir}
-        install -v -m 644 conf/persistentWindows.conf ${D}${webos_sysconfdir}
-        install -v -m 644 conf/default-launcher-page-layout.json ${D}${webos_sysconfdir}
+        install -v -m 644 ${S}/conf/luna.conf ${D}${webos_sysconfdir}
+        install -v -m 644 ${S}/conf/lunaAnimations.conf ${D}${webos_sysconfdir}
+        install -v -m 644 ${S}/conf/timezone.txt ${D}${webos_sysconfdir}
+        install -v -m 644 ${S}/conf/notificationPolicy.conf ${D}${webos_sysconfdir}
+        install -v -m 644 ${S}/conf/persistentWindows.conf ${D}${webos_sysconfdir}
+        install -v -m 644 ${S}/conf/default-launcher-page-layout.json ${D}${webos_sysconfdir}
     fi
 
     # install the mojodb file to register schema for different security policies
     install -d ${D}${webos_sysconfdir}/db/kinds
-    if [ -f mojodb/com.palm.securitypolicy ]
+    if [ -f ${S}/mojodb/com.palm.securitypolicy ]
     then
-        install -v -m 644 mojodb/com.palm.securitypolicy ${D}${webos_sysconfdir}/db/kinds/com.palm.securitypolicy
+        install -v -m 644 ${S}/mojodb/com.palm.securitypolicy ${D}${webos_sysconfdir}/db/kinds/com.palm.securitypolicy
     fi
 
     # install the mojodb file for the device security policy
-    if [ -f mojodb/com.palm.securitypolicy.device ]
+    if [ -f ${S}/mojodb/com.palm.securitypolicy.device ]
     then
-        install -v -m 644 mojodb/com.palm.securitypolicy.device ${D}${webos_sysconfdir}/db/kinds/com.palm.securitypolicy.device
+        install -v -m 644 ${S}/mojodb/com.palm.securitypolicy.device ${D}${webos_sysconfdir}/db/kinds/com.palm.securitypolicy.device
     fi
 
     # install the mojodb file to set permissions on security policies
     install -d ${D}${webos_sysconfdir}/db/permissions
-    if [ -f mojodb/com.palm.securitypolicy.permissions ]
+    if [ -f ${S}/mojodb/com.palm.securitypolicy.permissions ]
     then
-        install -v -m 644 mojodb/com.palm.securitypolicy.permissions ${D}${webos_sysconfdir}/db/permissions/com.palm.securitypolicy
+        install -v -m 644 ${S}/mojodb/com.palm.securitypolicy.permissions ${D}${webos_sysconfdir}/db/permissions/com.palm.securitypolicy
     fi
 
     # install the mojodb file to register for backup
     install -d ${D}${webos_sysconfdir}/backup
-    if [ -f mojodb/com.palm.appDataBackup ]
+    if [ -f ${S}/mojodb/com.palm.appDataBackup ]
     then
-        install -v -m 644 mojodb/com.palm.appDataBackup ${D}${webos_sysconfdir}/backup/com.palm.appDataBackup
+        install -v -m 644 ${S}/mojodb/com.palm.appDataBackup ${D}${webos_sysconfdir}/backup/com.palm.appDataBackup
     fi
 
-    if [ -f conf/default-exhibition-apps.json ]
+    if [ -f ${S}/conf/default-exhibition-apps.json ]
     then
-        install -v -m 644 conf/default-exhibition-apps.json ${D}${webos_sysconfdir}
+        install -v -m 644 ${S}/conf/default-exhibition-apps.json ${D}${webos_sysconfdir}
     fi
 
     # install the pubsub definition file for revokations
-    if [ -f service/com.palm.appinstaller.pubsub ]
+    if [ -f ${S}/service/com.palm.appinstaller.pubsub ]
     then
         install -d ${D}${webos_sysconfdir}/pubsub_handlers
-        install -v -m 0644 service/com.palm.appinstaller.pubsub ${D}${webos_sysconfdir}/pubsub_handlers/com.palm.appinstaller
+        install -v -m 0644 ${S}/service/com.palm.appinstaller.pubsub ${D}${webos_sysconfdir}/pubsub_handlers/com.palm.appinstaller
     fi
 }
 
