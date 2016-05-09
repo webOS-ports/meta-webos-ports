@@ -70,7 +70,7 @@ webos_read_only_rootfs_hook () {
          fi
     fi
 }
-ROOTFS_POSTPROCESS_COMMAND += '${@base_contains("IMAGE_FEATURES", "read-only-rootfs", "webos_read_only_rootfs_hook ; ", "", d)}'
+ROOTFS_POSTPROCESS_COMMAND += '${@bb.utils.contains("IMAGE_FEATURES", "read-only-rootfs", "webos_read_only_rootfs_hook ; ", "", d)}'
 
 # Luna-service2 services should be executable only by user and group,
 # otherwise it is possible to hijack them with LD_PRELOAD and

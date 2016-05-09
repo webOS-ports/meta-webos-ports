@@ -41,7 +41,7 @@ S = "${WORKDIR}/${BPN}-${PV}"
 
 # Let's not configure for the host distro.
 #
-PTEST_CONF = "${@base_contains('DISTRO_FEATURES', 'ptest', '--enable-tests', '', d)}"
+PTEST_CONF = "${@bb.utils.contains('DISTRO_FEATURES', 'ptest', '--enable-tests', '', d)}"
 EXTRA_OECONF += "--with-distro=${DISTRO} ${PTEST_CONF}"
 
 PACKAGECONFIG ??= ""

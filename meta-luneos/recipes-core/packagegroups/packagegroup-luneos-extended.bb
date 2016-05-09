@@ -28,9 +28,9 @@ RDEPENDS_${PN} = " \
   webos-connman-adapter \
   wireless-tools \
   \
-  ${@base_contains('MACHINE_FEATURES', 'phone', 'packagegroup-webos-telephony', '', d)} \
-  ${@base_contains('MACHINE_FEATURES', 'cellular', 'packagegroup-webos-telephony', '', d)} \
-  ${@base_contains('MACHINE_FEATURES', 'bluetooth', 'bluez4', '',d)} \
+  ${@bb.utils.contains('MACHINE_FEATURES', 'phone', 'packagegroup-webos-telephony', '', d)} \
+  ${@bb.utils.contains('MACHINE_FEATURES', 'cellular', 'packagegroup-webos-telephony', '', d)} \
+  ${@bb.utils.contains('MACHINE_FEATURES', 'bluetooth', 'bluez4', '',d)} \
   \
   location-service \
   imaccountvalidator \

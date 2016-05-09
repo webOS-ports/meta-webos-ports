@@ -13,5 +13,5 @@ PHONE_RDEPENDS = " \
 RDEPENDS_${PN} = " \
     ofono \
     webos-telephonyd \
-    ${@base_contains('MACHINE_FEATURES', 'phone', '${PHONE_RDEPENDS}', '', d)} \
+    ${@bb.utils.contains('MACHINE_FEATURES', 'phone', '${PHONE_RDEPENDS}', '', d)} \
 "

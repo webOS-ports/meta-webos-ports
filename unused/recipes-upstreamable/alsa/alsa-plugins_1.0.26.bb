@@ -15,7 +15,7 @@ SRC_URI[sha256sum] = "03515134d2009db4dfb2769e0ab0e1fb517c8140ffdfd64a984be968e8
 
 inherit autotools
 
-PACKAGECONFIG ??= "${@base_contains('DISTRO_FEATURES', 'pulseaudio', 'pulseaudio', '', d)}"
+PACKAGECONFIG ??= "${@bb.utils.contains('DISTRO_FEATURES', 'pulseaudio', 'pulseaudio', '', d)}"
 PACKAGECONFIG[pulseaudio] = "--enable-pulse,--disable-pulse,pulseaudio"
 PACKAGECONFIG[libav] = "--enable-avcodec,--disable-avcodec,libav"
 PACKAGECONFIG[jack] = "--enable-jack,--disable-jack,jack"

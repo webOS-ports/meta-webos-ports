@@ -46,7 +46,7 @@ do_install_append() {
 # LTTng tracepoints in LS2 can cause out of memory, because LS2 is used by many components.
 # To enable tracepoints back use WEBOS_LTTNG_ENABLED_pn-luna-service2 = "1"
 WEBOS_LTTNG_ENABLED = "0"
-EXTRA_OECMAKE += " ${@base_contains('WEBOS_LTTNG_ENABLED', '1', '-DWEBOS_LTTNG_ENABLED:BOOLEAN=True', '', d)}"
+EXTRA_OECMAKE += " ${@bb.utils.contains('WEBOS_LTTNG_ENABLED', '1', '-DWEBOS_LTTNG_ENABLED:BOOLEAN=True', '', d)}"
 
 WEBOS_DISABLE_LS2_SECURITY ?= "0"
 EXTRA_OECMAKE += '${@base_conditional("WEBOS_DISABLE_LS2_SECURITY", "1", "-DWEBOS_LS2_SECURE:BOOLEAN=False", "" ,d)}'
