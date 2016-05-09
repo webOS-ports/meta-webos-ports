@@ -18,7 +18,9 @@ FILES_${PN}-dbg += " \
     /lib/libqofono-qt5/tests/.debug \
     ${libdir}/qt5/qml/MeeGo/QOfono/.debug"
 FILES_${PN}-tests = " \
-    /lib/libqofono-qt5/tests/tst_*"
+    ${libdir}/libqofono-qt5/tests/tst_* \
+    /opt/tests/libqofono-qt5 \
+"
 FILES_${PN} += " \
     ${libdir}/qt5/qml/MeeGo/QOfono/qmldir \
     ${libdir}/qt5/qml/MeeGo/QOfono/libQOfonoQtDeclarative.so"
