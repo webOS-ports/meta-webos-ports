@@ -10,6 +10,9 @@ SRC_URI[sha256sum] = "43c6ced15e237cbb21b3082d7c0b42777c50c1f731d0d4b5efb5231063
 
 S = "${WORKDIR}/Mesa-${PV}"
 
+# This version doesn't have --with-sha option
+PACKAGECONFIG_remove = "${MESA_CRYPTO}"
+
 PACKAGECONFIG[gallium-egl]  = "--enable-gallium-egl, --disable-gallium-egl"
 PACKAGECONFIG[gallium-gbm]  = "--enable-gallium-gbm, --disable-gallium-gbm"
 
