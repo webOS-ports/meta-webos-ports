@@ -137,11 +137,12 @@ QEMU_RDEPENDS = " \
     mesa-driver-swrast \
     phonesim \
     qt5-plugin-generic-vboxtouch \
+    kernel-module-snd-intel8x0 \
 "
 
 RDEPENDS_${PN}_append_qemux86 = " ${QEMU_RDEPENDS}"
 RDEPENDS_${PN}_append_qemux86-64 = " ${QEMU_RDEPENDS}"
 
 RDEPENDS_${PN}_append_arm = " \
-  crash-handler \
+    crash-handler \
 "
