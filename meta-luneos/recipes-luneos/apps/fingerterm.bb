@@ -3,15 +3,19 @@ LICENSE = "GPL-2.0"
 LIC_FILES_CHKSUM = "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263"
 
 PV = "1.0.3+gitr${SRCPV}"
-SRCREV = "ec5794a31b837b4f8202a1768e5ada3966db9570"
+SRCREV = "875aa14ed2a511b7e79f29020d40f5b3c344423d"
 
 DEPENDS = "qtbase qtdeclarative"
 
 SRC_URI = " \
-    ${WEBOS_PORTS_GIT_REPO_COMPLETE} \
+    git://git.merproject.org/mer-core/fingerterm.git;protocol=git;branch=master \
     file://appinfo.json \
 "
 S = "${WORKDIR}/git"
+
+EXTRA_QMAKEVARS_PRE = "\
+    DEFAULT_FONT=Prelude \
+"
 
 inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
