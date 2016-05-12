@@ -27,7 +27,7 @@ require conf/distro/include/luneos-sdk.inc
 WEBOS_PORTS_CODENAME = "ports"
 # WEBOS_DISTRO_PLATFORM_CODENAME ?= "${DISTRO}-${WEBOS_PORTS_CODENAME}"
 WEBOS_DISTRO_PLATFORM_CODENAME ?= "luneos"
-WEBOS_DISTRO_VERSION_CODENAME ?= "mocha"
+WEBOS_DISTRO_VERSION_CODENAME ?= "tobio"
 # WEBOS_DISTRO_VERSION_CODENAME ?= "${@base_get_metadata_git_branch('.', None).strip().translate(None, '()/')}"
 WEBOS_DISTRO_RELEASE_CODENAME ?= "${WEBOS_DISTRO_PLATFORM_CODENAME}${@ base_conditional( 'WEBOS_DISTRO_VERSION_CODENAME', '', '', '-${WEBOS_DISTRO_VERSION_CODENAME}', d) }"
 
