@@ -4,7 +4,7 @@ DESCRIPTION = "Presage is an intelligent predictive text entry system."
 LICENSE = "GPL-2.0+"
 LIC_FILES_CHKSUM = "file://COPYING;md5=94d55d512a9ba36caa9b7df079bae19f"
 
-DEPENDS = "sqlite3 libtinyxml"
+DEPENDS = "sqlite3 libtinyxml ncurses"
 DEPENDS_append_class-target = " presage-native"
 
 BBCLASSEXTEND = "native"
