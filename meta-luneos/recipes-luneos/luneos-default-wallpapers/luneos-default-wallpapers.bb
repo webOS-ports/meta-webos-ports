@@ -13,7 +13,7 @@ S = "${WORKDIR}/git"
 
 do_install() {
     install -d ${D}${webos_mountablestoragedir}/wallpapers
-    cp -av ${S}/* ${D}${webos_mountablestoragedir}/wallpapers
+    cp -R --no-dereference --preserve=mode,links -v ${S}/* ${D}${webos_mountablestoragedir}/wallpapers
     rm ${D}${webos_mountablestoragedir}/wallpapers/README.md
 }
 
