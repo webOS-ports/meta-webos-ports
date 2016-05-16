@@ -2,7 +2,7 @@ SUMMARY = "Simple service to retrieve, set and get notified about android proper
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://README.md;beginline=86;endline=105;md5=649a1e756b7d4ea0e24d38c2d5a572ee"
 
-DEPENDS += "luna-service2 libhybris libpbnjson"
+DEPENDS += "luna-service2 libhybris libpbnjson luna-prefs"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
