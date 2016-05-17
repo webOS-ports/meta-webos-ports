@@ -21,6 +21,7 @@ RDEPENDS_${PN} = " \
     perl-module-constant \
     perl-module-overload \
     perl-module-exporter-heavy \
+    bash \
 "
 RDEPENDS_${PN}-ptest += "file make"
 
