@@ -33,3 +33,4 @@ do_install() {
 }
 
 FILES_${PN} += "${webos_servicesdir}/${PN}"
+RDEPENDS_${PN} = "bash"
