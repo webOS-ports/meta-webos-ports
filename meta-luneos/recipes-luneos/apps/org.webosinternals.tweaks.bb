@@ -8,8 +8,8 @@ inherit webos_filesystem_paths
 inherit webos_ports_repo
 inherit allarch
 
-PV = "3.0.1+gitr${SRCPV}"
-SRCREV = "06b517f5c33c520211eb330c42c6f1a47b7b6123"
+PV = "3.0.3+gitr${SRCPV}"
+SRCREV = "42f09d04dfa8e32e7bc46473cc6789aca729b11e"
 
 WEBOS_REPO_NAME = "tweaks"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
