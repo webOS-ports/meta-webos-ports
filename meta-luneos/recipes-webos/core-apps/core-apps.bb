@@ -54,3 +54,5 @@ do_install() {
 }
 
 FILES_${PN} += "${webos_applicationsdir} ${webos_sysconfdir}"
+
+RDEPENDS_${PN} = "bash"
