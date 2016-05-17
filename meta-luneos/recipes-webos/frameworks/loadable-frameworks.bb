@@ -29,3 +29,5 @@ do_install() {
 }
 
 FILES_${PN} += "${webos_frameworksdir}"
+
+RDEPENDS_${PN} = "bash"
