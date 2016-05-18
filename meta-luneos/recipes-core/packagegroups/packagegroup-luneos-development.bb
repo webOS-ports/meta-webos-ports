@@ -23,6 +23,7 @@ RDEPENDS_${PN} = " \
   strace \
   opkg-utils \
   bc \
+  ${VALGRIND} \
   smemstat \
   binutils \
   \
