@@ -152,6 +152,8 @@ SANITY_TESTED_DISTROS ?= " \
             Ubuntu-12.10 \n \
             Ubuntu-13.04 \n \
             Ubuntu-14.04 \n \
+            Ubuntu-15.10 \n \
+            Ubuntu-16.04 \n \
             "
 
 LICENSE_CREATE_PACKAGE = "1"
