@@ -26,6 +26,17 @@ EXTRA_OECONF = " \
     --disable-python-binding \
 "
 
+FILES_${PN} += "\
+    ${libdir}/python2.7 \
+    ${libdir}/python2.7/dist-packages \
+    ${libdir}/python2.7/dist-packages/presage_dbus_service.pyc \
+    ${libdir}/python2.7/dist-packages/presage_dbus_service.pyo \
+    ${libdir}/python2.7/dist-packages/presage_dbus_service.py \
+    ${datadir}/dbus-1 \
+    ${datadir}/dbus-1/services \
+    ${datadir}/dbus-1/services/org.gnome.presage.service \
+"
+
 do_configure_prepend_class-target() {
    sed -i "s#\$(top_builddir)/src/tools/text2ngram#${STAGING_BINDIR_NATIVE}/text2ngram#g" ${S}/resources/Makefile.am
 }
