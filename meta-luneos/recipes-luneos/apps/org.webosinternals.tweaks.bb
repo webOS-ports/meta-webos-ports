@@ -20,7 +20,7 @@ do_compile() {
 
 do_install() {
     install -d ${D}${webos_applicationsdir}/${PN}
-    cp -rv ${S}/enjo-app/* ${D}${webos_applicationsdir}/${PN}
+    cp -rv ${S}/enyo-app/* ${D}${webos_applicationsdir}/${PN}
 
     install -d ${D}${webos_servicesdir}/org.webosinternals.tweaks.prefs
     cp -rv ${S}/node-service/* ${D}${webos_servicesdir}/org.webosinternals.tweaks.prefs
