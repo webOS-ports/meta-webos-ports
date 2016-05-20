@@ -38,6 +38,8 @@ do_install_append() {
     install -m 0644 ${S}/LuneOS/systemd/sensorfwd.service ${D}${systemd_unitdir}/system
 }
 
+RDEPENDS_${PN} = "bash"
+
 FILES_${PN}-dbg += " \
   ${libdir}/sensord-qt5/testing/.debug \
   ${libdir}/sensord-qt5/.debug \
