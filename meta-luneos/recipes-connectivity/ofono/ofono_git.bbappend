@@ -4,7 +4,6 @@ SRCREV = "403f29320c68ead8b93ca422b1c3c509f8bff482"
 PV = "1.17+gitr${SRCPV}"
 
 RDEPENDS_${PN} += "mobile-broadband-provider-info ofono-conf"
-RDEPENDS_${PN}-tests += "python3"
 
 SRC_URI  = " \
   git://git.merproject.org/mer-core/ofono.git;protocol=git;branch=master \
@@ -12,6 +11,8 @@ SRC_URI  = " \
   file://0002-Add-support-for-the-Ericsson-F5521gw-modem.patch;striplevel=2 \
   file://ofono \
   file://ofono.service \
+  file://Revert-test-Convert-to-Python-3.patch
+  file://Revert-test-Convert-to-Python-3-VoiceCall.patch
 "
 S = "${WORKDIR}/git/ofono"
 
