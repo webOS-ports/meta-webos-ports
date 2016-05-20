@@ -8,7 +8,7 @@ SECTION = "console/network"
 
 LIC_FILES_CHKSUM = "file://COPYING;md5=8114b83a0435d8136b47bd70111ce5cd"
 
-DEPENDS = "glib-2.0 dbus dbus-glib json-glib libsoup-2.4"
+DEPENDS = "glib-2.0 dbus dbus-glib json-glib libsoup-2.4 avahi"
 
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE_${PN} = "${PN}.service"
