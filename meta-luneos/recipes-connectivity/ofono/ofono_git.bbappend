@@ -11,8 +11,8 @@ SRC_URI  = " \
   file://0002-Add-support-for-the-Ericsson-F5521gw-modem.patch;striplevel=2 \
   file://ofono \
   file://ofono.service \
-  file://Revert-test-Convert-to-Python-3.patch
-  file://Revert-test-Convert-to-Python-3-VoiceCall.patch
+  file://Revert-test-Convert-to-Python-3.patch \
+  file://Revert-test-Convert-to-Python-3-VoiceCall.patch \
 "
 S = "${WORKDIR}/git/ofono"
 
