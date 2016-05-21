@@ -9,7 +9,7 @@ DEPENDS_append_class-target = " presage-native"
 
 BBCLASSEXTEND = "native"
 
-inherit autotools gettext pkgconfig
+inherit autotools gettext pkgconfig python-dir
 
 SRC_URI = " \
     http://downloads.sourceforge.net/${BPN}/${BP}.tar.gz \
@@ -27,11 +27,11 @@ EXTRA_OECONF = " \
 "
 
 FILES_${PN} += "\
-    ${libdir}/python2.7 \
-    ${libdir}/python2.7/dist-packages \
-    ${libdir}/python2.7/dist-packages/presage_dbus_service.pyc \
-    ${libdir}/python2.7/dist-packages/presage_dbus_service.pyo \
-    ${libdir}/python2.7/dist-packages/presage_dbus_service.py \
+    ${libdir}/${PYTHON_DIR} \
+    ${libdir}/${PYTHON_DIR}/dist-packages \
+    ${libdir}/${PYTHON_DIR}/dist-packages/presage_dbus_service.pyc \
+    ${libdir}/${PYTHON_DIR}/dist-packages/presage_dbus_service.pyo \
+    ${libdir}/${PYTHON_DIR}/dist-packages/presage_dbus_service.py \
     ${datadir}/dbus-1 \
     ${datadir}/dbus-1/services \
     ${datadir}/dbus-1/services/org.gnome.presage.service \
