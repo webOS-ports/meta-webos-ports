@@ -10,19 +10,20 @@ DEPENDS = "python-lxml-native"
 
 SRCREV = "54c5c953560ad9c42479c9acd1f5d092ac9734e7"
 
-SRC_URI = "git://github.com/EFForg/https-everywhere.git;protocol=git;branch=master"
+SRC_URI = " \
+    git://github.com/EFForg/https-everywhere.git;protocol=git;branch=master \
+    file://make-sqlite.py \
+"
 S = "${WORKDIR}/git"
 
 do_compile() {
-    #the python script expects the ../pkg dir to exist. We can either patch the python script or simple create the pkg dir. The latter is far easier and failsafe :)
-    mkdir -p ${S}/pkg
-    python ${S}/utils/make-json.py
+    python ${WORKDIR}/make-sqlite.py
 }
 
 do_install() {
     # copy the created json database with rulesets to the browser app
-    install -d ${D}${webos_applicationsdir}/org.webosports.app.browser/qml/Utils/
-    cp -rv ${S}/pkg/rulesets.json ${D}${webos_applicationsdir}/org.webosports.app.browser/qml/Utils/
+    install -d ${D}${webos_applicationsdir}/org.webosports.app.browser/qml/utils/
+    cp -rv ${WORKDIR}/rulesets.sqlite ${D}${webos_applicationsdir}/org.webosports.app.browser/qml/utils/
 }
 
-FILES_${PN} = "${webos_applicationsdir}/org.webosports.app.browser/qml/Utils/rulesets.json"
+FILES_${PN} = "${webos_applicationsdir}/org.webosports.app.browser/qml/utils/rulesets.sqlite"
