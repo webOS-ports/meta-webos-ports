@@ -21,7 +21,7 @@ RDEPENDS_${PN} = " \
 RDEPENDS_${PN}-ptest += "file make"
 
 SRC_URI = "http://linuxcontainers.org/downloads/${BPN}-${PV}.tar.gz \
-	file://lxc-1.0.0-disable-udhcp-from-busybox-template.patch \
+	file://lxc-2.0.0-disable-udhcp-from-busybox-template.patch \
 	file://runtest.patch \
 	file://run-ptest \
 	file://automake-ensure-VPATH-builds-correctly.patch \
