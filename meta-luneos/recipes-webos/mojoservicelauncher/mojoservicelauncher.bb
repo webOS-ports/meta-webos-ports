@@ -12,18 +12,15 @@ RDEPENDS_${PN} = "nodejs"
 RDEPENDS_${PN} += "nodejs-module-webos-dynaload nodejs-module-webos-pmlog nodejs-module-webos-sysbus mojoloader"
 
 PV = "3.0.1-81+git${SRCPV}"
-SRCREV = "f5bf3e2b5aa411c0408e9694bc63cacd339a252d"
+SRCREV = "47f8c3f9a6392463fcc83798de5ef86944682c08"
 
-inherit webos_public_repo
-inherit webos_filesystem_paths
+inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
 inherit webos_cmake
 inherit pkgconfig
 
-SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
-
-SRC_URI += "file://disable-jailing-per-default.patch"
 
 FILES_${PN} += "${webos_prefix}/nodejs ${webos_servicesdir} ${webos_frameworksdir}"
 FILES_${PN}-dbg += "${webos_prefix}/nodejs/.debug/*"
