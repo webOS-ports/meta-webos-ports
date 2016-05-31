@@ -18,9 +18,11 @@ inherit pkgconfig
 inherit webos_machine_impl_dep
 inherit update-alternatives
 
-ALTERNATIVE_${PN} = "openssl-cnf"
+ALTERNATIVE_${PN} = "openssl-cnf openssl-cnf2"
 ALTERNATIVE_LINK_NAME[openssl-cnf] = "${libdir}/ssl/openssl.cnf"
 ALTERNATIVE_PRIORITY[openssl-cnf] ?= "10"
+ALTERNATIVE_LINK_NAME[openssl-cnf2] = "${sysconfdir}/ssl/openssl.cnf"
+ALTERNATIVE_PRIORITY[openssl-cnf2] ?= "10"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
@@ -31,13 +33,4 @@ do_install_append() {
     # get a conflict.
     install -d ${D}${sysconfdir}/ssl
     install -m 0644 ${S}/files/conf/ssl/openssl.cnf ${D}${sysconfdir}/ssl
-
-    # because openssl expects it's default configuration file in libdir
-    # we have to symlink it there together with some needed directories.
-    install -d ${D}${libdir}/ssl
-    ln -sf ${sysconfdir}/ssl/openssl.cnf ${D}${libdir}/ssl/openssl.cnf
-    ln -sf ${sysconfdir}/ssl/certs ${D}${libdir}/ssl/certs
-    ln -sf ${sysconfdir}/ssl/private ${D}${libdir}/ssl/private
 }
-
-FILES_${PN} += "${libdir}/ssl/"
