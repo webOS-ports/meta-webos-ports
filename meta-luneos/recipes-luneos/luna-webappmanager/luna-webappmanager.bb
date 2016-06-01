@@ -33,3 +33,5 @@ do_install_append() {
 }
 
 FILES_${PN} += "${webos_frameworksdir}"
+
+PNBLACKLIST[luna-webappmanager] ?= "BROKEN: needs to be adapted to new qt-5.7"
