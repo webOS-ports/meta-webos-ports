@@ -44,3 +44,5 @@ FILES_${PN} += "${OE_QMAKE_PATH_QML}/LunaNext"
 FILES_${PN}-dbg += " \
     ${OE_QMAKE_PATH_QML}/LunaNext/*/.debug \
     ${OE_QMAKE_PATH_QML}/LunaNext/*/*/.debug"
+
+PNBLACKLIST[luna-next] ?= "BROKEN: needs to be adapted to new qtwayland-5.7"

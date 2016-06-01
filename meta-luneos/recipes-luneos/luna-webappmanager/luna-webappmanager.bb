@@ -25,3 +25,5 @@ inherit webos_filesystem_paths
 inherit webos_systemd
 
 FILES_${PN} += "${webos_frameworksdir}"
+
+PNBLACKLIST[luna-webappmanager] ?= "BROKEN: needs to be adapted to new qt-5.7"
