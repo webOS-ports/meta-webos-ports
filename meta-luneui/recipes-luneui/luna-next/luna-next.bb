@@ -43,3 +43,5 @@ FILES_${PN}-dbg += " \
     ${OE_QMAKE_PATH_QML}/LunaNext/*/*/.debug"
 
 SRC_URI += "file://0001-CMakeLists.txt-Update-from-Qt5Compositor-to-Qt5Wayla.patch"
+
+PNBLACKLIST[luna-next] ?= "BROKEN: needs to be adapted to new qtwayland-5.7"
