@@ -9,7 +9,6 @@ RDEPENDS_${PN} += " \
     libconnman-qt5 \
     nemo-qml-plugin-dbus \
     libqofono \
-    luna-next \
 "
 
 PV = "0.4.0-1+git${SRCPV}"
