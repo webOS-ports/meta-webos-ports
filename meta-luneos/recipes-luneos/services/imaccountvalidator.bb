@@ -9,7 +9,7 @@ LIC_FILES_CHKSUM = " \
 DEPENDS = "glib-2.0 db8 pidgin luna-service2"
 
 PV = "3.0.5+gitr${SRCPV}"
-SRCREV = "f1a5ba6f35f957d82e830628587fee5bf430bb57"
+SRCREV = "fb5cf96b415cd0d8b3f1d1adc3ddf9b7befc0a3d"
 
 inherit webos_ports_repo
 inherit webos_cmake
