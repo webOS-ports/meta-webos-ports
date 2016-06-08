@@ -12,7 +12,7 @@ VIRTUAL-RUNTIME_rdx-utils ?= "rdx-utils-stub"
 RDEPENDS_${PN} = "${VIRTUAL-RUNTIME_cpushareholder} ${VIRTUAL-RUNTIME_rdx-utils}"
 
 PV = "3.9.3-194+git${SRCPV}"
-SRCREV = "1b65b37ad8c625cca1d173ec90c99b4a7c576ca2"
+SRCREV = "ed8fbe3a5d437d3102399d546e9ce7ca61e0a3f5"
 
 WEBOS_DISTRO_PRERELEASE ??= ""
 EXTRA_OECMAKE += "${@ '-DWEBOS_DISTRO_PRERELEASE:STRING="devel"' \
