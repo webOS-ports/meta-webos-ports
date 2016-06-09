@@ -6,7 +6,7 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 PV = "3.0.0-2+git${SRCPV}"
-SRCREV = "5ca9a5c2e1c6d30ee89e64bbcff1b50434621639"
+SRCREV = "3d5c13a046422e06a067e56f673f9adf0b61a689"
 
 inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
@@ -43,13 +43,10 @@ do_install() {
             cp -vrf $COREAPPS/configuration/activities/* ${D}${webos_sysconfdir}/activities/
         fi
     done
-    # Drop the notes application, we ship our own
+    # Drop the Contacts, Notes & Calculator applications, we ship our own Enyo 2 variant
+    # We keep all the db kinds & permissions because other apps can use these too.
     rm -rf ${D}${webos_applicationsdir}/com.palm.app.notes
-    rm -rf ${D}${sysconfdir}/palm/db/permissions/com.palm.note
-    rm -rf ${D}${sysconfdir}/palm/db/kinds/com.palm.note
     rm -rf ${D}${webos_applicationsdir}/com.palm.app.calculator
-    # NOTE we only have to drop the contacts app here, since we still need their db8
-    # configurations
     rm -rf ${D}${webos_applicationsdir}/com.palm.app.contacts
 }
 
