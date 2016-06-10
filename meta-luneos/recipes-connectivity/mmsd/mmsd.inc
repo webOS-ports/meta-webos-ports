@@ -14,4 +14,4 @@ RRECOMMENDS_${PN} += "ofono"
 
 FILES_${PN} += "${base_libdir}/udev ${systemd_unitdir}"
 FILES_${PN}-tests = "${libdir}/${BPN}/test"
-RDEPENDS_${PN}-tests = "python python-pygobject python-dbus"
+RDEPENDS_${PN}-tests = "python python-dbus"
