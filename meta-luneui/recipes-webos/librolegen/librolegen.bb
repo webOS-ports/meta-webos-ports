@@ -18,3 +18,4 @@ S = "${WORKDIR}/git"
 
 FILES_${PN} += "${datadir}/rolegen"
 
+SRC_URI += "file://0001-Fix-fexists-function.patch"
