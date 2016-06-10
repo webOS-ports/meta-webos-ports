@@ -18,7 +18,9 @@ inherit pkgconfig
 inherit webos_machine_impl_dep
 inherit webos_systemd
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
+    file://0001-Fix-build-with-newer-toolchain.patch \
+"
 S = "${WORKDIR}/git"
 
 CXXFLAGS += "-fpermissive"
