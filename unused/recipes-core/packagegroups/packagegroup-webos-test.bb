@@ -60,7 +60,6 @@ PYTHON = " \
     python-pprint \
     python-profile \
     python-pydoc \
-    python-pygobject \
     python-re \
     python-readline \
     python-resource \
