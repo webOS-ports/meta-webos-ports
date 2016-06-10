@@ -16,7 +16,9 @@ inherit webos_machine_impl_dep
 
 WEBOS_REPO_NAME = "mojomail"
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE} \
-    file://0001-replace-cjson-with-json-c.patch \
+    file://0001-Replace-cjson-with-json-c-0.12.patch;patchdir=.. \
+    file://0002-Fix-build-with-newer-toolchain.patch;patchdir=.. \
 "
 
+FILESEXTRAPATHS_prepend := "${THISDIR}/${WEBOS_REPO_NAME}:"
 CXXFLAGS += "-fpermissive"
