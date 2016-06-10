@@ -19,6 +19,7 @@ inherit webos_machine_impl_dep
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     file://0001-Fix-build-with-newer-boost-1.58.0.patch \
+    file://0001-Fix-build-with-newer-toolchain.patch \
 "
 S = "${WORKDIR}/git"
 
