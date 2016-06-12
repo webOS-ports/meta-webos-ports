@@ -35,6 +35,7 @@ RDEPENDS_${PN} = " \
   location-service \
   imaccountvalidator \
   imlibpurpleservice \
+  messaging-accounts \
   \
   org.webosinternals.preware \
   org.webosinternals.tweaks \
@@ -51,6 +52,7 @@ RDEPENDS_${PN} = " \
   org.webosports.app.pdf \
   org.webosports.app.photos \
   org.webosports.app.settings \
+  org.webosports.app.tasks \
   \
   org.webosports.cdav \
   \
