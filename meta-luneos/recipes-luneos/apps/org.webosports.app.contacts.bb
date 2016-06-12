@@ -10,7 +10,7 @@ inherit webos_filesystem_paths
 inherit webos_application
 
 PV = "0.0.1+gitr${SRCPV}"
-SRCREV = "eba4366a9d0d62d7ed33944f34599063775fe3b4"
+SRCREV = "af1af8185faea29596d47b9b44478105bd637436"
 
 # For compatibility reasons we have to name the app internally as the old palm contacts
 # app. Maybe possible to switch that later.
