@@ -14,7 +14,6 @@ SRC_URI = "git://github.com/mer-hybris/pulseaudio-modules-droid.git;branch=maste
 SRC_URI += " \
     file://0001-add-support-for-detected-external-connection-changes.patch \
     file://0002-droid-extcon-c-adapt-to-new-pulseaudio-5-apis.patch \
-    file://0003-remove-audio-bit-in-for-mako.patch \
     file://0004-use-pa-card-put-for-pulseaudio-8.patch \
 "
 
