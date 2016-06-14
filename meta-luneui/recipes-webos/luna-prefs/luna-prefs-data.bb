@@ -22,6 +22,9 @@ PRODUCT_DEVICE_NAME_PRODUCT_BROWSER_OS_NAME ?= "Lune OS"
 PRODUCT_DEVICE_NAME_PRODUCT_LINE_VERSION = "${WEBOS_DISTRO_API_VERSION}"
 PRODUCT_DEVICE_NAME_PRODUCT_BROWSER_OS_VERSION = "${WEBOS_DISTRO_API_VERSION}"
 
+# Public properties that should be accessible for apps
+PUBLIC_PROPERTIES ?= "com.palm.properties.nduid"
+
 do_install() {
     install -d ${D}${sysconfdir}/prefs/properties
 
@@ -38,4 +41,6 @@ do_install() {
     then
         echo -n ${PRODUCT_DEVICE_NAME_PRODUCT_BROWSER_OS_VERSION} > ${D}${sysconfdir}/prefs/properties/browserOsVersion
     fi
+	
+	echo -n "${PUBLIC_PROPERTIES}"               > ${D}${sysconfdir}/prefs/public_properties
 }
