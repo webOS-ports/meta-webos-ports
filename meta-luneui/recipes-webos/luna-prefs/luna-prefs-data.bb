@@ -42,5 +42,5 @@ do_install() {
         echo -n ${PRODUCT_DEVICE_NAME_PRODUCT_BROWSER_OS_VERSION} > ${D}${sysconfdir}/prefs/properties/browserOsVersion
     fi
 	
-	echo -n "${PUBLIC_PROPERTIES}"               > ${D}${sysconfdir}/prefs/public_properties
+    echo "${PUBLIC_PROPERTIES}"               > ${D}${sysconfdir}/prefs/public_properties
 }
