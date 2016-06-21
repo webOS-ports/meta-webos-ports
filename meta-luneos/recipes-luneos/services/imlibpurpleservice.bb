@@ -19,6 +19,35 @@ inherit webos_system_bus
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
+RRECOMMENDS_${PN} += " \
+    pidgin-sipe \
+    whatsapp-purple \
+    libpurple-plugin-autoaccept \
+    libpurple-plugin-buddynote \
+    libpurple-plugin-idle \
+    libpurple-plugin-joinpart \
+    libpurple-plugin-log_reader \
+    libpurple-plugin-newline \
+    libpurple-plugin-offlinemsg \
+    libpurple-plugin-psychic \
+    libpurple-plugin-ssl \
+    libpurple-plugin-ssl-gnutls \
+    libpurple-plugin-statenotify \
+    libpurple-protocol-aim \
+    libpurple-protocol-bonjour \
+    libpurple-protocol-gg \
+    libpurple-protocol-icq \
+    libpurple-protocol-irc \
+    libpurple-protocol-msn \
+    libpurple-protocol-mxit \
+    libpurple-protocol-myspace \
+    libpurple-protocol-novell \
+    libpurple-protocol-simple \
+    libpurple-protocol-xmpp \
+    libpurple-protocol-yahoojp \
+    libpurple-protocol-zephyr \
+"
+
 do_install_append() {
     cp -R --no-dereference --preserve=mode,links -v ${S}/files/etc ${D}
     cp -R --no-dereference --preserve=mode,links -v ${S}/files/usr ${D}
