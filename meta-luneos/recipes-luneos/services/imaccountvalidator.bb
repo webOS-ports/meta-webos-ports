@@ -23,6 +23,7 @@ S = "${WORKDIR}/git"
 RRECOMMENDS_${PN} += " \
     pidgin-sipe \
     whatsapp-purple \
+    purple-skypeweb \
     libpurple-plugin-autoaccept \
     libpurple-plugin-buddynote \
     libpurple-plugin-idle \
