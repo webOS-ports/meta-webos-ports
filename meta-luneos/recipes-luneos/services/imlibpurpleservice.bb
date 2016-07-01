@@ -39,12 +39,12 @@ RRECOMMENDS_${PN} += " \
     libpurple-protocol-gg \
     libpurple-protocol-icq \
     libpurple-protocol-irc \
-    libpurple-protocol-msn \
     libpurple-protocol-mxit \
     libpurple-protocol-myspace \
     libpurple-protocol-novell \
     libpurple-protocol-simple \
     libpurple-protocol-xmpp \
+    libpurple-protocol-yahoo \	
     libpurple-protocol-yahoojp \
     libpurple-protocol-zephyr \
 "
