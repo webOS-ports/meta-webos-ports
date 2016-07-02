@@ -4,7 +4,7 @@ SECTION = "webos/support"
 #Due to issues with CRLF line endings in LibWebP now using our own fork, so we don't need to patch in OE which caused issues. In future we migth be able to go back to upstream 3.18.0 release directly for example.
 SRC_URI = "git://github.com/webos-ports/FreeImage"
 
-SRCREV = "616efd4c556bc1754d4c053eec7ea7b141130870"
+SRCREV = "60b253f7cd9e82fb730cff7aa46b4eaa855443f1"
 
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = " \
