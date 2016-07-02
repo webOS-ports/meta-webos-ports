@@ -6,3 +6,9 @@ EXTRA_OECONF += " \
     --enable-plugins \
     --enable-debug \
 "
+
+FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
+
+SRC_URI += "\
+    file://ICQ-pw-length.patch \
+"
