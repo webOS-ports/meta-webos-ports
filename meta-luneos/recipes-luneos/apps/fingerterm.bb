@@ -14,7 +14,7 @@ SRC_URI = " \
 S = "${WORKDIR}/git"
 
 EXTRA_QMAKEVARS_PRE = "\
-    DEFAULT_FONT=Prelude \
+    DEFAULT_FONT=Courier \
 "
 
 inherit webos_ports_fork_repo
