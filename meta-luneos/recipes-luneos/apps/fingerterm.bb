@@ -21,16 +21,22 @@ inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
 inherit qmake5
 
-do_install() {
-    install -d ${D}${webos_applicationsdir}/fingerterm
+APP_PATH = "${webos_applicationsdir}/${PN}"
 
-    install -m 0644 ${WORKDIR}/appinfo.json ${D}${webos_applicationsdir}/fingerterm/
-    install -m 0755 ${WORKDIR}/build/fingerterm ${D}${webos_applicationsdir}/fingerterm/
-    install -m 0644 ${S}/fingerterm.png ${D}${webos_applicationsdir}/fingerterm/icon.png
-
-    # Always provide same version as we have in our recipe
-    sed -i -e s:__VERSION__:${PV}:g ${D}${webos_applicationsdir}/fingerterm/appinfo.json
+do_configure_append() {
+    sed -i -e s:/usr/bin/${PN}:${APP_PATH}/${PN}:g ${S}/*.cpp
 }
 
-FILES_${PN}-dbg += "${webos_applicationsdir}/fingerterm/.debug"
-FILES_${PN} += "${webos_applicationsdir}"
+do_install() {
+    install -d ${D}${APP_PATH}
+
+    install -m 0644 ${WORKDIR}/appinfo.json ${D}${APP_PATH}
+    install -m 0755 ${WORKDIR}/build/fingerterm ${D}${APP_PATH}
+    install -m 0644 ${S}/fingerterm.png ${D}${APP_PATH}/icon.png
+
+    # Always provide same version as we have in our recipe
+    sed -i -e s:__VERSION__:${PV}:g ${D}${APP_PATH}/appinfo.json
+}
+
+FILES_${PN}-dbg += "${APP_PATH}/.debug"
+FILES_${PN} += "${APP_PATH}"
