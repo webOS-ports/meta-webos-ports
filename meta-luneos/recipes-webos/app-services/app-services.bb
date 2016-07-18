@@ -64,6 +64,9 @@ do_install() {
     install -m 644 ${S}/com.palm.service.accounts/files/etc/event.d/createLocalAccount ${D}${sysconfdir}/event.d/
     install -d ${D}${sysconfdir}/init 2> /dev/null || true
     install -m 644 ${S}/com.palm.service.accounts/files/etc/init/createLocalAccount.conf ${D}${sysconfdir}/init/
+
+# create folder for contact linker plugins
+    mkdir -p ${D}${sysconfdir}/palm/contact_linker_plugins
 }
 
 FILES_${PN} += "${webos_servicesdir} ${webos_sysconfdir} ${sysconfdir}"
