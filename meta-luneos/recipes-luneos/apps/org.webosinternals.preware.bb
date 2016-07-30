@@ -9,7 +9,7 @@ inherit allarch
 inherit webos_enyojs_application
 
 PV = "2.0.2+gitr${SRCPV}"
-SRCREV = "43d7f3d00eaa4acd048000727091f931aced4e60"
+SRCREV = "1b80660e258ea9805bd00a23faa4e58016e9cacb"
 
 WEBOS_REPO_NAME = "preware"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
