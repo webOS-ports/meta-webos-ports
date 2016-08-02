@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "luna-service2 json-c glib-2.0 pulseaudio"
 
 PV = "0.1.0-10+git${SRCPV}"
-SRCREV = "9b3f3e1e7d7c3ecee5b6a8bbec54867ad74af37b"
+SRCREV = "50e4f34f1e329779640da98caba795833dfe0ef5"
 
 inherit webos_ports_repo
 inherit webos_cmake
