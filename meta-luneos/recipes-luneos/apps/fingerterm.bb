@@ -15,7 +15,7 @@ S = "${WORKDIR}/git"
 
 inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
-inherit qmake5
+inherit webos_qmake
 
 do_install() {
     install -d ${D}${webos_applicationsdir}/fingerterm

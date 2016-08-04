@@ -21,7 +21,7 @@ SRC_URI = " \
 
 S = "${WORKDIR}/git"
 
-inherit qmake5
+inherit webos_qmake
 inherit systemd
 inherit webos_system_bus
 

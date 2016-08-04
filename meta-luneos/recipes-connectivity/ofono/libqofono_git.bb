@@ -11,7 +11,7 @@ S = "${WORKDIR}/git"
 
 PV = "0.87+gitr${SRCPV}"
 
-inherit qmake5
+inherit webos_qmake
 
 PACKAGES += "${PN}-tests"
 FILES_${PN}-dbg += " \

@@ -11,7 +11,7 @@ RRECOMMENDS_${PN} += "qtlocation"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-inherit qmake5
+inherit webos_qmake
 inherit webos_ports_repo
 inherit webos_filesystem_paths
 
