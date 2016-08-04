@@ -106,6 +106,7 @@ RDEPENDS_${PN} = " \
   luneos-default-wallpapers \
   \
   https-everywhere \
+  storaged \
 "
 
 LIBHYBRIS_RDEPENDS = " \
