@@ -12,7 +12,7 @@ RDEPENDS_${PN} = "nodejs"
 RDEPENDS_${PN} += "nodejs-module-webos-dynaload nodejs-module-webos-pmlog nodejs-module-webos-sysbus mojoloader"
 
 PV = "3.0.1-81+git${SRCPV}"
-SRCREV = "f2b7729e4242644962cc6356128c14ac06a8f0dc"
+SRCREV = "ee35e3e27c1abc488694f336e123fb88e24b7296"
 
 inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
