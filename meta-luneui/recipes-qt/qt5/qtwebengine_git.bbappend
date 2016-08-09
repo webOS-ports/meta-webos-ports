@@ -21,6 +21,6 @@ SRCREV_chromium = "7dc89f73cceb3a3d63a230deeebff14862dfe828"
 QT_MODULE_BRANCH_CHROMIUM = "${WEBOS_GIT_PARAM_BRANCH}"
 
 SRC_URI = " \
-    ${WEBOS_PORTS_GIT_REPO_COMPLETE};name=qtwebengine;branch=webOS-ports/master-newer-56 \
+    ${WEBOS_PORTS_GIT_REPO_COMPLETE};name=qtwebengine \
     ${WEBOS_PORTS_GIT_REPO}/qtwebengine-chromium;name=chromium;branch=${QT_MODULE_BRANCH_CHROMIUM};destsuffix=git/src/3rdparty \
 "
