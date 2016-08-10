@@ -6,7 +6,7 @@ RDEPENDS_${PN} += " \
     qtdeclarative-qmlplugins \
     qtgraphicaleffects-qmlplugins \
     qtquickcontrols-qmlplugins \
-    libconnman-qt \
+    libconnman-qt5 \
     nemo-qml-plugin-dbus \
     libqofono \
     luna-next \
