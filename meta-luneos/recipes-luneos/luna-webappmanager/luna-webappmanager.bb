@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = " \
     file://COPYING-Apache-2.0;md5=3b83ef96387f14655fc854ddc3c6bd57 \
 "
 
-DEPENDS = "qtbase qtdeclarative qtwebengine luna-sysmgr-common libconnman-qt"
+DEPENDS = "qtbase qtdeclarative qtwebengine luna-sysmgr-common libconnman-qt5"
 RDEPENDS_${PN} += " \
     qtdeclarative-qmlplugins \
     qtwebengine-qmlplugins \
