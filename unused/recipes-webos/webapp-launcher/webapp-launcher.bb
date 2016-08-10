@@ -9,7 +9,7 @@ DEPENDS = "qtbase qtdeclarative qtwebkit luna-sysmgr-common libwebos-application
 RDEPENDS_${PN} += " \
     qtdeclarative-qmlplugins \
     qtwebkit-qmlplugins \
-    libconnman-qt \
+    libconnman-qt5 \
 "
 
 PV = "0.1.0-33+git${SRCPV}"
