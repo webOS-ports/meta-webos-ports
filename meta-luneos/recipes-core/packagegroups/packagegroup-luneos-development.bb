@@ -37,7 +37,6 @@ RDEPENDS_${PN} = " \
   nyx-utils \
   \
   systemd-analyze \
-  qt5-opengles2-test \
   sdl2-opengles-test \
   \
   connman-client \
