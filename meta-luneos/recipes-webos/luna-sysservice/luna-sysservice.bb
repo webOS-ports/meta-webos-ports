@@ -13,7 +13,7 @@ DEPENDS = "luna-service2 libpbnjson qtbase uriparser libxml2 sqlite3 pmloglib js
 RDEPENDS_${PN} += "${VIRTUAL-RUNTIME_ntp}"
 
 PV = "2.0.1-38+git${SRCPV}"
-SRCREV = "0f7dff94b040e788d8e852c3b1c2d7ca09969269"
+SRCREV = "151ba378886274f07d6d4e606ebeec43af3f576e"
 
 inherit webos_ports_fork_repo
 inherit webos_cmake
