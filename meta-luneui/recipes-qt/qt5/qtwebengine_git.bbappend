@@ -6,7 +6,7 @@ EXTRA_QMAKEVARS_PRE += "GYP_CONFIG+=use_pulseaudio"
 
 inherit webos_ports_fork_repo
 
-SRCREV_qtwebengine = "9811ae89bbef3fec356d5a63c1ae2801b1649ee7"
+SRCREV_qtwebengine = "f2a5538fb4e12b2fa15d4d576a05e2da50c7bbba"
 SRCREV_chromium = "7dc89f73cceb3a3d63a230deeebff14862dfe828"
 
 QT_MODULE_BRANCH_CHROMIUM = "${WEBOS_GIT_PARAM_BRANCH}"
