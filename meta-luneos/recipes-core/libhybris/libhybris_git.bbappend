@@ -6,4 +6,4 @@ EXTRA_OECONF += " \
     --enable-debug \
 "
 
-SRCREV = "0522457476240888d834035cc80fc43b8f77f13e"
+SRCREV = "63b253bd9985c84534acb42a89e8e5bd1db823e1"
