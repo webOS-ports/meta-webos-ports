@@ -19,6 +19,7 @@ PACKAGES += "${PN}-examples"
 FILES_${PN} += " \
     ${OE_QMAKE_PATH_QML}/LuneOS/ \
     ${OE_QMAKE_PATH_QML}/QtQuick/Controls/Styles/LuneOS/ \
+    ${OE_QMAKE_PATH_QML}/LunaWebEngineViewStyle/ \
 "
 FILES_${PN}-examples += " \
     ${webos_applicationsdir}/org.luneos.components.gallery \
