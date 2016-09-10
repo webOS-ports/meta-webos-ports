@@ -3,7 +3,7 @@ DEPENDS += "luna-service2 pmloglib qtlocation"
 # Enable extra codecs
 EXTRA_QMAKEVARS_PRE += "WEBENGINE_CONFIG+=use_proprietary_codecs"
 EXTRA_QMAKEVARS_PRE += "GYP_CONFIG+=use_pulseaudio"
-EXTRA_QMAKEVARS_PRE += "GYP_CONFIG+=enable_plugins"
+EXTRA_QMAKEVARS_PRE += "GYP_CONFIG+=enable_plugins=1"
 
 inherit webos_ports_fork_repo
 
