@@ -24,9 +24,18 @@ SRCREV = "6e1d0ab26597904722488ebeebfc4a0b4e570c2e"
 inherit webos_ports_fork_repo
 inherit webos_cmake
 inherit pkgconfig
+inherit systemd
+
+SYSTEMD_PACKAGES = "${PN}"
+SYSTEMD_SERVICE_${PN} = "nyx.target"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 # Patch to support additional async suspend API's
 SRC_URI += "file://0001-Implement-asynchronous-suspend-resume-methods-for-sy.patch"
+
+do_install_append() {
+    install -d ${D}${systemd_unitdir}/system
+    install -m 0644 ${S}/files/systemd/nyx.target ${D}${systemd_unitdir}/system/
+}
