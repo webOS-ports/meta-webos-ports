@@ -19,7 +19,7 @@ SECTION = "webos/libs"
 DEPENDS = "glib-2.0"
 
 PV = "6.1.0-70+git${SRCPV}"
-SRCREV = "6e1d0ab26597904722488ebeebfc4a0b4e570c2e"
+SRCREV = "2892791512ca37b655695f6ef811b5a4602ffb4b"
 
 inherit webos_ports_fork_repo
 inherit webos_cmake
