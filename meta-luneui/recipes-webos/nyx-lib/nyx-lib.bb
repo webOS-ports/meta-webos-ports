@@ -19,13 +19,13 @@ SECTION = "webos/libs"
 DEPENDS = "glib-2.0"
 
 PV = "6.1.0-70+git${SRCPV}"
-SRCREV = "7054fabb78bbcaaf0ff3bfb2ea7fde6b6905860a"
+SRCREV = "6e1d0ab26597904722488ebeebfc4a0b4e570c2e"
 
-inherit webos_public_repo
+inherit webos_ports_fork_repo
 inherit webos_cmake
 inherit pkgconfig
 
-SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 # Patch to support additional async suspend API's
