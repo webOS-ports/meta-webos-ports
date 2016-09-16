@@ -6,6 +6,7 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 DEPENDS = "nyx-lib luna-service2 json-c glib-2.0"
+RDEPENDS_${PN} = "bash"
 
 WEBOS_VERSION = "2.1.0-5_55d854d3ea9fc6190307a74d13d49ed75dd59a82"
 PR = "r3"
