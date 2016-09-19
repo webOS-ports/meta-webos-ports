@@ -12,12 +12,12 @@ PROVIDES = "mojodb"
 DEPENDS = "luna-service2 jemalloc icu pmloglib curl glib-2.0 leveldb leveldb-tl boost"
 
 PV = "3.2.0-145+git${SRCPV}"
-SRCREV = "70aea26dea652fd257ac2a1d37d2214e59409773"
+SRCREV = "0f18ab88053227608a8729ac54fb2bdb0a8dc363"
 
 RDEPENDS_${PN} += "leveldb bash"
 RDEPENDS_${PN}-tests += "bash"
 
-inherit webos_public_repo
+inherit webos_ports_fork_repo
 inherit webos_cmake
 inherit webos_system_bus
 inherit pkgconfig
