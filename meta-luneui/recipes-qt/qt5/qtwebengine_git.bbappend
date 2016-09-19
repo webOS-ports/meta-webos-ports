@@ -7,7 +7,7 @@ EXTRA_QMAKEVARS_PRE += "GYP_CONFIG+=enable_plugins=1"
 
 inherit webos_ports_fork_repo
 
-SRCREV_qtwebengine = "66b22fb0f54f4f47af354194c4b7733623f5d863"
+SRCREV_qtwebengine = "c1a68dd725d2fde3146b408ad695e9a147a9e55c"
 SRCREV_chromium = "df73009aa4afebe1114c2764a7c2a32d537ed5d7"
 
 QT_MODULE_BRANCH_CHROMIUM = "${WEBOS_GIT_PARAM_BRANCH}"
