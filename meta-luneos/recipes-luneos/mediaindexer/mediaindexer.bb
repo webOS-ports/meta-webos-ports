@@ -8,7 +8,7 @@ DEPENDS += "db8 glib-2.0 luna-service2 sqlite3 taglib qtbase luna-sysmgr-common"
 RDEPENDS_${PN} += "shared-mime-info"
 
 PV = "0.1.0-14+git${SRCPV}"
-SRCREV = "a1ffb6796c91c8676216d32036c54108c8cb536c"
+SRCREV = "fb14706a5ab1537cb5a1d2860dbc64aa6728cf56"
 
 inherit webos_ports_repo
 inherit webos_system_bus
