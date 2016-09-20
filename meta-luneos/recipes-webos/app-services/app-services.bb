@@ -30,6 +30,8 @@ do_install() {
     install -d ${D}${webos_sysbus_prvservicesdir}
     install -d ${D}${webos_sysbus_dynpubrolesdir}
     install -d ${D}${webos_sysbus_dynprvrolesdir}
+    install -d ${D}${webos_sysbus_dynpubservicesdir}
+    install -d ${D}${webos_sysbus_dynprvservicesdir}
     install -d ${D}${webos_sysbus_devpubservicesdir}
     install -d ${D}${webos_sysbus_devprvservicesdir}
     install -d ${D}${webos_sysbus_devpubrolesdir}
@@ -84,4 +86,5 @@ FILES_${PN} += "${webos_sysbus_prvrolesdir} ${webos_sysbus_pubrolesdir}"
 FILES_${PN} += "${webos_accttemplatesdir} ${webos_sysbus_dynpubrolesdir}"
 FILES_${PN} += "${webos_sysbus_dynprvrolesdir} ${webos_sysbus_devpubservicesdir}"
 FILES_${PN} += "${webos_sysbus_devprvservicesdir} ${webos_sysbus_devpubrolesdir}"
-FILES_${PN} += "${webos_sysbus_devprvrolesdir}"
+FILES_${PN} += "${webos_sysbus_devprvrolesdir} ${webos_sysbus_dynpubservicesdir}"
+FILES_${PN} += "${webos_sysbus_dynprvservicesdir}"
