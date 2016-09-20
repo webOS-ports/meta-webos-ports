@@ -21,10 +21,19 @@ do_install() {
     install -d ${D}${webos_servicesdir}
     install -d ${D}${webos_sysconfdir}/db/kinds
     install -d ${D}${webos_sysconfdir}/db/permissions
+    install -d ${D}${webos_sysconfdir}/db_kinds
+    install -d ${D}${webos_sysconfdir}/mediadb/kinds
+    install -d ${D}${webos_sysconfdir}/mediadb/permissions
     install -d ${D}${webos_sysconfdir}/activities
     install -d ${D}${webos_sysconfdir}/filecache_types
     install -d ${D}${webos_sysbus_pubservicesdir}
     install -d ${D}${webos_sysbus_prvservicesdir}
+    install -d ${D}${webos_sysbus_dynpubrolesdir}
+    install -d ${D}${webos_sysbus_dynprvrolesdir}
+    install -d ${D}${webos_sysbus_devpubservicesdir}
+    install -d ${D}${webos_sysbus_devprvservicesdir}
+    install -d ${D}${webos_sysbus_devpubrolesdir}
+    install -d ${D}${webos_sysbus_devprvrolesdir}
     install -d ${D}${webos_sysbus_prvrolesdir}
     install -d ${D}${webos_sysbus_pubrolesdir}
 
@@ -72,4 +81,7 @@ do_install() {
 FILES_${PN} += "${webos_servicesdir} ${webos_sysconfdir} ${sysconfdir}"
 FILES_${PN} += "${webos_sysbus_pubservicesdir} ${webos_sysbus_prvservicesdir}"
 FILES_${PN} += "${webos_sysbus_prvrolesdir} ${webos_sysbus_pubrolesdir}"
-FILES_${PN} += "${webos_accttemplatesdir}"
+FILES_${PN} += "${webos_accttemplatesdir} ${webos_sysbus_dynpubrolesdir}"
+FILES_${PN} += "${webos_sysbus_dynprvrolesdir} ${webos_sysbus_devpubservicesdir}"
+FILES_${PN} += "${webos_sysbus_devprvservicesdir} ${webos_sysbus_devpubrolesdir}"
+FILES_${PN} += "${webos_sysbus_devprvrolesdir}"
