@@ -38,6 +38,7 @@ do_install() {
     install -d ${D}${webos_sysbus_devprvrolesdir}
     install -d ${D}${webos_sysbus_prvrolesdir}
     install -d ${D}${webos_sysbus_pubrolesdir}
+    install -d ${D}${webos_localstatedir}/data/com.palm.appInstallService
 
     for SERVICE in `ls -d1 ${S}/com.palm.service.*` ; do
         SERVICE_DIR=`basename $SERVICE`
