@@ -10,7 +10,6 @@ SRC_URI += " \
     file://0003-daemon-Set-default-resampler-to-speex-fixed-2.patch \
     file://0004-bluetooth-Allow-leaving-transport-running-while-sink.patch \
     file://0005-bluetooth-device-Do-not-lose-transport-pointer-after.patch \
-    file://0006-bluetooth-device-Default-to-using-A2DP-profile-initi.patch \
     file://0007-bluetooth-util-Detect-transport-acquire-release-loop.patch \
     file://0008-suspend-on-idle-Ensure-we-still-time-out-if-a-stream.patch \
     file://0009-Add-dbus-policy-for-Bluez4.patch \
