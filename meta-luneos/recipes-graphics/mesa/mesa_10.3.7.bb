@@ -1,5 +1,8 @@
 require recipes-graphics/mesa/${BPN}.inc
 
+# different license.html than 12.* version used in oe-core
+LIC_FILES_CHKSUM = "file://docs/license.html;md5=6a23445982a7a972ac198e93cc1cb3de"
+
 SRC_URI = "ftp://ftp.freedesktop.org/pub/mesa/older-versions/10.x/${PV}/MesaLib-${PV}.tar.bz2 \
     file://0001-Revert-egl-Check-for-NULL-native_window-in-eglCreate.patch \
     file://0001-loader-include-sys-stat.h-for-non-sysfs-builds.patch \
