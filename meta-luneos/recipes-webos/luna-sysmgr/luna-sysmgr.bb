@@ -22,7 +22,7 @@ VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 RDEPENDS_${PN} += "${VIRTUAL-RUNTIME_cpushareholder}"
 
 PV = "3.0.0-3+git${SRCPV}"
-SRCREV = "7e483e072d58c0fd971a1a98f840d0ddf8d47dff"
+SRCREV = "d1c4826cd4385fc0f78b03e7c8914cbff76cd231"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 
