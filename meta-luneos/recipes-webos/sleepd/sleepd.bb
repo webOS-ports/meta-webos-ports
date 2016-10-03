@@ -9,13 +9,14 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "nyx-lib luna-service2 json-c libxml2 sqlite3 glib-2.0 powerd"
 
 PV = "1.1.1-30+git${SRCPV}"
-SRCREV = "db1f16c6e7f4e93cb3763f11250381d85731e2b3"
+SRCREV = "9d479cf002aaa65f21f560da784d1994899c6693"
 
 inherit webos_ports_fork_repo
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
 inherit webos_filesystem_paths
+inherit webos_systemd
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
