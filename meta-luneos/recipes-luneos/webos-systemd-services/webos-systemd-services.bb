@@ -4,7 +4,7 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 PV = "1.0+gitr${SRCPV}"
-SRCREV = "79a5cf799e4ea528df5039ae9bb542803c1c6d10"
+SRCREV = "6197c8da2993f5df97ccbff192b15e22abb8d20f"
 
 inherit webos_ports_repo
 
@@ -17,20 +17,9 @@ inherit systemd
 
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE_${PN} = " \
-    activitymanager.service \
-    configurator.service \
-    configurator-async.service \
-    filecache.service \
-    ls-hubd_private.service \
-    ls-hubd_public.service \
-    LunaSysService.service \
-    LunaUniversalSearchMgr.service \
-    LunaSysMgr.service \
-    LunaAppManager.service \
+    luna-universalsearchmgr.service \
+    luna-sysmgr.service \
     org.webosinternals.ipkgservice.service \
-    powerd.service \
-    sleepd.service \
-    webos-connman-adapter.service \
 "
 
 do_install() {
@@ -39,10 +28,7 @@ do_install() {
     for f in *.service ; do
         install -m 0644 ${S}/$f ${D}${systemd_unitdir}/system
     done
-
-    install -d ${D}${bindir}
-    install -m 0755 ${S}/db8-prestart.sh ${D}${bindir}
 }
 
 # to catch .service files not listed in SYSTEMD_SERVICE (db8@.service and in some cases webos-telephonyd.service)
-FILES_${PN} += "${systemd_unitdir}/system"
+#FILES_${PN} += "${systemd_unitdir}/system"

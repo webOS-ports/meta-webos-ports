@@ -18,7 +18,7 @@ RDEPENDS_${PN} += " \
 
 PV = "1.0.0-19+git${SRCPV}"
 SRCREV = "14007e05b6d8746f22cf18ce4bda47cdc5e52427"
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};"
 S = "${WORKDIR}/git"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
@@ -27,3 +27,4 @@ inherit webos_ports_repo
 inherit pkgconfig
 inherit webos_system_bus
 inherit webos_cmake_qt5
+inherit webos_systemd
