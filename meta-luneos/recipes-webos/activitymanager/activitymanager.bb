@@ -9,17 +9,16 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "luna-service2 db8 boost openssl glib-2.0 pmloglib nyx-lib"
 
 PV = "3.0.0-123+git${SRCPV}"
-SRCREV = "d6d1f8457036d6bf5000af4bacc176bf38b99287"
+SRCREV = "1e3e1f2a94bf57f9174b3e536b0b5c9b3a2b3d28"
 
 inherit webos_ports_fork_repo
 inherit webos_cmake
 inherit webos_system_bus
 inherit pkgconfig
 inherit webos_machine_impl_dep
+inherit webos_systemd
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
-    file://0001-Fix-build-with-newer-boost-1.58.0.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 CXXFLAGS += "-fpermissive"

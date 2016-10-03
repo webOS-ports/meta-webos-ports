@@ -12,7 +12,7 @@ VIRTUAL-RUNTIME_rdx-utils ?= "rdx-utils-stub"
 RDEPENDS_${PN} = "${VIRTUAL-RUNTIME_cpushareholder} ${VIRTUAL-RUNTIME_rdx-utils}"
 
 PV = "3.9.3-194+git${SRCPV}"
-SRCREV = "ed8fbe3a5d437d3102399d546e9ce7ca61e0a3f5"
+SRCREV = "5aef1c6db4229b590ea241a2b3b9d6823a3685b8"
 
 WEBOS_DISTRO_PRERELEASE ??= ""
 EXTRA_OECMAKE += "${@ '-DWEBOS_DISTRO_PRERELEASE:STRING="devel"' \
@@ -23,6 +23,10 @@ inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
 inherit webos_core_os_dep
+inherit systemd 
+
+SYSTEMD_PACKAGES = "${PN}"
+SYSTEMD_SERVICE_${PN} = "ls-hubd_private.service ls-hubd_public.service"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
@@ -35,6 +39,9 @@ CFLAGS += "-fgnu89-inline"
 # This fix-up will be removed shortly. luna-service2 headers must be included
 # using '#include <luna-service2/*.h>'
 do_install_append() {
+    install -d ${D}${systemd_unitdir}/system
+    install -m 0644 ${S}/files/systemd/ls-hubd_private.service ${D}${systemd_unitdir}/system/
+    install -m 0644 ${S}/files/systemd/ls-hubd_public.service ${D}${systemd_unitdir}/system/
     # XXX Temporarily, create links from the old locations until all users of
     # luna-service2 convert to using pkg-config
     ln -svnf luna-service2/lunaservice.h ${D}${includedir}/lunaservice.h

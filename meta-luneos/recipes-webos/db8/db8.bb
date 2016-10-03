@@ -12,7 +12,7 @@ PROVIDES = "mojodb"
 DEPENDS = "luna-service2 jemalloc icu pmloglib curl glib-2.0 leveldb leveldb-tl boost"
 
 PV = "3.2.0-145+git${SRCPV}"
-SRCREV = "0f18ab88053227608a8729ac54fb2bdb0a8dc363"
+SRCREV = "26d59e3ff7bdb410056e35f8eca0721c9285afae"
 
 RDEPENDS_${PN} += "leveldb bash"
 RDEPENDS_${PN}-tests += "bash"
@@ -22,18 +22,27 @@ inherit webos_cmake
 inherit webos_system_bus
 inherit pkgconfig
 inherit pkgconfig
-inherit webos_system_bus
+inherit systemd
 
 EXTRA_OECMAKE += "-DWEBOS_CONFIG_BUILD_TESTS:BOOL=TRUE -DWEBOS_DB8_BACKEND:STRING='leveldb;sandwich' -DCMAKE_SKIP_RPATH:BOOL=TRUE"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
+SYSTEMD_PACKAGES = "${PN}"
+SYSTEMD_SERVICE_${PN} = "${PN}@.service"
+
+do_install_append() {
+    install -d ${D}${systemd_unitdir}/system
+    install -m 0644 ${S}/files/systemd/${SYSTEMD_SERVICE_${PN}} ${D}${systemd_unitdir}/system/
+
+    install -d ${D}${bindir}
+    install -m 0755 ${S}/files/scripts/db8-prestart.sh ${D}${bindir}
+}
+
 PACKAGES =+ "${PN}-tests"
 
 FILES_${PN}-tests = "${libdir}/${PN}/tests/*"
 FILES_${PN}-dbg += "${libdir}/${PN}/tests/.debug"
-
-SRC_URI += "file://0001-Add-com.palm.mediapermissions-service-as-admin-for-m.patch"
 
 CXXFLAGS += "-fpermissive"
