@@ -12,7 +12,7 @@ RDEPENDS_${PN} += " \
 "
 
 PV = "0.2.0-8+git${SRCPV}"
-SRCREV = "d2b27cf5068f60a01607014ebde2af24ab2cef38"
+SRCREV = "ab60c593d9194f6c6bb480e959eedb20bae7ca35"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
@@ -22,14 +22,6 @@ inherit webos_system_bus
 inherit webos_ports_repo
 inherit webos_cmake_qt5
 inherit webos_filesystem_paths
-inherit systemd
-
-SYSTEMD_PACKAGES = "${PN}"
-SYSTEMD_SERVICE_${PN} = "LunaWebAppManager.service"
-
-do_install_append() {
-    install -d ${D}${systemd_unitdir}/system
-    install -m 0644 ${S}/files/systemd/LunaWebAppManager.service ${D}${systemd_unitdir}/system/
-}
+inherit webos_systemd
 
 FILES_${PN} += "${webos_frameworksdir}"
