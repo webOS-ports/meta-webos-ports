@@ -23,13 +23,14 @@ RDEPENDS_${PN} = " \
   pulseaudio-server \
   \
   alsa-conf \
+  ofono \
   tar \
   udev-extraconf \
+  voicecall \
   webos-connman-adapter \
+  webos-telephonyd \
   wireless-tools \
   \
-  ${@bb.utils.contains('MACHINE_FEATURES', 'phone', 'packagegroup-webos-telephony', '', d)} \
-  ${@bb.utils.contains('MACHINE_FEATURES', 'cellular', 'packagegroup-webos-telephony', '', d)} \
   ${@bb.utils.contains('MACHINE_FEATURES', 'bluetooth', 'bluez4', '',d)} \
   \
   location-service \
@@ -50,6 +51,7 @@ RDEPENDS_${PN} = " \
   org.webosports.app.memos \
   org.webosports.app.messaging \
   org.webosports.app.pdf \
+  org.webosports.app.phone \
   org.webosports.app.photos \
   org.webosports.app.settings \
   org.webosports.app.tasks \
