@@ -4,7 +4,7 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 PV = "1.0+gitr${SRCPV}"
-SRCREV = "6197c8da2993f5df97ccbff192b15e22abb8d20f"
+SRCREV = "1e3965076d46bd1c4824ca4613bf7ba935b9ab46"
 
 inherit webos_ports_repo
 
@@ -18,7 +18,6 @@ inherit systemd
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE_${PN} = " \
     luna-universalsearchmgr.service \
-    luna-sysmgr.service \
     org.webosinternals.ipkgservice.service \
 "
 
@@ -30,5 +29,3 @@ do_install() {
     done
 }
 
-# to catch .service files not listed in SYSTEMD_SERVICE (db8@.service and in some cases webos-telephonyd.service)
-#FILES_${PN} += "${systemd_unitdir}/system"
