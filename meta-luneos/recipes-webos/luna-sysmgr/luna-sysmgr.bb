@@ -13,7 +13,7 @@ DEPENDS += "serviceinstaller"
 #RDEPENDS_${PN} += "jail" #TODO
 
 PV = "3.0.0-3+git${SRCPV}"
-SRCREV = "ab1b57ae8a49c1d280206cdb54e1c34d46e8a876"
+SRCREV = "df38c20f6c0a06e4c2475ae82aaf884caf061335"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 
@@ -54,6 +54,7 @@ do_install_append() {
         install -v -m 644 ${S}/conf/notificationPolicy.conf ${D}${webos_sysconfdir}
         install -v -m 644 ${S}/conf/persistentWindows.conf ${D}${webos_sysconfdir}
         install -v -m 644 ${S}/conf/default-launcher-page-layout.json ${D}${webos_sysconfdir}
+        install -v -m 644 ${S}/conf/default-dock-positions.json ${D}${webos_sysconfdir}
     fi
 
     # install the db kind to register schema for context upload (collecting error logs)
