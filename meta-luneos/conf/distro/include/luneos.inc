@@ -176,3 +176,5 @@ PACKAGECONFIG_pn-cairo += "directfb"
 PACKAGECONFIG_pn-gtk+ += "directfb"
 # needed to have QtMultimedia plugins for GStreamer 1.0
 PACKAGECONFIG_pn-qtmultimedia += "gstreamer"
+# needed to use gles instead of default gl
+PACKAGECONFIG_GL_pn-libsdl2 = "gles2"
