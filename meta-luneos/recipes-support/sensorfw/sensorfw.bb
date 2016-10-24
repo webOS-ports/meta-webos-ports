@@ -17,6 +17,7 @@ SRC_URI = " \
     file://0002-sensord-daemon-conf-setup-improve-check-for-libhybri.patch \
     file://0003-Set-okToStop-to-false-to-prevent-deadlock-when-stopp.patch \
     file://0004-Implement-luna-service-integration.patch \
+    file://0005-Fixx-GCC6-compilation.patch \
 "
 
 S = "${WORKDIR}/git"
