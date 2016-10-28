@@ -1,0 +1,161 @@
+﻿From 91a4b904adf2d06f5a627e97bc4cf2ae8214be28 Mon Sep 17 00:00:00 2001
+From: Christophe Chapuis <chris.chapuis@gmail.com>
+Date: Sun, 15 Mar 2015 16:51:59 +0100
+Subject: [PATCH] [hwcomposer] Add support for QScreen::orientation, based on QtSensors.
+
+Signed-off-by: Christophe Chapuis <chris.chapuis@gmail.com>
+---
+ hwcomposer/hwcomposer.pro   |  2 +-
+ hwcomposer/qeglfsscreen.cpp | 59 +++++++++++++++++++++++++++++++++++++++++++++
+ hwcomposer/qeglfsscreen.h   | 13 +++++++++-
+ 3 files changed, 72 insertions(+), 2 deletions(-)
+
+diff --git a/hwcomposer/hwcomposer.pro b/hwcomposer/hwcomposer.pro
+index c394286..b2d216f 100644
+--- a/hwcomposer/hwcomposer.pro
++++ b/hwcomposer/hwcomposer.pro
+@@ -28,7 +28,7 @@ SOURCES += hwcomposer_backend_v11.cpp
+ HEADERS += hwcomposer_backend_v11.h
+ 
+ 
+-QT += core-private compositor-private gui-private platformsupport-private dbus
++QT += core-private compositor-private gui-private platformsupport-private dbus sensors
+ 
+ DEFINES += QEGL_EXTRA_DEBUG
+ CONFIG += egl qpa/genericunixfontdatabase
+diff --git a/hwcomposer/qeglfsscreen.cpp b/hwcomposer/qeglfsscreen.cpp
+index bc01946..3610f96 100644
+--- a/hwcomposer/qeglfsscreen.cpp
++++ b/hwcomposer/qeglfsscreen.cpp
+@@ -44,19 +44,44 @@
+ 
+ #include <private/qmath_p.h>
+ 
++#include <QtSensors/QSensorManager>
++#include <QtSensors/QOrientationSensor>
++#include <QtSensors/QOrientationFilter>
++#include <QtSensors/QOrientationReading>
++#include <qpa/qwindowsysteminterface.h>
++
++#include <QTimer>
++
++#include "moc_qeglfsscreen.cpp"
++
+ QT_BEGIN_NAMESPACE
+ 
+ QEglFSScreen::QEglFSScreen(HwComposerContext *hwc, EGLDisplay dpy)
+     : m_hwc(hwc)
+     , m_dpy(dpy)
++    , m_screenOrientation(Qt::PrimaryOrientation)
++    , m_orientationSensor(new QOrientationSensor(this))
+ {
+ #ifdef QEGL_EXTRA_DEBUG
+     qWarning("QEglScreen %p\n", this);
+ #endif
++
++    connect(m_orientationSensor, SIGNAL(readingChanged()), this, SLOT(orientationReadingChanged()));
++    QTimer::singleShot(0, this, SLOT(onStarted()));
+ }
+ 
+ QEglFSScreen::~QEglFSScreen()
+ {
++    if(m_orientationSensor) {
++        m_orientationSensor->stop();
++        delete m_orientationSensor; m_orientationSensor = NULL;
++    }
++}
++
++void QEglFSScreen::onStarted()
++{
++    if( !m_orientationSensor->isActive() )
++        m_orientationSensor->start();
+ }
+ 
+ QRect QEglFSScreen::geometry() const
+@@ -99,4 +124,38 @@ qreal QEglFSScreen::refreshRate() const
+     return m_hwc->refreshRate();
+ }
+ 
++void QEglFSScreen::orientationReadingChanged()
++{
++    QSize screenSize = m_hwc->screenSize();
++    Qt::ScreenOrientation screenPrimaryOrientation = Qt::PortraitOrientation;
++    if( screenSize.width() > screenSize.height() ) {
++        screenPrimaryOrientation = Qt::LandscapeOrientation;
++    }
++
++    QOrientationReading *orientationReading = m_orientationSensor->reading();
++    QOrientationReading::Orientation currentOrientation = orientationReading->orientation();
++
++    switch(currentOrientation) {
++    case QOrientationReading::TopUp:   /* 0┬░ */
++        m_screenOrientation = screenPrimaryOrientation;
++        break;
++    case QOrientationReading::LeftUp:  /* 90┬░ clockwise */
++        m_screenOrientation = screenPrimaryOrientation == Qt::PortraitOrientation ? Qt::InvertedLandscapeOrientation : Qt::PortraitOrientation;
++        break;
++    case QOrientationReading::TopDown: /* 180┬░ */
++        m_screenOrientation = screenPrimaryOrientation == Qt::PortraitOrientation ? Qt::InvertedPortraitOrientation : Qt::InvertedLandscapeOrientation;
++        break;
++    case QOrientationReading::RightUp: /* 270┬░ clockwise */
++        m_screenOrientation = screenPrimaryOrientation == Qt::PortraitOrientation ? Qt::LandscapeOrientation : Qt::InvertedPortraitOrientation;
++        break;
++    }
++
++    QWindowSystemInterface::handleScreenOrientationChange(QPlatformScreen::screen(), m_screenOrientation);
++}
++
++Qt::ScreenOrientation QEglFSScreen::orientation() const
++{
++    return m_screenOrientation;
++}
++
+ QT_END_NAMESPACE
+diff --git a/hwcomposer/qeglfsscreen.h b/hwcomposer/qeglfsscreen.h
+index 5ccee4d..cc4a6c0 100644
+--- a/hwcomposer/qeglfsscreen.h
++++ b/hwcomposer/qeglfsscreen.h
+@@ -49,14 +49,17 @@
+ 
+ #include <EGL/egl.h>
+ 
++class QOrientationSensor;
+ 
+ QT_BEGIN_NAMESPACE
+ 
+ class QEglFSPageFlipper;
+ class QPlatformOpenGLContext;
+ 
+-class QEglFSScreen : public QPlatformScreen //huh: FullScreenScreen ;) just to follow namespace
++class QEglFSScreen : public QObject, public QPlatformScreen //huh: FullScreenScreen ;) just to follow namespace
+ {
++    Q_OBJECT
++
+ public:
+     QEglFSScreen(HwComposerContext *hwc, EGLDisplay display);
+     ~QEglFSScreen();
+@@ -71,6 +74,8 @@ public:
+     EGLDisplay display() const { return m_dpy; }
+ 
+     qreal refreshRate() const;
++	
++    Qt::ScreenOrientation orientation() const;
+ 
+ #if 0
+     QPlatformScreenPageFlipper *pageFlipper() const;
+@@ -80,6 +85,12 @@ private:
+     HwComposerContext *m_hwc;
+     QEglFSPageFlipper *m_pageFlipper;
+     EGLDisplay m_dpy;
++    Qt::ScreenOrientation m_screenOrientation;
++    QOrientationSensor *m_orientationSensor;
++
++private Q_SLOTS:
++    void orientationReadingChanged();
++    void onStarted();
+ };
+ 
+ QT_END_NAMESPACE
+-- 
+2.10.0.windows.1
+
