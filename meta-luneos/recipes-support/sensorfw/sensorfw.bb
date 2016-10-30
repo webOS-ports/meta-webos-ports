@@ -7,12 +7,12 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=2d5025d4aa3495befef8f17206a5b0a1"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 PV = "0.8.5+gitr${SRCPV}"
-SRCREV = "a4bf550865f64ec4ac3c1a4d880a9dd7b37d4053"
+SRCREV = "6e5acd56944faca5e01161a2e444023f5600c299"
 DEPENDS = "qtbase libhybris virtual/android-headers \
     luna-sysmgr-common luna-service2 json-c glib-2.0 luna-sysmgr-ipc-messages"
 
 SRC_URI = " \
-    git://github.com/mer-packages/sensorfw;branch=master;protocol=git \
+    git://git.merproject.org/mer-core/sensorfw.git;branch=master;protocol=git \
     file://0001-Replace-android-headers-hard-coded-include-path-with.patch \
     file://0002-sensord-daemon-conf-setup-improve-check-for-libhybri.patch \
     file://0003-Set-okToStop-to-false-to-prevent-deadlock-when-stopp.patch \
@@ -34,6 +34,11 @@ SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE_${PN} = "sensorfwd.service"
 
 do_install_append() {
+    install -d ${D}${sysconfdir}/sensorfw/
+    install -m 0644 ${S}/config/sensord.conf ${D}${sysconfdir}/sensorfw/
+    install -m 0644 ${S}/config/sensord-hybris.conf ${D}${sysconfdir}/sensorfw/
+    install -d ${D}${bindir}
+    install -m 0755 ${S}/config/sensord-daemon-conf-setup ${D}${bindir}
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${S}/LuneOS/systemd/sensorfwd.service ${D}${systemd_unitdir}/system
 }
