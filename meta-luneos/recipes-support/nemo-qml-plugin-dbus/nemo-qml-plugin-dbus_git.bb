@@ -6,10 +6,10 @@ LIC_FILES_CHKSUM = "file://src/declarativedbusinterface.h;beginline=1;endline=23
 DEPENDS = "qtbase qtdeclarative glib-2.0 dbus dbus-glib"
 
 PV = "2.0.7+gitr${SRCPV}"
-SRCREV = "63febe3ce844c8f4ddb0903cf7084738a770e048"
+SRCREV = "2ff3d6824b9b08268273c3e660a03e7e8661be1c"
 
 SRC_URI = " \
-    git://github.com/nemomobile/nemo-qml-plugin-dbus;branch=master;protocol=git \
+    git://git.merproject.org/mer-core/nemo-qml-plugin-dbus;branch=master;protocol=git \
 "
 S = "${WORKDIR}/git"
 
