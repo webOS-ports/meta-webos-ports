@@ -1,3 +1,3 @@
-PV = "20160331+gitr${SRCPV}"
-SRCREV = "ead3afa53766fba1d53c33fd5f720d398007c2dc"
+PV = "20161028+gitr${SRCPV}"
+SRCREV = "ffadcffeaa8bc04e09e27c02019972a50575c874"
 
