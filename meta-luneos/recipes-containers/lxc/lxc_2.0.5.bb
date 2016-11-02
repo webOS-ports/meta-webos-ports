@@ -30,8 +30,8 @@ SRC_URI = "http://linuxcontainers.org/downloads/${BPN}-${PV}.tar.gz \
 	file://logs-optionally-use-base-filenames-to-report-src-fil.patch \
 	"
 
-SRC_URI[md5sum] = "04a7245a614cd3296b0ae9ceeeb83fbb"
-SRC_URI[sha256sum] = "5b737e114d8ef1feb193fba936d77a5697a7c8a10199a068cdd90d1bd27c10e4"
+SRC_URI[md5sum] = "59792f085be451b8cf336d86ac335123"
+SRC_URI[sha256sum] = "65703aa44d87c3c38d630b3692030d9dede03f04d26b53d5b3f77cfad5ade131"
 
 S = "${WORKDIR}/${BPN}-${PV}"
 
