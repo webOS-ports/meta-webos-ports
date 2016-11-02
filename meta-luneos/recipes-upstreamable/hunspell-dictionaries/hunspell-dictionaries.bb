@@ -85,7 +85,7 @@ inherit webos_filesystem_paths
 
 RDEPENDS_${PN} = "hunspell"
 
-SRCREV = "caa6dba5d58543463559b79d27d2013b0c03a236"
+SRCREV = "83d4dcb0454e62edd5a8a4107867ce062c10063f"
 
 SRC_URI = "git://github.com/wooorm/dictionaries.git;protocol=git;branch=master"
 S = "${WORKDIR}/git"
