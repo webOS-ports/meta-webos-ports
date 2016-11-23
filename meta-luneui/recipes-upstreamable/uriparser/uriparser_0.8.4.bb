@@ -11,5 +11,5 @@ inherit autotools
 
 EXTRA_OECONF = "--disable-test --disable-doc"
 
-SRC_URI[md5sum] = "77601f52ab91c0e100fc5d783d9c1ee5"
-SRC_URI[sha256sum] = "1dd9f9779d8f17822bd7d68ba042fd67779b6e4ccf162bd3c9d0ff19a8ba9bf7"
+SRC_URI[md5sum] = "9aabdc3611546f553f4af372167de6d6"
+SRC_URI[sha256sum] = "ce7ccda4136974889231e8426a785e7578e66a6283009cfd13f1b24a5e657b23"
