@@ -15,6 +15,7 @@ SRC_URI += " \
     file://0001-add-support-for-detected-external-connection-changes.patch \
     file://0002-droid-extcon-c-adapt-to-new-pulseaudio-5-apis.patch \
     file://0003-use-pa-card-put-for-pulseaudio-8.patch \
+    file://0004-Dont-include-QCOM_HARDWARE-related-defines.patch \
 "
 
 S = "${WORKDIR}/git"
