@@ -11,9 +11,9 @@ LIC_FILES_CHKSUM = "file://COPYING.LGPL;md5=d8045f3b8f929c1cb29a1e3fd737b499 \
 
 inherit autotools-brokensep gettext
 
-SRCREV = "6aae365af685822a61241cbb09cfcc11fda3e1c1"
+SRCREV = "d7cead13301da710b6188bdac37310c05caee42c"
 
-SRC_URI = "git://github.com/hunspell/hunspell.git;protocol=git;branch=master"
+SRC_URI = "git://github.com/hunspell/hunspell.git;protocol=git;branch=1-4"
 S = "${WORKDIR}/git"
 
 PACKAGES =+ "${PN}-perl"
