@@ -8,11 +8,12 @@ HOMEPAGE = "https://pypi.python.org/pypi/pytz/"
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://LICENSE.txt;md5=22b38951eb857cf285a4560a914b7cd6"
 
-SRC_URI = "https://pypi.python.org/packages/source/p/pytz/pytz-${PV}.tar.gz \
-    file://fix.for.tzdata-2015e.patch \
+SRC_URI = "https://pypi.python.org/packages/62/de/3ec428a9a656c4568f8a01b93bda4aff43c3fadfa50356048a62de9ee3b7/pytz-${PV}.tar.gz \
 "
-SRC_URI[md5sum] = "417a47b1c432d90333e42084a605d3d8"
-SRC_URI[sha256sum] = "c4ee70cb407f9284517ac368f121cf0796a7134b961e53d9daf1aaae8f44fb90"
+#    file://fix.for.tzdata-2015e.patch 
+
+SRC_URI[md5sum] = "8660ba7c3c0abd23e6e4efa493b02966"
+SRC_URI[sha256sum] = "8787de03f35f31699bcaf127e56ad14c00647965ed24d72dbaca87c6e4f843a3"
 
 S="${WORKDIR}/pytz-${PV}"
 
