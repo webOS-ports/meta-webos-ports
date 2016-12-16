@@ -9,9 +9,8 @@ do_compile() {
         rm -rf ${S}/deploy
     fi
 
-    ${ENYO_DEV_PATH}/node_binaries/${BUILD_ARCH}/node ${ENYO_DEV_PATH}/bin/enyo.js init
-
-    ${ENYO_DEV_PATH}/node_binaries/${BUILD_ARCH}/node ${ENYO_DEV_PATH}/bin/enyo.js pack --production --clean -l debug -d ${S}/deploy/${WEBOS_APPLICATION_NAME}
+    ${ENYO_DEV_PATH}/node_binaries/${BUILD_ARCH}/node ${ENYO_DEV_PATH}/bin/enyo.js init && \
+    ${ENYO_DEV_PATH}/node_binaries/${BUILD_ARCH}/node ${ENYO_DEV_PATH}/bin/enyo.js pack --production --clean -d ${S}/deploy/${WEBOS_APPLICATION_NAME}
 }
 
 do_install_append() {
