@@ -41,12 +41,12 @@ pkg_postinst_${PN}() {
         # Install webosports all-arch feeds
         echo "src/gz webosports http://feeds.webos-ports.org/webos-ports/all" > $APPS/${sysconfdir}/opkg/webos-ports.conf
 
-        # Add additional feeds which are disabled by default and NOT SUPPORTED by webOS
+        # Add additional feeds which are disabled by default and NOT SUPPORTED by webOS-ports
         # ports / LuneOS. The user has to turn them on manually to use them.
         echo "src PivotCE https://feed.pivotce.com" > $APPS/${sysconfdir}/opkg/pivotce.conf.disabled
         echo "src Macaw-enyo https://minego.net/preware/macaw-enyo" > $APPS/${sysconfdir}/opkg/macaw-enyo.conf.disabled
         echo "src Hominid-Software https://hominidsoftware.com/preware" > $APPS/${sysconfdir}/opkg/hominid-software.conf.disabled
-        echo "src/gz FeedSpider2 http://feedspider.net/luneos" > $APPS/${sysconfdir}/opkg/feedspider.conf.disabled
+        echo "src/gz FeedSpider2 https://www.hunternet.ca/fs/luneos" > $APPS/${sysconfdir}/opkg/feedspider.conf.disabled
     else
         exit 1
     fi
