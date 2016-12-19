@@ -24,6 +24,7 @@ RRECOMMENDS_${PN} += " \
     pidgin-sipe \
     whatsapp-purple \
     purple-skypeweb \
+    funyahoo-plusplus \
     libpurple-plugin-autoaccept \
     libpurple-plugin-buddynote \
     libpurple-plugin-idle \
@@ -45,8 +46,6 @@ RRECOMMENDS_${PN} += " \
     libpurple-protocol-novell \
     libpurple-protocol-simple \
     libpurple-protocol-xmpp \
-    libpurple-protocol-yahoo \
-    libpurple-protocol-yahoojp \
     libpurple-protocol-zephyr \
 "
 
