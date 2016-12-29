@@ -16,12 +16,9 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 SRC_URI = " \
 	git://github.com/mer-hybris/qt5-qpa-hwcomposer-plugin.git;protocol=git;branch=master \
     file://0001-Add-support-for-orientation.patch;striplevel=2 \
+    file://0003-Fix-4_4_2_hwcomposer_v0_build.patch;striplevel=2 \
 "
 S = "${WORKDIR}/git/hwcomposer"
-
-SRC_URI_append_tenderloin = " \
-    file://0002-Add-QCOM_BSP-define-switch.patch;striplevel=2 \
-"
 
 inherit webos_ports_fork_repo
 inherit qmake5
