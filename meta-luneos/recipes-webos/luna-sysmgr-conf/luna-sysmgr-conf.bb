@@ -5,17 +5,16 @@ SECTION = "webos/base"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-PV = "3.0.0-3+git${SRCPV}"
-SRCREV = "bcbe46be9b841e5d8f9a59f7254d407cd74176ea"
+PV = "3.1"
 
-inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-WEBOS_REPO_NAME = "luna-sysmgr"
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
+SRC_URI = "file://luna-platform.conf \
+           file://lunaAnimations-platform.conf \
+           file://defaultPreferences-platform.txt \
+           "
 
 do_install() {
     install -d ${D}${webos_sysconfdir}
@@ -26,32 +25,22 @@ do_install() {
     # name change needed on the install copy => do them all individually)
 
     # install the platform luna.conf file
-    if [ -f conf/luna-${MACHINE}.conf ]
-    then
-        install -v -m 644 conf/luna-${MACHINE}.conf ${D}${webos_sysconfdir}/luna-platform.conf
-    fi
+    install -v -m 0644 ${WORKDIR}/luna-platform.conf ${D}${webos_sysconfdir}/
 
     # install the platform lunaAnimations.conf file
-    if [ -f conf/lunaAnimations-${MACHINE}.conf ]
-    then
-        install -v -m 644 conf/lunaAnimations-${MACHINE}.conf ${D}${webos_sysconfdir}/lunaAnimations-platform.conf
-    fi
+    install -v -m 0644 ${WORKDIR}/lunaAnimations-platform.conf ${D}${webos_sysconfdir}/
 
     # install the platform defaultPreferences.txt file
-    if [ -f conf/defaultPreferences-${MACHINE}.txt ]
-    then
-        install -v -m 644 conf/defaultPreferences-${MACHINE}.txt ${D}${webos_sysconfdir}/defaultPreferences-platform.txt
-    fi
+    install -v -m 644 ${WORKDIR}/defaultPreferences-platform.txt ${D}${webos_sysconfdir}/
 
-    if [ -d platform/${MACHINE} ]
+    # copy over platform specific images, if any
+    if [ -d ${WORKDIR}/images ]
     then
-        # copy over platform specific images
-        if [ -d platform/${MACHINE}/images ]
-        then
-            cd ${S}/platform/${MACHINE} && tar --exclude-vcs --exclude-backups -cf - images | tar xf - -C ${D}${webos_sysmgrdir}
-            cd ${S}
-        fi
+        pushd ${WORKDIR}
+        tar --exclude-vcs --exclude-backups -cf - images | tar xf - -C ${D}${webos_sysmgrdir}
+        popd
     fi
 }
 
-FILES_${PN} += "${webos_sysmgrdir}"
+FILES_${PN} += "${webos_sysmgrdir}\
+                ${webos_sysconfdir}"
