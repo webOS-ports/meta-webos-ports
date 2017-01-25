@@ -22,15 +22,14 @@ mkdir -p /dev
 setup_devtmpfs ""
 
 info() {
-    echo "$1" > /dev/ttyprintk
+    echo "$1" > /dev/kmsg
 }
 
 fail() {
-    echo "Failed" > /dev/ttyprintk
-    echo "$1" > /dev/ttyprintk
-    echo "Waiting for 15 seconds before rebooting ..." > /dev/ttyprintk
-    sleep 15s
-    reboot
+    echo "Failed" > /dev/kmsg
+    echo "$1" > /dev/kmsg
+    echo "Rebooting now ..." > /dev/kmsg
+    /sbin/reboot
 }
 
 # Check wether we need to start adbd for interactive debugging
@@ -53,9 +52,9 @@ if [ ! -e /sys/block/mmcblk0/$sdcard_partition ] ; then
     sdcard_partition=mmcblk0
 fi
 
-info "Mounting sdcard/nand ..."
+info "Mounting sdcard/nand as /dev/$sdcard_partition ..."
 mkdir -m 0777 /sdcard
-mount -t auto -o rw,noatime,nodiratime /dev/$sdcard_partition /sdcard
+mount -t auto -o rw,noatime,nodiratime /dev/$sdcard_partition /sdcard >/dev/kmsg 2>&1
 [ $? -eq 0 ] || fail "Failed to mount the sdcard/nan. Cannot continue."
 
 ANDROID_SDCARD_DIR="/sdcard"
@@ -69,7 +68,7 @@ fi
 # Run any fixups needed to bring the system into the state we expect it to be in
 . /fixups.sh
 
-info "Checking for rootfs image on sdcard/nand ..."
+info "Checking for rootfs image on sdcard/nand for $ANDROID_SDCARD_DIR/$distro_name ..."
 if [ -d $ANDROID_SDCARD_DIR/$distro_name ] ; then
     info "Rootfs folder found at $ANDROID_SDCARD_DIR/$distro_name; chrooting into ..."
     mount -o bind $ANDROID_SDCARD_DIR/$distro_name /rfs
@@ -89,6 +88,7 @@ umount -l /sys
 # doing this the first time we have to remove the old data and copy the
 # initial data
 datadir=$ANDROID_SDCARD_DIR/$distro_name-data
+info "Preparing $datadir"
 if [ ! -e /rfs/.firstboot_done ] ; then
     for dir in var home ; do
         rm -rf $datadir/$dir
@@ -112,11 +112,13 @@ if [ ! -e /rfs/.firstboot_done ] ; then
     touch /rfs/.firstboot_done
 fi
 
+info "Bind-mount the directories"
 # bind-mount the directories to their correct place
 for dir in var home ; do
     mount -o bind,rw $datadir/$dir /rfs/$dir
 done
 
+info "Setup the user data directory"
 # finally setup the user data directory
 mount -o bind,rw $datadir/userdata /rfs/media/internal
 mount -o bind,rw $datadir/userdata/.cryptofs /rfs/media/cryptofs
