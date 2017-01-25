@@ -47,6 +47,19 @@ inherit webos_core_os_dep
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
+SRC_URI_append = " \
+  file://${MACHINE_ARCH}.cmake \
+  "
+
+do_configure_prepend() {
+  # install additional machine specific nyx configuration before CMake is started
+  if [ -f ${WORKDIR}/${MACHINE_ARCH}.cmake ]
+  then
+    cp ${WORKDIR}/${MACHINE_ARCH}.cmake ${S}/src/machine
+  fi
+}
+
+
 PACKAGES += "${PN}-tests"
 FILES_${PN} += "${libdir}/nyx/modules/*"
 FILES_${PN} += "${systemd_system_unitdir}/*"
