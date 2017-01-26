@@ -5,14 +5,13 @@ LIC_FILES_CHKSUM = "file://src/main.cpp;beginline=1;endline=18;md5=a513bca9b1708
 DEPENDS += "qtbase qtmultimedia libqofono"
 
 PV = "0.6.6+gitr${SRCPV}"
-SRCREV = "b2c2b0abeeac5513e5226b97c1f7b4339eb54a3c"
+SRCREV = "aefea4fa8d4b2ea43ba814116e3f9a0e87f7ee1a"
 
 inherit qmake5
 inherit systemd
 
 SRC_URI = "git://git.merproject.org/mer-core/voicecall.git;protocol=git;branch=master \
-           file://0001-Adapt-thingstoworkinLuneOS.patch \
-           file://0002-WaitfortheofonoVoiceCalltobevalidbeforeaddingit.patch" 
+           file://0001-Adapt-thingstoworkinLuneOS.patch" 
 
 S = "${WORKDIR}/git"
 
