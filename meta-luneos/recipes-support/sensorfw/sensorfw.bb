@@ -7,7 +7,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=2d5025d4aa3495befef8f17206a5b0a1"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 PV = "0.8.5+gitr${SRCPV}"
-SRCREV = "6e5acd56944faca5e01161a2e444023f5600c299"
+SRCREV = "9efd97d298131a116e4e93fa223072def9268e81"
 DEPENDS = "qtbase libhybris virtual/android-headers \
     luna-sysmgr-common luna-service2 json-c glib-2.0 luna-sysmgr-ipc-messages"
 
