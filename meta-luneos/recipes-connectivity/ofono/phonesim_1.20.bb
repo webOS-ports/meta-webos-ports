@@ -4,7 +4,7 @@ SECTION = "devel"
 LICENSE = "GPL-2.0"
 LIC_FILES_CHKSUM = "file://COPYING;md5=eb723b61539feef013de476e68b5c50a"
 
-DEPENDS += "qtbase qtscript qtxmlpatterns"
+DEPENDS += "qtbase qtscript qtxmlpatterns qtbase-native"
 
 SRC_URI = "https://www.kernel.org/pub/linux/network/ofono/phonesim-${PV}.tar.xz"
 SRC_URI[md5sum] = "44252d82a19a1c35d70160a6fbc965a1"

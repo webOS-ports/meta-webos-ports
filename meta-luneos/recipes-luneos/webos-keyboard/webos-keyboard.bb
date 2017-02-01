@@ -12,7 +12,7 @@ inherit qmake5
 inherit webos_system_bus
 inherit webos_ports_repo
 
-DEPENDS = "maliit-framework-qt5 hunspell presage luna-service2"
+DEPENDS = "maliit-framework-qt5 hunspell presage luna-service2 presage-native"
 
 RDEPENDS_${PN} += "qtsvg-plugins qtmultimedia-qmlplugins"
 RRECOMMENDS_${PN} += "hunspell-dictionaries"
