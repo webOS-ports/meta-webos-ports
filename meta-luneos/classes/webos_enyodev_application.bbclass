@@ -1,6 +1,6 @@
 inherit webos_application
 
-DEPENDS += "nodejs-native nodejs-enyo-dev"
+DEPENDS += "nodejs-native nodejs-enyo-dev-native"
 
 ENYO_DEV_PATH ??= "${STAGING_DIR_NATIVE}/opt/enyo-dev"
 
