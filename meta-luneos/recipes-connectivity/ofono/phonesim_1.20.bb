@@ -12,6 +12,7 @@ SRC_URI[sha256sum] = "8a858acdb99bfc928ba16c8d983103af198bc0aa0e9101477d34336162
 SRC_URI += " file://0001-Port-to-qt5.patch \
     file://phonesim.mkdir.patch \
     file://qt-5.7.gnu++11.patch \
+    file://qt-5.8.patch \
 "
 
 inherit autotools pkgconfig
