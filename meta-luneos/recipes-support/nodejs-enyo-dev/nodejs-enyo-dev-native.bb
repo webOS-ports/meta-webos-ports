@@ -19,6 +19,4 @@ do_install() {
     cp -R --no-dereference --preserve=mode,links -v ${S}/* ${D}${base_prefix}/opt/enyo-dev
 }
 
-sysroot_stage_all_append() {
-    sysroot_stage_dir ${D}${base_prefix}/opt ${SYSROOT_DESTDIR}${base_prefix}/opt
-}
+SYSROOT_DIRS += "${base_prefix}/opt"
