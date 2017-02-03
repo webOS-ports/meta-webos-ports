@@ -8,7 +8,7 @@ LIC_FILES_CHKSUM = " \
 PV = "5.6.0+gitr${SRCPV}"
 SRCREV = "ddca65e8b1e1bdd66d216b9d7681f39923f68078"
 
-DEPENDS = "qtbase libhybris qtwayland virtual/android-headers"
+DEPENDS = "qtbase libhybris qtwayland virtual/android-headers qtdeclarative"
 
 # We need to be ${MACHINE_ARCH} as we need to compile the source against a specific
 # Android version we select per machine
