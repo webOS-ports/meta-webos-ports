@@ -118,7 +118,6 @@ LIBHYBRIS_RDEPENDS = " \
     nyx-modules-hybris \
     pulseaudio-modules-droid \
     qt5-qpa-hwcomposer-plugin \
-    qtscenegraph-adaptation \
     qtsensors-sensorfw-plugin \
     sensorfw \
     \
