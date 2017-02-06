@@ -40,6 +40,7 @@ do_deploy() {
     ln -sf ${ZIP_NAME} ${DEPLOY_DIR_IMAGE}/${ZIP_BASENAME}.zip
 }
 
-do_deploy[depends] += "${IMAGE_NAME}:do_build"
+INHIBIT_DEFAULT_DEPS = "1"
+do_deploy[depends] += "${IMAGE_NAME}:do_image_complete"
 
 addtask deploy after do_install before do_package
