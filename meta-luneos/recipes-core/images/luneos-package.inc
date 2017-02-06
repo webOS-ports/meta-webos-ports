@@ -2,6 +2,7 @@ DESCRIPTION = ""
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
+INHIBIT_DEFAULT_DEPS = "1"
 DEPENDS = "zip-native"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
@@ -46,6 +47,6 @@ do_deploy() {
     ln -sf ${ZIP_NAME}.zip ${DEPLOY_DIR_IMAGE}/${ZIP_BASENAME}.zip
 }
 
-do_deploy[depends] += "${IMAGE_NAME}:do_build virtual/kernel:do_build"
+do_deploy[depends] += "${IMAGE_NAME}:do_image_complete virtual/kernel:do_deploy"
 
 addtask deploy after do_install before do_package
