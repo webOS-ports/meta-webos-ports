@@ -7,7 +7,7 @@ LIC_FILES_CHKSUM = " \
     file://COPYING.LGPL;md5=fbc093901857fcd118f065f900982c24 \
 "
 
-DEPENDS = "qtbase qtdeclarative qtwayland luna-sysmgr-common extra-cmake-modules"
+DEPENDS = "qtbase qtdeclarative qtwayland luna-sysmgr-common extra-cmake-modules wayland-native qtwayland-native"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
