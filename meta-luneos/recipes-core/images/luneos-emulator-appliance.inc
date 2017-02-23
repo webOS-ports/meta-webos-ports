@@ -41,6 +41,6 @@ do_deploy() {
 }
 
 INHIBIT_DEFAULT_DEPS = "1"
-do_deploy[depends] += "${IMAGE_NAME}:do_image_complete"
+do_deploy[depends] += "${IMAGE_NAME}:do_image_complete virtual/kernel:do_deploy"
 
 addtask deploy after do_install before do_package
