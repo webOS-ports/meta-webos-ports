@@ -8,6 +8,10 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 #libcrypto is a requirement and provided by openssl
 DEPENDS = "nyx-lib glib-2.0 libhybris libsuspend virtual/android-headers openssl"
 
+# We need to be ${MACHINE_ARCH} as we need to compile the source against a specific
+# Android version we select per machine
+PACKAGE_ARCH = "${MACHINE_ARCH}"
+
 PV = "0.1.0-1+git${SRCPV}"
 SRCREV = "2aff48cef64cfce9747018e8de33dc1863e313ab"
 
