@@ -149,12 +149,12 @@ CONNECTIVITY_CHECK_URIS ?= "http://jenkins.nas-admin.org \
 
 # TODO can check on all these host machines.
 SANITY_TESTED_DISTROS ?= " \
-            Ubuntu-12.04 \n \
-            Ubuntu-12.10 \n \
-            Ubuntu-13.04 \n \
-            Ubuntu-14.04 \n \
-            Ubuntu-15.10 \n \
-            Ubuntu-16.04 \n \
+            ubuntu-12.04 \n \
+            ubuntu-12.10 \n \
+            ubuntu-13.04 \n \
+            ubuntu-14.04 \n \
+            ubuntu-15.10 \n \
+            ubuntu-16.04 \n \
             "
 
 LICENSE_CREATE_PACKAGE = "1"
