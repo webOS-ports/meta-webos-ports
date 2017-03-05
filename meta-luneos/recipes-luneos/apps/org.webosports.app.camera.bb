@@ -10,7 +10,7 @@ SRCREV = "af4c09191a046b49d7ad83a9f62d45acac779628"
 
 DEPENDS = "qtbase qtdeclarative qtwebengine"
 
-SRC_URI = "git://github.com/Tofee/org.webosports.app.camera.git;branch=master"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit pkgconfig
