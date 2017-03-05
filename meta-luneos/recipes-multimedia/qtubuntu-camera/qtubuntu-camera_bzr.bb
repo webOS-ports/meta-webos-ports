@@ -7,7 +7,7 @@ inherit qmake5
 
 DEPENDS = "libhybris qtbase libqtubuntu-media-signals exiv2"
 
-RDEPENDS_${PN} += "qtmultimedia-plugins"
+RDEPENDS_${PN} += "qtmultimedia-plugins libpulse-simple0"
 
 SRCREV = "168"
 SRC_URI = "bzr://bazaar.launchpad.net/~phablet-team/qtubuntu-camera/trunk"
