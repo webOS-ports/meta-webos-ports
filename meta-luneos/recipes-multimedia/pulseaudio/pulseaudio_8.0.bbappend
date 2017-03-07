@@ -24,6 +24,8 @@ do_install_append() {
 
 inherit systemd
 
+RPROVIDES_${PN} = "libpulse-simple0"
+
 SYSTEMD_PACKAGES = "${PN}-server"
 SYSTEMD_SERVICE_${PN}-server = "pulseaudio.service"
 
