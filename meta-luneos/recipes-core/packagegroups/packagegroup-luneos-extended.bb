@@ -109,6 +109,13 @@ RDEPENDS_${PN} = " \
   \
   https-everywhere \
   storaged \
+  \
+  exiv2 \
+  libpulse-simple0 \
+  qtubuntu-camera \
+  libqtubuntu-media-signals2 \
+  qtvideo-node \
+  org.webosports.app.camera \
 "
 
 LIBHYBRIS_RDEPENDS = " \
