@@ -5,8 +5,8 @@ LIC_FILES_CHKSUM = " \
     file://LICENSE;md5=84dcc94da3adb52b53ae4fa38fe49e5d \
 "
 
-PV = "0.0.1-1+git${SRCPV}"
-SRCREV = "cafa683f29a0dd87a8480e19ee2a26bb7910e59c"
+PV = "0.0.2-1+git${SRCREV}"
+SRCREV = "55d8615d06a57d688cf8950728d531c2dc2eafa7"
 
 DEPENDS = "qtbase qtdeclarative qtwebengine"
 
