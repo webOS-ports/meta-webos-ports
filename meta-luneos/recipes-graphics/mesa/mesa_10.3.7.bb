@@ -35,6 +35,10 @@ DEPENDS += "udev"
 # ERROR: mesa-2_10.3.7-r0 do_configure: QA Issue: mesa: configure was passed unrecognised options: --without-vulkan-drivers [unknown-configure-op
 PACKAGECONFIG[vulkan] = ""
 
+# This breaks llvm from meta-oe as reported in:
+# http://lists.openembedded.org/pipermail/openembedded-core/2017-March/134503.html
+EXTRA_OECONF_remove = "--with-llvm-prefix=${STAGING_BINDIR_NATIVE}"
+
 #because we cannot rely on the fact that all apps will use pkgconfig,
 #make eglplatform.h independent of MESA_EGL_NO_X11_HEADER
 do_install_append() {
