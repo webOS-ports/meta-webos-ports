@@ -132,8 +132,6 @@ IMAGE_ROOTFS_EXTRA_SPACE := "${@ '2097152' if '${MACHINE}'.startswith('qemux86')
 # "tar.bz2 ext3" is added by qemu.inc, replace tar.bz2 with tar.gz in it
 IMAGE_FSTYPES := "${@ ' ${IMAGE_FSTYPES} '.replace(' tar.bz2 ',' tar.gz ') }"
 
-PATH_prepend = "${WEBOS_EXTRA_PATH}"
-
 EXTRAOPKGCONFIG = ""
 OPKGLIBDIR_forcevariable := "${localstatedir}/lib"
 
