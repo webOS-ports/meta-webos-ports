@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=e6a600fd5e1d9cbde2d983680233ad02"
 
 inherit qmake5
 
-DEPENDS = "libhybris qtbase libqtubuntu-media-signals exiv2"
+DEPENDS = "libhybris qtbase libqtubuntu-media-signals exiv2 qtmultimedia"
 
 RDEPENDS_${PN} += "qtmultimedia-plugins libpulse-simple0"
 
