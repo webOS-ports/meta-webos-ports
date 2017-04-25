@@ -28,6 +28,13 @@ EGL_PLATFORMS_append = ",fbdev"
  
 PACKAGECONFIG_append = " gallium-egl gallium-gbm"
 
+# removed from mesa.inc in upgrade to 13.* version
+DEPENDS += "udev"
+
+# This old version doesn't have options for vulkan, causing:
+# ERROR: mesa-2_10.3.7-r0 do_configure: QA Issue: mesa: configure was passed unrecognised options: --without-vulkan-drivers [unknown-configure-op
+PACKAGECONFIG[vulkan] = ""
+
 #because we cannot rely on the fact that all apps will use pkgconfig,
 #make eglplatform.h independent of MESA_EGL_NO_X11_HEADER
 do_install_append() {
