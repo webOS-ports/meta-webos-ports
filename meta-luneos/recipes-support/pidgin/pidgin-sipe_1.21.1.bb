@@ -3,7 +3,7 @@ SECTION = "webos/services"
 LICENSE = "GPLv2.0"
 LIC_FILES_CHKSUM = "file://COPYING;md5=751419260aa954499f7abaabaa882bbe"
 
-DEPENDS = "pidgin intltool-native"
+DEPENDS = "pidgin intltool-native glib-2.0-native"
 
 inherit pkgconfig
 inherit autotools
