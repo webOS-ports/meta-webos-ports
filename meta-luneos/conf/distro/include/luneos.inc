@@ -132,9 +132,6 @@ IMAGE_ROOTFS_EXTRA_SPACE := "${@ '2097152' if '${MACHINE}'.startswith('qemux86')
 # "tar.bz2 ext3" is added by qemu.inc, replace tar.bz2 with tar.gz in it
 IMAGE_FSTYPES := "${@ ' ${IMAGE_FSTYPES} '.replace(' tar.bz2 ',' tar.gz ') }"
 
-EXTRAOPKGCONFIG = ""
-OPKGLIBDIR_forcevariable := "${localstatedir}/lib"
-
 # Redirect console output to keep it from spewing all over the VirtualBox window
 # (This is added to qemux86 kernel cmdline by openembedded-core/meta/classes/syslinux.bbclass)
 APPEND_append_qemuall = " console=ttyS0"
