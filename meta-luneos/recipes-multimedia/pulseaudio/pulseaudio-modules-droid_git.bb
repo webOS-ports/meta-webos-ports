@@ -19,6 +19,8 @@ SRC_URI += " \
 
 S = "${WORKDIR}/git"
 
+CFLAGS_append_tenderloin = " -DQCOM_DIRECTTRACK"
+
 EXTRA_OECONF += " \
     --with-droid-device=${MACHINE} \
     --enable-udev \
