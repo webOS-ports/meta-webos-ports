@@ -19,7 +19,7 @@ SRC_URI += " \
 
 S = "${WORKDIR}/git"
 
-CFLAGS_append_tenderloin = " -DQCOM_DIRECTTRACK"
+CFLAGS_append_tenderloin = " -DQCOM_DIRECTTRACK -DQCOM_HARDWARE"
 
 EXTRA_OECONF += " \
     --with-droid-device=${MACHINE} \
