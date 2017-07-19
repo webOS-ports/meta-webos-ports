@@ -21,3 +21,7 @@ inherit pkgconfig
 
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
+
+# http://errors.yoctoproject.org/Errors/Details/147896/
+# It's fixed in newer submission which unfortunately wasn't ever open sourced
+SECURITY_STRINGFORMAT = ""
