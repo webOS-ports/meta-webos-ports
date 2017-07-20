@@ -8,10 +8,10 @@ DEPENDS = "pidgin json-glib glib-2.0 zlib"
 inherit pkgconfig
 
 SRC_URI = "git://github.com/EionRobb/skype4pidgin;branch=master;protocol=git"
-SRCREV = "278b062fcb526a6a4b487073685be0f0722f5af5"
+SRCREV = "2ea69c79db8d74797a8178d70b41302cf46802d0"
 
 S = "${WORKDIR}/git"
-PV = "1.2.2+git${SRCPV}"
+PV = "1.4+git${SRCPV}"
 
 do_compile() {
     oe_runmake -C skypeweb;
