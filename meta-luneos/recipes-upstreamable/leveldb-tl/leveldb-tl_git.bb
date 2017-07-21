@@ -23,3 +23,5 @@ SRCREV = "515dc5da38aa2997ba4d44336bef2eeb44e5b0d2"
 S = "${WORKDIR}/git"
 
 inherit cmake
+
+SRC_URI += "file://0001-util-Fix-build-with-gcc7.patch"
