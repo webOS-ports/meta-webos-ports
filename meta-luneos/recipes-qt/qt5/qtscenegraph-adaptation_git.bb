@@ -1,3 +1,4 @@
+FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 DESCRIPTION = "System specific changes for the Qt Quick Scene Graph."
 LICENSE = "LGPL-2.1 & GPL-3.0"
 LIC_FILES_CHKSUM = " \
@@ -5,7 +6,7 @@ LIC_FILES_CHKSUM = " \
     file://LICENSE.LGPL;md5=4193e7f1d47a858f6b7c0f1ee66161de \
 "
 
-PV = "5.6.0+gitr${SRCPV}"
+PV = "5.8.0+gitr${SRCPV}"
 SRCREV = "ddca65e8b1e1bdd66d216b9d7681f39923f68078"
 
 DEPENDS = "qtbase libhybris qtwayland virtual/android-headers qtdeclarative"
@@ -15,7 +16,8 @@ DEPENDS = "qtbase libhybris qtwayland virtual/android-headers qtdeclarative"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 SRC_URI = " \
-    git://github.com/mer-hybris/qtscenegraph-adaptation \
+    git://git.merproject.org/mer-core/qtscenegraph-adaptation.git \
+    file://0001-customcontext-Adapt-for-Qt-5.8.patch;patch=1 \
 "
 S = "${WORKDIR}/git"
 
