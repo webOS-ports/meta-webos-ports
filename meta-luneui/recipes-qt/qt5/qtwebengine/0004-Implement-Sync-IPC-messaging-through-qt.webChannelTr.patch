@@ -1,4 +1,4 @@
-From c82fe43fd07004a9a7279b91739d09e2961702b6 Mon Sep 17 00:00:00 2001
+From 5c01767aed6c9f17f22452e8340ffab8147e8499 Mon Sep 17 00:00:00 2001
 From: Christophe Chapuis <chris.chapuis@gmail.com>
 Date: Wed, 30 Sep 2015 19:48:02 +0200
 Subject: [PATCH 04/14] Implement Sync IPC messaging through
@@ -7,9 +7,10 @@ Subject: [PATCH 04/14] Implement Sync IPC messaging through
 Signed-off-by: Christophe Chapuis <chris.chapuis@gmail.com>
 ---
  src/core/common/qt_messages.h                      |  2 ++
- src/core/renderer/web_channel_ipc_transport.cpp    | 38 ++++++++++++++++++++++
+ src/core/renderer/web_channel_ipc_transport.cpp    | 42 +++++++++++++++++++++-
  .../web_channel_ipc_transport_host.cpp             | 18 +++++++++-
- 3 files changed, 57 insertions(+), 1 deletion(-)
+ .../renderer_host/web_channel_ipc_transport_host.h |  3 ++
+ 4 files changed, 63 insertions(+), 2 deletions(-)
 
 diff --git a/src/core/common/qt_messages.h b/src/core/common/qt_messages.h
 index 2c971aa..018ca85 100644
@@ -25,16 +26,16 @@ index 2c971aa..018ca85 100644
  // Misc messages
  // These are messages sent from the renderer to the browser process.
 diff --git a/src/core/renderer/web_channel_ipc_transport.cpp b/src/core/renderer/web_channel_ipc_transport.cpp
-index 161d6f4..0bf9e39 100644
+index 161d6f4..18f6b31 100644
 --- a/src/core/renderer/web_channel_ipc_transport.cpp
 +++ b/src/core/renderer/web_channel_ipc_transport.cpp
 @@ -89,6 +89,44 @@ private:
          renderView->Send(new WebChannelIPCTransportHost_SendMessage(renderView->GetRoutingID(), std::vector<char>(rawData, rawData + size)));
      }
  
-+    static void NativeQtSendMessageSync(gin::Arguments *args)
++    void NativeQtSendMessageSync(gin::Arguments *args)
 +    {
-+        content::RenderView *renderView = GetRenderView();
++        content::RenderView *renderView = GetRenderView(args->isolate());
 +        if (!renderView || args->Length() != 1)
 +            return;
 +        v8::Handle<v8::Value> val;
@@ -67,12 +68,23 @@ index 161d6f4..0bf9e39 100644
 +                           , v8::String::NewFromUtf8(isolate, jsonReply.constData(), v8::String::kNormalString, jsonReply.size())
 +                           , v8::PropertyAttribute(v8::ReadOnly | v8::DontDelete));
 +
-+        args->GetReturnValue().Set(replyObject);
++        args->Return(replyObject);
 +    }
 +
      DISALLOW_COPY_AND_ASSIGN(WebChannelTransport);
  };
  
+@@ -135,7 +173,9 @@ void WebChannelTransport::Uninstall(blink::WebFrame *frame, uint worldId)
+ 
+ gin::ObjectTemplateBuilder WebChannelTransport::GetObjectTemplateBuilder(v8::Isolate *isolate)
+ {
+-    return gin::Wrappable<WebChannelTransport>::GetObjectTemplateBuilder(isolate).SetMethod("send", &WebChannelTransport::NativeQtSendMessage);
++    return gin::Wrappable<WebChannelTransport>::GetObjectTemplateBuilder(isolate)
++                       .SetMethod("send", &WebChannelTransport::NativeQtSendMessage)
++                       .SetMethod("sendSync", &WebChannelTransport::NativeQtSendMessageSync);
+ }
+ 
+ content::RenderView *WebChannelTransport::GetRenderView(v8::Isolate *isolate)
 diff --git a/src/core/renderer_host/web_channel_ipc_transport_host.cpp b/src/core/renderer_host/web_channel_ipc_transport_host.cpp
 index aef16f0..5afeb50 100644
 --- a/src/core/renderer_host/web_channel_ipc_transport_host.cpp
@@ -121,6 +133,21 @@ index aef16f0..5afeb50 100644
          IPC_MESSAGE_UNHANDLED(handled = false)
      IPC_END_MESSAGE_MAP()
      return handled;
+diff --git a/src/core/renderer_host/web_channel_ipc_transport_host.h b/src/core/renderer_host/web_channel_ipc_transport_host.h
+index 75b4047..6421a3f 100644
+--- a/src/core/renderer_host/web_channel_ipc_transport_host.h
++++ b/src/core/renderer_host/web_channel_ipc_transport_host.h
+@@ -70,7 +70,10 @@ public:
+ private:
+     bool OnMessageReceived(const IPC::Message& message) Q_DECL_OVERRIDE;
+     void onWebChannelMessage(const std::vector<char> &message);
++    void onWebChannelMessageSync(const std::vector<char> &message, IPC::Message *reply);
++
+     uint m_worldId;
++    IPC::Message *_mWaitingReply;
+ };
+ 
+ } // namespace
 -- 
 2.7.4
 
