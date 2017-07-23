@@ -1,0 +1,233 @@
+From 41089613b6147c11dd25ccff8e202cd98246e6c2 Mon Sep 17 00:00:00 2001
+From: Christophe Chapuis <chris.chapuis@gmail.com>
+Date: Sun, 16 Jul 2017 11:09:09 +0000
+Subject: [PATCH 10/10] PalmServiceBridge: adapt to Chromium 53 code base
+
+Signed-off-by: Christophe Chapuis <chris.chapuis@gmail.com>
+---
+ .../WebKit/Source/modules/webos/LunaServiceMgr.cpp |  2 --
+ .../Source/modules/webos/PalmServiceBridge.cpp     | 42 +++++++---------------
+ .../Source/modules/webos/PalmServiceBridge.h       | 26 ++++++++------
+ .../Source/modules/webos/PalmServiceBridge.idl     |  3 +-
+ 4 files changed, 30 insertions(+), 43 deletions(-)
+
+diff --git a/chromium/third_party/WebKit/Source/modules/webos/LunaServiceMgr.cpp b/chromium/third_party/WebKit/Source/modules/webos/LunaServiceMgr.cpp
+index 55feab8..3562dc6 100644
+--- a/chromium/third_party/WebKit/Source/modules/webos/LunaServiceMgr.cpp
++++ b/chromium/third_party/WebKit/Source/modules/webos/LunaServiceMgr.cpp
+@@ -1,5 +1,3 @@
+-#include "config.h"
+-
+ #include "base/message_loop/message_loop.h"
+ #include "base/bind.h"
+ 
+diff --git a/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.cpp b/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.cpp
+index 22c160e..dd32df0 100644
+--- a/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.cpp
++++ b/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.cpp
+@@ -1,4 +1,3 @@
+-#include "config.h"
+ #include "PalmServiceBridge.h"
+ #include "Logging.h"
+ 
+@@ -15,7 +14,6 @@
+ #include "bindings/core/v8/ScriptState.h"
+ #include "bindings/core/v8/V8Binding.h"
+ #include "bindings/core/v8/ExceptionState.h"
+-#include <wtf/RefCountedLeakCounter.h>
+ 
+ #include <map>
+ #include <set>
+@@ -28,10 +26,6 @@ namespace blink {
+ typedef std::set<PalmServiceBridge*> ServicesSet;
+ typedef std::map<Document*, ServicesSet*> ServicesSetMap;
+ 
+-#ifndef NDEBUG
+-static WTF::RefCountedLeakCounter serviceBridgeCounter("PalmServiceBridge");
+-#endif
+-
+ static ServicesSetMap* servicesByDocument()
+ {
+     static ServicesSetMap map;
+@@ -41,7 +35,7 @@ static ServicesSetMap* servicesByDocument()
+ int PalmServiceBridge::numHandlesForUrl(const char* appId)
+ {
+     for (ServicesSetMap::iterator setIt = servicesByDocument()->begin(); setIt != servicesByDocument()->end(); ++setIt) {
+-        if (!strcmp(appId, setIt->first->url().string().utf8().data()))
++        if (!strcmp(appId, setIt->first->url().getString().utf8().data()))
+             return setIt->second->size();
+     }
+ 
+@@ -52,7 +46,7 @@ void PalmServiceBridge::handlesForUrl(const char* appId, std::list<PalmServiceBr
+ {
+     outHandles.clear();
+     for (ServicesSetMap::iterator setIt = servicesByDocument()->begin(); setIt != servicesByDocument()->end(); ++setIt) {
+-        if (!strcmp(appId, setIt->first->url().string().utf8().data())) {
++        if (!strcmp(appId, setIt->first->url().getString().utf8().data())) {
+             ServicesSet* set = setIt->second;
+ 
+             for (ServicesSet::iterator s = set->begin(); s != set->end(); ++s)
+@@ -102,6 +96,7 @@ static void removeFromServicesByDocument(Document* doc, PalmServiceBridge* svc)
+ 
+ PalmServiceBridge::PalmServiceBridge(ExecutionContext* context, bool subscribe)
+     : ActiveDOMObject(context),
++      ActiveScriptWrappable(this),
+       m_canceled(false),
+       m_subscribed(subscribe),
+       m_inServiceCallback(false),
+@@ -115,9 +110,6 @@ PalmServiceBridge::PalmServiceBridge(ExecutionContext* context, bool subscribe)
+ 
+     addToServicesByDocument(document(), this);
+ 
+-#ifndef NDEBUG
+-    serviceBridgeCounter.increment();
+-#endif
+     Frame *frame = document()->frame();
+     Settings* settings = document()->settings();
+     if (settings != 0 && document()->page()->mainFrame() == frame) {
+@@ -161,15 +153,11 @@ PalmServiceBridge::~PalmServiceBridge()
+     if (m_scriptState)
+         m_scriptState->clear();
+ 
+-    if (executionContext() && document())
++    if (getExecutionContext() && document())
+         removeFromServicesByDocument(document(), this);
+ 
+     if (m_identifier)
+         free(m_identifier);
+-
+-#ifndef NDEBUG
+-    serviceBridgeCounter.decrement();
+-#endif
+ }
+ 
+ void PalmServiceBridge::detachServices(Document* doc)
+@@ -247,7 +235,7 @@ void PalmServiceBridge::serviceResponse(const char* body)
+     ScriptState *pScriptState = m_scriptState->get();
+     v8::Isolate *isolateCurrent = pScriptState->isolate();
+     v8::HandleScope handleScope(isolateCurrent);
+-    v8::Handle<v8::Value> cbValue = m_callbackScriptValue.v8ValueUnsafe();
++    v8::Handle<v8::Value> cbValue = m_callbackScriptValue.v8Value();
+     if (!cbValue.IsEmpty() && cbValue->IsFunction()) {
+         v8::Handle<v8::Function> cbFctV8 = cbValue.As<v8::Function>();
+         v8::Handle<v8::Value> argv[1];
+@@ -273,28 +261,24 @@ void PalmServiceBridge::cancel()
+     }
+ }
+ 
+-void PalmServiceBridge::stop()
++void PalmServiceBridge::contextDestroyed()
+ {
+-    DEBUG("PalmServiceBridge[%p]: stopping ... (identifier %s privileged %d subscribed %d)",
+-        this, m_identifier, m_isPrivileged, m_subscribed);
+-
+     cancel();
+ }
+ 
+-bool PalmServiceBridge::canSuspend() const
++bool PalmServiceBridge::hasPendingActivity() const
+ {
+-    return false;
++    return m_canceled == false && getExecutionContext() && !getExecutionContext()->activeDOMObjectsAreStopped();
+ }
+ 
+-void PalmServiceBridge::contextDestroyed()
++Document* PalmServiceBridge::document() const
+ {
+-    ActiveDOMObject::contextDestroyed();
++    ASSERT(getExecutionContext()->isDocument());
++    return static_cast<Document*>(getExecutionContext());
+ }
+ 
+-Document* PalmServiceBridge::document() const
++DEFINE_TRACE(PalmServiceBridge)
+ {
+-    ASSERT(executionContext()->isDocument());
+-    return static_cast<Document*>(executionContext());
++    ActiveDOMObject::trace(visitor);
+ }
+-
+ } // namespace blink
+diff --git a/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.h b/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.h
+index 4984a09..d508f87 100644
+--- a/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.h
++++ b/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.h
+@@ -10,8 +10,6 @@
+ #include "core/events/EventListener.h"
+ #include "core/events/EventTarget.h"
+ #include "LunaServiceMgr.h"
+-#include <wtf/OwnPtr.h>
+-#include "wtf/PassOwnPtr.h"
+ 
+ // #include <heap/Strong.h>
+ // #include <heap/StrongInlines.h>
+@@ -25,14 +23,17 @@ namespace blink {
+ class Document;
+ 
+ 
+-class PalmServiceBridge : public RefCounted<PalmServiceBridge>,
++class PalmServiceBridge : public GarbageCollectedFinalized<PalmServiceBridge>, 
+                           public LunaServiceManagerListener,
+-                          public ActiveDOMObject, public ScriptWrappable {
++                          public ActiveDOMObject,
++                          public ScriptWrappable, public ActiveScriptWrappable {
+     DEFINE_WRAPPERTYPEINFO();
++    USING_GARBAGE_COLLECTED_MIXIN(PalmServiceBridge)
++    WTF_MAKE_NONCOPYABLE(PalmServiceBridge);
+     public:
+-        static PassRefPtr<PalmServiceBridge> create(ExecutionContext* context, bool subscribe = false)
++        static PalmServiceBridge *create(ExecutionContext* context, bool subscribe = false)
+         {
+-            return adoptRef(new PalmServiceBridge(context, subscribe));
++            return new PalmServiceBridge(context, subscribe);
+         }
+ 
+         bool init(Document*, bool subscribed = false);
+@@ -58,7 +59,7 @@ class PalmServiceBridge : public RefCounted<PalmServiceBridge>,
+             if (m_scriptState) {
+                 m_scriptState->clear();
+             }
+-            m_scriptState = adoptPtr(new ScriptStateProtectingContext(cbScriptValue.scriptState()));
++            m_scriptState.reset(new ScriptStateProtectingContext(cbScriptValue.getScriptState()));
+         }
+         ScriptValue onservicecallback() const { return m_callbackScriptValue; }
+ 
+@@ -67,14 +68,17 @@ class PalmServiceBridge : public RefCounted<PalmServiceBridge>,
+ 
+         Document* document() const;
+ 
+-        // ActiveDOMObject:
++        // ContextLifecycleObserver:
+         virtual void contextDestroyed();
+-        virtual bool canSuspend() const;
+-        virtual void stop();
++
++        // ActiveScriptWrappable.
++        bool hasPendingActivity() const final;
++
++    DECLARE_VIRTUAL_TRACE();
+ 
+     private:
+         ScriptValue m_callbackScriptValue;
+-        OwnPtr<ScriptStateProtectingContext> m_scriptState;
++        std::unique_ptr<ScriptStateProtectingContext> m_scriptState;
+ 
+         bool m_canceled;
+         bool m_subscribed;
+diff --git a/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.idl b/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.idl
+index 43e1fdd..2b1d28f 100644
+--- a/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.idl
++++ b/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.idl
+@@ -2,7 +2,8 @@ callback ServiceCallback = void (DOMString message);
+ 
+ [
+     Exposed=(Window,Worker),
+-    ActiveDOMObject,
++    ActiveScriptWrappable,
++    DependentLifetime,
+     Constructor,
+     ConstructorCallWith=ExecutionContext
+ ] interface PalmServiceBridge {
+-- 
+2.7.4
+

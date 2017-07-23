@@ -1,5 +1,5 @@
 PACKAGECONFIG_GL = "gles2 eglfs"
-PACKAGECONFIG_DISTRO += "sql-sqlite icu glib accessibility mtdev examples"
+PACKAGECONFIG_DISTRO += "sql-sqlite icu glib accessibility mtdev examples fontconfig xkbcommon-evdev"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 SRC_URI += " \
