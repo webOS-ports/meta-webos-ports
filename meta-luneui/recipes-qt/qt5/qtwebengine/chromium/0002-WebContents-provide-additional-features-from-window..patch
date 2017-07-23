@@ -1,0 +1,108 @@
+From eb044a5dd2a5de4d75e5a1fed11c847a9d560ddb Mon Sep 17 00:00:00 2001
+From: Christophe Chapuis <chris.chapuis@gmail.com>
+Date: Sun, 27 Sep 2015 21:39:56 +0200
+Subject: [PATCH 02/10] WebContents: provide additional features from
+ window.open to the client side
+
+* Also, parse these features in a way that take into account JSON values.
+* Also redirect calls to old AddNewContent to the new API, with empty additional features.
+
+Signed-off-by: Christophe Chapuis <chris.chapuis@gmail.com>
+Signed-off-by: Christophe Chapuis <chris.chapuis@gmail.com>
+---
+ .../browser/web_contents/web_contents_impl.cc      |  2 +-
+ .../content/public/browser/web_contents_delegate.h | 21 +++++++++++++++++-
+ .../WebKit/Source/core/page/WindowFeatures.cpp     | 25 +++++++++++++++++++---
+ 3 files changed, 43 insertions(+), 5 deletions(-)
+
+diff --git a/chromium/content/browser/web_contents/web_contents_impl.cc b/chromium/content/browser/web_contents/web_contents_impl.cc
+index b29412d..e893838 100644
+--- a/chromium/content/browser/web_contents/web_contents_impl.cc
++++ b/chromium/content/browser/web_contents/web_contents_impl.cc
+@@ -2082,7 +2082,7 @@ void WebContentsImpl::CreateNewWindow(
+       gfx::Rect initial_rect;
+       delegate_->AddNewContents(
+           this, new_contents, params.disposition, initial_rect,
+-          params.user_gesture, &was_blocked);
++          params.user_gesture, &was_blocked, params.additional_features);
+     }
+     if (!was_blocked) {
+       OpenURLParams open_params(params.target_url, params.referrer, CURRENT_TAB,
+diff --git a/chromium/content/public/browser/web_contents_delegate.h b/chromium/content/public/browser/web_contents_delegate.h
+index 2816c4d..8d1e541 100644
+--- a/chromium/content/public/browser/web_contents_delegate.h
++++ b/chromium/content/public/browser/web_contents_delegate.h
+@@ -118,7 +118,26 @@ class CONTENT_EXPORT WebContentsDelegate {
+                               WindowOpenDisposition disposition,
+                               const gfx::Rect& initial_rect,
+                               bool user_gesture,
+-                              bool* was_blocked) {}
++                              bool* was_blocked) {
++      std::vector<base::string16> additional_features;
++      AddNewContents(source,new_contents,disposition,initial_rect,user_gesture,was_blocked, additional_features);
++  }
++
++  // Creates a new tab with the already-created WebContents 'new_contents'.
++  // The window for the added contents should be reparented correctly when this
++  // method returns.  If |disposition| is NEW_POPUP, |initial_rect| should hold
++  // the initial position. If |was_blocked| is non-NULL, then |*was_blocked|
++  // will be set to true if the popup gets blocked, and left unchanged
++  // otherwise.
++  virtual void AddNewContents(WebContents* source,
++                              WebContents* new_contents,
++                              WindowOpenDisposition disposition,
++                              const gfx::Rect& initial_rect,
++                              bool user_gesture,
++                              bool* was_blocked,
++                              std::vector<base::string16> additional_features) {
++      AddNewContents(source,new_contents,disposition,initial_rect,user_gesture,was_blocked);
++  }
+ 
+   // Selects the specified contents, bringing its container to the front.
+   virtual void ActivateContents(WebContents* contents) {}
+diff --git a/chromium/third_party/WebKit/Source/core/page/WindowFeatures.cpp b/chromium/third_party/WebKit/Source/core/page/WindowFeatures.cpp
+index 4b3bd5e..b9cf988 100644
+--- a/chromium/third_party/WebKit/Source/core/page/WindowFeatures.cpp
++++ b/chromium/third_party/WebKit/Source/core/page/WindowFeatures.cpp
+@@ -111,9 +111,25 @@ WindowFeatures::WindowFeatures(const String& features)
+ 
+         ASSERT_WITH_SECURITY_IMPLICATION(i <= length);
+ 
+-        // skip to first separator
+-        while (i < length && !isWindowFeaturesSeparator(buffer[i]))
+-            i++;
++        if (i < length && buffer[i] == '{') {
++            // json value: go to the matching '}'
++            int unmatchedBraceCount = 0;
++            while (i < length) {
++                if (buffer[i] == '{')
++                    unmatchedBraceCount++;
++                else if (buffer[i] == '}')
++                    unmatchedBraceCount--;
++
++                if (unmatchedBraceCount <= 0)
++                    break;
++                i++;
++            }
++        }
++        else {
++            // classic case: skip to first separator
++            while (i < length && !isWindowFeaturesSeparator(buffer[i]))
++                i++;
++        }
+         valueEnd = i;
+ 
+         ASSERT_WITH_SECURITY_IMPLICATION(i <= length);
+@@ -162,6 +178,9 @@ void WindowFeatures::setWindowFeature(const String& keyString, const String& val
+         fullscreen = value;
+     } else if (keyString == "scrollbars") {
+         scrollbarsVisible = value;
++    }
++    else if (keyString == "attributes") {
++        additionalFeatures.append(keyString+"="+valueString);
+     } else if (keyString == "noopener") {
+         noopener = true;
+     } else if (value == 1) {
+-- 
+2.7.4
+

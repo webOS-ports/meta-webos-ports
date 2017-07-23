@@ -16,7 +16,7 @@ RDEPENDS_${PN} = " \
   pulseaudio-distro-conf \
   pulseaudio-misc \
   pulseaudio-module-switch-on-connect \
-  pulseaudio-module-bluetooth-discover \ 
+  pulseaudio-module-bluetooth-discover \
   pulseaudio-module-bluetooth-policy \
   pulseaudio-module-bluez4-device \
   pulseaudio-module-bluez4-discover \
@@ -71,9 +71,6 @@ RDEPENDS_${PN} = " \
   pmcertificatemgr \
   \
   qtbase-plugins \
-  qtbase-fonts \
-  qtbase-fonts-ttf-dejavu \
-  qtbase-fonts-ttf-vera \
   qtmultimedia-plugins \
   qtmultimedia-qmlplugins \
   qtsensors \
@@ -124,14 +121,15 @@ LIBHYBRIS_RDEPENDS = " \
     qtscenegraph-adaptation \
     qtsensors-sensorfw-plugin \
     sensorfw \
-    \
-    exiv2 \
-    libpulse-simple0 \
-    qtubuntu-camera \
-    libqtubuntu-media-signals2 \
-    qtvideo-node \
-    org.webosports.app.camera \
-"
+    "
+#    \
+#    exiv2 \
+#    libpulse-simple0 \
+#    qtubuntu-camera \
+#    libqtubuntu-media-signals2 \
+#    qtvideo-node \
+#    org.webosports.app.camera \
+#"
 
 MEMNOTIFY_RDEPENDS = " \
     memnotify-module \

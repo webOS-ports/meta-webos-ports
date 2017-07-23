@@ -5,14 +5,14 @@ LIC_FILES_CHKSUM = " \
     file://COPYING-Apache-2.0;md5=3b83ef96387f14655fc854ddc3c6bd57 \
 "
 
-DEPENDS = "qtbase qtdeclarative qtwebengine luna-sysmgr-common libconnman-qt"
+DEPENDS = "qtbase qtdeclarative qtwebengine luna-sysmgr-common libconnman-qt5"
 RDEPENDS_${PN} += " \
     qtdeclarative-qmlplugins \
     qtwebengine-qmlplugins \
 "
 
-PV = "0.2.0-8+git${SRCPV}"
-SRCREV = "56218951a11676e98cb46be99620fadc72253c3e"
+PV = "0.4.0-1+git${SRCPV}"
+SRCREV = "2c496910c4dab8fbb9a6bdc68fa8121e6f823d49"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

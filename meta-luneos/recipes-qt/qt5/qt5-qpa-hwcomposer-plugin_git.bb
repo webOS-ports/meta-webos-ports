@@ -5,7 +5,7 @@ LICENSE = "LGPL-2.1"
 LIC_FILES_CHKSUM = "file://hwcomposer_backend.cpp;beginline=1;endline=40;md5=09c08382077db2dbc01b1b5536ec6665"
 
 PV = "5.2.0+gitr${SRCPV}"
-SRCREV = "f3258694ea8cd1fc19dd6d0fa3d4cf83fcc564ed"
+SRCREV = "a85d3518550193aaee69a6a011f290a2859db5ca"
 
 DEPENDS = "qtbase libhybris qtwayland virtual/android-headers qtsensors"
 
@@ -14,9 +14,10 @@ DEPENDS = "qtbase libhybris qtwayland virtual/android-headers qtsensors"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 SRC_URI = " \
-	git://github.com/mer-hybris/qt5-qpa-hwcomposer-plugin.git;protocol=git;branch=master \
-    file://0001-Add-support-for-orientation.patch;striplevel=2 \
-    file://0003-Fix-4_4_2_hwcomposer_v0_build.patch;striplevel=2 \
+    git://github.com/mer-hybris/qt5-qpa-hwcomposer-plugin.git \
+    file://0001-Add-support-for-QScreen-orientation-based-on-QtSenso.patch;striplevel=2 \
+    file://0002-Fix-4.4.2-hwcomposer-build.patch;striplevel=2 \
+    file://0003-Qt-5.8-support.patch;striplevel=2 \
 "
 S = "${WORKDIR}/git/hwcomposer"
 
