@@ -2,8 +2,8 @@ DESCRIPTION = "LuneOS QML components"
 LICENSE = "LGPL-2.1"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
-PV = "0.1.0+gitr${SRCPV}"
-SRCREV = "f8878a894421b9c5e2ca23b63d7489ff6d51759a"
+PV = "0.4.0+gitr${SRCPV}"
+SRCREV = "f3c79cc41ef8a4abe7a68a4d6ff199034e7db87a"
 
 DEPENDS = "qtbase qtdeclarative qtlocation qtwebengine luna-service2"
 RRECOMMENDS_${PN} += "qtlocation"
