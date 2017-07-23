@@ -12,14 +12,17 @@ DEPENDS = "qtbase qtdeclarative qtwayland luna-sysmgr-common extra-cmake-modules
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-PV = "0.2.0-26+git${SRCPV}"
-SRCREV = "eb15a8914efcd7f306dbaf94cf95857ad4fc19e5"
+PV = "0.4.0-1+git${SRCPV}"
+SRCREV = "30534a4c645e074c2154e72cca7743cabf3d2124"
 
 # Otherwise there is conflict between None defined in Xlib.h and
 # qtdeclarative's /usr/include/qt5/QtQuick/qsgtexture.h:59
 # see http://lists.openembedded.org/pipermail/openembedded-core/2015-June/106351.html
 # for details
-CXXFLAGS += "-DMESA_EGL_NO_X11_HEADERS=1"
+CXXFLAGS += " -DMESA_EGL_NO_X11_HEADERS=1 "
+
+# This is needed because it is not included by cmake otherwise
+CXXFLAGS += " -DQT_WAYLAND_COMPOSITOR_QUICK "
 
 inherit pkgconfig
 inherit webos_ports_repo
@@ -41,5 +44,3 @@ FILES_${PN} += "${OE_QMAKE_PATH_QML}/LunaNext"
 FILES_${PN}-dbg += " \
     ${OE_QMAKE_PATH_QML}/LunaNext/*/.debug \
     ${OE_QMAKE_PATH_QML}/LunaNext/*/*/.debug"
-
-SRC_URI += "file://0001-CMakeLists.txt-Update-from-Qt5Compositor-to-Qt5Wayla.patch"
