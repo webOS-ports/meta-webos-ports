@@ -9,8 +9,8 @@ inherit pkgconfig
 inherit autotools
 
 SRC_URI = "${SOURCEFORGE_MIRROR}/sipe/pidgin-sipe-${PV}.tar.xz"
-SRC_URI[md5sum] = "96ea396adb5c8a1bb1749d778892605c"
-SRC_URI[sha256sum] = "651af55d65cbdf5bdbee0366bd5151bec4152c910743aa432204d015893fe444"
+SRC_URI[md5sum] = "63795d4171afcae7a7ebed37e10b8230"
+SRC_URI[sha256sum] = "3f5092b22bb7638a8945484b2b538c58b4d4fcf913d4b86a5ece1107d28a5154"
 
 PACKAGECONFIG ??= "nss krb5"
 PACKAGECONFIG[nss] = "--enable-nss=yes,--enable-nss=no,nss"
