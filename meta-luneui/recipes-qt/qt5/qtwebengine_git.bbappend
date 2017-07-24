@@ -13,6 +13,7 @@ SRC_URI += " \
     file://0003-WebEngineNewViewRequest-provide-the-requested-URL-as.patch \
     file://0004-Implement-Sync-IPC-messaging-through-qt.webChannelTr.patch \
     file://0005-Make-properties-for-some-settings-for-PalmBridgeServ.patch \
+    file://0006-Disable-some-sandboxing-capabilities.patch \
     file://0007-WebEngineSettings-Add-a-standardFontFamily-property-.patch \
     file://0008-WebEngineSettings-add-also-Serif-Fixed-and-Cursive-f.patch \
     file://0009-Store-the-additional-window-features-required-by-the.patch \
