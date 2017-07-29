@@ -12,8 +12,8 @@ RDEPENDS_${PN} = "sensorfw bash"
 # We're depending on libhybris so need to be MACHINE_ARCH
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-PV = "5.6.2+git${SRCPV}"
-SRCREV = "9e83f33dcb74b9775ca9c83ff1ac872f089aa245"
+PV = "5.8.0+git${SRCPV}"
+SRCREV = "ed4b46adfa7b5699466f12cee2f7ff23998ba870"
 
 inherit webos_ports_repo
 inherit qmake5
