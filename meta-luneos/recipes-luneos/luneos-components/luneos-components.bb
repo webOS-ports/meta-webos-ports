@@ -3,7 +3,7 @@ LICENSE = "LGPL-2.1"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 PV = "0.4.0+gitr${SRCPV}"
-SRCREV = "f3c79cc41ef8a4abe7a68a4d6ff199034e7db87a"
+SRCREV = "45cdad2461596927d4ee1f3c38afde8706d985f7"
 
 DEPENDS = "qtbase qtdeclarative qtlocation qtwebengine qtquickcontrols qtquickcontrols2 luna-service2"
 RRECOMMENDS_${PN} += "qtlocation"
@@ -18,6 +18,7 @@ inherit webos_filesystem_paths
 PACKAGES += "${PN}-examples"
 FILES_${PN} += " \
     ${OE_QMAKE_PATH_QML}/LuneOS/ \
+    ${OE_QMAKE_PATH_QML}/QtQuick/Controls.2/LuneOSStyle/ \
     ${OE_QMAKE_PATH_QML}/QtQuick/Controls/Styles/LuneOS/ \
     ${OE_QMAKE_PATH_QML}/LunaWebEngineViewStyle/ \
 "
