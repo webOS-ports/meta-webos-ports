@@ -18,8 +18,8 @@ RDEPENDS_${PN} = " \
   pulseaudio-module-switch-on-connect \
   pulseaudio-module-bluetooth-discover \
   pulseaudio-module-bluetooth-policy \
-  pulseaudio-module-bluez4-device \
-  pulseaudio-module-bluez4-discover \
+  pulseaudio-module-bluez5-device \
+  pulseaudio-module-bluez5-discover \
   pulseaudio-server \
   \
   alsa-conf \
@@ -31,7 +31,7 @@ RDEPENDS_${PN} = " \
   webos-telephonyd \
   wireless-tools \
   \
-  ${@bb.utils.contains('MACHINE_FEATURES', 'bluetooth', 'bluez4', '',d)} \
+  ${@bb.utils.contains('MACHINE_FEATURES', 'bluetooth', 'bluez5', '',d)} \
   \
   location-service \
   imaccountvalidator \
