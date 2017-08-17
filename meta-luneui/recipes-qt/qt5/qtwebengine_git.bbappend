@@ -32,7 +32,6 @@ SRC_URI += " \
     file://chromium/0006-Enable-password-echo.patch;patchdir=./src/3rdparty \
     file://chromium/0007-storage-browser-quota-workaround-for-crash-on-cache-.patch;patchdir=./src/3rdparty \
     file://chromium/0008-html.css-themeWin.css-Add-Prelude-as-default-font-in.patch;patchdir=./src/3rdparty \
-    file://chromium/0009-qtwebengine-add-missing-include.patch;patchdir=./src/3rdparty \
     file://chromium/0010-PalmServiceBridge-adapt-to-Chromium-53-code-base.patch;patchdir=./src/3rdparty \
     file://chromium/0011-Disable-some-sandboxing-capabilities.patch;patchdir=./src/3rdparty \
     "
