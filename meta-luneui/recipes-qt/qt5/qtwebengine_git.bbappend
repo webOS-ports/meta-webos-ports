@@ -35,6 +35,3 @@ DEPENDS += "luna-service2 pmloglib qtlocation"
 #    file://chromium/0010-PalmServiceBridge-adapt-to-Chromium-53-code-base.patch;patchdir=./src/3rdparty \
 #    file://chromium/0011-Disable-some-sandboxing-capabilities.patch;patchdir=./src/3rdparty \
 #    "
-
-SRCREV_qtwebengine = "d4c621f6a6b87f2a86069fa393b9f7c4f9e7b9ad"
-SRCREV_chromium = "21508b5b5421f10ba8627c3c66c5281efb39b2f9"
