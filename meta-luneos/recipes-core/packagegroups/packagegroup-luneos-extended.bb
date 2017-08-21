@@ -151,7 +151,6 @@ RDEPENDS_${PN}_append_rosy = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
 
 QEMU_RDEPENDS = " \
     alsa-utils-systemd \
-    libegl-gallium \
     mesa-driver-swrast \
     phonesim \
     qt5-plugin-generic-vboxtouch \
