@@ -15,6 +15,7 @@ SRC_URI = " \
     http://downloads.sourceforge.net/${BPN}/${BP}.tar.gz \
     file://disable-help2man.patch \
     file://fix.build.with.gcc-6.patch \
+    file://fix.build.with.gcc-7.patch \
 "
 
 SRC_URI[md5sum] = "9667be297912fa0d432e748526d8dd9e"
