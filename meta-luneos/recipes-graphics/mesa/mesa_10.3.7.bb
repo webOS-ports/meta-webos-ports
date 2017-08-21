@@ -35,6 +35,20 @@ DEPENDS += "udev"
 # ERROR: mesa-2_10.3.7-r0 do_configure: QA Issue: mesa: configure was passed unrecognised options: --without-vulkan-drivers [unknown-configure-op
 PACKAGECONFIG[vulkan] = ""
 
+# This old version doesn't have options for unwind], causing:
+# ERROR: mesa-2_10.3.7-r0 do_configure: QA Issue: mesa: configure was passed unrecognised options: --disable-libunwind [unknown-configure-option]
+PACKAGECONFIG[unwind] = ""
+
+# Restore old configuration options supported by this mesa version, undo oe-core change:
+# mesa.inc: replace deprecated configure options
+PACKAGECONFIG[egl] = "--enable-egl --with-egl-platforms=${EGL_PLATFORMS}, --disable-egl"
+PACKAGECONFIG[gallium-llvm] = "--enable-gallium-llvm --enable-llvm-shared-libs, --disable-gallium-llvm, llvm${MESA_LLVM_RELEASE} \
+    ${@'elfutils' if ${GALLIUMDRIVERS_LLVM33_ENABLED} else ''}"
+
+# Also undo changes from:
+# mesa: Split --with-platforms from egl PACKAGECONFIG
+EXTRA_OECONF_remove = "--with-platforms='${PLATFORMS}'"
+
 #because we cannot rely on the fact that all apps will use pkgconfig,
 #make eglplatform.h independent of MESA_EGL_NO_X11_HEADER
 do_install_append() {
