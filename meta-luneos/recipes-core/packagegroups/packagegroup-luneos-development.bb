@@ -14,7 +14,6 @@ VALGRIND_armv7a = "valgrind"
 RDEPENDS_${PN} = " \
   mingetty \
   serial-forward \
-  mdbus2 \
   gdb \
   gdbserver \
   powerstat \
