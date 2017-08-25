@@ -17,22 +17,26 @@ RDEPENDS_${PN} = " \
 		perl-module-constant \
 		perl-module-overload \
 		perl-module-exporter-heavy \
+		gmp \
+		libidn \
+		gnutls \
+		nettle \
 "
-RDEPENDS_${PN}-ptest += "file make"
+RDEPENDS_${PN}-ptest += "file make gmp nettle gnutls bash"
 
 SRC_URI = "http://linuxcontainers.org/downloads/${BPN}-${PV}.tar.gz \
-	file://lxc-2.0.0-disable-udhcp-from-busybox-template.patch \
+	file://lxc-1.0.0-disable-udhcp-from-busybox-template.patch \
 	file://runtest.patch \
 	file://run-ptest \
 	file://automake-ensure-VPATH-builds-correctly.patch \
 	file://lxc-fix-B-S.patch \
 	file://lxc-doc-upgrade-to-use-docbook-3.1-DTD.patch \
 	file://logs-optionally-use-base-filenames-to-report-src-fil.patch \
-	file://glibc.patch \
+	file://cgroups-work-around-issue-in-gcc-7.patch \
 	"
 
-SRC_URI[md5sum] = "59792f085be451b8cf336d86ac335123"
-SRC_URI[sha256sum] = "65703aa44d87c3c38d630b3692030d9dede03f04d26b53d5b3f77cfad5ade131"
+SRC_URI[md5sum] = "7bfd95280522d7936c0979dfea92cdb5"
+SRC_URI[sha256sum] = "0d8e34b302cfe4c40c6c9ae5097096aa5cc2c1dfceea3f0f22e3e16c4a4e8494"
 
 S = "${WORKDIR}/${BPN}-${PV}"
 
@@ -59,6 +63,7 @@ PACKAGECONFIG[templates] = ",,, ${PN}-templates"
 PACKAGECONFIG[selinux] = "--enable-selinux,--disable-selinux,libselinux,libselinux"
 PACKAGECONFIG[seccomp] ="--enable-seccomp,--disable-seccomp,libseccomp,libseccomp"
 PACKAGECONFIG[python] = "--enable-python,--disable-python,python3,python3-core"
+PACKAGECONFIG[lua] = "--enable-lua,--disable-lua,lua,lua"
 
 # required by python3 to run setup.py
 export BUILD_SYS
@@ -74,14 +79,18 @@ SYSTEMD_AUTO_ENABLE_${PN}-setup = "disable"
 
 INITSCRIPT_PACKAGES = "${PN}-setup"
 INITSCRIPT_NAME_{PN}-setup = "lxc"
-INITSCRIPT_PARAMS_${PN}-setup = "${OS_DEFAULT_INITSCRIPT_PARAMS}"
+INITSCRIPT_PARAMS_${PN}-setup = "defaults"
 
 FILES_${PN}-doc = "${mandir} ${infodir}"
 # For LXC the docdir only contains example configuration files and should be included in the lxc package
 FILES_${PN} += "${docdir}"
 FILES_${PN} += "${libdir}/python3*"
+FILES_${PN} += "${datadir}/bash-completion"
 FILES_${PN}-dbg += "${libexecdir}/lxc/.debug"
-PACKAGES =+ "${PN}-templates ${PN}-setup ${PN}-networking"
+FILES_${PN}-dbg += "${libexecdir}/lxc/hooks/.debug"
+PACKAGES =+ "${PN}-templates ${PN}-setup ${PN}-networking ${PN}-lua"
+FILES_lua-${PN} = "${datadir}/lua ${libdir}/lua"
+FILES_lua-${PN}-dbg += "${libdir}/lua/lxc/.debug"
 FILES_${PN}-templates += "${datadir}/lxc/templates"
 RDEPENDS_${PN}-templates += "bash"
 
