@@ -24,15 +24,15 @@ SRC_URI += " \
     file://0013-Implement-RequestQuotePermission.patch \
     file://0014-WebEngineView-re-introduce-devicePixelRatio-property.patch \
     file://0015-WebEngineView-add-extraContextMenuEntriesComponent-p.patch \
-    file://chromium/0001-Add-PalmServiceBridge-to-WebEngine.patch;patchdir=./src/3rdparty \
-    file://chromium/0002-WebContents-provide-additional-features-from-window..patch;patchdir=./src/3rdparty \
-    file://chromium/0003-Store-the-additional-window-features-related-to-Lune.patch;patchdir=./src/3rdparty \
-    file://chromium/0004-Fix-JSON-additional-window-features-parsing.patch;patchdir=./src/3rdparty \
-    file://chromium/0005-WindowFeatures-Chrome-lower-the-minimum-height-to-5.patch;patchdir=./src/3rdparty \
-    file://chromium/0006-Enable-password-echo.patch;patchdir=./src/3rdparty \
-    file://chromium/0007-storage-browser-quota-workaround-for-crash-on-cache-.patch;patchdir=./src/3rdparty \
-    file://chromium/0008-html.css-themeWin.css-Add-Prelude-as-default-font-in.patch;patchdir=./src/3rdparty \
-    file://chromium/0010-PalmServiceBridge-adapt-to-Chromium-53-code-base.patch;patchdir=./src/3rdparty \
-    file://chromium/0011-Disable-some-sandboxing-capabilities.patch;patchdir=./src/3rdparty \
-    file://chromium/0012-Update-additional-params-from-Chromium-53-56.patch;patchdir=./src/3rdparty \
+    file://chromium/0001-Add-PalmServiceBridge-to-WebEngine.patch;patchdir=src/3rdparty \
+    file://chromium/0002-WebContents-provide-additional-features-from-window..patch;patchdir=src/3rdparty \
+    file://chromium/0003-Store-the-additional-window-features-related-to-Lune.patch;patchdir=src/3rdparty \
+    file://chromium/0004-Fix-JSON-additional-window-features-parsing.patch;patchdir=src/3rdparty \
+    file://chromium/0005-WindowFeatures-Chrome-lower-the-minimum-height-to-5.patch;patchdir=src/3rdparty \
+    file://chromium/0006-Enable-password-echo.patch;patchdir=src/3rdparty \
+    file://chromium/0007-storage-browser-quota-workaround-for-crash-on-cache-.patch;patchdir=src/3rdparty \
+    file://chromium/0008-html.css-themeWin.css-Add-Prelude-as-default-font-in.patch;patchdir=src/3rdparty \
+    file://chromium/0010-PalmServiceBridge-adapt-to-Chromium-53-code-base.patch;patchdir=src/3rdparty \
+    file://chromium/0011-Disable-some-sandboxing-capabilities.patch;patchdir=src/3rdparty \
+    file://chromium/0012-Update-additional-params-from-Chromium-53-56.patch;patchdir=src/3rdparty \
     "
