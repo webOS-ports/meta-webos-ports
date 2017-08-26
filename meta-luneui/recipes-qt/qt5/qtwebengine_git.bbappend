@@ -24,6 +24,8 @@ SRC_URI += " \
     file://0013-Implement-RequestQuotePermission.patch \
     file://0014-WebEngineView-re-introduce-devicePixelRatio-property.patch \
     file://0015-WebEngineView-add-extraContextMenuEntriesComponent-p.patch \
+    file://0016-Fix_GetDefaultScreenInfo.patch \
+    file://0017-Fix_Missing_targetUrl.patch \
     file://chromium/0001-Add-PalmServiceBridge-to-WebEngine.patch;patchdir=src/3rdparty \
     file://chromium/0002-WebContents-provide-additional-features-from-window..patch;patchdir=src/3rdparty \
     file://chromium/0003-Store-the-additional-window-features-related-to-Lune.patch;patchdir=src/3rdparty \
@@ -36,4 +38,5 @@ SRC_URI += " \
     file://chromium/0011-Disable-some-sandboxing-capabilities.patch;patchdir=src/3rdparty \
     file://chromium/0012-Update-additional-params-from-Chromium-53-56.patch;patchdir=src/3rdparty \
     file://chromium/0013-Fix-build-error-in-WindowFeaturesStructTraits.patch;patchdir=src/3rdparty \
+    file://chromium/0014-Fix_webos_module.patch;patchdir=src/3rdparty \
     "
