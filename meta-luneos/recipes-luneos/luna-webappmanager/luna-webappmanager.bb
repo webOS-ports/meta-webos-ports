@@ -12,9 +12,9 @@ RDEPENDS_${PN} += " \
 "
 
 PV = "0.4.0-1+git${SRCPV}"
-SRCREV = "2c496910c4dab8fbb9a6bdc68fa8121e6f823d49"
+SRCREV = "43b5b62d2276e6d84f605b8521744a830f04f07e"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=herrie/qt59"
 S = "${WORKDIR}/git"
 
 inherit pkgconfig
