@@ -35,4 +35,5 @@ SRC_URI += " \
     file://chromium/0010-PalmServiceBridge-adapt-to-Chromium-53-code-base.patch;patchdir=src/3rdparty \
     file://chromium/0011-Disable-some-sandboxing-capabilities.patch;patchdir=src/3rdparty \
     file://chromium/0012-Update-additional-params-from-Chromium-53-56.patch;patchdir=src/3rdparty \
+    file://chromium/0013-Fix-build-error-in-WindowFeaturesStructTraits.patch;patchdir=src/3rdparty \
     "
