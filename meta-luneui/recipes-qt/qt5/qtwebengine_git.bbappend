@@ -26,6 +26,7 @@ SRC_URI += " \
     file://0015-WebEngineView-add-extraContextMenuEntriesComponent-p.patch \
     file://0016-Fix_GetDefaultScreenInfo.patch \
     file://0017-Fix_Missing_targetUrl.patch \
+    file://0018-Revert-Load-libEGL-and-libGLES2-symbols-implicitly.patch \
     file://chromium/0001-Add-PalmServiceBridge-to-WebEngine.patch;patchdir=src/3rdparty \
     file://chromium/0002-WebContents-provide-additional-features-from-window..patch;patchdir=src/3rdparty \
     file://chromium/0003-Store-the-additional-window-features-related-to-Lune.patch;patchdir=src/3rdparty \
