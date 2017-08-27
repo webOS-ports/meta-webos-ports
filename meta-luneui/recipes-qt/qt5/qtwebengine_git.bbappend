@@ -2,11 +2,8 @@ FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
 DEPENDS += "luna-service2 pmloglib qtlocation"
 
-# Enable extra codecs (for MP3 etc), plugins (Flash & WideVine), Print to PDF, spellchecker & WebRTC
-EXTRA_QMAKEVARS_PRE += "WEBENGINE_CONFIG+=use_proprietary_codecs"
-EXTRA_QMAKEVARS_PRE += "WEBENGINE_CONFIG+=use_pepper_plugins"
-EXTRA_QMAKEVARS_PRE += "WEBENGINE_CONFIG+=use_spellchecker"
-EXTRA_QMAKEVARS_PRE += "WEBENGINE_CONFIG+=use_webrtc"
+# Enable proprietary codecs (for MP3 etc), pepper-plugins (Flash & WideVine), Print to PDF, spellchecker & WebRTC
+EXTRA_QMAKEVARS_CONFIGURE += "-proprietary-codecs -pepper-plugins -printing-and-pdf -proprietary-codecs -spellchecker -webrtc"
 
 SRC_URI += " \
     file://0001-Add-PalmSystemBridge-feature.patch \
