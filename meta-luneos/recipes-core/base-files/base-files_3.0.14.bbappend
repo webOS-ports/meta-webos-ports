@@ -15,11 +15,16 @@ dirs755 += " \
     ${webos_picapkgdir} \
     ${webos_preferencesdir} \
 "
-
 # webOS expects this directory to be writeable by all (because it's typically
 # been mounted on a VFAT partition, which doesn't enforce permissions).
 dirs777 = " \
     ${webos_mountablestoragedir} \
+"
+
+# Add journal dir for permanent logging on qemux86, useful to troubleshoot boot issues when SSH doesn't work
+
+dirs755qemu += " \
+    ${webos_logdir}/journal \
 "
 
 do_install_prepend() {
@@ -29,6 +34,13 @@ do_install_prepend() {
     done
     for d in ${dirs777}; do
         install -v -m 0777 -d ${D}$d
+    done
+}
+
+do_install_prepend_qemux86() {
+    local d
+    for d in ${dirs755qemu}; do
+        install -v -m 0755 -d ${D}$d
     done
 }
 
