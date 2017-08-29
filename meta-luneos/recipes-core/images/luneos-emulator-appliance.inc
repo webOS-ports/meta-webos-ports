@@ -25,7 +25,7 @@ OVF_NAME[vardepsexclude] += "DATETIME"
 
 do_deploy[vardepsexclude] += "DATETIME"
 do_deploy() {
-    if [ ! -e ${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}-${MACHINE}.vmdk ] ; then
+    if [ ! -e ${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}-${MACHINE}.wic.vmdk ] ; then
         bbfatal "Required base image is not available as vmdk image!"
     fi
 
@@ -33,7 +33,7 @@ do_deploy() {
     mkdir -p ${WORKDIR}/appliance
     sed "s/luneos-emulator-disk.vmdk/${VMDK_NAME}/g" ${WORKDIR}/luneos-emulator.ovf > ${WORKDIR}/appliance/${OVF_NAME}
     sed -i "s/LuneOS Emulator/${DESCRIPTION} ${DATETIME}${WEBOS_IMAGE_NAME_SUFFIX}/g" ${WORKDIR}/appliance/${OVF_NAME}
-    ln -sf ${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}-${MACHINE}.vmdk ${WORKDIR}/appliance/${VMDK_NAME}
+    ln -sf ${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}-${MACHINE}.wic.vmdk ${WORKDIR}/appliance/${VMDK_NAME}
 
     (cd ${WORKDIR}/appliance ; zip ${DEPLOY_DIR_IMAGE}/${ZIP_NAME} ${OVF_NAME} ${VMDK_NAME})
 
