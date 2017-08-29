@@ -131,7 +131,7 @@ IMAGE_FSTYPES ?= "tar.gz"
 # If IMAGE_FSTYPES_append_qemux86 = " vmdk" is used, the inherit of
 # image-vmdk.bbclass in image.bbclass doesn't happen, because IMAGE_FSTYPES
 # overrides are expanded too late.
-IMAGE_FSTYPES := "${@ '${IMAGE_FSTYPES} vmdk' if '${MACHINE}'.startswith('qemux86') else '${IMAGE_FSTYPES}' }"
+IMAGE_FSTYPES := "${@ '${IMAGE_FSTYPES} wic.vmdk' if '${MACHINE}'.startswith('qemux86') else '${IMAGE_FSTYPES}' }"
 
 # Give our emulator images some more space so developers have some more room
 # for various things they are doing
