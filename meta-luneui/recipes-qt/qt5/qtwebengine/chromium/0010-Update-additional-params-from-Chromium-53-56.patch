@@ -1,17 +1,19 @@
-From 2d0750b70af7b420e863714c3e8f11ec02bed0a8 Mon Sep 17 00:00:00 2001
+From 1a5e631c99d55da3fa3e3d2e469d4ab95a5af5eb Mon Sep 17 00:00:00 2001
 From: Herrie <github.com@herrie.org>
 Date: Fri, 25 Aug 2017 21:12:16 +0200
-Subject: [PATCH] Update additional params from Chromium 53->56
+Subject: [PATCH 10/10] Update additional params from Chromium 53->56
 
 ---
- chromium/content/browser/web_contents/web_contents_impl.cc        | 8 ++++++--
- .../third_party/WebKit/public/web/WindowFeaturesStructTraits.cpp  | 1 +
- .../third_party/WebKit/public/web/WindowFeaturesStructTraits.h    | 8 ++++++++
- chromium/third_party/WebKit/public/web/window_features.mojom      | 2 ++
- 4 files changed, 17 insertions(+), 2 deletions(-)
+ .../content/browser/web_contents/web_contents_impl.cc     |  8 ++++++--
+ .../content/public/common/common_param_traits_macros.h    |  1 +
+ .../third_party/WebKit/public/web/WebWindowFeatures.h     | 15 +++++++++++----
+ .../WebKit/public/web/WindowFeaturesStructTraits.cpp      |  2 ++
+ .../WebKit/public/web/WindowFeaturesStructTraits.h        |  4 ++++
+ .../third_party/WebKit/public/web/window_features.mojom   |  2 ++
+ 6 files changed, 26 insertions(+), 6 deletions(-)
 
 diff --git a/chromium/content/browser/web_contents/web_contents_impl.cc b/chromium/content/browser/web_contents/web_contents_impl.cc
-index 228b62aecb..c1a74a8316 100644
+index 228b62a..c1a74a8 100644
 --- a/chromium/content/browser/web_contents/web_contents_impl.cc
 +++ b/chromium/content/browser/web_contents/web_contents_impl.cc
 @@ -2094,6 +2094,10 @@ void WebContentsImpl::CreateNewWindow(
@@ -43,39 +45,88 @@ index 228b62aecb..c1a74a8316 100644
      }
      if (!was_blocked) {
        OpenURLParams open_params(params.target_url, params.referrer,
+diff --git a/chromium/content/public/common/common_param_traits_macros.h b/chromium/content/public/common/common_param_traits_macros.h
+index c4568af..457fd2d 100644
+--- a/chromium/content/public/common/common_param_traits_macros.h
++++ b/chromium/content/public/common/common_param_traits_macros.h
+@@ -267,6 +267,7 @@ IPC_STRUCT_TRAITS_BEGIN(blink::WebWindowFeatures)
+   IPC_STRUCT_TRAITS_MEMBER(resizable)
+   IPC_STRUCT_TRAITS_MEMBER(fullscreen)
+   IPC_STRUCT_TRAITS_MEMBER(dialog)
++  IPC_STRUCT_TRAITS_MEMBER(additionalFeatures)
+ IPC_STRUCT_TRAITS_END()
+ 
+ IPC_ENUM_TRAITS_MAX_VALUE(ui::AXEvent, ui::AX_EVENT_LAST)
+diff --git a/chromium/third_party/WebKit/public/web/WebWindowFeatures.h b/chromium/third_party/WebKit/public/web/WebWindowFeatures.h
+index a1f6743..7c11a7d 100644
+--- a/chromium/third_party/WebKit/public/web/WebWindowFeatures.h
++++ b/chromium/third_party/WebKit/public/web/WebWindowFeatures.h
+@@ -60,7 +60,7 @@ struct WebWindowFeatures {
+ 
+   bool fullscreen;
+   bool dialog;
+-  WebVector<WebString> additionalFeatures;
++  std::vector<base::string16> additionalFeatures;
+ 
+   WebWindowFeatures()
+       : x(0),
+@@ -97,8 +97,15 @@ struct WebWindowFeatures {
+         scrollbarsVisible(f.scrollbarsVisible),
+         resizable(f.resizable),
+         fullscreen(f.fullscreen),
+-        dialog(f.dialog),
+-        additionalFeatures(f.additionalFeatures) {}
++        dialog(f.dialog) 
++    {
++        for(auto str: f.additionalFeatures) {
++            str.ensure16Bit();
++            base::string16 destStr((const base::char16*)str.characters16(), str.length());
++            
++            additionalFeatures.push_back(destStr);
++        }
++    }
+ 
+   operator WindowFeatures() const {
+     WindowFeatures result;
+@@ -119,7 +126,7 @@ struct WebWindowFeatures {
+     result.fullscreen = fullscreen;
+     result.dialog = dialog;
+     for (size_t i = 0; i < additionalFeatures.size(); ++i)
+-      result.additionalFeatures.append(additionalFeatures[i]);
++      result.additionalFeatures.append(WTF::String(additionalFeatures[i].data(), additionalFeatures[i].length()));
+     return result;
+   }
+ #endif
 diff --git a/chromium/third_party/WebKit/public/web/WindowFeaturesStructTraits.cpp b/chromium/third_party/WebKit/public/web/WindowFeaturesStructTraits.cpp
-index 69dce5bc63..27a5fd8cdc 100644
+index 69dce5b..d4b83fc 100644
 --- a/chromium/third_party/WebKit/public/web/WindowFeaturesStructTraits.cpp
 +++ b/chromium/third_party/WebKit/public/web/WindowFeaturesStructTraits.cpp
-@@ -27,6 +27,7 @@ bool StructTraits<::blink::mojom::WindowFeaturesDataView,
+@@ -27,6 +27,8 @@ bool StructTraits<::blink::mojom::WindowFeaturesDataView,
    out->resizable = data.resizable();
    out->fullscreen = data.fullscreen();
    out->dialog = data.dialog();
-+  out->additionalFeatures = data.additionalFeatures();
++  
++  data.ReadAdditionalfeatures(&out->additionalFeatures);
    return true;
  }
  
 diff --git a/chromium/third_party/WebKit/public/web/WindowFeaturesStructTraits.h b/chromium/third_party/WebKit/public/web/WindowFeaturesStructTraits.h
-index ca776ed5a0..0201c84487 100644
+index ca776ed..405fb498 100644
 --- a/chromium/third_party/WebKit/public/web/WindowFeaturesStructTraits.h
 +++ b/chromium/third_party/WebKit/public/web/WindowFeaturesStructTraits.h
-@@ -65,6 +65,14 @@ struct StructTraits<::blink::mojom::WindowFeaturesDataView,
+@@ -65,6 +65,10 @@ struct StructTraits<::blink::mojom::WindowFeaturesDataView,
      return features.dialog;
    }
  
 +  static std::vector<base::string16> additionalFeatures(const ::blink::WebWindowFeatures& features) {
-+    std::vector<base::string16> additional_features;
-+    for (auto webStr : features.additionalFeatures) { 
-+      additional_features.push_back(webStr); 
-+    }
-+    return additional_features;
++    return features.additionalFeatures;
 +  }
 +
    static bool Read(::blink::mojom::WindowFeaturesDataView,
                     ::blink::WebWindowFeatures* out);
  };
 diff --git a/chromium/third_party/WebKit/public/web/window_features.mojom b/chromium/third_party/WebKit/public/web/window_features.mojom
-index a26b8a3b44..cb21f157d5 100644
+index a26b8a3..cb21f15 100644
 --- a/chromium/third_party/WebKit/public/web/window_features.mojom
 +++ b/chromium/third_party/WebKit/public/web/window_features.mojom
 @@ -30,4 +30,6 @@ struct WindowFeatures {
@@ -86,5 +137,5 @@ index a26b8a3b44..cb21f157d5 100644
 +    array<string> additionalFeatures;
  };
 -- 
-2.11.0.windows.3
+2.7.4
 
