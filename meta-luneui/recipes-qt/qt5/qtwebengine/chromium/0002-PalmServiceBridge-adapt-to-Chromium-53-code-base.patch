@@ -1,18 +1,63 @@
-From 41089613b6147c11dd25ccff8e202cd98246e6c2 Mon Sep 17 00:00:00 2001
+From 66b5e193f3fc4d1bdc579b1051dc76aa90d3b61e Mon Sep 17 00:00:00 2001
 From: Christophe Chapuis <chris.chapuis@gmail.com>
 Date: Sun, 16 Jul 2017 11:09:09 +0000
-Subject: [PATCH 10/10] PalmServiceBridge: adapt to Chromium 53 code base
+Subject: [PATCH 02/10] PalmServiceBridge: adapt to Chromium 53 code base
 
 Signed-off-by: Christophe Chapuis <chris.chapuis@gmail.com>
 ---
- .../WebKit/Source/modules/webos/LunaServiceMgr.cpp |  2 --
- .../Source/modules/webos/PalmServiceBridge.cpp     | 42 +++++++---------------
- .../Source/modules/webos/PalmServiceBridge.h       | 26 ++++++++------
- .../Source/modules/webos/PalmServiceBridge.idl     |  3 +-
- 4 files changed, 30 insertions(+), 43 deletions(-)
+ .../Source/bindings/modules/v8/generated.gni       |  2 +
+ .../WebKit/Source/modules/webos/BUILD.gn           | 14 +++++++
+ .../WebKit/Source/modules/webos/LunaServiceMgr.cpp |  4 +-
+ .../Source/modules/webos/PalmServiceBridge.cpp     | 43 +++++++---------------
+ .../Source/modules/webos/PalmServiceBridge.h       | 36 +++++++++---------
+ .../Source/modules/webos/PalmServiceBridge.idl     |  5 ++-
+ 6 files changed, 52 insertions(+), 52 deletions(-)
 
+diff --git a/chromium/third_party/WebKit/Source/bindings/modules/v8/generated.gni b/chromium/third_party/WebKit/Source/bindings/modules/v8/generated.gni
+index 0d8f27d..db9b850 100644
+--- a/chromium/third_party/WebKit/Source/bindings/modules/v8/generated.gni
++++ b/chromium/third_party/WebKit/Source/bindings/modules/v8/generated.gni
+@@ -46,6 +46,8 @@ bindings_modules_generated_union_type_files = [
+   "$bindings_modules_v8_output_dir/RenderingContext.h",
+   "$bindings_modules_v8_output_dir/RequestOrUSVString.cpp",
+   "$bindings_modules_v8_output_dir/RequestOrUSVString.h",
++  "$bindings_modules_v8_output_dir/ServiceCallback.cpp",
++  "$bindings_modules_v8_output_dir/ServiceCallback.h",
+   "$bindings_modules_v8_output_dir/ServiceWorkerOrMessagePort.cpp",
+   "$bindings_modules_v8_output_dir/ServiceWorkerOrMessagePort.h",
+   "$bindings_modules_v8_output_dir/StringOrArrayBufferOrNFCMessage.cpp",
+diff --git a/chromium/third_party/WebKit/Source/modules/webos/BUILD.gn b/chromium/third_party/WebKit/Source/modules/webos/BUILD.gn
+index effd211..2da4492 100644
+--- a/chromium/third_party/WebKit/Source/modules/webos/BUILD.gn
++++ b/chromium/third_party/WebKit/Source/modules/webos/BUILD.gn
+@@ -1,6 +1,11 @@
+ # Copyright 2017 Herman van Hazendonk. All rights reserved.
+ 
+ import("//third_party/WebKit/Source/modules/modules.gni")
++import("//build/config/linux/pkg_config.gni")
++
++pkg_config("ls2") {
++  packages = [ "luna-service2", "glib-2.0" ]
++}  
+ 
+ blink_modules_sources("webos") {
+   sources = [
+@@ -10,4 +15,13 @@ blink_modules_sources("webos") {
+     "PalmServiceBridge.cpp",
+     "PalmServiceBridge.h",
+   ]
++   
++  public_configs = [
++    ":ls2",
++  ]
++  
++  libs = [
++    "PmLogLib",   
++  ]
++
+ }
 diff --git a/chromium/third_party/WebKit/Source/modules/webos/LunaServiceMgr.cpp b/chromium/third_party/WebKit/Source/modules/webos/LunaServiceMgr.cpp
-index 55feab8..3562dc6 100644
+index 55feab8..f4b9f60 100644
 --- a/chromium/third_party/WebKit/Source/modules/webos/LunaServiceMgr.cpp
 +++ b/chromium/third_party/WebKit/Source/modules/webos/LunaServiceMgr.cpp
 @@ -1,5 +1,3 @@
@@ -21,8 +66,17 @@ index 55feab8..3562dc6 100644
  #include "base/message_loop/message_loop.h"
  #include "base/bind.h"
  
+@@ -49,7 +47,7 @@ void GMainContextIterate()
+     base::MessageLoop *pCurrentMsgLoop = base::MessageLoop::current();
+     if( doIterateNext && pCurrentMsgLoop )
+     {
+-        pCurrentMsgLoop->PostDelayedTask(FROM_HERE, base::Bind(&GMainContextIterate), base::TimeDelta::FromMilliseconds(100));
++        pCurrentMsgLoop->task_runner()->PostDelayedTask(FROM_HERE, base::Bind(&GMainContextIterate), base::TimeDelta::FromMilliseconds(100));
+     }
+ }
+ 
 diff --git a/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.cpp b/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.cpp
-index 22c160e..dd32df0 100644
+index 22c160e..b6ece79 100644
 --- a/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.cpp
 +++ b/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.cpp
 @@ -1,4 +1,3 @@
@@ -30,7 +84,15 @@ index 22c160e..dd32df0 100644
  #include "PalmServiceBridge.h"
  #include "Logging.h"
  
-@@ -15,7 +14,6 @@
+@@ -6,7 +5,6 @@
+ #include "core/events/Event.h"
+ #include "core/dom/ExceptionCode.h"
+ #include "core/frame/Frame.h"
+-#include "platform/Logging.h"
+ #include "core/page/Page.h"
+ #include "core/frame/Settings.h"
+ #include <wtf/text/WTFString.h>
+@@ -15,7 +13,6 @@
  #include "bindings/core/v8/ScriptState.h"
  #include "bindings/core/v8/V8Binding.h"
  #include "bindings/core/v8/ExceptionState.h"
@@ -38,7 +100,7 @@ index 22c160e..dd32df0 100644
  
  #include <map>
  #include <set>
-@@ -28,10 +26,6 @@ namespace blink {
+@@ -28,10 +25,6 @@ namespace blink {
  typedef std::set<PalmServiceBridge*> ServicesSet;
  typedef std::map<Document*, ServicesSet*> ServicesSetMap;
  
@@ -49,7 +111,7 @@ index 22c160e..dd32df0 100644
  static ServicesSetMap* servicesByDocument()
  {
      static ServicesSetMap map;
-@@ -41,7 +35,7 @@ static ServicesSetMap* servicesByDocument()
+@@ -41,7 +34,7 @@ static ServicesSetMap* servicesByDocument()
  int PalmServiceBridge::numHandlesForUrl(const char* appId)
  {
      for (ServicesSetMap::iterator setIt = servicesByDocument()->begin(); setIt != servicesByDocument()->end(); ++setIt) {
@@ -58,7 +120,7 @@ index 22c160e..dd32df0 100644
              return setIt->second->size();
      }
  
-@@ -52,7 +46,7 @@ void PalmServiceBridge::handlesForUrl(const char* appId, std::list<PalmServiceBr
+@@ -52,7 +45,7 @@ void PalmServiceBridge::handlesForUrl(const char* appId, std::list<PalmServiceBr
  {
      outHandles.clear();
      for (ServicesSetMap::iterator setIt = servicesByDocument()->begin(); setIt != servicesByDocument()->end(); ++setIt) {
@@ -67,7 +129,7 @@ index 22c160e..dd32df0 100644
              ServicesSet* set = setIt->second;
  
              for (ServicesSet::iterator s = set->begin(); s != set->end(); ++s)
-@@ -102,6 +96,7 @@ static void removeFromServicesByDocument(Document* doc, PalmServiceBridge* svc)
+@@ -102,6 +95,7 @@ static void removeFromServicesByDocument(Document* doc, PalmServiceBridge* svc)
  
  PalmServiceBridge::PalmServiceBridge(ExecutionContext* context, bool subscribe)
      : ActiveDOMObject(context),
@@ -75,7 +137,7 @@ index 22c160e..dd32df0 100644
        m_canceled(false),
        m_subscribed(subscribe),
        m_inServiceCallback(false),
-@@ -115,9 +110,6 @@ PalmServiceBridge::PalmServiceBridge(ExecutionContext* context, bool subscribe)
+@@ -115,9 +109,6 @@ PalmServiceBridge::PalmServiceBridge(ExecutionContext* context, bool subscribe)
  
      addToServicesByDocument(document(), this);
  
@@ -85,7 +147,7 @@ index 22c160e..dd32df0 100644
      Frame *frame = document()->frame();
      Settings* settings = document()->settings();
      if (settings != 0 && document()->page()->mainFrame() == frame) {
-@@ -161,15 +153,11 @@ PalmServiceBridge::~PalmServiceBridge()
+@@ -161,15 +152,11 @@ PalmServiceBridge::~PalmServiceBridge()
      if (m_scriptState)
          m_scriptState->clear();
  
@@ -102,7 +164,7 @@ index 22c160e..dd32df0 100644
  }
  
  void PalmServiceBridge::detachServices(Document* doc)
-@@ -247,7 +235,7 @@ void PalmServiceBridge::serviceResponse(const char* body)
+@@ -247,7 +234,7 @@ void PalmServiceBridge::serviceResponse(const char* body)
      ScriptState *pScriptState = m_scriptState->get();
      v8::Isolate *isolateCurrent = pScriptState->isolate();
      v8::HandleScope handleScope(isolateCurrent);
@@ -111,7 +173,7 @@ index 22c160e..dd32df0 100644
      if (!cbValue.IsEmpty() && cbValue->IsFunction()) {
          v8::Handle<v8::Function> cbFctV8 = cbValue.As<v8::Function>();
          v8::Handle<v8::Value> argv[1];
-@@ -273,28 +261,24 @@ void PalmServiceBridge::cancel()
+@@ -273,28 +260,24 @@ void PalmServiceBridge::cancel()
      }
  }
  
@@ -149,10 +211,15 @@ index 22c160e..dd32df0 100644
 -
  } // namespace blink
 diff --git a/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.h b/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.h
-index 4984a09..d508f87 100644
+index 4984a09..46b6440 100644
 --- a/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.h
 +++ b/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.h
-@@ -10,8 +10,6 @@
+@@ -6,12 +6,11 @@
+ #include "bindings/core/v8/ScriptWrappable.h"
+ #include "bindings/core/v8/V8Binding.h"
+ #include "bindings/core/v8/ScriptValue.h"
++#include "bindings/modules/v8/ServiceCallback.h"
+ #include "core/events/Event.h"
  #include "core/events/EventListener.h"
  #include "core/events/EventTarget.h"
  #include "LunaServiceMgr.h"
@@ -161,7 +228,7 @@ index 4984a09..d508f87 100644
  
  // #include <heap/Strong.h>
  // #include <heap/StrongInlines.h>
-@@ -25,14 +23,17 @@ namespace blink {
+@@ -25,14 +24,17 @@ namespace blink {
  class Document;
  
  
@@ -183,16 +250,25 @@ index 4984a09..d508f87 100644
          }
  
          bool init(Document*, bool subscribed = false);
-@@ -58,7 +59,7 @@ class PalmServiceBridge : public RefCounted<PalmServiceBridge>,
-             if (m_scriptState) {
-                 m_scriptState->clear();
-             }
--            m_scriptState = adoptPtr(new ScriptStateProtectingContext(cbScriptValue.scriptState()));
-+            m_scriptState.reset(new ScriptStateProtectingContext(cbScriptValue.getScriptState()));
-         }
-         ScriptValue onservicecallback() const { return m_callbackScriptValue; }
+@@ -53,28 +55,28 @@ class PalmServiceBridge : public RefCounted<PalmServiceBridge>,
+         int call(const String& uri, const String& payload, ExceptionState&);
+         void cancel();
  
-@@ -67,14 +68,17 @@ class PalmServiceBridge : public RefCounted<PalmServiceBridge>,
+-        void setOnservicecallback(ScriptValue& cbScriptValue) {
+-            m_callbackScriptValue = cbScriptValue;
+-            if (m_scriptState) {
+-                m_scriptState->clear();
+-            }
+-            m_scriptState = adoptPtr(new ScriptStateProtectingContext(cbScriptValue.scriptState()));
++        void setOnservicecallback(ScriptState *&cbState, ServiceCallback *cbValue) {
++            m_callbackScriptValue = ScriptValue::from(cbState, cbValue->v8Value(cbState->isolate()));
++            m_scriptState.reset(new ScriptStateProtectingContext(cbState));
+         }
+-        ScriptValue onservicecallback() const { return m_callbackScriptValue; }
++        ScriptWrappable *onservicecallback(ScriptState *cbState) const { return nullptr; }
+ 
+         // callback from LunaServiceManagerListener
+         virtual void serviceResponse(const char* body);
  
          Document* document() const;
  
@@ -215,7 +291,7 @@ index 4984a09..d508f87 100644
          bool m_canceled;
          bool m_subscribed;
 diff --git a/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.idl b/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.idl
-index 43e1fdd..2b1d28f 100644
+index 43e1fdd..fc808d0 100644
 --- a/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.idl
 +++ b/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.idl
 @@ -2,7 +2,8 @@ callback ServiceCallback = void (DOMString message);
@@ -228,6 +304,13 @@ index 43e1fdd..2b1d28f 100644
      Constructor,
      ConstructorCallWith=ExecutionContext
  ] interface PalmServiceBridge {
+@@ -10,5 +11,5 @@ callback ServiceCallback = void (DOMString message);
+     [RaisesException] unsigned long call(DOMString method, DOMString url);
+     void cancel();
+ 
+-    attribute ServiceCallback onservicecallback;
++    [CallWith=ScriptState] attribute ServiceCallback onservicecallback;
+ };
 -- 
 2.7.4
 
