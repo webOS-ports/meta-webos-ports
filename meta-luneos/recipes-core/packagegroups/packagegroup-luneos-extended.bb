@@ -121,15 +121,14 @@ LIBHYBRIS_RDEPENDS = " \
     qtscenegraph-adaptation \
     qtsensors-sensorfw-plugin \
     sensorfw \
-    "
-#    \
-#    exiv2 \
-#    libpulse-simple0 \
-#    qtubuntu-camera \
-#    libqtubuntu-media-signals2 \
-#    qtvideo-node \
-#    org.webosports.app.camera \
-#"
+    \
+    exiv2 \
+    libpulse-simple0 \
+    qtubuntu-camera \
+    libqtubuntu-media-signals2 \
+    qtvideo-node \
+    org.webosports.app.camera \
+"
 
 MEMNOTIFY_RDEPENDS = " \
     memnotify-module \
