@@ -7,6 +7,9 @@ DEPENDS += "libsdl2"
 
 inherit webos_filesystem_paths pkgconfig
 
+TARGETS = "sdl2_opengles1_test sdl2_opengles2_test"
+TARGETS_raspberrypi3 = "sdl2_opengles2_test"
+
 PV = "1.0.6+gitr${SRCPV}"
 SRC_URI = "git://github.com/thp/sdl2-opengles-test \
     file://sdl2_opengles1_test-appinfo.json \
@@ -16,11 +19,11 @@ S = "${WORKDIR}/git"
 SRCREV = "40041a4e3425aab6d2a7170148a3dc36975f2d09"
 
 do_compile() {
-    oe_runmake TARGETS="sdl2_opengles1_test sdl2_opengles2_test"
+    oe_runmake TARGETS="${TARGETS}"
 }
 
 do_install() {
-    for f in sdl2_opengles1_test sdl2_opengles2_test ; do
+    for f in ${TARGETS}; do
         install -d ${D}${webos_applicationsdir}/$f
         install -m 0755 ${S}/$f ${D}${webos_applicationsdir}/$f/
         install -m 0644 ${WORKDIR}/$f-appinfo.json ${D}${webos_applicationsdir}/$f/appinfo.json
