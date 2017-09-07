@@ -117,8 +117,6 @@ WEBOS_ERROR_QA_AUTOREV ?= "webos-enh-sub-autorev-error"
 ERROR_QA_append = " webos-enh-sub-error ${WEBOS_ERROR_QA_AUTOREV}"
 ERROR_QA_remove = " version-going-backwards"
 
-QEMU_TARGETS ?= "arm i386"
-
 # Default WEBOS_TARGET_* values (see webos_cmake.bbclass)
 WEBOS_TARGET_CORE_OS ?= "rockhopper"
 WEBOS_TARGET_MACHINE_IMPL ?= "device"
