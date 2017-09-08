@@ -91,7 +91,7 @@ DISTRO_EXTRA_RDEPENDS_append_qemuall = " ${WEBOSQEMUDEPS}"
 KERNEL_MODULE_AUTOLOAD_append_qemux86 = " uvesafb"
 KERNEL_MODULE_PROBECONF_append_qemux86 = " uvesafb"
 
-UVESA_MODE ?= "1024x768-32"
+UVESA_MODE = "1024x768-32"
 module_conf_uvesafb_qemux86 = "options uvesafb mode_option=${UVESA_MODE}"
 
 # Prevent vboxvideo from loading, it conflicts with uvesafb
