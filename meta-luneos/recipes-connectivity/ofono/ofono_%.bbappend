@@ -28,3 +28,5 @@ do_install_append() {
 
 # meta-systemd sets this to disable but we as distro want it to be enabled by default
 SYSTEMD_AUTO_ENABLE_forcevariable = "enable"
+
+RDEPENDS_${PN}-tests += "python"
