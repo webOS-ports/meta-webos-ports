@@ -12,7 +12,7 @@ RDEPENDS_${PN} += " \
 "
 
 PV = "0.4.0-1+git${SRCPV}"
-SRCREV = "b4e55287502ba9673b35b1649cddddbda5b78fa3"
+SRCREV = "89e9c3e2437c21dcdaced17c7b5df5cc41efd051"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
