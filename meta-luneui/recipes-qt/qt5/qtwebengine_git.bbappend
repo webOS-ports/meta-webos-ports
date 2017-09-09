@@ -35,6 +35,6 @@ SRC_URI += " \
     file://chromium/0006-Enable-password-echo.patch;patchdir=src/3rdparty \
     file://chromium/0007-storage-browser-quota-workaround-for-crash-on-cache-.patch;patchdir=src/3rdparty \
     file://chromium/0008-html.css-themeWin.css-Add-Prelude-as-default-font-in.patch;patchdir=src/3rdparty \
-    file://chromium/0009-Disable-some-sandboxing-capabilities.patch;patchdir=src/3rdparty \
     file://chromium/0010-Update-additional-params-from-Chromium-53-56.patch;patchdir=src/3rdparty \
+    file://chromium/0011-Fix-WebGL2-Textures.patch;patchdir=src/3rdparty \
     "
