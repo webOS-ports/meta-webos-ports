@@ -14,3 +14,5 @@ inherit pkgconfig
 
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
+
+SRC_URI += "file://0001-allow-to-build-on-aarch64.patch"
