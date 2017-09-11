@@ -6,11 +6,11 @@ LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=694e396551033371686c80d3a1a69e88"
 DEPENDS = "nodejs-native node-gyp-packages-native"
 
-SRC_URI = "https://github.com/TooTallNate/node-gyp/archive/v${PV}.tar.gz"
-SRC_URI[md5sum] = "bbd667edd17df54c687d6224b8619f24"
-SRC_URI[sha256sum] = "3992e62c2480552b3e847ec7ac0e03009ab5391bdecf78a25b8688cb6e159d95"
+PV = "4.0.0+git${SRCPV}"
+SRCREV = "7245415296c5f0a97e10dba6dafbaf2332a67578"
+SRC_URI = "git://github.com/nodejs/node-gyp.git"
 
-S = "${WORKDIR}/node-gyp-${PV}"
+S = "${WORKDIR}/git"
 
 inherit native
 
@@ -61,5 +61,5 @@ do_install () {
 
     rm -rf ${D}/${libdir}/node_modules/node-gyp
     mkdir -p ${D}/${libdir}/node_modules/node-gyp
-    cp -R --no-dereference --preserve=mode,links -v ${S}/addon.gypi ${S}/bin ${S}/gyp ${S}/lib ${S}/LICENSE ${S}/node_modules ${S}/package.json ${S}/README.md ${D}/${libdir}/node_modules/node-gyp
+    cp -R --no-dereference --preserve=mode,links -v ${S}/addon.gypi ${S}/bin ${S}/CHANGELOG.md ${S}/CONTRIBUTING.md ${S}/gyp ${S}/lib ${S}/LICENSE ${S}/node_modules ${S}/package.json ${S}/README.md ${D}/${libdir}/node_modules/node-gyp
 }
