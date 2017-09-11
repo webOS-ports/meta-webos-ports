@@ -14,7 +14,7 @@ VBOX_RDEPENDS_qemux86-64 = "vboxguestdrivers"
 RDEPENDS_${PN} = "lsb gzip ${VBOX_RDEPENDS} nyx-conf"
 
 PV = "6.1.0-94+git${SRCPV}"
-SRCREV = "1c838f5647a726ece10aa42d3a45808cb221302b"
+SRCREV = "362b2bde9af0fb109e26e12580470199fee93493"
 
 EXTRA_OECMAKE += "-DDISTRO_VERSION:STRING='${DISTRO_VERSION}' -DDISTRO_NAME:STRING='${DISTRO_NAME}' \
                   -DWEBOS_DISTRO_API_VERSION:STRING='${WEBOS_DISTRO_API_VERSION}' \
@@ -48,15 +48,16 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 SRC_URI_append = " \
-  file://${MACHINE_ARCH}.cmake \
-  "
+    file://${MACHINE}.cmake \
+"
 
 do_configure_prepend() {
-  # install additional machine specific nyx configuration before CMake is started
-  if [ -f ${WORKDIR}/${MACHINE_ARCH}.cmake ]
-  then
-    cp ${WORKDIR}/${MACHINE_ARCH}.cmake ${S}/src/machine
-  fi
+    # install additional machine specific nyx configuration before CMake is started
+    if [ -f ${WORKDIR}/${MACHINE}.cmake ]
+    then
+        mkdir -p ${S}/src/machine
+        cp ${WORKDIR}/${MACHINE}.cmake ${S}/src/machine
+    fi
 }
 
 
