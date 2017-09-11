@@ -57,4 +57,9 @@ do_install () {
     export TMPDIR=${T}
     #install from fetched files
     ${STAGING_LIBDIR_NATIVE}/node_modules/npm/bin/npm-cli.js -g install ${S} --no-registry --cache ${STAGING_DATADIR_NATIVE}/npmcache/node-gyp-native/
+    rmdir ${D}/${sysconfdir} || true
+
+    rm -rf ${D}/${libdir}/node_modules/node-gyp
+    mkdir -p ${D}/${libdir}/node_modules/node-gyp
+    cp -R --no-dereference --preserve=mode,links -v ${S}/addon.gypi ${S}/bin ${S}/gyp ${S}/lib ${S}/LICENSE ${S}/node_modules ${S}/package.json ${S}/README.md ${D}/${libdir}/node_modules/node-gyp
 }
