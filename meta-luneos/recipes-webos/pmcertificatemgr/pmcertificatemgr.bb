@@ -18,9 +18,7 @@ inherit pkgconfig
 inherit webos_machine_impl_dep
 inherit update-alternatives
 
-ALTERNATIVE_${PN} = "openssl-cnf openssl-cnf2"
-ALTERNATIVE_LINK_NAME[openssl-cnf] = "${libdir}/ssl/openssl.cnf"
-ALTERNATIVE_PRIORITY[openssl-cnf] ?= "10"
+ALTERNATIVE_${PN} = "openssl-cnf2"
 ALTERNATIVE_LINK_NAME[openssl-cnf2] = "${sysconfdir}/ssl/openssl.cnf"
 ALTERNATIVE_PRIORITY[openssl-cnf2] ?= "10"
 
