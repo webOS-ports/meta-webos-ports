@@ -19,7 +19,7 @@ S = "${WORKDIR}/git"
 SRCREV = "40041a4e3425aab6d2a7170148a3dc36975f2d09"
 
 do_compile() {
-    oe_runmake TARGETS="${TARGETS}"
+    oe_runmake TARGETS="${TARGETS}" CXXFLAGS="${CXXFLAGS} ${LDFLAGS}"
 }
 
 do_install() {
