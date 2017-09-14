@@ -17,7 +17,7 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 do_compile() {
-    oe_runmake CC="${CC}"
+    oe_runmake CC="${CC} ${LDFLAGS}"
 }
 
 do_install() {
