@@ -7,7 +7,7 @@ LIC_FILES_CHKSUM = " \
 "
 
 PV = "5.8.0+gitr${SRCPV}"
-SRCREV = "ddca65e8b1e1bdd66d216b9d7681f39923f68078"
+SRCREV = "de6a1d9339d698e47e2e229394031e813d025d12"
 
 DEPENDS = "qtbase libhybris qtwayland virtual/android-headers qtdeclarative"
 
@@ -17,7 +17,6 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 SRC_URI = " \
     git://git.merproject.org/mer-core/qtscenegraph-adaptation.git \
-    file://0001-customcontext-Adapt-for-Qt-5.8.patch;patch=1 \
 "
 S = "${WORKDIR}/git"
 
