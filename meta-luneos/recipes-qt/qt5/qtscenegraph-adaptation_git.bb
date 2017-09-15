@@ -7,7 +7,7 @@ LIC_FILES_CHKSUM = " \
 "
 
 PV = "5.8.0+gitr${SRCPV}"
-SRCREV = "de6a1d9339d698e47e2e229394031e813d025d12"
+SRCREV = "cfcaa70dc244207efb522e511be6ee5818efbe43"
 
 DEPENDS = "qtbase libhybris qtwayland virtual/android-headers qtdeclarative"
 
@@ -16,7 +16,7 @@ DEPENDS = "qtbase libhybris qtwayland virtual/android-headers qtdeclarative"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 SRC_URI = " \
-    git://git.merproject.org/mer-core/qtscenegraph-adaptation.git \
+    git://git.merproject.org/Tofe/qtscenegraph-adaptation.git;branch=tofe/qt5.8 \
 "
 S = "${WORKDIR}/git"
 
