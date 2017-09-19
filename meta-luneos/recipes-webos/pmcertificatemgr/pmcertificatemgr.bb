@@ -15,7 +15,6 @@ SRCREV = "dc711d0788cd782e543bfa4c82eb23aee238825d"
 inherit webos_ports_repo
 inherit webos_cmake
 inherit pkgconfig
-inherit webos_machine_impl_dep
 inherit update-alternatives
 
 ALTERNATIVE_${PN} = "openssl-cnf2"
