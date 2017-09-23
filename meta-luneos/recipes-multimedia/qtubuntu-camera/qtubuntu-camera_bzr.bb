@@ -26,5 +26,6 @@ FILES_${PN} += "\
 "
 
 do_configure_prepend() {
-    rm ${S}/.qmake.conf
+    # Empty .qmake.conf, to avoid conflicts with pkgconfig from Yocto
+    echo "" > ${S}/.qmake.conf
 }
