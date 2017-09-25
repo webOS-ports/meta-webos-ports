@@ -21,6 +21,10 @@ inherit qmake5
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};"
 S = "${WORKDIR}/git"
 
+do_install_append() {
+    cp -r ${D}/etc/xdg ${D}${OE_QMAKE_PATH_QT_SETTINGS}
+}
+
 FILES_${PN}-dbg += " \
   ${OE_QMAKE_PATH_PLUGINS}/sensors/.debug \
 "
