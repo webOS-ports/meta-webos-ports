@@ -38,3 +38,10 @@ SRC_URI += " \
     file://chromium/0010-Update-additional-params-from-Chromium-53-56.patch;patchdir=src/3rdparty \
     file://chromium/0011-Fix-WebGL2-Textures.patch;patchdir=src/3rdparty \
     "
+
+do_install_append() {
+    #Create the chromium folder already so users can right away push the required plugins there
+    mkdir -p ${D}${libdir}/chromium
+}
+
+FILES_${PN} += "${libdir}/chromium"
