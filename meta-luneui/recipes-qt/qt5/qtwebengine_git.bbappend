@@ -24,9 +24,8 @@ SRC_URI += " \
     file://0014-WebEngineView-re-introduce-devicePixelRatio-property.patch \
     file://0015-WebEngineView-add-extraContextMenuEntriesComponent-p.patch \
     file://0016-Fix-build-for-Qt5.9.patch \
-    file://0017-Revert-Load-libEGL-and-libGLES2-symbols-implicitly.patch \
-    file://0018-gn_generator-fix-debug-build.patch \
-    file://0019-Add-LuneOS-specific-switches.patch \
+    file://0017-gn_generator-fix-debug-build.patch \
+    file://0018-Add-LuneOS-specific-switches.patch \
     file://chromium/0001-Add-PalmServiceBridge-to-WebEngine.patch;patchdir=src/3rdparty \
     file://chromium/0002-PalmServiceBridge-adapt-to-Chromium-53-code-base.patch;patchdir=src/3rdparty \
     file://chromium/0003-WebContents-provide-additional-features-from-window..patch;patchdir=src/3rdparty \
