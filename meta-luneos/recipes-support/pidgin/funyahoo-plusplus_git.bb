@@ -9,7 +9,7 @@ DEPENDS = "pidgin json-glib glib-2.0"
 inherit pkgconfig
 
 SRC_URI = "git://github.com/EionRobb/funyahoo-plusplus;branch=master;protocol=git"
-SRCREV = "26d87c554425fcbb36d577fa78fd2667ad6c01d0"
+SRCREV = "cbceef10ef4388ab0bf0d654493636180802274d"
 
 S = "${WORKDIR}/git"
 #PV = "1.2.0+git${SRCPV}"
