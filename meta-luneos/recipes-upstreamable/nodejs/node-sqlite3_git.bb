@@ -5,13 +5,13 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=79558839a9db3e807e4ae6f8cd100c1c"
 
 DEPENDS = "node-gyp-native sqlite3"
 
-PV = "3.0.8+gitr${SRCPV}"
+PV = "3.1.13+gitr${SRCPV}"
 
 SRC_URI = " \
     git://github.com/mapbox/node-sqlite3.git;branch=master;protocol=git \
     file://no-node-pre-gyp.patch \
 "
-SRCREV = "da220c85dce50d9a83c71bdeed0610a1c4c153e8"
+SRCREV = "72bddafddcd9285de2e650e9e281b92b9a9e6b85"
 S = "${WORKDIR}/git"
 
 do_configure() {
