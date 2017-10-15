@@ -22,7 +22,6 @@ S = "${WORKDIR}/git"
 
 RRECOMMENDS_${PN} += " \
     pidgin-sipe \
-    whatsapp-purple \
     purple-skypeweb \
     funyahoo-plusplus \
     libpurple-plugin-autoaccept \
@@ -41,8 +40,6 @@ RRECOMMENDS_${PN} += " \
     libpurple-protocol-gg \
     libpurple-protocol-icq \
     libpurple-protocol-irc \
-    libpurple-protocol-mxit \
-    libpurple-protocol-myspace \
     libpurple-protocol-novell \
     libpurple-protocol-simple \
     libpurple-protocol-xmpp \

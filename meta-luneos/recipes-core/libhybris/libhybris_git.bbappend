@@ -9,4 +9,4 @@ EXTRA_OECONF += " \
     --with-default-hybris-ld-library-path=/usr/libexec/hal-droid/system/lib \
 "
 
-SRCREV = "9d2bccb172093600fc3bbb869e3ba10628eec3d5"
+SRCREV = "4aa3379de1d911f00a86cb5643f7ff63dd48d7a6"
