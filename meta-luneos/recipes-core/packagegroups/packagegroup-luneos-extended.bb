@@ -77,6 +77,7 @@ RDEPENDS_${PN} = " \
   qtsensors-qmlplugins \
   qtwayland \
   qtwayland-plugins \
+  qtconnectivity \
   \
   luna-appmanager \
   luna-next-cardshell \
