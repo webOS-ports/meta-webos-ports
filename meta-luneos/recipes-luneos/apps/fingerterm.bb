@@ -2,19 +2,21 @@ SUMMARY = "A terminal emulator with a custom virtual keyboard"
 LICENSE = "GPL-2.0"
 LIC_FILES_CHKSUM = "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263"
 
-PV = "1.0.3+gitr${SRCPV}"
-SRCREV = "875aa14ed2a511b7e79f29020d40f5b3c344423d"
+PV = "1.3.6+gitr${SRCPV}"
+SRCREV = "1d0fc679d4bd159c0cbf25e6cface555d343446f"
 
 DEPENDS = "qtbase qtdeclarative"
 
 SRC_URI = " \
     git://git.merproject.org/mer-core/fingerterm.git;protocol=git;branch=master \
     file://appinfo.json \
+    file://0001-Make-DEPLOYMENT_PATH-configurable.patch \
 "
 S = "${WORKDIR}/git"
 
 EXTRA_QMAKEVARS_PRE = "\
     DEFAULT_FONT=Courier \
+    DEPLOYMENT_PATH=/usr/palm/applications/${PN} \
 "
 
 inherit webos_ports_fork_repo
@@ -27,7 +29,7 @@ do_configure_append() {
     sed -i -e s:/usr/bin/${PN}:${APP_PATH}/${PN}:g ${S}/*.cpp
 }
 
-do_install() {
+do_install_append() {
     install -d ${D}${APP_PATH}
 
     install -m 0644 ${WORKDIR}/appinfo.json ${D}${APP_PATH}
