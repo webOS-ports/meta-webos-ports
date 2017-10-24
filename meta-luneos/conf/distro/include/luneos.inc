@@ -187,3 +187,5 @@ PACKAGECONFIG_pn-gtk+ += "directfb"
 PACKAGECONFIG_pn-qtmultimedia += "gstreamer"
 # needed to use gles instead of default gl
 PACKAGECONFIG_GL_pn-libsdl2 = "gles2"
+# needed for VPN support in ConnMan
+PACKAGECONFIG_append_pn-connman = " openvpn vpnc l2tp pptp"
