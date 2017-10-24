@@ -31,7 +31,7 @@ RDEPENDS_${PN} = " \
   webos-telephonyd \
   wireless-tools \
   \
-  ${@bb.utils.contains('MACHINE_FEATURES', 'bluetooth', 'bluez5', '',d)} \
+  bluez5 \
   \
   location-service \
   imaccountvalidator \
