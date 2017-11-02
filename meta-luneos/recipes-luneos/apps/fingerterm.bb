@@ -3,14 +3,13 @@ LICENSE = "GPL-2.0"
 LIC_FILES_CHKSUM = "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263"
 
 PV = "1.3.6+gitr${SRCPV}"
-SRCREV = "1d0fc679d4bd159c0cbf25e6cface555d343446f"
+SRCREV = "64a3554969747e348bfa9eb85842490cef9b719e"
 
 DEPENDS = "qtbase qtdeclarative"
 
 SRC_URI = " \
     git://git.merproject.org/mer-core/fingerterm.git;protocol=git;branch=master \
     file://appinfo.json \
-    file://0001-Make-DEPLOYMENT_PATH-configurable.patch \
 "
 S = "${WORKDIR}/git"
 
