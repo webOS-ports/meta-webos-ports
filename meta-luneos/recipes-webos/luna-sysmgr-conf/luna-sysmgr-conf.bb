@@ -21,8 +21,6 @@ do_install() {
     install -d ${D}${webos_sysmgrdir}
 
     # install all the platform specific conf files
-    # (no good way to do this with find/xargs, given the <base>-<machine>.conf -> <base>-platform.conf
-    # name change needed on the install copy => do them all individually)
 
     # install the platform luna.conf file
     install -v -m 0644 ${WORKDIR}/luna-platform.conf ${D}${webos_sysconfdir}/
