@@ -29,8 +29,14 @@ do_install_append() {
     install -v -m 644 ${S}/files/conf/locale.txt ${D}${webos_sysconfdir}
     install -v -m 644 ${S}/files/conf/defaultPreferences.txt ${D}${webos_sysconfdir}
     install -v -m 644 ${S}/src/mccInfo.json ${D}${webos_sysconfdir}
+    install -v -m 644 ${S}/files/conf/CustomerCareNumber.txt ${D}${webos_sysconfdir}
+
+    install -d ${D}${webos_sysmgr_datadir}/customization
+    install -v -m 644 ${S}/files/conf/cust-preferences.txt ${D}${webos_sysmgr_datadir}/customization
+
 }
 
 PACKAGES =+ "${PN}-fonts"
-FILES_${PN} += "${webos_prefix} ${webos_sysconfdir}"
+FILES_${PN} += "${webos_prefix} ${webos_sysconfdir} ${webos_sysmgr_datadir}/customization"
 FILES_${PN}-fonts += "${datadir}/fonts/"
+}
