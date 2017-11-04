@@ -39,4 +39,3 @@ do_install_append() {
 PACKAGES =+ "${PN}-fonts"
 FILES_${PN} += "${webos_prefix} ${webos_sysconfdir} ${webos_sysmgr_datadir}/customization"
 FILES_${PN}-fonts += "${datadir}/fonts/"
-}
