@@ -49,10 +49,6 @@ do_install_append() {
     then
         install -d ${D}${webos_sysconfdir}
         install -v -m 644 ${S}/conf/luna.conf ${D}${webos_sysconfdir}
-        install -v -m 644 ${S}/conf/lunaAnimations.conf ${D}${webos_sysconfdir}
-        install -v -m 644 ${S}/conf/timezone.txt ${D}${webos_sysconfdir}
-        install -v -m 644 ${S}/conf/notificationPolicy.conf ${D}${webos_sysconfdir}
-        install -v -m 644 ${S}/conf/persistentWindows.conf ${D}${webos_sysconfdir}
         install -v -m 644 ${S}/conf/default-launcher-page-layout.json ${D}${webos_sysconfdir}
         install -v -m 644 ${S}/conf/default-dock-positions.json ${D}${webos_sysconfdir}
     fi
