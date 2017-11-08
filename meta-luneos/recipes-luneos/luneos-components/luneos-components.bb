@@ -3,9 +3,9 @@ LICENSE = "LGPL-2.1"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 PV = "0.4.0+gitr${SRCPV}"
-SRCREV = "ab0ab88a91d08b94c7e9078e16ca70f1f0f6f9fa"
+SRCREV = "cc39eee286b262b6c7f7379acbdce662249540df"
 
-DEPENDS = "qtbase qtdeclarative qtlocation qtwebengine qtquickcontrols qtquickcontrols2 luna-service2"
+DEPENDS = "qtbase qtdeclarative qtlocation qtwebengine qtquickcontrols qtquickcontrols2 luna-service2 kf5bluezqt-mer"
 RRECOMMENDS_${PN} += "qtlocation"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"

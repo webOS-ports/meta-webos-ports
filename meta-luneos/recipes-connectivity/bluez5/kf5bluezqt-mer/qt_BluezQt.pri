@@ -1,0 +1,10 @@
+QT.BluezQt.VERSION = 5.24.0
+QT.BluezQt.MAJOR_VERSION = 5
+QT.BluezQt.MINOR_VERSION = 24
+QT.BluezQt.PATCH_VERSION = 0
+QT.BluezQt.name = KF5BluezQt
+QT.BluezQt.defines = 
+QT.BluezQt.includes = $$QT_MODULE_INCLUDE_BASE/../KF5/BluezQt
+QT.BluezQt.private_includes =
+QT.BluezQt.libs = $$QT_MODULE_LIB_BASE
+QT.BluezQt.depends = core

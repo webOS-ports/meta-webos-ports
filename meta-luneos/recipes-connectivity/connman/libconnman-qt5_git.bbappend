@@ -1,3 +1,1 @@
-FILESEXTRAPATHS_prepend := "${THISDIR}/${BPN}:"
-
-SRC_URI += "file://0001-Fix-initial-value-of-connected-property.patch"
+SRCREV = "354325971423396c1f3704a2346cd93a24e86398"
