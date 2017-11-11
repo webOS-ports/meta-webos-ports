@@ -4,7 +4,7 @@ LICENSE = "GPL-3.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-3.0;md5=c79ff39f19dfec6d293b95dea7b07891"
 
 PV = "0.3.0-7+git${SRCPV}"
-SRCREV = "547287cda63f9a395cedf81e30dd6d60dc3ac5b1"
+SRCREV = "5acfe2bd0c1b3435ed0cbf9b021945202d0d2f86"
 
 DEPENDS += "qtbase qtdeclarative qtwebengine"
 
