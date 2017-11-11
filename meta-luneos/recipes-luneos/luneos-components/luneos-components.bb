@@ -3,7 +3,7 @@ LICENSE = "LGPL-2.1"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 PV = "0.4.0+gitr${SRCPV}"
-SRCREV = "cc39eee286b262b6c7f7379acbdce662249540df"
+SRCREV = "d71d3ac5ee782f49f580d68338400d2eef5876bd"
 
 DEPENDS = "qtbase qtdeclarative qtlocation qtwebengine qtquickcontrols qtquickcontrols2 luna-service2 kf5bluezqt-mer"
 RRECOMMENDS_${PN} += "qtlocation"
