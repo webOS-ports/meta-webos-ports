@@ -38,6 +38,7 @@ RDEPENDS_${PN} = " \
   systemd-analyze \
   qt5-opengles2-test \
   sdl2-opengles-test \
+  org.webosports.app.settings-qml \
   \
   connman-client \
   qtdeclarative-tools \
