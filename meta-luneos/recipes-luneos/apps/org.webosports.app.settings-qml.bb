@@ -20,6 +20,7 @@ S = "${WORKDIR}/git"
 FILES_${PN} += "${webos_applicationsdir}/org.webosports.app.settings-common \
                 ${webos_applicationsdir}/org.webosports.app.settings.wifi \
                 ${webos_applicationsdir}/org.webosports.app.settings.bluetooth \
+                ${webos_applicationsdir}/org.webosports.app.settings.about \
 		${datadir}/ls2 \
 		"
 
