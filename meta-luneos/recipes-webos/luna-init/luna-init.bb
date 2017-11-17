@@ -8,7 +8,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "tzdata python-tz-native"
 
 PV = "2.0.1-10+git${SRCPV}"
-SRCREV = "cc2ba5ac03b0c4f1ab11f1083fa630e5977ce4ab"
+SRCREV = "dc051875c4ecfae7b386f1355b2dc20f0d7544c2"
 
 inherit allarch
 inherit webos_ports_fork_repo
@@ -28,9 +28,11 @@ do_install_append() {
     install -d ${D}${webos_sysconfdir}
     install -v -m 644 ${S}/files/conf/locale.txt ${D}${webos_sysconfdir}
     install -v -m 644 ${S}/files/conf/defaultPreferences.txt ${D}${webos_sysconfdir}
-    install -v -m 644 ${S}/src/mccInfo.json ${D}${webos_sysconfdir}
+    install -v -m 644 ${S}/files/conf/default-launcher-page-layout.json ${D}${webos_sysconfdir}
+    install -v -m 644 ${S}/files/conf/default-dock-positions.json ${D}${webos_sysconfdir}
     install -v -m 644 ${S}/files/conf/CustomerCareNumber.txt ${D}${webos_sysconfdir}
-
+    install -v -m 644 ${S}/src/mccInfo.json ${D}${webos_sysconfdir}
+	
     install -d ${D}${webos_sysmgr_datadir}/customization
     install -v -m 644 ${S}/files/conf/cust-preferences.txt ${D}${webos_sysmgr_datadir}/customization
 

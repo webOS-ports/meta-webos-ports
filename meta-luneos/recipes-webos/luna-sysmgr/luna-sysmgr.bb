@@ -13,7 +13,7 @@ DEPENDS += "serviceinstaller"
 #RDEPENDS_${PN} += "jail" #TODO
 
 PV = "3.0.0-3+git${SRCPV}"
-SRCREV = "f99b66cde86c61837acdeaf292b17c734f791391"
+SRCREV = "514a3d4f4d104cb9d306772f3f5e804c018be738"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 
@@ -49,8 +49,6 @@ do_install_append() {
     then
         install -d ${D}${webos_sysconfdir}
         install -v -m 644 ${S}/conf/luna.conf ${D}${webos_sysconfdir}
-        install -v -m 644 ${S}/conf/default-launcher-page-layout.json ${D}${webos_sysconfdir}
-        install -v -m 644 ${S}/conf/default-dock-positions.json ${D}${webos_sysconfdir}
     fi
 
     # install the db kind to register schema for context upload (collecting error logs)
