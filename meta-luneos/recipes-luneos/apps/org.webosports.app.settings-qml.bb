@@ -12,7 +12,7 @@ inherit cmake_qt5
 inherit webos_cmake
 
 PV = "0.4.0-1+git${SRCPV}"
-SRCREV = "c1aff9ec3f0c22e790fa25086a3aadf73397269e"
+SRCREV = "7c84abab9ab8316a1867e4ad087fff2c6cf0ea2e"
 
 SRC_URI = "git://github.com/webOS-ports/org.webosports.app.settings.git;branch=qml-based"
 S = "${WORKDIR}/git"
