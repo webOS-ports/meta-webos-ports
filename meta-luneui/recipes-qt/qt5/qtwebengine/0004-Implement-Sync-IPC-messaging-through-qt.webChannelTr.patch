@@ -1,22 +1,25 @@
-From 3f1af6d3fb2f11ee5837f9568b99bbacba24a4c1 Mon Sep 17 00:00:00 2001
+From 1e91a8ecd8b3b2e114ec4c6525d82674667b48d8 Mon Sep 17 00:00:00 2001
 From: Christophe Chapuis <chris.chapuis@gmail.com>
 Date: Wed, 30 Sep 2015 19:48:02 +0200
 Subject: [PATCH] Implement Sync IPC messaging through
  qt.webChannelTransport.sendSync
 
+* Fix QtWebChannel IPC
+
 Signed-off-by: Christophe Chapuis <chris.chapuis@gmail.com>
+Signed-off-by: Martin Jansa <Martin.Jansa@gmail.com>
 ---
  src/core/common/qt_messages.h                 |  2 +
- .../renderer/web_channel_ipc_transport.cpp    | 42 ++++++++++++++++++-
- .../web_channel_ipc_transport_host.cpp        | 17 +++++++-
- .../web_channel_ipc_transport_host.h          |  3 ++
- 4 files changed, 62 insertions(+), 2 deletions(-)
+ .../renderer/web_channel_ipc_transport.cpp    | 53 ++++++++++++++++++-
+ .../web_channel_ipc_transport_host.cpp        | 22 +++++++-
+ .../web_channel_ipc_transport_host.h          |  5 ++
+ 4 files changed, 80 insertions(+), 2 deletions(-)
 
 diff --git a/src/core/common/qt_messages.h b/src/core/common/qt_messages.h
-index 239122e3..bb2a1ec6 100644
+index c5caa0ff..d3382dba 100644
 --- a/src/core/common/qt_messages.h
 +++ b/src/core/common/qt_messages.h
-@@ -69,6 +69,8 @@ IPC_MESSAGE_ROUTED0(RenderViewObserverHostQt_DidFirstVisuallyNonEmptyLayout)
+@@ -76,6 +76,8 @@ IPC_MESSAGE_ROUTED0(RenderViewObserverHostQt_DidFirstVisuallyNonEmptyLayout)
  
  IPC_MESSAGE_ROUTED1(WebChannelIPCTransportHost_SendMessage, std::vector<char> /*binaryJSON*/)
  
@@ -26,47 +29,59 @@ index 239122e3..bb2a1ec6 100644
  // Misc messages
  // These are messages sent from the renderer to the browser process.
 diff --git a/src/core/renderer/web_channel_ipc_transport.cpp b/src/core/renderer/web_channel_ipc_transport.cpp
-index 865bfc24..7067bf62 100644
+index bb544168..c86a4e6f 100644
 --- a/src/core/renderer/web_channel_ipc_transport.cpp
 +++ b/src/core/renderer/web_channel_ipc_transport.cpp
-@@ -89,6 +89,44 @@ private:
-         renderView->Send(new WebChannelIPCTransportHost_SendMessage(renderView->GetRoutingID(), std::vector<char>(rawData, rawData + size)));
-     }
+@@ -69,6 +69,56 @@ private:
+     // gin::WrappableBase
+     gin::ObjectTemplateBuilder GetObjectTemplateBuilder(v8::Isolate *isolate) override;
  
 +    void NativeQtSendMessageSync(gin::Arguments *args)
 +    {
-+        content::RenderView *renderView = GetRenderView(args->isolate());
-+        if (!renderView || args->Length() != 1)
++        blink::WebLocalFrame *frame = blink::WebLocalFrame::FrameForCurrentContext();
++        if (!frame || !frame->View())
 +            return;
-+        v8::Handle<v8::Value> val;
-+        args->GetNext(&val);
-+        if (!val->IsString() && !val->IsStringObject())
-+            return;
-+        v8::String::Utf8Value utf8(val->ToString());
 +
-+        QByteArray valueData(*utf8, utf8.length());
++        content::RenderFrame *renderFrame = content::RenderFrame::FromWebFrame(frame);
++        if (!renderFrame)
++            return;
++
++        std::string message;
++        if (!args->GetNext(&message))
++            return;
++
++        QByteArray valueData(message.data(), message.size());
 +        QJsonParseError error;
 +        QJsonDocument doc = QJsonDocument::fromJson(valueData, &error);
-+        if (error.error != QJsonParseError::NoError)
-+            qWarning("%s %d: Parsing error: %s",__FILE__, __LINE__, qPrintable(error.errorString()));
++        if (error.error != QJsonParseError::NoError) {
++            LOG(WARNING) << "Parsing error: " << qPrintable(error.errorString());
++            return;
++        }
++
 +        int size = 0;
 +        const char *rawData = doc.rawData(&size);
++        if (size == 0)
++            return;
 +
 +        std::vector<char> replyData;
-+        WebChannelIPCTransportHost_SendMessageSync *message = new WebChannelIPCTransportHost_SendMessageSync(renderView->GetRoutingID(), std::vector<char>(rawData, rawData + size), &replyData);
++        WebChannelIPCTransportHost_SendMessageSync *messageSync = new WebChannelIPCTransportHost_SendMessageSync(
++                                                                    renderFrame->GetRoutingID(),
++                                                                    std::vector<char>(rawData, rawData + size),
++                                                                    &replyData);
++
 +        // Enable the UI thread in browser to receive messages.
-+        message->EnableMessagePumping();
-+        renderView->Send(message);
++        messageSync->EnableMessagePumping();
++        renderFrame->Send(messageSync);
 +
 +        QJsonDocument docReply = QJsonDocument::fromRawData(replyData.data(), replyData.size(), QJsonDocument::BypassValidation);
 +        Q_ASSERT(docReply.isObject());
 +        QByteArray jsonReply = docReply.toJson(QJsonDocument::Compact);
 +
-+        v8::Isolate *isolate = v8::Isolate::GetCurrent();
-+        v8::Handle<v8::Object> replyObject(v8::Object::New(isolate));
-+        replyObject->ForceSet(v8::String::NewFromUtf8(isolate, "data")
-+                           , v8::String::NewFromUtf8(isolate, jsonReply.constData(), v8::String::kNormalString, jsonReply.size())
-+                           , v8::PropertyAttribute(v8::ReadOnly | v8::DontDelete));
++        v8::Isolate* isolate = args->isolate();
++
++        v8::Local<v8::Object> replyObject = v8::Object::New(isolate);
++        replyObject->Set(v8::String::NewFromUtf8(isolate, "data"),
++                      v8::String::NewFromUtf8(isolate, jsonReply.constData(), v8::String::kNormalString, jsonReply.size()));
 +
 +        args->Return(replyObject);
 +    }
@@ -74,46 +89,45 @@ index 865bfc24..7067bf62 100644
      DISALLOW_COPY_AND_ASSIGN(WebChannelTransport);
  };
  
-@@ -135,7 +173,9 @@ void WebChannelTransport::Uninstall(blink::WebFrame *frame, uint worldId)
- 
+@@ -154,7 +204,8 @@ bool WebChannelTransport::NativeQtSendMessage(gin::Arguments *args)
  gin::ObjectTemplateBuilder WebChannelTransport::GetObjectTemplateBuilder(v8::Isolate *isolate)
  {
--    return gin::Wrappable<WebChannelTransport>::GetObjectTemplateBuilder(isolate).SetMethod("send", &WebChannelTransport::NativeQtSendMessage);
-+    return gin::Wrappable<WebChannelTransport>::GetObjectTemplateBuilder(isolate)
-+                       .SetMethod("send", &WebChannelTransport::NativeQtSendMessage)
-+                       .SetMethod("sendSync", &WebChannelTransport::NativeQtSendMessageSync);
+     return gin::Wrappable<WebChannelTransport>::GetObjectTemplateBuilder(isolate)
+-        .SetMethod("send", &WebChannelTransport::NativeQtSendMessage);
++        .SetMethod("send", &WebChannelTransport::NativeQtSendMessage)
++        .SetMethod("sendSync", &WebChannelTransport::NativeQtSendMessageSync);
  }
  
- content::RenderView *WebChannelTransport::GetRenderView(v8::Isolate *isolate)
+ WebChannelIPCTransport::WebChannelIPCTransport(content::RenderFrame *renderFrame)
 diff --git a/src/core/renderer_host/web_channel_ipc_transport_host.cpp b/src/core/renderer_host/web_channel_ipc_transport_host.cpp
-index a093632b..f2bfae33 100644
+index 6b32093a..dad06eb9 100644
 --- a/src/core/renderer_host/web_channel_ipc_transport_host.cpp
 +++ b/src/core/renderer_host/web_channel_ipc_transport_host.cpp
-@@ -54,6 +54,7 @@ WebChannelIPCTransportHost::WebChannelIPCTransportHost(content::WebContents *con
+@@ -70,6 +70,7 @@ inline QDebug operator<<(QDebug stream, const base::Optional<T> &opt)
+ WebChannelIPCTransportHost::WebChannelIPCTransportHost(content::WebContents *contents, uint worldId, QObject *parent)
      : QWebChannelAbstractTransport(parent)
      , content::WebContentsObserver(contents)
-     , m_worldId(worldId)
 +    ,_mWaitingReply(0)
  {
-     Send(new WebChannelIPCTransport_Install(routing_id(), m_worldId));
+     setWorldId(worldId);
  }
-@@ -88,7 +89,14 @@ void WebChannelIPCTransportHost::sendMessage(const QJsonObject &message)
-     QJsonDocument doc(message);
-     int size = 0;
+@@ -86,7 +87,14 @@ void WebChannelIPCTransportHost::sendMessage(const QJsonObject &message)
      const char *rawData = doc.rawData(&size);
--    Send(new WebChannelIPCTransport_Message(routing_id(), std::vector<char>(rawData, rawData + size), m_worldId));
+     content::RenderFrameHost *frame = web_contents()->GetMainFrame();
+     qCDebug(log).nospace() << "sending webchannel message to " << frame << ": " << doc;
+-    frame->Send(new WebChannelIPCTransport_Message(frame->GetRoutingID(), std::vector<char>(rawData, rawData + size), *m_worldId));
 +    if (_mWaitingReply) {
 +        WebChannelIPCTransportHost_SendMessageSync::WriteReplyParams(_mWaitingReply, std::vector<char>(rawData, rawData + size));
-+        Send(_mWaitingReply);
++        frame->Send(_mWaitingReply);
 +        _mWaitingReply = 0;
 +    }
 +    else {
-+        Send(new WebChannelIPCTransport_Message(routing_id(), std::vector<char>(rawData, rawData + size), m_worldId));
++        frame->Send(new WebChannelIPCTransport_Message(frame->GetRoutingID(), std::vector<char>(rawData, rawData + size), *m_worldId));
 +    }
  }
  
- void WebChannelIPCTransportHost::onWebChannelMessage(const std::vector<char> &message)
-@@ -98,11 +106,18 @@ void WebChannelIPCTransportHost::onWebChannelMessage(const std::vector<char> &me
+ void WebChannelIPCTransportHost::setWorldId(base::Optional<uint> worldId)
+@@ -116,11 +124,22 @@ void WebChannelIPCTransportHost::onWebChannelMessage(const std::vector<char> &me
      Q_EMIT messageReceived(doc.object(), this);
  }
  
@@ -123,8 +137,20 @@ index a093632b..f2bfae33 100644
 +    onWebChannelMessage(message);
 +}
 +
- bool WebChannelIPCTransportHost::OnMessageReceived(const IPC::Message &message)
+ void WebChannelIPCTransportHost::RenderFrameCreated(content::RenderFrameHost *frame)
  {
+     setWorldId(frame, m_worldId);
+ }
+ 
++void WebChannelIPCTransportHost::Send(const IPC::Message *message)
++{
++    // an error has occurred during IPC_MESSAGE_HANDLER_DELAY_REPLY
++}
++
+ bool WebChannelIPCTransportHost::OnMessageReceived(const IPC::Message& message, content::RenderFrameHost *receiver)
+ {
+     if (receiver != web_contents()->GetMainFrame())
+@@ -129,6 +148,7 @@ bool WebChannelIPCTransportHost::OnMessageReceived(const IPC::Message& message,
      bool handled = true;
      IPC_BEGIN_MESSAGE_MAP(WebChannelIPCTransportHost, message)
          IPC_MESSAGE_HANDLER(WebChannelIPCTransportHost_SendMessage, onWebChannelMessage)
@@ -133,16 +159,31 @@ index a093632b..f2bfae33 100644
      IPC_END_MESSAGE_MAP()
      return handled;
 diff --git a/src/core/renderer_host/web_channel_ipc_transport_host.h b/src/core/renderer_host/web_channel_ipc_transport_host.h
-index a1e697a9..c227a4df 100644
+index 3a814a79..f546cc83 100644
 --- a/src/core/renderer_host/web_channel_ipc_transport_host.h
 +++ b/src/core/renderer_host/web_channel_ipc_transport_host.h
-@@ -71,7 +71,10 @@ public:
- private:
-     bool OnMessageReceived(const IPC::Message& message) override;
+@@ -59,6 +59,8 @@ public:
+     void setWorldId(uint worldId) { setWorldId(base::Optional<uint>(worldId)); }
+     uint worldId() const { return *m_worldId; }
+ 
++    void Send(const IPC::Message *message);
++
+     // QWebChannelAbstractTransport
+     void sendMessage(const QJsonObject &message) override;
+ 
+@@ -66,6 +68,7 @@ private:
+     void setWorldId(base::Optional<uint> worldId);
+     void setWorldId(content::RenderFrameHost *frame, base::Optional<uint> worldId);
      void onWebChannelMessage(const std::vector<char> &message);
 +    void onWebChannelMessageSync(const std::vector<char> &message, IPC::Message *reply);
+ 
+     // WebContentsObserver
+     void RenderFrameCreated(content::RenderFrameHost *frame) override;
+@@ -74,6 +77,8 @@ private:
+     // Empty only during construction/destruction. Synchronized to all the
+     // WebChannelIPCTransports/RenderFrames in the observed WebContents.
+     base::Optional<uint> m_worldId;
 +
-     uint m_worldId;
 +    IPC::Message *_mWaitingReply;
  };
  

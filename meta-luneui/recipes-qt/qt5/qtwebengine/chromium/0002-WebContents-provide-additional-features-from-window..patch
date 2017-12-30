@@ -1,4 +1,4 @@
-From 4dc15d90a1ddc8f28224cee6c2cf16e54ef5a493 Mon Sep 17 00:00:00 2001
+From 8ec2c8cfce606a1a9a159b57d5bd5774b2946648 Mon Sep 17 00:00:00 2001
 From: Christophe Chapuis <chris.chapuis@gmail.com>
 Date: Sun, 27 Sep 2015 21:39:56 +0200
 Subject: [PATCH] WebContents: provide additional features from window.open to
@@ -11,35 +11,36 @@ Subject: [PATCH] WebContents: provide additional features from window.open to
 * - initial target URL
 * Update additional params from Chromium 53->56
 
+Signed-off-by: Martin Jansa <Martin.Jansa@gmail.com>
 Signed-off-by: Christophe Chapuis <chris.chapuis@gmail.com>
 ---
  .../browser/web_contents/web_contents_impl.cc | 14 +++++++++--
  .../browser/web_contents/web_contents_view.h  |  8 +++++++
- .../public/browser/web_contents_delegate.h    | 21 +++++++++++++++-
+ .../public/browser/web_contents_delegate.h    | 21 ++++++++++++++++-
  .../common/common_param_traits_macros.h       |  1 +
- .../Source/core/page/WindowFeatures.cpp       | 24 ++++++++++++++++---
- .../WebKit/public/web/WebWindowFeatures.h     | 15 ++++++++----
- .../public/web/WindowFeaturesStructTraits.cpp |  2 ++
- .../public/web/WindowFeaturesStructTraits.h   |  4 ++++
- .../WebKit/public/web/window_features.mojom   |  2 ++
- 9 files changed, 81 insertions(+), 10 deletions(-)
+ .../renderer/window_features_converter.cc     |  2 ++
+ chromium/content/renderer/render_view_impl.cc |  2 +-
+ .../WebKit/Source/core/page/CreateWindow.cpp  | 23 +++++++++++++++++--
+ .../WebKit/public/web/WebWindowFeatures.h     |  2 ++
+ .../WebKit/public/web/window_features.mojom   |  6 +++++
+ 9 files changed, 73 insertions(+), 6 deletions(-)
 
 diff --git a/chromium/content/browser/web_contents/web_contents_impl.cc b/chromium/content/browser/web_contents/web_contents_impl.cc
-index a34ccc6088..9e2f68e47f 100644
+index 0e4799f444..1b6acdfe2c 100644
 --- a/chromium/content/browser/web_contents/web_contents_impl.cc
 +++ b/chromium/content/browser/web_contents/web_contents_impl.cc
-@@ -2094,6 +2094,10 @@ void WebContentsImpl::CreateNewWindow(
-       rfh->Init();
+@@ -2312,6 +2312,10 @@ void WebContentsImpl::CreateNewWindow(
+     }
      return;
    }
 +  
 +  std::vector<base::string16> additional_features;
-+  for (auto webStr : params.features.additionalFeatures)
-+    additional_features.push_back(webStr);
++  for (auto webStr : params.features->additionalFeatures)
++    additional_features.push_back(base::UTF8ToUTF16(base::StringPiece(webStr)));
  
    // Create the new web contents. This will automatically create the new
    // WebContentsView. In the future, we may want to create the view separately.
-@@ -2136,6 +2140,11 @@ void WebContentsImpl::CreateNewWindow(
+@@ -2354,6 +2358,11 @@ void WebContentsImpl::CreateNewWindow(
      if (!is_guest) {
        WebContentsView* new_view = new_contents->view_.get();
  
@@ -51,28 +52,28 @@ index a34ccc6088..9e2f68e47f 100644
        // TODO(brettw): It seems bogus that we have to call this function on the
        // newly created object and give it one of its own member variables.
        new_view->CreateViewForWidget(
-@@ -2168,7 +2177,7 @@ void WebContentsImpl::CreateNewWindow(
-       gfx::Rect initial_rect;
+@@ -2399,7 +2408,7 @@ void WebContentsImpl::CreateNewWindow(
+ 
        delegate_->AddNewContents(
            this, new_contents, params.disposition, initial_rect,
 -          params.user_gesture, &was_blocked);
 +          params.user_gesture, &was_blocked, additional_features);
-     }
-     if (!was_blocked) {
-       OpenURLParams open_params(params.target_url, params.referrer,
-@@ -2254,8 +2263,9 @@ void WebContentsImpl::ShowCreatedWindow(int process_id,
-       contents->ResumeLoadingCreatedWebContents();
  
+       if (!weak_new_contents)
+         return;  // The delegate deleted |new_contents| during AddNewContents().
+@@ -2491,8 +2500,9 @@ void WebContentsImpl::ShowCreatedWindow(int process_id,
      if (delegate) {
-+      std::vector<base::string16> additional_features = contents->view_.get()->getWindowAdditionalFeatures();
-       delegate->AddNewContents(
--          this, contents, disposition, initial_rect, user_gesture, NULL);
-+          this, contents, disposition, initial_rect, user_gesture, NULL, additional_features);
+       base::WeakPtr<WebContentsImpl> weak_popup =
+           popup->weak_factory_.GetWeakPtr();
++      std::vector<base::string16> additional_features = popup->view_.get()->getWindowAdditionalFeatures();
+       delegate->AddNewContents(this, popup, disposition, initial_rect,
+-                               user_gesture, nullptr);
++                               user_gesture, nullptr, additional_features);
+       if (!weak_popup)
+         return;  // The delegate deleted |popup| during AddNewContents().
      }
-   }
- }
 diff --git a/chromium/content/browser/web_contents/web_contents_view.h b/chromium/content/browser/web_contents/web_contents_view.h
-index e4401f85bf..aa2f79145d 100644
+index a38a936af6..dbdbb483b7 100644
 --- a/chromium/content/browser/web_contents/web_contents_view.h
 +++ b/chromium/content/browser/web_contents/web_contents_view.h
 @@ -13,6 +13,7 @@
@@ -83,7 +84,7 @@ index e4401f85bf..aa2f79145d 100644
  
  namespace content {
  class RenderViewHost;
-@@ -131,6 +132,13 @@ class WebContentsView {
+@@ -136,6 +137,13 @@ class WebContentsView {
    virtual bool IsEventTracking() const = 0;
    virtual void CloseTabAfterEventTracking() = 0;
  #endif
@@ -98,10 +99,10 @@ index e4401f85bf..aa2f79145d 100644
  
  }  // namespace content
 diff --git a/chromium/content/public/browser/web_contents_delegate.h b/chromium/content/public/browser/web_contents_delegate.h
-index 2beb83c3b7..aec4195711 100644
+index 0ad2e1d835..ffce73a4e4 100644
 --- a/chromium/content/public/browser/web_contents_delegate.h
 +++ b/chromium/content/public/browser/web_contents_delegate.h
-@@ -118,7 +118,26 @@ class CONTENT_EXPORT WebContentsDelegate {
+@@ -120,7 +120,26 @@ class CONTENT_EXPORT WebContentsDelegate {
                                WindowOpenDisposition disposition,
                                const gfx::Rect& initial_rect,
                                bool user_gesture,
@@ -130,35 +131,67 @@ index 2beb83c3b7..aec4195711 100644
    // Selects the specified contents, bringing its container to the front.
    virtual void ActivateContents(WebContents* contents) {}
 diff --git a/chromium/content/public/common/common_param_traits_macros.h b/chromium/content/public/common/common_param_traits_macros.h
-index c4568af7fb..457fd2d41e 100644
+index 98e4eb471d..22abb591fa 100644
 --- a/chromium/content/public/common/common_param_traits_macros.h
 +++ b/chromium/content/public/common/common_param_traits_macros.h
-@@ -267,6 +267,7 @@ IPC_STRUCT_TRAITS_BEGIN(blink::WebWindowFeatures)
-   IPC_STRUCT_TRAITS_MEMBER(resizable)
-   IPC_STRUCT_TRAITS_MEMBER(fullscreen)
-   IPC_STRUCT_TRAITS_MEMBER(dialog)
+@@ -259,6 +259,7 @@ IPC_STRUCT_TRAITS_BEGIN(blink::mojom::WindowFeatures)
+   IPC_STRUCT_TRAITS_MEMBER(status_bar_visible)
+   IPC_STRUCT_TRAITS_MEMBER(tool_bar_visible)
+   IPC_STRUCT_TRAITS_MEMBER(scrollbars_visible)
 +  IPC_STRUCT_TRAITS_MEMBER(additionalFeatures)
  IPC_STRUCT_TRAITS_END()
  
  IPC_ENUM_TRAITS_MAX_VALUE(ui::AXEvent, ui::AX_EVENT_LAST)
-diff --git a/chromium/third_party/WebKit/Source/core/page/WindowFeatures.cpp b/chromium/third_party/WebKit/Source/core/page/WindowFeatures.cpp
-index f1d78f9e45..82614af28b 100644
---- a/chromium/third_party/WebKit/Source/core/page/WindowFeatures.cpp
-+++ b/chromium/third_party/WebKit/Source/core/page/WindowFeatures.cpp
-@@ -89,7 +89,7 @@ WindowFeatures::WindowFeatures(const String& features)
+diff --git a/chromium/content/public/renderer/window_features_converter.cc b/chromium/content/public/renderer/window_features_converter.cc
+index b8dc86484c..887dd1e5de 100644
+--- a/chromium/content/public/renderer/window_features_converter.cc
++++ b/chromium/content/public/renderer/window_features_converter.cc
+@@ -21,6 +21,7 @@ blink::mojom::WindowFeaturesPtr ConvertWebWindowFeaturesToMojoWindowFeatures(
+   result->status_bar_visible = web_window_features.status_bar_visible;
+   result->tool_bar_visible = web_window_features.tool_bar_visible;
+   result->scrollbars_visible = web_window_features.scrollbars_visible;
++  result->additionalFeatures = web_window_features.additionalFeatures;
+   return result;
+ }
+ 
+@@ -39,6 +40,7 @@ blink::WebWindowFeatures ConvertMojoWindowFeaturesToWebWindowFeatures(
+   result.status_bar_visible = window_features.status_bar_visible;
+   result.tool_bar_visible = window_features.tool_bar_visible;
+   result.scrollbars_visible = window_features.scrollbars_visible;
++  result.additionalFeatures = window_features.additionalFeatures;
+   return result;
+ }
+ 
+diff --git a/chromium/content/renderer/render_view_impl.cc b/chromium/content/renderer/render_view_impl.cc
+index 631f97e6d8..3acaa351a8 100644
+--- a/chromium/content/renderer/render_view_impl.cc
++++ b/chromium/content/renderer/render_view_impl.cc
+@@ -954,7 +954,7 @@ void RenderView::ApplyWebPreferences(const WebPreferences& prefs,
+ #endif  // defined(OS_ANDROID)
+   settings->SetLuneosPriviledged(prefs.luneosPriviledged);
+   settings->SetPalmServiceBridgeEnabled(prefs.palmServiceBridgeEnabled);
+-  settings->SetLuneosAppIdentifier(base::ASCIIToUTF16(prefs.luneosAppIdentifier));
++  settings->SetLuneosAppIdentifier(blink::WebString::FromUTF8(prefs.luneosAppIdentifier));
+ 
+   switch (prefs.autoplay_policy) {
+     case AutoplayPolicy::kNoUserGestureRequired:
+diff --git a/chromium/third_party/WebKit/Source/core/page/CreateWindow.cpp b/chromium/third_party/WebKit/Source/core/page/CreateWindow.cpp
+index 20c13f8498..4c5e91b143 100644
+--- a/chromium/third_party/WebKit/Source/core/page/CreateWindow.cpp
++++ b/chromium/third_party/WebKit/Source/core/page/CreateWindow.cpp
+@@ -45,6 +45,7 @@
+ #include "platform/weborigin/KURL.h"
+ #include "platform/weborigin/SecurityOrigin.h"
+ #include "platform/weborigin/SecurityPolicy.h"
++#include "platform/wtf/text/StringUTF8Adaptor.h"
+ #include "public/platform/WebInputEvent.h"
+ #include "public/platform/WebKeyboardEvent.h"
+ #include "public/platform/WebMouseEvent.h"
+@@ -205,8 +206,24 @@ WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string) {
+     SECURITY_DCHECK(i <= length);
  
      // skip to first separator
-     while (i < length && !isWindowFeaturesSeparator(buffer[i]))
--      i++;
-+        i++;
-     keyEnd = i;
- 
-     SECURITY_DCHECK(i <= length);
-@@ -115,8 +115,24 @@ WindowFeatures::WindowFeatures(const String& features)
-     SECURITY_DCHECK(i <= length);
- 
-     // skip to first separator
--    while (i < length && !isWindowFeaturesSeparator(buffer[i]))
+-    while (i < length && !IsWindowFeaturesSeparator(buffer[i]))
 -      i++;
 +    if (i < length && buffer[i] == '{') {
 +        // json value: go to the matching '}'
@@ -175,97 +208,46 @@ index f1d78f9e45..82614af28b 100644
 +    }
 +    else {
 +        // classic case: skip to first separator
-+        while (i < length && !isWindowFeaturesSeparator(buffer[i]))
++        while (i < length && !IsWindowFeaturesSeparator(buffer[i]))
 +          i++;
 +    }
-     valueEnd = i;
+     value_end = i;
  
      SECURITY_DCHECK(i <= length);
-@@ -166,6 +182,8 @@ void WindowFeatures::setWindowFeature(const String& keyString,
-     fullscreen = value;
-   } else if (keyString == "scrollbars") {
-     scrollbarsVisible = value;
-+  } else if (keyString == "attributes") {
-+    additionalFeatures.append(keyString+"="+valueString);
-   } else if (keyString == "noopener") {
-     noopener = true;
-   } else if (value == 1) {
+@@ -241,6 +258,8 @@ WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string) {
+       window_features.status_bar_visible = value;
+     } else if (key_string == "scrollbars") {
+       window_features.scrollbars_visible = value;
++    } else if (key_string == "attributes") {
++      window_features.additionalFeatures.push_back(value_string.Latin1().data());
+     } else if (key_string == "resizable") {
+       window_features.resizable = value;
+     } else if (key_string == "noopener") {
 diff --git a/chromium/third_party/WebKit/public/web/WebWindowFeatures.h b/chromium/third_party/WebKit/public/web/WebWindowFeatures.h
-index a1f6743c08..7c11a7da4e 100644
+index cf213a9043..ebdb642b9b 100644
 --- a/chromium/third_party/WebKit/public/web/WebWindowFeatures.h
 +++ b/chromium/third_party/WebKit/public/web/WebWindowFeatures.h
-@@ -60,7 +60,7 @@ struct WebWindowFeatures {
- 
-   bool fullscreen;
-   bool dialog;
--  WebVector<WebString> additionalFeatures;
-+  std::vector<base::string16> additionalFeatures;
- 
-   WebWindowFeatures()
-       : x(0),
-@@ -97,8 +97,15 @@ struct WebWindowFeatures {
-         scrollbarsVisible(f.scrollbarsVisible),
-         resizable(f.resizable),
-         fullscreen(f.fullscreen),
--        dialog(f.dialog),
--        additionalFeatures(f.additionalFeatures) {}
-+        dialog(f.dialog) 
-+    {
-+        for(auto str: f.additionalFeatures) {
-+            str.ensure16Bit();
-+            base::string16 destStr((const base::char16*)str.characters16(), str.length());
-+            
-+            additionalFeatures.push_back(destStr);
-+        }
-+    }
- 
-   operator WindowFeatures() const {
-     WindowFeatures result;
-@@ -119,7 +126,7 @@ struct WebWindowFeatures {
-     result.fullscreen = fullscreen;
-     result.dialog = dialog;
-     for (size_t i = 0; i < additionalFeatures.size(); ++i)
--      result.additionalFeatures.append(additionalFeatures[i]);
-+      result.additionalFeatures.append(WTF::String(additionalFeatures[i].data(), additionalFeatures[i].length()));
-     return result;
-   }
- #endif
-diff --git a/chromium/third_party/WebKit/public/web/WindowFeaturesStructTraits.cpp b/chromium/third_party/WebKit/public/web/WindowFeaturesStructTraits.cpp
-index 69dce5bc63..d4b83fc2df 100644
---- a/chromium/third_party/WebKit/public/web/WindowFeaturesStructTraits.cpp
-+++ b/chromium/third_party/WebKit/public/web/WindowFeaturesStructTraits.cpp
-@@ -27,6 +27,8 @@ bool StructTraits<::blink::mojom::WindowFeaturesDataView,
-   out->resizable = data.resizable();
-   out->fullscreen = data.fullscreen();
-   out->dialog = data.dialog();
+@@ -54,6 +54,8 @@ struct WebWindowFeatures {
+   bool noopener = false;
+   bool background = false;
+   bool persistent = false;
 +  
-+  data.ReadAdditionalfeatures(&out->additionalFeatures);
-   return true;
- }
- 
-diff --git a/chromium/third_party/WebKit/public/web/WindowFeaturesStructTraits.h b/chromium/third_party/WebKit/public/web/WindowFeaturesStructTraits.h
-index ca776ed5a0..405fb49855 100644
---- a/chromium/third_party/WebKit/public/web/WindowFeaturesStructTraits.h
-+++ b/chromium/third_party/WebKit/public/web/WindowFeaturesStructTraits.h
-@@ -65,6 +65,10 @@ struct StructTraits<::blink::mojom::WindowFeaturesDataView,
-     return features.dialog;
-   }
- 
-+  static std::vector<base::string16> additionalFeatures(const ::blink::WebWindowFeatures& features) {
-+    return features.additionalFeatures;
-+  }
-+
-   static bool Read(::blink::mojom::WindowFeaturesDataView,
-                    ::blink::WebWindowFeatures* out);
++  std::vector<std::string> additionalFeatures;
  };
+ 
+ }  // namespace blink
 diff --git a/chromium/third_party/WebKit/public/web/window_features.mojom b/chromium/third_party/WebKit/public/web/window_features.mojom
-index a26b8a3b44..cb21f157d5 100644
+index dac13c3861..2ecfbd07f2 100644
 --- a/chromium/third_party/WebKit/public/web/window_features.mojom
 +++ b/chromium/third_party/WebKit/public/web/window_features.mojom
-@@ -30,4 +30,6 @@ struct WindowFeatures {
-     // NOTE: WebWindowFeatures::additionalFeatures is not mirrored by this
-     // mojom struct as it's never used by the browser and therefore doesn't need
-     // to be sent.
+@@ -21,4 +21,10 @@ struct WindowFeatures {
+     bool status_bar_visible = true;
+     bool tool_bar_visible = true;
+     bool scrollbars_visible = true;
++
++    // NOTE: WebWindowFeatures::additionalFeatures is not mirrored by this
++    // mojom struct as it's never used by the browser and therefore doesn't need
++    // to be sent.
 +	// ... but webOS/LuneOS apps need that to send additional info to the OS
 +    array<string> additionalFeatures;
  };
