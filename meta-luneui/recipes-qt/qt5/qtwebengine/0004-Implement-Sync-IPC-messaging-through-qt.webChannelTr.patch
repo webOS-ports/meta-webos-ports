@@ -1,4 +1,4 @@
-From 3f1af6d3fb2f11ee5837f9568b99bbacba24a4c1 Mon Sep 17 00:00:00 2001
+From d5775bd639fa3859485d3e8dbbfd88af139177c5 Mon Sep 17 00:00:00 2001
 From: Christophe Chapuis <chris.chapuis@gmail.com>
 Date: Wed, 30 Sep 2015 19:48:02 +0200
 Subject: [PATCH] Implement Sync IPC messaging through
@@ -7,16 +7,16 @@ Subject: [PATCH] Implement Sync IPC messaging through
 Signed-off-by: Christophe Chapuis <chris.chapuis@gmail.com>
 ---
  src/core/common/qt_messages.h                 |  2 +
- .../renderer/web_channel_ipc_transport.cpp    | 42 ++++++++++++++++++-
+ .../renderer/web_channel_ipc_transport.cpp    | 39 +++++++++++++++++++
  .../web_channel_ipc_transport_host.cpp        | 17 +++++++-
  .../web_channel_ipc_transport_host.h          |  3 ++
- 4 files changed, 62 insertions(+), 2 deletions(-)
+ 4 files changed, 60 insertions(+), 1 deletion(-)
 
 diff --git a/src/core/common/qt_messages.h b/src/core/common/qt_messages.h
-index 239122e3..bb2a1ec6 100644
+index c5caa0ff..d3382dba 100644
 --- a/src/core/common/qt_messages.h
 +++ b/src/core/common/qt_messages.h
-@@ -69,6 +69,8 @@ IPC_MESSAGE_ROUTED0(RenderViewObserverHostQt_DidFirstVisuallyNonEmptyLayout)
+@@ -76,6 +76,8 @@ IPC_MESSAGE_ROUTED0(RenderViewObserverHostQt_DidFirstVisuallyNonEmptyLayout)
  
  IPC_MESSAGE_ROUTED1(WebChannelIPCTransportHost_SendMessage, std::vector<char> /*binaryJSON*/)
  
@@ -26,12 +26,12 @@ index 239122e3..bb2a1ec6 100644
  // Misc messages
  // These are messages sent from the renderer to the browser process.
 diff --git a/src/core/renderer/web_channel_ipc_transport.cpp b/src/core/renderer/web_channel_ipc_transport.cpp
-index 865bfc24..7067bf62 100644
+index bb544168..02907a2a 100644
 --- a/src/core/renderer/web_channel_ipc_transport.cpp
 +++ b/src/core/renderer/web_channel_ipc_transport.cpp
-@@ -89,6 +89,44 @@ private:
-         renderView->Send(new WebChannelIPCTransportHost_SendMessage(renderView->GetRoutingID(), std::vector<char>(rawData, rawData + size)));
-     }
+@@ -69,6 +69,44 @@ private:
+     // gin::WrappableBase
+     gin::ObjectTemplateBuilder GetObjectTemplateBuilder(v8::Isolate *isolate) override;
  
 +    void NativeQtSendMessageSync(gin::Arguments *args)
 +    {
@@ -74,46 +74,43 @@ index 865bfc24..7067bf62 100644
      DISALLOW_COPY_AND_ASSIGN(WebChannelTransport);
  };
  
-@@ -135,7 +173,9 @@ void WebChannelTransport::Uninstall(blink::WebFrame *frame, uint worldId)
- 
- gin::ObjectTemplateBuilder WebChannelTransport::GetObjectTemplateBuilder(v8::Isolate *isolate)
+@@ -155,6 +193,7 @@ gin::ObjectTemplateBuilder WebChannelTransport::GetObjectTemplateBuilder(v8::Iso
  {
--    return gin::Wrappable<WebChannelTransport>::GetObjectTemplateBuilder(isolate).SetMethod("send", &WebChannelTransport::NativeQtSendMessage);
-+    return gin::Wrappable<WebChannelTransport>::GetObjectTemplateBuilder(isolate)
-+                       .SetMethod("send", &WebChannelTransport::NativeQtSendMessage)
-+                       .SetMethod("sendSync", &WebChannelTransport::NativeQtSendMessageSync);
+     return gin::Wrappable<WebChannelTransport>::GetObjectTemplateBuilder(isolate)
+         .SetMethod("send", &WebChannelTransport::NativeQtSendMessage);
++        .SetMethod("sendSync", &WebChannelTransport::NativeQtSendMessageSync);
  }
  
- content::RenderView *WebChannelTransport::GetRenderView(v8::Isolate *isolate)
+ WebChannelIPCTransport::WebChannelIPCTransport(content::RenderFrame *renderFrame)
 diff --git a/src/core/renderer_host/web_channel_ipc_transport_host.cpp b/src/core/renderer_host/web_channel_ipc_transport_host.cpp
-index a093632b..f2bfae33 100644
+index 6b32093a..00578bab 100644
 --- a/src/core/renderer_host/web_channel_ipc_transport_host.cpp
 +++ b/src/core/renderer_host/web_channel_ipc_transport_host.cpp
-@@ -54,6 +54,7 @@ WebChannelIPCTransportHost::WebChannelIPCTransportHost(content::WebContents *con
+@@ -70,6 +70,7 @@ inline QDebug operator<<(QDebug stream, const base::Optional<T> &opt)
+ WebChannelIPCTransportHost::WebChannelIPCTransportHost(content::WebContents *contents, uint worldId, QObject *parent)
      : QWebChannelAbstractTransport(parent)
      , content::WebContentsObserver(contents)
-     , m_worldId(worldId)
 +    ,_mWaitingReply(0)
  {
-     Send(new WebChannelIPCTransport_Install(routing_id(), m_worldId));
+     setWorldId(worldId);
  }
-@@ -88,7 +89,14 @@ void WebChannelIPCTransportHost::sendMessage(const QJsonObject &message)
-     QJsonDocument doc(message);
-     int size = 0;
+@@ -86,7 +87,14 @@ void WebChannelIPCTransportHost::sendMessage(const QJsonObject &message)
      const char *rawData = doc.rawData(&size);
--    Send(new WebChannelIPCTransport_Message(routing_id(), std::vector<char>(rawData, rawData + size), m_worldId));
+     content::RenderFrameHost *frame = web_contents()->GetMainFrame();
+     qCDebug(log).nospace() << "sending webchannel message to " << frame << ": " << doc;
+-    frame->Send(new WebChannelIPCTransport_Message(frame->GetRoutingID(), std::vector<char>(rawData, rawData + size), *m_worldId));
 +    if (_mWaitingReply) {
 +        WebChannelIPCTransportHost_SendMessageSync::WriteReplyParams(_mWaitingReply, std::vector<char>(rawData, rawData + size));
-+        Send(_mWaitingReply);
++        frame->Send(_mWaitingReply);
 +        _mWaitingReply = 0;
 +    }
 +    else {
-+        Send(new WebChannelIPCTransport_Message(routing_id(), std::vector<char>(rawData, rawData + size), m_worldId));
++        frame->Send(new WebChannelIPCTransport_Message(frame->GetRoutingID(), std::vector<char>(rawData, rawData + size), *m_worldId));
 +    }
  }
  
- void WebChannelIPCTransportHost::onWebChannelMessage(const std::vector<char> &message)
-@@ -98,11 +106,18 @@ void WebChannelIPCTransportHost::onWebChannelMessage(const std::vector<char> &me
+ void WebChannelIPCTransportHost::setWorldId(base::Optional<uint> worldId)
+@@ -116,6 +124,12 @@ void WebChannelIPCTransportHost::onWebChannelMessage(const std::vector<char> &me
      Q_EMIT messageReceived(doc.object(), this);
  }
  
@@ -123,8 +120,10 @@ index a093632b..f2bfae33 100644
 +    onWebChannelMessage(message);
 +}
 +
- bool WebChannelIPCTransportHost::OnMessageReceived(const IPC::Message &message)
+ void WebChannelIPCTransportHost::RenderFrameCreated(content::RenderFrameHost *frame)
  {
+     setWorldId(frame, m_worldId);
+@@ -129,6 +143,7 @@ bool WebChannelIPCTransportHost::OnMessageReceived(const IPC::Message& message,
      bool handled = true;
      IPC_BEGIN_MESSAGE_MAP(WebChannelIPCTransportHost, message)
          IPC_MESSAGE_HANDLER(WebChannelIPCTransportHost_SendMessage, onWebChannelMessage)
@@ -133,16 +132,22 @@ index a093632b..f2bfae33 100644
      IPC_END_MESSAGE_MAP()
      return handled;
 diff --git a/src/core/renderer_host/web_channel_ipc_transport_host.h b/src/core/renderer_host/web_channel_ipc_transport_host.h
-index a1e697a9..c227a4df 100644
+index 3a814a79..f73a625b 100644
 --- a/src/core/renderer_host/web_channel_ipc_transport_host.h
 +++ b/src/core/renderer_host/web_channel_ipc_transport_host.h
-@@ -71,7 +71,10 @@ public:
- private:
-     bool OnMessageReceived(const IPC::Message& message) override;
+@@ -66,6 +66,7 @@ private:
+     void setWorldId(base::Optional<uint> worldId);
+     void setWorldId(content::RenderFrameHost *frame, base::Optional<uint> worldId);
      void onWebChannelMessage(const std::vector<char> &message);
 +    void onWebChannelMessageSync(const std::vector<char> &message, IPC::Message *reply);
+ 
+     // WebContentsObserver
+     void RenderFrameCreated(content::RenderFrameHost *frame) override;
+@@ -74,6 +75,8 @@ private:
+     // Empty only during construction/destruction. Synchronized to all the
+     // WebChannelIPCTransports/RenderFrames in the observed WebContents.
+     base::Optional<uint> m_worldId;
 +
-     uint m_worldId;
 +    IPC::Message *_mWaitingReply;
  };
  

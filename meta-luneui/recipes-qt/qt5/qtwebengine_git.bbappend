@@ -6,7 +6,7 @@ DEPENDS += "luna-service2 pmloglib qtlocation"
 RDEPENDS_${PN}_append_x86 = " libpci"
 
 # Enable proprietary codecs (for MP3 etc), pepper-plugins (Flash & WideVine), Print to PDF, spellchecker, WebRTC & embedded build
-EXTRA_QMAKEVARS_CONFIGURE += "-proprietary-codecs -pepper-plugins -printing-and-pdf -spellchecker -webrtc -embedded"
+EXTRA_QMAKEVARS_CONFIGURE += "-proprietary-codecs -pepper-plugins -printing-and-pdf -spellchecker -webrtc"
 # Activate some more detailed debug info
 # EXTRA_QMAKEVARS_PRE += " CONFIG+=force_debug_info CONFIG+=webcore_debug "
 
