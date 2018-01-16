@@ -1,6 +1,9 @@
 #! /bin/sh
 
+# machine.conf should provide $sdcard_partition and $system_partition
 . /machine.conf
+
+# distro.conf should provide $distro_name
 . /distro.conf
 
 setup_devtmpfs() {
@@ -10,9 +13,10 @@ setup_devtmpfs() {
     test -c $1/dev/stdin || ln -sf fd/0 $1/dev/stdin
     test -c $1/dev/stdout || ln -sf fd/1 $1/dev/stdout
     test -c $1/dev/stderr || ln -sf fd/2 $1/dev/stderr
+    test -c $1/dev/socket || mkdir -m 0755 $1/dev/socket
 }
 
-echo "Mounting relevant filesystems ..."
+echo "Mounting pseudo-filesystems ..."
 mkdir -m 0755 /proc
 mount -t proc proc /proc
 mkdir -m 0755 /sys
@@ -26,7 +30,7 @@ info() {
 }
 
 fail() {
-    echo "Failed" > /dev/kmsg
+    echo "$distro_name initramfs failed:" > /dev/kmsg
     echo "$1" > /dev/kmsg
     echo "Rebooting now ..." > /dev/kmsg
     /sbin/reboot
@@ -35,6 +39,18 @@ fail() {
 # Check wether we need to start adbd for interactive debugging
 cat /proc/cmdline | grep enable_adb
 if [ $? -ne 1 ] ; then
+
+    #system partition is needed for accessing build.prop by android-gadget-setup
+    /sbin/fsck.ext4 -p /dev/$system_partition
+    mount -t auto -o rw,noatime,nodiratime,nodelalloc /dev/$system_partition /system
+
+    #below are now needed in order to use FunctionFS for ADB, tested to work with 3.4+ kernels
+    mkdir -p /dev/usb-ffs/adb 
+    mount -t functionfs adb /dev/usb-ffs/adb > /dev/kmsg
+    #android-gadget-setup doesn't provide below 2 and without them it won't work, so we provide them here.
+    echo adb > /sys/class/android_usb/android0/f_ffs/aliases
+    echo ffs > /sys/class/android_usb/android0/functions 
+
     /usr/bin/android-gadget-setup adb
     /usr/bin/adbd
 fi
@@ -42,44 +58,51 @@ fi
 
 mkdir -m 0755 /rfs
 
-while [ ! -e /sys/block/mmcblk0 ] ; do
-    info "Waiting for sdcard/nand ..."
+sdcard_device=$( echo "$sdcard_partition" | sed -e 's/p[[:digit:]]\+$//' )
+while [ ! -e /sys/block/$sdcard_device ] ; do
+    info "Waiting for SD Card/NAND ..."
     sleep 1
 done
 
 # Try unpartitioned card
-if [ ! -e /sys/block/mmcblk0/$sdcard_partition ] ; then
-    sdcard_partition=mmcblk0
+if [ ! -e /sys/block/$sdcard_device/$sdcard_partition ] ; then
+    sdcard_partition=$sdcard_device
 fi
 
-info "Mounting sdcard/nand as /dev/$sdcard_partition ..."
-mkdir -m 0777 /sdcard
-mount -t auto -o rw,noatime,nodiratime /dev/$sdcard_partition /sdcard >/dev/kmsg 2>&1
-[ $? -eq 0 ] || fail "Failed to mount the sdcard/nan. Cannot continue."
-
 ANDROID_SDCARD_DIR="/sdcard"
-ANDROID_MEDIA_DIR="/sdcard/media/"
+ANDROID_MEDIA_DIR="$ANDROID_SDCARD_DIR/media/"
+
+info "Mounting SD card/NAND as /dev/$sdcard_partition ..."
+mkdir -m 0777 $ANDROID_SDCARD_DIR
+mount -t auto -o rw,noatime,nodiratime /dev/$sdcard_partition $ANDROID_SDCARD_DIR >/dev/kmsg 2>&1
+[ $? -eq 0 ] || fail "Failed to mount the SD card/NAND, cannot continue."
 
 # Workaround for multi-user functionality in Android 4.2
-if [ -d /sdcard/media/0 ] ; then
-    ANDROID_MEDIA_DIR="/sdcard/media/0"
+if [ -d $ANDROID_SDCARD_DIR/media/0 ] ; then
+    ANDROID_MEDIA_DIR="$ANDROID_SDCARD_DIR/media/0"
 fi
 
 # Run any fixups needed to bring the system into the state we expect it to be in
 . /fixups.sh
 
-info "Checking for rootfs image on sdcard/nand for $ANDROID_SDCARD_DIR/$distro_name ..."
+info "Checking for rootfs image on SD card/NAND for $ANDROID_SDCARD_DIR/$distro_name ..."
 if [ -d $ANDROID_SDCARD_DIR/$distro_name ] ; then
     info "Rootfs folder found at $ANDROID_SDCARD_DIR/$distro_name; chrooting into ..."
     mount -o bind $ANDROID_SDCARD_DIR/$distro_name /rfs
     [ $? -eq 0 ] || fail "Failed to mount /rootfs"
 else
-    fail "Failed to find valid rootfs"
+    fail "No root filesystem found on SD card/NAND"
+
+    # We don't have anything to boot from SDcard/NAND. Cleanup and boot from system partition
+    umount $SDCARD_DIR
+
+    mount -t auto -o rw,noatime,nodiratime /dev/$system_partition /rfs
+    [ $? -eq 0 ] || fail "Failed to mount system partition /dev/$system_partition"
 fi
 
 setup_devtmpfs "/rfs"
 
-info "Umount not needed filesystems ..."
+info "Unmounting unneeded filesystems ..."
 umount -l /proc
 umount -l /sys
 
