@@ -135,14 +135,17 @@ MEMNOTIFY_RDEPENDS = " \
     memnotify-module \
 "
 
+# NOTE: For kernels build outside of OE we can't add memnotify support and therefor have to ship the module with the kernel package directly.
+# NOTE: For kernels build with OE, the kernel tree would need to have a patch applied in order to make si_swapinfo exportable as per http://lkml.iu.edu/hypermail//linux/kernel/1201.2/00719.html
+
 RDEPENDS_${PN}_append_tuna = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
 RDEPENDS_${PN}_append_grouper = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
 RDEPENDS_${PN}_append_mako = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
 RDEPENDS_${PN}_append_hammerhead = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
-# NOTE: we can't add memnotify support for tenderloin yet here as we build it's
-# kernel outside of OE and therefor have to ship the module with the kernel
-# package directly.
-RDEPENDS_${PN}_append_tenderloin = " ${LIBHYBRIS_RDEPENDS}"
+RDEPENDS_${PN}_append_tenderloin = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
+RDEPENDS_${PN}_append_mido = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
+RDEPENDS_${PN}_append_athene = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
+RDEPENDS_${PN}_append_onyx = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
 
 QEMU_RDEPENDS = " \
     alsa-utils-systemd \
