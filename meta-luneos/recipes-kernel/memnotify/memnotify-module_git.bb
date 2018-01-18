@@ -11,6 +11,9 @@ PV = "1.0.0+gitr${SRCPV}"
 SRCREV = "1bf57fd7b5df155b3a43d9fd80fcc615e9216c28"
 
 SRC_URI = "git://github.com/webOS-ports/memnotify-module.git;branch=master;protocol=git"
+
+SRC_URI_append_mido = "file://0001-Change-shrink-into-scan_objects-for-3.12-kernels.patch"
+
 S = "${WORKDIR}/git"
 
 do_install_append() {
