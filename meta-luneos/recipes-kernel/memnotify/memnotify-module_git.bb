@@ -8,7 +8,7 @@ DEPENDS = "virtual/kernel"
 inherit module
 
 PV = "1.0.0+gitr${SRCPV}"
-SRCREV = "1bf57fd7b5df155b3a43d9fd80fcc615e9216c28"
+SRCREV = "4d52505f5912962940c9df9b52ef7217932cf0ea"
 
 SRC_URI = "git://github.com/webOS-ports/memnotify-module.git;branch=master;protocol=git"
 S = "${WORKDIR}/git"
