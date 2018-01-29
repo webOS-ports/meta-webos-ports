@@ -18,6 +18,7 @@ SRC_URI = " \
     file://0001-Add-support-for-QScreen-orientation-based-on-QtSenso.patch;striplevel=2 \
     file://0002-Fix-4.4.2-hwcomposer-build.patch;striplevel=2 \
     file://0003-Qt-5.8-support.patch;striplevel=2 \
+    file://0004-Fix-hwcomposer-backend.patch;striplevel=2 \
 "
 S = "${WORKDIR}/git/hwcomposer"
 
