@@ -110,7 +110,7 @@ luna_service2_check_permissions () {
 }
 # Since many components restrict permissions only for the real hardware,
 # the permissions of luna services should be checked only for the relevant target.
-ROOTFS_POSTPROCESS_COMMAND += '${@base_conditional("WEBOS_TARGET_MACHINE_IMPL", "hardware", "luna_service2_check_permissions ; ", "", d)}'
+ROOTFS_POSTPROCESS_COMMAND += '${@oe.utils.conditional("WEBOS_TARGET_MACHINE_IMPL", "hardware", "luna_service2_check_permissions ; ", "", d)}'
 
 inherit core-image
 inherit webos_machine_impl_dep

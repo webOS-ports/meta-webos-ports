@@ -29,7 +29,7 @@ WEBOS_PORTS_CODENAME = "ports"
 WEBOS_DISTRO_PLATFORM_CODENAME ?= "luneos"
 WEBOS_DISTRO_VERSION_CODENAME ?= "Doppio"
 # WEBOS_DISTRO_VERSION_CODENAME ?= "${@base_get_metadata_git_branch('.', None).strip().translate(None, '()/')}"
-WEBOS_DISTRO_RELEASE_CODENAME ?= "${WEBOS_DISTRO_PLATFORM_CODENAME}${@ base_conditional( 'WEBOS_DISTRO_VERSION_CODENAME', '', '', '-${WEBOS_DISTRO_VERSION_CODENAME}', d) }"
+WEBOS_DISTRO_RELEASE_CODENAME ?= "${WEBOS_DISTRO_PLATFORM_CODENAME}${@oe.utils.conditional( 'WEBOS_DISTRO_VERSION_CODENAME', '', '', '-${WEBOS_DISTRO_VERSION_CODENAME}', d) }"
 
 # This is the codename for the series of builds that are made from a branch.
 # It appears in the image filenames. It is expected that other distros will
@@ -53,8 +53,8 @@ WEBOS_DISTRO_PRERELEASE ?= "devel"
 WEBOS_DISTRO_BUILD_ID ?= "0-0"
 
 # use WEBOS_DISTRO_BUILD_ID.
-WEBOS_IMAGE_NAME_SUFFIX = "${@ base_conditional( 'WEBOS_DISTRO_BUILD_CODENAME', '', '', '-${WEBOS_DISTRO_BUILD_CODENAME}', d) }"
-WEBOS_IMAGE_NAME_SUFFIX .= "${@ base_conditional( 'WEBOS_DISTRO_BUILD_ID', 'unofficial', '', '-${WEBOS_DISTRO_BUILD_ID}', d) }"
+WEBOS_IMAGE_NAME_SUFFIX = "${@oe.utils.conditional( 'WEBOS_DISTRO_BUILD_CODENAME', '', '', '-${WEBOS_DISTRO_BUILD_CODENAME}', d) }"
+WEBOS_IMAGE_NAME_SUFFIX .= "${@oe.utils.conditional( 'WEBOS_DISTRO_BUILD_ID', 'unofficial', '', '-${WEBOS_DISTRO_BUILD_ID}', d) }"
 IMAGE_NAME = "${IMAGE_BASENAME}-${MACHINE}-${DATETIME}${WEBOS_IMAGE_NAME_SUFFIX}"
 KERNEL_IMAGE_BASE_NAME = "${PKGE}-${PKGV}-${PKGR}-${MACHINE}-${DATETIME}${WEBOS_IMAGE_NAME_SUFFIX}"
 KERNEL_IMAGE_SYMLINK_NAME = "${MACHINE}"

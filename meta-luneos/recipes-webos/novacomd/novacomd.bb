@@ -11,8 +11,8 @@ inherit webos_cmake
 inherit pkgconfig
 inherit webos_machine_impl_dep
 
-DEPENDS = "${@base_conditional('WEBOS_TARGET_MACHINE_IMPL','host','libusb','nyx-lib',d)}"
-RDEPENDS_${PN} = "${@base_conditional('WEBOS_TARGET_MACHINE_IMPL','emulator','iproute2','',d)}"
+DEPENDS = "${@oe.utils.conditional('WEBOS_TARGET_MACHINE_IMPL','host','libusb','nyx-lib',d)}"
+RDEPENDS_${PN} = "${@oe.utils.conditional('WEBOS_TARGET_MACHINE_IMPL','emulator','iproute2','',d)}"
 
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
