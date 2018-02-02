@@ -14,6 +14,10 @@ inherit webos_public_repo
 inherit webos_cmake
 inherit pkgconfig
 
+# Otherwise it fails with:
+# libpbnjson/2.9.0-38+gitAUTOINC+5ffe5674fe-r0/git/src/pbnjson_c/validation/schema_builder.c:28:10: fatal error: schema_keywords.h: No such file or directory
+OECMAKE_GENERATOR="Unix Makefiles"
+
 # These are the defaults, but explicitly specify so that readers know they exist
 EXTRA_OECMAKE += "-DWITH_DOCS:BOOL=FALSE -DWITH_TESTS:BOOL=FALSE -DNO_LOGGING:BOOL=TRUE"
 
