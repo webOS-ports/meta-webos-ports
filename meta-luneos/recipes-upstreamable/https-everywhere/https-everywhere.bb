@@ -8,7 +8,7 @@ LIC_FILES_CHKSUM += "file://${COMMON_LICENSE_DIR}/GPL-3.0;md5=c79ff39f19dfec6d29
 inherit webos_filesystem_paths pythonnative
 DEPENDS = "python-lxml-native"
 
-SRCREV = "0eb2caba78c7d665751d01316bce95da394d65ca"
+SRCREV = "b7306d32a7485d135614cec8be1705646a20cc30"
 
 SRC_URI = " \
     git://github.com/EFForg/https-everywhere.git;protocol=git;branch=master \
