@@ -13,7 +13,7 @@ DEPENDS = "luna-service2 libpbnjson qtbase uriparser libxml2 sqlite3 pmloglib js
 RDEPENDS_${PN} += "${VIRTUAL-RUNTIME_ntp}"
 
 PV = "2.0.1-38+git${SRCPV}"
-SRCREV = "3e52044fc17511842e86fd05a0588fd015e28b3b"
+SRCREV = "f4327332e00597c767ccc7610d8f23b98eaaa606"
 
 inherit webos_ports_fork_repo
 inherit webos_cmake
@@ -21,8 +21,5 @@ inherit webos_system_bus
 inherit pkgconfig
 inherit webos_systemd
 
-SRC_URI = " \
-    ${WEBOS_PORTS_GIT_REPO_COMPLETE} \
-    file://0001-CMakeLists.txt-request-CXX-11.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
