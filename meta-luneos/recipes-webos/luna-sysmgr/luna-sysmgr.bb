@@ -13,7 +13,7 @@ DEPENDS += "serviceinstaller"
 #RDEPENDS_${PN} += "jail" #TODO
 
 PV = "3.0.0-3+git${SRCPV}"
-SRCREV = "514a3d4f4d104cb9d306772f3f5e804c018be738"
+SRCREV = "2f67c22a69160e83f5a4f194eccd15c579b45a19"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 
