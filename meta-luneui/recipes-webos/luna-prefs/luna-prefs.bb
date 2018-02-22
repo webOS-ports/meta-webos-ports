@@ -9,7 +9,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "luna-service2 json-c sqlite3 glib-2.0 nyx-lib"
 
 PV = "2.0.0-7+git${SRCPV}"
-SRCREV = "620394a1c4bd5b0c0ec0a7ee15aa5e8aa8c6d957"
+SRCREV = "2e30f931f3a10db86acb15a48c6719c4f152ba25"
 
 RDEPENDS_${PN} = "luna-prefs-data"
 
