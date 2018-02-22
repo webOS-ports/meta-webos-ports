@@ -4,7 +4,7 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 PV = "1.0+gitr${SRCPV}"
-SRCREV = "1e3965076d46bd1c4824ca4613bf7ba935b9ab46"
+SRCREV = "cc4f842f9b21905ffd5a433ee1569144cd8f44a8"
 
 inherit webos_ports_repo
 
@@ -17,7 +17,6 @@ inherit systemd
 
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE_${PN} = " \
-    luna-universalsearchmgr.service \
     org.webosinternals.ipkgservice.service \
 "
 
