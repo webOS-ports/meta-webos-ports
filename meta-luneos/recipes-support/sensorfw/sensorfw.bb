@@ -6,17 +6,14 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=2d5025d4aa3495befef8f17206a5b0a1"
 # We're depending on libhybris so need to be MACHINE_ARCH
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-PV = "0.8.5+gitr${SRCPV}"
-SRCREV = "9efd97d298131a116e4e93fa223072def9268e81"
+PV = "0.9.4+gitr${SRCPV}"
+SRCREV = "550ced29e787711fb9a41991226dd129969f1cc0"
 DEPENDS = "qtbase libhybris virtual/android-headers \
     luna-sysmgr-common luna-service2 json-c glib-2.0 luna-sysmgr-ipc-messages"
 
 SRC_URI = " \
     git://git.merproject.org/mer-core/sensorfw.git;branch=master;protocol=git \
-    file://0001-Replace-android-headers-hard-coded-include-path-with.patch \
-    file://0002-sensord-daemon-conf-setup-improve-check-for-libhybri.patch \
-    file://0003-Set-okToStop-to-false-to-prevent-deadlock-when-stopp.patch \
-    file://0004-Implement-luna-service-integration.patch \
+    file://0001-Set-okToStop-to-false-to-prevent-deadlock-when-stopp.patch \
 "
 
 S = "${WORKDIR}/git"
