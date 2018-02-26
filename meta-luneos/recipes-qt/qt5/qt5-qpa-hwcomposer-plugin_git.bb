@@ -22,10 +22,6 @@ SRC_URI = " \
 "
 S = "${WORKDIR}/git/hwcomposer"
 
-SRC_URI_append_tenderloin = " \
-	    file://0002-Add-QCOM_BSP-define-switch.patch;striplevel=2 \
-	"
-
 inherit webos_ports_fork_repo
 inherit qmake5
 
