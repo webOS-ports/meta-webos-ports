@@ -6,9 +6,13 @@ PV = "1.0"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-SRC_URI = "file://environment.conf"
+SRC_URI = " \ 
+    file://environment.conf \
+	file://ril_subscription.conf \
+	"
 
 do_install() {
     install -d ${D}${localstatedir}/lib/ofono
     install -m 0644 ${WORKDIR}/environment.conf ${D}${localstatedir}/lib/ofono/
+	install -m 0644 ${WORKDIR}/ril_subscription.conf ${D}${localstatedir}/lib/ofono/
 }
