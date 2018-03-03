@@ -15,8 +15,8 @@ ZIP_NAME[vardepsexclude] += "DATETIME"
 
 inherit webos_ports_repo
 
-PV = "1.0.1+git${SRCPV}"
-SRCREV = "8d81d92fba311196e4ac32d51fabd942c406b8f3"
+PV = "1.0.2+git${SRCPV}"
+SRCREV = "12c8eb4d79e4504a7683b8dc18266a9c460d2537"
 
 WEBOS_REPO_NAME = "android-update-package"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
