@@ -111,6 +111,7 @@ RDEPENDS_${PN} = " \
 
 LIBHYBRIS_RDEPENDS = " \
     ${VIRTUAL-RUNTIME_android-system-image} \
+    android-kernel-bootimg \
     android-property-service \
     android-system \
     android-system-compat \
