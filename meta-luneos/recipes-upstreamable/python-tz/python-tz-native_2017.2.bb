@@ -8,7 +8,7 @@ HOMEPAGE = "https://pypi.python.org/pypi/pytz/"
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://LICENSE.txt;md5=39ea92752a35cf67d8a885d8e3af3c69"
 
-SRC_URI = "https://pypi.python.org/packages/a4/09/c47e57fc9c7062b4e83b075d418800d322caa87ec0ac21e6308bd3a2d519//pytz-${PV}.zip \
+SRC_URI = "https://pypi.python.org/packages/a4/09/c47e57fc9c7062b4e83b075d418800d322caa87ec0ac21e6308bd3a2d519/pytz-${PV}.zip \
 "
 
 SRC_URI[md5sum] = "f89bde8a811c8a1a5bac17eaaa94383c"
