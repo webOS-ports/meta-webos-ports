@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# machine.conf should provide $sdcard_partition and $system_partition
+# machine.conf should provide $system_partition (for panic scenario)
 . /machine.conf
 
 # distro.conf should provide $distro_name
@@ -28,9 +28,11 @@ panic() {
     #reboot
 
     #system partition is needed for accessing build.prop by android-gadget-setup
-    /sbin/fsck.ext4 -p /dev/$system_partition
-    mkdir -p /system
-    mount -t auto -o rw,noatime,nodiratime,nodelalloc /dev/$system_partition /system
+    if [ -e /dev/$system_partition ]; then
+        /sbin/fsck.ext4 -p /dev/$system_partition
+        mkdir -p /system
+        mount -t auto -o rw,noatime,nodiratime,nodelalloc /dev/$system_partition /system
+    fi
 
     #below are now needed in order to use FunctionFS for ADB, tested to work with 3.4+ kernels
     mkdir -p /dev/usb-ffs/adb 
@@ -90,7 +92,6 @@ quiet="n"
 mkdir -m 0755 /rfs
 rootmnt=/rfs
 
-tell_kmsg "Mounting pseudo-filesystems"
 mkdir -m 0755 /proc
 mount -t proc proc /proc
 mkdir -m 0755 /sys
@@ -99,23 +100,12 @@ mkdir -p /dev
 
 setup_devtmpfs ""
 
+echo "======= LuneOS/Halium ===========" > /dev/kmsg
+
 # Check wether we need to start adbd for interactive debugging
 cat /proc/cmdline | grep enable_adb
 if [ $? -ne 1 ] ; then
-
-    #system partition is needed for accessing build.prop by android-gadget-setup
-    /sbin/fsck.ext4 -p /dev/$system_partition
-    mount -t auto -o rw,noatime,nodiratime,nodelalloc /dev/$system_partition /system
-
-    #below are now needed in order to use FunctionFS for ADB, tested to work with 3.4+ kernels
-    mkdir -p /dev/usb-ffs/adb 
-    mount -t functionfs adb /dev/usb-ffs/adb > /dev/kmsg
-    #android-gadget-setup doesn't provide below 2 and without them it won't work, so we provide them here.
-    echo adb > /sys/class/android_usb/android0/f_ffs/aliases
-    echo ffs > /sys/class/android_usb/android0/functions 
-
-    /usr/bin/android-gadget-setup adb
-    /usr/bin/adbd
+    panic "Initramfs Debug Mode"
 fi
 
 # Start udev
