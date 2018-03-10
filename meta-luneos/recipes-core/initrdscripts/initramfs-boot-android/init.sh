@@ -55,7 +55,7 @@ process_bind_mounts() {
     # system so bind mount them from the outside into the rootfs. If we're
     # doing this the first time we have to remove the old data and copy the
     # initial data
-    datadir=${rootmnt}/android/userdata/$distro_name-data
+    datadir=${rootmnt}/userdata/$distro_name-data
     tell_kmsg "Preparing $datadir"
     if [ ! -e ${rootmnt}/.firstboot_done ] ; then
         for dir in var home ; do
