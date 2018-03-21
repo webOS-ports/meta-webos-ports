@@ -15,6 +15,8 @@ WEBOS_REPO_NAME = "org.webosports.service.contacts.carddav"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
+CLEANBROKEN = "1"
+
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/service/sysbus"
 
