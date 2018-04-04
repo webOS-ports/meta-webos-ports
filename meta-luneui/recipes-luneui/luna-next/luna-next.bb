@@ -28,15 +28,6 @@ inherit pkgconfig
 inherit webos_ports_repo
 inherit webos_system_bus
 inherit webos_cmake_qt5
-inherit systemd
-
-SYSTEMD_PACKAGES = "${PN}"
-SYSTEMD_SERVICE_${PN} = "luna-next.service"
-
-do_install_append() {
-    install -d ${D}${systemd_unitdir}/system
-    install -m 0644 ${S}/files/systemd/luna-next.service ${D}${systemd_unitdir}/system/
-}
 
 RDEPENDS_${PN} = "luna-next-conf xkeyboard-config"
 

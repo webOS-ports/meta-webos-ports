@@ -1,11 +1,12 @@
 # Copyright (c) 2012-2014 LG Electronics, Inc.
 
 SUMMARY = "webOS portability layer - ${MACHINE}-specific modules"
+AUTHOR = "Keith Derrick <keith.derrick@lge.com>"
 SECTION = "webos/base"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-DEPENDS = "nyx-lib glib-2.0 luna-service2 openssl"
+DEPENDS = "nyx-lib glib-2.0 luna-service2 openssl udev"
 DEPENDS += "mtdev"
 
 VBOX_RDEPENDS = ""
@@ -13,10 +14,7 @@ VBOX_RDEPENDS_qemux86 = "vboxguestdrivers"
 VBOX_RDEPENDS_qemux86-64 = "vboxguestdrivers"
 RDEPENDS_${PN} = "lsb gzip ${VBOX_RDEPENDS} nyx-conf"
 
-PV = "6.1.0-94+git${SRCPV}"
-SRCREV = "bd739fa608be5fc466c96ff34c6864743fec8e9b"
-
-EXTRA_OECMAKE += "-DDISTRO_VERSION:STRING='${DISTRO_VERSION}' -DDISTRO_NAME:STRING='${DISTRO_NAME}' \
+EXTRA_OECMAKE += "-DDISTRO_VERSION:STRING='${DISTRO_VERSION}' -DDISTRO_NAME:STRING='${DISTRO_NAME}${WEBOS_DISTRO_NAME_SUFFIX}' \
                   -DWEBOS_DISTRO_API_VERSION:STRING='${WEBOS_DISTRO_API_VERSION}' \
                   -DWEBOS_DISTRO_RELEASE_CODENAME:STRING='${WEBOS_DISTRO_RELEASE_CODENAME}' \
                   -DWEBOS_DISTRO_BUILD_ID:STRING='${WEBOS_DISTRO_BUILD_ID}'"
@@ -36,20 +34,25 @@ WEBOS_DISTRO_PRERELEASE ??= ""
 EXTRA_OECMAKE += "${@ '-DWEBOS_DISTRO_PRERELEASE:STRING="${WEBOS_DISTRO_PRERELEASE}"' \
                   if d.getVar('WEBOS_DISTRO_PRERELEASE',True) != '' else ''}"
 
+# Currently always using the modules for the rockhopper core OS.
+WEBOS_TARGET_CORE_OS = "rockhopper"
+
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-inherit webos_ports_fork_repo
+inherit webos_public_repo
 inherit webos_cmake
-inherit pkgconfig
 inherit webos_machine_impl_dep
 inherit webos_core_os_dep
+inherit webos_nyx_module_provider
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 SRC_URI_append = " \
     file://${MACHINE}.cmake \
 "
+
+SRCREV = "3cb9f78169170eaf11494934e01c32a60cb1777e"
 
 do_configure_prepend() {
     # install additional machine specific nyx configuration before CMake is started

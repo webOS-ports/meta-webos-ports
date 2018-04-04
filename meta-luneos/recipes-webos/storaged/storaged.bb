@@ -14,7 +14,6 @@ PR = "r3"
 inherit webos_ports_fork_repo
 inherit webos_cmake
 inherit webos_system_bus
-inherit webos_systemd
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files/sysbus"

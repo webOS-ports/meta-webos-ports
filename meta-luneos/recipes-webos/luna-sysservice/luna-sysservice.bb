@@ -1,6 +1,6 @@
-# Copyright (c) 2012-2014 LG Electronics, Inc.
+# Copyright (c) 2012-2018 LG Electronics, Inc.
 
-SUMMARY = "Provides image manipulation, preference, timezone and ringtone services for Open webOS components"
+SUMMARY = "Provides preference, timezone and ringtone services"
 AUTHOR = "Keith Derrick <keith.derrick@lge.com>"
 SECTION = "webos/base"
 LICENSE = "Apache-2.0"
@@ -8,18 +8,22 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 VIRTUAL-RUNTIME_ntp ?= "sntp"
 
-DEPENDS = "luna-service2 libpbnjson qtbase uriparser libxml2 sqlite3 pmloglib json-c nyx-lib"
+DEPENDS = "luna-service2 libpbnjson qtbase uriparser libxml2 sqlite3 pmloglib nyx-lib libwebosi18n"
 
-RDEPENDS_${PN} += "${VIRTUAL-RUNTIME_ntp}"
+RDEPENDS_${PN} += "${VIRTUAL-RUNTIME_ntp} tzcode"
 
-PV = "2.0.1-38+git${SRCPV}"
-SRCREV = "35047deac5bd0c35fd7f7da793ecbcc37d36c323"
-
-inherit webos_ports_fork_repo
+inherit webos_public_repo
 inherit webos_cmake
 inherit webos_system_bus
-inherit pkgconfig
-inherit webos_systemd
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
+
+SRCREV = "70c1cdeab9198c0e30d21fb9f60109cbc96d9bcf"
+
+do_install_append() {
+    install -d ${D}${datadir}/localization/${BPN}
+    cp -rf ${S}/resources ${D}/${datadir}/localization/${BPN}
+}
+
+FILES_${PN} += "${datadir}/localization/${BPN}"

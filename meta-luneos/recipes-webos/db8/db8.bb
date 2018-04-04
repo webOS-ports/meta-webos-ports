@@ -1,47 +1,52 @@
-# Copyright (c) 2013-2014 LG Electronics, Inc.
+# Copyright (c) 2013-2018 LG Electronics, Inc.
 
-SUMMARY = "A userspace service that provides access to the Open webOS database"
+SUMMARY = "A userspace service that provides access to the webOS database"
 SECTION = "webos/base"
 AUTHOR = "Maksym Sditanov <maxim.sditanov@lge.com>"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
+DEPENDS = "icu glib-2.0 leveldb leveldb-tl boost"
+DEPENDS_append_class-target = " luna-service2 pmloglib jemalloc gtest curl"
+
 # db8 is also the provider for mojodb
 PROVIDES = "mojodb"
 
-DEPENDS = "luna-service2 jemalloc icu pmloglib curl glib-2.0 leveldb leveldb-tl boost"
+# db8's upstart job requires stat
+VIRTUAL-RUNTIME_stat ?= "stat"
+VIRTUAL-RUNTIME_bash ?= "bash"
+RDEPENDS_${PN}_append_class-target = " ${VIRTUAL-RUNTIME_stat} ${VIRTUAL-RUNTIME_bash}"
+RDEPENDS_${PN}-test_append_class-target = " ${VIRTUAL-RUNTIME_bash}"
 
-PV = "3.2.0-145+git${SRCPV}"
-SRCREV = "efa412ab7ec65f14839477544f53d76f9a317e6d"
-
-RDEPENDS_${PN} += "leveldb bash"
-RDEPENDS_${PN}-tests += "bash"
-
-inherit webos_ports_fork_repo
+inherit webos_public_repo
 inherit webos_cmake
 inherit webos_system_bus
 inherit pkgconfig
 inherit pkgconfig
 inherit systemd
 
-EXTRA_OECMAKE += "-DWEBOS_CONFIG_BUILD_TESTS:BOOL=TRUE -DWEBOS_DB8_BACKEND:STRING='leveldb;sandwich' -DCMAKE_SKIP_RPATH:BOOL=TRUE"
+EXTRA_OECMAKE += "-DWEBOS_DB8_BACKEND:STRING='leveldb;sandwich' -DCMAKE_SKIP_RPATH:BOOL=TRUE"
+EXTRA_OECMAKE_append_class-target = " -DWEBOS_CONFIG_BUILD_TESTS:BOOL=TRUE  -DUSE_PMLOG:BOOL=TRUE  -DBUILD_LS2:BOOL=TRUE -DWANT_PROFILING:BOOL=${@ 'true' if '${WEBOS_DISTRO_PRERELEASE}' != '' else 'false'}"
+EXTRA_OECMAKE_append_class-native = " -DWEBOS_CONFIG_BUILD_TESTS:BOOL=FALSE -DUSE_PMLOG:BOOL=FALSE -DBUILD_LS2:BOOL=FALSE"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+# Backported from Yocto 1.8
+# http://git.openembedded.org/openembedded-core/commit/?id=79144da00f005b5a3ab8f7404730216cfc684616
+OECMAKE_AR ?= "${AR}"
+cmake_do_generate_toolchain_file_append() {
+        cat >> ${WORKDIR}/toolchain.cmake <<EOF
+set( CMAKE_AR ${OECMAKE_AR} CACHE FILEPATH "Archiver" )
+EOF
+}
+
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-SYSTEMD_PACKAGES = "${PN}"
-SYSTEMD_SERVICE_${PN} = "${PN}@.service"
-
-do_install_append() {
-    install -d ${D}${systemd_unitdir}/system
-    install -m 0644 ${S}/files/systemd/${SYSTEMD_SERVICE_${PN}} ${D}${systemd_unitdir}/system/
-
-    install -d ${D}${bindir}
-    install -m 0755 ${S}/files/scripts/db8-prestart.sh ${D}${bindir}
-}
+SRCREV = "14aeeb5a8b5fa796e5c837a56f9ba0ee1df06fbb"
 
 PACKAGES =+ "${PN}-tests"
 
 FILES_${PN}-tests = "${libdir}/${PN}/tests/*"
+
+BBCLASSEXTEND = "native"
 
 CXXFLAGS += "-fpermissive"

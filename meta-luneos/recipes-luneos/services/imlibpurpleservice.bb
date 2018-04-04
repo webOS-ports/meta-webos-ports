@@ -9,14 +9,14 @@ LIC_FILES_CHKSUM = " \
 DEPENDS = "glib-2.0 db8 pidgin luna-service2 tidy-html5"
 
 PV = "3.0.5+gitr${SRCPV}"
-SRCREV = "97ef733e3adc902ebe97d4c294c5ef25e90d5b5f"
+SRCREV = "113a3714c1b370a0a6b86c3d5a4187dccfa684d8"
 
 inherit webos_ports_repo
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webosose-2"
 S = "${WORKDIR}/git"
 
 RRECOMMENDS_${PN} += " \

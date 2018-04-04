@@ -10,6 +10,7 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 inherit packagegroup
 
 VIRTUAL-RUNTIME_webappmanager ?= "luna-webappmanager"
+VIRTUAL-RUNTIME_initscripts ?= "initscripts"
 VIRTUAL-RUNTIME_librdx ?= "librdx-stub"
 VIRTUAL-RUNTIME_webos-compositor ?= "luna-next"
 VIRTUAL-RUNTIME_webos-ime ?= "webos-keyboard"
@@ -90,6 +91,7 @@ RDEPENDS_${PN} = " \
     pmlogdaemon \
     sleepd \
     webos-connman-adapter \
+    ${VIRTUAL-RUNTIME_initscripts} \
     ${WEBOS_PACKAGESET_TZDATA} \
     ${WEBOS_FOSS_MISSING_FROM_RDEPENDS} \
     ${WEBOS_PACKAGESET_SYSTEMAPPS} \
