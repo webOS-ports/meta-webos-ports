@@ -8,10 +8,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 PV = "3.0.1-4+git${SRCPV}"
 SRCREV = "5955c2fb66f09c414f6f2c662c11b3699b97ee96"
 
-inherit webos_system_bus_paths
 inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
-#inherit webos_cmake
 inherit allarch
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
