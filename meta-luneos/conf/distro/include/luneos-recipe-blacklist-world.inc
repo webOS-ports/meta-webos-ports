@@ -98,6 +98,9 @@ PNBLACKLIST[xinput-calibrator] = "depends on x11 DISTRO_FEATURE"
 PNBLACKLIST[gnuplot] = "depends on x11 DISTRO_FEATURE"
 PNBLACKLIST[libmatchbox] = "depends on x11 DISTRO_FEATURE"
 
+PNBLACKLIST[initscripts] ?= "replaced with webos-initscripts"
+PNBLACKLIST[lsbinitscripts] ?= "replaced with webos-initscripts"
+
 # Depends on recipe with incompatible LICENSE
 PNBLACKLIST[libsdl-mixer] = "depends on blacklisted libmad"
 # PNBLACKLIST[vlc] = "depends on blacklisted qt4-x11-free, libxpm, fluidsynth, libmad, mpeg2dec"

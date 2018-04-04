@@ -1,6 +1,7 @@
-# Copyright (c) 2012-2013 LG Electronics, Inc.
+# Copyright (c) 2012-2018 LG Electronics, Inc.
 
-SUMMARY = "Open webOS portability layer - library"
+SUMMARY = "webOS portability layer - library"
+AUTHOR = "Keith Derrick <keith.derrick@lge.com>"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 SECTION = "webos/libs"
@@ -16,26 +17,12 @@ SECTION = "webos/libs"
 # in any of the R* variables is re-built is because its package name is stored in
 # this component's .ipk and it may have changed because debian.bbclass is inherited.)
 
-DEPENDS = "glib-2.0"
+DEPENDS = "glib-2.0 pmloglib"
 
-PV = "6.1.0-70+git${SRCPV}"
-SRCREV = "2892791512ca37b655695f6ef811b5a4602ffb4b"
-
-inherit webos_ports_fork_repo
+inherit webos_public_repo
 inherit webos_cmake
-inherit pkgconfig
-inherit systemd
 
-SYSTEMD_PACKAGES = "${PN}"
-SYSTEMD_SERVICE_${PN} = "nyx.target"
-
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "git://github.com/herrie82/nyx-lib.git"
 S = "${WORKDIR}/git"
 
-# Patch to support additional async suspend API's
-SRC_URI += "file://0001-Implement-asynchronous-suspend-resume-methods-for-sy.patch"
-
-do_install_append() {
-    install -d ${D}${systemd_unitdir}/system
-    install -m 0644 ${S}/files/systemd/nyx.target ${D}${systemd_unitdir}/system/
-}
+SRCREV = "22e9d5a2506b5265250a4bc9f898705282c4e841"

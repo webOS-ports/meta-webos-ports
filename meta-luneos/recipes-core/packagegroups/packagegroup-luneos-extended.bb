@@ -116,7 +116,6 @@ LIBHYBRIS_RDEPENDS = " \
     android-system-compat \
     android-tools \
     mtp-server \
-    nyx-modules-hybris \
     pulseaudio-modules-droid \
     qt5-qpa-hwcomposer-plugin \
     qtscenegraph-adaptation \
@@ -130,6 +129,8 @@ LIBHYBRIS_RDEPENDS = " \
     qtvideo-node \
     org.webosports.app.camera \
 "
+# Removed nyx-modules-hybris pending since it needs fixing for webOS OSE
+#    nyx-modules-hybris 
 
 MEMNOTIFY_RDEPENDS = " \
     memnotify-module \

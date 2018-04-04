@@ -17,6 +17,8 @@ VIRTUAL-RUNTIME_rdx-utils = "rdx-utils-stub"
 BAD_RECOMMENDATIONS_append_qemux86 = " kernel-vmlinux"
 
 # switch from upstart to systemd
-VIRTUAL-RUNTIME_initscripts = ""
+VIRTUAL-RUNTIME_initscripts = "webos-initscripts"
+PREFERRED_RPROVIDER_initscripts-functions = "webos-initscripts"
+
 VIRTUAL-RUNTIME_init_manager = "systemd systemd-compat-units systemd-machine-units"
 BAD_RECOMMENDATIONS = "update-rc.d"
