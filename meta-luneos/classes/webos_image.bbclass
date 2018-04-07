@@ -39,7 +39,7 @@ WEBOS_IMAGE_EXTRA_INSTALL ?= ""
 IMAGE_INSTALL ?= "${WEBOS_IMAGE_BASE_INSTALL}"
 
 # Add ${webos_sysconfdir}/build/image-name during image construction that contains the image name
-ROOTFS_POSTPROCESS_COMMAND += "rootfs_set_image_name ; clean_python_installation ; "
+ROOTFS_POSTPROCESS_COMMAND += "rootfs_set_image_name ; clean_python_installation ; verify_acg ; "
 
 # Can be used to echo image name to ${webos_sysconfdir}/build/image-name
 rootfs_set_image_name () {
@@ -53,6 +53,17 @@ clean_python_installation () {
     do
         rm -f $p
     done
+}
+
+# run LS2 ACG verification code
+python verify_acg () {
+    def herror(c, m):
+        package_qa_handle_error(c, m, d)
+
+    import verify_ls2_acg
+    verify_ls2_acg.handle_error = herror
+    if not verify_ls2_acg.Verify("${IMAGE_ROOTFS}"):
+        bb.note("LS2 hub config not found, ACG verification skipped")
 }
 
 # A hook function to support read-only-rootfs IMAGE_FEATURES

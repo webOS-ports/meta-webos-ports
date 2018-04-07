@@ -9,7 +9,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "luna-service2 db8 json-c glib-2.0 pmloglib"
 
 PV = "3.0.0-59+git${SRCPV}"
-SRCREV = "86ca6b12e2b53d6a94493f4cf612f536cb9745be"
+SRCREV = "0430febd7f837351c4eac528bf54bd2b6cef54cf"
 
 inherit webos_ports_fork_repo
 inherit webos_cmake
@@ -29,7 +29,7 @@ do_install_append() {
 
 FILES_${PN} += "${systemd_unitdir}/system"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webOS-ports/master-webosose"
 S = "${WORKDIR}/git"
 
 CXXFLAGS += "-fpermissive"
