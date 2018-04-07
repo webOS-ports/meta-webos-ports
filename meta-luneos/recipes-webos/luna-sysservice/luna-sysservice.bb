@@ -24,6 +24,8 @@ SRCREV = "70c1cdeab9198c0e30d21fb9f60109cbc96d9bcf"
 do_install_append() {
     install -d ${D}${datadir}/localization/${BPN}
     cp -rf ${S}/resources ${D}/${datadir}/localization/${BPN}
+    rm -rf ${D}${webos_sysbus_prvrolesdir}/com.webos.*
+    rm -rf ${D}${webos_sysbus_pubrolesdir}/com.webos.* 
 }
 
 FILES_${PN} += "${datadir}/localization/${BPN}"
