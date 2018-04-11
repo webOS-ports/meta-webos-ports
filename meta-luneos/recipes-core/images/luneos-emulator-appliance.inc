@@ -32,7 +32,7 @@ do_deploy() {
     rm -rf ${WORKDIR}/appliance
     mkdir -p ${WORKDIR}/appliance
     sed "s/luneos-emulator-disk.vmdk/${VMDK_NAME}/g" ${WORKDIR}/luneos-emulator.ovf > ${WORKDIR}/appliance/${OVF_NAME}
-    sed -i "s/LuneOS Emulator/${DESCRIPTION} ${DATETIME}${WEBOS_IMAGE_NAME_SUFFIX}/g" ${WORKDIR}/appliance/${OVF_NAME}
+    sed -i "s/LuneOS Emulator/LuneOS ${DATETIME}${WEBOS_IMAGE_NAME_SUFFIX}/g" ${WORKDIR}/appliance/${OVF_NAME}
     ln -sf ${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}-${MACHINE}.wic.vmdk ${WORKDIR}/appliance/${VMDK_NAME}
 
     (cd ${WORKDIR}/appliance ; zip ${DEPLOY_DIR_IMAGE}/${ZIP_NAME} ${OVF_NAME} ${VMDK_NAME})
