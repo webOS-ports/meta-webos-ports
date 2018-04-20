@@ -12,7 +12,7 @@ PROVIDES = "mojodb"
 DEPENDS = "luna-service2 jemalloc icu pmloglib curl glib-2.0 leveldb leveldb-tl boost"
 
 PV = "3.2.0-145+git${SRCPV}"
-SRCREV = "6bb08a67b2374affc08ce8a6c8866a93f0983fb6"
+SRCREV = "81b0016f4f36efa2dc0811930978d9a7bcb95eb0"
 
 RDEPENDS_${PN} += "leveldb bash"
 RDEPENDS_${PN}-tests += "bash"
