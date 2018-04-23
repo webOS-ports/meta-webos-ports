@@ -41,3 +41,6 @@ DISTRO_FEATURES += "adb"
 # For proper support of wayland through the whole stack we need to set it as distro
 # feature (e.g. mesa requiers it to be set to compile the egl platform module)
 DISTRO_FEATURES += "wayland"
+
+# Use vc4graphics for all raspberrypi MACHINEs
+MACHINE_FEATURES_append_rpi = " vc4graphics"
