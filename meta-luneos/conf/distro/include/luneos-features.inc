@@ -44,3 +44,6 @@ DISTRO_FEATURES += "wayland"
 
 # Use vc4graphics for all raspberrypi MACHINEs
 MACHINE_FEATURES_append_rpi = " vc4graphics"
+
+# Our mesa doesn't provide gl.pc used by glmark2
+PACKAGECONFIG_remove_pn-glmark2 = "wayland-gl drm-gl"
