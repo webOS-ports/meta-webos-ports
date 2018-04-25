@@ -1,6 +1,6 @@
-# Copyright (c) 2012-2014 LG Electronics, Inc.
+# Copyright (c) 2012-2018 LG Electronics, Inc.
 
-SUMMARY = "Open webOS daemon to cache filesystem requests"
+SUMMARY = "webOS daemon to cache filesystem requests"
 AUTHOR = "Alekseyev Oleksandr <alekseyev.oleksandr@lge.com>"
 SECTION = "webos/base"
 LICENSE = "Apache-2.0"
@@ -8,16 +8,14 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "jemalloc luna-service2 db8 glibmm boost libsandbox glib-2.0 libsigc++-2.0"
 
-PV = "2.0.0-63+git${SRCPV}"
-SRCREV = "d1c49923f6475aa4f3a04d9bb7faea3272641a32"
+PV = "2.0.1-1+git${SRCPV}"
 
-inherit webos_ports_fork_repo
+inherit webos_ports_repo
 inherit webos_cmake
-inherit pkgconfig
 inherit webos_system_bus
 inherit webos_machine_impl_dep
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO}/${PN}-1;branch=webosose"
 S = "${WORKDIR}/git"
 
-CXXFLAGS += "-fpermissive"
+SRCREV = "cca201b63509aee8479eab055a9973367d2f3a00"

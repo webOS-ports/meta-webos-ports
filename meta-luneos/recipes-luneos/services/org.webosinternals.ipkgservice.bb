@@ -6,15 +6,16 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=eb723b61539feef013de476e68b5c50a"
 DEPENDS = "luna-service2 glib-2.0 json-c"
 
 PV = "2.0.0-2+git${SRCPV}"
-SRCREV = "4cdf4d2e5ecc4c6ac584874640351afab7a414e3"
+SRCREV = "5dd15cc3687e5829f67d4705ce3d6985e81dc942"
 
 inherit webos_ports_repo
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
+inherit webos_systemd
 
 WEBOS_REPO_NAME = "preware"
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webosose"
 
 S = "${WORKDIR}/git/oe-service"
 

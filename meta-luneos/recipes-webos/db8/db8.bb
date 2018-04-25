@@ -18,11 +18,9 @@ VIRTUAL-RUNTIME_bash ?= "bash"
 RDEPENDS_${PN}_append_class-target = " ${VIRTUAL-RUNTIME_stat} ${VIRTUAL-RUNTIME_bash}"
 RDEPENDS_${PN}-test_append_class-target = " ${VIRTUAL-RUNTIME_bash}"
 
-inherit webos_public_repo
+inherit webos_ports_repo
 inherit webos_cmake
 inherit webos_system_bus
-inherit pkgconfig
-inherit pkgconfig
 inherit systemd
 
 EXTRA_OECMAKE += "-DWEBOS_DB8_BACKEND:STRING='leveldb;sandwich' -DCMAKE_SKIP_RPATH:BOOL=TRUE"
@@ -38,14 +36,36 @@ set( CMAKE_AR ${OECMAKE_AR} CACHE FILEPATH "Archiver" )
 EOF
 }
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO}/${PN}-1;branch=webosose"
 S = "${WORKDIR}/git"
 
-SRCREV = "14aeeb5a8b5fa796e5c837a56f9ba0ee1df06fbb"
+SYSTEMD_PACKAGES = "${PN}"
+SYSTEMD_SERVICE_${PN} = " \
+    ${PN}.service \
+    ${PN}-maindb.service \
+    ${PN}-mediadb.service \
+    ${PN}-pre-config.service \
+    ${PN}-tempdb.service \
+"	
+	
+do_install_append() {	
+    install -d ${D}${systemd_unitdir}/system	
+    
+
+    install -m 0644 ${S}/files/systemd/${PN}.service ${D}${systemd_unitdir}/system/
+    install -m 0644 ${S}/files/systemd/${PN}-maindb.service ${D}${systemd_unitdir}/system/	
+    install -m 0644 ${S}/files/systemd/${PN}-mediadb.service ${D}${systemd_unitdir}/system/	
+    install -m 0644 ${S}/files/systemd/${PN}-pre-config.service ${D}${systemd_unitdir}/system/	
+    install -m 0644 ${S}/files/systemd/${PN}-tempdb.service ${D}${systemd_unitdir}/system/		
+
+}
+
+SRCREV = "4910d5e248a6bc071a9d0cd9f5fa1bf3500ed913"
 
 PACKAGES =+ "${PN}-tests"
 
 FILES_${PN}-tests = "${libdir}/${PN}/tests/*"
+# FILES_${PN} += "${webos_sysbus_datadir} ${systemd_unitdir}/system"
 
 BBCLASSEXTEND = "native"
 

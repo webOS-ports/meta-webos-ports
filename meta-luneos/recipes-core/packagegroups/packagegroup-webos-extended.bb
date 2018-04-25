@@ -89,6 +89,7 @@ RDEPENDS_${PN} = " \
     pmklogd \
     pmlogctl \
     pmlogdaemon \
+    settingsservice \
     sleepd \
     webos-connman-adapter \
     ${VIRTUAL-RUNTIME_initscripts} \

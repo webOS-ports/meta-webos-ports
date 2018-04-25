@@ -4,7 +4,7 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 PV = "1.0+gitr${SRCPV}"
-SRCREV = "a6e0618b0302efa182e906d73d5dcd8fe8f98005"
+SRCREV = "c5ca2fcfe3603270bfc17db3d72c6e2a8ed16930"
 
 inherit webos_ports_repo
 
@@ -20,10 +20,14 @@ SYSTEMD_SERVICE_${PN} = ""
 
 do_install() {
     install -d ${D}${systemd_unitdir}/system
+    install -d ${D}${sbindir}
 
     for f in *.service ; do
         install -m 0644 ${S}/$f ${D}${systemd_unitdir}/system
     done
+
+    install -m 0755 ${S}/populate-volatile.sh ${D}${sbindir}
 }
 
 FILES_${PN} += "${systemd_unitdir}/system"
+FILES_${PN} += "${sbindir}"

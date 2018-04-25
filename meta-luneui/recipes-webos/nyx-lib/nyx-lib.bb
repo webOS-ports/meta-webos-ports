@@ -17,12 +17,23 @@ SECTION = "webos/libs"
 # in any of the R* variables is re-built is because its package name is stored in
 # this component's .ipk and it may have changed because debian.bbclass is inherited.)
 
+PV = "7.3.0-1+git${SRCPV}"
+
 DEPENDS = "glib-2.0 pmloglib"
 
 inherit webos_public_repo
 inherit webos_cmake
+inherit systemd
 
-SRC_URI = "git://github.com/herrie82/nyx-lib.git"
+SYSTEMD_PACKAGES = "${PN}"
+SYSTEMD_SERVICE_${PN} = "nyx.target"
+
+SRC_URI = "git://github.com/herrie82/nyx-lib.git;branch=herrie/webosose"
 S = "${WORKDIR}/git"
 
-SRCREV = "22e9d5a2506b5265250a4bc9f898705282c4e841"
+SRCREV = "097ecf2cfefd2c6e73c516accd3b99b90154c467"
+
+do_install_append() {
+    install -d ${D}${systemd_unitdir}/system
+    install -m 0644 ${S}/files/systemd/${SYSTEMD_SERVICE_${PN}} ${D}${systemd_unitdir}/system/
+}

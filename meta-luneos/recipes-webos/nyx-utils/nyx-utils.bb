@@ -8,13 +8,16 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "nyx-lib glib-2.0"
 
-inherit webos_public_repo
+inherit webos_ports_repo
 inherit webos_cmake
+inherit webos_systemd
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+PV = "1.5.0-1+git${SRCPV}"
+
+SRC_URI = "${WEBOS_PORTS_GIT_REPO}/${PN}-1;branch=webosose"
 S = "${WORKDIR}/git"
 
-SRCREV = "86770f142b1023f0ea88b838318f44da5107324c"
+SRCREV = "b78c0d98da84de7e7a53d58b5a08738be7e6a497"
 
 FILES_${PN} += "${libdir}/nyx/nyxcmd/"
 

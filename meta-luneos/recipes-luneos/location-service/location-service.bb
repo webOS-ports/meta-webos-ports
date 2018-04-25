@@ -10,15 +10,16 @@ DEPENDS = "luna-service2 glib-2.0 libpbnjson"
 RDEPENDS_${PN} = "geoclue"
 
 PV = "0.1.0+git${SRCPV}"
-SRCREV = "0c8b742813266eca4fe3ae8a584f549d09cb0e9d"
+SRCREV = "6c92938f65cd1c9d24aa20f6ced571881132e84f"
 
 inherit webos_ports_repo
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
+inherit webos_systemd
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files/sysbus"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webosose"
 S = "${WORKDIR}/git"

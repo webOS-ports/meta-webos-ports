@@ -1,6 +1,6 @@
-# Copyright (c) 2012-2013 LG Electronics, Inc.
+# Copyright (c) 2012-2018 LG Electronics, Inc.
 
-SUMMARY = "Open webOS component responsible for launching the node.js services"
+SUMMARY = "webOS component responsible for launching the node.js services"
 AUTHOR = "Steve Lemke <steve.lemke@lge.com>"
 SECTION = "webos/frameworks"
 LICENSE = "Apache-2.0"
@@ -11,15 +11,15 @@ RDEPENDS_${PN} = "nodejs"
 # fork_server.js wants to load these:
 RDEPENDS_${PN} += "nodejs-module-webos-dynaload nodejs-module-webos-pmlog nodejs-module-webos-sysbus mojoloader"
 
-PV = "3.0.1-81+git${SRCPV}"
-SRCREV = "d7407a69e5acd1ac132ae25964e4db93b7685beb"
+PV = "3.0.2-1+git${SRCPV}"
+SRCREV = "3c95b38d74d31f34baff80c0b81fae72e4eefa65"
 
 inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
 inherit webos_cmake
 inherit pkgconfig
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO}/${PN}-1;branch=webOS-ports/master"
 S = "${WORKDIR}/git"
 
 FILES_${PN} += "${webos_prefix}/nodejs ${webos_servicesdir} ${webos_frameworksdir}"

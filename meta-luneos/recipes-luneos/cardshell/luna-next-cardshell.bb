@@ -15,14 +15,14 @@ RDEPENDS_${PN} += " \
 "
 
 PV = "0.4.0-1+git${SRCPV}"
-SRCREV = "438fe39a79cab84160f5a5f4211034d238905ed3"
+SRCREV = "f4a140e64ee9972323a0ed1fbf259bcbe762affb"
 
 inherit webos_ports_repo
 inherit webos_cmake
 inherit webos_tweaks
 inherit webos_filesystem_paths
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=herrie/webosose"
 S = "${WORKDIR}/git"
 
 # inheriting webos_application requires the appinfo.json file, which we don't have here.
