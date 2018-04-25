@@ -13,7 +13,9 @@ inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
 
-SRC_URI = "git://github.com/herrie82/sleepd.git"
+PV = "2.0.0-1+git${SRCPV}"
+
+SRC_URI = "git://github.com/herrie82/sleepd.git;branch=webosose"
 S = "${WORKDIR}/git"
 
-SRCREV = "1f0861e5eff2ee8d672db7b9241fc55843d0ba75"
+SRCREV = "abaf192e0444d0294e074901ad6281f849143b1b"

@@ -11,13 +11,11 @@ RDEPENDS_${PN} = "${VIRTUAL-RUNTIME_init_manager} ${VIRTUAL-RUNTIME_rdx-utils}"
 RPROVIDES_${PN} = "initscripts initscripts-functions"
 PROVIDES = "initscripts"
 
-EXTRA_OECMAKE += "-DWEBOS_TARGET_DISTRO:STRING='webos'"
-
 # TODO: systemd dependency is for fake initctl.
 # The dependency needs to be deleted after deleting fake initctl.
 DEPENDS = "systemd"
 
-SRCREV = "fe698d120ff1ed266f21c5eb2d4d6815ee90e418"
+SRCREV = "d65df0720729e0ab8a69f54be334c41f8b2bf3ee"
 inherit webos_cmake
 inherit webos_public_repo
 

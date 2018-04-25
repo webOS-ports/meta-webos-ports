@@ -9,11 +9,11 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "qtbase qtdeclarative qtwayland luna-sysmgr-common extra-cmake-modules wayland-native qtwayland-native"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webosose"
 S = "${WORKDIR}/git"
 
 PV = "0.4.0-1+git${SRCPV}"
-SRCREV = "f5fc4c8af0d0c6f74f57d3963eb570966bc8fa55"
+SRCREV = "eeb70f7f3b8e2ddd7cf384e9c6262b99e82f0a19"
 
 # Otherwise there is conflict between None defined in Xlib.h and
 # qtdeclarative's /usr/include/qt5/QtQuick/qsgtexture.h:59
@@ -28,6 +28,7 @@ inherit pkgconfig
 inherit webos_ports_repo
 inherit webos_system_bus
 inherit webos_cmake_qt5
+inherit webos_systemd
 
 RDEPENDS_${PN} = "luna-next-conf xkeyboard-config"
 

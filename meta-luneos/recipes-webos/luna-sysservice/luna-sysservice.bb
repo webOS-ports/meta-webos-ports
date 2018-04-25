@@ -12,20 +12,27 @@ DEPENDS = "luna-service2 libpbnjson qtbase uriparser libxml2 sqlite3 pmloglib ny
 
 RDEPENDS_${PN} += "${VIRTUAL-RUNTIME_ntp} tzcode"
 
-inherit webos_public_repo
+inherit webos_ports_repo
 inherit webos_cmake
 inherit webos_system_bus
+inherit systemd
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO}/${PN}-1;branch=webosose"
 S = "${WORKDIR}/git"
 
-SRCREV = "70c1cdeab9198c0e30d21fb9f60109cbc96d9bcf"
+SYSTEMD_PACKAGES = "${PN}"
+SYSTEMD_SERVICE_${PN} = "luna-sys-service.service"
+
+SRCREV = "170ea54cc60ebc55aa0549e74d25ee6552edc0b0"
 
 do_install_append() {
     install -d ${D}${datadir}/localization/${BPN}
     cp -rf ${S}/resources ${D}/${datadir}/localization/${BPN}
     rm -rf ${D}${webos_sysbus_prvrolesdir}/com.webos.*
     rm -rf ${D}${webos_sysbus_pubrolesdir}/com.webos.* 
+
+    install -d ${D}${systemd_unitdir}/system	
+    install -m 0644 ${S}/files/systemd/${SYSTEMD_SERVICE_${PN}} ${D}${systemd_unitdir}/system/
 }
 
 FILES_${PN} += "${datadir}/localization/${BPN}"

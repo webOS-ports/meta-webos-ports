@@ -8,13 +8,14 @@ DEPENDS += "db8 glib-2.0 luna-service2 sqlite3 taglib qtbase luna-sysmgr-common"
 RDEPENDS_${PN} += "shared-mime-info"
 
 PV = "0.1.0-14+git${SRCPV}"
-SRCREV = "42b6c179a095659eaddcba3fee4191a527051e77"
+SRCREV = "b1193b36d39a1e7bedf9b3f3ead351cfd3f69c8f"
 
 inherit webos_ports_repo
 inherit webos_system_bus
 inherit cmake_qt5
 inherit webos_cmake
 inherit webos_filesystem_paths
+inherit webos_systemd
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webosose"
 S = "${WORKDIR}/git"

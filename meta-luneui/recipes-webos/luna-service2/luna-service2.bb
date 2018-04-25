@@ -12,7 +12,7 @@ VIRTUAL-RUNTIME_rdx-utils ?= "rdxd"
 VIRTUAL-RUNTIME_bash ?= "bash"
 RDEPENDS_${PN} = "luna-service2-security-conf ${VIRTUAL-RUNTIME_cpushareholder} ${VIRTUAL-RUNTIME_rdx-utils} ${VIRTUAL-RUNTIME_bash}"
 
-PR = "r23"
+PV = "3.21.2-1+git${SRCPV}"
 
 WEBOS_DISTRO_PRERELEASE ??= ""
 EXTRA_OECMAKE += "${@ '-DWEBOS_DISTRO_PRERELEASE:STRING="devel"' \
@@ -25,17 +25,23 @@ inherit webos_core_os_dep
 inherit webos_machine_impl_dep
 inherit webos_lttng
 inherit webos_test_provider
+inherit systemd
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webosose"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO}/${PN}-1;branch=webOS-ports/master"
 S = "${WORKDIR}/git"
 
-SRCREV = "ac9819984a96bad5f3d2d655d7661943f4d7fd64"
+SYSTEMD_PACKAGES = "${PN}"
+SYSTEMD_SERVICE_${PN} = "ls-hubd.service"
+
+SRCREV = "007c2a0c7bf60cc2f8a92485a3bee0e75342b64b"
 
 # This fix-up will be removed shortly. luna-service2 headers must be included
 # using '#include <luna-service2/*.h>'
 do_install_append() {
     # XXX Temporarily, create links from the old locations until all users of
     # luna-service2 convert to using pkg-config
+    install -d ${D}${systemd_unitdir}/system
+    install -m 0644 ${S}/files/systemd/${SYSTEMD_SERVICE_${PN}} ${D}${systemd_unitdir}/system/
     ln -svnf luna-service2/lunaservice.h ${D}${includedir}/lunaservice.h
     ln -svnf luna-service2/lunaservice-errors.h ${D}${includedir}/lunaservice-errors.h
     ln -svnf lib${BPN}.so ${D}${libdir}/liblunaservice.so
@@ -51,5 +57,6 @@ WEBOS_DISABLE_LS2_SECURITY ?= "0"
 EXTRA_OECMAKE += '${@oe.utils.conditional("WEBOS_DISABLE_LS2_SECURITY", "1", "-DWEBOS_LS2_SECURE:BOOLEAN=False", "" ,d)}'
 
 PACKAGES += "${PN}-perf"
+FILES_${PN} += "${systemd_unitdir}/system"
 
 FILES_${PN}-perf += "${webos_testsdir}/${BPN}-perf"

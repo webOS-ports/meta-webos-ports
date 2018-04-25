@@ -7,15 +7,16 @@ DEPENDS = "luna-service2 json-c glib-2.0 luna-prefs glib-2.0-native"
 RRECOMMENDS_${PN} += "ofono mmsd"
 
 PV = "0.1.0-1+git${SRCPV}"
-SRCREV = "e7e3cee81e835f973142befda6d778aff9f85525"
+SRCREV = "4b80014da16e3ca424f34082010a1e7e034156f5"
 
 inherit webos_ports_repo
 inherit webos_filesystem_paths
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
+inherit webos_systemd
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webosose"
 S = "${WORKDIR}/git"
 
 do_install_append() {
