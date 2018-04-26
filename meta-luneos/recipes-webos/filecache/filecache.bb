@@ -14,6 +14,7 @@ inherit webos_ports_repo
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_machine_impl_dep
+inherit webos_systemd
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO}/${PN}-1;branch=webosose"
 S = "${WORKDIR}/git"

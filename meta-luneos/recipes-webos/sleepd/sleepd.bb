@@ -12,6 +12,7 @@ inherit webos_public_repo
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
+inherit webos_systemd
 
 PV = "2.0.0-1+git${SRCPV}"
 
