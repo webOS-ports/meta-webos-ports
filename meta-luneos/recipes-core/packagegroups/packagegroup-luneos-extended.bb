@@ -154,6 +154,7 @@ QEMU_RDEPENDS = " \
     phonesim \
     qt5-plugin-generic-vboxtouch \
     kernel-module-snd-intel8x0 \
+    libpci \
 "
 
 RDEPENDS_${PN}_append_qemux86 = " ${QEMU_RDEPENDS}"
