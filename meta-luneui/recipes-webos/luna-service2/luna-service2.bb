@@ -27,13 +27,13 @@ inherit webos_lttng
 inherit webos_test_provider
 inherit systemd
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO}/${PN}-1;branch=webOS-ports/master"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webOS-ports/webOS-OSE"
 S = "${WORKDIR}/git"
 
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE_${PN} = "ls-hubd.service"
 
-SRCREV = "56eb29cdf2da4f292bd36ff886a9475bcf69ca78"
+SRCREV = "17521d3923fb53ba246a56dd8a9c43c36d277a91"
 
 # This fix-up will be removed shortly. luna-service2 headers must be included
 # using '#include <luna-service2/*.h>'
@@ -53,7 +53,10 @@ do_install_append() {
 WEBOS_LTTNG_ENABLED = "0"
 EXTRA_OECMAKE += " ${@bb.utils.contains('WEBOS_LTTNG_ENABLED', '1', '-DWEBOS_LTTNG_ENABLED:BOOLEAN=True', '', d)}"
 
-WEBOS_DISABLE_LS2_SECURITY ?= "0"
+# Disable security as a work around for now until we sort all the new ACG bits for LS2. 
+# Should at least help the migration to OSE components a bit
+
+WEBOS_DISABLE_LS2_SECURITY ?= "1"
 EXTRA_OECMAKE += '${@oe.utils.conditional("WEBOS_DISABLE_LS2_SECURITY", "1", "-DWEBOS_LS2_SECURE:BOOLEAN=False", "" ,d)}'
 
 PACKAGES += "${PN}-perf"

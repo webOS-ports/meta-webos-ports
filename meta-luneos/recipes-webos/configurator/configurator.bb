@@ -9,7 +9,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "luna-service2 db8 glib-2.0 pmloglib"
 
 PV = "3.0.0-1+git${SRCPV}"
-SRCREV = "d1c6e03c3483875edf3af375dbf061e91409d53a"
+SRCREV = "10464dbc52dd61a512d3e52ee56e8ca8169ff2ac"
 
 inherit webos_ports_repo
 inherit webos_public_repo
@@ -32,5 +32,5 @@ FILES_${PN} += "${systemd_unitdir}/system"
 
 FILES_${PN} += "${webos_sysbus_datadir}"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO}/${PN}-1;branch=webosose"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webOS-ports/webOS-OSE"
 S = "${WORKDIR}/git"

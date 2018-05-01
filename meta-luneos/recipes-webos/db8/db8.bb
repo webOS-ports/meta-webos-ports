@@ -36,7 +36,7 @@ set( CMAKE_AR ${OECMAKE_AR} CACHE FILEPATH "Archiver" )
 EOF
 }
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO}/${PN}-1;branch=webosose"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webOS-ports/webOS-OSE"
 S = "${WORKDIR}/git"
 
 SYSTEMD_PACKAGES = "${PN}"
@@ -60,7 +60,7 @@ do_install_append() {
 
 }
 
-SRCREV = "4910d5e248a6bc071a9d0cd9f5fa1bf3500ed913"
+SRCREV = "b1280342c1fc655b6edb61228fc3ef6673ed0662"
 
 PACKAGES =+ "${PN}-tests"
 
