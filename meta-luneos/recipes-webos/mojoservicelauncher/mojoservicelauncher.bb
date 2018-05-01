@@ -12,14 +12,14 @@ RDEPENDS_${PN} = "nodejs"
 RDEPENDS_${PN} += "nodejs-module-webos-dynaload nodejs-module-webos-pmlog nodejs-module-webos-sysbus mojoloader"
 
 PV = "3.0.2-1+git${SRCPV}"
-SRCREV = "3c95b38d74d31f34baff80c0b81fae72e4eefa65"
+SRCREV = "d4bb179660ede717ec36186966dda6c584e0a8cc"
 
 inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
 inherit webos_cmake
 inherit pkgconfig
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO}/${PN}-1;branch=webOS-ports/master"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webOS-ports/webOS-OSE"
 S = "${WORKDIR}/git"
 
 FILES_${PN} += "${webos_prefix}/nodejs ${webos_servicesdir} ${webos_frameworksdir}"

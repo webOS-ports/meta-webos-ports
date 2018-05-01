@@ -14,10 +14,9 @@ inherit webos_systemd
 
 PV = "1.5.0-1+git${SRCPV}"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO}/${PN}-1;branch=webosose"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webOS-ports/webOS-OSE"
 S = "${WORKDIR}/git"
 
-SRCREV = "b78c0d98da84de7e7a53d58b5a08738be7e6a497"
+SRCREV = "0c86744f29fe18088b08fd4103666b9c4a4964aa"
 
 FILES_${PN} += "${libdir}/nyx/nyxcmd/"
-

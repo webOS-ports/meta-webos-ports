@@ -17,13 +17,13 @@ inherit webos_cmake
 inherit webos_system_bus
 inherit systemd
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO}/${PN}-1;branch=webosose"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webOS-ports/webOS-OSE"
 S = "${WORKDIR}/git"
 
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE_${PN} = "luna-sys-service.service"
 
-SRCREV = "170ea54cc60ebc55aa0549e74d25ee6552edc0b0"
+SRCREV = "beb573aa820eb0a47c74a64336476a36d93d8cb1"
 
 do_install_append() {
     install -d ${D}${datadir}/localization/${BPN}
