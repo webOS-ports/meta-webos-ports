@@ -159,7 +159,7 @@ QEMU_RDEPENDS = " \
 "
 
 RDEPENDS_${PN}_append_qemux86 = " ${QEMU_RDEPENDS}"
-RDEPENDS_${PN}_append_qemux86-64 = " ${QEMU_RDEPENDS}"
+RDEPENDS_${PN}_append_qemux86-64 = " ${QEMU_RDEPENDS} anbox"
 
 RDEPENDS_${PN}_append_arm = " \
     crash-handler \
