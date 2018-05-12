@@ -19,13 +19,13 @@
 # configuration file for maguro.
 # specify all the modules to be compiled
 
-set(MODULE_SYSTEM_WEBOS_LINUX		NO)
-set(MODULE_BATTERY_WEBOS_LINUX		YES)
-set(MODULE_CHARGER_WEBOS_LINUX		YES)
-set(MODULE_KEYS_WEBOS_LINUX			YES)
-set(MODULE_TOUCHPANEL_WEBOS_LINUX		YES)
-set(MODULE_ALS_WEBOS_LINUX_TUNA			YES)
-set(MODULE_HAPTICS_TIMEDOUTPUT_WEBOS_LINUX		NO)
+set(NYXMOD_OW_SYSTEM		NO)
+set(NYXMOD_OW_BATTERY		YES)
+set(NYXMOD_OW_CHARGER		YES)
+set(NYXMOD_OW_KEYS			YES)
+set(NYXMOD_OW_TOUCHPANEL		YES)
+set(NYXMOD_OW_ALS			YES)
+set(NYXMOD_OW_HAPTICS_TIMEDOUTPUT		NO)
 
 add_definitions(-DBATTERY_SYSFS_PATH=\"/sys/class/power_supply/battery/\")
 add_definitions(-DALS_INPUT_DEVICE=\"/dev/input/event4\")

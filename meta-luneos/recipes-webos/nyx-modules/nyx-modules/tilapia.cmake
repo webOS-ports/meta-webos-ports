@@ -19,12 +19,12 @@
 # configuration file for tilapia.
 # specify all the modules to be compiled
 
-set(MODULE_SYSTEM_WEBOS_LINUX		NO)
-set(MODULE_BATTERY_WEBOS_LINUX		YES)
-set(MODULE_CHARGER_WEBOS_LINUX		YES)
-set(MODULE_KEYS_WEBOS_LINUX			YES)
-set(MODULE_TOUCHPANEL_WEBOS_LINUX		NO)
-set(MODULE_TOUCHPANEL_MTDEV_WEBOS_LINUX		YES)
+set(NYXMOD_OW_SYSTEM		NO)
+set(NYXMOD_OW_BATTERY		YES)
+set(NYXMOD_OW_CHARGER		YES)
+set(NYXMOD_OW_KEYS			YES)
+set(NYXMOD_OW_TOUCHPANEL		NO)
+set(NYXMOD_OW_TOUCHPANEL_MTDEV		YES)
 
 add_definitions(-DKEYPAD_INPUT_DEVICE=\"/dev/input/event2\")
 add_definitions(-DBATTERY_SYSFS_PATH=\"/sys/class/power_supply/battery/\")
