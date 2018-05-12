@@ -1,4 +1,4 @@
-From 7573c5b64b7ec39bf1b0499b0fce2b236749d4a9 Mon Sep 17 00:00:00 2001
+From 485b6e4cdb12a632910722c975607c2d43e5c77a Mon Sep 17 00:00:00 2001
 From: Christophe Chapuis <chris.chapuis@gmail.com>
 Date: Mon, 28 Sep 2015 20:19:14 +0200
 Subject: [PATCH] WebEngineView: provide additionnal features from window.open
@@ -18,10 +18,10 @@ Signed-off-by: Christophe Chapuis <chris.chapuis@gmail.com>
  9 files changed, 31 insertions(+), 12 deletions(-)
 
 diff --git a/src/core/web_contents_adapter_client.h b/src/core/web_contents_adapter_client.h
-index f2f1d28d..698db93b 100644
+index 4c513377..6d577bb2 100644
 --- a/src/core/web_contents_adapter_client.h
 +++ b/src/core/web_contents_adapter_client.h
-@@ -385,7 +385,7 @@ public:
+@@ -412,7 +412,7 @@ public:
      virtual void loadFinished(bool success, const QUrl &url, bool isErrorPage = false, int errorCode = 0, const QString &errorDescription = QString()) = 0;
      virtual void focusContainer() = 0;
      virtual void unhandledKeyEvent(QKeyEvent *event) = 0;
@@ -31,20 +31,20 @@ index f2f1d28d..698db93b 100644
      virtual void close() = 0;
      virtual void windowCloseRejected() = 0;
 diff --git a/src/core/web_contents_delegate_qt.cpp b/src/core/web_contents_delegate_qt.cpp
-index db05fae4..d48294f7 100644
+index 40fc0934..4a1f5521 100644
 --- a/src/core/web_contents_delegate_qt.cpp
 +++ b/src/core/web_contents_delegate_qt.cpp
-@@ -120,7 +120,8 @@ content::WebContents *WebContentsDelegateQt::OpenURLFromTab(content::WebContents
+@@ -117,7 +117,8 @@ content::WebContents *WebContentsDelegateQt::OpenURLFromTab(content::WebContents
  {
      content::WebContents *target = source;
      if (params.disposition != WindowOpenDisposition::CURRENT_TAB) {
 -        QSharedPointer<WebContentsAdapter> targetAdapter = createWindow(0, params.disposition, gfx::Rect(), params.user_gesture);
 +        std::vector<base::string16> additional_features;
 +        QSharedPointer<WebContentsAdapter> targetAdapter = createWindow(0, params.disposition, gfx::Rect(), params.user_gesture, additional_features);
-         if (targetAdapter)
-             target = targetAdapter->webContents();
-     }
-@@ -174,10 +175,10 @@ void WebContentsDelegateQt::NavigationStateChanged(content::WebContents* source,
+         if (targetAdapter) {
+             if (!targetAdapter->isInitialized())
+                 targetAdapter->initialize(params.source_site_instance.get());
+@@ -212,10 +213,10 @@ void WebContentsDelegateQt::NavigationStateChanged(content::WebContents* source,
      }
  }
  
@@ -52,13 +52,13 @@ index db05fae4..d48294f7 100644
 +void WebContentsDelegateQt::AddNewContents(content::WebContents* source, content::WebContents* new_contents, WindowOpenDisposition disposition, const gfx::Rect& initial_pos, bool user_gesture, bool* was_blocked, std::vector<base::string16> additional_features)
  {
      Q_UNUSED(source)
--    QWeakPointer<WebContentsAdapter> newAdapter = createWindow(new_contents, disposition, initial_pos, user_gesture);
-+    QWeakPointer<WebContentsAdapter> newAdapter = createWindow(new_contents, disposition, initial_pos, user_gesture, additional_features);
+-    QSharedPointer<WebContentsAdapter> newAdapter = createWindow(new_contents, disposition, initial_pos, user_gesture);
++    QSharedPointer<WebContentsAdapter> newAdapter = createWindow(new_contents, disposition, initial_pos, user_gesture, additional_features);
+     if (newAdapter && !newAdapter->isInitialized())
+         newAdapter->loadDefault();
      if (was_blocked)
-         *was_blocked = !newAdapter;
- }
-@@ -501,11 +502,17 @@ void WebContentsDelegateQt::overrideWebPreferences(content::WebContents *, conte
-     m_viewClient->webEngineSettings()->overrideWebPreferences(webPreferences);
+@@ -535,11 +536,17 @@ void WebContentsDelegateQt::overrideWebPreferences(content::WebContents *webCont
+     m_viewClient->webEngineSettings()->overrideWebPreferences(webContents, webPreferences);
  }
  
 -QWeakPointer<WebContentsAdapter> WebContentsDelegateQt::createWindow(content::WebContents *new_contents, WindowOpenDisposition disposition, const gfx::Rect& initial_pos, bool user_gesture)
@@ -78,10 +78,10 @@ index db05fae4..d48294f7 100644
      // If the client didn't reference the adapter, it will be deleted now, and the weak pointer zeroed.
      return newAdapter;
 diff --git a/src/core/web_contents_delegate_qt.h b/src/core/web_contents_delegate_qt.h
-index 2ebdb2ff..a5d8cd3a 100644
+index 2ef87ccd..2dc5828d 100644
 --- a/src/core/web_contents_delegate_qt.h
 +++ b/src/core/web_contents_delegate_qt.h
-@@ -103,7 +103,7 @@ public:
+@@ -104,7 +104,7 @@ public:
      // WebContentsDelegate overrides
      content::WebContents *OpenURLFromTab(content::WebContents *source, const content::OpenURLParams &params) override;
      void NavigationStateChanged(content::WebContents* source, content::InvalidateTypes changed_flags) override;
@@ -91,7 +91,7 @@ index 2ebdb2ff..a5d8cd3a 100644
      void LoadProgressChanged(content::WebContents* source, double progress) override;
      void HandleKeyboardEvent(content::WebContents *source, const content::NativeWebKeyboardEvent &event) override;
 @@ -154,7 +154,7 @@ public:
-     WebEngineSettings *webEngineSettings() const;
+     WebContentsAdapter *webContentsAdapter() const;
  
  private:
 -    QWeakPointer<WebContentsAdapter> createWindow(content::WebContents *new_contents, WindowOpenDisposition disposition, const gfx::Rect& initial_pos, bool user_gesture);
@@ -152,10 +152,10 @@ index 9cc0f291..304c6c01 100644
  };
  
 diff --git a/src/webengine/api/qquickwebengineview.cpp b/src/webengine/api/qquickwebengineview.cpp
-index cb21f4b1..1b27511d 100644
+index fde7b40d..64817a3b 100644
 --- a/src/webengine/api/qquickwebengineview.cpp
 +++ b/src/webengine/api/qquickwebengineview.cpp
-@@ -565,7 +565,7 @@ void QQuickWebEngineViewPrivate::unhandledKeyEvent(QKeyEvent *event)
+@@ -461,7 +461,7 @@ void QQuickWebEngineViewPrivate::unhandledKeyEvent(QKeyEvent *event)
          QCoreApplication::sendEvent(q->parentItem(), event);
  }
  
@@ -164,7 +164,7 @@ index cb21f4b1..1b27511d 100644
  {
      Q_Q(QQuickWebEngineView);
      QQuickWebEngineNewViewRequest request;
-@@ -574,6 +574,7 @@ void QQuickWebEngineViewPrivate::adoptNewWindow(QSharedPointer<WebContentsAdapte
+@@ -470,6 +470,7 @@ void QQuickWebEngineViewPrivate::adoptNewWindow(QSharedPointer<WebContentsAdapte
      request.m_adapter = newWebContents;
      request.m_isUserInitiated = userGesture;
      request.m_requestedUrl = targetUrl;
@@ -173,23 +173,23 @@ index cb21f4b1..1b27511d 100644
      switch (disposition) {
      case WebContentsAdapterClient::NewForegroundTabDisposition:
 diff --git a/src/webengine/api/qquickwebengineview_p_p.h b/src/webengine/api/qquickwebengineview_p_p.h
-index 03d65580..baaca7fe 100644
+index 151d261d..1d180ea4 100644
 --- a/src/webengine/api/qquickwebengineview_p_p.h
 +++ b/src/webengine/api/qquickwebengineview_p_p.h
-@@ -109,7 +109,7 @@ public:
-     virtual void loadFinished(bool success, const QUrl &url, bool isErrorPage = false, int errorCode = 0, const QString &errorDescription = QString()) Q_DECL_OVERRIDE;
-     virtual void focusContainer() Q_DECL_OVERRIDE;
-     virtual void unhandledKeyEvent(QKeyEvent *event) Q_DECL_OVERRIDE;
--    virtual void adoptNewWindow(QSharedPointer<QtWebEngineCore::WebContentsAdapter> newWebContents, WindowOpenDisposition disposition, bool userGesture, const QRect &, const QUrl &targetUrl) Q_DECL_OVERRIDE;
-+    virtual void adoptNewWindow(QSharedPointer<QtWebEngineCore::WebContentsAdapter> newWebContents, WindowOpenDisposition disposition, bool userGesture, const QRect &, const QUrl &targetUrl, const QStringList &additionalFeatures) Q_DECL_OVERRIDE;
-     virtual bool isBeingAdopted() Q_DECL_OVERRIDE;
-     virtual void close() Q_DECL_OVERRIDE;
-     virtual void windowCloseRejected() Q_DECL_OVERRIDE;
+@@ -112,7 +112,7 @@ public:
+     void loadFinished(bool success, const QUrl &url, bool isErrorPage = false, int errorCode = 0, const QString &errorDescription = QString()) override;
+     void focusContainer() override;
+     void unhandledKeyEvent(QKeyEvent *event) override;
+-    void adoptNewWindow(QSharedPointer<QtWebEngineCore::WebContentsAdapter> newWebContents, WindowOpenDisposition disposition, bool userGesture, const QRect &, const QUrl &targetUrl) override;
++    void adoptNewWindow(QSharedPointer<QtWebEngineCore::WebContentsAdapter> newWebContents, WindowOpenDisposition disposition, bool userGesture, const QRect &, const QUrl &targetUrl, const QStringList &additionalFeatures) override;
+     bool isBeingAdopted() override;
+     void close() override;
+     void windowCloseRejected() override;
 diff --git a/src/webenginewidgets/api/qwebenginepage.cpp b/src/webenginewidgets/api/qwebenginepage.cpp
-index ac8e9c66..3de11aa4 100644
+index 8911c63c..a2239d9d 100644
 --- a/src/webenginewidgets/api/qwebenginepage.cpp
 +++ b/src/webenginewidgets/api/qwebenginepage.cpp
-@@ -385,11 +385,12 @@ void QWebEnginePagePrivate::unhandledKeyEvent(QKeyEvent *event)
+@@ -409,11 +409,12 @@ void QWebEnginePagePrivate::unhandledKeyEvent(QKeyEvent *event)
          QGuiApplication::sendEvent(view->parentWidget(), event);
  }
  
@@ -204,15 +204,15 @@ index ac8e9c66..3de11aa4 100644
      QWebEnginePage *newPage = q->createWindow(toWindowType(disposition));
      if (!newPage)
 diff --git a/src/webenginewidgets/api/qwebenginepage_p.h b/src/webenginewidgets/api/qwebenginepage_p.h
-index 12bad135..4eed6dd3 100644
+index dc7d02b7..67894c2b 100644
 --- a/src/webenginewidgets/api/qwebenginepage_p.h
 +++ b/src/webenginewidgets/api/qwebenginepage_p.h
-@@ -100,7 +100,7 @@ public:
-     virtual void loadFinished(bool success, const QUrl &url, bool isErrorPage = false, int errorCode = 0, const QString &errorDescription = QString()) Q_DECL_OVERRIDE;
-     virtual void focusContainer() Q_DECL_OVERRIDE;
-     virtual void unhandledKeyEvent(QKeyEvent *event) Q_DECL_OVERRIDE;
--    virtual void adoptNewWindow(QSharedPointer<QtWebEngineCore::WebContentsAdapter> newWebContents, WindowOpenDisposition disposition, bool userGesture, const QRect &initialGeometry, const QUrl &targetUrl) Q_DECL_OVERRIDE;
-+    virtual void adoptNewWindow(QSharedPointer<QtWebEngineCore::WebContentsAdapter> newWebContents, WindowOpenDisposition disposition, bool userGesture, const QRect &initialGeometry, const QUrl &targetUrl, const QStringList &additionalFeatures) Q_DECL_OVERRIDE;
+@@ -105,7 +105,7 @@ public:
+     void loadFinished(bool success, const QUrl &url, bool isErrorPage = false, int errorCode = 0, const QString &errorDescription = QString()) override;
+     void focusContainer() override;
+     void unhandledKeyEvent(QKeyEvent *event) override;
+-    void adoptNewWindow(QSharedPointer<QtWebEngineCore::WebContentsAdapter> newWebContents, WindowOpenDisposition disposition, bool userGesture, const QRect &initialGeometry, const QUrl &targetUrl) override;
++    void adoptNewWindow(QSharedPointer<QtWebEngineCore::WebContentsAdapter> newWebContents, WindowOpenDisposition disposition, bool userGesture, const QRect &initialGeometry, const QUrl &targetUrl, const QStringList &additionalFeatures) override;
      void adoptNewWindowImpl(QWebEnginePage *newPage,
              const QSharedPointer<QtWebEngineCore::WebContentsAdapter> &newWebContents,
              const QRect &initialGeometry);
