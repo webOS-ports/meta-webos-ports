@@ -1,7 +1,7 @@
-From d6348a5a7f2c288643fb5602e38a29a57b993b2a Mon Sep 17 00:00:00 2001
+From db21d2d1da571ee828bf55e7bf5e4db9ff563e26 Mon Sep 17 00:00:00 2001
 From: Christophe Chapuis <chris.chapuis@gmail.com>
 Date: Sat, 26 Sep 2015 22:26:24 +0200
-Subject: [PATCH 01/10] Add PalmServiceBridge to WebEngine
+Subject: [PATCH] Add PalmServiceBridge to WebEngine
 
 * Adapt PalmServiceBridge IDL for Chromium
 * Propagate PalmBridgeService related settings from host
@@ -11,23 +11,23 @@ Subject: [PATCH 01/10] Add PalmServiceBridge to WebEngine
 Signed-off-by: Christophe Chapuis <chris.chapuis@gmail.com>
 Signed-off-by: Martin Jansa <Martin.Jansa@gmail.com>
 ---
- .../public/common/common_param_traits_macros.h     |   3 +
- chromium/content/public/common/web_preferences.cc  |   3 +
- chromium/content/public/common/web_preferences.h   |   5 +
- chromium/content/renderer/render_view_impl.cc      |   3 +
- .../Source/core/exported/WebSettingsImpl.cpp       |  16 ++
- .../WebKit/Source/core/exported/WebSettingsImpl.h  |   3 +
- .../WebKit/Source/core/frame/Settings.json5        |  21 ++
- .../third_party/WebKit/Source/modules/BUILD.gn     |   1 +
- .../WebKit/Source/modules/modules_idl_files.gni    |   1 +
- .../WebKit/Source/modules/webos/BUILD.gn           |  13 +
- .../WebKit/Source/modules/webos/Logging.h          |  11 +
- .../WebKit/Source/modules/webos/LunaServiceMgr.cpp | 316 +++++++++++++++++++++
- .../WebKit/Source/modules/webos/LunaServiceMgr.h   |  53 ++++
- .../Source/modules/webos/PalmServiceBridge.cpp     | 300 +++++++++++++++++++
- .../Source/modules/webos/PalmServiceBridge.h       |  90 ++++++
- .../Source/modules/webos/PalmServiceBridge.idl     |  14 +
- .../third_party/WebKit/public/web/WebSettings.h    |   3 +
+ .../common/common_param_traits_macros.h       |   3 +
+ .../content/public/common/web_preferences.cc  |   3 +
+ .../content/public/common/web_preferences.h   |   5 +
+ chromium/content/renderer/render_view_impl.cc |   3 +
+ .../Source/core/exported/WebSettingsImpl.cpp  |  16 +
+ .../Source/core/exported/WebSettingsImpl.h    |   3 +
+ .../WebKit/Source/core/frame/Settings.json5   |  21 ++
+ .../WebKit/Source/modules/BUILD.gn            |   1 +
+ .../Source/modules/modules_idl_files.gni      |   1 +
+ .../WebKit/Source/modules/webos/BUILD.gn      |  13 +
+ .../WebKit/Source/modules/webos/Logging.h     |  11 +
+ .../Source/modules/webos/LunaServiceMgr.cpp   | 316 ++++++++++++++++++
+ .../Source/modules/webos/LunaServiceMgr.h     |  53 +++
+ .../modules/webos/PalmServiceBridge.cpp       | 300 +++++++++++++++++
+ .../Source/modules/webos/PalmServiceBridge.h  |  90 +++++
+ .../modules/webos/PalmServiceBridge.idl       |  14 +
+ .../WebKit/public/web/WebSettings.h           |   3 +
  17 files changed, 856 insertions(+)
  create mode 100644 chromium/third_party/WebKit/Source/modules/webos/BUILD.gn
  create mode 100644 chromium/third_party/WebKit/Source/modules/webos/Logging.h
@@ -38,13 +38,13 @@ Signed-off-by: Martin Jansa <Martin.Jansa@gmail.com>
  create mode 100644 chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.idl
 
 diff --git a/chromium/content/public/common/common_param_traits_macros.h b/chromium/content/public/common/common_param_traits_macros.h
-index e46d8b7..78688d9 100644
+index add74dc993..98e4eb471d 100644
 --- a/chromium/content/public/common/common_param_traits_macros.h
 +++ b/chromium/content/public/common/common_param_traits_macros.h
-@@ -256,6 +256,9 @@ IPC_STRUCT_TRAITS_BEGIN(content::WebPreferences)
-   IPC_STRUCT_TRAITS_MEMBER(media_controls_enabled)
+@@ -241,6 +241,9 @@ IPC_STRUCT_TRAITS_BEGIN(content::WebPreferences)
    IPC_STRUCT_TRAITS_MEMBER(do_not_update_selection_on_mutating_selection_range)
    IPC_STRUCT_TRAITS_MEMBER(autoplay_policy)
+   IPC_STRUCT_TRAITS_MEMBER(low_priority_iframes_threshold)
 +  IPC_STRUCT_TRAITS_MEMBER(luneosPriviledged)
 +  IPC_STRUCT_TRAITS_MEMBER(palmServiceBridgeEnabled)
 +  IPC_STRUCT_TRAITS_MEMBER(luneosAppIdentifier)
@@ -52,13 +52,13 @@ index e46d8b7..78688d9 100644
  
  IPC_STRUCT_TRAITS_BEGIN(blink::mojom::WindowFeatures)
 diff --git a/chromium/content/public/common/web_preferences.cc b/chromium/content/public/common/web_preferences.cc
-index 2262042..1bf7eab 100644
+index a8d1c1b354..1bbf5bc8d5 100644
 --- a/chromium/content/public/common/web_preferences.cc
 +++ b/chromium/content/public/common/web_preferences.cc
-@@ -232,6 +232,9 @@ WebPreferences::WebPreferences()
- #else
-       autoplay_policy(AutoplayPolicy::kNoUserGestureRequired) {
- #endif  // defined(OS_ANDROID)
+@@ -241,6 +241,9 @@ WebPreferences::WebPreferences()
+       autoplay_policy(AutoplayPolicy::kNoUserGestureRequired),
+ #endif
+       low_priority_iframes_threshold(net::EFFECTIVE_CONNECTION_TYPE_UNKNOWN) {
 +      luneosPriviledged(false),
 +      palmServiceBridgeEnabled(false),
 +      luneosAppIdentifier("") {
@@ -66,12 +66,12 @@ index 2262042..1bf7eab 100644
        base::ASCIIToUTF16("Times New Roman");
    fixed_font_family_map[kCommonScript] = base::ASCIIToUTF16("Courier New");
 diff --git a/chromium/content/public/common/web_preferences.h b/chromium/content/public/common/web_preferences.h
-index bcd55e6..3be2cad 100644
+index 1c2f3615c8..8f782de58b 100644
 --- a/chromium/content/public/common/web_preferences.h
 +++ b/chromium/content/public/common/web_preferences.h
-@@ -288,6 +288,11 @@ struct CONTENT_EXPORT WebPreferences {
-   // Defines the current autoplay policy.
-   AutoplayPolicy autoplay_policy;
+@@ -304,6 +304,11 @@ struct CONTENT_EXPORT WebPreferences {
+   // lowest priority.
+   net::EffectiveConnectionType low_priority_iframes_threshold;
  
 +  // Follwing settings are for LuneOS usage
 +  bool luneosPriviledged;
@@ -82,10 +82,10 @@ index bcd55e6..3be2cad 100644
    // chrome, except for the cases where it would require lots of extra work for
    // the embedder to use the same default value.
 diff --git a/chromium/content/renderer/render_view_impl.cc b/chromium/content/renderer/render_view_impl.cc
-index 22d5f83..148b6c3 100644
+index d1fc11429d..bc24303040 100644
 --- a/chromium/content/renderer/render_view_impl.cc
 +++ b/chromium/content/renderer/render_view_impl.cc
-@@ -982,6 +982,9 @@ void RenderView::ApplyWebPreferences(const WebPreferences& prefs,
+@@ -952,6 +952,9 @@ void RenderView::ApplyWebPreferences(const WebPreferences& prefs,
  #else   // defined(OS_ANDROID)
    settings->SetFullscreenSupported(prefs.fullscreen_supported);
  #endif  // defined(OS_ANDROID)
@@ -96,11 +96,11 @@ index 22d5f83..148b6c3 100644
    switch (prefs.autoplay_policy) {
      case AutoplayPolicy::kNoUserGestureRequired:
 diff --git a/chromium/third_party/WebKit/Source/core/exported/WebSettingsImpl.cpp b/chromium/third_party/WebKit/Source/core/exported/WebSettingsImpl.cpp
-index cec1daf..b00ce70 100644
+index 88b347207e..19bac891e4 100644
 --- a/chromium/third_party/WebKit/Source/core/exported/WebSettingsImpl.cpp
 +++ b/chromium/third_party/WebKit/Source/core/exported/WebSettingsImpl.cpp
-@@ -702,4 +702,20 @@ void WebSettingsImpl::SetDoNotUpdateSelectionOnMutatingSelectionRange(
-   settings_->SetDoNotUpdateSelectionOnMutatingSelectionRange(enabled);
+@@ -710,4 +710,20 @@ void WebSettingsImpl::SetLowPriorityIframesThreshold(
+   settings_->SetLowPriorityIframesThreshold(effective_connection_type);
  }
  
 +// LuneOS specific settings
@@ -121,19 +121,19 @@ index cec1daf..b00ce70 100644
 +
  }  // namespace blink
 diff --git a/chromium/third_party/WebKit/Source/core/exported/WebSettingsImpl.h b/chromium/third_party/WebKit/Source/core/exported/WebSettingsImpl.h
-index 92dbea6..35fb1cb 100644
+index 9c2447112a..1e73125dc1 100644
 --- a/chromium/third_party/WebKit/Source/core/exported/WebSettingsImpl.h
 +++ b/chromium/third_party/WebKit/Source/core/exported/WebSettingsImpl.h
-@@ -113,6 +113,8 @@ class CORE_EXPORT WebSettingsImpl final
-   void SetShouldReuseGlobalForUnownedMainFrame(bool) override;
+@@ -113,6 +113,8 @@ class CORE_EXPORT WebSettingsImpl final : public WebSettings {
    void SetProgressBarCompletion(ProgressBarCompletion) override;
+   void SetSavePreviousDocumentResources(SavePreviousDocumentResources) override;
    void SetLocalStorageEnabled(bool) override;
 +  void SetLuneosAppIdentifier(const WebString&) override;
 +  void SetLuneosPriviledged(bool) override;
    void SetMainFrameClipsContent(bool) override;
    void SetMainFrameResizesAreOrientationChanges(bool) override;
    void SetMaxTouchPoints(int) override;
-@@ -126,6 +128,7 @@ class CORE_EXPORT WebSettingsImpl final
+@@ -126,6 +128,7 @@ class CORE_EXPORT WebSettingsImpl final : public WebSettings {
    void SetMockScrollbarsEnabled(bool) override;
    void SetHideScrollbars(bool) override;
    void SetOfflineWebApplicationCacheEnabled(bool) override;
@@ -142,11 +142,11 @@ index 92dbea6..35fb1cb 100644
    void SetPasswordEchoDurationInSeconds(double) override;
    void SetPasswordEchoEnabled(bool) override;
 diff --git a/chromium/third_party/WebKit/Source/core/frame/Settings.json5 b/chromium/third_party/WebKit/Source/core/frame/Settings.json5
-index 3f900d4..f9135c5 100644
+index 26091ba8de..58dbffe81f 100644
 --- a/chromium/third_party/WebKit/Source/core/frame/Settings.json5
 +++ b/chromium/third_party/WebKit/Source/core/frame/Settings.json5
-@@ -858,6 +858,27 @@
-       initial: false,
+@@ -845,6 +845,27 @@
+       type: "PassiveListenerDefault",
      },
  
 +    // LuneOS specific #####
@@ -174,32 +174,32 @@ index 3f900d4..f9135c5 100644
      // indicates that the scanner will be used, but no preloads issued.
      {
 diff --git a/chromium/third_party/WebKit/Source/modules/BUILD.gn b/chromium/third_party/WebKit/Source/modules/BUILD.gn
-index de26837..ee8178f 100644
+index d33e591663..d3fa6ccb8a 100644
 --- a/chromium/third_party/WebKit/Source/modules/BUILD.gn
 +++ b/chromium/third_party/WebKit/Source/modules/BUILD.gn
-@@ -154,6 +154,7 @@ target("jumbo_" + modules_target_type, "modules") {
+@@ -153,6 +153,7 @@ target("jumbo_" + modules_target_type, "modules") {
+     "//third_party/WebKit/Source/modules/vr",
      "//third_party/WebKit/Source/modules/wake_lock",
      "//third_party/WebKit/Source/modules/webaudio",
-     "//third_party/WebKit/Source/modules/webauth",
 +    "//third_party/WebKit/Source/modules/webos",
      "//third_party/WebKit/Source/modules/webdatabase",
      "//third_party/WebKit/Source/modules/webgl",
      "//third_party/WebKit/Source/modules/webmidi",
 diff --git a/chromium/third_party/WebKit/Source/modules/modules_idl_files.gni b/chromium/third_party/WebKit/Source/modules/modules_idl_files.gni
-index f0ae8d0..4613483 100644
+index 7f9dee7f33..b4feb6d271 100644
 --- a/chromium/third_party/WebKit/Source/modules/modules_idl_files.gni
 +++ b/chromium/third_party/WebKit/Source/modules/modules_idl_files.gni
-@@ -386,6 +386,7 @@ modules_idl_files =
-                     "webmidi/MIDIOutput.idl",
-                     "webmidi/MIDIOutputMap.idl",
-                     "webmidi/MIDIPort.idl",
-+                    "webos/PalmServiceBridge.idl",
-                     "websockets/CloseEvent.idl",
-                     "websockets/WebSocket.idl",
-                     "webusb/USB.idl",
+@@ -394,6 +394,7 @@ modules_idl_files =
+           "webmidi/MIDIOutput.idl",
+           "webmidi/MIDIOutputMap.idl",
+           "webmidi/MIDIPort.idl",
++          "webos/PalmServiceBridge.idl",
+           "websockets/CloseEvent.idl",
+           "websockets/WebSocket.idl",
+           "webusb/USB.idl",
 diff --git a/chromium/third_party/WebKit/Source/modules/webos/BUILD.gn b/chromium/third_party/WebKit/Source/modules/webos/BUILD.gn
 new file mode 100644
-index 0000000..effd211
+index 0000000000..effd211870
 --- /dev/null
 +++ b/chromium/third_party/WebKit/Source/modules/webos/BUILD.gn
 @@ -0,0 +1,13 @@
@@ -218,7 +218,7 @@ index 0000000..effd211
 +}
 diff --git a/chromium/third_party/WebKit/Source/modules/webos/Logging.h b/chromium/third_party/WebKit/Source/modules/webos/Logging.h
 new file mode 100644
-index 0000000..d472ae2
+index 0000000000..d472ae299d
 --- /dev/null
 +++ b/chromium/third_party/WebKit/Source/modules/webos/Logging.h
 @@ -0,0 +1,11 @@
@@ -235,7 +235,7 @@ index 0000000..d472ae2
 +#endif
 diff --git a/chromium/third_party/WebKit/Source/modules/webos/LunaServiceMgr.cpp b/chromium/third_party/WebKit/Source/modules/webos/LunaServiceMgr.cpp
 new file mode 100644
-index 0000000..55feab8
+index 0000000000..55feab88c0
 --- /dev/null
 +++ b/chromium/third_party/WebKit/Source/modules/webos/LunaServiceMgr.cpp
 @@ -0,0 +1,316 @@
@@ -557,7 +557,7 @@ index 0000000..55feab8
 +};
 diff --git a/chromium/third_party/WebKit/Source/modules/webos/LunaServiceMgr.h b/chromium/third_party/WebKit/Source/modules/webos/LunaServiceMgr.h
 new file mode 100644
-index 0000000..d167f70
+index 0000000000..d167f70e95
 --- /dev/null
 +++ b/chromium/third_party/WebKit/Source/modules/webos/LunaServiceMgr.h
 @@ -0,0 +1,53 @@
@@ -616,7 +616,7 @@ index 0000000..d167f70
 +#endif
 diff --git a/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.cpp b/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.cpp
 new file mode 100644
-index 0000000..22c160e
+index 0000000000..22c160e9a2
 --- /dev/null
 +++ b/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.cpp
 @@ -0,0 +1,300 @@
@@ -922,7 +922,7 @@ index 0000000..22c160e
 +} // namespace blink
 diff --git a/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.h b/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.h
 new file mode 100644
-index 0000000..4984a09
+index 0000000000..4984a091fd
 --- /dev/null
 +++ b/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.h
 @@ -0,0 +1,90 @@
@@ -1018,7 +1018,7 @@ index 0000000..4984a09
 +#endif
 diff --git a/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.idl b/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.idl
 new file mode 100644
-index 0000000..43e1fdd
+index 0000000000..43e1fdd748
 --- /dev/null
 +++ b/chromium/third_party/WebKit/Source/modules/webos/PalmServiceBridge.idl
 @@ -0,0 +1,14 @@
@@ -1037,19 +1037,19 @@ index 0000000..43e1fdd
 +    attribute ServiceCallback onservicecallback;
 +};
 diff --git a/chromium/third_party/WebKit/public/web/WebSettings.h b/chromium/third_party/WebKit/public/web/WebSettings.h
-index 39e2ecc..d5a43a4 100644
+index f3bbc2322f..507184bfcf 100644
 --- a/chromium/third_party/WebKit/public/web/WebSettings.h
 +++ b/chromium/third_party/WebKit/public/web/WebSettings.h
-@@ -201,6 +201,8 @@ class WebSettings {
-   virtual void SetShouldReuseGlobalForUnownedMainFrame(bool) = 0;
-   virtual void SetProgressBarCompletion(ProgressBarCompletion) = 0;
+@@ -204,6 +204,8 @@ class WebSettings {
+   virtual void SetSavePreviousDocumentResources(
+       SavePreviousDocumentResources) = 0;
    virtual void SetLocalStorageEnabled(bool) = 0;
 +  virtual void SetLuneosAppIdentifier(const WebString&) = 0;
 +  virtual void SetLuneosPriviledged(bool) = 0;
    virtual void SetMainFrameClipsContent(bool) = 0;
    virtual void SetMainFrameResizesAreOrientationChanges(bool) = 0;
    virtual void SetMaxTouchPoints(int) = 0;
-@@ -214,6 +216,7 @@ class WebSettings {
+@@ -217,6 +219,7 @@ class WebSettings {
    virtual void SetMockScrollbarsEnabled(bool) = 0;
    virtual void SetHideScrollbars(bool) = 0;
    virtual void SetOfflineWebApplicationCacheEnabled(bool) = 0;
@@ -1057,6 +1057,3 @@ index 39e2ecc..d5a43a4 100644
    virtual void SetPassiveEventListenerDefault(PassiveEventListenerDefault) = 0;
    virtual void SetPasswordEchoDurationInSeconds(double) = 0;
    virtual void SetPasswordEchoEnabled(bool) = 0;
--- 
-2.7.4
-
