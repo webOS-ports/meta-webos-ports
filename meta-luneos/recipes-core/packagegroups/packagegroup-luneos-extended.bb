@@ -134,9 +134,16 @@ LIBHYBRIS_RDEPENDS = " \
 MEMNOTIFY_RDEPENDS = " \
     memnotify-module \
 "
-
 # NOTE: For kernels build outside of OE we can't add memnotify support and therefor have to ship the module with the kernel package directly.
 # NOTE: For kernels build with OE, the kernel tree would need to have a patch applied in order to make si_swapinfo exportable as per http://lkml.iu.edu/hypermail//linux/kernel/1201.2/00719.html
+
+ANBOX_RDEPENDS = " \
+    anbox \
+    kernel-module-squashfs \
+    kernel-module-ashmem-linux \
+    kernel-module-binder-linux \
+"
+# Note: Anbox requires kernel >= 3.18 !
 
 RDEPENDS_${PN}_append_tuna = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
 RDEPENDS_${PN}_append_grouper = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
@@ -159,7 +166,7 @@ QEMU_RDEPENDS = " \
 "
 
 RDEPENDS_${PN}_append_qemux86 = " ${QEMU_RDEPENDS}"
-RDEPENDS_${PN}_append_qemux86-64 = " ${QEMU_RDEPENDS}"
+RDEPENDS_${PN}_append_qemux86-64 = " ${QEMU_RDEPENDS} ${ANBOX_RDEPENDS}"
 
 RDEPENDS_${PN}_append_arm = " \
     crash-handler \
