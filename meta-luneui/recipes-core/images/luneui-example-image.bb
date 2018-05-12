@@ -33,3 +33,7 @@ IMAGE_INSTALL_append_qemuall = " \
     qt5-plugin-generic-vboxtouch \
     glmark2 \
 "
+
+IMAGE_INSTALL_append_qemux86-64 = " \
+    anbox \
+"
