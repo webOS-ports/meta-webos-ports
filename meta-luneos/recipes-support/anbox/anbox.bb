@@ -10,8 +10,10 @@ SECTION = "webos/support"
 SRCREV = "4a5cb84231bcff0e3ebe44f6dcd6accf8bcf2e92"
 PV = "3.0+git${SRCPV}"
 
-DEPENDS += "dbus-cpp libsdl2 libsdl2-image lxc glm protobuf protobuf-native gtest"
-RDEPENDS_${PN} += " kernel-module-squashfs ashmem binder"
+DEPENDS += "dbus-cpp libsdl2 libsdl2-image lxc glm protobuf protobuf-native gtest virtual/egl"
+RDEPENDS_${PN} += " kernel-module-squashfs"
+
+RDEPENDS_${PN}_append_qemux86-64 = " ashmem binder"
 
 SRC_URI = "git://github.com/anbox/anbox \
     file://0001-Fix-dependencies-for-LuneOS.patch \
@@ -20,6 +22,7 @@ SRC_URI = "git://github.com/anbox/anbox \
     file://0004-Fix-build-with-Wayland-SDL2.patch \
     file://0005-Fix-invalid-method-overload.patch \
     file://0006-Exclude-GLX-translator-from-build.patch \
+    file://0007-Fix-build-on-LuneOS-with-libhybris.patch \
     file://anbox-container-manager.service \
     file://anbox-session-manager.service \
     file://anbox-bridge.network \
