@@ -8,7 +8,6 @@ LIC_FILES_CHKSUM = "file://COPYING.GPL;md5=f27defe1e96c2e1ecd4e0c9be8967949"
 require anbox.inc
 
 DEPENDS += "dbus-cpp libsdl2 libsdl2-image lxc glm protobuf protobuf-native gtest virtual/egl"
-RDEPENDS_${PN} += " kernel-module-squashfs"
 
 RDEPENDS_${PN}_append_qemux86-64 = " ashmem binder"
 
