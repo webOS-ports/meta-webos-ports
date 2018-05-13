@@ -139,12 +139,12 @@ MEMNOTIFY_RDEPENDS = " \
 
 ANBOX_RDEPENDS = " \
     anbox anbox-data \
-    kernel-module-squashfs \
 "
-# ashmem and binder are directly included in android-flavored kernels
+# these modules are directly included in android-flavored kernels
 ANBOX_RDEPENDS_append_qemux86-64 = " \
     kernel-module-ashmem-linux \
     kernel-module-binder-linux \
+    kernel-module-squashfs \
 "
 # Note: Anbox requires kernel >= 3.18 !
 
