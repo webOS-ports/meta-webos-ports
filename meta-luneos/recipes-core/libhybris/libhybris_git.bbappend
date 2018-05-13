@@ -1,5 +1,11 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
+SRC_URI += " \
+    file://0001-Fix_test_sensors_printf.patch;striplevel=2 \
+    file://0002-tests-make-test_camera-use-wayland.patch;striplevel=2 \
+    file://0003-change-default-wayland-display.patch;striplevel=2 \
+  "
+
 DEPENDS += "wayland"
 EXTRA_OECONF += " \
     --enable-wayland \
