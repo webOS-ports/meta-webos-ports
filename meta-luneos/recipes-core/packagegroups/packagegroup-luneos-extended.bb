@@ -140,6 +140,9 @@ MEMNOTIFY_RDEPENDS = " \
 ANBOX_RDEPENDS = " \
     anbox \
     kernel-module-squashfs \
+"
+# ashmem and binder are directly included in android-flavored kernels
+ANBOX_RDEPENDS_append_qemux86-64 = " \
     kernel-module-ashmem-linux \
     kernel-module-binder-linux \
 "
@@ -148,7 +151,7 @@ ANBOX_RDEPENDS = " \
 RDEPENDS_${PN}_append_tuna = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
 RDEPENDS_${PN}_append_grouper = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
 RDEPENDS_${PN}_append_mako = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
-RDEPENDS_${PN}_append_hammerhead = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
+RDEPENDS_${PN}_append_hammerhead = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS} ${ANBOX_RDEPENDS}"
 RDEPENDS_${PN}_append_tenderloin = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
 RDEPENDS_${PN}_append_mido = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
 RDEPENDS_${PN}_append_athene = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
