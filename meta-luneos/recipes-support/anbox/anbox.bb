@@ -7,8 +7,10 @@ LIC_FILES_CHKSUM = "file://COPYING.GPL;md5=f27defe1e96c2e1ecd4e0c9be8967949"
 
 require anbox.inc
 
-DEPENDS += "dbus-cpp libsdl2 libsdl2-image lxc glm protobuf protobuf-native gtest"
-RDEPENDS_${PN} += " kernel-module-squashfs ashmem binder"
+DEPENDS += "dbus-cpp libsdl2 libsdl2-image lxc glm protobuf protobuf-native gtest virtual/egl"
+RDEPENDS_${PN} += " kernel-module-squashfs"
+
+RDEPENDS_${PN}_append_qemux86-64 = " ashmem binder"
 
 SRC_URI += " \
            file://0001-Fix-dependencies-for-LuneOS.patch \
@@ -17,6 +19,7 @@ SRC_URI += " \
 	   file://0004-Fix-build-with-Wayland-SDL2.patch \
 	   file://0005-Fix-invalid-method-overload.patch \
 	   file://0006-Exclude-GLX-translator-from-build.patch \
+	   file://0007-Fix-build-on-LuneOS-with-libhybris.patch \
 	   file://anbox-container-manager.service \
 	   file://anbox-session-manager.service \
 	   file://anbox-bridge.network \
