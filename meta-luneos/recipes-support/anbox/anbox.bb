@@ -11,9 +11,18 @@ SRCREV = "4a5cb84231bcff0e3ebe44f6dcd6accf8bcf2e92"
 PV = "3.0+git${SRCPV}"
 
 DEPENDS += "dbus-cpp libsdl2 libsdl2-image lxc glm protobuf protobuf-native gtest virtual/egl"
-RDEPENDS_${PN} += " kernel-module-squashfs"
 
-RDEPENDS_${PN}_append_qemux86-64 = " ashmem binder"
+RDEPENDS_${PN} += "anbox-data"
+
+# these modules are directly included in android-flavored kernels
+# Note: Anbox requires kernel >= 3.18 !
+RRECOMMENDS_${PN} += " \
+    ashmem \
+    binder \
+    kernel-module-ashmem-linux \
+    kernel-module-binder-linux \
+    kernel-module-squashfs \
+"
 
 SRC_URI = "git://github.com/anbox/anbox \
     file://0001-Fix-dependencies-for-LuneOS.patch \
