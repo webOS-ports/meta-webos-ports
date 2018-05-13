@@ -138,7 +138,7 @@ MEMNOTIFY_RDEPENDS = " \
 # NOTE: For kernels build with OE, the kernel tree would need to have a patch applied in order to make si_swapinfo exportable as per http://lkml.iu.edu/hypermail//linux/kernel/1201.2/00719.html
 
 ANBOX_RDEPENDS = " \
-    anbox \
+    anbox anbox-data \
     kernel-module-squashfs \
 "
 # ashmem and binder are directly included in android-flavored kernels
