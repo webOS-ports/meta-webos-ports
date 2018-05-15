@@ -53,6 +53,10 @@ EXTRA_OECONF += "--enable-log-src-basename"
 
 CFLAGS_append = " -Wno-error=deprecated-declarations"
 
+EXTRA_OECONF += "--disable-werror"
+# this won't work for < gcc8
+# CFLAGS_append = " -Wno-error=stringop-overflow="
+
 PACKAGECONFIG ??= "templates \
     ${@bb.utils.contains('DISTRO_FEATURES', 'selinux', 'selinux', '', d)} \
 "
