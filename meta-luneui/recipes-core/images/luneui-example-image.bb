@@ -33,4 +33,12 @@ IMAGE_INSTALL_append_qemuall = " \
     weston \
     weston-init \
     weston-examples \
+    anbox \
+    anbox-data \
+"
+
+IMAGE_INSTALL_append_qemux86-64 = " \
+    kernel-module-ashmem-linux \
+    kernel-module-binder-linux \
+    kernel-module-squashfs \
 "
