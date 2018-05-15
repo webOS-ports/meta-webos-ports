@@ -1,5 +1,2 @@
-FILESEXTRAPATHS_prepend := "${THISDIR}/${BPN}:"
-SRC_URI += " \
-    file://defconfig \
-    file://video.cfg \
-"
+FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
+SRC_URI += "file://fragment.cfg"
