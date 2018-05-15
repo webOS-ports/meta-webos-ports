@@ -32,4 +32,12 @@ IMAGE_INSTALL += " \
 IMAGE_INSTALL_append_qemuall = " \
     ${MESA_PKGS} \
     qt5-plugin-generic-vboxtouch \
+    anbox \
+    anbox-data \
+"
+
+IMAGE_INSTALL_append_qemux86-64 = " \
+    kernel-module-ashmem-linux \
+    kernel-module-binder-linux \
+    kernel-module-squashfs \
 "
