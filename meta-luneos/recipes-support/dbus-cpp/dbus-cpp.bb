@@ -21,5 +21,7 @@ EXTRA_OECMAKE += "-DDBUS_CPP_VERSION_MAJOR=5 -DDBUS_CPP_VERSION_MINOR=0 -DDBUS_C
 inherit cmake pkgconfig
 
 do_configure_prepend() {
-  echo " " > ${S}/tests/CMakeLists.txt
+    echo " " > ${S}/tests/CMakeLists.txt
 }
+
+SRC_URI += "file://0001-boost-asio-1-66-build-issue-patch.patch"
