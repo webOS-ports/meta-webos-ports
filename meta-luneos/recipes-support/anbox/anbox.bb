@@ -19,6 +19,7 @@ SRC_URI += " \
 	   file://0005-Fix-invalid-method-overload.patch \
 	   file://0006-Exclude-GLX-translator-from-build.patch \
 	   file://0007-Fix-build-on-LuneOS-with-libhybris.patch \
+           file://0001-GLcommon-add-dependency-on-GLHeaders.patch \
 	   file://anbox-container-manager.service \
 	   file://anbox-session-manager.service \
 	   file://anbox-bridge.network \
