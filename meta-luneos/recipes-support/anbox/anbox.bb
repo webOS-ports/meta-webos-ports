@@ -23,6 +23,7 @@ SRC_URI = "git://github.com/anbox/anbox \
     file://0005-Fix-invalid-method-overload.patch \
     file://0006-Exclude-GLX-translator-from-build.patch \
     file://0007-Fix-build-on-LuneOS-with-libhybris.patch \
+    file://0008-GLcommon-add-dependency-on-GLHeaders.patch \
     file://anbox-container-manager.service \
     file://anbox-session-manager.service \
     file://anbox-bridge.network \
