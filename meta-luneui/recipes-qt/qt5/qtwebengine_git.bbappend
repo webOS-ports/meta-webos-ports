@@ -30,16 +30,13 @@ SRC_URI += " \
     file://0017-gn_generator-fix-debug-build.patch \
     file://0018-Add-LuneOS-specific-switches.patch \
     file://chromium/0001-Add-PalmServiceBridge-to-WebEngine.patch;patchdir=src/3rdparty \
-    file://chromium/0002-PalmServiceBridge-adapt-to-Chromium-53-code-base.patch;patchdir=src/3rdparty \
-    file://chromium/0003-WebContents-provide-additional-features-from-window..patch;patchdir=src/3rdparty \
-    file://chromium/0004-Store-the-additional-window-features-related-to-Lune.patch;patchdir=src/3rdparty \
-    file://chromium/0005-WindowFeatures-Chrome-lower-the-minimum-height-to-5.patch;patchdir=src/3rdparty \
-    file://chromium/0006-Enable-password-echo.patch;patchdir=src/3rdparty \
-    file://chromium/0007-storage-browser-quota-workaround-for-crash-on-cache-.patch;patchdir=src/3rdparty \
-    file://chromium/0008-html.css-themeWin.css-Add-Prelude-as-default-font-in.patch;patchdir=src/3rdparty \
-    file://chromium/0010-Update-additional-params-from-Chromium-53-56.patch;patchdir=src/3rdparty \
-    file://chromium/0011-Fix-WebGL2-Textures.patch;patchdir=src/3rdparty \
-    "
+    file://chromium/0002-WebContents-provide-additional-features-from-window..patch;patchdir=src/3rdparty \
+    file://chromium/0003-WindowFeatures-Chrome-lower-the-minimum-height-to-5.patch;patchdir=src/3rdparty \
+    file://chromium/0004-Enable-password-echo.patch;patchdir=src/3rdparty \
+    file://chromium/0005-storage-browser-quota-workaround-for-crash-on-cache-.patch;patchdir=src/3rdparty \
+    file://chromium/0006-html.css-themeWin.css-Add-Prelude-as-default-font-in.patch;patchdir=src/3rdparty \
+    file://chromium/0007-Fix-WebGL2-Textures.patch;patchdir=src/3rdparty \
+"
 
 do_install_append() {
     #Create the chromium folder already so users can right away push the required plugins there
