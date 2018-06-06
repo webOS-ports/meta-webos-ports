@@ -35,7 +35,7 @@ SRC_URI += " \
     file://chromium/0004-Enable-password-echo.patch;patchdir=src/3rdparty \
     file://chromium/0005-storage-browser-quota-workaround-for-crash-on-cache-.patch;patchdir=src/3rdparty \
     file://chromium/0006-html.css-themeWin.css-Add-Prelude-as-default-font-in.patch;patchdir=src/3rdparty \
-    file://chromium/0007-Fix-WebGL2-Textures.patch;patchdir=src/3rdparty \
+    file://chromium/0007-Fix-webGL2-Textures.patch;patchdir=src/3rdparty \
 "
 
 do_install_append() {
