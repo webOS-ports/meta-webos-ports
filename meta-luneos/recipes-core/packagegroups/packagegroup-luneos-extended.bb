@@ -29,7 +29,7 @@ RDEPENDS_${PN} = " \
   voicecall \
   webos-connman-adapter \
   webos-telephonyd \
-  wireless-tools \
+  iw \
   \
   bluez5 \
   \
