@@ -8,7 +8,9 @@ DEPENDS = "pidgin intltool-native glib-2.0-native"
 inherit pkgconfig
 inherit autotools
 
-SRC_URI = "${SOURCEFORGE_MIRROR}/sipe/pidgin-sipe-${PV}.tar.xz"
+SRC_URI = "${SOURCEFORGE_MIRROR}/sipe/pidgin-sipe-${PV}.tar.xz \
+    file://gcc8.patch \
+"
 SRC_URI[md5sum] = "63795d4171afcae7a7ebed37e10b8230"
 SRC_URI[sha256sum] = "3f5092b22bb7638a8945484b2b538c58b4d4fcf913d4b86a5ece1107d28a5154"
 
