@@ -7,7 +7,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "jemalloc db8 boost curl libpalmsocket libsandbox pmloglib icu json-c glib-2.0 luna-service2"
 
 PV = "2.0.0-99+git${SRCPV}"
-SRCREV = "e4e26323af88dc92e2bd722b9a5756d510c09f25"
+SRCREV = "adce42b73ffa905e5c4ec125843e7f94769073c2"
 
 inherit webos_ports_fork_repo
 inherit webos_cmake
