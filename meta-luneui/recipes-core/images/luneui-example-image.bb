@@ -31,8 +31,6 @@ IMAGE_INSTALL += " \
 
 IMAGE_INSTALL_append_qemuall = " \
     ${MESA_PKGS} \
-    vboxguestdrivers \
-    v86d \
     qt5-plugin-generic-vboxtouch \
     anbox \
     anbox-data \
