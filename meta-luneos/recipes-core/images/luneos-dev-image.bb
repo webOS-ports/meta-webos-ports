@@ -22,7 +22,6 @@ MESA_PKGS = " \
     mesa \
     libgles1-mesa \
     libglapi \
-    libwayland-egl \
 "
 
 IMAGE_INSTALL_append = " \
