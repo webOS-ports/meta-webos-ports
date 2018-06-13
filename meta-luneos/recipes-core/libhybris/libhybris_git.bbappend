@@ -11,3 +11,8 @@ EXTRA_OECONF_append_aarch64 = " \
     --enable-arch=arm64 \
 "
 SRCREV = "3cda04985dab5f46d4c0f2067d2aab61362ee4b7"
+
+do_install_append() {
+    rm -rvf ${D}/${libdir}/libwayland-egl*
+    rm -rvf ${D}/${libdir}/pkgconfig/wayland-egl*
+}
