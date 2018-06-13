@@ -11,7 +11,6 @@ MESA_PKGS = " \
     mesa-megadriver \
     libgles1-mesa \
     libglapi \
-    libwayland-egl \
 "
 
 IMAGE_INSTALL += " \
