@@ -17,8 +17,8 @@ DEPENDS = "maliit-framework-qt5 hunspell presage luna-service2 presage-native"
 RDEPENDS_${PN} += "qtsvg-plugins qtmultimedia-qmlplugins"
 RRECOMMENDS_${PN} += "hunspell-dictionaries"
 
-SRCREV = "3df4f4492628d86b301a3ac7057c69a65f04d9cf"
-PV = "0.99.0+git${SRCPV}"
+SRCREV = "bccf23d49df11723f857fb951a67f9da36592e19"
+PV = "0.99.1+git${SRCPV}"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     file://0001-make-it-compatible-with-newer-hunspell.patch \
