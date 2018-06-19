@@ -1,4 +1,5 @@
 # Copyright (c) 2013 LG Electronics, Inc.
+FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
 AUTHOR = "Herb Kuta <herb.kuta@lge.com>"
 

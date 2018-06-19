@@ -12,7 +12,7 @@ RDEPENDS_${PN} += " \
 "
 
 PV = "0.4.0-1+git${SRCPV}"
-SRCREV = "fb3e6f9ca228bddd6d333ae901f56896c33856b7"
+SRCREV = "d2b063a42aceb55c9f996a9f97fa5ac50cd782fe"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
@@ -23,5 +23,6 @@ inherit webos_ports_repo
 inherit webos_cmake_qt5
 inherit webos_filesystem_paths
 inherit webos_systemd
+
 
 FILES_${PN} += "${webos_frameworksdir}"

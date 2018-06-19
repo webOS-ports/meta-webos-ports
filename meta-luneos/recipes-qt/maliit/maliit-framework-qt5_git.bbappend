@@ -1,7 +1,6 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 SRC_URI += " \
     file://0001-Use-dbus-system-bus-instead-of-session-bus-for-dbus-.patch \
-    file://0002-Set-XDG_RUNTIME_DIR-inside-maliit-server-statically.patch \
     file://0003-Add-webos-platform-implementation-to-set-correct-win.patch \
     file://maliit-server.conf \
     file://maliit-server.service \
