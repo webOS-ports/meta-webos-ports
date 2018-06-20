@@ -7,7 +7,7 @@ LIC_FILES_CHKSUM = " \
 "
 
 PV = "5.8.0+gitr${SRCPV}"
-SRCREV = "cfcaa70dc244207efb522e511be6ee5818efbe43"
+SRCREV = "1410d45704cf65224c9d8ec2d9bc7128e65b27d5"
 
 DEPENDS = "qtbase libhybris qtwayland virtual/android-headers qtdeclarative"
 
