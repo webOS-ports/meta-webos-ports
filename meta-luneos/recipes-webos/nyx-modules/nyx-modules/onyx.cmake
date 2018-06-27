@@ -16,7 +16,7 @@
 #
 # LICENSE@@@
 
-# configuration file for hammerhead
+# configuration file for onyx
 # specify all the modules to be compiled
 
 set(MODULE_SYSTEM_WEBOS_LINUX		NO)
