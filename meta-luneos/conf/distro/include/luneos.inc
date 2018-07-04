@@ -95,10 +95,8 @@ KERNEL_MODULE_PROBECONF_append_qemux86 = " vboxvideo"
 #KERNEL_MODULE_AUTOLOAD_append_qemux86-64 = " vboxvideo"
 KERNEL_MODULE_PROBECONF_append_qemux86-64 = " vboxvideo"
 
-#module_conf_vboxvideo_qemux86 = "options vboxvideo modeset=1"
-#module_conf_vboxvideo_qemux86-64 = "options vboxvideo modeset=1"
-module_conf_vboxvideo_qemux86 = "blacklist vboxvideo"
-module_conf_vboxvideo_qemux86-64 = "blacklist vboxvideo"
+module_conf_vboxvideo_qemux86 = "options vboxvideo modeset=1"
+module_conf_vboxvideo_qemux86-64 = "options vboxvideo modeset=1"
 
 # Prevent uvesafb from loading, it conflicts with vboxvideo
 KERNEL_MODULE_PROBECONF_append_qemux86 = " uvesafb"
