@@ -24,3 +24,8 @@ IMAGE_INSTALL += " \
     libgles1-mesa \
     libglapi \
 "
+
+IMAGE_INSTALL_append_qemuall = " \
+    vboxguestdrivers \
+    v86d \
+"
