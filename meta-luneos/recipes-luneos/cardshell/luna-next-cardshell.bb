@@ -6,6 +6,8 @@ RDEPENDS_${PN} += " \
     qtdeclarative-qmlplugins \
     qtgraphicaleffects-qmlplugins \
     qtquickcontrols-qmlplugins \
+    qtmultimedia-qmlplugins \
+    luneos-components \
     libconnman-qt5 \
     nemo-qml-plugin-dbus \
     libqofono \
