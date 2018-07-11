@@ -4,6 +4,17 @@ IMAGE_FEATURES += "package-management debug-tweaks ssh-server-openssh"
 
 inherit core-image
 
+MESA_PKGS = " \
+    libegl-mesa \
+    libgles2-mesa \
+    libgbm \
+    mesa-megadriver \
+    mesa \
+    libgles1-mesa \
+    libglapi \
+    libwayland-egl \
+"
+
 IMAGE_INSTALL += " \
     qtbase \
     qtbase-examples \
@@ -15,17 +26,14 @@ IMAGE_INSTALL += " \
     clutter-1.0-examples \
     glmark2 \
     kernel-modules \
-    libegl-mesa \
-    libgles2-mesa \
-    libgbm \
-    mesa-megadriver \
-    libwayland-egl \
-    mesa \
-    libgles1-mesa \
-    libglapi \
+    luna-next \
+    luna-next-cardshell \
+    luneos-components \
 "
 
 IMAGE_INSTALL_append_qemuall = " \
+    ${MESA_PKGS} \
     vboxguestdrivers \
     v86d \
+    qt5-plugin-generic-vboxtouch \
 "
