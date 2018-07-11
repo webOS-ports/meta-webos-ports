@@ -23,9 +23,18 @@ IMAGE_INSTALL += " \
     mesa \
     libgles1-mesa \
     libglapi \
+    luna-next \
+    luna-next-cardshell \
+    luneos-components \
 "
 
+# luna-next-cardshell is needed by default LUNA_NEXT_SHELL "card"
+# luneos-component provides LuneOS.Service which is needed by luna-next-cardshell card/qml/LunaSysAPI/Preferences.qml:20
+# but luneos-component depends on qtwebengine
+
 IMAGE_INSTALL_append_qemuall = " \
+    kernel-modules \
     vboxguestdrivers \
     v86d \
+    qt5-plugin-generic-vboxtouch \
 "
