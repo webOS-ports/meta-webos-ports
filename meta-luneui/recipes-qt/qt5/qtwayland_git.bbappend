@@ -6,7 +6,8 @@ PACKAGECONFIG[libhybris-egl-server] = "-feature-libhybris-egl-server,-no-feature
 
 EXTRA_PACKAGECONFIG ?= "libhybris-egl-server"
 EXTRA_PACKAGECONFIG_qemuall = "drm-egl-server"
-EXTRA_PACKAGECONFIG_rpi = "wayland-brcm"
+EXTRA_PACKAGECONFIG_rpi = ""
+#EXTRA_PACKAGECONFIG_rpi = "wayland-brcm"
 PACKAGECONFIG_append_class-target = " ${EXTRA_PACKAGECONFIG}"
 
 SRC_URI += " \
