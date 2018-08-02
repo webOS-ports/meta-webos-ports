@@ -6,6 +6,7 @@ PV = "1.3.6+gitr${SRCPV}"
 SRCREV = "64a3554969747e348bfa9eb85842490cef9b719e"
 
 DEPENDS = "qtbase qtdeclarative"
+RDEPENDS_${PN} = "ttf-liberation-mono"
 
 SRC_URI = " \
     git://git.merproject.org/mer-core/fingerterm.git;protocol=git;branch=master \
@@ -14,7 +15,7 @@ SRC_URI = " \
 S = "${WORKDIR}/git"
 
 EXTRA_QMAKEVARS_PRE = "\
-    DEFAULT_FONT=Courier \
+    DEFAULT_FONT=LiberationMono \
     DEPLOYMENT_PATH=/usr/palm/applications/${PN} \
 "
 
