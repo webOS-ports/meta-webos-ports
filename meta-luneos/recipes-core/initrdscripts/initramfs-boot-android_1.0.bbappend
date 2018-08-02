@@ -1,12 +1,12 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
 SRC_URI += " \
-  git://github.com/Tofee/initramfs-tools-halium.git;branch=halium \
+  git://github.com/Tofee/initramfs-tools-halium.git;branch=tofe/ab-scheme \
   file://udev-start.sh \
   file://udev-stop.sh \
   file://functions \
 "
-SRCREV="fd3e8efb3e9832c6f02f1478c9093da227c2ec3b"
+SRCREV="45a48291070344e6dba5821c3bfcd0ff974dc8b3"
 
 do_install_append() {
     install -m 0644 ${WORKDIR}/git/scripts/halium ${D}/halium-boot.sh
