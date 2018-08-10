@@ -1,7 +1,7 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
 SRC_URI += " \
-    file://persistent-storage-rule-mmc-partname.patch \
-    file://fd_fdinfo_mnt_id_disablefdinfostat.patch \
-    file://Disable-ProtectHome-and-ProtectSystem-for-old-kernel.patch \
+    file://0001-Create-disk-by-partlabel-links-for-mmcblk-partitions.patch \
+    file://0002-fd_fdinfo_mnt_id-disable-fdinfo-stat.patch \
+    file://0003-Disable-ProtectHome-and-ProtectSystem-for-old-kernel.patch \
 "
