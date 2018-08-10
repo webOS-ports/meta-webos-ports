@@ -1,6 +1,6 @@
 PACKAGECONFIG_GL = "gles2 eglfs"
 PACKAGECONFIG_GL_append_qemuall = " kms gbm"
-PACKAGECONFIG_DISTRO += "sql-sqlite icu glib accessibility mtdev examples fontconfig xkbcommon-evdev"
+PACKAGECONFIG_DISTRO += "sql-sqlite icu glib accessibility mtdev examples fontconfig xkbcommon-evdev renameat2"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 SRC_URI += " \
