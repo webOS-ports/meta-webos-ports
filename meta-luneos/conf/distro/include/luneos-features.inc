@@ -47,3 +47,16 @@ MACHINE_FEATURES_append_rpi = " vc4graphics"
 
 # Our mesa doesn't provide gl.pc used by glmark2
 PACKAGECONFIG_remove_pn-glmark2 = "wayland-gl drm-gl"
+# Fails with libhybris
+# | ../src/gl-state-egl.cpp: In member function 'bool GLStateEGL::gotValidDisplay()':
+# | ../src/gl-state-egl.cpp:438:9: error: 'PFNEGLGETPLATFORMDISPLAYEXTPROC' was not declared in this scope
+# |          PFNEGLGETPLATFORMDISPLAYEXTPROC get_platform_display =
+# |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# | ../src/gl-state-egl.cpp:438:9: note: suggested alternative: 'PFNGLGETNUNIFORMIVEXTPROC'
+# |          PFNEGLGETPLATFORMDISPLAYEXTPROC get_platform_display =
+# |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# |          PFNGLGETNUNIFORMIVEXTPROC
+# | ../src/gl-state-egl.cpp:442:13: error: 'get_platform_display' was not declared in this scope
+# |          if (get_platform_display != nullptr) {
+# |              ^~~~~~~~~~~~~~~~~~~~
+PACKAGECONFIG_remove_pn-glmark2 = "wayland-gles2"
