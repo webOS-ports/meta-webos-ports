@@ -13,3 +13,32 @@ webos_enable_devmode() {
 }
 
 ROOTFS_POSTPROCESS_COMMAND += "webos_enable_devmode;"
+
+MESA_PKGS = " \
+    libegl-mesa \
+    libgles2-mesa \
+    libgbm \
+    mesa-megadriver \
+    mesa \
+    libgles1-mesa \
+    libglapi \
+    libwayland-egl \
+"
+
+IMAGE_INSTALL_append = " \
+    qtbase \
+    qtbase-examples \
+    qtbase-plugins \
+    weston \
+    weston-init \
+    weston-examples \
+    gtk+3-demo \
+    glmark2 \
+    kernel-modules \
+"
+
+IMAGE_INSTALL_append_qemuall = " \
+    ${MESA_PKGS} \
+    vboxguestdrivers \
+    v86d \
+"
