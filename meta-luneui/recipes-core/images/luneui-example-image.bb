@@ -34,6 +34,7 @@ IMAGE_INSTALL_append_qemuall = " \
     glmark2 \
     anbox \
     anbox-data \
+    glmark2 \
 "
 
 IMAGE_INSTALL_append_qemux86-64 = " \
