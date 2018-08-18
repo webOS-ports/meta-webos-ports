@@ -53,19 +53,8 @@ WEBOS_DISTRO_PRERELEASE ?= "devel"
 WEBOS_DISTRO_BUILD_ID ?= "0-0"
 
 # use WEBOS_DISTRO_BUILD_ID.
-WEBOS_IMAGE_NAME_SUFFIX = "${@oe.utils.conditional( 'WEBOS_DISTRO_BUILD_CODENAME', '', '', '-${WEBOS_DISTRO_BUILD_CODENAME}', d) }"
-WEBOS_IMAGE_NAME_SUFFIX .= "${@oe.utils.conditional( 'WEBOS_DISTRO_BUILD_ID', 'unofficial', '', '-${WEBOS_DISTRO_BUILD_ID}', d) }"
-IMAGE_NAME = "${IMAGE_BASENAME}-${MACHINE}-${DATETIME}${WEBOS_IMAGE_NAME_SUFFIX}"
-IMAGE_NAME[vardepsexclude] += "DATETIME"
-KERNEL_IMAGE_BASE_NAME = "${PKGE}-${PKGV}-${PKGR}-${MACHINE}-${DATETIME}${WEBOS_IMAGE_NAME_SUFFIX}"
-KERNEL_IMAGE_BASE_NAME[vardepsexclude] += "DATETIME"
-KERNEL_IMAGE_SYMLINK_NAME = "${MACHINE}"
-MODULE_IMAGE_BASE_NAME = "modules-${PKGE}-${PKGV}-${PKGR}-${MACHINE}-${DATETIME}${WEBOS_IMAGE_NAME_SUFFIX}"
-MODULE_IMAGE_BASE_NAME[vardepsexclude] += "DATETIME"
-
-# Don't rebuild the kernel (or the rootfs) images if the only thing that's changed
-# is the start time of the build or the build number.
-BB_HASHBASE_WHITELIST_append = " WEBOS_IMAGE_NAME_SUFFIX"
+IMAGE_VERSION_SUFFIX = "${@oe.utils.conditional( 'WEBOS_DISTRO_BUILD_CODENAME', '', '', '-${WEBOS_DISTRO_BUILD_CODENAME}', d) }"
+IMAGE_VERSION_SUFFIX .= "${@oe.utils.conditional( 'WEBOS_DISTRO_BUILD_ID', 'unofficial', '${DATETIME}', '-${WEBOS_DISTRO_BUILD_ID}', d) }"
 
 # Add WEBOS_DISTRO_RELEASE_CODENAME and WEBOS_DISTRO_BUILD_ID to what's displayed
 # as the "build configuration".
