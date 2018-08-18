@@ -10,10 +10,9 @@ IMAGE_BASENAME = "luneos"
 IMAGE_NAME = "${IMAGE_BASENAME}-image"
 
 ZIP_BASENAME = "${IMAGE_BASENAME}-package-${MACHINE}"
-ZIP_NAME = "${ZIP_BASENAME}-${DATETIME}${WEBOS_IMAGE_NAME_SUFFIX}"
-ZIP_NAME[vardepsexclude] += "DATETIME"
+ZIP_NAME = "${ZIP_BASENAME}-${IMAGE_VERSION_SUFFIX}"
 
-inherit webos_ports_repo
+inherit webos_ports_repo kernel-artifact-names
 
 PV = "1.0.2+git${SRCPV}"
 SRCREV = "12c8eb4d79e4504a7683b8dc18266a9c460d2537"
@@ -23,7 +22,7 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 do_deploy() {
     IMG="${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}-${MACHINE}.tar.gz"
-    FASTBOOT="${DEPLOY_DIR_IMAGE}/${KERNEL_IMAGETYPE}-${KERNEL_IMAGE_SYMLINK_NAME}.fastboot"
+    FASTBOOT="${DEPLOY_DIR_IMAGE}/${KERNEL_IMAGETYPE}-${KERNEL_IMAGE_LINK_NAME}.fastboot"
     if [ ! -e $IMG ] ; then
         bbfatal "Required base image is not available as tar.gz image! $IMG doesn't exist."
     fi
