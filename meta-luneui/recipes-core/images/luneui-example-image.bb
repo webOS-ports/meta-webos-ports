@@ -35,6 +35,7 @@ IMAGE_INSTALL_append_qemuall = " \
     weston-examples \
     anbox \
     anbox-data \
+    glmark2 \
 "
 
 IMAGE_INSTALL_append_qemux86-64 = " \
