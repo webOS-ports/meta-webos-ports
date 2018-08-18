@@ -22,7 +22,6 @@ IMAGE_INSTALL += " \
     weston-init \
     weston-examples \
     gtk+3-demo \
-    glmark2 \
     kernel-modules \
     luna-next \
     luna-next-cardshell \
@@ -34,4 +33,5 @@ IMAGE_INSTALL_append_qemuall = " \
     vboxguestdrivers \
     v86d \
     qt5-plugin-generic-vboxtouch \
+    glmark2 \
 "
