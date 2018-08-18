@@ -30,10 +30,10 @@ IMAGE_INSTALL_append = " \
     qtbase-examples \
     qtbase-plugins \
     gtk+3-demo \
-    glmark2 \
     kernel-modules \
 "
 
 IMAGE_INSTALL_append_qemuall = " \
     ${MESA_PKGS} \
+    glmark2 \
 "
