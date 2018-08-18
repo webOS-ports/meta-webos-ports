@@ -32,10 +32,10 @@ IMAGE_INSTALL_append = " \
     weston-init \
     weston-examples \
     gtk+3-demo \
-    glmark2 \
     kernel-modules \
 "
 
 IMAGE_INSTALL_append_qemuall = " \
     ${MESA_PKGS} \
+    glmark2 \
 "
