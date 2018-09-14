@@ -3,9 +3,10 @@
 EXTENDPRAUTO_append = "webos8"
 
 inherit update-alternatives
+
 ALTERNATIVE_${PN}-conf = "openssl-cnf2"
 ALTERNATIVE_LINK_NAME[openssl-cnf2] = "${sysconfdir}/ssl/openssl.cnf"
-ALTERNATIVE_PRIORITY[openssl-cnf2] ?= "2"
+ALTERNATIVE_PRIORITY[openssl-cnf2] ?= "1"
 
 do_install_append_class-target() {
     # u-a renames it too late in do_package,
@@ -13,4 +14,4 @@ do_install_append_class-target() {
     mv ${D}${sysconfdir}/ssl/openssl.cnf ${D}${sysconfdir}/ssl/openssl.cnf.${BPN}
 }
 
-FILES_openssl-conf = "${sysconfdir}/ssl/openssl.cnf*"
+FILES_openssl10-conf = "${sysconfdir}/ssl/openssl.cnf*"
