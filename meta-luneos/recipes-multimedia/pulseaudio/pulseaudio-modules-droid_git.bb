@@ -6,15 +6,14 @@ DEPENDS += "pulseaudio libhybris virtual/android-headers dbus udev"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-PV = "10.0.59+gitr${SRCPV}"
-SRCREV = "d53995823d335a06a25b98d9a7ecd25f06afbcea"
+PV = "10.0.73+gitr${SRCPV}"
+SRCREV = "7c7caed93bc09d358f05ab385b44e81874f1f616"
 
 SRC_URI = "git://github.com/mer-hybris/pulseaudio-modules-droid.git;branch=master;protocol=git"
 
 SRC_URI += " \
     file://0001-add-support-for-detected-external-connection-changes.patch \
     file://0002-droid-extcon-c-adapt-to-new-pulseaudio-5-apis.patch \
-    file://0003-use-pa-card-put-for-pulseaudio-8.patch \
 "
 
 S = "${WORKDIR}/git"
