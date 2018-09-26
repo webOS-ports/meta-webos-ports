@@ -14,15 +14,13 @@ SRC_URI = "git://git.kernel.org/pub/scm/network/ofono/phonesim.git \
     file://0002-Fix-random-build-failure.patch \
     file://0003-configure.ac-use-gnu-11-to-fix-build-with-Qt-5.7.patch \
     file://0004-Fix-build-with-Qt-5.8.patch \
+    file://0005-configure.ac-fix-checking-for-host_bins-variable.patch \
 "
 S = "${WORKDIR}/git"
 
+export QMAKE_PATH_HOST_BINS = "${OE_QMAKE_PATH_EXTERNAL_HOST_BINS}"
+
 inherit autotools pkgconfig
 inherit qmake5_paths
-
-do_configure_append() {
-    sed -i -e s:/usr/bin/qt5/uic:${OE_QMAKE_PATH_EXTERNAL_HOST_BINS}/uic:g ${B}/Makefile
-    sed -i -e s:/usr/bin/qt5/moc:${OE_QMAKE_PATH_EXTERNAL_HOST_BINS}/moc:g ${B}/Makefile
-}
 
 CXXFLAGS += "-fPIC"
