@@ -6,14 +6,16 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=eb723b61539feef013de476e68b5c50a"
 
 DEPENDS += "qtbase qtscript qtxmlpatterns qtbase-native"
 
-SRC_URI = "https://www.kernel.org/pub/linux/network/ofono/phonesim-${PV}.tar.xz"
-SRC_URI[md5sum] = "44252d82a19a1c35d70160a6fbc965a1"
-SRC_URI[sha256sum] = "8a858acdb99bfc928ba16c8d983103af198bc0aa0e9101477d343361628d95d9"
-SRC_URI += " file://0001-Port-to-qt5.patch \
-    file://phonesim.mkdir.patch \
-    file://qt-5.7.gnu++11.patch \
-    file://qt-5.8.patch \
+SRCREV = "774958e133e0b53c87cfa0049b243e11874f3bae"
+PV = "1.20+git${SRCPV}"
+
+SRC_URI = "git://git.kernel.org/pub/scm/network/ofono/phonesim.git \
+    file://0001-Port-to-qt5.patch \
+    file://0002-Fix-random-build-failure.patch \
+    file://0003-configure.ac-use-gnu-11-to-fix-build-with-Qt-5.7.patch \
+    file://0004-Fix-build-with-Qt-5.8.patch \
 "
+S = "${WORKDIR}/git"
 
 inherit autotools pkgconfig
 inherit qmake5_paths
