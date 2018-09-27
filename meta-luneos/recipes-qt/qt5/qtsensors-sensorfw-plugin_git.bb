@@ -22,12 +22,10 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};"
 S = "${WORKDIR}/git"
 
 do_install_append() {
-    cp -R --no-dereference --preserve=mode,links -v ${D}/etc/xdg ${D}${OE_QMAKE_PATH_QT_SETTINGS}
+    if [ "${sysconfdir}" != "${OE_QMAKE_PATH_QT_SETTINGS}" ] ; then
+        cp -R --no-dereference --preserve=mode,links -v ${D}${sysconfdir}/xdg ${D}${OE_QMAKE_PATH_QT_SETTINGS}
+    fi
 }
-
-FILES_${PN}-dbg += " \
-    ${OE_QMAKE_PATH_PLUGINS}/sensors/.debug \
-"
 
 FILES_${PN} += " \
     ${libdir} \
