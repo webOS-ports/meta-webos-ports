@@ -22,6 +22,5 @@ EXTRA_QMAKEVARS_PRE = "\
 "
 
 FILES_${PN} += "\
-            ${libdir}/qt5/plugins \
+    ${OE_QMAKE_PATH_PLUGINS} \
 "
-
