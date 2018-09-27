@@ -33,6 +33,5 @@ do_install_append() {
     rm -vf ${D}${libdir}/cmake/Qt5Gui/Qt5Gui_QEglFSIntegrationPlugin.cmake
 }
 
-FILES_${PN} += "${libdir}/qt5/plugins/platforms/libhwcomposer.so"
-FILES_${PN}-dbg += "${libdir}/qt5/plugins/platforms/.debug/libhwcomposer.so"
+FILES_${PN} += "${OE_QMAKE_PATH_PLUGINS}/platforms/libhwcomposer.so"
 FILES_${PN}-dev += "${libdir}/cmake"
