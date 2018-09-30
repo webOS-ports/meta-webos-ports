@@ -23,16 +23,16 @@ do_configure_prepend() {
 }
 
 do_install_append() {
-    mkdir -p ${D}${libdir}/qt5/mkspecs/modules/
-    cp ${WORKDIR}/qt_BluezQt.pri ${D}${libdir}/qt5/mkspecs/modules/
+    mkdir -p ${D}${OE_QMAKE_PATH_ARCHDATA}/mkspecs/modules/
+    cp ${WORKDIR}/qt_BluezQt.pri ${D}${OE_QMAKE_PATH_ARCHDATA}/mkspecs/modules/
 }
 
 FILES_${PN} += " \
-		${libdir}/qt5/qml/org/kde/bluezqt \
+		${OE_QMAKE_PATH_QML}/org/kde/bluezqt \
 		"
 
 FILES_${PN}-dev += " \
-		${libdir}/qt5/mkspecs/modules/ \
+		${OE_QMAKE_PATH_ARCHDATA}/mkspecs/modules/ \
 		"
 
 RDEPENDS_${PN} = " \
