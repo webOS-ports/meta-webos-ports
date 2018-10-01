@@ -29,7 +29,6 @@ python populate_packages_prepend() {
 }
 
 FILES_${PN}-dev += "${libdir}/alsa-lib/libasound*.la"
-FILES_${PN}-dbg += "${libdir}/alsa-lib/.debug"
 
 FILES_libasound-module-conf-pulse += "${datadir}/alsa/alsa.conf.d/*pulseaudio*"
 FILES_libasound-module-rate-samplerate += "${libdir}/alsa-lib/*rate_samplerate_*.so"

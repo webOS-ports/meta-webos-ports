@@ -35,4 +35,3 @@ do_install() {
 }
 
 FILES_${PN} += "${libdir}/nodejs"
-FILES_${PN}-dbg += "${libdir}/nodejs/.debug"

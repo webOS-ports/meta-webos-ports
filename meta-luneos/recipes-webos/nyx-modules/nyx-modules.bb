@@ -64,5 +64,4 @@ do_configure_prepend() {
 PACKAGES += "${PN}-tests"
 FILES_${PN} += "${libdir}/nyx/modules/*"
 FILES_${PN} += "${systemd_system_unitdir}/*"
-FILES_${PN}-dbg += "${libdir}/nyx/modules/.debug/*"
 FILES_${PN}-tests += "${bindir}/nyx-test-ledcontroller"

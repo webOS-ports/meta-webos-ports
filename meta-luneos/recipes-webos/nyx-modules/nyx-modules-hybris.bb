@@ -23,4 +23,3 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 FILES_${PN} += "${libdir}/nyx/modules/*"
-FILES_${PN}-dbg += "${libdir}/nyx/modules/.debug/*"

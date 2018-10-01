@@ -48,4 +48,3 @@ EXTRA_QMAKEVARS_PRE += "\
 # into a separate package otherwise two packages will install the same file into the rootfs
 EXTRA_QMAKEVARS_PRE += "CONFIG+=qt5-inputcontext"
 FILES_${PN} += "${libdir}/qt5/plugins/platforminputcontexts"
-FILES_${PN}-dbg += "${libdir}/qt5/plugins/platforminputcontexts/.debug"

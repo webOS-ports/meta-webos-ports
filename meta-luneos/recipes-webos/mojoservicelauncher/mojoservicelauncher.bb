@@ -23,4 +23,3 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 FILES_${PN} += "${webos_prefix}/nodejs ${webos_servicesdir} ${webos_frameworksdir}"
-FILES_${PN}-dbg += "${webos_prefix}/nodejs/.debug/*"

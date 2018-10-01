@@ -25,7 +25,3 @@ FILES_${PN} += " \
 FILES_${PN}-examples += " \
     ${webos_applicationsdir}/org.luneos.components.gallery \
 "
-FILES_${PN}-dbg += " \
-    ${OE_QMAKE_PATH_QML}/LuneOS/*/.debug \
-    ${OE_QMAKE_PATH_QML}/QtQuick/Controls/Styles/LuneOS/.debug \
-"

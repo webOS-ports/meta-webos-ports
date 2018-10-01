@@ -43,6 +43,5 @@ do_install_append() {
 PACKAGES =+ "${PN}-tests"
 
 FILES_${PN}-tests = "${libdir}/${PN}/tests/*"
-FILES_${PN}-dbg += "${libdir}/${PN}/tests/.debug"
 
 CXXFLAGS += "-fpermissive"

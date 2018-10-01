@@ -27,7 +27,6 @@ INSANE_SKIP_${PN} = "libdir"
 INSANE_SKIP_${PN}-dbg = "libdir"
 
 FILES_${PN} += "${webos_applicationsdir}/org.webosports.app.browser"
-FILES_${PN}-dbg += "${webos_applicationsdir}/${PN}/browserutils/.debug"
 
 RDEPENDS_${PN} = " \
     qtdeclarative-qmlplugins \

@@ -25,4 +25,3 @@ inherit qmake5
 EXTRA_QMAKEVARS_PRE += "CONFIG+=surfaceformat CONFIG+=programbinary CONFIG+=hybristexture"
 
 FILES_${PN} += "${OE_QMAKE_PATH_PLUGINS}"
-FILES_${PN}-dbg += "${OE_QMAKE_PATH_PLUGINS}/*/.debug"

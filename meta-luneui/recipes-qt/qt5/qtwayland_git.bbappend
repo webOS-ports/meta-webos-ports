@@ -7,4 +7,3 @@ SRC_URI += " \
 "
 
 FILES_${PN} += "${OE_QMAKE_PATH_PLUGINS}/wayland-graphics-integration"
-FILES_${PN}-dbg += "${OE_QMAKE_PATH_PLUGINS}/wayland-graphics-integration/*/.debug"

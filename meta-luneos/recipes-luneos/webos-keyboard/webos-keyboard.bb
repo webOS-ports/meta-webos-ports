@@ -45,25 +45,6 @@ FILES_${PN} += "\
     ${datadir} \
 "
 
-FILES_${PN}-dbg += "${libdir}/maliit/plugins/.debug \
-                    ${datadir}/maliit/plugins/org/luneos/lib/ar/.debug \
-                    ${datadir}/maliit/plugins/org/luneos/lib/cs/.debug \
-                    ${datadir}/maliit/plugins/org/luneos/lib/da/.debug \
-                    ${datadir}/maliit/plugins/org/luneos/lib/de/.debug \
-                    ${datadir}/maliit/plugins/org/luneos/lib/es/.debug \
-                    ${datadir}/maliit/plugins/org/luneos/lib/en/.debug \
-                    ${datadir}/maliit/plugins/org/luneos/lib/fi/.debug \
-                    ${datadir}/maliit/plugins/org/luneos/lib/fr/.debug \
-                    ${datadir}/maliit/plugins/org/luneos/lib/he/.debug \
-                    ${datadir}/maliit/plugins/org/luneos/lib/hu/.debug \
-                    ${datadir}/maliit/plugins/org/luneos/lib/it/.debug \
-                    ${datadir}/maliit/plugins/org/luneos/lib/nl/.debug \
-                    ${datadir}/maliit/plugins/org/luneos/lib/pl/.debug \
-                    ${datadir}/maliit/plugins/org/luneos/lib/pt/.debug \
-                    ${datadir}/maliit/plugins/org/luneos/lib/ru/.debug \
-                    ${datadir}/maliit/plugins/org/luneos/lib/sv/.debug \
-                    "
-
 S = "${WORKDIR}/git"
 
 EXTRA_OEMAKE += "INSTALL_ROOT=${D}"

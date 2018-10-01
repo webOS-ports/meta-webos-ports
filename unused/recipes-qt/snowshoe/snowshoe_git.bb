@@ -29,5 +29,4 @@ do_install() {
     sed -i -e s:__VERSION__:${PV}:g ${D}${webos_applicationsdir}/snowshoe/appinfo.json
 }
 
-FILES_${PN}-dbg += "${webos_applicationsdir}/snowshoe/.debug"
 FILES_${PN} += "${webos_applicationsdir}"

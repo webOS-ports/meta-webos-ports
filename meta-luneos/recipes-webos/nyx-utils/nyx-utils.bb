@@ -19,7 +19,6 @@ SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 FILES_${PN} += "${libdir}/nyx/nyxcmd/*"
-FILES_${PN}-dbg += "${libdir}/nyx/nyxcmd/.debug/*"
 
 # Fix builds with new -ferpmissive set by default
 SRC_URI += "file://0001-Fix-fpermissive-problems.patch"

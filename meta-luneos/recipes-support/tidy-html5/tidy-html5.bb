@@ -22,9 +22,8 @@ do_configure_prepend() {
 }
 
 FILES_${PN} = " \
-  ${bindir}/tidy \
-  ${bindir}/tab2space \
-  ${libdir}/libtidy* \
-  ${includedir}/*.h \
+    ${bindir}/tidy \
+    ${bindir}/tab2space \
+    ${libdir}/libtidy* \
+    ${includedir}/*.h \
 "
-FILES_${PN}-dbg += "${libdir}/.debug"

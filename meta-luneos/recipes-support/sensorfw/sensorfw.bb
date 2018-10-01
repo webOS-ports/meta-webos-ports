@@ -42,15 +42,10 @@ do_install_append() {
 
 RDEPENDS_${PN} = "bash"
 
-FILES_${PN}-dbg += " \
-  ${libdir}/sensord-qt5/testing/.debug \
-  ${libdir}/sensord-qt5/.debug \
-"
-
 FILES_${PN} = " \
-  ${datadir} \
-  ${bindir} \
-  ${sbindir} \
-  ${sysconfdir} \
-  ${libdir} \
+    ${datadir} \
+    ${bindir} \
+    ${sbindir} \
+    ${sysconfdir} \
+    ${libdir} \
 "

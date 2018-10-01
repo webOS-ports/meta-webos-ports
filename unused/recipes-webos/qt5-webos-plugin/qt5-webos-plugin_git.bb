@@ -15,4 +15,3 @@ inherit qmake5
 inherit webos_ports_repo
 
 FILES_${PN} += "${libdir}/${QT_DIR_NAME}/plugins/platforms"
-FILES_${PN}-dbg += "${libdir}/${QT_DIR_NAME}/plugins/platforms/.debug"

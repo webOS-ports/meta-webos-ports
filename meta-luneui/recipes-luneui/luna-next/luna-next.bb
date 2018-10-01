@@ -41,6 +41,3 @@ do_install_append() {
 RDEPENDS_${PN} = "luna-next-conf xkeyboard-config"
 
 FILES_${PN} += "${OE_QMAKE_PATH_QML}/LunaNext"
-FILES_${PN}-dbg += " \
-    ${OE_QMAKE_PATH_QML}/LunaNext/*/.debug \
-    ${OE_QMAKE_PATH_QML}/LunaNext/*/*/.debug"

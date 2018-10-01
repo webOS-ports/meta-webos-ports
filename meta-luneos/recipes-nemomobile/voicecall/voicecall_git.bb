@@ -27,8 +27,4 @@ do_install_append() {
     install -m 0644 ${S}/src/voicecall-manager.service ${D}${systemd_unitdir}/system/
 }
 
-FILES_${PN}-dbg += " \
-    ${OE_QMAKE_PATH_QML}/*/*/*/.debug \
-    ${libdir}/voicecall/plugins/.debug \
-"
 FILES_${PN} += "${OE_QMAKE_PATH_QML}"

@@ -40,5 +40,4 @@ do_install_append() {
     sed -i -e s:__VERSION__:${PV}:g ${D}${APP_PATH}/appinfo.json
 }
 
-FILES_${PN}-dbg += "${APP_PATH}/.debug"
 FILES_${PN} += "${APP_PATH}"

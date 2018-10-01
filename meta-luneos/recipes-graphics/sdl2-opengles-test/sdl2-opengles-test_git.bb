@@ -31,4 +31,3 @@ do_install() {
 }
 
 FILES_${PN} += "${webos_applicationsdir}"
-FILES_${PN}-dbg += "${webos_applicationsdir}/*/.debug"

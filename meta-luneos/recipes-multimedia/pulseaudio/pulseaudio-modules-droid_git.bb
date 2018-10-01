@@ -33,7 +33,6 @@ do_configure_prepend() {
 FILES_${PN} += "${libdir}/pulse-10.0/modules/*.so"
 FILES_${PN}-dev += "${libdir}/pulse-10.0/modules/*.la"
 FILES_${PN}-staticdev += "${libdir}/pulse-10.0/modules/*.a"
-FILES_${PN}-dbg += "${libdir}/pulse-10.0/modules/.debug"
 
 # Add pulse user to audio group so he can access audio dev nodes from Android
 GROUPMEMS_PARAM_${PN} = "-a pulse -g audio"
