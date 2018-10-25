@@ -10,4 +10,4 @@ EXTRA_OECONF += " \
 EXTRA_OECONF_append_aarch64 = " \ 
     --enable-arch=arm64 \
 "
-SRCREV = "3beca8ad9246e3fce3c47ef978c3b07f6c04284a"
+SRCREV = "76f83fcd8a4c5aa43d4342d00af6242a20789a02"
