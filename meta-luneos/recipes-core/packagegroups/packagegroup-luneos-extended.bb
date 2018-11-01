@@ -85,7 +85,7 @@ RDEPENDS_${PN} = " \
   luna-sysmgr \
   luna-sysmgr-conf \
   luneos-components \
-  \
+  qtlocation-luneos-plugin \
   webos-system-update \
   \
   webos-systemd-services \
