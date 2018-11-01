@@ -65,7 +65,6 @@ SRCREV = "b1280342c1fc655b6edb61228fc3ef6673ed0662"
 PACKAGES =+ "${PN}-tests"
 
 FILES_${PN}-tests = "${libdir}/${PN}/tests/*"
-# FILES_${PN} += "${webos_sysbus_datadir} ${systemd_unitdir}/system"
 
 BBCLASSEXTEND = "native"
 
