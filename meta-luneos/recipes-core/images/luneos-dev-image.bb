@@ -26,6 +26,7 @@ MESA_PKGS = " \
 "
 
 IMAGE_INSTALL_append = " \
+    libdrm-tests \
     qtbase-examples \
     qtbase-plugins \
     gtk+3-demo \
