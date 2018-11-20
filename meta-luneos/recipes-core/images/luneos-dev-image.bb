@@ -26,6 +26,7 @@ MESA_PKGS = " \
 "
 
 IMAGE_INSTALL_append = " \
+    libdrm-tests \
     qtbase \
     qtbase-examples \
     qtbase-plugins \
