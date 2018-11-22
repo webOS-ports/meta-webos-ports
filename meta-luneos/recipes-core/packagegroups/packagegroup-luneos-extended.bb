@@ -154,6 +154,7 @@ QEMU_RDEPENDS = " \
     qt5-plugin-generic-vboxtouch \
     kernel-module-snd-intel8x0 \
     libpci \
+    rng-tools \
 "
 
 RDEPENDS_${PN}_append_qemux86 = " ${QEMU_RDEPENDS}"
