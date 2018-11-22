@@ -86,7 +86,7 @@ DISTRO_EXTRA_RDEPENDS += " ${WEBOS_DEFAULT_EXTRA_RDEPENDS}"
 DISTRO_EXTRA_RRECOMMENDS += " ${WEBOS_DEFAULT_EXTRA_RRECOMMENDS}"
 
 WEBOSQEMUDEPS = "${@bb.utils.contains("INCOMPATIBLE_LICENSE", "GPLv3", "", "qemu-config",d)}"
-DISTRO_EXTRA_RDEPENDS_append_qemuall = " ${WEBOSQEMUDEPS} kernel-module-vboxvideo kernel-module-uvesafb kernel-module-virtio-gpu kernel-module-vmwgfx"
+DISTRO_EXTRA_RDEPENDS_append_qemuall = " ${WEBOSQEMUDEPS} kernel-module-vboxvideo kernel-module-vboxguest kernel-module-vboxsf kernel-module-uvesafb kernel-module-virtio-gpu kernel-module-vmwgfx"
 
 MACHINE_ESSENTIAL_EXTRA_RDEPENDS_remove_qemuall = "v86d"
 
@@ -94,9 +94,9 @@ MACHINE_ESSENTIAL_EXTRA_RDEPENDS_remove_qemuall = "v86d"
 # https://github.com/torvalds/linux/commit/5cf5332d529bf7fd1f66378bb9611387c3e02b05#diff-6edc52f8a82e14082432721f3a52b2ab
 PREFERRED_PROVIDER_virtual/kernel_qemux86 = "linux-yocto-dev"
 
-#KERNEL_MODULE_AUTOLOAD_append_qemux86 = " vboxvideo"
+KERNEL_MODULE_AUTOLOAD_append_qemux86 = " vboxvideo vboxguest vboxsf"
 KERNEL_MODULE_PROBECONF_append_qemux86 = " vboxvideo"
-#KERNEL_MODULE_AUTOLOAD_append_qemux86-64 = " vboxvideo"
+KERNEL_MODULE_AUTOLOAD_append_qemux86-64 = " vboxvideo vboxguest vboxsf"
 KERNEL_MODULE_PROBECONF_append_qemux86-64 = " vboxvideo"
 
 module_conf_vboxvideo_qemux86 = "options vboxvideo modeset=1"
