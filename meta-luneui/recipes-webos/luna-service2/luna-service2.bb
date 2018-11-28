@@ -56,8 +56,8 @@ EXTRA_OECMAKE += " ${@bb.utils.contains('WEBOS_LTTNG_ENABLED', '1', '-DWEBOS_LTT
 # Disable security as a work around for now until we sort all the new ACG bits for LS2. 
 # Should at least help the migration to OSE components a bit
 
-WEBOS_DISABLE_LS2_SECURITY ?= "1"
-EXTRA_OECMAKE += '${@oe.utils.conditional("WEBOS_DISABLE_LS2_SECURITY", "1", "-DWEBOS_LS2_SECURE:BOOLEAN=False", "" ,d)}'
+#WEBOS_DISABLE_LS2_SECURITY ?= "1"
+#EXTRA_OECMAKE += '${@oe.utils.conditional("WEBOS_DISABLE_LS2_SECURITY", "1", "-DWEBOS_LS2_SECURE:BOOLEAN=False", "" ,d)}'
 
 PACKAGES += "${PN}-perf"
 FILES_${PN} += "${systemd_unitdir}/system"
