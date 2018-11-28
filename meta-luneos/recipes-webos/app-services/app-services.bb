@@ -5,11 +5,12 @@ SECTION = "webos/services"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-PV = "3.0.1-4+git${SRCPV}"
-SRCREV = "5955c2fb66f09c414f6f2c662c11b3699b97ee96"
+PV = "3.0.1-5+git${SRCPV}"
+SRCREV = "27af277849fc55de176997a4e09211ed49122b7e"
 
 inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
+inherit webos_configure_manifest
 inherit allarch
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
@@ -37,6 +38,8 @@ do_install() {
     install -d ${D}${webos_sysbus_prvrolesdir}
     install -d ${D}${webos_sysbus_pubrolesdir}
     install -d ${D}${webos_localstatedir}/data/com.palm.appInstallService
+    install -d ${D}${webos_sysbus_apipermissionsdir}
+    install -d ${D}${webos_sysbus_permissionsdir}
 
     for SERVICE in `ls -d1 ${S}/com.palm.service.*` ; do
         SERVICE_DIR=`basename $SERVICE`
@@ -48,9 +51,11 @@ do_install() {
         cp -vrf $SERVICE/activities/* ${D}${webos_sysconfdir}/activities/ 2> /dev/null || true
         cp -vrf $SERVICE/filecache_types/* ${D}${webos_sysconfdir}/filecache_types/ 2> /dev/null || true
         # Copy services and roles files
-        cp -vrf $SERVICE/files/sysbus/*.json ${D}${webos_sysbus_prvrolesdir} 2> /dev/null || true
-        cp -vrf $SERVICE/files/sysbus/*.json ${D}${webos_sysbus_pubrolesdir} 2> /dev/null || true
+        cp -vrf $SERVICE/files/sysbus/*.role.json ${D}${webos_sysbus_prvrolesdir} 2> /dev/null || true
+        cp -vrf $SERVICE/files/sysbus/*.role.json ${D}${webos_sysbus_pubrolesdir} 2> /dev/null || true
         cp -vrf $SERVICE/files/sysbus/*.service ${D}${webos_sysbus_prvservicesdir} 2> /dev/null || true
+        cp -vrf $SERVICE/files/sysbus/*.api.json ${D}${webos_sysbus_apipermissionsdir} 2> /dev/null || true
+        cp -vrf $SERVICE/files/sysbus/*.perm.json ${D}${webos_sysbus_permissionsdir} 2> /dev/null || true
     done
 
 # install account services files in public service directory.
@@ -87,3 +92,4 @@ FILES_${PN} += "${webos_sysbus_dynprvrolesdir} ${webos_sysbus_devpubservicesdir}
 FILES_${PN} += "${webos_sysbus_devprvservicesdir} ${webos_sysbus_devpubrolesdir}"
 FILES_${PN} += "${webos_sysbus_devprvrolesdir} ${webos_sysbus_dynpubservicesdir}"
 FILES_${PN} += "${webos_sysbus_dynprvservicesdir}"
+FILES_${PN} += "${webos_sysbus_manifestsdir} ${webos_sysbus_apipermissionsdir} ${webos_sysbus_permissionsdir}"
