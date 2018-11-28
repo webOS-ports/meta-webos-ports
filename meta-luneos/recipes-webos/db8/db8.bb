@@ -21,6 +21,7 @@ RDEPENDS_${PN}-test_append_class-target = " ${VIRTUAL-RUNTIME_bash}"
 inherit webos_ports_repo
 inherit webos_cmake
 inherit webos_system_bus
+inherit webos_configure_manifest
 inherit systemd
 
 EXTRA_OECMAKE += "-DWEBOS_DB8_BACKEND:STRING='leveldb;sandwich' -DCMAKE_SKIP_RPATH:BOOL=TRUE"
