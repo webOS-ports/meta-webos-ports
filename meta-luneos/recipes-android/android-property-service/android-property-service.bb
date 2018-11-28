@@ -12,8 +12,8 @@ inherit pkgconfig
 inherit webos_system_bus
 inherit webos_systemd
 
-PV = "0.1.0-1+git${SRCPV}"
-SRCREV = "88dd46e2ca17f3a2fc37950a634f2c5f56dd7afc"
+PV = "0.1.0-2+git${SRCPV}"
+SRCREV = "024e6ede517a7032daf838326f27823320a15c15"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
