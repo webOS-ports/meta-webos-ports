@@ -15,9 +15,19 @@ PROVIDES = "initscripts"
 # The dependency needs to be deleted after deleting fake initctl.
 DEPENDS = "systemd"
 
-SRCREV = "d65df0720729e0ab8a69f54be334c41f8b2bf3ee"
+SRCREV = "8868356c5a159a9d03076654df0f4878b627e482"
 inherit webos_cmake
 inherit webos_public_repo
+inherit systemd
 
 SRC_URI = "git://github.com/herrie82/webos-initscripts.git;branch=webosose"
+SYSTEMD_PACKAGES = "${PN}"
+SYSTEMD_SERVICE_${PN} = "default-webos.target \
+                         webos-cbd.target \
+			 webos-ibd.target \
+			 webos-rbd.target \
+		         webos-bd.target \
+			 webos-dis.target \
+			 webos-mbd.target"
+
 S = "${WORKDIR}/git"
