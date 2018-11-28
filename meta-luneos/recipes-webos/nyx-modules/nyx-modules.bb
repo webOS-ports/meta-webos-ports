@@ -45,21 +45,20 @@ inherit webos_machine_impl_dep
 inherit webos_core_os_dep
 inherit webos_nyx_module_provider
 
-SRC_URI = "git://github.com/herrie82/nyx-modules.git;branch=herrie/msm_mtp"
+SRC_URI = "git://github.com/Tofee/nyx-modules.git;branch=tofe/webosose"
 S = "${WORKDIR}/git"
 
 SRC_URI_append = " \
     file://${MACHINE}.cmake \
 "
 
-SRCREV = "7e292fce4fa3b3681c6dc3a21337700fbc96bc76"
+SRCREV = "cc2ee1c1503641638eb3ea199530e38f7cea2d45"
 
 do_configure_prepend() {
     # install additional machine specific nyx configuration before CMake is started
     if [ -f ${WORKDIR}/${MACHINE}.cmake ]
     then
-        mkdir -p ${S}/src/machine
-        cp ${WORKDIR}/${MACHINE}.cmake ${S}/src/machine
+        cp ${WORKDIR}/${MACHINE}.cmake ${S}/src/machine.cmake
     fi
 }
 
