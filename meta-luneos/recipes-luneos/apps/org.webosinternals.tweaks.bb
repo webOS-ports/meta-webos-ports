@@ -5,10 +5,11 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda
 
 inherit webos_filesystem_paths
 inherit webos_ports_repo
+inherit webos_configure_manifest
 inherit allarch
 
 PV = "3.0.3+gitr${SRCPV}"
-SRCREV = "6fb73285641a09bcaa501ed060083633bfa1e543"
+SRCREV = "a26059d4784b3cd9c06b8364d7ff42ecaa6a9cdc"
 
 WEBOS_REPO_NAME = "tweaks"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
@@ -38,6 +39,12 @@ do_install() {
     cp ${D}${webos_servicesdir}/org.webosinternals.tweaks.prefs/org.webosinternals.tweaks.prefs.service \
         ${D}${webos_sysbus_pubservicesdir}
 
+    # Install ACG
+    install -d ${D}${webos_sysbus_apipermissionsdir}
+    cp -vrf $SERVICE/files/sysbus/*.api.json ${D}${webos_sysbus_apipermissionsdir} 2> /dev/null || true
+    install -d ${D}${webos_sysbus_permissionsdir}
+    cp -vrf $SERVICE/files/sysbus/*.perm.json ${D}${webos_sysbus_permissionsdir} 2> /dev/null || true
+
     install -d ${D}${webos_sysconfdir}/db/kinds
     install -m 0644 ${S}/node-service/configuration/db/kinds/* ${D}${webos_sysconfdir}/db/kinds
 
@@ -53,4 +60,5 @@ FILES_${PN} = " \
     ${webos_sysbus_prvrolesdir} \
     ${webos_sysbus_pubrolesdir} \
     ${webos_sysbus_prvservicesdir} \
-    ${webos_sysbus_pubservicesdir}"
+    ${webos_sysbus_pubservicesdir} \
+    ${webos_sysbus_manifestsdir} ${webos_sysbus_apipermissionsdir} ${webos_sysbus_permissionsdir}"
