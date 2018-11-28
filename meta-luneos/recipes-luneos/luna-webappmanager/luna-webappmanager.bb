@@ -11,8 +11,8 @@ RDEPENDS_${PN} += " \
     qtwebengine-qmlplugins \
 "
 
-PV = "0.4.0-1+git${SRCPV}"
-SRCREV = "d2b063a42aceb55c9f996a9f97fa5ac50cd782fe"
+PV = "0.4.0-2+git${SRCPV}"
+SRCREV = "50e670a0e452560479bbd2e0a6f06f2c8385fdd9"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
