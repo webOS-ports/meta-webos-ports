@@ -23,7 +23,7 @@ inherit webos_system_bus
 inherit webos_cmake_qt5
 inherit webos_systemd
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webosose"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};"
 S = "${WORKDIR}/git"
 
 do_install_append() {
