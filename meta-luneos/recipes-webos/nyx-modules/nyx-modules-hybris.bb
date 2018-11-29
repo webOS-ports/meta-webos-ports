@@ -13,7 +13,7 @@ DEPENDS = "nyx-lib glib-2.0 libhybris libsuspend virtual/android-headers openssl
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 PV = "0.1.0-1+git${SRCPV}"
-SRCREV = "e363872871b3c9f3c8e6838fd620721e1ab91be8"
+SRCREV = "3b63f1d9294fd6e5a1f7cc3baac88d0f7eb4272e"
 
 inherit webos_ports_repo
 inherit webos_cmake
