@@ -49,6 +49,7 @@ SRC_URI_append = " \
     file://${MACHINE}.cmake \
 "
 
+PV = "7.1.0-1+git${SRCPV}"
 SRCREV = "cc2ee1c1503641638eb3ea199530e38f7cea2d45"
 
 do_configure_prepend() {
