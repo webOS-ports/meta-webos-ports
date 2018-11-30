@@ -22,7 +22,6 @@ inherit webos_ports_repo
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_core_os_dep
-inherit webos_machine_impl_dep
 inherit webos_lttng
 inherit webos_test_provider
 inherit systemd
