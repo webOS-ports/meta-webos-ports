@@ -14,7 +14,7 @@ WEBOS_CMAKE_DEPENDS = ""
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-PV = "1.6.3-1+git${SRCPV}
+PV = "1.6.3-1+git${SRCPV}"
 SRCREV = "832ec580a8628af9cb6eacea3e5f1db38001158d"
 
 do_compile() {
