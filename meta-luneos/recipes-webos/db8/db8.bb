@@ -28,15 +28,6 @@ EXTRA_OECMAKE += "-DWEBOS_DB8_BACKEND:STRING='leveldb;sandwich' -DCMAKE_SKIP_RPA
 EXTRA_OECMAKE_append_class-target = " -DWEBOS_CONFIG_BUILD_TESTS:BOOL=TRUE  -DUSE_PMLOG:BOOL=TRUE  -DBUILD_LS2:BOOL=TRUE -DWANT_PROFILING:BOOL=${@ 'true' if '${WEBOS_DISTRO_PRERELEASE}' != '' else 'false'}"
 EXTRA_OECMAKE_append_class-native = " -DWEBOS_CONFIG_BUILD_TESTS:BOOL=FALSE -DUSE_PMLOG:BOOL=FALSE -DBUILD_LS2:BOOL=FALSE"
 
-# Backported from Yocto 1.8
-# http://git.openembedded.org/openembedded-core/commit/?id=79144da00f005b5a3ab8f7404730216cfc684616
-OECMAKE_AR ?= "${AR}"
-cmake_do_generate_toolchain_file_append() {
-        cat >> ${WORKDIR}/toolchain.cmake <<EOF
-set( CMAKE_AR ${OECMAKE_AR} CACHE FILEPATH "Archiver" )
-EOF
-}
-
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webOS-ports/webOS-OSE"
 S = "${WORKDIR}/git"
 
@@ -47,18 +38,16 @@ SYSTEMD_SERVICE_${PN} = " \
     ${PN}-mediadb.service \
     ${PN}-pre-config.service \
     ${PN}-tempdb.service \
-"	
-	
-do_install_append() {	
-    install -d ${D}${systemd_unitdir}/system	
-    
+"
+
+do_install_append() {
+    install -d ${D}${systemd_unitdir}/system
 
     install -m 0644 ${S}/files/systemd/${PN}.service ${D}${systemd_unitdir}/system/
-    install -m 0644 ${S}/files/systemd/${PN}-maindb.service ${D}${systemd_unitdir}/system/	
-    install -m 0644 ${S}/files/systemd/${PN}-mediadb.service ${D}${systemd_unitdir}/system/	
-    install -m 0644 ${S}/files/systemd/${PN}-pre-config.service ${D}${systemd_unitdir}/system/	
-    install -m 0644 ${S}/files/systemd/${PN}-tempdb.service ${D}${systemd_unitdir}/system/		
-
+    install -m 0644 ${S}/files/systemd/${PN}-maindb.service ${D}${systemd_unitdir}/system/
+    install -m 0644 ${S}/files/systemd/${PN}-mediadb.service ${D}${systemd_unitdir}/system/
+    install -m 0644 ${S}/files/systemd/${PN}-pre-config.service ${D}${systemd_unitdir}/system/
+    install -m 0644 ${S}/files/systemd/${PN}-tempdb.service ${D}${systemd_unitdir}/system/
 }
 
 PV = "3.2.0-1+git${SRCPV}"
@@ -66,8 +55,6 @@ SRCREV = "b1280342c1fc655b6edb61228fc3ef6673ed0662"
 
 PACKAGES =+ "${PN}-tests"
 
-FILES_${PN}-tests = "${libdir}/${PN}/tests/*"
+FILES_${PN}-tests = "${libdir}/${PN}/tests"
 
 BBCLASSEXTEND = "native"
-
-CXXFLAGS += "-fpermissive"
