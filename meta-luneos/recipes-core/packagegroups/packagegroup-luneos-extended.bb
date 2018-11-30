@@ -121,7 +121,6 @@ LIBHYBRIS_RDEPENDS = " \
     qtscenegraph-adaptation \
     qtsensors-sensorfw-plugin \
     sensorfw \
-    nyx-modules-hybris \
     \
     exiv2 \
     libpulse-simple0 \
@@ -130,6 +129,8 @@ LIBHYBRIS_RDEPENDS = " \
     qtvideo-node \
     org.webosports.app.camera \
 "
+# Removed nyx-modules-hybris pending since it needs fixing for webOS OSE
+#    nyx-modules-hybris 
 
 MEMNOTIFY_RDEPENDS = " \
     memnotify-module \
