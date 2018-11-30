@@ -11,6 +11,13 @@ DEPENDS = "yajl glib-2.0 gperf-native flex-native lemon-native gmp uriparser boo
 inherit webos_public_repo
 inherit webos_cmake
 
+PV = "2.15.0-1+git${SRCPV}"
+SRCREV = "6cd4815a81830bbf6b22647ae8bb4fc818148ee7"
+
+# Otherwise it fails with:
+# libpbnjson/2.9.0-38+gitAUTOINC+5ffe5674fe-r0/git/src/pbnjson_c/validation/schema_builder.c:28:10: fatal error: schema_keywords.h: No such file or directory
+OECMAKE_GENERATOR = "Unix Makefiles"
+
 PACKAGECONFIG ??= ""
 PACKAGECONFIG_append_class-native = " tools"
 
@@ -25,7 +32,5 @@ PACKAGECONFIG[tools] = "-DPBNJSON_INSTALL_TOOLS:BOOL=TRUE,-DPBNJSON_INSTALL_TOOL
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
-
-SRCREV = "6cd4815a81830bbf6b22647ae8bb4fc818148ee7"
 
 BBCLASSEXTEND = "native"
