@@ -24,6 +24,7 @@ S = "${WORKDIR}/git"
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE_${PN} = "luna-sys-service.service"
 
+PV = "4.4.0-1+git${SRCPV}"
 SRCREV = "bdbd42f6b981b6e2553f39bdf9a92fc7d035e44b"
 
 do_install_append() {
