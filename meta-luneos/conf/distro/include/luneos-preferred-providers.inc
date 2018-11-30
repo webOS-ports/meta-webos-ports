@@ -24,4 +24,3 @@ VIRTUAL-RUNTIME_init_manager = "systemd systemd-compat-units systemd-machine-uni
 BAD_RECOMMENDATIONS = "update-rc.d"
 
 VIRTUAL-RUNTIME_stat = "busybox"
-VIRTUAL-RUNTIME_bash = "busybox"
