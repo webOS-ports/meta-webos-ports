@@ -17,5 +17,7 @@ WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files/sysbus"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webosose"
+
+PV = "2.1.0-5+git${SRCPV}"
 SRCREV = "a3efee3ddaea74c069a8b081944bd856fccd39ec"
 S = "${WORKDIR}/git"
