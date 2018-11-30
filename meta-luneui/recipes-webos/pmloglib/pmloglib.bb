@@ -32,5 +32,5 @@ do_install_append() {
     install -m 0644 ${S}/files/systemd/${SYSTEMD_SERVICE_${PN}} ${D}${systemd_unitdir}/system/
 }
 
-
+PV = "3.3.0-2+git${SRCPV}"
 SRCREV = "1d748e080d81c8ece27e4d103ccaad9bc133a937"
