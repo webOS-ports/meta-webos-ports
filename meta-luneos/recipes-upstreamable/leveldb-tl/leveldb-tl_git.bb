@@ -13,7 +13,8 @@ SECTION = "libs"
 LICENSE = "Apache-2.0 & LGPL-2.1"
 LIC_FILES_CHKSUM = "file://LICENSE.md;md5=a0e609841f5eed88831111c74c9b90a0"
 
-DEPENDS = "leveldb gtest"
+DEPENDS = "leveldb"
+DEPENDS_append_class-target = " gtest"
 
 SRC_URI = "git://github.com/ony/leveldb-tl.git;branch=gcc-4.9"
 
@@ -23,5 +24,9 @@ SRCREV = "515dc5da38aa2997ba4d44336bef2eeb44e5b0d2"
 S = "${WORKDIR}/git"
 
 inherit cmake
+
+EXTRA_OECMAKE_append_class-native = " -DBUILD_TESTING:BOOL=false -DBUILD_MKSANDWICH:BOOL=false"
+
+BBCLASSEXTEND = "native"
 
 SRC_URI += "file://0001-util-Fix-build-with-gcc7.patch"
