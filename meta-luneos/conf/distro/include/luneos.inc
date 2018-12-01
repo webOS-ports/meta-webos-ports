@@ -93,6 +93,7 @@ MACHINE_ESSENTIAL_EXTRA_RDEPENDS_remove_qemuall = "v86d"
 # Temporary to use latest staging vboxvideo driver with
 # https://github.com/torvalds/linux/commit/5cf5332d529bf7fd1f66378bb9611387c3e02b05#diff-6edc52f8a82e14082432721f3a52b2ab
 PREFERRED_PROVIDER_virtual/kernel_qemux86 = "linux-yocto-dev"
+PREFERRED_PROVIDER_virtual/kernel_qemux86-64 = "linux-yocto-dev"
 
 KERNEL_MODULE_AUTOLOAD_append_qemux86 = " vboxvideo vboxguest vboxsf"
 KERNEL_MODULE_PROBECONF_append_qemux86 = " vboxvideo"
