@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = " \
     file://NOTICE;md5=9645f39e9db895a4aa6e02cb57294595 \
 "
 
-DEPENDS += "boost libhybris glog"
+DEPENDS += "boost libhybris glog libunwind"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
@@ -20,3 +20,5 @@ inherit cmake
 inherit gettext
 inherit webos_systemd
 inherit webos_ports_repo
+
+SRC_URI += "file://0001-CMakeLists.txt-use-find_package-to-find-glog-instead.patch"
