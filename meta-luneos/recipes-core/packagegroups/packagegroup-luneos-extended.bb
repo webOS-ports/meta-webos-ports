@@ -11,6 +11,7 @@ NOT_COMPATIBLE_WITH_CURRENT_NODEJS = " \
 
 
 RDEPENDS_${PN} = " \
+  ${DISTRO_EXTRA_RDEPENDS} \
   distro-feed-configs \
   \
   pulseaudio-distro-conf \
