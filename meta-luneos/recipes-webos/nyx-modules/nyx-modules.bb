@@ -37,12 +37,14 @@ WEBOS_TARGET_CORE_OS = "rockhopper"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 inherit webos_public_repo
+inherit webos_ports_repo
 inherit webos_cmake
 inherit webos_machine_impl_dep
 inherit webos_core_os_dep
 inherit webos_nyx_module_provider
 
-SRC_URI = "git://github.com/Tofee/nyx-modules.git;branch=tofe/webosose"
+WEBOS_GIT_PARAM_BRANCH = "tofe/webosose"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 SRC_URI_append = " \
@@ -50,7 +52,7 @@ SRC_URI_append = " \
 "
 
 PV = "7.1.0-1+git${SRCPV}"
-SRCREV = "cc2ee1c1503641638eb3ea199530e38f7cea2d45"
+SRCREV = "af74a126de7aff1f2f958ad9c3838c0ef7c68a04"
 
 do_configure_prepend() {
     # install additional machine specific nyx configuration before CMake is started

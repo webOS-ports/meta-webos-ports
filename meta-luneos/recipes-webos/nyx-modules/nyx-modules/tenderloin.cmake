@@ -29,4 +29,4 @@ set(NYXMOD_OW_TOUCHPANEL_MTDEV		YES)
 add_definitions(-DBATTERY_SYSFS_PATH=\"/sys/class/power_supply/battery/\")
 add_definitions(-DTOUCHPANEL_DEVICE=\"/dev/input/event6\")
 
-install(FILES ../files/systemd/nyx.target.d/wait-touchscreen.conf DESTINATION ${WEBOS_INSTALL_ROOT}/lib/systemd/system/nyx.target.d/)
+install(FILES files/systemd/nyx.target.d/wait-touchscreen.conf DESTINATION ${WEBOS_INSTALL_ROOT}/lib/systemd/system/nyx.target.d/)
