@@ -6,7 +6,7 @@ SRC_URI += " \
   file://udev-stop.sh \
   file://functions \
 "
-SRCREV="45a48291070344e6dba5821c3bfcd0ff974dc8b3"
+SRCREV="37e2c80265e646169c8aee07acb1a9a3785ed699"
 
 do_install_append() {
     install -m 0644 ${WORKDIR}/git/scripts/halium ${D}/halium-boot.sh
