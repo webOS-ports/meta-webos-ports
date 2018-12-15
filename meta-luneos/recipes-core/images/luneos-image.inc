@@ -5,3 +5,5 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 IMAGE_FEATURES += "${LUNEOS_IMAGE_DEFAULT_FEATURES}"
 
 inherit luneos_image
+
+WKS_FILE = "luneos-image.wks"
