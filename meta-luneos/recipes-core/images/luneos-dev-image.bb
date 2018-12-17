@@ -4,6 +4,8 @@ DESCRIPTION = "Developers LuneOS image"
 
 IMAGE_FEATURES += "luneos-development"
 
+IMAGE_FEATURES_append = " dev-pkgs dbg-pkgs"
+
 webos_enable_devmode() {
     install -d ${IMAGE_ROOTFS}/var/luna
     touch ${IMAGE_ROOTFS}/var/luna/dev-mode-enabled
