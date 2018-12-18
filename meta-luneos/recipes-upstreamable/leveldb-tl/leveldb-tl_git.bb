@@ -34,3 +34,6 @@ EXTRA_OECMAKE_append_class-native = " -DBUILD_TESTING:BOOL=false -DBUILD_MKSANDW
 BBCLASSEXTEND = "native"
 
 SRC_URI += "file://0001-util-Fix-build-with-gcc7.patch"
+
+# ${PN} package is empty
+RDEPENDS_${PN}-dev = ""

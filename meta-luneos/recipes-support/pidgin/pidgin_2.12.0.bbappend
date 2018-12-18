@@ -6,3 +6,6 @@ EXTRA_OECONF += " \
     --enable-plugins \
     --enable-debug \
 "
+
+# ${PN} package is empty
+RDEPENDS_${PN}-dev = ""

@@ -20,3 +20,6 @@ S = "${WORKDIR}/git"
 
 PV = "3.3.0-2+git${SRCPV}"
 SRCREV = "42258fba451b75bd8452d0a4b038d45e9af61cc6"
+
+# ${PN} package is empty
+RDEPENDS_${PN}-dev = ""
