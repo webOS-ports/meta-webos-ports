@@ -35,3 +35,6 @@ sysroot_stage_all_append() {
 }
 
 FILES_${PN}-dev += "${prefix}/src"
+
+# ${PN} package is empty
+RDEPENDS_${PN}-dev = ""
