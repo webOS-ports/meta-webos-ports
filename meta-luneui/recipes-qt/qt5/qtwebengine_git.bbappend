@@ -28,6 +28,7 @@ SRC_URI += " \
     file://chromium/0004-storage-browser-quota-workaround-for-crash-on-cache-.patch;patchdir=src/3rdparty \
     file://chromium/0005-html.css-themeWin.css-Add-Prelude-as-default-font-in.patch;patchdir=src/3rdparty \
     file://chromium/0006-Fix-webGL2-Textures.patch;patchdir=src/3rdparty \
+    file://chromium/0007-qtwebchannel-mojom-provide-a-sync-call-for-LuneOS.patch \
 "
 
 do_install_append() {
