@@ -1,4 +1,4 @@
 # Use gallium and llvmpipe for rendering
-PACKAGECONFIG_append = " gallium gallium-llvm"
+PACKAGECONFIG_append_class-target = " gallium gallium-llvm"
 
-PACKAGECONFIG_append = " gbm"
+PACKAGECONFIG_append_class-target = " gbm"
