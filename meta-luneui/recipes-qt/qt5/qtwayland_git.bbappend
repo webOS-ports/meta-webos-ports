@@ -1,11 +1,12 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
 PACKAGECONFIG[wayland-brcm] = "-feature-wayland-brcm,-no-feature-wayland-brcm,virtual/egl"
-PACKAGECONFIG[drm-egl-server] = "-feature-drm-egl-server,-no-feature-drm-egl-server,libdrm virtual/egl"
-PACKAGECONFIG[libhybris-egl-server] = "-feature-libhybris-egl-server,-no-feature-libhybris-egl-server,libhybris"
+#PACKAGECONFIG[drm-egl-server] = "-feature-drm-egl-server,-no-feature-drm-egl-server,libdrm virtual/egl"
+#PACKAGECONFIG[libhybris-egl-server] = "-feature-libhybris-egl-server,-no-feature-libhybris-egl-server,libhybris"
 
-EXTRA_PACKAGECONFIG ?= "libhybris-egl-server"
-EXTRA_PACKAGECONFIG_qemuall = "drm-egl-server"
+EXTRA_PACKAGECONFIG ?= ""
+EXTRA_PACKAGECONFIG_qemuall = ""
+EXTRA_PACKAGECONFIG_hammerhead = ""
 EXTRA_PACKAGECONFIG_rpi = ""
 #EXTRA_PACKAGECONFIG_rpi = "wayland-brcm"
 PACKAGECONFIG_append_class-target = " ${EXTRA_PACKAGECONFIG}"
