@@ -19,6 +19,7 @@ SRC_URI = " \
     file://0002-Fix-4.4.2-hwcomposer-build.patch;striplevel=2 \
     file://0003-Qt-5.8-support.patch;striplevel=2 \
     file://0004-Fix-hwcomposer-backend.patch;striplevel=2 \
+    file://0005-hwcomposer_backend_v11-fix-compatibility-with-qtbase.patch;striplevel=2 \
 "
 S = "${WORKDIR}/git/hwcomposer"
 
