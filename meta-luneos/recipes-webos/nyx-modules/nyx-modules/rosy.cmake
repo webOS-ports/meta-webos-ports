@@ -19,13 +19,15 @@
 # configuration file for rosy
 # specify all the modules to be compiled
 
-set(MODULE_SYSTEM_WEBOS_LINUX		NO)
-set(MODULE_BATTERY_WEBOS_LINUX		YES)
-set(MODULE_CHARGER_WEBOS_LINUX		YES)
-set(MODULE_KEYS_WEBOS_LINUX			YES)
-set(MODULE_TOUCHPANEL_WEBOS_LINUX		NO)
-set(MODULE_TOUCHPANEL_MTDEV_WEBOS_LINUX		YES)
+set(NYXMOD_OW_SYSTEM			TRUE)
+set(NYXMOD_OW_MSMMTP			TRUE)
+set(NYXMOD_OW_BATTERY			TRUE)
+set(NYXMOD_OW_CHARGER			TRUE)
+set(NYXMOD_OW_KEYS			TRUE)
+set(NYXMOD_OW_TOUCHPANEL		FALSE)
+set(NYXMOD_OW_TOUCHPANEL_MTDEV		TRUE)
 
+add_definitions(-DKEYPAD_INPUT_DEVICE=\"/dev/input/event0\")
 add_definitions(-DBATTERY_SYSFS_PATH=\"/sys/class/power_supply/battery/\")
 add_definitions(-DTOUCHPANEL_DEVICE=\"/dev/input/event1\")
 add_definitions(-DCHARGER_AC_SYSFS_PATH=\"/sys/class/power_supply/usb/\")
