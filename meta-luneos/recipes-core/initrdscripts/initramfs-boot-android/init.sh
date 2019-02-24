@@ -122,6 +122,8 @@ fi
 # Start udev
 . udev-start.sh
 
+# Disable busybox's over-restrictive behavior with cpio extraction
+export EXTRACT_UNSAFE_SYMLINKS=1 
 # Call Halium's mount script
 mountroot
 
