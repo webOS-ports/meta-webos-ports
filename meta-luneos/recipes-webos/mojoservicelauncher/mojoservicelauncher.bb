@@ -9,7 +9,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "boost libpbnjson"
 RDEPENDS_${PN} = "nodejs"
 # fork_server.js wants to load these:
-RDEPENDS_${PN} += "nodejs-module-webos-dynaload nodejs-module-webos-pmlog nodejs-module-webos-sysbus mojoloader"
+RDEPENDS_${PN} += "nodejs-module-webos-pmlog mojoloader"
 
 PV = "3.0.2-2+git${SRCPV}"
 SRCREV = "94fc2181880f43a6ed71c5994c1a79485aa50353"
