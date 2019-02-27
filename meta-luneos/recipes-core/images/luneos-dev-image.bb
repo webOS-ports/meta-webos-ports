@@ -29,9 +29,6 @@ IMAGE_INSTALL_append = " \
     qtbase \
     qtbase-examples \
     qtbase-plugins \
-    weston \
-    weston-init \
-    weston-examples \
     gtk+3-demo \
     kernel-modules \
 "
@@ -39,4 +36,7 @@ IMAGE_INSTALL_append = " \
 IMAGE_INSTALL_append_qemuall = " \
     ${MESA_PKGS} \
     glmark2 \
+    weston \
+    weston-init \
+    weston-examples \
 "
