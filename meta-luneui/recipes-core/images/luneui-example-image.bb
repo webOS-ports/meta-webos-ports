@@ -18,9 +18,6 @@ IMAGE_INSTALL += " \
     qtbase \
     qtbase-examples \
     qtbase-plugins \
-    weston \
-    weston-init \
-    weston-examples \
     gtk+3-demo \
     kernel-modules \
     luna-next \
@@ -33,4 +30,7 @@ IMAGE_INSTALL_append_qemuall = " \
     v86d \
     qt5-plugin-generic-vboxtouch \
     glmark2 \
+    weston \
+    weston-init \
+    weston-examples \
 "
