@@ -63,12 +63,12 @@ process_bind_mounts() {
             mkdir -p $datadir/$dir
 
             # Copy initial content to new location outside rootfs
-            cp -rav ${rootmnt}/$dir/* $datadir/$dir
+            cp -ra ${rootmnt}/$dir/* $datadir/$dir
         done
 
         mkdir -p $datadir/userdata
         # Copy initial media to userdata
-        cp -rav ${rootmnt}/media/internal/* $datadir/userdata/
+        cp -ra ${rootmnt}/media/internal/* $datadir/userdata/
 
         # setup cryptofs which is not a real cryptofs yet
         if [ -d $datadir/userdata/.cryptofs ] ; then
