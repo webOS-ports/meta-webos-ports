@@ -129,9 +129,8 @@ LIBHYBRIS_RDEPENDS = " \
     libqtubuntu-media-signals2 \
     qtvideo-node \
     org.webosports.app.camera \
+    nyx-modules-hybris \
 "
-# Removed nyx-modules-hybris pending since it needs fixing for webOS OSE
-#    nyx-modules-hybris 
 
 MEMNOTIFY_RDEPENDS = " \
     memnotify-module \
