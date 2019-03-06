@@ -6,7 +6,7 @@ DEPENDS += "pulseaudio libhybris virtual/android-headers dbus udev"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-PULSEAUDIO_VERSION = "11.1"
+PULSEAUDIO_VERSION = "12.2"
 
 PV = "${PULSEAUDIO_VERSION}.74+gitr${SRCPV}"
 SRCREV = "b00bc7c3ea8cd58da61559769866e75308309ccd"
