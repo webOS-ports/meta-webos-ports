@@ -9,7 +9,6 @@ MESA_PKGS = " \
     libgles2-mesa \
     libgbm \
     mesa-megadriver \
-    mesa \
     libgles1-mesa \
     libglapi \
     libwayland-egl \
