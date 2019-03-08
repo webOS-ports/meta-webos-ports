@@ -24,3 +24,6 @@ VIRTUAL-RUNTIME_init_manager = "systemd systemd-compat-units systemd-machine-uni
 BAD_RECOMMENDATIONS = "update-rc.d"
 
 VIRTUAL-RUNTIME_stat = "busybox"
+
+# prefer a halium-flavored init script for initrd when building an Android boot image
+VIRTUAL-RUNTIME_android-initramfs-scripts = "initramfs-scripts-halium"
