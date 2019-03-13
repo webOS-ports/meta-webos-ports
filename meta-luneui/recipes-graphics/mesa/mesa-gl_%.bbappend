@@ -7,6 +7,7 @@ PROVIDES += "${@bb.utils.contains('PACKAGECONFIG', 'gbm', 'virtual/libgbm', '', 
 NOT_PROVIDED = "virtual/mesa"
 NOT_PROVIDED_qemuall = ""
 NOT_PROVIDED_pinephone = ""
+NOT_PROVIDED_hammerhead = ""
 PROVIDES_remove = "${NOT_PROVIDED}"
 
 do_install_append() {
