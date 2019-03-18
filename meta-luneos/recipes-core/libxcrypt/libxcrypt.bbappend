@@ -1,0 +1,7 @@
+# gcc-7 doesn't recognize missing-attributes error:
+# http://jenkins.nas-admin.org/job/LuneOS/view/unstable/job/luneos-unstable_qemux86/162/console
+# from config.log:
+# configure:3219: i586-webos-linux-gcc  -m32 -march=i586 --sysroot=/home/jenkins/workspace/luneos-unstable/webos-ports/tmp-glibc/work/i586-webos-linux/libxcrypt/4.4.2-r0/recipe-sysroot -I/home/jenkins/workspace/luneos-unstable/webos-ports/tmp-glibc/work/i586-webos-linux/libxcrypt/4.4.2-r0/recipe-sysroot/usr/include -Wno-error=missing-attributes -O2 -pipe -g -feliminate-unused-debug-types      -fdebug-prefix-map=/home/jenkins/workspace/luneos-unstable/webos-ports/tmp-glibc/work/i586-webos-linux/libxcrypt/4.4.2-r0=/usr/src/debug/libxcrypt/4.4.2-r0     -fdebug-prefix-map=/home/jenkins/workspace/luneos-unstable/webos-ports/tmp-glibc/work/i586-webos-linux/libxcrypt/4.4.2-r0/recipe-sysroot=     -fdebug-prefix-map=/home/jenkins/workspace/luneos-unstable/webos-ports/tmp-glibc/work/i586-webos-linux/libxcrypt/4.4.2-r0/recipe-sysroot-native=  -I/home/jenkins/workspace/luneos-unstable/webos-ports/tmp-glibc/work/i586-webos-linux/libxcrypt/4.4.2-r0/recipe-sysroot/usr/include -Wno-error=missing-attributes -Wl,-O1 -Wl,--hash-style=gnu -Wl,--as-needed conftest.c  >&5
+# cc1: error: -Werror=missing-attributes: no option -Wmissing-attributes
+# cc1: error: -Werror=missing-attributes: no option -Wmissing-attributes
+TARGET_CPPFLAGS_remove = "-Wno-error=missing-attributes"
