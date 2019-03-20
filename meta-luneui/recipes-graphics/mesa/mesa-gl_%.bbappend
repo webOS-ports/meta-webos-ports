@@ -7,3 +7,9 @@ PROVIDES += "${@bb.utils.contains('PACKAGECONFIG', 'gbm', 'virtual/libgbm', '', 
 NOT_PROVIDED = "virtual/mesa"
 NOT_PROVIDED_qemuall = ""
 PROVIDES_remove = "${NOT_PROVIDED}"
+
+do_install_append() {
+    if ${@oe.utils.conditional('PREFERRED_PROVIDER_virtual/egl', 'libhybris', 'true', 'false', d)} ; then
+        rm -rf ${D}${includedir}/KHR/khrplatform.h
+    fi
+}
