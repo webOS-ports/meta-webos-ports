@@ -29,3 +29,10 @@
 # DEFAULTTUNE_tuna = "cortexa9"
 # but be aware that grouper doesn't have cortexa9 available and a500 does not have cortexa8
 # if you want to use cortexa8 for all add cortexa8 settings to a500 (see tuna.conf).
+
+ARM_INSTRUCTION_SET = "thumb"
+DEFAULTTUNE_tenderloin = "cortexa8thf-neon"
+DEFAULTTUNE_hammerhead = "cortexa8thf-neon"
+DEFAULTTUNE_mako = "cortexa8thf-neon"
+DEFAULTTUNE_athene = "cortexa8thf-neon"
+DEFAULTTUNE_onyx = "cortexa8thf-neon"
