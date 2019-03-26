@@ -46,17 +46,17 @@ panic() {
 }
 
 mount_kernel_modules() {
-	# Avoid overriding kernel modules in LuneOS
+    # Avoid overriding kernel modules in LuneOS
     tell_kmsg "Skip overriding of kernel modules"
 }
 
 start_mdev() {
-	echo /sbin/mdev > /sys/kernel/uevent_helper
-	/sbin/mdev -s > /dev/kmsg
+    echo /sbin/mdev > /sys/kernel/uevent_helper
+    /sbin/mdev -s > /dev/kmsg
 }
 
 stop_mdev() {
-	killall mdev
+    killall mdev
 }
 
 process_bind_mounts() {

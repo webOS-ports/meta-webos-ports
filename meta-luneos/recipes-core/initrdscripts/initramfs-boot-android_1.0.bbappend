@@ -1,12 +1,12 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
 SRC_URI += " \
-  git://github.com/Tofee/initramfs-tools-halium.git;branch=tofe/ab-scheme \
-  file://functions \
+    git://github.com/Tofee/initramfs-tools-halium.git;branch=tofe/ab-scheme \
+    file://functions \
 "
 SRCREV="37e2c80265e646169c8aee07acb1a9a3785ed699"
 
-RDEPENDS_${PN} += " busybox-mdev "
+RDEPENDS_${PN} += "busybox-mdev"
 
 do_install_append() {
     install -m 0644 ${WORKDIR}/git/scripts/halium ${D}/halium-boot.sh
