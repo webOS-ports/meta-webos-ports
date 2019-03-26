@@ -50,6 +50,15 @@ mount_kernel_modules() {
     tell_kmsg "Skip overriding of kernel modules"
 }
 
+start_mdev() {
+	echo /sbin/mdev > /sys/kernel/uevent_helper
+	/sbin/mdev -s > /dev/kmsg
+}
+
+stop_mdev() {
+	killall mdev
+}
+
 process_bind_mounts() {
     # We need to mount some directories read-write in order to have a working
     # system so bind mount them from the outside into the rootfs. If we're
@@ -119,8 +128,8 @@ if [ $? -ne 1 ] ; then
     panic "Initramfs Debug Mode"
 fi
 
-# Start udev
-. udev-start.sh
+echo "Starting mdev" > /dev/kmsg
+start_mdev
 
 # Disable busybox's over-restrictive behavior with cpio extraction
 export EXTRACT_UNSAFE_SYMLINKS=1
@@ -128,8 +137,8 @@ export EXTRACT_UNSAFE_SYMLINKS=1
 # Call Halium's mount script
 mountroot
 
-# Stop udevd, we'll miss a few events while we run init, but we catch up
-. udev-stop.sh
+tell_kmsg "Stopping mdev"
+stop_mdev
 
 tell_kmsg "Umounting unneeded filesystems"
 umount -l /proc
