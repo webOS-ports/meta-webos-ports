@@ -82,6 +82,7 @@ RDEPENDS_${PN} = " \
     luna-init \
     luna-sysservice \
     mojoservicelauncher \
+    nyx-modules \
     pmklogd \
     pmlogctl \
     pmlogdaemon \
