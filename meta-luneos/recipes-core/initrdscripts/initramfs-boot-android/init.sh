@@ -52,21 +52,6 @@ mount_kernel_modules() {
     tell_kmsg "Skip overriding of kernel modules"
 }
 
-start_mdev() {
-    touch /dev/mdev.log
-    ps
-    echo /sbin/mdev > /sys/kernel/uevent_helper
-    /sbin/mdev -s > /dev/kmsg
-}
-
-stop_mdev() {
-    ps
-    echo "/dev/mdev.log contents:"
-    cat /dev/mdev.log
-    killall mdev
-    echo "" > /sys/kernel/uevent_helper
-}
-
 process_bind_mounts() {
     # We need to mount some directories read-write in order to have a working
     # system so bind mount them from the outside into the rootfs. If we're
@@ -117,6 +102,9 @@ mkdir -p /dev
 
 setup_devtmpfs ""
 
+# Put all of this script's output into /dev/kmsg
+exec &>/dev/kmsg
+
 # Check whether we need to boot recovery
 cat /proc/cmdline | grep skip_initramfs
 if [ $? -eq 1 ] && [ -f /recovery/init ] ; then
@@ -137,16 +125,19 @@ if [ $? -ne 1 ] ; then
 fi
 
 echo "Before mdev" > /dev/kmsg
-find /dev/disk > /dev/kmsg 2>&1
+find /dev/disk
 
 echo "Starting mdev" > /dev/kmsg
-start_mdev
+touch /dev/mdev.log
+ps
+echo /sbin/mdev > /sys/kernel/uevent_helper
+/sbin/mdev -s > /dev/kmsg
 
 # Disable busybox's over-restrictive behavior with cpio extraction
 export EXTRACT_UNSAFE_SYMLINKS=1
 
 echo "Before mountroot" > /dev/kmsg
-find /dev/disk > /dev/kmsg 2>&1
+find /dev/disk
 
 # Call Halium's mount script
 mountroot
@@ -155,7 +146,11 @@ echo "mount after mountroot" > /dev/kmsg
 mount > /dev/kmsg 2>&1
 
 tell_kmsg "Stopping mdev"
-stop_mdev
+ps
+echo "/dev/mdev.log contents:"
+cat /dev/mdev.log
+killall mdev
+echo "" > /sys/kernel/uevent_helper
 
 tell_kmsg "Umounting unneeded filesystems"
 umount -l /proc
