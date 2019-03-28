@@ -18,6 +18,8 @@ setup_devtmpfs() {
     test -c $1/dev/stdout || ln -sf fd/1 $1/dev/stdout
     test -c $1/dev/stderr || ln -sf fd/2 $1/dev/stderr
     test -c $1/dev/socket || mkdir -m 0755 $1/dev/socket
+    test -e $1/dev/pts || mkdir -m 0755 -p $1/dev/pts
+    test -e $1/dev/pts/0 || mount -t devpts devpts $1/dev/pts
 }
 
 panic() {
