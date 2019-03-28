@@ -137,6 +137,7 @@ ls -lah /sbin/mdev
 
 echo "Starting mdev" > /dev/kmsg
 touch /dev/mdev.log
+echo >/dev/mdev.seq
 ps
 echo /sbin/mdev > /sys/kernel/uevent_helper
 echo /sbin/mdev > /proc/sys/kernel/hotplug
