@@ -4,5 +4,5 @@
 # http://lists.openembedded.org/pipermail/openembedded-devel/2019-March/198937.html
 
 base_do_compile_prepend_arm() {
-    LDFLAGS="-fuse-ld=bfd"
+    export LDFLAGS="-fuse-ld=bfd"
 }
