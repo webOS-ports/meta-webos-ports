@@ -125,7 +125,7 @@ if [ $? -ne 1 ] ; then
 fi
 
 echo "Before mdev" > /dev/kmsg
-find /dev/disk
+find /dev
 
 echo "Starting mdev" > /dev/kmsg
 touch /dev/mdev.log
@@ -137,7 +137,11 @@ echo /sbin/mdev > /sys/kernel/uevent_helper
 export EXTRACT_UNSAFE_SYMLINKS=1
 
 echo "Before mountroot" > /dev/kmsg
-find /dev/disk
+find /dev
+echo "sleep for 30" > /dev/kmsg
+sleep 30
+echo "Find after sleep" > /dev/kmsg
+find /dev
 
 # Call Halium's mount script
 mountroot
