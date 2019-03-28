@@ -18,7 +18,9 @@ PV = "1.0.2+git${SRCPV}"
 SRCREV = "19633fd6f17d1a81927ea104c9d33473cb098305"
 
 WEBOS_REPO_NAME = "android-update-package"
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
+    file://0001-webos-deploy.sh-try-even-harder-to-work-around-broke.patch \
+"
 
 do_deploy() {
     IMG="${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}-${MACHINE}${IMAGE_NAME_SUFFIX}.tar.gz"
