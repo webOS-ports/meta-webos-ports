@@ -127,11 +127,25 @@ fi
 echo "Before mdev" > /dev/kmsg
 find /dev
 
+echo "Current /sys/kernel/uevent_helper"
+cat /sys/kernel/uevent_helper
+echo "Current /proc/sys/kernel/hotplug"
+cat /proc/sys/kernel/hotplug
+
+echo "/sbin/mdev"
+ls -lah /sbin/mdev
+
 echo "Starting mdev" > /dev/kmsg
 touch /dev/mdev.log
 ps
 echo /sbin/mdev > /sys/kernel/uevent_helper
+echo /sbin/mdev > /proc/sys/kernel/hotplug
 /sbin/mdev -s > /dev/kmsg
+
+echo "New /sys/kernel/uevent_helper"
+cat /sys/kernel/uevent_helper
+echo "New /proc/sys/kernel/hotplug"
+cat /proc/sys/kernel/hotplug
 
 # Disable busybox's over-restrictive behavior with cpio extraction
 export EXTRACT_UNSAFE_SYMLINKS=1
