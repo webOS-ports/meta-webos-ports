@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/sh -x
 
 # machine.conf should provide $system_partition (for panic scenario)
 . /machine.conf
@@ -58,6 +58,7 @@ start_mdev() {
 }
 
 stop_mdev() {
+    ps aux | grep mdev
     killall mdev
     echo "" > /sys/kernel/uevent_helper
 }
@@ -131,14 +132,23 @@ if [ $? -ne 1 ] ; then
     panic "Initramfs Debug Mode"
 fi
 
+echo "Before mdev" > /dev/kmsg
+find /dev/disk > /dev/kmsg 2>&1
+
 echo "Starting mdev" > /dev/kmsg
 start_mdev
 
 # Disable busybox's over-restrictive behavior with cpio extraction
 export EXTRACT_UNSAFE_SYMLINKS=1
 
+echo "Before mountroot" > /dev/kmsg
+find /dev/disk > /dev/kmsg 2>&1
+
 # Call Halium's mount script
 mountroot
+
+echo "mount after mountroot" > /dev/kmsg
+mount > /dev/kmsg 2>&1
 
 tell_kmsg "Stopping mdev"
 stop_mdev
