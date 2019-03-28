@@ -126,7 +126,7 @@ if [ $? -ne 1 ] ; then
 fi
 
 echo "Before mdev" > /dev/kmsg
-find /dev
+find /dev/
 
 echo "Current /sys/kernel/uevent_helper"
 cat /sys/kernel/uevent_helper
@@ -142,7 +142,7 @@ echo >/dev/mdev.seq
 ps
 echo /sbin/mdev > /sys/kernel/uevent_helper
 echo /sbin/mdev > /proc/sys/kernel/hotplug
-/sbin/mdev -s > /dev/kmsg
+/sbin/mdev -s
 
 echo "New /sys/kernel/uevent_helper"
 cat /sys/kernel/uevent_helper
@@ -153,11 +153,11 @@ cat /proc/sys/kernel/hotplug
 export EXTRACT_UNSAFE_SYMLINKS=1
 
 echo "Before mountroot" > /dev/kmsg
-find /dev
+find /dev/
 echo "sleep for 30" > /dev/kmsg
 sleep 30
 echo "Find after sleep" > /dev/kmsg
-find /dev
+find /dev/
 
 # Call Halium's mount script
 mountroot
