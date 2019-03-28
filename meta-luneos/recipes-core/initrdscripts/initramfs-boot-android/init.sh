@@ -53,12 +53,16 @@ mount_kernel_modules() {
 }
 
 start_mdev() {
+    touch /dev/mdev.log
+    ps
     echo /sbin/mdev > /sys/kernel/uevent_helper
     /sbin/mdev -s > /dev/kmsg
 }
 
 stop_mdev() {
-    ps aux | grep mdev
+    ps
+    echo "/dev/mdev.log contents:"
+    cat /dev/mdev.log
     killall mdev
     echo "" > /sys/kernel/uevent_helper
 }
