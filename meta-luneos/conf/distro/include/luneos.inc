@@ -165,7 +165,6 @@ CONNECTIVITY_CHECK_URIS ?= "http://jenkins.nas-admin.org \
 
 # TODO can check on all these host machines.
 SANITY_TESTED_DISTROS ?= " \
-    ubuntu-16.04 \n \
     ubuntu-18.04 \n \
 "
 
