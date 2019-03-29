@@ -59,6 +59,7 @@ start_mdev() {
 
 stop_mdev() {
     killall mdev
+    echo "" > /sys/kernel/uevent_helper
 }
 
 process_bind_mounts() {
