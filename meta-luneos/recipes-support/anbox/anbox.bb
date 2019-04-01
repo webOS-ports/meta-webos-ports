@@ -40,6 +40,13 @@ SRC_URI = "git://github.com/anbox/anbox \
 "
 S = "${WORKDIR}/git"
 
+# anbox-data is available only for following 4 archs
+COMPATIBLE_MACHINE ?= "(^$)"
+COMPATIBLE_MACHINE_x86-64 = "(.*)"
+COMPATIBLE_MACHINE_armv7a = "(.*)"
+COMPATIBLE_MACHINE_armv7ve = "(.*)"
+COMPATIBLE_MACHINE_aarch64 = "(.*)"
+
 EXTRA_OECMAKE += "-DCMAKE_BUILD_TYPE=debug"
 EXTRA_OECMAKE += "-DWAYLAND_SUPPORT=1"
 EXTRA_OECMAKE += "-DHOST_CMAKE_C_COMPILER='${BUILD_CC}'"
