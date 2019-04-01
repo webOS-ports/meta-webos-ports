@@ -21,3 +21,10 @@ do_install_append() {
 KERNEL_MODULE_AUTOLOAD += "binder_linux"
 
 FILES_${PN} += "${sysconfdir}/udev"
+
+# Needs quite new kernel (probably >= 3.18) and from LuneOS supported machines
+# only qemux86, qemux86-64 and rpi (later hammerhead-mainline) MACHINEs have it
+COMPATIBLE_MACHINE ?= "(^$)"
+COMPATIBLE_MACHINE_qemux86 = "(.*)"
+COMPATIBLE_MACHINE_qemux86-64 = "(.*)"
+COMPATIBLE_MACHINE_rpi = "(.*)"
