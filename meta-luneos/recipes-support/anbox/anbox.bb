@@ -36,12 +36,13 @@ SRC_URI = "git://github.com/anbox/anbox \
 "
 S = "${WORKDIR}/git"
 
-# anbox-data is available only for following 4 archs
+# Needs quite new kernel (probably >= 3.18) and from LuneOS supported machines
+# only qemux86, qemux86-64 and rpi (later hammerhead-mainline) MACHINEs have it
+# Unlink ashmem, binder drop qemux86 here, because anbox-data is available only
+# for following 4 archs (x86-64, armv7a, armv7ve, aarch64)
 COMPATIBLE_MACHINE ?= "(^$)"
-COMPATIBLE_MACHINE_x86-64 = "(.*)"
-COMPATIBLE_MACHINE_armv7a = "(.*)"
-COMPATIBLE_MACHINE_armv7ve = "(.*)"
-COMPATIBLE_MACHINE_aarch64 = "(.*)"
+COMPATIBLE_MACHINE_qemux86-64 = "(.*)"
+COMPATIBLE_MACHINE_rpi = "(.*)"
 
 EXTRA_OECMAKE += "-DCMAKE_BUILD_TYPE=debug"
 EXTRA_OECMAKE += "-DWAYLAND_SUPPORT=1"
