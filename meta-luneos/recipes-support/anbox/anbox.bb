@@ -17,8 +17,6 @@ RDEPENDS_${PN} += "anbox-data"
 # these modules are directly included in android-flavored kernels
 # Note: Anbox requires kernel >= 3.18 !
 RRECOMMENDS_${PN} += " \
-    ashmem \
-    binder \
     kernel-module-ashmem-linux \
     kernel-module-binder-linux \
     kernel-module-squashfs \
