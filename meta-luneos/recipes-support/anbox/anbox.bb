@@ -7,7 +7,7 @@ LIC_FILES_CHKSUM = "file://COPYING.GPL;md5=f27defe1e96c2e1ecd4e0c9be8967949"
 
 SECTION = "webos/support"
 
-SRCREV = "4a5cb84231bcff0e3ebe44f6dcd6accf8bcf2e92"
+SRCREV = "d521e282965462e82465045ab95d4ae1c4619685"
 PV = "3.0+git${SRCPV}"
 
 DEPENDS += "dbus-cpp libsdl2 libsdl2-image lxc glm protobuf protobuf-native gtest virtual/egl"
@@ -29,10 +29,6 @@ SRC_URI = "git://github.com/anbox/anbox \
     file://0002-Fix-native-binaries-build.patch \
     file://0003-Fix-emugl-build.patch \
     file://0004-Fix-build-with-Wayland-SDL2.patch \
-    file://0005-Fix-invalid-method-overload.patch \
-    file://0006-Exclude-GLX-translator-from-build.patch \
-    file://0007-Fix-build-on-LuneOS-with-libhybris.patch \
-    file://0008-GLcommon-add-dependency-on-GLHeaders.patch \
     file://anbox-container-manager.service \
     file://anbox-session-manager.service \
     file://anbox-bridge.network \
@@ -69,9 +65,7 @@ do_install_append() {
     install -d ${D}${systemd_unitdir}/network
     install -Dm 644 ${WORKDIR}/anbox-bridge.network ${D}${systemd_unitdir}/network/80-anbox-bridge.network
     install -Dm 644 ${WORKDIR}/anbox-bridge.netdev ${D}${systemd_unitdir}/network/80-anbox-bridge.netdev
-
-    install -d ${D}${sysconfdir}/udev/rules.d
-    install -m 0644 ${S}/kernel/99-anbox.rules ${D}${sysconfdir}/udev/rules.d/99-anbox.rules
 }
 
-FILES_${PN} += " ${systemd_unitdir} ${sysconfdir}/udev"
+FILES_${PN} += "${systemd_unitdir}"
+FILES_${PN}-dev += "${libdir}/backward/BackwardConfig.cmake"
