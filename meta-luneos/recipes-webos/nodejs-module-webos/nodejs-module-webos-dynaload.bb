@@ -8,7 +8,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "boost node-gyp-native"
 
 PV = "3.0.1-14+git${SRCPV}"
-SRCREV = "4eedb88e6eea69c88d30f5519d91113419cb7e71"
+SRCREV = "fa4a170707229011c4eb551792c2310ee4526809"
 
 inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
