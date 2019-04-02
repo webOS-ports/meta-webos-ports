@@ -17,7 +17,7 @@ inherit webos_system_bus
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webosose"
 S = "${WORKDIR}/git"
 
-SRCREV = "d00dafb9ab774b3dab97e915688c6a282b2cd64e"
+SRCREV = "ffd3a8d0b073bd6c102053e48ef70d598f44c1de"
 do_configure() {
     export HOME=${WORKDIR}
     export LD="${CXX}"
