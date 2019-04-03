@@ -11,7 +11,7 @@ DEPENDS += "boost libhybris glog libunwind"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 PV = "0.0.3+gitr${SRCPV}"
-SRCREV = "6159f1a1430d2bf385ead417e9858f2a65d91ecd"
+SRCREV = "bb4a81e61b8a21442fc6807766ec4e49e2b35000"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
@@ -20,5 +20,3 @@ inherit cmake
 inherit gettext
 inherit webos_systemd
 inherit webos_ports_repo
-
-SRC_URI += "file://0001-CMakeLists.txt-use-find_package-to-find-glog-instead.patch"
