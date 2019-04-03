@@ -8,14 +8,12 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 PULSEAUDIO_VERSION = "12.2"
 
-PV = "${PULSEAUDIO_VERSION}.74+gitr${SRCPV}"
-SRCREV = "b00bc7c3ea8cd58da61559769866e75308309ccd"
+PV = "${PULSEAUDIO_VERSION}.77+git${SRCPV}"
+SRCREV = "b1ce02b3d6e983fed34bba9defea9a1d74d6b917"
 
-SRC_URI = "git://github.com/mer-hybris/pulseaudio-modules-droid.git;branch=master;protocol=git"
-
-SRC_URI += " \
-    file://0001-add-support-for-detected-external-connection-changes.patch \
-    file://0002-droid-extcon-c-adapt-to-new-pulseaudio-5-apis.patch \
+SRC_URI = "git://github.com/mer-hybris/pulseaudio-modules-droid.git \
+    file://0001-Add-support-for-detected-external-connection-changes.patch \
+    file://0002-droid-extcon.c-adapt-to-new-pulseaudio-5-APIs.patch \
 "
 
 S = "${WORKDIR}/git"
