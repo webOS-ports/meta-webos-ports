@@ -5,3 +5,5 @@ SRC_URI += " \
     file://0002-fd_fdinfo_mnt_id-disable-fdinfo-stat.patch \
     file://0003-Disable-ProtectHome-and-ProtectSystem-for-old-kernel.patch \
 "
+
+PACKAGECONFIG_remove = "resolved networkd"
