@@ -11,8 +11,8 @@ PV = "2.0.0-1+git${SRCPV}"
 SRCREV = "51341059f7e53bbff150c728a2ac09daf90edf55"
 
 inherit webos_public_repo
-inherit webos_cmake
 inherit allarch
+inherit webos_cmake
 inherit pkgconfig
 
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
