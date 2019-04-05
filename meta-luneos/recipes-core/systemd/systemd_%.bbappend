@@ -6,4 +6,4 @@ SRC_URI += " \
     file://0003-Disable-ProtectHome-and-ProtectSystem-for-old-kernel.patch \
 "
 
-PACKAGECONFIG_remove = "resolved networkd"
+PACKAGECONFIG_remove = "resolved networkd nss-resolve"
