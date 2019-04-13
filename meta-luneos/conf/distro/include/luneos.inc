@@ -122,10 +122,28 @@ INHERIT_DISTRO ?= "debian devshell sstate license remove-libtool buildstats buil
 
 SOURCE_MIRROR_URL = "http://sources.webos-ports.org/"
 
-WARN_QA_append = " version-going-backwards webos-enh-sub-warning"
+WARN_QA_append = " version-going-backwards"
 WEBOS_ERROR_QA_AUTOREV ?= "webos-enh-sub-autorev-error"
-ERROR_QA_append = " webos-enh-sub-error ${WEBOS_ERROR_QA_AUTOREV}"
+ERROR_QA_append = " webos-enh-sub-warning webos-enh-sub-error ${WEBOS_ERROR_QA_AUTOREV}"
 ERROR_QA_remove = " version-going-backwards"
+
+# Add all default WARN_QA to ERROR_QA
+ERROR_QA_append = " \
+    ldflags useless-rpaths rpaths staticdev libdir xorg-driver-abi \
+    textrel already-stripped incompatible-license files-invalid \
+    installed-vs-shipped compile-host-path install-host-path \
+    pn-overrides infodir build-deps \
+    unknown-configure-option symlink-to-sysroot multilib \
+    invalid-packageconfig host-user-contaminated uppercase-pn patch-fuzz \
+"
+WARN_QA_remove = " \
+    ldflags useless-rpaths rpaths staticdev libdir xorg-driver-abi \
+    textrel already-stripped incompatible-license files-invalid \
+    installed-vs-shipped compile-host-path install-host-path \
+    pn-overrides infodir build-deps \
+    unknown-configure-option symlink-to-sysroot multilib \
+    invalid-packageconfig host-user-contaminated uppercase-pn patch-fuzz \
+"
 
 # Default WEBOS_TARGET_* values (see webos_cmake.bbclass)
 WEBOS_TARGET_CORE_OS ?= "rockhopper"
