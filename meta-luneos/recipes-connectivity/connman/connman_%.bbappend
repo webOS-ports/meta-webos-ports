@@ -1,5 +1,8 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${BPN}:"
 
+# we have resolved disabled in systemd
+SRC_URI_remove = "file://0001-connman.service-stop-systemd-resolved-when-we-use-co.patch"
+
 SRC_URI += "file://0001-connman.service.in-start-after-android-system.servic.patch"
 
 PACKAGECONFIG[nfc] = "--enable-neard, --disable-neard, neard, neard"
