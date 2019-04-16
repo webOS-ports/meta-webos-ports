@@ -7,6 +7,7 @@ PACKAGECONFIG[wayland-brcm] = "-feature-wayland-brcm,-no-feature-wayland-brcm,vi
 EXTRA_PACKAGECONFIG ?= ""
 EXTRA_PACKAGECONFIG_qemuall = ""
 EXTRA_PACKAGECONFIG_hammerhead = ""
+EXTRA_PACKAGECONFIG_pinephone = ""
 EXTRA_PACKAGECONFIG_rpi = ""
 #EXTRA_PACKAGECONFIG_rpi = "wayland-brcm"
 PACKAGECONFIG_append_class-target = " ${EXTRA_PACKAGECONFIG}"
