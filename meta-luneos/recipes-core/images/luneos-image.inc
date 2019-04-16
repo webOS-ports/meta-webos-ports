@@ -6,4 +6,4 @@ IMAGE_FEATURES += "${LUNEOS_IMAGE_DEFAULT_FEATURES}"
 
 inherit luneos_image
 
-WKS_FILE = "luneos-image.wks"
+WKS_FILE ?= "luneos-image.wks"
