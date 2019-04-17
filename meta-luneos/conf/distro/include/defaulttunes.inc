@@ -36,3 +36,9 @@ DEFAULTTUNE_hammerhead = "cortexa8thf-neon"
 DEFAULTTUNE_mako = "cortexa8thf-neon"
 DEFAULTTUNE_athene = "cortexa8thf-neon"
 DEFAULTTUNE_onyx = "cortexa8thf-neon"
+
+# http://lists.openembedded.org/pipermail/openembedded-core/2019-April/281328.html
+# make sure that raspberrypi3-64 with DEFAULTTUNE="cortexa53" uses different TUNE_PKGARCH
+# than e.g. tissot with DEFAULTTUNE="aarch64"
+TUNE_PKGARCH_64_raspberrypi3-64 = "aarch64-cortexa53"
+PACKAGE_EXTRA_ARCHS_append_raspberrypi3-64 = " aarch64-cortexa53"
