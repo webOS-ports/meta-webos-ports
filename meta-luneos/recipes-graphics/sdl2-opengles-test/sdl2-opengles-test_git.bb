@@ -8,7 +8,7 @@ DEPENDS += "libsdl2"
 inherit webos_filesystem_paths pkgconfig
 
 TARGETS = "sdl2_opengles1_test sdl2_opengles2_test"
-TARGETS_raspberrypi3 = "sdl2_opengles2_test"
+TARGETS_rpi = "sdl2_opengles2_test"
 
 PV = "1.0.6+gitr${SRCPV}"
 SRC_URI = "git://github.com/thp/sdl2-opengles-test \
