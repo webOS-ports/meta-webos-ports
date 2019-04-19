@@ -5,4 +5,4 @@ LIC_FILES_CHKSUM = " \
 "
 
 SRC_URI = "git://github.com/Tofee/qt5-plugin-generic-vboxtouch.git"
-SRCREV = "26e613f84e67f967c854a0bf5f3ab95b03f204bb"
+SRCREV = "5c3b346e2c72900158f207f86e62f1f2672f494a"
