@@ -4,8 +4,8 @@ LIC_FILES_CHKSUM = "file://src/main.cpp;beginline=1;endline=18;md5=a513bca9b1708
 
 DEPENDS += "qtbase qtmultimedia libqofono"
 
-PV = "0.7.5+gitr${SRCPV}"
-SRCREV = "aa8876d6b0969a4e2d0bd9565e87967142b84792"
+PV = "0.7.8+gitr${SRCPV}"
+SRCREV = "c15b7f95e1d165155461c10820824e22bfe882a4"
 
 inherit qmake5
 inherit systemd
