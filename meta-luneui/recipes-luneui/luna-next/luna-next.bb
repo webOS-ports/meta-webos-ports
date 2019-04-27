@@ -12,8 +12,8 @@ DEPENDS = "qtbase qtdeclarative qtwayland luna-sysmgr-common extra-cmake-modules
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webosose"
 S = "${WORKDIR}/git"
 
-PV = "0.5.0-2+git${SRCPV}"
-SRCREV = "b2b6ead87ce95cf1f8ce409e66cbff681510cc9d"
+PV = "0.5.0-3+git${SRCPV}"
+SRCREV = "29fb9b2a0a7e79b5ef6c80d0a702d09137e751b8"
 
 # Otherwise there is conflict between None defined in Xlib.h and
 # qtdeclarative's /usr/include/qt5/QtQuick/qsgtexture.h:59
