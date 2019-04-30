@@ -24,7 +24,7 @@ export HOST_SYS
 export STAGING_INCDIR
 export STAGING_LIBDIR
 
-# Without this line, package is delcared a library and named libgeoclue*
+# Without this line, package is declared a library and named libgeoclue*
 AUTO_LIBNAME_PKGS = ""
 
 PACKAGECONFIG ??= "3g modem-gps cdma nmea lib"
