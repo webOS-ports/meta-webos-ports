@@ -6,14 +6,14 @@ SECTION = "webos/base"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-inherit webos_public_repo
+inherit webos_ports_repo
 inherit webos_cmake
 inherit webos_system_bus
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webOS-ports/webOS-OSE"
 S = "${WORKDIR}/git"
 
-SRCREV = "761191b1ff6ce4465e62109f8c9a0d018108d435"
+SRCREV = "8b739ccb07e660999941062a6a4c7c876a164115"
 
 FILES_${PN} += "${webos_sysbus_datadir}"
 
