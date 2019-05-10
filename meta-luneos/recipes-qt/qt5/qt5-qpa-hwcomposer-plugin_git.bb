@@ -4,8 +4,8 @@ sometimes also SoC type (generic, qcom, exynos4, ...)."
 LICENSE = "LGPL-2.1"
 LIC_FILES_CHKSUM = "file://hwcomposer_backend.cpp;beginline=1;endline=40;md5=09c08382077db2dbc01b1b5536ec6665"
 
-PV = "5.2.0+gitr${SRCPV}"
-SRCREV = "a85d3518550193aaee69a6a011f290a2859db5ca"
+PV = "5.6.0+gitr${SRCPV}"
+SRCREV = "df9bddc316a30ee46055c700a40d68bb73e7e87b"
 
 DEPENDS = "qtbase libhybris qtwayland virtual/android-headers qtsensors"
 
@@ -20,6 +20,7 @@ SRC_URI = " \
     file://0003-Qt-5.8-support.patch;striplevel=2 \
     file://0004-Fix-hwcomposer-backend.patch;striplevel=2 \
     file://0005-hwcomposer_backend_v11-fix-compatibility-with-qtbase.patch;striplevel=2 \
+    file://0006-Revert-Add-systraces-to-v11.patch;striplevel=2 \
 "
 S = "${WORKDIR}/git/hwcomposer"
 
