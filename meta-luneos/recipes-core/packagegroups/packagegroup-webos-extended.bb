@@ -38,6 +38,9 @@ WEBOS_PACKAGESET_SYSTEMAPPS = " \
     luna-universalsearchmgr \
     app-services \
     core-apps \
+    mojomail-imap \
+    mojomail-pop \
+    mojomail-smtp \
 "
 
 # This packageset controls which time zone packages should be included in webOS.
