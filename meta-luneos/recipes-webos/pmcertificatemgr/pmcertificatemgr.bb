@@ -10,7 +10,7 @@ DEPENDS = "openssl glib-2.0"
 RDEPENDS_${PN} = "ca-certificates"
 
 PV = "2.0.0-29+git${SRCPV}"
-SRCREV = "dc711d0788cd782e543bfa4c82eb23aee238825d"
+SRCREV = "89a0bdcb9bdc6f99565aef7e2056c8bd4ad414e7"
 
 inherit webos_ports_repo
 inherit webos_cmake
