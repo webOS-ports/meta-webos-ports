@@ -68,6 +68,8 @@ RDEPENDS_${PN} = " \
   fingerterm \
   \
   ca-certificates \
+  certmgrd \
+  pmcertificatemgr \
   \
   qtbase-plugins \
   qtmultimedia-plugins \
