@@ -17,7 +17,7 @@ DEPENDS = "systemd"
 
 SRCREV = "8868356c5a159a9d03076654df0f4878b627e482"
 inherit webos_cmake
-inherit webos_public_repo
+inherit webos_ports_fork_repo
 inherit systemd
 
 WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
