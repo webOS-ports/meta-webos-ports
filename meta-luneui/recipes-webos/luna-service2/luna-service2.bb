@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2018 LG Electronics, Inc.
+# Copyright (c) 2012-2019 LG Electronics, Inc.
 
 SUMMARY = "webOS Luna System Bus library, daemon, and utilities"
 AUTHOR = "Anatolii Sakhnik <anatolii.sakhnik@lge.com>"
@@ -32,7 +32,7 @@ S = "${WORKDIR}/git"
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE_${PN} = "ls-hubd.service"
 
-SRCREV = "f9e902b1db591efdca2f758124d11eaa5db6ac81"
+SRCREV = "0ceb9815abc6483cce435dbe1fd3bf17ccd9d239"
 
 # This fix-up will be removed shortly. luna-service2 headers must be included
 # using '#include <luna-service2/*.h>'

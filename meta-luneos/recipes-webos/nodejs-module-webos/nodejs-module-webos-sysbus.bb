@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2018 LG Electronics, Inc.
+# Copyright (c) 2012-2019 LG Electronics, Inc.
 
 SUMMARY = "A module for nodejs that allows Javascript access to the webOS system bus"
 AUTHOR = "Anatolii Sakhnik <anatolii.sakhnik@lge.com>"
@@ -14,10 +14,10 @@ inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
 inherit webos_system_bus
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webosose"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webOS-ports/webOS-OSE"
 S = "${WORKDIR}/git"
 
-SRCREV = "ffd3a8d0b073bd6c102053e48ef70d598f44c1de"
+SRCREV = "9102a6d2df9ceb243d5c5b721e10532e75c53c27"
 do_configure() {
     export HOME=${WORKDIR}
     export LD="${CXX}"

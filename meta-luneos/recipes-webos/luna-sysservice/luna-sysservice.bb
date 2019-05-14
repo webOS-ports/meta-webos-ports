@@ -25,7 +25,7 @@ SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE_${PN} = "luna-sys-service.service"
 
 PV = "4.4.0-1+git${SRCPV}"
-SRCREV = "bdbd42f6b981b6e2553f39bdf9a92fc7d035e44b"
+SRCREV = "f82eda557270c3d98f289315d02a14bbde446a86"
 
 do_install_append() {
     install -d ${D}${datadir}/localization/${BPN}
