@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2018 LG Electronics, Inc.
+# Copyright (c) 2012-2019 LG Electronics, Inc.
 
 SUMMARY = "webOS logging library"
 AUTHOR = "Gayathri Srinivasan <gayathri.srinivasan@lge.com>"
@@ -24,7 +24,7 @@ SYSTEMD_SERVICE_${PN} = "pm-log-daemon.service"
 PACKAGECONFIG ??= ""
 PACKAGECONFIG[whitelist] = "-DENABLE_WHITELIST:BOOL=TRUE, -DENABLE_WHITELIST:BOOL=FALSE"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webosose"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webOS-ports/webOS-OSE"
 S = "${WORKDIR}/git"
 
 do_install_append() {
@@ -33,4 +33,4 @@ do_install_append() {
 }
 
 PV = "3.3.0-2+git${SRCPV}"
-SRCREV = "1d748e080d81c8ece27e4d103ccaad9bc133a937"
+SRCREV = "5907dc9dee7b561d4287ca93234e13bd9ae2dfa9"
