@@ -16,7 +16,8 @@ inherit webos_systemd
 
 PV = "2.0.0-1+git${SRCPV}"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webOS-ports/webOS-OSE"
+WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 SRCREV = "e0cba0a5408da3ded42f8c6c7c9b94b337d71e7c"

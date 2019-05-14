@@ -15,7 +15,8 @@ B = "${S}/build-private"
 EXTRA_OECMAKE += "-DBUILD_PRIVATE=ON"
 
 WEBOS_REPO_NAME = "pmloglib"
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webOS-ports/webOS-OSE"
+WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 PV = "3.3.0-2+git${SRCPV}"

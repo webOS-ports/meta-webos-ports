@@ -18,7 +18,8 @@ inherit pkgconfig
 inherit webos_machine_impl_dep
 inherit webos_systemd
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webOS-ports/webOS-OSE"
+WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 FILES_${PN} += "${webos_sysbus_datadir}"

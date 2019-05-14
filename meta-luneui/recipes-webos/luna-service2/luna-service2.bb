@@ -26,7 +26,8 @@ inherit webos_lttng
 inherit webos_test_provider
 inherit systemd
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webOS-ports/webOS-OSE"
+WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 SYSTEMD_PACKAGES = "${PN}"
