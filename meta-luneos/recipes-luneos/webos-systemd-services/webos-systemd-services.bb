@@ -10,7 +10,8 @@ inherit webos_ports_repo
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webosose"
+WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit systemd

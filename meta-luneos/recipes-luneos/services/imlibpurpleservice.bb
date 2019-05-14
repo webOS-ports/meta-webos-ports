@@ -16,7 +16,8 @@ inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webosose-2"
+WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 RRECOMMENDS_${PN} += " \

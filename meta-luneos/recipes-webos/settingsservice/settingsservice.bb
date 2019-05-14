@@ -18,11 +18,12 @@ inherit systemd
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE_${PN} = "settings-service-recovery.service settings-service.service"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO}/${PN};branch=webosose"
+WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 S = "${WORKDIR}/git"
 
-SRCREV = "e8c1c8293c2163e16e9feb4d16b44b60a7c37c2c"
+SRCREV = "e243ddfe472c236d0fa4b740e35fa4fc6bc071a5"
 
 WEBOS_SYSTEM_BUS_MANIFEST_TYPE = "SERVICE"
 
