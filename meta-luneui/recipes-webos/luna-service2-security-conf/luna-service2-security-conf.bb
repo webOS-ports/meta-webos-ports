@@ -10,7 +10,8 @@ inherit webos_ports_repo
 inherit webos_cmake
 inherit webos_system_bus
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webOS-ports/webOS-OSE"
+WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 SRCREV = "8b739ccb07e660999941062a6a4c7c876a164115"

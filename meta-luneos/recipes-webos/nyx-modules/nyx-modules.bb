@@ -43,7 +43,7 @@ inherit webos_machine_impl_dep
 inherit webos_core_os_dep
 inherit webos_nyx_module_provider
 
-WEBOS_GIT_PARAM_BRANCH = "tofe/webosose"
+WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 

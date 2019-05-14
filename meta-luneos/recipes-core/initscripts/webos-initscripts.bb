@@ -20,7 +20,9 @@ inherit webos_cmake
 inherit webos_public_repo
 inherit systemd
 
-SRC_URI = "git://github.com/herrie82/webos-initscripts.git;branch=webosose"
+WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE_${PN} = "default-webos.target \
                          webos-cbd.target \

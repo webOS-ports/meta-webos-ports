@@ -15,7 +15,8 @@ inherit webos_system_bus
 inherit webos_systemd
 
 WEBOS_REPO_NAME = "preware"
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webosose"
+WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 S = "${WORKDIR}/git/oe-service"
 
