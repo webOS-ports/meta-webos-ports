@@ -17,6 +17,6 @@ PV = "1.5.0-1+git${SRCPV}"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webOS-ports/webOS-OSE"
 S = "${WORKDIR}/git"
 
-SRCREV = "0c86744f29fe18088b08fd4103666b9c4a4964aa"
+SRCREV = "3efc873d73c453b08b56e150268fc74bf4b013cc"
 
 FILES_${PN} += "${libdir}/nyx/nyxcmd/"

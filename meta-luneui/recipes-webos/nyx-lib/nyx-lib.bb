@@ -21,17 +21,17 @@ PV = "7.3.0-1+git${SRCPV}"
 
 DEPENDS = "glib-2.0 pmloglib"
 
-inherit webos_public_repo
+inherit webos_ports_repo
 inherit webos_cmake
 inherit systemd
 
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE_${PN} = "nyx.target"
 
-SRC_URI = "git://github.com/herrie82/nyx-lib.git;branch=herrie/webosose"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webOS-ports/webOS-OSE"
 S = "${WORKDIR}/git"
 
-SRCREV = "097ecf2cfefd2c6e73c516accd3b99b90154c467"
+SRCREV = "88731b85f124ea950860941a027682374f174265"
 
 do_install_append() {
     install -d ${D}${systemd_unitdir}/system
