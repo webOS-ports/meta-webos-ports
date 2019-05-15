@@ -32,3 +32,5 @@ RDEPENDS_${PN} = " \
     qtubuntu-camera \
 "
 
+# Rdepends on qtubuntu-camera which depends on libhybris which has this restriction
+COMPATIBLE_MACHINE = "^halium$"

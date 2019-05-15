@@ -6,6 +6,9 @@ DEPENDS += "luna-service2 libhybris libpbnjson luna-prefs virtual/android-header
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
+# Depends on libhybris which has this restriction
+COMPATIBLE_MACHINE = "^halium$"
+
 inherit webos_ports_repo
 inherit webos_cmake
 inherit pkgconfig

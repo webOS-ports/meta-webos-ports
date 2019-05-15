@@ -13,6 +13,9 @@ DEPENDS = "qtbase libhybris qtwayland virtual/android-headers qtsensors"
 # Android version we select per machine
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
+# Depends on libhybris which has this restriction
+COMPATIBLE_MACHINE = "^halium$"
+
 SRC_URI = " \
     git://github.com/mer-hybris/qt5-qpa-hwcomposer-plugin.git \
     file://0001-Add-support-for-QScreen-orientation-based-on-QtSenso.patch;striplevel=2 \

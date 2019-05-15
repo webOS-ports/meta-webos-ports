@@ -9,6 +9,9 @@ DEPENDS = "libhybris qtbase libqtubuntu-media-signals exiv2 qtmultimedia pulseau
 
 RDEPENDS_${PN} += "qtmultimedia-plugins libpulse-simple0"
 
+# Depends on libhybris which has this restriction
+COMPATIBLE_MACHINE = "^halium$"
+
 SRCREV = "168"
 SRC_URI = "bzr://bazaar.launchpad.net/~phablet-team/qtubuntu-camera/trunk"
 PV = "0.3.3+bzr${SRCREV}"

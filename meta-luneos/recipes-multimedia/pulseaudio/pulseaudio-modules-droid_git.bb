@@ -6,6 +6,9 @@ DEPENDS += "pulseaudio libhybris virtual/android-headers dbus udev"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
+# Depends on libhybris which has this restriction
+COMPATIBLE_MACHINE = "^halium$"
+
 PULSEAUDIO_VERSION = "12.2"
 
 PV = "${PULSEAUDIO_VERSION}.77+git${SRCPV}"
