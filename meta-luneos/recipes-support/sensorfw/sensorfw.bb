@@ -6,6 +6,9 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=2d5025d4aa3495befef8f17206a5b0a1"
 # We're depending on libhybris so need to be MACHINE_ARCH
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
+# Depends on libhybris which has this restriction
+COMPATIBLE_MACHINE = "^halium$"
+
 PV = "0.9.4+gitr${SRCPV}"
 SRCREV = "550ced29e787711fb9a41991226dd129969f1cc0"
 DEPENDS = "qtbase libhybris virtual/android-headers \

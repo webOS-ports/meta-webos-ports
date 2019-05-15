@@ -12,6 +12,9 @@ DEPENDS = "nyx-lib glib-2.0 libhybris libsuspend virtual/android-headers openssl
 # Android version we select per machine
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
+# Depends on libhybris which has this restriction
+COMPATIBLE_MACHINE = "^halium$"
+
 PV = "0.1.0-1+git${SRCPV}"
 SRCREV = "3b63f1d9294fd6e5a1f7cc3baac88d0f7eb4272e"
 

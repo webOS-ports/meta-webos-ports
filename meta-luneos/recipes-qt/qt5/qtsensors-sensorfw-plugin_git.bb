@@ -12,6 +12,9 @@ RDEPENDS_${PN} = "sensorfw bash"
 # We're depending on libhybris so need to be MACHINE_ARCH
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
+# Depends on libhybris which has this restriction
+COMPATIBLE_MACHINE = "^halium$"
+
 PV = "5.8.0+git${SRCPV}"
 SRCREV = "ed4b46adfa7b5699466f12cee2f7ff23998ba870"
 

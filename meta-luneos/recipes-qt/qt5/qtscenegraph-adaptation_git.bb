@@ -15,6 +15,9 @@ DEPENDS = "qtbase libhybris qtwayland virtual/android-headers qtdeclarative"
 # Android version we select per machine
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
+# Depends on libhybris which has this restriction
+COMPATIBLE_MACHINE = "^halium$"
+
 SRC_URI = " \
     git://git.merproject.org/Tofe/qtscenegraph-adaptation.git;branch=tofe/qt5.8 \
 "

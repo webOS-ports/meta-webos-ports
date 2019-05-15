@@ -10,6 +10,9 @@ DEPENDS += "boost libhybris glog libunwind"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
+# Depends on libhybris which has this restriction
+COMPATIBLE_MACHINE = "^halium$"
+
 PV = "0.0.3+gitr${SRCPV}"
 SRCREV = "bb4a81e61b8a21442fc6807766ec4e49e2b35000"
 
