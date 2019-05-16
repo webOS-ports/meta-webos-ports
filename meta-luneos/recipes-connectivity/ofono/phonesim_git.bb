@@ -6,8 +6,8 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=eb723b61539feef013de476e68b5c50a"
 
 DEPENDS += "qtbase qtscript qtxmlpatterns qtbase-native"
 
-SRCREV = "774958e133e0b53c87cfa0049b243e11874f3bae"
-PV = "1.20+git${SRCPV}"
+SRCREV = "7664fdc37d3bc072ea8e9a5d92cac24aa1d27ddd"
+PV = "1.21+git${SRCPV}"
 
 SRC_URI = "git://git.kernel.org/pub/scm/network/ofono/phonesim.git \
     file://0001-Port-to-qt5.patch \
