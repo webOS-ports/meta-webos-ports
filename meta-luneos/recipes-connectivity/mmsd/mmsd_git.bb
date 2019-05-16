@@ -1,6 +1,6 @@
 require mmsd.inc
 
-SRCREV = "bfdce916968574effb4eec446f1ee61d2b5dcf80"
+SRCREV = "c259df5ca9f436ecfe2f614c752080bbcfb95f0b"
 PV = "0.0+git${SRCPV}"
 
 SRC_URI  = " \
