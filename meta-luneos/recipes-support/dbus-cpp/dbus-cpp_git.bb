@@ -1,3 +1,6 @@
+# Copyright (c) 2019 Christophe Chapuis <chris.chapuis@gmail.com>
+# Copyright (c) 2019 Herman van Hazendonk <github.com@herrie.org>
+
 SUMMARY = "A header-only dbus-binding leveraging C++-11."
 SECTION = "webos/support"
 LICENSE = "GPLv2+ & LGPLv3"
@@ -9,12 +12,12 @@ LIC_FILES_CHKSUM = " \
 DEPENDS += "libxml2 properties-cpp process-cpp boost dbus"
 RDEPENDS_${PN} += "boost-system dbus-lib boost-program-options boost-filesystem"
 
-PV = "5.0.0+16.10.20160809"
+PV = "5.0.0+git${SRCPV}"
 
-SRC_URI = "http://archive.ubuntu.com/ubuntu/pool/universe/d/dbus-cpp/dbus-cpp_5.0.0+16.10.20160809.orig.tar.gz"
-SRC_URI[md5sum] = "1ca6e981f4a53de0ca5dee6a314da7f6"
+SRCREV = "967dc1caf0efe0a1286c308e8e8dd1bf7da5f3ee"
+SRC_URI = "git://github.com/lib-cpp/${BPN}.git"
 
-S = "${WORKDIR}"
+S = "${WORKDIR}/git"
 
 EXTRA_OECMAKE += "-DDBUS_CPP_VERSION_MAJOR=5 -DDBUS_CPP_VERSION_MINOR=0 -DDBUS_CPP_VERSION_PATCH=0"
 
