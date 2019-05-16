@@ -8,6 +8,6 @@ SRC_URI = " \
   git://github.com/exiv2/exiv2.git;branch=0.27-maintenance \
 "
 S = "${WORKDIR}/git"
-SRCREV = "62826516778b96da5ddb38f5ec1499dc76994a6f"
+SRCREV = "16df09cc758e85d3d126701d2cdc8b447ded4743"
 
 inherit cmake gettext
