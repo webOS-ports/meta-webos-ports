@@ -9,10 +9,10 @@ inherit pkgconfig
 inherit autotools
 
 SRC_URI = "${SOURCEFORGE_MIRROR}/sipe/pidgin-sipe-${PV}.tar.xz \
-    file://gcc8.patch \
 "
-SRC_URI[md5sum] = "63795d4171afcae7a7ebed37e10b8230"
-SRC_URI[sha256sum] = "3f5092b22bb7638a8945484b2b538c58b4d4fcf913d4b86a5ece1107d28a5154"
+
+SRC_URI[md5sum] = "b91106d28c235b347a63dcb676f7b66a"
+SRC_URI[sha256sum] = "958803722b23d869131f76bd90df9da19116d4ca5a873e5253371479b7390f43"
 
 PACKAGECONFIG ??= "nss krb5"
 PACKAGECONFIG[nss] = "--enable-nss=yes,--enable-nss=no,nss"
@@ -30,4 +30,5 @@ FILES_${PN}-dev += " \
 FILES_${PN} += " \
     ${libdir}/purple-2/libsipe.so \
     ${datadir}/appdata \
+    ${datadir}/metainfo \
 "
