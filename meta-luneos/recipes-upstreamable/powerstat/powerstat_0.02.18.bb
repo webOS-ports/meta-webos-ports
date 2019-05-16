@@ -2,11 +2,11 @@ SUMMARY = "Powerstat measures the power consumption of a laptop using the ACPI b
 information."
 HOMEPAGE = "http://kernel.ubuntu.com/~cking/powerstat/"
 LICENSE = "GPLv2+"
-LIC_FILES_CHKSUM = "file://powerstat.c;beginline=1;endline=18;md5=1dceb0bc0ff50e42dbc9164e1c99de17"
+LIC_FILES_CHKSUM = "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263"
 
 SRC_URI = "http://kernel.ubuntu.com/~cking/tarballs/${BPN}/${BP}.tar.gz"
-SRC_URI[md5sum] = "1264baf2e06fb16a5aee11294b043174"
-SRC_URI[sha256sum] = "73967d673fa40597bdcf3e903c9dc203c1982d31b411b3e590395194bf710178"
+SRC_URI[md5sum] = "0da1ac7b54f72010aa3e869a3f722153"
+SRC_URI[sha256sum] = "a5be7df819c1d60edbaabde13ef09c72b1bc1375ae3cad3444f0c084abf399be"
 
 EXTRA_OEMAKE = "MAKEFLAGS="
 
