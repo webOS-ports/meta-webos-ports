@@ -5,8 +5,8 @@ LIC_FILES_CHKSUM = "file://src/plugin/plugin.cpp;beginline=1;endline=30;md5=20b5
 
 DEPENDS = "qtbase qtdeclarative glib-2.0 dbus dbus-glib"
 
-PV = "2.1.12+git${SRCPV}"
-SRCREV = "872b836a43eb9fb492bf0ca6fd57f9b7eafb17db"
+PV = "2.1.20+git${SRCPV}"
+SRCREV = "43b4a8fb2cb377f0a4f1fd0a2a389e4650a00425"
 
 SRC_URI = " \
     git://git.merproject.org/mer-core/nemo-qml-plugin-dbus;branch=master;protocol=git \
