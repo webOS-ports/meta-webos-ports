@@ -24,6 +24,7 @@ RRECOMMENDS_${PN} += " \
     pidgin-sipe \
     purple-skypeweb \
     funyahoo-plusplus \
+    icyque \
     libpurple-plugin-autoaccept \
     libpurple-plugin-buddynote \
     libpurple-plugin-idle \
