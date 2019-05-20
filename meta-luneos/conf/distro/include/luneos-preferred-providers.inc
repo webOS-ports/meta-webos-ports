@@ -10,7 +10,7 @@ PREFERRED_PROVIDER_jpeg-native = "libjpeg-turbo-native"
 # Just for documentation; these values are the defaults set in the recipes that
 # use them.
 VIRTUAL-RUNTIME_cpushareholder = "cpushareholder-stub"
-VIRTUAL-RUNTIME_rdx-utils = "rdx-utils-stub"
+VIRTUAL-RUNTIME_rdx-utils = "rdxd"
 
 # Don't install big /boot/vmlinux* file by default in qemux86 images (included in oprofile's RRECOMMENDS)
 # Use --no-vmlinux option to opcontrol or install it manually if you need to see samples from kernel
