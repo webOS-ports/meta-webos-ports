@@ -35,10 +35,8 @@ RRECOMMENDS_${PN} += " \
     libpurple-plugin-ssl \
     libpurple-plugin-ssl-gnutls \
     libpurple-plugin-statenotify \
-    libpurple-protocol-aim \
     libpurple-protocol-bonjour \
     libpurple-protocol-gg \
-    libpurple-protocol-icq \
     libpurple-protocol-irc \
     libpurple-protocol-novell \
     libpurple-protocol-simple \
