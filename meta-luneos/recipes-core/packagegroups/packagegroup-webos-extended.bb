@@ -11,7 +11,7 @@ inherit packagegroup
 
 VIRTUAL-RUNTIME_webappmanager ?= "luna-webappmanager"
 VIRTUAL-RUNTIME_initscripts ?= "initscripts"
-VIRTUAL-RUNTIME_librdx ?= "librdx-stub"
+VIRTUAL-RUNTIME_librdx ?= "rdxd"
 VIRTUAL-RUNTIME_webos-compositor ?= "luna-next"
 VIRTUAL-RUNTIME_webos-ime ?= "webos-keyboard"
 VIRTUAL-RUNTIME_novacomd ?= "novacomd"
