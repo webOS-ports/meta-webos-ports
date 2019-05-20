@@ -25,11 +25,12 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE_${PN} = "default-webos.target \
-                         webos-cbd.target \
-			 webos-ibd.target \
-			 webos-rbd.target \
-		         webos-bd.target \
-			 webos-dis.target \
-			 webos-mbd.target"
+    webos-cbd.target \
+    webos-ibd.target \
+    webos-rbd.target \
+    webos-bd.target \
+    webos-dis.target \
+    webos-mbd.target \
+"
 
 S = "${WORKDIR}/git"
