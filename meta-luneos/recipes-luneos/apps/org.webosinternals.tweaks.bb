@@ -8,7 +8,7 @@ inherit webos_ports_repo
 inherit webos_configure_manifest
 inherit allarch
 
-PV = "3.0.3+gitr${SRCPV}"
+PV = "3.0.3+git${SRCPV}"
 SRCREV = "a26059d4784b3cd9c06b8364d7ff42ecaa6a9cdc"
 
 WEBOS_REPO_NAME = "tweaks"

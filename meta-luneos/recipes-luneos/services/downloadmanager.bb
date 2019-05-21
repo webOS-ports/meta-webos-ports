@@ -8,7 +8,7 @@ inherit allarch
 inherit webos_filesystem_paths
 inherit webos_system_bus
 
-PV = "0.1.0+gitr${SRCPV}"
+PV = "0.1.0+git${SRCPV}"
 SRCREV = "a4a6ecfd32ee66661d6609f5388f883fee05eb2d"
 
 WEBOS_REPO_NAME = "org.webosports.service.downloadmgr"

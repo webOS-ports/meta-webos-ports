@@ -9,7 +9,7 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 # Depends on libhybris which has this restriction
 COMPATIBLE_MACHINE = "^halium$"
 
-PV = "0.9.4+gitr${SRCPV}"
+PV = "0.9.4+git${SRCPV}"
 SRCREV = "550ced29e787711fb9a41991226dd129969f1cc0"
 DEPENDS = "qtbase libhybris virtual/android-headers \
     luna-sysmgr-common luna-service2 json-c glib-2.0 luna-sysmgr-ipc-messages"

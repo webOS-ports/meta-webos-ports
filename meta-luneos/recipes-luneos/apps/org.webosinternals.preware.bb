@@ -8,7 +8,7 @@ inherit webos_filesystem_paths
 inherit allarch
 inherit webos_enyojs_application
 
-PV = "2.0.2+gitr${SRCPV}"
+PV = "2.0.2+git${SRCPV}"
 SRCREV = "5dd15cc3687e5829f67d4705ce3d6985e81dc942"
 
 WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"

@@ -1,7 +1,7 @@
 require mmsd.inc
 
 SRCREV = "bfdce916968574effb4eec446f1ee61d2b5dcf80"
-PV = "0.0+gitr${SRCPV}"
+PV = "0.0+git${SRCPV}"
 
 SRC_URI  = " \
     git://git.kernel.org/pub/scm/network/ofono/mmsd.git;protocol=git;branch=master \
