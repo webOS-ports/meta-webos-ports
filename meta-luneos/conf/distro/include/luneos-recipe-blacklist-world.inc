@@ -139,7 +139,6 @@ PNBLACKLIST[mx] ?= "depends on blacklisted clutter-1.8, startup-notification, li
 PNBLACKLIST[xterm] ?= "depends on blacklisted libxpm, libxau, libxext, libxaw"
 PNBLACKLIST[puzzles] ?= "depends on blacklisted libxt"
 PNBLACKLIST[synergy] ?= "depends on blacklisted libx11, libxtst"
-PNBLACKLIST[waffle] ?= "depends on blacklisted libx11"
 PNBLACKLIST[libfakekey] ?= "depends on blacklisted libxtst"
 PNBLACKLIST[gtkmathview] ?= "depends on blacklisted t1lib"
 PNBLACKLIST[matchbox-desktop] ?= "depends on blacklisted startup-notification"
