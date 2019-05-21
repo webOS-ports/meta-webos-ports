@@ -9,7 +9,7 @@ inherit webos_enyodev_application
 inherit webos_filesystem_paths
 inherit webos_application
 
-PV = "0.0.1+gitr${SRCPV}"
+PV = "0.0.1+git${SRCPV}"
 SRCREV = "16db9af2080bb4feacd3cc416ba3877335ea4f11"
 
 # For compatibility reasons we have to name the app internally as the old palm contacts

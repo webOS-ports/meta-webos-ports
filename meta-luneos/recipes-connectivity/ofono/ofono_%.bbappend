@@ -1,7 +1,7 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
 SRCREV = "b5ed6d16db88f1f6386549c32948633cb42b5bff"
-PV = "1.19+gitr${SRCPV}"
+PV = "1.19+git${SRCPV}"
 
 RDEPENDS_${PN} += "mobile-broadband-provider-info ofono-conf"
 
