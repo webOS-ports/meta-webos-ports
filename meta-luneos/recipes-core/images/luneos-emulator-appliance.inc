@@ -25,7 +25,7 @@ do_deploy() {
     sed -i "s/LuneOS Emulator/LuneOS ${IMAGE_VERSION_SUFFIX}/g" ${WORKDIR}/appliance/${OVF_NAME}
     ln -sf ${DEPLOY_DIR_IMAGE}/${SRC_VMDK_NAME} ${WORKDIR}/appliance/${VMDK_NAME}
 
-    (cd ${WORKDIR}/appliance ; tar cvf - ${OVF_NAME} ${VMDK_NAME} | pigz ${DEPLOY_DIR_IMAGE}/${ZIP_NAME} )
+    (cd ${WORKDIR}/appliance ; tar cvhf - ${OVF_NAME} ${VMDK_NAME} | pigz > ${DEPLOY_DIR_IMAGE}/${ZIP_NAME} )
 }
 
 INHIBIT_DEFAULT_DEPS = "1"
