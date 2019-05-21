@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "qtbase qtlocation glib-2.0 luna-service2"
 
-PV = "5.11.0+git${SRCPV}"
+PV = "5.12.3+git${SRCPV}"
 SRCREV = "2efa108bfeabee0bfcde19f438bddaf6af5e54a8"
 
 inherit webos_ports_repo
@@ -16,7 +16,7 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};"
 S = "${WORKDIR}/git"
 
 FILES_${PN} += " \
-    ${libdir}/plugins \
+    ${OE_QMAKE_PATH_PLUGINS} \
 "
 FILES_${PN}-dev += " \
     ${libdir}/cmake \
