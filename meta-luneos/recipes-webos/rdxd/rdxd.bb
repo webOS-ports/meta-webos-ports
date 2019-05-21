@@ -10,11 +10,12 @@ DEPENDS = "glib-2.0 libpbnjson luna-prefs luna-service2 pmloglib"
 #Add tar dependency since --absolute-names support is missing in busybox tar
 RDEPENDS_${PN} = "nyx-utils tar"
 
+PROVIDES = "librdx rdx-utils"
+
 inherit webos_ports_fork_repo
 inherit webos_cmake
 inherit webos_system_bus
 inherit pkgconfig
-inherit webos_machine_impl_dep
 inherit webos_systemd
 
 PV = "4.0.2-3+git${SRCPV}"
