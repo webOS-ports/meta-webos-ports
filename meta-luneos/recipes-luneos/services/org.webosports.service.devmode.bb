@@ -8,7 +8,7 @@ inherit allarch
 inherit webos_filesystem_paths
 inherit webos_system_bus
 
-PV = "0.1.0+gitr${SRCPV}"
+PV = "0.1.0+git${SRCPV}"
 SRCREV = "29d6871f81cf2d268d6d72a4210990482b9f2c48"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"

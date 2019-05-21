@@ -2,7 +2,7 @@ SUMMARY = "A terminal emulator with a custom virtual keyboard"
 LICENSE = "GPL-2.0"
 LIC_FILES_CHKSUM = "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263"
 
-PV = "1.3.6+gitr${SRCPV}"
+PV = "1.3.6+git${SRCPV}"
 SRCREV = "64a3554969747e348bfa9eb85842490cef9b719e"
 
 DEPENDS = "qtbase qtdeclarative"

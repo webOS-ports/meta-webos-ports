@@ -3,7 +3,7 @@ LICENSE = "GPL-2.0"
 LIC_FILES_CHKSUM = "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263"
 
 BASE_PV = "0.01.10"
-PV = "${BASE_PV}+gitr${SRCPV}"
+PV = "${BASE_PV}+git${SRCPV}"
 
 SRC_URI = "git://kernel.ubuntu.com/cking/smemstat.git;branch=master;protocol=git"
 S = "${WORKDIR}/git"
