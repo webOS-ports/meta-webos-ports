@@ -1,7 +1,5 @@
 # Copyright (c) 2013-2014 LG Electronics, Inc.
 
-EXTENDPRAUTO_append = "webos8"
-
 inherit update-alternatives
 ALTERNATIVE_${PN}-conf = "openssl-cnf2"
 ALTERNATIVE_LINK_NAME[openssl-cnf2] = "${sysconfdir}/ssl/openssl.cnf"
