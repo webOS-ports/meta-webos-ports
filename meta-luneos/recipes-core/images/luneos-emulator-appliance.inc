@@ -28,6 +28,11 @@ do_deploy() {
     (cd ${WORKDIR}/appliance ; tar cvhf - ${OVF_NAME} ${VMDK_NAME} | pigz > ${DEPLOY_DIR_IMAGE}/${ZIP_NAME} )
 }
 
+# only qemux86, qemux86-64 provide luneos-emulator.ovf file
+COMPATIBLE_MACHINE ?= "(^$)"
+COMPATIBLE_MACHINE_qemux86 = "(.*)"
+COMPATIBLE_MACHINE_qemux86-64 = "(.*)"
+
 INHIBIT_DEFAULT_DEPS = "1"
 do_deploy[depends] += "${IMAGE_BASENAME}-image:do_image_complete virtual/kernel:do_deploy pigz-native:do_populate_sysroot"
 
