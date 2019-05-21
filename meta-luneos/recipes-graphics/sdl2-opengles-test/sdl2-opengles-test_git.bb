@@ -1,7 +1,7 @@
 SUMMARY = "SDL2 OpenGL ES Test Applications"
 HOMEPAGE = "https://github.com/mer-qa/sdl2-opengles-test"
 LICENSE = "MIT"
-LIC_FILES_CHKSUM = "file://main_openglesv2.cpp;beginline=1;endline=26;md5=0d08cb5b4a92c955950cc46dbaa3b6f0"
+LIC_FILES_CHKSUM = "file://main_opengles2.cpp;beginline=1;endline=26;md5=0d08cb5b4a92c955950cc46dbaa3b6f0"
 
 DEPENDS += "libsdl2"
 
