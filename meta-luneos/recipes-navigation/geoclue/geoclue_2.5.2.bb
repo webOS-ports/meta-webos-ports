@@ -34,10 +34,11 @@ PACKAGECONFIG[cdma] = "-Dcdma-source=true,-Dcdma-source=false,modemmanager"
 PACKAGECONFIG[nmea] = "-Dnmea-source=true,-Dnmea-source=false,avahi"
 PACKAGECONFIG[lib] = "-Dlibgeoclue=true,-Dlibgeoclue=false,gobject-introspection"
 
+GTKDOC_MESON_OPTION = "gtk-doc"
+
 EXTRA_OEMESON += " \
     -Ddbus-sys-dir=${sysconfdir}/dbus-1/system.d \
     -Ddemo-agent=false \
-    -Dgtk-doc=false \
 "
 
 FILES_${PN} += " \
