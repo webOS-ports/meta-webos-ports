@@ -16,8 +16,8 @@ SRC_URI = " \
     https://gitlab.freedesktop.org/geoclue/geoclue/-/archive/${PV}/geoclue-${PV}.tar \
 "
 
-SRC_URI[md5sum] = "488f017d276a5042db83d3f440068696"
-SRC_URI[sha256sum] = "35f57bdb4fd2c363140a5e94c589c45a5045378e874a40967dfaec98589f193e"
+SRC_URI[md5sum] = "6228301ed62b587ebaa0438b97ce66e4"
+SRC_URI[sha256sum] = "3caa5e10190a34c17a9b3a9d1d8a19797ed197f07f36f6e35ce533a379efe155"
 
 export BUILD_SYS
 export HOST_SYS
