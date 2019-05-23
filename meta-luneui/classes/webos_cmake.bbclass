@@ -16,7 +16,7 @@ inherit cmake
 
 EXTRA_OECMAKE += "-DWEBOS_INSTALL_ROOT:PATH=/"
 
-WEBOS_TARGET_MACHINE_IMPL ?= "emulator"
+WEBOS_TARGET_MACHINE_IMPL ??= "invalid-missing-inherit-webos_machine_impl_dep"
 WEBOS_TARGET_CORE_OS ?= "rockhopper"
 EXTRA_OECMAKE += "${@ '-DWEBOS_TARGET_CORE_OS:STRING=${WEBOS_TARGET_CORE_OS}' if bb.data.inherits_class('webos_core_os_dep', d) else '' }"
 # XXX Add webos_kernel_dep() to webOS.cmake that adds WEBOS_TARGET_KERNEL_HEADERS to the search path
