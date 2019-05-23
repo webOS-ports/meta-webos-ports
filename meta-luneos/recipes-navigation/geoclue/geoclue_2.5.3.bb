@@ -36,6 +36,18 @@ PACKAGECONFIG[lib] = "-Dlibgeoclue=true,-Dlibgeoclue=false,gobject-introspection
 
 GTKDOC_MESON_OPTION = "gtk-doc"
 
+# backport gtk-doc.bbclass changes from Yocto 2.8 Zeus to make GTKDOC_MESON_OPTION work in Yocto 2.7 Warrior
+# http://git.openembedded.org/openembedded-core/commit/meta/classes/gtk-doc.bbclass?id=ff578f4451a0a199202e576b647840910b4d3f59
+# meson: default option name to enable/disable gtk-doc. This matches most
+# project's configuration. In doubts - check meson_options.txt in project's
+# source path.
+GTKDOC_MESON_OPTION ?= 'docs'
+GTKDOC_MESON_ENABLE_FLAG ?= 'true'
+GTKDOC_MESON_DISABLE_FLAG ?= 'false'
+EXTRA_OEMESON_prepend_class-target = "-D${GTKDOC_MESON_OPTION}=${@bb.utils.contains('GTKDOC_ENABLED', 'True', '${GTKDOC_MESON_ENABLE_FLAG}', '${GTKDOC_MESON_DISABLE_FLAG}', d)} "
+EXTRA_OEMESON_prepend_class-native = "-D${GTKDOC_MESON_OPTION}=${GTKDOC_MESON_DISABLE_FLAG} "
+EXTRA_OEMESON_prepend_class-nativesdk = "-D${GTKDOC_MESON_OPTION}=${GTKDOC_MESON_DISABLE_FLAG} "
+
 EXTRA_OEMESON += " \
     -Ddbus-sys-dir=${sysconfdir}/dbus-1/system.d \
     -Ddemo-agent=false \
