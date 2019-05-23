@@ -148,9 +148,6 @@ WARN_QA_remove = " \
 
 # Default WEBOS_TARGET_* values (see webos_cmake.bbclass)
 WEBOS_TARGET_CORE_OS ?= "rockhopper"
-WEBOS_TARGET_MACHINE_IMPL ?= "device"
-# For qemu we build for the emulator but for all other targets for a real device
-WEBOS_TARGET_MACHINE_IMPL_qemuall = "emulator"
 
 # The Open webOS distro is packaged into these image types:
 IMAGE_FSTYPES ?= "tar.gz"
