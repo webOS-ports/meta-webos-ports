@@ -1,3 +1,6 @@
+# Imported as-is in meta-oe:
+# e6d9392ebb funyahoo-plusplus, icyque, pidgin-sipe, purple-skypeweb: add couple plugins for pidgin
+
 SUMMARY = "Skype protocol plug-in for libpurple"
 SECTION = "webos/services"
 LICENSE = "GPLv3"

@@ -1,3 +1,6 @@
+# Imported as-is in meta-oe:
+# 4ef340551f pidgin: upgrade to 2.13.0
+
 SUMMARY = "multi-protocol instant messaging client"
 SECTION = "x11/network"
 LICENSE = "GPLv2"

@@ -1,3 +1,6 @@
+# Imported as-is in meta-oe:
+# e6d9392ebb funyahoo-plusplus, icyque, pidgin-sipe, purple-skypeweb: add couple plugins for pidgin
+
 SUMMARY = "Protocol plugin for Office 365/Lync/OCS for Adium, Pidgin, Miranda and Telepathy IM Framework"
 SECTION = "webos/services"
 LICENSE = "GPLv2.0"
