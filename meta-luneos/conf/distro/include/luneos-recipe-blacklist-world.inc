@@ -414,6 +414,10 @@ PNBLACKLIST[packagegroup-rpi-test] ?= "rdepends on bigbucksbunny* from meta-mult
 PNBLACKLIST[lsbtest] ?= "rdepends on broken rpm"
 #PNBLACKLIST[] ?= "rdepends on broken "
 
+PNBLACKLIST[openssl10] ?= "conflicts with openssl when both versions are pulled into the same RSS"
+PNBLACKLIST[openssl10-native] ?= "conflicts with openssl when both versions are pulled into the same RSS"
+PNBLACKLIST[nativesdk-openssl10] ?= "conflicts with openssl when both versions are pulled into the same RSS"
+
 # these are specific only for webos DISTRO
 python () {
     if d.getVar('DISTRO', True) == 'webos':
