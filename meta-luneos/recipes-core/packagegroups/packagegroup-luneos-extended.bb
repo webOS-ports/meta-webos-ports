@@ -45,6 +45,7 @@ RDEPENDS_${PN} = " \
   \
   org.webosports.app.browser \
   org.webosports.app.calculator \
+  org.webosports.app.camera \
   org.webosports.app.contacts \
   org.webosports.app.filemanager \
   org.webosports.app.firstuse \
@@ -128,7 +129,6 @@ LIBHYBRIS_RDEPENDS = " \
     qtubuntu-camera \
     libqtubuntu-media-signals2 \
     qtvideo-node \
-    org.webosports.app.camera \
     nyx-modules-hybris \
 "
 

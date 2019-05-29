@@ -29,8 +29,5 @@ FILES_${PN} += "${webos_applicationsdir}/org.webosports.app.camera"
 
 RDEPENDS_${PN} = " \
     qtdeclarative-qmlplugins \
-    qtubuntu-camera \
 "
 
-# Rdepends on qtubuntu-camera which depends on libhybris which has this restriction
-COMPATIBLE_MACHINE = "^halium$"
