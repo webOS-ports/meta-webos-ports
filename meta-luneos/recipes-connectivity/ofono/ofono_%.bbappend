@@ -20,6 +20,11 @@ B = "${S}"
 
 EXTRA_OECONF_append = " --disable-sailfish-pushforwarder"
 
+# this version does't support it:
+# ERROR: ofono-1.19+gitAUTOINC+b5ed6d16db-r0 do_configure: QA Issue: ofono: configure was passed unrecognised options: --enable-external-ell [unknown-configure-option]
+# enabled in oe-core with 1.29 version
+EXTRA_OECONF_remove = "--enable-external-ell"
+
 do_install_append() {
     # Override default system service configuration
     cp -v ${WORKDIR}/ofono.service ${D}${systemd_unitdir}/system/ofono.service
