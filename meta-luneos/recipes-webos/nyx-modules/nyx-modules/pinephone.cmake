@@ -18,6 +18,16 @@
 
 # configuration file for qemux86.
 
-set(DEVICEINFO_PRODUCT_NAME			"SoPine64")
+set(DEVICEINFO_PRODUCT_NAME			"Pinephone")
 
-add_definitions(-DKEYPAD_INPUT_DEVICE="/dev/input/keyboard0")
+set(NYXMOD_OW_BATTERY			TRUE)
+set(NYXMOD_OW_CHARGER			TRUE)
+set(NYXMOD_OW_KEYS			TRUE)
+set(NYXMOD_OW_TOUCHPANEL		FALSE)
+set(NYXMOD_OW_TOUCHPANEL_MTDEV		TRUE)
+set(NYXMOD_OW_LED			TRUE)
+set(NYXMOD_OW_HAPTICS			TRUE)
+
+add_definitions(-DBATTERY_SYSFS_PATH=\"/sys/class/power_supply/axp20x-battery/\")
+add_definitions(-DTOUCHPANEL_DEVICE=\"/dev/input/event3\")
+add_definitions(-DCHARGER_AC_SYSFS_PATH=\"/sys/class/power_supply/axp813-ac/\")
