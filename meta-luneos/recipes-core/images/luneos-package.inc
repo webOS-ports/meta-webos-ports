@@ -10,7 +10,7 @@ IMAGE_BASENAME = "luneos"
 IMAGE_NAME = "${IMAGE_BASENAME}-image"
 
 ZIP_BASENAME = "${IMAGE_BASENAME}-package-${MACHINE}"
-ZIP_NAME = "${ZIP_BASENAME}-${IMAGE_VERSION_SUFFIX}"
+ZIP_NAME = "${ZIP_BASENAME}${IMAGE_VERSION_SUFFIX}"
 
 inherit webos_ports_repo kernel-artifact-names
 
