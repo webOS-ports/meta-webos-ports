@@ -10,9 +10,9 @@ SRC_URI = "file://luneos-emulator.ovf"
 IMAGE_BASENAME = "luneos"
 
 SRC_VMDK_NAME = "${IMAGE_BASENAME}-image-${MACHINE}${IMAGE_NAME_SUFFIX}.wic.vmdk"
-VMDK_NAME     = "${IMAGE_BASENAME}-emulator-${MACHINE}-${IMAGE_VERSION_SUFFIX}.vmdk"
-OVF_NAME      = "${IMAGE_BASENAME}-emulator-${MACHINE}-${IMAGE_VERSION_SUFFIX}.ovf"
-ZIP_NAME      = "${IMAGE_BASENAME}-emulator-${MACHINE}-${IMAGE_VERSION_SUFFIX}.tar.gz"
+VMDK_NAME     = "${IMAGE_BASENAME}-emulator-${MACHINE}${IMAGE_VERSION_SUFFIX}.vmdk"
+OVF_NAME      = "${IMAGE_BASENAME}-emulator-${MACHINE}${IMAGE_VERSION_SUFFIX}.ovf"
+ZIP_NAME      = "${IMAGE_BASENAME}-emulator-${MACHINE}${IMAGE_VERSION_SUFFIX}.tar.gz"
 
 do_deploy() {
     if [ ! -e ${DEPLOY_DIR_IMAGE}/${SRC_VMDK_NAME} ] ; then
@@ -22,7 +22,7 @@ do_deploy() {
     rm -rf ${WORKDIR}/appliance
     mkdir -p ${WORKDIR}/appliance
     sed "s/luneos-emulator-disk.vmdk/${VMDK_NAME}/g" ${WORKDIR}/luneos-emulator.ovf > ${WORKDIR}/appliance/${OVF_NAME}
-    sed -i "s/LuneOS Emulator/LuneOS ${IMAGE_VERSION_SUFFIX}/g" ${WORKDIR}/appliance/${OVF_NAME}
+    sed -i "s/LuneOS Emulator/LuneOS-${MACHINE}${IMAGE_VERSION_SUFFIX}/g" ${WORKDIR}/appliance/${OVF_NAME}
     ln -sf ${DEPLOY_DIR_IMAGE}/${SRC_VMDK_NAME} ${WORKDIR}/appliance/${VMDK_NAME}
 
     (cd ${WORKDIR}/appliance ; tar cvhf - ${OVF_NAME} ${VMDK_NAME} | pigz > ${DEPLOY_DIR_IMAGE}/${ZIP_NAME} )
