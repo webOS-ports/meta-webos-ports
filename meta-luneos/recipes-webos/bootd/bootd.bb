@@ -10,14 +10,16 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "systemd luna-service2 libpbnjson pmloglib glib-2.0 boost gtest"
 
 PV = "0.1.0+git${SRCPV}"
-SRCREV = "e5cc02571c464aef785749f840e77ebcdb77cf58"
+SRCREV = "3a2b0d052941d453b1ad89d0d79aad0a2e4e6cce"
 
+inherit webos_ports_fork_repo
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_machine_impl_dep
+inherit webos_systemd
 
-SRC_URI = "\
-    git://github.com/webosose/bootd.git \
+WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     file://0001-Remove-PmTrace-dependency.patch \
 "
 S = "${WORKDIR}/git"
