@@ -9,9 +9,10 @@ inherit webos_filesystem_paths
 inherit webos_system_bus
 
 PV = "0.3.33+git${SRCPV}"
-SRCREV = "e9e585be16d0201c8f9084640fd506e09c884718"
+SRCREV = "4642548f77e15c9d0908d40b1e49e6a1d5d39276"
 
 WEBOS_REPO_NAME = "org.webosports.service.contacts.carddav"
+WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
