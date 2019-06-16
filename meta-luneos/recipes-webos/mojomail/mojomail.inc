@@ -7,14 +7,15 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "jemalloc db8 boost curl libpalmsocket libsandbox pmloglib icu json-c glib-2.0 luna-service2"
 
 PV = "2.0.0-99+git${SRCPV}"
-SRCREV = "2ad76b33b6d0a355baca1dacf65ddb66b49d7f6e"
+SRCREV = "77572e8ede86d077ce6fd8e2e1576b3777b5cbaa"
 
 inherit webos_ports_fork_repo
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_machine_impl_dep
 
+WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
 WEBOS_REPO_NAME = "mojomail"
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webosose;"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 CXXFLAGS += "-fpermissive"
