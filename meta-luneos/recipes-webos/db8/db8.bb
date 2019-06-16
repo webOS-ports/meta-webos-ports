@@ -29,9 +29,7 @@ EXTRA_OECMAKE_append_class-target = " -DWEBOS_CONFIG_BUILD_TESTS:BOOL=TRUE  -DUS
 EXTRA_OECMAKE_append_class-native = " -DWEBOS_CONFIG_BUILD_TESTS:BOOL=FALSE -DUSE_PMLOG:BOOL=FALSE -DBUILD_LS2:BOOL=FALSE"
 
 WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
-    file://0001-db8-Remove-references-to-com.webos.service.attacheds.patch"
-
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 SYSTEMD_PACKAGES = "${PN}"
@@ -54,7 +52,7 @@ do_install_append() {
 }
 
 PV = "3.2.0-5+git${SRCPV}"
-SRCREV = "4852de65c2a05cb25da385afedca73aaa246d215"
+SRCREV = "eabee5a5ff05a0aff02ab71e03f15b634c2cd00f"
 
 PACKAGES =+ "${PN}-tests"
 
