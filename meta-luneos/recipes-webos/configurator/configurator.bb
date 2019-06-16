@@ -9,7 +9,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "luna-service2 db8 glib-2.0 pmloglib"
 
 PV = "3.0.0-1+git${SRCPV}"
-SRCREV = "dd305b6b9a1a263b6a4e4caa26baa0faa216e4e9"
+SRCREV = "e4c3665099a345b5c437219b7c7550baa68071e2"
 
 inherit webos_ports_repo
 inherit webos_public_repo
