@@ -92,6 +92,7 @@ RDEPENDS_${PN} = " \
     settingsservice \
     sleepd \
     webos-connman-adapter \
+    com.webos.service.pdm \
     ${VIRTUAL-RUNTIME_initscripts} \
     ${WEBOS_PACKAGESET_TZDATA} \
     ${WEBOS_FOSS_MISSING_FROM_RDEPENDS} \
