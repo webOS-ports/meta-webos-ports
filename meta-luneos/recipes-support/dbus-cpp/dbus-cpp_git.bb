@@ -28,3 +28,6 @@ do_configure_prepend() {
 }
 
 SRC_URI += "file://0001-boost-asio-1-66-build-issue-patch.patch"
+
+# Until it's fixed properly to work with gcc9
+CXXFLAGS += "-Wno-error=deprecated-copy"
