@@ -77,6 +77,7 @@ WEBOS_PACKAGESET_UI = " \
 
 RDEPENDS_${PN} = " \
     activitymanager \
+    bootd \
     configurator \
     ${WEBOS_PACKAGESET_ENYO_1} \
     filecache \
@@ -85,6 +86,7 @@ RDEPENDS_${PN} = " \
     luna-init \
     luna-sysservice \
     mojoservicelauncher \
+    nodejs-module-webos-service \
     nyx-modules \
     pmklogd \
     pmlogctl \
