@@ -83,6 +83,7 @@ RDEPENDS_${PN} = " \
     filecache \
     ${VIRTUAL-RUNTIME_librdx} \
     ${VIRTUAL-RUNTIME_novacomd} \
+    luna-downloadmgr \
     luna-init \
     luna-sysservice \
     mojoservicelauncher \
