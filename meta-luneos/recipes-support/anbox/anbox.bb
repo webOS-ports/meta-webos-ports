@@ -10,7 +10,7 @@ SECTION = "webos/support"
 SRCREV = "d521e282965462e82465045ab95d4ae1c4619685"
 PV = "3.0+git${SRCPV}"
 
-DEPENDS += "dbus-cpp libsdl2 libsdl2-image lxc glm protobuf protobuf-native gtest virtual/egl"
+DEPENDS += "dbus-cpp libsdl2 libsdl2-image lxc glm protobuf protobuf-native gtest virtual/egl elfutils"
 
 RDEPENDS_${PN} += "anbox-data"
 
