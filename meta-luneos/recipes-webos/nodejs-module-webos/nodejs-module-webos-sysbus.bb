@@ -14,8 +14,16 @@ inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
 inherit webos_system_bus
 
+NODE_VERSION = "10.15.3"
+
 WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
+    https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}.tar.xz;name=node \
+"
+
+SRC_URI[node.md5sum] = "d76210a6ae1ea73d10254947684836fb"
+SRC_URI[node.sha256sum] = "4e22d926f054150002055474e452ed6cbb85860aa7dc5422213a2002ed9791d5"
+
 S = "${WORKDIR}/git"
 
 SRCREV = "7ff79a371f945c6c65c848e8838f31fc4305ee6c"
@@ -25,7 +33,7 @@ do_configure() {
     export GYP_DEFINES="sysroot=${STAGING_DIR_HOST}"
     # used by binding.gyp
     export webos_servicesdir="${webos_servicesdir}" webos_prefix="${webos_prefix}"
-    node-gyp --arch ${TARGET_ARCH} configure
+    node-gyp --arch ${TARGET_ARCH} --nodedir "${WORKDIR}/node-v${NODE_VERSION}" configure
 }
 
 do_compile() {
