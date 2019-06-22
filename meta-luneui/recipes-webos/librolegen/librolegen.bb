@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2014 LG Electronics, Inc.
+# Copyright (c) 2012-2018 LG Electronics, Inc.
 
 SUMMARY = "Library for dynamically generating webOS system bus role files for webOS JavaScript services"
 SECTION = "webos/libs"
@@ -7,15 +7,14 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 PV = "2.1.0-20+git${SRCPV}"
-SRCREV = "b293a3f8b05f83b36b1b673c4e7dd1c18bfcf768"
+SRCREV = "8714626f3d319cbf5fa91996bfdc43b73fe228ea"
 
 inherit webos_ports_fork_repo
 inherit webos_cmake
 inherit pkgconfig
 
+WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 FILES_${PN} += "${datadir}/rolegen"
-
-SRC_URI += "file://0001-Fix-fexists-function.patch"
