@@ -6,6 +6,8 @@ AUTHOR = "Seokhyon Seong <seokhyon.seong@lge.com>"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
+DEPENDS = "glib-2.0"
+
 PV = "2.1.0-20+git${SRCPV}"
 SRCREV = "8714626f3d319cbf5fa91996bfdc43b73fe228ea"
 
