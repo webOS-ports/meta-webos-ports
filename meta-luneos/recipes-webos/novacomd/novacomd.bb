@@ -18,15 +18,6 @@ RDEPENDS_${PN} = "${@oe.utils.conditional('WEBOS_TARGET_MACHINE_IMPL','emulator'
 
 WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
-    file://novacomd.conf \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 S = "${WORKDIR}/git"
-
-FILESEXTRAPATHS_prepend := "${THISDIR}/${BPN}:"
-
-do_install_append() {
-    install -d ${D}${sysconfdir}/init
-    install -m 0644 ${WORKDIR}/novacomd.conf ${D}${sysconfdir}/init/novacomd.conf
-}
