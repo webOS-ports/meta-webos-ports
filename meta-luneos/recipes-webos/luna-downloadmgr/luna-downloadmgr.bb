@@ -19,8 +19,5 @@ inherit webos_cmake
 inherit webos_system_bus
 inherit webos_public_repo
 
-WEBOS_MACHINE ?= "${MACHINE}"
-EXTRA_OECMAKE += "-DMACHINE=${WEBOS_MACHINE}"
-
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
