@@ -6,7 +6,7 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 PV = "3.0.1-5+git${SRCPV}"
-SRCREV = "dc87f3e410ab3541e3515367f5951d4214a69ae9"
+SRCREV = "ff73894433ba71cb7bf9ce195c67c6fee9524378"
 
 inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
@@ -26,21 +26,11 @@ do_install() {
     install -d ${D}${webos_sysconfdir}/mediadb/permissions
     install -d ${D}${webos_sysconfdir}/activities
     install -d ${D}${webos_sysconfdir}/filecache_types
-    install -d ${D}${webos_sysbus_pubservicesdir}
-    install -d ${D}${webos_sysbus_prvservicesdir}
-    install -d ${D}${webos_sysbus_dynpubrolesdir}
-    install -d ${D}${webos_sysbus_dynprvrolesdir}
-    install -d ${D}${webos_sysbus_dynpubservicesdir}
-    install -d ${D}${webos_sysbus_dynprvservicesdir}
-    install -d ${D}${webos_sysbus_devpubservicesdir}
-    install -d ${D}${webos_sysbus_devprvservicesdir}
-    install -d ${D}${webos_sysbus_devpubrolesdir}
-    install -d ${D}${webos_sysbus_devprvrolesdir}
-    install -d ${D}${webos_sysbus_prvrolesdir}
-    install -d ${D}${webos_sysbus_pubrolesdir}
     install -d ${D}${webos_localstatedir}/data/com.palm.appInstallService
     install -d ${D}${webos_sysbus_apipermissionsdir}
     install -d ${D}${webos_sysbus_permissionsdir}
+    install -d ${D}${webos_sysbus_rolesdir}
+    install -d ${D}${webos_sysbus_servicedir}
 
     for SERVICE in `ls -d1 ${S}/com.palm.service.*` ; do
         SERVICE_DIR=`basename $SERVICE`
@@ -52,15 +42,11 @@ do_install() {
         cp -vrf $SERVICE/activities/* ${D}${webos_sysconfdir}/activities/ 2> /dev/null || true
         cp -vrf $SERVICE/filecache_types/* ${D}${webos_sysconfdir}/filecache_types/ 2> /dev/null || true
         # Copy services and roles files
-        cp -vrf $SERVICE/files/sysbus/*.role.json ${D}${webos_sysbus_prvrolesdir} 2> /dev/null || true
-        cp -vrf $SERVICE/files/sysbus/*.role.json ${D}${webos_sysbus_pubrolesdir} 2> /dev/null || true
-        cp -vrf $SERVICE/files/sysbus/*.service ${D}${webos_sysbus_prvservicesdir} 2> /dev/null || true
         cp -vrf $SERVICE/files/sysbus/*.api.json ${D}${webos_sysbus_apipermissionsdir} 2> /dev/null || true
         cp -vrf $SERVICE/files/sysbus/*.perm.json ${D}${webos_sysbus_permissionsdir} 2> /dev/null || true
+        cp -vrf $SERVICE/files/sysbus/*.role.json ${D}${webos_sysbus_rolesdir} 2> /dev/null || true
+        cp -vrf $SERVICE/files/sysbus/*.service ${D}${webos_sysbus_servicedir} 2> /dev/null || true
     done
-
-# install account services files in public service directory.
-    cp -vrf ${S}/com.palm.service.accounts/files/sysbus/*.service ${D}${webos_sysbus_pubservicesdir} 2> /dev/null || true
 
 # install account service desktop credentials db kind 
     cp -vrf ${S}/com.palm.service.accounts/desktop/com.palm.account.credentails ${D}${webos_sysconfdir}/db/kinds 2> /dev/null || true
@@ -75,22 +61,10 @@ do_install() {
     cp -vrf com.palm.service.accounts/tempdb/kinds/* ${D}${webos_sysconfdir}/tempdb/kinds/ 2> /dev/null || true
     cp -vrf com.palm.service.accounts/tempdb/permissions/* ${D}${webos_sysconfdir}/tempdb/permissions/ 2> /dev/null || true
 
-# install account service upstart files
-    install -d ${D}${sysconfdir}/event.d 2> /dev/null || true
-    install -m 644 ${S}/com.palm.service.accounts/files/etc/event.d/createLocalAccount ${D}${sysconfdir}/event.d/
-    install -d ${D}${sysconfdir}/init 2> /dev/null || true
-    install -m 644 ${S}/com.palm.service.accounts/files/etc/init/createLocalAccount.conf ${D}${sysconfdir}/init/
-
 # create folder for contact linker plugins
     mkdir -p ${D}${sysconfdir}/palm/contact_linker_plugins
 }
 
 FILES_${PN} += "${webos_servicesdir} ${webos_sysconfdir} ${sysconfdir}"
-FILES_${PN} += "${webos_sysbus_pubservicesdir} ${webos_sysbus_prvservicesdir}"
-FILES_${PN} += "${webos_sysbus_prvrolesdir} ${webos_sysbus_pubrolesdir}"
-FILES_${PN} += "${webos_accttemplatesdir} ${webos_sysbus_dynpubrolesdir}"
-FILES_${PN} += "${webos_sysbus_dynprvrolesdir} ${webos_sysbus_devpubservicesdir}"
-FILES_${PN} += "${webos_sysbus_devprvservicesdir} ${webos_sysbus_devpubrolesdir}"
-FILES_${PN} += "${webos_sysbus_devprvrolesdir} ${webos_sysbus_dynpubservicesdir}"
-FILES_${PN} += "${webos_sysbus_dynprvservicesdir}"
-FILES_${PN} += "${webos_sysbus_manifestsdir} ${webos_sysbus_apipermissionsdir} ${webos_sysbus_permissionsdir}"
+FILES_${PN} += "${webos_accttemplatesdir}"
+FILES_${PN} += "${webos_sysbus_apipermissionsdir} ${webos_sysbus_manifestsdir} ${webos_sysbus_permissionsdir} ${webos_sysbus_rolesdir} ${webos_sysbus_servicedir}"
