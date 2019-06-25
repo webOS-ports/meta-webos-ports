@@ -20,4 +20,4 @@ WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-SRCREV = "13fa1a2cc33ac0fbdbf4ae2e78eb46ef8e41fedf"
+SRCREV = "6d375c48772489ebaf8b8ae32eabad670dfeff04"
