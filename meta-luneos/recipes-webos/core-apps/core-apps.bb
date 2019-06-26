@@ -6,7 +6,7 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 PV = "3.0.0-2+git${SRCPV}"
-SRCREV = "2d21b17e1b4cd515dda3684fd714843c0a450fdd"
+SRCREV = "e639302cdfbd37cdae5dc31de660825307fa4796"
 
 inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
