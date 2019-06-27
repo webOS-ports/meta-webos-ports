@@ -26,7 +26,7 @@ SRC_URI[node.sha256sum] = "4e22d926f054150002055474e452ed6cbb85860aa7dc5422213a2
 
 S = "${WORKDIR}/git"
 
-SRCREV = "08a33990183ffd08b60e67da4cefdae114c6b1f8"
+SRCREV = "5c741dd4b4c820b825d8a92b8e4230071d2ec08d"
 do_configure() {
     export HOME=${WORKDIR}
     export LD="${CXX}"
