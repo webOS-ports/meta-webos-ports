@@ -7,7 +7,7 @@ LIC_FILES_CHKSUM = "file://COPYING.GPL;md5=f27defe1e96c2e1ecd4e0c9be8967949"
 
 SECTION = "webos/support"
 
-SRCREV = "d521e282965462e82465045ab95d4ae1c4619685"
+SRCREV = "cd829e9ccd3a5d654c8aa5e16e32f0d3915d54a8"
 PV = "3.0+git${SRCPV}"
 
 DEPENDS += "dbus-cpp libsdl2 libsdl2-image lxc glm protobuf protobuf-native gtest virtual/egl elfutils"
