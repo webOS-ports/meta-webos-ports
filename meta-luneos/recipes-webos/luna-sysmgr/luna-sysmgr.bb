@@ -12,6 +12,8 @@ DEPENDS += "serviceinstaller"
 #DEPENDS += "localization" #TODO
 #RDEPENDS_${PN} += "jail" #TODO
 
+RDEPENDS_${PN} += "powerd"
+
 PV = "3.0.0-3+git${SRCPV}"
 SRCREV = "86cba93fb57f27f102d93bd51fb6bb82ab72b715"
 
