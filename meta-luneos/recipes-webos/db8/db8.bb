@@ -52,7 +52,7 @@ do_install_append() {
 }
 
 PV = "3.2.0-5+git${SRCPV}"
-SRCREV = "1cfbbce35e49e6014eb8768c1b66a02a948d1cc9"
+SRCREV = "539eff2b224a2929b79624e398454362c066c7a6"
 
 PACKAGES =+ "${PN}-tests"
 
