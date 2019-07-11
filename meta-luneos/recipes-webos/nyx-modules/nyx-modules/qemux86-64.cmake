@@ -1,6 +1,7 @@
 # @@@LICENSE
 #
-#      Copyright (c) 2010-2013 LG Electronics, Inc.
+#      Copyright (c) 2010-2019 LG Electronics, Inc.
+#      Copyright (c) 2019 Herman van Hazendonk <github.com@herrie.org>
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,6 +18,13 @@
 # LICENSE@@@
 
 # configuration file for qemux86.
+# specify all the modules to be compiled
+
+set(NYXMOD_OW_QEMU  			TRUE)
+set(NYXMOD_OW_BATTERY			TRUE)
+set(NYXMOD_OW_CHARGER			TRUE)
+set(NYXMOD_OW_TOUCHPANEL		TRUE)
+set(NYXMOD_OW_KEYS				TRUE)
 
 set(DEVICEINFO_PRODUCT_NAME			"x64 Emulator")
 
