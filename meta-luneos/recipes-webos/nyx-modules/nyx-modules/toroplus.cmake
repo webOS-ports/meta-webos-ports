@@ -1,6 +1,6 @@
 # @@@LICENSE
 #
-#      Copyright (c) 2010-2012 Hewlett-Packard Development Company, L.P.
+#      Copyright (c) 2010-2019 LG Electronics, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -26,6 +26,12 @@ set(NYXMOD_OW_KEYS			YES)
 set(NYXMOD_OW_TOUCHPANEL		YES)
 set(NYXMOD_OW_ALS			YES)
 set(NYXMOD_OW_HAPTICS_TIMEDOUTPUT		YES)
+
+# provided by nyx-modules-hybris
+set(NYXMOD_OW_DEVICEINFO		FALSE)
+set(NYXMOD_OW_SYSTEM			FALSE)
+set(NYXMOD_OW_LED			FALSE)
+set(NYXMOD_OW_HAPTICS			FALSE)
 
 add_definitions(-DKEYPAD_INPUT_DEVICE=\"/dev/input/event2\")
 add_definitions(-DBATTERY_SYSFS_PATH=\"/sys/class/power_supply/battery/\")
