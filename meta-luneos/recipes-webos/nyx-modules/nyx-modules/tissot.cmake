@@ -1,6 +1,8 @@
 # @@@LICENSE
 #
-#      Copyright (c) 2010-2012 Hewlett-Packard Development Company, L.P.
+#      Copyright (c) 2010-2019 LG Electronics, Inc.
+#      Copyright (c) 2018-2019 Herman van Hazendonk <github.com@herrie.org>
+#      Copyright (c) 2018-2019 Christophe Chapuis <chris.chapuis@gmail.com>
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
