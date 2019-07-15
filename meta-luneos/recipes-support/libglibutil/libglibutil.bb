@@ -1,9 +1,9 @@
 # Copyright (c) 2019 Christophe Chapuis <chris.chapuis@gmail.com>
 
 DESCRIPTION = "Library of glib utilities."
-LICENSE = "MIT"
+LICENSE = "BSD-3-Clause"
 SECTION = "webos/support"
-LIC_FILES_CHKSUM = "file://src/gutil_log.c;beginline=1;endline=31;md5=5633407a3d5b9895019fcd6b46dbf643"
+LIC_FILES_CHKSUM = "file://src/gutil_log.c;beginline=1;endline=31;md5=c476c5938ec00208b29c1c1743b4a006"
 
 DEPENDS = "glib-2.0"
 
