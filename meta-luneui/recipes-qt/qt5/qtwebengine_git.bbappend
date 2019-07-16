@@ -8,8 +8,8 @@ PACKAGECONFIG += "proprietary-codecs pepper-plugins printing-and-pdf spellchecke
 # EXTRA_QMAKEVARS_PRE += " CONFIG+=force_debug_info CONFIG+=webcore_debug "
 
 # Patches from:
-# https://github.com/webOS-ports/qtwebengine/commits/webOS-ports/master-next-20190418-5.12.3
-# https://github.com/webOS-ports/qtwebengine-chromium/commits/webOS-ports/master-next-20190418-5.12.3
+# https://github.com/webOS-ports/qtwebengine/commits/webOS-ports/master-next-20190716-5.13.0
+# https://github.com/webOS-ports/qtwebengine-chromium/commits/webOS-ports/master-next-20190716-5.13.0
 SRC_URI += " \
     file://qtwebengine.conf \
     file://0001-WebEngineView-provide-additionnal-features-from-wind.patch \
