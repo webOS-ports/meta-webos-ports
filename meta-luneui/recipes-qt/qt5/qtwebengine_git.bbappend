@@ -22,17 +22,27 @@ SRC_URI += " \
     file://0008-GetScreenInfo-use-default-screen-when-no-window-is-a.patch \
     file://0009-Enable-password-echo.patch \
     file://0010-Implement-RequestQuotePermission.patch \
-    file://0011-WebEngineView-re-introduce-devicePixelRatio-property.patch \
     file://0012-WebEngineView-add-extraContextMenuEntriesComponent-p.patch \
     file://0013-gn_generator-fix-debug-build.patch \
     file://chromium/0001-WebContents-provide-additional-features-from-window..patch;patchdir=src/3rdparty \
     file://chromium/0002-WindowFeatures-Chrome-lower-the-minimum-height-to-5.patch;patchdir=src/3rdparty \
     file://chromium/0003-Enable-password-echo.patch;patchdir=src/3rdparty \
-    file://chromium/0004-storage-browser-quota-workaround-for-crash-on-cache-.patch;patchdir=src/3rdparty \
-    file://chromium/0005-html.css-themeWin.css-Add-Prelude-as-default-font-in.patch;patchdir=src/3rdparty \
-    file://chromium/0006-Fix-webGL2-Textures.patch;patchdir=src/3rdparty \
-    file://chromium/0007-qtwebchannel-mojom-provide-a-sync-call-for-LuneOS.patch;patchdir=src/3rdparty \
+    file://chromium/0004-html.css-themeWin.css-Add-Prelude-as-default-font-in.patch;patchdir=src/3rdparty \
+    file://chromium/0005-Fix-webGL2-Textures.patch;patchdir=src/3rdparty \
+    file://chromium/0006-qtwebchannel-mojom-provide-a-sync-call-for-LuneOS.patch;patchdir=src/3rdparty \
 "
+# skipped for now to verify if it's still needed with gcc-9
+#    file://chromium/0007-storage-browser-quota-workaround-for-crash-on-cache-.patch;patchdir=src/3rdparty
+
+# skipped as well, whole dpiScale was removed in upstream commit:
+# commit 7e85ded0fa6467232ad64f8c20560ca26213518b
+# Author: Jüri Valdmann <juri.valdmann@qt.io>
+# Date:   Thu Jan 24 13:00:33 2019 +0100
+#
+#     Delete WebContentsAdapterClient::dpiScale()
+#         
+#     It's always 1.
+#    file://0011-WebEngineView-re-introduce-devicePixelRatio-property.patch
 
 do_install_append() {
     #Create the chromium folder already so users can right away push the required plugins there
