@@ -4,7 +4,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 PV = "0.4.2+git${SRCPV}"
 WEBOS_GIT_PARAM_BRANCH = "qt-5.12"
-SRCREV = "71ed9896a4d1209fdf620fd5104a6726604b3da3"
+SRCREV = "cb1979d068e40f2e550ddbd48f825648d809b9a8"
 
 DEPENDS = "qtbase qtdeclarative qtlocation qtquickcontrols qtquickcontrols2 luna-service2 kf5bluezqt-mer"
 RRECOMMENDS_${PN} += "qtlocation"
