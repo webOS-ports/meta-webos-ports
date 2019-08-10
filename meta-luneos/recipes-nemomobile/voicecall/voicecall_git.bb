@@ -11,7 +11,8 @@ inherit qmake5
 inherit systemd
 
 SRC_URI = "git://git.merproject.org/mer-core/voicecall.git \
-           file://voicecall-manager.service" 
+           file://voicecall-manager.service \
+           file://0001-VoiceCallManager-Fix-DEVICELOCK-handling.patch" 
 
 S = "${WORKDIR}/git"
 
