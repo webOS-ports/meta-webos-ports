@@ -5,14 +5,13 @@ LIC_FILES_CHKSUM = "file://src/main.cpp;beginline=1;endline=18;md5=a513bca9b1708
 DEPENDS += "qtbase qtmultimedia libqofono"
 
 PV = "0.7.9+git${SRCPV}"
-SRCREV = "ee588f9e92201d2c6ed492fd81e70cbf23f39baa"
+SRCREV = "3dfedcfa06a71804e8175f6cf0935467ae0376fd"
 
 inherit qmake5
 inherit systemd
 
 SRC_URI = "git://git.merproject.org/mer-core/voicecall.git \
-           file://voicecall-manager.service \
-           file://0001-VoiceCallManager-Fix-DEVICELOCK-handling.patch" 
+           file://voicecall-manager.service"
 
 S = "${WORKDIR}/git"
 
