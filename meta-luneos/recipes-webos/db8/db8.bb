@@ -16,7 +16,7 @@ PROVIDES = "mojodb"
 VIRTUAL-RUNTIME_stat ?= "stat"
 VIRTUAL-RUNTIME_bash ?= "bash"
 RDEPENDS_${PN}_append_class-target = " ${VIRTUAL-RUNTIME_stat} ${VIRTUAL-RUNTIME_bash}"
-RDEPENDS_${PN}-test_append_class-target = " ${VIRTUAL-RUNTIME_bash}"
+RDEPENDS_${PN}-tests_append_class-target = " ${VIRTUAL-RUNTIME_bash}"
 
 inherit webos_ports_repo
 inherit webos_cmake
