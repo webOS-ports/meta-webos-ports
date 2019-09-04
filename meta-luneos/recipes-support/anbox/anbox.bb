@@ -27,6 +27,7 @@ SRC_URI = "git://github.com/anbox/anbox \
     file://0002-Fix-native-binaries-build.patch \
     file://0003-Fix-emugl-build.patch \
     file://0004-Fix-build-with-Wayland-SDL2.patch \
+    file://0001-binary_writer.cpp-fix-compatibility-with-boost-1.71..patch \
     file://anbox-container-manager.service \
     file://anbox-session-manager.service \
     file://anbox-bridge.network \
