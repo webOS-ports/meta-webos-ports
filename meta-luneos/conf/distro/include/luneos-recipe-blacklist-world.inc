@@ -367,6 +367,7 @@ PNBLACKLIST[claws-mail] ?= "depends on broken gtk+"
 PNBLACKLIST[icon-slicer] ?= "depends on broken gtk+"
 
 # Depends on something blacklisted because the dependency was depending on something broken
+PNBLACKLIST[remmina] ?= "depends on blacklisted avahi-ui"
 PNBLACKLIST[vala-dbus-binding-tool] ?= "depends on blacklisted vala"
 PNBLACKLIST[opencv-samples] ?= "depends on blacklisted opencv"
 PNBLACKLIST[owl-video] ?= "depends on blacklisted libowl-av"
