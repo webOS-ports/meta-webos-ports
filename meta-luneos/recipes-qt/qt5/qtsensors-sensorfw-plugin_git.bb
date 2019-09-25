@@ -6,14 +6,14 @@ LIC_FILES_CHKSUM = " \
     file://LGPL_EXCEPTION.txt;md5=0145c4d1b6f96a661c2c139dfb268fb6 \
 "
 
-DEPENDS = "qtbase libhybris virtual/android-headers qtsensors sensorfw"
+DEPENDS = "qtbase qtsensors sensorfw"
 RDEPENDS_${PN} = "sensorfw bash"
 
-# We're depending on libhybris so need to be MACHINE_ARCH
+# We're depending on sensorfw so need to be MACHINE_ARCH
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 # Depends on libhybris which has this restriction
-COMPATIBLE_MACHINE = "^halium$"
+# COMPATIBLE_MACHINE = "^halium$"
 
 PV = "5.8.0+git${SRCPV}"
 SRCREV = "ed4b46adfa7b5699466f12cee2f7ff23998ba870"
