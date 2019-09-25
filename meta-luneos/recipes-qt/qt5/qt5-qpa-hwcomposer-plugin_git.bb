@@ -7,7 +7,7 @@ LIC_FILES_CHKSUM = "file://hwcomposer_backend.cpp;beginline=1;endline=40;md5=09c
 PV = "5.6.0+git${SRCPV}"
 SRCREV = "df9bddc316a30ee46055c700a40d68bb73e7e87b"
 
-DEPENDS = "qtbase libhybris qtwayland virtual/android-headers qtsensors"
+DEPENDS = "qtbase libhybris qtwayland virtual/android-headers"
 
 # We need to be ${MACHINE_ARCH} as we need to compile the source against a specific
 # Android version we select per machine
@@ -18,7 +18,6 @@ COMPATIBLE_MACHINE = "^halium$"
 
 SRC_URI = " \
     git://github.com/mer-hybris/qt5-qpa-hwcomposer-plugin.git \
-    file://0001-Add-support-for-QScreen-orientation-based-on-QtSenso.patch;striplevel=2 \
     file://0002-Fix-4.4.2-hwcomposer-build.patch;striplevel=2 \
     file://0003-Qt-5.8-support.patch;striplevel=2 \
     file://0004-Fix-hwcomposer-backend.patch;striplevel=2 \
