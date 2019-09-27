@@ -67,6 +67,7 @@ RDEPENDS_${PN} = " \
   org.webosports.service.update \
   \
   fingerterm \
+  messwerk \
   \
   ca-certificates \
   certmgrd \
