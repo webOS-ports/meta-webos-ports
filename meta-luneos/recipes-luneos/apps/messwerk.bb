@@ -3,12 +3,12 @@ LICENSE = "GPL-3.0"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=783b7e40cdfb4a1344d15b1f7081af66"
 
 PV = "0.1.0+git${SRCPV}"
-SRCREV = "46572bc11957f06f71df150969a0e814080d1db1"
+SRCREV = "3ab28261c15206991a5d97532a82ed8212f85277"
 
 DEPENDS = "qtbase qtdeclarative qtsensors qtlocation"
 
 SRC_URI = " \
-    git://github.com/Tofee/Messwerk.git;branch=tofe/work \
+    git://github.com/Tofee/Messwerk.git \
 "
 S = "${WORKDIR}/git"
 
