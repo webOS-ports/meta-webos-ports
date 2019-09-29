@@ -7,7 +7,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=2d5025d4aa3495befef8f17206a5b0a1"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 PV = "0.11.0+git${SRCPV}"
-SRCREV = "dc685733dc96e1d23565309fadbc5653901d0e1a"
+SRCREV = "f9f5be4d377a82d19959cc21bae33aad92aed34d"
 DEPENDS = "qtbase \
     luna-sysmgr-common luna-service2 json-c glib-2.0 luna-sysmgr-ipc-messages"
     
