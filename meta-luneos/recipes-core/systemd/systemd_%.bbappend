@@ -10,6 +10,5 @@ PACKAGECONFIG_remove = " \
     networkd    \
     resolved    \
     timedated   \
-    timesyncd   \
     nss-resolve \
 "
