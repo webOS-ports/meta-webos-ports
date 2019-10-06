@@ -9,6 +9,5 @@ SRC_URI += " \
 PACKAGECONFIG_remove = " \
     networkd    \
     resolved    \
-    timedated   \
     nss-resolve \
 "
