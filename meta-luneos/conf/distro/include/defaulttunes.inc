@@ -38,9 +38,17 @@ DEFAULTTUNE_athene = "cortexa8thf-neon"
 DEFAULTTUNE_onyx = "cortexa8thf-neon"
 
 # http://lists.openembedded.org/pipermail/openembedded-core/2019-April/281328.html
-# make sure that raspberrypi[34]-64 with DEFAULTTUNE="cortexa53" uses different TUNE_PKGARCH
+# make sure that raspberrypi[34]-64 originally with
+# DEFAULTTUNE="cortexa53"/DEFAULTTUNE="cortexa72"
+# uses different TUNE_PKGARCH
 # than e.g. tissot with DEFAULTTUNE="aarch64"
-TUNE_PKGARCH_64_raspberrypi3-64 = "aarch64-cortexa53"
-PACKAGE_EXTRA_ARCHS_append_raspberrypi3-64 = " aarch64-cortexa53"
-TUNE_PKGARCH_64_raspberrypi4-64 = "aarch64-cortexa72"
-PACKAGE_EXTRA_ARCHS_append_raspberrypi4-64 = " aarch64-cortexa72"
+# it's not sure if crypto will actually work with cortexa53/BCM2837 used
+# in raspberrypi3 B, see last comments in:
+# https://www.raspberrypi.org/forums/viewtopic.php?t=207888
+# about the license for Cryptography Extension, but hopefully the software
+# built with crypto enabled will correctly check ID_AA64ISAR0_EL1 before actually using it.
+DEFAULTTUNE_raspberrypi3-64 = "armv8a-crc-crypto"
+TUNE_PKGARCH_64_raspberrypi3-64 = "aarch64-rpi"
+PACKAGE_EXTRA_ARCHS_append_raspberrypi3-64 = " aarch64-rpi"
+DEFAULTTUNE_raspberrypi4-64 = "armv8a-crc-crypto"
+TUNE_PKGARCH_64_raspberrypi4-64 = "aarch64-rpi"
