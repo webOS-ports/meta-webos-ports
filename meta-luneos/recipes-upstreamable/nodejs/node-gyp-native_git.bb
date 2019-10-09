@@ -8,7 +8,7 @@ DEPENDS = "nodejs-native node-gyp-packages-native"
 
 PV = "4.0.0+git${SRCPV}"
 SRCREV = "7245415296c5f0a97e10dba6dafbaf2332a67578"
-SRC_URI = "git://github.com/nodejs/node-gyp.git"
+SRC_URI = "git://github.com/nodejs/node-gyp.git;branch=pre-v4.0.0-master"
 
 S = "${WORKDIR}/git"
 
