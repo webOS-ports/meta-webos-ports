@@ -81,6 +81,9 @@ RDEPENDS_${PN} = " \
   qtwayland \
   qtwayland-plugins \
   qtconnectivity \
+  qtsensors-sensorfw-plugin \
+  \
+  sensorfw \
   \
   luna-appmanager \
   luna-next-cardshell \
@@ -121,8 +124,6 @@ LIBHYBRIS_RDEPENDS = " \
     pulseaudio-modules-droid \
     qt5-qpa-hwcomposer-plugin \
     qtscenegraph-adaptation \
-    qtsensors-sensorfw-plugin \
-    sensorfw \
     \
     exiv2 \
     libpulse-simple0 \

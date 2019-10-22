@@ -6,8 +6,8 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=2d5025d4aa3495befef8f17206a5b0a1"
 # We're potentially depending on libhybris so need to be MACHINE_ARCH
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-PV = "0.11.0+git${SRCPV}"
-SRCREV = "f9f5be4d377a82d19959cc21bae33aad92aed34d"
+PV = "0.11.1+git${SRCPV}"
+SRCREV = "92b9c6f715e0b1a3db151e0b532e634818b89058"
 DEPENDS = "qtbase \
     luna-sysmgr-common luna-service2 json-c glib-2.0 luna-sysmgr-ipc-messages"
     
@@ -15,12 +15,14 @@ DEPENDS_append_halium = " libhybris virtual/android-headers "
 
 SRC_URI = " \
     git://github.com/sailfish-on-dontbeevil/sensorfw.git;branch=dontbeevil \
-    file://0001-Fix-pkgconfig-version.patch \
     file://0002-LuneOS-fix-systemd-service-file.patch \
     file://0003-Fix-build-with-autohybris.patch \
     file://0004-LuneOS-fix-dbus-service-file.patch \
-    file://sensord-iiosensors.conf \
-    file://90-dontbeevil.conf \
+"
+
+# Note: maybe this should go in a bbappend in meta-pine64-luneos...
+SRC_URI_append_pinephone = " \
+    file://sensord-pinephone.conf \
 "
 
 S = "${WORKDIR}/git"
@@ -39,10 +41,17 @@ SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE_${PN} = "sensorfwd.service"
 
 do_install_append() {
+    # by default, point to sensord-${MACHINE}
     install -d ${D}${sysconfdir}/sensorfw/
-    install -m 0644 ${S}/config/sensord.conf ${D}${sysconfdir}/sensorfw/
+    ln -s sensord-${MACHINE}.conf ${D}${sysconfdir}/sensorfw/primaryuse.conf
+    # .. and if the file is already in WORKDIR, copy it
+    if [ -f ${WORKDIR}/sensord-${MACHINE}.conf ] ; then
+      install -m 0644 ${WORKDIR}/sensord-${MACHINE}.conf ${D}${sysconfdir}/sensorfw/
+    fi
+    # setup script which will fix the configuration symlink if needed
     install -d ${D}${bindir}
     install -m 0755 ${S}/config/sensord-daemon-conf-setup ${D}${bindir}
+    # systemd service
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${S}/LuneOS/systemd/sensorfwd.service ${D}${systemd_unitdir}/system
 }
@@ -50,13 +59,6 @@ do_install_append() {
 do_install_append_halium() {
     install -d ${D}${sysconfdir}/sensorfw/
     install -m 0644 ${S}/config/sensord-hybris.conf ${D}${sysconfdir}/sensorfw/
-}
-
-do_install_append_pinephone() {
-    install -d ${D}${sysconfdir}/sensorfw/
-    install -m 0644 ${WORKDIR}/sensord-iiosensors.conf ${D}${sysconfdir}/sensorfw/primaryuse.conf
-    install -d ${D}${sysconfdir}/sensorfw/sensord.conf.d/
-    install -m 0644 ${WORKDIR}/90-dontbeevil.conf ${D}${sysconfdir}/sensorfw/sensord.conf.d/
 }
 
 RDEPENDS_${PN} = "bash"
