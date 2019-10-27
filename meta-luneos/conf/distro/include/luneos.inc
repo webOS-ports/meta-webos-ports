@@ -184,6 +184,9 @@ SANITY_TESTED_DISTROS ?= " \
     ubuntu-18.04 \n \
 "
 
+require conf/distro/include/yocto-uninative.inc
+INHERIT += "uninative"
+
 LICENSE_CREATE_PACKAGE = "1"
 
 require conf/distro/include/defaulttunes.inc
