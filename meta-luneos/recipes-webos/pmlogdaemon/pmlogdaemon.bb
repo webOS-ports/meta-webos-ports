@@ -1,6 +1,6 @@
-# Copyright (c) 2012-2014 LG Electronics, Inc.
+# Copyright (c) 2012-2019 LG Electronics, Inc.
 
-SUMMARY = "Open webOS logging daemon"
+SUMMARY = "webOS logging daemon"
 AUTHOR = "Gayathri Srinivasan <gayathri.srinivasan@lge.com>"
 SECTION = "webos/base"
 LICENSE = "Apache-2.0"
@@ -11,17 +11,25 @@ DEPENDS = "pmloglib zlib glib-2.0 librdx libpbnjson pmloglib-private luna-servic
 # provided by busybox.
 RDEPENDS_${PN} = "busybox"
 
-PV = "3.0.0-120+git${SRCPV}"
-SRCREV = "bb96721e299049aa4486331e71d4c91b52a287ed"
-
-EXTRA_OECMAKE += "-DENABLE_LOGGING:BOOL='YES'"
+PV = "3.1.0-5+git${SRCPV}"
+SRCREV = "a0e12f5a746ce88cc9da68c11b9d5595bd3c31bf"
 
 inherit webos_public_repo
 inherit webos_cmake
-inherit pkgconfig
 inherit webos_system_bus
+inherit webos_pmlog_config
 
-SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
+PACKAGECONFIG ??= ""
+PACKAGECONFIG[whitelist] = "-DENABLE_WHITELIST:BOOL=TRUE, -DENABLE_WHITELIST:BOOL=FALSE"
+
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+    ${@bb.utils.contains('PACKAGECONFIG', 'whitelist', 'file://whitelist.txt', '', d)} \
+"
 S = "${WORKDIR}/git"
 
+do_install_append() {
+    if ${@bb.utils.contains('PACKAGECONFIG', 'whitelist', 'true', 'false', d)} ; then
+        install -m 644 ${WORKDIR}/whitelist.txt ${D}${sysconfdir}/PmLogDaemon
+    fi
+}
 FILES_${PN} += "${datadir}/PmLogDaemon"
