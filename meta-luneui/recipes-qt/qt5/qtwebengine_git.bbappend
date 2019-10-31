@@ -19,11 +19,10 @@ SRC_URI += " \
     file://0005-Store-the-additional-window-features-required-by-the.patch \
     file://0006-QQuickWebEngineNewViewRequest-use-initialTargetUrl-f.patch \
     file://0007-WebEngineNewViewRequest-add-possibility-to-get-reque.patch \
-    file://0008-GetScreenInfo-use-default-screen-when-no-window-is-a.patch \
-    file://0009-Enable-password-echo.patch \
-    file://0010-Implement-RequestQuotePermission.patch \
-    file://0011-WebEngineView-add-extraContextMenuEntriesComponent-p.patch \
-    file://0012-gn_generator-fix-debug-build.patch \
+    file://0008-Enable-password-echo.patch \
+    file://0009-Implement-RequestQuotePermission.patch \
+    file://0010-WebEngineView-add-extraContextMenuEntriesComponent-p.patch \
+    file://0011-gn_generator-fix-debug-build.patch \
     file://chromium/0001-WebContents-provide-additional-features-from-window..patch;patchdir=src/3rdparty \
     file://chromium/0002-WindowFeatures-Chrome-lower-the-minimum-height-to-5.patch;patchdir=src/3rdparty \
     file://chromium/0003-Enable-password-echo.patch;patchdir=src/3rdparty \
