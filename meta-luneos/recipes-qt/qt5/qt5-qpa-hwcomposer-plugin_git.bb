@@ -18,11 +18,12 @@ COMPATIBLE_MACHINE = "^halium$"
 
 SRC_URI = " \
     git://github.com/mer-hybris/qt5-qpa-hwcomposer-plugin.git \
-    file://0002-Fix-4.4.2-hwcomposer-build.patch;striplevel=2 \
-    file://0003-Qt-5.8-support.patch;striplevel=2 \
-    file://0004-Fix-hwcomposer-backend.patch;striplevel=2 \
-    file://0005-hwcomposer_backend_v11-fix-compatibility-with-qtbase.patch;striplevel=2 \
-    file://0006-Revert-Add-systraces-to-v11.patch;striplevel=2 \
+    file://0002-Fix-4.4.2-hwcomposer-build.patch;patchdir=.. \
+    file://0003-Qt-5.8-support.patch;patchdir=.. \
+    file://0004-Fix-hwcomposer-backend.patch;patchdir=.. \
+    file://0005-hwcomposer_backend_v11-fix-compatibility-with-qtbase.patch;patchdir=.. \
+    file://0006-Revert-Add-systraces-to-v11.patch;patchdir=.. \
+    file://0007-qeglfsintegration-stop-using-deprecated-and-in-5.13-.patch;patchdir=.. \
 "
 S = "${WORKDIR}/git/hwcomposer"
 
