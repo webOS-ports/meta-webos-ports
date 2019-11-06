@@ -15,7 +15,7 @@ ZIP_NAME = "${ZIP_BASENAME}${IMAGE_VERSION_SUFFIX}"
 inherit webos_ports_repo kernel-artifact-names
 
 PV = "1.0.3+git${SRCPV}"
-SRCREV = "6ac8c9ebc6af50cfd424ab423bb6a54d13764144"
+SRCREV = "ff2646fef702374e1bb3180c40c97375006df95a"
 
 WEBOS_REPO_NAME = "android-update-package"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
@@ -38,12 +38,14 @@ do_deploy() {
     cp -r ${WORKDIR}/git/* ${WORKDIR}/build
     chmod +x ${WORKDIR}/build/webos_deploy.sh
 
+    cp ${DEPLOY_DIR_IMAGE}/busybox-static ${WORKDIR}/build/
+
     sed -i -e s:\#\#\#BOOT_PARTITION\#\#\#:${ANDROID_BOARD_BOOTIMAGE_PARTITION}:g \
         ${WORKDIR}/build/META-INF/com/google/android/updater-script
 
     (cd ${WORKDIR}/build ; zip -r ${DEPLOY_DIR_IMAGE}/${ZIP_NAME}.zip *)
 }
 
-do_deploy[depends] += "${IMAGE_NAME}:do_image_complete virtual/kernel:do_deploy"
+do_deploy[depends] += "${IMAGE_NAME}:do_image_complete virtual/kernel:do_deploy busybox-static:do_deploy"
 
 addtask deploy after do_install before do_package
