@@ -7,7 +7,9 @@ S = "${WORKDIR}/busybox-${PV}"
 
 do_configure_append() {
        sed -i -e '/CONFIG_STATIC/d' .config
+       sed -i -e '/CONFIG_FEATURE_TAR_LONG_OPTIONS/d' .config
        echo "CONFIG_STATIC=y" >>.config
+       echo "CONFIG_FEATURE_TAR_LONG_OPTIONS=y" >> .config
 }
 
 
