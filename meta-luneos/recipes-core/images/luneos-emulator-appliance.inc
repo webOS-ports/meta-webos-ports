@@ -25,7 +25,7 @@ do_deploy() {
     sed -i "s/LuneOS Emulator/LuneOS-${MACHINE}${IMAGE_VERSION_SUFFIX}/g" ${WORKDIR}/appliance/${OVF_NAME}
     ln -sf ${DEPLOY_DIR_IMAGE}/${SRC_VMDK_NAME} ${WORKDIR}/appliance/${VMDK_NAME}
 
-    (cd ${WORKDIR}/appliance ; tar cvhf - ${OVF_NAME} ${VMDK_NAME} | pigz > ${DEPLOY_DIR_IMAGE}/${ZIP_NAME} )
+    (cd ${WORKDIR}/appliance ; tar cvhf - ${OVF_NAME} ${VMDK_NAME} | pigz > ${DEPLOYDIR}/${ZIP_NAME} )
 }
 
 # only qemux86, qemux86-64 provide luneos-emulator.ovf file
@@ -34,6 +34,7 @@ COMPATIBLE_MACHINE_qemux86 = "(.*)"
 COMPATIBLE_MACHINE_qemux86-64 = "(.*)"
 
 INHIBIT_DEFAULT_DEPS = "1"
+do_deploy[sstate-outputdirs] = "${DEPLOY_DIR_IMAGE}"
 do_deploy[depends] += "${IMAGE_BASENAME}-image:do_image_complete virtual/kernel:do_deploy pigz-native:do_populate_sysroot"
 
 addtask deploy after do_install before do_package

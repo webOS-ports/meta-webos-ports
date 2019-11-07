@@ -43,9 +43,10 @@ do_deploy() {
     sed -i -e s:\#\#\#BOOT_PARTITION\#\#\#:${ANDROID_BOARD_BOOTIMAGE_PARTITION}:g \
         ${WORKDIR}/build/META-INF/com/google/android/updater-script
 
-    (cd ${WORKDIR}/build ; zip -r ${DEPLOY_DIR_IMAGE}/${ZIP_NAME}.zip *)
+    (cd ${WORKDIR}/build ; zip -r ${DEPLOYDIR}/${ZIP_NAME}.zip *)
 }
 
+do_deploy[sstate-outputdirs] = "${DEPLOY_DIR_IMAGE}"
 do_deploy[depends] += "${IMAGE_NAME}:do_image_complete virtual/kernel:do_deploy busybox-static:do_deploy"
 
 addtask deploy after do_install before do_package
