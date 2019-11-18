@@ -9,12 +9,13 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "glib-2.0 libpbnjson"
 
 LEAD_SONAME = "libPmLogLib.so"
-WEBOS_DISTRO_PRERELEASE ??= ""
+#WEBOS_DISTRO_PRERELEASE ??= ""
 EXTRA_OECMAKE += "-DWEBOS_DISTRO_PRERELEASE:STRING='${WEBOS_DISTRO_PRERELEASE}'"
 
 inherit webos_ports_repo
 inherit webos_cmake
 inherit webos_pmlog_config
+inherit webos_prerelease_dep
 inherit systemd
 
 SYSTEMD_PACKAGES = "${PN}"

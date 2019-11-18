@@ -1,0 +1,24 @@
+# Copyright (c) 2017-2019 LG Electronics, Inc.
+
+SECTION = "webos/apps"
+LICENSE = "Apache-2.0"
+LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
+
+#WEBOS_VERSION = "1.0.0-7_f522af254889550ec8d38c84771441f42951dc4f"
+INC_PR = "r4"
+
+EXTRA_INHERIT ?= "webos_cmake"
+
+#inherit webos_component
+#inherit webos_enhanced_submissions
+inherit webos_app
+inherit webos_public_repo
+inherit ${EXTRA_INHERIT}
+
+WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
+
+WEBOS_REPO_NAME = "test-apps"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+S = "${WORKDIR}/git/${BPN}"
+
+FILES_${PN} += "${webos_applicationsdir}"

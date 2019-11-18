@@ -9,7 +9,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 inherit packagegroup
 
-VIRTUAL-RUNTIME_webappmanager ?= "luna-webappmanager"
+#VIRTUAL-RUNTIME_webappmanager ?= "luna-webappmanager"
+VIRTUAL-RUNTIME_webappmanager ?= "wam"
 VIRTUAL-RUNTIME_initscripts ?= "initscripts"
 VIRTUAL-RUNTIME_librdx ?= "rdxd"
 VIRTUAL-RUNTIME_webos-compositor ?= "luna-next"
@@ -21,6 +22,13 @@ VIRTUAL-RUNTIME_novacomd ?= "novacomd"
 # .bbappend in meta-<distro> to do PR/PRINC/PR_append bump anyway so it's easier
 # to change this variable in .bbappend together with bump.
 #
+
+WEBOS_PACKAGESET_TESTAPPS = " \
+    bareapp \
+    com.webos.app.test.enact \
+    com.webos.app.test.webosose \
+    com.webos.app.test.youtube \
+"
 
 # Enyo 1 and related framework packages
 WEBOS_PACKAGESET_ENYO_1 = " \
@@ -103,6 +111,7 @@ RDEPENDS_${PN} = " \
     ${WEBOS_FOSS_MISSING_FROM_RDEPENDS} \
     ${WEBOS_PACKAGESET_SYSTEMAPPS} \
     ${WEBOS_PACKAGESET_UI} \
+    ${WEBOS_PACKAGESET_TESTAPPS} \
 "
 
 # XXX These FOSS components must be explicitly added because they are missing
