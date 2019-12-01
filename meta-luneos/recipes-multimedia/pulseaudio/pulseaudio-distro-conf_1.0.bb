@@ -9,6 +9,11 @@ SRC_URI = " \
     file://pulseaudio.conf \
 "
 
+SRC_URI_append_pinephone = " \
+    file://ucm/sun50i-a64-audio.conf \
+    file://ucm/HiFi \
+"
+
 do_install() {
     install -d ${D}${sysconfdir}/pulse
     install -m 0644 ${WORKDIR}/webos-system.pa ${D}${sysconfdir}/pulse/
@@ -17,4 +22,10 @@ do_install() {
     install -m 0644 ${WORKDIR}/pulseaudio.conf  ${D}${sysconfdir}/default/pulseaudio.conf
 }
 
-FILES_${PN} = "${sysconfdir}/pulse ${sysconfdir}/default"
+do_install_append_pinephone() {
+    install -d ${D}${datadir}/alsa/ucm/sun50i-a64-audio
+    install -m 0644 ${WORKDIR}/ucm/sun50i-a64-audio.conf ${D}${datadir}/alsa/ucm/sun50i-a64-audio/sun50i-a64-audio.conf
+    install -m 0644 ${WORKDIR}/ucm/HiFi ${D}${datadir}/alsa/ucm/sun50i-a64-audio/HiFi
+}
+
+FILES_${PN} = "${sysconfdir}/pulse ${sysconfdir}/default ${datadir}/alsa/ucm"
