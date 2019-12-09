@@ -3,4 +3,4 @@
 # Needed for db8-native
 BBCLASSEXTEND = "native"
 
-DEPENDS += "snappy"
+PACKAGECONFIG_append = " snappy"
