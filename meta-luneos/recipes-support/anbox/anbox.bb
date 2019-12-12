@@ -7,10 +7,10 @@ LIC_FILES_CHKSUM = "file://COPYING.GPL;md5=f27defe1e96c2e1ecd4e0c9be8967949"
 
 SECTION = "webos/support"
 
-SRCREV = "cd829e9ccd3a5d654c8aa5e16e32f0d3915d54a8"
+SRCREV = "0a49ae08f76de7f886a3dbed4422711c2fa39d10"
 PV = "3.0+git${SRCPV}"
 
-DEPENDS += "dbus-cpp libsdl2 libsdl2-image lxc glm protobuf protobuf-native gtest virtual/egl elfutils"
+DEPENDS += "dbus-cpp libsdl2 libsdl2-image lxc glm protobuf protobuf-native gtest elfutils"
 
 RDEPENDS_${PN} += "anbox-data"
 
@@ -26,8 +26,6 @@ SRC_URI = "git://github.com/anbox/anbox \
     file://0001-Fix-dependencies-for-LuneOS.patch \
     file://0002-Fix-native-binaries-build.patch \
     file://0003-Fix-emugl-build.patch \
-    file://0004-Fix-build-with-Wayland-SDL2.patch \
-    file://0001-binary_writer.cpp-fix-compatibility-with-boost-1.71..patch \
     file://anbox-container-manager.service \
     file://anbox-session-manager.service \
     file://anbox-bridge.network \
@@ -43,8 +41,11 @@ COMPATIBLE_MACHINE ?= "(^$)"
 COMPATIBLE_MACHINE_qemux86-64 = "(.*)"
 COMPATIBLE_MACHINE_rpi = "(.*)"
 
+PACKAGECONFIG ??= "wayland"
+PACKAGECONFIG[x11] = "-DENABLE_X11=ON,-DENABLE_X11=OFF,virtual/libx11"
+PACKAGECONFIG[wayland] = "-DENABLE_WAYLAND=ON,-DENABLE_WAYLAND=OFF,virtual/egl"
+
 EXTRA_OECMAKE += "-DCMAKE_BUILD_TYPE=debug"
-EXTRA_OECMAKE += "-DWAYLAND_SUPPORT=1"
 EXTRA_OECMAKE += "-DHOST_CMAKE_C_COMPILER='${BUILD_CC}'"
 EXTRA_OECMAKE += "-DHOST_CMAKE_CXX_COMPILER='${BUILD_CXX}'"
 EXTRA_OECMAKE += "-DHOST_CMAKE_CXX_LINK_FLAGS='${BUILD_LDFLAGS}'"
