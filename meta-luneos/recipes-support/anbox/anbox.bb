@@ -57,6 +57,10 @@ inherit systemd
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE_${PN} = "anbox-container-manager.service anbox-session-manager.service"
 
+do_configure_prepend() {
+    sed -i 's@^#!/usr/bin/env python2$@#!/usr/bin/env python3@g' ${S}/scripts/gen-emugl-entries.py
+}
+
 do_install_append() {
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${WORKDIR}/anbox-container-manager.service ${D}${systemd_unitdir}/system/
