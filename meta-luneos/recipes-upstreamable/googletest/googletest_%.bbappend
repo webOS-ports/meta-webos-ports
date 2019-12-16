@@ -25,15 +25,5 @@ sysroot_stage_all_append() {
     sysroot_stage_dir ${D}${prefix}/src ${SYSROOT_DESTDIR}${prefix}/src
 }
 
-# Backport http://lists.openembedded.org/pipermail/openembedded-devel/2019-December/203572.html
-# until it's in meta-oe/master
-do_configure_prepend() {
-    # explicitly use python3
-    # the scripts are already python3 compatible since https://github.com/google/googletest/commit/d404af0d987a9c38cafce82a7e26ec8468c88361 and other fixes like this
-    # but since this oe-core change http://git.openembedded.org/openembedded-core/commit/?id=5f8f16b17f66966ae91aeabc23e97de5ecd17447
-    # there isn't python in HOSTTOOLS so "env python" fails
-    sed -i 's@^#!/usr/bin/env python$@#!/usr/bin/env python3@g' ${S}/googlemock/scripts/*py ${S}/googlemock/scripts/generator/*py ${S}/googlemock/scripts/generator/cpp/*py ${S}/googlemock/test/*py ${S}/googletest/scripts/*py ${S}/googletest/test/*py
-}
-
 FILES_${PN} += "${bindir}/gtest"
 FILES_${PN}-dev += "${prefix}/src"
