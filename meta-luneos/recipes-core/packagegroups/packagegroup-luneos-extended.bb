@@ -40,7 +40,6 @@ RDEPENDS_${PN} = " \
   messaging-accounts \
   \
   org.webosinternals.preware \
-  org.webosinternals.tweaks \
   org.webosinternals.ipkgservice \
   \
   org.webosports.app.browser \
@@ -59,6 +58,7 @@ RDEPENDS_${PN} = " \
   org.webosports.app.tasks \
   \
   org.webosports.cdav \
+  org.webosports.tweaks \
   \
   org.webosports.service.devmode \
   org.webosports.service.licenses \

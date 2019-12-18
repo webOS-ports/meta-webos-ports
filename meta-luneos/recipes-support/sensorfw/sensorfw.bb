@@ -15,9 +15,7 @@ DEPENDS_append_halium = " libhybris virtual/android-headers "
 
 SRC_URI = " \
     git://github.com/sailfish-on-dontbeevil/sensorfw.git;branch=dontbeevil \
-    file://0002-LuneOS-fix-systemd-service-file.patch \
     file://0003-Fix-build-with-autohybris.patch \
-    file://0004-LuneOS-fix-dbus-service-file.patch \
 "
 
 # Note: maybe this should go in a bbappend in meta-pine64-luneos...
