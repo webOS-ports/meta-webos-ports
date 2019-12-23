@@ -7,7 +7,7 @@ LIC_FILES_CHKSUM = " \
 DEPENDS = "qtbase qtlocation glib-2.0 luna-service2"
 
 PV = "5.12.3+git${SRCPV}"
-SRCREV = "2efa108bfeabee0bfcde19f438bddaf6af5e54a8"
+SRCREV = "7849848e16528d860a03723514cdbe825e03a0a8"
 
 inherit webos_ports_repo
 inherit qmake5

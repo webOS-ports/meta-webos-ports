@@ -20,18 +20,18 @@ do_install() {
     install -d ${D}${webos_sysconfdir}
     install -d ${D}${webos_sysmgrdir}
 
-    # install all the platform specific conf files
+    # Install all the platform specific conf files
 
-    # install the platform luna.conf file
+    # Install the platform luna.conf file
     install -v -m 0644 ${WORKDIR}/luna-platform.conf ${D}${webos_sysconfdir}/
 
-    # install the platform lunaAnimations.conf file
+    # Install the platform lunaAnimations.conf file
     install -v -m 0644 ${WORKDIR}/lunaAnimations-platform.conf ${D}${webos_sysconfdir}/
 
-    # install the platform defaultPreferences.txt file
+    # Install the platform defaultPreferences.txt file
     install -v -m 644 ${WORKDIR}/defaultPreferences-platform.txt ${D}${webos_sysconfdir}/
 
-    # copy over platform specific images, if any
+    # Copy over platform specific images, if any
     if [ -d ${WORKDIR}/images ]
     then
         pushd ${WORKDIR}

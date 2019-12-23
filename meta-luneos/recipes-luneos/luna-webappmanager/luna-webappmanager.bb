@@ -12,8 +12,9 @@ RDEPENDS_${PN} += " \
 "
 
 PV = "0.4.1-2+git${SRCPV}"
-SRCREV = "57be94e40c0784af1c3f5dce7e7cb8cddf383f50"
+SRCREV = "75496f5f24cbc923befe1b8173455053b96f3573"
 
+SERVICE_NAME = "org.webosports.webappmanager"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
@@ -23,6 +24,18 @@ inherit webos_ports_repo
 inherit webos_cmake_qt5
 inherit webos_filesystem_paths
 inherit webos_systemd
+
+WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
+WEBOS_SYSTEM_BUS_FILES_LOCATION = "${WORKDIR}/git/files/sysbus"
+
+do_install_append() {
+    # Install the ACG configuration
+    install -d ${D}${webos_sysbus_servicedir}
+    install -d ${D}${webos_sysbus_rolesdir}
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.service ${D}${webos_sysbus_servicedir}/${SERVICE_NAME}.service
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.role.json ${D}${webos_sysbus_rolesdir}/${SERVICE_NAME}.role.json
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/com.palm.luna-apps.role.json ${D}${webos_sysbus_rolesdir}/com.palm.luna-apps.role.json
+}
 
 
 FILES_${PN} += "${webos_frameworksdir}"

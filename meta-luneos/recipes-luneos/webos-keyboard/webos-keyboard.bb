@@ -17,7 +17,9 @@ DEPENDS = "maliit-framework-qt5 hunspell presage luna-service2 presage-native"
 RDEPENDS_${PN} += "qtsvg-plugins qtmultimedia-qmlplugins"
 RRECOMMENDS_${PN} += "hunspell-dictionaries"
 
-SRCREV = "1154c38ae913e0b000df563dd8b2a24e0c451e5b"
+SERVICE_NAME = "org.maliit"
+
+SRCREV = "a92fcfa05303f934ae3d91766c0e4ebac3746c3a"
 PV = "0.99.2+git${SRCPV}"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
@@ -38,7 +40,16 @@ EXTRA_QMAKEVARS_PRE = "\
 INSANE_SKIP_${PN} += "libdir staticdev"
 INSANE_SKIP_${PN}-dbg += "libdir"
 
-WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
+WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
+WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files/sysbus"
+
+do_install_append() {
+    install -d ${D}${webos_sysbus_permissionsdir}
+    install -d ${D}${webos_sysbus_rolesdir}
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.perm.json ${D}${webos_sysbus_permissionsdir}/${SERVICE_NAME}.perm.json
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.role.json ${D}${webos_sysbus_rolesdir}/${SERVICE_NAME}.role.json
+}
+
 
 FILES_${PN} += "\
     ${libdir}/maliit \

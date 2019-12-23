@@ -48,20 +48,20 @@ do_install() {
         cp -vrf $SERVICE/files/sysbus/*.service ${D}${webos_sysbus_servicedir} 2> /dev/null || true
     done
 
-# install account service desktop credentials db kind 
+# Install account service desktop credentials db kind 
     cp -vrf ${S}/com.palm.service.accounts/desktop/com.palm.account.credentails ${D}${webos_sysconfdir}/db/kinds 2> /dev/null || true
 
-# install account templates.
+# Install account templates.
     install -d ${D}${webos_accttemplatesdir} 2> /dev/null || true
     cp -vrf ${S}/account-templates/palmprofile/com.palm.palmprofile ${D}${webos_accttemplatesdir}
 
-# install temp db kinds and permissions
+# Install temp db kinds and permissions
     install -d ${D}${webos_sysconfdir}/tempdb/kinds 2> /dev/null || true
     install -d ${D}${webos_sysconfdir}/tempdb/permissions 2> /dev/null || true
     cp -vrf com.palm.service.accounts/tempdb/kinds/* ${D}${webos_sysconfdir}/tempdb/kinds/ 2> /dev/null || true
     cp -vrf com.palm.service.accounts/tempdb/permissions/* ${D}${webos_sysconfdir}/tempdb/permissions/ 2> /dev/null || true
 
-# create folder for contact linker plugins
+# Create folder for contact linker plugins
     mkdir -p ${D}${sysconfdir}/palm/contact_linker_plugins
 }
 

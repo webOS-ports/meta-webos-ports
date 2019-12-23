@@ -9,7 +9,7 @@ LIC_FILES_CHKSUM = " \
 DEPENDS = "glib-2.0 db8 pidgin luna-service2 tidy-html5"
 
 PV = "3.0.5+git${SRCPV}"
-SRCREV = "10d784a8e49f25c0827667bbd580816057027a7f"
+SRCREV = "3d2aa3d50ae8da120ea33233cdf906f6196c7c03"
 
 inherit webos_ports_repo
 inherit webos_cmake
@@ -47,7 +47,6 @@ RRECOMMENDS_${PN} += " \
 
 do_install_append() {
     cp -R --no-dereference --preserve=mode,links -v ${S}/files/etc ${D}
-    cp -R --no-dereference --preserve=mode,links -v ${S}/files/usr ${D}
 }
 
 CXXFLAGS += "-fpermissive"

@@ -29,7 +29,7 @@ SRC_URI[node.sha256sum] = "4e22d926f054150002055474e452ed6cbb85860aa7dc5422213a2
 
 S = "${WORKDIR}/git"
 
-SRCREV = "5c741dd4b4c820b825d8a92b8e4230071d2ec08d"
+SRCREV = "14a047aec5d0d76be367e14d9d009e154cc5a2ea"
 do_configure() {
     export HOME=${WORKDIR}
     export LD="${CXX}"
@@ -60,10 +60,8 @@ do_install_append() {
     install -d ${D}${webos_prefix}/nodejs
     ln -svnf ${libdir}/nodejs/palmbus.js ${D}${webos_prefix}/nodejs/
     # The CMake build did this with macros
-    install -d ${D}${webos_sysbus_prvrolesdir}
-    sed "s|@WEBOS_INSTALL_BINDIR@|$bindir|" < ${S}/files/sysbus/com.webos.nodejs.json.prv.in > ${D}${webos_sysbus_prvrolesdir}/com.webos.nodejs.json
-    install -d ${D}${webos_sysbus_pubrolesdir}
-    sed "s|@WEBOS_INSTALL_BINDIR@|$bindir|" < ${S}/files/sysbus/com.webos.nodejs.json.pub.in > ${D}${webos_sysbus_pubrolesdir}/com.webos.nodejs.json
+    install -d ${D}${webos_sysbus_rolesdir}
+    sed "s|@WEBOS_INSTALL_BINDIR@|$bindir|" < ${S}/files/sysbus/com.webos.nodejs.role.json.in > ${D}${webos_sysbus_rolesdir}/com.webos.nodejs.role.json
 }
 
 FILES_${PN} += "${libdir}/nodejs"
