@@ -10,7 +10,7 @@ SRCREV = "aedb113ac3d73676802208d99e70a12b428f494e"
 
 inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
-#inherit webos_cmake
+inherit webos_app
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
@@ -18,11 +18,11 @@ S = "${WORKDIR}/git"
 do_install() {
     # WEBOS_INSTALL_WEBOS_COREAPPSDIR
     install -d ${D}${webos_applicationsdir}
-    #INSTALL DB/KINDS
+    # Install db8 kinds
     install -d ${D}${webos_sysconfdir}/db/kinds
-    #INSTALL DB/PERSMISSIONS
+    # Install db8 permissions
     install -d ${D}${webos_sysconfdir}/db/permissions
-    #INSTALL ACTIVITIES
+    # Install activities
     install -d ${D}${webos_sysconfdir}/activities
 
     for COREAPPS in `ls -d1 ${S}/com.palm.app*` ; do

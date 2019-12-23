@@ -8,9 +8,10 @@ inherit allarch
 inherit webos_filesystem_paths
 inherit webos_system_bus
 
-PV = "0.3.33+git${SRCPV}"
-SRCREV = "33039ae8b0a3de789e627bed7959e47ff984df2f"
+PV = "0.3.34+git${SRCPV}"
+SRCREV = "c2388ff282ff9187f8ab040e9fc76b19b9f8f103"
 
+SERVICE_NAME = "org.webosports.service.cdav"
 WEBOS_REPO_NAME = "org.webosports.service.contacts.carddav"
 WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
@@ -18,15 +19,25 @@ S = "${WORKDIR}/git"
 
 CLEANBROKEN = "1"
 
-WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
-WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/service/sysbus"
+WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
+WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files/sysbus"
 
-do_install() {
+do_install_append() {
     # the service itself
-    install -d ${D}${webos_servicesdir}/org.webosports.cdav.service
-    cp -rv ${S}/service/* ${D}${webos_servicesdir}/org.webosports.cdav.service
-    rm -rf ${D}${webos_servicesdir}/org.webosports.cdav.service/configuration
-
+    install -d ${D}${webos_servicesdir}/org.webosports.service.cdav
+    cp -rv ${S}/service/* ${D}${webos_servicesdir}/org.webosports.service.cdav
+    rm -rf ${D}${webos_servicesdir}/org.webosports.service.cdav/configuration
+    
+    # ACG configuration files
+    install -d ${D}${webos_sysbus_servicedir}
+    install -d ${D}${webos_sysbus_permissionsdir}
+    install -d ${D}${webos_sysbus_rolesdir}
+    install -d ${D}${webos_sysbus_apipermissionsdir}
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.service ${D}${webos_sysbus_servicedir}/${SERVICE_NAME}.service
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.perm.json ${D}${webos_sysbus_permissionsdir}/${SERVICE_NAME}.perm.json
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.role.json ${D}${webos_sysbus_rolesdir}/${SERVICE_NAME}.role.json
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.api.json ${D}${webos_sysbus_apipermissionsdir}/${SERVICE_NAME}.api.json
+    
     # db8 kinds and permissions
     install -d ${D}${webos_sysconfdir}/db/kinds
     install -d ${D}${webos_sysconfdir}/db/permissions
@@ -47,11 +58,11 @@ do_install() {
     cp -vrf ${S}/accounts-yahoo/* ${D}${webos_accttemplatesdir}/org.webosports.cdav.account.yahoo
 
     # account creation application
-    install -d ${D}${webos_applicationsdir}/org.webosports.cdav.app
-    cp -rv ${S}/app-enyo/* ${D}${webos_applicationsdir}/org.webosports.cdav.app/
+    install -d ${D}${webos_applicationsdir}/org.webosports.app.cdav
+    cp -rv ${S}/app-enyo/* ${D}${webos_applicationsdir}/org.webosports.app.cdav/
 
     # copy urlschemes.js from service dir to application dir
-    cp -v ${S}/service/javascript/urlschemes.js ${D}${webos_applicationsdir}/org.webosports.cdav.app/CrossAppTarget/
+    cp -v ${S}/service/javascript/urlschemes.js ${D}${webos_applicationsdir}/org.webosports.app.cdav/CrossAppTarget/
 }
 
 FILES_${PN} += "${webos_applicationsdir} ${webos_servicesdir} ${webos_accttemplatesdir}"
