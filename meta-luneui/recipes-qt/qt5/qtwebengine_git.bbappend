@@ -23,6 +23,7 @@ SRC_URI += " \
     file://0009-Implement-RequestQuotePermission.patch \
     file://0010-WebEngineView-add-extraContextMenuEntriesComponent-p.patch \
     file://0011-gn_generator-fix-debug-build.patch \
+    file://0012-screenInfoFromQScreen-fallback-on-primary-screen-if-.patch \
     file://chromium/0001-WebContents-provide-additional-features-from-window..patch;patchdir=src/3rdparty \
     file://chromium/0002-WindowFeatures-Chrome-lower-the-minimum-height-to-5.patch;patchdir=src/3rdparty \
     file://chromium/0003-Enable-password-echo.patch;patchdir=src/3rdparty \
