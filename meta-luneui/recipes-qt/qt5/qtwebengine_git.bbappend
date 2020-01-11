@@ -8,8 +8,8 @@ PACKAGECONFIG += "proprietary-codecs pepper-plugins printing-and-pdf spellchecke
 # EXTRA_QMAKEVARS_PRE += " CONFIG+=force_debug_info CONFIG+=webcore_debug "
 
 # Patches from:
-# https://github.com/webOS-ports/qtwebengine/commits/webOS-ports/master-next-20191031-5.13.2
-# https://github.com/webOS-ports/qtwebengine-chromium/commits/webOS-ports/master-next-20191031-5.13.2
+# https://github.com/webOS-ports/qtwebengine/commits/webOS-ports/master-next-20200112-5.14.0
+# https://github.com/webOS-ports/qtwebengine-chromium/commits/webOS-ports/master-next-20200112-5.14.0
 SRC_URI += " \
     file://qtwebengine.conf \
     file://0001-WebEngineView-provide-additionnal-features-from-wind.patch \
@@ -28,21 +28,8 @@ SRC_URI += " \
     file://chromium/0002-WindowFeatures-Chrome-lower-the-minimum-height-to-5.patch;patchdir=src/3rdparty \
     file://chromium/0003-Enable-password-echo.patch;patchdir=src/3rdparty \
     file://chromium/0004-html.css-themeWin.css-Add-Prelude-as-default-font-in.patch;patchdir=src/3rdparty \
-    file://chromium/0005-Fix-webGL2-Textures.patch;patchdir=src/3rdparty \
-    file://chromium/0006-qtwebchannel-mojom-provide-a-sync-call-for-LuneOS.patch;patchdir=src/3rdparty \
+    file://chromium/0005-qtwebchannel-mojom-provide-a-sync-call-for-LuneOS.patch;patchdir=src/3rdparty \
 "
-# skipped for now to verify if it's still needed with gcc-9
-#    file://chromium/0007-storage-browser-quota-workaround-for-crash-on-cache-.patch;patchdir=src/3rdparty
-
-# skipped as well, whole dpiScale was removed in upstream commit:
-# commit 7e85ded0fa6467232ad64f8c20560ca26213518b
-# Author: Jüri Valdmann <juri.valdmann@qt.io>
-# Date:   Thu Jan 24 13:00:33 2019 +0100
-#
-#     Delete WebContentsAdapterClient::dpiScale()
-#         
-#     It's always 1.
-#    file://0011-WebEngineView-re-introduce-devicePixelRatio-property.patch
 
 do_install_append() {
     #Create the chromium folder already so users can right away push the required plugins there
