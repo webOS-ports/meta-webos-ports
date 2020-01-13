@@ -47,4 +47,4 @@ RDEPENDS_${PN} = " \
 "
 
 QTWEBENGINE_armv5 = ""
-QTWEBENGINE = "qtwebengine-qmlplugins qtwebengine-examples"
+QTWEBENGINE = "qtwebengine-qmlplugins"
