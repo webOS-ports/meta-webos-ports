@@ -6,18 +6,16 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=2d5025d4aa3495befef8f17206a5b0a1"
 # We're potentially depending on libhybris so need to be MACHINE_ARCH
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-PV = "0.11.1+git${SRCPV}"
-SRCREV = "92b9c6f715e0b1a3db151e0b532e634818b89058"
+PV = "0.11.4+git${SRCPV}"
+SRCREV = "4f97982dd95f5ab229312d9e721d2f131bfa8886"
 DEPENDS = "qtbase \
     luna-sysmgr-common luna-service2 json-c glib-2.0 luna-sysmgr-ipc-messages"
     
 DEPENDS_append_halium = " libhybris virtual/android-headers "
 
 SRC_URI = " \
-    git://github.com/sailfish-on-dontbeevil/sensorfw.git;branch=dontbeevil \
-    file://0002-LuneOS-fix-systemd-service-file.patch \
-    file://0003-Fix-build-with-autohybris.patch \
-    file://0004-LuneOS-fix-dbus-service-file.patch \
+    git://git.merproject.org/mer-core/sensorfw.git;branch=master \
+    file://0001-Fix-build-with-autohybris.patch \
 "
 
 # Note: maybe this should go in a bbappend in meta-pine64-luneos...
