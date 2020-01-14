@@ -24,6 +24,7 @@ do_install_append() {
     if [ -e ${S}/files/conf/fonts/fonts.tgz ]; then
         install -d ${D}${datadir}/fonts
         tar xvzf ${S}/files/conf/fonts/fonts.tgz --directory=${D}${datadir}/fonts
+        chown -R root:root ${D}${datadir}/fonts
     fi
     install -d ${D}${webos_sysconfdir}
     install -v -m 644 ${S}/files/conf/locale.txt ${D}${webos_sysconfdir}
