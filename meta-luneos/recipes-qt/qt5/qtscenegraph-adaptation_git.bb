@@ -20,6 +20,7 @@ COMPATIBLE_MACHINE = "^halium$"
 
 SRC_URI = " \
     git://git.merproject.org/Tofe/qtscenegraph-adaptation.git;branch=tofe/qt5.8 \
+    file://0001-context-make-it-compatible-with-Qt-5.14.patch \
 "
 S = "${WORKDIR}/git"
 
