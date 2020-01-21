@@ -42,6 +42,7 @@ RDEPENDS_${PN} = " \
   \
   connman-client \
   qtdeclarative-tools \
+  ofono-tests \
   ${QTWEBENGINE} \
 "
 
