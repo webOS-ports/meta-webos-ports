@@ -7,7 +7,7 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 DEPENDS = "glib-2.0 glibmm luna-service2 libpbnjson pmloglib openssl libbson boost"
-RDEPENDS_${PN} = "settingsservice-conf python"
+RDEPENDS_${PN} = "settingsservice-conf python3"
 
 PV = "1.0.22-1+git${SRCPV}"
 inherit webos_cmake
