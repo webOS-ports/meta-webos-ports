@@ -5,19 +5,20 @@ DESCRIPTION = "HTTPS Everywhere Database to be used in LuneOS Browser App"
 LICENSE = "GPL-3.0"
 LIC_FILES_CHKSUM += "file://${COMMON_LICENSE_DIR}/GPL-3.0;md5=c79ff39f19dfec6d293b95dea7b07891"
 
-inherit webos_filesystem_paths pythonnative
-DEPENDS = "python-lxml-native"
+inherit webos_filesystem_paths python3native
+DEPENDS = "python3-lxml-native"
 
-SRCREV = "8416035cc443920c7bc4e5d78ebaab2b886f3dd7"
+PV = "2019.11.7+git${SRCPV}"
+SRCREV = "a9c798759ee53c88d1b2abbf305af0ba3f6b286f"
 
 SRC_URI = " \
-    git://github.com/EFForg/https-everywhere.git;protocol=git;branch=master \
+    git://github.com/EFForg/https-everywhere.git;protocol=git;branch=release \
     file://make-sqlite.py \
 "
 S = "${WORKDIR}/git"
 
 do_compile() {
-    python ${WORKDIR}/make-sqlite.py
+    python3 ${WORKDIR}/make-sqlite.py
 }
 
 do_install() {
