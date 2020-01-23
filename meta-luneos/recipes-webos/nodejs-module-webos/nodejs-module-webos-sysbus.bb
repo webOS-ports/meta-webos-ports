@@ -13,9 +13,9 @@ PV = "3.0.1-1+git${SRCPV}"
 inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
 inherit webos_system_bus
-inherit pythonnative
+inherit python3native
 
-export PYTHON = "python"
+export PYTHON = "python3"
 
 NODE_VERSION = "10.15.3"
 

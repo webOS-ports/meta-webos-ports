@@ -14,9 +14,9 @@ SRCREV = "658a2d0000de15a5a828e1cd361e4d4a91c51280"
 inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
 inherit pkgconfig
-inherit pythonnative
+inherit python3native
 
-export PYTHON = "python"
+export PYTHON = "python3"
 
 NODE_VERSION = "10.15.3"
 
