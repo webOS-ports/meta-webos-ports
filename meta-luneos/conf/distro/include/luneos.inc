@@ -2,7 +2,6 @@
 
 require conf/distro/include/luneos-preferred-providers.inc
 require conf/distro/include/luneos-recipe-blacklist.inc
-require conf/distro/include/luneos-recipe-blacklist-world.inc
 require conf/distro/include/luneos-preferred-versions.inc
 require conf/distro/include/luneos-features.inc
 require conf/distro/include/luneos-toolchain.inc

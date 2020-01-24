@@ -9,14 +9,4 @@
 # doesn't, then the only way to guarantee that the first recipe will never be
 # used is to blacklist it.
 
-INHERIT += "blacklist"
-
-include conf/distro/include/webos-recipe-blacklist-world.inc
-
-PNBLACKLIST[gst-plugins-bad] = "we prefer gstreamer1.0-plugins"
-PNBLACKLIST[gst-plugins-base] = "we prefer gstreamer1.0-plugins"
-PNBLACKLIST[gst-plugins-good] = "we prefer gstreamer1.0-plugins"
-PNBLACKLIST[gst-plugins-ugly] = "we prefer gstreamer1.0-plugins"
-PNBLACKLIST[gstreamer] = "we prefer gstreamer1.0"
-
 PNBLACKLIST[vboxguestdrivers] = "vboxguest is also in the kernel and we don't really need vboxsf"
