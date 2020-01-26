@@ -14,8 +14,11 @@ SRC_URI = " \
     ${WEBOS_PORTS_GIT_REPO}/qtwebengine-chromium;name=chromium${WEBOS_GIT_BRANCH};destsuffix=git/src/3rdparty \
     file://qtwebengine.conf \
 "
-SRCREV_qtwebengine = "d0e24c0f86db0aec0af920e505e22eb467d16dd6"
-SRCREV_chromium = "4282169e39f7098686ae8bcedda849ee2e1f69d1"
+WEBOS_GIT_PARAM_BRANCH = "webOS-ports/master-next"
+
+# Upgrade from webOS-ports/master-20200126-5.14.0 to latest 5.14 commit webOS-ports/master-next-20200126-5.14
+SRCREV_qtwebengine = "a30c712b4dbb02ba8d72b8e7a3a5ff3aebfec581"
+SRCREV_chromium = "4ca6f1013477753e4abd5d003e81791380917cca"
 
 do_install_append() {
     #Create the chromium folder already so users can right away push the required plugins there
