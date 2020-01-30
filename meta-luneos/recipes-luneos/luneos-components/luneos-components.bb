@@ -25,3 +25,5 @@ FILES_${PN} += " \
 FILES_${PN}-examples += " \
     ${webos_applicationsdir}/org.luneos.components.gallery \
 "
+
+SRC_URI += "file://0001-Update-for-qtdeclarative-5.15.patch"
