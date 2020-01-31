@@ -13,6 +13,7 @@ EXTRA_PACKAGECONFIG_rpi = ""
 PACKAGECONFIG_append_class-target = " ${EXTRA_PACKAGECONFIG}"
 
 SRC_URI += " \
+    file://0001-qwaylandwindow_p.h-update-for-changed-QPlatformWindo.patch \
     file://0002-Fix-QtKeyExtensionGlobal-s-export.patch \
     file://0003-Revert-Remove-QWaylandExtendedSurface-from-the-priva.patch \
     file://0004-QWaylandXdgSurface-handle-ExtendedSurface-window-pro.patch \
