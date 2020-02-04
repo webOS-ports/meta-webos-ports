@@ -17,7 +17,6 @@ SRC_URI += " \
     file://0002-Fix-QtKeyExtensionGlobal-s-export.patch \
     file://0003-Revert-Remove-QWaylandExtendedSurface-from-the-priva.patch \
     file://0004-QWaylandXdgSurface-handle-ExtendedSurface-window-pro.patch \
-    file://0005-Fix-compilation-of-linuxdmabuf-compositor-plugin.patch \
 "
 
 FILES_${PN} += "${OE_QMAKE_PATH_PLUGINS}/wayland-graphics-integration"
