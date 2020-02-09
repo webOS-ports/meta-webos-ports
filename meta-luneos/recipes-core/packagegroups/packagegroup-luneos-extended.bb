@@ -16,6 +16,7 @@ RDEPENDS_${PN} = " \
   \
   pulseaudio-distro-conf \
   pulseaudio-misc \
+  pulseaudio-module-loopback \
   pulseaudio-module-switch-on-connect \
   pulseaudio-module-bluetooth-discover \
   pulseaudio-module-bluetooth-policy \
