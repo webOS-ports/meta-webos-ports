@@ -14,7 +14,10 @@ RDEPENDS_${PN} += " \
 PV = "0.4.1-3+git${SRCPV}"
 SRCREV = "64a3e24d2cdb1b5736b7542eca591efb363274a9"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = " \
+    ${WEBOS_PORTS_GIT_REPO_COMPLETE} \
+    file://Revert-ACG-migration.patch \
+"
 S = "${WORKDIR}/git"
 
 inherit pkgconfig
