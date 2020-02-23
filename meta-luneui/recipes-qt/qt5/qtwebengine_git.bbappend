@@ -16,9 +16,9 @@ SRC_URI = " \
 "
 WEBOS_GIT_PARAM_BRANCH = "webOS-ports/master-next-5.15"
 
-# webOS-ports/master-next-20200130-5.15
-SRCREV_qtwebengine = "4d8fbbec2589825a51eb9bffea8949a07e35ac3c"
-SRCREV_chromium = "7c7689f0ed5753bbaa3edfb5c50953ca81425ec1"
+# webOS-ports/master-next-20200223-5.15
+SRCREV_qtwebengine = "cbc98422a858a4192aef6e7aa7cf7699582c56cf"
+SRCREV_chromium = "920f92e8c284822b92116d30f4e7d5ca23975316"
 
 do_install_append() {
     #Create the chromium folder already so users can right away push the required plugins there
