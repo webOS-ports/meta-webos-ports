@@ -58,6 +58,7 @@ RDEPENDS_${PN} = " \
   org.webosports.app.photos \
   org.webosports.app.settings \
   org.webosports.app.tasks \
+  org.webosports.app.terminal \
   \
   org.webosports.cdav \
   \
