@@ -1,7 +1,7 @@
 # Imported from meta-qt5, but without the dependency on meta-python2
 # because we're using it from zeus, where it isn't needed
 # as it was in:
-# fd376e15 qtwebengine: Fix missing headers found in build with clang
+# 3e759d82 qtwebengine: Fix build with ninja >= 1.10.0
 
 SUMMARY = "QtWebEngine combines the power of Chromium and Qt"
 
@@ -144,19 +144,20 @@ RDEPENDS_${PN}-examples += " \
 QT_MODULE_BRANCH_CHROMIUM = "77-based"
 
 # Patches from https://github.com/meta-qt5/qtwebengine/commits/b5.14
-# 5.14.meta-qt5.1
+# 5.14.meta-qt5.3
 SRC_URI += " \
     ${QT_GIT}/qtwebengine-chromium.git;name=chromium;branch=${QT_MODULE_BRANCH_CHROMIUM};protocol=${QT_GIT_PROTOCOL};destsuffix=git/src/3rdparty \
     file://0001-Force-host-toolchain-configuration.patch \
+    file://0002-Remove-ninja-version-test-for-now-it-fails-for-ninja.patch \
 "
 SRC_URI_append_libc-musl = "\
-    file://0002-musl-don-t-use-pvalloc-as-it-s-not-available-on-musl.patch \
-    file://0003-musl-link-against-libexecinfo.patch \
-    file://0004-mkspecs-Allow-builds-with-libc-glibc.patch \
+    file://0003-musl-don-t-use-pvalloc-as-it-s-not-available-on-musl.patch \
+    file://0004-musl-link-against-libexecinfo.patch \
+    file://0005-mkspecs-Allow-builds-with-libc-glibc.patch \
 "
 
 # Patches from https://github.com/meta-qt5/qtwebengine-chromium/commits/77-based
-# 77-based.meta-qt5.1
+# 77-based.meta-qt5.2
 SRC_URI += " \
     file://chromium/0001-chromium-workaround-for-too-long-.rps-file-name.patch;patchdir=src/3rdparty \
     file://chromium/0002-chromium-stack-pointer-clobber.patch;patchdir=src/3rdparty \
@@ -169,6 +170,7 @@ SRC_URI += " \
     file://chromium/0009-chromium-Include-cstddef-for-size_t-definition.patch;patchdir=src/3rdparty \
     file://chromium/0010-chromium-Move-CharAllocator-definition-to-a-header-f.patch;patchdir=src/3rdparty \
     file://chromium/0011-chromium-Include-cstddef-and-cstdint.patch;patchdir=src/3rdparty \
+    file://chromium/0012-chromium-Link-v8-with-libatomic-on-x86.patch;patchdir=src/3rdparty \
 "
 
 SRC_URI_append_libc-musl = "\
@@ -187,8 +189,8 @@ SRC_URI_append_libc-musl = "\
     file://chromium/0023-chromium-musl-pread-pwrite.patch;patchdir=src/3rdparty \
 "
 
-SRCREV_qtwebengine = "d366f1d5d37ce6f1833ac67c7ebda540b16690f2"
-SRCREV_chromium = "939daf833fff3a9901afb6fd65d02e0f057a494a"
+SRCREV_qtwebengine = "73d457481caff493066d9cce50087b56ee506f6a"
+SRCREV_chromium = "a9a20127e8adeb3f3cd7921b0bec32083103cc5c"
 SRCREV = "${SRCREV_qtwebengine}"
 
 SRCREV_FORMAT = "qtwebengine_chromium"

@@ -16,8 +16,8 @@ SRC_URI = " \
 "
 WEBOS_GIT_PARAM_BRANCH = "webOS-ports/master-next"
 
-# webOS-ports/master-next-20200127-5.14.1
-SRCREV_qtwebengine = "75b3c0763ba87aebba74201f4c5b61edff1730d1"
+# webOS-ports/master-20200313-5.14.1
+SRCREV_qtwebengine = "33af5fe7c5c9a691560e46591faca6e0c988c6c9"
 SRCREV_chromium = "b93ca80e2acc5a5e419f174fb909a6f0ee127bcd"
 
 do_install_append() {
