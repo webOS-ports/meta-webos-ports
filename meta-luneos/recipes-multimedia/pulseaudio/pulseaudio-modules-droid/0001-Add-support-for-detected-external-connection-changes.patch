@@ -1,4 +1,4 @@
-From a0ae2d2b9a4e3e42794b1d96ab1bf7da4756a3a4 Mon Sep 17 00:00:00 2001
+From d1179589ab72a1721f841c069678e1c76694de1c Mon Sep 17 00:00:00 2001
 From: Simon Busch <morphis@gravedo.de>
 Date: Thu, 26 Jun 2014 15:22:56 +0200
 Subject: [PATCH] Add support for detected external connection changes
@@ -7,25 +7,24 @@ Imported from Ubuntu Touch. Needed to dect a plugged in headphone.
 
 Signed-off-by: Simon Busch <morphis@gravedo.de>
 ---
- configure.ac                  |  19 +++
- src/droid/Makefile.am         |   9 ++
+ configure.ac                  |  18 +++
+ src/droid/Makefile.am         |  11 +-
  src/droid/droid-extcon.c      | 269 ++++++++++++++++++++++++++++++++++
  src/droid/droid-extcon.h      |  32 ++++
- src/droid/module-droid-card.c |  16 ++
- 5 files changed, 345 insertions(+)
+ src/droid/module-droid-card.c |  17 +++
+ 5 files changed, 346 insertions(+), 1 deletion(-)
  create mode 100644 src/droid/droid-extcon.c
  create mode 100644 src/droid/droid-extcon.h
 
 diff --git a/configure.ac b/configure.ac
-index 31134c3..51a96f9 100644
+index 270ecc5..9781050 100644
 --- a/configure.ac
 +++ b/configure.ac
-@@ -284,6 +284,25 @@ AC_ARG_WITH(
+@@ -281,6 +281,24 @@ AC_ARG_WITH(
  
  AC_SUBST(modlibexecdir)
  
 +#### UDEV support (optional) ####
-+
 +AC_ARG_ENABLE([udev],
 +    AS_HELP_STRING([--disable-udev],[Disable optional UDEV support]))
 +
@@ -47,20 +46,22 @@ index 31134c3..51a96f9 100644
  # Droid device type
  droiddevice="generic"
 diff --git a/src/droid/Makefile.am b/src/droid/Makefile.am
-index 8ab5fff..7b6c327 100644
+index 542da4b..a4a56b9 100644
 --- a/src/droid/Makefile.am
 +++ b/src/droid/Makefile.am
-@@ -11,6 +11,9 @@ AM_CFLAGS = \
+@@ -10,7 +10,10 @@ AM_CFLAGS = \
+ 	-DPULSEAUDIO_VERSION=@PA_MAJOR@ \
  	-I$(top_srcdir)/src/droid \
  	-I$(top_srcdir)/src/common/include
- 
+-
++ 
 +if HAVE_UDEV
 +AM_CFLAGS += -DHAVE_UDEV=1
 +endif
  
  modlibexec_LTLIBRARIES = \
  	libdroid-sink.la \
-@@ -51,3 +54,9 @@ module_droid_card_la_SOURCES = module-droid-card.c
+@@ -45,3 +48,9 @@ module_droid_card_la_SOURCES = module-droid-card.c
  module_droid_card_la_LDFLAGS = -module -avoid-version -Wl,-z,noexecstack -lhybris-common
  module_droid_card_la_LIBADD = -lm libdroid-sink.la libdroid-source.la $(top_builddir)/src/common/libdroid-util.la $(AM_LIBADD)
  module_droid_card_la_CFLAGS = $(AM_CFLAGS)
@@ -72,7 +73,7 @@ index 8ab5fff..7b6c327 100644
 +endif
 diff --git a/src/droid/droid-extcon.c b/src/droid/droid-extcon.c
 new file mode 100644
-index 0000000..088afb3
+index 0000000..697957d
 --- /dev/null
 +++ b/src/droid/droid-extcon.c
 @@ -0,0 +1,269 @@
@@ -200,13 +201,13 @@ index 0000000..088afb3
 +    pa_log_debug("Value of switch %s is now %d.", as->name, as->current_value);
 +
 +    PA_HASHMAP_FOREACH(p, u->card->ports, state) {
-+        if (p->is_output) {
++        if (p->direction == PA_DIRECTION_OUTPUT) {
 +            if (!strcmp(p->name, "output-wired_headset"))
 +                pa_device_port_set_available(p, hsmic_avail(as->current_value));
 +            if (!strcmp(p->name, "output-wired_headphone"))
 +                pa_device_port_set_available(p, hponly_avail(as->current_value));
 +        }
-+        if (p->is_input) {
++        if (p->direction == PA_DIRECTION_INPUT) {
 +            if (!strcmp(p->name, "input-wired_headset"))
 +                pa_device_port_set_available(p, hsmic_avail(as->current_value));
 +        }
@@ -384,11 +385,11 @@ index 0000000..7cb7ad2
 +
 +#endif
 diff --git a/src/droid/module-droid-card.c b/src/droid/module-droid-card.c
-index deca902..dc787b3 100644
+index fa35a9a..b89e116 100644
 --- a/src/droid/module-droid-card.c
 +++ b/src/droid/module-droid-card.c
-@@ -62,6 +62,10 @@
- #include <droid/droid-util.h>
+@@ -63,6 +63,10 @@
+ #include <droid/sllist.h>
  #include "droid-sink.h"
  #include "droid-source.h"
 + 
@@ -398,10 +399,10 @@ index deca902..dc787b3 100644
  
  #include "module-droid-card-symdef.h"
  
-@@ -157,6 +161,10 @@ struct userdata {
+@@ -159,6 +163,10 @@ struct userdata {
      pa_droid_card_data card_data;
  
-     pa_droid_profile *old_profile;
+     pa_card_profile *real_profile;
 + 
 +#ifdef HAVE_UDEV
 +    pa_droid_extcon *extcon;
@@ -409,18 +410,19 @@ index deca902..dc787b3 100644
  
      pa_modargs *modargs;
      pa_card *card;
-@@ -834,6 +842,10 @@ int pa__init(pa_module *m) {
+@@ -867,6 +875,11 @@ int pa__init(pa_module *m) {
+ 
      pa_card_choose_initial_profile(u->card);
- #endif
      init_profile(u);
 + 
 +#ifdef HAVE_UDEV
 +    u->extcon = pa_droid_extcon_new(m->core, u->card);
 +#endif
- 
- #if (PULSEAUDIO_VERSION >= 10)
++
      pa_card_put(u->card);
-@@ -865,6 +877,10 @@ void pa__done(pa_module *m) {
+ 
+     return 0;
+@@ -895,6 +908,10 @@ void pa__done(pa_module *m) {
          if (u->card && u->card->sources)
              pa_idxset_remove_all(u->card->sources, (pa_free_cb_t) pa_droid_source_free);
  
@@ -431,3 +433,6 @@ index deca902..dc787b3 100644
  
          if (u->card)
              pa_card_free(u->card);
+-- 
+2.17.0
+
