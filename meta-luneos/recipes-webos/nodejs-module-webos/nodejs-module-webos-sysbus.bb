@@ -19,7 +19,7 @@ export PYTHON = "python"
 
 NODE_VERSION = "10.15.3"
 
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
+WEBOS_GIT_PARAM_BRANCH = "tofe/nodejs12"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}.tar.xz;name=node \
 "
@@ -29,7 +29,7 @@ SRC_URI[node.sha256sum] = "4e22d926f054150002055474e452ed6cbb85860aa7dc5422213a2
 
 S = "${WORKDIR}/git"
 
-SRCREV = "5c741dd4b4c820b825d8a92b8e4230071d2ec08d"
+SRCREV = "88f38bcb2d6d148c3e328efff0c2300b13dce443"
 do_configure() {
     export HOME=${WORKDIR}
     export LD="${CXX}"
