@@ -9,7 +9,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "boost node-gyp-native"
 
 PV = "3.0.2-1+git${SRCPV}"
-SRCREV = "658a2d0000de15a5a828e1cd361e4d4a91c51280"
+SRCREV = "309ad91ee23b76c4afb61935ad8e1eace88950ac"
 
 inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
@@ -20,7 +20,7 @@ export PYTHON = "python3"
 
 NODE_VERSION = "10.15.3"
 
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
+WEBOS_GIT_PARAM_BRANCH = "tofe/nodejs12"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}.tar.xz;name=node \
 "
