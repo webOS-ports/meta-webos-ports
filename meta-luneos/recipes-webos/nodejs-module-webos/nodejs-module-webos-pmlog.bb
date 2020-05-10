@@ -8,9 +8,9 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "pmloglib node-gyp-native vim-native"
 
 PV = "3.0.1-1+git${SRCPV}"
-SRCREV = "8ebc759caf395bec3d6134b4f2277983d8b524bc"
+SRCREV = "6cc2ea137fcb7dbe99c67f2c0e07531d444d03b9"
 
-inherit webos_public_repo
+inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
 inherit pkgconfig
 inherit python3native
@@ -19,7 +19,8 @@ export PYTHON = "python3"
 
 NODE_VERSION = "10.15.3"
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+WEBOS_GIT_PARAM_BRANCH = "tofe/nodejs12"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}.tar.xz;name=node \
 "
 
