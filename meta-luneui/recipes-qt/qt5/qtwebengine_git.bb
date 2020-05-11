@@ -1,7 +1,7 @@
 # Imported from meta-qt5, but without the dependency on meta-python2
 # because we're using it from zeus, where it isn't needed
 # as it was in:
-# 6ce25385 qtwebengine: update patches for latest 5.15 revision
+# 986aa547 qt5: upgrade to 5.15 rc1
 
 SUMMARY = "QtWebEngine combines the power of Chromium and Qt"
 
@@ -141,10 +141,10 @@ RDEPENDS_${PN}-examples += " \
     qtdeclarative-qmlplugins \
 "
 
-QT_MODULE_BRANCH_CHROMIUM = "79-based"
+QT_MODULE_BRANCH_CHROMIUM = "80-based"
 
 # Patches from https://github.com/meta-qt5/qtwebengine/commits/b5.15
-# 5.15.meta-qt5.2
+# 5.15.meta-qt5.6
 SRC_URI += " \
     ${QT_GIT}/qtwebengine-chromium.git;name=chromium;branch=${QT_MODULE_BRANCH_CHROMIUM};protocol=${QT_GIT_PROTOCOL};destsuffix=git/src/3rdparty \
     file://0001-Force-host-toolchain-configuration.patch \
@@ -155,8 +155,8 @@ SRC_URI_append_libc-musl = "\
     file://0004-mkspecs-Allow-builds-with-libc-glibc.patch \
 "
 
-# Patches from https://github.com/meta-qt5/qtwebengine-chromium/commits/79-based
-# 79-based.meta-qt5.2
+# Patches from https://github.com/meta-qt5/qtwebengine-chromium/commits/80-based
+# 80-based.meta-qt5.2
 SRC_URI += " \
     file://chromium/0001-chromium-workaround-for-too-long-.rps-file-name.patch;patchdir=src/3rdparty \
     file://chromium/0002-chromium-stack-pointer-clobber.patch;patchdir=src/3rdparty \
@@ -186,10 +186,11 @@ SRC_URI_append_libc-musl = "\
     file://chromium/0023-chromium-musl-Use-_fpstate-instead-of-_libc_fpstate-.patch;patchdir=src/3rdparty \
     file://chromium/0024-chromium-musl-elf_reader.cc-include-sys-reg.h-to-get.patch;patchdir=src/3rdparty \
     file://chromium/0025-chromium-musl-pread-pwrite.patch;patchdir=src/3rdparty \
+    file://chromium/0026-chromium-musl-initialize-msghdr-in-a-compatible-mann.patch;patchdir=src/3rdparty \
 "
 
-SRCREV_qtwebengine = "3394cde4e89463ba49af379b89863c7731c4b4ac"
-SRCREV_chromium = "9424dc7ceeccf6e6d5edc7757edb39a7ae4983ab"
+SRCREV_qtwebengine = "58cd21c0aa7a9dc5a18ea411dcf462a2ee8193f6"
+SRCREV_chromium = "e941f2bda154c226bd2a1fd75efc8b1b7cee6a08"
 SRCREV = "${SRCREV_qtwebengine}"
 
 SRCREV_FORMAT = "qtwebengine_chromium"
