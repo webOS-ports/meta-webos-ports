@@ -8,12 +8,13 @@ inherit webos_system_bus
 inherit allarch
 
 PV = "0.1.0+git${SRCPV}"
-SRCREV = "fdd816e7c568a173e50d0e4b5d3bb2fcf1f84206"
+SRCREV = "11e12734e6192b258f5604fae4c2a80c9abe499b"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
+WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
+WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files/sysbus"
 PALM_DIR = "${prefix}/palm"
 
 do_install() {
@@ -22,6 +23,16 @@ do_install() {
     SERVICE_DIR="${PN}"
     install -d ${D}${PALM_DIR}/services/$SERVICE_DIR/
     cp -vf ${S}/*.js* ${D}${PALM_DIR}/services/$SERVICE_DIR/
+    
+    # Install the ACG configuration
+    install -d ${D}${webos_sysbus_servicedir}
+    install -d ${D}${webos_sysbus_permissionsdir}
+    install -d ${D}${webos_sysbus_rolesdir}
+    install -d ${D}${webos_sysbus_apipermissionsdir}
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.service ${D}${webos_sysbus_servicedir}/${BPN}.service
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.perm.json ${D}${webos_sysbus_permissionsdir}/${BPN}.perm.json
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.role.json ${D}${webos_sysbus_rolesdir}/${BPN}.role.json
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.api.json ${D}${webos_sysbus_apipermissionsdir}/${BPN}.api.json
 }
 
 FILES_${PN} += "${PALM_DIR}/services"

@@ -15,7 +15,7 @@ DEPENDS += "serviceinstaller"
 RDEPENDS_${PN} += "powerd"
 
 PV = "3.0.0-3+git${SRCPV}"
-SRCREV = "86cba93fb57f27f102d93bd51fb6bb82ab72b715"
+SRCREV = "d3bfcf6f5cf2b4e900aaf06505519f0afc5f3b5b"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 
@@ -82,10 +82,10 @@ do_install_append() {
     fi
 
     # install the pubsub definition file for revokations
-    if [ -f ${S}/service/com.palm.appinstaller.pubsub ]
+    if [ -f ${S}/files/sysbus/com.palm.appinstaller.pubsub ]
     then
         install -d ${D}${webos_sysconfdir}/pubsub_handlers
-        install -v -m 0644 ${S}/service/com.palm.appinstaller.pubsub ${D}${webos_sysconfdir}/pubsub_handlers/com.palm.appinstaller
+        install -v -m 0644 ${S}/files/sysbus/com.palm.appinstaller.pubsub ${D}${webos_sysconfdir}/pubsub_handlers/com.palm.appinstaller
     fi
 }
 
