@@ -16,6 +16,7 @@ SRCREV = "64a3e24d2cdb1b5736b7542eca591efb363274a9"
 
 SERVICE_NAME = "org.webosports.webappmanager"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+
 S = "${WORKDIR}/git"
 
 inherit pkgconfig

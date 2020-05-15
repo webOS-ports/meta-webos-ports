@@ -19,3 +19,5 @@ WEBOS_REPO_NAME = "mojomail"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 CXXFLAGS += "-fpermissive"
+
+SRC_URI += "file://0001-Use-multithreaded-boost.patch;patchdir=.."

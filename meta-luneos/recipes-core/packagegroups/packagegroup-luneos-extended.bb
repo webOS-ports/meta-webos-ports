@@ -16,6 +16,7 @@ RDEPENDS_${PN} = " \
   \
   pulseaudio-distro-conf \
   pulseaudio-misc \
+  pulseaudio-module-loopback \
   pulseaudio-module-switch-on-connect \
   pulseaudio-module-bluetooth-discover \
   pulseaudio-module-bluetooth-policy \
@@ -56,6 +57,7 @@ RDEPENDS_${PN} = " \
   org.webosports.app.photos \
   org.webosports.app.settings \
   org.webosports.app.tasks \
+  org.webosports.app.terminal \
   \
   org.webosports.cdav \
   org.webosports.tweaks \
