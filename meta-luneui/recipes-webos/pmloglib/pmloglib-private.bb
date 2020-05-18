@@ -8,6 +8,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 inherit webos_ports_repo
 inherit webos_cmake
+inherit pkgconfig
 
 # B needs to be different from that of pmloglib so there's
 # no collision in the case of local development.

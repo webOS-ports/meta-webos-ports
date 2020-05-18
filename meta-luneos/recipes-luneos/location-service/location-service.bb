@@ -6,21 +6,26 @@ LIC_FILES_CHKSUM = " \
 	file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10 \
 "
 
-DEPENDS = "luna-service2 glib-2.0 libpbnjson"
-RDEPENDS_${PN} = "geoclue"
-
-PV = "0.1.0+git${SRCPV}"
-SRCREV = "6c92938f65cd1c9d24aa20f6ced571881132e84f"
-
 inherit webos_ports_repo
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
-inherit webos_systemd
+inherit systemd
 
-WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
-WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files/sysbus"
-
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
+
+DEPENDS = "luna-service2 glib-2.0 libpbnjson"
+RDEPENDS_${PN} = "geoclue"
+
+PV = "0.1.0+git${SRCPV}"
+WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
+SRCREV = "e56f99e8ae9b6f9759dfba3fac204c3fb4c33aae"
+
+SYSTEMD_PACKAGES = "${PN}"
+SYSTEMD_SERVICE_${PN} = "org.webosports.service.location.service"
+
+do_install_append() {
+    install -d ${D}${systemd_unitdir}/system
+    install -m 0644 ${S}/files/systemd/org.webosports.service.location.service ${D}${systemd_unitdir}/system/
+}
