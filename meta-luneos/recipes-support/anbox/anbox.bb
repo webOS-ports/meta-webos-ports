@@ -7,7 +7,7 @@ LIC_FILES_CHKSUM = "file://COPYING.GPL;md5=f27defe1e96c2e1ecd4e0c9be8967949"
 
 SECTION = "webos/support"
 
-SRCREV = "3a54509bde5bde0a95c09afd4115d0c47159a7d2"
+SRCREV = "35fe93b8407d2fec9d925e35a5294c567569d9ed"
 PV = "3.0+git${SRCPV}"
 
 DEPENDS += "dbus-cpp libsdl2 libsdl2-image lxc glm protobuf protobuf-native gtest elfutils"
@@ -26,7 +26,6 @@ SRC_URI = "git://github.com/anbox/anbox \
     file://0001-Fix-dependencies-for-LuneOS.patch \
     file://0002-Fix-native-binaries-build.patch \
     file://0003-Fix-emugl-build.patch \
-    file://0004-program_family.cpp-include-string-and-stdexcept-to-f.patch \
     file://anbox-container-manager.service \
     file://anbox-session-manager.service \
     file://anbox-bridge.network \
