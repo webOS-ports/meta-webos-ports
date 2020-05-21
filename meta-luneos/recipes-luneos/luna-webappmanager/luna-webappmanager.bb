@@ -12,7 +12,7 @@ RDEPENDS_${PN} += " \
 "
 
 PV = "0.4.1-3+git${SRCPV}"
-SRCREV = "ec0824ea03b5c3c1023f61ea0a61616d7c9838b8"
+SRCREV = "1c45f87bb70d1cf3586bdfac1d69460649038ced"
 
 SERVICE_NAME = "org.webosports.webappmanager"
 
@@ -34,8 +34,10 @@ WEBOS_SYSTEM_BUS_FILES_LOCATION = "${WORKDIR}/git/files/sysbus"
 do_install_append() {
     # Install the ACG configuration
     install -d ${D}${webos_sysbus_servicedir}
-    install -d ${D}${webos_sysbus_permissionsdir}
-    install -d ${D}${webos_sysbus_rolesdir}
+    install -d ${D}${webos_sysbus_permissionsdir}
+
+    install -d ${D}${webos_sysbus_rolesdir}
+
     install -d ${D}${webos_sysbus_apipermissionsdir}
 
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.service ${D}${webos_sysbus_servicedir}/${SERVICE_NAME}.service
