@@ -30,9 +30,6 @@ WEBOS_NODE = "webos-sysbus.node"
 do_install_append() {
     install ${S}/src/palmbus.js ${D}${libdir}/nodejs/palmbus.js
 
-    # XXX Temporarily add symlink to old location until all users of it are changed
-    ln -svnf ${libdir}/nodejs/palmbus.js ${D}${webos_prefix}/nodejs/palmbus.js
-
     # The CMake build did this with macros
     install -d ${D}${webos_sysbus_prvrolesdir}
     sed "s|@WEBOS_INSTALL_BINDIR@|$bindir|" < ${S}/files/sysbus/com.webos.nodejs.json.prv.in > ${D}${webos_sysbus_prvrolesdir}/com.webos.nodejs.json
