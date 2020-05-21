@@ -23,7 +23,8 @@ def webos_app_generate_security_files_write_permission_file(d, app_info):
     key    = app_id + "-*"
     type   = app_info["type"]
 
-    if type == "native":
+    
+    if type == "native" or "com.palm." in app_id:
         key = app_id
 
     permission = {}
@@ -91,6 +92,13 @@ def webos_app_generate_security_files_write_role_file(d, app_info):
         role["type"]  = "regular"
         role["allowedNames"] = [app_id + "*"]
         role["permissions"] = [{"service": app_id, "outbound": ["*"] }]
+   
+    if "com.palm." in app_id:
+        role["appId"] = app_id
+        role["type"]  = "regular"
+        role["allowedNames"] = [app_id]
+        role["permissions"] = [{"service": app_id, "outbound": ["*"] }]
+
     else:
         role["appId"] = app_id
         role["type"]  = "regular"
