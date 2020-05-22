@@ -15,7 +15,7 @@ DEPENDS += "serviceinstaller"
 RDEPENDS_${PN} += "powerd"
 
 PV = "3.0.0-3+git${SRCPV}"
-SRCREV = "86cba93fb57f27f102d93bd51fb6bb82ab72b715"
+SRCREV = "c0ac89345278bf7674d1206ff424ee238c36120a"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 
@@ -26,6 +26,7 @@ inherit webos_cmake_qt5
 inherit webos_systemd
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};"
+WEBOS_GIT_PARAM_BRANCH = "herrie/ls2-acg-fixes"
 S = "${WORKDIR}/git"
 
 do_install_append() {
@@ -82,10 +83,10 @@ do_install_append() {
     fi
 
     # install the pubsub definition file for revokations
-    if [ -f ${S}/service/com.palm.appinstaller.pubsub ]
+    if [ -f ${S}/files/sysbus/com.palm.appinstaller.pubsub ]
     then
         install -d ${D}${webos_sysconfdir}/pubsub_handlers
-        install -v -m 0644 ${S}/service/com.palm.appinstaller.pubsub ${D}${webos_sysconfdir}/pubsub_handlers/com.palm.appinstaller
+        install -v -m 0644 ${S}/files/sysbus/com.palm.appinstaller.pubsub ${D}${webos_sysconfdir}/pubsub_handlers/com.palm.appinstaller
     fi
 }
 

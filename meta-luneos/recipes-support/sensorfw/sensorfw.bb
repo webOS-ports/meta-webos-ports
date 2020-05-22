@@ -28,11 +28,14 @@ S = "${WORKDIR}/git"
 inherit qmake5
 inherit systemd
 inherit webos_system_bus
+inherit webos_filesystem_paths
+
+SERVICE_NAME = "com.nokia.SensorService"
 
 EXTRA_QMAKEVARS_PRE += "MAKE_DOCS=no "
 EXTRA_QMAKEVARS_PRE_append_halium = "CONFIG+=autohybris "
 
-WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
+WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/LuneOS/sysbus"
 
 SYSTEMD_PACKAGES = "${PN}"
@@ -52,6 +55,12 @@ do_install_append() {
     # systemd service
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${S}/LuneOS/systemd/sensorfwd.service ${D}${systemd_unitdir}/system
+
+    # Install the ACG configuration
+    install -d ${D}${webos_sysbus_servicedir}
+    install -d ${D}${webos_sysbus_rolesdir}
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.service ${D}${webos_sysbus_servicedir}/${SERVICE_NAME}.service
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.role.json ${D}${webos_sysbus_rolesdir}/${SERVICE_NAME}.role.json
 }
 
 do_install_append_halium() {

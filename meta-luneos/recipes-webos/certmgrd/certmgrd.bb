@@ -6,14 +6,24 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "luna-service2 json-c glib-2.0 pmcertificatemgr"
 
 PV = "0.1.0-1+git${SRCPV}"
-SRCREV = "159929b1c9f81d60af50a84ee5a54cfd77548d44"
+SRCREV = "d7df5ac564b7d92d38ee7f4834cf9a91a048f8f9"
 
 inherit webos_ports_repo
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
-inherit webos_systemd
+inherit systemd
 
 WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
+
+SYSTEMD_PACKAGES = "${PN}"
+SYSTEMD_SERVICE_${PN} = "org.webosports.service.certmgrd.service"
+
+
+do_install_append() {
+    install -d ${D}${systemd_unitdir}/system
+    install -m 0644 ${S}/files/systemd/org.webosports.service.certmgrd.service ${D}${systemd_unitdir}/system/
+}
+

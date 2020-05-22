@@ -8,15 +8,15 @@ inherit webos_filesystem_paths
 inherit webos_system_bus
 
 PV = "0.1.0+git${SRCPV}"
-SRCREV = "ca35c051500206b13ed94d90842667713c965b26"
+SRCREV = "6342666ac51cb79f14c8f4a322f1dee7e258663f"
 
 WEBOS_REPO_NAME = "org.webosports.update"
 WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git/service"
 
-WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
-WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files"
+WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
+WEBOS_SYSTEM_BUS_FILES_LOCATION = "${WORKDIR}/git/files/sysbus"
 
 do_install() {
     # Install service and remove unecessary things
@@ -30,6 +30,16 @@ do_install() {
 
     chmod +x ${D}${webos_servicesdir}/${PN}/start-update.sh
     chmod +x ${D}${webos_servicesdir}/${PN}/download-updates.sh
+     
+    # Install the ACG configuration
+    install -d ${D}${webos_sysbus_servicedir}
+    install -d ${D}${webos_sysbus_permissionsdir}
+    install -d ${D}${webos_sysbus_rolesdir}
+    install -d ${D}${webos_sysbus_apipermissionsdir}
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.service ${D}${webos_sysbus_servicedir}/${BPN}.service
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.perm.json ${D}${webos_sysbus_permissionsdir}/${BPN}.perm.json
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.role.json ${D}${webos_sysbus_rolesdir}/${BPN}.role.json
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.api.json ${D}${webos_sysbus_apipermissionsdir}/${BPN}.api.json
 }
 
 FILES_${PN} += "${webos_servicesdir}/${PN}"
