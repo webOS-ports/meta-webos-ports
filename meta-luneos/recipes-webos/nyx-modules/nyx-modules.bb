@@ -55,7 +55,7 @@ PV = "7.1.0-1+git${SRCPV}"
 SRCREV = "9824fc77c362f7deaa3af3b140340714fb214991"
 
 do_configure_prepend() {
-    # install additional machine specific nyx configuration before CMake is started
+    # Install additional machine specific nyx configuration before CMake is started
     if [ -f ${WORKDIR}/${MACHINE}.cmake ]
     then
         cp ${WORKDIR}/${MACHINE}.cmake ${S}/src/machine.cmake

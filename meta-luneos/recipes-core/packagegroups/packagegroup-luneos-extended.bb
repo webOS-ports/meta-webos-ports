@@ -40,9 +40,8 @@ RDEPENDS_${PN} = " \
   imlibpurpleservice \
   messaging-accounts \
   \
-  org.webosinternals.preware \
-  org.webosinternals.tweaks \
-  org.webosinternals.ipkgservice \
+  org.webosports.app.preware \
+  org.webosports.service.ipkg \
   \
   org.webosports.app.browser \
   org.webosports.app.calculator \
@@ -61,6 +60,7 @@ RDEPENDS_${PN} = " \
   org.webosports.app.terminal \
   \
   org.webosports.cdav \
+  org.webosports.tweaks \
   \
   org.webosports.service.devmode \
   org.webosports.service.licenses \
@@ -99,7 +99,7 @@ RDEPENDS_${PN} = " \
   webos-systemd-services \
   \
   audio-service \
-  keymanager \
+  com.palm.keymanager \
   mediaindexer \
   media-permission-service \
   webos-systemsounds \
