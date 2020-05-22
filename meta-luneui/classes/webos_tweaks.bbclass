@@ -1,4 +1,4 @@
-webos_tweaksdir = "${webos_servicesdir}/org.webosinternals.tweaks.prefs/preferences"
+webos_tweaksdir = "${webos_servicesdir}/org.webosports.service.tweaks.prefs/preferences"
 
 # install tweak files from component repository
 do_install_append() {
