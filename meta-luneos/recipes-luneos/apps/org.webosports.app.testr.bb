@@ -8,9 +8,10 @@ inherit allarch
 inherit webos_enyojs_application
 inherit webos_cordova_application
 inherit webos_filesystem_paths
+inherit webos_app
 
 PV = "0.1.0+git${SRCPV}"
-SRCREV = "afeb9ad17a79f3d3ea8c27a465213f8d34cc1b42"
+SRCREV = "ed4b987687bda5530d89cf832f5de8182ba6d0f3"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
@@ -19,3 +20,5 @@ do_install_append() {
     install -d ${D}${WEBOS_APPLICATION_TARGET_DIR}
     install -v -m 0644 ${S}/receiver.html ${D}${WEBOS_APPLICATION_TARGET_DIR}/
 }
+
+WEBOS_GIT_PARAM_BRANCH = "herrie/acg"

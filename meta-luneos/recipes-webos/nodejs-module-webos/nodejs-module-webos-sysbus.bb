@@ -8,7 +8,8 @@ AUTHOR = "Anatolii Sakhnik <anatolii.sakhnik@lge.com>"
 DEPENDS += "glib-2.0 luna-service2"
 
 PV = "3.0.1-1+git${SRCPV}"
-SRCREV = "88f38bcb2d6d148c3e328efff0c2300b13dce443"
+SRCREV = "7c8f18f20a7e1d7fbce00153820adbec0db865fc"
+WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
 
 inherit webos_system_bus
 
@@ -31,8 +32,6 @@ do_install_append() {
     install ${S}/src/palmbus.js ${D}${libdir}/nodejs/palmbus.js
 
     # The CMake build did this with macros
-    install -d ${D}${webos_sysbus_prvrolesdir}
-    sed "s|@WEBOS_INSTALL_BINDIR@|$bindir|" < ${S}/files/sysbus/com.webos.nodejs.json.prv.in > ${D}${webos_sysbus_prvrolesdir}/com.webos.nodejs.json
-    install -d ${D}${webos_sysbus_pubrolesdir}
-    sed "s|@WEBOS_INSTALL_BINDIR@|$bindir|" < ${S}/files/sysbus/com.webos.nodejs.json.pub.in > ${D}${webos_sysbus_pubrolesdir}/com.webos.nodejs.json
+    install -d ${D}${webos_sysbus_rolesdir}
+    sed "s|@WEBOS_INSTALL_BINDIR@|$bindir|" < ${S}/files/sysbus/com.webos.nodejs.role.json.in > ${D}${webos_sysbus_rolesdir}/com.webos.nodejs.role.json
 }
