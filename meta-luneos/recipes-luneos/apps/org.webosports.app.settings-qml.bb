@@ -10,9 +10,10 @@ inherit webos_filesystem_paths
 
 inherit cmake_qt5
 inherit webos_cmake
+inherit webos_app
 
 PV = "0.4.0-1+git${SRCPV}"
-SRCREV = "1b43bb9a94e6b71c37993398660b17a739089fc8"
+SRCREV = "132b4805b1c7ffcb7ad1a39178a6dab1722c68cd"
 
 WEBOS_GIT_PARAM_BRANCH = "qml-based"
 WEBOS_REPO_NAME = "org.webosports.app.settings"

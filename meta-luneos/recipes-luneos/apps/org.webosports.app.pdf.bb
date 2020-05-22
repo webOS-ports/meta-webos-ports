@@ -7,9 +7,12 @@ inherit webos_ports_repo
 inherit allarch
 inherit webos_enyojs_application
 inherit webos_filesystem_paths
+inherit webos_app
 
 PV = "1.0.0+git${SRCPV}"
-SRCREV = "4e7d7fee56cc973198149b2b3c8e92cd5b83f422"
+SRCREV = "f6860144f072c6f63c3b1ec08e8f35c277693a88"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
+
+WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
