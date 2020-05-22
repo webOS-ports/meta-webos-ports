@@ -12,7 +12,7 @@ RDEPENDS_${PN} += " \
 "
 
 PV = "0.4.1-3+git${SRCPV}"
-SRCREV = "1c45f87bb70d1cf3586bdfac1d69460649038ced"
+SRCREV = "95230dd6030f70d023cd4944438d76f51d7092a9"
 
 SERVICE_NAME = "org.webosports.webappmanager"
 
