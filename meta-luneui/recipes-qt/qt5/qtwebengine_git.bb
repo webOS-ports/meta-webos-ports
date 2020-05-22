@@ -1,7 +1,7 @@
 # Imported from meta-qt5, but without the dependency on meta-python2
 # because we're using it from zeus, where it isn't needed
 # as it was in:
-# 3e759d82 qtwebengine: Fix build with ninja >= 1.10.0
+# 986aa547 qt5: upgrade to 5.15 rc1
 
 SUMMARY = "QtWebEngine combines the power of Chromium and Qt"
 
@@ -141,23 +141,22 @@ RDEPENDS_${PN}-examples += " \
     qtdeclarative-qmlplugins \
 "
 
-QT_MODULE_BRANCH_CHROMIUM = "77-based"
+QT_MODULE_BRANCH_CHROMIUM = "80-based"
 
-# Patches from https://github.com/meta-qt5/qtwebengine/commits/b5.14
-# 5.14.meta-qt5.3
+# Patches from https://github.com/meta-qt5/qtwebengine/commits/b5.15
+# 5.15.meta-qt5.6
 SRC_URI += " \
     ${QT_GIT}/qtwebengine-chromium.git;name=chromium;branch=${QT_MODULE_BRANCH_CHROMIUM};protocol=${QT_GIT_PROTOCOL};destsuffix=git/src/3rdparty \
     file://0001-Force-host-toolchain-configuration.patch \
-    file://0002-Remove-ninja-version-test-for-now-it-fails-for-ninja.patch \
 "
 SRC_URI_append_libc-musl = "\
-    file://0003-musl-don-t-use-pvalloc-as-it-s-not-available-on-musl.patch \
-    file://0004-musl-link-against-libexecinfo.patch \
-    file://0005-mkspecs-Allow-builds-with-libc-glibc.patch \
+    file://0002-musl-don-t-use-pvalloc-as-it-s-not-available-on-musl.patch \
+    file://0003-musl-link-against-libexecinfo.patch \
+    file://0004-mkspecs-Allow-builds-with-libc-glibc.patch \
 "
 
-# Patches from https://github.com/meta-qt5/qtwebengine-chromium/commits/77-based
-# 77-based.meta-qt5.2
+# Patches from https://github.com/meta-qt5/qtwebengine-chromium/commits/80-based
+# 80-based.meta-qt5.2
 SRC_URI += " \
     file://chromium/0001-chromium-workaround-for-too-long-.rps-file-name.patch;patchdir=src/3rdparty \
     file://chromium/0002-chromium-stack-pointer-clobber.patch;patchdir=src/3rdparty \
@@ -174,23 +173,24 @@ SRC_URI += " \
 "
 
 SRC_URI_append_libc-musl = "\
-    file://chromium/0011-chromium-musl-sandbox-Define-TEMP_FAILURE_RETRY-if-n.patch;patchdir=src/3rdparty \
-    file://chromium/0012-chromium-musl-Avoid-mallinfo-APIs-on-non-glibc-linux.patch;patchdir=src/3rdparty \
-    file://chromium/0013-chromium-musl-include-fcntl.h-for-loff_t.patch;patchdir=src/3rdparty \
-    file://chromium/0014-chromium-musl-use-off64_t-instead-of-the-internal-__.patch;patchdir=src/3rdparty \
-    file://chromium/0015-chromium-musl-linux-glibc-make-the-distinction.patch;patchdir=src/3rdparty \
-    file://chromium/0016-chromium-musl-allocator-Do-not-include-glibc_weak_sy.patch;patchdir=src/3rdparty \
-    file://chromium/0017-chromium-musl-Use-correct-member-name-__si_fields-fr.patch;patchdir=src/3rdparty \
-    file://chromium/0018-chromium-musl-Define-res_ninit-and-res_nclose-for-no.patch;patchdir=src/3rdparty \
-    file://chromium/0019-chromium-musl-Do-not-define-__sbrk-on-musl.patch;patchdir=src/3rdparty \
-    file://chromium/0020-chromium-musl-Adjust-default-pthread-stack-size.patch;patchdir=src/3rdparty \
-    file://chromium/0021-chromium-musl-Use-_fpstate-instead-of-_libc_fpstate-.patch;patchdir=src/3rdparty \
-    file://chromium/0022-chromium-musl-elf_reader.cc-include-sys-reg.h-to-get.patch;patchdir=src/3rdparty \
-    file://chromium/0023-chromium-musl-pread-pwrite.patch;patchdir=src/3rdparty \
+    file://chromium/0013-chromium-musl-sandbox-Define-TEMP_FAILURE_RETRY-if-n.patch;patchdir=src/3rdparty \
+    file://chromium/0014-chromium-musl-Avoid-mallinfo-APIs-on-non-glibc-linux.patch;patchdir=src/3rdparty \
+    file://chromium/0015-chromium-musl-include-fcntl.h-for-loff_t.patch;patchdir=src/3rdparty \
+    file://chromium/0016-chromium-musl-use-off64_t-instead-of-the-internal-__.patch;patchdir=src/3rdparty \
+    file://chromium/0017-chromium-musl-linux-glibc-make-the-distinction.patch;patchdir=src/3rdparty \
+    file://chromium/0018-chromium-musl-allocator-Do-not-include-glibc_weak_sy.patch;patchdir=src/3rdparty \
+    file://chromium/0019-chromium-musl-Use-correct-member-name-__si_fields-fr.patch;patchdir=src/3rdparty \
+    file://chromium/0020-chromium-musl-Define-res_ninit-and-res_nclose-for-no.patch;patchdir=src/3rdparty \
+    file://chromium/0021-chromium-musl-Do-not-define-__sbrk-on-musl.patch;patchdir=src/3rdparty \
+    file://chromium/0022-chromium-musl-Adjust-default-pthread-stack-size.patch;patchdir=src/3rdparty \
+    file://chromium/0023-chromium-musl-Use-_fpstate-instead-of-_libc_fpstate-.patch;patchdir=src/3rdparty \
+    file://chromium/0024-chromium-musl-elf_reader.cc-include-sys-reg.h-to-get.patch;patchdir=src/3rdparty \
+    file://chromium/0025-chromium-musl-pread-pwrite.patch;patchdir=src/3rdparty \
+    file://chromium/0026-chromium-musl-initialize-msghdr-in-a-compatible-mann.patch;patchdir=src/3rdparty \
 "
 
-SRCREV_qtwebengine = "73d457481caff493066d9cce50087b56ee506f6a"
-SRCREV_chromium = "a9a20127e8adeb3f3cd7921b0bec32083103cc5c"
+SRCREV_qtwebengine = "58cd21c0aa7a9dc5a18ea411dcf462a2ee8193f6"
+SRCREV_chromium = "e941f2bda154c226bd2a1fd75efc8b1b7cee6a08"
 SRCREV = "${SRCREV_qtwebengine}"
 
 SRCREV_FORMAT = "qtwebengine_chromium"
