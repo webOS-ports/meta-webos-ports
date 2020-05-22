@@ -7,11 +7,12 @@ inherit webos_ports_repo
 inherit webos_filesystem_paths
 inherit allarch
 inherit webos_enyojs_application
+inherit webos_app
 
-PV = "2.0.2+git${SRCPV}"
-SRCREV = "5dd15cc3687e5829f67d4705ce3d6985e81dc942"
+PV = "2.0.3+git${SRCPV}"
+SRCREV = "98501be35a5a522d33c5d1e5add7311673c754dd"
 
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
+WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
 WEBOS_REPO_NAME = "preware"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

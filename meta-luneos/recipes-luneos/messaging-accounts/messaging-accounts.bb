@@ -6,12 +6,13 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=e3fc50a88d0a364313df4b21ef20c29e"
 inherit webos_ports_repo
 inherit allarch
 inherit webos_filesystem_paths
+inherit webos_app
 
-SRCREV = "2b7319e65f546d2fec65f49f1a087d6c686dcc21"
+SRCREV = "e9391922868126b0a700dc3be313cbe43905ab70"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
-
+WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
 
 do_install() {
     # account templates
