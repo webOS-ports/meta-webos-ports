@@ -5,10 +5,12 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=e6a600fd5e1d9cbde2d983680233ad02"
 DEPENDS += "luna-service2"
 
 PV = "0.1.0-3+git${SRCPV}"
-SRCREV = "8d5ce985fec7a9fc5b514be306a74193b6139f5b"
+SRCREV = "4d1b8d8a316b5bec03a2e53ef8f91805480df676"
 
 inherit webos_ports_repo
 inherit webos_cmake
+
+WEBOS_GIT_PARAM_BRANCH = "tofe/acg"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
