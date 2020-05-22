@@ -7,7 +7,7 @@ DEPENDS = "luna-service2 json-c glib-2.0 luna-prefs glib-2.0-native"
 RRECOMMENDS_${PN} += "ofono mmsd"
 
 PV = "0.1.0-1+git${SRCPV}"
-SRCREV = "1913c4127c4137bda929f477a63acb444de5187a"
+SRCREV = "ed68acc788857d3e803bf32942ba7632d046a983"
 
 inherit webos_ports_repo
 inherit webos_filesystem_paths
@@ -16,7 +16,7 @@ inherit pkgconfig
 inherit webos_system_bus
 inherit webos_systemd
 
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
+WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 

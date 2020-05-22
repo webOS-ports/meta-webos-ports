@@ -12,12 +12,13 @@ RDEPENDS_${PN} += " \
 "
 
 PV = "0.4.1-3+git${SRCPV}"
-SRCREV = "64a3e24d2cdb1b5736b7542eca591efb363274a9"
+SRCREV = "0f9579c7d48ff6748dc629ccc005587d0c3a3be7"
 
-SRC_URI = " \
-    ${WEBOS_PORTS_GIT_REPO_COMPLETE} \
-    file://Revert-ACG-migration.patch \
-"
+SERVICE_NAME = "org.webosports.webappmanager"
+
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
+
 S = "${WORKDIR}/git"
 
 inherit pkgconfig
@@ -27,5 +28,9 @@ inherit webos_cmake_qt5
 inherit webos_filesystem_paths
 inherit webos_systemd
 
+do_install_append() {
+    # Install the additional ACG configuration
+    install -v -m 0644 ${S}/files/sysbus/com.palm.luna-apps.role.json ${D}${webos_sysbus_rolesdir}/com.palm.luna-apps.role.json
+}
 
 FILES_${PN} += "${webos_frameworksdir}"
