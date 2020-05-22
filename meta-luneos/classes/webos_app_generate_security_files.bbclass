@@ -91,6 +91,7 @@ def webos_app_generate_security_files_write_role_file(d, app_info):
         role["type"]  = "regular"
         role["allowedNames"] = [app_id + "*"]
         role["permissions"] = [{"service": app_id, "outbound": ["*"] }]
+
     else:
         role["appId"] = app_id
         role["type"]  = "regular"
