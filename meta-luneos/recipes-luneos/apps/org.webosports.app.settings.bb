@@ -6,9 +6,12 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 inherit webos_ports_repo
 inherit webos_enyojs_application
 inherit webos_filesystem_paths
+inherit webos_app
 
 PV = "0.3.0-1+git${SRCPV}"
-SRCREV = "b5bb034da82bdae5d753a35940c1fda856cd2287"
+SRCREV = "b9e162505357fccae63f3ae2f8563ed5c62ed1f7"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
+
+WEBOS_GIT_PARAM_BRANCH = "herrie/acg-js"

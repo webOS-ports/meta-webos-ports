@@ -13,9 +13,9 @@ inherit webos_cmake
 inherit webos_app
 
 PV = "0.4.0-1+git${SRCPV}"
-SRCREV = "1b43bb9a94e6b71c37993398660b17a739089fc8"
+SRCREV = "be6af01496a1dd58ed78736491b3c46e5d23fd1d"
 
-WEBOS_GIT_PARAM_BRANCH = "qml-based"
+WEBOS_GIT_PARAM_BRANCH = "qml-based-acg"
 WEBOS_REPO_NAME = "org.webosports.app.settings"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"

@@ -9,7 +9,7 @@ LIC_FILES_CHKSUM = " \
 DEPENDS = "glib-2.0 db8 pidgin luna-service2"
 
 PV = "3.0.5+git${SRCPV}"
-SRCREV = "47fee0880eab69b66ca146094817c86f28f03f21"
+SRCREV = "08fcc1e35abf86e9bf7c1ec7857b7b6998faa6cc"
 
 inherit webos_ports_repo
 inherit webos_cmake
@@ -18,6 +18,7 @@ inherit webos_system_bus
 inherit webos_filesystem_paths
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
 S = "${WORKDIR}/git"
 
 RRECOMMENDS_${PN} += " \

@@ -19,8 +19,8 @@ DEPENDS = "luna-service2 glib-2.0 libpbnjson"
 RDEPENDS_${PN} = "geoclue"
 
 PV = "0.1.0+git${SRCPV}"
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
-SRCREV = "e56f99e8ae9b6f9759dfba3fac204c3fb4c33aae"
+WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
+SRCREV = "6798d85224c2f04b6a703b8209310ceed108ebce"
 
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE_${PN} = "org.webosports.service.location.service"

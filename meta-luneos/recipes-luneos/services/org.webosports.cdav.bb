@@ -7,13 +7,14 @@ inherit webos_ports_repo
 inherit allarch
 inherit webos_filesystem_paths
 inherit webos_system_bus
+inherit webos_app
 
 PV = "0.3.34+git${SRCPV}"
-SRCREV = "c2388ff282ff9187f8ab040e9fc76b19b9f8f103"
+SRCREV = "f5eef62268edd2abf24a30169b7e9de3da910046"
 
 SERVICE_NAME = "org.webosports.service.cdav"
 WEBOS_REPO_NAME = "org.webosports.service.contacts.carddav"
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
+WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 

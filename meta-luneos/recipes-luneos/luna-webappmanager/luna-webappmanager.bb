@@ -12,12 +12,12 @@ RDEPENDS_${PN} += " \
 "
 
 PV = "0.4.1-3+git${SRCPV}"
-SRCREV = "95230dd6030f70d023cd4944438d76f51d7092a9"
+SRCREV = "4f0267e89efd3a7e29c6834bd35492243044ee71"
 
 SERVICE_NAME = "org.webosports.webappmanager"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-WEBOS_GIT_PARAM_BRANCH = "herrie/ls2-fix"
+WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
 
 S = "${WORKDIR}/git"
 

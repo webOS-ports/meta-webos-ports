@@ -8,10 +8,10 @@ inherit webos_filesystem_paths
 inherit webos_system_bus
 
 PV = "0.1.0+git${SRCPV}"
-SRCREV = "6342666ac51cb79f14c8f4a322f1dee7e258663f"
+SRCREV = "5dece7b5bcaeb5879707705a4704981756c4888c"
 
 WEBOS_REPO_NAME = "org.webosports.update"
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
+WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git/service"
 

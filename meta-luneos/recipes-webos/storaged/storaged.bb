@@ -13,12 +13,12 @@ inherit webos_cmake
 inherit webos_system_bus
 inherit webos_systemd
 
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
+WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files/sysbus"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 PV = "2.1.0-5+git${SRCPV}"
-SRCREV = "58771b80c0893f5940f34935c2b0521bcd98779c"
+SRCREV = "82199f26cc6786e8a7e6012293f8285ba21ae0e3"
 S = "${WORKDIR}/git"

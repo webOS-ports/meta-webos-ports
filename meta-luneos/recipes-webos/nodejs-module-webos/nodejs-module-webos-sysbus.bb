@@ -19,7 +19,7 @@ export PYTHON = "python"
 
 NODE_VERSION = "10.15.3"
 
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
+WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}.tar.xz;name=node \
 "
@@ -29,7 +29,7 @@ SRC_URI[node.sha256sum] = "4e22d926f054150002055474e452ed6cbb85860aa7dc5422213a2
 
 S = "${WORKDIR}/git"
 
-SRCREV = "677c9eef78b0f489288ea0c4dc04489894246037"
+SRCREV = "7c8f18f20a7e1d7fbce00153820adbec0db865fc"
 do_configure() {
     export HOME=${WORKDIR}
     export LD="${CXX}"
