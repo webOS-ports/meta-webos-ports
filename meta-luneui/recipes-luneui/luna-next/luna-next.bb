@@ -14,7 +14,7 @@ WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
 S = "${WORKDIR}/git"
 
 PV = "0.5.0-4+git${SRCPV}"
-SRCREV = "10d81c4e0dd9a5fd7c30f3cead8299f46e0fc1b4"
+SRCREV = "ddd3b1f4924d4ff5f632bf84a459d7c912d00073"
 
 # Otherwise there is conflict between None defined in Xlib.h and
 # qtdeclarative's /usr/include/qt5/QtQuick/qsgtexture.h:59

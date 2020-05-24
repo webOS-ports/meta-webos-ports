@@ -6,7 +6,7 @@ DEPENDS = "qtbase qtdeclarative qtwebengine luna-sysmgr-common libwebos-applicat
 RDEPENDS_${PN} += "qtwebengine-qmlplugins qtdeclarative-qmlplugins"
 
 PV = "0.1.0-6+git${SRCPV}"
-SRCREV = "cd2cfd6ff7431a3362b26daad752f7c4716771b7"
+SRCREV = "7121459912f9230bb279907b32af9cb3b3d5b491"
 
 inherit webos_ports_repo
 inherit webos_system_bus

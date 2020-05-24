@@ -20,7 +20,7 @@ RDEPENDS_${PN} = "geoclue"
 
 PV = "0.1.0+git${SRCPV}"
 WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
-SRCREV = "6798d85224c2f04b6a703b8209310ceed108ebce"
+SRCREV = "c7dab24c81534b1047152edf09dee763b7294b5e"
 
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE_${PN} = "org.webosports.service.location.service"
