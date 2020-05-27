@@ -1,7 +1,7 @@
 # Imported from meta-qt5, but without the dependency on meta-python2
 # because we're using it from zeus, where it isn't needed
 # as it was in:
-# 986aa547 qt5: upgrade to 5.15 rc1
+# b4340317 qt5: upgrade to 5.15.0
 
 SUMMARY = "QtWebEngine combines the power of Chromium and Qt"
 
@@ -144,7 +144,7 @@ RDEPENDS_${PN}-examples += " \
 QT_MODULE_BRANCH_CHROMIUM = "80-based"
 
 # Patches from https://github.com/meta-qt5/qtwebengine/commits/b5.15
-# 5.15.meta-qt5.6
+# 5.15.meta-qt5.7
 SRC_URI += " \
     ${QT_GIT}/qtwebengine-chromium.git;name=chromium;branch=${QT_MODULE_BRANCH_CHROMIUM};protocol=${QT_GIT_PROTOCOL};destsuffix=git/src/3rdparty \
     file://0001-Force-host-toolchain-configuration.patch \
@@ -156,7 +156,7 @@ SRC_URI_append_libc-musl = "\
 "
 
 # Patches from https://github.com/meta-qt5/qtwebengine-chromium/commits/80-based
-# 80-based.meta-qt5.2
+# 80-based.meta-qt5.3
 SRC_URI += " \
     file://chromium/0001-chromium-workaround-for-too-long-.rps-file-name.patch;patchdir=src/3rdparty \
     file://chromium/0002-chromium-stack-pointer-clobber.patch;patchdir=src/3rdparty \
@@ -189,8 +189,8 @@ SRC_URI_append_libc-musl = "\
     file://chromium/0026-chromium-musl-initialize-msghdr-in-a-compatible-mann.patch;patchdir=src/3rdparty \
 "
 
-SRCREV_qtwebengine = "58cd21c0aa7a9dc5a18ea411dcf462a2ee8193f6"
-SRCREV_chromium = "e941f2bda154c226bd2a1fd75efc8b1b7cee6a08"
+SRCREV_qtwebengine = "f5268555099a1a96f8730035a40f04a473dd396e"
+SRCREV_chromium = "7b2f027ea83c372c33d5b50deb65a2d98244aa04"
 SRCREV = "${SRCREV_qtwebengine}"
 
 SRCREV_FORMAT = "qtwebengine_chromium"
