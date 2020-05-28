@@ -9,7 +9,7 @@ inherit allarch
 inherit webos_system_bus
 
 PV = "3.0.3+git${SRCPV}"
-SRCREV = "2a4dff46a74c3a7dd542c1153a43de3c5e78a753"
+SRCREV = "898809fc2186659332ba412c61ffbdb601007cb7"
 
 WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
 
