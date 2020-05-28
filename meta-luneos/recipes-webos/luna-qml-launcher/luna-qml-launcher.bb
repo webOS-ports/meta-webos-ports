@@ -6,7 +6,7 @@ DEPENDS = "qtbase qtdeclarative qtwebengine luna-sysmgr-common libwebos-applicat
 RDEPENDS_${PN} += "qtwebengine-qmlplugins qtdeclarative-qmlplugins"
 
 PV = "0.1.0-6+git${SRCPV}"
-SRCREV = "807d93dd05ec547c7e5d7a526cf5ef56ed8cbaf5"
+SRCREV = "6c6bd12c0f5ba9c3bbac800f5e3bdc3b6aafdf56"
 
 inherit webos_ports_repo
 inherit webos_system_bus
@@ -26,8 +26,8 @@ do_install_append() {
     # ACG configuration files
     install -d ${D}${webos_sysbus_permissionsdir}
     install -d ${D}${webos_sysbus_rolesdir}
-    install -d ${D}${webos_sysbus_containersdir}
-    sed "s|@WEBOS_INSTALL_SBINDIR@|$sbindir|" < ${S}/files/sysbus/${SERVICE_NAME}.container.json.in > ${D}${webos_sysbus_containersdir}/${SERVICE_NAME}.container.json
+    #install -d ${D}${webos_sysbus_containersdir}
+    #sed "s|@WEBOS_INSTALL_SBINDIR@|$sbindir|" < ${S}/files/sysbus/${SERVICE_NAME}.container.json.in > ${D}${webos_sysbus_containersdir}/${SERVICE_NAME}.container.json
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.perm.json ${D}${webos_sysbus_permissionsdir}/${SERVICE_NAME}.perm.json
     sed "s|@WEBOS_INSTALL_SBINDIR@|$sbindir|" < ${S}/files/sysbus/${SERVICE_NAME}.role.json.in > ${D}${webos_sysbus_rolesdir}/${SERVICE_NAME}.role.json
 }
