@@ -26,7 +26,7 @@ SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE_${PN} = "luna-sys-service.service"
 
 PV = "4.4.0-1+git${SRCPV}"
-SRCREV = "be50246857ae72ab570ee3b04577e5165b66af4a"
+SRCREV = "b9426859e8c7c2acfc770350705926638bc8503a"
 
 do_install_append() {
     install -d ${D}${datadir}/localization/${BPN}
@@ -34,7 +34,7 @@ do_install_append() {
     rm -rf ${D}${webos_sysbus_prvrolesdir}/com.webos.*
     rm -rf ${D}${webos_sysbus_pubrolesdir}/com.webos.* 
 
-    install -d ${D}${systemd_unitdir}/system
+    install -d ${D}${systemd_unitdir}/system	
     install -m 0644 ${S}/files/systemd/${SYSTEMD_SERVICE_${PN}} ${D}${systemd_unitdir}/system/
 }
 

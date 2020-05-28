@@ -10,7 +10,7 @@ DEPENDS = "luna-service2 libpbnjson glib-2.0 luna-prefs openssl glib-2.0-native"
 RDEPENDS_${PN} = "connman connman-client"
 
 PV = "1.0.0-11+git${SRCPV}"
-SRCREV = "d3385378e2caee73b946ba42dccc1c88f0ecf41f"
+SRCREV = "d9a0b84a0f459724d37024541c0ee245ba56f284"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 

@@ -6,14 +6,14 @@ DEPENDS = "qtbase qtdeclarative qtwebengine luna-sysmgr-common libwebos-applicat
 RDEPENDS_${PN} += "qtwebengine-qmlplugins qtdeclarative-qmlplugins"
 
 PV = "0.1.0-6+git${SRCPV}"
-SRCREV = "05509782bc39ae69bb3bea0c2cd9aa509640d825"
+SRCREV = "807d93dd05ec547c7e5d7a526cf5ef56ed8cbaf5"
 
 inherit webos_ports_repo
 inherit webos_system_bus
 inherit webos_cmake_qt5
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-WEBOS_GIT_PARAM_BRANCH = "herrie/ls2-fix"
+WEBOS_GIT_PARAM_BRANCH = "herrie/work"
 S = "${WORKDIR}/git"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"

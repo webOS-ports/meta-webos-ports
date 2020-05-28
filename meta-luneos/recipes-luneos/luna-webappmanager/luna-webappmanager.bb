@@ -12,11 +12,13 @@ RDEPENDS_${PN} += " \
 "
 
 PV = "0.4.1-3+git${SRCPV}"
-SRCREV = "4f0267e89efd3a7e29c6834bd35492243044ee71"
+SRCREV = "c53d715dd8e524581402e4e8145f0f971fc995a4"
 
 SERVICE_NAME = "org.webosports.webappmanager"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+#SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "git://github.com/Tofee/luna-webappmanager.git;branch=herrie/acg"
+
 WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
 
 S = "${WORKDIR}/git"
