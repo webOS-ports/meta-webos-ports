@@ -10,7 +10,7 @@ inherit webos_enyojs_application
 inherit webos_app
 
 PV = "2.0.3+git${SRCPV}"
-SRCREV = "efa3b16cfe6f7b3dee5980d03f57b95f6fbbbc92"
+SRCREV = "98501be35a5a522d33c5d1e5add7311673c754dd"
 
 WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
 WEBOS_REPO_NAME = "preware"

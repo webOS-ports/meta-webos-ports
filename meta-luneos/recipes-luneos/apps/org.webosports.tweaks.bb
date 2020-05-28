@@ -10,7 +10,7 @@ inherit webos_system_bus
 inherit webos_app
 
 PV = "3.0.3+git${SRCPV}"
-SRCREV = "898809fc2186659332ba412c61ffbdb601007cb7"
+SRCREV = "ad5edad4d464e4c9cfd05b7fc51aa24ff85253fe"
 
 WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
 
