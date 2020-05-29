@@ -12,14 +12,11 @@ RDEPENDS_${PN} += " \
 "
 
 PV = "0.4.1-3+git${SRCPV}"
-SRCREV = "f8cec8f6370ca2efada4fd26a1881a142bc87388"
+SRCREV = "addd6ccc83e4dcf38c331b0982ddd28899cc988b"
 
 SERVICE_NAME = "org.webosports.webappmanager"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-#WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
-SRC_URI = "git://github.com/Tofee/luna-webappmanager.git;branch=herrie/acg"
-
 WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
 
 S = "${WORKDIR}/git"
@@ -31,22 +28,8 @@ inherit webos_cmake_qt5
 inherit webos_filesystem_paths
 inherit webos_systemd
 
-#WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
-#WEBOS_SYSTEM_BUS_FILES_LOCATION = "${WORKDIR}/git/files/sysbus"
-
 do_install_append() {
-    # Install the ACG configuration
- #   install -d ${D}${webos_sysbus_servicedir}
-  #  install -d ${D}${webos_sysbus_permissionsdir}
-
-   # install -d ${D}${webos_sysbus_rolesdir}
-
-    #install -d ${D}${webos_sysbus_apipermissionsdir}
-
-    #install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.service ${D}${webos_sysbus_servicedir}/${SERVICE_NAME}.service
-    #install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.perm.json ${D}${webos_sysbus_permissionsdir}/${SERVICE_NAME}.perm.json    
-    #install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.role.json ${D}${webos_sysbus_rolesdir}/${SERVICE_NAME}.role.json
-    #install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.api.json ${D}${webos_sysbus_apipermissionsdir}/${SERVICE_NAME}.api.json
+    # Install the additional ACG configuration
     install -v -m 0644 ${S}/files/sysbus/com.palm.luna-apps.role.json ${D}${webos_sysbus_rolesdir}/com.palm.luna-apps.role.json
 }
 
