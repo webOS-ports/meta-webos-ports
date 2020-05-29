@@ -13,7 +13,7 @@ inherit webos_app
 SERVICE_NAME = "org.webosports.service.filemanager"
 
 PV = "1.0.0+git${SRCPV}"
-SRCREV = "dacd1ac712d94c41f0acac4531aa282890a37eff"
+SRCREV = "fe41d9fd835849720e41f33a9b1beb710e7c6cca"
 WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
