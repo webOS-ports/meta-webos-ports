@@ -20,5 +20,3 @@ inherit webos_systemd
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
-
-WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
