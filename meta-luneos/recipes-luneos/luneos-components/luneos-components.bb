@@ -3,7 +3,7 @@ LICENSE = "LGPL-2.1"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 PV = "0.4.2+git${SRCPV}"
-SRCREV = "3678e1c2446684fd76b51814287244d7c85de15c"
+SRCREV = "fc650250c486c8666564439fab07bd1963de9da4"
 
 DEPENDS = "qtbase qtdeclarative qtlocation qtquickcontrols qtquickcontrols2 luna-service2 libwebos-application kf5bluezqt-mer qtdeclarative-native"
 
@@ -28,5 +28,3 @@ FILES_${PN}-examples += " \
 "
 
 SRC_URI += "file://0001-Update-for-qtdeclarative-5.15.patch"
-WEBOS_GIT_PARAM_BRANCH = "tofe/acg"
-
