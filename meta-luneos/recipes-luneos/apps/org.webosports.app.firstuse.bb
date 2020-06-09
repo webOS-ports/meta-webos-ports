@@ -4,7 +4,7 @@ LICENSE = "GPL-3.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-3.0;md5=c79ff39f19dfec6d293b95dea7b07891"
 
 PV = "0.3.0-7+git${SRCPV}"
-SRCREV = "4b9bc6cfa355a162bfe41795c9c86c702f04fa54"
+SRCREV = "43239bc9193ae911420990931b428e78aa4cf133"
 
 DEPENDS += "qtbase qtdeclarative qtwebengine"
 
@@ -16,7 +16,6 @@ inherit webos_app
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
-WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
 
 INSANE_SKIP_${PN} = "libdir"
 INSANE_SKIP_${PN}-dbg = "libdir"
