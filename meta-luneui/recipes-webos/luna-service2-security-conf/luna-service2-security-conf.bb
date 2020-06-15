@@ -14,7 +14,7 @@ WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-SRCREV = "43dbcce2e286a64b2b2ecf6dde022d9861c56fc8"
+SRCREV = "9a0e28982494dd5bdf2594504c844b953f68f50a"
 
 FILES_${PN} += "${webos_sysbus_datadir}"
 

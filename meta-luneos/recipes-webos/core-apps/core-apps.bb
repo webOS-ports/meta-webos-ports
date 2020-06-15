@@ -6,13 +6,15 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 PV = "3.0.0-2+git${SRCPV}"
-SRCREV = "aedb113ac3d73676802208d99e70a12b428f494e"
+SRCREV = "f92bf01d2101db2aee981fe822a53708b78895b5"
 
 inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
+inherit webos_app
 #inherit webos_cmake
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+
 S = "${WORKDIR}/git"
 
 do_install() {

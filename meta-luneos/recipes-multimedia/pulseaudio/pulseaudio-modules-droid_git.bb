@@ -11,12 +11,11 @@ COMPATIBLE_MACHINE = "^halium$"
 
 PULSEAUDIO_VERSION = "12.2"
 
-PV = "${PULSEAUDIO_VERSION}.77+git${SRCPV}"
-SRCREV = "b1ce02b3d6e983fed34bba9defea9a1d74d6b917"
+PV = "${PULSEAUDIO_VERSION}.84+git${SRCPV}"
+SRCREV = "72d4e0aaca9a8cdd2d2fc9915abd8fec5ac93e15"
 
 SRC_URI = "git://github.com/mer-hybris/pulseaudio-modules-droid.git \
-    file://0001-Add-support-for-detected-external-connection-changes.patch \
-    file://0002-droid-extcon.c-adapt-to-new-pulseaudio-5-APIs.patch \
+           file://0001-Add-support-for-detected-external-connection-changes.patch \
 "
 
 S = "${WORKDIR}/git"

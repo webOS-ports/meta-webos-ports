@@ -35,5 +35,7 @@ BBCLASSEXTEND = "native"
 
 SRC_URI += "file://0001-util-Fix-build-with-gcc7.patch"
 
+SRC_URI += "file://0001-test_corners-initialize-cookie.patch"
+
 # ${PN} package is empty
 RDEPENDS_${PN}-dev = ""

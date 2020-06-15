@@ -6,18 +6,16 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=2d5025d4aa3495befef8f17206a5b0a1"
 # We're potentially depending on libhybris so need to be MACHINE_ARCH
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-PV = "0.11.1+git${SRCPV}"
-SRCREV = "92b9c6f715e0b1a3db151e0b532e634818b89058"
+PV = "0.11.4+git${SRCPV}"
+SRCREV = "4f97982dd95f5ab229312d9e721d2f131bfa8886"
 DEPENDS = "qtbase \
     luna-sysmgr-common luna-service2 json-c glib-2.0 luna-sysmgr-ipc-messages"
     
 DEPENDS_append_halium = " libhybris virtual/android-headers "
 
 SRC_URI = " \
-    git://github.com/sailfish-on-dontbeevil/sensorfw.git;branch=dontbeevil \
-    file://0002-LuneOS-fix-systemd-service-file.patch \
-    file://0003-Fix-build-with-autohybris.patch \
-    file://0004-LuneOS-fix-dbus-service-file.patch \
+    git://git.merproject.org/mer-core/sensorfw.git;branch=master \
+    file://0001-Fix-build-with-autohybris.patch \
 "
 
 # Note: maybe this should go in a bbappend in meta-pine64-luneos...
@@ -30,11 +28,14 @@ S = "${WORKDIR}/git"
 inherit qmake5
 inherit systemd
 inherit webos_system_bus
+inherit webos_filesystem_paths
+
+SERVICE_NAME = "com.nokia.SensorService"
 
 EXTRA_QMAKEVARS_PRE += "MAKE_DOCS=no "
 EXTRA_QMAKEVARS_PRE_append_halium = "CONFIG+=autohybris "
 
-WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
+WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/LuneOS/sysbus"
 
 SYSTEMD_PACKAGES = "${PN}"
@@ -54,6 +55,12 @@ do_install_append() {
     # systemd service
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${S}/LuneOS/systemd/sensorfwd.service ${D}${systemd_unitdir}/system
+
+    # Install the ACG configuration
+    install -d ${D}${webos_sysbus_servicedir}
+    install -d ${D}${webos_sysbus_rolesdir}
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.service ${D}${webos_sysbus_servicedir}/${SERVICE_NAME}.service
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.role.json ${D}${webos_sysbus_rolesdir}/${SERVICE_NAME}.role.json
 }
 
 do_install_append_halium() {

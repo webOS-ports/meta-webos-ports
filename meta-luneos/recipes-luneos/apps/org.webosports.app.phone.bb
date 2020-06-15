@@ -3,7 +3,7 @@ SECTION = "webos/apps"
 LICENSE = "GPL-3.0"
 LIC_FILES_CHKSUM = "file://COPYING;md5=4ddd17b0c9241d7b24a4960caefe8e40"
 
-DEPENDS = "qtbase qtdeclarative libwebos-application"
+DEPENDS = "qtbase qtdeclarative"
 RDEPENDS_${PN} += "qtdeclarative-qmlplugins libqofono"
 
 inherit webos_ports_repo
@@ -12,9 +12,10 @@ inherit webos_cmake_qt5
 inherit webos_filesystem_paths
 inherit webos_application
 inherit webos_tweaks
+inherit webos_app
 
 PV = "0.1.0-6+git${SRCPV}"
-SRCREV = "15e22b370610c96bba71091900e62fe0ce2b26eb"
+SRCREV = "30ee8b9b9f11fa2085e2c38512fae48ddbcb5710"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

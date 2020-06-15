@@ -15,7 +15,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 PV = "1.6.3-1+git${SRCPV}"
-SRCREV = "832ec580a8628af9cb6eacea3e5f1db38001158d"
+SRCREV = "3c228242adcb8d418d222fddfcdd9288324dd469"
 
 do_compile() {
      :

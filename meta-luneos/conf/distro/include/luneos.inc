@@ -182,6 +182,8 @@ CONNECTIVITY_CHECK_URIS ?= "http://jenkins.nas-admin.org \
 # TODO can check on all these host machines.
 SANITY_TESTED_DISTROS ?= " \
     ubuntu-18.04 \n \
+    ubuntu-19.10 \n \
+    ubuntu-20.04 \n \
 "
 
 require conf/distro/include/yocto-uninative.inc

@@ -9,7 +9,12 @@ DEPENDS_append_class-target = " presage-native"
 
 BBCLASSEXTEND = "native"
 
-inherit autotools gettext pkgconfig python-dir
+# inheriting python3native works only as long as python3-native and target python3
+# have the same major version (used in python3-dir), but it's better than using
+# python3 from host (e.g. it installs to /usr/lib/python3.7/ on my host with ubuntu-19.04
+# and /usr/lib/python3.6 on jenkins with ubuntu-18.04 as shown here:
+# http://jenkins.nas-admin.org/job/LuneOS/view/unstable/job/luneos-unstable_qemux86-64/78/consoleFull
+inherit autotools gettext pkgconfig python3-dir python3native
 
 SRC_URI = " \
     http://downloads.sourceforge.net/${BPN}/${BP}.tar.gz \

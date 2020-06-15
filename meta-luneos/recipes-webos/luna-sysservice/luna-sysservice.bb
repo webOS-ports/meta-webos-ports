@@ -18,7 +18,7 @@ inherit webos_system_bus
 inherit webos_configure_manifest
 inherit systemd
 
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
+WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
@@ -26,7 +26,7 @@ SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE_${PN} = "luna-sys-service.service"
 
 PV = "4.4.0-1+git${SRCPV}"
-SRCREV = "d4743b352d02cb45a218dbac67aa264aabb84b14"
+SRCREV = "919767f5b196e47fe7e74c620149e85e84b808d0"
 
 do_install_append() {
     install -d ${D}${datadir}/localization/${BPN}

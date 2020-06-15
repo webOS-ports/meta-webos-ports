@@ -13,10 +13,9 @@ EXTRA_PACKAGECONFIG_rpi = ""
 PACKAGECONFIG_append_class-target = " ${EXTRA_PACKAGECONFIG}"
 
 SRC_URI += " \
-    file://0001-Added-password-mask-delay.patch \
-    file://0002-Fix-QtKeyExtensionGlobal-s-export.patch \
-    file://0003-Revert-Remove-QWaylandExtendedSurface-from-the-priva.patch \
-    file://0004-QWaylandXdgSurface-handle-ExtendedSurface-window-pro.patch \
+    file://0001-Fix-QtKeyExtensionGlobal-s-export.patch \
+    file://0002-Revert-Remove-QWaylandExtendedSurface-from-the-priva.patch \
+    file://0003-QWaylandXdgSurface-handle-ExtendedSurface-window-pro.patch \
 "
 
 FILES_${PN} += "${OE_QMAKE_PATH_PLUGINS}/wayland-graphics-integration"

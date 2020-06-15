@@ -14,8 +14,8 @@ RDEPENDS_${PN} += " \
     luna-next \
 "
 
-PV = "0.5.1-3+git${SRCPV}"
-SRCREV = "398b08191e84ae24027da55d0e436adc2e44c1eb"
+PV = "0.5.1-4+git${SRCPV}"
+SRCREV = "d4fd821ad677b5c2cc68b1f321822bbccd5276ef"
 
 inherit webos_ports_repo
 inherit webos_cmake

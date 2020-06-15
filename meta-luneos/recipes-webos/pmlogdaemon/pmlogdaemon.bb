@@ -12,9 +12,8 @@ DEPENDS = "pmloglib zlib glib-2.0 librdx libpbnjson pmloglib-private luna-servic
 RDEPENDS_${PN} = "busybox"
 
 PV = "3.1.0-5+git${SRCPV}"
-SRCREV = "1f7ff0d2c6c86bf88dc9c2c8444ebf54a96d5768"
+SRCREV = "df23d7f758b20035082f68f6aa8770297a46f0ac"
 
-#inherit webos_public_repo
 inherit webos_ports_fork_repo
 inherit webos_cmake
 inherit webos_system_bus

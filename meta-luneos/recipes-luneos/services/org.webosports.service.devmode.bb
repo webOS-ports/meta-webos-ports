@@ -9,12 +9,12 @@ inherit webos_filesystem_paths
 inherit webos_system_bus
 
 PV = "0.1.0+git${SRCPV}"
-SRCREV = "29d6871f81cf2d268d6d72a4210990482b9f2c48"
+SRCREV = "657480fec3a73183fe1fb5257f2e86aee03e4d0c"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
+WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files/sysbus"
 
 do_install() {
@@ -22,6 +22,16 @@ do_install() {
     install -d ${D}${webos_servicesdir}/${PN}
     cp -rv ${S}/* ${D}${webos_servicesdir}/${PN}
     rm -rf ${D}${webos_servicesdir}/${PN}/files
+    
+    # Install the ACG configuration
+    install -d ${D}${webos_sysbus_servicedir}
+    install -d ${D}${webos_sysbus_permissionsdir}
+    install -d ${D}${webos_sysbus_rolesdir}
+    install -d ${D}${webos_sysbus_apipermissionsdir}
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.service ${D}${webos_sysbus_servicedir}/${BPN}.service
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.perm.json ${D}${webos_sysbus_permissionsdir}/${BPN}.perm.json
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.role.json ${D}${webos_sysbus_rolesdir}/${BPN}.role.json
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.api.json ${D}${webos_sysbus_apipermissionsdir}/${BPN}.api.json
 }
 
 FILES_${PN} += "${webos_servicesdir}/${PN}"

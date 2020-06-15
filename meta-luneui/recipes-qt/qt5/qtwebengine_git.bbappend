@@ -7,32 +7,19 @@ PACKAGECONFIG += "proprietary-codecs pepper-plugins printing-and-pdf spellchecke
 # Activate some more detailed debug info
 # EXTRA_QMAKEVARS_PRE += " CONFIG+=force_debug_info CONFIG+=webcore_debug "
 
-# Patches from:
-# https://github.com/webOS-ports/qtwebengine/commits/webOS-ports/master-next-20190418-5.12.3
-# https://github.com/webOS-ports/qtwebengine-chromium/commits/webOS-ports/master-next-20190418-5.12.3
-SRC_URI += " \
+inherit webos_ports_fork_repo
+
+SRC_URI = " \
+    ${WEBOS_PORTS_GIT_REPO_COMPLETE};name=qtwebengine \
+    ${WEBOS_PORTS_GIT_REPO}/qtwebengine-chromium;name=chromium${WEBOS_GIT_BRANCH};destsuffix=git/src/3rdparty \
     file://qtwebengine.conf \
-    file://0001-WebEngineView-provide-additionnal-features-from-wind.patch \
-    file://0002-WebEngineNewViewRequest-provide-the-requested-URL-as.patch \
-    file://0003-Implement-Sync-IPC-messaging-through-qt.webChannelTr.patch \
-    file://0004-WebEngineSettings-Add-LuneOS-fonts-properties.patch \
-    file://0005-Store-the-additional-window-features-required-by-the.patch \
-    file://0006-QQuickWebEngineNewViewRequest-use-initialTargetUrl-f.patch \
-    file://0007-WebEngineNewViewRequest-add-possibility-to-get-reque.patch \
-    file://0008-GetScreenInfo-use-default-screen-when-no-window-is-a.patch \
-    file://0009-Enable-password-echo.patch \
-    file://0010-Implement-RequestQuotePermission.patch \
-    file://0011-WebEngineView-re-introduce-devicePixelRatio-property.patch \
-    file://0012-WebEngineView-add-extraContextMenuEntriesComponent-p.patch \
-    file://0013-gn_generator-fix-debug-build.patch \
-    file://chromium/0001-WebContents-provide-additional-features-from-window..patch;patchdir=src/3rdparty \
-    file://chromium/0002-WindowFeatures-Chrome-lower-the-minimum-height-to-5.patch;patchdir=src/3rdparty \
-    file://chromium/0003-Enable-password-echo.patch;patchdir=src/3rdparty \
-    file://chromium/0004-storage-browser-quota-workaround-for-crash-on-cache-.patch;patchdir=src/3rdparty \
-    file://chromium/0005-html.css-themeWin.css-Add-Prelude-as-default-font-in.patch;patchdir=src/3rdparty \
-    file://chromium/0006-Fix-webGL2-Textures.patch;patchdir=src/3rdparty \
-    file://chromium/0007-qtwebchannel-mojom-provide-a-sync-call-for-LuneOS.patch;patchdir=src/3rdparty \
 "
+WEBOS_GIT_PARAM_BRANCH = "webOS-ports/master"
+
+# webOS-ports/master-20200527
+SRCREV_qtwebengine = "7b53f3018b25f92fdccdb438a204b82543835d0e"
+# webOS-ports/master-20200527
+SRCREV_chromium = "25e1fa7d83a4c0959b638d82dcafb7284b2d825d"
 
 do_install_append() {
     #Create the chromium folder already so users can right away push the required plugins there
