@@ -7,12 +7,10 @@ SRCREV = "3ab28261c15206991a5d97532a82ed8212f85277"
 
 DEPENDS = "qtbase qtdeclarative qtsensors qtlocation"
 
-SRC_URI = " \
-    git://github.com/Tofee/Messwerk.git \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-inherit webos_ports_fork_repo
+inherit webos_ports_repo
 inherit webos_filesystem_paths
 inherit qmake5
 
