@@ -7,7 +7,7 @@ LIC_FILES_CHKSUM = " \
 "
 
 PV = "5.8.0+git${SRCPV}"
-SRCREV = "1410d45704cf65224c9d8ec2d9bc7128e65b27d5"
+SRCREV = "7c877513744a6de89f174f3f446538f2f24ed4be"
 
 DEPENDS = "qtbase libhybris qtwayland virtual/android-headers qtdeclarative"
 
@@ -20,7 +20,6 @@ COMPATIBLE_MACHINE = "^halium$"
 
 SRC_URI = " \
     git://git.merproject.org/Tofe/qtscenegraph-adaptation.git;branch=tofe/qt5.8 \
-    file://0001-context-make-it-compatible-with-Qt-5.14.patch \
 "
 S = "${WORKDIR}/git"
 
