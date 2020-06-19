@@ -10,8 +10,7 @@ inherit webos_filesystem_paths
 
 
 PV = "0.1.0+git${SRCPV}"
-SRCREV = "3412733f10a016e17bd53b304a84e40ed932a8d9"
-WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
+SRCREV = "f660e995b36552cbe8a40aa559c572bebf467037"
 SERVICE_NAME = "com.palm.mediapermissions"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"

@@ -11,7 +11,7 @@ inherit webos_application
 inherit webos_app
 
 PV = "0.0.1+git${SRCPV}"
-SRCREV = "85542a5de68f1afc224ca2ce6ed67e4a2b0d2e6d"
+SRCREV = "4398a38a847bb773d8438be0d6e0f61622784629"
 
 # For compatibility reasons we have to name the app internally as the old palm contacts
 # app. Maybe possible to switch that later.
@@ -19,5 +19,3 @@ WEBOS_APPLICATION_NAME = "com.palm.app.contacts"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
-
-WEBOS_GIT_PARAM_BRANCH = "herrie/acg"

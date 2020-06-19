@@ -8,11 +8,10 @@ inherit allarch
 inherit webos_filesystem_paths
 inherit webos_app
 
-SRCREV = "e9391922868126b0a700dc3be313cbe43905ab70"
+SRCREV = "181d6f2e23981a71264d38f9783c4a5213656824"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
-WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
 
 do_install() {
     # account templates
