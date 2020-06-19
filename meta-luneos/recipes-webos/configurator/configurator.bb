@@ -11,8 +11,7 @@ DEPENDS = "luna-service2 db8 glib-2.0 pmloglib"
 PV = "3.0.0-1+git${SRCPV}"
 SRCREV = "907c605ec347523218c9bb071e6a20090f8e2fce"
 
-inherit webos_ports_repo
-inherit webos_public_repo
+inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit webos_system_bus
 #inherit pkgconfig
@@ -32,6 +31,5 @@ FILES_${PN} += "${systemd_unitdir}/system"
 
 FILES_${PN} += "${webos_sysbus_datadir}"
 
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

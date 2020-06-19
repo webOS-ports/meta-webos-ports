@@ -9,14 +9,13 @@ RRECOMMENDS_${PN} += "ofono mmsd"
 PV = "0.1.0-1+git${SRCPV}"
 SRCREV = "dcccef9bbe90506fce596940a84bd3ada924168b"
 
-inherit webos_ports_repo
+inherit webos_ports_ose_repo
 inherit webos_filesystem_paths
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
 inherit webos_systemd
 
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 

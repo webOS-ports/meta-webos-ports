@@ -12,13 +12,12 @@ DEPENDS = "systemd luna-service2 libpbnjson pmloglib glib-2.0 boost gtest"
 PV = "0.1.0+git${SRCPV}"
 SRCREV = "75c5ff6a088924b3fd631740c46e9daf6d8ba932"
 
-inherit webos_ports_fork_repo
+inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_machine_impl_dep
 inherit webos_systemd
 
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     file://0001-Remove-PmTrace-dependency.patch \
 "

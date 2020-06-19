@@ -10,13 +10,12 @@ SRCREV = "6f9721a3f69c2572cdd7cd45a01791be02364aa8"
 
 SERVICE_NAME = "org.webosports.service.audio"
 
-inherit webos_ports_repo
+inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
 inherit webos_systemd
 
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 

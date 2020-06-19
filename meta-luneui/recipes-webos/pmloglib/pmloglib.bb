@@ -12,7 +12,7 @@ LEAD_SONAME = "libPmLogLib.so"
 WEBOS_DISTRO_PRERELEASE ??= ""
 EXTRA_OECMAKE += "-DWEBOS_DISTRO_PRERELEASE:STRING='${WEBOS_DISTRO_PRERELEASE}'"
 
-inherit webos_ports_repo
+inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit webos_pmlog_config
 inherit systemd
@@ -24,7 +24,6 @@ SYSTEMD_SERVICE_${PN} = "pm-log-daemon.service"
 PACKAGECONFIG ??= ""
 PACKAGECONFIG[whitelist] = "-DENABLE_WHITELIST:BOOL=TRUE, -DENABLE_WHITELIST:BOOL=FALSE"
 
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 

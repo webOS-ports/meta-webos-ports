@@ -12,13 +12,12 @@ RDEPENDS_${PN} = "settingsservice-conf python"
 PV = "1.0.22-1+git${SRCPV}"
 inherit webos_cmake
 inherit webos_system_bus
-inherit webos_ports_repo
+inherit webos_ports_ose_repo
 inherit systemd
 
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE_${PN} = "settings-service-recovery.service settings-service.service"
 
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 S = "${WORKDIR}/git"

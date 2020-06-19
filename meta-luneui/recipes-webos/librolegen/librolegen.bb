@@ -11,11 +11,10 @@ DEPENDS = "glib-2.0"
 PV = "2.1.0-20+git${SRCPV}"
 SRCREV = "8714626f3d319cbf5fa91996bfdc43b73fe228ea"
 
-inherit webos_ports_fork_repo
+inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit pkgconfig
 
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 

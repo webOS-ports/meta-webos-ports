@@ -18,7 +18,7 @@ WEBOS_DISTRO_PRERELEASE ??= ""
 EXTRA_OECMAKE += "${@ '-DWEBOS_DISTRO_PRERELEASE:STRING="devel"' \
                   if d.getVar('WEBOS_DISTRO_PRERELEASE',True) != '' else ''}"
 
-inherit webos_ports_repo
+inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_core_os_dep
@@ -26,7 +26,6 @@ inherit webos_lttng
 inherit webos_test_provider
 inherit systemd
 
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 

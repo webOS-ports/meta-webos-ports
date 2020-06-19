@@ -12,7 +12,7 @@ RDEPENDS_${PN} = "nyx-utils tar"
 
 PROVIDES = "librdx rdx-utils"
 
-inherit webos_ports_fork_repo
+inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit webos_system_bus
 inherit pkgconfig
@@ -20,7 +20,6 @@ inherit webos_systemd
 
 PV = "4.0.2-3+git${SRCPV}"
 
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 S = "${WORKDIR}/git"
