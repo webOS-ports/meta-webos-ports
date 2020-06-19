@@ -15,7 +15,7 @@ DEPENDS += "serviceinstaller"
 RDEPENDS_${PN} += "powerd"
 
 PV = "3.0.0-3+git${SRCPV}"
-SRCREV = "d7c49dc32bc6223d6a7d7b67d353a02323fadff0"
+SRCREV = "94dab1249dfb2ef84505d14e0cbe782322ae27ae"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 
@@ -26,7 +26,6 @@ inherit webos_cmake_qt5
 inherit webos_systemd
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};"
-WEBOS_GIT_PARAM_BRANCH = "herrie/ls2-acg-fixes"
 S = "${WORKDIR}/git"
 
 do_install_append() {

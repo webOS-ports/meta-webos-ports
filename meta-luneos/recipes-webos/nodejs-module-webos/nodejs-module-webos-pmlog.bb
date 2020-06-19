@@ -7,7 +7,7 @@ SUMMARY = "A module for nodejs that allows Javascript access to the Open webOS l
 DEPENDS += "pmloglib vim-native"
 
 PV = "3.0.1-1+git${SRCPV}"
-SRCREV = "6cc2ea137fcb7dbe99c67f2c0e07531d444d03b9"
+SRCREV = "ca359ed90389c5be085e7eac0548236312743d6a"
 
 inherit pkgconfig
 

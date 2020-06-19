@@ -11,9 +11,7 @@ inherit webos_application
 inherit webos_app
 
 PV = "0.0.1+git${SRCPV}"
-SRCREV = "7c3d0a1f41c3e9c3449bc96ef924fd707136c05d"
+SRCREV = "116116923a4770dccf6488303a3345d494be3e9b"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
-
-WEBOS_GIT_PARAM_BRANCH = "herrie/acg"

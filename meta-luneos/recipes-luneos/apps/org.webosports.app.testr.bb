@@ -11,7 +11,7 @@ inherit webos_filesystem_paths
 inherit webos_app
 
 PV = "0.1.0+git${SRCPV}"
-SRCREV = "ed4b987687bda5530d89cf832f5de8182ba6d0f3"
+SRCREV = "8810a58bd5f0a091c623a1c07dd2f52e0133649b"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
@@ -20,5 +20,3 @@ do_install_append() {
     install -d ${D}${WEBOS_APPLICATION_TARGET_DIR}
     install -v -m 0644 ${S}/receiver.html ${D}${WEBOS_APPLICATION_TARGET_DIR}/
 }
-
-WEBOS_GIT_PARAM_BRANCH = "herrie/acg"

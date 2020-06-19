@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "node-gyp-native"
 
-inherit webos_ports_fork_repo
+inherit webos_ports_ose_repo
 inherit webos_filesystem_paths
 inherit pythonnative
 
@@ -21,7 +21,6 @@ export PYTHON = "python"
 # Please try re-compiling or re-installing
 NODE_VERSION = "10.15.3"
 
-WEBOS_GIT_PARAM_BRANCH = "tofe/nodejs12"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}.tar.xz;name=node \
 "

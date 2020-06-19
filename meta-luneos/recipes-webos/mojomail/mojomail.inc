@@ -9,12 +9,11 @@ DEPENDS = "jemalloc db8 boost curl libpalmsocket libsandbox pmloglib icu json-c 
 PV = "2.0.0-99+git${SRCPV}"
 SRCREV = "446c53ce81eb6bae84fd6f8556356d05442f08bb"
 
-inherit webos_ports_fork_repo
+inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_machine_impl_dep
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
 WEBOS_REPO_NAME = "mojomail"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 

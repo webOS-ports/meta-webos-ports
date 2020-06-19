@@ -3,18 +3,17 @@ SECTION = "webos/services"
 LICENSE = "GPL-3.0"
 LIC_FILES_CHKSUM = "file://LICENSE.txt;md5=d32239bcb673463ab874e80d47fae504"
 
-inherit webos_ports_repo
+inherit webos_ports_ose_repo
 inherit allarch
 inherit webos_filesystem_paths
 inherit webos_system_bus
 inherit webos_app
 
 PV = "0.3.34+git${SRCPV}"
-SRCREV = "a671623062ba7411328bf7dd0bc90a71df57b8bf"
+SRCREV = "b57a9743bd42d6928662800dae61305b5b18a292"
 
 SERVICE_NAME = "org.webosports.service.cdav"
 WEBOS_REPO_NAME = "org.webosports.service.contacts.carddav"
-WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 

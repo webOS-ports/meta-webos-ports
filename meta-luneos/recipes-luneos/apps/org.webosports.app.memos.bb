@@ -10,9 +10,7 @@ inherit webos_filesystem_paths
 inherit webos_app
 
 PV = "1.0.7+git${SRCPV}"
-SRCREV = "8076763aad64fcb9c00f88c5dd01a2ad7b2d3eb6"
+SRCREV = "5a3697997669fdff9edd460e4c40736c71bc7198"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
-
-WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
