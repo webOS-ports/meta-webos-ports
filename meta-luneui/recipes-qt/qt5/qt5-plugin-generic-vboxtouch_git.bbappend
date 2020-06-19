@@ -4,5 +4,7 @@ LIC_FILES_CHKSUM = " \
     file://evdevmousehandler.cpp;beginline=1;endline=38;md5=e6b661a57e804d0e9c4065e9ea275f33 \
 "
 
-SRC_URI = "git://github.com/Tofee/qt5-plugin-generic-vboxtouch.git"
+inherit webos_ports_repo
+
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 SRCREV = "5c3b346e2c72900158f207f86e62f1f2672f494a"

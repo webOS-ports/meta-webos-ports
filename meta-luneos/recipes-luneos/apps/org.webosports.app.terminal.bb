@@ -8,12 +8,11 @@ SRCREV = "e47d824545db23b59c70c653942f741f6af9b198"
 DEPENDS = "qtbase qtdeclarative qtquickcontrols2"
 RDEPENDS_${PN} = "qmltermwidget "
 
-SRC_URI = " \
-    git://github.com/Tofee/org.webosports.app.terminal.git;protocol=git;branch=master \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-inherit webos_ports_fork_repo
+
+inherit webos_ports_repo
 inherit webos_filesystem_paths
 inherit cmake_qt5
 inherit webos_cmake
