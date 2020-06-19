@@ -10,7 +10,7 @@ DEPENDS = "nyx-lib luna-service2 json-c libxml2 sqlite3 glib-2.0"
 
 RDEPENDS_${PN} += "powerd"
 
-inherit webos_ports_fork_repo
+inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
@@ -18,7 +18,6 @@ inherit webos_systemd
 
 PV = "2.0.0-1+git${SRCPV}"
 
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 

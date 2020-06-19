@@ -14,7 +14,7 @@ RDEPENDS_${PN} = "busybox"
 PV = "3.1.0-5+git${SRCPV}"
 SRCREV = "df23d7f758b20035082f68f6aa8770297a46f0ac"
 
-inherit webos_ports_fork_repo
+inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_pmlog_config
@@ -22,7 +22,6 @@ inherit webos_pmlog_config
 PACKAGECONFIG ??= ""
 PACKAGECONFIG[whitelist] = "-DENABLE_WHITELIST:BOOL=TRUE, -DENABLE_WHITELIST:BOOL=FALSE"
 
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     ${@bb.utils.contains('PACKAGECONFIG', 'whitelist', 'file://whitelist.txt', '', d)} \
 "
