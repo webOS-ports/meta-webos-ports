@@ -12,15 +12,13 @@ RDEPENDS_${PN} += "bootd"
 PV = "3.0.0-1+git${SRCPV}"
 SRCREV = "a4fa00b669dc5d55d649a32c625cc61a2eaac4ed"
 
-inherit webos_ports_fork_repo
+inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit webos_system_bus
 inherit pkgconfig
 inherit webos_machine_impl_dep
 inherit webos_systemd
 
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 FILES_${PN} += "${webos_sysbus_datadir}"

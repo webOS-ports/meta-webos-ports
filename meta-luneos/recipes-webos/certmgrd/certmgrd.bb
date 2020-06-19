@@ -8,13 +8,12 @@ DEPENDS = "luna-service2 json-c glib-2.0 pmcertificatemgr"
 PV = "0.1.0-1+git${SRCPV}"
 SRCREV = "b31e4e03a030bc510f96df2c0ce599530b60e057"
 
-inherit webos_ports_repo
+inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
 inherit systemd
 
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 

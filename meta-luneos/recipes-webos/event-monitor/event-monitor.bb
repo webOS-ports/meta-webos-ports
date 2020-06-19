@@ -14,10 +14,9 @@ SRCREV = "68d2094f796f9c417efd8b5f10bdee88c2591773"
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_event_monitor_plugin
-inherit webos_ports_fork_repo
+inherit webos_ports_ose_repo
 inherit webos_systemd
 
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
