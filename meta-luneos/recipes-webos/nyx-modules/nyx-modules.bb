@@ -37,13 +37,12 @@ WEBOS_TARGET_CORE_OS = "rockhopper"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 inherit webos_public_repo
-inherit webos_ports_repo
+inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit webos_machine_impl_dep
 inherit webos_core_os_dep
 inherit webos_nyx_module_provider
 
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 

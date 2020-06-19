@@ -21,14 +21,13 @@ PV = "7.3.0-1+git${SRCPV}"
 
 DEPENDS = "glib-2.0 pmloglib"
 
-inherit webos_ports_repo
+inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit systemd
 
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE_${PN} = "nyx.target"
 
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/webOS-OSE"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
