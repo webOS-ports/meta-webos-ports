@@ -36,7 +36,6 @@ WEBOS_TARGET_CORE_OS = "rockhopper"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-inherit webos_public_repo
 inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit webos_machine_impl_dep

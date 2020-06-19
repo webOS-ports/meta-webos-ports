@@ -3,15 +3,14 @@ SECTION = "webos/services"
 LICENSE = "GPL-3.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-3.0;md5=c79ff39f19dfec6d293b95dea7b07891"
 
-inherit webos_ports_repo
+inherit webos_ports_ose_repo
 inherit webos_filesystem_paths
 inherit webos_system_bus
 
 PV = "0.1.0+git${SRCPV}"
-SRCREV = "5dece7b5bcaeb5879707705a4704981756c4888c"
+SRCREV = "610f30c1cfbc2e965d4a45a2aee209c42b07bd4f"
 
 WEBOS_REPO_NAME = "org.webosports.update"
-WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git/service"
 
