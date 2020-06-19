@@ -9,12 +9,11 @@ inherit webos_system_bus
 inherit webos_filesystem_paths
 
 PV = "0.1.0+git${SRCPV}"
-SRCREV = "b863861c07cc9c0022edf9ace37b9eed81ede323"
+SRCREV = "838e1a4e0cb25908cfb7a6c6d333322842d4a0e7"
 
 WEBOS_REPO_NAME = "org.webosports.messaging"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-WEBOS_GIT_PARAM_BRANCH = "herrie/acg"
 S = "${WORKDIR}/git/service"
 
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files/sysbus"
