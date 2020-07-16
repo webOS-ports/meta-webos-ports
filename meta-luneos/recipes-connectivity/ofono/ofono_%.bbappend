@@ -3,8 +3,8 @@ FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 SRCREV = "0db662bd6ba4070838bf143df5ee24c949a8c0df"
 PV = "1.31+git${SRCPV}"
 
-SRCREV_halium = "717f6452aad0d15bf9b3af3491fdd86b87d31315"
-PV_halium = "1.21+git${SRCPV}"
+SRCREV_halium = "2ee5e4c8270d0d2b211bf549c7a4e16cd86ca0b4"
+PV_halium = "1.23-19+git${SRCPV}"
 
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://COPYING;md5=eb723b61539feef013de476e68b5c50a"
@@ -37,7 +37,7 @@ S_halium = "${WORKDIR}/git/ofono"
 # Can't build out of tree right now so we have to build in tree
 B = "${S}"
 
-EXTRA_OECONF_append_halium = " --disable-sailfish-pushforwarder --enable-sailfish-rilmodem"
+EXTRA_OECONF_append_halium = " --disable-sailfish-pushforwarder --enable-sailfish-rilmodem --disable-datafiles"
 
 # this version does't support it:
 # ERROR: ofono-1.19+gitAUTOINC+b5ed6d16db-r0 do_configure: QA Issue: ofono: configure was passed unrecognised options: --enable-external-ell [unknown-configure-option]
@@ -49,7 +49,14 @@ SERVICE_FILE_halium = "ofono-halium.service"
 
 do_install_append() {
     # Override default system service configuration
-    cp -v ${WORKDIR}/${SERVICE_FILE} ${D}${systemd_unitdir}/system/ofono.service
+    install -d ${D}${systemd_unitdir}/system
+    install -m 0644 ${WORKDIR}/${SERVICE_FILE} ${D}${systemd_unitdir}/system/ofono.service
+}
+
+do_install_append_halium() {
+    # Since we use --disable-datafiles we need to install the dbus condif file manually now
+    install -d ${D}${sysconfdir}/dbus-1/system.d
+    install -m 0644 ${B}/src/${PN}.conf ${D}${sysconfdir}/dbus-1/system.d/
 }
 
 # meta-systemd sets this to disable but we as distro want it to be enabled by default
