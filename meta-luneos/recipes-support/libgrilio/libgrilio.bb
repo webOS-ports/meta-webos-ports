@@ -12,8 +12,8 @@ inherit pkgconfig
 SRC_URI = "git://git.merproject.org/mer-core/libgrilio.git"
 S = "${WORKDIR}/git"
 
-PV = "1.0.36-1+git${SRCPV}"
-SRCREV = "8a01e8093ec1bea57692aaad256e0a1dd59f0bf0"
+PV = "1.0.39-1+git${SRCPV}"
+SRCREV = "554f3b65715e920c4fe7c767a461ef1f4eb96f0c"
 
 EXTRA_OEMAKE = "KEEP_SYMBOLS=1"
 PARALLEL_MAKE = ""
