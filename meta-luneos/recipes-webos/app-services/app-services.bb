@@ -6,7 +6,7 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 PV = "3.0.1-5+git${SRCPV}"
-SRCREV = "5fdecd5a2817fbabeefd9be0068953e86b6561db"
+SRCREV = "70e37f6996a7548f8d23c9f7293fed0a01e41700"
 
 inherit webos_ports_ose_repo
 inherit webos_filesystem_paths
@@ -53,6 +53,7 @@ do_install() {
 # install account templates.
     install -d ${D}${webos_accttemplatesdir} 2> /dev/null || true
     cp -vrf ${S}/account-templates/palmprofile/com.palm.palmprofile ${D}${webos_accttemplatesdir}
+    cp -vrf ${S}/account-templates/sim/com.palm.sim ${D}${webos_accttemplatesdir}
 
 # install temp db kinds and permissions
     install -d ${D}${webos_sysconfdir}/tempdb/kinds 2> /dev/null || true
