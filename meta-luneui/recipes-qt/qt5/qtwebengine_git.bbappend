@@ -20,12 +20,17 @@ SRCREV_qtwebengine = "7b53f3018b25f92fdccdb438a204b82543835d0e"
 SRCREV_chromium = "25e1fa7d83a4c0959b638d82dcafb7284b2d825d"
 
 do_install_append() {
-    #Create the chromium folder already so users can right away push the required plugins there
+    # Create the chromium folder already so users can right away push the required plugins there
     mkdir -p ${D}${libdir}/chromium
 
-    #Install qtwebengine.conf, which contains all the environment variables needed to start qtwebengine
+    # Install qtwebengine.conf, which contains all the environment variables needed to start qtwebengine
     install -d ${D}${sysconfdir}/luna-next
     install -m 0644 ${WORKDIR}/qtwebengine.conf ${D}${sysconfdir}/luna-next/
+
+    # Store the Chromium version so it can be picked up by LuneOS Components in order to update the UserAgent with the correct Qt and Chromium version automatically
+    mkdir -p ${D}${datadir}/qtwebengine
+    grep "^chromium_version" ${S}/tools/scripts/version_resolver.py | awk -F  "'" '/1/ {print $2}' > ${D}${datadir}/qtwebengine/chromium-version.txt
+    echo ${QT_MODULE_BRANCH} > ${D}${datadir}/qtwebengine/qt-version.txt
 }
 
 FILES_${PN} += "${libdir}/chromium ${sysconfdir}/luna-next/"
