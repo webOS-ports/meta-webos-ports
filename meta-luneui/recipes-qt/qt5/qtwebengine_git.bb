@@ -1,7 +1,7 @@
 # Imported from meta-qt5, but without the dependency on meta-python2
 # because we're using it from zeus, where it isn't needed
 # as it was in:
-# b4340317 qt5: upgrade to 5.15.0
+# 4d641b4c qtwebengine: fix build with bison-3.7
 
 SUMMARY = "QtWebEngine combines the power of Chromium and Qt"
 
@@ -170,6 +170,7 @@ SRC_URI += " \
     file://chromium/0010-chromium-Move-CharAllocator-definition-to-a-header-f.patch;patchdir=src/3rdparty \
     file://chromium/0011-chromium-Include-cstddef-and-cstdint.patch;patchdir=src/3rdparty \
     file://chromium/0012-chromium-Link-v8-with-libatomic-on-x86.patch;patchdir=src/3rdparty \
+    file://chromium/0013-chromium-Fix-bison-3.7.patch;patchdir=src/3rdparty \
 "
 
 SRC_URI_append_libc-musl = "\
