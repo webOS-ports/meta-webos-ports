@@ -77,8 +77,7 @@ WEBOS_DEFAULT_EXTRA_RRECOMMENDS = ""
 DISTRO_EXTRA_RDEPENDS += " ${WEBOS_DEFAULT_EXTRA_RDEPENDS}"
 DISTRO_EXTRA_RRECOMMENDS += " ${WEBOS_DEFAULT_EXTRA_RRECOMMENDS}"
 
-WEBOSQEMUDEPS = "${@bb.utils.contains("INCOMPATIBLE_LICENSE", "GPLv3", "", "qemu-config",d)}"
-DISTRO_EXTRA_RDEPENDS_append_qemuall = " ${WEBOSQEMUDEPS} kernel-module-vboxvideo kernel-module-vboxguest kernel-module-uvesafb kernel-module-virtio-gpu kernel-module-vmwgfx"
+DISTRO_EXTRA_RDEPENDS_append_qemuall = " kernel-module-vboxvideo kernel-module-vboxguest kernel-module-uvesafb kernel-module-virtio-gpu kernel-module-vmwgfx"
 
 MACHINE_ESSENTIAL_EXTRA_RDEPENDS_remove_qemuall = "v86d"
 
