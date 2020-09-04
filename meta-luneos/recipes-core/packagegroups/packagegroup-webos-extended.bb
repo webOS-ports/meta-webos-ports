@@ -127,11 +127,6 @@ WEBOS_FOSS_MISSING_FROM_RDEPENDS = " \
     sqlite3 \
 "
 
-# These packages that are installed in the qemux86 image only.
-RDEPENDS_${PN}_append_qemuall = " \
-    dhcp-client \
-"
-
 # Unused meta-webos components:
 # - glibcurl
 # - libtinyxml
