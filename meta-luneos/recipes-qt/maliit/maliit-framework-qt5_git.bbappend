@@ -30,7 +30,8 @@ do_install_append() {
     install -d ${D}${localstatedir}/lib/maliit
 }
 
-pkg_postinst_${PN} () {
+# we don't have /etc/xdg/autostart/maliit-server.desktop
+pkg_postinst_ontarget_${PN} () {
 }
 
 pkg_postrm_${PN} () {
