@@ -16,8 +16,8 @@ SRC_URI = " \
 "
 # webOS-ports/master-20200527
 SRCREV_qtwebengine = "7b53f3018b25f92fdccdb438a204b82543835d0e"
-# webOS-ports/master-20200826
-SRCREV_chromium = "7a95dc3f791a49cf97cbe278f4a75fc95fa57a54"
+# webOS-ports/master-20200914
+SRCREV_chromium = "43a0fd1b8e58882748c4f988f4382cf8060c7aa3"
 
 do_install_append() {
     # Create the chromium folder already so users can right away push the required plugins there
