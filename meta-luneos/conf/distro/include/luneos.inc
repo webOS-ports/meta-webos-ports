@@ -187,6 +187,18 @@ SANITY_TESTED_DISTROS ?= " \
 require conf/distro/include/yocto-uninative.inc
 INHERIT += "uninative"
 
+# no interactive resolving, better to fail and report later
+PATCHRESOLVE = "noop"
+
+# save statistical info on images
+INHERIT += "buildhistory"
+
+# to build stuff with commercial licenses
+# LICENSE_FLAGS_WHITELIST is now used instead of COMMERCIAL_LICENSE, see:
+# http://git.openembedded.org/?p=openembedded-core.git&a=commit;h=a66fdbda548fab367cada035c49a32d9bf8ea528
+# we are not commercial project, we can whitelist them all
+LICENSE_FLAGS_WHITELIST = "commercial"
+
 LICENSE_CREATE_PACKAGE = "1"
 
 require conf/distro/include/defaulttunes.inc
