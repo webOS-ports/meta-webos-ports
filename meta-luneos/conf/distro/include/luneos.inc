@@ -128,13 +128,11 @@ ERROR_QA_remove = " version-going-backwards"
 
 # Move all default WARN_QA from insane.bbclass to ERROR_QA to prevent silently re-introducing these issues
 DEFAULT_WARN_QA = "\
-    ldflags useless-rpaths rpaths staticdev libdir xorg-driver-abi \
-    textrel already-stripped incompatible-license files-invalid \
-    installed-vs-shipped compile-host-path install-host-path \
-    pn-overrides infodir build-deps src-uri-bad \
-    unknown-configure-option symlink-to-sysroot multilib \
+    libdir xorg-driver-abi \
+    textrel incompatible-license files-invalid \
+    infodir build-deps src-uri-bad symlink-to-sysroot multilib \
     invalid-packageconfig host-user-contaminated uppercase-pn patch-fuzz \
-    mime mime-xdg unlisted-pkg-lics \
+    mime mime-xdg unlisted-pkg-lics unhandled-features-check \
 "
 ERROR_QA_append = " ${DEFAULT_WARN_QA}"
 WARN_QA_remove = "${DEFAULT_WARN_QA}"
