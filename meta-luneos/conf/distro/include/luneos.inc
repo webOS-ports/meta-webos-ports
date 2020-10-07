@@ -200,7 +200,7 @@ INHERIT += "reproducible_build"
 # we are not commercial project, we can whitelist them all
 LICENSE_FLAGS_WHITELIST = "commercial"
 
-LICENSE_CREATE_PACKAGE = "1"
+LICENSE_CREATE_PACKAGE = "0"
 
 require conf/distro/include/defaulttunes.inc
 
