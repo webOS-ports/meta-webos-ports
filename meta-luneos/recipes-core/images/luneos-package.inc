@@ -21,7 +21,7 @@ WEBOS_REPO_NAME = "android-update-package"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 do_deploy() {
-    IMG="${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}-${MACHINE}.tar.gz"
+    IMG="${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}-${MACHINE}${IMAGE_NAME_SUFFIX}.tar.gz"
     FASTBOOT="${DEPLOY_DIR_IMAGE}/${KERNEL_IMAGETYPE}.fastboot"
     if [ ! -e $IMG ] ; then
         bbfatal "Required base image is not available as tar.gz image! $IMG doesn't exist."
