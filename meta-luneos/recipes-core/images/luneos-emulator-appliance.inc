@@ -9,7 +9,7 @@ SRC_URI = "file://luneos-emulator.ovf"
 
 IMAGE_BASENAME = "luneos"
 
-SRC_VMDK_NAME = "${IMAGE_BASENAME}-image-${MACHINE}.wic.vmdk"
+SRC_VMDK_NAME = "${IMAGE_BASENAME}-image-${MACHINE}${IMAGE_NAME_SUFFIX}.wic.vmdk"
 VMDK_NAME     = "${IMAGE_BASENAME}-emulator-${MACHINE}${IMAGE_VERSION_SUFFIX}.vmdk"
 OVF_NAME      = "${IMAGE_BASENAME}-emulator-${MACHINE}${IMAGE_VERSION_SUFFIX}.ovf"
 ZIP_NAME      = "${IMAGE_BASENAME}-emulator-${MACHINE}${IMAGE_VERSION_SUFFIX}.tar.gz"
