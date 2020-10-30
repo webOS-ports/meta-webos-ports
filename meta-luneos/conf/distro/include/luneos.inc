@@ -175,6 +175,7 @@ SANITY_TESTED_DISTROS ?= " \
     ubuntu-18.04 \n \
     ubuntu-19.10 \n \
     ubuntu-20.04 \n \
+    ubuntu-20.10 \n \
 "
 
 require conf/distro/include/yocto-uninative.inc
