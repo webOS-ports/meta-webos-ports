@@ -122,6 +122,7 @@ LIBHYBRIS_RDEPENDS = " \
     android-system \
     android-system-compat \
     android-tools \
+    lxc \
     mtp-server \
     pulseaudio-modules-droid \
     qt5-qpa-hwcomposer-plugin \
