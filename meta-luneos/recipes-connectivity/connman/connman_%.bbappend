@@ -2,6 +2,8 @@ FILESEXTRAPATHS_prepend := "${THISDIR}/${BPN}:"
 
 # we have resolved disabled in systemd
 SRC_URI_remove = "file://0001-connman.service-stop-systemd-resolved-when-we-use-co.patch"
+# we have networkd disabled in systemd as well
+SRC_URI_remove = "file://0001-connman.service-stop-systemd-networkd-when-using-con.patch"
 
 SRC_URI += "file://0001-connman.service.in-start-after-android-system.servic.patch"
 
