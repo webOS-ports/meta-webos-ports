@@ -20,6 +20,9 @@ BAD_RECOMMENDATIONS_append_qemux86 = " kernel-vmlinux"
 VIRTUAL-RUNTIME_initscripts = "webos-initscripts"
 PREFERRED_RPROVIDER_initscripts-functions = "webos-initscripts"
 
+# used by meta-networking/recipes-connectivity/autossh/autossh_1.4g.bb
+PREFERRED_RPROVIDER_ssh = "openssh"
+
 VIRTUAL-RUNTIME_init_manager = "systemd systemd-compat-units systemd-machine-units"
 BAD_RECOMMENDATIONS = "update-rc.d"
 
