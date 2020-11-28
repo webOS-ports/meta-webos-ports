@@ -14,7 +14,8 @@ WEBOS_DISTRO_FEATURES_WINDOW_SYSTEM = ""
 WEBOS_DISTRO_FEATURES_BUSES = "pci pcmcia"
 WEBOS_DISTRO_FEATURES_USB = "usbhost usbgadget"
 WEBOS_DISTRO_FEATURES_CONNECTIVITY = "bluetooth 3g wifi bluez5 nfc"
-WEBOS_DISTRO_FEATURES_NETWORKING = "nfs zeroconf"
+# don't enable zeroconf, as it might conflict with connman
+WEBOS_DISTRO_FEATURES_NETWORKING = "nfs"
 
 WEBOS_DISTRO_FEATURES_LD = "ld-is-gold"
 
