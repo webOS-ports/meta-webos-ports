@@ -2,14 +2,14 @@ SUMMARY = "PulseAudio Droid HAL modules"
 LICENSE = "LGPL-2.1"
 LIC_FILES_CHKSUM = "file://COPYING;md5=f294906e6e4eac9d917503a0bbd139b4"
 
-DEPENDS += "pulseaudio libhybris virtual/android-headers dbus udev"
+DEPENDS += "pulseaudio pulseaudio-pulsecore-private-headers libhybris virtual/android-headers dbus udev"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 # Depends on libhybris which has this restriction
 COMPATIBLE_MACHINE = "^halium$"
 
-PULSEAUDIO_VERSION = "13.0"
+PULSEAUDIO_VERSION = "14.0"
 
 PV = "${PULSEAUDIO_VERSION}.84+git${SRCPV}"
 SRCREV = "72d4e0aaca9a8cdd2d2fc9915abd8fec5ac93e15"

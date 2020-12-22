@@ -6,7 +6,6 @@ SRC_URI += " \
 
 SRC_URI += " \
     file://0001-core-make-dependencies-compile-for-64bit.patch \
-    file://0002-build-Install-pulsecore-headers.patch \
     file://0003-daemon-Set-default-resampler-to-speex-fixed-2.patch \
     file://0004-suspend-on-idle-Ensure-we-still-time-out-if-a-stream.patch \
     file://0005-Add-dbus-policy-for-Bluez4.patch \
@@ -15,8 +14,6 @@ SRC_URI += " \
 do_install_append() {
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${WORKDIR}/pulseaudio.service ${D}${systemd_unitdir}/system
-    install -d ${D}${includedir}/pulsecore/filter
-    mv ${D}${includedir}/pulsecore/lfe-filter.h ${D}${includedir}/pulsecore/filter/
 }
 
 inherit systemd
