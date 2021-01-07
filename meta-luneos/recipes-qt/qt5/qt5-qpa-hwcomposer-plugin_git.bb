@@ -4,8 +4,8 @@ sometimes also SoC type (generic, qcom, exynos4, ...)."
 LICENSE = "LGPL-2.1"
 LIC_FILES_CHKSUM = "file://hwcomposer_backend.cpp;beginline=1;endline=40;md5=09c08382077db2dbc01b1b5536ec6665"
 
-PV = "5.6.0+git${SRCPV}"
-SRCREV = "df9bddc316a30ee46055c700a40d68bb73e7e87b"
+PV = "5.15.0+git${SRCPV}"
+SRCREV = "b95ad82be4bdf69e46e900e55a7612e6e46518c6"
 
 DEPENDS = "qtbase libhybris qtwayland virtual/android-headers"
 
@@ -18,12 +18,6 @@ COMPATIBLE_MACHINE = "^halium$"
 
 SRC_URI = " \
     git://github.com/mer-hybris/qt5-qpa-hwcomposer-plugin.git \
-    file://0002-Fix-4.4.2-hwcomposer-build.patch;patchdir=.. \
-    file://0003-Qt-5.8-support.patch;patchdir=.. \
-    file://0004-Fix-hwcomposer-backend.patch;patchdir=.. \
-    file://0005-hwcomposer_backend_v11-fix-compatibility-with-qtbase.patch;patchdir=.. \
-    file://0006-Revert-Add-systraces-to-v11.patch;patchdir=.. \
-    file://0007-qeglfsintegration-stop-using-deprecated-and-in-5.13-.patch;patchdir=.. \
 "
 S = "${WORKDIR}/git/hwcomposer"
 
