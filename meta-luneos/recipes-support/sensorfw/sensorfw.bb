@@ -11,7 +11,7 @@ SRCREV = "4f97982dd95f5ab229312d9e721d2f131bfa8886"
 DEPENDS = "qtbase \
     luna-sysmgr-common luna-service2 json-c glib-2.0 luna-sysmgr-ipc-messages"
     
-DEPENDS_append_halium = " libhybris virtual/android-headers "
+DEPENDS_append_halium = " libhybris virtual/android-headers libgbinder libglibutil "
 
 SRC_URI = " \
     git://git.merproject.org/mer-core/sensorfw.git;branch=master \
@@ -33,7 +33,7 @@ inherit webos_filesystem_paths
 SERVICE_NAME = "com.nokia.SensorService"
 
 EXTRA_QMAKEVARS_PRE += "MAKE_DOCS=no "
-EXTRA_QMAKEVARS_PRE_append_halium = "CONFIG+=autohybris "
+EXTRA_QMAKEVARS_PRE_append_halium = "CONFIG+=autohybris CONFIG+=binder "
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/LuneOS/sysbus"
