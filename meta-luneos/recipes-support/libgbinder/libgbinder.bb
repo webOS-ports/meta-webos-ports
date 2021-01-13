@@ -9,7 +9,9 @@ DEPENDS = "glib-2.0 libglibutil"
 
 inherit pkgconfig
 
-SRC_URI = "git://github.com/mer-hybris/libgbinder.git"
+SRC_URI = "git://github.com/mer-hybris/libgbinder.git \
+           file://gbinder.conf \
+"
 S = "${WORKDIR}/git"
 
 PV = "1.1.3"
@@ -21,4 +23,10 @@ PARALLEL_MAKE = ""
 do_install() {
     make install DESTDIR=${D}
     make install-dev DESTDIR=${D}
+    
+    # Install libgbinder's config for Halium 9.0
+    install -d ${D}${sysconfdir}
+    install -m 0644 ${WORKDIR}/gbinder.conf ${D}${sysconfdir}/gbinder.conf
 }
+
+FILES_${PN} += " ${sysconfdir}"
