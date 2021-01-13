@@ -12,17 +12,34 @@ DEPENDS = "nyx-lib glib-2.0 libhybris libsuspend virtual/android-headers openssl
 # Android version we select per machine
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
+# Let us fetch the machine-specific CMake configuration used by nyx-modules, to
+# define it only once
+FILESEXTRAPATHS_prepend := "${THISDIR}/nyx-modules:"
+
 # Depends on libhybris which has this restriction
 COMPATIBLE_MACHINE = "^halium$"
 
 PV = "0.1.0-1+git${SRCPV}"
-SRCREV = "c0c91e550d78c5c5a53412da7e6674b87e5580ee"
+SRCREV = "8fc4296392cf2b5a34345ab70718e919a3717d44"
 
 inherit webos_ports_repo
 inherit webos_cmake
 inherit pkgconfig
 
+WEBOS_GIT_PARAM_BRANCH = "tofe/halium-9"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
+
+SRC_URI_append = " \
+    file://${MACHINE}.cmake \
+"
+
+do_configure_prepend() {
+    # Install additional machine specific nyx configuration before CMake is started
+    if [ -f ${WORKDIR}/${MACHINE}.cmake ]
+    then
+        cp ${WORKDIR}/${MACHINE}.cmake ${S}/machine.cmake
+    fi
+}
 
 FILES_${PN} += "${libdir}/nyx/modules/*"
