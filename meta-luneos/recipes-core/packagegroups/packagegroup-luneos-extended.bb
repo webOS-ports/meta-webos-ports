@@ -134,6 +134,8 @@ LIBHYBRIS_RDEPENDS = " \
     libqtubuntu-media-signals2 \
     qtvideo-node \
     nyx-modules-hybris \
+    \
+    ofono-ril-binder-plugin \
 "
 
 MEMNOTIFY_RDEPENDS = " \
