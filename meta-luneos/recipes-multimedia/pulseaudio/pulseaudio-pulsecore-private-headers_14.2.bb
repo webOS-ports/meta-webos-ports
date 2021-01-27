@@ -14,8 +14,8 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=0e5cd938de1a7a53ea5adac38cc10c39 \
 SRC_URI = "http://freedesktop.org/software/pulseaudio/releases/pulseaudio-${PV}.tar.xz \
     file://pulsecore.pc \
 "
-SRC_URI[md5sum] = "84a7776e63dd55c40db8fbd7c7e2e18e"
-SRC_URI[sha256sum] = "a834775d9382b055504e5ee7625dc50768daac29329531deb6597bf05e06c261"
+SRC_URI[md5sum] = "1efc916251910f1e9d4df7810e3e69f8"
+SRC_URI[sha256sum] = "75d3f7742c1ae449049a4c88900e454b8b350ecaa8c544f3488a2562a9ff66f1"
 
 S = "${WORKDIR}/pulseaudio-${PV}"
 
