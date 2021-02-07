@@ -47,12 +47,16 @@ SRC_URI = "http://linuxcontainers.org/downloads/${BPN}-${PV}.tar.gz \
 	file://templates-use-curl-instead-of-wget.patch \
 	file://tests-our-init-is-not-busybox.patch \
 	file://tests-add-no-validate-when-using-download-template.patch \
+	file://0001-remove-deprecated-options-in-lxc.service-fixes-3527.patch \
+	file://0001-Remove-obsolete-setting-regarding-the-Standard-Outpu.patch \
 	file://dnsmasq.conf \
 	file://lxc-net \
 	"
 
-SRC_URI[md5sum] = "7d86ddf9fcb5f78ac5ae0380fbbfb690"
-SRC_URI[sha256sum] = "d56d91d772449c57e9a67b770dab8967e412051d8d6246ce56c63264671672e5"
+SRC_URI[md5sum] = "6197096cf11da286b9f9ee02dee9dc50"
+SRC_URI[sha256sum] = "3c65a8ba20ed2b66c2075dc914aa632f76d0137af707b851b62b5555fed7d995"
+
+
 
 S = "${WORKDIR}/${BPN}-${PV}"
 
@@ -65,9 +69,7 @@ EXTRA_OECONF += "--with-init-script=\
 ${@bb.utils.contains('DISTRO_FEATURES', 'sysvinit', 'sysvinit,', '', d)}\
 ${@bb.utils.contains('DISTRO_FEATURES', 'systemd', 'systemd', '', d)}"
 
-EXTRA_OECONF += "--enable-log-src-basename"
-
-CFLAGS_append = " -Wno-error=deprecated-declarations -Wno-error=stringop-overflow"
+EXTRA_OECONF += "--enable-log-src-basename --disable-werror"
 
 PACKAGECONFIG ??= "templates \
     ${@bb.utils.contains('DISTRO_FEATURES', 'systemd', 'systemd', '', d)} \
@@ -171,9 +173,9 @@ pkg_postinst_${PN}() {
 	fi
 }
 
-pkg_postinst_ontarget_${PN}-networking() {
+pkg_postinst_${PN}-networking() {
 if ${@bb.utils.contains('DISTRO_FEATURES', 'sysvinit', 'true', 'false', d)}; then
-cat >> /etc/network/interfaces << EOF
+cat >> $D/etc/network/interfaces << EOF
 
 auto lxcbr0
 iface lxcbr0 inet dhcp
@@ -182,7 +184,7 @@ iface lxcbr0 inet dhcp
 	bridge_maxwait 0
 EOF
 
-cat<<EOF>/etc/network/if-pre-up.d/lxcbr0
+cat<<EOF>$D/etc/network/if-pre-up.d/lxcbr0
 #! /bin/sh
 
 if test "x\$IFACE" = xlxcbr0 ; then
@@ -195,6 +197,6 @@ if test "x\$IFACE" = xlxcbr0 ; then
         fi
 fi
 EOF
-chmod 755 /etc/network/if-pre-up.d/lxcbr0
+chmod 755 $D/etc/network/if-pre-up.d/lxcbr0
 fi
 }
