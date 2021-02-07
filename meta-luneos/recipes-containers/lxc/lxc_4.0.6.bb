@@ -47,14 +47,12 @@ SRC_URI = "http://linuxcontainers.org/downloads/${BPN}-${PV}.tar.gz \
 	file://templates-use-curl-instead-of-wget.patch \
 	file://tests-our-init-is-not-busybox.patch \
 	file://tests-add-no-validate-when-using-download-template.patch \
-	file://0001-remove-deprecated-options-in-lxc.service-fixes-3527.patch \
-	file://0001-Remove-obsolete-setting-regarding-the-Standard-Outpu.patch \
 	file://dnsmasq.conf \
 	file://lxc-net \
 	"
 
-SRC_URI[md5sum] = "6197096cf11da286b9f9ee02dee9dc50"
-SRC_URI[sha256sum] = "3c65a8ba20ed2b66c2075dc914aa632f76d0137af707b851b62b5555fed7d995"
+SRC_URI[md5sum] = "732571c7cb4ab845068afb227bf35256"
+SRC_URI[sha256sum] = "9165dabc0bb6ef7f2fda2009aee90b20fbefe77ed8008347e9f06048eba1e463"
 
 
 
