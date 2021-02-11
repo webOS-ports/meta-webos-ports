@@ -20,13 +20,12 @@ FILESEXTRAPATHS_prepend := "${THISDIR}/nyx-modules:"
 COMPATIBLE_MACHINE = "^halium$"
 
 PV = "0.1.0-1+git${SRCPV}"
-SRCREV = "8fc4296392cf2b5a34345ab70718e919a3717d44"
+SRCREV = "6197796c176e956d2b26c107698beaab28e276b9"
 
 inherit webos_ports_repo
 inherit webos_cmake
 inherit pkgconfig
 
-WEBOS_GIT_PARAM_BRANCH = "tofe/halium-9"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
