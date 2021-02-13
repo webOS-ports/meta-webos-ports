@@ -50,7 +50,7 @@ SRC_URI_append = " \
 "
 
 PV = "7.1.0-1+git${SRCPV}"
-SRCREV = "4688be6a0809e1ea0c633da8d3a8f071fb0da31d"
+SRCREV = "555f6f2820faaecf498b865642fc87db1a1b6a29"
 
 do_configure_prepend() {
     # Install additional machine specific nyx configuration before CMake is started
