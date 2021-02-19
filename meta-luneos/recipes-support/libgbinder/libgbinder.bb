@@ -3,7 +3,7 @@
 DESCRIPTION = "Library used to interact with Android's binder module."
 LICENSE = "BSD-3-Clause"
 SECTION = "webos/support"
-LIC_FILES_CHKSUM = "file://LICENSE;md5=e6b65758132ddc2061147e8ace87051e"
+LIC_FILES_CHKSUM = "file://LICENSE;md5=24f23d12bbc59c7e5ab483c52a172555"
 
 DEPENDS = "glib-2.0 libglibutil"
 
@@ -14,8 +14,8 @@ SRC_URI = "git://github.com/mer-hybris/libgbinder.git \
 "
 S = "${WORKDIR}/git"
 
-PV = "1.1.3"
-SRCREV = "80e9be534326b3ebbb67306d80d015f63313028d"
+PV = "1.1.5"
+SRCREV = "88df2edb9533fc4680fe59f3113f839d0cf9c77a"
 
 EXTRA_OEMAKE = "KEEP_SYMBOLS=1"
 PARALLEL_MAKE = ""
