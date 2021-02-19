@@ -12,8 +12,8 @@ inherit pkgconfig
 SRC_URI = "git://git.merproject.org/mer-core/libglibutil.git"
 S = "${WORKDIR}/git"
 
-PV = "1.0.39-1+git${SRCPV}"
-SRCREV = "3a2b50ed08addd0eb75fa1f8534c9ba208f34ace"
+PV = "1.0.50-1+git${SRCPV}"
+SRCREV = "dfcf23805b49307e63d1090aec69255de4a167ea"
 
 EXTRA_OEMAKE = "KEEP_SYMBOLS=1"
 PARALLEL_MAKE = ""
