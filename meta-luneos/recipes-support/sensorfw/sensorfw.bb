@@ -33,7 +33,14 @@ inherit webos_filesystem_paths
 SERVICE_NAME = "com.nokia.SensorService"
 
 EXTRA_QMAKEVARS_PRE += "MAKE_DOCS=no "
-EXTRA_QMAKEVARS_PRE_append_halium = "CONFIG+=autohybris CONFIG+=binder "
+EXTRA_QMAKEVARS_PRE_append_halium = "CONFIG+=autohybris "
+
+# Halium-9.0 devices use binder to communicate with sensors
+EXTRA_QMAKEVARS_PRE_append_tissot = "CONFIG+=binder "
+EXTRA_QMAKEVARS_PRE_append_rosy = "CONFIG+=binder "
+EXTRA_QMAKEVARS_PRE_append_mido = "CONFIG+=binder "
+EXTRA_QMAKEVARS_PRE_append_yggdrasil = "CONFIG+=binder "
+EXTRA_QMAKEVARS_PRE_append_sagit = "CONFIG+=binder "
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/LuneOS/sysbus"
