@@ -15,8 +15,8 @@ SRC_URI = " \
     file://qtwebengine.conf \
 "
 WEBOS_GIT_PARAM_BRANCH = "webOS-ports/master-next"
-# webOS-ports/master-next-20210311b
-SRCREV_qtwebengine = "89c6a9c79b7c1e13e366693ef5bcd2e15e8495cf"
+# webOS-ports/master-next-20210311c
+SRCREV_qtwebengine = "0930b350d73be600321dafb7b562f04e87ba2250"
 # webOS-ports/master-next-20210311e
 SRCREV_chromium = "687d322faec50e018c684bf4830ceb40b01d7959"
 
