@@ -7,6 +7,7 @@ require conf/distro/include/luneos-features.inc
 require conf/distro/include/luneos-toolchain.inc
 require conf/distro/include/luneos-sdk.inc
 
+require conf/distro/include/python2-target-recipes-blacklist.inc
 
 #
 # Form the codename of a release (WEBOS_DISTRO_RELEASE_CODENAME) from a codename
