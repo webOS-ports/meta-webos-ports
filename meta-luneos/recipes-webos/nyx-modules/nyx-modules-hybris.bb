@@ -14,7 +14,7 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 # Let us fetch the machine-specific CMake configuration used by nyx-modules, to
 # define it only once
-FILESEXTRAPATHS_prepend := "${THISDIR}/nyx-modules:"
+FILESEXTRAPATHS_append := ":${THISDIR}/nyx-modules"
 
 # Depends on libhybris which has this restriction
 COMPATIBLE_MACHINE = "^halium$"
