@@ -42,6 +42,7 @@ EXTRA_QMAKEVARS_PRE_append_mido = "CONFIG+=binder "
 EXTRA_QMAKEVARS_PRE_append_yggdrasil = "CONFIG+=binder "
 EXTRA_QMAKEVARS_PRE_append_sagit = "CONFIG+=binder "
 EXTRA_QMAKEVARS_PRE_append_hammerhead = "CONFIG+=binder "
+EXTRA_QMAKEVARS_PRE_append_tenderloin = "CONFIG+=binder "
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/LuneOS/sysbus"
