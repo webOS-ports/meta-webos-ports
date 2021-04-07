@@ -60,6 +60,10 @@ do_configure_prepend() {
     fi
 }
 
+do_install_append_tenderloin() {
+    install -d ${D}${systemd_system_unitdir}/nyx.target.d/
+    install -m 0644 ${S}/files/systemd/nyx.target.d/wait-touchscreen.conf ${D}${systemd_system_unitdir}/nyx.target.d/
+}
 
 PACKAGES += "${PN}-tests"
 FILES_${PN} += "${libdir}/nyx/modules/*"
