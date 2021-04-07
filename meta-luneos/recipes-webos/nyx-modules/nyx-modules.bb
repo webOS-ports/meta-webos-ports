@@ -14,7 +14,9 @@ RDEPENDS_${PN} = "lsb-release gzip nyx-conf"
 EXTRA_OECMAKE += "-DDISTRO_VERSION:STRING='${DISTRO_VERSION}' -DDISTRO_NAME:STRING='${DISTRO_NAME}${WEBOS_DISTRO_NAME_SUFFIX}' \
                   -DWEBOS_DISTRO_API_VERSION:STRING='${WEBOS_DISTRO_API_VERSION}' \
                   -DWEBOS_DISTRO_RELEASE_CODENAME:STRING='${WEBOS_DISTRO_RELEASE_CODENAME}' \
-                  -DWEBOS_DISTRO_BUILD_ID:STRING='${WEBOS_DISTRO_BUILD_ID}'"
+                  -DWEBOS_DISTRO_BUILD_ID:STRING='${WEBOS_DISTRO_BUILD_ID}' \
+                  -DSYSTEMD_SYSTEM_UNITDIR:PATH=${systemd_system_unitdir} \
+"
 
 # Only pass in a value for the Manufacturing version if one is actually
 # defined. Otherwise, let the CMake script provide the default value.

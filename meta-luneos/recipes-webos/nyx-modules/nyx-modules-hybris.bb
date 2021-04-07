@@ -29,6 +29,8 @@ inherit pkgconfig
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
+EXTRA_OECMAKE += "-DSYSTEMD_SYSTEM_UNITDIR:PATH=${systemd_system_unitdir}"
+
 SRC_URI_append = " \
     file://${MACHINE}.cmake \
 "

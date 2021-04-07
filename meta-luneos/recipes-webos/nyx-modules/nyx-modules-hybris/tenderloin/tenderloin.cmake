@@ -33,5 +33,3 @@ set(NYXMOD_OW_HAPTICS			FALSE)
 
 add_definitions(-DBATTERY_SYSFS_PATH=\"/sys/class/power_supply/battery/\")
 add_definitions(-DTOUCHPANEL_DEVICE=\"/dev/input/event6\")
-
-install(FILES files/systemd/nyx.target.d/wait-touchscreen.conf DESTINATION ${SYSTEMD_SYSTEM_UNITDIR}/nyx.target.d/)
