@@ -8,6 +8,9 @@ LIC_FILES_CHKSUM = "file://bluebinder.c;beginline=1;endline=27;md5=430727b8efeca
 DEPENDS = "libgbinder glib-2.0 libglibutil bluez5 systemd"
 RDEPENDS_${PN} = "android-property-service"
 
+# Rdepends on android-property-service which depends on libhybris which has this restriction
+COMPATIBLE_MACHINE = "^halium$"
+
 inherit pkgconfig
 inherit systemd
 
