@@ -11,6 +11,9 @@ RDEPENDS_${PN} = "android-property-service"
 # Rdepends on android-property-service which depends on libhybris which has this restriction
 COMPATIBLE_MACHINE = "^halium$"
 
+# Rdepends on android-property-service which is MACHINE_ARCH
+PACKAGE_ARCH = "${MACHINE_ARCH}"
+
 inherit pkgconfig
 inherit systemd
 
