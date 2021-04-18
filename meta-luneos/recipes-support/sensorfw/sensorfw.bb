@@ -22,6 +22,10 @@ SRC_URI = " \
 SRC_URI_append_pinephone = " \
     file://sensord-pinephone.conf \
 "
+# Note: maybe this should go in a bbappend in meta-smartphone...
+SRC_URI_append_tenderloin = " \
+    file://sensord-tenderloin.conf \
+"
 
 S = "${WORKDIR}/git"
 
@@ -42,7 +46,8 @@ EXTRA_QMAKEVARS_PRE_append_mido = "CONFIG+=binder "
 EXTRA_QMAKEVARS_PRE_append_yggdrasil = "CONFIG+=binder "
 EXTRA_QMAKEVARS_PRE_append_sagit = "CONFIG+=binder "
 EXTRA_QMAKEVARS_PRE_append_hammerhead = "CONFIG+=binder "
-EXTRA_QMAKEVARS_PRE_append_tenderloin = "CONFIG+=binder "
+# Tenderloin here is an exception: sensorfw doesn't need to use Halium for the sensor
+EXTRA_QMAKEVARS_PRE_remove_tenderloin = "CONFIG+=autohybris "
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/LuneOS/sysbus"
