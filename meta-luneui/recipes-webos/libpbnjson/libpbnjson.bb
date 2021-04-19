@@ -34,3 +34,5 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 BBCLASSEXTEND = "native"
+
+SRC_URI += "file://0001-pbnjson.h-don-t-include-all-c-header-in-extern-C.patch"
