@@ -40,12 +40,14 @@ EXTRA_QMAKEVARS_PRE += "MAKE_DOCS=no "
 EXTRA_QMAKEVARS_PRE_append_halium = "CONFIG+=autohybris "
 
 # Halium-9.0 devices use binder to communicate with sensors
-EXTRA_QMAKEVARS_PRE_append_tissot = "CONFIG+=binder "
-EXTRA_QMAKEVARS_PRE_append_rosy = "CONFIG+=binder "
-EXTRA_QMAKEVARS_PRE_append_mido = "CONFIG+=binder "
-EXTRA_QMAKEVARS_PRE_append_yggdrasil = "CONFIG+=binder "
-EXTRA_QMAKEVARS_PRE_append_sagit = "CONFIG+=binder "
 EXTRA_QMAKEVARS_PRE_append_hammerhead = "CONFIG+=binder "
+EXTRA_QMAKEVARS_PRE_append_mako = "CONFIG+=binder "
+EXTRA_QMAKEVARS_PRE_append_mido = "CONFIG+=binder "
+EXTRA_QMAKEVARS_PRE_append_rosy = "CONFIG+=binder "
+EXTRA_QMAKEVARS_PRE_append_sagit = "CONFIG+=binder "
+EXTRA_QMAKEVARS_PRE_append_tissot = "CONFIG+=binder "
+EXTRA_QMAKEVARS_PRE_append_yggdrasil = "CONFIG+=binder "
+
 # Tenderloin here is an exception: sensorfw doesn't need to use Halium for the sensor
 EXTRA_QMAKEVARS_PRE_remove_tenderloin = "CONFIG+=autohybris "
 
