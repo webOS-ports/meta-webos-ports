@@ -19,4 +19,6 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 CXXFLAGS += "-fpermissive"
 
-SRC_URI += "file://0001-Use-multithreaded-boost.patch;patchdir=.."
+SRC_URI += "file://0001-Use-multithreaded-boost.patch;patchdir=.. \
+    file://0001-imap-fix-build-with-boost-1.76.0.patch;patchdir=.. \
+"
