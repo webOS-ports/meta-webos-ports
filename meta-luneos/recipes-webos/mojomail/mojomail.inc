@@ -7,7 +7,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "jemalloc db8 boost curl libpalmsocket libsandbox pmloglib icu json-c glib-2.0 luna-service2"
 
 PV = "2.0.0-99+git${SRCPV}"
-SRCREV = "446c53ce81eb6bae84fd6f8556356d05442f08bb"
+SRCREV = "49358ac2878e010f5c6e3bd962f047c476c11fc3"
 
 inherit webos_ports_ose_repo
 inherit webos_cmake
@@ -18,7 +18,3 @@ WEBOS_REPO_NAME = "mojomail"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 CXXFLAGS += "-fpermissive"
-
-SRC_URI += "file://0001-Use-multithreaded-boost.patch;patchdir=.. \
-    file://0001-imap-fix-build-with-boost-1.76.0.patch;patchdir=.. \
-"
