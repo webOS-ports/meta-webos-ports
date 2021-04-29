@@ -33,6 +33,10 @@ EXTRA_OECONF = " \
     --disable-python-binding \
 "
 
+# a lot of cases like:
+# presage.cpp:201:5: error: ISO C++17 does not allow dynamic exception specifications
+CXXFLAGS += "-std=gnu++14"
+
 FILES_${PN} += "\
     ${libdir}/${PYTHON_DIR} \
     ${libdir}/${PYTHON_DIR}/dist-packages \
