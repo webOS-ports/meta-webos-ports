@@ -7,10 +7,13 @@ LIC_FILES_CHKSUM = "file://COPYING.GPL;md5=f27defe1e96c2e1ecd4e0c9be8967949"
 
 SECTION = "webos/support"
 
-SRCREV = "35fe93b8407d2fec9d925e35a5294c567569d9ed"
+SRCREV_FORMAT = "main"
+SRCREV_main = "9de4e87cdd05135e1c71e6eadb68bf82719cebdf"
+SRCREV_cpu-features = "b9593c8b395318bb2bc42683a94f962564cc4664"
+SRCREV_sdbus-cpp = "3b735bf1aad65277f56e65c828a22455cbaf5245"
 PV = "3.0+git${SRCPV}"
 
-DEPENDS += "dbus-cpp libsdl2 libsdl2-image lxc glm protobuf protobuf-native gtest elfutils"
+DEPENDS += "dbus-cpp libsdl2 libsdl2-image lxc glm protobuf protobuf-native gtest elfutils sdbus-c++-tools-native"
 
 RDEPENDS_${PN} += "anbox-data"
 
@@ -22,10 +25,15 @@ RRECOMMENDS_${PN} += " \
     kernel-module-squashfs \
 "
 
-SRC_URI = "git://github.com/anbox/anbox \
+SRC_URI = "git://github.com/anbox/anbox;name=main \
+    git://github.com/google/cpu_features.git;name=cpu-features;destsuffix=git/external/cpu_features \
+    git://github.com/Kistler-Group/sdbus-cpp.git;name=sdbus-cpp;destsuffix=git/external/sdbus-cpp \
     file://0001-Fix-dependencies-for-LuneOS.patch \
     file://0002-Fix-native-binaries-build.patch \
     file://0003-Fix-emugl-build.patch \
+    file://0004-external-pass-CMAKE_TOOLCHAIN_FILE.patch \
+    file://0005-CMakeLists.txt-use-sdbus-c-from-native-build.patch \
+    file://0006-Fix-build-with-gcc-11.patch \
     file://anbox-container-manager.service \
     file://anbox-session-manager.service \
     file://anbox-bridge.network \
