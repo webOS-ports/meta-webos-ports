@@ -1,1 +1,1 @@
-PACKAGECONFIG_remove = "wayland-gl drm-gl wayland-gles2"
+# PACKAGECONFIG_remove = "wayland-gl drm-gl wayland-gles2"
