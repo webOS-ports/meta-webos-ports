@@ -24,6 +24,10 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     file://0001-make-it-compatible-with-newer-hunspell.patch \
 "
 
+# a lot of cases like:
+# presage.h:115:40: error: ISO C++17 does not allow dynamic exception specifications
+CXXFLAGS += "-std=gnu++14"
+
 EXTRA_QMAKEVARS_PRE = "\
     PREFIX=${prefix} \
     MALIIT_INSTALL_PRF=${QMAKE_MKSPEC_PATH}/mkspecs/features \
