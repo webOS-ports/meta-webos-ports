@@ -10,9 +10,9 @@ SRC_URI = " \
 "
 
 SRC_URI_append_pinephone = " \
-    file://ucm/sun50i-a64-audio.conf \
-    file://ucm/HiFi \
-    file://ucm/VoiceCall \
+    file://ucm2/PinePhone.conf \
+    file://ucm2/HiFi \
+    file://ucm2/VoiceCall \
 "
 
 do_install() {
@@ -24,10 +24,10 @@ do_install() {
 }
 
 do_install_append_pinephone() {
-    install -d ${D}${datadir}/alsa/ucm/sun50i-a64-audio
-    install -m 0644 ${WORKDIR}/ucm/sun50i-a64-audio.conf ${D}${datadir}/alsa/ucm/sun50i-a64-audio/sun50i-a64-audio.conf
-    install -m 0644 ${WORKDIR}/ucm/HiFi ${D}${datadir}/alsa/ucm/sun50i-a64-audio/HiFi
-    install -m 0644 ${WORKDIR}/ucm/VoiceCall ${D}${datadir}/alsa/ucm/sun50i-a64-audio/VoiceCall
+    install -d ${D}${datadir}/alsa/ucm2/PinePhone
+    install -m 0644 ${WORKDIR}/ucm2/PinePhone.conf ${D}${datadir}/alsa/ucm2/PinePhone/PinePhone.conf
+    install -m 0644 ${WORKDIR}/ucm2/HiFi ${D}${datadir}/alsa/ucm2/PinePhone/HiFi
+    install -m 0644 ${WORKDIR}/ucm2/VoiceCall ${D}${datadir}/alsa/ucm2/PinePhone/VoiceCall
 }
 
-FILES_${PN} = "${sysconfdir}/pulse ${sysconfdir}/default ${datadir}/alsa/ucm"
+FILES_${PN} = "${sysconfdir}/pulse ${sysconfdir}/default ${datadir}/alsa/ucm2"
