@@ -122,6 +122,7 @@ LIBHYBRIS_RDEPENDS = " \
     android-system \
     android-system-compat \
     android-tools \
+    android-tools-adbd \
     lxc \
     mtp-server \
     pulseaudio-modules-droid \
