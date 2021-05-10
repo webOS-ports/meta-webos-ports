@@ -7,6 +7,8 @@ require conf/distro/include/luneos-features.inc
 require conf/distro/include/luneos-toolchain.inc
 require conf/distro/include/luneos-sdk.inc
 
+require conf/distro/include/no-static-libs.inc
+
 require conf/distro/include/python2-target-recipes-blacklist.inc
 
 #
