@@ -14,10 +14,10 @@ SRC_URI = " \
     ${WEBOS_PORTS_GIT_REPO}/qtwebengine-chromium;name=chromium${WEBOS_GIT_BRANCH};destsuffix=git/src/3rdparty \
     file://qtwebengine.conf \
 "
-WEBOS_GIT_PARAM_BRANCH = "webOS-ports/master-next"
-# webOS-ports/master-next-20210429
+WEBOS_GIT_PARAM_BRANCH = "webOS-ports/master"
+# webOS-ports/master-20210429
 SRCREV_qtwebengine = "dd7f7a9166186c7fa0fc023324cedb85f02ac6c1"
-# webOS-ports/master-next-20210429
+# webOS-ports/master-20210429
 SRCREV_chromium = "555f348ae89356d9bdf119a97cb8b434bc4b6e89"
 
 do_install_append() {
