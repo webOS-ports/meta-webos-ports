@@ -20,6 +20,8 @@ inherit systemd
 SRC_URI = "git://github.com/mer-hybris/bluebinder.git;branch=master;protocol=https \
            file://0001-Use-CC-as-compiler.patch \
 "
+SRC_URI_append_tissot = " file://0002-service-load-after-wifi-module-load.patch"
+
 S = "${WORKDIR}/git"
 
 PV = "1.0"
