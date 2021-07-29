@@ -21,4 +21,4 @@ do_install() {
     cp -vrf ${S}/* ${D}${webos_frameworksdir}/underscore/version/1.0/
 }
 
-FILES_${PN} += "${webos_frameworksdir}"
+FILES:${PN} += "${webos_frameworksdir}"

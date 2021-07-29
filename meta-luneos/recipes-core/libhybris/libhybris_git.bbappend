@@ -5,6 +5,6 @@ EXTRA_OECONF += " \
     --enable-trace \
     --enable-debug \
 "
-EXTRA_OECONF_append_aarch64 = " \ 
+EXTRA_OECONF:append:aarch64 = " \ 
     --enable-arch=arm64 \
 "

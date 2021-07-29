@@ -9,9 +9,9 @@ DEPENDS  = "dbus glib-2.0"
 
 PACKAGES =+ "${PN}-tests"
 
-RDEPENDS_${PN} += "dbus"
-RRECOMMENDS_${PN} += "ofono"
+RDEPENDS:${PN} += "dbus"
+RRECOMMENDS:${PN} += "ofono"
 
-FILES_${PN} += "${base_libdir}/udev ${systemd_unitdir}"
-FILES_${PN}-tests = "${libdir}/${BPN}/test"
-RDEPENDS_${PN}-tests = "python3 python3-dbus"
+FILES:${PN} += "${base_libdir}/udev ${systemd_unitdir}"
+FILES:${PN}-tests = "${libdir}/${BPN}/test"
+RDEPENDS:${PN}-tests = "python3 python3-dbus"

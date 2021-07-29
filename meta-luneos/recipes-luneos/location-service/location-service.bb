@@ -16,15 +16,15 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 DEPENDS = "luna-service2 glib-2.0 libpbnjson"
-RDEPENDS_${PN} = "geoclue"
+RDEPENDS:${PN} = "geoclue"
 
 PV = "0.1.0+git${SRCPV}"
 SRCREV = "3e057e050a5a3618884edae10ba765c8aea5d84a"
 
 SYSTEMD_PACKAGES = "${PN}"
-SYSTEMD_SERVICE_${PN} = "org.webosports.service.location.service"
+SYSTEMD_SERVICE:${PN} = "org.webosports.service.location.service"
 
-do_install_append() {
+do_install:append() {
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${S}/files/systemd/org.webosports.service.location.service ${D}${systemd_unitdir}/system/
 }

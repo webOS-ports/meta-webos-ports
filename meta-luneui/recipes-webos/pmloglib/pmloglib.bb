@@ -18,7 +18,7 @@ inherit webos_pmlog_config
 inherit systemd
 
 SYSTEMD_PACKAGES = "${PN}"
-SYSTEMD_SERVICE_${PN} = "pm-log-daemon.service"
+SYSTEMD_SERVICE:${PN} = "pm-log-daemon.service"
 
 
 PACKAGECONFIG ??= ""
@@ -27,7 +27,7 @@ PACKAGECONFIG[whitelist] = "-DENABLE_WHITELIST:BOOL=TRUE, -DENABLE_WHITELIST:BOO
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-do_install_append() {
+do_install:append() {
     install -d ${D}${systemd_unitdir}/system	
     install -m 0644 ${S}/files/systemd/${SYSTEMD_SERVICE_${PN}} ${D}${systemd_unitdir}/system/
 }

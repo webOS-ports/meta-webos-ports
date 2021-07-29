@@ -8,6 +8,6 @@ USE_DEVFS = "1"
 
 inherit webos_image
 
-IMAGE_INSTALL_append = " \
+IMAGE_INSTALL:append = " \
   ${MACHINE_EXTRA_RDEPENDS} \
 "

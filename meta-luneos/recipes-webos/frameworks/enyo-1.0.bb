@@ -24,4 +24,4 @@ do_install() {
     ln -vs 0.10 ${D}${webos_frameworksdir}/enyo/1.0
 }
 
-FILES_${PN} += "${webos_frameworksdir}"
+FILES:${PN} += "${webos_frameworksdir}"

@@ -10,7 +10,7 @@ DEPENDS = "libpbnjson pmloglib glib-2.0 gtest"
 VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 VIRTUAL-RUNTIME_rdx-utils ?= "rdxd"
 VIRTUAL-RUNTIME_bash ?= "bash"
-RDEPENDS_${PN} = "luna-service2-security-conf ${VIRTUAL-RUNTIME_cpushareholder} ${VIRTUAL-RUNTIME_rdx-utils} ${VIRTUAL-RUNTIME_bash}"
+RDEPENDS:${PN} = "luna-service2-security-conf ${VIRTUAL-RUNTIME_cpushareholder} ${VIRTUAL-RUNTIME_rdx-utils} ${VIRTUAL-RUNTIME_bash}"
 
 PV = "3.21.2-1+git${SRCPV}"
 
@@ -30,13 +30,13 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 SYSTEMD_PACKAGES = "${PN}"
-SYSTEMD_SERVICE_${PN} = "ls-hubd.service"
+SYSTEMD_SERVICE:${PN} = "ls-hubd.service"
 
 SRCREV = "090e7f4b021584c9b5013a77402b31be94275796"
 
 # This fix-up will be removed shortly. luna-service2 headers must be included
 # using '#include <luna-service2/*.h>'
-do_install_append() {
+do_install:append() {
     # XXX Temporarily, create links from the old locations until all users of
     # luna-service2 convert to using pkg-config
     install -d ${D}${systemd_unitdir}/system
@@ -48,7 +48,7 @@ do_install_append() {
 
 # Disable LTTng tracepoints explicitly.
 # LTTng tracepoints in LS2 can cause out of memory, because LS2 is used by many components.
-# To enable tracepoints back use WEBOS_LTTNG_ENABLED_pn-luna-service2 = "1"
+# To enable tracepoints back use WEBOS_LTTNG_ENABLED:pn-luna-service2 = "1"
 WEBOS_LTTNG_ENABLED = "0"
 EXTRA_OECMAKE += " ${@bb.utils.contains('WEBOS_LTTNG_ENABLED', '1', '-DWEBOS_LTTNG_ENABLED:BOOLEAN=True', '', d)}"
 
@@ -59,6 +59,6 @@ EXTRA_OECMAKE += " ${@bb.utils.contains('WEBOS_LTTNG_ENABLED', '1', '-DWEBOS_LTT
 #EXTRA_OECMAKE += '${@oe.utils.conditional("WEBOS_DISABLE_LS2_SECURITY", "1", "-DWEBOS_LS2_SECURE:BOOLEAN=False", "" ,d)}'
 
 PACKAGES += "${PN}-perf"
-FILES_${PN} += "${systemd_unitdir}/system"
+FILES:${PN} += "${systemd_unitdir}/system"
 
-FILES_${PN}-perf += "${webos_testsdir}/${BPN}-perf"
+FILES:${PN}-perf += "${webos_testsdir}/${BPN}-perf"

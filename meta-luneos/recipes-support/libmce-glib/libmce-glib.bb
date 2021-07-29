@@ -42,7 +42,7 @@ EXTRA_OEMAKE = "KEEP_SYMBOLS=1"
 
 PARALLEL_MAKE = ""
 
-do_compile_prepend() {
+do_compile:prepend() {
     install -D ${WORKDIR}/dbus-names.h ${S}/include/mce/dbus-names.h
     install -D ${WORKDIR}/mode-names.h ${S}/include/mce/mode-names.h
 }

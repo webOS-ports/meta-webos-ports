@@ -28,9 +28,9 @@ inherit qmake5
 #   /OE/build/owpb/webos-ports/tmp-eglibc/sysroots/tenderloin/usr/lib/cmake/Qt5Gui/Qt5Gui_QEglFSIntegrationPlugin.cmake
 #   Matched in manifest-tenderloin-qtbase.populate_sysroot
 #   Please verify which package should provide the above files.
-do_install_append() {
+do_install:append() {
     rm -vf ${D}${libdir}/cmake/Qt5Gui/Qt5Gui_QEglFSIntegrationPlugin.cmake
 }
 
-FILES_${PN} += "${OE_QMAKE_PATH_PLUGINS}/platforms/libhwcomposer.so"
-FILES_${PN}-dev += "${libdir}/cmake"
+FILES:${PN} += "${OE_QMAKE_PATH_PLUGINS}/platforms/libhwcomposer.so"
+FILES:${PN}-dev += "${libdir}/cmake"

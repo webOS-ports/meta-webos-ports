@@ -7,7 +7,7 @@ inherit qmake5
 
 DEPENDS = "libhybris qtbase libqtubuntu-media-signals exiv2 qtmultimedia qtdeclarative"
 
-RDEPENDS_${PN} += "qtmultimedia-plugins"
+RDEPENDS:${PN} += "qtmultimedia-plugins"
 
 # Depends on libhybris which has this restriction
 COMPATIBLE_MACHINE = "^halium$"
@@ -24,6 +24,6 @@ EXTRA_QMAKEVARS_PRE = "\
     PREFIX=${prefix} \
 "
 
-FILES_${PN} += "\
+FILES:${PN} += "\
     ${OE_QMAKE_PATH_PLUGINS} \
 "

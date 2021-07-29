@@ -7,7 +7,7 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 DEPENDS = "glib-2.0 glibmm luna-service2 libpbnjson pmloglib openssl libbson boost"
-RDEPENDS_${PN} = "settingsservice-conf python3"
+RDEPENDS:${PN} = "settingsservice-conf python3"
 
 PV = "1.0.22-1+git${SRCPV}"
 inherit webos_cmake
@@ -16,7 +16,7 @@ inherit webos_ports_ose_repo
 inherit systemd
 
 SYSTEMD_PACKAGES = "${PN}"
-SYSTEMD_SERVICE_${PN} = "settings-service-recovery.service settings-service.service"
+SYSTEMD_SERVICE:${PN} = "settings-service-recovery.service settings-service.service"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
@@ -27,9 +27,9 @@ SRCREV = "f004031a876797b13e3730edc24a4a7706b65387"
 WEBOS_SYSTEM_BUS_MANIFEST_TYPE = "SERVICE"
 
 VIRTUAL-RUNTIME_bash ?= "bash"
-RDEPENDS_${PN}_append_class-target = " ${VIRTUAL-RUNTIME_bash}"
+RDEPENDS:${PN}:append:class-target = " ${VIRTUAL-RUNTIME_bash}"
 
-do_install_append() {
+do_install:append() {
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${S}/files/systemd/settings-service-recovery.service ${D}${systemd_unitdir}/system/
     install -m 0644 ${S}/files/systemd/settings-service.service ${D}${systemd_unitdir}/system/

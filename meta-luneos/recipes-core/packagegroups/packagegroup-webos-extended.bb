@@ -4,7 +4,7 @@ DESCRIPTION = "meta-webos components used in Open webOS"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-# You don't need to change this value when you're changing just RDEPENDS_${PN} variable.
+# You don't need to change this value when you're changing just RDEPENDS:${PN} variable.
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 inherit packagegroup
@@ -75,7 +75,7 @@ WEBOS_PACKAGESET_UI = " \
 # TUNE_PKGARCH  (e.g. i586). Instead, it is pulled into the image by adding it here.
 # (There are more details as to why this was done in nyx-lib.bb.)
 
-RDEPENDS_${PN} = " \
+RDEPENDS:${PN} = " \
     activitymanager \
     bootd \
     configurator \

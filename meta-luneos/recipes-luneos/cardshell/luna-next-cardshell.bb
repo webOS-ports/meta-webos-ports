@@ -2,7 +2,7 @@ SUMMARY = "Card shell implementation for the next generation webOS UI"
 LICENSE = "GPL-3.0 & Apache-2.0"
 LIC_FILES_CHKSUM = "file://COPYING;md5=bc807597ba062cd149d362d22d3061e7"
 
-RDEPENDS_${PN} += " \
+RDEPENDS:${PN} += " \
     qtdeclarative-qmlplugins \
     qtgraphicaleffects-qmlplugins \
     qtquickcontrols-qmlplugins \
@@ -27,7 +27,7 @@ S = "${WORKDIR}/git"
 
 # inheriting webos_application requires the appinfo.json file, which we don't have here.
 # so just install manually db8 permissions.
-do_install_append() {
+do_install:append() {
     if [ -d ${S}/configuration/db/kinds ] ; then
         install -d ${D}${webos_sysconfdir}/db/kinds
         install -m 0644 ${S}/configuration/db/kinds/* ${D}${webos_sysconfdir}/db/kinds
@@ -44,5 +44,5 @@ do_install_append() {
     fi
 }
 
-FILES_${PN} += "${webos_prefix}/luna-next/shells/card \
+FILES:${PN} += "${webos_prefix}/luna-next/shells/card \
                 ${webos_sysconfdir}"

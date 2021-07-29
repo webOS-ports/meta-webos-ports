@@ -1,10 +1,10 @@
-FILESEXTRAPATHS_prepend := "${COREBASE}/meta/recipes-core/busybox/busybox:${COREBASE}/meta/recipes-core/busybox/files:"
+FILESEXTRAPATHS:prepend := "${COREBASE}/meta/recipes-core/busybox/busybox:${COREBASE}/meta/recipes-core/busybox/files:"
 
 require recipes-core/busybox/busybox_${PV}.bb
 
 S = "${WORKDIR}/busybox-${PV}"
 
-do_configure_append() {
+do_configure:append() {
     sed -i -e '/CONFIG_STATIC/d' .config
     sed -i -e '/CONFIG_STATIC_LIBGCC/d' .config
     sed -i -e '/CONFIG_FEATURE_TAR_LONG_OPTIONS/d' .config
@@ -13,7 +13,7 @@ do_configure_append() {
     echo "CONFIG_FEATURE_TAR_LONG_OPTIONS=y" >> .config
 }
 
-SYSTEMD_SERVICE_${PN}-syslog = ""
+SYSTEMD_SERVICE:${PN}-syslog = ""
 
 do_install() {
     if ! grep -q "CONFIG_FEATURE_INDIVIDUAL=y" ${B}/.config; then
@@ -27,7 +27,7 @@ do_install() {
         bberror "busybox-static expects CONFIG_FEATURE_INDIVIDUAL to be enabled in busybox config"
     fi
 
-    # just to keep do_package_prepend from busybox.inc happy:
+    # just to keep do_package:prepend from busybox.inc happy:
     install -d ${D}${sysconfdir}
     touch ${D}${sysconfdir}/busybox.links
 }

@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = "file://LICENSE.LGPL2.1;md5=4fbd65380cdd255951079008b364516c 
 "
 
 DEPENDS = "libxml2 libcap"
-RDEPENDS_${PN} = " \
+RDEPENDS:${PN} = " \
 		rsync \
 		curl \
 		gzip \
@@ -30,11 +30,11 @@ RDEPENDS_${PN} = " \
 		util-linux-getopt \
 "
 
-RDEPENDS_${PN}_append_libc-glibc = " glibc-utils"
+RDEPENDS:${PN}:append:libc-glibc = " glibc-utils"
 
-RDEPENDS_${PN}-ptest += "file make gmp nettle gnutls bash libgcc"
+RDEPENDS:${PN}-ptest += "file make gmp nettle gnutls bash libgcc"
 
-RDEPENDS_${PN}-networking += "iptables"
+RDEPENDS:${PN}-networking += "iptables"
 
 SRC_URI = "http://linuxcontainers.org/downloads/${BPN}/${BPN}-${PV}.tar.gz \
 	file://lxc-1.0.0-disable-udhcp-from-busybox-template.patch \
@@ -90,31 +90,31 @@ export STAGING_LIBDIR
 inherit autotools pkgconfig ptest update-rc.d systemd python3native
 
 SYSTEMD_PACKAGES = "${PN} ${PN}-networking"
-SYSTEMD_SERVICE_${PN} = "lxc.service"
-SYSTEMD_AUTO_ENABLE_${PN} = "disable"
-SYSTEMD_SERVICE_${PN}-networking = "lxc-net.service"
-SYSTEMD_AUTO_ENABLE_${PN}-networking = "enable"
+SYSTEMD_SERVICE:${PN} = "lxc.service"
+SYSTEMD_AUTO_ENABLE:${PN} = "disable"
+SYSTEMD_SERVICE:${PN}-networking = "lxc-net.service"
+SYSTEMD_AUTO_ENABLE:${PN}-networking = "enable"
 
 INITSCRIPT_PACKAGES = "${PN} ${PN}-networking"
-INITSCRIPT_NAME_${PN} = "lxc-containers"
-INITSCRIPT_PARAMS_${PN} = "defaults"
-INITSCRIPT_NAME_${PN}-networking = "lxc-net"
-INITSCRIPT_PARAMS_${PN}-networking = "defaults"
+INITSCRIPT_NAME:${PN} = "lxc-containers"
+INITSCRIPT_PARAMS:${PN} = "defaults"
+INITSCRIPT_NAME:${PN}-networking = "lxc-net"
+INITSCRIPT_PARAMS:${PN}-networking = "defaults"
 
-FILES_${PN}-doc = "${mandir} ${infodir}"
+FILES:${PN}-doc = "${mandir} ${infodir}"
 # For LXC the docdir only contains example configuration files and should be included in the lxc package
-FILES_${PN} += "${docdir}"
-FILES_${PN} += "${libdir}/python3*"
-FILES_${PN} += "${datadir}/bash-completion"
-FILES_${PN}-dbg += "${libexecdir}/lxc/.debug"
-FILES_${PN}-dbg += "${libexecdir}/lxc/hooks/.debug"
+FILES:${PN} += "${docdir}"
+FILES:${PN} += "${libdir}/python3*"
+FILES:${PN} += "${datadir}/bash-completion"
+FILES:${PN}-dbg += "${libexecdir}/lxc/.debug"
+FILES:${PN}-dbg += "${libexecdir}/lxc/hooks/.debug"
 PACKAGES =+ "${PN}-templates ${PN}-networking ${PN}-lua"
-FILES_lua-${PN} = "${datadir}/lua ${libdir}/lua"
-FILES_lua-${PN}-dbg += "${libdir}/lua/lxc/.debug"
-FILES_${PN}-templates += "${datadir}/lxc/templates"
-RDEPENDS_${PN}-templates += "bash"
+FILES:lua-${PN} = "${datadir}/lua ${libdir}/lua"
+FILES:lua-${PN}-dbg += "${libdir}/lua/lxc/.debug"
+FILES:${PN}-templates += "${datadir}/lxc/templates"
+RDEPENDS:${PN}-templates += "bash"
 
-FILES_${PN}-networking += " \
+FILES:${PN}-networking += " \
     ${sysconfdir}/init.d/lxc-net \
     ${sysconfdir}/default/lxc-net \
 "
@@ -125,7 +125,7 @@ CACHED_CONFIGUREVARS += " \
     am_cv_python_pythondir='${PYTHON_SITEPACKAGES_DIR}' \
 "
 
-do_install_append() {
+do_install:append() {
 	# The /var/cache/lxc directory created by the Makefile
 	# is wiped out in volatile, we need to create this at boot.
 	rm -rf ${D}${localstatedir}/cache
@@ -165,13 +165,13 @@ do_install_ptest() {
 	mv ${D}/usr/bin/lxc-test-* ${D}/${PTEST_PATH}/tests/.
 }
 
-pkg_postinst_${PN}() {
+pkg_postinst:${PN}() {
 	if [ -z "$D" ] && [ -e /etc/init.d/populate-volatile.sh ] ; then
 		/etc/init.d/populate-volatile.sh update
 	fi
 }
 
-pkg_postinst_${PN}-networking() {
+pkg_postinst:${PN}-networking() {
 if ${@bb.utils.contains('DISTRO_FEATURES', 'sysvinit', 'true', 'false', d)}; then
 cat >> $D/etc/network/interfaces << EOF
 

@@ -29,12 +29,12 @@ SRC_URI[node.sha256sum] = "71158026579487422fd13cc2553b34cddb76519098aa6030faab5
 
 S = "${WORKDIR}/git"
 
-do_configure_prepend() {
+do_configure:prepend() {
     export HOME=${WORKDIR}
     export LD="${CXX}"
 }
 
-do_compile_prepend() {
+do_compile:prepend() {
     export HOME=${WORKDIR}
     export LD="${CXX}"
 }
@@ -44,4 +44,4 @@ do_install() {
     install ${S}/build/Release/${WEBOS_NODE} ${D}${libdir}/nodejs/${WEBOS_NODE}
 }
 
-FILES_${PN} += "${libdir}/nodejs"
+FILES:${PN} += "${libdir}/nodejs"

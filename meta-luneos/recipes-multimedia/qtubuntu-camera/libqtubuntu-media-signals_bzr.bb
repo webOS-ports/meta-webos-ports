@@ -7,9 +7,9 @@ inherit webos_cmake_qt5
 
 DEPENDS = "qtbase"
 
-RDEPENDS_${PN} += "qtmultimedia-plugins"
+RDEPENDS:${PN} += "qtmultimedia-plugins"
 
-RPROVIDES_${PN} += "libqtubuntu-media-signals2"
+RPROVIDES:${PN} += "libqtubuntu-media-signals2"
 
 SRCREV = "21"
 SRC_URI = "bzr://bazaar.launchpad.net/~phablet-team/qtubuntu-media-signals/trunk"

@@ -1,4 +1,4 @@
-FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 DEPENDS += "luna-service2 pmloglib"
 
@@ -20,7 +20,7 @@ SRCREV_qtwebengine = "dd7f7a9166186c7fa0fc023324cedb85f02ac6c1"
 # webOS-ports/master-20210429
 SRCREV_chromium = "555f348ae89356d9bdf119a97cb8b434bc4b6e89"
 
-do_install_append() {
+do_install:append() {
     # Create the chromium folder already so users can right away push the required plugins there
     mkdir -p ${D}${libdir}/chromium
 
@@ -34,4 +34,4 @@ do_install_append() {
     echo ${QT_MODULE_BRANCH} > ${D}${datadir}/qtwebengine/qt-version.txt
 }
 
-FILES_${PN} += "${libdir}/chromium ${sysconfdir}/luna-next/"
+FILES:${PN} += "${libdir}/chromium ${sysconfdir}/luna-next/"

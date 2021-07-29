@@ -5,7 +5,7 @@ SRC_URI = "${DEBIAN_MIRROR}/main/b/base-passwd/base-passwd_${PV}.tar.gz \
            file://disable-docs.patch \
           "
 
-do_configure_prepend() {
+do_configure:prepend() {
     # nobash.patch has interesting side-effect which we still need
     sed -i 's%^root:[^:]*:%root::%g' ${S}/passwd.master
 }

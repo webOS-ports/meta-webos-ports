@@ -1,11 +1,11 @@
-FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 SRC_URI += " \
     file://dbus-session.service \
     file://startup-dbus-session.sh \
 "
 
-do_install_append() {
+do_install:append() {
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${WORKDIR}/dbus-session.service ${D}${systemd_unitdir}/system/
 
@@ -13,4 +13,4 @@ do_install_append() {
     install -m 0755 ${WORKDIR}/startup-dbus-session.sh ${D}${bindir}/
 }
 
-FILES_${PN} += "${bindir} ${systemd_unitdir}"
+FILES:${PN} += "${bindir} ${systemd_unitdir}"

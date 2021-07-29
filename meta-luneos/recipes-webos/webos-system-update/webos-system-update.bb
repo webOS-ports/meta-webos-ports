@@ -3,7 +3,7 @@ LICENSE = "GPL-3.0"
 LIC_FILES_CHKSUM = "file://COPYING.txt;md5=d32239bcb673463ab874e80d47fae504"
 
 DEPENDS = "qtbase qtdeclarative"
-RDEPENDS_${PN} += "qtdeclarative-qmlplugins"
+RDEPENDS:${PN} += "qtdeclarative-qmlplugins"
 
 PV = "1.0.0-4+git${SRCPV}"
 SRCREV = "a07b22bc8a47fb3160c9eeb8a2aafee19d750d8f"
@@ -18,7 +18,7 @@ S = "${WORKDIR}/git"
 inherit systemd
 
 SYSTEMD_PACKAGES = "${PN}"
-SYSTEMD_SERVICE_${PN} = "webos-system-update.service"
+SYSTEMD_SERVICE:${PN} = "webos-system-update.service"
 
 do_install() {
     install -d ${D}${sbindir}

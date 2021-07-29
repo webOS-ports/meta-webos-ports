@@ -28,13 +28,13 @@ EXTRA_OECONF += " \
 # inherit webos_ports_fork_repo
 inherit autotools pkgconfig
 
-do_configure_prepend() {
+do_configure:prepend() {
   echo "${PV}" > ${S}/.tarball-version
 }
 
-FILES_${PN} += "${libdir}/pulse-${PULSEAUDIO_VERSION}/modules/*.so"
-FILES_${PN}-dev += "${libdir}/pulse-${PULSEAUDIO_VERSION}/modules/*.la"
-FILES_${PN}-staticdev += "${libdir}/pulse-${PULSEAUDIO_VERSION}/modules/*.a"
+FILES:${PN} += "${libdir}/pulse-${PULSEAUDIO_VERSION}/modules/*.so"
+FILES:${PN}-dev += "${libdir}/pulse-${PULSEAUDIO_VERSION}/modules/*.la"
+FILES:${PN}-staticdev += "${libdir}/pulse-${PULSEAUDIO_VERSION}/modules/*.a"
 
 # Add pulse user to audio group so he can access audio dev nodes from Android
-GROUPMEMS_PARAM_${PN} = "-a pulse -g audio"
+GROUPMEMS_PARAM:${PN} = "-a pulse -g audio"

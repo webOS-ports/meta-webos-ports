@@ -18,23 +18,23 @@ B = "${S}"
 
 EXTRA_QMAKEVARS_PRE += "KF5BLUEZQT_BLUEZ_VERSION=5"
 
-do_configure_prepend() {
+do_configure:prepend() {
     sed -i "s@(qdbusxml2cpp@(${OE_QMAKE_PATH_EXTERNAL_HOST_BINS}/qdbusxml2cpp@g" ${S}/bluez-qt/src/interfaces/interfaces.pri
 }
 
-do_install_append() {
+do_install:append() {
     mkdir -p ${D}${OE_QMAKE_PATH_ARCHDATA}/mkspecs/modules/
     cp ${WORKDIR}/qt_BluezQt.pri ${D}${OE_QMAKE_PATH_ARCHDATA}/mkspecs/modules/
 }
 
-FILES_${PN} += " \
+FILES:${PN} += " \
 		${OE_QMAKE_PATH_QML}/org/kde/bluezqt \
 		"
 
-FILES_${PN}-dev += " \
+FILES:${PN}-dev += " \
 		${OE_QMAKE_PATH_ARCHDATA}/mkspecs/modules/ \
 		"
 
-RDEPENDS_${PN} = " \
+RDEPENDS:${PN} = " \
     qtdeclarative-qmlplugins \
 "

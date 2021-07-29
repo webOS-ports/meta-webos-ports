@@ -4,8 +4,8 @@ SUPPORTED_EXTRA_ARCHS ?= "armv7a-vfp-neon cortexa8-vfp-neon cortexa8t-vfp-neon c
 # this is just to prevent opkg installing something from e.g. armv4t feed on armv7a, 
 # just because some upgrade was available in armv4t feed sooner and when it gets
 # available for armv7a (same version) it's not reinstalled to get it from feed with higher priority
-SUPPORTED_EXTRA_ARCHS_armv7a ?= "armv7a-vfp-neon cortexa8-vfp-neon cortexa8t-vfp-neon cortexa9-vfp-neon cortexa9t-vfp-neon"
-SUPPORTED_EXTRA_ARCHS_armv6 ?= "armv6"
+SUPPORTED_EXTRA_ARCHS:armv7a ?= "armv7a-vfp-neon cortexa8-vfp-neon cortexa8t-vfp-neon cortexa9-vfp-neon cortexa9t-vfp-neon"
+SUPPORTED_EXTRA_ARCHS:armv6 ?= "armv6"
 
 do_compile() {
     mkdir -p ${S}/${sysconfdir}/opkg
@@ -19,5 +19,5 @@ do_compile() {
     exit 0
 }
 
-CONFFILES_${PN} = '${@ " ".join( [ ( "${sysconfdir}/opkg/%s-feed.conf" % feed ) for feed in "all ${MACHINE_ARCH}".split() ] ) }'
-CONFFILES_${PN} += '${@ " ".join( [ ( "${sysconfdir}/opkg/%s-feed.conf" % feed ) for feed in set("${PACKAGE_EXTRA_ARCHS}".split()).intersection(set("${SUPPORTED_EXTRA_ARCHS}".split())) ] ) }'
+CONFFILES:${PN} = '${@ " ".join( [ ( "${sysconfdir}/opkg/%s-feed.conf" % feed ) for feed in "all ${MACHINE_ARCH}".split() ] ) }'
+CONFFILES:${PN} += '${@ " ".join( [ ( "${sysconfdir}/opkg/%s-feed.conf" % feed ) for feed in set("${PACKAGE_EXTRA_ARCHS}".split()).intersection(set("${SUPPORTED_EXTRA_ARCHS}".split())) ] ) }'

@@ -10,7 +10,7 @@ PHONE_RDEPENDS = " \
     org.webosports.app.phone \
 "
 
-RDEPENDS_${PN} = " \
+RDEPENDS:${PN} = " \
     ofono \
     webos-telephonyd \
     ${@bb.utils.contains('MACHINE_FEATURES', 'phone', '${PHONE_RDEPENDS}', '', d)} \

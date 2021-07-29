@@ -6,7 +6,7 @@ SECTION = "webos/support"
 LIC_FILES_CHKSUM = "file://bluebinder.c;beginline=1;endline=27;md5=430727b8efeca344ab89eeb635b4fa79"
 
 DEPENDS = "libgbinder glib-2.0 libglibutil bluez5 systemd"
-RDEPENDS_${PN} = "android-property-service"
+RDEPENDS:${PN} = "android-property-service"
 
 # Rdepends on android-property-service which depends on libhybris which has this restriction
 COMPATIBLE_MACHINE = "^halium$"
@@ -28,7 +28,7 @@ SRCREV = "419ab4a36fd61f841e7b1070b92b5e23ea813b63"
 CFLAGS += "--sysroot=${RECIPE_SYSROOT} ${LDFLAGS}"
 
 SYSTEMD_PACKAGES = "${PN}"
-SYSTEMD_SERVICE_${PN} = "bluebinder.service"
+SYSTEMD_SERVICE:${PN} = "bluebinder.service"
 
 do_install() {
     make install DESTDIR=${D}
@@ -41,4 +41,4 @@ do_install() {
     install -m 0644 ${S}/bluebinder.service ${D}${systemd_unitdir}/system/
 }
 
-FILES_${PN} += "${sbindir}/bluebinder_post.sh ${sbindir}/bluebinder_wait.sh"
+FILES:${PN} += "${sbindir}/bluebinder_post.sh ${sbindir}/bluebinder_wait.sh"

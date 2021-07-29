@@ -40,5 +40,5 @@ do_install() {
     fi
 }
 
-FILES_${PN} += "${webos_sysmgrdir}\
+FILES:${PN} += "${webos_sysmgrdir}\
                 ${webos_sysconfdir}"

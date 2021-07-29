@@ -21,7 +21,7 @@ SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE} \
 "
 S = "${WORKDIR}/git"
 
-do_install_append() {
+do_install:append() {
     # XXX Temporarily, create a link from the old include path
     install -d ${D}${includedir}/palmsocket/IncsPublic
     for i in ${D}${includedir}/palmsocket/*.h; do ln -svnf ../$(basename $i) ${D}${includedir}/palmsocket/IncsPublic; done

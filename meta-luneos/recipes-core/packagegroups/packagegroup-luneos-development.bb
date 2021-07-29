@@ -8,10 +8,10 @@ inherit packagegroup
 
 VALGRIND = "valgrind"
 # only armv7a is supported
-VALGRIND_arm = ""
-VALGRIND_armv7a = "valgrind"
+VALGRIND:arm = ""
+VALGRIND:armv7a = "valgrind"
 
-RDEPENDS_${PN} = " \
+RDEPENDS:${PN} = " \
   mingetty \
   serial-forward \
   gdb \
@@ -46,5 +46,5 @@ RDEPENDS_${PN} = " \
   ${QTWEBENGINE} \
 "
 
-QTWEBENGINE_armv5 = ""
+QTWEBENGINE:armv5 = ""
 QTWEBENGINE = "qtwebengine-qmlplugins"

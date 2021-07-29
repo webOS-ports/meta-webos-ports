@@ -14,14 +14,14 @@ S = "${WORKDIR}/git"
 
 inherit autotools autotools-brokensep
 
-do_configure_prepend() {
+do_configure:prepend() {
     touch ${S}/NEWS
     touch ${S}/ChangeLog
     touch ${S}/AUTHORS
     touch ${S}/README
 }
 
-FILES_${PN} = " \
+FILES:${PN} = " \
     ${bindir}/tidy \
     ${bindir}/tab2space \
     ${libdir}/libtidy* \

@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = " \
 "
 
 DEPENDS = "qtbase qtdeclarative qtwebengine luna-sysmgr-common libconnman-qt5"
-RDEPENDS_${PN} += " \
+RDEPENDS:${PN} += " \
     qtdeclarative-qmlplugins \
     qtwebengine-qmlplugins \
 "
@@ -27,9 +27,9 @@ inherit webos_cmake_qt5
 inherit webos_filesystem_paths
 inherit webos_systemd
 
-do_install_append() {
+do_install:append() {
     # Install the additional ACG configuration
     install -v -m 0644 ${S}/files/sysbus/com.palm.luna-apps.role.json ${D}${webos_sysbus_rolesdir}/com.palm.luna-apps.role.json
 }
 
-FILES_${PN} += "${webos_frameworksdir}"
+FILES:${PN} += "${webos_frameworksdir}"

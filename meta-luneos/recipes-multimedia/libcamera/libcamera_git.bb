@@ -22,5 +22,5 @@ inherit meson pkgconfig
 EXTRA_OEMESON += "-Ddocumentation=false -Dtest=false"
 
 # Specify manually the content of -dev package as libcamera.so should be in libcamera main package
-FILES_${PN}-dev = "${includedir} ${libdir}/pkgconfig"
-FILES_${PN} += " ${libdir}/libcamera.so "
+FILES:${PN}-dev = "${includedir} ${libdir}/pkgconfig"
+FILES:${PN} += " ${libdir}/libcamera.so "

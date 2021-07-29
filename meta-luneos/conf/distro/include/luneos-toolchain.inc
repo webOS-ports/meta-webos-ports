@@ -10,4 +10,4 @@ WEBOS_DISTRO_FEATURES_LIBC_DEFAULT ?= "\
   libc-utmp libc-utmpx libc-wordexp libc-posix-clang-wchar libc-posix-regexp libc-posix-regexp-glibc \
   libc-posix-wchar-io"
 WEBOS_DISTRO_FEATURES_LIBC = "${WEBOS_DISTRO_FEATURES_LIBC_DEFAULT}"
-WEBOS_DISTRO_FEATURES_LIBC_class-nativesdk = "${WEBOS_DISTRO_FEATURES_LIBC_DEFAULT}"
+WEBOS_DISTRO_FEATURES_LIBC:class-nativesdk = "${WEBOS_DISTRO_FEATURES_LIBC_DEFAULT}"

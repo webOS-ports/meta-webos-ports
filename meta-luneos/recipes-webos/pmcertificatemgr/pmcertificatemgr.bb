@@ -7,7 +7,7 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 DEPENDS = "openssl glib-2.0"
-RDEPENDS_${PN} = "ca-certificates"
+RDEPENDS:${PN} = "ca-certificates"
 
 PV = "2.0.0-29+git${SRCPV}"
 SRCREV = "89a0bdcb9bdc6f99565aef7e2056c8bd4ad414e7"
@@ -17,14 +17,14 @@ inherit webos_cmake
 inherit pkgconfig
 inherit update-alternatives
 
-ALTERNATIVE_${PN} = "openssl-cnf2"
+ALTERNATIVE:${PN} = "openssl-cnf2"
 ALTERNATIVE_LINK_NAME[openssl-cnf2] = "${sysconfdir}/ssl/openssl.cnf"
 ALTERNATIVE_PRIORITY[openssl-cnf2] ?= "10"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-do_install_append() {
+do_install:append() {
     # We ship our own modified openssl configuration and as long as the
     # openssl-misc package is not installed within the same image we don't
     # get a conflict.

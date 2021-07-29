@@ -14,7 +14,7 @@ inherit pkgconfig
 inherit webos_machine_impl_dep
 
 DEPENDS  = "nyx-lib"
-RDEPENDS_${PN} = "${@oe.utils.conditional('WEBOS_TARGET_MACHINE_IMPL','emulator','iproute2','',d)}"
+RDEPENDS:${PN} = "${@oe.utils.conditional('WEBOS_TARGET_MACHINE_IMPL','emulator','iproute2','',d)}"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 

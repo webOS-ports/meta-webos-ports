@@ -37,4 +37,4 @@ do_install() {
     rm -rf ${D}${webos_servicesdir}/${PN}/files
 }
 
-FILES_${PN} += "${webos_servicesdir}/${PN}"
+FILES:${PN} += "${webos_servicesdir}/${PN}"

@@ -21,9 +21,9 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 # TODO: Remove once there's localization support
-do_install_append() {
+do_install:append() {
     install -d ${D}${webos_prefix}/universalsearchmgr/resources/en_us
     install -v -m 0644 ${S}/files/UniversalSearchList.json ${D}${webos_prefix}/universalsearchmgr/resources/en_us
 }
 
-FILES_${PN} += "${webos_prefix}"
+FILES:${PN} += "${webos_prefix}"

@@ -23,14 +23,14 @@ MESA_PKGS = " \
     libglapi \
 "
 
-IMAGE_INSTALL_append = " \
+IMAGE_INSTALL:append = " \
     libdrm-tests \
     qtbase-examples \
     qtbase-plugins \
     kernel-modules \
 "
 
-IMAGE_INSTALL_append_qemuall = " \
+IMAGE_INSTALL:append:qemuall = " \
     ${MESA_PKGS} \
     glmark2 \
 "

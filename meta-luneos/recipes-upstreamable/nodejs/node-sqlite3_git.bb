@@ -34,4 +34,4 @@ do_install() {
     install ${S}/lib/trace.js ${D}${libdir}/nodejs/sqlite3/
 }
 
-FILES_${PN} += "${libdir}/nodejs"
+FILES:${PN} += "${libdir}/nodejs"

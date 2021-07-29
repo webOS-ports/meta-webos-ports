@@ -21,7 +21,7 @@ S = "${WORKDIR}/git"
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/service/sysbus"
 
-do_install_append() {
+do_install:append() {
     install -d ${D}${webos_servicesdir}/org.webosports.service.filemanager
     cp -r ${S}/service/* ${D}${webos_servicesdir}/org.webosports.service.filemanager/
     install -d ${D}${webos_sysbus_servicedir}
@@ -34,4 +34,4 @@ do_install_append() {
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.api.json ${D}${webos_sysbus_apipermissionsdir}/${SERVICE_NAME}.api.json
 }
 
-FILES_${PN} += "${webos_servicesdir}/${SERVICE_NAME}"
+FILES:${PN} += "${webos_servicesdir}/${SERVICE_NAME}"

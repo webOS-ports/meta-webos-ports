@@ -20,4 +20,4 @@ do_install() {
 }
 
 PACKAGES = "${PN}"
-FILES_${PN} = "${webos_frameworksdir}/cordova"
+FILES:${PN} = "${webos_frameworksdir}/cordova"

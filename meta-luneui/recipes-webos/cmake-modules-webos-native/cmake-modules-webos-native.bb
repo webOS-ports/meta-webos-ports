@@ -22,7 +22,7 @@ do_compile() {
 }
 
 # Keep in sync with classes/webos_pro_filesystem_paths.bbclass
-do_install_append() {
+do_install:append() {
     # The location of webOS.cmake depends on CMAKE_ROOT, which isn't accessible
     # to OE, but it's got to be somewhere under ${D} (assume there's only one):
     local webos_cmake=$(find ${D} -name webOS.cmake)

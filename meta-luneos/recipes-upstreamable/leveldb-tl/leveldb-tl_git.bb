@@ -16,7 +16,7 @@ LICENSE = "Apache-2.0 & LGPL-2.1"
 LIC_FILES_CHKSUM = "file://LICENSE.txt;md5=3b83ef96387f14655fc854ddc3c6bd57"
 
 DEPENDS = "leveldb"
-DEPENDS_append_class-target = " gtest"
+DEPENDS:append:class-target = " gtest"
 
 SRC_URI = "git://github.com/ony/${BPN};branch=gcc-4.7"
 
@@ -29,7 +29,7 @@ S = "${WORKDIR}/git"
 
 inherit cmake
 
-EXTRA_OECMAKE_append_class-native = " -DBUILD_TESTING:BOOL=false -DBUILD_MKSANDWICH:BOOL=false"
+EXTRA_OECMAKE:append:class-native = " -DBUILD_TESTING:BOOL=false -DBUILD_MKSANDWICH:BOOL=false"
 
 BBCLASSEXTEND = "native"
 
@@ -38,4 +38,4 @@ SRC_URI += "file://0001-util-Fix-build-with-gcc7.patch"
 SRC_URI += "file://0001-test_corners-initialize-cookie.patch"
 
 # ${PN} package is empty
-RDEPENDS_${PN}-dev = ""
+RDEPENDS:${PN}-dev = ""
