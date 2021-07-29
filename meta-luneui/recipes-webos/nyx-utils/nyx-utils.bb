@@ -19,4 +19,4 @@ S = "${WORKDIR}/git"
 
 SRCREV = "3efc873d73c453b08b56e150268fc74bf4b013cc"
 
-FILES_${PN} += "${libdir}/nyx/nyxcmd/"
+FILES:${PN} += "${libdir}/nyx/nyxcmd/"

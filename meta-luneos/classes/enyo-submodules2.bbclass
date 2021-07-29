@@ -14,7 +14,7 @@ SRCREV_g11n = "efd279a517662404aeb97b05f677ffed04b8e88f"
 SRCREV_layout = "246692a3505898ff361523ed8b545592c261eb83"
 SRCREV_onyx = "e5873bca7ba5111f58cf99fb5d66fb17d5a5bbce"
 
-do_configure_prepend() {
+do_configure:prepend() {
     SUBMODULES="enyo lib/canvas lib/extra lib/g11n lib/layout lib/onyx"
     # check that all our "submodules" exist in upstream repo
     for SUBMODULE in $SUBMODULES; do

@@ -19,7 +19,7 @@ SRCREV = "6cd4815a81830bbf6b22647ae8bb4fc818148ee7"
 OECMAKE_GENERATOR = "Unix Makefiles"
 
 PACKAGECONFIG ??= ""
-PACKAGECONFIG_append_class-native = " tools"
+PACKAGECONFIG:append:class-native = " tools"
 
 # These are the defaults, but explicitly specify so that readers know they exist
 EXTRA_OECMAKE += "-DWITH_DOCS:BOOL=FALSE -DWITH_TESTS:BOOL=FALSE -DNO_LOGGING:BOOL=TRUE"

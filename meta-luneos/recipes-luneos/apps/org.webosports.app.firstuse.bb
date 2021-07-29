@@ -17,7 +17,7 @@ inherit webos_app
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-INSANE_SKIP_${PN} = "libdir"
-INSANE_SKIP_${PN}-dbg = "libdir"
+INSANE_SKIP:${PN} = "libdir"
+INSANE_SKIP:${PN}-dbg = "libdir"
 
-FILES_${PN} += "${datadir}/luneos-license-agreements"
+FILES:${PN} += "${datadir}/luneos-license-agreements"

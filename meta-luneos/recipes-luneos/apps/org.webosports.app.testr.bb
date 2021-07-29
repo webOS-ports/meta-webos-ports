@@ -16,7 +16,7 @@ SRCREV = "8810a58bd5f0a091c623a1c07dd2f52e0133649b"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-do_install_append() {
+do_install:append() {
     install -d ${D}${WEBOS_APPLICATION_TARGET_DIR}
     install -v -m 0644 ${S}/receiver.html ${D}${WEBOS_APPLICATION_TARGET_DIR}/
 }

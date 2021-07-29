@@ -23,8 +23,8 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
 "
 S = "${WORKDIR}/git"
 
-FILES_${PN} += "${webos_sysbus_datadir}"
+FILES:${PN} += "${webos_sysbus_datadir}"
 
 # gtest option
 PACKAGES =+ "${PN}-tests"
-FILES_${PN}-tests = "${libexecdir}/tests/*"
+FILES:${PN}-tests = "${libexecdir}/tests/*"

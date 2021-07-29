@@ -9,7 +9,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "pmloglib zlib glib-2.0 librdx libpbnjson pmloglib-private luna-service2"
 # show_disk_usage.sh script uses mktemp, find, xargs, and du, all of which are
 # provided by busybox.
-RDEPENDS_${PN} = "busybox"
+RDEPENDS:${PN} = "busybox"
 
 PV = "3.1.0-5+git${SRCPV}"
 SRCREV = "df23d7f758b20035082f68f6aa8770297a46f0ac"
@@ -27,9 +27,9 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
 "
 S = "${WORKDIR}/git"
 
-do_install_append() {
+do_install:append() {
     if ${@bb.utils.contains('PACKAGECONFIG', 'whitelist', 'true', 'false', d)} ; then
         install -m 644 ${WORKDIR}/whitelist.txt ${D}${sysconfdir}/PmLogDaemon
     fi
 }
-FILES_${PN} += "${datadir}/PmLogDaemon"
+FILES:${PN} += "${datadir}/PmLogDaemon"

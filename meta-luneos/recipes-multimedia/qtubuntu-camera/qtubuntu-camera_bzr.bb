@@ -7,7 +7,7 @@ inherit qmake5
 
 DEPENDS = "libhybris qtbase libqtubuntu-media-signals exiv2 qtmultimedia pulseaudio"
 
-RDEPENDS_${PN} += "qtmultimedia-plugins libpulse-simple0"
+RDEPENDS:${PN} += "qtmultimedia-plugins libpulse-simple0"
 
 # Depends on libhybris which has this restriction
 COMPATIBLE_MACHINE = "^halium$"
@@ -24,11 +24,11 @@ EXTRA_QMAKEVARS_PRE = "\
     PREFIX=${prefix} \
 "
 
-FILES_${PN} += "\
+FILES:${PN} += "\
     ${OE_QMAKE_PATH_PLUGINS} \
 "
 
-do_configure_prepend() {
+do_configure:prepend() {
     # Empty .qmake.conf, to avoid conflicts with pkgconfig from Yocto
     echo "" > ${S}/.qmake.conf
 }

@@ -47,9 +47,9 @@ DEFAULTTUNE_onyx = "cortexa8thf-neon"
 # https://www.raspberrypi.org/forums/viewtopic.php?t=207888
 # about the license for Cryptography Extension, but hopefully the software
 # built with crypto enabled will correctly check ID_AA64ISAR0_EL1 before actually using it.
-DEFAULTTUNE_raspberrypi3-64 = "armv8a-crc-crypto"
-TUNE_PKGARCH_64_raspberrypi3-64 = "aarch64-rpi"
-PACKAGE_EXTRA_ARCHS_append_raspberrypi3-64 = " aarch64-rpi"
-DEFAULTTUNE_raspberrypi4-64 = "armv8a-crc-crypto"
-TUNE_PKGARCH_64_raspberrypi4-64 = "aarch64-rpi"
-PACKAGE_EXTRA_ARCHS_append_raspberrypi4-64 = " aarch64-rpi"
+DEFAULTTUNE:raspberrypi3-64 = "armv8a-crc-crypto"
+TUNE_PKGARCH_64:raspberrypi3-64 = "aarch64-rpi"
+PACKAGE_EXTRA_ARCHS:append:raspberrypi3-64 = " aarch64-rpi"
+DEFAULTTUNE:raspberrypi4-64 = "armv8a-crc-crypto"
+TUNE_PKGARCH_64:raspberrypi4-64 = "aarch64-rpi"
+PACKAGE_EXTRA_ARCHS:append:raspberrypi4-64 = " aarch64-rpi"

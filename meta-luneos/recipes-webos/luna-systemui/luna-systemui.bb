@@ -22,4 +22,4 @@ do_install() {
     cp -vrf ${S}/* ${D}${webos_applicationsdir}/com.palm.systemui/
 }
 
-FILES_${PN} += "${webos_applicationsdir}/com.palm.systemui"
+FILES:${PN} += "${webos_applicationsdir}/com.palm.systemui"

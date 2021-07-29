@@ -15,7 +15,7 @@ EXTRA_OECMAKE += "-DBUILD_TESTING=off"
 
 inherit cmake
 
-FILES_${PN}-dev += "${datadir}/ECM"
+FILES:${PN}-dev += "${datadir}/ECM"
 
 # ${PN} package is empty
-RDEPENDS_${PN}-dev = ""
+RDEPENDS:${PN}-dev = ""

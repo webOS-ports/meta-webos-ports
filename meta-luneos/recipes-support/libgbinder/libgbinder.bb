@@ -29,4 +29,4 @@ do_install() {
     install -m 0644 ${WORKDIR}/gbinder.conf ${D}${sysconfdir}/gbinder.conf
 }
 
-FILES_${PN} += " ${sysconfdir}"
+FILES:${PN} += " ${sysconfdir}"

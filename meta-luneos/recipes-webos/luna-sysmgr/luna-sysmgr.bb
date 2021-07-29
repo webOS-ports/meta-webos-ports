@@ -12,7 +12,7 @@ DEPENDS += "serviceinstaller"
 #DEPENDS += "localization" #TODO
 #RDEPENDS_${PN} += "jail" #TODO
 
-RDEPENDS_${PN} += "powerd"
+RDEPENDS:${PN} += "powerd"
 
 PV = "3.0.0-3+git${SRCPV}"
 SRCREV = "c18ff49155b201036e3085ae5f75509cbf8853be"
@@ -28,7 +28,7 @@ inherit webos_systemd
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};"
 S = "${WORKDIR}/git"
 
-do_install_append() {
+do_install:append() {
 
     install -d ${D}${webos_cryptofsdir}/apps/var/lock
 
@@ -89,4 +89,4 @@ do_install_append() {
     fi
 }
 
-FILES_${PN} += "${webos_sysmgrdir} ${webos_sysconfdir} ${webos_applicationsdir} ${webos_soundsdir} ${webos_cryptofsdir}"
+FILES:${PN} += "${webos_sysmgrdir} ${webos_sysconfdir} ${webos_applicationsdir} ${webos_soundsdir} ${webos_cryptofsdir}"

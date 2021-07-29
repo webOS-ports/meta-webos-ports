@@ -1,4 +1,4 @@
-FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 SRC_URI += " \
     file://0001-Use-dbus-system-bus-instead-of-session-bus-for-dbus-.patch \
     file://0003-Add-webos-platform-implementation-to-set-correct-win.patch \
@@ -10,14 +10,14 @@ SRC_URI += " \
 SRCREV = "62bd54bcde3c0d79337a0eb7361ff6d7375bc73c"
 
 # Do not recomment maliit-plugins-qt5 as keyboard provider
-RRECOMMENDS_${PN} = ""
+RRECOMMENDS:${PN} = ""
 
 inherit systemd
 
 SYSTEMD_PACKAGES = "${PN}"
-SYSTEMD_SERVICE_${PN} = "maliit-server.service"
+SYSTEMD_SERVICE:${PN} = "maliit-server.service"
 
-do_install_append() {
+do_install:append() {
     install -d ${D}${sysconfdir}/dbus-1/system.d
     install -m 0644 ${WORKDIR}/maliit-server.conf ${D}${sysconfdir}/dbus-1/system.d/
 
@@ -31,10 +31,10 @@ do_install_append() {
 }
 
 # we don't have /etc/xdg/autostart/maliit-server.desktop
-pkg_postinst_ontarget_${PN} () {
+pkg_postinst_ontarget:${PN} () {
 }
 
-pkg_postrm_${PN} () {
+pkg_postrm:${PN} () {
 }
 
 # Enable LuneOS/webOS specific support within maliit
@@ -48,4 +48,4 @@ EXTRA_QMAKEVARS_PRE += "\
 # so we build it here and package it. However the inputcontext within qtbase must be moved
 # into a separate package otherwise two packages will install the same file into the rootfs
 EXTRA_QMAKEVARS_PRE += "CONFIG+=qt5-inputcontext"
-FILES_${PN} += "${libdir}/qt5/plugins/platforminputcontexts"
+FILES:${PN} += "${libdir}/qt5/plugins/platforminputcontexts"

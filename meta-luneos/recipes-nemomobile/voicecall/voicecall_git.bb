@@ -23,11 +23,11 @@ EXTRA_QMAKEVARS_PRE += "CONFIG+=enable-debug"
 B = "${S}"
 
 SYSTEMD_PACKAGES = "${PN}"
-SYSTEMD_SERVICE_${PN} = "voicecall-manager.service"
+SYSTEMD_SERVICE:${PN} = "voicecall-manager.service"
 
-do_install_append() {
+do_install:append() {
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${WORKDIR}/voicecall-manager.service ${D}${systemd_unitdir}/system/
 }
 
-FILES_${PN} += "${OE_QMAKE_PATH_QML}"
+FILES:${PN} += "${OE_QMAKE_PATH_QML}"

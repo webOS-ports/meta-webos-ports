@@ -11,7 +11,7 @@ DEPENDS = "luna-service2 json-c sqlite3 glib-2.0 nyx-lib"
 PV = "2.0.0-7+git${SRCPV}"
 SRCREV = "232c9d7f8a2d5bba9bcf271335e6a4f001dacf21"
 
-RDEPENDS_${PN} = "luna-prefs-data"
+RDEPENDS:${PN} = "luna-prefs-data"
 
 inherit webos_ports_ose_repo
 inherit webos_cmake
@@ -21,7 +21,7 @@ inherit webos_system_bus
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-do_install_append() {
+do_install:append() {
     # CFISH-930: remove "other" perms granted by pmmakefiles (aka palmmake):
     chmod o-rwx ${D}${bindir}/luna-prefs-service
     chmod o-rwx ${D}${bindir}/lunaprop

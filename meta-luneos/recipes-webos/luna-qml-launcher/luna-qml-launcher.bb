@@ -3,7 +3,7 @@ LICENSE = "GPL-3.0"
 LIC_FILES_CHKSUM = "file://COPYING;md5=4ddd17b0c9241d7b24a4960caefe8e40"
 
 DEPENDS = "qtbase qtdeclarative qtwebengine luna-sysmgr-common libwebos-application"
-RDEPENDS_${PN} += "qtwebengine-qmlplugins qtdeclarative-qmlplugins"
+RDEPENDS:${PN} += "qtwebengine-qmlplugins qtdeclarative-qmlplugins"
 
 PV = "0.1.0-6+git${SRCPV}"
 SRCREV = "c59d517641359a10643484e86f393ba68f6dd246"
@@ -20,7 +20,7 @@ WEBOS_SYSTEM_BUS_FILES_LOCATION = "${WORKDIR}/git/files/sysbus"
 
 SERVICE_NAME = "org.webosports.luna-qml-launcher"
 
-do_install_append() {
+do_install:append() {
 
     # ACG configuration files
     install -d ${D}${webos_sysbus_permissionsdir}
@@ -29,4 +29,4 @@ do_install_append() {
     sed "s|@WEBOS_INSTALL_SBINDIR@|$sbindir|" < ${S}/files/sysbus/${SERVICE_NAME}.role.json.in > ${D}${webos_sysbus_rolesdir}/${SERVICE_NAME}.role.json
 }
 
-FILES_${PN} += "${webos_sysbus_containersdir}"
+FILES:${PN} += "${webos_sysbus_containersdir}"

@@ -80,33 +80,33 @@ WEBOS_DEFAULT_EXTRA_RRECOMMENDS = ""
 DISTRO_EXTRA_RDEPENDS += " ${WEBOS_DEFAULT_EXTRA_RDEPENDS}"
 DISTRO_EXTRA_RRECOMMENDS += " ${WEBOS_DEFAULT_EXTRA_RRECOMMENDS}"
 
-DISTRO_EXTRA_RDEPENDS_append_qemuall = " kernel-module-vboxvideo kernel-module-vboxguest kernel-module-uvesafb kernel-module-virtio-gpu kernel-module-vmwgfx"
+DISTRO_EXTRA_RDEPENDS:append:qemuall = " kernel-module-vboxvideo kernel-module-vboxguest kernel-module-uvesafb kernel-module-virtio-gpu kernel-module-vmwgfx"
 
-MACHINE_ESSENTIAL_EXTRA_RDEPENDS_remove_qemuall = "v86d"
+MACHINE_ESSENTIAL_EXTRA_RDEPENDS:remove:qemuall = "v86d"
 
-KERNEL_MODULE_AUTOLOAD_append_qemux86 = " vboxvideo vboxguest vboxsf"
-KERNEL_MODULE_PROBECONF_append_qemux86 = " vboxvideo"
-KERNEL_MODULE_AUTOLOAD_append_qemux86-64 = " vboxvideo vboxguest vboxsf"
-KERNEL_MODULE_PROBECONF_append_qemux86-64 = " vboxvideo"
+KERNEL_MODULE_AUTOLOAD:append:qemux86 = " vboxvideo vboxguest vboxsf"
+KERNEL_MODULE_PROBECONF:append:qemux86 = " vboxvideo"
+KERNEL_MODULE_AUTOLOAD:append:qemux86-64 = " vboxvideo vboxguest vboxsf"
+KERNEL_MODULE_PROBECONF:append:qemux86-64 = " vboxvideo"
 
-module_conf_vboxvideo_qemux86 = "options vboxvideo modeset=1"
-module_conf_vboxvideo_qemux86-64 = "options vboxvideo modeset=1"
+module_conf_vboxvideo:qemux86 = "options vboxvideo modeset=1"
+module_conf_vboxvideo:qemux86-64 = "options vboxvideo modeset=1"
 
 # Prevent uvesafb from loading, it conflicts with vboxvideo
-KERNEL_MODULE_PROBECONF_append_qemux86 = " uvesafb"
-KERNEL_MODULE_PROBECONF_append_qemux86-64 = " uvesafb"
-module_conf_uvesafb_qemux86 = "blacklist uvesafb"
-module_conf_uvesafb_qemux86-64 = "blacklist uvesafb"
+KERNEL_MODULE_PROBECONF:append:qemux86 = " uvesafb"
+KERNEL_MODULE_PROBECONF:append:qemux86-64 = " uvesafb"
+module_conf_uvesafb:qemux86 = "blacklist uvesafb"
+module_conf_uvesafb:qemux86-64 = "blacklist uvesafb"
 # Prevent virtio-gpu from loading, it conflicts with vboxvideo
-KERNEL_MODULE_PROBECONF_append_qemux86 = " virtio-gpu"
-KERNEL_MODULE_PROBECONF_append_qemux86-64 = " virtio-gpu"
-module_conf_virtio-gpu_qemux86 = "blacklist virtio-gpu"
-module_conf_virtio-gpu_qemux86-64 = "blacklist virtio-gpu"
+KERNEL_MODULE_PROBECONF:append:qemux86 = " virtio-gpu"
+KERNEL_MODULE_PROBECONF:append:qemux86-64 = " virtio-gpu"
+module_conf_virtio-gpu:qemux86 = "blacklist virtio-gpu"
+module_conf_virtio-gpu:qemux86-64 = "blacklist virtio-gpu"
 # Prevent vmwgfx from loading, it conflicts with vboxvideo
-KERNEL_MODULE_PROBECONF_append_qemux86 = " vmwgfx"
-KERNEL_MODULE_PROBECONF_append_qemux86-64 = " vmwgfx"
-module_conf_vmwgfx_qemux86 = "blacklist vmwgfx"
-module_conf_vmwgfx_qemux86-64 = "blacklist vmwgfx"
+KERNEL_MODULE_PROBECONF:append:qemux86 = " vmwgfx"
+KERNEL_MODULE_PROBECONF:append:qemux86-64 = " vmwgfx"
+module_conf_vmwgfx:qemux86 = "blacklist vmwgfx"
+module_conf_vmwgfx:qemux86-64 = "blacklist vmwgfx"
 
 USER_CLASSES ?= ""
 
@@ -124,10 +124,10 @@ INHERIT_DISTRO ?= "debian devshell sstate license remove-libtool buildstats buil
 
 SOURCE_MIRROR_URL = "http://sources.webos-ports.org/"
 
-WARN_QA_append = " version-going-backwards"
+WARN_QA:append = " version-going-backwards"
 WEBOS_ERROR_QA_AUTOREV ?= "webos-enh-sub-autorev-error"
-ERROR_QA_append = " webos-enh-sub-warning webos-enh-sub-error ${WEBOS_ERROR_QA_AUTOREV}"
-ERROR_QA_remove = " version-going-backwards"
+ERROR_QA:append = " webos-enh-sub-warning webos-enh-sub-error ${WEBOS_ERROR_QA_AUTOREV}"
+ERROR_QA:remove = " version-going-backwards"
 
 # Move all default WARN_QA from insane.bbclass to ERROR_QA to prevent silently re-introducing these issues
 DEFAULT_WARN_QA = "\
@@ -137,8 +137,8 @@ DEFAULT_WARN_QA = "\
     invalid-packageconfig host-user-contaminated uppercase-pn patch-fuzz \
     mime mime-xdg unlisted-pkg-lics unhandled-features-check \
 "
-ERROR_QA_append = " ${DEFAULT_WARN_QA}"
-WARN_QA_remove = "${DEFAULT_WARN_QA}"
+ERROR_QA:append = " ${DEFAULT_WARN_QA}"
+WARN_QA:remove = "${DEFAULT_WARN_QA}"
 
 # Default WEBOS_TARGET_* values (see webos_cmake.bbclass)
 WEBOS_TARGET_CORE_OS ?= "rockhopper"
@@ -148,7 +148,7 @@ IMAGE_FSTYPES ?= "tar.gz"
 
 # Only create a vmdk image when we're building for x86 emulator,
 # i.e. when MACHINE is qemux86 or qemux86-64
-# If IMAGE_FSTYPES_append_qemux86 = " vmdk" is used, the inherit of
+# If IMAGE_FSTYPES:append:qemux86 = " vmdk" is used, the inherit of
 # image-vmdk.bbclass in image.bbclass doesn't happen, because IMAGE_FSTYPES
 # overrides are expanded too late.
 IMAGE_FSTYPES := "${@ '${IMAGE_FSTYPES} wic.vmdk' if '${MACHINE}'.startswith('qemux86') else '${IMAGE_FSTYPES}' }"
@@ -165,7 +165,7 @@ IMAGE_FSTYPES := "${@ ' ${IMAGE_FSTYPES} '.replace(' tar.bz2 ',' tar.gz ') }"
 
 # Redirect console output to keep it from spewing all over the VirtualBox window
 # (This is added to qemux86 kernel cmdline by openembedded-core/meta/classes/syslinux.bbclass)
-APPEND_append_qemuall = " console=ttyS0"
+APPEND:append:qemuall = " console=ttyS0"
 
 # The CONNECTIVITY_CHECK_URI's are used to test whether we can succesfully
 # fetch from the network (and warn you if not). To disable the test set

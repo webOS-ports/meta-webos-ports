@@ -15,9 +15,9 @@ inherit qmake5
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};"
 S = "${WORKDIR}/git"
 
-FILES_${PN} += " \
+FILES:${PN} += " \
     ${OE_QMAKE_PATH_PLUGINS} \
 "
-FILES_${PN}-dev += " \
+FILES:${PN}-dev += " \
     ${libdir}/cmake \
 "

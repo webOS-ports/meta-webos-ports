@@ -7,7 +7,7 @@ LIC_FILES_CHKSUM = " \
 "
 
 DEPENDS = "qtbase qtsensors sensorfw"
-RDEPENDS_${PN} = "sensorfw bash"
+RDEPENDS:${PN} = "sensorfw bash"
 
 # We're depending on sensorfw so need to be MACHINE_ARCH
 PACKAGE_ARCH = "${MACHINE_ARCH}"
@@ -24,12 +24,12 @@ inherit qmake5
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};"
 S = "${WORKDIR}/git"
 
-do_install_append() {
+do_install:append() {
     if [ "${sysconfdir}" != "${OE_QMAKE_PATH_QT_SETTINGS}" ] ; then
         cp -R --no-dereference --preserve=mode,links -v ${D}${sysconfdir}/xdg ${D}${OE_QMAKE_PATH_QT_SETTINGS}
     fi
 }
 
-FILES_${PN} += " \
+FILES:${PN} += " \
     ${libdir} \
 "

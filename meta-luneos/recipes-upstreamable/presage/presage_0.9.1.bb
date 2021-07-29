@@ -5,7 +5,7 @@ LICENSE = "GPL-2.0+"
 LIC_FILES_CHKSUM = "file://COPYING;md5=94d55d512a9ba36caa9b7df079bae19f"
 
 DEPENDS = "sqlite3 libtinyxml ncurses"
-DEPENDS_append_class-target = " presage-native"
+DEPENDS:append:class-target = " presage-native"
 
 BBCLASSEXTEND = "native"
 
@@ -37,7 +37,7 @@ EXTRA_OECONF = " \
 # presage.cpp:201:5: error: ISO C++17 does not allow dynamic exception specifications
 CXXFLAGS += "-std=gnu++14"
 
-FILES_${PN} += "\
+FILES:${PN} += "\
     ${libdir}/${PYTHON_DIR} \
     ${libdir}/${PYTHON_DIR}/dist-packages \
     ${libdir}/${PYTHON_DIR}/dist-packages/presage_dbus_service.pyc \
@@ -48,6 +48,6 @@ FILES_${PN} += "\
     ${datadir}/dbus-1/services/org.gnome.presage.service \
 "
 
-do_configure_prepend_class-target() {
+do_configure:prepend:class-target() {
    sed -i "s#\$(top_builddir)/src/tools/text2ngram#${STAGING_BINDIR_NATIVE}/text2ngram#g" ${S}/resources/Makefile.am
 }

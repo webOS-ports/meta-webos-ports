@@ -1,5 +1,5 @@
 # Copyright (c) 2013 LG Electronics, Inc.
-FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 AUTHOR = "Herb Kuta <herb.kuta@lge.com>"
 
@@ -23,7 +23,7 @@ dirs777 = " \
     ${webos_mountablestoragedir} \
 "
 
-do_install_prepend() {
+do_install:prepend() {
     local d
     for d in ${dirs700}; do
         install -v -m 0700 -d ${D}$d
@@ -33,7 +33,7 @@ do_install_prepend() {
     done
 }
 
-do_install_append() {
+do_install:append() {
     # additional entries for fstab
     bbnote "Adding entries to ${sysconfdir}/fstab"
 

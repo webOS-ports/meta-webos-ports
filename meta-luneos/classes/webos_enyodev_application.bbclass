@@ -13,7 +13,7 @@ do_compile() {
     ${ENYO_DEV_PATH}/node_binaries/${BUILD_ARCH}/node ${ENYO_DEV_PATH}/bin/enyo.js pack --production --clean -d ${S}/deploy/${WEBOS_APPLICATION_NAME}
 }
 
-do_install_append() {
+do_install:append() {
     install -d ${D}${webos_applicationsdir}
     cp -rf ${S}/deploy/${WEBOS_APPLICATION_NAME} ${D}${webos_applicationsdir}
 }

@@ -9,7 +9,7 @@ SRC_URI = " \
     file://pulseaudio.conf \
 "
 
-SRC_URI_append_pinephone = " \
+SRC_URI:append_pinephone = " \
     file://ucm2/PinePhone.conf \
     file://ucm2/HiFi \
     file://ucm2/VoiceCall \
@@ -23,11 +23,11 @@ do_install() {
     install -m 0644 ${WORKDIR}/pulseaudio.conf  ${D}${sysconfdir}/default/pulseaudio.conf
 }
 
-do_install_append_pinephone() {
+do_install:append_pinephone() {
     install -d ${D}${datadir}/alsa/ucm2/PinePhone
     install -m 0644 ${WORKDIR}/ucm2/PinePhone.conf ${D}${datadir}/alsa/ucm2/PinePhone/PinePhone.conf
     install -m 0644 ${WORKDIR}/ucm2/HiFi ${D}${datadir}/alsa/ucm2/PinePhone/HiFi
     install -m 0644 ${WORKDIR}/ucm2/VoiceCall ${D}${datadir}/alsa/ucm2/PinePhone/VoiceCall
 }
 
-FILES_${PN} = "${sysconfdir}/pulse ${sysconfdir}/default ${datadir}/alsa/ucm2"
+FILES:${PN} = "${sysconfdir}/pulse ${sysconfdir}/default ${datadir}/alsa/ucm2"

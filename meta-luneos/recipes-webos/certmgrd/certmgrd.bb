@@ -18,10 +18,10 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 SYSTEMD_PACKAGES = "${PN}"
-SYSTEMD_SERVICE_${PN} = "org.webosports.service.certmgr.service"
+SYSTEMD_SERVICE:${PN} = "org.webosports.service.certmgr.service"
 
 
-do_install_append() {
+do_install:append() {
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${S}/files/systemd/org.webosports.service.certmgr.service ${D}${systemd_unitdir}/system/
 }

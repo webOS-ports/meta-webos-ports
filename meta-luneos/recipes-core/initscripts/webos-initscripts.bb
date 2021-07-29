@@ -7,8 +7,8 @@ LICENSE = "Apache-2.0 & MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 VIRTUAL-RUNTIME_rdx-utils ?= "rdxd"
-RDEPENDS_${PN} = "${VIRTUAL-RUNTIME_init_manager} ${VIRTUAL-RUNTIME_rdx-utils}"
-RPROVIDES_${PN} = "initscripts initscripts-functions"
+RDEPENDS:${PN} = "${VIRTUAL-RUNTIME_init_manager} ${VIRTUAL-RUNTIME_rdx-utils}"
+RPROVIDES:${PN} = "initscripts initscripts-functions"
 PROVIDES = "initscripts"
 
 # TODO: systemd dependency is for fake initctl.
@@ -23,7 +23,7 @@ inherit systemd
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 SYSTEMD_PACKAGES = "${PN}"
-SYSTEMD_SERVICE_${PN} = "default-webos.target \
+SYSTEMD_SERVICE:${PN} = "default-webos.target \
     webos-cbd.target \
     webos-ibd.target \
     webos-rbd.target \

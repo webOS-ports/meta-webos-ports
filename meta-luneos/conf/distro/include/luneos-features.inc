@@ -43,4 +43,4 @@ DISTRO_FEATURES += "adb"
 DISTRO_FEATURES += "wayland"
 
 # Use vc4graphics for all raspberrypi MACHINEs
-MACHINE_FEATURES_append_rpi = " vc4graphics"
+MACHINE_FEATURES:append:rpi = " vc4graphics"

@@ -31,6 +31,6 @@ inherit webos_configure_manifest
 inherit webos_cmake_qt5
 inherit webos_systemd
 
-RDEPENDS_${PN} = "luna-next-conf xkeyboard-config"
+RDEPENDS:${PN} = "luna-next-conf xkeyboard-config"
 
-FILES_${PN} += "${OE_QMAKE_PATH_QML}/LunaNext"
+FILES:${PN} += "${OE_QMAKE_PATH_QML}/LunaNext"

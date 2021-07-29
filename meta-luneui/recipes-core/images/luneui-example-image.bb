@@ -27,13 +27,13 @@ IMAGE_INSTALL += " \
     luneos-components \
 "
 
-IMAGE_INSTALL_append_qemuall = " \
+IMAGE_INSTALL:append:qemuall = " \
     ${MESA_PKGS} \
     v86d \
     qt5-plugin-generic-vboxtouch \
     glmark2 \
 "
 
-IMAGE_INSTALL_append_qemux86-64 = " \
+IMAGE_INSTALL:append:qemux86-64 = " \
     anbox \
 "

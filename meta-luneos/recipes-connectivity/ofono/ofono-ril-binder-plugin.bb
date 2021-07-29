@@ -27,4 +27,4 @@ do_install() {
     make install-dev DESTDIR=${D}
 }
 
-FILES_${PN} += "/usr/lib/ofono/plugins/rilbinderplugin.so"
+FILES:${PN} += "/usr/lib/ofono/plugins/rilbinderplugin.so"

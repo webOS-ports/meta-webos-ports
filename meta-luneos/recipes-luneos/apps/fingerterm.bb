@@ -6,7 +6,7 @@ PV = "1.3.6+git${SRCPV}"
 SRCREV = "64a3554969747e348bfa9eb85842490cef9b719e"
 
 DEPENDS = "qtbase qtdeclarative"
-RDEPENDS_${PN} = "ttf-liberation-mono qtxmlpatterns"
+RDEPENDS:${PN} = "ttf-liberation-mono qtxmlpatterns"
 
 SRC_URI = " \
     git://git.merproject.org/mer-core/fingerterm.git;protocol=git;branch=master \
@@ -25,11 +25,11 @@ inherit qmake5
 
 APP_PATH = "${webos_applicationsdir}/${PN}"
 
-do_configure_append() {
+do_configure:append() {
     sed -i -e s:/usr/bin/${PN}:${APP_PATH}/${PN}:g ${S}/*.cpp
 }
 
-do_install_append() {
+do_install:append() {
     install -d ${D}${APP_PATH}
 
     install -m 0644 ${WORKDIR}/appinfo.json ${D}${APP_PATH}
@@ -40,4 +40,4 @@ do_install_append() {
     sed -i -e s:__VERSION__:${PV}:g ${D}${APP_PATH}/appinfo.json
 }
 
-FILES_${PN} += "${APP_PATH}"
+FILES:${PN} += "${APP_PATH}"

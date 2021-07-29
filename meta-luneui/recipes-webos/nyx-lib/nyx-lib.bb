@@ -10,7 +10,7 @@ SECTION = "webos/libs"
 # here because nyx-modules is MACHINE_ARCH (e.g. qemux86), while nyx-lib is
 # TUNE_PKGARCH  (e.g. i586). Instead, it is pulled into the image by adding it to
 # the RDPENDS_${PN} of packagegroup-webos-extended. Putting
-#   RDEPENDS_${PN} = "nyx-modules"
+#   RDEPENDS:${PN} = "nyx-modules"
 # here would cause bitbake to re-execute the do_package task for each MACHINE,
 # even if these MACHINE-s were all i586 and should therefore share the same nyx-lib
 # .ipk and sstate files. (The reason do_package is re-executed when a component
@@ -26,14 +26,14 @@ inherit webos_cmake
 inherit systemd
 
 SYSTEMD_PACKAGES = "${PN}"
-SYSTEMD_SERVICE_${PN} = "nyx.target"
+SYSTEMD_SERVICE:${PN} = "nyx.target"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 SRCREV = "88731b85f124ea950860941a027682374f174265"
 
-do_install_append() {
+do_install:append() {
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${S}/files/systemd/${SYSTEMD_SERVICE_${PN}} ${D}${systemd_unitdir}/system/
 }

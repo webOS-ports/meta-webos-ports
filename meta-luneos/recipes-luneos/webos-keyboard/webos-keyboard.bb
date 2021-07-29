@@ -14,8 +14,8 @@ inherit webos_ports_repo
 
 DEPENDS = "maliit-framework-qt5 hunspell presage luna-service2 presage-native"
 
-RDEPENDS_${PN} += "qtsvg-plugins qtmultimedia-qmlplugins"
-RRECOMMENDS_${PN} += "hunspell-dictionaries"
+RDEPENDS:${PN} += "qtsvg-plugins qtmultimedia-qmlplugins"
+RRECOMMENDS:${PN} += "hunspell-dictionaries"
 
 SRCREV = "053037137e41c4437f36ec954fe38417024dc36a"
 PV = "0.99.2+git${SRCPV}"
@@ -39,15 +39,15 @@ EXTRA_QMAKEVARS_PRE = "\
     CONFIG+=enable-hunspell \
 "
 
-INSANE_SKIP_${PN} += "libdir staticdev"
-INSANE_SKIP_${PN}-dbg += "libdir"
+INSANE_SKIP:${PN} += "libdir staticdev"
+INSANE_SKIP:${PN}-dbg += "libdir"
 
 SERVICE_NAME = "org.maliit"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files/sysbus"
 
-do_install_append() {
+do_install:append() {
     # Install the ACG configuration
     install -d ${D}${webos_sysbus_permissionsdir}
     install -d ${D}${webos_sysbus_rolesdir}
@@ -55,7 +55,7 @@ do_install_append() {
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.role.json ${D}${webos_sysbus_rolesdir}/${SERVICE_NAME}.role.json
 }
 
-FILES_${PN} += "\
+FILES:${PN} += "\
     ${libdir}/maliit \
     ${datadir} \
 "

@@ -10,7 +10,7 @@ LIC_FILES_CHKSUM = " \
     "
 
 DEPENDS += "libxml2 properties-cpp process-cpp boost dbus"
-RDEPENDS_${PN} += "boost-system dbus-lib boost-program-options boost-filesystem"
+RDEPENDS:${PN} += "boost-system dbus-lib boost-program-options boost-filesystem"
 
 PV = "5.0.0+git${SRCPV}"
 
@@ -23,7 +23,7 @@ EXTRA_OECMAKE += "-DDBUS_CPP_VERSION_MAJOR=5 -DDBUS_CPP_VERSION_MINOR=0 -DDBUS_C
 
 inherit cmake pkgconfig
 
-do_configure_prepend() {
+do_configure:prepend() {
     echo " " > ${S}/tests/CMakeLists.txt
 }
 

@@ -10,7 +10,7 @@ DEPENDS = "libpbnjson luna-service2 sqlite3 curl uriparser pmloglib jemalloc lun
 
 #For LuneOS luna-appmanage now provides the same as applicationinstallerutility by the looks of it. So for now we'll depend on that and change into applicationinstallerutility as soon as we migrate away from luna-appmanager
 #RDEPENDS_${PN} = "applicationinstallerutility"
-RDEPENDS_${PN} = "luna-appmanager"
+RDEPENDS:${PN} = "luna-appmanager"
 
 PV = "4.0.0-1+git${SRCPV}"
 SRCREV = "47c7c3cc9e425fed4da71e62e7f6e6c08a197f7f"

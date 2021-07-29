@@ -21,7 +21,7 @@ WEBOS_REPO_NAME = "org.webosports.app.settings"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-FILES_${PN} += "${webos_applicationsdir}/org.webosports.app.settings-common \
+FILES:${PN} += "${webos_applicationsdir}/org.webosports.app.settings-common \
                 ${webos_applicationsdir}/org.webosports.app.settings.bluetooth \
                 ${webos_applicationsdir}/org.webosports.app.settings.networksettings \
                 ${webos_applicationsdir}/org.webosports.app.settings.vpn \
@@ -43,6 +43,6 @@ FILES_${PN} += "${webos_applicationsdir}/org.webosports.app.settings-common \
         ${datadir}/ls2 \
         "
 
-RDEPENDS_${PN} = " \
+RDEPENDS:${PN} = " \
     qtdeclarative-qmlplugins \
 "

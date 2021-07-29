@@ -13,7 +13,7 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 # Most of the MACHINEs we support are hardware
 WEBOS_TARGET_MACHINE_IMPL ?= "hardware"
 # For qemu we build for the emulator but for all other targets for a real device
-WEBOS_TARGET_MACHINE_IMPL_qemuall = "emulator"
+WEBOS_TARGET_MACHINE_IMPL:qemuall = "emulator"
 
 # Allow the use of WEBOS_TARGET_MACHINE_IMPL overrides. It's checked after
 # what's set by the machine architecture .inc file, which is checked after

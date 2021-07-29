@@ -6,7 +6,7 @@ PV = "0.1+git${SRCPV}"
 SRCREV = "e47d824545db23b59c70c653942f741f6af9b198"
 
 DEPENDS = "qtbase qtdeclarative qtquickcontrols2"
-RDEPENDS_${PN} = "qmltermwidget "
+RDEPENDS:${PN} = "qmltermwidget "
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
@@ -23,4 +23,4 @@ EXTRA_QMAKEVARS_PRE = "\
     DEPLOYMENT_PATH=${APP_PATH} \
 "
 
-FILES_${PN} += "${APP_PATH}"
+FILES:${PN} += "${APP_PATH}"

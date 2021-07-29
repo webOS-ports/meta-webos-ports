@@ -21,4 +21,4 @@ do_install() {
     cp -vrf ${S}/* ${D}${webos_applicationsdir}/com.palm.launcher
 }
 
-FILES_${PN} += "${webos_applicationsdir}/com.palm.launcher"
+FILES:${PN} += "${webos_applicationsdir}/com.palm.launcher"

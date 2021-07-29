@@ -35,4 +35,4 @@ do_install() {
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.api.json ${D}${webos_sysbus_apipermissionsdir}/${BPN}.api.json
 }
 
-FILES_${PN} += "${PALM_DIR}/services"
+FILES:${PN} += "${PALM_DIR}/services"

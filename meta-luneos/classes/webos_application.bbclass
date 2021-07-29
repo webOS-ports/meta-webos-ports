@@ -4,7 +4,7 @@ WEBOS_APPLICATION_DB8_KIND_LOCATION ?= "${S}/configuration/db/kinds"
 WEBOS_APPLICATION_DB8_PERMISSION_LOCATION ?= "${S}/configuration/db/permissions"
 WEBOS_APPLICATION_ACTIVITY_LOCATION ?= "${S}/configuration/activities"
 
-do_install_append() {
+do_install:append() {
     if [ ! -e ${S}/appinfo.json ] ; then
         bberror "Can't find appinfo.json file for application ${WEBOS_APPLICATION_NAME}"
     fi
@@ -28,6 +28,6 @@ do_install_append() {
     fi
 }
 
-FILES_${PN} += " \
+FILES:${PN} += " \
     ${WEBOS_APPLICATION_TARGET_DIR} \
     ${webos_sysconfdir}"

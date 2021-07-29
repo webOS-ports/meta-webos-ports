@@ -20,7 +20,7 @@ inherit webos_filesystem_paths
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-RRECOMMENDS_${PN} += " \
+RRECOMMENDS:${PN} += " \
     pidgin-sipe \
     purple-skypeweb \
     funyahoo-plusplus \

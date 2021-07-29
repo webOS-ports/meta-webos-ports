@@ -13,7 +13,7 @@ SRCREV = "5592505e73380efb6e728140572cc048683ba768"
 SRC_URI = "git://github.com/webOS-ports/memnotify-module.git;branch=master;protocol=git"
 S = "${WORKDIR}/git"
 
-do_install_append() {
+do_install:append() {
     install -d ${D}${sysconfdir}/modules-load.d
     echo "memnotify" > ${D}${sysconfdir}/modules-load.d/memnotify.conf
 }

@@ -1,5 +1,5 @@
 
-FILESEXTRAPATHS_prepend := "${THISDIR}/${BPN}:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 
 SRC_URI += " \
     file://wired-setup \
@@ -7,7 +7,7 @@ SRC_URI += " \
     file://main.conf \
 "
 
-do_install_append() {
+do_install:append() {
     # We have only wired-setup, remove test for wired.confg
     if test -e ${WORKDIR}/wired-setup; then
         install -d ${D}${datadir}/connman
@@ -19,4 +19,4 @@ do_install_append() {
     install -m 0644 ${WORKDIR}/main.conf ${D}${sysconfdir}/connman/
 }
 
-FILES_${PN} += "${sysconfdir}/connman"
+FILES:${PN} += "${sysconfdir}/connman"

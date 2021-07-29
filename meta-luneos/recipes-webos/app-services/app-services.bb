@@ -65,6 +65,6 @@ do_install() {
     mkdir -p ${D}${sysconfdir}/palm/contact_linker_plugins
 }
 
-FILES_${PN} += "${webos_servicesdir} ${webos_sysconfdir} ${sysconfdir}"
-FILES_${PN} += "${webos_accttemplatesdir}"
-FILES_${PN} += "${webos_sysbus_apipermissionsdir} ${webos_sysbus_manifestsdir} ${webos_sysbus_permissionsdir} ${webos_sysbus_rolesdir} ${webos_sysbus_servicedir}"
+FILES:${PN} += "${webos_servicesdir} ${webos_sysconfdir} ${sysconfdir}"
+FILES:${PN} += "${webos_accttemplatesdir}"
+FILES:${PN} += "${webos_sysbus_apipermissionsdir} ${webos_sysbus_manifestsdir} ${webos_sysbus_permissionsdir} ${webos_sysbus_rolesdir} ${webos_sysbus_servicedir}"

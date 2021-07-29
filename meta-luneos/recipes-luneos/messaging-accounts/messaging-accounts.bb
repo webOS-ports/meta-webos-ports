@@ -23,5 +23,5 @@ do_install() {
     cp -rv ${S}/application/* ${D}${webos_applicationsdir}/org.webosports.app.imvalidator/
 }
 
-FILES_${PN} += "${webos_applicationsdir} ${webos_accttemplatesdir}"
+FILES:${PN} += "${webos_applicationsdir} ${webos_accttemplatesdir}"
 

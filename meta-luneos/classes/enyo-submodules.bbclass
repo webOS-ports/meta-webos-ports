@@ -12,7 +12,7 @@ SRCREV_moonraker = "700338ab3ed06f76bd5047ee663861f3aa7acbdd"
 SRCREV_onyx = "bc69f798b6dbc40a9f7baaa797ac8f36d63df0bc"
 SRCREV_spotlight = "1d424af2f59ead9aab9af1d508b3895ebcaaa200"
 
-do_configure_prepend() {
+do_configure:prepend() {
     SUBMODULES="enyo lib/onyx lib/layout lib/spotlight lib/moonraker"
     # check that all our "submodules" exist in upstream repo
     for SUBMODULE in $SUBMODULES; do

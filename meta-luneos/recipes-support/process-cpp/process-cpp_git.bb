@@ -9,7 +9,7 @@ LIC_FILES_CHKSUM = " \
     "
 
 DEPENDS = "boost properties-cpp"
-RDEPENDS_${PN} += "boost-system boost-iostreams"
+RDEPENDS:${PN} += "boost-system boost-iostreams"
 
 PV = "3.0.1+git${SRCPV}"
 
@@ -22,6 +22,6 @@ inherit cmake pkgconfig
 
 EXTRA_OECMAKE += " -DPROCESS_CPP_ENABLE_DOC_GENERATION=OFF"
 
-do_configure_prepend() {
+do_configure:prepend() {
   echo " " > ${S}/tests/CMakeLists.txt
 }

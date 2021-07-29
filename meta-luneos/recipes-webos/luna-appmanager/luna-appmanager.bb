@@ -12,7 +12,7 @@ DEPENDS = " \
     qtbase qtdeclarative serviceinstaller \
 "
 
-RDEPENDS_${PN} += " \
+RDEPENDS:${PN} += " \
     bash \
 "
 
