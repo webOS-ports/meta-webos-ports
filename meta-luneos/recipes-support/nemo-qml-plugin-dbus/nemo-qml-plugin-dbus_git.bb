@@ -17,5 +17,5 @@ inherit qmake5
 
 PACKAGES += "${PN}-test"
 
-FILES_${PN}-test += "${base_prefix}/opt/tests"
-FILES_${PN} += "${OE_QMAKE_PATH_QML}/Nemo/DBus"
+FILES:${PN}-test += "${base_prefix}/opt/tests"
+FILES:${PN} += "${OE_QMAKE_PATH_QML}/Nemo/DBus"

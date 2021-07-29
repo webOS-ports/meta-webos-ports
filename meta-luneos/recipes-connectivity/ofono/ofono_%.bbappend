@@ -1,4 +1,4 @@
-FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 SRCREV = "0db662bd6ba4070838bf143df5ee24c949a8c0df"
 PV = "1.31+git${SRCPV}"
@@ -10,7 +10,7 @@ LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://COPYING;md5=eb723b61539feef013de476e68b5c50a"
 
 DEPENDS += "libglibutil dbus-glib libgrilio libmce-glib"
-RDEPENDS_${PN} += "mobile-broadband-provider-info ofono-conf"
+RDEPENDS:${PN} += "mobile-broadband-provider-info ofono-conf"
 
 SRC_URI = " \
   git://git.kernel.org/pub/scm/network/ofono/ofono.git \
@@ -38,29 +38,29 @@ S_halium = "${WORKDIR}/git/ofono"
 # Can't build out of tree right now so we have to build in tree
 B = "${S}"
 
-EXTRA_OECONF_append_halium = " --disable-sailfish-pushforwarder --enable-sailfish-rilmodem --disable-datafiles"
+EXTRA_OECONF:append_halium = " --disable-sailfish-pushforwarder --enable-sailfish-rilmodem --disable-datafiles"
 
 # this version does't support it:
 # ERROR: ofono-1.19+gitAUTOINC+b5ed6d16db-r0 do_configure: QA Issue: ofono: configure was passed unrecognised options: --enable-external-ell [unknown-configure-option]
 # enabled in oe-core with 1.29 version
-EXTRA_OECONF_remove_halium = "--enable-external-ell"
+EXTRA_OECONF:remove_halium = "--enable-external-ell"
 
 SERVICE_FILE = "ofono.service"
 SERVICE_FILE_halium = "ofono-halium.service"
 
-do_install_append() {
+do_install:append() {
     # Override default system service configuration
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${WORKDIR}/${SERVICE_FILE} ${D}${systemd_unitdir}/system/ofono.service
 }
 
-do_install_append_halium() {
+do_install:append_halium() {
     # Since we use --disable-datafiles we need to install the dbus condif file manually now
     install -d ${D}${sysconfdir}/dbus-1/system.d
     install -m 0644 ${B}/src/${PN}.conf ${D}${sysconfdir}/dbus-1/system.d/
 }
 
 # meta-systemd sets this to disable but we as distro want it to be enabled by default
-SYSTEMD_AUTO_ENABLE_forcevariable = "enable"
+SYSTEMD_AUTO_ENABLE:forcevariable = "enable"
 
-RDEPENDS_${PN}-tests += "python3"
+RDEPENDS:${PN}-tests += "python3"

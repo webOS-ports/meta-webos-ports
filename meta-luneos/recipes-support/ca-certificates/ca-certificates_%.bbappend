@@ -1,13 +1,13 @@
 # Copyright (c) 2013 LG Electronics, Inc.
 
-FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 CERT_SOURCE_DIR = "${datadir}/ca-certificates"
 CERT_TARGET_DIR = "${sysconfdir}/ssl/certs"
 
 inherit webos_certificates
 
-do_install_append() {
+do_install:append() {
     cd ${D}${sysconfdir}/ssl/certs
     for a in *.pem
     do

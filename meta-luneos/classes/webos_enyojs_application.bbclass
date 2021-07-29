@@ -10,7 +10,7 @@ do_compile() {
     node ${S}/enyo/tools/deploy.js -v -o ${S}/deploy/${WEBOS_APPLICATION_NAME}
 }
 
-do_install_append() {
+do_install:append() {
     install -d ${D}${webos_applicationsdir}
     cp -rf ${S}/deploy/${WEBOS_APPLICATION_NAME} ${D}${webos_applicationsdir}
 }

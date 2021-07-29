@@ -22,12 +22,12 @@ inherit webos_tweaks
 inherit cmake_qt5
 inherit webos_cmake
 
-INSANE_SKIP_${PN} = "libdir"
-INSANE_SKIP_${PN}-dbg = "libdir"
+INSANE_SKIP:${PN} = "libdir"
+INSANE_SKIP:${PN}-dbg = "libdir"
 
-FILES_${PN} += "${webos_applicationsdir}/org.webosports.app.camera"
+FILES:${PN} += "${webos_applicationsdir}/org.webosports.app.camera"
 
-RDEPENDS_${PN} = " \
+RDEPENDS:${PN} = " \
     qtdeclarative-qmlplugins \
 "
 

@@ -9,7 +9,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "nyx-lib glib-2.0 luna-service2 openssl udev"
 DEPENDS += "mtdev"
 
-RDEPENDS_${PN} = "lsb-release gzip nyx-conf"
+RDEPENDS:${PN} = "lsb-release gzip nyx-conf"
 
 EXTRA_OECMAKE += "-DDISTRO_VERSION:STRING='${DISTRO_VERSION}' -DDISTRO_NAME:STRING='${DISTRO_NAME}${WEBOS_DISTRO_NAME_SUFFIX}' \
                   -DWEBOS_DISTRO_API_VERSION:STRING='${WEBOS_DISTRO_API_VERSION}' \
@@ -45,14 +45,14 @@ inherit webos_nyx_module_provider
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-SRC_URI_append = " \
+SRC_URI:append = " \
     file://${MACHINE}.cmake \
 "
 
 PV = "7.1.0-1+git${SRCPV}"
 SRCREV = "555f6f2820faaecf498b865642fc87db1a1b6a29"
 
-do_configure_prepend() {
+do_configure:prepend() {
     # Install additional machine specific nyx configuration before CMake is started
     if [ -f ${WORKDIR}/${MACHINE}.cmake ]
     then
@@ -60,12 +60,12 @@ do_configure_prepend() {
     fi
 }
 
-do_install_append_tenderloin() {
+do_install:append_tenderloin() {
     install -d ${D}${systemd_system_unitdir}/nyx.target.d/
     install -m 0644 ${S}/files/systemd/nyx.target.d/wait-touchscreen.conf ${D}${systemd_system_unitdir}/nyx.target.d/
 }
 
 PACKAGES += "${PN}-tests"
-FILES_${PN} += "${libdir}/nyx/modules/*"
-FILES_${PN} += "${systemd_system_unitdir}/*"
-FILES_${PN}-tests += "${bindir}/nyx-test-ledcontroller"
+FILES:${PN} += "${libdir}/nyx/modules/*"
+FILES:${PN} += "${systemd_system_unitdir}/*"
+FILES:${PN}-tests += "${bindir}/nyx-test-ledcontroller"

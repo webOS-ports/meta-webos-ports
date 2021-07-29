@@ -19,7 +19,7 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 S = "${WORKDIR}/git/oe-service"
 
-pkg_postinst_ontarget_${PN}() {
+pkg_postinst_ontarget:${PN}() {
     #!/bin/sh -e
 
     APPS=/media/cryptofs/apps

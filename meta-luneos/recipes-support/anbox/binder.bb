@@ -13,18 +13,18 @@ SRC_URI = "git://github.com/anbox/anbox-modules \
 
 S = "${WORKDIR}/git/binder"
 
-do_install_append() {
+do_install:append() {
     install -d ${D}${sysconfdir}/udev/rules.d
     grep binder ${S}/../99-anbox.rules > ${D}${sysconfdir}/udev/rules.d/99-binder.rules
 }
 
 KERNEL_MODULE_AUTOLOAD += "binder_linux"
 
-FILES_kernel-module-binder-linux += "${sysconfdir}/udev"
+FILES:kernel-module-binder-linux += "${sysconfdir}/udev"
 
 # Needs quite new kernel (probably >= 3.18) and from LuneOS supported machines
 # only qemux86, qemux86-64 and rpi (later hammerhead-mainline) MACHINEs have it
 COMPATIBLE_MACHINE ?= "(^$)"
-COMPATIBLE_MACHINE_qemux86 = "(.*)"
-COMPATIBLE_MACHINE_qemux86-64 = "(.*)"
-COMPATIBLE_MACHINE_rpi = "(.*)"
+COMPATIBLE_MACHINE:qemux86 = "(.*)"
+COMPATIBLE_MACHINE:qemux86-64 = "(.*)"
+COMPATIBLE_MACHINE:rpi = "(.*)"

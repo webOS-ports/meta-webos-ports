@@ -27,6 +27,6 @@ do_install() {
     done
 }
 
-FILES_${PN} += "${webos_frameworksdir}"
+FILES:${PN} += "${webos_frameworksdir}"
 
-RDEPENDS_${PN} = "bash"
+RDEPENDS:${PN} = "bash"

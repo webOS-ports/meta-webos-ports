@@ -9,4 +9,4 @@ inherit webos_system_bus
 
 S = "${WORKDIR}/git/imap"
 
-FILES_${PN} += "${webos_accttemplatesdir}"
+FILES:${PN} += "${webos_accttemplatesdir}"

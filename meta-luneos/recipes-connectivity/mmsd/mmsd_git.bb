@@ -12,15 +12,15 @@ SRC_URI  = " \
 S = "${WORKDIR}/git"
 
 SYSTEMD_PACKAGES = "${PN}"
-SYSTEMD_SERVICE_${PN} = "${PN}.service"
+SYSTEMD_SERVICE:${PN} = "${PN}.service"
 
 inherit autotools-brokensep systemd
 
-do_configure_prepend () {
+do_configure:prepend () {
   ${S}/bootstrap
 }
 
-do_install_append() {
+do_install:append() {
     install -d ${D}${sysconfdir}/dbus-1/system.d
     install -m 0644 ${WORKDIR}/${PN}.conf ${D}${sysconfdir}/dbus-1/system.d/
 

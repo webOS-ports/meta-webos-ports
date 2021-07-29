@@ -22,7 +22,7 @@ S = "${WORKDIR}/git"
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files/sysbus"
 
-do_install_append() {
+do_install:append() {
 
     # ACG configuration files
     install -d ${D}${webos_sysbus_servicedir}

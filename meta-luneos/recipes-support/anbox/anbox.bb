@@ -15,11 +15,11 @@ PV = "3.0+git${SRCPV}"
 
 DEPENDS += "dbus-cpp libsdl2 libsdl2-image lxc glm protobuf protobuf-native gtest elfutils sdbus-c++-tools-native"
 
-RDEPENDS_${PN} += "anbox-data"
+RDEPENDS:${PN} += "anbox-data"
 
 # these modules are directly included in android-flavored kernels
 # Note: Anbox requires kernel >= 3.18 !
-RRECOMMENDS_${PN} += " \
+RRECOMMENDS:${PN} += " \
     kernel-module-ashmem-linux \
     kernel-module-binder-linux \
     kernel-module-squashfs \
@@ -46,8 +46,8 @@ S = "${WORKDIR}/git"
 # Unlink ashmem, binder drop qemux86 here, because anbox-data is available only
 # for following 4 archs (x86-64, armv7a, armv7ve, aarch64)
 COMPATIBLE_MACHINE ?= "(^$)"
-COMPATIBLE_MACHINE_qemux86-64 = "(.*)"
-COMPATIBLE_MACHINE_rpi = "(.*)"
+COMPATIBLE_MACHINE:qemux86-64 = "(.*)"
+COMPATIBLE_MACHINE:rpi = "(.*)"
 
 PACKAGECONFIG ??= "wayland"
 PACKAGECONFIG[x11] = "-DENABLE_X11=ON,-DENABLE_X11=OFF,virtual/libx11"
@@ -64,13 +64,13 @@ inherit pkgconfig
 inherit systemd
 
 SYSTEMD_PACKAGES = "${PN}"
-SYSTEMD_SERVICE_${PN} = "anbox-container-manager.service anbox-session-manager.service"
+SYSTEMD_SERVICE:${PN} = "anbox-container-manager.service anbox-session-manager.service"
 
-do_configure_prepend() {
+do_configure:prepend() {
     sed -i 's@^#!/usr/bin/env python2$@#!/usr/bin/env python3@g' ${S}/scripts/gen-emugl-entries.py
 }
 
-do_install_append() {
+do_install:append() {
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${WORKDIR}/anbox-container-manager.service ${D}${systemd_unitdir}/system/
     install -m 0644 ${WORKDIR}/anbox-session-manager.service ${D}${systemd_unitdir}/system/
@@ -80,5 +80,5 @@ do_install_append() {
     install -Dm 644 ${WORKDIR}/anbox-bridge.netdev ${D}${systemd_unitdir}/network/80-anbox-bridge.netdev
 }
 
-FILES_${PN} += "${systemd_unitdir}"
-FILES_${PN}-dev += "${libdir}/backward/BackwardConfig.cmake"
+FILES:${PN} += "${systemd_unitdir}"
+FILES:${PN}-dev += "${libdir}/backward/BackwardConfig.cmake"

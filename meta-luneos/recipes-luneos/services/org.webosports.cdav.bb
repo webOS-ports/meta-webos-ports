@@ -22,7 +22,7 @@ CLEANBROKEN = "1"
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files/sysbus"
 
-do_install_append() {
+do_install:append() {
     # the service itself
     install -d ${D}${webos_servicesdir}/org.webosports.service.cdav
     cp -rv ${S}/service/* ${D}${webos_servicesdir}/org.webosports.service.cdav
@@ -65,4 +65,4 @@ do_install_append() {
     cp -v ${S}/service/javascript/urlschemes.js ${D}${webos_applicationsdir}/org.webosports.app.cdav/CrossAppTarget/
 }
 
-FILES_${PN} += "${webos_applicationsdir} ${webos_servicesdir} ${webos_accttemplatesdir}"
+FILES:${PN} += "${webos_applicationsdir} ${webos_servicesdir} ${webos_accttemplatesdir}"

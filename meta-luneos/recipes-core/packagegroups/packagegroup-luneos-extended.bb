@@ -10,7 +10,7 @@ NOT_COMPATIBLE_WITH_CURRENT_NODEJS = " \
 "
 
 
-RDEPENDS_${PN} = " \
+RDEPENDS:${PN} = " \
   ${DISTRO_EXTRA_RDEPENDS} \
   distro-feed-configs \
   \
@@ -146,20 +146,20 @@ MEMNOTIFY_RDEPENDS = " \
 # NOTE: For kernels build outside of OE we can't add memnotify support and therefor have to ship the module with the kernel package directly.
 # NOTE: For kernels build with OE, the kernel tree would need to have a patch applied in order to make si_swapinfo exportable as per http://lkml.iu.edu/hypermail//linux/kernel/1201.2/00719.html
 
-RDEPENDS_${PN}_append_tuna = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
-RDEPENDS_${PN}_append_grouper = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
-RDEPENDS_${PN}_append_mako = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS} bluebinder"
-RDEPENDS_${PN}_append_hammerhead = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
-RDEPENDS_${PN}_append_tenderloin = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
-RDEPENDS_${PN}_append_mido = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS} bluebinder"
-RDEPENDS_${PN}_append_athene = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
-RDEPENDS_${PN}_append_onyx = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
-RDEPENDS_${PN}_append_oxygen = " ${LIBHYBRIS_RDEPENDS}"
-RDEPENDS_${PN}_append_tissot = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS} bluebinder"
-RDEPENDS_${PN}_append_rosy = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS} bluebinder"
-RDEPENDS_${PN}_append_s2 = " ${LIBHYBRIS_RDEPENDS}"
-RDEPENDS_${PN}_append_sagit = " ${LIBHYBRIS_RDEPENDS}"
-RDEPENDS_${PN}_append_yggdrasil = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
+RDEPENDS:${PN}:append_tuna = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
+RDEPENDS:${PN}:append_grouper = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
+RDEPENDS:${PN}:append_mako = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS} bluebinder"
+RDEPENDS:${PN}:append_hammerhead = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
+RDEPENDS:${PN}:append_tenderloin = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
+RDEPENDS:${PN}:append_mido = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS} bluebinder"
+RDEPENDS:${PN}:append_athene = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
+RDEPENDS:${PN}:append_onyx = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
+RDEPENDS:${PN}:append_oxygen = " ${LIBHYBRIS_RDEPENDS}"
+RDEPENDS:${PN}:append_tissot = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS} bluebinder"
+RDEPENDS:${PN}:append_rosy = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS} bluebinder"
+RDEPENDS:${PN}:append_s2 = " ${LIBHYBRIS_RDEPENDS}"
+RDEPENDS:${PN}:append_sagit = " ${LIBHYBRIS_RDEPENDS}"
+RDEPENDS:${PN}:append_yggdrasil = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
 
 QEMU_RDEPENDS = " \
     alsa-utils-systemd \
@@ -171,9 +171,9 @@ QEMU_RDEPENDS = " \
     rng-tools \
 "
 
-RDEPENDS_${PN}_append_qemux86 = " ${QEMU_RDEPENDS}"
-RDEPENDS_${PN}_append_qemux86-64 = " ${QEMU_RDEPENDS} anbox"
+RDEPENDS:${PN}:append:qemux86 = " ${QEMU_RDEPENDS}"
+RDEPENDS:${PN}:append:qemux86-64 = " ${QEMU_RDEPENDS} anbox"
 
-RDEPENDS_${PN}_append_arm = " \
+RDEPENDS:${PN}:append:arm = " \
     crash-handler \
 "

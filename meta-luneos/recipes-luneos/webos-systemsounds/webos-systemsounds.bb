@@ -14,4 +14,4 @@ do_install() {
     cp -rv ${S}/share/systemsounds/* ${D}${datadir}/systemsounds
 }
 
-FILES_${PN} += "${datadir}/systemsounds"
+FILES:${PN} += "${datadir}/systemsounds"

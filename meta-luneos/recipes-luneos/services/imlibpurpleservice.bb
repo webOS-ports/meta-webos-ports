@@ -19,7 +19,7 @@ inherit webos_system_bus
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-RRECOMMENDS_${PN} += " \
+RRECOMMENDS:${PN} += " \
     pidgin-sipe \
     purple-skypeweb \
     funyahoo-plusplus \
@@ -44,7 +44,7 @@ RRECOMMENDS_${PN} += " \
     libpurple-protocol-zephyr \
 "
 
-do_install_append() {
+do_install:append() {
     cp -R --no-dereference --preserve=mode,links -v ${S}/files/etc ${D}
 }
 

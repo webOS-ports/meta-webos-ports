@@ -16,7 +16,7 @@ S = "${WORKDIR}/git"
 inherit systemd
 
 SYSTEMD_PACKAGES = "${PN}"
-SYSTEMD_SERVICE_${PN} = ""
+SYSTEMD_SERVICE:${PN} = ""
 
 do_install() {
     install -d ${D}${systemd_unitdir}/system
@@ -29,5 +29,5 @@ do_install() {
     install -m 0755 ${S}/populate-volatile.sh ${D}${sbindir}
 }
 
-FILES_${PN} += "${systemd_unitdir}/system"
-FILES_${PN} += "${sbindir}"
+FILES:${PN} += "${systemd_unitdir}/system"
+FILES:${PN} += "${sbindir}"

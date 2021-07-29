@@ -6,4 +6,4 @@
 POSTINSTALL_INITPOSITION = "80"
 
 # Doesn't work for us for some reason
-PACKAGECONFIG_remove = "libsolv"
+PACKAGECONFIG:remove = "libsolv"

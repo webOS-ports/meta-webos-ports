@@ -14,7 +14,7 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 # Let us fetch the machine-specific CMake configuration used by nyx-modules, to
 # define it only once
-FILESEXTRAPATHS_prepend := "${THISDIR}/nyx-modules:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/nyx-modules:"
 
 # Depends on libhybris which has this restriction
 COMPATIBLE_MACHINE = "^halium$"
@@ -29,11 +29,11 @@ inherit pkgconfig
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-SRC_URI_append = " \
+SRC_URI:append = " \
     file://${MACHINE}.cmake \
 "
 
-do_configure_prepend() {
+do_configure:prepend() {
     # Install additional machine specific nyx configuration before CMake is started
     if [ -f ${WORKDIR}/${MACHINE}.cmake ]
     then
@@ -41,4 +41,4 @@ do_configure_prepend() {
     fi
 }
 
-FILES_${PN} += "${libdir}/nyx/modules/*"
+FILES:${PN} += "${libdir}/nyx/modules/*"

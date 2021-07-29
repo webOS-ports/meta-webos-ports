@@ -17,4 +17,4 @@ S = "${WORKDIR}/git"
 
 EXTRA_OECONF = "--disable-gtk-doc --disable-gtk-tests"
 
-FILES_${PN} += "${systemd_unitdir}"
+FILES:${PN} += "${systemd_unitdir}"

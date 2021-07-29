@@ -4,7 +4,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-FILESEXTRAPATHS_prepend := "${THISDIR}/luneos-emulator-appliance:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/luneos-emulator-appliance:"
 SRC_URI = "file://luneos-emulator.ovf"
 
 IMAGE_BASENAME = "luneos"
@@ -30,8 +30,8 @@ do_deploy() {
 
 # only qemux86, qemux86-64 provide luneos-emulator.ovf file
 COMPATIBLE_MACHINE ?= "(^$)"
-COMPATIBLE_MACHINE_qemux86 = "(.*)"
-COMPATIBLE_MACHINE_qemux86-64 = "(.*)"
+COMPATIBLE_MACHINE:qemux86 = "(.*)"
+COMPATIBLE_MACHINE:qemux86-64 = "(.*)"
 
 INHIBIT_DEFAULT_DEPS = "1"
 

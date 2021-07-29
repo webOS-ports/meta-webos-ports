@@ -26,7 +26,7 @@ WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files/sysbus"
 do_compile() {
 }
 
-do_install_append() {
+do_install:append() {
     install -d ${D}${webos_applicationsdir}/${APP_NAME}
     cp -rv ${S}/enyo-app/* ${D}${webos_applicationsdir}/${APP_NAME}
 
@@ -53,7 +53,7 @@ do_install_append() {
 }
 
 PACKAGES = "${PN}"
-FILES_${PN} = " \
+FILES:${PN} = " \
     ${webos_applicationsdir}/org.webosports.app.tweaks \
     ${webos_servicesdir}/org.webosports.service.tweaks.prefs \
     ${webos_sysconfdir} \

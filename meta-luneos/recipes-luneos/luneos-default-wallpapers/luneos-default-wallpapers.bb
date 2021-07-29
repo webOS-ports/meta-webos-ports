@@ -17,4 +17,4 @@ do_install() {
     rm ${D}${webos_mountablestoragedir}/wallpapers/README.md
 }
 
-FILES_${PN} = "${webos_mountablestoragedir}/wallpapers"
+FILES:${PN} = "${webos_mountablestoragedir}/wallpapers"

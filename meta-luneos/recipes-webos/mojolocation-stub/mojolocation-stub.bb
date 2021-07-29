@@ -29,4 +29,4 @@ do_install() {
     cp -vf ${S}/*.js* ${D}${webos_servicesdir}/$SERVICE_DIR/
 }
 
-FILES_${PN} += "${webos_servicesdir}"
+FILES:${PN} += "${webos_servicesdir}"

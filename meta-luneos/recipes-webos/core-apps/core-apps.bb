@@ -51,6 +51,6 @@ do_install() {
     rm -rf ${D}${webos_applicationsdir}/com.palm.app.contacts
 }
 
-FILES_${PN} += "${webos_applicationsdir} ${webos_sysconfdir}"
+FILES:${PN} += "${webos_applicationsdir} ${webos_sysconfdir}"
 
-RDEPENDS_${PN} = "bash"
+RDEPENDS:${PN} = "bash"

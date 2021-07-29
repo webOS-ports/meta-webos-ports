@@ -19,17 +19,17 @@ inherit webos_machine_impl_dep
 inherit systemd
 
 SYSTEMD_PACKAGES = "${PN}"
-SYSTEMD_SERVICE_${PN} = "configurator-activity.service configurator-db8.service"
+SYSTEMD_SERVICE:${PN} = "configurator-activity.service configurator-db8.service"
 
-do_install_append() {
+do_install:append() {
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${S}/files/systemd/configurator-activity.service ${D}${systemd_unitdir}/system/
     install -m 0644 ${S}/files/systemd/configurator-db8.service ${D}${systemd_unitdir}/system/
 }
 
-FILES_${PN} += "${systemd_unitdir}/system"
+FILES:${PN} += "${systemd_unitdir}/system"
 
-FILES_${PN} += "${webos_sysbus_datadir}"
+FILES:${PN} += "${webos_sysbus_datadir}"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

@@ -23,4 +23,4 @@ PV = "3.3.0-2+git${SRCPV}"
 SRCREV = "5907dc9dee7b561d4287ca93234e13bd9ae2dfa9"
 
 # ${PN} package is empty
-RDEPENDS_${PN}-dev = ""
+RDEPENDS:${PN}-dev = ""

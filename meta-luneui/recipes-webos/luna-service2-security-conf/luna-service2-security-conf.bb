@@ -15,10 +15,10 @@ S = "${WORKDIR}/git"
 
 SRCREV = "9a0e28982494dd5bdf2594504c844b953f68f50a"
 
-FILES_${PN} += "${webos_sysbus_datadir}"
+FILES:${PN} += "${webos_sysbus_datadir}"
 
 # The security configuration data isn't needed to build other components => don't stage it.
-sysroot_stage_dirs_append() {
+sysroot_stage_dirs:append() {
     # ${to} is the 2nd parameter passed to sysroot_stage_dir(),
     # e.g. ${SYSROOT_DESTDIR} passed from sysroot_stage_all()
     rm -vrf ${to}${webos_sysbus_datadir}

@@ -14,7 +14,7 @@ VIRTUAL-RUNTIME_rdx-utils = "rdxd"
 
 # Don't install big /boot/vmlinux* file by default in qemux86 images (included in oprofile's RRECOMMENDS)
 # Use --no-vmlinux option to opcontrol or install it manually if you need to see samples from kernel
-BAD_RECOMMENDATIONS_append_qemux86 = " kernel-vmlinux"
+BAD_RECOMMENDATIONS:append:qemux86 = " kernel-vmlinux"
 
 # switch from upstart to systemd
 VIRTUAL-RUNTIME_initscripts = "webos-initscripts"
