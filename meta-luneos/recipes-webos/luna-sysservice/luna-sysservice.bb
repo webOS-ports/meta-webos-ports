@@ -34,7 +34,7 @@ do_install:append() {
     rm -rf ${D}${webos_sysbus_pubrolesdir}/com.webos.* 
 
     install -d ${D}${systemd_unitdir}/system	
-    install -m 0644 ${S}/files/systemd/${SYSTEMD_SERVICE_${PN}} ${D}${systemd_unitdir}/system/
+    install -m 0644 ${S}/files/systemd/${SYSTEMD_SERVICE:${PN}} ${D}${systemd_unitdir}/system/
 }
 
 FILES:${PN} += "${datadir}/localization/${BPN}"

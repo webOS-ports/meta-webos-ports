@@ -16,6 +16,6 @@ WEBOS_LTTNG_ENABLED ??= "0"
 WEBOS_LTTNG_ENABLED:class-native = "0"
 WEBOS_LTTNG_ENABLED:class-nativesdk = "0"
 
-# Use _append so that WEBOS_LTTNG_ENABLED is evaluated during finalization so that the overrides effectual.
+# Use :append so that WEBOS_LTTNG_ENABLED is evaluated during finalization so that the overrides effectual.
 DEPENDS:append = "${@ ' lttng-ust' if '${WEBOS_LTTNG_ENABLED}' == '1' else ''}"
 RDEPENDS:${PN}:append = "${@ ' lttng-tools lttng-modules babeltrace' if '${WEBOS_LTTNG_ENABLED}' == '1' else ''}"
