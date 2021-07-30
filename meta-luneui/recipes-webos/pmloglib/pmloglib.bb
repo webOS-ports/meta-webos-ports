@@ -29,7 +29,7 @@ S = "${WORKDIR}/git"
 
 do_install:append() {
     install -d ${D}${systemd_unitdir}/system	
-    install -m 0644 ${S}/files/systemd/${SYSTEMD_SERVICE_${PN}} ${D}${systemd_unitdir}/system/
+    install -m 0644 ${S}/files/systemd/${SYSTEMD_SERVICE:${PN}} ${D}${systemd_unitdir}/system/
 }
 
 PV = "3.3.0-2+git${SRCPV}"

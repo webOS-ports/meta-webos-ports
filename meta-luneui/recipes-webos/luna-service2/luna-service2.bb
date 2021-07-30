@@ -40,7 +40,7 @@ do_install:append() {
     # XXX Temporarily, create links from the old locations until all users of
     # luna-service2 convert to using pkg-config
     install -d ${D}${systemd_unitdir}/system
-    install -m 0644 ${S}/files/systemd/${SYSTEMD_SERVICE_${PN}} ${D}${systemd_unitdir}/system/
+    install -m 0644 ${S}/files/systemd/${SYSTEMD_SERVICE:${PN}} ${D}${systemd_unitdir}/system/
     ln -svnf luna-service2/lunaservice.h ${D}${includedir}/lunaservice.h
     ln -svnf luna-service2/lunaservice-errors.h ${D}${includedir}/lunaservice-errors.h
     ln -svnf lib${BPN}.so ${D}${libdir}/liblunaservice.so
