@@ -18,3 +18,4 @@ SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 SRC_URI += "file://0001-ipc-fix-build-with-gcc-11.patch"
+SRC_URI += "file://0001-ipc-fix-build-with-glibc-2.34.patch"
