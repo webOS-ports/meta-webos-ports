@@ -34,6 +34,7 @@ SRC_URI = "git://github.com/anbox/anbox;name=main \
     file://0004-external-pass-CMAKE_TOOLCHAIN_FILE.patch \
     file://0005-CMakeLists.txt-use-sdbus-c-from-native-build.patch \
     file://0006-Fix-build-with-gcc-11.patch \
+    file://0001-Fix-build-with-glibc-2.34.patch \
     file://anbox-container-manager.service \
     file://anbox-session-manager.service \
     file://anbox-bridge.network \
