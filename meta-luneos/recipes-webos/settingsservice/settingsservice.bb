@@ -14,6 +14,7 @@ inherit webos_cmake
 inherit webos_system_bus
 inherit webos_ports_ose_repo
 inherit systemd
+inherit pkgconfig
 
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE:${PN} = "settings-service-recovery.service settings-service.service"

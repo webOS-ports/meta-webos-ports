@@ -11,6 +11,7 @@ SRCREV = "2efa108bfeabee0bfcde19f438bddaf6af5e54a8"
 
 inherit webos_ports_repo
 inherit qmake5
+inherit pkgconfig
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};"
 S = "${WORKDIR}/git"

@@ -9,6 +9,7 @@ SRCREV = "80713b607a13b7cab4cbaa4ab305a0c22cfa7de6"
 
 inherit webos_ports_repo
 inherit webos_cmake
+inherit pkgconfig
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
