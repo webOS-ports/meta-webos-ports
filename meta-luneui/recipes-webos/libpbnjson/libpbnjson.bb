@@ -10,6 +10,7 @@ DEPENDS = "yajl glib-2.0 gperf-native flex-native lemon-native gmp uriparser boo
 
 inherit webos_public_repo
 inherit webos_cmake
+inherit pkgconfig
 
 PV = "2.15.0-1+git${SRCPV}"
 SRCREV = "6cd4815a81830bbf6b22647ae8bb4fc818148ee7"
