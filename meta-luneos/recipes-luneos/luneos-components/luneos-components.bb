@@ -15,6 +15,7 @@ S = "${WORKDIR}/git"
 inherit qmake5
 inherit webos_ports_repo
 inherit webos_filesystem_paths
+inherit pkgconfig
 
 PACKAGES += "${PN}-examples"
 FILES:${PN} += " \

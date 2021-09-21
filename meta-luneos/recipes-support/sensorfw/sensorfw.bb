@@ -30,6 +30,7 @@ SRC_URI:append_tenderloin = " \
 S = "${WORKDIR}/git"
 
 inherit qmake5
+inherit pkgconfig
 inherit systemd
 inherit webos_system_bus
 inherit webos_filesystem_paths
