@@ -23,6 +23,7 @@ DEPENDS = "glib-2.0 pmloglib"
 
 inherit webos_ports_ose_repo
 inherit webos_cmake
+inherit pkgconfig
 inherit systemd
 
 SYSTEMD_PACKAGES = "${PN}"
