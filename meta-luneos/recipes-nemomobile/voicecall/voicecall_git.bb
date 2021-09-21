@@ -9,6 +9,7 @@ SRCREV = "3dfedcfa06a71804e8175f6cf0935467ae0376fd"
 
 inherit qmake5
 inherit systemd
+inherit pkgconfig
 
 SRC_URI = "git://git.merproject.org/mer-core/voicecall.git \
            file://voicecall-manager.service"
