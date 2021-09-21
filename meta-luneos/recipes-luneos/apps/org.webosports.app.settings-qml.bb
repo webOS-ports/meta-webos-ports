@@ -11,6 +11,7 @@ inherit webos_filesystem_paths
 inherit cmake_qt5
 inherit webos_cmake
 inherit webos_app
+inherit pkgconfig
 
 PV = "0.4.0-1+git${SRCPV}"
 SRCREV = "70fc0e35ed096e62b3ab0b5acdcc58d7ee43df80"
