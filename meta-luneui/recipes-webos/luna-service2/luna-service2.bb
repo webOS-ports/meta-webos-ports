@@ -24,6 +24,7 @@ inherit webos_system_bus
 inherit webos_core_os_dep
 inherit webos_lttng
 inherit webos_test_provider
+inherit pkgconfig
 inherit systemd
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
