@@ -11,6 +11,7 @@ PV = "3.0.1-1+git${SRCPV}"
 SRCREV = "4ec58ca600de9e4e9b9f6a3214a0339fb6866fe8"
 
 inherit webos_system_bus
+inherit pkgconfig
 
 do_configure() {
     export GYP_DEFINES="sysroot=${STAGING_DIR_HOST}"

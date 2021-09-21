@@ -11,6 +11,7 @@ DEPENDS = "nyx-lib glib-2.0"
 inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit webos_systemd
+inherit pkgconfig
 
 PV = "1.5.0-1+git${SRCPV}"
 

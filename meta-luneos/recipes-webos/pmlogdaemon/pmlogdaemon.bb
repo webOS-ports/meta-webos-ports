@@ -18,6 +18,7 @@ inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_pmlog_config
+inherit pkgconfig
 
 PACKAGECONFIG ??= ""
 PACKAGECONFIG[whitelist] = "-DENABLE_WHITELIST:BOOL=TRUE, -DENABLE_WHITELIST:BOOL=FALSE"
