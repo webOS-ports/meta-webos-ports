@@ -15,6 +15,7 @@ EXTRA_OECMAKE += "-DWEBOS_DISTRO_PRERELEASE:STRING='${WEBOS_DISTRO_PRERELEASE}'"
 inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit webos_pmlog_config
+inherit pkgconfig
 inherit systemd
 
 SYSTEMD_PACKAGES = "${PN}"
