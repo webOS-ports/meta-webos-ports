@@ -197,9 +197,6 @@ INHERIT += "buildhistory"
 BB_SIGNATURE_HANDLER ?= "OEEquivHash"
 BB_HASHSERVE ??= "auto"
 
-# enable reproducible builds which is very useful for OEEquivHash
-INHERIT += "reproducible_build"
-
 # to build stuff with commercial licenses
 # LICENSE_FLAGS_WHITELIST is now used instead of COMMERCIAL_LICENSE, see:
 # http://git.openembedded.org/?p=openembedded-core.git&a=commit;h=a66fdbda548fab367cada035c49a32d9bf8ea528
