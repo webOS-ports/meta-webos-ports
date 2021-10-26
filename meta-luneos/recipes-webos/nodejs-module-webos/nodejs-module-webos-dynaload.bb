@@ -16,12 +16,12 @@ inherit pkgconfig
 
 do_configure() {
     export GYP_DEFINES="sysroot=${STAGING_DIR_HOST}"
-    ${WEBOS_NODE_GYP} configure
+    node-gyp-build
 }
 
 do_compile() {
     export GYP_DEFINES="sysroot=${STAGING_DIR_HOST}"
-    ${WEBOS_NODE_GYP} build
+    node-gyp-build --arch ${TARGET_ARCH} build
 }
 
 WEBOS_NODE = "webos.node"

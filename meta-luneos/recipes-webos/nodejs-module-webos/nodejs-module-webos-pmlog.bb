@@ -18,11 +18,11 @@ do_configure() {
     cd src
     sh -c "xxd -i pmloglib.js > pmloglib.js.h"
     cd ..
-    ${WEBOS_NODE_GYP} configure
+    node-gyp-build --arch ${TARGET_ARCH} --nodedir "${WORKDIR}/node-v${NODE_VERSION}" configure
 }
 
 do_compile() {
-    ${WEBOS_NODE_GYP} build
+    node-gyp-build --arch ${TARGET_ARCH} build
 }
 
 WEBOS_NODE = "pmloglib.node"
