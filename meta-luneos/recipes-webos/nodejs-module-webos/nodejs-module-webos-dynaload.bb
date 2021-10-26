@@ -8,7 +8,7 @@ AUTHOR = "Anatolii Sakhnik <anatolii.sakhnik@lge.com>"
 DEPENDS += "boost"
 
 PV = "3.0.2-1+git${SRCPV}"
-SRCREV = "b1ec2c559d5a53280b604230d9481113c09ba069"
+SRCREV = "ab87a7f2c59e96ec91360f3d4a1bc82f42594d6a"
 
 inherit pkgconfig
 
