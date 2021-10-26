@@ -8,7 +8,7 @@ AUTHOR = "Anatolii Sakhnik <anatolii.sakhnik@lge.com>"
 DEPENDS += "glib-2.0 luna-service2"
 
 PV = "3.0.1-1+git${SRCPV}"
-SRCREV = "4ec58ca600de9e4e9b9f6a3214a0339fb6866fe8"
+SRCREV = "db4c888e627f4c4afe406600563daee88dc24578"
 
 inherit webos_system_bus
 inherit pkgconfig
