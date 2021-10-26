@@ -19,13 +19,13 @@ export PYTHON = "python3"
 # a different Node.js version using NODE_MODULE_VERSION 64.
 # This version of Node.js requires NODE_MODULE_VERSION 72.
 # Please try re-compiling or re-installing
-NODE_VERSION = "14.17.1"
+NODE_VERSION = "16.11.1"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}.tar.xz;name=node \
 "
 
-SRC_URI[node.sha256sum] = "ddf1d2d56ddf35ecd98c5ea5ddcd690b245899f289559b4330c921255f5a247f"
+SRC_URI[node.sha256sum] = "67587f4de25e30a9cc0b51a6033eca3bc82d7b4e0d79bb84a265e88f76ab6278"
 
 S = "${WORKDIR}/git"
 

@@ -17,14 +17,14 @@ do_configure() {
     export GYP_DEFINES="sysroot=${STAGING_DIR_HOST}"
     # used by binding.gyp
     export webos_servicesdir="${webos_servicesdir}" webos_prefix="${webos_prefix}"
-    node-gyp --arch ${TARGET_ARCH} --nodedir "${WORKDIR}/node-v${NODE_VERSION}" configure
+    node-gyp-build --arch ${TARGET_ARCH} --nodedir "${WORKDIR}/node-v${NODE_VERSION}" configure
 }
 
 do_compile() {
     export GYP_DEFINES="sysroot=${STAGING_DIR_HOST}"
     # used by binding.gyp
     export webos_servicesdir="${webos_servicesdir}" webos_prefix="${webos_prefix}"
-    node-gyp --arch ${TARGET_ARCH} build
+    node-gyp-build --arch ${TARGET_ARCH} build
 }
 
 WEBOS_NODE = "webos-sysbus.node"
