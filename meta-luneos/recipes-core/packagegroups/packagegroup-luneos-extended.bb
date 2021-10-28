@@ -146,20 +146,20 @@ MEMNOTIFY_RDEPENDS = " \
 # NOTE: For kernels build outside of OE we can't add memnotify support and therefor have to ship the module with the kernel package directly.
 # NOTE: For kernels build with OE, the kernel tree would need to have a patch applied in order to make si_swapinfo exportable as per http://lkml.iu.edu/hypermail//linux/kernel/1201.2/00719.html
 
-RDEPENDS:${PN}:append_tuna = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
-RDEPENDS:${PN}:append_grouper = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
-RDEPENDS:${PN}:append_mako = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS} bluebinder"
-RDEPENDS:${PN}:append_hammerhead = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
-RDEPENDS:${PN}:append_tenderloin = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
-RDEPENDS:${PN}:append_mido = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS} bluebinder"
-RDEPENDS:${PN}:append_athene = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
-RDEPENDS:${PN}:append_onyx = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
-RDEPENDS:${PN}:append_oxygen = " ${LIBHYBRIS_RDEPENDS}"
-RDEPENDS:${PN}:append_tissot = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS} bluebinder"
-RDEPENDS:${PN}:append_rosy = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS} bluebinder"
-RDEPENDS:${PN}:append_s2 = " ${LIBHYBRIS_RDEPENDS}"
-RDEPENDS:${PN}:append_sagit = " ${LIBHYBRIS_RDEPENDS}"
-RDEPENDS:${PN}:append_yggdrasil = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
+RDEPENDS:${PN}:append:tuna = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
+RDEPENDS:${PN}:append:grouper = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
+RDEPENDS:${PN}:append:mako = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS} bluebinder"
+RDEPENDS:${PN}:append:hammerhead = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
+RDEPENDS:${PN}:append:tenderloin = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
+RDEPENDS:${PN}:append:mido = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS} bluebinder"
+RDEPENDS:${PN}:append:athene = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
+RDEPENDS:${PN}:append:onyx = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
+RDEPENDS:${PN}:append:oxygen = " ${LIBHYBRIS_RDEPENDS}"
+RDEPENDS:${PN}:append:tissot = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS} bluebinder"
+RDEPENDS:${PN}:append:rosy = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS} bluebinder"
+RDEPENDS:${PN}:append:s2 = " ${LIBHYBRIS_RDEPENDS}"
+RDEPENDS:${PN}:append:sagit = " ${LIBHYBRIS_RDEPENDS}"
+RDEPENDS:${PN}:append:yggdrasil = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
 
 QEMU_RDEPENDS = " \
     alsa-utils-systemd \

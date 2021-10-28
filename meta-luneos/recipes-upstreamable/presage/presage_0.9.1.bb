@@ -13,7 +13,7 @@ BBCLASSEXTEND = "native"
 # have the same major version (used in python3-dir), but it's better than using
 # python3 from host (e.g. it installs to /usr/lib/python3.7/ on my host with ubuntu-19.04
 # and /usr/lib/python3.6 on jenkins with ubuntu-18.04 as shown here:
-# http://jenkins.nas-admin.org/job/LuneOS/view/unstable/job/luneos-unstable_qemux86-64/78/consoleFull
+# http://jenkins.nas-admin.org/job/LuneOS/view/unstable/job/luneos-unstable:qemux86-64/78/consoleFull
 inherit autotools gettext pkgconfig python3-dir python3native
 
 SRC_URI = " \

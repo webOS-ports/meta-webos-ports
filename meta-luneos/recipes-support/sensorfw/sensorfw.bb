@@ -11,7 +11,7 @@ SRCREV = "4f97982dd95f5ab229312d9e721d2f131bfa8886"
 DEPENDS = "qtbase \
     luna-sysmgr-common luna-service2 json-c glib-2.0 luna-sysmgr-ipc-messages"
     
-DEPENDS:append_halium = " libhybris virtual/android-headers libgbinder libglibutil "
+DEPENDS:append:halium = " libhybris virtual/android-headers libgbinder libglibutil "
 
 SRC_URI = " \
     git://git.merproject.org/mer-core/sensorfw.git;branch=master \
@@ -19,11 +19,11 @@ SRC_URI = " \
 "
 
 # Note: maybe this should go in a bbappend in meta-pine64-luneos...
-SRC_URI:append_pinephone = " \
+SRC_URI:append:pinephone = " \
     file://sensord-pinephone.conf \
 "
 # Note: maybe this should go in a bbappend in meta-smartphone...
-SRC_URI:append_tenderloin = " \
+SRC_URI:append:tenderloin = " \
     file://sensord-tenderloin.conf \
 "
 
@@ -38,19 +38,19 @@ inherit webos_filesystem_paths
 SERVICE_NAME = "com.nokia.SensorService"
 
 EXTRA_QMAKEVARS_PRE += "MAKE_DOCS=no "
-EXTRA_QMAKEVARS_PRE:append_halium = "CONFIG+=autohybris "
+EXTRA_QMAKEVARS_PRE:append:halium = "CONFIG+=autohybris "
 
 # Halium-9.0 devices use binder to communicate with sensors
-EXTRA_QMAKEVARS_PRE:append_hammerhead = "CONFIG+=binder "
-EXTRA_QMAKEVARS_PRE:append_mako = "CONFIG+=binder "
-EXTRA_QMAKEVARS_PRE:append_mido = "CONFIG+=binder "
-EXTRA_QMAKEVARS_PRE:append_rosy = "CONFIG+=binder "
-EXTRA_QMAKEVARS_PRE:append_sagit = "CONFIG+=binder "
-EXTRA_QMAKEVARS_PRE:append_tissot = "CONFIG+=binder "
-EXTRA_QMAKEVARS_PRE:append_yggdrasil = "CONFIG+=binder "
+EXTRA_QMAKEVARS_PRE:append:hammerhead = "CONFIG+=binder "
+EXTRA_QMAKEVARS_PRE:append:mako = "CONFIG+=binder "
+EXTRA_QMAKEVARS_PRE:append:mido = "CONFIG+=binder "
+EXTRA_QMAKEVARS_PRE:append:rosy = "CONFIG+=binder "
+EXTRA_QMAKEVARS_PRE:append:sagit = "CONFIG+=binder "
+EXTRA_QMAKEVARS_PRE:append:tissot = "CONFIG+=binder "
+EXTRA_QMAKEVARS_PRE:append:yggdrasil = "CONFIG+=binder "
 
 # Tenderloin here is an exception: sensorfw doesn't need to use Halium for the sensor
-EXTRA_QMAKEVARS_PRE:remove_tenderloin = "CONFIG+=autohybris "
+EXTRA_QMAKEVARS_PRE:remove:tenderloin = "CONFIG+=autohybris "
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/LuneOS/sysbus"
@@ -80,7 +80,7 @@ do_install:append() {
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.role.json ${D}${webos_sysbus_rolesdir}/${SERVICE_NAME}.role.json
 }
 
-do_install:append_halium() {
+do_install:append:halium() {
     install -d ${D}${sysconfdir}/sensorfw/
     install -m 0644 ${S}/config/sensord-hybris.conf ${D}${sysconfdir}/sensorfw/
 }
