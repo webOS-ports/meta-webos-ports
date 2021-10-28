@@ -3,8 +3,8 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 SRCREV = "0db662bd6ba4070838bf143df5ee24c949a8c0df"
 PV = "1.31+git${SRCPV}"
 
-SRCREV_halium = "2ee5e4c8270d0d2b211bf549c7a4e16cd86ca0b4"
-PV_halium = "1.23-19+git${SRCPV}"
+SRCREV:halium = "2ee5e4c8270d0d2b211bf549c7a4e16cd86ca0b4"
+PV:halium = "1.23-19+git${SRCPV}"
 
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://COPYING;md5=eb723b61539feef013de476e68b5c50a"
@@ -23,7 +23,7 @@ SRC_URI = " \
   file://ofono.service \
 "  
 
-SRC_URI_halium  = " \
+SRC_URI:halium  = " \
   git://git.merproject.org/mer-core/ofono.git \
   file://0001-Enable-the-various-modem-plugins-we-support-again.patch;striplevel=2 \
   file://0002-Add-support-for-the-Ericsson-F5521gw-modem.patch;striplevel=2 \
@@ -32,20 +32,20 @@ SRC_URI_halium  = " \
 "
 
 S = "${WORKDIR}/git"
-S_halium = "${WORKDIR}/git/ofono"
+S:halium = "${WORKDIR}/git/ofono"
 
 # Can't build out of tree right now so we have to build in tree
 B = "${S}"
 
-EXTRA_OECONF:append_halium = " --disable-sailfish-pushforwarder --enable-sailfish-rilmodem --disable-datafiles"
+EXTRA_OECONF:append:halium = " --disable-sailfish-pushforwarder --enable-sailfish-rilmodem --disable-datafiles"
 
 # this version does't support it:
 # ERROR: ofono-1.19+gitAUTOINC+b5ed6d16db-r0 do_configure: QA Issue: ofono: configure was passed unrecognised options: --enable-external-ell [unknown-configure-option]
 # enabled in oe-core with 1.29 version
-EXTRA_OECONF:remove_halium = "--enable-external-ell"
+EXTRA_OECONF:remove:halium = "--enable-external-ell"
 
 SERVICE_FILE = "ofono.service"
-SERVICE_FILE_halium = "ofono-halium.service"
+SERVICE_FILE:halium = "ofono-halium.service"
 
 do_install:append() {
     # Override default system service configuration
@@ -53,7 +53,7 @@ do_install:append() {
     install -m 0644 ${WORKDIR}/${SERVICE_FILE} ${D}${systemd_unitdir}/system/ofono.service
 }
 
-do_install:append_halium() {
+do_install:append:halium() {
     # Since we use --disable-datafiles we need to install the dbus condif file manually now
     install -d ${D}${sysconfdir}/dbus-1/system.d
     install -m 0644 ${B}/src/${PN}.conf ${D}${sysconfdir}/dbus-1/system.d/

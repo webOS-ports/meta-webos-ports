@@ -4,7 +4,7 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=6c4db32a2fa8717faffa1d4f10136f47"
 
 #Disabled until we have node-sqlite3 working again. 
-#RDEPENDS_${PN} = "node-sqlite3"
+#RDEPENDS:${PN} = "node-sqlite3"
 
 inherit webos_ports_repo
 inherit allarch

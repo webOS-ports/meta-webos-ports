@@ -16,26 +16,26 @@
 # and opkg -force-reinstall opkg-config-base distro-feed-configs
 # on target to get new /etc/opkg/arch.conf
 
-# DEFAULTTUNE_tuna = "cortexa8t-neon"
-# DEFAULTTUNE_grouper = "cortexa8t-neon"
+# DEFAULTTUNE:tuna = "cortexa8t-neon"
+# DEFAULTTUNE:grouper = "cortexa8t-neon"
 
 # or if you don't care about sharing binary feed between armv7a machines, 
 # add this to local.conf after that require line
-# DEFAULTTUNE_tuna = "cortexa9t-neon"
+# DEFAULTTUNE:tuna = "cortexa9t-neon"
 
 # A500 is using cortexa9, because Tegra2 does not support neon, so we cannot share
 # feed with it unless we disable neon also for tuna:
 # DEFAULTTUNE_a500 = "cortexa9"
-# DEFAULTTUNE_tuna = "cortexa9"
+# DEFAULTTUNE:tuna = "cortexa9"
 # but be aware that grouper doesn't have cortexa9 available and a500 does not have cortexa8
 # if you want to use cortexa8 for all add cortexa8 settings to a500 (see tuna.conf).
 
 ARM_INSTRUCTION_SET = "thumb"
-DEFAULTTUNE_tenderloin = "cortexa8thf-neon"
-DEFAULTTUNE_hammerhead = "cortexa8thf-neon"
-DEFAULTTUNE_mako = "cortexa8thf-neon"
-DEFAULTTUNE_athene = "cortexa8thf-neon"
-DEFAULTTUNE_onyx = "cortexa8thf-neon"
+DEFAULTTUNE:tenderloin = "cortexa8thf-neon"
+DEFAULTTUNE:hammerhead = "cortexa8thf-neon"
+DEFAULTTUNE:mako = "cortexa8thf-neon"
+DEFAULTTUNE:athene = "cortexa8thf-neon"
+DEFAULTTUNE:onyx = "cortexa8thf-neon"
 
 # http://lists.openembedded.org/pipermail/openembedded-core/2019-April/281328.html
 # make sure that raspberrypi[34]-64 originally with

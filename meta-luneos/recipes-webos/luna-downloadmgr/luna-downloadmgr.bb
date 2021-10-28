@@ -9,7 +9,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "libpbnjson luna-service2 sqlite3 curl uriparser pmloglib jemalloc luna-prefs boost glib-2.0"
 
 #For LuneOS luna-appmanage now provides the same as applicationinstallerutility by the looks of it. So for now we'll depend on that and change into applicationinstallerutility as soon as we migrate away from luna-appmanager
-#RDEPENDS_${PN} = "applicationinstallerutility"
+#RDEPENDS:${PN} = "applicationinstallerutility"
 RDEPENDS:${PN} = "luna-appmanager"
 
 PV = "4.0.0-1+git${SRCPV}"
