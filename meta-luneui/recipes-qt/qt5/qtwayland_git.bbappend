@@ -6,10 +6,10 @@ PACKAGECONFIG[wayland-brcm] = "-feature-wayland-brcm,-no-feature-wayland-brcm,vi
 
 EXTRA_PACKAGECONFIG ?= ""
 EXTRA_PACKAGECONFIG:qemuall = ""
-EXTRA_PACKAGECONFIG_hammerhead = ""
-EXTRA_PACKAGECONFIG_pinephone = ""
+EXTRA_PACKAGECONFIG:hammerhead = ""
+EXTRA_PACKAGECONFIG:pinephone = ""
 EXTRA_PACKAGECONFIG:rpi = ""
-#EXTRA_PACKAGECONFIG_rpi = "wayland-brcm"
+#EXTRA_PACKAGECONFIG:rpi = "wayland-brcm"
 PACKAGECONFIG:append:class-target = " ${EXTRA_PACKAGECONFIG}"
 
 SRC_URI += " \

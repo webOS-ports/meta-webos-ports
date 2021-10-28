@@ -10,7 +10,7 @@ DEPENDS += "qtbase"
 DEPENDS += "qtsensors"
 DEPENDS += "serviceinstaller"
 #DEPENDS += "localization" #TODO
-#RDEPENDS_${PN} += "jail" #TODO
+#RDEPENDS:${PN} += "jail" #TODO
 
 RDEPENDS:${PN} += "powerd"
 
