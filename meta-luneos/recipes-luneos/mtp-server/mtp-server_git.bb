@@ -20,6 +20,7 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit cmake
+inherit pkgconfig
 inherit gettext
 inherit webos_systemd
 inherit webos_ports_repo
