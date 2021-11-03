@@ -11,7 +11,7 @@ inherit webos_ports_fork_repo
 
 SRC_URI = " \
     ${WEBOS_PORTS_GIT_REPO_COMPLETE};name=qtwebengine \
-    ${WEBOS_PORTS_GIT_REPO}/qtwebengine-chromium;name=chromium${WEBOS_GIT_BRANCH};destsuffix=git/src/3rdparty \
+    ${WEBOS_PORTS_GIT_REPO}/qtwebengine-chromium;name=chromium${WEBOS_GIT_BRANCH};destsuffix=git/src/3rdparty;protocol=https \
     file://qtwebengine.conf \
 "
 WEBOS_GIT_PARAM_BRANCH = "webOS-ports/master"
