@@ -8,7 +8,7 @@ DEPENDS = "node-gyp-native sqlite3"
 PV = "3.1.13+git${SRCPV}"
 
 SRC_URI = " \
-    git://github.com/mapbox/node-sqlite3.git;branch=master;protocol=git \
+    git://github.com/mapbox/node-sqlite3.git;branch=master;protocol=https \
     file://no-node-pre-gyp.patch \
 "
 SRCREV = "72bddafddcd9285de2e650e9e281b92b9a9e6b85"
