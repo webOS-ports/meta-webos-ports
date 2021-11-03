@@ -12,7 +12,7 @@ PV = "2019.11.7+git${SRCPV}"
 SRCREV = "a9c798759ee53c88d1b2abbf305af0ba3f6b286f"
 
 SRC_URI = " \
-    git://github.com/EFForg/https-everywhere.git;protocol=git;branch=release \
+    git://github.com/EFForg/https-everywhere.git;protocol=https;branch=release \
     file://make-sqlite.py \
 "
 S = "${WORKDIR}/git"

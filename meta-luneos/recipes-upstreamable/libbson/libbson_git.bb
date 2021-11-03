@@ -13,7 +13,7 @@ PR = "r1"
 PV = "1.9.0+git${SRCPV}"
 # corresponds to 1.9.0
 SRCREV = "ffc8d983ecf6b46d5404f5cc20e756a85dfcbfd2"
-SRC_URI = "git://github.com/mongodb/libbson.git"
+SRC_URI = "git://github.com/mongodb/libbson.git;branch=master;protocol=https"
 
 S = "${WORKDIR}/git"
 

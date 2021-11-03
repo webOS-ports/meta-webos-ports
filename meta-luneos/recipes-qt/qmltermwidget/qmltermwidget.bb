@@ -9,7 +9,7 @@ DEPENDS = "qtbase qtdeclarative"
 RDEPENDS:${PN} = "ttf-liberation-mono qtxmlpatterns"
 
 SRC_URI = " \
-    git://github.com/Swordfish90/qmltermwidget.git;protocol=git;branch=master \
+    git://github.com/Swordfish90/qmltermwidget.git;protocol=https;branch=master \
     file://0001-qmltermwidget.pro-don-t-install-asset-directories-tw.patch \
 "
 S = "${WORKDIR}/git"

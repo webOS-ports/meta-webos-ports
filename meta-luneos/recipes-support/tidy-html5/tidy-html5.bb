@@ -7,7 +7,7 @@ PV = "0.99+git${SRCPV}"
 SRCREV = "0cf6d998431a61f1bd630e7883d4d43df4ad8ccc"
 
 SRC_URI = " \
-    git://github.com/w3c/tidy-html5;branch=master;protocol=git \
+    git://github.com/w3c/tidy-html5;branch=master;protocol=https \
     file://0001-Correctly-deploy-automake-files-at-the-right-place.patch \
 "
 S = "${WORKDIR}/git"

@@ -18,7 +18,7 @@ LIC_FILES_CHKSUM = "file://LICENSE.txt;md5=3b83ef96387f14655fc854ddc3c6bd57"
 DEPENDS = "leveldb"
 DEPENDS:append:class-target = " gtest"
 
-SRC_URI = "git://github.com/ony/${BPN};branch=gcc-4.7"
+SRC_URI = "git://github.com/ony/${BPN};branch=gcc-4.7;protocol=https"
 
 # Use gcc-4.7/v0.1.6 tag. It's backport of gcc-4.8 branch,
 # so it would work fine with both compiler versions

@@ -9,7 +9,7 @@ DEPENDS += "qtbase qtscript qtxmlpatterns qtbase-native"
 SRCREV = "7664fdc37d3bc072ea8e9a5d92cac24aa1d27ddd"
 PV = "1.21+git${SRCPV}"
 
-SRC_URI = "git://git.kernel.org/pub/scm/network/ofono/phonesim.git \
+SRC_URI = "git://git.kernel.org/pub/scm/network/ofono/phonesim.git;branch=master \
     file://0001-Port-to-qt5.patch \
     file://0002-Fix-random-build-failure.patch \
     file://0003-configure.ac-use-gnu-11-to-fix-build-with-Qt-5.7.patch \

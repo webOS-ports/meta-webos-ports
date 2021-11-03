@@ -17,7 +17,7 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 inherit pkgconfig
 inherit systemd
 
-SRC_URI = "git://github.com/mer-hybris/bluebinder.git \
+SRC_URI = "git://github.com/mer-hybris/bluebinder.git;branch=master;protocol=https \
            file://0001-Use-CC-as-compiler.patch \
 "
 S = "${WORKDIR}/git"

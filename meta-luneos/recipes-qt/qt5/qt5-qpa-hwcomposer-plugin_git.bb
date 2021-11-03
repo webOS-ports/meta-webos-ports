@@ -17,7 +17,7 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 COMPATIBLE_MACHINE = "^halium$"
 
 SRC_URI = " \
-    git://github.com/mer-hybris/qt5-qpa-hwcomposer-plugin.git \
+    git://github.com/mer-hybris/qt5-qpa-hwcomposer-plugin.git;branch=master;protocol=https \
 "
 S = "${WORKDIR}/git/hwcomposer"
 
