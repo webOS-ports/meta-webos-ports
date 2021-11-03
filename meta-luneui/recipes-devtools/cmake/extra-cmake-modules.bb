@@ -6,7 +6,7 @@ PV = "5.5.8+git${SRCPV}"
 SRCREV = "307b36662ec9dcf125a589ca24dd69886698fd2b"
 
 SRC_URI = " \
-    git://anongit.kde.org/extra-cmake-modules \
+    git://anongit.kde.org/extra-cmake-modules;branch=master \
     file://0001-Search-within-OE_QMAKE_PATH_EXTERNAL_HOST_BINS-for-q.patch \
 "
 S = "${WORKDIR}/git"

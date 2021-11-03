@@ -9,7 +9,7 @@ DEPENDS = "glib-2.0 glib-2.0-native libglibutil"
 
 inherit pkgconfig
 
-SRC_URI = "git://git.merproject.org/mer-core/libmce-glib.git \
+SRC_URI = "git://git.merproject.org/mer-core/libmce-glib.git;branch=master \
            https://git.merproject.org/mer-core/mce-dev/raw/03a4de12e5fabad8c0d846663e1a1a2cbfd88957/include/mce/dbus-names.h;name=dbus-names \
            https://git.merproject.org/mer-core/mce-dev/raw/03a4de12e5fabad8c0d846663e1a1a2cbfd88957/include/mce/mode-names.h;name=mode-names"
 S = "${WORKDIR}/git"

@@ -6,7 +6,7 @@ PR = "r1"
 
 inherit native
 
-SRC_URI = "git://github.com/enyojs/enyo-dev-dist.git;branch=master"
+SRC_URI = "git://github.com/enyojs/enyo-dev-dist.git;branch=master;protocol=https"
 SRCREV = "ba42e8cb3fe061380f77fd36baa206205a4ac06b"
 PV = "0.5.2"
 S = "${WORKDIR}/git"

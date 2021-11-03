@@ -14,7 +14,7 @@ PULSEAUDIO_VERSION = "15.0"
 PV = "${PULSEAUDIO_VERSION}.84+git${SRCPV}"
 SRCREV = "72d4e0aaca9a8cdd2d2fc9915abd8fec5ac93e15"
 
-SRC_URI = "git://github.com/mer-hybris/pulseaudio-modules-droid.git \
+SRC_URI = "git://github.com/mer-hybris/pulseaudio-modules-droid.git;branch=master;protocol=https \
            file://0001-Add-support-for-detected-external-connection-changes.patch \
 "
 

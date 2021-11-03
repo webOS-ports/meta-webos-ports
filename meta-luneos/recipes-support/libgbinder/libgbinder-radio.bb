@@ -9,7 +9,7 @@ DEPENDS = "libgbinder glib-2.0 libglibutil"
 
 inherit pkgconfig
 
-SRC_URI = "git://github.com/mer-hybris/libgbinder-radio.git"
+SRC_URI = "git://github.com/mer-hybris/libgbinder-radio.git;branch=master;protocol=https"
 S = "${WORKDIR}/git"
 
 PV = "1.0.11"

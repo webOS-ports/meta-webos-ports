@@ -7,7 +7,7 @@ PV = "3.0+git${SRCPV}"
 
 inherit module
 
-SRC_URI = "git://github.com/anbox/anbox-modules \
+SRC_URI = "git://github.com/anbox/anbox-modules;branch=master;protocol=https \
     file://0001-ashmem-binder-add-modules_install-target-to-Makefile.patch;patchdir=.. \
 "
 

@@ -9,7 +9,7 @@ DEPENDS = "udev systemd autoconf-archive-native gtk-doc-native glib-2.0-native l
 inherit autotools gettext pkgconfig gtk-doc systemd
 
 SRC_URI = " \
-    git://github.com/hadess/iio-sensor-proxy.git \
+    git://github.com/hadess/iio-sensor-proxy.git;branch=master;protocol=https \
     file://0001-Disable-gtk-doc.patch \
 "
 SRCREV = "d3d3c79096188e14344d926e6efb475da34ff293"

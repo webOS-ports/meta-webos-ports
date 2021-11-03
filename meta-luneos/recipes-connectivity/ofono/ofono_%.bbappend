@@ -13,7 +13,7 @@ DEPENDS += "libglibutil dbus-glib libgrilio libmce-glib"
 RDEPENDS:${PN} += "mobile-broadband-provider-info ofono-conf"
 
 SRC_URI = " \
-  git://git.kernel.org/pub/scm/network/ofono/ofono.git \
+  git://git.kernel.org/pub/scm/network/ofono/ofono.git;branch=master \
   file://0001-common-create-GList-helper-ofono_call_compare.patch \
   file://0002-common-atmodem-move-at_util_call_compare_by_status-t.patch \
   file://0003-common-atmodem-move-at_util_call_compare_by_id-to-dr.patch \
@@ -25,7 +25,7 @@ SRC_URI = " \
 "  
 
 SRC_URI:halium  = " \
-  git://git.merproject.org/mer-core/ofono.git \
+  git://git.merproject.org/mer-core/ofono.git;branch=master \
   file://0001-Enable-the-various-modem-plugins-we-support-again.patch;striplevel=2 \
   file://0002-Add-support-for-the-Ericsson-F5521gw-modem.patch;striplevel=2 \
   file://ofono \
