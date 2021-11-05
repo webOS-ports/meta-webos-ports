@@ -48,7 +48,7 @@ def webos_app_generate_security_files_write_permission_file(d, app_info):
             bb.fatal("Unexpected trustLevel: " + trust_level)
 
         if type == "web":
-            if "com.palm." in app_id or "com.webos." in app_id:
+            if "com.palm." in app_id or "com.webos." in app_id or "org.webosports." in app_id:
                 prv_bus = True
         elif type == "qml":
             prv_bus = True
