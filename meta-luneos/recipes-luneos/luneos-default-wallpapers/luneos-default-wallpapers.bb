@@ -12,9 +12,8 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 do_install() {
-    install -d ${D}${webos_mountablestoragedir}/wallpapers
-    cp -R --no-dereference --preserve=mode,links -v ${S}/* ${D}${webos_mountablestoragedir}/wallpapers
-    rm ${D}${webos_mountablestoragedir}/wallpapers/README.md
+    install -d ${D}${datadir}/wallpapers
+    cp -R --no-dereference --preserve=mode,links -v ${S}/*.jpg ${D}${datadir}/wallpapers
 }
 
-FILES:${PN} = "${webos_mountablestoragedir}/wallpapers"
+FILES:${PN} = "${datadir}/wallpapers"
