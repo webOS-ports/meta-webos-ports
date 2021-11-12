@@ -22,10 +22,10 @@ SRC_URI = " \
   file://0001-Fix-build-with-ell-0.39-by-restoring-unlikely-macro-.patch \
   file://ofono \
   file://ofono.service \
-"  
+"
 
 SRC_URI:halium  = " \
-  git://git.merproject.org/mer-core/ofono.git;branch=master \
+  git://github.com/sailfishos/ofono.git;protocol=https;branch=master \
   file://0001-Enable-the-various-modem-plugins-we-support-again.patch;striplevel=2 \
   file://0002-Add-support-for-the-Ericsson-F5521gw-modem.patch;striplevel=2 \
   file://ofono \

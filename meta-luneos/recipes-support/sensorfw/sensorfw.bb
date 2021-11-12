@@ -14,7 +14,7 @@ DEPENDS = "qtbase \
 DEPENDS:append:halium = " libhybris virtual/android-headers libgbinder libglibutil "
 
 SRC_URI = " \
-    git://git.merproject.org/mer-core/sensorfw.git;branch=master \
+    git://github.com/sailfishos/sensorfw.git;protocol=https;branch=master \
     file://0001-Fix-build-with-autohybris.patch \
 "
 

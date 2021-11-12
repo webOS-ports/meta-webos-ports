@@ -9,7 +9,7 @@ DEPENDS = "qtbase qtdeclarative"
 RDEPENDS:${PN} = "ttf-liberation-mono qtxmlpatterns"
 
 SRC_URI = " \
-    git://git.merproject.org/mer-core/fingerterm.git;protocol=git;branch=master \
+    git://github.com/sailfishos/fingerterm.git;protocol=https;branch=master \
     file://appinfo.json \
 "
 S = "${WORKDIR}/git"

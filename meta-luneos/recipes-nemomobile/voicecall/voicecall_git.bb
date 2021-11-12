@@ -11,7 +11,7 @@ inherit qmake5
 inherit systemd
 inherit pkgconfig
 
-SRC_URI = "git://git.merproject.org/mer-core/voicecall.git;branch=master \
+SRC_URI = "git://github.com/sailfishos/voicecall.git;protocol=https;branch=master \
            file://voicecall-manager.service"
 
 S = "${WORKDIR}/git"

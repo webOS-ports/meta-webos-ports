@@ -10,7 +10,7 @@ inherit qmake5
 PV = "5.24.0+git${SRCPV}"
 SRCREV = "e611adc6dce026e32aef6db902cfa4ee99d00265"
 
-SRC_URI = "git://git.merproject.org/mer-core/kf5bluezqt.git;protocol=https;branch=master \
+SRC_URI = "git://github.com/sailfishos/kf5bluezqt.git;protocol=https;branch=master \
            file://qt_BluezQt.pri"
 	   
 S = "${WORKDIR}/git"
