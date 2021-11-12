@@ -9,7 +9,7 @@ PV = "2.1.20+git${SRCPV}"
 SRCREV = "43b4a8fb2cb377f0a4f1fd0a2a389e4650a00425"
 
 SRC_URI = " \
-    git://git.merproject.org/mer-core/nemo-qml-plugin-dbus;branch=master;protocol=git \
+    git://github.com/sailfishos/nemo-qml-plugin-dbus;branch=master;protocol=https \
 "
 S = "${WORKDIR}/git"
 
