@@ -9,7 +9,7 @@ DEPENDS = "glib-2.0 libglibutil"
 
 inherit pkgconfig
 
-SRC_URI = "git://git.merproject.org/mer-core/libgrilio.git;branch=master"
+SRC_URI = "git://github.com/sailfishos/libgrilio.git;branch=master"
 S = "${WORKDIR}/git"
 
 PV = "1.0.39-1+git${SRCPV}"

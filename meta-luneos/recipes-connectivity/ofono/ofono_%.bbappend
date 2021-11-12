@@ -21,10 +21,10 @@ SRC_URI = " \
   file://0005-qmimodem-implement-voice-calls.patch \
   file://ofono \
   file://ofono.service \
-"  
+"
 
 SRC_URI:halium  = " \
-  git://git.merproject.org/mer-core/ofono.git;branch=master \
+  git://github.com/sailfishos/ofono.git;branch=master \
   file://0001-Enable-the-various-modem-plugins-we-support-again.patch;striplevel=2 \
   file://0002-Add-support-for-the-Ericsson-F5521gw-modem.patch;striplevel=2 \
   file://ofono \
