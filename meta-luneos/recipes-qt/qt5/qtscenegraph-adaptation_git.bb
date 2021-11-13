@@ -18,12 +18,10 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 # Depends on libhybris which has this restriction
 COMPATIBLE_MACHINE = "^halium$"
 
-SRC_URI = " \
-    git://git.merproject.org/Tofe/qtscenegraph-adaptation.git;branch=tofe/qt5.8 \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-inherit qmake5
+inherit qmake5 webos_ports_fork_repo
 
 EXTRA_QMAKEVARS_PRE += "CONFIG+=surfaceformat CONFIG+=programbinary CONFIG+=hybristexture"
 
