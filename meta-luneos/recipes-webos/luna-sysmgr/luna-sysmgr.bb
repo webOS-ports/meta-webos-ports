@@ -30,9 +30,6 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};"
 S = "${WORKDIR}/git"
 
 do_install:append() {
-
-    install -d ${D}${webos_cryptofsdir}/apps/var/lock
-
     # install images & low-memory files
     install -d ${D}${webos_sysmgrdir}/images
     install -v -m 644 ${S}/images/* ${D}${webos_sysmgrdir}/images
@@ -88,6 +85,12 @@ do_install:append() {
         install -d ${D}${webos_sysconfdir}/pubsub_handlers
         install -v -m 0644 ${S}/files/sysbus/com.palm.appinstaller.pubsub ${D}${webos_sysconfdir}/pubsub_handlers/com.palm.appinstaller
     fi
+}
+
+pkg_postinst:${PN}() {
+    # We need the lock directory for the application installer which will fail if this
+    # directory does not exist
+    mkdir -p $D${webos_cryptofsdir}/apps/var/lock
 }
 
 FILES:${PN} += "${webos_sysmgrdir} ${webos_sysconfdir} ${webos_applicationsdir} ${webos_soundsdir} ${webos_cryptofsdir}"
