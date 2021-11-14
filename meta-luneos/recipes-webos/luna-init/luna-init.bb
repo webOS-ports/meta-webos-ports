@@ -8,7 +8,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "tzdata python3-pytz-native"
 
 PV = "2.0.1-10+git${SRCPV}"
-SRCREV = "d38568c6d86bc17538ed69598b68d00a7ef52352"
+SRCREV = "c9aa53ab7806b330ced8c950c3d6912614a1ccb5"
 
 inherit allarch
 inherit webos_ports_fork_repo
@@ -16,9 +16,7 @@ inherit webos_filesystem_paths
 inherit webos_cmake
 inherit python3native
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
-    file://0001-Use-python3.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 do_install:append() {
