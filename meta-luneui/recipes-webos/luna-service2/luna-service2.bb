@@ -33,7 +33,7 @@ S = "${WORKDIR}/git"
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE:${PN} = "ls-hubd.service"
 
-SRCREV = "090e7f4b021584c9b5013a77402b31be94275796"
+SRCREV = "613f65e975c3ac4be80da3fbcafa4c68859f17cf"
 
 # This fix-up will be removed shortly. luna-service2 headers must be included
 # using '#include <luna-service2/*.h>'
