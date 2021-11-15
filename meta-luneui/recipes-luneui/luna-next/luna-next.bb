@@ -13,7 +13,7 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 PV = "0.5.0-4+git${SRCPV}"
-SRCREV = "ddd3b1f4924d4ff5f632bf84a459d7c912d00073"
+SRCREV = "1103c974a6e3f81ff6b89f356b6c83b0e1b96ba0"
 
 # Otherwise there is conflict between None defined in Xlib.h and
 # qtdeclarative's /usr/include/qt5/QtQuick/qsgtexture.h:59
