@@ -9,6 +9,8 @@ SRCREV = "556762740c6a6e19cf6842da926d184a51706ecb"
 SRC_URI = "git://github.com/ColinIanKing/${BPN}.git;protocol=https;branch=master"
 S = "${WORKDIR}/git"
 
+inherit bash-completion
+
 EXTRA_OEMAKE = "MAKEFLAGS="
 
 do_compile() {
