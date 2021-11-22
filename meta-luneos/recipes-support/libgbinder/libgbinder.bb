@@ -23,8 +23,10 @@ PARALLEL_MAKE = ""
 do_install() {
     make install DESTDIR=${D}
     make install-dev DESTDIR=${D}
-    
-    # Install libgbinder's config for Halium 9.0
+}
+
+# Install libgbinder's config for Halium 9.0, we do this here, since for Waydroid we need a different API version it seems, so better to split it for mainline targets such as PinePhone and qemux86-64.
+do_install:append:halium() {
     install -d ${D}${sysconfdir}
     install -m 0644 ${WORKDIR}/gbinder.conf ${D}${sysconfdir}/gbinder.conf
 }

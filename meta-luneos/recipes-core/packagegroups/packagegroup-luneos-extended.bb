@@ -161,6 +161,8 @@ RDEPENDS:${PN}:append:s2 = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:sagit = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:yggdrasil = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
 
+RDEPENDS:${PN}:append:pinephone = "waydroid"
+
 QEMU_RDEPENDS = " \
     alsa-utils-systemd \
     mesa-driver-swrast \
