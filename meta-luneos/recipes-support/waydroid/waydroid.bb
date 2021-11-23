@@ -10,7 +10,7 @@ SECTION = "webos/support"
 SRCREV = "d03e10c132de8e03dff781868b3e37b7f7c7128a"
 PV = "1.2.0+git${SRCPV}"
 
-DEPENDS += "python3-gbinder python3-pygobject"
+DEPENDS += "python3-gbinder python3-pygobject libgbinder"
 
 RDEPENDS:${PN} += "waydroid-data lxc"
 
@@ -51,7 +51,7 @@ do_install:append() {
     cp ${S}/waydroid.py "${D}/usr/lib/waydroid/"
     ln -s /usr/lib/waydroid/waydroid.py "${D}/usr/bin/waydroid"
 
-    install -Dm644 -t "${D}/etc" "${WORKDIR}/gbinder.conf"
+    # install -Dm644 -t "${D}/etc" "${WORKDIR}/gbinder.conf" # provided by libgbinder already
     install -Dm644 -t "${D}/etc/gbinder.d" ${S}/gbinder/anbox.conf
   
     install -d ${D}${systemd_unitdir}/system
@@ -59,3 +59,21 @@ do_install:append() {
 }
 
 FILES:${PN} += "${systemd_unitdir}"
+
+# Usage
+# =====
+# mount --bind /tmp/luna-session /run/luna-session/
+# export XDG_RUNTIME_DIR=/run/luna-session
+# export XDG_SESSION_TYPE=wayland
+# -- also, make sure /etc/gbinder.conf has "ApiLevel = 29" (Halium 9 needs API 28)
+#
+# Then:
+# 0. waydroid init (just once, but needs network !)
+# 1. waydroid container start
+# 2. either
+#      waydroid show-full-ui
+#    or
+#      waydroid session start
+#      waydroid app start com.android.settings
+     
+
