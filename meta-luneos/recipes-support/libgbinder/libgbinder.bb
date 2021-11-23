@@ -14,8 +14,8 @@ SRC_URI = "git://github.com/mer-hybris/libgbinder.git;branch=master;protocol=htt
 "
 S = "${WORKDIR}/git"
 
-PV = "1.1.5"
-SRCREV = "88df2edb9533fc4680fe59f3113f839d0cf9c77a"
+PV = "1.1.13"
+SRCREV = "7f7202107558ecfaa2b4e0d45cac5d1ba5c45569"
 
 EXTRA_OEMAKE = "KEEP_SYMBOLS=1"
 PARALLEL_MAKE = ""
