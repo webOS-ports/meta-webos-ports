@@ -51,14 +51,23 @@ do_install:append() {
     cp ${S}/waydroid.py "${D}/usr/lib/waydroid/"
     ln -s /usr/lib/waydroid/waydroid.py "${D}/usr/bin/waydroid"
 
-    # install -Dm644 -t "${D}/etc" "${WORKDIR}/gbinder.conf" # provided by libgbinder already
     install -Dm644 -t "${D}/etc/gbinder.d" ${S}/gbinder/anbox.conf
   
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${S}/debian/waydroid-container.service ${D}${systemd_unitdir}/system/
 }
 
-FILES:${PN} += "${systemd_unitdir}"
+# Provided by libgbinder already for Halium devices, but necessary to add for non-Halium devices.
+
+do_install:append:pinephone() {
+    install -Dm644 -t "${D}${sysconfdir}" "${WORKDIR}/gbinder.conf" 
+}
+
+do_install:append:qemux86-64() {
+    install -Dm644 -t "${D}${sysconfdir}" "${WORKDIR}/gbinder.conf" 
+}
+
+FILES:${PN} += "${systemd_unitdir} ${sysconfdir}"
 
 # Usage
 # =====
