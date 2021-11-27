@@ -10,9 +10,8 @@ SECTION = "webos/support"
 SRCREV = "d03e10c132de8e03dff781868b3e37b7f7c7128a"
 PV = "1.2.0+git${SRCPV}"
 
-DEPENDS += "python3-gbinder python3-pygobject libgbinder"
 
-RDEPENDS:${PN} += "waydroid-data lxc"
+RDEPENDS:${PN} += "waydroid-data lxc python3-gbinder python3-pygobject libgbinder python3-pyclip python3-py-vmdetect"
 
 # these modules are directly included in android-flavored kernels
 # Note: Waydroid requires kernel >= 3.18 !
@@ -23,6 +22,7 @@ RRECOMMENDS:${PN} += " \
 
 SRC_URI = "git://github.com/waydroid/waydroid;branch=bullseye;protocol=https \
            file://gbinder.conf \
+           file://0001-lxc.py-detect-usage-of-VM.patch \
           "
 S = "${WORKDIR}/git"
 
@@ -51,17 +51,27 @@ do_install:append() {
     cp ${S}/waydroid.py "${D}/usr/lib/waydroid/"
     ln -s /usr/lib/waydroid/waydroid.py "${D}/usr/bin/waydroid"
 
-    # install -Dm644 -t "${D}/etc" "${WORKDIR}/gbinder.conf" # provided by libgbinder already
     install -Dm644 -t "${D}/etc/gbinder.d" ${S}/gbinder/anbox.conf
   
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${S}/debian/waydroid-container.service ${D}${systemd_unitdir}/system/
 }
 
-FILES:${PN} += "${systemd_unitdir}"
+# Provided by libgbinder already for Halium devices, but necessary to add for non-Halium devices.
+
+do_install:append:pinephone() {
+    install -Dm644 -t "${D}${sysconfdir}" "${WORKDIR}/gbinder.conf" 
+}
+
+do_install:append:qemux86-64() {
+    install -Dm644 -t "${D}${sysconfdir}" "${WORKDIR}/gbinder.conf" 
+}
+
+FILES:${PN} += "${systemd_unitdir} ${sysconfdir}"
 
 # Usage
 # =====
+# mkdir -p /run/luna-session/
 # mount --bind /tmp/luna-session /run/luna-session/
 # export XDG_RUNTIME_DIR=/run/luna-session
 # export XDG_SESSION_TYPE=wayland
@@ -75,5 +85,3 @@ FILES:${PN} += "${systemd_unitdir}"
 #    or
 #      waydroid session start
 #      waydroid app start com.android.settings
-     
-
