@@ -10,7 +10,8 @@ SECTION = "webos/support"
 SRCREV = "d03e10c132de8e03dff781868b3e37b7f7c7128a"
 PV = "1.2.0+git${SRCPV}"
 
-RDEPENDS:${PN} += "waydroid-data lxc python3-gbinder python3-pygobject python3-pyclip libgbinder"
+
+RDEPENDS:${PN} += "waydroid-data lxc python3-gbinder python3-pygobject libgbinder python3-pyclip python3-py-vmdetect"
 
 # these modules are directly included in android-flavored kernels
 # Note: Waydroid requires kernel >= 3.18 !
@@ -21,6 +22,7 @@ RRECOMMENDS:${PN} += " \
 
 SRC_URI = "git://github.com/waydroid/waydroid;branch=bullseye;protocol=https \
            file://gbinder.conf \
+           file://0001-lxc.py-detect-usage-of-VM.patch \
           "
 S = "${WORKDIR}/git"
 
@@ -76,16 +78,10 @@ FILES:${PN} += "${systemd_unitdir} ${sysconfdir}"
 # -- also, make sure /etc/gbinder.conf has "ApiLevel = 29" (Halium 9 needs API 28)
 #
 # Then:
-#
 # 0. waydroid init (just once, but needs network !)
 # 1. waydroid container start
-# Start a new shell, expert the following again:
-# export XDG_RUNTIME_DIR=/run/luna-session
-# export XDG_SESSION_TYPE=wayland
-#
-# Followed by:
 # 2. either
 #      waydroid show-full-ui
 #    or
 #      waydroid session start
-#      waydroid app launch com.android.settings
+#      waydroid app start com.android.settings
