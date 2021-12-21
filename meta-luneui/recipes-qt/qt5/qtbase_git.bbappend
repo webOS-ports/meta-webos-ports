@@ -1,6 +1,7 @@
 PACKAGECONFIG_GL = "gles2 eglfs"
 PACKAGECONFIG_GL:append:qemuall = " kms gbm"
 PACKAGECONFIG_GL:append:pinephone = " kms gbm"
+PACKAGECONFIG_GL:append:pinephonepro = " kms gbm"
 PACKAGECONFIG_DISTRO += "sql-sqlite icu glib accessibility mtdev examples fontconfig xkbcommon"
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
