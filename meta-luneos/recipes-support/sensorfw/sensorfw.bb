@@ -7,6 +7,8 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=2d5025d4aa3495befef8f17206a5b0a1"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 PV = "0.11.4+git${SRCPV}"
+#PV = "0.12.6+git${SRCPV}"
+#SRCREV = "2e539015996111576a731750342effde7aaee87f"
 SRCREV = "4f97982dd95f5ab229312d9e721d2f131bfa8886"
 DEPENDS = "qtbase \
     luna-sysmgr-common luna-service2 json-c glib-2.0 luna-sysmgr-ipc-messages"
@@ -22,12 +24,20 @@ SRC_URI = " \
 SRC_URI:append:pinephone = " \
     file://sensord-pinephone.conf \
 "
+SRC_URI:append:pinephonepro = " \
+    file://sensord-pinephonepro.conf \
+"
+
 # Note: maybe this should go in a bbappend in meta-smartphone...
 SRC_URI:append:tenderloin = " \
     file://sensord-tenderloin.conf \
 "
 
 S = "${WORKDIR}/git"
+
+#do_configure:prepend() {
+#sed "s=@LIB@=lib=g" ${S}/sensord-qt5.pc.in > ${S}/sensord-qt5.pc
+#}
 
 inherit qmake5
 inherit pkgconfig
