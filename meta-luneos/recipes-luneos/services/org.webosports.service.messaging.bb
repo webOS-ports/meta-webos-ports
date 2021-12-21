@@ -16,8 +16,8 @@ WEBOS_REPO_NAME = "org.webosports.messaging"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git/service"
 
-WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files/sysbus"
-WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
+WEBOS_SYSTEM_BUS_FILES_LOCATION = "${WORKDIR}/git/files/sysbus"
+WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 
 do_install() {
     # Install service files
@@ -33,6 +33,16 @@ do_install() {
     install -d ${D}${webos_sysconfdir}/activities
     cp -rv ${S}/configuration/activities/org.webosports.service.messaging ${D}${webos_sysconfdir}/activities/
 
+    # Install the ACG configuration
+    install -d ${D}${webos_sysbus_servicedir}
+    install -d ${D}${webos_sysbus_permissionsdir}
+    install -d ${D}${webos_sysbus_rolesdir}
+    install -d ${D}${webos_sysbus_apipermissionsdir}
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.service ${D}${webos_sysbus_servicedir}/${BPN}.service
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.perm.json ${D}${webos_sysbus_permissionsdir}/${BPN}.perm.json
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.role.json ${D}${webos_sysbus_rolesdir}/${BPN}.role.json
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.api.json ${D}${webos_sysbus_apipermissionsdir}/${BPN}.api.json
+    
     # Remove things we don't want on the device
     rm -rf ${D}${webos_servicesdir}/${PN}/files
 }
