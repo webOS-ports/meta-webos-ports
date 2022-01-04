@@ -3,8 +3,8 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 SRCREV = "0db662bd6ba4070838bf143df5ee24c949a8c0df"
 PV = "1.31+git${SRCPV}"
 
-SRCREV:halium = "2ee5e4c8270d0d2b211bf549c7a4e16cd86ca0b4"
-PV:halium = "1.23-19+git${SRCPV}"
+SRCREV:halium = "005f36bb89a366b842bfa533ba273c0d9c52c621"
+PV:halium = "1.24+git${SRCPV}"
 
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://COPYING;md5=eb723b61539feef013de476e68b5c50a"
