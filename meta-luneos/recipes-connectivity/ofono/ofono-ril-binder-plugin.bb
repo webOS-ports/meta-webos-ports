@@ -12,8 +12,8 @@ inherit pkgconfig
 SRC_URI = "git://github.com/mer-hybris/ofono-ril-binder-plugin.git;branch=master;protocol=https"
 S = "${WORKDIR}/git"
 
-PV = "1.0.16"
-SRCREV = "20402845052db81ebe804293e4a6229804ea4dbe"
+PV = "1.2.6"
+SRCREV = "b5050bc79fbbe8d8f5c268466128fc8bce275de4"
 
 CFLAGS += "--sysroot=${RECIPE_SYSROOT} "
 LDFLAGS += "--sysroot=${RECIPE_SYSROOT} "
