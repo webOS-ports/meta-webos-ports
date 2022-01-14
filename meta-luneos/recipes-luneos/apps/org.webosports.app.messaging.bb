@@ -14,3 +14,8 @@ inherit webos_app
 WEBOS_REPO_NAME = "org.webosports.messaging"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git/app"
+
+# Workaround for network access issue during do_compile task
+# unfortunately enyo-dev fetches the dependencies during the do_compile
+# instead of proper OE dependencies fetched during do_fetch
+do_compile[network] = "1"
