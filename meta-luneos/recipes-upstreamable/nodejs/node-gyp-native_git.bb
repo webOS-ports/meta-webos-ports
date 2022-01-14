@@ -67,3 +67,9 @@ do_install () {
     install -d ${D}/${bindir}
     ln -snf ../lib/node_modules/node-gyp/bin/node-gyp.js ${D}/${bindir}/node-gyp
 }
+
+# Workaround for network access issue during do_install task
+# Unfortunately --no-registry no longer works it seems:
+# npm WARN invalid config registry=false set in command line options
+# npm WARN invalid config Must be full url with "http://"
+do_install[network] = "1"
