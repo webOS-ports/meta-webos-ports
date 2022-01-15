@@ -27,10 +27,10 @@ IMAGE_INSTALL:append = " \
     libdrm-tests \
     qtbase-examples \
     qtbase-plugins \
+    glmark2 \
     kernel-modules \
 "
 
 IMAGE_INSTALL:append:qemuall = " \
     ${MESA_PKGS} \
-    glmark2 \
 "
