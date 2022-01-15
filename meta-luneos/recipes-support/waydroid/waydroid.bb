@@ -34,6 +34,7 @@ COMPATIBLE_MACHINE ?= "(^$)"
 COMPATIBLE_MACHINE:qemux86-64 = "(.*)"
 COMPATIBLE_MACHINE:rpi = "(.*)"
 COMPATIBLE_MACHINE:pinephone = "(.*)"
+COMPATIBLE_MACHINE:pinephonepro = "(.*)"
 
 inherit pkgconfig
 
@@ -63,6 +64,10 @@ do_install:append:pinephone() {
     install -Dm644 -t "${D}${sysconfdir}" "${WORKDIR}/gbinder.conf" 
 }
 
+do_install:append:pinephonepro() {
+    install -Dm644 -t "${D}${sysconfdir}" "${WORKDIR}/gbinder.conf" 
+}
+
 do_install:append:qemux86-64() {
     install -Dm644 -t "${D}${sysconfdir}" "${WORKDIR}/gbinder.conf" 
 }
@@ -84,4 +89,4 @@ FILES:${PN} += "${systemd_unitdir} ${sysconfdir}"
 #      waydroid show-full-ui
 #    or
 #      waydroid session start
-#      waydroid app start com.android.settings
+#      waydroid app launch com.android.settings
