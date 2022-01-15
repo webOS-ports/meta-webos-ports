@@ -7,7 +7,7 @@ SRC_URI[sha256sum] = "bd7cf7ebfc6e6080d48c21007a7f09661afdec00de54a3fd48903717e6
 
 inherit pypi setuptools3
 
-do_configure_append () {
+do_configure:append () {
     install -d ${S}/docs
     cp ${S}/README.md ${S}/docs/README.md
 }
