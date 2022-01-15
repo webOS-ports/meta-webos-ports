@@ -161,7 +161,8 @@ RDEPENDS:${PN}:append:s2 = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:sagit = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:yggdrasil = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
 
-RDEPENDS:${PN}:append:pinephone = "waydroid"
+#RDEPENDS:${PN}:append:pinephone = "waydroid"
+#RDEPENDS:${PN}:append:pinephonepro = "waydroid"
 
 QEMU_RDEPENDS = " \
     alsa-utils-systemd \
@@ -174,7 +175,7 @@ QEMU_RDEPENDS = " \
 "
 
 RDEPENDS:${PN}:append:qemux86 = " ${QEMU_RDEPENDS}"
-RDEPENDS:${PN}:append:qemux86-64 = " ${QEMU_RDEPENDS} waydroid"
+#RDEPENDS:${PN}:append:qemux86-64 = " ${QEMU_RDEPENDS} waydroid"
 
 RDEPENDS:${PN}:append:arm = " \
     crash-handler \
