@@ -1,1 +1,1 @@
-# PACKAGECONFIG:remove = "wayland-gl drm-gl wayland-gles2"
+PACKAGECONFIG:remove:halium = "drm-gles2"
