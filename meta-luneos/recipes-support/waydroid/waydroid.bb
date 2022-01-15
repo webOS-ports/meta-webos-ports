@@ -11,7 +11,7 @@ SRCREV = "d03e10c132de8e03dff781868b3e37b7f7c7128a"
 PV = "1.2.0+git${SRCPV}"
 
 
-RDEPENDS:${PN} += "waydroid-data lxc python3-gbinder python3-pygobject libgbinder python3-pyclip python3-py-vmdetect"
+RDEPENDS:${PN} += "waydroid-data lxc python3-gbinder python3-pygobject libgbinder python3-pyclip"
 
 # these modules are directly included in android-flavored kernels
 # Note: Waydroid requires kernel >= 3.18 !
@@ -22,7 +22,6 @@ RRECOMMENDS:${PN} += " \
 
 SRC_URI = "git://github.com/waydroid/waydroid;branch=bullseye;protocol=https \
            file://gbinder.conf \
-           file://0001-lxc.py-detect-usage-of-VM.patch \
           "
 S = "${WORKDIR}/git"
 
@@ -34,6 +33,7 @@ COMPATIBLE_MACHINE ?= "(^$)"
 COMPATIBLE_MACHINE:qemux86-64 = "(.*)"
 COMPATIBLE_MACHINE:rpi = "(.*)"
 COMPATIBLE_MACHINE:pinephone = "(.*)"
+COMPATIBLE_MACHINE:pinephonepro = "(.*)"
 
 inherit pkgconfig
 
@@ -63,6 +63,10 @@ do_install:append:pinephone() {
     install -Dm644 -t "${D}${sysconfdir}" "${WORKDIR}/gbinder.conf" 
 }
 
+do_install:append:pinephonepro() {
+    install -Dm644 -t "${D}${sysconfdir}" "${WORKDIR}/gbinder.conf" 
+}
+
 do_install:append:qemux86-64() {
     install -Dm644 -t "${D}${sysconfdir}" "${WORKDIR}/gbinder.conf" 
 }
@@ -84,4 +88,4 @@ FILES:${PN} += "${systemd_unitdir} ${sysconfdir}"
 #      waydroid show-full-ui
 #    or
 #      waydroid session start
-#      waydroid app start com.android.settings
+#      waydroid app launch com.android.settings
