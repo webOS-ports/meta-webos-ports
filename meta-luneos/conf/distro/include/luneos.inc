@@ -122,7 +122,10 @@ OVERRIDES[vardepsexclude] += "WEBOS_EXTRA_MACHINEOVERRIDES"
 
 INHERIT_DISTRO ?= "debian devshell sstate license remove-libtool buildstats buildstats-summary own-mirrors image-buildinfo"
 
-SOURCE_MIRROR_URL = "http://sources.webos-ports.org/"
+# Set to "" because build server not being available and leading to errors on clean builds.
+# SOURCE_MIRROR_URL = "http://sources.webos-ports.org/"
+SOURCE_MIRROR_URL = ""
+
 
 WARN_QA:append = " version-going-backwards"
 WEBOS_ERROR_QA_AUTOREV ?= "webos-enh-sub-autorev-error"
@@ -170,8 +173,8 @@ APPEND:append:qemuall = " console=ttyS0"
 # The CONNECTIVITY_CHECK_URI's are used to test whether we can succesfully
 # fetch from the network (and warn you if not). To disable the test set
 # the variable to be empty.
-CONNECTIVITY_CHECK_URIS ?= "http://jenkins.nas-admin.org \
-                            http://build.webos-ports.org"
+# CONNECTIVITY_CHECK_URIS ?= "http://jenkins.nas-admin.org \
+#                            http://build.webos-ports.org"
 
 # TODO can check on all these host machines.
 SANITY_TESTED_DISTROS ?= " \
