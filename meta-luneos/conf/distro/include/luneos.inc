@@ -120,7 +120,7 @@ MACHINEOVERRIDES =. "${WEBOS_EXTRA_MACHINEOVERRIDES}"
 MACHINEOVERRIDES[vardepsexclude] += "WEBOS_EXTRA_MACHINEOVERRIDES"
 OVERRIDES[vardepsexclude] += "WEBOS_EXTRA_MACHINEOVERRIDES"
 
-INHERIT_DISTRO ?= "debian devshell sstate license remove-libtool buildstats buildstats-summary own-mirrors image-buildinfo"
+INHERIT_DISTRO ?= "debian devshell sstate license remove-libtool buildstats buildstats-summary image-buildinfo"
 
 SOURCE_MIRROR_URL = "http://sources.webos-ports.org/"
 
@@ -170,8 +170,7 @@ APPEND:append:qemuall = " console=ttyS0"
 # The CONNECTIVITY_CHECK_URI's are used to test whether we can succesfully
 # fetch from the network (and warn you if not). To disable the test set
 # the variable to be empty.
-CONNECTIVITY_CHECK_URIS ?= "http://jenkins.nas-admin.org \
-                            http://build.webos-ports.org"
+CONNECTIVITY_CHECK_URIS ?= "https://github.com"
 
 # TODO can check on all these host machines.
 SANITY_TESTED_DISTROS ?= " \
