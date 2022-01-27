@@ -2,6 +2,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 SRC_URI += "file://squashfs.cfg \
     file://video.cfg \
     file://virtio.cfg \
+    file://crypto.cfg \
     file://waydroid-anbox.cfg \
 "
 
