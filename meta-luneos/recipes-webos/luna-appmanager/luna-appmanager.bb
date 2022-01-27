@@ -16,9 +16,9 @@ RDEPENDS:${PN} += " \
     bash \
 "
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=herrie/appinstalld2"
 
-SRCREV = "81e4b7c28fb65caeee4d18c96f580ae2ba955ba5"
+SRCREV = "0a551e600fd9449fb2616fe9633d8c89902d4ef3"
 PV = "1.0.0-22+git${SRCPV}"
 
 S = "${WORKDIR}/git"
