@@ -8,17 +8,20 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "libpbnjson luna-service2 sqlite3 curl uriparser pmloglib jemalloc luna-prefs boost glib-2.0"
 
-#For LuneOS luna-appmanage now provides the same as applicationinstallerutility by the looks of it. So for now we'll depend on that and change into applicationinstallerutility as soon as we migrate away from luna-appmanager
-#RDEPENDS:${PN} = "applicationinstallerutility"
-RDEPENDS:${PN} = "luna-appmanager"
+RDEPENDS:${PN} = "applicationinstallerutility"
 
-PV = "4.0.0-1+git${SRCPV}"
-SRCREV = "47c7c3cc9e425fed4da71e62e7f6e6c08a197f7f"
+PV = "4.0.0-11+git${SRCPV}"
+SRCREV = "fe2b509d2de5746f79f1e0d9a237399502499ed5"
 
 inherit webos_cmake
 inherit webos_system_bus
-inherit webos_public_repo
+inherit webos_ports_repo
+inherit webos_systemd
 inherit pkgconfig
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
+
+FILES:${PN} += " \
+    ${systemd_unitdir}/system \
+"
