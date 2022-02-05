@@ -9,10 +9,12 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "pmloglib openssl glib-2.0"
 
 PV = "3.0.0-4+git${SRCPV}"
-SRCREV = "7d97bf4fb3dfe3054a0c34975f16bc380a3f815b"
+SRCREV = "151b3c18eb48e8c34478a813dac2bfcc35bd4aa4"
 
 inherit webos_cmake
 inherit webos_ports_fork_repo
 
+WEBOS_GIT_PARAM_BRANCH = "tofe/fixes"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
+

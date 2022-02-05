@@ -18,11 +18,18 @@ RDEPENDS_${PN} += " \
     lttng-modules \
 "
 
+#WEBOS_VERSION = "1.0.0-9_baf2c8ce00a722e9f58a1359993bf887b30d27e5"
+#PR = "r11"
+
 SRCREV = "f730615ed39d43210f4bd6c8802570e2b376c68a"
 
+#inherit webos_component
 inherit webos_cmake
+#inherit webos_enhanced_submissions
+#inherit webos_library
 inherit webos_lttng
 inherit webos_public_repo
+#inherit webos_prerelease_dep
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

@@ -9,7 +9,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "glib-2.0"
 
 PV = "2.1.0-20+git${SRCPV}"
-SRCREV = "8714626f3d319cbf5fa91996bfdc43b73fe228ea"
+SRCREV = "7ae0acab50df95d415fce95880c6c98f6fc88d12"
 
 inherit webos_ports_ose_repo
 inherit webos_cmake
