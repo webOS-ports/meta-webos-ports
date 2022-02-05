@@ -1,4 +1,4 @@
-# Copyright (c) 2010-2013 LG Electronics, Inc.
+    # Copyright (c) 2010-2013 LG Electronics, Inc.
 
 SUMMARY = "webOS ports Application Manager"
 SECTION = "webos/base"
@@ -16,9 +16,9 @@ RDEPENDS:${PN} += " \
     bash \
 "
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=herrie/appinstalld2"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
-SRCREV = "0a551e600fd9449fb2616fe9633d8c89902d4ef3"
+SRCREV = "bd86ffc446ad10e31533b884687b36be6855303e"
 PV = "1.0.0-22+git${SRCPV}"
 
 S = "${WORKDIR}/git"

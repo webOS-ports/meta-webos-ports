@@ -6,6 +6,7 @@ IMAGE_FEATURES += "luneos-development"
 
 webos_enable_devmode() {
     install -d ${IMAGE_ROOTFS}/var/luna
+    install -d ${IMAGE_ROOTFS}/var/luna/preferences
     touch ${IMAGE_ROOTFS}/var/luna/dev-mode-enabled
     touch ${IMAGE_ROOTFS}/var/luna/preferences/devmode_enabled
     touch ${IMAGE_ROOTFS}/var/usb-debugging-enabled
