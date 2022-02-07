@@ -16,6 +16,7 @@ inherit webos_cmake
 inherit webos_system_bus
 inherit webos_ports_ose_repo
 inherit webos_systemd
+inherit pkgconfig
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
