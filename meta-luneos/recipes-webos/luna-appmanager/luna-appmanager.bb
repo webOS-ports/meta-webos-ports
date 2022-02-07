@@ -1,4 +1,4 @@
-    # Copyright (c) 2010-2013 LG Electronics, Inc.
+# Copyright (c) 2010-2013 LG Electronics, Inc.
 
 SUMMARY = "webOS ports Application Manager"
 SECTION = "webos/base"
