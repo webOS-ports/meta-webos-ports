@@ -15,7 +15,7 @@ SRCREV = "fe2b509d2de5746f79f1e0d9a237399502499ed5"
 
 inherit webos_cmake
 inherit webos_system_bus
-inherit webos_ports_repo
+inherit webos_ports_ose_repo
 inherit webos_systemd
 inherit pkgconfig
 

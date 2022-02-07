@@ -14,7 +14,7 @@ SRCREV = "58faac369f8dd23df06e7a42dbfdeec65682262e"
 
 inherit webos_cmake
 inherit webos_system_bus
-inherit webos_ports_fork_repo
+inherit webos_ports_ose_repo
 inherit webos_systemd
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
