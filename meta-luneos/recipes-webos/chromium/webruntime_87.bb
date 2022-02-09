@@ -14,7 +14,7 @@ PACKAGECONFIG[debug] = "symbol_level=2,symbol_level=0"
 PACKAGECONFIG[debug-blink] = "blink_symbol_level=1,blink_symbol_level=0"
 
 # Since _remove is always applied LAST, we cannot implement
-# GN_ARGS_remove = "ozone_platform_wayland_external=true" here
+# GN_ARGS:remove = "ozone_platform_wayland_external=true" here
 # but thanks gn it overrides former gn args values with later ones
 # so we just add appropriate args to the end of its list:
 PACKAGECONFIG[google_ozone_wayland] = "\
