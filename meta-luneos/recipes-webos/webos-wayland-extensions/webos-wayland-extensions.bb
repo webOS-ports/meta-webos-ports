@@ -14,15 +14,15 @@ DEPENDS = "wayland wayland-native"
 WEBOS_VERSION = "1.0.0-42_bac07bee30665b5f33440c61cff1fcd8f670a24c"
 PR = "r6"
 
+SRCREV = "1804ef56817c9454db041c78fbda238408aca1a1"
+
 #inherit webos_component
 inherit webos_cmake
-inherit webos_pkgconfig
+inherit pkgconfig
 #inherit webos_enhanced_submissions
 inherit webos_public_repo
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
-
-SRCREV = ""
 
 FILES:${PN}-dev += "${datadir}/*"

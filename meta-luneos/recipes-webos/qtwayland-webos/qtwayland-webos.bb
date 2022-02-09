@@ -14,9 +14,9 @@ DEPENDS = "qtwayland webos-wayland-extensions libxkbcommon qt-features-webos way
 WEBOS_VERSION = "2.0.0-70_c04c1b3f861f866debb637909cf91e866ded3638"
 PR = "r15"
 
-inherit webos_qmake6
-inherit webos_pkgconfig
-inherit webos_enhanced_submissions
+inherit webos_qmake5
+inherit pkgconfig
+#inherit webos_enhanced_submissions
 inherit webos_lttng
 inherit webos_public_repo
 

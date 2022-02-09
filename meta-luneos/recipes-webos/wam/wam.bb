@@ -1,35 +1,37 @@
-# Copyright (c) 2015-2019 LG Electronics, Inc.
-
 SUMMARY = "WebAppMgr is responsible for running web applications on webOS"
 AUTHOR = "Lokesh Kumar Goel <lokeshkumar.goel@lge.com>"
 SECTION = "webos/base"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-DEPENDS = "virtual/webruntime qtbase luna-service2 sqlite3 librolegen nyx-lib openssl luna-prefs libpbnjson freetype serviceinstaller glib-2.0 pmloglib lttng-ust qt-features-webos"
+DEPENDS = "virtual/webruntime luna-service2 sqlite3 librolegen nyx-lib openssl luna-prefs libpbnjson freetype serviceinstaller glib-2.0 pmloglib lttng-ust gtest jsoncpp boost"
 PROVIDES = "webappmanager-webos"
 
 # webappmgr's upstart conf expects to be able to LD_PRELOAD ptmalloc3
 RDEPENDS:${PN} = "ptmalloc3"
 # webappmgr's upstart conf expects to have ionice available. Under OE-core, this is supplied by util-linux.
 RDEPENDS:${PN} += "util-linux"
-RDEPENDS:${PN} += "qtbase-plugins"
 
 #  webappmgr2's upstart conf expects setcpushares-task to be available
-VIRTUAL-RUNTIME:cpushareholder ?= "cpushareholder-stub"
-RDEPENDS:${PN} += "${VIRTUAL-RUNTIME:cpushareholder}"
+VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
+RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_cpushareholder}"
 
 #WEBOS_VERSION = "1.0.1-22_d311b9eebde64e48a494be910be2eeb9cec799cc"
-PV = "1.0.2-37"
-SRCREV = "20023103c015baf6830cdfc812dcfa3187b66342"
+PV = "1.0.2-55"
+SRCREV = "c52fff66be1e2bc2dd10020e6da7d52671383272"
 PR = "r30"
 
-#inherit pkgconfig
+WAM_BUILD_SYSTEM = "webos_qmake5"
+WAM_BUILD_SYSTEM:webos = "webos_cmake"
+
+#inherit ${WAM_BUILD_SYSTEM}
+inherit webos_cmake
+inherit pkgconfig
 #inherit webos_enhanced_submissions
 inherit webos_system_bus
 #inherit webos_machine_dep
 inherit systemd
-inherit webos_qmake5
+#inherit webos_qmake5
 inherit webos_lttng
 #inherit webos_distro_variant_dep
 #inherit webos_distro_dep
@@ -40,50 +42,50 @@ SYSTEMD_SERVICE:${PN} = "webapp-mgr.service"
 
 WAM_DATA_DIR = "${webos_execstatedir}/${BPN}"
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/LuneOS-rebased"
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
+    file://0001-Fix-build-with-gcc-11.patch \
+"
+
+WEBOS_GIT_PARAM_BRANCH = "herrie/LuneOS-rebased-honister"
 S = "${WORKDIR}/git"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 
 SYSTEMD_INSTALL_PATH = "${sysconfdir}/systemd/system"
-
-OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
-
-WEBOS_QMAKE_TARGET = "${MACHINE}"
-
 # Set the location of chromium headers
-EXTRA_QMAKEVARS_PRE += "CHROMIUM_SRC_DIR=${STAGING_INCDIR}/${PREFERRED_PROVIDER_virtual/webruntime}"
+EXTRA_OECMAKE += "-DCHROMIUM_SRC_DIR=${STAGING_INCDIR}/${PREFERRED_PROVIDER_virtual/webruntime}"
 
 # Enable LTTng tracing capability when enabled in webos_lttng class
-EXTRA_QMAKEVARS_PRE += "${@oe.utils.conditional('WEBOS_LTTNG_ENABLED', '1', 'CONFIG+=lttng', '', d)}"
+EXTRA_OECMAKE += "${@oe.utils.conditional('WEBOS_LTTNG_ENABLED', '1', '-DWEBOS_LTTNG_ENABLED:BOOLEAN=True', '', d)}"
 
-EXTRA_QMAKEVARS_PRE += "DEFINES+=WAM_DATA_DIR=\"\"${webos_cryptofsdir}/.webappmanager/\"\""
-EXTRA_QMAKEVARS_PRE += "PREFIX=/usr"
-EXTRA_QMAKEVARS_PRE += "PLATFORM=${@'PLATFORM_' + '${DISTRO}'.upper().replace('-', '_')}"
+EXTRA_OECMAKE += "-DWAM_DATA_DIR=\"\"${webos_cryptofsdir}/.webappmanager/\"\""
+EXTRA_OECMAKE += "-DPLATFORM=${@'PLATFORM_' + '${DISTRO}'.upper().replace('-', '_')}"
 
 # chromium doesn't build for armv[45]*
 COMPATIBLE_MACHINE = "(-)"
-COMPATIBLE_MACHINE_aarch64 = "(.*)"
-COMPATIBLE_MACHINE_armv6 = "(.*)"
-COMPATIBLE_MACHINE_armv7a = "(.*)"
-COMPATIBLE_MACHINE_armv7ve = "(.*)"
-COMPATIBLE_MACHINE_x86 = "(.*)"
-COMPATIBLE_MACHINE_x86-64 = "(.*)"
+COMPATIBLE_MACHINE:aarch64 = "(.*)"
+COMPATIBLE_MACHINE:armv6 = "(.*)"
+COMPATIBLE_MACHINE:armv7a = "(.*)"
+COMPATIBLE_MACHINE:armv7ve = "(.*)"
+COMPATIBLE_MACHINE:x86 = "(.*)"
+COMPATIBLE_MACHINE:x86-64 = "(.*)"
 
 WAM_ERROR_SCRIPTS_PATH = "${S}/html-ose"
 
 # Flag to control runtime flags for touch
 TOUCH_ENABLED ?= "true"
 
-do_configure:prepend() {
+# Flag to control runtime flag for platform decoder
+PLATFORM_DECODER_ENABLED ?= "true"
+
+# Flag to control runtime flag for platform encoder
+PLATFORM_ENCODER_ENABLED ?= "true"
+
+do_configure:append() {
     if [ -f "${S}/files/launch/systemd/webapp-mgr.sh.in" ]; then
       cp ${S}/files/launch/systemd/webapp-mgr.sh.in ${B}/webapp-mgr.sh
     fi
     cp ${S}/files/launch/systemd/webapp-mgr.service ${B}/webapp-mgr.service
-}
-
-do_configure:append() {
     sed -i -e "s/NETWORK_STABLE_TIMEOUT/NETWORK_QUIET_TIMEOUT/gI" -e "s/network-stable-timeout/network-quiet-timeout/gI" ${B}/webapp-mgr.sh
     sed -i '/export WAM_COMMON_SWITCHES=\" \\/a\    --disable-in-process-stack-traces \\' ${B}/webapp-mgr.sh
     sed -i '/export ENABLE_BLINK_FEATURES=/ s/$/,LocalResourceCodeCache,CustomEventExtension/' ${B}/webapp-mgr.sh
@@ -102,10 +104,27 @@ do_configure:append() {
        sed -i '/--enable-aggressive-release-policy \\/a\   --ignore-touch-devices \\' ${B}/webapp-mgr.sh
     fi
 
-    # Extra added for chromium79
-    if [ "${PREFERRED_VERSION_webruntime}" = "79.%" ]; then
-        sed -i '/export WAM_COMMON_SWITCHES=\" \\/a\    --enable-pal-media-service \\' ${B}/webapp-mgr.sh
+    sed -i '/export WAM_COMMON_SWITCHES=\" \\/a\    --enable-neva-media-service \\' ${B}/webapp-mgr.sh
+
+    # enable platform decoding if PLATFORM_DECODER_ENABLED is true
+    if ${PLATFORM_DECODER_ENABLED}; then
+       # enable h/w decoding for webrtc
+       sed -i '/--enable-aggressive-release-policy \\/a\    --enable-webrtc-platform-video-decoder \\' ${B}/webapp-mgr.sh
     fi
+
+    # enable platform encoding if PLATFORM_ENCODER_ENABLED is true
+    if ${PLATFORM_ENCODER_ENABLED}; then
+       # enable h/w encoding for webrtc
+       sed -i '/--enable-aggressive-release-policy \\/a\    --enable-webrtc-platform-video-encoder \\' ${B}/webapp-mgr.sh
+    fi
+
+    sed -i '/export WAM_MEM_FLAGS=\" \\/a\    --local-storage-limit-per-second-level-domain=10 \\' ${B}/webapp-mgr.sh
+
+    # Extra added for chromium87
+    sed -i '/--ozone-platform/d' ${B}/webapp-mgr.sh
+    sed -i '/export WAM_COMMON_SWITCHES=\" \\/a\    --disable-gpu-vsync \\' ${B}/webapp-mgr.sh
+    sed -i '/export WAM_COMMON_SWITCHES=\" \\/a\    --alsa-input-device=pulse \\' ${B}/webapp-mgr.sh
+    sed -i '/export WAM_COMMON_SWITCHES=\" \\/a\    --enable-accurate-seek \\' ${B}/webapp-mgr.sh
 }
 
 do_configure:append:qemux86() {
@@ -124,7 +143,6 @@ do_configure:append:qemux86-64() {
     fi
 }
 
-
 do_install:append() {
     install -d ${D}${sysconfdir}/pmlog.d
     install -d ${D}${sysconfdir}/wam
@@ -137,6 +155,9 @@ do_install:append() {
     install -v -m 755 ${B}/webapp-mgr.sh ${D}${SYSTEMD_INSTALL_PATH}/scripts/webapp-mgr.sh
     cp -vf ${WAM_ERROR_SCRIPTS_PATH}/* ${D}${datadir}/localization/${BPN}/
 }
+
+PACKAGES =+ "${PN}-tests"
+FILES:${PN}-tests = "${webos_testsdir}/* ${libexecdir}/tests/*"
 
 FILES:${PN} += " \
     ${sysconfdir}/pmlog.d \

@@ -14,7 +14,8 @@ DEPENDS = "qtbase"
 WEBOS_VERSION = "1.0.0-50_e3cd3c25717605a153d10fcccbf35893a38ebb8b"
 PR = "r8"
 
-#inherit webos_qmake6
+SRCREV = "7ba4ebe6d95591a31c8e072da5fd68adcfcb368a"
+
 inherit webos_qmake5
 #inherit webos_enhanced_submissions
 inherit webos_public_repo
@@ -25,7 +26,7 @@ S = "${WORKDIR}/git"
 FILES:${PN}-dev += "${OE_QMAKE_PATH_QT_ARCHDATA}/mkspecs"
 
 # An empty package is needed to satisfy package dependencies when building bdk.
-ALLOW_EMPTY:${PN} = "1"
+ALLOW_EMPTY_${PN} = "1"
 
 BBCLASSEXTEND = "native"
 
