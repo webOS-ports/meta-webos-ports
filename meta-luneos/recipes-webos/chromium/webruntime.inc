@@ -12,9 +12,9 @@ inherit pkgconfig
 inherit webruntime_apps
 inherit webos_filesystem_paths
 inherit webos_lttng
-inherit webos_machine_dep
+#inherit webos_machine_dep
 inherit webos_machine_impl_dep
-inherit webos_prerelease_dep
+#inherit webos_prerelease_dep
 inherit webos_system_bus
 
 DEPENDS = "virtual/gettext wayland wayland-native luna-service2 pixman freetype fontconfig openssl pango cairo icu webos-wayland-extensions libxkbcommon libexif dbus pciutils udev libcap alsa-lib virtual/egl elfutils-native libdrm atk gperf-native gconf libwebosi18n bison-native xorgproto nss nspr curl nspr-native nss-native pmloglib glib-2.0-native python-six-native python-beautifulsoup4-native python-lxml-native python-html5lib-native python-webencodings-native"
@@ -40,7 +40,7 @@ WAM_DEMO_BUILD_TARGET = "${@oe.utils.conditional('DEPLOY_WAM_DEMO', 'true', 'wam
 
 TARGET = "${WEBRUNTIME_BUILD_TARGET} ${BROWSER_APP_BUILD_TARGET} ${APPSHELL_BUILD_TARGET} ${CHROMEDRIVER_BUILD_TARGET} ${WAM_DEMO_BUILD_TARGET}"
 
-# Skip do_install_append of webos_system_bus. It is not compatible with this component.
+# Skip do_install:append of webos_system_bus. It is not compatible with this component.
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files/sysbus"
 WEBOS_SYSTEM_BUS_MANIFEST_TYPE = "PASS"
@@ -182,11 +182,11 @@ modify_run_app_shell() {
 
 modify_run_app_shell:append:qemux86() {
     # Disable media hardware acceleration
-    sed -i '/--disable-web-security\\/a\ --disable-web-media-player-neva\\' ${D}${APP_SHELL_RUNTIME_RUN_SCRIPT}
+    sed -i '/--disable-web-security\\/a\ --disable-web-media-player-neva\\' ${D}/usr/bin/app-shell/run_app_shell
 }
 modify_run_app_shell:append:qemux86-64() {
     # Disable media hardware acceleration
-    sed -i '/--disable-web-security\\/a\ --disable-web-media-player-neva\\' ${D}${APP_SHELL_RUNTIME_RUN_SCRIPT}
+    sed -i '/--disable-web-security\\/a\ --disable-web-media-player-neva\\' ${D}/usr/bin/app-shell/run_app_shell
 }
 
 WINDOW_SIZE ?= "1920,1080"
@@ -313,11 +313,11 @@ FILES:${WAM_DEMO_APPLICATION} += " \
 "
 
 RDEPENDS:${BROWSER_APPLICATION} += "${PN}"
-RDEPENDS:${APP_SHELL_RUNTIME} += "${PN} ${VIRTUAL-RUNTIME:gpu-libs}"
+RDEPENDS:${APP_SHELL_RUNTIME} += "${PN} ${VIRTUAL-RUNTIME_gpu-libs}"
 
-VIRTUAL-RUNTIME:gpu-libs ?= ""
-RDEPENDS:${PN} += "${VIRTUAL-RUNTIME:gpu-libs} ${APP_SHELL_RUNTIME}"
-RDEPENDS:${WAM_DEMO_APPLICATION} += "${VIRTUAL-RUNTIME:gpu-libs}"
+VIRTUAL-RUNTIME_gpu-libs ?= ""
+RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_gpu-libs} ${APP_SHELL_RUNTIME}"
+RDEPENDS:${WAM_DEMO_APPLICATION} += "${VIRTUAL-RUNTIME_gpu-libs}"
 
 # The text relocations are intentional -- see comments in [GF-52468]
 # TODO: check if we need INSANE_SKIP on ldflags

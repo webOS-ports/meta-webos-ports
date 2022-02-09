@@ -36,9 +36,9 @@ PREFERRED_PROVIDER_webappmanager-webos ?= "wam"
 
 # Use Enactbrowser by default, except for armv45
 VIRTUAL-RUNTIME_com.webos.app.browser = "com.webos.app.enactbrowser"
-VIRTUAL-RUNTIME_com.webos.app.browser_armv4 = ""
-VIRTUAL-RUNTIME_com.webos.app.browser_armv5 = ""
+VIRTUAL-RUNTIME_com.webos.app.browser:armv4 = ""
+VIRTUAL-RUNTIME_com.webos.app.browser:armv5 = ""
 
 VIRTUAL-RUNTIME_webappmanager = "wam"
-VIRTUAL-RUNTIME_webappmanager_armv4 = ""
-VIRTUAL-RUNTIME_webappmanager_armv5 = ""
+VIRTUAL-RUNTIME_webappmanager:armv4 = ""
+VIRTUAL-RUNTIME_webappmanager:armv5 = ""
