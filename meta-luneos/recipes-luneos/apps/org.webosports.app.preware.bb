@@ -10,6 +10,7 @@ inherit webos_enyojs_application
 inherit webos_app
 
 PV = "2.0.3+git${SRCPV}"
+
 SRCREV = "7f298913f4d6b3a73ac55df4bb2bcd06bb7ffc4c"
 
 WEBOS_REPO_NAME = "preware"
