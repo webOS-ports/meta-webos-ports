@@ -32,5 +32,6 @@ GN_ARGS:append = " \
   enable_mojom_closure_compile=false\
   enable_js_type_check=false\
 "
+PACKAGECONFIG:remove:pinephone = "gstreamer umediaserver neva-media gav neva-webrtc"
 PACKAGECONFIG:remove:qemux86 = "gstreamer umediaserver neva-media gav neva-webrtc"
 PACKAGECONFIG:remove:qemux86-64 = "gstreamer umediaserver neva-media gav neva-webrtc"
