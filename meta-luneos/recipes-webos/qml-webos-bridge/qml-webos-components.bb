@@ -31,7 +31,7 @@ S = "${WORKDIR}/git"
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 
 # Perform extra QML validation
-WEBOS_QMLLINT_EXTRA_VALIDATION = "1"
+#WEBOS_QMLLINT_EXTRA_VALIDATION = "1"
 
 # Enable LTTng tracing capability when enabled in webos_lttng class
 EXTRA_QMAKEVARS_PRE += "${@ 'CONFIG+=lttng' if '${WEBOS_LTTNG_ENABLED}' == '1' else '' }"
