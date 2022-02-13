@@ -20,7 +20,9 @@ inherit pkgconfig
 inherit webos_lttng
 inherit webos_ports_ose_repo
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
+           file://0001-Fix-build-for-Qt-5.15.2.patch \
+           "
 S = "${WORKDIR}/git"
 
 SRCREV = "c3b70c0f4684960ff33a09e493f95924ddc7835a"
@@ -60,7 +62,7 @@ inherit webos_qmllint
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 
 # Perform extra QML validation
-WEBOS_QMLLINT_EXTRA_VALIDATION = "1"
+# WEBOS_QMLLINT_EXTRA_VALIDATION = "1"
 
 PACKAGECONFIG ??= "multi-input"
 PACKAGECONFIG[compositor] = "CONFIG+=compositor_base,,qt-features-webos-native"
