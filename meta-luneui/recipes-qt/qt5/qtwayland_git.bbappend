@@ -17,6 +17,13 @@ SRC_URI += " \
     file://0001-Fix-QtKeyExtensionGlobal-s-export.patch \
     file://0002-Revert-Remove-QWaylandExtendedSurface-from-the-priva.patch \
     file://0003-QWaylandXdgSurface-handle-ExtendedSurface-window-pro.patch \
+    file://0004-Export-qwaylandwlshellsurface.patch \
+    file://0005-Export-wayland-egl.patch \
+    file://0006-Make-WaylandEglClientBuffer-overridable.patch \
+    file://0007-Support-platform-specific-implementation.patch \
+    file://0008-Allow-inheritance-of-key-translation.patch \
+    file://0009-Allow-seat-selection.patch \
+    file://0010-Export-QWaylandQuickSurfacePrivate.patch \
 "
 
 FILES:${PN} += "${OE_QMAKE_PATH_PLUGINS}/wayland-graphics-integration"
