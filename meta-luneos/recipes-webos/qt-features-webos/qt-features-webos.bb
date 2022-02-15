@@ -20,7 +20,9 @@ inherit webos_qmake5
 #inherit webos_enhanced_submissions
 inherit webos_public_repo
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+           file://0001-Do-not-depend-on-QtInputSupport-for-generate_qmap.patch \
+           "
 S = "${WORKDIR}/git"
 
 FILES:${PN}-dev += "${OE_QMAKE_PATH_QT_ARCHDATA}/mkspecs"
@@ -30,10 +32,10 @@ ALLOW_EMPTY_${PN} = "1"
 
 BBCLASSEXTEND = "native"
 
-do_configure_class-native() {
+do_configure:class-native() {
     ${OE_QMAKE_QMAKE} ${OE_QMAKE_DEBUG_OUTPUT} -r ${S}/tools/generate_qmap
 }
 
-do_install_class-native() {
+do_install:class-native() {
     oe_runmake install INSTALL_ROOT=${D}
 }
