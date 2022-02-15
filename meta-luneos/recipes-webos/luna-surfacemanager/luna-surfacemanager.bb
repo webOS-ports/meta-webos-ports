@@ -32,7 +32,7 @@ OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 # Enable LTTng tracing capability when enabled in webos_lttng class
 EXTRA_QMAKEVARS_PRE += "${@ 'CONFIG+=lttng' if '${WEBOS_LTTNG_ENABLED}' == '1' else '' }"
 
-EXTRA_QMAKEVARS_PRE += "${PACKAGECONFIG_CONFARGS}"
+EXTRA_QMAKEVARS_PRE += "${PACKAGECONFIG_CONFARGS} WEBOS_INSTALL_TESTSDIR=${webos_testsdir}"
 
 # We don't support configuring via cmake
 EXTRA_QMAKEVARS_POST += "CONFIG-=create_cmake"
@@ -69,7 +69,7 @@ PACKAGECONFIG[compositor] = "CONFIG+=compositor_base,,qt-features-webos-native"
 PACKAGECONFIG[multi-input] = ",CONFIG+=no_multi_input,"
 PACKAGECONFIG[cursor-theme] = "CONFIG+=cursor_theme,,"
 
-PACKAGECONFIG:webos = "compositor cursor-theme"
+PACKAGECONFIG = "compositor cursor-theme"
 
 PACKAGES =+ "${PN}-conf ${PN}-base ${PN}-base-tests"
 
