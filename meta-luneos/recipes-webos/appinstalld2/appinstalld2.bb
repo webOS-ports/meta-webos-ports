@@ -10,7 +10,7 @@ DEPENDS = "glib-2.0 luna-service2 libpbnjson pmloglib pmtrace boost icu"
 RDEPENDS:${PN} = "applicationinstallerutility ecryptfs-utils librolegen"
 
 PV = "1.0.0-35+git${SRCPV}"
-SRCREV = "58faac369f8dd23df06e7a42dbfdeec65682262e"
+SRCREV = "4b8fe91a1334460ebc8c960fa78a2dfc6e8b999f"
 
 inherit webos_cmake
 inherit webos_system_bus
