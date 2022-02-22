@@ -8,7 +8,7 @@ LIC_FILES_CHKSUM = " \
 PV = "0.0.2-1+git${SRCPV}"
 SRCREV = "a407b0443e7eb934c717723fbdedbd54ae631520"
 
-DEPENDS = "qtbase qtdeclarative qtwebengine qtmultimedia"
+DEPENDS = "qtbase qtdeclarative qtmultimedia"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
