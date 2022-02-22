@@ -197,10 +197,10 @@ BB_SIGNATURE_HANDLER ?= "OEEquivHash"
 BB_HASHSERVE ??= "auto"
 
 # to build stuff with commercial licenses
-# LICENSE_FLAGS_WHITELIST is now used instead of COMMERCIAL_LICENSE, see:
+# LICENSE_FLAGS_ACCEPTED is now used instead of COMMERCIAL_LICENSE, see:
 # http://git.openembedded.org/?p=openembedded-core.git&a=commit;h=a66fdbda548fab367cada035c49a32d9bf8ea528
 # we are not commercial project, we can whitelist them all
-LICENSE_FLAGS_WHITELIST = "commercial"
+LICENSE_FLAGS_ACCEPTED = "commercial"
 
 LICENSE_CREATE_PACKAGE = "1"
 

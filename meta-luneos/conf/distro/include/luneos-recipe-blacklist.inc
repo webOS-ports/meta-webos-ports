@@ -9,4 +9,4 @@
 # doesn't, then the only way to guarantee that the first recipe will never be
 # used is to blacklist it.
 
-PNBLACKLIST[vboxguestdrivers] = "vboxguest is also in the kernel and we don't really need vboxsf"
+SKIP_RECIPE[vboxguestdrivers] = "vboxguest is also in the kernel and we don't really need vboxsf"
