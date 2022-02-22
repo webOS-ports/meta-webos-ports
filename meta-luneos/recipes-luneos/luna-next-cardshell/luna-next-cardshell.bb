@@ -11,7 +11,8 @@ RDEPENDS:${PN} += " \
     libconnman-qt5 \
     nemo-qml-plugin-dbus \
     libqofono \
-    luna-next \
+    luna-surfacemanager-conf \
+    luna-surfacemanager-base \
 "
 
 PV = "0.5.1-4+git${SRCPV}"
