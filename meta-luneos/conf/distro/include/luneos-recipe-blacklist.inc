@@ -10,3 +10,4 @@
 # used is to blacklist it.
 
 SKIP_RECIPE[vboxguestdrivers] = "vboxguest is also in the kernel and we don't really need vboxsf"
+SKIP_RECIPE[qtwebengine] = "qtwebengine is now replaced by WebOS OSE webruntime"
