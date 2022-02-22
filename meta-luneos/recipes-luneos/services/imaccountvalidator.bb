@@ -1,6 +1,6 @@
 SUMMARY = "Instant Messaging Account Validator service"
 SECTION = "webos/services"
-LICENSE = "GPL-2.0"
+LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = " \
     file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263 \
     file://COPYRIGHT;md5=b928fe818deef43f0b52d28bd42f56f2 \

@@ -1,6 +1,6 @@
 SUMMARY = "License management service for the webOS ports project"
 SECTION = "webos/services"
-LICENSE = "GPLv2+"
+LICENSE = "GPL-2.0-or-later"
 LIC_FILES_CHKSUM = "file://COPYING;md5=eb723b61539feef013de476e68b5c50a"
 
 inherit webos_ports_repo

@@ -1,5 +1,5 @@
 SUMMARY = "A terminal emulator with a custom virtual keyboard"
-LICENSE = "GPL-2.0"
+LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263"
 
 PV = "1.3.6+git${SRCPV}"

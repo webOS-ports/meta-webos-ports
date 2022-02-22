@@ -1,5 +1,5 @@
 SUMMARY = "Sensorfw plugin for qtsensors"
-LICENSE = "LGPL-2.1 | LGPL-3.0"
+LICENSE = "LGPL-2.1-only | LGPL-3.0-only"
 LIC_FILES_CHKSUM = " \
     file://LICENSE.LGPLv21;md5=cff17b12416c896e10ae2c17a64252e7 \
     file://LICENSE.LGPLv3;md5=c1939be5579666be947371bc8120425f \

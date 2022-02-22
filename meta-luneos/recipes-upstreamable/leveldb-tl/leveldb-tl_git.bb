@@ -10,7 +10,7 @@ SECTION = "libs"
 # saying LGPL-2.1 and mksandwich.cpp having Apache-2.0 header, it looks like merge
 # from gcc-4.7 branch didn't go well (LICENSE.md wasn't replaced with LICENSE.txt)
 # LIC_FILES_CHKSUM = "file://LICENSE.txt;md5=3b83ef96387f14655fc854ddc3c6bd57"
-LICENSE = "Apache-2.0 & LGPL-2.1"
+LICENSE = "Apache-2.0 & LGPL-2.1-only"
 # for gcc-4.9 branch
 # LIC_FILES_CHKSUM = "file://LICENSE.md;md5=a0e609841f5eed88831111c74c9b90a0"
 LIC_FILES_CHKSUM = "file://LICENSE.txt;md5=3b83ef96387f14655fc854ddc3c6bd57"

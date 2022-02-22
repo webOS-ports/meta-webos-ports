@@ -3,7 +3,7 @@
 
 SUMMARY = "A header-only dbus-binding leveraging C++-11."
 SECTION = "webos/support"
-LICENSE = "GPLv2+ & LGPLv3"
+LICENSE = "GPL-2.0-or-later & LGPL-3.0-only"
 LIC_FILES_CHKSUM = " \
     file://COPYING.GPL;md5=b234ee4d69f5fce4486a80fdaf4a4263 \
     file://COPYING.LGPL;md5=e6a600fd5e1d9cbde2d983680233ad02 \

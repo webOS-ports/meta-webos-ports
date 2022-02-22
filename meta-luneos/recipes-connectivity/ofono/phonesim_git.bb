@@ -1,7 +1,7 @@
 SUMMARY = "Phone Simulator for modem testing"
 SECTION = "devel"
 
-LICENSE = "GPL-2.0"
+LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=eb723b61539feef013de476e68b5c50a"
 
 DEPENDS += "qtbase qtscript qtxmlpatterns qtbase-native"

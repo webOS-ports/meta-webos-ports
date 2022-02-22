@@ -1,6 +1,6 @@
 SUMMARY = "Node.js service to provide synergy connector for CardDav and CalDav"
 SECTION = "webos/services"
-LICENSE = "GPL-3.0"
+LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://LICENSE.txt;md5=d32239bcb673463ab874e80d47fae504"
 
 inherit webos_ports_ose_repo

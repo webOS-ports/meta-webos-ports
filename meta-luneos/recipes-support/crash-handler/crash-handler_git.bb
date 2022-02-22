@@ -1,6 +1,6 @@
 SUMMARY = "Tim Bird's experimental crash_handler program."
 HOMEPAGE = "http://elinux.org/Crash_handler"
-LICENSE = "Apache-2.0 & GPLv2+ & PD"
+LICENSE = "Apache-2.0 & GPL-2.0-or-later & PD"
 LIC_FILES_CHKSUM = " \
     file://LICENSE.txt;md5=58abc812381b4475c81a522215ed6cde \
     file://LICENSE-APACHE-2.0.txt;md5=9645f39e9db895a4aa6e02cb57294595 \

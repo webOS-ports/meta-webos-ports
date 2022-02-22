@@ -2,7 +2,7 @@ SUMMARY = "Android in a Box"
 DESCRIPTION = "Runtime for Android applications which runs a full Android system \
     in a container using Linux namespaces (user, ipc, net, mount) to \
     separate the Android system fully from the host."
-LICENSE = "GPLv3"
+LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://COPYING.GPL;md5=f27defe1e96c2e1ecd4e0c9be8967949"
 
 SECTION = "webos/support"

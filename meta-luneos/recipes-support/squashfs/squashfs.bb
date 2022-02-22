@@ -1,5 +1,5 @@
 SUMMARY = "Squashfs compressed read-only filesystem"
-LICENSE = "GPLv2"
+LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://squashfs.h;endline=22;md5=bf92dd48469f6b45027dde7c5aeb9f0b"
 
 inherit module

@@ -1,5 +1,5 @@
 DESCRIPTION = "LuneOS QML components"
-LICENSE = "LGPL-2.1"
+LICENSE = "LGPL-2.1-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 PV = "0.4.2+git${SRCPV}"

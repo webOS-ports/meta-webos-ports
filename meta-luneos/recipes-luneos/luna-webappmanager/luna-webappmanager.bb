@@ -1,5 +1,5 @@
 SUMMARY = "This is the web application launcher for the Luna Next webOS UI platform."
-LICENSE = "GPL-3.0 & Apache-2.0"
+LICENSE = "GPL-3.0-only & Apache-2.0"
 LIC_FILES_CHKSUM = " \
     file://COPYING;md5=0f93d2cf04b94ac3f04a789a1fb11ead \
     file://COPYING-Apache-2.0;md5=3b83ef96387f14655fc854ddc3c6bd57 \

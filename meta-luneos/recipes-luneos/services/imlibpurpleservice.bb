@@ -1,6 +1,6 @@
 SUMMARY = "Instant Messaging service"
 SECTION = "webos/services"
-LICENSE = "GPL-2.0"
+LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = " \
     file://COPYING;md5=263f341c01743dbd6b06ae75369dbeed \
     file://COPYRIGHT;md5=2ce083d13f0f21e5207b4115c8926450 \

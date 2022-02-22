@@ -1,5 +1,5 @@
 SUMMARY = "PulseAudio Droid HIDL module"
-LICENSE = "LGPL-2.1"
+LICENSE = "LGPL-2.1-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=f294906e6e4eac9d917503a0bbd139b4"
 
 DEPENDS += "pulseaudio pulseaudio-pulsecore-private-headers libhybris virtual/android-headers dbus audiosystem-passthrough pulseaudio-modules-droid pulseaudio-module-dbus-protocol"
