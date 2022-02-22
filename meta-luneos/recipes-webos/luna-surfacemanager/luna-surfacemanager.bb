@@ -22,6 +22,7 @@ inherit webos_ports_ose_repo
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
            file://0001-Fix-build-for-Qt-5.15.2.patch \
+           file://surface-manager.service \
            "
 S = "${WORKDIR}/git"
 
@@ -49,6 +50,12 @@ do_install:append() {
         install -d ${D}${datadir}/webos-keymap
         ${STAGING_DIR_NATIVE}${OE_QMAKE_PATH_QT_BINS}/generate_qmap ${D}${datadir}/webos-keymap/webos-keymap.qmap
     fi
+    
+    # This dummy import conflicts with the ${OE_QMAKE_PATH_QML}/WebOSCompositor import we use for luna-next-cardshell
+    rm -rf ${OE_QMAKE_PATH_QML}/WebOSCompositorBase/imports/WebOSCompositor
+    
+    install -d ${D}${systemd_system_unitdir}
+    install -v -m 0644 ${WORKDIR}/surface-manager.service ${D}${systemd_system_unitdir}/surface-manager.service
 }
 
 VIRTUAL-RUNTIME_gpu-libs ?= ""
@@ -56,6 +63,7 @@ RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_gpu-libs}"
 
 inherit webos_system_bus
 inherit webos_qmllint
+inherit systemd
 
 # qt-features-webos have its own logic to install system bus files reason for
 # that is because only qmake knows where substitued files will be placed.
@@ -73,8 +81,11 @@ PACKAGECONFIG = "compositor cursor-theme"
 
 PACKAGES =+ "${PN}-conf ${PN}-base ${PN}-base-tests"
 
+SYSTEMD_SERVICE:${PN} = "surface-manager.service"
+
 FILES:${PN}-conf += " \
     ${sysconfdir}/surface-manager.d/ \
+    ${systemd_system_unitdir} \
     ${webos_sysbus_apipermissionsdir} \
     ${webos_sysbus_groupsdir} \
     ${webos_sysbus_servicedir} \
