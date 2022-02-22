@@ -1,7 +1,7 @@
 SECTION = "base"
 DESCRIPTION = "IIO accelerometer sensor to input device proxy."
 
-LICENSE = "GPL-3.0"
+LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-3.0;md5=c79ff39f19dfec6d293b95dea7b07891"
 
 DEPENDS = "udev systemd autoconf-archive-native gtk-doc-native glib-2.0-native libgudev"

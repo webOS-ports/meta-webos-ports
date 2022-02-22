@@ -6,7 +6,7 @@ PV = "1.31+git${SRCPV}"
 SRCREV:halium = "005f36bb89a366b842bfa533ba273c0d9c52c621"
 PV:halium = "1.24+git${SRCPV}"
 
-LICENSE = "GPLv2"
+LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=eb723b61539feef013de476e68b5c50a"
 
 DEPENDS += "libglibutil dbus-glib libgrilio libmce-glib"

@@ -1,6 +1,6 @@
 SUMMARY = "Sensor Framework provides access to hardware sensors and additional logical products calculated from them."
 SECTION = "base"
-LICENSE = "LGPLv2.1+"
+LICENSE = "LGPL-2.1-or-later"
 LIC_FILES_CHKSUM = "file://COPYING;md5=2d5025d4aa3495befef8f17206a5b0a1"
 
 # We're potentially depending on libhybris so need to be MACHINE_ARCH

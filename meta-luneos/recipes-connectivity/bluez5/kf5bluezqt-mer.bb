@@ -1,6 +1,6 @@
 SUMMARY = "Qt 5 and QML bindings for the Bluez5 dbus API"
 SECTION = "libs"
-LICENSE = "LGPLv2.1"
+LICENSE = "LGPL-2.1-only"
 LIC_FILES_CHKSUM = "file://bluez-qt/COPYING.LIB;md5=4fbd65380cdd255951079008b364516c"
 
 DEPENDS = "qtbase qtdeclarative qtbase-native"

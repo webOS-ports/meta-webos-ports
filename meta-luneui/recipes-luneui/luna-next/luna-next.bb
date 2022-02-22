@@ -1,7 +1,7 @@
 DESCRIPTION = "Next generation webOS UI which meant to be a complete replacement for \
 LunaSysMgr/WebAppMgr and is completely based on well known open source technologies like \
 Qt 5 and Wayland."
-LICENSE = "GPL-3.0 & LGPL-2.1 & Apache-2.0"
+LICENSE = "GPL-3.0-only & LGPL-2.1-only & Apache-2.0"
 LIC_FILES_CHKSUM = " \
     file://COPYING;md5=d32239bcb673463ab874e80d47fae504 \
     file://COPYING.LGPL;md5=fbc093901857fcd118f065f900982c24 \

@@ -1,5 +1,5 @@
 SUMMARY = "Card shell implementation for the next generation webOS UI"
-LICENSE = "GPL-3.0 & Apache-2.0"
+LICENSE = "GPL-3.0-only & Apache-2.0"
 LIC_FILES_CHKSUM = "file://COPYING;md5=bc807597ba062cd149d362d22d3061e7"
 
 RDEPENDS:${PN} += " \

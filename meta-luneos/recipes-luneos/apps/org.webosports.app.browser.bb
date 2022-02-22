@@ -1,6 +1,6 @@
 SUMMARY = "Browser application written from scratch for webOS ports"
 SECTION = "webos/apps"
-LICENSE = "Apache-2.0 & GPL-3.0"
+LICENSE = "Apache-2.0 & GPL-3.0-only"
 LIC_FILES_CHKSUM = " \
     file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10 \
     file://COPYING;md5=4781c67bae2fdeb25779230fb39e1f69 \

@@ -1,5 +1,5 @@
 SUMMARY = "Application to start and monitor the update of the WebOS-Ports system"
-LICENSE = "GPL-3.0"
+LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://COPYING.txt;md5=d32239bcb673463ab874e80d47fae504"
 
 DEPENDS = "qtbase qtdeclarative"

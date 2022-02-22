@@ -6,7 +6,7 @@ SRC_URI = "git://github.com/webos-ports/FreeImage;branch=herrie/gcc6-arm;protoco
 
 SRCREV = "c01653d6b12939877e79d2787d3695865e8b1ee3"
 
-LICENSE = "GPLv2"
+LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = " \
     file://license-fi.txt;md5=7d2690b4d6d7dd53d69a773664bc4850 \
     file://license-gplv2.txt;md5=0440c487be0c0200c36caf975ab31174 \

@@ -1,6 +1,6 @@
 SUMMARY = "LuneOS Location service"
 SECTION = "webos/services"
-LICENSE = "GPLv3+ & Apache-2.0"
+LICENSE = "GPL-3.0-or-later & Apache-2.0"
 LIC_FILES_CHKSUM = " \
 	file://${COMMON_LICENSE_DIR}/GPL-3.0-only;md5=c79ff39f19dfec6d293b95dea7b07891 \
 	file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10 \

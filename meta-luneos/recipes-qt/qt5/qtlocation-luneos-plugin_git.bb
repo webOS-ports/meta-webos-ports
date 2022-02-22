@@ -1,5 +1,5 @@
 SUMMARY = "QtPosition LuneOS plugin for qtlocation"
-LICENSE = "LGPL-3.0"
+LICENSE = "LGPL-3.0-only"
 LIC_FILES_CHKSUM = " \
     file://LICENSE.LGPLv3;md5=c1939be5579666be947371bc8120425f \
 "

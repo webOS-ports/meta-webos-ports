@@ -2,7 +2,7 @@ SUMMARY = "Waydroid uses a container-based approach to boot a full Android syste
 DESCRIPTION = "Runtime for Android applications which runs a full Android system \
     in a container using Linux namespaces (user, ipc, net, mount) to \
     separate the Android system fully from the host."
-LICENSE = "GPLv3"
+LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=1ebbd3e34237af26da5dc08a4e440464"
 
 SECTION = "webos/support"

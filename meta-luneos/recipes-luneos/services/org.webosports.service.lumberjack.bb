@@ -1,6 +1,6 @@
 SUMMARY = "Lumberjack is an easy tool for viewing logfiles for a specific application."
 DESCRIPTION = "This is the service component needed for the lumberjack application"
-LICENSE = "GPLv2"
+LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=eb723b61539feef013de476e68b5c50a"
 
 DEPENDS = "luna-service2 glib-2.0 json-c"

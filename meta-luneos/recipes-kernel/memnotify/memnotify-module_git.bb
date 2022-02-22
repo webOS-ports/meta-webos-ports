@@ -1,6 +1,6 @@
 SECTION = "core"
 SUMMARY = "System-wide memory meter and notifier pseudo-device"
-LICENSE = "GPL-2.0"
+LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://memnotify.c;beginline=1;endline=15;md5=ccb461cd1a6a487a14850dd387a794a4"
 
 DEPENDS = "virtual/kernel"
