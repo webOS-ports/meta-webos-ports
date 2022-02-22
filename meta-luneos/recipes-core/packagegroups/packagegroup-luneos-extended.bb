@@ -43,7 +43,6 @@ RDEPENDS:${PN} = " \
   org.webosports.app.preware \
   org.webosports.service.ipkg \
   \
-  org.webosports.app.browser \
   org.webosports.app.calculator \
   org.webosports.app.camera \
   org.webosports.app.contacts \
