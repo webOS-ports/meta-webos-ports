@@ -172,6 +172,7 @@ QEMU_RDEPENDS = " \
     kernel-module-snd-intel8x0 \
     libpci \
     rng-tools \
+    vmwgfx-layout \
 "
 
 RDEPENDS:${PN}:append:qemux86 = " ${QEMU_RDEPENDS}"
