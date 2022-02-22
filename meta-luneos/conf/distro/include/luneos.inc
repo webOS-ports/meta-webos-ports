@@ -105,8 +105,8 @@ module_conf_virtio-gpu:qemux86-64 = "blacklist virtio-gpu"
 # Prevent vmwgfx from loading, it conflicts with vboxvideo
 KERNEL_MODULE_PROBECONF:append:qemux86 = " vmwgfx"
 KERNEL_MODULE_PROBECONF:append:qemux86-64 = " vmwgfx"
-module_conf_vmwgfx:qemux86 = "blacklist vmwgfx"
-module_conf_vmwgfx:qemux86-64 = "blacklist vmwgfx"
+#module_conf_vmwgfx:qemux86 = "blacklist vmwgfx"
+#module_conf_vmwgfx:qemux86-64 = "blacklist vmwgfx"
 
 USER_CLASSES ?= ""
 
