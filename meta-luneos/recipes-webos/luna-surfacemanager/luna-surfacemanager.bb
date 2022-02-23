@@ -52,7 +52,7 @@ do_install:append() {
     fi
     
     # This dummy import conflicts with the ${OE_QMAKE_PATH_QML}/WebOSCompositor import we use for luna-next-cardshell
-    rm -rf ${OE_QMAKE_PATH_QML}/WebOSCompositorBase/imports/WebOSCompositor
+    rm -rf ${D}${OE_QMAKE_PATH_QML}/WebOSCompositorBase/imports/WebOSCompositor
     
     install -d ${D}${systemd_system_unitdir}
     install -v -m 0644 ${WORKDIR}/surface-manager.service ${D}${systemd_system_unitdir}/surface-manager.service
