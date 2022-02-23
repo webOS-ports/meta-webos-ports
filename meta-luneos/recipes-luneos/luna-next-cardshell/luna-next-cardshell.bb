@@ -15,14 +15,18 @@ RDEPENDS:${PN} += " \
     luna-surfacemanager-base \
 "
 
-PV = "0.5.1-4+git${SRCPV}"
-SRCREV = "e65ecdafae8c02d21d61c71fc619a91677294d76"
+PV = "0.6-0+git${SRCPV}"
+SRCREV = "88d4bb4a46fd7b1541ef500a46d9ae1745888752"
 
 inherit webos_ports_repo
 inherit webos_cmake
+inherit qmake5_paths
 inherit webos_tweaks
 inherit webos_filesystem_paths
 
+EXTRA_OECMAKE += "-DLUNA_NEXT_SHELL_DIR=${OE_QMAKE_PATH_QML}/WebOSCompositor"
+
+WEBOS_GIT_PARAM_BRANCH = "tofe/lsm"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
@@ -45,5 +49,5 @@ do_install:append() {
     fi
 }
 
-FILES:${PN} += "${webos_prefix}/luna-next/shells/card \
+FILES:${PN} += "${OE_QMAKE_PATH_QML}/WebOSCompositor \
                 ${webos_sysconfdir}"
