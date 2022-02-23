@@ -13,10 +13,11 @@ RDEPENDS:${PN} += " \
     libqofono \
     luna-surfacemanager-conf \
     luna-surfacemanager-base \
+    luna-next-qmlplugins \
 "
 
 PV = "0.6-0+git${SRCPV}"
-SRCREV = "88d4bb4a46fd7b1541ef500a46d9ae1745888752"
+SRCREV = "1b45bf108ac62d8aa2a034b0872204cb6812ff11"
 
 inherit webos_ports_repo
 inherit webos_cmake
