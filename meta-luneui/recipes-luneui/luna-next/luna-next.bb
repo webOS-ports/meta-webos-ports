@@ -34,4 +34,6 @@ inherit webos_systemd
 
 RDEPENDS:${PN} = "luna-next-conf xkeyboard-config"
 
-FILES:${PN} += "${OE_QMAKE_PATH_QML}/LunaNext"
+PACKAGES =+ "${PN}-qmlplugins"
+
+FILES:${PN}-qmlplugins += "${OE_QMAKE_PATH_QML}/LunaNext"
