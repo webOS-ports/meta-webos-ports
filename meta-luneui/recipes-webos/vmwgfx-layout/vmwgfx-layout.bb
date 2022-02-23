@@ -15,7 +15,8 @@ inherit webos_cmake
 
 SRC_URI = "git://github.com/sparkleholic/vmwgfx-layout.git;branch=master;protocol=https \
            file://0001-Set-2-outputs-to-call-DRM_IOCTL_VMW_UPDATE_LAYOUT-fo.patch \
-"
+           file://0002-Setup-service-for-LuneOS.patch \
+           "
 S = "${WORKDIR}/git"
 
 SYSTEMD_SERVICE:${PN} = "vmwgfx-setlayout.service"
