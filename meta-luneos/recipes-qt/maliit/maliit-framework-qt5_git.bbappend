@@ -24,8 +24,8 @@ do_install:append() {
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${WORKDIR}/maliit-server.service ${D}${systemd_unitdir}/system/
 
-    install -d ${D}${sysconfdir}/luna-next
-    install -m 0644 ${WORKDIR}/maliit-env.conf ${D}${sysconfdir}/luna-next/
+    install -d ${D}${sysconfdir}/maliit
+    install -m 0644 ${WORKDIR}/maliit-env.conf ${D}${sysconfdir}/maliit/
 
     install -d ${D}${localstatedir}/lib/maliit
 }
