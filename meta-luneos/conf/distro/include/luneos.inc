@@ -84,29 +84,16 @@ DISTRO_EXTRA_RDEPENDS:append:qemuall = " kernel-module-vboxvideo kernel-module-v
 
 MACHINE_ESSENTIAL_EXTRA_RDEPENDS:remove:qemuall = "v86d"
 
-KERNEL_MODULE_AUTOLOAD:append:qemux86 = " vboxvideo vboxguest vboxsf"
-KERNEL_MODULE_PROBECONF:append:qemux86 = " vboxvideo"
-KERNEL_MODULE_AUTOLOAD:append:qemux86-64 = " vboxvideo vboxguest vboxsf"
-KERNEL_MODULE_PROBECONF:append:qemux86-64 = " vboxvideo"
-
-module_conf_vboxvideo:qemux86 = "options vboxvideo modeset=1"
-module_conf_vboxvideo:qemux86-64 = "options vboxvideo modeset=1"
-
-# Prevent uvesafb from loading, it conflicts with vboxvideo
-KERNEL_MODULE_PROBECONF:append:qemux86 = " uvesafb"
-KERNEL_MODULE_PROBECONF:append:qemux86-64 = " uvesafb"
-module_conf_uvesafb:qemux86 = "blacklist uvesafb"
-module_conf_uvesafb:qemux86-64 = "blacklist uvesafb"
-# Prevent virtio-gpu from loading, it conflicts with vboxvideo
-KERNEL_MODULE_PROBECONF:append:qemux86 = " virtio-gpu"
-KERNEL_MODULE_PROBECONF:append:qemux86-64 = " virtio-gpu"
-module_conf_virtio-gpu:qemux86 = "blacklist virtio-gpu"
-module_conf_virtio-gpu:qemux86-64 = "blacklist virtio-gpu"
-# Prevent vmwgfx from loading, it conflicts with vboxvideo
+KERNEL_MODULE_AUTOLOAD:append:qemux86 = " vmwgfx vboxguest vboxsf"
 KERNEL_MODULE_PROBECONF:append:qemux86 = " vmwgfx"
+KERNEL_MODULE_AUTOLOAD:append:qemux86-64 = " vmwgfx vboxguest vboxsf"
 KERNEL_MODULE_PROBECONF:append:qemux86-64 = " vmwgfx"
-#module_conf_vmwgfx:qemux86 = "blacklist vmwgfx"
-#module_conf_vmwgfx:qemux86-64 = "blacklist vmwgfx"
+
+# Prevent vboxvideo from loading, it conflicts with vmwgfx
+KERNEL_MODULE_PROBECONF:append:qemux86 = " vboxvideo"
+KERNEL_MODULE_PROBECONF:append:qemux86-64 = " vboxvideo"
+module_conf_vboxvideo:qemux86 = "blacklist vboxvideo"
+module_conf_vboxvideo:qemux86-64 = "blacklist vboxvideo"
 
 USER_CLASSES ?= ""
 
