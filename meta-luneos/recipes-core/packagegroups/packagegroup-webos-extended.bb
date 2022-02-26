@@ -16,6 +16,7 @@ VIRTUAL-RUNTIME_librdx ?= "rdxd"
 VIRTUAL-RUNTIME_webos-compositor ?= "luna-surfacemanager"
 VIRTUAL-RUNTIME_webos-ime ?= "webos-keyboard"
 VIRTUAL-RUNTIME_novacomd ?= "novacomd"
+VIRTUAL-RUNTIME_com.webos.app.browser ?= "com.webos.app.enactbrowser"
 VIRTUAL-RUNTIME_com.webos.app.notification ?= "com.webos.app.notification"
 VIRTUAL-RUNTIME_com.webos.app.volume ?= "com.webos.app.volume"
 
@@ -78,6 +79,7 @@ WEBOS_PACKAGESET_UI = " \
     ${VIRTUAL-RUNTIME_webappmanager} \
     ${VIRTUAL-RUNTIME_webos-compositor} \
     ${VIRTUAL-RUNTIME_webos-ime} \
+    ${VIRTUAL-RUNTIME_com.webos.app.browser} \
     ${VIRTUAL-RUNTIME_com.webos.app.notification} \
     ${VIRTUAL-RUNTIME_com.webos.app.volume} \
 "
