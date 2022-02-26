@@ -31,6 +31,10 @@ BAD_RECOMMENDATIONS = "update-rc.d"
 
 VIRTUAL-RUNTIME_stat = "busybox"
 
+# Used for testing IME Manager from webOS OSE instead of webos-keyboard
+# VIRTUAL-RUNTIME_webos-ime = "webos-keyboard"
+VIRTUAL-RUNTIME_webos-ime = "imemanager"
+
 # Make wam preferred provider for webappmanager-webos
 PREFERRED_PROVIDER_webappmanager-webos ?= "wam"
 
