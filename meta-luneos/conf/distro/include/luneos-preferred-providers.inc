@@ -34,11 +34,5 @@ VIRTUAL-RUNTIME_stat = "busybox"
 # Make wam preferred provider for webappmanager-webos
 PREFERRED_PROVIDER_webappmanager-webos ?= "wam"
 
-# Use Enactbrowser by default, except for armv45
 VIRTUAL-RUNTIME_com.webos.app.browser = "com.webos.app.enactbrowser"
-VIRTUAL-RUNTIME_com.webos.app.browser:armv4 = ""
-VIRTUAL-RUNTIME_com.webos.app.browser:armv5 = ""
-
 VIRTUAL-RUNTIME_webappmanager = "wam"
-VIRTUAL-RUNTIME_webappmanager:armv4 = ""
-VIRTUAL-RUNTIME_webappmanager:armv5 = ""
