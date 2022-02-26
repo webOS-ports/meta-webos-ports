@@ -38,5 +38,5 @@ VIRTUAL-RUNTIME_webos-ime = "imemanager"
 # Make wam preferred provider for webappmanager-webos
 PREFERRED_PROVIDER_webappmanager-webos ?= "wam"
 
-VIRTUAL-RUNTIME_com.webos.app.browser = "com.webos.app.enactbrowser"
+VIRTUAL-RUNTIME_com.webos.app.browser ?= "com.webos.app.enactbrowser"
 VIRTUAL-RUNTIME_webappmanager = "wam"
