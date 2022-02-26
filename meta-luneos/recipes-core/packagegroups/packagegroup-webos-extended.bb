@@ -16,6 +16,8 @@ VIRTUAL-RUNTIME_librdx ?= "rdxd"
 VIRTUAL-RUNTIME_webos-compositor ?= "luna-surfacemanager"
 VIRTUAL-RUNTIME_webos-ime ?= "webos-keyboard"
 VIRTUAL-RUNTIME_novacomd ?= "novacomd"
+VIRTUAL-RUNTIME_com.webos.app.notification ?= "com.webos.app.notification"
+VIRTUAL-RUNTIME_com.webos.app.volume ?= "com.webos.app.volume"
 
 # We're not using VIRTUAL-RUNTIME because VIRTUAL-RUNTIME is usually used for only
 # one item and changing that in <distro>-preferred-providers.inc would require
@@ -76,6 +78,8 @@ WEBOS_PACKAGESET_UI = " \
     ${VIRTUAL-RUNTIME_webappmanager} \
     ${VIRTUAL-RUNTIME_webos-compositor} \
     ${VIRTUAL-RUNTIME_webos-ime} \
+    ${VIRTUAL-RUNTIME_com.webos.app.notification} \
+    ${VIRTUAL-RUNTIME_com.webos.app.volume} \
 "
 
 # nyx-lib needs nyx-modules at runtime, but a runtime dependency is not defined
