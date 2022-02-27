@@ -111,6 +111,8 @@ RDEPENDS:${PN} = " \
     ${WEBOS_PACKAGESET_ENYO_1} \
     event-monitor \
     filecache \
+    gssdp \
+    gupnp \
     ${VIRTUAL-RUNTIME_librdx} \
     ${VIRTUAL-RUNTIME_novacomd} \
     ilib-qml-plugin \
@@ -130,6 +132,7 @@ RDEPENDS:${PN} = " \
     sleepd \
     webos-connman-adapter \
     com.webos.service.pdm \
+    com.webos.service.mediaindexer \
     ${VIRTUAL-RUNTIME_appinstalld} \    
     ${VIRTUAL-RUNTIME_event-monitor-network} \
     ${VIRTUAL-RUNTIME_initscripts} \
