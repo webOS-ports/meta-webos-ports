@@ -16,7 +16,7 @@ inherit pkgconfig
 inherit webos_system_bus
 inherit webos_systemd
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webOS-OSE-wam-lsm"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webOS-ports/webOS-OSE-wam-lsm"
 S = "${WORKDIR}/git"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
