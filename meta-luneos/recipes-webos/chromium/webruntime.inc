@@ -12,9 +12,7 @@ inherit pkgconfig
 inherit webruntime_apps
 inherit webos_filesystem_paths
 inherit webos_lttng
-#inherit webos_machine_dep
 inherit webos_machine_impl_dep
-#inherit webos_prerelease_dep
 inherit webos_system_bus
 
 DEPENDS = "virtual/gettext wayland wayland-native luna-service2 pixman freetype fontconfig openssl pango cairo icu webos-wayland-extensions libxkbcommon libexif dbus pciutils udev libcap alsa-lib virtual/egl elfutils-native libdrm atk gperf-native gconf libwebosi18n bison-native xorgproto nss nspr curl nspr-native nss-native pmloglib glib-2.0-native python-six-native python-beautifulsoup4-native python-lxml-native python-html5lib-native python-webencodings-native"
@@ -250,7 +248,7 @@ do_install() {
     install_chromium_manifest
 }
 
-do_install:append:webos() {
+do_install:append() {
     install_ls2_roles_acg ${APP_SHELL_RUNTIME}
 }
 
