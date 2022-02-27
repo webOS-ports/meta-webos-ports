@@ -19,14 +19,14 @@ inherit webos_configure_manifest
 inherit systemd
 inherit pkgconfig
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webOS-ports/webOS-OSE-wam-lsm"
 S = "${WORKDIR}/git"
 
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE:${PN} = "luna-sys-service.service"
 
 PV = "4.4.0-1+git${SRCPV}"
-SRCREV = "5b2235c08971852398d2d5e947ca1c005a1832a8"
+SRCREV = "afb1e9e15eb703e91c9a2aa1b65a866e81bfb621"
 
 do_install:append() {
     install -d ${D}${datadir}/localization/${BPN}
