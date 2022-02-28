@@ -16,25 +16,18 @@ RDEPENDS:${PN} += "util-linux"
 VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_cpushareholder}"
 
-#WEBOS_VERSION = "1.0.1-22_d311b9eebde64e48a494be910be2eeb9cec799cc"
-PV = "1.0.2-55"
-SRCREV = "10902af5c10017031f2f46ccbdf54c5fe37a4d4e"
+PV = "1.0.2-55+git${SRCPV}"
+SRCREV = "c7b4bc583d59b0cf0a8bfc245b4ef1020dd37e5c"
 PR = "r30"
 
 WAM_BUILD_SYSTEM = "webos_qmake5"
 WAM_BUILD_SYSTEM:webos = "webos_cmake"
 
-#inherit ${WAM_BUILD_SYSTEM}
 inherit webos_cmake
 inherit pkgconfig
-#inherit webos_enhanced_submissions
 inherit webos_system_bus
-#inherit webos_machine_dep
 inherit systemd
-#inherit webos_qmake5
 inherit webos_lttng
-#inherit webos_distro_variant_dep
-#inherit webos_distro_dep
 inherit webos_ports_repo
 
 SYSTEMD_PACKAGES = "${PN}"
