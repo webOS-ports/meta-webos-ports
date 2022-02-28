@@ -9,6 +9,7 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 SRC_URI = "file://surface-manager.env \
            file://surface-manager.service \
           "
+SRC_URI:append:qemuall = "file://99-virtualbox-mouse.rules"
 
 inherit systemd
 SYSTEMD_SERVICE:${PN} = "surface-manager.service"
@@ -21,7 +22,14 @@ do_install() {
     install -v -m 0644 ${WORKDIR}/surface-manager.service ${D}${systemd_system_unitdir}/surface-manager.service
 }
 
+do_install:append:qemuall() {
+    install -d ${D}${sysconfdir}/udev/rules.d
+    install -v -m 0644 ${WORKDIR}/99-virtualbox-mouse.rules ${D}${sysconfdir}/udev/rules.d/99-virtualbox-mouse.rules
+}
+
 FILES:${PN} += " \
     ${systemd_system_unitdir} \
     ${sysconfdir}/surface-manager.d \
 "
+
+FILES:${PN}:append:qemuall = "${sysconfdir}/udev/rules.d"
