@@ -22,7 +22,7 @@ inherit webos_ports_ose_repo
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
            file://0001-Fix-build-for-Qt-5.15.2.patch \
-           file://surface-manager.service \
+           file://0002-Add-capability-to-pass-extra-options-to-surface-mana.patch \
            "
 S = "${WORKDIR}/git"
 
@@ -53,9 +53,6 @@ do_install:append() {
     
     # This dummy import conflicts with the ${OE_QMAKE_PATH_QML}/WebOSCompositor import we use for luna-next-cardshell
     rm -rf ${D}${OE_QMAKE_PATH_QML}/WebOSCompositorBase/imports/WebOSCompositor
-    
-    install -d ${D}${systemd_system_unitdir}
-    install -v -m 0644 ${WORKDIR}/surface-manager.service ${D}${systemd_system_unitdir}/surface-manager.service
 }
 
 VIRTUAL-RUNTIME_gpu-libs ?= ""
@@ -63,7 +60,6 @@ RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_gpu-libs}"
 
 inherit webos_system_bus
 inherit webos_qmllint
-inherit systemd
 
 # qt-features-webos have its own logic to install system bus files reason for
 # that is because only qmake knows where substitued files will be placed.
@@ -79,20 +75,7 @@ PACKAGECONFIG[cursor-theme] = "CONFIG+=cursor_theme,,"
 
 PACKAGECONFIG = "compositor cursor-theme"
 
-PACKAGES =+ "${PN}-conf ${PN}-base ${PN}-base-tests"
-
-SYSTEMD_SERVICE:${PN} = "surface-manager.service"
-
-FILES:${PN}-conf += " \
-    ${sysconfdir}/surface-manager.d/ \
-    ${systemd_system_unitdir} \
-    ${webos_sysbus_apipermissionsdir} \
-    ${webos_sysbus_groupsdir} \
-    ${webos_sysbus_servicedir} \
-    ${webos_sysbus_manifestsdir}/luna-surfacemanager.manifest.json \
-    ${webos_sysbus_permissionsdir}/com.webos.surfacemanager.perm.json \
-    ${webos_sysbus_rolesdir}/com.webos.surfacemanager.role.json \
-"
+PACKAGES =+ "${PN}-base ${PN}-base-tests"
 
 FILES:${PN}-base += " \
     ${OE_QMAKE_PATH_QML}/WebOSCompositorBase/ \
@@ -100,6 +83,13 @@ FILES:${PN}-base += " \
     ${OE_QMAKE_PATH_BINS}/ \
     ${datadir}/icons/ \
     ${datadir}/webos-keymap/webos-keymap.qmap \
+    ${sysconfdir}/surface-manager.d/ \
+    ${webos_sysbus_apipermissionsdir} \
+    ${webos_sysbus_groupsdir} \
+    ${webos_sysbus_servicedir} \
+    ${webos_sysbus_manifestsdir}/luna-surfacemanager.manifest.json \
+    ${webos_sysbus_permissionsdir}/com.webos.surfacemanager.perm.json \
+    ${webos_sysbus_rolesdir}/com.webos.surfacemanager.role.json \
 "
 
 FILES:${PN}-base-tests += " \
@@ -110,4 +100,4 @@ FILES:${PN}-base-tests += " \
     ${webos_testsdir}/${BPN}/ \
 "
 
-RDEPENDS:${PN}-base += "xkeyboard-config qml-webos-framework qml-webos-bridge qml-webos-components"
+RDEPENDS:${PN}-base += "luna-surfacemanager-conf xkeyboard-config qml-webos-framework qml-webos-bridge qml-webos-components"
