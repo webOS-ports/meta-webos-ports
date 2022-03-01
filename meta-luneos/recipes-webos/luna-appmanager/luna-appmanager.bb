@@ -18,7 +18,7 @@ RDEPENDS:${PN} += " \
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=herrie/OSE-wam-honister-chromium87"
 
-SRCREV = "2f8ea2943594752149047c52484574fca2b38b5d"
+SRCREV = "6aada78675b50bb39666df8a7ac2c81e9990c0b8"
 
 PV = "1.0.0-22+git${SRCPV}"
 
