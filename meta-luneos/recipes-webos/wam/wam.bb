@@ -17,7 +17,7 @@ VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_cpushareholder}"
 
 PV = "1.0.2-55+git${SRCPV}"
-SRCREV = "c7b4bc583d59b0cf0a8bfc245b4ef1020dd37e5c"
+SRCREV = "04fd13f2a909ffc65f3a3b6d4ba56b551f3b0e9d"
 PR = "r30"
 
 WAM_BUILD_SYSTEM = "webos_qmake5"
