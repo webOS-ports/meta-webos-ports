@@ -18,6 +18,7 @@ PACKAGECONFIG[libim] = "CONFIG+=enable-libim,CONFIG-=enable-libim,libim"
 PV = "0.99.0+20-99+git${SRCPV}"
 SRCREV = "19d78446912905b28a7ee8ae7dda112925220ac2"
 
+inherit pkgconfig
 inherit webos_qmake5
 inherit webos_machine_impl_dep
 inherit webos_filesystem_paths
