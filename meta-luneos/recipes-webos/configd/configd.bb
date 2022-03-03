@@ -11,6 +11,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=89aea4e17d99a7cacdbeed46a0096b10 \
 DEPENDS = "luna-service2 pmloglib glib-2.0 libpbnjson gtest"
 RDEPENDS:${PN} += "configd-data"
 
+inherit pkgconfig
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_systemd
