@@ -63,6 +63,9 @@ PR = "r7"
 # Skip unneeded tasks
 do_configure[noexec] = "1"
 
+# Workaround for network access issue during do_compile task
+do_compile[network] = "1"
+
 do_compile() {
     cd ${S}/sandstone
     ${ENACT_JSDOC_TO_TS}
