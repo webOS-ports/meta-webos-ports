@@ -46,6 +46,9 @@ SRCREV_jsdoc-to-ts = "91e3709da01f4a8e0d57c2ed80d068789acf37eb"
 # Skip unneeded tasks
 do_configure[noexec] = "1"
 
+# Workaround for network access issue during do_compile task
+do_compile[network] = "1"
+
 # npm install on cli & jsdoc-to-ts
 do_compile() {
     bbnote "Enact cli & jsdoc-to-ts npm install"
