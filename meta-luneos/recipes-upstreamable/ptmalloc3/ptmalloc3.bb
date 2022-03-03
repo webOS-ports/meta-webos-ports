@@ -1,10 +1,14 @@
-# Copyright (c) 2012-2013 LG Electronics, Inc.
+# Copyright (c) 2012-2022 LG Electronics, Inc.
 
 SECTION = "libs"
 DESCRIPTION = "Multi-thread malloc implementation"
 HOMEPAGE = "http://www.malloc.de/en/"
-LICENSE = "BSD"
-LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/BSD;md5=3775480a712fc46a69647678acb234cb"
+LICENSE = "LGPL-2.0-only"
+LIC_FILES_CHKSUM = "file://COPYRIGHT;md5=5c8ad593874e48b27ded5334b58f1e0c \
+    file://README;md5=f97028d3ccde7cc91d7277d5e715173d \
+"
+
+PR = "r4"
 
 SRC_URI = "http://www.malloc.de/malloc/ptmalloc3-current.tar.gz \
            file://ptmalloc3-current-webos.patch "
@@ -12,7 +16,7 @@ SRC_URI = "http://www.malloc.de/malloc/ptmalloc3-current.tar.gz \
 SRC_URI[md5sum] = "c0b9dd5f16f8eae979166dc74b60015c"
 SRC_URI[sha256sum] = "f353606f24a579597a1ff5b51009a45d75da047b3975d82c3f613f85bcf312db"
 
-S = "${WORKDIR}/${PN}"
+S = "${WORKDIR}/${BPN}"
 
 do_compile () {
     make -f Makefile.palm CC="$CC"
@@ -26,7 +30,7 @@ do_install() {
     install -m 666 ${S}/mmap_dev_heap.h ${D}/${includedir}
     install -m 666 ${S}/malloc-2.8.3.h  ${D}/${includedir}
     install -m 666 ${S}/malloc_utils.h  ${D}/${includedir}
-    cp -a   ${S}/sysdeps         ${D}/${includedir}
+    cp -R --no-dereference --preserve=mode,links -v ${S}/sysdeps         ${D}/${includedir}
     rm ${D}/${includedir}/sysdeps/generic/atomic.h
 }
 
