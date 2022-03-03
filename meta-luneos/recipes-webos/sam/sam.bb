@@ -14,6 +14,7 @@ RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_webos-customization}"
 
 VIRTUAL-RUNTIME_webos-customization ?= ""
 
+inherit pkgconfig
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_systemd
