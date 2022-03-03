@@ -9,8 +9,6 @@ require conf/distro/include/luneos-sdk.inc
 
 require conf/distro/include/no-static-libs.inc
 
-require conf/distro/include/python2-target-recipes-blacklist.inc
-
 #
 # Form the codename of a release (WEBOS_DISTRO_RELEASE_CODENAME) from a codename
 # that represents the major set of features of the platform
