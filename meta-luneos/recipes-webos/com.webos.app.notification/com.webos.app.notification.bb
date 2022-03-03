@@ -18,6 +18,9 @@ SRCREV = "7096417c6f83ca4b9016defff9eabc8ff2564c39"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
+# Workaround for network access issue during do_compile task
+do_compile[network] = "1"
+
 WEBOS_ENACTJS_SHRINKWRAP_OVERRIDE = "false"
 
 WEBOS_ENACTJS_APP_ID = "com.webos.app.notification"
