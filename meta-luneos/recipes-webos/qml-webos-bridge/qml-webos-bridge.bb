@@ -20,6 +20,7 @@ inherit webos_qmake5
 #inherit webos_enhanced_submissions
 inherit webos_qmllint
 inherit webos_public_repo
+inherit pkgconfig
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
