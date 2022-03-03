@@ -80,6 +80,9 @@ PR = "r15"
 # Skip unneeded tasks
 do_configure[noexec] = "1"
 
+# Workaround for network access issue during do_compile task
+do_compile[network] = "1"
+
 do_compile() {
     cd ${S}
     rm -fr node_modules
