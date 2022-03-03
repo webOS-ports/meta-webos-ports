@@ -18,6 +18,9 @@ SRCREV = "b4079abb02f11a3b0a655a9727ca7acd28737534"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
+# Workaround for network access issue during do_compile task
+do_compile[network] = "1"
+
 WEBOS_ENACTJS_APP_ID = "com.webos.app.videoplayer"
 WEBOS_ENACTJS_SHRINKWRAP_OVERRIDE = "false"
 WEBOS_LOCALIZATION_DATA_PATH = "${S}"
