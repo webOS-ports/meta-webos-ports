@@ -25,6 +25,9 @@ SRCREV = "86b83a1bbfa3f0585300bf57c3472af000e8a1fa"
 # Skip the unwanted tasks
 do_configure[noexec] = "1"
 
+# Workaround for network access issue during do_compile task
+do_compile[network] = "1"
+
 do_compile() {
     ${WEBOS_NPM_BIN} ${WEBOS_NPM_INSTALL_FLAGS} install
 }
