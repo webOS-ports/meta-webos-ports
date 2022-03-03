@@ -9,18 +9,13 @@ require exportbuildscript.inc
 
 inherit gettext
 inherit pkgconfig
+inherit python3native
 inherit webruntime_apps
 inherit webos_filesystem_paths
 inherit webos_lttng
-inherit webos_machine_impl_dep
 inherit webos_system_bus
 
-DEPENDS = "virtual/gettext wayland wayland-native luna-service2 pixman freetype fontconfig openssl pango cairo icu webos-wayland-extensions libxkbcommon libexif dbus pciutils udev libcap alsa-lib virtual/egl elfutils-native libdrm atk gperf-native gconf libwebosi18n bison-native xorgproto nss nspr curl nspr-native nss-native pmloglib glib-2.0-native python-six-native python-beautifulsoup4-native python-lxml-native python-html5lib-native python-webencodings-native"
-
-# Build for raspberrypi4
-# Mesa 19.1.1 uses xorgproto instead of xproto series.
-DEPENDS:remove:raspberrypi4 = " xproto"
-DEPENDS:append:raspberrypi4 = " xorgproto"
+DEPENDS = "virtual/gettext wayland wayland-native luna-service2 pixman freetype fontconfig openssl pango cairo icu webos-wayland-extensions libxkbcommon libexif dbus pciutils udev libcap alsa-lib virtual/egl elfutils-native libdrm atk gperf-native gconf libwebosi18n bison-native xorgproto nss nspr curl nspr-native nss-native pmloglib glib-2.0-native python3-six-native python3-beautifulsoup4-native python3-soupsieve-native python3-lxml-native python3-html5lib-native python3-webencodings-native"
 
 INC_PR = "r52"
 # Enable this in webos-local.conf or in recipe to build
@@ -43,8 +38,10 @@ WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files/sysbus"
 WEBOS_SYSTEM_BUS_MANIFEST_TYPE = "PASS"
 
-PACKAGECONFIG ?= "jumbo neva-media"
-PACKAGECONFIG:append:hardware = " gstreamer umediaserver gav"
+PACKAGECONFIG_NEVA_WEBRTC ?= "neva-webrtc"
+PACKAGECONFIG_MEDIA ?= "neva-media gstreamer umediaserver gav"
+PACKAGECONFIG ?= ""
+#PACKAGECONFIG:append:hardware = " ${PACKAGECONFIG_MEDIA} ${PACKAGECONFIG_NEVA_WEBRTC}"
 PACKAGECONFIG[gstreamer] = "use_gst_media=true enable_webm_video_codecs=false,use_gst_media=false,g-media-pipeline"
 PACKAGECONFIG[umediaserver] = ",,umediaserver"
 # Options to enable debug build. Add this PACKAGECONFIG to webos-local.conf to enable debug build
@@ -55,13 +52,6 @@ PACKAGECONFIG[neva-media] = "use_neva_media=true, use_neva_media=false"
 PACKAGECONFIG[av1-codec] = "enable_av1_decoder=true, enable_av1_decoder=false"
 PACKAGECONFIG[gav] = "use_gav=true,use_gav=false"
 PACKAGECONFIG[neva-webrtc] = "use_neva_webrtc=true,use_neva_webrtc=false,media-codec-interface,media-codec-interface"
-
-# Set a default value for jumbo file merge of 8. This should be good for build
-# servers and workstations with a big number of cores. In case build is
-# happening in a machine with less cores but still enough RAM a good value could
-# be 50.
-JUMBO_FILE_MERGE_LIMIT="8"
-PACKAGECONFIG[jumbo] = "use_jumbo_build=true jumbo_file_merge_limit=${JUMBO_FILE_MERGE_LIMIT}, use_jumbo_build=false"
 
 PACKAGECONFIG:append = " ${@bb.utils.contains('WEBOS_LTTNG_ENABLED', '1', 'lttng', '', d)}"
 PACKAGECONFIG[lttng] = "use_lttng=true,use_lttng=false,lttng-ust,lttng-tools lttng-modules babeltrace"
@@ -79,8 +69,6 @@ GN_ARGS:append = " \
     use_local_storage_tracker=true\
     use_ozone=true\
     use_pmlog=true\
-    use_system_debugger_abort=true\
-    use_xkbcommon=true\
     ${WAM_DEMO_CONFARGS}\
     ${PACKAGECONFIG_CONFARGS}\
 "
@@ -94,10 +82,6 @@ GN_ARGS += "\
     use_gnome_keyring=false\
     use_pulseaudio=false\
 "
-
-# Disable closure_compile
-# Else we need HOSTTOOLS += "java"
-GN_ARGS:append = " closure_compile=false"
 
 # TODO: drop this after we migrate to ubuntu 16.04 or above
 GN_ARGS += "\
@@ -180,11 +164,11 @@ modify_run_app_shell() {
 
 modify_run_app_shell:append:qemux86() {
     # Disable media hardware acceleration
-    sed -i '/--disable-web-security\\/a\ --disable-web-media-player-neva\\' ${D}/usr/bin/app-shell/run_app_shell
+    sed -i '/--disable-web-security\\/a\ --disable-web-media-player-neva\\' ${D}${APP_SHELL_RUNTIME_RUN_SCRIPT}
 }
 modify_run_app_shell:append:qemux86-64() {
     # Disable media hardware acceleration
-    sed -i '/--disable-web-security\\/a\ --disable-web-media-player-neva\\' ${D}/usr/bin/app-shell/run_app_shell
+    sed -i '/--disable-web-security\\/a\ --disable-web-media-player-neva\\' ${D}${APP_SHELL_RUNTIME_RUN_SCRIPT}
 }
 
 WINDOW_SIZE ?= "1920,1080"
