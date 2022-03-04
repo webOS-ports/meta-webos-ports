@@ -10,3 +10,4 @@
 # used is to blacklist it.
 
 PNBLACKLIST[vboxguestdrivers] = "vboxguest is also in the kernel and we don't really need vboxsf"
+PNBLACKLIST[qtwebengine] = "qtwebengine is now replaced by WebOS OSE webruntime"

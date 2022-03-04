@@ -9,18 +9,35 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 inherit packagegroup
 
-VIRTUAL-RUNTIME_webappmanager ?= "luna-webappmanager"
+#VIRTUAL-RUNTIME_webappmanager ?= "luna-webappmanager"
+VIRTUAL-RUNTIME_webappmanager ?= "wam"
 VIRTUAL-RUNTIME_initscripts ?= "initscripts"
 VIRTUAL-RUNTIME_librdx ?= "rdxd"
-VIRTUAL-RUNTIME_webos-compositor ?= "luna-next"
-VIRTUAL-RUNTIME_webos-ime ?= "webos-keyboard"
+VIRTUAL-RUNTIME_webos-compositor ?= "luna-surfacemanager"
+VIRTUAL-RUNTIME_appinstalld ?= "appinstalld2"
+VIRTUAL-RUNTIME_event-monitor-network ?= "event-monitor-network"
+VIRTUAL-RUNTIME_surface-manager ?= "luna-surfacemanager-base"
+VIRTUAL-RUNTIME_surface-manager-conf ?= "luna-surfacemanager-conf"
+VIRTUAL-RUNTIME_surface-manager-extension ?= ""
+VIRTUAL-RUNTIME_webos-ime ?= ""
 VIRTUAL-RUNTIME_novacomd ?= "novacomd"
+VIRTUAL-RUNTIME_com.webos.app.browser ?= "com.webos.app.enactbrowser"
+VIRTUAL-RUNTIME_com.webos.app.notification ?= "com.webos.app.notification"
+VIRTUAL-RUNTIME_com.webos.app.volume ?= "com.webos.app.volume"
+VIRTUAL-RUNTIME_pdm ?= "com.webos.service.pdm"
 
 # We're not using VIRTUAL-RUNTIME because VIRTUAL-RUNTIME is usually used for only
 # one item and changing that in <distro>-preferred-providers.inc would require
 # .bbappend in meta-<distro> to do PR/PRINC/PR_append bump anyway so it's easier
 # to change this variable in .bbappend together with bump.
 #
+
+WEBOS_PACKAGESET_TESTAPPS = " \
+    bareapp \
+    com.webos.app.test.enact \
+    com.webos.app.test.webosose \
+    com.webos.app.test.youtube \
+"
 
 # Enyo 1 and related framework packages
 WEBOS_PACKAGESET_ENYO_1 = " \
@@ -66,8 +83,19 @@ WEBOS_PACKAGESET_TZDATA ?= " \
 
 WEBOS_PACKAGESET_UI = " \
     ${VIRTUAL-RUNTIME_webappmanager} \
-    ${VIRTUAL-RUNTIME_webos-compositor} \
+    ${VIRTUAL-RUNTIME_surface-manager} \
+    ${VIRTUAL-RUNTIME_surface-manager-conf} \
+    ${VIRTUAL-RUNTIME_surface-manager-extension} \
     ${VIRTUAL-RUNTIME_webos-ime} \
+    ${VIRTUAL-RUNTIME_com.webos.app.browser} \
+    ${VIRTUAL-RUNTIME_com.webos.app.notification} \
+    ${VIRTUAL-RUNTIME_com.webos.app.volume} \
+"
+
+WEBOS_PACKAGESET_ENACTAPPS = " \
+    com.webos.app.imageviewer \
+    com.webos.app.mediagallery \
+    com.webos.app.videoplayer \
 "
 
 # nyx-lib needs nyx-modules at runtime, but a runtime dependency is not defined
@@ -77,33 +105,44 @@ WEBOS_PACKAGESET_UI = " \
 
 RDEPENDS:${PN} = " \
     activitymanager \
-    appinstalld2 \
     bootd \
+    configd \
     configurator \
     ${WEBOS_PACKAGESET_ENYO_1} \
     event-monitor \
-    event-monitor-network \
     filecache \
+    gssdp \
+    gupnp \
     ${VIRTUAL-RUNTIME_librdx} \
     ${VIRTUAL-RUNTIME_novacomd} \
+    ilib-qml-plugin \
+    ilib-webapp \
     luna-downloadmgr \
     luna-init \
     luna-sysservice \
     mojoservicelauncher \
     nodejs-module-webos-service \
+    notificationmgr \
     nyx-modules \
     pmklogd \
     pmlogctl \
     pmlogdaemon \
+    sam \
     settingsservice \
     sleepd \
     webos-connman-adapter \
     com.webos.service.pdm \
+    com.webos.service.mediaindexer \
+    ${VIRTUAL-RUNTIME_appinstalld} \    
+    ${VIRTUAL-RUNTIME_event-monitor-network} \
     ${VIRTUAL-RUNTIME_initscripts} \
+    ${VIRTUAL-RUNTIME_pdm} \
     ${WEBOS_PACKAGESET_TZDATA} \
     ${WEBOS_FOSS_MISSING_FROM_RDEPENDS} \
     ${WEBOS_PACKAGESET_SYSTEMAPPS} \
     ${WEBOS_PACKAGESET_UI} \
+    ${WEBOS_PACKAGESET_TESTAPPS} \
+    ${WEBOS_PACKAGESET_ENACTAPPS} \
 "
 
 # XXX These FOSS components must be explicitly added because they are missing

@@ -3,6 +3,9 @@
 # Place distro-wide PREFERRED_PROVIDER settings here; place MACHINE-specific
 # settings in <MACHINE>.conf .
 
+PREFERRED_PROVIDER_virtual/webruntime = "webruntime"
+VIRTUAL-RUNTIME_webruntime = "webruntime"
+
 # Prefer libjpeg-turbo from meta-oe as it provides SIMD optimizations
 PREFERRED_PROVIDER_jpeg = "libjpeg-turbo"
 PREFERRED_PROVIDER_jpeg-native = "libjpeg-turbo-native"
@@ -27,3 +30,13 @@ VIRTUAL-RUNTIME_init_manager = "systemd systemd-compat-units systemd-machine-uni
 BAD_RECOMMENDATIONS = "update-rc.d"
 
 VIRTUAL-RUNTIME_stat = "busybox"
+
+# Used for testing IME Manager from webOS OSE instead of webos-keyboard
+# VIRTUAL-RUNTIME_webos-ime = "webos-keyboard"
+VIRTUAL-RUNTIME_webos-ime = "imemanager"
+
+# Make wam preferred provider for webappmanager-webos
+PREFERRED_PROVIDER_webappmanager-webos ?= "wam"
+
+VIRTUAL-RUNTIME_com.webos.app.browser ?= "com.webos.app.enactbrowser"
+VIRTUAL-RUNTIME_webappmanager = "wam"

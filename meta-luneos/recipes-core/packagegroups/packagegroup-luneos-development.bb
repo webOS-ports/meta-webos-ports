@@ -43,8 +43,5 @@ RDEPENDS:${PN} = " \
   connman-client \
   qtdeclarative-tools \
   ofono-tests \
-  ${QTWEBENGINE} \
 "
 
-QTWEBENGINE:armv5 = ""
-QTWEBENGINE = "qtwebengine-qmlplugins"

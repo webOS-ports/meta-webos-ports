@@ -11,17 +11,23 @@ RDEPENDS:${PN} += " \
     libconnman-qt5 \
     nemo-qml-plugin-dbus \
     libqofono \
-    luna-next \
+    luna-surfacemanager-conf \
+    luna-surfacemanager-base \
+    luna-next-qmlplugins \
 "
 
-PV = "0.5.1-4+git${SRCPV}"
-SRCREV = "e65ecdafae8c02d21d61c71fc619a91677294d76"
+PV = "0.6-0+git${SRCPV}"
+SRCREV = "763082fd8aa463c8e177fa3d429ac7115349ea85"
 
 inherit webos_ports_repo
 inherit webos_cmake
+inherit qmake5_paths
 inherit webos_tweaks
 inherit webos_filesystem_paths
 
+EXTRA_OECMAKE += "-DLUNA_NEXT_SHELL_DIR=${OE_QMAKE_PATH_QML}/WebOSCompositor"
+
+WEBOS_GIT_PARAM_BRANCH = "tofe/lsm"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
@@ -44,5 +50,5 @@ do_install:append() {
     fi
 }
 
-FILES:${PN} += "${webos_prefix}/luna-next/shells/card \
+FILES:${PN} += "${OE_QMAKE_PATH_QML}/WebOSCompositor \
                 ${webos_sysconfdir}"
