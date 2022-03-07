@@ -5,8 +5,8 @@ SECTION = "webos/base"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-PV = "2.0.0-2+git${SRCPV}"
-SRCREV = "8607ccf222d372ef809814477de783a9f9f8275c"
+PV = "2.0.1-2+git${SRCPV}"
+SRCREV = "7b0222bfd0b6344bd0bce5070913cfe331bcec01"
 
 inherit allarch
 inherit webos_filesystem_paths
