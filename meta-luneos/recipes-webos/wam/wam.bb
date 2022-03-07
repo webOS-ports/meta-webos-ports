@@ -37,6 +37,7 @@ WAM_DATA_DIR = "${webos_execstatedir}/${BPN}"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     file://0001-Fix-build-with-gcc-11.patch \
+    file://0003-Add-basic-implementation-for-getResource-for-webOSSy.patch \
 "
 
 WEBOS_GIT_PARAM_BRANCH = "herrie/LuneOS-rebased-honister"
