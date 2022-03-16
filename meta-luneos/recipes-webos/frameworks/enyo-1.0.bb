@@ -6,7 +6,7 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 PV = "1.0-128.2+git${SRCPV}"
-SRCREV = "1becad3e81a6ae651e906719080441dc11746fdf"
+SRCREV = "29d5729a290a62915dc15e0e555daf3e0675e688"
 
 inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
@@ -15,6 +15,8 @@ inherit allarch
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
+
+WEBOS_GIT_PARAM_BRANCH = "webOS-ports/wam-sam"
 
 do_install() {
     install -d ${D}${webos_frameworksdir}/enyo/0.10/framework
