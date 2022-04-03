@@ -1,0 +1,257 @@
+From 735830869d0a88ec9db38469c1e9df5e8b39a176 Mon Sep 17 00:00:00 2001
+From: Christophe Chapuis <chris.chapuis@gmail.com>
+Date: Wed, 23 Mar 2022 16:22:05 +0000
+Subject: [PATCH] Add window.open support
+
+Signed-off-by: Christophe Chapuis <chris.chapuis@gmail.com>
+---
+ .../app_runtime/public/webview_delegate.h     |  7 +++
+ src/neva/app_runtime/webview.cc               | 45 +++++++++++++++----
+ src/neva/app_runtime/webview.h                | 15 ++++++-
+ src/webos/webview_base.cc                     | 44 +++++++++++++-----
+ src/webos/webview_base.h                      | 10 +++++
+ 5 files changed, 101 insertions(+), 20 deletions(-)
+
+diff --git a/src/neva/app_runtime/public/webview_delegate.h b/src/neva/app_runtime/public/webview_delegate.h
+index f4fc4ef7cf..5521caa2c6 100644
+--- a/src/neva/app_runtime/public/webview_delegate.h
++++ b/src/neva/app_runtime/public/webview_delegate.h
+@@ -21,6 +21,10 @@
+ 
+ #include "neva/app_runtime/public/app_runtime_constants.h"
+ 
++namespace content {
++    class WebContents;
++}
++
+ namespace neva_app_runtime {
+ 
+ struct WebViewInfo;
+@@ -66,6 +70,9 @@ class WebViewDelegate {
+       neva_app_runtime::DropPeerConnectionReason reason) {}
+   virtual void DidResumeDOM() {}
+ 
++  // create a new view for this content
++  virtual content::WebContents *CreateWindowForContents(std::unique_ptr<content::WebContents> new_contents, const std::string& newUrl) = 0;
++
+   // Pluggable delegate
+   virtual void SendCookiesForHostname(const std::string& cookies) {}
+ 
+diff --git a/src/neva/app_runtime/webview.cc b/src/neva/app_runtime/webview.cc
+index cb3a70ab07..e2f6860829 100644
+--- a/src/neva/app_runtime/webview.cc
++++ b/src/neva/app_runtime/webview.cc
+@@ -131,11 +131,16 @@ void WebView::SetFileAccessBlocked(bool blocked) {
+   NOTIMPLEMENTED();
+ }
+ 
+-WebView::WebView(int width, int height, WebViewProfile* profile)
++WebView::WebView(int width, int height, WebViewProfile* profile, std::unique_ptr<content::WebContents> web_contents)
+     : width_(width),
+       height_(height),
+-      profile_(profile ? profile : WebViewProfile::GetDefaultProfile()) {
+-  CreateWebContents();
++      profile_(profile ? profile : WebViewProfile::GetDefaultProfile()),
++      web_contents_(std::move(web_contents)) {
++  if(!web_contents_) {
++    CreateWebContents();
++  }
++  injection_manager_ = std::make_unique<WebAppInjectionManager>();
++  
+   web_contents_->SetDelegate(this);
+   Observe(web_contents_.get());
+ 
+@@ -201,7 +206,6 @@ void WebView::CreateWebContents() {
+       profile_->GetBrowserContextAdapter()->GetBrowserContext();
+   content::WebContents::CreateParams params(browser_context, nullptr);
+   web_contents_ = content::WebContents::Create(params);
+-  injection_manager_ = std::make_unique<WebAppInjectionManager>();
+ }
+ 
+ content::WebContents* WebView::GetWebContents() {
+@@ -420,6 +424,18 @@ void WebView::LoadProgressChanged(double progress) {
+     webview_delegate_->OnLoadProgressChanged(progress);
+ }
+ 
++content::WebContents *WebView::CreateWindowForContents(std::unique_ptr<content::WebContents> new_contents, const GURL& target_url, WindowOpenDisposition disposition, const gfx::Rect& initial_pos, bool user_gesture)
++{
++  content::WebContents *contents = nullptr;
++  if (webview_delegate_) {
++    contents = webview_delegate_->CreateWindowForContents(std::move(new_contents), target_url.spec());
++  }
++
++//  WebView *newAdapter = new WebContentsAdapter(std::move(new_contents));
++//  m_viewClient->adoptNewWindow(newAdapter, static_cast<WebContentsAdapterClient::WindowOpenDisposition>(disposition), user_gesture, toQt(initial_pos), m_initialTargetUrl);
++  return contents;
++}
++
+ // OpenURLFromTab() method is implemented for transition from old_url to new_url
+ // where old_url.SchemeIs(url::kFileScheme) == false
+ // and   new_url.SchemeIs(url::kFileScheme) == true
+@@ -433,16 +449,27 @@ content::WebContents* WebView::OpenURLFromTab(
+     return nullptr;
+   }
+ 
++  content::WebContents *target = source;
++  content::SiteInstance *target_site_instance = params.source_site_instance.get();
++  content::Referrer referrer = params.referrer;
+   if (params.disposition != WindowOpenDisposition::CURRENT_TAB) {
+-    NOTIMPLEMENTED();
+-    return nullptr;
++      target = CreateWindowForContents(0, params.url, params.disposition, gfx::Rect(), params.user_gesture);
+   }
+ 
+-  source->GetController().LoadURLWithParams(
+-      content::NavigationController::LoadURLParams(params));
+-  return source;
++  content::NavigationController::LoadURLParams load_url_params(params);
++  load_url_params.source_site_instance = target_site_instance;
++  load_url_params.referrer = referrer;
++
++  target->GetController().LoadURLWithParams(load_url_params);
++  return target;
+ }
+ 
++void WebView::AddNewContents(content::WebContents* source, std::unique_ptr<content::WebContents> new_contents, const GURL& target_url, WindowOpenDisposition disposition, const gfx::Rect& initial_pos, bool user_gesture, bool* was_blocked)
++{
++    content::WebContents* newContent = CreateWindowForContents(std::move(new_contents), target_url, disposition, initial_pos, user_gesture);
++    if (was_blocked)
++        *was_blocked = !newContent;
++}
+ void WebView::NavigationStateChanged(content::WebContents* source,
+                                      content::InvalidateTypes changed_flags) {
+   if (content::INVALIDATE_TYPE_TITLE & changed_flags) {
+diff --git a/src/neva/app_runtime/webview.h b/src/neva/app_runtime/webview.h
+index e5ff1d4ea0..6deec64b80 100644
+--- a/src/neva/app_runtime/webview.h
++++ b/src/neva/app_runtime/webview.h
+@@ -89,7 +89,7 @@ class WebView : public content::WebContentsDelegate,
+ 
+   static void SetFileAccessBlocked(bool blocked);
+ 
+-  WebView(int width, int height, WebViewProfile* profile = nullptr);
++  WebView(int width, int height, WebViewProfile* profile = nullptr, std::unique_ptr<content::WebContents> web_contents = 0);
+   ~WebView() override;
+ 
+   void SetDelegate(WebViewDelegate* delegate);
+@@ -190,6 +190,13 @@ class WebView : public content::WebContentsDelegate,
+   content::WebContents* OpenURLFromTab(
+       content::WebContents* source,
+       const content::OpenURLParams& params) override;
++  void AddNewContents(content::WebContents* source,
++                      std::unique_ptr<content::WebContents> new_contents,
++                      const GURL& target_url,
++                      WindowOpenDisposition disposition,
++                      const gfx::Rect& initial_rect,
++                      bool user_gesture,
++                      bool* was_blocked) override;
+ 
+   void NavigationStateChanged(content::WebContents* source,
+                               content::InvalidateTypes changed_flags) override;
+@@ -295,6 +302,12 @@ class WebView : public content::WebContentsDelegate,
+ #endif
+   void SwitchFullscreenModeForTab(content::WebContents* web_contents,
+                                   bool enter_fullscreen);
++                                  
++  content::WebContents *CreateWindowForContents(std::unique_ptr<content::WebContents> new_contents, 
++                                                const GURL& target_url,
++                                                WindowOpenDisposition disposition, 
++                                                const gfx::Rect& initial_pos, 
++                                                bool user_gesture);
+ 
+   WebViewDelegate* webview_delegate_ = nullptr;
+ 
+diff --git a/src/webos/webview_base.cc b/src/webos/webview_base.cc
+index cf91389723..1f00ba4748 100644
+--- a/src/webos/webview_base.cc
++++ b/src/webos/webview_base.cc
+@@ -71,10 +71,40 @@ void WebViewBase::SetFileAccessBlocked(bool blocked) {
+   NOTIMPLEMENTED();
+ }
+ 
+-WebViewBase::WebViewBase(bool alt_storage_path, int width, int height) {
++WebViewBase::WebViewBase(neva_app_runtime::WebView *webview, bool alt_storage_path, int width, int height) {
++  webview_ = webview;
++  if (!webview_) {
++    // If screen is rotated then initial size might be different and default
++    // values may lead to incorrectly scaled view for the first rendered frame.
++    // That is why the default values are subject to the overriding.
++    if (display::Screen::GetScreen()->GetNumDisplays() > 0) {
++      gfx::Size displaySize =
++          display::Screen::GetScreen()->GetPrimaryDisplay().bounds().size();
++      width = displaySize.width();
++      height = displaySize.height();
++    }
++
++    webview_ = new neva_app_runtime::WebView(width, height);
++  }
++  
++  webview_->SetDelegate(this);
++  webview_->SetControllerDelegate(this);
++}
++
++WebViewBase::WebViewBase(bool alt_storage_path, int width, int height):
++  WebViewBase(nullptr, alt_storage_path, width, height) {}
++
++WebViewBase::~WebViewBase() {
++  webview_->SetDelegate(nullptr);
++  delete webview_;
++}
++
++content::WebContents *WebViewBase::CreateWindowForContents(std::unique_ptr<content::WebContents> new_contents, const std::string& newUrl)
++{
+   // If screen is rotated then initial size might be different and default
+   // values may lead to incorrectly scaled view for the first rendered frame.
+   // That is why the default values are subject to the overriding.
++  int width = 1920, height = 1080;
+   if (display::Screen::GetScreen()->GetNumDisplays() > 0) {
+     gfx::Size displaySize =
+         display::Screen::GetScreen()->GetPrimaryDisplay().bounds().size();
+@@ -82,15 +112,9 @@ WebViewBase::WebViewBase(bool alt_storage_path, int width, int height) {
+     height = displaySize.height();
+   }
+ 
+-  webview_ = new neva_app_runtime::WebView(width, height);
+-  webview_->SetDelegate(this);
+-  webview_->SetControllerDelegate(this);
+-}
+-
+-WebViewBase::~WebViewBase() {
+-  webview_->SetDelegate(nullptr);
+-  delete webview_;
+-}
++  neva_app_runtime::WebView *webview = new neva_app_runtime::WebView(width, height, nullptr, std::move(new_contents));
++  return CreateWindowForWebView(newUrl, webview);
++}    
+ 
+ void WebViewBase::Initialize(const std::string& app_id,
+                              const std::string& app_path,
+diff --git a/src/webos/webview_base.h b/src/webos/webview_base.h
+index 9d1cbe6b45..bc86c4102b 100644
+--- a/src/webos/webview_base.h
++++ b/src/webos/webview_base.h
+@@ -98,11 +98,21 @@ class WEBOS_EXPORT WebViewBase
+ 
+   static void SetFileAccessBlocked(bool blocked);
+ 
++  WebViewBase(neva_app_runtime::WebView *webview,
++              bool alt_storage_path = false,
++              int width = 1920,
++              int height = 1080);
++
+   WebViewBase(bool alt_storage_path = false,
+               int width = 1920,
+               int height = 1080);
++              
+   ~WebViewBase() override;
+ 
++  content::WebContents *CreateWindowForContents(std::unique_ptr<content::WebContents> new_contents, const std::string& newUrl) override;
++  // CreateWindowForWebView should be implemented in WAM
++  virtual content::WebContents *CreateWindowForWebView(const std::string& newUrl, neva_app_runtime::WebView *webview) { return nullptr; };
++
+   void Initialize(const std::string& app_id,
+                   const std::string& app_path,
+                   const std::string& trust_level,
+-- 
+2.17.1
+

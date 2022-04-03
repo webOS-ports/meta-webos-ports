@@ -52,4 +52,5 @@ SRC_URI += " \
     file://0032-Py2-Py3-fixup-for-dom_distiller_js.patch \
     file://0033-catapult-use-python3-for-rcssmin.patch \
     file://0034-run_app_shell-fix-XDG_RUNTIME_DIR-for-LuneOS.patch \
+    file://0035-Add-window.open-support.patch \
 "
