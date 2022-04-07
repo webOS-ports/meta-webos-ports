@@ -31,7 +31,9 @@ inherit webos_filesystem_paths
 inherit webos_qmllint
 inherit webos_public_repo
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+           file://0001-AppLoader-add-import-path-for-QML-apps.patch \
+"
 S = "${WORKDIR}/git"
 
 SRCREV = "221d2709f39c0c4443f0d4471546bc4f29f7380b"
