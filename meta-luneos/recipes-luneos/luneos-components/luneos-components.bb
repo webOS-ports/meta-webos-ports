@@ -3,7 +3,7 @@ LICENSE = "LGPL-2.1-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 PV = "0.4.2+git${SRCPV}"
-SRCREV = "3ef9a5dcd2e5fad6b105996ae44d53830696aa49"
+SRCREV = "1fcd19a799596b00a099f677e70edaa4a8a7f400"
 
 DEPENDS = "qtbase qtdeclarative qtlocation qtquickcontrols qtquickcontrols2 luna-service2 libwebos-application kf5bluezqt-mer qtdeclarative-native"
 
