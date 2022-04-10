@@ -33,6 +33,7 @@ inherit webos_public_repo
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
            file://0001-AppLoader-add-import-path-for-QML-apps.patch \
+           file://0002-Setup-missing-env-variables.patch \
 "
 S = "${WORKDIR}/git"
 
