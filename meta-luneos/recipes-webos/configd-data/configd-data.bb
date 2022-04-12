@@ -11,12 +11,20 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 inherit webos_ports_ose_repo
 
 PV = "1.0.0-2+git${SRCPV}"
-SRCREV = "8b41d8c3fd7f3e64fb9f18d4db25a223b42a191e"
+SRCREV = "790f21717864e9a55f8f6b159b9ded40d8d276de"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
+PACKAGE_ARCH = "${MACHINE_ARCH}"
+
 do_install() {
     install -d ${D}${sysconfdir}/configd
-    cp -vrf ${S}/configs/* ${D}${sysconfdir}/configd
+    cp -vf ${S}/configs/layers.json ${D}${sysconfdir}/configd
+    install -d ${D}${sysconfdir}/configd/layers/base
+    install -m 0644 ${S}/configs/layers/base/com.webos.surfacemanager.json ${D}${sysconfdir}/configd/layers/base
+    if [ -f ${S}/configs/layers/base/${MACHINE}/com.webos.surfacemanager.json ]
+    then
+        install -m 0644 ${S}/configs/layers/base/${MACHINE}/com.webos.surfacemanager.json ${D}${sysconfdir}/configd/layers/base
+    fi
 }
