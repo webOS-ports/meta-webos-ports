@@ -1,6 +1,11 @@
 # Copyright (c) 2015-2017 LG Electronics, Inc.
 
-WEBOS_NO_STATIC_LIBRARIES_WHITELIST = "libgtest.a libgtest_main.a"
+FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
+SRC_URI += "file://0001-Revert-Googletest-export.patch"
+
+do_configure:prepend() {
+    sed -i 's@^#!/usr/bin/env python$@#!/usr/bin/env python3@g' ${S}/googletest/scripts/*py
+}
 
 # GTest developers recommend to use source code instead of linking
 # against a prebuilt library.
