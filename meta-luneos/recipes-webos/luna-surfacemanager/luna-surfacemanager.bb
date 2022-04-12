@@ -23,6 +23,7 @@ inherit webos_ports_ose_repo
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
            file://0001-Fix-build-for-Qt-5.15.2.patch \
            file://0002-Add-capability-to-pass-extra-options-to-surface-mana.patch \
+           file://0003-WebOSShellSurface-add-setClientSize.patch \
            "
 S = "${WORKDIR}/git"
 
