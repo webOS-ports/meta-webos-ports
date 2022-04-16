@@ -10,7 +10,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "systemd luna-service2 libpbnjson pmloglib glib-2.0 boost gtest"
 
 PV = "0.1.5+git${SRCPV}"
-SRCREV = "9f305f929cfd339d6f42c6b383a67b9d03ebd6e7"
+SRCREV = "690458ba22962068595746132e45e96491db522e"
 
 inherit webos_ports_ose_repo
 inherit webos_cmake
