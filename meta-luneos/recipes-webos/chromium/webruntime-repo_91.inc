@@ -55,4 +55,5 @@ SRC_URI += " \
     file://0035-Add-window.open-support.patch \
     file://0036-WebOS-Shell-Surface-add-client_size_changed-wayland-.patch \
     file://0037-WebOSServiceBridgeInjection-fix-JSON-input-test.patch \
+    file://0038-build-Convert-third_party-opus-BUILD.gn-to-py3.patch \
 "
