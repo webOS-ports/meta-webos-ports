@@ -54,4 +54,5 @@ SRC_URI += " \
     file://0034-run_app_shell-fix-XDG_RUNTIME_DIR-for-LuneOS.patch \
     file://0035-Add-window.open-support.patch \
     file://0036-WebOS-Shell-Surface-add-client_size_changed-wayland-.patch \
+    file://0037-WebOSServiceBridgeInjection-fix-JSON-input-test.patch \
 "
