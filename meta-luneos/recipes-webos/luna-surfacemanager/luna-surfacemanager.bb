@@ -14,6 +14,8 @@ DEPENDS = "qtdeclarative wayland-native qtwayland qtwayland-native qt-features-w
 #WEBOS_VERSION = "2.0.0-360_5c3a00a694cc9c4ef33e910a7a20a241445b1083"
 #PR = "r52"
 
+PV = "2.0.0-360"
+
 inherit webos_qmake5
 inherit pkgconfig
 #inherit webos_enhanced_submissions
@@ -21,10 +23,11 @@ inherit webos_lttng
 inherit webos_ports_ose_repo
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
-           file://0001-Fix-build-for-Qt-5.15.2.patch \
-           file://0002-Add-capability-to-pass-extra-options-to-surface-mana.patch \
-           file://0003-WebOSShellSurface-add-setClientSize.patch \
-           "
+    file://0001-Fix-build-for-Qt-5.15.2.patch \
+    file://0002-Add-capability-to-pass-extra-options-to-surface-mana.patch \
+    file://0003-WebOSShellSurface-add-setClientSize.patch \
+    file://0004-webosscreenshot-respect-QT_OPENGL_ES.patch \
+"
 S = "${WORKDIR}/git"
 
 SRCREV = "c3b70c0f4684960ff33a09e493f95924ddc7835a"
