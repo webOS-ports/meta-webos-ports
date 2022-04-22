@@ -41,6 +41,7 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     file://0004-DeviceInfoImpl-add-tvDeviceInfo-data.patch \
     file://0005-Add-relaunch-support-for-legacy-enyo-apps.patch \
     file://0006-Add-window.open-support.patch \
+    file://0007-WebAppBase-add-noWindow-support.patch \
 "
 
 WEBOS_GIT_PARAM_BRANCH = "herrie/LuneOS-rebased-honister"
