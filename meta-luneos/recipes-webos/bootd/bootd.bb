@@ -10,7 +10,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "systemd luna-service2 libpbnjson pmloglib glib-2.0 boost gtest"
 
 PV = "0.1.5+git${SRCPV}"
-SRCREV = "690458ba22962068595746132e45e96491db522e"
+SRCREV = "ccffd6187ee3b2e3b127d8a7e68d7277e53e0d53"
 
 inherit webos_ports_ose_repo
 inherit webos_cmake
@@ -18,7 +18,7 @@ inherit webos_system_bus
 inherit webos_systemd
 inherit pkgconfig
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/wam"
+WEBOS_GIT_PARAM_BRANCH = "tofe/wam-minimal"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
