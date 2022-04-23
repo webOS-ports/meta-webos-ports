@@ -17,7 +17,7 @@ PV = "1.0.0-22+git${SRCPV}"
 SRCREV = "9db1c1d37948a9f51b829e768a29bc3f16dd19df"
 
 inherit webos_qmake5
-inherit webos_system_bus
+#inherit webos_system_bus
 inherit webos_ports_ose_repo
 #inherit webos_qt_localization
 
@@ -38,4 +38,4 @@ EXTRA_QMAKEVARS_PRE += "LIBDIR=${STAGING_LIBDIR}"
 EXTRA_QMAKEVARS_PRE += "WEBOS_INSTALL_BINS=${sbindir}"
 EXTRA_QMAKEVARS_PRE += "MALIIT_PLUGIN_VERSION=${PV}"
 
-FILES:${PN} += "${libdir}/maliit ${datadir}/maliit"
+FILES:${PN} += "${libdir}/maliit ${datadir}/maliit ${webos_sysbus_datadir}"
