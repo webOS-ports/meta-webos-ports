@@ -13,7 +13,7 @@ inherit webos_system_bus
 inherit webos_ports_repo
 inherit pkgconfig
 
-DEPENDS = "maliit-framework-qt5 hunspell presage luna-service2 presage-native"
+DEPENDS = "maliit-framework-webos hunspell presage luna-service2 presage-native"
 
 RDEPENDS:${PN} += "qtsvg-plugins qtmultimedia-qmlplugins"
 RRECOMMENDS:${PN} += "hunspell-dictionaries"
