@@ -26,4 +26,10 @@ SRC_URI += " \
     file://0010-Export-QWaylandQuickSurfacePrivate.patch \
 "
 
+# WebOS-OSE: Upstream-Status: Backport
+SRC_URI += " \
+    file://0011-Support-presentation-time-protocol.patch;maxver=6.2.* \
+    file://0012-Use-scope-resolution-operator-for-request.patch \
+"
+
 FILES:${PN} += "${OE_QMAKE_PATH_PLUGINS}/wayland-graphics-integration"
