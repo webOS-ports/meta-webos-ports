@@ -9,7 +9,7 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=2c7c706c6a586a6abec428c64006d86b \
 "
 
-DEPENDS = "qtdeclarative wayland-native qtwayland qtwayland-native qt-features-webos pmloglib webos-wayland-extensions glib-2.0"
+DEPENDS = "qtdeclarative wayland-native qtwayland qtwayland-native qt-features-webos pmloglib webos-wayland-extensions glib-2.0 qtwayland-webos"
 
 #WEBOS_VERSION = "2.0.0-360_5c3a00a694cc9c4ef33e910a7a20a241445b1083"
 #PR = "r52"
@@ -22,7 +22,7 @@ inherit pkgconfig
 inherit webos_lttng
 inherit webos_ports_ose_repo
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=herrie/rebased \
     file://0001-Fix-build-for-Qt-5.15.2.patch \
     file://0002-Add-capability-to-pass-extra-options-to-surface-mana.patch \
     file://0003-WebOSShellSurface-add-setClientSize.patch \
@@ -30,7 +30,7 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
 "
 S = "${WORKDIR}/git"
 
-SRCREV = "1f8411fff1cf308b3a85dc150b0972938dbf476e"
+SRCREV = "88e7084f8c87b6643a9b4a54ba25d4e5731d2d15"
 
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 
