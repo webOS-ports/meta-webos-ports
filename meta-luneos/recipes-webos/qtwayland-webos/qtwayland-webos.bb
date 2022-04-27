@@ -9,13 +9,13 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=7187b1fb0318bb1af23edbf4237ee8b8 \
 "
 
-DEPENDS = "qtwayland webos-wayland-extensions libxkbcommon qt-features-webos wayland-native qtwayland-native"
+DEPENDS = "qtwayland webos-wayland-extensions libxkbcommon qt-features-webos wayland-native qtwayland-native wayland-protocols"
 
 WEBOS_VERSION = "2.0.0-70_c04c1b3f861f866debb637909cf91e866ded3638"
 PR = "r15"
 
 PV = "2.0.0-70+git${SRCPV}"
-SRCREV = "c04c1b3f861f866debb637909cf91e866ded3638"
+SRCREV = "1deb6a5e446714bb6218df8c2ea093eeef514768"
 
 inherit webos_qmake5
 inherit pkgconfig
