@@ -30,6 +30,7 @@ SRC_URI += " \
     file://0001-Fix-build-with-Qt-5.15.2.patch \
     file://0002-WebOSIntegration-enable-all-capabilities-for-LuneOS.patch \
     file://0003-WebOSShellSurfacePrivate-add-client_size_changed.patch \
+    file://0004-WebOSCursor-disable-cursor.patch \
 "
 
 # No debian package renaming
