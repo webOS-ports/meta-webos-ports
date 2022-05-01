@@ -13,7 +13,7 @@ inherit webos_system_bus
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-SRCREV = "9a0e28982494dd5bdf2594504c844b953f68f50a"
+SRCREV = "b65d8511b2e04eb3751e8e5f7a9699df3c779a50"
 
 FILES:${PN} += "${webos_sysbus_datadir}"
 

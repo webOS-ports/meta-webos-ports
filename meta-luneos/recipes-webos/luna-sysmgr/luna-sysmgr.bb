@@ -15,7 +15,7 @@ DEPENDS += "serviceinstaller"
 RDEPENDS:${PN} += "powerd"
 
 PV = "3.0.0-3+git${SRCPV}"
-SRCREV = "c18ff49155b201036e3085ae5f75509cbf8853be"
+SRCREV = "6cfaab79a67e8ecd7a3a73517f11ed785a6c528b"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 
@@ -26,7 +26,7 @@ inherit webos_cmake_qt5
 inherit webos_systemd
 inherit pkgconfig
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 do_install:append() {
