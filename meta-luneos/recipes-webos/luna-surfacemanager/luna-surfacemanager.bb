@@ -22,7 +22,7 @@ inherit pkgconfig
 inherit webos_lttng
 inherit webos_ports_ose_repo
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=herrie/rebased \
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     file://0001-Fix-build-for-Qt-5.15.2.patch \
     file://0002-Add-capability-to-pass-extra-options-to-surface-mana.patch \
     file://0003-WebOSShellSurface-add-setClientSize.patch \
@@ -30,7 +30,7 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=herrie/rebased \
 "
 S = "${WORKDIR}/git"
 
-SRCREV = "88e7084f8c87b6643a9b4a54ba25d4e5731d2d15"
+SRCREV = "1cb0f9a1505c83f98ff8cd9d57fd5bd8165cd969"
 
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 
