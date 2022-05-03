@@ -24,6 +24,8 @@ do_install() {
 
     # Create symlink for enyo/1.0 (points to enyo/0.10)
     ln -vs 0.10 ${D}${webos_frameworksdir}/enyo/1.0
+    # Create symlink for tellurium (so the inspector doesn't give errors)
+    ln -vs enyo/0.10/framework/build/palm/tellurium ${D}${webos_frameworksdir}/tellurium
 }
 
 FILES:${PN} += "${webos_frameworksdir}"
