@@ -8,9 +8,9 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "libpbnjson pmloglib glib-2.0 gtest"
 VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
-VIRTUAL-RUNTIME_rdx-utils ?= "rdxd"
 VIRTUAL-RUNTIME_bash ?= "bash"
-RDEPENDS:${PN} = "luna-service2-security-conf ${VIRTUAL-RUNTIME_cpushareholder} ${VIRTUAL-RUNTIME_rdx-utils} ${VIRTUAL-RUNTIME_bash}"
+
+RDEPENDS:${PN} = "luna-service2-security-conf ${VIRTUAL-RUNTIME_cpushareholder} ${VIRTUAL-RUNTIME_bash}"
 
 PV = "3.21.2-1+git${SRCPV}"
 
