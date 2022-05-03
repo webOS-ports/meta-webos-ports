@@ -12,7 +12,6 @@ inherit packagegroup
 #VIRTUAL-RUNTIME_webappmanager ?= "luna-webappmanager"
 VIRTUAL-RUNTIME_webappmanager ?= "wam"
 VIRTUAL-RUNTIME_initscripts ?= "initscripts"
-VIRTUAL-RUNTIME_librdx ?= "rdxd"
 VIRTUAL-RUNTIME_webos-compositor ?= "luna-surfacemanager"
 VIRTUAL-RUNTIME_appinstalld ?= "appinstalld2"
 VIRTUAL-RUNTIME_event-monitor-network ?= "event-monitor-network"
@@ -113,7 +112,6 @@ RDEPENDS:${PN} = " \
     filecache \
     gssdp \
     gupnp \
-    ${VIRTUAL-RUNTIME_librdx} \
     ${VIRTUAL-RUNTIME_novacomd} \
     ilib-qml-plugin \
     ilib-webapp \
