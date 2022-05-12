@@ -14,7 +14,7 @@ SRC_URI = " \
 "
 S = "${WORKDIR}/git"
 
-inherit qmake5
+inherit qt6-qmake
 
 PACKAGES += "${PN}-test"
 
