@@ -22,7 +22,7 @@ SRC_URI = " \
 S = "${WORKDIR}/git/hwcomposer"
 
 inherit webos_ports_fork_repo
-inherit qmake5 pkgconfig
+inherit qt6-qmake pkgconfig
 
 # WARNING: The recipe qt5-qpa-hwcomposer-plugin is trying to install files into a shared area when those files already exist. Those files and their manifest location are:
 #   /OE/build/owpb/webos-ports/tmp-eglibc/sysroots/tenderloin/usr/lib/cmake/Qt5Gui/Qt5Gui_QEglFSIntegrationPlugin.cmake
