@@ -16,7 +16,7 @@ DEPENDS = "qtdeclarative wayland-native qtwayland qtwayland-native qt-features-w
 
 PV = "2.0.0-360"
 
-inherit webos_qmake5
+inherit webos_qmake6
 inherit pkgconfig
 #inherit webos_enhanced_submissions
 inherit webos_lttng
