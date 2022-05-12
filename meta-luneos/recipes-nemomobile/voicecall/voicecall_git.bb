@@ -2,7 +2,7 @@ SUMMARY = "Voice call management engine"
 LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://src/main.cpp;beginline=1;endline=18;md5=a513bca9b17080e89422924a39fd0eb0"
 
-DEPENDS += "qtbase qtmultimedia libqofono"
+DEPENDS += "qtbase qtmultimedia"
 
 PV = "0.7.9+git${SRCPV}"
 SRCREV = "3dfedcfa06a71804e8175f6cf0935467ae0376fd"

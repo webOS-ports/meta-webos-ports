@@ -4,7 +4,7 @@ LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=4ddd17b0c9241d7b24a4960caefe8e40"
 
 DEPENDS = "qtbase qtdeclarative"
-RDEPENDS:${PN} += "qtdeclarative-qmlplugins libqofono"
+RDEPENDS:${PN} += "qtdeclarative-qmlplugins"
 
 inherit webos_ports_repo
 inherit webos_system_bus

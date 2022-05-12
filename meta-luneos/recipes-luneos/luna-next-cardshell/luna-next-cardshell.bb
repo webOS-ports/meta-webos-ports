@@ -4,13 +4,9 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=bc807597ba062cd149d362d22d3061e7"
 
 RDEPENDS:${PN} += " \
     qtdeclarative-qmlplugins \
-    qtgraphicaleffects-qmlplugins \
-    qtquickcontrols-qmlplugins \
     qtmultimedia-qmlplugins \
     luneos-components \
-    libconnman-qt5 \
     nemo-qml-plugin-dbus \
-    libqofono \
     luna-surfacemanager-conf \
     luna-surfacemanager-base \
     luna-next-qmlplugins \
