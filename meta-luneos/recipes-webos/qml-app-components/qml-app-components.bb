@@ -14,7 +14,7 @@ DEPENDS:append = " ${@ 'qtshadertools-native' if d.getVar('QT_VERSION', True) ==
 PV = "1.0.0-6+git${SRCPV}"
 SRCREV = "128516aa9fedb645b2989618b50ec9e1a8e1f6aa"
 
-inherit webos_qmake5
+inherit webos_qmake6
 inherit pkgconfig
 #inherit webos_enhanced_submissions
 inherit webos_public_repo

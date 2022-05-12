@@ -21,7 +21,7 @@ EXTRA_QMAKEVARS_PRE = "\
 
 inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
-inherit qmake5
+inherit qt6-qmake
 
 APP_PATH = "${webos_applicationsdir}/${PN}"
 
