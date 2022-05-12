@@ -10,7 +10,7 @@ SRCREV = "46997b959847408d2885d8ca209c72e9bc6146fe"
 
 inherit webos_ports_repo
 inherit webos_system_bus
-inherit webos_cmake_qt5
+inherit webos_cmake_qt6
 inherit pkgconfig
 
 WEBOS_GIT_PARAM_BRANCH = "webosose-wam"

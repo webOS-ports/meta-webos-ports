@@ -8,7 +8,7 @@ RDEPENDS:${PN} += "qtdeclarative-qmlplugins libqofono"
 
 inherit webos_ports_repo
 inherit webos_system_bus
-inherit webos_cmake_qt5
+inherit webos_cmake_qt6
 inherit webos_filesystem_paths
 inherit webos_application
 inherit webos_tweaks

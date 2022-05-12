@@ -8,7 +8,7 @@ DEPENDS = "qtbase qtdeclarative"
 inherit webos_ports_repo
 inherit webos_filesystem_paths
 
-inherit cmake_qt5
+inherit qt6-cmake
 inherit webos_cmake
 inherit webos_app
 inherit pkgconfig
