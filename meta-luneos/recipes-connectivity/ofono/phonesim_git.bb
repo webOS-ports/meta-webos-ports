@@ -4,7 +4,7 @@ SECTION = "devel"
 LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=eb723b61539feef013de476e68b5c50a"
 
-DEPENDS += "qtbase qtscript qtxmlpatterns qtbase-native"
+DEPENDS += "qtbase qtscript qtbase-native"
 
 SRCREV = "7664fdc37d3bc072ea8e9a5d92cac24aa1d27ddd"
 PV = "1.21+git${SRCPV}"

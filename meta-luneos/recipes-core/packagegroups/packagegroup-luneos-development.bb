@@ -36,7 +36,6 @@ RDEPENDS:${PN} = " \
   nyx-utils \
   \
   systemd-analyze \
-  qt5-opengles2-test \
   sdl2-opengles-test \
   org.webosports.app.settings-qml \
   \
