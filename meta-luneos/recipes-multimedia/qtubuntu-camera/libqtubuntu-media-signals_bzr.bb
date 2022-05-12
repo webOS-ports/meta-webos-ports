@@ -3,7 +3,7 @@ HOMEPAGE = "http://bazaar.launchpad.net/~phablet-team/qtubuntu-media-signals"
 LICENSE = "LGPL-3.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=e6a600fd5e1d9cbde2d983680233ad02"
 
-inherit webos_cmake_qt5
+inherit webos_cmake_qt6
 
 DEPENDS = "qtbase"
 

@@ -16,7 +16,7 @@ SRCREV = "f441d1eed3fb967af243c3a513182ffcc685b76e"
 # Don't uncomment until all of the do_*() tasks have been moved out of the recipe
 inherit webos_ports_fork_repo
 inherit pkgconfig
-inherit webos_cmake_qt5
+inherit webos_cmake_qt6
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

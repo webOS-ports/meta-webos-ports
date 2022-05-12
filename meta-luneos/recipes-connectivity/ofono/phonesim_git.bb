@@ -21,6 +21,6 @@ S = "${WORKDIR}/git"
 export QMAKE_PATH_HOST_BINS = "${OE_QMAKE_PATH_EXTERNAL_HOST_BINS}"
 
 inherit autotools pkgconfig
-inherit qmake5_paths
+inherit qt6-paths
 
 CXXFLAGS += "-fPIC"
