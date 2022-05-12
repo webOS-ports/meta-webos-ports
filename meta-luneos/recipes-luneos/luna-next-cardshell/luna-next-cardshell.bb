@@ -4,20 +4,24 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=bc807597ba062cd149d362d22d3061e7"
 
 RDEPENDS:${PN} += " \
     qtdeclarative-qmlplugins \
+    qtgraphicaleffects-qmlplugins \
     qtmultimedia-qmlplugins \
     luneos-components \
-    nemo-qml-plugin-dbus \
+    libconnman-qt6 \
     luna-surfacemanager-conf \
     luna-surfacemanager-base \
     luna-next-qmlplugins \
 "
-
+#FIXME libqofono & nemo-qml-plugin-dbus need porting to Qt6
+# libqofono
+# nemo-qml-plugin-dbus 
+    
 PV = "0.6-0+git${SRCPV}"
 SRCREV = "df30b49ead1370e31cc54b252e4d86fa43b73707"
 
 inherit webos_ports_repo
 inherit webos_cmake
-inherit qt6-paths
+inherit webos_qmake6_paths
 inherit webos_tweaks
 inherit webos_filesystem_paths
 
