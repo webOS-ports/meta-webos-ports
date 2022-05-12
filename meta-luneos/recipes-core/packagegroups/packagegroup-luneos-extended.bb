@@ -169,12 +169,13 @@ QEMU_RDEPENDS = " \
     alsa-utils-systemd \
     mesa-driver-swrast \
     phonesim \
-    qt5-plugin-generic-vboxtouch \
     kernel-module-snd-intel8x0 \
     libpci \
     rng-tools \
     vmwgfx-layout \
 "
+
+#    qt5-plugin-generic-vboxtouch
 
 RDEPENDS:${PN}:append:qemux86 = " ${QEMU_RDEPENDS}"
 RDEPENDS:${PN}:append:qemux86-64 = " ${QEMU_RDEPENDS}"
