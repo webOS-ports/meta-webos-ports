@@ -1,7 +1,9 @@
-# Copyright (c) 2013-2019 LG Electronics, Inc.
+# Copyright (c) 2013-2022 LG Electronics, Inc.
 
 inherit qt6-qmake
 inherit webos_filesystem_paths
+# To use OE_QMAKE_PATH_QT_* under meta-lg-webos/
+inherit webos_qmake6_paths
 
 # These are used in the luna-sysmgr recipe
 export QT_CONFIGURE_PREFIX_PATH = "${OE_QMAKE_PATH_PREFIX}"
@@ -32,7 +34,8 @@ EXTRA_QMAKEVARS_PRE += "\
     WEBOS_INSTALL_PREFIX=${OE_QMAKE_PATH_PREFIX} \
     WEBOS_INSTALL_DATADIR=${datadir} \
     WEBOS_INSTALL_SYSCONFDIR=${sysconfdir} \
-    WEBOS_INSTALL_SYSBUS_DATADIR=${sysbus_datadir} \
+    WEBOS_INSTALL_SYSBUS_DATADIR=${webos_sysbus_datadir} \
+    WEBOS_INSTALL_TESTSDIR=${webos_testsdir} \
     WEBOS_INSTALL_UPSTARTCONFDIR=${webos_upstartconfdir} \
     WEBOS_INSTALL_WEBOS_SDKDIR=${webos_sdkdir} \
 "
@@ -70,10 +73,14 @@ EXPORT_WEBOS_QMAKE_TARGET[vardepvalue] = "${EXPORT_WEBOS_QMAKE_TARGET}"
 
 EXTRA_OEMAKE += "${EXPORT_WEBOS_QMAKE_TARGET}"
 
-# Add the the native tool in the paths as some project require rcc
-# to be available
-WEBOS_EXTRA_PATH .= "${OE_QMAKE_PATH_EXTERNAL_HOST_BINS}:"
+# Add the the native tool in the paths as some project require rcc to be available.
+# Since 6.1 rcc is located in libexec. (QTBUG-92245)
+WEBOS_EXTRA_PATH .= "${OE_QMAKE_PATH_EXTERNAL_HOST_BINS}:${STAGING_LIBEXECDIR_NATIVE}:"
 
 do_configure:prepend() {
+  ${EXPORT_WEBOS_QMAKE_MACHINE}
+}
+
+do_compile:prepend() {
   ${EXPORT_WEBOS_QMAKE_MACHINE}
 }

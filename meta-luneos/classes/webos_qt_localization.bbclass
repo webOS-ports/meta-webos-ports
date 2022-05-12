@@ -1,10 +1,10 @@
-# Copyright (c) 2013-2021 LG Electronics, Inc.
+# Copyright (c) 2013-2022 LG Electronics, Inc.
 #
 # Localization-related settings and tasks for Qt apps
 #
 
 inherit webos_localizable
-#inherit qt5-paths
+inherit qt6-paths
 
 WEBOS_QT_LOCALIZATION_DEPENDS = "qttools-native"
 DEPENDS:append = " ${WEBOS_QT_LOCALIZATION_DEPENDS}"
