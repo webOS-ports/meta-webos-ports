@@ -6,7 +6,7 @@ PV = "1.3.6+git${SRCPV}"
 SRCREV = "64a3554969747e348bfa9eb85842490cef9b719e"
 
 DEPENDS = "qtbase qtdeclarative"
-RDEPENDS:${PN} = "ttf-liberation-mono qtxmlpatterns"
+RDEPENDS:${PN} = "ttf-liberation-mono"
 
 SRC_URI = " \
     git://github.com/sailfishos/fingerterm.git;protocol=https;branch=master \
