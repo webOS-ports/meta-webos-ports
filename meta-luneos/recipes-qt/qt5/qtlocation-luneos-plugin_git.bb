@@ -4,7 +4,7 @@ LIC_FILES_CHKSUM = " \
     file://LICENSE.LGPLv3;md5=c1939be5579666be947371bc8120425f \
 "
 
-DEPENDS = "qtbase qtlocation glib-2.0 luna-service2"
+DEPENDS = "qtbase glib-2.0 luna-service2"
 
 PV = "5.12.3+git${SRCPV}"
 SRCREV = "2efa108bfeabee0bfcde19f438bddaf6af5e54a8"
