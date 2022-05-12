@@ -19,7 +19,7 @@ inherit webos_application
 inherit webos_filesystem_paths
 inherit webos_tweaks
 
-inherit cmake_qt5
+inherit qt6-cmake
 inherit webos_cmake
 
 INSANE_SKIP:${PN} = "libdir"

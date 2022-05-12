@@ -22,7 +22,7 @@ WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 inherit webos_filesystem_paths
 inherit webos_ports_fork_repo
 inherit webos_system_bus
-inherit webos_cmake_qt5
+inherit webos_cmake_qt6
 inherit webos_systemd
 inherit pkgconfig
 
