@@ -10,7 +10,7 @@ PV = "5.12.3+git${SRCPV}"
 SRCREV = "2efa108bfeabee0bfcde19f438bddaf6af5e54a8"
 
 inherit webos_ports_repo
-inherit qmake5
+inherit qt6-qmake
 inherit pkgconfig
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};"

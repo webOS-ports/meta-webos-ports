@@ -16,7 +16,7 @@ RDEPENDS:${PN} += "qml-webos-components"
 #PR = "r14"
 
 
-inherit webos_qmake5
+inherit webos_qmake6
 #inherit webos_enhanced_submissions
 inherit webos_qmllint
 inherit webos_public_repo

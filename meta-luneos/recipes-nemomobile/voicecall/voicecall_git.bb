@@ -7,7 +7,7 @@ DEPENDS += "qtbase qtmultimedia libqofono"
 PV = "0.7.9+git${SRCPV}"
 SRCREV = "3dfedcfa06a71804e8175f6cf0935467ae0376fd"
 
-inherit qmake5
+inherit qt6-qmake
 inherit systemd
 inherit pkgconfig
 

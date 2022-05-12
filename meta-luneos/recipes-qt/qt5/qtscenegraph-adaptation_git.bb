@@ -21,7 +21,7 @@ COMPATIBLE_MACHINE = "^halium$"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-inherit qmake5 webos_ports_fork_repo
+inherit qt6-qmake webos_ports_fork_repo
 
 EXTRA_QMAKEVARS_PRE += "CONFIG+=surfaceformat CONFIG+=programbinary CONFIG+=hybristexture"
 

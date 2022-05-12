@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = "file://bluez-qt/COPYING.LIB;md5=4fbd65380cdd255951079008b364
 
 DEPENDS = "qtbase qtdeclarative qtbase-native"
 
-inherit qmake5
+inherit qt6-qmake
 
 PV = "5.24.0+git${SRCPV}"
 SRCREV = "e611adc6dce026e32aef6db902cfa4ee99d00265"
