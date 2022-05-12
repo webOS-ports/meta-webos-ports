@@ -16,7 +16,7 @@ PR = "r8"
 
 SRCREV = "7ba4ebe6d95591a31c8e072da5fd68adcfcb368a"
 
-inherit webos_qmake5
+inherit webos_qmake6
 #inherit webos_enhanced_submissions
 inherit webos_public_repo
 

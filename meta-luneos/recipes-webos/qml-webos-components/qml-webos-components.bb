@@ -14,7 +14,7 @@ DEPENDS = "qtdeclarative pmloglib qt-features-webos luna-service2 glib-2.0"
 
 SRCREV = "4ed059ab02672373a45860d8d78024337e517cac"
 
-inherit webos_qmake5
+inherit webos_qmake6
 inherit pkgconfig
 inherit webos_machine_impl_dep
 #inherit webos_enhanced_submissions
