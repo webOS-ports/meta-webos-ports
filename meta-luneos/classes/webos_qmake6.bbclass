@@ -1,6 +1,6 @@
 # Copyright (c) 2013-2019 LG Electronics, Inc.
 
-inherit qmake5
+inherit qt6-qmake
 inherit webos_filesystem_paths
 
 # These are used in the luna-sysmgr recipe

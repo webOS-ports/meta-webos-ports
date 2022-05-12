@@ -13,7 +13,7 @@ WEBOS_GIT_PARAM_BRANCH = "webosose-wam"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-inherit qmake5
+inherit qt6-qmake
 inherit webos_ports_repo
 inherit webos_filesystem_paths
 inherit pkgconfig

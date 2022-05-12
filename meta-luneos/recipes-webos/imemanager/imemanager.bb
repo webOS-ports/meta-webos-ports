@@ -16,7 +16,7 @@ RDEPENDS:${PN} += "qml-webos-bridge"
 PV = "1.0.0-22+git${SRCPV}"
 SRCREV = "e71b9c458e4aa9203991ba84eed7104306372ce3"
 
-inherit webos_qmake5
+inherit webos_qmake6
 inherit webos_system_bus
 inherit webos_ports_ose_repo
 #inherit webos_qt_localization

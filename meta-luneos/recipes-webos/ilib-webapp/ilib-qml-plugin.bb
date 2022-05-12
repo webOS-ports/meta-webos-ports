@@ -14,7 +14,7 @@ DEPENDS = "qtdeclarative"
 PV = "11.0.0-6+git${SRCPV}"
 SRCREV = "bb19fd3dc52845540c9cf6b944cca773ff48c280"
 
-inherit webos_qmake5
+inherit webos_qmake6
 inherit webos_public_repo
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"

@@ -12,7 +12,7 @@ S = "${WORKDIR}/git"
 
 inherit webos_ports_repo
 inherit webos_filesystem_paths
-inherit qmake5
+inherit qt6-qmake
 
 APP_PATH = "${webos_applicationsdir}/${PN}"
 EXTRA_QMAKEVARS_PRE = "\
