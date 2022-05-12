@@ -5,7 +5,7 @@
 
 DEPENDS:append = " qtdeclarative-native libxml2-native"
 
-inherit qmake5_paths
+inherit qt6-paths
 
 WEBOS_QMLLINT_EXTRA_VALIDATION ?= "0"
 WEBOS_QMLLINT_ERROR_LOG ?= "${T}/qmllint_error.log"
