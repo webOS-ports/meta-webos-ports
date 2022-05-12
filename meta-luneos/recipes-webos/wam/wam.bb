@@ -20,7 +20,7 @@ PV = "1.0.2-55+git${SRCPV}"
 SRCREV = "d817c5a083127fc6e2ffb036ae3b4912c43c0262"
 PR = "r30"
 
-WAM_BUILD_SYSTEM = "webos_qmake5"
+WAM_BUILD_SYSTEM = "webos_qmake6"
 WAM_BUILD_SYSTEM:webos = "webos_cmake"
 
 inherit webos_cmake

@@ -21,7 +21,7 @@ RDEPENDS:${PN} += "qml-webos-framework qml-webos-bridge qml-app-components"
 
 inherit webos_ports_ose_repo
 inherit webos_localizable
-inherit webos_qmake5
+inherit webos_qmake6
 inherit systemd
 inherit webos_system_bus
 inherit webos_app
