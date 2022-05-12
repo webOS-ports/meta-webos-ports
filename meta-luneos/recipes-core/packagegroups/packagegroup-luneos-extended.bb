@@ -56,7 +56,6 @@ RDEPENDS:${PN} = " \
   org.webosports.app.photos \
   org.webosports.app.settings \
   org.webosports.app.tasks \
-  org.webosports.app.terminal \
   \
   org.webosports.cdav \
   org.webosports.tweaks \
@@ -67,8 +66,6 @@ RDEPENDS:${PN} = " \
   org.webosports.service.messaging \
   org.webosports.service.update \
   \
-  fingerterm \
-  messwerk \
   \
   ca-certificates \
   certmgrd \
@@ -92,7 +89,6 @@ RDEPENDS:${PN} = " \
   luna-sysmgr \
   luna-sysmgr-conf \
   luneos-components \
-  qtlocation-luneos-plugin \
   webos-system-update \
   \
   webos-systemd-services \
@@ -115,6 +111,11 @@ RDEPENDS:${PN} = " \
   storaged \
 "
 
+#Needs work for Qt6
+#  org.webosports.app.terminal
+#  fingerterm
+#  messwerk  
+#  qtlocation-luneos-plugin
 LIBHYBRIS_RDEPENDS = " \
     ${VIRTUAL-RUNTIME_android-system-image} \
     android-property-service \
@@ -168,14 +169,16 @@ RDEPENDS:${PN}:append:yggdrasil = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
 QEMU_RDEPENDS = " \
     alsa-utils-systemd \
     mesa-driver-swrast \
-    phonesim \
     kernel-module-snd-intel8x0 \
     libpci \
     rng-tools \
     vmwgfx-layout \
 "
 
-#    qt5-plugin-generic-vboxtouch
+#FIXME for Qt6 See https://lore.kernel.org/ofono/cf3db388-fc6d-347b-dd80-f7888c7d528c@gmail.com/T/#m739fe03c0bb888c3e2885967b72b22b7c849f31c
+#    phonesim 
+#    qt5-plugin-generic-vboxtouch 
+
 
 RDEPENDS:${PN}:append:qemux86 = " ${QEMU_RDEPENDS}"
 RDEPENDS:${PN}:append:qemux86-64 = " ${QEMU_RDEPENDS}"

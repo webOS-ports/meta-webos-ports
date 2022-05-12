@@ -1,4 +1,4 @@
-# Copyright (c) 2013-2021 LG Electronics, Inc.
+# Copyright (c) 2013-2022 LG Electronics, Inc.
 
 SUMMARY = "Shareable QML components for webOS"
 AUTHOR = "Anupam Kaul <anupam.kaul@lge.com>"
@@ -11,15 +11,17 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "qtdeclarative pmloglib qt-features-webos luna-service2 glib-2.0"
 
+#WEBOS_VERSION = "1.0.0-56_65071125e880b3de2bb3494cae3e1d4e680eb5a1"
+#PR = "r18"
 
-SRCREV = "4ed059ab02672373a45860d8d78024337e517cac"
+SRCREV = "f49bdc70c97af4fa33f99cf7885f631051141a3a"
 
 inherit webos_qmake6
 inherit pkgconfig
 inherit webos_machine_impl_dep
 #inherit webos_enhanced_submissions
 inherit webos_lttng
-inherit webos_qmllint
+#inherit webos_qmllint
 inherit webos_public_repo
 
 # TODO: move to WEBOS_GIT_REPO_COMPLETE

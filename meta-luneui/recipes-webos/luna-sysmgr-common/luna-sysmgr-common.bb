@@ -11,12 +11,13 @@ DEPENDS += "luna-sysmgr-ipc luna-sysmgr-ipc-messages"
 DEPENDS += "qtbase"
 
 PV = "3.0.0-3+git${SRCPV}"
-SRCREV = "f441d1eed3fb967af243c3a513182ffcc685b76e"
+SRCREV = "ae31c22625d3e5ced3d89cb0c560ef4c1378db52"
 
 # Don't uncomment until all of the do_*() tasks have been moved out of the recipe
 inherit webos_ports_fork_repo
 inherit pkgconfig
 inherit webos_cmake_qt6
 
+WEBOS_GIT_PARAM_BRANCH = "herrie/qt6"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
