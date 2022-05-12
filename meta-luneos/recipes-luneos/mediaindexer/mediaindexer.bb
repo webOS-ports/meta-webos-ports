@@ -12,7 +12,7 @@ SRCREV = "ac6d82f4bc679364efffe310975483f9b62b3698"
 
 inherit webos_ports_repo
 inherit webos_system_bus
-inherit cmake_qt5
+inherit qt6-cmake
 inherit webos_cmake
 inherit webos_filesystem_paths
 inherit webos_systemd

@@ -29,7 +29,7 @@ inherit pkgconfig
 inherit webos_ports_repo
 inherit webos_system_bus
 inherit webos_configure_manifest
-inherit webos_cmake_qt5
+inherit webos_cmake_qt6
 inherit webos_systemd
 
 RDEPENDS:${PN} = "luna-next-conf xkeyboard-config"
