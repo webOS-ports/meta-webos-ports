@@ -6,7 +6,7 @@ PV = "0.14.1+git${SRCPV}"
 SRCREV = "59f967d5e1f6e9ce8e1632d9405422b071d93d30"
 
 DEPENDS = "qtbase qtdeclarative"
-RDEPENDS:${PN} = "ttf-liberation-mono qtxmlpatterns"
+RDEPENDS:${PN} = "ttf-liberation-mono"
 
 SRC_URI = " \
     git://github.com/Swordfish90/qmltermwidget.git;protocol=https;branch=master \
