@@ -1,4 +1,4 @@
-# Copyright (c) 2016-2021 LG Electronics, Inc.
+# Copyright (c) 2016-2022 LG Electronics, Inc.
 
 SUMMARY = "webOS extension for Qtwayland"
 AUTHOR = "Elvis Lee <kwangwoong.lee@lge.com>"
@@ -11,17 +11,16 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "qtwayland webos-wayland-extensions libxkbcommon qt-features-webos wayland-native qtwayland-native wayland-protocols"
 
-WEBOS_VERSION = "2.0.0-70_c04c1b3f861f866debb637909cf91e866ded3638"
-PR = "r15"
-
-PV = "2.0.0-70+git${SRCPV}"
-SRCREV = "1deb6a5e446714bb6218df8c2ea093eeef514768"
+#WEBOS_VERSION = "2.0.0-77_06206d9e24f73c3317ecebee95d427ffb61587c5"
+#PR = "r16"
 
 inherit webos_qmake6
 inherit pkgconfig
 #inherit webos_enhanced_submissions
 inherit webos_lttng
 inherit webos_public_repo
+
+SRCREV = "973feda9c440a53f6f362c3254525cefe3ceabf5"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
