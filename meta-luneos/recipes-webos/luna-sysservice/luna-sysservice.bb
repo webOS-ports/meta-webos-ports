@@ -13,20 +13,21 @@ DEPENDS = "luna-service2 libpbnjson qtbase uriparser libxml2 sqlite3 pmloglib ny
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_ntp} tzcode"
 
 inherit webos_ports_ose_repo
-inherit webos_cmake
+inherit webos_cmake_qt6
 inherit webos_system_bus
 inherit webos_configure_manifest
 inherit systemd
 inherit pkgconfig
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webOS-ports/webOS-OSE-wam-lsm"
+WEBOS_GIT_PARAM_BRANCH = "herrie/qt6"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE:${PN} = "luna-sys-service.service"
 
 PV = "4.4.0-1+git${SRCPV}"
-SRCREV = "afb1e9e15eb703e91c9a2aa1b65a866e81bfb621"
+SRCREV = "591feb49aee20c546f422aa59515117f7ae7bec8"
 
 do_install:append() {
     install -d ${D}${datadir}/localization/${BPN}
