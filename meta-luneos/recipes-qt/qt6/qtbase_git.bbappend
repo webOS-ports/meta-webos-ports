@@ -14,13 +14,16 @@ remove_LGPL3() {
 }
 
 # Disable features we don't use in all webOS products
-PACKAGECONFIG_DEFAULT:remove = "dbus"
+# Needed in LuneOS
+#PACKAGECONFIG_DEFAULT:remove = "dbus"
+
 
 # Enable accessibility for qtquickcontrols
 PACKAGECONFIG:append = " accessibility"
 
 # Disable widget features
-PACKAGECONFIG:remove = "widgets"
+# Needed in LuneOS
+#PACKAGECONFIG:remove = "widgets"
 
 # Configure to use platform harfbuzz
 PACKAGECONFIG:append = " harfbuzz"
