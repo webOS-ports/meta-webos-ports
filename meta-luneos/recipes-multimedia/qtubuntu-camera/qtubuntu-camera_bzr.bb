@@ -3,7 +3,7 @@ HOMEPAGE = "http://bazaar.launchpad.net/~phablet-team/qtubuntu-camera"
 LICENSE = "LGPL-3.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=e6a600fd5e1d9cbde2d983680233ad02"
 
-inherit qmake5 pkgconfig
+inherit qt6-qmake pkgconfig
 
 DEPENDS = "libhybris qtbase libqtubuntu-media-signals exiv2 qtmultimedia pulseaudio"
 

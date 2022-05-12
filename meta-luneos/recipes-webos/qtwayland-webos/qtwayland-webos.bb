@@ -17,7 +17,7 @@ PR = "r15"
 PV = "2.0.0-70+git${SRCPV}"
 SRCREV = "1deb6a5e446714bb6218df8c2ea093eeef514768"
 
-inherit webos_qmake5
+inherit webos_qmake6
 inherit pkgconfig
 #inherit webos_enhanced_submissions
 inherit webos_lttng

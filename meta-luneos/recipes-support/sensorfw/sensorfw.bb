@@ -39,7 +39,7 @@ S = "${WORKDIR}/git"
 #sed "s=@LIB@=lib=g" ${S}/sensord-qt5.pc.in > ${S}/sensord-qt5.pc
 #}
 
-inherit qmake5
+inherit qt6-qmake
 inherit pkgconfig
 inherit systemd
 inherit webos_system_bus
