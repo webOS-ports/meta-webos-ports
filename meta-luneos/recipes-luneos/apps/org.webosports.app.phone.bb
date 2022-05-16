@@ -3,9 +3,7 @@ SECTION = "webos/apps"
 LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=4ddd17b0c9241d7b24a4960caefe8e40"
 
-#DEPENDS = "qtbase qtdeclarative libqofono"
-#FIXME libqofono needs porting to Qt6
-DEPENDS = "qtbase qtdeclarative"
+DEPENDS = "qtbase qtdeclarative libqofono"
 RDEPENDS:${PN} += "qtdeclarative-qmlplugins"
 
 inherit webos_ports_repo
