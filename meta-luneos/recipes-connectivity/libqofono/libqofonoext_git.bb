@@ -5,11 +5,11 @@ LIC_FILES_CHKSUM = "file://src/qofonoext.cpp;;beginline=1;endline=14;md5=e78738e
 
 DEPENDS += "qtbase qtdeclarative libqofono"
 
-SRCREV = "ebe45e0fe46578c24e9fe241e84cd5ca0f097372"
+SRCREV = "af438b503af3875a4f82f0fb99278a1b2e39414d"
 SRC_URI = "git://github.com/sailfishos/libqofonoext.git;protocol=https;branch=master"
 S = "${WORKDIR}/git"
 
-PV = "1.027+gitr${SRCPV}"
+PV = "1.029+gitr${SRCPV}"
 
 inherit pkgconfig qt6-qmake
 
