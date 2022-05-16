@@ -5,14 +5,13 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=4fbd65380cdd255951079008b364516c"
 
 DEPENDS += "qtbase qtdeclarative"
 
-SRCREV = "047b667f18ca73cb7f884f174d1d164a616d6814"
+SRCREV = "8d843d35f682a83bb1fec6c92595e0753ffe0079"
 
 SRC_URI = "git://github.com/sailfishos/libqofono.git;protocol=https;branch=master \
-           file://0001-also-emit-modemRemoved-and-modemAdded.patch \
 "
 S = "${WORKDIR}/git"
 
-PV = "0.103+gitr${SRCPV}"
+PV = "0.113+gitr${SRCPV}"
 
 inherit qt6-qmake
 
