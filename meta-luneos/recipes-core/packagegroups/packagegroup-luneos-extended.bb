@@ -170,12 +170,12 @@ QEMU_RDEPENDS = " \
     mesa-driver-swrast \
     kernel-module-snd-intel8x0 \
     libpci \
+    phonesim \
     rng-tools \
     vmwgfx-layout \
 "
 
-#FIXME for Qt6 See https://lore.kernel.org/ofono/cf3db388-fc6d-347b-dd80-f7888c7d528c@gmail.com/T/#m739fe03c0bb888c3e2885967b72b22b7c849f31c
-#    phonesim 
+#FIXME for Qt6 
 #    qt5-plugin-generic-vboxtouch 
 
 
