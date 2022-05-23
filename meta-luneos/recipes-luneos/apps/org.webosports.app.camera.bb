@@ -6,10 +6,11 @@ LIC_FILES_CHKSUM = " \
 "
 
 PV = "0.0.2-1+git${SRCPV}"
-SRCREV = "a407b0443e7eb934c717723fbdedbd54ae631520"
+SRCREV = "f59fdce9a4c682a9ec3fdf500939d2c69c17a01e"
 
 DEPENDS = "qtbase qtdeclarative qtmultimedia"
 
+WEBOS_GIT_PARAM_BRANCH = "herrie/qt6"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 

@@ -8,7 +8,7 @@ DEPENDS += "db8 glib-2.0 luna-service2 sqlite3 taglib qtbase luna-sysmgr-common"
 RDEPENDS:${PN} += "shared-mime-info"
 
 PV = "0.1.0-14+git${SRCPV}"
-SRCREV = "ac6d82f4bc679364efffe310975483f9b62b3698"
+SRCREV = "ff9dba75370547ae1cdbfb9043cb60df162d1488"
 
 inherit webos_ports_repo
 inherit webos_system_bus
@@ -18,6 +18,7 @@ inherit webos_filesystem_paths
 inherit webos_systemd
 inherit pkgconfig
 
+WEBOS_GIT_PARAM_BRANCH = "herrie/qt6"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 

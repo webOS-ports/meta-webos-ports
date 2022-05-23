@@ -1,0 +1,51 @@
+From d70550dae0668e46ecd31f9abdbee5a886a54628 Mon Sep 17 00:00:00 2001
+From: Hyunkook Khang <hyunkook.khang@lge.com>
+Date: Tue, 20 Sep 2016 10:25:36 +0900
+Subject: [PATCH] server: Fix crash when accessing client which is already
+ freed
+
+While processing pending data, client could be destroyed in the middle of
+the process. (e.g. by invoking wl_display_flush_clients()).
+In this case, client will be freed, but we are still in the processing data
+of the client, so it could cause a crash.
+
+To avoid this, instead of destroying the client directly,
+just set the error here and destroy the client where it needs to be.
+
+Signed-off-by: Hyunkook Khang <hyunkook.khang@lge.com>
+
+Upstream-Status: Submitted
+---
+ src/wayland-server.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/src/wayland-server.c b/src/wayland-server.c
+index 3f48dfe..2eaf398 100644
+--- a/src/wayland-server.c
++++ b/src/wayland-server.c
+@@ -1344,10 +1344,16 @@ wl_display_terminate(struct wl_display *display)
+ WL_EXPORT void
+ wl_display_run(struct wl_display *display)
+ {
++	struct wl_client *client, *next;
++
+ 	display->run = 1;
+ 
+ 	while (display->run) {
+ 		wl_display_flush_clients(display);
++		wl_list_for_each_safe(client, next, &display->client_list, link) {
++			if (client->error)
++				wl_client_destroy(client);
++		}
+ 		wl_event_loop_dispatch(display->loop, -1);
+ 	}
+ }
+@@ -1365,7 +1371,7 @@ wl_display_flush_clients(struct wl_display *display)
+ 						  WL_EVENT_WRITABLE |
+ 						  WL_EVENT_READABLE);
+ 		} else if (ret < 0) {
+-			wl_client_destroy(client);
++			client->error = 1;
+ 		}
+ 	}
+ }
