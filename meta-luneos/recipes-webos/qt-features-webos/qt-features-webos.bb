@@ -14,7 +14,7 @@ DEPENDS = "qtbase"
 WEBOS_VERSION = "1.0.0-50_e3cd3c25717605a153d10fcccbf35893a38ebb8b"
 PR = "r8"
 
-SRCREV = "7ba4ebe6d95591a31c8e072da5fd68adcfcb368a"
+SRCREV = "334ce71ac8f8b574adc45686e191e19d3711852e"
 
 inherit webos_qmake6
 #inherit webos_enhanced_submissions

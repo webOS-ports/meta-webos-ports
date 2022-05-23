@@ -3,12 +3,12 @@ LICENSE = "LGPL-2.1-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 PV = "0.4.2+git${SRCPV}"
-SRCREV = "1fcd19a799596b00a099f677e70edaa4a8a7f400"
+SRCREV = "145540cdcd324742053c7641af4d988d6402c7b9"
 
-#FIXME port kf5bluezqt-mer to Qt6 (Using yocto-meta-kf5 instead)
-DEPENDS = "qtbase qtdeclarative luna-service2 libwebos-application bluez-qt qtdeclarative-native"
+#FIXME port kf5bluezqt-mer to Qt6 (Using yocto-meta-kf5 instead) bluez-qt 
+DEPENDS = "qtbase qtdeclarative luna-service2 libwebos-application qtdeclarative-native"
 
-WEBOS_GIT_PARAM_BRANCH = "webosose-wam"
+WEBOS_GIT_PARAM_BRANCH = "herrie/qt6"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 

@@ -3,13 +3,13 @@ LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263"
 
 PV = "1.3.6+git${SRCPV}"
-SRCREV = "64a3554969747e348bfa9eb85842490cef9b719e"
+SRCREV = "ddd0fef1f55631b0760462591b1f47a41f173bd6"
 
-DEPENDS = "qtbase qtdeclarative"
+DEPENDS = "qtbase qtdeclarative qttools-native qt5compat"
 RDEPENDS:${PN} = "ttf-liberation-mono"
 
 SRC_URI = " \
-    git://github.com/sailfishos/fingerterm.git;protocol=https;branch=master \
+    git://github.com/herrie82/fingerterm-1.git;protocol=https;branch=herrie/qt6 \
     file://appinfo.json \
 "
 S = "${WORKDIR}/git"
