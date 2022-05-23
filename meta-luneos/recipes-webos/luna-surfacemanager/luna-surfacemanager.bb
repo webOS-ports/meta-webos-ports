@@ -1,4 +1,4 @@
-# Copyright (c) 2013-2021 LG Electronics, Inc.
+# Copyright (c) 2013-2022 LG Electronics, Inc.
 
 SUMMARY = "The core of the Luna Surface Manager (compositor)"
 AUTHOR  = "Anupam Kaul <anupam.kaul@lge.com>"
@@ -11,26 +11,21 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "qtdeclarative wayland-native qtwayland qtwayland-native qt-features-webos pmloglib webos-wayland-extensions glib-2.0 qtwayland-webos"
 
-#WEBOS_VERSION = "2.0.0-360_5c3a00a694cc9c4ef33e910a7a20a241445b1083"
-#PR = "r52"
+#WEBOS_VERSION = "2.0.0-372_0cfef81ecf58cb6bd50f9a766a7e976bd2ea21ad"
+#PR = "r54"
 
-PV = "2.0.0-360"
+PV ="2.0.0-372+git${SRCPV}"
+
+SRCREV = "228f8bcf2d2e225e8ddf7ad7910e9534fd62f9ba"
 
 inherit webos_qmake6
 inherit pkgconfig
 #inherit webos_enhanced_submissions
 inherit webos_lttng
-inherit webos_ports_ose_repo
+inherit webos_public_repo
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
-    file://0001-Fix-build-for-Qt-5.15.2.patch \
-    file://0002-Add-capability-to-pass-extra-options-to-surface-mana.patch \
-    file://0003-WebOSShellSurface-add-setClientSize.patch \
-    file://0004-webosscreenshot-respect-QT_OPENGL_ES.patch \
-"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
-
-SRCREV = "1cb0f9a1505c83f98ff8cd9d57fd5bd8165cd969"
 
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 
@@ -63,14 +58,14 @@ VIRTUAL-RUNTIME_gpu-libs ?= ""
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_gpu-libs}"
 
 inherit webos_system_bus
-inherit webos_qmllint
+#inherit webos_qmllint
 
 # qt-features-webos have its own logic to install system bus files reason for
 # that is because only qmake knows where substitued files will be placed.
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 
 # Perform extra QML validation
-# WEBOS_QMLLINT_EXTRA_VALIDATION = "1"
+#WEBOS_QMLLINT_EXTRA_VALIDATION = "1"
 
 PACKAGECONFIG ??= "multi-input"
 PACKAGECONFIG[compositor] = "CONFIG+=compositor_base,,qt-features-webos-native"
