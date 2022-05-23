@@ -4,14 +4,14 @@ LIC_FILES_CHKSUM = "file://src/main.cpp;beginline=1;endline=18;md5=a513bca9b1708
 
 DEPENDS += "qtbase qtmultimedia libqofono"
 
-PV = "0.7.9+git${SRCPV}"
-SRCREV = "3dfedcfa06a71804e8175f6cf0935467ae0376fd"
+PV = "0.7.14+git${SRCPV}"
+SRCREV = "35f734b35899a7c57bd0547f8c0975cc4e2489bf"
 
 inherit qt6-qmake
 inherit systemd
 inherit pkgconfig
 
-SRC_URI = "git://github.com/sailfishos/voicecall.git;protocol=https;branch=master \
+SRC_URI = "git://github.com/herrie82/voicecall.git;protocol=https;branch=herrie/qt6 \
            file://voicecall-manager.service"
 
 S = "${WORKDIR}/git"

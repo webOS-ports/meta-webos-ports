@@ -9,14 +9,13 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 PV = "0.11.4+git${SRCPV}"
 #PV = "0.12.6+git${SRCPV}"
 #SRCREV = "2e539015996111576a731750342effde7aaee87f"
-SRCREV = "4f97982dd95f5ab229312d9e721d2f131bfa8886"
-DEPENDS = "qtbase \
-    luna-sysmgr-common luna-service2 json-c glib-2.0 luna-sysmgr-ipc-messages"
+SRCREV = "7ffadf0d8e0cb3ee7512da2fe170dccafba49c6e"
+DEPENDS = "qtbase luna-sysmgr-common luna-service2 json-c glib-2.0 luna-sysmgr-ipc-messages"
     
 DEPENDS:append:halium = " libhybris virtual/android-headers libgbinder libglibutil "
 
 SRC_URI = " \
-    git://github.com/sailfishos/sensorfw.git;protocol=https;branch=master \
+    git://github.com/webos-ports/sensorfw.git;protocol=https;branch=herrie/qt6 \
     file://0001-Fix-build-with-autohybris.patch \
 "
 
