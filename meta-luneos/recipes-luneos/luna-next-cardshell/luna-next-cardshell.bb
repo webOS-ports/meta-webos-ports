@@ -7,14 +7,15 @@ RDEPENDS:${PN} += " \
     qtgraphicaleffects-qmlplugins \
     qtmultimedia-qmlplugins \
     luneos-components \
-    nemo-qml-plugin-dbus \
-    libconnman-qt6 \
     libqofono \
+    nemo-qml-plugin-dbus \
     luna-surfacemanager-conf \
     luna-surfacemanager-base \
-    luna-next-qmlplugins \
 "
-    
+
+#luna-next-qmlplugins
+#    libconnman-qt 
+
 PV = "0.6-0+git${SRCPV}"
 SRCREV = "df30b49ead1370e31cc54b252e4d86fa43b73707"
 

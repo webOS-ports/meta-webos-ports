@@ -15,7 +15,7 @@ DEPENDS += "serviceinstaller"
 RDEPENDS:${PN} += "powerd"
 
 PV = "3.0.0-3+git${SRCPV}"
-SRCREV = "e3ec491fcc85f5268b6fbf441dc2100d0d44b330"
+SRCREV = "43956e5059ac6b358f06f90a34242ba906c62e9a"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 
@@ -26,6 +26,7 @@ inherit webos_cmake_qt6
 inherit webos_systemd
 inherit pkgconfig
 
+WEBOS_GIT_PARAM_BRANCH = "herrie/qt6"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 

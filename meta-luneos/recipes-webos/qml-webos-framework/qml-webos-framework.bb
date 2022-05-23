@@ -28,17 +28,19 @@ inherit pkgconfig
 inherit webos_app_generate_security_files
 inherit webos_filesystem_paths
 #inherit webos_distro_variant_dep
-inherit webos_qmllint
+#inherit webos_qmllint
 inherit webos_public_repo
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-           file://0001-AppLoader-add-import-path-for-QML-apps.patch \
-           file://0002-Setup-missing-env-variables.patch \
-           file://0003-qml-runner-don-t-set-default-value-for-WEBOS_WINDOW_.patch \
            "
 S = "${WORKDIR}/git"
 
-SRCREV = "221d2709f39c0c4443f0d4471546bc4f29f7380b"
+#           file://0001-AppLoader-add-import-path-for-QML-apps.patch 
+#           file://0002-Setup-missing-env-variables.patch 
+#           file://0003-qml-runner-don-t-set-default-value-for-WEBOS_WINDOW_.patch 
+
+
+SRCREV = "8f4f4b3942755aa4f57de80586aac7aa47b59ddc"
 
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 

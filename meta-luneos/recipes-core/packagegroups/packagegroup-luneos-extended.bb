@@ -28,7 +28,6 @@ RDEPENDS:${PN} = " \
   ofono \
   tar \
   udev-extraconf \
-  voicecall \
   webos-connman-adapter \
   webos-telephonyd \
   iw \
@@ -44,7 +43,6 @@ RDEPENDS:${PN} = " \
   org.webosports.service.ipkg \
   \
   org.webosports.app.calculator \
-  org.webosports.app.camera \
   org.webosports.app.contacts \
   org.webosports.app.filemanager \
   org.webosports.app.firstuse \
@@ -85,7 +83,6 @@ RDEPENDS:${PN} = " \
   \
   luna-appmanager \
   luna-next-cardshell \
-  luna-qml-launcher \
   luna-sysmgr \
   luna-sysmgr-conf \
   luneos-components \
@@ -109,13 +106,16 @@ RDEPENDS:${PN} = " \
   \
   https-everywhere \
   storaged \
+  messwerk \
 "
 
 #Needs work for Qt6
 #  org.webosports.app.terminal
 #  fingerterm
-#  messwerk  
 #  qtlocation-luneos-plugin
+#  org.webosports.app.camera
+# voicecall
+
 LIBHYBRIS_RDEPENDS = " \
     ${VIRTUAL-RUNTIME_android-system-image} \
     android-property-service \
@@ -131,9 +131,6 @@ LIBHYBRIS_RDEPENDS = " \
     \
     exiv2 \
     libpulse-simple0 \
-    qtubuntu-camera \
-    libqtubuntu-media-signals2 \
-    qtvideo-node \
     nyx-modules-hybris \
     \
     ofono-ril-binder-plugin \
@@ -142,6 +139,12 @@ LIBHYBRIS_RDEPENDS = " \
 MEMNOTIFY_RDEPENDS = " \
     memnotify-module \
 "
+
+#Needs update for Qt6
+#    qtubuntu-camera 
+#    libqtubuntu-media-signals2 
+#    qtvideo-node 
+
 
 # NOTE: For kernels build outside of OE we can't add memnotify support and therefor have to ship the module with the kernel package directly.
 # NOTE: For kernels build with OE, the kernel tree would need to have a patch applied in order to make si_swapinfo exportable as per http://lkml.iu.edu/hypermail//linux/kernel/1201.2/00719.html
