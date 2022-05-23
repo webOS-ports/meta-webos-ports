@@ -12,21 +12,21 @@ inherit qt6-qmake
 inherit webos_ports_repo
 inherit pkgconfig
 
-DEPENDS = "maliit-framework-webos hunspell presage luna-service2 presage-native"
+DEPENDS = "maliit-framework-webos hunspell presage luna-service2 presage-native qt5compat"
 
 RDEPENDS:${PN} += "qtsvg-plugins qtmultimedia-qmlplugins"
 RRECOMMENDS:${PN} += "hunspell-dictionaries"
 
-SRCREV = "c89d6d2918d732860b38408c9bfeb5da87bb17d8"
+SRCREV = "0327f6a22b8766e0d77a51704878c02ea364bacf"
 PV = "0.99.2+git${SRCPV}"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=herrie/qt6 \
     file://0001-make-it-compatible-with-newer-hunspell.patch \
 "
 
 # a lot of cases like:
 # presage.h:115:40: error: ISO C++17 does not allow dynamic exception specifications
-CXXFLAGS += "-std=gnu++14"
+CXXFLAGS += "-std=c++1z"
 
 EXTRA_QMAKEVARS_PRE = "\
     PREFIX=${prefix} \

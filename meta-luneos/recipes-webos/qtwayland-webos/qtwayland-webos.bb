@@ -11,9 +11,6 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "qtwayland webos-wayland-extensions libxkbcommon qt-features-webos wayland-native qtwayland-native wayland-protocols"
 
-#WEBOS_VERSION = "2.0.0-77_06206d9e24f73c3317ecebee95d427ffb61587c5"
-#PR = "r16"
-
 inherit webos_qmake6
 inherit pkgconfig
 #inherit webos_enhanced_submissions
@@ -39,6 +36,8 @@ DEBIAN_NOAUTONAME:${PN}-dev = "1"
 
 # Enable LTTng tracing capability when enabled in webos_lttng class
 EXTRA_QMAKEVARS_PRE += "${@oe.utils.conditional('WEBOS_LTTNG_ENABLED', '1', 'CONFIG+=lttng', '', d)}"
+
+CXXFLAGS += "-fpermissive"
 
 # we don't provide cmake tests
 EXTRA_QMAKEVARS_POST += "CONFIG-=create_cmake"
