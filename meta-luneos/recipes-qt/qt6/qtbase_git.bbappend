@@ -29,7 +29,12 @@ PACKAGECONFIG:append = " accessibility"
 PACKAGECONFIG:append = " harfbuzz"
 
 # Configure to compile with GL ES2 instead of default desktop GL
-PACKAGECONFIG_GL = "gles2"
+PACKAGECONFIG_GL = "gles2 eglfs"
+PACKAGECONFIG_GL:append:qemuall = " kms gbm"
+PACKAGECONFIG_GL:append:pinephone = " kms gbm"
+PACKAGECONFIG_GL:append:pinephonepro = " kms gbm"
+PACKAGECONFIG_DISTRO += "sql-sqlite icu glib accessibility mtdev examples fontconfig xkbcommon"
+
 # We had this enabled in our old gpro/meta-qt5 recipe
 PACKAGECONFIG:append = " icu"
 # We had this enabled in our old gpro/meta-qt5 recipe
@@ -69,8 +74,6 @@ PACKAGECONFIG[system-pcre2] = "-DFEATURE_system_pcre2=ON,-DFEATURE_system_pcre2=
 PACKAGECONFIG:remove = "system-pcre2"
 
 PACKAGECONFIG:remove = "libinput"
-
-PACKAGECONFIG:append = " kms"
 
 # Depending on whether LTTNG support is enabled or not for the build we need to
 # depend on the LTTNG providers to not let the build fail
