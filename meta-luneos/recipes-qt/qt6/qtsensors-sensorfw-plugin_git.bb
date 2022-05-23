@@ -15,13 +15,15 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 # Depends on libhybris which has this restriction
 # COMPATIBLE_MACHINE = "^halium$"
 
-PV = "5.14.1+git${SRCPV}"
-SRCREV = "9414e7e35510fbcb1c07172c143b8a52c403caba"
+PV = "6.3.0+git${SRCPV}"
+SRCREV = "7b528ffd1f3cac9bab2058ccbca1bca75bb6436d"
 
 inherit webos_ports_repo
 inherit qt6-qmake
 inherit pkgconfig
 
+
+WEBOS_GIT_PARAM_BRANCH = "herrie/qt6"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};"
 S = "${WORKDIR}/git"
 
@@ -33,4 +35,5 @@ do_install:append() {
 
 FILES:${PN} += " \
     ${libdir} \
+    xdg/QtProject/Sensors.conf \
 "
