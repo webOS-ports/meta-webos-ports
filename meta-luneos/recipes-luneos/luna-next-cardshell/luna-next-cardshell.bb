@@ -8,6 +8,7 @@ RDEPENDS:${PN} += " \
     qtmultimedia-qmlplugins \
     luneos-components \
     libqofono \
+    luna-next-qmlplugins \
     nemo-qml-plugin-dbus \
     luna-surfacemanager-conf \
     luna-surfacemanager-base \
@@ -17,7 +18,7 @@ RDEPENDS:${PN} += " \
 #    libconnman-qt 
 
 PV = "0.6-0+git${SRCPV}"
-SRCREV = "df30b49ead1370e31cc54b252e4d86fa43b73707"
+SRCREV = "cef21e7fff0f4b9ea9c2b89aeeb2f66985c93eff"
 
 inherit webos_ports_repo
 inherit webos_cmake
@@ -27,7 +28,7 @@ inherit webos_filesystem_paths
 
 EXTRA_OECMAKE += "-DLUNA_NEXT_SHELL_DIR=${OE_QMAKE_PATH_QML}/WebOSCompositor"
 
-WEBOS_GIT_PARAM_BRANCH = "tofe/lsm"
+WEBOS_GIT_PARAM_BRANCH = "herrie/qt6"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
