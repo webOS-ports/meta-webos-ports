@@ -3,7 +3,7 @@ LICENSE = "LGPL-2.1-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 PV = "0.4.2+git${SRCPV}"
-SRCREV = "145540cdcd324742053c7641af4d988d6402c7b9"
+SRCREV = "9ec9ed8bfa579e098a8ac4d3e108b50308e78805"
 
 #FIXME port kf5bluezqt-mer to Qt6 (Using yocto-meta-kf5 instead) bluez-qt 
 DEPENDS = "qtbase qtdeclarative luna-service2 libwebos-application qtdeclarative-native"
