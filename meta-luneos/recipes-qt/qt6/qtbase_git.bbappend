@@ -29,10 +29,10 @@ PACKAGECONFIG:append = " accessibility"
 PACKAGECONFIG:append = " harfbuzz"
 
 # Configure to compile with GL ES2 instead of default desktop GL
-PACKAGECONFIG_GL = "gles2 eglfs"
-PACKAGECONFIG_GL:append:qemuall = " kms gbm"
-PACKAGECONFIG_GL:append:pinephone = " kms gbm"
-PACKAGECONFIG_GL:append:pinephonepro = " kms gbm"
+PACKAGECONFIG_GRAPHICS = "gles2 eglfs"
+PACKAGECONFIG_GRAPHICS:append:qemuall = " kms gbm"
+PACKAGECONFIG_GRAPHICS:append:pinephone = " kms gbm"
+PACKAGECONFIG_GRAPHICS:append:pinephonepro = " kms gbm"
 PACKAGECONFIG_DISTRO += "sql-sqlite icu glib accessibility mtdev examples fontconfig xkbcommon"
 
 # We had this enabled in our old gpro/meta-qt5 recipe
