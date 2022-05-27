@@ -17,7 +17,7 @@ RDEPENDS:${PN} += " \
 #    libconnman-qt 
 
 PV = "0.6-0+git${SRCPV}"
-SRCREV = "cef21e7fff0f4b9ea9c2b89aeeb2f66985c93eff"
+SRCREV = "ab8fe7957f2498d0ff16b720edef39afc27fea2e"
 
 inherit webos_ports_repo
 inherit webos_cmake
