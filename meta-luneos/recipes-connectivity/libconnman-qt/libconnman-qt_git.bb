@@ -9,9 +9,10 @@ PV = "1.2.35+git${SRCPV}"
 
 SRCREV = "347f20fe1a03bf0624f55b9108c797611e79f7d2"
 SRC_URI = "git://github.com/sailfishos/libconnman-qt.git;protocol=https;branch=master \
-    file://0001-Don-t-use-MeeGo-as-prefix-in-order-to-make-this-a-co.patch \
-    file://0001-Add-missing-declarations-for-operator-overloads.patch \
-"
+           file://0001-Don-t-use-MeeGo-as-prefix-in-order-to-make-this-a-co.patch \
+           file://0001-Add-missing-declarations-for-operator-overloads.patch \
+           file://0001-Fixes-for-Qt6.patch \
+           "
 
 S = "${WORKDIR}/git"
 
@@ -25,3 +26,9 @@ do_install:append() {
         sed -i "s@-L${STAGING_LIBDIR}@-L\${libdir}@g" ${D}${libdir}/pkgconfig/connman-qt5.pc
     fi
 }
+FILES:${PN} += " \
+    ${OE_QMAKE_PATH_QML}/Connman/ \
+"
+FILES:${PN}-dev += " \
+    ${libdir}/libconnman-qt6.prl \
+"
