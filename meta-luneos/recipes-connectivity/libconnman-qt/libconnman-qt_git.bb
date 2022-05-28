@@ -16,6 +16,7 @@ SRC_URI = "git://github.com/sailfishos/libconnman-qt.git;protocol=https;branch=m
 S = "${WORKDIR}/git"
 
 inherit pkgconfig
+inherit qt6-qmake
 
 RDEPENDS:${PN} += "connman"
 
