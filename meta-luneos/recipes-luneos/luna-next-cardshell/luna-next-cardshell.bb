@@ -8,6 +8,7 @@ RDEPENDS:${PN} += " \
     qtmultimedia-qmlplugins \
     luneos-components \
     libqofono \
+    libconnman-qt \
     nemo-qml-plugin-dbus \
     luna-surfacemanager-conf \
     luna-surfacemanager-base \
