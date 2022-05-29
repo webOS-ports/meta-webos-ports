@@ -5,8 +5,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 PV = "0.5+git${SRCPV}"
 SRCREV = "0140013eb1a8f1463739a28d276d69dcb9360c43"
 
-#FIXME port kf5bluezqt-mer to Qt6 (Using yocto-meta-kf5 instead) bluez-qt 
-DEPENDS = "qtbase qtdeclarative luna-service2 luna-sysmgr-common libwebos-application qtdeclarative-native"
+DEPENDS = "qtbase qtdeclarative luna-service2 luna-sysmgr-common libwebos-application qtdeclarative-native kf5bluezqt-mer"
 
 WEBOS_GIT_PARAM_BRANCH = "herrie/qt6-new"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
