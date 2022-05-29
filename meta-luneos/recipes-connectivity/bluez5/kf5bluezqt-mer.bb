@@ -11,7 +11,9 @@ PV = "5.24.0+git${SRCPV}"
 SRCREV = "e611adc6dce026e32aef6db902cfa4ee99d00265"
 
 SRC_URI = "git://github.com/sailfishos/kf5bluezqt.git;protocol=https;branch=master \
-           file://qt_BluezQt.pri"
+           file://qt_BluezQt.pri \
+           file://0001-minimal-migration-to-Qt6.patch \
+           "
 	   
 S = "${WORKDIR}/git"
 B = "${S}"
