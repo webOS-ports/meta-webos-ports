@@ -18,8 +18,10 @@ CXXFLAGS += "-Wno-narrowing"
 
 inherit webos_ports_repo
 
+WEBOS_REPO_NAME = "qt5-plugin-generic-vboxtouch"
+WEBOS_GIT_PARAM_BRANCH = "herrie/qt6"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-SRCREV = "5c3b346e2c72900158f207f86e62f1f2672f494a"
+SRCREV = "80eafd2e54eeec3d0c9f58046613598b09473d20"
 S = "${WORKDIR}/git/vboxtouch"
 
 inherit qt6-qmake
