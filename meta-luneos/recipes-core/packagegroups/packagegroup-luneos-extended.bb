@@ -175,13 +175,10 @@ QEMU_RDEPENDS = " \
     kernel-module-snd-intel8x0 \
     libpci \
     phonesim \
+    qt-plugin-generic-vboxtouch \
     rng-tools \
     vmwgfx-layout \
 "
-
-#FIXME for Qt6 
-#    qt5-plugin-generic-vboxtouch 
-
 
 RDEPENDS:${PN}:append:qemux86 = " ${QEMU_RDEPENDS}"
 RDEPENDS:${PN}:append:qemux86-64 = " ${QEMU_RDEPENDS}"
