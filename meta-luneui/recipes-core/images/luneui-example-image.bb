@@ -31,7 +31,7 @@ IMAGE_INSTALL += " \
 IMAGE_INSTALL:append:qemuall = " \
     ${MESA_PKGS} \
     v86d \
-    qt5-plugin-generic-vboxtouch \
+    qt-plugin-generic-vboxtouch \
 "
 
 IMAGE_INSTALL:append:qemux86-64 = " \
