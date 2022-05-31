@@ -16,7 +16,7 @@ DEPENDS = "qtdeclarative wayland-native qtwayland qtwayland-native qt-features-w
 
 PV ="2.0.0-372+git${SRCPV}"
 
-SRCREV = "9296bca1f7d538e4651009e30310637e9381a80a"
+SRCREV = "dfbf316e3d008aa7ed6965032a02c4552f8bcc61"
 
 inherit webos_qmake6
 inherit pkgconfig
