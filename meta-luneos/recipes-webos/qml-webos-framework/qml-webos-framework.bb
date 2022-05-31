@@ -32,13 +32,12 @@ inherit webos_filesystem_paths
 inherit webos_public_repo
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+           file://0001-AppLoader-add-import-path-for-QML-apps.patch \
+           file://0002-Setup-missing-env-variables.patch \
+           file://0003-qml-runner-don-t-set-default-value-for-WEBOS_WINDOW_.patch \
            "
+
 S = "${WORKDIR}/git"
-
-#           file://0001-AppLoader-add-import-path-for-QML-apps.patch 
-#           file://0002-Setup-missing-env-variables.patch 
-#           file://0003-qml-runner-don-t-set-default-value-for-WEBOS_WINDOW_.patch 
-
 
 SRCREV = "8f4f4b3942755aa4f57de80586aac7aa47b59ddc"
 
