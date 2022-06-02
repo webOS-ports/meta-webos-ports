@@ -35,6 +35,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
            file://0001-AppLoader-add-import-path-for-QML-apps.patch \
            file://0002-Setup-missing-env-variables.patch \
            file://0003-qml-runner-don-t-set-default-value-for-WEBOS_WINDOW_.patch \
+           file://0004-Revert-Update-com.webos.app.qmlrunner.perm.json.patch \
            "
 
 S = "${WORKDIR}/git"
