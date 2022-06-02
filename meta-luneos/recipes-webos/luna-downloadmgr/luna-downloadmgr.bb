@@ -11,7 +11,7 @@ DEPENDS = "libpbnjson luna-service2 sqlite3 curl uriparser pmloglib jemalloc lun
 RDEPENDS:${PN} = "applicationinstallerutility"
 
 PV = "4.0.0-11+git${SRCPV}"
-SRCREV = "fe2b509d2de5746f79f1e0d9a237399502499ed5"
+SRCREV = "1d5261104a9fbf01c6eb5f2572d3f33d274f3dd2"
 
 inherit webos_cmake
 inherit webos_system_bus
