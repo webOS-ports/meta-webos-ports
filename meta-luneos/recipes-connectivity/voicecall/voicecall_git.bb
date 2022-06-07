@@ -12,7 +12,9 @@ inherit systemd
 inherit pkgconfig
 
 SRC_URI = "git://github.com/sailfishos/voicecall.git;protocol=https;branch=master \
-           file://voicecall-manager.service"
+           file://voicecall-manager.service \
+           file://0001-Qt6-migration-patch.patch \
+"
 
 S = "${WORKDIR}/git"
 
@@ -31,4 +33,6 @@ do_install:append() {
     install -m 0644 ${WORKDIR}/voicecall-manager.service ${D}${systemd_unitdir}/system/
 }
 
-FILES:${PN} += "${OE_QMAKE_PATH_QML}"
+FILES:${PN} += "${OE_QMAKE_PATH_QML} \
+                ${libdir}/oneshot.d \
+"
