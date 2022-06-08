@@ -5,7 +5,6 @@ SRC_URI += " \
 "
 
 SRC_URI += " \
-    file://0001-core-make-dependencies-compile-for-64bit.patch \
     file://0003-daemon-Set-default-resampler-to-speex-fixed-2.patch \
     file://0004-suspend-on-idle-Ensure-we-still-time-out-if-a-stream.patch \
     file://0005-Add-dbus-policy-for-Bluez4.patch \

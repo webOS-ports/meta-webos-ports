@@ -9,7 +9,7 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 # Depends on libhybris which has this restriction
 COMPATIBLE_MACHINE = "^halium$"
 
-PULSEAUDIO_VERSION = "15.0"
+PULSEAUDIO_VERSION = "16.0"
 
 PV = "${PULSEAUDIO_VERSION}"
 SRCREV = "80015ede829752fcb357f8bbd7b59d861c865d38"
