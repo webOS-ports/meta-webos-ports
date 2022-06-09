@@ -114,7 +114,6 @@ RDEPENDS:${PN} = " \
 #  fingerterm
 #  qtlocation-luneos-plugin
 #  org.webosports.app.camera
-# voicecall
 
 LIBHYBRIS_RDEPENDS = " \
     ${VIRTUAL-RUNTIME_android-system-image} \
