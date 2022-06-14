@@ -5,7 +5,7 @@ PACKAGECONFIG[wayland-brcm] = "-feature-wayland-brcm,-no-feature-wayland-brcm,vi
 #PACKAGECONFIG[libhybris-egl-server] = "-feature-libhybris-egl-server,-no-feature-libhybris-egl-server,libhybris"
 
 EXTRA_PACKAGECONFIG ?= ""
-EXTRA_PACKAGECONFIG:qemuall = ""
+EXTRA_PACKAGECONFIG:qemuall = "wayland-drm-egl-server-buffer"
 EXTRA_PACKAGECONFIG:hammerhead = ""
 EXTRA_PACKAGECONFIG:pinephone = ""
 EXTRA_PACKAGECONFIG:pinephonepro = ""
