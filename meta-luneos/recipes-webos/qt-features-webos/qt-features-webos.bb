@@ -28,7 +28,7 @@ S = "${WORKDIR}/git"
 FILES:${PN}-dev += "${OE_QMAKE_PATH_QT_ARCHDATA}/mkspecs"
 
 # An empty package is needed to satisfy package dependencies when building bdk.
-ALLOW_EMPTY_${PN} = "1"
+ALLOW_EMPTY:${PN} = "1"
 
 BBCLASSEXTEND = "native"
 
