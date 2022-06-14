@@ -17,6 +17,7 @@ inherit pkgconfig
 inherit webos_lttng
 inherit webos_public_repo
 
+PV = "2.0.0-77+git${SRCPV}"
 SRCREV = "973feda9c440a53f6f362c3254525cefe3ceabf5"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
@@ -33,8 +34,6 @@ DEBIAN_NOAUTONAME:${PN}-dev = "1"
 
 # Enable LTTng tracing capability when enabled in webos_lttng class
 EXTRA_QMAKEVARS_PRE += "${@oe.utils.conditional('WEBOS_LTTNG_ENABLED', '1', 'CONFIG+=lttng', '', d)}"
-
-CXXFLAGS += "-fpermissive"
 
 # we don't provide cmake tests
 EXTRA_QMAKEVARS_POST += "CONFIG-=create_cmake"
