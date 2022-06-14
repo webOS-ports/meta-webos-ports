@@ -27,7 +27,14 @@ PACKAGECONFIG[client-wl-shell] = "-DFEATURE_wayland_client_wl_shell=ON,-DFEATURE
 PACKAGECONFIG[client-xdg-shell] = "-DFEATURE_wayland_client_xdg_shell=ON,-DFEATURE_wayland_client_xdg_shell=OFF,"
 
 # PACKAGECONFIG for webos
-PACKAGECONFIG = "wayland-server wayland-client client-wl-shell"
+PACKAGECONFIG = "wayland-server wayland-client client-wl-shell ${PACKAGECONFIG_DMABUF}"
+
+PACKAGECONFIG_DMABUF = "dmabuf-client-buffer dmabuf-server-buffer drm-egl-server-buffer"
+# libhybris's EGL/eglext.h doesn't define EGL_LINUX_DMA_BUF_EXT/EGL_EXT_image_dma_buf_import_modifiers tested by qtwayland
+# tests HAVE_dmabuf_server_buffer/HAVE_dmabuf_client_buffer
+# we can try to enable this again after upgrading libhybris to have:
+# https://github.com/libhybris/libhybris/commit/95b1472814c6cec192eef2da3361c81fa3d91860
+PACKAGECONFIG_DMABUF:halium = ""
 
 # qtwayland-qmlplugins is not used in webos
 RRECOMMENDS:${PN}:remove = "${PN}-qmlplugins"
