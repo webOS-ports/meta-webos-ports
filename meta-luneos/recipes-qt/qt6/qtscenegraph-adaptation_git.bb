@@ -6,8 +6,8 @@ LIC_FILES_CHKSUM = " \
     file://LICENSE.LGPL;md5=4193e7f1d47a858f6b7c0f1ee66161de \
 "
 
-PV = "5.8.0+git${SRCPV}"
-SRCREV = "7c877513744a6de89f174f3f446538f2f24ed4be"
+PV = "6.3.0+git${SRCPV}"
+SRCREV = "e146d14d80157b5a37fe9c012259b1c610fde5fe"
 
 DEPENDS = "qtbase libhybris qtwayland virtual/android-headers qtdeclarative"
 
@@ -18,6 +18,7 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 # Depends on libhybris which has this restriction
 COMPATIBLE_MACHINE = "^halium$"
 
+WEBOS_GIT_PARAM_BRANCH = "herrie/qt6"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
