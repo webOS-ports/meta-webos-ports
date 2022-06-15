@@ -18,10 +18,8 @@ RDEPENDS:${PN} += " \
     lttng-modules \
 "
 
-#WEBOS_VERSION = "1.0.0-9_baf2c8ce00a722e9f58a1359993bf887b30d27e5"
-#PR = "r11"
-
-SRCREV = "f730615ed39d43210f4bd6c8802570e2b376c68a"
+SRCREV = "baf2c8ce00a722e9f58a1359993bf887b30d27e5"
+PV = "1.0.0-9+git${SRCPV}"
 
 #inherit webos_component
 inherit webos_cmake
