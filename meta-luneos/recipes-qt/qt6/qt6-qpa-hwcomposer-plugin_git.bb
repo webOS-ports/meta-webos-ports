@@ -4,8 +4,8 @@ sometimes also SoC type (generic, qcom, exynos4, ...)."
 LICENSE = "LGPL-2.1-only"
 LIC_FILES_CHKSUM = "file://hwcomposer_backend.cpp;beginline=1;endline=40;md5=09c08382077db2dbc01b1b5536ec6665"
 
-PV = "5.15.0+git${SRCPV}"
-SRCREV = "b95ad82be4bdf69e46e900e55a7612e6e46518c6"
+PV = "6.3.0+git${SRCPV}"
+SRCREV = "34d4b40abe437d7e9201cfd8c9b6349bf85969d0"
 
 DEPENDS = "qtbase libhybris qtwayland virtual/android-headers"
 
@@ -17,7 +17,7 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 COMPATIBLE_MACHINE = "^halium$"
 
 SRC_URI = " \
-    git://github.com/mer-hybris/qt5-qpa-hwcomposer-plugin.git;branch=master;protocol=https \
+    git://github.com/herrie82/qt5-qpa-hwcomposer-plugin.git;branch=herrie/qt6;protocol=https \
 "
 S = "${WORKDIR}/git/hwcomposer"
 
