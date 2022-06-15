@@ -6,7 +6,7 @@ SECTION = "webos/base"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-DEPENDS = "glib-2.0 luna-service2 libpbnjson pmloglib pmtrace boost icu"
+DEPENDS = "glib-2.0 luna-service2 libpbnjson pmloglib boost icu"
 RDEPENDS:${PN} = "applicationinstallerutility ecryptfs-utils librolegen"
 
 PV = "1.0.0-35+git${SRCPV}"
