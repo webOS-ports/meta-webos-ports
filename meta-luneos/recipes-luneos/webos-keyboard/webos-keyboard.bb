@@ -1,6 +1,6 @@
 SUMMARY = "webOS on-screen keyboard based on the Ubuntu Touch keyboard"
 HOMEPAGE = "https://launchpad.net/ubuntu-keyboard"
-LICENSE = "GPL-3.0-only & BSD & Apache-2.0 & CC-BY-1.0"
+LICENSE = "LGPL-3.0-only & BSD-3-Clause & Apache-2.0 & CC-BY-3.0"
 LIC_FILES_CHKSUM = " \
     file://COPYING;md5=6a6a8e020838b23406c81b19c1d46df6 \
     file://COPYING.BSD;md5=9b2310382ed07cfdae9c4953c8d29078 \
