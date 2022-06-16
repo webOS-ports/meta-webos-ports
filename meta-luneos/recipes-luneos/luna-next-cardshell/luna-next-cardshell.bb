@@ -10,8 +10,6 @@ RDEPENDS:${PN} += " \
     libqofono \
     libconnman-qt \
     nemo-qml-plugin-dbus \
-    luna-surfacemanager-conf \
-    luna-surfacemanager-base \
 "
 
 PV = "0.6-0+git${SRCPV}"
