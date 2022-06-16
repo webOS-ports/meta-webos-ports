@@ -29,6 +29,11 @@ PACKAGECONFIG ??= ""
 # Emulator
 PACKAGECONFIG[emulator] = "CONFIG+=emulator,,nyx-lib"
 PACKAGECONFIG:append:emulator = " emulator"
+PACKAGECONFIG:append:qemuall = " emulator"
+SRC_URI:append:qemuall = " \
+    file://0001-virtual-touch-for-emulator.patch \
+    file://0002-Disable-mouse-wheel-on-touch-mode-for-emulator.patch \
+"
 
 # Multi-plane composition
 PACKAGECONFIG[plane-composition] = "CONFIG+=plane_composition,,"
