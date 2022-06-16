@@ -9,14 +9,13 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 PV = "0.11.4+git${SRCPV}"
 #PV = "0.12.6+git${SRCPV}"
 #SRCREV = "2e539015996111576a731750342effde7aaee87f"
-SRCREV = "6d1cee804b6b2fc2298ef8d9196254e4bbca0d1b"
+SRCREV = "284aa98d4d574cf718e56aaba1eea758559ec0de"
 DEPENDS = "qtbase luna-sysmgr-common luna-service2 json-c glib-2.0 luna-sysmgr-ipc-messages"
     
 DEPENDS:append:halium = " libhybris virtual/android-headers libgbinder libglibutil "
 
 SRC_URI = " \
     git://github.com/webos-ports/sensorfw.git;protocol=https;branch=herrie/qt6 \
-    file://0001-Fix-build-with-autohybris.patch \
 "
 
 # Note: maybe this should go in a bbappend in meta-pine64-luneos...
