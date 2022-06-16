@@ -79,7 +79,7 @@ PACKAGECONFIG[cursor-theme] = "CONFIG+=cursor_theme,,"
 
 PACKAGECONFIG = "compositor cursor-theme"
 
-PACKAGES =+ "${PN}-base ${PN}-base-tests"
+PACKAGES =+ "${PN}-base ${PN}-base-tests ${PN}-base-conf"
 
 FILES:${PN}-base += " \
     ${OE_QMAKE_PATH_QML}/WebOSCompositorBase/ \
@@ -87,6 +87,9 @@ FILES:${PN}-base += " \
     ${OE_QMAKE_PATH_BINS}/ \
     ${datadir}/icons/ \
     ${datadir}/webos-keymap/webos-keymap.qmap \
+"
+
+FILES:${PN}-base-conf += " \
     ${sysconfdir}/surface-manager.d/ \
     ${webos_sysbus_apipermissionsdir} \
     ${webos_sysbus_groupsdir} \
