@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2018 LG Electronics, Inc.
+# Copyright (c) 2012-2022 LG Electronics, Inc.
 
 #
 # Variables invented by webOS for standard locations
@@ -10,7 +10,7 @@ webos_defaultconfdir = "${sysconfdir}/default"
 webos_execstatedir = "${localstatedir}/lib"
 webos_fontsdir = "${datadir}/fonts"
 webos_homedir = "${base_prefix}/home"
-webos_firmwaredir = "${base_libdir}/firmware"
+webos_firmwaredir = "${nonarch_base_libdir}/firmware"
 webos_logdir = "${localstatedir}/log"
 webos_mediadir = "${base_prefix}/media"
 webos_mntdir = "${base_prefix}/mnt"
@@ -18,9 +18,12 @@ webos_mntdir = "${base_prefix}/mnt"
 webos_pkgconfigdir = "${datadir}/pkgconfig"
 webos_preservedtmpdir = "${localstatedir}/tmp"
 # Having a Qt plugins directory is standard, but the value used by webOS OSE isn't.
-# FIXME check if we can use new value
-# New value - webos_qtpluginsdir = "${libdir}/qt5/plugins"
-webos_qtpluginsdir = "${prefix}/plugins"
+# OE_QMAKE_PATH_QT_ARCHDATA might be undefined in components which don't inherit qmake5_paths
+# and cmake-modules-webos-native.bb:do_configure expects absolute path here
+# | CMake Error at webOS/webOS.cmake:316 (message):
+# |   ENV{webos_qtpluginsdir} is not an absolute path:
+# |   '${OE_QMAKE_PATH_QT_ARCHDATA}'
+webos_qtpluginsdir = "${libdir}/plugins"
 webos_runtimeinfodir = "${localstatedir}/run"
 webos_srcdir = "${prefix}/src"
 webos_udevscriptsdir = "${base_libdir}/udev"
@@ -47,16 +50,13 @@ webos_applicationsdir = "${prefix}/palm/applications"
 webos_frameworksdir = "${prefix}/palm/frameworks"
 webos_keysdir = "${prefix}/palm/data"
 # This is the location of the pre-installed catalog apps IPKs
-# FIXME check if we can use new value
-# New value - webos_picapkgdir = "${webos_mntdir}/pica"
-export webos_picapkgdir = "${prefix}/palm/ipkgs"
+webos_picapkgdir = "${webos_mntdir}/pica"
 # This is the location of webOS application plugins. There is a subdirectory for
 # each application that is named using the final field of its complete name.
 webos_pluginsdir = "${prefix}/palm/plugins"
 # This is the location of the trees for JS services; the files for native (dynamic)
 # services are located under sbindir, libdir, etc. as if they were Linux daemons.
 webos_servicesdir = "${prefix}/palm/services"
-webos_smartkeydatadir = "${prefix}/palm/smartkey"
 webos_soundsdir = "${prefix}/palm/sounds"
 webos_sysmgrdir = "${prefix}/palm/sysmgr"
 
@@ -132,6 +132,10 @@ webos_persistentstoragedir = "${webos_cryptofsdir}/data"
 # about media files. Potentially this db can be big
 webos_db8mediadir = "${webos_persistentstoragedir}/db8/mediadb"
 
+
+# Enhanced ACG - IPK verifier keys
+webos_eacg_certificates = "${sysconfdir}/ssl/certs/ca-certificates/pkg"
+
 # On devices that support it, this tree is externally mountable as (USB) mass
 # storage. Applications that want their data to be visible in this manner should
 # store them here instead of under webos_persistentstoragedir. This tree is
@@ -163,8 +167,8 @@ webos_emulatorshareddir = "${webos_mediadir}/shared"
 # The presence of this file indicates that First Use has been completed.
 webos_firstusesentinelfile = "${webos_sysmgr_localstatedir}/preferences/ran-firstuse"
 
-# Note that everything under localstatedir is erased by a NYX_SYSTEM_ERASE_VAR erasure.
-webos_crashddir = "${webos_logdir}/crashd"
+# SDK tools
+webos_sdkdir = "${webos_optdir}/webos/sdk"
 
 # Path to file which indicate failure to init settingsservice
 webos_settingsservice_errorsentinelfile = "${webos_localstatedir}/settingsservice_critical_error"
