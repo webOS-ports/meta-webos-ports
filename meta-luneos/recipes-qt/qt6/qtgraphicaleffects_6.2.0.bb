@@ -23,3 +23,7 @@ PV = "6.2.0"
 QT_MODULE_BRANCH = "6.2"
 
 SRCREV = "59ab3e11433a5157aac0f3af7c0d7fe70a373373"
+
+# Avoid conflicting files between ${PN}-dev and libqt6core5compat-dev
+PACKAGES =+ "${PN}-dev-cmake"
+FILES:${PN}-dev-cmake = "${QT6_INSTALL_LIBDIR}/cmake"
