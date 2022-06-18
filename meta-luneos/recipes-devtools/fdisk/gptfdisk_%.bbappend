@@ -5,3 +5,6 @@ FILES:${PN}-gdisk += "${sbindir}/gdisk"
 FILES:${PN}-cgdisk += "${sbindir}/cgdisk"
 FILES:${PN}-sgdisk += "${sbindir}/sgdisk"
 FILES:${PN}-fixparts += "${sbindir}/fixparts"
+
+# This makes PN empty and not created, avoid default PN-dev -> PN runtime dependency
+RDEPENDS:${PN}-dev = ""
