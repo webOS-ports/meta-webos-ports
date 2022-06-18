@@ -4,7 +4,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=bc807597ba062cd149d362d22d3061e7"
 
 RDEPENDS:${PN} += " \
     qtdeclarative-qmlplugins \
-    qtgraphicaleffects-qmlplugins \
+    qt5compat-qmlplugins \
     qtmultimedia-qmlplugins \
     luneos-components \
     libqofono \
@@ -14,11 +14,8 @@ RDEPENDS:${PN} += " \
     luna-surfacemanager-base \
 "
 
-#luna-next-qmlplugins
-#    libconnman-qt 
-
 PV = "0.6-0+git${SRCPV}"
-SRCREV = "f69f12c3ee7dd4476d91b79979de3ef9acc02be3"
+SRCREV = "1726ad7d0866084be02a42e65695d439ee78a00f"
 
 inherit webos_ports_repo
 inherit webos_cmake
