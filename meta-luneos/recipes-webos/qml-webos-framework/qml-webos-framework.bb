@@ -11,7 +11,7 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "qt-features-webos qtdeclarative qtwayland-webos pmloglib luna-service2 qttools-native"
 DEPENDS:append = " ${@ 'qtshadertools-native' if d.getVar('QT_VERSION', True) == '6' else '' }"
-RDEPENDS:${PN} = "qtgraphicaleffects-qmlplugins"
+RDEPENDS:${PN} = "qt5compat-qmlplugins"
 
 RPROVIDES:${PN}-examples = " \
     eos.bare \
@@ -36,6 +36,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
            file://0002-Setup-missing-env-variables.patch \
            file://0003-qml-runner-don-t-set-default-value-for-WEBOS_WINDOW_.patch \
            file://0004-Revert-Update-com.webos.app.qmlrunner.perm.json.patch \
+           file://0005-RoundedRectangle.qml-Use-GraphicalEffects-from-Qt5Co.patch \
            "
 
 S = "${WORKDIR}/git"
