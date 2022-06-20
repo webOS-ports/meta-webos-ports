@@ -11,6 +11,7 @@
 # LTTng is disabled by default. To enable, add:
 #    WEBOS_LTTNG_ENABLED = "1"
 # to your webos-local.conf or the location of your choice.
+# See https://github.com/shr-project/meta-webosose/commit/c1163bcddc2b3381881458378e3a383296d7a5d9
 WEBOS_LTTNG_ENABLED ??= "0"
 # Only enable LTTng for target components
 WEBOS_LTTNG_ENABLED:class-native = "0"
