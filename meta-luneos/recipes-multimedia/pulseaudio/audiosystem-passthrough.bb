@@ -1,5 +1,5 @@
 SUMMARY = "Audiosystem Passthrough"
-LICENSE = "BSD"
+LICENSE = "BSD-3-Clause"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=e9f185e65d260379da52afe6fc486efc"
 
 DEPENDS += "libgbinder systemd libglibutil glib-2.0"
