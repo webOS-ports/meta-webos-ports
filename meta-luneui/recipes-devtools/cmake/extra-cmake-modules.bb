@@ -1,13 +1,15 @@
 SUMMARY = "Extra modules and scripts for CMake"
-LICENSE = "BSD"
-LIC_FILES_CHKSUM = "file://COPYING-CMAKE-SCRIPTS;md5=54c7042be62e169199200bc6477f04d1"
+LICENSE = "BSD-3-Clause"
+LIC_FILES_CHKSUM = "file://COPYING-CMAKE-SCRIPTS;md5=54c7042be62e169199200bc6477f04d1 \
+    file://LICENSES/BSD-3-Clause.txt;md5=954f4d71a37096249f837652a7f586c0 \
+"
 
-PV = "5.5.8+git${SRCPV}"
-SRCREV = "307b36662ec9dcf125a589ca24dd69886698fd2b"
+PV = "5.95.0+git${SRCPV}"
+SRCREV = "633e3793ca94f2aec8605a48bec2b27f4dbde366"
 
 SRC_URI = " \
-    git://anongit.kde.org/extra-cmake-modules;branch=master \
-    file://0001-Search-within-OE_QMAKE_PATH_EXTERNAL_HOST_BINS-for-q.patch \
+    git://anongit.kde.org/extra-cmake-modules;branch=master;protocol=https \
+    file://0001-FindQtWaylandScanner-Search-within-OE_QMAKE_PATH_EXT.patch \
 "
 S = "${WORKDIR}/git"
 
