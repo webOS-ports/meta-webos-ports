@@ -1,7 +1,10 @@
 SUMMARY = "Waydroid uses a container-based approach to boot a full Android system"
 DESCRIPTION = "Android image file for Waydroid"
-LICENSE = "BSD"
-LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/BSD;md5=3775480a712fc46a69647678acb234cb"
+# this isn't very clear, there is no information in build.anbox.io and it surely doesn't
+# cover all components included in this built image, e.g.
+# https://aur.archlinux.org/packages/waydroid-image says Apache license
+LICENSE = "BSD-3-Clause"
+LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/BSD-3-Clause;md5=550794465ba0ec5312d6919e203a55f9"
 
 # works only for following 4 archs
 COMPATIBLE_MACHINE ?= "(^$)"
