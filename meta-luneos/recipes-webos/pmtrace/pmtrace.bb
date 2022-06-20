@@ -12,11 +12,12 @@ LIC_FILES_CHKSUM = "file://LICENSE.LGPL;md5=e2aa4f66375a24019b0ff5e99cec40ad \
 
 DEPENDS = "lttng-ust libpbnjson pmloglib glib-2.0"
 
-RDEPENDS:${PN} += " \
-    babeltrace \
-    lttng-tools \
-    lttng-modules \
-"
+# See https://github.com/shr-project/meta-webosose/commit/c1163bcddc2b3381881458378e3a383296d7a5d9
+# RDEPENDS:${PN} += " \
+#     babeltrace \
+#     lttng-tools \
+#     lttng-modules \
+# "
 
 SRCREV = "baf2c8ce00a722e9f58a1359993bf887b30d27e5"
 PV = "1.0.0-9+git${SRCPV}"
@@ -34,6 +35,7 @@ S = "${WORKDIR}/git"
 
 # The libmemtracker, libpmtrace, pmctl (library/header/binary files) will be installed in all builds except RELEASE mode.
 # Only libpmtrace header files need to install in all builds for other modules that are referring to the header files.
+# See https://github.com/shr-project/meta-webosose/commit/c1163bcddc2b3381881458378e3a383296d7a5d9
 EXTRA_OECMAKE += "-DENABLE_LIBPMTRACE:BOOLEAN=False"
 EXTRA_OECMAKE += "-DDEFAULT_LOGGING:STRING=${@'' if ('${WEBOS_DISTRO_PRERELEASE}' == '') else 'pmlog'}"
 
