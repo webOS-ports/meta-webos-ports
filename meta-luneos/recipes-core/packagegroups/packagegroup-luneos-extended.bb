@@ -125,6 +125,7 @@ LIBHYBRIS_RDEPENDS = " \
     lxc \
     mtp-server \
     pulseaudio-modules-droid \
+    pulseaudio-modules-droid-hidl \
     qt5-qpa-hwcomposer-plugin \
     qtscenegraph-adaptation \
     \
