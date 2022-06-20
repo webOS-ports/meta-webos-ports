@@ -13,14 +13,14 @@ SRC_URI = "git://github.com/waydroid/gbinder-python.git;branch=main;protocol=htt
 
 S = "${WORKDIR}/git"
 
-DEPENDS = "libgbinder python3-cython-native"
+DEPENDS = "libgbinder python3-cython-native libglibutil"
 
 RDEPENDS:${PN}:class-native = ""
 DEPENDS:append:class-native = " python-native "
 
 DISTUTILS_BUILD_ARGS = "sdist --cython"
 
-inherit setuptools3
+inherit setuptools3 pkgconfig
 
 BBCLASSEXTEND = "native"
 
