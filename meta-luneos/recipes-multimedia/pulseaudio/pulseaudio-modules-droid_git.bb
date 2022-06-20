@@ -11,20 +11,17 @@ COMPATIBLE_MACHINE = "^halium$"
 
 PULSEAUDIO_VERSION = "15.0"
 
-PV = "${PULSEAUDIO_VERSION}"
+PV = "14.2.88+git${SRCPV}"
 SRCREV = "80015ede829752fcb357f8bbd7b59d861c865d38"
 
 SRC_URI = "git://github.com/droidian/pulseaudio-modules-droid.git;branch=bookworm;protocol=https \
+    file://0001-module-droid-use-PA_MAJORMINOR-as-PA_MODULE_VERSION-.patch \
 "
 
 S = "${WORKDIR}/git"
 
 # inherit webos_ports_fork_repo
 inherit autotools pkgconfig
-
-do_configure:prepend() {
-  echo "${PV}" > ${S}/.tarball-version
-}
 
 FILES:${PN} += "${libdir}/pulse-${PULSEAUDIO_VERSION}/modules/*.so"
 FILES:${PN}-dev += "${libdir}/pulse-${PULSEAUDIO_VERSION}/modules/*.la"
