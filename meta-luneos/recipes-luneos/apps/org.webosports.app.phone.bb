@@ -15,7 +15,7 @@ inherit webos_tweaks
 inherit webos_app
 
 PV = "0.1.0-6+git${SRCPV}"
-SRCREV = "b5bb51e8ff37bdeb4851cdbfd73b19e4fb0d900a"
+SRCREV = "423c139e4483a69a1b3ff81aa6178608cf56ed9f"
 
 WEBOS_GIT_PARAM_BRANCH = "tofe/qt6"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
