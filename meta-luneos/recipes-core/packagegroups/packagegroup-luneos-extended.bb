@@ -86,6 +86,7 @@ RDEPENDS:${PN} = " \
   luna-sysmgr \
   luna-sysmgr-conf \
   luneos-components \
+  qtlocation-luneos-plugin \
   webos-system-update \
   \
   webos-systemd-services \
@@ -112,7 +113,6 @@ RDEPENDS:${PN} = " \
 #Needs work for Qt6
 #  org.webosports.app.terminal
 #  fingerterm
-#  qtlocation-luneos-plugin
 #  org.webosports.app.camera
 
 LIBHYBRIS_RDEPENDS = " \
