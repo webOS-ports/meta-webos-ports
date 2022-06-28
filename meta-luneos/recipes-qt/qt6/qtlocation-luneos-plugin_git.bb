@@ -4,15 +4,16 @@ LIC_FILES_CHKSUM = " \
     file://LICENSE.LGPLv3;md5=c1939be5579666be947371bc8120425f \
 "
 
-DEPENDS = "qtbase glib-2.0 luna-service2"
+DEPENDS = "qtbase glib-2.0 luna-service2 qtlocation"
 
-PV = "5.12.3+git${SRCPV}"
-SRCREV = "2efa108bfeabee0bfcde19f438bddaf6af5e54a8"
+PV = "6.3.0+git${SRCPV}"
+SRCREV = "62b1eb54f13f1d4349115bde95ba896239e5fd48"
 
 inherit webos_ports_repo
 inherit qt6-qmake
 inherit pkgconfig
 
+WEBOS_GIT_PARAM_BRANCH = "herrie/qt6"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};"
 S = "${WORKDIR}/git"
 
