@@ -108,11 +108,11 @@ RDEPENDS:${PN} = " \
   https-everywhere \
   storaged \
   messwerk \
+  fingerterm \
 "
 
 #Needs work for Qt6
 #  org.webosports.app.terminal
-#  fingerterm
 #  org.webosports.app.camera
 
 LIBHYBRIS_RDEPENDS = " \
