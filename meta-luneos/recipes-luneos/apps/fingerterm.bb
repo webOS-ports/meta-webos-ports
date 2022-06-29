@@ -3,7 +3,7 @@ LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263"
 
 PV = "1.3.6+git${SRCPV}"
-SRCREV = "ddd0fef1f55631b0760462591b1f47a41f173bd6"
+SRCREV = "b360915d9898294f0ca332a141dab66c2a406a04"
 
 DEPENDS = "qtbase qtdeclarative qttools-native qt5compat"
 RDEPENDS:${PN} = "ttf-liberation-mono"
@@ -40,4 +40,4 @@ do_install:append() {
     sed -i -e s:__VERSION__:${PV}:g ${D}${APP_PATH}/appinfo.json
 }
 
-FILES:${PN} += "${APP_PATH}"
+FILES:${PN} += "${APP_PATH} ${datadir}/translations"
