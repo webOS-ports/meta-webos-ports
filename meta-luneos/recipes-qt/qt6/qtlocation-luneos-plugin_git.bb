@@ -1,10 +1,10 @@
-SUMMARY = "QtPosition LuneOS plugin for qtlocation"
+SUMMARY = "QtPosition LuneOS plugin for qtlocation/qtpositioning"
 LICENSE = "LGPL-3.0-only"
 LIC_FILES_CHKSUM = " \
     file://LICENSE.LGPLv3;md5=c1939be5579666be947371bc8120425f \
 "
 
-DEPENDS = "qtbase glib-2.0 luna-service2 qtlocation"
+DEPENDS = "qtbase glib-2.0 luna-service2 qtpositioning"
 
 PV = "6.3.0+git${SRCPV}"
 SRCREV = "1dafcfd403fa161c7f733b6f4d1845f02dad7e30"
