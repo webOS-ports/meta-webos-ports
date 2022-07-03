@@ -127,7 +127,6 @@ LIBHYBRIS_RDEPENDS = " \
     pulseaudio-modules-droid \
     pulseaudio-modules-droid-hidl \
     qt6-qpa-hwcomposer-plugin \
-    qtscenegraph-adaptation \
     \
     exiv2 \
     libpulse-simple0 \
@@ -135,6 +134,9 @@ LIBHYBRIS_RDEPENDS = " \
     \
     ofono-ril-binder-plugin \
 "
+
+# (Optional?) work for Qt6:
+#     qtscenegraph-adaptation 
 
 MEMNOTIFY_RDEPENDS = " \
     memnotify-module \
