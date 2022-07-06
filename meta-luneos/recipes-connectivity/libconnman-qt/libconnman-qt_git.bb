@@ -1,23 +1,21 @@
-#require recipes-qt/qt5/qt5.inc
-
-SUMMARY = "Qt Library for ConnMan"
+SUMMARY = "Qt 5/6 Library for ConnMan"
 HOMEPAGE = "https://github.com/sailfishos/libconnman-qt"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://libconnman-qt/clockmodel.h;endline=8;md5=ea9f724050803f15d2d900ce3c5dac88"
 DEPENDS += "qtbase qtdeclarative"
-PV = "1.2.35+git${SRCPV}"
 
-SRCREV = "347f20fe1a03bf0624f55b9108c797611e79f7d2"
-SRC_URI = "git://github.com/sailfishos/libconnman-qt.git;protocol=https;branch=master \
-           file://0001-Don-t-use-MeeGo-as-prefix-in-order-to-make-this-a-co.patch \
-           file://0001-Add-missing-declarations-for-operator-overloads.patch \
-           file://0001-Fixes-for-Qt6.patch \
-           "
+VERSION = "1.2.46"
+PV = "${VERSION}+git${SRCPV}"
+
+SRCREV = "6786936cba9048ee943c0cd5d051c0b8fc70896f"
+SRC_URI = "git://github.com/sailfishos/libconnman-qt.git;protocol=https;branch=master"
 
 S = "${WORKDIR}/git"
 
 inherit pkgconfig
 inherit qt6-qmake
+
+EXTRA_QMAKEVARS_PRE = "CONFIG+=no-module-prefix VERSION=${VERSION}"
 
 RDEPENDS:${PN} += "connman"
 
