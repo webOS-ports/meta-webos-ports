@@ -1,50 +1,60 @@
-# Copyright (c) 2014 LG Electronics, Inc.
+# Copyright (c) 2014-2022 LG Electronics, Inc.
+
+INC_PR = "r3"
 
 SRC_URI +=" \
-http://registry.npmjs.org/fstream/-/fstream-0.1.25.tgz;name=fstream_0.1.25;unpack=yes;downloadfilename=fstream-0.1.25-tarball.tgz;subdir=${BPN}/fstream_0.1.25 \
-http://registry.npmjs.org/graceful-fs/-/graceful-fs-2.0.3.tgz;name=graceful-fs_2.0.3;unpack=yes;downloadfilename=graceful-fs-2.0.3-tarball.tgz;subdir=${BPN}/graceful-fs_2.0.3 \
-http://registry.npmjs.org/inherits/-/inherits-2.0.1.tgz;name=inherits_2.0.1;unpack=yes;downloadfilename=inherits-2.0.1-tarball.tgz;subdir=${BPN}/inherits_2.0.1 \
-http://registry.npmjs.org/mkdirp/-/mkdirp-0.3.5.tgz;name=mkdirp_0.3.5;unpack=yes;downloadfilename=mkdirp-0.3.5-tarball.tgz;subdir=${BPN}/mkdirp_0.3.5 \
-http://registry.npmjs.org/glob/-/glob-3.2.9.tgz;name=glob_3.2.9;unpack=yes;downloadfilename=glob-3.2.9-tarball.tgz;subdir=${BPN}/glob_3.2.9 \
-http://registry.npmjs.org/graceful-fs/-/graceful-fs-1.2.3.tgz;name=graceful-fs_1.2.3;unpack=yes;downloadfilename=graceful-fs-1.2.3-tarball.tgz;subdir=${BPN}/graceful-fs_1.2.3 \
-http://registry.npmjs.org/minimatch/-/minimatch-0.2.14.tgz;name=minimatch_0.2.14;unpack=yes;downloadfilename=minimatch-0.2.14-tarball.tgz;subdir=${BPN}/minimatch_0.2.14 \
-http://registry.npmjs.org/lru-cache/-/lru-cache-2.5.0.tgz;name=lru-cache_2.5.0;unpack=yes;downloadfilename=lru-cache-2.5.0-tarball.tgz;subdir=${BPN}/lru-cache_2.5.0 \
-http://registry.npmjs.org/sigmund/-/sigmund-1.0.0.tgz;name=sigmund_1.0.0;unpack=yes;downloadfilename=sigmund-1.0.0-tarball.tgz;subdir=${BPN}/sigmund_1.0.0 \
-http://registry.npmjs.org/mkdirp/-/mkdirp-0.4.0.tgz;name=mkdirp_0.4.0;unpack=yes;downloadfilename=mkdirp-0.4.0-tarball.tgz;subdir=${BPN}/mkdirp_0.4.0 \
-http://registry.npmjs.org/nopt/-/nopt-2.2.1.tgz;name=nopt_2.2.1;unpack=yes;downloadfilename=nopt-2.2.1-tarball.tgz;subdir=${BPN}/nopt_2.2.1 \
-http://registry.npmjs.org/abbrev/-/abbrev-1.0.5.tgz;name=abbrev_1.0.5;unpack=yes;downloadfilename=abbrev-1.0.5-tarball.tgz;subdir=${BPN}/abbrev_1.0.5 \
-http://registry.npmjs.org/npmlog/-/npmlog-0.0.6.tgz;name=npmlog_0.0.6;unpack=yes;downloadfilename=npmlog-0.0.6-tarball.tgz;subdir=${BPN}/npmlog_0.0.6 \
-http://registry.npmjs.org/ansi/-/ansi-0.2.1.tgz;name=ansi_0.2.1;unpack=yes;downloadfilename=ansi-0.2.1-tarball.tgz;subdir=${BPN}/ansi_0.2.1 \
-http://registry.npmjs.org/osenv/-/osenv-0.0.3.tgz;name=osenv_0.0.3;unpack=yes;downloadfilename=osenv-0.0.3-tarball.tgz;subdir=${BPN}/osenv_0.0.3 \
-http://registry.npmjs.org/request/-/request-2.34.0.tgz;name=request_2.34.0;unpack=yes;downloadfilename=request-2.34.0-tarball.tgz;subdir=${BPN}/request_2.34.0 \
-http://registry.npmjs.org/aws-sign2/-/aws-sign2-0.5.0.tgz;name=aws-sign2_0.5.0;unpack=yes;downloadfilename=aws-sign2-0.5.0-tarball.tgz;subdir=${BPN}/aws-sign2_0.5.0 \
-http://registry.npmjs.org/forever-agent/-/forever-agent-0.5.2.tgz;name=forever-agent_0.5.2;unpack=yes;downloadfilename=forever-agent-0.5.2-tarball.tgz;subdir=${BPN}/forever-agent_0.5.2 \
-http://registry.npmjs.org/form-data/-/form-data-0.1.2.tgz;name=form-data_0.1.2;unpack=yes;downloadfilename=form-data-0.1.2-tarball.tgz;subdir=${BPN}/form-data_0.1.2 \
-http://registry.npmjs.org/async/-/async-0.2.10.tgz;name=async_0.2.10;unpack=yes;downloadfilename=async-0.2.10-tarball.tgz;subdir=${BPN}/async_0.2.10 \
-http://registry.npmjs.org/combined-stream/-/combined-stream-0.0.4.tgz;name=combined-stream_0.0.4;unpack=yes;downloadfilename=combined-stream-0.0.4-tarball.tgz;subdir=${BPN}/combined-stream_0.0.4 \
-http://registry.npmjs.org/delayed-stream/-/delayed-stream-0.0.5.tgz;name=delayed-stream_0.0.5;unpack=yes;downloadfilename=delayed-stream-0.0.5-tarball.tgz;subdir=${BPN}/delayed-stream_0.0.5 \
-http://registry.npmjs.org/hawk/-/hawk-1.0.0.tgz;name=hawk_1.0.0;unpack=yes;downloadfilename=hawk-1.0.0-tarball.tgz;subdir=${BPN}/hawk_1.0.0 \
-http://registry.npmjs.org/boom/-/boom-0.4.2.tgz;name=boom_0.4.2;unpack=yes;downloadfilename=boom-0.4.2-tarball.tgz;subdir=${BPN}/boom_0.4.2 \
-http://registry.npmjs.org/cryptiles/-/cryptiles-0.2.2.tgz;name=cryptiles_0.2.2;unpack=yes;downloadfilename=cryptiles-0.2.2-tarball.tgz;subdir=${BPN}/cryptiles_0.2.2 \
-http://registry.npmjs.org/hoek/-/hoek-0.9.1.tgz;name=hoek_0.9.1;unpack=yes;downloadfilename=hoek-0.9.1-tarball.tgz;subdir=${BPN}/hoek_0.9.1 \
-http://registry.npmjs.org/sntp/-/sntp-0.2.4.tgz;name=sntp_0.2.4;unpack=yes;downloadfilename=sntp-0.2.4-tarball.tgz;subdir=${BPN}/sntp_0.2.4 \
-http://registry.npmjs.org/http-signature/-/http-signature-0.10.0.tgz;name=http-signature_0.10.0;unpack=yes;downloadfilename=http-signature-0.10.0-tarball.tgz;subdir=${BPN}/http-signature_0.10.0 \
-http://registry.npmjs.org/asn1/-/asn1-0.1.11.tgz;name=asn1_0.1.11;unpack=yes;downloadfilename=asn1-0.1.11-tarball.tgz;subdir=${BPN}/asn1_0.1.11 \
-http://registry.npmjs.org/assert-plus/-/assert-plus-0.1.2.tgz;name=assert-plus_0.1.2;unpack=yes;downloadfilename=assert-plus-0.1.2-tarball.tgz;subdir=${BPN}/assert-plus_0.1.2 \
-http://registry.npmjs.org/ctype/-/ctype-0.5.2.tgz;name=ctype_0.5.2;unpack=yes;downloadfilename=ctype-0.5.2-tarball.tgz;subdir=${BPN}/ctype_0.5.2 \
-http://registry.npmjs.org/json-stringify-safe/-/json-stringify-safe-5.0.0.tgz;name=json-stringify-safe_5.0.0;unpack=yes;downloadfilename=json-stringify-safe-5.0.0-tarball.tgz;subdir=${BPN}/json-stringify-safe_5.0.0 \
-http://registry.npmjs.org/mime/-/mime-1.2.11.tgz;name=mime_1.2.11;unpack=yes;downloadfilename=mime-1.2.11-tarball.tgz;subdir=${BPN}/mime_1.2.11 \
-http://registry.npmjs.org/node-uuid/-/node-uuid-1.4.1.tgz;name=node-uuid_1.4.1;unpack=yes;downloadfilename=node-uuid-1.4.1-tarball.tgz;subdir=${BPN}/node-uuid_1.4.1 \
-http://registry.npmjs.org/oauth-sign/-/oauth-sign-0.3.0.tgz;name=oauth-sign_0.3.0;unpack=yes;downloadfilename=oauth-sign-0.3.0-tarball.tgz;subdir=${BPN}/oauth-sign_0.3.0 \
-http://registry.npmjs.org/qs/-/qs-0.6.6.tgz;name=qs_0.6.6;unpack=yes;downloadfilename=qs-0.6.6-tarball.tgz;subdir=${BPN}/qs_0.6.6 \
-http://registry.npmjs.org/tough-cookie/-/tough-cookie-0.12.1.tgz;name=tough-cookie_0.12.1;unpack=yes;downloadfilename=tough-cookie-0.12.1-tarball.tgz;subdir=${BPN}/tough-cookie_0.12.1 \
-http://registry.npmjs.org/punycode/-/punycode-1.2.4.tgz;name=punycode_1.2.4;unpack=yes;downloadfilename=punycode-1.2.4-tarball.tgz;subdir=${BPN}/punycode_1.2.4 \
-http://registry.npmjs.org/tunnel-agent/-/tunnel-agent-0.3.0.tgz;name=tunnel-agent_0.3.0;unpack=yes;downloadfilename=tunnel-agent-0.3.0-tarball.tgz;subdir=${BPN}/tunnel-agent_0.3.0 \
-http://registry.npmjs.org/rimraf/-/rimraf-2.2.6.tgz;name=rimraf_2.2.6;unpack=yes;downloadfilename=rimraf-2.2.6-tarball.tgz;subdir=${BPN}/rimraf_2.2.6 \
-http://registry.npmjs.org/semver/-/semver-2.2.1.tgz;name=semver_2.2.1;unpack=yes;downloadfilename=semver-2.2.1-tarball.tgz;subdir=${BPN}/semver_2.2.1 \
-http://registry.npmjs.org/tar/-/tar-0.1.19.tgz;name=tar_0.1.19;unpack=yes;downloadfilename=tar-0.1.19-tarball.tgz;subdir=${BPN}/tar_0.1.19 \
-http://registry.npmjs.org/block-stream/-/block-stream-0.0.7.tgz;name=block-stream_0.0.7;unpack=yes;downloadfilename=block-stream-0.0.7-tarball.tgz;subdir=${BPN}/block-stream_0.0.7 \
-http://registry.npmjs.org/which/-/which-1.0.5.tgz;name=which_1.0.5;unpack=yes;downloadfilename=which-1.0.5-tarball.tgz;subdir=${BPN}/which_1.0.5 \
+https://registry.npmjs.org/fstream/-/fstream-0.1.25.tgz;name=fstream_0.1.25;unpack=yes;downloadfilename=fstream-0.1.25-tarball.tgz;subdir=${BPN}/fstream_0.1.25 \
+https://registry.npmjs.org/graceful-fs/-/graceful-fs-2.0.3.tgz;name=graceful-fs_2.0.3;unpack=yes;downloadfilename=graceful-fs-2.0.3-tarball.tgz;subdir=${BPN}/graceful-fs_2.0.3 \
+https://registry.npmjs.org/inherits/-/inherits-2.0.1.tgz;name=inherits_2.0.1;unpack=yes;downloadfilename=inherits-2.0.1-tarball.tgz;subdir=${BPN}/inherits_2.0.1 \
+https://registry.npmjs.org/mkdirp/-/mkdirp-0.3.5.tgz;name=mkdirp_0.3.5;unpack=yes;downloadfilename=mkdirp-0.3.5-tarball.tgz;subdir=${BPN}/mkdirp_0.3.5 \
+https://registry.npmjs.org/glob/-/glob-3.2.9.tgz;name=glob_3.2.9;unpack=yes;downloadfilename=glob-3.2.9-tarball.tgz;subdir=${BPN}/glob_3.2.9 \
+https://registry.npmjs.org/graceful-fs/-/graceful-fs-1.2.3.tgz;name=graceful-fs_1.2.3;unpack=yes;downloadfilename=graceful-fs-1.2.3-tarball.tgz;subdir=${BPN}/graceful-fs_1.2.3 \
+https://registry.npmjs.org/minimatch/-/minimatch-0.2.14.tgz;name=minimatch_0.2.14;unpack=yes;downloadfilename=minimatch-0.2.14-tarball.tgz;subdir=${BPN}/minimatch_0.2.14 \
+https://registry.npmjs.org/lru-cache/-/lru-cache-2.5.0.tgz;name=lru-cache_2.5.0;unpack=yes;downloadfilename=lru-cache-2.5.0-tarball.tgz;subdir=${BPN}/lru-cache_2.5.0 \
+https://registry.npmjs.org/sigmund/-/sigmund-1.0.0.tgz;name=sigmund_1.0.0;unpack=yes;downloadfilename=sigmund-1.0.0-tarball.tgz;subdir=${BPN}/sigmund_1.0.0 \
+https://registry.npmjs.org/mkdirp/-/mkdirp-0.4.0.tgz;name=mkdirp_0.4.0;unpack=yes;downloadfilename=mkdirp-0.4.0-tarball.tgz;subdir=${BPN}/mkdirp_0.4.0 \
+https://registry.npmjs.org/nopt/-/nopt-2.2.1.tgz;name=nopt_2.2.1;unpack=yes;downloadfilename=nopt-2.2.1-tarball.tgz;subdir=${BPN}/nopt_2.2.1 \
+https://registry.npmjs.org/abbrev/-/abbrev-1.0.5.tgz;name=abbrev_1.0.5;unpack=yes;downloadfilename=abbrev-1.0.5-tarball.tgz;subdir=${BPN}/abbrev_1.0.5 \
+https://registry.npmjs.org/npmlog/-/npmlog-0.0.6.tgz;name=npmlog_0.0.6;unpack=yes;downloadfilename=npmlog-0.0.6-tarball.tgz;subdir=${BPN}/npmlog_0.0.6 \
+https://registry.npmjs.org/ansi/-/ansi-0.2.1.tgz;name=ansi_0.2.1;unpack=yes;downloadfilename=ansi-0.2.1-tarball.tgz;subdir=${BPN}/ansi_0.2.1 \
+https://registry.npmjs.org/osenv/-/osenv-0.0.3.tgz;name=osenv_0.0.3;unpack=yes;downloadfilename=osenv-0.0.3-tarball.tgz;subdir=${BPN}/osenv_0.0.3 \
+https://registry.npmjs.org/request/-/request-2.34.0.tgz;name=request_2.34.0;unpack=yes;downloadfilename=request-2.34.0-tarball.tgz;subdir=${BPN}/request_2.34.0 \
+https://registry.npmjs.org/aws-sign2/-/aws-sign2-0.5.0.tgz;name=aws-sign2_0.5.0;unpack=yes;downloadfilename=aws-sign2-0.5.0-tarball.tgz;subdir=${BPN}/aws-sign2_0.5.0 \
+https://registry.npmjs.org/forever-agent/-/forever-agent-0.5.2.tgz;name=forever-agent_0.5.2;unpack=yes;downloadfilename=forever-agent-0.5.2-tarball.tgz;subdir=${BPN}/forever-agent_0.5.2 \
+https://registry.npmjs.org/form-data/-/form-data-0.1.2.tgz;name=form-data_0.1.2;unpack=yes;downloadfilename=form-data-0.1.2-tarball.tgz;subdir=${BPN}/form-data_0.1.2 \
+https://registry.npmjs.org/async/-/async-0.2.10.tgz;name=async_0.2.10;unpack=yes;downloadfilename=async-0.2.10-tarball.tgz;subdir=${BPN}/async_0.2.10 \
+https://registry.npmjs.org/combined-stream/-/combined-stream-0.0.4.tgz;name=combined-stream_0.0.4;unpack=yes;downloadfilename=combined-stream-0.0.4-tarball.tgz;subdir=${BPN}/combined-stream_0.0.4 \
+https://registry.npmjs.org/delayed-stream/-/delayed-stream-0.0.5.tgz;name=delayed-stream_0.0.5;unpack=yes;downloadfilename=delayed-stream-0.0.5-tarball.tgz;subdir=${BPN}/delayed-stream_0.0.5 \
+https://registry.npmjs.org/hawk/-/hawk-1.0.0.tgz;name=hawk_1.0.0;unpack=yes;downloadfilename=hawk-1.0.0-tarball.tgz;subdir=${BPN}/hawk_1.0.0 \
+https://registry.npmjs.org/boom/-/boom-0.4.2.tgz;name=boom_0.4.2;unpack=yes;downloadfilename=boom-0.4.2-tarball.tgz;subdir=${BPN}/boom_0.4.2 \
+https://registry.npmjs.org/cryptiles/-/cryptiles-0.2.2.tgz;name=cryptiles_0.2.2;unpack=yes;downloadfilename=cryptiles-0.2.2-tarball.tgz;subdir=${BPN}/cryptiles_0.2.2 \
+https://registry.npmjs.org/hoek/-/hoek-0.9.1.tgz;name=hoek_0.9.1;unpack=yes;downloadfilename=hoek-0.9.1-tarball.tgz;subdir=${BPN}/hoek_0.9.1 \
+https://registry.npmjs.org/sntp/-/sntp-0.2.4.tgz;name=sntp_0.2.4;unpack=yes;downloadfilename=sntp-0.2.4-tarball.tgz;subdir=${BPN}/sntp_0.2.4 \
+https://registry.npmjs.org/http-signature/-/http-signature-0.10.0.tgz;name=http-signature_0.10.0;unpack=yes;downloadfilename=http-signature-0.10.0-tarball.tgz;subdir=${BPN}/http-signature_0.10.0 \
+https://registry.npmjs.org/asn1/-/asn1-0.1.11.tgz;name=asn1_0.1.11;unpack=yes;downloadfilename=asn1-0.1.11-tarball.tgz;subdir=${BPN}/asn1_0.1.11 \
+https://registry.npmjs.org/assert-plus/-/assert-plus-0.1.2.tgz;name=assert-plus_0.1.2;unpack=yes;downloadfilename=assert-plus-0.1.2-tarball.tgz;subdir=${BPN}/assert-plus_0.1.2 \
+https://registry.npmjs.org/ctype/-/ctype-0.5.2.tgz;name=ctype_0.5.2;unpack=yes;downloadfilename=ctype-0.5.2-tarball.tgz;subdir=${BPN}/ctype_0.5.2 \
+https://registry.npmjs.org/json-stringify-safe/-/json-stringify-safe-5.0.0.tgz;name=json-stringify-safe_5.0.0;unpack=yes;downloadfilename=json-stringify-safe-5.0.0-tarball.tgz;subdir=${BPN}/json-stringify-safe_5.0.0 \
+https://registry.npmjs.org/mime/-/mime-1.2.11.tgz;name=mime_1.2.11;unpack=yes;downloadfilename=mime-1.2.11-tarball.tgz;subdir=${BPN}/mime_1.2.11 \
+https://registry.npmjs.org/node-uuid/-/node-uuid-1.4.1.tgz;name=node-uuid_1.4.1;unpack=yes;downloadfilename=node-uuid-1.4.1-tarball.tgz;subdir=${BPN}/node-uuid_1.4.1 \
+https://registry.npmjs.org/oauth-sign/-/oauth-sign-0.3.0.tgz;name=oauth-sign_0.3.0;unpack=yes;downloadfilename=oauth-sign-0.3.0-tarball.tgz;subdir=${BPN}/oauth-sign_0.3.0 \
+https://registry.npmjs.org/qs/-/qs-0.6.6.tgz;name=qs_0.6.6;unpack=yes;downloadfilename=qs-0.6.6-tarball.tgz;subdir=${BPN}/qs_0.6.6 \
+https://registry.npmjs.org/tough-cookie/-/tough-cookie-0.12.1.tgz;name=tough-cookie_0.12.1;unpack=yes;downloadfilename=tough-cookie-0.12.1-tarball.tgz;subdir=${BPN}/tough-cookie_0.12.1 \
+https://registry.npmjs.org/punycode/-/punycode-1.2.4.tgz;name=punycode_1.2.4;unpack=yes;downloadfilename=punycode-1.2.4-tarball.tgz;subdir=${BPN}/punycode_1.2.4 \
+https://registry.npmjs.org/tunnel-agent/-/tunnel-agent-0.3.0.tgz;name=tunnel-agent_0.3.0;unpack=yes;downloadfilename=tunnel-agent-0.3.0-tarball.tgz;subdir=${BPN}/tunnel-agent_0.3.0 \
+https://registry.npmjs.org/rimraf/-/rimraf-2.2.6.tgz;name=rimraf_2.2.6;unpack=yes;downloadfilename=rimraf-2.2.6-tarball.tgz;subdir=${BPN}/rimraf_2.2.6 \
+https://registry.npmjs.org/semver/-/semver-2.2.1.tgz;name=semver_2.2.1;unpack=yes;downloadfilename=semver-2.2.1-tarball.tgz;subdir=${BPN}/semver_2.2.1 \
+https://registry.npmjs.org/tar/-/tar-0.1.19.tgz;name=tar_0.1.19;unpack=yes;downloadfilename=tar-0.1.19-tarball.tgz;subdir=${BPN}/tar_0.1.19 \
+https://registry.npmjs.org/block-stream/-/block-stream-0.0.7.tgz;name=block-stream_0.0.7;unpack=yes;downloadfilename=block-stream-0.0.7-tarball.tgz;subdir=${BPN}/block-stream_0.0.7 \
+https://registry.npmjs.org/which/-/which-1.0.5.tgz;name=which_1.0.5;unpack=yes;downloadfilename=which-1.0.5-tarball.tgz;subdir=${BPN}/which_1.0.5 \
+https://registry.npmjs.org/grunt/-/grunt-0.4.5.tgz;name=grunt_0.4.5;unpack=yes;downloadfilename=grunt-0.4.5-tarball.tgz;subdir=${BPN}/grunt_0.4.5 \
+https://registry.npmjs.org/grunt-contrib-concat/-/grunt-contrib-concat-0.5.1.tgz;name=grunt-contrib-concat_0.5.1;unpack=yes;downloadfilename=grunt-contrib-concat-0.5.1-tarball.tgz;subdir=${BPN}/grunt-contrib-concat_0.5.1 \
+https://registry.npmjs.org/grunt-contrib-jshint/-/grunt-contrib-jshint-0.10.0.tgz;name=grunt-contrib-jshint_0.10.0;unpack=yes;downloadfilename=grunt-contrib-jshint-0.10.0-tarball.tgz;subdir=${BPN}/grunt-contrib-jshint_0.10.0 \
+https://registry.npmjs.org/grunt-contrib-nodeunit/-/grunt-contrib-nodeunit-0.4.1.tgz;name=grunt-contrib-nodeunit_0.4.1;unpack=yes;downloadfilename=grunt-contrib-nodeunit-0.4.1-tarball.tgz;subdir=${BPN}/grunt-contrib-nodeunit_0.4.1 \
+https://registry.npmjs.org/grunt-contrib-qunit/-/grunt-contrib-qunit-0.7.0.tgz;name=grunt-contrib-qunit_0.7.0;unpack=yes;downloadfilename=grunt-contrib-qunit-0.7.0-tarball.tgz;subdir=${BPN}/grunt-contrib-qunit_0.7.0 \
+https://registry.npmjs.org/grunt-contrib-uglify/-/grunt-contrib-uglify-0.5.0.tgz;name=grunt-contrib-uglify_0.5.0;unpack=yes;downloadfilename=grunt-contrib-uglify-0.5.0-tarball.tgz;subdir=${BPN}/grunt-contrib-uglify_0.5.0 \
+https://registry.npmjs.org/grunt-contrib-watch/-/grunt-contrib-watch-0.6.1.tgz;name=grunt-contrib-watch_0.6.1;unpack=yes;downloadfilename=grunt-contrib-watch-0.6.1-tarball.tgz;subdir=${BPN}/grunt-contrib-watch_0.6.1 \
+https://registry.npmjs.org/qunitjs/-/qunitjs-1.18.0.tgz;name=qunitjs_1.18.0;unpack=yes;downloadfilename=qunitjs-1.18.0-tarball.tgz;subdir=${BPN}/qunitjs_1.18.0 \
 "
 
 SRC_URI[fstream_0.1.25.md5sum]="81805600ac27ed20bbe21e2645021476"
@@ -135,6 +145,22 @@ SRC_URI[block-stream_0.0.7.md5sum]="c66aaa2227abec6daa6ff8a155b59294"
 SRC_URI[block-stream_0.0.7.sha256sum]="ac1574a921f2bc4213dd90e570ebca3d7826211d50ca341c45a234d232e90d4e"
 SRC_URI[which_1.0.5.md5sum]="de8504eba9afa3e8a4e7feb9d3b52b38"
 SRC_URI[which_1.0.5.sha256sum]="e26f39d7b152c700636472ab4da57bfb9af17972c49a9e2a06f9ff347d8fad42"
+SRC_URI[grunt_0.4.5.md5sum]="e3d801997f70cfc526640941305dda9a"
+SRC_URI[grunt_0.4.5.sha256sum]="6d7c28b8e3872cd723f9256013b26cde5f5305af06ed2c1c693995f51a33e5f5"
+SRC_URI[grunt-contrib-concat_0.5.1.md5sum]="47377994d05ff77072932987e3bc4a1b"
+SRC_URI[grunt-contrib-concat_0.5.1.sha256sum]="c0497e682a1bdcd6bbbd20f532a94603b50c37d3b3992e553a279df084ce5e4f"
+SRC_URI[grunt-contrib-jshint_0.10.0.md5sum]="27fdfb36a0195161a76ebf777d280633"
+SRC_URI[grunt-contrib-jshint_0.10.0.sha256sum]="4fa00d0f344e6f30d142efbca3dcd7cb2c738c8aab5af8c9c1e9392312b1dfdc"
+SRC_URI[grunt-contrib-nodeunit_0.4.1.md5sum]="2a49276df3efef4614057c889bba66c1"
+SRC_URI[grunt-contrib-nodeunit_0.4.1.sha256sum]="4cc5180ddf8f1763eb89f7a636ad77371c0764f43713426c48cf6fc53d4d43dc"
+SRC_URI[grunt-contrib-qunit_0.7.0.md5sum]="60108c8600397e69f6bbd4850b5230d8"
+SRC_URI[grunt-contrib-qunit_0.7.0.sha256sum]="c8df6ee0f724108d24147551c1d6e757471d3d0cf6e9f1777e7bc36c4f26dfb0"
+SRC_URI[grunt-contrib-uglify_0.5.0.md5sum]="9d331aec2ee97eb005155f7d0dc693e1"
+SRC_URI[grunt-contrib-uglify_0.5.0.sha256sum]="f4236d92bf9888876496782b161de7b80fb581ae10d5cd483667f811d3df77ce"
+SRC_URI[grunt-contrib-watch_0.6.1.md5sum]="b70f1adda01c55b7b6f76b48662206fc"
+SRC_URI[grunt-contrib-watch_0.6.1.sha256sum]="1d081e96de4f87db8561c31ce89082f2f48c4aca67f6bfd93abeb6ca797ed625"
+SRC_URI[qunitjs_1.18.0.md5sum]="e81275e5af008358033c1263af77442a"
+SRC_URI[qunitjs_1.18.0.sha256sum]="0aef191b55372129d8961892c51739c0c08d87309d4be3a18db3723481f35614"
 
 PACKAGES = " \
 abbrev-1.0.5 \
@@ -155,6 +181,13 @@ fstream-0.1.25 \
 glob-3.2.9 \
 graceful-fs-1.2.3 \
 graceful-fs-2.0.3 \
+grunt-0.4.5 \
+grunt-contrib-concat-0.5.1 \
+grunt-contrib-jshint-0.10.0 \
+grunt-contrib-nodeunit-0.4.1 \
+grunt-contrib-qunit-0.7.0 \
+grunt-contrib-uglify-0.5.0 \
+grunt-contrib-watch-0.6.1 \
 hawk-1.0.0 \
 hoek-0.9.1 \
 http-signature-0.10.0 \
@@ -174,6 +207,7 @@ osenv-0.0.3 \
 package \
 punycode-1.2.4 \
 qs-0.6.6 \
+qunitjs-1.18.0 \
 request-2.34.0 \
 rimraf-2.2.6 \
 semver-2.2.1 \
@@ -191,23 +225,30 @@ LICENSE_asn1-0.1.11 = "MIT"
 LICENSE_assert-plus-0.1.2 = "MIT"
 LICENSE_async-0.2.10 = "MIT"
 LICENSE_aws-sign2-0.5.0 = "Apache-2.0"
-LICENSE_block-stream-0.0.7 = "BSD"
-LICENSE_boom-0.4.2 = "BSD"
+LICENSE_block-stream-0.0.7 = "BSD-2-Clause"
+LICENSE_boom-0.4.2 = "BSD-3-Clause"
 LICENSE_combined-stream-0.0.4 = "MIT"
-LICENSE_cryptiles-0.2.2 = "BSD"
+LICENSE_cryptiles-0.2.2 = "MIT"
 LICENSE_ctype-0.5.2 = "MIT"
 LICENSE_delayed-stream-0.0.5 = "MIT"
 LICENSE_forever-agent-0.5.2 = "Apache-2.0"
 LICENSE_form-data-0.1.2 = "MIT"
-LICENSE_fstream-0.1.25 = "BSD"
-LICENSE_glob-3.2.9 = "BSD"
-LICENSE_graceful-fs-1.2.3 = "BSD"
-LICENSE_graceful-fs-2.0.3 = "BSD"
-LICENSE_hawk-1.0.0 = "BSD"
-LICENSE_hoek-0.9.1 = "BSD"
+LICENSE_fstream-0.1.25 = "MIT"
+LICENSE_glob-3.2.9 = "ISC"
+LICENSE_graceful-fs-1.2.3 = "ISC"
+LICENSE_graceful-fs-2.0.3 = "ISC"
+LICENSE_grunt-0.4.5 = "MIT"
+LICENSE_grunt-contrib-concat-0.5.1 = "MIT"
+LICENSE_grunt-contrib-jshint-0.10.0 = "MIT"
+LICENSE_grunt-contrib-nodeunit-0.4.1 = "MIT"
+LICENSE_grunt-contrib-qunit-0.7.0 = "MIT"
+LICENSE_grunt-contrib-uglify-0.5.0 = "MIT"
+LICENSE_grunt-contrib-watch-0.6.1 = "MIT"
+LICENSE_hawk-1.0.0 = "Apache-2.0"
+LICENSE_hoek-0.9.1 = "MIT"
 LICENSE_http-signature-0.10.0 = "MIT"
 LICENSE_inherits-2.0.1 = "ISC"
-LICENSE_json-stringify-safe-5.0.0 = "BSD"
+LICENSE_json-stringify-safe-5.0.0 = "ISC"
 LICENSE_lru-cache-2.5.0 = "MIT"
 LICENSE_mime-1.2.11 = "MIT"
 LICENSE_minimatch-0.2.14 = "MIT"
@@ -215,17 +256,18 @@ LICENSE_mkdirp-0.3.5 = "MIT"
 LICENSE_mkdirp-0.4.0 = "MIT"
 LICENSE_node-uuid-1.4.1 = "MIT"
 LICENSE_nopt-2.2.1 = "MIT"
-LICENSE_npmlog-0.0.6 = "BSD"
+LICENSE_npmlog-0.0.6 = "ISC"
 LICENSE_oauth-sign-0.3.0 = "Apache-2.0"
-LICENSE_osenv-0.0.3 = "BSD"
-LICENSE_punycode-1.2.4 = "BSD & MIT"
+LICENSE_osenv-0.0.3 = "ISC"
+LICENSE_punycode-1.2.4 = "MIT"
 LICENSE_qs-0.6.6 = "MIT"
+LICENSE_qunitjs-1.18.0 = "MIT"
 LICENSE_request-2.34.0 = "Apache-2.0"
 LICENSE_rimraf-2.2.6 = "MIT"
-LICENSE_semver-2.2.1 = "BSD"
-LICENSE_sigmund-1.0.0 = "BSD"
-LICENSE_sntp-0.2.4 = "BSD"
-LICENSE_tar-0.1.19 = "BSD"
+LICENSE_semver-2.2.1 = "ISC"
+LICENSE_sigmund-1.0.0 = "ISC"
+LICENSE_sntp-0.2.4 = "BSD-3-Clause"
+LICENSE_tar-0.1.19 = "ISC & MIT"
 LICENSE_tough-cookie-0.12.1 = "CC0-1.0 & (MPL-1.1 | GPL-2.0-only | LGPL-2.1-only) & MIT"
 LICENSE_tunnel-agent-0.3.0 = "Apache-2.0"
 LICENSE_which-1.0.5 = "MIT"
@@ -249,6 +291,13 @@ ${LICENSE_fstream-0.1.25} & \
 ${LICENSE_glob-3.2.9} & \
 ${LICENSE_graceful-fs-1.2.3} & \
 ${LICENSE_graceful-fs-2.0.3} & \
+${LICENSE_grunt-0.4.5} & \
+${LICENSE_grunt-contrib-concat-0.5.1} & \
+${LICENSE_grunt-contrib-jshint-0.10.0} & \
+${LICENSE_grunt-contrib-nodeunit-0.4.1} & \
+${LICENSE_grunt-contrib-qunit-0.7.0} & \
+${LICENSE_grunt-contrib-uglify-0.5.0} & \
+${LICENSE_grunt-contrib-watch-0.6.1} & \
 ${LICENSE_hawk-1.0.0} & \
 ${LICENSE_hoek-0.9.1} & \
 ${LICENSE_http-signature-0.10.0} & \
@@ -266,6 +315,7 @@ ${LICENSE_oauth-sign-0.3.0} & \
 ${LICENSE_osenv-0.0.3} & \
 ${LICENSE_punycode-1.2.4} & \
 ${LICENSE_qs-0.6.6} & \
+${LICENSE_qunitjs-1.18.0} & \
 ${LICENSE_request-2.34.0} & \
 ${LICENSE_rimraf-2.2.6} & \
 ${LICENSE_semver-2.2.1} & \
@@ -278,7 +328,7 @@ ${LICENSE_which-1.0.5} \
 "
 
 # Remove the duplicates
-LICENSE = "${@ ' & '.join(list(set('${ALL_LICENSES}'.split(' & ')))) }"
+LICENSE = "${@ ' & '.join(sorted(set('${ALL_LICENSES}'.strip().split(' & ')))) }"
 
 LIC_FILES_CHKSUM = "\
 file://${WORKDIR}/${BPN}/abbrev_1.0.5/package/LICENSE;md5=b3245a33f2d41818f14c489bd33bc4a8 \
@@ -299,6 +349,11 @@ file://${WORKDIR}/${BPN}/fstream_0.1.25/package/LICENSE;md5=8ce909f9cccb74a7c6f2
 file://${WORKDIR}/${BPN}/glob_3.2.9/package/LICENSE;md5=8ce909f9cccb74a7c6f2720930d072c1 \
 file://${WORKDIR}/${BPN}/graceful-fs_1.2.3/package/LICENSE;md5=8ce909f9cccb74a7c6f2720930d072c1 \
 file://${WORKDIR}/${BPN}/graceful-fs_2.0.3/package/LICENSE;md5=8ce909f9cccb74a7c6f2720930d072c1 \
+file://${WORKDIR}/${BPN}/grunt_0.4.5/package/LICENSE-MIT;md5=71ec026c2f855627041a4d9a1f5d2c3e \
+file://${WORKDIR}/${BPN}/grunt-contrib-jshint_0.10.0/package/LICENSE-MIT;md5=d4c0dac367d17453778bfc70faf69145 \
+file://${WORKDIR}/${BPN}/grunt-contrib-nodeunit_0.4.1/package/LICENSE-MIT;md5=d4c0dac367d17453778bfc70faf69145 \
+file://${WORKDIR}/${BPN}/grunt-contrib-uglify_0.5.0/package/LICENSE-MIT;md5=d4c0dac367d17453778bfc70faf69145 \
+file://${WORKDIR}/${BPN}/grunt-contrib-watch_0.6.1/package/LICENSE-MIT;md5=7aa789b63a114f3e399acfb94bb570a5 \
 file://${WORKDIR}/${BPN}/hawk_1.0.0/package/LICENSE;md5=a674df8d258d4437373838e36bc960d2 \
 file://${WORKDIR}/${BPN}/hoek_0.9.1/package/LICENSE;md5=1dd27b734d6fd3763ba8d9d1d4d2a44f \
 file://${WORKDIR}/${BPN}/http-signature_0.10.0/package/LICENSE;md5=38ecf0a3a3894f404ca99c2a08924afc \
@@ -317,6 +372,7 @@ file://${WORKDIR}/${BPN}/osenv_0.0.3/package/LICENSE;md5=c695aba12d799c74e770d90
 file://${WORKDIR}/${BPN}/punycode_1.2.4/package/LICENSE-MIT.txt;md5=f6e63cacc921f39d701abb9091a7d73d \
 file://${WORKDIR}/${BPN}/punycode_1.2.4/package/LICENSE-GPL.txt;md5=2c1778696d3ba68569a0352e709ae6b7 \
 file://${WORKDIR}/${BPN}/qs_0.6.6/package/Readme.md;beginline=35;md5=90d7f26fbfa70f23a025e3e3502e5a5b \
+file://${WORKDIR}/${BPN}/qunitjs_1.18.0/package/LICENSE.txt;md5=88e6b088e1bdb95427eca76a90663e3b \
 file://${WORKDIR}/${BPN}/request_2.34.0/package/LICENSE;md5=f3f8ead5440d1c311b45be065d135d90 \
 file://${WORKDIR}/${BPN}/rimraf_2.2.6/package/LICENSE;md5=b3245a33f2d41818f14c489bd33bc4a8 \
 file://${WORKDIR}/${BPN}/semver_2.2.1/package/LICENSE;md5=8ce909f9cccb74a7c6f2720930d072c1 \
