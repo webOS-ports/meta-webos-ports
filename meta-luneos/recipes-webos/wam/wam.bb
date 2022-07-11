@@ -17,7 +17,7 @@ VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_cpushareholder}"
 
 PV = "1.0.2-55+git${SRCPV}"
-SRCREV = "d817c5a083127fc6e2ffb036ae3b4912c43c0262"
+SRCREV = "fcb8afbfd94dc0a6eff2c4ed7003128429ec023d"
 PR = "r30"
 
 WAM_BUILD_SYSTEM = "webos_qmake6"
@@ -28,23 +28,17 @@ inherit pkgconfig
 inherit webos_system_bus
 inherit systemd
 inherit webos_lttng
-inherit webos_ports_repo
+inherit webos_ports_fork_repo
 
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE:${PN} = "webapp-mgr.service"
 
 WAM_DATA_DIR = "${webos_execstatedir}/${BPN}"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
-    file://0001-Fix-build-with-gcc-11.patch \
-    file://0003-Add-basic-implementation-for-getResource-for-webOSSy.patch \
-    file://0004-DeviceInfoImpl-add-tvDeviceInfo-data.patch \
-    file://0005-Add-relaunch-support-for-legacy-enyo-apps.patch \
-    file://0006-Add-window.open-support.patch \
-    file://0007-WebAppBase-add-noWindow-support.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/LuneOS-rebased-honister"
+WEBOS_GIT_PARAM_BRANCH = "55-webOS-ports/master"
+
 S = "${WORKDIR}/git"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
