@@ -14,7 +14,7 @@ inherit webos_app
 inherit pkgconfig
 
 PV = "0.4.0-1+git${SRCPV}"
-SRCREV = "121537e7a6c6025af3dc3c2c083bdd4c45aebd0d"
+SRCREV = "292fabfc5b5290a50236ea4e00ff194ea5c069aa"
 
 WEBOS_GIT_PARAM_BRANCH = "qml-based"
 WEBOS_REPO_NAME = "org.webosports.app.settings"
