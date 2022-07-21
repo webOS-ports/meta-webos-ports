@@ -29,6 +29,7 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     file://0002-Add-capability-to-pass-extra-options-to-surface-mana.patch \
     file://0003-WebOSShellSurface-add-setClientSize.patch \
     file://0004-webosscreenshot-respect-QT_OPENGL_ES.patch \
+    file://0005-DefaultSettings.qml-Use-Prelude-for-LuneOS.patch \
 "
 S = "${WORKDIR}/git"
 
