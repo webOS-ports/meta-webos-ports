@@ -19,7 +19,10 @@ inherit pkgconfig
 #inherit webos_enhanced_submissions
 inherit webos_public_repo
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+           file://0001-FontStyle.qml-Use-Prelude-on-LuneOS-instead-of-Museo.patch \
+"
+
 S = "${WORKDIR}/git"
 
 QMAKE_PROFILES = "${S}/qml-app-components.pro"
