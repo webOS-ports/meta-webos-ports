@@ -52,6 +52,13 @@ WEBOS_NPM_INSTALL_FLAGS = "--arch=${WEBOS_NPM_ARCH} --target_arch=${WEBOS_NPM_AR
 # Workaround for network access issue during do_compile task
 do_compile[network] = "1"
 
+do_install:prepend() {
+    export NODE_OPTIONS="--openssl-legacy-provider"
+    # work around nodejs trying to load openssl's legacy.so from openssl WORKDIR which might be already removed by rm-work
+    # see https://lists.openembedded.org/g/openembedded-devel/message/96799
+    export OPENSSL_MODULES="${STAGING_LIBDIR_NATIVE}/ossl-modules/"
+}
+
 do_compile:append() {
     ${WEBOS_NPM_BIN} ${WEBOS_NPM_INSTALL_FLAGS} install
     ${WEBOS_NODE_BIN} ./scripts/cli.js transpile
