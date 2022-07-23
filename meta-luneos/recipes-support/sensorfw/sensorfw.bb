@@ -49,7 +49,7 @@ EXTRA_QMAKEVARS_PRE += "MAKE_DOCS=no "
 EXTRA_QMAKEVARS_PRE:append:halium = "CONFIG+=autohybris "
 
 # Halium-9.0 devices use binder to communicate with sensors
-EXTRA_QMAKEVARS_PRE:append:hammerhead = "CONFIG+=binder "
+EXTRA_QMAKEVARS_PRE:append:hammerhead-halium = "CONFIG+=binder "
 EXTRA_QMAKEVARS_PRE:append:mako = "CONFIG+=binder "
 EXTRA_QMAKEVARS_PRE:append:mido = "CONFIG+=binder "
 EXTRA_QMAKEVARS_PRE:append:rosy = "CONFIG+=binder "
