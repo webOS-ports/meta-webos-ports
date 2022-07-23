@@ -1,0 +1,1525 @@
+From 5b80812cccdfeb3e864f5775921eeb593ee8cac8 Mon Sep 17 00:00:00 2001
+From: Dylan Van Assche <dylan.van.assche@protonmail.com>
+Date: Thu, 29 Aug 2019 18:48:52 +0200
+Subject: [PATCH 1/2] [ofono] qmimodem: implement voice calls
+
+---
+ ofono/Makefile.am                        |   5 +-
+ ofono/drivers/qmimodem/qmi.h             |  13 +
+ ofono/drivers/qmimodem/voice.c           |  86 ++++++
+ ofono/drivers/qmimodem/voice.h           |  84 ++++++
+ ofono/drivers/qmimodem/voice_generated.c | 210 ++++++++++++++
+ ofono/drivers/qmimodem/voice_generated.h | 113 ++++++++
+ ofono/drivers/qmimodem/voicecall.c       | 332 ++++++++++++++++++++++-
+ 7 files changed, 840 insertions(+), 3 deletions(-)
+ create mode 100644 ofono/drivers/qmimodem/voice.c
+ create mode 100644 ofono/drivers/qmimodem/voice.h
+ create mode 100644 ofono/drivers/qmimodem/voice_generated.c
+ create mode 100644 ofono/drivers/qmimodem/voice_generated.h
+
+diff --git a/ofono/Makefile.am b/ofono/Makefile.am
+index 187f0e93..3b50e303 100644
+--- a/ofono/Makefile.am
++++ b/ofono/Makefile.am
+@@ -293,7 +293,9 @@ qmi_sources = drivers/qmimodem/qmi.h drivers/qmimodem/qmi.c \
+ 					drivers/qmimodem/wds.h \
+ 					drivers/qmimodem/pds.h \
+ 					drivers/qmimodem/common.h \
+-					drivers/qmimodem/wda.h
++					drivers/qmimodem/wda.h \
++					drivers/qmimodem/voice.h \
++					drivers/qmimodem/voice.c
+ 
+ builtin_modules += qmimodem
+ builtin_sources += $(qmi_sources) \
+@@ -302,6 +304,7 @@ builtin_sources += $(qmi_sources) \
+ 			drivers/qmimodem/qmimodem.c \
+ 			drivers/qmimodem/devinfo.c \
+ 			drivers/qmimodem/voicecall.c \
++			drivers/qmimodem/voice_generated.c \
+ 			drivers/qmimodem/network-registration.c \
+ 			drivers/qmimodem/sim-legacy.c \
+ 			drivers/qmimodem/sim.c \
+diff --git a/ofono/drivers/qmimodem/qmi.h b/ofono/drivers/qmimodem/qmi.h
+index b4955b40..71d9fc88 100644
+--- a/ofono/drivers/qmimodem/qmi.h
++++ b/ofono/drivers/qmimodem/qmi.h
+@@ -19,6 +19,9 @@
+  *
+  */
+ 
++#ifndef __OFONO_QMI_QMI_H
++#define __OFONO_QMI_QMI_H
++
+ #include <stdbool.h>
+ #include <stdint.h>
+ 
+@@ -172,3 +175,13 @@ uint16_t qmi_service_register(struct qmi_service *service,
+ 				void *user_data, qmi_destroy_func_t destroy);
+ bool qmi_service_unregister(struct qmi_service *service, uint16_t id);
+ bool qmi_service_unregister_all(struct qmi_service *service);
++
++
++/* FIXME: find a place for parse_error */
++enum parse_error {
++	NONE = 0,
++	MISSING_MANDATORY = 1,
++	INVALID_LENGTH = 2,
++};
++
++#endif /* __OFONO_QMI_QMI_H */
+diff --git a/ofono/drivers/qmimodem/voice.c b/ofono/drivers/qmimodem/voice.c
+new file mode 100644
+index 00000000..c0856176
+--- /dev/null
++++ b/ofono/drivers/qmimodem/voice.c
+@@ -0,0 +1,86 @@
++/*
++ *
++ *  oFono - Open Source Telephony
++ *
++ *  Copyright (C) 2017 Alexander Couzens <lynxis@fe80.eu>
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU General Public License version 2 as
++ *  published by the Free Software Foundation.
++ *
++ *  This program is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ *  GNU General Public License for more details.
++ *
++ */
++
++#include <stdint.h>
++
++#include "voice.h"
++#include "../../src/common.h"
++
++#define _(X) case X: return #X
++
++const char *qmi_voice_call_state_name(enum qmi_voice_call_state value)
++{
++	switch (value) {
++		_(QMI_CALL_STATE_IDLE);
++		_(QMI_CALL_STATE_ORIG);
++		_(QMI_CALL_STATE_INCOMING);
++		_(QMI_CALL_STATE_CONV);
++		_(QMI_CALL_STATE_CC_IN_PROG);
++		_(QMI_CALL_STATE_ALERTING);
++		_(QMI_CALL_STATE_HOLD);
++		_(QMI_CALL_STATE_WAITING);
++		_(QMI_CALL_STATE_DISCONNECTING);
++		_(QMI_CALL_STATE_END);
++		_(QMI_CALL_STATE_SETUP);
++	}
++	return "QMI_CALL_STATE_<UNKNOWN>";
++}
++
++int qmi_to_ofono_status(uint8_t status, int *ret) {
++	int err = 0;
++	switch (status) {
++	case QMI_CALL_STATE_IDLE:
++	case QMI_CALL_STATE_END:
++	case QMI_CALL_STATE_DISCONNECTING:
++		*ret = CALL_STATUS_DISCONNECTED;
++		break;
++	case QMI_CALL_STATE_HOLD:
++		*ret = CALL_STATUS_HELD;
++		break;
++	case QMI_CALL_STATE_WAITING:
++		*ret = CALL_STATUS_WAITING;
++		break;
++	case QMI_CALL_STATE_ORIG:
++		*ret = CALL_STATUS_DIALING;
++		break;
++	case QMI_CALL_STATE_INCOMING:
++		*ret = CALL_STATUS_INCOMING;
++		break;
++	case QMI_CALL_STATE_CONV:
++		*ret = CALL_STATUS_ACTIVE;
++		break;
++	case QMI_CALL_STATE_CC_IN_PROG:
++	case QMI_CALL_STATE_SETUP:
++		/* FIXME: unsure if _SETUP is dialing or not */
++		*ret = CALL_STATUS_DIALING;
++		break;
++	case QMI_CALL_STATE_ALERTING:
++		*ret = CALL_STATUS_ALERTING;
++		break;
++	default:
++		err = 1;
++	}
++	return err;
++}
++
++uint8_t ofono_to_qmi_direction(enum call_direction ofono_direction) {
++	return ofono_direction + 1;
++}
++enum call_direction qmi_to_ofono_direction(uint8_t qmi_direction) {
++	return qmi_direction - 1;
++}
++
+diff --git a/ofono/drivers/qmimodem/voice.h b/ofono/drivers/qmimodem/voice.h
+new file mode 100644
+index 00000000..f25648f7
+--- /dev/null
++++ b/ofono/drivers/qmimodem/voice.h
+@@ -0,0 +1,84 @@
++/*
++ *
++ *  oFono - Open Source Telephony
++ *
++ *  Copyright (C) 2017 Alexander Couzens <lynxis@fe80.eu>
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU General Public License version 2 as
++ *  published by the Free Software Foundation.
++ *
++ *  This program is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ *  GNU General Public License for more details.
++ *
++ */
++
++enum call_direction;
++
++enum ussd_dcs {
++	USS_DCS_ASCII = 0x1,
++	USS_DCS_8BIT,
++	USS_DCS_UCS2,
++};
++
++enum ussd_user_required {
++	NO_USER_ACTION_REQUIRED = 0x1,
++	USER_ACTION_REQUIRED = 0x2,
++};
++
++struct qmi_ussd_data {
++	uint8_t dcs;
++	uint8_t length;
++	uint8_t data[0];
++} __attribute__((__packed__));
++
++enum voice_commands {
++	QMI_VOICE_CANCEL_USSD = 0x3c,
++	QMI_VOICE_USSD_RELEASE_IND = 0x3d,
++	QMI_VOICE_USSD_IND = 0x3e,
++	QMI_VOICE_SUPS_IND = 0x42,
++	QMI_VOICE_ASYNC_ORIG_USSD = 0x43,
++};
++
++enum qmi_voice_call_state {
++	QMI_CALL_STATE_IDLE = 0x0,
++	QMI_CALL_STATE_ORIG,
++	QMI_CALL_STATE_INCOMING,
++	QMI_CALL_STATE_CONV,
++	QMI_CALL_STATE_CC_IN_PROG,
++	QMI_CALL_STATE_ALERTING,
++	QMI_CALL_STATE_HOLD,
++	QMI_CALL_STATE_WAITING,
++	QMI_CALL_STATE_DISCONNECTING,
++	QMI_CALL_STATE_END,
++	QMI_CALL_STATE_SETUP
++};
++
++enum qmi_voice_call_type {
++	QMI_CALL_TYPE_VOICE = 0x0,
++	QMI_CALL_TYPE_VOICE_FORCE,
++};
++
++const char *qmi_voice_call_state_name(enum qmi_voice_call_state value);
++uint8_t ofono_to_qmi_direction(enum call_direction ofono_direction);
++enum call_direction qmi_to_ofono_direction(uint8_t qmi_direction);
++int qmi_to_ofono_status(uint8_t status, int *ret);
++
++#define QMI_VOICE_IND_ALL_STATUS 0x2e
++
++#define QMI_VOICE_PARAM_USS_DATA 0x01
++
++#define QMI_VOICE_PARAM_ASYNC_USSD_ERROR 0x10
++#define QMI_VOICE_PARAM_ASYNC_USSD_FAILURE_CASE 0x11
++#define QMI_VOICE_PARAM_ASYNC_USSD_DATA 0x12
++
++#define QMI_VOICE_PARAM_USSD_IND_USER_ACTION 0x01
++#define QMI_VOICE_PARAM_USSD_IND_DATA 0x10
++#define QMI_VOICE_PARAM_USSD_IND_UCS2 0x11
++
++/* according to GSM TS 23.038 */
++#define USSD_DCS_8BIT 0xf4
++#define USSD_DCS_UCS2 0x48
++#define USSD_DCS_UNSPECIFIC 0x0f
+diff --git a/ofono/drivers/qmimodem/voice_generated.c b/ofono/drivers/qmimodem/voice_generated.c
+new file mode 100644
+index 00000000..3440be43
+--- /dev/null
++++ b/ofono/drivers/qmimodem/voice_generated.c
+@@ -0,0 +1,210 @@
++
++#include <stdint.h>
++#include <string.h>
++#include <glib.h>
++
++#include "voice_generated.h"
++
++int qmi_voice_dial_call(
++		struct qmi_voice_dial_call_arg *arg,
++		struct qmi_service *service,
++		qmi_result_func_t func,
++		void *user_data,
++		qmi_destroy_func_t destroy)
++{
++	struct qmi_param *param = NULL;
++
++	param = qmi_param_new();
++	if (!param)
++		goto error;
++
++	if (arg->calling_number_set) {
++		if (!qmi_param_append(param,
++				 0x1,
++				 strlen(arg->calling_number),
++				 arg->calling_number))
++			goto error;
++	}
++
++	if (arg->call_type_set)
++		qmi_param_append_uint8(param, 0x10, arg->call_type);
++
++	if (qmi_service_send(service,
++			     0x20,
++			     param,
++			     func,
++			     user_data,
++			     destroy) > 0)
++		return 0;
++error:
++	g_free(param);
++	return 1;
++}
++
++enum parse_error qmi_voice_dial_call_parse(
++		struct qmi_result *qmi_result,
++		struct qmi_voice_dial_call_result *result)
++{
++	int err = NONE;
++
++	/* mandatory */
++	if (qmi_result_get_uint8(qmi_result, 0x10, &result->call_id))
++		result->call_id_set = 1;
++	else
++		err = MISSING_MANDATORY;
++
++	return err;
++}
++
++int qmi_voice_end_call(
++		struct qmi_voice_end_call_arg *arg,
++		struct qmi_service *service,
++		qmi_result_func_t func,
++		void *user_data,
++		qmi_destroy_func_t destroy)
++{
++	struct qmi_param *param = NULL;
++
++	param = qmi_param_new();
++	if (!param)
++		goto error;
++
++	if (arg->call_id_set) {
++		if (!qmi_param_append_uint8(
++					param,
++					0x1,
++					arg->call_id))
++			goto error;
++	}
++
++	if (qmi_service_send(service,
++			     0x21,
++			     param,
++			     func,
++			     user_data,
++			     destroy) > 0)
++		return 0;
++error:
++	g_free(param);
++	return 1;
++}
++
++enum parse_error qmi_voice_end_call_parse(
++		struct qmi_result *qmi_result,
++		struct qmi_voice_end_call_result *result)
++{
++	int err = NONE;
++
++	/* optional */
++	if (qmi_result_get_uint8(qmi_result, 0x10, &result->call_id))
++		result->call_id_set = 1;
++
++	return err;
++}
++
++
++int qmi_voice_answer_call(
++		struct qmi_voice_answer_call_arg *arg,
++		struct qmi_service *service,
++		qmi_result_func_t func,
++		void *user_data,
++		qmi_destroy_func_t destroy)
++{
++	struct qmi_param *param = NULL;
++
++	param = qmi_param_new();
++	if (!param)
++		goto error;
++
++	if (arg->call_id_set) {
++		if (!qmi_param_append_uint8(
++					param,
++					0x1,
++					arg->call_id))
++			goto error;
++	}
++
++	if (qmi_service_send(service,
++			     0x22,
++			     param,
++			     func,
++			     user_data,
++			     destroy) > 0)
++		return 0;
++error:
++	g_free(param);
++	return 1;
++}
++
++
++enum parse_error qmi_voice_answer_call_parse(
++		struct qmi_result *qmi_result,
++		struct qmi_voice_answer_call_result *result)
++{
++	int err = NONE;
++
++	/* optional */
++	if (qmi_result_get_uint8(qmi_result, 0x10, &result->call_id))
++		result->call_id_set = 1;
++
++	return err;
++}
++
++enum parse_error qmi_voice_ind_call_status(
++		struct qmi_result *qmi_result,
++		struct qmi_voice_all_call_status_ind *result)
++{
++	int err = NONE;
++	int offset;
++	uint16_t len;
++	const struct qmi_voice_remote_party_number *remote_party_number;
++	const struct qmi_voice_call_information *call_information;
++
++	/* mandatory */
++	call_information = qmi_result_get(qmi_result, 0x01, &len);
++	if (call_information)
++	{
++		int instance_size = sizeof(struct qmi_voice_call_information_instance);
++		/* verify the length */
++		if (len < sizeof(call_information->size))
++			return INVALID_LENGTH;
++
++		if (len != call_information->size * sizeof(struct qmi_voice_call_information_instance)
++			    + sizeof(call_information->size))
++			return INVALID_LENGTH;
++		result->call_information_set = 1;
++		result->call_information = call_information;
++	} else
++		return MISSING_MANDATORY;
++
++	/* mandatory */
++	remote_party_number = qmi_result_get(qmi_result, 0x10, &len);
++	if (remote_party_number) {
++		const struct qmi_voice_remote_party_number_instance *instance;
++		int instance_size = sizeof(struct qmi_voice_remote_party_number_instance);
++		int i;
++
++		/* verify the length */
++		if (len < sizeof(remote_party_number->size))
++			return INVALID_LENGTH;
++
++		for (i = 0, offset = sizeof(remote_party_number->size);
++		     offset <= len && i < 16 && i < remote_party_number->size; i++)
++		{
++			if (offset == len) {
++				break;
++			} else if (offset + instance_size > len) {
++				return INVALID_LENGTH;
++			}
++
++			instance = (void *)remote_party_number + offset;
++			result->remote_party_number[i] = instance;
++			offset += sizeof(struct qmi_voice_remote_party_number_instance) + instance->number_size;
++		}
++		result->remote_party_number_set = 1;
++		result->remote_party_number_size = remote_party_number->size;
++	} else
++		return MISSING_MANDATORY;
++
++	return err;
++}
+diff --git a/ofono/drivers/qmimodem/voice_generated.h b/ofono/drivers/qmimodem/voice_generated.h
+new file mode 100644
+index 00000000..471b52ea
+--- /dev/null
++++ b/ofono/drivers/qmimodem/voice_generated.h
+@@ -0,0 +1,113 @@
++
++#ifndef __OFONO_QMI_VOICE_GENERATED_H
++#define __OFONO_QMI_VOICE_GENERATED_H
++
++#include "qmi.h"
++
++struct qmi_voice_remote_party_number_instance {
++	uint8_t call_id;
++	uint8_t presentation_indicator;
++	uint8_t number_size;
++	char number[0];
++} __attribute__((__packed__));
++
++struct qmi_voice_remote_party_number {
++	uint8_t size;
++	struct qmi_voice_remote_party_number_instance instance[0];
++} __attribute__((__packed__));
++
++/* generator / parser */
++
++struct qmi_voice_dial_call_arg {
++	bool calling_number_set;
++	const char *calling_number;
++	bool call_type_set;
++	uint8_t call_type;
++};
++
++int qmi_voice_dial_call(
++		struct qmi_voice_dial_call_arg *arg,
++		struct qmi_service *service,
++		qmi_result_func_t func,
++		void *user_data,
++		qmi_destroy_func_t destroy);
++
++struct qmi_voice_dial_call_result {
++	bool call_id_set;
++	uint8_t call_id;
++};
++
++enum parse_error qmi_voice_dial_call_parse(
++		struct qmi_result *qmi_result,
++		struct qmi_voice_dial_call_result *result);
++
++struct qmi_voice_end_call_arg {
++	bool call_id_set;
++	uint8_t call_id;
++};
++
++int qmi_voice_end_call(
++		struct qmi_voice_end_call_arg *arg,
++		struct qmi_service *service,
++		qmi_result_func_t func,
++		void *user_data,
++		qmi_destroy_func_t destroy);
++
++struct qmi_voice_end_call_result {
++	bool call_id_set;
++	uint8_t call_id;
++};
++
++enum parse_error qmi_voice_end_call_parse(
++		struct qmi_result *qmi_result,
++		struct qmi_voice_end_call_result *result);
++
++struct qmi_voice_answer_call_arg {
++	bool call_id_set;
++	uint8_t call_id;
++};
++
++int qmi_voice_answer_call(
++		struct qmi_voice_answer_call_arg *arg,
++		struct qmi_service *service,
++		qmi_result_func_t func,
++		void *user_data,
++		qmi_destroy_func_t destroy);
++
++struct qmi_voice_answer_call_result {
++	bool call_id_set;
++	uint8_t call_id;
++};
++
++enum parse_error qmi_voice_answer_call_parse(
++		struct qmi_result *qmi_result,
++		struct qmi_voice_answer_call_result *result);
++
++struct qmi_voice_call_information_instance {
++	uint8_t id;
++	uint8_t state;
++	uint8_t type;
++	uint8_t direction;
++	uint8_t mode;
++	uint8_t multipart_indicator;
++	uint8_t als;
++} __attribute__((__packed__));
++
++struct qmi_voice_call_information {
++	uint8_t size;
++	struct qmi_voice_call_information_instance instance[0];
++} __attribute__((__packed__)) ;
++
++struct qmi_voice_all_call_status_ind {
++	bool call_information_set;
++	const struct qmi_voice_call_information *call_information;
++	bool remote_party_number_set;
++	uint8_t remote_party_number_size;
++	const struct qmi_voice_remote_party_number_instance *remote_party_number[16];
++};
++
++enum parse_error qmi_voice_ind_call_status(
++		struct qmi_result *qmi_result,
++		struct qmi_voice_all_call_status_ind *result);
++
++#endif /* __OFONO_QMI_VOICE_GENERATED_H */
+diff --git a/ofono/drivers/qmimodem/voicecall.c b/ofono/drivers/qmimodem/voicecall.c
+index 29166b08..27aae40c 100644
+--- a/ofono/drivers/qmimodem/voicecall.c
++++ b/ofono/drivers/qmimodem/voicecall.c
+@@ -3,6 +3,7 @@
+  *  oFono - Open Source Telephony
+  *
+  *  Copyright (C) 2011-2012  Intel Corporation. All rights reserved.
++ *  Copyright (C) 2017 Alexander Couzens <lynxis@fe80.eu>
+  *
+  *  This program is free software; you can redistribute it and/or modify
+  *  it under the terms of the GNU General Public License version 2 as
+@@ -23,20 +24,113 @@
+ #include <config.h>
+ #endif
+ 
++#include <string.h>
++
+ #include <ofono/log.h>
+ #include <ofono/modem.h>
+ #include <ofono/voicecall.h>
++#include <ofono/call-list.h>
+ 
+-#include "qmi.h"
++#include "../src/common.h"
+ 
++#include "qmi.h"
+ #include "qmimodem.h"
++#include "voice.h"
++#include "voice_generated.h"
++
++#ifndef ARRAY_SIZE
++#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
++#endif
++
++
++/* qmi protocol */
++
++
++/* end of qmi */
+ 
+ struct voicecall_data {
+ 	struct qmi_service *voice;
+ 	uint16_t major;
+ 	uint16_t minor;
++	GSList *call_list;
++	struct voicecall_static *vs;
++	struct ofono_phone_number dialed;
+ };
+ 
++static void all_call_status_ind(struct qmi_result *result, void *user_data)
++{
++	struct ofono_voicecall *vc = user_data;
++	struct voicecall_data *vd = ofono_voicecall_get_data(vc);
++	GSList *calls = NULL;
++	int i;
++	int size = 0;
++	struct qmi_voice_all_call_status_ind status_ind;
++	GSList *n, *o;
++	struct ofono_call *nc, *oc;
++
++
++	if (qmi_voice_ind_call_status(result, &status_ind) != NONE) {
++		DBG("Parsing of all call status indication failed");
++		return;
++	}
++
++	if (!status_ind.remote_party_number_set || !status_ind.call_information_set) {
++		DBG("Some required fields are not set");
++		return;
++	}
++
++	size = status_ind.call_information->size;
++	if (!size) {
++		DBG("No call informations received!");
++		return;
++	}
++
++	/* expect we have valid fields for every call */
++	if (size != status_ind.remote_party_number_size)  {
++		DBG("Not all fields have the same size");
++		return;
++	}
++
++	for (i = 0; i < size; i++) {
++		struct qmi_voice_call_information_instance call_info;
++		struct ofono_call *call;
++		const struct qmi_voice_remote_party_number_instance *remote_party = status_ind.remote_party_number[i];
++		int number_size;
++
++		call_info = status_ind.call_information->instance[i];
++		call = g_new0(struct ofono_call, 1);
++		call->id = call_info.id;
++		call->direction = qmi_to_ofono_direction(call_info.direction);
++
++		if (qmi_to_ofono_status(call_info.state, &call->status)) {
++			DBG("Ignore call id %d, because can not convert QMI state 0x%x to ofono.",
++			    call_info.id, call_info.state);
++			continue;
++		}
++		DBG("Call %d in state %s(%d)",
++		    call_info.id,
++		    qmi_voice_call_state_name(call_info.state),
++		    call_info.state);
++
++		call->type = 0; /* always voice */
++		number_size = remote_party->number_size;
++		if (number_size > OFONO_MAX_PHONE_NUMBER_LENGTH)
++			OFONO_MAX_PHONE_NUMBER_LENGTH;
++		strncpy(call->phone_number.number, remote_party->number,
++				number_size);
++		/* FIXME: set phone_number_type */
++
++		if (strlen(call->phone_number.number) > 0)
++			call->clip_validity = 0;
++		else
++			call->clip_validity = 2;
++
++		calls = g_slist_insert_sorted(calls, call, ofono_call_compare);
++	}
++
++	ofono_call_list_notify(vc, &vd->call_list, calls);
++}
++
+ static void create_voice_cb(struct qmi_service *service, void *user_data)
+ {
+ 	struct ofono_voicecall *vc = user_data;
+@@ -58,6 +152,12 @@ static void create_voice_cb(struct qmi_service *service, void *user_data)
+ 
+ 	data->voice = qmi_service_ref(service);
+ 
++	/* FIXME: we should call indication_register to ensure we get notified on call events.
++	 * We rely at the moment on the default value of notifications
++	 */
++	qmi_service_register(data->voice, QMI_VOICE_IND_ALL_STATUS,
++			     all_call_status_ind, vc, NULL);
++
+ 	ofono_voicecall_register(vc);
+ }
+ 
+@@ -77,7 +177,6 @@ static int qmi_voicecall_probe(struct ofono_voicecall *vc,
+ 					create_voice_cb, vc, NULL);
+ 
+ 	return 0;
+-
+ }
+ 
+ static void qmi_voicecall_remove(struct ofono_voicecall *vc)
+@@ -92,13 +191,242 @@ static void qmi_voicecall_remove(struct ofono_voicecall *vc)
+ 
+ 	qmi_service_unref(data->voice);
+ 
++	g_slist_free_full(data->call_list, g_free);
++
+ 	g_free(data);
+ }
+ 
++
++static struct ofono_call *create_call(struct ofono_voicecall *vc,
++				      enum call_direction direction,
++				      enum call_status status,
++				      const char *num,
++				      int num_type,
++				      int clip)
++{
++	return NULL;
++}
++
++static void dial_cb(struct qmi_result *result, void *user_data)
++{
++	struct cb_data *cbd = user_data;
++	struct ofono_voicecall *vc = cbd->user;
++	struct voicecall_data *vd = ofono_voicecall_get_data(vc);
++	ofono_voicecall_cb_t cb = cbd->cb;
++	uint16_t error;
++	struct qmi_voice_dial_call_result dial_result;
++	struct ofono_call *call;
++
++	if (qmi_result_set_error(result, &error)) {
++		DBG("QMI Error %d", error);
++		CALLBACK_WITH_FAILURE(cb, cbd->data);
++		return;
++	}
++
++	if (NONE != qmi_voice_dial_call_parse(result, &dial_result)) {
++		DBG("Received invalid Result");
++		CALLBACK_WITH_FAILURE(cb, cbd->data);
++		return;
++	}
++
++	if (!dial_result.call_id_set) {
++		DBG("Didn't receive a call id");
++		CALLBACK_WITH_FAILURE(cb, cbd->data);
++		return;
++	}
++
++	DBG("New call QMI id %d", dial_result.call_id);
++	ofono_call_list_dial_callback(vc,
++				      &vd->call_list,
++				      &vd->dialed,
++				      dial_result.call_id);
++
++
++	/* FIXME: create a timeout on this call_id */
++	CALLBACK_WITH_SUCCESS(cb, cbd->data);
++}
++
++static void dial(struct ofono_voicecall *vc, const struct ofono_phone_number *ph,
++		enum ofono_clir_option clir, ofono_voicecall_cb_t cb,
++		void *data)
++{
++	struct voicecall_data *vd = ofono_voicecall_get_data(vc);
++	struct cb_data *cbd = cb_data_new(cb, data);
++	struct qmi_voice_dial_call_arg arg;
++
++	cbd->user = vc;
++	arg.calling_number_set = true;
++	arg.calling_number = ph->number;
++	memcpy(&vd->dialed, ph, sizeof(*ph));
++
++	arg.call_type_set = true;
++	arg.call_type = QMI_CALL_TYPE_VOICE_FORCE;
++
++	if (!qmi_voice_dial_call(
++				&arg,
++				vd->voice,
++				dial_cb,
++				cbd,
++				g_free))
++		return;
++
++	CALLBACK_WITH_FAILURE(cb, data);
++	g_free(cbd);
++}
++
++static void answer_cb(struct qmi_result *result, void *user_data)
++{
++	struct cb_data *cbd = user_data;
++	struct ofono_voicecall *vc = cbd->user;
++	ofono_voicecall_cb_t cb = cbd->cb;
++	uint16_t error;
++	struct qmi_voice_answer_call_result answer_result;
++	struct ofono_call *call;
++
++	if (qmi_result_set_error(result, &error)) {
++		DBG("QMI Error %d", error);
++		CALLBACK_WITH_FAILURE(cb, cbd->data);
++		return;
++	}
++
++	/* TODO: what happens when calling it with no active call or wrong caller id? */
++	if (NONE != qmi_voice_answer_call_parse(result, &answer_result)) {
++		DBG("Received invalid Result");
++		CALLBACK_WITH_FAILURE(cb, cbd->data);
++		return;
++	}
++
++	CALLBACK_WITH_SUCCESS(cb, cbd->data);
++}
++
++static void answer(struct ofono_voicecall *vc, ofono_voicecall_cb_t cb, void *data)
++{
++	struct voicecall_data *vd = ofono_voicecall_get_data(vc);
++	struct cb_data *cbd = cb_data_new(cb, data);
++	struct qmi_voice_answer_call_arg arg;
++	struct ofono_call *call;
++	GSList *list;
++
++	DBG("");
++	cbd->user = vc;
++
++	list = g_slist_find_custom(vd->call_list,
++				   GINT_TO_POINTER(CALL_STATUS_INCOMING),
++				   ofono_call_compare_by_status);
++
++	if (list == NULL) {
++		DBG("Can not find a call to answer");
++		goto err;
++	}
++
++	call = list->data;
++
++	arg.call_id_set = true;
++	arg.call_id = call->id;
++
++	if (!qmi_voice_answer_call(
++				&arg,
++				vd->voice,
++				answer_cb,
++				cbd,
++				g_free))
++		return;
++err:
++	CALLBACK_WITH_FAILURE(cb, data);
++	g_free(cbd);
++}
++
++static void end_cb(struct qmi_result *result, void *user_data)
++{
++	struct cb_data *cbd = user_data;
++	struct ofono_voicecall *vc = cbd->user;
++	ofono_voicecall_cb_t cb = cbd->cb;
++	uint16_t error;
++	struct qmi_voice_end_call_result end_result;
++	struct ofono_call *call;
++
++	if (qmi_result_set_error(result, &error)) {
++		DBG("QMI Error %d", error);
++		CALLBACK_WITH_FAILURE(cb, cbd->data);
++		return;
++	}
++
++	if (NONE != qmi_voice_end_call_parse(result, &end_result)) {
++		DBG("Received invalid Result");
++		CALLBACK_WITH_FAILURE(cb, cbd->data);
++		return;
++	}
++
++	CALLBACK_WITH_SUCCESS(cb, cbd->data);
++}
++
++static void release_specific(struct ofono_voicecall *vc, int id,
++		ofono_voicecall_cb_t cb, void *data)
++{
++	struct voicecall_data *vd = ofono_voicecall_get_data(vc);
++	struct cb_data *cbd = cb_data_new(cb, data);
++	struct qmi_voice_end_call_arg arg;
++	int i;
++
++	DBG("");
++	cbd->user = vc;
++
++	arg.call_id_set = true;
++	arg.call_id = id;
++
++	if (!qmi_voice_end_call(&arg,
++				vd->voice,
++				end_cb,
++				cbd,
++				g_free))
++		return;
++
++	CALLBACK_WITH_FAILURE(cb, data);
++	g_free(cbd);
++}
++
++static void hangup_active(struct ofono_voicecall *vc,
++		ofono_voicecall_cb_t cb, void *data)
++{
++	struct voicecall_data *vd = ofono_voicecall_get_data(vc);
++	struct qmi_voice_end_call_arg arg;
++	struct ofono_call *call;
++	GSList *list = NULL;
++	enum call_status active[] = {
++		CALL_STATUS_ACTIVE,
++		CALL_STATUS_DIALING,
++		CALL_STATUS_ALERTING
++	};
++	int i;
++
++	DBG("");
++	for (i = 0; i < ARRAY_SIZE(active); i++) {
++		list = g_slist_find_custom(vd->call_list,
++					   GINT_TO_POINTER(CALL_STATUS_ACTIVE),
++					   ofono_call_compare_by_status);
++
++		if (list)
++			break;
++	}
++
++	if (list == NULL) {
++		DBG("Can not find a call to hang up");
++		CALLBACK_WITH_FAILURE(cb, data);
++		return;
++	}
++
++	call = list->data;
++	release_specific(vc, call->id, cb, data);
++}
++
+ static struct ofono_voicecall_driver driver = {
+ 	.name		= "qmimodem",
+ 	.probe		= qmi_voicecall_probe,
+ 	.remove		= qmi_voicecall_remove,
++	.dial		= dial,
++	.answer		= answer,
++	.hangup_active  = hangup_active,
++	.release_specific  = release_specific,
+ };
+ 
+ void qmi_voicecall_init(void)
+-- 
+2.23.0
+
+
+From 3aa8e6f1e76250d2bd9d98629bac95a16cdf24a6 Mon Sep 17 00:00:00 2001
+From: Chupligin Sergey <s.chupligin@omprussia.ru>
+Date: Tue, 17 Sep 2019 13:47:24 +0300
+Subject: [PATCH 2/2] [ofono] Fixup API of qmlmodem. Contribute JB#47364
+
+---
+ ofono/drivers/atmodem/atutil.c     | 89 +++++++++++++++++++++++++++++
+ ofono/drivers/atmodem/atutil.h     | 17 ++++++
+ ofono/drivers/qmimodem/common.h    | 92 ------------------------------
+ ofono/drivers/qmimodem/qmimodem.h  |  7 +++
+ ofono/drivers/qmimodem/util.h      | 57 ------------------
+ ofono/drivers/qmimodem/voicecall.c | 41 ++++---------
+ ofono/plugins/gobi.c               | 39 ++++++++++++-
+ 7 files changed, 163 insertions(+), 179 deletions(-)
+ delete mode 100644 ofono/drivers/qmimodem/common.h
+ delete mode 100644 ofono/drivers/qmimodem/util.h
+
+diff --git a/ofono/drivers/atmodem/atutil.c b/ofono/drivers/atmodem/atutil.c
+index 6f4e8a20..f9fedda4 100644
+--- a/ofono/drivers/atmodem/atutil.c
++++ b/ofono/drivers/atmodem/atutil.c
+@@ -32,9 +32,11 @@
+ #define OFONO_API_SUBJECT_TO_CHANGE
+ #include <ofono/log.h>
+ #include <ofono/types.h>
++#include <ofono/voicecall.h>
+ 
+ #include "atutil.h"
+ #include "vendor.h"
++#include "common.h"
+ 
+ static const char *cpin_prefix[] = { "+CPIN:", NULL };
+ 
+@@ -654,3 +656,90 @@ int at_util_get_ipv4_address_and_netmask(const char *addrnetmask,
+ 
+ 	return ret;
+ }
++
++void at_util_call_list_dial_callback(struct ofono_voicecall *vc,
++		   GSList **call_list,
++		   const struct ofono_phone_number *ph,
++		   int call_id)
++{
++    GSList *list;
++    struct ofono_call *call;
++
++    /* list_notify could be triggered before this call back is handled */
++    list = g_slist_find_custom(*call_list,
++		   GINT_TO_POINTER(call_id),
++		   at_util_call_compare_by_id);
++
++    if (list && list->data) {
++	call = list->data;
++	DBG("Call id %d already known. In state %s(%d)",
++	    call_id, call_status_to_string(call->status),
++	    call->status);
++	return;
++    }
++
++    call = g_new0(struct ofono_call, 1);
++    call->id = call_id;
++
++    memcpy(&call->called_number, ph, sizeof(*ph));
++    call->direction = CALL_DIRECTION_MOBILE_ORIGINATED;
++    call->status = CALL_STATUS_DIALING;
++    call->type = 0; /* voice */
++
++    *call_list = g_slist_insert_sorted(*call_list,
++		        call,
++		        at_util_call_compare);
++    ofono_voicecall_notify(vc, call);
++}
++
++void at_util_call_list_notify(struct ofono_voicecall *vc,
++	        GSList **call_list,
++	        GSList *calls)
++{
++    GSList *old_calls = *call_list;
++    GSList *new_calls = calls;
++    struct ofono_call *new_call, *old_call;
++
++    while (old_calls || new_calls) {
++	old_call = old_calls ? old_calls->data : NULL;
++	new_call = new_calls ? new_calls->data : NULL;
++
++	/* we drop disconnected calls and treat them as not existent */
++	if (new_call && new_call->status == CALL_STATUS_DISCONNECTED) {
++	    new_calls = new_calls->next;
++	    calls = g_slist_remove(calls, new_call);
++	    g_free(new_call);
++	    continue;
++	}
++
++	if (old_call &&
++		(new_call == NULL ||
++		(new_call->id > old_call->id))) {
++	    ofono_voicecall_disconnected(
++			vc,
++			old_call->id,
++			OFONO_DISCONNECT_REASON_UNKNOWN,
++			NULL);
++	    old_calls = old_calls->next;
++	} else if (new_call &&
++	       (old_call == NULL ||
++	       (new_call->id < old_call->id))) {
++
++	    /* new call, signal it */
++	    if (new_call->type == 0)
++		ofono_voicecall_notify(vc, new_call);
++
++	    new_calls = new_calls->next;
++	} else {
++	    if (memcmp(new_call, old_call, sizeof(*new_call))
++		    && new_call->type == 0)
++		ofono_voicecall_notify(vc, new_call);
++
++	    new_calls = new_calls->next;
++	    old_calls = old_calls->next;
++	}
++    }
++
++    g_slist_free_full(*call_list, g_free);
++    *call_list = calls;
++}
+\ No newline at end of file
+diff --git a/ofono/drivers/atmodem/atutil.h b/ofono/drivers/atmodem/atutil.h
+index 7113a4cd..d9012f42 100644
+--- a/ofono/drivers/atmodem/atutil.h
++++ b/ofono/drivers/atmodem/atutil.h
+@@ -86,6 +86,23 @@ void at_util_sim_state_query_free(struct at_util_sim_state_query *req);
+ int at_util_get_ipv4_address_and_netmask(const char *addrnetmask,
+ 						char *address, char *netmask);
+ 
++/*
++ * Can be called by the driver in the dialing callback,
++ * when the new call id already known
++ */
++void at_util_call_list_dial_callback(struct ofono_voicecall *vc,
++		   GSList **call_list,
++		   const struct ofono_phone_number *ph,
++		   int call_id);
++
++/*
++ * Called with a list of known calls e.g. clcc.
++ * Call list will take ownership of all ofono call within the calls.
++ */
++void at_util_call_list_notify(struct ofono_voicecall *vc,
++	        GSList **call_list,
++	        GSList *calls);
++
+ struct cb_data {
+ 	void *cb;
+ 	void *data;
+diff --git a/ofono/drivers/qmimodem/common.h b/ofono/drivers/qmimodem/common.h
+deleted file mode 100644
+index 5740b571..00000000
+--- a/ofono/drivers/qmimodem/common.h
++++ /dev/null
+@@ -1,92 +0,0 @@
+-/*
+- *
+- *  oFono - Open Source Telephony
+- *
+- *  Copyright (C) 2011-2012  Intel Corporation. All rights reserved.
+- *
+- *  This program is free software; you can redistribute it and/or modify
+- *  it under the terms of the GNU General Public License version 2 as
+- *  published by the Free Software Foundation.
+- *
+- *  This program is distributed in the hope that it will be useful,
+- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- *  GNU General Public License for more details.
+- *
+- *  You should have received a copy of the GNU General Public License
+- *  along with this program; if not, write to the Free Software
+- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+- *
+- */
+-
+-#define QMI_BAND_MASK_CLASS_0A		0x0000000000000001
+-#define QMI_BAND_MASK_CLASS_0B		0x0000000000000002
+-#define QMI_BAND_MASK_CLASS_1		0x0000000000000004
+-#define QMI_BAND_MASK_CLASS_2		0x0000000000000008
+-#define QMI_BAND_MASK_CLASS_3A		0x0000000000000010
+-#define QMI_BAND_MASK_CLASS_4		0x0000000000000020
+-#define QMI_BAND_MASK_CLASS_5		0x0000000000000040
+-#define QMI_BAND_MASK_GSM_DCS		0x0000000000000080
+-#define QMI_BAND_MASK_GSM_EXTENDED	0x0000000000000100
+-#define QMI_BAND_MASK_GSM_PRIMARY	0x0000000000000200
+-#define QMI_BAND_MASK_CLASS_6		0x0000000000000400
+-#define QMI_BAND_MASK_CLASS_7		0x0000000000000800
+-#define QMI_BAND_MASK_CLASS_8		0x0000000000001000
+-#define QMI_BAND_MASK_CLASS_9		0x0000000000002000
+-#define QMI_BAND_MASK_CLASS_10		0x0000000000004000
+-#define QMI_BAND_MASK_CLASS_11		0x0000000000008000
+-#define QMI_BAND_MASK_GSM_450		0x0000000000010000
+-#define QMI_BAND_MASK_GSM_480		0x0000000000020000
+-#define QMI_BAND_MASK_GSM_750		0x0000000000040000
+-#define QMI_BAND_MASK_GSM_850		0x0000000000080000
+-#define QMI_BAND_MASK_GSM_RAILWAYS	0x0000000000100000
+-#define QMI_BAND_MASK_GSM_PCS		0x0000000000200000
+-#define QMI_BAND_MASK_WCDMA_2100	0x0000000000400000
+-#define QMI_BAND_MASK_WCDMA_PCS		0x0000000000800000
+-#define QMI_BAND_MASK_WCDMA_DCS		0x0000000001000000
+-#define QMI_BAND_MASK_WCDMA_1700_US	0x0000000002000000
+-#define QMI_BAND_MASK_WCDMA_850		0x0000000004000000
+-#define QMI_BAND_MASK_WCDMA_800		0x0000000008000000
+-#define QMI_BAND_MASK_CLASS_12		0x0000000010000000
+-#define QMI_BAND_MASK_CLASS_14		0x0000000020000000
+-#define QMI_BAND_MASK_CLASS_15		0x0000000080000000
+-#define QMI_BAND_MASK_WCDMA_2600	0x0001000000000000
+-#define QMI_BAND_MASK_WCDMA_900		0x0002000000000000
+-#define QMI_BAND_MASK_WCDMA_1700_JP	0x0004000000000000
+-#define QMI_BAND_MASK_CLASS_16		0x0100000000000000
+-#define QMI_BAND_MASK_CLASS_17		0x0200000000000000
+-#define QMI_BAND_MASK_CLASS_18		0x0400000000000000
+-#define QMI_BAND_MASK_CLASS_19		0x0800000000000000
+-
+-#define QMI_LTE_BAND_MASK_EUTRA_1	0x0000000000000001
+-#define QMI_LTE_BAND_MASK_EUTRA_2	0x0000000000000002
+-#define QMI_LTE_BAND_MASK_EUTRA_3	0x0000000000000004
+-#define QMI_LTE_BAND_MASK_EUTRA_4	0x0000000000000008
+-#define QMI_LTE_BAND_MASK_EUTRA_5	0x0000000000000010
+-#define QMI_LTE_BAND_MASK_EUTRA_6	0x0000000000000020
+-#define QMI_LTE_BAND_MASK_EUTRA_7	0x0000000000000040
+-#define QMI_LTE_BAND_MASK_EUTRA_8	0x0000000000000080
+-#define QMI_LTE_BAND_MASK_EUTRA_9	0x0000000000000100
+-#define QMI_LTE_BAND_MASK_EUTRA_10	0x0000000000000200
+-#define QMI_LTE_BAND_MASK_EUTRA_11	0x0000000000000400
+-#define QMI_LTE_BAND_MASK_EUTRA_12	0x0000000000000800
+-#define QMI_LTE_BAND_MASK_EUTRA_13	0x0000000000001000
+-#define QMI_LTE_BAND_MASK_EUTRA_14	0x0000000000002000
+-#define QMI_LTE_BAND_MASK_EUTRA_17	0x0000000000010000
+-#define QMI_LTE_BAND_MASK_EUTRA_18	0x0000000000020000
+-#define QMI_LTE_BAND_MASK_EUTRA_19	0x0000000000040000
+-#define QMI_LTE_BAND_MASK_EUTRA_20	0x0000000000080000
+-#define QMI_LTE_BAND_MASK_EUTRA_21	0x0000000000100000
+-#define QMI_LTE_BAND_MASK_EUTRA_24	0x0000000000800000
+-#define QMI_LTE_BAND_MASK_EUTRA_25	0x0000000001000000
+-#define QMI_LTE_BAND_MASK_EUTRA_33	0x0000000100000000
+-#define QMI_LTE_BAND_MASK_EUTRA_34	0x0000000200000000
+-#define QMI_LTE_BAND_MASK_EUTRA_35	0x0000000400000000
+-#define QMI_LTE_BAND_MASK_EUTRA_36	0x0000000800000000
+-#define QMI_LTE_BAND_MASK_EUTRA_37	0x0000001000000000
+-#define QMI_LTE_BAND_MASK_EUTRA_38	0x0000002000000000
+-#define QMI_LTE_BAND_MASK_EUTRA_39	0x0000004000000000
+-#define QMI_LTE_BAND_MASK_EUTRA_40	0x0000008000000000
+-#define QMI_LTE_BAND_MASK_EUTRA_41	0x0000010000000000
+-#define QMI_LTE_BAND_MASK_EUTRA_42	0x0000020000000000
+-#define QMI_LTE_BAND_MASK_EUTRA_43	0x0000040000000000
+diff --git a/ofono/drivers/qmimodem/qmimodem.h b/ofono/drivers/qmimodem/qmimodem.h
+index 4b0fad3f..018b9d6b 100644
+--- a/ofono/drivers/qmimodem/qmimodem.h
++++ b/ofono/drivers/qmimodem/qmimodem.h
+@@ -19,8 +19,15 @@
+  *
+  */
+ 
++#include <glib.h>
++
+ #include "util.h"
+ 
++#include "gatchat.h"
++#include "gatresult.h"
++
++#include <drivers/atmodem/atutil.h>
++
+ extern void qmi_devinfo_init(void);
+ extern void qmi_devinfo_exit(void);
+ 
+diff --git a/ofono/drivers/qmimodem/util.h b/ofono/drivers/qmimodem/util.h
+deleted file mode 100644
+index cf053f0f..00000000
+--- a/ofono/drivers/qmimodem/util.h
++++ /dev/null
+@@ -1,57 +0,0 @@
+-/*
+- *
+- *  oFono - Open Source Telephony
+- *
+- *  Copyright (C) 2011-2012  Intel Corporation. All rights reserved.
+- *
+- *  This program is free software; you can redistribute it and/or modify
+- *  it under the terms of the GNU General Public License version 2 as
+- *  published by the Free Software Foundation.
+- *
+- *  This program is distributed in the hope that it will be useful,
+- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- *  GNU General Public License for more details.
+- *
+- *  You should have received a copy of the GNU General Public License
+- *  along with this program; if not, write to the Free Software
+- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+- *
+- */
+-
+-#include <glib.h>
+-
+-struct cb_data {
+-	void *cb;
+-	void *data;
+-	void *user;
+-};
+-
+-static inline struct cb_data *cb_data_new(void *cb, void *data)
+-{
+-	struct cb_data *ret;
+-
+-	ret = g_new0(struct cb_data, 1);
+-	ret->cb = cb;
+-	ret->data = data;
+-	ret->user = NULL;
+-
+-	return ret;
+-}
+-
+-#define CALLBACK_WITH_FAILURE(cb, args...)		\
+-	do {						\
+-		struct ofono_error cb_e;		\
+-		cb_e.type = OFONO_ERROR_TYPE_FAILURE;	\
+-		cb_e.error = 0;				\
+-							\
+-		cb(&cb_e, ##args);			\
+-	} while (0)					\
+-
+-#define CALLBACK_WITH_SUCCESS(f, args...)		\
+-	do {						\
+-		struct ofono_error e;			\
+-		e.type = OFONO_ERROR_TYPE_NO_ERROR;	\
+-		e.error = 0;				\
+-		f(&e, ##args);				\
+-	} while (0)
+diff --git a/ofono/drivers/qmimodem/voicecall.c b/ofono/drivers/qmimodem/voicecall.c
+index 27aae40c..1410523d 100644
+--- a/ofono/drivers/qmimodem/voicecall.c
++++ b/ofono/drivers/qmimodem/voicecall.c
+@@ -25,13 +25,18 @@
+ #endif
+ 
+ #include <string.h>
++#include <stdio.h>
++#include <errno.h>
++
++#include <glib.h>
+ 
+ #include <ofono/log.h>
+ #include <ofono/modem.h>
+ #include <ofono/voicecall.h>
+-#include <ofono/call-list.h>
+ 
+-#include "../src/common.h"
++#include "gatchat.h"
++#include "gatresult.h"
++#include "common.h"
+ 
+ #include "qmi.h"
+ #include "qmimodem.h"
+@@ -65,8 +70,6 @@ static void all_call_status_ind(struct qmi_result *result, void *user_data)
+ 	int i;
+ 	int size = 0;
+ 	struct qmi_voice_all_call_status_ind status_ind;
+-	GSList *n, *o;
+-	struct ofono_call *nc, *oc;
+ 
+ 
+ 	if (qmi_voice_ind_call_status(result, &status_ind) != NONE) {
+@@ -114,8 +117,6 @@ static void all_call_status_ind(struct qmi_result *result, void *user_data)
+ 
+ 		call->type = 0; /* always voice */
+ 		number_size = remote_party->number_size;
+-		if (number_size > OFONO_MAX_PHONE_NUMBER_LENGTH)
+-			OFONO_MAX_PHONE_NUMBER_LENGTH;
+ 		strncpy(call->phone_number.number, remote_party->number,
+ 				number_size);
+ 		/* FIXME: set phone_number_type */
+@@ -125,10 +126,10 @@ static void all_call_status_ind(struct qmi_result *result, void *user_data)
+ 		else
+ 			call->clip_validity = 2;
+ 
+-		calls = g_slist_insert_sorted(calls, call, ofono_call_compare);
++		calls = g_slist_insert_sorted(calls, call, at_util_call_compare);
+ 	}
+ 
+-	ofono_call_list_notify(vc, &vd->call_list, calls);
++	at_util_call_list_notify(vc, &vd->call_list, calls);
+ }
+ 
+ static void create_voice_cb(struct qmi_service *service, void *user_data)
+@@ -196,17 +197,6 @@ static void qmi_voicecall_remove(struct ofono_voicecall *vc)
+ 	g_free(data);
+ }
+ 
+-
+-static struct ofono_call *create_call(struct ofono_voicecall *vc,
+-				      enum call_direction direction,
+-				      enum call_status status,
+-				      const char *num,
+-				      int num_type,
+-				      int clip)
+-{
+-	return NULL;
+-}
+-
+ static void dial_cb(struct qmi_result *result, void *user_data)
+ {
+ 	struct cb_data *cbd = user_data;
+@@ -215,7 +205,6 @@ static void dial_cb(struct qmi_result *result, void *user_data)
+ 	ofono_voicecall_cb_t cb = cbd->cb;
+ 	uint16_t error;
+ 	struct qmi_voice_dial_call_result dial_result;
+-	struct ofono_call *call;
+ 
+ 	if (qmi_result_set_error(result, &error)) {
+ 		DBG("QMI Error %d", error);
+@@ -236,7 +225,7 @@ static void dial_cb(struct qmi_result *result, void *user_data)
+ 	}
+ 
+ 	DBG("New call QMI id %d", dial_result.call_id);
+-	ofono_call_list_dial_callback(vc,
++	at_util_call_list_dial_callback(vc,
+ 				      &vd->call_list,
+ 				      &vd->dialed,
+ 				      dial_result.call_id);
+@@ -277,11 +266,9 @@ static void dial(struct ofono_voicecall *vc, const struct ofono_phone_number *ph
+ static void answer_cb(struct qmi_result *result, void *user_data)
+ {
+ 	struct cb_data *cbd = user_data;
+-	struct ofono_voicecall *vc = cbd->user;
+ 	ofono_voicecall_cb_t cb = cbd->cb;
+ 	uint16_t error;
+ 	struct qmi_voice_answer_call_result answer_result;
+-	struct ofono_call *call;
+ 
+ 	if (qmi_result_set_error(result, &error)) {
+ 		DBG("QMI Error %d", error);
+@@ -312,7 +299,7 @@ static void answer(struct ofono_voicecall *vc, ofono_voicecall_cb_t cb, void *da
+ 
+ 	list = g_slist_find_custom(vd->call_list,
+ 				   GINT_TO_POINTER(CALL_STATUS_INCOMING),
+-				   ofono_call_compare_by_status);
++				   at_util_call_compare_by_status);
+ 
+ 	if (list == NULL) {
+ 		DBG("Can not find a call to answer");
+@@ -339,11 +326,9 @@ err:
+ static void end_cb(struct qmi_result *result, void *user_data)
+ {
+ 	struct cb_data *cbd = user_data;
+-	struct ofono_voicecall *vc = cbd->user;
+ 	ofono_voicecall_cb_t cb = cbd->cb;
+ 	uint16_t error;
+ 	struct qmi_voice_end_call_result end_result;
+-	struct ofono_call *call;
+ 
+ 	if (qmi_result_set_error(result, &error)) {
+ 		DBG("QMI Error %d", error);
+@@ -366,7 +351,6 @@ static void release_specific(struct ofono_voicecall *vc, int id,
+ 	struct voicecall_data *vd = ofono_voicecall_get_data(vc);
+ 	struct cb_data *cbd = cb_data_new(cb, data);
+ 	struct qmi_voice_end_call_arg arg;
+-	int i;
+ 
+ 	DBG("");
+ 	cbd->user = vc;
+@@ -389,7 +373,6 @@ static void hangup_active(struct ofono_voicecall *vc,
+ 		ofono_voicecall_cb_t cb, void *data)
+ {
+ 	struct voicecall_data *vd = ofono_voicecall_get_data(vc);
+-	struct qmi_voice_end_call_arg arg;
+ 	struct ofono_call *call;
+ 	GSList *list = NULL;
+ 	enum call_status active[] = {
+@@ -403,7 +386,7 @@ static void hangup_active(struct ofono_voicecall *vc,
+ 	for (i = 0; i < ARRAY_SIZE(active); i++) {
+ 		list = g_slist_find_custom(vd->call_list,
+ 					   GINT_TO_POINTER(CALL_STATUS_ACTIVE),
+-					   ofono_call_compare_by_status);
++					   at_util_call_compare_by_status);
+ 
+ 		if (list)
+ 			break;
+diff --git a/ofono/plugins/gobi.c b/ofono/plugins/gobi.c
+index 516b55e9..b517eb93 100644
+--- a/ofono/plugins/gobi.c
++++ b/ofono/plugins/gobi.c
+@@ -51,7 +51,7 @@
+ #include <drivers/qmimodem/qmi.h>
+ #include <drivers/qmimodem/dms.h>
+ #include <drivers/qmimodem/wda.h>
+-#include <drivers/qmimodem/util.h>
++#include <glib.h>
+ 
+ #define GOBI_DMS	(1 << 0)
+ #define GOBI_NAS	(1 << 1)
+@@ -65,6 +65,43 @@
+ #define GOBI_VOICE	(1 << 9)
+ #define GOBI_WDA	(1 << 10)
+ 
++#define CALLBACK_WITH_FAILURE(cb, args...)		\
++    do {						\
++	struct ofono_error cb_e;		\
++	cb_e.type = OFONO_ERROR_TYPE_FAILURE;	\
++	cb_e.error = 0;				\
++			    \
++	cb(&cb_e, ##args);			\
++    } while (0)					\
++
++#define CALLBACK_WITH_SUCCESS(f, args...)		\
++    do {						\
++	struct ofono_error e;			\
++	e.type = OFONO_ERROR_TYPE_NO_ERROR;	\
++	e.error = 0;				\
++	f(&e, ##args);				\
++    } while (0)
++
++
++struct cb_data {
++	void *cb;
++	void *data;
++	void *user;
++};
++
++static inline struct cb_data *cb_data_new(void *cb, void *data)
++{
++	struct cb_data *ret;
++
++	ret = g_new0(struct cb_data, 1);
++	ret->cb = cb;
++	ret->data = data;
++	ret->user = NULL;
++
++	return ret;
++}
++
++
+ struct gobi_data {
+ 	struct qmi_device *device;
+ 	struct qmi_service *dms;
+-- 
+2.23.0
+
