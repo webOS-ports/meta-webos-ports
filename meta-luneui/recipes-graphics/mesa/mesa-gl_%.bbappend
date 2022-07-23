@@ -6,6 +6,7 @@ PROVIDES += "${@bb.utils.contains('PACKAGECONFIG', 'gbm', 'virtual/libgbm', '', 
 # We want to use libhybris for non qemu* MACHINEs
 NOT_PROVIDED = "virtual/mesa"
 NOT_PROVIDED:qemuall = ""
+NOT_PROVIDED:hammerhead = ""
 NOT_PROVIDED:pinephone = ""
 PROVIDES:remove = "${NOT_PROVIDED}"
 

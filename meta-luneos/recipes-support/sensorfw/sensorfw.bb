@@ -31,6 +31,10 @@ SRC_URI:append:tenderloin = " \
     file://sensord-tenderloin.conf \
 "
 
+SRC_URI:append:hammerhead = " \
+    file://sensord-hammerhead.conf \
+"
+
 S = "${WORKDIR}/git"
 
 #do_configure:prepend() {

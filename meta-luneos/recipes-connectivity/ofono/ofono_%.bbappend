@@ -18,6 +18,7 @@ SRC_URI = " \
   file://0002-common-atmodem-move-at_util_call_compare_by_status-t.patch \
   file://0003-common-atmodem-move-at_util_call_compare_by_id-to-dr.patch \
   file://0004-add-call-list-helper-to-manage-voice-call-lists.patch \
+  file://0004-support-smdpkt.patch \
   file://0005-qmimodem-implement-voice-calls.patch \
   file://0001-Fix-build-with-ell-0.39-by-restoring-unlikely-macro-.patch \
   file://ofono \
