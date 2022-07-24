@@ -31,6 +31,7 @@ PACKAGECONFIG:append = " harfbuzz"
 # Configure to compile with GL ES2 instead of default desktop GL
 PACKAGECONFIG_GRAPHICS = "gles2 eglfs"
 PACKAGECONFIG_GRAPHICS:append:qemuall = " kms gbm"
+PACKAGECONFIG_GRAPHICS:append:hammerhead = " kms gbm"
 PACKAGECONFIG_GRAPHICS:append:pinephone = " kms gbm"
 PACKAGECONFIG_GRAPHICS:append:pinephonepro = " kms gbm"
 PACKAGECONFIG_DISTRO += "sql-sqlite icu glib accessibility mtdev examples fontconfig xkbcommon"
