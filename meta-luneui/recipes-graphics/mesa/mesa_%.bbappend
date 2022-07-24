@@ -8,3 +8,6 @@ PACKAGECONFIG:append:class-target = " gbm"
 # Enable freedreno driver
 PACKAGECONFIG:append:hammerhead = " kmsro freedreno"
 GALLIUMDRIVERS:append:hammerhead = ",freedreno"
+
+PACKAGECONFIG:append:tenderloin = " kmsro freedreno"
+GALLIUMDRIVERS:append:tenderloin = ",freedreno"

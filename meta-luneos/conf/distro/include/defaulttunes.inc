@@ -31,7 +31,7 @@
 # if you want to use cortexa8 for all add cortexa8 settings to a500 (see tuna.conf).
 
 ARM_INSTRUCTION_SET = "thumb"
-DEFAULTTUNE:tenderloin = "cortexa8thf-neon"
+DEFAULTTUNE:tenderloin-halium = "cortexa8thf-neon"
 DEFAULTTUNE:hammerhead-halium = "cortexa8thf-neon"
 DEFAULTTUNE:mako = "cortexa8thf-neon"
 DEFAULTTUNE:athene = "cortexa8thf-neon"

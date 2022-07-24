@@ -8,6 +8,7 @@ NOT_PROVIDED = "virtual/mesa"
 NOT_PROVIDED:qemuall = ""
 NOT_PROVIDED:hammerhead = ""
 NOT_PROVIDED:pinephone = ""
+NOT_PROVIDED:tenderloin = ""
 PROVIDES:remove = "${NOT_PROVIDED}"
 
 do_install:append() {
