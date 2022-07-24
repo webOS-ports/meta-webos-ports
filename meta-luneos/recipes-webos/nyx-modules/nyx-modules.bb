@@ -61,7 +61,7 @@ do_configure:prepend() {
     fi
 }
 
-do_install:append:tenderloin() {
+do_install:append:tenderloin-halium() {
     install -d ${D}${systemd_system_unitdir}/nyx.target.d/
     install -m 0644 ${S}/files/systemd/nyx.target.d/wait-touchscreen.conf ${D}${systemd_system_unitdir}/nyx.target.d/
 }
