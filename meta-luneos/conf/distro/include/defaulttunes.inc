@@ -33,6 +33,8 @@
 ARM_INSTRUCTION_SET = "thumb"
 DEFAULTTUNE:tenderloin-halium = "cortexa8thf-neon"
 DEFAULTTUNE:hammerhead-halium = "cortexa8thf-neon"
+DEFAULTTUNE:tenderloin = "cortexa8thf-neon"
+DEFAULTTUNE:hammerhead = "cortexa8thf-neon"
 DEFAULTTUNE:mako = "cortexa8thf-neon"
 DEFAULTTUNE:athene = "cortexa8thf-neon"
 DEFAULTTUNE:onyx = "cortexa8thf-neon"
