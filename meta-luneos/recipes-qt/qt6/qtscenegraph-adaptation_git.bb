@@ -6,8 +6,8 @@ LIC_FILES_CHKSUM = " \
     file://LICENSE.LGPL;md5=4193e7f1d47a858f6b7c0f1ee66161de \
 "
 
-PV = "6.3.0+git${SRCPV}"
-SRCREV = "e146d14d80157b5a37fe9c012259b1c610fde5fe"
+PV = "0.8.0+git${SRCPV}"
+SRCREV = "7ecfeaa23e2038a761bd1dfa95726dc0eed536d1"
 
 DEPENDS = "qtbase libhybris qtwayland virtual/android-headers qtdeclarative"
 
@@ -18,11 +18,10 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 # Depends on libhybris which has this restriction
 COMPATIBLE_MACHINE = "^halium$"
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/qt6"
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "git://github.com/sailfishos/qtscenegraph-adaptation.git;protocol=https;branch=master"
 S = "${WORKDIR}/git"
 
-inherit qt6-qmake webos_ports_fork_repo
+inherit qmake5
 
 EXTRA_QMAKEVARS_PRE += "CONFIG+=surfaceformat CONFIG+=programbinary CONFIG+=hybristexture"
 
