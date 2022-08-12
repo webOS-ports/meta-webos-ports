@@ -21,7 +21,7 @@ COMPATIBLE_MACHINE = "^halium$"
 SRC_URI = "git://github.com/sailfishos/qtscenegraph-adaptation.git;protocol=https;branch=master"
 S = "${WORKDIR}/git"
 
-inherit qmake5
+inherit qt6-qmake
 
 EXTRA_QMAKEVARS_PRE += "CONFIG+=surfaceformat CONFIG+=programbinary CONFIG+=hybristexture"
 
