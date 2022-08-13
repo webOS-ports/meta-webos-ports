@@ -35,7 +35,7 @@ COMPATIBLE_MACHINE:qemux86-64 = "(.*)"
 
 INHIBIT_DEFAULT_DEPS = "1"
 
-inherit deploy nopackages
+inherit deploy nopackages image-artifact-names
 
 do_deploy[sstate-outputdirs] = "${DEPLOY_DIR_IMAGE}"
 do_deploy[depends] += "${IMAGE_BASENAME}-image:do_image_complete virtual/kernel:do_deploy pigz-native:do_populate_sysroot"
