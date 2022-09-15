@@ -9,10 +9,10 @@ LIC_FILES_CHKSUM = "file://src/plugin/plugin.cpp;beginline=1;endline=30;md5=022f
 DEPENDS = "qtbase qtdeclarative glib-2.0 dbus dbus-glib"
 
 PV = "2.1.28+git${SRCPV}"
-SRCREV = "3293bb85c4e6277012573f71d9ef3479a5842a07"
+SRCREV = "347031ab0304dda20d7c908130c721c229f3e33f"
 
 SRC_URI = " \
-    git://github.com/herrie82/nemo-qml-plugin-dbus;branch=herrie/qt6;protocol=https \
+    git://github.com/sailfishos/nemo-qml-plugin-dbus;branch=master;protocol=https \
 "
 S = "${WORKDIR}/git"
 
