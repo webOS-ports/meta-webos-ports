@@ -16,6 +16,7 @@ DEPENDS:append:halium = " libhybris virtual/android-headers libgbinder libglibut
 
 SRC_URI = " \
     git://github.com/webos-ports/sensorfw.git;protocol=https;branch=herrie/qt6 \
+    file://0001-Fix-build-with-Qt-6.4.patch \
 "
 
 # Note: maybe this should go in a bbappend in meta-pine64-luneos...
