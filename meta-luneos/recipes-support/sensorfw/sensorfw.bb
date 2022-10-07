@@ -9,9 +9,9 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 PV = "0.11.4+git${SRCPV}"
 #PV = "0.12.6+git${SRCPV}"
 #SRCREV = "2e539015996111576a731750342effde7aaee87f"
-SRCREV = "284aa98d4d574cf718e56aaba1eea758559ec0de"
+SRCREV = "0922f1c07aa87167f0477254fb0ed6108af9dc59"
 DEPENDS = "qtbase luna-sysmgr-common luna-service2 json-c glib-2.0 luna-sysmgr-ipc-messages"
-    
+
 DEPENDS:append:halium = " libhybris virtual/android-headers libgbinder libglibutil "
 
 SRC_URI = " \
