@@ -35,6 +35,9 @@ do_install:append:pinephone() {
     install -m 0644 ${WORKDIR}/ucm2/PinePhone.conf ${D}${datadir}/alsa/ucm2/PinePhone/PinePhone.conf
     install -m 0644 ${WORKDIR}/ucm2/HiFi ${D}${datadir}/alsa/ucm2/PinePhone/HiFi
     install -m 0644 ${WORKDIR}/ucm2/VoiceCall ${D}${datadir}/alsa/ucm2/PinePhone/VoiceCall
+
+    install -d ${D}${datadir}/alsa/ucm2/conf.d/simple-card
+    ln -s /usr/share/alsa/ucm2/PinePhone/PinePhone.conf ${D}${datadir}/alsa/ucm2/conf.d/simple-card/PinePhone.conf
 }
 
 do_install:append:pinephonepro() {
