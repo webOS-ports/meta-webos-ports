@@ -37,6 +37,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
            file://0003-qml-runner-don-t-set-default-value-for-WEBOS_WINDOW_.patch \
            file://0004-Revert-Update-com.webos.app.qmlrunner.perm.json.patch \
            file://0005-RoundedRectangle.qml-Use-GraphicalEffects-from-Qt5Co.patch \
+           file://0006-AppLoader-use-old-syntax-for-quit-connect.patch \
            "
 
 S = "${WORKDIR}/git"
