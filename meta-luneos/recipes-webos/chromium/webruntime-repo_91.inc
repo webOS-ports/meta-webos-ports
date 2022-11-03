@@ -56,4 +56,6 @@ SRC_URI += " \
     file://0036-WebOS-Shell-Surface-add-client_size_changed-wayland-.patch \
     file://0037-WebOSServiceBridgeInjection-fix-JSON-input-test.patch \
     file://0038-build-Convert-third_party-opus-BUILD.gn-to-py3.patch \
+    file://0039-grit-Remove-usage-of-U-mode-bit-for-opening-files-in.patch \
+    file://0040-metrics-ukm-fix-build-with-python3.patch \
 "
