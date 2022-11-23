@@ -1,4 +1,4 @@
-# Copyright (c) 2015-2018 LG Electronics, Inc.
+# Copyright (c) 2015-2022 LG Electronics, Inc.
 #
 # webos_app_generate_security_files
 #
@@ -63,6 +63,10 @@ def webos_app_generate_security_files_write_permission_file(d, app_info):
         if pub_bus:
             permission[key].append("public")
 
+    if d.getVar("DISTRO", True) == "webos" or d.getVar("DISTRO", True) == "webos-auto" or d.getVar("DISTRO", True) == "luneos":
+        if type == "qml":
+            permission[key].append("application.operation")
+
     dst_dir         = d.getVar("D", True)
     permissions_dir = d.getVar("webos_sysbus_permissionsdir", True)
     permission_file = permissions_dir + "/" + app_id + ".app.json"
@@ -82,20 +86,23 @@ def webos_app_generate_security_files_write_role_file(d, app_info):
 
     app_id = app_info["id"]
     type = app_info["type"]
+    trustLevelKey = "oem"
 
     role = {}
     if type == "native":
         exe_name = app_info["main"]
         app_dir = d.getVar("webos_applicationsdir", True)
-        role["exeName"] = app_dir + "/" + d.getVar("PN", True) + "/" + exe_name
+        role["exeName"] = app_dir + "/" + d.getVar("BPN", True) + "/" + exe_name
         role["type"]  = "regular"
         role["allowedNames"] = [app_id + "*"]
         role["permissions"] = [{"service": app_id, "outbound": ["*"] }]
+        role["trustLevel"] = trustLevelKey
     else:
         role["appId"] = app_id
         role["type"]  = "regular"
         role["allowedNames"] = [app_id + "-*"]
         role["permissions"] = [{"service": app_id + "-*", "outbound": ["*"] }]
+        role["trustLevel"] = trustLevelKey
 
     dst_dir   = d.getVar("D", True)
     roles_dir = d.getVar("webos_sysbus_rolesdir", True)

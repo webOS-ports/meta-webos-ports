@@ -11,7 +11,7 @@ DEPENDS = "libpbnjson luna-service2 sqlite3 curl uriparser pmloglib jemalloc lun
 RDEPENDS:${PN} = "applicationinstallerutility"
 
 PV = "4.0.0-11+git${SRCPV}"
-SRCREV = "1d5261104a9fbf01c6eb5f2572d3f33d274f3dd2"
+SRCREV = "acabe6825745daea4c21b242d122110c9c982326"
 
 inherit webos_cmake
 inherit webos_system_bus
@@ -19,6 +19,7 @@ inherit webos_ports_ose_repo
 inherit webos_systemd
 inherit pkgconfig
 
+WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 

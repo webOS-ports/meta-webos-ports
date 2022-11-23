@@ -6,12 +6,12 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 PV = "1.0.0-16+git${SRCPV}"
-SRCREV = "5d93468757bb75e9d8b29599cda0decc124cedb8"
+SRCREV = "09b2b7d3b8d9feb9dcd8f654eb4cbbb42b2410d4"
 
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
-inherit webos_ports_ose_repo
+inherit webos_public_repo
 
 # third party libraries
 DEPENDS = "glib-2.0 libmtp gupnp libedit gstreamer1.0 gstreamer1.0-plugins-base taglib libpng libjpeg-turbo gdk-pixbuf jpeg libexif giflib"
@@ -21,7 +21,9 @@ DEPENDS += "luna-service2 pmloglib libpbnjson"
 VIRTUAL-RUNTIME_pdm ?= "com.webos.service.pdm"
 RDEPENDS:${PN} = "${VIRTUAL-RUNTIME_pdm} db8"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+#WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+file://0001-Fix-app-permissions.patch"
 S = "${WORKDIR}/git"
 
 # uncomment next line to use mediaindexer in shell/interactive mode

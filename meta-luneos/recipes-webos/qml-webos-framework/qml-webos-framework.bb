@@ -35,14 +35,13 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
            file://0001-AppLoader-add-import-path-for-QML-apps.patch \
            file://0002-Setup-missing-env-variables.patch \
            file://0003-qml-runner-don-t-set-default-value-for-WEBOS_WINDOW_.patch \
-           file://0004-Revert-Update-com.webos.app.qmlrunner.perm.json.patch \
-           file://0005-RoundedRectangle.qml-Use-GraphicalEffects-from-Qt5Co.patch \
-           file://0006-AppLoader-use-old-syntax-for-quit-connect.patch \
+           file://0004-RoundedRectangle.qml-Use-GraphicalEffects-from-Qt5Co.patch \
+           file://0005-AppLoader-use-old-syntax-for-quit-connect.patch \
            "
 
 S = "${WORKDIR}/git"
 
-SRCREV = "8f4f4b3942755aa4f57de80586aac7aa47b59ddc"
+SRCREV = "ae56b82a23c15ba13708c74a97bd59aaaf99a708"
 
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 

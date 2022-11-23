@@ -9,7 +9,9 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "luna-service2 db8 glib-2.0 pmloglib"
 
 PV = "3.0.0-1+git${SRCPV}"
-SRCREV = "907c605ec347523218c9bb071e6a20090f8e2fce"
+SRCREV = "f4f00f23b74df6e373cd27db75d951c3b4b9bf65"
+
+WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg-new"
 
 inherit webos_ports_ose_repo
 inherit webos_cmake

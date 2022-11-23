@@ -1,4 +1,4 @@
-# Copyright (c) 2017-2021 LG Electronics, Inc.
+# Copyright (c) 2017-2022 LG Electronics, Inc.
 
 SUMMARY = "Enact moonstone standard override used for Enact apps"
 AUTHOR = "Jason Robitaille <jason.robitaille@lge.com>"
@@ -7,6 +7,7 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://enact/LICENSE;md5=e3fc50a88d0a364313df4b21ef20c29e"
 
 inherit webos_enact_repo
+#inherit webos_arch_indep
 inherit webos_enactjs_env
 
 S = "${WORKDIR}/git"
@@ -21,53 +22,36 @@ SRC_URI = " \
 # algorithm properly recognizes that a pre-release precedes the associated final
 # release (e.g., 1.0-pre.1 < 1.0).
 
-PV = "4.0.3++git${SRCPV}"
+PV = "4.0.4"
 
-SRCREV_main = "8d4590d46fc35d64635e9e017926dc88be8fe1e2"
-SRCREV_enact = "d2d5262c8d026fbfd8fa635e5364491dc83cba7c"
+SRCREV_main = "1ce8ae701d66551db1db279fef5927509d683470"
+SRCREV_enact = "ae1ef854432b0dedd75b0f104f6c2d3b1033753f"
 
 do_fetch[vardeps] += "SRCREV_enact"
 SRCREV_FORMAT = "main_enact"
 
 # Ordered dependency list for Moonstone; provides shrink-wrap style locking in of package versions
 WEBOS_ENACT_DEPENDENCIES ??= "\
-    asap@2.0.6 \
-    change-emitter@0.1.6 \
     classnames@2.3.1 \
-    core-js@1.2.7 \
     direction@1.0.4 \
     dom-walk@0.1.2 \
-    encoding@0.1.13 \
-    fbjs@0.8.18 \
     global@4.4.0 \
-    hoist-non-react-statics@2.5.5 \
-    iconv-lite@0.6.3 \
-    ilib@14.11.1 \
+    ilib@14.14.0 \
     invariant@2.2.4 \
     is-function@1.0.2 \
-    is-stream@1.1.0 \
-    isomorphic-fetch@2.2.1 \
     js-tokens@4.0.0 \
     loose-envify@1.4.0 \
     min-document@2.19.0 \
-    node-fetch@1.7.3 \
     object-assign@4.1.1 \
     parse-headers@2.0.4 \
     process@0.11.10 \
-    promise@7.3.1 \
-    prop-types@15.7.2 \
+    prop-types@15.8.0 \
     ramda@0.24.1 \
     react@17.0.2 \
     react-dom@17.0.2 \
     react-is@17.0.2 \
-    recompose@0.26.0 \
-    safer-buffer@2.1.2 \
     scheduler@0.20.2 \
-    setimmediate@1.0.5 \
-    symbol-observable@1.2.0 \
-    ua-parser-js@0.7.31 \
     warning@4.0.3 \
-    whatwg-fetch@3.6.2 \
     xhr@2.6.0 \
     xtend@4.0.2 \
 "
@@ -75,13 +59,10 @@ WEBOS_ENACT_DEPENDENCIES ??= "\
 # NOTE: We only need to bump PR if we change something OTHER than
 # PV, SRCREV or the dependencies statement above.
 
-PR = "r15"
+PR = "r19"
 
 # Skip unneeded tasks
 do_configure[noexec] = "1"
-
-# Workaround for network access issue during do_compile task
-do_compile[network] = "1"
 
 do_compile() {
     cd ${S}
@@ -137,3 +118,6 @@ sysroot_stage_all:append() {
 }
 
 FILES:${PN} += "${datadir}"
+
+# Workaround for network access issue during do_compile task
+do_compile[network] = "1"

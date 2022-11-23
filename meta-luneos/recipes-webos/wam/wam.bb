@@ -17,7 +17,7 @@ VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_cpushareholder}"
 
 PV = "1.0.2-55+git${SRCPV}"
-SRCREV = "4561b51db7938c60a38543daa97622c8dfbc8bb1"
+SRCREV = "f8c30d3d79f51d47219ad2c2c462ee1de9845f80"
 PR = "r30"
 
 WAM_BUILD_SYSTEM = "webos_qmake6"
@@ -37,7 +37,7 @@ WAM_DATA_DIR = "${webos_execstatedir}/${BPN}"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
-WEBOS_GIT_PARAM_BRANCH = "55-webOS-ports/master"
+WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 
 S = "${WORKDIR}/git"
 

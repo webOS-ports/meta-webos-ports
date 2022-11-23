@@ -10,12 +10,13 @@ inherit webos_system_bus
 inherit webos_app
 
 PV = "3.0.3+git${SRCPV}"
-SRCREV = "b07cb1577e357f16bfd45cfc79b0c1accf8fe451"
+SRCREV = "dac614904aa930aabc6a8793b20d18feaf911050"
 
 SERVICE_NAME = "org.webosports.service.tweaks.prefs"
 APP_NAME = "org.webosports.app.tweaks"
 WEBOS_REPO_NAME = "tweaks"
 
+WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 

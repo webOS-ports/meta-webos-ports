@@ -6,7 +6,7 @@ SECTION = "webos/base"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-DEPENDS = "libpbnjson pmloglib glib-2.0 gtest"
+DEPENDS = "libpbnjson pmloglib glib-2.0 gtest systemd"
 VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 VIRTUAL-RUNTIME_bash ?= "bash"
 
@@ -27,13 +27,14 @@ inherit webos_test_provider
 inherit pkgconfig
 inherit systemd
 
+WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE:${PN} = "ls-hubd.service"
 
-SRCREV = "613f65e975c3ac4be80da3fbcafa4c68859f17cf"
+SRCREV = "b1b6ad1ccfaa638a8f1cdc366fe5a6e7db16c5e9"
 
 # This fix-up will be removed shortly. luna-service2 headers must be included
 # using '#include <luna-service2/*.h>'

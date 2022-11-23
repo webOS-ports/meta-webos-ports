@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "luna-service2 json-c glib-2.0 pulseaudio"
 
 PV = "0.1.0-10+git${SRCPV}"
-SRCREV = "01038ee0e5669498d8ae8f3febf7e934acd15ab1"
+SRCREV = "fc2949288359fe7b3143f5c9f6c886cfb14b3627"
 
 SERVICE_NAME = "org.webosports.service.audio"
 
@@ -16,7 +16,8 @@ inherit pkgconfig
 inherit webos_system_bus
 inherit webos_systemd
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=webOS-ports/webOS-OSE-wam-lsm"
+WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
