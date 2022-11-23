@@ -10,12 +10,13 @@ LIC_FILES_CHKSUM = " \
 "
 
 inherit webos_enactjs_app
-inherit webos_ports_ose_repo
+inherit webos_public_repo
 
 PV = "0.1.0-10+git${SRCPV}"
-SRCREV = "7096417c6f83ca4b9016defff9eabc8ff2564c39"
+SRCREV = "373d57006e53af2b59c15888b846230e2420f30b"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+
 S = "${WORKDIR}/git"
 
 # Workaround for network access issue during do_compile task

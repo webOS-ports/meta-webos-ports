@@ -12,7 +12,7 @@ DEPENDS = "pmloglib zlib glib-2.0 libpbnjson pmloglib-private luna-service2"
 RDEPENDS:${PN} = "busybox"
 
 PV = "3.1.0-5+git${SRCPV}"
-SRCREV = "01699b4062e083b77ca99837a95259843fa56f45"
+SRCREV = "e8fa1ea6ffae9988be01389c691143ba64125b94"
 
 inherit webos_ports_ose_repo
 inherit webos_cmake
@@ -23,6 +23,8 @@ inherit pkgconfig
 PACKAGECONFIG ??= ""
 PACKAGECONFIG[whitelist] = "-DENABLE_WHITELIST:BOOL=TRUE, -DENABLE_WHITELIST:BOOL=FALSE"
 
+
+WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     ${@bb.utils.contains('PACKAGECONFIG', 'whitelist', 'file://whitelist.txt', '', d)} \
 "

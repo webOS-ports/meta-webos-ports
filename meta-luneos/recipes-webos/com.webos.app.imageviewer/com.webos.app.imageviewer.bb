@@ -10,12 +10,13 @@ LIC_FILES_CHKSUM = " \
 "
 
 PV = "0.0.1-13+git${SRCPV}"
-SRCREV = "8b5e5845d4a8012c159f193ee359315999244c59"
+SRCREV = "06f5f5b5065743652af35fb9e043ae466b8d40ea"
 
 inherit webos_enactjs_app
-inherit webos_ports_ose_repo
+inherit webos_public_repo
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+#WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 # Workaround for network access issue during do_compile task

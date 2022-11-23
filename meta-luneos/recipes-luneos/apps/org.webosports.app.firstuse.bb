@@ -4,7 +4,7 @@ LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-3.0-only;md5=c79ff39f19dfec6d293b95dea7b07891"
 
 PV = "0.3.0-7+git${SRCPV}"
-SRCREV = "3a4e53bda7c50aef53e2cc5ce53ccd05466df8bf"
+SRCREV = "26c50c2c89ceb72ee25e6fd11c5f2e975fbbd10e"
 
 DEPENDS += "qtbase qtdeclarative"
 
@@ -14,7 +14,7 @@ inherit webos_cmake_qt6
 inherit webos_filesystem_paths
 inherit webos_app
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/qt6"
+WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
