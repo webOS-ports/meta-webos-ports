@@ -14,9 +14,9 @@ inherit webos_app
 inherit pkgconfig
 
 PV = "0.4.0-1+git${SRCPV}"
-SRCREV = "292fabfc5b5290a50236ea4e00ff194ea5c069aa"
+SRCREV = "a3f5903d85b91252822f705412af3e4b5f48653d"
 
-WEBOS_GIT_PARAM_BRANCH = "qml-based"
+WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 WEBOS_REPO_NAME = "org.webosports.app.settings"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"

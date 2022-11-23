@@ -9,8 +9,10 @@ SECTION = "webos/services"
 DEPENDS = "luna-service2 libpbnjson glib-2.0 luna-prefs openssl glib-2.0-native"
 RDEPENDS:${PN} = "connman connman-client"
 
+WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
+
 PV = "1.0.0-11+git${SRCPV}"
-SRCREV = "8c20e3c80111dad5c26ba93c85edfb4af7450a71"
+SRCREV = "e4ac60667ff86a77434eb7a194969a4a6e25eb70"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 

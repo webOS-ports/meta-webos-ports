@@ -8,7 +8,8 @@ inherit allarch
 inherit webos_filesystem_paths
 inherit webos_app
 
-SRCREV = "a85998918b2aa662f4dce8b6bae6d7abf817b2de"
+WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
+SRCREV = "f337f7e22a4409b7f546474e92daae7ffb014179"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

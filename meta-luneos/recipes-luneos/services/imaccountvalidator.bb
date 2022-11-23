@@ -9,13 +9,15 @@ LIC_FILES_CHKSUM = " \
 DEPENDS = "glib-2.0 db8 pidgin luna-service2"
 
 PV = "3.0.5+git${SRCPV}"
-SRCREV = "ccc508dcc15b73075208b0eeaa2c6de2b6e31e56"
+SRCREV = "94300adcc51792a33297eb5a66849de07fbe353d"
 
 inherit webos_ports_repo
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
 inherit webos_filesystem_paths
+
+WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

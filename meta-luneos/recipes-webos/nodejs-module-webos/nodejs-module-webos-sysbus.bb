@@ -8,7 +8,12 @@ AUTHOR = "Anatolii Sakhnik <anatolii.sakhnik@lge.com>"
 DEPENDS += "glib-2.0 luna-service2"
 
 PV = "3.0.1-1+git${SRCPV}"
-SRCREV = "58197732ba2232bcbbe2e7e5ccd0f4cd677da935"
+SRCREV = "f6c4050a5046c37b1d299a256db10973fdd65cbf"
+
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
+    https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}.tar.xz;name=node \
+"
+WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 
 inherit webos_system_bus
 inherit pkgconfig

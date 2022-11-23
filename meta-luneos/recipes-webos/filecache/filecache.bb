@@ -17,7 +17,9 @@ inherit webos_machine_impl_dep
 inherit webos_systemd
 inherit pkgconfig
 
+WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg-new"
+
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-SRCREV = "d9adc5b10c25c10bd75fecc8c81417e1eb095e30"
+SRCREV = "b6f14611ee623a8a23c3f2f921f9a249cda299b7"

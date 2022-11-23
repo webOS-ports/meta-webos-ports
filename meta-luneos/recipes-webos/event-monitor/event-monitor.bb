@@ -9,7 +9,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "glib-2.0 luna-service2 pmloglib libpbnjson libwebosi18n"
 
 PV = "1.1.0-1+git${SRCPV}"
-SRCREV = "68d2094f796f9c417efd8b5f10bdee88c2591773"
+SRCREV = "9f143e14050415e6104c96742a8f8685c6ed104c"
 
 inherit webos_cmake
 inherit webos_system_bus
@@ -18,6 +18,7 @@ inherit webos_ports_ose_repo
 inherit webos_systemd
 inherit pkgconfig
 
+WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 

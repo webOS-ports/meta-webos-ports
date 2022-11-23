@@ -12,7 +12,9 @@ inherit webos_filesystem_paths
 inherit webos_system_bus
 
 PV = "0.1.0+git${SRCPV}"
-SRCREV = "a63b8f9321fb67f6c50f2608223202be2e975018"
+SRCREV = "263210bf603bde8ad0a772160ce530d935708baf"
+
+WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 
 WEBOS_REPO_NAME = "keymanager"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"

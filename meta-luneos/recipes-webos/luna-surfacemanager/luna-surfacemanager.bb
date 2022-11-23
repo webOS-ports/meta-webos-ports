@@ -16,7 +16,7 @@ DEPENDS = "qtdeclarative wayland-native qtwayland qtwayland-native qt-features-w
 
 PV ="2.0.0-372+git${SRCPV}"
 
-SRCREV = "dfbf316e3d008aa7ed6965032a02c4552f8bcc61"
+SRCREV = "be3275bfee4a581c4b9cc90f4da596e247e71fae"
 
 inherit webos_qmake6
 inherit pkgconfig
@@ -24,7 +24,7 @@ inherit pkgconfig
 inherit webos_lttng
 inherit webos_ports_ose_repo
 
-WEBOS_GIT_PARAM_BRANCH = "tofe/rebased-20220527"
+WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     file://0002-Add-capability-to-pass-extra-options-to-surface-mana.patch \
     file://0003-WebOSShellSurface-add-setClientSize.patch \

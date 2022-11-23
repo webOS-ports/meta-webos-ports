@@ -19,7 +19,7 @@ inherit webos_configure_manifest
 inherit systemd
 inherit pkgconfig
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/qt6"
+WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
@@ -27,7 +27,7 @@ SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE:${PN} = "luna-sys-service.service"
 
 PV = "4.4.0-1+git${SRCPV}"
-SRCREV = "591feb49aee20c546f422aa59515117f7ae7bec8"
+SRCREV = "f6b2c2023df34f60682f996e4bd10c3fb584e990"
 
 do_install:append() {
     install -d ${D}${datadir}/localization/${BPN}

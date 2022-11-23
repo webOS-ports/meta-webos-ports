@@ -19,7 +19,7 @@ DEPENDS:append = " ${@ 'qtshadertools-native' if d.getVar('QT_VERSION', True) ==
 
 RDEPENDS:${PN} += "qml-webos-framework qml-webos-bridge qml-app-components"
 
-inherit webos_ports_ose_repo
+inherit webos_public_repo
 inherit webos_localizable
 inherit webos_qmake6
 inherit systemd
@@ -28,9 +28,10 @@ inherit webos_app
 
 
 PV = "1.0.0-15+git${SRCPV}"
-SRCREV = "afc866ec8d521c1f06aa58f2af01b35eaf9a9b09"
+SRCREV = "30b7565c59324dd0ce153e57ee7b4ab11b1aea38"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+#WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 QMAKE_PROFILES = "${S}/com.webos.app.mediagallery.pro"

@@ -32,30 +32,14 @@ EXTRA_OECMAKE:append:class-native = " -DWEBOS_CONFIG_BUILD_TESTS:BOOL=FALSE -DUS
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-SYSTEMD_PACKAGES = "${PN}"
-SYSTEMD_SERVICE:${PN} = " \
-    ${PN}.service \
-    ${PN}-maindb.service \
-    ${PN}-mediadb.service \
-    ${PN}-pre-config.service \
-    ${PN}-tempdb.service \
-"
-
-do_install:append() {
-    install -d ${D}${systemd_unitdir}/system
-
-    install -m 0644 ${S}/files/systemd/${PN}.service ${D}${systemd_unitdir}/system/
-    install -m 0644 ${S}/files/systemd/${PN}-maindb.service ${D}${systemd_unitdir}/system/
-    install -m 0644 ${S}/files/systemd/${PN}-mediadb.service ${D}${systemd_unitdir}/system/
-    install -m 0644 ${S}/files/systemd/${PN}-pre-config.service ${D}${systemd_unitdir}/system/
-    install -m 0644 ${S}/files/systemd/${PN}-tempdb.service ${D}${systemd_unitdir}/system/
-}
+WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 
 PV = "3.2.0-5+git${SRCPV}"
-SRCREV = "7f35f3dfadac138db2f469fb50185c9a790f8913"
+SRCREV = "77c93dcfa0ca408f7a85eabd44a017ca02a8930a"
 
 PACKAGES =+ "${PN}-tests"
 
 FILES:${PN}-tests = "${libdir}/${PN}/tests"
+FILES:${PN} += "${webos_sysbus_datadir}"
 
 BBCLASSEXTEND = "native"
