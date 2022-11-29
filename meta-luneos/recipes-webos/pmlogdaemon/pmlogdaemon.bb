@@ -11,10 +11,10 @@ DEPENDS = "pmloglib zlib glib-2.0 libpbnjson pmloglib-private luna-service2"
 # provided by busybox.
 RDEPENDS:${PN} = "busybox"
 
-PV = "3.1.0-5+git${SRCPV}"
-SRCREV = "e8fa1ea6ffae9988be01389c691143ba64125b94"
+PV = "3.1.0-13+git${SRCPV}"
+SRCREV = "0092c55c97e428fa187b6fa8a760da85f3d40410"
 
-inherit webos_ports_ose_repo
+inherit webos_public_repo
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_pmlog_config
@@ -24,8 +24,8 @@ PACKAGECONFIG ??= ""
 PACKAGECONFIG[whitelist] = "-DENABLE_WHITELIST:BOOL=TRUE, -DENABLE_WHITELIST:BOOL=FALSE"
 
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+    file://0001-Make-PmLogDaemon-compatible-with-systemd.patch \
     ${@bb.utils.contains('PACKAGECONFIG', 'whitelist', 'file://whitelist.txt', '', d)} \
 "
 S = "${WORKDIR}/git"

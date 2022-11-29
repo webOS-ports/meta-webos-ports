@@ -8,18 +8,21 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "glib-2.0 luna-service2 pmloglib libpbnjson libwebosi18n"
 
-PV = "1.1.0-1+git${SRCPV}"
-SRCREV = "9f143e14050415e6104c96742a8f8685c6ed104c"
+PV = "1.1.0-13+git${SRCPV}"
+SRCREV = "89cffbb2fb8b1984ca09a9d25dc13e0557a6e0e4"
 
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_event_monitor_plugin
-inherit webos_ports_ose_repo
+inherit webos_public_repo
 inherit webos_systemd
 inherit pkgconfig
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+file://0001-event-monitor-Add-systemd-service-file.patch \
+file://0002-Add-trustLevel.patch \
+"
+
 S = "${WORKDIR}/git"
 
 #Enable/disable mock plugin

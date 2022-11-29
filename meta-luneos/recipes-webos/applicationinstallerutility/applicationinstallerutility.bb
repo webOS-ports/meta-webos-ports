@@ -9,12 +9,14 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "pmloglib openssl glib-2.0"
 
 PV = "3.0.0-4+git${SRCPV}"
-SRCREV = "151b3c18eb48e8c34478a813dac2bfcc35bd4aa4"
+SRCREV = "35ef239390b8f20272d99cff73a50af4dae59043"
 
 inherit webos_cmake
-inherit webos_ports_ose_repo
+inherit webos_public_repo
 inherit pkgconfig
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+file://0001-Provide-default-opkg-conf-path.patch \
+"
 S = "${WORKDIR}/git"
 
