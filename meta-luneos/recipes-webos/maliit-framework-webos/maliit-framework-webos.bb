@@ -15,16 +15,16 @@ RDEPENDS:${PN} = "qtbase-plugins configd imemanager"
 
 PACKAGECONFIG[libim] = "CONFIG+=enable-libim,CONFIG-=enable-libim,libim"
 
-PV = "0.99.0+20-99+git${SRCPV}"
-SRCREV = "19d78446912905b28a7ee8ae7dda112925220ac2"
+PV = "0.99.0+20-100+git${SRCPV}"
+SRCREV = "ac36e9ea8cfe76f5e1154c9ae628f4f54b9879de"
 
 inherit pkgconfig
 inherit webos_qmake6
 inherit webos_machine_impl_dep
 inherit webos_filesystem_paths
-inherit webos_ports_ose_repo
+inherit webos_public_repo
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"

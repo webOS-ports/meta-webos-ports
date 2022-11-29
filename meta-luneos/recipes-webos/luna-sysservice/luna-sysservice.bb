@@ -12,22 +12,27 @@ DEPENDS = "luna-service2 libpbnjson qtbase uriparser libxml2 sqlite3 pmloglib ny
 
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_ntp} tzcode"
 
-inherit webos_ports_ose_repo
+inherit webos_public_repo
 inherit webos_cmake_qt6
 inherit webos_system_bus
 inherit webos_configure_manifest
 inherit systemd
 inherit pkgconfig
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+file://0001-luna-sysservice-Add-service-file-for-systemd.patch \
+file://0002-Add-ImageService.patch \
+file://0003-luna-sysservice-Fix-spacing-issues.patch \
+file://0004-luna-sysservice-Add-required-bits-for-LuneOS.patch \
+"
+
 S = "${WORKDIR}/git"
 
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE:${PN} = "luna-sys-service.service"
 
-PV = "4.4.0-1+git${SRCPV}"
-SRCREV = "f6b2c2023df34f60682f996e4bd10c3fb584e990"
+PV = "4.4.0-23+git${SRCPV}"
+SRCREV = "c346f6ed15a860780776b74d08080cfa57c9c578"
 
 do_install:append() {
     install -d ${D}${datadir}/localization/${BPN}

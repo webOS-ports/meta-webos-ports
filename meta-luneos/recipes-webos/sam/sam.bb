@@ -18,13 +18,24 @@ inherit pkgconfig
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_systemd
-inherit webos_ports_ose_repo
+inherit webos_public_repo
 
-PV = "2.0.0-61+git${SRCPV}"
-SRCREV = "309f56c922a1a53d02d547f33e78c5e43a77ea08"
+PV = "2.0.0-64+git${SRCPV}"
+SRCREV = "445570c44101e97da56c169e8a9d0166f50de520"
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg-new"
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+file://0001-sam-Add-systemd-service-file.patch \
+file://0002-Add-sam.sh-script-from-webos-initscripts-and-install.patch \
+file://0003-com.webos.sam.role.json.in-Fix-various-outbound-perm.patch \
+file://0004-Allow-getAppBasePath-also-from-trusted-apps.patch \
+file://0005-RunningApp-disable-killer-timeout-for-app-relaunch.patch \
+file://0006-Setup-QML-style-for-LuneOS.patch \
+file://0007-Handle-noWindow-apps.patch \
+file://0008-AppDescription.h-Add-org.webosports-as-privileged-as.patch \
+file://0009-LuneOS-style-module-name-is-now-QtQuick.Controls.Lun.patch \
+file://0010-Setup-QT_IM_MODULE-for-client-apps.patch \
+"
+
 S = "${WORKDIR}/git"
 
 PACKAGES =+ "${PN}-tests"
