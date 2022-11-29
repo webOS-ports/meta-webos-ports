@@ -17,12 +17,13 @@ inherit webos_system_bus
 inherit webos_systemd
 inherit webos_public_repo
 
-PV = "1.2.0-15+git${SRCPV}"
+PV = "1.2.0-16+git${SRCPV}"
 SRCREV = "8174a13520e4564252d7568b5c2761fc9e1d99cb"
 
-#WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-file://0001-Add-systemd-service-file.patch"
+file://0001-Add-systemd-service-file.patch \
+"
+
 S = "${WORKDIR}/git"
 
 PACKAGES =+ "${PN}-tests"

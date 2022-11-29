@@ -11,16 +11,23 @@ DEPENDS = "libpbnjson luna-service2 sqlite3 curl uriparser pmloglib jemalloc lun
 RDEPENDS:${PN} = "applicationinstallerutility"
 
 PV = "4.0.0-11+git${SRCPV}"
-SRCREV = "acabe6825745daea4c21b242d122110c9c982326"
+SRCREV = "53db994c5e00f653a3d663c50a95b566237f087b"
 
 inherit webos_cmake
 inherit webos_system_bus
-inherit webos_ports_ose_repo
+inherit webos_public_repo
 inherit webos_systemd
 inherit pkgconfig
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+file://0001-luna-webappmanager-Install-to-usr-sbin-instead-of-us.patch \
+file://0002-luna-downloadmanager-Fix-format-warnings-remove-unus.patch \
+file://0003-Add-systemd-service-file-at-expected-location-unify-.patch \
+file://0004-luna-downloadmgr-Fix-LS2-permissions.patch \
+file://0005-filesystemStatusCheck-first-implementation.patch \
+file://0006-DownloadManager.cpp-Make-org.webosports-privileged-a.patch \
+"
 S = "${WORKDIR}/git"
 
 FILES:${PN} += " \

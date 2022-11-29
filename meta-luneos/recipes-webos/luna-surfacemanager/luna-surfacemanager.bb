@@ -11,26 +11,30 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "qtdeclarative wayland-native qtwayland qtwayland-native qt-features-webos pmloglib webos-wayland-extensions glib-2.0 qtwayland-webos"
 
-#WEBOS_VERSION = "2.0.0-372_0cfef81ecf58cb6bd50f9a766a7e976bd2ea21ad"
+#WEBOS_VERSION = "2.0.0-379_0cfef81ecf58cb6bd50f9a766a7e976bd2ea21ad"
 #PR = "r54"
 
 PV ="2.0.0-372+git${SRCPV}"
 
-SRCREV = "be3275bfee4a581c4b9cc90f4da596e247e71fae"
+SRCREV = "bb6dd8faa4a47f76ad125a80813a2dff4dd6a2c3"
 
 inherit webos_qmake6
 inherit pkgconfig
-#inherit webos_enhanced_submissions
 inherit webos_lttng
-inherit webos_ports_ose_repo
+inherit webos_public_repo
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
-    file://0002-Add-capability-to-pass-extra-options-to-surface-mana.patch \
-    file://0003-WebOSShellSurface-add-setClientSize.patch \
-    file://0004-webosscreenshot-respect-QT_OPENGL_ES.patch \
-    file://0005-DefaultSettings.qml-Use-Prelude-for-LuneOS.patch \
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+    file://0001-Add-capability-to-pass-extra-options-to-surface-mana.patch \
+    file://0002-WebOSShellSurface-add-setClientSize.patch \
+    file://0003-webosscreenshot-respect-QT_OPENGL_ES.patch \
+    file://0004-DefaultSettings.qml-Use-Prelude-for-LuneOS.patch \
+    file://0005-Update-com.webos.surfacemanager.role.json.in.patch \
+    file://0006-product.env.in-Make-it-work-with-non-drm-devices.patch \
+    file://0007-Add-additional-permissions-for-org.webosports.notifi.patch \
+    file://0008-base.pro-Remove-building-of-tests.patch \
+    file://0009-com.webos.surfacemanager.perm.json-Add-permissions-f.patch \
 "
+
 S = "${WORKDIR}/git"
 
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"

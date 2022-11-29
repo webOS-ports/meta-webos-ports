@@ -8,14 +8,16 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "librolegen glib-2.0 libpbnjson luna-service2"
 
-PV = "2.0.0-2+git${SRCPV}"
-SRCREV = "c58cbd2cdcdf3484442f65b7c9e072d85424d31d"
+PV = "2.0.0-3+git${SRCPV}"
+SRCREV = "f7ac01e06bba81de4f21f004533dbee507a85f1c"
 
-inherit webos_ports_ose_repo
+inherit webos_public_repo
 inherit webos_cmake
 inherit pkgconfig
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+file://0001-Make-sure-generated-service-files-get-a-.service-suf.patch \
+"
 S = "${WORKDIR}/git"
 
 ALLOW_EMPTY:${PN} = "1"

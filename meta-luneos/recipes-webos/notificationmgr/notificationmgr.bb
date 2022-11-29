@@ -14,13 +14,15 @@ inherit pkgconfig
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_systemd
-inherit webos_ports_ose_repo
+inherit webos_public_repo
 
-PV = "1.0.0-19+git${SRCPV}"
-SRCREV = "59d14cbfd9d3b04aa09db14e204f3d897767faa4"
+PV = "1.0.0-21+git${SRCPV}"
+SRCREV = "97e68e38b489ab103e68b63672b5444ee7a05d49"
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+file://0001-notificationmgr-Add-systemd-service-file.patch \
+file://0002-Settings.cpp-Make-org.webosports-privileged-as-well.patch \
+"
 S = "${WORKDIR}/git"
 
 FILES:${PN} += " \ 

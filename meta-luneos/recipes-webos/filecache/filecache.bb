@@ -8,18 +8,20 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "jemalloc luna-service2 db8 glibmm boost libsandbox glib-2.0 libsigc++-2.0"
 
-PV = "2.0.1-1+git${SRCPV}"
+PV = "2.0.1-8+git${SRCPV}"
 
-inherit webos_ports_ose_repo
+inherit webos_public_repo
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_machine_impl_dep
 inherit webos_systemd
 inherit pkgconfig
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg-new"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+file://0001-filecache-Add-various-permissions-for-legacy-webOS-a.patch \
+file://0002-filecache-Add-service-file-for-systemd.patch \
+"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-SRCREV = "b6f14611ee623a8a23c3f2f921f9a249cda299b7"
+SRCREV = "579fa0425f449ed5c362ac2f4220a5e023c80b8d"

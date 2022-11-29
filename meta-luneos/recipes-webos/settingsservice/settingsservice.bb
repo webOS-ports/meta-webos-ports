@@ -9,23 +9,25 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "glib-2.0 glibmm luna-service2 libpbnjson pmloglib openssl libbson boost"
 RDEPENDS:${PN} = "settingsservice-conf python3"
 
-PV = "1.0.22-1+git${SRCPV}"
+PV = "1.0.22-17+git${SRCPV}"
 inherit webos_cmake
 inherit webos_system_bus
-inherit webos_ports_ose_repo
+inherit webos_public_repo
 inherit systemd
 inherit pkgconfig
 
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE:${PN} = "settings-service-recovery.service settings-service.service"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+file://0001-settingsservice-Add-service-files-for-systemd-script.patch \
+file://0002-service-update-SettingsService-path.patch \
+"
+
 
 S = "${WORKDIR}/git"
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
-
-SRCREV = "fbe276f3a657472cc8e2f4ff666857341f342dad"
+SRCREV = "29ff049918d5b9e48afea58d421f0bc56fbd9852"
 
 WEBOS_SYSTEM_BUS_MANIFEST_TYPE = "SERVICE"
 
