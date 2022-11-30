@@ -1,4 +1,4 @@
-# Copyright (c) 2021 LG Electronics, Inc.
+# Copyright (c) 2021-2022 LG Electronics, Inc.
 # This file configures common SRC_URI for both of mksnapshot and webruntime
 # Also it contains variables for gn command such as GN_ARGS
 
@@ -7,6 +7,7 @@ LIC_FILES_CHKSUM = "\
     file://src/LICENSE;md5=0fca02217a5d49a14dfe2d11837bb34d \
     file://src/third_party/blink/renderer/core/LICENSE-LGPL-2;md5=36357ffde2b64ae177b2494445b79d21 \
     file://src/third_party/blink/renderer/core/LICENSE-LGPL-2.1;md5=a778a33ef338abbaf8b8a7c36b6eec80 \
+    file://oss-pkg-info.yaml;md5=dac1866e82f07906c382718584e415e5 \
 "
 
 require gn-utils.inc
@@ -17,8 +18,8 @@ inherit webos_public_repo
 
 REPO_VERSION := "${@['','_${WEBRUNTIME_REPO_VERSION}'][d.getVar('WEBRUNTIME_REPO_VERSION').strip() != '']}"
 
-WEBOS_REPO_NAME ?= "chromium84"
-WEBOS_GIT_PARAM_BRANCH_V8 ?= "@chromium84"
+WEBOS_REPO_NAME ?= "chromium${WEBRUNTIME_REPO_VERSION}"
+WEBOS_GIT_PARAM_BRANCH_V8 ?= "@chromium${WEBRUNTIME_REPO_VERSION}"
 WEBOS_GIT_BRANCH_V8 ?= ";branch=${WEBOS_GIT_PARAM_BRANCH_V8}"
 WEBOS_REPO_NAME_V8 ?= "chromium-v8"
 WEBOSOSE_GIT_REPO_COMPLETE_V8 ?= "${WEBOSOSE_GIT_REPO}/${WEBOS_REPO_NAME_V8}${WEBOS_GIT_BRANCH_V8}${WEBOSOSE_GIT_PROTOCOL}"
@@ -80,7 +81,8 @@ GN_ARGS += "${EXTRA_OEGN_GOLD}"
 # The last digits in the submission format are used for typical submissions number.
 # The submission formats; submissions/[number] or submissions/[branch name].[number]
 WEBOS_SUBMISSION_NUMBER="${@ '${WEBOS_SUBMISSION}'.split('.')[-1] }"
-GN_ARGS:append = " webos_submission_number=10"
+#GN_ARGS:append = " webos_submission_number=${WEBOS_SUBMISSION_NUMBER}"
+GN_ARGS:append = " webos_submission_number=13"
 
 TARGET_CPU = "${@gn_arch_name(TARGET_ARCH)}"
 GN_ARGS:append = " target_cpu=\"${TARGET_CPU}\""
@@ -125,6 +127,12 @@ do_configure() {
     gn --script-executable=${PYTHON} ${EXTRA_OEGN} gen ${OUT_DIR} --args="${GN_ARGS}"
 }
 
+# Unfortunately not using ninja-native
+NINJA_OPTS = "${PARALLEL_MAKE} -C ${OUT_DIR}"
+# Use -v to see the commands executed by ninja
+NINJA_VERBOSE ?= ""
+NINJA = "${S}/depot_tools/ninja ${NINJA_VERBOSE} ${NINJA_OPTS}"
+
 do_compile[progress] = "outof:^\[(\d+)/(\d+)\]\s+"
 do_compile() {
     if [ ! -f ${OUT_DIR}/build.ninja ]; then
@@ -132,5 +140,5 @@ do_compile() {
     fi
 
     export PATH="${S}/depot_tools:$PATH"
-    ${S}/depot_tools/ninja ${PARALLEL_MAKE} -C ${OUT_DIR} ${TARGET}
+    ${NINJA} ${TARGET}
 }
