@@ -4,4 +4,4 @@
 # NOTE: Keep the lists in alphabetical order
 #
 
-PREFERRED_VERSION_webruntime ?= "91"
+PREFERRED_VERSION_webruntime ?= "94"
