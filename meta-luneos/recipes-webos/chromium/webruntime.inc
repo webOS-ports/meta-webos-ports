@@ -1,7 +1,7 @@
-# Copyright (c) 2018-2021 LG Electronics, Inc.
+# Copyright (c) 2018-2022 LG Electronics, Inc.
 
 SUMMARY = "Chromium webruntime for webOS"
-AUTHOR = "Lokesh Kumar Goel <lokeshkumar.goel@lge.com>"
+AUTHOR = "Donghyun Kim <donghyun11.kim@lge.com>"
 SECTION = "webos/apps"
 
 require webruntime-common.inc
@@ -13,11 +13,14 @@ inherit python3native
 inherit webruntime_apps
 inherit webos_filesystem_paths
 inherit webos_lttng
+#inherit webos_machine_dep
+#inherit webos_machine_impl_dep
+#inherit webos_prerelease_dep
 inherit webos_system_bus
 
 DEPENDS = "virtual/gettext wayland wayland-native luna-service2 pixman freetype fontconfig openssl pango cairo icu webos-wayland-extensions libxkbcommon libexif dbus pciutils udev libcap alsa-lib virtual/egl elfutils-native libdrm atk gperf-native gconf libwebosi18n bison-native xorgproto nss nspr curl nspr-native nss-native pmloglib glib-2.0-native python3-six-native python3-beautifulsoup4-native python3-soupsieve-native python3-lxml-native python3-html5lib-native python3-webencodings-native"
 
-INC_PR = "r52"
+INC_PR = "r59"
 # Enable this in webos-local.conf or in recipe to build
 DEPLOY_CHROMEDRIVER ?= "false"
 DEPLOY_WAM_DEMO ?= "false"
@@ -39,9 +42,14 @@ WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files/sysbus"
 WEBOS_SYSTEM_BUS_MANIFEST_TYPE = "PASS"
 
 PACKAGECONFIG_NEVA_WEBRTC ?= "neva-webrtc"
+PACKAGECONFIG_WEBOS_CODEC ?= "webos-codec pulseaudio webos-camera"
+#We don't supply gstreamer and umediaserver yet in LuneOS
 PACKAGECONFIG_MEDIA ?= "neva-media gstreamer umediaserver gav"
 PACKAGECONFIG ?= ""
-#PACKAGECONFIG:append:hardware = " ${PACKAGECONFIG_MEDIA} ${PACKAGECONFIG_NEVA_WEBRTC}"
+#We don't supply gstreamer and umediaserver yet in LuneOS, so disable the PACKAGECONFIG_MEDIA for now on all our targets
+#PACKAGECONFIG:append:hardware = " ${PACKAGECONFIG_MEDIA} ${PACKAGECONFIG_NEVA_WEBRTC} ${PACKAGECONFIG_WEBOS_CODEC}"
+#PACKAGECONFIG:append:qemux86 = " ${PACKAGECONFIG_MEDIA}"
+#PACKAGECONFIG:append:qemux86-64 = " ${PACKAGECONFIG_MEDIA}"
 PACKAGECONFIG[gstreamer] = "use_gst_media=true enable_webm_video_codecs=false,use_gst_media=false,g-media-pipeline"
 PACKAGECONFIG[umediaserver] = ",,umediaserver"
 # Options to enable debug build. Add this PACKAGECONFIG to webos-local.conf to enable debug build
@@ -51,10 +59,13 @@ PACKAGECONFIG[debug-blink] = "blink_symbol_level=2,blink_symbol_level=1"
 PACKAGECONFIG[neva-media] = "use_neva_media=true, use_neva_media=false"
 PACKAGECONFIG[av1-codec] = "enable_av1_decoder=true, enable_av1_decoder=false"
 PACKAGECONFIG[gav] = "use_gav=true,use_gav=false"
-PACKAGECONFIG[neva-webrtc] = "use_neva_webrtc=true,use_neva_webrtc=false,media-codec-interface,media-codec-interface"
+PACKAGECONFIG[neva-webrtc] = "use_neva_webrtc=true,use_neva_webrtc=false,media-codec-interface"
+PACKAGECONFIG[webos-codec] = "use_webos_codec=true,use_webos_codec=false,media-codec-interface"
+PACKAGECONFIG[pulseaudio] = "use_pulseaudio=true, use_pulseaudio=false, pulseaudio"
 
 PACKAGECONFIG:append = " ${@bb.utils.contains('WEBOS_LTTNG_ENABLED', '1', 'lttng', '', d)}"
 PACKAGECONFIG[lttng] = "use_lttng=true,use_lttng=false,lttng-ust,lttng-tools lttng-modules babeltrace"
+PACKAGECONFIG[webos-camera] = "use_webos_camera=true,use_webos_camera=false, cambufferlib"
 
 GN_ARGS:append = " \
     enable_memorymanager_webapi=true\
@@ -80,7 +91,6 @@ GN_ARGS += "\
     enable_print_preview=false\
     enable_remoting=false\
     use_gnome_keyring=false\
-    use_pulseaudio=false\
 "
 
 # TODO: drop this after we migrate to ubuntu 16.04 or above
@@ -98,22 +108,21 @@ GN_ARGS += "\
 CBE_DATA_PATH = "${libdir}/cbe"
 CBE_DATA_LOCALES_PATH = "${CBE_DATA_PATH}/neva_locales"
 
-
 do_compile:append() {
-    ${S}/depot_tools/ninja ${PARALLEL_MAKE} -C ${OUT_DIR} webos/install/weboswebruntime
+    ${NINJA} webos/install/weboswebruntime
 
     if ${DEPLOY_BROWSER} ; then
-        ${S}/depot_tools/ninja ${PARALLEL_MAKE} -C ${OUT_DIR} webos/install/default_browser
+        ${NINJA} webos/install/default_browser
     fi
 
-    ${S}/depot_tools/ninja ${PARALLEL_MAKE} -C ${OUT_DIR} webos/install/app_shell
+    ${NINJA} webos/install/app_shell
 
     if ${DEPLOY_CHROMEDRIVER} ; then
-        ${S}/depot_tools/ninja ${PARALLEL_MAKE} -C ${OUT_DIR} webos/install/chromedriver
+        ${NINJA} webos/install/chromedriver
     fi
 
     if ${DEPLOY_WAM_DEMO} ; then
-        ${S}/depot_tools/ninja ${PARALLEL_MAKE} -C ${OUT_DIR} webos/install/wam_demo
+        ${NINJA} webos/install/wam_demo
     fi
 }
 
@@ -163,12 +172,12 @@ modify_run_app_shell() {
 }
 
 modify_run_app_shell:append:qemux86() {
-    # Disable media hardware acceleration
-    sed -i '/--disable-web-security\\/a\ --disable-web-media-player-neva\\' ${D}${APP_SHELL_RUNTIME_RUN_SCRIPT}
+    # Disable MCIL hardware acceleration
+    sed -i '/--disable-web-security\\/a\ --disable-accelerated-video-decode\\' ${D}${APP_SHELL_RUNTIME_RUN_SCRIPT}
 }
 modify_run_app_shell:append:qemux86-64() {
-    # Disable media hardware acceleration
-    sed -i '/--disable-web-security\\/a\ --disable-web-media-player-neva\\' ${D}${APP_SHELL_RUNTIME_RUN_SCRIPT}
+    # Disable MCIL hardware acceleration
+    sed -i '/--disable-web-security\\/a\ --disable-accelerated-video-decode\\' ${D}${APP_SHELL_RUNTIME_RUN_SCRIPT}
 }
 
 WINDOW_SIZE ?= "1920,1080"
@@ -232,9 +241,14 @@ do_install() {
     install_chromium_manifest
 }
 
+do_install:append:webos() {
+    install_ls2_roles_acg ${APP_SHELL_RUNTIME}
+}
+
 do_install:append() {
     install_ls2_roles_acg ${APP_SHELL_RUNTIME}
 }
+
 
 WEBOS_SYSTEM_BUS_DIRS_LEGACY_BROWSER_APPLICATION = " \
     ${webos_sysbus_prvservicesdir}/${BROWSER_APPLICATION}.service \
