@@ -168,6 +168,8 @@ SANITY_TESTED_DISTROS ?= " \
     ubuntu-20.10 \n \
     ubuntu-21.04 \n \
     ubuntu-21.10 \n \
+    ubuntu-22.04 \n \
+    ubuntu-22.10 \n \
 "
 
 require conf/distro/include/yocto-uninative.inc
