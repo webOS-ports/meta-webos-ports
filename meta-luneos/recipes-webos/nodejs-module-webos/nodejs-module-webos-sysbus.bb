@@ -8,7 +8,7 @@ AUTHOR = "Anatolii Sakhnik <anatolii.sakhnik@lge.com>"
 DEPENDS += "glib-2.0 luna-service2"
 
 PV = "3.0.1-1+git${SRCPV}"
-SRCREV = "f6c4050a5046c37b1d299a256db10973fdd65cbf"
+SRCREV = "f411570c63791b3444bcee5a70f40dca0540ee54"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}.tar.xz;name=node \
