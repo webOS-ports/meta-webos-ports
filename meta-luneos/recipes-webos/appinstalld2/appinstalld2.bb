@@ -24,6 +24,7 @@ file://0002-Correctly-handle-ipk-URIs.patch \
 file://0003-AppInstaller-rescan-apps-after-install.patch \
 file://0004-AppPackage-allow-different-owner-UIDs-GIDs.patch \
 file://0005-appinstalld2-Make-org.webosports-privileged-as-well.patch \
+file://0006-Add-permission-for-rescan.patch \
 "
 
 S = "${WORKDIR}/git"
