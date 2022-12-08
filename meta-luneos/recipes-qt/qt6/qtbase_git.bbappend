@@ -97,6 +97,8 @@ SRC_URI:append = " \
     file://0003-QJsonValue-fix-incorrect-to-Array-Object-when-the-va.patch \
 "
 
+SRC_URI:append = " file://0001-Revert-Cater-for-upstream-changes-in-eglplatform.h.patch"
+
 # Upstream-Status: Inappropriate
 # NOTE: Increase maxver when upgrading Qt version
 SRC_URI:append = " \
