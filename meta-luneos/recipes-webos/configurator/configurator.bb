@@ -34,5 +34,7 @@ FILES:${PN} += "${webos_sysbus_datadir}"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
 file://0001-configurator-Add-service-file-for-systemd-script.patch \
 file://0002-configurator-Fix-permission-issue-for-com.palm.filec.patch \
+file://0003-com.webos.service.configurator.perm.json-Add-permiss.patch \
 "
+
 S = "${WORKDIR}/git"
