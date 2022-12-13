@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2021 LG Electronics, Inc.
+# Copyright (c) 2020-2022 LG Electronics, Inc.
 
 # Confidential computer software. Valid license from LG required for
 # possession, use or copying. Consistent with FAR 12.211 and 12.212,
@@ -7,7 +7,7 @@
 # under vendor's standard commercial license.
 
 SUMMARY = "Mediagallery QML App"
-AUTHOR = "Hyein Lee<hyein1.lee@lge.com>"
+AUTHOR = "Hyein Lee <hyein1.lee@lge.com>"
 SECTION = "webos/apps"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = " \
@@ -17,7 +17,16 @@ LIC_FILES_CHKSUM = " \
 DEPENDS = "qtdeclarative pmloglib luna-service2 libpbnjson"
 DEPENDS:append = " ${@ 'qtshadertools-native' if d.getVar('QT_VERSION', True) == '6' else '' }"
 
-RDEPENDS:${PN} += "qml-webos-framework qml-webos-bridge qml-app-components"
+RDEPENDS:${PN} += "qml-webos-framework qml-webos-bridge"
+
+WEBOS_VERSION = "1.0.0-17_4fe324a62ee8d06e344e935f17cbda3d3e568b59"
+
+PV = "1.0.0-17+git${SRCPV}"
+SRCREV = "4fe324a62ee8d06e344e935f17cbda3d3e568b59"
+
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+S = "${WORKDIR}/git"
+PR = "r3"
 
 inherit webos_public_repo
 inherit webos_localizable
@@ -26,15 +35,10 @@ inherit systemd
 inherit webos_system_bus
 inherit webos_app
 
-
-PV = "1.0.0-15+git${SRCPV}"
-SRCREV = "30b7565c59324dd0ce153e57ee7b4ab11b1aea38"
-
-#WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
-
 QMAKE_PROFILES = "${S}/com.webos.app.mediagallery.pro"
 QE_QMAKE_PATH_HEADERS = "${QE_QMAKE_PATH_QT_HEADERS}"
 
 FILES:${PN} += "${webos_applicationsdir}"
+
+# webos doesn't have localization data for this recipe
+WEBOS_LOCALIZATION_INSTALL_RESOURCES = "false"
