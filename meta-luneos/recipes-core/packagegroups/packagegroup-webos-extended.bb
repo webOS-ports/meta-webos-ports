@@ -94,6 +94,7 @@ WEBOS_PACKAGESET_ENACTAPPS = " \
     com.webos.app.imageviewer \
     com.webos.app.mediagallery \
     com.webos.app.videoplayer \
+    com.webos.app.videocall \
 "
 
 # nyx-lib needs nyx-modules at runtime, but a runtime dependency is not defined
