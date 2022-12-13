@@ -1,7 +1,7 @@
-# Copyright (c) 2018-2021 LG Electronics, Inc.
+# Copyright (c) 2018-2022 LG Electronics, Inc.
 
 SUMMARY = "Enact Based Web Browser"
-AUTHOR = "Mikyung Kim <mikyung27.kim@lge.com>"
+AUTHOR = "Revanth Kumar <revanth.kumar@lge.com>"
 SECTION = "webos/apps"
 LICENSE = "LicenseRef-EnactBrowser-Evaluation"
 LIC_FILES_CHKSUM = " \
@@ -9,13 +9,16 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=72b3e3cef46e5ab3e175e5b515dc3b18 \
 "
 
+WEBOS_VERSION = "1.0.0-64_8142dab393c4938b6d7b19dec73688bd28fc0855"
+PR = "r17"
+
 inherit webos_public_repo
 inherit webos_enactjs_app
 inherit webos_filesystem_paths
 inherit webos_npm_env
 
 PV = "1.0.0-64+git${SRCPV}"
-SRCREV = "31b4610dcd8b477841d6811809967e85498fbd87"
+SRCREV = "8142dab393c4938b6d7b19dec73688bd28fc0855"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
@@ -50,9 +53,6 @@ WEBOS_ENACTJS_PACK_OVERRIDE = "\
 # Error: Cannot find module 'glob'
 WEBOS_NPM_INSTALL_FLAGS = "--arch=${WEBOS_NPM_ARCH} --target_arch=${WEBOS_NPM_ARCH} --without-ssl --insecure --no-optional --verbose"
 
-# Workaround for network access issue during do_compile task
-do_compile[network] = "1"
-
 do_compile:append() {
     ${WEBOS_NPM_BIN} ${WEBOS_NPM_INSTALL_FLAGS} install
     ${WEBOS_NODE_BIN} ./scripts/cli.js transpile
@@ -77,3 +77,6 @@ do_install:append() {
 }
 
 FILES:${PN} += "${webos_applicationsdir}"
+
+# Workaround for network access issue during do_compile task
+do_compile[network] = "1"
