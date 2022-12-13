@@ -18,17 +18,13 @@ RPROVIDES:${PN}-examples = " \
     eos.widgetgallery \
 "
 
-#WEBOS_VERSION = "1.0.0-161_a6969a4cb6e95949af68e316c8414951b0c8fc9b"
-#PR = "r35"
+WEBOS_VERSION = "1.0.0-161_a6969a4cb6e95949af68e316c8414951b0c8fc9b"
+PR = "r35"
 
 inherit webos_qmake6
 inherit pkgconfig
-#inherit webos_enhanced_submissions
-#inherit webos_machine_dep
 inherit webos_app_generate_security_files
 inherit webos_filesystem_paths
-#inherit webos_distro_variant_dep
-#inherit webos_qmllint
 inherit webos_public_repo
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
@@ -37,11 +33,13 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
            file://0003-qml-runner-don-t-set-default-value-for-WEBOS_WINDOW_.patch \
            file://0004-RoundedRectangle.qml-Use-GraphicalEffects-from-Qt5Co.patch \
            file://0005-AppLoader-use-old-syntax-for-quit-connect.patch \
+           file://0006-com.webos.app.qmlrunner.role.json.in-Add-trustLevel.patch \
            "
 
 S = "${WORKDIR}/git"
 
-SRCREV = "ae56b82a23c15ba13708c74a97bd59aaaf99a708"
+PV = "1.0.0-161+git${SRCPV}"
+SRCREV = "a6969a4cb6e95949af68e316c8414951b0c8fc9b"
 
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 
