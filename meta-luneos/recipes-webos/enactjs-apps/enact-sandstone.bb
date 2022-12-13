@@ -1,12 +1,13 @@
-# Copyright (c) 2020-2021 LG Electronics, Inc.
+# Copyright (c) 2020-2022 LG Electronics, Inc.
 
 SUMMARY = "Enact Sandstone standard override used for Enact apps"
-AUTHOR = "Jason Robitaille <jason.robitaille@lge.com>"
+AUTHOR = "Seungho Park <seunghoh.park@lge.com>"
 SECTION = "webos/apps"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://enact/LICENSE;md5=e3fc50a88d0a364313df4b21ef20c29e"
 
 inherit webos_enact_repo
+#inherit webos_arch_indep
 inherit webos_enactjs_env
 
 S = "${WORKDIR}/git"
@@ -21,10 +22,10 @@ SRC_URI = " \
 # algorithm properly recognizes that a pre-release precedes the associated final
 # release (e.g., 1.0-pre.1 < 1.0).
 
-PV = "2.1.0+git${SRCPV}"
+PV = "2.5.2"
 
-SRCREV = "e69d6dcdf0993bc00b79495af68c1796dc027193"
-SRCREV_enact = "d2d5262c8d026fbfd8fa635e5364491dc83cba7c"
+SRCREV = "8d0f11ce16f9280fe511dddf5b7d071f4d35d7ea"
+SRCREV_enact = "6e6668d3327d6993b0e80edb73c0fc90765c834e"
 
 do_fetch[vardeps] += "SRCREV_enact"
 SRCREV_FORMAT = "main_enact"
@@ -35,21 +36,20 @@ WEBOS_ENACT_DEPENDENCIES ??= "\
     direction@1.0.4 \
     dom-walk@0.1.2 \
     global@4.4.0 \
-    ilib@14.11.1 \
+    ilib@14.15.1 \
     invariant@2.2.4 \
     is-function@1.0.2 \
     js-tokens@4.0.0 \
     loose-envify@1.4.0 \
     min-document@2.19.0 \
     object-assign@4.1.1 \
-    parse-headers@2.0.4 \
+    parse-headers@2.0.5 \
     process@0.11.10 \
-    prop-types@15.7.2 \
-    ramda@0.24.1 \
-    react@17.0.2 \
-    react-dom@17.0.2 \
-    react-is@17.0.2 \
-    scheduler@0.20.2 \
+    prop-types@15.8.1 \
+    react@18.2.0 \
+    react-dom@18.2.0 \
+    react-is@18.2.0 \
+    scheduler@0.23.0 \
     warning@4.0.3 \
     xhr@2.6.0 \
     xtend@4.0.2 \
@@ -58,13 +58,10 @@ WEBOS_ENACT_DEPENDENCIES ??= "\
 # NOTE: We only need to bump PR if we change something OTHER than
 # PV, SRCREV or the dependencies statement above.
 
-PR = "r7"
+PR = "r11"
 
 # Skip unneeded tasks
 do_configure[noexec] = "1"
-
-# Workaround for network access issue during do_compile task
-do_compile[network] = "1"
 
 do_compile() {
     cd ${S}/sandstone
@@ -109,3 +106,6 @@ sysroot_stage_all:append() {
 }
 
 FILES:${PN} += "${datadir}"
+
+# Workaround for network access issue during do_compile task
+do_compile[network] = "1"

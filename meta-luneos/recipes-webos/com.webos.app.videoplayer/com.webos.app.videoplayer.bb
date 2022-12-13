@@ -1,7 +1,7 @@
-# Copyright (c) 2021 LG Electronics, Inc.
+# Copyright (c) 2021-2022 LG Electronics, Inc.
 
 SUMMARY = "Video Player application"
-AUTHOR = "Anish TD <anish.td@lge.com>"
+AUTHOR = "Revanth Kumar <revanth.kumar@lge.com>"
 SECTION = "webos/apps"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = " \
@@ -9,20 +9,21 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=3072ffcf5bdbbc376ed21c9d378d14d5 \
 "
 
+WEBOS_VERSION = "0.0.1-12_ff6e0081d1b0f8ad1bf0480c5f28b2616cd646d4"
+PR = "r1"
+
+PV = "0.0.1-12+git${SRCPV}"
+SRCREV = "ff6e0081d1b0f8ad1bf0480c5f28b2616cd646d4"
+
 inherit webos_enactjs_app
 inherit webos_public_repo
 
-PV = "0.0.1-11+git${SRCPV}"
-SRCREV = "a25126d0d36b66639b3abab4462c2ee55c68cea9"
-
-#WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-# Workaround for network access issue during do_compile task
-do_compile[network] = "1"
-
 WEBOS_ENACTJS_APP_ID = "com.webos.app.videoplayer"
-WEBOS_ENACTJS_SHRINKWRAP_OVERRIDE = "false"
 WEBOS_LOCALIZATION_DATA_PATH = "${S}"
 WEBOS_LOCALIZATION_XLIFF_BASENAME = "videoplayer"
+
+# Workaround for network access issue during do_compile task
+do_compile[network] = "1"

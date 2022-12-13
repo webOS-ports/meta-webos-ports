@@ -9,6 +9,9 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=3072ffcf5bdbbc376ed21c9d378d14d5 \
 "
 
+WEBOS_VERSION = "0.0.1-15_ca49d724d66ff827acee8eb5e95c380fd3fc1de2"
+PR = "r1"
+
 PV = "0.0.1-15+git${SRCPV}"
 SRCREV = "ca49d724d66ff827acee8eb5e95c380fd3fc1de2"
 
