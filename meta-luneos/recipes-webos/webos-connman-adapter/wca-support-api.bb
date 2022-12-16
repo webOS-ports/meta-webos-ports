@@ -22,5 +22,8 @@ inherit pkgconfig
 inherit webos_cmake
 inherit webos_public_repo
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+            file://0001-Revert-Removing-support-for-com.webos.service.wan-se.patch \
+"
+
 S = "${WORKDIR}/git"

@@ -1,0 +1,1942 @@
+From 63172d779c5ac4442d837bc42c8690a04b5abbc1 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 16 Dec 2022 15:37:34 +0100
+Subject: [PATCH] Add back com.palm.wan for cellular support
+
+Since we use it in LuneOS.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+---
+ CMakeLists.txt                                |   1 +
+ files/sysbus/webos-connman-adapter.api.json   |  22 +-
+ files/sysbus/webos-connman-adapter.perm.json  |   8 +
+ .../sysbus/webos-connman-adapter.role.json.in |   9 +-
+ files/sysbus/webos-connman-adapter.service.in |   2 +-
+ src/common.c                                  |  59 ++
+ src/common.h                                  |   4 +
+ src/connectionmanager_service.c               | 110 +-
+ src/connman_manager.c                         |  77 +-
+ src/connman_manager.h                         |  12 +
+ src/connman_service.c                         |  71 ++
+ src/connman_service.h                         |  20 +
+ src/errors.h                                  |   3 +
+ src/logging.h                                 |   8 +-
+ src/main.c                                    |  12 +-
+ src/wan_service.c                             | 996 ++++++++++++++++++
+ src/wan_service.h                             |  39 +
+ src/wifi_service.c                            |   9 +
+ 18 files changed, 1448 insertions(+), 14 deletions(-)
+ create mode 100644 src/wan_service.c
+ create mode 100644 src/wan_service.h
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 2fa2af5..39058c3 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -135,6 +135,7 @@ file(GLOB SOURCE_FILES
+     src/main.c
+     src/pacrunner_client.c
+     src/utils.c
++    src/wan_service.c
+     src/wifi_p2p_service.c
+     src/wifi_tethering_service.c
+     src/wifi_profile.c
+diff --git a/files/sysbus/webos-connman-adapter.api.json b/files/sysbus/webos-connman-adapter.api.json
+index c238f03..8209bd7 100644
+--- a/files/sysbus/webos-connman-adapter.api.json
++++ b/files/sysbus/webos-connman-adapter.api.json
+@@ -64,6 +64,26 @@
+         "com.webos.service.wifi/p2p/setstate",
+         "com.webos.service.wifi/p2p/settethering",
+         "com.webos.service.wifi/p2p/setwifidisplayinfo"
+-
++    ],
++    "networking.query": [
++        "com.webos.service.connectionmanager/checkinternetstatus",
++        "com.webos.service.connectionmanager/findProxyForURL",
++        "com.webos.service.connectionmanager/getinfo",
++        "com.webos.service.connectionmanager/getStatus",
++        "com.webos.service.connectionmanager/getstatus",
++        "com.webos.service.connectionmanager/getUserStatus",
++        "com.webos.service.connectionmanager/getwolwowlstatus",
++        "com.webos.service.connectionmanager/monitorActivity",
++        "com.webos.service.wan/getStatus",
++        "com.webos.service.wan/getContexts",
++        "com.webos.service.wan/getContext",
++        "com.webos.service.wan/connect",
++        "com.webos.service.wan/disconnect",
++        "com.webos.service.wan/getStatus",
++        "com.webos.service.wan/getContexts",
++        "com.webos.service.wan/getContext",
++        "com.webos.service.wan/setHostRoutes",
++        "com.webos.service.wifi/getstatus",
++        "com.webos.service.wifi/getwifidiagnostics"
+     ]
+ }
+diff --git a/files/sysbus/webos-connman-adapter.perm.json b/files/sysbus/webos-connman-adapter.perm.json
+index 2621a73..f65c5fe 100644
+--- a/files/sysbus/webos-connman-adapter.perm.json
++++ b/files/sysbus/webos-connman-adapter.perm.json
+@@ -14,5 +14,13 @@
+         "wifi.query",
+         "wifi.management",
+         "systemconfig.query"
++    ],
++    "com.webos.service.wan": [
++        "settings.query",
++        "networkconnection.query",
++        "networkconnection.management",
++        "wifi.query",
++        "wifi.management",
++        "systemconfig.query"
+     ]
+ }
+diff --git a/files/sysbus/webos-connman-adapter.role.json.in b/files/sysbus/webos-connman-adapter.role.json.in
+index 4d1cf9b..c619766 100644
+--- a/files/sysbus/webos-connman-adapter.role.json.in
++++ b/files/sysbus/webos-connman-adapter.role.json.in
+@@ -2,7 +2,7 @@
+     "exeName":"@WEBOS_INSTALL_SBINDIR@/webos-connman-adapter",
+     "type":"regular",
+     "trustLevel": "oem",
+-    "allowedNames":["com.webos.service.wifi", "com.webos.service.connectionmanager"],
++    "allowedNames":["com.webos.service.wifi", "com.webos.service.connectionmanager", "com.webos.service.wan"],
+     "permissions": [
+         {
+             "service":"com.webos.service.wifi",
+@@ -18,6 +18,13 @@
+                         "com.webos.settingsservice",
+                         "com.webos.service.wifi",
+                         "com.webos.service.config"]
++        },
++        {
++            "service":"com.webos.service.wan",
++            "outbound":["com.webos.service.pdm",
++                        "com.webos.settingsservice",
++                        "com.webos.service.wifi",
++                        "com.webos.service.config"]
+         }
+     ]
+ }
+diff --git a/files/sysbus/webos-connman-adapter.service.in b/files/sysbus/webos-connman-adapter.service.in
+index da323a1..f10bace 100644
+--- a/files/sysbus/webos-connman-adapter.service.in
++++ b/files/sysbus/webos-connman-adapter.service.in
+@@ -1,4 +1,4 @@
+ [D-BUS Service]
+-Name=com.webos.service.wifi;com.webos.service.connectionmanager
++Name=com.webos.service.wifi;com.webos.service.wan;com.webos.service.connectionmanager;
+ Exec="@WEBOS_INSTALL_SBINDIR@/webos-connman-adapter
+ Type=static
+diff --git a/src/common.c b/src/common.c
+index c7c7d42..84238d0 100644
+--- a/src/common.c
++++ b/src/common.c
+@@ -177,6 +177,65 @@ gboolean set_wifi_powered_status(gboolean state)
+ 	return FALSE;
+ }
+ 
++void set_cellular_powered_status(gboolean state)
++{
++	connman_technology_t *cellular_tech = connman_manager_find_cellular_technology(
++	        manager);
++
++	if (!cellular_tech)
++	{
++		return;
++	}
++
++	connman_technology_set_powered(cellular_tech, state, NULL);
++}
++
++/**
++*  @brief Returns true if wan technology is powered on
++*
++*/
++
++gboolean is_cellular_powered(void)
++{
++	connman_technology_t *technology = connman_manager_find_cellular_technology(
++	                                       manager);
++	return (NULL != technology) && technology->powered;
++}
++
++/**
++*  @brief Check if the wan technology is available
++*   Send an error luna message if its not available
++*
++*  @param sh
++*  @param message
++*/
++
++gboolean cellular_technology_status_check(LSHandle *sh, LSMessage *message)
++{
++	if (NULL == connman_manager_find_cellular_technology(manager))
++	{
++		LSMessageReplyCustomError(sh, message, "Cellular technology unavailable",
++		                          WCA_API_ERROR_CELLULAR_TECH_UNAVAILABLE);
++		return FALSE;
++	}
++
++	return TRUE;
++}
++
++gboolean cellular_technology_status_check_with_subscription(LSHandle *sh,
++        LSMessage *message, bool subscribed)
++{
++	if (NULL == connman_manager_find_cellular_technology(manager))
++	{
++		LSMessageReplyCustomErrorWithSubscription(sh, message,
++		        "Cellular technology unavailable",
++		        WCA_API_ERROR_CELLULAR_TECH_UNAVAILABLE, subscribed);
++		return FALSE;
++	}
++
++	return TRUE;
++}
++
+ bool is_valid_ipv6address(char *ipAddress)
+ {
+ 	unsigned char ipv6_addr[sizeof(struct in6_addr)];
+diff --git a/src/common.h b/src/common.h
+index f58dae2..7cacbb1 100644
+--- a/src/common.h
++++ b/src/common.h
+@@ -29,8 +29,11 @@ extern gboolean connman_status_check(connman_manager_t *manager, LSHandle *sh,
+                                      LSMessage *message);
+ extern gboolean is_wifi_powered(void);
+ extern gboolean is_wifi_tethering(void);
++extern gboolean is_cellular_powered(void);
+ extern gboolean wifi_technology_status_check(LSHandle *sh, LSMessage *message);
+ extern gboolean p2p_technology_status_check(LSHandle *sh, LSMessage *message);
++extern gboolean cellular_technology_status_check(LSHandle *sh,
++        LSMessage *message);
+ extern gboolean wifi_technology_status_check_with_subscription(LSHandle *sh,
+                                                         LSMessage *message, bool subscribed);
+ extern gboolean p2p_technology_status_check_with_subscription(LSHandle *sh,
+@@ -40,6 +43,7 @@ extern gboolean connman_status_check_with_subscription(connman_manager_t *manage
+ extern gboolean set_wifi_powered_status(gboolean state);
+ extern const gchar *get_current_system_locale();
+ extern void retrieve_system_locale_info(LSHandle *handle);
++extern void set_cellular_powered_status(gboolean state);
+ extern bool is_valid_ipv6address(char *ipAddress);
+ extern bool is_valid_ipaddress(char *ipAddress);
+ 
+diff --git a/src/connectionmanager_service.c b/src/connectionmanager_service.c
+index 1183b49..a8d46cc 100644
+--- a/src/connectionmanager_service.c
++++ b/src/connectionmanager_service.c
+@@ -59,6 +59,7 @@ errorText | Yes | String | Error description
+ #include "wifi_profile.h"
+ #include "utils.h"
+ #include "pacrunner_client.h"
++#include "wan_service.h"
+ #include "wifi_setting.h"
+ #include "wifi_tethering_service.h"
+ 
+@@ -81,6 +82,8 @@ gboolean wifi_online_checking_status = FALSE;
+ gboolean wired_connected = FALSE;
+ gboolean wifi_connected = FALSE;
+ gboolean p2p_connected = FALSE;
++gboolean cellular_powered = FALSE;
++gboolean wan_connected = FALSE;
+ guint block_getstatus_response = 0;
+ gboolean wifi_tethering = FALSE;
+ gboolean wired_plugged = FALSE;
+@@ -96,6 +99,30 @@ static void getinfo_update(void);
+ 
+ #define IS_WIRED_PLUGGED() g_slist_length(manager->wired_services)
+ 
++static bool is_caller_using_new_interface(LSMessage *message)
++{
++	if (!message)
++	{
++		return false;
++	}
++
++	LSHandle *handle = LSMessageGetConnection(message);
++
++	if (!handle)
++	{
++		return false;
++	}
++
++	const char *name = LSHandleGetName(handle);
++
++	if (!name)
++	{
++		return false;
++	}
++
++	return (g_strcmp0(name, "com.webos.service.connectionmanager") == 0);
++}
++
+ static void update_string_value(jvalue_ref *status, jvalue_ref key, gchar *inVal)
+ {
+ 	if (NULL != inVal)
+@@ -383,7 +410,8 @@ static void append_p2p_connection_status(jvalue_ref *status,
+  * @param reply JSON object where we will append the connection status to.
+  */
+ 
+-static void append_connection_status(jvalue_ref *reply, bool subscribed)
++static void append_connection_status(jvalue_ref *reply, bool subscribed,
++                                     bool with_new_interface)
+ {
+ 	if (NULL == reply)
+ 	{
+@@ -514,6 +542,31 @@ static void append_connection_status(jvalue_ref *reply, bool subscribed)
+ 		jobject_put(*reply, J_CSTR_TO_JVAL("wifiDirect"), disconnected_p2p_status);
+ 		j_release(&connected_p2p_status);
+ 	}
++	if (with_new_interface)
++	{
++		jvalue_ref cellular_obj = jobject_create();
++		gboolean cellular_enabled = is_cellular_powered();
++
++		jobject_put(cellular_obj, J_CSTR_TO_JVAL("enabled"),
++		            jboolean_create(cellular_enabled));
++		jobject_put(*reply, J_CSTR_TO_JVAL("cellular"), cellular_obj);
++
++		jvalue_ref wan_obj = jobject_create();
++
++		if (cellular_enabled)
++		{
++			append_wan_status(wan_obj);
++		}
++		else
++		{
++			jvalue_ref connected_contexts_obj = jarray_create(NULL);
++			jobject_put(wan_obj, J_CSTR_TO_JVAL("connected"), jboolean_create(false));
++			jobject_put(wan_obj, J_CSTR_TO_JVAL("connectedContexts"),
++			            connected_contexts_obj);
++		}
++
++		jobject_put(*reply, J_CSTR_TO_JVAL("wan"), wan_obj);
++	}
+ }
+ 
+ /**
+@@ -639,16 +692,49 @@ static gboolean check_update_is_needed(void)
+ 		needed = TRUE;
+ 	}
+ 
+-	guint p2p_connected_count_now = connman_manager_get_p2p_connected_service_count(manager->p2p_services);
+-	if(p2p_connected_count != p2p_connected_count_now)
++	if (cellular_powered != is_cellular_powered())
+ 	{
++		cellular_powered = is_cellular_powered();
+ 		needed = TRUE;
+ 	}
+ 
++	guint p2p_connected_count_now = connman_manager_get_p2p_connected_service_count(manager->p2p_services);
++	if(p2p_connected_count != p2p_connected_count_now)
++
+ 	p2p_connected_count = p2p_connected_count_now;
+ 
+ 	p2p_connected = (connected_p2p_service != NULL && manager->groups != NULL);
+ 
++
++	GSList *iter;
++	guint num_connected = 0;
++
++	for (iter = manager->cellular_services; iter != NULL; iter = iter->next)
++	{
++		connman_service_t *service = iter->data;
++
++		if (!connman_service_is_connected(service))
++		{
++			continue;
++		}
++
++		num_connected++;
++
++		if (check_service_for_update(service, wan_connected || (num_connected > 0)))
++		{
++			needed = TRUE;
++		}
++	}
++
++	gboolean new_wan_connected = (num_connected > 0);
++
++	if (wan_connected != new_wan_connected)
++	{
++		needed = TRUE;
++	}
++
++	wan_connected = new_wan_connected;
++
+ 	WCALOG_INFO(MSGID_CONNECTION_INFO, 0, "needed: %d",needed);
+ 
+ 	return needed;
+@@ -756,8 +842,10 @@ void connectionmanager_send_status_to_subscribers(void)
+ 
+ 	jvalue_ref reply = jobject_create();
+ 	jvalue_ref reply_deprecated = jobject_create();
+-	append_connection_status(&reply, true);
+-	append_connection_status(&reply_deprecated, true);
++	append_connection_status(&reply, true, true);
++	// Same but without mentioning WAN and PAN as we don't support it on the
++	// com.webos.service.connectionmanager service face
++	append_connection_status(&reply_deprecated, true, false);
+ 
+ 	jschema_ref response_schema = jschema_parse(j_cstr_to_buffer("{}"),
+ 	                              DOMOPT_NOOPT, NULL);
+@@ -925,7 +1013,8 @@ static bool handle_get_status_command(LSHandle *sh, LSMessage *message,
+ 		}
+ 	}
+ 
+-	append_connection_status(&reply, subscribed);
++	append_connection_status(&reply, subscribed,
++	                         is_caller_using_new_interface(message));
+ 
+ 	response_schema = jschema_parse(j_cstr_to_buffer("{}"), DOMOPT_NOOPT, NULL);
+ 
+@@ -2177,6 +2266,11 @@ static void counter_usage_callback(const gchar *path, GVariant *home,
+ 	{
+ 		service = connman_manager_find_service_by_path(manager->wifi_services, path);
+ 
++		if (NULL == service)
++		{
++			service = connman_manager_find_service_by_path(manager->cellular_services,
++			          path);
++		}
+ 	}
+ 
+ 	if (NULL == service)
+@@ -2252,6 +2346,10 @@ static void append_data_activity(jvalue_ref *reply)
+ 	jobject_put(*reply, J_CSTR_TO_JVAL("wired"), wired_stats);
+ 	jobject_put(*reply, J_CSTR_TO_JVAL("wifi"), wifi_stats);
+ 
++	jvalue_ref wan_stats = jobject_create();
++	append_interface_data_activity(&wan_stats, CONNMAN_SERVICE_TYPE_CELLULAR);
++	jobject_put(*reply, J_CSTR_TO_JVAL("wan"), wan_stats);
++
+ 	memcpy(counter_data_old, counter_data_new, sizeof(counter_data_old));
+ 	memset(counter_data_new, 0, sizeof(counter_data_new));
+ }
+diff --git a/src/connman_manager.c b/src/connman_manager.c
+index b76a53c..33c3a0b 100644
+--- a/src/connman_manager.c
++++ b/src/connman_manager.c
+@@ -320,6 +320,13 @@ static connman_service_t *find_service_from_path(connman_manager_t *manager,
+ 
+ 		service = connman_manager_find_service_by_path(manager->p2p_services, path);
+ 
++		if (NULL != service)
++		{
++			return service;
++		}
++
++		service = connman_manager_find_service_by_path(manager->cellular_services,
++		                                               path);
+ 	}
+ 
+ 	return service;
+@@ -451,6 +458,14 @@ static gboolean service_on_configured_iface(GVariant *service_v,
+ 				g_variant_unref(property);
+ 				g_variant_unref(key_v);
+ 
++				return TRUE;
++			}
++			else if (!g_strcmp0(type, "cellular"))
++			{
++				g_variant_unref(properties);
++				g_variant_unref(property);
++				g_variant_unref(key_v);
++
+ 				return TRUE;
+ 			}
+ 		}
+@@ -496,6 +511,11 @@ static void add_service_to_list(connman_manager_t *manager,
+ 		{
+ 			manager->p2p_services = g_slist_append(manager->p2p_services, service);
+ 		}
++		else if (connman_service_type_wan(service))
++		{
++			manager->cellular_services = g_slist_append(manager->cellular_services,
++			                             service);
++		}
+ 	}
+ }
+ 
+@@ -603,6 +623,10 @@ static gboolean connman_manager_update_services(connman_manager_t *manager,
+ 					*service_type |= P2P_SERVICES_CHANGED;
+ 					break;
+ 
++				case CONNMAN_SERVICE_TYPE_CELLULAR:
++					*service_type |= CELLULAR_SERVICES_CHANGED;
++					break;
++
+ 				default:
+ 					break;
+ 			}
+@@ -684,7 +708,7 @@ static gboolean connman_manager_remove_old_services(connman_manager_t *manager,
+ 	}
+ 
+ 	gboolean wifi_services_removed = FALSE, wired_services_removed = FALSE,
+-	         p2p_services_removed = FALSE;
++	         p2p_services_removed = FALSE, cellular_services_removed = FALSE;
+ 
+ 	wifi_services_removed = remove_services_from_list(&manager->wifi_services,
+ 	                        services_removed);
+@@ -692,6 +716,8 @@ static gboolean connman_manager_remove_old_services(connman_manager_t *manager,
+ 	                         services_removed);
+ 	p2p_services_removed = remove_services_from_list(&manager->p2p_services,
+ 	                       services_removed);
++	cellular_services_removed = remove_services_from_list(
++	                                &manager->cellular_services, services_removed);
+ 
+ 	if (wired_services_removed)
+ 	{
+@@ -716,7 +742,13 @@ static gboolean connman_manager_remove_old_services(connman_manager_t *manager,
+ 		}
+ 	}
+ 
+-	return (wifi_services_removed | wired_services_removed | p2p_services_removed);
++	if (cellular_services_removed)
++	{
++		*service_type |= CELLULAR_SERVICES_CHANGED;
++	}
++
++	return (wifi_services_removed | wired_services_removed | p2p_services_removed |
++	        cellular_services_removed);
+ }
+ 
+ /**
+@@ -745,6 +777,10 @@ static void connman_manager_free_services(connman_manager_t *manager)
+ 	g_slist_free(manager->p2p_services);
+ 	manager->p2p_services = NULL;
+ 
++	g_slist_foreach(manager->cellular_services, (GFunc) connman_service_free, NULL);
++	g_slist_free(manager->cellular_services);
++	manager->cellular_services = NULL;
++
+ 	g_slist_foreach(manager->saved_services, (GFunc) connman_service_free, NULL);
+ 	g_slist_free(manager->saved_services);
+ 	manager->saved_services = NULL;
+@@ -1484,6 +1520,39 @@ connman_technology_t *connman_manager_find_ethernet_technology(
+ 	return NULL;
+ }
+ 
++/**
++ * Go through the manager's technologies list and get the cellular one
++ * (see header for API details)
++ */
++
++connman_technology_t *connman_manager_find_cellular_technology(
++    connman_manager_t *manager)
++{
++	if (NULL == manager)
++	{
++		return NULL;
++	}
++
++	GSList *iter;
++
++	for (iter = manager->technologies; NULL != iter; iter = iter->next)
++	{
++		connman_technology_t *tech = (struct connman_technology *)(iter->data);
++
++		if (!tech)
++		{
++			continue;
++		}
++
++		if (g_strcmp0("cellular", tech->type) == 0)
++		{
++			return tech;
++		}
++	}
++
++	return NULL;
++}
++
+ /**
+  * Go through the manager's technologies list and get the p2p one
+  * (see header for API details)
+@@ -2255,6 +2324,10 @@ connman_manager_t *connman_manager_new(void)
+ 	             g_slist_length(manager->wifi_services),
+ 	             g_slist_length(manager->technologies));
+ 
++	WCALOG_DEBUG("%d cellular services, %d technologies",
++	             g_slist_length(manager->cellular_services),
++	             g_slist_length(manager->technologies));
++
+ 	return manager;
+ }
+ 
+diff --git a/src/connman_manager.h b/src/connman_manager.h
+index e418f4c..0bdeaa5 100644
+--- a/src/connman_manager.h
++++ b/src/connman_manager.h
+@@ -42,6 +42,8 @@ typedef enum
+ 	CONNMAN_SERVICE_TYPE_P2P_WiFiDisplayIEs
+ } connman_p2p_service_type;
+ 
++#define CELLULAR_SERVICES_CHANGED   8
++
+ /**
+  * Callback function for handling any changes in connman services
+  *
+@@ -70,6 +72,7 @@ typedef struct connman_manager
+ 	GSList  *wifi_services;
+ 	GSList  *wired_services;
+ 	GSList  *p2p_services;
++	GSList  *cellular_services;
+ 	GSList  *saved_services;
+ 	GSList  *technologies;
+ 	GSList  *groups;
+@@ -168,6 +171,15 @@ extern connman_technology_t *connman_manager_find_ethernet_technology(
+  */
+ extern connman_technology_t *connman_manager_find_p2p_technology(
+     connman_manager_t *manager);
++/**
++* Go through the manager's technologies list and get the technology with type "cellular"
++*
++* @param[IN]  manager A manager instance
++*
++* @return Technology with type "cellular"
++*/
++extern connman_technology_t *connman_manager_find_cellular_technology(
++    connman_manager_t *manager);
+ /**
+  * Go through the manager's given services list and get the one which is in "ready" or
+  * "online" state , i.e  one of the connected states.
+diff --git a/src/connman_service.c b/src/connman_service.c
+index 2cd2017..d9b415a 100644
+--- a/src/connman_service.c
++++ b/src/connman_service.c
+@@ -65,6 +65,45 @@ gboolean connman_service_type_p2p(connman_service_t *service)
+ 	return (NULL != service) && (CONNMAN_SERVICE_TYPE_P2P == service->type);
+ }
+ 
++/**
++
++* Check if the type of the service is wan (see header for API details)
++*/
++
++gboolean connman_service_type_wan(connman_service_t *service)
++{
++	return (NULL != service) && (service->type == CONNMAN_SERVICE_TYPE_CELLULAR);
++}
++
++/**
++ * @brief Gets hostroutes for the connman service
++ */
++
++gboolean connman_service_set_hostroutes(connman_service_t *service,
++                                        GStrv hostroutes)
++{
++	if (NULL == service || NULL == hostroutes)
++	{
++		return FALSE;
++	}
++
++	GError *error = NULL;
++
++	connman_interface_service_call_set_property_sync(service->remote,
++	        "HostRoutes.Configuration",
++	        g_variant_new_variant(g_variant_new_strv((const gchar * const *)hostroutes,
++	                              g_strv_length(hostroutes))), NULL, &error);
++
++	if (error)
++	{
++		WCALOG_ESCAPED_ERRMSG(MSGID_WAN_SET_HOSTROUTE_ERROR, error->message);
++		g_error_free(error);
++		return FALSE;
++	}
++
++	return TRUE;
++}
++
+ /**
+  * Map the service connection status to corresponding webos state
+  * (see header for API details)
+@@ -899,6 +938,18 @@ gboolean connman_service_get_ipinfo(connman_service_t *service)
+ 			g_variant_unref(va);
+ 		}
+ 
++		if (!g_strcmp0(key, "HostRoutes"))
++		{
++			GVariant *v = g_variant_get_child_value(property, 1);
++			GVariant *va = g_variant_get_child_value(v, 0);
++
++			g_strfreev(service->hostroutes);
++			service->hostroutes = g_variant_dup_strv(va, NULL);
++
++			g_variant_unref(v);
++			g_variant_unref(va);
++		}
++
+ 		g_variant_unref(property);
+ 		g_variant_unref(key_v);
+ 	}
+@@ -1602,6 +1653,23 @@ void connman_service_update_properties(connman_service_t *service,
+ 		{
+ 			const gchar *v = g_variant_get_string(val, NULL);
+ 			connman_service_update_type(service,v);
++
++			if (!g_strcmp0(v, "wifi"))
++			{
++				service->type = CONNMAN_SERVICE_TYPE_WIFI;
++			}
++			else if (!g_strcmp0(v, "ethernet"))
++			{
++				service->type = CONNMAN_SERVICE_TYPE_ETHERNET;
++			}
++			else if (!g_strcmp0(v, "Peer"))
++			{
++				service->type = CONNMAN_SERVICE_TYPE_P2P;
++			}
++			else if (!g_strcmp0(v, "cellular"))
++			{
++				service->type = CONNMAN_SERVICE_TYPE_CELLULAR;
++			}
+ 		}
+ 		else if (!g_strcmp0(key, "State"))
+ 		{
+@@ -2031,6 +2099,9 @@ void connman_service_free(gpointer data, gpointer user_data)
+ 	g_strfreev(service->proxyinfo.excludes);
+ 
+ 
++	g_strfreev(service->hostroutes);
++	service->hostroutes = NULL;
++
+ 	g_free(service->peer.address);
+ 	g_free(service->peer.service_discovery_response);
+ 	service->peer.service_discovery_response = NULL;
+diff --git a/src/connman_service.h b/src/connman_service.h
+index 35c62b8..38aa7d0 100644
+--- a/src/connman_service.h
++++ b/src/connman_service.h
+@@ -146,6 +146,7 @@ typedef struct connman_service
+ 	gint type;
+ 	ipinfo_t ipinfo;
+ 	proxyinfo_t proxyinfo;
++	GStrv hostroutes;
+ 	gulong sighandler_id;
+ 	peer_t peer;
+ 
+@@ -180,6 +181,7 @@ typedef enum
+ 	CONNMAN_SERVICE_TYPE_ETHERNET,
+ 	CONNMAN_SERVICE_TYPE_WIFI,
+ 	CONNMAN_SERVICE_TYPE_P2P,
++	CONNMAN_SERVICE_TYPE_CELLULAR,
+ 	CONNMAN_SERVICE_TYPE_MAX
+ } connman_service_types;
+ 
+@@ -236,6 +238,16 @@ extern gboolean connman_service_type_ethernet(connman_service_t *service);
+ extern gboolean connman_service_type_p2p(connman_service_t *service);
+ 
+ /**
++* Check if the type of the service is wan
++*
++* @param[IN]  service A service instance
++*
++* @return TRUE if the service has "wan" type
++*/
++extern gboolean connman_service_type_wan(connman_service_t *service);
++
++/**
++
+  * Stringify the service connection status to corresponding webos state
+  * This function is required to send appropriate connection status to the webos world.
+  *
+@@ -418,6 +430,14 @@ extern void connman_service_register_property_changed_cb(
+ extern void connman_service_register_p2p_requests_cb(connman_service_t *service,
+         connman_p2p_request_cb func);
+ 
++/**
++ * Gets hostroutes for the connman service
++ *
++ * @param[IN] service A service instance
++ * @param[IN] hostroutes Hostroutes
++ */
++gboolean connman_service_set_hostroutes(connman_service_t *service, GStrv hostroutes);
++
+ /**
+  * Create a new connman service instance and set its properties
+  *
+diff --git a/src/errors.h b/src/errors.h
+index 724946c..0261938 100644
+--- a/src/errors.h
++++ b/src/errors.h
+@@ -23,7 +23,9 @@
+ #define WCA_API_ERROR_INVALID_PARAMETERS    3
+ #define WCA_API_ERROR_CONNMAN_UNAVAILABLE   4
+ #define WCA_API_ERROR_WIFI_TECH_UNAVAILABLE 5
++#define WCA_API_ERROR_CELLULAR_TECH_UNAVAILABLE 6
+ #define WCA_API_ERROR_WIFI_SWITCHED_OFF     7
++#define WCA_API_ERROR_WAN_SWITCHED_OFF      8
+ #define WCA_API_ERROR_SCHEMA_VALIDATION     9
+ 
+ #define WCA_API_ERROR_INVALID_KEY       10
+@@ -96,6 +98,7 @@
+ #define WCA_API_ERROR_FAILED_TO_ENABLE_DISABLE_TECHNOLOGIES 163
+ #define WCA_API_ERROR_FAILED_TO_SET_LISTEN_CHANNEL  164
+ #define WCA_API_ERROR_ALREADY_CONNECTED 165
++#define WCA_API_ERROR_HOST_ROUTE_NOT_SET 166
+ #define WCA_API_ERROR_REJECT_PEER 171
+ #define WCA_API_ERROR_LISTEN_PARAMS_INVALID_VALUES 172
+ #define WCA_API_ERROR_NO_SERVICE_CONNECTED              175
+diff --git a/src/logging.h b/src/logging.h
+index 7260c44..13f9c41 100644
+--- a/src/logging.h
++++ b/src/logging.h
+@@ -63,7 +63,8 @@ extern PmLogContext gLogContext;
+ /** common ones */
+ #define MSGID_WIFI_SRVC_REGISTER_FAIL                   "WIFI_SRVC_REGISTER_FAIL"
+ #define MSGID_CM_SRVC_REGISTER_FAIL                     "WIFI_CM_REGISTER_FAIL"
+-
++#define MSGID_WAN_SRVC_REGISTER_FAIL                    "WAN_SRVC_REGISTER_FAIL"
++#define MSGID_WAN_SRVC_ALLOC_FAIL                       "WAN_SRVC_ALLOC_FAIL"
+ #define MSGID_INVALID_STATE                             "INVALID_STATE"
+ 
+ /** main.c */
+@@ -224,6 +225,11 @@ extern PmLogContext gLogContext;
+ #define MSGID_COUNTRY_CODE_INFO                         "COUNTRY_CODE_INFO"
+ #define MSGID_COUNTRY_CODE_FAILED                       "COUNTRY_CODE_FAILED"
+ 
++/** Wan info codes **/
++#define MSGID_WAN_CONNECT_INFO                          "WAN_CONNECT_INFO"
++#define MSGID_WAN_DISCONNECT_INFO                       "WAN_DISCONNECT_INFO"
++#define MSGID_WAN_SET_HOSTROUTE_ERROR                   "WAN_SET_HOSTROUTE_ERR"
++
+ /** json_utils.c **/
+ #define MSGID_JSON_KEY_NULL                             "JSON_KEY_NULL"
+ #define MSGID_JSON_DEST_NULL                            "JSON_DEST_NULL"
+diff --git a/src/main.c b/src/main.c
+index f0f872d..aef01e9 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -35,6 +35,7 @@
+ #include "logging.h"
+ #include "wifi_service.h"
+ #include "wifi_setting.h"
++#include "wan_service.h"
+ #include "connectionmanager_service.h"
+ 
+ static GMainLoop *mainloop = NULL;
+@@ -57,7 +58,7 @@ term_handler(int signal)
+ int
+ main(int argc, char **argv)
+ {
+-	LSHandle *wifi_handle, *cm_handle;
++	LSHandle *wifi_handle, *wan_handle, *cm_handle;
+ 	signal(SIGTERM, term_handler);
+ 	signal(SIGINT, term_handler);
+ 
+@@ -74,6 +75,13 @@ main(int argc, char **argv)
+ 		return -1;
+ 	}
+ 
++	if (initialize_wan_ls2_calls(mainloop, &wan_handle) < 0)
++	{
++		WCALOG_ERROR(MSGID_WAN_SRVC_REGISTER_FAIL, 0,
++		             "Error in initializing com.webos.service.wan service");
++		return -1;
++	}
++
+ 	if (initialize_connectionmanager_ls2_calls(mainloop, &cm_handle) < 0)
+ 	{
+ 		WCALOG_ERROR(MSGID_CM_SRVC_REGISTER_FAIL, 0,
+@@ -83,7 +91,7 @@ main(int argc, char **argv)
+ 
+ 	wca_support_connman_update_callbacks wca_support_library_cb = { 0 };
+ 
+-	if (wca_support_init(wifi_handle, cm_handle,
++	if (wca_support_init(wifi_handle, cm_handle, wan_handle,
+ 	                     &wca_support_library_cb, NULL, &gLogContext) < 0)
+ 	{
+ 		WCALOG_ERROR(MSGID_WCA_SUPPORT_FAIL, 0,
+diff --git a/src/wan_service.c b/src/wan_service.c
+new file mode 100644
+index 0000000..2468a33
+--- /dev/null
++++ b/src/wan_service.c
+@@ -0,0 +1,996 @@
++// Copyright (c) 2013-2018 LG Electronics, Inc.
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++//
++// SPDX-License-Identifier: Apache-2.0
++
++#include <glib.h>
++#include <stdbool.h>
++#include <time.h>
++#include <string.h>
++#include <pbnjson.h>
++#include <sys/ioctl.h>
++#include <sys/types.h>
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <linux/if.h>
++
++#include "wan_service.h"
++#include "connman_manager.h"
++#include "connman_agent.h"
++#include "connman_service.h"
++#include "lunaservice_utils.h"
++#include "common.h"
++#include "connectionmanager_service.h"
++#include "logging.h"
++#include "errors.h"
++
++static LSHandle *pLsHandle;
++
++extern connman_manager_t *manager;
++extern connman_agent_t *agent;
++
++static void service_changed_cb(gpointer user_data, const gchar *name,
++                               GVariant *value)
++{
++	connectionmanager_send_status_to_subscribers();
++}
++
++static void retrieve_wan_context(jvalue_ref context_obj,
++                                 connman_service_t *service)
++{
++	jvalue_ref ipv4_obj, ipv6_obj, dns_obj, hosts_obj;
++	int i;
++
++	jobject_put(context_obj, J_CSTR_TO_JVAL("name"), jstring_create(service->name));
++	jobject_put(context_obj, J_CSTR_TO_JVAL("connected"),
++	            jboolean_create(connman_service_is_connected(service)));
++	jobject_put(context_obj, J_CSTR_TO_JVAL("onInternet"),
++	            jboolean_create(connman_service_is_online(service)));
++
++	if (service->ipinfo.iface)
++	{
++		jobject_put(context_obj, J_CSTR_TO_JVAL("interface"),
++		            jstring_create(service->ipinfo.iface));
++	}
++
++	ipv4_obj = jobject_create();
++
++	if (service->ipinfo.ipv4.address)
++	{
++		jobject_put(ipv4_obj, J_CSTR_TO_JVAL("address"),
++		            jstring_create(service->ipinfo.ipv4.address));
++	}
++
++	if (service->ipinfo.ipv4.netmask)
++	{
++		jobject_put(ipv4_obj, J_CSTR_TO_JVAL("subnet"),
++		            jstring_create(service->ipinfo.ipv4.netmask));
++	}
++
++	if (service->ipinfo.ipv4.gateway)
++	{
++		jobject_put(ipv4_obj, J_CSTR_TO_JVAL("gateway"),
++		            jstring_create(service->ipinfo.ipv4.gateway));
++	}
++
++	if (jobject_size(ipv4_obj) > 0)
++	{
++		jobject_put(context_obj, J_CSTR_TO_JVAL("ipv4"), ipv4_obj);
++	}
++	else
++	{
++		j_release(&ipv4_obj);
++	}
++
++	ipv6_obj = jobject_create();
++
++	if (service->ipinfo.ipv6.address)
++	{
++		jobject_put(ipv6_obj, J_CSTR_TO_JVAL("address"),
++		            jstring_create(service->ipinfo.ipv6.address));
++	}
++
++	if (service->ipinfo.ipv6.prefix_length > 0)
++	{
++		jobject_put(ipv6_obj, J_CSTR_TO_JVAL("prefixLength"),
++		            jnumber_create_i32(service->ipinfo.ipv6.prefix_length));
++	}
++
++	if (service->ipinfo.ipv6.gateway)
++	{
++		jobject_put(ipv6_obj, J_CSTR_TO_JVAL("gateway"),
++		            jstring_create(service->ipinfo.ipv6.gateway));
++	}
++
++	if (jobject_size(ipv6_obj) > 0)
++	{
++		jobject_put(context_obj, J_CSTR_TO_JVAL("ipv6"), ipv6_obj);
++	}
++	else
++	{
++		j_release(&ipv6_obj);
++	}
++
++	dns_obj = jarray_create(NULL);
++
++	if (service->ipinfo.dns)
++	{
++		for (i = 0; i < g_strv_length(service->ipinfo.dns); i++)
++		{
++			jarray_append(dns_obj, jstring_create(service->ipinfo.dns[i]));
++		}
++	}
++
++	jobject_put(context_obj, J_CSTR_TO_JVAL("dns"), dns_obj);
++
++	hosts_obj = jarray_create(NULL);
++
++	for (i = 0; i < g_strv_length(service->hostroutes); i++)
++	{
++		jarray_append(hosts_obj, jstring_create(service->hostroutes[i]));
++	}
++
++	jobject_put(context_obj, J_CSTR_TO_JVAL("hosts"), hosts_obj);
++
++}
++static void append_context(jvalue_ref contexts_obj, connman_service_t *service)
++{
++	if (!jis_array(contexts_obj))
++	{
++		return;
++	}
++
++	jvalue_ref context_obj = jobject_create();
++
++	retrieve_wan_context(context_obj, service);
++
++	jarray_append(contexts_obj, context_obj);
++}
++
++void append_wan_status(jvalue_ref reply_obj)
++{
++	GSList *iter;
++	connman_service_t *service = NULL;
++	bool connected = false;
++	bool online = false;
++	jvalue_ref connected_contexts_obj;
++
++	if (!reply_obj)
++	{
++		return;
++	}
++
++	connected_contexts_obj = jarray_create(NULL);
++
++	for (iter = manager->cellular_services; NULL != iter; iter = iter->next)
++	{
++		service = (connman_service_t *)(iter->data);
++
++		if (!connman_service_is_connected(service))
++		{
++			continue;
++		}
++
++		connected = TRUE;
++
++		if (connman_service_is_online(service))
++		{
++			online = true;
++		}
++
++		connman_service_get_ipinfo(service);
++
++		append_context(connected_contexts_obj, service);
++	}
++
++	jobject_put(reply_obj, J_CSTR_TO_JVAL("onInternet"), jboolean_create(online));
++	jobject_put(reply_obj, J_CSTR_TO_JVAL("connected"), jboolean_create(connected));
++	jobject_put(reply_obj, J_CSTR_TO_JVAL("connectedContexts"),
++	            connected_contexts_obj);
++}
++
++void send_wan_connection_status_to_subscribers()
++{
++	jvalue_ref reply = jobject_create();
++
++	jobject_put(reply, J_CSTR_TO_JVAL("returnValue"), jboolean_create(true));
++	jobject_put(reply, J_CSTR_TO_JVAL("subscribed"), jboolean_create(true));
++
++	append_wan_status(reply);
++
++	jschema_ref response_schema = jschema_parse(j_cstr_to_buffer("{}"),
++	                              DOMOPT_NOOPT, NULL);
++
++	if (response_schema)
++	{
++		const char *payload = jvalue_tostring(reply, response_schema);
++
++		LSError lserror;
++		LSErrorInit(&lserror);
++
++		if (!LSSubscriptionReply(pLsHandle, LUNA_CATEGORY_ROOT LUNA_METHOD_WAN_GETSTATUS, payload, &lserror))
++		{
++			LSErrorPrint(&lserror, stderr);
++			LSErrorFree(&lserror);
++		}
++
++		jschema_release(&response_schema);
++	}
++
++	j_release(&reply);
++}
++
++static void append_contexts(jvalue_ref reply_obj)
++{
++	connman_service_t *service;
++	GSList *iter;
++
++	jvalue_ref contexts_obj = jarray_create(NULL);
++
++	for (iter = manager->cellular_services; NULL != iter; iter = iter->next)
++	{
++		service = (connman_service_t *) iter->data;
++
++		connman_service_get_ipinfo(service);
++
++		append_context(contexts_obj, service);
++	}
++
++	jobject_put(reply_obj, J_CSTR_TO_JVAL("contexts"), contexts_obj);
++}
++
++void send_wan_contexts_update_to_subscribers()
++{
++	jvalue_ref reply_obj = jobject_create();
++
++	jobject_put(reply_obj, J_CSTR_TO_JVAL("returnValue"), jboolean_create(true));
++	jobject_put(reply_obj, J_CSTR_TO_JVAL("subscribed"), jboolean_create(true));
++
++	append_contexts(reply_obj);
++
++	jschema_ref response_schema = jschema_parse(j_cstr_to_buffer("{}"),
++	                              DOMOPT_NOOPT, NULL);
++
++	if (response_schema)
++	{
++		const char *payload = jvalue_tostring(reply_obj, response_schema);
++
++		LSError lserror;
++		LSErrorInit(&lserror);
++
++		if (!LSSubscriptionReply(pLsHandle, LUNA_CATEGORY_ROOT LUNA_METHOD_WAN_GETCONTEXTS, payload, &lserror))
++		{
++			LSErrorPrint(&lserror, stderr);
++			LSErrorFree(&lserror);
++		}
++
++		jschema_release(&response_schema);
++	}
++
++	j_release(&reply_obj);
++}
++
++static void service_connect_callback(gboolean success, gpointer user_data)
++{
++	luna_service_request_t *service_req = user_data;
++	connman_service_t *service = service_req->user_data;
++
++	if (!success)
++	{
++		LSMessageReplyCustomError(service_req->handle, service_req->message,
++		                          "Failed to connect cellular service", WCA_API_ERROR_FAILED_TO_CONNECT);
++		goto cleanup;
++	}
++
++	LSMessageReplySuccess(service_req->handle, service_req->message);
++
++	connman_service_register_property_changed_cb(service, service_changed_cb);
++
++cleanup:
++	luna_service_request_free(service_req);
++}
++
++
++static void connect_wan_service(const char *name,
++                                luna_service_request_t *service_req)
++{
++	GSList *iter;
++	gboolean found_service = FALSE;
++	connman_service_t *service = NULL;
++
++	if (!name)
++	{
++		LSMessageReplyErrorInvalidParams(service_req->handle, service_req->message);
++		goto cleanup;
++	}
++
++	for (iter = manager->cellular_services; NULL != iter ; iter = iter->next)
++	{
++		service = (connman_service_t *) iter->data;
++
++		if (g_strcmp0(service->name, name) == 0)
++		{
++			WCALOG_INFO(MSGID_WAN_CONNECT_INFO, 0, "Connecting to cellular service %s",
++			            service->name);
++			found_service = TRUE;
++			break;
++		}
++	}
++
++	if (!found_service)
++	{
++		LSMessageReplyCustomError(service_req->handle, service_req->message,
++		                          "Cellular service not found", WCA_API_ERROR_NETWORK_NOT_FOUND);
++		goto cleanup;
++	}
++
++	service_req->user_data = service;
++
++	if (!connman_service_connect(service, service_connect_callback, service_req))
++	{
++		LSMessageReplyErrorUnknown(service_req->handle, service_req->message);
++		goto cleanup;
++	}
++
++	return;
++
++cleanup:
++	luna_service_request_free(service_req);
++}
++
++
++static void disconnect_wan_service(const char *name, LSHandle *handle,
++                                   LSMessage *message)
++{
++	GSList *iter;
++	gboolean found_service = FALSE;
++	connman_service_t *service = NULL;
++
++	if (!name)
++	{
++		LSMessageReplyErrorInvalidParams(handle, message);
++		return;
++	}
++
++	/* Look up for the service with the given type */
++	for (iter = manager->cellular_services; NULL != iter ; iter = iter->next)
++	{
++		service = (connman_service_t *) iter->data;
++
++		if (g_strcmp0(service->name, name) == 0)
++		{
++			WCALOG_INFO(MSGID_WAN_DISCONNECT_INFO, 0,
++			            "Disconnecting from cellular service %s", service->name);
++			found_service = TRUE;
++			break;
++		}
++	}
++
++	if (!found_service)
++	{
++		LSMessageReplyCustomError(handle, message,
++		                          "Cellular service not found", WCA_API_ERROR_NETWORK_NOT_FOUND);
++		return;
++	}
++
++	if (!connman_service_disconnect(service))
++	{
++		LSMessageReplyErrorUnknown(handle, message);
++		return;
++	}
++
++	LSMessageReplySuccess(handle, message);
++}
++
++static void technology_property_changed_callback(gpointer data,
++        const gchar *property, GVariant *value)
++{
++	connman_technology_t *technology = (connman_technology_t *)data;
++
++	if (NULL == technology)
++	{
++		return;
++	}
++
++	WCALOG_DEBUG("WAN technology: property [%s] changed", property);
++
++	if ((technology == connman_manager_find_cellular_technology(manager)) &&
++	        (g_strcmp0(property, "Powered") == 0 || g_strcmp0(property, "Connected") == 0))
++	{
++		send_wan_connection_status_to_subscribers();
++		connectionmanager_send_status_to_subscribers();
++	}
++}
++
++/**
++ * @brief The connect method connects to a single context which is specified by its name.
++ *
++ * @param name Name of the context to connect to.
++ */
++
++static bool handle_wan_connect_command(LSHandle *sh, LSMessage *message,
++                                       void *context)
++{
++	if (!connman_status_check(manager, sh, message))
++	{
++		return true;
++	}
++
++	if (!cellular_technology_status_check(sh, message))
++	{
++		return true;
++	}
++
++	if (!is_cellular_powered())
++	{
++		LSMessageReplyCustomError(sh, message, "WAN switched off",
++		                          WCA_API_ERROR_WAN_SWITCHED_OFF);
++		return true;
++	}
++
++	// To prevent memory leaks, schema should be checked before the variables will be initialized.
++	jvalue_ref parsed_obj = 0;
++	if (!LSMessageValidateSchema(sh, message,
++	                             j_cstr_to_buffer(STRICT_SCHEMA(PROPS_1(PROP(name, string))  REQUIRED_1(name))),
++	                             &parsed_obj))
++	{
++		return true;
++	}
++
++	luna_service_request_t *service_req;
++	jvalue_ref name_obj = 0;
++	char *name = NULL;
++
++	if (jobject_get_exists(parsed_obj, J_CSTR_TO_BUF("name"), &name_obj))
++	{
++		raw_buffer name_buf = jstring_get(name_obj);
++		name = g_strdup(name_buf.m_str);
++		jstring_free_buffer(name_buf);
++	}
++
++	if (name == NULL || strlen(name) == 0)
++	{
++		LSMessageReplyErrorInvalidParams(sh, message);
++		goto cleanup;
++	}
++
++	service_req = luna_service_request_new(sh, message);
++
++	connect_wan_service(name, service_req);
++
++cleanup:
++
++	if (!jis_null(parsed_obj))
++	{
++		j_release(&parsed_obj);
++	}
++
++	g_free(name);
++
++	return true;
++}
++
++/**
++ * @brief The disconnect method disconnects a single context which is specified by its name.
++ *
++ * @param name Name of the context to disconnect
++ */
++
++static bool handle_wan_disconnect_command(LSHandle *sh, LSMessage *message,
++        void *context)
++{
++	if (!connman_status_check(manager, sh, message))
++	{
++		return true;
++	}
++
++	if (!cellular_technology_status_check(sh, message))
++	{
++		return true;
++	}
++
++	if (!is_cellular_powered())
++	{
++		LSMessageReplyCustomError(sh, message, "WAN switched off",
++		                          WCA_API_ERROR_WAN_SWITCHED_OFF);
++		return true;
++	}
++
++	// To prevent memory leaks, schema should be checked before the variables will be initialized.
++	jvalue_ref parsed_obj = 0;
++	if (!LSMessageValidateSchema(sh, message,
++	                             j_cstr_to_buffer(STRICT_SCHEMA(PROPS_1(PROP(name, string))  REQUIRED_1(name))),
++	                             &parsed_obj))
++	{
++		return true;
++	}
++
++	jvalue_ref name_obj = 0;
++	char *name = NULL;
++
++	if (jobject_get_exists(parsed_obj, J_CSTR_TO_BUF("name"), &name_obj))
++	{
++		raw_buffer name_buf = jstring_get(name_obj);
++		name = g_strdup(name_buf.m_str);
++		jstring_free_buffer(name_buf);
++	}
++
++	if (name == NULL || strlen(name) == 0)
++	{
++		LSMessageReplyErrorInvalidParams(sh, message);
++		goto cleanup;
++	}
++
++	disconnect_wan_service(name, sh, message);
++
++cleanup:
++
++	if (!jis_null(parsed_obj))
++	{
++		j_release(&parsed_obj);
++	}
++
++	g_free(name);
++
++	return true;
++}
++
++/**
++ * @brief Reports the current WAN status to the caller.
++ *
++ * @param subscribe To be notified of any status changes, set subscribe to true
++ */
++
++static bool handle_wan_get_status_command(LSHandle *sh, LSMessage *message,
++        void *context)
++{
++	jvalue_ref parsedObj = {0};
++
++	if (!LSMessageValidateSchema(sh, message,
++                                     j_cstr_to_buffer(SCHEMA_1(PROP(subscribe, boolean))), &parsedObj))
++	{
++                return true;
++	}
++
++	jvalue_ref reply_obj = 0;
++	LSError lserror;
++	LSErrorInit(&lserror);
++	bool subscribed = false;
++
++	reply_obj = jobject_create();
++
++	if (LSMessageIsSubscription(message))
++	{
++		if (!LSSubscriptionProcess(sh, message, &subscribed, &lserror))
++		{
++			LSErrorPrint(&lserror, stderr);
++			LSErrorFree(&lserror);
++		}
++	}
++
++	if (!connman_status_check_with_subscription(manager, sh, message, subscribed))
++	{
++		goto cleanup;
++	}
++
++	if (!cellular_technology_status_check_with_subscription(sh, message,
++		subscribed))
++	{
++		goto cleanup;
++	}
++
++	jobject_put(reply_obj, J_CSTR_TO_JVAL("returnValue"), jboolean_create(true));
++	jobject_put(reply_obj, J_CSTR_TO_JVAL("subscribed"),
++	            jboolean_create(subscribed));
++
++	append_wan_status(reply_obj);
++
++	if (!LSMessageReply(sh, message, jvalue_tostring(reply_obj, jschema_all()),
++	                    &lserror))
++	{
++		LSErrorPrint(&lserror, stderr);
++		LSErrorFree(&lserror);
++	}
++
++cleanup:
++
++	if (LSErrorIsSet(&lserror))
++	{
++		LSErrorPrint(&lserror, stderr);
++		LSErrorFree(&lserror);
++	}
++
++	j_release(&reply_obj);
++	j_release(&parsedObj);
++
++	return true;
++}
++
++/**
++ * @brief  Lists all available contexts
++ *
++ * @param subscribe To be notified of any status changes, set subscribe to true
++ */
++
++static bool handle_wan_get_contexts_command(LSHandle *sh, LSMessage *message,
++        void *context)
++{
++	jvalue_ref parsedObj = {0};
++
++	if (!LSMessageValidateSchema(sh, message,
++                                     j_cstr_to_buffer(SCHEMA_1(PROP(subscribe, boolean))), &parsedObj))
++	{
++                return true;
++	}
++
++	jvalue_ref reply_obj = 0;
++	LSError lserror;
++	LSErrorInit(&lserror);
++	bool subscribed = false;
++
++	reply_obj = jobject_create();
++
++	if (LSMessageIsSubscription(message))
++	{
++		if (!LSSubscriptionProcess(sh, message, &subscribed, &lserror))
++		{
++			LSErrorPrint(&lserror, stderr);
++			LSErrorFree(&lserror);
++		}
++	}
++
++	if (!connman_status_check_with_subscription(manager, sh, message, subscribed))
++	{
++		goto cleanup;
++	}
++
++	if (!cellular_technology_status_check_with_subscription(sh, message,
++	        subscribed))
++	{
++		goto cleanup;
++	}
++
++
++	jobject_put(reply_obj, J_CSTR_TO_JVAL("returnValue"), jboolean_create(true));
++	jobject_put(reply_obj, J_CSTR_TO_JVAL("subscribed"),
++	            jboolean_create(subscribed));
++
++	append_contexts(reply_obj);
++
++	if (!LSMessageReply(sh, message, jvalue_tostring(reply_obj, jschema_all()),
++	                    &lserror))
++	{
++		LSErrorPrint(&lserror, stderr);
++		LSErrorFree(&lserror);
++	}
++
++cleanup:
++
++	if (LSErrorIsSet(&lserror))
++	{
++		LSErrorPrint(&lserror, stderr);
++		LSErrorFree(&lserror);
++	}
++
++	j_release(&reply_obj);
++	j_release(&parsedObj);
++
++	return true;
++}
++
++/**
++ * @brief  Get information of a given context
++ *
++ * @param name name of the context
++ */
++
++static bool handle_wan_get_context_command(LSHandle *sh, LSMessage *message,
++        void *context)
++{
++	if (!connman_status_check(manager, sh, message))
++	{
++		return true;
++	}
++
++	if (!cellular_technology_status_check(sh, message))
++	{
++		return true;
++	}
++
++	// To prevent memory leaks, schema should be checked before the variables will be initialized.
++	jvalue_ref parsed_obj = 0;
++	if (!LSMessageValidateSchema(sh, message,
++	                             j_cstr_to_buffer(STRICT_SCHEMA(PROPS_1(PROP(name, string)) REQUIRED_1(name))),
++	                             &parsed_obj))
++	{
++		return true;
++	}
++
++	jvalue_ref reply_obj = 0;
++	jvalue_ref name_obj = 0;
++	LSError lserror;
++	LSErrorInit(&lserror);
++	bool found_service = FALSE;
++	GSList *iter;
++	char *name = NULL;
++	connman_service_t *service = NULL;
++
++	if (jobject_get_exists(parsed_obj, J_CSTR_TO_BUF("name"), &name_obj))
++	{
++		raw_buffer name_buf = jstring_get(name_obj);
++		name = g_strdup(name_buf.m_str);
++		jstring_free_buffer(name_buf);
++	}
++
++	reply_obj = jobject_create();
++
++	jobject_put(reply_obj, J_CSTR_TO_JVAL("returnValue"), jboolean_create(true));
++
++	for (iter = manager->cellular_services; NULL != iter; iter = iter->next)
++	{
++		service = (connman_service_t *) iter->data;
++
++		if (g_strcmp0(service->name, name) == 0)
++		{
++			connman_service_get_ipinfo(service);
++			jvalue_ref wan_context_obj = jobject_create();
++			retrieve_wan_context(wan_context_obj, service);
++			jobject_put(reply_obj, J_CSTR_TO_JVAL("contextInfo"), wan_context_obj);
++			found_service = TRUE;
++			break;
++		}
++	}
++
++	if (!found_service)
++	{
++		LSMessageReplyCustomError(sh, message, "Cellular service not found",
++		                          WCA_API_ERROR_NETWORK_NOT_FOUND);
++		goto cleanup;
++	}
++
++	if (!LSMessageReply(sh, message, jvalue_tostring(reply_obj, jschema_all()),
++                            &lserror))
++	{
++		LSErrorPrint(&lserror, stderr);
++		LSErrorFree(&lserror);
++	}
++
++cleanup:
++
++	if (!jis_null(reply_obj))
++	{
++		j_release(&reply_obj);
++	}
++
++	if (!jis_null(parsed_obj))
++	{
++		j_release(&parsed_obj);
++	}
++
++	g_free(name);
++
++	return true;
++}
++
++/**
++ * @brief  Set static host routing for a given context
++ *
++ * @param name  name of the context
++ * @param hosts an array of host IP address to setup static route
++ */
++
++static bool handle_set_hostroutes_command(LSHandle *sh, LSMessage *message,
++        void *context)
++{
++	if (!connman_status_check(manager, sh, message))
++	{
++		return true;
++	}
++
++	if (!cellular_technology_status_check(sh, message))
++	{
++		return true;
++	}
++
++	if (!is_cellular_powered())
++	{
++		LSMessageReplyCustomError(sh, message, "WAN switched off",
++		                          WCA_API_ERROR_WAN_SWITCHED_OFF);
++		return true;
++	}
++
++	// To prevent memory leaks, schema should be checked before the variables will be initialized.
++	jvalue_ref parsed_obj = 0;
++	if (!LSMessageValidateSchema(sh, message,
++	                             j_cstr_to_buffer(STRICT_SCHEMA(PROPS_2(ARRAY(hosts, string), PROP(name, string))
++	                                     REQUIRED_2(name, hosts))), &parsed_obj))
++	{
++		return true;
++	}
++
++	GStrv hosts = NULL;
++	jvalue_ref name_obj = 0;
++	jvalue_ref hosts_obj = 0;
++	char *name = NULL;
++	GSList *iter;
++	gboolean found_service = false;
++	connman_service_t *service = NULL;
++
++	if (jobject_get_exists(parsed_obj, J_CSTR_TO_BUF("name"), &name_obj))
++	{
++		raw_buffer name_buf = jstring_get(name_obj);
++		name = g_strdup(name_buf.m_str);
++		jstring_free_buffer(name_buf);
++	}
++
++	if (jobject_get_exists(parsed_obj, J_CSTR_TO_BUF("hosts"), &hosts_obj))
++	{
++		int i, host_arrsize = jarray_size(hosts_obj);
++		hosts = (GStrv) g_new0(GStrv, host_arrsize + 1);
++
++		for (i = 0; i < host_arrsize; i++)
++		{
++			raw_buffer host_buf = jstring_get(jarray_get(hosts_obj, i));
++			hosts[i] = g_strdup(host_buf.m_str);
++			jstring_free_buffer(host_buf);
++
++			if (!(is_valid_ipaddress(hosts[i]) || is_valid_ipv6address(hosts[i])))
++			{
++				LSMessageReplyErrorInvalidParams(sh, message);
++				goto cleanup;
++			}
++		}
++	}
++
++	/* Look up for the service with the given type */
++	for (iter = manager->cellular_services; NULL != iter ; iter = iter->next)
++	{
++		service = (connman_service_t *) iter->data;
++
++		if (g_strcmp0(service->name, name) == 0)
++		{
++			WCALOG_DEBUG("Setting host route for service %s", service->name);
++			found_service = true;
++			break;
++		}
++	}
++
++	if (!found_service)
++	{
++		LSMessageReplyCustomError(sh, message,
++		                          "Cellular service not found", WCA_API_ERROR_NETWORK_NOT_FOUND);
++		goto cleanup;
++	}
++
++	if (connman_service_set_hostroutes(service, hosts))
++	{
++		LSMessageReplySuccess(sh, message);
++	}
++	else
++	{
++		LSMessageReplyCustomError(sh, message, "Hosts could not be set as static route",
++		                          WCA_API_ERROR_HOST_ROUTE_NOT_SET);
++	}
++
++cleanup:
++
++	if (!jis_null(parsed_obj))
++	{
++		j_release(&parsed_obj);
++	}
++
++	g_free(name);
++	g_strfreev(hosts);
++
++	return true;
++}
++
++static LSMethod wan_methods[] =
++{
++	{ LUNA_METHOD_WAN_CONNECT,       handle_wan_connect_command },
++	{ LUNA_METHOD_WAN_DISCONNECT,    handle_wan_disconnect_command },
++	{ LUNA_METHOD_WAN_GETSTATUS,     handle_wan_get_status_command },
++	{ LUNA_METHOD_WAN_GETCONTEXTS,   handle_wan_get_contexts_command },
++	{ LUNA_METHOD_WAN_GETCONTEXT,    handle_wan_get_context_command },
++	{ LUNA_METHOD_WAN_SETHOSTROUTES, handle_set_hostroutes_command },
++	{ },
++};
++
++int initialize_wan_ls2_calls(GMainLoop *mainloop, LSHandle **wan_handle)
++{
++	LSError lserror;
++	LSErrorInit(&lserror);
++	pLsHandle = NULL;
++
++	if (NULL == mainloop)
++	{
++		goto Exit;
++	}
++
++	if (LSRegister(WAN_LUNA_SERVICE_NAME, &pLsHandle, &lserror) == false)
++	{
++		WCALOG_ERROR(MSGID_WAN_SRVC_REGISTER_FAIL, 0,
++		             "LSRegister() returned error");
++		goto Exit;
++	}
++
++	if (LSRegisterCategory(pLsHandle, LUNA_CATEGORY_ROOT, wan_methods, NULL, NULL,
++	                       &lserror) == false)
++	{
++		WCALOG_ERROR(MSGID_WAN_SRVC_REGISTER_FAIL, 0,
++		             "LSRegisterCategory() returned error");
++		goto Exit;
++	}
++
++	if (LSGmainAttach(pLsHandle, mainloop, &lserror) == false)
++	{
++		WCALOG_ERROR(MSGID_WAN_SRVC_REGISTER_FAIL, 0,
++		             "LSGmainAttach() returned error");
++		goto Exit;
++	}
++
++	*wan_handle = pLsHandle;
++
++	return 0;
++
++Exit:
++
++	if (LSErrorIsSet(&lserror))
++	{
++		LSErrorPrint(&lserror, stderr);
++		LSErrorFree(&lserror);
++	}
++
++	if (pLsHandle)
++	{
++		LSErrorInit(&lserror);
++
++		if (LSUnregister(pLsHandle, &lserror) == false)
++		{
++			LSErrorPrint(&lserror, stderr);
++			LSErrorFree(&lserror);
++		}
++	}
++
++	return -1;
++}
++
++void check_and_initialize_cellular_technology(void)
++{
++	connman_technology_t *technology = connman_manager_find_cellular_technology(
++	                                       manager);
++
++	if (!technology)
++	{
++		return;
++	}
++
++	connman_technology_register_property_changed_cb(technology,
++	        technology_property_changed_callback);
++
++	/* Register property change callback for all connected cellular services */
++	GSList *iter;
++
++	for (iter = manager->cellular_services; iter != NULL; iter = iter->next)
++	{
++		connman_service_t *service = iter->data;
++
++		if (!connman_service_is_connected(service))
++		{
++			continue;
++		}
++
++		connman_service_register_property_changed_cb(service, service_changed_cb);
++	}
++}
+diff --git a/src/wan_service.h b/src/wan_service.h
+new file mode 100644
+index 0000000..d94595d
+--- /dev/null
++++ b/src/wan_service.h
+@@ -0,0 +1,39 @@
++// Copyright (c) 2012-2018 LG Electronics, Inc.
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++//
++// SPDX-License-Identifier: Apache-2.0
++
++#ifndef _WAN_SERVICE_H_
++#define _WAN_SERVICE_H_
++
++#include <luna-service2/lunaservice.h>
++
++#define WAN_LUNA_SERVICE_NAME "com.webos.service.wan"
++
++#define LUNA_CATEGORY_ROOT            "/"
++
++#define LUNA_METHOD_WAN_CONNECT       "connect"
++#define LUNA_METHOD_WAN_DISCONNECT    "disconnect"
++#define LUNA_METHOD_WAN_GETSTATUS     "getStatus"
++#define LUNA_METHOD_WAN_GETCONTEXTS   "getContexts"
++#define LUNA_METHOD_WAN_GETCONTEXT    "getContext"
++#define LUNA_METHOD_WAN_SETHOSTROUTES "setHostRoutes"
++
++extern void check_and_initialize_cellular_technology(void);
++extern void send_wan_connection_status_to_subscribers(void);
++extern void send_wan_contexts_update_to_subscribers(void);
++extern void append_wan_status(jvalue_ref reply_obj);
++extern int initialize_wan_ls2_calls(GMainLoop *mainloop, LSHandle **wan_handle);
++
++#endif /* _WAN_SERVICE_H_ */
+diff --git a/src/wifi_service.c b/src/wifi_service.c
+index dbbb36a..28d965f 100644
+--- a/src/wifi_service.c
++++ b/src/wifi_service.c
+@@ -58,6 +58,7 @@ errorText | Yes | String | Error description
+ #include "logging.h"
+ #include "wifi_p2p_service.h"
+ #include "wifi_tethering_service.h"
++#include "wan_service.h"
+ #include "errors.h"
+ 
+ /* Range for converting signal strength to signal bars */
+@@ -1849,6 +1850,12 @@ static void manager_services_changed_callback(gpointer data,
+ 		connectionmanager_send_status_to_subscribers();
+ 	}
+ 
++	if (service_type & CELLULAR_SERVICES_CHANGED)
++	{
++		connectionmanager_send_status_to_subscribers();
++		send_wan_connection_status_to_subscribers();
++		send_wan_contexts_update_to_subscribers();
++	}
+ }
+ 
+ void send_getnetworks_status_to_subscribers()
+@@ -2145,6 +2152,7 @@ static void manager_technologies_changed_callback(gpointer data)
+ {
+ 	check_and_initialize_wifi_technology();
+ 	check_and_initialize_p2p_technology();
++	check_and_initialize_cellular_technology();
+ 	check_and_initialize_ethernet_technology();
+ }
+ 
+@@ -4059,6 +4067,7 @@ static void connman_service_started(GDBusConnection *conn, const gchar *name,
+ 	check_and_initialize_wifi_technology();
+ 	check_and_initialize_p2p_technology();
+ 	check_and_initialize_ethernet_technology();
++	check_and_initialize_cellular_technology();
+ 
+ 	connectionmanager_send_status_to_subscribers();
+ }
+-- 
+2.37.3.windows.1
+
