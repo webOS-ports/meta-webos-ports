@@ -1,0 +1,1235 @@
+From f9b4a2d9f2902f138de1e46d8df7fb82878e500c Mon Sep 17 00:00:00 2001
+From: "piyush10.asalmol" <piyush10.asalmol@lge.com>
+Date: Tue, 1 Nov 2022 19:04:33 +0530
+Subject: [PATCH] Fix for Create Group api and crash issue
+
+:Release Notes:
+Fix for create group api and crash issue
+
+:Detailed Notes:
+Fix for create group api and crash issue
+
+:Testing Performed:
+Tested locally
+
+:QA Notes:
+NA
+
+:Issues Addressed:
+[WRO-11079] - Fix for create group api and crash issue
+
+Change-Id: I8d9969094f10d9b880c5e5218497a0e64ad8e500
+Reviewed-on: http://gpro.lge.com/c/webosose/connman-webos/+/338352
+Reviewed-by: Commit Msg Checker <commit_msg@lge.com>
+Reviewed-by: <muralidhar.n@lge.com>
+Tested-by: <muralidhar.n@lge.com>
+---
+ client/commands.c         |  27 +++-----
+ gsupplicant/gsupplicant.h |  83 +++++++++++++++++++++++-
+ gsupplicant/supplicant.c  | 132 +++++++++++++++++++++++++++++++++++++-
+ include/technology.h      |   9 +++
+ plugins/ethernet.c        |  12 ++--
+ plugins/wifi.c            |   7 +-
+ src/connman.h             |   6 ++
+ src/device.c              | 116 +++++++++++++++++++++++++++++++++
+ src/inet.c                |   7 ++
+ src/network.c             |   8 +++
+ src/peer.c                |  72 +++++++++++++++++++--
+ src/rtnl.c                | 125 ++++++++++++++++++------------------
+ src/technology.c          |  43 +++++++++++++
+ src/wispr.c               |   5 ++
+ 14 files changed, 556 insertions(+), 96 deletions(-)
+
+diff --git a/client/commands.c b/client/commands.c
+index 53cc14c8..f8b43921 100644
+--- a/client/commands.c
++++ b/client/commands.c
+@@ -557,16 +557,14 @@ static int tether_update(struct tether_properties *tether)
+ {
+ 	int ret;
+ 
+-	if (tether->ssid_result == 0 && tether->passphrase_result == 0 &&
+-			tether->freq_result == 0) {
++	if (tether->ssid_result == 0 && tether->passphrase_result == 0) {
+ 		ret = tether_set("wifi", tether->set_tethering);
+ 		g_free(tether);
+ 		return ret;
+ 	}
+ 
+ 	if (tether->ssid_result != -EINPROGRESS &&
+-			tether->passphrase_result != -EINPROGRESS &&
+-			tether->freq_result != -EINPROGRESS) {
++			tether->passphrase_result != -EINPROGRESS) {
+ 		g_free(tether);
+ 		return 0;
+ 	}
+@@ -622,9 +620,9 @@ static int tether_set_freq_return(DBusMessageIter *iter, int errnum,
+ 	return tether_update(tether);
+ }
+ 
+-static int tether_set_ssid(char *ssid, char *passphrase, int set_tethering, int freq)
++static int tether_set_ssid(char *ssid, char *passphrase, int set_tethering)
+ {
+-	struct tether_properties *tether = g_new0(struct tether_properties, 1);
++	struct tether_properties *tether = g_new(struct tether_properties, 1);
+ 
+ 	tether->set_tethering = set_tethering;
+ 
+@@ -640,17 +638,9 @@ static int tether_set_ssid(char *ssid, char *passphrase, int set_tethering, int
+ 			tether_set_passphrase_return, tether,
+ 			"TetheringPassphrase", DBUS_TYPE_STRING, &passphrase);
+ 
+-	if (freq > 0) {
+-		tether->freq_result =__connmanctl_dbus_set_property(connection,
+-				"/net/connman/technology/wifi",
+-				"net.connman.Technology",
+-				tether_set_freq_return, tether,
+-				"TetheringFreq", DBUS_TYPE_INT32, &freq);
+-	}
+ 
+ 	if (tether->ssid_result != -EINPROGRESS &&
+-			tether->passphrase_result != -EINPROGRESS &&
+-			tether->freq_result != -EINPROGRESS) {
++			tether->passphrase_result != -EINPROGRESS) {
+ 		g_free(tether);
+ 		return -ENXIO;
+ 	}
+@@ -666,6 +656,9 @@ static int cmd_tether(char *args[], int num, struct connman_option *options)
+ 	if (num < 3)
+ 		return -EINVAL;
+ 
++	passphrase = args[num - 1];
++	ssid = args[num - 2];
++
+ 	set_tethering = parse_boolean(args[2]);
+ 
+ 	if (strcmp(args[1], "wifi") == 0) {
+@@ -689,7 +682,7 @@ static int cmd_tether(char *args[], int num, struct connman_option *options)
+ 		ssid = args[num - 2];
+ 
+ 		if (num > 3)
+-			return tether_set_ssid(ssid, passphrase, set_tethering, freq);
++			return tether_set_ssid(ssid, passphrase, set_tethering);
+ 	}
+ 
+ 	if (num > 3)
+@@ -2800,7 +2793,7 @@ static const struct {
+ 	  "Disables given technology or offline mode",
+ 	  lookup_technology_offline },
+ 	{ "tether", "<technology> on|off\n"
+-	            "            wifi [on|off] <ssid> <passphrase> [<freq>] ",
++	            "            wifi [on|off] <ssid> <passphrase> ",
+ 	                                  NULL,            cmd_tether,
+ 	  "Enable, disable tethering, set SSID and passphrase for wifi",
+ 	  lookup_tether },
+diff --git a/gsupplicant/gsupplicant.h b/gsupplicant/gsupplicant.h
+index ba934c18..b29a66d7 100644
+--- a/gsupplicant/gsupplicant.h
++++ b/gsupplicant/gsupplicant.h
+@@ -404,6 +404,11 @@ typedef void (*GSupplicantInterfaceCallback) (int result,
+ 					GSupplicantInterface *interface,
+ 							void *user_data);
+ 
++typedef void (*GSupplicantInterfaceBcmCallback) (int result,
++					GSupplicantInterface *interface,
++						const char *cmd_response,
++							void *user_data);
++int dev_type_str2bin(const char *type, unsigned char dev_type[8]);
+ void g_supplicant_interface_cancel(GSupplicantInterface *interface);
+ 
+ int g_supplicant_interface_create(const char *ifname, const char *driver,
+@@ -463,8 +468,56 @@ int g_supplicant_interface_p2p_wps_start(GSupplicantInterface *interface,
+ 													GSupplicantP2PWPSParams *wps_data,
+ 													GSupplicantInterfaceCallback callback,
+ 													void *user_data);
++
++int g_supplicant_interface_p2p_remove_all_persistent_groups(GSupplicantInterface *interface);
++int g_supplicant_interface_p2p_add_persistent_group(GSupplicantInterface *interface,
++										GSupplicantSSID *ssid, void *user_data);
++
++int g_supplicant_interface_p2p_sd_request(GSupplicantInterface *interface,
++				GSupplicantP2PSDParams *sd_data,
++				GSupplicantInterfaceCallbackWithData callback,
++				void *user_data);
++
++int g_supplicant_interface_p2p_sd_cancel_request(GSupplicantInterface *interface,
++				dbus_uint64_t request_id,
++				GSupplicantInterfaceCallback callback,
++				void *user_data);
++
++int g_supplicant_interface_p2p_replace_service(GSupplicantInterface *interface,
++				GSupplicantInterfaceCallback callback,
++				GSupplicantP2PServiceParams *p2p_service_params,
++				void *user_data);
++
++int g_supplicant_interface_p2p_asp_provision_request(GSupplicantInterface *interface,
++										  GSupplicantP2PASPProvisionRequestParams *sd_data,
++										  GSupplicantInterfaceCallback callback,
++										  void *user_data);
++
++int g_supplicant_interface_p2p_asp_provision_response(GSupplicantInterface *interface,
++                                                      GSupplicantP2PASPProvisionResponseParams *params,
++                                                      GSupplicantInterfaceCallback callback,
++                                                      void *user_data);
++
++int g_supplicant_interface_p2p_read_device_address(GSupplicantInterface *interface,
++                                                   GSupplicantInterfaceCallback callback, void *user_data);
++
++const unsigned char *g_supplicant_interface_p2p_get_device_address(GSupplicantInterface *interface);
++
++
+ int g_supplicant_interface_p2p_del_service(GSupplicantInterface *interface,
+ 				GSupplicantP2PServiceParams *p2p_service_params);
++
++int g_supplicant_interface_p2p_reject(GSupplicantInterface *interface,
++					GSupplicantPeerParams *peer_params, GSupplicantInterfaceCallback callback,
++					void *user_data);
++
++int g_supplicant_interface_p2p_client_remove(GSupplicantInterface *interface,
++					GSupplicantInterfaceCallback callback,
++					char* peer_path);
++
++int g_supplicant_interface_p2p_cancel(GSupplicantInterface *interface,
++				GSupplicantInterfaceCallback callback, void *user_data);
++
+ int g_supplicant_interface_p2p_flush(GSupplicantInterface *interface,
+ 				GSupplicantInterfaceCallback callback, void *user_data);
+ int g_supplicant_interface_p2p_invite(GSupplicantInterface *interface,
+@@ -487,6 +540,10 @@ int g_supplicant_interface_disconnect(GSupplicantInterface *interface,
+ int g_supplicant_interface_set_bss_expiration_age(GSupplicantInterface *interface,
+ 					unsigned int bss_expiration_age);
+ 
++int g_supplicant_interface_wps_cancel(GSupplicantInterface *interface,
++					GSupplicantInterfaceCallback callback,
++							void *user_data);
++
+ int g_supplicant_interface_set_apscan(GSupplicantInterface *interface,
+ 							unsigned int ap_scan);
+ 
+@@ -572,12 +629,18 @@ dbus_uint16_t g_supplicant_bss_get_frequency(GSupplicantBss *bss);
+ 
+ GSupplicantInterface *g_supplicant_peer_get_interface(GSupplicantPeer *peer);
+ const char *g_supplicant_peer_get_path(GSupplicantPeer *peer);
++dbus_uint16_t g_supplicant_peer_get_config_methods(GSupplicantPeer *peer);
+ const char *g_supplicant_peer_get_identifier(GSupplicantPeer *peer);
+ const void *g_supplicant_peer_get_device_address(GSupplicantPeer *peer);
+ const void *g_supplicant_peer_get_iface_address(GSupplicantPeer *peer);
++const char *g_supplicant_peer_get_ip_address(GSupplicantPeer *peer);
++
+ const char *g_supplicant_peer_get_name(GSupplicantPeer *peer);
+ const unsigned char *g_supplicant_peer_get_widi_ies(GSupplicantPeer *peer,
+ 								int *length);
++dbus_int32_t g_supplicant_peer_get_level(GSupplicantPeer *peer);
++const char *g_supplicant_peer_get_pri_dev_type(GSupplicantPeer *peer);
++int g_supplicant_peer_get_failure_status(GSupplicantPeer *peer);
+ bool g_supplicant_peer_is_wps_pbc(GSupplicantPeer *peer);
+ bool g_supplicant_peer_is_wps_pin(GSupplicantPeer *peer);
+ bool g_supplicant_peer_is_in_a_group(GSupplicantPeer *peer);
+@@ -590,9 +653,27 @@ const char *g_supplicant_peer_identifier_from_intf_address(const char* pintf_add
+ const char *g_supplicant_peer_wfds_get_identifier(GSupplicantPeer *peer);
+ int g_supplicant_peer_wfds_get_asp_services(GSupplicantPeer *peer, GSupplicantP2PService** services);
+ const char *g_supplicant_peer_wfds_get_peer_name(GSupplicantPeer *peer);
+-char *g_supplicant_group_get_ssid(GSupplicantGroup *group);
++
++int g_supplicant_interface_bcm_private_cmd(GSupplicantInterface *interface,const char *driver_cmd,
++			GSupplicantInterfaceBcmCallback callback,void *user_data);
++
++GSupplicantInterface *g_supplicant_group_get_interface(GSupplicantGroup *group);
++GSupplicantInterface *g_supplicant_group_get_orig_interface(GSupplicantGroup *group);
++char *g_supplicant_group_get_object_path(GSupplicantGroup *group);
++char *g_supplicant_group_get_bssid_no_colon(GSupplicantGroup *group);
++GSupplicantGroup *g_supplicant_get_group(const char *path);
++GSupplicantP2PPersistentGroup* g_supplicant_interface_get_p2p_persistent_group(GSupplicantInterface *interface, GSupplicantGroup *group);
+ unsigned int g_supplicant_network_get_keymgmt(GSupplicantNetwork *network);
+ 
++int g_supplicant_group_get_role(GSupplicantGroup *group);
++char *g_supplicant_group_get_ssid(GSupplicantGroup *group);
++char *g_supplicant_group_get_passphrase(GSupplicantGroup *group);
++int g_supplicant_group_get_frequency(GSupplicantGroup *group);
++bool g_supplicant_group_get_persistent(GSupplicantGroup *group);
++char *g_supplicant_group_get_ip_addr(GSupplicantGroup *group);
++char *g_supplicant_group_get_ip_mask(GSupplicantGroup *group);
++char *g_supplicant_group_get_go_ip_addr(GSupplicantGroup *group);
++
+ struct _GSupplicantCallbacks {
+ 	void (*system_ready) (void);
+ 	void (*system_killed) (void);
+diff --git a/gsupplicant/supplicant.c b/gsupplicant/supplicant.c
+index 353fe9d6..cc0a16e9 100644
+--- a/gsupplicant/supplicant.c
++++ b/gsupplicant/supplicant.c
+@@ -1115,6 +1115,16 @@ static void remove_group(gpointer data)
+ 	g_free(group);
+ }
+ 
++static void callback_wps_state(GSupplicantInterface *interface)
++{
++	if (callbacks_pointer == NULL)
++		return;
++
++	if (callbacks_pointer->wps_state == NULL)
++		return;
++
++	callbacks_pointer->wps_state(interface);
++}
+ 
+ static void remove_interface(gpointer data)
+ {
+@@ -3615,6 +3625,58 @@ static void signal_wps_event(const char *path, DBusMessageIter *iter)
+ 	dbus_message_iter_next(iter);
+ 
+ 	supplicant_dbus_property_foreach(iter, wps_event_args, interface);
++
++	callback_wps_state(interface);
++}
++
++static void signal_station_connected(const char *path, DBusMessageIter *iter)
++{
++	GSupplicantInterface *interface;
++	const char *sta_mac = NULL;
++
++	SUPPLICANT_DBG("path %s %s", path, SUPPLICANT_PATH);
++
++	if (callbacks_pointer->station_added == NULL)
++		return;
++
++	if (g_strcmp0(path, "/") == 0)
++		return;
++
++	interface = g_hash_table_lookup(interface_table, path);
++	if (interface == NULL)
++		return;
++
++	dbus_message_iter_get_basic(iter, &sta_mac);
++	if (sta_mac == NULL)
++		return;
++
++	SUPPLICANT_DBG("New station %s connected", sta_mac);
++	callbacks_pointer->station_added(sta_mac);
++}
++
++static void signal_station_disconnected(const char *path, DBusMessageIter *iter)
++{
++	GSupplicantInterface *interface;
++	const char *sta_mac = NULL;
++
++	SUPPLICANT_DBG("path %s %s", path, SUPPLICANT_PATH);
++
++	if (callbacks_pointer->station_removed == NULL)
++		return;
++
++	if (g_strcmp0(path, "/") == 0)
++		return;
++
++	interface = g_hash_table_lookup(interface_table, path);
++	if (interface == NULL)
++		return;
++
++	dbus_message_iter_get_basic(iter, &sta_mac);
++	if (sta_mac == NULL)
++		return;
++
++	SUPPLICANT_DBG("Station %s disconnected", sta_mac);
++	callbacks_pointer->station_removed(sta_mac);
+ }
+ 
+ static void create_peer_identifier(GSupplicantPeer *peer)
+@@ -4948,6 +5010,62 @@ static void interface_p2p_prov_disc_request_or_response(DBusMessageIter *iter,
+ 		                                     (void *)pin);
+ 	}
+ }
++
++static void signal_prov_disc_requested_pbc(const char *path, DBusMessageIter *iter)
++{
++	GSupplicantInterface *interface;
++
++	interface = g_hash_table_lookup(interface_table, path);
++	if (!interface)
++		return;
++
++	interface_p2p_prov_disc_request_or_response(iter, interface, true, "pbc");
++}
++
++static void signal_prov_disc_requested_enter_pin(const char *path, DBusMessageIter *iter)
++{
++	GSupplicantInterface *interface;
++
++	interface = g_hash_table_lookup(interface_table, path);
++	if (!interface)
++		return;
++
++	interface_p2p_prov_disc_request_or_response(iter, interface, true, "enter_pin");
++}
++
++static void signal_prov_disc_requested_disp_pin(const char *path, DBusMessageIter *iter)
++{
++	GSupplicantInterface *interface;
++
++	interface = g_hash_table_lookup(interface_table, path);
++	if (!interface)
++		return;
++
++	interface_p2p_prov_disc_request_or_response(iter, interface, true, "disp_pin");
++}
++
++static void signal_prov_disc_response_enter_pin(const char *path, DBusMessageIter *iter)
++{
++	GSupplicantInterface *interface;
++
++	interface = g_hash_table_lookup(interface_table, path);
++	if (!interface)
++		return;
++
++	interface_p2p_prov_disc_request_or_response(iter, interface, false, "enter_pin");
++}
++
++static void signal_prov_disc_response_disp_pin(const char *path, DBusMessageIter *iter)
++{
++	GSupplicantInterface *interface;
++
++	interface = g_hash_table_lookup(interface_table, path);
++	if (!interface)
++		return;
++
++	interface_p2p_prov_disc_request_or_response(iter, interface, false, "disp_pin");
++}
++
+ static void interface_p2p_prov_disc_fail(DBusMessageIter *iter, void *user_data)
+ {
+ 	GSupplicantInterface *interface = user_data;
+@@ -5789,6 +5907,9 @@ static struct {
+ 	{ SUPPLICANT_INTERFACE ".Interface", "StaAuthorized",     signal_sta_authorized    },
+ 	{ SUPPLICANT_INTERFACE ".Interface", "StaDeauthorized",   signal_sta_deauthorized  },
+ 
++	{ SUPPLICANT_INTERFACE ".Interface", "StaAuthorized",     signal_station_connected   },
++	{ SUPPLICANT_INTERFACE ".Interface", "StaDeauthorized",   signal_station_disconnected },
++
+ 	{ SUPPLICANT_INTERFACE ".BSS", "PropertiesChanged", signal_bss_changed   },
+ 
+ 	{ SUPPLICANT_INTERFACE ".Interface.WPS", "Credentials", signal_wps_credentials },
+@@ -5811,6 +5932,15 @@ static struct {
+ 
+ 	{ SUPPLICANT_INTERFACE ".Interface.P2PDevice", "P2PSProvisionStart", signal_p2ps_prov_start	},
+ 	{ SUPPLICANT_INTERFACE ".Interface.P2PDevice", "P2PSProvisionDone",	 signal_p2ps_prov_done	},
++
++	{ SUPPLICANT_INTERFACE ".Interface.P2PDevice", "ProvisionDiscoveryPBCRequest",	signal_prov_disc_requested_pbc },
++	{ SUPPLICANT_INTERFACE ".Interface.P2PDevice", "ProvisionDiscoveryRequestEnterPin",	signal_prov_disc_requested_enter_pin },
++	{ SUPPLICANT_INTERFACE ".Interface.P2PDevice", "ProvisionDiscoveryRequestDisplayPin",	signal_prov_disc_requested_disp_pin },
++
++	{ SUPPLICANT_INTERFACE ".Interface.P2PDevice", "ProvisionDiscoveryResponseEnterPin",	signal_prov_disc_response_enter_pin },
++	{ SUPPLICANT_INTERFACE ".Interface.P2PDevice", "ProvisionDiscoveryResponseDisplayPin",	signal_prov_disc_response_disp_pin },
++	{ SUPPLICANT_INTERFACE ".Interface.P2PDevice", "ProvisionDiscoveryFailure",	signal_prov_disc_fail },
++
+ 	{ SUPPLICANT_INTERFACE ".Interface.P2PDevice", "InvitationResult", signal_invitation_result },
+ 	{ SUPPLICANT_INTERFACE ".Interface.P2PDevice", "InvitationReceived", signal_invitation_received	},
+ 	{ SUPPLICANT_INTERFACE ".Group", "PeerJoined", signal_group_peer_joined },
+@@ -6063,7 +6193,7 @@ static void p2p_device_config_result(const char *error,
+ 	dbus_free(config);
+ }
+ 
+-static int dev_type_str2bin(const char *type, unsigned char dev_type[8])
++int dev_type_str2bin(const char *type, unsigned char dev_type[8])
+ {
+ 	int length, pos, end;
+ 	char b[3] = {};
+diff --git a/include/technology.h b/include/technology.h
+index 6f721ee5..ffc951d2 100644
+--- a/include/technology.h
++++ b/include/technology.h
+@@ -39,6 +39,9 @@ struct connman_technology;
+ 
+ int connman_technology_tethering_notify(struct connman_technology *technology,
+ 							bool enabled);
++void connman_technology_interface_changed(struct connman_technology *technology);
++int connman_technology_add_station(enum connman_service_type type, const char *mac);
++int connman_technology_remove_station(char *mac);
+ int connman_technology_set_regdom(const char *alpha2);
+ void connman_technology_regdom_notify(struct connman_technology *technology,
+ 							const char *alpha2);
+@@ -58,10 +61,16 @@ bool connman_technology_get_enable_p2p_listen(struct connman_technology *technol
+ bool connman_technology_get_p2p_listen(struct connman_technology *technology);
+ void connman_technology_set_p2p_listen(struct connman_technology *technology,
+ 							bool enabled);
++void __connman_technology_p2p_invitation_result(struct connman_technology *technology,
++							int status);
++void connman_technology_set_p2p_listen_params(struct connman_technology *technology,
++						int period, int interval);
+ unsigned int connman_technology_get_p2p_listen_channel(struct connman_technology *technology);
+ void connman_technology_set_p2p_listen_channel(struct connman_technology *technology,
+ 									unsigned int listen_channel);
+ void connman_technology_wps_failed_notify(struct connman_technology *technology);
++bool connman_technology_get_p2p_persistent(struct connman_technology *technology);
++void connman_technology_set_p2p_persistent(struct connman_technology *technology, bool enabled);
+ 
+ struct connman_technology_driver {
+ 	const char *name;
+diff --git a/plugins/ethernet.c b/plugins/ethernet.c
+index 27a3dcf3..265a7b09 100644
+--- a/plugins/ethernet.c
++++ b/plugins/ethernet.c
+@@ -73,7 +73,7 @@ static int get_vlan_vid(const char *ifname)
+ 		return -errno;
+ 
+ 	vifr.cmd = GET_VLAN_VID_CMD;
+-	stpncpy(vifr.device1, ifname, sizeof(vifr.device1) - 1);
++	stpncpy(vifr.device1, ifname, sizeof(vifr.device1));
+ 
+ 	if(ioctl(sk, SIOCSIFVLAN, &vifr) >= 0)
+ 		vid = vifr.u.VID;
+@@ -99,16 +99,14 @@ static int get_dsa_port(const char *ifname)
+ 		return -errno;
+ 
+ 	memset(&ifr, 0, sizeof(ifr));
+-	stpncpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name) - 1);
++	stpncpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name));
+ 
+ 	/* check if it is a vlan and get physical interface name*/
+ 	vifr.cmd = GET_VLAN_REALDEV_NAME_CMD;
+-	stpncpy(vifr.device1, ifname, sizeof(vifr.device1) - 1);
++	stpncpy(vifr.device1, ifname, sizeof(vifr.device1));
+ 
+-	if(ioctl(sk, SIOCSIFVLAN, &vifr) >= 0) {
+-		stpncpy(ifr.ifr_name, vifr.u.device2, sizeof(ifr.ifr_name) - 1);
+-		ifr.ifr_name[sizeof(ifr.ifr_name) - 1] = '\0';
+-	}
++	if(ioctl(sk, SIOCSIFVLAN, &vifr) >= 0)
++		stpncpy(ifr.ifr_name, vifr.u.device2, sizeof(ifr.ifr_name));
+ 
+ 	/* get driver info */
+ 	drvinfocmd.cmd =  ETHTOOL_GDRVINFO;
+diff --git a/plugins/wifi.c b/plugins/wifi.c
+index 101c0e7a..bc390870 100644
+--- a/plugins/wifi.c
++++ b/plugins/wifi.c
+@@ -750,7 +750,7 @@ static int tech_set_p2p_go(DBusMessage *msg, struct connman_technology *technolo
+ 
+ 		info->wifi = wifi;
+ 		info->technology = technology;
+-
++		
+ 		if (identifier || passphrase) {
+ 			snprintf(p2p_ssid, P2P_MAX_SSID, "%s%s", P2P_WILDCARD_SSID, identifier);
+ 			info->ssid = ssid_ap_init(p2p_ssid, passphrase);
+@@ -762,7 +762,6 @@ static int tech_set_p2p_go(DBusMessage *msg, struct connman_technology *technolo
+ 			err = g_supplicant_interface_p2p_group_add(iface, NULL,
+ 					NULL, info);
+ 		}
+-
+ 		group_msg = dbus_message_ref(msg);
+ 		create_group_flag = true;
+ 	}
+@@ -5520,7 +5519,6 @@ static void p2p_group_started(GSupplicantGroup *group)
+ 
+ 	if (!wifi)
+ 		return;
+-
+ 	const char* bssid_no_colon = g_supplicant_group_get_bssid_no_colon(group);
+ 	const char *ssid = g_supplicant_group_get_ssid(group);
+ 	const char *passphrase = g_supplicant_group_get_passphrase(group);
+@@ -5568,7 +5566,6 @@ static void p2p_group_started(GSupplicantGroup *group)
+ 		if (create_group_flag)
+ 			__connman_p2p_go_set_enabled();
+ 	}
+-
+ 	int freq = g_supplicant_group_get_frequency(group);
+ 	bool persistent = g_supplicant_group_get_persistent(group);
+ 
+@@ -6320,6 +6317,8 @@ static int wifi_init(void)
+ {
+ 	int err;
+ 
++	connection = connman_dbus_get_connection();
++
+ 	err = connman_network_driver_register(&network_driver);
+ 	if (err < 0)
+ 		return err;
+diff --git a/src/connman.h b/src/connman.h
+index d4714122..8c8f2e4f 100644
+--- a/src/connman.h
++++ b/src/connman.h
+@@ -471,6 +471,7 @@ typedef void (* dhcpv6_cb) (struct connman_network *network,
+ typedef void (* dhcp_cb) (struct connman_ipconfig *ipconfig,
+ 			struct connman_network *opt_network,
+ 			bool success, gpointer data);
++char *__connman_dhcp_get_client_address(struct connman_ipconfig *ipconfig);
+ char *__connman_dhcp_get_server_address(struct connman_ipconfig *ipconfig);
+ int __connman_dhcp_start(struct connman_ipconfig *ipconfig,
+ 			struct connman_network *network, dhcp_cb callback,
+@@ -509,6 +510,8 @@ int __connman_connection_gateway_add(struct connman_service *service,
+ 					const char *peer);
+ void __connman_connection_gateway_remove(struct connman_service *service,
+ 					enum connman_ipconfig_type type);
++char *find_service_gateway(struct connman_service *service);
++
+ int __connman_connection_get_vpn_index(int phy_index);
+ int __connman_connection_get_vpn_phy_index(int vpn_index);
+ 
+@@ -577,6 +580,8 @@ enum connman_service_type __connman_device_get_service_type(struct connman_devic
+ struct connman_device *__connman_device_find_device(enum connman_service_type type);
+ int __connman_device_request_scan(enum connman_service_type type);
+ int __connman_device_request_scan_full(enum connman_service_type type);
++int __connman_device_request_start_wps(enum connman_service_type type, const char *pin);
++int __connman_device_request_cancel_wps(enum connman_service_type type);
+ int __connman_device_request_cancel_p2p(enum connman_service_type type);
+ int __connman_device_request_hidden_scan(struct connman_device *device,
+ 				const char *ssid, unsigned int ssid_len,
+@@ -770,6 +775,7 @@ int __connman_service_indicate_default(struct connman_service *service);
+ int __connman_service_connect(struct connman_service *service,
+ 			enum connman_service_connect_reason reason);
+ int __connman_service_disconnect(struct connman_service *service);
++int __connman_service_disconnect_all(void);
+ void __connman_service_set_active_session(bool enable, GSList *list);
+ void __connman_service_auto_connect(enum connman_service_connect_reason reason);
+ bool __connman_service_remove(struct connman_service *service);
+diff --git a/src/device.c b/src/device.c
+index 6d4feaad..f1560b81 100644
+--- a/src/device.c
++++ b/src/device.c
+@@ -1232,6 +1232,122 @@ void __connman_device_stop_scan(enum connman_service_type type)
+ 	}
+ }
+ 
++static int device_start_wps(struct connman_device *device, const char *pin)
++{
++	if (!device->driver || !device->driver->start_wps)
++		return -EOPNOTSUPP;
++
++	if (device->powered == FALSE)
++	        return -ENOLINK;
++
++	__connman_device_disconnect(device);
++
++	return device->driver->start_wps(device, pin);
++}
++
++int __connman_device_request_start_wps(enum connman_service_type type, const char *pin)
++{
++	bool success = FALSE;
++	int last_err = -ENOSYS;
++	GSList *list;
++	int err;
++
++	switch (type) {
++	case CONNMAN_SERVICE_TYPE_UNKNOWN:
++	case CONNMAN_SERVICE_TYPE_SYSTEM:
++	case CONNMAN_SERVICE_TYPE_ETHERNET:
++	case CONNMAN_SERVICE_TYPE_BLUETOOTH:
++	case CONNMAN_SERVICE_TYPE_CELLULAR:
++	case CONNMAN_SERVICE_TYPE_GPS:
++	case CONNMAN_SERVICE_TYPE_VPN:
++	case CONNMAN_SERVICE_TYPE_GADGET:
++		return -EOPNOTSUPP;
++	case CONNMAN_SERVICE_TYPE_WIFI:
++		break;
++	}
++
++	for (list = device_list; list != NULL; list = list->next) {
++		struct connman_device *device = list->data;
++		enum connman_service_type service_type =
++			__connman_device_get_service_type(device);
++
++		if (service_type != CONNMAN_SERVICE_TYPE_UNKNOWN &&
++				service_type != type) {
++			continue;
++		}
++
++		err = device_start_wps(device, pin);
++		if (err == 0) {
++			success = TRUE;
++		} else {
++			last_err = err;
++			DBG("device %p err %d", device, err);
++		}
++	}
++
++	if (success == TRUE)
++		return 0;
++
++	return last_err;
++}
++
++static int device_cancel_wps(struct connman_device *device)
++{
++	if (!device->driver || !device->driver->cancel_wps)
++		return -EOPNOTSUPP;
++
++	if (device->powered == FALSE)
++		return -ENOLINK;
++
++	return device->driver->cancel_wps(device);
++}
++
++int __connman_device_request_cancel_wps(enum connman_service_type type)
++{
++	bool success = FALSE;
++	int last_err = -ENOSYS;
++	GSList *list;
++	int err;
++
++	switch (type) {
++	case CONNMAN_SERVICE_TYPE_UNKNOWN:
++	case CONNMAN_SERVICE_TYPE_SYSTEM:
++	case CONNMAN_SERVICE_TYPE_ETHERNET:
++	case CONNMAN_SERVICE_TYPE_BLUETOOTH:
++	case CONNMAN_SERVICE_TYPE_CELLULAR:
++	case CONNMAN_SERVICE_TYPE_GPS:
++	case CONNMAN_SERVICE_TYPE_VPN:
++	case CONNMAN_SERVICE_TYPE_GADGET:
++		return -EOPNOTSUPP;
++	case CONNMAN_SERVICE_TYPE_WIFI:
++		break;
++	}
++
++	for (list = device_list; list != NULL; list = list->next) {
++		struct connman_device *device = list->data;
++		enum connman_service_type service_type =
++			__connman_device_get_service_type(device);
++
++		if (service_type != CONNMAN_SERVICE_TYPE_UNKNOWN &&
++			service_type != type) {
++			continue;
++		}
++
++		err = device_cancel_wps(device);
++		if (err == 0) {
++			success = TRUE;
++		} else {
++			last_err = err;
++			DBG("device %p err %d", device, err);
++		}
++	}
++
++	if (success == TRUE)
++		return 0;
++
++	return last_err;
++}
++
+ static int device_cancel_p2p(struct connman_device *device)
+ {
+ 	if (!device->driver || !device->driver->cancel_p2p)
+diff --git a/src/inet.c b/src/inet.c
+index 4039a73c..df94d1ee 100644
+--- a/src/inet.c
++++ b/src/inet.c
+@@ -1836,6 +1836,13 @@ int __connman_inet_ipv6_send_rs(int index, int timeout,
+ 	return 0;
+ }
+ 
++static inline void ipv6_addr_advert_mult(const struct in6_addr *addr,
++					struct in6_addr *advert)
++{
++	ipv6_addr_set(advert, htonl(0xFF020000), 0, htonl(0x2),
++			htonl(0xFF000000) | addr->s6_addr32[3]);
++}
++
+ #define MSG_SIZE_SEND 1452
+ 
+ static int inc_len(int len, int inc)
+diff --git a/src/network.c b/src/network.c
+index a46c763c..123a5183 100644
+--- a/src/network.c
++++ b/src/network.c
+@@ -489,6 +489,8 @@ static void dhcp_callback(struct connman_ipconfig *ipconfig,
+ 			struct connman_network *network,
+ 			bool success, gpointer data)
+ {
++	connman_info("DHCP success %d",success);
++
+ 	network->connecting = false;
+ 
+ 	if (success)
+@@ -1246,6 +1248,7 @@ static void network_destruct(struct connman_network *network)
+ 	g_free(network->wifi.private_key_passphrase);
+ 	g_free(network->wifi.phase2_auth);
+ 	g_free(network->wifi.pin_wps);
++	g_hash_table_destroy(network->wifi.bss);
+ 
+ 	g_free(network->path);
+ 	g_free(network->group);
+@@ -1253,9 +1256,11 @@ static void network_destruct(struct connman_network *network)
+ 	g_free(network->name);
+ 	g_free(network->identifier);
+ 	acd_host_free(network->acd_host);
++	g_free(network->address);
+ 
+ 	network->device = NULL;
+ 
++	network->wifi.bss = NULL;
+ 	g_free(network);
+ }
+ 
+@@ -1290,6 +1295,7 @@ struct connman_network *connman_network_create(const char *identifier,
+ 	network->identifier = ident;
+ 	network->acd_host = NULL;
+ 	network->ipv4ll_timeout = 0;
++	network->wifi.bss   = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+ 
+ 	network_list = g_slist_prepend(network_list, network);
+ 
+@@ -1814,6 +1820,8 @@ int __connman_network_connect(struct connman_network *network)
+ 	if (!network->device)
+ 		return -ENODEV;
+ 
++	__connman_device_disconnect(network->device);
++
+ 	network->connecting = true;
+ 
+ 	err = network->driver->connect(network);
+diff --git a/src/peer.c b/src/peer.c
+index 385ccd0e..cc585bae 100644
+--- a/src/peer.c
++++ b/src/peer.c
+@@ -111,7 +111,7 @@ static void stop_dhcp_server(struct connman_peer *peer)
+ 	peer->dhcp_server = NULL;
+ 
+ 	if (peer->ip_pool)
+-		__connman_ippool_free(peer->ip_pool);
++		__connman_ippool_unref(peer->ip_pool);
+ 	peer->ip_pool = NULL;
+ 	peer->lease_ip = 0;
+ }
+@@ -124,13 +124,30 @@ static void dhcp_server_debug(const char *str, void *data)
+ static void lease_added(unsigned char *mac, uint32_t ip)
+ {
+ 	GList *list, *start;
++	char *mac_no_colon = __connman_util_mac_binary_to_string_no_colon(mac);
++
++	if (!mac_no_colon){
++		connman_info("Failed to get mac");
++		return;
++	}
++
++	const char* identifier = g_supplicant_peer_identifier_from_intf_address(mac_no_colon);
++	g_free(mac_no_colon);
++
++	if (!identifier)
++		return;
+ 
+ 	start = list = g_hash_table_get_values(peers_table);
+ 	for (; list; list = list->next) {
+ 		struct connman_peer *temp = list->data;
+ 
+-		if (!memcmp(temp->iface_address, mac, ETH_ALEN)) {
++		if (!g_strcmp0(temp->identifier, identifier)) {
+ 			temp->lease_ip = ip;
++			if (temp->is_static_ip) {
++				temp->is_static_ip = false;
++				if (temp->clientCb)
++					temp->clientCb();
++			}
+ 			settings_changed(temp);
+ 			break;
+ 		}
+@@ -169,7 +186,8 @@ static int start_dhcp_server(struct connman_peer *peer)
+ 	else
+ 		index = connman_device_get_index(peer->device);
+ 
+-	peer->ip_pool = __connman_ippool_create(index, 2, 1, NULL, NULL);
++	peer->ip_pool = __connman_ippool_create_with_block(index, 2, 252,
++						P2P_DEFAULT_BLOCK, NULL, NULL);
+ 	if (!peer->ip_pool)
+ 		goto error;
+ 
+@@ -237,6 +255,7 @@ static void peer_free(gpointer data)
+ 	}
+ 
+ 	if (peer->ipconfig) {
++		__connman_dhcp_stop(peer->ipconfig);
+ 		__connman_ipconfig_set_ops(peer->ipconfig, NULL);
+ 		__connman_ipconfig_set_data(peer->ipconfig, NULL);
+ 		__connman_ipconfig_unref(peer->ipconfig);
+@@ -255,7 +274,7 @@ static void peer_free(gpointer data)
+ 
+ 	g_free(peer->identifier);
+ 	g_free(peer->name);
+-
++	g_free(peer->device_address);
+ 	g_free(peer);
+ }
+ 
+@@ -349,6 +368,10 @@ static void append_ipv4(DBusMessageIter *iter, void *user_data)
+ 
+ 		local = __connman_ippool_get_gateway(peer->ip_pool);
+ 		remote = trans;
++		if (peer->lease_ip == 0)
++			peer->is_dhcp_ip = false;
++		else
++			peer->is_dhcp_ip = true;
+ 	} else if (peer->ipconfig) {
+ 		local = __connman_ipconfig_get_local(peer->ipconfig);
+ 
+@@ -365,6 +388,10 @@ static void append_ipv4(DBusMessageIter *iter, void *user_data)
+ 						DBUS_TYPE_STRING, &local);
+ 	connman_dbus_dict_append_basic(iter, "Remote",
+ 						DBUS_TYPE_STRING, &remote);
++
++	g_free(peer->dhcp_ip);
++	peer->dhcp_ip = g_strdup(remote);
++
+ 	if (dhcp)
+ 		g_free(dhcp);
+ }
+@@ -412,6 +439,27 @@ static void append_peer_services(DBusMessageIter *iter, void *user_data)
+ 	dbus_message_iter_close_container(iter, &container);
+ }
+ 
++static void append_peer(DBusMessageIter *dict, void *user_data)
++{
++	dbus_bool_t val;
++	struct connman_peer *peer = user_data;
++
++	connman_dbus_dict_append_basic(dict, "DeviceAddress", DBUS_TYPE_STRING,
++					&peer->device_address);
++
++	val = peer->is_groupOwner;
++	connman_dbus_dict_append_basic(dict, "GroupOwner", DBUS_TYPE_BOOLEAN,
++					&val);
++
++	if (peer->config_methods)
++		connman_dbus_dict_append_basic(dict, "ConfigMethod", DBUS_TYPE_UINT16,
++					&peer->config_methods);
++
++	if (peer->pri_dev_type)
++		connman_dbus_dict_append_basic(dict, "DeviceType", DBUS_TYPE_STRING,
++					&peer->pri_dev_type);
++}
++
+ static void append_properties(DBusMessageIter *iter, struct connman_peer *peer)
+ {
+ 	const char *state = state2string(peer->state);
+@@ -419,14 +467,30 @@ static void append_properties(DBusMessageIter *iter, struct connman_peer *peer)
+ 
+ 	connman_dbus_dict_open(iter, &dict);
+ 
++	connman_dbus_dict_append_basic(&dict, "Type",
++					DBUS_TYPE_STRING, &peer->type);
+ 	connman_dbus_dict_append_basic(&dict, "State",
+ 					DBUS_TYPE_STRING, &state);
+ 	connman_dbus_dict_append_basic(&dict, "Name",
+ 					DBUS_TYPE_STRING, &peer->name);
++	connman_dbus_dict_append_basic(&dict, "Strength",
++					DBUS_TYPE_BYTE, &peer->strength);
++	connman_dbus_dict_append_dict(&dict, "P2P", append_peer, peer);
++
+ 	connman_dbus_dict_append_dict(&dict, "IPv4", append_ipv4, peer);
+ 	connman_dbus_dict_append_array(&dict, "Services",
+ 					DBUS_TYPE_DICT_ENTRY,
+ 					append_peer_services, peer);
++
++	if (is_connected(peer)) {
++		if (peer->is_static_ip)
++			connman_dbus_dict_append_basic(&dict, "IPAddress",
++				DBUS_TYPE_STRING, &peer->static_ip);
++		else if (peer->is_dhcp_ip)
++			connman_dbus_dict_append_basic(&dict, "IPAddress",
++				DBUS_TYPE_STRING, &peer->dhcp_ip);
++	}
++
+ 	connman_dbus_dict_close(iter, &dict);
+ }
+ 
+diff --git a/src/rtnl.c b/src/rtnl.c
+index a87296ff..c9e84dab 100644
+--- a/src/rtnl.c
++++ b/src/rtnl.c
+@@ -1308,71 +1308,75 @@ static const char *type2string(uint16_t type)
+ static GIOChannel *channel = NULL;
+ static guint channel_watch = 0;
+ 
+-#define RTNL_REQUEST_SIZE (NLMSG_HDRLEN + NLMSG_ALIGN(sizeof(struct rtgenmsg)))
++struct rtnl_request {
++	struct nlmsghdr hdr;
++	struct rtgenmsg msg;
++};
++#define RTNL_REQUEST_SIZE  (sizeof(struct nlmsghdr) + sizeof(struct rtgenmsg))
+ 
+ static GSList *request_list = NULL;
+ static guint32 request_seq = 0;
+ 
+-static struct nlmsghdr *find_request(guint32 seq)
++static struct rtnl_request *find_request(guint32 seq)
+ {
+ 	GSList *list;
+ 
+ 	for (list = request_list; list; list = list->next) {
+-		struct nlmsghdr *hdr = list->data;
++		struct rtnl_request *req = list->data;
+ 
+-		if (hdr->nlmsg_seq == seq)
+-			return hdr;
++		if (req->hdr.nlmsg_seq == seq)
++			return req;
+ 	}
+ 
+ 	return NULL;
+ }
+ 
+-static int send_request(struct nlmsghdr *hdr)
++static int send_request(struct rtnl_request *req)
+ {
+ 	struct sockaddr_nl addr;
+ 	int sk;
+ 
+ 	DBG("%s len %d type %d flags 0x%04x seq %d",
+-				type2string(hdr->nlmsg_type),
+-				hdr->nlmsg_len, hdr->nlmsg_type,
+-				hdr->nlmsg_flags, hdr->nlmsg_seq);
++				type2string(req->hdr.nlmsg_type),
++				req->hdr.nlmsg_len, req->hdr.nlmsg_type,
++				req->hdr.nlmsg_flags, req->hdr.nlmsg_seq);
+ 
+ 	sk = g_io_channel_unix_get_fd(channel);
+ 
+ 	memset(&addr, 0, sizeof(addr));
+ 	addr.nl_family = AF_NETLINK;
+ 
+-	return sendto(sk, hdr, hdr->nlmsg_len, 0,
++	return sendto(sk, req, req->hdr.nlmsg_len, 0,
+ 				(struct sockaddr *) &addr, sizeof(addr));
+ }
+ 
+-static int queue_request(struct nlmsghdr *hdr)
++static int queue_request(struct rtnl_request *req)
+ {
+-	request_list = g_slist_append(request_list, hdr);
++	request_list = g_slist_append(request_list, req);
+ 
+ 	if (g_slist_length(request_list) > 1)
+ 		return 0;
+ 
+-	return send_request(hdr);
++	return send_request(req);
+ }
+ 
+ static int process_response(guint32 seq)
+ {
+-	struct nlmsghdr *hdr;
++	struct rtnl_request *req;
+ 
+ 	DBG("seq %d", seq);
+ 
+-	hdr = find_request(seq);
+-	if (hdr) {
+-		request_list = g_slist_remove(request_list, hdr);
+-		g_free(hdr);
++	req = find_request(seq);
++	if (req) {
++		request_list = g_slist_remove(request_list, req);
++		g_free(req);
+ 	}
+ 
+-	hdr = g_slist_nth_data(request_list, 0);
+-	if (!hdr)
++	req = g_slist_nth_data(request_list, 0);
++	if (!req)
+ 		return 0;
+ 
+-	return send_request(hdr);
++	return send_request(req);
+ }
+ 
+ static void rtnl_message(void *buf, size_t len)
+@@ -1470,65 +1474,62 @@ static gboolean netlink_event(GIOChannel *chan, GIOCondition cond, gpointer data
+ 
+ static int send_getlink(void)
+ {
+-	struct nlmsghdr *hdr;
+-	struct rtgenmsg *msg;
++	struct rtnl_request *req;
+ 
+ 	DBG("");
+ 
+-	hdr = g_malloc0(RTNL_REQUEST_SIZE);
+-
+-	hdr->nlmsg_len = RTNL_REQUEST_SIZE;
+-	hdr->nlmsg_type = RTM_GETLINK;
+-	hdr->nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
+-	hdr->nlmsg_pid = 0;
+-	hdr->nlmsg_seq = request_seq++;
++	req = g_try_malloc0(RTNL_REQUEST_SIZE);
++	if (!req)
++		return -ENOMEM;
+ 
+-	msg = (struct rtgenmsg *) NLMSG_DATA(hdr);
+-	msg->rtgen_family = AF_INET;
++	req->hdr.nlmsg_len = RTNL_REQUEST_SIZE;
++	req->hdr.nlmsg_type = RTM_GETLINK;
++	req->hdr.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
++	req->hdr.nlmsg_pid = 0;
++	req->hdr.nlmsg_seq = request_seq++;
++	req->msg.rtgen_family = AF_INET;
+ 
+-	return queue_request(hdr);
++	return queue_request(req);
+ }
+ 
+ static int send_getaddr(void)
+ {
+-	struct nlmsghdr *hdr;
+-	struct rtgenmsg *msg;
++	struct rtnl_request *req;
+ 
+ 	DBG("");
+ 
+-	hdr = g_malloc0(RTNL_REQUEST_SIZE);
++	req = g_try_malloc0(RTNL_REQUEST_SIZE);
++	if (!req)
++		return -ENOMEM;
+ 
+-	hdr->nlmsg_len = RTNL_REQUEST_SIZE;
+-	hdr->nlmsg_type = RTM_GETADDR;
+-	hdr->nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
+-	hdr->nlmsg_pid = 0;
+-	hdr->nlmsg_seq = request_seq++;
++	req->hdr.nlmsg_len = RTNL_REQUEST_SIZE;
++	req->hdr.nlmsg_type = RTM_GETADDR;
++	req->hdr.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
++	req->hdr.nlmsg_pid = 0;
++	req->hdr.nlmsg_seq = request_seq++;
++	req->msg.rtgen_family = AF_INET;
+ 
+-	msg = (struct rtgenmsg *) NLMSG_DATA(hdr);
+-	msg->rtgen_family = AF_INET;
+-
+-	return queue_request(hdr);
++	return queue_request(req);
+ }
+ 
+ static int send_getroute(void)
+ {
+-	struct nlmsghdr *hdr;
+-	struct rtgenmsg *msg;
++	struct rtnl_request *req;
+ 
+ 	DBG("");
+ 
+-	hdr = g_malloc0(RTNL_REQUEST_SIZE);
+-
+-	hdr->nlmsg_len = RTNL_REQUEST_SIZE;
+-	hdr->nlmsg_type = RTM_GETROUTE;
+-	hdr->nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
+-	hdr->nlmsg_pid = 0;
+-	hdr->nlmsg_seq = request_seq++;
++	req = g_try_malloc0(RTNL_REQUEST_SIZE);
++	if (!req)
++		return -ENOMEM;
+ 
+-	msg = (struct rtgenmsg *) NLMSG_DATA(hdr);
+-	msg->rtgen_family = AF_INET;
++	req->hdr.nlmsg_len = RTNL_REQUEST_SIZE;
++	req->hdr.nlmsg_type = RTM_GETROUTE;
++	req->hdr.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
++	req->hdr.nlmsg_pid = 0;
++	req->hdr.nlmsg_seq = request_seq++;
++	req->msg.rtgen_family = AF_INET;
+ 
+-	return queue_request(hdr);
++	return queue_request(req);
+ }
+ 
+ static gboolean update_timeout_cb(gpointer user_data)
+@@ -1672,14 +1673,14 @@ void __connman_rtnl_cleanup(void)
+ 	update_list = NULL;
+ 
+ 	for (list = request_list; list; list = list->next) {
+-		struct nlmsghdr *hdr= list->data;
++		struct rtnl_request *req = list->data;
+ 
+ 		DBG("%s len %d type %d flags 0x%04x seq %d",
+-				type2string(hdr->nlmsg_type),
+-				hdr->nlmsg_len, hdr->nlmsg_type,
+-				hdr->nlmsg_flags, hdr->nlmsg_seq);
++				type2string(req->hdr.nlmsg_type),
++				req->hdr.nlmsg_len, req->hdr.nlmsg_type,
++				req->hdr.nlmsg_flags, req->hdr.nlmsg_seq);
+ 
+-		g_free(hdr);
++		g_free(req);
+ 		list->data = NULL;
+ 	}
+ 
+diff --git a/src/technology.c b/src/technology.c
+index 535a9040..ff54059f 100644
+--- a/src/technology.c
++++ b/src/technology.c
+@@ -1956,6 +1956,44 @@ void connman_technology_wps_failed_notify(struct connman_technology *technology)
+ 		CONNMAN_TECHNOLOGY_INTERFACE, "WPSFailed",
+ 		DBUS_TYPE_INVALID);
+ }
++
++static DBusMessage *start_wps(DBusConnection *conn, DBusMessage *msg, void *data)
++{
++	struct connman_technology *technology = data;
++	DBusMessageIter iter;
++	int err;
++	const char *pin;
++
++	DBG("technology %p request from %s", technology,
++		dbus_message_get_sender(msg));
++
++	if (dbus_message_iter_init(msg, &iter) == FALSE)
++		return __connman_error_invalid_arguments(msg);
++
++	if (dbus_message_iter_get_arg_type(&iter) != DBUS_TYPE_STRING)
++		return __connman_error_invalid_arguments(msg);
++
++	dbus_message_iter_get_basic(&iter, &pin);
++
++	err = __connman_device_request_start_wps(technology->type, pin);
++	if (err < 0)
++		return __connman_error_failed(msg, -err);
++
++	return g_dbus_create_reply(msg, DBUS_TYPE_INVALID);
++}
++
++static DBusMessage *cancel_wps(DBusConnection *conn, DBusMessage *msg, void *data)
++{
++	struct connman_technology *technology = data;
++	int err;
++
++	err = __connman_device_request_cancel_wps(technology->type);
++	if (err < 0)
++		return __connman_error_failed(msg, -err);
++
++	return g_dbus_create_reply(msg, DBUS_TYPE_INVALID);
++}
++
+ static DBusMessage *cancel_p2p(DBusConnection *conn, DBusMessage *msg, void *data)
+ {
+ 	struct connman_technology *technology = data;
+@@ -2064,6 +2102,10 @@ static const GDBusMethodTable technology_methods[] = {
+ 			GDBUS_ARGS({ "name", "s" }, { "value", "v" }),
+ 			NULL, set_property) },
+ 	{ GDBUS_ASYNC_METHOD("Scan", NULL, NULL, scan) },
++	{ GDBUS_ASYNC_METHOD("StartWPS",
++			GDBUS_ARGS({ "pin", "s" }),
++			NULL, start_wps) },
++	{ GDBUS_METHOD("CancelWPS", NULL, NULL, cancel_wps) },
+ 	{ GDBUS_METHOD("CancelP2P", NULL, NULL, cancel_p2p) },
+ 	{ GDBUS_ASYNC_METHOD("GetInterfaceProperties",
+ 			GDBUS_ARGS({ "interface", "s" }),
+@@ -2075,6 +2117,7 @@ static const GDBusMethodTable technology_methods[] = {
+ static const GDBusSignalTable technology_signals[] = {
+ 	{ GDBUS_SIGNAL("PropertyChanged",
+ 			GDBUS_ARGS({ "name", "s" }, { "value", "v" })) },
++	{ GDBUS_SIGNAL("WPSFailed", NULL) },
+ 	{ },
+ };
+ 
+diff --git a/src/wispr.c b/src/wispr.c
+index 90c7dc49..42f59e26 100644
+--- a/src/wispr.c
++++ b/src/wispr.c
+@@ -167,6 +167,11 @@ static void free_wispr_routes(struct connman_wispr_portal_context *wp_context)
+ static void free_connman_wispr_portal_context(
+ 		struct connman_wispr_portal_context *wp_context)
+ {
++	DBG("context %p", wp_context);
++
++	if (!wp_context)
++		return;
++
+ 	if (wp_context->wispr_portal) {
+ 		if (wp_context->wispr_portal->ipv4_context == wp_context)
+ 			wp_context->wispr_portal->ipv4_context = NULL;
