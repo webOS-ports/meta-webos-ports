@@ -36,7 +36,8 @@ PACKAGECONFIG = "enable-multiple-routing-table"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
             file://0001-Workaround-to-prevent-luna-call-pending.patch \
-            file://0002-Add-systemd-service-file.patch\ 
+            file://0002-Add-systemd-service-file.patch \
+            file://0003-Add-back-com.palm.wan-for-cellular-support.patch \
 "
 
 S = "${WORKDIR}/git"
