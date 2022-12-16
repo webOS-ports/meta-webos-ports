@@ -1,0 +1,870 @@
+From de9c3c3b1bd7368903270f1937e29599471ada52 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 15 Dec 2022 14:16:58 +0100
+Subject: [PATCH] Add Changes for No Internet issue connman
+
+:Release Notes:
+Add Changes for No Internet issue connman
+
+:Detailed Notes:
+Add Changes for No Internet issue connman
+
+:Testing Performed:
+Tested locally
+
+:QA Notes:
+NA
+
+:Issues Addressed:
+[WRO-11077] - Add Changes for No Internet issue connman
+
+Change-Id: If7c9b04ce8aa56d67f3cf1ba8edf547bbdea353f
+Reviewed-on: http://gpro.lge.com/c/webosose/connman-webos/+/338301
+Reviewed-by: Commit Msg Checker <commit_msg@lge.com>
+Reviewed-by: Ban Word Checker <ban_word@lge.com>
+Reviewed-by: <muralidhar.n@lge.com>
+Tested-by: <muralidhar.n@lge.com>
+---
+ src/connman.h  |   4 +-
+ src/ipconfig.c |   2 +-
+ src/service.c  | 275 ++++++++++++++++++++++++++++++++++++++++++-------
+ src/session.c  |   2 +-
+ src/wispr.c    |  74 +++++++------
+ 5 files changed, 285 insertions(+), 72 deletions(-)
+
+diff --git a/src/connman.h b/src/connman.h
+index 68176086..6bd5642f 100644
+--- a/src/connman.h
++++ b/src/connman.h
+@@ -390,7 +390,7 @@ const char *__connman_ipconfig_type2string(enum connman_ipconfig_type type);
+ enum connman_ipconfig_method __connman_ipconfig_string2method(const char *method);
+ 
+ void __connman_ipconfig_append_ipv4(struct connman_ipconfig *ipconfig,
+-							DBusMessageIter *iter);
++							DBusMessageIter *iter, struct connman_service *service);
+ void __connman_ipconfig_append_ipv4config(struct connman_ipconfig *ipconfig,
+ 							DBusMessageIter *iter);
+ void __connman_ipconfig_append_ipv6(struct connman_ipconfig *ipconfig,
+@@ -730,6 +730,8 @@ int __connman_service_set_mdns(struct connman_service *service,
+ 
+ void __connman_service_set_string(struct connman_service *service,
+ 					const char *key, const char *value);
++int __connman_service_online_check_failed(struct connman_service *service,
++					enum connman_ipconfig_type type);
+ void __connman_service_online_check(struct connman_service *service,
+ 					enum connman_ipconfig_type type,
+ 					bool success);
+diff --git a/src/ipconfig.c b/src/ipconfig.c
+index 34b1724a..ac03b69e 100644
+--- a/src/ipconfig.c
++++ b/src/ipconfig.c
+@@ -1896,7 +1896,7 @@ int __connman_ipconfig_ipv6_set_privacy(struct connman_ipconfig *ipconfig,
+ }
+ 
+ void __connman_ipconfig_append_ipv4(struct connman_ipconfig *ipconfig,
+-							DBusMessageIter *iter)
++							DBusMessageIter *iter, struct connman_service *service)
+ {
+ 	struct connman_ipaddress *append_addr = NULL;
+ 	const char *str;
+diff --git a/src/service.c b/src/service.c
+index 1d2b78a6..8b8c484e 100644
+--- a/src/service.c
++++ b/src/service.c
+@@ -1454,12 +1454,12 @@ static void start_online_check(struct connman_service *service,
+ 			"Default service remains in READY state.");
+ 		return;
+ 	}
+-	enable_online_to_ready_transition =
++	/*enable_online_to_ready_transition =
+ 		connman_setting_get_bool("EnableOnlineToReadyTransition");
+ 	online_check_initial_interval =
+ 		connman_setting_get_uint("OnlineCheckInitialInterval");
+ 	online_check_max_interval =
+-		connman_setting_get_uint("OnlineCheckMaxInterval");
++		connman_setting_get_uint("OnlineCheckMaxInterval");*/
+ 
+ 	if (type != CONNMAN_IPCONFIG_TYPE_IPV4 || check_proxy_setup(service)) {
+ 		cancel_online_check(service);
+@@ -1595,7 +1595,7 @@ bool __connman_service_index_is_default(int index)
+ 	return __connman_service_get_index(service) == index;
+ }
+ 
+-static void start_wispr_when_connected(struct connman_service *service)
++/*static void start_wispr_when_connected(struct connman_service *service)
+ {
+ 	if (!connman_setting_get_bool("EnableOnlineCheck")) {
+ 		connman_info("Online check disabled. "
+@@ -1612,7 +1612,7 @@ static void start_wispr_when_connected(struct connman_service *service)
+ 			CONNMAN_IPCONFIG_TYPE_IPV6))
+ 		__connman_service_wispr_start(service,
+ 					CONNMAN_IPCONFIG_TYPE_IPV6);
+-}
++}*/
+ 
+ static void default_changed(void)
+ {
+@@ -1637,8 +1637,18 @@ static void default_changed(void)
+ 		if (service->domainname &&
+ 				connman_setting_get_bool("AllowDomainnameUpdates"))
+ 			__connman_utsname_set_domainname(service->domainname);
++            
++			if (__connman_service_is_connected_state(service,
++						CONNMAN_IPCONFIG_TYPE_IPV4))
++			__connman_service_wispr_start(service,
++						CONNMAN_IPCONFIG_TYPE_IPV4);
+ 
+-		start_wispr_when_connected(service);
++			if (__connman_service_is_connected_state(service,
++						CONNMAN_IPCONFIG_TYPE_IPV6))
++			__connman_service_wispr_start(service,
++					CONNMAN_IPCONFIG_TYPE_IPV6);
++
++		// start_wispr_when_connected(service);
+ 
+ 		/*
+ 		 * Connect VPN automatically when new default service
+@@ -1835,7 +1845,7 @@ static void append_ipv4(DBusMessageIter *iter, void *user_data)
+ 		return;
+ 
+ 	if (service->ipconfig_ipv4)
+-		__connman_ipconfig_append_ipv4(service->ipconfig_ipv4, iter);
++		__connman_ipconfig_append_ipv4(service->ipconfig_ipv4, iter, service);
+ }
+ 
+ static void append_ipv6(DBusMessageIter *iter, void *user_data)
+@@ -3498,11 +3508,11 @@ static void do_auto_connect(struct connman_service *service,
+ 	 * Only user interaction should get VPN or WIFI connected in failure
+ 	 * state.
+ 	 */
+-	if (service->state == CONNMAN_SERVICE_STATE_FAILURE &&
++	/*if (service->state == CONNMAN_SERVICE_STATE_FAILURE &&
+ 				reason != CONNMAN_SERVICE_CONNECT_REASON_USER &&
+ 				(service->type == CONNMAN_SERVICE_TYPE_VPN ||
+ 				service->type == CONNMAN_SERVICE_TYPE_WIFI))
+-		return;
++		return;*/
+ 
+ 	/*
+ 	 * Do not use the builtin auto connect, instead rely on the
+@@ -3595,6 +3605,9 @@ int __connman_service_reset_ipconfig(struct connman_service *service,
+ 	return err;
+ }
+ 
++#define online_check_initial_interval 1
++#define online_check_max_interval 12
++
+ void __connman_service_wispr_start(struct connman_service *service,
+ 					enum connman_ipconfig_type type)
+ {
+@@ -3736,8 +3749,15 @@ static DBusMessage *set_property(DBusConnection *conn,
+ 
+ 		nameserver_add_all(service, CONNMAN_IPCONFIG_TYPE_ALL);
+ 		dns_configuration_changed(service);
++		if (__connman_service_is_connected_state(service,
++						CONNMAN_IPCONFIG_TYPE_IPV4))
++			__connman_service_wispr_start(service, CONNMAN_IPCONFIG_TYPE_IPV4);
++
++		if (__connman_service_is_connected_state(service,
++						CONNMAN_IPCONFIG_TYPE_IPV6))
++			__connman_service_wispr_start(service, CONNMAN_IPCONFIG_TYPE_IPV6);
+ 
+-		start_wispr_when_connected(service);
++		// start_wispr_when_connected(service);
+ 
+ 		service_save(service);
+ 	} else if (g_str_equal(name, "Timeservers.Configuration")) {
+@@ -4231,7 +4251,7 @@ static bool auto_connect_service(GList *services,
+ 			continue;
+ 		}
+ 
+-		if (service->connect_reason ==
++		/*if (service->connect_reason ==
+ 				CONNMAN_SERVICE_CONNECT_REASON_NATIVE) {
+ 			DBG("service %p uses native autonnect, skip", service);
+ 			continue;
+@@ -4240,7 +4260,7 @@ static bool auto_connect_service(GList *services,
+ 		index = __connman_service_get_index(service);
+ 		if (g_hash_table_lookup(passphrase_requested,
+ 					GINT_TO_POINTER(index)))
+-			return true;
++			return true;*/
+ 
+ 		if (service->pending ||
+ 				is_connecting(service->state) ||
+@@ -4571,7 +4591,7 @@ static DBusMessage *connect_service(DBusConnection *conn,
+ 		struct connman_service *temp = list->data;
+ 
+ 		if (!is_connecting(temp->state) && !is_connected(temp->state))
+-			continue;
++			break;
+ 
+ 		if (service == temp)
+ 			continue;
+@@ -4723,11 +4743,16 @@ static void apply_relevant_default_downgrade(struct connman_service *service)
+ 	struct connman_service *def_service;
+ 
+ 	def_service = connman_service_get_default();
+-	if (!def_service || def_service != service ||
+-		def_service->state != CONNMAN_SERVICE_STATE_ONLINE)
++	if (!def_service)
+ 		return;
+ 
+-	downgrade_state(def_service);
++	//downgrade_state(def_service);
++	if (def_service == service &&
++			def_service->state == CONNMAN_SERVICE_STATE_ONLINE) {
++		def_service->state = CONNMAN_SERVICE_STATE_READY;
++		__connman_notifier_leave_online(def_service->type);
++		state_changed(def_service);
++	}
+ }
+ 
+ static void switch_default_service(struct connman_service *default_service,
+@@ -4973,6 +4998,108 @@ static DBusMessage *move_service(DBusConnection *conn,
+ 	return g_dbus_create_reply(msg, DBUS_TYPE_INVALID);
+ }
+ 
++static DBusMessage *move_default(DBusConnection *conn,
++					DBusMessage *msg, void *user_data)
++{
++
++	struct connman_service *service = user_data;
++	struct connman_service *target;
++	enum connman_ipconfig_method target4, target6;
++	enum connman_ipconfig_method service4, service6;
++
++	DBG("service %p", service);
++
++	target = connman_service_get_default();
++	if (!target || target == service)
++		return __connman_error_already_exists(msg);
++
++	if (target->type == CONNMAN_SERVICE_TYPE_VPN) {
++		/*
++		 * We only allow VPN route splitting if there are
++		 * routes defined for a given VPN.
++		 */
++		if (!__connman_provider_check_routes(target->provider)) {
++			connman_info("Cannot move service. "
++				"No routes defined for provider %s",
++				__connman_provider_get_ident(target->provider));
++			return __connman_error_invalid_service(msg);
++		}
++
++		__connman_service_set_split_routing(target, true);
++	} else
++		__connman_service_set_split_routing(target, false);
++
++	__connman_service_set_split_routing(service, false);
++
++	target4 = __connman_ipconfig_get_method(target->ipconfig_ipv4);
++	target6 = __connman_ipconfig_get_method(target->ipconfig_ipv6);
++	service4 = __connman_ipconfig_get_method(service->ipconfig_ipv4);
++	service6 = __connman_ipconfig_get_method(service->ipconfig_ipv6);
++
++	DBG("target %s method %d/%d state %d/%d split %d", target->identifier,
++		target4, target6, target->state_ipv4, target->state_ipv6,
++		target->do_split_routing);
++
++	DBG("service %s method %d/%d state %d/%d", service->identifier,
++				service4, service6,
++				service->state_ipv4, service->state_ipv6);
++
++	/*
++	 * If method is OFF, then we do not need to check the corresponding
++	 * ipconfig state.
++	 */
++	if (target4 == CONNMAN_IPCONFIG_METHOD_OFF) {
++		if (service6 != CONNMAN_IPCONFIG_METHOD_OFF) {
++			if (!check_suitable_state(target->state_ipv6,
++							service->state_ipv6))
++				return __connman_error_invalid_service(msg);
++		}
++	}
++
++	if (target6 == CONNMAN_IPCONFIG_METHOD_OFF) {
++		if (service4 != CONNMAN_IPCONFIG_METHOD_OFF) {
++			if (!check_suitable_state(target->state_ipv4,
++							service->state_ipv4))
++				return __connman_error_invalid_service(msg);
++		}
++	}
++
++	if (service4 == CONNMAN_IPCONFIG_METHOD_OFF) {
++		if (target6 != CONNMAN_IPCONFIG_METHOD_OFF) {
++			if (!check_suitable_state(target->state_ipv6,
++							service->state_ipv6))
++				return __connman_error_invalid_service(msg);
++		}
++	}
++
++	if (service6 == CONNMAN_IPCONFIG_METHOD_OFF) {
++		if (target4 != CONNMAN_IPCONFIG_METHOD_OFF) {
++			if (!check_suitable_state(target->state_ipv4,
++							service->state_ipv4))
++				return __connman_error_invalid_service(msg);
++		}
++	}
++
++	g_get_current_time(&service->modified);
++	service_save(service);
++	service_save(target);
++
++	/*
++	 * If the service which goes down is the default service and is
++	 * online, we downgrade directly its state to ready so:
++	 * the service which goes up, needs to recompute its state which
++	 * is triggered via downgrading it - if relevant - to state ready.
++	 */
++	switch_default_service(target, service);
++
++	__connman_connection_update_gateway();
++
++	service_schedule_changed();
++
++	return g_dbus_create_reply(msg, DBUS_TYPE_INVALID);
++
++}
++
+ static DBusMessage *move_before(DBusConnection *conn,
+ 					DBusMessage *msg, void *user_data)
+ {
+@@ -4995,6 +5122,12 @@ static DBusMessage *reset_counters(DBusConnection *conn,
+ 	return g_dbus_create_reply(msg, DBUS_TYPE_INVALID);
+ }
+ 
++static DBusMessage *set_default(DBusConnection *conn,
++					DBusMessage *msg, void *user_data)
++{
++	return move_default(conn, msg, user_data);
++}
++
+ static void service_schedule_added(struct connman_service *service)
+ {
+ 	DBG("service %p", service);
+@@ -5052,6 +5185,8 @@ static const GDBusMethodTable service_methods[] = {
+ 			GDBUS_ARGS({ "service", "o" }), NULL,
+ 			move_after) },
+ 	{ GDBUS_METHOD("ResetCounters", NULL, NULL, reset_counters) },
++	{ GDBUS_ASYNC_METHOD("SetDefault", NULL, NULL,
++			      set_default) },
+ 	{ },
+ };
+ 
+@@ -5357,16 +5492,16 @@ static gint service_compare(gconstpointer a, gconstpointer b)
+ 	b_connected = is_connected(state_b);
+ 
+ 	if (a_connected && b_connected) {
+-		int rval;
++		/*int rval;
+ 
+-		/* Compare the VPN transport and the service */
++		/* Compare the VPN transport and the service 
+ 		if ((service_a->type == CONNMAN_SERVICE_TYPE_VPN ||
+ 				service_b->type == CONNMAN_SERVICE_TYPE_VPN) &&
+ 				service_b->type != service_a->type) {
+ 			rval = service_compare_vpn(service_a, service_b);
+ 			if (rval)
+ 				return rval;
+-		}
++		}*/
+ 
+ 		if (service_a->order > service_b->order)
+ 			return -1;
+@@ -5374,9 +5509,9 @@ static gint service_compare(gconstpointer a, gconstpointer b)
+ 		if (service_a->order < service_b->order)
+ 			return 1;
+ 
+-		rval = service_compare_preferred(service_a, service_b);
++		/*	rval = service_compare_preferred(service_a, service_b);
+ 		if (rval)
+-			return rval;
++			return rval;*/
+ 	}
+ 
+ 	if (state_a != state_b) {
+@@ -5407,11 +5542,26 @@ static gint service_compare(gconstpointer a, gconstpointer b)
+ 		return 1;
+ 
+ 	if (service_a->type != service_b->type) {
+-		int rval;
++		/*int rval;
+ 
+ 		rval = service_compare_preferred(service_a, service_b);
+ 		if (rval)
+-			return rval;
++			return rval;*/
++
++		unsigned int *tech_array;
++		int i;
++
++		tech_array = connman_setting_get_uint_list(
++						"PreferredTechnologies");
++		if (tech_array) {
++			for (i = 0; tech_array[i]; i++) {
++				if (tech_array[i] == service_a->type)
++					return -1;
++
++				if (tech_array[i] == service_b->type)
++					return 1;
++			}
++		}
+ 
+ 		if (service_a->type == CONNMAN_SERVICE_TYPE_ETHERNET)
+ 			return -1;
+@@ -6023,14 +6173,14 @@ static int service_indicate_state(struct connman_service *service)
+ 		break;
+ 
+ 	case CONNMAN_SERVICE_STATE_IDLE:
+-		if (old_state == CONNMAN_SERVICE_STATE_FAILURE &&
++		/*if (old_state == CONNMAN_SERVICE_STATE_FAILURE &&
+ 				service->connect_reason ==
+ 					CONNMAN_SERVICE_CONNECT_REASON_NATIVE &&
+ 				service->error ==
+ 					CONNMAN_SERVICE_ERROR_INVALID_KEY) {
+ 			__connman_service_clear_error(service);
+ 			service_complete(service);
+-		}
++		}*/
+ 
+ 		if (old_state != CONNMAN_SERVICE_STATE_DISCONNECT)
+ 			__connman_service_disconnect(service);
+@@ -6148,14 +6298,13 @@ static int service_indicate_state(struct connman_service *service)
+ 		break;
+ 
+ 	case CONNMAN_SERVICE_STATE_FAILURE:
+-		if (service->connect_reason == CONNMAN_SERVICE_CONNECT_REASON_USER ||
+-			service->connect_reason == CONNMAN_SERVICE_CONNECT_REASON_NATIVE) {
++		if (service->connect_reason == CONNMAN_SERVICE_CONNECT_REASON_USER) {
+ 			connman_agent_report_error(service, service->path,
+ 						error2string(service->error),
+ 						report_error_cb,
+ 						get_dbus_sender(service),
+ 						NULL);
+-			goto notifier;
++			//goto notifier;
+ 		}
+ 		service_complete(service);
+ 		break;
+@@ -6165,7 +6314,7 @@ static int service_indicate_state(struct connman_service *service)
+ 
+ 	__connman_connection_update_gateway();
+ 
+-notifier:
++//notifier:
+ 	if ((old_state == CONNMAN_SERVICE_STATE_ONLINE &&
+ 			new_state != CONNMAN_SERVICE_STATE_READY) ||
+ 		(old_state == CONNMAN_SERVICE_STATE_READY &&
+@@ -6352,12 +6501,11 @@ static gboolean redo_wispr_ipv6(gpointer user_data)
+ 	return FALSE;
+ }
+ 
+-void __connman_service_online_check(struct connman_service *service,
+-					enum connman_ipconfig_type type,
+-					bool success)
++int __connman_service_online_check_failed(struct connman_service *service,
++					enum connman_ipconfig_type type)
+ {
+ 	GSourceFunc redo_func;
+-	unsigned int *interval;
++	int *interval;
+ 	enum connman_service_state current_state;
+ 
+ 	if (type == CONNMAN_IPCONFIG_TYPE_IPV4) {
+@@ -6368,7 +6516,7 @@ void __connman_service_online_check(struct connman_service *service,
+ 		redo_func = redo_wispr_ipv6;
+ 	}
+ 
+-	if(!enable_online_to_ready_transition)
++	/*if(!enable_online_to_ready_transition)
+ 		goto redo_func;
+ 
+ 	if (success) {
+@@ -6383,7 +6531,7 @@ void __connman_service_online_check(struct connman_service *service,
+ 		}
+ 	}
+ 
+-redo_func:
++redo_func:*/
+ 	DBG("service %p type %s interval %d", service,
+ 		__connman_ipconfig_type2string(type), *interval);
+ 
+@@ -6395,6 +6543,8 @@ redo_func:
+ 	 */
+ 	if (*interval < online_check_max_interval)
+ 		(*interval)++;
++
++	return EAGAIN;
+ }
+ 
+ int __connman_service_ipconfig_indicate_state(struct connman_service *service,
+@@ -6476,8 +6626,10 @@ int __connman_service_ipconfig_indicate_state(struct connman_service *service,
+ 		if (service->state == CONNMAN_SERVICE_STATE_IDLE)
+ 			return -EINVAL;
+ 
+-		if (type == CONNMAN_IPCONFIG_TYPE_IPV4)
++		if (type == CONNMAN_IPCONFIG_TYPE_IPV4){
+ 			service_rp_filter(service, false);
++			service->state_ipv6 = new_state;
++			}
+ 
+ 		break;
+ 
+@@ -6501,6 +6653,11 @@ int __connman_service_ipconfig_indicate_state(struct connman_service *service,
+ 	if (!is_connected(old_state) && is_connected(new_state))
+ 		nameserver_add_all(service, type);
+ 
++/*	if(new_state==CONNMAN_SERVICE_STATE_READY) {
++		service->state_ipv4 = CONNMAN_SERVICE_STATE_ONLINE;
++		state_changed(service);
++	}*/
++
+ 	__connman_timeserver_sync(service);
+ 
+ 	return service_indicate_state(service);
+@@ -6781,8 +6938,7 @@ int __connman_service_connect(struct connman_service *service,
+ 				service->provider)
+ 			connman_provider_disconnect(service->provider);
+ 
+-	if (reason == CONNMAN_SERVICE_CONNECT_REASON_USER ||
+-			reason == CONNMAN_SERVICE_CONNECT_REASON_NATIVE) {
++	if (reason == CONNMAN_SERVICE_CONNECT_REASON_USER) {
+ 		if (err == -ENOKEY || err == -EPERM) {
+ 			DBusMessage *pending = NULL;
+ 			const char *dbus_sender = get_dbus_sender(service);
+@@ -6805,12 +6961,12 @@ int __connman_service_connect(struct connman_service *service,
+ 			if (service->hidden && err != -EINPROGRESS)
+ 				service->pending = pending;
+ 
+-			if (err == -EINPROGRESS) {
++			/*if (err == -EINPROGRESS) {
+ 				index = __connman_service_get_index(service);
+ 				g_hash_table_replace(passphrase_requested,
+ 						GINT_TO_POINTER(index),
+ 						GINT_TO_POINTER(true));
+-			}
++			}*/
+ 
+ 			return err;
+ 		}
+@@ -6855,6 +7011,11 @@ int __connman_service_disconnect(struct connman_service *service)
+ 	__connman_ipconfig_address_remove(service->ipconfig_ipv4);
+ 	settings_changed(service, service->ipconfig_ipv4);
+ 
++	if (service->type == CONNMAN_SERVICE_TYPE_WIFI &&
++			__connman_ipconfig_get_method(service->ipconfig_ipv4) == CONNMAN_IPCONFIG_METHOD_MANUAL) {
++		__connman_ipconfig_set_method(service->ipconfig_ipv4, CONNMAN_IPCONFIG_METHOD_DHCP);
++	}
++
+ 	__connman_ipconfig_address_remove(service->ipconfig_ipv6);
+ 	settings_changed(service, service->ipconfig_ipv6);
+ 
+@@ -7444,6 +7605,7 @@ static void trigger_autoconnect(struct connman_service *service)
+ struct connman_service * __connman_service_create_from_network(struct connman_network *network)
+ {
+ 	struct connman_service *service;
++	struct connman_device *device;
+ 	const char *ident, *group;
+ 	char *name;
+ 	unsigned int *auto_connect_types, *favorite_types;
+@@ -7530,7 +7692,40 @@ struct connman_service * __connman_service_create_from_network(struct connman_ne
+ 	service_register(service);
+ 	service_schedule_added(service);
+ 
+-	trigger_autoconnect(service);
++	//trigger_autoconnect(service);
++	connman_network_set_autoconnect(network,
++				service->favorite && service->autoconnect);
++	if (service->favorite) {
++		device = connman_network_get_device(service->network);
++		if (device && !connman_device_get_scanning(device,
++						CONNMAN_SERVICE_TYPE_UNKNOWN)) {
++
++			switch (service->type) {
++			case CONNMAN_SERVICE_TYPE_UNKNOWN:
++			case CONNMAN_SERVICE_TYPE_SYSTEM:
++			case CONNMAN_SERVICE_TYPE_P2P:
++				break;
++
++			case CONNMAN_SERVICE_TYPE_GADGET:
++			case CONNMAN_SERVICE_TYPE_ETHERNET:
++				if (service->autoconnect) {
++					__connman_service_connect(service,
++						CONNMAN_SERVICE_CONNECT_REASON_AUTO);
++					break;
++				}
++
++				/* fall through */
++			case CONNMAN_SERVICE_TYPE_BLUETOOTH:
++			case CONNMAN_SERVICE_TYPE_GPS:
++			case CONNMAN_SERVICE_TYPE_VPN:
++			case CONNMAN_SERVICE_TYPE_WIFI:
++			case CONNMAN_SERVICE_TYPE_CELLULAR:
++				do_auto_connect(service,
++					CONNMAN_SERVICE_CONNECT_REASON_AUTO);
++				break;
++			}
++		}
++	}
+ 
+ 	__connman_notifier_service_add(service, service->name);
+ 
+diff --git a/src/session.c b/src/session.c
+index eeefe3f2..a8046ab8 100644
+--- a/src/session.c
++++ b/src/session.c
+@@ -836,7 +836,7 @@ static void append_ipconfig_ipv4(DBusMessageIter *iter, void *user_data)
+ 	if (!ipconfig_ipv4)
+ 		return;
+ 
+-	__connman_ipconfig_append_ipv4(ipconfig_ipv4, iter);
++	__connman_ipconfig_append_ipv4(ipconfig_ipv4, iter, service);
+ }
+ 
+ static void append_ipconfig_ipv6(DBusMessageIter *iter, void *user_data)
+diff --git a/src/wispr.c b/src/wispr.c
+index 8c6ed6c7..8efa95f3 100644
+--- a/src/wispr.c
++++ b/src/wispr.c
+@@ -30,6 +30,9 @@
+ 
+ #include "connman.h"
+ 
++#define STATUS_URL_IPV4  "http://ipv4.connman.net/online/status.html"
++#define STATUS_URL_IPV6  "http://ipv6.connman.net/online/status.html"
++
+ struct connman_wispr_message {
+ 	bool has_error;
+ 	const char *current_element;
+@@ -243,8 +246,10 @@ static void free_connman_wispr_portal(gpointer data)
+ 	if (!wispr_portal)
+ 		return;
+ 
+-	wispr_portal_context_unref(wispr_portal->ipv4_context);
+-	wispr_portal_context_unref(wispr_portal->ipv6_context);
++	//wispr_portal_context_unref(wispr_portal->ipv4_context);
++	//wispr_portal_context_unref(wispr_portal->ipv6_context);
++	free_connman_wispr_portal_context(wispr_portal->ipv4_context);
++	free_connman_wispr_portal_context(wispr_portal->ipv6_context);
+ 
+ 	g_free(wispr_portal);
+ }
+@@ -479,11 +484,13 @@ static void portal_manage_status(GWebResult *result,
+ 				&str))
+ 		connman_info("Client-Timezone: %s", str);
+ 
++	free_connman_wispr_portal_context(wp_context);
++    
+ 	__connman_service_ipconfig_indicate_state(service,
+ 					CONNMAN_SERVICE_STATE_ONLINE, type);
+ 
+-	if (enable_online_to_ready_transition)
+-		__connman_service_online_check(service, type, true);
++	/*if (enable_online_to_ready_transition)
++		__connman_service_online_check(service, type, true);*/
+ }
+ 
+ static bool wispr_route_request(const char *address, int ai_family,
+@@ -539,7 +546,7 @@ static void wispr_portal_request_portal(
+ {
+ 	DBG("");
+ 
+-	wispr_portal_context_ref(wp_context);
++	//wispr_portal_context_ref(wp_context);
+ 	wp_context->request_id = g_web_request_get(wp_context->web,
+ 					wp_context->status_url,
+ 					wispr_portal_web_result,
+@@ -548,7 +555,7 @@ static void wispr_portal_request_portal(
+ 
+ 	if (wp_context->request_id == 0) {
+ 		wispr_portal_error(wp_context);
+-		wispr_portal_context_unref(wp_context);
++		//wispr_portal_context_unref(wp_context);
+ 	}
+ }
+ 
+@@ -616,13 +623,13 @@ static void wispr_portal_browser_reply_cb(struct connman_service *service,
+ 	if (!authentication_done) {
+ 		free_wispr_routes(wp_context);
+ 		wispr_portal_error(wp_context);
+-		wispr_portal_context_unref(wp_context);
++		//wispr_portal_context_unref(wp_context);
+ 		return;
+ 	}
+ 
+ 	/* Restarting the test */
+ 	__connman_service_wispr_start(service, wp_context->type);
+-	wispr_portal_context_unref(wp_context);
++	//wispr_portal_context_unref(wp_context);
+ }
+ 
+ static void wispr_portal_request_wispr_login(struct connman_service *service,
+@@ -646,8 +653,9 @@ static void wispr_portal_request_wispr_login(struct connman_service *service,
+ 				return;
+ 		}
+ 
+-		wispr_portal_context_unref(wp_context);
+-		return;
++		//wispr_portal_context_unref(wp_context);
++		free_connman_wispr_portal_context(wp_context);
++        return;
+ 	}
+ 
+ 	g_free(wp_context->wispr_username);
+@@ -698,12 +706,12 @@ static bool wispr_manage_message(GWebResult *result,
+ 
+ 		wp_context->wispr_result = CONNMAN_WISPR_RESULT_LOGIN;
+ 
+-		wispr_portal_context_ref(wp_context);
++		//wispr_portal_context_ref(wp_context);
+ 		if (__connman_agent_request_login_input(wp_context->service,
+ 					wispr_portal_request_wispr_login,
+ 					wp_context) != -EINPROGRESS) {
+ 			wispr_portal_error(wp_context);
+-			wispr_portal_context_unref(wp_context);
++			//wispr_portal_context_unref(wp_context);
+ 		} else
+ 			return true;
+ 
+@@ -753,7 +761,7 @@ static bool wispr_portal_web_result(GWebResult *result, gpointer user_data)
+ 		if (length > 0) {
+ 			g_web_parser_feed_data(wp_context->wispr_parser,
+ 								chunk, length);
+-			wispr_portal_context_unref(wp_context);
++			//wispr_portal_context_unref(wp_context);
+ 			return true;
+ 		}
+ 
+@@ -771,7 +779,7 @@ static bool wispr_portal_web_result(GWebResult *result, gpointer user_data)
+ 
+ 	switch (status) {
+ 	case 000:
+-		wispr_portal_context_ref(wp_context);
++		//wispr_portal_context_ref(wp_context);
+ 		__connman_agent_request_browser(wp_context->service,
+ 				wispr_portal_browser_reply_cb,
+ 				wp_context->status_url, wp_context);
+@@ -783,10 +791,10 @@ static bool wispr_portal_web_result(GWebResult *result, gpointer user_data)
+ 		if (g_web_result_get_header(result, "X-ConnMan-Status",
+ 						&str)) {
+ 			portal_manage_status(result, wp_context);
+-			wispr_portal_context_unref(wp_context);
++			//wispr_portal_context_unref(wp_context);
+ 			return false;
+ 		} else {
+-			wispr_portal_context_ref(wp_context);
++			//wispr_portal_context_ref(wp_context);
+ 			__connman_agent_request_browser(wp_context->service,
+ 					wispr_portal_browser_reply_cb,
+ 					wp_context->redirect_url, wp_context);
+@@ -803,7 +811,7 @@ static bool wispr_portal_web_result(GWebResult *result, gpointer user_data)
+ 			!g_web_result_get_header(result, "Location",
+ 							&redirect)) {
+ 
+-			wispr_portal_context_ref(wp_context);
++			//wispr_portal_context_ref(wp_context);
+ 			__connman_agent_request_browser(wp_context->service,
+ 					wispr_portal_browser_reply_cb,
+ 					wp_context->status_url, wp_context);
+@@ -814,7 +822,7 @@ static bool wispr_portal_web_result(GWebResult *result, gpointer user_data)
+ 
+ 		wp_context->redirect_url = g_strdup(redirect);
+ 
+-		wispr_portal_context_ref(wp_context);
++		//wispr_portal_context_ref(wp_context);
+ 		wp_context->request_id = g_web_request_get(wp_context->web,
+ 				redirect, wispr_portal_web_result,
+ 				wispr_route_request, wp_context);
+@@ -822,12 +830,19 @@ static bool wispr_portal_web_result(GWebResult *result, gpointer user_data)
+ 		goto done;
+ 	case 400:
+ 	case 404:
+-		__connman_service_online_check(wp_context->service,
+-						wp_context->type, false);
++	/*	__connman_service_online_check(wp_context->service,
++						wp_context->type, false);*/
++
++	if (__connman_service_online_check_failed(wp_context->service,
++						wp_context->type) == 0) {
++			wispr_portal_error(wp_context);
++			free_connman_wispr_portal_context(wp_context);
++			return false;
++		}
+ 
+ 		break;
+ 	case 505:
+-		wispr_portal_context_ref(wp_context);
++		//wispr_portal_context_ref(wp_context);
+ 		__connman_agent_request_browser(wp_context->service,
+ 				wispr_portal_browser_reply_cb,
+ 				wp_context->status_url, wp_context);
+@@ -840,7 +855,7 @@ static bool wispr_portal_web_result(GWebResult *result, gpointer user_data)
+ 	wp_context->request_id = 0;
+ done:
+ 	wp_context->wispr_msg.message_type = -1;
+-	wispr_portal_context_unref(wp_context);
++	//wispr_portal_context_unref(wp_context);
+ 	return false;
+ }
+ 
+@@ -875,7 +890,7 @@ static void proxy_callback(const char *proxy, void *user_data)
+ 					xml_wispr_parser_callback, wp_context);
+ 
+ 	wispr_portal_request_portal(wp_context);
+-	wispr_portal_context_unref(wp_context);
++	//wispr_portal_context_unref(wp_context);
+ }
+ 
+ static gboolean no_proxy_callback(gpointer user_data)
+@@ -951,10 +966,10 @@ static int wispr_portal_detect(struct connman_wispr_portal_context *wp_context)
+ 
+ 	if (wp_context->type == CONNMAN_IPCONFIG_TYPE_IPV4) {
+ 		g_web_set_address_family(wp_context->web, AF_INET);
+-		wp_context->status_url = online_check_ipv4_url;
++		wp_context->status_url = STATUS_URL_IPV4;
+ 	} else {
+ 		g_web_set_address_family(wp_context->web, AF_INET6);
+-		wp_context->status_url = online_check_ipv6_url;
++		wp_context->status_url = STATUS_URL_IPV6;
+ 	}
+ 
+ 	for (i = 0; nameservers[i]; i++)
+@@ -970,7 +985,7 @@ static int wispr_portal_detect(struct connman_wispr_portal_context *wp_context)
+ 
+ 		if (wp_context->token == 0) {
+ 			err = -EINVAL;
+-			wispr_portal_context_unref(wp_context);
++			//wispr_portal_context_unref(wp_context);
+ 		}
+ 	} else if (wp_context->timeout == 0) {
+ 		wp_context->timeout = g_idle_add(no_proxy_callback, wp_context);
+@@ -1019,7 +1034,8 @@ int __connman_wispr_start(struct connman_service *service,
+ 
+ 	/* If there is already an existing context, we wipe it */
+ 	if (wp_context)
+-		wispr_portal_context_unref(wp_context);
++		//wispr_portal_context_unref(wp_context);
++		free_connman_wispr_portal_context(wp_context);
+ 
+ 	wp_context = create_wispr_portal_context();
+ 	if (!wp_context)
+@@ -1077,13 +1093,13 @@ int __connman_wispr_init(void)
+ 						g_direct_equal, NULL,
+ 						free_connman_wispr_portal);
+ 
+-	online_check_ipv4_url =
++	/*online_check_ipv4_url =
+ 		connman_setting_get_string("OnlineCheckIPv4URL");
+ 	online_check_ipv6_url =
+ 		connman_setting_get_string("OnlineCheckIPv6URL");
+ 
+ 	enable_online_to_ready_transition =
+-		connman_setting_get_bool("EnableOnlineToReadyTransition");
++		connman_setting_get_bool("EnableOnlineToReadyTransition");*/
+ 
+ 	return 0;
+ }
+-- 
+2.37.3.windows.1
+
