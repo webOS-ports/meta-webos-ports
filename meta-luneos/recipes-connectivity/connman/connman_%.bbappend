@@ -19,6 +19,7 @@ SRC_URI += " \
     file://0008-Revert-Fix-for-create-group-api-and-crash-issue.patch \
     file://0009-Fix-for-Create-Group-api-and-crash-issue.patch \
     file://0010-Fix-for-peer-Device-List-Info-issue.patch \
+    file://0011-Avoid-crash-if-no-interface-found.patch \
 "
 
 
