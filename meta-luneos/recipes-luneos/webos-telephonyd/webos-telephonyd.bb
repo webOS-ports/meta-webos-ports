@@ -7,7 +7,7 @@ DEPENDS = "luna-service2 json-c glib-2.0 luna-prefs glib-2.0-native"
 RRECOMMENDS:${PN} += "ofono mmsd"
 
 PV = "0.1.0-1+git${SRCPV}"
-SRCREV = "a5ede428c53552b4cc36847d1ed9967e40aef168"
+SRCREV = "27f5460bea0032991761ca6e509887c7b5e2f2b1"
 
 inherit webos_ports_ose_repo
 inherit webos_filesystem_paths
