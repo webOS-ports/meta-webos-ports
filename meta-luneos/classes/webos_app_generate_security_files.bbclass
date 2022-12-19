@@ -30,6 +30,12 @@ def webos_app_generate_security_files_write_permission_file(d, app_info):
 
     if "requiredPermissions" in app_info:
         permission[key] = app_info["requiredPermissions"]
+        
+        # START Hack for legacy com.palm apps to fix issues with proxied LS2 calls, we want to make sure to allow the "app_id*" and "app_id-*"
+        if type == "web" and "com.palm." in app_id:
+            permission[app_id] = app_info["requiredPermissions"]
+        # END Hack for legacy com.palm apps to fix issues with proxied LS2 calls, we want to make sure to allow the "app_id*" and "app_id-*"
+
     else:
         permission[key] = []
         pub_bus = False
