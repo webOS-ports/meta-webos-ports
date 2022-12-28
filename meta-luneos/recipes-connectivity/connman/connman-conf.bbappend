@@ -6,6 +6,7 @@ SRC_URI += " \
     file://connman.service \
     file://connman.sh.in \
     file://main.conf \
+    file://usb-dev.config \
 "
 do_configure:append () {
     sed -e 's/@WEBOS_CONNMAN_PREACTIVATE_INTERFACE_LIST@/${WEBOS_CONNMAN_PREACTIVATE_INTERFACE_LIST}/g; s%@DATADIR@%${datadir}%g' \
@@ -16,6 +17,9 @@ do_install:append() {
     install -d ${D}${sysconfdir}/connman
     install -m 0644 ${WORKDIR}/main.conf ${D}${sysconfdir}/connman/
 
+    install -d ${D}${localstatedir}/lib/connman
+    install -m 0644 ${WORKDIR}/usb-dev.config ${D}${localstatedir}/lib/connman/
+
     install -d ${D}${sysconfdir}/systemd/system
     install -v -m 644 ${WORKDIR}/connman.service ${D}${sysconfdir}/systemd/system/
     install -d ${D}${sysconfdir}/systemd/system/scripts
@@ -25,4 +29,5 @@ do_install:append() {
 FILES:${PN} += " \
     ${sysconfdir}/connman \
     ${sysconfdir} \
+    ${localstatedir}/lib/connman \
 "
