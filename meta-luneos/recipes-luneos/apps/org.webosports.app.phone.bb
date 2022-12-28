@@ -14,8 +14,8 @@ inherit webos_application
 inherit webos_tweaks
 inherit webos_app
 
-PV = "0.1.0-6+git${SRCPV}"
-SRCREV = "6d95c248275ef0e38efaf01fb59e550138396fd7"
+PV = "0.1.1-0+git${SRCPV}"
+SRCREV = "39b3ceddd36adee81ec2a53e6979a872e827503e"
 
 WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
