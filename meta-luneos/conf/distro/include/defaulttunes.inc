@@ -55,3 +55,19 @@ PACKAGE_EXTRA_ARCHS:append:raspberrypi3-64 = " aarch64-rpi"
 DEFAULTTUNE:raspberrypi4-64 = "armv8a-crc-crypto"
 TUNE_PKGARCH_64:raspberrypi4-64 = "aarch64-rpi"
 PACKAGE_EXTRA_ARCHS:append:raspberrypi4-64 = " aarch64-rpi"
+
+# Undo the switch to x86-64-v3 from:
+# https://git.openembedded.org/openembedded-core/commit/?id=6f2af1e5d1537b4d31e14946292bf58f0fd76fc9
+# https://git.openembedded.org/openembedded-core/commit/?id=ac041f90e71dba83b7144c91f929de88aaeae519
+# because we use VirtualBox and it doesn't support fma, f16c as shown with various Qt binaries:
+# root@qemux86-64:~# mediaindexer
+# Incompatible processor. This Qt build requires the following features: fma f16c
+
+# There is 7 years old enhancement ticket for Virtualbox without any progress:
+# https://www.virtualbox.org/ticket/15471
+
+# Don't switch all the way back to core2-64, corei7-64 should be fine nowadays.
+# core2-64 (Intel Core2 CPU with 64-bit extensions, MMX, SSE, SSE2, SSE3 and SSSE3 instruction set support. Intel Core 2 CPU family, including Conroe, Merom and beyond, as well as the first Atom CPUs, Diamondville, and beyond)
+# corei7-64 (Intel Nehalem CPU with 64-bit extensions, MMX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2 and POPCNT instruction set support. This tune is recommended for Intel Nehalem and Silvermont (e.g. Bay Trail) CPUs (and beyond)).
+# x86-64-v3 (CPUs with AVX, AVX2, BMI1, BMI2, F16C, FMA, LZCNT, MOVBE, XSAVE. (but not AVX512). See https://www.phoronix.com/news/GCC-11-x86-64-Feature-Levels for details.)
+DEFAULTTUNE:qemux86-64 = "corei7-64"
