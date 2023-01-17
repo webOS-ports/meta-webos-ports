@@ -8,6 +8,7 @@ SRCREV_main = "d593a3794841a4f840f22a660c1c52c2eb2afde5"
 
 SRC_URI += "file://0001-grit-Remove-usage-of-U-mode-bit-for-opening-files-in.patch"
 SRC_URI += "file://0001-Fix-compilation-with-lttng-ust-2.13.patch"
+SRC_URI += "file://0001-zlib-Remove-unsetting-_FILE_OFFSET_BITS.patch"
 
 SRC_URI += " \
     file://0003-run_app_shell-fix-XDG_RUNTIME_DIR-for-LuneOS.patch \
