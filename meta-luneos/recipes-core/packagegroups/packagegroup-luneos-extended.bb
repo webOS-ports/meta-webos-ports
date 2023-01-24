@@ -154,6 +154,7 @@ MEMNOTIFY_RDEPENDS = " \
 RDEPENDS:${PN}:append:tuna = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
 RDEPENDS:${PN}:append:grouper = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
 RDEPENDS:${PN}:append:mako = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS} bluebinder"
+RDEPENDS:${PN}:append:halium9-gsi = " ${LIBHYBRIS_RDEPENDS} bluebinder"
 RDEPENDS:${PN}:append:hammerhead = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:hammerhead-halium = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
 RDEPENDS:${PN}:append:tenderloin = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
