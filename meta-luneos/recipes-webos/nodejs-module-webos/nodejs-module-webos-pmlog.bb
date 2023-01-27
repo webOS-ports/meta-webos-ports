@@ -23,3 +23,5 @@ do_compile() {
 }
 
 WEBOS_NODE = "pmloglib.node"
+
+SRC_URI += "file://0001-Fix-build-with-nodejs-18.patch"
