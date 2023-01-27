@@ -7,6 +7,8 @@ DEPENDS = "node-gyp-native sqlite3"
 
 PV = "3.1.13+git${SRCPV}"
 
+inherit webos_npm_env
+
 SRC_URI = " \
     git://github.com/mapbox/node-sqlite3.git;branch=master;protocol=https \
     file://no-node-pre-gyp.patch \
@@ -17,13 +19,13 @@ S = "${WORKDIR}/git"
 do_configure() {
     export LD="${CXX}"
     export GYP_DEFINES="sysroot=${STAGING_DIR_HOST}"
-    node-gyp --arch ${TARGET_ARCH} configure
+    ${WEBOS_NODE_GYP} configure
 }
 
 do_compile() {
     export LD="${CXX}"
     export GYP_DEFINES="sysroot=${STAGING_DIR_HOST}"
-    node-gyp --arch ${TARGET_ARCH} build
+    ${WEBOS_NODE_GYP} build
 }
 
 do_install() {
