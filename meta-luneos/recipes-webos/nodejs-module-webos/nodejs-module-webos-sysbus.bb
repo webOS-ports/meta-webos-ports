@@ -9,10 +9,6 @@ DEPENDS += "glib-2.0 luna-service2"
 
 PV = "3.0.1-1+git${SRCPV}"
 SRCREV = "f411570c63791b3444bcee5a70f40dca0540ee54"
-
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
-    https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}.tar.xz;name=node \
-"
 WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 
 inherit webos_system_bus
@@ -22,14 +18,14 @@ do_configure() {
     export GYP_DEFINES="sysroot=${STAGING_DIR_HOST}"
     # used by binding.gyp
     export webos_servicesdir="${webos_servicesdir}" webos_prefix="${webos_prefix}"
-    node-gyp --arch ${TARGET_ARCH} --nodedir "${WORKDIR}/node-v${NODE_VERSION}" configure
+    ${WEBOS_NODE_GYP} configure
 }
 
 do_compile() {
     export GYP_DEFINES="sysroot=${STAGING_DIR_HOST}"
     # used by binding.gyp
     export webos_servicesdir="${webos_servicesdir}" webos_prefix="${webos_prefix}"
-    node-gyp --arch ${TARGET_ARCH} build
+    ${WEBOS_NODE_GYP} build
 }
 
 WEBOS_NODE = "webos-sysbus.node"
