@@ -23,7 +23,9 @@ RDEPENDS:${PN} = "${VIRTUAL-RUNTIME_pdm} db8"
 
 #WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-file://0001-Fix-app-permissions.patch"
+    file://0001-Fix-app-permissions.patch \
+    file://0001-Fix-build-with-gcc-13.patch \
+"
 S = "${WORKDIR}/git"
 
 # uncomment next line to use mediaindexer in shell/interactive mode
