@@ -35,7 +35,9 @@ SYSTEMD_SERVICE:${PN} = "webapp-mgr.service"
 
 WAM_DATA_DIR = "${webos_execstatedir}/${BPN}"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
+    file://0001-Fix-build-with-gcc-13.patch \
+"
 
 WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 
@@ -178,3 +180,7 @@ FILES:${PN} += " \
 # /OE/build/luneos-langdale/webos-ports/tmp-glibc/work/core2-64-webos-linux/wam/1.0.2-55+gitAUTOINC+d817c5a083-r30/recipe-sysroot/usr/include/gtest/gtest-matchers.h:317:33: error: '<unnamed>.testing::Matcher<WebPageBlinkDelegate*>::<unnamed>.testing::internal::MatcherBase<WebPageBlinkDelegate*>::buffer_' is used uninitialized [-Werror=uninitialized]
 # /OE/build/luneos-langdale/webos-ports/tmp-glibc/work/core2-64-webos-linux/wam/1.0.2-55+gitAUTOINC+d817c5a083-r30/recipe-sysroot/usr/include/gtest/gtest-matchers.h:317:33: error: '<unnamed>.testing::Matcher<WebPageBlinkDelegate*>::<unnamed>.testing::internal::MatcherBase<WebPageBlinkDelegate*>::buffer_' is used uninitialized [-Werror=uninitialized]
 CXXFLAGS += "-Wno-error=uninitialized -Wno-error=maybe-uninitialized"
+
+# wam/1.0.2-55+gitAUTOINC+f8c30d3d79-r30/git/src/util/timer.h:30:16: error: 'virtual void Timer::Start(int, bool)' was hidden [-Werror=overloaded-virtual=]
+# wam/1.0.2-55+gitAUTOINC+f8c30d3d79-r30/recipe-sysroot/usr/include/webruntime/neva/app_runtime/public/webapp_window_delegate.h:34:16: error: 'virtual bool neva_app_runtime::WebAppWindowDelegate::HandleEvent(neva_app_runtime::AppRuntimeEvent*)' was hidden [-Werror=overloaded-virtual=]
+CXXFLAGS += "-Wno-error=overloaded-virtual="
