@@ -37,5 +37,7 @@ SRC_URI += "file://0001-util-Fix-build-with-gcc7.patch"
 
 SRC_URI += "file://0001-test_corners-initialize-cookie.patch"
 
+SRC_URI += "file://0001-Fix-build-with-gcc-13.patch"
+
 # ${PN} package is empty
 RDEPENDS:${PN}-dev = ""
