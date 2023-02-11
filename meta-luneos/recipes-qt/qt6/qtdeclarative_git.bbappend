@@ -25,6 +25,10 @@ SRC_URI:append = " \
     file://0002-Revert-Don-t-hide-the-inputMethod-when-finishing-the.patch;maxver=6.3.0 \
 "
 
+SRC_URI:append:armv7a = " \
+    file://0003-Avoid-mat4-in-struct-shaders-on-armv7.patch \
+"
+
 # Supplement tool for qmllint
 inherit webos_qmake6_paths
 DEPENDS:append:class-native = " python3-regex-native"
