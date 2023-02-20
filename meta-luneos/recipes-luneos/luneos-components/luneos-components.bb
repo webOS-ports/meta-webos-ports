@@ -3,12 +3,11 @@ LICENSE = "LGPL-2.1-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 PV = "0.5+git${SRCPV}"
-SRCREV = "276707dcf9a58cc874d51f926fe396682527f9b1"
+SRCREV = "f544b9e7623da03dbf91960beadfb3e61d5c1aa2"
 
 DEPENDS = "qtbase qtdeclarative luna-service2 luna-sysmgr-common libwebos-application qtdeclarative-native kf5bluezqt-mer"
 RDEPENDS:${PN} = "qt5compat-qmlplugins"
 
-WEBOS_GIT_PARAM_BRANCH = "tofe/qt6"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
