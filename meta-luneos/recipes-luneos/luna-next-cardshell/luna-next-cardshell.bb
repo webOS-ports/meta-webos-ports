@@ -15,7 +15,7 @@ RDEPENDS:${PN} += " \
 "
 
 PV = "0.6-0+git${SRCPV}"
-SRCREV = "4fa16f75de0fe92fca612d3a456b793f0ef2af70"
+SRCREV = "f45f4915029a64731a9f039f117bfe2bc44d8dd3"
 
 inherit webos_ports_repo
 inherit webos_cmake
@@ -25,7 +25,6 @@ inherit webos_filesystem_paths
 
 EXTRA_OECMAKE += "-DLUNA_NEXT_SHELL_DIR=${OE_QMAKE_PATH_QML}/WebOSCompositor"
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/qt6"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
