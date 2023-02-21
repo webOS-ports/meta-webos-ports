@@ -34,6 +34,7 @@ file://0007-Handle-noWindow-apps.patch \
 file://0008-AppDescription.h-Add-org.webosports-as-privileged-as.patch \
 file://0009-LuneOS-style-module-name-is-now-QtQuick.Controls.Lun.patch \
 file://0010-Setup-QT_IM_MODULE-for-client-apps.patch \
+file://0011-NativeContainer-configure-native-apps.patch \
 "
 
 S = "${WORKDIR}/git"
