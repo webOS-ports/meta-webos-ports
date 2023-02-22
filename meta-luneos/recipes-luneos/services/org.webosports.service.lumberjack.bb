@@ -13,12 +13,11 @@ inherit pkgconfig
 inherit webos_system_bus
 inherit webos_systemd
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 WEBOS_REPO_NAME = "lumberjack"
-SRCREV = "400d1f552dc8d43d24bab57534971cb93d865546"
+SRCREV = "ce2251ad33ad88d9b3495ae3bdfe168a6a4aad91"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files/sysbus"

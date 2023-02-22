@@ -14,7 +14,7 @@ DEPENDS = "qtbase luna-service2 luna-prefs qt-features-webos qtdeclarative malii
 RDEPENDS:${PN} += "qml-webos-bridge"
 
 PV = "1.0.0-22+git${SRCPV}"
-SRCREV = "663f0abc1338ae7848f804bc80adb607d904b4d4"
+SRCREV = "9127a59721eb04ddf266e5bf18cdf2830c61b275"
 
 inherit webos_qmake6
 inherit webos_system_bus
@@ -23,7 +23,6 @@ inherit webos_ports_ose_repo
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 WEBOS_REPO_NAME = "ime-manager"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

@@ -17,7 +17,7 @@ VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_cpushareholder}"
 
 PV = "1.0.2-55+git${SRCPV}"
-SRCREV = "f8c30d3d79f51d47219ad2c2c462ee1de9845f80"
+SRCREV = "d45e2cb3e098282138cab687a105119a9ed15792"
 PR = "r30"
 
 WAM_BUILD_SYSTEM = "webos_qmake6"
@@ -39,8 +39,6 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     file://0001-Fix-build-with-gcc-13.patch \
     file://0001-CMakeLists.txt-remove-Wall-Werror-fpermissive-to-fix.patch \
 "
-
-WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 
 S = "${WORKDIR}/git"
 

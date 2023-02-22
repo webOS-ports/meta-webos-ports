@@ -15,7 +15,7 @@ DEPENDS += "serviceinstaller"
 RDEPENDS:${PN} += "powerd"
 
 PV = "3.0.0-3+git${SRCPV}"
-SRCREV = "ad6e3be5aeee682987f217dbc6c15372b3755367"
+SRCREV = "bd0e4528fa8d516391ba01b8e8a452b1f0f4bbd9"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 
@@ -26,7 +26,6 @@ inherit webos_cmake_qt6
 inherit webos_systemd
 inherit pkgconfig
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
