@@ -20,7 +20,7 @@ inherit webos_ports_repo
 
 WEBOS_REPO_NAME = "qt5-plugin-generic-vboxtouch"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-SRCREV = "80eafd2e54eeec3d0c9f58046613598b09473d20"
+SRCREV = "992e61f7861c85d5150fbeaa8f0f113d9945f7d4"
 S = "${WORKDIR}/git/vboxtouch"
 
 inherit qt6-qmake
