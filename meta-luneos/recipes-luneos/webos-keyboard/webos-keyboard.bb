@@ -20,7 +20,7 @@ RRECOMMENDS:${PN} += "hunspell-dictionaries"
 SRCREV = "e8dd0004cc8a915ea756bdacd5a14792812d9d3a"
 PV = "0.99.2+git${SRCPV}"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=herrie/qt6 \
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     file://0001-make-it-compatible-with-newer-hunspell.patch \
 "
 

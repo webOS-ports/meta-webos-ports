@@ -16,10 +16,9 @@ RDEPENDS:${PN} += " \
     bash \
 "
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg-new"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
-SRCREV = "17cfbc66d4e5d232926dfae167bc1b0bb1055e1b"
+SRCREV = "6df9c5fd2d9577fe0cd120e909987b7674cf4a33"
 
 PV = "1.0.0-22+git${SRCPV}"
 

@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=eb723b61539feef013de476e68b5c50a"
 DEPENDS = "luna-service2 glib-2.0 json-c"
 
 PV = "2.0.0-2+git${SRCPV}"
-SRCREV = "b1e8c1cc51968639adb4119c08806a9428dfa833"
+SRCREV = "ee2ab46cf128390fd36fde108c417e2ec8c50552"
 
 inherit webos_ports_ose_repo
 inherit webos_cmake
@@ -14,7 +14,6 @@ inherit pkgconfig
 inherit webos_system_bus
 inherit webos_systemd
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 WEBOS_REPO_NAME = "preware"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
