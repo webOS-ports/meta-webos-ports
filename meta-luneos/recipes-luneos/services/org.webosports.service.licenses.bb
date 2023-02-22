@@ -8,9 +8,8 @@ inherit webos_system_bus
 inherit allarch
 
 PV = "0.1.0+git${SRCPV}"
-SRCREV = "1a471bff312cf07ed015dd4c7eb51ee0f4c4fba2"
+SRCREV = "cf113c2a2a6dc3a62f162a4c6b175ed76745c9ef"
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 

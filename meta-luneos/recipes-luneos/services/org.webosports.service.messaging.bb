@@ -9,9 +9,8 @@ inherit webos_system_bus
 inherit webos_filesystem_paths
 
 PV = "0.1.0+git${SRCPV}"
-SRCREV = "5731b6f2d4b9a4010299fe127098e13923b3df65"
+SRCREV = "36ed3eb7a3c4d6c540da866eb76552702d417d00"
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 WEBOS_REPO_NAME = "org.webosports.messaging"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"

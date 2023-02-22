@@ -21,7 +21,6 @@ DEPENDS += "luna-service2 pmloglib libpbnjson"
 VIRTUAL-RUNTIME_pdm ?= "com.webos.service.pdm"
 RDEPENDS:${PN} = "${VIRTUAL-RUNTIME_pdm} db8"
 
-#WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Fix-app-permissions.patch \
     file://0001-Fix-build-with-gcc-13.patch \

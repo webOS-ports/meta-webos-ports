@@ -8,7 +8,7 @@ DEPENDS += "db8 glib-2.0 luna-service2 sqlite3 taglib qtbase luna-sysmgr-common"
 RDEPENDS:${PN} += "shared-mime-info"
 
 PV = "0.1.0-14+git${SRCPV}"
-SRCREV = "a3dc4ce3213439138ef7e1cd00190a3e7374ad69"
+SRCREV = "f9784494312c961c25b870f7fc7083492ea9f0e1"
 
 inherit webos_ports_repo
 inherit webos_system_bus
@@ -18,7 +18,6 @@ inherit webos_filesystem_paths
 inherit webos_systemd
 inherit pkgconfig
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     file://0001-Fix-build-with-gcc-13.patch \
 "

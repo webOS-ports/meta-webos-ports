@@ -18,8 +18,7 @@ inherit webos_systemd
 
 PV = "2.0.0-13+git${SRCPV}"
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-SRCREV = "6769b2ed584b7d4b038527c928ddf4ea0e10c1c4"
+SRCREV = "5fb87aa79d95e1b16dff6c8ff5a6b6e91dfd7293"

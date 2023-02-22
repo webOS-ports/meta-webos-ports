@@ -5,7 +5,7 @@ LICENSE = "LGPL-2.1-only"
 LIC_FILES_CHKSUM = "file://hwcomposer_backend.cpp;beginline=1;endline=40;md5=09c08382077db2dbc01b1b5536ec6665"
 
 PV = "6.3.0+git${SRCPV}"
-SRCREV = "6577623330c40114f6f64defc6138769e5548863"
+SRCREV = "998956aebe21ac7ba6e7315d1c12e6e11c93d742"
 
 DEPENDS = "qtbase libhybris qtwayland virtual/android-headers"
 
@@ -17,7 +17,7 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 COMPATIBLE_MACHINE = "^halium$"
 
 SRC_URI = " \
-    git://github.com/herrie82/qt5-qpa-hwcomposer-plugin.git;branch=herrie/qt6;protocol=https \
+    git://github.com/mer-hybris/qt5-qpa-hwcomposer-plugin.git;branch=master;protocol=https \
 "
 S = "${WORKDIR}/git/hwcomposer"
 

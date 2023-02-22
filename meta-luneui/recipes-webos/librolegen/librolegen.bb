@@ -9,13 +9,11 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "glib-2.0"
 
 PV = "2.1.0-20+git${SRCPV}"
-SRCREV = "30e23f0c976c44c28bce0ada34639b6c289ef955"
+SRCREV = "4732d074ad8c12878aacc6f4671eacf7f854dc89"
 
 inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit pkgconfig
-
-WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

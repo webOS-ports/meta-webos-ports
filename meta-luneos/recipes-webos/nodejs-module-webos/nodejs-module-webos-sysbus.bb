@@ -8,8 +8,7 @@ AUTHOR = "Anatolii Sakhnik <anatolii.sakhnik@lge.com>"
 DEPENDS += "glib-2.0 luna-service2"
 
 PV = "3.0.1-1+git${SRCPV}"
-SRCREV = "f411570c63791b3444bcee5a70f40dca0540ee54"
-WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
+SRCREV = "0a9fd959f4930e443f29a18f8bbeb1658500a131"
 
 inherit webos_system_bus
 inherit pkgconfig
