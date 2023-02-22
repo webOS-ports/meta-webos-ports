@@ -11,11 +11,10 @@ inherit webos_cmake
 inherit webos_system_bus
 
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg-new"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-SRCREV = "bcf930da2dd286b652aef9dd997bb92eab4c2b44"
+SRCREV = "71a63bd98c195f76f3017f55004818e0232ed94f"
 
 FILES:${PN} += "${webos_sysbus_datadir}"
 

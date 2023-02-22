@@ -10,9 +10,8 @@ inherit webos_system_bus
 inherit webos_app
 
 PV = "0.3.34+git${SRCPV}"
-SRCREV = "31f1f348c8123c1a6b7d88c289882088d0df28f7"
+SRCREV = "d938b95cca2042b49127b6f9bde5060ff47b29c8"
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 SERVICE_NAME = "org.webosports.service.cdav"
 WEBOS_REPO_NAME = "org.webosports.service.contacts.carddav"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"

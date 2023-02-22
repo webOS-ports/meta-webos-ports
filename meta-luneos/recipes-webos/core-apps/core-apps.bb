@@ -6,14 +6,12 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 PV = "3.0.0-2+git${SRCPV}"
-SRCREV = "ce51d2cbecb30836db0e84031993661129af9638"
+SRCREV = "2cb7a0ff1817d7fa15f211d6c01d0e2c815db1d5"
 
 inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
 inherit webos_app
-#inherit webos_cmake
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 S = "${WORKDIR}/git"

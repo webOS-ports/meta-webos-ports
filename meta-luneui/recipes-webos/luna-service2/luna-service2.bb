@@ -27,14 +27,13 @@ inherit webos_test_provider
 inherit pkgconfig
 inherit systemd
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE:${PN} = "ls-hubd.service"
 
-SRCREV = "b1b6ad1ccfaa638a8f1cdc366fe5a6e7db16c5e9"
+SRCREV = "f3a4a42e1595a68fef70ce94ea14878fc2b8dbca"
 
 # This fix-up will be removed shortly. luna-service2 headers must be included
 # using '#include <luna-service2/*.h>'

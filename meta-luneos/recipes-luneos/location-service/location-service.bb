@@ -12,7 +12,6 @@ inherit pkgconfig
 inherit webos_system_bus
 inherit systemd
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/enhanced-acg"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
@@ -20,7 +19,7 @@ DEPENDS = "luna-service2 glib-2.0 libpbnjson"
 RDEPENDS:${PN} = "geoclue"
 
 PV = "0.1.0+git${SRCPV}"
-SRCREV = "5de7193c53e7a07ddb48c2316d3209bf4ef0ab07"
+SRCREV = "948489ec5b4387e0ab9c5e5d49484ea49d440834"
 
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE:${PN} = "org.webosports.service.location.service"

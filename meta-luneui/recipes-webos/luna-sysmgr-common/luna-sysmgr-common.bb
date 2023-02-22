@@ -18,6 +18,5 @@ inherit webos_ports_fork_repo
 inherit pkgconfig
 inherit webos_cmake_qt6
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/qt6"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
