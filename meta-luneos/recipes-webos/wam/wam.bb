@@ -35,6 +35,7 @@ SYSTEMD_SERVICE:${PN} = "webapp-mgr.service"
 
 WAM_DATA_DIR = "${webos_execstatedir}/${BPN}"
 
+WEBOS_GIT_PARAM_BRANCH = "55-webOS-ports/master"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     file://0001-Fix-build-with-gcc-13.patch \
     file://0001-CMakeLists.txt-remove-Wall-Werror-fpermissive-to-fix.patch \
