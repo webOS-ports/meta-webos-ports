@@ -1,20 +1,132 @@
-From 5bfd1212bd46b27bdb335983d4a42b0634183e03 Mon Sep 17 00:00:00 2001
+From 942feee3f959de1dbc84fe2927de8c63f0d7247b Mon Sep 17 00:00:00 2001
 From: Herman van Hazendonk <github.com@herrie.org>
 Date: Wed, 7 Dec 2022 07:42:34 +0100
-Subject: [PATCH] [PATCH] Add window.open support
+Subject: [PATCH 2/5] Add window.open support
 
 Signed-off-by: Christophe Chapuis <chris.chapuis@gmail.com>
 Upstream-Status: Pending
----
- .../app_runtime/public/webview_delegate.h     |  7 +++
- src/neva/app_runtime/webview.cc               | 46 +++++++++++++++----
- src/neva/app_runtime/webview.h                | 16 ++++++-
- src/webos/webview_base.cc                     | 44 ++++++++++++++----
- src/webos/webview_base.h                      | 11 +++++
- 5 files changed, 104 insertions(+), 20 deletions(-)
 
+%% original patch: 0004-Add-window.open-support.patch
+---
+ .../browser/web_contents/web_contents_impl.cc | 14 +++++
+ .../browser/web_contents/web_contents_impl.h  |  5 ++
+ src/content/public/browser/web_contents.h     |  3 ++
+ .../common/common_param_traits_macros.h       |  1 +
+ .../renderer/window_features_converter.cc     |  2 +
+ .../app_runtime/public/webview_delegate.h     |  7 +++
+ src/neva/app_runtime/webview.cc               | 51 +++++++++++++++----
+ src/neva/app_runtime/webview.h                | 16 +++++-
+ .../window_features/window_features.mojom     |  6 +++
+ .../blink/public/web/web_window_features.h    |  2 +
+ .../renderer/core/page/chrome_client_impl.h   |  2 +
+ .../blink/renderer/core/page/create_window.cc | 24 ++++++++-
+ src/webos/webview_base.cc                     | 48 +++++++++++++----
+ src/webos/webview_base.h                      | 14 +++++
+ 14 files changed, 174 insertions(+), 21 deletions(-)
+
+diff --git a/src/content/browser/web_contents/web_contents_impl.cc b/src/content/browser/web_contents/web_contents_impl.cc
+index eabbbc6e95..6c1f8d1d6b 100644
+--- a/src/content/browser/web_contents/web_contents_impl.cc
++++ b/src/content/browser/web_contents/web_contents_impl.cc
+@@ -1175,6 +1175,13 @@ base::WeakPtr<WebContents> WebContentsImpl::GetWeakPtr() {
+   return weak_factory_.GetWeakPtr();
+ }
+ 
++const std::vector<std::string> WebContentsImpl::GetAdditionalFeatures() {
++  return additional_features_;
++}
++void WebContentsImpl::SetAdditionalFeatures(std::vector<std::string> additional_features) {
++  additional_features_ = additional_features;
++}
++
+ const GURL& WebContentsImpl::GetURL() {
+   return GetVisibleURL();
+ }
+@@ -3842,6 +3849,13 @@ FrameTree* WebContentsImpl::CreateNewWindow(
+   new_contents_impl->GetController().SetSessionStorageNamespace(
+       partition_id, session_storage_namespace);
+ 
++  // Additional window features passed to window.open (webOS/LuneOS specific)
++  std::vector<std::string> additional_features;
++  for (auto webStr : params.features->additional_features)
++    additional_features.push_back(std::string(base::StringPiece(webStr)));
++
++  new_contents_impl->SetAdditionalFeatures(additional_features);
++
+   // If the new frame has a name, make sure any SiteInstances that can find
+   // this named frame have proxies for it.  Must be called after
+   // SetSessionStorageNamespace, since this calls CreateRenderView, which uses
+diff --git a/src/content/browser/web_contents/web_contents_impl.h b/src/content/browser/web_contents/web_contents_impl.h
+index 933f8034ad..cffb1240c4 100644
+--- a/src/content/browser/web_contents/web_contents_impl.h
++++ b/src/content/browser/web_contents/web_contents_impl.h
+@@ -350,6 +350,9 @@ class CONTENT_EXPORT WebContentsImpl : public WebContents,
+   void SetDelegate(WebContentsDelegate* delegate) override;
+   NavigationControllerImpl& GetController() override;
+ 
++  const std::vector<std::string> GetAdditionalFeatures() override;
++  void SetAdditionalFeatures(std::vector<std::string> additional_features);
++
+ #if defined(USE_NEVA_APPRUNTIME)
+   // Notify the process creation of currently active RenderProcessHost
+   void RenderProcessCreated(RenderProcessHost* render_process_host) override;
+@@ -2052,6 +2055,8 @@ class CONTENT_EXPORT WebContentsImpl : public WebContents,
+   // Used to correctly handle integer zooming through a smooth scroll device.
+   float zoom_scroll_remainder_;
+ 
++  std::vector<std::string> additional_features_;
++
+   // The intrinsic size of the page.
+   gfx::Size preferred_size_;
+ 
+diff --git a/src/content/public/browser/web_contents.h b/src/content/public/browser/web_contents.h
+index 5781f96a03..4fa26f54b1 100644
+--- a/src/content/public/browser/web_contents.h
++++ b/src/content/public/browser/web_contents.h
+@@ -305,6 +305,9 @@ class WebContents : public PageNavigator,
+   // NavigationController).
+   virtual content::BrowserContext* GetBrowserContext() = 0;
+ 
++  // Retrieve additional window features passed to window.open (webOS/LuneOS specific)
++  virtual const std::vector<std::string> GetAdditionalFeatures() = 0;
++
+   // Returns a weak pointer.
+   virtual base::WeakPtr<WebContents> GetWeakPtr() = 0;
+ 
+diff --git a/src/content/public/common/common_param_traits_macros.h b/src/content/public/common/common_param_traits_macros.h
+index 3ebedf5aa0..769926dccd 100644
+--- a/src/content/public/common/common_param_traits_macros.h
++++ b/src/content/public/common/common_param_traits_macros.h
+@@ -68,6 +68,7 @@ IPC_STRUCT_TRAITS_BEGIN(blink::mojom::WindowFeatures)
+   IPC_STRUCT_TRAITS_MEMBER(status_bar_visible)
+   IPC_STRUCT_TRAITS_MEMBER(tool_bar_visible)
+   IPC_STRUCT_TRAITS_MEMBER(scrollbars_visible)
++  IPC_STRUCT_TRAITS_MEMBER(additional_features)
+ IPC_STRUCT_TRAITS_END()
+ 
+ IPC_ENUM_TRAITS_MAX_VALUE(gfx::FontRenderParams::Hinting,
+diff --git a/src/content/public/renderer/window_features_converter.cc b/src/content/public/renderer/window_features_converter.cc
+index 49fd3e6f1e..1241ded98b 100644
+--- a/src/content/public/renderer/window_features_converter.cc
++++ b/src/content/public/renderer/window_features_converter.cc
+@@ -27,6 +27,7 @@ blink::mojom::WindowFeaturesPtr ConvertWebWindowFeaturesToMojoWindowFeatures(
+   result->status_bar_visible = web_window_features.status_bar_visible;
+   result->tool_bar_visible = web_window_features.tool_bar_visible;
+   result->scrollbars_visible = web_window_features.scrollbars_visible;
++  result->additional_features = web_window_features.additional_features;
+   return result;
+ }
+ 
+@@ -45,6 +46,7 @@ blink::WebWindowFeatures ConvertMojoWindowFeaturesToWebWindowFeatures(
+   result.status_bar_visible = window_features.status_bar_visible;
+   result.tool_bar_visible = window_features.tool_bar_visible;
+   result.scrollbars_visible = window_features.scrollbars_visible;
++  result.additional_features = window_features.additional_features;
+   return result;
+ }
+ 
 diff --git a/src/neva/app_runtime/public/webview_delegate.h b/src/neva/app_runtime/public/webview_delegate.h
-index f4fc4ef7cf..5521caa2c6 100644
+index f4fc4ef7cf..90cea2dc18 100644
 --- a/src/neva/app_runtime/public/webview_delegate.h
 +++ b/src/neva/app_runtime/public/webview_delegate.h
 @@ -21,6 +21,10 @@
@@ -33,13 +145,13 @@ index f4fc4ef7cf..5521caa2c6 100644
    virtual void DidResumeDOM() {}
  
 +  // create a new view for this content
-+  virtual content::WebContents *CreateWindowForContents(std::unique_ptr<content::WebContents> new_contents, const std::string& newUrl) = 0;
++  virtual content::WebContents *CreateWindowForContents(std::unique_ptr<content::WebContents> new_contents, const std::string& newUrl, int height = 0) = 0;
 +
    // Pluggable delegate
    virtual void SendCookiesForHostname(const std::string& cookies) {}
  
 diff --git a/src/neva/app_runtime/webview.cc b/src/neva/app_runtime/webview.cc
-index 4078d3bb7e..2b2caa2710 100644
+index 4078d3bb7e..517fde854a 100644
 --- a/src/neva/app_runtime/webview.cc
 +++ b/src/neva/app_runtime/webview.cc
 @@ -133,11 +133,16 @@ void WebView::SetFileAccessBlocked(bool blocked) {
@@ -70,7 +182,7 @@ index 4078d3bb7e..2b2caa2710 100644
  
    permissions::PermissionRequestManager::CreateForWebContents(
        web_contents_.get());
-@@ -421,6 +425,18 @@ void WebView::LoadProgressChanged(double progress) {
+@@ -421,6 +425,23 @@ void WebView::LoadProgressChanged(double progress) {
      webview_delegate_->OnLoadProgressChanged(progress);
  }
  
@@ -78,7 +190,12 @@ index 4078d3bb7e..2b2caa2710 100644
 +{
 +  content::WebContents *contents = nullptr;
 +  if (webview_delegate_) {
-+    contents = webview_delegate_->CreateWindowForContents(std::move(new_contents), target_url.spec());
++    // height was given by the app, i.e. in window pixel coordinates. So scale it for display on device
++    float device_scale_factor = display::Display::GetForcedDeviceScaleFactor();
++    gfx::RectF screen_pos(initial_pos);
++    screen_pos.Scale(device_scale_factor);
++    
++    contents = webview_delegate_->CreateWindowForContents(std::move(new_contents), target_url.spec(), initial_pos.height());
 +  }
 +
 +//  WebView *newAdapter = new WebContentsAdapter(std::move(new_contents));
@@ -89,7 +206,7 @@ index 4078d3bb7e..2b2caa2710 100644
  // OpenURLFromTab() method is implemented for transition from old_url to new_url
  // where old_url.SchemeIs(url::kFileScheme) == false
  // and   new_url.SchemeIs(url::kFileScheme) == true
-@@ -434,14 +450,26 @@ content::WebContents* WebView::OpenURLFromTab(
+@@ -434,14 +455,26 @@ content::WebContents* WebView::OpenURLFromTab(
      return nullptr;
    }
  
@@ -162,8 +279,98 @@ index ce9ea7143d..d560ee5f0a 100644
    WebViewDelegate* webview_delegate_ = nullptr;
  
    std::unique_ptr<content::WebContents> web_contents_;
+diff --git a/src/third_party/blink/public/mojom/window_features/window_features.mojom b/src/third_party/blink/public/mojom/window_features/window_features.mojom
+index dac13c3861..1ca165b262 100644
+--- a/src/third_party/blink/public/mojom/window_features/window_features.mojom
++++ b/src/third_party/blink/public/mojom/window_features/window_features.mojom
+@@ -21,4 +21,10 @@ struct WindowFeatures {
+     bool status_bar_visible = true;
+     bool tool_bar_visible = true;
+     bool scrollbars_visible = true;
++
++    // NOTE: WebWindowFeatures::additional_features is not mirrored by this
++    // mojom struct as it's never used by the browser and therefore doesn't need
++    // to be sent.
++	// ... but webOS/LuneOS apps need that to send additional info to the OS
++    array<string> additional_features;
+ };
+diff --git a/src/third_party/blink/public/web/web_window_features.h b/src/third_party/blink/public/web/web_window_features.h
+index 84d32491a5..dfdf4aa6da 100644
+--- a/src/third_party/blink/public/web/web_window_features.h
++++ b/src/third_party/blink/public/web/web_window_features.h
+@@ -68,6 +68,8 @@ struct WebWindowFeatures {
+   // Represents the attribution source declared by Attribution Reporting related
+   // window features, if any.
+   absl::optional<WebImpression> impression;
++
++  std::vector<std::string> additional_features;
+ };
+ 
+ }  // namespace blink
+diff --git a/src/third_party/blink/renderer/core/page/chrome_client_impl.h b/src/third_party/blink/renderer/core/page/chrome_client_impl.h
+index dd24444401..e65a9e963f 100644
+--- a/src/third_party/blink/renderer/core/page/chrome_client_impl.h
++++ b/src/third_party/blink/renderer/core/page/chrome_client_impl.h
+@@ -307,6 +307,8 @@ class CORE_EXPORT ChromeClientImpl final : public ChromeClient {
+ 
+   void PasswordFieldReset(HTMLInputElement& element) override;
+ 
++  IntSize MinimumWindowSize() const override { return IntSize(100, 5); }
++
+  private:
+   bool IsChromeClientImpl() const override { return true; }
+ 
+diff --git a/src/third_party/blink/renderer/core/page/create_window.cc b/src/third_party/blink/renderer/core/page/create_window.cc
+index ed0fcc8906..081d6da9c9 100644
+--- a/src/third_party/blink/renderer/core/page/create_window.cc
++++ b/src/third_party/blink/renderer/core/page/create_window.cc
+@@ -131,8 +131,23 @@ WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string,
+       SECURITY_DCHECK(i <= length);
+ 
+       // skip to first separator (end of value)
+-      while (i < length && !IsWindowFeaturesSeparator(buffer[i]))
+-        i++;
++      if (i < length && buffer[i] == '{') {
++          // json value: go to the matching '}'
++          int unmatchedBraceCount = 0;
++          while (i < length) {
++              if (buffer[i] == '{')
++                  unmatchedBraceCount++;
++              else if (buffer[i] == '}')
++                  unmatchedBraceCount--;
++              i++;
++              if (unmatchedBraceCount <= 0)
++                  break;
++          }
++      } else {
++          // classic case: skip to first separator
++          while (i < length && !IsWindowFeaturesSeparator(buffer[i]))
++            i++;
++      }
+ 
+       value_end = i;
+ 
+@@ -199,6 +214,9 @@ WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string,
+       window_features.status_bar_visible = value;
+     } else if (key_string == "scrollbars") {
+       window_features.scrollbars_visible = value;
++    } else if (key_string == "attributes") {
++      String additionalFeature = key_string + "=" + value_string;
++      window_features.additional_features.push_back(additionalFeature.Latin1().data());
+     } else if (key_string == "resizable") {
+       window_features.resizable = value;
+     } else if (key_string == "noopener") {
+@@ -221,6 +239,8 @@ WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string,
+       } else if (key_string == "attributionsourcepriority") {
+         impression_features.priority = value_string.ToString();
+       }
++    } else if (value == 1) {
++      window_features.additional_features.push_back(key_string.ToString().Latin1().data());
+     }
+   }
+ 
 diff --git a/src/webos/webview_base.cc b/src/webos/webview_base.cc
-index b7c3432f56..e9fb3ed4f7 100644
+index b7c3432f56..8e9305000b 100644
 --- a/src/webos/webview_base.cc
 +++ b/src/webos/webview_base.cc
 @@ -75,10 +75,40 @@ void WebViewBase::SetFileAccessBlocked(bool blocked) {
@@ -199,7 +406,7 @@ index b7c3432f56..e9fb3ed4f7 100644
 +  delete webview_;
 +}
 +
-+content::WebContents *WebViewBase::CreateWindowForContents(std::unique_ptr<content::WebContents> new_contents, const std::string& newUrl)
++content::WebContents *WebViewBase::CreateWindowForContents(std::unique_ptr<content::WebContents> new_contents, const std::string& newUrl, int initial_height)
 +{
    // If screen is rotated then initial size might be different and default
    // values may lead to incorrectly scaled view for the first rendered frame.
@@ -208,31 +415,36 @@ index b7c3432f56..e9fb3ed4f7 100644
    if (display::Screen::GetScreen()->GetNumDisplays() > 0) {
      gfx::Size displaySize =
          display::Screen::GetScreen()->GetPrimaryDisplay().bounds().size();
-@@ -86,16 +116,10 @@ WebViewBase::WebViewBase(bool alt_storage_path, int width, int height) {
+@@ -86,16 +116,16 @@ WebViewBase::WebViewBase(bool alt_storage_path, int width, int height) {
      height = displaySize.height();
    }
  
 -  webview_ = new neva_app_runtime::WebView(width, height);
 -  webview_->SetDelegate(this);
 -  webview_->SetControllerDelegate(this);
-+  neva_app_runtime::WebView *webview = new neva_app_runtime::WebView(width, height, nullptr, std::move(new_contents));
-+  return CreateWindowForWebView(newUrl, webview);
- }
--
+-}
++  // take into account the height preferred by the new content
++  if (initial_height > 0) height = initial_height;
+ 
 -WebViewBase::~WebViewBase() {
 -  webview_->SetDelegate(nullptr);
 -  delete webview_;
 -}
--
++  std::vector<std::string> additional_features;
++  if(new_contents) additional_features = new_contents->GetAdditionalFeatures();
+ 
++  neva_app_runtime::WebView *webview = new neva_app_runtime::WebView(width, height, nullptr, std::move(new_contents));
++  return CreateWindowForWebView(newUrl, webview, height, additional_features);
++}
 +  
  void WebViewBase::Initialize(const std::string& app_id,
                               const std::string& app_path,
                               const std::string& trust_level,
 diff --git a/src/webos/webview_base.h b/src/webos/webview_base.h
-index 59bbc5526e..97462d8647 100644
+index 59bbc5526e..4252abe631 100644
 --- a/src/webos/webview_base.h
 +++ b/src/webos/webview_base.h
-@@ -100,11 +100,22 @@ class WEBOS_EXPORT WebViewBase
+@@ -100,11 +100,25 @@ class WEBOS_EXPORT WebViewBase
  
    static void SetFileAccessBlocked(bool blocked);
  
@@ -247,11 +459,17 @@ index 59bbc5526e..97462d8647 100644
 +
    ~WebViewBase() override;
  
-+  content::WebContents *CreateWindowForContents(std::unique_ptr<content::WebContents> new_contents, const std::string& newUrl) override;
++  content::WebContents *CreateWindowForContents(std::unique_ptr<content::WebContents> new_contents, const std::string& newUrl, int height = 0) override;
 +  // CreateWindowForWebView should be implemented in WAM
-+  virtual content::WebContents *CreateWindowForWebView(const std::string& newUrl, neva_app_runtime::WebView *webview) { return nullptr; };
++  virtual content::WebContents *CreateWindowForWebView(const std::string& newUrl,
++                                                       neva_app_runtime::WebView *webview,
++                                                       int height,
++                                                       std::vector<std::string> additional_features) { return nullptr; };
 +
 +
    void Initialize(const std::string& app_id,
                    const std::string& app_path,
                    const std::string& trust_level,
+-- 
+2.34.1
+
