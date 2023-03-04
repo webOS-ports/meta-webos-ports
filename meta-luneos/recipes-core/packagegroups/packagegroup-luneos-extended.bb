@@ -109,10 +109,10 @@ RDEPENDS:${PN} = " \
   storaged \
   messwerk \
   fingerterm \
+  org.webosports.app.terminal \
 "
 
 #Needs work for Qt6
-#  org.webosports.app.terminal
 #  org.webosports.app.camera
 
 LIBHYBRIS_RDEPENDS = " \
