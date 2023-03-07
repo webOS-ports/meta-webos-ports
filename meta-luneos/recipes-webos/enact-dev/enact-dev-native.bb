@@ -1,7 +1,8 @@
-# Copyright (c) 2016-2022 LG Electronics, Inc.
+# Copyright (c) 2016-2023 LG Electronics, Inc.
 
+# Maintained by Seungho Park <seunghoh.park@lge.com>
 DESCRIPTION = "enact-dev command-line tools used by webOS"
-AUTHOR = "Seungho Park <seunghoh.park@lge.com>"
+AUTHOR = "EnactUnassigned <enact.swp@lge.com>"
 SECTION = "webos/devel/tools"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://cli/LICENSE;md5=9456eea7fa7e9e4a4fcdf8e430bd36c8"
@@ -36,8 +37,8 @@ SRCREV_FORMAT = "main_jsdoc-to-ts"
 # tag whose hash is specified in SRCREV, so PV and SRCREV will always change
 # together.
 
-PV = "5.0.2"
-SRCREV = "37876eebfa39545cabad4c4d1aa30ecfec6417fc"
+PV = "5.1.0"
+SRCREV = "1c2d897abd95f7a310382edc5233e0384ed71cc4"
 SRCREV_jsdoc-to-ts = "059b9395e5804f943c3eef1afe7a0f80ef7c42ca"
 
 # Skip unneeded tasks
@@ -47,24 +48,7 @@ do_configure[noexec] = "1"
 do_compile() {
     bbnote "Enact cli & jsdoc-to-ts npm install"
     for LOC_TOOL in ${S}/* ; do
-        ATTEMPTS=0
-        STATUS=-1
-        while [ ${STATUS} -ne 0 ] ; do
-            ATTEMPTS=$(expr ${ATTEMPTS} + 1)
-            if [ ${ATTEMPTS} -gt 5 ] ; then
-                bberror "All attempts to NPM install have failed; exiting!"
-                exit ${STATUS}
-            fi
-
-            bbnote "NPM install attempt #${ATTEMPTS} (of 5)..." && echo
-            STATUS=0
-            timeout --kill-after=5m 15m ${WEBOS_NPM_BIN} ${WEBOS_NPM_INSTALL_FLAGS} install -C ${LOC_TOOL} || eval "STATUS=\$?"
-            if [ ${STATUS} -ne 0 ] ; then
-                bbwarn "...NPM process failed with status ${STATUS}"
-            else
-                bbnote "...NPM process succeeded" && echo
-            fi
-        done
+        ${WEBOS_NPM_BIN} ${WEBOS_NPM_INSTALL_FLAGS} install -C ${LOC_TOOL}
     done
 }
 
@@ -74,10 +58,7 @@ do_install() {
     cp -R --no-dereference --preserve=mode,links -v ${S}/* ${D}${base_prefix}/opt
 }
 
-sysroot_stage_all:append() {
-    # files installed to /opt don't get staged by default so we must force /opt to be staged
-    sysroot_stage_dir ${D}${base_prefix}/opt ${SYSROOT_DESTDIR}${base_prefix}/opt
-}
+SYSROOT_DIRS += "${base_prefix}/opt"
 
 # Workaround for network access issue during do_compile task
 do_compile[network] = "1"

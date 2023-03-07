@@ -1,7 +1,8 @@
-# Copyright (c) 2017-2022 LG Electronics, Inc.
+# Copyright (c) 2017-2023 LG Electronics, Inc.
 
+# Maintained by Seungho Park <seunghoh.park@lge.com>
 SUMMARY = "Enact moonstone standard override used for Enact apps"
-AUTHOR = "Jason Robitaille <jason.robitaille@lge.com>"
+AUTHOR = "EnactUnassigned <enact.swp@lge.com>"
 SECTION = "webos/apps"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://enact/LICENSE;md5=e3fc50a88d0a364313df4b21ef20c29e"
@@ -22,17 +23,17 @@ SRC_URI = " \
 # algorithm properly recognizes that a pre-release precedes the associated final
 # release (e.g., 1.0-pre.1 < 1.0).
 
-PV = "4.5.0"
+PV = "4.5.1"
 
-SRCREV_main = "1440da6ff32008855fc7c9a570ccf66c54fc0d77"
-SRCREV_enact = "6e6668d3327d6993b0e80edb73c0fc90765c834e"
+SRCREV_main = "a94258c80f2d20d672a407b795768398e65c28e2"
+SRCREV_enact = "36767a5f68f7fde3db8b5a4a2010d33231f8b58e"
 
 do_fetch[vardeps] += "SRCREV_enact"
 SRCREV_FORMAT = "main_enact"
 
 # Ordered dependency list for Moonstone; provides shrink-wrap style locking in of package versions
 WEBOS_ENACT_DEPENDENCIES ??= "\
-    classnames@2.3.1 \
+    classnames@2.3.2 \
     direction@1.0.4 \
     dom-walk@0.1.2 \
     global@4.4.0 \
@@ -59,7 +60,7 @@ WEBOS_ENACT_DEPENDENCIES ??= "\
 # NOTE: We only need to bump PR if we change something OTHER than
 # PV, SRCREV or the dependencies statement above.
 
-PR = "r21"
+PR = "r22"
 
 # Skip unneeded tasks
 do_configure[noexec] = "1"
@@ -112,10 +113,7 @@ do_install() {
     cp -R --no-dereference --preserve=mode,links -v ${S}/node_modules/* ${D}${datadir}/javascript/enact
 }
 
-sysroot_stage_all:append() {
-    # files don't get staged by default so we must force /opt to be staged
-    sysroot_stage_dir ${D}${datadir} ${SYSROOT_DESTDIR}${datadir}
-}
+SYSROOT_DIRS += "${datadir}"
 
 FILES:${PN} += "${datadir}"
 
