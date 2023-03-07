@@ -9,7 +9,7 @@ LIC_FILES_CHKSUM = " \
 "
 
 DEPENDS = "qtdeclarative luna-service2 glib-2.0"
-DEPENDS:append = " ${@ 'qtshadertools-native' if d.getVar('QT_VERSION', True) == '6' else '' }"
+DEPENDS:append = " ${@ 'qtshadertools-native' if d.getVar('QT_VERSION') == '6' else '' }"
 
 PV = "1.0.0-6+git${SRCPV}"
 SRCREV = "128516aa9fedb645b2989618b50ec9e1a8e1f6aa"
