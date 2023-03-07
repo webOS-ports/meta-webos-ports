@@ -16,7 +16,7 @@ PV = "3.21.2-1+git${SRCPV}"
 
 WEBOS_DISTRO_PRERELEASE ??= ""
 EXTRA_OECMAKE += "${@ '-DWEBOS_DISTRO_PRERELEASE:STRING="devel"' \
-                  if d.getVar('WEBOS_DISTRO_PRERELEASE',True) != '' else ''}"
+                  if d.getVar('WEBOS_DISTRO_PRERELEASE') != '' else ''}"
 
 inherit webos_ports_ose_repo
 inherit webos_cmake
