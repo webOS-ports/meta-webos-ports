@@ -1,4 +1,4 @@
-# Copyright (c) 2021-2022 LG Electronics, Inc.
+# Copyright (c) 2021-2023 LG Electronics, Inc.
 #
 # webos_npm_env
 #
@@ -6,7 +6,7 @@
 #
 
 def get_nodejs_arch(d):
-    target_arch = d.getVar('TRANSLATED_TARGET_ARCH', True)
+    target_arch = d.getVar('TRANSLATED_TARGET_ARCH')
 
     if target_arch == "x86-64":
         target_arch = "x64"
@@ -30,13 +30,6 @@ WEBOS_NPM_INSTALL_FLAGS ?= "--arch=${WEBOS_NPM_ARCH} --target_arch=${WEBOS_NPM_A
 WEBOS_NODE_BIN ??= "${STAGING_BINDIR_NATIVE}/node"
 
 # for node-gyp
-# this needs to be kept in sync with nodejs version in meta-oe
-# otherwise we'll get node.js error: like during dunfell upgrade
-# where meta-oe had 12.14.1 and 10.15.3 was here:
-# The module '/usr/lib/nodejs/webos.node' was compiled against
-# a different Node.js version using NODE_MODULE_VERSION 64.
-# This version of Node.js requires NODE_MODULE_VERSION 72.
-# Please try re-compiling or re-installing
 WEBOS_NODE_VERSION = "18.12.1"
 WEBOS_NODE_SRC_URI = "https://nodejs.org/dist/v${WEBOS_NODE_VERSION}/node-v${WEBOS_NODE_VERSION}.tar.xz;name=node"
 WEBOS_NODE_GYP = "node-gyp --arch '${TARGET_ARCH}' --nodedir '${WORKDIR}/node-v${WEBOS_NODE_VERSION}'"
