@@ -33,6 +33,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0007-Add-additional-permissions-for-org.webosports.notifi.patch \
     file://0008-base.pro-Remove-building-of-tests.patch \
     file://0009-com.webos.surfacemanager.perm.json-Add-permissions-f.patch \
+    file://0010-qmldir-expose-NotificationService-component.patch \
 "
 
 S = "${WORKDIR}/git"
