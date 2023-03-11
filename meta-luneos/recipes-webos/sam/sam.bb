@@ -8,7 +8,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=89aea4e17d99a7cacdbeed46a0096b10 \
                     file://oss-pkg-info.yaml;md5=2bdfe040dcf81b4038370ae96036c519 \
 "
 
-DEPENDS = "glib-2.0 luna-service2 libpbnjson boost icu pmloglib procps libwebosi18n"
+DEPENDS = "glib-2.0 luna-service2 libpbnjson boost icu pmloglib libwebosi18n"
 RDEPENDS:${PN} = "ecryptfs-utils"
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_webos-customization}"
 
@@ -36,6 +36,7 @@ file://0009-LuneOS-style-module-name-is-now-QtQuick.Controls.Lun.patch \
 file://0010-Setup-QT_IM_MODULE-for-client-apps.patch \
 file://0011-NativeContainer-configure-native-apps.patch \
 file://0001-CMakeLists.txt-use-libproc2-from-procps-4.patch \
+file://0002-sam-remove-procps-dependency.patch \
 "
 
 S = "${WORKDIR}/git"
