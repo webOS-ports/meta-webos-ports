@@ -13,8 +13,11 @@ DEPENDS = "glib-2.0 luna-service2 libpbnjson pmloglib boost libxml++"
 inherit pkgconfig
 inherit webos_cmake
 inherit webos_system_bus
-inherit webos_systemd
 inherit webos_public_repo
+inherit systemd
+
+SYSTEMD_PACKAGES = "${PN}"
+SYSTEMD_SERVICE:${PN} = "notificationmgr.service"
 
 PV = "1.0.0-21+git${SRCPV}"
 SRCREV = "97e68e38b489ab103e68b63672b5444ee7a05d49"
@@ -27,5 +30,4 @@ S = "${WORKDIR}/git"
 
 FILES:${PN} += " \ 
     ${webos_prefix} \
-    ${systemd_unitdir}/system \
 "
