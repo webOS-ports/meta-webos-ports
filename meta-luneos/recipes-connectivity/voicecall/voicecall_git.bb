@@ -19,7 +19,7 @@ SRC_URI = "git://github.com/sailfishos/voicecall.git;protocol=https;branch=maste
 S = "${WORKDIR}/git"
 
 #enable debugging in voicecall. This is now merged upstream so we don't need patches anymore to enable this for each individual file.
-EXTRA_QMAKEVARS_PRE += "CONFIG+=enable-debug"
+EXTRA_QMAKEVARS_PRE += "CONFIG+=enable-debug QT6_INSTALL_LIBDIR=${QT6_INSTALL_LIBDIR}"
 
 # Separated build dirs doesn't work with this component currently due to the way it deals
 # with its self build dependencies.
