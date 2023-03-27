@@ -1,7 +1,7 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
-SRCREV = "0db662bd6ba4070838bf143df5ee24c949a8c0df"
-PV = "1.31+git${SRCPV}"
+SRCREV = "39e2a3f2c57365b78f4f08c0353d6e7abf2709cb"
+PV = "1.34+git${SRCPV}"
 
 SRCREV:halium = "005f36bb89a366b842bfa533ba273c0d9c52c621"
 PV:halium = "1.24+git${SRCPV}"
