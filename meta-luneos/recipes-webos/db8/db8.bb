@@ -30,7 +30,8 @@ EXTRA_OECMAKE:append:class-target = " -DWEBOS_CONFIG_BUILD_TESTS:BOOL=TRUE  -DUS
 EXTRA_OECMAKE:append:class-native = " -DWEBOS_CONFIG_BUILD_TESTS:BOOL=FALSE -DUSE_PMLOG:BOOL=FALSE -DBUILD_LS2:BOOL=FALSE"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-file://0001-com.palm.db.role.json.in-More-generic-app-access.patch \
+    file://0001-com.palm.db.role.json.in-More-generic-app-access.patch \
+    file://0001-CMakeLists.txt-replace-std-c-0x-with-std-c-14.patch \
 "
 
 S = "${WORKDIR}/git"
