@@ -13,6 +13,7 @@ SRC_URI:append = " \
     file://0001-Support-presentation-time-protocol.patch;maxver=6.2.* \
     file://0002-Use-scope-resolution-operator-for-request.patch;maxver=6.2.* \
     file://0003-Fix-to-have-presentation-feedback-sequence-timely.patch;maxver=6.3.1 \
+    file://0004-QWaylandDisplay-don-t-ignore-wayland-QT_IM_MODULE.patch \
 "
 
 # More options for fine-tuned configuration
