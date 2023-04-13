@@ -17,7 +17,7 @@ DEPENDS = "maliit-framework-webos hunspell presage luna-service2 presage-native 
 RDEPENDS:${PN} += "qtsvg-plugins qtmultimedia-qmlplugins"
 RRECOMMENDS:${PN} += "hunspell-dictionaries"
 
-SRCREV = "7428028d8f1bef27892a0b40aa47afc142624a6c"
+SRCREV = "f832d242bd41a2c72a27af51b07a4d8736f4b81d"
 PV = "0.99.2+git${SRCPV}"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
