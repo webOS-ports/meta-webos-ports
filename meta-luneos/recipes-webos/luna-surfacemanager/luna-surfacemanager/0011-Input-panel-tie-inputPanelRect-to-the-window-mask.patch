@@ -1,0 +1,115 @@
+From 34dd542201bdcc863307c4308c3cf6d43d97737a Mon Sep 17 00:00:00 2001
+From: Christophe Chapuis <chris.chapuis@gmail.com>
+Date: Sun, 16 Apr 2023 14:13:05 +0000
+Subject: [PATCH] Input panel: tie inputPanelRect to the window mask
+
+With Wayland's input method protocol, there is no way to specify an
+input panel area (i.e. reserved keyboard area) which would be different
+from the keyboard's window geometry on screen.
+However we need this capability to be able to show key popups above the
+keyboard area, while keeping the reserved keyboard space the same.
+
+In this patch, the window mask is used as an indication as to where the
+reserved keyboard area should be. The largest area in the mask is
+considered to be the wanted input panel area.
+
+Signed-off-by: Christophe Chapuis <chris.chapuis@gmail.com>
+---
+ .../input/waylandinputpanel.cpp               | 24 +++++++++++++++++++
+ .../weboscompositor/input/waylandinputpanel.h |  1 +
+ modules/weboscompositor/webossurface.cpp      |  7 ++++++
+ modules/weboscompositor/webossurface.h        |  2 ++
+ 4 files changed, 34 insertions(+)
+
+diff --git a/modules/weboscompositor/input/waylandinputpanel.cpp b/modules/weboscompositor/input/waylandinputpanel.cpp
+index 4272a93..ce7fa78 100644
+--- a/modules/weboscompositor/input/waylandinputpanel.cpp
++++ b/modules/weboscompositor/input/waylandinputpanel.cpp
+@@ -20,6 +20,7 @@
+ #include <QDebug>
+ #include <QWaylandCompositor>
+ 
++#include "webossurface.h"
+ #include "webossurfaceitem.h"
+ #include "waylandinputpanel.h"
+ 
+@@ -154,6 +155,10 @@ void WaylandInputPanel::getInputPanelSurface(struct wl_client *client, struct wl
+     WaylandInputPanelSurface* surface = new WaylandInputPanelSurface(ipsi, client, id);
+     connect(surface, &WaylandInputPanelSurface::mapped, that, &WaylandInputPanel::onInputPanelSurfaceMapped);
+     connect(surface, &WaylandInputPanelSurface::unmapped, that, &WaylandInputPanel::onInputPanelSurfaceUnmapped);
++
++    if (surface->surfaceItem()->surface()) {
++        connect(surface->surfaceItem()->surface(), &QWaylandSurface::damaged, that, &WaylandInputPanel::onSurfaceDamaged);
++    }
+ }
+ 
+ void WaylandInputPanel::onInputPanelSurfaceMapped()
+@@ -173,6 +178,25 @@ void WaylandInputPanel::onInputPanelSurfaceUnmapped()
+         updateActiveInputPanelSurface();
+ }
+ 
++void WaylandInputPanel::onSurfaceDamaged(const QRegion &rect)
++{
++    Q_UNUSED(rect);
++    
++    WebOSSurface *surface = qobject_cast<WebOSSurface *>(sender());
++    if (surface) {
++        QRegion newRegion = surface->windowMask();
++        QRect largestWindowMask;
++        for (auto &lInputAreaRect: newRegion) {
++            if (lInputAreaRect.width() > largestWindowMask.width()) largestWindowMask = lInputAreaRect;
++        }
++        
++        if (largestWindowMask.width()>0) {
++            // consider that the first defined mask region is the input area
++            setInputPanelRect(largestWindowMask);
++        }
++    }
++}
++
+ void WaylandInputPanel::updateActiveInputPanelSurface(WaylandInputPanelSurface *surface)
+ {
+     WaylandInputPanelSurface *target = 0;
+diff --git a/modules/weboscompositor/input/waylandinputpanel.h b/modules/weboscompositor/input/waylandinputpanel.h
+index 3ffb17b..49cc364 100644
+--- a/modules/weboscompositor/input/waylandinputpanel.h
++++ b/modules/weboscompositor/input/waylandinputpanel.h
+@@ -97,6 +97,7 @@ private:
+ private slots:
+     void onInputPanelSurfaceMapped();
+     void onInputPanelSurfaceUnmapped();
++    void onSurfaceDamaged(const QRegion &rect);
+     void updateInputPanelState();
+ 
+ private:
+diff --git a/modules/weboscompositor/webossurface.cpp b/modules/weboscompositor/webossurface.cpp
+index f222ba0..d912826 100644
+--- a/modules/weboscompositor/webossurface.cpp
++++ b/modules/weboscompositor/webossurface.cpp
+@@ -55,3 +55,10 @@ WebOSSurface::WebOSSurface()
+     : QWaylandQuickSurface(*new WebOSSurfacePrivate())
+ {
+ }
++
++QRegion WebOSSurface::windowMask()
++{
++    Q_D(WebOSSurface);
++    
++    return d->inputRegion;
++}
+diff --git a/modules/weboscompositor/webossurface.h b/modules/weboscompositor/webossurface.h
+index 2fdf808..0d20026 100644
+--- a/modules/weboscompositor/webossurface.h
++++ b/modules/weboscompositor/webossurface.h
+@@ -32,6 +32,8 @@ class WebOSSurface : public QWaylandQuickSurface
+ 
+ public:
+     WebOSSurface();
++    
++    QRegion windowMask();
+ 
+ signals:
+     void aboutToBeDestroyed();
+-- 
+2.34.1
+
