@@ -53,12 +53,18 @@ do_install:append() {
     # Override default system service configuration
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${WORKDIR}/${SERVICE_FILE} ${D}${systemd_unitdir}/system/ofono.service
+    
+    # remove phonesim config
+    rm ${D}${sysconfdir}/ofono/phonesim.conf
 }
 
 do_install:append:halium() {
     # Since we use --disable-datafiles we need to install the dbus condif file manually now
     install -d ${D}${sysconfdir}/dbus-1/system.d
     install -m 0644 ${B}/src/${PN}.conf ${D}${sysconfdir}/dbus-1/system.d/
+    
+    # remove phonesim config
+    rm ${D}${sysconfdir}/ofono/phonesim.conf
 }
 
 # meta-systemd sets this to disable but we as distro want it to be enabled by default
