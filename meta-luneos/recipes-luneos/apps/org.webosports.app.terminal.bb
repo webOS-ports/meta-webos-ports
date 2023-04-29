@@ -3,7 +3,7 @@ LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=b234ee4d69f5fce4486a80fdaf4a4263"
 
 PV = "0.1+git${SRCPV}"
-SRCREV = "e8914c6d90418cac5c8e8f1b2f1af36f87b6fc0f"
+SRCREV = "3b13b9a4f543a1e3bf169fd8e4eed253b19012b5"
 
 DEPENDS = "qtbase qtdeclarative"
 RDEPENDS:${PN} = "qmltermwidget "
