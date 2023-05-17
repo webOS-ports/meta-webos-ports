@@ -80,9 +80,9 @@ GN_ARGS += "${EXTRA_OEGN_GOLD}"
 
 # The last digits in the submission format are used for typical submissions number.
 # The submission formats; submissions/[number] or submissions/[branch name].[number]
-WEBOS_SUBMISSION_NUMBER="${@ '${WEBOS_SUBMISSION}'.split('.')[-1] }"
+#WEBOS_SUBMISSION_NUMBER="${@ '${WEBOS_SUBMISSION}'.split('.')[-1] }"
 #GN_ARGS:append = " webos_submission_number=${WEBOS_SUBMISSION_NUMBER}"
-GN_ARGS:append = " webos_submission_number=13"
+GN_ARGS:append = " webos_submission_number=28"
 
 TARGET_CPU = "${@gn_arch_name(TARGET_ARCH)}"
 GN_ARGS:append = " target_cpu=\"${TARGET_CPU}\""
