@@ -97,13 +97,28 @@ PATCHTOOL = "git"
 SRC_URI:append = " \
     file://0001-Support-to-get-timing-from-pagefilp.patch;maxver=6.2.* \
     file://0002-evdev-Prevent-race-condition-in-touch-events-process.patch;maxver=6.2.* \
-    file://0003-QJsonValue-fix-incorrect-to-Array-Object-when-the-va.patch \
 "
 
 # Upstream-Status: Inappropriate
 # NOTE: Increase maxver when upgrading Qt version
 SRC_URI:append = " \
-    file://9901-Disable-Faux-bolding-in-Qts-FreeType-FontEngine.patch;maxver=6.3.0 \
+    file://9901-Disable-Faux-bolding-in-Qts-FreeType-FontEngine.patch;maxver=6.5.1 \
+"
+
+# FIXME: Patches below can be dropped once all qmake-dependent components are switched to cmake.
+# https://bugreports.qt.io/browse/WEBOSCI-66
+# https://bugreports.qt.io/browse/WEBOSCI-81
+SRC_URI:append:class-native = " file://9902-Revert-Remove-perl-related-functionality-from-CMake-.patch;minver=6.5.1;maxver=6.5.1"
+SRC_URI:append:class-native = " file://9902-Revert-Remove-perl-related-functionality-from-CMake-_6.5.x.patch;minver=6.5.2;maxver=6.5.*"
+SRC_URI:append:class-native = " file://9902-Revert-Remove-perl-related-functionality-from-CMake-_6.6.x.patch;minver=6.6.0"
+# https://bugreports.qt.io/browse/WEBOSCI-73
+SRC_URI:append = " file://9903-Revert-Remove-qmake-files-that-provide-support-for-b.patch;minver=6.5.1 "
+# https://bugreports.qt.io/browse/WEBOSCI-76
+SRC_URI:append = " file://9904-Revert-CMake-remove-tests-for-C-17-and-C11-and-earli.patch;minver=6.6.0"
+
+# Upstream-Status: Backport
+SRC_URI:append = " \
+    file://0003-QJsonValue-fix-incorrect-to-Array-Object-when-the-va.patch \
 "
 
 # Flags needed for webOS
