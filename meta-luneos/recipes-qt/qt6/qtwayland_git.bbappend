@@ -30,7 +30,7 @@ PACKAGECONFIG[client-xdg-shell] = "-DFEATURE_wayland_client_xdg_shell=ON,-DFEATU
 # PACKAGECONFIG for webos
 PACKAGECONFIG = "wayland-server wayland-client client-wl-shell ${PACKAGECONFIG_DMABUF}"
 
-PACKAGECONFIG_DMABUF = "dmabuf-client-buffer dmabuf-server-buffer drm-egl-server-buffer"
+PACKAGECONFIG_DMABUF = "drm-egl-server-buffer"
 # libhybris's EGL/eglext.h doesn't define EGL_LINUX_DMA_BUF_EXT/EGL_EXT_image_dma_buf_import_modifiers tested by qtwayland
 # tests HAVE_dmabuf_server_buffer/HAVE_dmabuf_client_buffer
 # we can try to enable this again after upgrading libhybris to have:
