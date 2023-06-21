@@ -4,10 +4,10 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://libconnman-qt/clockmodel.h;endline=8;md5=ea9f724050803f15d2d900ce3c5dac88"
 DEPENDS += "qtbase qtdeclarative"
 
-VERSION = "1.2.46"
+VERSION = "1.3.3"
 PV = "${VERSION}+git${SRCPV}"
 
-SRCREV = "6786936cba9048ee943c0cd5d051c0b8fc70896f"
+SRCREV = "16e1498c1de653f71391a0cafb47251be9355b6c"
 SRC_URI = "git://github.com/sailfishos/libconnman-qt.git;protocol=https;branch=master"
 
 S = "${WORKDIR}/git"
