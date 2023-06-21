@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-3.0-only;md5=c79ff39f19dfec
 PV = "0.3.0-7+git${SRCPV}"
 SRCREV = "d713c30e463a79a989c838e2eb81d639b7c7cf8a"
 
-DEPENDS += "qtbase qtdeclarative"
+DEPENDS += "qtbase qtdeclarative qtdeclarative-native"
 
 inherit webos_ports_repo
 inherit webos_application
