@@ -17,8 +17,8 @@ inherit pkgconfig
 inherit webos_lttng
 inherit webos_public_repo
 
-PV = "2.0.0-77+git${SRCPV}"
-SRCREV = "973feda9c440a53f6f362c3254525cefe3ceabf5"
+PV = "6.0.0-86+git${SRCPV}"
+SRCREV = "22f4a8b1637ffc06d5cd14d689e7dcc0e6589539"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Fix-platform-keys.patch \
