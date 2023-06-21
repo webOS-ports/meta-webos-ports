@@ -8,7 +8,9 @@ VERSION = "1.3.3"
 PV = "${VERSION}+git${SRCPV}"
 
 SRCREV = "16e1498c1de653f71391a0cafb47251be9355b6c"
-SRC_URI = "git://github.com/sailfishos/libconnman-qt.git;protocol=https;branch=master"
+SRC_URI = "git://github.com/sailfishos/libconnman-qt.git;protocol=https;branch=master \
+    file://0001-connman_vpn_manager.xml-Fix-build-with-Qt-6.5.patch \
+"
 
 S = "${WORKDIR}/git"
 
