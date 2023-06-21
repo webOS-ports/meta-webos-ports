@@ -13,6 +13,7 @@ SRCREV = "347031ab0304dda20d7c908130c721c229f3e33f"
 
 SRC_URI = " \
     git://github.com/sailfishos/nemo-qml-plugin-dbus;branch=master;protocol=https \
+    file://0001-Fix-build-with-Qt-6.5.patch \
 "
 S = "${WORKDIR}/git"
 
