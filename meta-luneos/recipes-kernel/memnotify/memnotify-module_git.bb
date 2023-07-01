@@ -17,3 +17,5 @@ do_install:append() {
     install -d ${D}${sysconfdir}/modules-load.d
     echo "memnotify" > ${D}${sysconfdir}/modules-load.d/memnotify.conf
 }
+
+FILES:${PN} += "${sysconfdir}/modules-load.d"
