@@ -22,6 +22,12 @@ SRC_URI:append:pinephonepro = " \
     file://ucm2/VoiceCall.conf \
 "
 
+SRC_URI:append:pinetab2 = " \
+    file://ucm2/PineTab2.conf \
+    file://ucm2/HiFi.conf \
+    file://ucm2/VoiceCall.conf \
+"
+
 do_install() {
     install -d ${D}${sysconfdir}/pulse
     install -m 0644 ${WORKDIR}/webos-system.pa ${D}${sysconfdir}/pulse/
@@ -48,6 +54,16 @@ do_install:append:pinephonepro() {
     install -m 0644 ${WORKDIR}/ucm2/VoiceCall.conf ${D}${datadir}/alsa/ucm2/Pine64/PinePhonePro/VoiceCall.conf
     install -d ${D}${datadir}/alsa/ucm2/conf.d/simple-card
     ln -sf ../../Pine64/PinePhonePro/PinePhonePro.conf ${D}${datadir}/alsa/ucm2/conf.d/simple-card/PinePhonePro.conf
+}
+
+do_install:append:pinetab2() {
+    install -d ${D}${datadir}/alsa/ucm2/PineTab2
+    install -d ${D}${datadir}/alsa/ucm2/Pine64/PineTab2
+    install -m 0644 ${WORKDIR}/ucm2/PineTab2.conf ${D}${datadir}/alsa/ucm2/Pine64/PineTab2/PineTab2.conf
+    install -m 0644 ${WORKDIR}/ucm2/HiFi.conf ${D}${datadir}/alsa/ucm2/Pine64/PineTab2/HiFi.conf
+    install -m 0644 ${WORKDIR}/ucm2/VoiceCall.conf ${D}${datadir}/alsa/ucm2/Pine64/PineTab2/VoiceCall.conf
+    install -d ${D}${datadir}/alsa/ucm2/conf.d/simple-card
+    ln -sf ../../Pine64/PineTab2/PineTab2.conf ${D}${datadir}/alsa/ucm2/conf.d/simple-card/PineTab2.conf
 }
 
 FILES:${PN} = "${sysconfdir}/pulse ${sysconfdir}/default ${datadir}/alsa/ucm2"

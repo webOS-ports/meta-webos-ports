@@ -34,6 +34,7 @@ COMPATIBLE_MACHINE:qemux86-64 = "(.*)"
 COMPATIBLE_MACHINE:rpi = "(.*)"
 COMPATIBLE_MACHINE:pinephone = "(.*)"
 COMPATIBLE_MACHINE:pinephonepro = "(.*)"
+COMPATIBLE_MACHINE:pinetab2 = "(.*)"
 
 inherit pkgconfig
 
@@ -64,6 +65,10 @@ do_install:append:pinephone() {
 }
 
 do_install:append:pinephonepro() {
+    install -Dm644 -t "${D}${sysconfdir}" "${WORKDIR}/gbinder.conf" 
+}
+
+do_install:append:pinetab2() {
     install -Dm644 -t "${D}${sysconfdir}" "${WORKDIR}/gbinder.conf" 
 }
 

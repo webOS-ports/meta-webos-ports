@@ -26,6 +26,10 @@ SRC_URI:append:pinephonepro = " \
     file://sensord-pinephonepro.conf \
 "
 
+SRC_URI:append:pinetab2 = " \
+    file://sensord-pinetab2.conf \
+"
+
 # Note: maybe this should go in a bbappend in meta-smartphone...
 SRC_URI:append:tenderloin = " \
     file://sensord-tenderloin.conf \

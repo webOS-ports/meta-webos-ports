@@ -171,6 +171,7 @@ RDEPENDS:${PN}:append:yggdrasil = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
 
 #RDEPENDS:${PN}:append:pinephone = "waydroid"
 #RDEPENDS:${PN}:append:pinephonepro = "waydroid"
+#RDEPENDS:${PN}:append:pinetab2 = "waydroid"
 
 QEMU_RDEPENDS = " \
     alsa-utils-systemd \
