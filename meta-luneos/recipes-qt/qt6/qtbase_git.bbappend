@@ -34,6 +34,7 @@ PACKAGECONFIG_GRAPHICS:append:qemuall = " kms gbm"
 PACKAGECONFIG_GRAPHICS:append:hammerhead = " kms gbm"
 PACKAGECONFIG_GRAPHICS:append:pinephone = " kms gbm"
 PACKAGECONFIG_GRAPHICS:append:pinephonepro = " kms gbm"
+PACKAGECONFIG_GRAPHICS:append:pinetab2 = " kms gbm"
 PACKAGECONFIG_GRAPHICS:append:tenderloin = " kms gbm"
 PACKAGECONFIG_DISTRO += "sql-sqlite icu glib accessibility mtdev examples fontconfig xkbcommon"
 
