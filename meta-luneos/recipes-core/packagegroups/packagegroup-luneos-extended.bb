@@ -110,10 +110,8 @@ RDEPENDS:${PN} = " \
   messwerk \
   fingerterm \
   org.webosports.app.terminal \
+  org.webosports.app.camera \
 "
-
-#Needs work for Qt6
-#  org.webosports.app.camera
 
 LIBHYBRIS_RDEPENDS = " \
     ${VIRTUAL-RUNTIME_android-system-image} \
