@@ -1,3 +1,6 @@
+# Backported as-is from meta-oe nanbield in:
+# https://git.openembedded.org/meta-openembedded/commit/?id=4e0281797277cf44287de93618c51e4a219fac75
+
 SUMMARY = "Linux libcamera framework"
 SECTION = "libs"
 
@@ -23,12 +26,13 @@ DEPENDS += "${@bb.utils.contains('DISTRO_FEATURES', 'qt', 'qtbase qtbase-native'
 
 PACKAGES =+ "${PN}-gst"
 
-PACKAGECONFIG ??= "gst"
+PACKAGECONFIG ??= ""
 PACKAGECONFIG[gst] = "-Dgstreamer=enabled,-Dgstreamer=disabled,gstreamer1.0 gstreamer1.0-plugins-base"
 
+LIBCAMERA_PIPELINES ??= "auto"
+
 EXTRA_OEMESON = " \
-    -Dpipelines=uvcvideo,simple,vimc \
-    -Dipas=vimc \
+    -Dpipelines=${LIBCAMERA_PIPELINES} \
     -Dv4l2=true \
     -Dcam=enabled \
     -Dlc-compliance=disabled \
