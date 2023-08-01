@@ -4,8 +4,8 @@ HOMEPAGE = "http://kernel.ubuntu.com/~cking/powerstat/"
 LICENSE = "GPL-2.0-or-later"
 LIC_FILES_CHKSUM = "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263"
 
-PV = "0.02.27+git${SRCPV}"
-SRCREV = "556762740c6a6e19cf6842da926d184a51706ecb"
+PV = "0.03.03+git${SRCPV}"
+SRCREV = "2b075c9481b9045a7615b05fe46eb8581e2ee9d0"
 SRC_URI = "git://github.com/ColinIanKing/${BPN}.git;protocol=https;branch=master"
 S = "${WORKDIR}/git"
 
