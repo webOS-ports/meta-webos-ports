@@ -18,10 +18,11 @@ inherit autotools gettext pkgconfig python3-dir python3native
 
 SRC_URI = " \
     http://downloads.sourceforge.net/${BPN}/${BP}.tar.gz \
-    file://disable-help2man.patch \
-    file://fix.build.with.gcc-6.patch \
-    file://fix.build.with.gcc-7.patch \
-    file://fix.build.with.gcc-11.patch \
+    file://0001-configure.ac-disable-help2man.patch \
+    file://0002-iso8859_1.h-Fix-build-with-gcc-6.patch \
+    file://0003-predictors-Fix-build-with-gcc-7.patch \
+    file://0004-Fix-build-with-gcc-11.patch \
+    file://0005-configure.ac-don-t-use-L-usr-local-lib-in-LDFLAGS.patch \
 "
 
 SRC_URI[md5sum] = "9667be297912fa0d432e748526d8dd9e"
