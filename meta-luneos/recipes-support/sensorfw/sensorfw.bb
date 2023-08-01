@@ -6,44 +6,19 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=2d5025d4aa3495befef8f17206a5b0a1"
 # We're potentially depending on libhybris so need to be MACHINE_ARCH
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-PV = "0.11.4+git${SRCPV}"
-#PV = "0.12.6+git${SRCPV}"
-#SRCREV = "2e539015996111576a731750342effde7aaee87f"
-SRCREV = "6c1fa648fd934ef62fae64b304d106d61c64869f"
+PV = "0.14.4+git${SRCPV}"
+SRCREV = "b6e7f390962e5e5fa3677a393a6fb7ba46f2d67b"
 DEPENDS = "qtbase luna-sysmgr-common luna-service2 json-c glib-2.0 luna-sysmgr-ipc-messages"
 
-DEPENDS:append:halium = " libhybris virtual/android-headers libgbinder libglibutil "
-
 SRC_URI = " \
-    git://github.com/webos-ports/sensorfw.git;protocol=https;branch=herrie/qt6 \
-"
-
-# Note: maybe this should go in a bbappend in meta-pine64-luneos...
-SRC_URI:append:pinephone = " \
-    file://sensord-pinephone.conf \
-"
-SRC_URI:append:pinephonepro = " \
-    file://sensord-pinephonepro.conf \
-"
-
-SRC_URI:append:pinetab2 = " \
-    file://sensord-pinetab2.conf \
-"
-
-# Note: maybe this should go in a bbappend in meta-smartphone...
-SRC_URI:append:tenderloin = " \
-    file://sensord-tenderloin.conf \
-"
-
-SRC_URI:append:hammerhead = " \
-    file://sensord-hammerhead.conf \
+    git://github.com/jmlich/sensorfw.git;protocol=https;branch=master \
 "
 
 S = "${WORKDIR}/git"
 
-#do_configure:prepend() {
-#sed "s=@LIB@=lib=g" ${S}/sensord-qt5.pc.in > ${S}/sensord-qt5.pc
-#}
+do_configure:prepend() {
+sed "s=@LIB@=lib=g" ${S}/sensord-qt6.pc.in > ${S}/sensord-qt6.pc
+}
 
 inherit qt6-qmake
 inherit pkgconfig
@@ -54,19 +29,6 @@ inherit webos_filesystem_paths
 SERVICE_NAME = "com.nokia.SensorService"
 
 EXTRA_QMAKEVARS_PRE += "MAKE_DOCS=no "
-EXTRA_QMAKEVARS_PRE:append:halium = "CONFIG+=autohybris "
-
-# Halium-9.0 devices use binder to communicate with sensors
-EXTRA_QMAKEVARS_PRE:append:hammerhead-halium = "CONFIG+=binder "
-EXTRA_QMAKEVARS_PRE:append:mako = "CONFIG+=binder "
-EXTRA_QMAKEVARS_PRE:append:mido = "CONFIG+=binder "
-EXTRA_QMAKEVARS_PRE:append:rosy = "CONFIG+=binder "
-EXTRA_QMAKEVARS_PRE:append:sagit = "CONFIG+=binder "
-EXTRA_QMAKEVARS_PRE:append:tissot = "CONFIG+=binder "
-EXTRA_QMAKEVARS_PRE:append:yggdrasil = "CONFIG+=binder "
-
-# Tenderloin here is an exception: sensorfw doesn't need to use Halium for the sensor
-EXTRA_QMAKEVARS_PRE:remove:tenderloin = "CONFIG+=autohybris "
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/LuneOS/sysbus"
@@ -94,11 +56,7 @@ do_install:append() {
     install -d ${D}${webos_sysbus_rolesdir}
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.service ${D}${webos_sysbus_servicedir}/${SERVICE_NAME}.service
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.role.json ${D}${webos_sysbus_rolesdir}/${SERVICE_NAME}.role.json
-}
-
-do_install:append:halium() {
-    install -d ${D}${sysconfdir}/sensorfw/
-    install -m 0644 ${S}/config/sensord-hybris.conf ${D}${sysconfdir}/sensorfw/
+    rm -rf ${D}/mkspecs
 }
 
 RDEPENDS:${PN} = "bash"
