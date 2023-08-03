@@ -39,3 +39,10 @@ PREFERRED_PROVIDER_webappmanager-webos ?= "wam"
 
 VIRTUAL-RUNTIME_com.webos.app.browser ?= "com.webos.app.enactbrowser"
 VIRTUAL-RUNTIME_webappmanager = "wam"
+
+PREFERRED_PROVIDER_llvm = "clang"
+PREFERRED_PROVIDER_llvm-native = "clang-native"
+PREFERRED_PROVIDER_nativesdk-llvm = "nativesdk-clang"
+PROVIDES:pn-clang = "llvm"
+PROVIDES:pn-clang-native = "llvm-native"
+PROVIDES:pn-nativesdk-clang = "nativesdk-llvm"
