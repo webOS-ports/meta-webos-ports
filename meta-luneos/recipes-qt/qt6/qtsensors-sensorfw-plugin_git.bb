@@ -15,8 +15,8 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 # Depends on libhybris which has this restriction
 # COMPATIBLE_MACHINE = "^halium$"
 
-PV = "6.3.0+git${SRCPV}"
-SRCREV = "90568f2a4894656407c5f3de61b388ee35088867"
+PV = "6.5.2+git${SRCPV}"
+SRCREV = "5123213a07209d32d3644597e52c8ffc21ea4d09"
 
 inherit webos_ports_repo
 inherit qt6-qmake
