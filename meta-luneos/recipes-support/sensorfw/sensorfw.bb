@@ -23,6 +23,11 @@ SRC_URI:append = " \
 	file://0001-Add-trustlevel-for-enhanced-ACG.patch \
 "
 
+# Upstream-Status: Pending https://github.com/jmlich/sensorfw/pull/1
+SRC_URI:append = " \
+    file://0002-Fix-Qt6-compatibility.patch           \
+"
+
 S = "${WORKDIR}/git"
 
 do_configure:prepend() {
@@ -37,7 +42,7 @@ inherit webos_filesystem_paths
 
 SERVICE_NAME = "com.nokia.SensorService"
 
-EXTRA_QMAKEVARS_PRE += "MAKE_DOCS=no "
+EXTRA_QMAKEVARS_PRE += "MAKE_DOCS=no QT6_INSTALL_LIBDIR=${QT6_INSTALL_LIBDIR}"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/LuneOS/sysbus"
