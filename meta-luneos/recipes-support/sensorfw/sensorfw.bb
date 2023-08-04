@@ -18,13 +18,8 @@ SRC_URI = " \
     git://github.com/jmlich/sensorfw.git;protocol=https;branch=master \
 "
 
-# Upstream-Status: Backport
 SRC_URI:append = " \
-	file://0001-Add-trustlevel-for-enhanced-ACG.patch \
-"
-
-# Upstream-Status: Pending https://github.com/jmlich/sensorfw/pull/1
-SRC_URI:append = " \
+    file://0001-Add-trustlevel-for-enhanced-ACG.patch \
     file://0002-Fix-Qt6-compatibility.patch           \
 "
 
