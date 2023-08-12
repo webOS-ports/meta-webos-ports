@@ -19,7 +19,9 @@ inherit webos_cmake
 inherit webos_ports_ose_repo
 inherit systemd
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
+    file://0001-CMakeLists.txt-don-t-install-initctl-twice-and-respe.patch \
+"
 
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE:${PN} = "default-webos.target \
@@ -32,3 +34,5 @@ SYSTEMD_SERVICE:${PN} = "default-webos.target \
 "
 
 S = "${WORKDIR}/git"
+
+FILES:${PN} += "${base_sbindir}"
