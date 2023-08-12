@@ -35,6 +35,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
            file://0005-AppLoader-use-old-syntax-for-quit-connect.patch \
            file://0006-com.webos.app.qmlrunner.role.json.in-Add-trustLevel.patch \
            file://0007-WebOSQuickWindow-make-setWindowPropery-Q_INVOKABLE.patch \
+           file://0008-runner-debug-use-WEBOS_INSTALL_BINS-as-other-binarie.patch \
            "
 
 S = "${WORKDIR}/git"
