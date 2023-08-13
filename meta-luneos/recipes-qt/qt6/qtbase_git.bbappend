@@ -98,12 +98,6 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 
 PATCHTOOL = "git"
 
-# Upstream-Status: Backport
-SRC_URI:append = " \
-    file://0001-Support-to-get-timing-from-pagefilp.patch;maxver=6.2.* \
-    file://0002-evdev-Prevent-race-condition-in-touch-events-process.patch;maxver=6.2.* \
-"
-
 # Upstream-Status: Inappropriate
 # NOTE: Increase maxver when upgrading Qt version
 SRC_URI:append = " \
@@ -113,7 +107,6 @@ SRC_URI:append = " \
 # FIXME: Patches below can be dropped once all qmake-dependent components are switched to cmake.
 # https://bugreports.qt.io/browse/WEBOSCI-66
 # https://bugreports.qt.io/browse/WEBOSCI-81
-SRC_URI:append:class-native = " file://9902-Revert-Remove-perl-related-functionality-from-CMake-.patch;minver=6.5.1;maxver=6.5.1"
 SRC_URI:append:class-native = " file://9902-Revert-Remove-perl-related-functionality-from-CMake-_6.5.x.patch;minver=6.5.2;maxver=6.5.*"
 SRC_URI:append:class-native = " file://9902-Revert-Remove-perl-related-functionality-from-CMake-_6.6.x.patch;minver=6.6.0"
 # https://bugreports.qt.io/browse/WEBOSCI-73
