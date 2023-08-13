@@ -10,9 +10,11 @@ PATCHTOOL = "git"
 
 # Upstream-Status: Inappropriate
 # NOTE: Increase maxver when upgrading Qt version
-SRC_URI:append = " \
-    file://0005-Revert-Also-use-text-input-if-QT_IM_MODULE-is-empty-.patch;maxver=6.5.3 \
-"
+# Resolved differently for LuneOS with one-line change in
+# 0004-QWaylandDisplay-don-t-ignore-wayland-QT_IM_MODULE.patch
+# SRC_URI:append = " \
+#     file://0005-Revert-Also-use-text-input-if-QT_IM_MODULE-is-empty-.patch;maxver=6.5.3 \
+# "
 
 SRC_URI:append = " \
     file://0004-QWaylandDisplay-don-t-ignore-wayland-QT_IM_MODULE.patch \
