@@ -8,11 +8,6 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 
 PATCHTOOL = "git"
 
-# Upstream-Status: Backport
-SRC_URI:append = " \
-    file://0001-Correctly-handle-QQuickState-when.patch;maxver=6.2.3 \
-"
-
 # Upstream-Status: Submitted
 # NOTE: Increase maxver when upgrading Qt version
 SRC_URI:append = " \
