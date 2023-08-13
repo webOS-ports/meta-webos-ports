@@ -1,8 +1,8 @@
-# Copyright (c) 2014-2022 LG Electronics, Inc.
+# Copyright (c) 2014-2023 LG Electronics, Inc.
 
 inherit webos_qt_global
 
-EXTENDPRAUTO:append = "webos77"
+EXTENDPRAUTO:append = "webos84"
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 
@@ -16,13 +16,13 @@ SRC_URI:append = " \
 # Upstream-Status: Submitted
 # NOTE: Increase maxver when upgrading Qt version
 SRC_URI:append = " \
-    file://0001-Check-if-a-device-in-knownPointingDevices-is-destroy.patch;maxver=6.3.0 \
+    file://0001-Check-if-a-device-in-knownPointingDevices-is-destroy.patch;maxver=6.5.2 \
 "
 
 # Upstream-Status: Inappropriate
 # NOTE: Increase maxver when upgrading Qt version
 SRC_URI:append = " \
-    file://0002-Revert-Don-t-hide-the-inputMethod-when-finishing-the.patch;maxver=6.3.0 \
+    file://0002-Revert-Don-t-hide-the-inputMethod-when-finishing-the.patch;maxver=6.5.2 \
 "
 
 SRC_URI:append:armv7a = " \
