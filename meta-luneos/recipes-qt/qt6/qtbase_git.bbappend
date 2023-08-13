@@ -1,8 +1,8 @@
-# Copyright (c) 2013-2022 LG Electronics, Inc.
+# Copyright (c) 2013-2023 LG Electronics, Inc.
 
 inherit webos_qt_global
 
-EXTENDPRAUTO:append = "webos99"
+EXTENDPRAUTO:append = "webos113"
 
 # Remove LGPL3-only files
 python do_patch:append() {
@@ -90,6 +90,10 @@ inherit webos_lttng
 # Do not build tests/ in webos
 PACKAGECONFIG:remove = "tests"
 
+# Need this flag as we don't build qtxxx-tools packages usually.
+# See https://codereview.qt-project.org/c/qt/qtbase/+/452475.
+EXTRA_OECMAKE:append = " -DQT_ALLOW_MISSING_TOOLS_PACKAGES=ON"
+
 FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 
 PATCHTOOL = "git"
@@ -103,7 +107,7 @@ SRC_URI:append = " \
 # Upstream-Status: Inappropriate
 # NOTE: Increase maxver when upgrading Qt version
 SRC_URI:append = " \
-    file://9901-Disable-Faux-bolding-in-Qts-FreeType-FontEngine.patch;maxver=6.5.1 \
+    file://9901-Disable-Faux-bolding-in-Qts-FreeType-FontEngine.patch;maxver=6.5.2 \
 "
 
 # FIXME: Patches below can be dropped once all qmake-dependent components are switched to cmake.
@@ -129,12 +133,3 @@ TARGET_CXXFLAGS:append = " \
 
 VIRTUAL-RUNTIME_gpu-libs ?= ""
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_gpu-libs}"
-
-# Workaround needed since https://codereview.qt-project.org/c/yocto/meta-qt6/+/366219
-# otherwise you get:
-# ERROR: Nothing RPROVIDES 'libssl-native' (but virtual:native:/home/noelma/work/webos/build-webos/meta-qt6/recipes-qt/qt6/qtbase_git.bb RDEPENDS on or otherwise requires it)
-# NOTE: Runtime target 'libssl-native' is unbuildable, removing...
-# Missing or unbuildable dependency chain was: ['libssl-native']
-# ERROR: Required build target 'qtbase' has no buildable providers.
-# Missing or unbuildable dependency chain was: ['qtbase', 'qtbase-native', 'libssl-native']
-PACKAGECONFIG:class-native:remove = "openssl"

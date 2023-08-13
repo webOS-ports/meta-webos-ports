@@ -1,8 +1,8 @@
-# Copyright (c) 2013-2022 LG Electronics, Inc.
+# Copyright (c) 2013-2023 LG Electronics, Inc.
 
 inherit webos_qt_global
 
-EXTENDPRAUTO:append = "webos30"
+EXTENDPRAUTO:append = "webos40"
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 
@@ -12,7 +12,17 @@ PATCHTOOL = "git"
 SRC_URI:append = " \
     file://0001-Support-presentation-time-protocol.patch;maxver=6.2.* \
     file://0002-Use-scope-resolution-operator-for-request.patch;maxver=6.2.* \
-    file://0003-Fix-to-have-presentation-feedback-sequence-timely.patch;maxver=6.3.1 \
+    file://0003-Fix-to-have-presentation-feedback-sequence-timely.patch;maxver=6.3.0 \
+    file://0004-Fix-Access-nullptr-returned-by-QWaylandSurface-clien.patch;maxver=6.3.0 \
+"
+
+# Upstream-Status: Inappropriate
+# NOTE: Increase maxver when upgrading Qt version
+SRC_URI:append = " \
+    file://0005-Revert-Also-use-text-input-if-QT_IM_MODULE-is-empty-.patch;maxver=6.5.2 \
+"
+
+SRC_URI:append = " \
     file://0004-QWaylandDisplay-don-t-ignore-wayland-QT_IM_MODULE.patch \
 "
 
@@ -39,6 +49,13 @@ PACKAGECONFIG_DMABUF:halium = ""
 
 # qtwayland-qmlplugins is not used in webos
 RRECOMMENDS:${PN}:remove = "${PN}-qmlplugins"
+
+# Set QT_SKIP_AUTO_PLUGIN_INCLUSION as otherwise
+# QtModulePluginTargets.cmake would complain during
+# do_install_ptest_base about missing files that are deleted
+# deliberately in do_install:append below.
+# See https://codereview.qt-project.org/c/qt/qtbase/+/420212.
+EXTRA_OECMAKE:append = " -DQT_SKIP_AUTO_PLUGIN_INCLUSION=ON"
 
 do_install:append() {
     # Remove files unnecessary or conflict with qtwayland-webos
