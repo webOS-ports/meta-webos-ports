@@ -29,5 +29,4 @@ set(NYXMOD_OW_TOUCHPANEL_MTDEV		TRUE)
 set(NYXMOD_OW_LED			TRUE)
 set(NYXMOD_OW_HAPTICS			TRUE)
 
-add_definitions(-DTOUCHPANEL_DEVICE=\"/dev/input/by-path/platform-1c2ac00.i2c-event\")
-add_definitions(-DCHARGER_AC_SYSFS_PATH=\"/sys/class/power_supply/rk818-charger/\")
+add_definitions(-DTOUCHPANEL_DEVICE=\"/dev/input/by-path/platform-fe5a0000.i2c-event\")
