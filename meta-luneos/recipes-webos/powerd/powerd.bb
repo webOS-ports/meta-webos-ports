@@ -9,7 +9,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "nyx-lib luna-service2 json-c glib-2.0"
 
 PV = "4.0.0-25+git${SRCPV}"
-SRCREV = "a2ff15fb1fa2e2f9a6c72fea316bac8db6110f76"
+SRCREV = "765d2fa18a7899ac8e7d41e844914eb3485c06cd"
 
 inherit webos_ports_fork_repo
 inherit webos_cmake
