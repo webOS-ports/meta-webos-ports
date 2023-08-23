@@ -7,20 +7,11 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=2d5025d4aa3495befef8f17206a5b0a1"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 PV = "0.14.4+git${SRCPV}"
-SRCREV = "b6e7f390962e5e5fa3677a393a6fb7ba46f2d67b"
+SRCREV = "24ab29a7b7a2a383b44485b519cee99b7a084ebd"
 DEPENDS = "qtbase luna-sysmgr-common luna-service2 json-c glib-2.0 luna-sysmgr-ipc-messages"
 
-# Upstream Qt6 changes are pending merge in https://github.com/sailfishos/sensorfw/pull/16 
-# Once merged we can switch back to sailfishos mirror and drop the patch
-# git://github.com/sailfishos/sensorfw.git;protocol=https;branch=master
-
 SRC_URI = " \
-    git://github.com/jmlich/sensorfw.git;protocol=https;branch=master \
-"
-
-SRC_URI:append = " \
-    file://0001-Add-trustlevel-for-enhanced-ACG.patch \
-    file://0002-Fix-Qt6-compatibility.patch           \
+    git://github.com/sailfishos/sensorfw.git;protocol=https;branch=master \
 "
 
 S = "${WORKDIR}/git"
