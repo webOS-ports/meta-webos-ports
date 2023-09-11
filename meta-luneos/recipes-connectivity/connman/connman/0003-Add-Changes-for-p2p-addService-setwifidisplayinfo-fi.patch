@@ -1,4 +1,4 @@
-From 029a398daeb95c89b615dca6c08501aabd5bde2b Mon Sep 17 00:00:00 2001
+From 07d8075a5c7112265f1ee4eba8180b43b89e0f44 Mon Sep 17 00:00:00 2001
 From: "piyush10.asalmol" <piyush10.asalmol@lge.com>
 Date: Thu, 27 Oct 2022 18:50:35 +0530
 Subject: [PATCH] Add Changes for p2p addService, setwifidisplayinfo,
@@ -30,12 +30,11 @@ Upstream-Status: Pending
  gdhcp/server.c       |   3 ++
  include/technology.h |   7 ++-
  plugins/ethernet.c   |   3 ++
- plugins/wifi.c       |  22 ++++----
  src/manager.c        |   8 +--
  src/service.c        |  95 ++++++++++++++++++++++++++++++---
  src/technology.c     | 102 +++++++++++++++++++++++++++--------
  src/tethering.c      | 124 +++++++++++++++++++++++++++++++++++++++++++
- 8 files changed, 316 insertions(+), 48 deletions(-)
+ 7 files changed, 306 insertions(+), 36 deletions(-)
 
 diff --git a/gdhcp/server.c b/gdhcp/server.c
 index 52ea2a55..f82c4bbd 100644
@@ -97,50 +96,6 @@ index 0bf7fc41..27a3dcf3 100644
  				const char *bridge, bool enabled)
  {
  	if (!connman_technology_is_tethering_allowed(
-diff --git a/plugins/wifi.c b/plugins/wifi.c
-index f2a5302a..101c0e7a 100644
---- a/plugins/wifi.c
-+++ b/plugins/wifi.c
-@@ -6000,29 +6000,27 @@ static void tech_remove(struct connman_technology *technology)
- 
- static GSupplicantSSID *ssid_ap_init(const char *ssid, const char *passphrase)
- {
--    struct connman_technology *technology;
-+    
- 	GSupplicantSSID *ap;
--	int freq;
--	bool ret;
-+	unsigned int channel;
-+	unsigned int freq;
- 
- 	ap = g_try_malloc0(sizeof(GSupplicantSSID));
- 	if (!ap)
- 		return NULL;
- 
--	ret = connman_technology_get_wifi_tethering(technology,
--						&ssid, &passphrase,
--						&freq);
--	if (ret == false)
--		return NULL;
-+	channel = connman_technology_get_wifi_tethering_channel();
-+
-+	if (channel)
-+		freq = 2412 + ((channel - 1) * 5);
-+	else
-+		freq = 2412;
- 
- 	ap->mode = G_SUPPLICANT_MODE_MASTER;
- 	ap->ssid = ssid;
- 	ap->ssid_len = strlen(ssid);
- 	ap->scan_ssid = 0;
--	if (freq)
--		ap->freq = freq;
--	else
--		ap->freq = 2412;
-+	ap->freq = freq;
- 
- 	if (!passphrase || strlen(passphrase) == 0) {
- 		ap->security = G_SUPPLICANT_SECURITY_NONE;
 diff --git a/src/manager.c b/src/manager.c
 index e325c908..5442756b 100644
 --- a/src/manager.c
@@ -169,18 +124,18 @@ index e325c908..5442756b 100644
  	return __connman_error_failed(msg, -ret);
  }
 diff --git a/src/service.c b/src/service.c
-index 712ade14..f38c88ff 100644
+index cbaea292..bd2b9882 100644
 --- a/src/service.c
 +++ b/src/service.c
-@@ -156,6 +156,7 @@ static struct connman_ipconfig *create_ip6config(struct connman_service *service
- 		int index);
+@@ -158,6 +158,7 @@ static struct connman_ipconfig *create_ip6config(struct connman_service *service
  static void dns_changed(struct connman_service *service);
  static void vpn_auto_connect(void);
+ static void trigger_autoconnect(struct connman_service *service);
 +static void append_bsses(DBusMessageIter *iter, void *user_data);
  
  struct find_data {
  	const char *path;
-@@ -2540,6 +2541,57 @@ int connman_service_iterate_services(connman_service_iterate_cb cb,
+@@ -2547,6 +2548,57 @@ int connman_service_iterate_services(connman_service_iterate_cb cb,
  	return ret;
  }
  
@@ -238,9 +193,9 @@ index 712ade14..f38c88ff 100644
  static void append_properties(DBusMessageIter *dict, dbus_bool_t limited,
  					struct connman_service *service)
  {
-@@ -2605,9 +2657,21 @@ static void append_properties(DBusMessageIter *dict, dbus_bool_t limited,
- 						append_ethernet, service);
+@@ -2612,9 +2664,21 @@ static void append_properties(DBusMessageIter *dict, dbus_bool_t limited,
  		break;
+ 	case CONNMAN_SERVICE_TYPE_VPN:
  	case CONNMAN_SERVICE_TYPE_WIFI:
 -	case CONNMAN_SERVICE_TYPE_ETHERNET:
 +		if (service->network) {
@@ -261,7 +216,7 @@ index 712ade14..f38c88ff 100644
  		connman_dbus_dict_append_dict(dict, "Ethernet",
  						append_ethernet, service);
  		break;
-@@ -3518,6 +3582,10 @@ static void do_auto_connect(struct connman_service *service,
+@@ -3532,6 +3596,10 @@ static void do_auto_connect(struct connman_service *service,
  	 */
  	if (service->type != CONNMAN_SERVICE_TYPE_VPN)
  		__connman_service_auto_connect(reason);
@@ -272,7 +227,7 @@ index 712ade14..f38c88ff 100644
  
  	vpn_auto_connect();
  }
-@@ -5923,14 +5991,27 @@ static int service_update_preferred_order(struct connman_service *default_servic
+@@ -5942,14 +6010,27 @@ static int service_update_preferred_order(struct connman_service *default_servic
  		struct connman_service *new_service,
  		enum connman_service_state new_state)
  {

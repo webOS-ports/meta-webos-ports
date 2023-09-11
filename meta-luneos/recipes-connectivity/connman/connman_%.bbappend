@@ -15,11 +15,9 @@ SRC_URI += " \
     file://0004-Add-Changes-for-tethering-setState-api.patch \
     file://0005-Add-Changes-for-p2p-create-group-api.patch \
     file://0006-Add-Changes-for-No-Internet-issue-connman.patch \
-    file://0007-Fix-for-create-group-api-and-crash-issue.patch \
-    file://0008-Revert-Fix-for-create-group-api-and-crash-issue.patch \
-    file://0009-Fix-for-Create-Group-api-and-crash-issue.patch \
-    file://0010-Fix-for-peer-Device-List-Info-issue.patch \
-    file://0011-Avoid-crash-if-no-interface-found.patch \
+    file://0007-Fix-for-Create-Group-api-and-crash-issue.patch \
+    file://0008-Fix-for-peer-Device-List-Info-issue.patch \
+    file://0009-Avoid-crash-if-no-interface-found.patch \
 "
 
 
