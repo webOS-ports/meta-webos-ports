@@ -1,4 +1,4 @@
-# Copyright (c) 2021-2022 LG Electronics, Inc.
+# Copyright (c) 2021-2023 LG Electronics, Inc.
 # This file configures common SRC_URI for both of mksnapshot and webruntime
 # Also it contains variables for gn command such as GN_ARGS
 
@@ -12,10 +12,9 @@ LIC_FILES_CHKSUM = "\
 
 require gn-utils.inc
 
-#inherit webos_enhanced_submissions
 inherit webos_public_repo
-#inherit webos_prerelease_dep
 
+WEBRUNTIME_REPO_VERSION ?= "94"
 REPO_VERSION := "${@['','_${WEBRUNTIME_REPO_VERSION}'][d.getVar('WEBRUNTIME_REPO_VERSION').strip() != '']}"
 
 WEBOS_REPO_NAME ?= "chromium${WEBRUNTIME_REPO_VERSION}"
@@ -59,7 +58,6 @@ GN_ARGS = "\
     host_pkg_config=\"pkg-config-native\"\
     host_os=\"linux\"\
     host_toolchain=\"//build/toolchain/cros:host\" \
-    is_clang=false\
     is_cross_linux_build=true\
     is_webos=true\
     is_debug=false\
@@ -67,10 +65,14 @@ GN_ARGS = "\
     target_os=\"linux\"\
     cros_host_sysroot=\"/\"\
     treat_warnings_as_errors=false\
-    use_custom_libcxx=false\
-    use_custom_libcxx_for_host=false\
     use_sysroot=false\
+    webos_toolprefix=\"${HOST_PREFIX}\"\
+    ${GN_ARGS_CLANG} \
+    ${GN_ARGS_LIBCXX} \
 "
+
+GN_ARGS_CLANG = "is_clang=false"
+GN_ARGS_LIBCXX = "${@bb.utils.contains('USE_WEBRUNTIME_LIBCXX', '1', 'use_custom_libcxx=true', 'use_custom_libcxx=false', d)}"
 
 # Respect ld-is-gold in DISTRO_FEATURES when enabling gold
 # Similar patch applied in meta-browser
@@ -82,7 +84,7 @@ GN_ARGS += "${EXTRA_OEGN_GOLD}"
 # The submission formats; submissions/[number] or submissions/[branch name].[number]
 #WEBOS_SUBMISSION_NUMBER="${@ '${WEBOS_SUBMISSION}'.split('.')[-1] }"
 #GN_ARGS:append = " webos_submission_number=${WEBOS_SUBMISSION_NUMBER}"
-GN_ARGS:append = " webos_submission_number=28"
+GN_ARGS:append = " webos_submission_number=80"
 
 TARGET_CPU = "${@gn_arch_name(TARGET_ARCH)}"
 GN_ARGS:append = " target_cpu=\"${TARGET_CPU}\""
@@ -95,9 +97,16 @@ GN_ARGS:append:armv7ve = " arm_arch=\"armv7ve\" arm_version=7 arm_float_abi=\"${
 # tcmalloc's atomicops-internals-arm-v6plus.h uses the "dmb" instruction that
 # is not available on (some?) ARMv6 models, which causes the build to fail.
 GN_ARGS:append:armv6 = ' use_allocator="none"'
+
 # The WebRTC code fails to build on ARMv6 when NEON is enabled.
 # https://bugs.chromium.org/p/webrtc/issues/detail?id=6574
-GN_ARGS:append:armv6 = ' arm_use_neon=false'
+GN_ARGS_NEON ?= ""
+GN_ARGS_NEON:armv6 = "arm_use_neon=false"
+GN_ARGS += "${GN_ARGS_NEON}"
+
+# Handle crash while building v8
+GN_ARGS:append:aarch64 = ' v8_enable_external_code_space=false'
+GN_ARGS:append:x86-64 = ' v8_enable_external_code_space=false'
 
 # Doesn't build for armv[45]*
 COMPATIBLE_MACHINE = "(-)"
@@ -140,5 +149,7 @@ do_compile() {
     fi
 
     export PATH="${S}/depot_tools:$PATH"
+    # depot_tools ninja requires current directory is chromium/src
+    cd ${S}/src
     ${NINJA} ${TARGET}
 }

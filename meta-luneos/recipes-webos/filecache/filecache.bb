@@ -1,14 +1,18 @@
-# Copyright (c) 2012-2018 LG Electronics, Inc.
+# Copyright (c) 2012-2023 LG Electronics, Inc.
 
 SUMMARY = "webOS daemon to cache filesystem requests"
-AUTHOR = "Alekseyev Oleksandr <alekseyev.oleksandr@lge.com>"
+AUTHOR = "Yogish S <yogish.s@lge.com>"
 SECTION = "webos/base"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 DEPENDS = "jemalloc luna-service2 db8 glibmm boost libsandbox glib-2.0 libsigc++-2.0"
 
-PV = "2.0.1-8+git${SRCPV}"
+WEBOS_VERSION = "2.0.1-10_561526086403e4b59a4600cdd28acbffbcc5a79e"
+PR = "r6"
+
+PV = "2.0.1-10+git${SRCPV}"
+SRCREV = "561526086403e4b59a4600cdd28acbffbcc5a79e"
 
 inherit webos_public_repo
 inherit webos_cmake
@@ -24,4 +28,4 @@ file://0002-filecache-Add-service-file-for-systemd.patch \
 
 S = "${WORKDIR}/git"
 
-SRCREV = "579fa0425f449ed5c362ac2f4220a5e023c80b8d"
+

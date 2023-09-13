@@ -1,16 +1,26 @@
-# Copyright (c) 2012-2018 LG Electronics, Inc.
+# Copyright (c) 2012-2023 LG Electronics, Inc.
 
 SUMMARY = "Provides preference, timezone and ringtone services"
-AUTHOR = "Keith Derrick <keith.derrick@lge.com>"
+AUTHOR = "Rajesh Gopu I.V <rajeshgopu.iv@lge.com>"
 SECTION = "webos/base"
+
 LICENSE = "Apache-2.0"
-LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
+LIC_FILES_CHKSUM = " \
+    file://LICENSE;md5=7bd705f8ae3d5077cbd3da7078607d8b \
+    file://oss-pkg-info.yaml;md5=2bdfe040dcf81b4038370ae96036c519 \
+"
 
 VIRTUAL-RUNTIME_ntp ?= "sntp"
 
 DEPENDS = "luna-service2 libpbnjson qtbase uriparser libxml2 sqlite3 pmloglib nyx-lib libwebosi18n"
 
-RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_ntp} tzcode"
+RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_ntp} tzcode luna-init"
+
+WEBOS_VERSION = "4.4.0-25_527dfeba2b7d1c7f84ea5e8775b1f1ec4c40b183"
+PR = "r11"
+
+PV = "4.4.0-25+git${SRCPV}"
+SRCREV = "527dfeba2b7d1c7f84ea5e8775b1f1ec4c40b183"
 
 inherit webos_public_repo
 inherit webos_cmake_qt6
@@ -20,28 +30,22 @@ inherit systemd
 inherit pkgconfig
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-file://0001-luna-sysservice-Add-service-file-for-systemd.patch \
-file://0002-Add-ImageService.patch \
-file://0003-luna-sysservice-Fix-spacing-issues.patch \
-file://0004-luna-sysservice-Add-required-bits-for-LuneOS.patch \
+file://0001-Add-ImageService.patch \
+file://0002-luna-sysservice-Fix-spacing-issues.patch \
+file://0003-luna-sysservice-Add-required-bits-for-LuneOS.patch \
 "
 
 S = "${WORKDIR}/git"
 
-SYSTEMD_PACKAGES = "${PN}"
-SYSTEMD_SERVICE:${PN} = "luna-sys-service.service"
-
-PV = "4.4.0-23+git${SRCPV}"
-SRCREV = "c346f6ed15a860780776b74d08080cfa57c9c578"
+inherit webos_systemd
+WEBOS_SYSTEMD_SERVICE = "luna-sys-service.service"
 
 do_install:append() {
     install -d ${D}${datadir}/localization/${BPN}
     cp -rf ${S}/resources ${D}/${datadir}/localization/${BPN}
+    # FIXME: We still need this or registration fails
     rm -rf ${D}${webos_sysbus_prvrolesdir}/com.webos.*
     rm -rf ${D}${webos_sysbus_pubrolesdir}/com.webos.* 
-
-    install -d ${D}${systemd_unitdir}/system	
-    install -m 0644 ${S}/files/systemd/${SYSTEMD_SERVICE:${PN}} ${D}${systemd_unitdir}/system/
 }
 
 FILES:${PN} += "${datadir}/localization/${BPN}"

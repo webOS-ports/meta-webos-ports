@@ -1,4 +1,4 @@
-# Copyright (c) 2019-2022 LG Electronics, Inc.
+# Copyright (c) 2019-2023 LG Electronics, Inc.
 
 SUMMARY = "General System Volume UI application"
 AUTHOR = "Revanth Kumar <revanth.kumar@lge.com>"
@@ -9,10 +9,10 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=0ec407cd2d4a192e0c60888f4ec66dd7 \
 "
 
-WEBOS_VERSION = "0.1.0-15_e0ebb597c373db824c3e1e8d3acf0f5ffcfa3584"
+WEBOS_VERSION = "0.1.0-16_675f9154fca5dffb1c2f773ccb93aa0e0e6ffe72"
 
-PV = "0.1.0-15+git${SRCPV}"
-SRCREV = "e0ebb597c373db824c3e1e8d3acf0f5ffcfa3584"
+PV = "0.1.0-16+git${SRCPV}"
+SRCREV = "675f9154fca5dffb1c2f773ccb93aa0e0e6ffe72"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

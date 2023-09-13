@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2022 LG Electronics, Inc.
+# Copyright (c) 2012-2023 LG Electronics, Inc.
 
 DESCRIPTION = "webOS component for managing network connections using connman"
 AUTHOR = "Muralidhar N <muralidhar.n@lge.com>"
@@ -10,20 +10,18 @@ LIC_FILES_CHKSUM = " \
 
 SECTION = "webos/services"
 
-DEPENDS = "luna-service2 libpbnjson glib-2.0 luna-prefs openssl glib-2.0-native wca-support-api wca-support"
+DEPENDS = "luna-service2 libpbnjson glib-2.0 luna-prefs openssl glib-2.0-native wca-support-api wca-support nyx-lib"
 RDEPENDS:${PN} = "connman connman-client"
 
-WEBOS_VERSION = "1.1.0-39_dc622623142035004f2354cc90cfee0e8fc3c5b3"
-PR = "r10"
+WEBOS_VERSION = "1.1.0-42_83a6b8517c2f4ce630e4fe3d1498965cff5fbac3"
+PR = "r13"
 
-PV = "1.1.0-39+git${SRCPV}"
-
-SRCREV = "dc622623142035004f2354cc90cfee0e8fc3c5b3"
+PV = "1.1.0-42+git${SRCPV}"
+SRCREV = "83a6b8517c2f4ce630e4fe3d1498965cff5fbac3"
 
 inherit webos_public_repo
 inherit webos_cmake
 inherit webos_system_bus
-inherit webos_systemd
 inherit pkgconfig
 
 # Set EXTRA_OECMAKE in webos-connman-adapter.bbappend to override default value for wifi and wired interfaces, for eg.
@@ -34,10 +32,13 @@ EXTRA_OECMAKE += "-DENABLE_SCAN_ON_SOFTAP=true"
 PACKAGECONFIG[enable-multiple-routing-table] = "-DMULTIPLE_ROUTING_TABLE:BOOL=true,-DMULTIPLE_ROUTING_TABLE:BOOL=false,"
 PACKAGECONFIG = "enable-multiple-routing-table"
 
+inherit webos_systemd
+WEBOS_SYSTEMD_SERVICE = "webos-connman-adapter.service"
+WEBOS_SYSTEMD_SCRIPT = "webos-connman-adapter.sh"
+
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
             file://0001-Workaround-to-prevent-luna-call-pending.patch \
-            file://0002-Add-systemd-service-file.patch \
-            file://0003-Add-back-com.palm.wan-for-cellular-support.patch \
+            file://0002-Add-back-com.palm.wan-for-cellular-support.patch \
 "
 
 S = "${WORKDIR}/git"

@@ -1,7 +1,7 @@
-# Copyright (c) 2012-2018 LG Electronics, Inc.
+# Copyright (c) 2012-2023 LG Electronics, Inc.
 
 SUMMARY = "Palm's Better Native JSON library"
-AUTHOR = "Anatolii Sakhnik <anatolii.sakhnik@lge.com>"
+AUTHOR = "Yogish S <yogish.s@lge.com>"
 SECTION = "webos/libs"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
@@ -12,12 +12,11 @@ inherit webos_public_repo
 inherit webos_cmake
 inherit pkgconfig
 
-PV = "2.15.0-1+git${SRCPV}"
-SRCREV = "6cd4815a81830bbf6b22647ae8bb4fc818148ee7"
+WEBOS_VERSION = "2.15.0-11_598b7168e0e5b69a10614d3c146613d3b5f7cca3"
+PR = "r13"
 
-# Otherwise it fails with:
-# libpbnjson/2.9.0-38+gitAUTOINC+5ffe5674fe-r0/git/src/pbnjson_c/validation/schema_builder.c:28:10: fatal error: schema_keywords.h: No such file or directory
-OECMAKE_GENERATOR = "Unix Makefiles"
+PV = "2.15.0-11+git${SRCPV}"
+SRCREV = "598b7168e0e5b69a10614d3c146613d3b5f7cca3"
 
 PACKAGECONFIG ??= ""
 PACKAGECONFIG:append:class-native = " tools"
@@ -35,5 +34,3 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 BBCLASSEXTEND = "native"
-
-SRC_URI += "file://0001-pbnjson.h-don-t-include-all-c-header-in-extern-C.patch"

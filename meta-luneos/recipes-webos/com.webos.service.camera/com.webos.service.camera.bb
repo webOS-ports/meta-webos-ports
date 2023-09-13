@@ -1,7 +1,7 @@
 # Copyright (c) 2019-2023 LG Electronics, Inc.
 
 SUMMARY = "Camera service framework to control camera devices"
-AUTHOR = "Premalatha M V S <premalatha.mvs@lge.com>"
+AUTHOR = "Kalaimani K <kalaimani.k@lge.com>"
 SECTION = "webos/services"
 
 LICENSE = "Apache-2.0"
@@ -16,23 +16,30 @@ DEPENDS = "glib-2.0 luna-service2 json-c alsa-lib pmloglib udev"
 #DEPENDS += "edgeai-vision jpeg opencv"
 #REQUIRED_DISTRO_FEATURES = "webos-aiframework"
 
-WEBOS_VERSION = "1.0.0-35_8ec5e64470df87173c8013e7661d96541c6d544c"
+WEBOS_VERSION = "1.0.0-36_9ffdd45eb7385bd8447117cc061ac9e73a819d57"
 PR = "r7"
 
-PV = "1.0.0-35+git${SRCPV}"
-SRCREV = "8ec5e64470df87173c8013e7661d96541c6d544c"
+PV = "1.0.0-36+git${SRCPV}"
+SRCREV = "9ffdd45eb7385bd8447117cc061ac9e73a819d57"
 
-inherit webos_cmake pkgconfig
+inherit webos_cmake 
+inherit pkgconfig
 inherit webos_public_repo
 inherit webos_system_bus
 inherit webos_machine_impl_dep
-#inherit webos_daemon
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-COMPATIBLE_MACHINE = "(.*)"
+inherit webos_systemd
+WEBOS_SYSTEMD_SERVICE = "com.webos.service.camera.service"
 
-FILES:${PN} += "${libdir}/*.so"
-FILES_SOLIBSDEV = ""
-INSANE_SKIP:${PN} += "dev-so"
+# All service files will be managed in meta-lg-webos.
+# The service file in the repository is not used, so please delete it.
+# See the page below for more details.
+# http://collab.lge.com/main/pages/viewpage.action?pageId=2031668745
+do_install:append() {
+    rm ${D}${sysconfdir}/systemd/system/com.webos.service.camera.service
+}
+
+COMPATIBLE_MACHINE = "(.*)"

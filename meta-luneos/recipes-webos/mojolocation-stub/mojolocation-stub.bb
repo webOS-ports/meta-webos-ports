@@ -10,7 +10,6 @@ SRCREV = "8d6e78b68385f729c0305f79f20fde3e30645c50"
 
 inherit webos_public_repo
 inherit webos_filesystem_paths
-#inherit webos_cmake
 inherit webos_system_bus
 inherit allarch
 

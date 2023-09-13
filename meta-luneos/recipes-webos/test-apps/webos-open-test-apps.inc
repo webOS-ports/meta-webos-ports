@@ -1,16 +1,17 @@
-# Copyright (c) 2017-2021 LG Electronics, Inc.
+# Copyright (c) 2017-2023 LG Electronics, Inc.
 
 SECTION = "webos/apps"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-WEBOS_VERSION = "1.0.0-19_2f910fb7ca5634bf88fc9985095f4840c7f6b487"
-INC_PR = "r4"
+WEBOS_VERSION = "1.0.0-22_648edac42dfe23fda82f9e041d4f5b5e3c75479f"
+INC_PR = "r6"
+
+PV = "1.0.0-22+git${SRCPV}"
+SRCREV = "648edac42dfe23fda82f9e041d4f5b5e3c75479f"
 
 EXTRA_INHERIT ?= "webos_cmake"
 
-#inherit webos_component
-#inherit webos_enhanced_submissions
 inherit webos_app
 inherit webos_public_repo
 inherit ${EXTRA_INHERIT}

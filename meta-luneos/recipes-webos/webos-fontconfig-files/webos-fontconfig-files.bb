@@ -15,8 +15,6 @@ PR = "r4"
 PV = "1.0.0-5+git${SRCPV}"
 SRCREV = "e3b8d5297c20edd8fc73ee3ac8729094159942ec"
 
-
-#inherit webos_enhanced_submissions
 inherit fontcache
 inherit webos_public_repo
 

@@ -1,7 +1,7 @@
-# Copyright (c) 2013-2022 LG Electronics, Inc.
+# Copyright (c) 2013-2023 LG Electronics, Inc.
 
 SUMMARY = "Shareable QML components for webOS"
-AUTHOR = "Anupam Kaul <anupam.kaul@lge.com>"
+AUTHOR = "Elvis Lee <kwangwoong.lee@lge.com>"
 SECTION = "webos/libs"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = " \
@@ -11,22 +11,17 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "qtdeclarative pmloglib qt-features-webos luna-service2 glib-2.0"
 
-#WEBOS_VERSION = "1.0.0-56_65071125e880b3de2bb3494cae3e1d4e680eb5a1"
-#PR = "r18"
+WEBOS_VERSION = "1.0.0-58_e4773e6b2db36f7d429973e58c072ad888326578"
+PR = "r21"
 
-SRCREV = "f49bdc70c97af4fa33f99cf7885f631051141a3a"
+PV = "1.0.0-58+git${SRCPV}"
+SRCREV = "e4773e6b2db36f7d429973e58c072ad888326578"
 
 inherit webos_qmake6
 inherit pkgconfig
-inherit webos_machine_impl_dep
-#inherit webos_enhanced_submissions
 inherit webos_lttng
-#inherit webos_qmllint
 inherit webos_public_repo
 
-# TODO: move to WEBOS_GIT_REPO_COMPLETE
-# Once the repo will go public this recipe should be moved to meta-webos
-# but until that happens we need to clone from gpro
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 

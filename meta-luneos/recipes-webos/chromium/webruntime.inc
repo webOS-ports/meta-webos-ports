@@ -1,4 +1,4 @@
-# Copyright (c) 2018-2022 LG Electronics, Inc.
+# Copyright (c) 2018-2023 LG Electronics, Inc.
 
 SUMMARY = "Chromium webruntime for webOS"
 AUTHOR = "Donghyun Kim <donghyun11.kim@lge.com>"
@@ -13,14 +13,11 @@ inherit python3native
 inherit webruntime_apps
 inherit webos_filesystem_paths
 inherit webos_lttng
-#inherit webos_machine_dep
-#inherit webos_machine_impl_dep
-#inherit webos_prerelease_dep
 inherit webos_system_bus
 
-DEPENDS = "virtual/gettext wayland wayland-native luna-service2 pixman freetype fontconfig openssl pango cairo icu webos-wayland-extensions libxkbcommon libexif dbus pciutils udev libcap alsa-lib virtual/egl elfutils-native libdrm atk gperf-native gconf libwebosi18n bison-native xorgproto nss nspr curl nspr-native nss-native pmloglib glib-2.0-native python3-six-native python3-beautifulsoup4-native python3-soupsieve-native python3-lxml-native python3-html5lib-native python3-webencodings-native abseil-cpp-native"
+DEPENDS = "virtual/gettext wayland wayland-native luna-service2 pixman freetype fontconfig openssl pango cairo icu webos-wayland-extensions libxkbcommon libexif dbus pciutils udev libcap alsa-lib virtual/egl elfutils-native libdrm atk gperf-native gconf libwebosi18n bison-native xorgproto nss nspr curl nspr-native nss-native pmloglib glib-2.0-native python3-six-native python3-beautifulsoup4-native python3-soupsieve-native python3-lxml-native python3-html5lib-native python3-webencodings-native"
 
-INC_PR = "r59"
+INC_PR = "r67"
 # Enable this in webos-local.conf or in recipe to build
 DEPLOY_CHROMEDRIVER ?= "false"
 DEPLOY_WAM_DEMO ?= "false"
@@ -38,18 +35,15 @@ TARGET = "${WEBRUNTIME_BUILD_TARGET} ${BROWSER_APP_BUILD_TARGET} ${APPSHELL_BUIL
 
 # Skip do_install:append of webos_system_bus. It is not compatible with this component.
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
-WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files/sysbus"
-WEBOS_SYSTEM_BUS_MANIFEST_TYPE = "PASS"
 
 PACKAGECONFIG_NEVA_WEBRTC ?= "neva-webrtc"
-PACKAGECONFIG_WEBOS_CODEC ?= "webos-codec pulseaudio webos-camera"
-#We don't supply gstreamer and umediaserver yet in LuneOS
+PACKAGECONFIG_WEBOS_CODEC ?= "webos-codec pulseaudio webos-camera webos-audio"
 PACKAGECONFIG_MEDIA ?= "neva-media gstreamer umediaserver gav"
 PACKAGECONFIG ?= ""
-#We don't supply gstreamer and umediaserver yet in LuneOS, so disable the PACKAGECONFIG_MEDIA for now on all our targets
-#PACKAGECONFIG:append:hardware = " ${PACKAGECONFIG_MEDIA} ${PACKAGECONFIG_NEVA_WEBRTC} ${PACKAGECONFIG_WEBOS_CODEC}"
-#PACKAGECONFIG:append:qemux86 = " ${PACKAGECONFIG_MEDIA}"
-#PACKAGECONFIG:append:qemux86-64 = " ${PACKAGECONFIG_MEDIA}"
+# We don't supply gstreamer and umediaserver yet in LuneOS, so disable the PACKAGECONFIG_MEDIA for now on all our targets
+# PACKAGECONFIG:append:hardware = " ${PACKAGECONFIG_MEDIA} ${PACKAGECONFIG_NEVA_WEBRTC} ${PACKAGECONFIG_WEBOS_CODEC}"
+# PACKAGECONFIG:append:qemux86 = " ${PACKAGECONFIG_MEDIA}"
+# PACKAGECONFIG:append:qemux86-64 = " ${PACKAGECONFIG_MEDIA}"
 PACKAGECONFIG[gstreamer] = "use_gst_media=true enable_webm_video_codecs=false,use_gst_media=false,g-media-pipeline"
 PACKAGECONFIG[umediaserver] = ",,umediaserver"
 # Options to enable debug build. Add this PACKAGECONFIG to webos-local.conf to enable debug build
@@ -59,13 +53,15 @@ PACKAGECONFIG[debug-blink] = "blink_symbol_level=2,blink_symbol_level=1"
 PACKAGECONFIG[neva-media] = "use_neva_media=true, use_neva_media=false"
 PACKAGECONFIG[av1-codec] = "enable_av1_decoder=true, enable_av1_decoder=false"
 PACKAGECONFIG[gav] = "use_gav=true,use_gav=false"
-PACKAGECONFIG[neva-webrtc] = "use_neva_webrtc=true,use_neva_webrtc=false,media-codec-interface"
+PACKAGECONFIG[neva-webrtc] = "use_neva_webrtc=true,use_neva_webrtc=false"
 PACKAGECONFIG[webos-codec] = "use_webos_codec=true,use_webos_codec=false,media-codec-interface"
 PACKAGECONFIG[pulseaudio] = "use_pulseaudio=true, use_pulseaudio=false, pulseaudio"
 
 PACKAGECONFIG:append = " ${@bb.utils.contains('WEBOS_LTTNG_ENABLED', '1', 'lttng', '', d)}"
 PACKAGECONFIG[lttng] = "use_lttng=true,use_lttng=false,lttng-ust,lttng-tools lttng-modules babeltrace"
 PACKAGECONFIG[webos-camera] = "use_webos_camera=true,use_webos_camera=false, cambufferlib"
+PACKAGECONFIG[webos-audio] = "use_webos_audio=true,use_webos_audio=false, pulseaudio"
+PACKAGECONFIG[test-coverage] = "enable_neva_test_coverage_build=true,enable_neva_test_coverage_build=false"
 
 GN_ARGS:append = " \
     enable_memorymanager_webapi=true\
@@ -103,6 +99,10 @@ GN_ARGS += "\
     use_debug_fission=false\
 "
 
+# Set webos system bus
+GN_ARGS:append = "\
+    can_use_legacy_luna_role_files=false\
+"
 
 #CHROMIUM_PLUGINS_PATH = "${libdir}"
 CBE_DATA_PATH = "${libdir}/cbe"
@@ -127,40 +127,43 @@ do_compile:append() {
 }
 
 install_ls2_roles() {
-    #sysbus files *.service
+    # sysbus service files
     install -d ${D}${webos_sysbus_pubservicesdir}
     install -d ${D}${webos_sysbus_prvservicesdir}
-    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/$1.service ${D}${webos_sysbus_pubservicesdir}/$1.service
-    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/$1.service ${D}${webos_sysbus_prvservicesdir}/$1.service
+    install -v -m 0644 ${OUT_IMAGE_DIR}${webos_sysbus_pubservicesdir}/$1.service ${D}${webos_sysbus_pubservicesdir}/$1.service
+    install -v -m 0644 ${OUT_IMAGE_DIR}${webos_sysbus_prvservicesdir}/$1.service ${D}${webos_sysbus_prvservicesdir}/$1.service
 
-    #sysbus files *.json
+    # sysbus role files
     install -d ${D}${webos_sysbus_pubrolesdir}
     install -d ${D}${webos_sysbus_prvrolesdir}
-    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/$1.json ${D}${webos_sysbus_pubrolesdir}/$1.json
-    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/$1.json ${D}${webos_sysbus_prvrolesdir}/$1.json
+    install -v -m 0644 ${OUT_IMAGE_DIR}${webos_sysbus_pubrolesdir}/$1.json ${D}${webos_sysbus_pubrolesdir}/$1.json
+    install -v -m 0644 ${OUT_IMAGE_DIR}${webos_sysbus_prvrolesdir}/$1.json ${D}${webos_sysbus_prvrolesdir}/$1.json
 
-    #sysbus files *.container.json
-    if [ -f ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/$1.container.json ]; then
+    # sysbus container file
+    if [ -f ${OUT_IMAGE_DIR}${webos_sysbus_containersdir}/$1.container.json ]; then
         install -d ${D}${webos_sysbus_containersdir}
-        install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/$1.container.json ${D}${webos_sysbus_containersdir}/$1.container.json
+        install -v -m 0644 ${OUT_IMAGE_DIR}${webos_sysbus_containersdir}/$1.container.json ${D}${webos_sysbus_containersdir}/$1.container.json
     fi
 }
 
 install_ls2_roles_acg() {
-    #sysbus files *.service
+    # sysbus service file
     install -d ${D}${webos_sysbus_servicedir}
-    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/$1.service ${D}${webos_sysbus_servicedir}/$1.service
+    install -v -m 0644 ${OUT_IMAGE_DIR}${webos_sysbus_servicedir}/$1.service ${D}${webos_sysbus_servicedir}/$1.service
 
-    #sysbus files *.json
+    # sysbus perm file
     install -d ${D}${webos_sysbus_permissionsdir}
-    install -d ${D}${webos_sysbus_rolesdir}
-    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/$1.perm.json ${D}${webos_sysbus_permissionsdir}/$1.perm.json
-    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/$1.role.json ${D}${webos_sysbus_rolesdir}/$1.role.json
-}
+    install -v -m 0644 ${OUT_IMAGE_DIR}${webos_sysbus_permissionsdir}/$1.perm.json ${D}${webos_sysbus_permissionsdir}/$1.perm.json
 
-install_chromium_manifest() {
-    install -d ${D}${webos_sysbus_manifestsdir}
-    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.manifest.json ${D}${webos_sysbus_manifestsdir}/${BPN}.manifest.json
+    # sysbus role file
+    install -d ${D}${webos_sysbus_rolesdir}
+    install -v -m 0644 ${OUT_IMAGE_DIR}${webos_sysbus_rolesdir}/$1.role.json ${D}${webos_sysbus_rolesdir}/$1.role.json
+
+    # sysbus container file
+    if [ -f ${OUT_IMAGE_DIR}${webos_sysbus_containersdir}/$1.container.json ]; then
+        install -d ${D}${webos_sysbus_containersdir}
+        install -v -m 0644 ${OUT_IMAGE_DIR}${webos_sysbus_containersdir}/$1.container.json ${D}${webos_sysbus_containersdir}/$1.container.json
+    fi
 }
 
 modify_run_app_shell() {
@@ -188,6 +191,8 @@ do_install() {
     # libcbe.so, libminigbm.so, liblttng_provider.so
     install -v -m 0644 ${OUT_IMAGE_DIR}/${libdir}/*.so ${D}${libdir}
 
+    install_ls2_roles_acg ${APP_SHELL_RUNTIME}
+
     install -d ${D}${CBE_DATA_PATH}
     install -v -m 0644 ${OUT_IMAGE_DIR}/${CBE_DATA_PATH}/icudtl.dat ${D}${CBE_DATA_PATH}
     install -v -m 0644 ${OUT_IMAGE_DIR}/${CBE_DATA_PATH}/snapshot_blob.bin ${D}${CBE_DATA_PATH}
@@ -198,9 +203,12 @@ do_install() {
     cp -R --no-dereference --preserve=mode,links -v ${OUT_IMAGE_DIR}/${CBE_DATA_LOCALES_PATH}/*.pak ${D}${CBE_DATA_LOCALES_PATH}
     chown root:root -R ${D}${CBE_DATA_LOCALES_PATH}
 
-    install -d ${D}${includedir}/${BPN}
-    cp -R --no-dereference --preserve=mode,links -v ${OUT_IMAGE_DIR}/${includedir}/${BPN}/* ${D}${includedir}/${BPN}/
-    chown root:root -R ${D}${includedir}/${BPN}
+    install -d ${D}${includedir}/webruntime
+    cp -R --no-dereference --preserve=mode,links -v ${OUT_IMAGE_DIR}/${includedir}/webruntime/* ${D}${includedir}/webruntime/
+    chown root:root -R ${D}${includedir}/webruntime
+
+    install -d ${D}${webos_pkgconfigdir}
+    install -v -m 0644 ${OUT_IMAGE_DIR}${webos_pkgconfigdir}/libcbe.pc ${D}/${webos_pkgconfigdir}
 
     install -d ${D}${APP_SHELL_RUNTIME_DIR}
     install -v -m 0755 ${OUT_IMAGE_DIR}/${APP_SHELL_RUNTIME_DIR}/app_shell ${D}${APP_SHELL_RUNTIME_DIR}
@@ -210,7 +218,7 @@ do_install() {
     ln -f ${D}${CBE_DATA_PATH}/snapshot_blob.bin ${D}${APP_SHELL_RUNTIME_DIR}/snapshot_blob.bin
 
     if ${DEPLOY_BROWSER} ; then
-        install_ls2_roles ${BROWSER_APPLICATION}
+        install_ls2_roles_acg ${BROWSER_APPLICATION}
 
         install -d ${D}${BROWSER_APPLICATION_DIR}
         install -v -m 0755 ${OUT_IMAGE_DIR}/${BROWSER_APPLICATION_DIR}/chrome ${D}${BROWSER_APPLICATION_DIR}
@@ -231,53 +239,13 @@ do_install() {
     fi
 
     if ${DEPLOY_WAM_DEMO} ; then
-        install_ls2_roles ${WAM_DEMO_APPLICATION}
+        install_ls2_roles_acg ${WAM_DEMO_APPLICATION}
 
         install -d ${D}${WAM_DEMO_APPLICATION_DIR}
         install -v -m 0755 ${OUT_IMAGE_DIR}/${WAM_DEMO_APPLICATION_DIR}/wam_demo ${D}${WAM_DEMO_APPLICATION_DIR}
         install -v -m 0755 ${OUT_IMAGE_DIR}/${WAM_DEMO_APPLICATION_DIR}/run_wam_demo ${D}${WAM_DEMO_APPLICATION_DIR}
     fi
-
-    install_chromium_manifest
 }
-
-do_install:append:webos() {
-    install_ls2_roles_acg ${APP_SHELL_RUNTIME}
-}
-
-do_install:append() {
-    install_ls2_roles_acg ${APP_SHELL_RUNTIME}
-}
-
-
-WEBOS_SYSTEM_BUS_DIRS_LEGACY_BROWSER_APPLICATION = " \
-    ${webos_sysbus_prvservicesdir}/${BROWSER_APPLICATION}.service \
-    ${webos_sysbus_pubservicesdir}/${BROWSER_APPLICATION}.service \
-    ${webos_sysbus_prvrolesdir}/${BROWSER_APPLICATION}.json \
-    ${webos_sysbus_pubrolesdir}/${BROWSER_APPLICATION}.json \
-"
-
-WEBOS_SYSTEM_BUS_DIRS_LEGACY_APP_SHELL_RUNTIME = " \
-    ${webos_sysbus_prvservicesdir}/${APP_SHELL_RUNTIME}.service \
-    ${webos_sysbus_pubservicesdir}/${APP_SHELL_RUNTIME}.service \
-    ${webos_sysbus_prvrolesdir}/${APP_SHELL_RUNTIME}.json \
-    ${webos_sysbus_pubrolesdir}/${APP_SHELL_RUNTIME}.json \
-    ${webos_sysbus_containersdir}/${APP_SHELL_RUNTIME}.container.json \
-"
-
-WEBOS_SYSTEM_BUS_DIRS_ACG_APP_SHELL_RUNTIME = " \
-    ${webos_sysbus_servicedir}/${APP_SHELL_RUNTIME}.service \
-    ${webos_sysbus_permissionsdir}/${APP_SHELL_RUNTIME}.perm.json \
-    ${webos_sysbus_rolesdir}/${APP_SHELL_RUNTIME}.role.json \
-"
-
-WEBOS_SYSTEM_BUS_DIRS_LEGACY_WAM_DEMO_APPLICATION = " \
-    ${webos_sysbus_prvservicesdir}/${WAM_DEMO_APPLICATION}.service \
-    ${webos_sysbus_pubservicesdir}/${WAM_DEMO_APPLICATION}.service \
-    ${webos_sysbus_prvrolesdir}/${WAM_DEMO_APPLICATION}.json \
-    ${webos_sysbus_pubrolesdir}/${WAM_DEMO_APPLICATION}.json \
-    ${webos_sysbus_containersdir}/${WAM_DEMO_APPLICATION}.container.json \
-"
 
 SYSROOT_DIRS:append = " ${base_bindir}"
 
@@ -290,13 +258,10 @@ PACKAGES:prepend = " \
 
 FILES:${BROWSER_APPLICATION} += " \
     ${BROWSER_APPLICATION_DIR} \
-    ${WEBOS_SYSTEM_BUS_DIRS_LEGACY_BROWSER_APPLICATION} \
 "
 
 FILES:${APP_SHELL_RUNTIME} += " \
     ${APP_SHELL_RUNTIME_DIR} \
-    ${WEBOS_SYSTEM_BUS_DIRS_ACG_APP_SHELL_RUNTIME} \
-    ${WEBOS_SYSTEM_BUS_DIRS_LEGACY_APP_SHELL_RUNTIME} \
 "
 
 FILES:${CHROMEDRIVER_RUNTIME} += " \
@@ -305,7 +270,6 @@ FILES:${CHROMEDRIVER_RUNTIME} += " \
 
 FILES:${WAM_DEMO_APPLICATION} += " \
     ${WAM_DEMO_APPLICATION_DIR} \
-    ${WEBOS_SYSTEM_BUS_DIRS_LEGACY_WAM_DEMO_APPLICATION} \
 "
 
 RDEPENDS:${BROWSER_APPLICATION} += "${PN}"
@@ -314,6 +278,9 @@ RDEPENDS:${APP_SHELL_RUNTIME} += "${PN} ${VIRTUAL-RUNTIME_gpu-libs}"
 VIRTUAL-RUNTIME_gpu-libs ?= ""
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_gpu-libs} ${APP_SHELL_RUNTIME}"
 RDEPENDS:${WAM_DEMO_APPLICATION} += "${VIRTUAL-RUNTIME_gpu-libs}"
+
+# it aborts if libudev.so.1 is missing
+RDEPENDS:${PN} += "libudev"
 
 # The text relocations are intentional -- see comments in [GF-52468]
 # TODO: check if we need INSANE_SKIP on ldflags
@@ -324,13 +291,13 @@ INSANE_SKIP:${MLPREFIX}${APP_SHELL_RUNTIME} += "libdir ldflags textrel"
 INSANE_SKIP:${MLPREFIX}${CHROMEDRIVER_RUNTIME} += "libdir ldflags textrel"
 INSANE_SKIP:${MLPREFIX}${WAM_DEMO_APPLICATION} += "libdir ldflags textrel"
 
-FILES:${PN} = " \
+FILES:${PN} += " \
     ${libdir}/*.so \
     ${CBE_DATA_PATH}/* \
     ${libdir}/${BPN}/*.so \
-    ${WEBOS_SYSTEM_BUS_DIRS} \
 "
 
 FILES:${PN}-dev = " \
+    ${webos_pkgconfigdir}/libcbe.pc \
     ${includedir} \
 "

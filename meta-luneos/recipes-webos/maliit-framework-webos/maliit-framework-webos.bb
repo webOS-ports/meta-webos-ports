@@ -1,8 +1,8 @@
-# Copyright (c) 2013-2021 LG Electronics, Inc.
+# Copyright (c) 2013-2023 LG Electronics, Inc.
 
 SUMMARY = "Maliit Input Method Framework"
 DESCRIPTION = "This is the webOS edition of the Maliit input method framework. It differs from upstream in that it supports a hardware keyboard using the wayland protocol."
-AUTHOR = "Minjoong Park <minjoong.park@lgepartner.com>"
+AUTHOR = "Elvis Lee <kwangwoong.lee@lge.com>"
 SECTION = "webos/base"
 LICENSE = "LGPL-2.0-only"
 LIC_FILES_CHKSUM = " \
@@ -11,16 +11,18 @@ LIC_FILES_CHKSUM = " \
 "
 
 DEPENDS = "qtbase qtdeclarative qtwayland-webos libxkbcommon pmloglib luna-service2 glib-2.0 udev wayland"
-RDEPENDS:${PN} = "qtbase-plugins configd imemanager"
+RDEPENDS:${PN} = "qtbase-plugins configd"
 
 PACKAGECONFIG[libim] = "CONFIG+=enable-libim,CONFIG-=enable-libim,libim"
 
-PV = "0.99.0+20-100+git${SRCPV}"
-SRCREV = "ac36e9ea8cfe76f5e1154c9ae628f4f54b9879de"
+WEBOS_VERSION = "0.99.0+20-101_9dff4aae8960bffa6f3add0c581dd77c6b8638ad"
+PR = "r35"
+
+PV = "0.99.0+20-101+git${SRCPV}"
+SRCREV = "9dff4aae8960bffa6f3add0c581dd77c6b8638ad"
 
 inherit pkgconfig
 inherit webos_qmake6
-inherit webos_machine_impl_dep
 inherit webos_filesystem_paths
 inherit webos_public_repo
 

@@ -1,4 +1,4 @@
-# Copyright (c) 2017-2022 LG Electronics, Inc.
+# Copyright (c) 2017-2023 LG Electronics, Inc.
 
 SUMMARY = "webOS connman adapter support library"
 AUTHOR = "Muralidhar N <muralidhar.n@lge.com>"
@@ -13,7 +13,6 @@ WEBOS_VERSION = "1.0.0-4_a59127baf2ddebc99874f714c9fe5528772e94d1"
 PR = "r2"
 
 PV = "1.0.0-4+git${SRCPV}"
-
 SRCREV = "a59127baf2ddebc99874f714c9fe5528772e94d1"
 
 DEPENDS = "glib-2.0 luna-service2 libpbnjson pmloglib luna-prefs wca-support-api"
@@ -22,7 +21,6 @@ RDEPENDS:${PN} = "iw"
 
 inherit webos_cmake
 inherit pkgconfig
-inherit webos_machine_impl_dep
 inherit webos_public_repo
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \

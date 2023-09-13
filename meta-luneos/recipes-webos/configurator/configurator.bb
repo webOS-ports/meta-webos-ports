@@ -1,41 +1,47 @@
-# Copyright (c) 2012-2018 LG Electronics, Inc.
+# Copyright (c) 2012-2023 LG Electronics, Inc.
 
 SUMMARY = "Creates the database schema for webOS apps"
-AUTHOR = "Ludovic Legrand <ludovic.legrand@lge.com>"
+AUTHOR = "Rajesh Gopu I.V <rajeshgopu.iv@lge.com>"
 SECTION = "webos/base"
+
 LICENSE = "Apache-2.0"
-LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
+LIC_FILES_CHKSUM = " \
+    file://LICENSE;md5=3b83ef96387f14655fc854ddc3c6bd57 \
+    file://oss-pkg-info.yaml;md5=2bdfe040dcf81b4038370ae96036c519 \
+"
 
 DEPENDS = "luna-service2 db8 glib-2.0 pmloglib"
 
-PV = "3.0.0-9+git${SRCPV}"
-SRCREV = "657fb30f8754e42ac0e56151722c5b729b5bde71"
+WEBOS_VERSION = "3.0.0-11_ded3f968c2943ef77d81755e5bf7de088447651a"
+PR = "r10"
+
+PV = "3.0.0-11+git${SRCPV}"
+SRCREV = "ded3f968c2943ef77d81755e5bf7de088447651a"
 
 inherit webos_public_repo
 inherit webos_cmake
 inherit webos_system_bus
 inherit pkgconfig
 inherit webos_machine_impl_dep
-inherit systemd
-
-SYSTEMD_PACKAGES = "${PN}"
-SYSTEMD_SERVICE:${PN} = "configurator-activity.service configurator-db8.service"
-
-do_install:append() {
-    install -d ${D}${systemd_unitdir}/system
-    install -m 0644 ${S}/files/systemd/configurator-activity.service ${D}${systemd_unitdir}/system/
-    install -m 0644 ${S}/files/systemd/configurator-db8.service ${D}${systemd_unitdir}/system/
-}
-
-FILES:${PN} += "${systemd_unitdir}/system"
-
-FILES:${PN} += "${webos_sysbus_datadir}"
+inherit webos_distro_dep
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-file://0001-configurator-Add-service-file-for-systemd-script.patch \
+file://0001-com.palm.configurator.role.json.in-Add-fixes-for-var.patch \
 file://0002-configurator-Fix-permission-issue-for-com.palm.filec.patch \
-file://0003-com.webos.service.configurator.perm.json-Add-permiss.patch \
-file://0004-com.palm.configurator.role.json.in-Add-fixes-for-var.patch \
 "
-
 S = "${WORKDIR}/git"
+FILES:${PN} += "${webos_sysbus_datadir}"
+
+inherit webos_systemd
+WEBOS_SYSTEMD_SERVICE = "configurator-activity.service configurator-db8.service"
+WEBOS_SYSTEMD_SCRIPT ="configurator-db8.sh"
+
+do_install:append() {
+# All service files will be managed in meta-lg-webos.
+# The service file in the repository is not used, so please delete it.
+# See the page below for more details.
+# http://collab.lge.com/main/pages/viewpage.action?pageId=2031668745
+    rm ${D}${sysconfdir}/systemd/system/configurator-activity.service
+    rm ${D}${sysconfdir}/systemd/system/configurator-db8.service
+    rm ${D}${sysconfdir}/systemd/system/scripts/configurator-db8.sh
+}
