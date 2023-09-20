@@ -22,7 +22,6 @@ RDEPENDS:${PN} = "iw"
 
 inherit webos_cmake
 inherit pkgconfig
-inherit webos_machine_impl_dep
 inherit webos_public_repo
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
