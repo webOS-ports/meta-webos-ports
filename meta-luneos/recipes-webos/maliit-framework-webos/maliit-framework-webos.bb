@@ -20,7 +20,6 @@ SRCREV = "ac36e9ea8cfe76f5e1154c9ae628f4f54b9879de"
 
 inherit pkgconfig
 inherit webos_qmake6
-inherit webos_machine_impl_dep
 inherit webos_filesystem_paths
 inherit webos_public_repo
 
@@ -32,7 +31,6 @@ OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 EXTRA_QMAKEVARS_PRE += "CONFIG+=wayland MALIIT_DEFAULT_PLUGIN=libluneos-keyboard-plugin.so CONFIG+=noxcb CONFIG+=nodoc CONFIG+=notests CONFIG+=noexamples"
 EXTRA_QMAKEVARS_PRE += "INCDIR=${STAGING_INCDIR} INCLUDEDIR=${STAGING_INCDIR} LIBDIR=${STAGING_LIBDIR} MALIIT_PLUGINS_DIR=${libdir}/maliit/plugins MALIIT_DATA_DIR=${webos_execstatedir}/maliit"
 EXTRA_QMAKEVARS_PRE += "MALIIT_VERSION=${PV}"
-EXTRA_QMAKEVARS_PRE += "WEBOS_TARGET_MACHINE_IMPL=${WEBOS_TARGET_MACHINE_IMPL}"
 EXTRA_QMAKEVARS_PRE += "${EXTRA_CONF_PACKAGECONFIG}"
 
 # .pc generation should be fixed to use correct paths
