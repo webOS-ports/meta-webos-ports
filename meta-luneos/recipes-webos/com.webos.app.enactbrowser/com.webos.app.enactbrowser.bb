@@ -1,4 +1,4 @@
-# Copyright (c) 2018-2022 LG Electronics, Inc.
+# Copyright (c) 2018-2023 LG Electronics, Inc.
 
 SUMMARY = "Enact Based Web Browser"
 AUTHOR = "Revanth Kumar <revanth.kumar@lge.com>"
@@ -9,7 +9,7 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=72b3e3cef46e5ab3e175e5b515dc3b18 \
 "
 
-WEBOS_VERSION = "1.0.0-64_8142dab393c4938b6d7b19dec73688bd28fc0855"
+WEBOS_VERSION = "1.0.0-74_ef128c4af9260f302d941d1a4bab94ba4a09d462"
 PR = "r17"
 
 inherit webos_public_repo
@@ -17,8 +17,8 @@ inherit webos_enactjs_app
 inherit webos_filesystem_paths
 inherit webos_npm_env
 
-PV = "1.0.0-64+git${SRCPV}"
-SRCREV = "8142dab393c4938b6d7b19dec73688bd28fc0855"
+PV = "1.0.0-74+git${SRCPV}"
+SRCREV = "ef128c4af9260f302d941d1a4bab94ba4a09d462"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

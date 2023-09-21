@@ -1,9 +1,13 @@
-# Copyright (c) 2012-2018 LG Electronics, Inc.
+# Copyright (c) 2012-2023 LG Electronics, Inc.
 
 SUMMARY = "webOS portability layer - library"
-AUTHOR = "Keith Derrick <keith.derrick@lge.com>"
+AUTHOR = "Yogish S <yogish.s@lge.com>"
+
 LICENSE = "Apache-2.0"
-LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
+LIC_FILES_CHKSUM = " \
+    file://LICENSE;md5=3b83ef96387f14655fc854ddc3c6bd57 \
+    file://oss-pkg-info.yaml;md5=2bdfe040dcf81b4038370ae96036c519 \
+"
 SECTION = "webos/libs"
 
 # nyx-lib needs nyx-modules at runtime, but a runtime dependency is not defined
@@ -17,11 +21,15 @@ SECTION = "webos/libs"
 # in any of the R* variables is re-built is because its package name is stored in
 # this component's .ipk and it may have changed because debian.bbclass is inherited.)
 
-PV = "7.3.0-1+git${SRCPV}"
-
 DEPENDS = "glib-2.0 pmloglib"
 
-inherit webos_ports_ose_repo
+WEBOS_VERSION = "7.3.0-13_0ee217947853f7fbd0e0a625d99c229ecd33ab91"
+PR = "r9"
+
+PV = "7.3.0-13+git${SRCPV}"
+SRCREV = "0ee217947853f7fbd0e0a625d99c229ecd33ab91"
+
+inherit webos_public_repo
 inherit webos_cmake
 inherit pkgconfig
 inherit systemd
@@ -29,10 +37,11 @@ inherit systemd
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE:${PN} = "nyx.target"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+file://0001-Implement-asynchronous-suspend-resume-methods-for-sy.patch \
+file://0002-add-nyx-target.patch \
+"
 S = "${WORKDIR}/git"
-
-SRCREV = "88731b85f124ea950860941a027682374f174265"
 
 do_install:append() {
     install -d ${D}${systemd_unitdir}/system

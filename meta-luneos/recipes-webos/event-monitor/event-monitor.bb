@@ -1,4 +1,4 @@
-# Copyright (c) 2015-2018 LG Electronics, Inc.
+# Copyright (c) 2015-2023 LG Electronics, Inc.
 
 SUMMARY = "Event Monitoring Service for generic notifications"
 AUTHOR = "Viesturs Zarins <viesturs.zarins@lge.com>"
@@ -8,8 +8,10 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "glib-2.0 luna-service2 pmloglib libpbnjson libwebosi18n"
 
-PV = "1.1.0-13+git${SRCPV}"
-SRCREV = "89cffbb2fb8b1984ca09a9d25dc13e0557a6e0e4"
+WEBOS_VERSION = "1.1.0-14_ebed44ed82acfbb2c6e4193d21eb22742c6d5ad2"
+
+PV = "1.1.0-14+git${SRCPV}"
+SRCREV = "ebed44ed82acfbb2c6e4193d21eb22742c6d5ad2"
 
 inherit webos_cmake
 inherit webos_system_bus
@@ -19,11 +21,13 @@ inherit webos_systemd
 inherit pkgconfig
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-file://0001-event-monitor-Add-systemd-service-file.patch \
-file://0002-Add-trustLevel.patch \
+file://0001-Add-trustLevel.patch \
 "
 
 S = "${WORKDIR}/git"
+
+inherit webos_systemd
+WEBOS_SYSTEMD_SERVICE = "event-monitor.service"
 
 #Enable/disable mock plugin
 EXTRA_OECMAKE += "-DBUILD_MOCK_PLUGIN:BOOL='NO'"

@@ -1,7 +1,7 @@
-# Copyright (c) 2013-2021 LG Electronics, Inc.
+# Copyright (c) 2013-2023 LG Electronics, Inc.
 
 SUMMARY = "Wayland protocol extensions for webOS"
-AUTHOR = "Anupam Kaul <anupam.kaul@lge.com>"
+AUTHOR = "Elvis Lee <kwangwoong.lee@lge.com>"
 SECTION = "webos/base"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = " \
@@ -11,15 +11,14 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "wayland wayland-native"
 
-WEBOS_VERSION = "1.0.0-42_bac07bee30665b5f33440c61cff1fcd8f670a24c"
+WEBOS_VERSION = "1.0.0-46_9ccf2cf894f9f5de46f110bba40aa0decb37acea"
 PR = "r6"
 
-SRCREV = "715829259cfb061ddcb5e16efa2a420e99af57e8"
+PV = "1.1.0-46+git${SRCPV}"
+SRCREV = "9ccf2cf894f9f5de46f110bba40aa0decb37acea"
 
-#inherit webos_component
 inherit webos_cmake
 inherit pkgconfig
-#inherit webos_enhanced_submissions
 inherit webos_public_repo
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \

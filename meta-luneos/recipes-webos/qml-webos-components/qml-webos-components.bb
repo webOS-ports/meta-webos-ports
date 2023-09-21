@@ -1,7 +1,7 @@
-# Copyright (c) 2013-2022 LG Electronics, Inc.
+# Copyright (c) 2013-2023 LG Electronics, Inc.
 
 SUMMARY = "Shareable QML components for webOS"
-AUTHOR = "Anupam Kaul <anupam.kaul@lge.com>"
+AUTHOR = "Elvis Lee <kwangwoong.lee@lge.com>"
 SECTION = "webos/libs"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = " \
@@ -11,7 +11,11 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "qtdeclarative pmloglib qt-features-webos luna-service2 glib-2.0"
 
-SRCREV = "f49bdc70c97af4fa33f99cf7885f631051141a3a"
+WEBOS_VERSION = "1.0.0-58_e4773e6b2db36f7d429973e58c072ad888326578"
+PR = "r21"
+
+PV = "1.0.0-58+git${SRCPV}"
+SRCREV = "e4773e6b2db36f7d429973e58c072ad888326578"
 
 inherit webos_qmake6
 inherit pkgconfig
@@ -22,6 +26,9 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
+
+# Perform extra QML validation
+#WEBOS_QMLLINT_EXTRA_VALIDATION = "1"
 
 # Enable LTTng tracing capability when enabled in webos_lttng class
 EXTRA_QMAKEVARS_PRE += "${@ 'CONFIG+=lttng' if '${WEBOS_LTTNG_ENABLED}' == '1' else '' }"

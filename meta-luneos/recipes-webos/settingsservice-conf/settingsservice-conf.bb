@@ -1,12 +1,16 @@
-# Copyright (c) 2015-2018 LG Electronics, Inc.
+# Copyright (c) 2015-2023 LG Electronics, Inc.
 
 SUMMARY = "Settings Service Configs"
-AUTHOR = "Denys Romanchuk <denys.romanchuk@lge.com>"
+AUTHOR = "Rajesh Gopu I.V <rajeshgopu.iv@lge.com>"
 SECTION = "webos/base"
 LICENSE = "Apache-2.0"
-LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
+LIC_FILES_CHKSUM = "file://LICENSE;md5=3b83ef96387f14655fc854ddc3c6bd57"
 
-PV = "1.0.0-1+git${SRCPV}"
+WEBOS_VERSION = "1.0.0-11_8e3694a3d3da9a26a688bda58655d13e714c3967"
+PR = "r2"
+
+PV = "1.0.0-11+git${SRCPV}"
+SRCREV = "8e3694a3d3da9a26a688bda58655d13e714c3967"
 
 inherit webos_cmake
 inherit webos_public_repo
@@ -14,5 +18,4 @@ inherit webos_public_repo
 WEBOS_REPO_NAME = "webos-settingsservice-conf"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 
-SRCREV = "5f38d96fae603216b67aa4f3362683c82ccf8579"
 S = "${WORKDIR}/git"

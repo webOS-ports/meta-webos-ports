@@ -1,4 +1,4 @@
-# Copyright (c) 2013-2018 LG Electronics, Inc.
+# Copyright (c) 2013-2023 LG Electronics, Inc.
 
 SUMMARY="The Application Installer Utility supports the installing and removing of applications on a webOS/LuneOS device."
 AUTHOR = "Seokjun Lee <sseokjun.lee@lge.com>"

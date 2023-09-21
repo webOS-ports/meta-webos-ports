@@ -1,7 +1,7 @@
-# Copyright (c) 2017-2021 LG Electronics, Inc.
+# Copyright (c) 2017-2023 LG Electronics, Inc.
 
 SUMMARY = "iLib Qml loader"
-AUTHOR = "Goun Lee <goun.lee@lge.com>"
+AUTHOR = "Seonmi Jin <seonmi1.jin@lge.com>"
 SECTION = "libs/qtplugin"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = " \
@@ -10,9 +10,13 @@ LIC_FILES_CHKSUM = " \
 "
 
 DEPENDS = "qtdeclarative"
+RDEPENDS:${PN} += "ilib-webapp"
+
+WEBOS_VERSION = "11.0.0-6_bdf1beb39a1326243eac0797791f099ca4f1c5ae"
+PR = "r7"
 
 PV = "11.0.0-6+git${SRCPV}"
-SRCREV = "bb19fd3dc52845540c9cf6b944cca773ff48c280"
+SRCREV = "bdf1beb39a1326243eac0797791f099ca4f1c5ae"
 
 inherit webos_qmake6
 inherit webos_public_repo

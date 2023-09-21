@@ -1,7 +1,7 @@
-# Copyright (c) 2013-2022 LG Electronics, Inc.
+# Copyright (c) 2013-2023 LG Electronics, Inc.
 
 SUMMARY = "The core of the Luna Surface Manager (compositor)"
-AUTHOR  = "Anupam Kaul <anupam.kaul@lge.com>"
+AUTHOR = "Elvis Lee <kwangwoong.lee@lge.com>"
 SECTION = "webos/libs"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = " \
@@ -11,12 +11,12 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "qtdeclarative wayland-native qtwayland qtwayland-native qt-features-webos pmloglib webos-wayland-extensions glib-2.0 qtwayland-webos"
 
-#WEBOS_VERSION = "2.0.0-379_0cfef81ecf58cb6bd50f9a766a7e976bd2ea21ad"
-#PR = "r54"
+WEBOS_VERSION = "2.0.0-388_e088dc9289ac1931cbd6cbfb0d9583a520139553"
+PR = "r59"
 
-PV ="2.0.0-372+git${SRCPV}"
+PV ="2.0.0-388+git${SRCPV}"
 
-SRCREV = "bb6dd8faa4a47f76ad125a80813a2dff4dd6a2c3"
+SRCREV = "e088dc9289ac1931cbd6cbfb0d9583a520139553"
 
 inherit webos_qmake6
 inherit pkgconfig
@@ -39,12 +39,17 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
 
 S = "${WORKDIR}/git"
 
+inherit webos_systemd
+WEBOS_SYSTEMD_SERVICE = "lsm-ready.path lsm-ready.service lsm-ready.target surface-manager.service surface-manager-daemon.service"
+
+#SYSTEMD_INSTALL_PATH = "${systemd_system_unitdir}"
+
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 
 # Enable LTTng tracing capability when enabled in webos_lttng class
 EXTRA_QMAKEVARS_PRE += "${@ 'CONFIG+=lttng' if '${WEBOS_LTTNG_ENABLED}' == '1' else '' }"
 
-EXTRA_QMAKEVARS_PRE += "${PACKAGECONFIG_CONFARGS} WEBOS_INSTALL_TESTSDIR=${webos_testsdir}"
+EXTRA_QMAKEVARS_PRE += "${PACKAGECONFIG_CONFARGS}"
 
 # We don't support configuring via cmake
 EXTRA_QMAKEVARS_POST += "CONFIG-=create_cmake"
@@ -61,13 +66,30 @@ do_install:append() {
         install -d ${D}${datadir}/webos-keymap
         ${STAGING_DIR_NATIVE}${OE_QMAKE_PATH_QT_BINS}/generate_qmap ${D}${datadir}/webos-keymap/webos-keymap.qmap
     fi
+	
+    if ${@bb.utils.contains('IMAGE_FEATURES', 'webos-test', 'true', 'false', d)}; then
+        mkdir -p ${D}${libdir}/${BPN}
+        find ${B} -name \*.gcno -exec cp -t ${D}${libdir}/${BPN} {} \;
+    fi
     
     # This dummy import conflicts with the ${OE_QMAKE_PATH_QML}/WebOSCompositor import we use for luna-next-cardshell
     rm -rf ${D}${OE_QMAKE_PATH_QML}/WebOSCompositorBase/imports/WebOSCompositor
+#    install -v -m 644 ${WORKDIR}/lsm-ready.path ${D}${SYSTEMD_INSTALL_PATH}/lsm-ready.path
+#    install -v -m 644 ${WORKDIR}/lsm-ready.target ${D}${SYSTEMD_INSTALL_PATH}/lsm-ready.target
+#    install -v -m 644 ${WORKDIR}/lsm-ready.service ${D}${SYSTEMD_INSTALL_PATH}/lsm-ready.service
+#    install -v -m 644 ${WORKDIR}/surface-manager.service ${D}${SYSTEMD_INSTALL_PATH}/surface-manager.service
+#    install -v -m 644 ${WORKDIR}/surface-manager-daemon.service ${D}${SYSTEMD_INSTALL_PATH}/surface-manager-daemon.service
 }
+
+TARGET_CXXFLAGS:append = " ${@bb.utils.contains('IMAGE_FEATURES', 'webos-test', '--coverage -fprofile-dir=/tmp/luna-surfacemanager-gcov -O0', '', d)}"
+TARGET_LDFLAGS:append = " ${@bb.utils.contains('IMAGE_FEATURES', 'webos-test', '--coverage', '', d)}"
 
 VIRTUAL-RUNTIME_gpu-libs ?= ""
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_gpu-libs}"
+
+# Select platform abstraction plugin
+VIRTUAL-RUNTIME_lsm-qpa ?= ""
+RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_lsm-qpa}"
 
 inherit webos_system_bus
 #inherit webos_qmllint
@@ -85,6 +107,12 @@ PACKAGECONFIG[multi-input] = ",CONFIG+=no_multi_input,"
 PACKAGECONFIG[cursor-theme] = "CONFIG+=cursor_theme,,"
 
 PACKAGECONFIG = "compositor cursor-theme"
+
+PACKAGE_BEFORE_PN = "${PN}-gcov"
+
+FILES:${PN}-gcov = " \
+    ${libdir}/${BPN}/*.gcno \
+"
 
 PACKAGES =+ "${PN}-base ${PN}-base-tests"
 
