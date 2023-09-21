@@ -1,0 +1,343 @@
+From 7d27d1046918a82584a11c7fdb4232439f0e5d64 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 4 Jul 2019 23:01:39 +0200
+Subject: [PATCH 04/10] Rework suspend state machine to support asynchronous
+ suspend
+
+Right now it's the only way we support suspending the system but when required the rework
+to suspend both ways (synchronous and asynchronous) through nyx should be rather small.
+
+Requires an extension of the official nyx API to support the two new methods needed
+to suspend asynchronously and resume afterwards.
+
+Signed-off-by: Simon Busch <morphis@gravedo.de>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+---
+ include/internal/machine.h  |   4 +-
+ include/internal/suspend.h  |   2 +
+ src/pwrevents/machine.c     |  20 +++++--
+ src/pwrevents/suspend.c     | 104 ++++++++++++++++++++++++++++++------
+ src/pwrevents/suspend_ipc.c |  28 ++++++++++
+ 5 files changed, 139 insertions(+), 19 deletions(-)
+
+diff --git a/include/internal/machine.h b/include/internal/machine.h
+index 7da9567..90d0c24 100644
+--- a/include/internal/machine.h
++++ b/include/internal/machine.h
+@@ -25,7 +25,9 @@ bool MachineCanSleep(void);
+ 
+ const char *MachineCantSleepReason(void);
+ 
+-void MachineSleep(void);
++bool MachineSleep(void);
++
++void MachineWakeup(void);
+ 
+ void MachineForceReboot(const char *reason);
+ 
+diff --git a/include/internal/suspend.h b/include/internal/suspend.h
+index 3de50ae..f92c29a 100644
+--- a/include/internal/suspend.h
++++ b/include/internal/suspend.h
+@@ -41,7 +41,9 @@ typedef int PowerEvent;
+ 
+ void ScheduleIdleCheck(int interval_ms, bool fromPoll);
+ void TriggerSuspend(const char *cause, PowerEvent power_event);
++void TriggerResume(const char *cause, PowerEvent power_event);
+ bool GetSuspendSettings(LSHandle *sh, LSMessage *message, void *ctx);
+ int com_palm_suspend_lunabus_init(void);
++bool IsSuspended(void);
+ 
+ #endif
+diff --git a/src/pwrevents/machine.c b/src/pwrevents/machine.c
+index f735bd4..a7cbd1e 100644
+--- a/src/pwrevents/machine.c
++++ b/src/pwrevents/machine.c
+@@ -62,11 +62,25 @@ MachineCantSleepReason(void)
+ }
+ 
+ 
+-void MachineSleep(void)
++bool MachineSleep(void)
+ {
+-    bool success;
++    bool success = false;
++    nyx_error_t error = NYX_ERROR_NONE;
+ 
+-    nyx_system_suspend(GetNyxSystemDevice(), &success);
++    error = nyx_system_suspend_async(GetNyxSystemDevice(), &success);
++    if (error != NYX_ERROR_NONE) {
++        SLEEPDLOG_DEBUG("NYX: failed to suspend (error %d)", error);
++        return false;
++    }
++
++    return success;
++}
++
++void MachineWakeup(void)
++{
++    bool success = false;
++
++    nyx_system_resume(GetNyxSystemDevice(), &success);
+ }
+ 
+ void
+diff --git a/src/pwrevents/suspend.c b/src/pwrevents/suspend.c
+index 6a2f48a..1992b5e 100644
+--- a/src/pwrevents/suspend.c
++++ b/src/pwrevents/suspend.c
+@@ -205,6 +205,33 @@ int SendPrepareSuspend(const char *message);
+ int SendResume(int resumetype, char *message);
+ int SendSuspended(const char *message);
+ 
++const char* StateToStr(PowerState state)
++{
++    switch (state)
++    {
++    case kPowerStateOn:
++        return "on";
++    case kPowerStateOnIdle:
++        return "on-idle";
++    case kPowerStateSuspendRequest:
++        return "suspend-request";
++    case kPowerStatePrepareSuspend:
++        return "prepare-suspend";
++    case kPowerStateSleep:
++        return "sleep";
++    case kPowerStateKernelResume:
++        return "kernel-resume";
++    case kPowerStateActivityResume:
++        return "activity-resume";
++    case kPowerStateAbortSuspend:
++        return "abort-suspend";
++    default:
++        return "unknown";
++    }
++
++     return NULL;
++}
++
+ void
+ StateLoopShutdown(void)
+ {
+@@ -235,17 +262,7 @@ ScheduleIdleCheck(int interval_ms, bool fromPoll)
+ static bool
+ IsDisplayOn(void)
+ {
+-	return gDisplayIsOn;
+-}
+-
+-/**
+- * @brief Turn off display using NYX interface.
+- */
+-void
+-switchoffDisplay(void)
+-{
+-	LSCallOneReply(GetLunaServiceHandle(), "luna://com.palm.display/control/setState",
+-		"{\"state\":\"off\"}", NULL, NULL, NULL, NULL);
++    return gDisplayIsOn;
+ }
+ 
+ /**
+@@ -262,6 +279,11 @@ IdleCheck(gpointer ctx)
+     struct timespec now;
+     int next_idle_ms = 0;
+ 
++    if (gCurrentStateNode.state == kPowerStateKernelResume) {
++        SLEEPDLOG_DEBUG("Not rescheduling idle check cause we're in sleep mode");
++        return FALSE;
++    }
++
+     ClockGetTime(&now);
+ 
+     /*
+@@ -358,15 +380,24 @@ SuspendStateUpdate(PowerEvent power_event)
+     gSuspendEvent = power_event;
+     PowerState next_state = kPowerStateLast;
+ 
++    SLEEPDLOG_DEBUG("%s: state %s", __PRETTY_FUNCTION__, StateToStr(gCurrentStateNode.state));
++
+     do
+     {
++        SLEEPDLOG_DEBUG("In state '%s'", StateToStr(gCurrentStateNode.state));
+         next_state = gCurrentStateNode.function();
++        SLEEPDLOG_DEBUG("Next state will be '%s'", StateToStr(next_state));
+ 
+         if (next_state != kPowerStateLast)
+         {
+             gCurrentStateNode = kStateMachine[next_state];
++            /* When suspend cycle is done we're breaking the loop here and waiting for the
++            * upper stack to trigger the resume cycle */
++            if (next_state == kPowerStateKernelResume)
++            {
++                break;
++            }
+         }
+-
+     }
+     while (next_state != kPowerStateLast);
+ 
+@@ -759,14 +790,16 @@ StateSleep(void)
+ 
+     else
+     {
++        SLEEPDLOG_DEBUG("Going to sleep now");
+         if (MachineCanSleep())
+         {
+             if (queue_next_wakeup())
+             {
++                SLEEPDLOG_DEBUG("We couldn't sleep because there can't setup wakup alarm");
+                 // let the system sleep now.
+-                MachineSleep();
++                nextState = kPowerStateAbortSuspend;
+             }
+-            else
++            else if (!MachineSleep())
+             {
+                 SLEEPDLOG_DEBUG("We couldn't sleep because there can't setup wakup alarm");
+                 nextState = kPowerStateAbortSuspend;
+@@ -782,6 +815,7 @@ StateSleep(void)
+         PwrEventThawActivities();
+     }
+ 
++    SLEEPDLOG_DEBUG("Leaving sleep state");
+     return nextState;
+ }
+ 
+@@ -795,6 +829,7 @@ static PowerState
+ StateAbortSuspend(void)
+ {
+     PMLOG_TRACE("State Abort suspend");
++    PwrEventThawActivities();
+     SendResume(kResumeAbortSuspend, "resume (suspend aborted)");
+ 
+     return kPowerStateOn;
+@@ -812,6 +847,10 @@ _stateResume(int resumeType)
+ {
+     PMLOG_TRACE("We awoke");
+ 
++    MachineWakeup();
++
++    PwrEventThawActivities();
++
+     char *resumeDesc = g_strdup_printf("resume (%s)",
+                                        resume_type_descriptions[resumeType]);
+     SendResume(resumeType, resumeDesc);
+@@ -881,6 +920,8 @@ DisplayStatusCb(LSHandle *handle, LSMessage *message, void *user_data)
+             gDisplayIsOn = false;
+     }
+ 
++    SLEEPDLOG_DEBUG("Display status is now %s", gDisplayIsOn ? "on" : "off");
++
+     json_object_put(root_obj);
+ 
+     return true;
+@@ -946,11 +987,32 @@ SuspendInit(void)
+ }
+ 
+ /**
+- * @brief Iterate through the state machine
++ * @brief Iterate through the suspend state machine
+  */
+ void
+ TriggerSuspend(const char *reason, PowerEvent event)
+ {
++    SLEEPDLOG_DEBUG("%s: state %s", __PRETTY_FUNCTION__, StateToStr(gCurrentStateNode.state));
++
++    GSource *source = g_idle_source_new();
++    g_source_set_callback(source,
++        (GSourceFunc)SuspendStateUpdate, GINT_TO_POINTER(event), NULL);
++    g_source_attach(source, g_main_loop_get_context(suspend_loop));
++
++    g_source_unref(source);
++}
++
++ /**
++ * @brief Iterate through the resume state machine
++ */
++void
++TriggerResume(const char *reason, PowerEvent event)
++{
++    SLEEPDLOG_DEBUG("%s: state %s", __PRETTY_FUNCTION__, StateToStr(gCurrentStateNode.state));
++
++    // We woke up from sleep.
++    PwrEventThawActivities();
++
+     GSource *source = g_idle_source_new();
+     g_source_set_callback(source,
+                           (GSourceFunc)SuspendStateUpdate, GINT_TO_POINTER(event), NULL);
+@@ -959,6 +1021,18 @@ TriggerSuspend(const char *reason, PowerEvent event)
+     g_source_unref(source);
+ }
+ 
++/**
++ * @brief Check if the device is currently in a low power mode
++ *
++ * @return True, if device is currently suspended, False otherwise.
++ */
++bool
++IsSuspended(void)
++{
++    SLEEPDLOG_DEBUG("%s: state %s", __PRETTY_FUNCTION__, StateToStr(gCurrentStateNode.state));
++    return (gCurrentStateNode.state == kPowerStateKernelResume);
++}
++
+ INIT_FUNC(INIT_FUNC_END, SuspendInit);
+ 
+ /* @} END OF SuspendLogic */
+diff --git a/src/pwrevents/suspend_ipc.c b/src/pwrevents/suspend_ipc.c
+index 03a9847..afdc294 100644
+--- a/src/pwrevents/suspend_ipc.c
++++ b/src/pwrevents/suspend_ipc.c
+@@ -355,6 +355,32 @@ forceSuspendCallback(LSHandle *sh, LSMessage *message, void *user_data)
+     return true;
+ }
+ 
++/**
++ * @brief Resume the device when it is currently in a low power state.
++ *
++ * @param  sh
++ * @param  message
++ * @param  user_data
++ */
++
++bool
++resumeCalback(LSHandle *sh, LSMessage *message, void *user_data)
++{
++    PMLOG_TRACE("Received resume");
++
++    if (!IsSuspended()) {
++        LSMessageReplyErrorUnknown(sh, message);
++        return true;
++    }
++
++    /* FIXME get reason as argument from the caller */
++    TriggerResume(NULL, kPowerEventNone);
++
++    LSMessageReplySuccess(sh, message);
++
++    return true;
++}
++
+ /**
+  * @brief Schedule the IdleCheck thread to check if the device can suspend
+  * (Used for testing purposes).
+@@ -805,6 +831,7 @@ LSMethod com_palm_suspend_methods[] =
+ 
+     /* suspend methods*/
+ 
++
+     { "suspendRequestRegister", suspendRequestRegister,LUNA_METHOD_FLAG_DEPRECATED },
+     { "prepareSuspendRegister", prepareSuspendRegister,LUNA_METHOD_FLAG_DEPRECATED },
+     { "suspendRequestAck", suspendRequestAck,LUNA_METHOD_FLAG_DEPRECATED },
+@@ -812,6 +839,7 @@ LSMethod com_palm_suspend_methods[] =
+     { "forceSuspend", forceSuspendCallback,LUNA_METHOD_FLAG_DEPRECATED },
+     { "identify", identifyCallback,LUNA_METHOD_FLAG_DEPRECATED },
+     { "clientCancelByName", clientCancelByName,LUNA_METHOD_FLAG_DEPRECATED },
++    { "resume", resumeCalback,LUNA_METHOD_FLAG_DEPRECATED },
+ 
+     { "activityStart", activityStartCallback,LUNA_METHOD_FLAG_DEPRECATED },
+     { "activityEnd", activityEndCallback, LUNA_METHOD_FLAG_DEPRECATED },
+-- 
+2.41.0.windows.3
+

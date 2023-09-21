@@ -1,0 +1,222 @@
+From f5ce5c85dc4bb5e768581e0418e96a6485877f5d Mon Sep 17 00:00:00 2001
+From: Christophe Chapuis <chris.chapuis@gmail.com>
+Date: Thu, 27 Jan 2022 18:22:11 +0000
+Subject: [PATCH 5/6] filesystemStatusCheck: first implementation
+
+Signed-off-by: Christophe Chapuis <chris.chapuis@gmail.com>
+Upstream-Status: Pending
+---
+ .../DownloadService.filesysStatusCheck.schema |  10 ++
+ ...com.webos.service.downloadmanager.api.json |   3 +-
+ src/DownloadManager.h                         |   3 +-
+ src/DownloadService.cpp                       | 126 +++++++++++++++++-
+ 4 files changed, 134 insertions(+), 8 deletions(-)
+ create mode 100644 files/schema/DownloadService.filesysStatusCheck.schema
+
+diff --git a/files/schema/DownloadService.filesysStatusCheck.schema b/files/schema/DownloadService.filesysStatusCheck.schema
+new file mode 100644
+index 0000000..ee73d2a
+--- /dev/null
++++ b/files/schema/DownloadService.filesysStatusCheck.schema
+@@ -0,0 +1,10 @@
++{
++    "id"    : "DownloadService.filesysStatusCheck",
++    "type"  : "object",
++    "properties" : {
++        "path" : {
++            "type"     : "string",
++            "description" : "path for the filesystem to check"
++        }
++    }
++}
+diff --git a/files/sysbus/com.webos.service.downloadmanager.api.json b/files/sysbus/com.webos.service.downloadmanager.api.json
+index f895e11..a184541 100644
+--- a/files/sysbus/com.webos.service.downloadmanager.api.json
++++ b/files/sysbus/com.webos.service.downloadmanager.api.json
+@@ -15,6 +15,7 @@
+         "com.webos.service.downloadmanager/downloadStatusQuery",
+         "com.webos.service.downloadmanager/pauseDownload",
+         "com.webos.service.downloadmanager/resumeDownload",
+-        "com.webos.service.downloadmanager/upload"
++        "com.webos.service.downloadmanager/upload",
++        "com.webos.service.downloadmanager/filesysStatusCheck"
+     ]
+ }
+diff --git a/src/DownloadManager.h b/src/DownloadManager.h
+index 0afeacf..f116e97 100644
+--- a/src/DownloadManager.h
++++ b/src/DownloadManager.h
+@@ -201,8 +201,9 @@ public:
+     static bool cbListPendingDownloads(LSHandle * lshandle,LSMessage *msg,void * user_data);
+     static bool cbGetAllHistory(LSHandle * lshandle,LSMessage *msg, void * user_data);
+     static bool cbClearDownloadHistory(LSHandle * lshandle,LSMessage *msg,void * user_data);
++    static bool cbFsStatusCheck(LSHandle * lshandle,LSMessage *msg,void * user_data);
+ 
+-    void filesystemStatusCheck(const uint64_t& spaceFreeKB,const uint64_t& spaceTotalKB,bool * criticalAlertRaised = 0, bool * stopMarkReached = 0);
++    void filesystemStatusCheck(const uint64_t& spaceFreeKB,const uint64_t& spaceTotalKB,uint32_t *pctFullValue = 0, bool * stopMarkReached = 0);
+ 
+     // upload specific
+     static bool cbUpload(LSHandle* lshandle, LSMessage *message,void *user_data);
+diff --git a/src/DownloadService.cpp b/src/DownloadService.cpp
+index 6fab3bd..ce74cb5 100644
+--- a/src/DownloadService.cpp
++++ b/src/DownloadService.cpp
+@@ -65,6 +65,7 @@ static LSMethod s_methods[]  = {
+     { "getAllHistory",              DownloadManager::cbGetAllHistory },
+     { "clearHistory",               DownloadManager::cbClearDownloadHistory },
+     { "upload",                     DownloadManager::cbUpload },
++    { "filesysStatusCheck",         DownloadManager::cbFsStatusCheck},
+     { "is1xMode",                   DownloadManager::cbConnectionType},
+     { "allow1x",                    cbAllow1x },
+     { 0, 0 },
+@@ -1038,24 +1039,22 @@ Done:
+     return true;
+ }
+ 
+-void DownloadManager::filesystemStatusCheck(const uint64_t& freeSpaceKB,const uint64_t& totalSpaceKB, bool * criticalAlertRaised, bool * stopMarkReached)
++void DownloadManager::filesystemStatusCheck(const uint64_t& freeSpaceKB,const uint64_t& totalSpaceKB, uint32_t *pctFullValue, bool * stopMarkReached)
+ {
+     uint32_t pctFull = 100 - (uint32_t)(0.5 + ((double)freeSpaceKB / (double)totalSpaceKB) * (double)100.0);
+     pctFull = (pctFull <= 100 ? pctFull : 100);
+     LOG_DEBUG ("%s: Percent Full = %u (from free space KB = %lu , total space KB = %lu",__FUNCTION__,pctFull,freeSpaceKB,totalSpaceKB);
+ 
++    if (pctFullValue)
++        *pctFullValue = pctFull;
++
+     if (pctFull < DownloadSettings::instance().freespaceLowmarkFullPercent)
+         return;
+ 
+-    bool critical = false;
+     bool stopMark = false;
+     if (freeSpaceKB <= DownloadSettings::instance().freespaceStopmarkRemainingKBytes)
+         stopMark = true;
+-    else if (pctFull >= DownloadSettings::instance().freespaceCriticalmarkFullPercent)
+-        critical = true;
+ 
+-    if (criticalAlertRaised)
+-        *criticalAlertRaised = critical;
+     if (stopMarkReached)
+         *stopMarkReached = stopMark;
+ }
+@@ -2058,3 +2057,118 @@ bool DownloadManager::cbRequestWakeLock(LSHandle* lshandle, LSMessage *msg, void
+ 
+     return true;
+ }
++
++//->Start of API documentation comment block
++/**
++@page com_webos_service_downloadmanager com.webos.service.downloadmanager
++@{
++@section com_webos_service_downloadmanager_filesysStatusCheck filesysStatusCheck
++
++filesystem status
++
++@par Parameters
++Name | Required | Type | Description
++-----|----------|------|----------
++path | no       | String | path of the fs to check (default: "/media/internal")
++
++@par Returns (Call)
++Name | Required | Type | Description
++-----|----------|------|----------
++returnValue | yes | Boolean | Indicates if the call was successful
++subscribed | no | Boolean | True if subscribed
++alert | no | String | on low space, can be "low" (90% full), "medium" (95% full), "high" (98% full) or "limit" (remaining space under limit)
++amountRemainingKB | no | Number | when alert is raised, shows amount of remaining space
++hardLimitReached | no | Boolean | true when alert == "limit"
++hardLimitKB | no | Number | when alert == "limit", shows limit value
++
++@par Returns (Subscription)
++None
++@}
++*/
++//->End of API documentation comment block
++bool DownloadManager::cbFsStatusCheck(LSHandle* lshandle, LSMessage *msg, void *user_data)
++{
++    LSError lserror;
++    LSErrorInit(&lserror);
++
++    JUtil::Error error;
++    pbnjson::JValue reply = pbnjson::Object();
++
++    std::string pathOnFs("/media/internal");
++
++    pbnjson::JValue root = JUtil::parse(LSMessageGetPayload(msg), "", &error);
++    if (root.isNull()) {
++        reply.put("returnValue", false);
++        reply.put("errorText", error.detail());
++    }
++    else {
++        reply.put("returnValue", true);
++        
++        std::string alertType;
++        
++        if (root.hasKey("path")) {
++            pathOnFs = root["path"].asString();
++        }
++        
++        //check free space on disk
++        uint64_t spaceFreeKB = 0;
++        uint64_t spaceTotalKB = 0;
++        if (! DownloadManager::spaceOnFs(pathOnFs,spaceFreeKB,spaceTotalKB))
++        {
++            alertType = "limit";
++        }
++        else
++        {
++            bool stopMarkReached = false;
++            uint32_t pctFull = 0;
++            DownloadManager::instance().filesystemStatusCheck(spaceFreeKB,spaceTotalKB,&pctFull,&stopMarkReached);
++            
++            if(stopMarkReached) {
++                alertType = "limit";
++                reply.put("hardLimitReached", true);
++                reply.put("hardLimitKB", (int64_t)DownloadSettings::instance().freespaceStopmarkRemainingKBytes);
++            }
++            else if(pctFull >= DownloadSettings::instance().freespaceCriticalmarkFullPercent) {
++                alertType = "critical";
++            }
++            else if(pctFull >= DownloadSettings::instance().freespaceHighmarkFullPercent) {
++                alertType = "high";
++            }
++            else if(pctFull >= DownloadSettings::instance().freespaceMedmarkFullPercent) {
++                alertType = "medium";
++            }
++            else if(pctFull >= DownloadSettings::instance().freespaceLowmarkFullPercent) {
++                alertType = "low";
++            }
++        }
++
++        if( !alertType.empty()) {
++            reply.put("alert", alertType);
++            reply.put("amountRemainingKB", (int64_t)spaceFreeKB);
++        }
++
++        if (LSMessageIsSubscription(msg)) {
++
++            bool retVal = LSSubscriptionAdd(lshandle,pathOnFs.c_str(), msg, &lserror);
++
++            if (!retVal) {
++                reply.put("subscribed", false);
++                LSErrorPrint (&lserror, stderr);
++                LSErrorFree(&lserror);
++            }
++            else {
++                reply.put("subscribed", true);
++            }
++        }
++        else {
++            reply.put("subscribed", false);
++        }
++    }
++
++    if  (!LSMessageReply( lshandle, msg, JUtil::toSimpleString(reply).c_str(), &lserror )) {
++        LSErrorPrint (&lserror, stderr);
++        LSErrorFree(&lserror);
++    }
++
++    return true;
++}
+-- 
+2.37.3.windows.1
+

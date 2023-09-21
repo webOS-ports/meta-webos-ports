@@ -1,8 +1,8 @@
-# Copyright (c) 2013-2021 LG Electronics, Inc.
+# Copyright (c) 2013-2023 LG Electronics, Inc.
 
 SUMMARY = "Maliit Input Method Framework"
 DESCRIPTION = "This is the webOS edition of the Maliit input method framework. It differs from upstream in that it supports a hardware keyboard using the wayland protocol."
-AUTHOR = "Minjoong Park <minjoong.park@lgepartner.com>"
+AUTHOR = "Elvis Lee <kwangwoong.lee@lge.com>"
 SECTION = "webos/base"
 LICENSE = "LGPL-2.0-only"
 LIC_FILES_CHKSUM = " \
@@ -15,8 +15,11 @@ RDEPENDS:${PN} = "qtbase-plugins configd imemanager"
 
 PACKAGECONFIG[libim] = "CONFIG+=enable-libim,CONFIG-=enable-libim,libim"
 
-PV = "0.99.0+20-100+git${SRCPV}"
-SRCREV = "ac36e9ea8cfe76f5e1154c9ae628f4f54b9879de"
+WEBOS_VERSION = "0.99.0+20-101_9dff4aae8960bffa6f3add0c581dd77c6b8638ad"
+PR = "r35"
+
+PV = "0.99.0+20-101+git${SRCPV}"
+SRCREV = "9dff4aae8960bffa6f3add0c581dd77c6b8638ad"
 
 inherit pkgconfig
 inherit webos_qmake6
@@ -31,6 +34,7 @@ OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 EXTRA_QMAKEVARS_PRE += "CONFIG+=wayland MALIIT_DEFAULT_PLUGIN=libluneos-keyboard-plugin.so CONFIG+=noxcb CONFIG+=nodoc CONFIG+=notests CONFIG+=noexamples"
 EXTRA_QMAKEVARS_PRE += "INCDIR=${STAGING_INCDIR} INCLUDEDIR=${STAGING_INCDIR} LIBDIR=${STAGING_LIBDIR} MALIIT_PLUGINS_DIR=${libdir}/maliit/plugins MALIIT_DATA_DIR=${webos_execstatedir}/maliit"
 EXTRA_QMAKEVARS_PRE += "MALIIT_VERSION=${PV}"
+EXTRA_QMAKEVARS_PRE += "WEBOS_TARGET_MACHINE_IMPL=${WEBOS_TARGET_MACHINE_IMPL}"
 EXTRA_QMAKEVARS_PRE += "${EXTRA_CONF_PACKAGECONFIG}"
 
 # .pc generation should be fixed to use correct paths

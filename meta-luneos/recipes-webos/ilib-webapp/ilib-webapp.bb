@@ -1,4 +1,4 @@
-# Copyright (c) 2017-2022 LG Electronics, Inc.
+# Copyright (c) 2017-2023 LG Electronics, Inc.
 
 SUMMARY = "iLib code and locale data"
 AUTHOR = "Goun Lee <goun.lee@lge.com>"
@@ -9,8 +9,11 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=be4f2e45a1215076318af43f833aa178 \
 "
 
-PV = "14.12.0-20+git${SRCPV}"
-SRCREV = "785c0cfbaf9771e645821f77889bb7d407739a2d"
+WEBOS_VERSION = "14.18.0-29_7b4faed3a1366b51f9bbfca62e767bb7f8318540"
+PR = "r8"
+
+PV = "14.18.0-29+git${SRCPV}"
+SRCREV = "7b4faed3a1366b51f9bbfca62e767bb7f8318540"
 
 inherit webos_public_repo
 

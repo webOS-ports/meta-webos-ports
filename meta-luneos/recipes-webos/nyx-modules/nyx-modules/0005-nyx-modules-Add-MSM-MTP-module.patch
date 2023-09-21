@@ -1,0 +1,348 @@
+From 145534137150a1d54aa521bdf73c413a4a1c59ca Mon Sep 17 00:00:00 2001
+From: Herrie <Github.com@herrie.org>
+Date: Thu, 14 Sep 2023 12:02:17 +0200
+Subject: [PATCH 5/8] nyx-modules: Add MSM MTP module
+
+Add Mass Storage MTP module
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+---
+ src/msm_mtp/CMakeLists.txt |  23 +++
+ src/msm_mtp/msm.c          | 295 +++++++++++++++++++++++++++++++++++++
+ 2 files changed, 318 insertions(+)
+ create mode 100644 src/msm_mtp/CMakeLists.txt
+ create mode 100644 src/msm_mtp/msm.c
+
+diff --git a/src/msm_mtp/CMakeLists.txt b/src/msm_mtp/CMakeLists.txt
+new file mode 100644
+index 0000000..bcc6ea1
+--- /dev/null
++++ b/src/msm_mtp/CMakeLists.txt
+@@ -0,0 +1,23 @@
++# Copyright (c) 2010-2018 LG Electronics, Inc.
++# Copyright (c) 2016 Nikolay Nizov <nizovn@gmail.com>
++# Copyright (c) 2018 Herman van Hazendonk <github.com@herrie.org>
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++# http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++#
++# SPDX-License-Identifier: Apache-2.0
++
++include_directories(.)
++
++webos_build_nyx_module(MassStorageModeMain
++		       SOURCES msm.c
++		       LIBRARIES ${GLIB2_LDFLAGS} ${PMLOG_LDFLAGS} ${NYXLIB_LDFLAGS} ${UDEV_LDFLAGS} -lrt -lpthread)
+diff --git a/src/msm_mtp/msm.c b/src/msm_mtp/msm.c
+new file mode 100644
+index 0000000..e08ef40
+--- /dev/null
++++ b/src/msm_mtp/msm.c
+@@ -0,0 +1,295 @@
++// Copyright (c) 2010-2018 LG Electronics, Inc.
++// Copyright (c) 2016 Nikolay Nizov <nizovn@gmail.com>
++// Copyright (c) 2018 Herman van Hazendonk <github.com@herrie.org>
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++//
++// SPDX-License-Identifier: Apache-2.0
++
++/*
++************************************************
++* @file msm.c
++************************************************
++*/
++
++#include <string.h>
++#include <stdlib.h>
++
++#include <nyx/nyx_module.h>
++#include <nyx/module/nyx_utils.h>
++#include <nyx/module/nyx_log.h>
++#include "msgid.h"
++
++#include <glib.h>
++#include <libudev.h>
++
++GIOChannel *channel;
++
++struct udev *udev;
++struct udev_monitor *mon;
++static guint event_watch;
++
++nyx_device_t *nyxDev = NULL;
++void *mtp_change_callback_context = NULL;
++nyx_device_callback_function_t mtp_change_callback;
++
++#define MTP_SYSFS_PATH    "/sys/class/misc/mtp_usb/"
++#define ANDROID_USB_SYSFS_PATH    "/sys/class/android_usb/android0/"
++
++void mtp_init(void);
++void mtp_close(void);
++nyx_error_t mtp_get_state(nyx_device_handle_t handle, nyx_mass_storage_mode_state_t *state);
++
++NYX_DECLARE_MODULE(NYX_DEVICE_MASS_STORAGE_MODE, "Main");
++
++nyx_error_t nyx_module_open(nyx_instance_t i, nyx_device_t **d)
++{
++	if (nyxDev)
++	{
++		nyx_info(MSGID_NYX_MOD_MSMMTP_OPEN_ERR, 0, "MassStorageMode module already open");
++		return NYX_ERROR_NONE;
++	}
++
++	nyxDev = (nyx_device_t *)calloc(sizeof(nyx_device_t), 1);
++
++	if (NULL == nyxDev)
++	{
++		return NYX_ERROR_OUT_OF_MEMORY;
++	}
++
++	nyx_module_register_method(i, (nyx_device_t *)nyxDev,
++	                           NYX_MASS_STORAGE_MODE_SET_MODE_MODULE_METHOD,
++	                           "mtp_set_mode");
++
++	nyx_module_register_method(i, (nyx_device_t *)nyxDev,
++	                           NYX_MASS_STORAGE_MODE_GET_STATE_MODULE_METHOD,
++	                           "mtp_get_state");
++
++	nyx_module_register_method(i, (nyx_device_t *)nyxDev,
++	                           NYX_MASS_STORAGE_MODE_REGISTER_CHANGE_CALLBACK_MODULE_METHOD,
++	                           "mtp_register_change_callback");
++
++	*d = (nyx_device_t *)nyxDev;
++	mtp_init();
++
++	return NYX_ERROR_NONE;
++}
++
++nyx_error_t nyx_module_close(nyx_device_t *d)
++{
++	mtp_close();
++	return NYX_ERROR_NONE;
++}
++
++nyx_error_t mtp_set_mode(nyx_device_handle_t handle,
++        nyx_mass_storage_mode_action_t action, nyx_mass_storage_mode_return_code_t *ret)
++{
++	if (handle != nyxDev)
++	{
++		return NYX_ERROR_INVALID_HANDLE;
++	}
++
++	if (!ret)
++	{
++		return NYX_ERROR_INVALID_VALUE;
++	}
++
++	if ((action == NYX_MASS_STORAGE_MODE_DISABLE) ||
++	    (action == NYX_MASS_STORAGE_MODE_DISABLE_AFTER_FSCK))
++	{
++		*ret = NYX_MASS_STORAGE_MODE_SUCCESS;
++		return NYX_ERROR_NONE;
++	}
++
++	if (action == NYX_MASS_STORAGE_MODE_ENABLE) {
++
++		nyx_mass_storage_mode_state_t state;
++		if (mtp_get_state(nyxDev, &state) != NYX_ERROR_NONE)
++			return NYX_ERROR_INVALID_OPERATION;
++
++		if (!(state & NYX_MASS_STORAGE_MODE_DRIVER_AVAILABLE)) {
++			*ret = NYX_MASS_STORAGE_MODE_DRIVER_UNAVAILABLE;
++			return NYX_ERROR_INVALID_OPERATION;
++		}
++
++		if (!(state & NYX_MASS_STORAGE_MODE_HOST_CONNECTED)) {
++			*ret = NYX_MASS_STORAGE_MODE_HOST_NOT_CONNECTED;
++			return NYX_ERROR_INVALID_OPERATION;
++		}
++
++		if (state & NYX_MASS_STORAGE_MODE_MODE_ON) {
++			*ret = NYX_MASS_STORAGE_MODE_SUCCESS;
++			return NYX_ERROR_NONE;
++		}
++
++		if (system("systemctl start mtp-server --no-block") == 0) {
++			*ret = NYX_MASS_STORAGE_MODE_SUCCESS;
++			return NYX_ERROR_NONE;
++		}
++		else {
++			*ret = NYX_MASS_STORAGE_MODE_MOUNT_FAILURE;
++			return NYX_ERROR_INVALID_OPERATION;
++		}
++	}
++
++	return NYX_ERROR_INVALID_VALUE;
++}
++
++nyx_error_t mtp_get_state(nyx_device_handle_t handle,
++        nyx_mass_storage_mode_state_t *state)
++{
++	if (handle != nyxDev)
++	{
++		return NYX_ERROR_INVALID_HANDLE;
++	}
++
++	if (!state)
++	{
++		return NYX_ERROR_INVALID_VALUE;
++	}
++
++	*state = 0;
++
++	struct udev *udev_state;
++	struct udev_device *device;
++	const char *attr;
++	char *running = NULL;
++	char *token;
++	bool mtp_enabled = false;
++
++	udev_state = udev_new();
++	if (!udev_state) {
++		nyx_error(MSGID_NYX_MOD_UDEV_ERR, 0, "Could not initialize udev component");
++		return NYX_ERROR_INVALID_OPERATION;
++	}
++
++	// when using mtp, internal partition is always mounted
++	*state |= NYX_MASS_STORAGE_MODE_PARTITION_MOUNTED;
++
++	device = udev_device_new_from_syspath(udev_state, MTP_SYSFS_PATH);
++
++	if (!device)
++		goto reply;
++
++	udev_device_unref(device);
++
++	device = udev_device_new_from_syspath(udev_state, ANDROID_USB_SYSFS_PATH);
++
++	if (!device)
++		goto reply;
++
++	attr = udev_device_get_sysattr_value(device, "enable");
++	if (g_strcmp0(attr, "1") != 0)
++		goto reply;
++
++	attr = udev_device_get_sysattr_value(device, "functions");
++	running = g_strdup(attr);
++	while ((token = strsep(&running, ","))) {
++		mtp_enabled |= (g_strcmp0(token, "mtp") == 0);
++	}
++
++	if (!mtp_enabled)
++		goto reply;
++
++	*state |= NYX_MASS_STORAGE_MODE_DRIVER_AVAILABLE;
++
++	attr = udev_device_get_sysattr_value(device, "state");
++	if ((g_strcmp0(attr, "CONFIGURED") == 0) || (g_strcmp0(attr, "CONNECTED") == 0)) {
++		*state |= NYX_MASS_STORAGE_MODE_HOST_CONNECTED;
++	}
++
++	if (system("pidof mtp-server > /dev/null") == 0)
++		*state |= NYX_MASS_STORAGE_MODE_MODE_ON;
++
++reply:
++	if (device)
++		udev_device_unref(device);
++	if (udev_state)
++		udev_unref(udev_state);
++	if (running)
++		g_free(running);
++
++	return NYX_ERROR_NONE;
++}
++
++nyx_error_t mtp_register_change_callback(nyx_device_handle_t handle,
++        nyx_device_callback_function_t callback_func, void *context)
++{
++	if (handle != nyxDev)
++	{
++		return NYX_ERROR_INVALID_HANDLE;
++	}
++
++	if (!callback_func)
++	{
++		return NYX_ERROR_INVALID_VALUE;
++	}
++
++	mtp_change_callback = callback_func;
++	mtp_change_callback_context = context;
++
++	return NYX_ERROR_NONE;
++}
++
++gboolean _handle_event(GIOChannel *channel, GIOCondition condition, gpointer data)
++{
++	struct udev_device *dev;
++
++	if ((condition  & G_IO_IN) == G_IO_IN) {
++		dev = udev_monitor_receive_device(mon);
++		if (dev) {
++			/* something related to android_usb has changed; notify connected clients so
++			 * they can query the new status */
++			mtp_change_callback(nyxDev, NYX_CALLBACK_STATUS_DONE, mtp_change_callback_context);
++		}
++	}
++
++	return TRUE;
++}
++
++void mtp_init(void)
++{
++	int fd;
++
++	udev = udev_new();
++	if (!udev) {
++		nyx_error(MSGID_NYX_MOD_UDEV_ERR, 0, "Could not initialize udev component; mtp status updates will not be available");
++		return;
++	}
++
++	mon = udev_monitor_new_from_netlink(udev, "udev");
++	udev_monitor_filter_add_match_subsystem_devtype(mon, "android_usb", NULL);
++	udev_monitor_enable_receiving(mon);
++	fd = udev_monitor_get_fd(mon);
++
++	channel = g_io_channel_unix_new(fd);
++	event_watch = g_io_add_watch(channel, G_IO_IN | G_IO_HUP | G_IO_NVAL, _handle_event, NULL);
++}
++
++void mtp_close(void)
++{
++	if (channel) {
++		g_io_channel_shutdown(channel, FALSE, NULL);
++		channel = NULL;
++
++		g_source_remove(event_watch);
++	}
++
++	if (mon) {
++		udev_monitor_unref(mon);
++	}
++
++	if (udev) {
++		udev_unref(udev);
++	}
++}
+-- 
+2.41.0.windows.3
+

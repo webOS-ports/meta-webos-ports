@@ -1,7 +1,7 @@
-# Copyright (c) 2014-2021 LG Electronics, Inc.
+# Copyright (c) 2014-2023 LG Electronics, Inc.
 
 SUMMARY = "QML widgets and runtime framework for webOS apps"
-AUTHOR = "Mikko Levonmaa <mikko.levonmaa@lge.com>"
+AUTHOR = "Elvis Lee <kwangwoong.lee@lge.com>"
 SECTION = "webos/base"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = " \
@@ -10,7 +10,7 @@ LIC_FILES_CHKSUM = " \
 "
 
 DEPENDS = "qt-features-webos qtdeclarative qtwayland-webos pmloglib luna-service2 qttools-native"
-DEPENDS:append = " ${@ 'qtshadertools-native' if d.getVar('QT_VERSION') == '6' else '' }"
+DEPENDS:append = " ${@ 'qtshadertools-native' if d.getVar('QT_VERSION')[0] == '6' else '' }"
 RDEPENDS:${PN} = "qt5compat-qmlplugins"
 
 RPROVIDES:${PN}-examples = " \
@@ -18,8 +18,11 @@ RPROVIDES:${PN}-examples = " \
     eos.widgetgallery \
 "
 
-WEBOS_VERSION = "1.0.0-166_5e309e40317324529510297a3f3ade62c34e5c1e"
+WEBOS_VERSION = "1.0.0-166_976ef6a9f06993cbaf2ed3babc6dcb96dd3b1b1f"
 PR = "r35"
+
+PV = "1.0.0-166+git${SRCPV}"
+SRCREV = "976ef6a9f06993cbaf2ed3babc6dcb96dd3b1b1f"
 
 inherit webos_qmake6
 inherit pkgconfig
@@ -39,9 +42,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
            "
 
 S = "${WORKDIR}/git"
-
-PV = "1.0.0-166+git${SRCPV}"
-SRCREV = "5e309e40317324529510297a3f3ade62c34e5c1e"
 
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 

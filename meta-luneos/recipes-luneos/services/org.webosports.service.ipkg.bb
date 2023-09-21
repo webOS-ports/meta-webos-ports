@@ -14,6 +14,8 @@ inherit pkgconfig
 inherit webos_system_bus
 inherit webos_systemd
 
+LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
+
 WEBOS_REPO_NAME = "preware"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 

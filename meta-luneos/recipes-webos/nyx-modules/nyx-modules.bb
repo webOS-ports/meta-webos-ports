@@ -1,15 +1,26 @@
-# Copyright (c) 2012-2014 LG Electronics, Inc.
+# Copyright (c) 2012-2023 LG Electronics, Inc.
 
 SUMMARY = "webOS portability layer - ${MACHINE}-specific modules"
-AUTHOR = "Keith Derrick <keith.derrick@lge.com>"
+AUTHOR = "Yogish S <yogish.s@lge.com>"
 SECTION = "webos/base"
-LICENSE = "Apache-2.0"
-LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-DEPENDS = "nyx-lib glib-2.0 luna-service2 openssl udev"
+LICENSE = "Apache-2.0"
+LIC_FILES_CHKSUM = " \
+    file://LICENSE;md5=89aea4e17d99a7cacdbeed46a0096b10 \
+    file://oss-pkg-info.yaml;md5=2bdfe040dcf81b4038370ae96036c519 \
+"
+
+DEPENDS = "nyx-lib glib-2.0 luna-service2 openssl udev nmeaparser"
+#LuneOS added for mtdev modules such as touchscreen
 DEPENDS += "mtdev"
 
 RDEPENDS:${PN} = "lsb-release gzip nyx-conf"
+
+WEBOS_VERSION = "7.1.0-22_677ed3eca696f1d5b00d8b7579f981e37e319ce3"
+PR = "r19"
+
+PV = "7.1.0-22+git${SRCPV}"
+SRCREV = "677ed3eca696f1d5b00d8b7579f981e37e319ce3"
 
 EXTRA_OECMAKE += "-DDISTRO_VERSION:STRING='${DISTRO_VERSION}' -DDISTRO_NAME:STRING='${DISTRO_NAME}${WEBOS_DISTRO_NAME_SUFFIX}' \
                   -DWEBOS_DISTRO_API_VERSION:STRING='${WEBOS_DISTRO_API_VERSION}' \
@@ -36,22 +47,28 @@ WEBOS_TARGET_CORE_OS = "rockhopper"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-inherit webos_ports_ose_repo
+inherit webos_public_repo
 inherit webos_cmake
 inherit webos_machine_impl_dep
 inherit webos_core_os_dep
 inherit webos_nyx_module_provider
 inherit pkgconfig
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+    file://0001-nyx-modules-Add-ALS.patch \
+    file://0002-nyx-modules-Add-haptics-module.patch \
+    file://0003-nyx-modules-Add-keys-module.patch \
+    file://0004-nyx-modules-Add-LED-module.patch \
+    file://0005-nyx-modules-Add-MSM-MTP-module.patch \
+    file://0006-nyx-modules-Add-touchpanel-mtdev-modules.patch \
+    file://0007-msgid-Add-messages-for-LuneOS-modules.patch \
+    file://0008-Add-LuneOS-modules-and-machine-specific-cmake-file-t.patch \
+"
 S = "${WORKDIR}/git"
 
 SRC_URI:append = " \
     file://${MACHINE}.cmake \
 "
-
-PV = "7.1.0-1+git${SRCPV}"
-SRCREV = "555f6f2820faaecf498b865642fc87db1a1b6a29"
 
 do_configure:prepend() {
     # Install additional machine specific nyx configuration before CMake is started

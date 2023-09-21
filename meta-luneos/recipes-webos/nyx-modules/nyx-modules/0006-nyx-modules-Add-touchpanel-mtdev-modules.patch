@@ -1,0 +1,3361 @@
+From d434292cd7052aaebf5cc270b38c0f12dfe3e979 Mon Sep 17 00:00:00 2001
+From: Herrie <Github.com@herrie.org>
+Date: Thu, 14 Sep 2023 12:03:57 +0200
+Subject: [PATCH 6/8] nyx-modules: Add touchpanel(-mtdev) modules
+
+Add Touchpanel(MTDEV) modules
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+---
+ src/touchpanel/CMakeLists.txt              |  19 +
+ src/touchpanel/touchpanel.c                | 829 ++++++++++++++++++
+ src/touchpanel/touchpanel_common.c         |  41 +
+ src/touchpanel/touchpanel_common.h         |  24 +
+ src/touchpanel/touchpanel_gestures.c       | 489 +++++++++++
+ src/touchpanel/touchpanel_gestures.h       | 131 +++
+ src/touchpanel_mtdev/CMakeLists.txt        |  21 +
+ src/touchpanel_mtdev/touchpanel.c          | 965 +++++++++++++++++++++
+ src/touchpanel_mtdev/touchpanel_common.c   |  43 +
+ src/touchpanel_mtdev/touchpanel_common.h   |  26 +
+ src/touchpanel_mtdev/touchpanel_gestures.c | 530 +++++++++++
+ src/touchpanel_mtdev/touchpanel_gestures.h | 133 +++
+ 12 files changed, 3251 insertions(+)
+ create mode 100644 src/touchpanel/CMakeLists.txt
+ create mode 100644 src/touchpanel/touchpanel.c
+ create mode 100644 src/touchpanel/touchpanel_common.c
+ create mode 100644 src/touchpanel/touchpanel_common.h
+ create mode 100644 src/touchpanel/touchpanel_gestures.c
+ create mode 100644 src/touchpanel/touchpanel_gestures.h
+ create mode 100644 src/touchpanel_mtdev/CMakeLists.txt
+ create mode 100644 src/touchpanel_mtdev/touchpanel.c
+ create mode 100644 src/touchpanel_mtdev/touchpanel_common.c
+ create mode 100644 src/touchpanel_mtdev/touchpanel_common.h
+ create mode 100644 src/touchpanel_mtdev/touchpanel_gestures.c
+ create mode 100644 src/touchpanel_mtdev/touchpanel_gestures.h
+
+diff --git a/src/touchpanel/CMakeLists.txt b/src/touchpanel/CMakeLists.txt
+new file mode 100644
+index 0000000..77c38cb
+--- /dev/null
++++ b/src/touchpanel/CMakeLists.txt
+@@ -0,0 +1,19 @@
++# Copyright (c) 2010-2018 LG Electronics, Inc.
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++# http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++#
++# SPDX-License-Identifier: Apache-2.0
++
++webos_build_nyx_module(TouchpanelMain
++		       SOURCES touchpanel.c touchpanel_common.c touchpanel_gestures.c
++		       LIBRARIES ${GLIB2_LDFLAGS} ${PMLOG_LDFLAGS} ${NYXLIB_LDFLAGS} -lrt -lpthread)
+diff --git a/src/touchpanel/touchpanel.c b/src/touchpanel/touchpanel.c
+new file mode 100644
+index 0000000..1d53767
+--- /dev/null
++++ b/src/touchpanel/touchpanel.c
+@@ -0,0 +1,829 @@
++// Copyright (c) 2010-2018 LG Electronics, Inc.
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++//
++// SPDX-License-Identifier: Apache-2.0
++
++
++#include <assert.h>
++#include <sys/types.h>
++#include <sys/time.h>
++#include <sys/types.h>
++#include <sys/socket.h>
++#include <sys/un.h>
++#include <linux/input.h>
++#include <linux/ioctl.h>
++#include <linux/fb.h>
++#include <math.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <time.h>
++#include <glib.h>
++#include <errno.h>
++#include <poll.h>
++#include <unistd.h>
++
++#include <nyx/nyx_module.h>
++#include <nyx/module/nyx_event_touchpanel_internal.h>
++#include <nyx/common/nyx_macros.h>
++#include <nyx/module/nyx_utils.h>
++
++
++#include <sys/socket.h>
++#include <sys/un.h>
++#include <stdbool.h>
++#include <dirent.h>
++#include <fcntl.h>
++
++#include "touchpanel_gestures.h"
++#include "msgid.h"
++
++/* Later versions of nyx_utils.h no longer define this macro */
++#undef return_if
++#define return_if(condition, args...)                         \
++  do {                                                        \
++    if (G_UNLIKELY(condition)) {                              \
++      return args;                                            \
++    }                                                         \
++  } while(0)
++
++typedef struct
++{
++	nyx_device_t _parent;
++	nyx_event_touchpanel_t *current_event_ptr;
++	int32_t mode;
++} touchpanel_device_t;
++
++NYX_DECLARE_MODULE(NYX_DEVICE_TOUCHPANEL, "Touchpanel");
++
++#define MAX_HIDD_EVENTS     (4096 / sizeof(input_event_t))
++
++typedef struct
++{
++	size_t input_filled;
++	size_t input_read;
++	input_event_t input[MAX_HIDD_EVENTS];
++} event_list_t;
++
++
++event_list_t touchpanel_event_list;
++int touchpanel_event_fd = -1;
++
++static void touch_item_reset(nyx_touchpanel_event_item_t *t)
++{
++	t->finger = 0;
++	t->state = NYX_TOUCHPANEL_STATE_UNDEFINED;
++	t->x = 0;
++	t->y = 0;
++	t->gestureKey = -1;
++	t->xVelocity = 0;
++	t->yVelocity = 0;
++	t->weight = (double) NAN;
++}
++
++static nyx_event_touchpanel_t *touch_event_create()
++{
++	nyx_event_touchpanel_t *event_ptr;
++	event_ptr =
++	    (nyx_event_touchpanel_t *) calloc(sizeof(nyx_event_touchpanel_t), 1);
++
++	if (NULL == event_ptr)
++	{
++		return event_ptr;
++	}
++
++	event_ptr->type = NYX_TOUCHPANEL_EVENT_TYPE_TOUCH;
++	event_ptr->item_count = 0;
++	return event_ptr;
++}
++
++nyx_error_t touchpanel_release_event(nyx_device_t *d, nyx_event_t *e)
++{
++	if (NULL == d)
++	{
++		return NYX_ERROR_INVALID_HANDLE;
++	}
++
++	if (NULL == e)
++	{
++		return NYX_ERROR_INVALID_HANDLE;
++	}
++
++	nyx_event_touchpanel_t *a = (nyx_event_touchpanel_t *) e;
++	free(a);
++	return NYX_ERROR_NONE;
++}
++
++static nyx_touchpanel_event_item_t *touch_event_get_next_item(
++    nyx_event_touchpanel_t *i_event_ptr)
++{
++	nyx_touchpanel_event_item_t *item_ptr = NULL;
++	assert(NULL != i_event_ptr);
++
++	if (i_event_ptr->item_count < NYX_MAX_TOUCH_EVENTS)
++	{
++		item_ptr = &i_event_ptr->item_array[i_event_ptr->item_count++];
++	}
++	else
++	{
++		nyx_error(MSGID_NYX_MOD_TP_TOOMANY_ITEMS_ERR, 0, "tried allocating too many touch items: event %p, item cnt %d, max %d",
++		          i_event_ptr, i_event_ptr->item_count, NYX_MAX_TOUCH_EVENTS);
++	}
++
++	return item_ptr;
++}
++
++static nyx_touchpanel_event_item_t *touch_event_get_current_item(
++    nyx_event_touchpanel_t *i_event_ptr)
++{
++	nyx_touchpanel_event_item_t *item_ptr = NULL;
++	assert(NULL != i_event_ptr);
++
++	if (i_event_ptr->item_count > 0)
++	{
++		item_ptr = &i_event_ptr->item_array[i_event_ptr->item_count - 1];
++	}
++	else
++	{
++		nyx_error(MSGID_NYX_MOD_TP_NOTOUCH_ERR, 0, "No touch items available! event %p", i_event_ptr);
++	}
++
++	return item_ptr;
++}
++
++static inline int64_t get_ts_tval(struct timeval *tv)
++{
++	return tv->tv_sec * 1000000000LL + tv->tv_usec * 1000;
++}
++
++#define VBOXGUEST_DEVICE_NAME   "/dev/vboxguest"
++
++/** Version of VMMDevRequestHeader structure. */
++#define VMMDEV_REQUEST_HEADER_VERSION (0x10001)
++
++#define VBOXGUEST_IOCTL_FLAG     0
++#define VBOXGUEST_IOCTL_CODE_(Function, Size)  _IOC(_IOC_READ|_IOC_WRITE, 'V', (Function), (Size))
++#define VBOXGUEST_IOCTL_CODE(Function, Size)   VBOXGUEST_IOCTL_CODE_((Function) | VBOXGUEST_IOCTL_FLAG, Size)
++#define VBOXGUEST_IOCTL_VMMREQUEST(Size)       VBOXGUEST_IOCTL_CODE(3, (Size))
++
++#pragma pack(4)
++/** generic VMMDev request header */
++typedef struct
++{
++	/** size of the structure in bytes (including body). Filled by caller */
++	uint32_t size;
++	/** version of the structure. Filled by caller */
++	uint32_t version;
++	/** type of the request */
++	/*VMMDevRequestType*/ uint32_t requestType;
++	/** return code. Filled by VMMDev */
++	int32_t  rc;
++	/** reserved fields */
++	uint32_t reserved1;
++	uint32_t reserved2;
++} VMMdev_request_header;
++
++/** mouse status request structure */
++typedef struct
++{
++	/** header */
++	VMMdev_request_header header;
++	/** mouse feature mask */
++	uint32_t mouseFeatures;
++	/** mouse x position */
++	int32_t pointerXPos;
++	/** mouse y position */
++	int32_t pointerYPos;
++} VMMdev_req_mouse_status;
++
++/**
++ * mouse pointer shape/visibility change request
++ */
++typedef struct VMMdev_req_mouse_pointer
++{
++	/** Header. */
++	VMMdev_request_header header;
++	/** VBOX_MOUSE_POINTER_* bit flags. */
++	uint32_t fFlags;
++	/** x coordinate of hot spot. */
++	uint32_t xHot;
++	/** y coordinate of hot spot. */
++	uint32_t yHot;
++	/** Width of the pointer in pixels. */
++	uint32_t width;
++	/** Height of the pointer in scanlines. */
++	uint32_t height;
++	/** Pointer data. */
++	char pointerData[4];
++} VMMdev_req_mouse_pointer;
++
++/* The purpose of this function is to enable mouse pointer on the screen
++   for virtualbox qemux86 images, by firing appropriate ioctls to vbox driver */
++static void init_vbox_touchpanel(void)
++{
++	// Open the VirtualBox kernel module driver
++	int vbox_fd = open(VBOXGUEST_DEVICE_NAME, O_RDWR, 0);
++
++	if (vbox_fd < 0)
++	{
++		nyx_error(MSGID_NYX_MOD_TP_VBOX_OPEN_ERR, 0, "ERROR: vboxguest module open failed: %d", errno);
++		goto error;
++	}
++
++	VMMdev_req_mouse_status Req;
++	Req.header.size        = (uint32_t)sizeof(VMMdev_req_mouse_status);
++	Req.header.version     = 0x10001;   // VMMDEV_REQUEST_HEADER_VERSION;
++	Req.header.requestType = 2;         // VMMDevReq_SetMouseStatus;
++	Req.header.rc          = -1;        // VERR_GENERAL_FAILURE;
++	Req.header.reserved1   = 0;
++	Req.header.reserved2   = 0;
++
++	// set MouseGuestNeedsHostCursor (bit 2)
++	Req.mouseFeatures = (1 << 2);
++	Req.pointerXPos = 0;
++	Req.pointerYPos = 0;
++
++	// perform VMM request
++	if (ioctl(vbox_fd, VBOXGUEST_IOCTL_VMMREQUEST(Req.header.size),
++	          (void *)&Req.header) < 0)
++	{
++		nyx_error(MSGID_NYX_MOD_TP_IOCTL_ERR, 0, "ERROR: vboxguest rms ioctl failed: %d", errno);
++		goto error;
++	}
++	else if (Req.header.rc < 0)
++	{
++		nyx_error(MSGID_NYX_MOD_TP_IOCTL_READ_ERR, 0, "ERROR: vboxguest SetMouseStatus failed: %d", Req.header.rc);
++		goto error;
++	}
++
++	VMMdev_req_mouse_pointer mpReq;
++	mpReq.header.size        = (uint32_t)sizeof(VMMdev_req_mouse_pointer);
++	mpReq.header.version     = 0x10001; // VMMDEV_REQUEST_HEADER_VERSION;
++	mpReq.header.requestType = 3;       // VMMDevReq_SetPointerShape;
++	mpReq.header.rc          = -1;      // VERR_GENERAL_FAILURE;
++	mpReq.header.reserved1   = 0;
++	mpReq.header.reserved2   = 0;
++
++	// set fields for SetPointerShape (most importantly VISIBLE)
++	mpReq.fFlags = 1;           // VBOX_MOUSE_POINTER_VISIBLE;
++	mpReq.xHot = 0;
++	mpReq.yHot = 0;
++	mpReq.width = 0;
++	mpReq.height = 0;
++	mpReq.pointerData[0] = 0;
++	mpReq.pointerData[1] = 0;
++	mpReq.pointerData[2] = 0;
++	mpReq.pointerData[3] = 0;
++
++	// perform VMM request
++	if (ioctl(vbox_fd, VBOXGUEST_IOCTL_VMMREQUEST(mpReq.header.size),
++	          (void *)&mpReq.header) < 0)
++	{
++		nyx_error(MSGID_NYX_MOD_TP_IOCTL_REQUEST_ERR, 0,"ERROR: vboxguest mpr ioctl failed: %d", errno);
++		goto error;
++	}
++	else if (mpReq.header.rc < 0)
++	{
++		nyx_error(MSGID_NYX_MOD_TP_SETPTR_ERR, 0,"ERROR: vboxguest SetPointerShape failed: %d", mpReq.header.rc);
++		goto error;
++	}
++
++	return;
++error:
++
++	if (vbox_fd >= 0)
++	{
++		close(vbox_fd);
++	}
++
++	return;
++}
++
++
++/*
++ * FIXME: The following two definitions are a temporary hack to work around
++ * the fact that the XML file parsing reads in all the cypress-library
++ * settings that we don't need or want (for dependency reasons)
++ */
++static general_settings_t sGeneralSettings =
++{
++	.coordBufSize = 6,
++	.fingerDownThreshold = 0
++};
++
++#define FRAMEBUF_DEVICE_NAME    "/dev/fb"
++
++static int
++get_display_res(int *x, int *y)
++{
++	int ret = -1;
++	struct fb_var_screeninfo varinfo;
++
++	int displayFd = open(FRAMEBUF_DEVICE_NAME, O_RDONLY);
++
++	if (displayFd < 0)
++	{
++		nyx_error(MSGID_NYX_MOD_TP_OPEN_FB_ERR, 0, "Error in opening fb file");
++		return ret;
++	}
++
++	if (ioctl(displayFd, FBIOGET_VSCREENINFO, &varinfo) < 0)
++	{
++		nyx_error(MSGID_NYX_MOD_TP_VSCREEN_INFO_ERR, 0, "Error in getting var screen info");
++		goto exit;
++	}
++
++	*x = varinfo.xres;
++	*y = varinfo.yres;
++
++	ret = 0;
++
++exit:
++	close(displayFd);
++	return ret;
++}
++
++
++static float scaleX, scaleY;
++
++static int
++init_touchpanel(void)
++{
++	struct input_absinfo abs;
++	int  maxX, maxY, sXres, sYres, ret = -1;
++
++#ifdef TOUCHPANEL_DEVICE
++	touchpanel_event_fd = open(TOUCHPANEL_DEVICE, O_RDWR | O_NONBLOCK);
++#else
++	touchpanel_event_fd = open("/dev/input/touchscreen0", O_RDWR | O_NONBLOCK);
++#endif
++
++	if (touchpanel_event_fd < 0)
++	{
++		nyx_error(MSGID_NYX_MOD_TP_OPEN_ERR, 0,"Error in opening touchpanel event device");
++		return -1;
++	}
++
++	ret = ioctl(touchpanel_event_fd, EVIOCGABS(0), &abs);
++
++	if (ret < 0)
++	{
++		nyx_error(MSGID_NYX_MOD_TP_EVENT_HLIMIT_ERR, 0,"Error in fetching screen horizontal limits");
++		goto error;
++	}
++
++	maxX = abs.maximum;
++
++	ret = ioctl(touchpanel_event_fd, EVIOCGABS(1), &abs);
++
++	if (ret < 0)
++	{
++		nyx_error(MSGID_NYX_MOD_TP_EVENT_VLIMIT_ERR, 0, "Error in fetching screen vertical limits");
++		goto error;
++	}
++
++	maxY = abs.maximum;
++
++	// The following function is valid only for virtualbox qemux86 image
++	init_vbox_touchpanel();
++	init_gesture_state_machine(&sGeneralSettings, 1);
++
++	/* Get the display resolution */
++	if (get_display_res(&sXres, &sYres) < 0)
++	{
++		nyx_error(MSGID_NYX_MOD_TP_RES_ERR, 0, "Failed to get display resolution");
++		goto error;
++	}
++
++	scaleX = (float)sXres / (float)maxX;
++	scaleY = (float)sYres / (float)maxY;
++
++	return 0;
++error:
++
++	if (touchpanel_event_fd >= 0)
++	{
++		close(touchpanel_event_fd);
++	}
++
++	return ret;
++}
++
++
++nyx_error_t nyx_module_open(nyx_instance_t i, nyx_device_t **d)
++{
++
++	touchpanel_device_t *touchpanel_device = (touchpanel_device_t *) calloc(
++	            sizeof(touchpanel_device_t), 1);
++
++	if (G_UNLIKELY(!touchpanel_device))
++	{
++		nyx_error(MSGID_NYX_MOD_TP_OUT_OF_MEMORY, 0, "Out of memory");
++		return NYX_ERROR_OUT_OF_MEMORY;
++	}
++
++
++	nyx_module_register_method(i, (nyx_device_t *) touchpanel_device,
++	                                     NYX_GET_EVENT_SOURCE_MODULE_METHOD, "touchpanel_get_event_source");
++
++	nyx_module_register_method(i, (nyx_device_t *) touchpanel_device,
++	                           NYX_GET_EVENT_MODULE_METHOD, "touchpanel_get_event");
++	nyx_module_register_method(i, (nyx_device_t *) touchpanel_device,
++	                           NYX_RELEASE_EVENT_MODULE_METHOD, "touchpanel_release_event");
++	nyx_module_register_method(i, (nyx_device_t *) touchpanel_device,
++	                           NYX_SET_OPERATING_MODE_MODULE_METHOD, "touchpanel_set_operating_mode");
++	nyx_module_register_method(i, (nyx_device_t *) touchpanel_device,
++	                           NYX_TOUCHPANEL_SET_ACTIVE_SCAN_RATE_MODULE_METHOD,
++	                           "touchpanel_set_active_scan_rate");
++	nyx_module_register_method(i, (nyx_device_t *) touchpanel_device,
++	                           NYX_TOUCHPANEL_SET_IDLE_SCAN_RATE_MODULE_METHOD,
++	                           "touchpanel_set_idle_scan_rate");
++	nyx_module_register_method(i, (nyx_device_t *) touchpanel_device,
++	                           NYX_TOUCHPANEL_GET_IDLE_SCAN_RATE_MODULE_METHOD,
++	                           "touchpanel_get_idle_scan_rate");
++	nyx_module_register_method(i, (nyx_device_t *) touchpanel_device,
++	                           NYX_TOUCHPANEL_GET_ACTIVE_SCAN_RATE_MODULE_METHOD,
++	                           "touchpanel_get_active_scan_rate");
++	nyx_module_register_method(i, (nyx_device_t *) touchpanel_device,
++	                           NYX_TOUCHPANEL_SET_MODE_MODULE_METHOD, "touchpanel_set_mode");
++	nyx_module_register_method(i, (nyx_device_t *) touchpanel_device,
++	                           NYX_TOUCHPANEL_GET_MODE_MODULE_METHOD, "touchpanel_get_mode");
++
++	*d = (nyx_device_t *) touchpanel_device;
++
++	if (init_touchpanel() < 0)
++	{
++		goto fail_unlock_settings;
++	}
++
++	return NYX_ERROR_NONE;
++
++fail_unlock_settings:
++	return NYX_ERROR_GENERIC;
++}
++
++nyx_error_t nyx_module_close(nyx_device_t *d)
++{
++
++	touchpanel_device_t *touchpanel_device = (touchpanel_device_t *) d;
++
++	if (touchpanel_device->current_event_ptr)
++	{
++		touchpanel_release_event(d,
++		                         (nyx_event_t *) touchpanel_device->current_event_ptr);
++	}
++
++	nyx_debug("Freeing touchpanel %p", d);
++
++	deinit_gesture_state_machine();
++	free(d);
++
++	if (touchpanel_event_fd >= 0)
++	{
++		close(touchpanel_event_fd);
++		touchpanel_event_fd = -1;
++	}
++
++
++	return NYX_ERROR_NONE;
++}
++
++nyx_error_t touchpanel_get_event_source(nyx_device_t *d, int *f)
++{
++
++	if (NULL == d)
++	{
++		return NYX_ERROR_INVALID_HANDLE;
++	}
++
++	if (NULL == f)
++	{
++		return NYX_ERROR_INVALID_VALUE;
++	}
++
++	*f = touchpanel_event_fd;
++
++	return NYX_ERROR_NONE;
++}
++
++nyx_error_t touchpanel_set_operating_mode(nyx_device_t *d,
++        nyx_operating_mode_t m)
++{
++	return NYX_ERROR_NOT_IMPLEMENTED;
++}
++
++void
++get_time_stamp(time_stamp_t *pTime)
++{
++	struct timeval tv;
++	(void)gettimeofday(&tv, NULL);
++
++	pTime->time.tv_sec = tv.tv_sec;
++	pTime->time.tv_nsec = tv.tv_usec * 1000;
++}
++
++
++int cachedX, cachedY;
++
++static void
++generate_mouse_gesture(int touchButtonState)
++{
++	int32_t xOrd[2], yOrd[2], wOrd[2], fingers;
++	time_stamp_t eventTime;
++	int num_events = 0;
++
++	get_time_stamp(&eventTime);
++	xOrd[0] = cachedX;
++	yOrd[0] = cachedY;
++	wOrd[0] = touchButtonState ? 1 : 0;
++	fingers = touchButtonState ? 1 : 0;
++
++	xOrd[1] = 0;
++	yOrd[1] = 0;
++	wOrd[1] = 0;
++
++	gesture_state_machine(xOrd, yOrd, wOrd, fingers, &eventTime,
++	                      touchpanel_event_list.input, &num_events);
++	touchpanel_event_list.input_filled = num_events * sizeof(input_event_t);
++	touchpanel_event_list.input_read = 0;
++}
++
++
++/**
++ * An EV_SYN event that is a flag to indicate that we've just started a plugin
++ * and anything expecting us to be in a certain state should clear its state
++ */
++#define SYN_START       8
++
++
++static void handle_new_event(input_event_t *event)
++{
++	static int touchButtonState = 0;
++
++	// Truncate scaled X & Y coordinate values
++	if ((event->type == EV_ABS) && (event->code == ABS_X))
++	{
++		cachedX = (int)(event->value * scaleX);
++	}
++
++	else if ((event->type == EV_ABS) && (event->code == ABS_Y))
++	{
++		cachedY = (int)(event->value * scaleY);
++	}
++
++	// qemu touchpanel sends BTN_TOUCH, virtualbox touchpanel sends BTN_LEFT
++	else if ((event->type == EV_KEY) && ((event->code == BTN_TOUCH) ||
++	                                     (event->code == BTN_LEFT)))
++	{
++		// save touchButtonState (up or down)
++		touchButtonState = event->value;
++
++		if (touchButtonState == 0)
++		{
++			/* generate another event with the coordinates and time of the
++			* release point so that we can calculate how long the mouse
++			* button has been down in the same spot and not create flicks
++			* if it has been down for long enough
++			*/
++			generate_mouse_gesture(1);
++		}
++	}
++	else if (event->type == EV_SYN)
++	{
++		generate_mouse_gesture(touchButtonState);
++	}
++
++	if ((event->type == EV_REL && event->code == REL_WHEEL) ||
++	        (event->type == EV_KEY && (event->code == BTN_MIDDLE ||
++	                                   event->code == BTN_SIDE ||
++	                                   event->code == BTN_EXTRA || event->code == BTN_FORWARD ||
++	                                   event->code == BTN_BACK || event->code == BTN_TASK)))
++	{
++		memcpy(&touchpanel_event_list.input[0], event, sizeof(input_event_t));
++		// Forward an EV_SYN after the key event, to make sure it is processed immediately.
++		input_event_t syn_event;
++		syn_event.type = EV_SYN;
++		syn_event.code = SYN_START;
++		syn_event.value = 0;
++
++		memcpy(&touchpanel_event_list.input[1], &syn_event, sizeof(input_event_t));
++
++		touchpanel_event_list.input_filled = 2 * sizeof(input_event_t);
++		touchpanel_event_list.input_read = 0;
++	}
++
++	return;
++}
++
++static struct pollfd fds[1];
++
++static int
++read_input_event(void)
++{
++	int numEvents = 0;
++	int rd = 0;
++	input_event_t pEvent;
++
++	fds[0].fd = touchpanel_event_fd;
++	fds[0].events = POLLIN;
++
++	int ret_val = poll(fds, 1, 0);
++
++	if (ret_val <= 0)
++	{
++		return 0;
++	}
++
++	if (fds[0].revents & POLLIN)
++	{
++		rd = read(fds[0].fd, &pEvent, sizeof(input_event_t));
++
++		if (rd < 0 && errno != EINTR)
++		{
++			nyx_error(MSGID_NYX_MOD_TP_EVT_READ_ERR, 0, "Failed to read events from keypad event file");
++			return -1;
++		}
++
++		handle_new_event(&pEvent);
++	}
++
++	return numEvents;
++}
++
++nyx_error_t touchpanel_get_event(nyx_device_t *d, nyx_event_t **e)
++{
++	int event_count = 0;
++	int event_iter = 0;
++	static int read_input = 0;
++
++	nyx_event_t *p_generated = NULL;
++	touchpanel_device_t *touch_device = (touchpanel_device_t *) d;
++
++	/*
++	 * Event bookkeeping...
++	 */
++	if (!read_input)
++	{
++		read_input_event();
++		touch_device->current_event_ptr = NULL;
++		read_input = 1;
++	}
++
++	/*
++	* Event bookkeeping...
++	*/
++	event_count = touchpanel_event_list.input_filled / sizeof(input_event_t);
++	event_iter = touchpanel_event_list.input_read / sizeof(input_event_t);
++
++	if (event_iter == event_count)
++	{
++		read_input = 0;
++	}
++
++	if (touch_device->current_event_ptr == NULL)
++	{
++		/*
++		* let's allocate new event and hold it here.
++		*/
++		touch_device->current_event_ptr = touch_event_create();
++	}
++
++	touch_device->current_event_ptr->_parent.type = NYX_EVENT_TOUCHPANEL;
++
++	for (; event_iter < event_count; event_iter++)
++	{
++		input_event_t *input_event_ptr;
++		nyx_touchpanel_event_item_t *item_ptr;
++		input_event_ptr = &touchpanel_event_list.input[event_iter];
++
++		touchpanel_event_list.input_read += sizeof(input_event_t);
++
++		switch (input_event_ptr->type)
++		{
++			case EV_FINGERID:
++				item_ptr = touch_event_get_next_item(
++				               touch_device->current_event_ptr);
++
++				if (NULL == item_ptr)
++				{
++					p_generated = (nyx_event_t *) touch_device->current_event_ptr;
++					touch_device->current_event_ptr = touch_event_create();
++					item_ptr = touch_event_get_next_item(
++					               touch_device->current_event_ptr);
++				}
++
++				if (NULL != item_ptr)
++				{
++					touch_item_reset(item_ptr);
++					item_ptr->finger = input_event_ptr->value * 1000
++					                   + input_event_ptr->code;
++					item_ptr->timestamp = get_ts_tval(&(input_event_ptr->time));
++				}
++
++				break;
++
++			case EV_ABS:
++				item_ptr = touch_event_get_current_item(
++				               touch_device->current_event_ptr);
++
++				if (NULL != item_ptr)
++				{
++					if (ABS_X == input_event_ptr->code)
++					{
++						item_ptr->x = input_event_ptr->value;
++					}
++					else if (ABS_Y == input_event_ptr->code)
++					{
++						item_ptr->y = input_event_ptr->value;
++					}
++					else
++					{
++						nyx_error(MSGID_NYX_MOD_TP_ABS_ERR, 0, "Unexpected code 0x%x", input_event_ptr->code);
++					}
++				}
++
++				break;
++
++			case EV_KEY:
++				item_ptr = touch_event_get_current_item(
++				               touch_device->current_event_ptr);
++
++				if (NULL != item_ptr)
++				{
++					if (BTN_TOUCH == input_event_ptr->code)
++					{
++						if (1 == input_event_ptr->value)
++						{
++							item_ptr->state = NYX_TOUCHPANEL_STATE_DOWN;
++						}
++						else
++						{
++							item_ptr->state = NYX_TOUCHPANEL_STATE_UP;
++						}
++					}
++				}
++
++				break;
++
++			case EV_SYN:
++				p_generated = (nyx_event_t *) touch_device->current_event_ptr;
++				touch_device->current_event_ptr = NULL;
++
++				break;
++
++			default:
++				nyx_warn(MSGID_NYX_MOD_TP_INVALID_EVENT, 0, "Invalid event type (0x%x)", input_event_ptr->type);
++				break;
++		}
++
++		// Generated event, bail out and let the caller know.
++		if (NULL != p_generated)
++		{
++			break;
++		}
++	}
++
++	*e = p_generated;
++
++	return NYX_ERROR_NONE;
++}
++
++nyx_error_t touchpanel_set_active_scan_rate(nyx_device_t *d, unsigned int r)
++{
++	return NYX_ERROR_NOT_IMPLEMENTED;
++}
++
++nyx_error_t touchpanel_set_idle_scan_rate(nyx_device_t *d, unsigned int r)
++{
++	return NYX_ERROR_NOT_IMPLEMENTED;
++}
++
++nyx_error_t touchpanel_get_active_scan_rate(nyx_device_t *d, unsigned int *r)
++{
++	return NYX_ERROR_NOT_IMPLEMENTED;
++}
++
++nyx_error_t touchpanel_get_idle_scan_rate(nyx_device_t *d, unsigned int *r)
++{
++	return NYX_ERROR_NOT_IMPLEMENTED;
++}
++
++nyx_error_t touchpanel_set_mode(nyx_device_t *d, int m)
++{
++	return NYX_ERROR_NOT_IMPLEMENTED;
++}
++
++nyx_error_t touchpanel_get_mode(nyx_device_t *d, int *m)
++{
++	return NYX_ERROR_NOT_IMPLEMENTED;
++}
+diff --git a/src/touchpanel/touchpanel_common.c b/src/touchpanel/touchpanel_common.c
+new file mode 100644
+index 0000000..6d775de
+--- /dev/null
++++ b/src/touchpanel/touchpanel_common.c
+@@ -0,0 +1,41 @@
++// Copyright (c) 2010-2018 LG Electronics, Inc.
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++//
++// SPDX-License-Identifier: Apache-2.0
++
++#include "touchpanel_gestures.h"
++#include "touchpanel_common.h"
++
++#include <nyx/module/nyx_log.h>
++#include "msgid.h"
++
++void
++set_event_params(input_event_t *pEvent, time_stamp_t *pTime, uint16_t type,
++                 uint16_t code, int32_t value)
++{
++	if (NULL == pEvent || NULL == pTime)
++	{
++		nyx_error(MSGID_NYX_MOD_TP_EVENT_NULL_ERR, 0, "NULL parameter passed");
++		return;
++	}
++
++	((struct timeval *)pTime)->tv_sec = ((struct timeval *)
++	                                     &pEvent->time)->tv_sec;
++	((struct timeval *)pTime)->tv_usec = ((struct timeval *)
++	                                      &pEvent->time)->tv_usec;
++
++	pEvent->type = type;
++	pEvent->code = code;
++	pEvent->value = value;
++}
+diff --git a/src/touchpanel/touchpanel_common.h b/src/touchpanel/touchpanel_common.h
+new file mode 100644
+index 0000000..b4a3346
+--- /dev/null
++++ b/src/touchpanel/touchpanel_common.h
+@@ -0,0 +1,24 @@
++// Copyright (c) 2010-2018 LG Electronics, Inc.
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++//
++// SPDX-License-Identifier: Apache-2.0
++
++#ifndef __TOUCHPANEL_COMMON_H
++#define __TOUCHPANEL_COMMON_H
++
++void set_event_params(input_event_t *pEvent, time_stamp_t *pTime, uint16_t type,
++                      uint16_t code, int32_t value);
++
++#endif  /* __TOUCHPANEL_COMMON_PRV_H */
++
+diff --git a/src/touchpanel/touchpanel_gestures.c b/src/touchpanel/touchpanel_gestures.c
+new file mode 100644
+index 0000000..e96bbd7
+--- /dev/null
++++ b/src/touchpanel/touchpanel_gestures.c
+@@ -0,0 +1,489 @@
++// Copyright (c) 2010-2018 LG Electronics, Inc.
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++//
++// SPDX-License-Identifier: Apache-2.0
++
++
++#include <stdlib.h>
++#include <limits.h>
++#include <glib-2.0/glib.h>
++
++#include <nyx/module/nyx_log.h>
++
++
++#include "touchpanel_gestures.h"
++#include "touchpanel_common.h"
++#include "msgid.h"
++
++static GList *sFingers = NULL;
++static GQueue availableFingers = G_QUEUE_INIT;
++
++static uint32_t curFingerId = 0;
++
++int gesture_state_machine_finger(finger_t *finger, input_event_t *events,
++                                 int *numEvents);
++
++static const general_settings_t *spGeneralSettings = NULL;
++
++/**
++ *******************************************************************************
++ * @brief Allocate and initialize the buffer that keeps a coordinate history
++ *
++ * @param  ppCoordBuf   IN/OUT  ptr to the coordinate buffer struct
++ * @param  bufSize      IN      size of the buffer
++ *
++ * @retval  0 on success
++ * @retval -1 on failure
++ *******************************************************************************
++ */
++int
++create_coord_buffer(coord_buf_t *pCoordBuf, int bufSize)
++{
++
++	if (NULL == pCoordBuf)
++	{
++		nyx_error(MSGID_NYX_MOD_TP_COORDBUF_ERR, 0,"NULL parameter passed");
++		return -1;
++	}
++
++	pCoordBuf->pCoords = (coord_t *)malloc(sizeof(coord_t) * bufSize);
++
++	if (NULL == pCoordBuf->pCoords)
++	{
++		nyx_error(MSGID_NYX_MOD_TP_COORDS_ERR, 0,"Failed to allocate memory");
++		return -1;
++	}
++
++	pCoordBuf->size = bufSize;
++	pCoordBuf->head = 0;
++	pCoordBuf->tail = 0;
++	pCoordBuf->numItems = 0;
++
++	return 0;
++}
++
++
++void
++free_coord_buffer(coord_buf_t *pCoordBuf)
++{
++	free(pCoordBuf->pCoords);
++}
++
++
++void
++reset_coord_buffer(coord_buf_t *pCoordBuf)
++{
++	pCoordBuf->head = 0;
++	pCoordBuf->tail = 0;
++	pCoordBuf->numItems = 0;
++}
++
++void
++update_coord_buffer(coord_buf_t *pCoordBuf, int xCoord, int yCoord,
++                    const time_stamp_t *pTime)
++{
++	if (pCoordBuf->head == pCoordBuf->tail &&
++	        pCoordBuf->numItems == pCoordBuf->size)
++	{
++		/* full buffer, so make space for new item and overwrite old one */
++		pCoordBuf->head = (pCoordBuf->head + 1) % pCoordBuf->size;
++	}
++
++	int index = pCoordBuf->tail;
++	coord_t *pCurCoord = &((pCoordBuf->pCoords)[index]);
++
++	if (spGeneralSettings->positionFilter && pCoordBuf->numItems)
++	{
++		int prev;
++
++		if (index)
++		{
++			prev = index - 1;
++		}
++
++		else
++		{
++			prev = pCoordBuf->size - 1;
++		}
++
++		if (xCoord < pCoordBuf->pCoords[prev].x)
++		{
++			xCoord++;
++		}
++
++		else if (xCoord > pCoordBuf->pCoords[prev].x)
++		{
++			xCoord--;
++		}
++
++		if (yCoord < pCoordBuf->pCoords[prev].y)
++		{
++			yCoord++;
++		}
++
++		else if (yCoord > pCoordBuf->pCoords[prev].y)
++		{
++			yCoord--;
++		}
++	}
++
++	pCurCoord->timeStamp = *pTime;
++	pCurCoord->x = xCoord;
++	pCurCoord->y = yCoord;
++
++	if (pCoordBuf->numItems < pCoordBuf->size)
++	{
++		pCoordBuf->numItems++;
++	}
++
++	pCoordBuf->tail = (pCoordBuf->tail + 1) % pCoordBuf->size;
++}
++
++void get_last_coords(const coord_buf_t *pCoordBuf, int *xCoord, int *yCoord,
++                     time_stamp_t *timestamp)
++{
++	int previndex = (pCoordBuf->head + pCoordBuf->numItems - 1) % pCoordBuf->size;
++	coord_t *coord = &pCoordBuf->pCoords[previndex];
++
++	if (xCoord)
++	{
++		*xCoord = coord->x;
++	}
++
++	if (yCoord)
++	{
++		*yCoord = coord->y;
++	}
++
++	if (timestamp)
++	{
++		*timestamp = coord->timeStamp;
++	}
++}
++
++void init_gesture_state_machine(const general_settings_t *pGeneralSettings,
++                                int maxFingers)
++{
++	int i;
++
++	spGeneralSettings = pGeneralSettings;
++
++	for (i = 0 ; i < maxFingers * 2; i++)
++	{
++		finger_t *finger = malloc(sizeof(finger_t));
++		create_coord_buffer(&finger->coords, pGeneralSettings->coordBufSize);
++		finger->state.state = UNUSED;
++		g_queue_push_tail(&availableFingers, finger);
++	}
++}
++
++
++void
++deinit_gesture_state_machine(void)
++{
++	finger_t *finger = NULL;
++
++	while ((finger = g_queue_pop_head(&availableFingers)) != NULL)
++	{
++		free_coord_buffer(&finger->coords);
++		free(finger);
++	}
++
++	finger = NULL;
++	GList *l = sFingers;
++
++	while (l != NULL)
++	{
++		if (l->data)
++		{
++			finger = (finger_t *)l->data;
++			free_coord_buffer(&finger->coords);
++		}
++
++		l = g_list_remove(l, l->data);
++
++		if (finger)
++		{
++			free(finger);
++			finger = NULL;
++		}
++	}
++}
++
++void
++reset_state_data(gesture_state_data_t *pStateData)
++{
++	pStateData->state = START_STATE;
++	pStateData->insideTapRadius = true;
++}
++
++static void add_new_finger(int x, int y, int weight,
++                           const time_stamp_t *pCurTime)
++{
++	finger_t *finger = g_queue_pop_head(&availableFingers);
++
++	if (!finger)
++	{
++		nyx_debug("No available finger buffers, rejecting finger");
++		return;
++	}
++
++	//  ASSERT(finger->state.state == UNUSED);
++	reset_state_data(&finger->state);
++	finger->id = curFingerId++;
++	finger->timestamp = *pCurTime;
++	//hal_info"NEW: %ld,%ld\n",finger->id.time.tv_sec,finger->id.time.tv_nsec);
++	finger->minDist = 0;
++	finger->minDistId = 0;
++	finger->lastWeight = weight;
++	reset_coord_buffer(&finger->coords);
++	update_coord_buffer(&finger->coords, x, y, pCurTime);
++	nyx_debug("Finger down at %d,%d", x, y);
++	sFingers = g_list_prepend(sFingers, finger);
++}
++
++
++#define MAX_EVENTS_PER_UPDATE 100
++
++/*
++ * Finger tracking:
++ * The hardware does not do any fingertracking, so we do it all here.
++ */
++void
++gesture_state_machine(int *pXCoords, int *pYCoords, const int *pFingerWeights,
++                      int numFingers, const time_stamp_t *pCurTime,
++                      input_event_t *events, int *numEvents)
++{
++	/* Update Fingers */
++	int j;
++	int timestmpcnt = 0;
++	GList *list;
++
++	//For each new finger
++	for (j = 0; j < numFingers; j++)
++	{
++		int minDist = INT_MAX;
++		GList *minId = NULL;
++		list = g_list_first(sFingers);
++
++		//Try and match it against one of the existing ones
++		while (list)
++		{
++			int xPrev, yPrev;
++			int matched = 0;
++			finger_t *finger = (finger_t *)list->data;
++
++			get_last_coords(&finger->coords, &xPrev, &yPrev, NULL);
++			int dx = pXCoords[j] - xPrev;
++			int dy = pYCoords[j] - yPrev;
++			int dist = (dx * dx + dy * dy);
++
++			//Another finger from the input list is already a better match.
++			if (dist > finger->minDist)
++			{
++				list = g_list_next(list);
++				continue;
++			}
++
++			if (dist < minDist)
++			{
++				matched = 1;
++			}
++
++			if (matched)
++			{
++				minId = list;
++				minDist = dist;
++			}
++
++			list = g_list_next(list);
++		}
++
++		if (minId)
++		{
++			finger_t *finger = (finger_t *)minId->data;
++			finger->minDistId = j;
++			finger->minDist = minDist;
++		}
++	}
++
++	//Okay, at this point, for each existing finger, (sFingers)
++	//We have set minDistId to the index of the finger in the input array
++	//Or it's set to INT_MAX if it didn't match any of the new fingers.
++
++	//Iterate through the fingerList, and update each of the fingers that has a match with new coordinates.
++	list = g_list_first(sFingers);
++
++	while (list)
++	{
++		finger_t *finger = (finger_t *)list->data;
++
++		//Finger released
++		if (finger->minDist == INT_MAX)
++		{
++			list = g_list_next(list);
++			continue;
++		}
++
++		nyx_info(MSGID_NYX_MOD_TP_FINGER_WT, 0,"New coord (at: %d), %d,%d weight: %d, distance: %d",
++		         finger->minDistId, pXCoords[finger->minDistId], pYCoords[finger->minDistId],
++		         pFingerWeights[finger->minDistId], finger->minDist);
++
++		//Let's ignore the coordinate if there was a huge difference in weight
++		//This is a common scenario when the user is releasing his finger.
++		if (finger->lastWeight / 2 < pFingerWeights[finger->minDistId])
++		{
++			update_coord_buffer(&finger->coords, pXCoords[finger->minDistId],
++			                    pYCoords[finger->minDistId], pCurTime);
++		}
++		else
++		{
++			nyx_debug("Ignoring coordinate");
++		}
++
++		finger->lastWeight = pFingerWeights[finger->minDistId];
++		//remove finger from pool of "new" fingers.
++		pXCoords[finger->minDistId] = pYCoords[finger->minDistId] = 0;
++
++		finger->minDist = 0;
++		finger->minDistId = 0;
++		list = g_list_next(list);
++	}
++
++	//Now go through the list and find any new unmatched fingers
++	for (j = 0; j < numFingers; j++)
++	{
++		time_stamp_t ts = *pCurTime;
++
++		/* When dragging over the gesture button, we get spurious
++		 * "extra" fingers Disregard these events if we already
++		 * matched a finger in the gesture area
++		 */
++		if (pXCoords[j] == 0 && pYCoords[j] == 0)
++		{
++			continue;
++		}
++
++		if (pFingerWeights[j] < g_atomic_int_get(
++		            &spGeneralSettings->fingerDownThreshold))
++		{
++			nyx_info(MSGID_NYX_MOD_TP_FING_LOW_WT, 0,"Discarding finger with too low weight (%d)", pFingerWeights[j]);
++			continue;
++		}
++
++		nyx_debug("pFingerWeight: %d (%d)", pFingerWeights[j], j);
++
++		nyx_debug("j: %d, %d) New finger @ %d,%d", j, numFingers, pXCoords[j],
++		         pYCoords[j]);
++
++		ts.time.tv_nsec += timestmpcnt;
++		timestmpcnt += 1000000;
++		add_new_finger(pXCoords[j], pYCoords[j], pFingerWeights[j], &ts);
++	}
++
++	/* All fingers has been matched, now let's process the changes */
++	list = g_list_first(sFingers);
++
++	while (list)
++	{
++		finger_t *finger = (finger_t *)list->data;
++
++		//-1 means to move the list element into the available list
++		if (gesture_state_machine_finger(finger, events, numEvents) == -1)
++		{
++			finger->state.state = UNUSED;
++			list = g_list_next(list);
++			sFingers = g_list_remove(sFingers, finger);
++			g_queue_push_tail(&availableFingers, finger);
++		}
++		else
++		{
++			list = g_list_next(list);
++		}
++	}
++
++	if (0 < *numEvents)
++	{
++		//ASSERT(numEvents < MAX_EVENTS_PER_UPDATE);
++		/* add EV_SYN event */
++		set_event_params(&events[(*numEvents)++], (time_stamp_t *) pCurTime, EV_SYN, 0,
++		                 0);
++	}
++}
++
++int gesture_state_machine_finger(finger_t *finger, input_event_t *events,
++                                 int *numEvents)
++{
++	int x, y;
++	time_stamp_t timestamp;
++
++	get_last_coords(&finger->coords, &x, &y, &timestamp);
++
++	finger->numEvents = *numEvents;
++	finger->events = events;
++
++	set_event_params(&finger->events[finger->numEvents++], &timestamp, EV_FINGERID,
++	                 0 , finger->id);
++
++	switch (finger->state.state)
++	{
++		case START_STATE:
++		{
++			finger->state.start[X_DIM] = x;
++			finger->state.start[Y_DIM] = y;
++			finger->state.startTime = timestamp;
++			finger->state.state = FINGER_DOWN_STATE;
++			set_event_params(&finger->events[finger->numEvents++], &timestamp, EV_KEY,
++			                 BTN_TOUCH, 1);
++		}
++		break;
++
++		case FINGER_DOWN_STATE:
++			break;
++
++		case FINGER_DOWN_AFTER_QUICK_LAUNCH:
++		{
++			/* keep reporting pen moves until the finger comes up
++			 * LunaSysMgr will handle the finger until release
++			 */
++		}
++		break;
++
++		case UNUSED:
++			//ASSERT(0);
++			break;
++	}
++
++	set_event_params(&finger->events[finger->numEvents++], &timestamp, EV_ABS,
++	                 ABS_X, x);
++	set_event_params(&finger->events[finger->numEvents++], &timestamp, EV_ABS,
++	                 ABS_Y, y);
++	*numEvents = finger->numEvents;
++
++	if (finger->minDist > 0)
++	{
++		//send finger release event
++		nyx_debug("Finger up at %d,%d", x, y);
++		set_event_params(&finger->events[finger->numEvents++], &timestamp, EV_KEY,
++		                 BTN_TOUCH, 0);
++		*numEvents = finger->numEvents;
++		return -1;
++	}
++	else
++	{
++		finger->minDist = INT_MAX;
++	}
++
++	return 0;
++}
+diff --git a/src/touchpanel/touchpanel_gestures.h b/src/touchpanel/touchpanel_gestures.h
+new file mode 100644
+index 0000000..869bc59
+--- /dev/null
++++ b/src/touchpanel/touchpanel_gestures.h
+@@ -0,0 +1,131 @@
++// Copyright (c) 2010-2018 LG Electronics, Inc.
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++//
++// SPDX-License-Identifier: Apache-2.0
++
++#ifndef __TOUCHPANEL_GESTURES_H
++#define __TOUCHPANEL_GESTURES_H
++
++#include <limits.h>
++#include <glib.h>
++#include <linux/input.h>
++#include <stdbool.h>
++
++typedef         __u8            uint8_t;
++typedef         __u16           uint16_t;
++typedef         __u32           uint32_t;
++
++
++#define EV_FINGERID 0x07
++
++typedef struct time_stamp
++{
++	struct timespec time;   /**< internal time stamp format */
++} time_stamp_t;
++
++typedef enum
++{
++	LOCALE_LEFT_RIGHT = 0,
++	LOCALE_RIGHT_LEFT,
++	NUM_LOCALES
++} locale_type_t;
++
++typedef struct interrupt_on_touch_settings
++{
++	bool enabled;
++	int scanRate;           /**< HZ */
++	int wakeThreshold;
++	int noTouchThreshold;   /**< ms */
++	int watchdogTimeout;    /**< ms */
++} interrupt_on_touch_settings_t;
++
++
++typedef struct general_settings
++{
++	int coordBufSize;           /**< size of coordinate circular buffer to calculate
++                                     things such as avg velocity */
++	int fingerDownThreshold;            /**< threshold to accept finger as down -- access atomically */
++
++	int positionFilter;
++} general_settings_t;
++
++typedef struct coord
++{
++	int x;                     /**< ptr to array of x coords */
++	int y;                     /**< ptr to array of y coords */
++	time_stamp_t timeStamp;   /**< time of the coordinates */
++} coord_t;
++
++typedef struct coord_buf
++{
++	coord_t *pCoords;       /**< array of coords */
++	int head;               /**< index of start of items in the array */
++	int tail;               /**< index of end of items in the array  */
++	int numItems;           /**< number of items in the array */
++	int size;               /**< total size of coord array */
++} coord_buf_t;
++
++typedef enum
++{
++	UNUSED = -1,
++	START_STATE = 0,                        /**< no fingers down */
++	FINGER_DOWN_STATE,                      /**< a finger is down */
++	FINGER_DOWN_AFTER_QUICK_LAUNCH,         /**< a quick launch was detected and we're
++                                               waiting for the finger to come up */
++} gesture_state_t;
++
++#define NUM_DIMENSIONS  2
++#define X_DIM   0
++#define Y_DIM   1
++
++typedef struct gesture_state_data
++{
++	gesture_state_t state;
++	int start[NUM_DIMENSIONS];
++	bool insideTapRadius;
++	time_stamp_t startTime;
++} gesture_state_data_t;
++
++typedef struct
++{
++	struct timeval time;  /**< time event was generated */
++	uint16_t type;        /**< type of event, EV_ABS, EV_MSC, etc. */
++	uint16_t code;        /**< event code, ABS_X, ABS_Y, etc. */
++	int32_t value;        /**< event value: coordinate, intensity,etc. */
++} input_event_t;
++
++typedef struct finger
++{
++	coord_buf_t coords;
++	time_stamp_t timestamp;
++	uint32_t id;
++	gesture_state_data_t state;
++	int minDist;
++	int minDistId;
++	int lastWeight;
++	int numEvents;
++	input_event_t *events;
++} finger_t;
++
++
++
++void init_gesture_state_machine(const general_settings_t *pGeneralSettings,
++                                int maxFingers);
++void deinit_gesture_state_machine(void);
++void gesture_state_machine(int *pXCoords, int *pYCoords,
++                           const int *pFingerWeights,
++                           int fingerCount, const time_stamp_t *pTime,
++                           input_event_t *events, int *numEvents);
++
++#endif  /* __TOUCHPANEL_GESTURES_PRV_H */
+diff --git a/src/touchpanel_mtdev/CMakeLists.txt b/src/touchpanel_mtdev/CMakeLists.txt
+new file mode 100644
+index 0000000..7313610
+--- /dev/null
++++ b/src/touchpanel_mtdev/CMakeLists.txt
+@@ -0,0 +1,21 @@
++# Copyright (c) 2010-2018 LG Electronics, Inc.
++# Copyright (c) 2018 Christophe Chapuis <chris.chapuis@gmail.com>
++# Copyright (c) 2018 Herman van Hazendonk <github.com@herrie.org>
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++# http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++#
++# SPDX-License-Identifier: Apache-2.0
++
++webos_build_nyx_module(TouchpanelMain
++		       SOURCES touchpanel.c touchpanel_common.c touchpanel_gestures.c
++		       LIBRARIES ${GLIB2_LDFLAGS} ${PMLOG_LDFLAGS} ${NYXLIB_LDFLAGS} ${MTDEV_LDFLAGS} -lrt -lpthread)
+diff --git a/src/touchpanel_mtdev/touchpanel.c b/src/touchpanel_mtdev/touchpanel.c
+new file mode 100644
+index 0000000..1a578dd
+--- /dev/null
++++ b/src/touchpanel_mtdev/touchpanel.c
+@@ -0,0 +1,965 @@
++// Copyright (c) 2010-2018 LG Electronics, Inc.
++// Copyright (c) 2012 Simon Busch <morphis@gravedo.de>
++// Copyright (c) 2018 Christophe Chapuis <chris.chapuis@gmail.com>
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++//
++// SPDX-License-Identifier: Apache-2.0
++
++
++#include <assert.h>
++#include <sys/types.h>
++#include <sys/time.h>
++#include <sys/types.h>
++#include <sys/socket.h>
++#include <sys/un.h>
++#include <linux/input.h>
++#include <linux/ioctl.h>
++#include <linux/fb.h>
++#include <math.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <time.h>
++#include <glib.h>
++#include <errno.h>
++#include <poll.h>
++#include <unistd.h>
++
++#include <mtdev.h>
++
++#include <nyx/nyx_module.h>
++#include <nyx/module/nyx_event_touchpanel_internal.h>
++#include <nyx/common/nyx_macros.h>
++#include <nyx/module/nyx_utils.h>
++
++
++#include <sys/socket.h>
++#include <sys/un.h>
++#include <stdbool.h>
++#include <dirent.h>
++#include <fcntl.h>
++
++#include "touchpanel_gestures.h"
++#include "msgid.h"
++
++/* Later versions of nyx_utils.h no longer define this macro */
++#undef return_if
++#define return_if(condition, args...)                         \
++  do {                                                        \
++    if (G_UNLIKELY(condition)) {                              \
++      return args;                                            \
++    }                                                         \
++  } while(0)
++
++typedef struct
++{
++	nyx_device_t _parent;
++	nyx_event_touchpanel_t *current_event_ptr;
++	int32_t mode;
++} touchpanel_device_t;
++
++NYX_DECLARE_MODULE(NYX_DEVICE_TOUCHPANEL, "Touchpanel");
++
++#define MAX_HIDD_EVENTS     (4096 / sizeof(input_event_t))
++
++typedef struct
++{
++	size_t input_filled;
++	size_t input_read;
++	input_event_t input[MAX_HIDD_EVENTS];
++} event_list_t;
++
++typedef struct
++{
++	int touchMajor;
++	int touchMinor;
++	int widthMajor;
++	int widthMinor;
++	int orientation;
++	int posX;
++	int posY;
++	int tracking_id;
++	int previous_tracking_id;
++	struct finger_t *nyx_finger;
++} mt_slot_t;
++struct mtdev *ts_mtdev = NULL;
++/*
++ * Maximum number of slots that this driver can handle for multitouch.
++ * Since we have 10 fingers, it seems sensible to have a max of 10 slots.
++ */
++#define MAX_MT_SLOTS    10
++mt_slot_t *mt_slots = NULL;
++
++
++event_list_t touchpanel_event_list;
++int touchpanel_event_fd = -1;
++
++static void touch_item_reset(nyx_touchpanel_event_item_t *t)
++{
++	t->finger = 0;
++	t->state = NYX_TOUCHPANEL_STATE_UNDEFINED;
++	t->x = 0;
++	t->y = 0;
++	t->gestureKey = -1;
++	t->xVelocity = 0;
++	t->yVelocity = 0;
++	t->weight = (double) NAN;
++}
++
++static nyx_event_touchpanel_t *touch_event_create()
++{
++	nyx_event_touchpanel_t *event_ptr;
++	event_ptr =
++	    (nyx_event_touchpanel_t *) calloc(sizeof(nyx_event_touchpanel_t), 1);
++
++	if (NULL == event_ptr)
++	{
++		return event_ptr;
++	}
++
++	event_ptr->type = NYX_TOUCHPANEL_EVENT_TYPE_TOUCH;
++	event_ptr->item_count = 0;
++	return event_ptr;
++}
++
++nyx_error_t touchpanel_release_event(nyx_device_t *d, nyx_event_t *e)
++{
++	if (NULL == d)
++	{
++		return NYX_ERROR_INVALID_HANDLE;
++	}
++
++	if (NULL == e)
++	{
++		return NYX_ERROR_INVALID_HANDLE;
++	}
++
++	nyx_event_touchpanel_t *a = (nyx_event_touchpanel_t *) e;
++	free(a);
++	return NYX_ERROR_NONE;
++}
++
++static nyx_touchpanel_event_item_t *touch_event_get_next_item(
++    nyx_event_touchpanel_t *i_event_ptr)
++{
++	nyx_touchpanel_event_item_t *item_ptr = NULL;
++	assert(NULL != i_event_ptr);
++
++	if (i_event_ptr->item_count < NYX_MAX_TOUCH_EVENTS)
++	{
++		item_ptr = &i_event_ptr->item_array[i_event_ptr->item_count++];
++	}
++	else
++	{
++		nyx_error(MSGID_NYX_MOD_TP_TOOMANY_ITEMS_ERR, 0, "tried allocating too many touch items: event %p, item cnt %d, max %d",
++		          i_event_ptr, i_event_ptr->item_count, NYX_MAX_TOUCH_EVENTS);
++	}
++
++	return item_ptr;
++}
++
++static nyx_touchpanel_event_item_t *touch_event_get_current_item(
++    nyx_event_touchpanel_t *i_event_ptr)
++{
++	nyx_touchpanel_event_item_t *item_ptr = NULL;
++	assert(NULL != i_event_ptr);
++
++	if (i_event_ptr->item_count > 0)
++	{
++		item_ptr = &i_event_ptr->item_array[i_event_ptr->item_count - 1];
++	}
++	else
++	{
++		nyx_error(MSGID_NYX_MOD_TP_NOTOUCH_ERR, 0, "No touch items available! event %p", i_event_ptr);
++	}
++
++	return item_ptr;
++}
++
++static inline int64_t get_ts_tval(struct timeval *tv)
++{
++	return tv->tv_sec * 1000000000LL + tv->tv_usec * 1000;
++}
++
++#define VBOXGUEST_DEVICE_NAME   "/dev/vboxguest"
++
++/** Version of VMMDevRequestHeader structure. */
++#define VMMDEV_REQUEST_HEADER_VERSION (0x10001)
++
++#define VBOXGUEST_IOCTL_FLAG     0
++#define VBOXGUEST_IOCTL_CODE_(Function, Size)  _IOC(_IOC_READ|_IOC_WRITE, 'V', (Function), (Size))
++#define VBOXGUEST_IOCTL_CODE(Function, Size)   VBOXGUEST_IOCTL_CODE_((Function) | VBOXGUEST_IOCTL_FLAG, Size)
++#define VBOXGUEST_IOCTL_VMMREQUEST(Size)       VBOXGUEST_IOCTL_CODE(3, (Size))
++
++#pragma pack(4)
++/** generic VMMDev request header */
++typedef struct
++{
++	/** size of the structure in bytes (including body). Filled by caller */
++	uint32_t size;
++	/** version of the structure. Filled by caller */
++	uint32_t version;
++	/** type of the request */
++	/*VMMDevRequestType*/ uint32_t requestType;
++	/** return code. Filled by VMMDev */
++	int32_t  rc;
++	/** reserved fields */
++	uint32_t reserved1;
++	uint32_t reserved2;
++} VMMdev_request_header;
++
++/** mouse status request structure */
++typedef struct
++{
++	/** header */
++	VMMdev_request_header header;
++	/** mouse feature mask */
++	uint32_t mouseFeatures;
++	/** mouse x position */
++	int32_t pointerXPos;
++	/** mouse y position */
++	int32_t pointerYPos;
++} VMMdev_req_mouse_status;
++
++/**
++ * mouse pointer shape/visibility change request
++ */
++typedef struct VMMdev_req_mouse_pointer
++{
++	/** Header. */
++	VMMdev_request_header header;
++	/** VBOX_MOUSE_POINTER_* bit flags. */
++	uint32_t fFlags;
++	/** x coordinate of hot spot. */
++	uint32_t xHot;
++	/** y coordinate of hot spot. */
++	uint32_t yHot;
++	/** Width of the pointer in pixels. */
++	uint32_t width;
++	/** Height of the pointer in scanlines. */
++	uint32_t height;
++	/** Pointer data. */
++	char pointerData[4];
++} VMMdev_req_mouse_pointer;
++
++/* The purpose of this function is to enable mouse pointer on the screen
++   for virtualbox qemux86 images, by firing appropriate ioctls to vbox driver */
++static void init_vbox_touchpanel(void)
++{
++	// Open the VirtualBox kernel module driver
++	int vbox_fd = open(VBOXGUEST_DEVICE_NAME, O_RDWR, 0);
++
++	if (vbox_fd < 0)
++	{
++		nyx_error(MSGID_NYX_MOD_TP_VBOX_OPEN_ERR, 0, "ERROR: vboxguest module open failed: %d", errno);
++		goto error;
++	}
++
++	VMMdev_req_mouse_status Req;
++	Req.header.size        = (uint32_t)sizeof(VMMdev_req_mouse_status);
++	Req.header.version     = 0x10001;   // VMMDEV_REQUEST_HEADER_VERSION;
++	Req.header.requestType = 2;         // VMMDevReq_SetMouseStatus;
++	Req.header.rc          = -1;        // VERR_GENERAL_FAILURE;
++	Req.header.reserved1   = 0;
++	Req.header.reserved2   = 0;
++
++	// set MouseGuestNeedsHostCursor (bit 2)
++	Req.mouseFeatures = (1 << 2);
++	Req.pointerXPos = 0;
++	Req.pointerYPos = 0;
++
++	// perform VMM request
++	if (ioctl(vbox_fd, VBOXGUEST_IOCTL_VMMREQUEST(Req.header.size),
++	          (void *)&Req.header) < 0)
++	{
++		nyx_error(MSGID_NYX_MOD_TP_IOCTL_ERR, 0, "ERROR: vboxguest rms ioctl failed: %d", errno);
++		goto error;
++	}
++	else if (Req.header.rc < 0)
++	{
++		nyx_error(MSGID_NYX_MOD_TP_IOCTL_READ_ERR, 0, "ERROR: vboxguest SetMouseStatus failed: %d", Req.header.rc);
++		goto error;
++	}
++
++	VMMdev_req_mouse_pointer mpReq;
++	mpReq.header.size        = (uint32_t)sizeof(VMMdev_req_mouse_pointer);
++	mpReq.header.version     = 0x10001; // VMMDEV_REQUEST_HEADER_VERSION;
++	mpReq.header.requestType = 3;       // VMMDevReq_SetPointerShape;
++	mpReq.header.rc          = -1;      // VERR_GENERAL_FAILURE;
++	mpReq.header.reserved1   = 0;
++	mpReq.header.reserved2   = 0;
++
++	// set fields for SetPointerShape (most importantly VISIBLE)
++	mpReq.fFlags = 1;           // VBOX_MOUSE_POINTER_VISIBLE;
++	mpReq.xHot = 0;
++	mpReq.yHot = 0;
++	mpReq.width = 0;
++	mpReq.height = 0;
++	mpReq.pointerData[0] = 0;
++	mpReq.pointerData[1] = 0;
++	mpReq.pointerData[2] = 0;
++	mpReq.pointerData[3] = 0;
++
++	// perform VMM request
++	if (ioctl(vbox_fd, VBOXGUEST_IOCTL_VMMREQUEST(mpReq.header.size),
++	          (void *)&mpReq.header) < 0)
++	{
++		nyx_error(MSGID_NYX_MOD_TP_IOCTL_REQUEST_ERR, 0,"ERROR: vboxguest mpr ioctl failed: %d", errno);
++		goto error;
++	}
++	else if (mpReq.header.rc < 0)
++	{
++		nyx_error(MSGID_NYX_MOD_TP_SETPTR_ERR, 0,"ERROR: vboxguest SetPointerShape failed: %d", mpReq.header.rc);
++		goto error;
++	}
++
++	return;
++error:
++
++	if (vbox_fd >= 0)
++	{
++		close(vbox_fd);
++	}
++
++	return;
++}
++
++
++/*
++ * FIXME: The following two definitions are a temporary hack to work around
++ * the fact that the XML file parsing reads in all the cypress-library
++ * settings that we don't need or want (for dependency reasons)
++ */
++static general_settings_t sGeneralSettings =
++{
++	.coordBufSize = 6,
++	.fingerDownThreshold = 0
++};
++
++#define FRAMEBUF_DEVICE_NAME    "/dev/fb"
++
++static int
++get_display_res(int *x, int *y)
++{
++	int ret = -1;
++	struct fb_var_screeninfo varinfo;
++
++	int displayFd = open(FRAMEBUF_DEVICE_NAME, O_RDONLY);
++
++	if (displayFd < 0)
++	{
++		nyx_error(MSGID_NYX_MOD_TP_OPEN_FB_ERR, 0, "Error in opening fb file");
++		return ret;
++	}
++
++	if (ioctl(displayFd, FBIOGET_VSCREENINFO, &varinfo) < 0)
++	{
++		nyx_error(MSGID_NYX_MOD_TP_VSCREEN_INFO_ERR, 0, "Error in getting var screen info");
++		goto exit;
++	}
++
++	*x = varinfo.xres;
++	*y = varinfo.yres;
++
++	ret = 0;
++
++exit:
++	close(displayFd);
++	return ret;
++}
++
++
++static float scaleX, scaleY;
++
++static int
++init_touchpanel(void)
++{
++	struct input_absinfo abs;
++	int  maxX, maxY, sXres, sYres, ret = -1;
++
++#ifdef TOUCHPANEL_DEVICE
++	touchpanel_event_fd = open(TOUCHPANEL_DEVICE, O_RDWR | O_NONBLOCK);
++#else
++	touchpanel_event_fd = open("/dev/input/touchscreen0", O_RDWR | O_NONBLOCK);
++#endif
++
++	if (touchpanel_event_fd < 0)
++	{
++		nyx_error(MSGID_NYX_MOD_TP_OPEN_ERR, 0,"Error in opening touchpanel event device");
++		return -1;
++	}
++
++	ret = ioctl(touchpanel_event_fd, EVIOCGABS(0), &abs);
++
++	if (ret < 0)
++	{
++		nyx_error(MSGID_NYX_MOD_TP_EVENT_HLIMIT_ERR, 0,"Error in fetching screen horizontal limits");
++		goto error;
++	}
++
++	maxX = abs.maximum;
++
++	ret = ioctl(touchpanel_event_fd, EVIOCGABS(1), &abs);
++
++	if (ret < 0)
++	{
++		nyx_error(MSGID_NYX_MOD_TP_EVENT_VLIMIT_ERR, 0, "Error in fetching screen vertical limits");
++		goto error;
++	}
++
++	maxY = abs.maximum;
++
++	// The following function is valid only for virtualbox qemux86 image
++	init_vbox_touchpanel();
++	init_gesture_state_machine(&sGeneralSettings, 1);
++
++	/* Get the display resolution */
++	if (get_display_res(&sXres, &sYres) < 0)
++	{
++		nyx_error(MSGID_NYX_MOD_TP_RES_ERR, 0, "Failed to get display resolution");
++		goto error;
++	}
++
++	scaleX = (float)sXres / (float)maxX;
++	scaleY = (float)sYres / (float)maxY;
++
++    /* initialize the mtdev instance for this touchscreen */
++    ts_mtdev = mtdev_new_open(touchpanel_event_fd);
++    if (ts_mtdev)
++    {
++        nyx_debug("[touchpanel] mtdev initialized.");
++        int iSlot = 0;
++        mt_slots = (mt_slot_t *)calloc(sizeof(mt_slot_t), MAX_MT_SLOTS);
++        for (; iSlot < MAX_MT_SLOTS; iSlot++)
++        {
++            mt_slots[iSlot].tracking_id = -1;
++            mt_slots[iSlot].previous_tracking_id = -1;
++            mt_slots[iSlot].nyx_finger = -1;
++        }
++    }
++
++	return 0;
++error:
++
++	if (touchpanel_event_fd >= 0)
++	{
++		close(touchpanel_event_fd);
++	}
++
++	return ret;
++}
++
++
++nyx_error_t nyx_module_open(nyx_instance_t i, nyx_device_t **d)
++{
++
++	touchpanel_device_t *touchpanel_device = (touchpanel_device_t *) calloc(
++	            sizeof(touchpanel_device_t), 1);
++
++	if (G_UNLIKELY(!touchpanel_device))
++	{
++		nyx_error(MSGID_NYX_MOD_TP_OUT_OF_MEMORY, 0, "Out of memory");
++		return NYX_ERROR_OUT_OF_MEMORY;
++	}
++
++
++	nyx_module_register_method(i, (nyx_device_t *) touchpanel_device,
++	                                     NYX_GET_EVENT_SOURCE_MODULE_METHOD, "touchpanel_get_event_source");
++
++	nyx_module_register_method(i, (nyx_device_t *) touchpanel_device,
++	                           NYX_GET_EVENT_MODULE_METHOD, "touchpanel_get_event");
++	nyx_module_register_method(i, (nyx_device_t *) touchpanel_device,
++	                           NYX_RELEASE_EVENT_MODULE_METHOD, "touchpanel_release_event");
++	nyx_module_register_method(i, (nyx_device_t *) touchpanel_device,
++	                           NYX_SET_OPERATING_MODE_MODULE_METHOD, "touchpanel_set_operating_mode");
++	nyx_module_register_method(i, (nyx_device_t *) touchpanel_device,
++	                           NYX_TOUCHPANEL_SET_ACTIVE_SCAN_RATE_MODULE_METHOD,
++	                           "touchpanel_set_active_scan_rate");
++	nyx_module_register_method(i, (nyx_device_t *) touchpanel_device,
++	                           NYX_TOUCHPANEL_SET_IDLE_SCAN_RATE_MODULE_METHOD,
++	                           "touchpanel_set_idle_scan_rate");
++	nyx_module_register_method(i, (nyx_device_t *) touchpanel_device,
++	                           NYX_TOUCHPANEL_GET_IDLE_SCAN_RATE_MODULE_METHOD,
++	                           "touchpanel_get_idle_scan_rate");
++	nyx_module_register_method(i, (nyx_device_t *) touchpanel_device,
++	                           NYX_TOUCHPANEL_GET_ACTIVE_SCAN_RATE_MODULE_METHOD,
++	                           "touchpanel_get_active_scan_rate");
++	nyx_module_register_method(i, (nyx_device_t *) touchpanel_device,
++	                           NYX_TOUCHPANEL_SET_MODE_MODULE_METHOD, "touchpanel_set_mode");
++	nyx_module_register_method(i, (nyx_device_t *) touchpanel_device,
++	                           NYX_TOUCHPANEL_GET_MODE_MODULE_METHOD, "touchpanel_get_mode");
++
++	*d = (nyx_device_t *) touchpanel_device;
++
++	if (init_touchpanel() < 0)
++	{
++		goto fail_unlock_settings;
++	}
++
++	return NYX_ERROR_NONE;
++
++fail_unlock_settings:
++	return NYX_ERROR_GENERIC;
++}
++
++nyx_error_t nyx_module_close(nyx_device_t *d)
++{
++
++	touchpanel_device_t *touchpanel_device = (touchpanel_device_t *) d;
++
++	if (touchpanel_device->current_event_ptr)
++	{
++		touchpanel_release_event(d,
++		                         (nyx_event_t *) touchpanel_device->current_event_ptr);
++	}
++
++	nyx_debug("Freeing touchpanel %p", d);
++
++	deinit_gesture_state_machine();
++	free(d);
++
++	if(ts_mtdev)
++	{
++		mtdev_close_delete(ts_mtdev);
++	}
++	if(mt_slots)
++	{
++		free(mt_slots);
++	}
++
++	if (touchpanel_event_fd >= 0)
++	{
++		close(touchpanel_event_fd);
++		touchpanel_event_fd = -1;
++	}
++
++
++	return NYX_ERROR_NONE;
++}
++
++nyx_error_t touchpanel_get_event_source(nyx_device_t *d, int *f)
++{
++
++	if (NULL == d)
++	{
++		return NYX_ERROR_INVALID_HANDLE;
++	}
++
++	if (NULL == f)
++	{
++		return NYX_ERROR_INVALID_VALUE;
++	}
++
++	*f = touchpanel_event_fd;
++
++	return NYX_ERROR_NONE;
++}
++
++nyx_error_t touchpanel_set_operating_mode(nyx_device_t *d,
++        nyx_operating_mode_t m)
++{
++	return NYX_ERROR_NOT_IMPLEMENTED;
++}
++
++void
++get_time_stamp(time_stamp_t *pTime)
++{
++	struct timeval tv;
++	(void)gettimeofday(&tv, NULL);
++
++	pTime->time.tv_sec = tv.tv_sec;
++	pTime->time.tv_nsec = tv.tv_usec * 1000;
++}
++
++
++int cachedX, cachedY;
++
++static void
++generate_mouse_gesture(int touchButtonState)
++{
++	int32_t xOrd[2], yOrd[2], wOrd[2], fingers;
++	time_stamp_t eventTime;
++	int num_events = 0;
++
++	get_time_stamp(&eventTime);
++	xOrd[0] = cachedX;
++	yOrd[0] = cachedY;
++	wOrd[0] = touchButtonState ? 1 : 0;
++	fingers = touchButtonState ? 1 : 0;
++
++	xOrd[1] = 0;
++	yOrd[1] = 0;
++	wOrd[1] = 0;
++
++	/* track this new coordinate */
++	gesture_state_machine(xOrd, yOrd, wOrd, fingers, &eventTime,
++	                      touchpanel_event_list.input, &num_events);
++	/* process the modifications */
++	touchpanel_event_list.input_filled = num_events * sizeof(input_event_t);
++	touchpanel_event_list.input_read = 0;
++}
++
++
++/**
++ * An EV_SYN event that is a flag to indicate that we've just started a plugin
++ * and anything expecting us to be in a certain state should clear its state
++ */
++#define SYN_START       8
++
++static void handle_new_mt_event(input_event_t *event)
++{
++	static int currentSlot = 0;
++
++	/* safety check */
++	if ((NULL == ts_mtdev) || (NULL == mt_slots))
++		return;
++
++	nyx_debug("[touchpanel] ABS=%x KEY=%x,SYN=%x", EV_ABS, EV_KEY, EV_SYN);
++	nyx_debug("[touchpanel] event->type = %x, event->code = %x, event->value=%d", event->type, event->code, (int) (event->value));
++
++	/* if the current slot has changed, it should be the first thing we get */
++	if ((event->type == EV_ABS) && (event->code == ABS_MT_SLOT))
++		currentSlot = (int) (event->value);
++
++	/* if the current slot is not valid, then skip the event */
++	if (currentSlot < 0 || currentSlot >= MAX_MT_SLOTS)
++		return;
++
++	if ((event->type == EV_ABS) && (event->code == ABS_MT_TRACKING_ID))
++		mt_slots[currentSlot].tracking_id = (int) (event->value);
++
++    else if ((event->type == EV_ABS) && (event->code == ABS_MT_POSITION_X))
++            mt_slots[currentSlot].posX =  (int) (event->value * scaleX);
++
++    else if ((event->type == EV_ABS) && (event->code == ABS_MT_POSITION_Y))
++            mt_slots[currentSlot].posY = (int) (event->value * scaleY);
++
++	else if (event->type == EV_SYN && event->code == SYN_REPORT)
++    {
++        int num_events=0;
++        time_stamp_t eventTime;
++        get_time_stamp(&eventTime);
++
++		/* Now process all the changes */
++		int iSlot = 0;
++        for( ; iSlot < MAX_MT_SLOTS; iSlot++ )
++        {
++            if((mt_slots[iSlot].tracking_id != -1) && (mt_slots[iSlot].previous_tracking_id == -1))
++			{
++				/* a new finger has appeared */
++				nyx_debug("[touchpanel] new finger");
++				mt_slots[iSlot].nyx_finger = add_new_finger(mt_slots[iSlot].posX, mt_slots[iSlot].posY, 1, &eventTime);
++				mt_slots[iSlot].previous_tracking_id = mt_slots[iSlot].tracking_id;
++			}
++			else if((mt_slots[iSlot].tracking_id == -1) && (mt_slots[iSlot].previous_tracking_id != -1))
++			{
++				/* a finger has been released */
++				nyx_debug("[touchpanel] release finger");
++				update_finger(mt_slots[iSlot].nyx_finger, mt_slots[iSlot].posX, mt_slots[iSlot].posY, 0, &eventTime);
++
++				mt_slots[iSlot].nyx_finger = NULL;
++				mt_slots[iSlot].previous_tracking_id = mt_slots[iSlot].tracking_id;
++			}
++			else if(mt_slots[iSlot].tracking_id != -1)
++			{
++				nyx_debug("[touchpanel] update finger");
++				/* simple move gesture */
++				update_finger(mt_slots[iSlot].nyx_finger, mt_slots[iSlot].posX, mt_slots[iSlot].posY, 1, &eventTime);
++			}
++        }
++
++		gesture_state_machine_process(&eventTime, touchpanel_event_list.input+touchpanel_event_list.input_filled/sizeof(input_event_t), &num_events);
++	    touchpanel_event_list.input_filled+=num_events * sizeof(input_event_t);
++    }
++}
++
++static void handle_new_event(input_event_t *event)
++{
++	static int touchButtonState = 0;
++
++	// Truncate scaled X & Y coordinate values
++	if ((event->type == EV_ABS) && (event->code == ABS_X))
++	{
++		cachedX = (int)(event->value * scaleX);
++	}
++
++	else if ((event->type == EV_ABS) && (event->code == ABS_Y))
++	{
++		cachedY = (int)(event->value * scaleY);
++	}
++
++	// qemu touchpanel sends BTN_TOUCH, virtualbox touchpanel sends BTN_LEFT
++	else if ((event->type == EV_KEY) && ((event->code == BTN_TOUCH) ||
++	                                     (event->code == BTN_LEFT)))
++	{
++		// save touchButtonState (up or down)
++		touchButtonState = event->value;
++
++		if (touchButtonState == 0)
++		{
++			/* generate another event with the coordinates and time of the
++			* release point so that we can calculate how long the mouse
++			* button has been down in the same spot and not create flicks
++			* if it has been down for long enough
++			*/
++			generate_mouse_gesture(1);
++		}
++	}
++	else if (event->type == EV_SYN)
++	{
++		generate_mouse_gesture(touchButtonState);
++	}
++
++	if ((event->type == EV_REL && event->code == REL_WHEEL) ||
++	        (event->type == EV_KEY && (event->code == BTN_MIDDLE ||
++	                                   event->code == BTN_SIDE ||
++	                                   event->code == BTN_EXTRA || event->code == BTN_FORWARD ||
++	                                   event->code == BTN_BACK || event->code == BTN_TASK)))
++	{
++		memcpy(&touchpanel_event_list.input[0], event, sizeof(input_event_t));
++		// Forward an EV_SYN after the key event, to make sure it is processed immediately.
++		input_event_t syn_event;
++		syn_event.type = EV_SYN;
++		syn_event.code = SYN_START;
++		syn_event.value = 0;
++
++		memcpy(&touchpanel_event_list.input[1], &syn_event, sizeof(input_event_t));
++
++		touchpanel_event_list.input_filled = 2 * sizeof(input_event_t);
++		touchpanel_event_list.input_read = 0;
++	}
++
++	return;
++}
++
++static struct pollfd fds[1];
++
++static int
++read_input_event(void)
++{
++	int numEvents = 0;
++	int rd = 0;
++	input_event_t pEvent;
++
++	fds[0].fd = touchpanel_event_fd;
++	fds[0].events = POLLIN;
++
++	/* read events through mtdev (which can also handle singletouch events) */
++	if (ts_mtdev)
++	{
++		touchpanel_event_list.input_filled=0;
++      	touchpanel_event_list.input_read=0;
++
++		if (!mtdev_idle(ts_mtdev, touchpanel_event_fd, 0))
++		{
++			while (mtdev_get(ts_mtdev, touchpanel_event_fd, (struct input_event *)&pEvent, 1) > 0)
++			{
++				numEvents++;
++				handle_new_mt_event(&pEvent);
++			}
++		}
++	}
++	else
++	{
++		/* Fallback on singletouch handling it no mtdev is present */
++		int ret_val = poll(fds, 1, 0);
++
++		if (ret_val <= 0)
++		{
++			return 0;
++		}
++
++		if (fds[0].revents & POLLIN)
++		{
++			rd = read(fds[0].fd, &pEvent, sizeof(input_event_t));
++
++			if (rd < 0 && errno != EINTR)
++			{
++				nyx_error(MSGID_NYX_MOD_TP_EVT_READ_ERR, 0, "Failed to read events from keypad event file");
++				return -1;
++			}
++	
++			handle_new_event(&pEvent);
++		}
++	}
++    	
++	return numEvents;
++}
++
++nyx_error_t touchpanel_get_event(nyx_device_t *d, nyx_event_t **e)
++{
++	int event_count = 0;
++	int event_iter = 0;
++	static int read_input = 0;
++
++	nyx_event_t *p_generated = NULL;
++	touchpanel_device_t *touch_device = (touchpanel_device_t *) d;
++
++	/*
++	 * Event bookkeeping...
++	 */
++	if (!read_input)
++	{
++		read_input_event();
++		touch_device->current_event_ptr = NULL;
++		read_input = 1;
++	}
++
++	/*
++	* Event bookkeeping...
++	*/
++	event_count = touchpanel_event_list.input_filled / sizeof(input_event_t);
++	event_iter = touchpanel_event_list.input_read / sizeof(input_event_t);
++
++	if (event_iter == event_count)
++	{
++		read_input = 0;
++	}
++
++	if (touch_device->current_event_ptr == NULL)
++	{
++		/*
++		* let's allocate new event and hold it here.
++		*/
++		touch_device->current_event_ptr = touch_event_create();
++	}
++
++	touch_device->current_event_ptr->_parent.type = NYX_EVENT_TOUCHPANEL;
++
++	for (; event_iter < event_count; event_iter++)
++	{
++		input_event_t *input_event_ptr;
++		nyx_touchpanel_event_item_t *item_ptr;
++		input_event_ptr = &touchpanel_event_list.input[event_iter];
++
++		touchpanel_event_list.input_read += sizeof(input_event_t);
++
++		switch (input_event_ptr->type)
++		{
++			case EV_FINGERID:
++				item_ptr = touch_event_get_next_item(
++				               touch_device->current_event_ptr);
++
++				if (NULL == item_ptr)
++				{
++					p_generated = (nyx_event_t *) touch_device->current_event_ptr;
++					touch_device->current_event_ptr = touch_event_create();
++					item_ptr = touch_event_get_next_item(
++					               touch_device->current_event_ptr);
++				}
++
++				if (NULL != item_ptr)
++				{
++					touch_item_reset(item_ptr);
++					item_ptr->finger = input_event_ptr->value * 1000
++					                   + input_event_ptr->code;
++					item_ptr->timestamp = get_ts_tval(&(input_event_ptr->time));
++				}
++
++				break;
++
++			case EV_ABS:
++				item_ptr = touch_event_get_current_item(
++				               touch_device->current_event_ptr);
++
++				if (NULL != item_ptr)
++				{
++					if (ABS_X == input_event_ptr->code)
++					{
++						item_ptr->x = input_event_ptr->value;
++					}
++					else if (ABS_Y == input_event_ptr->code)
++					{
++						item_ptr->y = input_event_ptr->value;
++					}
++					else
++					{
++						nyx_error(MSGID_NYX_MOD_TP_ABS_ERR, 0, "Unexpected code 0x%x", input_event_ptr->code);
++					}
++				}
++
++				break;
++
++			case EV_KEY:
++				item_ptr = touch_event_get_current_item(
++				               touch_device->current_event_ptr);
++
++				if (NULL != item_ptr)
++				{
++					if (BTN_TOUCH == input_event_ptr->code)
++					{
++						if (1 == input_event_ptr->value)
++						{
++							item_ptr->state = NYX_TOUCHPANEL_STATE_DOWN;
++						}
++						else
++						{
++							item_ptr->state = NYX_TOUCHPANEL_STATE_UP;
++						}
++					}
++				}
++
++				break;
++
++			case EV_SYN:
++				p_generated = (nyx_event_t *) touch_device->current_event_ptr;
++				touch_device->current_event_ptr = NULL;
++
++				break;
++
++			default:
++				nyx_warn(MSGID_NYX_MOD_TP_INVALID_EVENT, 0, "Invalid event type (0x%x)", input_event_ptr->type);
++				break;
++		}
++
++		// Generated event, bail out and let the caller know.
++		if (NULL != p_generated)
++		{
++			break;
++		}
++	}
++
++	*e = p_generated;
++
++	return NYX_ERROR_NONE;
++}
++
++nyx_error_t touchpanel_set_active_scan_rate(nyx_device_t *d, unsigned int r)
++{
++	return NYX_ERROR_NOT_IMPLEMENTED;
++}
++
++nyx_error_t touchpanel_set_idle_scan_rate(nyx_device_t *d, unsigned int r)
++{
++	return NYX_ERROR_NOT_IMPLEMENTED;
++}
++
++nyx_error_t touchpanel_get_active_scan_rate(nyx_device_t *d, unsigned int *r)
++{
++	return NYX_ERROR_NOT_IMPLEMENTED;
++}
++
++nyx_error_t touchpanel_get_idle_scan_rate(nyx_device_t *d, unsigned int *r)
++{
++	return NYX_ERROR_NOT_IMPLEMENTED;
++}
++
++nyx_error_t touchpanel_set_mode(nyx_device_t *d, int m)
++{
++	return NYX_ERROR_NOT_IMPLEMENTED;
++}
++
++nyx_error_t touchpanel_get_mode(nyx_device_t *d, int *m)
++{
++	return NYX_ERROR_NOT_IMPLEMENTED;
++}
+diff --git a/src/touchpanel_mtdev/touchpanel_common.c b/src/touchpanel_mtdev/touchpanel_common.c
+new file mode 100644
+index 0000000..e20d65e
+--- /dev/null
++++ b/src/touchpanel_mtdev/touchpanel_common.c
+@@ -0,0 +1,43 @@
++// Copyright (c) 2010-2018 LG Electronics, Inc.
++// Copyright (c) 2012 Simon Busch <morphis@gravedo.de>
++// Copyright (c) 2018 Christophe Chapuis <chris.chapuis@gmail.com>
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++//
++// SPDX-License-Identifier: Apache-2.0
++
++#include "touchpanel_gestures.h"
++#include "touchpanel_common.h"
++
++#include <nyx/module/nyx_log.h>
++#include "msgid.h"
++
++void
++set_event_params(input_event_t *pEvent, time_stamp_t *pTime, uint16_t type,
++                 uint16_t code, int32_t value)
++{
++	if (NULL == pEvent || NULL == pTime)
++	{
++		nyx_error(MSGID_NYX_MOD_TP_EVENT_NULL_ERR, 0, "NULL parameter passed");
++		return;
++	}
++
++	((struct timeval *)pTime)->tv_sec = ((struct timeval *)
++	                                     &pEvent->time)->tv_sec;
++	((struct timeval *)pTime)->tv_usec = ((struct timeval *)
++	                                      &pEvent->time)->tv_usec;
++
++	pEvent->type = type;
++	pEvent->code = code;
++	pEvent->value = value;
++}
+diff --git a/src/touchpanel_mtdev/touchpanel_common.h b/src/touchpanel_mtdev/touchpanel_common.h
+new file mode 100644
+index 0000000..665ea31
+--- /dev/null
++++ b/src/touchpanel_mtdev/touchpanel_common.h
+@@ -0,0 +1,26 @@
++// Copyright (c) 2010-2018 LG Electronics, Inc.
++// Copyright (c) 2012 Simon Busch <morphis@gravedo.de>
++// Copyright (c) 2018 Christophe Chapuis <chris.chapuis@gmail.com>
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++//
++// SPDX-License-Identifier: Apache-2.0
++
++#ifndef __TOUCHPANEL_COMMON_H
++#define __TOUCHPANEL_COMMON_H
++
++void set_event_params(input_event_t *pEvent, time_stamp_t *pTime, uint16_t type,
++                      uint16_t code, int32_t value);
++
++#endif  /* __TOUCHPANEL_COMMON_PRV_H */
++
+diff --git a/src/touchpanel_mtdev/touchpanel_gestures.c b/src/touchpanel_mtdev/touchpanel_gestures.c
+new file mode 100644
+index 0000000..4b561a9
+--- /dev/null
++++ b/src/touchpanel_mtdev/touchpanel_gestures.c
+@@ -0,0 +1,530 @@
++// Copyright (c) 2010-2018 LG Electronics, Inc.
++// Copyright (c) 2012 Simon Busch <morphis@gravedo.de>
++// Copyright (c) 2018 Christophe Chapuis <chris.chapuis@gmail.com>
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++//
++// SPDX-License-Identifier: Apache-2.0
++
++
++#include <stdlib.h>
++#include <limits.h>
++#include <glib-2.0/glib.h>
++
++#include <nyx/module/nyx_log.h>
++
++
++#include "touchpanel_gestures.h"
++#include "touchpanel_common.h"
++#include "msgid.h"
++
++static GList *sFingers = NULL;
++static GQueue availableFingers = G_QUEUE_INIT;
++
++static uint32_t curFingerId = 0;
++
++int gesture_state_machine_finger(finger_t *finger, input_event_t *events,
++                                 int *numEvents);
++
++static const general_settings_t *spGeneralSettings = NULL;
++
++/**
++ *******************************************************************************
++ * @brief Allocate and initialize the buffer that keeps a coordinate history
++ *
++ * @param  ppCoordBuf   IN/OUT  ptr to the coordinate buffer struct
++ * @param  bufSize      IN      size of the buffer
++ *
++ * @retval  0 on success
++ * @retval -1 on failure
++ *******************************************************************************
++ */
++int
++create_coord_buffer(coord_buf_t *pCoordBuf, int bufSize)
++{
++
++	if (NULL == pCoordBuf)
++	{
++		nyx_error(MSGID_NYX_MOD_TP_COORDBUF_ERR, 0,"NULL parameter passed");
++		return -1;
++	}
++
++	pCoordBuf->pCoords = (coord_t *)malloc(sizeof(coord_t) * bufSize);
++
++	if (NULL == pCoordBuf->pCoords)
++	{
++		nyx_error(MSGID_NYX_MOD_TP_COORDS_ERR, 0,"Failed to allocate memory");
++		return -1;
++	}
++
++	pCoordBuf->size = bufSize;
++	pCoordBuf->head = 0;
++	pCoordBuf->tail = 0;
++	pCoordBuf->numItems = 0;
++
++	return 0;
++}
++
++
++void
++free_coord_buffer(coord_buf_t *pCoordBuf)
++{
++	free(pCoordBuf->pCoords);
++}
++
++
++void
++reset_coord_buffer(coord_buf_t *pCoordBuf)
++{
++	pCoordBuf->head = 0;
++	pCoordBuf->tail = 0;
++	pCoordBuf->numItems = 0;
++}
++
++void
++update_coord_buffer(coord_buf_t *pCoordBuf, int xCoord, int yCoord,
++                    const time_stamp_t *pTime)
++{
++	if (pCoordBuf->head == pCoordBuf->tail &&
++	        pCoordBuf->numItems == pCoordBuf->size)
++	{
++		/* full buffer, so make space for new item and overwrite old one */
++		pCoordBuf->head = (pCoordBuf->head + 1) % pCoordBuf->size;
++	}
++
++	int index = pCoordBuf->tail;
++	coord_t *pCurCoord = &((pCoordBuf->pCoords)[index]);
++
++	if (spGeneralSettings->positionFilter && pCoordBuf->numItems)
++	{
++		int prev;
++
++		if (index)
++		{
++			prev = index - 1;
++		}
++
++		else
++		{
++			prev = pCoordBuf->size - 1;
++		}
++
++		if (xCoord < pCoordBuf->pCoords[prev].x)
++		{
++			xCoord++;
++		}
++
++		else if (xCoord > pCoordBuf->pCoords[prev].x)
++		{
++			xCoord--;
++		}
++
++		if (yCoord < pCoordBuf->pCoords[prev].y)
++		{
++			yCoord++;
++		}
++
++		else if (yCoord > pCoordBuf->pCoords[prev].y)
++		{
++			yCoord--;
++		}
++	}
++
++	pCurCoord->timeStamp = *pTime;
++	pCurCoord->x = xCoord;
++	pCurCoord->y = yCoord;
++
++	if (pCoordBuf->numItems < pCoordBuf->size)
++	{
++		pCoordBuf->numItems++;
++	}
++
++	pCoordBuf->tail = (pCoordBuf->tail + 1) % pCoordBuf->size;
++}
++
++void get_last_coords(const coord_buf_t *pCoordBuf, int *xCoord, int *yCoord,
++                     time_stamp_t *timestamp)
++{
++	int previndex = (pCoordBuf->head + pCoordBuf->numItems - 1) % pCoordBuf->size;
++	coord_t *coord = &pCoordBuf->pCoords[previndex];
++
++	if (xCoord)
++	{
++		*xCoord = coord->x;
++	}
++
++	if (yCoord)
++	{
++		*yCoord = coord->y;
++	}
++
++	if (timestamp)
++	{
++		*timestamp = coord->timeStamp;
++	}
++}
++
++void init_gesture_state_machine(const general_settings_t *pGeneralSettings,
++                                int maxFingers)
++{
++	int i;
++
++	spGeneralSettings = pGeneralSettings;
++
++	for (i = 0 ; i < maxFingers * 2; i++)
++	{
++		finger_t *finger = malloc(sizeof(finger_t));
++		create_coord_buffer(&finger->coords, pGeneralSettings->coordBufSize);
++		finger->state.state = UNUSED;
++		g_queue_push_tail(&availableFingers, finger);
++	}
++}
++
++
++void
++deinit_gesture_state_machine(void)
++{
++	finger_t *finger = NULL;
++
++	while ((finger = g_queue_pop_head(&availableFingers)) != NULL)
++	{
++		free_coord_buffer(&finger->coords);
++		free(finger);
++	}
++
++	finger = NULL;
++	GList *l = sFingers;
++
++	while (l != NULL)
++	{
++		if (l->data)
++		{
++			finger = (finger_t *)l->data;
++			free_coord_buffer(&finger->coords);
++		}
++
++		l = g_list_remove(l, l->data);
++
++		if (finger)
++		{
++			free(finger);
++			finger = NULL;
++		}
++	}
++}
++
++void
++reset_state_data(gesture_state_data_t *pStateData)
++{
++	pStateData->state = START_STATE;
++	pStateData->insideTapRadius = true;
++}
++
++finger_t *add_new_finger(int x,int y,int weight, const time_stamp_t *pCurTime)
++{
++    finger_t *finger = g_queue_pop_head(&availableFingers);
++
++    if(!finger) {
++            nyx_info(MSGID_NYX_MOD_TP_NO_FINGER_BUFF, 0, "No available finger buffers, rejecting finger\n");
++            return NULL;
++    }
++  //  ASSERT(finger->state.state == UNUSED);
++    reset_state_data(&finger->state);
++    finger->id = curFingerId++;
++    finger->timestamp = *pCurTime;
++    //hal_info"NEW: %ld,%ld\n",finger->id.time.tv_sec,finger->id.time.tv_nsec);
++    finger->minDist = 0;
++    finger->minDistId = 0;
++    finger->lastWeight = weight;
++    reset_coord_buffer(&finger->coords);
++    update_coord_buffer(&finger->coords, x, y, pCurTime);
++    nyx_debug(MSGID_NYX_MOD_TP_FINGER_DOWN, 0, "Finger down at %d,%d\n",x,y);
++    sFingers = g_list_prepend(sFingers,finger);
++
++    return finger;
++}
++
++void
++update_finger(finger_t *finger, int x,int y,int weight, const time_stamp_t *pCurTime)
++{
++    if(finger == NULL)
++	return;
++
++    //Let's ignore the coordinate if there was a huge difference in weight
++    //This is a common scenario when the user is releasing his finger.
++    if(finger->lastWeight/2 < weight) {
++        update_coord_buffer(&finger->coords, x, y, pCurTime);
++    } else {
++        nyx_debug(MSGID_NYX_MOD_TP_IGNORING_COORD, 0, "Ignoring coordinate\n");
++    }   
++    finger->lastWeight = weight;
++}
++
++#define MAX_EVENTS_PER_UPDATE 100
++
++/*
++ * Finger tracking:
++ * The hardware does not do any fingertracking, so we do it all here.
++ */
++void
++gesture_state_machine(int *pXCoords, int *pYCoords, const int *pFingerWeights,
++                      int numFingers, const time_stamp_t *pCurTime,
++                      input_event_t *events, int *numEvents)
++{
++	/* Update Fingers */
++	int j;
++	int timestmpcnt = 0;
++	GList *list;
++
++	//For each new finger
++	for (j = 0; j < numFingers; j++)
++	{
++		int minDist = INT_MAX;
++		GList *minId = NULL;
++		list = g_list_first(sFingers);
++
++		//Try and match it against one of the existing ones
++		while (list)
++		{
++			int xPrev, yPrev;
++			int matched = 0;
++			finger_t *finger = (finger_t *)list->data;
++
++			get_last_coords(&finger->coords, &xPrev, &yPrev, NULL);
++			int dx = pXCoords[j] - xPrev;
++			int dy = pYCoords[j] - yPrev;
++			int dist = (dx * dx + dy * dy);
++
++			//Another finger from the input list is already a better match.
++			if (dist > finger->minDist)
++			{
++				list = g_list_next(list);
++				continue;
++			}
++
++			if (dist < minDist)
++			{
++				matched = 1;
++			}
++
++			if (matched)
++			{
++				minId = list;
++				minDist = dist;
++			}
++
++			list = g_list_next(list);
++		}
++
++		if (minId)
++		{
++			finger_t *finger = (finger_t *)minId->data;
++			finger->minDistId = j;
++			finger->minDist = minDist;
++		}
++	}
++
++	//Okay, at this point, for each existing finger, (sFingers)
++	//We have set minDistId to the index of the finger in the input array
++	//Or it's set to INT_MAX if it didn't match any of the new fingers.
++
++	//Iterate through the fingerList, and update each of the fingers that has a match with new coordinates.
++	list = g_list_first(sFingers);
++
++	while (list)
++	{
++		finger_t *finger = (finger_t *)list->data;
++
++		//Finger released
++		if (finger->minDist == INT_MAX)
++		{
++			list = g_list_next(list);
++			continue;
++		}
++
++		nyx_debug(MSGID_NYX_MOD_TP_FINGER_WT, 0,"New coord (at: %d), %d,%d weight: %d, distance: %d",
++		         finger->minDistId, pXCoords[finger->minDistId], pYCoords[finger->minDistId],
++		         pFingerWeights[finger->minDistId], finger->minDist);
++
++		//Let's ignore the coordinate if there was a huge difference in weight
++		//This is a common scenario when the user is releasing his finger.
++		if (finger->lastWeight / 2 < pFingerWeights[finger->minDistId])
++		{
++			update_coord_buffer(&finger->coords, pXCoords[finger->minDistId],
++			                    pYCoords[finger->minDistId], pCurTime);
++		}
++		else
++		{
++			nyx_debug(MSGID_NYX_MOD_TP_IGNORING_COORD, 0, "Ignoring coordinate");
++		}
++
++		finger->lastWeight = pFingerWeights[finger->minDistId];
++		//remove finger from pool of "new" fingers.
++		pXCoords[finger->minDistId] = pYCoords[finger->minDistId] = 0;
++
++		finger->minDist = 0;
++		finger->minDistId = 0;
++		list = g_list_next(list);
++	}
++
++	//Now go through the list and find any new unmatched fingers
++	for (j = 0; j < numFingers; j++)
++	{
++		time_stamp_t ts = *pCurTime;
++
++		/* When dragging over the gesture button, we get spurious
++		 * "extra" fingers Disregard these events if we already
++		 * matched a finger in the gesture area
++		 */
++		if (pXCoords[j] == 0 && pYCoords[j] == 0)
++		{
++			continue;
++		}
++
++		if (pFingerWeights[j] < g_atomic_int_get(
++		            &spGeneralSettings->fingerDownThreshold))
++		{
++			nyx_info(MSGID_NYX_MOD_TP_FING_LOW_WT, 0,"Discarding finger with too low weight (%d)", pFingerWeights[j]);
++			continue;
++		}
++
++		nyx_debug(MSGID_NYX_MOD_TP_FINGER_WT, 0, "pFingerWeight: %d (%d)", pFingerWeights[j], j);
++
++		nyx_debug(MSGID_NYX_MOD_TP_NEW_FINGER, 0, "j: %d, %d) New finger @ %d,%d", j, numFingers, pXCoords[j],
++		         pYCoords[j]);
++
++		ts.time.tv_nsec += timestmpcnt;
++		timestmpcnt += 1000000;
++		add_new_finger(pXCoords[j], pYCoords[j], pFingerWeights[j], &ts);
++	}
++
++	/* All fingers has been matched, now let's process the changes */
++	list = g_list_first(sFingers);
++
++	while (list)
++	{
++		finger_t *finger = (finger_t *)list->data;
++
++		//-1 means to move the list element into the available list
++		if (gesture_state_machine_finger(finger, events, numEvents) == -1)
++		{
++			finger->state.state = UNUSED;
++			list = g_list_next(list);
++			sFingers = g_list_remove(sFingers, finger);
++			g_queue_push_tail(&availableFingers, finger);
++		}
++		else
++		{
++			list = g_list_next(list);
++		}
++	}
++
++	if (0 < *numEvents)
++	{
++		//ASSERT(numEvents < MAX_EVENTS_PER_UPDATE);
++		/* add EV_SYN event */
++		set_event_params(&events[(*numEvents)++], (time_stamp_t *) pCurTime, EV_SYN, 0,
++		                 0);
++	}
++}
++
++void
++gesture_state_machine_process(const time_stamp_t* pCurTime, input_event_t *events, int *numEvents)
++{
++    /* Let's process the changes */
++    GList *list = g_list_first(sFingers);
++    while(list) {
++    	finger_t *finger = (finger_t*)list->data;
++        //-1 means to move the list element into the available list
++        if(gesture_state_machine_finger(finger,events,numEvents) == -1) {
++            finger->state.state = UNUSED;
++            list = g_list_next(list);
++            sFingers = g_list_remove(sFingers,finger);
++            g_queue_push_tail(&availableFingers,finger);
++        } else
++            list = g_list_next(list);
++    }
++
++    if (0 < *numEvents)
++    {
++        //ASSERT(numEvents < MAX_EVENTS_PER_UPDATE);
++        /* add EV_SYN event */
++        set_event_params(&events[(*numEvents)++], (time_stamp_t*) pCurTime, EV_SYN, 0, 0);
++    }
++}
++
++int gesture_state_machine_finger(finger_t *finger, input_event_t *events,
++                                 int *numEvents)
++{
++	int x, y;
++	time_stamp_t timestamp;
++
++	get_last_coords(&finger->coords, &x, &y, &timestamp);
++
++	finger->numEvents = *numEvents;
++	finger->events = events;
++
++	set_event_params(&finger->events[finger->numEvents++], &timestamp, EV_FINGERID,
++	                 0 , finger->id);
++
++	switch (finger->state.state)
++	{
++		case START_STATE:
++		{
++			finger->state.start[X_DIM] = x;
++			finger->state.start[Y_DIM] = y;
++			finger->state.startTime = timestamp;
++			finger->state.state = FINGER_DOWN_STATE;
++			set_event_params(&finger->events[finger->numEvents++], &timestamp, EV_KEY,
++			                 BTN_TOUCH, 1);
++		}
++		break;
++
++		case FINGER_DOWN_STATE:
++			break;
++
++		case FINGER_DOWN_AFTER_QUICK_LAUNCH:
++		{
++			/* keep reporting pen moves until the finger comes up
++			 * LunaSysMgr will handle the finger until release
++			 */
++		}
++		break;
++
++		case UNUSED:
++			//ASSERT(0);
++			break;
++	}
++
++	set_event_params(&finger->events[finger->numEvents++], &timestamp, EV_ABS,
++	                 ABS_X, x);
++	set_event_params(&finger->events[finger->numEvents++], &timestamp, EV_ABS,
++	                 ABS_Y, y);
++	*numEvents = finger->numEvents;
++
++	if (finger->minDist > 0)
++	{
++		//send finger release event
++		nyx_debug("Finger up at %d,%d", x, y);
++		set_event_params(&finger->events[finger->numEvents++], &timestamp, EV_KEY,
++		                 BTN_TOUCH, 0);
++		*numEvents = finger->numEvents;
++		return -1;
++	}
++	else
++	{
++		finger->minDist = INT_MAX;
++	}
++
++	return 0;
++}
+diff --git a/src/touchpanel_mtdev/touchpanel_gestures.h b/src/touchpanel_mtdev/touchpanel_gestures.h
+new file mode 100644
+index 0000000..6c9578f
+--- /dev/null
++++ b/src/touchpanel_mtdev/touchpanel_gestures.h
+@@ -0,0 +1,133 @@
++// Copyright (c) 2010-2018 LG Electronics, Inc.
++// Copyright (c) 2012 Simon Busch <morphis@gravedo.de>
++// Copyright (c) 2018 Christophe Chapuis <chris.chapuis@gmail.com>
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++//
++// SPDX-License-Identifier: Apache-2.0
++
++#ifndef __TOUCHPANEL_GESTURES_H
++#define __TOUCHPANEL_GESTURES_H
++
++#include <limits.h>
++#include <glib.h>
++#include <linux/input.h>
++#include <stdbool.h>
++
++typedef         __u8            uint8_t;
++typedef         __u16           uint16_t;
++typedef         __u32           uint32_t;
++
++
++#define EV_FINGERID 0x07
++
++typedef struct time_stamp
++{
++	struct timespec time;   /**< internal time stamp format */
++} time_stamp_t;
++
++typedef enum
++{
++	LOCALE_LEFT_RIGHT = 0,
++	LOCALE_RIGHT_LEFT,
++	NUM_LOCALES
++} locale_type_t;
++
++typedef struct interrupt_on_touch_settings
++{
++	bool enabled;
++	int scanRate;           /**< HZ */
++	int wakeThreshold;
++	int noTouchThreshold;   /**< ms */
++	int watchdogTimeout;    /**< ms */
++} interrupt_on_touch_settings_t;
++
++
++typedef struct general_settings
++{
++	int coordBufSize;           /**< size of coordinate circular buffer to calculate
++                                     things such as avg velocity */
++	int fingerDownThreshold;            /**< threshold to accept finger as down -- access atomically */
++
++	int positionFilter;
++} general_settings_t;
++
++typedef struct coord
++{
++	int x;                     /**< ptr to array of x coords */
++	int y;                     /**< ptr to array of y coords */
++	time_stamp_t timeStamp;   /**< time of the coordinates */
++} coord_t;
++
++typedef struct coord_buf
++{
++	coord_t *pCoords;       /**< array of coords */
++	int head;               /**< index of start of items in the array */
++	int tail;               /**< index of end of items in the array  */
++	int numItems;           /**< number of items in the array */
++	int size;               /**< total size of coord array */
++} coord_buf_t;
++
++typedef enum
++{
++	UNUSED = -1,
++	START_STATE = 0,                        /**< no fingers down */
++	FINGER_DOWN_STATE,                      /**< a finger is down */
++	FINGER_DOWN_AFTER_QUICK_LAUNCH,         /**< a quick launch was detected and we're
++                                               waiting for the finger to come up */
++} gesture_state_t;
++
++#define NUM_DIMENSIONS  2
++#define X_DIM   0
++#define Y_DIM   1
++
++typedef struct gesture_state_data
++{
++	gesture_state_t state;
++	int start[NUM_DIMENSIONS];
++	bool insideTapRadius;
++	time_stamp_t startTime;
++} gesture_state_data_t;
++
++typedef struct
++{
++	struct timeval time;  /**< time event was generated */
++	uint16_t type;        /**< type of event, EV_ABS, EV_MSC, etc. */
++	uint16_t code;        /**< event code, ABS_X, ABS_Y, etc. */
++	int32_t value;        /**< event value: coordinate, intensity,etc. */
++} input_event_t;
++
++typedef struct finger
++{
++	coord_buf_t coords;
++	time_stamp_t timestamp;
++	uint32_t id;
++	gesture_state_data_t state;
++	int minDist;
++	int minDistId;
++	int lastWeight;
++	int numEvents;
++	input_event_t *events;
++} finger_t;
++
++
++
++void init_gesture_state_machine(const general_settings_t *pGeneralSettings,
++                                int maxFingers);
++void deinit_gesture_state_machine(void);
++void gesture_state_machine(int *pXCoords, int *pYCoords,
++                           const int *pFingerWeights,
++                           int fingerCount, const time_stamp_t *pTime,
++                           input_event_t *events, int *numEvents);
++
++#endif  /* __TOUCHPANEL_GESTURES_PRV_H */
+-- 
+2.41.0.windows.3
+

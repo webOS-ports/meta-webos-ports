@@ -1,22 +1,25 @@
-# Copyright (c) 2021-2022 LG Electronics, Inc.
+# Copyright (c) 2021-2023 LG Electronics, Inc.
 
 SUMMARY = "webOS QML app components"
-AUTHOR = "Jongson Kim <jongson.kim@lge.com>"
+AUTHOR = "KIEN TRUNG PHAM <kien2.pham@lge.com>"
 SECTION = "webos/libs"
+
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = " \
-  file://LICENSE;md5=89aea4e17d99a7cacdbeed46a0096b10 \
+    file://LICENSE;md5=89aea4e17d99a7cacdbeed46a0096b10 \
 "
 
 DEPENDS = "qtdeclarative luna-service2 glib-2.0"
-DEPENDS:append = " ${@ 'qtshadertools-native' if d.getVar('QT_VERSION') == '6' else '' }"
+DEPENDS:append = " ${@ 'qtshadertools-native' if d.getVar('QT_VERSION')[0] == '6' else '' }"
+
+WEBOS_VERSION = "1.0.0-6_ad9b0aee66408b214d5f4d61b9912ed411da2f00"
+PR = "r4"
 
 PV = "1.0.0-6+git${SRCPV}"
-SRCREV = "128516aa9fedb645b2989618b50ec9e1a8e1f6aa"
+SRCREV = "ad9b0aee66408b214d5f4d61b9912ed411da2f00"
 
 inherit webos_qmake6
 inherit pkgconfig
-#inherit webos_enhanced_submissions
 inherit webos_public_repo
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \

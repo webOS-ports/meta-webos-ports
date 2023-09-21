@@ -14,6 +14,8 @@ inherit webos_system_bus
 inherit webos_systemd
 inherit pkgconfig
 
+LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
+
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files/sysbus"
 
