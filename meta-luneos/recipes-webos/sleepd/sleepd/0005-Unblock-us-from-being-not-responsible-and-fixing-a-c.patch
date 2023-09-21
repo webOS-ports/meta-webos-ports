@@ -1,0 +1,220 @@
+From 7d2f9408af4888b7401463851a9531d8cfba098d Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 5 Jul 2019 08:28:06 +0200
+Subject: [PATCH 05/10] Unblock us from being not responsible and fixing a
+ crash on resume
+
+Signed-off-by: Simon Busch <morphis@gravedo.de>
+---
+ src/pwrevents/suspend.c | 137 +++++++++++++++++++++-------------------
+ 1 file changed, 71 insertions(+), 66 deletions(-)
+
+diff --git a/src/pwrevents/suspend.c b/src/pwrevents/suspend.c
+index 1992b5e..649abf1 100644
+--- a/src/pwrevents/suspend.c
++++ b/src/pwrevents/suspend.c
+@@ -248,6 +248,7 @@ ScheduleIdleCheck(int interval_ms, bool fromPoll)
+ {
+     if (idle_scheduler)
+     {
++        SLEEPDLOG_DEBUG("Scheduling new ilde check in %d ms", interval_ms);
+         g_timer_source_set_interval(idle_scheduler, interval_ms, fromPoll);
+     }
+     else
+@@ -284,94 +285,101 @@ IdleCheck(gpointer ctx)
+         return FALSE;
+     }
+ 
+-    ClockGetTime(&now);
++    SLEEPDLOG_DEBUG("IdleCheck: state %s", StateToStr(gCurrentStateNode.state));
+ 
+-    /*
+-     * Enforce that the minimum time awake must be at least
+-     * after_resume_idle_ms.
+-     */
+-    struct timespec last_wake;
+-    last_wake.tv_sec = sTimeOnWake.tv_sec;
+-    last_wake.tv_nsec = sTimeOnWake.tv_nsec;
++    if (!IsDisplayOn())
++    {
++        SLEEPDLOG_DEBUG("IdleCheck: display off");
+ 
+-    ClockAccumMs(&last_wake, gSleepConfig.after_resume_idle_ms);
++        ClockGetTime(&now);
+ 
+-    if (!ClockTimeIsGreater(&last_wake, &now))
+-    {
+         /*
+-         * Do not sleep if any activity is still active
++         * Enforce that the minimum time awake must be at least
++         * after_resume_idle_ms.
+          */
++        struct timespec last_wake;
++        last_wake.tv_sec = sTimeOnWake.tv_sec;
++        last_wake.tv_nsec = sTimeOnWake.tv_nsec;
+ 
+-        activity_idle = PwrEventActivityCanSleep(&now);
++        ClockAccumMs(&last_wake, gSleepConfig.after_resume_idle_ms);
+ 
+-        if (!activity_idle)
++        if (!ClockTimeIsGreater(&last_wake, &now))
+         {
+-            SLEEPDLOG_DEBUG("Can't sleep because an activity is active: ");
+-        }
++            /*
++             * Do not sleep if any activity is still active
++             */
+ 
+-        if (PwrEventActivityCount(&sTimeOnWake))
+-        {
+-            SLEEPDLOG_DEBUG("Activities since wake: ");
+-            PwrEventActivityPrintFrom(&sTimeOnWake);
+-        }
++            activity_idle = PwrEventActivityCanSleep(&now);
+ 
+-        PwrEventActivityRemoveExpired(&now);
+-        {
+-            time_t expiry = 0;
+-            gchar *app_id = NULL;
+-            gchar *key = NULL;
++            if (!activity_idle)
++            {
++                SLEEPDLOG_DEBUG("Can't sleep because an activity is active: ");
++            }
++
++            if (PwrEventActivityCount(&sTimeOnWake))
++            {
++                SLEEPDLOG_DEBUG("Activities since wake: ");
++                PwrEventActivityPrintFrom(&sTimeOnWake);
++            }
+ 
+-            if (timeout_get_next_wakeup(&expiry, &app_id, &key))
++            PwrEventActivityRemoveExpired(&now);
+             {
+-                g_free(app_id);
+-                g_free(key);
+-                int next_wake = expiry - reference_time();
++                time_t expiry = 0;
++                gchar *app_id = NULL;
++                gchar *key = NULL;
+ 
+-                if (next_wake >= 0 && next_wake <= gSleepConfig.wait_alarms_s)
++                if (timeout_get_next_wakeup(&expiry, &app_id, &key))
+                 {
+-                    SLEEPDLOG_DEBUG("Not going to sleep because an alarm is about to fire in %d sec\n",
+-                                    next_wake);
+-                    goto resched;
++                    g_free(app_id);
++                    g_free(key);
++                    int next_wake = expiry - reference_time();
++
++                    if (next_wake >= 0 && next_wake <= gSleepConfig.wait_alarms_s)
++                    {
++                        SLEEPDLOG_DEBUG("Not going to sleep because an alarm is about to fire in %d sec\n",
++                                        next_wake);
++                        goto resched;
++                    }
+                 }
+             }
+-        }
+ 
+-        // temporary hack, to be removed once compositor starts registering with com.webos.service.power
++            // temporary hack, to be removed once compositor starts registering with com.webos.service.power
+ #if 1
+-        suspend_active = (access("/tmp/suspend_active", R_OK) == 0);
++            suspend_active = (access("/tmp/suspend_active", R_OK) == 0);
+ 
+-        if (suspend_active && activity_idle)
+-        {
+-            TriggerSuspend("device is idle.", kPowerEventIdleEvent);
+-        }
++            if (suspend_active && activity_idle)
++            {
++                TriggerSuspend("device is idle.", kPowerEventIdleEvent);
++            }
+ 
+ #endif
+-    }
+-    else
+-    {
+-        struct timespec diff;
+-        ClockDiff(&diff, &last_wake, &now);
+-        next_idle_ms = ClockGetMs(&diff);
+-    }
+-
+-resched:
+-    {
+-        long wait_idle_ms = gSleepConfig.wait_idle_ms;
+-        long max_duration_ms = PwrEventActivityGetMaxDuration(&now);
+-
+-        if (max_duration_ms > wait_idle_ms)
++        }
++        else
+         {
+-            wait_idle_ms = max_duration_ms;
++            struct timespec diff;
++            ClockDiff(&diff, &last_wake, &now);
++            next_idle_ms = ClockGetMs(&diff);
+         }
+ 
+-        if (next_idle_ms > wait_idle_ms)
++resched:
+         {
+-            wait_idle_ms = next_idle_ms;
+-        }
++            long wait_idle_ms = gSleepConfig.wait_idle_ms;
++            long max_duration_ms = PwrEventActivityGetMaxDuration(&now);
++
++            if (max_duration_ms > wait_idle_ms)
++            {
++                wait_idle_ms = max_duration_ms;
++            }
+ 
+-        ScheduleIdleCheck(wait_idle_ms, true);
++            if (next_idle_ms > wait_idle_ms)
++            {
++                wait_idle_ms = next_idle_ms;
++            }
++
++            ScheduleIdleCheck(wait_idle_ms, true);
++        }
++        return TRUE;
+     }
+-    return TRUE;
+ }
+ 
+ static gboolean
+@@ -418,7 +426,6 @@ SuspendThread(void *ctx)
+     context = g_main_context_new();
+ 
+     suspend_loop = g_main_loop_new(context, FALSE);
+-    g_main_context_unref(context);
+ 
+     idle_scheduler = g_timer_source_new(
+                          gSleepConfig.wait_idle_ms, gSleepConfig.wait_idle_granularity_ms);
+@@ -427,10 +434,11 @@ SuspendThread(void *ctx)
+                           IdleCheck, NULL, NULL);
+     g_source_attach((GSource *)idle_scheduler,
+                     g_main_loop_get_context(suspend_loop));
+-    g_source_unref((GSource *)idle_scheduler);
+ 
+     g_main_loop_run(suspend_loop);
++    g_source_unref((GSource *)idle_scheduler);
+     g_main_loop_unref(suspend_loop);
++    g_main_context_unref(context);
+ 
+     return NULL;
+ }
+@@ -1010,9 +1018,6 @@ TriggerResume(const char *reason, PowerEvent event)
+ {
+     SLEEPDLOG_DEBUG("%s: state %s", __PRETTY_FUNCTION__, StateToStr(gCurrentStateNode.state));
+ 
+-    // We woke up from sleep.
+-    PwrEventThawActivities();
+-
+     GSource *source = g_idle_source_new();
+     g_source_set_callback(source,
+                           (GSourceFunc)SuspendStateUpdate, GINT_TO_POINTER(event), NULL);
+-- 
+2.41.0.windows.3
+

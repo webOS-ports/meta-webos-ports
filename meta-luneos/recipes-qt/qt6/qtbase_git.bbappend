@@ -114,11 +114,6 @@ SRC_URI:append = " file://9903-Revert-Remove-qmake-files-that-provide-support-fo
 # https://bugreports.qt.io/browse/WEBOSCI-76
 SRC_URI:append = " file://9904-Revert-CMake-remove-tests-for-C-17-and-C11-and-earli.patch;minver=6.6.0"
 
-# Upstream-Status: Backport
-SRC_URI:append = " \
-    file://0003-QJsonValue-fix-incorrect-to-Array-Object-when-the-va.patch \
-"
-
 # Flags needed for webOS
 TARGET_CXXFLAGS:append = " \
     -DQFONTCACHE_MIN_COST=512 \

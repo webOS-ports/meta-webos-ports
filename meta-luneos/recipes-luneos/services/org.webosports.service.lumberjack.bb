@@ -13,6 +13,8 @@ inherit pkgconfig
 inherit webos_system_bus
 inherit webos_systemd
 
+LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
+
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 

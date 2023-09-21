@@ -1,7 +1,7 @@
-# Copyright (c) 2013-2021 LG Electronics, Inc.
+# Copyright (c) 2013-2023 LG Electronics, Inc.
 
 SUMMARY = "Common Qt features for webOS components"
-AUTHOR = "Anupam Kaul <anulam.kaul@lge.com>"
+AUTHOR = "Elvis Lee <kwangwoong.lee@lge.com>"
 SECTION = "webos/base"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = " \
@@ -11,13 +11,13 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "qtbase"
 
-WEBOS_VERSION = "1.0.0-50_e3cd3c25717605a153d10fcccbf35893a38ebb8b"
+WEBOS_VERSION = "1.0.0-55_8bf2bf5ced2aafd6220233cbddc750965ff535d1"
 PR = "r8"
 
-SRCREV = "334ce71ac8f8b574adc45686e191e19d3711852e"
+PV = "1.0.0-55+git${SRCPV}"
+SRCREV = "8bf2bf5ced2aafd6220233cbddc750965ff535d1"
 
 inherit webos_qmake6
-#inherit webos_enhanced_submissions
 inherit webos_public_repo
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \

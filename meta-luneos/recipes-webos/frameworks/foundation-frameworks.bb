@@ -10,7 +10,6 @@ SRCREV = "2444cbf9c43c8485ba6b44c91ab3c2d6fcf9680c"
 
 inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
-#inherit webos_cmake
 inherit allarch
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"

@@ -1,0 +1,271 @@
+From ba64e7f0be2d6061c193e9b8d544cb39a19bd27c Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 5 Jul 2019 09:25:23 +0200
+Subject: [PATCH 09/10] Creating activities while being suspend will wakeup the
+ system now
+
+Signed-off-by: Simon Busch <morphis@gravedo.de>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+---
+ include/internal/activity.h |  2 +
+ include/internal/logging.h  |  2 +
+ include/internal/machine.h  |  2 +
+ src/pwrevents/activity.c    | 73 ++++++++++++++++++++++++++++++++++++-
+ src/pwrevents/machine.c     | 19 ++++++++++
+ src/pwrevents/suspend.c     | 22 +++++++++--
+ 6 files changed, 116 insertions(+), 4 deletions(-)
+
+diff --git a/include/internal/activity.h b/include/internal/activity.h
+index b59ecf8..880b0ed 100644
+--- a/include/internal/activity.h
++++ b/include/internal/activity.h
+@@ -35,6 +35,8 @@ bool PwrEventActivityCanSleep(struct timespec *now);
+ bool PwrEventFreezeActivities(struct timespec *now);
+ void PwrEventThawActivities(void);
+ 
++bool PwrEventActivityCheckActivitiesActive(struct timespec *now);
++
+ long PwrEventActivityGetMaxDuration(struct timespec *now);
+ 
+ #endif
+diff --git a/include/internal/logging.h b/include/internal/logging.h
+index 69d44ea..7b7e675 100644
+--- a/include/internal/logging.h
++++ b/include/internal/logging.h
+@@ -105,6 +105,8 @@
+ /** machine.c */
+ #define MSGID_FRC_SHUTDOWN                        "FRC_SHUTDOWN"             // Force Shutdown
+ #define MSGID_FRC_REBOOT                          "FRC_REBOOT"               // Force Reboot
++#define MSGID_WAKE_LOCK_FAILED                    "WAKE_LOCK_FAILED"         // Wake lock failed
++#define MSGID_WAKE_UNLOCK_FAILED                  "WAKE_UNLOCK_FAILED"       // Wake unlock failed
+ 
+ /** shutdown.c */
+ #define MSGID_SHUTDOWN_APPS_SIG_FAIL              "SHUTDOWN_APPS_SIG_FAIL"   // Could not send shutdown applications
+diff --git a/include/internal/machine.h b/include/internal/machine.h
+index 90d0c24..a7622d3 100644
+--- a/include/internal/machine.h
++++ b/include/internal/machine.h
+@@ -39,4 +39,6 @@ void TurnBypassOff(void);
+ 
+ int MachineGetToken(const char *token_name, char *buf, int len);
+ 
++bool MachineSupportsWakelocks(void);
++
+ #endif // _MACHINE_H_
+diff --git a/src/pwrevents/activity.c b/src/pwrevents/activity.c
+index 191b22d..c311be9 100644
+--- a/src/pwrevents/activity.c
++++ b/src/pwrevents/activity.c
+@@ -35,11 +35,16 @@
+ #include "logging.h"
+ #include "activity.h"
+ #include "init.h"
++#include "machine.h"
++#include "sysfs.h"
+ 
+ //#include "metrics.h"
+ 
+ //#define CONFIG_ACTIVITY_TIMEOUT_RDX_REPORT
+ 
++#define WAKELOCK_LOCK_PATH	"/sys/power/wake_lock"
++#define WAKELOCK_UNLOCK_PATH	"/sys/power/wake_unlock"
++
+ // Max duration at 15 minutes.
+ #define ACTIVITY_MAX_DURATION_MS (15*60*1000)
+ 
+@@ -454,6 +459,53 @@ _activity_print(struct timespec *from, struct timespec *now)
+     pthread_mutex_unlock(&activity_mutex);
+ }
+ 
++static void
++_activity_wakelock_lock(const char *activity_id)
++{
++    if (!MachineSupportsWakelocks()) 
++    {
++        return;
++    }
++
++    char buff[255];
++    memset(buff, 0, 255);
++    snprintf(buff, 255, "activity-%s", activity_id);
++
++    if (SysfsWriteString(WAKELOCK_LOCK_PATH, buff) < 0) 
++    {
++        SLEEPDLOG_WARNING(MSGID_WAKE_LOCK_FAILED, 0, "Failed to lock system sleep state for activity %s",
++                          activity_id);
++    }
++    else
++    {
++        SLEEPDLOG_DEBUG("Successfully disabled wakelock %s", buff);
++    }
++}
++
++ static void
++_activity_wakelock_unlock(const char *activity_id)
++{
++    if (!MachineSupportsWakelocks())
++    {
++        return;
++    }
++
++    char buff[255];
++    memset(buff, 0, 255);
++    snprintf(buff, 255, "activity-%s", activity_id);
++
++    if (SysfsWriteString(WAKELOCK_UNLOCK_PATH, buff) < 0) 
++    {
++        SLEEPDLOG_WARNING(MSGID_WAKE_UNLOCK_FAILED, 0, "Failed to unlock system sleep state for activity %s",
++                          activity_id);
++    }
++    else
++    {
++        SLEEPDLOG_DEBUG("Successfully disabled wakelock %s", buff);
++    }
++}
++
++
+ /**
+  * @brief Free the memory for an activity.
+  *
+@@ -468,6 +520,7 @@ _activity_stop_activity(Activity *a)
+         return;
+     }
+ 
++    _activity_wakelock_unlock(a->activity_id);
+     _activity_free(a);
+ }
+ 
+@@ -501,6 +554,8 @@ _activity_start(const char *activity_id, int duration_ms)
+     /* replace exising *activity_id' */
+     _activity_stop(activity_id);
+ 
++    _activity_wakelock_lock(activity_id);
++
+     return _activity_insert(activity_id, duration_ms);
+ }
+ 
+@@ -510,13 +565,18 @@ _activity_start(const char *activity_id, int duration_ms)
+ * @param  activity_id  Should be in format com.domain.reverse-serial.
+ * @param  duration_ms
+ *
+-* @return false if the activity could not be created... (activities may be frozen).
++* @return false if the activity could not be created.
+ */
+ bool
+ PwrEventActivityStart(const char *activity_id, int duration_ms)
+ {
+     bool retVal;
+ 
++    if (MachineSupportsWakelocks()) 
++    {
++        TriggerResume("activity", kPowerEventNone);
++    }
++
+     retVal = _activity_start(activity_id, duration_ms);
+ 
+     SLEEPDLOG_DEBUG("PwrEventActivityStart() : (%s) for %dms => %s", activity_id,
+@@ -677,6 +737,17 @@ PwrEventActivityGetMaxDuration(struct timespec *now)
+     return ClockGetMs(&diff);
+ }
+ 
++bool
++PwrEventActivityCheckActivitiesActive(struct timespec *now)
++{
++    if (_activity_obtain_min_unlocked(now) != NULL)
++    {
++        return false;
++    }
++
++    return true;
++}
++
+ /*
+  * @brief Stop any new activity.
+  * Called when the system is about to suspend.
+diff --git a/src/pwrevents/machine.c b/src/pwrevents/machine.c
+index a7cbd1e..b157273 100644
+--- a/src/pwrevents/machine.c
++++ b/src/pwrevents/machine.c
+@@ -45,6 +45,25 @@
+  */
+ bool chargerIsConnected = false;
+ 
++/**
++ * Holds the current state of whether or not the device supports Wakelocks.
++ */
++
++bool machineSupportsWakelocks = false;
++
++bool MachineSupportsWakelocks(void)
++{
++    static bool initialized = false;
++    if (!initialized)
++    {
++        machineSupportsWakelocks =  g_file_test("/sys/power/wake_lock", (GFileTest)(G_FILE_TEST_EXISTS | G_FILE_TEST_IS_REGULAR));
++        SLEEPDLOG_DEBUG("System %s wakelocks", machineSupportsWakelocks ? "supports" : "does not support");
++        initialized = true;
++    }
++
++    return machineSupportsWakelocks;
++}
++
+ bool
+ MachineCanSleep(void)
+ {
+diff --git a/src/pwrevents/suspend.c b/src/pwrevents/suspend.c
+index e3b4e6a..d493978 100644
+--- a/src/pwrevents/suspend.c
++++ b/src/pwrevents/suspend.c
+@@ -749,6 +749,16 @@ InstrumentOnWake(int resumeType)
+     sawmill_logger_record_wake(diffAsleep);
+ }
+ 
++static bool
++CheckActivitiesActive(struct timespec *now)
++{
++    if (MachineSupportsWakelocks())
++    {
++        return PwrEventActivityCheckActivitiesActive(now);
++    }
++
++    return PwrEventFreezeActivities(now);
++}
+ 
+ /**
+  * @brief In this state it will first send the "Suspended" signal to everybody. If any activity is active
+@@ -789,7 +799,7 @@ StateSleep(void)
+ 
+     // if any activities were started, abort suspend.
+     if (gSuspendEvent != kPowerEventForceSuspend &&
+-            !PwrEventFreezeActivities(&sTimeOnSuspended))
++            !CheckActivitiesActive(&sTimeOnSuspended))
+     {
+         SLEEPDLOG_DEBUG("aborting sleep because of current activity");
+         PwrEventActivityPrintFrom(&sTimeOnSuspended);
+@@ -837,7 +847,10 @@ static PowerState
+ StateAbortSuspend(void)
+ {
+     PMLOG_TRACE("State Abort suspend");
+-    PwrEventThawActivities();
++    if (!MachineSupportsWakelocks())
++    {
++        PwrEventThawActivities();
++    }
+     SendResume(kResumeAbortSuspend, "resume (suspend aborted)");
+ 
+     return kPowerStateOn;
+@@ -857,7 +870,10 @@ _stateResume(int resumeType)
+ 
+     MachineWakeup();
+ 
+-    PwrEventThawActivities();
++    if (!MachineSupportsWakelocks())
++    {
++        PwrEventThawActivities();
++    }
+ 
+     char *resumeDesc = g_strdup_printf("resume (%s)",
+                                        resume_type_descriptions[resumeType]);
+-- 
+2.41.0.windows.3
+
