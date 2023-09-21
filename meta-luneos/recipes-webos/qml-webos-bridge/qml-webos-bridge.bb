@@ -1,7 +1,7 @@
-# Copyright (c) 2013-2022 LG Electronics, Inc.
+# Copyright (c) 2013-2023 LG Electronics, Inc.
 
 SUMMARY = "webOS QML LS2 bridge"
-AUTHOR = "Anupam Kaul <anupam.kaul@lge.com>"
+AUTHOR = "Elvis Lee <kwangwoong.lee@lge.com>"
 SECTION = "webos/libs"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = " \
@@ -12,19 +12,19 @@ LIC_FILES_CHKSUM = " \
 DEPENDS = "qtdeclarative luna-service2 glib-2.0"
 RDEPENDS:${PN} += "qml-webos-components"
 
-WEBOS_VERSION = "1.0.0-129_6f44cfcb4f33f3f8d6997c5bbcf88ba7bb9e5e3a"
+WEBOS_VERSION = "1.0.0-132_8ba88a9b0dae1ce530d903f76ff9a6a1b8b533c1"
 PR = "r18"
+
+PV = "1.0.0-132+git${SRCPV}"
+SRCREV = "8ba88a9b0dae1ce530d903f76ff9a6a1b8b533c1"
 
 inherit webos_qmake6
 inherit pkgconfig
-#inherit webos_enhanced_submissions
-#inherit webos_qmllint
 inherit webos_public_repo
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-SRCREV = "cbbce57581fbe2c296cf02f0be4f6a1659ba2cd0"
 
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 

@@ -1,25 +1,34 @@
-# Copyright (c) 2012-2018 LG Electronics, Inc.
+# Copyright (c) 2012-2023 LG Electronics, Inc.
 
 SUMMARY = "webOS component responsible for launching the node.js services"
-AUTHOR = "Steve Lemke <steve.lemke@lge.com>"
+AUTHOR = "Rajesh Gopu I.V <rajeshgopu.iv@lge.com>"
 SECTION = "webos/frameworks"
+
 LICENSE = "Apache-2.0"
-LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
+LIC_FILES_CHKSUM = " \
+    file://LICENSE;md5=3b83ef96387f14655fc854ddc3c6bd57 \
+    file://oss-pkg-info.yaml;md5=bc052cc0f232b815569ebc81a4ef6490 \
+"
 
 DEPENDS = "boost libpbnjson"
 RDEPENDS:${PN} = "nodejs"
 # fork_server.js wants to load these:
 RDEPENDS:${PN} += "nodejs-module-webos-dynaload nodejs-module-webos-pmlog nodejs-module-webos-sysbus mojoloader"
 
-PV = "3.0.2-2+git${SRCPV}"
-SRCREV = "94fc2181880f43a6ed71c5994c1a79485aa50353"
+WEBOS_VERSION = "3.0.2-7_b759589be50ce52c4ae4e6af40ecbc78c7232a96"
+PR = "r10"
 
-inherit webos_ports_ose_repo
-inherit webos_filesystem_paths
+PV = "3.0.2-7+git${SRCPV}"
+SRCREV = "b759589be50ce52c4ae4e6af40ecbc78c7232a96"
+
+inherit webos_public_repo
 inherit webos_cmake
 inherit pkgconfig
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+    file://0001-Revert-Remove-dynaload-dependency.patch \
+    file://0002-Revert-Remove-pmloglib-dependency.patch \
+"
 S = "${WORKDIR}/git"
 
 FILES:${PN} += "${webos_prefix}/nodejs ${webos_servicesdir} ${webos_frameworksdir}"

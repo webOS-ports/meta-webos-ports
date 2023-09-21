@@ -1,24 +1,42 @@
-# Copyright (c) 2012-2018 LG Electronics, Inc.
+# Copyright (c) 2012-2023 LG Electronics, Inc.
 
 SUMMARY = "Sleep scheduling policy daemon"
-AUTHOR = "Sapna Todwal <sapna.todwal@lge.com>"
+AUTHOR = "Yogish S <yogish.s@lge.com>"
 SECTION = "webos/base"
+
 LICENSE = "Apache-2.0"
-LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
+LIC_FILES_CHKSUM = " \
+    file://LICENSE;md5=89aea4e17d99a7cacdbeed46a0096b10 \
+    file://oss-pkg-info.yaml;md5=2bdfe040dcf81b4038370ae96036c519 \
+"
 
 DEPENDS = "nyx-lib luna-service2 json-c libxml2 sqlite3 glib-2.0"
-
 RDEPENDS:${PN} += "powerd"
 
-inherit webos_ports_ose_repo
+WEBOS_VERSION = "2.0.0-17_3727287956ca9ac3c6dfb05c64a2df446fa61289"
+PR = "r11"
+
+PV = "2.0.0-17+git${SRCPV}"
+SRCREV = "3727287956ca9ac3c6dfb05c64a2df446fa61289"
+
+inherit webos_public_repo
 inherit webos_cmake
-inherit pkgconfig
 inherit webos_system_bus
-inherit webos_systemd
+inherit pkgconfig
 
-PV = "2.0.0-13+git${SRCPV}"
-
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+    file://0001-Add-empty-alarms.xml-file.patch \
+    file://0002-Add-alarms.xml-to-CMakeLists.txt.patch \
+    file://0003-Use-com.palm.display-service-to-query-display-state.patch \
+    file://0004-Rework-suspend-state-machine-to-support-asynchronous.patch \
+    file://0005-Unblock-us-from-being-not-responsible-and-fixing-a-c.patch \
+    file://0006-Don-t-remove-idle-check-from-mainloop-when-currently.patch \
+    file://0007-Don-t-block-main-thread-when-in-sleep-state.patch \
+    file://0008-Don-t-handle-displayInactive-event.patch \
+    file://0009-Creating-activities-while-being-suspend-will-wakeup-.patch \
+    file://0010-Add-powerd.management-permission-needed-by-powermenu.patch \
+"
 S = "${WORKDIR}/git"
 
-SRCREV = "6a29080865b27ddd25d70e0c171a1212d993dbce"
+inherit webos_systemd
+WEBOS_SYSTEMD_SERVICE = "sleepd.service"

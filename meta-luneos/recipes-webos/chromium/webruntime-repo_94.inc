@@ -1,11 +1,12 @@
-# Copyright (c) 2022 LG Electronics, Inc.
+# Copyright (c) 2022-2023 LG Electronics, Inc.
 
-# 94.0.4606.128-28
-SRCREV_main = "8dd0be73053420f8f7e65e2a768793d1e46e30c9"
+#WEBOS_VERSION = "94.0.4606.128-42_ca7be9386e921a320507174144ff758a75f886cc"
+SRCREV_main = "ca7be9386e921a320507174144ff758a75f886cc"
 
 # 9.4.146.25-chromium94.7
 SRCREV_v8 = "9e0278b87b7e59dd91364aaef32fd5fc31789bd4"
 
+# http://gpro.lge.com/c/webosose/chromium94/+/363094 avcodec/x86/mathops: clip constants used with shift instructions within inline assembly
 SRC_URI += " \
     file://0001-avcodec-x86-mathops-clip-constants-used-with-shift-i.patch \
     file://0003-run_app_shell-fix-XDG_RUNTIME_DIR-for-LuneOS.patch \

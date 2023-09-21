@@ -1,4 +1,4 @@
-# Copyright (c) 2014-2021 LG Electronics, Inc.
+# Copyright (c) 2014-2023 LG Electronics, Inc.
 
 SUMMARY = "webOS Configuration Service"
 AUTHOR  = "Sangwoo Kang <sangwoo82.kang@lge.com>"
@@ -17,14 +17,17 @@ inherit webos_system_bus
 inherit webos_systemd
 inherit webos_public_repo
 
-PV = "1.2.0-16+git${SRCPV}"
-SRCREV = "8174a13520e4564252d7568b5c2761fc9e1d99cb"
+WEBOS_VERSION = "1.2.0-18_0d07514460a6c35e3a7aa0d360468f626210eaae"
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-file://0001-Add-systemd-service-file.patch \
-"
+PV = "1.2.0-18+git${SRCPV}"
+SRCREV = "0d07514460a6c35e3a7aa0d360468f626210eaae"
+
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 
 S = "${WORKDIR}/git"
+
+inherit webos_systemd
+WEBOS_SYSTEMD_SERVICE = "configd.service"
 
 PACKAGES =+ "${PN}-tests"
 FILES:${PN}-tests = "${libexecdir}/tests/*"

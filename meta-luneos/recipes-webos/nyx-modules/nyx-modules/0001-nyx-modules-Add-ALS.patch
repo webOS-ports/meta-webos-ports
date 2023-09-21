@@ -1,0 +1,314 @@
+From d7bd8747b8f401a0cddaf5f766d5e70c819aed9a Mon Sep 17 00:00:00 2001
+From: Herrie <Github.com@herrie.org>
+Date: Thu, 14 Sep 2023 12:00:47 +0200
+Subject: [PATCH 1/8] nyx-modules: Add ALS
+
+Add Ambient Light Sensor (ALS) Module
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+---
+ src/als/CMakeLists.txt |  23 ++++
+ src/als/als.c          | 261 +++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 284 insertions(+)
+ create mode 100644 src/als/CMakeLists.txt
+ create mode 100644 src/als/als.c
+
+diff --git a/src/als/CMakeLists.txt b/src/als/CMakeLists.txt
+new file mode 100644
+index 0000000..54dc724
+--- /dev/null
++++ b/src/als/CMakeLists.txt
+@@ -0,0 +1,23 @@
++# Copyright (c) 2010-2018 LG Electronics, Inc.
++# Copyright (c) 2013 Simon Busch <morphis@gravedo.de>
++# Copyright (c) 2018 Herman van Hazendonk <github.com@herrie.org>
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++# http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++#
++# SPDX-License-Identifier: Apache-2.0
++
++include_directories(.)
++
++webos_build_nyx_module(SensorAlsDefault
++		       SOURCES als.c
++		       LIBRARIES ${GLIB2_LDFLAGS} ${PMLOG_LDFLAGS} ${NYXLIB_LDFLAGS} -lm -lrt -lpthread)
+diff --git a/src/als/als.c b/src/als/als.c
+new file mode 100644
+index 0000000..f76e8d6
+--- /dev/null
++++ b/src/als/als.c
+@@ -0,0 +1,261 @@
++// Copyright (c) 2013 Simon Busch <morphis@gravedo.de>
++// Copyright (c) 2018 Herman van Hazendonk <github.com@herrie.org	>
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++//
++// SPDX-License-Identifier: Apache-2.0
++
++#include <string.h>
++#include <stdlib.h>
++#include <errno.h>
++#include <stdio.h>
++#include <unistd.h>
++#include <linux/input.h>
++#include <fcntl.h>
++#include <poll.h>
++#include <glib.h>
++
++#include <nyx/nyx_module.h>
++#include <nyx/module/nyx_utils.h>
++#include <nyx/module/nyx_log.h>
++#include "msgid.h"
++
++#define MAX_EVENTS		64
++#ifndef ALS_INPUT_DEVICE
++#define ALS_INPUT_DEVICE		"/sys/class/input/event4/"
++#endif
++
++typedef struct {
++	nyx_device_t parent;
++	nyx_event_sensor_als_t *current_event_ptr;
++	int fd;
++	struct input_event raw_events[MAX_EVENTS];
++	int event_count;
++	int event_iter;
++} als_device_t;
++
++NYX_DECLARE_MODULE(NYX_DEVICE_SENSOR_ALS, "Default");
++
++nyx_error_t als_release_event(nyx_device_t *device, nyx_event_t *event)
++{
++	if (device == NULL || event == NULL)
++		return NYX_ERROR_INVALID_HANDLE;
++
++	nyx_event_sensor_als_t *als_event = (nyx_event_sensor_als_t*) event;
++	free(als_event);
++
++	return NYX_ERROR_NONE;
++}
++
++static nyx_event_keys_t *als_event_create()
++{
++	nyx_event_sensor_als_t* event = (nyx_event_sensor_als_t*)
++		calloc(sizeof(nyx_event_sensor_als_t), 1);
++
++	if (event == NULL)
++		return NULL;
++
++	((nyx_event_t*) event)->type = NYX_EVENT_SENSOR_ALS;
++
++	return event;
++}
++
++nyx_error_t nyx_module_open(nyx_instance_t i, nyx_device_t** device)
++{
++	als_device_t *als_device = (als_device_t*) calloc(sizeof(als_device_t), 1);
++
++	if (G_UNLIKELY(!als_device))
++		return NYX_ERROR_OUT_OF_MEMORY;
++
++	als_device->event_count = 0;
++	als_device->event_iter = 0;
++
++	/* now we can start to use the input device and listen for events */
++	als_device->fd = open(ALS_INPUT_DEVICE, O_RDONLY);
++	if (als_device->fd < 0) {
++		free(als_device);
++		return NYX_ERROR_INVALID_VALUE;
++	}
++
++	nyx_module_register_method(i, (nyx_device_t*) als_device,
++			NYX_GET_EVENT_SOURCE_MODULE_METHOD, "als_get_event_source");
++	nyx_module_register_method(i, (nyx_device_t*) als_device,
++			NYX_GET_EVENT_MODULE_METHOD, "als_get_event");
++	nyx_module_register_method(i, (nyx_device_t*) als_device,
++			NYX_RELEASE_EVENT_MODULE_METHOD, "als_release_event");
++	nyx_module_register_method(i, (nyx_device_t*) als_device,
++			NYX_SET_OPERATING_MODE_MODULE_METHOD, "als_set_operating_mode");
++
++	*device = (nyx_device_t*) als_device;
++
++	return NYX_ERROR_NONE;
++}
++
++nyx_error_t nyx_module_close(nyx_device_t* device)
++{
++	als_device_t *als_device = (als_device_t*) device;
++
++	if (als_device->fd > 0)
++		close(als_device->fd);
++
++	if (device == NULL)
++		return NYX_ERROR_INVALID_HANDLE;
++
++	if (als_device->current_event_ptr)
++		als_release_event(als_device, (nyx_event_t*) als_device->current_event_ptr);
++
++	free(als_device);
++
++	return NYX_ERROR_NONE;
++}
++
++gboolean file_set_contents(const char *filename, const char *content, unsigned int length)
++{
++	int fd;
++
++	fd = open(filename, O_WRONLY);
++	if (fd < 0)
++		return FALSE;
++
++	if (write(fd, content, length) < 0) {
++		close(fd);
++		return FALSE;
++	}
++
++	close(fd);
++
++	return TRUE;
++}
++
++nyx_error_t als_set_operating_mode(nyx_device_t *device, nyx_operating_mode_t mode)
++{
++	GError *error = NULL;
++
++	switch (mode) {
++		case NYX_OPERATING_MODE_OFF:
++			if (file_set_contents(ALS_INPUT_DEVICE"device/enable", "0", 2) == FALSE) {
++				nyx_error(MSGID_NYX_MOD_ALS_DISABLE_ERR, 0, "Failed to disable ALS sensor device");
++				return NYX_ERROR_INVALID_FILE_ACCESS;
++			}
++			break;
++		case NYX_OPERATING_MODE_ON:
++			if (file_set_contents(ALS_INPUT_DEVICE"device/enable", "1", 2) == FALSE) {
++				nyx_error(MSGID_NYX_MOD_ALS_ENABLE_ERR, 0, "Failed to enable ALS sensor device");
++				return NYX_ERROR_INVALID_FILE_ACCESS;
++			}
++			break;
++		default:
++			return NYX_ERROR_INVALID_VALUE;
++	}
++
++	return NYX_ERROR_NONE;
++}
++
++nyx_error_t als_get_event_source(nyx_device_t *device, int *fd)
++{
++	als_device_t *als_device = (als_device_t*) device;
++
++	if (device == NULL || fd == NULL)
++		return NYX_ERROR_INVALID_VALUE;
++
++	*fd = als_device->fd;
++
++	return NYX_ERROR_NONE;
++}
++
++struct pollfd fds[1];
++
++static int read_input_event(int fd, struct input_event *events, int max_events)
++{
++	int num_events = 0;
++	int rc = 0;
++	int bytesread;
++
++	if(events == NULL)
++		return -1;
++
++	fds[0].fd = fd;
++	fds[0].events = POLLIN;
++
++	rc = poll(fds, 1, 0);
++	if (rc <= 0)
++		return 0;
++
++	if (fds[0].revents & POLLIN) {
++		for (;;) {
++			bytesread = read(fds[0].fd, events, sizeof(struct input_event) * max_events);
++			if (bytesread > 0) {
++				num_events += bytesread / sizeof(struct input_event);
++				break;
++			}
++			else if (bytesread < 0 && errno != EINTR) {
++				nyx_error(MSGID_NYX_MOD_ALS_READ_EVENT_ERR, 0, "Failed to read events from event file");
++				return -1;
++			}
++		}
++	}
++
++	return num_events;
++}
++
++
++nyx_error_t als_get_event(nyx_device_t* device, nyx_event_t** event)
++{
++	int rd = 0;
++	als_device_t *als_device = (als_device_t*) device;
++
++
++	/* event bookkeeping... */
++	if(!als_device->event_iter) {
++		als_device->event_count = read_input_event(als_device->fd, als_device->raw_events,
++											MAX_EVENTS);
++		als_device->current_event_ptr = NULL;
++	}
++
++	if (als_device->current_event_ptr == NULL) {
++		/* let's allocate new event and hold it here */
++		als_device->current_event_ptr = als_event_create();
++	}
++
++	for (; als_device->event_iter < als_device->event_count;) {
++		struct input_event* current_event = &als_device->raw_events[als_device->event_iter];
++		als_device->event_iter++;
++
++		if (current_event->type == EV_ABS && current_event->code == ABS_MISC) {
++			/**
++			 * From AOSP device/samsung/tuna/libsensors/LightSensor.cpp:
++			 * Convert adc value to lux assuming:
++			 *  I = 10 * log(Ev) uA; R = 24kOhm
++			 * Max adc value 1023 = 1.25V
++			 *  1/4 of light reaches sensor
++			 */
++			als_device->current_event_ptr->item.intensity_in_lux =
++				(int32_t) (powf(10, current_event->value * (125.0f / 1023.0f / 24.0f)) * 4);
++		}
++		else {
++			continue;
++		}
++
++		*event = (nyx_event_t*) als_device->current_event_ptr;
++		als_device->current_event_ptr = NULL;
++
++		/* Generated event, bail out and let the caller know. */
++		if (NULL != *event)
++			break;
++	}
++
++	if(als_device->event_iter >= als_device->event_count)
++		als_device->event_iter = 0;
++
++	return NYX_ERROR_NONE;
++}
+-- 
+2.41.0.windows.3
+

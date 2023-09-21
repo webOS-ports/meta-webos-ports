@@ -1,15 +1,21 @@
-# Copyright (c) 2012-2018 LG Electronics, Inc.
+# Copyright (c) 2012-2023 LG Electronics, Inc.
 
 SUMMARY = "An extensible object oriented component used to add service components to webOS"
-AUTHOR = "Anatolii Sakhnik <anatolii.sakhnik@lge.com>"
+AUTHOR = "Rajesh Gopu I.V <rajeshgopu.iv@lge.com>"
 SECTION = "webos/devel"
-LICENSE = "Apache-2.0"
-LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
+LICENSE = "Apache-2.0"
+LIC_FILES_CHKSUM = " \
+    file://LICENSE;md5=3b83ef96387f14655fc854ddc3c6bd57 \
+    file://oss-pkg-info.yaml;md5=2bdfe040dcf81b4038370ae96036c519 \
+"
 DEPENDS = "librolegen glib-2.0 libpbnjson luna-service2"
 
-PV = "2.0.0-3+git${SRCPV}"
-SRCREV = "f7ac01e06bba81de4f21f004533dbee507a85f1c"
+WEBOS_VERSION = "2.0.0-4_13eaf63ab5ec5c4dd62b02f176c0b60894251b1c"
+PR = "r6"
+
+PV = "2.0.0-4+git${SRCPV}"
+SRCREV = "13eaf63ab5ec5c4dd62b02f176c0b60894251b1c"
 
 inherit webos_public_repo
 inherit webos_cmake
