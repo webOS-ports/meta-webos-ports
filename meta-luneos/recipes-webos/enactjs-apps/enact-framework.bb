@@ -8,7 +8,7 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://enact/LICENSE;md5=e3fc50a88d0a364313df4b21ef20c29e"
 
 inherit webos_enact_repo
-#inherit webos_arch_indep
+inherit allarch
 inherit webos_enactjs_env
 
 S = "${WORKDIR}/git"
@@ -23,10 +23,10 @@ SRC_URI = " \
 # algorithm properly recognizes that a pre-release precedes the associated final
 # release (e.g., 1.0-pre.1 < 1.0).
 
-PV = "4.5.1"
+PV = "4.5.3"
 
-SRCREV_main = "a94258c80f2d20d672a407b795768398e65c28e2"
-SRCREV_enact = "36767a5f68f7fde3db8b5a4a2010d33231f8b58e"
+SRCREV_main = "1cede54ee5df6f1a33d253eccaaf285fe1809bb6"
+SRCREV_enact = "020e8fd4ad58352274ec85a1842eeab01f12dbca"
 
 do_fetch[vardeps] += "SRCREV_enact"
 SRCREV_FORMAT = "main_enact"
@@ -37,7 +37,7 @@ WEBOS_ENACT_DEPENDENCIES ??= "\
     direction@1.0.4 \
     dom-walk@0.1.2 \
     global@4.4.0 \
-    ilib@14.15.1 \
+    ilib@14.18.0 \
     invariant@2.2.4 \
     is-function@1.0.2 \
     js-tokens@4.0.0 \
@@ -47,7 +47,7 @@ WEBOS_ENACT_DEPENDENCIES ??= "\
     parse-headers@2.0.5 \
     process@0.11.10 \
     prop-types@15.8.1 \
-    ramda@0.28.0 \
+    ramda@0.29.0 \
     react@18.2.0 \
     react-dom@18.2.0 \
     react-is@18.2.0 \
@@ -60,7 +60,7 @@ WEBOS_ENACT_DEPENDENCIES ??= "\
 # NOTE: We only need to bump PR if we change something OTHER than
 # PV, SRCREV or the dependencies statement above.
 
-PR = "r22"
+PR = "r25"
 
 # Skip unneeded tasks
 do_configure[noexec] = "1"

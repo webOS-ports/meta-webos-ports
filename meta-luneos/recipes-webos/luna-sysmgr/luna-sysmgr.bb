@@ -15,7 +15,7 @@ DEPENDS += "serviceinstaller"
 RDEPENDS:${PN} += "powerd"
 
 PV = "3.0.0-3+git${SRCPV}"
-SRCREV = "bd0e4528fa8d516391ba01b8e8a452b1f0f4bbd9"
+SRCREV = "6aeea4d489065b5c04a9238de6458f2acdedd428"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 
@@ -25,6 +25,8 @@ inherit webos_system_bus
 inherit webos_cmake_qt6
 inherit webos_systemd
 inherit pkgconfig
+
+LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

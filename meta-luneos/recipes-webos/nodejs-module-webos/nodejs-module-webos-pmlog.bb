@@ -1,13 +1,19 @@
-# Copyright (c) 2012-2014 LG Electronics, Inc.
+# Copyright (c) 2012-2023 LG Electronics, Inc.
 
 require nodejs-module-webos.inc
 
-SUMMARY = "A module for nodejs that allows Javascript access to the Open webOS logging system"
+AUTHOR = "Rajesh Gopu I.V <rajeshgopu.iv@lge.com>"
+SUMMARY = "A module for nodejs that allows Javascript access to the webOS logging system"
+#FIXME: Use below after bumping
+#LIC_FILES_CHKSUM += "file://oss-pkg-info.yaml;md5=d486dd326df35bb9d577c353691f0455"
 
 DEPENDS += "pmloglib vim-native"
 
-PV = "3.0.1-1+git${SRCPV}"
-SRCREV = "a2f85331a39bfbf98936e548e5676ff7aa3d0114"
+WEBOS_VERSION = "3.0.1-8_bf9622036e9fcfd0de2fe135ab3039742c73ad05"
+PR = "r16"
+
+PV = "3.0.1-8+git${SRCPV}"
+SRCREV = "bf9622036e9fcfd0de2fe135ab3039742c73ad05"
 
 inherit pkgconfig
 
@@ -23,5 +29,3 @@ do_compile() {
 }
 
 WEBOS_NODE = "pmloglib.node"
-
-SRC_URI += "file://0001-Fix-build-with-nodejs-18.patch"

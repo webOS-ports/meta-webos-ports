@@ -18,6 +18,8 @@ inherit webos_filesystem_paths
 inherit webos_systemd
 inherit pkgconfig
 
+LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
+
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     file://0001-Fix-build-with-gcc-13.patch \
 "

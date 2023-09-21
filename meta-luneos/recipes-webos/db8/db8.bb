@@ -1,10 +1,14 @@
-# Copyright (c) 2013-2018 LG Electronics, Inc.
+# Copyright (c) 2013-2023 LG Electronics, Inc.
 
 SUMMARY = "A userspace service that provides access to the webOS database"
 SECTION = "webos/base"
-AUTHOR = "Maksym Sditanov <maxim.sditanov@lge.com>"
+AUTHOR = "Yogish S <yogish.s@lge.com>"
+
 LICENSE = "Apache-2.0"
-LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
+LIC_FILES_CHKSUM = " \
+    file://LICENSE;md5=89aea4e17d99a7cacdbeed46a0096b10 \
+    file://oss-pkg-info.yaml;md5=2bdfe040dcf81b4038370ae96036c519 \
+"
 
 DEPENDS = "icu glib-2.0 leveldb leveldb-tl boost"
 DEPENDS:append:class-target = " luna-service2 pmloglib jemalloc gtest curl"
@@ -22,8 +26,14 @@ inherit webos_public_repo
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_configure_manifest
-inherit systemd
 inherit pkgconfig
+
+WEBOS_VERSION = "3.2.0-28_3962b2d1690d908019787da521e38686700439a1"
+PR = "r40"
+
+PV = "3.2.0-28+git${SRCPV}"
+SRCREV = "3962b2d1690d908019787da521e38686700439a1"
+
 
 EXTRA_OECMAKE += "-DWEBOS_DB8_BACKEND:STRING='leveldb;sandwich' -DCMAKE_SKIP_RPATH:BOOL=TRUE"
 EXTRA_OECMAKE:append:class-target = " -DWEBOS_CONFIG_BUILD_TESTS:BOOL=TRUE  -DUSE_PMLOG:BOOL=TRUE  -DBUILD_LS2:BOOL=TRUE -DWANT_PROFILING:BOOL=${@ 'true' if '${WEBOS_DISTRO_PRERELEASE}' != '' else 'false'}"
@@ -31,13 +41,26 @@ EXTRA_OECMAKE:append:class-native = " -DWEBOS_CONFIG_BUILD_TESTS:BOOL=FALSE -DUS
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-com.palm.db.role.json.in-More-generic-app-access.patch \
-    file://0001-CMakeLists.txt-replace-std-c-0x-with-std-c-14.patch \
 "
 
 S = "${WORKDIR}/git"
 
-PV = "3.2.0-22+git${SRCPV}"
-SRCREV = "a9697f6aa3b2e26fddb03639ac885574cd608f87"
+inherit webos_systemd
+WEBOS_SYSTEMD_SERVICE = "db8-maindb.service db8-mediadb.service db8-pre-config.service db8-tempdb.service db8.service"
+WEBOS_SYSTEMD_SCRIPT = "db8-maindb.sh"
+
+# All service files will be managed in meta-lg-webos.
+# The service file in the repository is not used, so please delete it.
+# See the page below for more details.
+# http://collab.lge.com/main/pages/viewpage.action?pageId=2031668745
+do_install:append() {
+    rm -f ${D}${sysconfdir}/systemd/system/db8-maindb.service
+    rm -f ${D}${sysconfdir}/systemd/system/scripts/db8-maindb.sh
+    rm -f ${D}${sysconfdir}/systemd/system/db8-mediadb.service
+    rm -f ${D}${sysconfdir}/systemd/system/db8-pre-config.service
+    rm -f ${D}${sysconfdir}/systemd/system/db8-tempdb.service
+    rm -f ${D}${sysconfdir}/systemd/system/db8.service
+}
 
 PACKAGES =+ "${PN}-tests"
 

@@ -1,9 +1,10 @@
-# Copyright (c) 2022 LG Electronics, Inc.
+# Copyright (c) 2022-2023 LG Electronics, Inc.
+
+AUTHOR = "Donghyun Kim <donghyun11.kim@lge.com>"
 
 inherit cross
 inherit pkgconfig
 
-WEBRUNTIME_REPO_VERSION = "94"
 require webruntime-common.inc
 require webruntime-repo${REPO_VERSION}.inc
 

@@ -1,0 +1,813 @@
+From 3abf7f9a83895ace95a8158597a06537125e622a Mon Sep 17 00:00:00 2001
+From: Herrie <Github.com@herrie.org>
+Date: Wed, 20 Sep 2023 11:44:19 +0200
+Subject: [PATCH] Revert "Retire the deprecated APIs"
+
+This reverts commit d375450e35b6d0002d224613d28314870a28c0bd.
+---
+ ...com.webos.service.activitymanager.api.json |  14 +
+ src/activitymanager/ActivityManagerApp.cpp    |   8 +-
+ src/activitymanager/ActivityManagerApp.h      |   3 +-
+ .../service/ActivityCategoryHandler.cpp       | 605 +++++++++++++++++-
+ .../service/ActivityCategoryHandler.h         |  24 +-
+ 5 files changed, 650 insertions(+), 4 deletions(-)
+
+diff --git a/files/sysbus/com.webos.service.activitymanager.api.json b/files/sysbus/com.webos.service.activitymanager.api.json
+index 3b85d18..5235d7b 100644
+--- a/files/sysbus/com.webos.service.activitymanager.api.json
++++ b/files/sysbus/com.webos.service.activitymanager.api.json
+@@ -1,7 +1,11 @@
+ {
+ "activity.query": [
+     "com.webos.service.activitymanager/getActivityInfo",
++    "com.webos.service.activitymanager/getDetails",
+     "com.webos.service.activitymanager/getManagerInfo",
++    "com.webos.service.activitymanager/info",
++    "com.webos.service.activitymanager/list",
++    "com.webos.service.activitymanager/monitor",
+     "com.webos.service.config/getConfigs"
+     ],
+ "activity.operation": [
+@@ -13,6 +17,16 @@
+     "com.webos.service.activitymanager/start",
+     "com.webos.service.activitymanager/stop",
+     "com.webos.service.activitymanager/pause",
++    "com.webos.service.activitymanager/join",
++    "com.webos.service.activitymanager/addFocus",
++    "com.webos.service.activitymanager/devel/concurrency",
++    "com.webos.service.activitymanager/devel/evict",
++    "com.webos.service.activitymanager/devel/priorityControl",
++    "com.webos.service.activitymanager/devel/run",
++    "com.webos.service.activitymanager/disable",
++    "com.webos.service.activitymanager/enable",
++    "com.webos.service.activitymanager/focus",
++    "com.webos.service.activitymanager/unfocus",
+     "com.webos.service.config/setConfigs"    
+     ],
+ "activity.wakeup": [
+diff --git a/src/activitymanager/ActivityManagerApp.cpp b/src/activitymanager/ActivityManagerApp.cpp
+index 5cb90cd..3a21ef6 100644
+--- a/src/activitymanager/ActivityManagerApp.cpp
++++ b/src/activitymanager/ActivityManagerApp.cpp
+@@ -1,4 +1,4 @@
+-// Copyright (c) 2009-2023 LG Electronics, Inc.
++// Copyright (c) 2009-2018 LG Electronics, Inc.
+ //
+ // Licensed under the Apache License, Version 2.0 (the "License");
+ // you may not use this file except in compliance with the License.
+@@ -170,6 +170,12 @@ MojErr ActivityManagerApp::online()
+     err = BusConnection::getInstance().getService().addCategory("/callback", m_callbackHandler.get());
+     MojErrCheck(err);
+ 
++    m_develHandler.reset(new DevelCategoryHandler());
++    MojAllocCheck(m_develHandler.get());
++
++    err = BusConnection::getInstance().getService().addCategory("/devel", m_develHandler.get());
++    MojErrCheck(err);
++
+     return MojErrNone;
+ }
+ 
+diff --git a/src/activitymanager/ActivityManagerApp.h b/src/activitymanager/ActivityManagerApp.h
+index a5df818..0153a42 100644
+--- a/src/activitymanager/ActivityManagerApp.h
++++ b/src/activitymanager/ActivityManagerApp.h
+@@ -1,4 +1,4 @@
+-// Copyright (c) 2009-2023 LG Electronics, Inc.
++// Copyright (c) 2009-2018 LG Electronics, Inc.
+ //
+ // Licensed under the Apache License, Version 2.0 (the "License");
+ // you may not use this file except in compliance with the License.
+@@ -50,6 +50,7 @@ private:
+ 
+     MojRefCountedPtr<ActivityCategoryHandler> m_handler;
+     MojRefCountedPtr<CallbackCategoryHandler> m_callbackHandler;
++    MojRefCountedPtr<DevelCategoryHandler> m_develHandler;
+ 
+ };
+ 
+diff --git a/src/activitymanager/service/ActivityCategoryHandler.cpp b/src/activitymanager/service/ActivityCategoryHandler.cpp
+index 23b7604..3c7df7c 100644
+--- a/src/activitymanager/service/ActivityCategoryHandler.cpp
++++ b/src/activitymanager/service/ActivityCategoryHandler.cpp
+@@ -1,4 +1,4 @@
+-// Copyright (c) 2009-2023 LG Electronics, Inc.
++// Copyright (c) 2009-2021 LG Electronics, Inc.
+ //
+ //      Copyright (c) 2009-2018 LG Electronics, Inc.
+ // Licensed under the Apache License, Version 2.0 (the "License");
+@@ -53,6 +53,25 @@ const MojChar* const ActivityCategoryHandler::ReleaseSchema =
+         _T("}") \
+     _T("}");
+ 
++const MojChar* const ActivityCategoryHandler::MonitorSchema =
++    _T("{ \"type\": \"object\", ") \
++        _T(" \"properties\": { ") \
++            _T(" \"activityId\": { \"type\": \"integer\", \"optional\": true }, ") \
++            _T(" \"activityName\": { \"type\": \"string\", \"optional\": true }, ") \
++            _T(" \"detailedEvents\" : { \"type\": \"boolean\", \"optional\": true }, ") \
++            _T(" \"subscribe\": { \"type\": \"boolean\", \"optional\": true } ") \
++        _T("}") \
++    _T("}");
++
++const MojChar* const ActivityCategoryHandler::JoinSchema =
++    _T("{ \"type\": \"object\", ") \
++        _T(" \"properties\": { ") \
++            _T(" \"activityId\": { \"type\": \"integer\", \"optional\": true }, ") \
++            _T(" \"activityName\": { \"type\": \"string\", \"optional\": true }, ") \
++            _T(" \"subscribe\": { \"type\": \"boolean\" } ") \
++        _T("}") \
++    _T("}");
++
+ const MojChar* const ActivityCategoryHandler::PauseSchema =
+     _T("{ \"type\": \"object\", ") \
+         _T(" \"properties\": { ") \
+@@ -109,6 +128,26 @@ const MojChar* const ActivityCategoryHandler::CancelSchema =
+         _T("}") \
+     _T("}");
+ 
++const MojChar* const ActivityCategoryHandler::ListSchema =
++    _T("{ \"type\": \"object\", ") \
++        _T(" \"properties\": { ") \
++            _T(" \"details\": { \"type\": \"boolean\" }, ") \
++            _T(" \"subscribers\": { \"type\": \"boolean\" }, ") \
++            _T(" \"current\" : { \"type\": \"boolean\" }, ") \
++            _T(" \"internal\" : { \"type\": \"boolean\" } ") \
++        _T("}") \
++    _T("}");
++
++const MojChar* const ActivityCategoryHandler::GetDetailsSchema =
++    _T("{ \"type\": \"object\", ") \
++        _T(" \"properties\": { ") \
++            _T(" \"activityId\": { \"type\": \"integer\", \"optional\": true }, ") \
++            _T(" \"activityName\": { \"type\": \"string\", \"optional\": true }, ") \
++            _T(" \"current\" : { \"type\": \"boolean\" }, ") \
++            _T(" \"internal\" : { \"type\": \"boolean\" } ") \
++        _T("}") \
++    _T("}");
++
+ const MojChar* const ActivityCategoryHandler::GetActivityInfoSchema =
+     _T("{ \"type\": \"object\", ") \
+         _T(" \"properties\": { ") \
+@@ -131,6 +170,19 @@ const MojChar* const ActivityCategoryHandler::GetActivityInfoSchema =
+  * - \ref com_palm_activitymanager_start
+  * - \ref com_palm_activitymanager_stop
+  * - \ref com_palm_activitymanager_cancel
++ *
++ * Private methods:
++ * - \ref com_palm_activitymanager_monitor
++ * - \ref com_palm_activitymanager_join
++ * - \ref com_palm_activitymanager_pause
++ * - \ref com_palm_activitymanager_focus
++ * - \ref com_palm_activitymanager_unfocus
++ * - \ref com_palm_activitymanager_addfocus
++ * - \ref com_palm_activitymanager_list
++ * - \ref com_palm_activitymanager_get_details
++ * - \ref com_palm_activitymanager_info
++ * - \ref com_palm_activitymanager_enable
++ * - \ref com_palm_activitymanager_disable
+  */
+ 
+ const ActivityCategoryHandler::SchemaMethod ActivityCategoryHandler::s_methods[] = {
+@@ -141,9 +193,19 @@ const ActivityCategoryHandler::SchemaMethod ActivityCategoryHandler::s_methods[]
+     { _T("start"), (Callback) &ActivityCategoryHandler::startActivity, ActivityCategoryHandler::StartSchema },
+     { _T("stop"), (Callback) &ActivityCategoryHandler::stopActivity, ActivityCategoryHandler::StopSchema },
+     { _T("cancel"), (Callback) &ActivityCategoryHandler::cancelActivity, ActivityCategoryHandler::CancelSchema },
++    { _T("monitor"), (Callback) &ActivityCategoryHandler::monitorActivity, ActivityCategoryHandler::MonitorSchema },
++    { _T("join"), (Callback) &ActivityCategoryHandler::joinActivity, ActivityCategoryHandler::JoinSchema },
+     { _T("pause"), (Callback) &ActivityCategoryHandler::pauseActivity, ActivityCategoryHandler::PauseSchema },
++    { _T("list"), (Callback) &ActivityCategoryHandler::listActivities, ActivityCategoryHandler::ListSchema },
++    { _T("getDetails"), (Callback) &ActivityCategoryHandler::getActivityDetails, ActivityCategoryHandler::GetDetailsSchema },
+     { _T("getActivityInfo"), (Callback) &ActivityCategoryHandler::getActivityInfo, ActivityCategoryHandler::GetActivityInfoSchema },
++    { _T("info"), (Callback) &ActivityCategoryHandler::getManagerInfo, NULL },
+     { _T("getManagerInfo"), (Callback) &ActivityCategoryHandler::getManagerInfo, NULL },
++    { _T("addFocus"), (Callback) &ActivityCategoryHandler::replyDeprecatedMethod, NULL },
++    { _T("focus"), (Callback) &ActivityCategoryHandler::replyDeprecatedMethod, NULL },
++    { _T("unfocus"), (Callback) &ActivityCategoryHandler::replyDeprecatedMethod, NULL },
++    { _T("disable"), (Callback) &ActivityCategoryHandler::replyDeprecatedMethod, NULL },
++    { _T("enable"), (Callback) &ActivityCategoryHandler::replyDeprecatedMethod, NULL },
+     { NULL, NULL, NULL }
+ };
+ 
+@@ -554,6 +616,219 @@ void ActivityCategoryHandler::finishReplaceActivity(std::shared_ptr<Activity> ac
+     act->clearPersistToken();
+ }
+ 
++/*!
++\page com_palm_activitymanager
++\n
++\section com_palm_activitymanager_join join
++
++\e Public.
++
++com.palm.activitymanager/join
++
++Subscribe to receive events from a particular Activity.
++
++\subsection com_palm_activitymanager_join_syntax Syntax:
++\code
++{
++    "activityId": int,
++    "subscribe": true
++}
++\endcode
++
++\param activityId The Activity to join to.
++\param subscribe Must be true for this call to succeed.
++
++\subsection com_palm_activitymanager_join_returns Returns:
++\code
++{
++    "errorCode": int,
++    "errorText": string,
++    "returnValue": boolean,
++    "subscribed": boolean
++}
++\endcode
++
++\param errorCode Code for the error in case the call was not succesful.
++\param errorText Describes the error if the call was not succesful.
++\param returnValue Indicates if the call was succesful.
++\param subscribed True if the call was subscribed.
++
++\subsection com_palm_activitymanager_join_examples Examples:
++\code
++luna-send -i -f luna://com.palm.activitymanager/join '{ "activityId": 81, "subscribe": true }'
++\endcode
++
++Example response for a succesful call followed by a status update event:
++\code
++{
++    "returnValue": true,
++    "subscribed": true
++}
++{
++    "activityId": 81,
++    "event": "stop",
++    "returnValue": true,
++    "subscribed": true
++}
++\endcode
++
++Example response for a failed call:
++\code
++{
++    "errorCode": 22,
++    "errorText": "Join method calls must subscribe to the Activity",
++    "returnValue": false
++}
++\endcode
++*/
++
++MojErr ActivityCategoryHandler::joinActivity(MojServiceMessage *msg, MojObject& payload)
++{
++    ACTIVITY_SERVICEMETHOD_BEGIN();
++
++    LOG_AM_TRACE("Entering function %s", __FUNCTION__);
++    LOG_AM_DEBUG("Join: Message from %s: %s",
++                 Subscription::getSubscriberString(msg).c_str(),
++                 MojoObjectJson(payload).c_str());
++
++    MojErr err = MojErrNone;
++
++    bool subscribe = false;
++    payload.get(_T("subscribe"), subscribe);
++    if (!subscribe) {
++        err = msg->replyError(MojErrInvalidArg, "Join method calls must subscribe to the Activity");
++        MojErrCheck(err);
++        return MojErrNone;
++    }
++
++    err = monitorActivity(msg, payload);
++    MojErrCheck(err);
++
++    ACTIVITY_SERVICEMETHOD_END(msg);
++
++    return MojErrNone;
++}
++
++/*!
++\page com_palm_activitymanager
++\n
++\section com_palm_activitymanager_monitor monitor
++
++\e Public.
++
++com.palm.activitymanager/monitor
++
++Given an activity ID, returns the current activity state. If the caller chooses
++to subscribe, additional Activity status updates are returned as they occur.
++
++\subsection com_palm_activitymanager_monitor_syntax Syntax:
++\code
++{
++    "activityId": int,
++    "activityName": string,
++    "subscribe": boolean,
++    "detailedEvents": boolean
++}
++\endcode
++
++\param activityId Activity ID. Either this, or "activityName" is required.
++\param activityName Activity name. Either this, or "activityId" is required.
++\param subscribe Activity subscription flag. \e Required.
++\param detailedEvents Flag to have the Activity Manager generate "update" events
++       when the state of one of this Activity's requirements changes.
++       \e Required.
++
++\subsection com_palm_activitymanager_monitor_returns Returns:
++\code
++{
++    "errorCode": int,
++    "errorText": string,
++    "returnValue": boolean,
++    "subscribed": boolean,
++    "state": string
++}
++
++\endcode
++
++\param errorCode Code for the error in case the call was not succesful.
++\param errorText Describes the error if the call was not succesful.
++\param returnValue Indicates if the call was succesful.
++\param subscribed True if the call was subscribed.
++\param state Activity state.
++
++\subsection com_palm_activitymanager_monitor_examples Examples:
++\code
++luna-send -i -f  luna://com.palm.activitymanager/monitor '{ "activityId": 71, "subscribe": false, "detailedEvents": true }'
++\endcode
++
++Example response for a succesful call:
++\code
++{
++    "returnValue": true,
++    "subscribed": false,
++    "state": "running"
++}
++\endcode
++
++Example response for a failed call:
++\code
++{
++    "errorCode": 2,
++    "errorText": "Error retrieving activityId of Activity to operate on",
++    "returnValue": false
++}
++\endcode
++*/
++
++MojErr ActivityCategoryHandler::monitorActivity(MojServiceMessage *msg, MojObject& payload)
++{
++    ACTIVITY_SERVICEMETHOD_BEGIN();
++
++    LOG_AM_TRACE("Entering function %s", __FUNCTION__);
++    LOG_AM_DEBUG("Monitor: Message from %s: %s",
++                 Subscription::getSubscriberString(msg).c_str(),
++                 MojoObjectJson(payload).c_str());
++
++    MojErr err = MojErrNone;
++
++    std::shared_ptr<Activity> act;
++
++    err = lookupActivity(msg, payload, act);
++    MojErrCheck(err);
++
++    err = checkSerial(msg, payload, act);
++    MojErrCheck(err);
++
++    std::shared_ptr<Subscription> sub;
++    bool subscribed = subscribeActivity(msg, payload, act, sub);
++
++    MojObject reply;
++
++    err = reply.putString(_T("state"), act->getState()->toString().c_str());
++    MojErrCheck(err);
++
++    err = reply.putBool(_T("subscribed"), subscribed);
++    MojErrCheck(err);
++
++    err = reply.putBool(MojServiceMessage::ReturnValueKey, true);
++    MojErrCheck(err);
++
++    err = msg->reply(reply);
++    MojErrCheck(err);
++
++    if (subscribed) {
++        LOG_AM_DEBUG("Monitor: %s subscribed to [Activity %llu]",
++                     Subscription::getSubscriberString(msg).c_str(), act->getId());
++    } else {
++        LOG_AM_DEBUG("Monitor: Returned [Activity %llu] state to %s",
++                     act->getId(), Subscription::getSubscriberString(msg).c_str());
++    }
++
++    ACTIVITY_SERVICEMETHOD_END(msg);
++
++    return MojErrNone;
++}
++
+ /*!
+ \page com_palm_activitymanager
+ \n
+@@ -1530,6 +1805,334 @@ MojErr ActivityCategoryHandler::pauseActivity(MojServiceMessage *msg, MojObject&
+     return MojErrNone;
+ }
+ 
++/*!
++\page com_palm_activitymanager
++\n
++\section com_palm_activitymanager_list list
++
++\e Public.
++
++com.palm.activitymanager/list
++
++List activities that are in running or waiting state.
++
++\subsection com_palm_activitymanager_list_syntax Syntax:
++\code
++{
++    "details": boolean,
++    "subscribers": boolean,
++    "current": boolean,
++    "internal": boolean
++}
++\endcode
++
++\param details Set to true to return full details for each Activity.
++\param subscribers Set to true to return current parent, queued adopters, and
++                   subscribers for each Activity
++\param current Set to true to return the *current* state of the prerequisites
++               for the Activity, as opposed to the desired states
++\param internal Set to true to Include internal state information for debugging.
++
++
++\subsection com_palm_activitymanager_list_returns Returns:
++\code
++{
++    "errorCode": int,
++    "errorText": string,
++    "activities": [ object array ],
++    "returnValue": boolean
++}
++\endcode
++
++\param errorCode Code for the error in case the call was not succesful.
++\param errorText Describes the error if the call was not succesful.
++\param activities Array with Activity objects.
++\param returnValue Indicates if the call was succesful.
++
++\subsection com_palm_activitymanager_list_examples Examples:
++\code
++luna-send -n 1 -f luna://com.palm.activitymanager/list '{ "details": true }'
++\endcode
++
++Example response for a succesful call:
++\code
++{
++    "activities": [
++        {
++            "activityId": 2,
++            "callback": {
++                "method": "palm:\/\/com.palm.service.backup\/registerPubSub",
++                "params": {
++                }
++            },
++            "creator": {
++                "serviceId": "com.palm.service.backup"
++            },
++            "description": "Registers the Backup Service with the PubSub Service, once the PubSub Service has a session.",
++            "focused": false,
++            "name": "RegisterPubSub",
++            "state": "waiting",
++            "trigger": {
++                "method": "palm:\/\/com.palm.pubsubservice\/subscribeConnStatus",
++                "params": {
++                    "subscribe": true
++                },
++                "where": [
++                    {
++                        "op": "=",
++                        "prop": "session",
++                        "val": true
++                    }
++                ]
++            },
++            "type": {
++                "background": true,
++                "bus": "private"
++            }
++        },
++        ...
++        {
++            "activityId": 223,
++            "callback": {
++                "method": "palm:\/\/com.palm.smtp\/syncOutbox",
++                "params": {
++                    "accountId": "++IAHN1DN8Snvorv",
++                    "folderId": "++IAHN1nZl4k1OtL"
++                }
++            },
++            "creator": {
++                "serviceId": "com.palm.smtp"
++            },
++            "description": "Watches SMTP outbox for new emails",
++            "focused": false,
++            "metadata": {
++                "accountId": "++IAHN1DN8Snvorv",
++                "folderId": "++IAHN1nZl4k1OtL"
++            },
++            "name": "SMTP Watch\/accountId=\"\"++IAHN1DN8Snvorv\"\"",
++            "requirements": {
++                "internet": true
++            },
++            "state": "waiting",
++            "trigger": {
++                "key": "fired",
++                "method": "palm:\/\/com.palm.db\/watch",
++                "params": {
++                    "query": {
++                        "from": "com.palm.email:1",
++                        "where": [
++                            {
++                                "_id": "454",
++                                "op": "=",
++                                "prop": "folderId",
++                                "val": "++IAHN1nZl4k1OtL"
++                            }
++                        ]
++                    }
++                }
++            },
++            "type": {
++                "bus": "private",
++                "explicit": true,
++                "immediate": true,
++                "persist": true,
++                "priority": "low"
++            }
++        }
++    ],
++    "returnValue": true
++}
++\endcode
++
++Example response for a failed call:
++\code
++{
++    "errorCode": -1989,
++    "errorText": "json: unexpected char at 1:14",
++    "returnValue": false
++}
++\endcode
++*/
++
++MojErr ActivityCategoryHandler::listActivities(MojServiceMessage *msg, MojObject& payload)
++{
++    ACTIVITY_SERVICEMETHOD_BEGIN();
++
++    LOG_AM_TRACE("Entering function %s", __FUNCTION__);
++    LOG_AM_DEBUG("List: Message from %s: %s",
++                 Subscription::getSubscriberString(msg).c_str(),
++                 MojoObjectJson(payload).c_str());
++
++    MojErr err = MojErrNone;
++    if (!payload.contains(_T("details"))) {
++        err = msg->replyError(MojErrInvalidArg, "'details flag' must be specified");
++        MojErrCheck(err);
++        return MojErrNone;
++    }
++    if (!payload.contains(_T("subscribers"))) {
++        err = msg->replyError(MojErrInvalidArg, "'subscribers flag' must be specified");
++        MojErrCheck(err);
++        return MojErrNone;
++    }
++    if (!payload.contains(_T("current"))) {
++        err = msg->replyError(MojErrInvalidArg, "'current flag' must be specified");
++        MojErrCheck(err);
++        return MojErrNone;
++    }
++    if (!payload.contains(_T("internal"))) {
++        err = msg->replyError(MojErrInvalidArg, "'internal flag' must be specified");
++        MojErrCheck(err);
++        return MojErrNone;
++    }
++
++    bool found = false;
++    if (payload.contains(_T("activityId"))) {
++        err = payload.del(_T("activityId"), found);
++        MojErrCheck(err);
++    }
++    if (payload.contains(_T("activityName"))) {
++        err = payload.del(_T("activityName"), found);
++        MojErrCheck(err);
++    }
++    err = getActivityInfo(msg, payload);
++    MojErrCheck(err);
++
++    ACTIVITY_SERVICEMETHOD_END(msg);
++
++    return MojErrNone;
++}
++
++/*!
++\page com_palm_activitymanager
++\n
++\section com_palm_activitymanager_get_details getDetails
++
++\e Public.
++
++com.palm.activitymanager/getDetails
++
++Get details of an activity.
++
++\subsection com_palm_activitymanager_get_details_syntax Syntax:
++\code
++{
++    "activityId": int,
++    "activityName": string,
++    "current": boolean,
++    "internal": boolean
++}
++\endcode
++
++\param activityId Activity ID. Either this, or "activityName" is required.
++\param activityName Activity name. Either this, or "activityId" is required.
++\param current Set to true to return the *current* state of the prerequisites
++               for the Activity, as opposed to the desired states
++\param internal Set to true to Include internal state information for debugging.
++
++\subsection com_palm_activitymanager_get_details_returns Returns:
++\code
++{
++    "errorCode": int,
++    "errorText": string,
++    "activity": { object },
++    "returnValue": boolean
++}
++\endcode
++
++\param errorCode Code for the error in case the call was not succesful.
++\param errorText Describes the error if the call was not succesful.
++\param activity The activity object.
++\param returnValue Indicates if the call was succesful.
++
++\subsection com_palm_activitymanager_get_details_examples Examples:
++\code
++luna-send -i -f luna://com.palm.activitymanager/getDetails '{ "activityId": 221, "current": true }'
++\endcode
++
++Example response for a succesful call:
++\code
++{
++    "activity": {
++        "activityId": 221,
++        "adopters": [
++        ],
++        "callback": <NULL>,
++        "creator": {
++            "serviceId": "com.palm.smtp"
++        },
++        "description": "Watches SMTP config on account \"++IAHN1DN8Snvorv\"",
++        "focused": false,
++        "metadata": {
++            "accountId": "++IAHN1DN8Snvorv"
++        },
++        "name": "SMTP Account Watch\/accountId=\"\"++IAHN1DN8Snvorv\"\"",
++        "state": "waiting",
++        "subscribers": [
++        ],
++        "trigger": false,
++        "type": {
++            "bus": "private",
++            "explicit": true,
++            "immediate": true,
++            "persist": true,
++            "priority": "low"
++        }
++    },
++    "returnValue": true
++}
++\endcode
++
++Example response for a failed call:
++\code
++{
++    "errorCode": 2,
++    "errorText": "Activity name\/creator pair not found",
++    "returnValue": false
++}
++\endcode
++*/
++
++MojErr ActivityCategoryHandler::getActivityDetails(MojServiceMessage *msg,
++                                                   MojObject& payload)
++{
++    ACTIVITY_SERVICEMETHOD_BEGIN();
++
++    LOG_AM_TRACE("Entering function %s", __FUNCTION__);
++    LOG_AM_DEBUG("Details: Message from %s: %s",
++                 Subscription::getSubscriberString(msg).c_str(),
++                 MojoObjectJson(payload).c_str());
++
++    MojErr err = MojErrNone;
++
++    std::shared_ptr<Activity> act;
++
++    err = lookupActivity(msg, payload, act);
++    MojErrCheck(err);
++
++    if (!payload.contains(_T("current"))) {
++        err = msg->replyError(MojErrInvalidArg, "'current flag' must be specified");
++        MojErrCheck(err);
++        return MojErrNone;
++    }
++    if (!payload.contains(_T("internal"))) {
++        err = msg->replyError(MojErrInvalidArg, "'internal flag' must be specified");
++        MojErrCheck(err);
++        return MojErrNone;
++    }
++
++    err = payload.putBool(_T("subscribers"), true);
++    MojErrCheck(err);
++    err = payload.putBool(_T("details"), true);
++    MojErrCheck(err);
++
++    err = getActivityInfo(msg, payload);
++    MojErrCheck(err);
++
++    ACTIVITY_SERVICEMETHOD_END(msg);
++
++    return MojErrNone;
++}
++
+ /*!
+ \page com_palm_activitymanager
+ \n
+diff --git a/src/activitymanager/service/ActivityCategoryHandler.h b/src/activitymanager/service/ActivityCategoryHandler.h
+index 215e4d4..3374a45 100644
+--- a/src/activitymanager/service/ActivityCategoryHandler.h
++++ b/src/activitymanager/service/ActivityCategoryHandler.h
+@@ -1,4 +1,4 @@
+-// Copyright (c) 2009-2023 LG Electronics, Inc.
++// Copyright (c) 2009-2018 LG Electronics, Inc.
+ //
+ // Licensed under the Apache License, Version 2.0 (the "License");
+ // you may not use this file except in compliance with the License.
+@@ -36,12 +36,19 @@ class ActivityCategoryHandler : public MojService::CategoryHandler {
+ private:
+     static const MojChar* const CreateSchema;
+     static const MojChar* const ReleaseSchema;
++    static const MojChar* const MonitorSchema;
++    static const MojChar* const JoinSchema;
+     static const MojChar* const PauseSchema;
++    static const MojChar* const FocusSchema;
++    static const MojChar* const UnfocusSchema;
+     static const MojChar* const AdoptSchema;
+     static const MojChar* const CompleteSchema;
+     static const MojChar* const StartSchema;
+     static const MojChar* const StopSchema;
+     static const MojChar* const CancelSchema;
++    static const MojChar* const AddFocusSchema;
++    static const MojChar* const ListSchema;
++    static const MojChar* const GetDetailsSchema;
+     static const MojChar* const GetActivityInfoSchema;
+ 
+ public:
+@@ -56,6 +63,8 @@ public:
+ protected:
+     /* Lifecycle Methods */
+     MojErr createActivity(MojServiceMessage *msg, MojObject& payload);
++    MojErr joinActivity(MojServiceMessage *msg, MojObject& payload);
++    MojErr monitorActivity(MojServiceMessage *msg, MojObject& payload);
+     MojErr releaseActivity(MojServiceMessage *msg, MojObject& payload);
+     MojErr adoptActivity(MojServiceMessage *msg, MojObject& payload);
+     MojErr completeActivity(MojServiceMessage *msg, MojObject& payload);
+@@ -94,6 +103,8 @@ protected:
+                               bool succeeded);
+ 
+     /* Introspection */
++    MojErr listActivities(MojServiceMessage *msg, MojObject& payload);
++    MojErr getActivityDetails(MojServiceMessage *msg, MojObject& payload);
+     MojErr getActivityInfo(MojServiceMessage *msg, MojObject& payload);
+ 
+     /* Debugging/Information Methods */
+@@ -144,4 +155,15 @@ protected:
+     std::shared_ptr<PermissionManager> m_pm;
+ };
+ 
++class DevelCategoryHandler : public MojService::CategoryHandler {
++public:
++    DevelCategoryHandler() {
++        addMethod("concurrency", (Callback) &ActivityCategoryHandler::replyDeprecatedMethod);
++        addMethod("evict", (Callback) &ActivityCategoryHandler::replyDeprecatedMethod);
++        addMethod("priorityControl", (Callback) &ActivityCategoryHandler::replyDeprecatedMethod);
++        addMethod("run", (Callback) &ActivityCategoryHandler::replyDeprecatedMethod);
++    }
++    virtual ~DevelCategoryHandler() {}
++};
++
+ #endif /* __ACTIVITY_CATEGORY_HANDLER_H__ */
+-- 
+2.41.0.windows.3
+

@@ -20,6 +20,8 @@ inherit pkgconfig
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
+LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
+
 # TODO: Remove once there's localization support
 do_install:append() {
     install -d ${D}${webos_prefix}/universalsearchmgr/resources/en_us
