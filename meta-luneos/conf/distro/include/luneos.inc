@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2014 LG Electronics, Inc.
+# Copyright (c) 2012-2023 LG Electronics, Inc.
 
 require conf/distro/include/luneos-preferred-providers.inc
 require conf/distro/include/luneos-recipe-blacklist.inc
@@ -95,9 +95,6 @@ module_conf_vboxvideo:qemux86-64 = "blacklist vboxvideo"
 
 USER_CLASSES ?= ""
 
-# Configure Bluetooth service classes we want to support
-WEBOS_BLUETOOTH_ENABLED_SERVICE_CLASSES ?= "FTP"
-
 # WEBOS_EXTRA_MACHINEOVERRIDES will appear in OVERRIDES before what's added by
 # the machine architecture .inc file, which appears before MACHINE.
 # WEBOS_EXTRA_MACHINEOVERRIDES is set in webos_machine_impl_dep.bbclass . Do it
@@ -173,6 +170,7 @@ SANITY_TESTED_DISTROS ?= " \
     ubuntu-21.10 \n \
     ubuntu-22.04 \n \
     ubuntu-22.10 \n \
+    ubuntu-23.04 \n \
 "
 
 require conf/distro/include/yocto-uninative.inc
