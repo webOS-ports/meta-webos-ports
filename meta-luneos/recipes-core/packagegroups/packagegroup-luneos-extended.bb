@@ -9,7 +9,8 @@ NOT_COMPATIBLE_WITH_CURRENT_NODEJS = " \
   node-sqlite3 \
 "
 
-
+#LuneOS uses it's own settings app
+VIRTUAL-RUNTIME_settingsapp ?= "org.webosports.app.settings"
 RDEPENDS:${PN} = " \
   ${DISTRO_EXTRA_RDEPENDS} \
   distro-feed-configs \
@@ -34,7 +35,6 @@ RDEPENDS:${PN} = " \
   \
   bluez5 \
   \
-  location-service \
   imaccountvalidator \
   imlibpurpleservice \
   messaging-accounts \
@@ -52,7 +52,7 @@ RDEPENDS:${PN} = " \
   org.webosports.app.pdf \
   org.webosports.app.phone \
   org.webosports.app.photos \
-  org.webosports.app.settings \
+  ${VIRTUAL-RUNTIME_settingsapp} \
   org.webosports.app.tasks \
   \
   org.webosports.cdav \
@@ -96,12 +96,6 @@ RDEPENDS:${PN} = " \
   mediaindexer \
   media-permission-service \
   webos-systemsounds \
-  \
-  gstreamer1.0-libav \
-  gstreamer1.0-plugins-bad-meta \
-  gstreamer1.0-plugins-base-meta \
-  gstreamer1.0-plugins-good-meta \
-  gstreamer1.0-plugins-ugly-meta \
   \
   luneos-default-wallpapers \
   \

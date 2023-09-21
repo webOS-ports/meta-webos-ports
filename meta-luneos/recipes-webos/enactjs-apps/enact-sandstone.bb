@@ -8,7 +8,7 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://enact/LICENSE;md5=e3fc50a88d0a364313df4b21ef20c29e"
 
 inherit webos_enact_repo
-#inherit webos_arch_indep
+inherit allarch
 inherit webos_enactjs_env
 
 S = "${WORKDIR}/git"
@@ -23,10 +23,10 @@ SRC_URI = " \
 # algorithm properly recognizes that a pre-release precedes the associated final
 # release (e.g., 1.0-pre.1 < 1.0).
 
-PV = "2.6.0"
+PV = "2.7.3"
 
-SRCREV = "56a9177899f3644d0b40aff339d591cf0d9e89dd"
-SRCREV_enact = "36767a5f68f7fde3db8b5a4a2010d33231f8b58e"
+SRCREV = "ef92fc6465407d1539b8f1d989bd2eb55e96bcc7"
+SRCREV_enact = "020e8fd4ad58352274ec85a1842eeab01f12dbca"
 
 do_fetch[vardeps] += "SRCREV_enact"
 SRCREV_FORMAT = "main_enact"
@@ -37,7 +37,7 @@ WEBOS_ENACT_DEPENDENCIES ??= "\
     direction@1.0.4 \
     dom-walk@0.1.2 \
     global@4.4.0 \
-    ilib@14.15.1 \
+    ilib@14.18.0 \
     invariant@2.2.4 \
     is-function@1.0.2 \
     js-tokens@4.0.0 \
@@ -59,7 +59,7 @@ WEBOS_ENACT_DEPENDENCIES ??= "\
 # NOTE: We only need to bump PR if we change something OTHER than
 # PV, SRCREV or the dependencies statement above.
 
-PR = "r12"
+PR = "r14"
 
 # Skip unneeded tasks
 do_configure[noexec] = "1"
