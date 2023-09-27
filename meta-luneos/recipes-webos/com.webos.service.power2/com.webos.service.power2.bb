@@ -18,7 +18,6 @@ inherit pkgconfig
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_public_repo
-inherit webos_distro_dep
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
