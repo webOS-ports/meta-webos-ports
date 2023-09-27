@@ -27,17 +27,11 @@ SRCREV = "56d52cda62567a5b1f4a3780d1f5401d89fb8d10"
 WAM_BUILD_SYSTEM ?= "webos_cmake"
 WAM_BUILD_DEFAULT_PLUGIN ?= "1"
 
-#inherit webos_cmake
-#inherit webos_enhanced_submissions
 inherit webos_system_bus
-#inherit webos_machine_dep
 inherit ${WAM_BUILD_SYSTEM}
 inherit pkgconfig
 inherit webos_lttng
-#inherit webos_distro_variant_dep
-#inherit webos_distro_dep
 inherit webos_public_repo
-#inherit webos_ports_fork_repo
 inherit webos_systemd
 
 WAM_DATA_DIR = "${webos_execstatedir}/${BPN}"

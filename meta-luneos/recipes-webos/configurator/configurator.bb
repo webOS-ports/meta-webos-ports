@@ -23,7 +23,8 @@ inherit webos_cmake
 inherit webos_system_bus
 inherit pkgconfig
 inherit webos_machine_impl_dep
-inherit webos_distro_dep
+
+EXTRA_OECMAKE_DISTRO = "-DWEBOS_TARGET_DISTRO:STRING='luneos'"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
 file://0001-com.palm.configurator.role.json.in-Add-fixes-for-var.patch \
