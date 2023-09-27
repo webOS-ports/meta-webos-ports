@@ -25,7 +25,9 @@ inherit webos_public_repo
 inherit pkgconfig
 inherit webos_test_provider
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}\
+    file://0001-Add-trustLevel.patch \
+"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "com.webos.service.videooutput.service"
