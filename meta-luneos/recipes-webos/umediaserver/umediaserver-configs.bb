@@ -20,9 +20,11 @@ inherit pkgconfig
 inherit webos_cmake
 inherit webos_filesystem_paths
 inherit webos_public_repo
-inherit webos_machine_dep
+
+PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 EXTRA_OECMAKE += "-DWEBOS_INSTALL_CONFCAPSDIR:STRING=${webos_frameworksdir}"
+EXTRA_OECMAKE += "-DWEBOS_TARGET_MACHINE:STRING=${MACHINE}"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
