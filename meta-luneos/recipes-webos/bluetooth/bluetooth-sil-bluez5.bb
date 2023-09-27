@@ -26,7 +26,6 @@ SRCREV = "efcb8e250dacebd13900c5625b6366f75f7ca189"
 inherit webos_public_repo
 inherit webos_cmake
 inherit pkgconfig
-inherit webos_distro_dep
 inherit webos_bluetooth_sil
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \

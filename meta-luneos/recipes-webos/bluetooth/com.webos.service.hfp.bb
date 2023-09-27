@@ -21,7 +21,6 @@ SRCREV = "f3f53f2567b90babcc19608776addc450fdcb9ac"
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_public_repo
-inherit webos_distro_dep
 inherit pkgconfig
 
 # Set WEBOS_HFP_ENABLED_ROLE to a space-separted list of

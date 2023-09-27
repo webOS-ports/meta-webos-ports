@@ -22,7 +22,6 @@ inherit webos_cmake
 inherit pkgconfig
 inherit webos_public_repo
 inherit webos_machine_impl_dep
-inherit webos_machine_dep
 inherit webos_system_bus
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
