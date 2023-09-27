@@ -25,25 +25,17 @@ inherit webos_public_repo
 inherit systemd
 inherit pkgconfig
 
-SYSTEMD_PACKAGES = "${PN}"
-SYSTEMD_SERVICE:${PN} = "settings-service-recovery.service settings-service.service"
-
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-file://0001-settingsservice-Add-service-files-for-systemd-script.patch \
-file://0002-service-update-SettingsService-path.patch \
+file://0001-service-update-SettingsService-path.patch \
 "
 
-
 S = "${WORKDIR}/git"
+
+inherit webos_systemd
+WEBOS_SYSTEMD_SERVICE = "settings-service.service settings-service-recovery.service"
+WEBOS_SYSTEMD_SCRIPT = "settings-service.sh"
 
 WEBOS_SYSTEM_BUS_MANIFEST_TYPE = "SERVICE"
 
 VIRTUAL-RUNTIME_bash ?= "bash"
 RDEPENDS:${PN}:append:class-target = " ${VIRTUAL-RUNTIME_bash}"
-
-do_install:append() {
-    install -d ${D}${systemd_unitdir}/system
-    install -m 0644 ${S}/files/systemd/settings-service-recovery.service ${D}${systemd_unitdir}/system/
-    install -m 0644 ${S}/files/systemd/settings-service.service ${D}${systemd_unitdir}/system/
-}
-
