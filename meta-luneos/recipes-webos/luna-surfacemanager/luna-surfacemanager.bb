@@ -40,7 +40,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
 S = "${WORKDIR}/git"
 
 inherit webos_systemd
-WEBOS_SYSTEMD_SERVICE = "lsm-ready.path lsm-ready.service lsm-ready.target surface-manager.service surface-manager-daemon.service"
+WEBOS_SYSTEMD_SERVICE = "lsm-ready.path lsm-ready.service lsm-ready.target surface-manager.service"
 
 #SYSTEMD_INSTALL_PATH = "${systemd_system_unitdir}"
 
