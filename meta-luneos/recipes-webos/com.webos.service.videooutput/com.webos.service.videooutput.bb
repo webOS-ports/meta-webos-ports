@@ -27,4 +27,15 @@ inherit webos_test_provider
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 
+inherit webos_systemd
+WEBOS_SYSTEMD_SERVICE = "com.webos.service.videooutput.service"
+
+# All service files will be managed in meta-lg-webos.
+# The service file in the repository is not used, so please delete it.
+# See the page below for more details.
+# http://collab.lge.com/main/pages/viewpage.action?pageId=2031668745
+do_install:append() {
+    rm ${D}${sysconfdir}/systemd/system/videooutputd.service
+}
+
 S = "${WORKDIR}/git"
