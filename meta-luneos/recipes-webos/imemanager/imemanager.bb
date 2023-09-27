@@ -1,7 +1,7 @@
 # Copyright (c) 2017-2023 LG Electronics, Inc.
 
 SUMMARY = "Maliit Input Method Plugins"
-DESCRIPTION = "Mallit-based virtual keyboard and input method engine for open webOS"
+DESCRIPTION = "Mallit-based virtual keyboard and input method engine for webOS"
 AUTHOR = "Guruprasad KN <guruprasad.kn@lge.com>"
 SECTION = "webos/base"
 
@@ -30,7 +30,11 @@ inherit webos_public_repo
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 
 WEBOS_REPO_NAME = "ime-manager"
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+file://0001-ime-manager-Fix-implicit-declaration-of-QML-Connecti.patch \
+file://0002-main.qml-Fix-syntax-error.patch \
+file://0003-com.webos.service.ime-Add-org.maliit-as-allowed-name.patch \
+"
 S = "${WORKDIR}/git"
 
 WEBOS_LOCALIZATION_XLIFF_BASENAME = "imemanager"
@@ -58,9 +62,10 @@ do_install:append() {
     install -d ${D}${webos_sysbus_rolesdir}
     install -d ${D}${webos_sysbus_apipermissionsdir}
     install -d ${D}${webos_sysbus_groupsdir}
+    #Replace the escaping characters (\) and the path placeholders
     sed "s|\$\$WEBOS_INSTALL_BINS|$sbindir|" < ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.service.in > ${D}${webos_sysbus_servicedir}/${SERVICE_NAME}.service
-    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.perm.json ${D}${webos_sysbus_permissionsdir}/${SERVICE_NAME}.perm.json
     sed "s|\$\$WEBOS_INSTALL_BINS|$sbindir|g;s|[\]||g" < ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.role.json.in > ${D}${webos_sysbus_rolesdir}/${SERVICE_NAME}.role.json
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.perm.json ${D}${webos_sysbus_permissionsdir}/${SERVICE_NAME}.perm.json
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.api.json ${D}${webos_sysbus_apipermissionsdir}/${SERVICE_NAME}.api.json
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.groups.json ${D}${webos_sysbus_groupsdir}/${SERVICE_NAME}.groups.json
     #FixMe: Weird quirk installs role.json in services folder
