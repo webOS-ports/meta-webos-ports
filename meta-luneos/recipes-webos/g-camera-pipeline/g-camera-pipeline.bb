@@ -13,7 +13,6 @@ LIC_FILES_CHKSUM = " \
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_public_repo
-inherit webos_machine_dep
 inherit pkgconfig
 
 PR = "r14"
