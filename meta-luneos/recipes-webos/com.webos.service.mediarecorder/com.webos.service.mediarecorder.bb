@@ -22,7 +22,9 @@ inherit webos_public_repo
 inherit webos_system_bus
 inherit pkgconfig
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+    file://0001-media_recorder_manager.cpp-Fix-format-specifier.patch \
+"
 S = "${WORKDIR}/git"
 
 inherit webos_systemd
