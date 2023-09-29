@@ -9,6 +9,9 @@ DEPENDS += "lapack"
 FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 SRC_URI += "file://snowboy.pc.in;subdir=git"
 
+# snowboy offers arm/aarch64/x86-64 only for C++ implementation
+COMPATIBLE_MACHINE = "rpi|aarch64|x86-64|qemux86-64|^halium$|pinetab2|pinephonepro|pinephone"
+
 # match static lib for each arch
 SNOWBOY_ARCH:armv6 = "rpi"
 SNOWBOY_ARCH:armv7a = "rpi"
