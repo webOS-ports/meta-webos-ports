@@ -32,6 +32,10 @@ inherit webos_configure_manifest
 inherit webos_cmake_qt6
 inherit webos_systemd
 
+inherit features_check
+# luna-service2 depends on systemd
+REQUIRED_DISTRO_FEATURES = "systemd"
+
 RDEPENDS:${PN} = "luna-next-conf xkeyboard-config"
 
 PACKAGES =+ "${PN}-qmlplugins"
