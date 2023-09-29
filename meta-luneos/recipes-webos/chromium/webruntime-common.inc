@@ -12,7 +12,9 @@ LIC_FILES_CHKSUM = "\
 
 require gn-utils.inc
 
+inherit webos_enhanced_submissions
 inherit webos_public_repo
+inherit webos_prerelease_dep
 
 WEBRUNTIME_REPO_VERSION ?= "94"
 REPO_VERSION := "${@['','_${WEBRUNTIME_REPO_VERSION}'][d.getVar('WEBRUNTIME_REPO_VERSION').strip() != '']}"
@@ -82,9 +84,8 @@ GN_ARGS += "${EXTRA_OEGN_GOLD}"
 
 # The last digits in the submission format are used for typical submissions number.
 # The submission formats; submissions/[number] or submissions/[branch name].[number]
-#WEBOS_SUBMISSION_NUMBER="${@ '${WEBOS_SUBMISSION}'.split('.')[-1] }"
-#GN_ARGS:append = " webos_submission_number=${WEBOS_SUBMISSION_NUMBER}"
-GN_ARGS:append = " webos_submission_number=80"
+WEBOS_SUBMISSION_NUMBER="${@ '${WEBOS_SUBMISSION}'.split('.')[-1] }"
+GN_ARGS:append = " webos_submission_number=${WEBOS_SUBMISSION_NUMBER}"
 
 TARGET_CPU = "${@gn_arch_name(TARGET_ARCH)}"
 GN_ARGS:append = " target_cpu=\"${TARGET_CPU}\""
