@@ -9,6 +9,11 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=9e4744182d366ff5258e3268c575afe2 \
 "
 
+# The same restriction as in
+# meta-luneos/recipes-upstreamable/snowboy/snowboy_%.bbappend
+# libgoogleassistant depends on snowboy
+COMPATIBLE_MACHINE = "rpi|aarch64|x86-64|qemux86-64|^halium$|pinetab2|pinephonepro|pinephone"
+
 DEPENDS = "snowboy glib-2.0 googleapis grpc json-c pmloglib pulseaudio"
 RDEPENDS:${PN}:class-target = "snowboy-models"
 
