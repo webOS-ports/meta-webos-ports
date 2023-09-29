@@ -25,11 +25,10 @@ PROVIDES:pn-nativesdk-clang = "nativesdk-llvm"
 PREFERRED_PROVIDER_virtual/webruntime = "webruntime${WEBRUNTIME_TOOLCHAIN}"
 VIRTUAL-RUNTIME_webruntime = "webruntime${WEBRUNTIME_TOOLCHAIN}"
 
-#FixMe: LuneOS db8 doesn't like below somehow.
-
-#WEBOS_PREFERRED_PROVIDER_FOR_BASH = "busybox"
-#PREFERRED_PROVIDER_bash = "${@oe.utils.conditional('WEBOS_PREFERRED_PROVIDER_FOR_BASH', 'busybox', '${MLPREFIX}busybox', '${MLPREFIX}bash', d)}"
-#VIRTUAL-RUNTIME_bash = "${@oe.utils.conditional('WEBOS_PREFERRED_PROVIDER_FOR_BASH', 'busybox', '${MLPREFIX}busybox', '${MLPREFIX}bash', d)}"
+# Use bash instead of Busybox in LuneOS since we don't have CONFIG_BASH_IS_ASH=y enabled in Busybox defconfig
+WEBOS_PREFERRED_PROVIDER_FOR_BASH = "bash"
+PREFERRED_PROVIDER_bash = "${@oe.utils.conditional('WEBOS_PREFERRED_PROVIDER_FOR_BASH', 'busybox', '${MLPREFIX}busybox', '${MLPREFIX}bash', d)}"
+VIRTUAL-RUNTIME_bash = "${@oe.utils.conditional('WEBOS_PREFERRED_PROVIDER_FOR_BASH', 'busybox', '${MLPREFIX}busybox', '${MLPREFIX}bash', d)}"
 
 # Use the busybox Tar instead of GNU Tar
 WEBOS_PREFERRED_PROVIDER_FOR_TAR = "busybox"
@@ -73,14 +72,9 @@ BLUEZ:class-nativesdk = "bluez5"
 # use them.
 VIRTUAL-RUNTIME_cpushareholder = "cpushareholder-stub"
 
-# Use Enactbrowser by default, except for armv45
+# Use Enactbrowser by default
 VIRTUAL-RUNTIME_com.webos.app.browser ?= "com.webos.app.enactbrowser"
-#VIRTUAL-RUNTIME_com.webos.app.browser:armv4 = ""
-#VIRTUAL-RUNTIME_com.webos.app.browser:armv5 = ""
-
 VIRTUAL-RUNTIME_webappmanager = "wam${WEBRUNTIME_TOOLCHAIN}"
-#VIRTUAL-RUNTIME_webappmanager:armv4 = ""
-#VIRTUAL-RUNTIME_webappmanager:armv5 = ""
 
 VIRTUAL-RUNTIME_initscripts = "webos-initscripts"
 PREFERRED_RPROVIDER_initd-functions = "webos-initscripts"
