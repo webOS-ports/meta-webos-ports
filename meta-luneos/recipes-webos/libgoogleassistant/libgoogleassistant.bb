@@ -28,8 +28,8 @@ PV = "1.0.1-10+git${SRCPV}"
 SRCREV = "b8610f05673d48b498e38cb774d6f1056c3b5522"
 
 inherit webos_cmake
-inherit webos_machine_impl_dep
 inherit webos_public_repo
+inherit pkgconfig
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
