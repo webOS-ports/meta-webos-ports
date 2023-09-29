@@ -7,7 +7,7 @@
 
 inherit systemd
 
-FILESEXTRAPATHS:prepend := "${TOPDIR}/meta-webos-ports/meta-luneui/files:"
+FILESEXTRAPATHS:prepend = "${LAYERDIR_meta-luneui}/files:"
 SRC_URI:append = " \
     file://replace.cmake \
     ${@' '.join(['file://' + f for f in '${WEBOS_SYSTEMD_SERVICE}'.split()])} \
