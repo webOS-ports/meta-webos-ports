@@ -35,7 +35,7 @@ WEBOS_SYSTEMD_SERVICE = "activitymanager.service"
 FILES:${PN} += "${webos_sysbus_datadir}"
 FILES:${PN} += "${@oe.utils.conditional('DISTRO_NAME', 'webOS OSE', '${localstatedir}/lib/activitymanager', '', d)}"
 
-EXTRA_OECMAKE += "-DINIT_MANAGER:STRING=${VIRTUAL-RUNTIME_init_manager}"
+EXTRA_OECMAKE += "-DINIT_MANAGER:STRING='${@bb.utils.filter('VIRTUAL-RUNTIME_init_manager', 'systemd upstart', d)}'"
 
 # All service files will be managed in meta-lg-webos.
 # The service file in the repository is not used, so please delete it.
