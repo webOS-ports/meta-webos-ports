@@ -21,6 +21,10 @@ inherit webos_public_repo
 inherit webos_cmake
 inherit pkgconfig
 
+inherit features_check
+# luna-service2 depends on systemd
+REQUIRED_DISTRO_FEATURES = "systemd"
+
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
 file://0001-Make-sure-generated-service-files-get-a-.service-suf.patch \
 "
