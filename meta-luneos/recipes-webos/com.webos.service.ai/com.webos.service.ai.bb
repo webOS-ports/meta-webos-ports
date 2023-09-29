@@ -9,6 +9,11 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=5e240f6c8ed6312f22c06e00a91dd340 \
 "
 
+# The same restriction as in
+# meta-luneos/recipes-upstreamable/snowboy/snowboy_%.bbappend
+# com.webos.service.ai depends on libgoogleassistant which depends on snowboy
+COMPATIBLE_MACHINE = "rpi|aarch64|x86-64|qemux86-64|^halium$|pinetab2|pinephonepro|pinephone"
+
 DEPENDS = "glib-2.0 luna-service2 json-c pmloglib libgoogleassistant"
 
 WEBOS_VERSION = "1.0.0-11_6bc7a16f334f58dfa4b439b6f849d79a1b72871b"
