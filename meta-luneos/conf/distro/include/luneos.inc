@@ -210,3 +210,6 @@ MACHINEOVERRIDES[vardepsexclude] = "MACHINE MACHINE_CLASS"
 OVERRIDES[vardepsexclude] = "MACHINE MACHINE_CLASS"
 
 inherit android_image_types
+
+# To build lapack(blas) for snowboy
+FORTRAN:forcevariable = ",fortran"
