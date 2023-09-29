@@ -4,7 +4,7 @@
 # settings in <MACHINE>.conf .
 
 # Empty will use default gcc or you can use -clang"
-WEBRUNTIME_TOOLCHAIN = ""
+WEBRUNTIME_TOOLCHAIN = "-clang"
 
 SKIP_RECIPE[jsoncpp-clang] ?= "${@oe.utils.conditional('WEBRUNTIME_TOOLCHAIN', '-clang', '', 'WEBRUNTIME_TOOLCHAIN is not set to -clang', d)}"
 SKIP_RECIPE[libpbnjson-clang] ?= "${@oe.utils.conditional('WEBRUNTIME_TOOLCHAIN', '-clang', '', 'WEBRUNTIME_TOOLCHAIN is not set to -clang', d)}"
