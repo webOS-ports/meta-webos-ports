@@ -128,7 +128,8 @@ DEFAULT_WARN_QA = "\
     license-exists license-no-generic license-syntax license-format \
     license-incompatible license-file-missing obsolete-license \
 "
-ERROR_QA:append = " ${DEFAULT_WARN_QA}"
+# patch-status is by default enabled only for oe-core layer
+ERROR_QA:append = " ${DEFAULT_WARN_QA} patch-status"
 WARN_QA:remove = "${DEFAULT_WARN_QA}"
 
 # Default WEBOS_TARGET_* values (see webos_cmake.bbclass)
