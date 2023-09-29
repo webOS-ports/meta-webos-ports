@@ -29,5 +29,4 @@ SRCREV = "7d108f95b8a6d7772b31fe9e07e05a2401c220e2"
 
 EXTRA_OEMESON = "\
     -Ddoc=disabled \
-    -Dmachine=${MACHINE} \
 "
