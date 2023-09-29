@@ -17,9 +17,7 @@ IMAGE_INSTALL += " \
     qtbase \
     qtbase-examples \
     qtbase-plugins \
-    weston \
-    weston-init \
-    weston-examples \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'pam', 'weston weston-init weston-examples', '', d)} \
     gtk+3-demo \
     glmark2 \
     kernel-modules \
