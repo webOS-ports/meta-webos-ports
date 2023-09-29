@@ -10,6 +10,9 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=2bdfe040dcf81b4038370ae96036c519 \
 "
 
+inherit features_check
+REQUIRED_DISTRO_FEATURES = "systemd"
+
 DEPENDS = "libpbnjson pmloglib glib-2.0 gtest systemd"
 VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 VIRTUAL-RUNTIME_bash ?= "bash"
