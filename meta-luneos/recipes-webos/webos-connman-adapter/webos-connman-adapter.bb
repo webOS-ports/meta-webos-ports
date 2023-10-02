@@ -37,8 +37,9 @@ WEBOS_SYSTEMD_SERVICE = "webos-connman-adapter.service"
 WEBOS_SYSTEMD_SCRIPT = "webos-connman-adapter.sh"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-            file://0001-Workaround-to-prevent-luna-call-pending.patch \
-            file://0002-Add-back-com.palm.wan-for-cellular-support.patch \
+    file://0001-Workaround-to-prevent-luna-call-pending.patch \
+    file://0002-Add-back-com.palm.wan-for-cellular-support.patch \
+    file://0003-Update-webos-connman-adapter.role.json.in-Add-permis.patch \
 "
 
 S = "${WORKDIR}/git"
