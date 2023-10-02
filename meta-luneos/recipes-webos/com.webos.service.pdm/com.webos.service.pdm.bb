@@ -30,7 +30,7 @@ inherit pkgconfig
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-NfcDeviceHandler-Fix-incorrect-name.patch \
-    file://0002-com.webos.service.pdm-Remove-the-Android-Auto-bits.patch \
+    file://0002-Remove-the-Android-Auto-bits.patch \
 "
 
 S = "${WORKDIR}/git"
