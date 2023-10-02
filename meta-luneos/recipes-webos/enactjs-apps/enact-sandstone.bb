@@ -28,7 +28,6 @@ PV = "2.7.3"
 SRCREV = "ef92fc6465407d1539b8f1d989bd2eb55e96bcc7"
 SRCREV_enact = "020e8fd4ad58352274ec85a1842eeab01f12dbca"
 
-do_fetch[vardeps] += "SRCREV_enact"
 SRCREV_FORMAT = "main_enact"
 
 # Ordered dependency list for Sandstone; provides shrink-wrap style locking in of package versions

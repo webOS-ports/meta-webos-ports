@@ -27,9 +27,6 @@ SRC_URI = " \
     ${ENACTJS_GIT_REPO}/jsdoc-to-ts.git;name=jsdoc-to-ts${WEBOS_GIT_PROTOCOL};nobranch=1;destsuffix=git/jsdoc-to-ts \
 "
 
-# we don't include SRCPV in PV, so we have to manually include SRCREVs in do_fetch vardeps
-do_fetch[vardeps] += "SRCREV"
-do_fetch[vardeps] += "SRCREV_jsdoc-to-ts"
 SRCREV_FORMAT = "main_jsdoc-to-ts"
 
 # PV is the version of the cli distribution, as tagged in the

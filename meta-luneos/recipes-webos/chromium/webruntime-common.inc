@@ -31,8 +31,6 @@ SRC_URI:append = "\
     ${WEBOSOSE_GIT_REPO_COMPLETE_V8};destsuffix=git/src/v8;name=v8 \
 "
 
-## we don't include SRCPV in PV, so we have to manually include SRCREVs in do_fetch vardeps
-do_fetch[vardeps] += "SRCREV_v8"
 SRCREV_FORMAT = "main_v8"
 
 S = "${WORKDIR}/git"

@@ -28,7 +28,6 @@ PV = "4.5.3"
 SRCREV_main = "1cede54ee5df6f1a33d253eccaaf285fe1809bb6"
 SRCREV_enact = "020e8fd4ad58352274ec85a1842eeab01f12dbca"
 
-do_fetch[vardeps] += "SRCREV_enact"
 SRCREV_FORMAT = "main_enact"
 
 # Ordered dependency list for Moonstone; provides shrink-wrap style locking in of package versions
