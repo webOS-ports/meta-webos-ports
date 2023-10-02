@@ -13,7 +13,7 @@ DEPENDS = "glib-2.0 luna-service2 pmloglib libpbnjson"
 WEBOS_VERSION = "1.0.0-1_d44eeede2de5b06d08fd86ace6e93f5aed9f7f27"
 PR = "r3"
 
-PV = "1.0.0-1+git${SRCPV}"
+PV = "1.0.0-1+git"
 
 SRCREV = "d44eeede2de5b06d08fd86ace6e93f5aed9f7f27"
 

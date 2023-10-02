@@ -14,7 +14,7 @@ DEPENDS = "qtdeclarative pmloglib qt-features-webos luna-service2 glib-2.0"
 WEBOS_VERSION = "1.0.0-58_e4773e6b2db36f7d429973e58c072ad888326578"
 PR = "r21"
 
-PV = "1.0.0-58+git${SRCPV}"
+PV = "1.0.0-58+git"
 SRCREV = "e4773e6b2db36f7d429973e58c072ad888326578"
 
 inherit webos_qmake6

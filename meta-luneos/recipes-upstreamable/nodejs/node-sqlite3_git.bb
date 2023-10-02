@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=79558839a9db3e807e4ae6f8cd100c1c"
 
 DEPENDS = "node-gyp-native sqlite3"
 
-PV = "3.1.13+git${SRCPV}"
+PV = "3.1.13+git"
 
 inherit webos_npm_env
 

@@ -4,7 +4,7 @@ LIC_FILES_CHKSUM = "file://src/main.cpp;beginline=1;endline=18;md5=a513bca9b1708
 
 DEPENDS += "qtbase qtmultimedia libqofono"
 
-PV = "0.7.14+git${SRCPV}"
+PV = "0.7.14+git"
 SRCREV = "4285715324c902a28b402e3370fa765fa82c0134"
 
 inherit qt6-qmake

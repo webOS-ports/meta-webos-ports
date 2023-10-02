@@ -10,7 +10,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=82938594632d748d209a71bb60e3cdcb \
 
 DEPENDS = "curl"
 
-PV = "0.0.1+git${SRCPV}"
+PV = "0.0.1+git"
 PR = "r3"
 
 SRCREV_FORMAT = "libgdrive"

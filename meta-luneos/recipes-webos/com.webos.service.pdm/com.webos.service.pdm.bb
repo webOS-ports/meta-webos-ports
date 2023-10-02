@@ -20,7 +20,7 @@ RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_pdm-plugin}"
 
 WEBOS_VERSION = "1.0.1-82_76bdc781196e4a5d0cf01ccf8d59ea04d5ef9fe8"
 
-PV = "1.0.1-82+git${SRCPV}"
+PV = "1.0.1-82+git"
 SRCREV = "76bdc781196e4a5d0cf01ccf8d59ea04d5ef9fe8"
 
 inherit webos_cmake

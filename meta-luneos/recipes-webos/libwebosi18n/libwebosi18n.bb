@@ -14,7 +14,7 @@ DEPENDS = "libpbnjson boost"
 WEBOS_VERSION = "1.0.1-8_af063dc035e950fda7967144c0e4fa8acc7ded91"
 PR = "r3"
 
-PV = "1.0.1-8+git${SRCPV}"
+PV = "1.0.1-8+git"
 SRCREV = "af063dc035e950fda7967144c0e4fa8acc7ded91"
 
 inherit webos_cmake

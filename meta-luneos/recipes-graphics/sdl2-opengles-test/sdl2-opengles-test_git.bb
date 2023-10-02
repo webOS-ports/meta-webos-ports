@@ -10,7 +10,7 @@ inherit webos_filesystem_paths pkgconfig
 TARGETS = "sdl2_opengles1_test sdl2_opengles2_test"
 TARGETS:rpi = "sdl2_opengles2_test"
 
-PV = "1.0.6+git${SRCPV}"
+PV = "1.0.6+git"
 SRC_URI = "git://github.com/mer-qa/sdl2-opengles-test.git;branch=master;protocol=https \
     file://sdl2_opengles1_test-appinfo.json \
     file://sdl2_opengles2_test-appinfo.json"

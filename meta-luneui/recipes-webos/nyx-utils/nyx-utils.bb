@@ -19,7 +19,7 @@ inherit pkgconfig
 WEBOS_VERSION = "1.5.0-9_1e45c59b3671f66b8a372d57a32bcc2a400ff933"
 PR = "r5"
 
-PV = "1.5.0-9+git${SRCPV}"
+PV = "1.5.0-9+git"
 SRCREV = "1e45c59b3671f66b8a372d57a32bcc2a400ff933"
 
 

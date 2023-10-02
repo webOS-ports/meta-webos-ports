@@ -16,7 +16,7 @@ EXTRA_OECMAKE += "-DNO_TEST=1"
 WEBOS_VERSION = "1.0.0-12_067d32e0a22b2dcb23985f728515cc34f13b0712"
 PR = "r7"
 
-PV = "1.0.0-12+git${SRCPV}"
+PV = "1.0.0-12+git"
 SRCREV = "067d32e0a22b2dcb23985f728515cc34f13b0712"
 
 inherit webos_cmake

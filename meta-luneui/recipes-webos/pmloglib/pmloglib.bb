@@ -15,7 +15,7 @@ DEPENDS = "glib-2.0 libpbnjson"
 WEBOS_VERSION = "3.3.0-7_70ff1081b4ff6d910b89b96c86c6e42a5fa29c6a"
 PR = "r10"
 
-PV = "3.3.0-7+git${SRCPV}"
+PV = "3.3.0-7+git"
 SRCREV = "70ff1081b4ff6d910b89b96c86c6e42a5fa29c6a"
 
 LEAD_SONAME = "libPmLogLib.so"

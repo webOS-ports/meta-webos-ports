@@ -15,7 +15,7 @@ RDEPENDS:${PN} += "telegraf"
 WEBOS_VERSION = "1.0.0-8_7b57bed2916bf1a3f9842fdd82d612d37dde6add"
 PR = "r1"
 
-PV = "1.0.0-8+git${SRCPV}"
+PV = "1.0.0-8+git"
 SRCREV = "7b57bed2916bf1a3f9842fdd82d612d37dde6add"
 
 inherit systemd

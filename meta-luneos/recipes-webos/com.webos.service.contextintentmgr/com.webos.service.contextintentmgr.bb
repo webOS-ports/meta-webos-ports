@@ -15,7 +15,7 @@ DEPENDS = "nodejs-module-node-red"
 WEBOS_VERSION = "1.0.0-19_15340c48143f287d667ce0c48a3ecbbad94691d1"
 PR = "r6"
 
-PV = "1.0.0-19+git${SRCPV}"
+PV = "1.0.0-19+git"
 SRCREV = "15340c48143f287d667ce0c48a3ecbbad94691d1"
 
 inherit systemd

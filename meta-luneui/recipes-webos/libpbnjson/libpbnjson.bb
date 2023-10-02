@@ -15,7 +15,7 @@ inherit pkgconfig
 WEBOS_VERSION = "2.15.0-11_598b7168e0e5b69a10614d3c146613d3b5f7cca3"
 PR = "r13"
 
-PV = "2.15.0-11+git${SRCPV}"
+PV = "2.15.0-11+git"
 SRCREV = "598b7168e0e5b69a10614d3c146613d3b5f7cca3"
 
 PACKAGECONFIG ??= ""

@@ -24,7 +24,7 @@ COMPATIBLE_MACHINE = "^qemux86$|^qemux86-64$|^raspberrypi3$|^raspberrypi3-64$|^r
 
 WEBOS_VERSION = "1.0.0-gav.40_48def9addb5dcb0f408137c5f8c34c33d799ab90"
 
-PV = "1.0.0-gav.40+git${SRCPV}"
+PV = "1.0.0-gav.40+git"
 SRCREV = "48def9addb5dcb0f408137c5f8c34c33d799ab90"
 
 WEBOS_GIT_PARAM_BRANCH = "@gav"

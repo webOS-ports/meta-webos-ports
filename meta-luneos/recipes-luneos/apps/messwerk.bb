@@ -2,7 +2,7 @@ SUMMARY = "An application for reading sensors, ported from SFOS"
 LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=783b7e40cdfb4a1344d15b1f7081af66"
 
-PV = "0.1.0+git${SRCPV}"
+PV = "0.1.0+git"
 SRCREV = "c55936fc81751c156a85fee3067b61fe03ea8f44"
 
 DEPENDS = "qtbase qtdeclarative qtsensors qtpositioning"

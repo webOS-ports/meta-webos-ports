@@ -9,7 +9,7 @@ inherit allarch
 inherit webos_system_bus
 inherit webos_app
 
-PV = "3.0.3+git${SRCPV}"
+PV = "3.0.3+git"
 SRCREV = "440ff5da2e5a79d832811f4eeb9347f99085d6a9"
 
 SERVICE_NAME = "org.webosports.service.tweaks.prefs"

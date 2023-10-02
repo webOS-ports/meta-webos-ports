@@ -19,7 +19,7 @@ RDEPENDS:${PN} += "qml-webos-bridge"
 WEBOS_VERSION = "1.0.0-28_08621717c6c65b5ed75749c460e050a8f66fc231"
 PR = "r6"
 
-PV = "1.0.0-28+git${SRCPV}"
+PV = "1.0.0-28+git"
 SRCREV = "08621717c6c65b5ed75749c460e050a8f66fc231"
 
 inherit webos_qmake6

@@ -13,7 +13,7 @@ COMPATIBLE_MACHINE = "^halium$"
 
 PULSEAUDIO_VERSION = "16.1"
 
-PV = "1.3.1+git${SRCPV}"
+PV = "1.3.1+git"
 SRCREV = "ab03d444dbf44523233b0cf33b21bc58d0b1ffe8"
 
 SRC_URI = "git://github.com/droidian/pulseaudio-modules-droid-hidl.git;branch=bookworm;protocol=https \

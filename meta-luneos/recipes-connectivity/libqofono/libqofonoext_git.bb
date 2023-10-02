@@ -9,7 +9,7 @@ SRCREV = "af438b503af3875a4f82f0fb99278a1b2e39414d"
 SRC_URI = "git://github.com/sailfishos/libqofonoext.git;protocol=https;branch=master"
 S = "${WORKDIR}/git"
 
-PV = "1.029+gitr${SRCPV}"
+PV = "1.029+git"
 
 inherit pkgconfig qt6-qmake
 

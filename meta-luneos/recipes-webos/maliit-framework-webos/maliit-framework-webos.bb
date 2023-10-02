@@ -18,7 +18,7 @@ PACKAGECONFIG[libim] = "CONFIG+=enable-libim,CONFIG-=enable-libim,libim"
 WEBOS_VERSION = "0.99.0+20-101_9dff4aae8960bffa6f3add0c581dd77c6b8638ad"
 PR = "r35"
 
-PV = "0.99.0+20-101+git${SRCPV}"
+PV = "0.99.0+20-101+git"
 SRCREV = "9dff4aae8960bffa6f3add0c581dd77c6b8638ad"
 
 inherit pkgconfig

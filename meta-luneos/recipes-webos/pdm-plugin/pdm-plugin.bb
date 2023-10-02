@@ -16,7 +16,7 @@ DEPENDS = "com.webos.service.pdm"
 WEBOS_VERSION = "1.0.1-11_d63d098d4f9735ea19e73eda31e10b6ab52dd8d5"
 PR = "r3"
 
-PV = "1.0.1-11+git${SRCPV}"
+PV = "1.0.1-11+git"
 SRCREV = "d63d098d4f9735ea19e73eda31e10b6ab52dd8d5"
 
 inherit webos_cmake

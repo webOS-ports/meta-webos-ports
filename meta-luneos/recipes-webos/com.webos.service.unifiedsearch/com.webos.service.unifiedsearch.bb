@@ -13,7 +13,7 @@ DEPENDS = "luna-service2 libpbnjson glib-2.0 procps sqlite3"
 WEBOS_VERSION = "1.0.0-6_a911bcccbe9e7c5082a30173d064dca9e7c8ab21"
 PR = "r4"
 
-PV = "1.0.0-6+git${SRCPV}"
+PV = "1.0.0-6+git"
 SRCREV = "a911bcccbe9e7c5082a30173d064dca9e7c8ab21"
 
 inherit webos_cmake

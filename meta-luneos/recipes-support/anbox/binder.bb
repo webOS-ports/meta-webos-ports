@@ -3,7 +3,7 @@ LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://binder.c;endline=16;md5=b2770a40135de69c87b8e47553341bb7"
 
 SRCREV = "27fd47e11ef6eef93738f8f3df3e42c88975544e"
-PV = "3.0+git${SRCPV}"
+PV = "3.0+git"
 
 inherit module
 

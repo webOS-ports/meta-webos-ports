@@ -14,7 +14,7 @@ DEPENDS = "glib-2.0"
 WEBOS_VERSION = "1.0.0-26_d1236c28f289d0e40f4d26c5d73ad198158e62bb"
 PR = "r4"
 
-PV = "1.0.0-26+git${SRCPV}"
+PV = "1.0.0-26+git"
 SRCREV = "d1236c28f289d0e40f4d26c5d73ad198158e62bb"
 
 inherit webos_public_repo

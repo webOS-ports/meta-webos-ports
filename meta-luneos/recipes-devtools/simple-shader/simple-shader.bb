@@ -10,7 +10,7 @@ DEPENDS = "virtual/egl"
 SRC_URI = "git://github.com/Tofee/simple-shader.git;protocol=https;branch=main"
 S = "${WORKDIR}/git"
 
-PV = "0.0.1+git${SRCPV}"
+PV = "0.0.1+git"
 SRCREV = "d373356857a36707d740b65300a74ffaf74c14ae"
 
 do_compile() {

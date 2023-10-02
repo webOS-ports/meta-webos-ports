@@ -9,7 +9,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 WEBOS_VERSION = "3.3.0-2_75eef528791b73b8bc4f84cf522c6a1c533edc32"
 PR = "r1"
 
-PV = "3.3.0-7+git${SRCPV}"
+PV = "3.3.0-7+git"
 SRCREV = "70ff1081b4ff6d910b89b96c86c6e42a5fa29c6a"
 
 inherit webos_public_repo

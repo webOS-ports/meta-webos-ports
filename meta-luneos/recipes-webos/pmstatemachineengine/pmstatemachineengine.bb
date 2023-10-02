@@ -7,7 +7,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "pmloglib"
 
-PV = "2.0.0-13+git${SRCPV}"
+PV = "2.0.0-13+git"
 SRCREV = "a2a49bed01c9abc8545265639ae91416f15e3205"
 
 inherit webos_public_repo

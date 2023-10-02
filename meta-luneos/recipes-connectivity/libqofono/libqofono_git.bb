@@ -11,7 +11,7 @@ SRC_URI = "git://github.com/sailfishos/libqofono.git;protocol=https;branch=maste
 "
 S = "${WORKDIR}/git"
 
-PV = "0.113+gitr${SRCPV}"
+PV = "0.113+git"
 
 inherit qt6-qmake
 

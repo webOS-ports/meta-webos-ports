@@ -10,7 +10,7 @@ DEPENDS = "glib-2.0 event-monitor pmloglib libpbnjson libwebosi18n"
 
 WEBOS_VERSION = "1.0.0-5_c99401afd1464f8b74766696560bad84a10e5ab4"
 
-PV = "1.0.0-5+git${SRCPV}"
+PV = "1.0.0-5+git"
 SRCREV = "c99401afd1464f8b74766696560bad84a10e5ab4"
 
 inherit webos_cmake

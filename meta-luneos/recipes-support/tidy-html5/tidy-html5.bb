@@ -3,7 +3,7 @@ SECTION = "libs"
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://license.html;md5=dd71141e2a02dcb46089c09e63d00657"
 
-PV = "0.99+git${SRCPV}"
+PV = "0.99+git"
 SRCREV = "0cf6d998431a61f1bd630e7883d4d43df4ad8ccc"
 
 SRC_URI = " \

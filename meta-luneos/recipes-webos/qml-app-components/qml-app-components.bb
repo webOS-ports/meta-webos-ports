@@ -15,7 +15,7 @@ DEPENDS:append = " ${@ 'qtshadertools-native' if d.getVar('QT_VERSION')[0] == '6
 WEBOS_VERSION = "1.0.0-6_ad9b0aee66408b214d5f4d61b9912ed411da2f00"
 PR = "r4"
 
-PV = "1.0.0-6+git${SRCPV}"
+PV = "1.0.0-6+git"
 SRCREV = "ad9b0aee66408b214d5f4d61b9912ed411da2f00"
 
 inherit webos_qmake6

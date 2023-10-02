@@ -21,5 +21,5 @@ S = "${WORKDIR}/git"
 WEBOS_VERSION ="1.0.0-4_b8ddfdc6bd7f0de06b5e35a6ee9daf1eed633642"
 PR = "r1"
 
-PV = "1.0.0-4+git${SRCPV}"
+PV = "1.0.0-4+git"
 SRCREV = "b8ddfdc6bd7f0de06b5e35a6ee9daf1eed633642"

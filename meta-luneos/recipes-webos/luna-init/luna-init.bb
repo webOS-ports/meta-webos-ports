@@ -7,7 +7,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "tzdata python3-pytz-native"
 
-PV = "2.0.1-10+git${SRCPV}"
+PV = "2.0.1-10+git"
 SRCREV = "d5086f6422693138c4d5a0d2a11926d906af3a72"
 
 inherit allarch

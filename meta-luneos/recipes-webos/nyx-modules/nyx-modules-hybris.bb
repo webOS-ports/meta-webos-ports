@@ -19,7 +19,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/nyx-modules:"
 # Depends on libhybris which has this restriction
 COMPATIBLE_MACHINE = "^halium$"
 
-PV = "0.1.0-1+git${SRCPV}"
+PV = "0.1.0-1+git"
 SRCREV = "6197796c176e956d2b26c107698beaab28e276b9"
 
 inherit webos_ports_repo

@@ -8,7 +8,7 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "glib-2.0 db8 pidgin luna-service2 tidy-html5"
 
-PV = "3.0.5+git${SRCPV}"
+PV = "3.0.5+git"
 SRCREV = "3d1af1f8717fe513343feb33b297bedc7bbfa571"
 
 inherit webos_ports_ose_repo

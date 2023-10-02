@@ -14,7 +14,7 @@ DEPENDS = "qtbase"
 WEBOS_VERSION = "1.0.0-55_8bf2bf5ced2aafd6220233cbddc750965ff535d1"
 PR = "r8"
 
-PV = "1.0.0-55+git${SRCPV}"
+PV = "1.0.0-55+git"
 SRCREV = "8bf2bf5ced2aafd6220233cbddc750965ff535d1"
 
 inherit webos_qmake6

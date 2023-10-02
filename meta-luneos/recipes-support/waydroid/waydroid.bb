@@ -8,7 +8,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=1ebbd3e34237af26da5dc08a4e440464"
 SECTION = "webos/support"
 
 SRCREV = "d03e10c132de8e03dff781868b3e37b7f7c7128a"
-PV = "1.2.0+git${SRCPV}"
+PV = "1.2.0+git"
 
 
 RDEPENDS:${PN} += "waydroid-data lxc python3-gbinder python3-pygobject libgbinder python3-pyclip"

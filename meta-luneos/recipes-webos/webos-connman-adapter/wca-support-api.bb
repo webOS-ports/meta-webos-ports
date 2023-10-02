@@ -14,7 +14,7 @@ DEPENDS = "libpbnjson luna-service2"
 WEBOS_VERSION = "1.0.0-4_54eca17251c81e7291893682ed86bc39a8f568ac"
 PR = "r2"
 
-PV = "1.0.0-4+git${SRCPV}"
+PV = "1.0.0-4+git"
 
 SRCREV = "54eca17251c81e7291893682ed86bc39a8f568ac"
 

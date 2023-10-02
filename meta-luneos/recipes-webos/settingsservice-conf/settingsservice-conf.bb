@@ -9,7 +9,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=3b83ef96387f14655fc854ddc3c6bd57"
 WEBOS_VERSION = "1.0.0-11_8e3694a3d3da9a26a688bda58655d13e714c3967"
 PR = "r2"
 
-PV = "1.0.0-11+git${SRCPV}"
+PV = "1.0.0-11+git"
 SRCREV = "8e3694a3d3da9a26a688bda58655d13e714c3967"
 
 inherit webos_cmake

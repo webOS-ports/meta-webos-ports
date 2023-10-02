@@ -7,7 +7,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "libxml2 luna-service2 glib-2.0 json-c sqlite3 "
 
-PV = "2.0.0-1+git${SRCPV}"
+PV = "2.0.0-1+git"
 SRCREV = "8205b762d2f99851961fdc17c82554376bc91f80"
 
 inherit webos_ports_fork_repo

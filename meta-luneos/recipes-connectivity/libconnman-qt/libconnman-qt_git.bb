@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = "file://libconnman-qt/clockmodel.h;endline=8;md5=ea9f72405080
 DEPENDS += "qtbase qtdeclarative"
 
 VERSION = "1.3.3"
-PV = "${VERSION}+git${SRCPV}"
+PV = "${VERSION}+git"
 
 SRCREV = "16e1498c1de653f71391a0cafb47251be9355b6c"
 SRC_URI = "git://github.com/sailfishos/libconnman-qt.git;protocol=https;branch=master \

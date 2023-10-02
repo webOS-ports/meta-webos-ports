@@ -7,7 +7,7 @@ DEPENDS = "qtbase qtdeclarative qtbase-native"
 
 inherit qt6-qmake
 
-PV = "5.24.0+git${SRCPV}"
+PV = "5.24.0+git"
 SRCREV = "e611adc6dce026e32aef6db902cfa4ee99d00265"
 
 SRC_URI = "git://github.com/sailfishos/kf5bluezqt.git;protocol=https;branch=master \

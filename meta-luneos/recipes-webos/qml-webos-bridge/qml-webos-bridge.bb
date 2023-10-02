@@ -15,7 +15,7 @@ RDEPENDS:${PN} += "qml-webos-components"
 WEBOS_VERSION = "1.0.0-132_8ba88a9b0dae1ce530d903f76ff9a6a1b8b533c1"
 PR = "r18"
 
-PV = "1.0.0-132+git${SRCPV}"
+PV = "1.0.0-132+git"
 SRCREV = "8ba88a9b0dae1ce530d903f76ff9a6a1b8b533c1"
 
 inherit webos_qmake6

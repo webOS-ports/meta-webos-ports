@@ -18,7 +18,7 @@ WEBOS_REPO_NAME = "com.webos.service.nettools"
 WEBOS_VERSION = "1.1.0-6_5ebd0866e9709d88db9c433746ccfcbc7561d48f"
 PR = "r1"
 
-PV = "1.1.0-6+git${SRCPV}"
+PV = "1.1.0-6+git"
 SRCREV = "5ebd0866e9709d88db9c433746ccfcbc7561d48f"
 
 inherit pkgconfig

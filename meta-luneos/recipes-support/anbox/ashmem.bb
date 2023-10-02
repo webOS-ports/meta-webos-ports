@@ -3,7 +3,7 @@ LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://ashmem.c;endline=17;md5=c74d8e70552b07bbd79f07120b792292"
 
 SRCREV = "27fd47e11ef6eef93738f8f3df3e42c88975544e"
-PV = "3.0+git${SRCPV}"
+PV = "3.0+git"
 
 inherit module
 

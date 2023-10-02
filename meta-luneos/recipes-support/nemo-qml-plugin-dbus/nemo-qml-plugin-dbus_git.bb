@@ -8,7 +8,7 @@ LIC_FILES_CHKSUM = "file://src/plugin/plugin.cpp;beginline=1;endline=30;md5=022f
 
 DEPENDS = "qtbase qtdeclarative glib-2.0 dbus dbus-glib"
 
-PV = "2.1.28+git${SRCPV}"
+PV = "2.1.28+git"
 SRCREV = "347031ab0304dda20d7c908130c721c229f3e33f"
 
 SRC_URI = " \

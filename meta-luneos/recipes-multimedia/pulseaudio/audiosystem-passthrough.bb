@@ -8,7 +8,7 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 inherit pkgconfig
 
-PV = "1.2.1+git${SRCPV}"
+PV = "1.2.1+git"
 SRCREV = "3165200ce2e6aa84274c8bb2134c839a1544153d"
 
 SRC_URI = " \

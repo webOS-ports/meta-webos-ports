@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "qtbase glib-2.0 luna-service2 qtpositioning"
 
-PV = "6.3.0+git${SRCPV}"
+PV = "6.3.0+git"
 SRCREV = "70dae9de2b1f19f8b72f3c826f14f8a0bd9ad2cb"
 
 inherit webos_ports_repo

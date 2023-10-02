@@ -28,7 +28,7 @@ SRC_URI = "git://github.com/ony/${BPN};branch=gcc-4.7;protocol=https \
 # Use gcc-4.7/v0.1.6 tag. It's backport of gcc-4.8 branch,
 # so it would work fine with both compiler versions
 SRCREV = "b4f56ad18162c2e2f9acef93f0f42eac0f9f3163"
-PV = "1.0.6+git${SRCPV}"
+PV = "1.0.6+git"
 
 S = "${WORKDIR}/git"
 

@@ -19,7 +19,7 @@ RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_ntp} tzcode luna-init"
 WEBOS_VERSION = "4.4.0-25_527dfeba2b7d1c7f84ea5e8775b1f1ec4c40b183"
 PR = "r11"
 
-PV = "4.4.0-25+git${SRCPV}"
+PV = "4.4.0-25+git"
 SRCREV = "527dfeba2b7d1c7f84ea5e8775b1f1ec4c40b183"
 
 inherit webos_public_repo

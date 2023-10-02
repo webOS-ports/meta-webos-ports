@@ -12,7 +12,7 @@ PROVIDES = "virtual/pmssupportreference"
 WEBOS_VERSION = "1.0.0-4_fb77973c4c82a384cee430719365b95e26de6d03"
 PR = "r1"
 
-PV = "1.0.0-4+git${SRCPV}"
+PV = "1.0.0-4+git"
 SRCREV = "fb77973c4c82a384cee430719365b95e26de6d03"
 
 inherit pkgconfig

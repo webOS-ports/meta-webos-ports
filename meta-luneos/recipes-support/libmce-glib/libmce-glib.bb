@@ -19,7 +19,7 @@ SRC_URI[dbus-names.sha256sum] = "fd890ba5921cc58c1d61b4e406f22f5d20ffb4ed6cbc8af
 SRC_URI[mode-names.md5sum] = "b4927cca05e21114a5ba40c0d1e27f8a"
 SRC_URI[mode-names.sha256sum] = "63b3b5f9966f858c9387a770021054e6a72c5ef68e181329ca25b41e29dd32a8"
 
-PV = "1.0.7-1+git${SRCPV}"
+PV = "1.0.7-1+git"
 SRCREV = "517cdafd222e3a508786174a119e6f1e5a6e4b45"
 
 EXTRA_OEMAKE = "KEEP_SYMBOLS=1"

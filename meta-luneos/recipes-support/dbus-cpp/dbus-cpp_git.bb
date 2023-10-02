@@ -12,7 +12,7 @@ LIC_FILES_CHKSUM = " \
 DEPENDS += "libxml2 properties-cpp process-cpp boost dbus"
 RDEPENDS:${PN} += "boost-system dbus-lib boost-program-options boost-filesystem"
 
-PV = "5.0.0+git${SRCPV}"
+PV = "5.0.0+git"
 
 SRCREV = "967dc1caf0efe0a1286c308e8e8dd1bf7da5f3ee"
 SRC_URI = "git://github.com/lib-cpp/${BPN}.git;branch=master;protocol=https"

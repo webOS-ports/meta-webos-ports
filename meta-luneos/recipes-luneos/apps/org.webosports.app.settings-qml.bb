@@ -13,7 +13,7 @@ inherit webos_cmake
 inherit webos_app
 inherit pkgconfig
 
-PV = "0.4.0-1+git${SRCPV}"
+PV = "0.4.0-1+git"
 SRCREV = "df0c6cc279b5fc9e6b210ba6fb10f762d2cd552f"
 
 WEBOS_GIT_PARAM_BRANCH = "qml-based"

@@ -8,7 +8,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "pmloglib openssl glib-2.0"
 
-PV = "3.0.0-4+git${SRCPV}"
+PV = "3.0.0-4+git"
 SRCREV = "35ef239390b8f20272d99cff73a50af4dae59043"
 
 inherit webos_cmake

@@ -15,7 +15,7 @@ DEPENDS = "luna-service2 glib-2.0 pmloglib libpbnjson nyx-lib"
 WEBOS_VERSION = "1.0.0-11_f7dd5e7ec8cb39154634aab0d70667c29253e0be"
 PR = "r1"
 
-PV = "1.0.0-11+git${SRCPV}"
+PV = "1.0.0-11+git"
 SRCREV = "f7dd5e7ec8cb39154634aab0d70667c29253e0be"
 
 inherit pkgconfig

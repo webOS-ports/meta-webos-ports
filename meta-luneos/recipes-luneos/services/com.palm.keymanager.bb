@@ -11,7 +11,7 @@ inherit allarch
 inherit webos_filesystem_paths
 inherit webos_system_bus
 
-PV = "0.1.0+git${SRCPV}"
+PV = "0.1.0+git"
 SRCREV = "7c88a02bc3db9c0550baa98de25b1f3cd061f075"
 
 WEBOS_REPO_NAME = "keymanager"

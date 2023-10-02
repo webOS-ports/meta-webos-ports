@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "luna-service2 json-c glib-2.0 pulseaudio"
 
-PV = "0.1.0-10+git${SRCPV}"
+PV = "0.1.0-10+git"
 SRCREV = "92fde6af9e56117742aa687df931575b14376fad"
 
 SERVICE_NAME = "org.webosports.service.audio"

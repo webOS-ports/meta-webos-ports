@@ -14,7 +14,7 @@ DEPENDS = "qtdeclarative wayland-native qtwayland qtwayland-native qt-features-w
 WEBOS_VERSION = "2.0.0-388_e088dc9289ac1931cbd6cbfb0d9583a520139553"
 PR = "r59"
 
-PV ="2.0.0-388+git${SRCPV}"
+PV ="2.0.0-388+git"
 
 SRCREV = "e088dc9289ac1931cbd6cbfb0d9583a520139553"
 

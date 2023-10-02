@@ -11,7 +11,7 @@ DEPENDS = "jemalloc luna-service2 db8 glibmm boost libsandbox glib-2.0 libsigc++
 WEBOS_VERSION = "2.0.1-10_561526086403e4b59a4600cdd28acbffbcc5a79e"
 PR = "r6"
 
-PV = "2.0.1-10+git${SRCPV}"
+PV = "2.0.1-10+git"
 SRCREV = "561526086403e4b59a4600cdd28acbffbcc5a79e"
 
 inherit webos_public_repo

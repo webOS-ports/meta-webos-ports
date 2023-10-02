@@ -11,7 +11,7 @@ DEPENDS = "luna-service2 glib-2.0 libpmscore virtual/pmssupportreference pmlogli
 WEBOS_VERSION = "1.0.0-11_7513b0adcb45c8a44f0ebc5b857023c8c6658451"
 PR = "r2"
 
-PV = "1.0.0-11+git${SRCPV}"
+PV = "1.0.0-11+git"
 SRCREV = "7513b0adcb45c8a44f0ebc5b857023c8c6658451"
 
 inherit pkgconfig

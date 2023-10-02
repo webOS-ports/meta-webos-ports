@@ -13,7 +13,7 @@ WEBOS_GIT_PARAM_BRANCH = "herrie/qt6"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
-PV = "0.5.0-4+git${SRCPV}"
+PV = "0.5.0-4+git"
 SRCREV = "08f75b341b8ce856eac947991f987d86d39eb024"
 
 # Otherwise there is conflict between None defined in Xlib.h and

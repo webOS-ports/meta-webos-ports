@@ -24,7 +24,7 @@ RDEPENDS:${PN}:remove:class-target = "${@oe.utils.conditional('WEBOS_PREFERRED_P
 WEBOS_VERSION = "1.0.1-10_b8610f05673d48b498e38cb774d6f1056c3b5522"
 PR = "r8"
 
-PV = "1.0.1-10+git${SRCPV}"
+PV = "1.0.1-10+git"
 SRCREV = "b8610f05673d48b498e38cb774d6f1056c3b5522"
 
 inherit webos_cmake

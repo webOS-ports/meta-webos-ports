@@ -18,7 +18,7 @@ RDEPENDS:${PN} += "qtsvg-plugins qtmultimedia-qmlplugins"
 RRECOMMENDS:${PN} += "hunspell-dictionaries"
 
 SRCREV = "f832d242bd41a2c72a27af51b07a4d8736f4b81d"
-PV = "0.99.2+git${SRCPV}"
+PV = "0.99.2+git"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     file://0001-make-it-compatible-with-newer-hunspell.patch \

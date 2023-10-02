@@ -14,7 +14,7 @@ DEPENDS = "glib-2.0 luna-service2 pmloglib nlohmann-json"
 WEBOS_VERSION = "1.0.0-1_ab3652ecfc70c53ee79a660752ebbd57e9502804"
 PR = "r0"
 
-PV = "1.0.0-1+git${SRCPV}"
+PV = "1.0.0-1+git"
 SRCREV = "ab3652ecfc70c53ee79a660752ebbd57e9502804"
 
 inherit webos_cmake

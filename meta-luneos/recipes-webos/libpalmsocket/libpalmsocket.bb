@@ -7,7 +7,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "pmloglib glib-2.0 openssl c-ares pmstatemachineengine"
 
-PV = "2.0.0-33+git${SRCPV}"
+PV = "2.0.0-33+git"
 SRCREV = "cd3014c00eac01494578c656fa46d28dd69de243"
 
 inherit webos_ports_fork_repo

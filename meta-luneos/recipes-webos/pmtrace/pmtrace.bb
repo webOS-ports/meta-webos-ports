@@ -24,7 +24,7 @@ DEPENDS = "lttng-ust libpbnjson pmloglib glib-2.0"
 WEBOS_VERSION = "1.0.0-15_407d07f257498472a53bf39c9d176953885cadeb"
 PR = "r13"
 
-PV = "1.0.0-15+git${SRCPV}"
+PV = "1.0.0-15+git"
 SRCREV = "407d07f257498472a53bf39c9d176953885cadeb"
 
 inherit webos_cmake

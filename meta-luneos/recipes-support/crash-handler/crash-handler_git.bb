@@ -8,7 +8,7 @@ LIC_FILES_CHKSUM = " \
     file://table-unwind-arm.c;beginline=1;endline=27;md5=8ab295976fef914ca04d5d0843f0849a \
     file://mcternan-unwinder/LICENCE;md5=1b6c91f7832f201dbf0ce618a39abdd0"
 
-PV = "0.6+git${SRCPV}"
+PV = "0.6+git"
 SRCREV = "3633c18f924c3fc501b5f090ec9a760890002295"
 
 inherit webos_ports_repo

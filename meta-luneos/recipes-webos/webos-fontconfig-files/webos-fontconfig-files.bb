@@ -12,7 +12,7 @@ LIC_FILES_CHKSUM = " \
 #WEBOS_VERSION = "1.0.0-5_e3b8d5297c20edd8fc73ee3ac8729094159942ec"
 PR = "r4"
 
-PV = "1.0.0-5+git${SRCPV}"
+PV = "1.0.0-5+git"
 SRCREV = "e3b8d5297c20edd8fc73ee3ac8729094159942ec"
 
 inherit fontcache

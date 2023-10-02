@@ -14,7 +14,7 @@ RDEPENDS:${PN} = "luna-prefs-data"
 
 WEBOS_VERSION = "3.0.0-14_5470fb26fccbd246a23bb519c3b1050d6d305562"
 
-PV = "3.0.0-14+git${SRCPV}"
+PV = "3.0.0-14+git"
 SRCREV = "5470fb26fccbd246a23bb519c3b1050d6d305562"
 
 inherit webos_public_repo

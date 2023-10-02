@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = "file://COPYING.txt;md5=d32239bcb673463ab874e80d47fae504"
 DEPENDS = "qtbase qtdeclarative"
 RDEPENDS:${PN} += "qtdeclarative-qmlplugins"
 
-PV = "1.0.0-4+git${SRCPV}"
+PV = "1.0.0-4+git"
 SRCREV = "a07b22bc8a47fb3160c9eeb8a2aafee19d750d8f"
 
 inherit webos_ports_repo

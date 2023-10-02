@@ -9,7 +9,7 @@ inherit webos_filesystem_paths
 inherit webos_system_bus
 inherit webos_app
 
-PV = "0.3.34+git${SRCPV}"
+PV = "0.3.34+git"
 SRCREV = "d938b95cca2042b49127b6f9bde5060ff47b29c8"
 
 SERVICE_NAME = "org.webosports.service.cdav"

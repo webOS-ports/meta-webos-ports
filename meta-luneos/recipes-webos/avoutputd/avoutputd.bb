@@ -12,7 +12,7 @@ RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_aval-impl}"
 WEBOS_VERSION = "1.0.0-5_36d08c75feb62391af087ccdc9c00fcaf8271712"
 PR = "r1"
 
-PV = "1.0.0-5+git${SRCPV}"
+PV = "1.0.0-5+git"
 SRCREV = "36d08c75feb62391af087ccdc9c00fcaf8271712"
 
 inherit pkgconfig

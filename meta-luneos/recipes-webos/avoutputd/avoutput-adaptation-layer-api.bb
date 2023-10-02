@@ -10,7 +10,7 @@ DEPENDS = "glib-2.0"
 WEBOS_VERSION = "1.0.0-1_46828b6f12a027d70eab3e3ae720b3f8be1de261"
 PR = "r0"
 
-PV = "1.0.0-1+git${SRCPV}"
+PV = "1.0.0-1+git"
 SRCREV = "46828b6f12a027d70eab3e3ae720b3f8be1de261"
 
 inherit pkgconfig

@@ -14,7 +14,7 @@ ZIP_NAME = "${ZIP_BASENAME}${IMAGE_VERSION_SUFFIX}"
 
 inherit webos_ports_repo kernel-artifact-names deploy nopackages
 
-PV = "1.0.3+git${SRCPV}"
+PV = "1.0.3+git"
 SRCREV = "b69bf00f602138628521184b7f6d0773736d5f8b"
 
 WEBOS_REPO_NAME = "android-update-package"

@@ -13,7 +13,7 @@ LIC_FILES_CHKSUM = " \
 WEBOS_VERSION = "1.0.0-15_48cb6a1271fbb3c08f8503da81047b28b1ef8c7c"
 PR = "r7"
 
-PV = "1.0.0-15+git${SRCPV}"
+PV = "1.0.0-15+git"
 SRCREV = "48cb6a1271fbb3c08f8503da81047b28b1ef8c7c"
 
 inherit pkgconfig

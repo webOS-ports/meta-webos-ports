@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=c75985e733726beaba57bc5253e96d04"
 
 COMPATIBLE_MACHINE = "(qemux86|qemux86-64)"
 
-PV = "0.1+git${SRCPV}"
+PV = "0.1+git"
 PR = "r0"
 SRCREV = "8e43168d508abc2702a97f8b264ab08330465608"
 

@@ -19,7 +19,7 @@ VIRTUAL-RUNTIME_webos-customization ?= ""
 WEBOS_VERSION = "2.0.0-67_5ee2734aa1dbad21bcd0e443471b05f269329fd3"
 PR = "r28"
 
-PV = "2.0.0-67+git${SRCPV}"
+PV = "2.0.0-67+git"
 SRCREV = "5ee2734aa1dbad21bcd0e443471b05f269329fd3"
 
 inherit pkgconfig

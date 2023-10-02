@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = " \
     file://LICENSE.LGPL;md5=4193e7f1d47a858f6b7c0f1ee66161de \
 "
 
-PV = "0.8.0+git${SRCPV}"
+PV = "0.8.0+git"
 SRCREV = "7ecfeaa23e2038a761bd1dfa95726dc0eed536d1"
 
 DEPENDS = "qtbase libhybris qtwayland virtual/android-headers qtdeclarative"

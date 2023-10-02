@@ -5,7 +5,7 @@ SECTION = "webos/frameworks"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-PV = "1.0-128.2+git${SRCPV}"
+PV = "1.0-128.2+git"
 SRCREV = "02502917b3ea60add7f6a08aa706dd00bc232c5b"
 
 inherit webos_ports_fork_repo

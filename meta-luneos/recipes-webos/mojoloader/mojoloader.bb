@@ -13,7 +13,7 @@ LIC_FILES_CHKSUM = " \
 WEBOS_VERSION = "1.1-3_7c22039cbef6e78adc0b4165a0f6c7232eac24d8"
 PR = "r7"
 
-PV = "1.1-3+git${SRCPV}"
+PV = "1.1-3+git"
 SRCREV = "7c22039cbef6e78adc0b4165a0f6c7232eac24d8"
 
 

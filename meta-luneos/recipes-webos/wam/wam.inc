@@ -21,7 +21,7 @@ RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_cpushareholder}"
 WEBOS_VERSION = "1.0.2-80_56d52cda62567a5b1f4a3780d1f5401d89fb8d10"
 INC_PR = "r64"
 
-PV = "1.0.2-80+git${SRCPV}"
+PV = "1.0.2-80+git"
 SRCREV = "56d52cda62567a5b1f4a3780d1f5401d89fb8d10"
 
 WAM_BUILD_SYSTEM ?= "webos_cmake"

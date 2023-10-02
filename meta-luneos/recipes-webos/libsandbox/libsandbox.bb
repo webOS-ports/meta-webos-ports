@@ -13,7 +13,7 @@ LIC_FILES_CHKSUM = " \
 WEBOS_VERSION = "2.0.0-2_03120c12ebae2cb2fbd4cb2b58e6b2c6b565efa5"
 PR = "r3"
 
-PV = "2.0.0-2+git${SRCPV}"
+PV = "2.0.0-2+git"
 SRCREV = "03120c12ebae2cb2fbd4cb2b58e6b2c6b565efa5"
 
 inherit webos_public_repo

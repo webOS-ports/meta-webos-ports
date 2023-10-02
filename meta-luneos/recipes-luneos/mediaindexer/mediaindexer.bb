@@ -7,7 +7,7 @@ DEPENDS += "db8 glib-2.0 luna-service2 sqlite3 taglib qtbase luna-sysmgr-common"
 # We need this in order to have the mime based media detection working
 RDEPENDS:${PN} += "shared-mime-info"
 
-PV = "0.1.0-14+git${SRCPV}"
+PV = "0.1.0-14+git"
 SRCREV = "f9784494312c961c25b870f7fc7083492ea9f0e1"
 
 inherit webos_ports_repo

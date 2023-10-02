@@ -26,7 +26,7 @@ DEPENDS = "glib-2.0 pmloglib"
 WEBOS_VERSION = "7.3.0-13_0ee217947853f7fbd0e0a625d99c229ecd33ab91"
 PR = "r9"
 
-PV = "7.3.0-13+git${SRCPV}"
+PV = "7.3.0-13+git"
 SRCREV = "0ee217947853f7fbd0e0a625d99c229ecd33ab91"
 
 inherit webos_public_repo

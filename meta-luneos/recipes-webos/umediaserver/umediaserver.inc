@@ -30,7 +30,7 @@ do_configure:prepend() {
 
 WEBOS_VERSION = "1.0.0-gav.35_fd5cba5e25bb62b19ed467ee53f7691a87b2d0b8"
 
-PV = "1.0.0-gav.35+git${SRCPV}"
+PV = "1.0.0-gav.35+git"
 SRCREV = "fd5cba5e25bb62b19ed467ee53f7691a87b2d0b8"
 
 WEBOS_GIT_PARAM_BRANCH = "@gav"

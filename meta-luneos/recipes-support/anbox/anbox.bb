@@ -11,7 +11,7 @@ SRCREV_FORMAT = "main"
 SRCREV_main = "9de4e87cdd05135e1c71e6eadb68bf82719cebdf"
 SRCREV_cpu-features = "b9593c8b395318bb2bc42683a94f962564cc4664"
 SRCREV_sdbus-cpp = "3b735bf1aad65277f56e65c828a22455cbaf5245"
-PV = "3.0+git${SRCPV}"
+PV = "3.0+git"
 
 DEPENDS += "dbus-cpp libsdl2 libsdl2-image lxc glm protobuf protobuf-native gtest elfutils sdbus-c++-tools-native"
 

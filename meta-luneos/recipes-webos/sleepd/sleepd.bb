@@ -16,7 +16,7 @@ RDEPENDS:${PN} += "powerd"
 WEBOS_VERSION = "2.0.0-17_3727287956ca9ac3c6dfb05c64a2df446fa61289"
 PR = "r11"
 
-PV = "2.0.0-17+git${SRCPV}"
+PV = "2.0.0-17+git"
 SRCREV = "3727287956ca9ac3c6dfb05c64a2df446fa61289"
 
 inherit webos_public_repo

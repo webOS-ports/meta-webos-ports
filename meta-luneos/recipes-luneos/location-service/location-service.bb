@@ -18,7 +18,7 @@ S = "${WORKDIR}/git"
 DEPENDS = "luna-service2 glib-2.0 libpbnjson"
 RDEPENDS:${PN} = "geoclue"
 
-PV = "0.1.0+git${SRCPV}"
+PV = "0.1.0+git"
 SRCREV = "948489ec5b4387e0ab9c5e5d49484ea49d440834"
 
 SYSTEMD_PACKAGES = "${PN}"

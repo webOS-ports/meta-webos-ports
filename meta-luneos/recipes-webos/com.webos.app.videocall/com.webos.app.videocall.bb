@@ -12,7 +12,7 @@ LIC_FILES_CHKSUM = " \
 WEBOS_VERSION = "0.0.1-6_32a649a56f2389243e7ecd95ec978f6ab0a7e335"
 PR = "r0"
 
-PV = "0.0.1-6+git${SRCPV}"
+PV = "0.0.1-6+git"
 SRCREV = "32a649a56f2389243e7ecd95ec978f6ab0a7e335"
 
 inherit webos_enactjs_app

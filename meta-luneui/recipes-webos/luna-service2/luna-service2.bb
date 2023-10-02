@@ -21,7 +21,7 @@ RDEPENDS:${PN} = "luna-service2-security-conf ${VIRTUAL-RUNTIME_cpushareholder} 
 WEBOS_VERSION = "3.21.2-34_e59ad3680ba012ca008d51500275c0ada6c2116a"
 PR = "r32"
 
-PV = "3.21.2-34+git${SRCPV}"
+PV = "3.21.2-34+git"
 SRCREV = "e59ad3680ba012ca008d51500275c0ada6c2116a"
 
 EXTRA_OECMAKE += "${@ '-DWEBOS_DISTRO_PRERELEASE:STRING="devel"' \

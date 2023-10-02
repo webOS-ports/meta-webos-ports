@@ -12,7 +12,7 @@ inherit pkgconfig
 SRC_URI = "git://github.com/sailfishos/libglibutil.git;protocol=https;branch=master"
 S = "${WORKDIR}/git"
 
-PV = "1.0.61-1+git${SRCPV}"
+PV = "1.0.61-1+git"
 SRCREV = "508e1255782e59725c25068874337e6309da04b2"
 
 EXTRA_OEMAKE = "KEEP_SYMBOLS=1"

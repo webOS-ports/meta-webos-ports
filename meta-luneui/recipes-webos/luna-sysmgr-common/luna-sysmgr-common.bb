@@ -10,7 +10,7 @@ DEPENDS += "luna-webkit-api"
 DEPENDS += "luna-sysmgr-ipc luna-sysmgr-ipc-messages"
 DEPENDS += "qtbase"
 
-PV = "3.0.0-3+git${SRCPV}"
+PV = "3.0.0-3+git"
 SRCREV = "36f2181cb92690c02af7d87b1dc7d2b689bf2c98"
 
 # Don't uncomment until all of the do_*() tasks have been moved out of the recipe

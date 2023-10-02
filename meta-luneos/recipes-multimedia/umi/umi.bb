@@ -20,7 +20,7 @@ DEPENDS = "glib-2.0 pmloglib libpbnjson alsa-lib"
 WEBOS_VERSION = "1.0.0-10_5562fabff79cce1fcd85034ff0273fc56cb806cd"
 PR = "r4"
 
-PV = "1.0.0-10+git${SRCPV}"
+PV = "1.0.0-10+git"
 SRCREV = "5562fabff79cce1fcd85034ff0273fc56cb806cd"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"

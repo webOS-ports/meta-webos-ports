@@ -14,7 +14,7 @@ DEPENDS = "qtwayland webos-wayland-extensions libxkbcommon qt-features-webos way
 WEBOS_VERSION = "6.0.0-87_7bdbb39086df6ab54bb7c472d43d54a8167628d5"
 PR = "r20"
 
-PV = "6.0.0-87+git${SRCPV}"
+PV = "6.0.0-87+git"
 SRCREV = "7bdbb39086df6ab54bb7c472d43d54a8167628d5"
 
 PACKAGECONFIG ??= ""

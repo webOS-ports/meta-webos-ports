@@ -15,7 +15,7 @@ DEPENDS = "glib-2.0 glib-2.0-native luna-service2 pmloglib libpbnjson"
 WEBOS_VERSION = "1.0.0-32_f3f53f2567b90babcc19608776addc450fdcb9ac"
 PR = "r7"
 
-PV = "1.0.0-32+git${SRCPV}"
+PV = "1.0.0-32+git"
 SRCREV = "f3f53f2567b90babcc19608776addc450fdcb9ac"
 
 inherit webos_cmake

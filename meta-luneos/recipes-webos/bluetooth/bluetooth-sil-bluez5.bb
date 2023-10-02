@@ -20,7 +20,7 @@ RDEPENDS:${PN} += "${@ bb.utils.contains('WEBOS_BLUETOOTH_ENABLED_SERVICE_CLASSE
 WEBOS_VERSION = "0.1.0-81_efcb8e250dacebd13900c5625b6366f75f7ca189"
 PR = "r9"
 
-PV = "0.1.0-81+git${SRCPV}"
+PV = "0.1.0-81+git"
 SRCREV = "efcb8e250dacebd13900c5625b6366f75f7ca189"
 
 inherit webos_public_repo

@@ -5,7 +5,7 @@ SECTION = "webos/services"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-PV = "3.0.1-5+git${SRCPV}"
+PV = "3.0.1-5+git"
 SRCREV = "18349bfc0f7329b897f15e8acba325902923af18"
 
 inherit webos_ports_ose_repo

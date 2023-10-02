@@ -12,7 +12,7 @@ inherit webos_app
 
 SERVICE_NAME = "org.webosports.service.filemanager"
 
-PV = "1.0.0+git${SRCPV}"
+PV = "1.0.0+git"
 SRCREV = "f2884b97b2e3d4e462571661994433b1a65c383a"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"

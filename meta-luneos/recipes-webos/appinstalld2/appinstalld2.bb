@@ -9,7 +9,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "glib-2.0 luna-service2 libpbnjson pmloglib pmtrace boost icu"
 RDEPENDS:${PN} = "applicationinstallerutility ecryptfs-utils librolegen"
 
-PV = "1.0.0-40+git${SRCPV}"
+PV = "1.0.0-40+git"
 SRCREV = "fd7c130fcd570c48ea54d36c14c22bec4e2c63f8"
 
 inherit webos_cmake

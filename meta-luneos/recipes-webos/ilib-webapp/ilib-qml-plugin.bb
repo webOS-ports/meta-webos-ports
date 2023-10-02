@@ -15,7 +15,7 @@ RDEPENDS:${PN} += "ilib-webapp"
 WEBOS_VERSION = "11.0.0-6_bdf1beb39a1326243eac0797791f099ca4f1c5ae"
 PR = "r7"
 
-PV = "11.0.0-6+git${SRCPV}"
+PV = "11.0.0-6+git"
 SRCREV = "bdf1beb39a1326243eac0797791f099ca4f1c5ae"
 
 inherit webos_qmake6

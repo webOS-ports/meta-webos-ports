@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=4ddd17b0c9241d7b24a4960caefe8e40"
 DEPENDS = "qtbase qtdeclarative luna-sysmgr-common libwebos-application"
 RDEPENDS:${PN} += "qtdeclarative-qmlplugins"
 
-PV = "0.1.0-6+git${SRCPV}"
+PV = "0.1.0-6+git"
 SRCREV = "46997b959847408d2885d8ca209c72e9bc6146fe"
 
 inherit webos_ports_repo
