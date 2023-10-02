@@ -1,0 +1,749 @@
+From f1353b8a6fded3ff92aae27164db329adce0697b Mon Sep 17 00:00:00 2001
+From: Herrie <Github.com@herrie.org>
+Date: Mon, 2 Oct 2023 14:19:47 +0200
+Subject: [PATCH] Revert 97e68e38b489ab103e68b63672b5444ee7a05d49
+
+Since we still need those on LuneOS
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+---
+Upstream-Status: Inappropriate [LuneOS specific]
+
+ .../sysbus/com.webos.notification.api.json.in |  15 +-
+ src/NotificationService.cpp                   | 622 ++++++++++++++++++
+ src/NotificationService.h                     |  10 +-
+ 3 files changed, 645 insertions(+), 2 deletions(-)
+
+diff --git a/files/sysbus/com.webos.notification.api.json.in b/files/sysbus/com.webos.notification.api.json.in
+index 3b2db17..549a458 100644
+--- a/files/sysbus/com.webos.notification.api.json.in
++++ b/files/sysbus/com.webos.notification.api.json.in
+@@ -1,14 +1,27 @@
+ {
+        "notification.operation": [
+         "com.webos.notification/createAlert",
+-        "com.webos.notification/createToast"
++        "com.webos.notification/createInputAlert",
++        "com.webos.notification/createNotification",
++        "com.webos.notification/createPincodePrompt",
++        "com.webos.notification/createToast",
++        "com.webos.notification/createSignageAlert"
+     ],
+     "notification.management": [
++        "com.webos.notification/getNotification",
++        "com.webos.notification/getNotificationInfo",
+         "com.webos.notification/getAlertNotification",
++        "com.webos.notification/getInputAlertNotification",
++        "com.webos.notification/getPincodePromptNotification",
+         "com.webos.notification/getToastNotification",
++        "com.webos.notification/getRemoteNotificationInfo",
+         "com.webos.notification/closeAlert",
+         "com.webos.notification/closeAllAlerts",
++        "com.webos.notification/closeInputAlert",
++        "com.webos.notification/closePincodePrompt",
+         "com.webos.notification/closeToast",
++        "com.webos.notification/disableToast",
++        "com.webos.notification/enableToast",
+         "com.webos.notification/removeAllNotification",
+         "com.webos.notification/removeNotification",
+         "com.webos.notification/enable",
+diff --git a/src/NotificationService.cpp b/src/NotificationService.cpp
+index 356a993..6115a58 100755
+--- a/src/NotificationService.cpp
++++ b/src/NotificationService.cpp
+@@ -65,12 +65,17 @@ static LSMethod s_methods[] =
+     { "createAlert", NotificationService::cb_createAlert},
+     { "closeToast", NotificationService::cb_closeToast},
+     { "closeAlert", NotificationService::cb_closeAlert},
++    { "createNotification", NotificationService::cb_createNotification},
+     { "removeNotification", NotificationService::cb_removeNotification},
+     { "getToastNotification", NotificationService::cb_getNotification},
+     { "getAlertNotification", NotificationService::cb_getNotification},
++    { "enableToast", NotificationService::cb_enableToast},
++    { "disableToast", NotificationService::cb_disableToast},
+     { "closeAllAlerts", NotificationService::cb_closeAllAlerts},
+     { "enable", NotificationService::cb_enable},
+     { "disable", NotificationService::cb_disable},
++    { "getNotification", NotificationService::cb_getNotification},
++    { "getNotificationInfo", NotificationService::cb_getNotificationInfo},
+     { "removeAllNotification", NotificationService::cb_removeAllNotification},
+     { "getToastCount", NotificationService::cb_getToastCount},
+     { "getToastList", NotificationService::cb_getToastList},
+@@ -1283,6 +1288,282 @@ bool NotificationService::cb_createAlertIsAllowed(LSHandle* lshandle, LSMessage
+         return true;
+ }
+ 
++bool NotificationService::cb_setSystemSetting(LSHandle* lshandle, LSMessage *msg, void *user_data)
++{
++	pbnjson::JValue list = JUtil::parse(LSMessageGetPayload(msg), std::string(""));
++	if (list.isNull())
++	{
++		LOG_WARNING(MSGID_CA_MSG_EMPTY, 0, "cb_setSystemSetting Message is missing in %s", __PRETTY_FUNCTION__);
++		return false;
++	}
++	return true;
++}
++
++bool NotificationService::cb_createNotification(LSHandle* lshandle, LSMessage *msg, void *user_data)
++{
++    LSErrorSafe lserror;
++    std::string errText;
++    pbnjson::JValue request;
++    bool success = false;
++    pbnjson::JValue postCreateNoti;
++ //   pbnjson::JValue createNotiInfo;
++
++    bool autoRemove = false;
++    bool forceLcdTurnOn= true;
++    bool needSoundPlay = false;
++    bool forceSoundPlay = false;
++    bool isRawSound = true;
++    bool needToShowPopup = true;
++    bool isRemoteNotification = false;
++    bool isUnDeletable = false;
++    bool saveRemoteNotification = false;
++
++    std::string sourceId;
++    std::string message;
++    std::string title;
++    std::string timestamp;
++    std::string iconPath;
++    std::string onClick;
++    std::string soundUri;
++
++    JUtil::Error error;
++
++    std::string caller = LSUtils::getCallerId(msg);
++    if(caller.empty())
++    {
++        errText = "Unknown Source";
++        goto Done;
++    }
++    LOG_WARNING(MSGID_NOTIFICATIONMGR, 0, "[%s:%d] Caller: %s", __FUNCTION__, __LINE__, caller.c_str());
++
++    request = JUtil::parse(LSMessageGetPayload(msg), "createNotification", &error);
++
++    if(request.isNull())
++    {
++        LOG_WARNING(MSGID_CA_PARSE_FAIL, 0, "Message parsing error in %s", __PRETTY_FUNCTION__ );
++        errText = "Message is not parsed.";
++        goto Done;
++    }
++
++    //createNotiInfo = pbnjson::Object();
++    postCreateNoti = pbnjson::Object();
++
++    sourceId = request["sourceId"].asString();
++    if(sourceId.length() == 0)
++    {
++        sourceId = Utils::extractSourceIdFromCaller(caller);
++        postCreateNoti.put("sourceId", sourceId);
++    }
++    else
++    {
++        postCreateNoti.put("sourceId", sourceId);
++    }
++
++    message = request["message"].asString();
++    if(message.length() == 0)
++    {
++        LOG_WARNING(MSGID_CA_MSG_EMPTY, 0, "Empty message is given in %s", __PRETTY_FUNCTION__);
++        errText = "Message can't be empty";
++        goto Done;
++    }
++    else
++    {
++        //Copy the message
++        //Remove if there is any space character except ' '
++        std::replace_if(message.begin(), message.end(), Utils::isEscapeChar, ' ');
++        postCreateNoti.put("message", message);
++    }
++
++    //Check the icon and copy it.
++    if(!request["iconUrl"].isNull())
++    {
++        iconPath = request["iconUrl"].asString();
++        if(iconPath.length() != 0 && Utils::verifyFileExist(iconPath.c_str()))
++        {
++            postCreateNoti.put("iconUrl", "file://"+iconPath);
++        }
++        else
++        {
++            postCreateNoti.put("iconUrl", "file://"+ Settings::instance()->getDefaultIcon("alert"));
++        }
++    }
++
++    if(!request["title"].isNull())
++    {
++        title = request["title"].asString();
++        std::replace_if(title.begin(), title.end(), Utils::isEscapeChar, ' ');
++    }
++    else
++    {
++        title = "";
++    }
++    postCreateNoti.put("title", title);
++
++    if(!request["autoRemove"].isNull())
++    {
++        autoRemove = request["autoRemove"].asBool();
++        postCreateNoti.put("autoRemove", autoRemove);
++    }
++    else
++    {
++        postCreateNoti.put("autoRemove", false);
++    }
++
++    if(!request["onClick"].isNull())
++    {
++        onClick = request["onClick"].asString();
++        if(!Utils::isValidURI(onClick))
++        {
++            LOG_WARNING(MSGID_CA_SERVICEURI_INVALID, 0, "Invalid ServiceURI is given in %s", __PRETTY_FUNCTION__);
++            errText = "Invalid Service Uri in the onclick";
++            goto Done;
++        }
++
++        if(onClick.length() != 0)
++        {
++            postCreateNoti.put("onClick", onClick);
++        }
++    }
++
++    if(!request["params"].isNull())
++    {
++         postCreateNoti.put("params", request["params"]);
++    }
++
++    if(!request["forceLcdTurnOn"].isNull())
++    {
++        forceLcdTurnOn = request["forceLcdTurnOn"].asBool();
++        postCreateNoti.put("forceLcdTurnOn", forceLcdTurnOn);
++    }
++    else
++    {
++        postCreateNoti.put("forceLcdTurnOn", forceLcdTurnOn);
++    }
++
++    if(!request["needSoundPlay"].isNull())
++    {
++        needSoundPlay = request["needSoundPlay"].asBool();
++        postCreateNoti.put("needSoundPlay", needSoundPlay);
++    }
++    else
++    {
++        postCreateNoti.put("needSoundPlay", needSoundPlay);
++    }
++
++    if(!request["forceSoundPlay"].isNull())
++    {
++        forceSoundPlay = request["forceSoundPlay"].asBool();
++        postCreateNoti.put("forceSoundPlay", forceSoundPlay);
++    }
++    else
++    {
++        postCreateNoti.put("forceSoundPlay", forceSoundPlay);
++    }
++
++    if(!request["soundUri"].isNull())
++    {
++        soundUri = request["soundUri"].asString();
++
++        if(soundUri.length() != 0 && Utils::verifyFileExist(soundUri.c_str()))
++        {
++            postCreateNoti.put("soundUri", "file://"+soundUri);
++        }
++        else if(soundUri.length() != 0 && !Utils::verifyFileExist(soundUri.c_str()))
++        {
++            LOG_WARNING(MSGID_CLT_SOUNDURI_MISSING, 0, "File does not exist on the local file system in %s", __PRETTY_FUNCTION__);
++            errText = "File does not exist on the local file system";
++            goto Done;
++        }
++        else
++        {
++            LOG_WARNING(MSGID_CA_SERVICEURI_INVALID, 0, "Invalid SoundURI is given in %s", __PRETTY_FUNCTION__);
++            errText = "Invalid Sound Uri";
++            goto Done;
++        }
++    }
++
++    if(!request["isRawSound"].isNull())
++    {
++        isRawSound = request["isRawSound"].asBool();
++        postCreateNoti.put("isRawSound", isRawSound);
++    }
++    else
++    {
++        postCreateNoti.put("isRawSound", isRawSound);
++    }
++
++    if(!request["needToShowPopup"].isNull())
++    {
++        needToShowPopup = request["needToShowPopup"].asBool();
++        postCreateNoti.put("needToShowPopup", needToShowPopup);
++    }
++    else
++    {
++        postCreateNoti.put("needToShowPopup", needToShowPopup);
++    }
++
++    if(!request["isRemoteNotification"].isNull())
++    {
++        isRemoteNotification = request["isRemoteNotification"].asBool();
++        postCreateNoti.put("isRemoteNotification", isRemoteNotification);
++    }
++    else
++    {
++        postCreateNoti.put("isRemoteNotification", isRemoteNotification);
++    }
++
++    if(!request["isUnDeletable"].isNull())
++    {
++        isUnDeletable = request["isUnDeletable"].asBool();
++        postCreateNoti.put("isUnDeletable", isUnDeletable);
++    }
++    else
++    {
++        postCreateNoti.put("isUnDeletable", isUnDeletable);
++    }
++
++    if(request["isSysReq"].isNull())
++    {
++        postCreateNoti.put("isSysReq", false);
++    }
++    else
++    {
++        postCreateNoti.put("isSysReq", request["isSysReq"].asBool());
++    }
++
++    Utils::createTimestamp(timestamp);
++
++    postCreateNoti.put("notiId", (sourceId + "-" + timestamp));
++    postCreateNoti.put("timestamp", timestamp);
++   // postCreateNoti.put("notiInfo", createNotiInfo);
++    postCreateNoti.put("saveRemoteNotification", saveRemoteNotification);
++
++    //Post the message
++    NotificationService::instance()->postNotification(postCreateNoti, false, false);
++    success = true;
++
++Done:
++    pbnjson::JValue json = pbnjson::Object();
++    json.put("returnValue", success);
++
++    if(!success)
++    {
++        json.put("errorText", errText);
++    }
++    else
++    {
++        json.put("notiId", (sourceId + "-" + timestamp));
++    }
++
++    std::string result = JUtil::jsonToString(json);
++    if(!LSMessageReply( lshandle, msg, result.c_str(), &lserror))
++    {
++        return false;
++    }
++
++    return true;
++}
++
+ bool NotificationService::postToastNotification(pbnjson::JValue toastNotificationPayload, bool staleMsg, bool persistentMsg, std::string &errorText)
+ {
+     LSErrorSafe lserror;
+@@ -1384,6 +1665,191 @@ bool NotificationService::postAlertNotification(pbnjson::JValue alertNotificatio
+     return true;
+ }
+ 
++//->Start of API documentation comment block
++/**
++@page com_webos_notification com.webos.notification
++@{
++@section com_webos_notification_enableToast enableToast
++
++Enable Toast globally or for an App
++
++@par Parameters
++Name | Required | Type | Description
++-----|----------|------|------------
++source | no  | String | It should be App or Service Id that creates the toast
++
++@par Returns(Call)
++Name | Required | Type | Description
++-----|----------|------|------------
++returnValue | yes | Boolean | True
++
++@par Returns(Subscription)
++None
++@}
++*/
++//->End of API documentation comment block
++
++bool NotificationService::cb_enableToast(LSHandle* lshandle, LSMessage *msg, void *user_data)
++{
++	LSErrorSafe lserror;
++
++	bool success = false;
++
++	std::string sourceId;
++	std::string errText;
++
++	pbnjson::JValue request;
++
++	JUtil::Error error;
++
++	request = JUtil::parse(LSMessageGetPayload(msg), "enableToast", &error);
++
++	if(request.isNull())
++	{
++		LOG_WARNING(MSGID_ET_PARSE_FAIL, 0, "Parsing Error in %s", __PRETTY_FUNCTION__ );
++		errText = "Message is not parsed";
++		goto Done;
++	}
++
++	sourceId = request["source"].asString();
++	if(sourceId.length() == 0)
++	{
++		//Assume this is for Global.
++		success = Settings::instance()->enableToastNotification();
++		goto Done;
++	}
++
++	//This is for an individual App. SourceId is same as the AppId. Check the AppId.
++	if(AppList::instance()->isAppExist(sourceId))
++	{
++		success = Settings::instance()->enableToastNotificationForApp(sourceId);
++	}
++	else
++	{
++		//This should never happen.
++		errText = "Unknown Source ID";
++	}
++
++Done:
++	pbnjson::JValue json = pbnjson::Object();
++	json.put("returnValue", success);
++
++	const char* caller = LSMessageGetApplicationID(msg);
++	if (!caller)
++		caller = LSMessageGetSenderServiceName(msg);
++	if (caller)
++		sourceId = std::string(caller);
++
++	if (success)
++	{
++		LOG_INFO(MSGID_NOTIFY_CLOSE, 2,
++			PMLOGKS("SOURCE_ID", sourceId.c_str()),
++			PMLOGKS("TYPE", "ALERT"),
++			" ");
++	}
++        else
++        {
++		LOG_WARNING(MSGID_NOTIFY_INVOKE_FAILED, 3,
++			PMLOGKS("SOURCE_ID", sourceId.c_str()),
++			PMLOGKS("TYPE", "ALERT"),
++			PMLOGKS("ERROR", errText.c_str()),
++			" ");
++		json.put("errorText", errText);
++        }
++
++	std::string result = pbnjson::JGenerator::serialize(json, pbnjson::JSchemaFragment("{}"));
++	if(!LSMessageReply( lshandle, msg, result.c_str(), &lserror))
++	{
++		return false;
++	}
++
++	return true;
++}
++
++//->Start of API documentation comment block
++/**
++@page com_webos_notification com.webos.notification
++@{
++@section com_webos_notification_disableToast disableToast
++
++Disable Toast globally or for an App
++
++@par Parameters
++Name | Required | Type | Description
++-----|----------|------|------------
++source | no  | String | It should be App or Service Id that creates the toast
++
++@par Returns(Call)
++Name | Required | Type | Description
++-----|----------|------|------------
++returnValue | yes | Boolean | True
++
++@par Returns(Subscription)
++None
++
++@}
++*/
++//->End of API documentation comment block
++
++bool NotificationService::cb_disableToast(LSHandle* lshandle, LSMessage *msg, void *user_data)
++{
++	LSErrorSafe lserror;
++
++	bool success = false;
++
++	std::string sourceId;
++	std::string errText;
++
++	pbnjson::JValue request;
++
++	JUtil::Error error;
++
++	request = JUtil::parse(LSMessageGetPayload(msg), "enableToast", &error);
++
++	if(request.isNull())
++	{
++		LOG_WARNING(MSGID_DT_PARSE_FAIL, 0, "Parsing Error in %s", __PRETTY_FUNCTION__ );
++		errText = "Message is not parsed";
++		goto Done;
++	}
++
++	sourceId = request["source"].asString();
++	if(sourceId.length() == 0)
++	{
++		//Assume this is for Global.
++		success = Settings::instance()->disableToastNotification();
++		goto Done;
++	}
++
++	//This is for an individual App. SourceId is same as the AppId. Check the AppId.
++	if(AppList::instance()->isAppExist(sourceId))
++	{
++		success = Settings::instance()->disableToastNotificationForApp(sourceId);
++	}
++	else
++	{
++		//This should never happen.
++		errText = "Unknown Source ID";
++	}
++
++Done:
++	pbnjson::JValue json = pbnjson::Object();
++	json.put("returnValue", success);
++
++	if(!success)
++	{
++		json.put("errorText", errText);
++	}
++
++	std::string result = pbnjson::JGenerator::serialize(json, pbnjson::JSchemaFragment("{}"));
++	if(!LSMessageReply( lshandle, msg, result.c_str(), &lserror))
++	{
++		return false;
++	}
++
++	return true;
++}
++
+ //->Start of API documentation comment block
+ /**
+ @page com_webos_notification com.webos.notification
+@@ -1931,6 +2397,135 @@ Done:
+     return true;
+ }
+ 
++bool NotificationService::cb_getNotificationInfo(LSHandle* lshandle, LSMessage *msg, void *user_data)
++{
++    LSErrorSafe lserror;
++
++    bool success = false;
++
++    std::string sourceId;
++    std::string errText;
++    std::string timestamp;
++
++    bool all = false;
++    bool privilegedSource = false;
++
++    pbnjson::JValue request;
++    pbnjson::JValue postNotiInfoMessage;
++
++    JUtil::Error error;
++
++    History* getReq = NULL;
++
++    std::string caller = LSUtils::getCallerId(msg);
++    if(caller.empty())
++    {
++        errText = "Unknown Source";
++        goto Done;
++    }
++    LOG_WARNING(MSGID_NOTIFICATIONMGR, 0, "[%s:%d] Caller: %s", __FUNCTION__, __LINE__, caller.c_str());
++
++    request = JUtil::parse(LSMessageGetPayload(msg), "getNotificationInfo", &error);
++
++    if(request.isNull())
++    {
++        LOG_WARNING(MSGID_CLA_PARSE_FAIL, 0, "Parsing Error in %s", __PRETTY_FUNCTION__ );
++        errText = "Message is not parsed";
++        goto Done;
++    }
++
++    postNotiInfoMessage = pbnjson::Object();
++
++    if(!request["all"].isNull())
++    {
++        getReq = new History();
++        all = request["all"].asBool();
++        postNotiInfoMessage.put("all", all);
++
++        // get notification info about sourceId
++        if(all == false)
++        {
++            sourceId = request["sourceId"].asString();
++            sourceId = Utils::extractSourceIdFromCaller(sourceId);
++
++            if(sourceId.length() == 0)
++            {
++                LOG_WARNING(MSGID_CA_CALLERID_MISSING, 0, "%s : invalid id specified", __PRETTY_FUNCTION__);
++                errText = "Invalid source id specified";
++                goto Done;
++            }
++            else
++            {
++                if(Settings::instance()->isPrivilegedSource(caller))
++                {
++                    privilegedSource = true;
++                }
++
++                if(!privilegedSource)
++                {
++                    LOG_WARNING(MSGID_PERMISSION_DENY, 0, "Permission Denied in %s", __PRETTY_FUNCTION__);
++                    errText = "Permission Denied";
++                    goto Done;
++                }
++
++                postNotiInfoMessage.put("sourceId", sourceId);
++
++                if(getReq)
++                {
++                    success = getReq->selectMessage(lshandle, sourceId, msg);
++                    if (!success)
++                    {
++                        errText = "can't get the notification info from db";
++                    }
++                }
++            }
++        }
++        // get all notification info
++        else
++        {
++            sourceId = request["sourceId"].asString();
++            if(sourceId.length() != 0)
++            {
++                LOG_WARNING("don't input source id", 0, "%s : invalid id specified", __PRETTY_FUNCTION__);
++                errText = "Do not input source id when all is true";
++                goto Done;
++            }
++
++            if(getReq)
++            {
++                success = getReq->selectMessage(lshandle, "all", msg);
++                if (!success)
++                {
++                    errText = "can't get the notification info from db";
++                }
++            }
++        }
++    }
++    else
++    {
++        LOG_WARNING(MSGID_CLA_ALERTID_MISSING, 0, "all is missing in %s", __PRETTY_FUNCTION__);
++        errText = "all can't be Empty";
++        goto Done;
++    }
++
++Done:
++    pbnjson::JValue json = pbnjson::Object();
++    json.put("returnValue", success);
++
++    if(!success)
++    {
++        json.put("errorText", errText);
++
++        std::string result = JUtil::jsonToString(json);
++        if(!LSMessageReply( lshandle, msg, result.c_str(), &lserror))
++        {
++            return false;
++        }
++    }
++
++    return true;
++}
++
+ bool NotificationService::cb_getToastList(LSHandle* lshandle, LSMessage *msg, void *user_data)
+ {
+     LSErrorSafe lserror;
+@@ -2017,6 +2612,33 @@ Done:
+     return true;
+ }
+ 
++bool NotificationService::cb_launch(LSHandle* lshandle, LSMessage *msg, void *user_data)
++{
++    LSErrorSafe lserror;
++    pbnjson::JValue request;
++    std::string path;
++    std::string errorText;
++    JUtil::Error error;
++
++    request = JUtil::parse(LSMessageGetPayload(msg), "", &error);
++    if(request.isNull()){
++        LOG_DEBUG("Error In ApplicationManager response: %s", __PRETTY_FUNCTION__);
++        return false;
++    }
++    else
++    {
++        if(request["returnValue"].asBool()){
++             LOG_INFO(MSGID_LAUNCH_ALERTAPP, 1, PMLOGKS("proceesId",(request["processId"].asString()).c_str()),"");
++        }
++        else{
++            LOG_DEBUG("Error in Launching App: %s",(request["errorText"].asString()).c_str());
++        }
++    }
++
++    return true;
++}
++
++
+ //->Start of API documentation comment block
+ /**
+ @page com_webos_notification com.webos.notification
+diff --git a/src/NotificationService.h b/src/NotificationService.h
+index aa2acb7..c4cdba6 100755
+--- a/src/NotificationService.h
++++ b/src/NotificationService.h
+@@ -1,4 +1,4 @@
+-// Copyright (c) 2013-2022 LG Electronics, Inc.
++// Copyright (c) 2013-2020 LG Electronics, Inc.
+ //
+ // Licensed under the Apache License, Version 2.0 (the "License");
+ // you may not use this file except in compliance with the License.
+@@ -56,14 +56,22 @@ public:
+     static bool cb_createToast(LSHandle* lshandle, LSMessage *msg, void *user_data);
+     static bool cb_createAlert(LSHandle* lshandle, LSMessage *msg, void *user_data);
+     static bool cb_createAlertIsAllowed(LSHandle* lshandle, LSMessage *msg, void *user_data);
++    static bool cb_enableToast(LSHandle* lshandle, LSMessage *msg, void *user_data);
++    static bool cb_disableToast(LSHandle* lshandle, LSMessage *msg, void *user_data);
+     static bool cb_closeToast(LSHandle* lshandle, LSMessage *msg, void *user_data);
+     static bool cb_closeAlert(LSHandle* lshandle, LSMessage *msg, void *user_data);
+     static bool cb_closeAllAlerts(LSHandle* lshandle, LSMessage *msg, void *user_data);
+     static bool cb_enable(LSHandle* lshandle, LSMessage *msg, void *user_data);
+     static bool cb_disable(LSHandle* lshandle, LSMessage *msg, void *user_data);
++    static bool cb_getSystemSetting(LSHandle* lshandle, LSMessage *msg, void *user_data);
++    static bool cb_setSystemSetting(LSHandle* lshandle, LSMessage *msg, void *user_data);
++    static bool cb_getSystemSettingForCountry(LSHandle* lshandle, LSMessage *msg, void *user_data);
+ 
++    static bool cb_createNotification(LSHandle* lshandle, LSMessage *msg, void *user_data);
+     static bool cb_removeNotification(LSHandle* lshandle, LSMessage *msg, void *user_data);
+     static bool cb_removeAllNotification(LSHandle* lshandle, LSMessage *msg, void *user_data);
++    static bool cb_getNotificationInfo(LSHandle* lshandle, LSMessage *msg, void *user_data);
++    static bool cb_launch(LSHandle* lshandle, LSMessage *msg, void *user_data);
+     static bool parseDoc(const char *docname);
+ 
+     bool postToastNotification(pbnjson::JValue toastNotificationPayload, bool staleMsg, bool persistentMsg, std::string &errorText);
