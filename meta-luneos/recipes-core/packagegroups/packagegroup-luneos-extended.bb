@@ -99,7 +99,6 @@ RDEPENDS:${PN} = " \
   \
   luneos-default-wallpapers \
   \
-  https-everywhere \
   storaged \
   messwerk \
   fingerterm \
