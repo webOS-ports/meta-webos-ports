@@ -6,12 +6,14 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=eb723b61539feef013de476e68b5c50a"
 
 DEPENDS += "qtbase qtbase-native qtdeclarative qt5compat qtdeclarative-native"
 
-SRCREV = "2a2d508bc7ff4ca6dd5b8df7927c6e883731d23b"
-PV = "1.21+git"
+SRCREV = "a55ada223b31ce9a69d0d225ec2aa0b8f311e401"
+PV = "2.0+git"
 
-SRC_URI = "git://github.com/herrie82/phonesim.git;protocol=https;branch=herrie/qt6 \
-           file://phonesim.service \
-	   file://phonesim.conf \
+SRC_URI = "git://git.kernel.org/pub/scm/network/ofono/phonesim.git;protocol=https;branch=master \
+    file://phonesim.service \
+    file://phonesim.conf \
+    file://0001-Phonesim-Port-to-CMake-and-Qt6.patch \
+    file://0002-default.xml-LuneOS-Branding.patch \
 "
 S = "${WORKDIR}/git"
 
