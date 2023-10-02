@@ -2,7 +2,7 @@
 
 inherit clang_cmake
 
-require recipes-test/googletest/googletest_${PV}.bb
+require recipes-test/googletest/googletest_git.bb
 
 PACKAGECONFIG += "${@bb.utils.contains('USE_WEBRUNTIME_LIBCXX', '1', 'webruntime-libcxx', 'system-libcxx', d)}"
 PACKAGECONFIG[webruntime-libcxx] = ",,chromium-toolchain-native chromium-stdlib"
