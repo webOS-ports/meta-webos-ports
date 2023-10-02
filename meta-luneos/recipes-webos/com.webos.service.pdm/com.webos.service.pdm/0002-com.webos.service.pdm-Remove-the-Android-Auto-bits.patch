@@ -1,0 +1,718 @@
+From 8422ec45759affb8e74c6a5905965bddccef9bf5 Mon Sep 17 00:00:00 2001
+From: Herrie <Github.com@herrie.org>
+Date: Mon, 2 Oct 2023 12:57:49 +0200
+Subject: [PATCH] com.webos.service.pdm: Remove the Android Auto bits
+
+Since we'll never need these in LuneOS.
+
+Keeps the logs a bit cleaner too, currently getting a lot of the
+following spam:
+
+2023-10-02T06:51:14.955031Z [4.130400054] kern.info
+physical-device-manager [] PDM AutoAndroidDeviceHandler: {} HandlerEvent
+line: 71 Android Auto is applicable only for Auto not for OSE
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+---
+Upstream-Status: Inappropriate [LuneOS specific]
+
+ files/rules/90_Android_device.rules           |  21 --
+ inc/private/AutoAndroidDevice.h               |  37 --
+ inc/private/AutoAndroidDeviceHandler.h        |  90 -----
+ inc/private/AutoAndroidSubSystem.h            |  57 ---
+ inc/private/Common.h                          |   1 -
+ src/devices/autoAndroid/AutoAndroidDevice.cpp |  36 --
+ src/framework/AutoAndroidSubSystem.cpp        |  57 ---
+ .../autoAndroid/AutoAndroidDeviceHandler.cpp  | 330 ------------------
+ 8 files changed, 629 deletions(-)
+ delete mode 100644 files/rules/90_Android_device.rules
+ delete mode 100644 inc/private/AutoAndroidDevice.h
+ delete mode 100644 inc/private/AutoAndroidDeviceHandler.h
+ delete mode 100644 inc/private/AutoAndroidSubSystem.h
+ delete mode 100644 src/devices/autoAndroid/AutoAndroidDevice.cpp
+ delete mode 100644 src/framework/AutoAndroidSubSystem.cpp
+ delete mode 100644 src/handlers/autoAndroid/AutoAndroidDeviceHandler.cpp
+
+diff --git a/files/rules/90_Android_device.rules b/files/rules/90_Android_device.rules
+deleted file mode 100644
+index ce9d35a..0000000
+--- a/files/rules/90_Android_device.rules
++++ /dev/null
+@@ -1,21 +0,0 @@
+-@@@LICENSE
+-#
+-# Copyright (c) 2020 LG Electronics, Inc.
+-#
+-# Licensed under the Apache License, Version 2.0 (the "License");
+-# you may not use this file except in compliance with the License.
+-# You may obtain a copy of the License at
+-#
+-# http://www.apache.org/licenses/LICENSE-2.0
+-#
+-# Unless required by applicable law or agreed to in writing, software
+-# distributed under the License is distributed on an "AS IS" BASIS,
+-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-# See the License for the specific language governing permissions and
+-# limitations under the License.
+-#
+-# LICENSE@@@
+-
+-# android Auto
+-
+-SUBSYSTEM=="usb", ENV{ID_PRODUCT_ID}="$attr{idProduct}", MODE="0666"
+diff --git a/inc/private/AutoAndroidDevice.h b/inc/private/AutoAndroidDevice.h
+deleted file mode 100644
+index 022e896..0000000
+--- a/inc/private/AutoAndroidDevice.h
++++ /dev/null
+@@ -1,37 +0,0 @@
+-// @@@LICENSE
+-//
+-// Copyright (c) 2020-2022 LG Electronics, Inc.
+-//
+-// Confidential computer software. Valid license from LG required for
+-// possession, use or copying. Consistent with FAR 12.211 and 12.212,
+-// Commercial Computer Software, Computer Software Documentation, and
+-// Technical Data for Commercial Items are licensed to the U.S. Government
+-// under vendor's standard commercial license.
+-//
+-// LICENSE@@@
+-
+-
+-#ifndef _AUTOANDROIDDEVICE_H_
+-#define _AUTOANDROIDDEVICE_H_
+-
+-#include "Device.h"
+-#include "DeviceClass.h"
+-#include <functional>
+-
+-class AutoAndroidDeviceHandler;
+-
+-class AutoAndroidDevice : public Device
+-{
+-private:
+-    using handlerCb = std::function<void(EventType,AutoAndroidDevice*)>;
+-    handlerCb mAutoAndroidDeviceHandlerCb;
+-    bool m_isDevAddNotified;
+-public:
+-    AutoAndroidDevice(PdmConfig* const pConfObj, PluginAdapter* const pluginAdapter)
+-              : Device(pConfObj, pluginAdapter, "AUTOANDROID",PdmDevAttributes::PDM_ERR_NOTHING), m_isDevAddNotified(false){}
+-    ~AutoAndroidDevice() = default;
+-    void setDeviceInfo(DeviceClass*);
+-    void registerCallback(handlerCb AutoAndroidDeviceHandlerCb);
+-};
+-
+-#endif // AutoAndroidDevice_H
+diff --git a/inc/private/AutoAndroidDeviceHandler.h b/inc/private/AutoAndroidDeviceHandler.h
+deleted file mode 100644
+index 94aa442..0000000
+--- a/inc/private/AutoAndroidDeviceHandler.h
++++ /dev/null
+@@ -1,90 +0,0 @@
+-// @@@LICENSE
+-//
+-// Copyright (c) 2020-2022 LG Electronics, Inc.
+-//
+-// Confidential computer software. Valid license from LG required for
+-// possession, use or copying. Consistent with FAR 12.211 and 12.212,
+-// Commercial Computer Software, Computer Software Documentation, and
+-// Technical Data for Commercial Items are licensed to the U.S. Government
+-// under vendor's standard commercial license.
+-//
+-// LICENSE@@@
+-
+-#ifndef _AUTOANDROIDDEVICEHANDLER_H_
+-#define _AUTOANDROIDDEVICEHANDLER_H_
+-
+-#include "CommandManager.h"
+-#include "DeviceHandler.h"
+-#include "AutoAndroidDevice.h"
+-#include "PdmDeviceFactory.h"
+-#include "PdmLogUtils.h"
+-#include "DeviceClass.h"
+-#include <libusb.h>
+-
+-#define ACCESSORY_STRING_MANUFACTURER 0
+-#define ACCESSORY_STRING_MODEL 1
+-#define ACCESSORY_STRING_DESCRIPTION 2
+-#define ACCESSORY_STRING_VERSION 3
+-#define ACCESSORY_STRING_URI 4
+-#define ACCESSORY_STRING_SERIAL 5
+-#define ACCESSORY_GET_PROTOCOL 51U
+-#define ACCESSORY_SEND_STRING 52U
+-#define ACCESSORY_START 53U
+-
+-#define ACCESSORY_MANUFACTURER_NAME "Android"
+-#define ACCESSORY_MODEL_NAME "Android Open Automotive Protocol"
+-#define ACCESSORY_DESCRIPTION "Android Open Automotive Protocol"
+-#define ACCESSORY_VERSION "1.0"
+-#define ACCESSORY_URI "http://www.android.com/"
+-#define ACCESSORY_SERIAL_NUMBER "0000000012345678"
+-
+-#define HOST_TO_DEVICE_TYPE 0xc0U
+-#define DEVICE_TO_HOST_TYPE 0x40U
+-#define USB_OPEN_RETRY_COUNT 10
+-#define USB_OPEN_RETRY_USECOND 1000U * 100U
+-
+-class AutoAndroidDeviceHandler : public DeviceHandler
+-{
+-private:
+-    libusb_device_handle* mHandle;
+-    std::list<AutoAndroidDevice*> sList;
+-    bool m_deviceRemoved;
+-    libusb_context* m_context;
+-
+-    AutoAndroidDeviceHandler(PdmConfig* const pConfObj, PluginAdapter* const pluginAdapter);
+-    static bool mIsObjRegistered;
+-
+-    //Register Object to object factory. This is called automatically
+-    static bool RegisterObject() {
+-        return (PdmDeviceFactory::getInstance()->Register("AUTOANDROID",
+-                                                          &AutoAndroidDeviceHandler::CreateObject));
+-    }
+-    bool isAOAInterface(DeviceClass*);
+-    bool isAOAProductId(DeviceClass*);
+-    int startAccessoryMode();
+-    int getAOAPProtocol();
+-    void removeDevice(AutoAndroidDevice* Device);
+-    bool openDevice(DeviceClass*);
+-
+-public:
+-    ~AutoAndroidDeviceHandler();
+-
+-    static DeviceHandler* CreateObject(PdmConfig* const pConfObj, PluginAdapter* const pluginAdapter) {
+-        if (mIsObjRegistered) {
+-            PDM_LOG_DEBUG("CreateObject - Creating the HID Device");
+-            return new AutoAndroidDeviceHandler(pConfObj, pluginAdapter);
+-        } else {
+-            return nullptr;
+-        }
+-    }
+-
+-    bool HandlerEvent(DeviceClass* deviceClass) override;
+-    bool HandlerCommand(CommandType *cmdtypes, CommandResponse *cmdResponse) override;
+-    bool HandlePluginEvent(int eventType) override;
+-    bool GetAttachedDeviceStatus(pbnjson::JValue &payload, LSMessage *message) override;
+-    bool GetAttachedNonStorageDeviceList(pbnjson::JValue &payload, LSMessage *message);
+-    void ProcessAutoAndroidDevice(DeviceClass*);
+-    void commandNotification(EventType event, AutoAndroidDevice* device);
+-};
+-
+-#endif // AUTOANDROIDDEVICEHANDLER_H_
+diff --git a/inc/private/AutoAndroidSubSystem.h b/inc/private/AutoAndroidSubSystem.h
+deleted file mode 100644
+index 76d7d41..0000000
+--- a/inc/private/AutoAndroidSubSystem.h
++++ /dev/null
+@@ -1,57 +0,0 @@
+-// Copyright (c) 2022 LG Electronics, Inc.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// SPDX-License-Identifier: Apache-2.0
+-
+-#ifndef _AUTOANDROID_SUSBSYSTEM_H_
+-#define _AUTOANDROID_SUSBSYSTEM_H_
+-
+-#include <unordered_map>
+-#include <string>
+-#include "DeviceClass.h"
+-#include "DeviceClassFactory.h"
+-#include "PdmLogUtils.h"
+-
+-using namespace PdmDevAttributes;
+-
+-class AutoAndroidSubSystem : public DeviceClass
+-{
+-    std::string mDevType;
+-    std::unordered_map<std::string, std::string> mDevPropMap;
+-    static bool mIsObjRegistered;
+-    static bool RegisterSubSystem()
+-    {
+-        DeviceClassFactory::getInstance().Register("autoandroid", std::bind(&AutoAndroidSubSystem::create, std::placeholders::_1));
+-        return true;
+-    }
+-
+-    static bool canProcessEvent(std::unordered_map<std::string, std::string> mDevPropMap)
+-    {
+-        std::string interfaceClass = mDevPropMap[PdmDevAttributes::ID_USB_INTERFACES];
+-        if (((interfaceClass.find(":06") != std::string::npos) || (interfaceClass.find(":ff") != std::string::npos)) && (mDevPropMap[DEVTYPE] == USB_DEVICE) && (mDevPropMap[ID_BLUETOOTH] != "1"))
+-            return true;
+-
+-        PDM_LOG_DEBUG("AutoAndroidSubSystem:%s line: %d AutoAndroidSubSystem Object created", __FUNCTION__, __LINE__);
+-        return false;
+-    }
+-
+-public:
+-    AutoAndroidSubSystem(std::unordered_map<std::string, std::string> &);
+-    virtual ~AutoAndroidSubSystem();
+-    static AutoAndroidSubSystem* create(std::unordered_map<std::string, std::string>&);
+-    std::string getIdProduct();
+-    std::string getModelId();
+-};
+-
+-#endif /* _AUTOANDROID_SUSBSYSTEM_H_ */
+diff --git a/inc/private/Common.h b/inc/private/Common.h
+index 8fa8206..affd19a 100644
+--- a/inc/private/Common.h
++++ b/inc/private/Common.h
+@@ -32,7 +32,6 @@ enum DeviceEventType { STORAGE_DEVICE = 0,
+                        PTP_DEVICE,
+                        BLUETOOTH_DEVICE,
+                        CDC_DEVICE,
+-                       AUTO_ANDROID_DEVICE,
+                        NFC_DEVICE,
+                        UNKNOWN_DEVICE
+                      };
+diff --git a/src/devices/autoAndroid/AutoAndroidDevice.cpp b/src/devices/autoAndroid/AutoAndroidDevice.cpp
+deleted file mode 100644
+index 705a2cf..0000000
+--- a/src/devices/autoAndroid/AutoAndroidDevice.cpp
++++ /dev/null
+@@ -1,36 +0,0 @@
+-
+-// @@@LICENSE
+-//
+-// Copyright (c) 2020-2022 LG Electronics, Inc.
+-//
+-// Confidential computer software. Valid license from LG required for
+-// possession, use or copying. Consistent with FAR 12.211 and 12.212,
+-// Commercial Computer Software, Computer Software Documentation, and
+-// Technical Data for Commercial Items are licensed to the U.S. Government
+-// under vendor's standard commercial license.
+-//
+-// LICENSE@@@
+-
+-
+-#include "AutoAndroidDevice.h"
+-#include "PdmLogUtils.h"
+-#include "Common.h"
+-
+-using namespace PdmDevAttributes;
+-
+-void AutoAndroidDevice::setDeviceInfo(DeviceClass* devClass)
+-{
+-    PDM_LOG_DEBUG("AutoAndroidDevice:%s line: %d setDeviceInfo", __FUNCTION__, __LINE__);
+-    if(devClass->getAction()== DEVICE_ADD ) {
+-        PDM_LOG_DEBUG("AutoAndroidDevice:%s line: %d setDeviceInfo: DEVICE_ADD", __FUNCTION__, __LINE__);
+-        if(!devClass->getSpeed().empty()) {
+-            m_devSpeed = getDeviceSpeed(stoi(devClass->getSpeed(), nullptr));
+-        }
+-        Device::setDeviceInfo(devClass);
+-    }
+-}
+-
+-void AutoAndroidDevice::registerCallback(handlerCb AutoAndroidDeviceHandlerCb) {
+-    mAutoAndroidDeviceHandlerCb = AutoAndroidDeviceHandlerCb;
+-}
+-
+diff --git a/src/framework/AutoAndroidSubSystem.cpp b/src/framework/AutoAndroidSubSystem.cpp
+deleted file mode 100644
+index a323dae..0000000
+--- a/src/framework/AutoAndroidSubSystem.cpp
++++ /dev/null
+@@ -1,57 +0,0 @@
+-// Copyright (c) 2022 LG Electronics, Inc.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// SPDX-License-Identifier: Apache-2.0
+-
+-#include <functional>
+-#include "AutoAndroidSubSystem.h"
+-#include "DeviceClassFactory.h"
+-#include "Common.h"
+-#include "PdmLogUtils.h"
+-
+-using namespace PdmDevAttributes;
+-
+-bool AutoAndroidSubSystem::mIsObjRegistered = AutoAndroidSubSystem::RegisterSubSystem();
+-
+-AutoAndroidSubSystem::AutoAndroidSubSystem(std::unordered_map<std::string, std::string>& devPropMap)
+-	: mDevType("autoandroid"), DeviceClass(devPropMap)
+-{
+-	for (auto &prop : devPropMap)
+-		mDevPropMap[prop.first] = prop.second;
+-}
+-
+-AutoAndroidSubSystem::~AutoAndroidSubSystem() {}
+-
+-AutoAndroidSubSystem *AutoAndroidSubSystem::create(std::unordered_map<std::string, std::string> &devProMap)
+-{
+-    PDM_LOG_DEBUG("AutoAndroidSubSystem:%s line: %d", __FUNCTION__, __LINE__);
+-    bool canProcessEve = AutoAndroidSubSystem::canProcessEvent(devProMap);
+-
+-    if (!canProcessEve)
+-        return nullptr;
+-
+-    AutoAndroidSubSystem *ptr = new (std::nothrow) AutoAndroidSubSystem(devProMap);
+-    PDM_LOG_DEBUG("AutoAndroidSubSystem:%s line: %d AutoAndroidSubSystem object created", __FUNCTION__, __LINE__);
+-    return ptr;
+-}
+-
+-std::string AutoAndroidSubSystem::getIdProduct()
+-{
+-    return mDevPropMap[ID_PRODUCT_ID];
+-}
+-
+-std::string AutoAndroidSubSystem::getModelId()
+-{
+-    return mDevPropMap[ID_MODEL_ID];
+-}
+\ No newline at end of file
+diff --git a/src/handlers/autoAndroid/AutoAndroidDeviceHandler.cpp b/src/handlers/autoAndroid/AutoAndroidDeviceHandler.cpp
+deleted file mode 100644
+index f7f468d..0000000
+--- a/src/handlers/autoAndroid/AutoAndroidDeviceHandler.cpp
++++ /dev/null
+@@ -1,330 +0,0 @@
+-// @@@LICENSE
+-//
+-// Copyright (c) 2020-2022 LG Electronics, Inc.
+-//
+-// Confidential computer software. Valid license from LG required for
+-// possession, use or copying. Consistent with FAR 12.211 and 12.212,
+-// Commercial Computer Software, Computer Software Documentation, and
+-// Technical Data for Commercial Items are licensed to the U.S. Government
+-// under vendor's standard commercial license.
+-//
+-// LICENSE@@@
+-
+-#include "AutoAndroidDeviceHandler.h"
+-#include "PdmJson.h"
+-#include <string.h>
+-#include "AutoAndroidSubSystem.h"
+-
+-static int sendString(libusb_device_handle *handle, const char *str, int index)
+-{
+-    return libusb_control_transfer(handle, DEVICE_TO_HOST_TYPE, ACCESSORY_SEND_STRING, 0U, static_cast<uint16_t>(index),
+-                                   (uint8_t *)str, static_cast<uint16_t>(strlen(str)) + 1U, 3000U);
+-}
+-
+-using namespace PdmDevAttributes;
+-
+-bool AutoAndroidDeviceHandler::mIsObjRegistered = AutoAndroidDeviceHandler::RegisterObject();
+-
+-AutoAndroidDeviceHandler::AutoAndroidDeviceHandler(PdmConfig *const pConfObj, PluginAdapter *const pluginAdapter)
+-    : DeviceHandler(pConfObj, pluginAdapter), m_deviceRemoved(false), m_context(nullptr), mHandle(nullptr)
+-
+-{
+-    lunaHandler->registerLunaCallback(std::bind(&AutoAndroidDeviceHandler::GetAttachedDeviceStatus, this, _1, _2),
+-                                      GET_DEVICESTATUS);
+-    lunaHandler->registerLunaCallback(std::bind(&AutoAndroidDeviceHandler::GetAttachedNonStorageDeviceList, this, _1, _2),
+-                                      GET_NONSTORAGEDEVICELIST);
+-}
+-
+-AutoAndroidDeviceHandler::~AutoAndroidDeviceHandler()
+-{
+-}
+-
+-bool AutoAndroidDeviceHandler::HandlerEvent(DeviceClass *devClass)
+-{
+-#ifdef WEBOS_SESSION
+-    if (devClass->getAction() == "remove")
+-    {
+-        ProcessAutoAndroidDevice(devClass);
+-        if (m_deviceRemoved)
+-            return true;
+-    }
+-
+-    if (isAOAProductId(devClass))
+-    {
+-        ProcessAutoAndroidDevice(devClass);
+-        return true;
+-    }
+-    if (isAOAInterface(devClass))
+-    {
+-        PDM_LOG_INFO("AutoAndroidDeviceHandler:", 0, "%s line: %d android interface detected", __FUNCTION__, __LINE__);
+-        if (openDevice(devClass))
+-        {
+-            PDM_LOG_INFO("AutoAndroidDeviceHandler:", 0, "%s line: %d opened android device", __FUNCTION__, __LINE__);
+-            if (startAccessoryMode() >= 0)
+-            {
+-                PDM_LOG_INFO("AutoAndroidDeviceHandler:", 0, "%s line: %d started Accessory mode", __FUNCTION__, __LINE__);
+-                return true;
+-            }
+-        }
+-    }
+-#else
+-    PDM_LOG_INFO("AutoAndroidDeviceHandler:", 0, "%s line: %d Android Auto is applicable only for Auto not for OSE", __FUNCTION__, __LINE__);
+-#endif
+-    return false;
+-}
+-
+-bool AutoAndroidDeviceHandler::isAOAProductId(DeviceClass *devClass)
+-{
+-    AutoAndroidSubSystem *autoAndroidSubsystem = (AutoAndroidSubSystem *)devClass;
+-
+-    if (autoAndroidSubsystem->getModelId().find("2d0") != std::string::npos)
+-    {
+-        return true;
+-    }
+-    return false;
+-}
+-
+-bool AutoAndroidDeviceHandler::openDevice(DeviceClass *devClass)
+-{
+-    AutoAndroidSubSystem *autoAndroidSubsystem = (AutoAndroidSubSystem *)devClass;
+-
+-    int usbopen_retrycnt = 0;
+-    libusb_device_handle *dev_handle = nullptr;
+-    libusb_device *device = nullptr;
+-    if (m_context == nullptr)
+-    {
+-        if (int res = libusb_init(&m_context) != LIBUSB_SUCCESS)
+-        {
+-            PDM_LOG_ERROR("AutoAndroidDeviceHandler:%s line: %d Fail to init libusb error:%s", __FUNCTION__, __LINE__, libusb_error_name(res));
+-            return false;
+-        }
+-        else
+-        {
+-            PDM_LOG_INFO("AutoAndroidDeviceHandler:", 0, "%s line: %d libusb_init initialized", __FUNCTION__, __LINE__);
+-        }
+-    }
+-    else
+-    {
+-        PDM_LOG_INFO("AutoAndroidDeviceHandler:", 0, "%s line: %d libusb_init already initialized", __FUNCTION__, __LINE__);
+-    }
+-    PDM_LOG_INFO("AutoAndroidDeviceHandler:", 0, "%s line: %d VendorID:%s, ProductID:%s", __FUNCTION__, __LINE__, devClass->getIdVendor().c_str(), autoAndroidSubsystem->getIdProduct().c_str());
+-    std::string vendorID = devClass->getIdVendor();
+-    std::string productID = autoAndroidSubsystem->getIdProduct();
+-    unsigned vendorId = stoul(vendorID, nullptr, 16);
+-    unsigned productId = stoul(productID, nullptr, 16);
+-
+-    dev_handle = libusb_open_device_with_vid_pid(m_context, vendorId, productId);
+-    if (dev_handle == nullptr)
+-    {
+-        PDM_LOG_ERROR("AutoAndroidDeviceHandler:%s line: %d Fail to get dev_handle", __FUNCTION__, __LINE__);
+-        return false;
+-    }
+-
+-    device = libusb_get_device(dev_handle);
+-    if (device == nullptr)
+-    {
+-        PDM_LOG_ERROR("AutoAndroidDeviceHandler:%s line: %d Fail to get device", __FUNCTION__, __LINE__);
+-        return false;
+-    }
+-    while (int res = libusb_open(device, &mHandle) != LIBUSB_SUCCESS)
+-    {
+-        PDM_LOG_ERROR("AutoAndroidDeviceHandler:%s line: %d Failed to open USB device, error: %s with mHandle : %p", __FUNCTION__, __LINE__, libusb_error_name(res), mHandle);
+-        usbopen_retrycnt++;
+-        if (usbopen_retrycnt > USB_OPEN_RETRY_COUNT)
+-        {
+-            PDM_LOG_ERROR("AutoAndroidDeviceHandler:%s line: %d Failed to open USB device, exceeded Retry count. (%d)", __FUNCTION__, __LINE__, usbopen_retrycnt);
+-            return false;
+-        }
+-        usleep(USB_OPEN_RETRY_USECOND);
+-    }
+-    PDM_LOG_INFO("AutoAndroidDeviceHandler:", 0, "%s line: %d Successfully opened device. with mHandle : 0x%p", __FUNCTION__, __LINE__, mHandle);
+-
+-    if (libusb_claim_interface(mHandle, 0) == LIBUSB_SUCCESS)
+-    {
+-        PDM_LOG_INFO("AutoAndroidDeviceHandler:", 0, "%s line: %d libusb_claim_interface Attached", __FUNCTION__, __LINE__);
+-    }
+-    return true;
+-}
+-
+-int AutoAndroidDeviceHandler::startAccessoryMode()
+-{
+-    int ret = -1;
+-    ret = getAOAPProtocol();
+-    if (ret <= 0)
+-    {
+-        PDM_LOG_ERROR("AutoAndroidDeviceHandler:%s line: %d Failed to getAOAPProtocol() (%d)", __FUNCTION__, __LINE__, ret);
+-        return -1;
+-    }
+-
+-    ret = sendString(mHandle, ACCESSORY_MANUFACTURER_NAME, ACCESSORY_STRING_MANUFACTURER);
+-    if (ret != (static_cast<int>(strlen(ACCESSORY_MANUFACTURER_NAME)) + 1))
+-    {
+-        PDM_LOG_ERROR("AutoAndroidDeviceHandler:%s line: %d Failed to Send ACCESSORY_MANUFACTURER_NAME (%d)", __FUNCTION__, __LINE__, ret);
+-        return -1;
+-    }
+-
+-    ret = sendString(mHandle, ACCESSORY_MODEL_NAME, ACCESSORY_STRING_MODEL);
+-    if (ret != (static_cast<int>(strlen(ACCESSORY_MODEL_NAME)) + 1))
+-    {
+-        PDM_LOG_ERROR("AutoAndroidDeviceHandler:%s line: %d Failed to Send ACCESSORY_MODEL_NAME (%d)", __FUNCTION__, __LINE__, ret);
+-        return -1;
+-    }
+-
+-    ret = sendString(mHandle, ACCESSORY_DESCRIPTION, ACCESSORY_STRING_DESCRIPTION);
+-    if (ret != (static_cast<int>(strlen(ACCESSORY_DESCRIPTION)) + 1))
+-    {
+-        PDM_LOG_ERROR("AutoAndroidDeviceHandler:%s line: %d Failed to Send ACCESSORY_DESCRIPTION (%d)", __FUNCTION__, __LINE__, ret);
+-        return -1;
+-    }
+-
+-    ret = sendString(mHandle, ACCESSORY_VERSION, ACCESSORY_STRING_VERSION);
+-    if (ret != (static_cast<int>(strlen(ACCESSORY_VERSION)) + 1))
+-    {
+-        PDM_LOG_ERROR("AutoAndroidDeviceHandler:%s line: %d Failed to Send ACCESSORY_VERSION (%d)", __FUNCTION__, __LINE__, ret);
+-        return -1;
+-    }
+-
+-    ret = sendString(mHandle, ACCESSORY_URI, ACCESSORY_STRING_URI);
+-    if (ret != (static_cast<int>(strlen(ACCESSORY_URI)) + 1))
+-    {
+-        PDM_LOG_ERROR("AutoAndroidDeviceHandler:%s line: %d Failed to Send ACCESSORY_URI (%d)", __FUNCTION__, __LINE__, ret);
+-        return -1;
+-    }
+-
+-    ret = sendString(mHandle, ACCESSORY_SERIAL_NUMBER, ACCESSORY_STRING_SERIAL);
+-    if (ret != (static_cast<int>(strlen(ACCESSORY_SERIAL_NUMBER)) + 1))
+-    {
+-        PDM_LOG_ERROR("AutoAndroidDeviceHandler:%s line: %d Failed to Send ACCESSORY_SERIAL_NUMBER (%d)", __FUNCTION__, __LINE__, ret);
+-        return -1;
+-    }
+-
+-    ret = libusb_control_transfer(mHandle, DEVICE_TO_HOST_TYPE, ACCESSORY_START, 0U, 0U, NULL, 0U, 3000U);
+-    if (ret != 0)
+-    {
+-        PDM_LOG_ERROR("AutoAndroidDeviceHandler:%s line: %d Failed to Send ACCESSORY_START (%d)", __FUNCTION__, __LINE__, ret);
+-        return -1;
+-    }
+-    return ret;
+-}
+-
+-int AutoAndroidDeviceHandler::getAOAPProtocol()
+-{
+-    int result = -1;
+-    uint8_t buffer[2];
+-    int iAOAPProtoVer = 0;
+-    int ret = libusb_control_transfer(mHandle, HOST_TO_DEVICE_TYPE, ACCESSORY_GET_PROTOCOL, 0U, 0U,
+-                                      (uint8_t *)buffer, 2U, 3000U);
+-    if (ret == 2)
+-    {
+-        iAOAPProtoVer = static_cast<int>(buffer[0]) + static_cast<int>(buffer[1] << 8);
+-        PDM_LOG_INFO("AutoAndroidDeviceHandler:", 0, "%s line: %d Succeed to get protocol (ver = %d)", __FUNCTION__, __LINE__, iAOAPProtoVer);
+-        result = iAOAPProtoVer;
+-    }
+-    else
+-    {
+-        PDM_LOG_ERROR("AutoAndroidDeviceHandler:%s line: %d Failed to get protocol with the error: %s", __FUNCTION__, __LINE__, libusb_error_name(ret));
+-    }
+-    return result;
+-}
+-
+-bool AutoAndroidDeviceHandler::isAOAInterface(DeviceClass *devClass)
+-{
+-    bool result = false;
+-    std::string interfaceClass = devClass->getInterfaceClass();
+-    PDM_LOG_INFO("AutoAndroidDeviceHandler:", 0, "%s line: %d interfaceClass %s devType:%s", __FUNCTION__, __LINE__, interfaceClass.c_str(), devClass->getDevType().c_str());
+-    if (((interfaceClass.find(":06") != std::string::npos) || (interfaceClass.find(":ff") != std::string::npos)) && (devClass->getDevType() == USB_DEVICE) && (devClass->getBluetoothId() != "1"))
+-    {
+-        result = true;
+-    }
+-    return result;
+-}
+-
+-void AutoAndroidDeviceHandler::removeDevice(AutoAndroidDevice *device)
+-{
+-    if (!device)
+-        return;
+-    sList.remove(device);
+-    Notify(AUTO_ANDROID_DEVICE, REMOVE, device);
+-    delete device;
+-    device = nullptr;
+-    if (sList.empty())
+-    {
+-        if (m_context)
+-        {
+-            PDM_LOG_INFO("AutoAndroidDeviceHandler:", 0, "%s line: %d list is emplty so stopping the libusb", __FUNCTION__, __LINE__);
+-            libusb_exit(m_context);
+-            m_context = nullptr;
+-        }
+-    }
+-}
+-
+-void AutoAndroidDeviceHandler::ProcessAutoAndroidDevice(DeviceClass *devClass)
+-{
+-
+-    PDM_LOG_INFO("AutoAndroidDeviceHandler:", 0, "%s line: %d DEVTYPE: %s ACTION: %s", __FUNCTION__, __LINE__, devClass->getDevType().c_str(), devClass->getAction().c_str());
+-    AutoAndroidDevice *androidDevice = nullptr;
+-    try
+-    {
+-        switch (sMapDeviceActions.at(devClass->getAction()))
+-        {
+-        case DeviceActions::USB_DEV_ADD:
+-            androidDevice = getDeviceWithPath<AutoAndroidDevice>(sList, devClass->getDevPath());
+-            if (!androidDevice)
+-            {
+-                androidDevice = new (std::nothrow) AutoAndroidDevice(m_pConfObj, m_pluginAdapter);
+-                if (!androidDevice)
+-                    break;
+-                androidDevice->setDeviceInfo(devClass);
+-                androidDevice->registerCallback(std::bind(&AutoAndroidDeviceHandler::commandNotification, this, _1, _2));
+-                sList.push_back(androidDevice);
+-                Notify(AUTO_ANDROID_DEVICE, ADD, androidDevice);
+-            }
+-            else
+-                androidDevice->setDeviceInfo(devClass);
+-            break;
+-        case DeviceActions::USB_DEV_REMOVE:
+-            androidDevice = getDeviceWithPath<AutoAndroidDevice>(sList, devClass->getDevPath());
+-            if (androidDevice)
+-            {
+-                removeDevice(androidDevice);
+-                m_deviceRemoved = true;
+-            }
+-            break;
+-        default:
+-            // Do nothing
+-            break;
+-        }
+-    }
+-    catch (const std::out_of_range &err)
+-    {
+-        PDM_LOG_INFO("AutoAndroidDeviceHandler:", 0, "%s line: %d out of range : %s", __FUNCTION__, __LINE__, err.what());
+-    }
+-}
+-
+-bool AutoAndroidDeviceHandler::HandlerCommand(CommandType *cmdtypes, CommandResponse *cmdResponse)
+-{
+-
+-    PDM_LOG_DEBUG("AutoAndroidDeviceHandler:%s line: %d", __FUNCTION__, __LINE__);
+-    return false;
+-}
+-
+-bool AutoAndroidDeviceHandler::HandlePluginEvent(int eventType)
+-{
+-    return true;
+-}
+-
+-bool AutoAndroidDeviceHandler::GetAttachedDeviceStatus(pbnjson::JValue &payload, LSMessage *message)
+-{
+-    return getAttachedDeviceStatus<AutoAndroidDevice>(sList, payload);
+-}
+-
+-bool AutoAndroidDeviceHandler::GetAttachedNonStorageDeviceList(pbnjson::JValue &payload, LSMessage *message)
+-{
+-    return getAttachedNonStorageDeviceList<AutoAndroidDevice>(sList, payload);
+-}
+-
+-void AutoAndroidDeviceHandler::commandNotification(EventType event, AutoAndroidDevice *device)
+-{
+-
+-    Notify(AUTO_ANDROID_DEVICE, event, device);
+-}
