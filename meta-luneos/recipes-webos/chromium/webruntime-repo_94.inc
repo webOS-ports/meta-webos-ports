@@ -16,4 +16,5 @@ SRC_URI += " \
     file://0005-DesktopNativeWidgetAura-donc-apply-DIP-for-SetBounds.patch \
     file://0006-palmGetResource-improve-legacy-compatibility.patch \
     file://0007-Update-app-shell.role.json.in-Add-trustLevel.patch \
+    file://0008-webossystem_injection.js-Fix-loading-of-local-resour.patch \
 "
