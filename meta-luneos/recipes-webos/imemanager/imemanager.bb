@@ -31,9 +31,10 @@ WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 
 WEBOS_REPO_NAME = "ime-manager"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-file://0001-ime-manager-Fix-implicit-declaration-of-QML-Connecti.patch \
-file://0002-main.qml-Fix-syntax-error.patch \
-file://0003-com.webos.service.ime-Add-org.maliit-as-allowed-name.patch \
+    file://0001-ime-manager-Fix-implicit-declaration-of-QML-Connecti.patch \
+    file://0002-main.qml-Fix-syntax-error.patch \
+    file://0003-com.webos.service.ime-Add-org.maliit-as-allowed-name.patch \
+    file://0004-main.qml-Fix-the-signature-of-onResponse.patch \
 "
 S = "${WORKDIR}/git"
 
