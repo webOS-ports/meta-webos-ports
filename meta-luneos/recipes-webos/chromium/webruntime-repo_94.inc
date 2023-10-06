@@ -20,4 +20,5 @@ SRC_URI += " \
     file://0006-palmGetResource-improve-legacy-compatibility.patch \
     file://0007-Update-app-shell.role.json.in-Add-trustLevel.patch \
     file://0008-palmGetResource-Fix-loading-of-local-resources.patch \
+    file://0009-webossystem_injection.cc-Disable-length-check-for-ar.patch \
 "
