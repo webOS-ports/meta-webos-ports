@@ -35,6 +35,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0008-Don-t-handle-displayInactive-event.patch \
     file://0009-Creating-activities-while-being-suspend-will-wakeup-.patch \
     file://0010-Add-powerd.management-permission-needed-by-powermenu.patch \
+    file://0011-Revert-Deprecation-of-com.webos.service.power.patch \
 "
 S = "${WORKDIR}/git"
 
