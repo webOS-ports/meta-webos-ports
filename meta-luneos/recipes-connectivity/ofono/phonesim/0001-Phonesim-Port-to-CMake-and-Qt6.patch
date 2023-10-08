@@ -1,0 +1,230 @@
+From 91cd037f8f3f17d0e8edfb911d1f19fe9a9fbaf2 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sat, 14 May 2022 08:20:58 +0200
+Subject: [PATCH] Phonesim: Port to CMake and Qt6
+
+Based upon: https://lore.kernel.org/ofono/cf3db388-fc6d-347b-dd80-f7888c7d528c@gmail.com/T/#mdc864cd544f867ff3b65bf44b0c32549617f5077
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+---
+Upstream-Status: Pending
+
+ CMakeLists.txt              | 24 ++++++++++++++++++++
+ src/CMakeLists.txt          | 45 +++++++++++++++++++++++++++++++++++++
+ src/control.cpp             |  8 +++----
+ src/hardwaremanipulator.cpp |  1 -
+ src/phonesim.cpp            |  2 +-
+ src/qwsppdu.cpp             | 12 +++++-----
+ 6 files changed, 79 insertions(+), 13 deletions(-)
+ create mode 100644 CMakeLists.txt
+ create mode 100644 src/CMakeLists.txt
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+new file mode 100644
+index 0000000..edff85d
+--- /dev/null
++++ b/CMakeLists.txt
+@@ -0,0 +1,24 @@
++cmake_minimum_required(VERSION 2.8.12)
++project(phonesim)
++set(PHONESIM_VERSION 1.21)
++
++include(FeatureSummary)
++include(GNUInstallDirs)
++
++find_package(Qt6 "6.0.0" NO_MODULE COMPONENTS Core Widgets Qml Network DBus Core5Compat)
++
++if(NOT Qt6_FOUND)
++    find_package(Qt5 "5.10.0" REQUIRED NO_MODULE COMPONENTS Core Widgets Qml Network DBus)
++endif()
++
++set(CMAKE_AUTOMOC ON)
++set(CMAKE_AUTOUIC ON)
++
++################# Enable C++17 #################
++
++set(CMAKE_CXX_STANDARD 17)
++
++################# build and install #################
++add_subdirectory(src)
++
++feature_summary(WHAT ALL INCLUDE_QUIET_PACKAGES FATAL_ON_MISSING_REQUIRED_PACKAGES)
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+new file mode 100644
+index 0000000..2fe976c
+--- /dev/null
++++ b/src/CMakeLists.txt
+@@ -0,0 +1,45 @@
++set(PHONESIM_SRCS
++    control.cpp
++    controlbase.ui
++    qatutils.cpp
++    qatresult.cpp
++    qwsppdu.cpp
++    qgsmcodec.cpp
++    callmanager.cpp
++    qsimterminalresponse.cpp
++    qsmsmessagelist.cpp
++    qsmsmessage.cpp
++    qsimcontrolevent.cpp
++    conformancesimapplication.cpp
++    server.cpp
++    aidapplication.cpp
++    gsmitem.cpp
++    simauth.cpp
++    phonesim.cpp
++    qsimcommand.cpp
++    qsimenvelope.cpp
++    qcbsmessage.cpp
++    hardwaremanipulator.cpp
++    simapplication.cpp
++    qatresultparser.cpp
++    attranslator.cpp
++    gsmspec.cpp
++    main.cpp
++    simfilesystem.cpp
++    aes.c
++    comp128.c
++)
++
++set(CMAKE_INCLUDE_CURRENT_DIR ON)
++
++add_executable(phonesim ${PHONESIM_SRCS})
++target_compile_definitions(phonesim PRIVATE -DVERSION=${PHONESIM_VERSION} -DQT_NO_FOREACH)
++
++if(Qt6_FOUND)
++    target_link_libraries(phonesim Qt6::Core Qt6::Widgets Qt6::Qml Qt6::Network Qt6::DBus Qt6::Core5Compat)
++else()
++    target_link_libraries(phonesim Qt5::Core Qt5::Widgets Qt5::Qml Qt5::Network Qt5::DBus)
++endif()
++
++install(TARGETS phonesim RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
++install(FILES default.xml DESTINATION ${CMAKE_INSTALL_DATADIR}/phonesim/)
+\ No newline at end of file
+diff --git a/src/control.cpp b/src/control.cpp
+index 817a0b2..d45ff91 100644
+--- a/src/control.cpp
++++ b/src/control.cpp
+@@ -24,7 +24,6 @@
+ #include <qcombobox.h>
+ #include <qmessagebox.h>
+ #include <qfiledialog.h>
+-#include <Qt>
+ #include <qbuffer.h>
+ #include <qtimer.h>
+ #include <qevent.h>
+@@ -337,7 +336,7 @@ void ControlWidget::sendSMSMessage()
+         return;
+     }
+ 
+-    if (ui->leSMSServiceCenter->text().isEmpty() || ui->leSMSServiceCenter->text().contains(QRegExp("\\D"))) {
++    if (ui->leSMSServiceCenter->text().isEmpty() || ui->leSMSServiceCenter->text().contains(QRegularExpression(R"(\D)"))) {
+         p->warning(tr("Invalid Service Center"),
+                 tr("Service Center must not be empty and contain "
+                    "only digits"));
+@@ -386,14 +385,14 @@ void ControlWidget::selectFile()
+ void ControlWidget::sendSMSDatagram()
+ {
+     QString dstPortStr = ui->leDstPort->text();
+-    if ( dstPortStr.contains(QRegExp("\\D")) ) {
++    if ( dstPortStr.contains(QRegularExpression(R"(\D)")) ) {
+         p->warning(tr("Invalid Port"), tr("Port number can contain only digits" ));
+         return;
+     }
+     int dst = dstPortStr.toInt();
+ 
+     QString srcPortStr = ui->leSrcPort->text();
+-    if ( srcPortStr.contains(QRegExp("\\D")) ) {
++    if ( srcPortStr.contains(QRegularExpression(R"(\D)")) ) {
+         p->warning(tr("Invalid Port"), tr("Port number can contain only digits" ));
+         return;
+     }
+@@ -700,7 +699,6 @@ QString Script::Run(const QString &name, const QDBusMessage &msg)
+     }
+ 
+     QTextStream stream(&scriptFile);
+-    stream.setCodec("UTF-8");
+     QString contents = stream.readAll();
+     scriptFile.close();
+ 
+diff --git a/src/hardwaremanipulator.cpp b/src/hardwaremanipulator.cpp
+index a8a9bfe..7a5d30b 100644
+--- a/src/hardwaremanipulator.cpp
++++ b/src/hardwaremanipulator.cpp
+@@ -18,7 +18,6 @@
+ ****************************************************************************/
+ 
+ #include "hardwaremanipulator.h"
+-#include <Qt>
+ #include <qdebug.h>
+ #include <qbuffer.h>
+ #include <qtimer.h>
+diff --git a/src/phonesim.cpp b/src/phonesim.cpp
+index 89d5e9d..1b826ed 100644
+--- a/src/phonesim.cpp
++++ b/src/phonesim.cpp
+@@ -346,7 +346,7 @@ bool SimChat::command( const QString& cmd )
+         else {
+             int index = value.indexOf( "${*}" );
+             if ( index != -1 ) {
+-                if ( wild.length() > 0 && wild[wild.length() - 1] == 0x1A ) {
++                if ( wild.length() > 0 && wild[wild.length() - 1] == QChar(0x1A) ) {
+                     // Strip the terminating ^Z from SMS PDU's.
+                     wild = wild.left( wild.length() - 1 );
+                 }
+diff --git a/src/qwsppdu.cpp b/src/qwsppdu.cpp
+index d636b5c..9798374 100644
+--- a/src/qwsppdu.cpp
++++ b/src/qwsppdu.cpp
+@@ -707,7 +707,7 @@ QString QWspPduDecoder::decodeTextString()
+     if (o == '\"')
+         o = decodeOctet();
+     while (o != 0 && !dev->atEnd()) {
+-        str += o;
++        str += QChar(o);
+         o = decodeOctet();
+     }
+ 
+@@ -722,7 +722,7 @@ QString QWspPduDecoder::decodeTextBlock(int length)
+ {
+     QString result;
+     for(int i = 0; i < length; ++i)
+-        result += decodeOctet();
++        result += QChar(decodeOctet());
+     return result;
+ }
+ 
+@@ -815,7 +815,7 @@ QString QWspPduDecoder::decodeContentType()
+             // Extension-Media
+             o = decodeOctet();
+             while (o != 0) {
+-                type += o;
++                type += QChar(o);
+                 o = decodeOctet();
+             }
+         }
+@@ -838,7 +838,7 @@ QString QWspPduDecoder::decodeContentType()
+         // Constrained-encoding = Extension-Media
+         o = decodeOctet();
+         while (o != 0) {
+-            type += o;
++            type += QChar(o);
+             o = decodeOctet();
+         }
+     }
+@@ -988,13 +988,13 @@ QString QWspPduDecoder::decodeParameter()
+         p = decodeTokenText() + "=";
+         octet = peekOctet();
+         if (octet <= 31 || octet & 0x80) {
+-            p += decodeInteger();
++            p += QChar(decodeInteger());
+         } else {
+             // Extension-Media
+             p += '\"';
+             octet = decodeOctet();
+             while (octet != 0 && !dev->atEnd()) {
+-                p += octet;
++                p += QChar(octet);
+                 octet = decodeOctet();
+             }
+             p += '\"';
