@@ -12,7 +12,9 @@ inherit webos_system_bus
 inherit pkgconfig
 
 WEBOS_VERSION = "3.0.1-15_a8d17fa1037cd0056449a95aa22c01ded2989d85"
-PR = "r17"
+PR = "r18"
+
+SRC_URI += "file://0001-Fix-build-with-nodejs-20.patch"
 
 PV = "3.0.1-15+git"
 SRCREV = "a8d17fa1037cd0056449a95aa22c01ded2989d85"
