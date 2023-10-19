@@ -1,22 +1,39 @@
-# Copyright (c) 2012-2014 LG Electronics, Inc.
+# Copyright (c) 2012-2023 LG Electronics, Inc.
 
 SUMMARY = "Initialization, setup, and font files used by luna-sysmgr and luna-sysservice"
+AUTHOR = "Yogish S <yogish.s@lge.com>"
 SECTION = "webos/base"
+
 LICENSE = "Apache-2.0"
-LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
+LIC_FILES_CHKSUM = " \
+    file://LICENSE;md5=89aea4e17d99a7cacdbeed46a0096b10 \
+    file://oss-pkg-info.yaml;md5=2bdfe040dcf81b4038370ae96036c519 \
+"
 
 DEPENDS = "tzdata python3-pytz-native"
 
-PV = "2.0.1-10+git${SRCPV}"
-SRCREV = "d5086f6422693138c4d5a0d2a11926d906af3a72"
+WEBOS_VERSION = "2.0.1-8_97d9c92925ca1a88106727cbdbd7d225a327bb15"
+PR = "r19"
+
+PV = "2.0.1-8+git${SRCPV}"
+SRCREV = "97d9c92925ca1a88106727cbdbd7d225a327bb15"
 
 inherit allarch
-inherit webos_ports_fork_repo
-inherit webos_filesystem_paths
+inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit python3native
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+    file://0001-luna-init-Add-cust-preferences.txt-and-CustomerCareN.patch \
+    file://0002-luna-init-Add-default-launcher-page-layout.json.patch \
+    file://0003-default-dock-positions.json-Use-variant-for-LuneOS.patch \
+    file://0004-defaultPreferences.txt-Customize-ringtone-and-wallpa.patch \
+    file://0005-defaultPreferences.txt-Add-keyboard-key-used-by-Mali.patch \
+    file://0006-command-resource-handlers.json-Switch-to-new-variant.patch \
+    file://0007-command-resource-handlers.json-Add-custom-handlers-f.patch \
+"
+
 S = "${WORKDIR}/git"
 
 do_install:append() {
@@ -28,17 +45,8 @@ do_install:append() {
     fi
     install -d ${D}${webos_sysconfdir}
     install -v -m 644 ${S}/files/conf/locale.txt ${D}${webos_sysconfdir}
-    install -v -m 644 ${S}/files/conf/defaultPreferences.txt ${D}${webos_sysconfdir}
-    install -v -m 644 ${S}/files/conf/default-launcher-page-layout.json ${D}${webos_sysconfdir}
-    install -v -m 644 ${S}/files/conf/default-dock-positions.json ${D}${webos_sysconfdir}
-    install -v -m 644 ${S}/files/conf/CustomerCareNumber.txt ${D}${webos_sysconfdir}
-    install -v -m 644 ${S}/src/mccInfo.json ${D}${webos_sysconfdir}
-	
-    install -d ${D}${webos_sysmgr_datadir}/customization
-    install -v -m 644 ${S}/files/conf/cust-preferences.txt ${D}${webos_sysmgr_datadir}/customization
-
 }
 
 PACKAGES =+ "${PN}-fonts"
-FILES:${PN} += "${webos_prefix} ${webos_sysconfdir} ${webos_sysmgr_datadir}/customization"
+FILES:${PN} += "${webos_prefix} ${webos_sysconfdir}"
 FILES:${PN}-fonts += "${datadir}/fonts/"
