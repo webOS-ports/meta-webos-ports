@@ -23,6 +23,8 @@ SRC_URI = "git://github.com/ony/${BPN};branch=gcc-4.7;protocol=https \
     file://0001-test_corners-initialize-cookie.patch \
     file://0001-Fix-build-with-gcc-13.patch \
     file://0001-CMakeLists.txt-replace-std-c-0x-with-std-c-14.patch \
+    file://0001-Fix-build-with-leveldb-1.23.patch \
+    file://0001-test-test_corners.cpp-fix-Werror-maybe-uninitialized.patch \
 "
 
 # Use gcc-4.7/v0.1.6 tag. It's backport of gcc-4.8 branch,
