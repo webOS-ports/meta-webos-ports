@@ -12,6 +12,7 @@ DEPENDS = "qtbase luna-sysmgr-common luna-service2 json-c glib-2.0 luna-sysmgr-i
 
 SRC_URI = " \
     git://github.com/sailfishos/sensorfw.git;protocol=https;branch=master \
+    file://0001-core.pro-use-QT6_INSTALL_LIBDIR-when-provided.patch \
 "
 
 S = "${WORKDIR}/git"
