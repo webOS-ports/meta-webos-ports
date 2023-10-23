@@ -44,4 +44,4 @@ SRC_URI += " \
     file://0001-Fix-off-by-one-error-preventing-ACG-security-from-fu.patch \
     file://0002-com.webos.nodejs.role.json-Add-permissions-required-.patch \
     file://0003-LS2Handle-findMyAppId-might-not-work-with-mojoservic.patch \
-    "
+"

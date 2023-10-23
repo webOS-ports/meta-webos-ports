@@ -37,11 +37,11 @@ inherit pkgconfig
 
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-file://0001-hub.cpp-add-org.webosports.service-in-the-migrated-s.patch \
-file://0002-ls-hubd-print-more-useful-error-for-outbound-permiss.patch \
-file://0003-CMakeLists-Remove-webos_machine_impl_dep-call.patch \
-file://0004-hub.cpp-Add-support-for-org.webosports-and-org.webos.patch \
-file://0005-luna-service2-Add-permissions-for-com.palm-and-org.w.patch \
+    file://0001-hub.cpp-add-org.webosports.service-in-the-migrated-s.patch \
+    file://0002-ls-hubd-print-more-useful-error-for-outbound-permiss.patch \
+    file://0003-CMakeLists-Remove-webos_machine_impl_dep-call.patch \
+    file://0004-hub.cpp-Add-support-for-org.webosports-and-org.webos.patch \
+    file://0005-luna-service2-Add-permissions-for-com.palm-and-org.w.patch \
 "
 S = "${WORKDIR}/git"
 

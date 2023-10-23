@@ -23,7 +23,7 @@ inherit pkgconfig
 inherit webos_public_repo
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-           file://0001-FontStyle.qml-Use-Prelude-on-LuneOS-instead-of-Museo.patch \
+    file://0001-FontStyle.qml-Use-Prelude-on-LuneOS-instead-of-Museo.patch \
 "
 
 S = "${WORKDIR}/git"
