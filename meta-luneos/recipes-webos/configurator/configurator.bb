@@ -27,8 +27,8 @@ inherit webos_machine_impl_dep
 EXTRA_OECMAKE_DISTRO = "-DWEBOS_TARGET_DISTRO:STRING='luneos'"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-file://0001-com.palm.configurator.role.json.in-Add-fixes-for-var.patch \
-file://0002-configurator-Fix-permission-issue-for-com.palm.filec.patch \
+    file://0001-com.palm.configurator.role.json.in-Add-fixes-for-var.patch \
+    file://0002-configurator-Fix-permission-issue-for-com.palm.filec.patch \
 "
 S = "${WORKDIR}/git"
 FILES:${PN} += "${webos_sysbus_datadir}"

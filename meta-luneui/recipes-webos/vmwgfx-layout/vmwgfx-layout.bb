@@ -14,10 +14,10 @@ inherit systemd
 inherit cmake
 
 SRC_URI = "git://github.com/sparkleholic/vmwgfx-layout.git;branch=master;protocol=https \
-           file://0001-Set-2-outputs-to-call-DRM_IOCTL_VMW_UPDATE_LAYOUT-fo.patch \
-           file://0002-Setup-service-for-LuneOS.patch \
-           file://0003-CMakeLists.txt-use-systemdsystemunitdir-instead-of-l.patch \
-           "
+    file://0001-Set-2-outputs-to-call-DRM_IOCTL_VMW_UPDATE_LAYOUT-fo.patch \
+    file://0002-Setup-service-for-LuneOS.patch \
+    file://0003-CMakeLists.txt-use-systemdsystemunitdir-instead-of-l.patch \
+"
 S = "${WORKDIR}/git"
 
 EXTRA_OECMAKE = "-Dsystemdsystemunitdir=${systemd_system_unitdir}"

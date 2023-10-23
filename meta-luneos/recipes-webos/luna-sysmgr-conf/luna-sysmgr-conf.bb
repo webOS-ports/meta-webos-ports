@@ -11,10 +11,11 @@ inherit webos_filesystem_paths
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-SRC_URI = "file://luna-platform.conf \
-           file://lunaAnimations-platform.conf \
-           file://defaultPreferences-platform.txt \
-           "
+SRC_URI = " \
+    file://luna-platform.conf \
+    file://lunaAnimations-platform.conf \
+    file://defaultPreferences-platform.txt \
+"
 
 do_install() {
     install -d ${D}${webos_sysconfdir}

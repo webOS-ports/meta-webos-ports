@@ -26,10 +26,10 @@ inherit pkgconfig
 
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-file://0001-luna-downloadmanager-Fix-format-warnings-remove-unus.patch \
-file://0002-luna-downloadmgr-Fix-LS2-permissions.patch \
-file://0003-filesystemStatusCheck-first-implementation.patch \
-file://0004-DownloadManager.cpp-Make-org.webosports-privileged-a.patch \
+    file://0001-luna-downloadmanager-Fix-format-warnings-remove-unus.patch \
+    file://0002-luna-downloadmgr-Fix-LS2-permissions.patch \
+    file://0003-filesystemStatusCheck-first-implementation.patch \
+    file://0004-DownloadManager.cpp-Make-org.webosports-privileged-a.patch \
 "
 S = "${WORKDIR}/git"
 
