@@ -28,15 +28,15 @@ inherit webos_system_bus
 inherit webos_public_repo
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-file://0001-com.webos.sam.role.json.in-Fix-various-outbound-perm.patch \
-file://0002-Allow-getAppBasePath-also-from-trusted-apps.patch \
-file://0003-RunningApp-disable-killer-timeout-for-app-relaunch.patch \
-file://0004-Setup-QML-style-for-LuneOS.patch \
-file://0005-Handle-noWindow-apps.patch \
-file://0006-AppDescription.h-Add-org.webosports-as-privileged-as.patch \
-file://0007-Setup-QT_IM_MODULE-for-client-apps.patch \
-file://0008-NativeContainer-configure-native-apps.patch \
-file://0009-Setup-QT_WAYLAND_SHELL_INTEGRATION-for-webOS.patch \
+    file://0001-com.webos.sam.role.json.in-Fix-various-outbound-perm.patch \
+    file://0002-Allow-getAppBasePath-also-from-trusted-apps.patch \
+    file://0003-RunningApp-disable-killer-timeout-for-app-relaunch.patch \
+    file://0004-Setup-QML-style-for-LuneOS.patch \
+    file://0005-Handle-noWindow-apps.patch \
+    file://0006-AppDescription.h-Add-org.webosports-as-privileged-as.patch \
+    file://0007-Setup-QT_IM_MODULE-for-client-apps.patch \
+    file://0008-NativeContainer-configure-native-apps.patch \
+    file://0009-Setup-QT_WAYLAND_SHELL_INTEGRATION-for-webOS.patch \
 "
 S = "${WORKDIR}/git"
 

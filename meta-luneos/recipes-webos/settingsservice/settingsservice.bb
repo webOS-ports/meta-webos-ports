@@ -26,7 +26,7 @@ inherit systemd
 inherit pkgconfig
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-file://0001-service-update-SettingsService-path.patch \
+    file://0001-service-update-SettingsService-path.patch \
 "
 
 S = "${WORKDIR}/git"

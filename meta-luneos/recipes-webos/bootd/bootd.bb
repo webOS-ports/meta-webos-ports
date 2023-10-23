@@ -21,7 +21,7 @@ inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "bootd.service"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-file://0001-DefaultBootSequencer.cpp-Add-LuneOS-bits.patch \
+    file://0001-DefaultBootSequencer.cpp-Add-LuneOS-bits.patch \
 "
 S = "${WORKDIR}/git"
 
