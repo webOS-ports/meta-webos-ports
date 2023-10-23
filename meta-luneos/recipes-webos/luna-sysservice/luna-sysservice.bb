@@ -30,9 +30,9 @@ inherit webos_systemd
 inherit pkgconfig
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-file://0001-Add-ImageService.patch \
-file://0002-luna-sysservice-Fix-spacing-issues.patch \
-file://0003-luna-sysservice-Add-required-bits-for-LuneOS.patch \
+    file://0001-Add-ImageService.patch \
+    file://0002-luna-sysservice-Fix-spacing-issues.patch \
+    file://0003-luna-sysservice-Add-required-bits-for-LuneOS.patch \
 "
 
 S = "${WORKDIR}/git"

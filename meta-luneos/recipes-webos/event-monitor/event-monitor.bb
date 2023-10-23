@@ -21,7 +21,7 @@ inherit webos_systemd
 inherit pkgconfig
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-file://0001-Add-trustLevel.patch \
+    file://0001-Add-trustLevel.patch \
 "
 
 S = "${WORKDIR}/git"
