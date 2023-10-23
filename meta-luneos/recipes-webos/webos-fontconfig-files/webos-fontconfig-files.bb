@@ -19,7 +19,7 @@ inherit fontcache
 inherit webos_public_repo
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-           file://0001-31-webos-aliases.conf-Use-Prelude-for-LuneOS.patch \
+    file://0001-31-webos-aliases.conf-Use-Prelude-for-LuneOS.patch \
 "
 S = "${WORKDIR}/git"
 
