@@ -31,15 +31,15 @@ inherit webos_filesystem_paths
 inherit webos_public_repo
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-           file://0001-AppLoader-add-import-path-for-QML-apps.patch \
-           file://0002-Setup-missing-env-variables.patch \
-           file://0003-qml-runner-don-t-set-default-value-for-WEBOS_WINDOW_.patch \
-           file://0004-RoundedRectangle.qml-Use-GraphicalEffects-from-Qt5Co.patch \
-           file://0005-AppLoader-use-old-syntax-for-quit-connect.patch \
-           file://0006-com.webos.app.qmlrunner.role.json.in-Add-trustLevel.patch \
-           file://0007-WebOSQuickWindow-make-setWindowPropery-Q_INVOKABLE.patch \
-           file://0008-runner-debug-use-WEBOS_INSTALL_BINS-as-other-binarie.patch \
-           "
+    file://0001-AppLoader-add-import-path-for-QML-apps.patch \
+    file://0002-Setup-missing-env-variables.patch \
+    file://0003-qml-runner-don-t-set-default-value-for-WEBOS_WINDOW_.patch \
+    file://0004-RoundedRectangle.qml-Use-GraphicalEffects-from-Qt5Co.patch \
+    file://0005-AppLoader-use-old-syntax-for-quit-connect.patch \
+    file://0006-com.webos.app.qmlrunner.role.json.in-Add-trustLevel.patch \
+    file://0007-WebOSQuickWindow-make-setWindowPropery-Q_INVOKABLE.patch \
+    file://0008-runner-debug-use-WEBOS_INSTALL_BINS-as-other-binarie.patch \
+"
 
 S = "${WORKDIR}/git"
 

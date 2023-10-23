@@ -38,8 +38,8 @@ SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE:${PN} = "nyx.target"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-file://0001-Implement-asynchronous-suspend-resume-methods-for-sy.patch \
-file://0002-add-nyx-target.patch \
+    file://0001-Implement-asynchronous-suspend-resume-methods-for-sy.patch \
+    file://0002-add-nyx-target.patch \
 "
 S = "${WORKDIR}/git"
 

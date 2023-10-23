@@ -14,8 +14,8 @@ inherit webos_public_repo
 inherit webos_cmake
 inherit pkgconfig
 
-SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
+SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE} \
+    file://0001-ipc-fix-build-with-gcc-11.patch \
+    file://0001-ipc-fix-build-with-glibc-2.34.patch \
+"
 S = "${WORKDIR}/git"
-
-SRC_URI += "file://0001-ipc-fix-build-with-gcc-11.patch"
-SRC_URI += "file://0001-ipc-fix-build-with-glibc-2.34.patch"

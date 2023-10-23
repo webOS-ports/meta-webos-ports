@@ -26,7 +26,7 @@ inherit features_check
 REQUIRED_DISTRO_FEATURES = "systemd"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-file://0001-Make-sure-generated-service-files-get-a-.service-suf.patch \
+    file://0001-Make-sure-generated-service-files-get-a-.service-suf.patch \
 "
 S = "${WORKDIR}/git"
 
