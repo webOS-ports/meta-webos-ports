@@ -20,7 +20,11 @@ inherit webos_npm_env
 PV = "1.0.0-74+git${SRCPV}"
 SRCREV = "ef128c4af9260f302d941d1a4bab94ba4a09d462"
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+    file://0001-appinfo.json-Use-custom-icon-files-from-legacy.patch \
+    file://icon.png \
+    file://icon-256x256.png \
+"
 S = "${WORKDIR}/git"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
@@ -31,8 +35,6 @@ WEBOS_ENACTJS_PACK_OPTS = "--isomorphic --production --snapshot"
 WEBOS_ENACTJS_ILIB_OVERRIDE = ""
 WEBOS_PREFERRED_GFX_IMAGE_FORMAT_ENABLED="0"
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 WEBOS_ENACTJS_PROJECT_PATH = "./samples/enact-based"
 WEBOS_ENACTJS_PACK_OVERRIDE = "\
     ${ENACT_DEV} pack ${WEBOS_ENACTJS_PACK_OPTS} && \
@@ -68,12 +70,19 @@ install_acg_configuration() {
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.manifest.json ${D}${webos_sysbus_manifestsdir}/${BPN}.json
 }
 
+APP_PATH = "${webos_applicationsdir}/${PN}"
+
 do_install:append() {
     install_acg_configuration
 
     # Enact does something wrong in this case, chown to prevent host-user-contaminated QA issue
     # but should be fixed in enactjs
     chown root:root -R ${D}
+
+    # Add the legacy icons instead
+    install -d ${D}${APP_PATH}
+    install -m 0644 ${WORKDIR}/icon.png ${D}${APP_PATH}/icon.png
+    install -m 0644 ${WORKDIR}/icon-256x256.png ${D}${APP_PATH}/icon-256x256.png
 }
 
 FILES:${PN} += "${webos_applicationsdir}"
