@@ -18,10 +18,9 @@ RDEPENDS:${PN} += " \
 
 LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/cleanup"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
-SRCREV = "6ec0c7107a6c86bd54091b742c6df7da34f7167a"
+SRCREV = "5c42d70ee25adb5855d2346eabbf69f4bdc3bd0e"
 
 PV = "1.0.0-22+git"
 
