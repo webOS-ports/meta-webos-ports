@@ -86,7 +86,7 @@ BAD_RECOMMENDATIONS:append:qemux86 = " kernel-vmlinux"
 # used by meta-networking/recipes-connectivity/autossh/autossh_1.4g.bb
 PREFERRED_RPROVIDER_ssh = "openssh"
 
-VIRTUAL-RUNTIME_init_manager = "systemd"
+VIRTUAL-RUNTIME_init_manager = "systemd systemd-compat-units systemd-machine-units"
 
 # With upstart we don't need update-rc.d, as bonus fixes following avahi issue for us:
 # http://lists.openembedded.org/pipermail/openembedded-core/2013-November/086901.html
