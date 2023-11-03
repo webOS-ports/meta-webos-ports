@@ -7,9 +7,8 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=1ebbd3e34237af26da5dc08a4e440464"
 
 SECTION = "webos/support"
 
-SRCREV = "d03e10c132de8e03dff781868b3e37b7f7c7128a"
+SRCREV = "209c90d47330ddb357b5209309c80c4257f05fe3"
 PV = "1.2.0+git"
-
 
 RDEPENDS:${PN} += "waydroid-data lxc python3-gbinder python3-pygobject libgbinder python3-pyclip"
 
@@ -20,14 +19,15 @@ RRECOMMENDS:${PN} += " \
     kernel-module-binder-linux \
 "
 
-SRC_URI = "git://github.com/waydroid/waydroid;branch=bullseye;protocol=https \
+SRC_URI = "git://github.com/waydroid/waydroid.git;branch=main;protocol=https \
+           file://0001-config_4-Disable-this-for-now-since-Waydroid-doesn-t.patch \
            file://gbinder.conf \
           "
 S = "${WORKDIR}/git"
 
 # Needs quite new kernel (probably >= 3.18) and from LuneOS supported machines
-# only qemux86, qemux86-64 and rpi (later hammerhead-mainline) MACHINEs have it
-# Unlink ashmem, binder drop qemux86 here, because anbox-data is available only
+# only qemux86, qemux86-64, rpi, Pine64 and other mainline) MACHINEs have it
+# Unlink ashmem, binder drop qemux86 here, because waydroid-data is available only
 # for following 4 archs (x86-64, armv7a, armv7ve, aarch64)
 COMPATIBLE_MACHINE ?= "(^$)"
 COMPATIBLE_MACHINE:qemux86-64 = "(.*)"
@@ -52,10 +52,12 @@ do_install:append() {
     cp ${S}/waydroid.py "${D}/usr/lib/waydroid/"
     ln -s /usr/lib/waydroid/waydroid.py "${D}/usr/bin/waydroid"
 
-    install -Dm644 -t "${D}/etc/gbinder.d" ${S}/gbinder/anbox.conf
-  
     install -d ${D}${systemd_unitdir}/system
-    install -m 0644 ${S}/debian/waydroid-container.service ${D}${systemd_unitdir}/system/
+    install -m 0644 ${S}/systemd/waydroid-container.service ${D}${systemd_unitdir}/system/
+
+    install -d ${D}${sysconfdir}/dbus-1/system.d
+    install -m 0644 ${S}/dbus/id.waydro.Container.conf ${D}${sysconfdir}/dbus-1/system.d/
+    install -m 0644 ${S}/dbus/id.waydro.Container.service ${D}${sysconfdir}/dbus-1/system.d/
 }
 
 # Provided by libgbinder already for Halium devices, but necessary to add for non-Halium devices.
@@ -84,12 +86,11 @@ FILES:${PN} += "${systemd_unitdir} ${sysconfdir}"
 # mount --bind /tmp/luna-session /run/luna-session/
 # export XDG_RUNTIME_DIR=/run/luna-session
 # export XDG_SESSION_TYPE=wayland
-# -- also, make sure /etc/gbinder.conf has "ApiLevel = 29" (Halium 9 needs API 28)
+# -- also, make sure /etc/gbinder.conf has "ApiLevel = 30" (Halium 9 needs API 28)
 #
 # Then:
 # 0. waydroid init (just once, but needs network !)
-# 1. waydroid container start
-# 2. either
+# 1. either
 #      waydroid show-full-ui
 #    or
 #      waydroid session start
