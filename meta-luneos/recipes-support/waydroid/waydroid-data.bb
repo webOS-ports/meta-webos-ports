@@ -17,13 +17,15 @@ WAYDROID_ARCH:x86-64 = "waydroid_x86_64"
 WAYDROID_ARCH:aarch64 = "waydroid_arm64"
 WAYDROID_SYSTEM_IMAGE = "lineage-18.1-20231028-VANILLA-${WAYDROID_ARCH}-system.zip" 
 WAYDROID_VENDOR_IMAGE = "lineage-18.1-20231028-MAINLINE-${WAYDROID_ARCH}-vendor.zip" 
-WAYDROID_VENDOR_IMAGE:halium = "lineage-16.0-20231028-HALIUM_9-${WAYDROID_ARCH}-vendor.zip"
+WAYDROID_VENDOR_IMAGE:halium = "lineage-18.1-20231028-HALIUM_11-${WAYDROID_ARCH}-vendor.zip"
 
 SHA256SUM_SYSTEM:x86-64 = "992853ed6849fd26cb750d880016ff605910661229fb3ab22447a7e6f1c8c112"
 SHA256SUM_VENDOR:x86-64 = "c0057b233c5dddf7b8f3bb046d3114fa34589c776743ced61840615d4d48f5bc"
 
 SHA256SUM_SYSTEM:aarch64 = "406adff7e346eab019a51287e49765a6d6c24d62c0a47eb74eb8ea9ad2c384ee"
 SHA256SUM_VENDOR:aarch64 = "e67f0d92907bd74083f1f83da701609c94c4cdbd8ba7c662c27d3e94194aac70"
+
+SHA256SUM_VENDOR:halium = "cd5b1394f35c97c0284f365e52588eecd7b89b6aa28624aefca55aff509143e5"
 
 SRC_URI = "https://sourceforge.net/projects/waydroid/files/images/system/lineage/${WAYDROID_ARCH}/${WAYDROID_SYSTEM_IMAGE};name=system \
            https://sourceforge.net/projects/waydroid/files/images/vendor/${WAYDROID_ARCH}/${WAYDROID_VENDOR_IMAGE};name=vendor \
