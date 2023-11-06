@@ -21,7 +21,6 @@ RRECOMMENDS:${PN} += " \
 "
 
 SRC_URI = "git://github.com/waydroid/waydroid.git;branch=main;protocol=https \
-           file://0001-config_4-Disable-this-for-now-since-Waydroid-doesn-t.patch \
            file://gbinder.conf \
           "
 S = "${WORKDIR}/git"
