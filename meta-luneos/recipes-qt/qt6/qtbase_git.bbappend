@@ -2,7 +2,7 @@
 
 inherit webos_qt_global
 
-EXTENDPRAUTO:append = "webos113"
+EXTENDPRAUTO:append = "webos117"
 
 # Remove LGPL3-only files
 python do_patch:append() {
@@ -101,18 +101,23 @@ PATCHTOOL = "git"
 # Upstream-Status: Inappropriate
 # NOTE: Increase maxver when upgrading Qt version
 SRC_URI:append = " \
-    file://9901-Disable-Faux-bolding-in-Qts-FreeType-FontEngine.patch;maxver=6.5.3 \
+    file://9901-Disable-Faux-bolding-in-Qts-FreeType-FontEngine.patch;maxver=6.6.0 \
 "
 
 # FIXME: Patches below can be dropped once all qmake-dependent components are switched to cmake.
 # https://bugreports.qt.io/browse/WEBOSCI-66
 # https://bugreports.qt.io/browse/WEBOSCI-81
+# https://bugreports.qt.io/browse/WEBOSCI-86
+SRC_URI:append:class-native = " file://9902-Revert-Remove-perl-related-functionality-from-CMake-.patch;minver=6.5.1;maxver=6.5.1"
 SRC_URI:append:class-native = " file://9902-Revert-Remove-perl-related-functionality-from-CMake-_6.5.x.patch;minver=6.5.2;maxver=6.5.*"
-SRC_URI:append:class-native = " file://9902-Revert-Remove-perl-related-functionality-from-CMake-_6.6.x.patch;minver=6.6.0"
+SRC_URI:append:class-native = " file://9902-Revert-Remove-perl-related-functionality-from-CMake-_6.6.x.patch;minver=6.6.0;maxver=6.6.*"
+SRC_URI:append:class-native = " file://9902-Revert-Remove-perl-related-functionality-from-CMake-_6.7.x.patch;minver=6.7.0"
 # https://bugreports.qt.io/browse/WEBOSCI-73
 SRC_URI:append = " file://9903-Revert-Remove-qmake-files-that-provide-support-for-b.patch;minver=6.5.1 "
 # https://bugreports.qt.io/browse/WEBOSCI-76
 SRC_URI:append = " file://9904-Revert-CMake-remove-tests-for-C-17-and-C11-and-earli.patch;minver=6.6.0"
+# https://bugreports.qt.io/browse/WEBOSCI-64
+SRC_URI:append:class-native = " file://9905-Revert-Remove-syncqt.pl.patch;minver=6.7.0"
 
 # Flags needed for webOS
 TARGET_CXXFLAGS:append = " \
@@ -121,3 +126,10 @@ TARGET_CXXFLAGS:append = " \
 
 VIRTUAL-RUNTIME_gpu-libs ?= ""
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_gpu-libs}"
+
+# FIXME: Since there is no libgles3-mesa package that would pull in the headers,
+# webos-qt-sdk should have runtime dependency on libgles3-mesa-dev because
+# /usr/include/QtGui/qtgui-config.h will either use gl3.h or gl2.h based
+# on QT_FEATURE_opengles3.
+# https://bugreports.qt.io/browse/WEBOSCI-82
+RRECOMMENDS:${PN}-dev += "libgles3-mesa-dev"
