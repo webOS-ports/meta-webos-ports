@@ -2,7 +2,7 @@
 
 inherit webos_qt_global
 
-EXTENDPRAUTO:append = "webos84"
+EXTENDPRAUTO:append = "webos85"
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 
@@ -11,7 +11,7 @@ PATCHTOOL = "git"
 # Upstream-Status: Submitted
 # NOTE: Increase maxver when upgrading Qt version
 SRC_URI:append = " \
-    file://0001-Check-if-a-device-in-knownPointingDevices-is-destroy.patch;maxver=6.5.3 \
+    file://0001-Check-if-a-device-in-knownPointingDevices-is-destroy.patch;maxver=6.6.0 \
 "
 
 SRC_URI:append:armv7a = " \
