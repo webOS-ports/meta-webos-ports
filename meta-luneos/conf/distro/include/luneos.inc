@@ -29,14 +29,14 @@ WEBOS_PORTS_CODENAME = "ports"
 # WEBOS_DISTRO_PLATFORM_CODENAME ?= "${DISTRO}-${WEBOS_PORTS_CODENAME}"
 WEBOS_DISTRO_PLATFORM_CODENAME ?= "luneos"
 WEBOS_DISTRO_VERSION_CODENAME ?= "Eiskaffee"
-# WEBOS_DISTRO_VERSION_CODENAME ?= "${@oe.buildcfg.get_metadata_git_branch('.', None).strip().translate(None, '()/')}"
+# WEBOS_DISTRO_VERSION_CODENAME ?= "${@oe.buildcfg.get_metadata_git_branch('.').strip().translate(None, '()/')}"
 WEBOS_DISTRO_RELEASE_CODENAME ?= "${WEBOS_DISTRO_PLATFORM_CODENAME}${@oe.utils.conditional( 'WEBOS_DISTRO_VERSION_CODENAME', '', '', '-${WEBOS_DISTRO_VERSION_CODENAME}', d) }"
 
 # This is the codename for the series of builds that are made from a branch.
 # It appears in the image filenames. It is expected that other distros will
 # override this based on their codename schemes.
 WEBOS_DISTRO_BUILD_CODENAME ?= ""
-# WEBOS_DISTRO_BUILD_CODENAME ?= "${@oe.buildcfg.get_metadata_git_branch('.', None).strip().translate(None, '()/')}"
+# WEBOS_DISTRO_BUILD_CODENAME ?= "${@oe.buildcfg.get_metadata_git_branch('.').strip().translate(None, '()/')}"
 
 WEBOS_DISTRO_PRERELEASE ?= "devel"
 
@@ -63,8 +63,8 @@ BUILDCFG_VARS += "WEBOS_DISTRO_RELEASE_CODENAME WEBOS_DISTRO_BUILD_ID"
 
 # Branch, revision and description of TOPDIR (webos-ports-setup repository)
 SETUP_COMMON_DIR = "${TOPDIR}/../common/"
-WEBOS_DISTRO_TOPDIR_BRANCH ?= "${@oe.buildcfg.get_metadata_git_branch('${SETUP_COMMON_DIR}', None).strip()}"
-WEBOS_DISTRO_TOPDIR_REVISION ?= "${@oe.buildcfg.get_metadata_git_revision('${SETUP_COMMON_DIR}', None).strip()}"
+WEBOS_DISTRO_TOPDIR_BRANCH ?= "${@oe.buildcfg.get_metadata_git_branch('${SETUP_COMMON_DIR}').strip()}"
+WEBOS_DISTRO_TOPDIR_REVISION ?= "${@oe.buildcfg.get_metadata_git_revision('${SETUP_COMMON_DIR}').strip()}"
 # Don't add WEBOS_DISTRO_TOPDIR_BRANCH, because in many cases it can be "(nobranch)"
 BUILDCFG_VARS += "WEBOS_DISTRO_TOPDIR_REVISION"
 
