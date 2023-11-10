@@ -35,6 +35,7 @@ COMPATIBLE_MACHINE:rpi = "(.*)"
 COMPATIBLE_MACHINE:pinephone = "(.*)"
 COMPATIBLE_MACHINE:pinephonepro = "(.*)"
 COMPATIBLE_MACHINE:pinetab2 = "(.*)"
+COMPATIBLE_MACHINE:mido = "(.*)"
 
 inherit pkgconfig
 
