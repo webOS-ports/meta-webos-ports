@@ -1,6 +1,6 @@
 # @@@LICENSE
 #
-#      Copyright (c) 2010-2023 LG Electronics, Inc.
+#      Copyright (c) 2010-2019 LG Electronics, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,8 +24,12 @@ set(NYXMOD_OW_CHARGER			TRUE)
 set(NYXMOD_OW_KEYS			TRUE)
 set(NYXMOD_OW_TOUCHPANEL		FALSE)
 set(NYXMOD_OW_TOUCHPANEL_MTDEV		TRUE)
-set(NYXMOD_OW_LED			TRUE)
 set(NYXMOD_OW_HAPTICS			TRUE)
+
+# provided by nyx-modules-hybris
+set(NYXMOD_OW_DEVICEINFO		FALSE)
+set(NYXMOD_OW_SYSTEM			FALSE)
+set(NYXMOD_OW_LED			FALSE)
 
 add_definitions(-DBATTERY_SYSFS_PATH=\"/sys/class/power_supply/battery/\")
 add_definitions(-DTOUCHPANEL_DEVICE=\"/dev/input/event1\")
