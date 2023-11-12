@@ -36,7 +36,7 @@ RDEPENDS:${PN}-ptest += "file make gmp nettle gnutls bash libgcc"
 
 RDEPENDS:${PN}-networking += "iptables"
 
-SRC_URI = "git://github.com/lxc/lxc.git;branch=stable-4.0;protocol=https \
+SRC_URI = "http://linuxcontainers.org/downloads/${BPN}/${BPN}-${PV}.tar.gz \
 	file://lxc-1.0.0-disable-udhcp-from-busybox-template.patch \
 	file://run-ptest \
 	file://lxc-fix-B-S.patch \
@@ -46,15 +46,17 @@ SRC_URI = "git://github.com/lxc/lxc.git;branch=stable-4.0;protocol=https \
 	file://template-make-busybox-template-compatible-with-core-.patch \
 	file://templates-use-curl-instead-of-wget.patch \
 	file://tests-our-init-is-not-busybox.patch \
+	file://tests-add-no-validate-when-using-download-template.patch \
 	file://dnsmasq.conf \
 	file://lxc-net \
-	file://0001-Patching-an-incoming-CVE-CVE-2022-47952.patch \
 	"
 
-SRCREV = "5ba5725cb4a210c25707beeca64fde5f561d1c71"
-PV = "4.0.12+git${SRCPV}"
+SRC_URI[md5sum] = "732571c7cb4ab845068afb227bf35256"
+SRC_URI[sha256sum] = "9165dabc0bb6ef7f2fda2009aee90b20fbefe77ed8008347e9f06048eba1e463"
 
-S = "${WORKDIR}/git"
+
+
+S = "${WORKDIR}/${BPN}-${PV}"
 
 # Let's not configure for the host distro.
 #
