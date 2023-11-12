@@ -7,12 +7,11 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=2d5025d4aa3495befef8f17206a5b0a1"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 PV = "0.14.4+git"
-SRCREV = "24ab29a7b7a2a383b44485b519cee99b7a084ebd"
+SRCREV = "c906ea7f6473e01c454e4bff8c08cb6135776c8c"
 DEPENDS = "qtbase luna-sysmgr-common luna-service2 json-c glib-2.0 luna-sysmgr-ipc-messages"
 
 SRC_URI = " \
     git://github.com/sailfishos/sensorfw.git;protocol=https;branch=master \
-    file://0001-core.pro-use-QT6_INSTALL_LIBDIR-when-provided.patch \
 "
 
 S = "${WORKDIR}/git"
@@ -29,7 +28,7 @@ inherit webos_filesystem_paths
 
 SERVICE_NAME = "com.nokia.SensorService"
 
-EXTRA_QMAKEVARS_PRE += "MAKE_DOCS=no QT6_INSTALL_LIBDIR=${QT6_INSTALL_LIBDIR}"
+EXTRA_QMAKEVARS_PRE += "MAKE_DOCS=no QT6_INSTALL_LIBDIR=${QT6_INSTALL_LIBDIR} "
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/LuneOS/sysbus"
