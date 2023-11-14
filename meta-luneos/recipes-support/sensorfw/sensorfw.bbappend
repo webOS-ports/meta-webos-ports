@@ -8,6 +8,7 @@ do_install:append:halium() {
 }
 
 EXTRA_QMAKEVARS_PRE:append:halium = "CONFIG+=autohybris "
+EXTRA_QMAKEVARS_PRE:append:halium = "CONFIG+=luneos "
 
 # Halium-9.0 devices use binder to communicate with sensors
 EXTRA_QMAKEVARS_PRE:append:hammerhead-halium = "CONFIG+=binder "
