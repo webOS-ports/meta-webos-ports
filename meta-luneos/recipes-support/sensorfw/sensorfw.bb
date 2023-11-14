@@ -13,6 +13,7 @@ DEPENDS = "qtbase luna-sysmgr-common luna-service2 json-c glib-2.0 luna-sysmgr-i
 SRC_URI = " \
     git://github.com/sailfishos/sensorfw.git;protocol=https;branch=master \
     file://0001-hybrisadaptor-Fix-deprecated-use-of-QMap-insertMulti.patch \
+    file://0002-sensorfw-Add-LuneOS-specific-config-option.patch \
 "
 
 S = "${WORKDIR}/git"
