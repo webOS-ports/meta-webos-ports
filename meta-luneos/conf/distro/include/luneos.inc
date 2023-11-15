@@ -63,8 +63,9 @@ BUILDCFG_VARS += "WEBOS_DISTRO_RELEASE_CODENAME WEBOS_DISTRO_BUILD_ID"
 SETUP_COMMON_DIR = "${TOPDIR}/../common/"
 WEBOS_DISTRO_TOPDIR_BRANCH ?= "${@base_get_metadata_git_branch('${SETUP_COMMON_DIR}', None).strip()}"
 WEBOS_DISTRO_TOPDIR_REVISION ?= "${@base_get_metadata_git_revision('${SETUP_COMMON_DIR}', None).strip()}"
-# Don't add WEBOS_DISTRO_TOPDIR_BRANCH, because in many cases it can be "(nobranch)"
-BUILDCFG_VARS += "WEBOS_DISTRO_TOPDIR_REVISION"
+# Depends on https://lists.openembedded.org/g/openembedded-core/message/190292 or webos_base.bbclass removed in https://github.com/webOS-ports/meta-webos-ports/commit/20884dd8b7e78cbfa3b5e485bdfca24584c644b3
+# WEBOS_DISTRO_TOPDIR_DESCRIBE ?= "${@oe.buildcfg.get_metadata_git_describe('${SETUP_COMMON_DIR}').strip()}"
+BUILDCFG_VARS += "WEBOS_DISTRO_TOPDIR_BRANCH WEBOS_DISTRO_TOPDIR_REVISION"
 
 # Add build timestamp to what's displayed in build-id.txt for use in pruning script
 BUILDCFG_VARS += "DATETIME"
