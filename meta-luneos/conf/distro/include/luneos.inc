@@ -167,15 +167,9 @@ CONNECTIVITY_CHECK_URIS ?= "https://github.com"
 
 # TODO can check on all these host machines.
 SANITY_TESTED_DISTROS ?= " \
-    ubuntu-18.04 \n \
-    ubuntu-19.10 \n \
-    ubuntu-20.04 \n \
-    ubuntu-20.10 \n \
-    ubuntu-21.04 \n \
-    ubuntu-21.10 \n \
     ubuntu-22.04 \n \
-    ubuntu-22.10 \n \
     ubuntu-23.04 \n \
+    ubuntu-23.10 \n \
 "
 
 require conf/distro/include/yocto-uninative.inc
