@@ -29,14 +29,12 @@ WEBOS_PORTS_CODENAME = "ports"
 # WEBOS_DISTRO_PLATFORM_CODENAME ?= "${DISTRO}-${WEBOS_PORTS_CODENAME}"
 WEBOS_DISTRO_PLATFORM_CODENAME ?= "luneos"
 WEBOS_DISTRO_VERSION_CODENAME ?= "Eiskaffee"
-# WEBOS_DISTRO_VERSION_CODENAME ?= "${@oe.buildcfg.get_metadata_git_branch('.').strip().translate(None, '()/')}"
 WEBOS_DISTRO_RELEASE_CODENAME ?= "${WEBOS_DISTRO_PLATFORM_CODENAME}${@oe.utils.conditional( 'WEBOS_DISTRO_VERSION_CODENAME', '', '', '-${WEBOS_DISTRO_VERSION_CODENAME}', d) }"
 
 # This is the codename for the series of builds that are made from a branch.
 # It appears in the image filenames. It is expected that other distros will
 # override this based on their codename schemes.
-WEBOS_DISTRO_BUILD_CODENAME ?= ""
-# WEBOS_DISTRO_BUILD_CODENAME ?= "${@oe.buildcfg.get_metadata_git_branch('.').strip().translate(None, '()/')}"
+WEBOS_DISTRO_BUILD_CODENAME ?= "${WEBOS_DISTRO_TOPDIR_BRANCH}"
 
 WEBOS_DISTRO_PRERELEASE ?= "devel"
 
@@ -51,11 +49,11 @@ WEBOS_DISTRO_PRERELEASE ?= "devel"
 # integer. Note that WEBOS_DISTRO_BUILD_CODENAME is never included in
 # WEBOS_DISTRO_BUILD_ID.
 #
-WEBOS_DISTRO_BUILD_ID ?= "0-0"
+WEBOS_DISTRO_BUILD_ID ?= "unofficial"
 
 # use WEBOS_DISTRO_BUILD_ID.
 IMAGE_VERSION_SUFFIX = "${@oe.utils.conditional( 'WEBOS_DISTRO_BUILD_CODENAME', '', '', '-${WEBOS_DISTRO_BUILD_CODENAME}', d) }"
-IMAGE_VERSION_SUFFIX .= "${@oe.utils.conditional( 'WEBOS_DISTRO_BUILD_ID', 'unofficial', '${DATETIME}', '-${WEBOS_DISTRO_BUILD_ID}', d) }"
+IMAGE_VERSION_SUFFIX .= "${@oe.utils.conditional( 'WEBOS_DISTRO_BUILD_ID', 'unofficial', '-${DATETIME}', '-${WEBOS_DISTRO_BUILD_ID}', d) }"
 
 # Add WEBOS_DISTRO_RELEASE_CODENAME and WEBOS_DISTRO_BUILD_ID to what's displayed
 # as the "build configuration".
