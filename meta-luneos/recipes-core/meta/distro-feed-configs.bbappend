@@ -7,6 +7,8 @@ SUPPORTED_EXTRA_ARCHS ?= "armv7a-vfp-neon cortexa8-vfp-neon cortexa8t-vfp-neon c
 SUPPORTED_EXTRA_ARCHS:armv7a ?= "armv7a-vfp-neon cortexa8-vfp-neon cortexa8t-vfp-neon cortexa9-vfp-neon cortexa9t-vfp-neon"
 SUPPORTED_EXTRA_ARCHS:armv6 ?= "armv6"
 
+DISTRO_FEED_URI = "http://build.webos-ports.org/luneos-${WEBOS_DISTRO_TOPDIR_BRANCH}/ipk"
+
 do_compile() {
     mkdir -p ${S}/${sysconfdir}/opkg
     for feed in all ${MACHINE_ARCH}; do
