@@ -71,6 +71,9 @@ BUILDCFG_VARS += "WEBOS_DISTRO_TOPDIR_REVISION"
 # Add build timestamp to what's displayed in build-id.txt for use in pruning script
 BUILDCFG_VARS += "DATETIME"
 
+# Add the same variables from BUILDCFG_VARS to /etc/buildinfo as well
+IMAGE_BUILDINFO_VARS = "${BUILDCFG_VARS}"
+
 # Override these in webOS based distros to modify DISTRO_EXTRA_R*
 WEBOS_DEFAULT_EXTRA_RDEPENDS = ""
 WEBOS_DEFAULT_EXTRA_RRECOMMENDS = ""
