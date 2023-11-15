@@ -53,7 +53,7 @@ WEBOS_DISTRO_BUILD_ID ?= "unofficial"
 
 # use WEBOS_DISTRO_BUILD_ID.
 IMAGE_VERSION_SUFFIX = "${@oe.utils.conditional( 'WEBOS_DISTRO_BUILD_CODENAME', '', '', '-${WEBOS_DISTRO_BUILD_CODENAME}', d) }"
-IMAGE_VERSION_SUFFIX .= "${@oe.utils.conditional( 'WEBOS_DISTRO_BUILD_ID', 'unofficial', '-${DATETIME}', '-${WEBOS_DISTRO_BUILD_ID}', d) }"
+IMAGE_VERSION_SUFFIX .= "${@oe.utils.conditional( 'WEBOS_DISTRO_BUILD_ID', 'unofficial', '-${IMAGE_VERSION_SUFFIX_DATETIME}', '-${WEBOS_DISTRO_BUILD_ID}', d) }"
 
 # Add WEBOS_DISTRO_RELEASE_CODENAME and WEBOS_DISTRO_BUILD_ID to what's displayed
 # as the "build configuration".
