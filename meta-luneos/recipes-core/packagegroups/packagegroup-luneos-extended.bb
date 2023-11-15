@@ -13,7 +13,6 @@ NOT_COMPATIBLE_WITH_CURRENT_NODEJS = " \
 VIRTUAL-RUNTIME_settingsapp ?= "org.webosports.app.settings"
 RDEPENDS:${PN} = " \
   ${DISTRO_EXTRA_RDEPENDS} \
-  distro-feed-configs \
   \
   pulseaudio-distro-conf \
   pulseaudio-misc \
