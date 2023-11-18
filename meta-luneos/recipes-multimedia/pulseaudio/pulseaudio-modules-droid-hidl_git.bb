@@ -11,8 +11,6 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 # Depends on libhybris which has this restriction
 COMPATIBLE_MACHINE = "^halium$"
 
-PULSEAUDIO_VERSION = "16.1"
-
 PV = "1.4.0+git${SRCPV}"
 SRCREV = "96f02cfe157ab271646f37ba374e2f5be3cfdf55"
 
@@ -25,9 +23,9 @@ S = "${WORKDIR}/git"
 # inherit webos_ports_fork_repo
 inherit autotools pkgconfig
 
-FILES:${PN} += "${libdir}/pulse-${PULSEAUDIO_VERSION}/modules/*.so"
-FILES:${PN}-dev += "${libdir}/pulse-${PULSEAUDIO_VERSION}/modules/*.la"
-FILES:${PN}-staticdev += "${libdir}/pulse-${PULSEAUDIO_VERSION}/modules/*.a"
+FILES:${PN} += "${libdir}/pulse-*/modules/*.so"
+FILES:${PN}-dev += "${libdir}/pulse-*/modules/*.la"
+FILES:${PN}-staticdev += "${libdir}/pulse-*/modules/*.a"
 
 # Add pulse user to audio group so he can access audio dev nodes from Android
 GROUPMEMS_PARAM:${PN} = "-a pulse -g audio -G input"
