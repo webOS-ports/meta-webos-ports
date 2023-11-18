@@ -11,8 +11,8 @@ COMPATIBLE_MACHINE = "^halium$"
 
 PULSEAUDIO_VERSION = "16.1"
 
-PV = "14.2.88+git"
-SRCREV = "80015ede829752fcb357f8bbd7b59d861c865d38"
+PV = "15.0.88+git"
+SRCREV = "894f8da11f8335b09e336c599affbfc7d5fab536"
 
 SRC_URI = "git://github.com/droidian/pulseaudio-modules-droid.git;branch=bookworm;protocol=https \
     file://0001-module-droid-use-PA_MAJORMINOR-as-PA_MODULE_VERSION-.patch \
