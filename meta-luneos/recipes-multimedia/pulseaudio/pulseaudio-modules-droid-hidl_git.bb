@@ -13,15 +13,14 @@ COMPATIBLE_MACHINE = "^halium$"
 
 PULSEAUDIO_VERSION = "16.1"
 
-PV = "1.3.1+git${SRCPV}"
-SRCREV = "ab03d444dbf44523233b0cf33b21bc58d0b1ffe8"
+PV = "1.4.0+git${SRCPV}"
+SRCREV = "96f02cfe157ab271646f37ba374e2f5be3cfdf55"
 
 SRC_URI = "git://github.com/droidian/pulseaudio-modules-droid-hidl.git;branch=bookworm;protocol=https \
+    file://0001-module-hidl-use-PA_MAJORMINOR-as-PA_MODULE_VERSION-.patch \
 "
 
 S = "${WORKDIR}/git"
-
-EXTRA_OECONF = "--with-module-dir=/usr/lib/pulse-${PULSEAUDIO_VERSION}/modules/"
 
 # inherit webos_ports_fork_repo
 inherit autotools pkgconfig
@@ -29,3 +28,6 @@ inherit autotools pkgconfig
 FILES:${PN} += "${libdir}/pulse-${PULSEAUDIO_VERSION}/modules/*.so"
 FILES:${PN}-dev += "${libdir}/pulse-${PULSEAUDIO_VERSION}/modules/*.la"
 FILES:${PN}-staticdev += "${libdir}/pulse-${PULSEAUDIO_VERSION}/modules/*.a"
+
+# Add pulse user to audio group so he can access audio dev nodes from Android
+GROUPMEMS_PARAM:${PN} = "-a pulse -g audio -G input"
