@@ -49,6 +49,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0010-WebAppWayland-do-not-show-window-if-its-status-is-st.patch \
     file://0011-Add-additional-window.open-features-management.patch \
     file://0012-PalmSystem-add-banner-support.patch \
+    file://0013-WebAppBase-fix-window.close-for-multi-window-apps.patch \
 "
 S = "${WORKDIR}/git"
 
