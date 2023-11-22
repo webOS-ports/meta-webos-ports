@@ -2,7 +2,8 @@ SUMMARY = "A terminal emulator with a custom virtual keyboard"
 LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263"
 
-PV = "1.3.6+git"
+SPV = "1.3.6"
+PV = "${SPV}+git"
 SRCREV = "4cfd21a3dbc83bac707828745ffdf0ebe5af768a"
 
 DEPENDS = "qtbase qtdeclarative qttools-native qt5compat"
@@ -37,7 +38,7 @@ do_install:append() {
     install -m 0644 ${S}/fingerterm.png ${D}${APP_PATH}/icon.png
 
     # Always provide same version as we have in our recipe
-    sed -i -e s:__VERSION__:${PV}:g ${D}${APP_PATH}/appinfo.json
+    sed -i -e s:__VERSION__:${SPV}:g ${D}${APP_PATH}/appinfo.json
 }
 
 FILES:${PN} += "${APP_PATH} ${datadir}/translations"
