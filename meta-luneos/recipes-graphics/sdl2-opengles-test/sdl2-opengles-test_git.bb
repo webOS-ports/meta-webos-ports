@@ -12,8 +12,8 @@ TARGETS:rpi = "sdl2_opengles2_test"
 
 PV = "1.0.6+git${SRCPV}"
 SRC_URI = "git://github.com/mer-qa/sdl2-opengles-test.git;branch=master;protocol=https \
-    file://sdl2_opengles1_test-appinfo.json \
-    file://sdl2_opengles2_test-appinfo.json"
+    file://org.mer.app.sdl2_opengles1_test-appinfo.json \
+    file://org.mer.app.sdl2_opengles2_test-appinfo.json"
 S = "${WORKDIR}/git"
 
 SRCREV = "d0a3c8806cb29e3fe9dccc162c66d42dc4ebc40e"
@@ -24,9 +24,9 @@ do_compile() {
 
 do_install() {
     for f in ${TARGETS}; do
-        install -d ${D}${webos_applicationsdir}/$f
-        install -m 0755 ${S}/$f ${D}${webos_applicationsdir}/$f/
-        install -m 0644 ${WORKDIR}/$f-appinfo.json ${D}${webos_applicationsdir}/$f/appinfo.json
+        install -d ${D}${webos_applicationsdir}/org.mer.app.$f
+        install -m 0755 ${S}/$f ${D}${webos_applicationsdir}/org.mer.app.$f/
+        install -m 0644 ${WORKDIR}/org.mer.app.$f-appinfo.json ${D}${webos_applicationsdir}/org.mer.app.$f/appinfo.json
     done
 }
 
