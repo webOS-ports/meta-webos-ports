@@ -99,8 +99,8 @@ RDEPENDS:${PN} = " \
   luneos-default-wallpapers \
   \
   storaged \
-  messwerk \
-  fingerterm \
+  org.webosports.app.messwerk \
+  org.mer.app.fingerterm \
   org.webosports.app.terminal \
   org.webosports.app.camera \
 "
