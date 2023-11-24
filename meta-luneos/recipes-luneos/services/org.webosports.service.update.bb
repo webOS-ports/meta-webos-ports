@@ -8,7 +8,7 @@ inherit webos_filesystem_paths
 inherit webos_system_bus
 
 PV = "0.1.0+git${SRCPV}"
-SRCREV = "7d945400fca227f92322afe008bab4a41b79d380"
+SRCREV = "90a9a03bd08e9e52f355f6ca0b7c9148e45b4108"
 
 WEBOS_REPO_NAME = "org.webosports.update"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
