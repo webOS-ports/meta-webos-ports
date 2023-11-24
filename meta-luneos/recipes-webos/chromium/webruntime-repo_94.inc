@@ -21,4 +21,5 @@ SRC_URI += " \
     file://0007-Update-app-shell.role.json.in-Add-trustLevel.patch \
     file://0008-palmGetResource-Fix-loading-of-local-resources.patch \
     file://0009-webossystem_injection.cc-fix-some-PalmSystem-functions.patch \
+    file://0010-app_shell-override-default-OnWindowHostClose-to-clos.patch \
 "
