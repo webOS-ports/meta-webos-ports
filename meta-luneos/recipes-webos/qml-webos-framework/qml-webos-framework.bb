@@ -39,6 +39,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0006-com.webos.app.qmlrunner.role.json.in-Add-trustLevel.patch \
     file://0007-WebOSQuickWindow-make-setWindowPropery-Q_INVOKABLE.patch \
     file://0008-runner-debug-use-WEBOS_INSTALL_BINS-as-other-binarie.patch \
+    file://0009-WebOSQuickWindow-use-APP_ID-env-variable-for-appId.patch \
 "
 
 S = "${WORKDIR}/git"
