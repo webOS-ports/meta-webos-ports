@@ -45,10 +45,10 @@ index 0000000..880057c
 +		       LIBRARIES ${GLIB2_LDFLAGS} ${PMLOG_LDFLAGS} ${NYXLIB_LDFLAGS} ${UDEV_LDFLAGS} -lrt -lpthread)
 diff --git a/src/haptics_timedoutput/haptics.c b/src/haptics_timedoutput/haptics.c
 new file mode 100644
-index 0000000..27bc473
+index 0000000..96609cb
 --- /dev/null
 +++ b/src/haptics_timedoutput/haptics.c
-@@ -0,0 +1,340 @@
+@@ -0,0 +1,387 @@
 +// Copyright (c) 2010-2018 LG Electronics, Inc.
 +// Copyright (c) 2013 Simon Busch <morphis@gravedo.de>
 +// Copyright (c) 2009-2013 Michael 'Mickey' Lauer <mlauer@vanille-media.de>
@@ -89,6 +89,8 @@ index 0000000..27bc473
 +	nyx_device_t _parent;
 +	const char *path;             /* path for duration */
 +	const char *path_activation;  /* path for activating the vibrator */
++	int fd_ioctl;
++	struct ff_effect ff;
 +	guint fulltimeoutwatch;
 +	guint smalltimeoutwatch;
 +	guint don;
@@ -201,8 +203,11 @@ index 0000000..27bc473
 +			haptics_device->path = g_build_filename(vibrator_path, "duration", NULL);
 +			haptics_device->path_activation = g_build_filename(vibrator_path, "activate", NULL);
 +		}
++		else {
++			haptics_device->fd_ioctl = open("/dev/input/by-path/platform-vibrator-event", O_RDWR | O_CLOEXEC);
++		}
 +	}
-+	if (!vibrator_path) {
++	if (!vibrator_path && haptics_device->fd_ioctl<=0) {
 +		nyx_error(MSGID_NYX_MOD_HAPTICS_NODEVICE_ERR, 0, "Could not find a vibrator device");
 +		return NYX_ERROR_DEVICE_UNAVAILABLE;
 +	}
@@ -220,6 +225,11 @@ index 0000000..27bc473
 +
 +	if (device == NULL)
 +		return NYX_ERROR_INVALID_HANDLE;
++
++	if(haptics_device->fd_ioctl>0) {
++		close(haptics_device->fd_ioctl); 
++		haptics_device->fd_ioctl = 0; 
++	}
 +
 +	g_free(haptics_device->path);
 +	if(haptics_device->path_activation) g_free(haptics_device->path_activation);
@@ -276,6 +286,19 @@ index 0000000..27bc473
 +	if (device->fulltimeoutwatch > 0) {
 +		g_source_remove(device->fulltimeoutwatch);
 +		device->fulltimeoutwatch = 0;
++	}
++	
++	if (device->fd_ioctl>0) {
++		/* stop the vibration */
++		struct input_event ff_event;
++		memset(&ff_event, 0, sizeof(ff_event));
++		ff_event.type = EV_FF;
++		ff_event.code = device->ff.id;
++		ff_event.value = 0;
++		write(device->fd_ioctl, &ff_event, sizeof ff_event);
++
++		/* clear rumble effect */
++		ioctl(device->fd_ioctl, EVIOCRMFF, device->ff.id);
 +	}
 +
 +	device->pulses = 0;
@@ -347,7 +370,7 @@ index 0000000..27bc473
 +
 +nyx_error_t haptics_vibrate(nyx_device_t *device, nyx_haptics_configuration_t configuration)
 +{
-+	haptics_device_t *hdevice = (haptics_device_t*) device;
++	haptics_device_t *haptics_device = (haptics_device_t*) device;
 +	guint pulses = 0;
 +	guint delay_on = 0;
 +	guint delay_off = 0;
@@ -374,8 +397,32 @@ index 0000000..27bc473
 +		return NYX_ERROR_INVALID_VALUE;
 +	}
 +
-+	if (vibrate_pattern(hdevice, pulses, delay_on, delay_off) == FALSE)
-+		return NYX_ERROR_INVALID_VALUE;
++	if (haptics_device->fd_ioctl>0) {
++		/* upload rumble effect */
++		memset(&haptics_device->ff, 0, sizeof(haptics_device->ff));
++		haptics_device->ff.type = FF_RUMBLE,
++		haptics_device->ff.id = -1;
++		haptics_device->ff.replay.length = configuration.duration;
++		haptics_device->ff.replay.delay = 0;
++		haptics_device->ff.u.rumble.strong_magnitude = 0xc000;
++		haptics_device->ff.u.rumble.weak_magnitude = 0;
++		ioctl(haptics_device->fd_ioctl, EVIOCSFF, &(haptics_device->ff));
++
++		/* play vibration pattern */
++		struct input_event ff_event;
++		memset(&ff_event, 0, sizeof(ff_event));
++		ff_event.type = EV_FF;
++		ff_event.code = haptics_device->ff.id;
++		ff_event.value = 1;
++		write(haptics_device->fd_ioctl, &ff_event, sizeof ff_event);
++
++		/* timeout to stop vibration */
++		g_timeout_add(configuration.duration, vibrate_timeout_cb, device);
++    }
++	else {
++		if (vibrate_pattern(haptics_device, pulses, delay_on, delay_off) == FALSE)
++			return NYX_ERROR_INVALID_VALUE;
++	}
 +
 +	return NYX_ERROR_NONE;
 +}
