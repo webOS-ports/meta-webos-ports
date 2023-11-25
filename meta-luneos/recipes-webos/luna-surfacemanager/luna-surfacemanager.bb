@@ -35,6 +35,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0009-com.webos.surfacemanager.perm.json-Add-permissions-f.patch \
     file://0010-qmldir-expose-NotificationService-component.patch \
     file://0011-Input-panel-tie-inputPanelRect-to-the-window-mask.patch \
+    file://0012-WebOSSurfaceItem-close-Wayland-client-fallback-on-Cl.patch \
 "
 
 S = "${WORKDIR}/git"
