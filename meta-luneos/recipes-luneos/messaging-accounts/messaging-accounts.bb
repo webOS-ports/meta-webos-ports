@@ -8,7 +8,7 @@ inherit allarch
 inherit webos_filesystem_paths
 inherit webos_app
 
-SRCREV = "e57dda3653fab165666769ab6a001a6cd0830665"
+SRCREV = "ec3890298a39a2b0d907a3c6cc611cbe95756ace"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
