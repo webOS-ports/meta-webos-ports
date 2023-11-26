@@ -7,8 +7,9 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=1ebbd3e34237af26da5dc08a4e440464"
 
 SECTION = "webos/support"
 
-SRCREV = "209c90d47330ddb357b5209309c80c4257f05fe3"
-PV = "1.4.2+git${SRCPV}"
+SRCREV = "da2e691725a130a294a84881bdddaa1bb29515b7"
+SPV = "1.4.2"
+PV = "${SPV}+git${SRCPV}"
 
 
 RDEPENDS:${PN} += "waydroid-data lxc python3-gbinder python3-pygobject libgbinder python3-pyclip"
@@ -20,7 +21,7 @@ RRECOMMENDS:${PN} += " \
     kernel-module-binder-linux \
 "
 
-SRC_URI = "git://github.com/waydroid/waydroid.git;branch=main;protocol=https \
+SRC_URI = "git://github.com/herrie82/waydroid.git;branch=herrie/luneos;protocol=https \
            file://gbinder.conf \
           "
 S = "${WORKDIR}/git"
@@ -35,30 +36,17 @@ COMPATIBLE_MACHINE:rpi = "(.*)"
 COMPATIBLE_MACHINE:pinephone = "(.*)"
 COMPATIBLE_MACHINE:pinephonepro = "(.*)"
 COMPATIBLE_MACHINE:pinetab2 = "(.*)"
-COMPATIBLE_MACHINE:mido = "(.*)"
+COMPATIBLE_MACHINE:mido-halium = "(.*)"
+COMPATIBLE_MACHINE:tissot = "(.*)"
 
 inherit pkgconfig
+inherit webos_app
+inherit webos_filesystem_paths
 
-inherit systemd
+CLEANBROKEN = "1"
 
-SYSTEMD_PACKAGES = "${PN}"
-SYSTEMD_SERVICE:${PN} = "waydroid-container.service"
-
-do_install:append() {
-    install -dm755 "${D}/usr/lib/waydroid"
-    install -dm755 "${D}/usr/share/applications"
-    install -dm755 "${D}/usr/bin"
-    cp -r ${S}/tools ${S}/data "${D}/usr/lib/waydroid/"
-    cp "${D}/usr/lib/waydroid/data/Waydroid.desktop" "${D}/usr/share/applications"
-    cp ${S}/waydroid.py "${D}/usr/lib/waydroid/"
-    ln -s /usr/lib/waydroid/waydroid.py "${D}/usr/bin/waydroid"
-
-    install -d ${D}${systemd_unitdir}/system
-    install -m 0644 ${S}/systemd/waydroid-container.service ${D}${systemd_unitdir}/system/
-
-    install -d ${D}${sysconfdir}/dbus-1/system.d
-    install -m 0644 ${S}/dbus/id.waydro.Container.conf ${D}${sysconfdir}/dbus-1/system.d/
-    install -m 0644 ${S}/dbus/id.waydro.Container.service ${D}${sysconfdir}/dbus-1/system.d/
+do_install() {
+    make install_luneos DESTDIR=${D} USE_NFTABLES="1" WAYDROID_VERSION=${SPV}
 }
 
 # Provided by libgbinder already for Halium devices, but necessary to add for non-Halium devices.
@@ -79,10 +67,20 @@ do_install:append:qemux86-64() {
     install -Dm644 -t "${D}${sysconfdir}" "${WORKDIR}/gbinder.conf" 
 }
 
-FILES:${PN} += "${systemd_unitdir} ${sysconfdir}"
+FILES:${PN} += " \
+    ${systemd_unitdir} \
+    ${sysconfdir} \
+    ${libdir} \
+    ${datadir}/dbus-1 \
+    ${datadir}/polkit-1 \
+    ${prefix}/libexec \
+    ${webos_applicationsdir}/id.waydro.container \
+"
 
 # Usage
 # =====
+# Below is obsolete since Waydroid can now just be started from Launcher, however it's good to keep for reference
+#
 # mkdir -p /run/luna-session/
 # mount --bind /tmp/luna-session /run/luna-session/
 # export XDG_RUNTIME_DIR=/run/luna-session
