@@ -44,6 +44,7 @@ SRC_URI += " \
     file://0001-Correctly-detect-wayland-platform.patch \
     file://maliit-server.conf \
     file://maliit-server.service \
+    file://maliit-server.path \
     file://maliit-server@.service \
     file://maliit-server.sh.in \
     file://maliit-env.conf \
@@ -52,13 +53,14 @@ SRC_URI += " \
 inherit systemd
 
 SYSTEMD_PACKAGES = "${PN}"
-SYSTEMD_SERVICE:${PN} = "maliit-server.service"
+SYSTEMD_SERVICE:${PN} = "maliit-server.service maliit-server@.service maliit-server.path"
 
 do_install:append() {
     install -d ${D}${sysconfdir}/dbus-1/system.d
     install -m 0644 ${WORKDIR}/maliit-server.conf ${D}${sysconfdir}/dbus-1/system.d/
 
     install -d ${D}${systemd_unitdir}/system
+    install -m 0644 ${WORKDIR}/maliit-server.path ${D}${systemd_unitdir}/system/
     install -m 0644 ${WORKDIR}/maliit-server.service ${D}${systemd_unitdir}/system/
     install -m 0644 ${WORKDIR}/maliit-server@.service ${D}${systemd_unitdir}/system/
 
