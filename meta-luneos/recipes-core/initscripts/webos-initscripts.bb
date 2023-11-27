@@ -14,7 +14,7 @@ PROVIDES = "initscripts"
 # The dependency needs to be deleted after deleting fake initctl.
 DEPENDS = "systemd"
 
-SRCREV = "e06b0259412c78df4114d4b42a0b091d297a4e38"
+SRCREV = "ad3eb10e7edb6a7e916eafec8b8671e2073c9e6b"
 inherit webos_cmake
 inherit webos_ports_ose_repo
 inherit systemd
