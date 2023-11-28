@@ -160,10 +160,12 @@ RDEPENDS:${PN}:append:s2 = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:sagit = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:yggdrasil = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
 
-#RDEPENDS:${PN}:append:mido = "waydroid"
-#RDEPENDS:${PN}:append:pinephone = "waydroid"
-#RDEPENDS:${PN}:append:pinephonepro = "waydroid"
-#RDEPENDS:${PN}:append:pinetab2 = "waydroid"
+RDEPENDS:${PN}:append:mido-halium = " waydroid"
+RDEPENDS:${PN}:append:pinephone = " waydroid"
+RDEPENDS:${PN}:append:pinephonepro = " waydroid"
+RDEPENDS:${PN}:append:pinetab2 = " waydroid"
+RDEPENDS:${PN}:append:qemux86-64 = " waydroid"
+RDEPENDS:${PN}:append:tissot = " waydroid"
 
 QEMU_RDEPENDS = " \
     alsa-utils-systemd \
