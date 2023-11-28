@@ -7,4 +7,5 @@ SRC_URI:append = " \
     file://0004-Add-UCM-for-PinePhone.patch \
     file://0005-Add-UCM-for-PinePhonePro.patch \
     file://0006-Add-UCM-for-RK817.patch \
+    file://0007-Fix-UCM-for-RK817.patch \
 "
