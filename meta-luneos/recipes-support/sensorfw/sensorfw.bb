@@ -6,14 +6,12 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=2d5025d4aa3495befef8f17206a5b0a1"
 # We're potentially depending on libhybris so need to be MACHINE_ARCH
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-PV = "0.14.4+git${SRCPV}"
-SRCREV = "c906ea7f6473e01c454e4bff8c08cb6135776c8c"
+PV = "0.14.7+git${SRCPV}"
+SRCREV = "0766bad9751d872951d075f5e8e8b8e4f31eb4c8"
 DEPENDS = "qtbase luna-sysmgr-common luna-service2 json-c glib-2.0 luna-sysmgr-ipc-messages"
 
 SRC_URI = " \
     git://github.com/sailfishos/sensorfw.git;protocol=https;branch=master \
-    file://0001-hybrisadaptor-Fix-deprecated-use-of-QMap-insertMulti.patch \
-    file://0002-sensorfw-Add-LuneOS-specific-config-option.patch \
 "
 
 S = "${WORKDIR}/git"
