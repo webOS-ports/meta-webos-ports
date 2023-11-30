@@ -103,6 +103,9 @@ PATCHTOOL = "git"
 SRC_URI:append = " \
     file://9901-Disable-Faux-bolding-in-Qts-FreeType-FontEngine.patch;maxver=6.6.0 \
 "
+SRC_URI:append = " \
+    file://0001-xkb-fix-build-with-libxkbcommon-1.6.0-and-later.patch;maxver=6.6.0 \
+"
 
 # FIXME: Patches below can be dropped once all qmake-dependent components are switched to cmake.
 # https://bugreports.qt.io/browse/WEBOSCI-66
