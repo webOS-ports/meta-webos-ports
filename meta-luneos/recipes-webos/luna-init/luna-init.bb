@@ -8,7 +8,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "tzdata python3-pytz-native"
 
 PV = "2.0.1-10+git${SRCPV}"
-SRCREV = "8cf8b08d15b6543eb0ecf5cffc8b1758f7015e51"
+SRCREV = "726742b7c2eca3a22ccd0f29d715c7d1844eea94"
 
 inherit allarch
 inherit webos_ports_fork_repo
