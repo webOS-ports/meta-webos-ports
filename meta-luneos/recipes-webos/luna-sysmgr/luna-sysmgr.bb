@@ -15,7 +15,7 @@ DEPENDS += "serviceinstaller"
 RDEPENDS:${PN} += "powerd"
 
 PV = "3.0.0-3+git${SRCPV}"
-SRCREV = "7ddd5929a8914626b5b193f6428f5a6913db08cf"
+SRCREV = "53e06c4c0fecc5b17662a7d089950507f2eaa380"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 
