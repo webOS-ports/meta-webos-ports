@@ -26,6 +26,9 @@ inherit features_check
 # luna-service2 depends on systemd
 REQUIRED_DISTRO_FEATURES = "systemd"
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = " \
+    ${WEBOSOSE_GIT_REPO_COMPLETE} \
+    file://0001-luna-prefs-Fix-outbound-permissions.patch \
+"
 S = "${WORKDIR}/git"
 
