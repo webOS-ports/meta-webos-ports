@@ -3,15 +3,9 @@ FILESEXTRAPATHS:prepend := "${COREBASE}/meta/recipes-core/busybox/busybox:${CORE
 require recipes-core/busybox/busybox_${PV}.bb
 
 S = "${WORKDIR}/busybox-${PV}"
-
-do_configure:append() {
-    sed -i -e '/CONFIG_STATIC/d' .config
-    sed -i -e '/CONFIG_STATIC_LIBGCC/d' .config
-    sed -i -e '/CONFIG_FEATURE_TAR_LONG_OPTIONS/d' .config
-    echo "CONFIG_STATIC=y" >>.config
-    echo "CONFIG_STATIC_LIBGCC=y" >>.config
-    echo "CONFIG_FEATURE_TAR_LONG_OPTIONS=y" >> .config
-}
+SRC_URI += " \
+            file://static-build.cfg \
+"
 
 SYSTEMD_SERVICE:${PN}-syslog = ""
 
