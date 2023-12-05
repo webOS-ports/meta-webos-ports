@@ -12,8 +12,8 @@ inherit pkgconfig
 SRC_URI = "git://github.com/sailfishos/libgrilio.git;protocol=https;branch=master"
 S = "${WORKDIR}/git"
 
-PV = "1.0.39-1+git${SRCPV}"
-SRCREV = "554f3b65715e920c4fe7c767a461ef1f4eb96f0c"
+PV = "1.0.44-1+git${SRCPV}"
+SRCREV = "014c4cdd0feb17c3d723dde90dbd9ad7376798dc"
 
 EXTRA_OEMAKE = "KEEP_SYMBOLS=1"
 PARALLEL_MAKE = ""
