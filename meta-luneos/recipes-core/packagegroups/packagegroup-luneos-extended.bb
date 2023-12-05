@@ -122,7 +122,7 @@ LIBHYBRIS_RDEPENDS = " \
     libpulse-simple0 \
     nyx-modules-hybris \
     \
-    ofono-ril-binder-plugin \
+    ofono-binder-plugin \
 "
 
 # (Optional?) work for Qt6:
