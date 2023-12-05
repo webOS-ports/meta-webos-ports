@@ -9,8 +9,12 @@ PV:halium = "1.29+git${SRCPV}"
 LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=eb723b61539feef013de476e68b5c50a"
 
-DEPENDS += "libglibutil dbus-glib libgrilio libmce-glib"
+DEPENDS += "dbus-glib libmce-glib"
 RDEPENDS:${PN} += "mobile-broadband-provider-info ofono-conf"
+
+#For Halium 9 devices we want to use the ofono-binder-plugin, for older devices we might want to use ofono-ril-plugin
+RDEPENDS:${PN}:append:halium = " ofono-binder-plugin"
+
 
 SRC_URI = " \
   git://git.kernel.org/pub/scm/network/ofono/ofono.git;branch=master \
@@ -39,11 +43,12 @@ S:halium = "${WORKDIR}/git/ofono"
 B = "${S}"
 
 EXTRA_OECONF:append = " --disable-datafiles"
-EXTRA_OECONF:append:halium = " --disable-sailfish-pushforwarder --enable-extra-modems"
+EXTRA_OECONF:append:halium = " --disable-sailfish-pushforwarder --enable-extra-modems --disable-rilmodem"
 
 # this version does't support it:
 # ERROR: ofono-1.19+gitAUTOINC+b5ed6d16db-r0 do_configure: QA Issue: ofono: configure was passed unrecognised options: --enable-external-ell [unknown-configure-option]
-# enabled in oe-core with 1.29 version
+# enabled in oe-core with 1.29 version, however explicitly disabled in SFOS (for reasons unknown to us). Discussions are ongoing about SFOS way forward on oFono
+# see https://github.com/sailfishos/ofono/pull/25
 EXTRA_OECONF:remove:halium = "--enable-external-ell"
 
 SERVICE_FILE = "ofono.service"
