@@ -2,7 +2,7 @@
 
 DESCRIPTION = "Extension framework for ofono binder plugin"
 LICENSE = "GPL-2.0-only"
-LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0-only;md5=801f80980d171dd6425610833a22dbe6"
+LIC_FILES_CHKSUM = "file://COPYING;md5=ba484c1af8c917210c60e63b7b499327"
 SECTION = "webos/support"
 
 DEPENDS = "glib-2.0 libglibutil libgbinder-radio"
