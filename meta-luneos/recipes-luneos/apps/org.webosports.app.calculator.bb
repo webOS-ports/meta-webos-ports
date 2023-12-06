@@ -11,7 +11,7 @@ inherit webos_filesystem_paths
 inherit webos_app
 
 PV = "0.1.1+git${SRCPV}"
-SRCREV = "e6dcde00b57b633d70d85b37b9caa748ec0a0b32"
+SRCREV = "a119d09de7855e5c681ea6ad1675afec77035143"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
