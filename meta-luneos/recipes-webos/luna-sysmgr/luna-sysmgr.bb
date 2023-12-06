@@ -12,7 +12,7 @@ DEPENDS += "serviceinstaller"
 #DEPENDS += "localization" #TODO
 #RDEPENDS:${PN} += "jail" #TODO
 
-RDEPENDS:${PN} += "powerd"
+RDEPENDS:${PN} += "sleepd com.webos.service.battery"
 
 PV = "3.0.0-3+git"
 SRCREV = "46876364ee2bc9cacdeb511eb5bbdda664e16e5e"
