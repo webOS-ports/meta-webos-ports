@@ -11,7 +11,7 @@ LIC_FILES_CHKSUM = " \
 "
 
 DEPENDS = "nyx-lib luna-service2 json-c libxml2 sqlite3 glib-2.0"
-RDEPENDS:${PN} += "powerd"
+RDEPENDS:${PN} += "com.webos.service.battery"
 
 WEBOS_VERSION = "2.0.0-17_3727287956ca9ac3c6dfb05c64a2df446fa61289"
 PR = "r11"
