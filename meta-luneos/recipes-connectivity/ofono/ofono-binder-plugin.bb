@@ -2,7 +2,7 @@
 
 DESCRIPTION = "Binder based ofono plugin (Needed for Android 8.0+)."
 LICENSE = "GPL-2.0-only"
-LIC_FILES_CHKSUM = "file://COPYING;md5=ba484c1af8c917210c60e63b7b499327"
+LIC_FILES_CHKSUM = "file://LICENSE;md5=37fe900f9ece53e2621d89780f2031be"
 SECTION = "webos/support"
 
 DEPENDS = "ofono libgbinder libgbinder-radio glib-2.0 libglibutil libofonobinderpluginext"
