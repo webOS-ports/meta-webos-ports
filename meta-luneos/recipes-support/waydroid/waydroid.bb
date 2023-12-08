@@ -7,7 +7,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=1ebbd3e34237af26da5dc08a4e440464"
 
 SECTION = "webos/support"
 
-SRCREV = "da2e691725a130a294a84881bdddaa1bb29515b7"
+SRCREV = "957f8b12f46fcf054124ba8baa9f36ec6ce10d23"
 SPV = "1.4.2"
 PV = "${SPV}+git"
 
