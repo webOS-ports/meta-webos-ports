@@ -25,6 +25,7 @@ inherit webos_system_bus
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-google-add-gpr-lib-to-TTS_ENGINE-call.patch \
+    file://0002-CMakeLists.txt-use-std-c-17-to-build-with-absl.patch \
 "
 S = "${WORKDIR}/git"
 
