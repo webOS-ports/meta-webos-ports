@@ -12,10 +12,14 @@ inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
 inherit allarch
 
+DEPENDS += " nodejs-native "
+
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 do_install() {
+    node ${S}/support/enyo-compress/enyo-compress.js ${S}/framework/source --no-color --make-enyo -o ${S}/framework/build
+
     install -d ${D}${webos_frameworksdir}/enyo/0.10/framework
     cp -vrf ${S}/framework/* ${D}${webos_frameworksdir}/enyo/0.10/framework
 
