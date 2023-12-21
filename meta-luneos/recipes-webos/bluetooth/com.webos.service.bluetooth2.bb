@@ -74,6 +74,7 @@ PACKAGECONFIG[support-response-bt-prepare-suspend-done] = "-DSUPPORT_RESPONSE_BT
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Fix-build-with-gcc-12.patch \
     file://0002-Fix-build-with-gcc-13.patch \
+    file://0003-com.webos.service.bluetooth2.role.json.in-Add-additi.patch \
 "
 S = "${WORKDIR}/git"
 
