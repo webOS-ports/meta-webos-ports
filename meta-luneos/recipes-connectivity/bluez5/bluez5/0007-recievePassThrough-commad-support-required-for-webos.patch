@@ -1,0 +1,190 @@
+From 76f3a04a8135315944af66b322bb646d66b6366c Mon Sep 17 00:00:00 2001
+From: "sameer.mulla" <sameer.mulla@lge.com>
+Date: Sun, 13 Jan 2019 13:35:55 +0530
+Subject: [PATCH] recievePassThrough commad support required for webos
+
+:Release Notes:
+recievePassThrough commad support required for webos
+
+:Detailed Notes:
+bluez not supporting recievePassThrough throught properties,
+instead directly injecting uinput events
+As luna command is required to be supported so
+added as properties so that this can read from bluetooth-bluez-sil
+
+:Testing Performed:
+Builded and tested
+
+:QA Notes:
+
+:Issues Addressed:
+[PLAT-49637] Implement avrcp/receivePassThroughCommand for blueooth-sil-bluez
+
+Change-Id: I9c07aa27f242247b5c3df85e0b3605d2ba055cad
+---
+Upstream-Status: Inappropriate [webos specific]
+
+ profiles/audio/avctp.c |  5 ++++
+ src/device.c           | 57 +++++++++++++++++++++++++++++++++++++++++-
+ src/device.h           |  2 ++
+ 3 files changed, 63 insertions(+), 1 deletion(-)
+
+diff --git a/profiles/audio/avctp.c b/profiles/audio/avctp.c
+index 6f64f162b..b002470f9 100644
+--- a/profiles/audio/avctp.c
++++ b/profiles/audio/avctp.c
+@@ -406,6 +406,7 @@ static size_t handle_panel_passthrough(struct avctp *session,
+ 
+ 		DBG("AV/C: %s %s", key_map[i].name, status);
+ 
++		recieve_passThrough_commands(session->device, key_map[i].name, status);
+ 		key_quirks = session->key_quirks[key_map[i].avc];
+ 
+ 		if (key_quirks & QUIRK_NO_RELEASE) {
+@@ -421,9 +422,13 @@ static size_t handle_panel_passthrough(struct avctp *session,
+ 		}
+ 
+ 		if (pressed)
++		{
+ 			handle_press(session, key_map[i].uinput);
++		}
+ 		else
++		{
+ 			handle_release(session, key_map[i].uinput);
++		}
+ 
+ 		break;
+ 	}
+diff --git a/src/device.c b/src/device.c
+index fea01d20a..2eef2a8cf 100644
+--- a/src/device.c
++++ b/src/device.c
+@@ -170,6 +170,11 @@ enum {
+ 	WAKE_FLAG_DISABLED,
+ };
+ 
++struct key_code {
++	const char* key;
++	const char* state;
++};
++
+ struct btd_device {
+ 	int ref_count;
+ 
+@@ -275,6 +280,8 @@ struct btd_device {
+ 	time_t		name_resolve_failed_time;
+ 
+ 	int8_t		volume;
++
++	struct key_code passththough_key;
+ };
+ 
+ static const uint16_t uuid_list[] = {
+@@ -1407,6 +1414,18 @@ dev_property_manufacturer_data_exist(const GDBusPropertyTable *property,
+ 	return bt_ad_has_manufacturer_data(device->ad, NULL);
+ }
+ 
++static gboolean
++dev_property_key_code_exist(const GDBusPropertyTable *property,
++								void *data)
++{
++	struct btd_device *device = data;
++
++	if (device->passththough_key.key == NULL)
++		return false;
++	else 
++		return true;
++}
++
+ static void append_service_data(void *data, void *user_data)
+ {
+ 	struct bt_ad_service_data *sd = data;
+@@ -1425,13 +1444,13 @@ dev_property_get_service_data(const GDBusPropertyTable *property,
+ 	struct btd_device *device = data;
+ 	DBusMessageIter dict;
+ 
++
+ 	dbus_message_iter_open_container(iter, DBUS_TYPE_ARRAY,
+ 					DBUS_DICT_ENTRY_BEGIN_CHAR_AS_STRING
+ 					DBUS_TYPE_STRING_AS_STRING
+ 					DBUS_TYPE_VARIANT_AS_STRING
+ 					DBUS_DICT_ENTRY_END_CHAR_AS_STRING,
+ 					&dict);
+-
+ 	bt_ad_foreach_service_data(device->ad, append_service_data, &dict);
+ 
+ 	dbus_message_iter_close_container(iter, &dict);
+@@ -1439,6 +1458,28 @@ dev_property_get_service_data(const GDBusPropertyTable *property,
+ 	return TRUE;
+ }
+ 
++static gboolean dev_property_get_key_code(const GDBusPropertyTable *property,
++					DBusMessageIter *iter, void *data)
++{
++	struct btd_device *dev = data;
++	const char* key_code = dev->passththough_key.key;
++	const char *state = dev->passththough_key.state;
++
++	DBusMessageIter dict;
++	dbus_message_iter_open_container(iter, DBUS_TYPE_ARRAY,
++					DBUS_DICT_ENTRY_BEGIN_CHAR_AS_STRING
++					DBUS_TYPE_UINT16_AS_STRING
++					DBUS_TYPE_VARIANT_AS_STRING
++					DBUS_DICT_ENTRY_END_CHAR_AS_STRING,
++					&dict);
++
++	dict_append_array(&dict, key_code, DBUS_TYPE_BYTE, &state, strlen(state) + 1);
++
++	dbus_message_iter_close_container(iter, &dict);
++
++	return TRUE;
++}
++
+ static gboolean
+ dev_property_service_data_exist(const GDBusPropertyTable *property,
+ 								void *data)
+@@ -2037,6 +2078,15 @@ void device_set_manufacturer_data(struct btd_device *dev, GSList *list,
+ 	g_slist_foreach(list, add_manufacturer_data, dev);
+ }
+ 
++void recieve_passThrough_commands(struct btd_device *dev, const char* code, const char* state)
++{
++		dev->passththough_key.state = state;
++		dev->passththough_key.key = code;
++
++		g_dbus_emit_property_changed(dbus_conn, dev->path,
++					DEVICE_INTERFACE, "KeyCode");
++}
++
+ static void add_service_data(void *data, void *user_data)
+ {
+ 	struct eir_sd *sd = data;
+@@ -3065,6 +3115,8 @@ static const GDBusPropertyTable device_properties[] = {
+ 	{ "Adapter", "o", dev_property_get_adapter },
+ 	{ "ManufacturerData", "a{qv}", dev_property_get_manufacturer_data,
+ 				NULL, dev_property_manufacturer_data_exist },
++	{ "KeyCode", "a{sv}", dev_property_get_key_code,
++				NULL, dev_property_key_code_exist},
+ 	{ "ServiceData", "a{sv}", dev_property_get_service_data,
+ 				NULL, dev_property_service_data_exist },
+ 	{ "TxPower", "n", dev_property_get_tx_power, NULL,
+@@ -4037,6 +4089,9 @@ static struct btd_device *device_new(struct btd_adapter *adapter,
+ 	device->adapter = adapter;
+ 	device->temporary = true;
+ 
++	device->passththough_key.state = NULL;
++	device->passththough_key.key = NULL;
++
+ 	device->db_id = gatt_db_register(device->db, gatt_service_added,
+ 					gatt_service_removed, device, NULL);
+ 
+diff --git a/src/device.h b/src/device.h
+index d7f886224..b7a5aaa98 100644
+--- a/src/device.h
++++ b/src/device.h
+@@ -186,3 +186,5 @@ void btd_device_cleanup(void);
+ 
+ void btd_device_set_volume(struct btd_device *dev, int8_t volume);
+ int8_t btd_device_get_volume(struct btd_device *dev);
++
++void recieve_passThrough_commands(struct btd_device *dev, const char* code, const char* state);
