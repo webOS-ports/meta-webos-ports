@@ -188,6 +188,7 @@ RDEPENDS:${PN} = " \
     webos-fontconfig-files \
     com.webos.service.audiofocusmanager \
     com.webos.service.audiooutput \
+    ${VIRTUAL-RUNTIME_bluetooth_service} \
     ${VIRTUAL-RUNTIME_com.webos.service.cec} \
     com.webos.service.hfp \
     com.webos.service.mediaindexer \

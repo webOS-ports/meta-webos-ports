@@ -24,7 +24,11 @@ inherit webos_public_repo
 inherit webos_machine_impl_dep
 inherit webos_system_bus
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = " \
+    ${WEBOSOSE_GIT_REPO_COMPLETE} \
+    file://0001-com.webos.service.mediacontroller-Make-it-work-gener.patch \
+    file://0002-com.webos.service.mediacontroller.role.json.in-Fix-o.patch \
+    "
 S = "${WORKDIR}/git"
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "com.webos.service.mediacontroller.service"
