@@ -45,8 +45,10 @@ inherit webos_filesystem_paths
 
 CLEANBROKEN = "1"
 
+EXTRA_OEMAKE = "SYSD_DIR=${systemd_system_unitdir} USE_NFTABLES="1" WAYDROID_VERSION=${SPV}"
+
 do_install() {
-    make install_luneos DESTDIR=${D} USE_NFTABLES="1" WAYDROID_VERSION=${SPV}
+    make install_luneos DESTDIR=${D}
 }
 
 # Provided by libgbinder already for Halium devices, but necessary to add for non-Halium devices.
@@ -68,7 +70,7 @@ do_install:append:qemux86-64() {
 }
 
 FILES:${PN} += " \
-    ${systemd_unitdir} \
+    ${systemd_system_unitdir} \
     ${sysconfdir} \
     ${libdir} \
     ${datadir}/dbus-1 \
