@@ -22,7 +22,6 @@ RRECOMMENDS:${PN} += " \
 "
 
 SRC_URI = "git://github.com/herrie82/waydroid.git;branch=herrie/luneos;protocol=https \
-    file://0001-Makefile-use-regular-SYSD_DIR-for-LuneOS-as-well.patch \
     file://gbinder.conf \
 "
 S = "${WORKDIR}/git"
