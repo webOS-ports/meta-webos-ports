@@ -19,12 +19,12 @@
 # configuration file for tilapia.
 # specify all the modules to be compiled
 
-set(NYXMOD_OW_SYSTEM		NO)
-set(NYXMOD_OW_BATTERY		YES)
-set(NYXMOD_OW_CHARGER		YES)
-set(NYXMOD_OW_KEYS			YES)
-set(NYXMOD_OW_TOUCHPANEL		NO)
-set(NYXMOD_OW_TOUCHPANEL_MTDEV		YES)
+set(NYXMOD_OW_SYSTEM					FALSE)
+set(NYXMOD_OW_BATTERY					TRUE)
+set(NYXMOD_OW_CHARGER					TRUE)
+set(NYXMOD_OW_KEYS						TRUE)
+set(NYXMOD_OW_TOUCHPANEL				FALSE)
+set(NYXMOD_OW_TOUCHPANEL_MTDEV			TRUE)
 
 add_definitions(-DKEYPAD_INPUT_DEVICE=\"/dev/input/event2\")
 add_definitions(-DBATTERY_SYSFS_PATH=\"/sys/class/power_supply/battery/\")

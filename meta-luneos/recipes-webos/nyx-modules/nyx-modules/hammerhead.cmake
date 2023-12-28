@@ -19,12 +19,12 @@
 # configuration file for hammerhead
 # specify all the modules to be compiled
 
-set(NYXMOD_OW_BATTERY			TRUE)
-set(NYXMOD_OW_CHARGER			TRUE)
-set(NYXMOD_OW_KEYS			TRUE)
-set(NYXMOD_OW_TOUCHPANEL		FALSE)
-set(NYXMOD_OW_TOUCHPANEL_MTDEV		TRUE)
-set(NYXMOD_OW_LED			TRUE)
-set(NYXMOD_OW_HAPTICS			TRUE)
+set(NYXMOD_OW_BATTERY					TRUE)
+set(NYXMOD_OW_CHARGER					TRUE)
+set(NYXMOD_OW_KEYS						TRUE)
+set(NYXMOD_OW_TOUCHPANEL				FALSE)
+set(NYXMOD_OW_TOUCHPANEL_MTDEV			TRUE)
+set(NYXMOD_OW_LED						TRUE)
+set(NYXMOD_OW_HAPTICS					TRUE)
 
 add_definitions(-DTOUCHPANEL_DEVICE=\"/dev/input/touchscreen0\")

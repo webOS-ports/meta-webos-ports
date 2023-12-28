@@ -18,7 +18,7 @@
 
 # configuration file for qemuarmv7a.
 
-set(DEVICEINFO_PRODUCT_NAME			"ARMv7-A Emulator")
+set(DEVICEINFO_PRODUCT_NAME				"ARMv7-A Emulator")
 
 add_definitions(-DKEYPAD_INPUT_DEVICE="/dev/input/keyboard0")
 
