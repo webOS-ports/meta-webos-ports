@@ -19,18 +19,18 @@
 # configuration file for maguro.
 # specify all the modules to be compiled
 
-set(NYXMOD_OW_BATTERY			TRUE)
-set(NYXMOD_OW_CHARGER			TRUE)
-set(NYXMOD_OW_KEYS			TRUE)
-set(NYXMOD_OW_TOUCHPANEL		TRUE)
-set(NYXMOD_OW_ALS			TRUE)
-set(NYXMOD_OW_HAPTICS_TIMEDOUTPUT	FALSE)
+set(NYXMOD_OW_BATTERY					TRUE)
+set(NYXMOD_OW_CHARGER					TRUE)
+set(NYXMOD_OW_KEYS						TRUE)
+set(NYXMOD_OW_TOUCHPANEL				TRUE)
+set(NYXMOD_OW_ALS						TRUE)
+set(NYXMOD_OW_HAPTICS_TIMEDOUTPUT		FALSE)
 
 # provided by nyx-modules-hybris
-set(NYXMOD_OW_DEVICEINFO		FALSE)
-set(NYXMOD_OW_SYSTEM			FALSE)
-set(NYXMOD_OW_LED			FALSE)
-set(NYXMOD_OW_HAPTICS			FALSE)
+set(NYXMOD_OW_DEVICEINFO				FALSE)
+set(NYXMOD_OW_SYSTEM					FALSE)
+set(NYXMOD_OW_LED						FALSE)
+set(NYXMOD_OW_HAPTICS					FALSE)
 
 add_definitions(-DBATTERY_SYSFS_PATH=\"/sys/class/power_supply/battery/\")
 add_definitions(-DALS_INPUT_DEVICE=\"/dev/input/event4\")
