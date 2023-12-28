@@ -20,18 +20,18 @@
 # configuration file for rosy
 # specify all the modules to be compiled
 
-set(NYXMOD_OW_MSMMTP			TRUE)
-set(NYXMOD_OW_BATTERY			TRUE)
-set(NYXMOD_OW_CHARGER			TRUE)
-set(NYXMOD_OW_KEYS			TRUE)
-set(NYXMOD_OW_TOUCHPANEL		FALSE)
-set(NYXMOD_OW_TOUCHPANEL_MTDEV		TRUE)
-set(NYXMOD_OW_HAPTICS			TRUE)
+set(NYXMOD_OW_MSMMTP					TRUE)
+set(NYXMOD_OW_BATTERY					TRUE)
+set(NYXMOD_OW_CHARGER					TRUE)
+set(NYXMOD_OW_KEYS						TRUE)
+set(NYXMOD_OW_TOUCHPANEL				FALSE)
+set(NYXMOD_OW_TOUCHPANEL_MTDEV			TRUE)
+set(NYXMOD_OW_HAPTICS					TRUE)
 
 # provided by nyx-modules-hybris
-set(NYXMOD_OW_DEVICEINFO		FALSE)
-set(NYXMOD_OW_SYSTEM			FALSE)
-set(NYXMOD_OW_LED			FALSE)
+set(NYXMOD_OW_DEVICEINFO				FALSE)
+set(NYXMOD_OW_SYSTEM					FALSE)
+set(NYXMOD_OW_LED						FALSE)
 
 add_definitions(-DKEYPAD_INPUT_DEVICE=\"/dev/input/event0\")
 add_definitions(-DBATTERY_SYSFS_PATH=\"/sys/class/power_supply/battery/\")

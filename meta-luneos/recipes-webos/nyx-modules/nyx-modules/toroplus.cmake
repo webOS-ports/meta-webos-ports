@@ -19,19 +19,19 @@
 # configuration file for toroplus.
 # specify all the modules to be compiled
 
-set(NYXMOD_OW_SYSTEM		NO)
-set(NYXMOD_OW_BATTERY		YES)
-set(NYXMOD_OW_CHARGER		YES)
-set(NYXMOD_OW_KEYS			YES)
-set(NYXMOD_OW_TOUCHPANEL		YES)
-set(NYXMOD_OW_ALS			YES)
-set(NYXMOD_OW_HAPTICS_TIMEDOUTPUT		YES)
+set(NYXMOD_OW_SYSTEM					FALSE)
+set(NYXMOD_OW_BATTERY					TRUE)
+set(NYXMOD_OW_CHARGER					TRUE)
+set(NYXMOD_OW_KEYS						TRUE)
+set(NYXMOD_OW_TOUCHPANEL				TRUE)
+set(NYXMOD_OW_ALS						TRUE)
+set(NYXMOD_OW_HAPTICS_TIMEDOUTPUT		TRUE)
 
 # provided by nyx-modules-hybris
-set(NYXMOD_OW_DEVICEINFO		FALSE)
-set(NYXMOD_OW_SYSTEM			FALSE)
-set(NYXMOD_OW_LED			FALSE)
-set(NYXMOD_OW_HAPTICS			FALSE)
+set(NYXMOD_OW_DEVICEINFO				FALSE)
+set(NYXMOD_OW_SYSTEM					FALSE)
+set(NYXMOD_OW_LED						FALSE)
+set(NYXMOD_OW_HAPTICS					FALSE)
 
 add_definitions(-DKEYPAD_INPUT_DEVICE=\"/dev/input/event2\")
 add_definitions(-DBATTERY_SYSFS_PATH=\"/sys/class/power_supply/battery/\")
