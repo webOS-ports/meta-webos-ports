@@ -20,14 +20,14 @@
 # configuration file for a500.
 # specify all the modules to be compiled
 
-set(NYXMOD_OW_KEYS			TRUE)
-set(NYXMOD_OW_TOUCHPANEL		TRUE)
+set(NYXMOD_OW_KEYS						TRUE)
+set(NYXMOD_OW_TOUCHPANEL				TRUE)
 
 # provided by nyx-modules-hybris
-set(NYXMOD_OW_DEVICEINFO		FALSE)
-set(NYXMOD_OW_SYSTEM			FALSE)
-set(NYXMOD_OW_LED			FALSE)
-set(NYXMOD_OW_HAPTICS			FALSE)
+set(NYXMOD_OW_DEVICEINFO				FALSE)
+set(NYXMOD_OW_SYSTEM					FALSE)
+set(NYXMOD_OW_LED						FALSE)
+set(NYXMOD_OW_HAPTICS					FALSE)
 
 add_definitions(-DKEYPAD_INPUT_DEVICE=\"/dev/input/by-path/platform-gpio-keys.0-event\")
 add_definitions(-DBATTERY_SYSFS_PATH=\"/sys/class/power_supply/battery/\")

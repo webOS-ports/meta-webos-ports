@@ -18,7 +18,7 @@
 
 # configuration file for qemuarm.
 
-set(DEVICEINFO_PRODUCT_NAME			"ARMv5TE Emulator")
+set(DEVICEINFO_PRODUCT_NAME				"ARMv5TE Emulator")
 
 add_definitions(-DKEYPAD_INPUT_DEVICE="/dev/input/keyboard0")
 
