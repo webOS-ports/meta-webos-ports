@@ -17,11 +17,11 @@
 # configuration file for raspberrypi4
 # specify all the modules to be compiled
 
-set(NYXMOD_OW_SYSTEM		NO)
-set(NYXMOD_OW_BATTERY		NO)
-set(NYXMOD_OW_CHARGER		NO)
-set(NYXMOD_OW_KEYS			YES)
-set(NYXMOD_OW_TOUCHPANEL		 NO)
-set(NYXMOD_OW_TOUCHPANEL_MTDEV		YES)
+set(NYXMOD_OW_SYSTEM					FALSE)
+set(NYXMOD_OW_BATTERY					FALSE)
+set(NYXMOD_OW_CHARGER					FALSE)
+set(NYXMOD_OW_KEYS						TRUE)
+set(NYXMOD_OW_TOUCHPANEL				FALSE)
+set(NYXMOD_OW_TOUCHPANEL_MTDEV			TRUE)
 
 add_definitions(-DTOUCHPANEL_DEVICE=\"/dev/input/event0\")
