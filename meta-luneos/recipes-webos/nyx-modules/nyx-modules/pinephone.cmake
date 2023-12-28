@@ -28,6 +28,7 @@ set(NYXMOD_OW_TOUCHPANEL				FALSE)
 set(NYXMOD_OW_TOUCHPANEL_MTDEV			TRUE)
 set(NYXMOD_OW_LED						TRUE)
 set(NYXMOD_OW_HAPTICS					TRUE)
+set(NYXMOD_OW_GPS						TRUE)
 
 add_definitions(-DBATTERY_SYSFS_PATH=\"/sys/class/power_supply/axp20x-battery/\")
 add_definitions(-DTOUCHPANEL_DEVICE=\"/dev/input/by-path/platform-1c2ac00.i2c-event\")
