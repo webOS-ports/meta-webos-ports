@@ -48,9 +48,7 @@ VIRTUAL-RUNTIME_com.webos.service.mediacontroller ?= "com.webos.service.mediacon
 VIRTUAL-RUNTIME_umediaserver ?= "umediaserver"
 VIRTUAL-RUNTIME_mediarecorder ?= "com.webos.service.mediarecorder"
 VIRTUAL-RUNTIME_com.webos.service.cec ?= "com.webos.service.cec"
-#LuneOS uses location-service for now
-#VIRTUAL-RUNTIME_com.webos.service.location ?= "com.webos.service.location"
-VIRTUAL-RUNTIME_com.webos.service.location ?= "location-service"
+VIRTUAL-RUNTIME_com.webos.service.location ?= "com.webos.service.location"
 #LuneOS uses Just Type/Universal Search from legacy webOS
 #VIRTUAL-RUNTIME_unifiedsearch ?= "com.webos.service.unifiedsearch com.webos.service.unifiedsearch-plugins"
 VIRTUAL-RUNTIME_unifiedsearch ?= "luna-applauncher luna-universalsearchmgr"
