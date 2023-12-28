@@ -22,7 +22,15 @@ inherit webos_cmake
 inherit webos_system_bus
 inherit pkgconfig
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+    file://0001-com.webos.service.location-Add-value-for-LuneOS.patch \
+    file://0002-com.webos.service.location-Fix-LS2-permission-errors.patch \
+    file://0003-com.webos.service.location-Fix-paths-of-config-files.patch \
+    file://0004-com.webos.service.location-include-LunaLocationServi.patch \
+    file://0005-Add-back-various-API-s.patch \
+    file://0006-com.webos.service.location-include-ServiceAgent.h-Fi.patch \
+"
+
 S = "${WORKDIR}/git"
 
 FILES:${PN} += "${libdir}/location/plugins/lib*.so"
