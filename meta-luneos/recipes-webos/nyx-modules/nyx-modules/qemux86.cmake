@@ -20,12 +20,12 @@
 # configuration file for qemux86.
 # specify all the modules to be compiled
 
-set(NYXMOD_OW_QEMU  			TRUE)
-set(NYXMOD_OW_BATTERY			TRUE)
-set(NYXMOD_OW_CHARGER			TRUE)
-set(NYXMOD_OW_TOUCHPANEL		TRUE)
-set(NYXMOD_OW_KEYS				TRUE)
+set(NYXMOD_OW_QEMU  					TRUE)
+set(NYXMOD_OW_BATTERY					TRUE)
+set(NYXMOD_OW_CHARGER					TRUE)
+set(NYXMOD_OW_TOUCHPANEL				TRUE)
+set(NYXMOD_OW_KEYS						TRUE)
 
-set(DEVICEINFO_PRODUCT_NAME			"x86 Emulator")
+set(DEVICEINFO_PRODUCT_NAME				"x86 Emulator")
 
 add_definitions(-DKEYPAD_INPUT_DEVICE="/dev/input/keyboard0")
