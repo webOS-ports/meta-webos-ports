@@ -29,6 +29,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0004-com.webos.service.location-include-LunaLocationServi.patch \
     file://0005-Add-back-various-API-s.patch \
     file://0006-com.webos.service.location-include-ServiceAgent.h-Fi.patch \
+    file://0007-com.webos.service.location-Remove-gpsConfig-file.patch \
 "
 
 S = "${WORKDIR}/git"
