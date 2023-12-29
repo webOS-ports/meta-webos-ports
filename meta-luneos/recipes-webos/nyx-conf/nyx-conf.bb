@@ -6,9 +6,14 @@ PV = "1.0"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-SRC_URI = "file://nyx.conf"
+SRC_URI = " \
+           file://nyx.conf \
+           file://gpsConfig.conf \
+"
 
 do_install() {
     install -d ${D}${sysconfdir}
+    install -d ${D}${sysconfdir}/location
     install -m 0644 ${WORKDIR}/nyx.conf ${D}${sysconfdir}
+    install -m 0644 ${WORKDIR}/gpsConfig.conf ${D}${sysconfdir}/location
 }
