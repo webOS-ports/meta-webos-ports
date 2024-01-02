@@ -1,10 +1,11 @@
-# Copyright (c) 2022-2023 LG Electronics, Inc.
+# Copyright (c) 2023 LG Electronics, Inc.
 
 AUTHOR = "Donghyun Kim <donghyun11.kim@lge.com>"
 
 inherit cross
 inherit pkgconfig
 
+WEBRUNTIME_REPO_VERSION = "108"
 require webruntime-common.inc
 require webruntime-repo${REPO_VERSION}.inc
 
@@ -15,7 +16,7 @@ UNINATIVE_LOADER = ""
 PROVIDES = "mksnapshot-cross-${TARGET_ARCH}"
 PN = "mksnapshot-cross-${TARGET_ARCH}"
 BPN = "mksnapshot"
-PR = "r2"
+PR = "r0"
 
 TARGET = "v8_snapshot_clang_${TARGET_CPU}/mksnapshot"
 
