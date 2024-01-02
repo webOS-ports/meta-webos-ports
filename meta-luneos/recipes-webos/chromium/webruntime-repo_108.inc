@@ -1,23 +1,23 @@
 # Copyright (c) 2023 LG Electronics, Inc.
 
 WEBOS_REPO_NAME = "chromium108"
+WEBRUNTIME_REPO_VERSION = "108"
+WEBOS_VERSION = "108.0.5359.217-10_f596a7307265fec379d890e4952e97e6f0e56298"
 
-# The submission doesn't exist yet and the repo wasn't publish, but we need
-# some WEBOS_VERSION to set SRCREV to allow parsing the recipes which include
-# this .inc file.
-WEBOS_VERSION = "108.0.5359.217-1_deadbeefdecafcafebaddeadbeefdecafcafebad"
+# LICENSE
+CHROMIUM_LICENSE_CHKSUM = "file://src/LICENSE;md5=c408a301e3407c3803499ce9290515d6"
+# oss-pkg-info.yaml
+CHROMIUM_OSS_PKG_INFO_CHKSUM = "file://oss-pkg-info.yaml;md5=f6cf1c62d76fef64d3ca1b3556fc1d9a"
 
-# 10.8.168.25-chromium108.2
-WEBOS_REPO_NAME_V8 = "chromium-v8"
-WEBOS_GIT_PARAM_BRANCH_V8 = "@chromium108"
-WEBOS_VERSION_V8 = "10.8.168.25-chromium108.3_df187f4df764f33a5674eae21c1cb42c1f48b8a6"
-SRCREV_v8 = "fd143650b4f9a6c37695cafbd39baed42ac64038"
-
-# http://gpro.lge.com/c/webosose/chromium94/+/363094 avcodec/x86/mathops: clip constants used with shift instructions within inline assembly
-# http://gpro.lge.com/c/webosose/chromium108/+/363100 avcodec/x86/mathops: clip constants used with shift instructions within inline assembly
-SRC_URI += "file://0001-avcodec-x86-mathops-clip-constants-used-with-shift-i.patch"
-
-# http://gpro.lge.com/c/webosose/chromium94/+/373211 Disable usage of `__is_cpp17_contiguous_iterator` until libc++ rolls.
-# http://gpro.lge.com/c/webosose/chromium108/+/373222 Disable usage of `__is_cpp17_contiguous_iterator` until libc++ rolls. (master branch)
-# http://gpro.lge.com/c/webosose/chromium108/+/373221 Disable usage of `__is_cpp17_contiguous_iterator` until libc++ rolls. (@pro branch)
-SRC_URI += "file://0001-Disable-usage-of-__is_cpp17_contiguous_iterator-unti.patch"
+# LuneOS specific patches
+SRC_URI += " \
+    file://0002-run_app_shell-fix-XDG_RUNTIME_DIR-for-LuneOS.patch \
+    file://0003-Add-window.open-support.patch \
+    file://0004-WebOS-Shell-Surface-add-client_size_changed-wayland-.patch \
+    file://0005-DesktopNativeWidgetAura-donc-apply-DIP-for-SetBounds.patch \
+    file://0006-palmGetResource-improve-legacy-compatibility.patch \
+    file://0007-Update-app-shell.role.json.in-Add-trustLevel.patch \
+    file://0008-palmGetResource-Fix-loading-of-local-resources.patch \
+    file://0009-webossystem_injection.cc-fix-some-PalmSystem-functio.patch \
+    file://0010-app_shell-override-default-OnWindowHostClose-to-clos.patch \
+"

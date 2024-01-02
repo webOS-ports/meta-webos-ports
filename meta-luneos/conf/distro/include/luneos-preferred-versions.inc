@@ -1,10 +1,5 @@
 # Copyright (c) 2012-2023 LG Electronics, Inc.
 
-# Make chromium94 the default webruntime
-PREFERRED_VERSION_webruntime = "94.%"
-PREFERRED_VERSION_webruntime-clang = "94.%"
-PREFERRED_VERSION_mksnapshot-cross-${TARGET_ARCH} = "94.%"
-
 # Version 2 is available since nanbield:
 # https://git.openembedded.org/meta-openembedded/commit/?id=cd26db61af27a9f822492b1d67b0e39e6828e7cb
 # but eg25-manager used on pinepohone wasn't updated yet to support it:
