@@ -33,8 +33,5 @@ GN_ARGS:append = " \
 GN_ARGS_AES = "disable_zlib_arm_aes_cflag=true"
 GN_ARGS += "${GN_ARGS_AES}"
 
-# Raspberry Pi does not support PMULL.
-GN_ARGS_AES:raspberrypi4-64 = ""
-GN_ARGS_NEON:raspberrypi4-64 = "arm_use_neon=false"
-GN_ARGS_AES:raspberrypi3-64 = ""
-GN_ARGS_NEON:raspberrypi3-64 = "arm_use_neon=false"
+GN_ARGS_AES:aarch64 = ""
+GN_ARGS_NEON:aarch64 = "arm_use_neon=false"
