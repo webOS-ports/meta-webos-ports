@@ -35,3 +35,8 @@ GN_ARGS += "${GN_ARGS_AES}"
 
 GN_ARGS_AES:aarch64 = ""
 GN_ARGS_NEON:aarch64 = "arm_use_neon=false"
+
+# ryu fails to build with thumb:
+# https://github.com/google/ruy/issues/284
+# https://bpa.st/UOIQ
+ARM_INSTRUCTION_SET = "arm"
