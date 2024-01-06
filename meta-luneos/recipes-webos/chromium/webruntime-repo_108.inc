@@ -11,13 +11,13 @@ CHROMIUM_OSS_PKG_INFO_CHKSUM = "file://oss-pkg-info.yaml;md5=f6cf1c62d76fef64d3c
 
 # LuneOS specific patches
 SRC_URI += " \
-    file://0002-run_app_shell-fix-XDG_RUNTIME_DIR-for-LuneOS.patch \
-    file://0003-Add-window.open-support.patch \
-    file://0004-WebOS-Shell-Surface-add-client_size_changed-wayland-.patch \
-    file://0005-DesktopNativeWidgetAura-donc-apply-DIP-for-SetBounds.patch \
-    file://0006-palmGetResource-improve-legacy-compatibility.patch \
-    file://0007-Update-app-shell.role.json.in-Add-trustLevel.patch \
-    file://0008-palmGetResource-Fix-loading-of-local-resources.patch \
-    file://0009-webossystem_injection.cc-fix-some-PalmSystem-functio.patch \
-    file://0010-app_shell-override-default-OnWindowHostClose-to-clos.patch \
+    file://0001-run_app_shell-fix-XDG_RUNTIME_DIR-for-LuneOS.patch \
+    file://0002-Add-window.open-support.patch \
+    file://0003-WebOS-Shell-Surface-add-client_size_changed-wayland-.patch \
+    file://0004-DesktopNativeWidgetAura-don-t-apply-DIP-for-SetBound.patch \
+    file://0005-palmGetResource-improve-legacy-compatibility.patch \
+    file://0006-Update-app-shell.role.json.in-Add-trustLevel.patch \
+    file://0007-palmGetResource-Fix-loading-of-local-resources.patch \
+    file://0008-webossystem_injection.cc-fix-some-PalmSystem-functio.patch \
+    file://0009-app_shell-override-default-OnWindowHostClose-to-clos.patch \
 "
