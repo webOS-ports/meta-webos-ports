@@ -30,5 +30,10 @@ SRC_URI = " \
     ${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-luna-prefs-Fix-outbound-permissions.patch \
 "
+
+do_configure:append() {
+    rm -rf ${S}/service
+}
+
 S = "${WORKDIR}/git"
 
