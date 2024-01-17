@@ -11,11 +11,11 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "qtwayland webos-wayland-extensions libxkbcommon qt-features-webos wayland-native qtwayland-native wayland-protocols"
 
-WEBOS_VERSION = "6.0.0-87_7bdbb39086df6ab54bb7c472d43d54a8167628d5"
+WEBOS_VERSION = "6.0.0-93_fa22224e6e6549d89c19f99a984a63c3062dd4f5"
 PR = "r20"
 
-PV = "6.0.0-87+git"
-SRCREV = "7bdbb39086df6ab54bb7c472d43d54a8167628d5"
+PV = "6.0.0-93+git"
+SRCREV = "fa22224e6e6549d89c19f99a984a63c3062dd4f5"
 
 PACKAGECONFIG ??= ""
 

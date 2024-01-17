@@ -28,11 +28,11 @@ inherit webos_system_bus
 inherit webos_configure_manifest
 inherit pkgconfig
 
-WEBOS_VERSION = "3.2.0-28_3962b2d1690d908019787da521e38686700439a1"
+WEBOS_VERSION = "3.2.0-29_bc18024e9cb039d7eba18c9266b54128f25a3dbd"
 PR = "r40"
 
-PV = "3.2.0-28+git"
-SRCREV = "3962b2d1690d908019787da521e38686700439a1"
+PV = "3.2.0-29+git"
+SRCREV = "bc18024e9cb039d7eba18c9266b54128f25a3dbd"
 
 
 EXTRA_OECMAKE += "-DWEBOS_DB8_BACKEND:STRING='leveldb;sandwich' -DCMAKE_SKIP_RPATH:BOOL=TRUE"

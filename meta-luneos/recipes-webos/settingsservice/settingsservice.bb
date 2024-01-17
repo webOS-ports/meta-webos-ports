@@ -31,6 +31,11 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
 
 S = "${WORKDIR}/git"
 
+#Remove service folder to avoid duplicate legacy and ACG role files
+do_configure:append() {
+    rm -rf ${S}/service
+}
+
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "settings-service.service settings-service-recovery.service"
 WEBOS_SYSTEMD_SCRIPT = "settings-service.sh"
