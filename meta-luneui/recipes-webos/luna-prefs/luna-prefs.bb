@@ -31,6 +31,7 @@ SRC_URI = " \
     file://0001-luna-prefs-Fix-outbound-permissions.patch \
 "
 
+#Remove service folder to avoid duplicate legacy and ACG role files
 do_configure:append() {
     rm -rf ${S}/service
 }
