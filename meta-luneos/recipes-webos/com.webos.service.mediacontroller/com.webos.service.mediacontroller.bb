@@ -12,11 +12,11 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "glib-2.0 luna-service2 json-c pmloglib"
 
-WEBOS_VERSION = "1.0.0-27_4f035cb28f9f3ffa9f67ca27dd35dd5f03d4352f"
-PR = "r5"
+WEBOS_VERSION = "1.0.0-28_4cecd9e728e00db17e4e2a8707bad36d133f7618"
+PR = "r6"
 
-PV = "1.0.0-27+git${SRCPV}"
-SRCREV = "4f035cb28f9f3ffa9f67ca27dd35dd5f03d4352f"
+PV = "1.0.0-28+git${SRCPV}"
+SRCREV = "4cecd9e728e00db17e4e2a8707bad36d133f7618"
 
 inherit webos_cmake
 inherit pkgconfig

@@ -16,11 +16,11 @@ DEPENDS = "qtbase luna-service2 luna-prefs qt-features-webos qtdeclarative malii
 #RDEPENDS:${PN} += "libhangul sunpinyin pyzy qml-webos-bridge openwnn-webos"
 RDEPENDS:${PN} += "qml-webos-bridge"
 
-WEBOS_VERSION = "1.0.0-28_08621717c6c65b5ed75749c460e050a8f66fc231"
+WEBOS_VERSION = "1.0.0-29_277aa343ce79866539ee1cafda091f06548b3f79"
 PR = "r6"
 
-PV = "1.0.0-28+git${SRCPV}"
-SRCREV = "08621717c6c65b5ed75749c460e050a8f66fc231"
+PV = "1.0.0-29+git${SRCPV}"
+SRCREV = "277aa343ce79866539ee1cafda091f06548b3f79"
 
 inherit webos_qmake6
 inherit webos_system_bus
