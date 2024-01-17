@@ -12,11 +12,11 @@ inherit webos_public_repo
 inherit webos_cmake
 inherit pkgconfig
 
-WEBOS_VERSION = "2.15.0-11_598b7168e0e5b69a10614d3c146613d3b5f7cca3"
-PR = "r13"
+WEBOS_VERSION = "2.15.0-15_038a2f0aa9f74a4db831e39a78754e250aeec651"
+PR = "r15"
 
-PV = "2.15.0-11+git${SRCPV}"
-SRCREV = "598b7168e0e5b69a10614d3c146613d3b5f7cca3"
+PV = "2.15.0-15+git${SRCPV}"
+SRCREV = "038a2f0aa9f74a4db831e39a78754e250aeec651"
 
 PACKAGECONFIG ??= ""
 PACKAGECONFIG:append:class-native = " tools"
