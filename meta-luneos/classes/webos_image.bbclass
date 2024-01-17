@@ -37,6 +37,9 @@ WEBOS_IMAGE_EXTRA_INSTALL ?= ""
 
 IMAGE_INSTALL ?= "${WEBOS_IMAGE_BASE_INSTALL}"
 
+# Perform validation for all ls2 security configuration jsons
+IMAGE_CLASSES += "webos_ls2_conf_validate"
+
 # Add ${webos_sysconfdir}/build/image-name during image construction that contains the image name
 ROOTFS_POSTPROCESS_COMMAND += "rootfs_set_image_name ; clean_python_installation ; verify_acg ; "
 
