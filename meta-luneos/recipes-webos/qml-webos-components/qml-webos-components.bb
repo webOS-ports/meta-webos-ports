@@ -11,11 +11,11 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "qtdeclarative pmloglib qt-features-webos luna-service2 glib-2.0"
 
-WEBOS_VERSION = "1.0.0-58_e4773e6b2db36f7d429973e58c072ad888326578"
+WEBOS_VERSION = "1.0.0-59_bf114a608322c5d188959da22646ea83d1e1a6b7"
 PR = "r21"
 
-PV = "1.0.0-58+git${SRCPV}"
-SRCREV = "e4773e6b2db36f7d429973e58c072ad888326578"
+PV = "1.0.0-59+git${SRCPV}"
+SRCREV = "bf114a608322c5d188959da22646ea83d1e1a6b7"
 
 inherit webos_qmake6
 inherit pkgconfig
