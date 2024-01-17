@@ -37,37 +37,38 @@ def webos_app_generate_security_files_write_permission_file(d, app_info):
         # END Hack for legacy com.palm apps to fix issues with proxied LS2 calls, we want to make sure to allow the "app_id*" and "app_id-*"
 
     else:
+        # We really shouldn't use pub and priv here anymore, so lets comment it out because it will give warnings in LS2 validation
         permission[key] = []
-        pub_bus = False
-        prv_bus = False
+#        pub_bus = False
+#        prv_bus = False
         trust_level = app_info.get("trustLevel", "default")
-        if trust_level == "default":
-            pub_bus = True
-        elif trust_level == "trusted":
-            pub_bus = True
-            prv_bus = True
-        elif trust_level == "netcast":
-            # According to https://wiki.lgsvl.com/display/webOSDocs/Security+Level+for+web+applications
-            # netcast level dosn't have access to public and private bus
-            pass
-        else:
-            bb.fatal("Unexpected trustLevel: " + trust_level)
-
-        if type == "web":
-            if "com.palm." in app_id or "com.webos." in app_id or "org.webosports." in app_id:
-                prv_bus = True
-        elif type == "qml":
-            prv_bus = True
-            pub_bus = True
-        elif type == "native":
-            pub_bus = True
-
-        if prv_bus:
-            permission[key].append("private")
-            pub_bus = True
-
-        if pub_bus:
-            permission[key].append("public")
+#        if trust_level == "default":
+#            pub_bus = True
+#        elif trust_level == "trusted":
+#            pub_bus = True
+#            prv_bus = True
+#        elif trust_level == "netcast":
+#            # According to https://wiki.lgsvl.com/display/webOSDocs/Security+Level+for+web+applications
+#            # netcast level dosn't have access to public and private bus
+#            pass
+#        else:
+#            bb.fatal("Unexpected trustLevel: " + trust_level)
+#
+#        if type == "web":
+#            if "com.palm." in app_id or "com.webos." in app_id or "org.webosports." in app_id:
+#                prv_bus = True
+#        elif type == "qml":
+#            prv_bus = True
+#            pub_bus = True
+#        elif type == "native":
+#            pub_bus = True
+#
+#        if prv_bus:
+#            permission[key].append("private")
+#            pub_bus = True
+#
+#        if pub_bus:
+#            permission[key].append("public")
 
     if d.getVar("DISTRO") == "webos" or d.getVar("DISTRO") == "webos-auto" or d.getVar("DISTRO") == "luneos":
         if type == "qml":
