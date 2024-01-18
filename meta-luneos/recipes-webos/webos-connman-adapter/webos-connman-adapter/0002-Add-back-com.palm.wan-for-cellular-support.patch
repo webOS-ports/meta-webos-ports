@@ -6,10 +6,12 @@ Subject: [PATCH] Add back com.palm.wan for cellular support
 Since we use it in LuneOS.
 
 Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
-Upstream-Status: Pending
 ---
+Upstream-Status: Inappropriate [LuneOS specific]
+
  CMakeLists.txt                                |   2 +
  files/sysbus/webos-connman-adapter.api.json   |  22 +-
+ .../sysbus/webos-connman-adapter.groups.json  |   5 +-
  files/sysbus/webos-connman-adapter.perm.json  |   8 +
  .../sysbus/webos-connman-adapter.role.json.in |  36 +-
  files/sysbus/webos-connman-adapter.service.in |   2 +-
@@ -26,7 +28,7 @@ Upstream-Status: Pending
  src/wan_service.c                             | 996 ++++++++++++++++++
  src/wan_service.h                             |  39 +
  src/wifi_service.c                            |   9 +
- 18 files changed, 1468 insertions(+), 22 deletions(-)
+ 19 files changed, 1471 insertions(+), 24 deletions(-)
  create mode 100644 src/wan_service.c
  create mode 100644 src/wan_service.h
 
@@ -82,6 +84,22 @@ index c238f03..8209bd7 100644
 +        "com.webos.service.wifi/getwifidiagnostics"
      ]
  }
+diff --git a/files/sysbus/webos-connman-adapter.groups.json b/files/sysbus/webos-connman-adapter.groups.json
+index 3b3c226..1215a50 100644
+--- a/files/sysbus/webos-connman-adapter.groups.json
++++ b/files/sysbus/webos-connman-adapter.groups.json
+@@ -1,8 +1,9 @@
+ {
+-    "allowedNames": ["com.webos.service.wifi", "com.webos.service.connectionmanager"],
++    "allowedNames": ["com.webos.service.wifi", "com.webos.service.connectionmanager", "com.webos.service.wan"],
+           "networkconnection.query": ["dev"],
+           "networkconnection.management": ["oem"],
+           "wifi.query": ["dev"],
+-          "wifi.management": ["oem"]
++          "wifi.management": ["oem"],
++          "networking.query": ["dev"]
+ }
+ 
 diff --git a/files/sysbus/webos-connman-adapter.perm.json b/files/sysbus/webos-connman-adapter.perm.json
 index 2621a73..f65c5fe 100644
 --- a/files/sysbus/webos-connman-adapter.perm.json
@@ -452,7 +470,7 @@ index 1183b49..a8d46cc 100644
  	memset(counter_data_new, 0, sizeof(counter_data_new));
  }
 diff --git a/src/connman_manager.c b/src/connman_manager.c
-index b76a53c..33c3a0b 100644
+index 83c214b..c16c558 100644
 --- a/src/connman_manager.c
 +++ b/src/connman_manager.c
 @@ -320,6 +320,13 @@ static connman_service_t *find_service_from_path(connman_manager_t *manager,
@@ -496,7 +514,7 @@ index b76a53c..33c3a0b 100644
  	}
  }
  
-@@ -603,6 +623,10 @@ static gboolean connman_manager_update_services(connman_manager_t *manager,
+@@ -606,6 +626,10 @@ static gboolean connman_manager_update_services(connman_manager_t *manager,
  					*service_type |= P2P_SERVICES_CHANGED;
  					break;
  
@@ -507,7 +525,7 @@ index b76a53c..33c3a0b 100644
  				default:
  					break;
  			}
-@@ -684,7 +708,7 @@ static gboolean connman_manager_remove_old_services(connman_manager_t *manager,
+@@ -687,7 +711,7 @@ static gboolean connman_manager_remove_old_services(connman_manager_t *manager,
  	}
  
  	gboolean wifi_services_removed = FALSE, wired_services_removed = FALSE,
@@ -516,7 +534,7 @@ index b76a53c..33c3a0b 100644
  
  	wifi_services_removed = remove_services_from_list(&manager->wifi_services,
  	                        services_removed);
-@@ -692,6 +716,8 @@ static gboolean connman_manager_remove_old_services(connman_manager_t *manager,
+@@ -695,6 +719,8 @@ static gboolean connman_manager_remove_old_services(connman_manager_t *manager,
  	                         services_removed);
  	p2p_services_removed = remove_services_from_list(&manager->p2p_services,
  	                       services_removed);
@@ -525,7 +543,7 @@ index b76a53c..33c3a0b 100644
  
  	if (wired_services_removed)
  	{
-@@ -716,7 +742,13 @@ static gboolean connman_manager_remove_old_services(connman_manager_t *manager,
+@@ -719,7 +745,13 @@ static gboolean connman_manager_remove_old_services(connman_manager_t *manager,
  		}
  	}
  
@@ -540,7 +558,7 @@ index b76a53c..33c3a0b 100644
  }
  
  /**
-@@ -745,6 +777,10 @@ static void connman_manager_free_services(connman_manager_t *manager)
+@@ -748,6 +780,10 @@ static void connman_manager_free_services(connman_manager_t *manager)
  	g_slist_free(manager->p2p_services);
  	manager->p2p_services = NULL;
  
@@ -551,7 +569,7 @@ index b76a53c..33c3a0b 100644
  	g_slist_foreach(manager->saved_services, (GFunc) connman_service_free, NULL);
  	g_slist_free(manager->saved_services);
  	manager->saved_services = NULL;
-@@ -1484,6 +1520,39 @@ connman_technology_t *connman_manager_find_ethernet_technology(
+@@ -1487,6 +1523,39 @@ connman_technology_t *connman_manager_find_ethernet_technology(
  	return NULL;
  }
  
@@ -591,7 +609,7 @@ index b76a53c..33c3a0b 100644
  /**
   * Go through the manager's technologies list and get the p2p one
   * (see header for API details)
-@@ -2255,6 +2324,10 @@ connman_manager_t *connman_manager_new(void)
+@@ -2258,6 +2327,10 @@ connman_manager_t *connman_manager_new(void)
  	             g_slist_length(manager->wifi_services),
  	             g_slist_length(manager->technologies));
  
@@ -640,7 +658,7 @@ index e418f4c..0bdeaa5 100644
   * Go through the manager's given services list and get the one which is in "ready" or
   * "online" state , i.e  one of the connected states.
 diff --git a/src/connman_service.c b/src/connman_service.c
-index 2cd2017..d9b415a 100644
+index febcc3a..66a927e 100644
 --- a/src/connman_service.c
 +++ b/src/connman_service.c
 @@ -65,6 +65,45 @@ gboolean connman_service_type_p2p(connman_service_t *service)
@@ -708,7 +726,7 @@ index 2cd2017..d9b415a 100644
  		g_variant_unref(property);
  		g_variant_unref(key_v);
  	}
-@@ -1602,6 +1653,23 @@ void connman_service_update_properties(connman_service_t *service,
+@@ -1608,6 +1659,23 @@ void connman_service_update_properties(connman_service_t *service,
  		{
  			const gchar *v = g_variant_get_string(val, NULL);
  			connman_service_update_type(service,v);
@@ -732,7 +750,7 @@ index 2cd2017..d9b415a 100644
  		}
  		else if (!g_strcmp0(key, "State"))
  		{
-@@ -2031,6 +2099,9 @@ void connman_service_free(gpointer data, gpointer user_data)
+@@ -2037,6 +2105,9 @@ void connman_service_free(gpointer data, gpointer user_data)
  	g_strfreev(service->proxyinfo.excludes);
  
  
@@ -1934,7 +1952,7 @@ index 0000000..d94595d
 +
 +#endif /* _WAN_SERVICE_H_ */
 diff --git a/src/wifi_service.c b/src/wifi_service.c
-index dbbb36a..28d965f 100644
+index 93521af..fdf93c0 100644
 --- a/src/wifi_service.c
 +++ b/src/wifi_service.c
 @@ -58,6 +58,7 @@ errorText | Yes | String | Error description
@@ -1966,7 +1984,7 @@ index dbbb36a..28d965f 100644
  	check_and_initialize_ethernet_technology();
  }
  
-@@ -4059,6 +4067,7 @@ static void connman_service_started(GDBusConnection *conn, const gchar *name,
+@@ -4056,6 +4064,7 @@ static void connman_service_started(GDBusConnection *conn, const gchar *name,
  	check_and_initialize_wifi_technology();
  	check_and_initialize_p2p_technology();
  	check_and_initialize_ethernet_technology();
