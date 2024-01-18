@@ -6,11 +6,11 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 PV = "3.0.1-5+git${SRCPV}"
-SRCREV = "17b47c4bfef52b209e07efdd22ed43f144279bc6"
+SRCREV = "ccdde9644c25907c1ca643df57dd6c4701f30af2"
 
 inherit webos_ports_ose_repo
 inherit webos_filesystem_paths
-inherit webos_configure_manifest
+inherit webos_system_bus
 inherit allarch
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
@@ -30,6 +30,7 @@ do_install() {
     install -d ${D}${webos_sysbus_permissionsdir}
     install -d ${D}${webos_sysbus_rolesdir}
     install -d ${D}${webos_sysbus_servicedir}
+    install -d ${D}${webos_sysbus_groupsdir}
 
     for SERVICE in `ls -d1 ${S}/com.palm.service.*` ; do
         SERVICE_DIR=`basename $SERVICE`
@@ -45,6 +46,7 @@ do_install() {
         cp -vrf $SERVICE/files/sysbus/*.perm.json ${D}${webos_sysbus_permissionsdir} 2> /dev/null || true
         cp -vrf $SERVICE/files/sysbus/*.role.json ${D}${webos_sysbus_rolesdir} 2> /dev/null || true
         cp -vrf $SERVICE/files/sysbus/*.service ${D}${webos_sysbus_servicedir} 2> /dev/null || true
+        cp -vrf $SERVICE/files/sysbus/*.groups.json ${D}${webos_sysbus_groupsdir} 2> /dev/null || true
     done
 
 # install account service desktop credentials db kind 
@@ -67,4 +69,4 @@ do_install() {
 
 FILES:${PN} += "${webos_servicesdir} ${webos_sysconfdir} ${sysconfdir}"
 FILES:${PN} += "${webos_accttemplatesdir}"
-FILES:${PN} += "${webos_sysbus_apipermissionsdir} ${webos_sysbus_manifestsdir} ${webos_sysbus_permissionsdir} ${webos_sysbus_rolesdir} ${webos_sysbus_servicedir}"
+FILES:${PN} += "${webos_sysbus_apipermissionsdir} ${webos_sysbus_manifestsdir} ${webos_sysbus_permissionsdir} ${webos_sysbus_rolesdir} ${webos_sysbus_servicedir} ${webos_sysbus_groupsdir}"
