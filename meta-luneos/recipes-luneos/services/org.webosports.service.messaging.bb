@@ -9,7 +9,7 @@ inherit webos_system_bus
 inherit webos_filesystem_paths
 
 PV = "0.1.0+git"
-SRCREV = "36ed3eb7a3c4d6c540da866eb76552702d417d00"
+SRCREV = "e8d7c39b692d47ca61f7cea8509bad7ef1ee53e5"
 
 WEBOS_REPO_NAME = "org.webosports.messaging"
 
@@ -38,10 +38,12 @@ do_install() {
     install -d ${D}${webos_sysbus_permissionsdir}
     install -d ${D}${webos_sysbus_rolesdir}
     install -d ${D}${webos_sysbus_apipermissionsdir}
+    install -d ${D}${webos_sysbus_groupsdir}
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.service ${D}${webos_sysbus_servicedir}/${BPN}.service
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.perm.json ${D}${webos_sysbus_permissionsdir}/${BPN}.perm.json
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.role.json ${D}${webos_sysbus_rolesdir}/${BPN}.role.json
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.api.json ${D}${webos_sysbus_apipermissionsdir}/${BPN}.api.json
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.groups.json ${D}${webos_sysbus_groupsdir}/${BPN}.groups.json
     
     # Remove things we don't want on the device
     rm -rf ${D}${webos_servicesdir}/${PN}/files

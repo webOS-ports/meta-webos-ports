@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "luna-service2 json-c glib-2.0 pulseaudio"
 
 PV = "0.1.0-10+git"
-SRCREV = "92fde6af9e56117742aa687df931575b14376fad"
+SRCREV = "f3f746089f17ed5bbcb3927a8ffe6af35595a247"
 
 SERVICE_NAME = "org.webosports.service.audio"
 
@@ -20,19 +20,3 @@ LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
-
-WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
-WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files/sysbus"
-
-do_install:append() {
-
-    # ACG configuration files
-    install -d ${D}${webos_sysbus_servicedir}
-    install -d ${D}${webos_sysbus_permissionsdir}
-    install -d ${D}${webos_sysbus_rolesdir}
-    install -d ${D}${webos_sysbus_apipermissionsdir}
-    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.service ${D}${webos_sysbus_servicedir}/${SERVICE_NAME}.service
-    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.perm.json ${D}${webos_sysbus_permissionsdir}/${SERVICE_NAME}.perm.json
-    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.role.json ${D}${webos_sysbus_rolesdir}/${SERVICE_NAME}.role.json
-    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.api.json ${D}${webos_sysbus_apipermissionsdir}/${SERVICE_NAME}.api.json
-}

@@ -25,7 +25,6 @@ RDEPENDS:${PN}-tests:append:class-target = " ${VIRTUAL-RUNTIME_bash}"
 inherit webos_public_repo
 inherit webos_cmake
 inherit webos_system_bus
-inherit webos_configure_manifest
 inherit pkgconfig
 
 WEBOS_VERSION = "3.2.0-29_bc18024e9cb039d7eba18c9266b54128f25a3dbd"

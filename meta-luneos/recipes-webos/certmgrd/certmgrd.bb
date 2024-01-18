@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "luna-service2 json-c glib-2.0 pmcertificatemgr"
 
 PV = "0.1.0-1+git"
-SRCREV = "32c5fd6494bf8b3378fec9b3e85a833b77d14ff5"
+SRCREV = "9000690778d574a46a0bb8e404394660145ea3bb"
 
 inherit webos_ports_ose_repo
 inherit webos_cmake

@@ -13,7 +13,7 @@ inherit webos_app
 SERVICE_NAME = "org.webosports.service.filemanager"
 
 PV = "1.0.0+git"
-SRCREV = "ca8114cefdc9bd4609beb2f63578df07d4116652"
+SRCREV = "3ce3cda248556217a7d2cb7a4970e04f897268f3"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
@@ -28,10 +28,12 @@ do_install:append() {
     install -d ${D}${webos_sysbus_permissionsdir}
     install -d ${D}${webos_sysbus_rolesdir}
     install -d ${D}${webos_sysbus_apipermissionsdir}
+    install -d ${D}${webos_sysbus_groupsdir}
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.service ${D}${webos_sysbus_servicedir}/${SERVICE_NAME}.service
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.perm.json ${D}${webos_sysbus_permissionsdir}/${SERVICE_NAME}.perm.json
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.role.json ${D}${webos_sysbus_rolesdir}/${SERVICE_NAME}.role.json
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.api.json ${D}${webos_sysbus_apipermissionsdir}/${SERVICE_NAME}.api.json
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.groups.json ${D}${webos_sysbus_groupsdir}/${SERVICE_NAME}.groups.json
 }
 
 FILES:${PN} += "${webos_servicesdir}/${SERVICE_NAME}"
