@@ -27,6 +27,7 @@ inherit pkgconfig
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-service-update-SettingsService-path.patch \
+    file://0002-com.webos.settingsservice-Change-luna.internal-to-se.patch \
 "
 
 S = "${WORKDIR}/git"

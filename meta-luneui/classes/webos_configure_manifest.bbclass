@@ -1,4 +1,4 @@
-# Copyright (c) 2015-2018 LG Electronics, Inc.
+# Copyright (c) 2015-2023 LG Electronics, Inc.
 
 WEBOS_SYSTEM_BUS_MANIFEST_TYPE ??= "PACKAGE"
 
@@ -25,7 +25,7 @@ def webos_configure_manifest_lookup_files_by_ext(d, dir_var, ext):
     dst = d.getVar("D")
     rel_dir = d.getVar(dir_var)
     abs_dir = dst + rel_dir
-
+    
     if not os.path.exists(abs_dir):
         return ret
 
@@ -85,6 +85,15 @@ def webos_configure_manifest_service(d):
 
                 requires = webos_configure_manifest_find_file_by_name_or_pn(d, "webos_sysbus_permissionsdir", srv_name, ".perm.json")
                 if requires: manifest["clientPermissionFiles"] = [requires]
+
+                groups = webos_configure_manifest_find_file_by_name_or_pn(d, "webos_sysbus_groupsdir", srv_name, ".groups.json")
+                if groups: manifest["groupsFiles"] = [groups]
+
+                intents = webos_configure_manifest_find_file_by_name_or_pn(d, "webos_sysbus_intentsdir", srv_name, ".intents.json")
+                if intents: manifest["intentFiles"] = [intents]
+
+                intent_filters = webos_configure_manifest_find_file_by_name_or_pn(d, "webos_sysbus_intentfiltersdir", srv_name, ".intent-filter.json")
+                if intent_filters: manifest["intentFilterFiles"] = [intent_filters]
 
             if role:
                 manifests.append(manifest)
@@ -196,13 +205,34 @@ def webos_configure_manifest_application_from_appinfo(d, app_info_file):
 
             role_file = webos_configure_manifest_find_file_by_name_or_pn(d, "webos_sysbus_rolesdir", app_info["id"], ".json")
             if role_file:
-                manifest["roleFile"] = [role_file]
+                manifest["roleFiles"] = [role_file]
 
                 provides = webos_configure_manifest_find_file_by_name_or_pn(d, "webos_sysbus_apipermissionsdir", app_info["id"], ".json")
                 if provides: manifest["apiPermissionFiles"]= [provides]
 
                 requires = webos_configure_manifest_find_file_by_name_or_pn(d, "webos_sysbus_permissionsdir", app_info["id"], ".json")
                 if requires: manifest["clientPermissionFiles"] = [requires]
+
+                groups = webos_configure_manifest_find_file_by_name_or_pn(d, "webos_sysbus_groupsdir", app_info["id"], ".json")
+                if groups: manifest["groupsFiles"] = [groups]
+
+                return manifest
+
+            # Retry with .app.json as webos_app_generate_security_files.bbclass is supposed to
+            # generate roles and permissions file with .app.json suffix.
+            role_file = webos_configure_manifest_find_file_by_name_or_pn(d, "webos_sysbus_rolesdir", app_info["id"], ".app.json")
+            if role_file:
+                manifest["roleFiles"] = [role_file]
+
+                provides = webos_configure_manifest_find_file_by_name_or_pn(d, "webos_sysbus_apipermissionsdir", app_info["id"], ".app.json")
+                if provides: manifest["apiPermissionFiles"]= [provides]
+
+                requires = webos_configure_manifest_find_file_by_name_or_pn(d, "webos_sysbus_permissionsdir", app_info["id"], ".app.json")
+                if requires: manifest["clientPermissionFiles"] = [requires]
+
+                groups = webos_configure_manifest_find_file_by_name_or_pn(d, "webos_sysbus_groupsdir", app_info["id"], ".app.json")
+                if groups: manifest["groupsFiles"] = [groups]
+
                 return manifest
 
             if warn_mismatch(d, "webos_sysbus_rolesdir"):
@@ -296,6 +326,15 @@ def webos_configure_manifest_package(d):
 
     requires = webos_configure_manifest_lookup_files_by_ext(d, "webos_sysbus_permissionsdir", ".json")
     if requires: manifest["clientPermissionFiles"] = requires
+
+    groups = webos_configure_manifest_lookup_files_by_ext(d, "webos_sysbus_groupsdir", ".json")
+    if groups: manifest["groupsFiles"] = groups
+
+    intents = webos_configure_manifest_lookup_files_by_ext(d, "webos_sysbus_intentsdir", ".json")
+    if intents: manifest["intentFiles"] = intents
+
+    intent_filters = webos_configure_manifest_lookup_files_by_ext(d, "webos_sysbus_intentfiltersdir", ".json")
+    if intent_filters: manifest["intentFilterFiles"] = intent_filters
 
     return [manifest]
 

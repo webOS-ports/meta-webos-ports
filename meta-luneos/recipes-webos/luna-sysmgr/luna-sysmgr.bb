@@ -15,7 +15,7 @@ DEPENDS += "serviceinstaller"
 RDEPENDS:${PN} += "sleepd com.webos.service.battery"
 
 PV = "3.0.0-3+git"
-SRCREV = "f42a3a6b5c433b817e9508a0f73610542b5649b6"
+SRCREV = "23e64f97a4070ea7e323d007a4a72fa857cca9a1"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 

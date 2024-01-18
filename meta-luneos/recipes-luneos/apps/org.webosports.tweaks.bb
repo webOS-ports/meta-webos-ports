@@ -1,4 +1,4 @@
-SUMMARY = "Tweaks for your webOS device."
+#SUMMARY = "Tweaks for your webOS device."
 SECTION = "webos/apps"
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
@@ -10,7 +10,7 @@ inherit webos_system_bus
 inherit webos_app
 
 PV = "3.0.3+git"
-SRCREV = "440ff5da2e5a79d832811f4eeb9347f99085d6a9"
+SRCREV = "71a29a3623cd1bc9fbcf5e99bf6e174cd1ab8883"
 
 SERVICE_NAME = "org.webosports.service.tweaks.prefs"
 APP_NAME = "org.webosports.app.tweaks"
@@ -39,10 +39,12 @@ do_install:append() {
     install -d ${D}${webos_sysbus_permissionsdir}
     install -d ${D}${webos_sysbus_rolesdir}
     install -d ${D}${webos_sysbus_apipermissionsdir}
+    install -d ${D}${webos_sysbus_groupsdir}
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.service ${D}${webos_sysbus_servicedir}/${SERVICE_NAME}.service
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.perm.json ${D}${webos_sysbus_permissionsdir}/${SERVICE_NAME}.perm.json
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.role.json ${D}${webos_sysbus_rolesdir}/${SERVICE_NAME}.role.json
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.api.json ${D}${webos_sysbus_apipermissionsdir}/${SERVICE_NAME}.api.json
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.groups.json ${D}${webos_sysbus_groupsdir}/${SERVICE_NAME}.groups.json
 
     # Install the db8 configuration & permissions
     install -d ${D}${webos_sysconfdir}/db/kinds
@@ -57,5 +59,7 @@ FILES:${PN} = " \
     ${webos_applicationsdir}/org.webosports.app.tweaks \
     ${webos_servicesdir}/org.webosports.service.tweaks.prefs \
     ${webos_sysconfdir} \
-    ${webos_sysbus_manifestsdir} ${webos_sysbus_apipermissionsdir} ${webos_sysbus_permissionsdir} ${webos_sysbus_rolesdir} ${webos_sysbus_servicedir} \
-"
+    ${webos_sysbus_manifestsdir} ${webos_sysbus_apipermissionsdir} ${webos_sysbus_permissionsdir} ${webos_sysbus_rolesdir} ${webos_sysbus_servicedir} ${webos_sysbus_groupsdir} \
+    "
+
+
