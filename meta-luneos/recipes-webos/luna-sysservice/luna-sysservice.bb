@@ -35,6 +35,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0003-luna-sysservice-Add-required-bits-for-LuneOS.patch \
     file://0004-luna-sysservice-Fix-permissions-for-telephony.patch \
     file://0005-luna-sysservice-TimePrefsHandler.cpp-Fix-typo.patch \
+    file://0006-com.webos.service.systemservice-Add-image.management.patch \
 "
 
 S = "${WORKDIR}/git"
