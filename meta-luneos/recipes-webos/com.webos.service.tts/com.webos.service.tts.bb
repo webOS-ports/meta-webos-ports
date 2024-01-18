@@ -23,7 +23,9 @@ inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+    file://0001-com.webos.service.tts-Fix-typos.patch \
+"
 S = "${WORKDIR}/git"
 
 inherit webos_systemd

@@ -8,7 +8,7 @@ inherit webos_filesystem_paths
 inherit webos_system_bus
 
 PV = "0.1.0+git${SRCPV}"
-SRCREV = "90a9a03bd08e9e52f355f6ca0b7c9148e45b4108"
+SRCREV = "6a684bd19fe96f24406e4510e1dec7e445b40ea7"
 
 WEBOS_REPO_NAME = "org.webosports.update"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
@@ -35,10 +35,12 @@ do_install() {
     install -d ${D}${webos_sysbus_permissionsdir}
     install -d ${D}${webos_sysbus_rolesdir}
     install -d ${D}${webos_sysbus_apipermissionsdir}
+    install -d ${D}${webos_sysbus_groupsdir}
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.service ${D}${webos_sysbus_servicedir}/${BPN}.service
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.perm.json ${D}${webos_sysbus_permissionsdir}/${BPN}.perm.json
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.role.json ${D}${webos_sysbus_rolesdir}/${BPN}.role.json
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.api.json ${D}${webos_sysbus_apipermissionsdir}/${BPN}.api.json
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.groups.json ${D}${webos_sysbus_groupsdir}/${BPN}.groups.json
 }
 
 FILES:${PN} += "${webos_servicesdir}/${PN}"

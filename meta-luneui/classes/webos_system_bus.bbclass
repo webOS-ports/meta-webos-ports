@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2018 LG Electronics, Inc.
+# Copyright (c) 2012-2023 LG Electronics, Inc.
 #
 # webos_system_bus
 
@@ -86,6 +86,8 @@ WEBOS_SYSTEM_BUS_DIRS += " \
     ${webos_sysbus_permissionsdir} \
     ${webos_sysbus_apipermissionsdir} \
     ${webos_sysbus_groupsdir} \
+    ${webos_sysbus_intentsdir} \
+    ${webos_sysbus_intentfiltersdir} \
     ${webos_sysbus_manifestsdir} \
 "
 
