@@ -16,12 +16,10 @@ RDEPENDS:${PN} = "applicationinstallerutility"
 WEBOS_VERSION = "4.0.0-12_abc1c307bbd50aa2a362c256098da1199220c277"
 PR = "r12"
 
-PV = "4.0.0-12+git"
-SRCREV = "abc1c307bbd50aa2a362c256098da1199220c277"
-
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit pkgconfig
 
 

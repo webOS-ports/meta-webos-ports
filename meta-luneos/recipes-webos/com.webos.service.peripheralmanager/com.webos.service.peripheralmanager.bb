@@ -15,13 +15,11 @@ DEPENDS = "glib-2.0 libpbnjson luna-service2 pmloglib "
 WEBOS_VERSION = "1.0.0-13_bbd3a51b96ef9ff375de3f9f7738e6f746b4f326"
 PR = "r3"
 
-PV = "1.0.0-13+git"
-SRCREV = "bbd3a51b96ef9ff375de3f9f7738e6f746b4f326"
-
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

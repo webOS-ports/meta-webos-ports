@@ -16,9 +16,7 @@ inherit webos_public_repo
 inherit webos_enactjs_app
 inherit webos_filesystem_paths
 inherit webos_npm_env
-
-PV = "1.0.0-74+git"
-SRCREV = "ef128c4af9260f302d941d1a4bab94ba4a09d462"
+inherit webos_enhanced_submissions
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-appinfo.json-Use-custom-icon-files-from-legacy.patch \

@@ -16,11 +16,9 @@ inherit webos_cmake
 inherit webos_system_bus
 inherit webos_systemd
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 
 WEBOS_VERSION = "1.2.0-18_0d07514460a6c35e3a7aa0d360468f626210eaae"
-
-PV = "1.2.0-18+git"
-SRCREV = "0d07514460a6c35e3a7aa0d360468f626210eaae"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 

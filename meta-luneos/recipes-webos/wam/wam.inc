@@ -21,9 +21,6 @@ RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_cpushareholder}"
 WEBOS_VERSION = "1.0.2-83_9e666f281d73ba1ff7b24d996f199b2343950369"
 INC_PR = "r64"
 
-PV = "1.0.2-83+git"
-SRCREV = "9e666f281d73ba1ff7b24d996f199b2343950369"
-
 WAM_BUILD_SYSTEM ?= "webos_cmake"
 WAM_BUILD_DEFAULT_PLUGIN ?= "1"
 
@@ -32,6 +29,7 @@ inherit ${WAM_BUILD_SYSTEM}
 inherit pkgconfig
 inherit webos_lttng
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit webos_systemd
 
 WAM_DATA_DIR = "${webos_execstatedir}/${BPN}"

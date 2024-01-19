@@ -12,9 +12,6 @@ DEPENDS += "boost"
 WEBOS_VERSION = "3.0.2-4_ef029ca96241caf25700b51a47502e6752cc8638"
 PR = "r13"
 
-PV = "3.0.2-4+git"
-SRCREV = "ef029ca96241caf25700b51a47502e6752cc8638"
-
 inherit pkgconfig
 
 do_configure() {

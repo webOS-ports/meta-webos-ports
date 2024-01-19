@@ -12,13 +12,11 @@ LIC_FILES_CHKSUM = " \
 WEBOS_VERSION = "1.0.0-25_41eadb20de0db9950251567680e83f4d218d9110"
 PR = "r11"
 
-PV = "1.0.0-25+git"
-SRCREV = "41eadb20de0db9950251567680e83f4d218d9110"
-
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 
 # third party libraries
 DEPENDS = "glib-2.0 libmtp gupnp libedit gstreamer1.0 gstreamer1.0-plugins-base taglib libpng libjpeg-turbo gdk-pixbuf jpeg libexif giflib"

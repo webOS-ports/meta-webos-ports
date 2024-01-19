@@ -6,13 +6,11 @@ SECTION = "webos/libs"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-WEBOS_VERSION = "3.3.0-2_75eef528791b73b8bc4f84cf522c6a1c533edc32"
+WEBOS_VERSION = "3.3.0-7_70ff1081b4ff6d910b89b96c86c6e42a5fa29c6a"
 PR = "r1"
 
-PV = "3.3.0-7+git"
-SRCREV = "70ff1081b4ff6d910b89b96c86c6e42a5fa29c6a"
-
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit pkgconfig
 

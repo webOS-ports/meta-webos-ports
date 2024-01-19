@@ -15,11 +15,9 @@ RDEPENDS:${PN} += "ilib-webapp"
 WEBOS_VERSION = "11.0.0-6_bdf1beb39a1326243eac0797791f099ca4f1c5ae"
 PR = "r7"
 
-PV = "11.0.0-6+git"
-SRCREV = "bdf1beb39a1326243eac0797791f099ca4f1c5ae"
-
 inherit webos_qmake6
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

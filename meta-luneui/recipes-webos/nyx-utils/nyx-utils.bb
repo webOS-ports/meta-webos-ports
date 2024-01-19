@@ -13,15 +13,12 @@ LIC_FILES_CHKSUM = " \
 DEPENDS = "nyx-lib glib-2.0"
 
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit pkgconfig
 
 WEBOS_VERSION = "1.5.0-9_1e45c59b3671f66b8a372d57a32bcc2a400ff933"
 PR = "r5"
-
-PV = "1.5.0-9+git"
-SRCREV = "1e45c59b3671f66b8a372d57a32bcc2a400ff933"
-
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

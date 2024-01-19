@@ -21,14 +21,12 @@ RPROVIDES:${PN}-examples = " \
 WEBOS_VERSION = "1.0.0-166_976ef6a9f06993cbaf2ed3babc6dcb96dd3b1b1f"
 PR = "r35"
 
-PV = "1.0.0-166+git"
-SRCREV = "976ef6a9f06993cbaf2ed3babc6dcb96dd3b1b1f"
-
 inherit webos_qmake6
 inherit pkgconfig
 inherit webos_app_generate_security_files
 inherit webos_filesystem_paths
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-AppLoader-add-import-path-for-QML-apps.patch \

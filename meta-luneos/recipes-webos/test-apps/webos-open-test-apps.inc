@@ -7,13 +7,11 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 WEBOS_VERSION = "1.0.0-22_648edac42dfe23fda82f9e041d4f5b5e3c75479f"
 INC_PR = "r6"
 
-PV = "1.0.0-22+git"
-SRCREV = "648edac42dfe23fda82f9e041d4f5b5e3c75479f"
-
 EXTRA_INHERIT ?= "webos_cmake"
 
 inherit webos_app
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit ${EXTRA_INHERIT}
 
 WEBOS_REPO_NAME = "test-apps"

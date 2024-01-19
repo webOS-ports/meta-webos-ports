@@ -21,12 +21,10 @@ RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_pdm-plugin}"
 WEBOS_VERSION = "1.0.1-84_ce309957eaa6afc905fd9c60504e776e8273ed27"
 PR = "r10"
 
-PV = "1.0.1-84+git"
-SRCREV = "ce309957eaa6afc905fd9c60504e776e8273ed27"
-
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit pkgconfig
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \

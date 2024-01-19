@@ -19,11 +19,9 @@ DEPENDS = "glib-2.0 luna-service2 json-c pmloglib libgoogleassistant"
 WEBOS_VERSION = "1.0.0-11_6bc7a16f334f58dfa4b439b6f849d79a1b72871b"
 PR = "r8"
 
-PV = "1.0.0-11+git"
-SRCREV = "6bc7a16f334f58dfa4b439b6f849d79a1b72871b"
-
 inherit systemd
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus

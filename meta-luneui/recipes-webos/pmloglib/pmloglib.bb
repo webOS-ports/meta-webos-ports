@@ -15,13 +15,11 @@ DEPENDS = "glib-2.0 libpbnjson"
 WEBOS_VERSION = "3.3.0-7_70ff1081b4ff6d910b89b96c86c6e42a5fa29c6a"
 PR = "r10"
 
-PV = "3.3.0-7+git"
-SRCREV = "70ff1081b4ff6d910b89b96c86c6e42a5fa29c6a"
-
 LEAD_SONAME = "libPmLogLib.so"
 EXTRA_OECMAKE += "-DWEBOS_DISTRO_PRERELEASE:STRING='${WEBOS_DISTRO_PRERELEASE}'"
 
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit webos_pmlog_config
 inherit pkgconfig

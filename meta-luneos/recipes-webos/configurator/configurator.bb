@@ -15,10 +15,8 @@ DEPENDS = "luna-service2 db8 glib-2.0 pmloglib"
 WEBOS_VERSION = "3.0.0-11_ded3f968c2943ef77d81755e5bf7de088447651a"
 PR = "r10"
 
-PV = "3.0.0-11+git"
-SRCREV = "ded3f968c2943ef77d81755e5bf7de088447651a"
-
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit webos_system_bus
 inherit pkgconfig

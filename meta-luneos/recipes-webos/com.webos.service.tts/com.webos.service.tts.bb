@@ -15,10 +15,8 @@ DEPENDS = "glib-2.0 luna-service2 libpbnjson pmloglib json-c pulseaudio googleap
 WEBOS_VERSION = "1.0.0-28_06ceb4c6e4b9899e2c1760061a7130146ab5ae98"
 PR = "r9"
 
-PV = "1.0.0-28+git"
-SRCREV = "06ceb4c6e4b9899e2c1760061a7130146ab5ae98"
-
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
