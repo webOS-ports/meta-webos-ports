@@ -18,13 +18,11 @@ PACKAGECONFIG[libim] = "CONFIG+=enable-libim,CONFIG-=enable-libim,libim"
 WEBOS_VERSION = "0.99.0+20-102_b3c5fe41a33b6dd3d5c11b704c6ff2c8974ef7b6"
 PR = "r35"
 
-PV = "0.99.0+20-102+git${SRCPV}"
-SRCREV = "b3c5fe41a33b6dd3d5c11b704c6ff2c8974ef7b6"
-
 inherit pkgconfig
 inherit webos_qmake6
 inherit webos_filesystem_paths
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

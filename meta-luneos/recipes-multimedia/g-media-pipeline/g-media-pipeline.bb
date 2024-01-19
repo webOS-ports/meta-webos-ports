@@ -13,6 +13,7 @@ LIC_FILES_CHKSUM = " \
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit pkgconfig
 
 PR = "r18"
@@ -23,9 +24,6 @@ DEPENDS:append:rpi = " virtual/libomxil"
 COMPATIBLE_MACHINE = "^qemux86$|^qemux86-64$|^raspberrypi3$|^raspberrypi3-64$|^raspberrypi4$|^raspberrypi4-64$"
 
 WEBOS_VERSION = "1.0.0-gav.48_3ba1c574047904a87182f34482eea6197bf5a48f"
-
-PV = "1.0.0-gav.48+git${SRCPV}"
-SRCREV = "3ba1c574047904a87182f34482eea6197bf5a48f"
 
 WEBOS_GIT_PARAM_BRANCH = "@gav"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"

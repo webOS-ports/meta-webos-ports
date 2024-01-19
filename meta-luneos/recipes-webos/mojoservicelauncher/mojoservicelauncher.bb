@@ -18,10 +18,8 @@ RDEPENDS:${PN} += "nodejs-module-webos-dynaload nodejs-module-webos-pmlog nodejs
 WEBOS_VERSION = "3.0.2-7_b759589be50ce52c4ae4e6af40ecbc78c7232a96"
 PR = "r10"
 
-PV = "3.0.2-7+git${SRCPV}"
-SRCREV = "b759589be50ce52c4ae4e6af40ecbc78c7232a96"
-
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit pkgconfig
 

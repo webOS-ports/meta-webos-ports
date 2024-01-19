@@ -14,12 +14,10 @@ DEPENDS = "glib-2.0 event-monitor pmloglib libpbnjson libwebosi18n"
 WEBOS_VERSION = "1.0.0-8_fb0a3bab04d07537a4cc04c4e7274025fe5633ef"
 PR = "r2"
 
-PV = "1.0.0-8+git${SRCPV}"
-SRCREV = "fb0a3bab04d07537a4cc04c4e7274025fe5633ef"
-
 inherit webos_cmake
 inherit webos_event_monitor_plugin
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit webos_localizable
 inherit pkgconfig
 

@@ -11,15 +11,13 @@ LIC_FILES_CHKSUM = " \
 
 WEBOS_VERSION = "0.1.0-17_843ac43ece5a0644799466ada5f4845993744124"
 
-PV = "0.1.0-17+git${SRCPV}"
-SRCREV = "843ac43ece5a0644799466ada5f4845993744124"
-
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 PR = "r2"
 
 inherit webos_enactjs_app
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 
 WEBOS_ENACTJS_APP_ID = "com.webos.app.notification"
 

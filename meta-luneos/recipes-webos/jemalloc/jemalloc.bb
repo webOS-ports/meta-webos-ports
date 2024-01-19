@@ -9,10 +9,8 @@ LIC_FILES_CHKSUM = "file://README.md;beginline=94;md5=b159f6c7121460dba2c5965602
 WEBOS_VERSION = "0.20080828a-0webos9-6_f527e94e1facd3a9c801bf181d5e7cba287d04bb"
 PR = "r5"
 
-PV = "0.20080828a-0webos9-6+git${SRCPV}"
-SRCREV = "f527e94e1facd3a9c801bf181d5e7cba287d04bb"
-
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit webos_cmake
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
