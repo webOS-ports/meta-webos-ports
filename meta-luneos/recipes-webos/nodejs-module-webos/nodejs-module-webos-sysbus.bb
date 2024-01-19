@@ -14,9 +14,6 @@ inherit pkgconfig
 WEBOS_VERSION = "3.0.1-15_a8d17fa1037cd0056449a95aa22c01ded2989d85"
 PR = "r17"
 
-PV = "3.0.1-15+git${SRCPV}"
-SRCREV = "a8d17fa1037cd0056449a95aa22c01ded2989d85"
-
 do_configure() {
     export GYP_DEFINES="sysroot=${STAGING_DIR_HOST}"
     # used by binding.gyp

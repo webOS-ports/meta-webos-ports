@@ -9,14 +9,12 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=704f5c65b7aa0484b9e3f01c09e74b58 \
 "
 
-#WEBOS_VERSION = "1.0.0-5_e3b8d5297c20edd8fc73ee3ac8729094159942ec"
+WEBOS_VERSION = "1.0.0-5_e3b8d5297c20edd8fc73ee3ac8729094159942ec"
 PR = "r4"
-
-PV = "1.0.0-5+git${SRCPV}"
-SRCREV = "e3b8d5297c20edd8fc73ee3ac8729094159942ec"
 
 inherit fontcache
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-31-webos-aliases.conf-Use-Prelude-for-LuneOS.patch \

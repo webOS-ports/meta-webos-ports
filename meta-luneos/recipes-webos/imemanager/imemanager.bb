@@ -19,12 +19,10 @@ RDEPENDS:${PN} += "qml-webos-bridge"
 WEBOS_VERSION = "1.0.0-29_277aa343ce79866539ee1cafda091f06548b3f79"
 PR = "r6"
 
-PV = "1.0.0-29+git${SRCPV}"
-SRCREV = "277aa343ce79866539ee1cafda091f06548b3f79"
-
 inherit webos_qmake6
 inherit webos_system_bus
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 #inherit webos_qt_localization
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"

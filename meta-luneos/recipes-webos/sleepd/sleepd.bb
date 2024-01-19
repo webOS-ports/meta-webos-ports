@@ -16,10 +16,8 @@ RDEPENDS:${PN} += "com.webos.service.battery"
 WEBOS_VERSION = "2.0.0-17_3727287956ca9ac3c6dfb05c64a2df446fa61289"
 PR = "r11"
 
-PV = "2.0.0-17+git${SRCPV}"
-SRCREV = "3727287956ca9ac3c6dfb05c64a2df446fa61289"
-
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit webos_system_bus
 inherit pkgconfig

@@ -19,13 +19,11 @@ VIRTUAL-RUNTIME_webos-customization ?= ""
 WEBOS_VERSION = "2.0.0-68_efe1735e8c136b7795856e24103778877701fe60"
 PR = "r28"
 
-PV = "2.0.0-68+git${SRCPV}"
-SRCREV = "efe1735e8c136b7795856e24103778877701fe60"
-
 inherit pkgconfig
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-com.webos.sam.role.json.in-Fix-various-outbound-perm.patch \

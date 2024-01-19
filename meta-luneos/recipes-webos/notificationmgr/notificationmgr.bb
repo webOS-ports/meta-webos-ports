@@ -15,13 +15,11 @@ DEPENDS = "glib-2.0 luna-service2 libpbnjson pmloglib boost libxml++"
 WEBOS_VERSION = "1.0.0-26_44ada0c03140ee74a73a0e41b8f506e79c58d97f"
 PR = "r11"
 
-PV = "1.0.0-26+git${SRCPV}"
-SRCREV = "44ada0c03140ee74a73a0e41b8f506e79c58d97f"
-
 inherit pkgconfig
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit webos_systemd
 
 

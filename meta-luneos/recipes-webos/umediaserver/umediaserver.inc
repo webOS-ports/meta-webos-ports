@@ -23,15 +23,13 @@ inherit webos_system_bus
 inherit python3-dir
 inherit python3native
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 
 do_configure:prepend() {
     sed -i 's@add_subdirectory(test/python)@#disabled until updated to work with python3 add_subdirectory(test/python)@g' ${S}/CMakeLists.txt
 }
 
 WEBOS_VERSION = "1.0.0-gav.35_fd5cba5e25bb62b19ed467ee53f7691a87b2d0b8"
-
-PV = "1.0.0-gav.35+git${SRCPV}"
-SRCREV = "fd5cba5e25bb62b19ed467ee53f7691a87b2d0b8"
 
 WEBOS_GIT_PARAM_BRANCH = "@gav"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"

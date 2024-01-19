@@ -51,10 +51,8 @@ WEBOS_BLUETOOTH_PAIRING_IO_CAPABILITY ??= "NoInputNoOutput"
 WEBOS_VERSION = "1.0.0-73_6255daed3e9da398abd49bc2bf82812607794627"
 PR = "r8"
 
-PV = "1.0.0-73+git${SRCPV}"
-SRCREV = "6255daed3e9da398abd49bc2bf82812607794627"
-
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
