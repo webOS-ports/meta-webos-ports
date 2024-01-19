@@ -1,4 +1,4 @@
-# Copyright (c) 2018-2023 LG Electronics, Inc.
+# Copyright (c) 2018-2024 LG Electronics, Inc.
 
 SUMMARY = "Chromium webruntime for webOS"
 AUTHOR = "Donghyun Kim <donghyun11.kim@lge.com>"
@@ -17,7 +17,7 @@ inherit webos_system_bus
 
 DEPENDS = "virtual/gettext wayland wayland-native luna-service2 pixman freetype fontconfig openssl pango cairo icu webos-wayland-extensions libxkbcommon libexif dbus pciutils udev libcap alsa-lib virtual/egl elfutils-native libdrm atk gperf-native gconf libwebosi18n bison-native xorgproto nss nspr curl nspr-native nss-native pmloglib glib-2.0-native python3-six-native python3-beautifulsoup4-native python3-soupsieve-native python3-lxml-native python3-html5lib-native python3-webencodings-native"
 
-INC_PR = "r67"
+INC_PR = "r70"
 # Enable this in webos-local.conf or in recipe to build
 DEPLOY_CHROMEDRIVER ?= "false"
 DEPLOY_WAM_DEMO ?= "false"
@@ -36,10 +36,10 @@ TARGET = "${WEBRUNTIME_BUILD_TARGET} ${BROWSER_APP_BUILD_TARGET} ${APPSHELL_BUIL
 # Skip do_install:append of webos_system_bus. It is not compatible with this component.
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 
-PACKAGECONFIG_NEVA_WEBRTC ?= "neva-webrtc"
 PACKAGECONFIG_WEBOS_CODEC ?= "webos-codec pulseaudio webos-camera webos-audio"
 PACKAGECONFIG_MEDIA ?= "neva-media gstreamer umediaserver gav"
 PACKAGECONFIG ?= ""
+PACKAGECONFIG:append = " ${@bb.utils.filter('DISTRO_FEATURES', 'smack', d)}"
 # We don't supply gstreamer and umediaserver yet in LuneOS, so disable the PACKAGECONFIG_MEDIA for now on all our targets
 # PACKAGECONFIG:append:hardware = " ${PACKAGECONFIG_MEDIA} ${PACKAGECONFIG_NEVA_WEBRTC} ${PACKAGECONFIG_WEBOS_CODEC}"
 # PACKAGECONFIG:append:qemux86 = " ${PACKAGECONFIG_MEDIA}"
@@ -53,7 +53,6 @@ PACKAGECONFIG[debug-blink] = "blink_symbol_level=2,blink_symbol_level=1"
 PACKAGECONFIG[neva-media] = "use_neva_media=true, use_neva_media=false"
 PACKAGECONFIG[av1-codec] = "enable_av1_decoder=true, enable_av1_decoder=false"
 PACKAGECONFIG[gav] = "use_gav=true,use_gav=false"
-PACKAGECONFIG[neva-webrtc] = "use_neva_webrtc=true,use_neva_webrtc=false"
 PACKAGECONFIG[webos-codec] = "use_webos_codec=true,use_webos_codec=false,media-codec-interface"
 PACKAGECONFIG[pulseaudio] = "use_pulseaudio=true, use_pulseaudio=false, pulseaudio"
 
@@ -62,6 +61,7 @@ PACKAGECONFIG[lttng] = "use_lttng=true,use_lttng=false,lttng-ust,lttng-tools ltt
 PACKAGECONFIG[webos-camera] = "use_webos_camera=true,use_webos_camera=false, cambufferlib"
 PACKAGECONFIG[webos-audio] = "use_webos_audio=true,use_webos_audio=false, pulseaudio"
 PACKAGECONFIG[test-coverage] = "enable_neva_test_coverage_build=true,enable_neva_test_coverage_build=false"
+PACKAGECONFIG[smack] = "enable_webos_smack=true, enable_webos_smack=false"
 
 GN_ARGS:append = " \
     enable_memorymanager_webapi=true\
@@ -301,3 +301,6 @@ FILES:${PN}-dev = " \
     ${webos_pkgconfigdir}/libcbe.pc \
     ${includedir} \
 "
+
+export CCACHE_MAXSIZE = "3800M"
+
