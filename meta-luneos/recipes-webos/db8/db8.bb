@@ -40,6 +40,7 @@ EXTRA_OECMAKE:append:class-native = " -DWEBOS_CONFIG_BUILD_TESTS:BOOL=FALSE -DUS
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-com.palm.db.role.json.in-More-generic-app-access.patch \
+    file://0002-db-Update-db8.groups.json-for-test-API-s.patch \
 "
 
 S = "${WORKDIR}/git"
