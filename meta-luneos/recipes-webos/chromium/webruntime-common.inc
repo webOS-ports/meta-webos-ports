@@ -1,4 +1,4 @@
-# Copyright (c) 2021-2023 LG Electronics, Inc.
+# Copyright (c) 2021-2024 LG Electronics, Inc.
 # This file configures common SRC_URI for both of mksnapshot and webruntime
 # Also it contains variables for gn command such as GN_ARGS
 
@@ -22,6 +22,8 @@ WEBRUNTIME_REPO_VERSION ?= "108"
 REPO_VERSION := "${@['','_${WEBRUNTIME_REPO_VERSION}'][d.getVar('WEBRUNTIME_REPO_VERSION').strip() != '']}"
 
 WEBOS_REPO_NAME ?= "chromium${WEBRUNTIME_REPO_VERSION}"
+
+OVERRIDES:append = ":src-chromium${WEBRUNTIME_REPO_VERSION}"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE};name=main"
 

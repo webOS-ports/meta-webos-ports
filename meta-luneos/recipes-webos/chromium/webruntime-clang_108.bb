@@ -1,10 +1,10 @@
-# Copyright (c) 2023 LG Electronics, Inc.
+# Copyright (c) 2023-2024 LG Electronics, Inc.
 
 require webruntime_108.bb
 
 PROVIDES = "virtual/webruntime"
 
-PR = "r1"
+PR = "r4"
 
 inherit clang_libc
 
@@ -46,7 +46,9 @@ INCLUDE_PATH_LIBCXX += " \
 # http://gecko.lge.com:8000/Errors/Details/527999
 ARM_INSTRUCTION_SET = "arm"
 
-GN_ARGS += "${@bb.utils.contains('WEBRUNTIME_CLANG_STDLIB', '1', 'clang_use_stdlib=true clang_extra_cxxflags=\\\"${INCLUDE_PATH_STDLIB} ${TARGET_CC_ARCH}\\\"', 'clang_use_stdlib=false clang_extra_cxxflags=\\\"${INCLUDE_PATH_LIBCXX} ${TARGET_CC_ARCH}\\\"', d)}"
+CLANG_CXXFLAGS = ""
+
+GN_ARGS += "${@bb.utils.contains('WEBRUNTIME_CLANG_STDLIB', '1', 'clang_use_stdlib=true clang_extra_cxxflags=\\\"${INCLUDE_PATH_STDLIB} ${TARGET_CC_ARCH} ${CLANG_CXXFLAGS}\\\"', 'clang_use_stdlib=false clang_extra_cxxflags=\\\"${INCLUDE_PATH_LIBCXX} ${TARGET_CC_ARCH} ${CLANG_CXXFLAGS}\\\"', d)}"
 
 GN_ARGS += "webos_rpath=\"${libdir}/cbe\""
 
@@ -54,13 +56,15 @@ GN_ARGS += "${@'cc_wrapper=\\\"ccache \\\"' if bb.data.inherits_class('ccache', 
 
 PACKAGECONFIG[umediaserver] = ",,umediaserver${DEPEXT}"
 PACKAGECONFIG[gstreamer] = "use_gst_media=true enable_webm_video_codecs=false,use_gst_media=false,g-media-pipeline${DEPEXT}"
-PACKAGECONFIG[neva-webrtc] = "use_neva_webrtc=true,use_neva_webrtc=false,media-codec-interface${DEPEXT}"
 PACKAGECONFIG[webos-codec] = "use_webos_codec=true,use_webos_codec=false,media-codec-interface${DEPEXT}"
 
 do_configure:prepend() {
-    [ -f ${STAGING_DATADIR}/pkgconfig/umedia_api_clang.pc ] && \
-    mv -n ${STAGING_DATADIR}/pkgconfig/umedia_api_clang.pc ${STAGING_DATADIR}/pkgconfig/umedia_api.pc
+    ln -snf umedia_api_clang.pc ${STAGING_DATADIR}/pkgconfig/umedia_api.pc
+
+    # g-media-pipeline is optional for various webruntime configurations,
+    # condition is needed to check if gmp-player-client-clang.pc is
+    # available during configuration of webruntime.
     [ -f ${STAGING_DATADIR}/pkgconfig/gmp-player-client-clang.pc ] && \
-    mv -n ${STAGING_DATADIR}/pkgconfig/gmp-player-client-clang.pc ${STAGING_DATADIR}/pkgconfig/gmp-player-client.pc
+        ln -snf gmp-player-client-clang.pc ${STAGING_DATADIR}/pkgconfig/gmp-player-client.pc
 }
 
