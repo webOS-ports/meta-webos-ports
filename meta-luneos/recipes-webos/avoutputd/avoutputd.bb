@@ -12,13 +12,11 @@ RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_aval-impl}"
 WEBOS_VERSION = "1.0.0-5_36d08c75feb62391af087ccdc9c00fcaf8271712"
 PR = "r1"
 
-PV = "1.0.0-5+git"
-SRCREV = "36d08c75feb62391af087ccdc9c00fcaf8271712"
-
 inherit pkgconfig
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

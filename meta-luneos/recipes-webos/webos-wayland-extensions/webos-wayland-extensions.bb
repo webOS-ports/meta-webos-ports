@@ -14,12 +14,10 @@ DEPENDS = "wayland wayland-native"
 WEBOS_VERSION = "1.0.0-46_9ccf2cf894f9f5de46f110bba40aa0decb37acea"
 PR = "r6"
 
-PV = "1.1.0-46+git"
-SRCREV = "9ccf2cf894f9f5de46f110bba40aa0decb37acea"
-
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Add-client-size-event.patch \

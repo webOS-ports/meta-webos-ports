@@ -12,11 +12,9 @@ LIC_FILES_CHKSUM = " \
 WEBOS_VERSION = "0.0.1-12_ff6e0081d1b0f8ad1bf0480c5f28b2616cd646d4"
 PR = "r1"
 
-PV = "0.0.1-12+git"
-SRCREV = "ff6e0081d1b0f8ad1bf0480c5f28b2616cd646d4"
-
 inherit webos_enactjs_app
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

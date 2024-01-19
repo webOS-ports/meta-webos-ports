@@ -12,6 +12,7 @@ inherit pkgconfig
 inherit webos_cmake
 inherit webos_test_provider
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
@@ -20,6 +21,3 @@ DEPENDS = "glib-2.0 pmloglib libpbnjson videooutput-adaptation-layer-api"
 
 WEBOS_VERSION = "1.0.0-3_730d28b116759f4d28c2ac4dbc56b29c13d5452e"
 PR = "r1"
-
-PV = "1.0.0-3+git"
-SRCREV = "730d28b116759f4d28c2ac4dbc56b29c13d5452e"

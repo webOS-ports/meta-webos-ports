@@ -13,11 +13,8 @@ LIC_FILES_CHKSUM = " \
 WEBOS_VERSION = "1.1-3_7c22039cbef6e78adc0b4165a0f6c7232eac24d8"
 PR = "r7"
 
-PV = "1.1-3+git"
-SRCREV = "7c22039cbef6e78adc0b4165a0f6c7232eac24d8"
-
-
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit allarch
 inherit webos_filesystem_paths
 

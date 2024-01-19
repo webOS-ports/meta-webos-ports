@@ -14,10 +14,8 @@ DEPENDS = "librolegen glib-2.0 libpbnjson luna-service2"
 WEBOS_VERSION = "2.0.0-4_13eaf63ab5ec5c4dd62b02f176c0b60894251b1c"
 PR = "r6"
 
-PV = "2.0.0-4+git"
-SRCREV = "13eaf63ab5ec5c4dd62b02f176c0b60894251b1c"
-
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit pkgconfig
 

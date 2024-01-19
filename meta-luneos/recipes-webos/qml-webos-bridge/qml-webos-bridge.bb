@@ -15,12 +15,10 @@ RDEPENDS:${PN} += "qml-webos-components"
 WEBOS_VERSION = "1.0.0-134_657db46613ebe921d835b84391ad0b521170143c"
 PR = "r18"
 
-PV = "1.0.0-134+git"
-SRCREV = "657db46613ebe921d835b84391ad0b521170143c"
-
 inherit webos_qmake6
 inherit pkgconfig
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

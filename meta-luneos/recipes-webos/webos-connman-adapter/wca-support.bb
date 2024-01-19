@@ -12,9 +12,6 @@ LIC_FILES_CHKSUM = " \
 WEBOS_VERSION = "1.0.0-4_a59127baf2ddebc99874f714c9fe5528772e94d1"
 PR = "r2"
 
-PV = "1.0.0-4+git"
-SRCREV = "a59127baf2ddebc99874f714c9fe5528772e94d1"
-
 DEPENDS = "glib-2.0 luna-service2 libpbnjson pmloglib luna-prefs wca-support-api"
 
 RDEPENDS:${PN} = "iw"
@@ -22,6 +19,7 @@ RDEPENDS:${PN} = "iw"
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Revert-Removing-support-for-com.webos.service.wan-se.patch \

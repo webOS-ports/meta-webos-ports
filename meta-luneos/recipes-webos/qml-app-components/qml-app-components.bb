@@ -15,12 +15,10 @@ DEPENDS:append = " ${@ 'qtshadertools-native' if d.getVar('QT_VERSION')[0] == '6
 WEBOS_VERSION = "1.0.0-6_ad9b0aee66408b214d5f4d61b9912ed411da2f00"
 PR = "r4"
 
-PV = "1.0.0-6+git"
-SRCREV = "ad9b0aee66408b214d5f4d61b9912ed411da2f00"
-
 inherit webos_qmake6
 inherit pkgconfig
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-FontStyle.qml-Use-Prelude-on-LuneOS-instead-of-Museo.patch \

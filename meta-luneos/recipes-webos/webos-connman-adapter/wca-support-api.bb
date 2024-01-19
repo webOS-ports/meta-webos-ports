@@ -14,13 +14,10 @@ DEPENDS = "libpbnjson luna-service2"
 WEBOS_VERSION = "1.0.0-4_54eca17251c81e7291893682ed86bc39a8f568ac"
 PR = "r2"
 
-PV = "1.0.0-4+git"
-
-SRCREV = "54eca17251c81e7291893682ed86bc39a8f568ac"
-
 inherit pkgconfig
 inherit webos_cmake
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Revert-Removing-support-for-com.webos.service.wan-se.patch \

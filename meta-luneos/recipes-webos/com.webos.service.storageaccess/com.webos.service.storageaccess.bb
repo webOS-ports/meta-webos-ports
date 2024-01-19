@@ -15,10 +15,8 @@ DEPENDS= "glib-2.0 libxml2 luna-service2 pmloglib libgdrive libpbnjson curl gupn
 WEBOS_VERSION = "1.0.0-24_fcb2542bb458d3677db58bddde44df8859c072a2"
 PR = "r6"
 
-PV = "1.0.0-24+git"
-SRCREV = "fcb2542bb458d3677db58bddde44df8859c072a2"
-
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus

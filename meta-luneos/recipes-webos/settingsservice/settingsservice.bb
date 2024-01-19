@@ -16,12 +16,10 @@ RDEPENDS:${PN} = "settingsservice-conf db8"
 WEBOS_VERSION = "1.0.22-19_7684fcc6813104ee5c139701f8ed6627ef851b97"
 PR = "r26"
 
-PV = "1.0.22-19+git"
-SRCREV = "7684fcc6813104ee5c139701f8ed6627ef851b97"
-
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit systemd
 inherit pkgconfig
 

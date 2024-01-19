@@ -21,14 +21,12 @@ RDEPENDS:${PN} += "qml-webos-framework qml-webos-bridge"
 
 WEBOS_VERSION = "1.0.0-17_4fe324a62ee8d06e344e935f17cbda3d3e568b59"
 
-PV = "1.0.0-17+git"
-SRCREV = "4fe324a62ee8d06e344e935f17cbda3d3e568b59"
-
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 PR = "r3"
 
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit webos_localizable
 inherit webos_qmake6
 inherit systemd

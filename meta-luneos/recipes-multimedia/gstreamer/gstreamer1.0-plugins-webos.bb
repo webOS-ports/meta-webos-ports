@@ -18,14 +18,13 @@ inherit gobject-introspection
 PACKAGES_DYNAMIC =+ "^libgst.*"
 
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 
 WEBOS_REPO_NAME = "gst-plugins-webos"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 WEBOS_VERSION = "1.18.2-6_7d108f95b8a6d7772b31fe9e07e05a2401c220e2"
-PV = "1.18.2-6+git"
-SRCREV = "7d108f95b8a6d7772b31fe9e07e05a2401c220e2"
 
 EXTRA_OEMESON = "\
     -Ddoc=disabled \

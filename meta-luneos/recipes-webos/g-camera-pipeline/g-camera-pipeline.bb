@@ -13,6 +13,7 @@ LIC_FILES_CHKSUM = " \
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit pkgconfig
 
 PR = "r14"
@@ -23,9 +24,6 @@ DEPENDS:append:rpi = " userland"
 COMPATIBLE_MACHINE = "^qemux86$|^qemux86-64$|^raspberrypi3$|^raspberrypi3-64$|^raspberrypi4$|^raspberrypi4-64$"
 
 WEBOS_VERSION = "1.0.0-gav.40_48def9addb5dcb0f408137c5f8c34c33d799ab90"
-
-PV = "1.0.0-gav.40+git"
-SRCREV = "48def9addb5dcb0f408137c5f8c34c33d799ab90"
 
 WEBOS_GIT_PARAM_BRANCH = "@gav"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"

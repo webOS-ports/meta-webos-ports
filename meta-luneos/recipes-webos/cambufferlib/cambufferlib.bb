@@ -12,13 +12,11 @@ LIC_FILES_CHKSUM = " \
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit pkgconfig
 
 WEBOS_VERSION = "1.0.0-7_8ef639b99716bd1466d15d65210cc4a9c142095a"
 PR = "r1"
-
-PV = "1.0.0-7+git"
-SRCREV = "8ef639b99716bd1466d15d65210cc4a9c142095a"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 

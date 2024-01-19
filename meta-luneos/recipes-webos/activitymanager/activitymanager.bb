@@ -15,10 +15,8 @@ DEPENDS = "luna-service2 db8 boost libpbnjson glib-2.0 pmloglib ${VIRTUAL-RUNTIM
 WEBOS_VERSION = "3.0.0-40_8da546299f22de459467d24e2d52f1d611ce2daa"
 PR = "r13"
 
-PV = "3.0.0-40+git"
-SRCREV = "8da546299f22de459467d24e2d52f1d611ce2daa"
-
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit webos_system_bus
 inherit pkgconfig

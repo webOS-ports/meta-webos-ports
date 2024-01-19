@@ -16,12 +16,10 @@ inherit pkgconfig
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 
 WEBOS_VERSION = "1.0.0-5_7b3b85dcfc2ad9394cfad761e4c34354f3126180"
 PR = "r2"
-
-PV = "1.0.0-5+git"
-SRCREV = "7b3b85dcfc2ad9394cfad761e4c34354f3126180"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

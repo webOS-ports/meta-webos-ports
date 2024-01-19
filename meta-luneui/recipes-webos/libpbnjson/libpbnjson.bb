@@ -9,14 +9,12 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "yajl glib-2.0 gperf-native flex-native lemon-native gmp uriparser boost"
 
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit pkgconfig
 
 WEBOS_VERSION = "2.15.0-15_038a2f0aa9f74a4db831e39a78754e250aeec651"
 PR = "r15"
-
-PV = "2.15.0-15+git"
-SRCREV = "038a2f0aa9f74a4db831e39a78754e250aeec651"
 
 PACKAGECONFIG ??= ""
 PACKAGECONFIG:append:class-native = " tools"
