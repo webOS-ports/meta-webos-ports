@@ -14,14 +14,11 @@ DEPENDS = "qtdeclarative wayland-native qtwayland qtwayland-native qt-features-w
 WEBOS_VERSION = "2.0.0-395_4e88486015c69db462654a7ef797f5c6a56e616f"
 PR = "r60"
 
-PV ="2.0.0-395+git${SRCPV}"
-
-SRCREV = "4e88486015c69db462654a7ef797f5c6a56e616f"
-
 inherit webos_qmake6
 inherit pkgconfig
 inherit webos_lttng
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Add-capability-to-pass-extra-options-to-surface-mana.patch \

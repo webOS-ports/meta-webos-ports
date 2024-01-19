@@ -11,6 +11,7 @@ PROVIDES = "aval-impl"
 inherit webos_cmake
 inherit webos_test_provider
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
@@ -19,8 +20,3 @@ DEPENDS = "glib-2.0 pmloglib libpbnjson ls2-helpers avoutput-adaptation-layer-ap
 
 WEBOS_VERSION = "1.0.0-2_ed69d432dc11eb63863228cfafc76bc4925c77d1"
 PR = "r0"
-
-PV = "1.0.0-2+git${SRCPV}"
-SRCREV = "ed69d432dc11eb63863228cfafc76bc4925c77d1"
-
-

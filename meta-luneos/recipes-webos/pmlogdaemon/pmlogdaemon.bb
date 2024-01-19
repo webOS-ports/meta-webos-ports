@@ -18,10 +18,8 @@ RDEPENDS:${PN} = "busybox"
 WEBOS_VERSION = "3.1.0-13_17f40f7074f3f0a54395e6b1bc6b29af02d46fb8"
 PR = "r11"
 
-PV = "3.1.0-13+git${SRCPV}"
-SRCREV = "17f40f7074f3f0a54395e6b1bc6b29af02d46fb8"
-
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_pmlog_config

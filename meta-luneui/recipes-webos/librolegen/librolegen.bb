@@ -15,10 +15,8 @@ DEPENDS = "glib-2.0"
 WEBOS_VERSION = "2.1.0-5_0e70f221299476786627f169a0915556f315b72b"
 PR = "r7"
 
-PV = "2.1.0-5+git${SRCPV}"
-SRCREV = "0e70f221299476786627f169a0915556f315b72b"
-
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit pkgconfig
 

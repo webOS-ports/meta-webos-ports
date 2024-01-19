@@ -16,10 +16,8 @@ RDEPENDS:${PN} = "connman connman-client"
 WEBOS_VERSION = "1.1.0-42_83a6b8517c2f4ce630e4fe3d1498965cff5fbac3"
 PR = "r13"
 
-PV = "1.1.0-42+git${SRCPV}"
-SRCREV = "83a6b8517c2f4ce630e4fe3d1498965cff5fbac3"
-
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit webos_system_bus
 inherit pkgconfig

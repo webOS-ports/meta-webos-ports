@@ -14,9 +14,6 @@ DEPENDS = "qtwayland webos-wayland-extensions libxkbcommon qt-features-webos way
 WEBOS_VERSION = "6.0.0-93_fa22224e6e6549d89c19f99a984a63c3062dd4f5"
 PR = "r20"
 
-PV = "6.0.0-93+git${SRCPV}"
-SRCREV = "fa22224e6e6549d89c19f99a984a63c3062dd4f5"
-
 PACKAGECONFIG ??= ""
 
 # qtwayland-webos_cmake.inc or qtwayland-webos_qmake.inc
@@ -26,6 +23,7 @@ inherit webos_qmake6
 inherit pkgconfig
 inherit webos_lttng
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Fix-platform-keys.patch \
