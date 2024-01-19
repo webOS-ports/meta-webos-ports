@@ -22,6 +22,15 @@ WEBOS_REPO_NAME = "org.webosports.app.settings"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
+# We don't provide android-property-service on non-Android devices, so remove it in these cases to avoid LS2 warnings/errors
+
+REMOVE_ANDROID_PROPERTY_SERVICE_CMD:halium = ""
+REMOVE_ANDROID_PROPERTY_SERVICE_CMD = "sed -i 's/\"android-property-service.operation\", //g' ${D}/${webos_applicationsdir}/org.webosports.app.settings.deviceinfo/appinfo.json"
+
+do_install:append() {
+    ${REMOVE_ANDROID_PROPERTY_SERVICE_CMD}
+}
+
 FILES:${PN} += "${webos_applicationsdir}/org.webosports.app.settings-common \
                 ${webos_applicationsdir}/org.webosports.app.settings.bluetooth \
                 ${webos_applicationsdir}/org.webosports.app.settings.networksettings \
