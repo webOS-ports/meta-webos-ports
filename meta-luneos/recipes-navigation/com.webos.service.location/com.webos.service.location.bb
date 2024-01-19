@@ -14,10 +14,8 @@ DEPENDS = "glib-2.0 libpbnjson libxml2 pmloglib luna-service2 luna-prefs loc-uti
 WEBOS_VERSION = "1.0.0-104_69e22e6c07d087096885809b3f0da5650af3a488"
 PR = "r3"
 
-PV = "1.0.0-104+git${SRCPV}"
-SRCREV = "69e22e6c07d087096885809b3f0da5650af3a488"
-
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit webos_system_bus
 inherit pkgconfig

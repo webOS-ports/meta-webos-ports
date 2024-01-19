@@ -19,9 +19,6 @@ RDEPENDS:${PN} = "lsb-release gzip nyx-conf"
 WEBOS_VERSION = "7.1.0-22_677ed3eca696f1d5b00d8b7579f981e37e319ce3"
 PR = "r19"
 
-PV = "7.1.0-22+git${SRCPV}"
-SRCREV = "677ed3eca696f1d5b00d8b7579f981e37e319ce3"
-
 EXTRA_OECMAKE += "-DDISTRO_VERSION:STRING='${DISTRO_VERSION}' -DDISTRO_NAME:STRING='${DISTRO_NAME}${WEBOS_DISTRO_NAME_SUFFIX}' \
                   -DWEBOS_DISTRO_API_VERSION:STRING='${WEBOS_DISTRO_API_VERSION}' \
                   -DWEBOS_DISTRO_RELEASE_CODENAME:STRING='${WEBOS_DISTRO_RELEASE_CODENAME}' \
@@ -48,6 +45,7 @@ WEBOS_TARGET_CORE_OS = "rockhopper"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit webos_machine_impl_dep
 inherit webos_core_os_dep

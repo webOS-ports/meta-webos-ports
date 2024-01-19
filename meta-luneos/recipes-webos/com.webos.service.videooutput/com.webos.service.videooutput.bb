@@ -16,12 +16,10 @@ RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_val-impl}"
 WEBOS_VERSION = "1.0.0-13_931b3e59260a97ea0741ebbd1d84fd30b405b484"
 PR = "r2"
 
-PV = "1.0.0-13+git${SRCPV}"
-SRCREV = "931b3e59260a97ea0741ebbd1d84fd30b405b484"
-
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit pkgconfig
 inherit webos_test_provider
 

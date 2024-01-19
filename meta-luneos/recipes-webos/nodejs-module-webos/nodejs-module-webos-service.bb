@@ -13,11 +13,9 @@ LIC_FILES_CHKSUM = " \
 WEBOS_VERSION = "1.0.1-7_a514543927ec3998a054ead7654cea6dfa5dee90"
 PR = "r5"
 
-PV = "1.0.1-7+git${SRCPV}"
-SRCREV = "a514543927ec3998a054ead7654cea6dfa5dee90"
-
 inherit webos_system_bus
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
