@@ -30,6 +30,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0002-Revert-97e68e38b489ab103e68b63672b5444ee7a05d49.patch \
     file://0003-com.webos.notification.role.json.in-Fix-permission-i.patch \
     file://0004-NotificationService.h-Add-back-bits-required-by-Lune.patch \
+    file://0005-com.webos.notification.perm.json-Fix-incorrect-value.patch \
 "
 S = "${WORKDIR}/git"
 
