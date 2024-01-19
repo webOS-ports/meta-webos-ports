@@ -15,10 +15,8 @@ DEPENDS = "pmloglib"
 WEBOS_VERSION = "3.0.0-2_a6ac2b162550e69d2a2bfe5b77eaff24e1a92184"
 PR = "r4"
 
-PV = "3.0.0-2+git${SRCPV}"
-SRCREV = "a6ac2b162550e69d2a2bfe5b77eaff24e1a92184"
-
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit pkgconfig
 

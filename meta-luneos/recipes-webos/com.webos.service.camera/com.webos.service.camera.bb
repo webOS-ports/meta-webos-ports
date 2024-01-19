@@ -19,12 +19,10 @@ DEPENDS = "glib-2.0 luna-service2 json-c alsa-lib pmloglib udev"
 WEBOS_VERSION = "1.0.0-36_9ffdd45eb7385bd8447117cc061ac9e73a819d57"
 PR = "r7"
 
-PV = "1.0.0-36+git${SRCPV}"
-SRCREV = "9ffdd45eb7385bd8447117cc061ac9e73a819d57"
-
 inherit webos_cmake 
 inherit pkgconfig
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit webos_system_bus
 inherit webos_machine_impl_dep
 

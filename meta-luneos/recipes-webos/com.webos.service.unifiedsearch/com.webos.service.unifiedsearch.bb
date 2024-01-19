@@ -13,12 +13,10 @@ DEPENDS = "luna-service2 libpbnjson glib-2.0 procps sqlite3"
 WEBOS_VERSION = "1.0.0-6_a911bcccbe9e7c5082a30173d064dca9e7c8ab21"
 PR = "r4"
 
-PV = "1.0.0-6+git${SRCPV}"
-SRCREV = "a911bcccbe9e7c5082a30173d064dca9e7c8ab21"
-
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit webos_system_bus
 
 # http://gpro.lge.com/c/webosose/com.webos.service.unifiedsearch/+/347405 Fix build with gcc-12

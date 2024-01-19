@@ -14,10 +14,8 @@ RPROVIDES:${PN} = "cpushareholder"
 WEBOS_VERSION = "2.0.1-3_215a50182594720b99a53880393833a4f28c5c25"
 PR = "r5"
 
-PV = "2.0.1-3+git${SRCPV}"
-SRCREV = "215a50182594720b99a53880393833a4f28c5c25"
-
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit allarch
 inherit webos_cmake
 inherit pkgconfig

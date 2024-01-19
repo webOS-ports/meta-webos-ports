@@ -15,11 +15,9 @@ RDEPENDS:${PN} += "telegraf"
 WEBOS_VERSION = "1.0.0-8_7b57bed2916bf1a3f9842fdd82d612d37dde6add"
 PR = "r1"
 
-PV = "1.0.0-8+git${SRCPV}"
-SRCREV = "7b57bed2916bf1a3f9842fdd82d612d37dde6add"
-
 inherit systemd
 inherit webos_public_repo
+inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
