@@ -50,9 +50,7 @@ webos_applicationsdir = "${prefix}/palm/applications"
 webos_frameworksdir = "${prefix}/palm/frameworks"
 webos_keysdir = "${prefix}/palm/data"
 # This is the location of the pre-installed catalog apps IPKs
-# FIXME check if we can use new value
-# New value - webos_picapkgdir = "${webos_mntdir}/pica"
-export webos_picapkgdir = "${prefix}/palm/ipkgs"
+webos_picapkgdir = "${webos_mntdir}/pica"
 # This is the location of webOS application plugins. There is a subdirectory for
 # each application that is named using the final field of its complete name.
 webos_pluginsdir = "${prefix}/palm/plugins"
@@ -171,8 +169,8 @@ webos_emulatorshareddir = "${webos_mediadir}/shared"
 # The presence of this file indicates that First Use has been completed.
 webos_firstusesentinelfile = "${webos_sysmgr_localstatedir}/preferences/ran-firstuse"
 
-# Note that everything under localstatedir is erased by a NYX_SYSTEM_ERASE_VAR erasure.
-webos_crashddir = "${webos_logdir}/crashd"
+# SDK tools
+webos_sdkdir = "${webos_optdir}/webos/sdk"
 
 # SDK tools
 webos_sdkdir = "${webos_optdir}/webos/sdk"

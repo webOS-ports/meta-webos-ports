@@ -120,6 +120,9 @@ FILES:${PN}-base += " \
     ${OE_QMAKE_PATH_BINS}/ \
     ${datadir}/icons/ \
     ${datadir}/webos-keymap/webos-keymap.qmap \
+"
+
+FILES:${PN}-base-conf += " \
     ${sysconfdir}/surface-manager.d/ \
     ${webos_sysbus_apipermissionsdir} \
     ${webos_sysbus_groupsdir} \
