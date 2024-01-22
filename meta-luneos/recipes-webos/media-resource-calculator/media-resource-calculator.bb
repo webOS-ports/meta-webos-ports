@@ -21,5 +21,7 @@ inherit pkgconfig
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+    file://0001-media-resource-calculator-Add-generic-config-files.patch \
+"
 S = "${WORKDIR}/git"
