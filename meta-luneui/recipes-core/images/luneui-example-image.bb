@@ -21,7 +21,6 @@ IMAGE_INSTALL += " \
     gtk+3-demo \
     glmark2 \
     kernel-modules \
-    luna-next \
     luna-next-cardshell \
     luneos-components \
 "
