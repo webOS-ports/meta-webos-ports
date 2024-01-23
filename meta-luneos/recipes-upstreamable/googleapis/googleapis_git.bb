@@ -7,7 +7,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=86d3f3a95c324c9479bd8986968f4327"
 SECTION = "google/api"
 
 PV = "git"
-PR = "r1"
+PR = "r0"
 
 DEPENDS = "grpc-native"
 
@@ -43,7 +43,4 @@ do_install() {
     rm ${D}${includedir}/google/protobuf/any.pb.h
     rm ${D}${includedir}/google/protobuf/api.pb.h
     rm ${D}${includedir}/google/protobuf/compiler/plugin.pb.h
-    # http://gecko.lge.com:8000/Errors/Details/764493
-    # ERROR: The file /usr/include/google/protobuf/cpp_features.pb.h is installed by both protobuf and googleapis, aborting
-    rm ${D}${includedir}/google/protobuf/cpp_features.pb.h
 }
