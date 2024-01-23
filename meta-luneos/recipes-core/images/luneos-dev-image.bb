@@ -12,7 +12,6 @@ webos_enable_devmode() {
     touch ${IMAGE_ROOTFS}/var/luna/preferences/debug_system_apps
     touch ${IMAGE_ROOTFS}/var/usb-debugging-enabled
     touch ${IMAGE_ROOTFS}/.writable_image
-#    echo "LUNA_NEXT_DEBUG=1" >> ${IMAGE_ROOTFS}${sysconfdir}/luna-next/environment.conf
 }
 
 ROOTFS_POSTPROCESS_COMMAND += "webos_enable_devmode;"
