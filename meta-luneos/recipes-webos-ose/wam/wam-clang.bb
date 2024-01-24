@@ -41,3 +41,7 @@ do_compile:prepend() {
     rm -rf ${STAGING_LIBDIR}/libgtest*.a
     rm -rf ${STAGING_LIBDIR}/libgmock*.a
 }
+
+# pass dyld-prefix with usrmerge otherwise the default loader from clang++ will be non-existent (on target)
+# /lib64/ld-linux-x86-64.so.2 instead of expected /usr/lib/ld-linux-x86-64.so.2 for qemux86-64
+TUNE_CCARGS:append = "${@bb.utils.contains("DISTRO_FEATURES", "usrmerge", " --dyld-prefix=/usr", "", d)}"
