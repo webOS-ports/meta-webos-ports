@@ -3,7 +3,7 @@ LICENSE = "LGPL-2.1-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 PV = "0.5+git"
-SRCREV = "71c8687fe5f2a8570ff0cb93f83ff5701e1d3fb3"
+SRCREV = "f09d1401a85e8f723fba0f551500187423e4dd84"
 
 DEPENDS = "qtbase qtdeclarative luna-service2 luna-sysmgr-common libwebos-application qtdeclarative-native kf5bluezqt-mer"
 RDEPENDS:${PN} = "qt5compat-qmlplugins"
