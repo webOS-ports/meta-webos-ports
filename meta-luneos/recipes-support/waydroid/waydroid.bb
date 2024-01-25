@@ -7,7 +7,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=1ebbd3e34237af26da5dc08a4e440464"
 
 SECTION = "webos/support"
 
-SRCREV = "7bd073c2b583cc1a9a3f258759399d377a1bdd8c"
+SRCREV = "41f309f4c185a2c716723c081274eb56eb9263ff"
 SPV = "1.4.2"
 PV = "${SPV}+git"
 
@@ -41,6 +41,9 @@ COMPATIBLE_MACHINE:tissot = "(.*)"
 inherit pkgconfig
 inherit webos_app
 inherit webos_filesystem_paths
+inherit webos_systemd
+
+WEBOS_SYSTEMD_SERVICE = "waydroid-init.service waydroid-container.service"
 
 CLEANBROKEN = "1"
 
@@ -53,23 +56,22 @@ do_install() {
 # Provided by libgbinder already for Halium devices, but necessary to add for non-Halium devices.
 
 do_install:append:pinephone() {
-    install -Dm644 -t "${D}${sysconfdir}" "${WORKDIR}/gbinder.conf" 
+    install -Dm644 -t "${D}${sysconfdir}" "${WORKDIR}/gbinder.conf"
 }
 
 do_install:append:pinephonepro() {
-    install -Dm644 -t "${D}${sysconfdir}" "${WORKDIR}/gbinder.conf" 
+    install -Dm644 -t "${D}${sysconfdir}" "${WORKDIR}/gbinder.conf"
 }
 
 do_install:append:pinetab2() {
-    install -Dm644 -t "${D}${sysconfdir}" "${WORKDIR}/gbinder.conf" 
+    install -Dm644 -t "${D}${sysconfdir}" "${WORKDIR}/gbinder.conf"
 }
 
 do_install:append:qemux86-64() {
-    install -Dm644 -t "${D}${sysconfdir}" "${WORKDIR}/gbinder.conf" 
+    install -Dm644 -t "${D}${sysconfdir}" "${WORKDIR}/gbinder.conf"
 }
 
 FILES:${PN} += " \
-    ${systemd_system_unitdir} \
     ${sysconfdir} \
     ${libdir} \
     ${datadir}/dbus-1 \
