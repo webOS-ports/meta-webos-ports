@@ -14,7 +14,7 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 # Let us fetch the machine-specific CMake configuration used by nyx-modules, to
 # define it only once
-FILESEXTRAPATHS:prepend := "${THISDIR}/nyx-modules:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/../../recipes-webos-ose/nyx-modules/nyx-modules:"
 
 # Depends on libhybris which has this restriction
 COMPATIBLE_MACHINE = "^halium$"
