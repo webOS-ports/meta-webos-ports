@@ -26,8 +26,7 @@ DEPENDS += "media-resource-calculator-clang umediaserver-clang"
 PKGCONFIG_DIR = "${datadir}/pkgconfig"
 
 do_configure:prepend() {
-    [ -f ${STAGING_LIBDIR}/pkgconfig/media-resource-calculator-clang.pc ] && \
-    mv -n ${STAGING_LIBDIR}/pkgconfig/media-resource-calculator-clang.pc ${STAGING_LIBDIR}/pkgconfig/media-resource-calculator.pc
+    ln -snf media-resource-calculator-clang.pc ${STAGING_LIBDIR}/pkgconfig/media-resource-calculator.pc
 }
 
 do_install:append() {
