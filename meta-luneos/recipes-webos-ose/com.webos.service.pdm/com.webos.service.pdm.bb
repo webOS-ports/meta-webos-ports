@@ -31,6 +31,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-NfcDeviceHandler-Fix-incorrect-name.patch \
     file://0002-Remove-the-Android-Auto-bits.patch \
     file://0003-com.webos.service.pdm.perm.json-Fix-incorrect-permis.patch \
+    file://0004-com.webos.service.pdm-Gracefully-handle-BIND-actions.patch \
 "
 
 S = "${WORKDIR}/git"
