@@ -12,6 +12,7 @@ DEPENDS = "qtbase luna-sysmgr-common luna-service2 json-c glib-2.0 luna-sysmgr-i
 
 SRC_URI = " \
     git://github.com/sailfishos/sensorfw.git;protocol=https;branch=master \
+    file://0001-sensorfwd-Add-TimeoutStopSec-to-improve-shutdown.patch \
 "
 
 S = "${WORKDIR}/git"
