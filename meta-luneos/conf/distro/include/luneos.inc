@@ -28,7 +28,7 @@ require conf/distro/include/no-static-libs.inc
 WEBOS_PORTS_CODENAME = "ports"
 # WEBOS_DISTRO_PLATFORM_CODENAME ?= "${DISTRO}-${WEBOS_PORTS_CODENAME}"
 WEBOS_DISTRO_PLATFORM_CODENAME ?= "luneos"
-WEBOS_DISTRO_VERSION_CODENAME ?= "Eiskaffee"
+WEBOS_DISTRO_VERSION_CODENAME ?= "Espressino"
 WEBOS_DISTRO_RELEASE_CODENAME ?= "${WEBOS_DISTRO_PLATFORM_CODENAME}${@oe.utils.conditional( 'WEBOS_DISTRO_VERSION_CODENAME', '', '', '-${WEBOS_DISTRO_VERSION_CODENAME}', d) }"
 
 # This is the codename for the series of builds that are made from a branch.
