@@ -53,7 +53,7 @@ WEBOS_DISTRO_BUILD_ID ?= "unofficial"
 
 # use WEBOS_DISTRO_BUILD_ID.
 IMAGE_VERSION_SUFFIX = "${@oe.utils.conditional( 'WEBOS_DISTRO_BUILD_CODENAME', '', '', '-${WEBOS_DISTRO_BUILD_CODENAME}', d) }"
-IMAGE_VERSION_SUFFIX .= "${@oe.utils.conditional( 'WEBOS_DISTRO_BUILD_ID', 'unofficial', '-${IMAGE_VERSION_SUFFIX_DATETIME}', '-${WEBOS_DISTRO_BUILD_ID}', d) }"
+IMAGE_VERSION_SUFFIX .= "${@oe.utils.conditional( 'WEBOS_DISTRO_BUILD_ID', 'unofficial', '-${WEBOS_DISTRO_LUNEUI_DESCRIBE}', '-${WEBOS_DISTRO_BUILD_ID}', d) }"
 
 # Add WEBOS_DISTRO_RELEASE_CODENAME and WEBOS_DISTRO_BUILD_ID to what's displayed
 # as the "build configuration".
@@ -61,11 +61,13 @@ BUILDCFG_VARS += "WEBOS_DISTRO_RELEASE_CODENAME WEBOS_DISTRO_BUILD_ID"
 
 # Branch, revision and description of TOPDIR (webos-ports-setup repository)
 SETUP_COMMON_DIR = "${TOPDIR}/../common/"
-WEBOS_DISTRO_TOPDIR_BRANCH ?= "${@oebackport.buildcfg.get_metadata_git_branch('${SETUP_COMMON_DIR}').strip()}"
-WEBOS_DISTRO_TOPDIR_REVISION ?= "${@oebackport.buildcfg.get_metadata_git_revision('${SETUP_COMMON_DIR}').strip()}"
-# Depends on https://lists.openembedded.org/g/openembedded-core/message/190292 or webos_base.bbclass removed in https://github.com/webOS-ports/meta-webos-ports/commit/20884dd8b7e78cbfa3b5e485bdfca24584c644b3
-# WEBOS_DISTRO_TOPDIR_DESCRIBE ?= "${@oebackport.buildcfg.get_metadata_git_describe('${SETUP_COMMON_DIR}').strip()}"
-BUILDCFG_VARS += "WEBOS_DISTRO_TOPDIR_BRANCH WEBOS_DISTRO_TOPDIR_REVISION"
+WEBOS_DISTRO_TOPDIR_BRANCH ?= "${@oe.buildcfg.get_metadata_git_branch('${SETUP_COMMON_DIR}').strip().replace('/', '_')}"
+WEBOS_DISTRO_TOPDIR_REVISION ?= "${@oe.buildcfg.get_metadata_git_revision('${SETUP_COMMON_DIR}').strip()}"
+WEBOS_DISTRO_TOPDIR_DESCRIBE ?= "${@oe.buildcfg.get_metadata_git_describe('${SETUP_COMMON_DIR}').strip().replace('/', '_')}"
+BUILDCFG_VARS += "WEBOS_DISTRO_TOPDIR_BRANCH WEBOS_DISTRO_TOPDIR_REVISION WEBOS_DISTRO_TOPDIR_DESCRIBE"
+
+WEBOS_DISTRO_LUNEUI_DESCRIBE ?= "${@oe.buildcfg.get_metadata_git_describe('${LAYERDIR_meta-luneui}').strip().replace('/', '_')}"
+BUILDCFG_VARS += "WEBOS_DISTRO_LUNEUI_DESCRIBE"
 
 # Add build timestamp to what's displayed in build-id.txt for use in pruning script
 BUILDCFG_VARS += "DATETIME"
