@@ -1,8 +1,8 @@
-# Copyright (c) 2013-2023 LG Electronics, Inc.
+# Copyright (c) 2013-2024 LG Electronics, Inc.
 
 inherit webos_qt_global
 
-EXTENDPRAUTO:append = "webos117"
+EXTENDPRAUTO:append = "webos120"
 
 # Remove LGPL3-only files
 python do_patch:append() {
@@ -108,9 +108,10 @@ SRC_URI:append = " \
 # https://bugreports.qt.io/browse/WEBOSCI-66
 # https://bugreports.qt.io/browse/WEBOSCI-81
 # https://bugreports.qt.io/browse/WEBOSCI-86
-SRC_URI:append:class-native = " file://9902-Revert-Remove-perl-related-functionality-from-CMake-_6.5.x.patch;minver=6.5.2;maxver=6.5.*"
-SRC_URI:append:class-native = " file://9902-Revert-Remove-perl-related-functionality-from-CMake-_6.6.x.patch;minver=6.6.0;maxver=6.6.*"
-SRC_URI:append:class-native = " file://9902-Revert-Remove-perl-related-functionality-from-CMake-_6.7.x.patch;minver=6.7.0"
+SRC_URI:append:class-native = " file://9902-Revert-Remove-perl-related-functionality-from-CMake-_6.6.1.patch;minver=6.6.0;maxver=6.6.1"
+SRC_URI:append:class-native = " file://9902-Revert-Remove-perl-related-functionality-from-CMake-_6.6.x.patch;minver=6.6.2;maxver=6.6.*"
+SRC_URI:append:class-native = " file://9902-Revert-Remove-perl-related-functionality-from-CMake-_6.7.x.patch;minver=6.7.0;maxver=6.7.*"
+SRC_URI:append:class-native = " file://9902-Revert-Remove-perl-related-functionality-from-CMake-_6.8.x.patch;minver=6.8.0"
 # https://bugreports.qt.io/browse/WEBOSCI-73
 SRC_URI:append = " file://9903-Revert-Remove-qmake-files-that-provide-support-for-b.patch;minver=6.5.1 "
 # https://bugreports.qt.io/browse/WEBOSCI-76
