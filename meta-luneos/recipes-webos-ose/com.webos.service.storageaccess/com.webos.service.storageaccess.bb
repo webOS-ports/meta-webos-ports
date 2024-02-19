@@ -1,4 +1,4 @@
-# Copyright (c) 2021-2023 LG Electronics, Inc.
+# Copyright (c) 2021-2024 LG Electronics, Inc.
 
 SUMMARY = "Storage Access Framework for OSE"
 AUTHOR = "Rajesh Gopu I.V <rajeshgopu.iv@lge.com>"
@@ -12,8 +12,8 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS= "glib-2.0 libxml2 luna-service2 pmloglib libgdrive libpbnjson curl gupnp"
 
-WEBOS_VERSION = "1.0.0-24_fcb2542bb458d3677db58bddde44df8859c072a2"
-PR = "r6"
+WEBOS_VERSION = "1.0.0-25_2a8dfbcc3a471f14c61fc8b3f00c93a90963fd5e"
+PR = "r7"
 
 inherit webos_public_repo
 inherit webos_enhanced_submissions
@@ -21,5 +21,8 @@ inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+    file://0001-CMakeLists.txt-use-pkg-config-for-libcurl-and-respec.patch \
+    file://0002-CMakeLists.txt-use-gupnp-1.6.patch \
+"
 S = "${WORKDIR}/git"

@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2023 LG Electronics, Inc.
+# Copyright (c) 2012-2024 LG Electronics, Inc.
 
 DESCRIPTION = "webOS component for managing network connections using connman"
 AUTHOR = "Muralidhar N <muralidhar.n@lge.com>"
@@ -13,8 +13,8 @@ SECTION = "webos/services"
 DEPENDS = "luna-service2 libpbnjson glib-2.0 luna-prefs openssl glib-2.0-native wca-support-api wca-support nyx-lib"
 RDEPENDS:${PN} = "connman connman-client"
 
-WEBOS_VERSION = "1.1.0-42_83a6b8517c2f4ce630e4fe3d1498965cff5fbac3"
-PR = "r13"
+WEBOS_VERSION = "1.1.0-43_282a9ab89a024c24c1a602ccd2f11e22995b3b96"
+PR = "r14"
 
 inherit webos_public_repo
 inherit webos_enhanced_submissions
@@ -35,9 +35,8 @@ WEBOS_SYSTEMD_SERVICE = "webos-connman-adapter.service"
 WEBOS_SYSTEMD_SCRIPT = "webos-connman-adapter.sh"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-Workaround-to-prevent-luna-call-pending.patch \
-    file://0002-Add-back-com.palm.wan-for-cellular-support.patch \
-    file://0003-Update-webos-connman-adapter.role.json.in-Add-permis.patch \
+    file://0001-Add-back-com.palm.wan-for-cellular-support.patch \
+    file://0002-Update-webos-connman-adapter.role.json.in-Add-permis.patch \
 "
 
 S = "${WORKDIR}/git"

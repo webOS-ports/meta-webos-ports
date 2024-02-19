@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2023 LG Electronics, Inc.
+# Copyright (c) 2012-2024 LG Electronics, Inc.
 
 SUMMARY = "webOS Luna System Bus library, daemon, and utilities"
 AUTHOR = "Yogish S <yogish.s@lge.com>"
@@ -18,7 +18,7 @@ VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 VIRTUAL-RUNTIME_bash ?= "bash"
 RDEPENDS:${PN} = "luna-service2-security-conf ${VIRTUAL-RUNTIME_cpushareholder} ${VIRTUAL-RUNTIME_bash}"
 
-WEBOS_VERSION = "3.21.2-34_e59ad3680ba012ca008d51500275c0ada6c2116a"
+WEBOS_VERSION = "3.21.2-37_1c03d61dd0e1eab4b514e4e437fdca0ae81005ee"
 PR = "r32"
 
 EXTRA_OECMAKE += "${@ '-DWEBOS_DISTRO_PRERELEASE:STRING="devel"' \
@@ -43,17 +43,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0006-LSMessageIsSubscription-test-if-payload-is-a-JSON-ob.patch \
 "
 S = "${WORKDIR}/git"
-
-# FIXME: We still need this?
-# This fix-up will be removed shortly. luna-service2 headers must be included
-# using '#include <luna-service2/*.h>'
-do_install:append() {
-    # XXX Temporarily, create links from the old locations until all users of
-    # luna-service2 convert to using pkg-config
-    ln -svnf luna-service2/lunaservice.h ${D}${includedir}/lunaservice.h
-    ln -svnf luna-service2/lunaservice-errors.h ${D}${includedir}/lunaservice-errors.h
-    ln -svnf lib${BPN}.so ${D}${libdir}/liblunaservice.so
-}
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "ls-hubd.service"

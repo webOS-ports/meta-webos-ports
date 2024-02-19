@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2023 LG Electronics, Inc.
+# Copyright (c) 2020-2024 LG Electronics, Inc.
 
 SUMMARY = "Intent Manager"
 AUTHOR = "Sangwoo Kang <sangwoo82.kang@lge.com>"
@@ -12,8 +12,8 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "glib-2.0 luna-service2 libpbnjson"
 
-WEBOS_VERSION = "1.0.0-17_ea416580431307921b4846e9421af5d22a8d62d5"
-PR = "r3"
+WEBOS_VERSION = "1.0.0-21_f6abd9e19695a310e75be6a13bdae1bffaabafcc"
+PR = "r4"
 
 inherit webos_cmake
 inherit pkgconfig
@@ -21,10 +21,7 @@ inherit webos_system_bus
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 
-# [http://gpro.lge.com/c/webosose/com.webos.service.intent/+/348184 Fix luna-service2 usage]
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-Fix-luna-service2-usage.patch \
-"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit webos_systemd

@@ -1,4 +1,4 @@
-# Copyright (c) 2017-2023 LG Electronics, Inc.
+# Copyright (c) 2017-2024 LG Electronics, Inc.
 
 SUMMARY = "Event Monitoring for Network service"
 AUTHOR = "Seokhee Lee <seokhee.lee@lge.com>"
@@ -9,6 +9,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "glib-2.0 event-monitor pmloglib libpbnjson libwebosi18n"
 
 WEBOS_VERSION = "1.0.0-5_c99401afd1464f8b74766696560bad84a10e5ab4"
+PR = "r2"
 
 inherit webos_cmake
 inherit webos_event_monitor_plugin

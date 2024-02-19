@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2023 LG Electronics, Inc.
+# Copyright (c) 2020-2024 LG Electronics, Inc.
 
 SUMMARY = "Unified search service"
 AUTHOR = "Sangwoo Kang <sangwoo82.kang@lge.com>"
@@ -10,8 +10,8 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "luna-service2 libpbnjson glib-2.0 procps sqlite3"
 
-WEBOS_VERSION = "1.0.0-6_a911bcccbe9e7c5082a30173d064dca9e7c8ab21"
-PR = "r4"
+WEBOS_VERSION = "1.0.0-10_d48cc0481448810de233b91aa8a83989b652881c"
+PR = "r5"
 
 inherit webos_cmake
 inherit pkgconfig
@@ -23,6 +23,7 @@ inherit webos_system_bus
 # http://gpro.lge.com/c/webosose/com.webos.service.unifiedsearch/+/347406 CMakeLists.txt: update from libprocps to libproc2
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Fix-build-with-gcc-12.patch \
+    file://0002-CMakeLists.txt-update-from-libprocps-to-libproc2.patch \
 "
 S = "${WORKDIR}/git"
 

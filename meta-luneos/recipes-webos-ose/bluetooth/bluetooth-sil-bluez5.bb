@@ -1,4 +1,4 @@
-# Copyright (c) 2014-2023 LG Electronics, Inc.
+# Copyright (c) 2014-2024 LG Electronics, Inc.
 
 SUMMARY = "webOS Bluetooth SIL implementation for bluez5"
 AUTHOR = "Muralidhar N <muralidhar.n@lge.com>"
@@ -17,8 +17,8 @@ WEBOS_BLUETOOTH_ENABLED_SERVICE_CLASSES ??= ""
 # Add runtime dependency on bluez5 OBEX service when we have to support FTP
 RDEPENDS:${PN} += "${@ bb.utils.contains('WEBOS_BLUETOOTH_ENABLED_SERVICE_CLASSES', 'FTP', 'bluez5-obex', '', d)}"
 
-WEBOS_VERSION = "0.1.0-81_efcb8e250dacebd13900c5625b6366f75f7ca189"
-PR = "r9"
+WEBOS_VERSION = "0.1.0-82_60a854aeb7ae1aa79492a68a37fad3ffeafa1cf8"
+PR = "r10"
 
 inherit webos_public_repo
 inherit webos_enhanced_submissions
@@ -26,9 +26,7 @@ inherit webos_cmake
 inherit pkgconfig
 inherit webos_bluetooth_sil
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-Fix-build-with-gcc-13.patch \
-"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 # http://caprica.lgsvl.com:8080/Errors/Details/1092093

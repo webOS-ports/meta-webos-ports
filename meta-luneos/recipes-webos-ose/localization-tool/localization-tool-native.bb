@@ -1,4 +1,4 @@
-# Copyright (c) 2013-2023 LG Electronics, Inc.
+# Copyright (c) 2013-2024 LG Electronics, Inc.
 
 SUMMARY = "A localization tool is written in JavaScript"
 AUTHOR = "Seonmi Jin <seonmi1.jin@lge.com>"
@@ -19,8 +19,8 @@ S = "${WORKDIR}/git"
 # iLib-js/ilib-loctool-webos-dist repository on GitHub. This version should correspond to the
 # tag whose hash is specified in SRCREV, so PV and SRCREV will always change
 # together.
-PV = "1.14.1"
-SRCREV = "a18059b38ac4815f3c7cd082c15a5c295bc025e8"
+PV = "1.15.4"
+SRCREV = "77386a915785477e7119a4c196810f8bf86c29a1"
 
 # Skip the unwanted tasks
 do_configure[noexec] = "1"

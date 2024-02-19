@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2023 LG Electronics, Inc.
+# Copyright (c) 2012-2024 LG Electronics, Inc.
 
 SUMMARY = "webOS logging control application"
 AUTHOR = "Sukil Hong <sukil.hong@lge.com>"
@@ -12,7 +12,7 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "pmloglib"
 
-WEBOS_VERSION = "3.0.0-2_a6ac2b162550e69d2a2bfe5b77eaff24e1a92184"
+WEBOS_VERSION = "3.0.0-3_40928a1105070886b7c823c1f7fda3146aa475cd"
 PR = "r4"
 
 inherit webos_public_repo

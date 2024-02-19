@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2023 LG Electronics, Inc.
+# Copyright (c) 2020-2024 LG Electronics, Inc.
 
 SUMMARY = "Memory Manager"
 AUTHOR = "Sukil Hong <sukil.hong@lge.com>"
@@ -11,8 +11,8 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "glib-2.0 glib-2.0-native luna-service2 libpbnjson pmloglib"
 
-WEBOS_VERSION = "1.0.0-57_5d320c6c5fb80fce406b5384351985cda0808914"
-PR = "r10"
+WEBOS_VERSION = "1.0.0-62_3d28d42c1e66b70321246b6e7c3f30325b2c9388"
+PR = "r11"
 
 inherit webos_cmake
 inherit webos_system_bus
@@ -25,11 +25,3 @@ S = "${WORKDIR}/git"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "memorymanager.service.in"
-
-# All service files will be managed in meta-lg-webos.
-# The service file in the repository is not used, so please delete it.
-# See the page below for more details.
-# http://collab.lge.com/main/pages/viewpage.action?pageId=2031668745
-do_install:append() {
-    rm ${D}${sysconfdir}/systemd/system/memorymanager.service
-}

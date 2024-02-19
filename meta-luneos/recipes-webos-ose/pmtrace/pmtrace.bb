@@ -1,4 +1,4 @@
-# Copyright (c) 2013-2023 LG Electronics, Inc.
+# Copyright (c) 2013-2024 LG Electronics, Inc.
 
 SUMMARY = "lttng-ust tracepoints wrapper library and performance tools"
 AUTHOR = "Sukil Hong <sukil.hong@lge.com>"
@@ -21,7 +21,7 @@ DEPENDS = "lttng-ust libpbnjson pmloglib glib-2.0"
 #     lttng-modules \
 # "
 
-WEBOS_VERSION = "1.0.0-15_407d07f257498472a53bf39c9d176953885cadeb"
+WEBOS_VERSION = "1.0.0-17_f6d4399f296df2b4bead4dda7f3e56090634fd6b"
 PR = "r13"
 
 inherit webos_cmake

@@ -1,4 +1,4 @@
-# Copyright (c) 2019-2023 LG Electronics, Inc.
+# Copyright (c) 2019-2024 LG Electronics, Inc.
 
 SUMMARY = "Camera service framework to control camera devices"
 AUTHOR = "Kalaimani K <kalaimani.k@lge.com>"
@@ -12,12 +12,8 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "glib-2.0 luna-service2 json-c alsa-lib pmloglib udev"
 
-# depends on edgeai-vision and opencv for face recognition
-#DEPENDS += "edgeai-vision jpeg opencv"
-#REQUIRED_DISTRO_FEATURES = "webos-aiframework"
-
-WEBOS_VERSION = "1.0.0-36_9ffdd45eb7385bd8447117cc061ac9e73a819d57"
-PR = "r7"
+WEBOS_VERSION = "1.0.0-42_6eb6cb0e6cd050c98a7773c8824a01eb71f78ea9"
+PR = "r12"
 
 inherit webos_cmake 
 inherit pkgconfig
@@ -25,6 +21,13 @@ inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_system_bus
 inherit webos_machine_impl_dep
+
+# depends on edgeai-vision
+PACKAGECONFIG ??= " \
+    ${@bb.utils.filter('DISTRO_FEATURES', 'webos-aiframework', d)}\
+"
+
+PACKAGECONFIG[webos-aiframework] = "-DWITH_AIFRAMEWORK=ON,-DWITH_AIFRAMEWORK=OFF,edgeai-vision"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

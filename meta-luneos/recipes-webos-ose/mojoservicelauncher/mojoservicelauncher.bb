@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2023 LG Electronics, Inc.
+# Copyright (c) 2012-2024 LG Electronics, Inc.
 
 SUMMARY = "webOS component responsible for launching the node.js services"
 AUTHOR = "Rajesh Gopu I.V <rajeshgopu.iv@lge.com>"
@@ -16,7 +16,7 @@ RDEPENDS:${PN} = "nodejs"
 RDEPENDS:${PN} += "nodejs-module-webos-dynaload nodejs-module-webos-pmlog nodejs-module-webos-sysbus mojoloader"
 
 WEBOS_VERSION = "3.0.2-7_b759589be50ce52c4ae4e6af40ecbc78c7232a96"
-PR = "r10"
+PR = "r11"
 
 inherit webos_public_repo
 inherit webos_enhanced_submissions
