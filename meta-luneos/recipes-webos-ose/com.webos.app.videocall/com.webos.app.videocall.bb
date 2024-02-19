@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2023 LG Electronics, Inc.
+# Copyright (c) 2022-2024 LG Electronics, Inc.
 
 SUMMARY = "Video Call Application"
 AUTHOR = "Ganesh Bhat<ganesh.bhat@lge.com>"
@@ -9,7 +9,7 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=0ec407cd2d4a192e0c60888f4ec66dd7 \
 "
 
-WEBOS_VERSION = "0.0.1-6_32a649a56f2389243e7ecd95ec978f6ab0a7e335"
+WEBOS_VERSION = "0.0.1-7_15078b399a6835f6c1713fbec8ac5d6363ef672f"
 PR = "r0"
 
 inherit webos_enactjs_app

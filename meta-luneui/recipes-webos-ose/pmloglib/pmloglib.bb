@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2023 LG Electronics, Inc.
+# Copyright (c) 2012-2024 LG Electronics, Inc.
 
 SUMMARY = "webOS logging library"
 AUTHOR = "Sukil Hong <sukil.hong@lge.com>"
@@ -12,7 +12,7 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "glib-2.0 libpbnjson"
 
-WEBOS_VERSION = "3.3.0-7_70ff1081b4ff6d910b89b96c86c6e42a5fa29c6a"
+WEBOS_VERSION = "3.3.0-9_dde40f333009e150b455468994ceb46a8cbf60ea"
 PR = "r10"
 
 LEAD_SONAME = "libPmLogLib.so"
@@ -24,10 +24,13 @@ inherit webos_cmake
 inherit webos_pmlog_config
 inherit pkgconfig
 
+#FIXME These are not in OSE, see if we can remove it too
+#START
 inherit webos_systemd
 
 WEBOS_SYSTEMD_SERVICE = "pm-log-daemon.service"
 WEBOS_SYSTEMD_SCRIPT = "pm-log-daemon-stop.sh.in"
+#END
 
 PACKAGECONFIG ??= ""
 PACKAGECONFIG[whitelist] = "-DENABLE_WHITELIST:BOOL=TRUE, -DENABLE_WHITELIST:BOOL=FALSE"

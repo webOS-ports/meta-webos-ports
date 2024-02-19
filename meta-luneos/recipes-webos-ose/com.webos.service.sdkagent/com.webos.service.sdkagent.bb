@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2023 LG Electronics, Inc.
+# Copyright (c) 2022-2024 LG Electronics, Inc.
 
 SUMMARY = "SDK Agent service for telegraf"
 AUTHOR = "Wonsang Ryu <wonsang.ryu@lge.com>"
@@ -12,7 +12,7 @@ LIC_FILES_CHKSUM = " \
 DEPENDS = "glib-2.0 luna-service2 json-c pmloglib libpbnjson"
 RDEPENDS:${PN} += "telegraf"
 
-WEBOS_VERSION = "1.0.0-8_7b57bed2916bf1a3f9842fdd82d612d37dde6add"
+WEBOS_VERSION = "1.0.0-10_dd87019d32994ce2c4c0f7748f4085715edf711d"
 PR = "r1"
 
 inherit systemd

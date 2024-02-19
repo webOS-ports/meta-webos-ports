@@ -4,4 +4,3 @@ inherit webos_public_repo
 inherit webos_enhanced_submissions
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-

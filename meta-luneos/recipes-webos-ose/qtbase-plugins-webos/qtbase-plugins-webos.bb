@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2023 LG Electronics, Inc.
+# Copyright (c) 2020-2024 LG Electronics, Inc.
 
 SUMMARY = "webOS extension for qtbase plugins"
 AUTHOR = "Elvis Lee <kwangwoong.lee@lge.com>"
@@ -11,7 +11,7 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "qtbase"
 
-WEBOS_VERSION = "1.0.0-20_3fa4ffc17d21075a70bba418c3ca1723459c5680"
+WEBOS_VERSION = "1.0.0-24_ef79dc2f265877a0bdf57846a35776362fc77707"
 PR = "r8"
 
 inherit webos_qmake6

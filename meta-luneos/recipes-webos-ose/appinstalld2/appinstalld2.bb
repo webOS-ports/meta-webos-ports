@@ -1,4 +1,4 @@
-# Copyright (c) 2017-2023 LG Electronics, Inc.
+# Copyright (c) 2017-2024 LG Electronics, Inc.
 
 SUMMARY = "Application Install Service"
 AUTHOR = "Sangwoo Kang <sangwoo82.kang@lge.com>"
@@ -9,10 +9,11 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "glib-2.0 luna-service2 libpbnjson pmloglib pmtrace boost icu"
 RDEPENDS:${PN} = "applicationinstallerutility ecryptfs-utils librolegen"
 
-PV = "1.0.0-40+git"
-SRCREV = "fd7c130fcd570c48ea54d36c14c22bec4e2c63f8"
+WEBOS_VERSION = "1.0.0-40_398977eb4f3fd7e82561e683c959c895060b707a"
+PR = "r5"
 
 inherit webos_cmake
+inherit webos_enhanced_submissions
 inherit webos_system_bus
 inherit webos_public_repo
 inherit pkgconfig

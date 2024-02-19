@@ -1,4 +1,4 @@
-# Copyright (c) 2019-2023 LG Electronics, Inc.
+# Copyright (c) 2019-2024 LG Electronics, Inc.
 
 SUMMARY = "General System Volume UI application"
 AUTHOR = "Revanth Kumar <revanth.kumar@lge.com>"
@@ -13,7 +13,7 @@ WEBOS_VERSION = "0.1.0-16_675f9154fca5dffb1c2f773ccb93aa0e0e6ffe72"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
-PR = "r2"
+PR = "r3"
 
 inherit webos_enactjs_app
 inherit webos_public_repo

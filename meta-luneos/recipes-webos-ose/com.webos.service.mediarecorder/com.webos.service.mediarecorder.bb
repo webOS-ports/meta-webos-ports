@@ -1,4 +1,5 @@
-# Copyright (c) 2023 LG Electronics, Inc.
+# Copyright (c) 2023-2024 LG Electronics, Inc.
+
 SUMMARY = "Media Recorder Service"
 AUTHOR = "Sungho Lee <shl.lee@lge.com>"
 SECTION = "webos/services"
@@ -11,7 +12,7 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "glib-2.0 luna-service2 pmloglib nlohmann-json"
 
-WEBOS_VERSION = "1.0.0-1_ab3652ecfc70c53ee79a660752ebbd57e9502804"
+WEBOS_VERSION = "1.0.0-2_6e79a8bbf649cfd9e04e9aeb1555a416d57487cb"
 PR = "r0"
 
 inherit webos_cmake
@@ -20,9 +21,7 @@ inherit webos_enhanced_submissions
 inherit webos_system_bus
 inherit pkgconfig
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-media_recorder_manager.cpp-Fix-format-specifier.patch \
-"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit webos_systemd

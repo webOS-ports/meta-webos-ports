@@ -10,12 +10,13 @@ WEBOS_DISTRO_FEATURES_DEFAULT = "\
 "
 WEBOS_DISTRO_FEATURES_OPENGL = "opengl"
 # Remove x11
-WEBOS_DISTRO_FEATURES_WINDOW_SYSTEM = ""
+WEBOS_DISTRO_FEATURES_WINDOW_SYSTEM = "wayland"
 WEBOS_DISTRO_FEATURES_BUSES = "pci"
 WEBOS_DISTRO_FEATURES_USB = "usbhost usbgadget"
-WEBOS_DISTRO_FEATURES_CONNECTIVITY = "bluetooth 3g wifi bluez5 nfc"
+WEBOS_DISTRO_FEATURES_CONNECTIVITY = "bluetooth 3g wifi bluez5 nfc ipv6"
 WEBOS_DISTRO_FEATURES_NETWORKING = "nfs zeroconf"
 WEBOS_DISTRO_FEATURES_SECURITY = "seccomp"
+WEBOS_DISTRO_FEATURES_EXTENDED = "webos-touch"
 
 WEBOS_DISTRO_FEATURES_LD = "ld-is-lld"
 
@@ -35,14 +36,11 @@ DISTRO_FEATURES = "\
   ${WEBOS_DISTRO_FEATURES_LIBC} \
   ${WEBOS_DISTRO_FEATURES_LD} \
   ${WEBOS_DISTRO_FEATURES_INIT} \
+  ${WEBOS_DISTRO_FEATURES_EXTENDED} \
 "
 
 # Enable adb support
 DISTRO_FEATURES += "adb"
-
-# For proper support of wayland through the whole stack we need to set it as distro
-# feature (e.g. mesa requiers it to be set to compile the egl platform module)
-DISTRO_FEATURES += "wayland"
 
 # Use vc4graphics for all raspberrypi MACHINEs
 MACHINE_FEATURES:append:rpi = " vc4graphics"

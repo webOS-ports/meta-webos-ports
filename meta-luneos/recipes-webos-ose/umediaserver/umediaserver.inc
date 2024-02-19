@@ -1,4 +1,4 @@
-# Copyright (c) 2013-2023 LG Electronics, Inc.
+# Copyright (c) 2013-2024 LG Electronics, Inc.
 
 SUMMARY = "webOS uMediaserver daemon and utilities"
 AUTHOR = "Sujeet Nayak <Sujeet.nayak@lge.com>"
@@ -15,7 +15,7 @@ DEPENDS += "gstreamer1.0 gstreamer1.0-plugins-base"
 DEPENDS += "pmtrace"
 RDEPENDS:${PN} = "umediaserver-configs"
 
-INC_PR = "r25"
+INC_PR = "r26"
 
 inherit pkgconfig
 inherit webos_cmake
@@ -29,7 +29,7 @@ do_configure:prepend() {
     sed -i 's@add_subdirectory(test/python)@#disabled until updated to work with python3 add_subdirectory(test/python)@g' ${S}/CMakeLists.txt
 }
 
-WEBOS_VERSION = "1.0.0-gav.35_fd5cba5e25bb62b19ed467ee53f7691a87b2d0b8"
+WEBOS_VERSION = "1.0.0-gav.40_37ef88f5f401ced68d9296ba425fffe74fbfa0ac"
 
 WEBOS_GIT_PARAM_BRANCH = "@gav"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"

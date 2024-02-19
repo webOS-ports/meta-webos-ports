@@ -1,4 +1,4 @@
-# Copyright (c) 2021-2022 LG Electronics, Inc.
+# Copyright (c) 2021-2024 LG Electronics, Inc.
 
 SUMMARY = "Image Viewer application"
 AUTHOR = "Revanth Kumar <revanth.kumar@lge.com>"
@@ -10,7 +10,7 @@ LIC_FILES_CHKSUM = " \
 "
 
 WEBOS_VERSION = "0.0.1-15_ca49d724d66ff827acee8eb5e95c380fd3fc1de2"
-PR = "r1"
+PR = "r2"
 
 inherit webos_enactjs_app
 inherit webos_public_repo

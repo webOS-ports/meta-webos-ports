@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2023 LG Electronics, Inc.
+# Copyright (c) 2022-2024 LG Electronics, Inc.
 
 SUMMARY = "Camera Shared Memory library for webOS"
 AUTHOR  = "Moorthy B S <moorthy.bs@lge.com>"
@@ -15,7 +15,7 @@ inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit pkgconfig
 
-WEBOS_VERSION = "1.0.0-7_8ef639b99716bd1466d15d65210cc4a9c142095a"
+WEBOS_VERSION = "1.0.0-10_0630bc4a1eefe7cf1e3f1baf0dac50cb1a04bad1"
 PR = "r1"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"

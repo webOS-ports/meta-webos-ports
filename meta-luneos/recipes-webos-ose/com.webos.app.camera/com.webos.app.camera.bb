@@ -1,4 +1,4 @@
-# Copyright (c) 2021-2023 LG Electronics, Inc.
+# Copyright (c) 2021-2024 LG Electronics, Inc.
 
 SUMMARY = "Camera application"
 AUTHOR = "Revanth Kumar <revanth.kumar@lge.com>"
@@ -10,8 +10,8 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=3072ffcf5bdbbc376ed21c9d378d14d5 \
 "
 
-WEBOS_VERSION = "0.0.1-14_ecbead987b164f57f8da2481532d2c9c662b2e02"
-PR = "r1"
+WEBOS_VERSION = "0.0.1-17_79c8e8c4390b97abdf4616474d463babaec40557"
+PR = "r2"
 
 inherit webos_enactjs_app
 inherit webos_public_repo

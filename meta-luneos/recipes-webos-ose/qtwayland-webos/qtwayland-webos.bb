@@ -1,4 +1,4 @@
-# Copyright (c) 2016-2023 LG Electronics, Inc.
+# Copyright (c) 2016-2024 LG Electronics, Inc.
 
 SUMMARY = "webOS extension for Qtwayland"
 AUTHOR = "Elvis Lee <kwangwoong.lee@lge.com>"
@@ -14,12 +14,19 @@ DEPENDS = "qtwayland webos-wayland-extensions libxkbcommon qt-features-webos way
 WEBOS_VERSION = "6.0.0-93_fa22224e6e6549d89c19f99a984a63c3062dd4f5"
 PR = "r20"
 
+#QT_BUILD_SYSTEM ?= "${@ 'cmake' if d.getVar('QT_VERSION')[0] == '6' else 'qmake' }"
+#Force qmake for now since cmake gives build errors
+# add_library cannot create ALIAS target "Qt::WebOSEglClientBuffer" because
+#|   another target with the same name already exists.
+
+QT_BUILD_SYSTEM = "qmake"
+
+
 PACKAGECONFIG ??= ""
 
 # qtwayland-webos_cmake.inc or qtwayland-webos_qmake.inc
-require ${BPN}_qmake.inc
+require ${BPN}_${QT_BUILD_SYSTEM}.inc
 
-inherit webos_qmake6
 inherit pkgconfig
 inherit webos_lttng
 inherit webos_public_repo
