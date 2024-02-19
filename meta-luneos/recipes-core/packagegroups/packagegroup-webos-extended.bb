@@ -238,6 +238,9 @@ WEBOS_FOSS_MISSING_FROM_RDEPENDS = " \
     sqlite3 \
 "
 
+RDEPENDS:${PN} += "${MACHINE_EXTRA_RDEPENDS}"
+RRECOMMENDS:${PN} += "${MACHINE_EXTRA_RRECOMMENDS}"
+
 # Unused meta-webos components:
 # - glibcurl
 # - libtinyxml
