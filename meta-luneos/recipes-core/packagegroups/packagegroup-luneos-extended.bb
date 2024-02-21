@@ -11,6 +11,9 @@ NOT_COMPATIBLE_WITH_CURRENT_NODEJS = " \
 
 #LuneOS uses it's own settings app
 VIRTUAL-RUNTIME_settingsapp ?= "org.webosports.app.settings"
+#To easier check audiod-pro migration
+#VIRTUAL-RUNTIME_audioservice ?= "audiod-pro"
+VIRTUAL-RUNTIME_audioservice ?= "audio-service"
 RDEPENDS:${PN} = " \
   ${DISTRO_EXTRA_RDEPENDS} \
   \
@@ -90,7 +93,7 @@ RDEPENDS:${PN} = " \
   \
   webos-systemd-services \
   \
-  audio-service \
+  ${VIRTUAL-RUNTIME_audioservice} \
   com.palm.keymanager \
   mediaindexer \
   media-permission-service \

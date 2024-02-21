@@ -10,7 +10,7 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=2bdfe040dcf81b4038370ae96036c519 \
 "
 
-DEPENDS = "glib-2.0 luna-service2 json-c alsa-lib pmloglib udev"
+DEPENDS = "glib-2.0 luna-service2 json-c alsa-lib pmloglib udev nlohmann-json"
 
 WEBOS_VERSION = "1.0.0-42_6eb6cb0e6cd050c98a7773c8824a01eb71f78ea9"
 PR = "r12"
@@ -34,13 +34,3 @@ S = "${WORKDIR}/git"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "com.webos.service.camera.service"
-
-# All service files will be managed in meta-lg-webos.
-# The service file in the repository is not used, so please delete it.
-# See the page below for more details.
-# http://collab.lge.com/main/pages/viewpage.action?pageId=2031668745
-do_install:append() {
-    rm ${D}${sysconfdir}/systemd/system/com.webos.service.camera.service
-}
-
-COMPATIBLE_MACHINE = "(.*)"

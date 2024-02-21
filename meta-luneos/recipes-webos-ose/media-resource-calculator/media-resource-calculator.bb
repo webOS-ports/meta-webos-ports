@@ -20,6 +20,11 @@ inherit webos_cmake
 inherit pkgconfig
 inherit webos_public_repo
 inherit webos_enhanced_submissions
+inherit webos_machine_dep
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
+
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+          file://0001-media-resource-calculator-Add-generic-config-files.patch \
+"
 S = "${WORKDIR}/git"

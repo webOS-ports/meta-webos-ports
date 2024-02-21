@@ -1,4 +1,4 @@
-# Copyright (c) 2021-2023 LG Electronics, Inc.
+# Copyright (c) 2021-2024 LG Electronics, Inc.
 
 DESCRIPTION = "webOS audiofocusmanager"
 AUTHOR = "Sushovan G <sushovan.g@lge.com>"
@@ -11,7 +11,7 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "glib-2.0 libpbnjson luna-service2 pmloglib"
 
-WEBOS_VERSION = "1.0.0-7_17689b0cbff53466134e79cdbfbfd4aa64fdce36"
+WEBOS_VERSION = "1.0.0-8_a1d3b3b0e029aa69d6718dce6c68e03591ee3acf"
 PR = "r4"
 
 inherit pkgconfig

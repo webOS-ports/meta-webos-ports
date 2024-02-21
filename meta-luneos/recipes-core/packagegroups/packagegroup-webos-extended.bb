@@ -30,14 +30,8 @@ VIRTUAL-RUNTIME_com.webos.app.home ?= ""
 VIRTUAL-RUNTIME_pdm ?= "com.webos.service.pdm"
 VIRTUAL-RUNTIME_ai ?= "com.webos.service.ai"
 VIRTUAL-RUNTIME_memorymanager ?= "com.webos.service.memorymanager"
-VIRTUAL-RUNTIME_g-media-pipeline ?= ""
-VIRTUAL-RUNTIME_g-media-pipeline:rpi = "g-media-pipeline"
-VIRTUAL-RUNTIME_g-media-pipeline:qemux86 = "g-media-pipeline"
-VIRTUAL-RUNTIME_g-media-pipeline:qemux86-64 = "g-media-pipeline"
-VIRTUAL-RUNTIME_g-camera-pipeline ?= ""
-VIRTUAL-RUNTIME_g-camera-pipeline:rpi = "g-camera-pipeline"
-VIRTUAL-RUNTIME_g-camera-pipeline:qemux86 = "g-camera-pipeline"
-VIRTUAL-RUNTIME_g-camera-pipeline:qemux86-64 = "g-camera-pipeline"
+VIRTUAL-RUNTIME_g-media-pipeline = "g-media-pipeline"
+VIRTUAL-RUNTIME_g-camera-pipeline = "g-camera-pipeline"
 VIRTUAL-RUNTIME_nodejs-module-node-red ?= "nodejs-module-node-red"
 VIRTUAL-RUNTIME_contextintentmgr ?= "com.webos.service.contextintentmgr"
 VIRTUAL-RUNTIME_mojoservicelauncher ?= "mojoservicelauncher"
@@ -198,6 +192,8 @@ RDEPENDS:${PN} = " \
     ${VIRTUAL-RUNTIME_com.webos.app.notification} \
     ${VIRTUAL-RUNTIME_com.webos.app.volume} \
     ${VIRTUAL-RUNTIME_com.webos.service.intent} \
+    ${VIRTUAL-RUNTIME_g-camera-pipeline} \
+    ${VIRTUAL-RUNTIME_g-media-pipeline} \
     ${VIRTUAL-RUNTIME_memorymanager} \
     ${VIRTUAL-RUNTIME_mojoservicelauncher} \
     ${VIRTUAL-RUNTIME_tts} \
@@ -212,9 +208,6 @@ RDEPENDS:${PN} = " \
     ${WEBOS_PACKAGESET_MEDIA} \
 "
 
-#FIXME: 
-#   ${VIRTUAL-RUNTIME_g-camera-pipeline}
-#   ${VIRTUAL-RUNTIME_g-media-pipeline}
 
 # XXX These FOSS components must be explicitly added because they are missing
 # from the RDEPENDS lists of the components that expect them to be present at

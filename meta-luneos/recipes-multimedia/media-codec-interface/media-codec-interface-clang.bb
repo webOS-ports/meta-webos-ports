@@ -6,7 +6,7 @@ require media-codec-interface.bb
 
 WEBOS_REPO_NAME = "media-codec-interface"
 
-PR = "r3"
+PR = "r5"
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/media-codec-interface/:"
 # http://gpro.lge.com/c/webosose/media-codec-interface/+/349078 chrono namespace changed
@@ -31,8 +31,9 @@ do_configure:prepend() {
 
 do_install:append() {
     install -d ${D}/${LIBCBE_DIR}
-    mv ${D}/${libdir}/*.so ${D}/${LIBCBE_DIR}
+    mv ${D}/${libdir}/*.so* ${D}/${LIBCBE_DIR}
     sed -i '/^libdir=.*\/lib$/ s/$/\/cbe/' ${D}/${PKGCONFIG_DIR}/media-codec-interface.pc
 }
 
-FILES:${PN} += "${LIBCBE_DIR}/lib*${SOLIBSDEV}"
+FILES:${PN} += "${LIBCBE_DIR}/lib*${SOLIBS}"
+FILES:${PN}-dev += "${LIBCBE_DIR}/lib*${SOLIBSDEV}"

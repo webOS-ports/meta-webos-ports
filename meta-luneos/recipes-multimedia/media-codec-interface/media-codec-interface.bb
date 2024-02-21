@@ -1,4 +1,4 @@
-# Copyright (c) 2021-2023 LG Electronics, Inc.
+# Copyright (c) 2021-2024 LG Electronics, Inc.
 
 SUMMARY = "Media codec interface for webOS"
 AUTHOR = "Sujeet Nayak <Sujeet.nayak@lge.com>"
@@ -17,13 +17,14 @@ inherit webos_machine_impl_dep
 inherit webos_machine_dep
 inherit webos_pkgconfig
 
-COMPATIBLE_MACHINE = "^qemux86$|^qemux86-64$|^raspberrypi3$|^raspberrypi3-64$|^raspberrypi4$|^raspberrypi4-64$"
+#In LuneOS we want this for all machines
+#COMPATIBLE_MACHINE = "^qemux86$|^qemux86-64$|^raspberrypi3$|^raspberrypi3-64$|^raspberrypi4$|^raspberrypi4-64$"
 
 DEPENDS = "boost gstreamer1.0 gstreamer1.0-plugins-base gstreamer1.0-plugins-bad umediaserver media-resource-calculator"
 DEPENDS:append:rpi = " virtual/libomxil"
 
-WEBOS_VERSION = "1.0.0-20_d05454b02d5c3f38b80093ebfa0d6a074bc1a864"
-PR = "r10"
+WEBOS_VERSION = "1.0.0-27_7c7c72b6cef519a774ef8baf1be8f32eb942277b"
+PR = "r11"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 
