@@ -191,7 +191,8 @@ BB_HASHSERVE ??= "auto"
 # LICENSE_FLAGS_ACCEPTED is now used instead of COMMERCIAL_LICENSE, see:
 # http://git.openembedded.org/?p=openembedded-core.git&a=commit;h=a66fdbda548fab367cada035c49a32d9bf8ea528
 # we are not commercial project, we can whitelist them all
-LICENSE_FLAGS_ACCEPTED = "commercial"
+# RPi firmware has some very specific license (synaptics-killswitch) that needs whitelisting as well
+LICENSE_FLAGS_ACCEPTED = "commercial synaptics-killswitch"
 
 LICENSE_CREATE_PACKAGE = "1"
 
