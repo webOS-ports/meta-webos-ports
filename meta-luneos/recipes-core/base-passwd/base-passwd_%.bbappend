@@ -7,4 +7,7 @@
 do_configure:prepend() {
     # Undo 0002-Use-bin-sh-instead-of-bin-bash-for-the-root-user.patch
     sed -i 's%^\(root:.*\):/bin/sh%\1:/bin/bash%g' ${S}/passwd.master
+    # used by wam systemd service
+    echo 'compositor:x:505:wam,graphics,media' >> ${S}/group.master
+    echo 'wam:x:505:505::/var/lib/wam:/bin/false' >> ${S}/passwd.master
 }
