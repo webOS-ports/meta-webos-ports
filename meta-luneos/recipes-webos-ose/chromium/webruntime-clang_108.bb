@@ -53,6 +53,7 @@ GN_ARGS += "${@bb.utils.contains('WEBRUNTIME_CLANG_STDLIB', '1', 'clang_use_stdl
 GN_ARGS += "webos_rpath=\"${libdir}/cbe\""
 
 GN_ARGS += "${@'cc_wrapper=\\\"ccache \\\"' if bb.data.inherits_class('ccache', d) else ''}"
+GN_ARGS += "dcheck_always_on=true enable_gpu_service_logging=true"
 
 PACKAGECONFIG[umediaserver] = ",,umediaserver${DEPEXT}"
 PACKAGECONFIG[gstreamer] = "use_gst_media=true enable_webm_video_codecs=false,use_gst_media=false,g-media-pipeline${DEPEXT}"
