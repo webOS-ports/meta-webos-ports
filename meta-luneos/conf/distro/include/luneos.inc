@@ -147,9 +147,6 @@ IMAGE_FSTYPES ?= "tar.gz"
 # overrides are expanded too late.
 IMAGE_FSTYPES := "${@ '${IMAGE_FSTYPES} wic.vmdk' if '${MACHINE}'.startswith('qemux86') else '${IMAGE_FSTYPES}' }"
 
-# Add rpi-sdimg.gz to all raspberrypi* MACHINEs
-IMAGE_FSTYPES := "${@ '${IMAGE_FSTYPES} rpi-sdimg.gz' if '${MACHINE}'.startswith('raspberrypi') else '${IMAGE_FSTYPES}' }"
-
 # Give our emulator images some more space so developers have some more room
 # for various things they are doing
 IMAGE_ROOTFS_EXTRA_SPACE := "${@ '2097152' if '${MACHINE}'.startswith('qemux86') else '${IMAGE_ROOTFS_EXTRA_SPACE}' }"
