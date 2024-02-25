@@ -61,7 +61,7 @@ PACKAGECONFIG:append = " mesh \
 EXTRA_OECONF:remove = "--enable-external-ell"
 
 do_install:append () {
-    install -d ${D}${sysconfdir}/systemd/system
+    install -d ${D}${sysconfdir}/bluetooth
     install -v -m 0644  ${WORKDIR}/main.conf ${D}${sysconfdir}/bluetooth/
 }
 
