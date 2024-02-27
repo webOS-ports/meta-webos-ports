@@ -17,11 +17,12 @@ SRC_URI += " \
     file://0004-Remove-unused-python-import.patch \
     file://0005-More-removal-of-six.py.patch \
     file://0006-Update-vendored-copy-of-six-to-1.16.0.patch \
+    file://0001-avoid-link-latomic-failure-on-CentOS-8-host.patch \
+    file://0002-Revert-Disable-GPU-acceleration-on-VMware-on-Linux.patch \
 "
 
 # pending in upstream webruntime
 SRC_URI += " \
-    file://0001-avoid-link-latomic-failure-on-CentOS-8-host.patch \
     file://0002-Fix-build-with-gcc-13.patch \
     file://0003-Fix-build-with-dcheck_always_on-true-in-GN_ARGS.patch \
     file://0004-neva-Fix-build-with-dcheck_always_on-true-in-GN_ARGS.patch \
