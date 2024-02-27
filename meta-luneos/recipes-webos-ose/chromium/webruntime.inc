@@ -73,7 +73,6 @@ GN_ARGS:append = " \
     use_cbe=true\
     use_cups=false\
     use_kerberos=false\
-    use_libpci=false\
     use_local_storage_tracker=true\
     use_ozone=true\
     use_pmlog=true\
