@@ -278,6 +278,7 @@ RDEPENDS:${APP_SHELL_RUNTIME} += "${PN} ${VIRTUAL-RUNTIME_gpu-libs}"
 VIRTUAL-RUNTIME_gpu-libs ?= ""
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_gpu-libs} ${APP_SHELL_RUNTIME}"
 RDEPENDS:${WAM_DEMO_APPLICATION} += "${VIRTUAL-RUNTIME_gpu-libs}"
+RDEPENDS:${PN}:append:qemuall = " libpci"
 
 # it aborts if libudev.so.1 is missing
 RDEPENDS:${PN} += "libudev"

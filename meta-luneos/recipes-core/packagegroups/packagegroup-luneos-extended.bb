@@ -171,7 +171,6 @@ QEMU_RDEPENDS = " \
     alsa-utils-systemd \
     mesa-driver-swrast \
     kernel-module-snd-intel8x0 \
-    libpci \
     phonesim \
     qt-plugin-generic-vboxtouch \
     rng-tools \
