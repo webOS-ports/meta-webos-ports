@@ -5,9 +5,9 @@ LICENSE = "MIT"
 SECTION = "webos/support"
 LIC_FILES_CHKSUM = "file://src/mce_display.c;beginline=1;endline=35;md5=999eef94327cfda24c3f60f25ee98fd7"
 
-DEPENDS = "glib-2.0 glib-2.0-native libglibutil"
+DEPENDS = "glib-2.0 glib-2.0-native libglibutil python3-packaging-native"
 
-inherit pkgconfig
+inherit pkgconfig python3native
 
 SRC_URI = "git://github.com/sailfishos/libmce-glib.git;protocol=https;branch=master \
            https://raw.githubusercontent.com/sailfishos/mce-dev/03a4de12e5fabad8c0d846663e1a1a2cbfd88957/include/mce/dbus-names.h;name=dbus-names \
