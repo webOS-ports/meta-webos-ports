@@ -39,6 +39,15 @@ DEFAULTTUNE:mako = "cortexa8thf-neon"
 DEFAULTTUNE:athene = "cortexa8thf-neon"
 DEFAULTTUNE:onyx = "cortexa8thf-neon"
 
+# oldest are mako (3.4), only (3.4) and hammerhead-halium (3.4)
+# lower from 5.15 set since nanbield
+# https://git.openembedded.org/openembedded-core/commit/?h=master&id=feb8e3fb71131a414a2a9271832b4e16860301ea
+OLDEST_KERNEL:armv7a:halium = "3.4"
+
+# used by tissot, sargo, mido-halium some other unsupported MACHINEs might use older, see list in:
+# https://github.com/shr-distribution/meta-smartphone/pull/164
+OLDEST_KERNEL:aarch64:halium = "4.9"
+
 # in meta-smartphone/meta-android/conf/machine/include/meta-android-halium.inc
 # we do:
 # TUNE_PKGARCH:append = "-halium"
