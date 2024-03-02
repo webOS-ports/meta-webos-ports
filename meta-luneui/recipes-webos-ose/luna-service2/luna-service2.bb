@@ -41,6 +41,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0004-hub.cpp-Add-support-for-org.webosports-and-org.webos.patch \
     file://0005-luna-service2-Add-permissions-for-com.palm-and-org.w.patch \
     file://0006-LSMessageIsSubscription-test-if-payload-is-a-JSON-ob.patch \
+    file://0007-_LSCheckProvidedTrustedGroups-reduce-log-noise.patch \
 "
 S = "${WORKDIR}/git"
 
