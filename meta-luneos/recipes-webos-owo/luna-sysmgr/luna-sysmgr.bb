@@ -14,7 +14,7 @@ DEPENDS += "serviceinstaller"
 
 RDEPENDS:${PN} += "sleepd com.webos.service.battery"
 
-PV = "3.0.0-3+git"
+PV = "3.0.0-4+git"
 SRCREV = "c4f28a11e68cf2c444bd0557041f039a33065449"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
@@ -30,6 +30,9 @@ LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
+
+# Configure startup applications
+LUNEOS_BOOT_APPS ??= "org.webosports.app.phone;com.palm.app.email;com.palm.app.calendar;"
 
 do_install:append() {
     # install images & low-memory files
@@ -51,6 +54,15 @@ do_install:append() {
     then
         install -d ${D}${webos_sysconfdir}
         install -v -m 644 ${S}/conf/luna.conf ${D}${webos_sysconfdir}
+    fi
+
+    # Apply configured boot applications
+    if [ -f ${D}${webos_sysconfdir}/luna.conf ]
+    then
+        # remove LaunchAtBoot section from luna.conf (from [LaunchAtBoot] to Applications=...)
+        sed -i "/\[LaunchAtBoot\]/,/^Applications=/d" ${D}${webos_sysconfdir}/luna.conf
+        # add new LaunchAtBoot section to luna.conf
+        echo "\n[LaunchAtBoot]\nApplications=${LUNEOS_BOOT_APPS}\n" >> ${D}${webos_sysconfdir}/luna.conf
     fi
 
     # install the db kind to register schema for context upload (collecting error logs)

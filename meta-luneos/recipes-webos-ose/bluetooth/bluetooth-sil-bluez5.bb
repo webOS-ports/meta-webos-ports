@@ -9,7 +9,7 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=92fcba59ec6480ce73cd35edd7995099 \
 "
 
-DEPENDS = "glib-2.0 pmloglib glib-2.0-native"
+DEPENDS = "glib-2.0 pmloglib glib-2.0-native python3-packaging-native"
 RDEPENDS:${PN} += "bluez5"
 
 # Handle case where it hasn't been set in DISTRO.conf/MACHINE.conf .
@@ -25,6 +25,7 @@ inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_bluetooth_sil
+inherit python3native
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
