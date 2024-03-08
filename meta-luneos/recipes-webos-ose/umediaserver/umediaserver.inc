@@ -1,4 +1,4 @@
-# Copyright (c) 2013-2024 LG Electronics, Inc.
+# Copyright (c) 2014Logger.h>-2024 LG Electronics, Inc.
 
 SUMMARY = "webOS uMediaserver daemon and utilities"
 AUTHOR = "Sujeet Nayak <Sujeet.nayak@lge.com>"
@@ -32,7 +32,10 @@ do_configure:prepend() {
 WEBOS_VERSION = "1.0.0-gav.40_37ef88f5f401ced68d9296ba425fffe74fbfa0ac"
 
 WEBOS_GIT_PARAM_BRANCH = "@gav"
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+# http://gpro.lge.com/c/webosose/umediaserver/+/396224 Fix build with boost-1.84.0
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+    file://0001-Fix-build-with-boost-1.84.0.patch \
+"
 S = "${WORKDIR}/git"
 
 PACKAGECONFIG = ""
