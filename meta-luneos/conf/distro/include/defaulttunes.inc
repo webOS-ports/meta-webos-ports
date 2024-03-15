@@ -57,6 +57,7 @@ OLDEST_KERNEL:aarch64:halium = "4.9"
 PACKAGE_EXTRA_ARCHS_HALIUM = "${@oe.utils.conditional('ARM_INSTRUCTION_SET', 'thumb', 'cortexa8hf-neon-halium', 'cortexa8t2hf-neon-halium', d) }"
 PACKAGE_EXTRA_ARCHS:append:tenderloin-halium = " ${PACKAGE_EXTRA_ARCHS_HALIUM}"
 PACKAGE_EXTRA_ARCHS:append:hammerhead-halium = " ${PACKAGE_EXTRA_ARCHS_HALIUM}"
+PACKAGE_EXTRA_ARCHS:append:mako = " ${PACKAGE_EXTRA_ARCHS_HALIUM}"
 
 # http://lists.openembedded.org/pipermail/openembedded-core/2019-April/281328.html
 # make sure that raspberrypi[34]-64 originally with
