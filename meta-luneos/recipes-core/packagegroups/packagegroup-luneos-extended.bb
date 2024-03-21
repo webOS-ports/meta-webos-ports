@@ -88,8 +88,6 @@ RDEPENDS:${PN} = " \
   qtlocation-luneos-plugin \
   webos-system-update \
   \
-  webos-systemd-services \
-  \
   audio-service \
   com.palm.keymanager \
   mediaindexer \
