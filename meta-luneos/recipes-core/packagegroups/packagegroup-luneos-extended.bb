@@ -88,7 +88,6 @@ RDEPENDS:${PN} = " \
   qtlocation-luneos-plugin \
   webos-system-update \
   \
-  webos-systemd-services \
   webos-users-groups \
   \
   audio-service \

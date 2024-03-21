@@ -1,5 +1,5 @@
 #!/bin/sh
-# Copyright (c) 2021-2023 LG Electronics, Inc.
+# Copyright (c) 2021-2024 LG Electronics, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,11 +16,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # To provide enough time for inbuilt adapter to be configured
-
-# first, if the cdc_ether isn't built as a module, there's nothing to do
-if ! zgrep -qs CONFIG_USB_NET_CDCETHER=m /proc/config.gz; then
-    exit 0
-fi
 
 if ! grep -qs qemu /etc/hostname ; then
     sleep 5
