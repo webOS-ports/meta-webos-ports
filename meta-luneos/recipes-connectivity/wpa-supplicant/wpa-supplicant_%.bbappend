@@ -1,17 +1,18 @@
-# Copyright (c) 2017-2022 LG Electronics, Inc.
+# Copyright (c) 2017-2024 LG Electronics, Inc.
 
-EXTENDPRAUTO:append = "webos5"
+EXTENDPRAUTO:append = "webos7"
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 
 SRC_URI += " \
-    file://wpa-supplicant.sh \
-    file://wpa-supplicant.service \
     file://0001-Add-p2p-changes.patch \
 "
 # Replace the wpa_supplicant.service from wpa-supplicant source with our own version (for some unknown reason)
 SYSTEMD_SERVICE:${PN}:remove = "wpa_supplicant.service"
-SYSTEMD_SERVICE:${PN}:append = " wpa-supplicant.service"
+
+inherit webos_systemd
+WEBOS_SYSTEMD_SERVICE = "wpa-supplicant.service"
+WEBOS_SYSTEMD_SCRIPT = "wpa-supplicant.sh"
 
 do_configure:append() {
     # Enable DBus Introspection for easier debugging
@@ -41,17 +42,15 @@ do_configure:append() {
     echo "CONFIG_WIFI_DISPLAY=y" >> ${B}/wpa_supplicant/.config
     echo "CONFIG_IEEE80211N=y" >> ${B}/wpa_supplicant/.config
 
+    #Enable WEP Security
+    echo "CONFIG_WEP=y" >> ${B}/wpa_supplicant/.config
+
 }
 
 do_install:append() {
-    # systemd service files
-    install -d ${D}${sysconfdir}/systemd/system
-    install -v -m 644 ${WORKDIR}/wpa-supplicant.service ${D}${sysconfdir}/systemd/system/wpa-supplicant.service
     # Remove the wpa_supplicant.service from upstream, but be aware that we're still
     # keeping upstream wpa_supplicant-nl80211@.service wpa_supplicant@.service  wpa_supplicant-wired@.service
     rm -vf ${D}${systemd_unitdir}/system/wpa_supplicant.service
-    install -d ${D}${sysconfdir}/systemd/system/scripts
-    install -v -m 755 ${WORKDIR}/wpa-supplicant.sh ${D}${sysconfdir}/systemd/system/scripts/
 
     # Replace the removed wpa_supplicant.service from upstream with our =wpa-supplicant.service
     sed -i 's/SystemdService=wpa_supplicant.service/SystemdService=wpa-supplicant.service/g' ${D}/${datadir}/dbus-1/system-services/*service
@@ -66,4 +65,3 @@ USERADD_PARAM:${PN} = " \
     -u 1010 -d /var -s /usr/sbin/nologin -G netdev -U wifi ;\
     -u 1025 -d /var -s /usr/sbin/nologin -G netdev -U network ;\
 "
-
