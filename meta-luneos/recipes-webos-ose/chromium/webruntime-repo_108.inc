@@ -30,13 +30,12 @@ SRC_URI += " \
 
 # LuneOS specific patches
 SRC_URI += " \
-    file://0001-run_app_shell-fix-XDG_RUNTIME_DIR-for-LuneOS.patch \
-    file://0002-Add-window.open-support.patch \
-    file://0003-WebOS-Shell-Surface-add-client_size_changed-wayland-.patch \
-    file://0004-DesktopNativeWidgetAura-don-t-apply-DIP-for-SetBound.patch \
-    file://0005-palmGetResource-improve-legacy-compatibility.patch \
-    file://0006-Update-app-shell.role.json.in-Add-trustLevel.patch \
-    file://0007-palmGetResource-Fix-loading-of-local-resources.patch \
-    file://0008-webossystem_injection.cc-fix-some-PalmSystem-functio.patch \
-    file://0009-app_shell-override-default-OnWindowHostClose-to-clos.patch \
+    file://0001-Add-window.open-support.patch \
+    file://0002-WebOS-Shell-Surface-add-client_size_changed-wayland-.patch \
+    file://0003-DesktopNativeWidgetAura-don-t-apply-DIP-for-SetBound.patch \
+    file://0004-palmGetResource-improve-legacy-compatibility.patch \
+    file://0005-Update-app-shell.role.json.in-Add-trustLevel.patch \
+    file://0006-palmGetResource-Fix-loading-of-local-resources.patch \
+    file://0007-webossystem_injection.cc-fix-some-PalmSystem-functio.patch \
+    file://0008-app_shell-override-default-OnWindowHostClose-to-clos.patch \
 "
