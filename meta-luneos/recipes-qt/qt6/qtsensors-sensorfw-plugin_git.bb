@@ -16,12 +16,11 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 # COMPATIBLE_MACHINE = "^halium$"
 
 PV = "6.5.2+git"
-SRCREV = "5123213a07209d32d3644597e52c8ffc21ea4d09"
+SRCREV = "7d6f6c577749b186698295c8f9848666c0a53203"
 
 inherit webos_ports_repo
-inherit qt6-qmake
-inherit pkgconfig
-
+inherit qt6-cmake
+inherit webos_cmake
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};"
 S = "${WORKDIR}/git"
