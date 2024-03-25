@@ -25,3 +25,9 @@ RRECOMMENDS:${PN} += "neard connman-vpn connman-plugin-vpn-openvpn connman-plugi
 
 # needed for VPN support in ConnMan
 PACKAGECONFIG:append = " openvpn vpnc l2tp pptp"
+
+SYSTEMD_SERVICE:${PN}:remove = "connman.service"
+
+do_install:append() {
+    rm -vf ${D}${systemd_unitdir}/system/connman.service
+}
