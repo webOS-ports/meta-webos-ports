@@ -26,6 +26,16 @@ inherit webos_system_bus
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit pkgconfig
+inherit useradd
+
+USERADD_PACKAGES = "${PN}"
+USERADD_PARAM:${PN} = " \
+    -g pdmgroup -d /home/pdmuser -m -s /bin/sh pdmuser; \
+"
+
+GROUPADD_PARAM:${PN} = " \
+    -g 2023 -f pdmgroup; \
+"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-NfcDeviceHandler-Fix-incorrect-name.patch \

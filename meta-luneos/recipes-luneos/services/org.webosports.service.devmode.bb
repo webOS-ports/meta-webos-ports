@@ -37,3 +37,22 @@ do_install() {
 }
 
 FILES:${PN} += "${webos_servicesdir}/${PN}"
+
+inherit useradd
+
+# Let the devmode recipe, add the developer users & group
+USERADD_PACKAGES = "${PN}"
+USERADD_PARAM:${PN} = " \
+    -u 504 -r -g developer --system -c developer -d /home/developer -s /bin/sh developer; \
+    -u 2003 -g developer -d /var -s /usr/sbin/nologin debug; \
+    -u 2004 -g developer -d /var -s /usr/sbin/nologin dev-func; \
+"
+
+GROUPADD_PARAM:${PN} = " \
+    -g 504 -f developer; \
+"
+
+GROUPMEMS_PARAM:${PN} = " \
+    -a developer -g developer; \
+    -a dev-func -g developer; \ 
+"

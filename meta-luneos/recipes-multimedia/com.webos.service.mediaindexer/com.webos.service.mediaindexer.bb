@@ -56,3 +56,10 @@ do_install:append() {
 # media indexer client library
 FILES_SOLIBSDEV = ""
 FILES:${PN} += "${libdir}/*.so"
+
+inherit useradd
+USERADD_PACKAGES = "${PN}"
+
+GROUPMEMS_PARAM:${PN} = " \
+    -a media -g video; \
+"
