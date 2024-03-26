@@ -7,3 +7,10 @@ IMAGE_FEATURES += "${LUNEOS_IMAGE_DEFAULT_FEATURES}"
 inherit luneos_image
 
 WKS_FILE ?= "luneos-image.wks"
+
+# During build the pulse-access group is not available to wam, therefore add it here in the end of the image
+
+inherit extrausers
+EXTRA_USERS_PARAMS = " \
+    usermod -a -G pulse-access wam; \
+"

@@ -89,6 +89,7 @@ RDEPENDS:${PN} = " \
   webos-system-update \
   \
   webos-systemd-services \
+  webos-users-groups \
   \
   audio-service \
   com.palm.keymanager \

@@ -1,16 +1,21 @@
-FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
+# Copyright (c) 2014-2024 LG Electronics, Inc.
 
-SRC_URI += " \
-    file://dbus-session.service \
-    file://startup-dbus-session.sh \
+EXTENDPRAUTO:append = "webos6"
+
+PACKAGES =+ "${PN}-gpl"
+LICENSE += "& GPL-2.0-only"
+LICENSE:${PN}-gpl = "GPL-2.0-only"
+
+RDEPENDS:${PN} += "${PN}-gpl"
+
+FILES:${PN}-gpl = " \
+    ${bindir}/dbus-cleanup-sockets \
+    ${bindir}/dbus-daemon \
+    ${bindir}/dbus-monitor \
+    ${bindir}/dbus-send \
+    ${bindir}/dbus-uuidgen \
 "
 
-do_install:append() {
-    install -d ${D}${systemd_unitdir}/system
-    install -m 0644 ${WORKDIR}/dbus-session.service ${D}${systemd_unitdir}/system/
-
-    install -d ${D}${bindir}
-    install -m 0755 ${WORKDIR}/startup-dbus-session.sh ${D}${bindir}/
-}
-
-FILES:${PN} += "${bindir} ${systemd_unitdir}"
+VIRTUAL-RUNTIME_bash ?= "bash"
+RDEPENDS:${PN}-ptest:append:class-target = " ${VIRTUAL-RUNTIME_bash}"
+RDEPENDS:${PN}-ptest:remove:class-target = "${@oe.utils.conditional('WEBOS_PREFERRED_PROVIDER_FOR_BASH', 'busybox', 'bash', '', d)}"

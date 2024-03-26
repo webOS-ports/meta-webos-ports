@@ -44,3 +44,14 @@ do_install:append() {
 }
 
 COMPATIBLE_MACHINE = "(.*)"
+
+inherit useradd
+USERADD_PACKAGES = "${PN}"
+
+USERADD_PARAM:${PN} = " \
+    -u 1006 -d /var -s /usr/sbin/nologin -G video -U camera; \
+"
+
+GROUPMEMS_PARAM:${PN} = " \
+    -a camera -g video; \
+"

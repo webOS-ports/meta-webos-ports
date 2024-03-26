@@ -29,3 +29,22 @@ SYSTEMD_SERVICE:${PN}-server = "pulseaudio.service"
 # - https://github.com/Freescale/meta-fsl-arm/commit/3e6ede30f5da132fc5e2c376c11df661efea7163
 # - https://bugs.launchpad.net/ubuntu/+source/pulseaudio/+bug/932096
 CACHED_CONFIGUREVARS:append:arm = " ax_cv_PTHREAD_PRIO_INHERIT=no"
+
+inherit useradd
+
+USERADD_PACKAGES = "pulseaudio-server"
+GROUPADD_PARAM:pulseaudio-server = " \
+    -g 507 -f --system pulse; \
+    -g 506 -f --system pulse-access; \
+"
+
+USERADD_PARAM:pulseaudio-server = " \
+    --system --home /var/run/pulse --no-create-home --shell /bin/false --groups audio,pulse --gid pulse pulse; \
+"
+
+GROUPMEMS_PARAM:pulseaudio-server = " \
+    -a root -g pulse-access; \
+    -a system -g pulse-access; \
+    -a pulse -g pulse-access; \
+    -a pulse -g audio; \
+"
