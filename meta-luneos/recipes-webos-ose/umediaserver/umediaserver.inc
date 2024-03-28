@@ -50,6 +50,6 @@ FILES:${PN}-python = "${libdir}/${PYTHON_DIR}/site-packages/uMediaServer/* ${dat
 # PACKAGECONFIG += "${@bb.utils.contains('USE_WEBRUNTIME_LIBCXX', '1', 'webruntime-libcxx', 'system-libcxx', d)}"
 PACKAGECONFIG:append:qemuall = " com.webos.service.videooutput"
 
-do_install:append:webos() {
+do_install:append() {
     install -m 755 -o media -g media -v -d ${D}${webos_execstatedir}/ums
 }
