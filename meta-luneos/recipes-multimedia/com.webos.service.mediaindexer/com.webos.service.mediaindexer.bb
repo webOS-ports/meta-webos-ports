@@ -56,3 +56,16 @@ do_install:append() {
 # media indexer client library
 FILES_SOLIBSDEV = ""
 FILES:${PN} += "${libdir}/*.so"
+
+inherit useradd
+USERADD_PACKAGES = "${PN}"
+
+RDEPENDS:${PN} = "pulseaudio-server"
+
+USERADD_PARAM:${PN} = " \
+                       -u 1013 -d /var -s /usr/sbin/nologin -U media ;\
+"
+
+GROUPMEMS_PARAM:${PN} = " \
+                         -a media -g video; \
+"

@@ -58,3 +58,14 @@ do_install:append() {
 }
 
 FILES:${PN} += "${systemd_unitdir}"
+
+DEPENDS +="webos-users-groups"
+
+inherit useradd
+USERADD_PACKAGES = "${PN}"
+
+USERADD_PARAM:${PN} = " \
+                       -u 1010 -d /var -s /usr/sbin/nologin -G netdev -U wifi ;\
+                       -u 1025 -d /var -s /usr/sbin/nologin -G netdev -U network ;\
+"
+

@@ -7,6 +7,7 @@ inherit webos_ports_repo
 inherit allarch
 inherit webos_filesystem_paths
 inherit webos_system_bus
+inherit useradd
 
 PV = "0.1.0+git"
 SRCREV = "65588c2d9c74a89d794fb7b3ea2d8da5df1b9921"
@@ -37,3 +38,18 @@ do_install() {
 }
 
 FILES:${PN} += "${webos_servicesdir}/${PN}"
+
+# Let the devmode recipe, add the developer users & group
+
+USERADD_PACKAGES = "${PN}"
+USERADD_PARAM:${PN} = " \
+                       -u 504 -r -g 504 --system -c developer -d /home/developer -s /bin/sh developer; \
+                       -u 2003 -g 504 -d /var -s /usr/sbin/nologin debug ;\
+                       -u 2004 -g 504 -d /var -s /usr/sbin/nologin dev-func ;\
+"
+
+GROUPADD_PARAM:${PN} = "-g 504 developer"
+
+GROUPMEMS_PARAM:${PN} = " \
+                         -a developer -g developer; \
+"

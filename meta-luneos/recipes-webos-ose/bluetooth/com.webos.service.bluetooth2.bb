@@ -77,3 +77,19 @@ S = "${WORKDIR}/git"
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "webos-bluetooth-service.service"
 WEBOS_SYSTEMD_SCRIPT = "webos-bluetooth-service.sh"
+
+inherit useradd
+
+USERADD_PACKAGES = "${PN}"
+
+USERADD_PARAM:${PN} = " \
+                       -u 1002 -d /var -s /usr/sbin/nologin -G netdev -U bluetooth ;\
+"
+
+GROUPMEMS_PARAM:${PN} = " \
+                         -a bluetooth -g netdev; \
+"
+
+GROUPADD_PARAM:${PN} = " \
+                        -g 2024 blemesh; \
+"

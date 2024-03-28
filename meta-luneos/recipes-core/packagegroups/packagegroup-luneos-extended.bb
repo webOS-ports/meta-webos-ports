@@ -88,7 +88,7 @@ RDEPENDS:${PN} = " \
   qtlocation-luneos-plugin \
   webos-system-update \
   \
-  webos-systemd-services \
+  webos-users-groups \
   \
   audio-service \
   com.palm.keymanager \
@@ -164,7 +164,7 @@ RDEPENDS:${PN}:append:mido-halium = " waydroid"
 RDEPENDS:${PN}:append:pinephone = " waydroid"
 RDEPENDS:${PN}:append:pinephonepro = " waydroid"
 RDEPENDS:${PN}:append:pinetab2 = " waydroid"
-RDEPENDS:${PN}:append:qemux86-64 = " waydroid"
+#RDEPENDS:${PN}:append:qemux86-64 = " waydroid"
 RDEPENDS:${PN}:append:tissot = " waydroid"
 
 QEMU_RDEPENDS = " \

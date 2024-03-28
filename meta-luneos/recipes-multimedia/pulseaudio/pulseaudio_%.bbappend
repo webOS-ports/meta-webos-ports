@@ -15,6 +15,8 @@ do_install:append() {
     install -m 0644 ${WORKDIR}/pulseaudio.service ${D}${systemd_unitdir}/system
 }
 
+DEPENDS += "webos-users-groups"
+
 inherit systemd
 
 RPROVIDES:${PN} = "libpulse-simple0"
@@ -29,3 +31,13 @@ SYSTEMD_SERVICE:${PN}-server = "pulseaudio.service"
 # - https://github.com/Freescale/meta-fsl-arm/commit/3e6ede30f5da132fc5e2c376c11df661efea7163
 # - https://bugs.launchpad.net/ubuntu/+source/pulseaudio/+bug/932096
 CACHED_CONFIGUREVARS:append:arm = " ax_cv_PTHREAD_PRIO_INHERIT=no"
+
+inherit useradd
+USERADD_PACKAGES = "${PN}"
+
+GROUPADD_PARAM:${PN} = "--system pulse; --system pulse-access"
+
+GROUPMEMS_PARAM:${PN} = " \
+                         -a root -g pulse-access; \
+                         -a system -g pulse-access; \
+"

@@ -7,6 +7,9 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM += "file://oss-pkg-info.yaml;md5=790420e31fa17284afec484d5b2ad2d8"
 
 DEPENDS = "virtual/webruntime luna-service2 sqlite3 librolegen nyx-lib openssl luna-prefs libpbnjson freetype serviceinstaller glib-2.0 pmloglib lttng-ust gtest jsoncpp boost"
+
+#We need the system user/group to be available, so depend on webos-users-groups which creates this.
+DEPENDS += "webos-users-groups"
 PROVIDES = "virtual/webappmanager-webos"
 
 # webappmgr's upstart conf expects to be able to LD_PRELOAD ptmalloc3
@@ -31,6 +34,7 @@ inherit webos_lttng
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_systemd
+inherit useradd
 
 WAM_DATA_DIR = "${webos_execstatedir}/${BPN}"
 
@@ -163,3 +167,22 @@ FILES:${PN} += " \
     ${libdir}/webappmanager/plugins/*.so \
     ${datadir}/localization/${BPN} \
 "
+
+# Let WAM create it's user & compositor and se group. "se" is used for DRM keys on some webOS distros
+USERADD_PACKAGES = "${PN}"
+USERADD_PARAM:${PN} = "-u 505 -r -g 505 --system -c wam -d /var/lib/wam -s /usr/sbin/nologin -G audio,video,compositor,pulse-access,se,media wam;"
+GROUPADD_PARAM:${PN} = " \
+                        -g 505 compositor; \
+                        -g 509 se; \
+"
+
+GROUPMEMS_PARAM:${PN} = " \
+                         -a graphics -g compositor; \
+                         -a media -g compositor; \
+                         -a wam -g input;\
+                         -a wam -g video; \
+                         -a wam -g pulse-access; \
+                         -a wam -g se; \
+                         -a root -g se; \
+                         -a system -g se; \
+                        "

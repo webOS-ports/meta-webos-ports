@@ -12,6 +12,9 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "luna-service2 db8 boost libpbnjson glib-2.0 pmloglib ${VIRTUAL-RUNTIME_init_manager}"
 
+#We need the system user/group to be available, so depend on webos-users-groups which creates this.
+DEPENDS += "webos-users-groups"
+
 WEBOS_VERSION = "3.0.0-42_0b4b42042f933cc34c38b7190184c5ab7e62b96e"
 PR = "r16"
 
@@ -31,7 +34,7 @@ inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "activitymanager.service"
 
 FILES:${PN} += "${webos_sysbus_datadir}"
-FILES:${PN} += "${@oe.utils.conditional('DISTRO_NAME', 'webOS OSE', '${localstatedir}/lib/activitymanager', '', d)}"
+FILES:${PN} += "${localstatedir}/lib/activitymanager"
 
 EXTRA_OECMAKE += "-DINIT_MANAGER:STRING='${@bb.utils.filter('VIRTUAL-RUNTIME_init_manager', 'systemd upstart', d)}'"
 
@@ -39,7 +42,5 @@ PACKAGECONFIG ??= "${@bb.utils.filter('DISTRO_FEATURES', 'webos-dac', d)}"
 PACKAGECONFIG[webos-dac] = "-DDAC_IMPLEMENTATION:BOOL=TRUE,,"
 
 do_install:append() {
-    if ${@oe.utils.conditional('DISTRO_NAME', 'webOS OSE', 'true', 'false', d)} ; then
         install -m 0700 -o system -g system -v -d ${D}${localstatedir}/lib/activitymanager
-    fi
 }
