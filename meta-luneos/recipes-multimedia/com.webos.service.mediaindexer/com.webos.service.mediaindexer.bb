@@ -29,6 +29,7 @@ RDEPENDS:${PN} = "${VIRTUAL-RUNTIME_pdm} db8"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-CMakeLists.txt-respect-libdir-setting.patch \
     file://0001-Fix-app-permissions.patch \
+    file://0001-mediaitem.cpp-Fix-build-with-gcc-14.patch \
 "
 
 S = "${WORKDIR}/git"
