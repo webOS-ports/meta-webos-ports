@@ -37,3 +37,9 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 BBCLASSEXTEND = "native"
+
+# libpbnjson/2.15.0-16/git/src/pbnjson_c/validation/instance_types.gperf:124:8: error: initialization of 'const char *' from 'int' makes pointer from integer without a cast [-Wint-conversion]
+# ...
+# libpbnjson/2.15.0-16/git/src/pbnjson_c/validation/schema_keywords.gperf:190:8: error: initialization of 'const char *' from 'int' makes pointer from integer without a cast [-Wint-conversion]
+# ...
+CFLAGS += "-Wno-error=int-conversion"

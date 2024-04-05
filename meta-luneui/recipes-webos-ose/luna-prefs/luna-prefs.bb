@@ -37,3 +37,10 @@ do_configure:append() {
 
 S = "${WORKDIR}/git"
 
+# luna-prefs/3.0.0-17/git/luna-prefs-service/accesschecker.c:39:39: error: initialization of 'LSMessage *' from incompatible pointer type 'LSMessage **' [-Wincompatible-pointer-types]
+# luna-prefs/3.0.0-17/git/luna-prefs-service/accesschecker.c:85:24: error: assignment to 'LSMessage **' from incompatible pointer type 'LSMessage *' [-Wincompatible-pointer-types]
+# luna-prefs/3.0.0-17/git/luna-prefs-service/main.c:487:48: error: passing argument 4 of 'checkAccess' from incompatible pointer type [-Wincompatible-pointer-types]
+# luna-prefs/3.0.0-17/git/luna-prefs-service/main.c:766:48: error: passing argument 4 of 'checkAccess' from incompatible pointer type [-Wincompatible-pointer-types]
+# luna-prefs/3.0.0-17/git/luna-prefs-service/main.c:959:48: error: passing argument 4 of 'checkAccess' from incompatible pointer type [-Wincompatible-pointer-types]
+# luna-prefs/3.0.0-17/git/luna-prefs-service/main.c:1072:49: error: passing argument 4 of 'checkAccess' from incompatible pointer type [-Wincompatible-pointer-types]
+CFLAGS += "-Wno-error=incompatible-pointer-types"

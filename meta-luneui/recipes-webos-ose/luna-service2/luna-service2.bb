@@ -68,3 +68,7 @@ FILES:${PN}-perf += "${webos_testsdir}/${BPN}-perf"
 INSANE_SKIP:${PN}-ptest += "libdir"
 # luna-service2-dbg: found library in wrong location: /usr/opt/webos/tests/luna-service2/lib/.debug/libls-hublib-test.so
 INSANE_SKIP:${PN}-dbg += "libdir"
+
+# luna-service2/3.21.2-37/git/src/libluna-service2/transport.c:2001:50: error: passing argument 2 of '_LSTransportMessageGetString' from incompatible pointer type [-Wincompatible-pointer-types]
+# luna-service2/3.21.2-37/git/src/libluna-service2/transport.c:6758:12: error: returning 'LSTransportTrustLevelGroupBitmask *' from a function with incompatible return type 'LSTransportCategoryBitmask *' [-Wincompatible-pointer-types]
+CFLAGS += "-Wno-error=incompatible-pointer-types"

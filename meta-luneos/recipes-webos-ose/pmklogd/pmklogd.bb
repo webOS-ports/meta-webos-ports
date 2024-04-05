@@ -31,3 +31,7 @@ WEBOS_SYSTEMD_SERVICE = "pm-klog-daemon.service"
 #      fprintf(fp, gOutBuff+counter);
 #      ^~~~~~~
 SECURITY_STRINGFORMAT = ""
+
+# pmklogd/2.0.0-2/build/Configured/src/PmKLogDaemon.c:274:30: error: implicit declaration of function 'g_strstr_len' [-Wimplicit-function-declaration]
+# pmklogd/2.0.0-2/build/Configured/src/PmKLogDaemon.c:298:28: error: implicit declaration of function 'g_str_has_prefix' [-Wimplicit-function-declaration]
+CFLAGS += "-Wno-error=implicit-function-declaration"

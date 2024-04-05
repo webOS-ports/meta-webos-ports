@@ -31,3 +31,21 @@ do_install:append() {
     install -d ${D}${sysconfdir}/ssl
     install -m 0644 ${S}/files/conf/ssl/openssl.cnf ${D}${sysconfdir}/ssl
 }
+
+# pmcertificatemgr/2.0.0-29+git/git/src/cert_pkcs.c:105:57: error: passing argument 1 of 'EVP_PKEY_type' makes integer from pointer without a cast [-Wint-conversion]
+# pmcertificatemgr/2.0.0-29+git/git/src/cert_pkcs.c:105:79: error: passing argument 1 of 'EVP_PKEY_type' makes integer from pointer without a cast [-Wint-conversion]
+# pmcertificatemgr/2.0.0-29+git/git/src/cert_db.c:360:50: error: passing argument 1 of 'OPENSSL_sk_num' from incompatible pointer type [-Wincompatible-pointer-types]
+# pmcertificatemgr/2.0.0-29+git/git/src/cert_db.c:411:49: error: passing argument 1 of 'OPENSSL_sk_num' from incompatible pointer type [-Wincompatible-pointer-types]
+# pmcertificatemgr/2.0.0-29+git/git/src/cert_db.c:417:62: error: passing argument 1 of 'OPENSSL_sk_value' from incompatible pointer type [-Wincompatible-pointer-types]
+# pmcertificatemgr/2.0.0-29+git/git/src/cert_db.c:682:52: error: passing argument 1 of 'OPENSSL_sk_num' from incompatible pointer type [-Wincompatible-pointer-types]
+# pmcertificatemgr/2.0.0-29+git/git/src/cert_db.c:686:56: error: passing argument 1 of 'OPENSSL_sk_value' from incompatible pointer type [-Wincompatible-pointer-types]
+# pmcertificatemgr/2.0.0-29+git/git/src/cert_db.c:778:54: error: passing argument 1 of 'OPENSSL_sk_num' from incompatible pointer type [-Wincompatible-pointer-types]
+# pmcertificatemgr/2.0.0-29+git/git/src/cert_db.c:783:62: error: passing argument 1 of 'OPENSSL_sk_value' from incompatible pointer type [-Wincompatible-pointer-types]
+# pmcertificatemgr/2.0.0-29+git/git/src/cert_db.c:843:54: error: passing argument 1 of 'OPENSSL_sk_num' from incompatible pointer type [-Wincompatible-pointer-types]
+# pmcertificatemgr/2.0.0-29+git/git/src/cert_db.c:848:62: error: passing argument 1 of 'OPENSSL_sk_value' from incompatible pointer type [-Wincompatible-pointer-types]
+# pmcertificatemgr/2.0.0-29+git/git/src/cert_db.c:944:54: error: passing argument 1 of 'OPENSSL_sk_num' from incompatible pointer type [-Wincompatible-pointer-types]
+# pmcertificatemgr/2.0.0-29+git/git/src/cert_db.c:951:62: error: passing argument 1 of 'OPENSSL_sk_value' from incompatible pointer type [-Wincompatible-pointer-types]
+# pmcertificatemgr/2.0.0-29+git/git/src/cert_db.c:1024:32: error: passing argument 1 of 'OPENSSL_sk_num' from incompatible pointer type [-Wincompatible-pointer-types]
+# pmcertificatemgr/2.0.0-29+git/git/src/cert_db.c:1028:46: error: passing argument 1 of 'OPENSSL_sk_value' from incompatible pointer type [-Wincompatible-pointer-types]
+# pmcertificatemgr/2.0.0-29+git/git/src/cert_utils.c:569:25: error: passing argument 1 of 'EVP_PKEY_type' makes integer from pointer without a cast [-Wint-conversion]
+CFLAGS += "-Wno-error=int-conversion -Wno-error=incompatible-pointer-types"

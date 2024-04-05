@@ -26,3 +26,5 @@ do_install:append() {
     install -m 0644 ${S}/files/systemd/org.webosports.service.certmgr.service ${D}${systemd_unitdir}/system/
 }
 
+# certmgrd/0.1.0-1+git/git/src/certmgr_service.c:249:18: error: implicit declaration of function 'luna_service_message_get_int'; did you mean 'luna_service_message_get_string'? [-Wimplicit-function-declaration]
+CFLAGS += "-Wno-error=implicit-function-declaration"
