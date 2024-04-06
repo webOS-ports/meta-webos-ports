@@ -19,3 +19,21 @@ FILES:${PN}-gpl = " \
 VIRTUAL-RUNTIME_bash ?= "bash"
 RDEPENDS:${PN}-ptest:append:class-target = " ${VIRTUAL-RUNTIME_bash}"
 RDEPENDS:${PN}-ptest:remove:class-target = "${@oe.utils.conditional('WEBOS_PREFERRED_PROVIDER_FOR_BASH', 'busybox', 'bash', '', d)}"
+
+# This part is introduced for LuneOS, to create a DBus session (needed by voicecall, for instance)
+FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
+
+SRC_URI += " \
+    file://dbus-session.service \
+    file://startup-dbus-session.sh \
+"
+
+do_install:append() {
+    install -d ${D}${systemd_unitdir}/system
+    install -m 0644 ${WORKDIR}/dbus-session.service ${D}${systemd_unitdir}/system/
+
+    install -d ${D}${bindir}
+    install -m 0755 ${WORKDIR}/startup-dbus-session.sh ${D}${bindir}/
+}
+
+FILES:${PN} += "${bindir} ${systemd_unitdir}"
