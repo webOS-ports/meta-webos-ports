@@ -8,6 +8,8 @@ SRC_URI += " \
     file://0003-daemon-Set-default-resampler-to-speex-fixed-2.patch \
     file://0004-suspend-on-idle-Ensure-we-still-time-out-if-a-stream.patch \
     file://0005-Add-dbus-policy-for-Bluez4.patch \
+    file://0006-alsa-ucm-Check-UCM-verb.patch \
+    file://0007-alsa-ucm-Replace-port-device-UCM-context-assertion.patch \
 "
 
 do_install:append() {
