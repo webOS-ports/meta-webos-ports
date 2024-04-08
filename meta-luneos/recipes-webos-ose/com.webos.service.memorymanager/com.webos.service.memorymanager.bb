@@ -21,7 +21,10 @@ inherit webos_enhanced_submissions
 inherit pkgconfig
 inherit python3native
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = " \
+    ${WEBOSOSE_GIT_REPO_COMPLETE} \
+    file://0001-com.webos.service.memorymanager-Fix-outbound-permiss.patch \
+"
 S = "${WORKDIR}/git"
 
 inherit webos_systemd
