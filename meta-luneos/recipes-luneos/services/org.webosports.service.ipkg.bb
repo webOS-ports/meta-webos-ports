@@ -21,33 +21,29 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 S = "${WORKDIR}/git/oe-service"
 
-pkg_postinst_ontarget:${PN}() {
+pkg_postinst:${PN}() {
     #!/bin/sh -e
 
     APPS=/media/cryptofs/apps
 
     # Create the opkg config and database areas
-    mkdir -p $APPS/${sysconfdir}/opkg $APPS/${localstatedir}/lib/opkg/cache
+    mkdir -p $D$APPS/${sysconfdir}/opkg $D$APPS/${localstatedir}/lib/opkg/cache
 
     # We provide an empty status file to satisfy the ipkgservice
-    touch $APPS/${localstatedir}/lib/opkg/status
+    touch $D$APPS/${localstatedir}/lib/opkg/status
 
     # Remove all list database cache files
-    rm -f $APPS/${localstatedir}/lib/opkg/lists/*
-
-    # Set up the architecture configuration file
-    rm -f $APPS/${sysconfdir}/opkg/arch.conf
-    cp ${sysconfdir}/opkg/arch.conf $APPS/${sysconfdir}/opkg/arch.conf
+    rm -f $D$APPS/${localstatedir}/lib/opkg/lists/*
 
     # Install webosports all-arch feeds
-    echo "src/gz webosports http://feeds.webos-ports.org/webos-ports/all" > $APPS/${sysconfdir}/opkg/webos-ports.conf
+    echo "src/gz webosports http://feeds.webos-ports.org/webos-ports/all" > $D$APPS/${sysconfdir}/opkg/webos-ports.conf
 
     # Add additional feeds which are disabled by default and NOT SUPPORTED by webOS-ports
     # ports / LuneOS. The user has to turn them on manually to use them.
-    echo "src PivotCE https://feed.pivotce.com" > $APPS/${sysconfdir}/opkg/pivotce.conf.disabled
-    echo "src Macaw-enyo https://minego.net/preware/macaw-enyo" > $APPS/${sysconfdir}/opkg/macaw-enyo.conf.disabled
-    echo "src Hominid-Software https://hominidsoftware.com/preware" > $APPS/${sysconfdir}/opkg/hominid-software.conf.disabled
-    echo "src/gz FeedSpider2 https://www.hunternet.ca/fs/luneos" > $APPS/${sysconfdir}/opkg/feedspider.conf.disabled
+    echo "src PivotCE https://feed.pivotce.com" > $D$APPS/${sysconfdir}/opkg/pivotce.conf.disabled
+    # echo "src Macaw-enyo https://minego.net/preware/macaw-enyo" > $D$APPS/${sysconfdir}/opkg/macaw-enyo.conf.disabled
+    echo "src Hominid-Software https://hominidsoftware.com/preware" > $D$APPS/${sysconfdir}/opkg/hominid-software.conf.disabled
+    echo "src/gz FeedSpider2 https://www.hunternet.ca/fs/luneos" > $D$APPS/${sysconfdir}/opkg/feedspider.conf.disabled
 }
 
 # | /OE/build/luneos-master/webos-ports/tmp-glibc/work/core2-64-webos-linux/org.webosports.service.ipkg/2.0.0-2+gitAUTOINC+2f5147149b-r0/recipe-sysroot-native/usr/bin/x86_64-webos-linux/../../libexec/x86_64-webos-linux/gcc/x86_64-webos-linux/10.2.0/ld: error: CMakeFiles/org.webosports.service.ipkg.dir/src/luna_methods.c.o: multiple definition of 'priv_serviceHandle'
