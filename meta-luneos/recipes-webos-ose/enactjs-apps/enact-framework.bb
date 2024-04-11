@@ -28,6 +28,7 @@ PV = "4.5.3"
 SRCREV_main = "1cede54ee5df6f1a33d253eccaaf285fe1809bb6"
 SRCREV_enact = "020e8fd4ad58352274ec85a1842eeab01f12dbca"
 
+do_fetch[vardeps] += "SRCREV_enact"
 SRCREV_FORMAT = "main_enact"
 
 # Ordered dependency list for Moonstone; provides shrink-wrap style locking in of package versions
@@ -36,7 +37,7 @@ WEBOS_ENACT_DEPENDENCIES ??= "\
     direction@1.0.4 \
     dom-walk@0.1.2 \
     global@4.4.0 \
-    ilib@14.18.0 \
+    ilib@14.19.0 \
     invariant@2.2.4 \
     is-function@1.0.2 \
     js-tokens@4.0.0 \
@@ -59,7 +60,7 @@ WEBOS_ENACT_DEPENDENCIES ??= "\
 # NOTE: We only need to bump PR if we change something OTHER than
 # PV, SRCREV or the dependencies statement above.
 
-PR = "r25"
+PR = "r26"
 
 # Skip unneeded tasks
 do_configure[noexec] = "1"

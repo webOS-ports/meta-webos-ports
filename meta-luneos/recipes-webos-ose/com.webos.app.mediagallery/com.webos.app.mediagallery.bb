@@ -7,7 +7,7 @@
 # under vendor's standard commercial license.
 
 SUMMARY = "Mediagallery QML App"
-AUTHOR = "Hyein Lee <hyein1.lee@lge.com>"
+AUTHOR = "KIEN TRUNG PHAM <kien2.pham@lge.com>"
 SECTION = "webos/apps"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = " \
@@ -15,7 +15,7 @@ LIC_FILES_CHKSUM = " \
 "
 
 DEPENDS = "qtdeclarative pmloglib luna-service2 libpbnjson"
-DEPENDS:append = " ${@ 'qtshadertools-native' if d.getVar('QT_VERSION') == '6' else '' }"
+DEPENDS:append = " ${@ 'qtshadertools-native' if d.getVar('QT_VERSION')[0] == '6' else '' }"
 
 RDEPENDS:${PN} += "qml-webos-framework qml-webos-bridge"
 

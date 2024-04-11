@@ -14,6 +14,7 @@ RDEPENDS:${PN} += "luna-service2 pmloglib nodejs nodejs-module-webos-service nod
 inherit systemd
 inherit webos_cmake
 inherit webos_system_bus
+inherit webos_enhanced_submissions
 inherit webos_npm_env
 
 require flowmanager.inc
