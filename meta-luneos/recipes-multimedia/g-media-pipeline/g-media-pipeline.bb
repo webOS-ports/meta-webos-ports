@@ -1,4 +1,4 @@
-# Copyright (c) 2018-2023 LG Electronics, Inc.
+# Copyright (c) 2018-2024 LG Electronics, Inc.
 
 SUMMARY = "G media pipeline is a media pipeline which uses GStreamer"
 AUTHOR = "Sujeet Nayak <Sujeet.nayak@lge.com>"
@@ -16,18 +16,21 @@ inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit pkgconfig
 
-PR = "r18"
+# media-resource-calculator since submissions 47 isn't usable for any other MACHINE than
+# raspberrypi3
+# raspberrypi3-64
+# raspberrypi4
+# raspberrypi4-64
+# qemux86
+# qemux86-64
+COMPATIBLE_MACHINE = "^qemux86$|^qemux86-64$|^raspberrypi3$|^raspberrypi3-64$|^raspberrypi4$|^raspberrypi4-64$"
+
+PR = "r19"
 DEPENDS = "boost gstreamer1.0 gstreamer1.0-plugins-base gstreamer1.0-plugins-bad umediaserver media-resource-calculator webos-wayland-extensions"
 RDEPENDS:${PN} = "gstreamer1.0-plugins-webosrs"
 DEPENDS:append:rpi = " virtual/libomxil"
 
-COMPATIBLE_MACHINE = "^qemux86$|^qemux86-64$|^raspberrypi3$|^raspberrypi3-64$|^raspberrypi4$|^raspberrypi4-64$"
+WEBOS_VERSION = "1.0.0-gav.53_4e91a56809eb88d4b45d0121f3912a040995a141"
 
-WEBOS_VERSION = "1.0.0-gav.48_3ba1c574047904a87182f34482eea6197bf5a48f"
-
-WEBOS_GIT_PARAM_BRANCH = "@gav"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
-
-FILES_SOLIBSDEV = ""
-FILES:${PN} += "${libdir}/*.so"

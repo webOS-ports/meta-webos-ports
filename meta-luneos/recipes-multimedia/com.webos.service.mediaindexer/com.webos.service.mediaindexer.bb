@@ -9,8 +9,8 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=2bdfe040dcf81b4038370ae96036c519 \
 "
 
-WEBOS_VERSION = "1.0.0-25_41eadb20de0db9950251567680e83f4d218d9110"
-PR = "r11"
+WEBOS_VERSION = "1.0.0-28_fa2854730d1da15d7205b650c40e6a69647767be"
+PR = "r13"
 
 inherit webos_cmake
 inherit pkgconfig
@@ -27,7 +27,6 @@ VIRTUAL-RUNTIME_pdm ?= "com.webos.service.pdm"
 RDEPENDS:${PN} = "${VIRTUAL-RUNTIME_pdm} db8"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-CMakeLists.txt-respect-libdir-setting.patch \
     file://0001-Fix-app-permissions.patch \
     file://0001-mediaitem.cpp-Fix-build-with-gcc-14.patch \
 "
@@ -53,10 +52,6 @@ do_install:append() {
 # configure the folders on local storage which shall be scanned from
 # storage plugin, the format is <path>,<name>,<description>;...
 #EXTRA_OECMAKE += " -DSTORAGE_DEVS:string='/media/local,Media,Local Media Storage'"
-
-# media indexer client library
-FILES_SOLIBSDEV = ""
-FILES:${PN} += "${libdir}/*.so"
 
 inherit useradd
 USERADD_PACKAGES = "${PN}"

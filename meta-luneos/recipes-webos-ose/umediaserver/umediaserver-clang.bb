@@ -10,7 +10,8 @@ PACKAGECONFIG[system-libcxx] = ",,llvm-native clang"
 
 WEBOS_REPO_NAME = "umediaserver"
 
-PR = "${INC_PR}.3"
+PR = "${INC_PR}.4"
+
 FILESEXTRAPATHS:prepend := "${THISDIR}/umediaserver:"
 
 OECMAKE_CXX_FLAGS += "-Wno-c++11-narrowing -Wno-format-security"

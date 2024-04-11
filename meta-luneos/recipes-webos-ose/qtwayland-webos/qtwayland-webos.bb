@@ -47,21 +47,13 @@ DEBIAN_NOAUTONAME:${PN}-dev = "1"
 # Enable LTTng tracing capability when enabled in webos_lttng class
 EXTRA_QMAKEVARS_PRE += "${@oe.utils.conditional('WEBOS_LTTNG_ENABLED', '1', 'CONFIG+=lttng', '', d)}"
 
-# we don't provide cmake tests
-EXTRA_QMAKEVARS_POST += "CONFIG-=create_cmake"
-
-PACKAGECONFIG ??= ""
-PACKAGECONFIG[criu] = "CONFIG+=criu,,criu-webos"
-
-EXTRA_QMAKEVARS_PRE += "${PACKAGECONFIG_CONFARGS}"
-
 FILES:${PN} += " \
-    ${OE_QMAKE_PATH_PLUGINS}/*/*${SOLIBSDEV} \
+    ${libdir}/plugins/*/*${SOLIBSDEV} \
 "
 
 FILES:${PN}-dev += " \
-    ${OE_QMAKE_PATH_LIBS}/*.prl \
-    ${OE_QMAKE_PATH_QT_ARCHDATA}/mkspecs/* \
+    ${libdir}/*.prl \
+    ${libdir}/mkspecs/* \
 "
 
 # FIXME: weboscompositorextensionclient is deprecated and merged into

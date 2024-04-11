@@ -14,12 +14,11 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "lttng-ust libpbnjson pmloglib glib-2.0"
 
-# See https://github.com/shr-project/meta-webosose/commit/c1163bcddc2b3381881458378e3a383296d7a5d9
-# RDEPENDS:${PN} += " \
-#     babeltrace \
-#     lttng-tools \
-#     lttng-modules \
-# "
+RDEPENDS:${PN} += " \
+    babeltrace \
+    lttng-tools \
+    lttng-modules \
+"
 
 WEBOS_VERSION = "1.0.0-17_f6d4399f296df2b4bead4dda7f3e56090634fd6b"
 PR = "r13"
