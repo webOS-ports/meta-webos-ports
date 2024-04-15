@@ -16,7 +16,7 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 # COMPATIBLE_MACHINE = "^halium$"
 
 PV = "6.5.2+git"
-SRCREV = "7d6f6c577749b186698295c8f9848666c0a53203"
+SRCREV = "4fbf12f43e4ba63cbac8a24805e2549fa67bd772"
 
 inherit webos_ports_repo
 inherit qt6-cmake
