@@ -14,6 +14,7 @@ inherit webos_cmake
 inherit webos_system_bus
 inherit webos_public_repo
 inherit webos_enhanced_submissions
+inherit webos_machine_dep
 inherit pkgconfig
 
 # media-resource-calculator since submissions 47 isn't usable for any other MACHINE than
@@ -23,7 +24,8 @@ inherit pkgconfig
 # raspberrypi4-64
 # qemux86
 # qemux86-64
-COMPATIBLE_MACHINE = "^qemux86$|^qemux86-64$|^raspberrypi3$|^raspberrypi3-64$|^raspberrypi4$|^raspberrypi4-64$"
+#In LuneOS we want this for all machines
+#COMPATIBLE_MACHINE = "^qemux86$|^qemux86-64$|^raspberrypi3$|^raspberrypi3-64$|^raspberrypi4$|^raspberrypi4-64$"
 
 PR = "r19"
 DEPENDS = "boost gstreamer1.0 gstreamer1.0-plugins-base gstreamer1.0-plugins-bad umediaserver media-resource-calculator webos-wayland-extensions"
@@ -32,5 +34,9 @@ DEPENDS:append:rpi = " virtual/libomxil"
 
 WEBOS_VERSION = "1.0.0-gav.53_4e91a56809eb88d4b45d0121f3912a040995a141"
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+WEBOS_GIT_PARAM_BRANCH = "@gav"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}\ 
+    file://0001-Add-generic-config.patch \
+"
 S = "${WORKDIR}/git"
+
