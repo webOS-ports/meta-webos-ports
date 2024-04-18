@@ -50,6 +50,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0011-Add-additional-window.open-features-management.patch \
     file://0012-PalmSystem-add-banner-support.patch \
     file://0013-WebAppBase-fix-window.close-for-multi-window-apps.patch \
+    file://0014-WAM-Fix-outbound-permission-error.patch \
 "
 S = "${WORKDIR}/git"
 
