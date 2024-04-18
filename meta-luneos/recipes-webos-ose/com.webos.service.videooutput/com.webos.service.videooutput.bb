@@ -25,6 +25,7 @@ inherit webos_test_provider
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}\
     file://0001-Add-trustLevel.patch \
+    file://0002-com.webos.service.videooutput-Fix-outbound-permissio.patch \
 "
 
 inherit webos_systemd
