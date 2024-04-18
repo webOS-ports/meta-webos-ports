@@ -17,7 +17,8 @@ inherit webos_machine_impl_dep
 inherit webos_machine_dep
 inherit webos_pkgconfig
 
-COMPATIBLE_MACHINE = "^qemux86$|^qemux86-64$|^raspberrypi3$|^raspberrypi3-64$|^raspberrypi4$|^raspberrypi4-64$"
+#In LuneOS we want this for all machines
+#COMPATIBLE_MACHINE = "^qemux86$|^qemux86-64$|^raspberrypi3$|^raspberrypi3-64$|^raspberrypi4$|^raspberrypi4-64$"
 
 DEPENDS = "boost gstreamer1.0 gstreamer1.0-plugins-base gstreamer1.0-plugins-bad umediaserver media-resource-calculator"
 DEPENDS:append:rpi = " virtual/libomxil"
