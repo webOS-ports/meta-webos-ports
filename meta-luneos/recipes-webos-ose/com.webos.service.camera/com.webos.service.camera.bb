@@ -35,16 +35,6 @@ S = "${WORKDIR}/git"
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "com.webos.service.camera.service"
 
-# All service files will be managed in meta-lg-webos.
-# The service file in the repository is not used, so please delete it.
-# See the page below for more details.
-# http://collab.lge.com/main/pages/viewpage.action?pageId=2031668745
-do_install:append() {
-    rm ${D}${sysconfdir}/systemd/system/com.webos.service.camera.service
-}
-
-COMPATIBLE_MACHINE = "(.*)"
-
 inherit useradd
 USERADD_PACKAGES = "${PN}"
 
