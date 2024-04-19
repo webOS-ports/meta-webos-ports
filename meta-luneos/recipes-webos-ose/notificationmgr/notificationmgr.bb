@@ -10,7 +10,7 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=2bdfe040dcf81b4038370ae96036c519 \
 "
 
-DEPENDS = "glib-2.0 luna-service2 libpbnjson pmloglib boost libxml++"
+DEPENDS = "glib-2.0 luna-service2 libpbnjson pmloglib boost"
 
 WEBOS_VERSION = "1.0.0-26_44ada0c03140ee74a73a0e41b8f506e79c58d97f"
 PR = "r11"
@@ -29,6 +29,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0003-com.webos.notification.role.json.in-Fix-permission-i.patch \
     file://0004-NotificationService.h-Add-back-bits-required-by-Lune.patch \
     file://0005-com.webos.notification.perm.json-Fix-incorrect-value.patch \
+    file://0006-notificationmgr-Drop-libxml-requirement-and-bits.patch \
 "
 S = "${WORKDIR}/git"
 
