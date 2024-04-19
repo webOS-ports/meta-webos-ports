@@ -1,0 +1,623 @@
+From c30d9d74bf80fca943b8381b19d171c0050a26c3 Mon Sep 17 00:00:00 2001
+From: Herrie <Github.com@herrie.org>
+Date: Fri, 19 Apr 2024 11:25:29 +0200
+Subject: [PATCH] notificationmgr: Drop libxml requirement and bits
+
+Seems that libxml2 got removed from meta-oe with. https://github.com/openembedded/meta-openembedded/commit/04eefd302d58c403e011ad34d1d346703a364a53
+
+Seeing that libxml is only used by parseDoc function which is not used, let's drop it altogether.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+---
+Upstream-Status: Pending
+
+---
+ CMakeLists.txt              |   5 -
+ src/NotificationService.cpp |  71 -------
+ src/NotificationService.h   |   1 -
+ src/sax_parser.cpp          | 365 ------------------------------------
+ src/sax_parser.h            |  99 ----------
+ 5 files changed, 541 deletions(-)
+ delete mode 100755 src/sax_parser.cpp
+ delete mode 100755 src/sax_parser.h
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 05771d6..eed7fb4 100755
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -49,10 +49,6 @@ include_directories(${Boost_INCLUDE_DIRS})
+ webos_add_compiler_flags(ALL ${Boost_CFLAGS_OTHER})
+ add_definitions(-DBOOST_BIND_NO_PLACEHOLDERS)
+ 
+-# -- check for libxml++
+-pkg_check_modules(LIBXMLXX REQUIRED libxml++-2.6)
+-webos_add_compiler_flags(ALL ${LIBXMLXX_CFLAGS})
+-
+ pkg_check_modules(OPENSSL REQUIRED openssl)
+ webos_add_compiler_flags(ALL ${OPENSSL_CFLAGS})
+ 
+@@ -74,7 +70,6 @@ target_link_libraries(notificationmgr
+     ${LUNASERVICE_LDFLAGS}
+     ${PBNJSON_CPP_LDFLAGS}
+     ${PMLOG_LDFLAGS}
+-    ${LIBXMLXX_LDFLAGS}
+     ${OPENSSL_LDFLAGS}
+ )
+ 
+diff --git a/src/NotificationService.cpp b/src/NotificationService.cpp
+index 6115a58..e6fdd84 100755
+--- a/src/NotificationService.cpp
++++ b/src/NotificationService.cpp
+@@ -38,7 +38,6 @@
+ #include <Logging.h>
+ #include <pbnjson.hpp>
+ #include <vector>
+-#include "sax_parser.h"
+ 
+ 
+ #define APPMGR_LAUNCH_CALL "palm://com.webos.applicationManager/"
+@@ -2835,76 +2834,6 @@ NotificationService::NotiMsgItem::NotiMsgItem(pbnjson::JValue payload, bool remo
+     this->removeAll = removeAll;
+ };
+ 
+-//Parsing XML
+-bool NotificationService::parseDoc(const char *docname)
+-{
+-    // Set the global C and C++ locale to the user-configured locale,
+-    // so we can use std::cout with UTF-8, via Glib::ustring, without exceptions.
+-    std::locale::global(std::locale(""));
+-
+-    std::string filepath(docname);
+-
+-    try
+-    {
+-        Schedule::schedule_parsing = true;
+-        Canvas::canvas_parsing = false;
+-        LOG_DEBUG("Creating Schedule Parse object");
+-        MySaxParser::level=0;
+-        MySaxParser parser;
+-        parser.set_substitute_entities(true);
+-        parser.parse_file(filepath);
+-    }
+-
+-    catch(const xmlpp::exception& ex)
+-    {
+-        LOG_ERROR(MSGID_XML_PARSING_ERROR, 1, PMLOGKS("libxml++ exception:", ex.what()),"");
+-        return false;
+-    }
+-
+-    std::string xmlpath;
+-    std::string canvasPath;
+-    /*
+-    //Keeping this code, if in future we have to pasre the XML file to get "CanvasPath"
+-    std::string path = Schedule::instance()->Period["CanvasPath"].asString();
+-    int found = path.find_last_of("/");
+-
+-    if( found == (path.length()-1))
+-        xmlpath =  Schedule::instance()->Period["CanvasPath"].asString() + Schedule::instance()->CanvasName;
+-    else
+-        xmlpath =  Schedule::instance()->Period["CanvasPath"].asString() + "/" + Schedule::instance()->CanvasName;
+-    */
+-
+-    int lastOccurrence = filepath.find_last_of("/");
+-
+-    if (lastOccurrence > -1)
+-        canvasPath = filepath.substr(0, lastOccurrence);
+-    else
+-    {
+-        LOG_ERROR(MSGID_XML_PARSING_ERROR, 1 ,PMLOGKS("Wrong Input Param:", "Canvas path is not proper"),"");
+-        return false;
+-    }
+-
+-    xmlpath =  canvasPath + "/" + Schedule::instance()->CanvasName;
+-
+-    LOG_INFO(MSGID_XML_CANVAS_PATH, 1, PMLOGKS("PATH",xmlpath.c_str()),"");
+-    try
+-    {
+-        Schedule::schedule_parsing = false;
+-        Canvas::canvas_parsing = true;
+-        LOG_DEBUG("Creating Canvas Parse object");
+-        MySaxParser::level=0;
+-        MySaxParser parser;
+-        parser.set_substitute_entities(true);
+-        parser.parse_file(xmlpath);
+-    }
+-
+-    catch(const xmlpp::exception& ex)
+-    {
+-        LOG_ERROR(MSGID_XML_PARSING_ERROR, 1 ,PMLOGKS("libxml++ exception:", ex.what()),"");
+-        return false;
+-    }
+-    return true;
+-}
+ bool NotificationService::cb_setToastStatus(LSHandle *lshandle, LSMessage *msg, void *user_data)
+ {
+     bool success = false;
+diff --git a/src/NotificationService.h b/src/NotificationService.h
+index 2945d25..17bda63 100755
+--- a/src/NotificationService.h
++++ b/src/NotificationService.h
+@@ -79,7 +79,6 @@ public:
+     static bool cb_getNotificationInfo(LSHandle* lshandle, LSMessage *msg, void *user_data);
+     static bool cb_getRemoteNotificationInfo(LSHandle* lshandle, LSMessage *msg, void *user_data);
+     static bool cb_launch(LSHandle* lshandle, LSMessage *msg, void *user_data);
+-    static bool parseDoc(const char *docname);
+ 
+     bool postToastNotification(pbnjson::JValue toastNotificationPayload, bool staleMsg, bool persistentMsg, std::string &errorText);
+     bool postToastCountNotification(pbnjson::JValue toastCountPayload, bool staleMsg, bool persistentMsg, std::string &errorText);
+diff --git a/src/sax_parser.cpp b/src/sax_parser.cpp
+deleted file mode 100755
+index 357c5d9..0000000
+--- a/src/sax_parser.cpp
++++ /dev/null
+@@ -1,365 +0,0 @@
+-// Copyright (c) 2014-2018 LG Electronics, Inc.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// SPDX-License-Identifier: Apache-2.0
+-
+-#include "sax_parser.h"
+-#include <glibmm/convert.h> //For Glib::ConvertError
+-#include <vector>
+-#include <iostream>
+-#include <Logging.h>
+-#include <stdlib.h>
+-
+-static Schedule* s_instance = 0;
+-static Canvas* canv_instance = 0;
+-int MySaxParser::level = 0;
+-static bool on_end_elem = false;
+-static bool have_attribute = false;
+-bool Schedule::schedule_parsing = false;
+-bool Canvas::canvas_parsing = false;
+-
+-
+-std::vector<std::string> nodes;
+-
+-Schedule * Schedule::instance()
+-{
+-    if(!s_instance) {
+-        s_instance = new Schedule();
+-    }
+-
+-    return s_instance;
+-}
+-
+-Schedule::Schedule()
+-    :Zorder(0){
+-
+-}
+-
+-Schedule::~Schedule(){
+-
+-}
+-
+-Canvas * Canvas::instance()
+-{
+-    if(!canv_instance) {
+-        canv_instance = new Canvas();
+-    }
+-
+-    return canv_instance;
+-}
+-
+-Canvas::Canvas()
+-  :lineSpacing(0)
+-  ,level(0)
+-  ,bold(false)
+-  ,italic(false)
+-  ,text_size(0)
+-  ,underline(false)
+-  ,speed(0)
+-  ,space(0)
+-  ,line_thickness(0)
+-  ,window_flag(false)
+-  ,text_flag(false)
+-  ,line_flag(false)
+-  ,line_view(false)
+-{
+-
+-}
+-
+-Canvas::~Canvas(){
+-
+-}
+-
+-MySaxParser::MySaxParser()
+-   :xmlpp::SaxParser()
+-{
+-}
+-
+-MySaxParser::~MySaxParser()
+-{
+-}
+-
+-void MySaxParser::on_start_document()
+-{
+-    LOG_DEBUG("on_start_XML_document");
+-}
+-
+-void MySaxParser::on_end_document()
+-{
+-    LOG_DEBUG("on_end_XML_document");
+-}
+-
+-void MySaxParser::on_start_element(const Glib::ustring& name,
+-                                   const AttributeList& attributes)
+-{
+-    nodes.push_back(name);
+-    pbnjson::JValue Object;
+-
+-    xmlpp::SaxParser::AttributeList::const_iterator iter = attributes.begin();
+-    if(iter!= attributes.end())
+-    {
+-        Object = pbnjson::Object();
+-        Object.put("node",name.c_str());
+-        have_attribute = true;
+-
+-        for(xmlpp::SaxParser::AttributeList::const_iterator iter = attributes.begin(); iter != attributes.end(); ++iter)
+-        {
+-
+-            Object.put((iter->name).c_str(),iter->value.c_str());
+-        }
+-
+-        if(!Object.isNull())
+-        {
+-            if(Schedule::schedule_parsing)
+-                Schedule::instance()->process_Schedule_Objects(Object);
+-            else
+-                Canvas::instance()->process_Canvas_Objects(Object,level);
+-        }
+-        level++;
+-    }
+-}
+-
+-void MySaxParser::on_end_element(const Glib::ustring& /* name */)
+-{
+-    LOG_DEBUG("on_end XML element");
+-    on_end_elem = true;
+-}
+-
+-void MySaxParser::on_characters(const Glib::ustring& text)
+-{
+-    if(!on_end_elem && !have_attribute)
+-    {
+-        //process Key_pair value with Node and level
+-        std::string key = nodes.back();
+-        if(Schedule::schedule_parsing)
+-            Schedule::instance()->process_Schedule_OnCharacter(key,text);
+-        else
+-            Canvas::instance()->process_Canvas_OnCharacter(key,text);
+-    }
+-    on_end_elem = false;
+-    have_attribute = false;
+-}
+-
+-void MySaxParser::on_comment(const Glib::ustring& text)
+-{
+-    LOG_DEBUG("Xml Comment %s",text.c_str());
+-}
+-
+-void MySaxParser::on_warning(const Glib::ustring& text)
+-{
+-    LOG_DEBUG("Xml warning %s",text.c_str());
+-}
+-
+-void MySaxParser::on_error(const Glib::ustring& text)
+-{
+-    LOG_DEBUG("Xml ERROR %s",text.c_str());
+-}
+-
+-void MySaxParser::on_fatal_error(const Glib::ustring& text)
+-{
+-    LOG_DEBUG("Xml FATAL_ERROR %s",text.c_str());
+-}
+-
+-//Process Scehdule.ace
+-
+-void Schedule::process_Schedule_Objects(pbnjson::JValue &Obj)
+-{
+-
+-    std::string node;
+-    node = Obj["node"].asString();
+-
+-    if (node.compare("Period") == 0)
+-    {
+-        Schedule::instance()->Period = pbnjson::Object();
+-        Schedule::instance()->Period.put("CanvasPath",Obj["CanvasPath"]);
+-        Schedule::instance()->Period.put("MediaPath",Obj["MediaPath"]);
+-        Schedule::instance()->Period.put("Type",Obj["Type"]);
+-    }
+-    else if(node.compare("Schedule") == 0)
+-    {
+-        Schedule::instance()->sched = pbnjson::Object();
+-        Schedule::instance()->sched.put("Duration",Obj["Duration"]);
+-        Schedule::instance()->sched.put("Name",Obj["Name"]);
+-        Schedule::instance()->sched.put("StartDateTime",Obj["StartDateTime"]);
+-        Schedule::instance()->sched.put("Repeat",Obj["Repeat"]);
+-        Schedule::instance()->sched.put("Idx",Obj["Idx"]);
+-    }
+-
+-}
+-
+-void Schedule::process_Schedule_OnCharacter(std::string key,std::string value)
+-{
+-
+-    if(key.compare("CanvasName") == 0)
+-    {
+-        Schedule::instance()->CanvasName = value;
+-    }
+-    else if(key.compare("CanvasType") == 0)
+-    {
+-        Schedule::instance()->CanvasType = value;
+-    }
+-    else if(key.compare("Zorder") == 0)
+-    {
+-        Schedule::instance()->Zorder = atoi(value.c_str());
+-    }
+-}
+-
+-//Procees Canvas xml
+-void Canvas::process_Canvas_Objects(pbnjson::JValue &Obj, int level)
+-{
+-
+-    std::string node;
+-    node = Obj["node"].asString();
+-    Canvas *canv_Obj = Canvas::instance();
+-    if (node.compare("Canvas") == 0)
+-    {
+-        canv_Obj->canvas = pbnjson::Object();
+-        canv_Obj->canvas.put("Duration",Obj["Duration"]);
+-        canv_Obj->canvas.put("Name",Obj["Name"]);
+-        canv_Obj->canvas.put("Type",Obj["Type"]);
+-        canv_Obj->canvas.put("Idx",Obj["Idx"]);
+-    }
+-
+-    else if(node.compare("Region") == 0)
+-    {
+-        if(Obj["Name"].asString().compare("background") == 0)
+-        {
+-            canv_Obj->wind_Region = pbnjson::Object();
+-            canv_Obj->wind_Region.put("Height",Obj["Height"]);
+-            canv_Obj->wind_Region.put("Name",Obj["Name"]);
+-            canv_Obj->wind_Region.put("Width",Obj["Width"]);
+-            canv_Obj->wind_Region.put("X",Obj["X"]);
+-            canv_Obj->wind_Region.put("Y",Obj["Y"]);
+-            canv_Obj->wind_Region.put("Z",Obj["Z"]);
+-        }
+-        else
+-        {
+-            canv_Obj->text_Region = pbnjson::Object();
+-            canv_Obj->text_Region.put("Height",Obj["Height"]);
+-            canv_Obj->text_Region.put("Name",Obj["Name"]);
+-            canv_Obj->text_Region.put("Width",Obj["Width"]);
+-            canv_Obj->text_Region.put("X",Obj["X"]);
+-            canv_Obj->text_Region.put("Y",Obj["Y"]);
+-            canv_Obj->text_Region.put("Z",Obj["Z"]);
+-        }
+-
+-    }
+-
+-    else if(node.compare("Media") == 0)
+-    {
+-        if(Obj["Type"].asString().compare("Window") == 0)
+-        {
+-            canv_Obj->window_flag = true;
+-            canv_Obj->text_flag = false;
+-        }
+-        else{
+-            canv_Obj->text_flag = true;
+-            canv_Obj->window_flag = false;
+-            canv_Obj->line_flag = false;
+-        }
+-    }
+-
+-    else if(node.compare("Line") == 0)
+-    {
+-        canv_Obj->line_view = Obj["View"].asBool();
+-        canv_Obj->line_flag = true;
+-        canv_Obj->text_flag = false;
+-    }
+-
+-    else if(node.compare("Content") == 0)
+-    {
+-        canv_Obj->content = pbnjson ::Object();
+-        canv_Obj->content.put("Duration",Obj["Duration"]);
+-        canv_Obj->content.put("StartTime",Obj["StartTime"]);
+-    }
+-
+-}
+-
+-void Canvas::process_Canvas_OnCharacter(std::string key,std::string value)
+-{
+-    Canvas *canv_Obj = Canvas::instance();
+-    if(key.compare("BkColor") == 0 && canv_Obj->window_flag)
+-        canv_Obj->win_bckGrndclr = value;
+-    else if(key.compare("BkColor") == 0 && canv_Obj->text_flag)
+-        canv_Obj->text_bckGrndclr = value;
+-    else if(key.compare("Color") == 0)
+-    {
+-        if(canv_Obj->line_flag)
+-            canv_Obj->line_color = value;
+-        else
+-            canv_Obj->text_color = value;
+-    }
+-    else if(key.compare("Thickness") == 0)
+-        canv_Obj->line_thickness = atoi(value.c_str());
+-    else if(key.compare("Font") == 0)
+-        canv_Obj->font = value;
+-    else if(key.compare("Bold") == 0)
+-    {
+-        if(value.compare("true") == 0)
+-            canv_Obj->bold = true;
+-        else
+-            canv_Obj->bold = false;
+-    }
+-    else if(key.compare("Italic") == 0)
+-    {
+-        if(value.compare("true") == 0)
+-            canv_Obj->italic = true;
+-        else
+-            canv_Obj->italic = false;
+-    }
+-    else if(key.compare("Underline") == 0)
+-    {
+-        if(value.compare("true") == 0)
+-            canv_Obj->underline = true;
+-        else
+-            canv_Obj->underline = false;
+-    }
+-    else if(key.compare("Size") == 0)
+-        canv_Obj->text_size = atoi(value.c_str());
+-    else if(key.compare("Space") == 0)
+-        canv_Obj->space = atoi(value.c_str());
+-    else if(key.compare("Effect") == 0)
+-        canv_Obj->effect = value;
+-    else if(key.compare("Speed") == 0)
+-        canv_Obj->speed = atoi(value.c_str());
+-    else if(key.compare("HAlign") == 0)
+-        canv_Obj->hAlign = value;
+-    else if(key.compare("VAlign") == 0)
+-        canv_Obj->vAlign = value;
+-    else if(key.compare("LineSpace") == 0)
+-        canv_Obj->lineSpacing = atoi(value.c_str());
+-    else if(key.compare("String") == 0)
+-    {
+-        if ((canv_Obj->message).empty())
+-        {
+-            canv_Obj->message = value;
+-        }
+-        else
+-        {
+-           canv_Obj->message = (canv_Obj->message).append(value);
+-        }
+-
+-        size_t pos = 0;
+-        std::string toReplace = ";nl;";
+-
+-        while ((pos = canv_Obj->message.find(toReplace)) != std::string::npos)
+-        {
+-            std::string replaceWith = "\n";
+-            canv_Obj->message.replace(pos, toReplace.length(), replaceWith);
+-            pos += replaceWith.length();
+-        }
+-    }
+-    else if(key.compare("Repeat") == 0)
+-        canv_Obj->repeat = value;
+-}
+diff --git a/src/sax_parser.h b/src/sax_parser.h
+deleted file mode 100755
+index 33d196e..0000000
+--- a/src/sax_parser.h
++++ /dev/null
+@@ -1,99 +0,0 @@
+-// Copyright (c) 2014-2018 LG Electronics, Inc.
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-//
+-// SPDX-License-Identifier: Apache-2.0
+-
+-#ifndef __LIBXMLPP_MYPARSER_H
+-#define __LIBXMLPP_MYPARSER_H
+-
+-#include <libxml++/libxml++.h>
+-#include <pbnjson.hpp>
+-
+-class MySaxParser : public xmlpp::SaxParser
+-{
+-public:
+-  MySaxParser();
+-  virtual ~MySaxParser();
+-  static int level; //To know the order of parsing
+-
+-protected:
+-  //overrides:
+-  virtual void on_start_document();
+-  virtual void on_end_document();
+-  virtual void on_start_element(const Glib::ustring& name,
+-                                const AttributeList& properties);
+-  virtual void on_end_element(const Glib::ustring& name);
+-  virtual void on_characters(const Glib::ustring& characters);
+-  virtual void on_comment(const Glib::ustring& text);
+-  virtual void on_warning(const Glib::ustring& text);
+-  virtual void on_error(const Glib::ustring& text);
+-  virtual void on_fatal_error(const Glib::ustring& text);
+-};
+-
+-class Schedule
+-{
+-public:
+-    Schedule();
+-    ~Schedule();
+-    static Schedule *instance();
+-    void process_Schedule_Objects(pbnjson::JValue &Obj);
+-    void process_Schedule_OnCharacter(std::string key,std::string value);
+-    pbnjson::JValue Period;
+-    pbnjson::JValue sched;
+-    std::string CanvasName;
+-    std::string CanvasPath;
+-    std::string CanvasType;
+-    int Zorder;
+-    static bool schedule_parsing;
+-};
+-
+-class Canvas
+-{
+-public:
+-    Canvas();
+-    ~Canvas();
+-    static Canvas *instance();
+-    void process_Canvas_Objects(pbnjson::JValue &Obj, int level);
+-    void process_Canvas_OnCharacter(std::string key,std::string value);
+-    int level;
+-    pbnjson::JValue canvas;
+-    pbnjson::JValue wind_Region;
+-    pbnjson::JValue content;
+-    pbnjson::JValue text_Region;
+-    std::string hAlign;
+-    std::string vAlign;
+-    int lineSpacing;
+-    std::string win_bckGrndclr;
+-    std::string message;
+-    std::string repeat;
+-    std::string text_bckGrndclr;
+-    std::string font;
+-    bool bold;
+-    std::string text_color;
+-    bool italic;
+-    int text_size;
+-    bool underline;
+-    int speed;
+-    int space;
+-    std::string line_color;
+-    int line_thickness;
+-    bool window_flag;
+-    bool text_flag;
+-    bool line_flag;
+-    bool line_view;
+-    std::string effect;
+-    static bool canvas_parsing;
+-};
+-
+-#endif //__LIBXMLPP_MYPARSER_H
