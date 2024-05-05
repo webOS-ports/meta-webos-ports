@@ -1,6 +1,6 @@
 # Copyright (c) 2018-2023 LG Electronics, Inc.
 
-EXTENDPRAUTO:append = "webos6"
+EXTENDPRAUTO:append = "webos7"
 
 # Remove rsvg because that's the only thing pulling librsvg -> cargo-native -> rust-native into our images
 # and Tofee's builder takes 2h+ to build it
