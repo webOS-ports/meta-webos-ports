@@ -71,3 +71,11 @@ do_install:append:raspberrypi4 () {
 }
 
 FILES:${PN}:append:raspberrypi4 = " ${sysconfdir}/modprobe.d/*"
+
+# http://gecko.lge.com:8000/Errors/Details/819467
+# bluez-5.72/src/main.c:1042:41: error: passing argument 4 of 'parse_config_bool' from incompatible pointer type [-Wincompatible-pointer-types]
+# caused by 0012-Support-enabling-avdtp-delayReport.patch
+CFLAGS += "-Wno-error=incompatible-pointer-types"
+# bluez-5.72/profiles/audio/avrcp.c:4004:9: error: implicit declaration of function 'set_avrcp_ct_supported_events' [-Wimplicit-function-declaration]
+# caused by 0017-AVRCP-getting-supported-notification-events.patch
+CFLAGS += "-Wno-error=implicit-function-declaration"
