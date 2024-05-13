@@ -3,7 +3,7 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 INHIBIT_DEFAULT_DEPS = "1"
-DEPENDS = "zip-native"
+DEPENDS = "zip-native coreutils-native"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 IMAGE_BASENAME = "luneos"
@@ -23,11 +23,21 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 do_deploy() {
     IMG="${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}-${MACHINE}${IMAGE_NAME_SUFFIX}.tar.gz"
     FASTBOOT="${DEPLOY_DIR_IMAGE}/${KERNEL_IMAGETYPE}.fastboot"
+    LK2ND="${DEPLOY_DIR_IMAGE}/lk2nd-${MACHINE}.img"
     if [ ! -e $IMG ] ; then
         bbfatal "Required base image is not available as tar.gz image! $IMG doesn't exist."
     fi
     if [ ! -e $FASTBOOT ] ; then
         bbfatal "Required kernel image is not available as zImage fastboot image! $FASTBOOT doesn't exist."
+    fi
+    if [ -e $LK2ND ] ; then
+        bbnote "Found lk2nd bootloader image, packing fastboot image and lk2nd together."
+
+        cp $LK2ND ${WORKDIR}/lk2nd-${MACHINE}.img.tmp
+        truncate -s 1M ${WORKDIR}/lk2nd-${MACHINE}.img.tmp
+        cat ${WORKDIR}/lk2nd-${MACHINE}.img.tmp $FASTBOOT > ${WORKDIR}/${KERNEL_IMAGETYPE}.fastboot-lk2nd
+        
+        FASTBOOT=${WORKDIR}/${KERNEL_IMAGETYPE}.fastboot-lk2nd
     fi
 
     rm -rf ${WORKDIR}/build
