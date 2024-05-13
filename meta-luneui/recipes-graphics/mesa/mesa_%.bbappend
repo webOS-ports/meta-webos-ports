@@ -9,5 +9,8 @@ PACKAGECONFIG:append:class-target = " gbm"
 PACKAGECONFIG:append:hammerhead = " kmsro freedreno"
 GALLIUMDRIVERS:append:hammerhead = ",freedreno"
 
+PACKAGECONFIG:append:rosy = " kmsro freedreno"
+GALLIUMDRIVERS:append:rosy = ",freedreno"
+
 PACKAGECONFIG:append:tenderloin = " kmsro freedreno"
 GALLIUMDRIVERS:append:tenderloin = ",freedreno"
