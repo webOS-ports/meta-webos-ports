@@ -2,6 +2,9 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 
 # Devices specific configuration and options for sensorfw go here
 
+### Halium devices related configuration ###
+DEPENDS:append:halium = " libhybris virtual/android-headers libgbinder libglibutil "
+
 do_install:append:halium() {
     install -d ${D}${sysconfdir}/sensorfw/
     install -m 0644 ${S}/config/sensord-hybris.conf ${D}${sysconfdir}/sensorfw/
@@ -24,8 +27,7 @@ SRC_URI:append:tenderloin-halium = " \
     file://sensord-tenderloin-halium.conf \
 "
 
-DEPENDS:append:halium = " libhybris virtual/android-headers libgbinder libglibutil "
-
+### Mainline devices related configuration ###
 SRC_URI:append:tenderloin = " \
     file://sensord-tenderloin.conf \
 "
