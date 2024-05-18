@@ -33,3 +33,7 @@ SRC_URI:append:tenderloin = " \
 SRC_URI:append:hammerhead = " \
     file://sensord-hammerhead.conf \
 "
+
+SRC_URI:append:hammerhead = " \
+    file://sensord-rosy.conf \
+"
