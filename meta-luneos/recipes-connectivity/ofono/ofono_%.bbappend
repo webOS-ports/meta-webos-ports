@@ -1,8 +1,5 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
-SRCREV = "39e2a3f2c57365b78f4f08c0353d6e7abf2709cb"
-PV = "1.34+git"
-
 SRCREV:halium = "3afa0876c6506f76ef2e45d97cb326c5ff9fef4d"
 PV:halium = "1.29+git"
 
@@ -10,23 +7,24 @@ LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=eb723b61539feef013de476e68b5c50a"
 
 DEPENDS += "dbus-glib libmce-glib"
-RDEPENDS:${PN} += "mobile-broadband-provider-info ofono-conf"
+RDEPENDS:${PN} += "mobile-broadband-provider-info ofono-conf libsmdpkt-wrapper"
 
 #For Halium 9 devices we want to use the ofono-binder-plugin, for older devices we might want to use ofono-ril-plugin
 RDEPENDS:${PN}:append:halium = " ofono-binder-plugin"
 
+PV = "2.7"
+SRC_URI[sha256sum] = "dabf6ef06b94beaad65253200abe3887046a4e722f4fe373c4264f357ae47ad3"
 
-SRC_URI = " \
-  git://git.kernel.org/pub/scm/network/ofono/ofono.git;branch=master \
+SRC_URI:append = " \
   file://0001-common-create-GList-helper-ofono_call_compare.patch \
   file://0002-common-atmodem-move-at_util_call_compare_by_status-t.patch \
   file://0003-common-atmodem-move-at_util_call_compare_by_id-to-dr.patch \
   file://0004-add-call-list-helper-to-manage-voice-call-lists.patch \
   file://0004-support-smdpkt.patch \
-  file://0005-qmimodem-implement-voice-calls.patch \
-  file://0001-Fix-build-with-ell-0.39-by-restoring-unlikely-macro-.patch \
-  file://ofono \
+  file://0006-Allow-qmi-qrtr-without-data.patch \
+  file://msm-modem-uim-selection.sh \
   file://ofono.service \
+  file://70-ofono-modem.rules \
 "
 
 SRC_URI:halium  = " \
@@ -36,14 +34,12 @@ SRC_URI:halium  = " \
   file://ofono-halium.service \
 "
 
-S = "${WORKDIR}/git"
 S:halium = "${WORKDIR}/git/ofono"
 
 # Can't build out of tree right now so we have to build in tree
-B = "${S}"
+B:halium = "${S}"
 
-EXTRA_OECONF:append = " --disable-datafiles"
-EXTRA_OECONF:append:halium = " --disable-sailfish-pushforwarder --enable-extra-modems --disable-rilmodem"
+EXTRA_OECONF:append:halium = " --disable-datafiles --disable-sailfish-pushforwarder --enable-extra-modems --disable-rilmodem"
 
 # this version does't support it:
 # ERROR: ofono-1.19+gitAUTOINC+b5ed6d16db-r0 do_configure: QA Issue: ofono: configure was passed unrecognised options: --enable-external-ell [unknown-configure-option]
@@ -59,6 +55,15 @@ do_install:append() {
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${WORKDIR}/${SERVICE_FILE} ${D}${systemd_unitdir}/system/ofono.service
 
+    # Install shell script which can help with MSM modems
+    install -d ${D}${sbindir}
+    install -m 0755 ${WORKDIR}/msm-modem-uim-selection.sh ${D}${sbindir}/msm-modem-uim-selection.sh
+    
+    # Install udev rule for mainline modem
+    install -d ${D}${sysconfdir}/udev/rules.d
+    install -m 0644 ${WORKDIR}/70-ofono-modem.rules ${D}${sysconfdir}/udev/rules.d/70-ofono-modem.rules
+}
+do_install:halium:append() {
     # Since we use --disable-datafiles we need to install the dbus condif file manually now
     install -d ${D}${sysconfdir}/dbus-1/system.d
     install -m 0644 ${B}/src/${PN}.conf ${D}${sysconfdir}/dbus-1/system.d/
