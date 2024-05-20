@@ -7,7 +7,7 @@ LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=eb723b61539feef013de476e68b5c50a"
 
 DEPENDS += "dbus-glib libmce-glib"
-RDEPENDS:${PN} += "mobile-broadband-provider-info ofono-conf libsmdpkt-wrapper"
+RDEPENDS:${PN} += "mobile-broadband-provider-info ofono-conf libsmdpkt-wrapper libqmi libmbim libqrtr-glib"
 
 #For Halium 9 devices we want to use the ofono-binder-plugin, for older devices we might want to use ofono-ril-plugin
 RDEPENDS:${PN}:append:halium = " ofono-binder-plugin"
