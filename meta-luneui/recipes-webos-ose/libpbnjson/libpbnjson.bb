@@ -43,3 +43,5 @@ BBCLASSEXTEND = "native"
 # libpbnjson/2.15.0-16/git/src/pbnjson_c/validation/schema_keywords.gperf:190:8: error: initialization of 'const char *' from 'int' makes pointer from integer without a cast [-Wint-conversion]
 # ...
 CFLAGS += "-Wno-error=int-conversion"
+# native has the same issue for hosts with gcc-14
+BUILD_CFLAGS += "-Wno-error=int-conversion"
