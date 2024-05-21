@@ -36,6 +36,6 @@ SRC_URI:append:hammerhead = " \
     file://sensord-hammerhead.conf \
 "
 
-SRC_URI:append:hammerhead = " \
+SRC_URI:append:rosy = " \
     file://sensord-rosy.conf \
 "
