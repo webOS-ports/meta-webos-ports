@@ -15,7 +15,6 @@ inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit webos_system_bus
-inherit webos_machine_impl_dep
 inherit webos_systemd
 inherit pkgconfig
 
@@ -23,6 +22,7 @@ WEBOS_SYSTEMD_SERVICE = "filecache.service"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-filecache-Add-various-permissions-for-legacy-webOS-a.patch \
+    file://0002-Remove-useless-machine-dependency.patch \
 "
 
 S = "${WORKDIR}/git"
