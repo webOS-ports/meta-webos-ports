@@ -16,9 +16,10 @@ PR = "r3"
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake
-inherit webos_machine_impl_dep
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+           file://0001-Remove-webos_machine_impl_dep.patch \
+"
 S = "${WORKDIR}/git"
 
 ALLOW_EMPTY:${PN} = "1"
