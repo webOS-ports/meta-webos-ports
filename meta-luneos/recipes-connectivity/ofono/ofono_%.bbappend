@@ -34,7 +34,7 @@ SRC_URI:halium  = " \
   file://ofono-halium.service \
 "
 
-S:halium = "${WORKDIR}/git/ofono"
+S:halium = "${UNPACKDIR}/git/ofono"
 
 # Can't build out of tree right now so we have to build in tree
 B:halium = "${S}"
@@ -53,15 +53,15 @@ SERVICE_FILE:halium = "ofono-halium.service"
 do_install:append() {
     # Override default system service configuration
     install -d ${D}${systemd_unitdir}/system
-    install -m 0644 ${WORKDIR}/${SERVICE_FILE} ${D}${systemd_unitdir}/system/ofono.service
+    install -m 0644 ${UNPACKDIR}/${SERVICE_FILE} ${D}${systemd_unitdir}/system/ofono.service
 
     # Install shell script which can help with MSM modems
     install -d ${D}${sbindir}
-    install -m 0755 ${WORKDIR}/msm-modem-uim-selection.sh ${D}${sbindir}/msm-modem-uim-selection.sh
+    install -m 0755 ${UNPACKDIR}/msm-modem-uim-selection.sh ${D}${sbindir}/msm-modem-uim-selection.sh
     
     # Install udev rule for mainline modem
     install -d ${D}${sysconfdir}/udev/rules.d
-    install -m 0644 ${WORKDIR}/70-ofono-modem.rules ${D}${sysconfdir}/udev/rules.d/70-ofono-modem.rules
+    install -m 0644 ${UNPACKDIR}/70-ofono-modem.rules ${D}${sysconfdir}/udev/rules.d/70-ofono-modem.rules
 }
 do_install:halium:append() {
     # Since we use --disable-datafiles we need to install the dbus condif file manually now
