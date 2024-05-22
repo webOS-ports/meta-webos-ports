@@ -3,22 +3,22 @@
 HOMEPAGE = "https://github.com/influxdata/telegraf"
 SUMMARY = "Telegraf is the open source server agent to help you collect metrics from your stacks, sensors, and systems."
 LICENSE = "MIT"
-LIC_FILES_CHKSUM = "file://src/import/LICENSE;md5=c5d3aeddd4f7a4c4993bbdc4a41aec44"
+LIC_FILES_CHKSUM = "file://${GO_SRCURI_DESTSUFFIX}/LICENSE;md5=c5d3aeddd4f7a4c4993bbdc4a41aec44"
 
 SRCREV = "583ee20a093acaa0781508b7840deb97a0fda622"
-SRC_URI = "git://github.com/influxdata/telegraf.git;protocol=https;branch=release-1.21 \
-    file://0001-Modify-the-Makefile-for-v1.21.4.patch;patchdir=src/${GO_IMPORT} \
-    file://0002-Remove-unused-plugins-for-v1.21.4.patch;patchdir=src/${GO_IMPORT} \
-    file://0003-Apply-inputs.socket_listener-plugin-for-sdkagent.patch;patchdir=src/${GO_IMPORT} \
-    file://0004-Add-plugins-for-dashboard.patch;patchdir=src/${GO_IMPORT} \
-    file://0005-Change-telegraf-config-directory.patch;patchdir=src/${GO_IMPORT} \
+SRC_URI = "git://github.com/influxdata/telegraf.git;protocol=https;branch=release-1.21;destsuffix=${GO_SRCURI_DESTSUFFIX} \
+    file://0001-Modify-the-Makefile-for-v1.21.4.patch;patchdir=${GO_SRCURI_DESTSUFFIX} \
+    file://0002-Remove-unused-plugins-for-v1.21.4.patch;patchdir=${GO_SRCURI_DESTSUFFIX} \
+    file://0003-Apply-inputs.socket_listener-plugin-for-sdkagent.patch;patchdir=${GO_SRCURI_DESTSUFFIX} \
+    file://0004-Add-plugins-for-dashboard.patch;patchdir=${GO_SRCURI_DESTSUFFIX} \
+    file://0005-Change-telegraf-config-directory.patch;patchdir=${GO_SRCURI_DESTSUFFIX} \
 "
 
 PR = "r8"
 
 GO_IMPORT = "import"
 
-S = "${WORKDIR}/git"
+S = "${UNPACKDIR}"
 
 inherit goarch
 inherit go
@@ -66,7 +66,7 @@ do_compile() {
     fi
     export glibc_version="${GLIBCVERSION}"
 
-    cd ${S}/src/${GO_IMPORT}
+    cd ${S}/${GO_SRCURI_DESTSUFFIX}
     oe_runmake install
 
     # Golang forces permissions to 0500 on directories and 0400 on files in
