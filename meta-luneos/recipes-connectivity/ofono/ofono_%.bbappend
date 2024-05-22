@@ -20,7 +20,6 @@ SRC_URI_mainline = " \
   file://0002-common-atmodem-move-at_util_call_compare_by_status-t.patch \
   file://0003-common-atmodem-move-at_util_call_compare_by_id-to-dr.patch \
   file://0004-add-call-list-helper-to-manage-voice-call-lists.patch \
-  file://0004-support-smdpkt.patch \
   file://0006-Allow-qmi-qrtr-without-data.patch \
   file://msm-modem-uim-selection.sh \
   file://ofono.service \
