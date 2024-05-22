@@ -9,12 +9,15 @@ DEPENDS = "jemalloc db8 boost curl libpalmsocket libsandbox pmloglib icu json-c 
 PV = "2.0.0-99+git"
 SRCREV = "a4208c6eea88320f50dec2716b19ea980d5b8484"
 
+FILESEXTRAPATHS:prepend := "${THISDIR}/mojomail:"
+
 inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit pkgconfig
-inherit webos_machine_impl_dep
 
 WEBOS_REPO_NAME = "mojomail"
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
+           file://0001-Remove-webos_machine_dep.patch;patchdir=${WORKDIR}/git \
+"
 
 CXXFLAGS += "-fpermissive"
