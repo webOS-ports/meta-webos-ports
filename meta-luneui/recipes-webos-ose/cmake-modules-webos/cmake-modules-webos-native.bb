@@ -17,7 +17,9 @@ inherit native
 
 WEBOS_CMAKE_DEPENDS = ""
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+    file://0001-webOS.cmake-update-cmake_minimum_required-to-3.5.0.patch \
+"
 
 do_compile() {
      :
