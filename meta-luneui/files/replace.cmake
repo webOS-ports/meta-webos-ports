@@ -15,17 +15,17 @@ foreach(in_file ${IN_FILES})
     string(REGEX REPLACE "\\.in$" "" file "${in_file}")
 
     if (in_file MATCHES "^.+\\.in$")
-        configure_file(${CMAKE_SOURCE_DIR}/${in_file} ${file} @ONLY)
+        configure_file(${CMAKE_SOURCE_DIR}/${in_file} ${CMAKE_SOURCE_DIR}/${file} @ONLY)
     endif()
 
     if (file MATCHES "^.+\\.service$")
-        install(FILES ${CMAKE_BINARY_DIR}/${file} DESTINATION ${CMAKE_INSTALL_UNITDIR}/ )
+        install(FILES ${CMAKE_SOURCE_DIR}/${file} DESTINATION ${CMAKE_INSTALL_UNITDIR}/ )
     elseif (file MATCHES "^.+\\.path$")
-        install(FILES ${CMAKE_BINARY_DIR}/${file} DESTINATION ${CMAKE_INSTALL_UNITDIR}/ )
+        install(FILES ${CMAKE_SOURCE_DIR}/${file} DESTINATION ${CMAKE_INSTALL_UNITDIR}/ )
     elseif (file MATCHES "^.+\\.target$")
-        install(FILES ${CMAKE_BINARY_DIR}/${file} DESTINATION ${CMAKE_INSTALL_UNITDIR}/ )
+        install(FILES ${CMAKE_SOURCE_DIR}/${file} DESTINATION ${CMAKE_INSTALL_UNITDIR}/ )
     elseif (file MATCHES "^.+\\.sh$")
-        install(FILES ${CMAKE_BINARY_DIR}/${file}
+        install(FILES ${CMAKE_SOURCE_DIR}/${file}
                 PERMISSIONS OWNER_WRITE OWNER_READ OWNER_EXECUTE
                             GROUP_READ  GROUP_EXECUTE
                             WORLD_READ  WORLD_EXECUTE
