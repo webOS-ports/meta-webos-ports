@@ -15,12 +15,12 @@ SRC_URI:append:halium = "\
     file://binder.conf \
 "
 
-# We currently only need this for mido-halium and tissot, not pretty but it works.
+# We currently only need this for mido-halium and tissot-halium, not pretty but it works.
 SRC_URI:append:mido-halium = "\ 
     file://dual-sim.conf \
 "
 
-SRC_URI:append:tissot = "\ 
+SRC_URI:append:tissot-halium = "\ 
     file://dual-sim.conf \
 "
 
@@ -46,7 +46,7 @@ do_install:append:mido-halium() {
     fi
 }
 
-do_install:append:tissot() {
+do_install:append:tissot-halium() {
     # dual-sim.conf only exists for dual sim devices, so we need to check for it's existence before trying to install it.
     if [ -f ${WORKDIR}/dual-sim.conf ]
     then

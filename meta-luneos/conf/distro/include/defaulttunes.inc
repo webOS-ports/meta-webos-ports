@@ -44,7 +44,7 @@ DEFAULTTUNE:onyx = "cortexa8thf-neon"
 # https://git.openembedded.org/openembedded-core/commit/?h=master&id=feb8e3fb71131a414a2a9271832b4e16860301ea
 OLDEST_KERNEL:armv7a:halium = "3.4"
 
-# used by tissot, sargo, mido-halium some other unsupported MACHINEs might use older, see list in:
+# used by tissot-halium, sargo, mido-halium some other unsupported MACHINEs might use older, see list in:
 # https://github.com/shr-distribution/meta-smartphone/pull/164
 OLDEST_KERNEL:aarch64:halium = "4.9"
 
@@ -63,7 +63,7 @@ PACKAGE_EXTRA_ARCHS:append:mako = " ${PACKAGE_EXTRA_ARCHS_HALIUM}"
 # make sure that raspberrypi[34]-64 originally with
 # DEFAULTTUNE="cortexa53"/DEFAULTTUNE="cortexa72"
 # uses different TUNE_PKGARCH
-# than e.g. tissot with DEFAULTTUNE="aarch64"
+# than e.g. tissot-halium with DEFAULTTUNE="aarch64"
 # it's not sure if crypto will actually work with cortexa53/BCM2837 used
 # in raspberrypi3 B, see last comments in:
 # https://www.raspberrypi.org/forums/viewtopic.php?t=207888
