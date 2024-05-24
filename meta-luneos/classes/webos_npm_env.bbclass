@@ -32,7 +32,7 @@ WEBOS_NODE_BIN ??= "${STAGING_BINDIR_NATIVE}/node"
 # for node-gyp
 WEBOS_NODE_VERSION = "20.13.0"
 WEBOS_NODE_SRC_URI = "https://nodejs.org/dist/v${WEBOS_NODE_VERSION}/node-v${WEBOS_NODE_VERSION}.tar.xz;name=node"
-WEBOS_NODE_GYP = "node-gyp --arch '${TARGET_ARCH}' --nodedir '${WORKDIR}/node-v${WEBOS_NODE_VERSION}'"
+WEBOS_NODE_GYP = "node-gyp --arch '${TARGET_ARCH}' --nodedir '${UNPACKDIR}/node-v${WEBOS_NODE_VERSION}'"
 SRC_URI[node.sha256sum] = "11d229fcad7e6e10f450301223c602043f021cda51259ffafc7e55e484b37dc7"
 
 do_compile:prepend() {
