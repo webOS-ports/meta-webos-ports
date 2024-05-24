@@ -15,7 +15,7 @@ RDEPENDS:${PN}:append:halium = " ofono-binder-plugin"
 PV = "2.7"
 SRC_URI[sha256sum] = "dabf6ef06b94beaad65253200abe3887046a4e722f4fe373c4264f357ae47ad3"
 
-SRC_URI:append = " \
+SRC_URI_mainline = " \
   file://0001-common-create-GList-helper-ofono_call_compare.patch \
   file://0002-common-atmodem-move-at_util_call_compare_by_status-t.patch \
   file://0003-common-atmodem-move-at_util_call_compare_by_id-to-dr.patch \
@@ -26,6 +26,8 @@ SRC_URI:append = " \
   file://ofono.service \
   file://70-ofono-modem.rules \
 "
+SRC_URI_mainline:halium = ""
+SRC_URI:append = "${SRC_URI_mainline}"
 
 SRC_URI:halium  = " \
   git://github.com/sailfishos/ofono.git;protocol=https;branch=master \
@@ -55,15 +57,19 @@ do_install:append() {
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${UNPACKDIR}/${SERVICE_FILE} ${D}${systemd_unitdir}/system/ofono.service
 
-    # Install shell script which can help with MSM modems
-    install -d ${D}${sbindir}
-    install -m 0755 ${UNPACKDIR}/msm-modem-uim-selection.sh ${D}${sbindir}/msm-modem-uim-selection.sh
+    if [ -e ${UNPACKDIR}/msm-modem-uim-selection.sh ]; then
+        # Install shell script which can help with MSM modems
+        install -d ${D}${sbindir}
+        install -m 0755 ${UNPACKDIR}/msm-modem-uim-selection.sh ${D}${sbindir}/msm-modem-uim-selection.sh
+    fi
     
-    # Install udev rule for mainline modem
-    install -d ${D}${sysconfdir}/udev/rules.d
-    install -m 0644 ${UNPACKDIR}/70-ofono-modem.rules ${D}${sysconfdir}/udev/rules.d/70-ofono-modem.rules
+    if [ -e ${UNPACKDIR}/70-ofono-modem.rules ]; then
+        # Install udev rule for mainline modem
+        install -d ${D}${sysconfdir}/udev/rules.d
+        install -m 0644 ${UNPACKDIR}/70-ofono-modem.rules ${D}${sysconfdir}/udev/rules.d/70-ofono-modem.rules
+    fi
 }
-do_install:halium:append() {
+do_install:append:halium() {
     # Since we use --disable-datafiles we need to install the dbus condif file manually now
     install -d ${D}${sysconfdir}/dbus-1/system.d
     install -m 0644 ${B}/src/${PN}.conf ${D}${sysconfdir}/dbus-1/system.d/
