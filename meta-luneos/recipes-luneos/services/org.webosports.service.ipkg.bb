@@ -17,7 +17,9 @@ inherit webos_systemd
 LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
 
 WEBOS_REPO_NAME = "preware"
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
+    file://0001-Fix-missing-return-values.patch;patchdir=.. \
+"
 
 S = "${WORKDIR}/git/oe-service"
 
@@ -59,12 +61,3 @@ pkg_postinst:${PN}() {
 # | /OE/build/luneos-master/webos-ports/tmp-glibc/work/core2-64-webos-linux/org.webosports.service.ipkg/2.0.0-2+gitAUTOINC+2f5147149b-r0/recipe-sysroot-native/usr/bin/x86_64-webos-linux/../../libexec/x86_64-webos-linux/gcc/x86_64-webos-linux/10.2.0/ld: error: CMakeFiles/org.webosports.service.ipkg.dir/src/luna_service.c.o: multiple definition of 'priv_serviceHandle'
 # | /OE/build/luneos-master/webos-ports/tmp-glibc/work/core2-64-webos-linux/org.webosports.service.ipkg/2.0.0-2+gitAUTOINC+2f5147149b-r0/recipe-sysroot-native/usr/bin/x86_64-webos-linux/../../libexec/x86_64-webos-linux/gcc/x86_64-webos-linux/10.2.0/ld: CMakeFiles/org.webosports.service.ipkg.dir/src/ipkgservice.c.o: previous definition here
 CFLAGS += "-fcommon"
-
-# org.webosports.service.ipkg/2.0.0-2+git/git/oe-service/src/luna_methods.c:812:3: error: 'return' with no value, in function returning non-void [-Wreturn-mismatch]
-# org.webosports.service.ipkg/2.0.0-2+git/git/oe-service/src/luna_methods.c:1532:3: error: 'return' with no value, in function returning non-void [-Wreturn-mismatch]
-# org.webosports.service.ipkg/2.0.0-2+git/git/oe-service/src/luna_methods.c:1929:3: error: 'return' with no value, in function returning non-void [-Wreturn-mismatch]
-# org.webosports.service.ipkg/2.0.0-2+git/git/oe-service/src/luna_methods.c:2006:3: error: 'return' with no value, in function returning non-void [-Wreturn-mismatch]
-# org.webosports.service.ipkg/2.0.0-2+git/git/oe-service/src/luna_methods.c:2057:3: error: 'return' with no value, in function returning non-void [-Wreturn-mismatch]
-# org.webosports.service.ipkg/2.0.0-2+git/git/oe-service/src/luna_methods.c:2137:3: error: 'return' with no value, in function returning non-void [-Wreturn-mismatch]
-# org.webosports.service.ipkg/2.0.0-2+git/git/oe-service/src/luna_methods.c:2217:3: error: 'return' with no value, in function returning non-void [-Wreturn-mismatch]
-CFLAGS += "-Wno-error=return-mismatch"
