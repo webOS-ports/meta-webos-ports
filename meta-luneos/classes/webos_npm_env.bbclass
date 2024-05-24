@@ -32,8 +32,8 @@ WEBOS_NODE_BIN ??= "${STAGING_BINDIR_NATIVE}/node"
 # for node-gyp
 WEBOS_NODE_VERSION = "20.12.2"
 WEBOS_NODE_SRC_URI = "https://nodejs.org/dist/v${WEBOS_NODE_VERSION}/node-v${WEBOS_NODE_VERSION}.tar.xz;name=node"
-WEBOS_NODE_GYP = "node-gyp --arch '${TARGET_ARCH}' --nodedir '${WORKDIR}/node-v${WEBOS_NODE_VERSION}'"
-SRC_URI[node.sha256sum] = "d7cbcc5fbfb31e9001f3f0150bbeda59abe5dd7137aaa6273958cd59ce35ced7"
+WEBOS_NODE_GYP = "node-gyp --arch '${TARGET_ARCH}' --nodedir '${UNPACKDIR}/node-v${WEBOS_NODE_VERSION}'"
+SRC_URI[node.sha256sum] = "11d229fcad7e6e10f450301223c602043f021cda51259ffafc7e55e484b37dc7"
 
 do_compile:prepend() {
     # this is needed to use user's gitconfig even after changing the HOME directory bellow
