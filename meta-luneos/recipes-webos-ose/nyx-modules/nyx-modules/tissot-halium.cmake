@@ -18,7 +18,7 @@
 #
 # LICENSE@@@
 
-# configuration file for tissot
+# configuration file for tissot-halium
 # specify all the modules to be compiled
 
 set(NYXMOD_OW_MSMMTP					TRUE)
