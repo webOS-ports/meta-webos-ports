@@ -18,7 +18,7 @@ EXTRA_QMAKEVARS_PRE:append:hammerhead-halium = "CONFIG+=binder "
 EXTRA_QMAKEVARS_PRE:append:mako = "CONFIG+=binder "
 EXTRA_QMAKEVARS_PRE:append:mido-halium = "CONFIG+=binder "
 EXTRA_QMAKEVARS_PRE:append:sagit = "CONFIG+=binder "
-EXTRA_QMAKEVARS_PRE:append:tissot = "CONFIG+=binder "
+EXTRA_QMAKEVARS_PRE:append:tissot-halium = "CONFIG+=binder "
 EXTRA_QMAKEVARS_PRE:append:yggdrasil = "CONFIG+=binder "
 
 # Tenderloin here is an exception: sensorfw doesn't need to use Halium for the sensor

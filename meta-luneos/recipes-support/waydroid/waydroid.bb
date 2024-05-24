@@ -36,7 +36,7 @@ COMPATIBLE_MACHINE:pinephone = "(.*)"
 COMPATIBLE_MACHINE:pinephonepro = "(.*)"
 COMPATIBLE_MACHINE:pinetab2 = "(.*)"
 COMPATIBLE_MACHINE:mido-halium = "(.*)"
-COMPATIBLE_MACHINE:tissot = "(.*)"
+COMPATIBLE_MACHINE:tissot-halium = "(.*)"
 
 inherit pkgconfig
 inherit webos_app
