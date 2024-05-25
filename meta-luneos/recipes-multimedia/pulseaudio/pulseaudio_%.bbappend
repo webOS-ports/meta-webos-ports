@@ -46,6 +46,7 @@ USERADD_PARAM:pulseaudio-server = " \
 
 GROUPMEMS_PARAM:pulseaudio-server = " \
     -a root -g pulse-access; \
+    -a root -g audio; \
     -a system -g pulse-access; \
     -a pulse -g pulse-access; \
     -a pulse -g audio; \
