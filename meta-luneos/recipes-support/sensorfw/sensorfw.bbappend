@@ -39,3 +39,7 @@ SRC_URI:append:hammerhead = " \
 SRC_URI:append:rosy = " \
     file://sensord-rosy.conf \
 "
+
+SRC_URI:append:tissot = " \
+    file://sensord-tissot.conf \
+"

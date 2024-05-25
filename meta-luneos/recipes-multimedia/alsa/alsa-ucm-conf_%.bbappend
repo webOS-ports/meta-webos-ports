@@ -21,9 +21,15 @@ do_install:append() {
     install -d ${D}${datadir}/alsa/ucm2/conf.d/xiaomi-mido
     install -m 0644 ${S}/msm8953/ucm2/conf.d/xiaomi-mido/xiaomi-mido.conf ${D}${datadir}/alsa/ucm2/conf.d/xiaomi-mido/xiaomi-mido.conf
 
-    # rosy
+    # rosy/vince
     install -d ${D}${datadir}/alsa/ucm2/Xiaomi/vince
     install -m 0644 ${S}/msm8953/ucm2/Xiaomi/vince/HiFi.conf ${D}${datadir}/alsa/ucm2/Xiaomi/vince/HiFi.conf
     install -d ${D}${datadir}/alsa/ucm2/conf.d/xiaomi-rosy
     install -m 0644 ${S}/msm8953/ucm2/conf.d/xiaomi-rosy/xiaomi-rosy.conf ${D}${datadir}/alsa/ucm2/conf.d/xiaomi-rosy/xiaomi-rosy.conf
+
+    # tissot/daisy
+    install -d ${D}${datadir}/alsa/ucm2/Xiaomi/daisy
+    install -m 0644 ${S}/msm8953/ucm2/Xiaomi/daisy/HiFi.conf ${D}${datadir}/alsa/ucm2/Xiaomi/daisy/HiFi.conf
+    install -d ${D}${datadir}/alsa/ucm2/conf.d/xiaomi-tissot
+    install -m 0644 ${S}/msm8953/ucm2/conf.d/xiaomi-tissot/xiaomi-tissot.conf ${D}${datadir}/alsa/ucm2/conf.d/xiaomi-tissot/xiaomi-tissot.conf
 }

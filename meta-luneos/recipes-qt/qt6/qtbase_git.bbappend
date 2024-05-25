@@ -37,6 +37,7 @@ PACKAGECONFIG_GRAPHICS:append:pinephonepro = " kms gbm"
 PACKAGECONFIG_GRAPHICS:append:pinetab2 = " kms gbm"
 PACKAGECONFIG_GRAPHICS:append:tenderloin = " kms gbm"
 PACKAGECONFIG_GRAPHICS:append:rosy = " kms gbm"
+PACKAGECONFIG_GRAPHICS:append:tissot = " kms gbm"
 PACKAGECONFIG_DISTRO += "sql-sqlite icu glib accessibility mtdev examples fontconfig xkbcommon"
 
 # We had this enabled in our old gpro/meta-qt5 recipe
