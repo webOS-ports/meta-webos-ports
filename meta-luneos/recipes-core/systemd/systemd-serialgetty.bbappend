@@ -5,3 +5,4 @@ SERIAL_CONSOLES:qemux86-64 = ""
 
 # Also disable serial getty on devices where there is no serial console
 SERIAL_CONSOLES:rosy = ""
+SERIAL_CONSOLES:tissot = ""

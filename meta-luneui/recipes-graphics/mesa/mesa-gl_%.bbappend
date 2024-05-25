@@ -10,6 +10,7 @@ NOT_PROVIDED:hammerhead = ""
 NOT_PROVIDED:pinephone = ""
 NOT_PROVIDED:tenderloin = ""
 NOT_PROVIDED:rosy = ""
+NOT_PROVIDED:tissot = ""
 PROVIDES:remove = "${NOT_PROVIDED}"
 
 do_install:append() {
