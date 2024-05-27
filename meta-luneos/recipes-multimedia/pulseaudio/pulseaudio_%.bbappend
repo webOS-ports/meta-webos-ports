@@ -14,7 +14,7 @@ SRC_URI += " \
 
 do_install:append() {
     install -d ${D}${systemd_unitdir}/system
-    install -m 0644 ${WORKDIR}/pulseaudio.service ${D}${systemd_unitdir}/system
+    install -m 0644 ${UNPACKDIR}/pulseaudio.service ${D}${systemd_unitdir}/system
 
     # Out-of-tree PulseAudio modules (pulseaudio-module-palm-policy) include
     # pulsecore headers, and those refuse to compile unless config.h has been
