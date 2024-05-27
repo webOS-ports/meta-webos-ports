@@ -30,10 +30,10 @@ SRC_URI += " \
 
 do_install:append() {
     install -d ${D}${systemd_unitdir}/system
-    install -m 0644 ${WORKDIR}/dbus-session.service ${D}${systemd_unitdir}/system/
+    install -m 0644 ${UNPACKDIR}/dbus-session.service ${D}${systemd_unitdir}/system/
 
     install -d ${D}${bindir}
-    install -m 0755 ${WORKDIR}/startup-dbus-session.sh ${D}${bindir}/
+    install -m 0755 ${UNPACKDIR}/startup-dbus-session.sh ${D}${bindir}/
 }
 
 FILES:${PN} += "${bindir} ${systemd_unitdir}"
