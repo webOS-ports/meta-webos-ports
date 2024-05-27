@@ -14,7 +14,7 @@ SRC_URI += " \
 
 do_install:append() {
     install -d ${D}${systemd_unitdir}/system
-    install -m 0644 ${WORKDIR}/pulseaudio.service ${D}${systemd_unitdir}/system
+    install -m 0644 ${UNPACKDIR}/pulseaudio.service ${D}${systemd_unitdir}/system
 }
 
 inherit systemd
