@@ -14,6 +14,6 @@ SRC_URI = " \
 do_install() {
     install -d ${D}${sysconfdir}
     install -d ${D}${sysconfdir}/location
-    install -m 0644 ${WORKDIR}/nyx.conf ${D}${sysconfdir}
-    install -m 0644 ${WORKDIR}/gpsConfig.conf ${D}${sysconfdir}/location
+    install -m 0644 ${UNPACKDIR}/nyx.conf ${D}${sysconfdir}
+    install -m 0644 ${UNPACKDIR}/gpsConfig.conf ${D}${sysconfdir}/location
 }
