@@ -26,31 +26,31 @@ SRC_URI:append:tissot-halium = "\
 
 do_install() {
     install -d ${D}${sysconfdir}/ofono
-    install -m 0644 ${WORKDIR}/environment.conf ${D}${sysconfdir}/ofono/
-    install -m 0644 ${WORKDIR}/ril_subscription.conf ${D}${sysconfdir}/ofono/
+    install -m 0644 ${UNPACKDIR}/environment.conf ${D}${sysconfdir}/ofono/
+    install -m 0644 ${UNPACKDIR}/ril_subscription.conf ${D}${sysconfdir}/ofono/
 }
 
 # For Halium we're using SFOS oFono fork, which requires binder.conf and optional dual-sim.conf configuration files for Android 9+ ports
 
 do_install:append:halium() {
-    install -m 0644 ${WORKDIR}/binder.conf ${D}${sysconfdir}/ofono/
+    install -m 0644 ${UNPACKDIR}/binder.conf ${D}${sysconfdir}/ofono/
 }
 
 # We currently only need this for mido, not pretty but it works.
 do_install:append:mido-halium() {
     # dual-sim.conf only exists for dual sim devices, so we need to check for it's existence before trying to install it.
-    if [ -f ${WORKDIR}/dual-sim.conf ]
+    if [ -f ${UNPACKDIR}/dual-sim.conf ]
     then
         install -d ${D}${sysconfdir}/ofono/binder.d/
-        install -m 0644 ${WORKDIR}/dual-sim.conf ${D}${sysconfdir}/ofono/binder.d/
+        install -m 0644 ${UNPACKDIR}/dual-sim.conf ${D}${sysconfdir}/ofono/binder.d/
     fi
 }
 
 do_install:append:tissot-halium() {
     # dual-sim.conf only exists for dual sim devices, so we need to check for it's existence before trying to install it.
-    if [ -f ${WORKDIR}/dual-sim.conf ]
+    if [ -f ${UNPACKDIR}/dual-sim.conf ]
     then
         install -d ${D}${sysconfdir}/ofono/binder.d/
-        install -m 0644 ${WORKDIR}/dual-sim.conf ${D}${sysconfdir}/ofono/binder.d/
+        install -m 0644 ${UNPACKDIR}/dual-sim.conf ${D}${sysconfdir}/ofono/binder.d/
     fi
 }
