@@ -11,10 +11,10 @@ SRC_URI = " \
 
 do_install() {
     install -d ${D}${sysconfdir}/pulse
-    install -m 0644 ${WORKDIR}/webos-system.pa ${D}${sysconfdir}/pulse/
+    install -m 0644 ${UNPACKDIR}/webos-system.pa ${D}${sysconfdir}/pulse/
 
     install -d ${D}${sysconfdir}/default
-    install -m 0644 ${WORKDIR}/pulseaudio.conf  ${D}${sysconfdir}/default/pulseaudio.conf
+    install -m 0644 ${UNPACKDIR}/pulseaudio.conf  ${D}${sysconfdir}/default/pulseaudio.conf
 }
 
 FILES:${PN} = "${sysconfdir}/pulse ${sysconfdir}/default"
