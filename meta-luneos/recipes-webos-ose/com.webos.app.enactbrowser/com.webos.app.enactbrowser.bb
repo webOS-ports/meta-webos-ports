@@ -79,8 +79,8 @@ do_install:append() {
 
     # Add the legacy icons instead
     install -d ${D}${APP_PATH}
-    install -m 0644 ${WORKDIR}/icon.png ${D}${APP_PATH}/icon.png
-    install -m 0644 ${WORKDIR}/icon-256x256.png ${D}${APP_PATH}/icon-256x256.png
+    install -m 0644 ${UNPACKDIR}/icon.png ${D}${APP_PATH}/icon.png
+    install -m 0644 ${UNPACKDIR}/icon-256x256.png ${D}${APP_PATH}/icon-256x256.png
 }
 
 FILES:${PN} += "${webos_applicationsdir}"
