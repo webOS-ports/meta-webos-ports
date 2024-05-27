@@ -7,7 +7,7 @@ DEPENDS = "luna-service2 json-c glib-2.0 luna-prefs glib-2.0-native python3-pack
 RRECOMMENDS:${PN} += "ofono mmsd"
 
 PV = "0.1.0-1+git"
-SRCREV = "e9ae31e6dae85241d713a3f239a2902e37e5624a"
+SRCREV = "f3064a6c724a3b2f140b1f4aeb184829ba88c8e9"
 
 inherit webos_ports_ose_repo
 inherit webos_filesystem_paths
@@ -19,9 +19,7 @@ inherit python3native
 
 LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
-    file://0001-Fix-missing-return-values.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 do_install:append() {
