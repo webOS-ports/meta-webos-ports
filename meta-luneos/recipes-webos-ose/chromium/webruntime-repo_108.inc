@@ -38,4 +38,5 @@ SRC_URI += " \
     file://0006-palmGetResource-Fix-loading-of-local-resources.patch \
     file://0007-webossystem_injection.cc-fix-some-PalmSystem-functio.patch \
     file://0008-app_shell-override-default-OnWindowHostClose-to-clos.patch \
+    file://0009-wayland_touch-apply-device_scale_factor-to-events.patch \
 "
