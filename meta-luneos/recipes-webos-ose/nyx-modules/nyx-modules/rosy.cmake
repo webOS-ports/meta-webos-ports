@@ -28,8 +28,3 @@ set(NYXMOD_OW_TOUCHPANEL				FALSE)
 set(NYXMOD_OW_TOUCHPANEL_MTDEV			TRUE)
 set(NYXMOD_OW_HAPTICS					TRUE)
 set(NYXMOD_OW_LED					TRUE)
-
-add_definitions(-DKEYPAD_INPUT_DEVICE=\"/dev/input/event0\")
-add_definitions(-DBATTERY_SYSFS_PATH=\"/sys/class/power_supply/battery/\")
-add_definitions(-DTOUCHPANEL_DEVICE=\"/dev/input/event1\")
-add_definitions(-DCHARGER_AC_SYSFS_PATH=\"/sys/class/power_supply/usb/\")
