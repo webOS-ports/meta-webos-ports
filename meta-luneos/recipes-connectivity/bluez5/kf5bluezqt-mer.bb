@@ -27,7 +27,7 @@ do_configure:prepend() {
 
 do_install:append() {
     mkdir -p ${D}${OE_QMAKE_PATH_ARCHDATA}/mkspecs/modules/
-    cp ${WORKDIR}/qt_BluezQt.pri ${D}${OE_QMAKE_PATH_ARCHDATA}/mkspecs/modules/
+    cp ${UNPACKDIR}/qt_BluezQt.pri ${D}${OE_QMAKE_PATH_ARCHDATA}/mkspecs/modules/
 }
 
 FILES:${PN} += " \
