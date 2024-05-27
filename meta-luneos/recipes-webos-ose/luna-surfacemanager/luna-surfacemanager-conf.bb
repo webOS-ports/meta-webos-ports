@@ -13,12 +13,12 @@ SRC_URI:append:qemuall = "file://99-virtualbox-mouse.rules"
 
 do_install() {
     install -d ${D}${sysconfdir}/surface-manager.d
-    install -m 0644 ${WORKDIR}/surface-manager.env ${D}${sysconfdir}/surface-manager.d/
+    install -m 0644 ${UNPACKDIR}/surface-manager.env ${D}${sysconfdir}/surface-manager.d/
 }
 
 do_install:append:qemuall() {
     install -d ${D}${sysconfdir}/udev/rules.d
-    install -v -m 0644 ${WORKDIR}/99-virtualbox-mouse.rules ${D}${sysconfdir}/udev/rules.d/99-virtualbox-mouse.rules
+    install -v -m 0644 ${UNPACKDIR}/99-virtualbox-mouse.rules ${D}${sysconfdir}/udev/rules.d/99-virtualbox-mouse.rules
 }
 
 FILES:${PN} += " \
