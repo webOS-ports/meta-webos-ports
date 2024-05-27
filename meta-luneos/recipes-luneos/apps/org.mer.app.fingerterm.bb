@@ -33,8 +33,8 @@ do_configure:append() {
 do_install:append() {
     install -d ${D}${APP_PATH}
 
-    install -m 0644 ${WORKDIR}/appinfo.json ${D}${APP_PATH}
-    install -m 0755 ${WORKDIR}/build/fingerterm ${D}${APP_PATH}
+    install -m 0644 ${UNPACKDIR}/appinfo.json ${D}${APP_PATH}
+    install -m 0755 ${B}/fingerterm ${D}${APP_PATH}
     install -m 0644 ${S}/fingerterm.png ${D}${APP_PATH}/icon.png
 
     # Always provide same version as we have in our recipe
