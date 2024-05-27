@@ -54,17 +54,17 @@ SYSTEMD_SERVICE:${PN} = "maliit-server.service"
 
 do_install:append() {
     install -d ${D}${sysconfdir}/dbus-1/system.d
-    install -m 0644 ${WORKDIR}/maliit-server.conf ${D}${sysconfdir}/dbus-1/system.d/
+    install -m 0644 ${UNPACKDIR}/maliit-server.conf ${D}${sysconfdir}/dbus-1/system.d/
 
     install -d ${D}${systemd_unitdir}/system
-    install -m 0644 ${WORKDIR}/maliit-server.service ${D}${systemd_unitdir}/system/
-    install -m 0644 ${WORKDIR}/maliit-server@.service ${D}${systemd_unitdir}/system/
+    install -m 0644 ${UNPACKDIR}/maliit-server.service ${D}${systemd_unitdir}/system/
+    install -m 0644 ${UNPACKDIR}/maliit-server@.service ${D}${systemd_unitdir}/system/
 
     install -d ${D}${systemd_unitdir}/system/scripts
-    install -m 0755 ${WORKDIR}/maliit-server.sh.in ${D}${systemd_unitdir}/system/scripts/maliit-server.sh
+    install -m 0755 ${UNPACKDIR}/maliit-server.sh.in ${D}${systemd_unitdir}/system/scripts/maliit-server.sh
 
     install -d ${D}${sysconfdir}/maliit
-    install -m 0644 ${WORKDIR}/maliit-env.conf ${D}${sysconfdir}/maliit/
+    install -m 0644 ${UNPACKDIR}/maliit-env.conf ${D}${sysconfdir}/maliit/
 
     install -d ${D}${localstatedir}/lib/maliit
 }
