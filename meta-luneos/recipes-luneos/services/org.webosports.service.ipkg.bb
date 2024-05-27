@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=eb723b61539feef013de476e68b5c50a"
 DEPENDS = "luna-service2 glib-2.0 json-c"
 
 PV = "2.0.0-2+git"
-SRCREV = "9789b474acff215f624fb103a6954bb1a25cd2b1"
+SRCREV = "cca6470dc7b5b8f31470dd269d013e782cd0b4b8"
 
 inherit webos_ports_ose_repo
 inherit webos_cmake
@@ -17,9 +17,7 @@ inherit webos_systemd
 LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
 
 WEBOS_REPO_NAME = "preware"
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
-    file://0001-Fix-missing-return-values.patch;patchdir=.. \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 S = "${WORKDIR}/git/oe-service"
 
