@@ -208,3 +208,8 @@ inherit android_image_types
 
 # To build lapack(blas) for snowboy
 FORTRAN:forcevariable = ",fortran"
+
+# Override 64bit time_t on armv7a, as there are still many cases where things
+# like printf("[%5ld.%09ld]", time.tv_sec, time.tv_nsec) is done and provokes crashes
+GLIBC_64BIT_TIME_FLAGS:remove:armv7a = "-D_TIME_BITS=64"
+INSANE_SKIP:append:armv7a = " 32bit-time"
