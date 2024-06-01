@@ -6,8 +6,8 @@
 # https://gitlab.com/mobian1/eg25-manager/-/issues/45
 PREFERRED_VERSION_libgpiod = "1.6.4"
 
-# Prefer gstreamer version 1.22.% from oe-core for webos
-GSTREAMER_VERSION = "1.22.%"
+# Prefer gstreamer version 1.24.% from oe-core for webos
+GSTREAMER_VERSION = "1.24.%"
 
 PREFERRED_VERSION_gstreamer1.0              = "${GSTREAMER_VERSION}"
 PREFERRED_VERSION_gstreamer1.0-plugins-bad  = "${GSTREAMER_VERSION}"
@@ -16,7 +16,6 @@ PREFERRED_VERSION_gstreamer1.0-plugins-cool = "${GSTREAMER_VERSION}"
 PREFERRED_VERSION_gstreamer1.0-plugins-good = "${GSTREAMER_VERSION}"
 PREFERRED_VERSION_gstreamer1.0-plugins-ugly = "${GSTREAMER_VERSION}"
 PREFERRED_VERSION_gstreamer1.0-libav        = "${GSTREAMER_VERSION}"
-PREFERRED_VERSION_gstreamer1.0-omx          = "${GSTREAMER_VERSION}"
 PREFERRED_VERSION_gstreamer1.0-python       = "${GSTREAMER_VERSION}"
 PREFERRED_VERSION_gstreamer1.0-rtsp-server  = "${GSTREAMER_VERSION}"
 PREFERRED_VERSION_gstreamer1.0-vaapi        = "${GSTREAMER_VERSION}"
