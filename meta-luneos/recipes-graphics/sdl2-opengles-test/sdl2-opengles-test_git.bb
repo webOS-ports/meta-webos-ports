@@ -26,7 +26,7 @@ do_install() {
     for f in ${TARGETS}; do
         install -d ${D}${webos_applicationsdir}/org.mer.app.$f
         install -m 0755 ${S}/$f ${D}${webos_applicationsdir}/org.mer.app.$f/
-        install -m 0644 ${WORKDIR}/org.mer.app.$f-appinfo.json ${D}${webos_applicationsdir}/org.mer.app.$f/appinfo.json
+        install -m 0644 ${UNPACKDIR}/org.mer.app.$f-appinfo.json ${D}${webos_applicationsdir}/org.mer.app.$f/appinfo.json
     done
 }
 
