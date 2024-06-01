@@ -41,6 +41,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0007-Derive-requiredPermissions-for-legacy-apps-on-install.patch \
     file://luneos-app-permissions \
     file://luneos-app-permissions.json \
+    file://0001-CMakeLists.txt-replace-std-c-11-with-std-c-17-for-ic.patch \
 "
 
 S = "${WORKDIR}/git"
