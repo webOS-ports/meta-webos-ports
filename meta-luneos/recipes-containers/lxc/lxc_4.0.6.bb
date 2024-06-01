@@ -54,10 +54,6 @@ SRC_URI = "http://linuxcontainers.org/downloads/${BPN}/${BPN}-${PV}.tar.gz \
 SRC_URI[md5sum] = "732571c7cb4ab845068afb227bf35256"
 SRC_URI[sha256sum] = "9165dabc0bb6ef7f2fda2009aee90b20fbefe77ed8008347e9f06048eba1e463"
 
-
-
-S = "${WORKDIR}/${BPN}-${PV}"
-
 # Let's not configure for the host distro.
 #
 PTEST_CONF = "${@bb.utils.contains('DISTRO_FEATURES', 'ptest', '--enable-tests', '', d)}"
@@ -150,12 +146,12 @@ do_install:append() {
 	# /etc/default/lxc sources lxc-net, this allows lxc bridge when lxc-networking
 	# is not installed this results in no lxcbr0, but when lxc-networking is installed
 	# lxcbr0 will be fully configured.
-	install -m 644 ${WORKDIR}/lxc-net ${D}${sysconfdir}/default/
+	install -m 644 ${UNPACKDIR}/lxc-net ${D}${sysconfdir}/default/
 
 	# Force the main dnsmasq instance to bind only to specified interfaces and
 	# to not bind to virbr0. Libvirt will run its own instance on this interface.
 	install -d ${D}/${sysconfdir}/dnsmasq.d
-	install -m 644 ${WORKDIR}/dnsmasq.conf ${D}/${sysconfdir}/dnsmasq.d/lxc
+	install -m 644 ${UNPACKDIR}/dnsmasq.conf ${D}/${sysconfdir}/dnsmasq.d/lxc
 }
 
 EXTRA_OEMAKE += "TEST_DIR=${D}${PTEST_PATH}/src/tests"
