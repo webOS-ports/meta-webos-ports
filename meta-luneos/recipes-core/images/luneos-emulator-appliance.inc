@@ -21,7 +21,7 @@ do_deploy() {
 
     rm -rf ${WORKDIR}/appliance
     mkdir -p ${WORKDIR}/appliance
-    sed "s/luneos-emulator-disk.vmdk/${VMDK_NAME}/g" ${WORKDIR}/luneos-emulator.ovf > ${WORKDIR}/appliance/${OVF_NAME}
+    sed "s/luneos-emulator-disk.vmdk/${VMDK_NAME}/g" ${UNPACKDIR}/luneos-emulator.ovf > ${WORKDIR}/appliance/${OVF_NAME}
     sed -i "s/LuneOS Emulator/LuneOS-${MACHINE}${IMAGE_VERSION_SUFFIX}/g" ${WORKDIR}/appliance/${OVF_NAME}
     ln -sf ${DEPLOY_DIR_IMAGE}/${SRC_VMDK_NAME} ${WORKDIR}/appliance/${VMDK_NAME}
 
