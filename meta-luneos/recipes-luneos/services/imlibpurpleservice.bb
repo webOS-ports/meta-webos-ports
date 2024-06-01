@@ -16,7 +16,9 @@ inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
+    file://0001-CMakeLists.txt-replace-std-c-11-with-std-c-17-for-ic.patch \
+"
 S = "${WORKDIR}/git"
 
 RRECOMMENDS:${PN} += " \
