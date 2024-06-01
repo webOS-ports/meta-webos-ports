@@ -16,6 +16,8 @@ inherit webos_ports_repo
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
+CLEANBROKEN = "1"
+
 do_compile() {
     oe_runmake CC="${CC} ${LDFLAGS} ${CFLAGS}"
 }
