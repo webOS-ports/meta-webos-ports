@@ -56,19 +56,19 @@ do_install() {
 # Provided by libgbinder already for Halium devices, but necessary to add for non-Halium devices.
 
 do_install:append:pinephone() {
-    install -Dm644 -t "${D}${sysconfdir}" "${WORKDIR}/gbinder.conf"
+    install -Dm644 -t "${D}${sysconfdir}" "${UNPACKDIR}/gbinder.conf"
 }
 
 do_install:append:pinephonepro() {
-    install -Dm644 -t "${D}${sysconfdir}" "${WORKDIR}/gbinder.conf"
+    install -Dm644 -t "${D}${sysconfdir}" "${UNPACKDIR}/gbinder.conf"
 }
 
 do_install:append:pinetab2() {
-    install -Dm644 -t "${D}${sysconfdir}" "${WORKDIR}/gbinder.conf"
+    install -Dm644 -t "${D}${sysconfdir}" "${UNPACKDIR}/gbinder.conf"
 }
 
 do_install:append:qemux86-64() {
-    install -Dm644 -t "${D}${sysconfdir}" "${WORKDIR}/gbinder.conf"
+    install -Dm644 -t "${D}${sysconfdir}" "${UNPACKDIR}/gbinder.conf"
 }
 
 FILES:${PN} += " \
