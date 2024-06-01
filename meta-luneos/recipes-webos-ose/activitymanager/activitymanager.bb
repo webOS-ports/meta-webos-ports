@@ -25,6 +25,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Allow-for-1-minute-intervals.patch \
     file://0002-Revert-Retire-the-deprecated-APIs.patch \
     file://0003-activitymanager-Fix-outbound-permissions-to-com.webo.patch \
+    file://0001-CMakeLists.txt-replace-std-c-11-with-std-c-17-for-ic.patch \
 "
 S = "${WORKDIR}/git"
 
