@@ -9,16 +9,14 @@ LIC_FILES_CHKSUM = " \
 DEPENDS = "glib-2.0 db8 pidgin luna-service2 tidy-html5"
 
 PV = "3.0.5+git"
-SRCREV = "8e0580c411d5c13e9559a5b38410b1460fd9ee07"
+SRCREV = "134cf24abf82d019cc645599c39f360c3875a6b7"
 
 inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
-    file://0001-CMakeLists.txt-replace-std-c-11-with-std-c-17-for-ic.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 RRECOMMENDS:${PN} += " \
