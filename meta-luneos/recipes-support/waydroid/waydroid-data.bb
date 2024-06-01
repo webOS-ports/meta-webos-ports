@@ -38,8 +38,8 @@ do_install() {
     install -dm755 "${D}/usr/share/waydroid-extra/images"
 
     # makepkg have extracted the zips
-    install -m 0644 "${WORKDIR}/system.img" "${D}/usr/share/waydroid-extra/images"
-    install -m 0644 "${WORKDIR}/vendor.img" "${D}/usr/share/waydroid-extra/images"
+    install -m 0644 "${UNPACKDIR}/system.img" "${D}/usr/share/waydroid-extra/images"
+    install -m 0644 "${UNPACKDIR}/vendor.img" "${D}/usr/share/waydroid-extra/images"
 }
 
 FILES:${PN} += "/usr/share/waydroid-extra/images"
