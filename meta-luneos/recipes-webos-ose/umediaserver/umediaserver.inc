@@ -35,6 +35,7 @@ WEBOS_GIT_PARAM_BRANCH = "@gav"
 # http://gpro.lge.com/c/webosose/umediaserver/+/396224 Fix build with boost-1.84.0
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Fix-build-with-boost-1.84.0.patch \
+    file://0001-uMediaserver-add-missing-include-to-fix-build-with-b.patch \
 "
 S = "${WORKDIR}/git"
 
