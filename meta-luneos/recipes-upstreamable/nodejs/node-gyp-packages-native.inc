@@ -1,4 +1,4 @@
-# Copyright (c) 2014-2022 LG Electronics, Inc.
+# Copyright (c) 2014-2024 LG Electronics, Inc.
 
 INC_PR = "r3"
 
@@ -56,6 +56,9 @@ https://registry.npmjs.org/grunt-contrib-uglify/-/grunt-contrib-uglify-0.5.0.tgz
 https://registry.npmjs.org/grunt-contrib-watch/-/grunt-contrib-watch-0.6.1.tgz;name=grunt-contrib-watch_0.6.1;unpack=yes;downloadfilename=grunt-contrib-watch-0.6.1-tarball.tgz;subdir=${BPN}/grunt-contrib-watch_0.6.1 \
 https://registry.npmjs.org/qunitjs/-/qunitjs-1.18.0.tgz;name=qunitjs_1.18.0;unpack=yes;downloadfilename=qunitjs-1.18.0-tarball.tgz;subdir=${BPN}/qunitjs_1.18.0 \
 "
+
+S = "${WORKDIR}/sources"
+UNPACKDIR = "${S}"
 
 SRC_URI[fstream_0.1.25.md5sum]="81805600ac27ed20bbe21e2645021476"
 SRC_URI[fstream_0.1.25.sha256sum]="da01b58c91f9657c895f7d5dbe56e957923a2fe216e70d5beac45e5b5d8103d6"
@@ -331,55 +334,55 @@ ${LICENSE_which-1.0.5} \
 LICENSE = "${@ ' & '.join(sorted(set('${ALL_LICENSES}'.strip().split(' & ')))) }"
 
 LIC_FILES_CHKSUM = "\
-file://${WORKDIR}/${BPN}/abbrev_1.0.5/package/LICENSE;md5=b3245a33f2d41818f14c489bd33bc4a8 \
-file://${WORKDIR}/${BPN}/ansi_0.2.1/package/README.md;beginline=67;md5=c9dbec5380fde616b6393b2b1d91cd18 \
-file://${WORKDIR}/${BPN}/asn1_0.1.11/package/LICENSE;md5=5ce2f42143c298495637e28e40cd5462 \
-file://${WORKDIR}/${BPN}/assert-plus_0.1.2/package/README.md;beginline=101;md5=01b58088f134c724978d16324441a473 \
-file://${WORKDIR}/${BPN}/async_0.2.10/package/LICENSE;md5=64a378b2b01424fe22d54bc626175994 \
-file://${WORKDIR}/${BPN}/aws-sign2_0.5.0/package/LICENSE;md5=f3f8ead5440d1c311b45be065d135d90 \
-file://${WORKDIR}/${BPN}/block-stream_0.0.7/package/LICENCE;md5=c695aba12d799c74e770d90e1c5d59aa \
-file://${WORKDIR}/${BPN}/boom_0.4.2/package/LICENSE;md5=8595d57fda9e9f801719f48fb5bff49d \
-file://${WORKDIR}/${BPN}/combined-stream_0.0.4/package/License;md5=5270b4ddb6700d0a820e6d066744589c \
-file://${WORKDIR}/${BPN}/cryptiles_0.2.2/package/LICENSE;md5=a674df8d258d4437373838e36bc960d2 \
-file://${WORKDIR}/${BPN}/ctype_0.5.2/package/LICENSE;md5=0d330d2474abae149a0126325ec70247 \
-file://${WORKDIR}/${BPN}/delayed-stream_0.0.5/package/License;md5=5270b4ddb6700d0a820e6d066744589c \
-file://${WORKDIR}/${BPN}/forever-agent_0.5.2/package/LICENSE;md5=f3f8ead5440d1c311b45be065d135d90 \
-file://${WORKDIR}/${BPN}/form-data_0.1.2/package/License;md5=7aa505292e2636a9e59d4d3f258f4819 \
-file://${WORKDIR}/${BPN}/fstream_0.1.25/package/LICENSE;md5=8ce909f9cccb74a7c6f2720930d072c1 \
-file://${WORKDIR}/${BPN}/glob_3.2.9/package/LICENSE;md5=8ce909f9cccb74a7c6f2720930d072c1 \
-file://${WORKDIR}/${BPN}/graceful-fs_1.2.3/package/LICENSE;md5=8ce909f9cccb74a7c6f2720930d072c1 \
-file://${WORKDIR}/${BPN}/graceful-fs_2.0.3/package/LICENSE;md5=8ce909f9cccb74a7c6f2720930d072c1 \
-file://${WORKDIR}/${BPN}/grunt_0.4.5/package/LICENSE-MIT;md5=71ec026c2f855627041a4d9a1f5d2c3e \
-file://${WORKDIR}/${BPN}/grunt-contrib-jshint_0.10.0/package/LICENSE-MIT;md5=d4c0dac367d17453778bfc70faf69145 \
-file://${WORKDIR}/${BPN}/grunt-contrib-nodeunit_0.4.1/package/LICENSE-MIT;md5=d4c0dac367d17453778bfc70faf69145 \
-file://${WORKDIR}/${BPN}/grunt-contrib-uglify_0.5.0/package/LICENSE-MIT;md5=d4c0dac367d17453778bfc70faf69145 \
-file://${WORKDIR}/${BPN}/grunt-contrib-watch_0.6.1/package/LICENSE-MIT;md5=7aa789b63a114f3e399acfb94bb570a5 \
-file://${WORKDIR}/${BPN}/hawk_1.0.0/package/LICENSE;md5=a674df8d258d4437373838e36bc960d2 \
-file://${WORKDIR}/${BPN}/hoek_0.9.1/package/LICENSE;md5=1dd27b734d6fd3763ba8d9d1d4d2a44f \
-file://${WORKDIR}/${BPN}/http-signature_0.10.0/package/LICENSE;md5=38ecf0a3a3894f404ca99c2a08924afc \
-file://${WORKDIR}/${BPN}/inherits_2.0.1/package/LICENSE;md5=5b2ef2247af6d355ae9d9f988092d470 \
-file://${WORKDIR}/${BPN}/json-stringify-safe_5.0.0/package/LICENSE;md5=8ce909f9cccb74a7c6f2720930d072c1 \
-file://${WORKDIR}/${BPN}/lru-cache_2.5.0/package/LICENSE;md5=b3245a33f2d41818f14c489bd33bc4a8 \
-file://${WORKDIR}/${BPN}/mime_1.2.11/package/LICENSE;md5=8eab89930e0b484cd991ed4a155f74f7 \
-file://${WORKDIR}/${BPN}/minimatch_0.2.14/package/LICENSE;md5=b3245a33f2d41818f14c489bd33bc4a8 \
-file://${WORKDIR}/${BPN}/mkdirp_0.3.5/package/LICENSE;md5=b2d989bc186e7f6b418a5fdd5cc0b56b \
-file://${WORKDIR}/${BPN}/mkdirp_0.4.0/package/LICENSE;md5=b2d989bc186e7f6b418a5fdd5cc0b56b \
-file://${WORKDIR}/${BPN}/node-uuid_1.4.1/package/LICENSE.md;md5=c1a615ca498934d9a312c2d5294cf2cf \
-file://${WORKDIR}/${BPN}/nopt_2.2.1/package/LICENSE;md5=b3245a33f2d41818f14c489bd33bc4a8 \
-file://${WORKDIR}/${BPN}/npmlog_0.0.6/package/LICENSE;md5=8ce909f9cccb74a7c6f2720930d072c1 \
-file://${WORKDIR}/${BPN}/oauth-sign_0.3.0/package/LICENSE;md5=f3f8ead5440d1c311b45be065d135d90 \
-file://${WORKDIR}/${BPN}/osenv_0.0.3/package/LICENSE;md5=c695aba12d799c74e770d90e1c5d59aa \
-file://${WORKDIR}/${BPN}/punycode_1.2.4/package/LICENSE-MIT.txt;md5=f6e63cacc921f39d701abb9091a7d73d \
-file://${WORKDIR}/${BPN}/punycode_1.2.4/package/LICENSE-GPL.txt;md5=2c1778696d3ba68569a0352e709ae6b7 \
-file://${WORKDIR}/${BPN}/qs_0.6.6/package/Readme.md;beginline=35;md5=90d7f26fbfa70f23a025e3e3502e5a5b \
-file://${WORKDIR}/${BPN}/qunitjs_1.18.0/package/LICENSE.txt;md5=88e6b088e1bdb95427eca76a90663e3b \
-file://${WORKDIR}/${BPN}/request_2.34.0/package/LICENSE;md5=f3f8ead5440d1c311b45be065d135d90 \
-file://${WORKDIR}/${BPN}/rimraf_2.2.6/package/LICENSE;md5=b3245a33f2d41818f14c489bd33bc4a8 \
-file://${WORKDIR}/${BPN}/semver_2.2.1/package/LICENSE;md5=8ce909f9cccb74a7c6f2720930d072c1 \
-file://${WORKDIR}/${BPN}/sigmund_1.0.0/package/LICENSE;md5=8ce909f9cccb74a7c6f2720930d072c1 \
-file://${WORKDIR}/${BPN}/sntp_0.2.4/package/LICENSE;md5=a674df8d258d4437373838e36bc960d2 \
-file://${WORKDIR}/${BPN}/tar_0.1.19/package/LICENCE;md5=c695aba12d799c74e770d90e1c5d59aa \
-file://${WORKDIR}/${BPN}/tough-cookie_0.12.1/package/LICENSE;md5=069d7e6f46a4e30df19bc7cddf36674b \
-file://${WORKDIR}/${BPN}/tunnel-agent_0.3.0/package/LICENSE;md5=f3f8ead5440d1c311b45be065d135d90 \
-file://${WORKDIR}/${BPN}/which_1.0.5/package/LICENSE;md5=b3245a33f2d41818f14c489bd33bc4a8 \
+file://${BPN}/abbrev_1.0.5/package/LICENSE;md5=b3245a33f2d41818f14c489bd33bc4a8 \
+file://${BPN}/ansi_0.2.1/package/README.md;beginline=67;md5=c9dbec5380fde616b6393b2b1d91cd18 \
+file://${BPN}/asn1_0.1.11/package/LICENSE;md5=5ce2f42143c298495637e28e40cd5462 \
+file://${BPN}/assert-plus_0.1.2/package/README.md;beginline=101;md5=01b58088f134c724978d16324441a473 \
+file://${BPN}/async_0.2.10/package/LICENSE;md5=64a378b2b01424fe22d54bc626175994 \
+file://${BPN}/aws-sign2_0.5.0/package/LICENSE;md5=f3f8ead5440d1c311b45be065d135d90 \
+file://${BPN}/block-stream_0.0.7/package/LICENCE;md5=c695aba12d799c74e770d90e1c5d59aa \
+file://${BPN}/boom_0.4.2/package/LICENSE;md5=8595d57fda9e9f801719f48fb5bff49d \
+file://${BPN}/combined-stream_0.0.4/package/License;md5=5270b4ddb6700d0a820e6d066744589c \
+file://${BPN}/cryptiles_0.2.2/package/LICENSE;md5=a674df8d258d4437373838e36bc960d2 \
+file://${BPN}/ctype_0.5.2/package/LICENSE;md5=0d330d2474abae149a0126325ec70247 \
+file://${BPN}/delayed-stream_0.0.5/package/License;md5=5270b4ddb6700d0a820e6d066744589c \
+file://${BPN}/forever-agent_0.5.2/package/LICENSE;md5=f3f8ead5440d1c311b45be065d135d90 \
+file://${BPN}/form-data_0.1.2/package/License;md5=7aa505292e2636a9e59d4d3f258f4819 \
+file://${BPN}/fstream_0.1.25/package/LICENSE;md5=8ce909f9cccb74a7c6f2720930d072c1 \
+file://${BPN}/glob_3.2.9/package/LICENSE;md5=8ce909f9cccb74a7c6f2720930d072c1 \
+file://${BPN}/graceful-fs_1.2.3/package/LICENSE;md5=8ce909f9cccb74a7c6f2720930d072c1 \
+file://${BPN}/graceful-fs_2.0.3/package/LICENSE;md5=8ce909f9cccb74a7c6f2720930d072c1 \
+file://${BPN}/grunt_0.4.5/package/LICENSE-MIT;md5=71ec026c2f855627041a4d9a1f5d2c3e \
+file://${BPN}/grunt-contrib-jshint_0.10.0/package/LICENSE-MIT;md5=d4c0dac367d17453778bfc70faf69145 \
+file://${BPN}/grunt-contrib-nodeunit_0.4.1/package/LICENSE-MIT;md5=d4c0dac367d17453778bfc70faf69145 \
+file://${BPN}/grunt-contrib-uglify_0.5.0/package/LICENSE-MIT;md5=d4c0dac367d17453778bfc70faf69145 \
+file://${BPN}/grunt-contrib-watch_0.6.1/package/LICENSE-MIT;md5=7aa789b63a114f3e399acfb94bb570a5 \
+file://${BPN}/hawk_1.0.0/package/LICENSE;md5=a674df8d258d4437373838e36bc960d2 \
+file://${BPN}/hoek_0.9.1/package/LICENSE;md5=1dd27b734d6fd3763ba8d9d1d4d2a44f \
+file://${BPN}/http-signature_0.10.0/package/LICENSE;md5=38ecf0a3a3894f404ca99c2a08924afc \
+file://${BPN}/inherits_2.0.1/package/LICENSE;md5=5b2ef2247af6d355ae9d9f988092d470 \
+file://${BPN}/json-stringify-safe_5.0.0/package/LICENSE;md5=8ce909f9cccb74a7c6f2720930d072c1 \
+file://${BPN}/lru-cache_2.5.0/package/LICENSE;md5=b3245a33f2d41818f14c489bd33bc4a8 \
+file://${BPN}/mime_1.2.11/package/LICENSE;md5=8eab89930e0b484cd991ed4a155f74f7 \
+file://${BPN}/minimatch_0.2.14/package/LICENSE;md5=b3245a33f2d41818f14c489bd33bc4a8 \
+file://${BPN}/mkdirp_0.3.5/package/LICENSE;md5=b2d989bc186e7f6b418a5fdd5cc0b56b \
+file://${BPN}/mkdirp_0.4.0/package/LICENSE;md5=b2d989bc186e7f6b418a5fdd5cc0b56b \
+file://${BPN}/node-uuid_1.4.1/package/LICENSE.md;md5=c1a615ca498934d9a312c2d5294cf2cf \
+file://${BPN}/nopt_2.2.1/package/LICENSE;md5=b3245a33f2d41818f14c489bd33bc4a8 \
+file://${BPN}/npmlog_0.0.6/package/LICENSE;md5=8ce909f9cccb74a7c6f2720930d072c1 \
+file://${BPN}/oauth-sign_0.3.0/package/LICENSE;md5=f3f8ead5440d1c311b45be065d135d90 \
+file://${BPN}/osenv_0.0.3/package/LICENSE;md5=c695aba12d799c74e770d90e1c5d59aa \
+file://${BPN}/punycode_1.2.4/package/LICENSE-MIT.txt;md5=f6e63cacc921f39d701abb9091a7d73d \
+file://${BPN}/punycode_1.2.4/package/LICENSE-GPL.txt;md5=2c1778696d3ba68569a0352e709ae6b7 \
+file://${BPN}/qs_0.6.6/package/Readme.md;beginline=35;md5=90d7f26fbfa70f23a025e3e3502e5a5b \
+file://${BPN}/qunitjs_1.18.0/package/LICENSE.txt;md5=88e6b088e1bdb95427eca76a90663e3b \
+file://${BPN}/request_2.34.0/package/LICENSE;md5=f3f8ead5440d1c311b45be065d135d90 \
+file://${BPN}/rimraf_2.2.6/package/LICENSE;md5=b3245a33f2d41818f14c489bd33bc4a8 \
+file://${BPN}/semver_2.2.1/package/LICENSE;md5=8ce909f9cccb74a7c6f2720930d072c1 \
+file://${BPN}/sigmund_1.0.0/package/LICENSE;md5=8ce909f9cccb74a7c6f2720930d072c1 \
+file://${BPN}/sntp_0.2.4/package/LICENSE;md5=a674df8d258d4437373838e36bc960d2 \
+file://${BPN}/tar_0.1.19/package/LICENCE;md5=c695aba12d799c74e770d90e1c5d59aa \
+file://${BPN}/tough-cookie_0.12.1/package/LICENSE;md5=069d7e6f46a4e30df19bc7cddf36674b \
+file://${BPN}/tunnel-agent_0.3.0/package/LICENSE;md5=f3f8ead5440d1c311b45be065d135d90 \
+file://${BPN}/which_1.0.5/package/LICENSE;md5=b3245a33f2d41818f14c489bd33bc4a8 \
 "
