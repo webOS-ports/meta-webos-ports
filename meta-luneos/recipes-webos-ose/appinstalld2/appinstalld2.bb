@@ -24,6 +24,7 @@ file://0002-AppInstaller-rescan-apps-after-install.patch \
 file://0003-AppPackage-allow-different-owner-UIDs-GIDs.patch \
 file://0004-appinstalld2-Make-org.webosports-privileged-as-well.patch \
 file://0005-Add-permission-for-rescan.patch \
+file://0001-CMakeLists.txt-replace-std-c-11-with-std-c-17-for-ic.patch \
 "
 
 S = "${WORKDIR}/git"
