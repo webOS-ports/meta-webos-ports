@@ -17,10 +17,19 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 do_compile() {
-    oe_runmake CC="${CC} ${LDFLAGS}"
+    oe_runmake CC="${CC} ${LDFLAGS} ${CFLAGS}"
 }
 
 do_install() {
     install -d ${D}${sbindir}
     install -m 0755 ${S}/crash_handler ${D}${sbindir}
 }
+
+# table-unwind-arm.c:488:55: error: implicit declaration of function 'strerror' [-Wimplicit-function-declaration]
+# journal.c:62:19: error: implicit declaration of function 'atoi' [-Wimplicit-function-declaration]
+# journal.c:84:17: error: implicit declaration of function 'strptime'; did you mean 'strftime'? [-Wimplicit-function-declaration]
+# journal.c:120:17: error: implicit declaration of function 'read'; did you mean 'fread'? [-Wimplicit-function-declaration]
+# journal.c:188:17: error: implicit declaration of function 'write'; did you mean 'fwrite'? [-Wimplicit-function-declaration]
+# journal.c:207:16: error: implicit declaration of function 'close'; did you mean 'pclose'? [-Wimplicit-function-declaration]
+# crash_handler.c:611:16: error: implicit declaration of function 'klogctl' [-Wimplicit-function-declaration]
+CFLAGS += "-Wno-error=implicit-function-declaration"
