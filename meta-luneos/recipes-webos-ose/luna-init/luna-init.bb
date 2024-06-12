@@ -12,8 +12,8 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "tzdata python3-pytz-native"
 
-WEBOS_VERSION = "2.0.1-10_3a951d1299acf713d1d406ed5e0608d6e9ca9108"
-PR = "r19"
+WEBOS_VERSION = "2.0.1-11_b186c185d8304480e78aade0617ef795c3db3e6e"
+PR = "r20"
 
 inherit allarch
 inherit webos_public_repo
@@ -34,7 +34,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
         file://0010-CMakeLists.txt-Install-mccInfo.json-as-well.patch \
         file://0011-Delete-ext-timezones.json.patch \
         file://0012-luna-init-gen-ext-timezones.py-Fix-typo.patch \
-        file://0013-luna-init-CMakeLists.txt-Remove-checks-for-WEBOS_TAR.patch \
 "
 S = "${WORKDIR}/git"
 

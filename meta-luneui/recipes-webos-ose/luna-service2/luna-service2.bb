@@ -18,8 +18,8 @@ VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 VIRTUAL-RUNTIME_bash ?= "bash"
 RDEPENDS:${PN} = "luna-service2-security-conf ${VIRTUAL-RUNTIME_cpushareholder} ${VIRTUAL-RUNTIME_bash}"
 
-WEBOS_VERSION = "3.21.2-37_1c03d61dd0e1eab4b514e4e437fdca0ae81005ee"
-PR = "r32"
+WEBOS_VERSION = "3.21.2-41_0cfbecbc319544b61b59dd00d0cd25371b95ebfe"
+PR = "r33"
 
 EXTRA_OECMAKE += "${@ '-DWEBOS_DISTRO_PRERELEASE:STRING="devel"' \
                   if d.getVar('WEBOS_DISTRO_PRERELEASE') != '' else ''}"
@@ -37,11 +37,10 @@ inherit pkgconfig
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-hub.cpp-add-org.webosports.service-in-the-migrated-s.patch \
     file://0002-ls-hubd-print-more-useful-error-for-outbound-permiss.patch \
-    file://0003-CMakeLists-Remove-webos_machine_impl_dep-call.patch \
-    file://0004-hub.cpp-Add-support-for-org.webosports-and-org.webos.patch \
-    file://0005-luna-service2-Add-permissions-for-com.palm-and-org.w.patch \
-    file://0006-LSMessageIsSubscription-test-if-payload-is-a-JSON-ob.patch \
-    file://0007-_LSCheckProvidedTrustedGroups-reduce-log-noise.patch \
+    file://0003-hub.cpp-Add-support-for-org.webosports-and-org.webos.patch \
+    file://0004-luna-service2-Add-permissions-for-com.palm-and-org.w.patch \
+    file://0005-LSMessageIsSubscription-test-if-payload-is-a-JSON-ob.patch \
+    file://0006-_LSCheckProvidedTrustedGroups-reduce-log-noise.patch \
 "
 S = "${WORKDIR}/git"
 

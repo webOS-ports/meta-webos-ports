@@ -12,8 +12,8 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "glib-2.0 glib-2.0-native luna-service2 pmloglib libpbnjson python3-packaging-native"
 
-WEBOS_VERSION = "1.0.0-33_536d71dbd9969c56038da29ce451dca8a7767e09"
-PR = "r8"
+WEBOS_VERSION = "1.0.0-34_4e1ab4e3a5d2c7168dcc7d6c41ee607fb1616d49"
+PR = "r9"
 
 inherit webos_cmake
 inherit webos_system_bus

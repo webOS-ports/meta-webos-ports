@@ -19,8 +19,8 @@ RDEPENDS:${PN} += "util-linux"
 VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_cpushareholder}"
 
-WEBOS_VERSION = "1.0.2-83_9e666f281d73ba1ff7b24d996f199b2343950369"
-INC_PR = "r66"
+WEBOS_VERSION = "1.0.2-92_9950b9f8e6a4cd7c902fed744832846bb06e54b0"
+INC_PR = "r67"
 
 WAM_BUILD_SYSTEM ?= "webos_cmake"
 WAM_BUILD_DEFAULT_PLUGIN ?= "1"
@@ -37,17 +37,17 @@ inherit useradd
 WAM_DATA_DIR = "${webos_execstatedir}/${BPN}"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-security_policy.conf-Add-usr-palm-applications.patch \
-    file://0002-ls2-Add-required-bits-for-LuneOS.patch \
+    file://0001-security_policy.conf-Add-paths-for-LuneOS.patch \
+    file://0002-WAM-LS2-Add-required-bits-for-LuneOS.patch \
     file://0003-WAM-Use-Prelude-as-default-font.patch \
     file://0004-Add-basic-implementation-for-getResource-for-webOSSy.patch \
     file://0005-DeviceInfoImpl-add-tvDeviceInfo-data.patch \
     file://0006-Add-relaunch-support-for-legacy-enyo-apps.patch \
-    file://0007-Add-window.open-support.patch \
+    file://0007-WAM-Add-window.open-support.patch \
     file://0008-WebAppBase-add-noWindow-support.patch \
-    file://0009-WebPageBlink-keep-same-window-type-when-creating-add.patch \
+    file://0009-WAM-WebPageBlink-keep-same-window-type-when-creating.patch \
     file://0010-WebAppWayland-do-not-show-window-if-its-status-is-st.patch \
-    file://0011-Add-additional-window.open-features-management.patch \
+    file://0011-WAM-Add-additional-window.open-features-management.patch \
     file://0012-PalmSystem-add-banner-support.patch \
     file://0013-WebAppBase-fix-window.close-for-multi-window-apps.patch \
     file://0014-WAM-Fix-outbound-permission-error.patch \

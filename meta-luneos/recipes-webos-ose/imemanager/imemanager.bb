@@ -1,7 +1,7 @@
 # Copyright (c) 2017-2024 LG Electronics, Inc.
 
 SUMMARY = "Maliit Input Method Plugins"
-DESCRIPTION = "Mallit-based virtual keyboard and input method engine for webOS"
+DESCRIPTION = "Mallit-based virtual keyboard and input method engine for open webOS"
 AUTHOR = "Guruprasad KN <guruprasad.kn@lge.com>"
 SECTION = "webos/base"
 
@@ -16,14 +16,16 @@ DEPENDS = "qtbase luna-service2 luna-prefs qt-features-webos qtdeclarative malii
 #RDEPENDS:${PN} += "libhangul sunpinyin pyzy qml-webos-bridge openwnn-webos"
 RDEPENDS:${PN} += "qml-webos-bridge"
 
-WEBOS_VERSION = "1.0.0-29_277aa343ce79866539ee1cafda091f06548b3f79"
-PR = "r6"
+WEBOS_VERSION = "1.0.0-30_4380d482f1779485963f996d53390eef4ca99875"
+PR = "r7"
 
 inherit webos_qmake6
 inherit webos_system_bus
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 #inherit webos_qt_localization
+inherit features_check
+ANY_OF_DISTRO_FEATURES = "vulkan opengl"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 

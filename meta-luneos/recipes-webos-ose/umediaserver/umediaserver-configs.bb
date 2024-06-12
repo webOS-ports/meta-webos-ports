@@ -10,19 +10,18 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=2bdfe040dcf81b4038370ae96036c519 \
 "
 
-WEBOS_VERSION = "1.0.0-15_48cb6a1271fbb3c08f8503da81047b28b1ef8c7c"
-PR = "r7"
+WEBOS_VERSION = "1.0.0-17_33b442fca4ed27a779dd4cd55e8fc7a48c8c31ac"
+PR = "r8"
 
 inherit pkgconfig
 inherit webos_cmake
+inherit webos_machine_dep
+inherit webos_enhanced_submissions
+#inherit webos_distro_variant_dep
 inherit webos_filesystem_paths
 inherit webos_public_repo
-inherit webos_enhanced_submissions
-
-PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 EXTRA_OECMAKE += "-DWEBOS_INSTALL_CONFCAPSDIR:STRING=${webos_frameworksdir}"
-EXTRA_OECMAKE += "-DWEBOS_TARGET_MACHINE:STRING=${MACHINE}"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

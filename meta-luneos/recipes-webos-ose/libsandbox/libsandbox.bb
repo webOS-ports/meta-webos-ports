@@ -10,16 +10,14 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=629222c36a9c68f9e1855667faef01ae \
 "
 
-WEBOS_VERSION = "2.0.0-2_03120c12ebae2cb2fbd4cb2b58e6b2c6b565efa5"
+WEBOS_VERSION = "2.0.0-3_03123aaa6b341f7cb838ace978223a5617f2555c"
 PR = "r3"
 
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-           file://0001-Remove-webos_machine_impl_dep.patch \
-"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 ALLOW_EMPTY:${PN} = "1"

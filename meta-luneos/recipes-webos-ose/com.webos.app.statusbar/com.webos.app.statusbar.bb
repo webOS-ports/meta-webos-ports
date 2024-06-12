@@ -15,9 +15,9 @@ PR = "r0"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
+inherit webos_enhanced_submissions
 inherit webos_enactjs_app
 inherit webos_public_repo
-inherit webos_enhanced_submissions
 
 WEBOS_ENACTJS_APP_ID = "com.webos.app.statusbar"
 

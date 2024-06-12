@@ -1,9 +1,11 @@
-# Copyright (c) 2013 LG Electronics, Inc.
+# Copyright (c) 2013-2024 LG Electronics, Inc.
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 AUTHOR = "Herb Kuta <herb.kuta@lge.com>"
 
 inherit webos_filesystem_paths
+
+EXTENDPRAUTO:append = "webos16"
 
 dirs700 = " \
     ${webos_db8datadir} \
@@ -57,4 +59,12 @@ do_install:append() {
 generate_fstab_entries() {
     echo "# additional in-memory storage for db8"
     echo "tmpfs ${webos_db8datadir}/temp tmpfs size=80M,mode=0700 0 0"
+}
+
+PR:append = "${@bb.utils.contains('DISTRO_FEATURES', 'smack', 'smack1', '', d)}"
+do_install[postfuncs] += "${@bb.utils.contains('DISTRO_FEATURES', 'smack', 'set_tmpfs_star', '', d)}"
+
+set_tmpfs_star () {
+    fstab="${D}/${sysconfdir}/fstab"
+    awk '$1 == "tmpfs" {$4=$4",smackfsroot=*"} {print}' $fstab > "$fstab.tmp" && mv $fstab.tmp $fstab
 }
