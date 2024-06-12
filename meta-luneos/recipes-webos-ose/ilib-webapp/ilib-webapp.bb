@@ -1,7 +1,7 @@
 # Copyright (c) 2017-2024 LG Electronics, Inc.
 
 SUMMARY = "iLib code and locale data"
-AUTHOR = "Goun Lee <goun.lee@lge.com>"
+AUTHOR = "Seonmi Jin <seonmi1.jin@lge.com>"
 SECTION = "libs/javascript"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = " \
@@ -9,11 +9,11 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=be4f2e45a1215076318af43f833aa178 \
 "
 
-WEBOS_VERSION = "14.19.0-31_8ffdc3e1a0cab2b2b6325576b4093a633ae739f6"
+WEBOS_VERSION = "14.20.0-32_9748c062c2db2ed5bab8fea64a47c139c7559487"
 PR = "r0"
 
-inherit webos_public_repo
 inherit webos_enhanced_submissions
+inherit webos_public_repo
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

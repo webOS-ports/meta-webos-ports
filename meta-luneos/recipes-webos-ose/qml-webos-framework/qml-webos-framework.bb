@@ -19,7 +19,7 @@ RPROVIDES:${PN}-examples = " \
 "
 
 WEBOS_VERSION = "1.0.0-169_5a2860ca78815cb135dc4120f204c31bad5d7ab9"
-PR = "r36"
+PR = "r38"
 
 inherit webos_qmake6
 inherit pkgconfig
@@ -65,3 +65,7 @@ FILES:${PN}-tools += "${webos_sdkdir}/*"
 
 # we don't provide cmake tests
 EXTRA_QMAKEVARS_POST += "CONFIG-=create_cmake"
+
+PR:append = "${@bb.utils.contains('DISTRO_FEATURES', 'smack', 'smack1', '', d)}"
+PATCH_SMACK = "${@bb.utils.contains('DISTRO_FEATURES', 'smack', 'file://0001-Add-SMACK-security-labeling.patch', '', d)}"
+SRC_URI:append = " ${PATCH_SMACK}"

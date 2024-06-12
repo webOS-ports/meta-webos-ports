@@ -11,13 +11,16 @@ inherit gettext
 inherit pkgconfig
 inherit python3native
 inherit webruntime_apps
+inherit webos_configure_manifest
 inherit webos_filesystem_paths
 inherit webos_lttng
 inherit webos_system_bus
+inherit features_check
+ANY_OF_DISTRO_FEATURES = "vulkan opengl"
 
 DEPENDS = "virtual/gettext wayland wayland-native luna-service2 pixman freetype fontconfig openssl pango cairo icu webos-wayland-extensions libxkbcommon libexif dbus pciutils udev libcap alsa-lib virtual/egl elfutils-native libdrm atk gperf-native gconf libwebosi18n bison-native xorgproto nss nspr curl nspr-native nss-native pmloglib glib-2.0-native python3-six-native python3-beautifulsoup4-native python3-soupsieve-native python3-lxml-native python3-html5lib-native python3-webencodings-native"
 
-INC_PR = "r70"
+INC_PR = "r74"
 # Enable this in webos-local.conf or in recipe to build
 DEPLOY_CHROMEDRIVER ?= "false"
 DEPLOY_WAM_DEMO ?= "false"
@@ -40,10 +43,9 @@ PACKAGECONFIG_WEBOS_CODEC ?= "webos-codec pulseaudio webos-camera webos-audio"
 PACKAGECONFIG_MEDIA ?= "neva-media gstreamer umediaserver gav"
 PACKAGECONFIG ?= ""
 PACKAGECONFIG:append = " ${@bb.utils.filter('DISTRO_FEATURES', 'smack', d)}"
-# We don't supply gstreamer and umediaserver yet in LuneOS, so disable the PACKAGECONFIG_MEDIA for now on all our targets
-# PACKAGECONFIG:append:hardware = " ${PACKAGECONFIG_MEDIA} ${PACKAGECONFIG_NEVA_WEBRTC} ${PACKAGECONFIG_WEBOS_CODEC}"
-# PACKAGECONFIG:append:qemux86 = " ${PACKAGECONFIG_MEDIA}"
-# PACKAGECONFIG:append:qemux86-64 = " ${PACKAGECONFIG_MEDIA}"
+PACKAGECONFIG:append:hardware = " ${PACKAGECONFIG_MEDIA} ${PACKAGECONFIG_WEBOS_CODEC}"
+PACKAGECONFIG:append:qemux86 = " ${PACKAGECONFIG_MEDIA}"
+PACKAGECONFIG:append:qemux86-64 = " ${PACKAGECONFIG_MEDIA}"
 PACKAGECONFIG[gstreamer] = "use_gst_media=true enable_webm_video_codecs=false,use_gst_media=false,g-media-pipeline"
 PACKAGECONFIG[umediaserver] = ",,umediaserver"
 # Options to enable debug build. Add this PACKAGECONFIG to webos-local.conf to enable debug build
@@ -62,6 +64,7 @@ PACKAGECONFIG[webos-camera] = "use_webos_camera=true,use_webos_camera=false, cam
 PACKAGECONFIG[webos-audio] = "use_webos_audio=true,use_webos_audio=false, pulseaudio"
 PACKAGECONFIG[test-coverage] = "enable_neva_test_coverage_build=true,enable_neva_test_coverage_build=false"
 PACKAGECONFIG[smack] = "enable_webos_smack=true, enable_webos_smack=false"
+PACKAGECONFIG[dcheck] = "dcheck_is_configurable=true"
 
 GN_ARGS:append = " \
     enable_memorymanager_webapi=true\
@@ -278,10 +281,12 @@ RDEPENDS:${APP_SHELL_RUNTIME} += "${PN} ${VIRTUAL-RUNTIME_gpu-libs}"
 VIRTUAL-RUNTIME_gpu-libs ?= ""
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_gpu-libs} ${APP_SHELL_RUNTIME}"
 RDEPENDS:${WAM_DEMO_APPLICATION} += "${VIRTUAL-RUNTIME_gpu-libs}"
-RDEPENDS:${PN}:append:qemuall = " libpci"
 
 # it aborts if libudev.so.1 is missing
 RDEPENDS:${PN} += "libudev"
+
+# for libpci.so
+RDEPENDS:${PN} += "libpci"
 
 # The text relocations are intentional -- see comments in [GF-52468]
 # TODO: check if we need INSANE_SKIP on ldflags
@@ -303,5 +308,8 @@ FILES:${PN}-dev = " \
     ${includedir} \
 "
 
-export CCACHE_MAXSIZE = "3800M"
+PR:append = "${@bb.utils.contains('DISTRO_FEATURES', 'smack', 'smack2', '', d)}"
+PATCH_SMACK = "${@bb.utils.contains('DISTRO_FEATURES', 'smack', 'file://0001-run_app_shell-add-SMACK-labeling-based-on-AppID_79.patch', '', d)}"
+SRC_URI:append = " ${PATCH_SMACK}"
 
+export CCACHE_MAXSIZE = "3800M"

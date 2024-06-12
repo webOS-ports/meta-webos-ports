@@ -22,14 +22,14 @@ VIRTUAL-RUNTIME_bash ?= "bash"
 RDEPENDS:${PN}:append:class-target = " ${VIRTUAL-RUNTIME_stat} ${VIRTUAL-RUNTIME_bash}"
 RDEPENDS:${PN}-tests:append:class-target = " ${VIRTUAL-RUNTIME_bash}"
 
+WEBOS_VERSION = "3.2.0-32_11ae879176e14f80d8dd103150947f9a4f8b7a5d"
+PR = "r40"
+
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit webos_system_bus
 inherit pkgconfig
-
-WEBOS_VERSION = "3.2.0-29_bc18024e9cb039d7eba18c9266b54128f25a3dbd"
-PR = "r40"
 
 EXTRA_OECMAKE += "-DWEBOS_DB8_BACKEND:STRING='leveldb;sandwich' -DCMAKE_SKIP_RPATH:BOOL=TRUE"
 EXTRA_OECMAKE:append:class-target = " -DWEBOS_CONFIG_BUILD_TESTS:BOOL=TRUE  -DUSE_PMLOG:BOOL=TRUE  -DBUILD_LS2:BOOL=TRUE -DWANT_PROFILING:BOOL=${@ 'true' if '${WEBOS_DISTRO_PRERELEASE}' != '' else 'false'}"

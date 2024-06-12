@@ -1,7 +1,7 @@
 # Copyright (c) 2019-2024 LG Electronics, Inc.
 
 SUMMARY = "General System Launcher application"
-AUTHOR = "Revanth Kumar <revanth.kumar@lge.com>"
+AUTHOR = "VINH VAN LE <vinh5.le@lge.com>"
 SECTION = "webos/apps"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = " \
@@ -10,14 +10,13 @@ LIC_FILES_CHKSUM = " \
 "
 
 WEBOS_VERSION = "0.1.0-17_843ac43ece5a0644799466ada5f4845993744124"
-
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
-PR = "r3"
+PR = "r4"
 
+inherit webos_enhanced_submissions
 inherit webos_enactjs_app
 inherit webos_public_repo
-inherit webos_enhanced_submissions
 
 WEBOS_ENACTJS_APP_ID = "com.webos.app.notification"
 

@@ -10,7 +10,7 @@ LIC_FILES_CHKSUM = " \
 "
 
 WEBOS_VERSION = "0.0.1-15_ca49d724d66ff827acee8eb5e95c380fd3fc1de2"
-PR = "r2"
+PR = "r3"
 
 inherit webos_enactjs_app
 inherit webos_public_repo

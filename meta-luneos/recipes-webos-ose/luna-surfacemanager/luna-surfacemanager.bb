@@ -11,14 +11,16 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "qtdeclarative wayland-native qtwayland qtwayland-native qt-features-webos pmloglib webos-wayland-extensions glib-2.0 qtwayland-webos"
 
-WEBOS_VERSION = "2.0.0-395_4e88486015c69db462654a7ef797f5c6a56e616f"
-PR = "r60"
+WEBOS_VERSION = "2.0.0-402_3fae203063a880806a982cb522f235ca04d1c9a5"
+PR = "r61"
 
 inherit webos_qmake6
 inherit pkgconfig
 inherit webos_lttng
 inherit webos_public_repo
 inherit webos_enhanced_submissions
+inherit features_check
+ANY_OF_DISTRO_FEATURES = "vulkan opengl"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Add-capability-to-pass-extra-options-to-surface-mana.patch \

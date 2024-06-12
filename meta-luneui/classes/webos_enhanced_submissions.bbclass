@@ -88,9 +88,6 @@ WEBOS_GIT_TAG = ""
 
 WEBOS_GIT_PARAM_BRANCH = "${@webos_version_get_branch('${WEBOS_VERSION}')}"
 
-# When SRCREV isn't SHA-1 show error
-do_fetch[prefuncs] += "webos_enhsub_srcrev_sanity_check"
-
 # '0' in 'webos_submission' is used with AUTOREV or SHA-1 without matching tag
 # show non-fatal ERROR to make sure that it's not accidentally merged in master
 python webos_enhsub_srcrev_sanity_check() {

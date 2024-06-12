@@ -16,8 +16,8 @@ RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_webos-customization}"
 
 VIRTUAL-RUNTIME_webos-customization ?= ""
 
-WEBOS_VERSION = "2.0.0-68_efe1735e8c136b7795856e24103778877701fe60"
-PR = "r28"
+WEBOS_VERSION = "2.0.0-71_3d61aa27e87fa827fb240aa9e37c41fa7491c787"
+PR = "r30"
 
 inherit pkgconfig
 inherit webos_cmake
