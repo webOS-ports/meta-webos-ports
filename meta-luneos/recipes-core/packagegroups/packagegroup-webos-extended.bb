@@ -32,7 +32,7 @@ VIRTUAL-RUNTIME_ai ?= "com.webos.service.ai"
 VIRTUAL-RUNTIME_memorymanager ?= "com.webos.service.memorymanager"
 VIRTUAL-RUNTIME_g-media-pipeline ?= "g-media-pipeline"
 VIRTUAL-RUNTIME_g-camera-pipeline ?= "g-camera-pipeline"
-VIRTUAL-RUNTIME_nodejs-module-node-red ?= "nodejs-module-node-red"
+VIRTUAL-RUNTIME_nodejs-module-node-red ?= "node-red"
 VIRTUAL-RUNTIME_contextintentmgr ?= "com.webos.service.contextintentmgr"
 VIRTUAL-RUNTIME_mojoservicelauncher ?= "mojoservicelauncher"
 VIRTUAL-RUNTIME_com.webos.service.flowmanager ?= "com.webos.service.flowmanager"
@@ -146,6 +146,7 @@ WEBOS_PACKAGESET_MEDIA = " \
 
 RDEPENDS:${PN} = " \
     activitymanager \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'smack', 'attr smack com.webos.app.test.smack.native', '', d)} \
     ${VIRTUAL-RUNTIME_com.webos.app.camera} \
     ${VIRTUAL-RUNTIME_com.webos.app.home} \
     ${VIRTUAL-RUNTIME_g-camera-pipeline} \

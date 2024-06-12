@@ -1,15 +1,19 @@
 # Copyright (c) 2017-2024 LG Electronics, Inc.
 
 SUMMARY = "Application Install Service"
-AUTHOR = "Sangwoo Kang <sangwoo82.kang@lge.com>"
+AUTHOR = "Guruprasad KN <guruprasad.kn@lge.com>"
 SECTION = "webos/base"
+
 LICENSE = "Apache-2.0"
-LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
+LIC_FILES_CHKSUM = " \
+    file://LICENSE;md5=89aea4e17d99a7cacdbeed46a0096b10 \
+    file://oss-pkg-info.yaml;md5=2bdfe040dcf81b4038370ae96036c519 \
+"
 
 DEPENDS = "glib-2.0 luna-service2 libpbnjson pmloglib pmtrace boost icu"
 RDEPENDS:${PN} = "applicationinstallerutility ecryptfs-utils librolegen"
 
-WEBOS_VERSION = "1.0.0-40_398977eb4f3fd7e82561e683c959c895060b707a"
+WEBOS_VERSION = "1.0.0-43_da94c85dba584c828c0bb59cdad1ea03c982e4b0"
 PR = "r5"
 
 inherit webos_cmake

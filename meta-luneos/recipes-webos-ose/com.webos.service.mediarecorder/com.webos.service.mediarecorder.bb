@@ -12,29 +12,25 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "glib-2.0 luna-service2 pmloglib nlohmann-json"
 
-WEBOS_VERSION = "1.0.0-2_6e79a8bbf649cfd9e04e9aeb1555a416d57487cb"
-PR = "r0"
+# Record pipeline
+DEPENDS += "boost gstreamer1.0 gstreamer1.0-plugins-base gstreamer1.0-plugins-bad umediaserver media-resource-calculator"
+
+WEBOS_VERSION = "1.0.0-7_8faaa2f728696f31bd2aed94e1020ca16ce94612"
+PR = "r4"
 
 inherit webos_cmake
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_system_bus
 inherit pkgconfig
+inherit features_check
+ANY_OF_DISTRO_FEATURES = "vulkan opengl"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "com.webos.service.mediarecorder.service"
-
-# All service files will be managed in meta-lg-webos.
-# The service file in the repository is not used, so please delete it.
-# See the page below for more details.
-# http://collab.lge.com/main/pages/viewpage.action?pageId=2031668745
-do_install:append() {
-    rm ${D}${sysconfdir}/systemd/system/com.webos.service.mediarecorder.service
-}
-
 
 # Build a native app for testing the media recorder
 PACKAGECONFIG[test-apps] = "-DWITH_CAMERA_TEST=ON,-DWITH_CAMERA_TEST=OFF, webos-wayland-extensions mesa jpeg, ${PN}-test-apps"
@@ -44,3 +40,13 @@ PACKAGES += "${PN}-test-apps"
 RDEPENDS:${PN}-test-apps = "${PN}"
 
 FILES:${PN}-test-apps = "${webos_applicationsdir}"
+
+# Calculate display plane resource
+PACKAGECONFIG[use-display-resource] = "-DUSE_DISPLAY_RESOURCE:BOOL=True,-DUSE_DISPLAY_RESOURCE:BOOL=False,"
+
+# Pro UMS
+PACKAGECONFIG[pro-ums] = "-DPRO_UMS:BOOL=True,-DPRO_UMS:BOOL=False,"
+
+PACKAGECONFIG = "test-apps"
+
+PACKAGECONFIG:append = " use-display-resource"

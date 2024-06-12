@@ -9,8 +9,8 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=1c44bb8384dc6f3479834afcdfa98054 \
 "
 
-WEBOS_VERSION = "1.0.0-4_a59127baf2ddebc99874f714c9fe5528772e94d1"
-PR = "r2"
+WEBOS_VERSION = "1.0.0-5_8bb192e7fb628c4dc5172a00f2ec518969f47fe7"
+PR = "r3"
 
 DEPENDS = "glib-2.0 luna-service2 libpbnjson pmloglib luna-prefs wca-support-api"
 

@@ -1,0 +1,202 @@
+From 394174f5e0d47864750d8b9ea6ab5dc212b2420a Mon Sep 17 00:00:00 2001
+From: Herrie <Github.com@herrie.org>
+Date: Thu, 13 Jun 2024 10:12:00 +0200
+Subject: [PATCH] WAM: Add additional window.open features management
+
+Signed-off-by: Christophe Chapuis <chris.chapuis@gmail.com>
+---
+Upstream-Status: Inappropriate [LuneOS specific]
+
+ src/core/application_description.h            |  4 ++
+ src/core/web_app_manager.cc                   |  3 +-
+ src/core/web_app_manager.h                    |  2 +-
+ src/platform/webengine/blink_web_view.cc      |  9 +++-
+ src/platform/webengine/blink_web_view.h       |  5 +-
+ src/platform/webengine/web_page_blink.cc      | 46 +++++++++++++++++--
+ .../webengine/web_page_blink_delegate.h       |  2 +-
+ 7 files changed, 61 insertions(+), 10 deletions(-)
+
+diff --git a/src/core/application_description.h b/src/core/application_description.h
+index 59b4d9a..33d4346 100644
+--- a/src/core/application_description.h
++++ b/src/core/application_description.h
+@@ -34,6 +34,8 @@ class ApplicationDescription {
+   ApplicationDescription();
+   virtual ~ApplicationDescription() = default;
+ 
++  ApplicationDescription(const ApplicationDescription& b) = default;
++
+   const std::string& Id() const { return id_; }
+   const std::string& Title() const { return title_; }
+   const std::string& EntryPoint() const { return entry_point_; }
+@@ -57,6 +59,8 @@ class ApplicationDescription {
+ 
+   const std::string& DefaultWindowType() const { return default_window_type_; }
+ 
++  void SetDefaultWindowType(std::string windowType) { default_window_type_ = windowType ; }
++
+   const std::string& EnyoBundleVersion() const { return enyo_bundle_version_; }
+ 
+   const std::set<std::string>& SupportedEnyoBundleVersions() const {
+diff --git a/src/core/web_app_manager.cc b/src/core/web_app_manager.cc
+index e6e241c..bc51ca1 100644
+--- a/src/core/web_app_manager.cc
++++ b/src/core/web_app_manager.cc
+@@ -347,7 +347,7 @@ WebAppBase* WebAppManager::OnLaunchUrl(
+   return app;
+ }
+ 
+-void WebAppManager::CreateWindowForAppPage(const std::string& win_type,
++WebAppBase* WebAppManager::CreateWindowForAppPage(const std::string& win_type,
+                                            std::shared_ptr<ApplicationDescription> app_desc,
+                                            const std::string& args,
+                                            const std::string& launching_app_id,
+@@ -389,6 +389,7 @@ void WebAppManager::CreateWindowForAppPage(const std::string& win_type,
+       app_version_[app_desc->Id()] = app_desc->Version();
+     }
+   }
++  return app;
+ }
+ 
+ void WebAppManager::ForceCloseAppInternal(WebAppBase* app) {
+diff --git a/src/core/web_app_manager.h b/src/core/web_app_manager.h
+index b1fbce6..1a0ce3f 100644
+--- a/src/core/web_app_manager.h
++++ b/src/core/web_app_manager.h
+@@ -127,7 +127,7 @@ class WebAppManager {
+   void WebPageAdded(WebPageBase* page);
+   void WebPageRemoved(WebPageBase* page);
+ 
+-  void CreateWindowForAppPage(const std::string& win_type,
++  WebAppBase* CreateWindowForAppPage(const std::string& win_type,
+                               std::shared_ptr<ApplicationDescription> app_desc,
+                               const std::string& args,
+                               const std::string& launching_app_id,
+diff --git a/src/platform/webengine/blink_web_view.cc b/src/platform/webengine/blink_web_view.cc
+index ec3636b..1289f7d 100644
+--- a/src/platform/webengine/blink_web_view.cc
++++ b/src/platform/webengine/blink_web_view.cc
+@@ -271,16 +271,21 @@ void BlinkWebView::DidErrorPageLoadedFromNetErrorHelper() {
+   return delegate_->DidErrorPageLoadedFromNetErrorHelper();
+ }
+ 
+-content::WebContents *BlinkWebView::CreateWindowForWebView(const std::string& newUrl, neva_app_runtime::WebView *webview)
++content::WebContents *BlinkWebView::CreateWindowForWebView(const std::string& newUrl,
++                                                           neva_app_runtime::WebView *webview,
++                                                           int height,
++                                                           std::vector<std::string> additional_features)
+ {
+   if (!delegate_)
+     return nullptr;
+ 
++  LOG_DEBUG("Creating window for webview with height = %d", height);
++
+   // create a new factory for this new_contents
+   WebView* webViewNewContents = new WebViewImpl(std::make_unique<BlinkWebView>(webview));
+   std::unique_ptr<WebViewFactory> dedicatedFactory(new WebViewFactoryExistingWebContents(webViewNewContents));
+   // create a new WebPage using this factory
+-  WebView *newWebView = delegate_->CreateWindow(newUrl, std::move(dedicatedFactory));
++  WebView *newWebView = delegate_->CreateWindow(newUrl, std::move(dedicatedFactory), height, additional_features);
+ 
+   return newWebView->GetWebContents();
+ }
+\ No newline at end of file
+diff --git a/src/platform/webengine/blink_web_view.h b/src/platform/webengine/blink_web_view.h
+index cb50914..245c72b 100644
+--- a/src/platform/webengine/blink_web_view.h
++++ b/src/platform/webengine/blink_web_view.h
+@@ -77,7 +77,10 @@ class BlinkWebView : public webos::WebViewBase {
+   void DidResumeDOM() override;
+   void DidErrorPageLoadedFromNetErrorHelper() override;
+ 
+-  content::WebContents *CreateWindowForWebView(const std::string& newUrl, neva_app_runtime::WebView *webview) override;
++  content::WebContents *CreateWindowForWebView(const std::string& newUrl,
++                                               neva_app_runtime::WebView *webview,
++                                               int height,
++                                               std::vector<std::string> additional_features) override;
+ 
+  private:
+   WebPageBlinkDelegate* delegate_ = nullptr;
+diff --git a/src/platform/webengine/web_page_blink.cc b/src/platform/webengine/web_page_blink.cc
+index 1360f9b..99624dc 100644
+--- a/src/platform/webengine/web_page_blink.cc
++++ b/src/platform/webengine/web_page_blink.cc
+@@ -35,6 +35,7 @@
+ #include "web_app_manager_tracer.h"
+ #include "web_app_manager_utils.h"
+ #include "web_app_manager.h"
++#include "web_app_base.h"
+ #include "web_page_blink_observer.h"
+ #include "web_page_observer.h"
+ #include "web_view.h"
+@@ -1257,15 +1258,52 @@ void WebPageBlink::SetObserver(WebPageBlinkObserver* observer) {
+   observer_ = observer;
+ }
+ 
+-WebView* WebPageBlink::CreateWindow(const std::string& newUrl, std::unique_ptr<WebViewFactory> dedicatedFactory) {
++WebView* WebPageBlink::CreateWindow(const std::string& newUrl, std::unique_ptr<WebViewFactory> dedicatedFactory, int height, std::vector<std::string> additional_features) {
++
++  std::shared_ptr<ApplicationDescription> new_app_desc(new ApplicationDescription(*app_desc_.get()));
++
++  Json::Value window_attributes;
++  // explore additional_features to determine our window type
++  // reminder: the features are a list of "key=value" strings, where value can also be a json string
++  for(const std::string &feature: additional_features) {
++    if (feature.find("attributes=") != std::string::npos) {
++      // for the webOS attributes, the value is a json string
++      window_attributes = util::StringToJson(feature.substr(11));
++    }
++  }
++
++  if (window_attributes["window"].asString() == "dashboard") {
++    new_app_desc->SetDefaultWindowType("floating");
++  }
++
++  else if (window_attributes["window"].asString() == "popupalert") {
++    new_app_desc->SetDefaultWindowType("system_ui");
++  }
++
+   // create a new page, with a factory associated with the new content
+-  WebPageBlink *newPage = new WebPageBlink(newUrl, app_desc_, "{}", std::move(dedicatedFactory));
++  wam::Url newWamUrl(newUrl);
++  WebPageBlink *newPage = new WebPageBlink(newWamUrl, new_app_desc, "{}", std::move(dedicatedFactory));
+   newPage->Init();
+ 
+   // Create a new webApp instance for this page
+   WebAppManager *webAppMgr = WebAppManager::Instance();
+-  webAppMgr->CreateWindowForAppPage(webAppMgr->WindowTypeFromString(app_desc_->DefaultWindowType()),
+-                                    app_desc_, "{}", app_id_, newPage);
++  WebAppBase *newWebApp = webAppMgr->CreateWindowForAppPage(webAppMgr->WindowTypeFromString(new_app_desc->DefaultWindowType()), 
++                                    new_app_desc, "{}", app_id_, newPage);
++
++  if (newWebApp && height > 0) {
++    newWebApp->Resize(CurrentUiWidth(), height);
++  }
++
++  if (newWebApp) {
++    for (auto window_attr_iter = window_attributes.begin(); window_attr_iter != window_attributes.end(); ++window_attr_iter) {
++      std::string attr_key = window_attr_iter.name();
++      std::string attr_value = window_attr_iter->asString();
++
++      if (attr_key != "" && attr_value != "") {
++        newWebApp->SetWindowProperty("LuneOS_" + attr_key, attr_value);
++      }
++    }
++  }
+ 
+   return newPage->PageView();
+ }
+\ No newline at end of file
+diff --git a/src/platform/webengine/web_page_blink_delegate.h b/src/platform/webengine/web_page_blink_delegate.h
+index 14994c7..c06528f 100644
+--- a/src/platform/webengine/web_page_blink_delegate.h
++++ b/src/platform/webengine/web_page_blink_delegate.h
+@@ -63,7 +63,7 @@ class WebPageBlinkDelegate {
+   virtual void DidSwapCompositorFrame() {}
+   virtual void DidResumeDOM() {}
+   virtual void DidErrorPageLoadedFromNetErrorHelper() = 0;
+-  virtual WebView* CreateWindow(const std::string& newUrl, std::unique_ptr<WebViewFactory> dedicatedFactory) = 0;
++  virtual WebView* CreateWindow(const std::string& newUrl, std::unique_ptr<WebViewFactory> dedicatedFactory, int height, std::vector<std::string> additional_features) = 0;
+ };
+ 
+ #endif  // PLATFORM_WEBENGINE_WEB_PAGE_BLINK_DELEGATE_H_

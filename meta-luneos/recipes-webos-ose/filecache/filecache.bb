@@ -8,7 +8,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "jemalloc luna-service2 db8 glibmm boost libsandbox glib-2.0 libsigc++-2.0"
 
-WEBOS_VERSION = "2.0.1-12_31660e50ab350dab3304bc57a87ee68d65a8edf7"
+WEBOS_VERSION = "2.0.1-13_62466fb6f04d9420e4dc65caf06fd2ae98251d29"
 PR = "r6"
 
 inherit webos_public_repo
@@ -22,7 +22,6 @@ WEBOS_SYSTEMD_SERVICE = "filecache.service"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-filecache-Add-various-permissions-for-legacy-webOS-a.patch \
-    file://0002-Remove-useless-machine-dependency.patch \
 "
 
 S = "${WORKDIR}/git"

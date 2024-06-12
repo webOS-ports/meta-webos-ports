@@ -6,11 +6,11 @@ require media-resource-calculator.bb
 
 WEBOS_REPO_NAME = "media-resource-calculator"
 
-PR = "r2"
+PR = "r4"
 
 PACKAGECONFIG += "${@bb.utils.contains('USE_WEBRUNTIME_LIBCXX', '1', 'webruntime-libcxx', 'system-libcxx', d)}"
 PACKAGECONFIG[webruntime-libcxx] = ",,chromium-toolchain-native chromium-stdlib"
-PACKAGECONFIG[system-libcxx] = ",,llvm-native clang"
+PACKAGECONFIG[system-libcxx] = ",,libcxx"
 
 PKGCONFIG_DIR = "${libdir}/pkgconfig"
 
@@ -20,7 +20,7 @@ do_install:append() {
 
     mv -n ${D}${includedir}/media-resource-calculator ${D}${includedir}/${BPN}
 
-    sed -i '/^libdir=.*\/lib$/ s/$/\/cbe/' ${D}/${PKGCONFIG_DIR}/media-resource-calculator.pc
+    sed -i '/^libdir=.*\/lib$/ s/$/\/cbe/; /^libdir=.*\/lib32$/ s/$/\/cbe/; /^libdir=.*\/lib64$/ s/$/\/cbe/;' ${D}/${PKGCONFIG_DIR}/media-resource-calculator.pc
     mv -n ${D}/${PKGCONFIG_DIR}/media-resource-calculator.pc ${D}/${PKGCONFIG_DIR}/${BPN}.pc
 }
 

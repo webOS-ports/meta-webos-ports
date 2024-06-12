@@ -12,8 +12,8 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "glib-2.0 luna-service2 json-c pmloglib"
 
-WEBOS_VERSION = "1.0.0-28_4cecd9e728e00db17e4e2a8707bad36d133f7618"
-PR = "r6"
+WEBOS_VERSION = "1.0.0-32_df921e6ed0dbe7cfb308a849296d3855f1208054"
+PR = "r7"
 
 inherit webos_cmake
 inherit pkgconfig
@@ -31,5 +31,4 @@ S = "${WORKDIR}/git"
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "com.webos.service.mediacontroller.service"
 
-FILES:${PN} += "${libdir}/*.so"
-FILES_SOLIBSDEV = ""
+FILES:${PN} += "${webos_testsdir}/${BPN}"

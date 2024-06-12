@@ -9,8 +9,8 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=72b3e3cef46e5ab3e175e5b515dc3b18 \
 "
 
-WEBOS_VERSION = "1.0.0-81_7ad2ed801ba7facb1e8c13e1bffe130e4aadf643"
-PR = "r19"
+WEBOS_VERSION = "1.0.0-83_b6db2aee4fb6dbcc4d0aca81dcb8de576f98aa54"
+PR = "r20"
 
 inherit webos_public_repo
 inherit webos_enactjs_app
@@ -87,3 +87,15 @@ FILES:${PN} += "${webos_applicationsdir}"
 
 # Workaround for network access issue during do_compile task
 do_compile[network] = "1"
+
+PR:append = "${@bb.utils.contains('DISTRO_FEATURES', 'smack', 'smack2', '', d)}"
+SRC_URI += "\
+    ${@bb.utils.contains('DISTRO_FEATURES', 'smack', 'file://com.webos.app.enactbrowser', '', d)} \
+"
+
+do_install[postfuncs] += "${@bb.utils.contains('DISTRO_FEATURES', 'smack', 'install_smack_rules', '', d)}"
+
+install_smack_rules (){
+    install -d ${D}${sysconfdir}/smack/accesses.d
+    install -v -m 0644 ${WORKDIR}/com.webos.app.enactbrowser ${D}${sysconfdir}/smack/accesses.d/com.webos.app.enactbrowser
+}

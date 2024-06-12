@@ -12,19 +12,27 @@ LIC_FILES_CHKSUM = " \
 
 VIRTUAL-RUNTIME_ntp ?= "sntp"
 
-DEPENDS = "luna-service2 libpbnjson qtbase uriparser libxml2 sqlite3 pmloglib nyx-lib libwebosi18n"
+DEPENDS = "luna-service2 libpbnjson uriparser libxml2 sqlite3 pmloglib nyx-lib libwebosi18n"
 
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_ntp} tzcode luna-init"
 
-WEBOS_VERSION = "4.4.0-25_527dfeba2b7d1c7f84ea5e8775b1f1ec4c40b183"
-PR = "r11"
+WEBOS_VERSION = "4.4.0-26_ffe9b48d169a3ee34ea1c9657af0b099af3898ed"
+PR = "r13"
 
 inherit webos_public_repo
 inherit webos_enhanced_submissions
-inherit webos_cmake_qt6
 inherit webos_system_bus
 inherit webos_systemd
+inherit webos_cmake
 inherit pkgconfig
+
+# avoid qt6-cmake inherit - migrate this to inherit_defer after upgrading to scarthgap with:
+# https://git.openembedded.org/openembedded-core/commit/?h=scarthgap&id=451363438d38bd4552d5bcec4a92332f5819a5d4
+# https://git.openembedded.org/bitbake/commit/?h=2.8&id=5c2e840eafeba1f0f754c226b87bfb674f7bea29
+# now it needs to be set in DISTRO config
+PACKAGECONFIG ??= "qt"
+PACKAGECONFIG[qt] = ",,qtbase"
+inherit_defer ${@bb.utils.contains('PACKAGECONFIG', 'qt', 'qt6-cmake', '', d)}
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Add-ImageService.patch \
