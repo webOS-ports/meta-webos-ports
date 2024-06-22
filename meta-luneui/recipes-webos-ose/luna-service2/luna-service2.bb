@@ -22,7 +22,8 @@ WEBOS_VERSION = "3.21.2-41_0cfbecbc319544b61b59dd00d0cd25371b95ebfe"
 PR = "r33"
 
 EXTRA_OECMAKE += "${@ '-DWEBOS_DISTRO_PRERELEASE:STRING="devel"' \
-                  if d.getVar('WEBOS_DISTRO_PRERELEASE') != '' else ''}"
+                  if d.getVar('WEBOS_DISTRO_PRERELEASE') != '' else ''} \
+                  -DWEBOS_TARGET_MACHINE_IMPL=hardware"
 
 inherit webos_public_repo
 inherit webos_enhanced_submissions
@@ -31,7 +32,6 @@ inherit webos_system_bus
 inherit webos_core_os_dep
 inherit webos_lttng
 inherit webos_test_provider
-inherit webos_machine_impl_dep
 inherit pkgconfig
 
 
