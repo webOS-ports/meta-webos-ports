@@ -10,7 +10,7 @@ DEPENDS = "openssl glib-2.0"
 RDEPENDS:${PN} = "ca-certificates"
 
 PV = "2.0.0-29+git"
-SRCREV = "d238d4dd6b70b09196bfaed86c34f56bc6ea7ad2"
+SRCREV = "827392304985b8e0b1ab26bcb60bbb84e678b3c8"
 
 inherit webos_ports_repo
 inherit webos_cmake
@@ -21,7 +21,7 @@ ALTERNATIVE:${PN} = "openssl-cnf2"
 ALTERNATIVE_LINK_NAME[openssl-cnf2] = "${sysconfdir}/ssl/openssl.cnf"
 ALTERNATIVE_PRIORITY[openssl-cnf2] ?= "10"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=herrie/fixes"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 do_install:append() {
