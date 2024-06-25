@@ -88,6 +88,8 @@ FILES:${PN} += "${libdir}/nyx/modules/*"
 FILES:${PN} += "${systemd_system_unitdir}/*"
 FILES:${PN}-tests += "${bindir}/nyx-test-ledcontroller"
 
+# http://gecko.lge.com:8000/Errors/Details/821714
 # nyx-modules/7.1.0-22/git/src/keys/keys_common.c:84:91: error: passing argument 4 of 'g_key_file_get_string_list' from incompatible pointer type [-Wincompatible-pointer-types]
 # nyx-modules/7.1.0-22/git/src/keys/keys_common.c:211:11: error: passing argument 1 of 'pipe2' from incompatible pointer type [-Wincompatible-pointer-types]
-CFLAGS += "-Wno-error=incompatible-pointer-types"
+# nyx-modules/7.1.0-22/git/src/device_info/device_info_generic.c:363:16: error: implicit declaration of function 'isspace' [-Wimplicit-function-declaration]
+CFLAGS += "-Wno-error=incompatible-pointer-types -Wno-error=implicit-function-declaration"
