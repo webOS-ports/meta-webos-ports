@@ -23,7 +23,6 @@ PACKAGECONFIG:remove = " \
 "
 PACKAGECONFIG:append = " \
     oomd \
-    cgroupv2 \
     coredump \
     elfutils \
 "
