@@ -32,7 +32,10 @@ EXTRA_OECMAKE += "-DCMAKE_AR:FILEPATH=${AR}"
 
 PACKAGECONFIG[tools] = "-DPBNJSON_INSTALL_TOOLS:BOOL=TRUE,-DPBNJSON_INSTALL_TOOLS:BOOL=FALSE"
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+    file://0001-CMakeLists.txt-fix-buildpaths-issue.patch \
+    file://0002-validation-always-call-lemon-with-l-and-relative-pat.patch \
+"
 
 S = "${WORKDIR}/git"
 
