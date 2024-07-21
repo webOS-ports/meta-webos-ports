@@ -70,12 +70,6 @@ GN_ARGS = "\
 GN_ARGS_CLANG = "is_clang=false"
 GN_ARGS_LIBCXX = "${@bb.utils.contains('USE_WEBRUNTIME_LIBCXX', '1', 'use_custom_libcxx=true', 'use_custom_libcxx=false', d)}"
 
-# Respect ld-is-gold in DISTRO_FEATURES when enabling gold
-# Similar patch applied in meta-browser
-# http://patchwork.openembedded.org/patch/77755/
-EXTRA_OEGN_GOLD = "${@bb.utils.contains('DISTRO_FEATURES', 'ld-is-gold', 'use_gold=true', 'use_gold=false', d)}"
-GN_ARGS += "${EXTRA_OEGN_GOLD}"
-
 # The last digits in the submission format are used for typical submissions number.
 # The submission formats; submissions/[number] or submissions/[branch name].[number]
 WEBOS_SUBMISSION_NUMBER="${@ '${WEBOS_SUBMISSION}'.split('.')[-1] }"
