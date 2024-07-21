@@ -135,3 +135,7 @@ RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_gpu-libs}"
 # on QT_FEATURE_opengles3.
 # https://bugreports.qt.io/browse/WEBOSCI-82
 RRECOMMENDS:${PN}-dev += "libgles3-mesa-dev"
+
+# work around for issues described in:
+# https://codereview.qt-project.org/c/yocto/meta-qt6/+/483660
+PACKAGECONFIG[use-lld-linker] = ""
