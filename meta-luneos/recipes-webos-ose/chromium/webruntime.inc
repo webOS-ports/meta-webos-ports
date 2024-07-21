@@ -79,6 +79,7 @@ GN_ARGS:append = " \
     use_local_storage_tracker=true\
     use_ozone=true\
     use_pmlog=true\
+    use_gold=false \
     ${WAM_DEMO_CONFARGS}\
     ${PACKAGECONFIG_CONFARGS}\
 "
