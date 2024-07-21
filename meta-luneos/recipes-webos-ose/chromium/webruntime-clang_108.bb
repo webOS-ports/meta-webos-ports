@@ -16,13 +16,6 @@ PACKAGECONFIG[system-libcxx] = ",,libcxx"
 
 GN_ARGS_CLANG = "is_clang=true"
 
-# Don't use gold even when selected by default with ld-is-gold in DISTRO_FEATURES
-# because liblttng_provider is built with default host linker (hosttools/ld.gold)
-# and build fails because use_lld added --color-diagnostic which isn't recognized
-# by host's ld.gold (it should be fixed by using the cross toolchain with lld).
-# http://gecko.lge.com:8000/Errors/Details/648296
-EXTRA_OEGN_GOLD = ""
-
 GN_ARGS += "target_sysroot=\"${STAGING_DIR_TARGET}\""
 
 INCLUDE_PATH_STDLIB = " \

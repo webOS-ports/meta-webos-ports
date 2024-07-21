@@ -24,6 +24,7 @@ DEPENDS = "glib-2.0-native gcc-runtime"
 
 GN_ARGS:append = "\
     use_pmlog=false \
+    use_gold=false \
 "
 
 EXTRA_OEGN = "--root=${S}/src --dotfile=mksnapshot.gn"
