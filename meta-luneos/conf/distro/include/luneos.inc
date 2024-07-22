@@ -134,6 +134,10 @@ DEFAULT_WARN_QA = "\
 ERROR_QA:append = " ${DEFAULT_WARN_QA} patch-status"
 WARN_QA:remove = "${DEFAULT_WARN_QA}"
 
+# https://bugreports.qt.io/browse/QTBUG-105913
+ERROR_QA:remove:layer-qt6-layer = "buildpaths"
+WARN_QA:append:layer-qt6-layer = " buildpaths"
+
 # Default WEBOS_TARGET_* values (see webos_cmake.bbclass)
 WEBOS_TARGET_CORE_OS ?= "rockhopper"
 
