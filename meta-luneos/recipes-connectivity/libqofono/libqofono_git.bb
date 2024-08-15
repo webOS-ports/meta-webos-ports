@@ -5,13 +5,11 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=4fbd65380cdd255951079008b364516c"
 
 DEPENDS += "qtbase qtdeclarative"
 
-SRCREV = "8d843d35f682a83bb1fec6c92595e0753ffe0079"
+SRCREV = "72a6943f4f7aa6b53c91793e2a4b32093a255b61"
+PV = "0.123"
 
-SRC_URI = "git://github.com/sailfishos/libqofono.git;protocol=https;branch=master \
-"
+SRC_URI = "git://github.com/sailfishos/libqofono.git;protocol=https;branch=master"
 S = "${WORKDIR}/git"
-
-PV = "0.113+git"
 
 inherit qt6-qmake
 
