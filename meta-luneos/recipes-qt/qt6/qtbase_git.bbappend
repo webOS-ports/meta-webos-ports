@@ -29,7 +29,10 @@ PACKAGECONFIG:append = " accessibility"
 PACKAGECONFIG:append = " harfbuzz"
 
 # Configure to compile with GL ES2 instead of default desktop GL
-PACKAGECONFIG_GRAPHICS = "gles2 eglfs"
+PACKAGECONFIG_GRAPHICS = "gles2 eglfs \
+    ${@bb.utils.filter('DISTRO_FEATURES', 'vulkan', d)} \
+    ${@bb.utils.filter('DISTRO_FEATURES', 'wayland', d)} \
+"
 PACKAGECONFIG_GRAPHICS:append:qemuall = " kms gbm"
 PACKAGECONFIG_GRAPHICS:append:hammerhead = " kms gbm"
 PACKAGECONFIG_GRAPHICS:append:pinephone = " kms gbm"
