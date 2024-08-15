@@ -30,3 +30,7 @@ do_install() {
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${S}/files/systemd/webos-system-update.service ${D}${systemd_unitdir}/system/
 }
+
+# ERROR: webos-system-update-1.0.0-4+git-r0 do_package_qa: QA Issue: File /usr/src/debug/webos-system-update/1.0.0-4+git/qrc_resources.cpp in package webos-system-update-src contains reference to TMPDIR [buildpaths]
+ERROR_QA:remove = "buildpaths"
+WARN_QA:append = " buildpaths"

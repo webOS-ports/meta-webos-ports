@@ -25,3 +25,7 @@ do_compile() {
 }
 
 WEBOS_NODE = "pmloglib.node"
+
+# ERROR: nodejs-module-webos-pmlog-3.0.1-8-r19.0 do_package_qa: QA Issue: File /usr/lib/nodejs/.debug/pmloglib.node in package nodejs-module-webos-pmlog-dbg contains reference to TMPDIR [buildpaths]
+ERROR_QA:remove = "buildpaths"
+WARN_QA:append = " buildpaths"

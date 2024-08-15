@@ -38,3 +38,8 @@ S = "${WORKDIR}/git"
 #  g_print(g_variant_get_type_string(arguments));
 #                                              ^
 SECURITY_STRINGFORMAT = ""
+
+# ERROR: bluetooth-sil-bluez5-0.1.0-84-r11 do_package_qa: QA Issue: File /usr/src/debug/bluetooth-sil-bluez5/0.1.0-84/Configured/src/bluez-interface.c in package bluetooth-sil-bluez5-src contains reference to TMPDIR
+# File /usr/src/debug/bluetooth-sil-bluez5/0.1.0-84/Configured/src/freedesktop-interface.c in package bluetooth-sil-bluez5-src contains reference to TMPDIR [buildpaths]
+ERROR_QA:remove = "buildpaths"
+WARN_QA:append = " buildpaths"

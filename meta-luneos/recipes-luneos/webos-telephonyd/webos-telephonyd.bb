@@ -77,3 +77,7 @@ do_install:append() {
 # webos-telephonyd/0.1.0-1+git/git/drivers/ofono/ofonomessagemanager.c:54:27: error: initialization of 'void (*)(void *, GCancellable *, void (*)(GObject *, GAsyncResult *, void *), void *)' {aka 'void (*)(void *, struct _GCancellable *, void (*)(struct _GObject *, struct _GAsyncResult *, void *), void *)'} from incompatible pointer type 'void (*)(OfonoInterfaceMessageManager *, GCancellable *, void (*)(GObject *, GAsyncResult *, void *), void *)' {aka 'void (*)(struct _OfonoInterfaceMessageManager *, struct _GCancellable *, void (*)(struct _GObject *, struct _GAsyncResult *, void *), void *)'} [-Wincompatible-pointer-types]
 # webos-telephonyd/0.1.0-1+git/git/drivers/ofono/ofonomessagemanager.c:55:34: error: initialization of 'gboolean (*)(void *, GVariant **, GAsyncResult *, GError **)' {aka 'int (*)(void *, struct _GVariant **, struct _GAsyncResult *, struct _GError **)'} from incompatible pointer type 'gboolean (*)(OfonoInterfaceMessageManager *, GVariant **, GAsyncResult *, GError **)' {aka 'int (*)(struct _OfonoInterfaceMessageManager *, struct _GVariant **, struct _GAsyncResult *, struct _GError **)'} [-Wincompatible-pointer-types]
 CFLAGS += "-Wno-error=incompatible-pointer-types"
+
+# ERROR: webos-telephonyd-0.1.0-1+git-r0 do_package_qa: QA Issue: File /usr/src/debug/webos-telephonyd/0.1.0-1+git/Configured/src/ofono-interface.c in package webos-telephonyd-src contains reference to TMPDIR [buildpaths]
+ERROR_QA:remove = "buildpaths"
+WARN_QA:append = " buildpaths"

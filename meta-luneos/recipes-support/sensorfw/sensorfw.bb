@@ -69,3 +69,13 @@ FILES:${PN} = " \
     ${sysconfdir} \
     ${libdir} \
 "
+
+# ERROR: sensorfw-0.14.4+git-r0 do_package_qa: QA Issue: File /usr/bin/sensorbenchmark-test in package sensorfw contains reference to TMPDIR
+# File /usr/bin/sensordataflow-test in package sensorfw contains reference to TMPDIR
+# File /usr/bin/sensoradaptors-test in package sensorfw contains reference to TMPDIR
+# File /usr/bin/sensormetadata-test in package sensorfw contains reference to TMPDIR
+# File /usr/bin/sensorapi-test in package sensorfw contains reference to TMPDIR
+# File /usr/bin/sensorfilters-test in package sensorfw contains reference to TMPDIR
+# File /usr/bin/sensorchains-test in package sensorfw contains reference to TMPDIR [buildpaths]
+ERROR_QA:remove = "buildpaths"
+WARN_QA:append = " buildpaths"

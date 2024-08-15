@@ -42,3 +42,7 @@ do_install:append() {
 }
 
 FILES:${PN} += "${APP_PATH} ${datadir}/translations"
+
+# ERROR: org.mer.app.fingerterm-1.3.6+git-r0 do_package_qa: QA Issue: File /usr/src/debug/org.mer.app.fingerterm/1.3.6+git/qrc_resources.cpp in package org.mer.app.fingerterm-src contains reference to TMPDIR [buildpaths]
+ERROR_QA:remove = "buildpaths"
+WARN_QA:append = " buildpaths"

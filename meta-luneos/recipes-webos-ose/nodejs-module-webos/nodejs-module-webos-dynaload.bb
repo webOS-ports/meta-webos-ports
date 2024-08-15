@@ -22,3 +22,7 @@ do_compile() {
 }
 
 WEBOS_NODE = "webos.node"
+
+# ERROR: nodejs-module-webos-dynaload-3.0.2-4-r19.0 do_package_qa: QA Issue: File /usr/lib/nodejs/.debug/webos.node in package nodejs-module-webos-dynaload-dbg contains reference to TMPDIR [buildpaths]
+ERROR_QA:remove = "buildpaths"
+WARN_QA:append = " buildpaths"

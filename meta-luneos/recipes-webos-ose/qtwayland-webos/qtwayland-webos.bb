@@ -67,3 +67,19 @@ do_install:append() {
     sed -i 's@prefix=${STAGING_DIR_HOST}@prefix=@g ;s@-L${STAGING_DIR_HOST} @ @g;' ${D}${libdir}/pkgconfig/*.pc
     sed -i "s@-L${STAGING_LIBDIR}@-L\${libdir}@g" ${D}${libdir}/pkgconfig/*.pc
 }
+
+# ERROR: qtwayland-webos-6.0.0-93-r20 do_package_qa: QA Issue: File /usr/src/debug/qtwayland-webos/6.0.0-93/src/webos-platform-interface/qwayland-presentation-time.cpp in package qtwayland-webos-src contains reference to TMPDIR
+# File /usr/src/debug/qtwayland-webos/6.0.0-93/src/webos-platform-interface/qwayland-presentation-time.h in package qtwayland-webos-src contains reference to TMPDIR
+# File /usr/src/debug/qtwayland-webos/6.0.0-93/src/webos-platform-interface/qwayland-webos-surface-group.h in package qtwayland-webos-src contains reference to TMPDIR
+# File /usr/src/debug/qtwayland-webos/6.0.0-93/src/webos-platform-interface/qwayland-webos-surface-group.cpp in package qtwayland-webos-src contains reference to TMPDIR
+# File /usr/src/debug/qtwayland-webos/6.0.0-93/src/webos-platform-interface/qwayland-webos-tablet.cpp in package qtwayland-webos-src contains reference to TMPDIR
+# File /usr/src/debug/qtwayland-webos/6.0.0-93/src/webos-platform-interface/qwayland-webos-foreign.cpp in package qtwayland-webos-src contains reference to TMPDIR
+# File /usr/src/debug/qtwayland-webos/6.0.0-93/src/webos-platform-interface/qwayland-webos-foreign.h in package qtwayland-webos-src contains reference to TMPDIR
+# File /usr/src/debug/qtwayland-webos/6.0.0-93/src/webos-platform-interface/qwayland-webos-input-manager.cpp in package qtwayland-webos-src contains reference to TMPDIR
+# File /usr/src/debug/qtwayland-webos/6.0.0-93/src/webos-platform-interface/qwayland-webos-input-manager.h in package qtwayland-webos-src contains reference to TMPDIR
+# File /usr/src/debug/qtwayland-webos/6.0.0-93/src/webos-platform-interface/qwayland-webos-tablet.h in package qtwayland-webos-src contains reference to TMPDIR
+# File /usr/src/debug/qtwayland-webos/6.0.0-93/src/webos-platform-interface/qwayland-webos-extension.cpp in package qtwayland-webos-src contains reference to TMPDIR
+# File /usr/src/debug/qtwayland-webos/6.0.0-93/src/webos-platform-interface/qwayland-webos-extension.h in package qtwayland-webos-src contains reference to TMPDIR [buildpaths]
+# ERROR: qtwayland-webos-6.0.0-93-r20 do_package_qa: QA Issue: File /usr/lib/libWebOSEglClientBuffer.prl in package qtwayland-webos-dev contains reference to TMPDIR [buildpaths]
+ERROR_QA:remove = "buildpaths"
+WARN_QA:append = " buildpaths"
