@@ -19,6 +19,7 @@ SRCREV = "b69bf00f602138628521184b7f6d0773736d5f8b"
 
 WEBOS_REPO_NAME = "android-update-package"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+S = "${WORKDIR}/git"
 
 do_deploy() {
     IMG="${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}-${MACHINE}${IMAGE_NAME_SUFFIX}.tar.gz"
@@ -45,7 +46,7 @@ do_deploy() {
     ln -sf $IMG ${WORKDIR}/build/webos-rootfs.tar.gz
     ln -sf $FASTBOOT ${WORKDIR}/build/boot.img
 
-    cp -r ${WORKDIR}/git/* ${WORKDIR}/build
+    cp -r ${S}/* ${WORKDIR}/build
     chmod +x ${WORKDIR}/build/webos_deploy.sh
 
     cp ${DEPLOY_DIR_IMAGE}/busybox-static ${WORKDIR}/build/
