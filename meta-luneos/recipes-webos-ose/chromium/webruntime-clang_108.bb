@@ -61,3 +61,7 @@ do_configure:prepend() {
         ln -snf gmp-player-client-clang.pc ${STAGING_DATADIR}/pkgconfig/gmp-player-client.pc
 }
 
+# ERROR: webruntime-clang-108.0.5359.217-32-r4 do_package_qa: QA Issue: File /usr/lib/libcbe.so in package webruntime-clang contains reference to TMPDIR [buildpaths]
+# ERROR: webruntime-clang-108.0.5359.217-32-r4 do_package_qa: QA Issue: File /usr/lib/.debug/libcbe.so in package webruntime-clang-dbg contains reference to TMPDIR [buildpaths]
+ERROR_QA:remove = "buildpaths"
+WARN_QA:append = " buildpaths"

@@ -73,3 +73,7 @@ S = "${WORKDIR}/git"
 # webos-connman-adapter/1.1.0-43/git/src/wifi_service.c:4162:82: error: passing argument 5 of 'g_bus_watch_name' from incompatible pointer type [-Wincompatible-pointer-types]
 # webos-connman-adapter/1.1.0-43/git/src/wifi_tethering_service.c:752:42: error: passing argument 2 of 'jboolean_get' from incompatible pointer type [-Wincompatible-pointer-types]
 CFLAGS += "-Wno-error=incompatible-pointer-types -Wno-error=int-conversion -Wno-error=implicit-function-declaration"
+
+# ERROR: webos-connman-adapter-1.1.0-43-r15 do_package_qa: QA Issue: File /usr/src/debug/webos-connman-adapter/1.1.0-43/Configured/src/connman-interface.c in package webos-connman-adapter-src contains reference to TMPDIR
+ERROR_QA:remove = "buildpaths"
+WARN_QA:append = " buildpaths"

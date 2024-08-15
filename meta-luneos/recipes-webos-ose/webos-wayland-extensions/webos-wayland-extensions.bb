@@ -25,3 +25,8 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
 S = "${WORKDIR}/git"
 
 FILES:${PN}-dev += "${datadir}/*"
+
+# ERROR: webos-wayland-extensions-1.0.0-46-r6 do_package_qa: QA Issue: File /usr/share/pkgconfig/wayland-webos-client.pc in package webos-wayland-extensions-dev contains reference to TMPDIR
+# File /usr/share/pkgconfig/wayland-webos-server.pc in package webos-wayland-extensions-dev contains reference to TMPDIR [buildpaths]
+ERROR_QA:remove = "buildpaths"
+WARN_QA:append = " buildpaths"

@@ -36,3 +36,7 @@ S = "${WORKDIR}/git"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "webos-hfp-service.service"
+
+# ERROR: com.webos.service.hfp-1.0.0-34-r9 do_package_qa: QA Issue: File /usr/src/debug/com.webos.service.hfp/1.0.0-34/Configured/src/ofono-interface.c in package com.webos.service.hfp-src contains reference to TMPDIR [buildpaths]
+ERROR_QA:remove = "buildpaths"
+WARN_QA:append = " buildpaths"

@@ -32,3 +32,6 @@ FILES:${PN} += " \
 FILES:${PN}-dev += " \
     ${libdir}/libconnman-qt6.prl \
 "
+# ERROR: libconnman-qt-1.3.3+git-r0 do_package_qa: QA Issue: File /usr/lib/libconnman-qt6.prl in package libconnman-qt-dev contains reference to TMPDIR [buildpaths]
+ERROR_QA:remove = "buildpaths"
+WARN_QA:append = " buildpaths"

@@ -52,3 +52,10 @@ EXTRA_QMAKEVARS_PRE += "WEBOS_INSTALL_BINS=${sbindir}"
 EXTRA_QMAKEVARS_PRE += "MALIIT_PLUGIN_VERSION=${PV}"
 
 FILES:${PN} += "${libdir}/maliit ${datadir}/maliit"
+
+# ERROR: imemanager-1.0.0-30-r7 do_package_qa: QA Issue: File /usr/src/debug/imemanager/1.0.0-30/maliit-plugin-global/plugin/qrc_json.cpp in package imemanager-src contains reference to TMPDIR
+# File /usr/src/debug/imemanager/1.0.0-30/maliit-plugin-global/plugin/qrc_common.cpp in package imemanager-src contains reference to TMPDIR
+# File /usr/src/debug/imemanager/1.0.0-30/maliit-plugin-global/plugin/qrc_common-images-hd.cpp in package imemanager-src contains reference to TMPDIR
+# File /usr/src/debug/imemanager/1.0.0-30/maliit-plugin-global/plugin/qrc_common-images.cpp in package imemanager-src contains reference to TMPDIR [buildpaths]
+ERROR_QA:remove = "buildpaths"
+WARN_QA:append = " buildpaths"

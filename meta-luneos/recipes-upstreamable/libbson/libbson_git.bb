@@ -23,3 +23,8 @@ do_configure:append() {
     find ${S}/src -type f -name "*.[c|h]" | xargs sed -i 's/\([^"|^\/]\)yajl_/\1bson_yajl_/g'
     find ${S}/src -type f -name "*.[c|h]" | xargs sed -i 's/^yajl_/bson_yajl_/g'
 }
+
+# ERROR: libbson-1.9.0+git-r1 do_package_qa: QA Issue: File /usr/lib/cmake/libbson-static-1.0/libbson-static-1.0-config.cmake in package libbson-dev contains reference to TMPDIR
+# File /usr/lib/pkgconfig/libbson-static-1.0.pc in package libbson-dev contains reference to TMPDIR [buildpaths]
+ERROR_QA:remove = "buildpaths"
+WARN_QA:append = " buildpaths"

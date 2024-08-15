@@ -29,3 +29,7 @@ FILES:${PN}-dev += " \
     ${libdir}/libqofono-qt6.prl \
     ${datadir}/qt6/mkspecs \
 "
+
+# ERROR: libqofono-0.123-r0 do_package_qa: QA Issue: File /usr/lib/libqofono-qt6.prl in package libqofono-dev contains reference to TMPDIR [buildpaths]
+ERROR_QA:remove = "buildpaths"
+WARN_QA:append = " buildpaths"
