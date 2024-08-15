@@ -14,6 +14,7 @@ inherit pkgconfig
 SRC_URI = "git://github.com/sailfishos/voicecall.git;protocol=https;branch=master \
            file://voicecall-manager.service \
            file://0001-Qt6-migration-patch.patch \
+           file://0001-src.pro-use-qofono-qt6-instead-of-qofono-qt5.patch \
 "
 
 S = "${WORKDIR}/git"
