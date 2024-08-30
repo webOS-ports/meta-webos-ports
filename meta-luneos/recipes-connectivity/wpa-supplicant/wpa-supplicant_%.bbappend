@@ -4,9 +4,6 @@ EXTENDPRAUTO:append = "webos8"
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 
-SRC_URI += " \
-    file://0001-Add-p2p-changes.patch \
-"
 # Replace the wpa_supplicant.service from wpa-supplicant source with our own version (for some unknown reason)
 SYSTEMD_SERVICE:${PN}:remove = "wpa_supplicant.service"
 
@@ -65,8 +62,3 @@ USERADD_PARAM:${PN} = " \
     -u 1010 -d /var -s /usr/sbin/nologin -G netdev -U wifi ;\
     -u 1025 -d /var -s /usr/sbin/nologin -G netdev -U network ;\
 "
-
-# http://gecko.lge.com:8000/Errors/Details/819468
-# caused by 0001-Add-p2p-changes.patch
-# notify.c:769:25: error: implicit declaration of function 'wpas_dbus_signal_p2p_peer_joined_with_ip'; did you mean 'wpas_dbus_signal_p2p_peer_joined'? [-Wimplicit-function-declaration]
-CFLAGS += "-Wno-error=implicit-function-declaration"
