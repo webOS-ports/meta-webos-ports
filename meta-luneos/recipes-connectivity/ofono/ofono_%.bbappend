@@ -6,16 +6,11 @@ COMPATIBLE_MACHINE:halium = "^(?!halium)$"
 DEPENDS += "dbus-glib libmce-glib"
 RDEPENDS:${PN} += "mobile-broadband-provider-info ofono-conf libsmdpkt-wrapper libqmi libmbim libqrtr-glib"
 
-# Bump to 2.7
-PV = "2.7"
-SRC_URI[sha256sum] = "dabf6ef06b94beaad65253200abe3887046a4e722f4fe373c4264f357ae47ad3"
-
 SRC_URI:append = " \
   file://0001-common-create-GList-helper-ofono_call_compare.patch \
   file://0002-common-atmodem-move-at_util_call_compare_by_status-t.patch \
   file://0003-common-atmodem-move-at_util_call_compare_by_id-to-dr.patch \
   file://0004-add-call-list-helper-to-manage-voice-call-lists.patch \
-  file://0004-support-smdpkt.patch \
   file://0006-Allow-qmi-qrtr-without-data.patch \
   file://msm-modem-uim-selection.sh \
   file://ofono.service \
