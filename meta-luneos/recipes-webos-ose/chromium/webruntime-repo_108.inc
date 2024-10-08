@@ -20,3 +20,7 @@ SRC_URI += " \
     file://0007-app_shell-override-default-OnWindowHostClose-to-clos.patch \
     file://0008-wayland_touch-apply-device_scale_factor-to-events.patch \
 "
+
+SRC_URI += " \
+    file://0001-Use-shlex-instead-of-pipes.patch \
+"
