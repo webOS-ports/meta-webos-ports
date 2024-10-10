@@ -150,6 +150,7 @@ RDEPENDS:${PN}:append:tenderloin = " alsa-utils-systemd mesa-driver-swrast rmtfs
 RDEPENDS:${PN}:append:tenderloin-halium = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
 RDEPENDS:${PN}:append:mido = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:mido-halium = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS} bluebinder"
+RDEPENDS:${PN}:append:mindphone = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
 RDEPENDS:${PN}:append:athene = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
 RDEPENDS:${PN}:append:onyx = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
 RDEPENDS:${PN}:append:oxygen = " ${LIBHYBRIS_RDEPENDS}"
