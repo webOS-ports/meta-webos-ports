@@ -34,6 +34,7 @@ WEBOS_VERSION = "1.0.0-gav.46_6867736010545963dcc66574ed31f38c75a8cfda"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-uMediaserver-add-missing-include-to-fix-build-with-b.patch \
+    file://0001-python-fix-build-with-python-3.13.patch \
 "
 S = "${WORKDIR}/git"
 
