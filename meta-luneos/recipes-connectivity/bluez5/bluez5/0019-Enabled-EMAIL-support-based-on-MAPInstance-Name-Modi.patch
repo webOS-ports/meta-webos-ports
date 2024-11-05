@@ -22,11 +22,11 @@ Upstream-Status: Inappropriate [webos specific]
  obexd/client/bluetooth.c | 21 ++++++++++++++++++---
  obexd/client/manager.c   | 10 ++++++----
  obexd/client/map.c       | 17 +++++++++++++++++
- obexd/client/session.c   |  9 ++++++++-
+ obexd/client/session.c   |  8 ++++++++
  obexd/client/session.h   |  1 +
  obexd/client/transport.h |  2 +-
  tools/obexctl.c          | 13 +++++++++++--
- 7 files changed, 62 insertions(+), 11 deletions(-)
+ 7 files changed, 62 insertions(+), 10 deletions(-)
 
 diff --git a/obexd/client/bluetooth.c b/obexd/client/bluetooth.c
 index ca2c023fb..c197fe8aa 100644
@@ -100,19 +100,19 @@ index ca2c023fb..c197fe8aa 100644
  	str2ba(destination, &session->dst);
  	str2ba(source, &session->src);
 diff --git a/obexd/client/manager.c b/obexd/client/manager.c
-index ad1fbb04a..eb0d5a8e5 100644
+index 52f4d0179..eab745cc2 100644
 --- a/obexd/client/manager.c
 +++ b/obexd/client/manager.c
-@@ -107,7 +107,7 @@ done:
- }
+@@ -109,7 +109,7 @@ done:
  
  static int parse_device_dict(DBusMessageIter *iter,
--		const char **source, const char **target, uint8_t *channel)
-+		const char **source, const char **target, uint8_t *channel, const char **instanceName)
+ 		const char **source, const char **target, uint8_t *channel,
+-		uint16_t *psm)
++		uint16_t *psm, const char **instanceName)
  {
  	while (dbus_message_iter_get_arg_type(iter) == DBUS_TYPE_DICT_ENTRY) {
  		DBusMessageIter entry, value;
-@@ -125,6 +125,8 @@ static int parse_device_dict(DBusMessageIter *iter,
+@@ -127,6 +127,8 @@ static int parse_device_dict(DBusMessageIter *iter,
  				dbus_message_iter_get_basic(&value, source);
  			else if (g_str_equal(key, "Target") == TRUE)
  				dbus_message_iter_get_basic(&value, target);
@@ -121,30 +121,30 @@ index ad1fbb04a..eb0d5a8e5 100644
  			break;
  		case DBUS_TYPE_BYTE:
  			if (g_str_equal(key, "Channel") == TRUE)
-@@ -158,7 +160,7 @@ static DBusMessage *create_session(DBusConnection *connection,
+@@ -164,7 +166,7 @@ static DBusMessage *create_session(DBusConnection *connection,
  	DBusMessageIter iter, dict;
  	struct obc_session *session;
  	struct send_data *data;
 -	const char *source = NULL, *dest = NULL, *target = NULL;
 +	const char *source = NULL, *dest = NULL, *target = NULL ,*inStanceName = NULL;
  	uint8_t channel = 0;
+ 	uint16_t psm = 0;
  
- 	dbus_message_iter_init(message, &iter);
-@@ -175,7 +177,7 @@ static DBusMessage *create_session(DBusConnection *connection,
+@@ -182,7 +184,7 @@ static DBusMessage *create_session(DBusConnection *connection,
  
  	dbus_message_iter_recurse(&iter, &dict);
  
--	parse_device_dict(&dict, &source, &target, &channel);
-+	parse_device_dict(&dict, &source, &target, &channel,&inStanceName);
- 	if (dest == NULL || target == NULL)
+-	parse_device_dict(&dict, &source, &target, &channel, &psm);
++	parse_device_dict(&dict, &source, &target, &channel, &psm, &inStanceName);
+ 	if (dest == NULL || target == NULL || (channel && psm))
  		return g_dbus_create_error(message,
  				ERROR_INTERFACE ".InvalidArguments", NULL);
-@@ -188,7 +190,7 @@ static DBusMessage *create_session(DBusConnection *connection,
+@@ -195,7 +197,7 @@ static DBusMessage *create_session(DBusConnection *connection,
  	data->connection = dbus_connection_ref(connection);
  	data->message = dbus_message_ref(message);
  
--	session = obc_session_create(source, dest, target, channel,
-+	session = obc_session_create(source, dest, target,inStanceName, channel,
+-	session = obc_session_create(source, dest, target, channel, psm,
++	session = obc_session_create(source, dest, target, inStanceName, channel, psm,
  					dbus_message_get_sender(message),
  					create_callback, data);
  	if (session != NULL) {
@@ -184,7 +184,7 @@ index 6fd19d47c..78c6b2447 100644
  };
  
 diff --git a/obexd/client/session.c b/obexd/client/session.c
-index 884013b75..0bfed30b3 100644
+index 2b147dcb8..234eaa90d 100644
 --- a/obexd/client/session.c
 +++ b/obexd/client/session.c
 @@ -87,6 +87,7 @@ struct obc_session {
@@ -193,34 +193,33 @@ index 884013b75..0bfed30b3 100644
  	char *destination;
 +	char *inStanceName;
  	uint8_t channel;
+ 	uint16_t psm;
  	struct obc_transport *transport;
- 	struct obc_driver *driver;
-@@ -541,7 +542,7 @@ static int session_connect(struct obc_session *session,
- 	}
+@@ -547,6 +548,7 @@ static int session_connect(struct obc_session *session,
  
  	session->id = transport->connect(session->source, session->destination,
--					driver->uuid, session->channel,
-+					driver->uuid,session->inStanceName, session->channel,
- 					transport_func, callback);
+ 			driver->uuid,
++                        session->inStanceName,
+ 			session->channel ? session->channel : session->psm,
+ 			transport_func, callback);
  	if (session->id == 0) {
- 		obc_session_unref(callback->session);
-@@ -557,6 +558,7 @@ static int session_connect(struct obc_session *session,
+@@ -563,6 +565,7 @@ static int session_connect(struct obc_session *session,
  struct obc_session *obc_session_create(const char *source,
  						const char *destination,
  						const char *service,
 +						const char *instanceName,
  						uint8_t channel,
+ 						uint16_t psm,
  						const char *owner,
- 						session_callback_t function,
-@@ -597,6 +599,7 @@ struct obc_session *obc_session_create(const char *source,
+@@ -605,6 +608,7 @@ struct obc_session *obc_session_create(const char *source,
  	session->conn = conn;
  	session->source = g_strdup(source);
  	session->destination = g_strdup(destination);
 +	//session->inStanceName = g_strdup(instanceName);
  	session->channel = channel;
+ 	session->psm = psm;
  	session->queue = g_queue_new();
- 	session->folder = g_strdup("/");
-@@ -605,6 +608,7 @@ struct obc_session *obc_session_create(const char *source,
+@@ -614,6 +618,7 @@ struct obc_session *obc_session_create(const char *source,
  		obc_session_set_owner(session, owner, owner_disconnected);
  
  proceed:
@@ -228,7 +227,7 @@ index 884013b75..0bfed30b3 100644
  	if (session_connect(session, function, user_data) < 0) {
  		obc_session_unref(session);
  		return NULL;
-@@ -613,6 +617,9 @@ proceed:
+@@ -622,6 +627,9 @@ proceed:
  	DBG("session %p transport %s driver %s", session,
  			session->transport->name, session->driver->service);
  
@@ -239,7 +238,7 @@ index 884013b75..0bfed30b3 100644
  }
  
 diff --git a/obexd/client/session.h b/obexd/client/session.h
-index 2c646df1a..5e200e40d 100644
+index 19c3f3687..c9e147c06 100644
 --- a/obexd/client/session.h
 +++ b/obexd/client/session.h
 @@ -21,6 +21,7 @@ typedef void (*session_callback_t) (struct obc_session *session,
@@ -248,8 +247,8 @@ index 2c646df1a..5e200e40d 100644
  						const char *service,
 +						const char *instanceName,
  						uint8_t channel,
+ 						uint16_t psm,
  						const char *owner,
- 						session_callback_t function,
 diff --git a/obexd/client/transport.h b/obexd/client/transport.h
 index e1f1a5c53..43164c522 100644
 --- a/obexd/client/transport.h
@@ -264,27 +263,27 @@ index e1f1a5c53..43164c522 100644
  	int (*getpacketopt) (GIOChannel *io, int *tx_mtu, int *rx_mtu);
  	void (*disconnect) (guint id);
 diff --git a/tools/obexctl.c b/tools/obexctl.c
-index 8678b86c9..3efff7ddf 100644
+index 31b3e263d..2d9a142b1 100644
 --- a/tools/obexctl.c
 +++ b/tools/obexctl.c
-@@ -115,6 +115,7 @@ struct connect_args {
+@@ -114,6 +114,7 @@ struct connect_args {
  	char *dev;
  	char *target;
- 	uint8_t channel;
+ 	uint16_t channel;
 +	char *instanceName;
  };
  
  static void connect_args_free(void *data)
-@@ -143,6 +144,8 @@ static void connect_setup(DBusMessageIter *iter, void *user_data)
+@@ -142,6 +143,8 @@ static void connect_setup(DBusMessageIter *iter, void *user_data)
  	if (args->target)
  		g_dbus_dict_append_entry(&dict, "Target",
  					DBUS_TYPE_STRING, &args->target);
 +	g_dbus_dict_append_entry(&dict, "InstanceName",
 +					DBUS_TYPE_STRING, &args->instanceName);
  
- 	if (args->channel)
- 		g_dbus_dict_append_entry(&dict, "Channel",
-@@ -156,6 +159,7 @@ static void cmd_connect(int argc, char *argv[])
+ 	if (args->channel) {
+ 		if (args->channel > 31)
+@@ -160,6 +163,7 @@ static void cmd_connect(int argc, char *argv[])
  	struct connect_args *args;
  	const char *target = "opp";
  	int channel = 0;
@@ -292,7 +291,7 @@ index 8678b86c9..3efff7ddf 100644
  
  	if (!client) {
  		bt_shell_printf("Client proxy not available\n");
-@@ -175,10 +179,14 @@ static void cmd_connect(int argc, char *argv[])
+@@ -179,10 +183,14 @@ static void cmd_connect(int argc, char *argv[])
  		}
  	}
  
@@ -307,16 +306,16 @@ index 8678b86c9..3efff7ddf 100644
  
  	if (g_dbus_proxy_method_call(client, "CreateSession", connect_setup,
  			connect_reply, args, connect_args_free) == FALSE) {
-@@ -1846,7 +1854,7 @@ static void cmd_mkdir(int argc, char *argv[])
+@@ -1850,7 +1858,7 @@ static void cmd_mkdir(int argc, char *argv[])
  static const struct bt_shell_menu main_menu = {
  	.name = "main",
  	.entries = {
--	{ "connect",      "<dev> [uuid] [channel]", cmd_connect,
-+	{ "connect",      "<dev> [uuid] [channel] [instanceName]", cmd_connect,
+-	{ "connect",      "<dev> [uuid] [channel|PSM]", cmd_connect,
++	{ "connect",      "<dev> [uuid] [channel|PSM] [instanceName]", cmd_connect,
  						"Connect session" },
  	{ "disconnect",   "[session]", cmd_disconnect, "Disconnect session",
  						session_generator },
-@@ -1867,7 +1875,8 @@ static const struct bt_shell_menu main_menu = {
+@@ -1871,7 +1879,8 @@ static const struct bt_shell_menu main_menu = {
  	{ "pull",	  "<file>",   cmd_pull,
  					"Pull Vobject & stores in file" },
  	{ "cd",           "<path>",   cmd_cd, "Change current folder" },
