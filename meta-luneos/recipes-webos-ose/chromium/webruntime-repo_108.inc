@@ -24,4 +24,5 @@ SRC_URI += " \
 SRC_URI += " \
     file://0001-Use-shlex-instead-of-pipes.patch \
     file://0001-Define-UChar-as-char16_t.patch \
+    file://0001-Shorted-printed-cmd-when-long-commands-fail.patch \
 "
