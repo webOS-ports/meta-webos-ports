@@ -1,6 +1,6 @@
 SUMMARY = "LuneUI example image"
 
-IMAGE_FEATURES += "package-management debug-tweaks ssh-server-openssh"
+IMAGE_FEATURES += "package-management allow-empty-password empty-root-password allow-root-login post-install-logging ssh-server-openssh"
 
 inherit core-image
 
