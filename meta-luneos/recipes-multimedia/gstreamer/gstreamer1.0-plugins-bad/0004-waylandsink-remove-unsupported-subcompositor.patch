@@ -7,18 +7,21 @@ MJ: a lot of conflicts from:
 https://github.com/GStreamer/gstreamer/commit/062638a639f21e52230c8724fb57b89c14180b35 waylandsink: Rename occurrences of GstWaylandSink to 'self'
 https://github.com/GStreamer/gstreamer/commit/8c3e33d4941e6e6796ab96bc966805c5b8b5f757 gstwayland: Move reusable parts of the waylandsink into a library
 
+and
+https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7494
+
 Signed-off-by: Martin Jansa <Martin.Jansa@gmail.com>
 ---
 Upstream-Status: Pending
 
- .../ext/wayland/gstwaylandsink.c              | 116 ++++++++-
+ .../ext/wayland/gstwaylandsink.c              | 113 ++++++++-
  .../ext/wayland/gstwaylandsink.h              |   4 +
  .../gst-libs/gst/wayland/gstwldisplay.c       |  17 +-
- .../gst-libs/gst/wayland/gstwlwindow.c        | 239 +++++-------------
- 4 files changed, 180 insertions(+), 196 deletions(-)
+ .../gst-libs/gst/wayland/gstwlwindow.c        | 228 +++++-------------
+ 4 files changed, 177 insertions(+), 185 deletions(-)
 
 diff --git a/subprojects/gst-plugins-bad/ext/wayland/gstwaylandsink.c b/subprojects/gst-plugins-bad/ext/wayland/gstwaylandsink.c
-index 1bf537c9f3..5efd5821c5 100644
+index a6613a103f..c43cfef494 100644
 --- a/subprojects/gst-plugins-bad/ext/wayland/gstwaylandsink.c
 +++ b/subprojects/gst-plugins-bad/ext/wayland/gstwaylandsink.c
 @@ -201,6 +201,10 @@ gst_wayland_sink_init (GstWaylandSink * self)
@@ -40,7 +43,7 @@ index 1bf537c9f3..5efd5821c5 100644
    self->display = gst_wl_display_new_existing (display, FALSE, &error);
  
    if (error) {
-@@ -373,13 +378,19 @@ gst_wayland_sink_find_display (GstWaylandSink * self)
+@@ -406,11 +411,16 @@ gst_wayland_sink_find_display (GstWaylandSink * self)
    GError *error = NULL;
    gboolean ret = TRUE;
  
@@ -51,25 +54,13 @@ index 1bf537c9f3..5efd5821c5 100644
 +  GST_DEBUG_OBJECT (self, " gst_wayland_sink_find_display : After g_mutex_lock ");
 +
    if (!self->display) {
-     /* first query upstream for the needed display handle */
-     query = gst_query_new_context (GST_WL_DISPLAY_HANDLE_CONTEXT_TYPE);
-+    GST_DEBUG_OBJECT (self, " gst_wayland_sink_find_display : First query upstream ");
-     if (gst_pad_peer_query (GST_VIDEO_SINK_PAD (self), query)) {
-       gst_query_parse_context (query, &context);
-+      GST_DEBUG_OBJECT (self, " wl_display = %p", self->display);
-       gst_wayland_sink_set_display_from_context (self, context);
+     if (!gst_wayland_sink_query_context (self,
+             GST_WL_DISPLAY_HANDLE_CONTEXT_TYPE)) {
++      GST_DEBUG_OBJECT (self, " gst_wayland_sink_find_display : First query upstream ");
+       gst_wayland_sink_query_context (self,
+           GST_WL_DISPLAY_HANDLE_LEGACY_CONTEXT_TYPE);
      }
-     gst_query_unref (query);
-@@ -389,6 +400,8 @@ gst_wayland_sink_find_display (GstWaylandSink * self)
-       msg = gst_message_new_need_context (GST_OBJECT_CAST (self),
-           GST_WL_DISPLAY_HANDLE_CONTEXT_TYPE);
- 
-+      GST_DEBUG_OBJECT (self, "gst_wayland_sink_find_display : Ask Application for contect before mutex unlock");
-+
-       g_mutex_unlock (&self->display_lock);
-       gst_element_post_message (GST_ELEMENT_CAST (self), msg);
-       /* at this point we expect gst_wayland_sink_set_context
-@@ -398,6 +411,9 @@ gst_wayland_sink_find_display (GstWaylandSink * self)
+@@ -425,6 +435,9 @@ gst_wayland_sink_find_display (GstWaylandSink * self)
        if (!self->display) {
          /* if the application didn't set a display, let's create it ourselves */
          GST_OBJECT_LOCK (self);
@@ -79,7 +70,7 @@ index 1bf537c9f3..5efd5821c5 100644
          self->display = gst_wl_display_new (self->display_name, &error);
          GST_OBJECT_UNLOCK (self);
  
-@@ -412,8 +428,11 @@ gst_wayland_sink_find_display (GstWaylandSink * self)
+@@ -439,8 +452,11 @@ gst_wayland_sink_find_display (GstWaylandSink * self)
      }
    }
  
@@ -91,7 +82,7 @@ index 1bf537c9f3..5efd5821c5 100644
    return ret;
  }
  
-@@ -425,18 +444,35 @@ gst_wayland_sink_change_state (GstElement * element, GstStateChange transition)
+@@ -452,18 +468,35 @@ gst_wayland_sink_change_state (GstElement * element, GstStateChange transition)
  
    switch (transition) {
      case GST_STATE_CHANGE_NULL_TO_READY:
@@ -129,7 +120,7 @@ index 1bf537c9f3..5efd5821c5 100644
      case GST_STATE_CHANGE_PAUSED_TO_READY:
        gst_buffer_replace (&self->last_buffer, NULL);
        if (self->window) {
-@@ -484,6 +520,7 @@ gst_wayland_sink_set_context (GstElement * element, GstContext * context)
+@@ -513,6 +546,7 @@ gst_wayland_sink_set_context (GstElement * element, GstContext * context)
      g_mutex_lock (&self->display_lock);
      if (G_LIKELY (!self->display)) {
        gst_wayland_sink_set_display_from_context (self, context);
@@ -137,7 +128,7 @@ index 1bf537c9f3..5efd5821c5 100644
      } else {
        GST_WARNING_OBJECT (element, "changing display handle is not supported");
        g_mutex_unlock (&self->display_lock);
-@@ -679,6 +716,31 @@ gst_wayland_activate_drm_dumb_pool (GstWaylandSink * self)
+@@ -708,6 +742,31 @@ gst_wayland_activate_drm_dumb_pool (GstWaylandSink * self)
    return TRUE;
  }
  
@@ -169,7 +160,7 @@ index 1bf537c9f3..5efd5821c5 100644
  static gboolean
  gst_wayland_sink_set_caps (GstBaseSink * bsink, GstCaps * caps)
  {
-@@ -753,6 +815,13 @@ unsupported_format:
+@@ -782,6 +841,13 @@ unsupported_format:
          gst_video_format_to_string (GST_VIDEO_INFO_FORMAT (&self->video_info)));
      return FALSE;
    }
@@ -183,7 +174,7 @@ index 1bf537c9f3..5efd5821c5 100644
  }
  
  static gboolean
-@@ -844,6 +913,18 @@ gst_wayland_sink_show_frame (GstVideoSink * vsink, GstBuffer * buffer)
+@@ -873,6 +939,18 @@ gst_wayland_sink_show_frame (GstVideoSink * vsink, GstBuffer * buffer)
    g_mutex_lock (&self->render_lock);
  
    GST_LOG_OBJECT (self, "render buffer %" GST_PTR_FORMAT "", buffer);
@@ -202,7 +193,7 @@ index 1bf537c9f3..5efd5821c5 100644
  
    if (G_UNLIKELY (!self->window)) {
      /* ask for window handle. Unlock render_lock while doing that because
-@@ -851,8 +932,10 @@ gst_wayland_sink_show_frame (GstVideoSink * vsink, GstBuffer * buffer)
+@@ -880,8 +958,10 @@ gst_wayland_sink_show_frame (GstVideoSink * vsink, GstBuffer * buffer)
      g_mutex_unlock (&self->render_lock);
      gst_video_overlay_prepare_window_handle (GST_VIDEO_OVERLAY (self));
      g_mutex_lock (&self->render_lock);
@@ -213,7 +204,7 @@ index 1bf537c9f3..5efd5821c5 100644
        /* if we were not provided a window, create one ourselves */
        self->window = gst_wl_window_new_toplevel (self->display,
            &self->video_info, self->fullscreen, &self->render_lock);
-@@ -860,7 +943,25 @@ gst_wayland_sink_show_frame (GstVideoSink * vsink, GstBuffer * buffer)
+@@ -889,7 +969,25 @@ gst_wayland_sink_show_frame (GstVideoSink * vsink, GstBuffer * buffer)
            G_CALLBACK (on_window_closed), self, 0);
        gst_wl_window_set_rotate_method (self->window,
            self->current_rotate_method);
@@ -239,7 +230,7 @@ index 1bf537c9f3..5efd5821c5 100644
    }
  
    /* make sure that the application has called set_render_rectangle() */
-@@ -1037,6 +1138,13 @@ no_window_size:
+@@ -1066,6 +1164,13 @@ no_window_size:
      ret = GST_FLOW_ERROR;
      goto done;
    }
@@ -253,7 +244,7 @@ index 1bf537c9f3..5efd5821c5 100644
  no_buffer:
    {
      GST_WARNING_OBJECT (self, "could not create buffer");
-@@ -1109,6 +1217,7 @@ gst_wayland_sink_set_window_handle (GstVideoOverlay * overlay, guintptr handle)
+@@ -1138,6 +1243,7 @@ gst_wayland_sink_set_window_handle (GstVideoOverlay * overlay, guintptr handle)
        (void *) handle);
  
    g_clear_object (&self->window);
@@ -261,7 +252,7 @@ index 1bf537c9f3..5efd5821c5 100644
  
    if (handle) {
      if (G_LIKELY (gst_wayland_sink_find_display (self))) {
-@@ -1120,8 +1229,11 @@ gst_wayland_sink_set_window_handle (GstVideoOverlay * overlay, guintptr handle)
+@@ -1149,8 +1255,11 @@ gst_wayland_sink_set_window_handle (GstVideoOverlay * overlay, guintptr handle)
                  "an externally-supplied display handle. Consider providing a "
                  "display handle from your application with GstContext"));
        } else {
@@ -289,7 +280,7 @@ index 5bbb10a8e3..cb988bbb3e 100644
    gboolean skip_dumb_buffer_copy;
  };
 diff --git a/subprojects/gst-plugins-bad/gst-libs/gst/wayland/gstwldisplay.c b/subprojects/gst-plugins-bad/gst-libs/gst/wayland/gstwldisplay.c
-index 8d386593a6..1d091a7e7f 100644
+index 8ae698c0ff..7afa289ad7 100644
 --- a/subprojects/gst-plugins-bad/gst-libs/gst/wayland/gstwldisplay.c
 +++ b/subprojects/gst-plugins-bad/gst-libs/gst/wayland/gstwldisplay.c
 @@ -46,7 +46,6 @@ typedef struct _GstWlDisplayPrivate
@@ -300,7 +291,7 @@ index 8d386593a6..1d091a7e7f 100644
    struct xdg_wm_base *xdg_wm_base;
    struct zwp_fullscreen_shell_v1 *fullscreen_shell;
    struct wp_single_pixel_buffer_manager_v1 *single_pixel_buffer;
-@@ -158,9 +157,6 @@ gst_wl_display_finalize (GObject * gobject)
+@@ -159,9 +158,6 @@ gst_wl_display_finalize (GObject * gobject)
    if (priv->compositor)
      wl_compositor_destroy (priv->compositor);
  
@@ -310,7 +301,7 @@ index 8d386593a6..1d091a7e7f 100644
    if (priv->registry)
      wl_registry_destroy (priv->registry);
  
-@@ -308,13 +304,11 @@ registry_handle_global (void *data, struct wl_registry *registry,
+@@ -309,13 +305,11 @@ registry_handle_global (void *data, struct wl_registry *registry,
  {
    GstWlDisplay *self = data;
    GstWlDisplayPrivate *priv = gst_wl_display_get_instance_private (self);
@@ -325,7 +316,7 @@ index 8d386593a6..1d091a7e7f 100644
    } else if (g_strcmp0 (interface, "xdg_wm_base") == 0) {
      priv->xdg_wm_base =
          wl_registry_bind (registry, id, &xdg_wm_base_interface, 1);
-@@ -453,7 +447,6 @@ gst_wl_display_new_existing (struct wl_display *display,
+@@ -459,7 +453,6 @@ gst_wl_display_new_existing (struct wl_display *display,
    }
  
    VERIFY_INTERFACE_EXISTS (compositor, "wl_compositor");
@@ -333,7 +324,7 @@ index 8d386593a6..1d091a7e7f 100644
    VERIFY_INTERFACE_EXISTS (shm, "wl_shm");
  
  #undef VERIFY_INTERFACE_EXISTS
-@@ -601,14 +594,6 @@ gst_wl_display_get_compositor (GstWlDisplay * self)
+@@ -607,14 +600,6 @@ gst_wl_display_get_compositor (GstWlDisplay * self)
    return priv->compositor;
  }
  
@@ -349,7 +340,7 @@ index 8d386593a6..1d091a7e7f 100644
  gst_wl_display_get_xdg_wm_base (GstWlDisplay * self)
  {
 diff --git a/subprojects/gst-plugins-bad/gst-libs/gst/wayland/gstwlwindow.c b/subprojects/gst-plugins-bad/gst-libs/gst/wayland/gstwlwindow.c
-index 8a60b143a6..80b6aaee4a 100644
+index 27084c0d1a..222531b855 100644
 --- a/subprojects/gst-plugins-bad/gst-libs/gst/wayland/gstwlwindow.c
 +++ b/subprojects/gst-plugins-bad/gst-libs/gst/wayland/gstwlwindow.c
 @@ -41,13 +41,9 @@ typedef struct _GstWlWindowPrivate
@@ -403,10 +394,10 @@ index 8a60b143a6..80b6aaee4a 100644
 -
 -  if (priv->area_subsurface)
 -    wl_subsurface_destroy (priv->area_subsurface);
- 
+-
 -  if (priv->area_viewport)
 -    wp_viewport_destroy (priv->area_viewport);
--
+ 
 -  wl_proxy_wrapper_destroy (priv->area_surface_wrapper);
 -  wl_surface_destroy (priv->area_surface);
 +  if (priv->internal_surface)
@@ -571,7 +562,7 @@ index 8a60b143a6..80b6aaee4a 100644
    GstVideoRectangle src = { 0, };
    GstVideoRectangle dst = { 0, };
    GstVideoRectangle res;
-@@ -488,12 +468,18 @@ gst_wl_window_resize_video_surface (GstWlWindow * self, gboolean commit)
+@@ -496,12 +476,18 @@ gst_wl_window_resize_video_surface (GstWlWindow * self, gboolean commit)
      gst_video_center_rect (&src, &dst, &res, FALSE);
    }
  
@@ -592,7 +583,7 @@ index 8a60b143a6..80b6aaee4a 100644
  
    priv->video_rectangle = res;
  }
-@@ -505,12 +491,7 @@ gst_wl_window_set_opaque (GstWlWindow * self, const GstVideoInfo * info)
+@@ -513,12 +499,7 @@ gst_wl_window_set_opaque (GstWlWindow * self, const GstVideoInfo * info)
    struct wl_compositor *compositor;
    struct wl_region *region;
  
@@ -605,7 +596,7 @@ index 8a60b143a6..80b6aaee4a 100644
  
    if (!GST_VIDEO_INFO_HAS_ALPHA (info)) {
      /* Set video opaque */
-@@ -562,7 +543,6 @@ gst_wl_window_commit_buffer (GstWlWindow * self, GstWlBuffer * buffer)
+@@ -570,7 +551,6 @@ gst_wl_window_commit_buffer (GstWlWindow * self, GstWlBuffer * buffer)
      priv->video_width = info->width;
      priv->video_height = info->height;
  
@@ -613,7 +604,7 @@ index 8a60b143a6..80b6aaee4a 100644
      gst_wl_window_resize_video_surface (self, FALSE);
      gst_wl_window_set_opaque (self, info);
    }
-@@ -572,13 +552,16 @@ gst_wl_window_commit_buffer (GstWlWindow * self, GstWlBuffer * buffer)
+@@ -580,13 +560,16 @@ gst_wl_window_commit_buffer (GstWlWindow * self, GstWlBuffer * buffer)
      priv->frame_callback = callback;
      wl_callback_add_listener (callback, &frame_callback_listener, self);
      gst_wl_buffer_attach (buffer, priv->video_surface_wrapper);
@@ -634,7 +625,7 @@ index 8a60b143a6..80b6aaee4a 100644
        priv->is_area_surface_mapped = TRUE;
        g_signal_emit (self, signals[MAP], 0);
      }
-@@ -586,21 +569,9 @@ gst_wl_window_commit_buffer (GstWlWindow * self, GstWlBuffer * buffer)
+@@ -594,21 +577,9 @@ gst_wl_window_commit_buffer (GstWlWindow * self, GstWlBuffer * buffer)
      /* clear both video and parent surfaces */
      wl_surface_attach (priv->video_surface_wrapper, NULL, 0, 0);
      wl_surface_commit (priv->video_surface_wrapper);
@@ -656,7 +647,7 @@ index 8a60b143a6..80b6aaee4a 100644
  }
  
  static void
-@@ -663,103 +634,6 @@ gst_wl_window_render (GstWlWindow * self, GstWlBuffer * buffer,
+@@ -671,103 +642,6 @@ gst_wl_window_render (GstWlWindow * self, GstWlBuffer * buffer,
    return ret;
  }
  
@@ -760,7 +751,7 @@ index 8a60b143a6..80b6aaee4a 100644
  void
  gst_wl_window_set_render_rectangle (GstWlWindow * self, gint x, gint y,
      gint w, gint h)
-@@ -775,7 +649,16 @@ gst_wl_window_set_render_rectangle (GstWlWindow * self, gint x, gint y,
+@@ -783,7 +657,16 @@ gst_wl_window_set_render_rectangle (GstWlWindow * self, gint x, gint y,
    priv->render_rectangle.w = w;
    priv->render_rectangle.h = h;
  
@@ -778,7 +769,7 @@ index 8a60b143a6..80b6aaee4a 100644
  }
  
  const GstVideoRectangle *
-@@ -819,5 +702,5 @@ gst_wl_window_set_rotate_method (GstWlWindow * self,
+@@ -827,5 +710,5 @@ gst_wl_window_set_rotate_method (GstWlWindow * self,
  
    priv->buffer_transform = output_transform_from_orientation_method (method);
  
