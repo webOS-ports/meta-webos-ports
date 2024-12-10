@@ -25,3 +25,8 @@ WEBOS_ENACTJS_APP_ID = "com.webos.app.camera"
 
 # FIXME: Workaround for network access issue during do_npm_install task
 do_npm_install[network] = "1"
+
+# WRR-13760 host-user-contaminated with new nodejs-22.12.0
+do_install:append() {
+    chown -R root:root ${D}/
+}
