@@ -24,3 +24,8 @@ WEBOS_ENACTJS_APP_ID = "com.webos.app.camera"
 
 # Workaround for network access issue during do_compile task
 do_compile[network] = "1"
+
+# WRR-13760 host-user-contaminated with new nodejs-22.12.0
+do_install:append() {
+    chown -R root:root ${D}/
+}
