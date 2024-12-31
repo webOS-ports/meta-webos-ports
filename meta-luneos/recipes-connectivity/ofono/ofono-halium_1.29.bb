@@ -27,7 +27,7 @@ PV = "1.29+git"
 
 DEPENDS += "dbus-glib libmce-glib"
 # For Halium 9 devices we want to use the ofono-binder-plugin, for older devices we might want to use ofono-ril-plugin
-RDEPENDS:${PN} += "mobile-broadband-provider-info ofono-conf ofono-binder-plugin"
+RDEPENDS:${PN} += "mobile-broadband-provider-info-halium ofono-conf ofono-binder-plugin"
 
 S = "${WORKDIR}/git/ofono"
 # Can't build out of tree right now so we have to build in tree
