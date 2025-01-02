@@ -33,7 +33,7 @@ inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "com.webos.service.mediarecorder.service"
 
 # Build a native app for testing the media recorder
-PACKAGECONFIG[test-apps] = "-DWITH_CAMERA_TEST=ON,-DWITH_CAMERA_TEST=OFF, webos-wayland-extensions mesa jpeg, ${PN}-test-apps"
+PACKAGECONFIG[test-apps] = "-DWITH_CAMERA_TEST=ON,-DWITH_CAMERA_TEST=OFF, webos-wayland-extensions virtual/mesa jpeg, ${PN}-test-apps"
 
 PACKAGES += "${PN}-test-apps"
 
