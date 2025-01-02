@@ -11,6 +11,7 @@ DEPENDS = "dbus glib-2.0 udev mobile-broadband-provider-info ell"
 COMPATIBLE_MACHINE = "^halium$"
 # This recipe acts as a replacement for the ofono recipe
 PROVIDES += "ofono"
+RPROVIDES:${PN} += "ofono"
 
 SRC_URI  = " \
   git://github.com/sailfishos/ofono.git;protocol=https;branch=master \

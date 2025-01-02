@@ -11,7 +11,7 @@ PHONE_RDEPENDS = " \
 "
 
 RDEPENDS:${PN} = " \
-    ofono \
+    ${VIRTUAL-RUNTIME_ofono} \
     webos-telephonyd \
     ${@bb.utils.contains('MACHINE_FEATURES', 'phone', '${PHONE_RDEPENDS}', '', d)} \
 "
