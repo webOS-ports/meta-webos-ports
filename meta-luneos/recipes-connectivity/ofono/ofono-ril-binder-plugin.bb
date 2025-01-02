@@ -5,7 +5,7 @@ LICENSE = "BSD-3-Clause"
 SECTION = "webos/support"
 LIC_FILES_CHKSUM = "file://src/ril_binder_plugin.c;beginline=1;endline=31;md5=ba484c1af8c917210c60e63b7b499327"
 
-DEPENDS = "ofono libgbinder libgbinder-radio libgrilio glib-2.0 libglibutil"
+DEPENDS = "${VIRTUAL-RUNTIME_ofono} libgbinder libgbinder-radio libgrilio glib-2.0 libglibutil"
 
 inherit pkgconfig
 

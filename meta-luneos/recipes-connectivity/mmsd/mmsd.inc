@@ -10,7 +10,7 @@ DEPENDS  = "dbus glib-2.0"
 PACKAGES =+ "${PN}-tests"
 
 RDEPENDS:${PN} += "dbus"
-RRECOMMENDS:${PN} += "ofono"
+RRECOMMENDS:${PN} += "${VIRTUAL-RUNTIME_ofono}"
 
 FILES:${PN} += "${base_libdir}/udev ${systemd_unitdir}"
 FILES:${PN}-tests = "${libdir}/${BPN}/test"
