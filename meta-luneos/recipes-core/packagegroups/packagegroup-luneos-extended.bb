@@ -25,7 +25,7 @@ RDEPENDS:${PN} = " \
   pulseaudio-server \
   \
   alsa-conf \
-  ofono \
+  ${VIRTUAL-RUNTIME_ofono} \
   tar \
   udev-extraconf \
   webos-connman-adapter \
