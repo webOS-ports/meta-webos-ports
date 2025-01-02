@@ -128,39 +128,31 @@ LIBHYBRIS_RDEPENDS = " \
 # (Optional?) work for Qt6:
 #     qtscenegraph-adaptation 
 
-MEMNOTIFY_RDEPENDS = " \
-    memnotify-module \
-"
-
 #Needs update for Qt6
 #    qtubuntu-camera 
 #    libqtubuntu-media-signals2 
 #    qtvideo-node 
 
-
-# NOTE: For kernels build outside of OE we can't add memnotify support and therefor have to ship the module with the kernel package directly.
-# NOTE: For kernels build with OE, the kernel tree would need to have a patch applied in order to make si_swapinfo exportable as per http://lkml.iu.edu/hypermail//linux/kernel/1201.2/00719.html
-
-RDEPENDS:${PN}:append:tuna = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
-RDEPENDS:${PN}:append:grouper = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
-RDEPENDS:${PN}:append:mako = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS} bluebinder"
+RDEPENDS:${PN}:append:tuna = " ${LIBHYBRIS_RDEPENDS}"
+RDEPENDS:${PN}:append:grouper = " ${LIBHYBRIS_RDEPENDS}"
+RDEPENDS:${PN}:append:mako = " ${LIBHYBRIS_RDEPENDS} bluebinder"
 RDEPENDS:${PN}:append:hammerhead = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
-RDEPENDS:${PN}:append:hammerhead-halium = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
+RDEPENDS:${PN}:append:hammerhead-halium = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:tenderloin = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
-RDEPENDS:${PN}:append:tenderloin-halium = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
+RDEPENDS:${PN}:append:tenderloin-halium = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:mido = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
-RDEPENDS:${PN}:append:mido-halium = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS} bluebinder"
-RDEPENDS:${PN}:append:mindphone = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
-RDEPENDS:${PN}:append:athene = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
-RDEPENDS:${PN}:append:onyx = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
+RDEPENDS:${PN}:append:mido-halium = " ${LIBHYBRIS_RDEPENDS} bluebinder"
+RDEPENDS:${PN}:append:mindphone = " ${LIBHYBRIS_RDEPENDS}"
+RDEPENDS:${PN}:append:athene = " ${LIBHYBRIS_RDEPENDS}"
+RDEPENDS:${PN}:append:onyx = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:oxygen = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:tissot = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
-RDEPENDS:${PN}:append:tissot-halium = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS} bluebinder"
+RDEPENDS:${PN}:append:tissot-halium = " ${LIBHYBRIS_RDEPENDS} bluebinder"
 RDEPENDS:${PN}:append:sargo = " ${LIBHYBRIS_RDEPENDS} bluebinder"
 RDEPENDS:${PN}:append:rosy = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:s2 = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:sagit = " ${LIBHYBRIS_RDEPENDS}"
-RDEPENDS:${PN}:append:yggdrasil = " ${LIBHYBRIS_RDEPENDS} ${MEMNOTIFY_RDEPENDS}"
+RDEPENDS:${PN}:append:yggdrasil = " ${LIBHYBRIS_RDEPENDS}"
 
 RDEPENDS:${PN}:append:mido-halium = " waydroid"
 RDEPENDS:${PN}:append:pinephone = " waydroid"
