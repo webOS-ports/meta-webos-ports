@@ -112,3 +112,7 @@ VIRTUAL-RUNTIME_surface-manager-tests = "luna-surfacemanager-base-tests"
 
 # Options: com.webos.service.pdm, physical-device-manager, physical-device-manager2
 VIRTUAL-RUNTIME_pdm = "com.webos.service.pdm"
+
+# We want to distinguish between ofono (mainline etc) and ofono-halium (Halium based devices)
+VIRTUAL-RUNTIME_ofono = "ofono"
+VIRTUAL-RUNTIME_ofono-tests = "ofono-tests"

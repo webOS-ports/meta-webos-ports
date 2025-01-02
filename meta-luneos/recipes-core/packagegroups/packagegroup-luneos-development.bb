@@ -41,6 +41,6 @@ RDEPENDS:${PN} = " \
   \
   connman-client \
   qtdeclarative-tools \
-  ofono-tests \
+  ${VIRTUAL-RUNTIME_ofono-tests} \
 "
 
