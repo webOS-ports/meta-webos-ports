@@ -1,4 +1,4 @@
-# Copyright (c) 2016-2024 LG Electronics, Inc.
+# Copyright (c) 2016-2025 LG Electronics, Inc.
 #
 # webos_enactjs_app
 #
@@ -22,8 +22,9 @@ inherit webos_enactjs_env
 #   - mksnapshot-cross to use the mksnapshot binary to build v8 app snapshot blobs
 #   - enact-framework, enact-sandstone to use a shared Enact framework libraries
 #   - coreutils-native to use timeout utility to prevent frozen NPM processes
-WEBOS_ENACTJS_APP_DEPENDS = "ilib-webapp mksnapshot-cross-${TARGET_ARCH} enact-framework enact-sandstone coreutils-native"
+WEBOS_ENACTJS_APP_DEPENDS = "ilib-webapp enact-framework enact-sandstone coreutils-native"
 DEPENDS:append = " ${WEBOS_ENACTJS_APP_DEPENDS}"
+DEPENDS:append = " ${@ 'mksnapshot-cross-${TARGET_ARCH}' if not d.getVar('WEBOS_ENACTJS_PACK_OVERRIDE').strip() and '--snapshot' in d.getVar('WEBOS_ENACTJS_PACK_OPTS') else ''}"
 
 # chromium doesn't build for armv[45]*
 COMPATIBLE_MACHINE = "(-)"
@@ -92,15 +93,11 @@ do_locate_enactjs_appinfo() {
 }
 addtask do_locate_enactjs_appinfo after do_configure before do_install
 
-do_compile() {
+do_npm_shrink_enact_override() {
     working=$(pwd)
 
     bbnote "Using Enact project at ${WEBOS_ENACTJS_PROJECT_PATH}"
     cd ${S}/${WEBOS_ENACTJS_PROJECT_PATH}
-
-    # clear local cache prior to each compile
-    bbnote "Clearing any existing node_modules"
-    rm -fr node_modules
 
     # ensure an NPM shrinkwrap file exists so app has its dependencies locked in
     if [ ! -f npm-shrinkwrap.json ] ; then
@@ -129,16 +126,50 @@ do_compile() {
         if [ -d ${FRAMEWORK_PATH} ] ; then
             bbnote "Using system submission Enact framework from ${FRAMEWORK_PATH}"
             ${ENACT_BOOTSTRAP_OVERRIDE} "${FRAMEWORK_PATH}"
+            if [ ! -d node_modules ] ; then
+                mkdir node_modules
+            fi
+            cp -r ${FRAMEWORK_PATH}/node_modules_override/* node_modules
         else
             FRAMEWORK_ALLARCH_PATH="${WEBOS_ENACTJS_FRAMEWORK_ALLARCH}${ENACTJS_FRAMEWORK_VARIANT}"
             if [ -d ${FRAMEWORK_ALLARCH_PATH} ] ; then
                 bbnote "Using system submission Enact framework from ${FRAMEWORK_ALLARCH_PATH}"
                 ${ENACT_BOOTSTRAP_OVERRIDE} "${FRAMEWORK_ALLARCH_PATH}"
+                if [ ! -d node_modules ] ; then
+                    mkdir node_modules
+                fi
+                cp -r ${FRAMEWORK_ALLARCH_PATH}/node_modules_override/* node_modules
             else
                 bbwarn "Enact framework submission could not be found"
             fi
         fi
     fi
+}
+addtask do_npm_shrink_enact_override after do_patch do_prepare_recipe_sysroot before do_configure
+
+do_compile() {
+    :
+}
+
+do_compile:append() {
+    working=$(pwd)
+
+    bbnote "Using Enact project at ${WEBOS_ENACTJS_PROJECT_PATH}"
+    cd ${S}/${WEBOS_ENACTJS_PROJECT_PATH}
+
+    # clear local cache prior to each compile
+    bbnote "Clearing any existing node_modules"
+    rm -fr node_modules
+    cd ${working}
+}
+
+# FIXME: After fixing all of the enact app recipes, we have to remove this task
+# to aollow fetching npm sub-modules only for do_fetch.
+do_npm_install() {
+    working=$(pwd)
+
+    bbnote "Using Enact project at ${WEBOS_ENACTJS_PROJECT_PATH}"
+    cd ${S}/${WEBOS_ENACTJS_PROJECT_PATH}
 
     NPM_OPTS="${WEBOS_NPM_INSTALL_FLAGS} install"
     if [ -z "${WEBOS_ENACTJS_PACK_OVERRIDE}" ] ; then
@@ -152,6 +183,15 @@ do_compile() {
     rm -f package-lock.json
 
     ${WEBOS_NPM_BIN} ${NPM_OPTS}
+    cd ${working}
+}
+addtask do_npm_install after do_compile before do_npm_install_postprocess
+
+do_npm_install_postprocess() {
+    working=$(pwd)
+
+    bbnote "Using Enact project at ${WEBOS_ENACTJS_PROJECT_PATH}"
+    cd ${S}/${WEBOS_ENACTJS_PROJECT_PATH}
 
     if [ ! -z "${WEBOS_ENACTJS_ILIB_OVERRIDE}" ] ; then
         ## only override ilib if using Enact submission via shrinkwrap override
@@ -181,11 +221,14 @@ do_compile() {
     fi
     cd ${working}
 }
+addtask do_npm_install_postprocess after do_npm_install before do_install
 
 V8_SNAPSHOT_EXTRA_ARGS = " --turbo_instruction_scheduling"
 do_install() {
     working=$(pwd)
-    cd ${WEBOS_ENACTJS_PROJECT_PATH}
+
+    bbnote "Using Enact project at ${WEBOS_ENACTJS_PROJECT_PATH}"
+    cd ${S}/${WEBOS_ENACTJS_PROJECT_PATH}
 
     # Support optional transpiling to full ES5 if needed
     export ES5="${WEBOS_ENACTJS_FORCE_ES5}"
@@ -217,7 +260,7 @@ do_install() {
     else
         # Normal App Build
         bbnote "Bundling Enact app to $appdir"
-        ${ENACT_DEV} pack ${WEBOS_ENACTJS_PACK_OPTS} -o "$appdir" --verbose
+        ${ENACT_DEV} pack ${WEBOS_ENACTJS_PACK_OPTS} -o "$appdir"
     fi
 
     if [ ! -f $appdir/index.html ] ; then
