@@ -1,4 +1,4 @@
-# Copyright (c) 2019-2024 LG Electronics, Inc.
+# Copyright (c) 2019-2025 LG Electronics, Inc.
 
 SUMMARY = "Physical Device Manager handles physical devices using netlink events"
 DESCRIPTION = "Service for detecting and managing physical devices using netlink events. A physical device is a USB device, available internal storage device and so on."
@@ -18,28 +18,25 @@ RDEPENDS:${PN} = "fuse-utils hdparm gphoto2 gphotofs sdparm gptfdisk-sgdisk e2fs
 
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_pdm-plugin}"
 
-WEBOS_VERSION = "1.0.1-85_e0c035d14c8c7d954559426e17c0424c944c356a"
+WEBOS_VERSION = "1.0.1-87_75a15955e26415fe121eae36e61bd4ad1b951aaf"
 PR = "r11"
 
+inherit webos_component
+inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit webos_system_bus
+inherit webos_daemon
 inherit webos_public_repo
-inherit webos_enhanced_submissions
-inherit pkgconfig
+inherit webos_localizable
 inherit useradd
 
+USERADD_PARAM:${PN} = "-g pdmgroup -d /home/pdmuser -m -s /bin/sh pdmuser"
+GROUPADD_PARAM:${PN} = "-g 2023 pdmgroup"
 USERADD_PACKAGES = "${PN}"
-USERADD_PARAM:${PN} = " \
-    -g pdmgroup -d /home/pdmuser -m -s /bin/sh pdmuser; \
-"
-
-GROUPADD_PARAM:${PN} = " \
-    -g 2023 -f pdmgroup; \
-"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-NfcDeviceHandler-Fix-incorrect-name.patch \
-    file://0002-Remove-the-Android-Auto-bits.patch \
+	file://0002-Remove-the-Android-Auto-bits.patch \
     file://0003-com.webos.service.pdm.perm.json-Fix-incorrect-permis.patch \
     file://0004-com.webos.service.pdm-Gracefully-handle-BIND-actions.patch \
 "

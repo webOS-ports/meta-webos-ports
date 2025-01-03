@@ -1,4 +1,4 @@
-# Copyright (c) 2019-2024 LG Electronics, Inc.
+# Copyright (c) 2019-2025 LG Electronics, Inc.
 
 SUMMARY = " Pdm-plugin to support Physical device manager for webOS OSE"
 DESCRIPTION = "Pdm-plugin to initialize hardware required by Physical device manager in for webOS OSE"
@@ -16,10 +16,11 @@ DEPENDS = "com.webos.service.pdm"
 WEBOS_VERSION = "1.0.1-11_d63d098d4f9735ea19e73eda31e10b6ab52dd8d5"
 PR = "r3"
 
-inherit webos_cmake
-inherit webos_public_repo
+inherit webos_component
 inherit webos_enhanced_submissions
-inherit pkgconfig
+inherit webos_cmake
+inherit webos_library
+inherit webos_public_repo
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
