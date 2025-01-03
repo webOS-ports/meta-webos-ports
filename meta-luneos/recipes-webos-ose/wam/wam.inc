@@ -1,4 +1,4 @@
-# Copyright (c) 2015-2024 LG Electronics, Inc.
+# Copyright (c) 2015-2025 LG Electronics, Inc.
 
 SUMMARY = "WebAppMgr is responsible for running web applications on webOS"
 AUTHOR = "Donghyun Kim <donghyun11.kim@lge.com>"
@@ -7,7 +7,6 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM += "file://oss-pkg-info.yaml;md5=790420e31fa17284afec484d5b2ad2d8"
 
 DEPENDS = "virtual/webruntime luna-service2 sqlite3 librolegen nyx-lib openssl luna-prefs libpbnjson freetype serviceinstaller glib-2.0 pmloglib lttng-ust gtest jsoncpp boost"
-
 PROVIDES = "virtual/webappmanager-webos"
 
 # webappmgr's upstart conf expects to be able to LD_PRELOAD ptmalloc3
@@ -19,24 +18,27 @@ RDEPENDS:${PN} += "util-linux"
 VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_cpushareholder}"
 
-WEBOS_VERSION = "1.0.2-92_9950b9f8e6a4cd7c902fed744832846bb06e54b0"
-INC_PR = "r67"
+WEBOS_VERSION = "1.0.2-99_a698bc40c4e73d338bdf3310c31d1878978d231a"
+INC_PR = "r70"
 
 WAM_BUILD_SYSTEM ?= "webos_cmake"
 WAM_BUILD_DEFAULT_PLUGIN ?= "1"
 
-inherit webos_system_bus
-inherit ${WAM_BUILD_SYSTEM}
-inherit pkgconfig
-inherit webos_lttng
-inherit webos_public_repo
 inherit webos_enhanced_submissions
+inherit webos_system_bus
+inherit webos_machine_dep
+inherit ${WAM_BUILD_SYSTEM}
+inherit webos_pkgconfig
+inherit webos_lttng
+#inherit webos_distro_variant_dep
+inherit webos_public_repo
 inherit webos_systemd
 inherit useradd
 
 WAM_DATA_DIR = "${webos_execstatedir}/${BPN}"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+    file://0001-Fix-build-with-liburcu-0.15.0.patch \
     file://0001-security_policy.conf-Add-paths-for-LuneOS.patch \
     file://0002-WAM-LS2-Add-required-bits-for-LuneOS.patch \
     file://0003-WAM-Use-Prelude-as-default-font.patch \
@@ -52,6 +54,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0013-WebAppBase-fix-window.close-for-multi-window-apps.patch \
     file://0014-WAM-Fix-outbound-permission-error.patch \
 "
+
 S = "${WORKDIR}/git"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
@@ -106,6 +109,7 @@ install_units:append() {
         sed -i '/export WAM_COMMON_SWITCHES=\" \\/a\    --disable-in-process-stack-traces \\' $script
         sed -i '/export ENABLE_BLINK_FEATURES=/ s/$/,LocalResourceCodeCache,CustomEventExtension,WebCodecs,MediaStreamInsertableStreams/' $script
         sed -i -e "s/\$WAM_V8_CODE_CACHE_SWITCHES//g" $script
+        sed -i '/export WAM_COMMON_SWITCHES=\" \\/a\    --disable-font-subpixel-positioning \\' $script
 
         # disable pinch zoom
         sed -i '/--enable-aggressive-release-policy \\/a\     --disable-pinch \\' $script
@@ -166,6 +170,8 @@ FILES:${PN} += " \
     ${libdir}/webappmanager/plugins/*.so \
     ${datadir}/localization/${BPN} \
 "
+
+# LuneOS added here to work around outdated group.master from OSE
 # Needed for the users & groups
 DEPENDS += "webos-users-groups"
 

@@ -1,4 +1,4 @@
-# Copyright (c) 2021-2024 LG Electronics, Inc.
+# Copyright (c) 2021-2025 LG Electronics, Inc.
 
 SUMMARY = "Google Drive for SAF"
 AUTHOR = "Navnit Kumar <navnit.kumar@lge.com>"
@@ -11,7 +11,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=82938594632d748d209a71bb60e3cdcb \
 DEPENDS = "curl"
 
 PV = "0.0.1+git"
-PR = "r3"
+PR = "r4"
 
 SRCREV_FORMAT = "libgdrive"
 SRCREV_libgdrive = "a7838bcf55fbbc6cfb66209bb2db1fbe82758924"

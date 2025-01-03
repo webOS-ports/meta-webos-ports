@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2024 LG Electronics, Inc.
+# Copyright (c) 2012-2025 LG Electronics, Inc.
 
 SUMMARY = "Provides preference, timezone and ringtone services"
 AUTHOR = "Rajesh Gopu I.V <rajeshgopu.iv@lge.com>"
@@ -16,20 +16,16 @@ DEPENDS = "luna-service2 libpbnjson uriparser libxml2 sqlite3 pmloglib nyx-lib l
 
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_ntp} tzcode luna-init"
 
-WEBOS_VERSION = "4.4.0-26_ffe9b48d169a3ee34ea1c9657af0b099af3898ed"
-PR = "r13"
+WEBOS_VERSION = "4.4.0-31_b768ff291f1bed353c8652bd430cc43ee80c8c79"
+PR = "r14"
 
+inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_system_bus
-inherit webos_systemd
+inherit webos_daemon
 inherit webos_cmake
-inherit pkgconfig
 
-# avoid qt6-cmake inherit - migrate this to inherit_defer after upgrading to scarthgap with:
-# https://git.openembedded.org/openembedded-core/commit/?h=scarthgap&id=451363438d38bd4552d5bcec4a92332f5819a5d4
-# https://git.openembedded.org/bitbake/commit/?h=2.8&id=5c2e840eafeba1f0f754c226b87bfb674f7bea29
-# now it needs to be set in DISTRO config
 PACKAGECONFIG ??= "qt"
 PACKAGECONFIG[qt] = ",,qtbase"
 inherit_defer ${@bb.utils.contains('PACKAGECONFIG', 'qt', 'qt6-cmake', '', d)}
@@ -41,6 +37,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0004-luna-sysservice-Fix-permissions-for-telephony.patch \
     file://0005-luna-sysservice-TimePrefsHandler.cpp-Fix-typo.patch \
     file://0006-com.webos.service.systemservice-Add-image.management.patch \
+    file://0007-Add-back-Image-and-Wallpaper-handling.patch \
 "
 
 S = "${WORKDIR}/git"

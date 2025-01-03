@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2024 LG Electronics, Inc.
+# Copyright (c) 2023-2025 LG Electronics, Inc.
 WEBRUNTIME_REPO_VERSION = "108"
 
 require webruntime.inc
@@ -33,10 +33,8 @@ GN_ARGS:append = " \
 GN_ARGS_AES = "disable_zlib_arm_aes_cflag=true"
 GN_ARGS += "${GN_ARGS_AES}"
 
-GN_ARGS_AES:aarch64 = ""
-GN_ARGS_NEON:aarch64 = "arm_use_neon=false"
-
-# ryu fails to build with thumb:
-# https://github.com/google/ruy/issues/284
-# https://bpa.st/UOIQ
-ARM_INSTRUCTION_SET = "arm"
+# Raspberry Pi does not support PMULL.
+GN_ARGS_AES:raspberrypi4-64 = ""
+GN_ARGS_NEON:raspberrypi4-64 = "arm_use_neon=false"
+GN_ARGS_AES:raspberrypi3-64 = ""
+GN_ARGS_NEON:raspberrypi3-64 = "arm_use_neon=false"

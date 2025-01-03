@@ -1,4 +1,4 @@
-# Copyright (c) 2017-2024 LG Electronics, Inc.
+# Copyright (c) 2017-2025 LG Electronics, Inc.
 
 SUMMARY = "webOS connman adapter support library"
 AUTHOR = "Muralidhar N <muralidhar.n@lge.com>"
@@ -16,10 +16,13 @@ DEPENDS = "glib-2.0 luna-service2 libpbnjson pmloglib luna-prefs wca-support-api
 
 RDEPENDS:${PN} = "iw"
 
-inherit webos_cmake
-inherit pkgconfig
-inherit webos_public_repo
+inherit webos_component
 inherit webos_enhanced_submissions
+inherit webos_machine_dep
+inherit webos_cmake
+inherit webos_library
+inherit webos_machine_impl_dep
+inherit webos_public_repo
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Revert-Removing-support-for-com.webos.service.wan-se.patch \

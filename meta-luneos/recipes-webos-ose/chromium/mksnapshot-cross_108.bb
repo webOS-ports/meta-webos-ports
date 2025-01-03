@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2024 LG Electronics, Inc.
+# Copyright (c) 2023-2025 LG Electronics, Inc.
 
 AUTHOR = "Donghyun Kim <donghyun11.kim@lge.com>"
 
@@ -24,7 +24,6 @@ DEPENDS = "glib-2.0-native gcc-runtime"
 
 GN_ARGS:append = "\
     use_pmlog=false \
-    use_gold=false \
 "
 
 EXTRA_OEGN = "--root=${S}/src --dotfile=mksnapshot.gn"

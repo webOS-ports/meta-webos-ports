@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2024 LG Electronics, Inc.
+# Copyright (c) 2022-2025 LG Electronics, Inc.
 
 SUMMARY = "Event Monitoring for com.webos.service.pdm service"
 AUTHOR = "Rajesh Gopu I.V <rajeshgopu.iv@lge.com>"
@@ -11,15 +11,16 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "glib-2.0 event-monitor pmloglib libpbnjson libwebosi18n"
 
-WEBOS_VERSION = "1.0.0-8_fb0a3bab04d07537a4cc04c4e7274025fe5633ef"
+WEBOS_VERSION = "1.0.0-9_40c3e5abeb420d0fece8b61a0ebe71c5be6ad140"
 PR = "r2"
 
+inherit webos_component
+inherit webos_enhanced_submissions
 inherit webos_cmake
+inherit webos_pkgconfig
 inherit webos_event_monitor_plugin
 inherit webos_public_repo
-inherit webos_enhanced_submissions
 inherit webos_localizable
-inherit pkgconfig
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

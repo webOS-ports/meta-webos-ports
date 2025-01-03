@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2024 LG Electronics, Inc.
+# Copyright (c) 2012-2025 LG Electronics, Inc.
 
 SUMMARY = "webOS portability layer - ${MACHINE}-specific modules"
 AUTHOR = "Yogish S <yogish.s@lge.com>"
@@ -14,15 +14,21 @@ DEPENDS = "nyx-lib glib-2.0 luna-service2 openssl udev nmeaparser"
 #LuneOS added for mtdev modules such as touchscreen
 DEPENDS += "mtdev"
 
-RDEPENDS:${PN} = "lsb-release gzip nyx-conf"
+RDEPENDS:${PN} = "lsb-release gzip"
+#LuneOS uses config per device provided by nyx-conf
+RDEPENDS:${PN} += "nyx-conf"
 
-WEBOS_VERSION = "7.1.0-24_f5e0d88ac5dc6d6d027be9e4e876ebbb6682c77c"
-PR = "r20"
+WEBOS_VERSION = "7.1.0-25_802df9c1da7fb70c9d7506d4b863cd858153a1b1"
 
-EXTRA_OECMAKE += "-DDISTRO_VERSION:STRING='${DISTRO_VERSION}' -DDISTRO_NAME:STRING='${DISTRO_NAME}${WEBOS_DISTRO_NAME_SUFFIX}' \
-                  -DWEBOS_DISTRO_API_VERSION:STRING='${WEBOS_DISTRO_API_VERSION}' \
-                  -DWEBOS_DISTRO_RELEASE_CODENAME:STRING='${WEBOS_DISTRO_RELEASE_CODENAME}' \
-                  -DWEBOS_DISTRO_BUILD_ID:STRING='${WEBOS_DISTRO_BUILD_ID}'"
+PR = "r22"
+
+EXTRA_OECMAKE += "\
+    -DDISTRO_VERSION:STRING='${DISTRO_VERSION}' \
+    -DDISTRO_NAME:STRING='${DISTRO_NAME}${WEBOS_DISTRO_NAME_SUFFIX}' \
+    -DWEBOS_DISTRO_RELEASE_PLATFORMCODE:STRING='${WEBOS_DISTRO_RELEASE_PLATFORMCODE}' \
+    -DWEBOS_DISTRO_RELEASE_CODENAME:STRING='${WEBOS_DISTRO_RELEASE_CODENAME}' \
+    -DWEBOS_DISTRO_BUILD_ID:STRING='${WEBOS_DISTRO_BUILD_ID}' \
+"
 
 # Only pass in a value for the Manufacturing version if one is actually
 # defined. Otherwise, let the CMake script provide the default value.
@@ -35,7 +41,6 @@ EXTRA_OECMAKE += "${@ '-DWEBOS_DISTRO_MANUFACTURING_VERSION:STRING="${WEBOS_DIST
 
 # NB. CMakeLists.txt arranges for the return value of the NYX_OS_INFO_WEBOS_PRERELEASE
 # query to be "" when WEBOS_DISTRO_PRERELEASE is not defined on the command line.
-WEBOS_DISTRO_PRERELEASE ??= ""
 EXTRA_OECMAKE += "${@ '-DWEBOS_DISTRO_PRERELEASE:STRING="${WEBOS_DISTRO_PRERELEASE}"' \
                   if d.getVar('WEBOS_DISTRO_PRERELEASE') != '' else ''}"
 
@@ -44,13 +49,16 @@ WEBOS_TARGET_CORE_OS = "rockhopper"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
+inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake
-inherit webos_machine_impl_dep
+inherit webos_library
+#inherit webos_machine_impl_dep
+#inherit webos_prerelease_dep
 inherit webos_core_os_dep
 inherit webos_nyx_module_provider
-inherit pkgconfig
+#inherit webos_distro_variant_dep
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-nyx-modules-Add-ALS.patch \
@@ -87,9 +95,3 @@ PACKAGES += "${PN}-tests"
 FILES:${PN} += "${libdir}/nyx/modules/*"
 FILES:${PN} += "${systemd_system_unitdir}/*"
 FILES:${PN}-tests += "${bindir}/nyx-test-ledcontroller"
-
-# http://gecko.lge.com:8000/Errors/Details/821714
-# nyx-modules/7.1.0-22/git/src/keys/keys_common.c:84:91: error: passing argument 4 of 'g_key_file_get_string_list' from incompatible pointer type [-Wincompatible-pointer-types]
-# nyx-modules/7.1.0-22/git/src/keys/keys_common.c:211:11: error: passing argument 1 of 'pipe2' from incompatible pointer type [-Wincompatible-pointer-types]
-# nyx-modules/7.1.0-22/git/src/device_info/device_info_generic.c:363:16: error: implicit declaration of function 'isspace' [-Wimplicit-function-declaration]
-CFLAGS += "-Wno-error=incompatible-pointer-types -Wno-error=implicit-function-declaration"

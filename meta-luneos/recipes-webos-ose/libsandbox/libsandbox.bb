@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2024 LG Electronics, Inc.
+# Copyright (c) 2012-2025 LG Electronics, Inc.
 
 SUMMARY = "libsandbox is a collection of APIs for separating running programs"
 AUTHOR = "Vibhanshu Dhote <vibhanshu.dhote@lge.com>"
@@ -13,9 +13,11 @@ LIC_FILES_CHKSUM = " \
 WEBOS_VERSION = "2.0.0-3_03123aaa6b341f7cb838ace978223a5617f2555c"
 PR = "r3"
 
+inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake
+inherit webos_library
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"

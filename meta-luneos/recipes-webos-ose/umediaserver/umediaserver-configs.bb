@@ -1,4 +1,4 @@
-# Copyright (c) 2014-2024 LG Electronics, Inc.
+# Copyright (c) 2014-2025 LG Electronics, Inc.
 
 SUMMARY = "umediaserver configs installation"
 AUTHOR = "Sujeet Nayak <Sujeet.nayak@lge.com>"
@@ -13,7 +13,6 @@ LIC_FILES_CHKSUM = " \
 WEBOS_VERSION = "1.0.0-17_33b442fca4ed27a779dd4cd55e8fc7a48c8c31ac"
 PR = "r8"
 
-inherit pkgconfig
 inherit webos_cmake
 inherit webos_machine_dep
 inherit webos_enhanced_submissions

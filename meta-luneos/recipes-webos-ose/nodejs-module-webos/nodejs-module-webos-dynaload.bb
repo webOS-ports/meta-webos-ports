@@ -22,3 +22,9 @@ do_compile() {
 }
 
 WEBOS_NODE = "webos.node"
+
+# FIXME-buildpaths!!!
+# [WRP-10883] buildpath QA issues
+# ERROR: QA Issue: File /usr/lib/nodejs/.debug/webos.node in package lib32-nodejs-module-webos-dynaload-dbg contains reference to TMPDIR [buildpaths]
+ERROR_QA:remove = "buildpaths"
+WARN_QA:append = " buildpaths"

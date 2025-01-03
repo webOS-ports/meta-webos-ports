@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2024 LG Electronics, Inc.
+# Copyright (c) 2012-2025 LG Electronics, Inc.
 
 SUMMARY = "JavaScript loader for foundation frameworks and other loadable libraries"
 AUTHOR = "Rajesh Gopu I.V <rajeshgopu.iv@lge.com>"
@@ -15,7 +15,7 @@ PR = "r7"
 
 inherit webos_public_repo
 inherit webos_enhanced_submissions
-inherit allarch
+inherit webos_arch_indep
 inherit webos_filesystem_paths
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \

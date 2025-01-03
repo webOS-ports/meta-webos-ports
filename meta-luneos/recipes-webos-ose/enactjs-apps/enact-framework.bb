@@ -1,4 +1,4 @@
-# Copyright (c) 2017-2024 LG Electronics, Inc.
+# Copyright (c) 2017-2025 LG Electronics, Inc.
 
 # Maintained by Seungho Park <seunghoh.park@lge.com>
 SUMMARY = "Enact moonstone standard override used for Enact apps"
@@ -8,7 +8,7 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://enact/LICENSE;md5=e3fc50a88d0a364313df4b21ef20c29e"
 
 inherit webos_enact_repo
-inherit allarch
+inherit webos_arch_indep
 inherit webos_enactjs_env
 
 S = "${WORKDIR}/git"
@@ -37,7 +37,7 @@ WEBOS_ENACT_DEPENDENCIES ??= "\
     direction@1.0.4 \
     dom-walk@0.1.2 \
     global@4.4.0 \
-    ilib@14.19.0 \
+    ilib@14.21.0 \
     invariant@2.2.4 \
     is-function@1.0.2 \
     js-tokens@4.0.0 \
@@ -60,14 +60,14 @@ WEBOS_ENACT_DEPENDENCIES ??= "\
 # NOTE: We only need to bump PR if we change something OTHER than
 # PV, SRCREV or the dependencies statement above.
 
-PR = "r26"
+PR = "r29"
 
 # Skip unneeded tasks
 do_configure[noexec] = "1"
 
 do_compile() {
     cd ${S}
-    rm -fr node_modules
+    rm -fr node_modules node_modules_override
     mkdir node_modules
 
     for LIB in core ui spotlight i18n webos ; do
@@ -97,6 +97,9 @@ do_compile() {
     ${WEBOS_NPM_BIN} pack --loglevel=error ./enact/packages/webos
     ${WEBOS_NPM_BIN} pack --loglevel=error ${WEBOS_ENACT_DEPENDENCIES}
 
+    ${WEBOS_NPM_BIN} init -y
+    ${WEBOS_NPM_BIN} install *.tgz
+    mv node_modules node_modules_override
     for ARCHIVE in $(find . -name "*.tgz") ; do
         tar --warning=no-unknown-keyword -xzf ${ARCHIVE} package/package.json
         PKG=$(${WEBOS_NODE_BIN} -p "require('./package/package.json').name")
@@ -111,6 +114,7 @@ do_compile() {
 do_install() {
     install -d ${D}${datadir}/javascript/enact/@enact
     cp -R --no-dereference --preserve=mode,links -v ${S}/node_modules/* ${D}${datadir}/javascript/enact
+    cp -R --no-dereference --preserve=mode,links -v ${S}/node_modules_override ${D}${datadir}/javascript/enact
 }
 
 SYSROOT_DIRS += "${datadir}"

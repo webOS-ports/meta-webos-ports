@@ -14,23 +14,22 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "libpbnjson pmloglib glib-2.0"
 
-RDEPENDS:${PN} += " \
-    babeltrace \
-"
+WEBOS_VERSION = "1.0.0-18_97c256a74ef2249929b0366bf7ac5c972894a197"
+PR = "r16"
 
-WEBOS_VERSION = "1.0.0-17_f6d4399f296df2b4bead4dda7f3e56090634fd6b"
-PR = "r13"
+inherit webos_component
 
 inherit webos_cmake
+inherit webos_enhanced_submissions
+inherit webos_library
 inherit webos_lttng
 inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_prerelease_dep
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
 
 # The libmemtracker, libpmtrace, pmctl (library/header/binary files) will be installed in all builds except RELEASE mode.
 # Only libpmtrace header files need to install in all builds for other modules that are referring to the header files.
-# See https://github.com/shr-project/meta-webosose/commit/c1163bcddc2b3381881458378e3a383296d7a5d9
-EXTRA_OECMAKE += "-DENABLE_LIBPMTRACE:BOOLEAN=False"
+EXTRA_OECMAKE += "-DENABLE_LIBPMTRACE:BOOLEAN=${@'False' if ('${WEBOS_DISTRO_PRERELEASE}' == '') else 'True'}"
 EXTRA_OECMAKE += "-DDEFAULT_LOGGING:STRING=${@'' if ('${WEBOS_DISTRO_PRERELEASE}' == '') else 'pmlog'}"

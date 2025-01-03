@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2024 LG Electronics, Inc.
+# Copyright (c) 2020-2025 LG Electronics, Inc.
 
 SUMMARY = "Bluetooth HFP(Hands Free Profile) support service"
 AUTHOR = "Muralidhar N <muralidhar.n@lge.com>"
@@ -12,14 +12,15 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "glib-2.0 glib-2.0-native luna-service2 pmloglib libpbnjson python3-packaging-native"
 
-WEBOS_VERSION = "1.0.0-34_4e1ab4e3a5d2c7168dcc7d6c41ee607fb1616d49"
-PR = "r9"
+WEBOS_VERSION = "1.0.0-35_1c8e66b1e794a31d36d11fdc2afd4834184d70dd"
+PR = "r10"
 
+inherit webos_component
+inherit webos_enhanced_submissions
 inherit webos_cmake
+inherit webos_daemon
 inherit webos_system_bus
 inherit webos_public_repo
-inherit webos_enhanced_submissions
-inherit pkgconfig
 inherit python3native
 
 # Set WEBOS_HFP_ENABLED_ROLE to a space-separted list of
@@ -36,3 +37,11 @@ S = "${WORKDIR}/git"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "webos-hfp-service.service"
+
+# FIXME-buildpaths!!!
+# [WRP-10883] buildpath QA issues
+# [WRQ-14472] bluetooth: Resolve buildpaths QA warnings
+# http://gecko.lge.com:8000/Errors/Details/894436
+# ERROR: QA Issue: File /usr/src/debug/com.webos.service.hfp/1.0.0-34/Configured/src/ofono-interface.c in package com.webos.service.hfp-src contains reference to TMPDIR [buildpaths]
+ERROR_QA:remove = "buildpaths"
+WARN_QA:append = " buildpaths"

@@ -15,6 +15,12 @@ PR = "${INC_PR}.0"
 
 SRC_URI += "file://0001-Fix-build-with-nodejs-20.patch"
 
+SRC_URI += " \
+    file://0001-Fix-off-by-one-error-preventing-ACG-security-from-fu.patch \
+    file://0002-com.webos.nodejs.role.json-Add-permissions-required-.patch \
+    file://0003-LS2Handle-findMyAppId-might-not-work-with-mojoservic.patch \
+"
+
 do_configure() {
     export GYP_DEFINES="sysroot=${STAGING_DIR_HOST}"
     # used by binding.gyp
@@ -38,8 +44,9 @@ do_install:append() {
     sed "s|@WEBOS_INSTALL_BINDIR@|$bindir|" < ${S}/files/sysbus/com.webos.nodejs.role.json.in > ${D}${webos_sysbus_rolesdir}/com.webos.nodejs.role.json
 }
 
-SRC_URI += " \
-    file://0001-Fix-off-by-one-error-preventing-ACG-security-from-fu.patch \
-    file://0002-com.webos.nodejs.role.json-Add-permissions-required-.patch \
-    file://0003-LS2Handle-findMyAppId-might-not-work-with-mojoservic.patch \
-"
+# FIXME-buildpaths!!!
+# [WRP-10883] buildpath QA issues
+# ERROR: QA Issue: File /usr/lib/nodejs/webos-sysbus.node in package nodejs-module-webos-sysbus contains reference to TMPDIR [buildpaths]
+# ERROR: QA Issue: File /usr/lib/nodejs/.debug/webos-sysbus.node in package nodejs-module-webos-sysbus-dbg contains reference to TMPDIR [buildpaths]
+ERROR_QA:remove = "buildpaths"
+WARN_QA:append = " buildpaths"
