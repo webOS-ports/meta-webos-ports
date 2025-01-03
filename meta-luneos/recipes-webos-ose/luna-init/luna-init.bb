@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2024 LG Electronics, Inc.
+# Copyright (c) 2012-2025 LG Electronics, Inc.
 
 SUMMARY = "Initialization, setup, and font files used by luna-sysmgr and luna-sysservice"
 AUTHOR = "Yogish S <yogish.s@lge.com>"
@@ -15,7 +15,7 @@ DEPENDS = "tzdata python3-pytz-native"
 WEBOS_VERSION = "2.0.1-11_b186c185d8304480e78aade0617ef795c3db3e6e"
 PR = "r20"
 
-inherit allarch
+inherit webos_arch_indep
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake
@@ -49,5 +49,7 @@ do_install:append() {
 }
 
 PACKAGES =+ "${PN}-fonts"
-FILES:${PN} += "${webos_prefix} ${webos_sysconfdir} ${webos_sysmgr_datadir}/customization/"
+FILES:${PN} += "${webos_prefix} ${webos_sysconfdir}"
+# Below is needed for the LuneOS additions
+FILES:${PN} += "${webos_sysmgr_datadir}/customization/"
 FILES:${PN}-fonts += "${datadir}/fonts/"

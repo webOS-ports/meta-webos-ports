@@ -1,4 +1,4 @@
-# Copyright (c) 2014-2024 LG Electronics, Inc.
+# Copyright (c) 2014-2025 LG Electronics, Inc.
 
 SUMMARY = "webOS Bluetooth SIL implementation for bluez5"
 AUTHOR = "Muralidhar N <muralidhar.n@lge.com>"
@@ -17,13 +17,14 @@ WEBOS_BLUETOOTH_ENABLED_SERVICE_CLASSES ??= ""
 # Add runtime dependency on bluez5 OBEX service when we have to support FTP
 RDEPENDS:${PN} += "${@ bb.utils.contains('WEBOS_BLUETOOTH_ENABLED_SERVICE_CLASSES', 'FTP', 'bluez5-obex', '', d)}"
 
-WEBOS_VERSION = "0.1.0-84_fef59a3b45b0a1d0513be551ce2fbbfb58700864"
-PR = "r11"
+WEBOS_VERSION = "0.1.0-87_91ed8541e63b298cda488585595a782b095da90c"
+PR = "r13"
 
+inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake
-inherit pkgconfig
+inherit webos_pkgconfig
 inherit webos_bluetooth_sil
 inherit python3native
 
@@ -39,7 +40,11 @@ S = "${WORKDIR}/git"
 #                                              ^
 SECURITY_STRINGFORMAT = ""
 
-# ERROR: bluetooth-sil-bluez5-0.1.0-84-r11 do_package_qa: QA Issue: File /usr/src/debug/bluetooth-sil-bluez5/0.1.0-84/Configured/src/bluez-interface.c in package bluetooth-sil-bluez5-src contains reference to TMPDIR
-# File /usr/src/debug/bluetooth-sil-bluez5/0.1.0-84/Configured/src/freedesktop-interface.c in package bluetooth-sil-bluez5-src contains reference to TMPDIR [buildpaths]
+# FIXME-buildpaths!!!
+# [WRP-10883] buildpath QA issues
+# [WRQ-14472] bluetooth: Resolve buildpaths QA warnings
+# http://gecko.lge.com:8000/Errors/Details/894426
+# ERROR: QA Issue: File /usr/src/debug/bluetooth-sil-bluez5/0.1.0-86/Configured/src/freedesktop-interface.c in package bluetooth-sil-bluez5-src contains reference to TMPDIR
+# File /usr/src/debug/bluetooth-sil-bluez5/0.1.0-86/Configured/src/bluez-interface.c in package bluetooth-sil-bluez5-src contains reference to TMPDIR [buildpaths]
 ERROR_QA:remove = "buildpaths"
 WARN_QA:append = " buildpaths"
