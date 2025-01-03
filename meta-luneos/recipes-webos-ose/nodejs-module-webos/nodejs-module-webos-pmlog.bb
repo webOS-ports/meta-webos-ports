@@ -11,8 +11,6 @@ DEPENDS += "pmloglib vim-native"
 WEBOS_VERSION = "3.0.1-8_bf9622036e9fcfd0de2fe135ab3039742c73ad05"
 PR = "${INC_PR}.0"
 
-inherit pkgconfig
-
 do_configure() {
     cd src
     sh -c "xxd -i pmloglib.js > pmloglib.js.h"
@@ -26,6 +24,8 @@ do_compile() {
 
 WEBOS_NODE = "pmloglib.node"
 
-# ERROR: nodejs-module-webos-pmlog-3.0.1-8-r19.0 do_package_qa: QA Issue: File /usr/lib/nodejs/.debug/pmloglib.node in package nodejs-module-webos-pmlog-dbg contains reference to TMPDIR [buildpaths]
+# FIXME-buildpaths!!!
+# [WRP-10883] buildpath QA issues
+# ERROR: QA Issue: File /usr/lib/nodejs/.debug/pmloglib.node in package nodejs-module-webos-pmlog-dbg contains reference to TMPDIR [buildpaths]
 ERROR_QA:remove = "buildpaths"
 WARN_QA:append = " buildpaths"

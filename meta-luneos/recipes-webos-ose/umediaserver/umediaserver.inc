@@ -1,4 +1,4 @@
-# Copyright (c) 2013-2024 LG Electronics, Inc.
+# Copyright (c) 2013-2025 LG Electronics, Inc.
 
 SUMMARY = "webOS uMediaserver daemon and utilities"
 AUTHOR = "Sujeet Nayak <Sujeet.nayak@lge.com>"
@@ -15,14 +15,13 @@ DEPENDS += "gstreamer1.0 gstreamer1.0-plugins-base"
 DEPENDS += "${@'' if '${WEBOS_DISTRO_PRERELEASE}' == '' else 'pmtrace'}"
 RDEPENDS:${PN} = "umediaserver-configs"
 
-INC_PR = "r28"
+INC_PR = "r29"
 
-inherit pkgconfig
-#inherit webos_component
+inherit webos_component
 inherit webos_enhanced_submissions
 inherit webos_cmake
-#inherit webos_library
-#inherit webos_daemon
+inherit webos_library
+inherit webos_daemon
 inherit webos_system_bus
 #inherit webos_machine_dep
 inherit python3-dir
@@ -30,7 +29,7 @@ inherit python3native
 inherit webos_public_repo
 inherit webos_prerelease_dep
 
-WEBOS_VERSION = "1.0.0-gav.46_6867736010545963dcc66574ed31f38c75a8cfda"
+WEBOS_VERSION = "1.0.0-gav.50_b56a3469edb8aa87056482c0648d0819f3935f9c"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-uMediaserver-add-missing-include-to-fix-build-with-b.patch \
@@ -46,6 +45,6 @@ FILES:${PN}-python = "${libdir}/${PYTHON_DIR}/site-packages/uMediaServer/* ${dat
 # Use append, because umediaserver-clang uses:
 # PACKAGECONFIG += "${@bb.utils.contains('USE_WEBRUNTIME_LIBCXX', '1', 'webruntime-libcxx', 'system-libcxx', d)}"
 
-do_install:append() {
+do_install:append:webos() {
     install -m 755 -o media -g media -v -d ${D}${webos_execstatedir}/ums
 }
