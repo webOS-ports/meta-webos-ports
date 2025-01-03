@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2024 LG Electronics, Inc.
+# Copyright (c) 2012-2025 LG Electronics, Inc.
 
 SUMMARY = "An extensible object oriented component used to add service components to webOS"
 AUTHOR = "Rajesh Gopu I.V <rajeshgopu.iv@lge.com>"
@@ -14,14 +14,11 @@ DEPENDS = "librolegen glib-2.0 libpbnjson luna-service2"
 WEBOS_VERSION = "2.0.0-8_07aacc893789e8ebead38fe123a71423a21bd1a8"
 PR = "r6"
 
+inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake
-inherit pkgconfig
-
-inherit features_check
-# luna-service2 depends on systemd
-REQUIRED_DISTRO_FEATURES = "systemd"
+inherit webos_pkgconfig
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Make-sure-generated-service-files-get-a-.service-suf.patch \

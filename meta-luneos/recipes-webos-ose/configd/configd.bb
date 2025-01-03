@@ -1,4 +1,4 @@
-# Copyright (c) 2014-2024 LG Electronics, Inc.
+# Copyright (c) 2014-2025 LG Electronics, Inc.
 
 SUMMARY = "webOS Configuration Service"
 AUTHOR = "Guruprasad KN <guruprasad.kn@lge.com>"
@@ -13,18 +13,17 @@ LIC_FILES_CHKSUM = " \
 DEPENDS = "luna-service2 pmloglib glib-2.0 libpbnjson gtest"
 RDEPENDS:${PN} += "configd-data"
 
-WEBOS_VERSION = "1.2.0-23_bee5187991f9b897cf43602df02eb7cbafc2e355"
-PR = "r21"
+WEBOS_VERSION = "1.2.0-27_1a213102fa9a0f85d1e8af17b8af4ce150a63b01"
+PR = "r23"
 
-inherit pkgconfig
+inherit webos_component
+inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit webos_system_bus
-inherit webos_systemd
+inherit webos_daemon
 inherit webos_public_repo
-inherit webos_enhanced_submissions
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-
 S = "${WORKDIR}/git"
 
 inherit webos_systemd
@@ -33,9 +32,3 @@ WEBOS_SYSTEMD_SERVICE = "configd.service"
 PACKAGES =+ "${PN}-tests"
 FILES:${PN}-tests = "${libexecdir}/tests/*"
 FILES:${PN} += "${webos_sysbus_datadir}"
-
-# configd/1.2.0-20/git/src/libconfigd/libconfigd.c:335:17: error: passing argument 4 of 'LSCall' from incompatible pointer type [-Wincompatible-pointer-types]
-# configd/1.2.0-20/git/src/libconfigd/libconfigd.c:870:13: error: passing argument 4 of 'LSCallOneReply' from incompatible pointer type [-Wincompatible-pointer-types]
-# configd/1.2.0-20/git/src/libconfigd/libconfigd.c:939:29: error: passing argument 4 of 'LSCallOneReply' from incompatible pointer type [-Wincompatible-pointer-types]
-# configd/1.2.0-20/git/src/libconfigd/libconfigd.c:970:25: error: passing argument 4 of 'LSCallOneReply' from incompatible pointer type [-Wincompatible-pointer-types]
-CFLAGS += "-Wno-error=incompatible-pointer-types"

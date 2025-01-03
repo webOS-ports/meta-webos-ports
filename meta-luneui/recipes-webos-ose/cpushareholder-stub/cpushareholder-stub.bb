@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2023 LG Electronics, Inc.
+# Copyright (c) 2012-2025 LG Electronics, Inc.
 
 SUMMARY = "Stubbed implementation of the webOS CPU shares scripts"
 AUTHOR = "Rajesh Gopu I.V <rajeshgopu.iv@lge.com>"
@@ -14,11 +14,12 @@ RPROVIDES:${PN} = "cpushareholder"
 WEBOS_VERSION = "2.0.1-4_bef23b732f076008ad1eec5a7b77e62d0e354427"
 PR = "r5"
 
+inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
-inherit allarch
+inherit webos_arch_indep
 inherit webos_cmake
-inherit pkgconfig
+inherit webos_program
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
