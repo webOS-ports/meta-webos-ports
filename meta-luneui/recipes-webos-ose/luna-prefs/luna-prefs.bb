@@ -19,7 +19,8 @@ PR = "r17"
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake
-inherit pkgconfig
+inherit webos_program
+inherit webos_library
 inherit webos_system_bus
 
 inherit features_check

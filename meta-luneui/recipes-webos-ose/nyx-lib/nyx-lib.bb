@@ -26,10 +26,11 @@ DEPENDS = "glib-2.0 pmloglib"
 WEBOS_VERSION = "7.3.0-13_0ee217947853f7fbd0e0a625d99c229ecd33ab91"
 PR = "r9"
 
+inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake
-inherit pkgconfig
+inherit webos_library
 inherit systemd
 
 SYSTEMD_PACKAGES = "${PN}"

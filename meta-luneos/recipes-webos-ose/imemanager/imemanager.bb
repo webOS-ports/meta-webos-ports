@@ -16,18 +16,17 @@ DEPENDS = "qtbase luna-service2 luna-prefs qt-features-webos qtdeclarative malii
 #RDEPENDS:${PN} += "libhangul sunpinyin pyzy qml-webos-bridge openwnn-webos"
 RDEPENDS:${PN} += "qml-webos-bridge"
 
-WEBOS_VERSION = "1.0.0-30_4380d482f1779485963f996d53390eef4ca99875"
+WEBOS_VERSION = "1.0.0-31_55da1c739acaedc2b26ad66f4fb14761905bba8a"
 PR = "r7"
 
+inherit webos_component
+inherit webos_enhanced_submissions
 inherit webos_qmake6
 inherit webos_system_bus
 inherit webos_public_repo
-inherit webos_enhanced_submissions
-#inherit webos_qt_localization
+inherit webos_qt_localization
 inherit features_check
 ANY_OF_DISTRO_FEATURES = "vulkan opengl"
-
-WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 
 WEBOS_REPO_NAME = "ime-manager"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
@@ -52,3 +51,14 @@ EXTRA_QMAKEVARS_PRE += "WEBOS_INSTALL_BINS=${sbindir}"
 EXTRA_QMAKEVARS_PRE += "MALIIT_PLUGIN_VERSION=${PV}"
 
 FILES:${PN} += "${libdir}/maliit ${datadir}/maliit"
+
+# FIXME-buildpaths!!!
+# [WRP-10883] buildpath QA issues
+# ERROR: QA Issue: File /usr/src/debug/imemanager/1.0.0-30/maliit-plugin-chinese/plugin/qrc_openjson.cpp in package imemanager-src contains reference to TMPDIR
+# File /usr/src/debug/imemanager/1.0.0-30/maliit-plugin-global/plugin/qrc_json.cpp in package imemanager-src contains reference to TMPDIR
+# File /usr/src/debug/imemanager/1.0.0-30/maliit-plugin-global/plugin/qrc_common-images-hd.cpp in package imemanager-src contains reference to TMPDIR
+# File /usr/src/debug/imemanager/1.0.0-30/maliit-plugin-global/plugin/qrc_common-images.cpp in package imemanager-src contains reference to TMPDIR
+# File /usr/src/debug/imemanager/1.0.0-30/maliit-plugin-global/plugin/qrc_common.cpp in package imemanager-src contains reference to TMPDIR
+# File /usr/src/debug/imemanager/1.0.0-30/maliit-plugin-japanese/plugin/qrc_japanese-images.cpp in package imemanager-src contains reference to TMPDIR [buildpaths]
+ERROR_QA:remove = "buildpaths"
+WARN_QA:append = " buildpaths"

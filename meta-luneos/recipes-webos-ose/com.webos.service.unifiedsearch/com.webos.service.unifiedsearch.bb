@@ -10,16 +10,18 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "luna-service2 libpbnjson glib-2.0 sqlite3"
 
-WEBOS_VERSION = "1.0.0-14_2b434a6c598a885d262d30a978826f5cf6c59a89"
+WEBOS_VERSION = "1.0.0-16_e31d9474a8015db88e8eb9f9663496a703ce42c3"
 PR = "r5"
 
-inherit webos_cmake
-inherit pkgconfig
-inherit webos_public_repo
+inherit webos_component
 inherit webos_enhanced_submissions
+inherit webos_cmake
+inherit webos_pkgconfig
+inherit webos_public_repo
 inherit webos_system_bus
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+
 S = "${WORKDIR}/git"
 
 inherit webos_systemd

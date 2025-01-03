@@ -15,13 +15,13 @@ DEPENDS = "pmloglib openssl glib-2.0"
 WEBOS_VERSION = "3.0.0-5_3b7116a9cdd5e118bd1219aaaf44788da01054b1"
 PR = "r2"
 
+inherit webos_component
 inherit webos_enhanced_submissions
 inherit webos_cmake
+inherit webos_program
 inherit webos_public_repo
-inherit pkgconfig
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
 file://0001-Provide-default-opkg-conf-path.patch \
 "
 S = "${WORKDIR}/git"
-

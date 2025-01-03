@@ -10,6 +10,7 @@ LIC_FILES_CHKSUM = " \
 "
 
 inherit webos_app
+inherit webos_enhanced_submissions
 
 require flowmanager.inc
 PR = "r2"
@@ -23,4 +24,3 @@ do_install() {
 }
 
 FILES:${PN} += "${webos_applicationsdir}"
-

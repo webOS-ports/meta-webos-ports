@@ -12,6 +12,7 @@ LIC_FILES_CHKSUM = " \
 WEBOS_VERSION = "14.20.0-32_9748c062c2db2ed5bab8fea64a47c139c7559487"
 PR = "r0"
 
+inherit webos_arch_indep
 inherit webos_enhanced_submissions
 inherit webos_public_repo
 

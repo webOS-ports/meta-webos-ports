@@ -18,11 +18,12 @@ PR = "r10"
 LEAD_SONAME = "libPmLogLib.so"
 EXTRA_OECMAKE += "-DWEBOS_DISTRO_PRERELEASE:STRING='${WEBOS_DISTRO_PRERELEASE}'"
 
+inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake
+inherit webos_library
 inherit webos_pmlog_config
-inherit pkgconfig
 
 #FIXME These are not in OSE, see if we can remove it too
 #START

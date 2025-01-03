@@ -10,26 +10,22 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=2bdfe040dcf81b4038370ae96036c519 \
 "
 
+inherit webos_component
 inherit webos_cmake
 inherit webos_system_bus
-inherit webos_public_repo
 inherit webos_enhanced_submissions
-inherit webos_machine_dep
-inherit pkgconfig
+inherit webos_public_repo
+inherit webos_pkgconfig
 inherit features_check
 ANY_OF_DISTRO_FEATURES = "vulkan opengl"
 
-PR = "r14"
+PR = "r19"
 
 DEPENDS = "boost gstreamer1.0 gstreamer1.0-plugins-base gstreamer1.0-plugins-bad umediaserver media-resource-calculator com.webos.service.camera webos-wayland-extensions"
 DEPENDS:append:rpi = " userland"
 
-#In LuneOS we want this for all machines
-#COMPATIBLE_MACHINE = "^qemux86$|^qemux86-64$|^raspberrypi3$|^raspberrypi3-64$|^raspberrypi4$|^raspberrypi4-64$"
+WEBOS_VERSION = "1.0.0-gav.60_1be5e5a4c500037201c3a1535b8b5313ff8fbe89"
 
-WEBOS_VERSION = "1.0.0-gav.58_864818d70a3400c24d31e25eabcf3f70e62a8297"
-
-WEBOS_GIT_PARAM_BRANCH = "@gav"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 
 S = "${WORKDIR}/git"

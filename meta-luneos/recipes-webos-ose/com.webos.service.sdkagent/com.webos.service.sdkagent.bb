@@ -1,37 +1,29 @@
-# Copyright (c) 2022-2024 LG Electronics, Inc.
+# Copyright (c) 2021-2024 LG Electronics, Inc.
 
-SUMMARY = "SDK Agent service for telegraf"
-AUTHOR = "Wonsang Ryu <wonsang.ryu@lge.com>"
-SECTION = "webos/extended-service"
+SUMMARY = "Storage Access Framework for OSE"
+AUTHOR = "Rajesh Gopu I.V <rajeshgopu.iv@lge.com>"
+SECTION = "webos/base"
+
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = " \
-    file://LICENSE;md5=3b83ef96387f14655fc854ddc3c6bd57 \
-    file://oss-pkg-info.yaml;md5=7a1ae36458ee4a0a5f0d6c75b326c77e \
+    file://LICENSE;md5=86d3f3a95c324c9479bd8986968f4327 \
+    file://oss-pkg-info.yaml;md5=13b5f44cefd7b1b0040a056eeddf6174 \
 "
 
-DEPENDS = "glib-2.0 luna-service2 json-c pmloglib libpbnjson"
-RDEPENDS:${PN} += "telegraf"
+DEPENDS= "glib-2.0 libxml2 luna-service2 pmloglib libgdrive libpbnjson curl gupnp"
 
-WEBOS_VERSION = "1.0.0-12_09765a8908962147e7f137d3811cb2443ba234d7"
-PR = "r1"
+WEBOS_VERSION = "1.0.0-30_7f8cc7ae2bfdf6f36f2a91c97439027a7ff2df72"
+PR = "r9"
 
-inherit systemd
+inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake
-inherit pkgconfig
+inherit webos_pkgconfig
 inherit webos_system_bus
+inherit webos_machine_dep
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+    file://0002-CMakeLists.txt-use-gupnp-1.6.patch \
+"
 S = "${WORKDIR}/git"
-
-inherit webos_systemd
-WEBOS_SYSTEMD_SERVICE = "com.webos.service.sdkagent.service"
-
-# All service files will be managed in meta-lg-webos.
-# The service file in the repository is not used, so please delete it.
-# See the page below for more details.
-# http://collab.lge.com/main/pages/viewpage.action?pageId=2031668745
-do_install:append() {
-    rm ${D}${sysconfdir}/systemd/system/com.webos.service.sdkagent.service
-}

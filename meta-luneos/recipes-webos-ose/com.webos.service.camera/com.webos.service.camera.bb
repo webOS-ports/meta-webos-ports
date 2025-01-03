@@ -13,14 +13,15 @@ LIC_FILES_CHKSUM = " \
 DEPENDS = "glib-2.0 luna-service2 json-c alsa-lib pmloglib udev nlohmann-json"
 
 WEBOS_VERSION = "1.0.0-47_a6cc82ed43e7b563e0befc2a45905b5b967e0703"
-PR = "r12"
+PR = "r13"
 
-inherit webos_cmake 
-inherit pkgconfig
-inherit webos_public_repo
+inherit webos_component
+inherit webos_cmake
 inherit webos_enhanced_submissions
-inherit webos_system_bus
+inherit webos_public_repo
 inherit webos_machine_impl_dep
+inherit webos_system_bus
+inherit webos_daemon
 
 # depends on edgeai-vision
 PACKAGECONFIG ??= " \

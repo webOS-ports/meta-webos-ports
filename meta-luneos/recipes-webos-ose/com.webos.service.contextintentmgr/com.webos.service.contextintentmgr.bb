@@ -15,8 +15,14 @@ DEPENDS = "node-red"
 WEBOS_VERSION = "1.0.0-19_15340c48143f287d667ce0c48a3ecbbad94691d1"
 PR = "r7"
 
+# The same restrition as nodejs (and node-red)
+COMPATIBLE_MACHINE:armv4 = "(!.*armv4).*"
+COMPATIBLE_MACHINE:armv5 = "(!.*armv5).*"
+COMPATIBLE_MACHINE:mips64 = "(!.*mips64).*"
+
 inherit systemd
 inherit webos_public_repo
+inherit webos_component
 inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit webos_system_bus

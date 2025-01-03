@@ -10,17 +10,17 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=63319cd2c369569050a7c0cc246fc8ba \
 "
 
-DEPENDS = "glib-2.0 glib-2.0-native luna-service2 pmloglib libpbnjson python3-packaging-native"
+DEPENDS = "glib-2.0 glib-2.0-native luna-service2 pmloglib libpbnjson"
 
 WEBOS_VERSION = "1.0.0-34_4e1ab4e3a5d2c7168dcc7d6c41ee607fb1616d49"
 PR = "r9"
 
+inherit webos_component
+inherit webos_enhanced_submissions
 inherit webos_cmake
+inherit webos_daemon
 inherit webos_system_bus
 inherit webos_public_repo
-inherit webos_enhanced_submissions
-inherit pkgconfig
-inherit python3native
 
 # Set WEBOS_HFP_ENABLED_ROLE to a space-separted list of
 # HFP (Hands Free Profile) role to be supported by the
@@ -36,3 +36,10 @@ S = "${WORKDIR}/git"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "webos-hfp-service.service"
+
+# FIXME-buildpaths!!!
+# [WRP-10883] buildpath QA issues
+# [WRQ-14472] bluetooth: Resolve buildpaths QA warnings
+# ERROR: QA Issue: File /usr/src/debug/com.webos.service.hfp/1.0.0-34/Configured/src/ofono-interface.c in package com.webos.service.hfp-src contains reference to TMPDIR [buildpaths]
+ERROR_QA:remove = "buildpaths"
+WARN_QA:append = " buildpaths"
