@@ -1,4 +1,4 @@
-# Copyright (c) 2017-2024 LG Electronics, Inc.
+# Copyright (c) 2017-2025 LG Electronics, Inc.
 
 SUMMARY = "Private configuration files for fontconfig"
 AUTHOR = "Seonmi Jin <seonmi1.jin@lge.com>"
@@ -12,9 +12,9 @@ LIC_FILES_CHKSUM = " \
 WEBOS_VERSION = "1.0.0-5_e3b8d5297c20edd8fc73ee3ac8729094159942ec"
 PR = "r4"
 
+inherit webos_enhanced_submissions
 inherit fontcache
 inherit webos_public_repo
-inherit webos_enhanced_submissions
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-31-webos-aliases.conf-Use-Prelude-for-LuneOS.patch \

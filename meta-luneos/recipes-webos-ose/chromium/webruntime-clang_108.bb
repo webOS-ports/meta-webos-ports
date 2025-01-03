@@ -1,10 +1,10 @@
-# Copyright (c) 2023-2024 LG Electronics, Inc.
+# Copyright (c) 2023-2025 LG Electronics, Inc.
 
 require webruntime_108.bb
 
 PROVIDES = "virtual/webruntime"
 
-PR = "r4"
+PR = "r5"
 
 inherit clang_libc
 
@@ -12,9 +12,16 @@ GCC_CROSS_VER = "11.3.0"
 DEPEXT = "${@bb.utils.contains('WEBRUNTIME_CLANG_STDLIB', '1', '', '-clang', d)}"
 
 PACKAGECONFIG += "${@bb.utils.contains('USE_WEBRUNTIME_LIBCXX', '1', '', 'system-libcxx', d)}"
-PACKAGECONFIG[system-libcxx] = ",,libcxx"
+PACKAGECONFIG[system-libcxx] = ",,llvm-native clang"
 
 GN_ARGS_CLANG = "is_clang=true"
+
+# Don't use gold even when selected by default with ld-is-gold in DISTRO_FEATURES
+# because liblttng_provider is built with default host linker (hosttools/ld.gold)
+# and build fails because use_lld added --color-diagnostic which isn't recognized
+# by host's ld.gold (it should be fixed by using the cross toolchain with lld).
+# http://gecko.lge.com:8000/Errors/Details/648296
+EXTRA_OEGN_GOLD = ""
 
 GN_ARGS += "target_sysroot=\"${STAGING_DIR_TARGET}\""
 
@@ -50,6 +57,7 @@ GN_ARGS += "${@'cc_wrapper=\\\"ccache \\\"' if bb.data.inherits_class('ccache', 
 PACKAGECONFIG[umediaserver] = ",,umediaserver${DEPEXT}"
 PACKAGECONFIG[gstreamer] = "use_gst_media=true enable_webm_video_codecs=false,use_gst_media=false,g-media-pipeline${DEPEXT}"
 PACKAGECONFIG[webos-codec] = "use_webos_codec=true,use_webos_codec=false,media-codec-interface${DEPEXT}"
+PACKAGECONFIG[webos-camera] = "use_webos_camera=true,use_webos_camera=false, cambufferlib${DEPEXT}"
 
 do_configure:prepend() {
     ln -snf umedia_api_clang.pc ${STAGING_DATADIR}/pkgconfig/umedia_api.pc

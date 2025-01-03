@@ -1,4 +1,4 @@
-# Copyright (c) 2018-2024 LG Electronics, Inc.
+# Copyright (c) 2018-2025 LG Electronics, Inc.
 
 SUMMARY = "Node-red based context intent manager (CIM)"
 AUTHOR = "Muthu Santhosh Kumar <santhosh.muthu@lge.com>"
@@ -15,8 +15,10 @@ DEPENDS = "node-red"
 WEBOS_VERSION = "1.0.0-19_15340c48143f287d667ce0c48a3ecbbad94691d1"
 PR = "r7"
 
+
 inherit systemd
 inherit webos_public_repo
+inherit webos_component
 inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit webos_system_bus
