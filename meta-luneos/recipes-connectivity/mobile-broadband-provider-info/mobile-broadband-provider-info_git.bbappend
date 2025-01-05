@@ -4,15 +4,11 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 
 SRC_URI:halium  = " \
                     git://github.com/sailfishos/mobile-broadband-provider-info.git;protocol=https;branch=master \
-                    file://meson.build \
+                    file://meson.build;subdir=git/${BPN} \
 "
 
 S:halium = "${WORKDIR}/git/${BPN}"
 
 SRCREV:halium = "fe500f1b19e8525d09655a38ac111a0fe127b5f9"
 LIC_FILES_CHKSUM:halium = "file://COPYING;md5=87964579b2a8ece4bc6744d2dc9a8b04"
-
-do_configure:prepend:halium() {
-  cp ${WORKDIR}/meson.build ${S}
-}
 
