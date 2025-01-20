@@ -17,7 +17,8 @@ PATCHTOOL = "git"
 # "
 
 SRC_URI:append = " \
-    file://0004-QWaylandDisplay-don-t-ignore-wayland-QT_IM_MODULE.patch \
+    file://0004-QWaylandDisplay-don-t-ignore-wayland-QT_IM_MODULE.patch;maxver=6.7.* \
+    file://0004-QWaylandDisplay-don-t-ignore-wayland-QT_IM_MODULE-6.8.x.patch;minver=6.8.0 \
 "
 
 # More options for fine-tuned configuration
