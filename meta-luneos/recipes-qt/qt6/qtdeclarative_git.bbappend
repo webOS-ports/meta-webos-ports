@@ -9,9 +9,8 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 PATCHTOOL = "git"
 
 # Upstream-Status: Submitted
-# NOTE: Increase maxver when upgrading Qt version
 SRC_URI:append = " \
-    file://0001-Check-if-a-device-in-knownPointingDevices-is-destroy.patch;maxver=6.6.0 \
+    file://0001-Check-if-a-device-in-knownPointingDevices-is-destroy.patch \
 "
 
 SRC_URI:append:armv7a = " \
