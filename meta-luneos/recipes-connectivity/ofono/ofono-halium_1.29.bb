@@ -12,6 +12,7 @@ COMPATIBLE_MACHINE = "^halium$"
 # This recipe acts as a replacement for the ofono recipe
 PROVIDES += "ofono"
 RPROVIDES:${PN} += "ofono"
+RPROVIDES:${PN}-tests += "ofono-tests"
 
 SRC_URI  = " \
   git://github.com/sailfishos/ofono.git;protocol=https;branch=master \
