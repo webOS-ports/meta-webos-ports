@@ -11,14 +11,14 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "libpbnjson boost"
 
-WEBOS_VERSION = "1.0.1-10_9bf79f1cceba90a91fafdec7be0a38e05a3ab2f1"
+WEBOS_VERSION = "1.0.1-11_fb840444b16fda39c65fe061327b2507eb0adf41"
 PR = "r3"
 
-inherit webos_cmake
-inherit pkgconfig
-inherit webos_public_repo
+inherit webos_component
 inherit webos_enhanced_submissions
+inherit webos_cmake
+inherit webos_library
+inherit webos_public_repo
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
-

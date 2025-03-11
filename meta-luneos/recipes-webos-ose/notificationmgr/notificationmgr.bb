@@ -12,16 +12,15 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "glib-2.0 luna-service2 libpbnjson pmloglib boost libxml++-5.0 glibmm"
 
-WEBOS_VERSION = "1.0.0-27_6272903dd0cc54009ce50a444700f094b85d4c16"
+WEBOS_VERSION = "1.0.0-28_4d4e8f2f68f6f3541f75998d11aec7f42f278e37"
 PR = "r11"
 
-inherit pkgconfig
+inherit webos_component
 inherit webos_cmake
+inherit webos_enhanced_submissions
+inherit webos_daemon
 inherit webos_system_bus
 inherit webos_public_repo
-inherit webos_enhanced_submissions
-inherit webos_systemd
-
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-CMakeLists.txt-switch-to-libxml-5.patch \

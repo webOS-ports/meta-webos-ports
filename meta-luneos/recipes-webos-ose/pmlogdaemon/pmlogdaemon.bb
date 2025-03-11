@@ -18,16 +18,16 @@ RDEPENDS:${PN} = "busybox"
 WEBOS_VERSION = "3.1.0-15_4b4e74c08a7aa02d4eee9ec94d4459a1ca640c77"
 PR = "r13"
 
+inherit webos_component
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake
+inherit webos_daemon
 inherit webos_system_bus
 inherit webos_pmlog_config
-inherit pkgconfig
 
 PACKAGECONFIG ??= ""
 PACKAGECONFIG[whitelist] = "-DENABLE_WHITELIST:BOOL=TRUE, -DENABLE_WHITELIST:BOOL=FALSE"
-
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Make-PmLogDaemon-compatible-with-systemd.patch \

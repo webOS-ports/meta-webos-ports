@@ -15,7 +15,7 @@ PR = "r7"
 
 inherit webos_public_repo
 inherit webos_enhanced_submissions
-inherit allarch
+inherit webos_arch_indep
 inherit webos_filesystem_paths
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \

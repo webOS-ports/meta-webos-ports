@@ -16,12 +16,12 @@ RDEPENDS:${PN} = "applicationinstallerutility"
 WEBOS_VERSION = "4.0.0-14_64d8126e478253529fee8692dff914245fc35005"
 PR = "r14"
 
+inherit webos_component
+inherit webos_library
+inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_public_repo
-inherit webos_enhanced_submissions
-inherit pkgconfig
-
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-luna-downloadmanager-Fix-format-warnings-remove-unus.patch \
