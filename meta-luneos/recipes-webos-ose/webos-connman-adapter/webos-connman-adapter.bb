@@ -77,3 +77,8 @@ CFLAGS += "-Wno-error=incompatible-pointer-types -Wno-error=int-conversion -Wno-
 # ERROR: webos-connman-adapter-1.1.0-43-r15 do_package_qa: QA Issue: File /usr/src/debug/webos-connman-adapter/1.1.0-43/Configured/src/connman-interface.c in package webos-connman-adapter-src contains reference to TMPDIR
 ERROR_QA:remove = "buildpaths"
 WARN_QA:append = " buildpaths"
+
+# http://gecko.lge.com:8000/Errors/Details/1139929
+# webos-connman-adapter/1.1.0-242.apollo.18/git/src/main.c:47:5: error: conflicting types for 'initialize_wifi_ls2_calls'; have 'int(void)'
+# webos-connman-adapter/1.1.0-242.apollo.18/git/src/main.c:86:13: error: too many arguments to function 'initialize_wifi_ls2_calls'; expected 0, have 2
+CFLAGS += "-std=gnu17"
