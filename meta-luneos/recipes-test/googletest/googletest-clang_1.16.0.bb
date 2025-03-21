@@ -3,6 +3,8 @@
 inherit clang_cmake
 
 require recipes-test/googletest/googletest_${PV}.bb
+# Needed for meta-oe/recipes-test/googletest/googletest/gtest-ciso646.patch
+FILESEXTRAPATHS:prepend = "${META_OE_LAYER}/recipes-test/googletest/googletest:"
 
 PACKAGECONFIG += "${@bb.utils.contains('USE_WEBRUNTIME_LIBCXX', '1', 'webruntime-libcxx', 'system-libcxx', d)}"
 PACKAGECONFIG[webruntime-libcxx] = ",,chromium-toolchain-native chromium-stdlib"
