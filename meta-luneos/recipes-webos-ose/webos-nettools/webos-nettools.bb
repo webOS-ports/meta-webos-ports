@@ -26,3 +26,7 @@ inherit webos_system_bus
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
+
+# http://gecko.lge.com:8000/Errors/Details/1142232
+# webos-nettools/1.1.0-43/git/src/main.c:51:13: error: too many arguments to function 'initialize_nettools_ls2_calls'; expected 0, have 1
+CFLAGS += "-std=gnu17"
