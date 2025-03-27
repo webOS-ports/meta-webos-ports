@@ -32,3 +32,8 @@ do_install:append:halium() {
 }
 
 FILES:${PN} += " ${sysconfdir}"
+
+#     src/gbinder_writer.c:1318:60: error: passing argument 2 of 'gbinder_cleanup_add' from incompatible pointer type [-Wincompatible-pointer-types]
+#     src/gbinder_writer.c:1329:55: error: passing argument 4 of 'gbinder_writer_alloc' from incompatible pointer type [-Wincompatible-pointer-types]
+#     src/gbinder_writer.c:1337:56: error: passing argument 4 of 'gbinder_writer_alloc' from incompatible pointer type [-Wincompatible-pointer-types]
+CFLAGS += "-std=gnu17"
