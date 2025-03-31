@@ -7,6 +7,7 @@ PR = "${INC_PR}.0"
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "com.webos.service.mediarecorder.service"
 
-PACKAGECONFIG += "build-media-recorder test-apps"
+# disable test-apps PACKAGECONFIG, because it fails to build for qemux86 (doesn't fail for rpi)
+PACKAGECONFIG += "build-media-recorder"
 
 DEPENDS:append = " umediaserver media-resource-calculator"
