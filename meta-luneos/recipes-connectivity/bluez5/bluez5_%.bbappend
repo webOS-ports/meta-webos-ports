@@ -1,4 +1,4 @@
-# Copyright (c) 2018-2023 LG Electronics, Inc.
+# Copyright (c) 2018-2025 LG Electronics, Inc.
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 
@@ -18,30 +18,29 @@ SRC_URI += " \
     file://0002-Send-disconnect-signal-on-remote-device-disconnect.patch \
     file://0003-Fetching-device-type-like-BLE-BREDR-from-bluez.patch \
     file://0004-Fix-Gatt-connect-when-device-address-type-is-BDADDR_.patch \
-    file://0005-Use-system-bus-instead-of-session-for-obexd.patch \
-    file://0006-Implementation-to-get-connected-profiles-uuids.patch \
-    file://0007-recievePassThrough-commad-support-required-for-webos.patch \
-    file://0008-Added-dbus-signal-for-MediaPlayRequest.patch \
-    file://0009-avrcp-getting-remote-device-features-list.patch \
-    file://0010-Fix-volume-property-not-able-to-set.patch \
-    file://0011-Fix-volume-level-notification-not-appearing-after-12.patch \
-    file://0012-Support-enabling-avdtp-delayReport.patch \
-    file://0013-Implementation-to-get-connectedUuid-s-in-case-of-inc.patch \
-    file://0014-Fix-for-updating-connected-uuids-when-profile-is-dis.patch \
-    file://0015-Fix-device-getStatus-not-updated-when-unpaired.patch \
-    file://0016-Set-default-pairing-capability-as-NoInputNoOutput.patch \
-    file://0017-AVRCP-getting-supported-notification-events.patch \
-    file://0018-Modified-MapInstanceName-MapInstanceProperties-parsi.patch \
-    file://0019-Enabled-EMAIL-support-based-on-MAPInstance-Name-Modi.patch \
-    file://0020-Disabling-DB-Hash-for-Gatt.patch \
-    file://0021-Added-Notification-property-in-org.bluez.obex.Messag.patch \
-    file://0022-Added-MessageHandle-property-in-org.bluez.obex.Trans.patch \
-    file://0023-Create-Message-interface-for-sent-message-related-no.patch \
-    file://0024-AVRCP-addToNowPlaying-return-error-when-player-not-s.patch \
-    file://0025-AVRCP-MediaItem-object-path-fix.patch \
-    file://0026-Revert-a2dp-Add-reverse-discovery.patch \
-    file://0027-Add-support-for-meshd-to-use-RAW-channel.patch \
-    file://0028-Enable-mesh-fixed-ell-undefined-symbol-error.patch \
+    file://0005-Implementation-to-get-connected-profiles-uuids.patch \
+    file://0006-recievePassThrough-commad-support-required-for-webos.patch \
+    file://0007-Added-dbus-signal-for-MediaPlayRequest.patch \
+    file://0008-avrcp-getting-remote-device-features-list.patch \
+    file://0009-Fix-volume-property-not-able-to-set.patch \
+    file://0010-Support-enabling-avdtp-delayReport.patch \
+    file://0011-Implementation-to-get-connectedUuid-s-in-case-of-inc.patch \
+    file://0012-Fix-for-updating-connected-uuids-when-profile-is-dis.patch \
+    file://0013-Fix-device-getStatus-not-updated-when-unpaired.patch \
+    file://0014-Set-default-pairing-capability-as-NoInputNoOutput.patch \
+    file://0015-AVRCP-getting-supported-notification-events.patch \
+    file://0016-Modified-MapInstanceName-MapInstanceProperties-parsi.patch \
+    file://0017-Enabled-EMAIL-support-based-on-MAPInstance-Name-Modi.patch \
+    file://0018-Disabling-DB-Hash-for-Gatt.patch \
+    file://0019-Added-Notification-property-in-org.bluez.obex.Messag.patch \
+    file://0020-Added-MessageHandle-property-in-org.bluez.obex.Trans.patch \
+    file://0021-Create-Message-interface-for-sent-message-related-no.patch \
+    file://0022-AVRCP-addToNowPlaying-return-error-when-player-not-s.patch \
+    file://0023-AVRCP-MediaItem-object-path-fix.patch \
+    file://0024-Revert-a2dp-Add-reverse-discovery.patch \
+    file://0025-Add-support-for-meshd-to-use-RAW-channel.patch \
+    file://0026-Enable-mesh-fixed-ell-undefined-symbol-error.patch \
+    file://0027-Sync-Add-support-for-meshd-to-use-RAW-channel-with-b.patch \
     file://main.conf \
     file://brcm43438.service \
 "
@@ -71,11 +70,3 @@ do_install:append:raspberrypi4 () {
 }
 
 FILES:${PN}:append:raspberrypi4 = " ${sysconfdir}/modprobe.d/*"
-
-# http://gecko.lge.com:8000/Errors/Details/819467
-# bluez-5.72/src/main.c:1042:41: error: passing argument 4 of 'parse_config_bool' from incompatible pointer type [-Wincompatible-pointer-types]
-# caused by 0012-Support-enabling-avdtp-delayReport.patch
-CFLAGS += "-Wno-error=incompatible-pointer-types"
-# bluez-5.72/profiles/audio/avrcp.c:4004:9: error: implicit declaration of function 'set_avrcp_ct_supported_events' [-Wimplicit-function-declaration]
-# caused by 0017-AVRCP-getting-supported-notification-events.patch
-CFLAGS += "-Wno-error=implicit-function-declaration"

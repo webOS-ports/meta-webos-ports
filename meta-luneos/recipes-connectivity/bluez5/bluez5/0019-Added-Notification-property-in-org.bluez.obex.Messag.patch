@@ -1,4 +1,4 @@
-From 939f192f10dcfe47e100f497f540891d59a4a1cf Mon Sep 17 00:00:00 2001
+From a85bf65d99e145ace459894e9d9a8d978871e06a Mon Sep 17 00:00:00 2001
 From: Rakes Pani <rakes.pani@lge.com>
 Date: Fri, 7 Aug 2020 18:32:03 +0530
 Subject: [PATCH] Added Notification property in org.bluez.obex.MessageAccess1
@@ -29,18 +29,18 @@ NA
 ---
 Upstream-Status: Inappropriate [webos specific]
 
- doc/org.bluez.obex.MessageAccess.rst |  49 +++++++++
- obexd/client/map.c                   | 153 ++++++++++++++++++++++++++-
- 2 files changed, 199 insertions(+), 3 deletions(-)
+ doc/org.bluez.obex.MessageAccess.rst |  48 +++++++++
+ obexd/client/map.c                   | 147 ++++++++++++++++++++++++++-
+ 2 files changed, 193 insertions(+), 2 deletions(-)
 
 diff --git a/doc/org.bluez.obex.MessageAccess.rst b/doc/org.bluez.obex.MessageAccess.rst
-index 4f7f07d1b..2508ecdfc 100644
+index 6962520a2..800346260 100644
 --- a/doc/org.bluez.obex.MessageAccess.rst
 +++ b/doc/org.bluez.obex.MessageAccess.rst
-@@ -199,3 +199,52 @@ object, dict PushMessage(string sourcefile, string folder, dict args)
+@@ -229,3 +229,51 @@ array{string} SupportedTypes [readonly]
+ 	:"IM":
  
- 	:org.bluez.obex.Error.InvalidArguments:
- 	:org.bluez.obex.Error.Failed:
+ 		Instant messaging.
 +
 +Properties dict Notification [readonly]
 +
@@ -89,12 +89,11 @@ index 4f7f07d1b..2508ecdfc 100644
 +			boolean Priority:
 +
 +				Message Priority, only available for "NewMessage"
-+
 diff --git a/obexd/client/map.c b/obexd/client/map.c
-index 78c6b2447..858f05d36 100644
+index 37e97454d..2347f7759 100644
 --- a/obexd/client/map.c
 +++ b/obexd/client/map.c
-@@ -85,12 +85,25 @@ static const char * const filter_list[] = {
+@@ -92,12 +92,25 @@ static const char * const filter_list[] = {
  #define STATUS_DELETE 1
  #define FILLER_BYTE 0x30
  
@@ -120,7 +119,7 @@ index 78c6b2447..858f05d36 100644
  };
  
  struct pending_request {
-@@ -420,6 +433,20 @@ static void map_msg_free(void *data)
+@@ -436,6 +449,20 @@ static void map_msg_free(void *data)
  	g_free(msg);
  }
  
@@ -141,7 +140,55 @@ index 78c6b2447..858f05d36 100644
  static DBusMessage *map_msg_get(DBusConnection *connection,
  					DBusMessage *message, void *user_data)
  {
-@@ -1849,6 +1876,62 @@ static void map_msg_remove(void *data)
+@@ -2049,8 +2076,47 @@ static gboolean get_supported_types(const GDBusPropertyTable *property,
+ 	return TRUE;
+ }
+ 
++static gboolean map_get_msg_notification(const GDBusPropertyTable *property,
++					DBusMessageIter *iter, void *data)
++{
++	struct map_data *map = data;
++
++	if(!map->notification)
++		return FALSE;
++
++	DBusMessageIter dict;
++	dbus_message_iter_open_container(iter, DBUS_TYPE_ARRAY,
++					DBUS_DICT_ENTRY_BEGIN_CHAR_AS_STRING
++					DBUS_TYPE_STRING_AS_STRING
++					DBUS_TYPE_VARIANT_AS_STRING
++					DBUS_DICT_ENTRY_END_CHAR_AS_STRING,
++					&dict);
++
++	g_dbus_dict_append_entry(&dict, "ObjectPath", DBUS_TYPE_STRING, &map->notification->path);
++	g_dbus_dict_append_entry(&dict, "EventType", DBUS_TYPE_STRING, &map->notification->eventType);
++	g_dbus_dict_append_entry(&dict, "Folder", DBUS_TYPE_STRING, &map->notification->folder);
++	g_dbus_dict_append_entry(&dict, "Type", DBUS_TYPE_STRING, &map->notification->msg_type);
++
++	if(!g_strcmp0(map->notification->eventType,"NewMessage"))
++	{
++		g_dbus_dict_append_entry(&dict, "Subject", DBUS_TYPE_STRING, &map->notification->subject);
++		g_dbus_dict_append_entry(&dict, "Timestamp", DBUS_TYPE_STRING, &map->notification->datetime);
++		g_dbus_dict_append_entry(&dict, "Sender", DBUS_TYPE_STRING, &map->notification->sender_name);
++		g_dbus_dict_append_entry(&dict, "Priority", DBUS_TYPE_BOOLEAN, &map->notification->priority);
++	}
++	else if (!g_strcmp0(map->notification->eventType,"MessageShift"))
++	{
++		g_dbus_dict_append_entry(&dict, "OldFolder", DBUS_TYPE_STRING, &map->notification->old_folder);
++	}
++
++	dbus_message_iter_close_container(iter, &dict);
++
++	return TRUE;
++}
++
+ static const GDBusPropertyTable map_properties[] = {
+ 	{ "SupportedTypes", "as", get_supported_types },
++	{ "Notification", "a{sv}", map_get_msg_notification },
+ 	{ }
+ };
+ 
+@@ -2065,6 +2131,62 @@ static void map_msg_remove(void *data)
  	g_free(path);
  }
  
@@ -204,7 +251,7 @@ index 78c6b2447..858f05d36 100644
  static void map_handle_new_message(struct map_data *map,
  							struct map_event *event)
  {
-@@ -1859,7 +1942,15 @@ static void map_handle_new_message(struct map_data *map,
+@@ -2075,7 +2197,15 @@ static void map_handle_new_message(struct map_data *map,
  	if (msg)
  		g_hash_table_remove(map->messages, &event->handle);
  
@@ -221,7 +268,7 @@ index 78c6b2447..858f05d36 100644
  }
  
  static void map_handle_status_changed(struct map_data *map,
-@@ -1880,6 +1971,8 @@ static void map_handle_status_changed(struct map_data *map,
+@@ -2096,6 +2226,8 @@ static void map_handle_status_changed(struct map_data *map,
  
  	g_dbus_emit_property_changed(conn, msg->path, MAP_MSG_INTERFACE,
  								"Status");
@@ -230,7 +277,7 @@ index 78c6b2447..858f05d36 100644
  }
  
  static void map_handle_folder_changed(struct map_data *map,
-@@ -1903,6 +1996,8 @@ static void map_handle_folder_changed(struct map_data *map,
+@@ -2119,6 +2251,8 @@ static void map_handle_folder_changed(struct map_data *map,
  
  	g_dbus_emit_property_changed(conn, msg->path, MAP_MSG_INTERFACE,
  								"Folder");
@@ -239,57 +286,7 @@ index 78c6b2447..858f05d36 100644
  }
  
  static void map_handle_notification(struct map_event *event, void *user_data)
-@@ -1945,6 +2040,49 @@ static void map_handle_notification(struct map_event *event, void *user_data)
- 	}
- }
- 
-+static gboolean map_get_msg_notification(const GDBusPropertyTable *property,
-+					DBusMessageIter *iter, void *data)
-+{
-+	struct map_data *map = data;
-+
-+	if(!map->notification)
-+		return FALSE;
-+
-+	DBusMessageIter dict;
-+	dbus_message_iter_open_container(iter, DBUS_TYPE_ARRAY,
-+					DBUS_DICT_ENTRY_BEGIN_CHAR_AS_STRING
-+					DBUS_TYPE_STRING_AS_STRING
-+					DBUS_TYPE_VARIANT_AS_STRING
-+					DBUS_DICT_ENTRY_END_CHAR_AS_STRING,
-+					&dict);
-+
-+	g_dbus_dict_append_entry(&dict, "ObjectPath", DBUS_TYPE_STRING, &map->notification->path);
-+	g_dbus_dict_append_entry(&dict, "EventType", DBUS_TYPE_STRING, &map->notification->eventType);
-+	g_dbus_dict_append_entry(&dict, "Folder", DBUS_TYPE_STRING, &map->notification->folder);
-+	g_dbus_dict_append_entry(&dict, "Type", DBUS_TYPE_STRING, &map->notification->msg_type);
-+
-+	if(!g_strcmp0(map->notification->eventType,"NewMessage"))
-+	{
-+		g_dbus_dict_append_entry(&dict, "Subject", DBUS_TYPE_STRING, &map->notification->subject);
-+		g_dbus_dict_append_entry(&dict, "Timestamp", DBUS_TYPE_STRING, &map->notification->datetime);
-+		g_dbus_dict_append_entry(&dict, "Sender", DBUS_TYPE_STRING, &map->notification->sender_name);
-+		g_dbus_dict_append_entry(&dict, "Priority", DBUS_TYPE_BOOLEAN, &map->notification->priority);
-+	}
-+	else if (!g_strcmp0(map->notification->eventType,"MessageShift"))
-+	{
-+		g_dbus_dict_append_entry(&dict, "OldFolder", DBUS_TYPE_STRING, &map->notification->old_folder);
-+	}
-+
-+	dbus_message_iter_close_container(iter, &dict);
-+
-+	return TRUE;
-+}
-+
-+static const GDBusPropertyTable map_properties[] = {
-+	{ "Notification", "a{sv}", map_get_msg_notification },
-+	{ }
-+};
-+
- static bool set_notification_registration(struct map_data *map, bool status)
- {
- 	struct obc_transfer *transfer;
-@@ -1992,6 +2130,8 @@ static void map_free(void *data)
+@@ -2208,6 +2342,8 @@ static void map_free(void *data)
  
  	obc_session_unref(map->session);
  	g_hash_table_unref(map->messages);
@@ -298,7 +295,7 @@ index 78c6b2447..858f05d36 100644
  	g_free(map);
  }
  
-@@ -2044,10 +2184,17 @@ static int map_probe(struct obc_session *session)
+@@ -2260,7 +2396,14 @@ static int map_probe(struct obc_session *session)
  
  	DBG("%s, instance id %d", path, map->mas_instance_id);
  
@@ -313,8 +310,4 @@ index 78c6b2447..858f05d36 100644
 +	}
  
  	if (!g_dbus_register_interface(conn, path, MAP_INTERFACE, map_methods,
--					NULL, NULL, map, map_free)) {
-+					NULL, map_properties, map, map_free)) {
- 		map_free(map);
- 
- 		return -ENOMEM;
+ 					NULL, map_properties, map, map_free)) {
