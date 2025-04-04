@@ -20,7 +20,7 @@ DEPENDS += "jsoncpp-clang"
 DEPENDS:remove = "gtest googletest"
 DEPENDS += "googletest-clang"
 
-CXXFLAGS +="-I${STAGING_INCDIR}/cbe"
+CXXFLAGS += "-I${STAGING_INCDIR}/cbe"
 
 OECMAKE_CXX_FLAGS += "\
     -Wno-error=unused-command-line-argument \

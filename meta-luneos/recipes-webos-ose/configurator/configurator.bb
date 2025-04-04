@@ -34,7 +34,7 @@ FILES:${PN} += "${webos_sysbus_datadir}"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "configurator-activity.service configurator-db8.service"
-WEBOS_SYSTEMD_SCRIPT ="configurator-db8.sh"
+WEBOS_SYSTEMD_SCRIPT = "configurator-db8.sh"
 
 do_install:append() {
 # All service files will be managed in meta-lg-webos.

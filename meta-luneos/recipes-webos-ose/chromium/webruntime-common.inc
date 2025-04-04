@@ -72,7 +72,7 @@ GN_ARGS_LIBCXX = "${@bb.utils.contains('USE_WEBRUNTIME_LIBCXX', '1', 'use_custom
 
 # The last digits in the submission format are used for typical submissions number.
 # The submission formats; submissions/[number] or submissions/[branch name].[number]
-WEBOS_SUBMISSION_NUMBER="${@ '${WEBOS_SUBMISSION}'.split('.')[-1] }"
+WEBOS_SUBMISSION_NUMBER = "${@ '${WEBOS_SUBMISSION}'.split('.')[-1] }"
 GN_ARGS:append = " webos_submission_number=${WEBOS_SUBMISSION_NUMBER}"
 
 TARGET_CPU = "${@gn_arch_name(TARGET_ARCH)}"

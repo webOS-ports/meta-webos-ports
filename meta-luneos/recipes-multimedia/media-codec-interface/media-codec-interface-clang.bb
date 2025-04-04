@@ -8,7 +8,7 @@ WEBOS_REPO_NAME = "media-codec-interface"
 
 PR = "r7"
 
-CXXFLAGS +=" \
+CXXFLAGS += " \
     -I${STAGING_INCDIR}/media-resource-calculator-clang \
     -I${STAGING_INCDIR}/cbe \
 "
