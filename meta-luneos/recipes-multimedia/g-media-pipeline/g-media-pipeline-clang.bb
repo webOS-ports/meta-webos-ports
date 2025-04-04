@@ -20,7 +20,7 @@ OECMAKE_TARGET_COMPILE = "gmp-player-client"
 
 PKGCONFIG_DIR = "${datadir}/pkgconfig"
 
-CXXFLAGS +=" \
+CXXFLAGS += " \
     -I${STAGING_INCDIR}/media-resource-calculator-clang \
     -I${STAGING_INCDIR}/cbe \
 "
