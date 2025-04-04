@@ -1,6 +1,6 @@
 # Copyright (c) 2013-2024 LG Electronics, Inc.
 
-SUMMARY="The Application Installer Utility supports the installing and removing of applications on a HP webOS device."
+SUMMARY = "The Application Installer Utility supports the installing and removing of applications on a HP webOS device."
 AUTHOR = "Guruprasad KN <guruprasad.kn@lge.com>"
 SECTION = "webos/apps"
 
