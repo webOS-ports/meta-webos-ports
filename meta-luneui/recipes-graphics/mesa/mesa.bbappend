@@ -6,5 +6,5 @@ PACKAGECONFIG:append:class-target:qemuall = " gallium-llvm"
 PACKAGECONFIG:append:class-target = " gbm"
 
 # Enable freedreno driver
-PACKAGECONFIG:append = " kmsro freedreno"
+PACKAGECONFIG:append = " freedreno"
 GALLIUMDRIVERS:append = ",freedreno"
