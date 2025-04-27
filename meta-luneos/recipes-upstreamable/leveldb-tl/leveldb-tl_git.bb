@@ -34,7 +34,8 @@ S = "${WORKDIR}/git"
 
 inherit cmake
 
-EXTRA_OECMAKE:append:class-native = " -DBUILD_TESTING:BOOL=false -DBUILD_MKSANDWICH:BOOL=false"
+EXTRA_OECMAKE:append = " -DBUILD_TESTING:BOOL=false"
+EXTRA_OECMAKE:append:class-native = " -DBUILD_MKSANDWICH:BOOL=false"
 
 BBCLASSEXTEND = "native"
 
