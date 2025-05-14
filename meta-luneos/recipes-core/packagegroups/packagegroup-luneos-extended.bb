@@ -136,20 +136,20 @@ LIBHYBRIS_RDEPENDS = " \
 RDEPENDS:${PN}:append:tuna = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:grouper = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:mako = " ${LIBHYBRIS_RDEPENDS} bluebinder"
-RDEPENDS:${PN}:append:hammerhead = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
+RDEPENDS:${PN}:append:hammerhead = " alsa-utils-systemd rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:hammerhead-halium = " ${LIBHYBRIS_RDEPENDS}"
-RDEPENDS:${PN}:append:tenderloin = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
+RDEPENDS:${PN}:append:tenderloin = " alsa-utils-systemd rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:tenderloin-halium = " ${LIBHYBRIS_RDEPENDS}"
-RDEPENDS:${PN}:append:mido = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
+RDEPENDS:${PN}:append:mido = " alsa-utils-systemd rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:mido-halium = " ${LIBHYBRIS_RDEPENDS} bluebinder"
 RDEPENDS:${PN}:append:mindphone = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:athene = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:onyx = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:oxygen = " ${LIBHYBRIS_RDEPENDS}"
-RDEPENDS:${PN}:append:tissot = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
+RDEPENDS:${PN}:append:tissot = " alsa-utils-systemd rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:tissot-halium = " ${LIBHYBRIS_RDEPENDS} bluebinder"
 RDEPENDS:${PN}:append:sargo = " ${LIBHYBRIS_RDEPENDS} bluebinder"
-RDEPENDS:${PN}:append:rosy = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
+RDEPENDS:${PN}:append:rosy = " alsa-utils-systemd rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:s2 = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:sagit = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:yggdrasil = " ${LIBHYBRIS_RDEPENDS}"
@@ -163,7 +163,6 @@ RDEPENDS:${PN}:append:tissot-halium = " waydroid"
 
 QEMU_RDEPENDS = " \
     alsa-utils-systemd \
-    mesa-driver-swrast \
     kernel-module-snd-intel8x0 \
     phonesim \
     qt-plugin-generic-vboxtouch \
