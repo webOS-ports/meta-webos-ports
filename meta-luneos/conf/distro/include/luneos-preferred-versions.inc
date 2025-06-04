@@ -5,3 +5,5 @@
 # but eg25-manager used on pinepohone wasn't updated yet to support it:
 # https://gitlab.com/mobian1/eg25-manager/-/issues/45
 PREFERRED_VERSION_libgpiod = "1.6.4"
+
+PREFERRED_VERSION_lttng-modules:tenderloin    = "2.13.12+git"
