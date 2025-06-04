@@ -5,6 +5,7 @@ require recipes-core/busybox/busybox_${PV}.bb
 S = "${WORKDIR}/busybox-${PV}"
 SRC_URI += " \
             file://static-build.cfg \
+            file://enable-devmem.cfg \
 "
 
 SYSTEMD_SERVICE:${PN}-syslog = ""
