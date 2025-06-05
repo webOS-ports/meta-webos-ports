@@ -24,7 +24,7 @@ inherit webos_enhanced_submissions
 inherit webos_qmake6
 inherit webos_system_bus
 inherit webos_public_repo
-inherit webos_qt_localization
+#inherit webos_qt_localization
 inherit features_check
 ANY_OF_DISTRO_FEATURES = "vulkan opengl"
 
