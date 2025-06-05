@@ -5,6 +5,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 SRC_URI:halium  = " \
                     git://github.com/sailfishos/mobile-broadband-provider-info.git;protocol=https;branch=master \
                     file://meson.build;subdir=git/${BPN} \
+                    file://apns-conf.xsl;subdir=git/${BPN} \
 "
 
 S:halium = "${WORKDIR}/git/${BPN}"

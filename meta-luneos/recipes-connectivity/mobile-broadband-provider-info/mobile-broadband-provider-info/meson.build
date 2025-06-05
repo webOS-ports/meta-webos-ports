@@ -24,7 +24,6 @@ pkgconfig.generate(
   dataonly: true,
 )
 
-if false
 custom_target('build-apns-conf',
   build_by_default: true,
   output: 'apns-conf.xml',
@@ -33,7 +32,6 @@ custom_target('build-apns-conf',
   install: true,
   install_dir: pkgdatadir,
 )
-endif
 
 install_data(
   [sp_xml_db, 'serviceproviders.2.dtd'],
