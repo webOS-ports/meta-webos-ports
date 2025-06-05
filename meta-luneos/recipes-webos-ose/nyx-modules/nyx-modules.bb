@@ -54,7 +54,7 @@ inherit webos_public_repo
 inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit webos_library
-#inherit webos_machine_impl_dep
+inherit webos_machine_impl_dep
 #inherit webos_prerelease_dep
 inherit webos_core_os_dep
 inherit webos_nyx_module_provider
