@@ -11,7 +11,7 @@ SRC_URI += " \
 "
 PR = "${INC_PR}.2"
 
-DEPENDS = "glib-2.0 luna-service2 json-c alsa-lib pmloglib udev nlohmann-json camera-utils"
+DEPENDS = "glib-2.0 luna-service2 json-c alsa-lib pmloglib udev nlohmann-json camera-utils gstreamer1.0"
 
 # depends on edgeai-vision
 PACKAGECONFIG ??= " \
