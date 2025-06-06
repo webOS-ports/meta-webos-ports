@@ -107,7 +107,7 @@ do_install:append() {
     install_acg_configuration
 
     # Custom LuneOS legacy icons
-    APP_PATH = "${webos_applicationsdir}/${PN}"
+    APP_PATH="${webos_applicationsdir}/${PN}"
     install -d ${D}${APP_PATH}
     install -m 0644 ${UNPACKDIR}/icon.png ${D}${APP_PATH}/icon.png
     install -m 0644 ${UNPACKDIR}/icon-256x256.png ${D}${APP_PATH}/icon-256x256.png
