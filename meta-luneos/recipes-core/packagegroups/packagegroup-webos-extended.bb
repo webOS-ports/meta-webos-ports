@@ -60,7 +60,6 @@ WEBOS_PACKAGESET_TESTAPPS = " \
     com.webos.app.test.webosose \
     com.webos.app.test.webrtc \
     com.webos.app.test.youtube \
-    test.redirection.backgroundmedia \
 "
 
 # Enyo 1 and related framework packages
