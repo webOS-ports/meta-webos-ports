@@ -43,6 +43,11 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
 
 S = "${WORKDIR}/git"
 
+do_fix_endlines() {
+    sed -i -e "s,\\r,,g" "${S}/files/rules/90_Android_device.rules"
+}
+addtask do_fix_endlines before do_patch after do_unpack
+
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "physical-device-manager.service"
 
