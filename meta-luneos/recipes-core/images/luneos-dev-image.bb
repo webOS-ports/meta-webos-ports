@@ -10,7 +10,7 @@ webos_enable_devmode() {
     touch ${IMAGE_ROOTFS}/var/luna/dev-mode-enabled
     touch ${IMAGE_ROOTFS}/var/luna/preferences/devmode_enabled
     touch ${IMAGE_ROOTFS}/var/luna/preferences/debug_system_apps
-    touch ${IMAGE_ROOTFS}/var/usb-debugging-enabled
+    touch ${IMAGE_ROOTFS}/etc/usb-debugging-enabled
     touch ${IMAGE_ROOTFS}/.writable_image
 }
 
