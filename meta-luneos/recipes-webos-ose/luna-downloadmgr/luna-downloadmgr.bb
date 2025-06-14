@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2024 LG Electronics, Inc.
+# Copyright (c) 2012-2025 LG Electronics, Inc.
 
 SUMMARY = "The Download Manager service supports the downloading and uploading of files to and from a HP webOS device."
 AUTHOR = "Guruprasad KN <guruprasad.kn@lge.com>"
@@ -13,15 +13,18 @@ LIC_FILES_CHKSUM = " \
 DEPENDS = "libpbnjson luna-service2 sqlite3 curl uriparser pmloglib jemalloc luna-prefs boost glib-2.0"
 RDEPENDS:${PN} = "applicationinstallerutility"
 
-WEBOS_VERSION = "4.0.0-14_64d8126e478253529fee8692dff914245fc35005"
+WEBOS_VERSION = "4.0.0-15_b81bbbde2f9c65d7b524dbe0aeabbdcf30bd7be0"
 PR = "r14"
 
+inherit webos_component
+inherit webos_library
+inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_public_repo
-inherit webos_enhanced_submissions
-inherit pkgconfig
 
+#WEBOS_MACHINE ?= "${MACHINE}"
+#EXTRA_OECMAKE += "-DMACHINE=${WEBOS_MACHINE}"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-luna-downloadmanager-Fix-format-warnings-remove-unus.patch \

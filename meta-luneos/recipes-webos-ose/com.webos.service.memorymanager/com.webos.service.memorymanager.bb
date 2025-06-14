@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2024 LG Electronics, Inc.
+# Copyright (c) 2020-2025 LG Electronics, Inc.
 
 SUMMARY = "Memory Manager"
 AUTHOR = "Sukil Hong <sukil.hong@lge.com>"
@@ -11,14 +11,15 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "glib-2.0 glib-2.0-native luna-service2 libpbnjson pmloglib python3-packaging-native"
 
-WEBOS_VERSION = "1.0.0-63_db714511a2ba4b85c8b894b07f7880add4e527a8"
-PR = "r12"
+WEBOS_VERSION = "1.0.0-65_701456ce1ba2d761b244dd106f496a5e059ee6d6"
+PR = "r14"
 
+inherit webos_component
 inherit webos_cmake
+inherit webos_enhanced_submissions
+inherit webos_daemon
 inherit webos_system_bus
 inherit webos_public_repo
-inherit webos_enhanced_submissions
-inherit pkgconfig
 inherit python3native
 
 SRC_URI = " \

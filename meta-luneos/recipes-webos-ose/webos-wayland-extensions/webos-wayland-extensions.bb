@@ -1,4 +1,4 @@
-# Copyright (c) 2013-2024 LG Electronics, Inc.
+# Copyright (c) 2013-2025 LG Electronics, Inc.
 
 SUMMARY = "Wayland protocol extensions for webOS"
 AUTHOR = "Elvis Lee <kwangwoong.lee@lge.com>"
@@ -11,13 +11,14 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "wayland wayland-native"
 
-WEBOS_VERSION = "1.0.0-46_9ccf2cf894f9f5de46f110bba40aa0decb37acea"
-PR = "r6"
+WEBOS_VERSION = "1.0.0-48_07b0ddfa4f72d7eeff80c8263e80a17f5f836156"
+PR = "r7"
 
+inherit webos_component
 inherit webos_cmake
-inherit pkgconfig
-inherit webos_public_repo
+inherit webos_pkgconfig
 inherit webos_enhanced_submissions
+inherit webos_public_repo
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Add-client-size-event.patch \

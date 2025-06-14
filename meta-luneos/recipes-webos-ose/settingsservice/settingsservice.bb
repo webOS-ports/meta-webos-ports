@@ -1,4 +1,4 @@
-# Copyright (c) 2013-2024 LG Electronics, Inc.
+# Copyright (c) 2013-2025 LG Electronics, Inc.
 
 SUMMARY = "Settings Service"
 AUTHOR = "Rajesh Gopu I.V <rajeshgopu.iv@lge.com>"
@@ -13,15 +13,15 @@ LIC_FILES_CHKSUM = " \
 DEPENDS = "glib-2.0 glibmm luna-service2 libpbnjson pmloglib openssl libbson boost"
 RDEPENDS:${PN} = "settingsservice-conf db8"
 
-WEBOS_VERSION = "1.0.22-20_822afbcf37d916c1d41860f322e4d076d52bc19e"
+WEBOS_VERSION = "1.0.22-22_176fed142cb4a6417b5eaf4ca7cde0a114b1b1b4"
 PR = "r26"
 
+inherit webos_component
+inherit webos_enhanced_submissions
 inherit webos_cmake
+inherit webos_daemon
 inherit webos_system_bus
 inherit webos_public_repo
-inherit webos_enhanced_submissions
-inherit systemd
-inherit pkgconfig
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-service-update-SettingsService-path.patch \
@@ -30,7 +30,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
 
 S = "${WORKDIR}/git"
 
-#Remove service folder to avoid duplicate legacy and ACG role files
+#FIXME Remove service folder to avoid duplicate legacy and ACG role files
 do_configure:append() {
     rm -rf ${S}/service
 }

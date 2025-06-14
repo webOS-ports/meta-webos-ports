@@ -1,4 +1,4 @@
-# Copyright (c) 2021-2024 LG Electronics, Inc.
+# Copyright (c) 2021-2025 LG Electronics, Inc.
 # This file configures common SRC_URI for both of mksnapshot and webruntime
 # Also it contains variables for gn command such as GN_ARGS
 
@@ -34,8 +34,6 @@ BUILD_TYPE = "Release"
 OUT_DIR = "${B}/${BUILD_TYPE}"
 OUT_IMAGE_DIR = "${OUT_DIR}/image"
 
-HOST_TOOLCHAIN_GCC = "host_toolchain=\"//build/toolchain/cros:host\""
-
 GN_ARGS = "\
     cros_host_ar=\"${BUILD_AR}\"\
     cros_host_cc=\"${BUILD_CC}\"\
@@ -64,11 +62,20 @@ GN_ARGS = "\
     webos_toolprefix=\"${HOST_PREFIX}\"\
     ${GN_ARGS_CLANG} \
     ${GN_ARGS_LIBCXX} \
+    ${GN_ARGS_HOST_LIBCXX} \
     ${HOST_TOOLCHAIN_GCC} \
 "
 
 GN_ARGS_CLANG = "is_clang=false"
 GN_ARGS_LIBCXX = "${@bb.utils.contains('USE_WEBRUNTIME_LIBCXX', '1', 'use_custom_libcxx=true', 'use_custom_libcxx=false', d)}"
+GN_ARGS_HOST_LIBCXX = "${@oe.utils.conditional('WEBRUNTIME_TOOLCHAIN', '-clang', 'use_custom_libcxx_for_host=true', '', d)}"
+HOST_TOOLCHAIN_GCC = "${@oe.utils.conditional('WEBRUNTIME_TOOLCHAIN', '-clang', '', 'host_toolchain=\\"//build/toolchain/cros:host\\"', d)}"
+
+# Respect ld-is-gold in DISTRO_FEATURES when enabling gold
+# Similar patch applied in meta-browser
+# http://patchwork.openembedded.org/patch/77755/
+EXTRA_OEGN_GOLD = "${@bb.utils.contains('DISTRO_FEATURES', 'ld-is-gold', 'use_gold=true', 'use_gold=false', d)}"
+GN_ARGS += "${EXTRA_OEGN_GOLD}"
 
 # The last digits in the submission format are used for typical submissions number.
 # The submission formats; submissions/[number] or submissions/[branch name].[number]
@@ -92,6 +99,10 @@ GN_ARGS:append:armv6 = ' use_allocator="none"'
 GN_ARGS_NEON ?= ""
 GN_ARGS_NEON:armv6 = "arm_use_neon=false"
 GN_ARGS += "${GN_ARGS_NEON}"
+
+# Media Wrapper is used to adapt webruntime to clang build
+GN_ARGS_MEDIA_WRAPPER ?= ""
+GN_ARGS += "${GN_ARGS_MEDIA_WRAPPER}"
 
 # Handle crash while building v8
 GN_ARGS:append:aarch64 = ' v8_enable_external_code_space=false'

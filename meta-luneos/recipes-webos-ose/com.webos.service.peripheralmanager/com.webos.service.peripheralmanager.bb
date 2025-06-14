@@ -1,4 +1,4 @@
-# Copyright (c) 2021-2024 LG Electronics, Inc.
+# Copyright (c) 2021-2025 LG Electronics, Inc.
 
 SUMMARY = "Peripheral Manager service for webOS OSE"
 AUTHOR = "Rajesh Gopu I.V <rajeshgopu.iv@lge.com>"
@@ -12,14 +12,15 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "glib-2.0 libpbnjson luna-service2 pmloglib "
 
-WEBOS_VERSION = "1.0.0-14_a161ae6db6ac3830db978a4ddc16a14cd26cc78d"
+WEBOS_VERSION = "1.0.0-17_78da1e6c8be537b3946432f5ab71ea47d894b623"
 PR = "r3"
 
+inherit webos_component
+inherit webos_enhanced_submissions
 inherit webos_cmake
-inherit pkgconfig
+inherit webos_daemon
 inherit webos_system_bus
 inherit webos_public_repo
-inherit webos_enhanced_submissions
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
