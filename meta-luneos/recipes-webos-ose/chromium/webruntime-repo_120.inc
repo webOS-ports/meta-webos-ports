@@ -20,3 +20,7 @@ SRC_URI += " \
     file://0007-app_shell-override-default-OnWindowHostClose-to-clos.patch \
     file://0008-wayland_touch-apply-device_scale_factor-to-events.patch \
 "
+# Halium specific patch for DRI
+SRC_URI:append:halium = " \
+    file://0001-Halium-Disable-DRI-build.patch \
+"
