@@ -18,8 +18,6 @@ WEBOS_REPO_NAME = "gst-plugins-webos"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 WEBOS_VERSION = "1.18.5-rust.3_766c456fb7c97d00e27505882de9a237095def52"
 
-S = "${WORKDIR}/git"
-
 require gstreamer1.0-plugins-webosrs-crates.inc
 
 export gst_libdir = "${libdir}/gstreamer-1.0"

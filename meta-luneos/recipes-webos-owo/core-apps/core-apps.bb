@@ -14,8 +14,6 @@ inherit webos_app
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
-S = "${WORKDIR}/git"
-
 do_install() {
     # WEBOS_INSTALL_WEBOS_COREAPPSDIR
     install -d ${D}${webos_applicationsdir}

@@ -28,6 +28,4 @@ INC_PR = "r4"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 
-S = "${WORKDIR}/git"
-
 PACKAGECONFIG[testapp] = "-DTEST_APP=ON, -DTEST_APP=OFF, opencv, "

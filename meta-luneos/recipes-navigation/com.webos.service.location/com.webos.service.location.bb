@@ -32,7 +32,5 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Fix-build-with-gcc-15.patch \
 "
 
-S = "${WORKDIR}/git"
-
 FILES:${PN} += "${libdir}/location/plugins/lib*.so"
 SECURITY_STRINGFORMAT = ""

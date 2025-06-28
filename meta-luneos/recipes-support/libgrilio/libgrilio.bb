@@ -10,7 +10,6 @@ DEPENDS = "glib-2.0 libglibutil"
 inherit pkgconfig
 
 SRC_URI = "git://github.com/sailfishos/libgrilio.git;protocol=https;branch=master"
-S = "${WORKDIR}/git"
 
 PV = "1.0.39-1+git"
 SRCREV = "014c4cdd0feb17c3d723dde90dbd9ad7376798dc"

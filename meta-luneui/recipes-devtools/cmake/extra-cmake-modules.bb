@@ -11,7 +11,6 @@ SRC_URI = " \
     git://anongit.kde.org/extra-cmake-modules;branch=master;protocol=https \
     file://0001-FindQtWaylandScanner-Search-within-OE_QMAKE_PATH_EXT.patch \
 "
-S = "${WORKDIR}/git"
 
 EXTRA_OECMAKE += "-DBUILD_TESTING=off"
 

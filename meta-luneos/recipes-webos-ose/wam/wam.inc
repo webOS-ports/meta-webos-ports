@@ -55,8 +55,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0014-WAM-Fix-outbound-permission-error.patch \
 "
 
-S = "${WORKDIR}/git"
-
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 
 # Enable LTTng tracing capability when enabled in webos_lttng class

@@ -14,8 +14,6 @@ DEPENDS = "grpc-native"
 SRC_URI = "git://github.com/googleapis/googleapis.git;branch=master;protocol=https"
 SRCREV = "9efcd835514288b21ce37182d75cc75c18b16541"
 
-S = "${WORKDIR}/git"
-
 OUTPUT = "${WORKDIR}/build"
 LANGUAGE = "cpp"
 GRPCPLUGIN = "${STAGING_BINDIR_NATIVE}/grpc_${LANGUAGE}_plugin"

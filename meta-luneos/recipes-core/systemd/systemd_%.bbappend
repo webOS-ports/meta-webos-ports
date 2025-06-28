@@ -29,7 +29,6 @@ PACKAGECONFIG:append = " \
 
 FILES:${PN} += "${datadir}/dbus-1/system.d/com.webos.MemoryManager1.conf"
 
-
 # By default systemd's Predictable Network Interface Names policy configured for qemu
 # Currently we don't support this policy in qemu, so removing from systemd's configuration
 do_install:append:qemuall() {

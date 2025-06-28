@@ -12,8 +12,6 @@ SRC_URI = "git://github.com/sailfishos/libconnman-qt.git;protocol=https;branch=m
     file://0001-connman_vpn_manager.xml-Fix-build-with-Qt-6.5.patch \
 "
 
-S = "${WORKDIR}/git"
-
 inherit pkgconfig
 inherit qt6-qmake
 

@@ -14,7 +14,6 @@ SRC_URI = " \
     file://no-node-pre-gyp.patch \
 "
 SRCREV = "72bddafddcd9285de2e650e9e281b92b9a9e6b85"
-S = "${WORKDIR}/git"
 
 do_configure() {
     export LD="${CXX}"

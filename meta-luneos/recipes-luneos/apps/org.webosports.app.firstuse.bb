@@ -15,7 +15,6 @@ inherit webos_filesystem_paths
 inherit webos_app
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 INSANE_SKIP:${PN} = "libdir"
 INSANE_SKIP:${PN}-dbg = "libdir"

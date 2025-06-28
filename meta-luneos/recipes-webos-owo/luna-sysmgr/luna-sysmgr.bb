@@ -29,7 +29,6 @@ inherit pkgconfig
 LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 # Configure startup applications
 LUNEOS_BOOT_APPS ??= "org.webosports.app.phone;com.palm.app.email;com.palm.app.calendar;"

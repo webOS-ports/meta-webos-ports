@@ -38,7 +38,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0011-Revert-Deprecation-of-com.webos.service.power.patch \
     file://0012-com.webos.service.sleep.api.json.in-Add-API-for-susp.patch \
 "
-S = "${WORKDIR}/git"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "sleepd.service"

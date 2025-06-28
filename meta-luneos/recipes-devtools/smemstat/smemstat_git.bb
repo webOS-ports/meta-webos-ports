@@ -6,7 +6,6 @@ BASE_PV = "0.01.10"
 PV = "${BASE_PV}+git"
 
 SRC_URI = "git://kernel.ubuntu.com/cking/smemstat.git;branch=master;protocol=git"
-S = "${WORKDIR}/git"
 
 SRCREV = "787d4de350ab492baf199a70075d5ccf7187a517"
 

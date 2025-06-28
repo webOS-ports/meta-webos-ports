@@ -27,7 +27,6 @@ OVERRIDES:append = ":src-chromium${WEBRUNTIME_REPO_VERSION}"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE};name=main"
 
-S = "${WORKDIR}/git"
 B = "${WORKDIR}/build"
 
 BUILD_TYPE = "Release"

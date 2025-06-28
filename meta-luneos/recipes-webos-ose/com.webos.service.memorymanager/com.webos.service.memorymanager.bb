@@ -26,7 +26,6 @@ SRC_URI = " \
     ${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-com.webos.service.memorymanager-Fix-outbound-permiss.patch \
 "
-S = "${WORKDIR}/git"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "memorymanager.service.in"

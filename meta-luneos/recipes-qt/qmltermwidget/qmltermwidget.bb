@@ -12,7 +12,6 @@ SRC_URI = " \
     git://github.com/Tofee/qmltermwidget.git;protocol=https;branch=tofe/qt6 \
     file://0001-qmltermwidget.pro-don-t-install-asset-directories-tw.patch \
 "
-S = "${WORKDIR}/git"
 
 inherit qt6-qmake
 

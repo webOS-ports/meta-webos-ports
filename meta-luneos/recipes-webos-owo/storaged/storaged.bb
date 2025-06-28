@@ -23,4 +23,3 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 PV = "2.1.0-5+git"
 SRCREV = "ba9a0e949f43d2894d66bcc6eca36e2c66600c6d"
-S = "${WORKDIR}/git"

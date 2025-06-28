@@ -15,8 +15,6 @@ inherit webos_app
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
-S = "${WORKDIR}/git"
-
 do_install() {
     install -d ${D}${webos_applicationsdir}/com.palm.systemui
     cp -vrf ${S}/* ${D}${webos_applicationsdir}/com.palm.systemui/

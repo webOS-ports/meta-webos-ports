@@ -18,4 +18,3 @@ inherit webos_daemon
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 
-S = "${WORKDIR}/git"

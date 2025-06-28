@@ -15,8 +15,6 @@ SRC_URI = " \
     file://0001-sensorfwd-Add-TimeoutStopSec-to-improve-shutdown.patch \
 "
 
-S = "${WORKDIR}/git"
-
 do_configure:prepend() {
 sed "s=@LIB@=lib=g" ${S}/sensord-qt6.pc.in > ${S}/sensord-qt6.pc
 }

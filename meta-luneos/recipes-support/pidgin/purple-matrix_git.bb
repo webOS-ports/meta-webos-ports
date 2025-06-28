@@ -10,7 +10,6 @@ inherit pkgconfig
 SRC_URI = "git://github.com/matrix-org/purple-matrix;branch=master;protocol=https"
 SRCREV = "2792d4db0916ad821886de1f8de3a5e46c66ca37"
 
-S = "${WORKDIR}/git"
 PV = "0.1.0+git"
 
 do_compile() {

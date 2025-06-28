@@ -24,8 +24,6 @@ SRC_URI = "git://github.com/allenbo/libgdrive.git;name=libgdrive;branch=master;p
     file://0001-patch-for-libgdrive-in-SAF.patch \
 "
 
-S = "${WORKDIR}/git"
-
 #To Build Libgdrive
 do_compile:prepend() {
     cp -R ${S}/common/include/common ${S}/jconer/include/

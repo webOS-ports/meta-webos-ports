@@ -35,7 +35,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-uMediaserver-add-missing-include-to-fix-build-with-b.patch \
     file://0001-python-fix-build-with-python-3.13.patch \
 "
-S = "${WORKDIR}/git"
 
 # umediaserver-python contains the Python bindings
 PACKAGES =+ "${PN}-python"

@@ -12,7 +12,6 @@ inherit pkgconfig
 SRC_URI = "git://github.com/mer-hybris/libgbinder.git;branch=master;protocol=https \
            file://gbinder.conf \
 "
-S = "${WORKDIR}/git"
 
 PV = "1.1.35"
 SRCREV = "e3f705c4cc6b820d8885b565fc7995e02dd196b3"

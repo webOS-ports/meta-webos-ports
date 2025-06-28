@@ -22,7 +22,6 @@ WEBOS_VERSION = "1.0.0-10_5562fabff79cce1fcd85034ff0273fc56cb806cd"
 PR = "r4"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 #UMI only supports RPI and qemux86 values as per https://github.com/webosose/umi/blob/c8f08f898ad5940d06f4b15c81dab740808c55b9/src/devicecapability.h#L49
 EXTRA_OECMAKE:append:qemux86 = " -DWEBOS_SOC:STRING=qemux86"

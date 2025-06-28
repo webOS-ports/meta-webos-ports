@@ -16,8 +16,6 @@ PR = "r1"
 
 GO_IMPORT = "import"
 
-S = "${WORKDIR}/git"
-
 inherit goarch
 inherit go
 

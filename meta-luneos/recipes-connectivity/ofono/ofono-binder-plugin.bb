@@ -10,7 +10,6 @@ DEPENDS = "ofono libgbinder libgbinder-radio glib-2.0 libglibutil libofonobinder
 inherit pkgconfig
 
 SRC_URI = "git://github.com/mer-hybris/ofono-binder-plugin.git;branch=master;protocol=https"
-S = "${WORKDIR}/git"
 
 PV = "1.1.12"
 SRCREV = "0bd4932f0c30187cd90ac91fe40c9e7131ed6110"

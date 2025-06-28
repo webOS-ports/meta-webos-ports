@@ -4,7 +4,7 @@ LIC_FILES_CHKSUM = "file://squashfs.h;endline=22;md5=bf92dd48469f6b45027dde7c5ae
 
 inherit module
 
-S = "${WORKDIR}/sources"
+S = "${UNPACKDIR}/sources"
 UNPACKDIR = "${S}"
 
 SRC_URI = " \
