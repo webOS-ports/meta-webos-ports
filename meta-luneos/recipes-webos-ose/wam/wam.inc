@@ -58,8 +58,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0017-DeviceInfoImpl-publish-display-metrics-when-known.patch \
 "
 
-S = "${WORKDIR}/git"
-
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 
 # Enable LTTng tracing capability when enabled in webos_lttng class

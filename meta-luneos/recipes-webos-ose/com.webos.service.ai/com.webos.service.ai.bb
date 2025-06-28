@@ -23,7 +23,6 @@ inherit webos_pkgconfig
 inherit webos_system_bus
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "ai.service"

@@ -11,7 +11,6 @@ PV = "1.0.1+git"
 SRCREV = "5592505e73380efb6e728140572cc048683ba768"
 
 SRC_URI = "git://github.com/webOS-ports/memnotify-module.git;branch=master;protocol=https"
-S = "${WORKDIR}/git"
 
 do_install:append() {
     install -d ${D}${sysconfdir}/modules-load.d

@@ -32,7 +32,7 @@ SRC_URI = " \
     file://ilib-lint-config.json \
 "
 
-S = "${WORKDIR}/npm"
+S = "${UNPACKDIR}/npm"
 
 PR = "r0"
 

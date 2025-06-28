@@ -28,4 +28,3 @@ SRC_URI = " \
     file://0001-luna-prefs-Fix-outbound-permissions.patch \
 "
 
-S = "${WORKDIR}/git"

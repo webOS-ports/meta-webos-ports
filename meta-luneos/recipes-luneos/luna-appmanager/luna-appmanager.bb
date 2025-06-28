@@ -24,8 +24,6 @@ SRCREV = "8d7e7a51e2de63c65af9f89583b156b86f7a02c9"
 
 PV = "1.0.0-22+git"
 
-S = "${WORKDIR}/git"
-
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 
 inherit webos_ports_repo

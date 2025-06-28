@@ -29,7 +29,6 @@ inherit webos_bluetooth_sil
 inherit python3native
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 # FIXME-buildpaths!!!
 # [WRP-10883] buildpath QA issues

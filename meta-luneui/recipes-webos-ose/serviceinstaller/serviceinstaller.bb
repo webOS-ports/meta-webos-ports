@@ -23,6 +23,5 @@ inherit webos_pkgconfig
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Make-sure-generated-service-files-get-a-.service-suf.patch \
 "
-S = "${WORKDIR}/git"
 
 ALLOW_EMPTY:${PN} = "1"

@@ -19,7 +19,6 @@ SRCREV = "b69bf00f602138628521184b7f6d0773736d5f8b"
 
 WEBOS_REPO_NAME = "android-update-package"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 do_deploy() {
     IMG="${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}-${MACHINE}${IMAGE_NAME_SUFFIX}.tar.gz"

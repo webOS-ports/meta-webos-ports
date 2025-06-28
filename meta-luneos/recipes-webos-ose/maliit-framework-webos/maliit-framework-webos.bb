@@ -27,7 +27,6 @@ inherit features_check
 ANY_OF_DISTRO_FEATURES = "vulkan opengl"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 

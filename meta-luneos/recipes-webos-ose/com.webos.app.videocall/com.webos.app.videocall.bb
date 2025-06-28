@@ -18,11 +18,9 @@ inherit webos_enactjs_app
 inherit webos_public_repo
 inherit webos_localizable
 
-
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     npmsw://${THISDIR}/${BPN}/npm-shrinkwrap.json \
 "
-S = "${WORKDIR}/git"
 
 WEBOS_ENACTJS_APP_ID = "com.webos.app.videocall"
 

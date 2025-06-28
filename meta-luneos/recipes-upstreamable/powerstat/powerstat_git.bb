@@ -9,7 +9,6 @@ SRCREV = "2b075c9481b9045a7615b05fe46eb8581e2ee9d0"
 SRC_URI = "git://github.com/ColinIanKing/${BPN}.git;protocol=https;branch=master \
     file://0001-Fix-build-with-glibc-2.38.patch \
 "
-S = "${WORKDIR}/git"
 
 inherit bash-completion
 

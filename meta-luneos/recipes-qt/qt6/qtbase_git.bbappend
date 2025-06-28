@@ -17,7 +17,6 @@ remove_LGPL3() {
 # Needed in LuneOS
 #PACKAGECONFIG_DEFAULT:remove = "dbus"
 
-
 # Enable accessibility for qtquickcontrols
 PACKAGECONFIG:append = " accessibility"
 

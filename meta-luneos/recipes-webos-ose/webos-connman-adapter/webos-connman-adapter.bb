@@ -36,7 +36,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Add-back-com.palm.wan-for-cellular-support.patch \
     file://0002-Update-webos-connman-adapter.role.json.in-Add-permis.patch \
 "
-S = "${WORKDIR}/git"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "webos-connman-adapter.service"

@@ -14,7 +14,7 @@ SRCREV = "351459fdc3515cfe383648691168e09f1d4e4f9b"
 WEBOS_REPO_NAME = "org.webosports.messaging"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git/service"
+S = "${UNPACKDIR}/git/service"
 
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${WORKDIR}/git/files/sysbus"
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"

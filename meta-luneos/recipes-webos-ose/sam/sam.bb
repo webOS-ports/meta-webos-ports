@@ -39,7 +39,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
 	file://0009-Setup-QT_WAYLAND_SHELL_INTEGRATION-for-webOS.patch \
 	file://0001-CMakeLists.txt-replace-std-gnu-0x-with-std-c-17-for-.patch \
 "
-S = "${WORKDIR}/git"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "sam.service"

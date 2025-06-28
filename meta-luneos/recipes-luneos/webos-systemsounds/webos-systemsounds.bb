@@ -5,7 +5,6 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=6c4db32a2fa8717faffa1d4f10136f47"
 PV = "1.0.0+git"
 
 SRC_URI = "git://github.com/openwebos/image-assets;protocol=https;branch=master"
-S = "${WORKDIR}/git"
 
 SRCREV = "c4fc6d761deb548b492735683efed1718935ed71"
 

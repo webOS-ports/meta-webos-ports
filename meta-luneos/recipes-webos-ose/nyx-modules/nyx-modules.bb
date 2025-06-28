@@ -76,7 +76,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0013-battery-charger-Allow-path-override-from-cmake.patch \
     file://0014-battery.c-Return-proper-current.patch \
 "
-S = "${WORKDIR}/git"
 
 SRC_URI:append = " \
     file://${MACHINE}.cmake \

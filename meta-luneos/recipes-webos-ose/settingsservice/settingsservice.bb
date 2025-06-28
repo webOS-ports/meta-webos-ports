@@ -28,8 +28,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0002-com.webos.settingsservice-Change-luna.internal-to-se.patch \
 "
 
-S = "${WORKDIR}/git"
-
 #FIXME Remove service folder to avoid duplicate legacy and ACG role files
 do_configure:append() {
     rm -rf ${S}/service

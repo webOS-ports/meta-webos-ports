@@ -29,7 +29,6 @@ inherit webos_cmake
 inherit webos_public_repo
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 # Fix zram-on.sh for modern kernels (Linux 5.x/6.x)
 # - Suppress grep errors for missing optional config file

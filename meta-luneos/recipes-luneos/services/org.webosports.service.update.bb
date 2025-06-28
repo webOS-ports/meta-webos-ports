@@ -12,7 +12,7 @@ SRCREV = "fd7174e8741686a1fbbd4bf730e311db1d965d19"
 
 WEBOS_REPO_NAME = "org.webosports.update"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git/service"
+S = "${UNPACKDIR}/git/service"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${WORKDIR}/git/files/sysbus"

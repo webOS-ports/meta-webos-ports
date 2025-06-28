@@ -14,7 +14,6 @@ SRC_URI = "git://git.kernel.org/pub/scm/network/ofono/phonesim.git;protocol=http
         file://0001-Phonesim-Port-to-CMake-and-Qt6.patch \
         file://0002-default.xml-LuneOS-Branding.patch \
 "
-S = "${WORKDIR}/git"
 
 inherit qt6-cmake
 inherit webos_cmake

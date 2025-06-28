@@ -13,6 +13,5 @@ inherit allarch
 inherit webos_cmake
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 ALLOW_EMPTY:${PN} = "1"

@@ -22,8 +22,6 @@ SRC_URI = "git://github.com/mer-hybris/bluebinder.git;branch=master;protocol=htt
 "
 SRC_URI:append:tissot-halium = " file://0002-service-load-after-wifi-module-load.patch"
 
-S = "${WORKDIR}/git"
-
 PV = "1.0"
 SRCREV = "419ab4a36fd61f841e7b1070b92b5e23ea813b63"
 

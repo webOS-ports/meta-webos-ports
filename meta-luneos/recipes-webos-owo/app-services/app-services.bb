@@ -14,7 +14,6 @@ inherit webos_system_bus
 inherit allarch
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 do_install() {
     install -d ${D}${webos_servicesdir}

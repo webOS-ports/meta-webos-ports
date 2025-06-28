@@ -7,7 +7,6 @@ DEPENDS += "qtbase qtdeclarative libqofono"
 
 SRCREV = "1893185f2124ef5487fc684f9e69237b8551f4c4"
 SRC_URI = "git://github.com/sailfishos/libqofonoext.git;protocol=https;branch=master"
-S = "${WORKDIR}/git"
 
 PV = "1.0.32"
 

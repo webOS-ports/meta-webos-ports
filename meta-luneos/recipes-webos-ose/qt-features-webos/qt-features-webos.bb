@@ -21,7 +21,6 @@ inherit webos_enhanced_submissions
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Do-not-depend-on-QtInputSupport-for-generate_qmap.patch \
 "
-S = "${WORKDIR}/git"
 
 FILES:${PN}-dev += "${OE_QMAKE_PATH_QT_ARCHDATA}/mkspecs"
 

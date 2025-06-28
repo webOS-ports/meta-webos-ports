@@ -31,7 +31,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0005-com.webos.notification.perm.json-Fix-incorrect-value.patch \
     file://0006-NotificationService-tell-subscribers-when-a-toast-is.patch \
 "
-S = "${WORKDIR}/git"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "notificationmgr.service.in"

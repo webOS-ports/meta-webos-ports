@@ -6,6 +6,6 @@ DEPENDS += "mojomail-common c-ares"
 
 inherit webos_system_bus
 
-S = "${WORKDIR}/git/smtp"
+S = "${UNPACKDIR}/git/smtp"
 
 SRC_URI += "file://0001-Fix-build-with-gcc-12.patch;patchdir=.."

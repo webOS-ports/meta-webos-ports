@@ -17,7 +17,6 @@ inherit pkgconfig
 inherit webos_system_bus
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 RRECOMMENDS:${PN} += " \
     pidgin-sipe \

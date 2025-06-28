@@ -31,7 +31,5 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0008-com.webos.service.location.perm.json-Update-for-Lune.patch \
 "
 
-S = "${WORKDIR}/git"
-
 FILES:${PN} += "${libdir}/location/plugins/lib*.so"
 SECURITY_STRINGFORMAT = ""

@@ -15,11 +15,9 @@ inherit webos_system_bus
 inherit systemd
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE:${PN} = "org.webosports.service.certmgr.service"
-
 
 do_install:append() {
     install -d ${D}${systemd_unitdir}/system

@@ -28,8 +28,6 @@ WEBOS_VERSION = "1.0.0-gav.74_34ab300c64090fc1fc88c04ef592aa782f90781d"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 
-S = "${WORKDIR}/git"
-
 FILES_SOLIBSDEV = ""
 FILES:${PN} += "${libdir}/*.so"
 FILES:${PN} += "${libdir}/gstreamer-1.0/*.so"

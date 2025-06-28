@@ -13,7 +13,6 @@ SRC_URI = " \
     git://github.com/herrie82/fingerterm-1.git;protocol=https;branch=herrie/qt6 \
     file://appinfo.json \
 "
-S = "${WORKDIR}/git"
 
 EXTRA_QMAKEVARS_PRE = "\
     DEFAULT_FONT=LiberationMono \

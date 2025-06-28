@@ -23,7 +23,6 @@ LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     file://0001-Fix-build-with-gcc-13.patch \
 "
-S = "${WORKDIR}/git"
 
 do_install:append() {
     install -d ${D}${webos_sysconfdir}/db/kinds

@@ -14,7 +14,6 @@ SRCREV = "3633c18f924c3fc501b5f090ec9a760890002295"
 inherit webos_ports_repo
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 CLEANBROKEN = "1"
 

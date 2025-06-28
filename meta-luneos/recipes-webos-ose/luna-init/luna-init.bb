@@ -35,7 +35,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
         file://0011-Delete-ext-timezones.json.patch \
         file://0012-luna-init-gen-ext-timezones.py-Fix-typo.patch \
 "
-S = "${WORKDIR}/git"
 
 do_install:append() {
     # Expand fonts tarball

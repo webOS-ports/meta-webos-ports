@@ -28,7 +28,6 @@ inherit webos_system_bus
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://nettools_access_control.conf \
 "
-S = "${WORKDIR}/git"
 
 do_install:append() {
     install -d ${D}${sysconfdir}

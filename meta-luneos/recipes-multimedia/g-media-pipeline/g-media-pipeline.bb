@@ -38,5 +38,4 @@ WEBOS_GIT_PARAM_BRANCH = "@gav"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}\ 
     file://0001-Add-generic-config.patch \
 "
-S = "${WORKDIR}/git"
 

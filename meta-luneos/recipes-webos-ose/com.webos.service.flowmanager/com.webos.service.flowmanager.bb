@@ -27,8 +27,6 @@ COMPATIBLE_MACHINE:mips64 = "(!.*mips64).*"
 
 DEPENDS:append = " nodejs-native"
 
-S = "${WORKDIR}/git"
-
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "flowmgr.service"
 WEBOS_SYSTEMD_SCRIPT = "flowmgr.sh.in"

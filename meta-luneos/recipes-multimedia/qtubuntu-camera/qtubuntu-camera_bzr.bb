@@ -16,7 +16,7 @@ SRCREV = "168"
 SRC_URI = "bzr://bazaar.launchpad.net/~phablet-team/qtubuntu-camera/trunk"
 PV = "0.3.3+bzr${SRCREV}"
 
-S = "${WORKDIR}/trunk"
+S = "${UNPACKDIR}/trunk"
 
 EXTRA_OEMAKE += "INSTALL_ROOT=${D}"
 

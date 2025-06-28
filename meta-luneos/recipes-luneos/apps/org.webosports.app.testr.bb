@@ -14,7 +14,6 @@ PV = "0.1.0+git"
 SRCREV = "c8c94ce1bcbd191ee6c1b84c6b399fc2c8ea4159"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 do_install:append() {
     install -d ${D}${WEBOS_APPLICATION_TARGET_DIR}

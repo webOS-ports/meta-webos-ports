@@ -12,7 +12,6 @@ PV = "0.3.0-1+git"
 SRCREV = "fdc2cc64ec80dc304608b67ba059c22e4b0b64fd"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 # We don't provide android-property-service on non-Android devices, so remove it in these cases to avoid LS2 warnings/errors
 

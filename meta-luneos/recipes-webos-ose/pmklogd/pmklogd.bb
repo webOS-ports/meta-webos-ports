@@ -22,6 +22,5 @@ inherit webos_cmake
 inherit webos_daemon
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "pm-klog-daemon.service"

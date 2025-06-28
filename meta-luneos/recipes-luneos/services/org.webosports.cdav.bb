@@ -15,7 +15,6 @@ SRCREV = "35cb6cc84e840ef8c5e2210e74c5bf1ea6ad8e56"
 SERVICE_NAME = "org.webosports.service.cdav"
 WEBOS_REPO_NAME = "org.webosports.service.contacts.carddav"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 CLEANBROKEN = "1"
 

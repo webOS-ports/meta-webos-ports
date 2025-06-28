@@ -17,8 +17,6 @@ SRC_URI = " \
     file://0003-iioadaptor-Accept-input-attributes-for-IIO_CHAN_INFO.patch \
 "
 
-S = "${WORKDIR}/git"
-
 do_configure:prepend() {
 sed "s=@LIB@=lib=g" ${S}/sensord-qt6.pc.in > ${S}/sensord-qt6.pc
 }

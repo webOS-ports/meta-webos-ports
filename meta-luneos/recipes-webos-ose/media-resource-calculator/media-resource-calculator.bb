@@ -28,4 +28,3 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
           file://0001-media-resource-calculator-Add-generic-config-files.patch \
 "
-S = "${WORKDIR}/git"

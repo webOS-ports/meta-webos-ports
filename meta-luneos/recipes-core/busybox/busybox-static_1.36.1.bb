@@ -2,7 +2,7 @@ FILESEXTRAPATHS:prepend := "${COREBASE}/meta/recipes-core/busybox/busybox:${CORE
 
 require recipes-core/busybox/busybox_${PV}.bb
 
-S = "${WORKDIR}/busybox-${PV}"
+S = "${UNPACKDIR}/busybox-${PV}"
 SRC_URI += " \
             file://static-build.cfg \
             file://enable-devmem.cfg \

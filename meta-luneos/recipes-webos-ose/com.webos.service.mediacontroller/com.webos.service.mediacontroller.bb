@@ -26,7 +26,6 @@ SRC_URI = " \
     ${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-com.webos.service.mediacontroller.role.json.in-Fix-o.patch \
 "
-S = "${WORKDIR}/git"
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "com.webos.service.mediacontroller.service"
 

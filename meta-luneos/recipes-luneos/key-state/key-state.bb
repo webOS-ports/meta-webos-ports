@@ -9,4 +9,3 @@ SRCREV = "6dbd96bc949f02220fc418bcd5a1b2993b8d1e11"
 inherit cmake
 
 SRC_URI = "git://github.com/Tofee/key-state.git;protocol=https;branch=main"
-S = "${WORKDIR}/git"

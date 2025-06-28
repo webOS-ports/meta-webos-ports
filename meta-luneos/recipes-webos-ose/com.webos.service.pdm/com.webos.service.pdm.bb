@@ -42,8 +42,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0005-SoundSubsystem-derive-the-card-number-when-udev-does-.patch \
 "
 
-S = "${WORKDIR}/git"
-
 do_fix_endlines() {
     sed -i -e "s,\\r,,g" "${S}/files/rules/90_Android_device.rules"
 }

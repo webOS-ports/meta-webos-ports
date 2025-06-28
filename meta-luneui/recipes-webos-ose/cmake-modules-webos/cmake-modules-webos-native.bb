@@ -18,7 +18,6 @@ inherit native
 WEBOS_CMAKE_DEPENDS = ""
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 do_compile() {
      :

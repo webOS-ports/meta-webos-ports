@@ -20,8 +20,6 @@ SRC_URI = "git://github.com/droidian/pulseaudio-modules-droid-hidl.git;branch=bo
 
 EXTRA_OECONF = "--with-module-dir=${libdir}/pulseaudio/modules"
 
-S = "${WORKDIR}/git"
-
 # inherit webos_ports_fork_repo
 inherit autotools pkgconfig
 

@@ -35,8 +35,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-format_attribute.h-fix-typo-in-macro-name.patch \
 "
 
-S = "${WORKDIR}/git"
-
 BBCLASSEXTEND = "native"
 
 # to work around build with gcc-16 on host
