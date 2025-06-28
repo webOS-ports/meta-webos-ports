@@ -13,7 +13,6 @@ inherit webos_system_bus
 inherit systemd
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 DEPENDS = "luna-service2 glib-2.0 libpbnjson"
 RDEPENDS:${PN} = "geoclue"

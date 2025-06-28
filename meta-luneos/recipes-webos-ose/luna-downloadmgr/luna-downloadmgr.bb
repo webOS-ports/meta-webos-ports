@@ -32,7 +32,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0003-filesystemStatusCheck-first-implementation.patch \
     file://0004-DownloadManager.cpp-Make-org.webosports-privileged-a.patch \
 "
-S = "${WORKDIR}/git"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "luna-download-mgr.service.in"

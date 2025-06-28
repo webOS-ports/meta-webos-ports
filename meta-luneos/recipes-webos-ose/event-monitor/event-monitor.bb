@@ -27,8 +27,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Add-trustLevel.patch \
 "
 
-S = "${WORKDIR}/git"
-
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "event-monitor.service"
 

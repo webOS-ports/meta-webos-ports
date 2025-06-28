@@ -38,7 +38,6 @@ WEBOS_DISTRO_BUILD_CODENAME ?= "${WEBOS_DISTRO_TOPDIR_BRANCH}"
 
 WEBOS_DISTRO_PRERELEASE ?= "devel"
 
-
 #
 # All of the types of official build jobs should override WEBOS_DISTRO_BUILD_ID
 # in the following format: "[[<prefix>.]<site>-]<build-number>", where the

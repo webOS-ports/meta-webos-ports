@@ -11,7 +11,6 @@ inherit webos_ports_ose_repo
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 inherit systemd
 

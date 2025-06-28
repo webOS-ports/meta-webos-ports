@@ -23,7 +23,6 @@ RRECOMMENDS:${PN} += " \
 SRC_URI = "git://github.com/herrie82/waydroid.git;branch=herrie/luneos;protocol=https \
     file://gbinder.conf \
 "
-S = "${WORKDIR}/git"
 
 # Needs quite new kernel (probably >= 3.18) and from LuneOS supported machines
 # only qemux86, qemux86-64, rpi, Pine64 and other mainline) MACHINEs have it

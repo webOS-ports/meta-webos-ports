@@ -12,7 +12,6 @@ inherit pkgconfig python3native
 SRC_URI = "git://github.com/sailfishos/libmce-glib.git;protocol=https;branch=master \
            https://raw.githubusercontent.com/sailfishos/mce-dev/03a4de12e5fabad8c0d846663e1a1a2cbfd88957/include/mce/dbus-names.h;name=dbus-names \
            https://raw.githubusercontent.com/sailfishos/mce-dev/03a4de12e5fabad8c0d846663e1a1a2cbfd88957/include/mce/mode-names.h;name=mode-names"
-S = "${WORKDIR}/git"
 
 SRC_URI[dbus-names.md5sum] = "2040ea70d49e679fe915dc6bc76a7aa1"
 SRC_URI[dbus-names.sha256sum] = "fd890ba5921cc58c1d61b4e406f22f5d20ffb4ed6cbc8afa88881f879ad53796"

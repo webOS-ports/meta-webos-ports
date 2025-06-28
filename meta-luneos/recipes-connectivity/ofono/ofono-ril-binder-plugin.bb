@@ -10,7 +10,6 @@ DEPENDS = "${VIRTUAL-RUNTIME_ofono} libgbinder libgbinder-radio libgrilio glib-2
 inherit pkgconfig
 
 SRC_URI = "git://github.com/mer-hybris/ofono-ril-binder-plugin.git;branch=master;protocol=https"
-S = "${WORKDIR}/git"
 
 PV = "1.2.7"
 SRCREV = "599c148fbd881015cc2be21b9d7e7554a30514fa"

@@ -17,8 +17,6 @@ SRC_URI = "git://github.com/sailfishos/voicecall.git;protocol=https;branch=maste
            file://0001-src.pro-use-qofono-qt6-instead-of-qofono-qt5.patch \
 "
 
-S = "${WORKDIR}/git"
-
 #enable debugging in voicecall. This is now merged upstream so we don't need patches anymore to enable this for each individual file.
 EXTRA_QMAKEVARS_PRE += "CONFIG+=enable-debug QT6_INSTALL_LIBDIR=${QT6_INSTALL_LIBDIR}"
 

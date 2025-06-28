@@ -15,7 +15,6 @@ inherit allarch
 DEPENDS += " nodejs-native "
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 do_install() {
     node ${S}/support/enyo-compress/enyo-compress.js ${S}/framework/source --no-color --make-enyo -o ${S}/framework/build

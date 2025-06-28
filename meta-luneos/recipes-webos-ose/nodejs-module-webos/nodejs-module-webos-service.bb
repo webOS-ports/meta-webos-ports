@@ -18,7 +18,6 @@ inherit webos_public_repo
 inherit webos_enhanced_submissions
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 do_install() {
     install -d ${D}${nonarch_libdir}/node_modules

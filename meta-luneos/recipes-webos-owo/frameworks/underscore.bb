@@ -13,7 +13,6 @@ inherit webos_filesystem_paths
 inherit allarch
 
 SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 do_install() {
     install -d ${D}${webos_frameworksdir}/underscore/version/1.0/

@@ -17,8 +17,6 @@ PV = "5.0.0+git"
 SRCREV = "967dc1caf0efe0a1286c308e8e8dd1bf7da5f3ee"
 SRC_URI = "git://github.com/lib-cpp/${BPN}.git;branch=master;protocol=https"
 
-S = "${WORKDIR}/git"
-
 EXTRA_OECMAKE += "-DDBUS_CPP_VERSION_MAJOR=5 -DDBUS_CPP_VERSION_MINOR=0 -DDBUS_CPP_VERSION_PATCH=0"
 
 inherit cmake pkgconfig

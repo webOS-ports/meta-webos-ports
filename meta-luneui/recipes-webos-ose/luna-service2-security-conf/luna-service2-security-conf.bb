@@ -20,7 +20,6 @@ inherit webos_cmake
 inherit webos_system_bus
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 FILES:${PN} += "${webos_sysbus_datadir}"
 

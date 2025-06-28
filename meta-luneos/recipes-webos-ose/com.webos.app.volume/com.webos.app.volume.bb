@@ -11,7 +11,6 @@ LIC_FILES_CHKSUM = " \
 
 WEBOS_VERSION = "0.1.0-16_675f9154fca5dffb1c2f773ccb93aa0e0e6ffe72"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 PR = "r6"
 
 inherit webos_enhanced_submissions

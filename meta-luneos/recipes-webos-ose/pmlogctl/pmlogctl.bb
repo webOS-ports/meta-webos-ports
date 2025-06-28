@@ -22,4 +22,3 @@ inherit webos_cmake
 inherit webos_program
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"

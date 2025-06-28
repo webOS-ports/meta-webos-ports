@@ -137,7 +137,6 @@ WEBOS_PACKAGESET_MEDIA = " \
     com.webos.service.mediaindexer \
 "
 
-
 # nyx-lib needs nyx-modules at runtime, but a runtime dependency is not defined
 # in its recipe because nyx-modules is MACHINE_ARCH (e.g. qemux86), while nyx-lib is
 # TUNE_PKGARCH  (e.g. i586). Instead, it is pulled into the image by adding it here.
@@ -207,7 +206,6 @@ RDEPENDS:${PN} = " \
     ${WEBOS_PACKAGESET_ENACTAPPS} \
     ${WEBOS_PACKAGESET_MEDIA} \
 "
-
 
 # XXX These FOSS components must be explicitly added because they are missing
 # from the RDEPENDS lists of the components that expect them to be present at

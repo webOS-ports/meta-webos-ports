@@ -11,14 +11,12 @@ LIC_FILES_CHKSUM = " \
 
 WEBOS_VERSION = "0.1.0-41_24e92ff40a32acc09ee178f9eae538d8b3b6d10b"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 PR = "r8"
 
 inherit webos_enhanced_submissions
 inherit webos_enactjs_app
 inherit webos_public_repo
 inherit webos_localizable
-
 
 WEBOS_ENACTJS_APP_ID = "com.webos.app.home"
 WEBOS_LOCALIZATION_XLIFF_BASENAME = "home"

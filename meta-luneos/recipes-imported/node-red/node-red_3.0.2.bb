@@ -15,7 +15,7 @@ SRC_URI = "\
 
 SRC_URI[sha256sum] = "6c452646648f9e86622148eff2208fb45d2311b5339481f86b445e9e2fa215c5"
 
-S = "${WORKDIR}/${BPN}"
+S = "${UNPACKDIR}/${BPN}"
 
 do_install:append() {
     # Service

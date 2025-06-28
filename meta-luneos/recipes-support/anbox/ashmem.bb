@@ -11,7 +11,7 @@ SRC_URI = "git://github.com/anbox/anbox-modules;branch=master;protocol=https \
     file://0001-ashmem-binder-add-modules_install-target-to-Makefile.patch;patchdir=.. \
 "
 
-S = "${WORKDIR}/git/ashmem"
+S = "${UNPACKDIR}/git/ashmem"
 
 do_install:append() {
     install -d ${D}${sysconfdir}/udev/rules.d

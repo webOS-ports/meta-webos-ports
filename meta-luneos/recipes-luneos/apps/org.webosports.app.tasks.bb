@@ -10,7 +10,6 @@ inherit webos_filesystem_paths
 SRCREV = "5400f2f4eac6da564759f7491b280791892de087"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 do_install() {
 
@@ -21,5 +20,4 @@ do_install() {
     cp -vrf ${S}/configuration/db/permissions/* ${D}${webos_sysconfdir}/db/permissions/
 
 }
-
 

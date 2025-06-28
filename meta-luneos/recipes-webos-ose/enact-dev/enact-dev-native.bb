@@ -15,8 +15,6 @@ inherit native
 # No need to bump PR when changing the values of PV and SRCREV (below)
 PR = "r0"
 
-S = "${WORKDIR}/git"
-
 RDEPENDS:${PN} += "jsdoc-to-ts-native"
 
 SRC_URI = " \

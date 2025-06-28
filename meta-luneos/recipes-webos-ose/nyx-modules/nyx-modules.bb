@@ -72,7 +72,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0009-Add-wait-touchscreen-conf.patch \
     file://0010-nyx-modules-Use-etc-machine-id-for-serial-number.patch \
 "
-S = "${WORKDIR}/git"
 
 SRC_URI:append = " \
     file://${MACHINE}.cmake \

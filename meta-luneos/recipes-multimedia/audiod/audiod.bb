@@ -38,7 +38,6 @@ inherit webos_public_repo
 
 WEBOS_REPO_NAME = "audiod-pro"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "audiod.service"

@@ -19,7 +19,6 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 COMPATIBLE_MACHINE = "^halium$"
 
 SRC_URI = "git://github.com/sailfishos/qtscenegraph-adaptation.git;protocol=https;branch=master"
-S = "${WORKDIR}/git"
 
 inherit qt6-qmake
 

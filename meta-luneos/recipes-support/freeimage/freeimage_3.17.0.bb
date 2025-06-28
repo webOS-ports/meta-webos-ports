@@ -13,8 +13,6 @@ LIC_FILES_CHKSUM = " \
     file://license-gplv3.txt;md5=e9661e0bea741d71a430b23475da519e \
 "
 
-S = "${WORKDIR}/git"
-
 TARGET_CC_ARCH += "${LDFLAGS}"
 
 do_configure() {

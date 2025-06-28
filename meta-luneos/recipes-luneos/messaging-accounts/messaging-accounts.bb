@@ -11,7 +11,6 @@ inherit webos_app
 SRCREV = "ec3890298a39a2b0d907a3c6cc611cbe95756ace"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 do_install() {
     # account templates

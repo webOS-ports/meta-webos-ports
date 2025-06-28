@@ -30,8 +30,6 @@ SRC_URI = "git://github.com/ony/${BPN};branch=gcc-4.7;protocol=https \
 SRCREV = "b4f56ad18162c2e2f9acef93f0f42eac0f9f3163"
 PV = "1.0.6+git"
 
-S = "${WORKDIR}/git"
-
 inherit cmake
 
 EXTRA_OECMAKE:append = " -DBUILD_TESTING:BOOL=false"

@@ -5,7 +5,6 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=8d385adc93db3f7e5d092b82fb2c9353"
 
 SRCREV = "052db3400c5f45d8ac2bbf5688ad92f37b81e2ec"
 SRC_URI = "git://github.com/Kitt-AI/snowboy;protocol=https;branch=master"
-S = "${WORKDIR}/git"
 
 COMPATIBLE_MACHINE = "(machine-native|android)"
 

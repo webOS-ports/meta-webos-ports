@@ -42,7 +42,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0005-LSMessageIsSubscription-test-if-payload-is-a-JSON-ob.patch \
     file://0006-_LSCheckProvidedTrustedGroups-reduce-log-noise.patch \
 "
-S = "${WORKDIR}/git"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "ls-hubd.service"

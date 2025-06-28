@@ -27,7 +27,6 @@ inherit webos_cmake
 inherit pkgconfig
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 SRC_URI:append = " \
     file://${MACHINE}.cmake \

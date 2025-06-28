@@ -14,7 +14,6 @@ inherit qt6-qmake
 inherit pkgconfig
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};"
-S = "${WORKDIR}/git"
 
 FILES:${PN} += " \
     ${OE_QMAKE_PATH_PLUGINS} \

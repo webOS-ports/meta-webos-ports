@@ -10,7 +10,6 @@ DEPENDS = "glib-2.0"
 inherit pkgconfig
 
 SRC_URI = "git://github.com/sailfishos/libglibutil.git;protocol=https;branch=master"
-S = "${WORKDIR}/git"
 
 PV = "1.0.61-1+git"
 SRCREV = "4e110017fd4f852a3b1e5616baf111813be9fe92"

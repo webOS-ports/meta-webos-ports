@@ -24,8 +24,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     ${WEBOS_NODE_SRC_URI} \
 "
 
-S = "${WORKDIR}/git"
-
 do_configure:prepend() {
     export HOME=${WORKDIR}
     export LD="${CXX}"

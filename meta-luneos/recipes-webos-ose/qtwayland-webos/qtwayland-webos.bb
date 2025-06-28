@@ -21,7 +21,6 @@ PR = "r20"
 
 QT_BUILD_SYSTEM = "qmake"
 
-
 PACKAGECONFIG ??= ""
 
 # qtwayland-webos_cmake.inc or qtwayland-webos_qmake.inc
@@ -37,7 +36,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0002-WebOSIntegration-enable-all-capabilities-for-LuneOS.patch \
     file://0003-WebOSShellSurfacePrivate-add-client_size_changed.patch \
 "
-S = "${WORKDIR}/git"
 
 # No debian package renaming
 DEBIAN_NOAUTONAME:${PN} = "1"

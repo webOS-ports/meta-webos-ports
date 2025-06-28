@@ -8,13 +8,11 @@ inherit webos_system_bus
 inherit allarch
 inherit webos_filesystem_paths
 
-
 PV = "0.1.0+git"
 SRCREV = "5010b7e7021bd1c2b32f1ae968d39159b77a9b15"
 SERVICE_NAME = "com.palm.mediapermissions"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files/sysbus"

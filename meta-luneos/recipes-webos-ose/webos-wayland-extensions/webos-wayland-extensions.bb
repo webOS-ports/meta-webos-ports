@@ -23,7 +23,6 @@ inherit webos_public_repo
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Add-client-size-event.patch \
 "
-S = "${WORKDIR}/git"
 
 FILES:${PN}-dev += "${datadir}/*"
 

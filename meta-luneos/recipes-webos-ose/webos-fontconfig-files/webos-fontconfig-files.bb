@@ -19,7 +19,6 @@ inherit webos_public_repo
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-31-webos-aliases.conf-Use-Prelude-for-LuneOS.patch \
 "
-S = "${WORKDIR}/git"
 
 # Skip the unwanted tasks
 do_configure[noexec] = "1"

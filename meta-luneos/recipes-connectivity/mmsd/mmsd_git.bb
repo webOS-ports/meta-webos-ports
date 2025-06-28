@@ -9,7 +9,6 @@ SRC_URI  = " \
     file://mmsd.conf \
     file://mmsd.service \
 "
-S = "${WORKDIR}/git"
 
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE:${PN} = "${PN}.service"

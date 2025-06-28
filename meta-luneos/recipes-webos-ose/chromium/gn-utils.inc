@@ -31,7 +31,6 @@ def gn_arch_name(yocto_arch):
     except KeyError:
         bb.fatal('"%s" is not a supported architecture.' % yocto_arch)
 
-
 def write_toolchain_file(d, file_path):
     """Creates a complete GN toolchain file in |file_path|."""
     import string

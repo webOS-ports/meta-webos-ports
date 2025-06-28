@@ -24,8 +24,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-FontStyle.qml-Use-Prelude-on-LuneOS-instead-of-Museo.patch \
 "
 
-S = "${WORKDIR}/git"
-
 QMAKE_PROFILES = "${S}/qml-app-components.pro"
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 

@@ -40,8 +40,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0009-WebOSQuickWindow-use-APP_ID-env-variable-for-appId.patch \
 "
 
-S = "${WORKDIR}/git"
-
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 
 # Perform extra QML validation

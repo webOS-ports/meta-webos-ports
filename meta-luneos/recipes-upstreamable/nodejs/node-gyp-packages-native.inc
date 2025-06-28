@@ -57,7 +57,7 @@ https://registry.npmjs.org/grunt-contrib-watch/-/grunt-contrib-watch-0.6.1.tgz;n
 https://registry.npmjs.org/qunitjs/-/qunitjs-1.18.0.tgz;name=qunitjs_1.18.0;unpack=yes;downloadfilename=qunitjs-1.18.0-tarball.tgz;subdir=${BPN}/qunitjs_1.18.0 \
 "
 
-S = "${WORKDIR}/sources"
+S = "${UNPACKDIR}/sources"
 UNPACKDIR = "${S}"
 
 SRC_URI[fstream_0.1.25.md5sum] = "81805600ac27ed20bbe21e2645021476"

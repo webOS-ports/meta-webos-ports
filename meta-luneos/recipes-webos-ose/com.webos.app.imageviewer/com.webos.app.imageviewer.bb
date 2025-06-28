@@ -18,7 +18,6 @@ inherit webos_enactjs_app
 inherit webos_public_repo
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 WEBOS_ENACTJS_APP_ID = "com.webos.app.imageviewer"
 WEBOS_LOCALIZATION_DATA_PATH = "${S}"

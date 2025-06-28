@@ -40,7 +40,6 @@ SRC_URI = "git://github.com/anbox/anbox;name=main;branch=master;protocol=https \
     file://anbox-bridge.network \
     file://anbox-bridge.netdev \
 "
-S = "${WORKDIR}/git"
 
 # Needs quite new kernel (probably >= 3.18) and from LuneOS supported machines
 # only qemux86, qemux86-64 and rpi (later hammerhead-mainline) MACHINEs have it

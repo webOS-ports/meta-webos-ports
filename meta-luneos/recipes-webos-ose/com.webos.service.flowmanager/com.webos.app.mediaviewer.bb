@@ -16,7 +16,7 @@ require flowmanager.inc
 PR = "r2"
 
 WEBOS_REPO_NAME = "com.webos.service.flowmanager"
-S = "${WORKDIR}/git/apps"
+S = "${UNPACKDIR}/git/apps"
 
 do_install() {
     install -d ${D}${webos_applicationsdir}/${PN}

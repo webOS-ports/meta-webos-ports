@@ -23,6 +23,5 @@ inherit webos_public_repo
 inherit webos_localizable
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 WEBOS_LOCALIZATION_INSTALL_RESOURCES = "true"

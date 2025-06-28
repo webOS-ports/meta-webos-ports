@@ -30,7 +30,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0002-configurator-Fix-permission-issue-for-com.palm.filec.patch \
     file://0003-com.webos.service.configurator.perm.json-Update-the-.patch \
 "
-S = "${WORKDIR}/git"
 FILES:${PN} += "${webos_sysbus_datadir}"
 
 inherit webos_systemd

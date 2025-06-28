@@ -43,7 +43,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://icon.png \
     file://icon-256x256.png \
 "
-S = "${WORKDIR}/git"
 WEBOS_ENACTJS_PROJECT_PATH = "./samples/enact-based"
 WEBOS_ENACTJS_PACK_OVERRIDE = "\
     ${ENACT_DEV} pack ${WEBOS_ENACTJS_PACK_OPTS} -o ${D}${webos_applicationsdir}/${WEBOS_ENACTJS_APP_ID} && \
