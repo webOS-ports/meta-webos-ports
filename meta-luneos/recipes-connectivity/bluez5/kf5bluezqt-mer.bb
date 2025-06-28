@@ -16,7 +16,6 @@ SRC_URI = "git://github.com/sailfishos/kf5bluezqt.git;protocol=https;branch=mast
            file://0001-Update-D-Bus-xml-files-to-use-Out-for-signal-type-Qt.patch \
 "
 
-S = "${WORKDIR}/git"
 B = "${S}"
 
 EXTRA_QMAKEVARS_PRE += "KF5BLUEZQT_BLUEZ_VERSION=5"

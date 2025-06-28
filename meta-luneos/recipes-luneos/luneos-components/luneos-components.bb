@@ -9,7 +9,6 @@ DEPENDS = "qtbase qtdeclarative luna-service2 luna-sysmgr-common libwebos-applic
 RDEPENDS:${PN} = "qt5compat-qmlplugins"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 inherit qt6-qmake
 inherit webos_ports_repo

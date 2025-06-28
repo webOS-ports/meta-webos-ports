@@ -17,11 +17,9 @@ APP_NAME = "org.webosports.app.tweaks"
 WEBOS_REPO_NAME = "tweaks"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files/sysbus"
-
 
 do_compile() {
 }
@@ -61,5 +59,4 @@ FILES:${PN} = " \
     ${webos_sysconfdir} \
     ${webos_sysbus_manifestsdir} ${webos_sysbus_apipermissionsdir} ${webos_sysbus_permissionsdir} ${webos_sysbus_rolesdir} ${webos_sysbus_servicedir} ${webos_sysbus_groupsdir} \
     "
-
 

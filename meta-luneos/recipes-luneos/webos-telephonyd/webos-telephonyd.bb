@@ -20,7 +20,6 @@ inherit python3native
 LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 do_install:append() {
     install -d ${D}${webos_sysconfdir}/db/kinds

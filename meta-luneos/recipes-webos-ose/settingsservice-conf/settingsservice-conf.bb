@@ -17,4 +17,3 @@ inherit webos_public_repo
 WEBOS_REPO_NAME = "webos-settingsservice-conf"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 
-S = "${WORKDIR}/git"

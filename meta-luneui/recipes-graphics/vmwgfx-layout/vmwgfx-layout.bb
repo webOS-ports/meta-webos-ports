@@ -18,7 +18,6 @@ SRC_URI = "git://github.com/sparkleholic/vmwgfx-layout.git;branch=master;protoco
     file://0002-Setup-service-for-LuneOS.patch \
     file://0003-CMakeLists.txt-use-systemdsystemunitdir-instead-of-l.patch \
 "
-S = "${WORKDIR}/git"
 
 EXTRA_OECMAKE = "-Dsystemdsystemunitdir=${systemd_system_unitdir}"
 

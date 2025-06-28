@@ -23,6 +23,5 @@ inherit webos_public_repo
 EXTRA_OECMAKE += "-DWEBOS_INSTALL_CONFCAPSDIR:STRING=${webos_frameworksdir}"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 FILES:${PN} += "${webos_frameworksdir}/umediaserver/*"

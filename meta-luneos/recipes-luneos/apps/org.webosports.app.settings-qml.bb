@@ -20,7 +20,6 @@ WEBOS_GIT_PARAM_BRANCH = "qml-based"
 WEBOS_REPO_NAME = "org.webosports.app.settings"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 # We don't provide android-property-service on non-Android devices, so remove it in these cases to avoid LS2 warnings/errors
 

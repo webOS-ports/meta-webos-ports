@@ -18,7 +18,6 @@ inherit webos_system_bus
 inherit webos_filesystem_paths
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 RRECOMMENDS:${PN} += " \
     pidgin-sipe \

@@ -20,4 +20,3 @@ inherit webos_public_repo
 inherit webos_library
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"

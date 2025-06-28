@@ -29,7 +29,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Revert-Remove-dynaload-dependency.patch \
     file://0002-Revert-Remove-pmloglib-dependency.patch \
 "
-S = "${WORKDIR}/git"
 
 PACKAGECONFIG:append = " ${@bb.utils.filter('DISTRO_FEATURES', 'smack', d)}"
 PACKAGECONFIG[smack] = "-Denable_webos_smack=true:BOOL=TRUE"

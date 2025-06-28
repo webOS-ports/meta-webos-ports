@@ -13,8 +13,6 @@ SRC_URI = "git://github.com/waydroid/gbinder-python.git;branch=bullseye;protocol
            file://0001-setup.py-Migrate-away-from-deprecated-distutils.core.patch \
 "
 
-S = "${WORKDIR}/git"
-
 DEPENDS = "libgbinder python3-cython-native libglibutil"
 
 RDEPENDS:${PN}:class-native = ""

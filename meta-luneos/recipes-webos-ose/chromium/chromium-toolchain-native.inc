@@ -14,8 +14,6 @@ inherit native
 
 OFFSET = "src/third_party/llvm-build/Release+Asserts"
 
-S = "${WORKDIR}/git"
-
 do_configure() {
 }
 

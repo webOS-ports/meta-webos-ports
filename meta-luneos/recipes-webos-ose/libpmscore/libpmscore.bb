@@ -24,7 +24,6 @@ inherit webos_public_repo
 inherit webos_library
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 # http://caprica.lgsvl.com:8080/Errors/Details/1092306
 # 1.0.0-5-r0/git/include/public/pmscore/PmsLogging.h:63:28: error: format not a string literal and no format arguments [-Werror=format-security]

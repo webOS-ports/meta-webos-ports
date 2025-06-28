@@ -45,8 +45,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0002-test-Don-t-use-long-deprecated-boost-filesystem-path.patch \
 "
 
-S = "${WORKDIR}/git"
-
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "db8-maindb.service db8-mediadb.service db8-pre-config.service db8-tempdb.service db8.service"
 WEBOS_SYSTEMD_SCRIPT = "db8-maindb.sh"

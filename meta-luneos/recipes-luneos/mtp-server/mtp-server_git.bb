@@ -19,7 +19,6 @@ PV = "0.0.3+git"
 SRCREV = "bb4a81e61b8a21442fc6807766ec4e49e2b35000"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 inherit cmake
 inherit pkgconfig

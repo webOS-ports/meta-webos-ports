@@ -73,7 +73,6 @@ PACKAGECONFIG[support-response-bt-prepare-suspend-done] = "-DSUPPORT_RESPONSE_BT
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-com.webos.service.bluetooth2.role.json.in-Add-additi.patch \
 "
-S = "${WORKDIR}/git"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "webos-bluetooth-service.service"

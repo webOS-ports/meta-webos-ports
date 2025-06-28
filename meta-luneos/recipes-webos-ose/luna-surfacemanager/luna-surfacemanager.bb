@@ -39,8 +39,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0014-ViewStateController.qml-Fix-TypeError.patch \
 "
 
-S = "${WORKDIR}/git"
-
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "lsm-ready.path lsm-ready.service lsm-ready.target surface-manager.service surface-manager-daemon.service"
 

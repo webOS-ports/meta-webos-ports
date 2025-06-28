@@ -38,7 +38,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0003-com.webos.service.ime-Add-org.maliit-as-allowed-name.patch \
     file://0004-main.qml-Fix-the-signature-of-onResponse.patch \
 "
-S = "${WORKDIR}/git"
 
 WEBOS_LOCALIZATION_XLIFF_BASENAME = "imemanager"
 

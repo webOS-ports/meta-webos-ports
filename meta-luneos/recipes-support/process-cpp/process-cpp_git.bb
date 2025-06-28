@@ -16,8 +16,6 @@ PV = "3.0.1+git"
 SRCREV = "2923b597f6fc5b49133be8c4f2ba3cbaacdb9540"
 SRC_URI = "git://github.com/lib-cpp/${BPN}.git;branch=master;protocol=https"
 
-S = "${WORKDIR}/git"
-
 inherit cmake pkgconfig
 
 EXTRA_OECMAKE += " -DPROCESS_CPP_ENABLE_DOC_GENERATION=OFF"

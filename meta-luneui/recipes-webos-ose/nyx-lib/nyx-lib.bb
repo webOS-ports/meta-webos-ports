@@ -40,7 +40,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Implement-asynchronous-suspend-resume-methods-for-sy.patch \
     file://0002-add-nyx-target.patch \
 "
-S = "${WORKDIR}/git"
 
 do_install:append() {
     install -d ${D}${systemd_unitdir}/system

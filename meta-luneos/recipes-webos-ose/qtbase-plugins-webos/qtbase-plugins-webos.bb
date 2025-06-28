@@ -21,8 +21,6 @@ inherit webos_qt_global
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 
-S = "${WORKDIR}/git"
-
 EXTRA_QMAKEVARS_PRE += "${PACKAGECONFIG_CONFARGS}"
 PACKAGECONFIG ??= ""
 

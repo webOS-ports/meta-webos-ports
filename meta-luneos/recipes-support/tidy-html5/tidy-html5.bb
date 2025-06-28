@@ -10,7 +10,6 @@ SRC_URI = " \
     git://github.com/w3c/tidy-html5;branch=master;protocol=https \
     file://0001-Correctly-deploy-automake-files-at-the-right-place.patch \
 "
-S = "${WORKDIR}/git"
 
 inherit autotools autotools-brokensep
 

@@ -144,7 +144,7 @@ SRC_URI = " \
     npmsw://${THISDIR}/${BPN}/npm-shrinkwrap.json \
 "
 
-S = "${WORKDIR}/npm"
+S = "${UNPACKDIR}/npm"
 
 PR = "r0"
 

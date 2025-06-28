@@ -14,7 +14,6 @@ PV = "1.0.6+git"
 SRC_URI = "git://github.com/mer-qa/sdl2-opengles-test.git;branch=master;protocol=https \
     file://org.mer.app.sdl2_opengles1_test-appinfo.json \
     file://org.mer.app.sdl2_opengles2_test-appinfo.json"
-S = "${WORKDIR}/git"
 
 SRCREV = "d0a3c8806cb29e3fe9dccc162c66d42dc4ebc40e"
 
