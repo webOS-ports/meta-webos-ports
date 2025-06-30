@@ -21,6 +21,7 @@ S = "${WORKDIR}/git"
 
 RRECOMMENDS:${PN} += " \
     pidgin-sipe \
+    purple-matrix \
     funyahoo-plusplus \
     icyque \
     libpurple-plugin-autoaccept \
