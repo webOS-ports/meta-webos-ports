@@ -32,7 +32,9 @@ WEBOS_HFP_ENABLED_ROLE = "HF"
 
 EXTRA_OECMAKE += "-DWEBOS_HFP_ENABLED_ROLE:STRING='${WEBOS_HFP_ENABLED_ROLE}'"
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+           file://0001-HfpHFRole-init-mHfpOfonoManager-to-nullptr.patch \
+"
 S = "${WORKDIR}/git"
 
 inherit webos_systemd
