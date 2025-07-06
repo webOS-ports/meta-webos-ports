@@ -245,6 +245,7 @@ python submission_sanity_check() {
 
     found_first = False
     workdir = d.getVar('WORKDIR')
+    unpackdir = d.getVar('UNPACKDIR')
     pn = d.getVar('PN')
     file = d.getVar('FILE')
     fetcher = bb.fetch.Fetch(src_uri, d)
@@ -259,7 +260,8 @@ python submission_sanity_check() {
                 oe.qa.handle_error("webos-enh-sub-warning", msg, d)
                 break
             found_first = True
-            destsuffix_param = urldata[u].parm['destsuffix'] if 'destsuffix' in urldata[u].parm else 'git'
+            destsuffix = d.getVar('BB_GIT_DEFAULT_DESTSUFFIX')
+            destsuffix_param = urldata[u].parm['destsuffix'] if 'destsuffix' in urldata[u].parm else destsuffix
             webos_version = d.getVar('WEBOS_VERSION')
             srcrev = d.getVar('SRCREV')
             name = urldata[u].parm['name'] if 'name' in urldata[u].parm else 'default'
@@ -287,7 +289,7 @@ python submission_sanity_check() {
             elif webos_git_repo_tag == default_webos_git_repo_tag:
                 msg = "Don't set WEBOS_GIT_REPO_TAG when the component is using default scheme 'submissions/${WEBOS_SUBMISSION}' in recipe '%s' (file '%s')" % (pn, file)
                 oe.qa.handle_error("webos-enh-sub-error", msg, d)
-            checkout = "%s/%s" % (workdir, destsuffix_param)
+            checkout = "%s/%s" % (unpackdir, destsuffix_param)
 
             # '0' in 'webos_submission' is used with AUTOREV -> so don't check AUTOREV against submissions/0 tag
             if webos_submission != '0' and webos_git_repo_tag and rev:
