@@ -19,6 +19,8 @@ do_configure:prepend() {
 #Let's add the system and media users and groups early on as well as the netdev group, since these are needed by multiple recipes.
 
 WEBOS_EXTRA_USERS ?= "system:x:1000:1000::/var:/usr/sbin/nologin \
+                      input:x:1004:1004::/var:/usr/sbin/nologin \
+                      audio:x:1005:1005::/var:/usr/sbin/nologin \
                       media:x:1013:1013::/var:/usr/sbin/nologin \
 "
 WEBOS_EXTRA_GROUPS ?= "system:x:1000:system \
