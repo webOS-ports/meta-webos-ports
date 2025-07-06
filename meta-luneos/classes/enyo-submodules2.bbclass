@@ -1,10 +1,10 @@
 SRC_URI += "\
-  ${ENYOJS_GIT_REPO}/enyo;protocol=git;name=enyo;destsuffix=git/enyo \
-  ${ENYOJS_GIT_REPO}/canvas;protocol=git;name=canvas;destsuffix=git/lib/canvas \
-  ${ENYOJS_GIT_REPO}/extra;protocol=git;name=extra;destsuffix=git/lib/extra \
-  ${ENYOJS_GIT_REPO}/g11n;protocol=git;name=g11n;destsuffix=git/lib/g11n \
-  ${ENYOJS_GIT_REPO}/layout;protocol=git;name=layout;destsuffix=git/lib/layout \
-  ${ENYOJS_GIT_REPO}/onyx;protocol=git;name=onyx;destsuffix=git/lib/onyx \
+  ${ENYOJS_GIT_REPO}/enyo;protocol=git;name=enyo;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX}/enyo \
+  ${ENYOJS_GIT_REPO}/canvas;protocol=git;name=canvas;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX}/lib/canvas \
+  ${ENYOJS_GIT_REPO}/extra;protocol=git;name=extra;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX}/lib/extra \
+  ${ENYOJS_GIT_REPO}/g11n;protocol=git;name=g11n;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX}/lib/g11n \
+  ${ENYOJS_GIT_REPO}/layout;protocol=git;name=layout;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX}/lib/layout \
+  ${ENYOJS_GIT_REPO}/onyx;protocol=git;name=onyx;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX}/lib/onyx \
 "
 SRCREV_FORMAT="main"
 SRCREV_enyo = "fb50b39b9b614b98ece05b19edc96abca605c3f6"

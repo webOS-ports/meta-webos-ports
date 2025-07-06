@@ -1,9 +1,9 @@
 SRC_URI += "\
-  ${ENYOJS_GIT_REPO}/enyo;protocol=git;name=enyo;destsuffix=git/enyo \
-  ${ENYOJS_GIT_REPO}/layout;protocol=git;name=layout;destsuffix=git/lib/layout \
-  ${ENYOJS_GIT_REPO}/moonraker;protocol=ssh;name=moonraker;destsuffix=git/lib/moonraker \
-  ${ENYOJS_GIT_REPO}/onyx;protocol=git;name=onyx;destsuffix=git/lib/onyx \
-  ${ENYOJS_GIT_REPO}/spotlight;protocol=ssh;name=spotlight;destsuffix=git/lib/spotlight \
+  ${ENYOJS_GIT_REPO}/enyo;protocol=git;name=enyo;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX}/enyo \
+  ${ENYOJS_GIT_REPO}/layout;protocol=git;name=layout;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX}/lib/layout \
+  ${ENYOJS_GIT_REPO}/moonraker;protocol=ssh;name=moonraker;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX}/lib/moonraker \
+  ${ENYOJS_GIT_REPO}/onyx;protocol=git;name=onyx;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX}/lib/onyx \
+  ${ENYOJS_GIT_REPO}/spotlight;protocol=ssh;name=spotlight;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX}/lib/spotlight \
 "
 SRCREV_FORMAT="main"
 SRCREV_enyo = "7d08cbf035ea25985788f5456e4b3241f8e70740"
