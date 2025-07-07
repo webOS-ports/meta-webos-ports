@@ -7,6 +7,6 @@ DEPENDS += "mojomail-common c-ares"
 inherit webos_filesystem_paths
 inherit webos_system_bus
 
-S = "${UNPACKDIR}/git/pop"
+S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/pop"
 
 FILES:${PN} += "${webos_accttemplatesdir}"

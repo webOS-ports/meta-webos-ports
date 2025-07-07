@@ -8,7 +8,7 @@ require com.webos.service.camera.inc
 
 WEBOS_REPO_NAME = "com.webos.service.camera"
 
-S = "${UNPACKDIR}/git/src/libs"
+S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/src/libs"
 
 PR = "${INC_PR}.3"
 
