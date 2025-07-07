@@ -18,8 +18,8 @@ SRCREV_libgdrive = "a7838bcf55fbbc6cfb66209bb2db1fbe82758924"
 SRCREV_common = "d4276cb79d2bccb47431d530e6e3738df49cabd2"
 SRCREV_coner = "22dd8e36e96bf38d35896add347a733ad9ed541c"
 SRC_URI = "git://github.com/allenbo/libgdrive.git;name=libgdrive;branch=master;protocol=https \
-    git://github.com/allenbo/common.git;name=common;destsuffix=git/common;branch=master;protocol=https \
-    git://github.com/allenbo/JConer.git;name=coner;destsuffix=git/jconer;branch=master;protocol=https \
+    git://github.com/allenbo/common.git;name=common;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX}/common;branch=master;protocol=https \
+    git://github.com/allenbo/JConer.git;name=coner;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX}/jconer;branch=master;protocol=https \
     file://0001-patch-for-jconer-in-SAF.patch;patchdir=jconer \
     file://0001-patch-for-libgdrive-in-SAF.patch \
 "
