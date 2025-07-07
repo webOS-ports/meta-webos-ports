@@ -17,6 +17,6 @@ inherit ${EXTRA_INHERIT}
 
 WEBOS_REPO_NAME = "test-apps"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-S = "${UNPACKDIR}/git/${BPN}"
+S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/${BPN}"
 
 FILES:${PN} += "${webos_applicationsdir}"

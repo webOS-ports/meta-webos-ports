@@ -19,7 +19,7 @@ LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
 WEBOS_REPO_NAME = "preware"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
-S = "${UNPACKDIR}/git/oe-service"
+S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/oe-service"
 
 pkg_postinst:${PN}() {
     #!/bin/sh -e
