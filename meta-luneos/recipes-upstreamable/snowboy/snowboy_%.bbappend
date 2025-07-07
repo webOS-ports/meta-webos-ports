@@ -7,7 +7,7 @@ inherit cmake
 DEPENDS += "lapack"
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
-SRC_URI += "file://snowboy.pc.in;subdir=git"
+SRC_URI += "file://snowboy.pc.in;subdir=${BB_GIT_DEFAULT_DESTSUFFIX}"
 
 # snowboy offers arm/aarch64/x86-64 only for C++ implementation
 COMPATIBLE_MACHINE = "rpi|aarch64|x86-64|qemux86-64|^halium$|pinetab2|pinephonepro|pinephone"
@@ -20,7 +20,7 @@ SNOWBOY_ARCH:aarch64 = "aarch64-ubuntu1604"
 SNOWBOY_ARCH:x86-64 = "ubuntu64"
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
-SRC_URI:append = " file://CMakeLists.txt;subdir=git"
+SRC_URI:append = " file://CMakeLists.txt;subdir=${BB_GIT_DEFAULT_DESTSUFFIX}"
 
 INSANE_SKIP:${PN} += "textrel"
 
