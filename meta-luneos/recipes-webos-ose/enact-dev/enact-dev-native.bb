@@ -19,7 +19,7 @@ RDEPENDS:${PN} += "jsdoc-to-ts-native"
 
 SRC_URI = " \
     ${ENACTJS_GIT_REPO}/cli.git;name=main${WEBOS_GIT_PROTOCOL};nobranch=1 \
-    npmsw://${THISDIR}/${BPN}/npm-shrinkwrap.json;destsuffix=git \
+    npmsw://${THISDIR}/${BPN}/npm-shrinkwrap.json;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX} \
 "
 
 # PV is the version of the cli distribution, as tagged in the

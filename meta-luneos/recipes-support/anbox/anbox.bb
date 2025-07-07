@@ -26,8 +26,8 @@ RRECOMMENDS:${PN} += " \
 "
 
 SRC_URI = "git://github.com/anbox/anbox;name=main;branch=master;protocol=https \
-    git://github.com/google/cpu_features.git;name=cpu-features;destsuffix=git/external/cpu_features;branch=master;protocol=https \
-    git://github.com/Kistler-Group/sdbus-cpp.git;name=sdbus-cpp;destsuffix=git/external/sdbus-cpp;branch=master;protocol=https \
+    git://github.com/google/cpu_features.git;name=cpu-features;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX}/external/cpu_features;branch=master;protocol=https \
+    git://github.com/Kistler-Group/sdbus-cpp.git;name=sdbus-cpp;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX}/external/sdbus-cpp;branch=master;protocol=https \
     file://0001-Fix-dependencies-for-LuneOS.patch \
     file://0002-Fix-native-binaries-build.patch \
     file://0003-Fix-emugl-build.patch \

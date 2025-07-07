@@ -12,8 +12,8 @@ inherit webos_arch_indep
 inherit webos_enactjs_env
 
 SRC_URI = " \
-    ${ENACTJS_GIT_REPO}/sandstone.git;name=main${WEBOS_GIT_PROTOCOL};nobranch=1;destsuffix=git/sandstone \
-    ${ENACTJS_GIT_REPO}/enact;name=enact${WEBOS_GIT_PROTOCOL};nobranch=1;destsuffix=git/enact \
+    ${ENACTJS_GIT_REPO}/sandstone.git;name=main${WEBOS_GIT_PROTOCOL};nobranch=1;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX}/sandstone \
+    ${ENACTJS_GIT_REPO}/enact;name=enact${WEBOS_GIT_PROTOCOL};nobranch=1;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX}/enact \
     file://custom_skin.js \
 "
 
