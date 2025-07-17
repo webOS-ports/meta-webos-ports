@@ -48,3 +48,4 @@ do_install:append() {
 
 FILES:${PN} += "${OE_QMAKE_PATH_QML}/WebOSCompositor \
                 ${webos_sysconfdir}"
+EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"

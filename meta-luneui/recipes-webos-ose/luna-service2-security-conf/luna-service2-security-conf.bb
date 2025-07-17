@@ -29,3 +29,4 @@ sysroot_stage_dirs:append() {
     # e.g. ${SYSROOT_DESTDIR} passed from sysroot_stage_all()
     rm -vrf ${to}${webos_sysbus_datadir}
 }
+EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"

@@ -24,3 +24,4 @@ inherit webos_library
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 
 FILES:${PN} += "${datadir}/rolegen"
+EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"

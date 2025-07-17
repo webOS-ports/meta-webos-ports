@@ -25,3 +25,4 @@ EXTRA_OECMAKE += "-DWEBOS_INSTALL_CONFCAPSDIR:STRING=${webos_frameworksdir}"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 
 FILES:${PN} += "${webos_frameworksdir}/umediaserver/*"
+EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"

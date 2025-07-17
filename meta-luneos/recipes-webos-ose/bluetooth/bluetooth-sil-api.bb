@@ -28,3 +28,4 @@ PACKAGES =. "${PN}-tests "
 FILES:${PN}-tests = "${bindir}/bluetooth-sil-tester"
 
 ALLOW_EMPTY:${PN} = "1"
+EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"

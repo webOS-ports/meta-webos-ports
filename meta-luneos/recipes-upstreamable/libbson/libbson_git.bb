@@ -26,3 +26,4 @@ do_configure:append() {
 # File /usr/lib/pkgconfig/libbson-static-1.0.pc in package libbson-dev contains reference to TMPDIR [buildpaths]
 ERROR_QA:remove = "buildpaths"
 WARN_QA:append = " buildpaths"
+EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"

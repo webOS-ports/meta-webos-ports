@@ -17,3 +17,4 @@ inherit webos_public_repo
 WEBOS_REPO_NAME = "webos-settingsservice-conf"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 
+EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"

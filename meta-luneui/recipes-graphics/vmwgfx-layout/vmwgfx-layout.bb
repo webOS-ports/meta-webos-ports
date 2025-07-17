@@ -26,3 +26,4 @@ SYSTEMD_SERVICE:${PN} = "vmwgfx-setlayout.service"
 FILES:${PN} = "${bindir} \
     ${systemd_system_unitdir} \
 "
+EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"

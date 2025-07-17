@@ -24,3 +24,4 @@ inherit webos_daemon
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "pm-klog-daemon.service"
+EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"

@@ -22,3 +22,4 @@ inherit webos_cmake
 inherit webos_program
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"

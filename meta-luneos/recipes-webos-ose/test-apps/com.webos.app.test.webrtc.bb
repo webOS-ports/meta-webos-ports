@@ -7,3 +7,4 @@ PR = "${INC_PR}.0"
 SUMMARY = "WebRTC"
 AUTHOR = "Sujeet Nayak <sujeet.nayak@lge.com>"
 
+EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"

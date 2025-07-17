@@ -48,3 +48,4 @@ do_install:append() {
 # pmcertificatemgr/2.0.0-29+git/git/src/cert_db.c:1028:46: error: passing argument 1 of 'OPENSSL_sk_value' from incompatible pointer type [-Wincompatible-pointer-types]
 # pmcertificatemgr/2.0.0-29+git/git/src/cert_utils.c:569:25: error: passing argument 1 of 'EVP_PKEY_type' makes integer from pointer without a cast [-Wint-conversion]
 CFLAGS += "-Wno-error=int-conversion -Wno-error=incompatible-pointer-types"
+EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"

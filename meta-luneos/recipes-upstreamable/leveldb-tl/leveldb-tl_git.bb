@@ -39,3 +39,4 @@ BBCLASSEXTEND = "native"
 
 # ${PN} package is empty
 RDEPENDS:${PN}-dev = ""
+EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"

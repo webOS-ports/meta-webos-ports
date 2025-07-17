@@ -52,3 +52,4 @@ FILES:${PN} += "${webos_prefix} ${webos_sysconfdir}"
 # Below is needed for the LuneOS additions
 FILES:${PN} += "${webos_sysmgr_datadir}/customization/"
 FILES:${PN}-fonts += "${datadir}/fonts/"
+EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
