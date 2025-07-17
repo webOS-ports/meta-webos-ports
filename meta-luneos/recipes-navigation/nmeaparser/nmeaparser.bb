@@ -18,3 +18,4 @@ SRC_URI = "git://github.com/VisualGPS/NMEAParser.git;branch=master;protocol=http
     file://0002-NMEA-checksum-passing-to-nyx-module.patch \
 "
 S = "${WORKDIR}/git"
+EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"

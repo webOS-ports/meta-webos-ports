@@ -19,3 +19,4 @@ SRC_URI = "${OPENWEBOS_GIT_REPO_COMPLETE} \
     file://0001-ipc-fix-build-with-glibc-2.34.patch \
 "
 S = "${WORKDIR}/git"
+EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"

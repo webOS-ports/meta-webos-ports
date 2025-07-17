@@ -13,3 +13,4 @@ PR = "${INC_PR}.5"
 SRC_URI += " \
     file://0001-com.webos.app.test.webosose-use-the-media.operation-.patch \
 "
+EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"

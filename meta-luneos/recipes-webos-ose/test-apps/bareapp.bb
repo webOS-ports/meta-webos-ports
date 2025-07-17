@@ -10,3 +10,4 @@ PR = "${INC_PR}.2"
 
 SUMMARY = "Bare (no-enyo) test application"
 AUTHOR = "Donghyun Kim <donghyun11.kim@lge.com>"
+EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
