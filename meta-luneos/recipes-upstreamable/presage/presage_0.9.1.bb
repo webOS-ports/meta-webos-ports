@@ -23,6 +23,7 @@ SRC_URI = " \
     file://0003-predictors-Fix-build-with-gcc-7.patch \
     file://0004-Fix-build-with-gcc-11.patch \
     file://0005-configure.ac-don-t-use-L-usr-local-lib-in-LDFLAGS.patch \
+    file://0006-correct-mvprintw-compile-error.patch \
 "
 
 SRC_URI[md5sum] = "9667be297912fa0d432e748526d8dd9e"
