@@ -31,8 +31,13 @@ EXTRA_OECMAKE += "-DCMAKE_AR:FILEPATH=${AR}"
 
 PACKAGECONFIG[tools] = "-DPBNJSON_INSTALL_TOOLS:BOOL=TRUE,-DPBNJSON_INSTALL_TOOLS:BOOL=FALSE"
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+    file://0001-format_attribute.h-fix-typo-in-macro-name.patch \
+"
 
 S = "${WORKDIR}/git"
 
 BBCLASSEXTEND = "native"
+
+# to work around build with gcc-16 on host
+BUILD_CFLAGS += "-std=c++11"
