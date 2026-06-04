@@ -8,7 +8,7 @@ SRC_URI:append = " \
     file://0007-Fix-UCM-for-RK817.patch \
     git://github.com/msm8953-mainline/alsa-ucm-conf.git;protocol=https;branch=master;name=msm8953;destsuffix=${BP}/msm8953 \
 "
-SRCREV_msm8953 = "b6860eae577ddea6f55834850fb4ed403f208d2f"
+SRCREV_msm8953 = "ed9334bda853fe032794751c34cea03ec0d7d4eb"
 
 do_install:append() {
     # msm8953: generic codecs

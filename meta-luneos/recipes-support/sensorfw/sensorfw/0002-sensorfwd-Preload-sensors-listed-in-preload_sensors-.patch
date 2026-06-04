@@ -1,0 +1,89 @@
+From 54dcca43912135f5b2e98f014f233a00a0a31558 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 4 Jun 2026 07:44:23 +0200
+Subject: [PATCH] [sensorfwd] Preload sensors listed in "preload_sensors"
+ config key
+
+When a Qt6 client opens a sensor through the libqtsensors_sensorfw
+plugin (e.g. QAmbientLightSensor through luna-sysmgr), the plugin calls
+requestSensor() directly on /SensorManager over D-Bus. On a build that
+ships neither contextprovider-1.0 (the only path that preloads
+ContextSensor + ALSSensor in main.cpp today) nor a Halium hwconfig
+asserting Feature_* defaults, no sensor plugin is auto-loaded and the
+first requestSensor() fails with:
+
+    SensorManagerError: "requested sensor id 'alssensor' not registered"
+
+The client never recovers because the failure looks like a permanent
+unsupported-sensor error rather than a "not loaded yet" condition.
+
+Add a small comma-separated "preload_sensors" config key that an
+integrator can drop into a device's sensord conf, and call
+SensorManager::loadPlugin() for each name right after the manager comes
+up. The list is read through the existing SensorFrameworkConfig so it
+inherits the regular sensord.conf.d merging order; unknown names just
+log a "-> failed" line and otherwise stay out of the way.
+
+Suggested device conf:
+
+    preload_sensors=alssensor,accelerometersensor,gyroscopesensor,\
+                    magnetometersensor,orientationsensor
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ sensord/main.cpp | 38 ++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 38 insertions(+)
+
+diff --git a/sensord/main.cpp b/sensord/main.cpp
+index e43ecd1..22b32b7 100644
+--- a/sensord/main.cpp
++++ b/sensord/main.cpp
+@@ -281,6 +281,44 @@ int main(int argc, char *argv[])
+     }
+ #endif
+ 
++    /*
++     * Preload sensors named in the "preload_sensors" config key. This is
++     * a comma-separated list of sensor plugin names; each is loaded right
++     * after SensorManager comes up so that requestSensor() over D-Bus can
++     * succeed immediately on first call, without the client having to
++     * fall back to loadPlugin() explicitly.
++     *
++     * Without this, sensors whose Q[Type]Sensor Qt6 backend goes straight
++     * to requestSensor() (e.g. QAmbientLightSensor through
++     * libqtsensors_sensorfw.so) report "requested sensor id '<name>' not
++     * registered" on the first call, because lazy plugin loading in
++     * sensorfwd currently only fires for the magnetometer (via the
++     * --magnetometer-bg-calibration path) and for the ContextSensor
++     * path (only compiled when PROVIDE_CONTEXT_INFO is set, which in
++     * turn requires the legacy contextprovider-1.0 package).
++     *
++     * Builds that ship neither contextprovider nor the Halium-style
++     * hwconfig defaults end up with no auto-loaded sensors at all, so
++     * the on-demand request path is the only one available -- and on
++     * the current sensorfw it does not register the plugin.
++     *
++     * Example device conf:
++     *   preload_sensors=alssensor,accelerometersensor,gyroscopesensor
++     */
++    {
++        const QString preload =
++            SensorFrameworkConfig::configuration()->value<QString>("preload_sensors");
++        const QStringList names = preload.split(QLatin1Char(','));
++        for (const QString &item : names) {
++            const QString name = item.trimmed();
++            if (name.isEmpty())
++                continue;
++            const bool ok = sm.loadPlugin(name);
++            qCInfo(lcSensorFw) << "Preloading sensor" << name
++                               << (ok ? "-> ok" : "-> failed");
++        }
++    }
++
+     if (parser.magnetometerCalibration()) {
+         CalibrationHandler* calibrationHandler_ = new CalibrationHandler(nullptr);
+         calibrationHandler_->initiateSession();
+-- 
+2.43.0
+
