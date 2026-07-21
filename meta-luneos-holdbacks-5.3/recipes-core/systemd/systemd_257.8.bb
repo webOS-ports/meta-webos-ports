@@ -18,6 +18,10 @@ REQUIRED_DISTRO_FEATURES += "usrmerge"
 # that we don't build both udev and systemd in world builds.
 REQUIRED_DISTRO_FEATURES += "systemd"
 
+# Ensure that the native tools are available when we're building a rootfs with systemd in,
+# so that systemctl can be used in postinst scripts
+PACKAGE_WRITE_DEPS += "systemd-tools-native"
+
 SRC_URI += " \
            file://touchscreen.rules \
            file://00-create-volatile.conf \
@@ -923,12 +927,10 @@ pkg_prerm:${PN}:libc-glibc () {
 	fi
 }
 
-PACKAGE_WRITE_DEPS += "qemuwrapper-cross"
-
 pkg_postinst:udev-hwdb () {
 	if test -n "$D"; then
-		$INTERCEPT_DIR/postinst_intercept update_udev_hwdb ${PKG} mlprefix=${MLPREFIX} binprefix=${MLPREFIX} \
-			rootlibexecdir="${nonarch_libdir}" PREFERRED_PROVIDER_udev="${PREFERRED_PROVIDER_udev}" base_bindir="${base_bindir}"
+		$INTERCEPT_DIR/postinst_intercept update_udev_hwdb ${PKG} mlprefix=${MLPREFIX} \
+			PREFERRED_PROVIDER_udev="${PREFERRED_PROVIDER_udev}"
 	else
 		systemd-hwdb update
 	fi
