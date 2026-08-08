@@ -15,9 +15,21 @@ DEPENDS = "pidgin glib-2.0 libopus libogg luna-service2"
 S = "${WORKDIR}/git/messaging/facebook-e2ee/plugin/purple-combined"
 # B defaults to ${WORKDIR}/build in go.bbclass; left at the default.
 
-inherit go-mod
+# `go`, deliberately not `go-mod`. go-mod adds
+#     do_compile[dirs] += "${B}/src/${GO_WORKDIR}"
+# and bitbake chdirs into the last [dirs] entry before running the task. That path only exists
+# under the GOPATH relocation go_do_unpack performs -- which purple-synergy.inc disables with
+# destsuffix=git so that S lands where every other recipe here expects. With the relocation off,
+# nothing creates that directory and the task dies as FileNotFoundError before writing any log,
+# which is a confusing way to learn this.
+#
+# The module handling go-mod would have contributed is two lines, reproduced below.
+inherit go
 
 GO_IMPORT = "github.com/hoehermann/purple-gowhatsapp"
+
+export GOMODCACHE = "${B}/.mod"
+do_compile[cleandirs] += "${B}/.mod"
 
 # Go modules follow what this layer set already does for Go recipes (influxdb, etcd, syzkaller):
 # fetch through GOPROXY during do_compile, with that task granted network access, which bitbake
@@ -45,7 +57,7 @@ do_compile() {
     # cross settings that DO matter -- CC, CGO_ENABLED, CGO_CFLAGS, GOARCH -- come from the
     # environment the class exports, not from these flags. build-combined.sh invokes go the same
     # bare way.
-    ${GO} build -trimpath -buildmode=c-archive -o ${B}/libwhatsmeow.a .
+    ${GO} build -trimpath -modcacherw -buildmode=c-archive -o ${B}/libwhatsmeow.a .
 
     GCFLAGS="${CFLAGS} -fPIC -I${S}/glue -I${S} -I${B} -I${WORKDIR}/git/messaging/common \
              $(pkg-config --cflags purple glib-2.0 opus ogg)"
