@@ -29,6 +29,25 @@ inherit cmake cargo cargo-update-recipe-crates
 
 EXTRA_OECMAKE = "-DCMAKE_BUILD_TYPE=Release"
 
+# BLOCKED ON THE RUST TOOLCHAIN, not on anything in this recipe.
+#
+# scarthgap ships rust/cargo 1.75.0. presage's dependency graph is far newer than that:
+#
+#   * src/rust/Cargo.lock is lockfile version 4, which cargo refuses before 1.78 --
+#     "lock file version 4 requires `-Znext-lockfile-bump`"
+#   * regenerating it as version 3 only moves the failure. The graph pulls icu_* 2.2.0, and
+#     icu_collections-2.2.0 declares rust-version = "1.86". Eleven minor versions above what is
+#     available here, and it is a transitive dependency of libsignal, so it cannot simply be
+#     pinned back without unpicking presage and libsignal too.
+#
+# Enabling Signal therefore needs a newer rust in the layer set, not a change here. Given that
+# Signal also does not work on webOS at runtime -- libpresage aborts the transport on login --
+# that is a lot of toolchain work for a plug-in that would not function afterwards.
+#
+# Everything else in this recipe is done and stays valid for whenever the toolchain moves: the
+# 443 crates.io dependencies are listed with checksums, and the 24 non-crates.io git forks are
+# wired up by source replacement in purple-presage-git-deps.inc.
+
 # The Rust half links libcrypto for SQLCipher, so openssl has to be visible to the crate build
 # scripts and not only to the final C link. boring-sys additionally builds BoringSSL from its own
 # vendored copy, which is the slowest part of this recipe by a wide margin.
