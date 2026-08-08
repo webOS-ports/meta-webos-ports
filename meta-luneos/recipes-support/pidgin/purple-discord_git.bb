@@ -33,12 +33,14 @@ do_compile() {
     oe_runmake LDFLAGS="${LDFLAGS} $(${STAGING_BINDIR_NATIVE}/pkg-config --libs libqrencode openssl)"
 }
 
-# Installed by hand rather than with `make install`. That target depends on discord16.png and
-# friends, which are NOT in the repo: the Makefile regenerates them from discord-alt-logo.svg
-# with ImageMagick, so `make install` fails with "magick: No such file or directory". Pulling in
-# imagemagick-native to render artwork would be a heavy dependency for nothing, because these
-# pixmaps are Pidgin UI icons -- webOS takes its account icons from the account template instead.
-# (purple-teams and purple-googlechat ship their PNGs committed, so they can use make install.)
+# Installed by hand rather than with `make install`, so no Pidgin pixmaps are shipped -- same as
+# purple-teams and purple-googlechat. See purple-synergy.inc for why none of them ship icons.
+#
+# Here there is a second reason: `make install` cannot run at all. It depends on discord16.png
+# and friends, which are in upstream's own .gitignore -- the Makefile renders them from
+# discord-alt-logo.svg with ImageMagick at install time, so the target fails with
+# "magick: No such file or directory" and would otherwise need imagemagick-native purely to
+# generate artwork that nothing on this platform reads.
 do_install() {
     install -d ${D}${libdir}/purple-2
     install -m 0755 ${S}/libdiscord.so ${D}${libdir}/purple-2/libdiscord.so
