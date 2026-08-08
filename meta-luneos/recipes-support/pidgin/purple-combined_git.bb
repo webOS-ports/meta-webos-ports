@@ -13,7 +13,7 @@ require purple-synergy.inc
 DEPENDS = "pidgin glib-2.0 libopus libogg luna-service2"
 
 S = "${WORKDIR}/git/messaging/facebook-e2ee/plugin/purple-combined"
-B = "${WORKDIR}/build"
+# B defaults to ${WORKDIR}/build in go.bbclass; left at the default.
 
 inherit go-mod
 
@@ -38,8 +38,14 @@ VOIPKIT_GLUE = "voipkit_none"
 do_compile() {
     cd ${S}
 
-    # 1. the Go half as a c-archive, plus its generated header
-    ${GO} build ${GOBUILDFLAGS} -buildmode=c-archive -o ${B}/libwhatsmeow.a .
+    # 1. the Go half as a c-archive, plus its generated header.
+    # GOBUILDFLAGS is deliberately not used: go.bbclass builds it around GO_LDFLAGS, which is an
+    # -ldflags= string for linking executables (-linkmode, -extldflags, the dynamic loader). None
+    # of that applies to -buildmode=c-archive, where the C toolchain does the final link. The
+    # cross settings that DO matter -- CC, CGO_ENABLED, CGO_CFLAGS, GOARCH -- come from the
+    # environment the class exports, not from these flags. build-combined.sh invokes go the same
+    # bare way.
+    ${GO} build -trimpath -buildmode=c-archive -o ${B}/libwhatsmeow.a .
 
     GCFLAGS="${CFLAGS} -fPIC -I${S}/glue -I${S} -I${B} -I${WORKDIR}/git/messaging/common \
              $(pkg-config --cflags purple glib-2.0 opus ogg)"
