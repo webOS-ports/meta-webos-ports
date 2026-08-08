@@ -11,7 +11,12 @@
 HOMEPAGE = "https://github.com/Herrie82/webos-synergy-revival"
 SECTION = "webos/services"
 
-SRC_URI = "git://github.com/Herrie82/webos-synergy-revival.git;branch=herrie/telegram-tdlib-1.8.66;protocol=https"
+# destsuffix=git is the git fetcher's own default, so it changes nothing for most of these -- but
+# it is stated explicitly because go.bbclass's go_do_unpack REWRITES the destsuffix when a git URL
+# does not set one, relocating the checkout to ${WORKDIR}/<basename S>/src/${GO_IMPORT} for a
+# GOPATH layout. purple-combined inherits go-mod, so without this its sources land somewhere else
+# entirely and S points at an empty directory tree.
+SRC_URI = "git://github.com/Herrie82/webos-synergy-revival.git;branch=herrie/telegram-tdlib-1.8.66;protocol=https;destsuffix=git"
 SRCREV = "6984a0a27f65bf49be1ad829a85a02b1494af17a"
 
 PV = "1.0+git"

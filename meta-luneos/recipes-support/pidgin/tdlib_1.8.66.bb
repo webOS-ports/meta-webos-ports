@@ -18,6 +18,32 @@ S = "${WORKDIR}/git/messaging/telegram/plugin/tdlib-src"
 
 inherit cmake
 
+# TDLib cannot be cross-compiled in one pass. Headers like td/mtproto/mtproto_api.h do not exist
+# in the source tree: they are produced by generator programs (tl_generate_mtproto,
+# tl_generate_common, tdmime_auto, tl_generate_json) that TDLib builds and then RUNS. Cross-built
+# generators cannot run on the builder, so the first cross attempt fails with
+#
+#     td/mtproto/Handshake.cpp:12:10: fatal error: td/mtproto/mtproto_api.h: No such file
+#
+# Upstream's answer is the prepare_cross_compiling target, driven from a native configure. This
+# does that in-recipe rather than via tdlib-native, because the generators write their output into
+# the SOURCE tree -- a separate native recipe would generate into its own WORKDIR, where this
+# build would never see it.
+#
+# TD_GENERATE_SOURCE_FILES=ON keeps the pass cheap: TDLib skips its OpenSSL/zlib lookups and
+# builds only the generators, not the library.
+do_configure:prepend() {
+    cmake -S ${S} -B ${WORKDIR}/generate \
+        -DTD_GENERATE_SOURCE_FILES=ON \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_C_COMPILER="${BUILD_CC}" \
+        -DCMAKE_CXX_COMPILER="${BUILD_CXX}" \
+        -DCMAKE_C_FLAGS="${BUILD_CFLAGS}" \
+        -DCMAKE_CXX_FLAGS="${BUILD_CXXFLAGS}" \
+        -DCMAKE_EXE_LINKER_FLAGS="${BUILD_LDFLAGS}"
+    cmake --build ${WORKDIR}/generate -j ${@oe.utils.cpu_count()}
+}
+
 # Static libraries only. tdlib-purple links libtdclient/libtdcore/libtdapi/libtddb/libtdsqlite/
 # libtde2e/libtdmtproto/libtdnet/libtdactor/libtdutils as archives, which is also how the ARM
 # build in this monorepo consumes it.
@@ -41,4 +67,6 @@ CXXFLAGS:remove = "-pipe"
 # package is empty by design and everything lands in -dev/-staticdev.
 ALLOW_EMPTY:${PN} = "1"
 
+# The generator pass above is done in-recipe, so nothing here needs tdlib-native. Left available
+# in case something else ever wants it.
 BBCLASSEXTEND = "native nativesdk"
