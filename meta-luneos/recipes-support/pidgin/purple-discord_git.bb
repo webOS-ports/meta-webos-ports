@@ -9,27 +9,37 @@ DEPENDS = "pidgin json-glib glib-2.0 zlib qrencode openssl"
 S = "${WORKDIR}/git/messaging/discord/plugin/purple-discord"
 
 # QR remote-auth is NOT optional in this fork: discord_rsa.c includes <qrencode.h>
-# unconditionally, so the plug-in does not compile without it. qrencode comes from meta-oe.
+# unconditionally, so the plug-in does not compile without it. qrencode comes from meta-oe and
+# ships libqrencode.pc, the module name the Makefile probes for.
 #
-# USE_QRCODE_AUTH=0 looks backwards but is deliberate, and matches build-discord.sh. It only
-# switches off the upstream Makefile's QR auto-detect block, which pulls the RSA backend from
-# NSS via pkg-config. This fork uses the OpenSSL backend instead (USE_OPENSSL_CRYPTO in
-# discord_rsa.c), so the feature is enabled by hand through CPPFLAGS -- -DUSE_QRCODE_AUTH
-# without the NSS dependency the Makefile would otherwise impose.
+# USE_QRCODE_AUTH=0 reads backwards but is deliberate, and matches build-discord.sh. It only
+# switches off the upstream Makefile's QR auto-detect block, which would pull the RSA backend in
+# from NSS via pkg-config. This fork uses the OpenSSL backend instead (USE_OPENSSL_CRYPTO in
+# discord_rsa.c), so the feature is enabled through CFLAGS below and NSS is never involved.
+#
+# The defines go through CFLAGS rather than a CPPFLAGS= assignment in EXTRA_OEMAKE: quoting a
+# multi-word value there does not survive into make reliably -- the first attempt reached make as
+# an empty CPPFLAGS= plus two stray arguments. The Makefile uses both $(CFLAGS) and $(CPPFLAGS)
+# on its link line, and declares CFLAGS with ?= so bitbake's exported value wins anyway.
+CFLAGS:append = " -DUSE_QRCODE_AUTH -DUSE_OPENSSL_CRYPTO"
 
-# CPPFLAGS keeps OE's own value and appends -- setting it outright on the make command line would
-# drop the sysroot flags bitbake puts there, since command-line variables beat the environment.
 EXTRA_OEMAKE = " \
     CC='${CC}' \
     PKG_CONFIG='${STAGING_BINDIR_NATIVE}/pkg-config' \
     USE_QRCODE_AUTH=0 \
-    CPPFLAGS='${CPPFLAGS} -DUSE_QRCODE_AUTH -DUSE_OPENSSL_CRYPTO' \
 "
 
 do_compile() {
     oe_runmake LDFLAGS="${LDFLAGS} $(${STAGING_BINDIR_NATIVE}/pkg-config --libs libqrencode openssl)"
 }
 
+# Installed by hand rather than with `make install`. That target depends on discord16.png and
+# friends, which are NOT in the repo: the Makefile regenerates them from discord-alt-logo.svg
+# with ImageMagick, so `make install` fails with "magick: No such file or directory". Pulling in
+# imagemagick-native to render artwork would be a heavy dependency for nothing, because these
+# pixmaps are Pidgin UI icons -- webOS takes its account icons from the account template instead.
+# (purple-teams and purple-googlechat ship their PNGs committed, so they can use make install.)
 do_install() {
-    oe_runmake DESTDIR="${D}" install
+    install -d ${D}${libdir}/purple-2
+    install -m 0755 ${S}/libdiscord.so ${D}${libdir}/purple-2/libdiscord.so
 }
