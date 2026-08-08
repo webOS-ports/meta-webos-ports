@@ -26,6 +26,9 @@ RRECOMMENDS:${PN} += " \
     purple-discord \
     purple-googlechat \
     purple-teams \
+    purple-combined \
+    purple-presage \
+    tdlib-purple \
     funyahoo-plusplus \
     icyque \
     libpurple-plugin-autoaccept \
@@ -48,18 +51,20 @@ RRECOMMENDS:${PN} += " \
     libpurple-protocol-zephyr \
 "
 
-# The remaining webos-synergy-revival plug-ins are deliberately NOT listed above. RRECOMMENDS
-# still requires the recipe to build, so a broken one fails the whole image, and each of these
-# has a known blocker:
+# All six webos-synergy-revival plug-ins are enabled. purple-combined provides TWO prpls from one
+# shared object -- prpl-hehoe-whatsmeow (WhatsApp) and prpl-gometa (Facebook Messenger) -- because
+# they share a Go runtime.
 #
-#   purple-combined  needs network access in do_compile to fetch Go modules through GOPROXY.
-#                    Vendoring instead would add 172M to the source repo.
-#   purple-presage   its 24 non-crates.io git dependencies are wired up but have never been
-#                    built, and boring-sys compiles BoringSSL, which is slow.
+# Three of them are heavier or more fragile than the rest, so if an image build breaks these are
+# the ones to drop first:
+#
 #   tdlib-purple     pulls in tdlib, a very large C++ build and the most likely thing to OOM a
-#                    constrained builder.
-#
-# Add them to the list above one at a time, once each has been through a real build:
-#     purple-combined purple-presage tdlib-purple
+#                    constrained builder (its recipe caps PARALLEL_MAKE at 2 for that reason).
+#   purple-combined  needs network access in do_compile to fetch Go modules through GOPROXY,
+#                    the same way influxdb and etcd do in this layer set.
+#   purple-presage   its 24 non-crates.io git dependencies are wired up by hand, and boring-sys
+#                    compiles BoringSSL. Note also that Signal does not currently work on webOS
+#                    at runtime -- libpresage aborts the transport on login -- so a successful
+#                    build here does not mean a usable plug-in.
 
 CXXFLAGS += "-fpermissive"
