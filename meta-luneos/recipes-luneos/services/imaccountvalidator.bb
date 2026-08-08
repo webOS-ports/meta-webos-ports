@@ -23,6 +23,9 @@ S = "${WORKDIR}/git"
 RRECOMMENDS:${PN} += " \
     pidgin-sipe \
     purple-matrix \
+    purple-discord \
+    purple-googlechat \
+    purple-teams \
     funyahoo-plusplus \
     icyque \
     libpurple-plugin-autoaccept \
@@ -44,5 +47,19 @@ RRECOMMENDS:${PN} += " \
     libpurple-protocol-xmpp \
     libpurple-protocol-zephyr \
 "
+
+# The remaining webos-synergy-revival plug-ins are deliberately NOT listed above. RRECOMMENDS
+# still requires the recipe to build, so a broken one fails the whole image, and each of these
+# has a known blocker:
+#
+#   purple-combined  needs network access in do_compile to fetch Go modules through GOPROXY.
+#                    Vendoring instead would add 172M to the source repo.
+#   purple-presage   its 24 non-crates.io git dependencies are wired up but have never been
+#                    built, and boring-sys compiles BoringSSL, which is slow.
+#   tdlib-purple     pulls in tdlib, a very large C++ build and the most likely thing to OOM a
+#                    constrained builder.
+#
+# Add them to the list above one at a time, once each has been through a real build:
+#     purple-combined purple-presage tdlib-purple
 
 CXXFLAGS += "-fpermissive"
