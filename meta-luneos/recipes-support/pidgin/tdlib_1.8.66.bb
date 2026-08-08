@@ -53,15 +53,19 @@ EXTRA_OECMAKE = " \
     -DBUILD_SHARED_LIBS=OFF \
 "
 
-# TDLib generates a very large set of C++ sources and then compiles them, and the generated
-# translation units are individually huge. On a builder with limited RAM per core this is the
-# recipe that will OOM first; upstream's own advice is to split the generated sources
-# (SplitSource.php) or to cap parallelism. Capping is the simpler lever and is why it is here
-# rather than left to the default.
-PARALLEL_MAKE = "-j 2"
-
-# The generated sources push compile memory well past what -pipe assumes.
-CXXFLAGS:remove = "-pipe"
+# TDLib's generated translation units are individually large, so its peak memory per compile job
+# is well above average -- roughly 1-2 GB. That is worth knowing, but it is NOT a reason to
+# throttle by default: at the -j 24 this build sets globally that is ~50 GB peak against the
+# 125 GB this builder has.
+#
+# An earlier version of this recipe pinned PARALLEL_MAKE = "-j 2" as a precaution against OOM on
+# a small builder. That was a guess, and an expensive one: it overrode the global setting and
+# made tdlib roughly twelve times slower than it needed to be. If you are building on something
+# genuinely memory-constrained, set PARALLEL_MAKE in your local.conf rather than here, where it
+# would penalise everyone.
+#
+# -pipe is likewise left alone; it trades a little memory for not round-tripping through temp
+# files, which is the right trade on any machine with RAM to spare.
 
 # tdlib installs headers plus the static archives; nothing here ships at runtime, so the main
 # package is empty by design and everything lands in -dev/-staticdev.
