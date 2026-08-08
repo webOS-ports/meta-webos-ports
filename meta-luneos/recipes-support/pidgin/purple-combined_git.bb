@@ -7,7 +7,10 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=5b4473596678d62d9d83096273422c8c"
 
 require purple-synergy.inc
 
-DEPENDS = "pidgin glib-2.0 libopus libogg"
+# luna-service2 is for glue/call.c (com.palm.whatsapp.call). It compiles against 3.21.2 thanks to
+# messaging/common/webos-ls2-compat.h, which re-expresses the legacy split-bus API -- LSPalmService
+# and friends were removed outright in 3.x.
+DEPENDS = "pidgin glib-2.0 libopus libogg luna-service2"
 
 S = "${WORKDIR}/git/messaging/facebook-e2ee/plugin/purple-combined"
 B = "${WORKDIR}/build"
@@ -16,52 +19,73 @@ inherit go-mod
 
 GO_IMPORT = "github.com/hoehermann/purple-gowhatsapp"
 
-# Go module handling follows what the rest of this layer set already does for Go recipes
-# (influxdb, etcd, syzkaller): let the go tool fetch modules through GOPROXY during do_compile,
-# and grant that task network access, which bitbake otherwise denies outside do_fetch.
+# Go modules follow what this layer set already does for Go recipes (influxdb, etcd, syzkaller):
+# fetch through GOPROXY during do_compile, with that task granted network access, which bitbake
+# otherwise denies outside do_fetch.
 #
-# The alternative is vendoring. It was measured rather than guessed: `go mod vendor` on this
-# module produces 172 MB, which is not something to carry in the source repo for every checkout.
-# If a fully offline build is ever needed, vendor into a separate artifact and add -mod=vendor
-# here rather than committing it upstream.
+# Vendoring was the alternative and was measured rather than assumed: `go mod vendor` on this
+# module produces 172 MB, too much to carry in the source repo for every checkout. If a fully
+# offline build is ever required, vendor into a separate artifact and add -mod=vendor here.
 export GOPROXY = "https://proxy.golang.org,direct"
 do_compile[network] = "1"
 
-# Three stages, mirroring build-combined.sh:
-#   1. cgo builds the Go half as a c-archive plus its generated header
-#   2. the C glue compiles against that header
-#   3. everything links into one plugin
-#
-# The video bridge is deliberately the NULL backend here. glue/voipkit.cpp binds
-# libpalmgstskype.so, a gstreamer-0.10 plugin that exists only in legacy webOS firmware;
-# glue/voipkit_none.c is the stand-in that lets the plugin link without it (WA_VOIPKIT=0 in
-# build-combined.sh). Messaging and voice calling are unaffected -- video is what is missing, and
-# a real LuneOS backend still has to be written.
-#
-# Also not built: the com.palm.whatsapp.call LS2 service in glue/call.c. Turning it on needs
-# DEPENDS += "luna-service2" and -I${WORKDIR}/git/messaging/common for webos-ls2-compat.h, which
-# maps the legacy split-bus API onto the single bus luna-service2 3.21.2 provides.
+# The video bridge is the NULL backend. glue/voipkit.cpp binds libpalmgstskype.so, a
+# gstreamer-0.10 plugin that exists only in legacy webOS firmware; glue/voipkit_none.c stands in
+# so the plugin links without it. Messaging and voice calling are unaffected -- video is what is
+# missing, and a LuneOS video backend still has to be written.
+VOIPKIT_GLUE = "voipkit_none"
 
 do_compile() {
     cd ${S}
+
+    # 1. the Go half as a c-archive, plus its generated header
     ${GO} build ${GOBUILDFLAGS} -buildmode=c-archive -o ${B}/libwhatsmeow.a .
 
-    for f in whatsmeow gometa_init voipkit_none; do
-        [ -f ${S}/glue/$f.c ] || continue
-        ${CC} ${CFLAGS} -fPIC -I${S}/glue -I${S} -I${B} \
-            $(pkg-config --cflags purple glib-2.0) \
-            -c ${S}/glue/$f.c -o ${B}/$f.o
+    GCFLAGS="${CFLAGS} -fPIC -I${S}/glue -I${S} -I${B} -I${WORKDIR}/git/messaging/common \
+             $(pkg-config --cflags purple glib-2.0 opus ogg)"
+
+    # 2. the C glue. This list mirrors build-combined.sh; keep the two in step.
+    OBJS=""
+    for s in init login qrcode bridge process_message display_message groups blist \
+             send_message handle_attachment send_file presence options receipt pixbuf commands \
+             call denoise aec h264_rtp gometa_init ${VOIPKIT_GLUE}; do
+        ${CC} ${GCFLAGS} -I${WEBRTC_DSP} -c ${S}/glue/$s.c -o ${B}/glue_$s.o
+        OBJS="$OBJS ${B}/glue_$s.o"
+    done
+    for s in bridge constants gometabridge; do
+        ${CC} ${GCFLAGS} -c ${S}/$s.c -o ${B}/root_$s.o
+        OBJS="$OBJS ${B}/root_$s.o"
     done
 
-    # -Bsymbolic-functions: this plugin and purple-teams both define the identically-named
-    # voipkit_* bridge symbols and are dlopen'd into the same process, so without it ELF
+    # 2b. WebRTC float noise suppression + AECM, for glue/denoise.c and glue/aec.c. The source
+    # lists live in build-combined.sh (NS_SRCS/AEC_SRCS); they are read from there rather than
+    # copied, so the two cannot drift apart.
+    NS_SRCS=$(sed -n '/^NS_SRCS=(/,/^)/p' ${S}/build-combined.sh | grep -oE "[a-z_0-9/]+\.(c|cc)")
+    AEC_SRCS=$(sed -n '/^AEC_SRCS=(/,/^)/p' ${S}/build-combined.sh | grep -oE "[a-z_0-9/]+\.(c|cc)")
+    for s in $NS_SRCS; do
+        ${CC} -O2 -fPIC -std=gnu11 -DNDEBUG -DWEBRTC_POSIX -DWEBRTC_APM_DEBUG_DUMP=0 \
+              -DWEBRTC_NS_FLOAT -I${WEBRTC_DSP} -c ${WEBRTC_DSP}/$s -o ${B}/ns_$(echo $s | tr / _).o
+        OBJS="$OBJS ${B}/ns_$(echo $s | tr / _).o"
+    done
+    for s in $AEC_SRCS; do
+        ${CXX} -O2 -fPIC -std=c++11 -DNDEBUG -DWEBRTC_POSIX -DWEBRTC_APM_DEBUG_DUMP=0 \
+               -I${WEBRTC_DSP} -c ${WEBRTC_DSP}/$s -o ${B}/aec_$(echo $s | tr / _).o
+        OBJS="$OBJS ${B}/aec_$(echo $s | tr / _).o"
+    done
+
+    # 3. link. -Bsymbolic-functions: this plugin and purple-teams both define the identically
+    # named voipkit_* bridge symbols and are dlopen'd into the same process, so without it ELF
     # interposition can route one plugin's calls into the other's copy depending on load order.
     ${CC} -shared -fPIC ${LDFLAGS} -Wl,-Bsymbolic-functions \
         -Wl,-soname,libwhatsmeow.so -o ${B}/libwhatsmeow.so \
-        ${B}/*.o ${B}/libwhatsmeow.a \
-        $(pkg-config --libs purple glib-2.0) \
-        -lopus -logg -lpthread -ldl -lm -lresolv -lstdc++
+        $OBJS ${B}/libwhatsmeow.a \
+        $(pkg-config --libs purple glib-2.0 opus ogg) \
+        -lpthread -ldl -lm -lresolv -lstdc++
 }
+
+# The WebRTC DSP sources live in the Telegram plug-in's libtgvoip copy, in the same monorepo
+# checkout -- purple-combined reuses them rather than carrying a second copy.
+WEBRTC_DSP = "${WORKDIR}/git/messaging/telegram/plugin/libtgvoip/webrtc_dsp"
 
 do_install() {
     install -d ${D}${libdir}/purple-2
