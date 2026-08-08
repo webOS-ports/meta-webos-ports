@@ -26,7 +26,6 @@ RRECOMMENDS:${PN} += " \
     purple-googlechat \
     purple-teams \
     purple-combined \
-    purple-presage \
     tdlib-purple \
     funyahoo-plusplus \
     icyque \
@@ -61,10 +60,11 @@ RRECOMMENDS:${PN} += " \
 #                    constrained builder (its recipe caps PARALLEL_MAKE at 2 for that reason).
 #   purple-combined  needs network access in do_compile to fetch Go modules through GOPROXY,
 #                    the same way influxdb and etcd do in this layer set.
-#   purple-presage   its 24 non-crates.io git dependencies are wired up by hand, and boring-sys
-#                    compiles BoringSSL. Note also that Signal does not currently work on webOS
-#                    at runtime -- libpresage aborts the transport on login -- so a successful
-#                    build here does not mean a usable plug-in.
+#
+# purple-presage (Signal) is NOT listed: it cannot build on scarthgap at all. Its Cargo.lock is
+# lockfile version 4 (cargo 1.78+) and its graph needs rust 1.86 via icu_* 2.2.0, against the
+# 1.75 this layer set provides. The recipe is complete and waiting for a newer toolchain -- see
+# purple-presage_git.bb. Signal also does not work on webOS at runtime regardless.
 
 do_install:append() {
     cp -R --no-dereference --preserve=mode,links -v ${S}/files/etc ${D}
