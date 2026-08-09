@@ -11,6 +11,12 @@ NOT_COMPATIBLE_WITH_CURRENT_NODEJS = " \
 
 #LuneOS uses it's own settings app
 VIRTUAL-RUNTIME_settingsapp ?= "org.webosports.app.settings"
+
+# Atlas is the default browser (VIRTUAL-RUNTIME_com.webos.app.browser) and is also listed below, so it
+# ships whichever browser is default. enactbrowser stays installed because run_browser_shell loads its
+# pdf.js as a Chromium extension for EVERY browsershell app — drop that package and Atlas loses
+# in-browser PDF as well.
+
 RDEPENDS:${PN} = " \
   ${DISTRO_EXTRA_RDEPENDS} \
   \
@@ -40,7 +46,9 @@ RDEPENDS:${PN} = " \
   \
   org.webosports.app.preware \
   org.webosports.service.ipkg \
+  com.webos.app.enactbrowser \
   \
+  org.webosports.app.atlas \
   org.webosports.app.calculator \
   org.webosports.app.contacts \
   org.webosports.app.filemanager \
@@ -126,12 +134,12 @@ LIBHYBRIS_RDEPENDS = " \
 "
 
 # (Optional?) work for Qt6:
-#     qtscenegraph-adaptation 
+#     qtscenegraph-adaptation
 
 #Needs update for Qt6
-#    qtubuntu-camera 
-#    libqtubuntu-media-signals2 
-#    qtvideo-node 
+#    qtubuntu-camera
+#    libqtubuntu-media-signals2
+#    qtvideo-node
 
 RDEPENDS:${PN}:append:tuna = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:grouper = " ${LIBHYBRIS_RDEPENDS}"
