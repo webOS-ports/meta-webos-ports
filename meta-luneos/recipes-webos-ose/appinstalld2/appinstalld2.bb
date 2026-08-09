@@ -14,7 +14,7 @@ DEPENDS = "glib-2.0 luna-service2 libpbnjson pmloglib pmtrace boost icu"
 RDEPENDS:${PN} = "applicationinstallerutility ecryptfs-utils librolegen"
 
 WEBOS_VERSION = "1.0.0-48_85b593a34cefb1384ca6def806bfaf18ca92b7d9"
-PR = "r7"
+PR = "r8"
 
 inherit webos_component
 inherit webos_cmake
@@ -29,6 +29,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0003-AppPackage-allow-different-owner-UIDs-GIDs.patch \
     file://0004-appinstalld2-Make-org.webosports-privileged-as-well.patch \
     file://0005-Add-permission-for-rescan.patch \
+    file://0006-sysbus-drop-client-permissions-for-ACGs-that-do-not-.patch \
 "
 
 inherit webos_systemd

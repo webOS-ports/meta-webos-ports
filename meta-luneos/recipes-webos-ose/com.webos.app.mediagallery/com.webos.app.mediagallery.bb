@@ -20,8 +20,10 @@ DEPENDS:append = " ${@ 'qtshadertools-native' if d.getVar('QT_VERSION')[0] == '6
 RDEPENDS:${PN} += "qml-webos-framework qml-webos-bridge"
 
 WEBOS_VERSION = "1.0.0-17_4fe324a62ee8d06e344e935f17cbda3d3e568b59"
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-PR = "r4"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+    file://0001-appinfo.json-drop-requiredPermissions-for-ACGs-that-.patch \
+"
+PR = "r5"
 
 inherit webos_enhanced_submissions
 inherit webos_public_repo

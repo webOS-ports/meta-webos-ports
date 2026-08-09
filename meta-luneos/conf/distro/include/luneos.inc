@@ -216,3 +216,20 @@ FORTRAN:forcevariable = ",fortran"
 # like printf("[%5ld.%09ld]", time.tv_sec, time.tv_nsec) is done and provokes crashes
 GLIBC_64BIT_TIME_FLAGS:remove:armv7a = "-D_TIME_BITS=64"
 INSANE_SKIP:append:armv7a = " 32bit-time"
+
+#############################################################################
+# LS2 access control group (ACG) validation, see
+# meta-luneos/classes/webos_ls2_conf_validate.bbclass
+#
+# Components carry client-permissions for services that webOS OSE ships but
+# LuneOS does not. The referenced groups therefore do not exist in our images,
+# which is harmless (ls-hubd simply grants nothing for them) but makes
+# do_validate_ls2_acg complain. List them here so the check stays useful for
+# real mistakes. Drop an entry as soon as the providing service is added.
+#############################################################################
+WEBOS_LS2_CONF_VALIDATE_SKIP_GROUP = " \
+    account.query \
+    media.displayControl \
+    media.displayInfo \
+    session.management \
+"
