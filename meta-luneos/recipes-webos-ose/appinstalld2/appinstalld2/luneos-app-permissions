@@ -1,0 +1,479 @@
+#!/usr/bin/env python3
+# Copyright (c) 2026 WebOS Ports
+#
+# SPDX-License-Identifier: Apache-2.0
+"""Fill in a missing "requiredPermissions" in an application's appinfo.json.
+
+Newer luna-service2 only grants an application the LS2 access control groups
+(ACGs) listed in "requiredPermissions" in its appinfo.json.  Legacy webOS ipks
+predate that key, so appinstalld ends up generating a client-permissions file
+that grants them nothing and every luna:// call they make is denied.
+
+This helper scans the installed application for luna:// / palm:// service URIs,
+maps them onto the ACGs that the installed services actually declare (in
+/usr/share/luna-service2/api-permissions.d and friends) and writes the result
+back into appinfo.json, so that the permission file appinstalld generates right
+afterwards grants exactly what the app appears to use.
+
+Applications that already declare "requiredPermissions" are left alone unless
+--force is given.
+"""
+
+import argparse
+import errno
+import fnmatch
+import json
+import os
+import re
+import sys
+import tempfile
+
+DEFAULT_CONFIG_PATH = "/etc/palm/luneos-app-permissions.json"
+
+DEFAULT_CONFIG = {
+    # Directories holding <service>.api.json files that declare which ACG each
+    # service method belongs to.  Missing directories are ignored.
+    "apiPermissionsDirs": [
+        "/usr/share/luna-service2/api-permissions.d",
+        "/var/luna-service2/api-permissions.d",
+        "/var/luna-service2-dev/api-permissions.d",
+    ],
+
+    # Granted to every app we touch, on top of whatever the scan finds.  These
+    # are the groups a legacy webOS app needs just to be an app: talk to the
+    # application manager, run activities, read the system settings.
+    "baseline": [
+        "activity.operation",
+        "application.launcher",
+        "application.operation",
+        "appmanager.management",
+        "settings.query",
+        "systemsettings.query",
+        "time.query",
+    ],
+
+    # Used instead of the scan result when the scan finds nothing at all (an app
+    # that builds its service URIs at runtime, or one we could not read).
+    "fallback": [
+        "activity.operation",
+        "application.launcher",
+        "application.operation",
+        "appmanager.management",
+        "database.operation",
+        "download.operation",
+        "filecache.operation",
+        "notification.operation",
+        "preferences.applicationpropertyquery",
+        "preferences.operation",
+        "preferences.systempropertyquery",
+        "settings.query",
+        "systemsettings.query",
+        "time.query",
+    ],
+
+    # Legacy service names that no longer appear in api-permissions.d, mapped to
+    # the name that replaced them.  Consulted only when the legacy name itself
+    # matches nothing.
+    "serviceAliases": {
+        "com.palm.activitymanager": "com.webos.service.activitymanager",
+        "com.palm.bluetooth": "com.webos.service.bluetooth2",
+        "com.palm.bluetooth2": "com.webos.service.bluetooth2",
+        "com.palm.connectionmanager": "com.webos.service.connectionmanager",
+        "com.palm.downloadmanager": "com.webos.service.downloadmanager",
+        "com.palm.image": "com.webos.service.image",
+        "com.palm.location": "com.webos.service.location",
+        "com.palm.locationservice": "com.webos.service.location",
+        "com.palm.mediad": "com.webos.media",
+        "com.palm.notification": "com.webos.notification",
+        "com.palm.pdm": "com.webos.service.pdm",
+        "com.palm.power": "com.webos.service.power2",
+        "com.palm.settingsservice": "com.webos.settingsservice",
+        "com.palm.systemservice": "com.webos.service.systemservice",
+        "com.palm.wifi": "com.webos.service.wifi",
+    },
+
+    # When only the service name is known (Enyo splits the service URI and the
+    # method name across two properties) we grant every group that service
+    # declares, except the ones matching these patterns.
+    "excludeFromServiceExpansion": [
+        "all",
+        "arescli.interface",
+        "eventmonitor.plugin",
+        "*.devmode",
+        "*.devutility",
+        "*.profiling",
+        "*.test",
+    ],
+
+    # Never emitted, whatever the scan says.  "all" is the wildcard group; an
+    # app that gets it is not sandboxed at all.
+    "excludeAlways": [
+        "all",
+    ],
+
+    # Files we never bother reading.  Everything else is scanned as bytes, so
+    # native executables are covered too.
+    "skipExtensions": [
+        ".3gp", ".aac", ".avi", ".bmp", ".flac", ".gif", ".gz", ".ico", ".jpeg",
+        ".jpg", ".m4a", ".m4v", ".mp3", ".mp4", ".oga", ".ogg", ".ogv", ".opus",
+        ".otf", ".png", ".svg", ".tar", ".ttf", ".wav", ".webm", ".webp",
+        ".wma", ".wmv", ".woff", ".woff2", ".xz", ".zip",
+    ],
+
+    # Per-file cap, in bytes.  0 disables the cap.
+    "maxFileSize": 268435456,
+}
+
+# luna://com.palm.db/find, palm://com.palm.systemservice/, luna://com.webos.foo
+URI_RE = re.compile(
+    rb"(?:luna|palm)://"
+    rb"([A-Za-z][A-Za-z0-9]*(?:[._-][A-Za-z0-9]+)*)"
+    rb"((?:/[A-Za-z0-9_-]+)*)"
+)
+
+
+def log(msg):
+    sys.stderr.write("luneos-app-permissions: %s\n" % msg)
+
+
+class AcgIndex(object):
+    """Which ACG covers which <service>/<category>/<method>."""
+
+    def __init__(self):
+        self._patterns = []          # [(pattern, group)]
+        self._by_service = {}        # service pattern -> set(groups)
+
+    def load_dirs(self, dirs):
+        for directory in dirs:
+            try:
+                names = sorted(os.listdir(directory))
+            except OSError as exc:
+                if exc.errno not in (errno.ENOENT, errno.ENOTDIR):
+                    log("cannot list %s: %s" % (directory, exc))
+                continue
+            for name in names:
+                if name.endswith(".json"):
+                    self._load_file(os.path.join(directory, name))
+
+    def _load_file(self, path):
+        try:
+            with open(path, "r") as handle:
+                data = json.load(handle)
+        except (OSError, ValueError) as exc:
+            log("ignoring %s: %s" % (path, exc))
+            return
+        if not isinstance(data, dict):
+            return
+        for group, methods in data.items():
+            if not isinstance(methods, list):
+                continue
+            for method in methods:
+                if not isinstance(method, str):
+                    continue
+                self._patterns.append((method, group))
+                service = method.split("/", 1)[0]
+                self._by_service.setdefault(service, set()).add(group)
+
+    @property
+    def empty(self):
+        return not self._patterns
+
+    def groups_for_method(self, service, path):
+        uri = service if not path else service + "/" + path
+        return set(g for p, g in self._patterns if fnmatch.fnmatchcase(uri, p))
+
+    def groups_for_service(self, service):
+        groups = set()
+        for pattern, pattern_groups in self._by_service.items():
+            # "*" is luna-service2's own catch-all entry; expanding it would
+            # match every service name and tell us nothing.
+            if pattern == "*":
+                continue
+            if fnmatch.fnmatchcase(service, pattern):
+                groups |= pattern_groups
+        return groups
+
+
+def matches_any(name, patterns):
+    return any(fnmatch.fnmatchcase(name, p) for p in patterns)
+
+
+def strip_json_comments(text):
+    """Drop // and /* */ comments; some legacy appinfo.json files have them."""
+
+    def replace(match):
+        token = match.group(0)
+        return "" if token.startswith("/") else token
+
+    pattern = re.compile(
+        r"//[^\n]*|/\*.*?\*/|'(?:\\.|[^\\'])*'|\"(?:\\.|[^\\\"])*\"",
+        re.DOTALL,
+    )
+    return pattern.sub(replace, text)
+
+
+def read_json_relaxed(path):
+    """Parse JSON, tolerating the // and /* */ comments webOS files often use."""
+    with open(path, "r") as handle:
+        text = handle.read()
+    try:
+        return json.loads(text)
+    except ValueError:
+        return json.loads(strip_json_comments(text))
+
+
+def write_appinfo(path, data):
+    """Rewrite appinfo.json, keeping the original owner and mode."""
+    stat = os.stat(path)
+    directory = os.path.dirname(path) or "."
+    handle, tmp_path = tempfile.mkstemp(prefix=".appinfo.json.", dir=directory)
+    try:
+        with os.fdopen(handle, "w") as out:
+            json.dump(data, out, indent=4, ensure_ascii=False)
+            out.write("\n")
+            out.flush()
+            os.fsync(out.fileno())
+        os.chmod(tmp_path, stat.st_mode & 0o7777)
+        try:
+            os.chown(tmp_path, stat.st_uid, stat.st_gid)
+        except OSError as exc:
+            if exc.errno != errno.EPERM:
+                raise
+        os.rename(tmp_path, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def collect_uris(app_dir, config):
+    """Return {service: set(method paths)}; an empty path means "unknown"."""
+    skip_extensions = tuple(e.lower() for e in config["skipExtensions"])
+    max_size = config["maxFileSize"]
+    found = {}
+
+    for root, dirs, files in os.walk(app_dir):
+        dirs.sort()
+        for name in sorted(files):
+            if name.lower().endswith(skip_extensions):
+                continue
+            path = os.path.join(root, name)
+            try:
+                if os.path.islink(path) or not os.path.isfile(path):
+                    continue
+                if max_size and os.path.getsize(path) > max_size:
+                    log("skipping oversized %s" % path)
+                    continue
+                with open(path, "rb") as handle:
+                    blob = handle.read()
+            except OSError as exc:
+                log("cannot read %s: %s" % (path, exc))
+                continue
+
+            for match in URI_RE.finditer(blob):
+                service = match.group(1).decode("ascii", "replace")
+                path_part = match.group(2).decode("ascii", "replace").strip("/")
+                found.setdefault(service, set()).add(path_part)
+
+    return found
+
+
+def resolve_groups(uris, index, config):
+    """Map scanned URIs onto ACGs.  Returns (groups, unresolved services)."""
+    aliases = config["serviceAliases"]
+    exclude_expansion = config["excludeFromServiceExpansion"]
+    exclude_always = config["excludeAlways"]
+    groups = set()
+    unresolved = set()
+
+    def usable(candidates):
+        return set(g for g in candidates if not matches_any(g, exclude_always))
+
+    for service, paths in uris.items():
+        candidates = [service]
+        alias = aliases.get(service)
+        if alias and alias != service:
+            candidates.append(alias)
+
+        service_hit = False
+        for candidate in candidates:
+            for path in paths:
+                if path:
+                    hit = usable(index.groups_for_method(candidate, path))
+                    if hit:
+                        groups |= hit
+                        service_hit = True
+            if service_hit:
+                break
+
+            # No exact method match: fall back to everything this service
+            # offers, minus the developer-only groups.
+            expansion = usable(index.groups_for_service(candidate))
+            expansion = set(
+                g for g in expansion if not matches_any(g, exclude_expansion)
+            )
+            if expansion:
+                groups |= expansion
+                service_hit = True
+                break
+
+        if not service_hit:
+            unresolved.add(service)
+
+    return groups, unresolved
+
+
+def load_config(path):
+    config = dict(DEFAULT_CONFIG)
+    if not path:
+        return config
+    try:
+        override = read_json_relaxed(path)
+    except OSError as exc:
+        if exc.errno != errno.ENOENT:
+            log("cannot read %s: %s" % (path, exc))
+        return config
+    except ValueError as exc:
+        log("ignoring malformed %s: %s" % (path, exc))
+        return config
+
+    if isinstance(override, dict):
+        config.update(override)
+    return config
+
+
+def has_permissions(app_info):
+    value = app_info.get("requiredPermissions")
+    return (
+        isinstance(value, list)
+        and value
+        and all(isinstance(item, str) for item in value)
+    )
+
+
+def process_app(app_dir, config, index, args):
+    app_info_path = os.path.join(app_dir, "appinfo.json")
+    try:
+        app_info = read_json_relaxed(app_info_path)
+    except (OSError, ValueError) as exc:
+        log("%s: cannot parse appinfo.json: %s" % (app_dir, exc))
+        return None
+    if not isinstance(app_info, dict):
+        log("%s: appinfo.json is not an object" % app_dir)
+        return None
+
+    app_id = app_info.get("id", os.path.basename(app_dir.rstrip("/")))
+
+    if has_permissions(app_info) and not args.force:
+        if args.verbose:
+            log("%s: already declares requiredPermissions, nothing to do" % app_id)
+        return None
+
+    uris = collect_uris(app_dir, config)
+    groups, unresolved = resolve_groups(uris, index, config)
+    source = "scan"
+
+    if not groups:
+        groups = set(config["fallback"])
+        source = "fallback"
+        log("%s: no service calls recognised, applying fallback profile" % app_id)
+
+    groups |= set(config["baseline"])
+    result = sorted(
+        g for g in groups if not matches_any(g, config["excludeAlways"])
+    )
+
+    if args.verbose:
+        for service in sorted(uris):
+            log("%s: uses %s" % (app_id, service))
+        for service in sorted(unresolved):
+            log("%s: no ACG declares %s, ignored" % (app_id, service))
+
+    log(
+        "%s: requiredPermissions (%s) -> %s"
+        % (app_id, source, ", ".join(result))
+    )
+
+    if args.dry_run:
+        return result
+
+    app_info["requiredPermissions"] = result
+    try:
+        write_appinfo(app_info_path, app_info)
+    except OSError as exc:
+        log("%s: cannot write appinfo.json: %s" % (app_id, exc))
+        return None
+
+    return result
+
+
+def iter_app_dirs(args):
+    for base in args.all_installed:
+        try:
+            names = sorted(os.listdir(base))
+        except OSError as exc:
+            if exc.errno != errno.ENOENT:
+                log("cannot list %s: %s" % (base, exc))
+            continue
+        for name in names:
+            candidate = os.path.join(base, name)
+            if os.path.isfile(os.path.join(candidate, "appinfo.json")):
+                yield candidate
+    for app_dir in args.app_dir:
+        yield app_dir
+
+
+def main(argv):
+    parser = argparse.ArgumentParser(
+        description="Fill in a missing requiredPermissions in appinfo.json."
+    )
+    parser.add_argument("app_dir", nargs="*",
+                        help="directory holding the application's appinfo.json")
+    parser.add_argument("--all-installed", action="append", default=[],
+                        metavar="DIR",
+                        help="process every application directory under DIR "
+                             "(repeatable)")
+    parser.add_argument("--config", default=DEFAULT_CONFIG_PATH,
+                        help="configuration file (default: %(default)s)")
+    parser.add_argument("--api-permissions-dir", action="append", default=[],
+                        metavar="DIR",
+                        help="extra api-permissions.d directory (repeatable)")
+    parser.add_argument("--force", action="store_true",
+                        help="recompute even if requiredPermissions is present")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="report what would be written, change nothing")
+    parser.add_argument("--json", action="store_true", dest="as_json",
+                        help="print the result as JSON on stdout")
+    parser.add_argument("-v", "--verbose", action="store_true",
+                        help="report the service URIs found")
+    args = parser.parse_args(argv)
+
+    if not args.app_dir and not args.all_installed:
+        parser.error("no application directory given")
+
+    config = load_config(args.config)
+
+    index = AcgIndex()
+    index.load_dirs(list(config["apiPermissionsDirs"]) +
+                    list(args.api_permissions_dir))
+    if index.empty:
+        log("no api-permissions.d content found, cannot map service calls")
+
+    report = {}
+    for app_dir in iter_app_dirs(args):
+        result = process_app(app_dir, config, index, args)
+        if result is not None:
+            report[app_dir] = result
+
+    if args.as_json:
+        json.dump(report, sys.stdout, indent=4, sort_keys=True)
+        sys.stdout.write("\n")
+
+    # Never fail an installation because of this helper.
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
