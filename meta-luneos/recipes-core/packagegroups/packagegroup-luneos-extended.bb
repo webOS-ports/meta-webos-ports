@@ -11,6 +11,11 @@ NOT_COMPATIBLE_WITH_CURRENT_NODEJS = " \
 
 #LuneOS uses it's own settings app
 VIRTUAL-RUNTIME_settingsapp ?= "org.webosports.app.settings"
+
+# Atlas is the default browser (VIRTUAL-RUNTIME_com.webos.app.browser) and is also listed below, so it
+# ships whichever browser is default. enactbrowser stays installed because run_browser_shell loads its
+# pdf.js as a Chromium extension for EVERY browsershell app — drop that package and Atlas loses
+# in-browser PDF as well.
 RDEPENDS:${PN} = " \
   ${DISTRO_EXTRA_RDEPENDS} \
   \
@@ -40,7 +45,9 @@ RDEPENDS:${PN} = " \
   \
   org.webosports.app.preware \
   org.webosports.service.ipkg \
+  com.webos.app.enactbrowser \
   \
+  org.webosports.app.atlas \
   org.webosports.app.calculator \
   org.webosports.app.contacts \
   org.webosports.app.filemanager \
@@ -103,6 +110,8 @@ RDEPENDS:${PN} = " \
   org.mer.app.fingerterm \
   org.webosports.app.terminal \
   org.webosports.app.camera \
+  \
+  v4l-utils \
 "
 
 LIBHYBRIS_RDEPENDS = " \
@@ -138,7 +147,11 @@ RDEPENDS:${PN}:append:grouper = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:mako = " ${LIBHYBRIS_RDEPENDS} bluebinder"
 RDEPENDS:${PN}:append:hammerhead = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:hammerhead-halium = " ${LIBHYBRIS_RDEPENDS}"
-RDEPENDS:${PN}:append:tenderloin = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
+RDEPENDS:${PN}:append:opal = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
+RDEPENDS:${PN}:append:opal3g = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
+RDEPENDS:${PN}:append:tenderloin = " alsa-utils-systemd rmtfs qrtr rpmsgexport"
+RDEPENDS:${PN}:append:tenderloin71 = " alsa-utils-systemd rmtfs qrtr rpmsgexport"
+RDEPENDS:${PN}:append:tenderloin3g = " alsa-utils-systemd rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:tenderloin-halium = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:mido = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:mido-halium = " ${LIBHYBRIS_RDEPENDS} bluebinder"
@@ -163,7 +176,7 @@ RDEPENDS:${PN}:append:tissot-halium = " waydroid"
 
 QEMU_RDEPENDS = " \
     alsa-utils-systemd \
-    mesa-driver-swrast \
+    mesa-megadriver \
     kernel-module-snd-intel8x0 \
     phonesim \
     qt-plugin-generic-vboxtouch \
