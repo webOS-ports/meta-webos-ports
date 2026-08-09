@@ -30,6 +30,16 @@ inherit webos_public_repo
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 
+# Fix zram-on.sh for modern kernels (Linux 5.x/6.x)
+# - Suppress grep errors for missing optional config file
+# - Skip deprecated max_comp_streams sysfs file
+# - Handle comp_algorithm gracefully
+
+SRC_URI:append = " \
+    file://0001-zram-on.sh-fix-for-modern-kernels.patch \
+"
+
+
 #EXTRA_OECMAKE += "-DWEBOS_QTTESTABILITY_ENABLED:BOOL=${@ '1' if d.getVar('WEBOS_DISTRO_PRERELEASE') != '' else '0'}"
 
 FILES:${PN} += "${base_libdir}"
