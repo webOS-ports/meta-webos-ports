@@ -19,6 +19,7 @@ SRC_URI += " \
     file://0006-webossystem_injection.cc-fix-some-PalmSystem-functio.patch \
     file://0007-app_shell-override-default-OnWindowHostClose-to-clos.patch \
     file://0008-wayland_touch-apply-device_scale_factor-to-events.patch \
+    file://0009-browser-shell-use-ACG-names-that-actually-exist.patch \
 "
 # Halium specific patch for DRI
 SRC_URI:append:halium = " \

@@ -217,3 +217,20 @@ INSANE_SKIP:append:armv7a = " 32bit-time"
 # Backport UNPACKDIR variable from styhead
 # https://git.openembedded.org/openembedded-core/commit/?id=e022d62ba917790af2121da57646271ef17c03fa
 UNPACKDIR ??= "${WORKDIR}"
+
+#############################################################################
+# LS2 access control group (ACG) validation, see
+# meta-luneos/classes/webos_ls2_conf_validate.bbclass
+#
+# Components carry client-permissions for services that webOS OSE ships but
+# LuneOS does not. The referenced groups therefore do not exist in our images,
+# which is harmless (ls-hubd simply grants nothing for them) but makes
+# do_validate_ls2_acg complain. List them here so the check stays useful for
+# real mistakes. Drop an entry as soon as the providing service is added.
+#############################################################################
+WEBOS_LS2_CONF_VALIDATE_SKIP_GROUP = " \
+    account.query \
+    media.displayControl \
+    media.displayInfo \
+    session.management \
+"
