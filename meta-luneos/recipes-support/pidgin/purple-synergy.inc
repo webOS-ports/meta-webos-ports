@@ -17,7 +17,7 @@ SECTION = "webos/services"
 # GOPATH layout. purple-combined inherits go-mod, so without this its sources land somewhere else
 # entirely and S points at an empty directory tree.
 SRC_URI = "git://github.com/Herrie82/webos-synergy-revival.git;branch=herrie/telegram-tdlib-1.8.66;protocol=https;destsuffix=git"
-SRCREV = "6984a0a27f65bf49be1ad829a85a02b1494af17a"
+SRCREV = "23e8193c5ff9c83a7a9f275af2947d868d3d2ce2"
 
 PV = "1.0+git"
 

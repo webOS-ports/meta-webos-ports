@@ -10,7 +10,16 @@ require purple-synergy.inc
 # luna-service2 is for glue/call.c (com.palm.whatsapp.call). It compiles against 3.21.2 thanks to
 # messaging/common/webos-ls2-compat.h, which re-expresses the legacy split-bus API -- LSPalmService
 # and friends were removed outright in 3.x.
-DEPENDS = "pidgin glib-2.0 libopus libogg luna-service2"
+#
+# alsa-lib is also glue/call.c: call audio is captured and played through ALSA directly.
+#
+# opusfile is NOT optional in practice. opusreader.c gates itself on `#if __has_include("opusfile.h")`
+# and, when absent, compiles to a stub with
+#     #pragma message "Warning: Building without opusfile. Sending voice messages is disabled."
+# -- a warning, not an error, so the build stays green and voice-note sending silently disappears
+# from the finished plugin. It provides the duration and waveform that send_file.go/send_message.go/
+# gometa_media.go attach to outgoing voice notes.
+DEPENDS = "pidgin glib-2.0 libopus libogg opusfile alsa-lib luna-service2"
 
 S = "${WORKDIR}/git/messaging/facebook-e2ee/plugin/purple-combined"
 # B defaults to ${WORKDIR}/build in go.bbclass; left at the default.
@@ -50,6 +59,20 @@ VOIPKIT_GLUE = "voipkit_none"
 do_compile() {
     cd ${S}
 
+    # The plugin version is a build input, not a recipe constant: glue/init.c has
+    #     #ifndef PLUGIN_VERSION
+    #     #error Must set PLUGIN_VERSION in build system
+    # and both halves stamp it into their PurplePluginInfo.version. Read it from the same VERSION
+    # file build-combined.sh reads, so the device and LuneOS builds cannot report different versions.
+    PLUGIN_VERSION=$(cat ${S}/VERSION)
+
+    # cgo needs libpurple's own include directory. go.bbclass exports CGO_CFLAGS as bare ${CFLAGS},
+    # which carries the sysroot and the cross settings but nothing package-specific, so the very
+    # first cgo file fails on gometabridge.h's `#include <purple.h>`. Append rather than replace --
+    # what go.bbclass put there is what makes this a cross build at all.
+    export CGO_CFLAGS="$CGO_CFLAGS $(pkg-config --cflags purple glib-2.0 opus opusfile ogg) -DPLUGIN_VERSION=$PLUGIN_VERSION -D_DEFAULT_SOURCE"
+    export CGO_LDFLAGS="$CGO_LDFLAGS $(pkg-config --libs purple glib-2.0 opus opusfile ogg)"
+
     # 1. the Go half as a c-archive, plus its generated header.
     # GOBUILDFLAGS is deliberately not used: go.bbclass builds it around GO_LDFLAGS, which is an
     # -ldflags= string for linking executables (-linkmode, -extldflags, the dynamic loader). None
@@ -59,8 +82,22 @@ do_compile() {
     # bare way.
     ${GO} build -trimpath -modcacherw -buildmode=c-archive -o ${B}/libwhatsmeow.a .
 
-    GCFLAGS="${CFLAGS} -fPIC -I${S}/glue -I${S} -I${B} -I${WORKDIR}/git/messaging/common \
-             $(pkg-config --cflags purple glib-2.0 opus ogg)"
+    # -DPURPLE_PLUGINS mirrors build-combined.sh, but it is belt-and-braces rather than required:
+    # plugin.h does switch PURPLE_INIT_PLUGIN on it (unset selects the static-prpl entry point
+    # purple_init_whatsmeow_plugin instead of the G_MODULE_EXPORTed purple_init_plugin libpurple
+    # looks up after dlopen), yet purple.h itself does `#define PURPLE_PLUGINS 1` at line 46, so any
+    # translation unit that reaches plugin.h through purple.h already has it. Verified both ways --
+    # the symbol is purple_init_plugin with and without the flag.
+    #
+    # -DPLUGIN_VERSION, by contrast, IS required: glue/init.c #errors without it.
+    #
+    # luna-service2 needs its own -I on top of pkg-config: the .pc gives only -I${includedir}, while
+    # the header sits at ${includedir}/luna-service2/lunaservice.h and webos-ls2-compat.h includes it
+    # bare as <lunaservice.h>.
+    GCFLAGS="${CFLAGS} -fPIC -DPURPLE_PLUGINS -DPLUGIN_VERSION=$PLUGIN_VERSION \
+             -I${S}/glue -I${S} -I${B} -I${WORKDIR}/git/messaging/common \
+             -I${STAGING_INCDIR}/luna-service2 \
+             $(pkg-config --cflags purple glib-2.0 opus opusfile ogg alsa luna-service2)"
 
     # 2. the C glue. This list mirrors build-combined.sh; keep the two in step.
     OBJS=""
@@ -97,8 +134,18 @@ do_compile() {
     ${CC} -shared -fPIC ${LDFLAGS} -Wl,-Bsymbolic-functions \
         -Wl,-soname,libwhatsmeow.so -o ${B}/libwhatsmeow.so \
         $OBJS ${B}/libwhatsmeow.a \
-        $(pkg-config --libs purple glib-2.0 opus ogg) \
+        $(pkg-config --libs purple glib-2.0 opus opusfile ogg alsa luna-service2) \
         -lpthread -ldl -lm -lresolv -lstdc++
+
+    # Fail loudly here rather than shipping a plugin libpurple will quietly refuse to load. This is
+    # the same check build-combined.sh runs on the ARM output. A .so missing its entry point or a
+    # prpl id builds, links and packages perfectly happily; nothing before runtime notices.
+    if ! ${NM} -D --defined-only ${B}/libwhatsmeow.so | grep -q ' purple_init_plugin$'; then
+        bbfatal "libwhatsmeow.so exports no purple_init_plugin; libpurple would reject it at runtime"
+    fi
+    for id in prpl-hehoe-whatsmeow prpl-gometa; do
+        grep -q "$id" ${B}/libwhatsmeow.so || bbfatal "libwhatsmeow.so is missing prpl id $id"
+    done
 }
 
 # The WebRTC DSP sources live in the Telegram plug-in's libtgvoip copy, in the same monorepo
