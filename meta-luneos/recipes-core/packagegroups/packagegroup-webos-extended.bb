@@ -19,7 +19,7 @@ VIRTUAL-RUNTIME_surface-manager-conf ?= "luna-surfacemanager-conf"
 VIRTUAL-RUNTIME_surface-manager-extension ?= ""
 VIRTUAL-RUNTIME_webos-ime ?= ""
 VIRTUAL-RUNTIME_novacomd ?= "novacomd"
-VIRTUAL-RUNTIME_com.webos.app.browser ?= "com.webos.app.enactbrowser"
+VIRTUAL-RUNTIME_com.webos.app.browser ?= "org.webosports.app.atlas"
 VIRTUAL-RUNTIME_com.webos.app.camera ?= "com.webos.app.camera"
 VIRTUAL-RUNTIME_com.webos.app.mediagallery ?= "com.webos.app.mediagallery"
 VIRTUAL-RUNTIME_com.webos.app.notification ?= "com.webos.app.notification"
@@ -32,6 +32,7 @@ VIRTUAL-RUNTIME_ai ?= "com.webos.service.ai"
 VIRTUAL-RUNTIME_memorymanager ?= "com.webos.service.memorymanager"
 VIRTUAL-RUNTIME_g-media-pipeline ?= "g-media-pipeline"
 VIRTUAL-RUNTIME_g-camera-pipeline ?= "g-camera-pipeline"
+VIRTUAL-RUNTIME_camera ?= "com.webos.service.camera"
 VIRTUAL-RUNTIME_nodejs-module-node-red ?= "node-red"
 VIRTUAL-RUNTIME_contextintentmgr ?= "com.webos.service.contextintentmgr"
 VIRTUAL-RUNTIME_mojoservicelauncher ?= "mojoservicelauncher"
@@ -148,6 +149,7 @@ RDEPENDS:${PN} = " \
     ${@bb.utils.contains('DISTRO_FEATURES', 'smack', 'attr smack com.webos.app.test.smack.native', '', d)} \
     ${VIRTUAL-RUNTIME_com.webos.app.camera} \
     ${VIRTUAL-RUNTIME_com.webos.app.home} \
+    ${VIRTUAL-RUNTIME_camera} \
     ${VIRTUAL-RUNTIME_g-camera-pipeline} \
     ${VIRTUAL-RUNTIME_g-media-pipeline} \
     bootd \
@@ -226,6 +228,7 @@ WEBOS_FOSS_MISSING_FROM_RDEPENDS = " \
     makedevs \
     ncurses \
     openssl \
+    openssl-engines \
     procps \
     psmisc \
     sqlite3 \
