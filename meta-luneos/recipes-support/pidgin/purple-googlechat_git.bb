@@ -28,4 +28,8 @@ do_compile() {
 do_install() {
     install -d ${D}${libdir}/purple-2
     install -m 0755 ${S}/libgooglechat.so ${D}${libdir}/purple-2/libgooglechat.so
+
+    # Account template, so Google Chat can actually be added as an account.
+    install -d ${D}${webos_accttemplatesdir}
+    cp -rf ${WORKDIR}/git/messaging/googlechat/account/com.palm.googlechat ${D}${webos_accttemplatesdir}/
 }

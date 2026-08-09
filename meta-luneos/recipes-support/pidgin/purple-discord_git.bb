@@ -44,4 +44,8 @@ do_compile() {
 do_install() {
     install -d ${D}${libdir}/purple-2
     install -m 0755 ${S}/libdiscord.so ${D}${libdir}/purple-2/libdiscord.so
+
+    # Account template, so Discord can actually be added as an account.
+    install -d ${D}${webos_accttemplatesdir}
+    cp -rf ${WORKDIR}/git/messaging/discord/account/com.palm.discord ${D}${webos_accttemplatesdir}/
 }

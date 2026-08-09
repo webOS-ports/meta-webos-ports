@@ -23,13 +23,20 @@ PV = "1.0+git"
 
 inherit pkgconfig
 
+# webos_filesystem_paths is for webos_accttemplatesdir. Each plugin installs its own account
+# template from the monorepo's messaging/<protocol>/account/ -- the template is what makes the
+# protocol appear as an addable account type, so it belongs with the plugin that implements it
+# rather than in messaging-accounts, which carries the legacy org.webosports.messaging.* set from
+# a different repository.
+inherit webos_filesystem_paths
+
 # Every one of these is an EionRobb-style plugin or a close relative: a plain Makefile, nothing
 # needing configure. Each recipe installs its .so by hand rather than running `make install`,
 # because that target also installs Pidgin protocol pixmaps into ${datadir}/pixmaps/pidgin --
 # a directory only Pidgin's GTK UI reads, and there is no Pidgin here. libpurple is loaded
 # headless by imlibpurpletransport, and webOS takes account icons from the account template.
 # So no pixmaps path is packaged: nothing installs one.
-FILES:${PN} += "${libdir}/purple-2"
+FILES:${PN} += "${libdir}/purple-2 ${webos_accttemplatesdir}"
 
 # The plugins are dlopen'd by libpurple, so they carry no SONAME and OE's default packaging
 # would otherwise route the .so into ${PN}-dev and leave the runtime package empty.

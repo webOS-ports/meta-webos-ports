@@ -96,4 +96,8 @@ EXTRA_OECMAKE = " \
 do_install:append() {
     rm -rf ${D}${datadir}/pixmaps
     rm -rf ${D}${datadir}/metainfo
+
+    # Account template, so Telegram can actually be added as an account.
+    install -d ${D}${webos_accttemplatesdir}
+    cp -rf ${WORKDIR}/git/messaging/telegram/account/com.palm.telegram ${D}${webos_accttemplatesdir}/
 }
