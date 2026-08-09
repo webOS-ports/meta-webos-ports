@@ -1,0 +1,120 @@
+From b8bc037aebd283c64d34b5039551c4afad13c4b8 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 4 Jun 2026 10:44:10 +0200
+Subject: [PATCH] [iioadaptor] Accept *_input attributes for
+ IIO_CHAN_INFO_PROCESSED sensors
+
+IIO drivers that expose their value as a pre-processed quantity publish
+the channel as *_input rather than *_raw -- the driver applies scale,
+offset and calibration on the kernel side and userspace consumes the
+result directly in physical units.  Examples include isl29018 (lux via
+in_illuminance0_input), many temperature sensors (milli-degree via
+in_temp_input) and the humidity stack.
+
+IioAdaptor::findSensor() currently scans only for "<type>.*raw$"
+attributes when binding paths, so on a board whose ALS exposes
+in_illuminance0_input the adaptor matches the IIO device by name but
+binds zero paths.  Reading lux on the resulting alsadaptor returns
+(0, 0) forever and sensorfw answers QAmbientLightSensor with Dark.
+
+Add an "<type>.*input$" branch ahead of the existing "_raw$" branch,
+flag the IioDevice as processedChannel, and in the IIO_ALS read case
+return the kernel-side value verbatim instead of multiplying by
+iioDevice.scale (which would either zero the reading if scale was
+never populated or double-apply if the driver also publishes a
+*_scale sysfs attribute).
+
+The accelerometer / gyroscope / magnetometer paths keep their existing
+*_raw + scale + offset behaviour; only the ALS read handler needs the
+branch for now, but the flag is plumbed through the IioDevice struct
+so adding it to temperature/humidity later is mechanical.
+
+Reported on the HP TouchPad once the tenderloin DT was pointed at the
+isl29018 driver: sensorfw debug log said
+"alsadaptor: No sysfs path defined for: \"als\"" and the lux property
+remained (tu) 0 0 even though /sys/bus/iio/devices/iio:device3/
+in_illuminance0_input returned a sane 871.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ adaptors/iioadaptor/iioadaptor.cpp | 30 +++++++++++++++++++++++++++++-
+ adaptors/iioadaptor/iioadaptor.h   |  7 +++++++
+ 2 files changed, 36 insertions(+), 1 deletion(-)
+
+diff --git a/adaptors/iioadaptor/iioadaptor.cpp b/adaptors/iioadaptor/iioadaptor.cpp
+index 10df516..39edf28 100644
+--- a/adaptors/iioadaptor/iioadaptor.cpp
++++ b/adaptors/iioadaptor/iioadaptor.cpp
+@@ -225,6 +225,7 @@ int IioAdaptor::findSensor(const QString &sensorName)
+                 iioDevice.offset = 0.0;
+                 iioDevice.scale = 1.0;
+                 iioDevice.frequency = 1.0;
++                iioDevice.processedChannel = false;
+                 qDebug() << id() << Q_FUNC_INFO << "Syspath for sensor (" + sensorName + "):" << iioDevice.devicePath;
+ 
+                 udev_list_entry_foreach(sysattr, udev_device_get_sysattr_list_entry(dev)) {
+@@ -253,6 +254,23 @@ int IioAdaptor::findSensor(const QString &sensorName)
+                         if (ok) {
+                             qDebug() << id() << sensorName + ":" << "Frequency is" << iioDevice.frequency;
+                         }
++                    } else if (attributeName.contains(QRegularExpression(iioDevice.channelTypeName + ".*input$"))) {
++                        /*
++                         * IIO drivers that expose IIO_CHAN_INFO_PROCESSED publish
++                         * an *_input attribute that already returns the value in
++                         * physical units, with the driver having applied scale /
++                         * offset / calibscale internally. Examples include
++                         * isl29018 (in_illuminance0_input, lux), most temperature
++                         * sensors (in_temp_input, milli-degree) and the humidity
++                         * stack. Without this branch findSensor() finds a matching
++                         * IIO device by name but binds to zero paths and the
++                         * adaptor goes "no sysfs path defined".
++                         */
++                        qDebug() << id() << "adding to paths (processed):" << iioDevice.devicePath
++                                   << attributeName << iioDevice.index;
++                        addPath(iioDevice.devicePath + attributeName, j);
++                        iioDevice.processedChannel = true;
++                        j++;
+                     } else if (attributeName.contains(QRegularExpression(iioDevice.channelTypeName + ".*raw$"))) {
+                         qDebug() << id() << "adding to paths:" << iioDevice.devicePath
+                                    << attributeName << iioDevice.index;
+@@ -463,7 +481,17 @@ void IioAdaptor::processSample(int fileId, int fd)
+                 break;
+             case IioAdaptor::IIO_ALS:
+                 uData = alsBuffer_->nextSlot();
+-                uData->value_ = (result + iioDevice.offset) * iioDevice.scale;
++                /*
++                 * Drivers exposing IIO_CHAN_INFO_PROCESSED have already
++                 * applied scale + offset on the kernel side; reusing
++                 * iioDevice.scale here would either double-apply (if a
++                 * _scale attribute is also published, e.g. isl29018's
++                 * in_illuminance0_scale) or zero the reading out (if
++                 * scale was never populated).
++                 */
++                uData->value_ = iioDevice.processedChannel
++                                ? static_cast<unsigned>(result)
++                                : static_cast<unsigned>((result + iioDevice.offset) * iioDevice.scale);
+                 break;
+             case IioAdaptor::IIO_PROXIMITY:
+                 {
+diff --git a/adaptors/iioadaptor/iioadaptor.h b/adaptors/iioadaptor/iioadaptor.h
+index fe776ec..70177bf 100644
+--- a/adaptors/iioadaptor/iioadaptor.h
++++ b/adaptors/iioadaptor/iioadaptor.h
+@@ -70,6 +70,13 @@ class IioAdaptor : public SysfsAdaptor
+       int index;
+       IioSensorType sensorType;
+       QString channelTypeName;
++      /*
++       * True when the channel attribute we bound to is an _input
++       * (IIO_CHAN_INFO_PROCESSED) sysfs file rather than a _raw one --
++       * the driver has already applied scale / offset before exposing
++       * the value, so the read handler must not multiply by scale again.
++       */
++      bool processedChannel;
+     };
+ 
+ public:
+-- 
+2.43.0
+
