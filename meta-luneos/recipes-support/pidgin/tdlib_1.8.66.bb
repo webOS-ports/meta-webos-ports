@@ -12,7 +12,7 @@ DEPENDS = "openssl zlib gperf-native"
 # tdlib-purple is developed and tested against. SRCREV is shared with the plugin recipes -- see
 # purple-synergy.inc for why it is pinned rather than AUTOREV.
 SRC_URI = "git://github.com/Herrie82/webos-synergy-revival.git;branch=herrie/telegram-tdlib-1.8.66;protocol=https"
-SRCREV = "6984a0a27f65bf49be1ad829a85a02b1494af17a"
+SRCREV = "23e8193c5ff9c83a7a9f275af2947d868d3d2ce2"
 
 S = "${WORKDIR}/git/messaging/telegram/plugin/tdlib-src"
 
