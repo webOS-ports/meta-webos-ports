@@ -72,8 +72,8 @@ BLUEZ:class-nativesdk = "bluez5"
 # use them.
 VIRTUAL-RUNTIME_cpushareholder = "cpushareholder-stub"
 
-# Use Enactbrowser by default
-VIRTUAL-RUNTIME_com.webos.app.browser ?= "com.webos.app.enactbrowser"
+# Atlas is the default browser; enactbrowser remains available as an alternative provider
+VIRTUAL-RUNTIME_com.webos.app.browser ?= "org.webosports.app.atlas"
 VIRTUAL-RUNTIME_webappmanager = "wam${WEBRUNTIME_TOOLCHAIN}"
 
 VIRTUAL-RUNTIME_initscripts = "webos-initscripts"
