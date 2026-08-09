@@ -155,4 +155,11 @@ WEBRTC_DSP = "${WORKDIR}/git/messaging/telegram/plugin/libtgvoip/webrtc_dsp"
 do_install() {
     install -d ${D}${libdir}/purple-2
     install -m 0755 ${B}/libwhatsmeow.so ${D}${libdir}/purple-2/libwhatsmeow.so
+
+    # Two account templates, because this one .so registers two prpls: com.palm.whatsapp for
+    # prpl-hehoe-whatsmeow and com.palm.gometa for prpl-gometa. Without them the protocols are
+    # loaded but cannot be added as accounts.
+    install -d ${D}${webos_accttemplatesdir}
+    cp -rf ${WORKDIR}/git/messaging/whatsapp/account/com.palm.whatsapp ${D}${webos_accttemplatesdir}/
+    cp -rf ${WORKDIR}/git/messaging/facebook-e2ee/account/com.palm.gometa ${D}${webos_accttemplatesdir}/
 }

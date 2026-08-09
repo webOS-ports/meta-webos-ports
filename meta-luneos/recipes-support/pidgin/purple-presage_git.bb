@@ -56,3 +56,10 @@ EXTRA_OECMAKE = "-DCMAKE_BUILD_TYPE=Release"
 # aborts the whole imlibpurple transport on login, from an uncaught "Couldn't find prpl" raised in
 # Util::getProtocolInfo. That is a webOS transport bug rather than a LuneOS one, but a green build
 # here does not mean a working plugin.
+
+# Account template, so Signal can be added as an account once the plugin works. cmake's own
+# install runs first here, unlike the hand-installed plugins in this directory.
+do_install:append() {
+    install -d ${D}${webos_accttemplatesdir}
+    cp -rf ${WORKDIR}/git/messaging/signal/account/com.palm.signal ${D}${webos_accttemplatesdir}/
+}

@@ -39,4 +39,8 @@ do_install() {
     install -d ${D}${libdir}/purple-2
     install -m 0755 ${S}/libteams.so          ${D}${libdir}/purple-2/libteams.so
     install -m 0755 ${S}/libteams-personal.so ${D}${libdir}/purple-2/libteams-personal.so
+
+    # Account template, so Teams can actually be added as an account.
+    install -d ${D}${webos_accttemplatesdir}
+    cp -rf ${WORKDIR}/git/messaging/teams/account/com.palm.teams ${D}${webos_accttemplatesdir}/
 }
