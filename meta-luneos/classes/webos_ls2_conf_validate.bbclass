@@ -150,11 +150,13 @@ fakeroot python do_validate_ls2_acg() {
     # List of group names to skip checking
     skip_group = d.getVar("WEBOS_LS2_CONF_VALIDATE_SKIP_GROUP").split()
     if len(skip_group) > 0:
+        # These are configured deliberately via WEBOS_LS2_CONF_VALIDATE_SKIP_GROUP,
+        # so listing them is informational rather than something to act on.
         msg = "=== LIST BEGIN: Groups considered as exception ===\n"
         for group in sorted(skip_group):
             msg += "  %s\n" % group
         msg += "=== LIST END ===\n"
-        bb.warn(msg)
+        bb.note(msg)
     # Always skip 'allowedNames' which is being used a key in old-style groups.json
     skip_group.append("allowedNames")
 
