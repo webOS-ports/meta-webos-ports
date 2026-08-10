@@ -43,4 +43,8 @@ do_install() {
     # Account template, so Teams can actually be added as an account.
     install -d ${D}${webos_accttemplatesdir}
     cp -rf ${WORKDIR}/git/messaging/teams/account/com.palm.teams ${D}${webos_accttemplatesdir}/
+
+    # Validator app named by the template's validator.customUI.appId.
+    install -d ${D}${webos_applicationsdir}
+    cp -rf ${WORKDIR}/git/messaging/teams/apps/com.palm.app.teams ${D}${webos_applicationsdir}/
 }

@@ -23,12 +23,19 @@ PV = "1.0+git"
 
 inherit pkgconfig
 
-# webos_filesystem_paths is for webos_accttemplatesdir. Each plugin installs its own account
-# template from the monorepo's messaging/<protocol>/account/ -- the template is what makes the
-# protocol appear as an addable account type, so it belongs with the plugin that implements it
-# rather than in messaging-accounts, which carries the legacy org.webosports.messaging.* set from
-# a different repository.
+# webos_filesystem_paths is for webos_accttemplatesdir and webos_applicationsdir. Each plugin
+# installs two things from the monorepo besides its .so: the account template from
+# messaging/<protocol>/account/, which makes the protocol an addable account type, and the
+# validator app from messaging/<protocol>/apps/, which is the UI the template's
+# validator.customUI.appId names. Both belong with the plugin that implements the protocol rather
+# than in messaging-accounts, which carries the legacy org.webosports.messaging.* set from a
+# different repository and only ships the shared org.webosports.app.imvalidator.
+#
+# webos_app is what turns those appinfo.json files into LS2 role and permission files at build
+# time. The validator apps declare requiredPermissions (accountsservice.*, networkconnection.query)
+# and would otherwise be installed with no bus access at all.
 inherit webos_filesystem_paths
+inherit webos_app
 
 # Every one of these is an EionRobb-style plugin or a close relative: a plain Makefile, nothing
 # needing configure. Each recipe installs its .so by hand rather than running `make install`,
@@ -36,7 +43,7 @@ inherit webos_filesystem_paths
 # a directory only Pidgin's GTK UI reads, and there is no Pidgin here. libpurple is loaded
 # headless by imlibpurpletransport, and webOS takes account icons from the account template.
 # So no pixmaps path is packaged: nothing installs one.
-FILES:${PN} += "${libdir}/purple-2 ${webos_accttemplatesdir}"
+FILES:${PN} += "${libdir}/purple-2 ${webos_accttemplatesdir} ${webos_applicationsdir}"
 
 # The plugins are dlopen'd by libpurple, so they carry no SONAME and OE's default packaging
 # would otherwise route the .so into ${PN}-dev and leave the runtime package empty.

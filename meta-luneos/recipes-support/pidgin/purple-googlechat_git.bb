@@ -32,4 +32,8 @@ do_install() {
     # Account template, so Google Chat can actually be added as an account.
     install -d ${D}${webos_accttemplatesdir}
     cp -rf ${WORKDIR}/git/messaging/googlechat/account/com.palm.googlechat ${D}${webos_accttemplatesdir}/
+
+    # Validator app named by the template's validator.customUI.appId.
+    install -d ${D}${webos_applicationsdir}
+    cp -rf ${WORKDIR}/git/messaging/googlechat/apps/com.palm.app.googlechat ${D}${webos_applicationsdir}/
 }

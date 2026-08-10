@@ -48,4 +48,10 @@ do_install() {
     # Account template, so Discord can actually be added as an account.
     install -d ${D}${webos_accttemplatesdir}
     cp -rf ${WORKDIR}/git/messaging/discord/account/com.palm.discord ${D}${webos_accttemplatesdir}/
+
+    # Validator app named by the template's validator.customUI.appId. Only com.palm.app.discord:
+    # apps/com.palm.app.discordqr is the superseded full-screen QR card, which validator.js now
+    # renders inline instead ("This replaces the old flow ...").
+    install -d ${D}${webos_applicationsdir}
+    cp -rf ${WORKDIR}/git/messaging/discord/apps/com.palm.app.discord ${D}${webos_applicationsdir}/
 }

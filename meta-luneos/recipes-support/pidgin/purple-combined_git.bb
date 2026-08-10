@@ -162,4 +162,10 @@ do_install() {
     install -d ${D}${webos_accttemplatesdir}
     cp -rf ${WORKDIR}/git/messaging/whatsapp/account/com.palm.whatsapp ${D}${webos_accttemplatesdir}/
     cp -rf ${WORKDIR}/git/messaging/facebook-e2ee/account/com.palm.gometa ${D}${webos_accttemplatesdir}/
+
+    # ...and the validator apps those templates name in validator.customUI.appId. Without them the
+    # account type appears but selecting it finds no validator.html.
+    install -d ${D}${webos_applicationsdir}
+    cp -rf ${WORKDIR}/git/messaging/whatsapp/apps/com.palm.app.whatsapp ${D}${webos_applicationsdir}/
+    cp -rf ${WORKDIR}/git/messaging/facebook-e2ee/apps/com.palm.app.gometa ${D}${webos_applicationsdir}/
 }
