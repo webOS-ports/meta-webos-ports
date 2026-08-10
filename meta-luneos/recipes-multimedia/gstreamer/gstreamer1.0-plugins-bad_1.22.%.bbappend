@@ -5,6 +5,7 @@ EXTENDPRAUTO:append = "webos7"
 # Remove rsvg because that's the only thing pulling librsvg -> cargo-native -> rust-native into our images
 # and Tofee's builder takes 2h+ to build it
 PACKAGECONFIG:remove = "rsvg"
+PACKAGECONFIG:append = " v4l2codecs"
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 SRC_URI:append = " \
