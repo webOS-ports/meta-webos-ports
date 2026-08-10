@@ -53,6 +53,8 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0012-PalmSystem-add-banner-support.patch \
     file://0013-WebAppBase-fix-window.close-for-multi-window-apps.patch \
     file://0014-WAM-Fix-outbound-permission-error.patch \
+    file://0015-PalmSystem-fix-banner-removal.patch \
+    file://0016-DeviceInfoImpl-publish-display-metrics-when-known.patch \
 "
 
 S = "${WORKDIR}/git"
