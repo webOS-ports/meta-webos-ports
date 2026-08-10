@@ -19,7 +19,7 @@ VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_cpushareholder}"
 
 WEBOS_VERSION = "1.0.2-99_a698bc40c4e73d338bdf3310c31d1878978d231a"
-INC_PR = "r71"
+INC_PR = "r72"
 
 WAM_BUILD_SYSTEM ?= "webos_cmake"
 WAM_BUILD_DEFAULT_PLUGIN ?= "1"
@@ -54,6 +54,8 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0013-WebAppBase-fix-window.close-for-multi-window-apps.patch \
     file://0014-WAM-Fix-outbound-permission-error.patch \
     file://0015-Add-groups.d-definition-for-the-webapplication.push-.patch \
+    file://0016-PalmSystem-fix-banner-removal.patch \
+    file://0017-DeviceInfoImpl-publish-display-metrics-when-known.patch \
 "
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
