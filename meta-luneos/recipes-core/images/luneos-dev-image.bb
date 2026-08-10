@@ -22,7 +22,6 @@ MESA_PKGS = " \
     libgbm \
     mesa-megadriver \
     libgles1-mesa \
-    libglapi \
 "
 
 IMAGE_INSTALL:append = " \
@@ -31,6 +30,11 @@ IMAGE_INSTALL:append = " \
     qtbase-plugins \
     glmark2 \
     kernel-modules \
+"
+
+IMAGE_INSTALL:append:tenderloin = " \
+    ${MESA_PKGS} \
+    luneos-mainline-debug \
 "
 
 IMAGE_INSTALL:append:qemuall = " \

@@ -10,7 +10,6 @@ MESA_PKGS = " \
     libgbm \
     mesa-megadriver \
     libgles1-mesa \
-    libglapi \
 "
 
 IMAGE_INSTALL += " \
