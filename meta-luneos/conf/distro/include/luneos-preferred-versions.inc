@@ -11,6 +11,9 @@ PREFERRED_VERSION_mksnapshot-cross-${TARGET_ARCH} = "${PREFERRED_VERSION_webrunt
 # https://gitlab.com/mobian1/eg25-manager/-/issues/45
 PREFERRED_VERSION_libgpiod = "1.6.4"
 
+# We need latest mesa from meta-luneos-backports-6.0 for all machines
+PREFERRED_VERSION_mesa = "26.1.0%"
+
 # Prefer gstreamer version 1.22.% from oe-core for webos
 GSTREAMER_VERSION = "1.22.%"
 
