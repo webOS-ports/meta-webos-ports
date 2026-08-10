@@ -72,6 +72,13 @@ WEBOS_PACKAGESET_ENYO_1 = " \
     luna-init-fonts \
 "
 
+# Mojo 1, for applications predating Enyo. mojo-framework needs a tarball
+# extracted from a legacy webOS image (Mojo was never open-sourced), so it is
+# left out of the default set - see mojo-framework.bb. Add it with:
+#     WEBOS_PACKAGESET_MOJO_1:append = " mojo-framework"
+# or by setting MOJO_FRAMEWORK_TARBALL and adding mojo-framework directly.
+WEBOS_PACKAGESET_MOJO_1 ?= ""
+
 WEBOS_PACKAGESET_SYSTEMAPPS = " \
     ${VIRTUAL-RUNTIME_unifiedsearch} \
     luna-systemui \
@@ -153,6 +160,7 @@ RDEPENDS:${PN} = " \
     configd \
     configurator \
     ${WEBOS_PACKAGESET_ENYO_1} \
+    ${WEBOS_PACKAGESET_MOJO_1} \
     event-monitor \
     filecache \
     gssdp \
