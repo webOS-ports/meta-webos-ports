@@ -71,6 +71,10 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0008-Add-LuneOS-modules-and-machine-specific-cmake-file-t.patch \
     file://0009-Add-wait-touchscreen-conf.patch \
     file://0010-nyx-modules-Use-etc-machine-id-for-serial-number.patch \
+    file://0011-Fix-memory-leaks-in-multiple-modules.patch \
+    file://0012-charger-read-usb_type-current_max-and-vendor_charger.patch \
+    file://0013-battery-charger-Allow-path-override-from-cmake.patch \
+    file://0014-battery.c-Return-proper-current.patch \
 "
 
 SRC_URI:append = " \

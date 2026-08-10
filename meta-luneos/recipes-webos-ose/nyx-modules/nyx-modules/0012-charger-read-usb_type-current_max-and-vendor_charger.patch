@@ -1,0 +1,275 @@
+From 4578f703ff13397dd95f7f943caeefcaf353e1b8 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 21 May 2026 07:44:30 +0200
+Subject: charger: read usb_type, current_max and
+ vendor_charger_variant from sysfs
+
+The charger module auto-discovers /sys/class/power_supply/* via the
+device "type" property and reads each entry's "online" file, but it
+never reads the BC 1.2 charger-type classification or the negotiated
+current limit.  As a result, gChargerStatus.charger_max_current stays
+at 0 for every platform that exposes a USB power_supply -- batteryd's
+ChargingLogicUpdate() then has no real input current to pass to the
+underlying charger IC.
+
+Modern Linux USB controller drivers (e.g. drivers/usb/chipidea/
+ci_hdrc_msm.c for MSM8660/APQ8060) expose the BC 1.2 classification
+on the power_supply class device:
+
+  usb_type        kernel-formatted enum line, bracketed value is
+                  active, e.g. "Unknown SDP [DCP] CDP"
+  current_max     negotiated input current limit in microamps
+  vendor_charger_variant
+                  optional vendor variant name e.g.
+                  "hp-touchstone-10w" / "hp-phone-900ma" / "omtp-900ma"
+
+In core_charger_read_status(), when the USB sysfs is online:
+
+- Parse the bracketed token in usb_type.  If it is "DCP", report
+  NYX_CHARGER_WALL_CONNECTED (dedicated wall charger reached via a
+  USB cable); otherwise (SDP, CDP, Unknown) keep the legacy
+  NYX_CHARGER_PC_CONNECTED behaviour.
+- Read current_max (microamps) and convert to milliamps for
+  gChargerStatus.charger_max_current.
+- Copy any non-empty vendor_charger_variant string into
+  gChargerStatus.dock_serial_number, which batteryd already echoes
+  to luna clients as the "USBName" field of the chargerStatus
+  payload -- this lets userspace surface HP-specific variants
+  (Touchstone 10 W vs HP Phone Adaptor 900 mA) without changing
+  the nyx_charger_status_t public structure.
+
+Mains-class supplies (e.g. max8903) also gain current_max readout
+when the kernel driver publishes it.
+
+Drivers that publish only /online (older platforms) continue to
+work unchanged -- the new sysfs attributes are all optional, and
+the function falls back to the legacy classification when usb_type
+is missing.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [LuneOS specific]
+
+---
+ src/charger/charger.c | 172 +++++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 160 insertions(+), 12 deletions(-)
+
+diff --git a/src/charger/charger.c b/src/charger/charger.c
+index eaaf321..afcca93 100644
+--- a/src/charger/charger.c
++++ b/src/charger/charger.c
+@@ -53,10 +53,21 @@ char *battery_status = NULL;
+ char batt_present_path[PATH_LEN] = {0,};
+ char batt_status_path[PATH_LEN] = {0,};
+ char charger_usb_sysfs_online_path[PATH_LEN] = {0,};
++char charger_usb_sysfs_usb_type_path[PATH_LEN] = {0,};
++char charger_usb_sysfs_current_max_path[PATH_LEN] = {0,};
++char charger_usb_sysfs_vendor_variant_path[PATH_LEN] = {0,};
+ char charger_ac_sysfs_online_path[PATH_LEN] = {0,};
++char charger_ac_sysfs_current_max_path[PATH_LEN] = {0,};
+ char charger_touch_sysfs_online_path[PATH_LEN] = {0,};
+ char charger_wireless_sysfs_online_path[PATH_LEN] = {0,};
+ 
++/* Parsed value from /sys/class/power_supply/<usb>/vendor_charger_variant.
++ * Empty string when no HP/Palm vendor variant is reported.  Stored in
++ * gChargerStatus.dock_serial_number so existing batteryd payloads (which
++ * already echo this field) carry the variant identity through to luna
++ * clients without needing a new struct field.
++ */
++
+ static nyx_charger_event_t current_event = NYX_NO_NEW_EVENT;
+ nyx_charger_status_t gChargerStatus =
+ {
+@@ -67,31 +78,143 @@ nyx_charger_status_t gChargerStatus =
+ 	.is_charging = false,
+ };
+ 
++/*
++ * _parse_usb_type_bracketed - extract the bracketed token from
++ * power_supply usb_type sysfs output (e.g. "Unknown SDP [DCP] CDP").
++ *
++ * Returns a pointer into the supplied buffer (NUL-terminated, with the
++ * closing bracket overwritten with '\0') or NULL if no bracketed token
++ * was found.  The buffer is mutated in place.
++ */
++static char *_parse_usb_type_bracketed(char *buf)
++{
++	char *start = strchr(buf, '[');
++	char *end;
++
++	if (!start)
++	{
++		return NULL;
++	}
++
++	end = strchr(start, ']');
++
++	if (!end)
++	{
++		return NULL;
++	}
++
++	*end = '\0';
++	return start + 1;
++}
++
+ nyx_error_t core_charger_read_status(nyx_charger_status_t *status)
+ {
++	bool usb_online;
++	bool ac_online;
++	bool touch_online;
++	bool wireless_online;
++	int  current_max_ua = 0;
++	char usb_type_buf[64] = {0};
++	char variant_buf[NYX_DOCK_SERIAL_NUMBER_LEN] = {0};
++	char num_buf[32] = {0};
++	char *active_type;
++
+ 	/* before we start to update the charger status we reset it completely */
+ 	memset(&gChargerStatus, 0, sizeof(nyx_charger_status_t));
+ 
+-	/* function returns -1 on invalid file path, so check for 1, instead of true */
+-	if (nyx_utils_read_value(charger_usb_sysfs_online_path) == 1)
++	usb_online      = (nyx_utils_read_value(charger_usb_sysfs_online_path) == 1);
++	ac_online       = (nyx_utils_read_value(charger_ac_sysfs_online_path) == 1);
++	touch_online    = (nyx_utils_read_value(charger_touch_sysfs_online_path) == 1);
++	wireless_online = (nyx_utils_read_value(charger_wireless_sysfs_online_path) == 1);
++
++	if (usb_online)
+ 	{
+-		gChargerStatus.connected |= NYX_CHARGER_PC_CONNECTED;
++		/*
++		 * If the USB power_supply driver classifies the source via
++		 * BC 1.2 (SDP/CDP/DCP), use that to drive the Nyx connection
++		 * type and pull the negotiated current limit from current_max.
++		 * Fall back to the legacy "any USB power_supply online =
++		 * PC_CONNECTED" behaviour when usb_type / current_max are
++		 * absent (matches older drivers that only expose /online).
++		 */
+ 		gChargerStatus.powered |= NYX_CHARGER_USB_POWERED;
++
++		if (charger_usb_sysfs_usb_type_path[0] &&
++		    FileGetString(charger_usb_sysfs_usb_type_path, usb_type_buf,
++		                  sizeof(usb_type_buf)) != -1 &&
++		    (active_type = _parse_usb_type_bracketed(usb_type_buf)) != NULL)
++		{
++			if (strcmp(active_type, "DCP") == 0)
++			{
++				/* Dedicated wall charger via USB cable */
++				gChargerStatus.connected |= NYX_CHARGER_WALL_CONNECTED;
++			}
++			else /* SDP, CDP, Unknown -- treat as host-class */
++			{
++				gChargerStatus.connected |= NYX_CHARGER_PC_CONNECTED;
++			}
++		}
++		else
++		{
++			gChargerStatus.connected |= NYX_CHARGER_PC_CONNECTED;
++		}
++
++		/*
++		 * Pull the negotiated max current (microamps in sysfs, mA in
++		 * the Nyx struct).  Wall chargers via USB cable report up to
++		 * 2000 mA via HP-variant detection; standard SDP reports 500.
++		 */
++		if (charger_usb_sysfs_current_max_path[0] &&
++		    FileGetString(charger_usb_sysfs_current_max_path, num_buf,
++		                  sizeof(num_buf)) != -1)
++		{
++			current_max_ua = atoi(num_buf);
++			if (current_max_ua > 0)
++			{
++				gChargerStatus.charger_max_current = current_max_ua / 1000;
++			}
++		}
++
++		/*
++		 * Optional HP/Palm vendor variant string -- carried through to
++		 * userspace as the chargerStatus payload's "USBName" field via
++		 * the existing dock_serial_number plumbing in batteryd.
++		 */
++		if (charger_usb_sysfs_vendor_variant_path[0] &&
++		    FileGetString(charger_usb_sysfs_vendor_variant_path, variant_buf,
++		                  sizeof(variant_buf)) != -1 &&
++		    variant_buf[0] != '\0')
++		{
++			strncpy(gChargerStatus.dock_serial_number, variant_buf,
++			        sizeof(gChargerStatus.dock_serial_number) - 1);
++		}
+ 	}
+-	else if (nyx_utils_read_value(charger_ac_sysfs_online_path) == 1)
++	else if (ac_online)
+ 	{
++		/*
++		 * Wired Mains-class supply (e.g. max8903 via Touchstone
++		 * inductive input).  Drop NYX_CHARGER_DIRECT_POWERED here as a
++		 * best-effort indicator; userspace separately reads the
++		 * "Touch" power_supply (if present) for the wireless flag.
++		 */
+ 		gChargerStatus.connected |= NYX_CHARGER_WALL_CONNECTED;
+-		gChargerStatus.powered |= NYX_CHARGER_DIRECT_POWERED;
+-	}
++		gChargerStatus.powered   |= NYX_CHARGER_DIRECT_POWERED;
+ 
+-	if ((nyx_utils_read_value(charger_usb_sysfs_online_path) == 1) ||
+-	        (nyx_utils_read_value(charger_ac_sysfs_online_path) == 1) ||
+-	        (nyx_utils_read_value(charger_touch_sysfs_online_path) == 1) ||
+-	        (nyx_utils_read_value(charger_wireless_sysfs_online_path) == 1))
+-	{
+-		gChargerStatus.is_charging = true;
++		if (charger_ac_sysfs_current_max_path[0] &&
++		    FileGetString(charger_ac_sysfs_current_max_path, num_buf,
++		                  sizeof(num_buf)) != -1)
++		{
++			current_max_ua = atoi(num_buf);
++			if (current_max_ua > 0)
++			{
++				gChargerStatus.charger_max_current = current_max_ua / 1000;
++			}
++		}
+ 	}
+ 
++	gChargerStatus.is_charging = usb_online || ac_online ||
++	                             touch_online || wireless_online;
++
+ 	if (status)
+ 	{
+ 		memcpy(status, &gChargerStatus, sizeof(nyx_charger_status_t));
+@@ -282,12 +405,37 @@ void _detect_charger_sysfs_paths()
+ 	{
+ 		snprintf(charger_usb_sysfs_online_path, PATH_LEN, "%s/online",
+ 		         charger_usb_sysfs_path);
++		/*
++		 * Additional sysfs attributes published by BC 1.2-capable USB
++		 * type detectors (e.g. drivers/usb/chipidea/ci_hdrc_msm.c on
++		 * MSM8660).  All are optional -- a power_supply that exposes
++		 * only "online" still works at the legacy classification.
++		 *
++		 * usb_type              : kernel-formatted enum line e.g.
++		 *                         "Unknown SDP [DCP] CDP" -- the
++		 *                         bracketed token is the active value.
++		 * current_max           : maximum charge current in microamps.
++		 * vendor_charger_variant: optional vendor variant string e.g.
++		 *                         "hp-touchstone-10w" / "hp-phone-900ma"
++		 *                         / "omtp-900ma".  Empty when the
++		 *                         platform driver did not detect a
++		 *                         vendor-specific variant.
++		 */
++		snprintf(charger_usb_sysfs_usb_type_path, PATH_LEN, "%s/usb_type",
++		         charger_usb_sysfs_path);
++		snprintf(charger_usb_sysfs_current_max_path, PATH_LEN, "%s/current_max",
++		         charger_usb_sysfs_path);
++		snprintf(charger_usb_sysfs_vendor_variant_path, PATH_LEN,
++		         "%s/vendor_charger_variant", charger_usb_sysfs_path);
+ 	}
+ 
+ 	if (charger_ac_sysfs_path)
+ 	{
+ 		snprintf(charger_ac_sysfs_online_path, PATH_LEN, "%s/online",
+ 		         charger_ac_sysfs_path);
++		/* Mains chargers (e.g. max8903) also expose current_max. */
++		snprintf(charger_ac_sysfs_current_max_path, PATH_LEN, "%s/current_max",
++		         charger_ac_sysfs_path);
+ 	}
+ 
+ 	if (charger_touch_sysfs_path)

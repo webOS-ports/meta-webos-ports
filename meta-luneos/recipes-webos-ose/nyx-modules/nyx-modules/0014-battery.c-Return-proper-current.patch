@@ -1,0 +1,61 @@
+From 11c29589a72436b8a192ebe1ec9eaf25cbd50875 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 4 Jun 2026 05:43:03 +0200
+Subject: [PATCH] battery.c: Return proper current
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The Linux power_supply class exports current_now as a *signed*
+value in microamps: positive while the battery is charging,
+negative while it is discharging. nyx_utils_read_value() collapses
+"value is negative" with "read failed", which means battery_current
+returns -1 on every Linux-mainline target the moment the device
+runs on battery — masking the real value and confusing
+batteryStatusQuery consumers in cardshell / powerd.
+
+	 * Use FileGetDouble() instead, which signals errors via its return
+	 * code and stores the parsed value through the out-parameter, so
+	 * negative readings are passed through cleanly.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/battery/battery.c | 19 ++++++++++++++++---
+ 1 file changed, 16 insertions(+), 3 deletions(-)
+
+diff --git a/src/battery/battery.c b/src/battery/battery.c
+index 4d7567d..450d9dc 100644
+--- a/src/battery/battery.c
++++ b/src/battery/battery.c
+@@ -180,14 +180,27 @@ int battery_voltage(void)
+  */
+ int battery_current(void)
+ {
+-	signed int current;
++	double current;
+ 
+-	if ((current = nyx_utils_read_value(batt_current_path)) < 0)
++	/*
++	 * The Linux power_supply class exports current_now as a *signed*
++	 * value in microamps: positive while the battery is charging,
++	 * negative while it is discharging. nyx_utils_read_value() collapses
++	 * "value is negative" with "read failed", which means battery_current
++	 * returns -1 on every Linux-mainline target the moment the device
++	 * runs on battery — masking the real value and confusing
++	 * batteryStatusQuery consumers in cardshell / powerd.
++	 *
++	 * Use FileGetDouble() instead, which signals errors via its return
++	 * code and stores the parsed value through the out-parameter, so
++	 * negative readings are passed through cleanly.
++	 */
++	if (FileGetDouble(batt_current_path, &current) < 0)
+ 	{
+ 		return -1;
+ 	}
+ 
+-	return current;
++	return (int)current;
+ }
+ 
+ /**
