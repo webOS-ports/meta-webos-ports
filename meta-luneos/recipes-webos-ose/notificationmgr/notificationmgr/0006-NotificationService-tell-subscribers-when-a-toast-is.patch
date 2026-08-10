@@ -1,0 +1,68 @@
+From: LuneOS
+Subject: [PATCH] NotificationService: tell subscribers when a toast is closed
+
+cb_closeToast() deletes the row from History and nothing else. It never posts
+on the getToastNotification subscription, so every subscriber keeps its own
+copy of the toast: the call answers {"returnValue":true} while the banner
+stays on screen and its entry stays in the notification area. An application
+that posts a banner and later withdraws it cannot make it go away.
+
+closeAlert() already does this properly - it builds an alertAction "close"
+message carrying alertInfo.timestamp and posts it, and the shell's alert model
+switches on that action to remove the matching row. Toasts have the same
+shape (createToast puts a timestamp and a sourceId into the payload) and had
+no equivalent, so mirror it: "close" carries toastInfo.timestamp for the
+single-toast case, "closeAll" carries toastInfo.sourceId for the bulk case.
+
+Posted with persistentMsg and staleMsg false, so the close is delivered
+without being written back into History.
+
+The consumer side needs the matching change in luna-surfacemanager-base,
+whose toast model has no removal branch today.
+
+Upstream-Status: Inappropriate [LuneOS specific]
+
+--- a/src/NotificationService.cpp
++++ b/src/NotificationService.cpp
+@@ -1888,6 +1888,8 @@
+     std::string timestamp;
+ 
+     pbnjson::JValue request;
++    pbnjson::JValue postToastMessage;
++    pbnjson::JValue toastInfo;
+     JUtil::Error error;
+ 
+     request = JUtil::parse(LSMessageGetPayload(msg), "closeToast", &error);
+@@ -1919,6 +1921,17 @@
+         }
+ 
+         History::instance()->deleteMessage("timestamp", timestamp);
++
++        // Deleting the history row is not enough: subscribers hold their own
++        // copy of the toast and are never told it went away, so the banner
++        // stays on screen. Post a close the same way closeAlert does.
++        postToastMessage = pbnjson::Object();
++        toastInfo = pbnjson::Object();
++        toastInfo.put("timestamp", timestamp);
++        postToastMessage.put("toastAction", "close");
++        postToastMessage.put("toastInfo", toastInfo);
++
++        NotificationService::instance()->postToastNotification(postToastMessage, false, false, errText);
+     }
+     else if (!sourceId.empty())
+     {
+@@ -1948,6 +1961,14 @@
+         }
+ 
+         History::instance()->deleteMessage("sourceId", sourceId);
++
++        postToastMessage = pbnjson::Object();
++        toastInfo = pbnjson::Object();
++        toastInfo.put("sourceId", sourceId);
++        postToastMessage.put("toastAction", "closeAll");
++        postToastMessage.put("toastInfo", toastInfo);
++
++        NotificationService::instance()->postToastNotification(postToastMessage, false, false, errText);
+     }
+ 
+     success = true;
