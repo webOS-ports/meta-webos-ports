@@ -100,4 +100,8 @@ do_install:append() {
     # Account template, so Telegram can actually be added as an account.
     install -d ${D}${webos_accttemplatesdir}
     cp -rf ${WORKDIR}/git/messaging/telegram/account/com.palm.telegram ${D}${webos_accttemplatesdir}/
+
+    # Validator app named by the template's validator.customUI.appId.
+    install -d ${D}${webos_applicationsdir}
+    cp -rf ${WORKDIR}/git/messaging/telegram/apps/com.palm.app.telegram ${D}${webos_applicationsdir}/
 }

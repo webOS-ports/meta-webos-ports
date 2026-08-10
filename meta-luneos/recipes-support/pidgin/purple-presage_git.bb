@@ -62,4 +62,8 @@ EXTRA_OECMAKE = "-DCMAKE_BUILD_TYPE=Release"
 do_install:append() {
     install -d ${D}${webos_accttemplatesdir}
     cp -rf ${WORKDIR}/git/messaging/signal/account/com.palm.signal ${D}${webos_accttemplatesdir}/
+
+    # Validator app named by the template's validator.customUI.appId.
+    install -d ${D}${webos_applicationsdir}
+    cp -rf ${WORKDIR}/git/messaging/signal/apps/com.palm.app.signal ${D}${webos_applicationsdir}/
 }
