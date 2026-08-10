@@ -37,6 +37,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0012-WebOSSurfaceItem-close-Wayland-client-fallback-on-Cl.patch \
     file://0013-Wait-for-DRI-card-on-EGLFS-platform.patch \
     file://0014-ViewStateController.qml-Fix-TypeError.patch \
+    file://0015-NotificationService.qml-let-the-toast-model-remove-t.patch \
 "
 
 S = "${WORKDIR}/git"
