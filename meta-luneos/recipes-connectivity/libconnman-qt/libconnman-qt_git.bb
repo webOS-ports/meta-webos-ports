@@ -4,13 +4,14 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://libconnman-qt/clockmodel.h;endline=8;md5=ea9f724050803f15d2d900ce3c5dac88"
 DEPENDS += "qtbase qtdeclarative"
 
-VERSION = "1.3.3"
+VERSION = "1.4.25"
 PV = "${VERSION}+git"
 
-SRCREV = "16e1498c1de653f71391a0cafb47251be9355b6c"
-SRC_URI = "git://github.com/sailfishos/libconnman-qt.git;protocol=https;branch=master \
-    file://0001-connman_vpn_manager.xml-Fix-build-with-Qt-6.5.patch \
-"
+SRCREV = "8aa2e17cd936afa2754992e68836a3c93aafbcf9"
+# 0001-connman_vpn_manager.xml-Fix-build-with-Qt-6.5.patch was dropped at 1.4.25:
+# upstream added the QtTypeName.Out1 annotation on ConnectionAdded themselves, so
+# qdbusxml2cpp no longer chokes on the a{sv} out-argument.
+SRC_URI = "git://github.com/sailfishos/libconnman-qt.git;protocol=https;branch=master"
 
 S = "${WORKDIR}/git"
 
