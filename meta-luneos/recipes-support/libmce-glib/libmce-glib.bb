@@ -1,9 +1,12 @@
 # Copyright (c) 2019 Christophe Chapuis <chris.chapuis@gmail.com>
 
 DESCRIPTION = "GLib bindings for mce."
-LICENSE = "MIT"
+# Corrected from MIT: the header of mce_display.c says "You may use this file under
+# the terms of BSD license" and carries all three clauses, at the old revision as
+# well as this one. The MIT value was simply wrong, it is not a licence change.
+LICENSE = "BSD-3-Clause"
 SECTION = "webos/support"
-LIC_FILES_CHKSUM = "file://src/mce_display.c;beginline=1;endline=35;md5=999eef94327cfda24c3f60f25ee98fd7"
+LIC_FILES_CHKSUM = "file://src/mce_display.c;beginline=1;endline=35;md5=21b822edd94b6074f3f2b84925f2aa24"
 
 DEPENDS = "glib-2.0 glib-2.0-native libglibutil python3-packaging-native"
 
@@ -19,8 +22,8 @@ SRC_URI[dbus-names.sha256sum] = "fd890ba5921cc58c1d61b4e406f22f5d20ffb4ed6cbc8af
 SRC_URI[mode-names.md5sum] = "b4927cca05e21114a5ba40c0d1e27f8a"
 SRC_URI[mode-names.sha256sum] = "63b3b5f9966f858c9387a770021054e6a72c5ef68e181329ca25b41e29dd32a8"
 
-PV = "1.0.7-1+git"
-SRCREV = "517cdafd222e3a508786174a119e6f1e5a6e4b45"
+PV = "1.1.0"
+SRCREV = "49cff7f515979777d137cbb6a78076a50fdb99f2"
 
 EXTRA_OEMAKE = "KEEP_SYMBOLS=1"
 
