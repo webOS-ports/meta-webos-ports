@@ -46,13 +46,19 @@ SRC_URI = "http://linuxcontainers.org/downloads/${BPN}/${BPN}-${PV}.tar.gz \
 	file://template-make-busybox-template-compatible-with-core-.patch \
 	file://templates-use-curl-instead-of-wget.patch \
 	file://tests-our-init-is-not-busybox.patch \
-	file://tests-add-no-validate-when-using-download-template.patch \
+	file://0001-syscall_wrappers-don-t-collide-with-glibc-mount_seta.patch \
 	file://dnsmasq.conf \
 	file://lxc-net \
 	"
 
-SRC_URI[md5sum] = "732571c7cb4ab845068afb227bf35256"
-SRC_URI[sha256sum] = "9165dabc0bb6ef7f2fda2009aee90b20fbefe77ed8008347e9f06048eba1e463"
+SRC_URI[sha256sum] = "db242f8366fc63e8c7588bb2017b354173cf3c4b20abc18780debdc48b14d3ef"
+
+# 4.0.12 is the LAST autotools release of LXC. 5.0.0 switched to meson, removed
+# the Lua bindings and cut the template set down to three files, so moving past
+# this point is a recipe rewrite (inherit meson, drop the ${PN}-lua package,
+# retranslate every EXTRA_OECONF/PACKAGECONFIG option) rather than a version
+# bump. Verified against a 7.0.0 tarball: no configure.ac, no src/lua-lxc, and
+# 5 of the 9 patches carried here no longer apply.
 
 
 
