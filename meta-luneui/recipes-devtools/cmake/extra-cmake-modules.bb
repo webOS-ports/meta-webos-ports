@@ -4,11 +4,13 @@ LIC_FILES_CHKSUM = "file://COPYING-CMAKE-SCRIPTS;md5=54c7042be62e169199200bc6477
     file://LICENSES/BSD-3-Clause.txt;md5=954f4d71a37096249f837652a7f586c0 \
 "
 
-PV = "5.95.0+git"
-SRCREV = "633e3793ca94f2aec8605a48bec2b27f4dbde366"
+PV = "6.28.0"
+SRCREV = "01dc9a0c05dd4851b01b93e961c9aa33b1e96056"
 
+# anongit.kde.org still redirects here, but KDE moved to invent.kde.org years ago
+# so point at the real home rather than relying on the redirect.
 SRC_URI = " \
-    git://anongit.kde.org/extra-cmake-modules;branch=master;protocol=https \
+    git://invent.kde.org/frameworks/extra-cmake-modules.git;branch=master;protocol=https \
     file://0001-FindQtWaylandScanner-Search-within-OE_QMAKE_PATH_EXT.patch \
 "
 S = "${WORKDIR}/git"
