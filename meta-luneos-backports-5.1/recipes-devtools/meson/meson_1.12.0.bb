@@ -8,14 +8,17 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://COPYING;md5=3b83ef96387f14655fc854ddc3c6bd57"
 
 GITHUB_BASE_URI = "https://github.com/mesonbuild/meson/releases/"
+# 0001-python-module-do-not-manipulate-the-environment-when.patch was dropped at
+# 1.12.0: upstream removed wrap_in_pythons_pc_dir() and no longer mutates
+# os.environ for PKG_CONFIG_LIBDIR/PKG_CONFIG_PATH at all, it sets them on a
+# proper environment object in dependencies/pkgconfig.py instead.
 SRC_URI = "${GITHUB_BASE_URI}/download/${PV}/meson-${PV}.tar.gz \
            file://meson-setup.py \
            file://meson-wrapper \
-           file://0001-python-module-do-not-manipulate-the-environment-when.patch \
            file://0001-Make-CPU-family-warnings-fatal.patch \
            file://0002-Support-building-allarch-recipes-again.patch \
            "
-SRC_URI[sha256sum] = "567e533adf255de73a2de35049b99923caf872a455af9ce03e01077e0d384bed"
+SRC_URI[sha256sum] = "88afe0c20e52030218924ac37d0c81c59b4b5f3ae3752c8c6d7470c7d365886c"
 UPSTREAM_CHECK_REGEX = "(?P<pver>\d+(\.\d+)+)$"
 
 inherit python_setuptools_build_meta github-releases
