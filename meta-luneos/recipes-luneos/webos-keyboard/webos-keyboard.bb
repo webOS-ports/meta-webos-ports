@@ -22,6 +22,7 @@ PV = "0.99.2+git"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     file://0001-make-it-compatible-with-newer-hunspell.patch \
+    file://0002-Handle-hardware-keyboard-input.patch \
 "
 
 # a lot of cases like:
