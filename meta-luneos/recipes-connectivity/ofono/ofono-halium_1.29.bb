@@ -24,7 +24,7 @@ inherit autotools pkgconfig systemd gobject-introspection-data
 
 SYSTEMD_SERVICE:${PN} = "ofono.service"
 
-SRCREV = "3afa0876c6506f76ef2e45d97cb326c5ff9fef4d"
+SRCREV = "bea32ca9a931e77cb6d37800c06fead44265507f"
 PV = "1.29+git"
 
 DEPENDS += "dbus-glib libmce-glib"
