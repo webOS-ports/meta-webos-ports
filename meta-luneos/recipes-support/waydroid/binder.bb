@@ -1,3 +1,7 @@
+# NOTE: this builds a kernel module out of the anbox-modules repo, which is only
+# where the module sources live. It is not part of the anbox application, which
+# was removed. It lives here because Waydroid RRECOMMENDS the resulting
+# kernel-module-binder-linux package.
 SUMMARY = "Android IPC Subsystem"
 LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://binder.c;endline=16;md5=b2770a40135de69c87b8e47553341bb7"
