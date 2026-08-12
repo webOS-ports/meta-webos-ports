@@ -16,13 +16,15 @@ CXXFLAGS += " \
 PACKAGECONFIG += "${@bb.utils.contains('USE_WEBRUNTIME_LIBCXX', '1', 'webruntime-libcxx', 'system-libcxx', d)}"
 PACKAGECONFIG[webruntime-libcxx] = ",,chromium-toolchain-native chromium-stdlib"
 PACKAGECONFIG[system-libcxx] = ",,libcxx"
-DEPENDS:remove = "media-resource-calculator umediaserver"
-DEPENDS += "media-resource-calculator-clang umediaserver-clang"
+DEPENDS:remove = "media-resource-calculator umediaserver gst-video-encoder"
+DEPENDS += "media-resource-calculator-clang umediaserver-clang gst-video-encoder-clang"
 
 PKGCONFIG_DIR = "${datadir}/pkgconfig"
 
 do_configure:prepend() {
     ln -snf media-resource-calculator-clang.pc ${STAGING_LIBDIR}/pkgconfig/media-resource-calculator.pc
+    # gst-video-encoder-clang renames its .pc and installs it under datadir.
+    ln -snf gst-video-encoder-clang.pc ${STAGING_DATADIR}/pkgconfig/gst-video-encoder.pc
 }
 
 do_install:append() {
