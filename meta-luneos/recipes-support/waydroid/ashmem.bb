@@ -1,3 +1,7 @@
+# NOTE: this builds a kernel module out of the anbox-modules repo, which is only
+# where the module sources live. It is not part of the anbox application, which
+# was removed. It lives here because Waydroid RRECOMMENDS the resulting
+# kernel-module-ashmem-linux package.
 SUMMARY = "Anonymous Shared Memory Subsystem, ashmem"
 LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://ashmem.c;endline=17;md5=c74d8e70552b07bbd79f07120b792292"
