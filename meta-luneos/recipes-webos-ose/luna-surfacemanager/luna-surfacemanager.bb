@@ -11,7 +11,7 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "qtdeclarative wayland-native qtwayland qtwayland-native qt-features-webos pmloglib webos-wayland-extensions glib-2.0 qtwayland-webos"
 
-WEBOS_VERSION = "2.0.0-402_3fae203063a880806a982cb522f235ca04d1c9a5"
+WEBOS_VERSION = "2.0.0-423_6f49cced1cd4aea27f14d136e1c8ce846beef62a"
 PR = "r61"
 
 inherit webos_qmake6
@@ -38,6 +38,8 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0013-Wait-for-DRI-card-on-EGLFS-platform.patch \
     file://0014-ViewStateController.qml-Fix-TypeError.patch \
     file://0015-NotificationService.qml-let-the-toast-model-remove-t.patch \
+    file://0016-Advertise-xdg_wm_base-so-modern-toolkits-can-map-wind.patch \
+    file://0017-com.webos.surfacemanager.groups.json-keep-the-array-.patch \
 "
 
 S = "${WORKDIR}/git"
