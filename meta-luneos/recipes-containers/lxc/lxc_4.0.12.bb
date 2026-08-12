@@ -47,6 +47,7 @@ SRC_URI = "http://linuxcontainers.org/downloads/${BPN}/${BPN}-${PV}.tar.gz \
 	file://templates-use-curl-instead-of-wget.patch \
 	file://tests-our-init-is-not-busybox.patch \
 	file://0001-syscall_wrappers-don-t-collide-with-glibc-mount_seta.patch \
+	file://CVE-2026-39402.patch \
 	file://dnsmasq.conf \
 	file://lxc-net \
 	"
@@ -55,10 +56,25 @@ SRC_URI[sha256sum] = "db242f8366fc63e8c7588bb2017b354173cf3c4b20abc18780debdc48b
 
 # 4.0.12 is the LAST autotools release of LXC. 5.0.0 switched to meson, removed
 # the Lua bindings and cut the template set down to three files, so moving past
-# this point is a recipe rewrite (inherit meson, drop the ${PN}-lua package,
-# retranslate every EXTRA_OECONF/PACKAGECONFIG option) rather than a version
-# bump. Verified against a 7.0.0 tarball: no configure.ac, no src/lua-lxc, and
-# 5 of the 9 patches carried here no longer apply.
+# this point is a recipe rewrite rather than a version bump. Verified against a
+# 7.0.0 tarball: no configure.ac, no src/lua-lxc, and 5 of the 9 patches carried
+# here no longer apply.
+#
+# meta-virtualization (scarthgap) already did that work and ships lxc 5.0.3+git
+# on stable-5.0 with a meson recipe, and 5.x is where the mount_setattr/glibc
+# collision patched below is fixed properly upstream: 5.x renamed LXC's struct
+# to "struct mount_attr" behind #if !HAVE_STRUCT_MOUNT_ATTR, so it uses glibc's
+# type when one exists instead of a parallel one.
+#
+# We deliberately stay on 4.0.x anyway, because of the kernel floor. lxc is in
+# packagegroup-luneos-extended, so it lands on every extended image and not just
+# the machines waydroid lists, and linux-lg-mako is 3.4.113. 4.0.x is the
+# generation LuneOS has actually run on those kernels. 4.0.12 stays safe there:
+# every new-mount-API path is gated behind can_use_mount_api(), which treats
+# ENOSYS as unsupported, and the mount_setattr calls live in the idmapped-mounts
+# path, which is a 5.12+ feature and opt-in per container config.
+#
+# Revisit 5.0.3 only with a device on the oldest supported kernel to test on.
 
 
 
