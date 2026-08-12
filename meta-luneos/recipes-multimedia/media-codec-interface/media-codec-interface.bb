@@ -20,10 +20,13 @@ inherit webos_pkgconfig
 #In LuneOS we want this for all machines
 #COMPATIBLE_MACHINE = "^qemux86$|^qemux86-64$|^raspberrypi3$|^raspberrypi3-64$|^raspberrypi4$|^raspberrypi4-64$"
 
-DEPENDS = "boost gstreamer1.0 gstreamer1.0-plugins-base gstreamer1.0-plugins-bad umediaserver media-resource-calculator"
+# submissions/36 moved the Gst video encoder implementation into the media
+# recorder framework, so src/impl/gst now pkg_check_modules(gst-video-encoder),
+# which com.webos.service.mediarecorder provides via its gst-video-encoder recipe.
+DEPENDS = "boost gstreamer1.0 gstreamer1.0-plugins-base gstreamer1.0-plugins-bad umediaserver media-resource-calculator gst-video-encoder"
 DEPENDS:append:rpi = " virtual/libomxil"
 
-WEBOS_VERSION = "1.0.0-27_7c7c72b6cef519a774ef8baf1be8f32eb942277b"
+WEBOS_VERSION = "1.0.0-36_70d4149d8d558148c68855356feab825ce282b7f"
 PR = "r11"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
