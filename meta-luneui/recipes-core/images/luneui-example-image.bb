@@ -31,6 +31,3 @@ IMAGE_INSTALL:append:qemuall = " \
     qt-plugin-generic-vboxtouch \
 "
 
-IMAGE_INSTALL:append:qemux86-64 = " \
-    anbox \
-"
