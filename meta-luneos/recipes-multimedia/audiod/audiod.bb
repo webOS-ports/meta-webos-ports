@@ -31,7 +31,7 @@ RDEPENDS:${PN} = "\
     pulseaudio-module-palm-policy \
 "
 
-WEBOS_VERSION = "1.0.0-71_e7845696647c535f943c34336854e16983f3817c"
+WEBOS_VERSION = "1.0.0-78_127c6cd6c9247979b4ead42d9b8fc8b5c48b47a2"
 PR = "r36"
 
 inherit webos_component
@@ -41,17 +41,17 @@ inherit webos_cmake
 # pkg_check_modules(), so pkg-config-native has to be in the build.
 inherit pkgconfig
 inherit webos_system_bus
-inherit webos_machine_dep
+inherit webos_machine_impl_dep
 inherit gettext
 inherit webos_lttng
 inherit webos_public_repo
 
 WEBOS_REPO_NAME = "audiod-pro"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-Make-webos_machine_dep-optional.patch \
-    file://0002-Add-palmLegacyManager-serve-the-Palm-era-com.palm.au.patch \
-    file://0003-Let-audiod-claim-the-legacy-com.palm.audio-bus-names.patch \
-    file://0004-palmLegacyManager-route-calls-via-PulseAudio-card-pr.patch \
+    file://0001-Add-palmLegacyManager-serve-the-Palm-era-com.palm.au.patch \
+    file://0002-Let-audiod-claim-the-legacy-com.palm.audio-bus-names.patch \
+    file://0003-palmLegacyManager-route-calls-via-PulseAudio-card-pr.patch \
+    file://0004-PulseAudioLink-tolerate-a-libpulse-simple-without-pa.patch \
 "
 S = "${WORKDIR}/git"
 
