@@ -1,0 +1,195 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 12 Aug 2026 18:07:57 +0200
+Subject: [PATCH] Don't rely on the name "crypto": node 19+ shadows it with
+ WebCrypto
+
+On a freshly provisioned device every keymanager method blocked until its caller
+timed out. The service never finished starting:
+
+  Uncaught error: TypeError: crypto.randomBytes is not a function
+
+Node 19 and later define globalThis.crypto as a getter-only accessor holding the
+WebCrypto Crypto object, whose interface is getRandomValues/randomUUID/subtle and
+which has no randomBytes(), createCipher() or createHash(). Because that property
+has no setter and these sources run sloppy mode, prologue.js's
+
+    var crypto = require("crypto");
+
+assigned to the accessor and was SILENTLY DISCARDED, so every file kept seeing
+WebCrypto. Verified on the device: the object's prototype was
+constructor,getRandomValues,randomUUID,subtle, while IMPORTS.require("crypto")
+returned the real module with randomBytes as a function.
+
+The failure was invisible because prologue.js installs an uncaughtException
+handler that logs and does not rethrow. KeyStore.loadKey() threw inside the
+fs.readFile callback, the exception was swallowed, its future was never resolved,
+KeyManagerServiceAssistant.setup() never completed, and MojoService never
+dispatched a command: activities were created and started, then nothing.
+
+Downstream that broke account creation. com.palm.service.accounts/createAccount
+calls Utils.saveCredentials -> KeyStore.put -> keymanager/fetchKey, which hung,
+so createAccount hit its 20s commandTimeout. DB.put runs before saveCredentials,
+so the account was still committed to db8 -- accounts appeared after a long delay
+with no credentials stored.
+
+It only bit on a fresh system: once /var/palm/keystore/key exists loadKey() reads
+it and never reaches randomBytes(), which is why provisioned devices were fine.
+
+Fixed by binding the module to nodeCrypto, a name the WebCrypto global cannot
+shadow, and using it at all nine call sites in the loaded sources (KeyStore.js,
+CryptAssistant.js, GenerateAssistant.js). The jslint /*global*/ headers follow.
+
+Verified on qemux86-64 with /var/palm/keystore wiped to reproduce first boot:
+fetchKey now answers in ~194ms with a proper "Key not found" instead of hanging,
+and the 256 byte master key is generated and written.
+
+NOTE: utils/KeyStoreSQLite.js has the same four call sites and is left untouched
+because sources.json does not load it. It will need the same change if that
+backend is ever selected.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+Upstream-Status: Pending [branch herrie/crypto-fix, not yet pushed to webOS-ports/keymanager]
+---
+ .../javascript/assistants/CryptAssistant.js   | 10 ++++----
+ .../assistants/GenerateAssistant.js           |  4 ++--
+ .../assistants/KeyManagerServiceAssistant.js  |  2 +-
+ service/javascript/prologue.js                | 24 ++++++++++++++++++-
+ service/javascript/utils/KeyStore.js          |  8 +++----
+ 5 files changed, 35 insertions(+), 13 deletions(-)
+
+diff --git a/service/javascript/assistants/CryptAssistant.js b/service/javascript/assistants/CryptAssistant.js
+index 33112d7..747cf24 100644
+--- a/service/javascript/assistants/CryptAssistant.js
++++ b/service/javascript/assistants/CryptAssistant.js
+@@ -1,5 +1,5 @@
+ /*jslint node: true */
+-/*global getAppId, KeyStore, crypto, debug */
++/*global getAppId, KeyStore, nodeCrypto, debug */
+ 
+ var CryptAssistant = function () {
+     "use strict";
+@@ -44,18 +44,18 @@ CryptAssistant.prototype.run = function (outerfuture) {
+                     iv = new Buffer.from(args.iv, "base64");
+                     if (args.decrypt) {
+                         debug(algorithm, " for decryption with iv.");
+-                        cipher = crypto.createDecipheriv(algorithm, keydata, iv);
++                        cipher = nodeCrypto.createDecipheriv(algorithm, keydata, iv);
+                     } else {
+                         debug(algorithm, " for encryption with iv.");
+-                        cipher = crypto.createCipheriv(algorithm, keydata, iv);
++                        cipher = nodeCrypto.createCipheriv(algorithm, keydata, iv);
+                     }
+                 } else {
+                     if (args.decrypt) {
+                         debug(algorithm, " for decryption.");
+-                        cipher = crypto.createDecipher(algorithm, keydata);
++                        cipher = nodeCrypto.createDecipher(algorithm, keydata);
+                     } else {
+                         debug(algorithm, " for encryption.");
+-                        cipher = crypto.createCipher(algorithm, keydata);
++                        cipher = nodeCrypto.createCipher(algorithm, keydata);
+                     }
+                 }
+ 
+diff --git a/service/javascript/assistants/GenerateAssistant.js b/service/javascript/assistants/GenerateAssistant.js
+index 04651c6..0674c9a 100644
+--- a/service/javascript/assistants/GenerateAssistant.js
++++ b/service/javascript/assistants/GenerateAssistant.js
+@@ -1,5 +1,5 @@
+ /*jslint node: true */
+-/*global getAppId, KeyStore, crypto, log */
++/*global getAppId, KeyStore, nodeCrypto, log */
+ 
+ var GenerateAssistant = function () {
+     "use strict";
+@@ -48,7 +48,7 @@ GenerateAssistant.prototype.run = function (outerfuture) {
+         if (result.returnValue === true) {
+             outerfuture.exception = {errorCode: -1, message: "Key already exists."};
+         } else {
+-            crypto.randomBytes(key.size, function radomCB(ex, buf) {
++            nodeCrypto.randomBytes(key.size, function radomCB(ex, buf) {
+                 if (ex) {
+                     log("Could not create random key:", ex);
+                     outerfuture.exception = {errorCode: -1, message: "Could not create random key: " + JSON.stringify(ex) };
+diff --git a/service/javascript/assistants/KeyManagerServiceAssistant.js b/service/javascript/assistants/KeyManagerServiceAssistant.js
+index 5f217d2..cefc0a6 100644
+--- a/service/javascript/assistants/KeyManagerServiceAssistant.js
++++ b/service/javascript/assistants/KeyManagerServiceAssistant.js
+@@ -3,7 +3,7 @@
+ * It sets up the keystore decipher.
+ */
+ /*jslint node: true */
+-/*global log, debug, fs, crypto, Future, KeyStore */
++/*global log, debug, fs, nodeCrypto, Future, KeyStore */
+ 
+ var keystoreFolder = "/var/palm/keystore/";
+ var keyFile = keystoreFolder + "key";
+diff --git a/service/javascript/prologue.js b/service/javascript/prologue.js
+index edb4e4a..6f8cead 100644
+--- a/service/javascript/prologue.js
++++ b/service/javascript/prologue.js
+@@ -14,7 +14,29 @@ if (typeof require === "undefined") {
+     require = IMPORTS.require;
+ }
+ var fs = require("fs"); //required for own node modules and current vCard converter.
+-var crypto = require("crypto");
++
++// Deliberately NOT called "crypto". Node 19 and later define globalThis.crypto as a
++// getter-only accessor holding the WebCrypto Crypto object, whose interface is
++// getRandomValues/randomUUID/subtle and which has no randomBytes(), createCipher() or
++// createHash(). A top-level "var crypto = require('crypto')" in this sandbox assigns to
++// that accessor and, because the property has no setter and we run sloppy mode, the
++// assignment is silently discarded: every source file kept seeing WebCrypto.
++//
++// The visible effect was that KeyStore.loadKey() threw
++//     TypeError: crypto.randomBytes is not a function
++// which the uncaughtException handler at the bottom of this file swallowed, so
++// loadKey()'s future was never resolved, KeyManagerServiceAssistant.setup() never
++// completed, and MojoService never dispatched a single command. Every keymanager method
++// then blocked until its caller gave up, which took out account creation:
++// com.palm.service.accounts/createAccount hit its 20s commandTimeout inside
++// Utils.saveCredentials(), leaving accounts stored in db8 with no credentials.
++//
++// This only bit on a fresh system. Once /var/palm/keystore/key exists loadKey() reads it
++// and never reaches randomBytes(), which is why an already-provisioned device was fine.
++var nodeCrypto = IMPORTS.require("crypto");
++if (!nodeCrypto || typeof nodeCrypto.randomBytes !== "function") {
++    nodeCrypto = require("crypto");
++}
+ 
+ console.error("--------->Loaded Libraries OK1");
+ 
+diff --git a/service/javascript/utils/KeyStore.js b/service/javascript/utils/KeyStore.js
+index 3c0ed14..21d38ed 100644
+--- a/service/javascript/utils/KeyStore.js
++++ b/service/javascript/utils/KeyStore.js
+@@ -1,5 +1,5 @@
+ /*jslint node: true, nomen: true */
+-/*global Future, log, debug, fs, keyStoreFile, keyFile, crypto */
++/*global Future, log, debug, fs, keyStoreFile, keyFile, nodeCrypto */
+ 
+ var KeyStore = (function () {
+     "use strict";
+@@ -19,9 +19,9 @@ var KeyStore = (function () {
+     function _crypt(decrypt, inData) {
+         var future = new Future(), cipher, data = new Buffer.from("");
+         if (decrypt) {
+-            cipher = crypto.createDecipher("AES-256-CBC", masterkey);
++            cipher = nodeCrypto.createDecipher("AES-256-CBC", masterkey);
+         } else {
+-            cipher = crypto.createCipher("AES-256-CBC", masterkey);
++            cipher = nodeCrypto.createCipher("AES-256-CBC", masterkey);
+         }
+ 
+         cipher.on("data", function dataCB(chunk) {
+@@ -234,7 +234,7 @@ var KeyStore = (function () {
+                 if (err) {
+                     //generate random key:
+                     debug("No file. Generating random key. Error was:", err);
+-                    crypto.randomBytes(256, function radomCB(ex, buf) {
++                    nodeCrypto.randomBytes(256, function radomCB(ex, buf) {
+                         if (ex) {
+                             log("Could not create random key:", ex);
+                             future.result = { returnValue: false };

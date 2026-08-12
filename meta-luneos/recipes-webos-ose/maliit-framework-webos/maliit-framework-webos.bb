@@ -15,8 +15,8 @@ RDEPENDS:${PN} = "qtbase-plugins configd imemanager"
 
 PACKAGECONFIG[libim] = "CONFIG+=enable-libim,CONFIG-=enable-libim,libim"
 
-WEBOS_VERSION = "0.99.0+20-102_b3c5fe41a33b6dd3d5c11b704c6ff2c8974ef7b6"
-PR = "r36"
+WEBOS_VERSION = "0.99.0+20-103_71e5f78c3c8610e522e4ed01f536f740818efebb"
+PR = "r37"
 
 inherit pkgconfig
 inherit webos_qmake6
