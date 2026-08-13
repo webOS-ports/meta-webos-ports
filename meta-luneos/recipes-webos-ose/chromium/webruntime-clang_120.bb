@@ -57,6 +57,10 @@ GN_ARGS += "clang_use_chrome_plugins=false"
 # the gather builtins were all checked against clang 22 and still compile.
 SRC_URI += "file://0001-skcms-use-_mm256_cvtph_ps-for-clang-22.patch"
 
+# Perfetto uses the template disambiguator without a template argument list in
+# six places, which clang now rejects. Every TU that includes
+# base/trace_event/trace_event.h - most of base/ - fails without this.
+SRC_URI += "file://0002-perfetto-drop-template-keyword-without-arg-list.patch"
 
 # Don't use gold even when selected by default with ld-is-gold in DISTRO_FEATURES
 # because liblttng_provider is built with default host linker (hosttools/ld.gold)
