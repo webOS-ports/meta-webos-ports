@@ -16,7 +16,12 @@ TOOLCHAIN_OPTIONS = "\
     --sysroot=${STAGING_DIR_TARGET} \
     --target=${TARGET_SYS} \
     -stdlib=libc++ \
-    -fuse-ld=${STAGING_BINDIR_NATIVE}/ld.lld \
+    # --ld-path, not -fuse-ld: clang used to accept an absolute path in
+    # -fuse-ld=, but now takes only a linker *name* there and rejects a path:
+    #   clang++: error: invalid linker name in argument
+    #   '-fuse-ld=.../recipe-sysroot-native/usr/bin/ld.lld'
+    # --ld-path= is the spelling for pointing at a specific binary.
+    --ld-path=${STAGING_BINDIR_NATIVE}/ld.lld \
     -nostdinc++ \
     -isystem ${STAGING_INCDIR}/c++/v1/ \
     -Wl,-L${STAGING_DIR_TARGET}/${LIBCBE_DIR} \

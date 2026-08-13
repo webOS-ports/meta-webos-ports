@@ -75,6 +75,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0012-charger-read-usb_type-current_max-and-vendor_charger.patch \
     file://0013-battery-charger-Allow-path-override-from-cmake.patch \
     file://0014-battery.c-Return-proper-current.patch \
+    file://0020-keys-fix-pointer-types-rejected-by-GCC-15.patch \
 "
 
 SRC_URI:append = " \

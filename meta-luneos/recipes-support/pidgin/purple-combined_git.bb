@@ -118,12 +118,17 @@ do_compile() {
     NS_SRCS=$(sed -n '/^NS_SRCS=(/,/^)/p' ${S}/build-combined.sh | grep -oE "[a-z_0-9/]+\.(c|cc)")
     AEC_SRCS=$(sed -n '/^AEC_SRCS=(/,/^)/p' ${S}/build-combined.sh | grep -oE "[a-z_0-9/]+\.(c|cc)")
     for s in $NS_SRCS; do
-        ${CC} -O2 -fPIC -std=gnu11 -DNDEBUG -DWEBRTC_POSIX -DWEBRTC_APM_DEBUG_DUMP=0 \
+        # ${DEBUG_PREFIX_MAP} rather than ${CFLAGS}: these two compiles deliberately use a
+        # minimal flag set, but without the prefix map the debug info records absolute build
+        # paths and buildpaths QA rejects the result:
+        #   File /usr/lib/purple-2/.debug/libwhatsmeow.so in package purple-combined-dbg
+        #   contains reference to TMPDIR [buildpaths]
+        ${CC} -O2 -fPIC -std=gnu11 ${DEBUG_PREFIX_MAP} -DNDEBUG -DWEBRTC_POSIX -DWEBRTC_APM_DEBUG_DUMP=0 \
               -DWEBRTC_NS_FLOAT -I${WEBRTC_DSP} -c ${WEBRTC_DSP}/$s -o ${B}/ns_$(echo $s | tr / _).o
         OBJS="$OBJS ${B}/ns_$(echo $s | tr / _).o"
     done
     for s in $AEC_SRCS; do
-        ${CXX} -O2 -fPIC -std=c++11 -DNDEBUG -DWEBRTC_POSIX -DWEBRTC_APM_DEBUG_DUMP=0 \
+        ${CXX} -O2 -fPIC -std=c++11 ${DEBUG_PREFIX_MAP} -DNDEBUG -DWEBRTC_POSIX -DWEBRTC_APM_DEBUG_DUMP=0 \
                -I${WEBRTC_DSP} -c ${WEBRTC_DSP}/$s -o ${B}/aec_$(echo $s | tr / _).o
         OBJS="$OBJS ${B}/aec_$(echo $s | tr / _).o"
     done

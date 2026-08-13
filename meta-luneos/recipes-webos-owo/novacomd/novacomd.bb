@@ -18,3 +18,12 @@ RDEPENDS:${PN} = "${@oe.utils.conditional('WEBOS_TARGET_MACHINE_IMPL','emulator'
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 EXTRA_OECMAKE += "-DWEBOS_TARGET_MACHINE_IMPL=hardware"
+
+# novacomd is pre-C23 code: platform.h does "typedef int bool;" with matching
+# true/false macros. GCC 15 defaults to -std=gnu23, where bool is a keyword:
+#
+#   include/platform.h:56:13: error: 'bool' cannot be defined via 'typedef'
+#
+# Build it as the C17 it was written for rather than reworking the type across
+# the tree, which would change the size of bool in every struct that uses it.
+CFLAGS += "-std=gnu17"
