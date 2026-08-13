@@ -30,7 +30,15 @@ OE_QMAKE_PATH_EXAMPLES = "${datadir}/examples"
 OE_QMAKE_PATH_TESTS = "${datadir}/tests"
 OE_QMAKE_PATH_HOST_PREFIX = ""
 OE_QMAKE_PATH_HOST_PREFIX:class-target = "${STAGING_DIR_NATIVE}"
-OE_QMAKE_PATH_HOST_BINS = "${bindir}${QT_DIR_NAME}"
+# OE_QMAKE_PATH_HOST_BINS is deliberately NOT overridden here. It names the
+# directory holding the *host* qmake, and meta-qt6 computes it from
+# STAGING_BINDIR_NATIVE. Setting it to ${bindir} - as this class used to,
+# carried over from the qt5-era qmake5_paths.bbclass - makes qt6-qmake.bbclass
+# derive OE_QMAKE_QMAKE = /usr/bin/qmake, the build host's path:
+#   run.do_configure: /usr/bin/qmake: not found
+# Every other OE_QMAKE_PATH_* below is a target path, which is why this one
+# looked like it belonged; the neighbouring OE_QMAKE_PATH_EXTERNAL_HOST_BINS
+# already uses STAGING_BINDIR_NATIVE for the same reason.
 OE_QMAKE_PATH_HOST_DATA = "${QMAKE_MKSPEC_PATH_TARGET}"
 OE_QMAKE_PATH_HOST_LIBS = "${STAGING_LIBDIR}"
 OE_QMAKE_PATH_EXTERNAL_HOST_BINS = "${STAGING_BINDIR_NATIVE}${QT_DIR_NAME}"
