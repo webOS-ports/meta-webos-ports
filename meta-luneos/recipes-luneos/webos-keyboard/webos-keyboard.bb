@@ -14,7 +14,12 @@ inherit pkgconfig
 
 DEPENDS = "maliit-framework-webos hunspell presage luna-service2 presage-native qt5compat"
 
-RDEPENDS:${PN} += "qtsvg-plugins qtmultimedia-qmlplugins"
+# maliit-framework-webos provides maliit-server, which hosts the keyboard plugin
+# this recipe installs into ${libdir}/maliit/plugins -- without it there is no VKB
+# at all. It used to arrive only as an automatic shlib dependency on
+# libmaliit-plugins.so.0, but that is computed at do_package time and silently
+# went missing when the maliit bump changed PKGV, so state it explicitly.
+RDEPENDS:${PN} += "maliit-framework-webos qtsvg-plugins qtmultimedia-qmlplugins"
 RRECOMMENDS:${PN} += "hunspell-dictionaries"
 
 SRCREV = "19cd63f602ff978648535f5abf779682aead34fc"
