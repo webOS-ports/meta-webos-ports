@@ -36,7 +36,13 @@ PACKAGECONFIG[client-wl-shell] = "-DFEATURE_wayland_client_wl_shell=ON,-DFEATURE
 PACKAGECONFIG[client-xdg-shell] = "-DFEATURE_wayland_client_xdg_shell=ON,-DFEATURE_wayland_client_xdg_shell=OFF,"
 
 # PACKAGECONFIG for webos
-PACKAGECONFIG = "wayland-server wayland-client client-wl-shell ${PACKAGECONFIG_DMABUF}"
+# wayland-server/wayland-client dropped: meta-qt6 6.12's qtwayland defines no
+# PACKAGECONFIG[] at all, and an entry with no definition is a fatal QA error
+# (the same one that stopped qtbase over "examples"). Qt 6.10 moved the Wayland
+# client into qtbase and builds the compositor unconditionally, so there is
+# nothing left for these two to switch. client-wl-shell and the DMABUF entry
+# stay - this bbappend defines those itself, just above.
+PACKAGECONFIG = "client-wl-shell ${PACKAGECONFIG_DMABUF}"
 
 PACKAGECONFIG_DMABUF = "drm-egl-server-buffer"
 

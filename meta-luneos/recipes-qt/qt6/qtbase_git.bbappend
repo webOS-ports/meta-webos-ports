@@ -41,7 +41,11 @@ PACKAGECONFIG_GRAPHICS:append:pinetab2 = " kms gbm"
 PACKAGECONFIG_GRAPHICS:append:tenderloin = " kms gbm"
 PACKAGECONFIG_GRAPHICS:append:rosy = " kms gbm"
 PACKAGECONFIG_GRAPHICS:append:tissot = " kms gbm"
-PACKAGECONFIG_DISTRO += "sql-sqlite icu glib accessibility mtdev examples fontconfig xkbcommon"
+# "examples" dropped: meta-qt6 6.12 has no PACKAGECONFIG[examples] any more -
+# examples moved out to qt6-examples.inc - and an unknown entry is fatal:
+#   ERROR: QA Issue: qtbase: invalid PACKAGECONFIG(s): examples
+# LuneOS does not ship the Qt examples, so there is nothing to carry over.
+PACKAGECONFIG_DISTRO += "sql-sqlite icu glib accessibility mtdev fontconfig xkbcommon"
 
 # We had this enabled in our old gpro/meta-qt5 recipe
 PACKAGECONFIG:append = " icu"
