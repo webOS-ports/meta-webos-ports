@@ -29,6 +29,14 @@ DEPENDS = "pidgin glib-2.0 zlib openssl tdlib libtgvoip libopus alsa-lib luna-se
 
 S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/messaging/telegram/plugin/tdlib-purple"
 
+# S is the plugin subdirectory, so OE's automatic ${S} prefix-map covers only
+# that. The build also pulls in messaging/common, a sibling of S, whose paths
+# then survive into the debug info:
+#   File /usr/lib/purple-2/.debug/libtelegram-tdlib.so in package
+#   tdlib-purple-dbg contains reference to TMPDIR [buildpaths]
+# Map the whole unpacked tree, as purple-combined does for the same reason.
+DEBUG_PREFIX_MAP:append = " -ffile-prefix-map=${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}=/usr/src/debug/${PN}/${PV}"
+
 inherit cmake pkgconfig
 
 # tdlib-purple declares cmake_minimum_required(VERSION 3.2). Scarthgap's CMake still accepted that

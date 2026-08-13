@@ -8,6 +8,12 @@ DEPENDS = "pidgin json-glib glib-2.0 zlib"
 
 S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/messaging/teams/plugin/purple-teams"
 
+# Same as tdlib-purple and purple-combined: S is the plugin subdirectory, so
+# the automatic ${S} prefix-map misses messaging/common, which this build also
+# compiles, and those paths would survive into the debug info and trip
+# buildpaths QA. Map the whole unpacked tree.
+DEBUG_PREFIX_MAP:append = " -ffile-prefix-map=${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}=/usr/src/debug/${PN}/${PV}"
+
 # The default target builds both variants: libteams.so (commercial, Skype for Business) and
 # libteams-personal.so (consumer). webOS uses the consumer one; both are installed, as upstream
 # does, since the extra object costs little and keeps the recipe close to the Makefile.
