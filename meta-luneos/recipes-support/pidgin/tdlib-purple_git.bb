@@ -31,9 +31,13 @@ S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/messaging/telegram/plugin/tdlib-p
 
 inherit cmake pkgconfig
 
-# tdlib-purple declares cmake_minimum_required(VERSION 3.2). Scarthgap's CMake still accepts that
-# with a deprecation warning; CMake 4 does not, and will need
-# -DCMAKE_POLICY_VERSION_MINIMUM=3.5 added to EXTRA_OECMAKE when the host cmake is bumped.
+# tdlib-purple declares cmake_minimum_required(VERSION 3.2). Scarthgap's CMake still accepted that
+# with a deprecation warning; wrynose's CMake 4 does not:
+#   CMake Error at CMakeLists.txt:1 (cmake_minimum_required):
+#     Compatibility with CMake < 3.5 has been removed from CMake.
+# so -DCMAKE_POLICY_VERSION_MINIMUM=3.5 is now set below, as this note
+# anticipated. webos_cmake.bbclass does the same for the webOS components, and
+# clang_cmake.bbclass inherits it, but this recipe is a plain "inherit cmake".
 
 # NoVoip=OFF keeps libtgvoip, which is what carries webOS calling. NoLottie=ON drops the rlottie
 # sticker renderer: a large dependency the webOS UI does not animate anyway. Note that NoLottie also
@@ -67,6 +71,7 @@ inherit cmake pkgconfig
 # The semicolons must stay quoted: cmake_do_configure expands EXTRA_OECMAKE unquoted into a shell
 # command, which would otherwise split the line at each one.
 EXTRA_OECMAKE = " \
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DNoVoip=OFF \
     -DNoLottie=ON \
     -DNoTgcallsLite=ON \
