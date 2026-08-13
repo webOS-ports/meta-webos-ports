@@ -9,6 +9,13 @@ PREFERRED_VERSION_mksnapshot-cross-${TARGET_ARCH} = "${PREFERRED_VERSION_webrunt
 # https://git.openembedded.org/meta-openembedded/commit/?id=cd26db61af27a9f822492b1d67b0e39e6828e7cb
 # but eg25-manager used on pinepohone wasn't updated yet to support it:
 # https://gitlab.com/mobian1/eg25-manager/-/issues/45
+# meson 1.12.0 from meta-luneos-backports-6.0 rather than wrynose's 1.10.2.
+# This is a forward-port, not a hold-back: oe-core wrynose regressed relative to
+# what LuneOS was already building on scarthgap, so pin it explicitly or bitbake
+# would pick 1.10.2 as the only other candidate.
+PREFERRED_VERSION_meson = "1.12.0"
+PREFERRED_VERSION_meson-native = "1.12.0"
+
 PREFERRED_VERSION_libgpiod = "1.6.5"
 
 # We need latest mesa from meta-luneos-backports-6.0 for all machines
