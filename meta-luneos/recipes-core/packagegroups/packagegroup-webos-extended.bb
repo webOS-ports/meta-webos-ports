@@ -19,7 +19,7 @@ VIRTUAL-RUNTIME_surface-manager-conf ?= "luna-surfacemanager-conf"
 VIRTUAL-RUNTIME_surface-manager-extension ?= ""
 VIRTUAL-RUNTIME_webos-ime ?= ""
 VIRTUAL-RUNTIME_novacomd ?= "novacomd"
-VIRTUAL-RUNTIME_com.webos.app.browser ?= "com.webos.app.enactbrowser"
+VIRTUAL-RUNTIME_com.webos.app.browser ?= "org.webosports.app.atlas"
 VIRTUAL-RUNTIME_com.webos.app.camera ?= "com.webos.app.camera"
 VIRTUAL-RUNTIME_com.webos.app.mediagallery ?= "com.webos.app.mediagallery"
 VIRTUAL-RUNTIME_com.webos.app.notification ?= "com.webos.app.notification"
@@ -32,6 +32,7 @@ VIRTUAL-RUNTIME_ai ?= "com.webos.service.ai"
 VIRTUAL-RUNTIME_memorymanager ?= "com.webos.service.memorymanager"
 VIRTUAL-RUNTIME_g-media-pipeline ?= "g-media-pipeline"
 VIRTUAL-RUNTIME_g-camera-pipeline ?= "g-camera-pipeline"
+VIRTUAL-RUNTIME_camera ?= "com.webos.service.camera"
 VIRTUAL-RUNTIME_nodejs-module-node-red ?= "node-red"
 VIRTUAL-RUNTIME_contextintentmgr ?= "com.webos.service.contextintentmgr"
 VIRTUAL-RUNTIME_mojoservicelauncher ?= "mojoservicelauncher"
@@ -71,6 +72,13 @@ WEBOS_PACKAGESET_ENYO_1 = " \
     underscore \
     luna-init-fonts \
 "
+
+# Mojo 1, for applications predating Enyo. mojo-framework needs a tarball
+# extracted from a legacy webOS image (Mojo was never open-sourced), so it is
+# left out of the default set - see mojo-framework.bb. Add it with:
+#     WEBOS_PACKAGESET_MOJO_1:append = " mojo-framework"
+# or by setting MOJO_FRAMEWORK_TARBALL and adding mojo-framework directly.
+WEBOS_PACKAGESET_MOJO_1 ?= ""
 
 WEBOS_PACKAGESET_SYSTEMAPPS = " \
     ${VIRTUAL-RUNTIME_unifiedsearch} \
@@ -137,6 +145,7 @@ WEBOS_PACKAGESET_MEDIA = " \
     com.webos.service.mediaindexer \
 "
 
+
 # nyx-lib needs nyx-modules at runtime, but a runtime dependency is not defined
 # in its recipe because nyx-modules is MACHINE_ARCH (e.g. qemux86), while nyx-lib is
 # TUNE_PKGARCH  (e.g. i586). Instead, it is pulled into the image by adding it here.
@@ -147,12 +156,14 @@ RDEPENDS:${PN} = " \
     ${@bb.utils.contains('DISTRO_FEATURES', 'smack', 'attr smack com.webos.app.test.smack.native', '', d)} \
     ${VIRTUAL-RUNTIME_com.webos.app.camera} \
     ${VIRTUAL-RUNTIME_com.webos.app.home} \
+    ${VIRTUAL-RUNTIME_camera} \
     ${VIRTUAL-RUNTIME_g-camera-pipeline} \
     ${VIRTUAL-RUNTIME_g-media-pipeline} \
     bootd \
     configd \
     configurator \
     ${WEBOS_PACKAGESET_ENYO_1} \
+    ${WEBOS_PACKAGESET_MOJO_1} \
     event-monitor \
     filecache \
     gssdp \
@@ -207,6 +218,7 @@ RDEPENDS:${PN} = " \
     ${WEBOS_PACKAGESET_MEDIA} \
 "
 
+
 # XXX These FOSS components must be explicitly added because they are missing
 # from the RDEPENDS lists of the components that expect them to be present at
 # runtime (or perhaps some are in fact top-level components and some others
@@ -224,6 +236,7 @@ WEBOS_FOSS_MISSING_FROM_RDEPENDS = " \
     makedevs \
     ncurses \
     openssl \
+    openssl-engines \
     procps \
     psmisc \
     sqlite3 \

@@ -55,7 +55,10 @@ GN_ARGS += "webos_rpath=\"${libdir}/cbe\""
 GN_ARGS += "${@'cc_wrapper=\\\"ccache \\\"' if bb.data.inherits_class('ccache', d) else ''}"
 
 PACKAGECONFIG[umediaserver] = ",,umediaserver${DEPEXT}"
-PACKAGECONFIG[gstreamer] = "use_gst_media=true enable_webm_video_codecs=false,use_gst_media=false,g-media-pipeline${DEPEXT}"
+# enable_webm_video_codecs=true, as in webruntime.inc — this line re-declares the whole PACKAGECONFIG
+# just to append ${DEPEXT} to the dependency, so it silently overrides the value set there. See the
+# comment in webruntime.inc for why WebM has to be on for LuneOS.
+PACKAGECONFIG[gstreamer] = "use_gst_media=true enable_webm_video_codecs=true,use_gst_media=false,g-media-pipeline${DEPEXT}"
 PACKAGECONFIG[webos-codec] = "use_webos_codec=true,use_webos_codec=false,media-codec-interface${DEPEXT}"
 PACKAGECONFIG[webos-camera] = "use_webos_camera=true,use_webos_camera=false, cambufferlib${DEPEXT}"
 

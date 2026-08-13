@@ -18,6 +18,3 @@ RDEPENDS:${PN} = "${@oe.utils.conditional('WEBOS_TARGET_MACHINE_IMPL','emulator'
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 EXTRA_OECMAKE += "-DWEBOS_TARGET_MACHINE_IMPL=hardware"
-
-# novacomd/2.0.0-124+git/git/include/platform.h:56:13: error: 'bool' cannot be defined via 'typedef'
-CFLAGS += "-std=gnu17"

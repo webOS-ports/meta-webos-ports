@@ -23,7 +23,7 @@ ANY_OF_DISTRO_FEATURES = "vulkan opengl"
 
 DEPENDS = "virtual/gettext wayland wayland-native luna-service2 pixman freetype fontconfig openssl pango cairo icu webos-wayland-extensions libxkbcommon libexif dbus pciutils udev libcap alsa-lib virtual/egl elfutils-native libdrm atk gperf-native gconf libwebosi18n bison-native xorgproto nss nspr curl nspr-native nss-native pmloglib glib-2.0-native python3-six-native python3-beautifulsoup4-native python3-soupsieve-native python3-lxml-native python3-html5lib-native python3-webencodings-native"
 
-INC_PR = "r80"
+INC_PR = "r81"
 # Enable this in webos-local.conf or in recipe to build
 DEPLOY_CHROMEDRIVER ?= "false"
 DEPLOY_WAM_DEMO ?= "false"
@@ -47,13 +47,28 @@ TARGET:append = " ${BROWSERSHELL_TARGET}"
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 
 PACKAGECONFIG_WEBOS_CODEC ?= "webos-codec pulseaudio webos-camera webos-audio"
-PACKAGECONFIG_MEDIA ?= "neva-media gstreamer umediaserver gav"
+# av1-codec buys WebM-AV1 and canvas AVIF (a few html5test points), but it is SOFTWARE decode: once
+# Chromium advertises AV1, sites that negotiate a codec — YouTube being the obvious one — will start
+# serving it, and phone-class hardware may not keep up. Drop it from the hardware append if real-world
+# playback regresses; the emulator is unaffected either way.
+PACKAGECONFIG_MEDIA ?= "neva-media gstreamer umediaserver gav av1-codec"
 PACKAGECONFIG ?= ""
 PACKAGECONFIG:append = " ${@bb.utils.filter('DISTRO_FEATURES', 'smack', d)}"
 PACKAGECONFIG:append:hardware = " ${PACKAGECONFIG_MEDIA} ${PACKAGECONFIG_WEBOS_CODEC}"
 PACKAGECONFIG:append:qemux86 = " ${PACKAGECONFIG_MEDIA}"
 PACKAGECONFIG:append:qemux86-64 = " ${PACKAGECONFIG_MEDIA}"
-PACKAGECONFIG[gstreamer] = "use_gst_media=true enable_webm_video_codecs=false,use_gst_media=false,g-media-pipeline"
+# enable_webm_video_codecs is left ON here, unlike upstream, which forces it false whenever the gst
+# pipeline is in use. That default suits a TV whose gst pipeline hands decoding to fixed-function
+# hardware with no VP8/VP9 support: advertising WebM there would accept media it cannot then play.
+# LuneOS decodes in software, and the pipeline on a LuneOS image already has everything WebM needs —
+# matroskademux (gstreamer1.0-plugins-good-matroska) plus avdec_vp8 / avdec_vp9 / avdec_opus and
+# vorbisdec (gstreamer1.0-libav, gstreamer1.0-plugins-base-vorbis) — all verified present on a
+# qemux86-64 image. With it false, Chromium compiles the WebM demuxer out of its own media layer, so
+# canPlayType and MediaSource.isTypeSupported answer "no" for every WebM type while the codecs
+# themselves work: audio/ogg;vorbis reports "probably" but audio/webm;vorbis reports nothing. That
+# cost ten html5test points (VP8, VP9, AV1, Vorbis and Opus, each counted once for playback and again
+# for MSE) and, more to the point, makes WebM-only sites fall back or fail.
+PACKAGECONFIG[gstreamer] = "use_gst_media=true enable_webm_video_codecs=true,use_gst_media=false,g-media-pipeline"
 PACKAGECONFIG[umediaserver] = ",,umediaserver"
 # Options to enable debug build. Add this PACKAGECONFIG to webos-local.conf to enable debug build
 # By default debug is completely disabled to speed up build
@@ -236,6 +251,14 @@ do_install() {
         install -d ${D}${BROWSERSHELL_APPLICATION_DIR}
         install -v -m 0755 ${OUT_IMAGE_DIR}/${BROWSERSHELL_APPLICATION_DIR}/browser_shell ${D}${BROWSERSHELL_APPLICATION_DIR}
         install -v -m 0755 ${OUT_IMAGE_DIR}/${BROWSERSHELL_APPLICATION_DIR}/run_browser_shell ${D}${BROWSERSHELL_APPLICATION_DIR}
+
+        # Chromium keeps its speech-dispatcher TTS backend behind a switch
+        # (content/browser/speech/tts_linux.cc bails out of TtsPlatformImplLinux's constructor without
+        # it), so libspeechd is never dlopened and speechSynthesis.getVoices() returns an empty list --
+        # the Web Speech API looks present but nothing can ever speak. Turn it on; the daemon is
+        # autospawned by libspeechd on first use, so nothing has to run at boot.
+        sed -i '/--enable-file-cookies\\/a\  --enable-speech-dispatcher\\' \
+            ${D}${BROWSERSHELL_APPLICATION_DIR}/run_browser_shell
 
         ln -f ${D}${CBE_DATA_PATH}/snapshot_blob.bin ${D}${BROWSERSHELL_APPLICATION_DIR}/snapshot_blob.bin
     else

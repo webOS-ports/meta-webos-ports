@@ -17,6 +17,7 @@ remove_LGPL3() {
 # Needed in LuneOS
 #PACKAGECONFIG_DEFAULT:remove = "dbus"
 
+
 # Enable accessibility for qtquickcontrols
 PACKAGECONFIG:append = " accessibility"
 
@@ -131,6 +132,13 @@ TARGET_CXXFLAGS:append = " \
 
 VIRTUAL-RUNTIME_gpu-libs ?= ""
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_gpu-libs}"
+
+# FIXME: Since there is no libgles3-mesa package that would pull in the headers,
+# webos-qt-sdk should have runtime dependency on libgles3-mesa-dev because
+# /usr/include/QtGui/qtgui-config.h will either use gl3.h or gl2.h based
+# on QT_FEATURE_opengles3.
+# https://bugreports.qt.io/browse/WEBOSCI-82
+RRECOMMENDS:${PN}-dev += "libgles3-mesa-dev"
 
 # work around for issues described in:
 # https://codereview.qt-project.org/c/yocto/meta-qt6/+/483660

@@ -32,6 +32,11 @@ IMAGE_INSTALL:append = " \
     kernel-modules \
 "
 
+IMAGE_INSTALL:append:tenderloin = " \
+    ${MESA_PKGS} \
+    luneos-mainline-debug \
+"
+
 IMAGE_INSTALL:append:qemuall = " \
     ${MESA_PKGS} \
 "

@@ -1,0 +1,131 @@
+From 6ae233367b299256ed50f85bb4a2ba356c73b552 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Mon, 23 Mar 2026 21:38:18 +0100
+Subject: Fix memory leaks in multiple modules
+
+- device_info_generic.c: Free product_name in nyx_module_close
+  (product_name and device_name point to same allocation from strdup)
+- system.c: Free nyxDev in nyx_module_close
+- charger.c: Free sysfs path strings after use in _detect_charger_sysfs_paths
+- utils.c: Properly close GDir handles in find_power_supply_sysfs_path,
+  including error paths and success paths
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [LuneOS specific]
+
+---
+ src/charger/charger.c                 |  7 +++++++
+ src/device_info/device_info_generic.c |  8 ++++++++
+ src/system/system.c                   |  5 +++++
+ src/utils/utils.c                     | 18 +++++++++++++++---
+ 4 files changed, 35 insertions(+), 3 deletions(-)
+
+diff --git a/src/charger/charger.c b/src/charger/charger.c
+index 99f1bf5..eaaf321 100644
+--- a/src/charger/charger.c
++++ b/src/charger/charger.c
+@@ -307,6 +307,13 @@ void _detect_charger_sysfs_paths()
+ 		snprintf(batt_present_path, PATH_LEN, "%s/present", battery_sysfs_path);
+ 		snprintf(batt_status_path, PATH_LEN, "%s/status", battery_sysfs_path);
+ 	}
++
++	/* Free allocated paths after use */
++	g_free(battery_sysfs_path);
++	g_free(charger_usb_sysfs_path);
++	g_free(charger_ac_sysfs_path);
++	g_free(charger_touch_sysfs_path);
++	g_free(charger_wireless_sysfs_path);
+ }
+ 
+ static void _charger_cleanup(void)
+diff --git a/src/device_info/device_info_generic.c b/src/device_info/device_info_generic.c
+index 804723f..ccd8082 100644
+--- a/src/device_info/device_info_generic.c
++++ b/src/device_info/device_info_generic.c
+@@ -503,6 +503,14 @@ nyx_error_t nyx_module_close(nyx_device_handle_t d)
+ 		device_info->devuid_str = NULL;
+ 	}
+ 
++	/* product_name and device_name point to the same allocation */
++	if (NULL != device_info->product_name)
++	{
++		free((void *) device_info->product_name);
++		device_info->product_name = NULL;
++		device_info->device_name = NULL;
++	}
++
+ 	free((void *) device_info->nduid_str);
+ 	free(device_info);
+ 	return NYX_ERROR_NONE;
+diff --git a/src/system/system.c b/src/system/system.c
+index 9b63d88..eaec65f 100644
+--- a/src/system/system.c
++++ b/src/system/system.c
+@@ -108,6 +108,11 @@ nyx_error_t nyx_module_open(nyx_instance_t i, nyx_device_t **d)
+ nyx_error_t nyx_module_close(nyx_device_t *d)
+ {
+ 	rtc_close();
++	if (nyxDev)
++	{
++		free(nyxDev);
++		nyxDev = NULL;
++	}
+ 	return NYX_ERROR_NONE;
+ }
+ 
+diff --git a/src/utils/utils.c b/src/utils/utils.c
+index 2ec8ec8..64e98df 100644
+--- a/src/utils/utils.c
++++ b/src/utils/utils.c
+@@ -99,10 +99,11 @@ end:
+ char *find_power_supply_sysfs_path(const char *device_type)
+ {
+ 	GError *gerror = NULL;
+-	GDir *dir;
+-	GDir *subdir;
++	GDir *dir = NULL;
++	GDir *subdir = NULL;
+ 	gchar *dir_path = NULL;
+ 	gchar *full_path = NULL;
++	gchar *result = NULL;
+ 	const char *sub_dir_name;
+ 	const char *file_name;
+ 	char file_contents[64];
+@@ -135,6 +136,8 @@ char *find_power_supply_sysfs_path(const char *device_type)
+ 			{
+ 				nyx_error(MSGID_NYX_MOD_GET_DIR_ERR, 0, "error: %s", gerror->message);
+ 				g_error_free(gerror);
++				g_free(dir_path);
++				g_dir_close(dir);
+ 				return NULL;
+ 			}
+ 
+@@ -147,18 +150,27 @@ char *find_power_supply_sysfs_path(const char *device_type)
+ 
+ 					if (strcmp(file_contents, device_type) == 0)
+ 					{
+-						return dir_path;
++						result = dir_path;
++						dir_path = NULL;  /* Prevent freeing below */
++						g_free(full_path);
++						g_dir_close(subdir);
++						g_dir_close(dir);
++						return result;
+ 					}
+ 
+ 					g_free(full_path);
+ 					full_path = NULL;
+ 				}
+ 			}
++
++			g_dir_close(subdir);
++			subdir = NULL;
+ 		}
+ 
+ 		g_free(dir_path);
+ 		dir_path = NULL;
+ 	}
+ 
++	g_dir_close(dir);
+ 	return NULL;
+ }

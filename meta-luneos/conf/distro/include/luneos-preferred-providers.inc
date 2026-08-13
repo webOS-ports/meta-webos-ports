@@ -57,6 +57,20 @@ VIRTUAL-RUNTIME_stat = "busybox"
 VIRTUAL-RUNTIME_webos-ime = "webos-keyboard"
 # VIRTUAL-RUNTIME_webos-ime = "imemanager"
 
+# Which audio control service ships. Both claim com.palm.audio and
+# org.webosports.service.audio, so exactly one of them can be installed.
+#
+#   packagegroup-luneos-audiod - audiod (webOS OSE) plus module-palm-policy and
+#                                palmLegacyManager, which serves the Palm-era
+#                                com.palm.audio API that Enyo 1.0's
+#                                com.palm.app.phone and the enyo framework use.
+#   audio-service              - the previous LuneOS service. Thin libpulse
+#                                wrapper: master volume, mute and setCallMode
+#                                only, no /phone, /ringtone, /dtmf or /media.
+#
+# Set to audio-service in a machine conf to fall back while bringing a device up.
+VIRTUAL-RUNTIME_audio_service ?= "packagegroup-luneos-audiod"
+
 VIRTUAL-RUNTIME_bluetooth_service ?= "${@bb.utils.contains('DISTRO_FEATURES', 'bluetooth', 'com.webos.service.bluetooth2', '', d)}"
 
 # Options are: bluez4, bluez5. This will only be used if "bluetooth" appears in
@@ -72,8 +86,8 @@ BLUEZ:class-nativesdk = "bluez5"
 # use them.
 VIRTUAL-RUNTIME_cpushareholder = "cpushareholder-stub"
 
-# Use Enactbrowser by default
-VIRTUAL-RUNTIME_com.webos.app.browser ?= "com.webos.app.enactbrowser"
+# Atlas is the default browser; enactbrowser remains available as an alternative provider
+VIRTUAL-RUNTIME_com.webos.app.browser ?= "org.webosports.app.atlas"
 VIRTUAL-RUNTIME_webappmanager = "wam${WEBRUNTIME_TOOLCHAIN}"
 
 VIRTUAL-RUNTIME_initscripts = "webos-initscripts"

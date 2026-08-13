@@ -11,6 +11,16 @@ NOT_COMPATIBLE_WITH_CURRENT_NODEJS = " \
 
 #LuneOS uses it's own settings app
 VIRTUAL-RUNTIME_settingsapp ?= "org.webosports.app.settings"
+
+# Web Speech API support for the browser. Chromium dlopens libspeechd.so.2 and talks to the
+# speech-dispatcher daemon; without this, speechSynthesis exists but has no voices and pages that
+# speak stay silent. Set to "" in a distro/local conf to drop it (it pulls in espeak and portaudio).
+VIRTUAL-RUNTIME_speech_synthesis ?= "speech-dispatcher"
+
+# Atlas is the default browser (VIRTUAL-RUNTIME_com.webos.app.browser) and is also listed below, so it
+# ships whichever browser is default. enactbrowser stays installed because run_browser_shell loads its
+# pdf.js as a Chromium extension for EVERY browsershell app — drop that package and Atlas loses
+# in-browser PDF as well.
 RDEPENDS:${PN} = " \
   ${DISTRO_EXTRA_RDEPENDS} \
   \
@@ -40,7 +50,11 @@ RDEPENDS:${PN} = " \
   \
   org.webosports.app.preware \
   org.webosports.service.ipkg \
+  com.webos.app.enactbrowser \
   \
+  ${VIRTUAL-RUNTIME_speech_synthesis} \
+  \
+  org.webosports.app.atlas \
   org.webosports.app.calculator \
   org.webosports.app.contacts \
   org.webosports.app.filemanager \
@@ -90,7 +104,7 @@ RDEPENDS:${PN} = " \
   \
   webos-users-groups \
   \
-  audio-service \
+  ${VIRTUAL-RUNTIME_audio_service} \
   com.palm.keymanager \
   mediaindexer \
   media-permission-service \
@@ -103,6 +117,8 @@ RDEPENDS:${PN} = " \
   org.mer.app.fingerterm \
   org.webosports.app.terminal \
   org.webosports.app.camera \
+  \
+  v4l-utils \
 "
 
 LIBHYBRIS_RDEPENDS = " \
@@ -136,20 +152,24 @@ LIBHYBRIS_RDEPENDS = " \
 RDEPENDS:${PN}:append:tuna = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:grouper = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:mako = " ${LIBHYBRIS_RDEPENDS} bluebinder"
-RDEPENDS:${PN}:append:hammerhead = " alsa-utils-systemd rmtfs qrtr rpmsgexport"
+RDEPENDS:${PN}:append:hammerhead = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:hammerhead-halium = " ${LIBHYBRIS_RDEPENDS}"
+RDEPENDS:${PN}:append:opal = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
+RDEPENDS:${PN}:append:opal3g = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:tenderloin = " alsa-utils-systemd rmtfs qrtr rpmsgexport"
+RDEPENDS:${PN}:append:tenderloin71 = " alsa-utils-systemd rmtfs qrtr rpmsgexport"
+RDEPENDS:${PN}:append:tenderloin3g = " alsa-utils-systemd rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:tenderloin-halium = " ${LIBHYBRIS_RDEPENDS}"
-RDEPENDS:${PN}:append:mido = " alsa-utils-systemd rmtfs qrtr rpmsgexport"
+RDEPENDS:${PN}:append:mido = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:mido-halium = " ${LIBHYBRIS_RDEPENDS} bluebinder"
 RDEPENDS:${PN}:append:mindphone = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:athene = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:onyx = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:oxygen = " ${LIBHYBRIS_RDEPENDS}"
-RDEPENDS:${PN}:append:tissot = " alsa-utils-systemd rmtfs qrtr rpmsgexport"
+RDEPENDS:${PN}:append:tissot = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:tissot-halium = " ${LIBHYBRIS_RDEPENDS} bluebinder"
 RDEPENDS:${PN}:append:sargo = " ${LIBHYBRIS_RDEPENDS} bluebinder"
-RDEPENDS:${PN}:append:rosy = " alsa-utils-systemd rmtfs qrtr rpmsgexport"
+RDEPENDS:${PN}:append:rosy = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:s2 = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:sagit = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:yggdrasil = " ${LIBHYBRIS_RDEPENDS}"
@@ -163,6 +183,7 @@ RDEPENDS:${PN}:append:tissot-halium = " waydroid"
 
 QEMU_RDEPENDS = " \
     alsa-utils-systemd \
+    mesa-megadriver \
     kernel-module-snd-intel8x0 \
     phonesim \
     qt-plugin-generic-vboxtouch \

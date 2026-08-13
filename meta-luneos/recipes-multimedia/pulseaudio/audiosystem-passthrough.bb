@@ -8,8 +8,8 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 inherit pkgconfig
 
-PV = "1.2.1+git"
-SRCREV = "3165200ce2e6aa84274c8bb2134c839a1544153d"
+PV = "1.3.1+git"
+SRCREV = "11a0d95f43c92580a42c08a050b2b5bf18e0f475"
 
 SRC_URI = " \
         git://github.com/mer-hybris/audiosystem-passthrough.git;branch=master;protocol=https \

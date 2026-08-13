@@ -15,8 +15,11 @@ DEPENDS = "qtbase luna-service2 luna-prefs qt-features-webos qtdeclarative malii
 #We don't need the exotic languages for now, so let's simply remove them for now.
 #RDEPENDS:${PN} += "libhangul sunpinyin pyzy qml-webos-bridge openwnn-webos"
 RDEPENDS:${PN} += "qml-webos-bridge"
+# Japanese: openwnn-webos ships libWnnJpn.so as a maliit plugin, which is the
+# engine the ja keyboard in this component expects to find.
+RDEPENDS:${PN} += "openwnn-webos"
 
-WEBOS_VERSION = "1.0.0-31_55da1c739acaedc2b26ad66f4fb14761905bba8a"
+WEBOS_VERSION = "1.0.0-32_45ef0e7b8ec941caa045515d0ccad87b61d0b84d"
 PR = "r7"
 
 inherit webos_component

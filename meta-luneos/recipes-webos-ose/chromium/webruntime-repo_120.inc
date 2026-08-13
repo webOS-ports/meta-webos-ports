@@ -19,6 +19,10 @@ SRC_URI += " \
     file://0006-webossystem_injection.cc-fix-some-PalmSystem-functio.patch \
     file://0007-app_shell-override-default-OnWindowHostClose-to-clos.patch \
     file://0008-wayland_touch-apply-device_scale_factor-to-events.patch \
+    file://0009-browser_shell-permissions-find-in-page-js-cookies.patch \
+    file://0010-window.open-attach-all-WebContents-helpers-to-an-adop.patch \
+    file://0011-neva-mime-keep-webm-ogg-aac-with-gst-media.patch \
+    file://0012-app_runtime-exit-shell-when-compositor-closes-window.patch \
 "
 # Halium specific patch for DRI
 SRC_URI:append:halium = " \

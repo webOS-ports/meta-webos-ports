@@ -1,0 +1,70 @@
+From 23c1aa4177778c85f1078d7239568ae274ccda90 Mon Sep 17 00:00:00 2001
+From: LuneOS <>
+Date: Wed, 12 Aug 2026 22:12:00 +0200
+Subject: [PATCH 15/17] NotificationService.qml: let the toast model remove
+ toasts
+
+The toast model's parseModelData() only ever set()s an existing row or
+append()s a new one. There is no way for it to drop a toast, so a toast that
+the posting application withdraws stays in the model and on screen - and once
+notificationmgr starts posting a close for it, that close would arrive as just
+another toast.
+
+The alert model beside it already handles this: it switches on alertAction and
+removes the row whose alertInfo.timestamp matches, or clears everything for
+"closeAll". Toasts carry the same fields, so give them the same treatment
+keyed on toastAction / toastInfo.
+
+"closeAll" without a sourceId clears the model; with one it drops only that
+source's toasts, iterating backwards so the indices stay valid while removing.
+
+Removing the row is what the shell above is waiting for: luna-next-cardshell's
+NotificationsMergedModel already listens for onRowsAboutToBeRemoved on this
+model and drops the matching entry from the notification area.
+
+Needs the matching notificationmgr change, which posts the toastAction.
+
+Upstream-Status: Inappropriate [LuneOS specific]
+---
+ .../notification/NotificationService.qml      | 28 +++++++++++++++++++
+ 1 file changed, 28 insertions(+)
+
+diff --git a/base/qml/WebOSCompositorBase/views/notification/NotificationService.qml b/base/qml/WebOSCompositorBase/views/notification/NotificationService.qml
+index a829031..fd021d8 100644
+--- a/base/qml/WebOSCompositorBase/views/notification/NotificationService.qml
++++ b/base/qml/WebOSCompositorBase/views/notification/NotificationService.qml
+@@ -42,6 +42,34 @@ Item {
+         function parseModelData() {
+             if (!modelData || Object.keys(modelData).length === 0)
+                  return;
++
++            // notificationmgr posts a toastAction when a toast is withdrawn,
++            // mirroring alertAction. Without this the model only ever grows
++            // and closeToast has no visible effect.
++            var j = 0;
++            switch (modelData.toastAction) {
++            case "closeAll":
++                if (!modelData.toastInfo || modelData.toastInfo.sourceId === undefined) {
++                    clear();
++                    return;
++                }
++                for (j = count - 1; j >= 0; j--) {
++                    if (get(j).sourceId === modelData.toastInfo.sourceId)
++                        remove(j);
++                }
++                return;
++            case "close":
++                for (j = 0; j < count; j++) {
++                    if (get(j).timestamp === modelData.toastInfo.timestamp) {
++                        remove(j);
++                        break;
++                    }
++                }
++                return;
++            default:
++                break;
++            }
++
+             for (var i = 0; i < count; i++) {
+                 var d = get(i);
+                 if (modelData.sourceId === d.sourceId && modelData.message === d.message && modelData.type === d.type) {

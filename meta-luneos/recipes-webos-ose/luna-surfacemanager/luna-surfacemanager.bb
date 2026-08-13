@@ -11,7 +11,7 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "qtdeclarative wayland-native qtwayland qtwayland-native qt-features-webos pmloglib webos-wayland-extensions glib-2.0 qtwayland-webos"
 
-WEBOS_VERSION = "2.0.0-402_3fae203063a880806a982cb522f235ca04d1c9a5"
+WEBOS_VERSION = "2.0.0-423_6f49cced1cd4aea27f14d136e1c8ce846beef62a"
 PR = "r61"
 
 inherit webos_qmake6
@@ -37,6 +37,9 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0012-WebOSSurfaceItem-close-Wayland-client-fallback-on-Cl.patch \
     file://0013-Wait-for-DRI-card-on-EGLFS-platform.patch \
     file://0014-ViewStateController.qml-Fix-TypeError.patch \
+    file://0015-NotificationService.qml-let-the-toast-model-remove-t.patch \
+    file://0016-Advertise-xdg_wm_base-so-modern-toolkits-can-map-wind.patch \
+    file://0017-com.webos.surfacemanager.groups.json-keep-the-array-.patch \
 "
 
 inherit webos_systemd
@@ -74,11 +77,11 @@ do_install:append() {
     
     # This dummy import conflicts with the ${OE_QMAKE_PATH_QML}/WebOSCompositor import we use for luna-next-cardshell
     rm -rf ${D}${OE_QMAKE_PATH_QML}/WebOSCompositorBase/imports/WebOSCompositor
-#    install -v -m 644 ${WORKDIR}/lsm-ready.path ${D}${SYSTEMD_INSTALL_PATH}/lsm-ready.path
-#    install -v -m 644 ${WORKDIR}/lsm-ready.target ${D}${SYSTEMD_INSTALL_PATH}/lsm-ready.target
-#    install -v -m 644 ${WORKDIR}/lsm-ready.service ${D}${SYSTEMD_INSTALL_PATH}/lsm-ready.service
-#    install -v -m 644 ${WORKDIR}/surface-manager.service ${D}${SYSTEMD_INSTALL_PATH}/surface-manager.service
-#    install -v -m 644 ${WORKDIR}/surface-manager-daemon.service ${D}${SYSTEMD_INSTALL_PATH}/surface-manager-daemon.service
+#    install -v -m 644 ${UNPACKDIR}/lsm-ready.path ${D}${SYSTEMD_INSTALL_PATH}/lsm-ready.path
+#    install -v -m 644 ${UNPACKDIR}/lsm-ready.target ${D}${SYSTEMD_INSTALL_PATH}/lsm-ready.target
+#    install -v -m 644 ${UNPACKDIR}/lsm-ready.service ${D}${SYSTEMD_INSTALL_PATH}/lsm-ready.service
+#    install -v -m 644 ${UNPACKDIR}/surface-manager.service ${D}${SYSTEMD_INSTALL_PATH}/surface-manager.service
+#    install -v -m 644 ${UNPACKDIR}/surface-manager-daemon.service ${D}${SYSTEMD_INSTALL_PATH}/surface-manager-daemon.service
 }
 
 TARGET_CXXFLAGS:append = " ${@bb.utils.contains('IMAGE_FEATURES', 'webos-test', '--coverage -fprofile-dir=/tmp/luna-surfacemanager-gcov -O0', '', d)}"
@@ -140,20 +143,3 @@ FILES:${PN}-base-tests += " \
 "
 
 RDEPENDS:${PN}-base += "luna-surfacemanager-conf xkeyboard-config qml-webos-framework qml-webos-bridge qml-webos-components"
-
-# ERROR: luna-surfacemanager-2.0.0-402-r61 do_package_qa: QA Issue: File /usr/src/debug/luna-surfacemanager/2.0.0-402/modules/weboscompositor/qwayland-server-webos-foreign.cpp in package luna-surfacemanager-src contains reference to TMPDIR
-# File /usr/src/debug/luna-surfacemanager/2.0.0-402/modules/weboscompositor/qwayland-server-webos-tablet.h in package luna-surfacemanager-src contains reference to TMPDIR
-# File /usr/src/debug/luna-surfacemanager/2.0.0-402/modules/weboscompositor/qwayland-server-webos-surface-group.cpp in package luna-surfacemanager-src contains reference to TMPDIR
-# File /usr/src/debug/luna-surfacemanager/2.0.0-402/modules/weboscompositor/qwayland-server-webos-foreign.h in package luna-surfacemanager-src contains reference to TMPDIR
-# File /usr/src/debug/luna-surfacemanager/2.0.0-402/modules/weboscompositor/qwayland-server-webos-surface-group.h in package luna-surfacemanager-src contains reference to TMPDIR
-# File /usr/src/debug/luna-surfacemanager/2.0.0-402/modules/weboscompositor/qwayland-server-webos-tablet.cpp in package luna-surfacemanager-src contains reference to TMPDIR
-# File /usr/src/debug/luna-surfacemanager/2.0.0-402/modules/weboscompositor/qwayland-server-webos-input-manager.h in package luna-surfacemanager-src contains reference to TMPDIR
-# File /usr/src/debug/luna-surfacemanager/2.0.0-402/modules/weboscompositor/qwayland-server-webos-input-manager.cpp in package luna-surfacemanager-src contains reference to TMPDIR
-# File /usr/src/debug/luna-surfacemanager/2.0.0-402/base/utils/screen-tester/.rcc/qrc_qmake_qmake_immediate.cpp in package luna-surfacemanager-src contains reference to TMPDIR [buildpaths]
-# ERROR: luna-surfacemanager-2.0.0-402-r61 do_package_qa: QA Issue: File /usr/lib/libWebOSCoreCompositor.prl in package luna-surfacemanager-dev contains reference to TMPDIR
-# File /usr/include/WebOSCoreCompositor/0.0.1/WebOSCoreCompositor/private/qwayland-server-webos-tablet.h in package luna-surfacemanager-dev contains reference to TMPDIR
-# File /usr/include/WebOSCoreCompositor/0.0.1/WebOSCoreCompositor/private/qwayland-server-webos-foreign.h in package luna-surfacemanager-dev contains reference to TMPDIR
-# File /usr/include/WebOSCoreCompositor/0.0.1/WebOSCoreCompositor/private/qwayland-server-webos-surface-group.h in package luna-surfacemanager-dev contains reference to TMPDIR
-# File /usr/include/WebOSCoreCompositor/0.0.1/WebOSCoreCompositor/private/qwayland-server-webos-input-manager.h in package luna-surfacemanager-dev contains reference to TMPDIR [buildpaths]
-ERROR_QA:remove = "buildpaths"
-WARN_QA:append = " buildpaths"

@@ -33,4 +33,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
 PACKAGECONFIG:append = " ${@bb.utils.filter('DISTRO_FEATURES', 'smack', d)}"
 PACKAGECONFIG[smack] = "-Denable_webos_smack=true:BOOL=TRUE"
 
+PACKAGECONFIG:append = " ${@bb.utils.filter('DISTRO_FEATURES', 'smack', d)}"
+PACKAGECONFIG[smack] = "-Denable_webos_smack=true:BOOL=TRUE"
+
 FILES:${PN} += "${webos_prefix}/nodejs ${webos_servicesdir} ${webos_frameworksdir}"

@@ -36,7 +36,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
 "
 
 BBCLASSEXTEND = "native"
-EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
 
 # to work around build with gcc-16 on host
 BUILD_CFLAGS += "-std=c++11"

@@ -38,6 +38,7 @@ WEBOS_DISTRO_BUILD_CODENAME ?= "${WEBOS_DISTRO_TOPDIR_BRANCH}"
 
 WEBOS_DISTRO_PRERELEASE ?= "devel"
 
+
 #
 # All of the types of official build jobs should override WEBOS_DISTRO_BUILD_ID
 # in the following format: "[[<prefix>.]<site>-]<build-number>", where the
@@ -60,10 +61,10 @@ BUILDCFG_VARS += "WEBOS_DISTRO_RELEASE_CODENAME WEBOS_DISTRO_BUILD_ID"
 
 # Branch, revision and description of TOPDIR (webos-ports-setup repository)
 SETUP_COMMON_DIR = "${TOPDIR}/../common/"
-WEBOS_DISTRO_TOPDIR_BRANCH ?= "${@oe.buildcfg.get_metadata_git_branch('${SETUP_COMMON_DIR}').strip()}"
-WEBOS_DISTRO_TOPDIR_REVISION ?= "${@oe.buildcfg.get_metadata_git_revision('${SETUP_COMMON_DIR}').strip()}"
+WEBOS_DISTRO_TOPDIR_BRANCH ?= "${@oebackport.buildcfg.get_metadata_git_branch('${SETUP_COMMON_DIR}').strip()}"
+WEBOS_DISTRO_TOPDIR_REVISION ?= "${@oebackport.buildcfg.get_metadata_git_revision('${SETUP_COMMON_DIR}').strip()}"
 # Depends on https://lists.openembedded.org/g/openembedded-core/message/190292 or webos_base.bbclass removed in https://github.com/webOS-ports/meta-webos-ports/commit/20884dd8b7e78cbfa3b5e485bdfca24584c644b3
-# WEBOS_DISTRO_TOPDIR_DESCRIBE ?= "${@oe.buildcfg.get_metadata_git_describe('${SETUP_COMMON_DIR}').strip()}"
+# WEBOS_DISTRO_TOPDIR_DESCRIBE ?= "${@oebackport.buildcfg.get_metadata_git_describe('${SETUP_COMMON_DIR}').strip()}"
 BUILDCFG_VARS += "WEBOS_DISTRO_TOPDIR_BRANCH WEBOS_DISTRO_TOPDIR_REVISION"
 
 # Add build timestamp to what's displayed in build-id.txt for use in pruning script
@@ -132,10 +133,6 @@ DEFAULT_WARN_QA = "\
 # patch-status is by default enabled only for oe-core layer
 ERROR_QA:append = " ${DEFAULT_WARN_QA} patch-status"
 WARN_QA:remove = "${DEFAULT_WARN_QA}"
-
-# https://bugreports.qt.io/browse/QTBUG-105913
-ERROR_QA:remove:layer-qt6-layer = "buildpaths"
-WARN_QA:append:layer-qt6-layer = " buildpaths"
 
 # Default WEBOS_TARGET_* values (see webos_cmake.bbclass)
 WEBOS_TARGET_CORE_OS ?= "rockhopper"
@@ -216,3 +213,7 @@ FORTRAN:forcevariable = ",fortran"
 # like printf("[%5ld.%09ld]", time.tv_sec, time.tv_nsec) is done and provokes crashes
 GLIBC_64BIT_TIME_FLAGS:remove:armv7a = "-D_TIME_BITS=64"
 INSANE_SKIP:append:armv7a = " 32bit-time"
+
+# Backport UNPACKDIR variable from styhead
+# https://git.openembedded.org/openembedded-core/commit/?id=e022d62ba917790af2121da57646271ef17c03fa
+UNPACKDIR ??= "${WORKDIR}"

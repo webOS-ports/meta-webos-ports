@@ -43,4 +43,3 @@ FILES:${PN}-dev += "${LIBCBE_DIR}/lib*${SOLIBSDEV}"
 
 # Avoid conflict with libpbnjson recipe
 PRIVATE_LIBS = "libpbnjson_c.so.* libpbnjson_cpp.so.*"
-EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"

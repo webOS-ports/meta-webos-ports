@@ -33,6 +33,17 @@ SRC_URI:append:tenderloin = " \
     file://sensord-tenderloin.conf \
 "
 
+# tenderloin71 is the upstream-kernel build variant of the same board (same
+# sensor layout). Stage the same config so the iiosensorsadaptor path
+# actually gets installed there too — without this append the
+# sensord-tenderloin71.conf in the layer was never picked up by the build.
+# The ISL29023 cover-glass calibration lives in the kernel device tree
+# (isil,cover-comp-gain) rather than a udev rule, so this recipe carries
+# nothing user-side for it.
+SRC_URI:append:tenderloin71 = " \
+    file://sensord-tenderloin71.conf \
+"
+
 SRC_URI:append:hammerhead = " \
     file://sensord-hammerhead.conf \
 "

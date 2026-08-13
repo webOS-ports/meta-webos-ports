@@ -15,8 +15,8 @@ RDEPENDS:${PN} = "qtbase-plugins configd imemanager"
 
 PACKAGECONFIG[libim] = "CONFIG+=enable-libim,CONFIG-=enable-libim,libim"
 
-WEBOS_VERSION = "0.99.0+20-102_b3c5fe41a33b6dd3d5c11b704c6ff2c8974ef7b6"
-PR = "r36"
+WEBOS_VERSION = "0.99.0+20-103_71e5f78c3c8610e522e4ed01f536f740818efebb"
+PR = "r37"
 
 inherit pkgconfig
 inherit webos_qmake6
@@ -41,6 +41,7 @@ SSTATE_SCAN_FILES += "*.prf *.pc"
 
 SRC_URI += " \
     file://0001-Correctly-detect-wayland-platform.patch \
+    file://0002-Give-plugins-the-character-for-every-printable-keysym.patch \
     file://maliit-server.conf \
     file://maliit-server.service \
     file://maliit-server@.service \
@@ -86,9 +87,3 @@ do_install:append() {
 }
 
 FILES:${PN} += "${OE_QMAKE_PATH_QT_ARCHDATA} ${systemd_unitdir}/system/scripts"
-
-# ERROR: maliit-framework-webos-0.99.0+20-102-r36 do_package_qa: QA Issue: File /usr/lib/mkspecs/features/maliit-framework.prf in package maliit-framework-webos-dev contains reference to TMPDIR
-# File /usr/lib/mkspecs/features/maliit-defines.prf in package maliit-framework-webos-dev contains reference to TMPDIR
-# File /usr/lib/mkspecs/features/maliit-plugins.prf in package maliit-framework-webos-dev contains reference to TMPDIR [buildpaths]
-ERROR_QA:remove = "buildpaths"
-WARN_QA:append = " buildpaths"
