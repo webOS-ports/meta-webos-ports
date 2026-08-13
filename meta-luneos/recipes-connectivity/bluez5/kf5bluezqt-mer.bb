@@ -21,7 +21,13 @@ B = "${S}"
 EXTRA_QMAKEVARS_PRE += "KF5BLUEZQT_BLUEZ_VERSION=5"
 
 do_configure:prepend() {
-    sed -i "s@(qdbusxml2cpp@(${OE_QMAKE_PATH_EXTERNAL_HOST_BINS}/qdbusxml2cpp@g" ${S}/bluez-qt/src/interfaces/interfaces.pri
+    # ${STAGING_BINDIR_NATIVE}, not ${OE_QMAKE_PATH_EXTERNAL_HOST_BINS}: that
+    # variable is defined only by our webos_qmake6_paths.bbclass, and this
+    # recipe inherits qt6-qmake directly, so it expanded to nothing and
+    # interfaces.pri ended up calling the absolute path /qdbusxml2cpp:
+    #   make: *** No rule to make target '.../interfaces/../dbusproperties.cpp'
+    # because none of the D-Bus interface sources got generated.
+    sed -i "s@(qdbusxml2cpp@(${STAGING_BINDIR_NATIVE}/qdbusxml2cpp@g" ${S}/bluez-qt/src/interfaces/interfaces.pri
 }
 
 do_install:append() {
