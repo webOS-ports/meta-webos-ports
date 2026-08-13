@@ -9,7 +9,7 @@ PACKAGECONFIG:append = " v4l2codecs"
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 SRC_URI:append = " \
-    file://0004-waylandsink-remove-unsupported-subcompositor.patch;striplevel=3 \
+    file://0004-waylandsink-make-wl_subcompositor-optional.patch;striplevel=3 \
     file://0005-h264parse-resolution-changed-event-support.patch;striplevel=3 \
     file://0006-fix-Webex-meeting-Participant-video-screen-is-gray.patch;striplevel=3 \
 "
