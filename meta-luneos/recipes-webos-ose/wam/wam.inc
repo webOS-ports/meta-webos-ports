@@ -19,7 +19,7 @@ VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_cpushareholder}"
 
 WEBOS_VERSION = "1.0.2-99_a698bc40c4e73d338bdf3310c31d1878978d231a"
-INC_PR = "r70"
+INC_PR = "r73"
 
 WAM_BUILD_SYSTEM ?= "webos_cmake"
 WAM_BUILD_DEFAULT_PLUGIN ?= "1"
@@ -55,6 +55,9 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0014-WAM-Fix-outbound-permission-error.patch \
     file://0015-PalmSystem-fix-banner-removal.patch \
     file://0016-DeviceInfoImpl-publish-display-metrics-when-known.patch \
+    file://0017-BlinkWebView-null-check-the-window-created-for-window.patch \
+    file://0018-WebAppBase-do-not-abort-on-a-non-numeric-instance-id.patch \
+    file://0019-WebPageBlink-hand-aborted-external-protocol-navigatio.patch \
 "
 
 S = "${WORKDIR}/git"
