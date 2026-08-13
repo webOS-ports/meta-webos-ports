@@ -12,6 +12,7 @@ RDEPENDS:${PN} = "ttf-liberation-mono"
 SRC_URI = " \
     git://github.com/herrie82/fingerterm-1.git;protocol=https;branch=herrie/qt6 \
     file://appinfo.json \
+    file://0001-terminal-make-ch_ESC-constexpr.patch \
 "
 
 EXTRA_QMAKEVARS_PRE = "\

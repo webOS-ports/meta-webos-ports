@@ -8,7 +8,9 @@ DEPENDS += "qtbase qtdeclarative"
 SRCREV = "c54ba898a2daca1b5884b59353d0d7922405a3e1"
 PV = "0.130"
 
-SRC_URI = "git://github.com/sailfishos/libqofono.git;protocol=https;branch=master"
+SRC_URI = "git://github.com/sailfishos/libqofono.git;protocol=https;branch=master \
+    file://0001-src-do-not-bake-absolute-path-into-generated-headers.patch \
+"
 
 # Upstream dropped qmake in b43e54a and builds with CMake only, so this no longer
 # inherits qt6-qmake. QT_MAJOR_VERSION is a cache variable that still defaults to 5
