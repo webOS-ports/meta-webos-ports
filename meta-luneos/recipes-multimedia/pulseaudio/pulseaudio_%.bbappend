@@ -36,6 +36,20 @@ do_install:append() {
     # orphan removed from the affected work/*/recipe-sysroot trees; it is not
     # fixed by cleansstate of the consumer alone. See the PR note below.
     install -Dm644 ${B}/config.h ${D}${includedir}/pulsecore/config.h
+
+    # config.h records the absolute paths it was generated in. They are build
+    # metadata that no pulsecore consumer needs, but shipping them trips the
+    # buildpaths QA check:
+    #   File /usr/include/pulsecore/config.h in package pulseaudio-dev
+    #   contains reference to TMPDIR [buildpaths]
+    # Neutralise the values rather than dropping the defines, so anything that
+    # references them still compiles, and rather than silencing the QA check,
+    # which would let a genuine path leak through unnoticed later.
+    sed -i -e 's|^\(#define DOXYGEN_OUTPUT_DIRECTORY\) .*|\1 .|' \
+           -e 's|^\(#define PA_BUILDDIR\) .*|\1 "."|' \
+           -e 's|^\(#define PA_SRCDIR\) .*|\1 "."|' \
+           -e 's|^\(#define top_srcdir\) .*|\1 .|' \
+           ${D}${includedir}/pulsecore/config.h
 }
 
 # Staging config.h adds a file to pulseaudio's sysroot output. A build tree that
