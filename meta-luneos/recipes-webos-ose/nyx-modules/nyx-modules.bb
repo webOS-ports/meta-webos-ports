@@ -83,9 +83,9 @@ SRC_URI:append = " \
 
 do_configure:prepend() {
     # Install additional machine specific nyx configuration before CMake is started
-    if [ -f ${WORKDIR}/${MACHINE}.cmake ]
+    if [ -f ${UNPACKDIR}/${MACHINE}.cmake ]
     then
-        cp ${WORKDIR}/${MACHINE}.cmake ${S}/src/machine.cmake
+        cp ${UNPACKDIR}/${MACHINE}.cmake ${S}/src/machine.cmake
     fi
 }
 

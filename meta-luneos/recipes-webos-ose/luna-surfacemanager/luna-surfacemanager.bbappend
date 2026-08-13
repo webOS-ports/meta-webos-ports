@@ -8,7 +8,7 @@ SRC_URI:append:tenderloin = " \
 
 do_install:append:tenderloin() {
     install -d ${D}${sysconfdir}/systemd/system/surface-manager.service.d
-    install -m 0644 ${WORKDIR}/surface-manager-wait-for-drm.conf ${D}${sysconfdir}/systemd/system/surface-manager.service.d/wait-for-drm.conf
+    install -m 0644 ${UNPACKDIR}/surface-manager-wait-for-drm.conf ${D}${sysconfdir}/systemd/system/surface-manager.service.d/wait-for-drm.conf
 }
 
 FILES:${PN}:append:tenderloin = " ${sysconfdir}/systemd/system/surface-manager.service.d"
