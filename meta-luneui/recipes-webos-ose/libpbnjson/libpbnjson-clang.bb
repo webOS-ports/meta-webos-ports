@@ -16,7 +16,7 @@ OECMAKE_TARGET_COMPILE = "pbnjson_cpp"
 
 # For unknown reason ld.lld messes native & target sysroot.
 # It searches for libgmp.so in recipe-sysroot-native
-TOOLCHAIN_OPTIONS:remove = "--ld-path=${STAGING_BINDIR_NATIVE}/ld.lld"
+TOOLCHAIN_OPTIONS:remove = "-fuse-ld=${STAGING_BINDIR_NATIVE}/ld.lld"
 
 # This lets cmake install work without triggering build of target pbnjson_validate which depends on boost
 EXTRA_OECMAKE += "-DCMAKE_SKIP_INSTALL_ALL_DEPENDENCY:BOOL=TRUE"

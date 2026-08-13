@@ -3,7 +3,13 @@
 inherit webos_cmake
 inherit clang_libc
 
-DEPENDS:append = " clang-native"
+# clang-native brings the compiler but not ld.lld, which ships in lld-native.
+# Without it -fuse-ld=${STAGING_BINDIR_NATIVE}/ld.lld points at a file that was
+# never staged, and clang reports it as a bad linker *name* rather than a
+# missing path, which is misleading:
+#   clang++: error: invalid linker name in argument
+#   '-fuse-ld=.../recipe-sysroot-native/usr/bin/ld.lld'
+DEPENDS:append = " clang-native lld-native"
 
 OECMAKE_C_COMPILER = "clang"
 OECMAKE_CXX_COMPILER = "clang++"
@@ -12,16 +18,11 @@ LIBCBE_DIR = "${libdir}/cbe"
 
 CLANG_DEPENDENCY_SUFFIX = "-clang"
 
-# --ld-path, not -fuse-ld: clang used to accept an absolute path in -fuse-ld=,
-# but now takes only a linker *name* there and rejects a path outright:
-#   clang++: error: invalid linker name in argument
-#   '-fuse-ld=.../recipe-sysroot-native/usr/bin/ld.lld'
-# --ld-path= is the spelling for pointing at a specific linker binary.
 TOOLCHAIN_OPTIONS = "\
     --sysroot=${STAGING_DIR_TARGET} \
     --target=${TARGET_SYS} \
     -stdlib=libc++ \
-    --ld-path=${STAGING_BINDIR_NATIVE}/ld.lld \
+    -fuse-ld=${STAGING_BINDIR_NATIVE}/ld.lld \
     -nostdinc++ \
     -isystem ${STAGING_INCDIR}/c++/v1/ \
     -Wl,-L${STAGING_DIR_TARGET}/${LIBCBE_DIR} \
