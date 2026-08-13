@@ -10,6 +10,7 @@ PV = "0.130"
 
 SRC_URI = "git://github.com/sailfishos/libqofono.git;protocol=https;branch=master \
     file://0001-src-do-not-bake-absolute-path-into-generated-headers.patch \
+    file://0002-src-generate-dbus-adaptors-with-relative-output-name.patch \
 "
 
 # Upstream dropped qmake in b43e54a and builds with CMake only, so this no longer

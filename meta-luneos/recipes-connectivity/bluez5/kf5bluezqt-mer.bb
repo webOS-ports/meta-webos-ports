@@ -27,7 +27,11 @@ do_configure:prepend() {
     # interfaces.pri ended up calling the absolute path /qdbusxml2cpp:
     #   make: *** No rule to make target '.../interfaces/../dbusproperties.cpp'
     # because none of the D-Bus interface sources got generated.
-    sed -i "s@(qdbusxml2cpp@(${STAGING_BINDIR_NATIVE}/qdbusxml2cpp@g" ${S}/bluez-qt/src/interfaces/interfaces.pri
+    # Match an optional leading path so this is idempotent: do_unpack does not
+    # re-run when only do_configure changes, so the .pri may already carry a
+    # substitution from a previous build - including the broken "(/qdbusxml2cpp"
+    # left by the earlier empty-variable version of this sed.
+    sed -i "s@([^ ]*qdbusxml2cpp@(${STAGING_BINDIR_NATIVE}/qdbusxml2cpp@g" ${S}/bluez-qt/src/interfaces/interfaces.pri
 }
 
 do_install:append() {
