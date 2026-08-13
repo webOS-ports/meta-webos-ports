@@ -16,6 +16,48 @@ PACKAGECONFIG[system-libcxx] = ",,libcxx"
 
 GN_ARGS_CLANG = "is_clang=true"
 
+# Build Chromium with the system clang rather than the clang bundled in
+# third_party/llvm-build.
+#
+# LuneOS deliberately builds webruntime against the shared system libc++ (the
+# CBE) instead of Chromium's own: use_custom_libcxx=false, with
+# -I${STAGING_INCDIR}/c++/v1 supplied through INCLUDE_PATH_LIBCXX. That worked
+# while meta-clang and Chromium's bundled clang were the same vintage. On
+# wrynose meta-clang is LLVM 22, and Chromium 120 bundles clang 18, which
+# cannot parse libc++ 22 headers:
+#   .../include/c++/v1/__type_traits/aligned_storage.h:41:59: error: use of
+#   undeclared identifier '__builtin_clzg'
+#   error: use of undeclared identifier '__GCC_CONSTRUCTIVE_SIZE'
+# (__builtin_clzg/__builtin_ctzg and __GCC_*_SIZE all arrived in clang 19.)
+#
+# The two obvious alternatives are not available here. USE_WEBRUNTIME_LIBCXX=1
+# would switch every -clang component to chromium-stdlib and
+# chromium-toolchain-native, but those exist only as .inc files with no recipe
+# providing them. use_custom_libcxx=true needs
+# buildtools/third_party/libc++/trunk, which is stripped from our source drop.
+#
+# So point Chromium at clang-native, which is the same 22.1.8 that built the
+# libc++ in the sysroot; compiler and standard library then match.
+# clang_use_chrome_plugins must go with it - those plugins are ABI-tied to the
+# bundled clang and will not load in a different one. treat_warnings_as_errors
+# is already false in webruntime-common.inc, which matters across a jump from
+# clang 18 to 22.
+# lld-native as well as clang-native: Chromium links with -fuse-ld=lld, and
+# with the bundled toolchain lld came from third_party/llvm-build. Now that we
+# point clang_base_path at the sysroot, ld.lld has to be staged there too or
+# the link fails with
+#   clang++: error: invalid linker name in argument '-fuse-ld=lld'
+# which is clang's wording for a linker it cannot resolve, not a bad flag.
+DEPENDS += "clang-native lld-native"
+GN_ARGS += "clang_base_path=\"${STAGING_DIR_NATIVE}${prefix}\""
+GN_ARGS += "clang_use_chrome_plugins=false"
+
+# clang 22 removed __builtin_ia32_vcvtph2ps256, which skcms uses for its F16C
+# half-to-float path. Only that one builtin went - vcvtps2ph256, roundps256 and
+# the gather builtins were all checked against clang 22 and still compile.
+SRC_URI += "file://0001-skcms-use-_mm256_cvtph_ps-for-clang-22.patch"
+
+
 # Don't use gold even when selected by default with ld-is-gold in DISTRO_FEATURES
 # because liblttng_provider is built with default host linker (hosttools/ld.gold)
 # and build fails because use_lld added --color-diagnostic which isn't recognized
