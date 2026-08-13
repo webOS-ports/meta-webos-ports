@@ -268,9 +268,16 @@ do_install() {
         exit 1
     fi
 
-    if [ -f $appdir/snapshot_blob.bin ] ; then
-        chown root:root "$appdir/snapshot_blob.bin"
-    fi
+    # The Enact packer (and the mv out of ./dist above) leave the staged files
+    # owned by the build user instead of root, which do_package rejects as host
+    # contamination:
+    #   Path ... is owned by uid 1000, gid 1000, which doesn't match any
+    #   user/group on target. This may be due to host contamination.
+    #   KeyError: 'getpwuid(): uid not found: 1000'
+    # snapshot_blob.bin was already being corrected on its own; the whole app
+    # directory needs it, as luna-init, mojo-framework and the localization
+    # classes already do for the trees they install.
+    chown -R root:root "$appdir"
 
     cd ${working}
 }
