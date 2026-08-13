@@ -98,7 +98,7 @@ RDEPENDS:${PN} = " \
   \
   webos-users-groups \
   \
-  audio-service \
+  ${VIRTUAL-RUNTIME_audio_service} \
   com.palm.keymanager \
   mediaindexer \
   media-permission-service \
