@@ -35,6 +35,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-uMediaserver-add-missing-include-to-fix-build-with-b.patch \
     file://0001-python-fix-build-with-python-3.13.patch \
     file://0010-ums_connector-do-not-link-the-impl-library-to-itself.patch \
+    file://0011-server-drop-boost_system-from-the-link-list.patch \
 "
 
 # umediaserver-python contains the Python bindings
