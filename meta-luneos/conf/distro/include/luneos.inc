@@ -214,6 +214,3 @@ FORTRAN:forcevariable = ",fortran"
 GLIBC_64BIT_TIME_FLAGS:remove:armv7a = "-D_TIME_BITS=64"
 INSANE_SKIP:append:armv7a = " 32bit-time"
 
-# Backport UNPACKDIR variable from styhead
-# https://git.openembedded.org/openembedded-core/commit/?id=e022d62ba917790af2121da57646271ef17c03fa
-UNPACKDIR ??= "${WORKDIR}"
