@@ -1,0 +1,583 @@
+From: LuneOS <webos-ports@googlegroups.com>
+Date: Wed, 12 Aug 2026 00:00:00 +0000
+Subject: [PATCH] browser_shell: deliver permission requests, add find-in-page,
+ JavaScript and cookie switches
+
+browser_shell apps had no way to ask any of this of the engine, so the browser
+UI on LuneOS carried dead controls.
+
+Permission requests: PageContents::RequestMediaAccessPermission handed the
+dispatcher's answer straight back to the page, so the shell app was never
+consulted. Everything needed for the round trip already existed -- the
+media_access_requests_ map, AckPermission, the OnPermissionRequest delegate hook
+and the "permissionrequest" event in the injection -- but nothing ever started
+it, so the map stayed empty and AckPermission could only log "Not found
+request". getUserMedia was therefore decided without the user, and enactbrowser's
+own permissionrequest listener never fired once. The devices the dispatcher
+picked are now held until the app answers; a request the dispatcher already
+refused is passed straight through, since there is nothing to decide.
+
+Find-in-page: exposes findInPage()/stopFindInPage() over WebContents::Find, with
+results reported back on a new "found-in-page" event. Without it a browsershell
+app can only fall back to window.find(), which cannot report a match count or
+highlight the other matches.
+
+setEnableJavascript / setAcceptCookies: pageContents exposed no web preferences
+at all. JavaScript goes through OverrideWebkitPrefs, which is only consulted when
+preferences are recomputed, hence the explicit NotifyPreferencesChanged. Cookies
+go through the content settings map rather than the CookieManager directly, so
+the change is not overwritten the next time the map syncs.
+
+Upstream-Status: Pending
+---
+--- a/src/neva/app_runtime/app/app_runtime_page_contents.cc
++++ b/src/neva/app_runtime/app/app_runtime_page_contents.cc
+@@ -51,8 +51,12 @@
+ #include "neva/app_runtime/app/app_runtime_page_view.h"
+ #include "neva/app_runtime/app/app_runtime_shell_environment.h"
+ #include "neva/app_runtime/app/app_runtime_visible_region_capture.h"
++#include "components/content_settings/core/browser/host_content_settings_map.h"
++#include "components/content_settings/core/common/content_settings.h"
++#include "components/content_settings/core/common/content_settings_types.h"
+ #include "neva/app_runtime/browser/app_runtime_browser_context.h"
+ #include "neva/app_runtime/browser/app_runtime_webview_controller_impl.h"
++#include "neva/app_runtime/browser/host_content_settings_map_factory.h"
+ #include "neva/app_runtime/browser/browsing_data/browsing_data_remover.h"
+ #include "neva/app_runtime/browser/media/webrtc/media_capture_devices_dispatcher.h"
+ #include "neva/app_runtime/public/mojom/app_runtime_webview.mojom.h"
+@@ -64,6 +68,7 @@
+ #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
+ #include "third_party/blink/public/common/page/page_zoom.h"
+ #include "third_party/blink/public/common/web_preferences/web_preferences.h"
++#include "third_party/blink/public/mojom/frame/find_in_page.mojom.h"
+ #include "third_party/blink/public/mojom/renderer_preferences.mojom.h"
+ #include "ui/base/page_transition_types.h"
+ #include "ui/events/keycodes/dom/dom_key.h"
+@@ -906,8 +911,59 @@
+   if (callback.is_null())
+     return;
+ 
++  // Ask the dispatcher which devices would satisfy the request, but do not hand
++  // them to the page yet: the shell app gets to approve first. Everything needed
++  // for that round trip (media_access_requests_, AckPermission, the
++  // OnPermissionRequest delegate call and the "permissionrequest" event in the
++  // injection) was already here, but nothing ever started it, so getUserMedia
++  // resolved without the app ever being consulted and AckPermission could only
++  // ever log "Not found request".
+   MediaCaptureDevicesDispatcher::GetInstance()->ProcessMediaAccessRequest(
+-      web_contents, request, std::move(callback));
++      web_contents, request,
++      base::BindOnce(&PageContents::OnMediaAccessDevicesResolved,
++                     weak_ptr_factory_.GetWeakPtr(),
++                     GetMediaPermissionName(request), std::move(callback)));
++}
++
++void PageContents::OnMediaAccessDevicesResolved(
++    const std::string& permission,
++    content::MediaResponseCallback callback,
++    const blink::mojom::StreamDevicesSet& stream_devices_set,
++    blink::mojom::MediaStreamRequestResult result,
++    std::unique_ptr<content::MediaStreamUI> ui) {
++  // The dispatcher already turned the request down (no hardware, bad request,
++  // policy). There is nothing for the user to decide, so do not prompt.
++  if (result != blink::mojom::MediaStreamRequestResult::OK) {
++    std::move(callback).Run(stream_devices_set, result, std::move(ui));
++    return;
++  }
++
++  // Holding the devices while we wait means the answer is applied to exactly the
++  // set the dispatcher picked. The MediaStreamUI is dropped: it belongs to the
++  // browser UI this platform does not have, and AckPermission passes nullptr.
++  MediaAccessPermissionInfo info(stream_devices_set, std::move(callback));
++  // The id counter is bumped by the constructor above, so it now names this
++  // request. emplace, not operator[]: MediaAccessPermissionInfo declares a move
++  // constructor and a destructor, which suppresses the implicit move assignment
++  // that operator[] would need.
++  const uint64_t id = MediaAccessPermissionInfo::id;
++  media_access_requests_.emplace(id, std::move(info));
++  delegate_->OnPermissionRequest(permission, id);
++}
++
++// static
++std::string PageContents::GetMediaPermissionName(
++    const content::MediaStreamRequest& request) {
++  const bool audio = request.audio_type !=
++                     blink::mojom::MediaStreamType::NO_SERVICE;
++  const bool video = request.video_type !=
++                     blink::mojom::MediaStreamType::NO_SERVICE;
++  // These spellings match the ones the shell app already understands.
++  if (audio && video)
++    return "media";
++  if (video)
++    return "videoCapture";
++  return "audioCapture";
+ }
+ 
+ bool PageContents::CheckMediaAccessPermission(
+@@ -924,6 +980,85 @@
+       create_params_.allow_file_access_from_file_urls;
+   web_prefs->allow_universal_access_from_file_urls =
+       create_params_.allow_universal_access_from_file_urls;
++  web_prefs->javascript_enabled = javascript_enabled_;
++}
++
++void PageContents::SetEnableJavascript(bool enable) {
++  if (javascript_enabled_ == enable)
++    return;
++
++  javascript_enabled_ = enable;
++  if (!web_contents_)
++    return;
++
++  // OverrideWebkitPrefs is only consulted when the preferences are recomputed,
++  // so ask for that explicitly; without it the change would not reach the
++  // renderer until the next navigation.
++  web_contents_->NotifyPreferencesChanged();
++}
++
++void PageContents::SetAcceptCookies(bool accept) {
++  if (!web_contents_)
++    return;
++
++  // Go through the content settings map rather than pushing rules straight at
++  // the CookieManager: the map is the source of truth this build already keeps
++  // (see HostContentSettingsMapFactory), it propagates the change to the
++  // network stack itself, and a rule set behind its back would be overwritten
++  // the next time the map syncs. The setting is profile-wide because the shell
++  // exposes one switch, not a per-site UI.
++  HostContentSettingsMap* settings_map =
++      HostContentSettingsMapFactory::GetForBrowserContext(
++          web_contents_->GetBrowserContext());
++  if (!settings_map)
++    return;
++
++  settings_map->SetDefaultContentSetting(
++      ContentSettingsType::COOKIES,
++      accept ? CONTENT_SETTING_ALLOW : CONTENT_SETTING_BLOCK);
++}
++
++void PageContents::FindInPage(int request_id,
++                              const std::string& search_text,
++                              bool forward,
++                              bool match_case,
++                              bool find_next) {
++  if (!web_contents_)
++    return;
++
++  // An empty needle means "stop searching" — passing it through to Find would
++  // be treated as a malformed request.
++  if (search_text.empty()) {
++    StopFindInPage(true);
++    return;
++  }
++
++  auto options = blink::mojom::FindOptions::New();
++  options->forward = forward;
++  options->match_case = match_case;
++  options->new_session = !find_next;
++
++  web_contents_->Find(request_id, base::UTF8ToUTF16(search_text),
++                      std::move(options), false /* skip_delay */);
++}
++
++void PageContents::StopFindInPage(bool clear_selection) {
++  if (!web_contents_)
++    return;
++
++  web_contents_->StopFinding(clear_selection
++                                 ? content::STOP_FIND_ACTION_CLEAR_SELECTION
++                                 : content::STOP_FIND_ACTION_KEEP_SELECTION);
++}
++
++void PageContents::FindReply(content::WebContents* web_contents,
++                             int request_id,
++                             int number_of_matches,
++                             const gfx::Rect& selection_rect,
++                             int active_match_ordinal,
++                             bool final_update) {
++  delegate_->OnFoundInPage(request_id, active_match_ordinal, number_of_matches,
++                           final_update);
+ }
+ 
+ void PageContents::PrimaryMainFrameRenderProcessGone(
+--- a/src/neva/app_runtime/app/app_runtime_page_contents_delegate.cc
++++ b/src/neva/app_runtime/app/app_runtime_page_contents_delegate.cc
+@@ -116,6 +116,11 @@
+ void PageContentsDelegate::OnPermissionRequest(const std::string& permission,
+                                                uint64_t id) {}
+ 
++void PageContentsDelegate::OnFoundInPage(int request_id,
++                                         int active_match_ordinal,
++                                         int number_of_matches,
++                                         bool final_update) {}
++
+ void PageContentsDelegate::OnVisibleRegionCaptured(
+     const std::string& base64_data) {}
+ 
+--- a/src/neva/app_runtime/app/app_runtime_page_contents_delegate.h
++++ b/src/neva/app_runtime/app/app_runtime_page_contents_delegate.h
+@@ -116,6 +116,10 @@
+   virtual void OnRendererUnresponsive();
+   virtual void OnRendererResponsive();
+   virtual void OnPermissionRequest(const std::string& permission, uint64_t id);
++  virtual void OnFoundInPage(int request_id,
++                             int active_match_ordinal,
++                             int number_of_matches,
++                             bool final_update);
+   virtual void OnVisibleRegionCaptured(const std::string& base64_data);
+   virtual void OnZoomFactorChanged(double zoom_factor);
+   virtual bool RunJSDialog(const std::string& type, const std::string& message,
+--- a/src/neva/app_runtime/app/app_runtime_page_contents.h
++++ b/src/neva/app_runtime/app/app_runtime_page_contents.h
+@@ -30,6 +30,7 @@
+ #include "neva/app_runtime/app/app_runtime_js_dialog_manager_delegate.h"
+ #include "neva/app_runtime/app/app_runtime_page_contents_delegate.h"
+ #include "neva/app_runtime/browser/app_runtime_web_contents_delegate.h"
++#include "ui/gfx/geometry/rect.h"
+ #include "neva/app_runtime/public/app_runtime_constants.h"
+ #include "third_party/blink/public/mojom/mediastream/media_stream.mojom.h"
+ #include "third_party/blink/public/mojom/window_features/window_features.mojom.h"
+@@ -133,6 +134,14 @@
+   void ResumeDOM();
+   void ResumeMedia();
+   void ScrollByY(int y_shift);
++  void SetEnableJavascript(bool enable);
++  void SetAcceptCookies(bool accept);
++  void FindInPage(int request_id,
++                  const std::string& search_text,
++                  bool forward,
++                  bool match_case,
++                  bool find_next);
++  void StopFindInPage(bool clear_selection);
+   void SetAcceptedLanguages(std::string languages);
+   void SetErrorPageHiding(bool enable);
+   void SetFocus();
+@@ -219,6 +228,12 @@
+                                   const GURL& security_origin,
+                                   blink::mojom::MediaStreamType type) override;
+   void OverrideWebkitPrefs(blink::web_pref::WebPreferences* prefs) override;
++  void FindReply(content::WebContents* web_contents,
++                 int request_id,
++                 int number_of_matches,
++                 const gfx::Rect& selection_rect,
++                 int active_match_ordinal,
++                 bool final_update) override;
+ 
+   // JSDialogManagerDelegate
+   bool RunJSDialog(const std::string& type,
+@@ -243,6 +258,17 @@
+   void OnCaptureVisibleRegion(std::string base64);
+   void OnZoomLevelChanged(const content::HostZoomMap::ZoomLevelChange& change);
+ 
++  // Second half of RequestMediaAccessPermission: the dispatcher has chosen the
++  // devices, now the shell app decides whether the page may have them.
++  void OnMediaAccessDevicesResolved(
++      const std::string& permission,
++      content::MediaResponseCallback callback,
++      const blink::mojom::StreamDevicesSet& stream_devices_set,
++      blink::mojom::MediaStreamRequestResult result,
++      std::unique_ptr<content::MediaStreamUI> ui);
++  static std::string GetMediaPermissionName(
++      const content::MediaStreamRequest& request);
++
+   struct MediaAccessPermissionInfo {
+     MediaAccessPermissionInfo();
+     MediaAccessPermissionInfo(
+@@ -257,6 +283,11 @@
+   };
+   std::map<uint64_t, MediaAccessPermissionInfo> media_access_requests_;
+ 
++  // Mirrors WebPreferences::javascript_enabled, which is recomputed rather than
++  // stored, so the requested value has to be kept here and reapplied from
++  // OverrideWebkitPrefs. Defaults to enabled, matching the WebPreferences default.
++  bool javascript_enabled_ = true;
++
+   CreateParams create_params_;
+   const uint64_t id_ = 0;
+   PageView* parent_page_view_ = nullptr;
+--- a/src/neva/browser_shell/service/browser_shell_page_contents_impl.cc
++++ b/src/neva/browser_shell/service/browser_shell_page_contents_impl.cc
+@@ -195,6 +195,27 @@
+   page_contents_->ScrollByY(y_shift);
+ }
+ 
++void PageContentsImpl::SetEnableJavascript(bool enable) {
++  page_contents_->SetEnableJavascript(enable);
++}
++
++void PageContentsImpl::SetAcceptCookies(bool accept) {
++  page_contents_->SetAcceptCookies(accept);
++}
++
++void PageContentsImpl::FindInPage(int32_t request_id,
++                                  const std::string& search_text,
++                                  bool forward,
++                                  bool match_case,
++                                  bool find_next) {
++  page_contents_->FindInPage(request_id, search_text, forward, match_case,
++                             find_next);
++}
++
++void PageContentsImpl::StopFindInPage(bool clear_selection) {
++  page_contents_->StopFindInPage(clear_selection);
++}
++
+ void PageContentsImpl::SetAcceptedLanguages(const std::string& languages) {
+   page_contents_->SetAcceptedLanguages(languages);
+ }
+@@ -438,6 +459,15 @@
+     remote_client_->OnPermissionRequest(permission, id);
+ }
+ 
++void PageContentsImpl::OnFoundInPage(int request_id,
++                                     int active_match_ordinal,
++                                     int number_of_matches,
++                                     bool final_update) {
++  if (remote_client_.is_bound())
++    remote_client_->OnFoundInPage(request_id, active_match_ordinal,
++                                  number_of_matches, final_update);
++}
++
+ void PageContentsImpl::OnVisibleRegionCaptured(const std::string& base64_data) {
+   if (capture_visible_region_callback_.get() != nullptr) {
+     std::move(*capture_visible_region_callback_).Run(base64_data);
+--- a/src/neva/browser_shell/service/browser_shell_page_contents_impl.h
++++ b/src/neva/browser_shell/service/browser_shell_page_contents_impl.h
+@@ -79,6 +79,14 @@
+   void ResumeDOM() override;
+   void ResumeMedia() override;
+   void ScrollByY(int y_shift) override;
++  void SetEnableJavascript(bool enable) override;
++  void SetAcceptCookies(bool accept) override;
++  void FindInPage(int32_t request_id,
++                  const std::string& search_text,
++                  bool forward,
++                  bool match_case,
++                  bool find_next) override;
++  void StopFindInPage(bool clear_selection) override;
+   void SetAcceptedLanguages(const std::string& languages) override;
+   void SetErrorPageHiding(bool enable) override;
+   void SetFocus() override;
+@@ -122,6 +130,10 @@
+   void OnRendererUnresponsive() override;
+   void OnRendererResponsive() override;
+   void OnPermissionRequest(const std::string& permission, uint64_t id) override;
++  void OnFoundInPage(int request_id,
++                     int active_match_ordinal,
++                     int number_of_matches,
++                     bool final_update) override;
+   void OnVisibleRegionCaptured(const std::string& base64_data) override;
+   void OnZoomFactorChanged(double zoom_factor) override;
+   bool RunJSDialog(const std::string& type, const std::string& message,
+--- a/src/neva/browser_shell/service/public/mojom/browser_shell_page_contents.mojom
++++ b/src/neva/browser_shell/service/public/mojom/browser_shell_page_contents.mojom
+@@ -90,6 +90,12 @@
+   OnRendererUnresponsive();
+   OnRendererResponsive();
+   OnPermissionRequest(string permission, uint64 id);
++  // Progress of a FindInPage request. The engine reports repeatedly for one
++  // request as it scans, with final_update set on the last one.
++  OnFoundInPage(int32 request_id,
++                int32 active_match_ordinal,
++                int32 number_of_matches,
++                bool final_update);
+   OnZoomFactorChanged(double zoom_factor);
+   RunJSDialog(string type, string message, string default_prompt_text);
+   TitleUpdated(string title, string url);
+@@ -112,6 +118,14 @@
+   ExecuteJavaScriptInAllFrames(string code);
+   ExecuteJavaScriptInMainFrame(string code);
+   ExitFullscreen();
++  // Find-in-page. find_next distinguishes "advance within the current search"
++  // from "start a new one"; results arrive on OnFoundInPage.
++  FindInPage(int32 request_id,
++             string search_text,
++             bool forward,
++             bool match_case,
++             bool find_next);
++  StopFindInPage(bool clear_selection);
+   GoBack();
+   GoForward();
+   LoadURL(string url) => (string url);
+@@ -119,7 +133,9 @@
+   ResumeDOM();
+   ResumeMedia();
+   ScrollByY(int32 y_shift);
++  SetAcceptCookies(bool accept);
+   SetAcceptedLanguages(string launguages);
++  SetEnableJavascript(bool enable);
+   SetErrorPageHiding(bool enable);
+   SetFocus();
+   SetKeyCodesFilter(array<string> key_codes);
+--- a/src/neva/injection/renderer/browser_shell/browser_shell_page_contents.cc
++++ b/src/neva/injection/renderer/browser_shell/browser_shell_page_contents.cc
+@@ -55,6 +55,7 @@
+ const char kOnRendererUnresponsive[] = "unresponsive";
+ const char kOnRendererResponsive[] = "responsive";
+ const char kOnPermissionRequest[] = "permissionrequest";
++const char kOnFoundInPage[] = "found-in-page";
+ const char kOnZoomFactorChanged[] = "zoomchange";
+ const char kPageTitleUpdated[] = "page-title-updated";
+ const char kOnCloseEvent[] = "close";
+@@ -98,6 +99,12 @@
+ char BrowserShellPageContents::kResumeDOMMethodName[] = "resumeDOM";
+ char BrowserShellPageContents::kResumeMediaMethodName[] = "resumeMedia";
+ char BrowserShellPageContents::kScrollByYMethodName[] = "scrollByY";
++char BrowserShellPageContents::kFindInPageMethodName[] = "findInPage";
++char BrowserShellPageContents::kStopFindInPageMethodName[] = "stopFindInPage";
++char BrowserShellPageContents::kSetAcceptCookiesMethodName[] =
++    "setAcceptCookies";
++char BrowserShellPageContents::kSetEnableJavascriptMethodName[] =
++    "setEnableJavascript";
+ char BrowserShellPageContents::kSetAcceptedLanguagesMethodName[] =
+     "setAcceptedLanguages";
+ char BrowserShellPageContents::kSetFocusMethodName[] = "setFocus";
+@@ -674,6 +681,33 @@
+   DoEmit(events::kDidUpdateFaviconUrl, favicon_info_arr.As<v8::Object>());
+ }
+ 
++void BrowserShellPageContents::OnFoundInPage(int32_t request_id,
++                                            int32_t active_match_ordinal,
++                                            int32_t number_of_matches,
++                                            bool final_update) {
++  v8::Isolate* isolate = v8::Isolate::GetCurrent();
++  v8::HandleScope handle_scope(isolate);
++  v8::Local<v8::Object> wrapper = GetWrapper(isolate).ToLocalChecked();
++  v8::Local<v8::Context> context;
++  if (!wrapper->GetCreationContext().ToLocal(&context))
++    return;
++
++  v8::MicrotasksScope microtasksScope(context,
++                                      v8::MicrotasksScope::kRunMicrotasks);
++  v8::Context::Scope context_scope(context);
++
++  v8::Local<v8::Object> result = v8::Object::New(isolate);
++  gin::Dictionary dict(isolate, result);
++  dict.Set("requestId", request_id);
++  // 1-based index of the highlighted match, 0 when there is none.
++  dict.Set("activeMatchOrdinal", active_match_ordinal);
++  dict.Set("numberOfMatches", number_of_matches);
++  // The engine reports as it scans; only the final report is a complete count.
++  dict.Set("finalUpdate", final_update);
++
++  DoEmit(events::kOnFoundInPage, result);
++}
++
+ void BrowserShellPageContents::DOMReady() {
+   DoEmit(events::kDOMReady);
+ }
+@@ -864,6 +898,55 @@
+     remote_->ResumeMedia();
+ }
+ 
++/* findInPage(searchText [, forward [, matchCase [, findNext]]]) -> requestId
++ *
++ * The request id is generated here rather than asked of the caller: it only has
++ * to be unique within this page contents, and handing it back lets the app match
++ * a "found-in-page" event to the search that produced it — the engine reports
++ * progressively, so several events arrive per request. */
++int BrowserShellPageContents::FindInPage(gin::Arguments* args) {
++  std::string search_text;
++  if (!args->GetNext(&search_text))
++    return 0;
++
++  // Optional arguments, peeked so that omitting them is not an argument error.
++  bool forward = true;
++  bool match_case = false;
++  bool find_next = false;
++  if (!args->PeekNext().IsEmpty())
++    args->GetNext(&forward);
++  if (!args->PeekNext().IsEmpty())
++    args->GetNext(&match_case);
++  if (!args->PeekNext().IsEmpty())
++    args->GetNext(&find_next);
++
++  if (!remote_.is_bound())
++    return 0;
++
++  remote_->FindInPage(++find_request_id_, search_text, forward, match_case,
++                      find_next);
++  return find_request_id_;
++}
++
++void BrowserShellPageContents::StopFindInPage(gin::Arguments* args) {
++  bool clear_selection = true;
++  if (!args->PeekNext().IsEmpty())
++    args->GetNext(&clear_selection);
++
++  if (remote_.is_bound())
++    remote_->StopFindInPage(clear_selection);
++}
++
++void BrowserShellPageContents::SetEnableJavascript(bool enable) {
++  if (remote_.is_bound())
++    remote_->SetEnableJavascript(enable);
++}
++
++void BrowserShellPageContents::SetAcceptCookies(bool accept) {
++  if (remote_.is_bound())
++    remote_->SetAcceptCookies(accept);
++}
++
+ void BrowserShellPageContents::ScrollByY(int y_shift) {
+   if (y_shift != 0 && remote_.is_bound())
+     remote_->ScrollByY(y_shift);
+@@ -1031,6 +1114,13 @@
+       .SetMethod(kResumeDOMMethodName, &BrowserShellPageContents::ResumeDOM)
+       .SetMethod(kResumeMediaMethodName, &BrowserShellPageContents::ResumeMedia)
+       .SetMethod(kScrollByYMethodName, &BrowserShellPageContents::ScrollByY)
++      .SetMethod(kFindInPageMethodName, &BrowserShellPageContents::FindInPage)
++      .SetMethod(kStopFindInPageMethodName,
++                 &BrowserShellPageContents::StopFindInPage)
++      .SetMethod(kSetAcceptCookiesMethodName,
++                 &BrowserShellPageContents::SetAcceptCookies)
++      .SetMethod(kSetEnableJavascriptMethodName,
++                 &BrowserShellPageContents::SetEnableJavascript)
+       .SetMethod(kSetAcceptedLanguagesMethodName,
+                  &BrowserShellPageContents::SetAcceptedLanguages)
+       .SetMethod(kSetFocusMethodName, &BrowserShellPageContents::SetFocus)
+--- a/src/neva/injection/renderer/browser_shell/browser_shell_page_contents.h
++++ b/src/neva/injection/renderer/browser_shell/browser_shell_page_contents.h
+@@ -79,6 +79,10 @@
+   static char kResumeDOMMethodName[];
+   static char kResumeMediaMethodName[];
+   static char kScrollByYMethodName[];
++  static char kFindInPageMethodName[];
++  static char kStopFindInPageMethodName[];
++  static char kSetAcceptCookiesMethodName[];
++  static char kSetEnableJavascriptMethodName[];
+   static char kSetAcceptedLanguagesMethodName[];
+   static char kSetFocusMethodName[];
+   static char kSetPageBaseBackgroundColorMethodName[];
+@@ -177,6 +181,10 @@
+   void OnRendererUnresponsive() override;
+   void OnRendererResponsive() override;
+   void OnPermissionRequest(const std::string& permission, uint64_t id) override;
++  void OnFoundInPage(int32_t request_id,
++                     int32_t active_match_ordinal,
++                     int32_t number_of_matches,
++                     bool final_update) override;
+   void OnZoomFactorChanged(double zoom_factor) override;
+   void RunJSDialog(const std::string& type, const std::string& message,
+                    const std::string& default_prompt_text) override;
+@@ -224,6 +232,10 @@
+   void ResumeDOM();
+   void ResumeMedia();
+   void ScrollByY(int y_shift);
++  int FindInPage(gin::Arguments* args);
++  void StopFindInPage(gin::Arguments* args);
++  void SetAcceptCookies(bool accept);
++  void SetEnableJavascript(bool enable);
+   void SetAcceptedLanguages(const std::string& languages);
+   void SetErrorPageHiding(bool enable);
+   void SetFocus();
+@@ -251,6 +263,9 @@
+   State state_;
+   std::string url_string_;
+   double zoom_factor_;
++  // Per-page-contents counter handed back by findInPage so the app can tell
++  // which search a "found-in-page" event belongs to.
++  int32_t find_request_id_ = 0;
+ 
+   mojo::Remote<browser_shell::mojom::PageContents> remote_;
+   mojo::AssociatedReceiver<browser_shell::mojom::PageContentsClient>
