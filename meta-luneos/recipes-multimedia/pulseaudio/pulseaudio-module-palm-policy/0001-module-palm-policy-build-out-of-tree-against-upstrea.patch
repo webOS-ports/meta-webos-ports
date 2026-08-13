@@ -1,0 +1,152 @@
+From 5e626a0fac859bf8d3a62d12221472b71425d753 Mon Sep 17 00:00:00 2001
+From: LuneOS <claude.ai@herrie.org>
+Date: Mon, 10 Aug 2026 12:56:11 +0200
+Subject: [PATCH] module-palm-policy: build out-of-tree against upstream
+ PulseAudio 17.0
+
+The module is written against LG's PulseAudio fork. A few fork-specific
+assumptions prevent it building against an unmodified PulseAudio:
+
+* module-palm-policy.c, module-palm-policy.h and module-palm-policy-tables.h
+  all included <config.h> unconditionally, but an out-of-tree build has no
+  generated PulseAudio config.h. Guard each with HAVE_CONFIG_H, matching the
+  idiom module-palm-policy-util.c already uses. Nothing here needs a value
+  from it: the only consumer was PACKAGE_VERSION (see below), and
+  MACHINE_IS_SIRLOIN being undefined already selects the -default tables.
+
+* PA_MODULE_VERSION(PACKAGE_VERSION) came from that config.h. PulseAudio
+  refuses to load a module whose version string does not match the daemon,
+  so use PULSEAUDIO_VERSION, passed in by the build as PA_MAJORMINOR. This
+  mirrors what meta-luneos already does for pulseaudio-modules-droid.
+
+* PA_PROP_PREFERRED_DEVICE is an LG addition to the fork's pulse/proplist.h.
+  Only this module reads and writes the key, so define it locally.
+
+Also replace pa_bool_t with bool: the typedef was removed from PulseAudio
+in 6.0, and the fork only still carries it for source compatibility.
+
+Upstream-Status: Inappropriate [out-of-tree build enablement]
+---
+ src/modules/module-palm-policy-tables.h |  2 ++
+ src/modules/module-palm-policy.c        | 28 +++++++++++++++----------
+ src/modules/module-palm-policy.h        |  2 ++
+ 3 files changed, 21 insertions(+), 11 deletions(-)
+
+diff --git a/src/modules/module-palm-policy-tables.h b/src/modules/module-palm-policy-tables.h
+index 805d591..c604fea 100644
+--- a/src/modules/module-palm-policy-tables.h
++++ b/src/modules/module-palm-policy-tables.h
+@@ -17,7 +17,9 @@
+   along with PulseAudio; if not, see <http://www.gnu.org/licenses/>.
+ ***/
+ 
++#ifdef HAVE_CONFIG_H
+ #include <config.h>
++#endif
+ 
+ #ifdef MACHINE_IS_SIRLOIN
+     #include "module-palm-policy-tables-sirloin.h"
+diff --git a/src/modules/module-palm-policy.c b/src/modules/module-palm-policy.c
+index eb1892e..e180409 100644
+--- a/src/modules/module-palm-policy.c
++++ b/src/modules/module-palm-policy.c
+@@ -23,9 +23,7 @@
+  * as determined by audioD.
+  **********************************************************************/
+ 
+-#if defined(__i386__) && defined(LOCAL_TEST_BUILD)
+-#include <pulsecore/config.h> /* bit of a hack, this, I have a local copy of config.h for x86 in the /usr/include/pulsecore/ dir */
+-#else
++#ifdef HAVE_CONFIG_H
+ #include <config.h>
+ #endif
+ 
+@@ -58,6 +56,14 @@
+ #include "module-palm-policy-tables.h"
+ #include "module-palm-policy-util.h"
+ 
++/* Upstream PulseAudio has no such proplist key -- it is an LG addition carried in
++ * this fork's own src/pulse/proplist.h. Define it locally so the module can be
++ * built out-of-tree against an unmodified PulseAudio. Only this module reads and
++ * writes the key, so a local definition is sufficient. */
++#ifndef PA_PROP_PREFERRED_DEVICE
++#define PA_PROP_PREFERRED_DEVICE "preferred.device"
++#endif
++
+ #define _MEM_ZERO(object) (memset(&(object), '\0', sizeof((object))))
+ #define _NAME_STRUCT_OFFSET(struct_type, member) ((long)((unsigned char *)&((struct_type *)0)->member))
+ 
+@@ -124,9 +130,9 @@ struct sinkinputnode
+                                * _enum_virtualsinkmap rather than a pulseaudio sink idx */
+     pa_sink_input *sinkinput; /* reference to sink input with this index */
+ 
+-    pa_bool_t paused;
++    bool paused;
+ 
+-    pa_bool_t bypassRouting;
++    bool bypassRouting;
+ 
+     char appname[APP_NAME_LENGTH];
+ 
+@@ -139,9 +145,9 @@ struct sourceoutputnode
+     int32_t virtualsourceid;        /* index of virtual sink it was created against, this is our index from
+                                      * _enum_virtualsourcemap rather than a pulseaudio sink idx */
+     pa_source_output *sourceoutput; /* reference to sink input with this index */
+-    pa_bool_t paused;
++    bool paused;
+ 
+-    pa_bool_t bypassRouting;
++    bool bypassRouting;
+ 
+     char appname[APP_NAME_LENGTH];
+ 
+@@ -214,7 +220,7 @@ struct userdata
+     struct sockaddr_un name;    /* filename for socket */
+     pa_io_event *sockev;        /* socket event handler */
+     pa_io_event *connev;        /* connection event handler */
+-    pa_bool_t connectionactive; /* do we have an active connection on the socket */
++    bool connectionactive; /* do we have an active connection on the socket */
+ 
+     // Maintain count of sinks opened, as sent to audiod, so that we can re-send data on reconnect for audiod to resync with us
+     int32_t audiod_sink_input_opened[eVirtualSink_Count];
+@@ -367,7 +373,7 @@ static pa_hook_result_t route_source_output_unlink_hook_callback(pa_core *c, pa_
+ static pa_hook_result_t route_sink_state_changed_hook_callback(pa_core *c, pa_object *o,
+                                                                struct userdata *u);
+ 
+-static pa_bool_t sink_input_new_data_is_passthrough(pa_sink_input_new_data *data);
++static bool sink_input_new_data_is_passthrough(pa_sink_input_new_data *data);
+ 
+ static pa_hook_result_t sink_state_changed_cb(pa_core *c, pa_object *o, struct userdata *u);
+ 
+@@ -389,7 +395,7 @@ bool detect_usb_device(struct userdata *u, bool isOutput, int cardNumber, int de
+ 
+ PA_MODULE_AUTHOR("Palm, Inc.");
+ PA_MODULE_DESCRIPTION("Implements policy, communication with external app is a socket at /tmp/palmaudio");
+-PA_MODULE_VERSION(PACKAGE_VERSION);
++PA_MODULE_VERSION(PULSEAUDIO_VERSION);
+ PA_MODULE_LOAD_ONCE(true);
+ PA_MODULE_USAGE("No parameters for this module");
+ 
+@@ -817,7 +823,7 @@ void check_and_remove_usb_device_module(struct userdata *u, bool isOutput, pa_mo
+ Once it is removed, audio will be routed to HDMI.
+ */
+ 
+-static pa_bool_t sink_input_new_data_is_passthrough(pa_sink_input_new_data *data)
++static bool sink_input_new_data_is_passthrough(pa_sink_input_new_data *data)
+ {
+ 
+     if (pa_sink_input_new_data_is_passthrough(data))
+diff --git a/src/modules/module-palm-policy.h b/src/modules/module-palm-policy.h
+index 3e13b20..b4ecb29 100644
+--- a/src/modules/module-palm-policy.h
++++ b/src/modules/module-palm-policy.h
+@@ -20,7 +20,9 @@
+ #ifndef MODULE_PALM_POLICY_H
+ #define MODULE_PALM_POLICY_H
+ 
++#ifdef HAVE_CONFIG_H
+ #include <config.h>
++#endif
+ #include "module-palm-policy-default.h"
+ 
+ #endif
