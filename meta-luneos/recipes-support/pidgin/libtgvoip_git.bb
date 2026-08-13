@@ -75,3 +75,10 @@ EXTRA_OEMAKE = "OBJCXXLINK='$(CXXLINK)'"
 # Headers land in ${includedir}/tgvoip (Makefile.am: tgvoipincludedir). Nothing ships at runtime
 # because the only output is a static archive, so the main package is empty by design.
 ALLOW_EMPTY:${PN} = "1"
+
+# GCC 15 no longer pulls <cstdint> in transitively, and this vendored copy of
+# libtgvoip/json11 uses uint8_t, uint32_t and friends without including it:
+#   json11.cpp:98:32: error: 'uint8_t' does not name a type
+# At least ten headers and translation units are affected, so force-include it
+# rather than patching each one of an upstream vendored tree.
+CXXFLAGS:append = " -include cstdint"
