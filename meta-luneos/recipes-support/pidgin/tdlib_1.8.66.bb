@@ -76,17 +76,28 @@ ALLOW_EMPTY:${PN} = "1"
 BBCLASSEXTEND = "native nativesdk"
 
 # CMake bakes absolute sysroot paths into both the generated pkg-config files
-# and the exported target files:
+# and the exported CMake targets:
 #   Libs.private: -L"${RECIPE_SYSROOT}/usr/lib" -lcrypto -ldl ...
 #   INTERFACE_LINK_LIBRARIES "${RECIPE_SYSROOT}/usr/lib/libcrypto.so;..."
-# which buildpaths QA rejects:
-#   File /usr/lib/pkgconfig/tdutils.pc in package tdlib-dev contains
-#   reference to TMPDIR [buildpaths]
-#   File /usr/lib/cmake/Td/TdStaticTargets.cmake ... [buildpaths]
-# Strip the sysroot prefix so both name the on-target paths they should have
-# named all along. Listed explicitly rather than sweeping ${D}: a recursive
-# grep+sed would also match the installed binaries.
+# which buildpaths QA rejects.
+#
+# The two need different treatment. For .pc, stripping the sysroot prefix off
+# -L leaves the on-target /usr/lib, which is right. For the exported targets it
+# is NOT enough: rewriting the path to /usr/lib/libssl.so makes a consumer link
+# the *host* library, and tdlib-purple then fails with
+#   ninja: error: '/usr/lib/libssl.so', needed by 'libtelegram-tdlib.so',
+#   missing and no known rule to make it
+# so turn those into bare library names instead, which CMake emits as -lssl and
+# the linker resolves through the sysroot. Any other sysroot reference (include
+# dirs and the like) still just gets the prefix stripped.
+#
+# Listed explicitly rather than sweeping ${D}: a recursive grep+sed would also
+# match the installed binaries.
 do_install:append() {
+    for f in ${D}${libdir}/cmake/Td/*.cmake; do
+        [ -e "$f" ] || continue
+        sed -i -e 's|${RECIPE_SYSROOT}${libdir}/lib\([A-Za-z0-9_.+-]*\)\.so|\1|g' "$f"
+    done
     for f in ${D}${libdir}/pkgconfig/*.pc ${D}${libdir}/cmake/Td/*.cmake; do
         [ -e "$f" ] || continue
         sed -i -e 's|${RECIPE_SYSROOT}||g' "$f"
