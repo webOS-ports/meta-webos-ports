@@ -42,7 +42,13 @@ GN_ARGS_CLANG = "is_clang=true"
 # bundled clang and will not load in a different one. treat_warnings_as_errors
 # is already false in webruntime-common.inc, which matters across a jump from
 # clang 18 to 22.
-DEPENDS += "clang-native"
+# lld-native as well as clang-native: Chromium links with -fuse-ld=lld, and
+# with the bundled toolchain lld came from third_party/llvm-build. Now that we
+# point clang_base_path at the sysroot, ld.lld has to be staged there too or
+# the link fails with
+#   clang++: error: invalid linker name in argument '-fuse-ld=lld'
+# which is clang's wording for a linker it cannot resolve, not a bad flag.
+DEPENDS += "clang-native lld-native"
 GN_ARGS += "clang_base_path=\"${STAGING_DIR_NATIVE}${prefix}\""
 GN_ARGS += "clang_use_chrome_plugins=false"
 
