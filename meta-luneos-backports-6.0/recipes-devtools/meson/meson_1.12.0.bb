@@ -1,3 +1,17 @@
+# meson 1.12.0, forward-ported from oe-core master. wrynose ships 1.10.2, which
+# is older than what LuneOS was already building on scarthgap.
+#
+# This is oe-core wrynose's meson_1.10.2.bb verbatim with only the version and
+# checksum changed. The previous backport was the scarthgap-era recipe, which
+# still used the old install_templates() mechanism with shell-substituted
+# host_cpu/host_endian; wrynose moved to install_native_template() /
+# install_cross_template() with @OECORE_MESON_HOST_* placeholders that
+# meson-setup.py and meson-wrapper now expect. It also still carried
+# "python3-pkg-resources" in RDEPENDS, which python3-setuptools 82 no longer
+# provides - that alone made meson-native unbuildable and cascaded into 544
+# "Nothing RPROVIDES" errors, since almost everything needs meson-native.
+#
+# Both oe-core patches apply to 1.12.0 unchanged (offsets only, no fuzz).
 HOMEPAGE = "http://mesonbuild.com"
 SUMMARY = "A high performance build system"
 DESCRIPTION = "Meson is a build system designed to increase programmer \
@@ -8,10 +22,6 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://COPYING;md5=3b83ef96387f14655fc854ddc3c6bd57"
 
 GITHUB_BASE_URI = "https://github.com/mesonbuild/meson/releases/"
-# 0001-python-module-do-not-manipulate-the-environment-when.patch was dropped at
-# 1.12.0: upstream removed wrap_in_pythons_pc_dir() and no longer mutates
-# os.environ for PKG_CONFIG_LIBDIR/PKG_CONFIG_PATH at all, it sets them on a
-# proper environment object in dependencies/pkgconfig.py instead.
 SRC_URI = "${GITHUB_BASE_URI}/download/${PV}/meson-${PV}.tar.gz \
            file://meson-setup.py \
            file://meson-wrapper \
@@ -23,19 +33,9 @@ UPSTREAM_CHECK_REGEX = "(?P<pver>\d+(\.\d+)+)$"
 
 inherit python_setuptools_build_meta github-releases
 
-RDEPENDS:${PN} = "ninja python3-modules python3-pkg-resources"
+RDEPENDS:${PN} = "ninja python3-modules"
 
 FILES:${PN} += "${datadir}/polkit-1"
-
-do_install:append () {
-	# As per the same issue in the python recipe itself:
-	# Unfortunately the following pyc files are non-deterministc due to 'frozenset'
-	# being written without strict ordering, even with PYTHONHASHSEED = 0
-	# Upstream is discussing ways to solve the issue properly, until then let's
-	# just not install the problematic files.
-	# More info: http://benno.id.au/blog/2013/01/15/python-determinism
-	rm -f ${D}${libdir}/python*/site-packages/mesonbuild/dependencies/__pycache__/mpi.cpython*
-}
 
 BBCLASSEXTEND = "native nativesdk"
 
@@ -78,7 +78,7 @@ def generate_native_link_template(d):
 
     return repr(val)
 
-install_templates() {
+install_native_template() {
     install -d ${D}${datadir}/meson
 
     cat >${D}${datadir}/meson/meson.native.template <<EOF
@@ -96,9 +96,26 @@ c_args = ['-isystem@{OECORE_NATIVE_SYSROOT}${includedir_native}' , ${@var_list2s
 c_link_args = ${@generate_native_link_template(d)}
 cpp_args = ['-isystem@{OECORE_NATIVE_SYSROOT}${includedir_native}' , ${@var_list2str('BUILD_OPTIMIZATION', d)}]
 cpp_link_args = ${@generate_native_link_template(d)}
-[properties]
-sys_root = '@OECORE_NATIVE_SYSROOT'
 EOF
+}
+
+install_nativesdk_template() {
+    install -d ${D}${datadir}/meson
+
+    cat >${D}${datadir}/meson/meson.native.template <<EOF
+[binaries]
+pkg-config = 'pkg-config-native'
+
+[built-in options]
+c_args = ['-isystem@{OECORE_NATIVE_SYSROOT}${includedir_native}']
+c_link_args = ['-L@{OECORE_NATIVE_SYSROOT}${libdir_native}', '-L@{OECORE_NATIVE_SYSROOT}${base_libdir_native}',]
+cpp_args = ['-isystem@{OECORE_NATIVE_SYSROOT}${includedir_native}']
+cpp_link_args = ['-L@{OECORE_NATIVE_SYSROOT}${libdir_native}', '-L@{OECORE_NATIVE_SYSROOT}${base_libdir_native}',]
+EOF
+}
+
+install_cross_template() {
+    install -d ${D}${datadir}/meson
 
     cat >${D}${datadir}/meson/meson.cross.template <<EOF
 [binaries]
@@ -120,19 +137,16 @@ needs_exe_wrapper = true
 sys_root = @OECORE_TARGET_SYSROOT
 
 [host_machine]
-system = '$host_system'
-cpu_family = '$host_cpu_family'
-cpu = '$host_cpu'
-endian = '$host_endian'
+system = @OECORE_MESON_HOST_SYSTEM
+cpu_family = @OECORE_MESON_HOST_CPU_FAMILY
+cpu = @OECORE_MESON_HOST_CPU
+endian = @OECORE_MESON_HOST_ENDIAN
 EOF
 }
 
 do_install:append:class-nativesdk() {
-    host_system=${SDK_OS}
-    host_cpu_family=${@meson_cpu_family("SDK_ARCH", d)}
-    host_cpu=${SDK_ARCH}
-    host_endian=${@meson_endian("SDK", d)}
-    install_templates
+    install_nativesdk_template
+    install_cross_template
 
     install -d ${D}${SDKPATHNATIVE}/post-relocate-setup.d
     install -m 0755 ${UNPACKDIR}/meson-setup.py ${D}${SDKPATHNATIVE}/post-relocate-setup.d/
@@ -145,11 +159,8 @@ do_install:append:class-nativesdk() {
 FILES:${PN}:append:class-nativesdk = "${datadir}/meson ${SDKPATHNATIVE}"
 
 do_install:append:class-native() {
-    host_system=${HOST_OS}
-    host_cpu_family=${@meson_cpu_family("HOST_ARCH", d)}
-    host_cpu=${HOST_ARCH}
-    host_endian=${@meson_endian("HOST", d)}
-    install_templates
+    install_native_template
+    install_cross_template
 
     install -d ${D}${datadir}/post-relocate-setup.d
     install -m 0755 ${UNPACKDIR}/meson-setup.py ${D}${datadir}/post-relocate-setup.d/

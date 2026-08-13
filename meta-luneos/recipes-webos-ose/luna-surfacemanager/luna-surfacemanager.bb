@@ -9,7 +9,11 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=2c7c706c6a586a6abec428c64006d86b \
 "
 
-DEPENDS = "qtdeclarative wayland-native qtwayland qtwayland-native qt-features-webos pmloglib webos-wayland-extensions glib-2.0 qtwayland-webos"
+# Qt 6.10 moved the QtWayland client and qtwaylandscanner into qtbase, and
+# meta-qt6 dropped the qtwayland native/nativesdk builds with it
+# ("Adapt to QtWayland client move to QtBase"). qtwaylandscanner now comes from
+# qtbase-native, gated on the wayland DISTRO_FEATURE which LuneOS sets.
+DEPENDS = "qtdeclarative wayland-native qtwayland qtbase-native qt-features-webos pmloglib webos-wayland-extensions glib-2.0 qtwayland-webos"
 
 WEBOS_VERSION = "2.0.0-423_6f49cced1cd4aea27f14d136e1c8ce846beef62a"
 PR = "r61"

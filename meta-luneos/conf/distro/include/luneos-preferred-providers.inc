@@ -15,12 +15,23 @@ SKIP_RECIPE[googletest-clang] ?= "${@oe.utils.conditional('WEBRUNTIME_TOOLCHAIN'
 SKIP_RECIPE[media-codec-interface-clang] ?= "${@oe.utils.conditional('WEBRUNTIME_TOOLCHAIN', '-clang', '', 'WEBRUNTIME_TOOLCHAIN is not set to -clang', d)}"
 SKIP_RECIPE[g-media-pipeline-clang] ?= "${@oe.utils.conditional('WEBRUNTIME_TOOLCHAIN', '-clang', '', 'WEBRUNTIME_TOOLCHAIN is not set to -clang', d)}"
 
-PREFERRED_PROVIDER_llvm = "${@oe.utils.conditional('WEBRUNTIME_TOOLCHAIN', '-clang', 'clang', 'llvm', d)}"
-PREFERRED_PROVIDER_llvm-native = "${@oe.utils.conditional('WEBRUNTIME_TOOLCHAIN', '-clang', 'clang-native', 'llvm-native', d)}"
-PREFERRED_PROVIDER_nativesdk-llvm = "${@oe.utils.conditional('WEBRUNTIME_TOOLCHAIN', '-clang', 'nativesdk-clang', 'nativesdk-llvm', d)}"
-PROVIDES:pn-clang = "llvm"
-PROVIDES:pn-clang-native = "llvm-native"
-PROVIDES:pn-nativesdk-clang = "nativesdk-llvm"
+# The llvm -> clang aliasing that used to live here is gone. It made sense while
+# meta-clang shipped the only LLVM in the build and its clang recipe PROVIDED
+# llvm. wrynose moved the whole clang/llvm stack into oe-core, where llvm_git.bb
+# and clang_git.bb are separate recipes and clang DEPENDS on llvm-native:
+#
+#   DEPENDS = "llvm-tblgen-native llvm-native llvm binutils zlib zstd ..."
+#
+# so pointing llvm-native at clang-native made clang-native depend on itself:
+#
+#   ERROR: 313 unbuildable tasks were found.
+#   Dependency loop #1 found:
+#     clang_git.bb:do_prepare_recipe_sysroot <- clang_git.bb:do_populate_sysroot
+#
+# meta-clang on wrynose no longer carries any clang recipes at all - it is now
+# just bbappends and nonclangable.conf - so there is nothing left to alias to.
+# LuneOS' own llvm_%.bbappend (the LLVM_HOST_TRIPLE fix for llvmpipe) already
+# assumes oe-core's real llvm recipe.
 
 PREFERRED_PROVIDER_virtual/webruntime = "webruntime${WEBRUNTIME_TOOLCHAIN}"
 VIRTUAL-RUNTIME_webruntime = "webruntime${WEBRUNTIME_TOOLCHAIN}"
@@ -39,12 +50,6 @@ VIRTUAL-RUNTIME_tar = "${@oe.utils.conditional('WEBOS_PREFERRED_PROVIDER_FOR_TAR
 PREFERRED_PROVIDER_jpeg = "libjpeg-turbo"
 PREFERRED_PROVIDER_jpeg-native = "libjpeg-turbo-native"
 
-PREFERRED_PROVIDER_llvm = "clang"
-PREFERRED_PROVIDER_llvm-native = "clang-native"
-PREFERRED_PROVIDER_nativesdk-llvm = "nativesdk-clang"
-PROVIDES:pn-clang = "llvm"
-PROVIDES:pn-clang-native = "llvm-native"
-PROVIDES:pn-nativesdk-clang = "nativesdk-llvm"
 
 # Just for documentation; these values are the defaults set in the recipes that
 # use them.
@@ -100,7 +105,20 @@ BAD_RECOMMENDATIONS:append:qemux86 = " kernel-vmlinux"
 # used by meta-networking/recipes-connectivity/autossh/autossh_1.4g.bb
 PREFERRED_RPROVIDER_ssh = "openssh"
 
-VIRTUAL-RUNTIME_init_manager = "systemd systemd-compat-units systemd-machine-units"
+# systemd-compat-units is gone in wrynose: it existed only to provide the SysV
+# compatibility units, and systemd dropped SysVinit support entirely.
+VIRTUAL-RUNTIME_init_manager = "systemd systemd-machine-units"
+
+# node-red is fetched with npmsw://, which bitbake 2.18 disables, so the recipe
+# is skipped at parse and anything requiring it becomes unbuildable. Turn off
+# node-red and the two webOS services that hard-depend on it until node-red is
+# moved off the npm fetcher (its npm-shrinkwrap.json would have to be
+# regenerated first - see the note in UPSTREAM-UPDATE-REPORT.md).
+#   com.webos.service.contextintentmgr  DEPENDS  = "node-red"
+#   com.webos.service.flowmanager       RDEPENDS = "... node-red"
+VIRTUAL-RUNTIME_nodejs-module-node-red = ""
+VIRTUAL-RUNTIME_contextintentmgr = ""
+VIRTUAL-RUNTIME_com.webos.service.flowmanager = ""
 
 # With upstart we don't need update-rc.d, as bonus fixes following avahi issue for us:
 # http://lists.openembedded.org/pipermail/openembedded-core/2013-November/086901.html
