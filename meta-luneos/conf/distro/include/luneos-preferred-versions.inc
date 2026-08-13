@@ -24,26 +24,9 @@ PREFERRED_VERSION_mesa = "26.2.0%"
 
 PREFERRED_VERSION_lttng-modules:tenderloin    = "2.13.12+git"
 
-# Go 1.26.5, backported from oe-core master into meta-luneos/recipes-devtools/go.
-#
-# scarthgap ships 1.22.12, and purple-combined's go.mod requires >= 1.25.5 -- the whatsmeow and
-# messagix modules it depends on will not build on anything older ("go.mod requires go >= 1.25.5
-# (running go 1.22.12)"). Every go recipe has to move together: go-cross, go-runtime and the
-# native bootstrap all have to agree on a version or the cross build mixes toolchains.
-GOVERSION = "1.26.5"
-PREFERRED_VERSION_go                          = "${GOVERSION}"
-PREFERRED_VERSION_go-native                   = "${GOVERSION}"
-PREFERRED_VERSION_go-binary-native            = "${GOVERSION}"
-PREFERRED_VERSION_go-runtime                  = "${GOVERSION}"
-# No go-cross line here. Its PN is go-cross-${TUNE_PKGARCH} (go-cross.inc), not
-# ${TARGET_ARCH}, so a TARGET_ARCH-keyed pin does nothing on 32-bit ARM, where
-# the two differ (arm vs armv7at2hf-neon). Where they are equal - aarch64, x86-64 -
-# it merely duplicates the key oe-core already sets, and bitbake says so:
-#   Variable key PREFERRED_VERSION_go-cross-${TUNE_PKGARCH} (${GOVERSION})
-#   replaces original key PREFERRED_VERSION_go-cross-x86_64 (${GOVERSION})
-# tcmode-default.inc has PREFERRED_VERSION_go-cross-${TUNE_PKGARCH} ?= "${GOVERSION}",
-# which picks up the GOVERSION set above, so go-cross is pinned correctly without it.
-# (go-crosssdk is the opposite case: its PN really is keyed on SDK_SYS, so that
-# line below is needed - oe-core keys its own on SDK_ARCH and misses.)
-PREFERRED_VERSION_go-crosssdk-${SDK_SYS}      = "${GOVERSION}"
-PREFERRED_VERSION_go-cross-canadian-${TRANSLATED_TARGET_ARCH} = "${GOVERSION}"
+# The go 1.26.5 backport is gone: it existed because scarthgap shipped 1.22.12
+# and purple-combined's go.mod needs >= 1.25.5 (whatsmeow, messagix). wrynose
+# ships go 1.26.4 in oe-core, which satisfies that, so the whole
+# meta-luneos/recipes-devtools/go tree and its GOVERSION pins are redundant.
+# They were also broken here: every one of those recipes still had
+# S = "${WORKDIR}/go", which wrynose rejects.
