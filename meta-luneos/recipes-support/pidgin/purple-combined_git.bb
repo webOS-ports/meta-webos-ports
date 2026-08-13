@@ -157,6 +157,16 @@ do_compile() {
 # checkout -- purple-combined reuses them rather than carrying a second copy.
 WEBRTC_DSP = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/messaging/telegram/plugin/libtgvoip/webrtc_dsp"
 
+# S points at messaging/facebook-e2ee/plugin/purple-combined, so OE's automatic
+# ${S} prefix-map covers only that subtree. This recipe also compiles siblings
+# of it -- messaging/common and the libtgvoip webrtc_dsp sources above -- whose
+# paths therefore survive into the debug info:
+#   File /usr/lib/purple-2/.debug/libwhatsmeow.so in package purple-combined-dbg
+#   contains reference to TMPDIR [buildpaths]
+# Map the whole unpacked tree so every sibling is covered, not just ${S}.
+DEBUG_PREFIX_MAP:append = " -ffile-prefix-map=${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}=/usr/src/debug/${PN}/${PV}"
+
+
 do_install() {
     install -d ${D}${libdir}/purple-2
     install -m 0755 ${B}/libwhatsmeow.so ${D}${libdir}/purple-2/libwhatsmeow.so
