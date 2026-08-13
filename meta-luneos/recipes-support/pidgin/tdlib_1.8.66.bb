@@ -74,3 +74,17 @@ ALLOW_EMPTY:${PN} = "1"
 # The generator pass above is done in-recipe, so nothing here needs tdlib-native. Left available
 # in case something else ever wants it.
 BBCLASSEXTEND = "native nativesdk"
+
+# CMake bakes the absolute sysroot lib path into the generated .pc files:
+#   Libs.private: -L"${RECIPE_SYSROOT}/usr/lib" -lcrypto -ldl ...
+# which buildpaths QA rejects:
+#   File /usr/lib/pkgconfig/tdutils.pc in package tdlib-dev contains
+#   reference to TMPDIR [buildpaths]
+# Strip the sysroot prefix so the -L points at the on-target /usr/lib it
+# should have named all along.
+do_install:append() {
+    for pc in ${D}${libdir}/pkgconfig/*.pc; do
+        [ -e "$pc" ] || continue
+        sed -i -e 's|${RECIPE_SYSROOT}||g' "$pc"
+    done
+}
