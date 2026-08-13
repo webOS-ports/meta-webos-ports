@@ -24,5 +24,13 @@ do_install:append() {
     install -m 755 ${S}/libWnnJpn.so ${D}${libdir}/maliit/plugins
 }
 
-TARGET_CC_ARCH += "${LDFLAGS}"
+# The shipped Makefile assigns CFLAGS absolutely (-fPIC -g -O2 -I...), so OE's
+# CFLAGS -- and with them DEBUG_PREFIX_MAP -- never reach the compiler, and the
+# debug info ends up recording absolute TMPDIR paths:
+#   File /usr/lib/maliit/plugins/.debug/libWnnJpn.so in package openwnn-webos-dbg
+#   contains reference to TMPDIR [buildpaths]
+# Overriding CFLAGS on the make command line would drop the -I flags the
+# Makefile bakes into it, so smuggle the flags in through TARGET_CC_ARCH, which
+# lands in CXX itself. Same trick this recipe already uses for LDFLAGS.
+TARGET_CC_ARCH += "${LDFLAGS} ${DEBUG_PREFIX_MAP}"
 FILES:${PN} += "${libdir}/maliit/plugins/"
