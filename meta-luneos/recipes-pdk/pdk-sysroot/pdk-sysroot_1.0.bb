@@ -45,7 +45,7 @@ PDK_SYSROOT_TARBALL_SHA256 ?= ""
 # build and requiring the multiconfig would be a hard error for no reason.
 do_install[mcdepends] = "${@'mc::pdk-armel:pdk-sysroot-image:do_image_complete' if not d.getVar('PDK_SYSROOT_TARBALL') else ''}"
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 do_install() {
     install -d ${D}${PDK_PREFIX}/sysroot

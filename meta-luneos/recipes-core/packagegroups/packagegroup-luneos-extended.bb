@@ -144,10 +144,10 @@ LIBHYBRIS_RDEPENDS = " \
 # (Optional?) work for Qt6:
 #     qtscenegraph-adaptation 
 
-#Needs update for Qt6
-#    qtubuntu-camera 
-#    libqtubuntu-media-signals2 
-#    qtvideo-node 
+# qtubuntu-camera, libqtubuntu-media-signals and qtvideo-node were the Ubuntu
+# Touch camera stack. They were commented out here for the Qt5 -> Qt6 migration
+# and never updated, and the first two were fetched over bzr, whose fetcher
+# wrynose removed. The recipes are gone as of the wrynose migration.
 
 RDEPENDS:${PN}:append:tuna = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:grouper = " ${LIBHYBRIS_RDEPENDS}"
