@@ -59,7 +59,9 @@ do_compile[noexec] = "1"
 #
 #   db8 caller     the permissions name the app exactly, but the hub gives a browsershell app an
 #                  instance-suffixed name (org.webosports.app.atlas-1) that an exact caller never
-#                  matches. Wildcard callers are the norm on this platform.
+#                  matches. Wildcard callers are the norm on this platform — but db8 only accepts a
+#                  '*' that follows a '.', so the wildcard has to sit one component up
+#                  (org.webosports.app.*). See the note above caller_wildcard below.
 ADAPTED = "${WORKDIR}/luneos-adapted"
 
 python do_luneos_adapt() {
@@ -106,6 +108,14 @@ python do_luneos_adapt() {
                 json.dump(kind, f, indent=4)
             bb.note('kind %s owner -> %s' % (name, app_id))
 
+    # db8 only accepts a trailing '*' that follows a '.' separator — it rejects anything else with
+    # "db: invalid wildcard in - '<caller>'" (MojErr -3989), and the whole permission file then fails
+    # to install, which makes db8 answer every query from the app with "kind not registered". So
+    # neither 'org.webosports.app.atlas*' nor 'org.webosports.app.atlas-*' can be used, even though
+    # the name we need to match is the hub's instance-suffixed 'org.webosports.app.atlas-1'. The
+    # closest legal pattern is one component up. Verified against db8 on a LuneOS qemux86-64 image.
+    caller_wildcard = app_id.rsplit('.', 1)[0] + '.*'
+
     perms = os.path.join(out, 'db', 'permissions')
     for name in sorted(os.listdir(perms)):
         path = os.path.join(perms, name)
@@ -114,12 +124,12 @@ python do_luneos_adapt() {
         changed = False
         for entry in entries:
             if entry.get('caller') == app_id:
-                entry['caller'] = app_id + '*'
+                entry['caller'] = caller_wildcard
                 changed = True
         if changed:
             with open(path, 'w') as f:
                 json.dump(entries, f, indent=4)
-            bb.note('permission %s caller -> %s*' % (name, app_id))
+            bb.note('permission %s caller -> %s' % (name, caller_wildcard))
 }
 addtask luneos_adapt after do_patch before do_install
 

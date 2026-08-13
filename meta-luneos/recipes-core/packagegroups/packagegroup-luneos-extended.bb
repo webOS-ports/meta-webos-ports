@@ -12,6 +12,11 @@ NOT_COMPATIBLE_WITH_CURRENT_NODEJS = " \
 #LuneOS uses it's own settings app
 VIRTUAL-RUNTIME_settingsapp ?= "org.webosports.app.settings"
 
+# Web Speech API support for the browser. Chromium dlopens libspeechd.so.2 and talks to the
+# speech-dispatcher daemon; without this, speechSynthesis exists but has no voices and pages that
+# speak stay silent. Set to "" in a distro/local conf to drop it (it pulls in espeak and portaudio).
+VIRTUAL-RUNTIME_speech_synthesis ?= "speech-dispatcher"
+
 # Atlas is the default browser (VIRTUAL-RUNTIME_com.webos.app.browser) and is also listed below, so it
 # ships whichever browser is default. enactbrowser stays installed because run_browser_shell loads its
 # pdf.js as a Chromium extension for EVERY browsershell app — drop that package and Atlas loses
@@ -46,6 +51,8 @@ RDEPENDS:${PN} = " \
   org.webosports.app.preware \
   org.webosports.service.ipkg \
   com.webos.app.enactbrowser \
+  \
+  ${VIRTUAL-RUNTIME_speech_synthesis} \
   \
   org.webosports.app.atlas \
   org.webosports.app.calculator \
