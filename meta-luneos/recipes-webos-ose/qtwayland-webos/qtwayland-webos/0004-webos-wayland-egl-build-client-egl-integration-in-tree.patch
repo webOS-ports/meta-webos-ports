@@ -1,0 +1,89 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: LuneOS / webOS Ports <team@webos-ports.org>
+Date: Thu, 13 Aug 2026 00:00:00 +0000
+Subject: [PATCH] webos-wayland-egl: build the client EGL integration in-tree
+
+  Project ERROR: Unknown module(s) in QT:
+  wayland_egl_client_hw_integration-private
+
+Qt 6.10 moved the QtWayland client into qtbase, and in doing so stopped
+publishing the client-side EGL hardware integration as a private module.
+qtbase 6.12 still has the sources, at
+
+  src/plugins/platforms/wayland/plugins/hardwareintegration/wayland-egl/
+
+but builds them as QWaylandEglClientBufferPlugin only: no installed headers,
+no exported symbols. This plugin subclasses QWaylandEglWindow and
+QWaylandEglClientBufferIntegration, so it needs the types rather than the
+plugin.
+
+Compile those sources into this plugin instead of patching qtbase, which
+meta-qt6 would have to carry forward across every Qt upgrade. They live in
+qt-wayland-egl-client/ together with a small
+QtWaylandEglClientHwIntegration/private/ tree of forwarding headers, so the
+existing includes in this plugin's own sources keep working unchanged and no
+webOS code has to be touched.
+
+opengl-private replaces the removed module in QT: qtbase links the same
+sources against Qt::OpenGLPrivate. QT_EGL_NO_X11 has to be set explicitly for
+the same reason - it used to come with the module, and without it QtGui's
+qt_egl_p.h defines USE_X11 and eglplatform.h demands <X11/Xlib.h>.
+
+Upstream-Status: Inappropriate [depends on files imported from qtbase]
+---
+--- a/src/plugins/platforms/webos-wayland-egl/webos-wayland-egl.pro
++++ b/src/plugins/platforms/webos-wayland-egl/webos-wayland-egl.pro
+@@ -19,11 +19,31 @@
+ 
+ QT += waylandclient-private
+ versionAtLeast(QT_VERSION, 6.0.0) {
+-    QT += wl_shell_integration-private wayland_egl_client_hw_integration-private
++    # wayland_egl_client_hw_integration-private is gone: Qt 6.10 moved the
++    # QtWayland client into qtbase and now builds the client-side EGL
++    # integration as a plugin only, publishing no module. Its sources are
++    # compiled into this plugin instead - see qt-wayland-egl-client/.
++    QT += wl_shell_integration-private opengl-private
+ } else {
+     QT += egl_support-private
+ }
+ 
++# qt-wayland-egl-client holds the imported qtbase sources; the directory above
++# it carries a QtWaylandEglClientHwIntegration/private/ tree of forwarding
++# headers so the existing includes in this plugin keep resolving unchanged.
++INCLUDEPATH += $$PWD/qt-wayland-egl-client
++
++# QtGui's qt_egl_p.h defines USE_X11 unless QT_EGL_NO_X11 is set, and
++# eglplatform.h then pulls in <X11/Xlib.h>, which LuneOS does not ship:
++#   EGL/eglplatform.h:115:10: fatal error: X11/Xlib.h: No such file or directory
++# The define used to arrive with wayland_egl_client_hw_integration-private;
++# set it here now that the module is gone.
++DEFINES += QT_EGL_NO_X11
++
++# qtbase links these sources against Wayland::Egl; without it the imported
++# code leaves wl_egl_window_create/destroy/resize/get_attached_size undefined.
++LIBS += -lwayland-egl
++
+ qtConfig(xkbcommon) {
+     QMAKE_USE_PRIVATE += xkbcommon
+ }
+@@ -37,6 +57,9 @@
+     webos-wayland-egl.json
+ 
+ SOURCES += \
++    qt-wayland-egl-client/qwaylandeglclientbufferintegration.cpp \
++    qt-wayland-egl-client/qwaylandeglwindow.cpp \
++    qt-wayland-egl-client/qwaylandglcontext.cpp \
+     main.cpp \
+     webosintegration.cpp \
+     webosplatformwindow.cpp \
+@@ -46,6 +69,10 @@
+     webosscreen.cpp
+ 
+ HEADERS += \
++    qt-wayland-egl-client/qwaylandeglclientbufferintegration_p.h \
++    qt-wayland-egl-client/qwaylandeglinclude_p.h \
++    qt-wayland-egl-client/qwaylandeglwindow_p.h \
++    qt-wayland-egl-client/qwaylandglcontext_p.h \
+     weboseglplatformintegration.h \
+     webosintegration_p.h \
+     webosplatformwindow_p.h \
