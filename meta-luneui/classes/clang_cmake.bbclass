@@ -12,15 +12,15 @@ LIBCBE_DIR = "${libdir}/cbe"
 
 CLANG_DEPENDENCY_SUFFIX = "-clang"
 
+# --ld-path, not -fuse-ld: clang used to accept an absolute path in -fuse-ld=,
+# but now takes only a linker *name* there and rejects a path outright:
+#   clang++: error: invalid linker name in argument
+#   '-fuse-ld=.../recipe-sysroot-native/usr/bin/ld.lld'
+# --ld-path= is the spelling for pointing at a specific linker binary.
 TOOLCHAIN_OPTIONS = "\
     --sysroot=${STAGING_DIR_TARGET} \
     --target=${TARGET_SYS} \
     -stdlib=libc++ \
-    # --ld-path, not -fuse-ld: clang used to accept an absolute path in
-    # -fuse-ld=, but now takes only a linker *name* there and rejects a path:
-    #   clang++: error: invalid linker name in argument
-    #   '-fuse-ld=.../recipe-sysroot-native/usr/bin/ld.lld'
-    # --ld-path= is the spelling for pointing at a specific binary.
     --ld-path=${STAGING_BINDIR_NATIVE}/ld.lld \
     -nostdinc++ \
     -isystem ${STAGING_INCDIR}/c++/v1/ \
