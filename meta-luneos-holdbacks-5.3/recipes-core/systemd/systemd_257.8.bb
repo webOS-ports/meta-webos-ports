@@ -412,7 +412,14 @@ python populate_packages:prepend (){
 }
 PACKAGES_DYNAMIC += "^lib(udev|systemd|nss).*"
 
-PACKAGE_BEFORE_PN = "\
+# wrynose changed bash-completion.bbclass from
+#   PACKAGES += "${PN}-bash-completion"
+# to
+#   PACKAGE_BEFORE_PN += "${PN}-bash-completion"
+# An absolute assignment here therefore wipes the package the class adds, and
+# the completions end up installed but unpackaged. oe-core's own 259.5 recipe
+# uses += for exactly this reason.
+PACKAGE_BEFORE_PN += "\
     ${PN}-analyze \
     ${PN}-binfmt \
     ${PN}-container \

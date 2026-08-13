@@ -19,6 +19,7 @@ inherit autotools gettext pkgconfig python3-dir python3native
 SRC_URI = " \
     http://downloads.sourceforge.net/${BPN}/${BP}.tar.gz \
     file://0001-configure.ac-disable-help2man.patch \
+    file://0001-presageDemo-pass-a-format-string-to-mvprintw-mvwprin.patch \
     file://0002-iso8859_1.h-Fix-build-with-gcc-6.patch \
     file://0003-predictors-Fix-build-with-gcc-7.patch \
     file://0004-Fix-build-with-gcc-11.patch \
