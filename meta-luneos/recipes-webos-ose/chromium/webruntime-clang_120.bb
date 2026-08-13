@@ -46,6 +46,11 @@ DEPENDS += "clang-native"
 GN_ARGS += "clang_base_path=\"${STAGING_DIR_NATIVE}${prefix}\""
 GN_ARGS += "clang_use_chrome_plugins=false"
 
+# clang 22 removed __builtin_ia32_vcvtph2ps256, which skcms uses for its F16C
+# half-to-float path. Only that one builtin went - vcvtps2ph256, roundps256 and
+# the gather builtins were all checked against clang 22 and still compile.
+SRC_URI += "file://0001-skcms-use-_mm256_cvtph_ps-for-clang-22.patch"
+
 # Don't use gold even when selected by default with ld-is-gold in DISTRO_FEATURES
 # because liblttng_provider is built with default host linker (hosttools/ld.gold)
 # and build fails because use_lld added --color-diagnostic which isn't recognized
