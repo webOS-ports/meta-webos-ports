@@ -15,7 +15,7 @@ DEPENDS = "libopus alsa-lib openssl"
 # not a prpl, so none of that file's purple-2 packaging applies), but kept on the same SRCREV so a
 # bump moves the engine and the plugin together.
 SRC_URI = "git://github.com/Herrie82/webos-synergy-revival.git;branch=herrie/telegram-tdlib-1.8.66;protocol=https;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX}"
-SRCREV = "23e8193c5ff9c83a7a9f275af2947d868d3d2ce2"
+SRCREV = "8a37e0cf8c8462d7ba18c5aa2208af56845c4f18"
 
 PV = "1.0+git"
 

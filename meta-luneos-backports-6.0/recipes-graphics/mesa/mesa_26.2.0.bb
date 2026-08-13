@@ -23,7 +23,10 @@ require mesa.inc
 # stop applying.
 SRCREV = "9f0a761020bca92f2b07156a0621e5360cb8eca5"
 
-SRC_URI = "git://gitlab.freedesktop.org/mesa/mesa.git;protocol=https;branch=26.2"
+SRC_URI = "git://gitlab.freedesktop.org/mesa/mesa.git;protocol=https;branch=26.2 \
+           file://0001-gallivm-check-ExecutionEngine-create-for-NULL-before-.patch \
+           file://0002-gallivm-handle-a-failed-execution-engine-instead-of-a.patch \
+"
 
 PV = "26.2.0+git"
 

@@ -6,7 +6,12 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 PV = "1.0-128.2+git"
-SRCREV = "e27b5feff9a5ff8afde8cd6273bc9494d04d0b13"
+SRCREV = "ca842c0d0c4154cd5de9ed12fa691b26c09fc114"
+
+# herrie/params, not the class default of webOS-ports/master: the windowParams
+# precedence fix (URL's enyoWindowParams before PalmSystem.launchParams, which WAM
+# populates with app-instance data and so is always truthy) lives on that branch.
+WEBOS_GIT_BRANCH = ";branch=herrie/params"
 
 inherit webos_ports_fork_repo
 inherit webos_filesystem_paths

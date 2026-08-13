@@ -15,7 +15,7 @@ DEPENDS += "serviceinstaller"
 RDEPENDS:${PN} += "sleepd com.webos.service.battery"
 
 PV = "3.0.0-4+git"
-SRCREV = "c4f28a11e68cf2c444bd0557041f039a33065449"
+SRCREV = "04862a3de892a57d984ccdee2bf102954ba1da28"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 
@@ -28,8 +28,7 @@ inherit pkgconfig
 
 LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=herrie/memleaks3"
 # Configure startup applications
 LUNEOS_BOOT_APPS ??= "org.webosports.app.phone;com.palm.app.email;com.palm.app.calendar;"
 

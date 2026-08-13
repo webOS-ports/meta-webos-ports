@@ -48,6 +48,23 @@ do_install() {
     rm -rf ${D}${webos_applicationsdir}/com.palm.app.contacts
 }
 
+# The synergy account validators (WhatsApp, Telegram, Discord, Signal...) call
+# com.palm.imlibpurple/startQRLogin, getAuthChallenge and submitAuthInput. Their validator.html
+# runs inside THIS app's web context, so those calls go out as com.palm.app.accounts-<pid> and are
+# checked against this app's groups -- the validator apps' own requiredPermissions never apply.
+# Upstream's appinfo.json predates the QR flow and grants imaccountvalidator.operation but not
+# imlibpurple-service.operation, so sign-in fails with
+#     "Not permitted to send to com.palm.imlibpurple."
+#
+# webos_app's do_configure_security reads appinfo.json after do_install, so amending it here is
+# what lands in the generated client-permissions entry.
+do_install:append() {
+    appinfo=${D}${webos_applicationsdir}/com.palm.app.accounts/appinfo.json
+    if [ -f $appinfo ] && ! grep -q "imlibpurple-service.operation" $appinfo; then
+        sed -i 's/"requiredPermissions": \[/"requiredPermissions": ["imlibpurple-service.operation", /' $appinfo
+    fi
+}
+
 FILES:${PN} += "${webos_applicationsdir} ${webos_sysconfdir}"
 
 RDEPENDS:${PN} = "bash"

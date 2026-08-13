@@ -1,0 +1,67 @@
+From: LuneOS <team@webos-ports.org>
+Date: Thu, 13 Aug 2026 00:00:00 +0200
+Subject: [PATCH] gallivm: handle a failed execution engine instead of asserting
+
+gallivm_compile_module() reacted to init_gallivm_engine() failing with
+assert(0), and gallivm_jit_function() guarded its use of the engine with
+assert(gallivm->compiled) / assert(gallivm->engine). Mesa is built with NDEBUG,
+so all of those are compiled out and the failure is not handled at all:
+execution fell through to
+
+  lp_passmgr_run(..., LLVMGetExecutionEngineTargetMachine(gallivm->engine), ...)
+
+with a NULL engine, and later to LLVMGetPointerToGlobal() on the same NULL.
+
+Reachable whenever MCJIT creation fails - for instance running llvmpipe under
+qemu-arm user-mode emulation, where LLVM cannot build an execution engine for
+the emulated target:
+
+  signal : 11 SIGSEGV (bad memory access)
+  si_addr: 0x00000000
+  r0     : 0x00000000
+  symbol : LLVMGetExecutionEngineTargetMachine
+
+Report the failure and leave gallivm->compiled at zero so gallivm_jit_function()
+returns NULL rather than dereferencing the engine. This does not make llvmpipe
+work where the JIT cannot be created - callers still have no fallback - but the
+failure becomes a diagnosable error instead of a segfault in release builds.
+
+Upstream-Status: Pending
+---
+diff --git a/src/gallium/auxiliary/gallivm/lp_bld_init.c b/src/gallium/auxiliary/gallivm/lp_bld_init.c
+index f5b6110f912..6e52e3a4cb6 100644
+--- a/src/gallium/auxiliary/gallivm/lp_bld_init.c
++++ b/src/gallium/auxiliary/gallivm/lp_bld_init.c
+@@ -412,9 +412,15 @@ gallivm_compile_module(struct gallivm_state *gallivm)
+    LLVMSetDataLayout(gallivm->module, "");
+    assert(!gallivm->engine);
+    if (!init_gallivm_engine(gallivm)) {
+-      assert(0);
++      /* Not an assert: builds define NDEBUG, so asserting here left the
++       * failure completely unhandled and the NULL engine was used a few lines
++       * below in LLVMGetExecutionEngineTargetMachine().  Leave gallivm->compiled
++       * at zero so gallivm_jit_function() refuses to hand out code.
++       */
++      _debug_printf("gallivm: failed to create an LLVM execution engine; "
++                    "cannot JIT shaders\n");
++      return;
+    }
+-   assert(gallivm->engine);
+ 
+    if (gallivm->cache && gallivm->cache->data_size) {
+       goto skip_cached;
+@@ -512,8 +518,12 @@ gallivm_jit_function(struct gallivm_state *gallivm,
+    func_pointer jit_func;
+    int64_t time_begin = 0;
+ 
+-   assert(gallivm->compiled);
+-   assert(gallivm->engine);
++   /* Same reasoning as in gallivm_compile_module(): these were asserts only,
++    * which NDEBUG removes, so a failed engine reached LLVMGetPointerToGlobal().
++    */
++   if (!gallivm->compiled || !gallivm->engine) {
++      return NULL;
++   }
+ 
+    if (gallivm_debug & GALLIVM_DEBUG_PERF)
+       time_begin = os_time_get();

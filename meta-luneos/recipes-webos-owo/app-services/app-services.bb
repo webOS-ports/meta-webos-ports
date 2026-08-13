@@ -6,7 +6,16 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 PV = "3.0.1-5+git"
-SRCREV = "ccdde9644c25907c1ca643df57dd6c4701f30af2"
+# TEMPORARY: built from the fork while the webOS-ports PR is pending. Revert all three lines
+# once it merges, leaving a plain SRCREV bump.
+#
+# herrie/synergy-on-upstream is branched from webOS-ports/webOS-OSE at ccdde96 -- NOT from the
+# fork's master, which forked before the Enhanced ACG migration and is 44 commits / 94k deletions
+# behind. Building master would drop the ACG groups files and the imlibpurple-service.operation
+# perm, i.e. undo the LS2 work this image depends on.
+WEBOS_PORTS_GIT_REPO = "git://github.com/Herrie82"
+WEBOS_GIT_PARAM_BRANCH = "herrie/synergy-on-upstream"
+SRCREV = "91388af546546b3434da28a40fe8fd6540a152a8"
 
 inherit webos_ports_ose_repo
 inherit webos_filesystem_paths

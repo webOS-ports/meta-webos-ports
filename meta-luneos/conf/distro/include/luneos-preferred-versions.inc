@@ -46,6 +46,15 @@ PREFERRED_VERSION_go                          = "${GOVERSION}"
 PREFERRED_VERSION_go-native                   = "${GOVERSION}"
 PREFERRED_VERSION_go-binary-native            = "${GOVERSION}"
 PREFERRED_VERSION_go-runtime                  = "${GOVERSION}"
-PREFERRED_VERSION_go-cross-${TARGET_ARCH}     = "${GOVERSION}"
+# No go-cross line here. Its PN is go-cross-${TUNE_PKGARCH} (go-cross.inc), not
+# ${TARGET_ARCH}, so a TARGET_ARCH-keyed pin does nothing on 32-bit ARM, where
+# the two differ (arm vs armv7at2hf-neon). Where they are equal - aarch64, x86-64 -
+# it merely duplicates the key oe-core already sets, and bitbake says so:
+#   Variable key PREFERRED_VERSION_go-cross-${TUNE_PKGARCH} (${GOVERSION})
+#   replaces original key PREFERRED_VERSION_go-cross-x86_64 (${GOVERSION})
+# tcmode-default.inc has PREFERRED_VERSION_go-cross-${TUNE_PKGARCH} ?= "${GOVERSION}",
+# which picks up the GOVERSION set above, so go-cross is pinned correctly without it.
+# (go-crosssdk is the opposite case: its PN really is keyed on SDK_SYS, so that
+# line below is needed - oe-core keys its own on SDK_ARCH and misses.)
 PREFERRED_VERSION_go-crosssdk-${SDK_SYS}      = "${GOVERSION}"
 PREFERRED_VERSION_go-cross-canadian-${TRANSLATED_TARGET_ARCH} = "${GOVERSION}"
