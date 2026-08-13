@@ -75,16 +75,20 @@ ALLOW_EMPTY:${PN} = "1"
 # in case something else ever wants it.
 BBCLASSEXTEND = "native nativesdk"
 
-# CMake bakes the absolute sysroot lib path into the generated .pc files:
+# CMake bakes absolute sysroot paths into both the generated pkg-config files
+# and the exported target files:
 #   Libs.private: -L"${RECIPE_SYSROOT}/usr/lib" -lcrypto -ldl ...
+#   INTERFACE_LINK_LIBRARIES "${RECIPE_SYSROOT}/usr/lib/libcrypto.so;..."
 # which buildpaths QA rejects:
 #   File /usr/lib/pkgconfig/tdutils.pc in package tdlib-dev contains
 #   reference to TMPDIR [buildpaths]
-# Strip the sysroot prefix so the -L points at the on-target /usr/lib it
-# should have named all along.
+#   File /usr/lib/cmake/Td/TdStaticTargets.cmake ... [buildpaths]
+# Strip the sysroot prefix so both name the on-target paths they should have
+# named all along. Listed explicitly rather than sweeping ${D}: a recursive
+# grep+sed would also match the installed binaries.
 do_install:append() {
-    for pc in ${D}${libdir}/pkgconfig/*.pc; do
-        [ -e "$pc" ] || continue
-        sed -i -e 's|${RECIPE_SYSROOT}||g' "$pc"
+    for f in ${D}${libdir}/pkgconfig/*.pc ${D}${libdir}/cmake/Td/*.cmake; do
+        [ -e "$f" ] || continue
+        sed -i -e 's|${RECIPE_SYSROOT}||g' "$f"
     done
 }
