@@ -29,7 +29,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-webOS.cmake-update-cmake_minimum_required-to-3.5.0.patch \
     file://0002-webOS.cmake-do-not-read-the-LOCATION-target-property.patch \
 "
-S = "${WORKDIR}/git"
 
 do_compile() {
      :
