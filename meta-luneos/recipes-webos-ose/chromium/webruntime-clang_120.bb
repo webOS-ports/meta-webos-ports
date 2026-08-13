@@ -62,6 +62,14 @@ SRC_URI += "file://0001-skcms-use-_mm256_cvtph_ps-for-clang-22.patch"
 # base/trace_event/trace_event.h - most of base/ - fails without this.
 SRC_URI += "file://0002-perfetto-drop-template-keyword-without-arg-list.patch"
 
+# Further clang-22 fallout in bundled third_party code. All four are
+# pre-existing defects that older toolchains happened to accept, not wrynose
+# issues; see each patch header.
+SRC_URI += "file://0003-sandbox-include-signal.h-before-defining-SYS_SECCOMP.patch"
+SRC_URI += "file://0004-tflite-wrap-std-abs-in-lambdas.patch"
+SRC_URI += "file://0005-quiche-call-Size-not-size.patch"
+SRC_URI += "file://0006-webrtc-drop-lifetimebound-on-a-void-setter.patch"
+
 # Don't use gold even when selected by default with ld-is-gold in DISTRO_FEATURES
 # because liblttng_provider is built with default host linker (hosttools/ld.gold)
 # and build fails because use_lld added --color-diagnostic which isn't recognized
@@ -92,7 +100,14 @@ INCLUDE_PATH_LIBCXX += " \
 # http://gecko.lge.com:8000/Errors/Details/527999
 ARM_INSTRUCTION_SET = "arm"
 
-CLANG_CXXFLAGS = ""
+# clang gained -Wc++11-narrowing-const-reference and makes it an error. Chromium
+# 120 predates it and narrows through const references in aggregate
+# initialisers in a number of unrelated places (webrtc stats collectors, cc
+# layer code, ...), all deliberate and all long-standing. Demote it to a
+# warning for the whole build rather than sprinkling pragmas through
+# third_party: it is one flag instead of one patch per file, and it does not
+# hide anything we would otherwise act on in code we do not maintain.
+CLANG_CXXFLAGS = "-Wno-error=c++11-narrowing-const-reference"
 
 GN_ARGS += "${@bb.utils.contains('WEBRUNTIME_CLANG_STDLIB', '1', 'clang_use_stdlib=true clang_extra_cxxflags=\\\"${INCLUDE_PATH_STDLIB} ${TARGET_CC_ARCH} ${CLANG_CXXFLAGS}\\\"', 'clang_use_stdlib=false clang_extra_cxxflags=\\\"${INCLUDE_PATH_LIBCXX} ${TARGET_CC_ARCH} ${CLANG_CXXFLAGS}\\\"', d)}"
 
