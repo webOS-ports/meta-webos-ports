@@ -17,7 +17,18 @@ inherit native
 
 WEBOS_CMAKE_DEPENDS = ""
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+# webOS OSE is dormant upstream (cmake-modules-webos has not changed since
+# 2023-12), so the CMake-4 port is ours. 0001 stops webOS.cmake declaring
+# compatibility with CMake < 3.5; 0002 stops webos_build_library() reading the
+# LOCATION target property, which CMP0026 turned into a hard error in CMake 4
+# and which CMAKE_POLICY_VERSION_MINIMUM cannot work around -- it sets the
+# policy version to 3.5, at which CMP0026 is already NEW. Without 0002 every
+# one of the 29 components that build a library via webos_build_library()
+# fails do_configure.
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+    file://0001-webOS.cmake-update-cmake_minimum_required-to-3.5.0.patch \
+    file://0002-webOS.cmake-do-not-read-the-LOCATION-target-property.patch \
+"
 S = "${WORKDIR}/git"
 
 do_compile() {
