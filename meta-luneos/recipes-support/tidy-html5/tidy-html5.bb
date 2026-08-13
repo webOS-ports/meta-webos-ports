@@ -27,3 +27,8 @@ FILES:${PN} = " \
     ${libdir}/libtidy* \
     ${includedir}/*.h \
 "
+
+# Upstream still declares cmake_minimum_required(VERSION < 3.5), which CMake 4
+# rejects. This recipe inherits plain cmake, not webos_cmake, so it needs the
+# flag inline.
+EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"

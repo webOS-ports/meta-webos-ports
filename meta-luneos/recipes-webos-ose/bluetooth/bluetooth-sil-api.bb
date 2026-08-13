@@ -29,3 +29,8 @@ PACKAGES =. "${PN}-tests "
 FILES:${PN}-tests = "${bindir}/bluetooth-sil-tester"
 
 ALLOW_EMPTY:${PN} = "1"
+EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
+
+# CMake 4: @VAR@ is no longer expanded in unquoted arguments (CMP0053),
+# which broke the install() DESTINATIONs in this component.
+SRC_URI += "file://0001-CMakeLists-use-CMake-variable-syntax-instead-of-VAR.patch"

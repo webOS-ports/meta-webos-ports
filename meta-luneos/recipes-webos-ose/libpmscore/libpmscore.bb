@@ -32,3 +32,7 @@ S = "${WORKDIR}/git"
 #                             ^~~~~~
 # ...
 SECURITY_STRINGFORMAT = ""
+
+# CMake 4: @VAR@ is no longer expanded in unquoted arguments (CMP0053),
+# which broke the install() DESTINATIONs in this component.
+SRC_URI += "file://0001-CMakeLists-use-CMake-variable-syntax-instead-of-VAR.patch"
