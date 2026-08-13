@@ -72,7 +72,7 @@ do_install() {
 
     # webos_enactjs_env.bbclass invokes ${STAGING_BINDIR_NATIVE}/enact
     install -d ${D}${bindir}
-    lnr ${D}${nonarch_libdir}/node_modules/${NPM_PKG_NAME}/bin/enact.js ${D}${bindir}/enact
+    ln -rs ${D}${nonarch_libdir}/node_modules/${NPM_PKG_NAME}/bin/enact.js ${D}${bindir}/enact
     chmod +x ${D}${nonarch_libdir}/node_modules/${NPM_PKG_NAME}/bin/enact.js
 }
 

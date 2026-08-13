@@ -49,7 +49,7 @@ do_install() {
 
     # webos_enactjs_env.bbclass invokes ${STAGING_BINDIR_NATIVE}/jsdoc-to-ts
     install -d ${D}${bindir}
-    lnr ${D}${nonarch_libdir}/node_modules/${NPM_PKG_NAME}/bin/jsdoc-to-ts.js ${D}${bindir}/jsdoc-to-ts
+    ln -rs ${D}${nonarch_libdir}/node_modules/${NPM_PKG_NAME}/bin/jsdoc-to-ts.js ${D}${bindir}/jsdoc-to-ts
     chmod +x ${D}${nonarch_libdir}/node_modules/${NPM_PKG_NAME}/bin/jsdoc-to-ts.js
 }
 
