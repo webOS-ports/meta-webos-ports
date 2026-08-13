@@ -108,6 +108,10 @@ SRC_URI:append = " \
     file://9901-Disable-Faux-bolding-in-Qts-FreeType-FontEngine.patch \
 "
 
+# Qt 6.10 moved the QtWayland client from qtwayland into qtbase; this is the
+# qtwayland 0004 patch retargeted at the new path.
+SRC_URI:append = " file://9906-QWaylandDisplay-don-t-ignore-wayland-QT_IM_MODULE.patch;minver=6.10.0"
+
 # FIXME: Patches below can be dropped once all qmake-dependent components are switched to cmake.
 # https://bugreports.qt.io/browse/WEBOSCI-66
 # https://bugreports.qt.io/browse/WEBOSCI-81

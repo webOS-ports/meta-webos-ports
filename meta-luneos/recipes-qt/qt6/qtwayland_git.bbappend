@@ -16,9 +16,12 @@ PATCHTOOL = "git"
 #     file://0005-Revert-Also-use-text-input-if-QT_IM_MODULE-is-empty-.patch;maxver=6.5.3 \
 # "
 
+# From 6.10 the QtWayland client lives in qtbase, so this change moved to
+# meta-luneos/recipes-qt/qt6/qtbase/9906-QWaylandDisplay-*.patch and the
+# patches below are capped at 6.9.
 SRC_URI:append = " \
     file://0004-QWaylandDisplay-don-t-ignore-wayland-QT_IM_MODULE.patch;maxver=6.7.* \
-    file://0004-QWaylandDisplay-don-t-ignore-wayland-QT_IM_MODULE-6.8.x.patch;minver=6.8.0 \
+    file://0004-QWaylandDisplay-don-t-ignore-wayland-QT_IM_MODULE-6.8.x.patch;minver=6.8.0;maxver=6.9.* \
 "
 
 # More options for fine-tuned configuration
