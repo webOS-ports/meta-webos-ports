@@ -30,10 +30,28 @@ WEBOS_NPM_INSTALL_FLAGS ?= "--arch=${WEBOS_NPM_ARCH} --target_arch=${WEBOS_NPM_A
 WEBOS_NODE_BIN ??= "${STAGING_BINDIR_NATIVE}/node"
 
 # for node-gyp
-WEBOS_NODE_VERSION = "20.13.0"
+#
+# This MUST track the nodejs version that meta-oe builds for the image
+# (meta-openembedded/meta-oe/recipes-devtools/nodejs). node-gyp compiles the
+# native modules against these headers, and a native module built against one
+# major version of node cannot be loaded by another: the V8 ABI differs.
+#
+# wrynose moved meta-oe to nodejs 22 while this was still pinned to 20, so every
+# module under /usr/lib/nodejs was built against Node 20's V8 headers and then
+# failed to load in Node 22 with
+#
+#   /usr/lib/nodejs/webos.node: undefined symbol:
+#   _ZN2v812api_internal18GlobalizeReferenceEPNS_8internal7IsolateEPm
+#
+# That kills every JS service (run-js-service exits immediately), which is not
+# obvious from the outside: com.palm.service.accounts never registers, so no
+# local profile is created, /var/luna/preferences/first-use-profile-created is
+# never written, BootManager stays in BOOT_STATE_FIRSTUSE and the device
+# relaunches First Use on every boot with no gesture bar.
+WEBOS_NODE_VERSION = "22.23.1"
 WEBOS_NODE_SRC_URI = "https://nodejs.org/dist/v${WEBOS_NODE_VERSION}/node-v${WEBOS_NODE_VERSION}.tar.xz;name=node"
 WEBOS_NODE_GYP = "node-gyp --arch '${TARGET_ARCH}' --nodedir '${UNPACKDIR}/node-v${WEBOS_NODE_VERSION}'"
-SRC_URI[node.sha256sum] = "11d229fcad7e6e10f450301223c602043f021cda51259ffafc7e55e484b37dc7"
+SRC_URI[node.sha256sum] = "b27385d6845089bdb91285d94b06c2a5cf1c37f8173a3c4e10824cc1ffadeaba"
 
 do_compile:prepend() {
     # this is needed to use user's gitconfig even after changing the HOME directory bellow
