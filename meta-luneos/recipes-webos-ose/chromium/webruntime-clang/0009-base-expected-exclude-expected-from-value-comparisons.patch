@@ -1,0 +1,77 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: LuneOS / webOS Ports <team@webos-ports.org>
+Date: Thu, 14 Aug 2026 00:00:00 +0000
+Subject: [PATCH] base: keep expected out of its own value-comparison overloads
+
+  error: use of overloaded operator '==' is ambiguous (with operand types
+  'const base::expected<GURL, std::string>' and ...)
+
+The value-comparison operators take an unconstrained U, so they also match when
+U is itself an expected, competing with the expected-vs-expected overload.
+C++20's reversed candidates make that latent ambiguity reachable. Add a
+kIsExpected trait and constrain the four generic-U overloads (== and !=, both
+orders); the ok<U> and unexpected<G> overloads are already specific and are
+untouched.
+
+Upstream-Status: Pending
+---
+--- a/src/base/types/expected.h
++++ b/src/base/types/expected.h
+@@ -968,6 +968,23 @@
+   Impl impl_;
+ };
+ 
++namespace internal {
++
++// True when U is itself a base::expected. The value-comparison operators below
++// take an unconstrained U, so without this they also match when U is an
++// expected, and comparing two expecteds becomes ambiguous against the
++// expected-vs-expected overload:
++//   error: use of overloaded operator '==' is ambiguous
++//   (with operand types 'const base::expected<GURL, std::string>' and ...)
++// C++20's reversed candidates make that ambiguity reachable where it was not
++// before.
++template <typename U>
++inline constexpr bool kIsExpected = false;
++template <typename T, typename E, bool IsVoid>
++inline constexpr bool kIsExpected<expected<T, E, IsVoid>> = true;
++
++}  // namespace internal
++
+ // [expected.object.eq], equality operators
+ // [expected.void.eq], equality operators
+ template <typename T, typename E, typename U, typename G, bool IsVoid>
+@@ -986,12 +1003,14 @@
+          (x.has_value() ? equal_values(x, y) : x.error() == y.error());
+ }
+ 
+-template <typename T, typename E, typename U, internal::EnableIfNotVoid<T> = 0>
++template <typename T, typename E, typename U, internal::EnableIfNotVoid<T> = 0,
++          std::enable_if_t<!internal::kIsExpected<U>, int> = 0>
+ constexpr bool operator==(const expected<T, E>& x, const U& v) noexcept {
+   return x.has_value() && x.value() == v;
+ }
+ 
+-template <typename T, typename E, typename U, internal::EnableIfNotVoid<T> = 0>
++template <typename T, typename E, typename U, internal::EnableIfNotVoid<T> = 0,
++          std::enable_if_t<!internal::kIsExpected<U>, int> = 0>
+ constexpr bool operator==(const U& v, const expected<T, E>& x) noexcept {
+   return x == v;
+ }
+@@ -1024,12 +1043,14 @@
+   return !(x == y);
+ }
+ 
+-template <typename T, typename E, typename U, internal::EnableIfNotVoid<T> = 0>
++template <typename T, typename E, typename U, internal::EnableIfNotVoid<T> = 0,
++          std::enable_if_t<!internal::kIsExpected<U>, int> = 0>
+ constexpr bool operator!=(const expected<T, E>& x, const U& v) noexcept {
+   return !(x == v);
+ }
+ 
+-template <typename T, typename E, typename U, internal::EnableIfNotVoid<T> = 0>
++template <typename T, typename E, typename U, internal::EnableIfNotVoid<T> = 0,
++          std::enable_if_t<!internal::kIsExpected<U>, int> = 0>
+ constexpr bool operator!=(const U& v, const expected<T, E>& x) noexcept {
+   return !(v == x);
+ }
