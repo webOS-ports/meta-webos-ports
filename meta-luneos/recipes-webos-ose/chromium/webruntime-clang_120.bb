@@ -70,6 +70,13 @@ SRC_URI += "file://0004-tflite-wrap-std-abs-in-lambdas.patch"
 SRC_URI += "file://0005-quiche-call-Size-not-size.patch"
 SRC_URI += "file://0006-webrtc-drop-lifetimebound-on-a-void-setter.patch"
 
+# Latent defects in Chromium's own code, exposed once a modern clang actually
+# parsed them, plus one genuine toolchain conflict (0010).
+SRC_URI += "file://0007-base-fix-IDMap-Iterator-copy-assignment.patch"
+SRC_URI += "file://0008-blink-drop-template-keyword-without-arg-list.patch"
+SRC_URI += "file://0009-base-expected-exclude-expected-from-value-comparisons.patch"
+SRC_URI += "file://0010-blink-do-not-add-a-second-fallthrough-after-gperf-33.patch"
+
 # Don't use gold even when selected by default with ld-is-gold in DISTRO_FEATURES
 # because liblttng_provider is built with default host linker (hosttools/ld.gold)
 # and build fails because use_lld added --color-diagnostic which isn't recognized
