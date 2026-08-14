@@ -17,10 +17,19 @@ require mesa.inc
 # libqofono's QML plugin being installed off the import path by the qmake->CMake
 # migration, and fixing that brought the UI back with mesa unchanged.
 #
-# NOTE: meta-smartphone/meta-mainline carries mesa_<version>.bbappend with the
-# freedreno A22X patch series for tenderloin (HP TouchPad). It is version-pinned,
-# so it has to be renamed in lockstep with this file or those 15 patches silently
-# stop applying.
+# NOTE: this file must stay named mesa.bb, not mesa_<version>.bb. oe-core dropped
+# the version from its own recipe in wrynose (mesa_24.0.7.bb -> mesa.bb) and every
+# layer renamed its append to mesa.bbappend to match. A versioned recipe here is
+# still built -- this layer outranks oe-core -- but mesa.bbappend then matches
+# oe-core's mesa.bb instead of it, so meta-luneui's PACKAGECONFIG (gallium-llvm,
+# svga, virtio, freedreno) and meta-rockchip's and meta-rpi-luneos's appends all
+# silently stop applying. The emulator then builds with softpipe only and
+# surface-manager dies in initializeHardwareIntegration() with
+# "vmwgfx: driver missing", because the svga gallium driver was never compiled in.
+#
+# meta-smartphone/meta-mainline's mesa.bbappend, which carries the freedreno A22X
+# patch series for tenderloin (HP TouchPad), has to keep the same name as this
+# file or those patches silently stop applying too.
 SRCREV = "9f0a761020bca92f2b07156a0621e5360cb8eca5"
 
 SRC_URI = "git://gitlab.freedesktop.org/mesa/mesa.git;protocol=https;branch=26.2 \
