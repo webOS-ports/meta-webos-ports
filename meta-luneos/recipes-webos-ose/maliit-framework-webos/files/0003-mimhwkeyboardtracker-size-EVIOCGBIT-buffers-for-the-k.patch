@@ -1,0 +1,80 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] mimhwkeyboardtracker: size EVIOCGBIT buffers for the kernel's copy
+
+MaliitServer aborts on startup with a stack smash, so no input method ever
+comes up:
+
+    __stack_chk_fail
+    MImHwKeyboardTrackerPrivate::tryEvdevDevice(char const*)
+    MImHwKeyboardTrackerPrivate::detectEvdev()
+    MImHwKeyboardTracker::MImHwKeyboardTracker()
+
+The length argument of EVIOCGBIT is a size in bytes, not a bit count, and the
+kernel copies the bitmap out in sizeof(long) granularity:
+
+    /* drivers/input/evdev.c */
+    static int bits_to_user(unsigned long *bits, unsigned int maxbit,
+                            unsigned int maxlen, void __user *p, int compat)
+    {
+            int len = BITS_TO_LONGS(maxbit) * sizeof(long);
+            if (len > maxlen)
+                    len = maxlen;
+            return copy_to_user(p, bits, len) ? -EFAULT : len;
+    }
+
+EVIOCGBIT(0, EV_MAX) therefore copies min(BITS_TO_LONGS(EV_MAX) * sizeof(long),
+EV_MAX) = 8 bytes on a 64-bit kernel, and EVIOCGBIT(EV_SW, SW_CNT) copies 8
+bytes as well. Both destinations were BITS2BYTES(EV_MAX) = 4 bytes, so probing
+any evdev node overflowed the stack by 4 bytes. That has always been wrong; it
+only became fatal once the stack protector started catching it.
+
+Round the buffers up to a whole number of longs so they can hold whatever the
+kernel is willing to write. EVIOCGSW(SW_MAX) wrote into an unsigned long array
+that happened to be large enough; give it the same treatment so none of the
+three depends on BITS2BYTES being accidentally generous.
+
+Upstream-Status: Pending
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+---
+--- a/src/mimhwkeyboardtracker.cpp
++++ b/src/mimhwkeyboardtracker.cpp
+@@ -28,6 +28,12 @@
+ 
+ /* bit array ops */
+ #define BITS2BYTES(x) ((((x) - 1) / 8) + 1)
++/* The kernel copies evdev bitmaps out in sizeof(long) granularity (see
++ * bits_to_user() in drivers/input/evdev.c), so a buffer sized to the exact
++ * number of bytes the bits need is not enough: round it up to whole longs. */
++#define EVDEV_BITS_BUFSIZE(x) \
++    ((((BITS2BYTES(x)) + sizeof(long) - 1) / sizeof(long)) * sizeof(long))
++
+ #define TEST_BIT(bit, array) (array[(bit) / 8] & (1 << (bit) % 8))
+ 
+ MImHwKeyboardTrackerPrivate::MImHwKeyboardTrackerPrivate(MImHwKeyboardTracker *q_ptr) :
+@@ -114,7 +120,7 @@
+ void MImHwKeyboardTrackerPrivate::tryEvdevDevice(const char *device)
+ {
+     QFile *qfile = new QFile(this);
+-    unsigned char evbits[BITS2BYTES(EV_MAX)];
++    unsigned char evbits[EVDEV_BITS_BUFSIZE(EV_MAX)];
+     int fd;
+ 
+     qfile->setFileName(device);
+@@ -140,7 +146,7 @@
+         return;
+     }
+ 
+-    unsigned char swbit[BITS2BYTES(EV_MAX)];
++    unsigned char swbit[EVDEV_BITS_BUFSIZE(EV_MAX)];
+     if (ioctl(fd, EVIOCGBIT(EV_SW, SW_CNT), swbit) < 0) {
+         delete qfile;
+         return;
+@@ -161,7 +167,7 @@
+     present = true;
+ 
+     // Initialise initial tablet mode state
+-    unsigned long state[BITS2BYTES(SW_MAX)];
++    unsigned char state[EVDEV_BITS_BUFSIZE(SW_MAX)];
+     if (ioctl(fd, EVIOCGSW(SW_MAX), state) < 0)
+         return;
+ 
