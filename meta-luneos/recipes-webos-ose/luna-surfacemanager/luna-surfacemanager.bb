@@ -44,6 +44,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0015-NotificationService.qml-let-the-toast-model-remove-t.patch \
     file://0016-Advertise-xdg_wm_base-so-modern-toolkits-can-map-wind.patch \
     file://0017-com.webos.surfacemanager.groups.json-keep-the-array-.patch \
+    file://0018-weboscompositor-include-what-qt-612-no-longer-pulls-in.patch \
 "
 
 inherit webos_systemd
