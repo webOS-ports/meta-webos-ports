@@ -84,3 +84,15 @@ do_configure:prepend() {
 do_compile:prepend() {
   ${EXPORT_WEBOS_QMAKE_MACHINE}
 }
+
+# qt6-qmake.bbclass rewrites STAGING_DIR_NATIVE and STAGING_DIR_HOST out of the
+# generated .pri/.prl files, but QMAKE_PRL_BUILD_DIR records ${B} - the build
+# directory - which matches neither, so it survives into the -dev package:
+#   File /usr/lib/libWebOSCoreCompositor.prl in package luna-surfacemanager-dev
+#   contains reference to TMPDIR [buildpaths]
+# The value is build-time bookkeeping that means nothing on target, so drop the
+# line. Done here rather than in meta-qt6 so we are not carrying a change to
+# that layer, and it covers every recipe that inherits this class.
+do_install:append() {
+    find ${D} -name "*.prl" -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d' {} \;
+}

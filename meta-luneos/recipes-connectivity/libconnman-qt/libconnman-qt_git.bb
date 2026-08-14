@@ -34,3 +34,12 @@ FILES:${PN}-dev += " \
 # ERROR: libconnman-qt-1.3.3+git-r0 do_package_qa: QA Issue: File /usr/lib/libconnman-qt6.prl in package libconnman-qt-dev contains reference to TMPDIR [buildpaths]
 ERROR_QA:remove = "buildpaths"
 WARN_QA:append = " buildpaths"
+
+# Same .prl issue webos_qmake6.bbclass handles for the qmake6 recipes: qmake
+# records QMAKE_PRL_BUILD_DIR = ${B}, which meta-qt6's sanitising pass does not
+# cover because it only rewrites the staging directories, so the build path
+# ships in the -dev package and trips buildpaths QA. This recipe does not
+# inherit that class, so drop the line here too.
+do_install:append() {
+    find ${D} -name "*.prl" -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d' {} \;
+}
