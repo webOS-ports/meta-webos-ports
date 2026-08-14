@@ -43,6 +43,7 @@ SSTATE_SCAN_FILES += "*.prf *.pc"
 SRC_URI += " \
     file://0001-Correctly-detect-wayland-platform.patch \
     file://0002-Give-plugins-the-character-for-every-printable-keysym.patch \
+    file://0003-mimhwkeyboardtracker-size-EVIOCGBIT-buffers-for-the-k.patch \
     file://maliit-server.conf \
     file://maliit-server.service \
     file://maliit-server@.service \
