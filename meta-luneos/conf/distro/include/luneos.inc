@@ -80,14 +80,18 @@ WEBOS_DEFAULT_EXTRA_RRECOMMENDS = ""
 DISTRO_EXTRA_RDEPENDS += " ${WEBOS_DEFAULT_EXTRA_RDEPENDS}"
 DISTRO_EXTRA_RRECOMMENDS += " ${WEBOS_DEFAULT_EXTRA_RRECOMMENDS}"
 
-DISTRO_EXTRA_RDEPENDS:append:qemuall = " kernel-module-vboxvideo kernel-module-vboxguest kernel-module-uvesafb kernel-module-virtio-gpu kernel-module-vmwgfx"
+DISTRO_EXTRA_RDEPENDS:append:qemuall = " kernel-module-vboxvideo kernel-module-vboxguest kernel-module-uvesafb kernel-module-virtio-gpu"
 
 MACHINE_ESSENTIAL_EXTRA_RDEPENDS:remove:qemuall = "v86d"
 
-KERNEL_MODULE_AUTOLOAD:append:qemux86 = " vmwgfx vboxguest vboxsf"
-KERNEL_MODULE_PROBECONF:append:qemux86 = " vmwgfx"
-KERNEL_MODULE_AUTOLOAD:append:qemux86-64 = " vmwgfx vboxguest vboxsf"
-KERNEL_MODULE_PROBECONF:append:qemux86-64 = " vmwgfx"
+# vmwgfx is built into the kernel on qemux86*, not built as a module: oe-core's
+# linux-yocto adds features/drm-bochs/drm-bochs.scc to KERNEL_FEATURES, whose
+# drm-bochs-64.cfg sets CONFIG_DRM_VMWGFX=y and so overrides the =m we ask for
+# in recipes-kernel/linux/linux-yocto/video.cfg. The driver is therefore present
+# and binds at boot, but there is no kernel-module-vmwgfx package to depend on
+# and nothing to autoload.
+KERNEL_MODULE_AUTOLOAD:append:qemux86 = " vboxguest vboxsf"
+KERNEL_MODULE_AUTOLOAD:append:qemux86-64 = " vboxguest vboxsf"
 
 # Prevent vboxvideo from loading, it conflicts with vmwgfx
 KERNEL_MODULE_PROBECONF:append:qemux86 = " vboxvideo"
