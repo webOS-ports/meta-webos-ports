@@ -24,6 +24,12 @@ SRC_URI:append = " \
     file://0004-QWaylandDisplay-don-t-ignore-wayland-QT_IM_MODULE-6.8.x.patch;minver=6.8.0;maxver=6.9.* \
 "
 
+# The compositor half of the libhybris server-buffer integration still expects
+# QOpenGLTexture in QtGui, where it has not lived since Qt 6.0. Only halium
+# machines build it, so upstream never sees it break. The client half has the
+# same problem plus a protocol one, patched in qtbase as 9907.
+SRC_URI:append = " file://0006-libhybris-egl-server-take-QOpenGLTexture-from-QtOpenG.patch"
+
 # More options for fine-tuned configuration
 PACKAGECONFIG[brcm] = "-DFEATURE_wayland_brcm=ON,-DFEATURE_wayland_brcm=OFF,"
 PACKAGECONFIG[drm-egl-server-buffer] = "-DFEATURE_wayland_drm_egl_server_buffer=ON,-DFEATURE_wayland_drm_egl_server_buffer=OFF,"

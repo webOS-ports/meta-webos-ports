@@ -18,6 +18,7 @@ COMPATIBLE_MACHINE = "^halium$"
 
 SRC_URI = " \
     git://github.com/mer-hybris/qt5-qpa-hwcomposer-plugin.git;branch=master;protocol=https \
+    file://0001-Follow-Qt-s-qgenericunixtheme_p.h-rename.patch \
 "
 S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/hwcomposer"
 
