@@ -116,6 +116,11 @@ SRC_URI:append = " \
 # qtwayland 0004 patch retargeted at the new path.
 SRC_URI:append = " file://9906-QWaylandDisplay-don-t-ignore-wayland-QT_IM_MODULE.patch;minver=6.10.0"
 
+# Same move: the libhybris server-buffer plugin came into qtbase with the
+# QtWayland client and still expects QOpenGLTexture in QtGui, where it has not
+# lived since Qt 6.0. Only halium machines build it, so upstream never sees it.
+SRC_URI:append = " file://9907-libhybris-egl-server-take-QOpenGLTexture-from-QtOpenG.patch;minver=6.10.0"
+
 # FIXME: Patches below can be dropped once all qmake-dependent components are switched to cmake.
 # https://bugreports.qt.io/browse/WEBOSCI-66
 # https://bugreports.qt.io/browse/WEBOSCI-81
