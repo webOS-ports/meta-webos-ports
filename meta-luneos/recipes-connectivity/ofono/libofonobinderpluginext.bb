@@ -13,7 +13,7 @@ SRC_URI = "git://github.com/mer-hybris/ofono-binder-plugin.git;branch=master;pro
 S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/lib"
 
 PV = "1.1.28"
-SRCREV = "05f4cee30d1d8fd3e5c3afc4c09e06b8b54356ca"
+SRCREV = "7e9d3d57a46e1ad62b6082203d6c0f62554fe08c"
 
 CFLAGS += "--sysroot=${RECIPE_SYSROOT} "
 LDFLAGS += "--sysroot=${RECIPE_SYSROOT} "
