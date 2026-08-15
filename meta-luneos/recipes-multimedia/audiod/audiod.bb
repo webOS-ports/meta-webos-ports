@@ -52,6 +52,9 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0002-Let-audiod-claim-the-legacy-com.palm.audio-bus-names.patch \
     file://0003-palmLegacyManager-route-calls-via-PulseAudio-card-pr.patch \
     file://0004-PulseAudioLink-tolerate-a-libpulse-simple-without-pa.patch \
+    file://0005-moduleManager-fix-iterator-invalidation-in-removeModules.patch \
+    file://0006-PulseAudioLink-report-play_sample-failures.patch \
+    file://0007-systemsounds-fall-back-to-samples-without-the-ondemand-suffix.patch \
 "
 S = "${WORKDIR}/git"
 
