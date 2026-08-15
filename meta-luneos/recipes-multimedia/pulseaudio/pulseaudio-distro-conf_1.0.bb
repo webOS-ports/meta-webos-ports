@@ -8,13 +8,19 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 # PULSE_SCRIPT=/etc/pulse/webos-system.pa, but nothing ever read that variable --
 # pulseaudio.service's ExecStart names the script directly now, so the file had no
 # remaining content or purpose.
+# webos-virtual-devices.pa is deliberately not per-machine: the names it declares
+# have to match module-palm-policy's virtualsinkmap[]/virtualsourcemap[], which is
+# the same everywhere, and a missing one aborts pulseaudio rather than degrading.
+# Machine-specific webos-system.pa files include it.
 SRC_URI = " \
     file://webos-system.pa \
+    file://webos-virtual-devices.pa \
 "
 
 do_install() {
     install -d ${D}${sysconfdir}/pulse
     install -m 0644 ${WORKDIR}/webos-system.pa ${D}${sysconfdir}/pulse/
+    install -m 0644 ${WORKDIR}/webos-virtual-devices.pa ${D}${sysconfdir}/pulse/
 }
 
 FILES:${PN} = "${sysconfdir}/pulse"
