@@ -31,9 +31,6 @@ inherit webos_public_repo
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0002-tmpfiles-create-var-cache-xdg-traversable.patch \
 "
-# NB: 0001-CMakeLists.txt-don-t-install-initctl-twice-and-respe.patch sits next
-# to this recipe but has never been listed here, so it is not applied. Left
-# as-is rather than enabled blind.
 
 #EXTRA_OECMAKE += "-DWEBOS_QTTESTABILITY_ENABLED:BOOL=${@ '1' if d.getVar('WEBOS_DISTRO_PRERELEASE') != '' else '0'}"
 
