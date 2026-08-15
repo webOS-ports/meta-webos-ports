@@ -54,6 +54,23 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0004-PulseAudioLink-tolerate-a-libpulse-simple-without-pa.patch \
 "
 
+# Which sound cards audiod looks for. Upstream's CMakeLists picks between an
+# emulator config and files/config/audiod_internal_device_loading_open.json,
+# whose card names are the OSE reference board's - b1, b2, Headphones. Those
+# match nothing on a real device: audiod finds no card, so it creates no sink,
+# so there is no device to route to and the machine is silent until somebody
+# restarts audiod by hand. A machine that names its cards differently drops a
+# replacement in files/<machine>/ and it overwrites the installed one.
+#
+# The card name is the ALSA one from /proc/asound/cards, and the sink names
+# have to be those module-palm-policy knows (see webos-virtual-devices.pa).
+SRC_URI:append:pinetab2 = " file://audiod_internal_device_loading.json"
+
+do_install:append:pinetab2() {
+    install -m 0644 ${UNPACKDIR}/audiod_internal_device_loading.json \
+        ${D}${webos_sysconfdir}/audiod/audiod_internal_device_loading.json
+}
+
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "audiod.service"
 
