@@ -1,0 +1,87 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 15 Aug 2026 00:00:00 +0000
+Subject: [PATCH] SoundSubsystem: derive the card number when udev does not
+ supply one
+
+Every built-in sound card is reported to clients as card 0.
+
+getCardNumber() reads the CARD_NUMBER udev property, but only USB sound
+devices have one. A platform card gets no such property - udev exposes the
+number as a sysfs attribute instead:
+
+    $ udevadm info /sys/class/sound/card1 | grep -E "CARD|SOUND"
+    E: SOUND_INITIALIZED=1
+    E: SOUND_FORM_FACTOR=internal          <- no CARD_NUMBER
+
+    $ udevadm info -a /sys/class/sound/card1 | grep ATTR
+    ATTR{id}=="rk817ext"
+    ATTR{number}=="1"                      <- the value we want
+
+so the lookup returns empty and SoundDevice keeps the 0 it was constructed
+with. CARD_ID and CARD_NAME are populated, which is why the device is
+otherwise identified correctly.
+
+This is invisible on a board whose audio codec happens to be card 0, which
+is why it has not bitten before. On a PineTab2 it is card 1 - HDMI takes 0 -
+so getAttachedNonStorageDeviceList reports:
+
+    {"cardId":"rk817ext","cardName":"rk817_ext","cardNumber":0,...}
+
+audiod believes that, asks the PulseAudio policy module to load its sink on
+hw:0,0, and the load fails:
+
+    Failed to load module "module-alsa-sink" (argument: "device=hw:0,0
+    mmap=0 sink_name=pcm_output ..."): initialization failed.
+
+leaving the device with no route from the virtual sinks to the hardware and
+no audio at all. Loading the same sink by hand on hw:1,0 works, which
+isolates it to this number.
+
+DEVPATH is already in the property map and ends in the card node, so take
+the number from there instead of opening sysfs a second time. USB devices
+keep their existing behaviour - the property is only consulted as a
+fallback.
+
+Upstream-Status: Pending
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+---
+ src/framework/SoundSubsystem.cpp | 28 +++++++++++++++++++++++++++-
+ 1 file changed, 27 insertions(+), 1 deletion(-)
+
+--- a/src/framework/SoundSubsystem.cpp
++++ b/src/framework/SoundSubsystem.cpp
+@@ -58,5 +58,31 @@
+ 
+ std::string SoundSubsystem::getCardNumber()
+ {
+-	return mDevPropMap[CARD_NUMBER];
++	std::string cardNumber = mDevPropMap[CARD_NUMBER];
++	if (!cardNumber.empty())
++		return cardNumber;
++
++	/* Only USB sound devices carry a CARD_NUMBER property. For a platform
++	 * card udev exposes the number as a sysfs attribute instead, so this
++	 * lookup comes back empty and SoundDevice keeps its default of 0 -
++	 * every built-in card is then reported as card 0. That is harmless on a
++	 * board whose only card really is 0, but where it is not, audiod asks
++	 * PulseAudio to open the wrong hw: device and playback never starts.
++	 *
++	 * DEVPATH already ends in the card node, e.g.
++	 *   /devices/platform/rk817-sound/sound/card1
++	 * so recover the number from there rather than reading sysfs again.
++	 */
++	const std::string &devPath = mDevPropMap[DEVPATH];
++	const std::size_t cardPos = devPath.rfind("/card");
++	if (cardPos != std::string::npos) {
++		std::size_t start = cardPos + 5;
++		std::size_t end = start;
++		while (end < devPath.size() && devPath[end] >= '0' && devPath[end] <= '9')
++			++end;
++		if (end > start)
++			cardNumber = devPath.substr(start, end - start);
++	}
++
++	return cardNumber;
+ }
+\ No newline at end of file
