@@ -41,9 +41,16 @@ do_install:append() {
     # by default, point to sensord-${MACHINE}
     install -d ${D}${sysconfdir}/sensorfw/
     ln -s sensord-${MACHINE}.conf ${D}${sysconfdir}/sensorfw/primaryuse.conf
-    # .. and if the file is already in WORKDIR, copy it
-    if [ -f ${WORKDIR}/sensord-${MACHINE}.conf ] ; then
-      install -m 0644 ${WORKDIR}/sensord-${MACHINE}.conf ${D}${sysconfdir}/sensorfw/
+    # .. and if a machine shipped one, copy it.
+    #
+    # UNPACKDIR, not WORKDIR: SRC_URI files land there now, so this test quietly
+    # stopped matching and the config stopped being installed, leaving the symlink
+    # above dangling. sensorfw then falls back to its defaults, which look for the
+    # accelerometer on /dev/input/event*, and a PineTab2's sc7a20 is an IIO device
+    # with no evdev node at all - so there is no accelerometer, no orientation, and
+    # the screen never rotates, with sensorfwd running and the hardware working.
+    if [ -f ${UNPACKDIR}/sensord-${MACHINE}.conf ] ; then
+      install -m 0644 ${UNPACKDIR}/sensord-${MACHINE}.conf ${D}${sysconfdir}/sensorfw/
     fi
     # setup script which will fix the configuration symlink if needed
     install -d ${D}${bindir}
