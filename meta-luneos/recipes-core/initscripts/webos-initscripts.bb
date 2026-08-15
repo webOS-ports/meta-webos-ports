@@ -29,7 +29,7 @@ inherit webos_cmake
 inherit webos_public_repo
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0002-tmpfiles-create-var-cache-xdg-traversable.patch \
+    file://0001-tmpfiles-create-var-cache-xdg-traversable.patch \
 "
 
 #EXTRA_OECMAKE += "-DWEBOS_QTTESTABILITY_ENABLED:BOOL=${@ '1' if d.getVar('WEBOS_DISTRO_PRERELEASE') != '' else '0'}"
