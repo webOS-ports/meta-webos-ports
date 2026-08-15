@@ -17,7 +17,11 @@ SRC_URI = " \
 
 TARGET_CC_ARCH += "${LDFLAGS}"
 
-EXTRA_OEMAKE = "KEEP_SYMBOLS=1 CROSS_COMPILE=${TARGET_PREFIX} CC='${CC}' "
+# DEBUG_PREFIX_MAP has to ride along on CC: upstream's Makefile assigns CFLAGS
+# itself, so OE's CFLAGS never reach the compiler and the debug info keeps
+# absolute TMPDIR paths. That is only a warning on scarthgap but fails
+# do_package_qa on wrynose with "contains reference to TMPDIR [buildpaths]".
+EXTRA_OEMAKE = "KEEP_SYMBOLS=1 CROSS_COMPILE=${TARGET_PREFIX} CC='${CC} ${DEBUG_PREFIX_MAP}' "
 PARALLEL_MAKE = ""
 
 do_install() {
