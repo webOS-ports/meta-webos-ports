@@ -1,0 +1,47 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] qt-api: do not marshal invalid QVariant arguments
+
+AbstractSensorChannelInterface::call() takes eight QVariant slots, all
+defaulting to QVariant(), and forwards all of them to QDBusAbstractInterface.
+Qt5 dropped trailing invalid ones; Qt6 refuses to marshal them:
+
+    QDBusMarshaller: cannot add an invalid QVariant
+    Marshalling failed: Invalid QVariant passed in arguments
+
+So nearly every call from the client library fails before reaching sensord -
+start(), setInterval(), the property accessors, all of them. On LuneOS this
+shows up as the compositor creating a sensor session successfully and then
+never receiving a reading, so the screen does not rotate; starting any other
+sensor app makes the adaptor run and rotation begins working, which is a
+confusing way for this to present. luna-surfacemanager logs 144 of these on
+a single boot.
+
+Pass only the arguments that were actually supplied.
+
+Upstream-Status: Pending
+--- a/qt-api/abstractsensor_i.cpp
++++ b/qt-api/abstractsensor_i.cpp
+@@ -536,7 +536,22 @@
+                                                   const QVariant& arg7,
+                                                   const QVariant& arg8)
+ {
+-    return pimpl_->call(mode, method, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
++    /*
++     * Qt6's QDBus refuses to marshal an invalid QVariant, where Qt5 silently
++     * dropped trailing ones. Every call here passes all eight slots, so any
++     * call with fewer real arguments - which is nearly all of them - fails with
++     * "Marshalling failed: Invalid QVariant passed in arguments" and never
++     * reaches sensord. Pass only the arguments that were actually given.
++     */
++    QList<QVariant> args;
++    const QVariant *const slots_[] = { &arg1, &arg2, &arg3, &arg4,
++                                       &arg5, &arg6, &arg7, &arg8 };
++    for (const QVariant *slot : slots_) {
++        if (!slot->isValid())
++            break;
++        args.append(*slot);
++    }
++    return pimpl_->callWithArgumentList(mode, method, args);
+ }
+ 
+ QDBusMessage AbstractSensorChannelInterface::callWithArgumentList(QDBus::CallMode mode, const QString& method,

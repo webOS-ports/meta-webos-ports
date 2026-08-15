@@ -15,6 +15,7 @@ SRC_URI = " \
     file://0001-sensorfwd-Add-TimeoutStopSec-to-improve-shutdown.patch \
     file://0002-sensorfwd-Preload-sensors-listed-in-preload_sensors-.patch \
     file://0003-iioadaptor-Accept-input-attributes-for-IIO_CHAN_INFO.patch \
+    file://0004-qt-api-do-not-marshal-invalid-QVariant-arguments.patch \
 "
 
 do_configure:prepend() {
