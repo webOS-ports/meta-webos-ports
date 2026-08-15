@@ -18,7 +18,10 @@ LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
 PV = "0.0.3+git"
 SRCREV = "bb4a81e61b8a21442fc6807766ec4e49e2b35000"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
+    file://0001-Build-as-C-14-for-glog-0.7.patch \
+    file://0002-Port-to-Boost.Asio-1.87.patch \
+"
 
 inherit cmake
 inherit pkgconfig
