@@ -30,6 +30,10 @@ RDEPENDS:${PN} = "\
     pulseaudio-server \
     pulseaudio-module-palm-policy \
 "
+# Halium machines drive the codec through the Android HAL, so their sink is
+# named by module-droid-card and not by audiod. webos-system.pa aliases it to
+# the pcm_output name audiod routes by, which needs this module present.
+RDEPENDS:${PN} += "pulseaudio-module-remap-sink"
 
 WEBOS_VERSION = "1.0.0-78_127c6cd6c9247979b4ead42d9b8fc8b5c48b47a2"
 PR = "r36"
@@ -55,6 +59,8 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0005-moduleManager-fix-iterator-invalidation-in-removeModules.patch \
     file://0006-PulseAudioLink-report-play_sample-failures.patch \
     file://0007-systemsounds-fall-back-to-samples-without-the-ondemand-suffix.patch \
+    file://0008-deviceManager-support-sinks-that-PulseAudio-already-o.patch \
+    file://audiod-after-pulseaudio.conf \
 "
 
 # Which sound cards audiod looks for. Upstream's CMakeLists picks between an
@@ -68,14 +74,33 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
 # The card name is the ALSA one from /proc/asound/cards, and the sink names
 # have to be those module-palm-policy knows (see webos-virtual-devices.pa).
 SRC_URI:append:pinetab2 = " file://audiod_internal_device_loading.json"
+SRC_URI:append:sargo = " file://audiod_internal_device_loading.json"
 
 do_install:append:pinetab2() {
     install -m 0644 ${UNPACKDIR}/audiod_internal_device_loading.json \
         ${D}${webos_sysconfdir}/audiod/audiod_internal_device_loading.json
 }
 
+# sargo drives its codec through the Android HAL (module-droid-card), so the
+# sink already exists in PulseAudio and is declared "preloaded" here - see
+# 0008-deviceManager-support-sinks-that-PulseAudio-already-o.patch.
+do_install:append:sargo() {
+    install -m 0644 ${UNPACKDIR}/audiod_internal_device_loading.json \
+        ${D}${webos_sysconfdir}/audiod/audiod_internal_device_loading.json
+}
+
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "audiod.service"
+
+# audiod's own unit orders itself after ls-hubd only, so it races PulseAudio -
+# see the drop-in for what that costs.
+do_install:append() {
+    install -d ${D}${systemd_unitdir}/system/audiod.service.d
+    install -m 0644 ${UNPACKDIR}/audiod-after-pulseaudio.conf \
+        ${D}${systemd_unitdir}/system/audiod.service.d/10-after-pulseaudio.conf
+}
+
+FILES:${PN} += "${systemd_unitdir}/system/audiod.service.d"
 
 EXTRA_OECMAKE += "${@bb.utils.contains('WEBOS_LTTNG_ENABLED', '1', '-DWEBOS_LTTNG_ENABLED:BOOLEAN=True', '', d)}"
 
