@@ -1,0 +1,50 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sun, 16 Aug 2026 09:20:00 +0200
+Subject: [PATCH] hwcomposer: always pass the buffer to set_client_target
+
+The slot cache added in "implement the usage of slot-based buffer cache"
+passes a null target once a buffer has been seen before, leaving the slot
+index as the only way for the composer to know which buffer is meant. That
+relies on the composer keeping its own slot-indexed cache of buffers it has
+already been handed.
+
+Older HWC2 implementations do not, and the null is dereferenced instead. On
+a Halium 9 device (Adreno, Android 9 vendor blobs) surface-manager dies on
+the second frame:
+
+  #0  hwc2_compat_display_set_client_target (libhwc2_compat_layer.so)
+  #1  HWC2Window::present(HWComposerNativeWindowBuffer*) (libhwcomposer.so)
+  #2  HWComposerNativeWindow::queueBuffer(BaseNativeWindowBuffer*, int)
+  ...
+  #10 eglSwapBuffers
+  #12 QRhi::endFrame
+      QSGRenderThread
+
+which reads as a Qt or libhybris fault and is neither - the first frame is
+fine, because the buffer is not in the cache yet and a real pointer is
+passed. Only from the second frame on, when the cache hits, does the null
+reach the composer.
+
+Keep the slot bookkeeping, since the slot number is still what the composer
+uses to identify the buffer, but always hand over the buffer as well.
+Supplying a buffer for an already-cached slot is valid for every HWC2
+implementation - the cache is an optimisation to avoid re-importing a
+buffer, not a requirement to omit it - so this stays correct on newer
+composers while working on older ones.
+
+Upstream-Status: Pending [written against 41e7bda, intended for
+mer-hybris/qt5-qpa-hwcomposer-plugin]
+---
+ hwcomposer_backend_v20.cpp | 1 -
+ 1 file changed, 1 deletion(-)
+
+--- a/hwcomposer_backend_v20.cpp
++++ b/hwcomposer_backend_v20.cpp
+@@ -207,7 +207,6 @@
+     // Check if the current buffer is cached in any slots
+     for (size_t i = 0; i < m_slotCache.size(); i++) {
+         if (m_slotCache[i] == buffer) {
+-            target = nullptr;
+             slot = i;
+             break;
+         }
