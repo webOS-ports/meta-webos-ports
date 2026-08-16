@@ -1,0 +1,96 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sun, 16 Aug 2026 18:45:00 +0200
+Subject: [PATCH] deviceManager: support sinks that PulseAudio already owns
+
+Two things stop audiod ever finding a device on a Halium port, and between
+them nothing is ever routed: audiod reports no internal device, so
+module-palm-policy is never given an output device, never moves a stream off
+the virtual null sinks, and every sound is played into the bin with a
+perfectly healthy audio stack underneath.
+
+First, the config is looked up by the card id PDM reports, and PDM does not
+report one on every platform - on a Pixel 3a it arrives empty while the card
+is described by name ("sdm670-intcodec-s4-snd-card"). No entry can match an
+empty key whatever the config says, so fall back to matching the card name.
+
+Second, a device could only be brought up by asking PulseAudio to load an
+ALSA sink for it. That is wrong wherever something else already owns the
+card: on Halium that is module-droid-card, and the Android HAL has to keep
+it, because the HAL is what sets up the mixer paths - talking to the PCM
+directly generally gets a device that opens and stays silent. Loading an
+ALSA sink there means two things fighting over the same PCM.
+
+Allow a sink to be declared as type "preloaded", meaning it already exists
+in PulseAudio and audiod should register it without loading anything. The
+check lives in loadInternalCard() rather than at the call site because there
+are two paths in: addInternalCard() when the card is discovered, and
+eventMixerStatus() replaying registered cards once the mixer is ready. On a
+cold boot the mixer is not ready when the card is discovered, so it is the
+second path that runs - handling only the first leaves cold boots silent
+while a hand-restarted audiod works, which is a thoroughly confusing way for
+this to fail.
+
+Announcing the connection is part of the same job. PulseAudio normally
+answers a load with a device-connection reply, and that reply is what tells
+audioRouter a device exists and makes it route the virtual sinks onto it.
+Nothing sends it for a sink we did not load, so raise it here or the device
+is registered and never routed to.
+
+Nothing else needs to change: routing is by sink name the whole way down -
+audioRouter passes a name to setSoundOutputOnRange() and module-palm-policy
+resolves it with pa_namereg_get() - so a sink of that name is all it needs.
+
+Upstream-Status: Pending [intended for webosose/audiod]
+---
+--- a/src/modules/deviceManager/deviceManager.cpp
++++ b/src/modules/deviceManager/deviceManager.cpp
+@@ -90,6 +90,32 @@
+ {
+     PM_LOG_INFO(MSGID_DEVICE_MANAGER, INIT_KVCOUNT, "loadInternalCard cardInfo.isConnected = %d",cardInfo.isConnected);
+     bool ret = false;
++    if (cardInfo.type == "preloaded")
++    {
++        // The sink already exists in PulseAudio and something else owns the
++        // hardware - module-droid-card on a Halium device, where the Android HAL
++        // has to keep the card because it is what sets up the mixer paths.
++        // Loading an ALSA sink here would fight it for the PCM. Registering is
++        // enough: routing is by sink name, so the router only needs a sink of
++        // this name to exist.
++        //
++        // Nothing else will report it as connected, either. Normally PulseAudio
++        // answers the load with a device-connection reply and that is what tells
++        // audioRouter a device exists and makes it route the virtual sinks onto
++        // it, so announce it here or the device is registered but never routed
++        // to, and every stream stays on the virtual sink it was created on.
++        if (!cardInfo.isConnected)
++        {
++            PM_LOG_INFO(MSGID_DEVICE_MANAGER, INIT_KVCOUNT,\
++                "sink %s is preloaded, registering without loading a card",\
++                cardInfo.name.c_str());
++            cardInfo.isConnected = true;
++            mObjAudioMixer->callBackDeviceConnectionStatus(cardInfo.name,\
++                cardInfo.name, "", utils::eDeviceConnected,\
++                utils::ePulseMixer, cardInfo.isOutput);
++        }
++        return true;
++    }
+     if (cardInfo.isConnected == false)
+     {
+         PM_LOG_DEBUG("calling load internal card with parameters cardno :%d,deviceno:%d,status:%d,isoutput:%d,name:%s",\
+@@ -817,6 +843,16 @@
+     {
+         bool deviceFoundInlist = false;
+         it = internalDevices.find(cardId);
++        if (it == internalDevices.end() && !cardName.empty())
++        {
++            // PDM does not report a card id on every platform - it arrives
++            // empty on Halium devices, where the card is described by name
++            // only - so fall back to matching the name before giving up.
++            PM_LOG_INFO(MSGID_DEVICE_MANAGER, INIT_KVCOUNT,\
++                "no config entry for cardId '%s', trying cardName '%s'",\
++                cardId.c_str(), cardName.c_str());
++            it = internalDevices.find(cardName);
++        }
+         if (it != internalDevices.end())
+         {
+             for (auto& deviceInfo : it->second)
