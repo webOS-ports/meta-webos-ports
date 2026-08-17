@@ -149,13 +149,9 @@ LIBHYBRIS_RDEPENDS = " \
 # and never updated, and the first two were fetched over bzr, whose fetcher
 # wrynose removed. The recipes are gone as of the wrynose migration.
 
-RDEPENDS:${PN}:append:tuna = " ${LIBHYBRIS_RDEPENDS}"
-RDEPENDS:${PN}:append:grouper = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:mako = " ${LIBHYBRIS_RDEPENDS} bluebinder"
 RDEPENDS:${PN}:append:hammerhead = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:hammerhead-halium = " ${LIBHYBRIS_RDEPENDS}"
-RDEPENDS:${PN}:append:opal = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
-RDEPENDS:${PN}:append:opal3g = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:tenderloin = " alsa-utils-systemd rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:tenderloin71 = " alsa-utils-systemd rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:tenderloin3g = " alsa-utils-systemd rmtfs qrtr rpmsgexport"
@@ -163,6 +159,7 @@ RDEPENDS:${PN}:append:tenderloin-halium = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:mido = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:mido-halium = " ${LIBHYBRIS_RDEPENDS} bluebinder"
 RDEPENDS:${PN}:append:mindphone = " ${LIBHYBRIS_RDEPENDS}"
+RDEPENDS:${PN}:append:angler = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:athene = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:onyx = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:oxygen = " ${LIBHYBRIS_RDEPENDS}"
