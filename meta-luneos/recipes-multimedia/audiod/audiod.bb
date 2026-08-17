@@ -45,7 +45,25 @@ inherit webos_cmake
 # pkg_check_modules(), so pkg-config-native has to be in the build.
 inherit pkgconfig
 inherit webos_system_bus
-inherit webos_machine_impl_dep
+# Deliberately not webos_machine_impl_dep. That class exists to give a recipe the
+# hardware/emulator override, and it sets PACKAGE_ARCH = MACHINE_ARCH to do it,
+# which rebuilds audiod separately for every machine. audiod does not need that:
+# the only thing the distinction reaches is WEBOS_SOC_TYPE, and despite the name
+# that is not a SoC selector. It is used in exactly one place, audioRouter, to
+# decide whether the device has a second display:
+#
+#   mMapSinkRoutingInfo["display1"] = outputRoutingInfo;
+#   if (WEBOS_SOC_TYPE == "RPI4")
+#       mMapSinkRoutingInfo["display2"] = outputRoutingInfo;
+#
+# and then whether stream categories are looked up by name or all forced onto
+# display1. The stock policy configs do carry display2 entries, and the emulator
+# branch folds them into display1 rather than leaving them on a display nothing
+# uses - so the hardware branch is the better behaviour for a single-display
+# device, and it is what every real machine was already getting.
+#
+# Pin it and let audiod build once per architecture instead of once per machine.
+EXTRA_OECMAKE += "-DWEBOS_TARGET_MACHINE_IMPL=hardware"
 inherit gettext
 inherit webos_lttng
 inherit webos_public_repo
@@ -64,51 +82,16 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
 "
 S = "${WORKDIR}/git"
 
-# Which sound cards audiod looks for. Upstream's CMakeLists picks between an
-# emulator config and files/config/audiod_internal_device_loading_open.json,
-# whose card names are the OSE reference board's - b1, b2, Headphones. Those
-# match nothing on a real device: audiod finds no card, so it creates no sink,
-# so there is no device to route to and the machine is silent until somebody
-# restarts audiod by hand. A machine that names its cards differently drops a
-# replacement in files/<machine>/ and it overwrites the installed one.
-#
-# The card name is the ALSA one from /proc/asound/cards, and the sink names
-# have to be those module-palm-policy knows (see webos-virtual-devices.pa).
-# The stock config names the OSE reference board's cards - b1, b2, Headphones -
-# which match nothing on any real device, so audiod finds no card, registers no
-# device, and module-palm-policy is never told where to send anything. Every
-# stream then plays into a virtual sink and is discarded, silently: the only
-# trace is "Invalid max device count(0)" from the policy module.
-#
-# Two shapes cover almost everything. On Halium the Android HAL owns the card
-# and PulseAudio already has a sink for it, so audiod must register it without
-# loading anything ("preloaded"). Everywhere else nothing loads a sink and
-# audiod creating one is right. Both use the "*" card entry, because the card
-# is only worth naming when a machine has more than one internal card and the
-# wrong one could win - otherwise naming it just means no machine makes a sound
-# until somebody boots it and reads the name back out of the log.
-SRC_URI:append = " file://audiod_internal_device_loading_alsa.json"
-SRC_URI:append:halium = " file://audiod_internal_device_loading_droid.json"
-
-# pinetab2 has a codec and an HDMI output, so it is one of the machines where
-# the card does have to be named.
-SRC_URI:append:pinetab2 = " file://audiod_internal_device_loading.json"
-
+# The device configuration lives in audiod-conf, not here, so that changing a
+# machine's audio setup does not rebuild audiod - the same split
+# luna-surfacemanager-conf uses. audiod's own build installs a config naming the
+# OSE reference board's cards, which matches nothing on any real device; drop it
+# so the two packages do not both own the file and audiod-conf's is what lands.
 do_install:append() {
-    install -m 0644 ${UNPACKDIR}/audiod_internal_device_loading_alsa.json \
-        ${D}${webos_sysconfdir}/audiod/audiod_internal_device_loading.json
+    rm -f ${D}${webos_sysconfdir}/audiod/audiod_internal_device_loading.json
 }
 
-do_install:append:halium() {
-    install -m 0644 ${UNPACKDIR}/audiod_internal_device_loading_droid.json \
-        ${D}${webos_sysconfdir}/audiod/audiod_internal_device_loading.json
-}
-
-# Installed last so it wins over the generic one above.
-do_install:append:pinetab2() {
-    install -m 0644 ${UNPACKDIR}/audiod_internal_device_loading.json \
-        ${D}${webos_sysconfdir}/audiod/audiod_internal_device_loading.json
-}
+RDEPENDS:${PN} += "audiod-conf"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "audiod.service"
