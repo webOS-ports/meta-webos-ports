@@ -74,18 +74,38 @@ S = "${WORKDIR}/git"
 #
 # The card name is the ALSA one from /proc/asound/cards, and the sink names
 # have to be those module-palm-policy knows (see webos-virtual-devices.pa).
-SRC_URI:append:pinetab2 = " file://audiod_internal_device_loading.json"
-SRC_URI:append:sargo = " file://audiod_internal_device_loading.json"
+# The stock config names the OSE reference board's cards - b1, b2, Headphones -
+# which match nothing on any real device, so audiod finds no card, registers no
+# device, and module-palm-policy is never told where to send anything. Every
+# stream then plays into a virtual sink and is discarded, silently: the only
+# trace is "Invalid max device count(0)" from the policy module.
+#
+# Two shapes cover almost everything. On Halium the Android HAL owns the card
+# and PulseAudio already has a sink for it, so audiod must register it without
+# loading anything ("preloaded"). Everywhere else nothing loads a sink and
+# audiod creating one is right. Both use the "*" card entry, because the card
+# is only worth naming when a machine has more than one internal card and the
+# wrong one could win - otherwise naming it just means no machine makes a sound
+# until somebody boots it and reads the name back out of the log.
+SRC_URI:append = " file://audiod_internal_device_loading_alsa.json"
+SRC_URI:append:halium = " file://audiod_internal_device_loading_droid.json"
 
-do_install:append:pinetab2() {
-    install -m 0644 ${UNPACKDIR}/audiod_internal_device_loading.json \
+# pinetab2 has a codec and an HDMI output, so it is one of the machines where
+# the card does have to be named.
+SRC_URI:append:pinetab2 = " file://audiod_internal_device_loading.json"
+
+do_install:append() {
+    install -m 0644 ${UNPACKDIR}/audiod_internal_device_loading_alsa.json \
         ${D}${webos_sysconfdir}/audiod/audiod_internal_device_loading.json
 }
 
-# sargo drives its codec through the Android HAL (module-droid-card), so the
-# sink already exists in PulseAudio and is declared "preloaded" here - see
-# 0008-deviceManager-support-sinks-that-PulseAudio-already-o.patch.
-do_install:append:sargo() {
+do_install:append:halium() {
+    install -m 0644 ${UNPACKDIR}/audiod_internal_device_loading_droid.json \
+        ${D}${webos_sysconfdir}/audiod/audiod_internal_device_loading.json
+}
+
+# Installed last so it wins over the generic one above.
+do_install:append:pinetab2() {
     install -m 0644 ${UNPACKDIR}/audiod_internal_device_loading.json \
         ${D}${webos_sysconfdir}/audiod/audiod_internal_device_loading.json
 }
