@@ -16,10 +16,20 @@ SRC_URI += " \
     file://0003-technology-add-StartWPS-and-CancelWPS.patch \
 "
 
-RRECOMMENDS:${PN} += "neard connman-vpn connman-plugin-vpn-openvpn connman-plugin-vpn-vpnc connman-plugin-vpn-l2tp connman-plugin-vpn-pppt connman-tests connman-tools connman-wait-online"
+# neard is not listed here: PACKAGECONFIG[nfc] below already pulls it in as a
+# hard RDEPENDS, so recommending it separately would be redundant.
+RRECOMMENDS:${PN} += "connman-vpn connman-plugin-vpn-openvpn connman-plugin-vpn-vpnc connman-plugin-vpn-l2tp connman-plugin-vpn-pptp connman-plugin-vpn-wireguard connman-tests connman-tools connman-wait-online"
 
-# needed for VPN support in ConnMan
-PACKAGECONFIG:append = " openvpn vpnc l2tp pptp"
+# needed for VPN support in ConnMan. wireguard is the one modern transport
+# upstream supports and it only needs libmnl, so there is no reason to ship
+# the other four without it.
+PACKAGECONFIG:append = " openvpn vpnc l2tp pptp wireguard"
+
+# nfc is in DISTRO_FEATURES but oe-core does not map it onto connman the way
+# it maps bluetooth onto bluez, so connman was being built --disable-neard
+# while we separately tried to recommend neard into the image. Enable the
+# plugin so the two agree.
+PACKAGECONFIG:append = " ${@bb.utils.filter('DISTRO_FEATURES', 'nfc', d)}"
 
 SYSTEMD_SERVICE:${PN}:remove = "connman.service"
 
