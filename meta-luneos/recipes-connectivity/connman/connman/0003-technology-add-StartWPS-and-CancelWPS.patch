@@ -1,0 +1,683 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: LuneOS <dev@luneos.org>
+Date: Mon, 17 Aug 2026 17:16:52 +0200
+Subject: [PATCH] technology: add StartWPS and CancelWPS
+
+com.webos.service.wifi/startwps, /createwpspin and /cancelwps drive WPS
+at the technology level: the user pushes the button on the router and
+ConnMan is expected to associate with whatever access point answers.
+Upstream only supports the agent driven per-network form, where a target
+service already exists and the agent returns a WPS field, so the adapter
+had nothing to call.
+
+Adds net.connman.Technology.StartWPS(pin) / CancelWPS() and the WPSFailed
+signal, a start_wps/cancel_wps pair on connman_device_driver implemented
+by the WiFi plugin, and the supplicant plumbing they need
+(Interface.WPS.Cancel plus a wps_state callback so the plugin learns the
+outcome).  On success the provisioned SSID is matched against the known
+networks and handed to the normal association path.
+
+Reworked from the webOS OSE ConnMan fork.  Note that the fork also
+blocked service auto-connect for the duration of the WPS handshake via a
+global flag in service.c; that is not carried over, so a known network
+may be auto-connected while WPS is running, exactly as it can with
+upstream's per-network WPS.
+
+Upstream-Status: Inappropriate [webOS specific]
+---
+ gsupplicant/gsupplicant.h |   4 +
+ gsupplicant/supplicant.c  |  60 +++++++++
+ include/device.h          |   2 +
+ include/technology.h      |   1 +
+ plugins/wifi.c            | 263 ++++++++++++++++++++++++++++++++++++++
+ src/connman.h             |   3 +
+ src/device.c              |  84 ++++++++++++
+ src/technology.c          |  70 ++++++++++
+ 8 files changed, 487 insertions(+)
+
+diff --git a/gsupplicant/gsupplicant.h b/gsupplicant/gsupplicant.h
+index eab6293..9936dd7 100644
+--- a/gsupplicant/gsupplicant.h
++++ b/gsupplicant/gsupplicant.h
+@@ -273,6 +273,9 @@ int g_supplicant_interface_connect(GSupplicantInterface *interface,
+ 					GSupplicantInterfaceCallback callback,
+ 							void *user_data);
+ 
++int g_supplicant_interface_wps_cancel(GSupplicantInterface *interface,
++					GSupplicantInterfaceCallback callback,
++							void *user_data);
+ int g_supplicant_interface_disconnect(GSupplicantInterface *interface,
+ 					GSupplicantInterfaceCallback callback,
+ 							void *user_data);
+@@ -356,6 +359,7 @@ struct _GSupplicantCallbacks {
+ 	void (*interface_added) (GSupplicantInterface *interface);
+ 	void (*interface_state) (GSupplicantInterface *interface);
+ 	void (*interface_removed) (GSupplicantInterface *interface);
++	void (*wps_state) (GSupplicantInterface *interface);
+ 	void (*p2p_support) (GSupplicantInterface *interface);
+ 	void (*scan_started) (GSupplicantInterface *interface);
+ 	void (*scan_finished) (GSupplicantInterface *interface);
+diff --git a/gsupplicant/supplicant.c b/gsupplicant/supplicant.c
+index 5e28995..e6a65cf 100644
+--- a/gsupplicant/supplicant.c
++++ b/gsupplicant/supplicant.c
+@@ -3061,6 +3061,9 @@ static void signal_wps_event(const char *path, DBusMessageIter *iter)
+ 	else
+ 		interface->wps_state = G_SUPPLICANT_WPS_STATE_UNKNOWN;
+ 
++	if (callbacks_pointer && callbacks_pointer->wps_state)
++		callbacks_pointer->wps_state(interface);
++
+ 	if (!dbus_message_iter_has_next(iter))
+ 		return;
+ 
+@@ -5364,6 +5367,63 @@ int g_supplicant_interface_disconnect(GSupplicantInterface *interface,
+ 	return ret;
+ }
+ 
++static void interface_wps_cancel_result(const char *error,
++					DBusMessageIter *iter, void *user_data)
++{
++	struct interface_data *data = user_data;
++	int err = 0;
++
++	SUPPLICANT_DBG("");
++
++	if (error) {
++		SUPPLICANT_DBG("error: %s", error);
++		err = parse_supplicant_error(iter);
++	}
++
++	if (data->callback)
++		data->callback(err, data->interface, data->user_data);
++
++	g_free(data->path);
++	dbus_free(data);
++}
++
++int g_supplicant_interface_wps_cancel(GSupplicantInterface *interface,
++					GSupplicantInterfaceCallback callback,
++							void *user_data)
++{
++	struct interface_data *data;
++	int ret;
++
++	SUPPLICANT_DBG("");
++
++	if (!interface)
++		return -EINVAL;
++
++	if (!system_available)
++		return -EFAULT;
++
++	data = dbus_malloc0(sizeof(*data));
++	if (!data)
++		return -ENOMEM;
++
++	data->interface = interface;
++	data->path = g_strdup(interface->path);
++	data->callback = callback;
++	data->user_data = user_data;
++
++	ret = supplicant_dbus_method_call(interface->path,
++			SUPPLICANT_INTERFACE ".Interface.WPS", "Cancel",
++			NULL, interface_wps_cancel_result, data,
++			interface);
++
++	if (ret < 0) {
++		g_free(data->path);
++		dbus_free(data);
++	}
++
++	return ret;
++}
++
+ static void interface_p2p_find_result(const char *error,
+ 					DBusMessageIter *iter, void *user_data)
+ {
+diff --git a/include/device.h b/include/device.h
+index 0fc06bd..8fd2f83 100644
+--- a/include/device.h
++++ b/include/device.h
+@@ -137,6 +137,8 @@ struct connman_device_driver {
+ 			struct connman_device *device);
+ 	int (*set_regdom) (struct connman_device *device,
+ 						const char *alpha2);
++	int (*start_wps) (struct connman_device *device, const char *pin);
++	int (*cancel_wps) (struct connman_device *device);
+ };
+ 
+ int connman_device_driver_register(struct connman_device_driver *driver);
+diff --git a/include/technology.h b/include/technology.h
+index fcd658e..5b0a5b5 100644
+--- a/include/technology.h
++++ b/include/technology.h
+@@ -41,6 +41,7 @@ int connman_technology_tethering_notify(struct connman_technology *technology,
+ int connman_technology_set_regdom(const char *alpha2);
+ void connman_technology_regdom_notify(struct connman_technology *technology,
+ 							const char *alpha2);
++void connman_technology_wps_failed_notify(struct connman_technology *technology);
+ 
+ enum connman_service_type connman_technology_get_type
+ 				(struct connman_technology *technology);
+diff --git a/plugins/wifi.c b/plugins/wifi.c
+index 9ce7b5a..5187cda 100644
+--- a/plugins/wifi.c
++++ b/plugins/wifi.c
+@@ -75,6 +75,8 @@
+ #define P2P_LISTEN_PERIOD 500
+ #define P2P_LISTEN_INTERVAL 2000
+ 
++#define WPS_CONNECT_TIMEOUT 120	/* in seconds */
++
+ #define ASSOC_STATUS_AUTH_TIMEOUT 16
+ #define ASSOC_STATUS_NO_CLIENT 17
+ #define LOAD_SHAPING_MAX_RETRIES 3
+@@ -165,8 +167,15 @@ struct wifi_data {
+ 	int servicing;
+ 	int disconnect_code;
+ 	int assoc_code;
++	/* Technology wide WPS, driven by net.connman.Technology.StartWPS */
++	bool wps_active;
++	bool wps_start_deferred;
++	char *wps_pin;
++	guint wps_timeout;
+ };
+ 
++static void clear_wps_state(struct wifi_data *wifi);
++
+ struct wifi_network {
+ 	unsigned int keymgmt;
+ };
+@@ -926,6 +935,8 @@ static void wifi_remove(struct connman_device *device)
+ 	if (wifi->p2p_connection_timeout)
+ 		g_source_remove(wifi->p2p_connection_timeout);
+ 
++	clear_wps_state(wifi);
++
+ 	remove_networks(device, wifi);
+ 	remove_peers(wifi);
+ 
+@@ -2055,6 +2066,250 @@ static void wifi_regdom_callback(int result,
+ 	connman_device_unref(device);
+ }
+ 
++/*
++ * Technology wide WPS. Unlike the agent driven per-network WPS there is no
++ * target network yet: wpa_supplicant is asked to associate with whatever
++ * access point is in WPS mode, and once it reports which SSID it ended up
++ * with we hand over to the normal connect path.
++ */
++static void clear_wps_state(struct wifi_data *wifi)
++{
++	if (wifi->wps_timeout > 0) {
++		g_source_remove(wifi->wps_timeout);
++		wifi->wps_timeout = 0;
++	}
++
++	wifi->wps_active = false;
++	wifi->wps_start_deferred = false;
++
++	g_free(wifi->wps_pin);
++	wifi->wps_pin = NULL;
++}
++
++static void wps_failed(struct wifi_data *wifi)
++{
++	clear_wps_state(wifi);
++
++	connman_technology_wps_failed_notify(wifi_technology);
++}
++
++static int cancel_wps(struct wifi_data *wifi);
++
++static gboolean wps_timeout_cb(gpointer user_data)
++{
++	struct wifi_data *wifi = user_data;
++
++	DBG("wifi %p", wifi);
++
++	wifi->wps_timeout = 0;
++
++	cancel_wps(wifi);
++	wps_failed(wifi);
++
++	return FALSE;
++}
++
++static void wps_start_callback(int result, GSupplicantInterface *interface,
++							void *user_data)
++{
++	struct wifi_data *wifi = user_data;
++
++	DBG("result %d", result);
++
++	if (result == 0)
++		return;
++
++	wps_failed(wifi);
++}
++
++static int start_wps(struct wifi_data *wifi)
++{
++	GSupplicantSSID *ssid;
++	int ret;
++
++	ssid = g_try_malloc0(sizeof(GSupplicantSSID));
++	if (!ssid)
++		return -ENOMEM;
++
++	ssid->use_wps = TRUE;
++	if (wifi->wps_pin)
++		ssid->pin_wps = g_strdup(wifi->wps_pin);
++
++	connman_info("Starting WPS association");
++
++	wifi->wps_timeout = g_timeout_add_seconds(WPS_CONNECT_TIMEOUT,
++						wps_timeout_cb, wifi);
++
++	/* gsupplicant owns ssid from here on and releases it itself */
++	ret = g_supplicant_interface_connect(wifi->interface, ssid,
++						wps_start_callback, wifi);
++	if (ret == -EALREADY || ret == -EINPROGRESS)
++		ret = 0;
++
++	return ret;
++}
++
++static void cancel_wps_callback(int result, GSupplicantInterface *interface,
++							void *user_data)
++{
++	struct wifi_data *wifi = user_data;
++
++	DBG("result %d", result);
++
++	/* The interface may have gone away while the call was in flight. */
++	if (!g_supplicant_interface_get_data(interface))
++		return;
++
++	if (wifi->network) {
++		connman_network_set_bool(wifi->network, "WiFi.UseWPS", false);
++		connman_network_set_connected(wifi->network, false);
++		wifi->network = NULL;
++	}
++
++	clear_wps_state(wifi);
++}
++
++static int cancel_wps(struct wifi_data *wifi)
++{
++	int ret;
++
++	DBG("wifi %p", wifi);
++
++	ret = g_supplicant_interface_wps_cancel(wifi->interface,
++						cancel_wps_callback, wifi);
++	if (ret == -EALREADY || ret == -EINPROGRESS)
++		ret = 0;
++
++	return ret;
++}
++
++static void deferred_wps_start(struct wifi_data *wifi)
++{
++	if (!wifi->wps_active || !wifi->wps_start_deferred)
++		return;
++
++	DBG("wifi %p", wifi);
++
++	wifi->wps_start_deferred = false;
++	wifi->network = NULL;
++
++	if (start_wps(wifi) < 0)
++		wps_failed(wifi);
++}
++
++/*
++ * wpa_supplicant reports the outcome of the WPS handshake here. On success
++ * it also tells us which SSID it provisioned, so look up the matching
++ * network and let the regular association path take it from there.
++ */
++static void wps_state(GSupplicantInterface *interface)
++{
++	struct wifi_data *wifi = g_supplicant_interface_get_data(interface);
++	GSupplicantWpsState state;
++	const void *wps_ssid;
++	unsigned int wps_ssid_len;
++	GSList *list;
++
++	if (!wifi || !wifi->wps_active)
++		return;
++
++	state = g_supplicant_interface_get_wps_state(interface);
++
++	DBG("wifi %p wps state %d", wifi, state);
++
++	if (state == G_SUPPLICANT_WPS_STATE_UNKNOWN)
++		return;
++
++	if (state == G_SUPPLICANT_WPS_STATE_FAIL) {
++		wps_failed(wifi);
++		return;
++	}
++
++	wps_ssid = g_supplicant_interface_get_wps_ssid(interface,
++							&wps_ssid_len);
++	if (!wps_ssid) {
++		wps_failed(wifi);
++		return;
++	}
++
++	for (list = wifi->networks; list; list = list->next) {
++		struct connman_network *network = list->data;
++		const void *ssid;
++		unsigned int ssid_len;
++
++		ssid = connman_network_get_blob(network, "WiFi.SSID",
++							&ssid_len);
++		if (!ssid || ssid_len != wps_ssid_len ||
++				memcmp(ssid, wps_ssid, ssid_len) != 0)
++			continue;
++
++		DBG("WPS provisioned a known network");
++
++		connman_network_set_bool(network, "WiFi.UseWPS", true);
++		wifi->network = network;
++
++		clear_wps_state(wifi);
++
++		return;
++	}
++
++	DBG("WPS provisioned an unknown network, disconnecting");
++
++	g_supplicant_interface_wps_cancel(wifi->interface,
++						cancel_wps_callback, wifi);
++	wps_failed(wifi);
++}
++
++static int wifi_start_wps(struct connman_device *device, const char *pin)
++{
++	struct wifi_data *wifi = connman_device_get_data(device);
++
++	DBG("device %p", device);
++
++	if (!wifi || !wifi->interface)
++		return -EINVAL;
++
++	if (wifi->wps_active)
++		return -EINPROGRESS;
++
++	wifi->wps_active = true;
++	if (pin && *pin != '\0')
++		wifi->wps_pin = g_strdup(pin);
++
++	/*
++	 * Issuing the WPS command tears down any current association, so if a
++	 * disconnect is already in flight wait for it to land first.
++	 */
++	if (wifi->disconnecting) {
++		DBG("deferring WPS until the disconnect completes");
++		wifi->wps_start_deferred = true;
++		return 0;
++	}
++
++	if (wifi->network) {
++		connman_network_set_connected(wifi->network, false);
++		connman_network_set_associating(wifi->network, false);
++		wifi->network = NULL;
++	}
++
++	return start_wps(wifi);
++}
++
++static int wifi_cancel_wps(struct connman_device *device)
++{
++	struct wifi_data *wifi = connman_device_get_data(device);
++
++	DBG("device %p", device);
++
++	if (!wifi)
++		return -EINVAL;
++
++	if (!wifi->wps_active)
++		return 0;
++
++	return cancel_wps(wifi);
++}
++
+ static int wifi_set_regdom(struct connman_device *device, const char *alpha2)
+ {
+ 	struct wifi_data *wifi = connman_device_get_data(device);
+@@ -2085,6 +2340,8 @@ static struct connman_device_driver wifi_ng_driver = {
+ 	.scan		= wifi_scan,
+ 	.stop_scan	= wifi_stop_scan,
+ 	.set_regdom	= wifi_set_regdom,
++	.start_wps	= wifi_start_wps,
++	.cancel_wps	= wifi_cancel_wps,
+ };
+ 
+ static void system_ready(void)
+@@ -2297,6 +2554,11 @@ static void disconnect_callback(int result, GSupplicantInterface *interface,
+ 
+ 	wifi->disconnecting = false;
+ 
++	if (wifi->wps_start_deferred) {
++		deferred_wps_start(wifi);
++		return;
++	}
++
+ 	if (network != wifi->network) {
+ 		if (network == wifi->pending_network)
+ 			wifi->pending_network = NULL;
+@@ -3343,6 +3605,7 @@ static const GSupplicantCallbacks callbacks = {
+ 	.interface_added	= interface_added,
+ 	.interface_state	= interface_state,
+ 	.interface_removed	= interface_removed,
++	.wps_state		= wps_state,
+ 	.p2p_support		= p2p_support,
+ 	.scan_started		= scan_started,
+ 	.scan_finished		= scan_finished,
+diff --git a/src/connman.h b/src/connman.h
+index 99586a3..e3355b5 100644
+--- a/src/connman.h
++++ b/src/connman.h
+@@ -614,6 +614,9 @@ int __connman_device_request_hidden_scan(struct connman_device *device,
+ 				const char *identity, const char *passphrase,
+ 				const char *security, void *user_data);
+ void __connman_device_stop_scan(enum connman_service_type type);
++int __connman_device_request_start_wps(enum connman_service_type type,
++							const char *pin);
++int __connman_device_request_cancel_wps(enum connman_service_type type);
+ 
+ bool __connman_device_isfiltered(const char *devname);
+ 
+diff --git a/src/device.c b/src/device.c
+index 5567009..94b63fe 100644
+--- a/src/device.c
++++ b/src/device.c
+@@ -1179,6 +1179,90 @@ int __connman_device_request_hidden_scan(struct connman_device *device,
+ 	return device->driver->scan(device, &params);
+ }
+ 
++/*
++ * Technology wide WPS, i.e. "the user pressed the button on the router,
++ * find whatever network answers".  This is distinct from the per-network
++ * WPS that is driven through the agent and the WiFi.UseWPS network
++ * property; there is no target service yet when this is called.
++ */
++int __connman_device_request_start_wps(enum connman_service_type type,
++							const char *pin)
++{
++	bool success = false;
++	int last_err = -ENOSYS;
++	GSList *list;
++	int err;
++
++	if (type != CONNMAN_SERVICE_TYPE_WIFI)
++		return -EOPNOTSUPP;
++
++	for (list = device_list; list; list = list->next) {
++		struct connman_device *device = list->data;
++
++		if (!device_has_service_type(device, type))
++			continue;
++
++		if (!device->driver || !device->driver->start_wps) {
++			last_err = -EOPNOTSUPP;
++			continue;
++		}
++
++		if (!device->powered) {
++			last_err = -ENOLINK;
++			continue;
++		}
++
++		err = device->driver->start_wps(device, pin);
++		if (err == 0 || err == -EALREADY || err == -EINPROGRESS) {
++			success = true;
++		} else {
++			last_err = err;
++			DBG("device %p err %d", device, err);
++		}
++	}
++
++	if (success)
++		return 0;
++
++	return last_err;
++}
++
++int __connman_device_request_cancel_wps(enum connman_service_type type)
++{
++	bool success = false;
++	int last_err = -ENOSYS;
++	GSList *list;
++	int err;
++
++	if (type != CONNMAN_SERVICE_TYPE_WIFI)
++		return -EOPNOTSUPP;
++
++	for (list = device_list; list; list = list->next) {
++		struct connman_device *device = list->data;
++
++		if (!device_has_service_type(device, type))
++			continue;
++
++		if (!device->driver || !device->driver->cancel_wps) {
++			last_err = -EOPNOTSUPP;
++			continue;
++		}
++
++		err = device->driver->cancel_wps(device);
++		if (err == 0 || err == -EALREADY || err == -EINPROGRESS) {
++			success = true;
++		} else {
++			last_err = err;
++			DBG("device %p err %d", device, err);
++		}
++	}
++
++	if (success)
++		return 0;
++
++	return last_err;
++}
++
+ void __connman_device_stop_scan(enum connman_service_type type)
+ {
+ 	GSList *list;
+diff --git a/src/technology.c b/src/technology.c
+index 299100b..dfcd7f7 100644
+--- a/src/technology.c
++++ b/src/technology.c
+@@ -1333,6 +1333,72 @@ static DBusMessage *scan(DBusConnection *conn, DBusMessage *msg, void *data)
+ 	return NULL;
+ }
+ 
++void connman_technology_wps_failed_notify(struct connman_technology *technology)
++{
++	if (!technology || !technology->path)
++		return;
++
++	g_dbus_emit_signal(connection, technology->path,
++			CONNMAN_TECHNOLOGY_INTERFACE, "WPSFailed",
++			DBUS_TYPE_INVALID);
++}
++
++/*
++ * Technology wide WPS, as used by com.webos.service.wifi/startwps. Unlike
++ * the agent driven per-network WPS there is no target service yet: the
++ * supplicant is asked to associate with whatever access point answers.
++ */
++static DBusMessage *start_wps(DBusConnection *conn, DBusMessage *msg,
++								void *data)
++{
++	struct connman_technology *technology = data;
++	const char *pin = NULL;
++	DBusMessageIter iter;
++	int err;
++
++	DBG("technology %p request from %s", technology,
++			dbus_message_get_sender(msg));
++
++	if (technology->type != CONNMAN_SERVICE_TYPE_WIFI)
++		return __connman_error_not_supported(msg);
++
++	if (!technology->enabled)
++		return __connman_error_permission_denied(msg);
++
++	if (!dbus_message_iter_init(msg, &iter))
++		return __connman_error_invalid_arguments(msg);
++
++	if (dbus_message_iter_get_arg_type(&iter) != DBUS_TYPE_STRING)
++		return __connman_error_invalid_arguments(msg);
++
++	dbus_message_iter_get_basic(&iter, &pin);
++
++	err = __connman_device_request_start_wps(technology->type, pin);
++	if (err < 0)
++		return __connman_error_failed(msg, -err);
++
++	return g_dbus_create_reply(msg, DBUS_TYPE_INVALID);
++}
++
++static DBusMessage *cancel_wps(DBusConnection *conn, DBusMessage *msg,
++								void *data)
++{
++	struct connman_technology *technology = data;
++	int err;
++
++	DBG("technology %p request from %s", technology,
++			dbus_message_get_sender(msg));
++
++	if (technology->type != CONNMAN_SERVICE_TYPE_WIFI)
++		return __connman_error_not_supported(msg);
++
++	err = __connman_device_request_cancel_wps(technology->type);
++	if (err < 0)
++		return __connman_error_failed(msg, -err);
++
++	return g_dbus_create_reply(msg, DBUS_TYPE_INVALID);
++}
++
+ static const GDBusMethodTable technology_methods[] = {
+ 	{ GDBUS_DEPRECATED_METHOD("GetProperties",
+ 			NULL, GDBUS_ARGS({ "properties", "a{sv}" }),
+@@ -1341,12 +1407,16 @@ static const GDBusMethodTable technology_methods[] = {
+ 			GDBUS_ARGS({ "name", "s" }, { "value", "v" }),
+ 			NULL, set_property) },
+ 	{ GDBUS_ASYNC_METHOD("Scan", NULL, NULL, scan) },
++	{ GDBUS_METHOD("StartWPS",
++			GDBUS_ARGS({ "pin", "s" }), NULL, start_wps) },
++	{ GDBUS_METHOD("CancelWPS", NULL, NULL, cancel_wps) },
+ 	{ },
+ };
+ 
+ static const GDBusSignalTable technology_signals[] = {
+ 	{ GDBUS_SIGNAL("PropertyChanged",
+ 			GDBUS_ARGS({ "name", "s" }, { "value", "v" })) },
++	{ GDBUS_SIGNAL("WPSFailed", NULL) },
+ 	{ },
+ };
+ 

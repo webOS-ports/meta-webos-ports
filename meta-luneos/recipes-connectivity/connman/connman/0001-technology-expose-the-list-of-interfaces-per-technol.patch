@@ -1,0 +1,89 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: LuneOS <dev@luneos.org>
+Date: Mon, 17 Aug 2026 16:49:43 +0200
+Subject: [PATCH] technology: expose the list of interfaces per technology
+
+webos-connman-adapter reads the "Interfaces" property of each
+net.connman.Technology object to report the wired interface name and
+MAC address through com.webos.service.connectionmanager/getinfo and
+/getStatus.  Upstream ConnMan never exposed it, so without this the
+adapter reports no ethernet interface at all.
+
+This is the non-P2P part of the webOS OSE ConnMan fork's
+"p2p getDeviceName" change, reworked for ConnMan 2.0 to use the
+public connman_device_get_string() accessor instead of adding a new
+internal one.
+
+Upstream-Status: Inappropriate [webOS specific]
+---
+ src/technology.c | 36 ++++++++++++++++++++++++++++++++++++
+ 1 file changed, 36 insertions(+)
+
+diff --git a/src/technology.c b/src/technology.c
+index 933070f..dcceacb 100644
+--- a/src/technology.c
++++ b/src/technology.c
+@@ -557,6 +557,34 @@ static bool connman_technology_load_offlinemode(void)
+ 	return offlinemode;
+ }
+ 
++static void append_interfaces(DBusMessageIter *iter, void *user_data)
++{
++	struct connman_technology *technology = user_data;
++	GSList *list;
++
++	for (list = technology->device_list; list; list = list->next) {
++		struct connman_device *device = list->data;
++		const char *iface = connman_device_get_string(device,
++								"Interface");
++
++		if (!iface)
++			continue;
++
++		dbus_message_iter_append_basic(iter, DBUS_TYPE_STRING, &iface);
++	}
++}
++
++static void interfaces_changed(struct connman_technology *technology)
++{
++	if (!technology->path)
++		return;
++
++	connman_dbus_property_changed_array(technology->path,
++					CONNMAN_TECHNOLOGY_INTERFACE,
++					"Interfaces", DBUS_TYPE_STRING,
++					append_interfaces, technology);
++}
++
+ static void append_properties(DBusMessageIter *iter,
+ 		struct connman_technology *technology)
+ {
+@@ -587,6 +615,10 @@ static void append_properties(DBusMessageIter *iter,
+ 					DBUS_TYPE_BOOLEAN,
+ 					&val);
+ 
++	connman_dbus_dict_append_array(&dict, "Interfaces",
++					DBUS_TYPE_STRING,
++					append_interfaces, technology);
++
+ 	val = technology->tethering;
+ 	connman_dbus_dict_append_basic(&dict, "Tethering",
+ 					DBUS_TYPE_BOOLEAN,
+@@ -1572,6 +1604,8 @@ done:
+ 	technology->device_list = g_slist_prepend(technology->device_list,
+ 								device);
+ 
++	interfaces_changed(technology);
++
+ 	return 0;
+ }
+ 
+@@ -1594,6 +1628,8 @@ int __connman_technology_remove_device(struct connman_device *device)
+ 	technology->device_list = g_slist_remove(technology->device_list,
+ 								device);
+ 
++	interfaces_changed(technology);
++
+ 	if (technology->tethering)
+ 		set_tethering(technology, false);
+ 
