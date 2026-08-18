@@ -1,0 +1,152 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: LuneOS <dev@luneos.org>
+Date: Mon, 17 Aug 2026 17:59:38 +0200
+Subject: [PATCH] connectionmanager: implement setDefaultInterface with
+ MoveBefore
+
+Service.SetDefault is a webOS OSE connman fork addition.  Upstream hands
+the default route to the first connected favorite in its own service
+ordering and exposes MoveBefore/MoveAfter to reorder it, so promoting the
+requested wired service past the current default wired service is the
+equivalent operation.
+
+Also declares ClearProperty and ResetCounters on net.connman.Service
+while the interface is being brought in line with upstream.
+
+Upstream-Status: Inappropriate [LuneOS specific]
+---
+ files/xml/connman.xml           | 11 ++++++++++-
+ src/connectionmanager_service.c | 17 ++++++++++++++++-
+ src/connman_service.c           | 31 ++++++++++++++++++++++++++++---
+ src/connman_service.h           | 19 ++++++++++++++++++-
+ 4 files changed, 72 insertions(+), 6 deletions(-)
+
+diff --git a/files/xml/connman.xml b/files/xml/connman.xml
+index 7b2e3e6..d175b75 100644
+--- a/files/xml/connman.xml
++++ b/files/xml/connman.xml
+@@ -162,7 +162,16 @@ limitations under the License.
+ 		</method>
+ 		<method name="Remove">
+ 		</method>
+-		<method name="SetDefault">
++		<method name="ClearProperty">
++			<arg type="s" direction="in"/>
++		</method>
++		<method name="MoveBefore">
++			<arg type="o" direction="in"/>
++		</method>
++		<method name="MoveAfter">
++			<arg type="o" direction="in"/>
++		</method>
++		<method name="ResetCounters">
+ 		</method>
+ 		<signal name="PropertyChanged">
+ 			<arg type="s"/>
+diff --git a/src/connectionmanager_service.c b/src/connectionmanager_service.c
+index d356044..3c62a61 100644
+--- a/src/connectionmanager_service.c
++++ b/src/connectionmanager_service.c
+@@ -2868,7 +2868,22 @@ static bool handle_set_default_interface(LSHandle *sh, LSMessage *message,
+ 		else if(service_state == CONNMAN_SERVICE_STATE_READY
+ 			|| service_state == CONNMAN_SERVICE_STATE_CONFIGURATION)
+ 		{
+-			if (connman_service_set_default(service))
++			/*
++			 * Connman hands the default route to the first connected
++			 * favorite in its service ordering, so promoting this service
++			 * past the current default is what makes it default. The webOS
++			 * OSE connman fork had a SetDefault method for this; upstream
++			 * expects MoveBefore.
++			 */
++			connman_service_t *current_default =
++			        connman_manager_get_default_service(manager->wired_services);
++
++			if (NULL == current_default || current_default == service)
++			{
++				/* Nothing ranked ahead of it, so it already is the default */
++				LSMessageReplySuccess(sh, message);
++			}
++			else if (connman_service_move_before(service, current_default))
+ 			{
+ 				LSMessageReplySuccess(sh, message);
+ 			}
+diff --git a/src/connman_service.c b/src/connman_service.c
+index f28f6dd..3c4e4a4 100644
+--- a/src/connman_service.c
++++ b/src/connman_service.c
+@@ -1473,16 +1473,41 @@ gboolean connman_service_reject_peer(connman_service_t *service)
+  * Set the given service as default interface(see header for API details)
+  */
+ 
+-gboolean connman_service_set_default(connman_service_t *service)
++gboolean connman_service_move_before(connman_service_t *service,
++                                     connman_service_t *target)
+ {
+-	if (NULL == service)
++	GError *error = NULL;
++
++	if (NULL == service || NULL == target || service == target)
+ 	{
+ 		return FALSE;
+ 	}
+ 
++	connman_interface_service_call_move_before_sync(service->remote,
++	        target->path, NULL, &error);
++
++	if (error)
++	{
++		WCALOG_ESCAPED_ERRMSG(MSGID_SERVICE_SET_DEFAULT_ERROR, error->message);
++		g_error_free(error);
++		return FALSE;
++	}
++
++	return TRUE;
++}
++
++gboolean connman_service_move_after(connman_service_t *service,
++                                    connman_service_t *target)
++{
+ 	GError *error = NULL;
+ 
+-	connman_interface_service_call_set_default_sync(service->remote, NULL, &error);
++	if (NULL == service || NULL == target || service == target)
++	{
++		return FALSE;
++	}
++
++	connman_interface_service_call_move_after_sync(service->remote,
++	        target->path, NULL, &error);
+ 
+ 	if (error)
+ 	{
+diff --git a/src/connman_service.h b/src/connman_service.h
+index 38aa7d0..e0b8839 100644
+--- a/src/connman_service.h
++++ b/src/connman_service.h
+@@ -304,7 +304,24 @@ extern gboolean connman_service_reject_peer(connman_service_t *service);
+  *
+  * @return FALSE if the call failed, TRUE otherwise
+  */
+-extern gboolean connman_service_set_default(connman_service_t *service);
++/**
++ * @brief Move service ahead of target in connman's service ordering, which is
++ *        how the default route is chosen. Both services must be favorites and
++ *        in a connected state or connman rejects the call.
++ *
++ * @param[IN] service The service to promote
++ * @param[IN] target  The service to promote it past
++ *
++ * @return TRUE if the move succeeded
++ */
++extern gboolean connman_service_move_before(connman_service_t *service,
++        connman_service_t *target);
++
++/**
++ * @brief Move service behind target in connman's service ordering.
++ */
++extern gboolean connman_service_move_after(connman_service_t *service,
++        connman_service_t *target);
+ 
+ /**
+  * remove a remote connman service

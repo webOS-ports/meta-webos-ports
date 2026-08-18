@@ -1,0 +1,710 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: LuneOS <dev@luneos.org>
+Date: Mon, 17 Aug 2026 18:12:05 +0200
+Subject: [PATCH] connectionmanager: expose per-service timeservers, mDNS and
+ traffic counters
+
+Three connman service capabilities that had no Luna API in front of them:
+
+  setTimeservers        Timeservers.Configuration, the NTP servers to use
+                        while a service is the default one
+  setmDNS               mDNS.Configuration, per-service multicast DNS
+  getServiceCounters    the RX/TX byte, packet, error and drop counters
+  resetServiceCounters  plus Service.ResetCounters to zero them
+
+The counters are lifetime totals per service, which is different from
+what monitorActivity already reports: that uses connman's Counter API and
+delivers periodic deltas.
+
+All four are registered in the existing networkconnection.query and
+networkconnection.management ACGs, so groups.json and perm.json are
+unchanged.
+
+Upstream-Status: Inappropriate [LuneOS specific]
+---
+ files/sysbus/webos-connman-adapter.api.json |  11 +-
+ src/connectionmanager_service.c             | 342 ++++++++++++++++++++
+ src/connectionmanager_service.h             |   4 +
+ src/connman_service.c                       | 137 ++++++++
+ src/connman_service.h                       |  51 +++
+ src/logging.h                               |   3 +
+ 6 files changed, 545 insertions(+), 3 deletions(-)
+
+diff --git a/files/sysbus/webos-connman-adapter.api.json b/files/sysbus/webos-connman-adapter.api.json
+index 8209bd7..0221532 100644
+--- a/files/sysbus/webos-connman-adapter.api.json
++++ b/files/sysbus/webos-connman-adapter.api.json
+@@ -3,7 +3,8 @@
+         "com.webos.service.connectionmanager/findProxyForURL",
+         "com.webos.service.connectionmanager/getinfo",
+         "com.webos.service.connectionmanager/getStatus",
+-        "com.webos.service.connectionmanager/getstatus"
++        "com.webos.service.connectionmanager/getstatus",
++        "com.webos.service.connectionmanager/getServiceCounters"
+     ],
+     "networkconnection.management": [
+         "com.webos.service.connectionmanager/setdns",
+@@ -13,7 +14,10 @@
+         "com.webos.service.connectionmanager/setstate",
+         "com.webos.service.connectionmanager/setTechnologyState",
+         "com.webos.service.connectionmanager/monitorActivity",
+-        "com.webos.service.connectionmanager/setDefaultInterface"
++        "com.webos.service.connectionmanager/setDefaultInterface",
++        "com.webos.service.connectionmanager/setTimeservers",
++        "com.webos.service.connectionmanager/setmDNS",
++        "com.webos.service.connectionmanager/resetServiceCounters"
+     ],
+     "wifi.query": [
+         "com.webos.service.wifi/findnetworks",
+@@ -84,6 +88,7 @@
+         "com.webos.service.wan/getContext",
+         "com.webos.service.wan/setHostRoutes",
+         "com.webos.service.wifi/getstatus",
+-        "com.webos.service.wifi/getwifidiagnostics"
++        "com.webos.service.wifi/getwifidiagnostics",
++        "com.webos.service.connectionmanager/getServiceCounters"
+     ]
+ }
+diff --git a/src/connectionmanager_service.c b/src/connectionmanager_service.c
+index b65df78..1e306d3 100644
+--- a/src/connectionmanager_service.c
++++ b/src/connectionmanager_service.c
+@@ -207,6 +207,20 @@ static void update_connection_status(connman_service_t *connected_service,
+ 			jobject_put(*status, J_CSTR_TO_JVAL("domains"), domains_obj);
+ 		}
+ 
++		if (connected_service->timeservers &&
++		        g_strv_length(connected_service->timeservers) > 0)
++		{
++			jvalue_ref timeservers_obj = jarray_create(NULL);
++
++			for (i = 0; i < g_strv_length(connected_service->timeservers); i++)
++			{
++				jarray_append(timeservers_obj,
++				              jstring_create(connected_service->timeservers[i]));
++			}
++
++			jobject_put(*status, J_CSTR_TO_JVAL("timeservers"), timeservers_obj);
++		}
++
+ 		update_string_value(status, J_CSTR_TO_JVAL("method"),connected_service->ipinfo.ipv4.method);
+ 
+ 		if (connected_service->type == CONNMAN_SERVICE_TYPE_CELLULAR)
+@@ -2882,6 +2896,330 @@ cleanup:
+ 	return true;
+ }
+ 
++/**
++ *  @brief Handler for "setTimeservers" command.
++ *
++ *  Sets the NTP servers connman should use while the selected service is the
++ *  default one (Timeservers.Configuration). An empty array clears the override
++ *  and falls back to whatever the network or FallbackTimeservers provides.
++ *
++ *  JSON format:
++ *  luna://com.webos.service.connectionmanager/setTimeservers
++ *      {"timeservers":["0.pool.ntp.org"], "ssid":"<ssid>", "interfaceName":"<iface>"}
++ */
++
++static bool handle_set_timeservers_command(LSHandle *sh, LSMessage *message,
++        void *context)
++{
++	if (!connman_status_check(manager, sh, message))
++	{
++		return true;
++	}
++
++	jvalue_ref parsedObj = {0};
++	if (!LSMessageValidateSchema(sh, message,
++	                             j_cstr_to_buffer(STRICT_SCHEMA(PROPS_3(ARRAY(timeservers, string),
++	                                     PROP(ssid, string), PROP(interfaceName, string))
++	                                     REQUIRED_1(timeservers))), &parsedObj))
++	{
++		return true;
++	}
++
++	jvalue_ref timeserversObj = {0};
++	GStrv timeservers = NULL;
++	gchar *ssid = NULL;
++	gchar *interface_name = NULL;
++	connman_service_t *service = NULL;
++
++	if (jobject_get_exists(parsedObj, J_CSTR_TO_BUF("timeservers"),
++	                       &timeserversObj))
++	{
++		int i, arrsize = jarray_size(timeserversObj);
++		timeservers = (GStrv) g_new0(GStrv, arrsize + 1);
++
++		for (i = 0; i < arrsize; i++)
++		{
++			raw_buffer buf = jstring_get(jarray_get(timeserversObj, i));
++			timeservers[i] = g_strdup(buf.m_str);
++			jstring_free_buffer(buf);
++
++			if (0 == strlen(timeservers[i]))
++			{
++				LSMessageReplyErrorInvalidParams(sh, message);
++				goto exit;
++			}
++		}
++
++		timeservers[arrsize] = NULL;
++	}
++
++	get_string_value(parsedObj, J_CSTR_TO_BUF("ssid"), &ssid);
++	get_string_value(parsedObj, J_CSTR_TO_BUF("interfaceName"), &interface_name);
++
++	service = retrieve_service_by_ssid(ssid, interface_name);
++
++	if (NULL == service)
++	{
++		LSMessageReplyCustomError(sh, message, "No connected network",
++		                          WCA_API_ERROR_NO_CONNECTED_NW);
++		goto exit;
++	}
++
++	if (connman_service_set_timeservers(service, timeservers))
++	{
++		LSMessageReplySuccess(sh, message);
++	}
++	else
++	{
++		LSMessageReplyErrorUnknown(sh, message);
++	}
++
++exit:
++	g_strfreev(timeservers);
++	g_free(ssid);
++	g_free(interface_name);
++	j_release(&parsedObj);
++	return true;
++}
++
++/**
++ *  @brief Handler for "setmDNS" command.
++ *
++ *  Enables or disables multicast DNS resolution on a service
++ *  (mDNS.Configuration).
++ *
++ *  JSON format:
++ *  luna://com.webos.service.connectionmanager/setmDNS
++ *      {"enabled":true, "ssid":"<ssid>", "interfaceName":"<iface>"}
++ */
++
++static bool handle_set_mdns_command(LSHandle *sh, LSMessage *message,
++                                    void *context)
++{
++	if (!connman_status_check(manager, sh, message))
++	{
++		return true;
++	}
++
++	jvalue_ref parsedObj = {0};
++	if (!LSMessageValidateSchema(sh, message,
++	                             j_cstr_to_buffer(STRICT_SCHEMA(PROPS_3(PROP(enabled, boolean),
++	                                     PROP(ssid, string), PROP(interfaceName, string))
++	                                     REQUIRED_1(enabled))), &parsedObj))
++	{
++		return true;
++	}
++
++	jvalue_ref enabledObj = {0};
++	bool enabled = false;
++	gchar *ssid = NULL;
++	gchar *interface_name = NULL;
++	connman_service_t *service = NULL;
++
++	if (jobject_get_exists(parsedObj, J_CSTR_TO_BUF("enabled"), &enabledObj))
++	{
++		jboolean_get(enabledObj, &enabled);
++	}
++
++	get_string_value(parsedObj, J_CSTR_TO_BUF("ssid"), &ssid);
++	get_string_value(parsedObj, J_CSTR_TO_BUF("interfaceName"), &interface_name);
++
++	service = retrieve_service_by_ssid(ssid, interface_name);
++
++	if (NULL == service)
++	{
++		LSMessageReplyCustomError(sh, message, "No connected network",
++		                          WCA_API_ERROR_NO_CONNECTED_NW);
++		goto exit;
++	}
++
++	if (connman_service_set_mdns(service, enabled))
++	{
++		LSMessageReplySuccess(sh, message);
++	}
++	else
++	{
++		LSMessageReplyErrorUnknown(sh, message);
++	}
++
++exit:
++	g_free(ssid);
++	g_free(interface_name);
++	j_release(&parsedObj);
++	return true;
++}
++
++static void append_service_counters(jvalue_ref *reply,
++                                    connman_service_t *service)
++{
++	jvalue_ref counters = jobject_create();
++
++	jobject_put(counters, J_CSTR_TO_JVAL("rxBytes"),
++	            jnumber_create_i64(service->stats.rx_bytes));
++	jobject_put(counters, J_CSTR_TO_JVAL("txBytes"),
++	            jnumber_create_i64(service->stats.tx_bytes));
++	jobject_put(counters, J_CSTR_TO_JVAL("rxPackets"),
++	            jnumber_create_i64(service->stats.rx_packets));
++	jobject_put(counters, J_CSTR_TO_JVAL("txPackets"),
++	            jnumber_create_i64(service->stats.tx_packets));
++	jobject_put(counters, J_CSTR_TO_JVAL("rxErrors"),
++	            jnumber_create_i64(service->stats.rx_errors));
++	jobject_put(counters, J_CSTR_TO_JVAL("txErrors"),
++	            jnumber_create_i64(service->stats.tx_errors));
++	jobject_put(counters, J_CSTR_TO_JVAL("rxDropped"),
++	            jnumber_create_i64(service->stats.rx_dropped));
++	jobject_put(counters, J_CSTR_TO_JVAL("txDropped"),
++	            jnumber_create_i64(service->stats.tx_dropped));
++	jobject_put(counters, J_CSTR_TO_JVAL("connectedTime"),
++	            jnumber_create_i64(service->stats.time));
++
++	if (service->ipinfo.iface)
++	{
++		jobject_put(counters, J_CSTR_TO_JVAL("interfaceName"),
++		            jstring_create(service->ipinfo.iface));
++	}
++
++	jobject_put(*reply, J_CSTR_TO_JVAL("counters"), counters);
++}
++
++/**
++ *  @brief Handler for "getServiceCounters" command.
++ *
++ *  Reports the cumulative traffic counters connman keeps for a service. These
++ *  are lifetime totals for the service, unlike monitorActivity which reports
++ *  periodic deltas through the connman counter API.
++ *
++ *  JSON format:
++ *  luna://com.webos.service.connectionmanager/getServiceCounters
++ *      {"ssid":"<ssid>", "interfaceName":"<iface>"}
++ */
++
++static bool handle_get_service_counters_command(LSHandle *sh,
++        LSMessage *message, void *context)
++{
++	if (!connman_status_check(manager, sh, message))
++	{
++		return true;
++	}
++
++	jvalue_ref parsedObj = {0};
++	if (!LSMessageValidateSchema(sh, message,
++	                             j_cstr_to_buffer(STRICT_SCHEMA(PROPS_2(PROP(ssid, string),
++	                                     PROP(interfaceName, string)))), &parsedObj))
++	{
++		return true;
++	}
++
++	gchar *ssid = NULL;
++	gchar *interface_name = NULL;
++	connman_service_t *service = NULL;
++	jvalue_ref reply = NULL;
++
++	get_string_value(parsedObj, J_CSTR_TO_BUF("ssid"), &ssid);
++	get_string_value(parsedObj, J_CSTR_TO_BUF("interfaceName"), &interface_name);
++
++	service = retrieve_service_by_ssid(ssid, interface_name);
++
++	if (NULL == service)
++	{
++		LSMessageReplyCustomError(sh, message, "No connected network",
++		                          WCA_API_ERROR_NO_CONNECTED_NW);
++		goto exit;
++	}
++
++	/* Refresh so the counters are current rather than whatever was cached */
++	GVariant *properties = connman_service_fetch_properties(service);
++
++	if (NULL != properties)
++	{
++		connman_service_update_properties(service, properties);
++		g_variant_unref(properties);
++	}
++
++	reply = jobject_create();
++	jobject_put(reply, J_CSTR_TO_JVAL("returnValue"), jboolean_create(true));
++	append_service_counters(&reply, service);
++
++	LSError lserror;
++	LSErrorInit(&lserror);
++
++	if (!LSMessageReply(sh, message, jvalue_tostring(reply, jschema_all()),
++	                    &lserror))
++	{
++		LSErrorPrint(&lserror, stderr);
++		LSErrorFree(&lserror);
++	}
++
++exit:
++	if (reply)
++	{
++		j_release(&reply);
++	}
++
++	g_free(ssid);
++	g_free(interface_name);
++	j_release(&parsedObj);
++	return true;
++}
++
++/**
++ *  @brief Handler for "resetServiceCounters" command.
++ *
++ *  Zeroes connman's cumulative traffic counters for a service.
++ *
++ *  JSON format:
++ *  luna://com.webos.service.connectionmanager/resetServiceCounters
++ *      {"ssid":"<ssid>", "interfaceName":"<iface>"}
++ */
++
++static bool handle_reset_service_counters_command(LSHandle *sh,
++        LSMessage *message, void *context)
++{
++	if (!connman_status_check(manager, sh, message))
++	{
++		return true;
++	}
++
++	jvalue_ref parsedObj = {0};
++	if (!LSMessageValidateSchema(sh, message,
++	                             j_cstr_to_buffer(STRICT_SCHEMA(PROPS_2(PROP(ssid, string),
++	                                     PROP(interfaceName, string)))), &parsedObj))
++	{
++		return true;
++	}
++
++	gchar *ssid = NULL;
++	gchar *interface_name = NULL;
++	connman_service_t *service = NULL;
++
++	get_string_value(parsedObj, J_CSTR_TO_BUF("ssid"), &ssid);
++	get_string_value(parsedObj, J_CSTR_TO_BUF("interfaceName"), &interface_name);
++
++	service = retrieve_service_by_ssid(ssid, interface_name);
++
++	if (NULL == service)
++	{
++		LSMessageReplyCustomError(sh, message, "No connected network",
++		                          WCA_API_ERROR_NO_CONNECTED_NW);
++		goto exit;
++	}
++
++	if (connman_service_reset_counters(service))
++	{
++		LSMessageReplySuccess(sh, message);
++	}
++	else
++	{
++		LSMessageReplyErrorUnknown(sh, message);
++	}
++
++exit:
++	g_free(ssid);
++	g_free(interface_name);
++	j_release(&parsedObj);
++	return true;
++}
++
+ static bool handle_set_default_interface(LSHandle *sh, LSMessage *message,
+                                     void *context)
+ {
+@@ -2975,6 +3313,10 @@ static LSMethod connectionmanager_methods[] =
+ 	{ LUNA_METHOD_SETPROXY,             handle_set_proxy_command },
+ 	{ LUNA_METHOD_FINDPROXYFORURL,      handle_find_proxy_for_url_command },
+ 	{ LUNA_METHOD_SETDEFAULT,           handle_set_default_interface },
++	{ LUNA_METHOD_SETTIMESERVERS,       handle_set_timeservers_command },
++	{ LUNA_METHOD_SETMDNS,              handle_set_mdns_command },
++	{ LUNA_METHOD_GETCOUNTERS,          handle_get_service_counters_command },
++	{ LUNA_METHOD_RESETCOUNTERS,        handle_reset_service_counters_command },
+ 	{ },
+ };
+ 
+diff --git a/src/connectionmanager_service.h b/src/connectionmanager_service.h
+index b906455..170ef60 100644
+--- a/src/connectionmanager_service.h
++++ b/src/connectionmanager_service.h
+@@ -46,6 +46,10 @@
+ #define LUNA_METHOD_SETPROXY              "setProxy"
+ #define LUNA_METHOD_FINDPROXYFORURL       "findProxyForURL"
+ #define LUNA_METHOD_SETDEFAULT            "setDefaultInterface"
++#define LUNA_METHOD_SETTIMESERVERS        "setTimeservers"
++#define LUNA_METHOD_SETMDNS               "setmDNS"
++#define LUNA_METHOD_GETCOUNTERS           "getServiceCounters"
++#define LUNA_METHOD_RESETCOUNTERS         "resetServiceCounters"
+ 
+ 
+ enum ipadress_type
+diff --git a/src/connman_service.c b/src/connman_service.c
+index e8e3160..17a4c9b 100644
+--- a/src/connman_service.c
++++ b/src/connman_service.c
+@@ -697,6 +697,90 @@ gboolean connman_service_set_domains(connman_service_t *service, GStrv domains)
+ 	return TRUE;
+ }
+ 
++/**
++ * Set the NTP servers for the given service (see header for API details)
++ */
++
++gboolean connman_service_set_timeservers(connman_service_t *service,
++        GStrv timeservers)
++{
++	GError *error = NULL;
++
++	if (NULL == service || NULL == timeservers)
++	{
++		return FALSE;
++	}
++
++	connman_interface_service_call_set_property_sync(service->remote,
++	        "Timeservers.Configuration",
++	        g_variant_new_variant(g_variant_new_strv((const gchar * const *)
++	                              timeservers, g_strv_length(timeservers))), NULL, &error);
++
++	if (error)
++	{
++		WCALOG_ESCAPED_ERRMSG(MSGID_SERVICE_SET_TIMESERVERS_ERROR, error->message);
++		g_error_free(error);
++		return FALSE;
++	}
++
++	return TRUE;
++}
++
++/**
++ * Enable or disable multicast DNS on the given service (see header for API details)
++ */
++
++gboolean connman_service_set_mdns(connman_service_t *service, gboolean enabled)
++{
++	GError *error = NULL;
++
++	if (NULL == service)
++	{
++		return FALSE;
++	}
++
++	connman_interface_service_call_set_property_sync(service->remote,
++	        "mDNS.Configuration",
++	        g_variant_new_variant(g_variant_new_boolean(enabled)), NULL, &error);
++
++	if (error)
++	{
++		WCALOG_ESCAPED_ERRMSG(MSGID_SERVICE_SET_MDNS_ERROR, error->message);
++		g_error_free(error);
++		return FALSE;
++	}
++
++	return TRUE;
++}
++
++/**
++ * Zero the traffic counters for the given service (see header for API details)
++ */
++
++gboolean connman_service_reset_counters(connman_service_t *service)
++{
++	GError *error = NULL;
++
++	if (NULL == service)
++	{
++		return FALSE;
++	}
++
++	connman_interface_service_call_reset_counters_sync(service->remote, NULL,
++	        &error);
++
++	if (error)
++	{
++		WCALOG_ESCAPED_ERRMSG(MSGID_SERVICE_RESET_COUNTERS_ERROR, error->message);
++		g_error_free(error);
++		return FALSE;
++	}
++
++	memset(&service->stats, 0, sizeof(service->stats));
++
++	return TRUE;
++}
++
+ /**
+  * Set auto-connect property for the given service (see header for API details)
+  */
+@@ -978,6 +1062,18 @@ gboolean connman_service_get_ipinfo(connman_service_t *service)
+ 			g_variant_unref(va);
+ 		}
+ 
++		if (!g_strcmp0(key, "Timeservers"))
++		{
++			GVariant *v = g_variant_get_child_value(property, 1);
++			GVariant *va = g_variant_get_child_value(v, 0);
++
++			g_strfreev(service->timeservers);
++			service->timeservers = g_variant_dup_strv(va, NULL);
++
++			g_variant_unref(v);
++			g_variant_unref(va);
++		}
++
+ 		if (!g_strcmp0(key, "HostRoutes"))
+ 		{
+ 			GVariant *v = g_variant_get_child_value(property, 1);
+@@ -1787,6 +1883,46 @@ void connman_service_update_properties(connman_service_t *service,
+ 		{
+ 			service->roaming = g_variant_get_boolean(val);
+ 		}
++		else if (!g_strcmp0(key, "mDNS"))
++		{
++			service->mdns = g_variant_get_boolean(val);
++		}
++		else if (!g_strcmp0(key, "RX.Bytes"))
++		{
++			service->stats.rx_bytes = g_variant_get_uint32(val);
++		}
++		else if (!g_strcmp0(key, "TX.Bytes"))
++		{
++			service->stats.tx_bytes = g_variant_get_uint32(val);
++		}
++		else if (!g_strcmp0(key, "RX.Packets"))
++		{
++			service->stats.rx_packets = g_variant_get_uint32(val);
++		}
++		else if (!g_strcmp0(key, "TX.Packets"))
++		{
++			service->stats.tx_packets = g_variant_get_uint32(val);
++		}
++		else if (!g_strcmp0(key, "RX.Errors"))
++		{
++			service->stats.rx_errors = g_variant_get_uint32(val);
++		}
++		else if (!g_strcmp0(key, "TX.Errors"))
++		{
++			service->stats.tx_errors = g_variant_get_uint32(val);
++		}
++		else if (!g_strcmp0(key, "RX.Dropped"))
++		{
++			service->stats.rx_dropped = g_variant_get_uint32(val);
++		}
++		else if (!g_strcmp0(key, "TX.Dropped"))
++		{
++			service->stats.tx_dropped = g_variant_get_uint32(val);
++		}
++		else if (!g_strcmp0(key, "Time"))
++		{
++			service->stats.time = g_variant_get_uint32(val);
++		}
+ 		else if (!g_strcmp0(key, "Online"))
+ 		{
+ 			connman_service_advance_online_state(service, val);
+@@ -2169,6 +2305,7 @@ void connman_service_free(gpointer data, gpointer user_data)
+ 	g_free(service->ipinfo.ipv6.gateway);
+ 	g_strfreev(service->ipinfo.dns);
+ 	g_strfreev(service->ipinfo.domains);
++	g_strfreev(service->timeservers);
+ 
+ 	g_free(service->proxyinfo.method);
+ 	g_free(service->proxyinfo.url);
+diff --git a/src/connman_service.h b/src/connman_service.h
+index 2b6bf75..4435190 100644
+--- a/src/connman_service.h
++++ b/src/connman_service.h
+@@ -70,6 +70,23 @@ typedef struct ipinfo
+ 	ipv6info_t ipv6;
+ } ipinfo_t;
+ 
++/**
++ * Cumulative traffic counters connman keeps per service
++ *
++ */
++typedef struct servicestats
++{
++	guint32 rx_bytes;
++	guint32 tx_bytes;
++	guint32 rx_packets;
++	guint32 tx_packets;
++	guint32 rx_errors;
++	guint32 tx_errors;
++	guint32 rx_dropped;
++	guint32 tx_dropped;
++	guint32 time; /* seconds the service has been connected */
++} servicestats_t;
++
+ /**
+  * Proxy information for the service
+  *
+@@ -145,8 +162,11 @@ typedef struct connman_service
+ 	gboolean hidden;
+ 	gboolean online;
+ 	gboolean online_checking;
++	gboolean mdns; /* Multicast DNS active on this service */
+ 	gint type;
+ 	ipinfo_t ipinfo;
++	GStrv timeservers; /* NTP servers in use for this service */
++	servicestats_t stats;
+ 	proxyinfo_t proxyinfo;
+ 	GStrv hostroutes;
+ 	gulong sighandler_id;
+@@ -389,6 +409,37 @@ extern gboolean connman_service_set_nameservers(connman_service_t *service,
+ extern gboolean connman_service_set_domains(connman_service_t *service,
+         GStrv domains);
+ 
++/**
++ * Set the NTP servers to use while this service is the default
++ *
++ * @param[IN]  service A service instance
++ * @param[IN]  timeservers A NULL terminated array of NTP server names
++ *
++ * @return FALSE if the call to set "Timeservers.Configuration" failed, TRUE otherwise
++ */
++extern gboolean connman_service_set_timeservers(connman_service_t *service,
++        GStrv timeservers);
++
++/**
++ * Enable or disable multicast DNS resolution on a service
++ *
++ * @param[IN]  service A service instance
++ * @param[IN]  enabled TRUE to enable mDNS
++ *
++ * @return FALSE if the call to set "mDNS.Configuration" failed, TRUE otherwise
++ */
++extern gboolean connman_service_set_mdns(connman_service_t *service,
++        gboolean enabled);
++
++/**
++ * Zero the cumulative traffic counters connman keeps for a service
++ *
++ * @param[IN]  service A service instance
++ *
++ * @return FALSE if the ResetCounters call failed, TRUE otherwise
++ */
++extern gboolean connman_service_reset_counters(connman_service_t *service);
++
+ /**
+  * Set the "autoconnect" flag for a service
+  *
+diff --git a/src/logging.h b/src/logging.h
+index 31ee1da..5823fd5 100644
+--- a/src/logging.h
++++ b/src/logging.h
+@@ -120,6 +120,9 @@ extern PmLogContext gLogContext;
+ #define MSGID_SERVICE_SET_IPV6_ERROR                    "SRVC_SET_IPV6_ERR"
+ #define MSGID_SERVICE_SET_NAMESERVER_ERROR              "SRVC_SET_NAMESERVER_ERR"
+ #define MSGID_SERVICE_SET_DOMAINS_ERROR                 "SRVC_SET_DOMAINS_ERR"
++#define MSGID_SERVICE_SET_TIMESERVERS_ERROR             "SRVC_SET_TIMESERVERS_ERR"
++#define MSGID_SERVICE_SET_MDNS_ERROR                    "SRVC_SET_MDNS_ERR"
++#define MSGID_SERVICE_RESET_COUNTERS_ERROR              "SRVC_RESET_COUNTERS_ERR"
+ #define MSGID_SERVICE_AUTOCONNECT_ERROR                 "SRVC_AUTOCONNECT_ERR"
+ #define MSGID_SERVICE_GET_IPINFO_ERROR                  "SRVC_GET_IPINFO_ERR"
+ #define MSGID_SERVICE_FETCH_PROPERTIES_ERROR            "SRVC_FETCH_PROPERTIES_ERR"
