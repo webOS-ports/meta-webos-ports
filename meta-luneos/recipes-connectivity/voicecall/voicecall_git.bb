@@ -14,7 +14,7 @@ inherit pkgconfig
 SRC_URI = "git://github.com/sailfishos/voicecall.git;protocol=https;branch=master \
            file://voicecall-manager.service \
            file://0001-Support-building-against-Qt-6.patch \
-           file://0002-Build-cell-broadcast-support-only-when-mlite-is-avai.patch \
+           file://0002-Build-cell-broadcast-support-without-mlite.patch \
 "
 
 #enable debugging in voicecall. This is now merged upstream so we don't need patches anymore to enable this for each individual file.
@@ -31,6 +31,12 @@ do_install:append() {
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${UNPACKDIR}/voicecall-manager.service ${D}${systemd_unitdir}/system/
 }
+
+# The cell broadcast controller reads its channel catalog from
+# /usr/share/cell-broadcast-provider-info/channels.json. Without it cell
+# broadcast just reports itself unavailable; calls are unaffected, so recommend
+# rather than depend.
+RRECOMMENDS:${PN} += "cell-broadcast-provider-info"
 
 FILES:${PN} += "${OE_QMAKE_PATH_QML} \
                 ${libdir}/oneshot.d \

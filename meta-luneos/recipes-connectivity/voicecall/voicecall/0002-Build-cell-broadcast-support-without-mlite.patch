@@ -1,0 +1,426 @@
+From ffda3dfa95c648a0ad0865a675a916e88f04c76c Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 19 Aug 2026 12:00:00 +0200
+Subject: [PATCH] Build cell broadcast support without mlite
+
+The cell broadcast controller keeps its settings in dconf via mlite's
+MDConfItem, so src/ gained a hard dependency on mlite. mlite is part of the
+Nemo stack and is not packaged everywhere, which makes the whole
+voicecall-manager unbuildable on those distributions.
+
+Rather than dropping the feature there, put the settings behind
+CellBroadcastSettingItem: a typedef for MDConfItem when mlite is available,
+and a QSettings-backed stand-in with the same small API when it is not. The
+stand-in is per-process instead of system-wide, which is enough because
+voicecall-manager owns these keys and everyone else reaches them through its
+cell broadcast D-Bus interface.
+
+Also fixes the build with Qt 6 while here: QString::SkipEmptyParts moved to
+Qt::SkipEmptyParts in 5.14 and is gone in 6.
+
+Upstream-Status: Pending [written against 8e6ec88, intended for sailfishos/voicecall]
+---
+ src/cellbroadcastcontroller.cpp |  17 ++--
+ src/cellbroadcastcontroller.h   |   8 +-
+ src/cellbroadcastsettings.cpp   | 133 ++++++++++++++++++++++++++++++++
+ src/cellbroadcastsettings.h     |  77 ++++++++++++++++++
+ src/cellbroadcasttopics.cpp     |   6 ++
+ src/src.pro                     |  13 ++++
+ 6 files changed, 241 insertions(+), 13 deletions(-)
+ create mode 100644 src/cellbroadcastsettings.cpp
+ create mode 100644 src/cellbroadcastsettings.h
+
+diff --git a/src/cellbroadcastcontroller.cpp b/src/cellbroadcastcontroller.cpp
+index 86a5b7e..3b8d233 100644
+--- a/src/cellbroadcastcontroller.cpp
++++ b/src/cellbroadcastcontroller.cpp
+@@ -20,7 +20,6 @@
+  */
+ #include "cellbroadcastcontroller.h"
+ 
+-#include <MDConfItem>
+ #include <qofonocellbroadcast.h>
+ 
+ #include <QDBusError>
+@@ -67,7 +66,7 @@ QString lastManagedSettingKey(const QString &identity, const QString &modemPath)
+ 
+ bool alertsEnabledFromSettings()
+ {
+-    MDConfItem item(QString::fromLatin1(AlertsEnabledSettingKey));
++    CellBroadcastSettingItem item(QString::fromLatin1(AlertsEnabledSettingKey));
+     return item.value(true).toBool();
+ }
+ 
+@@ -169,11 +168,11 @@ CellBroadcastController::CellBroadcastController(QObject *parent)
+     , m_haveTopics(false)
+     , m_applyAfterRefresh(false)
+     , m_pendingTopicsOperation(NoTopicsOperation)
+-    , m_alertsEnabledItem(new MDConfItem(QString::fromLatin1(AlertsEnabledSettingKey), this))
++    , m_alertsEnabledItem(new CellBroadcastSettingItem(QString::fromLatin1(AlertsEnabledSettingKey), this))
+     , m_cellBroadcast(new CellBroadcastOfonoClient(this))
+ {
+     m_alertsEnabled = m_alertsEnabledItem->value(true).toBool();
+-    connect(m_alertsEnabledItem, &MDConfItem::valueChanged,
++    connect(m_alertsEnabledItem, &CellBroadcastSettingItem::valueChanged,
+             this, &CellBroadcastController::onAlertsEnabledSettingChanged);
+     connect(m_cellBroadcast, &QOfonoCellBroadcast::topicsChanged,
+             this, &CellBroadcastController::onCellBroadcastTopicsChanged);
+@@ -197,7 +196,7 @@ bool CellBroadcastController::alertsGloballyEnabled()
+ 
+ void CellBroadcastController::setAlertsGloballyEnabled(bool enabled)
+ {
+-    MDConfItem item(QString::fromLatin1(AlertsEnabledSettingKey));
++    CellBroadcastSettingItem item(QString::fromLatin1(AlertsEnabledSettingKey));
+     item.set(enabled);
+ }
+ 
+@@ -774,7 +773,7 @@ bool CellBroadcastController::channelEnabled(const QString &scope,
+ {
+     const QString id = identity();
+     const QVariant scopedValue = settingItem(channelSettingKey(id, scope, category.id))->value();
+-    MDConfItem *patternItem = settingItem(channelPatternSettingKey(id, category.id));
++    CellBroadcastSettingItem *patternItem = settingItem(channelPatternSettingKey(id, category.id));
+ 
+     if (scopedValue.isValid()) {
+         if (!patternItem->value().isValid()) {
+@@ -791,11 +790,11 @@ bool CellBroadcastController::channelEnabled(const QString &scope,
+     return category.defaultEnabled;
+ }
+ 
+-MDConfItem *CellBroadcastController::settingItem(const QString &key) const
++CellBroadcastSettingItem *CellBroadcastController::settingItem(const QString &key) const
+ {
+-    MDConfItem *item = m_settingItems.value(key);
++    CellBroadcastSettingItem *item = m_settingItems.value(key);
+     if (!item) {
+-        item = new MDConfItem(key, const_cast<CellBroadcastController *>(this));
++        item = new CellBroadcastSettingItem(key, const_cast<CellBroadcastController *>(this));
+         m_settingItems.insert(key, item);
+     }
+     return item;
+diff --git a/src/cellbroadcastcontroller.h b/src/cellbroadcastcontroller.h
+index 3a555a1..8b2e814 100644
+--- a/src/cellbroadcastcontroller.h
++++ b/src/cellbroadcastcontroller.h
+@@ -22,6 +22,7 @@
+ #define CELLBROADCASTCONTROLLER_H
+ 
+ #include "cellbroadcastcatalog.h"
++#include "cellbroadcastsettings.h"
+ 
+ #include <QHash>
+ #include <QObject>
+@@ -29,7 +30,6 @@
+ #include <QVariantMap>
+ 
+ class CellBroadcastOfonoClient;
+-class MDConfItem;
+ 
+ class CellBroadcastController : public QObject
+ {
+@@ -133,7 +133,7 @@ private:
+     bool isRoamingNetworkRelevant() const;
+     bool channelEnabled(const QString &scope,
+                         const CellBroadcastCatalogCategory &category) const;
+-    MDConfItem *settingItem(const QString &key) const;
++    CellBroadcastSettingItem *settingItem(const QString &key) const;
+     CellBroadcastTopicRangeList lastManagedTopics() const;
+     void setLastManagedTopics(const CellBroadcastTopicRangeList &topics);
+     void setAlertsEnabledValue(bool enabled);
+@@ -174,9 +174,9 @@ private:
+     bool m_applyAfterRefresh;
+     PendingTopicsOperation m_pendingTopicsOperation;
+     QString m_errorString;
+-    MDConfItem *m_alertsEnabledItem;
++    CellBroadcastSettingItem *m_alertsEnabledItem;
+     CellBroadcastOfonoClient *m_cellBroadcast;
+-    mutable QHash<QString, MDConfItem *> m_settingItems;
++    mutable QHash<QString, CellBroadcastSettingItem *> m_settingItems;
+     CellBroadcastCatalog m_catalog;
+     CellBroadcastTopicRangeList m_currentTopics;
+     CellBroadcastTopicRangeList m_pendingManagedTopics;
+diff --git a/src/cellbroadcastsettings.cpp b/src/cellbroadcastsettings.cpp
+new file mode 100644
+index 0000000..1ca2df0
+--- /dev/null
++++ b/src/cellbroadcastsettings.cpp
+@@ -0,0 +1,133 @@
++/*
++ * This file is a part of the Voice Call Manager project
++ *
++ * Copyright (C) 2026 Jolla Mobile Ltd
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ */
++#include "cellbroadcastsettings.h"
++
++#ifndef HAVE_MLITE
++
++#include <QDir>
++#include <QGlobalStatic>
++#include <QHash>
++#include <QList>
++#include <QSettings>
++#include <QStandardPaths>
++
++namespace {
++
++QString settingsFilePath()
++{
++    QString base = QString::fromLocal8Bit(qgetenv("VOICECALL_CONFIG_HOME"));
++    if (base.isEmpty()) {
++        base = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation);
++    }
++    // voicecall-manager is often started as a system service, which has no HOME
++    // for QStandardPaths to work from. Keep the store out of "/" in that case.
++    if (base.isEmpty() || !QDir::isAbsolutePath(base) || base == QLatin1String("/")) {
++        base = QStringLiteral("/var/lib");
++    }
++    return base + QStringLiteral("/voicecall/cellbroadcast.conf");
++}
++
++QSettings *store()
++{
++    static QSettings settings(settingsFilePath(), QSettings::IniFormat);
++    return &settings;
++}
++
++// dconf keys are absolute paths, QSettings keys are relative to the file root.
++QString settingsKey(const QString &key)
++{
++    int start = 0;
++    while (start < key.size() && key.at(start) == QLatin1Char('/')) {
++        ++start;
++    }
++    return key.mid(start);
++}
++
++typedef QHash<QString, QList<CellBroadcastSettingItem *> > ItemsByKey;
++Q_GLOBAL_STATIC(ItemsByKey, itemsByKey)
++
++}
++
++CellBroadcastSettingItem::CellBroadcastSettingItem(const QString &key, QObject *parent)
++    : QObject(parent)
++    , m_key(key)
++{
++    (*itemsByKey())[m_key].append(this);
++}
++
++CellBroadcastSettingItem::~CellBroadcastSettingItem()
++{
++    if (!itemsByKey.isDestroyed()) {
++        QList<CellBroadcastSettingItem *> &items = (*itemsByKey())[m_key];
++        items.removeAll(this);
++        if (items.isEmpty()) {
++            itemsByKey()->remove(m_key);
++        }
++    }
++}
++
++QString CellBroadcastSettingItem::key() const
++{
++    return m_key;
++}
++
++QVariant CellBroadcastSettingItem::value() const
++{
++    return store()->value(settingsKey(m_key));
++}
++
++QVariant CellBroadcastSettingItem::value(const QVariant &def) const
++{
++    return store()->value(settingsKey(m_key), def);
++}
++
++void CellBroadcastSettingItem::set(const QVariant &val)
++{
++    if (value() == val) {
++        return;
++    }
++
++    if (val.isValid()) {
++        store()->setValue(settingsKey(m_key), val);
++    } else {
++        store()->remove(settingsKey(m_key));
++    }
++    store()->sync();
++
++    Q_EMIT valueChanged();
++
++    // MDConfItem notifies the item that was written to right away and the other
++    // items for the same key once the event loop runs. Match that, so callers
++    // which set a value from within a valueChanged() handler behave the same.
++    const QList<CellBroadcastSettingItem *> items = itemsByKey()->value(m_key);
++    for (CellBroadcastSettingItem *item : items) {
++        if (item != this) {
++            QMetaObject::invokeMethod(item, "valueChanged", Qt::QueuedConnection);
++        }
++    }
++}
++
++void CellBroadcastSettingItem::unset()
++{
++    set(QVariant());
++}
++
++#endif // HAVE_MLITE
+diff --git a/src/cellbroadcastsettings.h b/src/cellbroadcastsettings.h
+new file mode 100644
+index 0000000..6b69b69
+--- /dev/null
++++ b/src/cellbroadcastsettings.h
+@@ -0,0 +1,77 @@
++/*
++ * This file is a part of the Voice Call Manager project
++ *
++ * Copyright (C) 2026 Jolla Mobile Ltd
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ */
++#ifndef CELLBROADCASTSETTINGS_H
++#define CELLBROADCASTSETTINGS_H
++
++/*
++ * The cell broadcast settings are dconf keys on Sailfish OS, reached through
++ * mlite's MDConfItem. mlite is part of the Nemo stack and is not packaged
++ * everywhere, so this header hands out a CellBroadcastSettingItem that is
++ * MDConfItem where it exists, and a QSettings-backed stand-in with the same
++ * small API where it does not.
++ */
++
++#ifdef HAVE_MLITE
++
++#include <MDConfItem>
++
++typedef MDConfItem CellBroadcastSettingItem;
++
++#else
++
++#include <QObject>
++#include <QString>
++#include <QVariant>
++
++/*
++ * Only the parts of MDConfItem that the cell broadcast code uses. Keys keep
++ * their dconf spelling ("/apps/sailfish/cellbroadcast/enabled") so the two
++ * backends stay interchangeable; the leading slash is dropped when the key is
++ * handed to QSettings.
++ *
++ * Unlike dconf this store is per-process: a change made by another process is
++ * not noticed. That is enough here because voicecall-manager owns these keys
++ * and everyone else goes through its cell broadcast D-Bus interface.
++ */
++class CellBroadcastSettingItem : public QObject
++{
++    Q_OBJECT
++
++public:
++    explicit CellBroadcastSettingItem(const QString &key, QObject *parent = 0);
++    ~CellBroadcastSettingItem();
++
++    QString key() const;
++    QVariant value() const;
++    QVariant value(const QVariant &def) const;
++    void set(const QVariant &val);
++    void unset();
++
++Q_SIGNALS:
++    void valueChanged();
++
++private:
++    const QString m_key;
++};
++
++#endif // HAVE_MLITE
++
++#endif // CELLBROADCASTSETTINGS_H
+diff --git a/src/cellbroadcasttopics.cpp b/src/cellbroadcasttopics.cpp
+index bcea244..6a985ed 100644
+--- a/src/cellbroadcasttopics.cpp
++++ b/src/cellbroadcasttopics.cpp
+@@ -20,6 +20,8 @@
+  */
+ #include "cellbroadcasttopics.h"
+ 
++#include <QtGlobal>
++
+ #include <algorithm>
+ 
+ #include <QStringList>
+@@ -45,7 +47,11 @@ CellBroadcastTopicRangeList CellBroadcastTopics::parse(const QString &topics)
+         return ranges;
+     }
+ 
++#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
++    const QStringList parts = trimmed.split(QLatin1Char(','), Qt::SkipEmptyParts);
++#else
+     const QStringList parts = trimmed.split(QLatin1Char(','), QString::SkipEmptyParts);
++#endif
+     for (const QString &part : parts) {
+         const QString range = part.trimmed();
+         const int separator = range.indexOf(QLatin1Char('-'));
+diff --git a/src/src.pro b/src/src.pro
+index a1ce753..e048075 100644
+--- a/src/src.pro
++++ b/src/src.pro
+@@ -15,6 +15,17 @@ DEFINES += VOICECALL_PLUGIN_DIRECTORY=\"\\\"$${VOICECALL_LIBDIR}/voicecall/plugi
+ 
+ PKGCONFIG += qofono-qt$${QT_MAJOR_VERSION}
+ 
++# The cell broadcast settings live in dconf, which is reached through mlite.
++# mlite is part of the Nemo stack and is not packaged everywhere, so use it
++# when it is there and fall back to a QSettings-backed store when it is not,
++# rather than dropping the feature. See cellbroadcastsettings.h.
++packagesExist(mlite$${QT_MAJOR_VERSION}) {
++    PKGCONFIG += mlite$${QT_MAJOR_VERSION}
++    DEFINES += HAVE_MLITE
++} else {
++    warning("mlite not found; cell broadcast settings will be kept in a local settings file")
++}
++
+ enable-nemo-devicelock {
+     PKGCONFIG += nemodevicelock
+     DEFINES += WITH_NEMO_DEVICELOCK
+@@ -31,6 +42,7 @@ LIBS += -L../lib/src -lvoicecall
+ 
+ HEADERS += \
+     cellbroadcastcatalog.h \
++    cellbroadcastsettings.h \
+     cellbroadcastcontroller.h \
+     cellbroadcastdaemon.h \
+     cellbroadcasttopics.h \
+@@ -42,6 +54,7 @@ HEADERS += \
+ 
+ SOURCES += \
+     cellbroadcastcatalog.cpp \
++    cellbroadcastsettings.cpp \
+     cellbroadcastcontroller.cpp \
+     cellbroadcastdaemon.cpp \
+     cellbroadcasttopics.cpp \
