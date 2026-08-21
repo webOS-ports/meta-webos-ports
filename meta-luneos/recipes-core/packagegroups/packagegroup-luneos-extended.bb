@@ -126,6 +126,7 @@ LIBHYBRIS_RDEPENDS = " \
     android-property-service \
     android-system \
     android-system-compat \
+    luneos-device-config \
     android-tools \
     android-tools-adbd \
     lxc \
