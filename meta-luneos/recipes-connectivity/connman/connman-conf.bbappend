@@ -43,3 +43,11 @@ FILES:${PN} += " \
     ${sysconfdir}/connman \
     ${sysconfdir} \
 "
+
+# main.conf turns the online check on, and connman resolves the proxy for the
+# check URL by asking pacrunner over D-Bus. With no pacrunner on the bus the
+# lookup fails outright - "no valid proxy", even on a service with no proxy
+# configured at all - and after six failures the service drops to "ready" with
+# Error=online-check-failed and never reaches "online". Recommends rather than
+# depends: connman itself is fine without it, this config is not.
+RRECOMMENDS:${PN} += "pacrunner"
