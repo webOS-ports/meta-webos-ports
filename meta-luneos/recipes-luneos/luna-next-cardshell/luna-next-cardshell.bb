@@ -15,7 +15,16 @@ RDEPENDS:${PN} += " \
 "
 
 PV = "0.6-0+git"
-SRCREV = "e1a530a174629049adce124870fedb77c7d5f27e"
+
+# herrie/audiod: the shell's volume paths still called
+# org.webosports.service.audio, the audio-service LuneOS no longer ships.
+# audiod claims that bus name, so the calls were answered with "Couldn't find
+# method: volumeUp" and the keys, the on-screen indicator and the system-menu
+# slider all did nothing. Confirmed on sargo: the legacy name keeps its own
+# volume (46) which is wired to no sink, while master/* moves pcm_output.
+# Drop the branch once it lands on master.
+WEBOS_GIT_BRANCH = ";branch=herrie/audiod"
+SRCREV = "2b65632ac0872f096395c094997d6efa4de0207f"
 
 inherit webos_ports_repo
 inherit webos_cmake
