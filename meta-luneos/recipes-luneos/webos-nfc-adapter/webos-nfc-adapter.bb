@@ -4,7 +4,7 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 # glib-2.0-native provides gdbus-codegen, which generates the nfcd D-Bus glue
-DEPENDS = "luna-service2 pbnjson glib-2.0 glib-2.0-native"
+DEPENDS = "luna-service2 libpbnjson glib-2.0 glib-2.0-native"
 
 # The service is useful without nfcd running (it reports NFC as unavailable),
 # but there is no point shipping it on its own.
