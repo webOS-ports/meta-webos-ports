@@ -36,3 +36,8 @@ SYSTEMD_SERVICE:${PN}:remove = "connman.service"
 do_install:append() {
     rm -vf ${D}${systemd_unitdir}/system/connman.service
 }
+
+# neard drives the in-kernel Linux NFC subsystem, which Halium devices don't
+# have: there the NFC controller is reached through the Android HAL by nfcd.
+# Keep neard for mainline targets, but don't pull it in on Halium.
+RRECOMMENDS:${PN}:remove:halium = "neard"

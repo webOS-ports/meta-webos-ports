@@ -148,6 +148,16 @@ LIBHYBRIS_RDEPENDS = " \
     ofono-binder-plugin \
 "
 
+# NFC stack: nfcd talks to the Android NFC HAL over binder, webos-nfc-adapter
+# bridges its D-Bus API onto the luna-service2 bus for apps and the shell.
+# Only added for machines that actually have an NFC controller.
+NFC_RDEPENDS = " \
+    nfcd \
+    nfcd-tools \
+    nfcd-binder-plugin \
+    webos-nfc-adapter \
+"
+
 # (Optional?) work for Qt6:
 #     qtscenegraph-adaptation 
 
@@ -170,6 +180,12 @@ RDEPENDS:${PN}:append:tenderloin3g = " alsa-utils-systemd rmtfs qrtr rpmsgexport
 RDEPENDS:${PN}:append:mido = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:tissot = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:rosy = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
+
+# NFC-capable devices only.
+RDEPENDS:${PN}:append:mako = " ${NFC_RDEPENDS}"
+RDEPENDS:${PN}:append:hammerhead-halium = " ${NFC_RDEPENDS}"
+RDEPENDS:${PN}:append:sargo = " ${NFC_RDEPENDS}"
+RDEPENDS:${PN}:append:sagit = " ${NFC_RDEPENDS}"
 
 RDEPENDS:${PN}:append:mido-halium = " waydroid"
 RDEPENDS:${PN}:append:pinephone = " waydroid"

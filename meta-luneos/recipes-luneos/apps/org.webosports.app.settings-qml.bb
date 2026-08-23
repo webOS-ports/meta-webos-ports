@@ -33,6 +33,7 @@ do_install:append() {
 FILES:${PN} += "${webos_applicationsdir}/org.webosports.app.settings-common \
                 ${webos_applicationsdir}/org.webosports.app.settings.bluetooth \
                 ${webos_applicationsdir}/org.webosports.app.settings.networksettings \
+                ${webos_applicationsdir}/org.webosports.app.settings.nfc \
                 ${webos_applicationsdir}/org.webosports.app.settings.vpn \
                 ${webos_applicationsdir}/org.webosports.app.settings.wifi \
                 ${webos_applicationsdir}/org.webosports.app.settings.backup \
