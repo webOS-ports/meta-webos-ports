@@ -147,6 +147,16 @@ FINGERPRINT_RDEPENDS = " \
     webos-fingerprint-adapter \
 "
 
+# NFC stack: nfcd talks to the Android NFC HAL over binder, webos-nfc-adapter
+# bridges its D-Bus API onto the luna-service2 bus for apps and the shell.
+# Only added for machines that actually have an NFC controller.
+NFC_RDEPENDS = " \
+    nfcd \
+    nfcd-tools \
+    nfcd-binder-plugin \
+    webos-nfc-adapter \
+"
+
 # (Optional?) work for Qt6:
 #     qtscenegraph-adaptation
 
@@ -179,6 +189,12 @@ RDEPENDS:${PN}:append:tissot-halium = " ${FINGERPRINT_RDEPENDS}"
 # The GSI machine can land on any device; the stack is harmless without a
 # sensor (the adapter just reports unavailable).
 RDEPENDS:${PN}:append:halium-arm64 = " ${FINGERPRINT_RDEPENDS}"
+
+# NFC-capable devices only.
+RDEPENDS:${PN}:append:mako = " ${NFC_RDEPENDS}"
+RDEPENDS:${PN}:append:hammerhead-halium = " ${NFC_RDEPENDS}"
+RDEPENDS:${PN}:append:sargo = " ${NFC_RDEPENDS}"
+RDEPENDS:${PN}:append:sagit = " ${NFC_RDEPENDS}"
 
 RDEPENDS:${PN}:append:mido-halium = " waydroid"
 RDEPENDS:${PN}:append:pinephone = " waydroid"
