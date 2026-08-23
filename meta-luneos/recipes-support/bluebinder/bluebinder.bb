@@ -66,11 +66,15 @@ do_install() {
     #        Writing packet from HAL to vhci device failed: No such device
     # 4. It orders itself after droid-hal-init.service, which is Sailfish's
     #    container init. Ours is android-system.service.
+    # 5. It installs into graphical.target, which LuneOS never reaches -
+    #    systemctl get-default is multi-user.target - so even with all of the
+    #    above fixed the unit is simply never pulled in and sits inactive.
     sed -i \
         -e 's|/usr/bin/droid/|${sbindir}/|g' \
         -e 's|^DevicePolicy=strict$|DevicePolicy=closed|' \
         -e 's|^RestrictAddressFamilies=AF_BLUETOOTH$|RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_BLUETOOTH|' \
         -e 's|^After=droid-hal-init.service$|After=android-system.service|' \
+        -e 's|^WantedBy=graphical.target$|WantedBy=multi-user.target|' \
         ${D}${systemd_unitdir}/system/bluebinder.service
 }
 
