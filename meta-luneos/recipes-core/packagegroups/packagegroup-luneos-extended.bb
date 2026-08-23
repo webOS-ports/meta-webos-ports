@@ -121,10 +121,15 @@ RDEPENDS:${PN} = " \
   v4l-utils \
 "
 
+# qbootctl is listed unconditionally: LIBHYBRIS_RDEPENDS is only ever appended
+# for halium machines, one by one, below. The recipe is
+# COMPATIBLE_MACHINE = "^halium$" and its unit is conditional on the device
+# being A/B at runtime, so a non-A/B halium machine installs it harmlessly.
 LIBHYBRIS_RDEPENDS = " \
     ${VIRTUAL-RUNTIME_android-system-image} \
     android-property-service \
     android-system \
+    qbootctl \
     android-system-compat \
     luneos-device-config \
     android-tools \
