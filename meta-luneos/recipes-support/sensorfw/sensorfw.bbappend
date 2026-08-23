@@ -22,6 +22,24 @@ EXTRA_QMAKEVARS_PRE:append:sagit = "CONFIG+=binder "
 EXTRA_QMAKEVARS_PRE:append:tissot-halium = "CONFIG+=binder "
 EXTRA_QMAKEVARS_PRE:append:yggdrasil = "CONFIG+=binder "
 
+# sargo has no working legacy sensors HAL at all, so binder is not an
+# optimisation here but the only route. /vendor/lib64/hw/sensors.sargo.so is
+# AOSP's HAL 1.0 multihal and /vendor/etc/sensors/hals.conf points it at
+# sensors.ssc.so - but that library is a HAL *2.0* sub-HAL: 862 dynamic
+# symbols, none of them HMI, and it links android.hardware.sensors@2.0.so,
+# libhidlbase and libfmq. So the multihal loads it and then cannot find the
+# entry point:
+#
+#     I MultiHal: Loaded library from sensors.ssc.so
+#     W MultiHal: Error calling dlsym:
+#     sensorfw: no sensors found
+#
+# hw_get_module("sensors") can therefore never return a sensor on this device.
+# android.hardware.sensors@2.0::ISensors is registered and works - the
+# container's own HAL service enumerates the full set through it - so talk to
+# that instead.
+EXTRA_QMAKEVARS_PRE:append:sargo = "CONFIG+=binder "
+
 # Tenderloin here is an exception: sensorfw doesn't need to use Halium for the sensor
 EXTRA_QMAKEVARS_PRE:remove:tenderloin-halium = "CONFIG+=autohybris "
 SRC_URI:append:tenderloin-halium = " \
