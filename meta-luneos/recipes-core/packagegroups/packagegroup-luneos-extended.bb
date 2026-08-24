@@ -155,27 +155,24 @@ LIBHYBRIS_RDEPENDS = " \
 # and never updated, and the first two were fetched over bzr, whose fetcher
 # wrynose removed. The recipes are gone as of the wrynose migration.
 
-RDEPENDS:${PN}:append:mako = " ${LIBHYBRIS_RDEPENDS} bluebinder"
+# Every Halium machine gets the stack through the "halium" override that
+# meta-android-halium.inc already puts in MACHINEOVERRIDES, rather than through
+# one line per device. The per-device form silently excluded any new machine -
+# halium-arm64 built a complete image with no container, no HAL bridges and no
+# device-config service, because nothing had added it to the list yet.
+RDEPENDS:${PN}:append:halium = " ${LIBHYBRIS_RDEPENDS}"
+
+RDEPENDS:${PN}:append:mako = " bluebinder"
 RDEPENDS:${PN}:append:hammerhead = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
-RDEPENDS:${PN}:append:hammerhead-halium = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:tenderloin = " alsa-utils-systemd rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:tenderloin71 = " alsa-utils-systemd rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:tenderloin3g = " alsa-utils-systemd rmtfs qrtr rpmsgexport"
-RDEPENDS:${PN}:append:tenderloin-halium = " ${LIBHYBRIS_RDEPENDS}"
 RDEPENDS:${PN}:append:mido = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
-RDEPENDS:${PN}:append:mido-halium = " ${LIBHYBRIS_RDEPENDS} bluebinder"
-RDEPENDS:${PN}:append:mindphone = " ${LIBHYBRIS_RDEPENDS}"
-RDEPENDS:${PN}:append:angler = " ${LIBHYBRIS_RDEPENDS}"
-RDEPENDS:${PN}:append:athene = " ${LIBHYBRIS_RDEPENDS}"
-RDEPENDS:${PN}:append:onyx = " ${LIBHYBRIS_RDEPENDS}"
-RDEPENDS:${PN}:append:oxygen = " ${LIBHYBRIS_RDEPENDS}"
+RDEPENDS:${PN}:append:mido-halium = " bluebinder"
 RDEPENDS:${PN}:append:tissot = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
-RDEPENDS:${PN}:append:tissot-halium = " ${LIBHYBRIS_RDEPENDS} bluebinder"
-RDEPENDS:${PN}:append:sargo = " ${LIBHYBRIS_RDEPENDS} bluebinder"
+RDEPENDS:${PN}:append:tissot-halium = " bluebinder"
+RDEPENDS:${PN}:append:sargo = " bluebinder"
 RDEPENDS:${PN}:append:rosy = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
-RDEPENDS:${PN}:append:s2 = " ${LIBHYBRIS_RDEPENDS}"
-RDEPENDS:${PN}:append:sagit = " ${LIBHYBRIS_RDEPENDS}"
-RDEPENDS:${PN}:append:yggdrasil = " ${LIBHYBRIS_RDEPENDS}"
 
 RDEPENDS:${PN}:append:mido-halium = " waydroid"
 RDEPENDS:${PN}:append:pinephone = " waydroid"
