@@ -5,7 +5,7 @@ without checking TTF_OpenFont for NULL - see pdk-sysroot-fonts."
 
 SDLLIB = "SDL_ttf"
 SDLBRANCH = "SDL-1.2"
-SRCREV = "831efa364afb87c0c93e7635153e6df9be3c72b4"
+SRCREV = "3af6dd26174bb719c241447d1ea55e40597bb9a6"
 
 LIC_FILES_CHKSUM = "file://COPYING;md5=22800d1b3701377aae0b61ee36f5c303"
 

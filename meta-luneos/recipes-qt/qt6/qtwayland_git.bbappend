@@ -50,12 +50,41 @@ PACKAGECONFIG[client-xdg-shell] = "-DFEATURE_wayland_client_xdg_shell=ON,-DFEATU
 # stay - this bbappend defines those itself, just above.
 PACKAGECONFIG = "client-wl-shell ${PACKAGECONFIG_DMABUF}"
 
-PACKAGECONFIG_DMABUF = "drm-egl-server-buffer"
+# The zwp_linux_dmabuf_v1 compositor integration. Both plugins built from it -
+# linux-dmabuf-unstable-v1 and linux-dmabuf-v1 - link Libdrm::Libdrm, and the
+# configure test for the feature does too, so without libdrm in DEPENDS Qt just
+# reports:
+#   -- Could NOT find Libdrm (missing: Libdrm_LIBRARY Libdrm_INCLUDE_DIR)
+#   -- Performing Test Linux Client dma-buf Buffer Sharing - Failed because
+#      Libdrm::Libdrm not found
+#          Linux dma-buf client buffer .......... no
+# On Mesa machines it was never noticed because virtual/egl is mesa, which pulls
+# libdrm into the sysroot transitively - so the feature auto-detected ON there.
+# On halium virtual/egl is libhybris, which does not, and the feature silently
+# went off. Depend on it explicitly so the outcome is the PACKAGECONFIG's
+# decision rather than a side effect of who else happens to need libdrm.
+PACKAGECONFIG[dmabuf-client-buffer] = "-DFEATURE_wayland_dmabuf_client_buffer=ON,-DFEATURE_wayland_dmabuf_client_buffer=OFF,libdrm"
 
-# libhybris's EGL/eglext.h doesn't define EGL_LINUX_DMA_BUF_EXT/EGL_EXT_image_dma_buf_import_modifiers tested by qtwayland
-# tests HAVE_dmabuf_server_buffer/HAVE_dmabuf_client_buffer
-# we can try to enable this again after upgrading libhybris to have:
-# https://github.com/libhybris/libhybris/commit/95b1472814c6cec192eef2da3361c81fa3d91860
+PACKAGECONFIG_DMABUF = "drm-egl-server-buffer dmabuf-client-buffer"
+
+# Deliberately off on halium, and not for the reason this comment used to give.
+# The libhybris EGL headers have defined EGL_LINUX_DMA_BUF_EXT and
+# EGL_EXT_image_dma_buf_import_modifiers since 2020 (commit 95b14728), so the
+# headers are no longer the obstacle - the driver underneath them is.
+#
+# On halium virtual/egl is libhybris, whose eglCreateImageKHR is a passthrough to
+# the vendor blob (hybris/egl/egl.c), and the Android GPU drivers implement
+# EGL_ANDROID_image_native_buffer (gralloc) rather than EGL_EXT_image_dma_buf_import.
+# On sargo, for instance, no library in /android/vendor/lib64/egl mentions
+# dma_buf_import at all.
+#
+# That would be merely useless if the plugin declined to load, but it is worse
+# than that: LinuxDmabufClientBufferIntegration::initializeHardware() constructs
+# the LinuxDmabuf object - creating and advertising the zwp_linux_dmabuf_v1
+# global - before it probes for eglQueryDmaBufFormatsEXT/eglQueryDmaBufModifiersEXT,
+# and returns early when they are missing without tearing the global back down.
+# Clients would bind a protocol the compositor cannot honour and fail every
+# buffer import, instead of falling back to wl_shm as they do today.
 PACKAGECONFIG_DMABUF:halium = ""
 
 # qtwayland-qmlplugins is not used in webos

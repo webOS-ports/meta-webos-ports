@@ -14,6 +14,7 @@ SRCREV = "3633c18f924c3fc501b5f090ec9a760890002295"
 inherit webos_ports_repo
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI += "file://0001-Fix-return-mismatch-errors-for-gcc-14.patch"
 
 CLEANBROKEN = "1"
 

@@ -73,7 +73,22 @@ do_configure:prepend() {
           ${S}/aclocal.m4
 }
 
+
 # These ship an unversioned .so in the runtime package on purpose - PDK
 # applications link both the versioned soname and the bare name.
 FILES:${PN} += "${libdir}/lib*.so"
 INSANE_SKIP:${PN} += "dev-so"
+
+# The codecs are linked statically (--enable-music-*-shared=no), so configure
+# records the recipe sysroot in Libs.private of the generated .pc file:
+#   Libs.private: -L${RECIPE_SYSROOT}/usr/lib ...
+# which fails the buildpaths QA check. Strip it - a consumer resolves those
+# libraries from its own sysroot, so the path carries no information.
+do_install:append() {
+    for pc in ${D}${libdir}/pkgconfig/*.pc; do
+        [ -f "$pc" ] || continue
+        sed -i -e "s|-L${RECIPE_SYSROOT}${libdir}||g" \
+               -e "s|${RECIPE_SYSROOT}||g" \
+               -e "s|  *| |g" "$pc"
+    done
+}

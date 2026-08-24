@@ -5,7 +5,7 @@ but a missing soname stops the application loading at all."
 
 SDLLIB = "SDL_net"
 SDLBRANCH = "SDL-1.2"
-SRCREV = "7aa8ffae32fda6455792c5538a8b64a655dd0721"
+SRCREV = "8363cd02baf1b65c287691bdd22c3dc87da9759d"
 
 LIC_FILES_CHKSUM = "file://COPYING;md5=9cf3de2d872bf510f88eb20d06d700b5"
 

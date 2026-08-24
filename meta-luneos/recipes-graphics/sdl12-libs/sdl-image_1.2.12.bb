@@ -5,7 +5,7 @@ different library and does not satisfy them."
 
 SDLLIB = "SDL_image"
 SDLBRANCH = "SDL-1.2"
-SRCREV = "220be3fd43a85921138072ed847b7e4bc5ad163e"
+SRCREV = "2ffb2e3e1eba037897164e3ac6c67570d8bccd79"
 
 LIC_FILES_CHKSUM = "file://COPYING;md5=613734b7586e1580ef944961c6d62227"
 

@@ -7,21 +7,11 @@ proprietary, plus ffmpeg 0.6. Upstream needs none of that."
 
 SDLLIB = "SDL_mixer"
 SDLBRANCH = "SDL-1.2"
-SRCREV = "1a14d94ed4271e45435ecb5512d61792e1a42932"
+SRCREV = "50517740a3916e5ffd719c053c6e7b65f933e23a"
 
 LIC_FILES_CHKSUM = "file://COPYING;md5=a37a47a0e579e461474cd03b9e05199d"
 
 require sdl12-libs.inc
-
-# configure.in line 3 already has AC_CONFIG_AUX_DIR(build-scripts). Line 44 then
-# repeats it as AC_CONFIG_AUX_DIRS($srcdir/build-scripts), where $srcdir is not
-# expanded at autoreconf time, so autoconf tries to create a directory literally
-# called '$srcdir':
-#   autoreconf: error: cannot create $srcdir/build-scripts: No such file or directory
-# Upstream never fixed it because the 1.2 branch stopped in 2012.
-do_configure:prepend() {
-    sed -i '/AC_CONFIG_AUX_DIRS(\$srcdir\/build-scripts)/d' ${S}/configure.in
-}
 
 DEPENDS += "libvorbis libogg flac libmikmod"
 

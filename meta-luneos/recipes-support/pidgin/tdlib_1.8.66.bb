@@ -32,12 +32,21 @@ inherit cmake
 #
 # TD_GENERATE_SOURCE_FILES=ON keeps the pass cheap: TDLib skips its OpenSSL/zlib lookups and
 # builds only the generators, not the library.
+# BUILD_CC/BUILD_CXX are not usable as CMAKE_*_COMPILER directly: with
+# INHERIT += "ccache" they become "ccache gcc", and CMake wants a single path -
+#   The CMAKE_CXX_COMPILER: ccache g++ is not a full path and was not found in
+#   the PATH.
+# cmake.bbclass already splits them for exactly this reason (oecmake_map_compiler
+# returns the compiler and the launcher separately), so use its native variants.
+# They degrade to a plain compiler and an empty launcher when ccache is off.
 do_configure:prepend() {
     cmake -S ${S} -B ${WORKDIR}/generate \
         -DTD_GENERATE_SOURCE_FILES=ON \
         -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_C_COMPILER="${BUILD_CC}" \
-        -DCMAKE_CXX_COMPILER="${BUILD_CXX}" \
+        -DCMAKE_C_COMPILER="${OECMAKE_NATIVE_C_COMPILER}" \
+        -DCMAKE_C_COMPILER_LAUNCHER="${OECMAKE_NATIVE_C_COMPILER_LAUNCHER}" \
+        -DCMAKE_CXX_COMPILER="${OECMAKE_NATIVE_CXX_COMPILER}" \
+        -DCMAKE_CXX_COMPILER_LAUNCHER="${OECMAKE_NATIVE_CXX_COMPILER_LAUNCHER}" \
         -DCMAKE_C_FLAGS="${BUILD_CFLAGS}" \
         -DCMAKE_CXX_FLAGS="${BUILD_CXXFLAGS}" \
         -DCMAKE_EXE_LINKER_FLAGS="${BUILD_LDFLAGS}"
