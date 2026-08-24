@@ -40,6 +40,22 @@ EXTRA_QMAKEVARS_PRE:append:yggdrasil = "CONFIG+=binder "
 # that instead.
 EXTRA_QMAKEVARS_PRE:append:sargo = "CONFIG+=binder "
 
+# The generic machine: binder for the same reason, generalised. A Treble
+# device exposes sensors as android.hardware.sensors over hwbinder, and the
+# legacy hw_get_module("sensors") route is the one that may or may not exist -
+# on sargo it exists and is broken, as above. Built without this, sensorfwd
+# takes the hybris HAL path and aborts inside bionic before it reports
+# anything useful:
+#
+#     linker_tls.cpp:93: unregister_tls_module
+#     CHECK 'mod.static_offset == SIZE_MAX' failed
+#
+# The per-machine list above is a hand-maintained duplicate of "is this a
+# Treble device", and should collapse into :halium once the device machines
+# retire - tenderloin-halium is the only one here that genuinely wants the
+# legacy path.
+EXTRA_QMAKEVARS_PRE:append:halium-arm64 = "CONFIG+=binder "
+
 # Tenderloin here is an exception: sensorfw doesn't need to use Halium for the sensor
 EXTRA_QMAKEVARS_PRE:remove:tenderloin-halium = "CONFIG+=autohybris "
 SRC_URI:append:tenderloin-halium = " \

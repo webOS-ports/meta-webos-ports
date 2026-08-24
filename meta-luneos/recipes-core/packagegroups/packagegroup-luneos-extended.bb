@@ -139,6 +139,7 @@ LIBHYBRIS_RDEPENDS = " \
     pulseaudio-modules-droid \
     pulseaudio-modules-droid-hidl \
     qt6-qpa-hwcomposer-plugin \
+    bluebinder \
     \
     exiv2 \
     libpulse-simple0 \
@@ -162,16 +163,12 @@ LIBHYBRIS_RDEPENDS = " \
 # device-config service, because nothing had added it to the list yet.
 RDEPENDS:${PN}:append:halium = " ${LIBHYBRIS_RDEPENDS}"
 
-RDEPENDS:${PN}:append:mako = " bluebinder"
 RDEPENDS:${PN}:append:hammerhead = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:tenderloin = " alsa-utils-systemd rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:tenderloin71 = " alsa-utils-systemd rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:tenderloin3g = " alsa-utils-systemd rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:mido = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
-RDEPENDS:${PN}:append:mido-halium = " bluebinder"
 RDEPENDS:${PN}:append:tissot = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
-RDEPENDS:${PN}:append:tissot-halium = " bluebinder"
-RDEPENDS:${PN}:append:sargo = " bluebinder"
 RDEPENDS:${PN}:append:rosy = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
 
 RDEPENDS:${PN}:append:mido-halium = " waydroid"
