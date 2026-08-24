@@ -14,7 +14,7 @@ SRC_URI = "git://github.com/mer-hybris/libnciplugin.git;protocol=https;branch=ma
 PV = "1.2.2"
 SRCREV = "0b543f1aa1f2d88fb14c38c15c8a6beb6ce13b0f"
 
-EXTRA_OEMAKE = "KEEP_SYMBOLS=1 LIBDIR=${libdir}"
+EXTRA_OEMAKE = "CROSS_COMPILE=${TARGET_PREFIX} CC='${CC}' KEEP_SYMBOLS=1 LIBDIR=${libdir}"
 PARALLEL_MAKE = ""
 
 do_compile() {
