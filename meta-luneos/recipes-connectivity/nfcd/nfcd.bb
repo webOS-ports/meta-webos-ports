@@ -7,7 +7,9 @@ SECTION = "webos/connectivity"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=c9f20b68b5eba5ff8e714fbacefb9b5f"
 
 # glib-2.0-native provides gdbus-codegen, which generates the D-Bus glue
-DEPENDS = "glib-2.0 glib-2.0-native libglibutil libnfcdef"
+# file provides libmagic, which tools/ndef-share includes as magic.h
+# (upstream nfcd.spec: BuildRequires: file-devel)
+DEPENDS = "glib-2.0 glib-2.0-native libglibutil libnfcdef file"
 
 inherit pkgconfig
 inherit systemd
@@ -20,7 +22,7 @@ SRCREV = "f748b1c32dae72dc29e4af276a85bc4bc1d5b000"
 # HAVE_DBUSACCESS=0: libdbusaccess is the Sailfish per-application D-Bus access
 # control framework, which we don't ship. Access is governed by the installed
 # dbus-1 system.d policy instead.
-EXTRA_OEMAKE = "KEEP_SYMBOLS=1 HAVE_DBUSACCESS=0 LIBDIR=${libdir} UNITDIR=${systemd_unitdir}/system"
+EXTRA_OEMAKE = "CROSS_COMPILE=${TARGET_PREFIX} CC='${CC}' KEEP_SYMBOLS=1 HAVE_DBUSACCESS=0 LIBDIR=${libdir} UNITDIR=${systemd_unitdir}/system"
 PARALLEL_MAKE = ""
 
 do_compile() {

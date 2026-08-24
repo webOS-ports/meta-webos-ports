@@ -14,7 +14,7 @@ SRC_URI = "git://github.com/mer-hybris/libncicore.git;protocol=https;branch=mast
 PV = "1.1.33"
 SRCREV = "aa9ccbb1148e49852e56df2241ecea15f80861a1"
 
-EXTRA_OEMAKE = "KEEP_SYMBOLS=1 LIBDIR=${libdir}"
+EXTRA_OEMAKE = "CROSS_COMPILE=${TARGET_PREFIX} CC='${CC}' KEEP_SYMBOLS=1 LIBDIR=${libdir}"
 PARALLEL_MAKE = ""
 
 do_compile() {
