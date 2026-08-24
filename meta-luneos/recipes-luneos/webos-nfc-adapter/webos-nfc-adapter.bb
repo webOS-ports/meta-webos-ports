@@ -11,8 +11,7 @@ DEPENDS = "luna-service2 libpbnjson glib-2.0 glib-2.0-native"
 RRECOMMENDS:${PN} += "nfcd"
 
 PV = "0.1.0-1+git"
-# Pin this once webos-nfc-adapter has been pushed to github.com/webOS-ports
-SRCREV = "${AUTOREV}"
+SRCREV = "6511276462582a653413302767712e6e2d096f10"
 
 inherit webos_ports_repo
 inherit webos_filesystem_paths
