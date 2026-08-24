@@ -26,3 +26,10 @@ WEBOS_REPO_NAME = "webos-nfc-adapter"
 LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+
+# gdbus-codegen writes an absolute #include for the header it generates, so the
+# generated source shipped in -src carries a build path. webos-telephonyd has
+# the same construct and the same QA hit:
+# ERROR: webos-nfc-adapter-0.1.0-1+git-r0 do_package_qa: QA Issue: File /usr/src/debug/webos-nfc-adapter/0.1.0-1+git/Configured/src/nfcd-interface.c in package webos-nfc-adapter-src contains reference to TMPDIR [buildpaths]
+ERROR_QA:remove = "buildpaths"
+WARN_QA:append = " buildpaths"

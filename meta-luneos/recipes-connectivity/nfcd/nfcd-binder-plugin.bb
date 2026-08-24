@@ -20,7 +20,7 @@ SRCREV = "25a67ba973dc118d14625c2d66f75ca0afaa1bfc"
 # The plugin picks the HAL flavour at runtime: the HIDL backend speaks
 # android.hardware.nfc@1.0 (Halium 9/11) and the AIDL backend speaks
 # android.hardware.nfc.INfc (Halium 13), so one build covers both.
-EXTRA_OEMAKE = "KEEP_SYMBOLS=1 PLUGIN_DIR=${libdir}/nfcd/plugins"
+EXTRA_OEMAKE = "CROSS_COMPILE=${TARGET_PREFIX} CC='${CC}' KEEP_SYMBOLS=1 PLUGIN_DIR=${libdir}/nfcd/plugins"
 PARALLEL_MAKE = ""
 
 do_compile() {

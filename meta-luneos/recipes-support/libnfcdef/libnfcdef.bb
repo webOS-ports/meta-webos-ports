@@ -16,7 +16,7 @@ SRCREV = "2f4d115c977919de74fbf1ab30ce8d43b1d7ed32"
 
 # The upstream Makefile derives its lib dir from pkg-config, which resolves to
 # the host's when cross compiling, so pass it explicitly.
-EXTRA_OEMAKE = "KEEP_SYMBOLS=1 LIBDIR=${libdir}"
+EXTRA_OEMAKE = "CROSS_COMPILE=${TARGET_PREFIX} CC='${CC}' KEEP_SYMBOLS=1 LIBDIR=${libdir}"
 PARALLEL_MAKE = ""
 
 do_compile() {
