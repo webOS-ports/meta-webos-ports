@@ -77,6 +77,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0014-battery.c-Return-proper-current.patch \
     file://0020-keys-fix-pointer-types-rejected-by-GCC-15.patch \
     file://0021-touchpanel-mtdev-fix-finger-type-and-declare-gesture-.patch \
+    file://0022-Read-device-paths-from-etc-nyx.conf-at-runtime.patch \
 "
 
 SRC_URI:append = " \
