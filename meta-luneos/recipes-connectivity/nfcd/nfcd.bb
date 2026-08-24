@@ -38,6 +38,18 @@ do_install() {
     # a non-root user (bluebinder has the same constraint), so run as root.
     sed -i '/^User=nfc$/d' ${D}${systemd_unitdir}/system/nfcd.service
 
+    # nfcd's dbus_neard plugin exposes a neard compatible org.neard interface
+    # and ships the matching D-Bus policy. connman pulls in the real neard,
+    # which owns that same path, so the two clash at rootfs assembly:
+    #
+    #   Package nfcd wants to install file /etc/dbus-1/system.d/org.neard.conf
+    #   But that file is already provided by package neard
+    #
+    # Leave the file to neard and stop nfcd from contending for the bus name.
+    rm -f ${D}${sysconfdir}/dbus-1/system.d/org.neard.conf
+    sed -i 's|^ExecStart=\(.*\)/nfcd -o syslog|ExecStart=\1/nfcd -o syslog -d dbus_neard|' \
+        ${D}${systemd_unitdir}/system/nfcd.service
+
     # Persistent settings (the enabled flag lives here)
     install -d -m 0700 ${D}${localstatedir}/lib/nfcd
 
