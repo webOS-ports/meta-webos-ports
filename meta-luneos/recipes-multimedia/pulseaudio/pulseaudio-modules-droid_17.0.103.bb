@@ -28,6 +28,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/pulseaudio-modules-droid-modern:"
 
 SRC_URI = "git://github.com/droidian/pulseaudio-modules-droid-modern.git;branch=droidian;protocol=https \
     file://0001-modules-declare-the-PulseAudio-version-we-build-agai.patch \
+    file://0002-droid-util-fall-back-to-set_parameters-without-audio.patch \
 "
 
 inherit meson pkgconfig

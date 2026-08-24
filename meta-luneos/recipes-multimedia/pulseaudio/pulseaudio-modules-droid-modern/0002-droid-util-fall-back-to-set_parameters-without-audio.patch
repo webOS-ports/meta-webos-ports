@@ -1,0 +1,94 @@
+From d93755622be0ded3796da0d3a1abaf6facf853e8 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <Github.com@herrie.org>
+Date: Mon, 24 Aug 2026 15:51:24 +0200
+Subject: [PATCH] droid-util: fall back to set_parameters when the HAL has no
+ audio patch API
+
+create_audio_patch and release_audio_patch are optional members of
+audio_hw_device_t. A HAL that does not implement them leaves the
+pointers NULL, and droid-util called create_audio_patch unconditionally,
+so on such a device PulseAudio jumps to address zero before it has
+created a single sink:
+
+    #0  0x0000000000000000 n/a (n/a + 0x0)
+    #1  0x0000007f90aeaef0 audio_patch_update_output (libdroid-util.so)
+    pulseaudio.service: Main process exited, code=dumped, status=11/SEGV
+
+Seen on a Google Pixel 3a running its stock Android 12L vendor, where
+the HAL implements neither.
+
+The fallback already exists - output_stream_set_parameter() and
+input_stream_set_parameter(), selected by the
+use_legacy_stream_set_parameters option - so this only picks it. Rather
+than making every affected device set that option, ask the HAL: a NULL
+function pointer is the HAL saying it has no patch API, and a config
+file restating that can only ever go out of sync with it. The option is
+still honoured for HALs that implement the API but want the legacy route
+regardless.
+
+audio_patch_release() needs no guard: it dereferences the pointer only
+when a patch handle exists, which cannot happen if creating one never
+succeeded.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/common/droid-util.c | 31 +++++++++++++++++++++++++++++--
+ 1 file changed, 29 insertions(+), 2 deletions(-)
+
+diff --git a/src/common/droid-util.c b/src/common/droid-util.c
+index 39ee096..4e51330 100644
+--- a/src/common/droid-util.c
++++ b/src/common/droid-util.c
+@@ -2064,6 +2064,33 @@ static void stream_update_bt_sco(pa_droid_hw_module *hw_module, const dm_config_
+     }
+ }
+ 
++/* Whether this HAL can route with the audio patch API.
++ *
++ * create_audio_patch and release_audio_patch are optional members of
++ * audio_hw_device_t: a HAL that predates the patch API, or simply does not
++ * implement it, leaves them NULL. Calling one then jumps to address zero, which
++ * is what the Pixel 3a's HAL does - SIGSEGV with a null frame under
++ * audio_patch_update_output(), before a single sink appears.
++ *
++ * The set_parameters path this falls back to is already here, selected by the
++ * use_legacy_stream_set_parameters option. Requiring every such device to
++ * declare that option is asking a config file to restate something the HAL has
++ * already told us by leaving the pointer NULL, so ask the HAL instead. The
++ * option stays honoured for HALs that do implement the API but want the legacy
++ * route anyway.
++ */
++static bool audio_patches_supported(pa_droid_hw_module *hw) {
++    pa_assert(hw);
++    pa_assert(hw->device);
++
++    return hw->device->create_audio_patch && hw->device->release_audio_patch;
++}
++
++static bool use_legacy_set_parameters(pa_droid_hw_module *hw) {
++    return pa_droid_option(hw, DM_OPTION_USE_LEGACY_STREAM_SET_PARAMETERS) ||
++           !audio_patches_supported(hw);
++}
++
+ static void audio_patch_release(pa_droid_stream *stream) {
+     int ret;
+ 
+@@ -2295,7 +2322,7 @@ static int input_stream_set_route(pa_droid_stream *stream, const dm_config_port
+     if (!input->stream)
+         goto done;
+ 
+-    if (!pa_droid_option(stream->module, DM_OPTION_USE_LEGACY_STREAM_SET_PARAMETERS)) {
++    if (!use_legacy_set_parameters(stream->module)) {
+         audio_patch_release(stream);
+         ret = audio_patch_update_input(stream, device_port);
+     } else {
+@@ -2316,7 +2343,7 @@ int pa_droid_stream_set_route(pa_droid_stream *s, dm_config_port *device_port) {
+ 
+     if (s->output) {
+         int ret;
+-        if (!pa_droid_option(s->module, DM_OPTION_USE_LEGACY_STREAM_SET_PARAMETERS)) {
++        if (!use_legacy_set_parameters(s->module)) {
+             if (pa_droid_stream_is_primary(s))
+                 stream_update_bt_sco(s->module, device_port);
+ 
