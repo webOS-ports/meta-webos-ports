@@ -13,7 +13,6 @@ inherit pkgconfig
 inherit systemd
 
 SRC_URI = "git://github.com/sailfishos/nfcd.git;protocol=https;branch=master"
-S = "${WORKDIR}/git"
 
 PV = "1.2.7"
 SRCREV = "f748b1c32dae72dc29e4af276a85bc4bc1d5b000"
