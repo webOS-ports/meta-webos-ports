@@ -26,4 +26,3 @@ WEBOS_REPO_NAME = "webos-nfc-adapter"
 LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"

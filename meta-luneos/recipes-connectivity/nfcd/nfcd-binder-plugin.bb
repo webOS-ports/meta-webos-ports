@@ -13,7 +13,6 @@ inherit pkgconfig
 COMPATIBLE_MACHINE = "^halium$"
 
 SRC_URI = "git://github.com/mer-hybris/nfcd-binder-plugin.git;protocol=https;branch=master"
-S = "${WORKDIR}/git"
 
 PV = "1.2.1"
 SRCREV = "25a67ba973dc118d14625c2d66f75ca0afaa1bfc"

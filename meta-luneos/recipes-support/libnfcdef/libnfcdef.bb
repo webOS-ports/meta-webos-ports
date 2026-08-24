@@ -10,7 +10,6 @@ DEPENDS = "glib-2.0 libglibutil"
 inherit pkgconfig
 
 SRC_URI = "git://github.com/sailfishos/libnfcdef.git;protocol=https;branch=master"
-S = "${WORKDIR}/git"
 
 PV = "1.1.0"
 SRCREV = "2f4d115c977919de74fbf1ab30ce8d43b1d7ed32"
