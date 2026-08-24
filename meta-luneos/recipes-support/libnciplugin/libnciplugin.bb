@@ -10,7 +10,6 @@ DEPENDS = "glib-2.0 libglibutil libncicore nfcd"
 inherit pkgconfig
 
 SRC_URI = "git://github.com/mer-hybris/libnciplugin.git;protocol=https;branch=master"
-S = "${WORKDIR}/git"
 
 PV = "1.2.2"
 SRCREV = "0b543f1aa1f2d88fb14c38c15c8a6beb6ce13b0f"

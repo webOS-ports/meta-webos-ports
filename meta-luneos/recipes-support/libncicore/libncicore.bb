@@ -10,7 +10,6 @@ DEPENDS = "glib-2.0 libglibutil"
 inherit pkgconfig
 
 SRC_URI = "git://github.com/mer-hybris/libncicore.git;protocol=https;branch=master"
-S = "${WORKDIR}/git"
 
 PV = "1.1.33"
 SRCREV = "aa9ccbb1148e49852e56df2241ecea15f80861a1"
