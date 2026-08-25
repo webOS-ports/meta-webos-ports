@@ -19,8 +19,8 @@ SRC_URI = " \
 
 do_install() {
     install -d ${D}${sysconfdir}/pulse
-    install -m 0644 ${WORKDIR}/webos-system.pa ${D}${sysconfdir}/pulse/
-    install -m 0644 ${WORKDIR}/webos-virtual-devices.pa ${D}${sysconfdir}/pulse/
+    install -m 0644 ${UNPACKDIR}/webos-system.pa ${D}${sysconfdir}/pulse/
+    install -m 0644 ${UNPACKDIR}/webos-virtual-devices.pa ${D}${sysconfdir}/pulse/
 }
 
 FILES:${PN} = "${sysconfdir}/pulse"
