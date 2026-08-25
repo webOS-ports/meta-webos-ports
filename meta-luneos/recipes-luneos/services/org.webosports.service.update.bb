@@ -15,7 +15,7 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/service"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
-WEBOS_SYSTEM_BUS_FILES_LOCATION = "${WORKDIR}/git/files/sysbus"
+WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/../files/sysbus"
 
 do_install() {
     # Install service and remove unecessary things

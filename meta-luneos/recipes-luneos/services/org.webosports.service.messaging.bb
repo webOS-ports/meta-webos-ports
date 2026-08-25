@@ -1,7 +1,7 @@
 SUMMARY = "webOS Ports Messaging service"
 SECTION = "webos/services"
 LICENSE = "Apache-2.0"
-LIC_FILES_CHKSUM = "file://${WORKDIR}/git/COPYING-Apache-2.0;md5=3b83ef96387f14655fc854ddc3c6bd57"
+LIC_FILES_CHKSUM = "file://../COPYING-Apache-2.0;md5=3b83ef96387f14655fc854ddc3c6bd57"
 
 inherit webos_ports_repo
 inherit allarch
@@ -16,7 +16,7 @@ WEBOS_REPO_NAME = "org.webosports.messaging"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/service"
 
-WEBOS_SYSTEM_BUS_FILES_LOCATION = "${WORKDIR}/git/files/sysbus"
+WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/../files/sysbus"
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 
 do_install() {
