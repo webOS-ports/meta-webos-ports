@@ -1,0 +1,156 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: LuneOS / webOS Ports <team@webos-ports.org>
+Date: Thu, 13 Aug 2026 00:00:00 +0000
+Subject: [PATCH] webos-wayland-egl: follow QtWayland private API changes in
+ 6.12
+
+The plugin subclasses QtWayland client internals, several of which changed
+when Qt 6.10 moved the client into qtbase:
+
+  * QWaylandIntegration lost its default constructor and now requires the
+    platform name. create() was discarding the requested name with
+    Q_UNUSED, so thread it through instead of inventing one.
+  * QWaylandIntegration::mDisplay became std::unique_ptr, so .data() is .get().
+  * QWaylandWindow::mWaitingForFrameCallback is gone; a pending callback is
+    now simply mFrameCallback being non-null.
+  * QWaylandWindow::updateSurface() was split up and the replacement scale
+    handling (updateScale/setScale/handleScreensChanged) is private, driven by
+    QWaylandWindow's own screen-change path. The two forced refreshes here
+    therefore have no accessible equivalent and are dropped.
+  * QWaylandInputDevice::Keyboard lost focusWindow(); derive it from the
+    focused surface instead.
+  * QWaylandPointerEvent now takes a QWaylandSurface rather than a
+    QWaylandWindow.
+  * QWaylandSurface lost devicePixelRatio(); go through its window.
+
+Upstream-Status: Inappropriate [webOS-specific plugin against Qt private API]
+---
+--- a/src/plugins/platforms/webos-wayland-egl/main.cpp
++++ b/src/plugins/platforms/webos-wayland-egl/main.cpp
+@@ -31,8 +31,7 @@
+ QPlatformIntegration *WebOSIntegrationPlugin::create(const QString& system, const QStringList& paramList)
+ {
+     Q_UNUSED(paramList);
+-    Q_UNUSED(system);
+-    auto *integration = new WebOSEglPlatformIntegration();
++    auto *integration = new WebOSEglPlatformIntegration(system);
+ 
+ #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 1)
+     if (!integration->init()) {
+--- a/src/plugins/platforms/webos-wayland-egl/webosintegration.cpp
++++ b/src/plugins/platforms/webos-wayland-egl/webosintegration.cpp
+@@ -33,9 +33,10 @@
+ 
+ using QtWaylandClient::QWaylandClipboard;
+ 
+-WebOSIntegration::WebOSIntegration()
++WebOSIntegration::WebOSIntegration(const QString &platformName)
+ #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+-    : QWaylandIntegration()
++    // Qt 6.10 dropped the default constructor; the platform name is now required.
++    : QWaylandIntegration(platformName)
+ #else
+     : QWaylandIntegration(true)
+ #endif
+@@ -46,7 +47,7 @@
+ #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+     mNativeInterface.reset(new WebOSNativeInterface(this));
+     mDisplay.reset(new QWaylandDisplay(this));
+-    mClipboard.reset(new QWaylandClipboard(mDisplay.data()));
++    mClipboard.reset(new QWaylandClipboard(mDisplay.get()));
+ #endif
+ }
+ 
+@@ -87,7 +88,7 @@
+         ::exit(1);
+     }
+ 
+-    return new WebOSPlatformWindow(window, mDisplay.data());
++    return new WebOSPlatformWindow(window, mDisplay.get());
+ #else
+     return new WebOSPlatformWindow(window);
+ #endif
+--- a/src/plugins/platforms/webos-wayland-egl/webosintegration_p.h
++++ b/src/plugins/platforms/webos-wayland-egl/webosintegration_p.h
+@@ -35,7 +35,7 @@
+ class WebOSIntegration : public QWaylandIntegration
+ {
+ public:
+-    WebOSIntegration();
++    WebOSIntegration(const QString &platformName);
+     ~WebOSIntegration();
+ 
+     QPlatformWindow *createPlatformWindow(QWindow *window) const override;
+--- a/src/plugins/platforms/webos-wayland-egl/weboseglplatformintegration.h
++++ b/src/plugins/platforms/webos-wayland-egl/weboseglplatformintegration.h
+@@ -52,8 +52,8 @@
+ {
+ public:
+ #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+-    WebOSEglPlatformIntegration()
+-        : WebOSIntegration()
++    WebOSEglPlatformIntegration(const QString &platformName)
++        : WebOSIntegration(platformName)
+         , m_client_buffer_integration(new WebOSEglClientBufferIntegrationQt6())
+     {
+     }
+--- a/src/plugins/platforms/webos-wayland-egl/webosplatformwindow.cpp
++++ b/src/plugins/platforms/webos-wayland-egl/webosplatformwindow.cpp
+@@ -142,7 +142,7 @@
+         QWindowSystemInterface::flushWindowSystemEvents();
+         if (!deleteGuard.isNull()) {
+             // Delay hiding window if waiting for the frame callback (See WebOSPlatformWindow::doHandleFrameCallback())
+-            if (!mWaitingForFrameCallback) {
++            if (!mFrameCallback) {
+                 attach(0, 0, 0);
+                 mSurface->commit();
+             }
+@@ -285,7 +285,9 @@
+ 
+ void WebOSPlatformWindow::onDevicePixelRatioChanged()
+ {
+-    updateSurface(false);
++    // Qt 6.10 made QWaylandWindow's scale handling private (updateScale() and
++    // setScale() are no longer reachable from a subclass) and drives it from
++    // its own screen-change path, so there is nothing to force here any more.
+ }
+ 
+ void WebOSPlatformWindow::onScreenChanged(QScreen *screen)
+@@ -294,5 +296,6 @@
+     if (waylandScreen())
+         qInfo() << "Screen changed to output" << waylandScreen()->outputId() << waylandScreen()->name() << waylandScreen()->geometry();
+     onOutputTransformChanged();
+-    updateSurface(false);
++    // Scale is refreshed by QWaylandWindow itself since Qt 6.10; see
++    // onDevicePixelRatioChanged().
+ }
+--- a/src/plugins/platforms/webos-wayland-egl/webosinputdevice.cpp
++++ b/src/plugins/platforms/webos-wayland-egl/webosinputdevice.cpp
+@@ -439,7 +439,7 @@
+     PMTRACE_FUNCTION;
+ 
+ #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+-    auto *window = Keyboard::focusWindow();
++    auto *window = mFocus ? mFocus->waylandWindow() : nullptr;
+     if (window && !window->window()->isActive()) {
+         // Due to the asynchronous window activation by the upstream commit f497a5b,
+         // the window may not yet be activated at the time when the very first key
+@@ -583,7 +583,7 @@
+     QWaylandWindow *grab = QWaylandWindow::mouseGrab();
+     if (!grab) {
+ #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+-        QtWaylandClient::QWaylandPointerEvent enter(QEvent::Type::Enter, Qt::ScrollBegin, window,
++        QtWaylandClient::QWaylandPointerEvent enter(QEvent::Type::Enter, Qt::ScrollBegin, window->waylandSurface(),
+                 parent->getTime(), mSurfacePos, mGlobalPos, mButtons, Qt::NoButton, parent->modifiers());
+ #else
+         QtWaylandClient::QWaylandPointerEvent enter(QtWaylandClient::QWaylandPointerEvent::Enter, parent->getTime(),
+@@ -783,7 +783,8 @@
+         return;
+ #endif
+ 
+-    Touch::touch_motion(time, id, x / mFocus->devicePixelRatio(), y / mFocus->devicePixelRatio());
++    Touch::touch_motion(time, id, x / mFocus->waylandWindow()->devicePixelRatio(),
++                    y / mFocus->waylandWindow()->devicePixelRatio());
+ }
+ 
+ void WebOSInputDevice::WebOSTouch::touch_cancel()

@@ -11,7 +11,7 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "qtbase"
 
-WEBOS_VERSION = "1.0.0-55_8bf2bf5ced2aafd6220233cbddc750965ff535d1"
+WEBOS_VERSION = "1.0.0-58_3bbd046f3f87c5316a8ebf5b1f4224dfca337f96"
 PR = "r8"
 
 inherit webos_qmake6
@@ -20,6 +20,7 @@ inherit webos_enhanced_submissions
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Do-not-depend-on-QtInputSupport-for-generate_qmap.patch \
+    file://0002-generate_qmap-drop-the-QKeyboardMap-alias.patch \
 "
 
 FILES:${PN}-dev += "${OE_QMAKE_PATH_QT_ARCHDATA}/mkspecs"
