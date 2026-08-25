@@ -14,6 +14,7 @@ SRCREV = "3633c18f924c3fc501b5f090ec9a760890002295"
 inherit webos_ports_repo
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI += "file://0001-Fix-return-mismatch-errors-for-gcc-14.patch"
 
 CLEANBROKEN = "1"
 
@@ -34,7 +35,3 @@ do_install() {
 # journal.c:207:16: error: implicit declaration of function 'close'; did you mean 'pclose'? [-Wimplicit-function-declaration]
 # crash_handler.c:611:16: error: implicit declaration of function 'klogctl' [-Wimplicit-function-declaration]
 CFLAGS += "-Wno-error=implicit-function-declaration"
-
-# guess-unwinder.c:95:49: error: 'return' with no value, in function returning non-void [-Wreturn-mismatch]
-# crash_handler.c:419:9: error: 'return' with no value, in function returning non-void [-Wreturn-mismatch]
-CFLAGS += "-Wno-error=return-mismatch"

@@ -1,0 +1,57 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] Fix return-mismatch errors that gcc 14 promotes to hard errors
+
+'return' with no value in a function returning non-void was a warning for
+decades and became an error in gcc 14 (-Wreturn-mismatch), which is what the
+build now trips over:
+
+  guess-unwinder.c:95:49: error: 'return' with no value, in function returning non-void
+  crash_handler.c:419:9: error: 'return' with no value, in function returning non-void
+
+Both sites are ARM32-only code, which is why this only shows up on a 32-bit
+ARM machine and never on aarch64.
+
+Fixed rather than silenced with -Wno-error=return-mismatch, because falling off
+guess_unwind_backtrace_with_ptrace() leaves an indeterminate value that the
+caller consumes as a frame count:
+
+    stack_depth = guess_unwind_backtrace_with_ptrace(...);
+    if (stack_depth < 2) dump_pc_and_lr(pid, milist, stack_depth);
+    dump_stack_and_code(pid, milist, stack_depth, sp_list, frame0_pc_sane);
+
+Returning 0 matches the function's existing give-up path ("lr doesn't point to
+a branch link instruction"), so a failed PTRACE_GETREGS now reports no frames
+instead of garbage.
+
+dump_pc_code() never returned a value on any path and its single caller ignores
+the result, so it becomes void.
+
+Upstream-Status: Inappropriate [LuneOS-specific fork of Tim Bird's crash_handler]
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+
+diff --git a/crash_handler.c b/crash_handler.c
+index 308f0b8..98f9006 100644
+--- a/crash_handler.c
++++ b/crash_handler.c
+@@ -405,7 +405,7 @@ void dump_fault_addr(int pid, int sig)
+     LOG("\n");
+ }
+ 
+-int dump_pc_code(int pid)
++void dump_pc_code(int pid)
+ {
+     struct pt_regs r;
+     //pt_regs r;
+diff --git a/guess-unwinder.c b/guess-unwinder.c
+index cba371c..88d0024 100644
+--- a/guess-unwinder.c
++++ b/guess-unwinder.c
+@@ -92,7 +92,7 @@ int guess_unwind_backtrace_with_ptrace(int pid, mapinfo *milist,
+ 	/* move up stack looking at addresses */
+ 
+ 	/* set up regs for backtrace */
+-	if (ptrace(PTRACE_GETREGS, pid, 0, &r)) return;
++	if (ptrace(PTRACE_GETREGS, pid, 0, &r)) return 0;
+ 	sp = r.ARM_sp;
+ 	pc = r.ARM_pc;
+ 	lr = r.ARM_lr;
