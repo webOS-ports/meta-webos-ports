@@ -25,8 +25,6 @@ SRC_URI = "git://github.com/webosose/pulseaudio-webos.git;branch=master;protocol
     file://Makefile \
 "
 
-S = "${WORKDIR}/git"
-
 inherit pkgconfig
 
 # PA_MAJORMINOR must match the running daemon or PulseAudio refuses to load the
@@ -41,11 +39,11 @@ EXTRA_OEMAKE = " \
 do_configure[noexec] = "1"
 
 do_compile() {
-    oe_runmake -C ${S}/src/modules -f ${WORKDIR}/Makefile all
+    oe_runmake -C ${S}/src/modules -f ${UNPACKDIR}/Makefile all
 }
 
 do_install() {
-    oe_runmake -C ${S}/src/modules -f ${WORKDIR}/Makefile install DESTDIR=${D}
+    oe_runmake -C ${S}/src/modules -f ${UNPACKDIR}/Makefile install DESTDIR=${D}
 }
 
 FILES:${PN} = "${libdir}/pulseaudio/modules/module-palm-policy.so"
