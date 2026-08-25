@@ -36,5 +36,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 # http://gecko.lge.com:8000/Errors/Details/894426
 # ERROR: QA Issue: File /usr/src/debug/bluetooth-sil-bluez5/0.1.0-86/Configured/src/freedesktop-interface.c in package bluetooth-sil-bluez5-src contains reference to TMPDIR
 # File /usr/src/debug/bluetooth-sil-bluez5/0.1.0-86/Configured/src/bluez-interface.c in package bluetooth-sil-bluez5-src contains reference to TMPDIR [buildpaths]
-ERROR_QA:remove = "buildpaths"
-WARN_QA:append = " buildpaths"
+# Scoped to -src: only the generated source carries the build path, and that
+# package never reaches an image. Demoting the check for the whole recipe
+# would also stop it catching a build path in something that does ship.
+INSANE_SKIP:${PN}-src += "buildpaths"

@@ -78,5 +78,7 @@ do_install:append() {
 CFLAGS += "-Wno-error=incompatible-pointer-types"
 
 # ERROR: webos-telephonyd-0.1.0-1+git-r0 do_package_qa: QA Issue: File /usr/src/debug/webos-telephonyd/0.1.0-1+git/Configured/src/ofono-interface.c in package webos-telephonyd-src contains reference to TMPDIR [buildpaths]
-ERROR_QA:remove = "buildpaths"
-WARN_QA:append = " buildpaths"
+# Scoped to -src: only the generated source carries the build path, and that
+# package never reaches an image. Demoting the check for the whole recipe
+# would also stop it catching a build path in something that does ship.
+INSANE_SKIP:${PN}-src += "buildpaths"

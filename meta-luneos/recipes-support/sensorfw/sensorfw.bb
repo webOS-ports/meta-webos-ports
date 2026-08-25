@@ -78,12 +78,23 @@ FILES:${PN} = " \
     ${libdir} \
 "
 
-# ERROR: sensorfw-0.14.4+git-r0 do_package_qa: QA Issue: File /usr/bin/sensorbenchmark-test in package sensorfw contains reference to TMPDIR
-# File /usr/bin/sensordataflow-test in package sensorfw contains reference to TMPDIR
-# File /usr/bin/sensoradaptors-test in package sensorfw contains reference to TMPDIR
-# File /usr/bin/sensormetadata-test in package sensorfw contains reference to TMPDIR
-# File /usr/bin/sensorapi-test in package sensorfw contains reference to TMPDIR
-# File /usr/bin/sensorfilters-test in package sensorfw contains reference to TMPDIR
-# File /usr/bin/sensorchains-test in package sensorfw contains reference to TMPDIR [buildpaths]
-ERROR_QA:remove = "buildpaths"
-WARN_QA:append = " buildpaths"
+PACKAGES =+ "${PN}-tests"
+
+# qmake's testcase.prf bakes -DQT_TESTCASE_BUILDDIR='"$$OUT_PWD"' into every
+# target with CONFIG+=testcase, for QFINDTESTDATA to find its data at runtime.
+# It is a string literal rather than debug info, so -ffile-prefix-map does not
+# touch it and nothing can strip it afterwards - which is why this recipe used
+# to demote buildpaths from error to warning for the whole package.
+#
+# Scope it instead: the test binaries are the only things carrying a build path,
+# and an image has no business shipping eleven of them in /usr/bin anyway. In
+# their own package they are out of the image and the check stays strict for
+# everything sensorfw actually installs.
+FILES:${PN}-tests = " \
+    ${bindir}/*-test \
+    ${bindir}/sensortestapp \
+    ${bindir}/datafaker-qt6 \
+    ${bindir}/sensordummyclient-qt6 \
+"
+INSANE_SKIP:${PN}-tests += "buildpaths"
+RDEPENDS:${PN}-tests = "${PN}"
