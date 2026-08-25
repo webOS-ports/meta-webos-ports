@@ -75,6 +75,9 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0012-charger-read-usb_type-current_max-and-vendor_charger.patch \
     file://0013-battery-charger-Allow-path-override-from-cmake.patch \
     file://0014-battery.c-Return-proper-current.patch \
+    file://0020-keys-fix-pointer-types-rejected-by-GCC-15.patch \
+    file://0021-touchpanel-mtdev-fix-finger-type-and-declare-gesture-.patch \
+    file://0022-Read-device-paths-from-etc-nyx.conf-at-runtime.patch \
 "
 
 SRC_URI:append = " \
@@ -83,9 +86,9 @@ SRC_URI:append = " \
 
 do_configure:prepend() {
     # Install additional machine specific nyx configuration before CMake is started
-    if [ -f ${WORKDIR}/${MACHINE}.cmake ]
+    if [ -f ${UNPACKDIR}/${MACHINE}.cmake ]
     then
-        cp ${WORKDIR}/${MACHINE}.cmake ${S}/src/machine.cmake
+        cp ${UNPACKDIR}/${MACHINE}.cmake ${S}/src/machine.cmake
     fi
 }
 

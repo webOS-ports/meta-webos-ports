@@ -27,4 +27,3 @@ SRC_URI = " \
     ${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-luna-prefs-Fix-outbound-permissions.patch \
 "
-

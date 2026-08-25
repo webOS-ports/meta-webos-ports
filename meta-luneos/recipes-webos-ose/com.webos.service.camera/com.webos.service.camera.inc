@@ -17,4 +17,3 @@ inherit webos_system_bus
 inherit webos_daemon
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-

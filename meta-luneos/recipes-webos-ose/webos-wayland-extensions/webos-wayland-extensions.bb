@@ -30,3 +30,16 @@ FILES:${PN}-dev += "${datadir}/*"
 # File /usr/share/pkgconfig/wayland-webos-server.pc in package webos-wayland-extensions-dev contains reference to TMPDIR [buildpaths]
 ERROR_QA:remove = "buildpaths"
 WARN_QA:append = " buildpaths"
+
+# The generated .pc files interpolate a CMake list straight after -l, so
+# wayland-client;m (pkg_check_modules' _LIBRARIES) becomes a single bogus
+# link flag:
+#   Libs: -L${libdir} -lwayland-webos-client -lwayland-client;m
+# Every consumer then fails to link - qtwayland-webos died with
+#   ld: cannot find -lwayland-client;m
+# Turn the list separator back into a proper -l. Done here rather than in the
+# CMakeLists because the same substitution covers both the client and server
+# .pc files regardless of which libraries pkg-config reports.
+do_install:append() {
+    sed -i '/^Libs:/s/;/ -l/g' ${D}${datadir}/pkgconfig/wayland-webos-*.pc
+}

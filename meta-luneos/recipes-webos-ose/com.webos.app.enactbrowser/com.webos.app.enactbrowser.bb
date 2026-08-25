@@ -10,7 +10,7 @@ LIC_FILES_CHKSUM = " \
 "
 
 WEBOS_VERSION = "1.0.0-17.browsershell.15_b9eab572b47b35018320bd6512a20d6cf8412ffe"
-PR = "r27"
+PR = "r26"
 
 inherit webos_public_repo
 inherit webos_enhanced_submissions
@@ -40,7 +40,6 @@ WEBOS_ENACTJS_PACK_FOR_BROWSERSHELL = "${@oe.utils.conditional('SUPPORT_BROWSERS
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-appinfo.json-Use-custom-icon-files-from-legacy.patch \
-    file://0001-sysbus-drop-the-undefined-media-ACG.patch \
     file://icon.png \
     file://icon-256x256.png \
 "
@@ -127,5 +126,5 @@ do_install[postfuncs] += "${@bb.utils.contains('DISTRO_FEATURES', 'smack', 'inst
 
 install_smack_rules (){
     install -d ${D}${sysconfdir}/smack/accesses.d
-    install -v -m 0644 ${WORKDIR}/com.webos.app.enactbrowser ${D}${sysconfdir}/smack/accesses.d/com.webos.app.enactbrowser
+    install -v -m 0644 ${UNPACKDIR}/com.webos.app.enactbrowser ${D}${sysconfdir}/smack/accesses.d/com.webos.app.enactbrowser
 }

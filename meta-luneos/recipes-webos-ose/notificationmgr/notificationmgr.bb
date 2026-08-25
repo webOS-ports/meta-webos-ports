@@ -30,6 +30,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0004-NotificationService.h-Add-back-bits-required-by-Lune.patch \
     file://0005-com.webos.notification.perm.json-Fix-incorrect-value.patch \
     file://0006-NotificationService-tell-subscribers-when-a-toast-is.patch \
+    file://0010-CMakeLists.txt-build-as-C-17-for-libxml-5.0.patch \
 "
 
 inherit webos_systemd
