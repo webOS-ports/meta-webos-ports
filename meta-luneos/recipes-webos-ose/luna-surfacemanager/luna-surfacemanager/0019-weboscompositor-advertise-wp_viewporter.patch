@@ -1,0 +1,77 @@
+From 9048b393e327d009a8355834bea8695c09de31dd Mon Sep 17 00:00:00 2001
+From: LuneOS <team@webos-ports.org>
+Date: Sat, 22 Aug 2026 14:30:33 +0200
+Subject: [PATCH] weboscompositor: advertise wp_viewporter
+
+Clients that want to present a buffer smaller than their window have no way
+to say so: without wp_viewporter a wl_surface is displayed at exactly its
+buffer size, so anything wanting to scale must render at the full output
+resolution itself.
+
+That is expensive when the renderer is a CPU rasteriser. Legacy PDK/SDL games
+run against llvmpipe in the soft-float sysroot and draw a 320x480 mode; with
+no viewporter SDL2 cannot use its Wayland mode-setting path, falls back to a
+desktop-sized surface, and llvmpipe rasterises 1080x1620 instead of 320x480 -
+11x the pixels. Measured on sargo with Bubble Bash, counting wl_surface.commit
+on the wire: 2.7fps as shipped, 18.8fps rendering at the game's own size.
+
+There is no accelerated client path to fall back on there. sargo's Adreno 615
+sits behind Qualcomm's downstream KGSL driver, and msm_drm is bound to the
+display controller only (ae00000.qcom,mdss_mdp), so freedreno has no GPU to
+drive and the compositor is the only process with hardware access - it holds
+it through hwcomposer.
+
+wp_viewporter lets the client hand over a small buffer and a destination size
+and have the compositor scale it, which puts that upscale on the GPU the
+compositor already has and costs the client nothing.
+
+QWaylandViewporter is a plain compositor extension: constructing it advertises
+the global, and QWaylandSurface/QWaylandQuickItem already honour
+destinationSize once a client sets one, so no surface handling changes here.
+
+Upstream-Status: Pending
+---
+ modules/weboscompositor/weboscorecompositor.cpp | 2 ++
+ modules/weboscompositor/weboscorecompositor.h   | 2 ++
+ 2 files changed, 4 insertions(+)
+
+diff --git a/modules/weboscompositor/weboscorecompositor.cpp b/modules/weboscompositor/weboscorecompositor.cpp
+index d395ced..1cbb0d8 100644
+--- a/modules/weboscompositor/weboscorecompositor.cpp
++++ b/modules/weboscompositor/weboscorecompositor.cpp
+@@ -240,6 +240,7 @@ WebOSCoreCompositor::WebOSCoreCompositor(ExtensionFlags extensions, const char *
+     , m_surfaceModel(nullptr)
+     , m_wlShell(new QWaylandWlShell(this))
+     , m_xdgShell(new QWaylandXdgShell(this))
++    , m_viewporter(new QWaylandViewporter(this))
+ #ifdef MULTIINPUT_SUPPORT
+     , m_lastMouseEventFrom(0)
+     , m_inputDevicePreallocated(0)
+@@ -336,6 +337,7 @@ WebOSCoreCompositor::~WebOSCoreCompositor()
+     delete m_eventPreprocessor;
+     delete m_wlShell;
+     delete m_xdgShell;
++    delete m_viewporter;
+ }
+ 
+ void WebOSCoreCompositor::insertToWindows(WebOSCompositorWindow *window)
+diff --git a/modules/weboscompositor/weboscorecompositor.h b/modules/weboscompositor/weboscorecompositor.h
+index e5a0fb0..f5a413e 100644
+--- a/modules/weboscompositor/weboscorecompositor.h
++++ b/modules/weboscompositor/weboscorecompositor.h
+@@ -32,6 +32,7 @@
+ #include <WebOSCoreCompositor/weboskeyfilter.h>
+ #include <QtWaylandCompositor/QWaylandWlShellSurface>
+ #include <QtWaylandCompositor/QWaylandXdgShell>
++#include <QtWaylandCompositor/QWaylandViewporter>
+ 
+ #include "unixsignalhandler.h"
+ #include "webossurfaceitem.h"
+@@ -352,6 +353,7 @@ private:
+     WebOSInputManager *m_inputManager;
+     QWaylandWlShell *m_wlShell = nullptr;
+     QWaylandXdgShell *m_xdgShell = nullptr;
++    QWaylandViewporter *m_viewporter = nullptr;
+ #ifdef MULTIINPUT_SUPPORT
+     WebOSInputDevice *m_inputDevicePreallocated;
+     int m_lastMouseEventFrom;
