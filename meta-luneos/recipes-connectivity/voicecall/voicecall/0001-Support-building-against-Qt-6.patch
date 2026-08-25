@@ -1,0 +1,258 @@
+From 6bfaf2a7aaca47c436d53ad45ae58b69a92b2c65 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sat, 15 Aug 2026 21:25:12 +0200
+Subject: [PATCH 1/2] Support building against Qt 6
+
+The sources build against Qt 5 or Qt 6 from the same tree:
+
+  - qofono is looked up as qofono-qt$${QT_MAJOR_VERSION} rather than
+    hardcoding qofono-qt5.
+  - qt5-boostable is only looked for on Qt 5; there is no Qt 6 equivalent
+    and packagesExist() would warn on every build otherwise.
+  - The recorder uses the Qt 6 multimedia API - QAudioSource,
+    QAudioDevice and QMediaDevices - behind QT_VERSION checks. Qt 6
+    dropped setSampleSize/setCodec/setByteOrder/setSampleType: a
+    QAudioFormat there is always host-order linear PCM described by a
+    single sample format, so Int16 replaces the four Qt 5 calls, and
+    preferredFormat() replaces nearestFormat().
+  - Q_MOC_INCLUDE tells moc where forward-declared types used in
+    properties live; it needs Qt 5.15 or newer, so it is guarded.
+  - mlite5 is dropped from src/src.pro, which hardcoded the Qt 5 flavour
+    of a package that has a Qt 6 one. It is still needed - cellbroadcast-
+    topics.cpp uses MDConfItem - so the next commit brings it back as an
+    optional, version-agnostic dependency instead of a hard Qt 5 one.
+
+Also lets a distribution point the plugin directory somewhere other than
+$$[QT_INSTALL_LIBS] via VOICECALL_INSTALL_LIBDIR, since that value comes
+from the Qt running qmake, which is the host Qt when cross-building.
+Upstream-Status: Pending [written against 8e6ec88, intended for sailfishos/voicecall]
+---
+ lib/src/abstractvoicecallhandler.h            |  7 ++++++
+ lib/src/src.pro                               |  8 ++++++-
+ .../src/voicecallaudiorecorder.cpp            | 22 +++++++++++++++++++
+ .../declarative/src/voicecallaudiorecorder.h  |  9 ++++++++
+ plugins/declarative/src/voicecallhandler.h    |  7 ++++++
+ plugins/plugin.pri                            |  8 ++++++-
+ plugins/plugins.pro                           |  9 +++++++-
+ plugins/providers/ofono/src/src.pro           |  2 +-
+ src/src.pro                                   | 12 +++++++---
+ 9 files changed, 77 insertions(+), 7 deletions(-)
+
+diff --git a/lib/src/abstractvoicecallhandler.h b/lib/src/abstractvoicecallhandler.h
+index c0bd768..56aac08 100644
+--- a/lib/src/abstractvoicecallhandler.h
++++ b/lib/src/abstractvoicecallhandler.h
+@@ -23,6 +23,13 @@
+ 
+ #include <QObject>
+ #include <QDateTime>
++#include <QtGlobal>
++
++#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
++// moc needs to know where the forward-declared type lives to generate the
++// property metacalls; before 5.15 it found it via the old include scan.
++Q_MOC_INCLUDE("abstractvoicecallprovider.h")
++#endif
+ 
+ class AbstractVoiceCallProvider;
+ 
+diff --git a/lib/src/src.pro b/lib/src/src.pro
+index a85a6aa..6c0d040 100644
+--- a/lib/src/src.pro
++++ b/lib/src/src.pro
+@@ -14,7 +14,13 @@ SOURCES += \
+     abstractvoicecallhandler.cpp \
+     common.cpp
+ 
+-target.path = $$[QT_INSTALL_LIBS]
++
++# $$[QT_INSTALL_LIBS] is queried from the Qt that runs qmake, which is the host
++# Qt when cross-building, so distributions need to be able to say where the
++# libraries will actually live on the target.
++VOICECALL_LIBDIR = $$[QT_INSTALL_LIBS]
++!isEmpty(VOICECALL_INSTALL_LIBDIR): VOICECALL_LIBDIR = $${VOICECALL_INSTALL_LIBDIR}
++target.path = $${VOICECALL_LIBDIR}
+ 
+ develheaders.path = /usr/include/voicecall
+ develheaders.files = $$HEADERS
+diff --git a/plugins/declarative/src/voicecallaudiorecorder.cpp b/plugins/declarative/src/voicecallaudiorecorder.cpp
+index 351d9f4..b324c79 100644
+--- a/plugins/declarative/src/voicecallaudiorecorder.cpp
++++ b/plugins/declarative/src/voicecallaudiorecorder.cpp
+@@ -44,6 +44,12 @@
+ #include <QDataStream>
+ #include <QStandardPaths>
+ #include <QtDebug>
++#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
++#include <QAudioDevice>
++#include <QMediaDevices>
++#else
++#include <QAudioDeviceInfo>
++#endif
+ 
+ #include <unistd.h>
+ 
+@@ -70,6 +76,16 @@ QAudioFormat getRecordingFormat()
+ 
+     format.setChannelCount(ChannelCount);
+     format.setSampleRate(SampleRate);
++
++#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
++    // Qt6 dropped the codec, byte order and sample size setters: a QAudioFormat
++    // is always host-order linear PCM now, described by a single sample format.
++    format.setSampleFormat(QAudioFormat::Int16);
++
++    const QAudioDevice info = QMediaDevices::defaultAudioInput();
++    if (!info.isFormatSupported(format)) {
++        format = info.preferredFormat();
++#else
+     format.setSampleSize(SampleBits);
+     format.setCodec(QStringLiteral("audio/pcm"));
+     format.setByteOrder(QAudioFormat::LittleEndian);
+@@ -78,6 +94,7 @@ QAudioFormat getRecordingFormat()
+     QAudioDeviceInfo info(QAudioDeviceInfo::defaultInputDevice());
+     if (!info.isFormatSupported(format)) {
+         format = info.nearestFormat(format);
++#endif
+     }
+ 
+     return format;
+@@ -304,8 +321,13 @@ bool VoiceCallAudioRecorder::initiateRecording(const QString &fileName)
+ 
+     output.swap(file);
+ 
++#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
++    input.reset(new QAudioSource(recordingFormat));
++    connect(input.data(), &QAudioSource::stateChanged, this, &VoiceCallAudioRecorder::inputStateChanged);
++#else
+     input.reset(new QAudioInput(recordingFormat));
+     connect(input.data(), &QAudioInput::stateChanged, this, &VoiceCallAudioRecorder::inputStateChanged);
++#endif
+ 
+     input->start(output.data());
+     active = true;
+diff --git a/plugins/declarative/src/voicecallaudiorecorder.h b/plugins/declarative/src/voicecallaudiorecorder.h
+index 44d2666..6a4c563 100644
+--- a/plugins/declarative/src/voicecallaudiorecorder.h
++++ b/plugins/declarative/src/voicecallaudiorecorder.h
+@@ -35,7 +35,12 @@
+ #ifndef VOICECALLAUDIORECORDER_H
+ #define VOICECALLAUDIORECORDER_H
+ 
++#include <QtGlobal>
++#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
++#include <QAudioSource>
++#else
+ #include <QAudioInput>
++#endif
+ #include <QFile>
+ #include <QScopedPointer>
+ #include <QDBusPendingCallWatcher>
+@@ -86,7 +91,11 @@ private:
+     bool initiateRecording(const QString &fileName);
+     void terminateRecording();
+ 
++#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
++    QScopedPointer<QAudioSource> input;
++#else
+     QScopedPointer<QAudioInput> input;
++#endif
+     QScopedPointer<QFile> output;
+     QString label;
+     bool featureAvailable;
+diff --git a/plugins/declarative/src/voicecallhandler.h b/plugins/declarative/src/voicecallhandler.h
+index 0201da8..87524bd 100644
+--- a/plugins/declarative/src/voicecallhandler.h
++++ b/plugins/declarative/src/voicecallhandler.h
+@@ -3,6 +3,13 @@
+ 
+ #include <QObject>
+ #include <QDateTime>
++#include <QtGlobal>
++
++#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
++// moc needs to know where the forward-declared type lives to generate the
++// property metacalls; before 5.15 it found it via the old include scan.
++Q_MOC_INCLUDE("voicecallmodel.h")
++#endif
+ 
+ #include <QDBusInterface>
+ #include <QDBusPendingCallWatcher>
+diff --git a/plugins/plugin.pri b/plugins/plugin.pri
+index c449d00..f213a4e 100644
+--- a/plugins/plugin.pri
++++ b/plugins/plugin.pri
+@@ -8,5 +8,11 @@ INCLUDEPATH += $$PWD/../lib/src
+ 
+ LIBS += -L$$PWD/../lib/src -lvoicecall
+ 
+-target.path = $$[QT_INSTALL_LIBS]/voicecall/plugins
++
++# $$[QT_INSTALL_LIBS] is queried from the Qt that runs qmake, which is the host
++# Qt when cross-building, so distributions need to be able to say where the
++# libraries will actually live on the target.
++VOICECALL_LIBDIR = $$[QT_INSTALL_LIBS]
++!isEmpty(VOICECALL_INSTALL_LIBDIR): VOICECALL_LIBDIR = $${VOICECALL_INSTALL_LIBDIR}
++target.path = $${VOICECALL_LIBDIR}/voicecall/plugins
+ INSTALLS += target
+diff --git a/plugins/plugins.pro b/plugins/plugins.pro
+index 739a551..a3e73be 100644
+--- a/plugins/plugins.pro
++++ b/plugins/plugins.pro
+@@ -1,5 +1,12 @@
+ TEMPLATE = subdirs
+-SUBDIRS = declarative providers playback-manager mce commhistory filter
++SUBDIRS = declarative providers playback-manager mce
++
++# commhistory-qt is not available everywhere - it is part of the Nemo stack -
++# and the plugins that use it are optional, so only build them when it is
++# actually installed rather than failing the whole build.
++packagesExist(commhistory-qt$${QT_MAJOR_VERSION}) {
++    SUBDIRS += commhistory filter
++}
+ 
+ enable-ngf {
+     SUBDIRS += ngf
+diff --git a/plugins/providers/ofono/src/src.pro b/plugins/providers/ofono/src/src.pro
+index a38a209..6f20ee5 100644
+--- a/plugins/providers/ofono/src/src.pro
++++ b/plugins/providers/ofono/src/src.pro
+@@ -2,7 +2,7 @@ include(../../../plugin.pri)
+ TARGET = voicecall-ofono-plugin
+ QT += dbus
+ 
+-PKGCONFIG += qofono-qt5
++PKGCONFIG += qofono-qt$${QT_MAJOR_VERSION}
+ 
+ HEADERS += \
+     ofonovoicecallhandler.h  \
+diff --git a/src/src.pro b/src/src.pro
+index 8070136..a1ce753 100644
+--- a/src/src.pro
++++ b/src/src.pro
+@@ -5,16 +5,22 @@ CONFIG += link_pkgconfig
+ 
+ INCLUDEPATH += ../lib/src
+ 
+-DEFINES += VOICECALL_PLUGIN_DIRECTORY=\"\\\"$$[QT_INSTALL_LIBS]/voicecall/plugins\\\"\"
+ 
+-PKGCONFIG += mlite5 qofono-qt5
++# $$[QT_INSTALL_LIBS] is queried from the Qt that runs qmake, which is the host
++# Qt when cross-building, so distributions need to be able to say where the
++# libraries will actually live on the target.
++VOICECALL_LIBDIR = $$[QT_INSTALL_LIBS]
++!isEmpty(VOICECALL_INSTALL_LIBDIR): VOICECALL_LIBDIR = $${VOICECALL_INSTALL_LIBDIR}
++DEFINES += VOICECALL_PLUGIN_DIRECTORY=\"\\\"$${VOICECALL_LIBDIR}/voicecall/plugins\\\"\"
++
++PKGCONFIG += qofono-qt$${QT_MAJOR_VERSION}
+ 
+ enable-nemo-devicelock {
+     PKGCONFIG += nemodevicelock
+     DEFINES += WITH_NEMO_DEVICELOCK
+ }
+ 
+-packagesExist(qt5-boostable) {
++equals(QT_MAJOR_VERSION, 5):packagesExist(qt5-boostable) {
+     DEFINES += HAS_BOOSTER
+     PKGCONFIG += qt5-boostable
+ } else {
