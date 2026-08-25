@@ -10,7 +10,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "nyx-lib luna-service2 json-c glib-2.0"
 
 PV = "1.0.0-1+git"
-SRCREV = "ca1767800350b0b1a357988e6df3f6c7efe6660c"
+SRCREV = "c4933dcef08e88cae49a3c3ba1104a15753b907e"
 
 inherit webos_ports_fork_repo
 inherit webos_cmake
@@ -18,8 +18,9 @@ inherit pkgconfig
 inherit webos_system_bus
 inherit webos_systemd
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=herrie/fixes \
+    file://0001-Fix-callback-and-time-struct-types-for-GCC-15.patch \
+"
 LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
 
 # /OE/build/luneos-master/webos-ports/tmp-glibc/work/core2-64-webos-linux/powerd/4.0.0-25+gitAUTOINC+bbb74058dc-r0/recipe-sysroot-native/usr/bin/x86_64-webos-linux/../../libexec/x86_64-webos-linux/gcc/x86_64-webos-linux/10.2.0/ld: error: powerd/CMakeFiles/powerd.dir/charging/charging_logic.c.o: multiple definition of 'battery_ctia_params'
