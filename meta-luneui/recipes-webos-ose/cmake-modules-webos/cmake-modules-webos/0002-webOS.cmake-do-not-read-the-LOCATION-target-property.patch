@@ -1,0 +1,123 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: LuneOS / webOS Ports <team@webos-ports.org>
+Date: Thu, 13 Aug 2026 00:00:00 +0000
+Subject: [PATCH] webOS.cmake: do not read the LOCATION target property
+
+:Release Notes:
+Fixes a hard configure error from CMake 4 in every component that calls
+webos_build_library().
+
+:Detailed Notes:
+webos_build_library() recovered two facts by parsing the LOCATION target
+property: the file name the library would be written under (to detect and strip
+a doubled "lib" prefix), and whether the target was static or shared (to choose
+ARCHIVE vs LIBRARY for install() and to add -fPIC to static libraries).
+
+Reading LOCATION was deprecated by CMP0026 in CMake 3.0 and removed in CMake
+4.0, where it is an error:
+
+  CMake Error at .../webOS.cmake:840 (get_target_property):
+    The LOCATION property may not be read from target "foo".  Use the target
+    name directly with add_custom_command, or use the generator expression
+    $<TARGET_FILE>, as appropriate.
+
+Setting CMAKE_POLICY_VERSION_MINIMUM=3.5 does not help: that sets the policy
+version to 3.5, at which CMP0026 is already NEW. $<TARGET_FILE> is no use
+either, because a generator expression is not expanded until generate time and
+so cannot be inspected by if()/string() at configure time.
+
+Query the underlying properties instead: OUTPUT_NAME and PREFIX for the name,
+TYPE for static vs shared. TYPE is always set on a target created by
+add_library() and is readable at configure time. It is also strictly more
+accurate than matching the ".a"/".so" suffix of LOCATION, which never matched a
+MODULE library.
+
+:Testing Performed:
+Configured, built and installed a project with CMake 4.2.3 calling
+webos_build_library() three times - a SHARED target, a SHARED target whose name
+starts with "lib", and a STATIC target. Results:
+  - libwebostest.so.1.0.0 installed as LIBRARY, SONAME libwebostest.so.1
+  - target "libwebosdup" installed as libwebosdup.so*, not liblibwebosdup.so*,
+    i.e. the doubled-prefix fixup still fires
+  - libwebostest_static.a installed as ARCHIVE and compiled with -fPIC
+The same project against the unpatched module fails at every
+webos_build_library() call with the CMP0026 error quoted above.
+
+:QA Notes:
+No change to image: installed file names, SONAMEs and compile flags are
+identical to those produced by the LOCATION-based code.
+
+:Issues Addressed:
+---
+Upstream-Status: Submitted [https://github.com/webosose/cmake-modules-webos]
+
+ webOS/webOS.cmake | 40 ++++++++++++++++++++++++++++++++--------
+ 1 file changed, 32 insertions(+), 8 deletions(-)
+
+diff --git a/webOS/webOS.cmake b/webOS/webOS.cmake
+index c1dac04..acacd50 100644
+--- a/webOS/webOS.cmake
++++ b/webOS/webOS.cmake
+@@ -834,30 +834,54 @@ function(webos_build_library)
+ 
+ 	_webos_set_bin_permissions(permissions ${webos_library_RESTRICTED_PERMISSIONS})
+ 
++	# Both of the facts needed below - the name the library will be written under, and whether it is static or shared -
++	# used to be recovered by parsing the LOCATION target property. Reading LOCATION was deprecated by CMP0026 in CMake
++	# 3.0 and removed outright in CMake 4.0, where it is a hard error:
++	#
++	#   CMake Error at .../webOS.cmake (get_target_property):
++	#     The LOCATION property may not be read from target "foo".  Use the target
++	#     name directly with add_custom_command, or use the generator expression
++	#     $<TARGET_FILE>, as appropriate.
++	#
++	# $<TARGET_FILE> is no use here because it is a generator expression: it is not expanded until generate time, so it
++	# cannot be inspected by if()/string() at configure time. Query the underlying properties instead.
++
+ 	# If <target-name> begins with "lib", then the library name would begin with "liblib" unless its fixed, which is done here.
+ 	# NB. Can't just get the LIBRARY_OUTPUT_NAME properity, because it doesn't exist unless it's been assigned to (it doesn't
+-	#     have a default value).
+-	get_target_property(location ${webos_library_TARGET} LOCATION)
+-	string(REGEX MATCH "[^/]+$" libname ${location})
+-	string(SUBSTRING ${libname} 0 6 libnameprefix)
+-	if(${libnameprefix} STREQUAL liblib)
++	#     have a default value). Same for OUTPUT_NAME and PREFIX, hence the defaults applied here: CMake falls back to the
++	#     target name and to CMAKE_${type}_LIBRARY_PREFIX ("lib" on UNIX) respectively.
++	get_target_property(_webos_lib_outname ${webos_library_TARGET} OUTPUT_NAME)
++	if(NOT _webos_lib_outname)
++		set(_webos_lib_outname ${webos_library_TARGET})
++	endif()
++	get_target_property(_webos_lib_prefix ${webos_library_TARGET} PREFIX)
++	if(NOT _webos_lib_prefix)
++		set(_webos_lib_prefix "lib")
++	endif()
++	set(libname "${_webos_lib_prefix}${_webos_lib_outname}")
++	string(SUBSTRING "${libname}" 0 6 libnameprefix)
++	if("${libnameprefix}" STREQUAL "liblib")
+ 		# ASSERT(PREFIX is "lib")
+ 		set_target_properties(${webos_library_TARGET} PROPERTIES PREFIX "")
+ 	endif()
+ 
+ 	# Why can't install() figure this out without needing to be told?
++	# TYPE is always set on a target created by add_library() and is readable at configure time, so it replaces matching
++	# on the ".a"/".so" suffix of LOCATION. It is also strictly more accurate: a MODULE library is installed as a
++	# LIBRARY but was never matched by the old "\\.so$" test on platforms using a different suffix.
++	get_target_property(_webos_lib_type ${webos_library_TARGET} TYPE)
+ 	if(UNIX)
+-		if(${location} MATCHES "\\.a$")
++		if("${_webos_lib_type}" STREQUAL "STATIC_LIBRARY")
+ 			set(kind ARCHIVE)
+ 			# Allow static libraries to be linked into shared ones. Without -fPIC, you can get this errors such as:
+ 			#   libXXX.a(YYY.o): relocation R_ARM_MOVW_ABS_NC against `a local symbol' can not be used when making a
+ 			#                    shared object; recompile with -fPIC
+ 			# Technically, it's not needed for x86, but supplying it does no harm.
+ 			set_target_properties(${webos_library_TARGET} PROPERTIES COMPILE_FLAGS -fPIC)
+-		elseif(${location} MATCHES "\\.so$")
++		elseif("${_webos_lib_type}" STREQUAL "SHARED_LIBRARY" OR "${_webos_lib_type}" STREQUAL "MODULE_LIBRARY")
+ 			set(kind LIBRARY)
+ 		else()
+-			message(FATAL_ERROR "webos_build_library(): Unrecognized library suffix: ${location}")
++			message(FATAL_ERROR "webos_build_library(): Unrecognized library type: ${_webos_lib_type}")
+ 		endif()
+ 	else()
+ 		message(FATAL_ERROR "INTERNAL ERROR: webos_build_library() needs work for non-UNIX builds.")

@@ -21,6 +21,24 @@ WEBOS_PKGCONFIG_BUILDDIR = "${B}"
 
 EXTRA_OECMAKE += "-DWEBOS_INSTALL_ROOT:PATH=/"
 
+# CMake 4 (wrynose ships 4.3.1) removed compatibility with cmake_minimum_required(VERSION < 3.5)
+# and errors out instead of warning. Practically every webOS OSE component still declares
+# 2.8.7, and webOS OSE is dormant upstream, so there is no fix to wait for.
+#
+# Set here rather than in ~100 individual recipes: of the components in this layer set that
+# declare a pre-3.5 minimum, all but two inherit this class (directly, or via webos_cmake_qt6 /
+# clang_cmake, both of which inherit it). The two that do not -- libsuspend and mtp-server --
+# inherit plain cmake and carry the flag inline instead.
+#
+# The three nodejs-module-webos-* recipes also have a pre-3.5 CMakeLists.txt upstream but need
+# nothing: they override do_configure to run node-gyp, so CMake never runs on them.
+#
+# NB this only gets past the cmake_minimum_required() call itself. Components that build a
+# library also need 0002-webOS.cmake-do-not-read-the-LOCATION-target-property.patch in
+# cmake-modules-webos-native: this flag sets the policy version to 3.5, at which CMP0026 is
+# already NEW, so reading the LOCATION target property stays a hard error.
+EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
+
 WEBOS_TARGET_DISTRO_VARIANT ??= "bitbake-conf-in-meta-webos-was-not-parsed"
 WEBOS_TARGET_MACHINE_IMPL ??= "invalid-missing-inherit-webos_machine_impl_dep"
 WEBOS_TARGET_MACHINE_VARIANT ??= "invalid-missing-inherit-webos_machine_variant_dep"
