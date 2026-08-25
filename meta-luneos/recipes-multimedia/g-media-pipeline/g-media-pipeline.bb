@@ -37,5 +37,6 @@ WEBOS_VERSION = "1.0.0-gav.59_a3765932446632e60cf8491019629de7400adbae"
 WEBOS_GIT_PARAM_BRANCH = "@gav"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}\ 
     file://0001-Add-generic-config.patch \
+    file://0001-CMakeLists-pass-library-dirs-to-link_directories.patch \
 "
 

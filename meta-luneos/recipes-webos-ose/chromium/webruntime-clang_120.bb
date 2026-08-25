@@ -16,6 +16,67 @@ PACKAGECONFIG[system-libcxx] = ",,libcxx"
 
 GN_ARGS_CLANG = "is_clang=true"
 
+# Build Chromium with the system clang rather than the clang bundled in
+# third_party/llvm-build.
+#
+# LuneOS deliberately builds webruntime against the shared system libc++ (the
+# CBE) instead of Chromium's own: use_custom_libcxx=false, with
+# -I${STAGING_INCDIR}/c++/v1 supplied through INCLUDE_PATH_LIBCXX. That worked
+# while meta-clang and Chromium's bundled clang were the same vintage. On
+# wrynose meta-clang is LLVM 22, and Chromium 120 bundles clang 18, which
+# cannot parse libc++ 22 headers:
+#   .../include/c++/v1/__type_traits/aligned_storage.h:41:59: error: use of
+#   undeclared identifier '__builtin_clzg'
+#   error: use of undeclared identifier '__GCC_CONSTRUCTIVE_SIZE'
+# (__builtin_clzg/__builtin_ctzg and __GCC_*_SIZE all arrived in clang 19.)
+#
+# The two obvious alternatives are not available here. USE_WEBRUNTIME_LIBCXX=1
+# would switch every -clang component to chromium-stdlib and
+# chromium-toolchain-native, but those exist only as .inc files with no recipe
+# providing them. use_custom_libcxx=true needs
+# buildtools/third_party/libc++/trunk, which is stripped from our source drop.
+#
+# So point Chromium at clang-native, which is the same 22.1.8 that built the
+# libc++ in the sysroot; compiler and standard library then match.
+# clang_use_chrome_plugins must go with it - those plugins are ABI-tied to the
+# bundled clang and will not load in a different one. treat_warnings_as_errors
+# is already false in webruntime-common.inc, which matters across a jump from
+# clang 18 to 22.
+# lld-native as well as clang-native: Chromium links with -fuse-ld=lld, and
+# with the bundled toolchain lld came from third_party/llvm-build. Now that we
+# point clang_base_path at the sysroot, ld.lld has to be staged there too or
+# the link fails with
+#   clang++: error: invalid linker name in argument '-fuse-ld=lld'
+# which is clang's wording for a linker it cannot resolve, not a bad flag.
+DEPENDS += "clang-native lld-native"
+GN_ARGS += "clang_base_path=\"${STAGING_DIR_NATIVE}${prefix}\""
+GN_ARGS += "clang_use_chrome_plugins=false"
+
+# clang 22 removed __builtin_ia32_vcvtph2ps256, which skcms uses for its F16C
+# half-to-float path. Only that one builtin went - vcvtps2ph256, roundps256 and
+# the gather builtins were all checked against clang 22 and still compile.
+SRC_URI += "file://0001-skcms-use-_mm256_cvtph_ps-for-clang-22.patch"
+
+# Perfetto uses the template disambiguator without a template argument list in
+# six places, which clang now rejects. Every TU that includes
+# base/trace_event/trace_event.h - most of base/ - fails without this.
+SRC_URI += "file://0002-perfetto-drop-template-keyword-without-arg-list.patch"
+
+# Further clang-22 fallout in bundled third_party code. All four are
+# pre-existing defects that older toolchains happened to accept, not wrynose
+# issues; see each patch header.
+SRC_URI += "file://0003-sandbox-include-signal.h-before-defining-SYS_SECCOMP.patch"
+SRC_URI += "file://0004-tflite-wrap-std-abs-in-lambdas.patch"
+SRC_URI += "file://0005-quiche-call-Size-not-size.patch"
+SRC_URI += "file://0006-webrtc-drop-lifetimebound-on-a-void-setter.patch"
+
+# Latent defects in Chromium's own code, exposed once a modern clang actually
+# parsed them, plus one genuine toolchain conflict (0010).
+SRC_URI += "file://0007-base-fix-IDMap-Iterator-copy-assignment.patch"
+SRC_URI += "file://0008-blink-drop-template-keyword-without-arg-list.patch"
+SRC_URI += "file://0009-base-expected-exclude-expected-from-value-comparisons.patch"
+SRC_URI += "file://0010-blink-do-not-add-a-second-fallthrough-after-gperf-33.patch"
+
 # Don't use gold even when selected by default with ld-is-gold in DISTRO_FEATURES
 # because liblttng_provider is built with default host linker (hosttools/ld.gold)
 # and build fails because use_lld added --color-diagnostic which isn't recognized
@@ -46,7 +107,14 @@ INCLUDE_PATH_LIBCXX += " \
 # http://gecko.lge.com:8000/Errors/Details/527999
 ARM_INSTRUCTION_SET = "arm"
 
-CLANG_CXXFLAGS = ""
+# clang gained -Wc++11-narrowing-const-reference and makes it an error. Chromium
+# 120 predates it and narrows through const references in aggregate
+# initialisers in a number of unrelated places (webrtc stats collectors, cc
+# layer code, ...), all deliberate and all long-standing. Demote it to a
+# warning for the whole build rather than sprinkling pragmas through
+# third_party: it is one flag instead of one patch per file, and it does not
+# hide anything we would otherwise act on in code we do not maintain.
+CLANG_CXXFLAGS = "-Wno-error=c++11-narrowing-const-reference"
 
 GN_ARGS += "${@bb.utils.contains('WEBRUNTIME_CLANG_STDLIB', '1', 'clang_use_stdlib=true clang_extra_cxxflags=\\\"${INCLUDE_PATH_STDLIB} ${TARGET_CC_ARCH} ${CLANG_CXXFLAGS}\\\"', 'clang_use_stdlib=false clang_extra_cxxflags=\\\"${INCLUDE_PATH_LIBCXX} ${TARGET_CC_ARCH} ${CLANG_CXXFLAGS}\\\"', d)}"
 
@@ -55,7 +123,10 @@ GN_ARGS += "webos_rpath=\"${libdir}/cbe\""
 GN_ARGS += "${@'cc_wrapper=\\\"ccache \\\"' if bb.data.inherits_class('ccache', d) else ''}"
 
 PACKAGECONFIG[umediaserver] = ",,umediaserver${DEPEXT}"
-PACKAGECONFIG[gstreamer] = "use_gst_media=true enable_webm_video_codecs=false,use_gst_media=false,g-media-pipeline${DEPEXT}"
+# enable_webm_video_codecs=true, as in webruntime.inc — this line re-declares the whole PACKAGECONFIG
+# just to append ${DEPEXT} to the dependency, so it silently overrides the value set there. See the
+# comment in webruntime.inc for why WebM has to be on for LuneOS.
+PACKAGECONFIG[gstreamer] = "use_gst_media=true enable_webm_video_codecs=true,use_gst_media=false,g-media-pipeline${DEPEXT}"
 PACKAGECONFIG[webos-codec] = "use_webos_codec=true,use_webos_codec=false,media-codec-interface${DEPEXT}"
 PACKAGECONFIG[webos-camera] = "use_webos_camera=true,use_webos_camera=false, cambufferlib${DEPEXT}"
 

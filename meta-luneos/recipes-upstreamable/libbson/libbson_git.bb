@@ -22,8 +22,17 @@ do_configure:append() {
     find ${S}/src -type f -name "*.[c|h]" | xargs sed -i 's/^yajl_/bson_yajl_/g'
 }
 
-# ERROR: libbson-1.9.0+git-r1 do_package_qa: QA Issue: File /usr/lib/cmake/libbson-static-1.0/libbson-static-1.0-config.cmake in package libbson-dev contains reference to TMPDIR
-# File /usr/lib/pkgconfig/libbson-static-1.0.pc in package libbson-dev contains reference to TMPDIR [buildpaths]
-ERROR_QA:remove = "buildpaths"
-WARN_QA:append = " buildpaths"
+# The static variant records every implicit library CMake resolved as a full
+# path - ${STAGING_DIR_HOST}${libdir}/librt.so and friends - rather than as a
+# -l flag, so both the pkg-config and cmake files hand the build tree to anyone
+# who links libbson statically. Rewrite them back to -l instead of demoting the
+# QA check, which previously hid it for the whole recipe.
+do_install:append() {
+    for f in ${D}${libdir}/pkgconfig/libbson-static-1.0.pc \
+             ${D}${libdir}/cmake/libbson-static-1.0/libbson-static-1.0-config.cmake; do
+        [ -f "$f" ] || continue
+        sed -i -e 's|${STAGING_DIR_HOST}${libdir}/lib\([a-zA-Z0-9_+-]*\)\.so|-l\1|g' \
+               -e 's|${STAGING_DIR_HOST}||g' "$f"
+    done
+}
 EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
