@@ -9,9 +9,13 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=2c7c706c6a586a6abec428c64006d86b \
 "
 
-DEPENDS = "qtdeclarative wayland-native qtwayland qtwayland-native qt-features-webos pmloglib webos-wayland-extensions glib-2.0 qtwayland-webos"
+# Qt 6.10 moved the QtWayland client and qtwaylandscanner into qtbase, and
+# meta-qt6 dropped the qtwayland native/nativesdk builds with it
+# ("Adapt to QtWayland client move to QtBase"). qtwaylandscanner now comes from
+# qtbase-native, gated on the wayland DISTRO_FEATURE which LuneOS sets.
+DEPENDS = "qtdeclarative wayland-native qtwayland qtbase-native qt-features-webos pmloglib webos-wayland-extensions glib-2.0 qtwayland-webos"
 
-WEBOS_VERSION = "2.0.0-402_3fae203063a880806a982cb522f235ca04d1c9a5"
+WEBOS_VERSION = "2.0.0-423_6f49cced1cd4aea27f14d136e1c8ce846beef62a"
 PR = "r61"
 
 inherit webos_qmake6
@@ -38,9 +42,11 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0013-Wait-for-DRI-card-on-EGLFS-platform.patch \
     file://0014-ViewStateController.qml-Fix-TypeError.patch \
     file://0015-NotificationService.qml-let-the-toast-model-remove-t.patch \
+    file://0016-Advertise-xdg_wm_base-so-modern-toolkits-can-map-wind.patch \
+    file://0017-com.webos.surfacemanager.groups.json-keep-the-array-.patch \
+    file://0018-weboscompositor-include-what-qt-612-no-longer-pulls-in.patch \
+    file://0019-weboscompositor-advertise-wp_viewporter.patch \
 "
-
-S = "${WORKDIR}/git"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "lsm-ready.path lsm-ready.service lsm-ready.target surface-manager.service surface-manager-daemon.service"
@@ -77,11 +83,11 @@ do_install:append() {
     
     # This dummy import conflicts with the ${OE_QMAKE_PATH_QML}/WebOSCompositor import we use for luna-next-cardshell
     rm -rf ${D}${OE_QMAKE_PATH_QML}/WebOSCompositorBase/imports/WebOSCompositor
-#    install -v -m 644 ${WORKDIR}/lsm-ready.path ${D}${SYSTEMD_INSTALL_PATH}/lsm-ready.path
-#    install -v -m 644 ${WORKDIR}/lsm-ready.target ${D}${SYSTEMD_INSTALL_PATH}/lsm-ready.target
-#    install -v -m 644 ${WORKDIR}/lsm-ready.service ${D}${SYSTEMD_INSTALL_PATH}/lsm-ready.service
-#    install -v -m 644 ${WORKDIR}/surface-manager.service ${D}${SYSTEMD_INSTALL_PATH}/surface-manager.service
-#    install -v -m 644 ${WORKDIR}/surface-manager-daemon.service ${D}${SYSTEMD_INSTALL_PATH}/surface-manager-daemon.service
+#    install -v -m 644 ${UNPACKDIR}/lsm-ready.path ${D}${SYSTEMD_INSTALL_PATH}/lsm-ready.path
+#    install -v -m 644 ${UNPACKDIR}/lsm-ready.target ${D}${SYSTEMD_INSTALL_PATH}/lsm-ready.target
+#    install -v -m 644 ${UNPACKDIR}/lsm-ready.service ${D}${SYSTEMD_INSTALL_PATH}/lsm-ready.service
+#    install -v -m 644 ${UNPACKDIR}/surface-manager.service ${D}${SYSTEMD_INSTALL_PATH}/surface-manager.service
+#    install -v -m 644 ${UNPACKDIR}/surface-manager-daemon.service ${D}${SYSTEMD_INSTALL_PATH}/surface-manager-daemon.service
 }
 
 TARGET_CXXFLAGS:append = " ${@bb.utils.contains('IMAGE_FEATURES', 'webos-test', '--coverage -fprofile-dir=/tmp/luna-surfacemanager-gcov -O0', '', d)}"
