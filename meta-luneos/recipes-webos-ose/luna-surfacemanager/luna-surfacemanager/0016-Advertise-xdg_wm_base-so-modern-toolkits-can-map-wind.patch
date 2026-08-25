@@ -1,0 +1,110 @@
+From b36ab18fd9e23305d91bf6ba45b1e40bf8223aca Mon Sep 17 00:00:00 2001
+From: LuneOS <team@webos-ports.org>
+Date: Wed, 12 Aug 2026 22:12:00 +0200
+Subject: [PATCH 16/17] weboscorecompositor: advertise xdg_wm_base
+
+The compositor only ever created QWaylandWlShell, so it advertised wl_shell
+and wl_webos_shell and nothing else. wl_shell was deprecated in 2016 and has
+since been removed from SDL2 (2.0.16), GTK4 and Qt's own client, which leaves
+those toolkits with no way to give a surface a role: they connect, bind
+wl_compositor, never attach a buffer, and the window silently never appears.
+
+Surface handling here is already role-agnostic - items are created from
+QWaylandCompositor::surfaceCreated regardless of shell - so this only has to
+advertise the global and answer the initial configure, which xdg_shell
+requires before a client may attach its first buffer. webOS surfaces are
+fullscreen at the output size.
+
+xdg_toplevel.app_id is mapped onto WebOSSurfaceItem so xdg clients still have
+an identity for the card shell; wl_webos_shell clients get this through
+WebOSShellSurface instead.
+
+Upstream-Status: Pending
+---
+ .../weboscompositor/weboscorecompositor.cpp   | 38 +++++++++++++++++++
+ modules/weboscompositor/weboscorecompositor.h |  2 +
+ 2 files changed, 40 insertions(+)
+
+diff --git a/modules/weboscompositor/weboscorecompositor.cpp b/modules/weboscompositor/weboscorecompositor.cpp
+index 7b37808..d395ced 100644
+--- a/modules/weboscompositor/weboscorecompositor.cpp
++++ b/modules/weboscompositor/weboscorecompositor.cpp
+@@ -239,6 +239,7 @@ WebOSCoreCompositor::WebOSCoreCompositor(ExtensionFlags extensions, const char *
+     , m_inputManager(0)
+     , m_surfaceModel(nullptr)
+     , m_wlShell(new QWaylandWlShell(this))
++    , m_xdgShell(new QWaylandXdgShell(this))
+ #ifdef MULTIINPUT_SUPPORT
+     , m_lastMouseEventFrom(0)
+     , m_inputDevicePreallocated(0)
+@@ -257,6 +258,42 @@ WebOSCoreCompositor::WebOSCoreCompositor(ExtensionFlags extensions, const char *
+     });
+     connect(this, &QWaylandCompositor::surfaceCreated, this, &WebOSCoreCompositor::surfaceCreated);
+ 
++    /* xdg_shell is the only window protocol still implemented by current
++     * toolkits: wl_shell was deprecated in 2016 and removed from SDL2 in
++     * 2.0.16, from GTK4, and from Qt's own client. Without xdg_wm_base such a
++     * client connects, binds wl_compositor, and then has no way to give its
++     * surface a role - so it never attaches a buffer, hasContent() stays false
++     * and no WebOSSurfaceItem is ever mapped. The window silently never appears.
++     *
++     * Surface handling here is already role-agnostic: items come from
++     * QWaylandCompositor::surfaceCreated. All that is needed is to advertise
++     * the global and answer the initial configure. xdg_shell requires the
++     * compositor to configure a toplevel before the client may attach its
++     * first buffer, and webOS surfaces are fullscreen at the output size.
++     */
++    connect(m_xdgShell, &QWaylandXdgShell::toplevelCreated, this,
++            [this](QWaylandXdgToplevel *toplevel, QWaylandXdgSurface *xdgSurface) {
++        QSize size;
++        if (QWaylandOutput *output = defaultOutput())
++            size = output->geometry().size();
++        if (size.isEmpty())
++            size = QSize(1920, 1080);
++
++        qInfo() << "xdg_toplevel created" << toplevel << "configuring fullscreen" << size;
++        toplevel->sendFullscreen(size);
++
++        /* Carry appId across to the surface item. wl_webos_shell clients set it
++         * through WebOSShellSurface; xdg_shell clients set xdg_toplevel.app_id,
++         * and without this the item has no identity for the card shell to use.
++         */
++        connect(toplevel, &QWaylandXdgToplevel::appIdChanged, this, [toplevel, xdgSurface]() {
++            if (!xdgSurface || !xdgSurface->surface())
++                return;
++            if (WebOSSurfaceItem *item = WebOSSurfaceItem::getSurfaceItemFromSurface(xdgSurface->surface()))
++                item->setAppId(toplevel->appId());
++        });
++    });
++
+ #if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
+     const QVector<ShmFormat> supportedWaylandFormats = {
+         ShmFormat_ARGB8888,
+@@ -298,6 +335,7 @@ WebOSCoreCompositor::~WebOSCoreCompositor()
+     QCoreApplication::instance()->removeEventFilter(m_eventPreprocessor);
+     delete m_eventPreprocessor;
+     delete m_wlShell;
++    delete m_xdgShell;
+ }
+ 
+ void WebOSCoreCompositor::insertToWindows(WebOSCompositorWindow *window)
+diff --git a/modules/weboscompositor/weboscorecompositor.h b/modules/weboscompositor/weboscorecompositor.h
+index d0d582d..e5a0fb0 100644
+--- a/modules/weboscompositor/weboscorecompositor.h
++++ b/modules/weboscompositor/weboscorecompositor.h
+@@ -31,6 +31,7 @@
+ 
+ #include <WebOSCoreCompositor/weboskeyfilter.h>
+ #include <QtWaylandCompositor/QWaylandWlShellSurface>
++#include <QtWaylandCompositor/QWaylandXdgShell>
+ 
+ #include "unixsignalhandler.h"
+ #include "webossurfaceitem.h"
+@@ -350,6 +351,7 @@ private:
+     WebOSShell* m_shell;
+     WebOSInputManager *m_inputManager;
+     QWaylandWlShell *m_wlShell = nullptr;
++    QWaylandXdgShell *m_xdgShell = nullptr;
+ #ifdef MULTIINPUT_SUPPORT
+     WebOSInputDevice *m_inputDevicePreallocated;
+     int m_lastMouseEventFrom;
