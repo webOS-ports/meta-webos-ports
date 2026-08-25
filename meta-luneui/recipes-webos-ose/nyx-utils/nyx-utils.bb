@@ -22,7 +22,6 @@ inherit webos_cmake
 inherit webos_program
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "nyx-utils.service.in"
@@ -34,5 +33,16 @@ WEBOS_SYSTEMD_SERVICE = "nyx-utils.service.in"
 do_install:append() {
     rm ${D}${sysconfdir}/systemd/system/nyx-utils.service
 }
+
+# The nyxcmd plugins under ${libdir}/nyx/nyxcmd resolve NyxCmdQueryCommand and
+# NyxCmdDeviceType symbols from the nyx-cmd executable, so those have to be in
+# its .dynsym. CMake only adds -rdynamic to executables while policy CMP0065 is
+# OLD, which used to be the case here because upstream declares
+# cmake_minimum_required(VERSION 2.8). webos_cmake.bbclass now passes
+# -DCMAKE_POLICY_VERSION_MINIMUM=3.5 so CMake 4 accepts that declaration, and
+# that also moves CMP0065 to NEW and drops -rdynamic. Every plugin then fails to
+# dlopen and nyx-cmd exits with "Error opening the plugin", which fails
+# nyx-utils.service.
+TARGET_LDFLAGS:append = " -Wl,--export-dynamic"
 
 FILES:${PN} += "${libdir}/nyx/nyxcmd/"
