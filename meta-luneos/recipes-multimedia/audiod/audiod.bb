@@ -80,7 +80,6 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0008-deviceManager-support-sinks-that-PulseAudio-already-o.patch \
     file://audiod-after-pulseaudio.conf \
 "
-S = "${WORKDIR}/git"
 
 # The device configuration lives in audiod-conf, not here, so that changing a
 # machine's audio setup does not rebuild audiod - the same split
