@@ -1,7 +1,10 @@
 # Copyright (c) 2012-2023 LG Electronics, Inc.
 
-# Set default chromium version for webruntime and mksnapshot
-PREFERRED_VERSION_webruntime = "120.%"
+# Set default chromium version for webruntime and mksnapshot.
+# 151 is the default on every machine as of 2026-08-20. Set this back to
+# "120.%" to return the whole distro to Chromium 120; both recipe sets are
+# still present.
+PREFERRED_VERSION_webruntime = "151.%"
 PREFERRED_VERSION_webruntime-clang = "${PREFERRED_VERSION_webruntime}"
 PREFERRED_VERSION_mksnapshot-cross-${TARGET_ARCH} = "${PREFERRED_VERSION_webruntime}"
 
