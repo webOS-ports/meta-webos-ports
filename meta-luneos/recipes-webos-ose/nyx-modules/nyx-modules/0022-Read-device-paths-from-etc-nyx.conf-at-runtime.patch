@@ -1,0 +1,231 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Mon, 24 Aug 2026 13:00:00 +0200
+Subject: [PATCH] Read device paths from /etc/nyx.conf at runtime
+
+The touchscreen node and the power-supply sysfs paths were compile-time
+-D defines, set by a per-machine cmake include. That is why this package
+is PACKAGE_ARCH = MACHINE_ARCH and why there are 57 machine cmake files,
+37 of which exist only to carry these paths.
+
+They do not need to be built in. luneos-device-config already derives
+the touchscreen at boot - exactly one input device advertises
+ID_INPUT_TOUCHSCREEN, so no per-device knowledge is involved - and takes
+anything genuinely underivable from the adaptation's deviceinfo. It
+writes /etc/nyx.conf and bind-mounts it over the shipped default, so the
+rootfs is never modified. The keys module has read [module.keys] paths=
+this way for a while; this extends the same mechanism to the rest.
+
+Precedence is runtime config, then the compile-time define, then the
+existing detection, so nothing changes for a machine still built with
+the defines and nothing changes on a device where the file is absent.
+
+Groups and keys:
+
+    [module.touchpanel] path
+    [module.battery]    sysfs_path
+    [module.charger]    usb_sysfs_path, ac_sysfs_path
+
+An absent or empty value falls through, which is what lets the shipped
+default declare the keys empty and leave detection in charge.
+
+Upstream-Status: Inappropriate [LuneOS-specific runtime configuration]
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+---
+diff -urN a/include/internal/nyx_conf.h b/include/internal/nyx_conf.h
+--- a/include/internal/nyx_conf.h	1970-01-01 01:00:00.000000000 +0100
++++ b/include/internal/nyx_conf.h	2026-08-24 13:44:00.629710044 +0200
+@@ -0,0 +1,62 @@
++// @@@LICENSE
++//
++//      Copyright (c) 2026 Herman van Hazendonk <github.com@herrie.org>
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++//
++// LICENSE@@@
++
++/*
++ * Read a device path out of /etc/nyx.conf.
++ *
++ * These paths used to be compile-time -D defines set by a per-machine cmake
++ * include, which meant a package built for one device and 57 machine files to
++ * maintain. luneos-device-config now derives them at boot - or takes them from
++ * the adaptation's deviceinfo when they cannot be derived - writes nyx.conf
++ * and bind-mounts it over the shipped default, so the same binary suits any
++ * device. The keys module has read [module.keys] paths= this way for a while;
++ * this is the same mechanism for the rest.
++ *
++ * Returns NULL if the file, group or key is missing or the value is empty, so
++ * callers fall through to exactly what they did before. Caller frees.
++ */
++
++#ifndef _NYX_CONF_H_
++#define _NYX_CONF_H_
++
++#include <glib.h>
++
++#define NYX_CONF_FILE "/etc/nyx.conf"
++
++static inline gchar *nyx_conf_get_path(const gchar *group, const gchar *key)
++{
++	GKeyFile *keyfile = g_key_file_new();
++	gchar *value = NULL;
++
++	if (g_key_file_load_from_file(keyfile, NYX_CONF_FILE, G_KEY_FILE_NONE, NULL))
++	{
++		value = g_key_file_get_string(keyfile, group, key, NULL);
++	}
++
++	g_key_file_free(keyfile);
++
++	if (value && *value == '\0')
++	{
++		g_free(value);
++		value = NULL;
++	}
++
++	return value;
++}
++
++#endif /* _NYX_CONF_H_ */
+diff -urN a/src/battery/battery.c b/src/battery/battery.c
+--- a/src/battery/battery.c	2026-08-24 13:44:00.581722447 +0200
++++ b/src/battery/battery.c	2026-08-24 13:44:25.582579989 +0200
+@@ -33,6 +33,7 @@
+ #include <nyx/module/nyx_utils.h>
+ #include <nyx/module/nyx_log.h>
+ #include "msgid.h"
++#include "nyx_conf.h"
+ 
+ #include <glib.h>
+ #include <libudev.h>
+@@ -330,6 +331,11 @@
+ 
+ static void detect_battery_sysfs_paths()
+ {
++	/* Runtime value from luneos-device-config wins over both. */
++	battery_sysfs_path = nyx_conf_get_path("module.battery", "sysfs_path");
++
++	if (!battery_sysfs_path)
++	{
+ #ifdef BATTERY_SYSFS_PATH
+ 	/*
+ 	 * Honour the BATTERY_SYSFS_PATH define from the machine-specific
+@@ -343,10 +349,11 @@
+ 	 * registered by the kernel as power_supply type=Battery; only
+ 	 * a6-0 actually has a battery wired to it.
+ 	 */
+-	battery_sysfs_path = g_strdup(BATTERY_SYSFS_PATH);
++		battery_sysfs_path = g_strdup(BATTERY_SYSFS_PATH);
+ #else
+-	battery_sysfs_path = find_power_supply_sysfs_path("Battery");
++		battery_sysfs_path = find_power_supply_sysfs_path("Battery");
+ #endif
++	}
+ 
+ 	if (battery_sysfs_path)
+ 	{
+diff -urN a/src/charger/charger.c b/src/charger/charger.c
+--- a/src/charger/charger.c	2026-08-24 13:44:00.603809479 +0200
++++ b/src/charger/charger.c	2026-08-24 13:44:25.582694726 +0200
+@@ -33,6 +33,7 @@
+ #include <nyx/nyx_module.h>
+ #include <nyx/module/nyx_utils.h>
+ #include "msgid.h"
++#include "nyx_conf.h"
+ 
+ #define STATUS_LEN 64
+ #define PATH_LEN 128
+@@ -404,21 +405,36 @@
+ 	 * the same type (e.g. two type=Battery entries, or a "Mains" charger
+ 	 * sharing the namespace with a separately-named USB BC1.2 detector).
+ 	 */
++	char *battery_sysfs_path = nyx_conf_get_path("module.battery", "sysfs_path");
++
++	if (!battery_sysfs_path)
++	{
+ #ifdef BATTERY_SYSFS_PATH
+-	char *battery_sysfs_path = g_strdup(BATTERY_SYSFS_PATH);
++		battery_sysfs_path = g_strdup(BATTERY_SYSFS_PATH);
+ #else
+-	char *battery_sysfs_path = find_power_supply_sysfs_path("Battery");
++		battery_sysfs_path = find_power_supply_sysfs_path("Battery");
+ #endif
++	}
++	char *charger_usb_sysfs_path = nyx_conf_get_path("module.charger", "usb_sysfs_path");
++
++	if (!charger_usb_sysfs_path)
++	{
+ #ifdef CHARGER_USB_SYSFS_PATH
+-	char *charger_usb_sysfs_path = g_strdup(CHARGER_USB_SYSFS_PATH);
++		charger_usb_sysfs_path = g_strdup(CHARGER_USB_SYSFS_PATH);
+ #else
+-	char *charger_usb_sysfs_path = find_power_supply_sysfs_path("USB");
++		charger_usb_sysfs_path = find_power_supply_sysfs_path("USB");
+ #endif
++	}
++	char *charger_ac_sysfs_path = nyx_conf_get_path("module.charger", "ac_sysfs_path");
++
++	if (!charger_ac_sysfs_path)
++	{
+ #ifdef CHARGER_AC_SYSFS_PATH
+-	char *charger_ac_sysfs_path = g_strdup(CHARGER_AC_SYSFS_PATH);
++		charger_ac_sysfs_path = g_strdup(CHARGER_AC_SYSFS_PATH);
+ #else
+-	char *charger_ac_sysfs_path = find_power_supply_sysfs_path("Mains");
++		charger_ac_sysfs_path = find_power_supply_sysfs_path("Mains");
+ #endif
++	}
+ #ifdef CHARGER_TOUCH_SYSFS_PATH
+ 	char *charger_touch_sysfs_path = g_strdup(CHARGER_TOUCH_SYSFS_PATH);
+ #else
+diff -urN a/src/touchpanel_mtdev/touchpanel.c b/src/touchpanel_mtdev/touchpanel.c
+--- a/src/touchpanel_mtdev/touchpanel.c	2026-08-24 13:44:00.624734522 +0200
++++ b/src/touchpanel_mtdev/touchpanel.c	2026-08-24 13:44:25.582441537 +0200
+@@ -51,6 +51,7 @@
+ 
+ #include "touchpanel_gestures.h"
+ #include "msgid.h"
++#include "nyx_conf.h"
+ 
+ /* Later versions of nyx_utils.h no longer define this macro */
+ #undef return_if
+@@ -387,11 +388,26 @@
+ 	struct input_absinfo abs;
+ 	int  maxX, maxY, sXres, sYres, ret = -1;
+ 
++	/*
++	 * luneos-device-config derives the touchscreen node - exactly one input
++	 * device advertises ID_INPUT_TOUCHSCREEN, so it needs no per-device
++	 * knowledge - and writes it here. Fall back to the compile-time define
++	 * for the machines still built that way, then to the udev symlink.
++	 */
++	gchar *tp_conf = nyx_conf_get_path("module.touchpanel", "path");
++	const char *tp_path = tp_conf;
++
++	if (!tp_path)
++	{
+ #ifdef TOUCHPANEL_DEVICE
+-	touchpanel_event_fd = open(TOUCHPANEL_DEVICE, O_RDWR | O_NONBLOCK);
++		tp_path = TOUCHPANEL_DEVICE;
+ #else
+-	touchpanel_event_fd = open("/dev/input/touchscreen0", O_RDWR | O_NONBLOCK);
++		tp_path = "/dev/input/touchscreen0";
+ #endif
++	}
++
++	touchpanel_event_fd = open(tp_path, O_RDWR | O_NONBLOCK);
++	g_free(tp_conf);
+ 
+ 	if (touchpanel_event_fd < 0)
+ 	{
