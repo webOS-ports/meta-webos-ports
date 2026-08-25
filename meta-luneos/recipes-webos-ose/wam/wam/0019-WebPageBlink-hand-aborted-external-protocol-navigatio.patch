@@ -1,0 +1,106 @@
+From e18e64da0a935e96976ea49ebaec9f3bdbf7bda0 Mon Sep 17 00:00:00 2001
+From: Herrie <Github.com@herrie.org>
+Date: Wed, 12 Aug 2026 15:24:29 +0200
+Subject: [PATCH] WebPageBlink: hand aborted external-protocol navigations to
+ the page
+
+The engine aborts a navigation to a scheme it cannot load, and does so before any
+script can observe it -- location never changes, so the page cannot tell that the
+navigation happened at all. Only WAM sees the URL, in LoadAborted(), where it was
+merely logged:
+
+  WAM LOAD [ABORTED]msauth.com.microsoft.teams://auth?code=...
+
+That is exactly where a native OAuth redirect lands. An app that signs in through
+window.open() is handed its authorization code as msauth.<client>://auth?code=...,
+and dropping it silently means sign-in can never complete. Legacy webOS learns about
+these redirects through BrowserServer-atlas's actionData("oauthRedirect"); LuneOS had
+no equivalent.
+
+Forward any non-engine scheme to the page as a 'webOSExternalProtocol' CustomEvent
+(and mirror it on window.webOSExternalProtocolUrl for code that would rather poll).
+The event is dispatched on the aborting page and on its opener, because with
+window.open() the window waiting for the code is the opener, not the popup.
+
+Signed-off-by: Herrie <Github.com@herrie.org>
+---
+Upstream-Status: Inappropriate [LuneOS specific]
+
+ src/platform/webengine/web_page_blink.cc | 51 ++++++++++++++++++++++++
+ src/platform/webengine/web_page_blink.h  |  1 +
+ 2 files changed, 52 insertions(+)
+
+diff --git a/src/platform/webengine/web_page_blink.cc b/src/platform/webengine/web_page_blink.cc
+index 2179f21..d1ca39e 100644
+--- a/src/platform/webengine/web_page_blink.cc
++++ b/src/platform/webengine/web_page_blink.cc
+@@ -727,6 +727,57 @@ void WebPageBlink::LoadAborted(const std::string& url) {
+            PMLOGKS("INSTANCE_ID", InstanceId().c_str()),
+            PMLOGKFV("PID", "%d", GetWebProcessPID()), "[ABORTED]%s",
+            WebAppManagerUtils::TruncateURL(url).c_str());
++
++  NotifyExternalProtocolNavigation(url);
++}
++
++// A navigation to a scheme the engine cannot load is aborted before any script can see
++// it: location never changes, so the page has no way to observe the URL. That matters for
++// native OAuth redirects -- an app signing in through window.open() gets its authorization
++// code as msauth.<client>://auth?code=..., and losing it silently means sign-in can never
++// complete. Legacy webOS learns about these through BrowserServer-atlas's
++// actionData("oauthRedirect"); this is the LuneOS equivalent. Hand the URL to the page as a
++// DOM event, and to its opener as well, since the window that started the sign-in is the
++// one waiting for the code.
++void WebPageBlink::NotifyExternalProtocolNavigation(const std::string& url) {
++  static const char* kEngineSchemes[] = {"http:",  "https:", "file:", "about:",
++                                         "data:",  "blob:",  "ws:",   "wss:",
++                                         "chrome:"};
++  if (url.empty() || url.find(':') == std::string::npos)
++    return;
++  for (const char* scheme : kEngineSchemes) {
++    if (url.rfind(scheme, 0) == 0)
++      return;
++  }
++
++  // The URL becomes a JavaScript string literal, so escape what would break out of it.
++  std::string escaped;
++  escaped.reserve(url.size() + 16);
++  for (const char c : url) {
++    switch (c) {
++      case '\\': escaped += "\\\\"; break;
++      case '"': escaped += "\\\""; break;
++      case '\n': escaped += "\\n"; break;
++      case '\r': escaped += "\\r"; break;
++      default:
++        // Drop control characters rather than emit a raw byte the parser may choke on.
++        if (static_cast<unsigned char>(c) >= 0x20)
++          escaped += c;
++        break;
++    }
++  }
++
++  LOG_INFO(MSGID_LOAD, 3, PMLOGKS("APP_ID", AppId().c_str()),
++           PMLOGKS("INSTANCE_ID", InstanceId().c_str()),
++           PMLOGKFV("PID", "%d", GetWebProcessPID()), "[EXTPROTO]%s",
++           WebAppManagerUtils::TruncateURL(url).c_str());
++
++  EvaluateJavaScript(
++      "(function(){var u=\"" + escaped + "\";"
++      "var f=function(w){try{w.webOSExternalProtocolUrl=u;"
++      "w.dispatchEvent(new CustomEvent('webOSExternalProtocol',"
++      "{detail:{url:u}}));}catch(e){}};"
++      "f(window);if(window.opener){f(window.opener);}})();");
+ }
+ 
+ void WebPageBlink::LoadFailed(const std::string& url, int err_code) {
+diff --git a/src/platform/webengine/web_page_blink.h b/src/platform/webengine/web_page_blink.h
+index 3af21b5..2655d7d 100644
+--- a/src/platform/webengine/web_page_blink.h
++++ b/src/platform/webengine/web_page_blink.h
+@@ -122,6 +122,7 @@ class WebPageBlink : public WebPageBase, public WebPageBlinkDelegate {
+   void LoadFailed(const std::string& url, int err_code) override;
+   void LoadStopped() override;
+   void LoadAborted(const std::string& url) override;
++  void NotifyExternalProtocolNavigation(const std::string& url);
+   void LoadProgressChanged(double progress) override;
+   void DidStartNavigation(const std::string& url,
+                           bool is_in_main_frame) override;

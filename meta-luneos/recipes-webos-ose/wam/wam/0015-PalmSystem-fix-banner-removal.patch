@@ -1,0 +1,147 @@
+From: LuneOS
+Subject: [PATCH] PalmSystem: fix banner removal
+
+removeBannerMessage() and clearBannerMessages() call
+luna://org.webosports.notifications/close and /closeAll. No such service
+exists on the bus - the only notification service is com.webos.notification,
+which is what AddBannerMessage() itself calls to create the toast. Both calls
+are therefore dropped and a banner an application withdraws stays put.
+Checked against the running service:
+
+    createToast {"message":"..."}   -> {"returnValue":true,
+                                        "toastId":"<appId>-<pid>-<ms>"}
+    closeToast  {"toastId":"<id>"}  -> {"returnValue":true}
+    closeToast  {"id":"<id>"}       -> {"returnValue":false,
+                                        "errorText":"Both Toast Id and Source
+                                         Id can't be Empty"}
+
+so the parameter is "toastId", not "id". closeToast also takes a "sourceId",
+which is the bulk form clearBannerMessages() wants. createToast ignores a
+caller-supplied toastId, so the id has to come back from the reply.
+
+Two things stopped that reply from ever arriving. LSCalloutContext cancels its
+call from its destructor, and the context was a local:
+
+    LSCalloutContext cbAddBanner(lambda);
+    ...Call(..., &cbAddBanner);          // cancelled on return
+
+so the toastId was never recorded and there was nothing to close. It is now
+held in a map for the lifetime of the call, the same way
+notification_service_luna.cc owns the contexts for its own createToast calls.
+
+The id bookkeeping was wrong too. currentNotifId is a static local, and the
+callback read it rather than the value belonging to its own call:
+
+    bannerIds_[currentNotifId++] = "no-uuid";      // writes slot N
+    ... [this](payload) {
+      this->bannerIds_[currentNotifId] = ...       // writes slot N+1
+    }
+
+The placeholder landed in a slot nothing reads, and a second banner posted
+before the first reply would corrupt the mapping. The id is now captured by
+value, and the slot is left empty until the reply lands so that removing a
+banner whose createToast has not answered yet is a no-op rather than a close
+call with an empty toastId.
+
+closeToast sits in the notification.management group while createToast is in
+notification.operation, so com.palm.webappmanager needs the former added to
+its client permissions or the call is refused with
+
+    LS_REQUIRES_SECURITY {"CLIENT":"com.palm.webappmanager",
+                          "SERVICE":"com.webos.notification",
+                          "METHOD":"closeToast"}
+
+Upstream-Status: Inappropriate [LuneOS specific; fixes a LuneOS patch]
+
+--- a/src/platform/webengine/palm_system_blink.cc
++++ b/src/platform/webengine/palm_system_blink.cc
+@@ -27,6 +27,13 @@
+ 
+ namespace {
+ 
++// LSCalloutContext cancels its call from its destructor, so a context created
++// on the stack cancels the moment the calling function returns and its reply
++// is never delivered. Keep banner contexts alive here, keyed by banner id -
++// the same ownership pattern notification_service_luna.cc uses for its own
++// createToast calls.
++std::map<int, LSCalloutContext> banner_contexts;
++
+ const char* toStr(const bool value) {
+   return value ? "true" : "false";
+ }
+@@ -267,31 +274,50 @@
+ 
+   static int currentNotifId = 0; // always increment a static int, to return a unique id
+ 
+-  bannerIds_[currentNotifId++] = "no-uuid";
+-  std::function<Json::Value(const Json::Value&)> lambda = [this](const Json::Value& payload) {
+-      this->bannerIds_[currentNotifId] = payload["toastId"].asString();
+-      return payload;
+-  };
+-  LSCalloutContext cbAddBanner(lambda);
++  const int bannerId = ++currentNotifId; // ids start at 1, so 0 can mean "none"
++
++  // Left empty until createToast answers. RemoveBannerMessage() treats an
++  // empty entry as "not created yet" rather than closing toastId "".
++  bannerIds_[bannerId] = std::string();
++
++  // bannerId is captured by value: currentNotifId is a static local and will
++  // have moved on by the time this reply arrives if another banner was posted
++  // in the meantime.
++  banner_contexts.emplace(
++      bannerId, LSCalloutContext([this, bannerId](const Json::Value& payload) {
++        if (payload.isObject() && payload["toastId"].isString()) {
++          this->bannerIds_[bannerId] = payload["toastId"].asString();
++        }
++        banner_contexts.erase(bannerId);
++        return Json::Value();
++      }));
+ 
+   WebAppManagerServiceLuna::Instance()->Call(
+-      "luna://com.webos.notification/createToast", create_params, app_->AppId().c_str(), &cbAddBanner);
++      "luna://com.webos.notification/createToast", create_params,
++      app_->AppId().c_str(), &banner_contexts.at(bannerId));
+ 
+-  return currentNotifId;
++  return bannerId;
+ }
+ 
+ void PalmSystemBlink::RemoveBannerMessage(std::string id) {
+-  std::string remove_params = R"(
+-    {"id" : ")" + bannerIds_[std::atoi(id.c_str())] + R"("}
+-  )";
++  const auto it = bannerIds_.find(std::atoi(id.c_str()));
++  if (it == bannerIds_.end() || it->second.empty()) {
++    // Unknown banner, or createToast has not returned its id yet.
++    return;
++  }
+ 
+-  app_->ServiceCall("luna://org.webosports.notifications/close", remove_params, app_->AppId());
++  std::string remove_params = R"({"toastId":")" + it->second + R"("})";
++
++  app_->ServiceCall("luna://com.webos.notification/closeToast", remove_params, app_->AppId());
++  bannerIds_.erase(it);
+ }
+-void PalmSystemBlink::ClearBannerMessages() {
+ 
+-  std::string clear_params = "{}";
++void PalmSystemBlink::ClearBannerMessages() {
++  // closeToast's bulk form: drop everything this application posted.
++  std::string clear_params = R"({"sourceId":")" + app_->AppId() + R"("})";
+ 
+-  app_->ServiceCall("luna://org.webosports.notifications/closeAll", clear_params, app_->AppId());
++  app_->ServiceCall("luna://com.webos.notification/closeToast", clear_params, app_->AppId());
++  bannerIds_.clear();
+ }
+ 
+ Json::Value PalmSystemBlink::Initialize() {
+--- a/files/sysbus/com.palm.webappmanager.perm.json
++++ b/files/sysbus/com.palm.webappmanager.perm.json
+@@ -6,6 +6,7 @@
+         "memorymanager.query",
+         "networkconnection.query",
+         "notification.operation",
++        "notification.management",
+         "settings.query"
+     ],
+     "com.webos.chromium.audio*": [
