@@ -3,7 +3,13 @@
 inherit webos_cmake
 inherit clang_libc
 
-DEPENDS:append = " clang-native"
+# clang-native brings the compiler but not ld.lld, which ships in lld-native.
+# Without it -fuse-ld=${STAGING_BINDIR_NATIVE}/ld.lld points at a file that was
+# never staged, and clang reports it as a bad linker *name* rather than a
+# missing path, which is misleading:
+#   clang++: error: invalid linker name in argument
+#   '-fuse-ld=.../recipe-sysroot-native/usr/bin/ld.lld'
+DEPENDS:append = " clang-native lld-native"
 
 OECMAKE_C_COMPILER = "clang"
 OECMAKE_CXX_COMPILER = "clang++"
