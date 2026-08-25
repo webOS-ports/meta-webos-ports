@@ -1,0 +1,50 @@
+From: LuneOS <webos-ports@googlegroups.com>
+Date: Thu, 20 Aug 2026 00:00:00 +0000
+Subject: [PATCH] binder_connman: do not read non-basic property variants
+
+connman_tech_set_property() calls dbus_message_iter_get_basic() on every
+technology property variant before looking at its type. libdbus treats
+that as a programming error for non-basic types and aborts the process:
+
+    connman_set_techs() /net/connman/technology/p2p
+    dbus: type array 97 not a basic type
+
+Newer connman exposes an "Interfaces" property on technology objects whose
+variant is an array, so ofonod aborts as soon as it enumerates the
+technologies. systemd then restarts it forever - roughly 15 aborts a minute
+on a Pixel 3a, taking the whole telephony stack down with it.
+
+The function only ever consumes booleans, so check the type first and bail
+out on anything else instead of asking libdbus for a value it cannot give.
+
+Upstream-Status: Pending
+Upstream-Status: Pending
+---
+--- a/src/binder_connman.c
++++ b/src/binder_connman.c
+@@ -289,17 +289,17 @@
+ 
+     dbus_message_iter_next(it);
+     dbus_message_iter_recurse(it, &var);
++    if (dbus_message_iter_get_arg_type(&var) != DBUS_TYPE_BOOLEAN) {
++        /* e.g. "Interfaces", whose variant is an array */
++        return 0;
++    }
+     dbus_message_iter_get_basic(&var, &value);
+     if (!g_ascii_strcasecmp(key, CONNMAN_TECH_CONNECTED)) {
+-        if (dbus_message_iter_get_arg_type(&var) == DBUS_TYPE_BOOLEAN) {
+-            connman_set_tech_connected(tech, value.bool_val);
+-            return CONNMAN_TECH_CONNECTED_BIT;
+-        }
++        connman_set_tech_connected(tech, value.bool_val);
++        return CONNMAN_TECH_CONNECTED_BIT;
+     } else if (!g_ascii_strcasecmp(key, CONNMAN_TECH_TETHERING)) {
+-        if (dbus_message_iter_get_arg_type(&var) == DBUS_TYPE_BOOLEAN) {
+-            connman_set_tech_tethering(tech, value.bool_val);
+-            return CONNMAN_TECH_TETHERING_BIT;
+-        }
++        connman_set_tech_tethering(tech, value.bool_val);
++        return CONNMAN_TECH_TETHERING_BIT;
+     }
+     return 0;
+ }

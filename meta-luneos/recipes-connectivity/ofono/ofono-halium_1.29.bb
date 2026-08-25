@@ -24,7 +24,7 @@ inherit autotools pkgconfig systemd gobject-introspection-data
 
 SYSTEMD_SERVICE:${PN} = "ofono.service"
 
-SRCREV = "3afa0876c6506f76ef2e45d97cb326c5ff9fef4d"
+SRCREV = "bea32ca9a931e77cb6d37800c06fead44265507f"
 PV = "1.29+git"
 
 DEPENDS += "dbus-glib libmce-glib"
@@ -47,7 +47,7 @@ EXTRA_OECONF += "--enable-test --disable-datafiles --disable-sailfish-pushforwar
 do_install:append() {
     # Override default system service configuration
     install -d ${D}${systemd_unitdir}/system
-    install -m 0644 ${WORKDIR}/ofono.service ${D}${systemd_unitdir}/system/ofono.service
+    install -m 0644 ${UNPACKDIR}/ofono.service ${D}${systemd_unitdir}/system/ofono.service
 
     # Since we use --disable-datafiles we need to install the dbus condif file manually now
     install -d ${D}${sysconfdir}/dbus-1/system.d

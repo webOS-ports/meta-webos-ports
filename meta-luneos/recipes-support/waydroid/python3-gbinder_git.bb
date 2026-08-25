@@ -27,5 +27,7 @@ inherit setuptools3 pkgconfig
 BBCLASSEXTEND = "native"
 
 # ERROR: python3-gbinder-1.1.2+git-r0 do_package_qa: QA Issue: File /usr/src/debug/python3-gbinder/1.1.2+git/gbinder.c in package python3-gbinder-src contains reference to TMPDIR [buildpaths]
-ERROR_QA:remove = "buildpaths"
-WARN_QA:append = " buildpaths"
+# Scoped to -src: only the generated source carries the build path, and that
+# package never reaches an image. Demoting the check for the whole recipe
+# would also stop it catching a build path in something that does ship.
+INSANE_SKIP:${PN}-src += "buildpaths"
