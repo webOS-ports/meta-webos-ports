@@ -16,9 +16,7 @@ DEPENDS = "gstreamer1.0 gstreamer1.0-plugins-base"
 WEBOS_GIT_PARAM_BRANCH = "@rust"
 WEBOS_REPO_NAME = "gst-plugins-webos"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-WEBOS_VERSION = "1.18.5-rust.3_766c456fb7c97d00e27505882de9a237095def52"
-
-S = "${WORKDIR}/git"
+WEBOS_VERSION = "1.18.5-rust.11_cac1c661e3f79a8ec407d5e8140022ba47c0c1fe"
 
 require gstreamer1.0-plugins-webosrs-crates.inc
 
