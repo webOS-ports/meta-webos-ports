@@ -23,7 +23,6 @@ inherit qt6-cmake
 inherit webos_cmake
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};"
-S = "${WORKDIR}/git"
 
 do_install:append() {
     if [ "${sysconfdir}" != "${OE_QMAKE_PATH_QT_SETTINGS}" ] ; then

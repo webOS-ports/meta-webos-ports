@@ -6,8 +6,8 @@ LIC_FILES_CHKSUM = " \
     file://LICENSE.LGPL;md5=4193e7f1d47a858f6b7c0f1ee66161de \
 "
 
-PV = "0.8.0+git"
-SRCREV = "7ecfeaa23e2038a761bd1dfa95726dc0eed536d1"
+PV = "0.8.1+git"
+SRCREV = "6db62967601bf8d370580389fab1df36ed35c8d5"
 
 DEPENDS = "qtbase libhybris qtwayland virtual/android-headers qtdeclarative"
 
@@ -19,7 +19,6 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 COMPATIBLE_MACHINE = "^halium$"
 
 SRC_URI = "git://github.com/sailfishos/qtscenegraph-adaptation.git;protocol=https;branch=master"
-S = "${WORKDIR}/git"
 
 inherit qt6-qmake
 
