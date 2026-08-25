@@ -1,0 +1,62 @@
+From: LuneOS <webos-ports@googlegroups.com>
+Date: Wed, 12 Aug 2026 00:00:00 +0000
+Subject: [PATCH] app_runtime: exit the shell when the compositor closes the window
+
+ShellWindow::WindowHostClose() was an empty stub, so a close request from the
+compositor -- closing the card in the webOS card shell -- was received and
+dropped.
+
+The path up to that point is already complete: the webOS shell surface delivers
+the close through WaylandWindowWebos::HandleWindowHostClose() and
+DesktopWindowTreeHostPlatform::OnWindowHostClose() to the NativeEventDelegate,
+which is ShellWindow. The path after it is complete too: WindowClosing() notifies
+the ShellWindowDelegate and observers, and Shell::OnWindowClosing() recognises
+the main window and calls Shell::Shutdown(). Only the stub in the middle was
+missing, which left Shutdown() reachable only from a page calling window.close().
+
+For a browsershell app the effect is that closing the card destroys the window
+but leaves the whole browser_shell process running -- renderers, GPU process and
+all -- with nothing on screen. Worse, SAM still considers the app running, so
+relaunching re-shows the existing process instead of starting a new one: the app
+appears to ignore a restart, and picks up neither new command-line flags nor a
+newly installed webruntime.
+
+Widget::Close() is used rather than ShellWindow::CloseNow(), because this runs
+inside the platform window's own event dispatch and CloseNow() would
+synchronously destroy the DesktopWindowTreeHostPlatform and WaylandWindowWebos
+still on the stack below. Close() defers the teardown, which is what
+DesktopWindowTreeHostPlatform::OnCloseRequest() already does for an ordinary
+close request, and it still ends in WindowClosing().
+
+Upstream-Status: Pending
+---
+--- a/src/neva/app_runtime/app/app_runtime_shell_window.cc
++++ b/src/neva/app_runtime/app/app_runtime_shell_window.cc
+@@ -141,7 +141,26 @@
+ 
+ void ShellWindow::KeyboardLeave() {}
+ 
+-void ShellWindow::WindowHostClose() {}
++// The compositor asking the window to go away -- closing the card in the webOS card shell, which
++// reaches us as a webOS shell-surface close through WaylandWindowWebos::HandleWindowHostClose() and
++// DesktopWindowTreeHostPlatform::OnWindowHostClose().
++//
++// Doing nothing here left the window gone but the process alive: WindowClosing() was never reached,
++// so neither the ShellWindowDelegate nor Shell::OnWindowClosing() heard about it, and
++// Shell::Shutdown() stayed reachable only from a page calling window.close(). For a browsershell app
++// that means closing the card leaves a whole browser_shell running -- renderers, GPU process and all
++// -- with nothing on screen; and since SAM still counts the app as running, relaunching re-shows the
++// old process rather than starting a new one.
++//
++// Widget::Close() rather than CloseNow(): this runs inside the platform window's own event dispatch,
++// and CloseNow() would synchronously destroy the DesktopWindowTreeHostPlatform and the
++// WaylandWindowWebos still on the stack below us. Close() defers the teardown, which is exactly what
++// DesktopWindowTreeHostPlatform::OnCloseRequest() does with an ordinary close request. It still ends
++// in WindowClosing(), so the delegate and Shell::OnWindowClosing() run as they should.
++void ShellWindow::WindowHostClose() {
++  if (window_widget_)
++    window_widget_->Close();
++}
+ 
+ void ShellWindow::WindowHostExposed() {}
+ 

@@ -1,0 +1,62 @@
+From: LuneOS <webos-ports@googlegroups.com>
+Date: Wed, 12 Aug 2026 00:00:00 +0000
+Subject: [PATCH] neva mime: keep WebM, Ogg and AAC when decoding in software
+
+NevaMimeUtil::RemoveUnsupportedMediaFormats() dropped audio/webm, video/webm,
+video/ogg, audio/aac and audio/x-m4a from the supported-container table for every
+webOS build. On a TV that is correct -- decoding is done by fixed-function
+hardware that cannot handle them, so advertising support would accept media that
+then fails to play. On LuneOS the pipeline is GStreamer decoding in software, and
+every one of these has a decoder present: matroskademux, avdec_vp8, avdec_vp9,
+avdec_opus, vorbisdec, oggdemux, theoradec, qtdemux and avdec_aac.
+
+USE_GST_MEDIA already marks that distinction, so the removals are now conditional
+on it. The two WebM entries additionally honour the enable_webm_audio_codecs and
+enable_webm_video_codecs GN args, which already gate the MediaSource side in
+media/filters/stream_parser_factory.cc; without this the two disagreed, since
+those args never reached the canPlayType path at all.
+
+Effect on LuneOS: canPlayType and MediaSource.isTypeSupported both start
+answering for WebM (VP8, VP9, AV1, Vorbis, Opus), Ogg Theora, and AAC in its
+audio/aac and audio/x-m4a spellings, instead of reporting nothing for media the
+device can actually play.
+
+Upstream-Status: Pending
+---
+--- a/src/media/base/neva/webos/neva_mime_util_internal_webosose.cc
++++ b/src/media/base/neva/webos/neva_mime_util_internal_webosose.cc
+@@ -28,14 +28,32 @@
+   AddContainerWithCodecs("service/webos-photo-camera", webos_codecs);
+ #endif  // defined(USE_NEVA_MEDIA_PLAYER_CAMERA)
+ }
++// These containers were removed unconditionally, which is right for a TV: there the neva media
++// pipeline hands decoding to fixed-function hardware that cannot do them, so claiming support would
++// accept media that then fails to play. It is wrong wherever the pipeline decodes in software.
++//
++// USE_GST_MEDIA is exactly that distinction -- it is set when the GStreamer pipeline is in use, as on
++// LuneOS, where every one of these has a decoder present (matroskademux, avdec_vp8, avdec_vp9,
++// avdec_opus, vorbisdec, oggdemux, theoradec, qtdemux, avdec_aac). The WebM pair additionally honours
++// the enable_webm_*_codecs GN args, which already gate the MSE side in stream_parser_factory.cc, so
++// that the two paths cannot disagree about what is playable.
++//
++// This is what canPlayType answers from; the GN args alone do NOT reach it, which is why WebM stayed
++// unsupported even with enable_webm_video_codecs=true.
+ void NevaMimeUtil::RemoveUnsupportedMediaFormats() {
++#if !defined(ENABLE_WEBM_AUDIO_CODECS)
+   RemoveContainer("audio/webm");
++#endif
++#if !defined(ENABLE_WEBM_VIDEO_CODECS)
+   RemoveContainer("video/webm");
++#endif
++#if !defined(USE_GST_MEDIA)
+   RemoveContainer("video/ogg");
+-#if BUILDFLAG(USE_PROPRIETARY_CODECS)
++#endif
++#if BUILDFLAG(USE_PROPRIETARY_CODECS) && !defined(USE_GST_MEDIA)
+   RemoveContainer("audio/aac");
+   RemoveContainer("audio/x-m4a");
+-#endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
++#endif  // BUILDFLAG(USE_PROPRIETARY_CODECS) && !defined(USE_GST_MEDIA)
+ }
+ }  // namespace internal
+ }  // namespace media

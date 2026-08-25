@@ -1,0 +1,80 @@
+From 317080f1579a548ce24d63a24934c4bd8d8d36e7 Mon Sep 17 00:00:00 2001
+From: Herrie <Github.com@herrie.org>
+Date: Wed, 12 Aug 2026 13:13:00 +0200
+Subject: [PATCH] window.open: attach all WebContents helpers to an adopted
+ WebContents
+
+A window.open() from a webOS app crashed WebAppMgr as soon as the new window
+finished loading any http/https page. about:blank and file:// URLs were fine.
+
+WebView::CreateWebContents() attaches four helpers to the WebContents it creates:
+AppRuntimeWebViewHostImpl, AppRuntimeWebViewControllerImpl,
+PermissionRequestManager and (with ENABLE_PWA_MANAGER_WEBAPI) InstallableManager.
+The adopted-WebContents branch added by 0001-Add-window.open-support.patch attaches
+only the first two, so a window.open()ed page has no InstallableManager and no
+PermissionRequestManager.
+
+DidFinishLoad() then runs
+
+  if (validated_url.SchemeIsHTTPOrHTTPS() && pwa_is_starting_)
+    installable_manager_.MaybeUpdate(web_contents_.get());
+
+which reaches WebAppDataRetriever::CheckInstallabilityAndRetrieveManifest() and
+dereferences the absent InstallableManager -> null deref in the browser process,
+taking down WebAppMgr and every card with it. The SchemeIsHTTPOrHTTPS() guard is
+why only remote URLs were affected.
+
+Factor the helper attachment into AttachWebContentsHelpers() and call it from both
+paths, so an adopted WebContents is equipped exactly like a created one.
+
+Signed-off-by: Herrie <Github.com@herrie.org>
+---
+Upstream-Status: Inappropriate [LuneOS specific]
+
+ src/neva/app_runtime/webview.cc | 13 +++++++++++--
+ src/neva/app_runtime/webview.h  |  1 +
+ 2 files changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/src/neva/app_runtime/webview.cc b/src/neva/app_runtime/webview.cc
+index c3dc992..70fd770 100644
+--- a/src/neva/app_runtime/webview.cc
++++ b/src/neva/app_runtime/webview.cc
+@@ -141,8 +141,10 @@ WebView::WebView(int width, int height, WebViewProfile* profile, std::unique_ptr
+     CreateWebContents();
+   }
+   else {
+-    AppRuntimeWebViewHostImpl::CreateForWebContents(web_contents_.get());
+-    AppRuntimeWebViewControllerImpl::CreateForWebContents(web_contents_.get());
++    // An adopted WebContents (window.open) needs exactly the same helpers attached as one
++    // we create ourselves -- notably InstallableManager, which DidFinishLoad() reaches
++    // through installable_manager_.MaybeUpdate() for every http/https load.
++    AttachWebContentsHelpers();
+   }
+   injection_manager_ = std::make_unique<WebAppInjectionManager>();
+   
+@@ -227,6 +229,13 @@ void WebView::CreateWebContents() {
+   params.desired_renderer_state =
+       content::WebContents::CreateParams::kNoRendererProcess;
+   web_contents_ = content::WebContents::Create(params);
++  AttachWebContentsHelpers();
++}
++
++// Attach the per-WebContents helpers this WebView relies on. Called for both the
++// WebContents we create and the one adopted from a window.open(), so the two kinds of
++// page are equally equipped.
++void WebView::AttachWebContentsHelpers() {
+   AppRuntimeWebViewHostImpl::CreateForWebContents(web_contents_.get());
+   AppRuntimeWebViewControllerImpl::CreateForWebContents(web_contents_.get());
+ 
+diff --git a/src/neva/app_runtime/webview.h b/src/neva/app_runtime/webview.h
+index 2aaa9fd..4eb3025 100644
+--- a/src/neva/app_runtime/webview.h
++++ b/src/neva/app_runtime/webview.h
+@@ -99,6 +99,7 @@ class WebView : public AppRuntimeWebContentsDelegate,
+   void SetControllerDelegate(WebViewControllerDelegate* delegate);
+ 
+   void CreateWebContents();
++  void AttachWebContentsHelpers();
+   content::WebContents* GetWebContents();
+   void AddUserStyleSheet(const std::string& sheet);
+   std::string UserAgent() const;
