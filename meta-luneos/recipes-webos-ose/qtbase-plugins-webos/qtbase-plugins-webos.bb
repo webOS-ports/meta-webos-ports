@@ -11,7 +11,7 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "qtbase"
 
-WEBOS_VERSION = "1.0.0-24_ef79dc2f265877a0bdf57846a35776362fc77707"
+WEBOS_VERSION = "1.0.0-33_82de55b24bdab921b0a41bb08631cea7e881e376"
 PR = "r8"
 
 inherit webos_qmake6
@@ -20,8 +20,6 @@ inherit webos_enhanced_submissions
 inherit webos_qt_global
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-
-S = "${WORKDIR}/git"
 
 EXTRA_QMAKEVARS_PRE += "${PACKAGECONFIG_CONFARGS}"
 PACKAGECONFIG ??= ""

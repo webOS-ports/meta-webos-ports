@@ -9,9 +9,13 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=7187b1fb0318bb1af23edbf4237ee8b8 \
 "
 
-DEPENDS = "qtwayland webos-wayland-extensions libxkbcommon qt-features-webos wayland-native qtwayland-native wayland-protocols"
+# Qt 6.10 moved the QtWayland client and qtwaylandscanner into qtbase, and
+# meta-qt6 dropped the qtwayland native/nativesdk builds with it
+# ("Adapt to QtWayland client move to QtBase"). qtwaylandscanner now comes from
+# qtbase-native, gated on the wayland DISTRO_FEATURE which LuneOS sets.
+DEPENDS = "qtwayland webos-wayland-extensions libxkbcommon qt-features-webos wayland-native qtbase-native wayland-protocols"
 
-WEBOS_VERSION = "6.0.0-93_fa22224e6e6549d89c19f99a984a63c3062dd4f5"
+WEBOS_VERSION = "6.0.0-94_bc155a885ed03c8243bde3bb40e65a08dfe4c94d"
 PR = "r20"
 
 #QT_BUILD_SYSTEM ?= "${@ 'cmake' if d.getVar('QT_VERSION')[0] == '6' else 'qmake' }"
@@ -20,7 +24,6 @@ PR = "r20"
 #|   another target with the same name already exists.
 
 QT_BUILD_SYSTEM = "qmake"
-
 
 PACKAGECONFIG ??= ""
 
@@ -36,8 +39,10 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Fix-platform-keys.patch \
     file://0002-WebOSIntegration-enable-all-capabilities-for-LuneOS.patch \
     file://0003-WebOSShellSurfacePrivate-add-client_size_changed.patch \
+    file://qt-wayland-egl-client \
+    file://0004-webos-wayland-egl-build-client-egl-integration-in-tree.patch \
+    file://0005-webos-wayland-egl-follow-qtwayland-api-changes.patch \
 "
-S = "${WORKDIR}/git"
 
 # No debian package renaming
 DEBIAN_NOAUTONAME:${PN} = "1"
@@ -66,4 +71,32 @@ do_install:append() {
     ln -snvf webos-platform-interface.pc ${D}${libdir}/pkgconfig/weboscompositorextensionclient.pc
     sed -i 's@prefix=${STAGING_DIR_HOST}@prefix=@g ;s@-L${STAGING_DIR_HOST} @ @g;' ${D}${libdir}/pkgconfig/*.pc
     sed -i "s@-L${STAGING_LIBDIR}@-L\${libdir}@g" ${D}${libdir}/pkgconfig/*.pc
+}
+
+# ERROR: qtwayland-webos-6.0.0-93-r20 do_package_qa: QA Issue: File /usr/src/debug/qtwayland-webos/6.0.0-93/src/webos-platform-interface/qwayland-presentation-time.cpp in package qtwayland-webos-src contains reference to TMPDIR
+# File /usr/src/debug/qtwayland-webos/6.0.0-93/src/webos-platform-interface/qwayland-presentation-time.h in package qtwayland-webos-src contains reference to TMPDIR
+# File /usr/src/debug/qtwayland-webos/6.0.0-93/src/webos-platform-interface/qwayland-webos-surface-group.h in package qtwayland-webos-src contains reference to TMPDIR
+# File /usr/src/debug/qtwayland-webos/6.0.0-93/src/webos-platform-interface/qwayland-webos-surface-group.cpp in package qtwayland-webos-src contains reference to TMPDIR
+# File /usr/src/debug/qtwayland-webos/6.0.0-93/src/webos-platform-interface/qwayland-webos-tablet.cpp in package qtwayland-webos-src contains reference to TMPDIR
+# File /usr/src/debug/qtwayland-webos/6.0.0-93/src/webos-platform-interface/qwayland-webos-foreign.cpp in package qtwayland-webos-src contains reference to TMPDIR
+# File /usr/src/debug/qtwayland-webos/6.0.0-93/src/webos-platform-interface/qwayland-webos-foreign.h in package qtwayland-webos-src contains reference to TMPDIR
+# File /usr/src/debug/qtwayland-webos/6.0.0-93/src/webos-platform-interface/qwayland-webos-input-manager.cpp in package qtwayland-webos-src contains reference to TMPDIR
+# File /usr/src/debug/qtwayland-webos/6.0.0-93/src/webos-platform-interface/qwayland-webos-input-manager.h in package qtwayland-webos-src contains reference to TMPDIR
+# File /usr/src/debug/qtwayland-webos/6.0.0-93/src/webos-platform-interface/qwayland-webos-tablet.h in package qtwayland-webos-src contains reference to TMPDIR
+# File /usr/src/debug/qtwayland-webos/6.0.0-93/src/webos-platform-interface/qwayland-webos-extension.cpp in package qtwayland-webos-src contains reference to TMPDIR
+# File /usr/src/debug/qtwayland-webos/6.0.0-93/src/webos-platform-interface/qwayland-webos-extension.h in package qtwayland-webos-src contains reference to TMPDIR [buildpaths]
+# ERROR: qtwayland-webos-6.0.0-93-r20 do_package_qa: QA Issue: File /usr/lib/libWebOSEglClientBuffer.prl in package qtwayland-webos-dev contains reference to TMPDIR [buildpaths]
+ERROR_QA:remove = "buildpaths"
+WARN_QA:append = " buildpaths"
+
+# Qt 6.10 moved the QtWayland client into qtbase and stopped publishing the
+# client-side EGL hardware integration as a private module, so
+# webos-wayland-egl - which subclasses QWaylandEglWindow and
+# QWaylandEglClientBufferIntegration - has nothing to build against. The
+# sources still exist in qtbase but are compiled into a plugin with no
+# installed headers, so they are imported here and built into the webOS plugin
+# instead. See qt-wayland-egl-client/README.webos for provenance and how to
+# refresh them when the qtbase SRCREV moves.
+do_configure:prepend() {
+    cp -a ${UNPACKDIR}/qt-wayland-egl-client ${S}/src/plugins/platforms/webos-wayland-egl/
 }
