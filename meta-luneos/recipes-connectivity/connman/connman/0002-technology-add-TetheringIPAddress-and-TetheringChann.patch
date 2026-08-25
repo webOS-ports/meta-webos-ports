@@ -1,0 +1,476 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: LuneOS <dev@luneos.org>
+Date: Mon, 17 Aug 2026 16:55:25 +0200
+Subject: [PATCH] technology: add TetheringIPAddress and TetheringChannel,
+ allow open AP
+
+webos-connman-adapter drives WiFi tethering through three properties
+that upstream ConnMan does not have:
+
+  - TetheringIPAddress, the address the AP itself takes, from which the
+    served /24 is derived.  Upstream always asks the IP pool for a free
+    block, so the address could not be pinned down.
+  - TetheringChannel, the 802.11 channel.  Upstream 2.0 gained
+    TetheringFreq for the same purpose, so rather than carrying a second
+    field this maps channel to frequency and keeps tethering_freq as the
+    single source of truth.  Both properties are exported and either can
+    be set.
+  - An empty TetheringPassphrase, which is how the adapter's
+    securityType=open mode asks for an open AP.  plugins/wifi.c already
+    turns an empty passphrase into G_SUPPLICANT_SECURITY_NONE; only the
+    D-Bus side rejected it.
+
+Reworked from the webOS OSE ConnMan fork, which duplicated the whole of
+__connman_tethering_set_enabled() to support the static address.  Here
+the existing function takes an optional address instead, so the two
+paths cannot drift apart, and the derived strings are released on every
+exit path.
+
+Upstream-Status: Inappropriate [webOS specific]
+---
+ src/connman.h    |   2 +-
+ src/technology.c | 140 +++++++++++++++++++++++++++++++++++++++++++++--
+ src/tethering.c  | 130 +++++++++++++++++++++++++++++++++++--------
+ 3 files changed, 244 insertions(+), 28 deletions(-)
+
+diff --git a/src/connman.h b/src/connman.h
+index 7ebda7a..99586a3 100644
+--- a/src/connman.h
++++ b/src/connman.h
+@@ -681,7 +681,7 @@ int __connman_tethering_init(void);
+ void __connman_tethering_cleanup(void);
+ 
+ const char *__connman_tethering_get_bridge(void);
+-int __connman_tethering_set_enabled(void);
++int __connman_tethering_set_enabled(const char *ip);
+ void __connman_tethering_set_disabled(void);
+ void __connman_tethering_list_clients(DBusMessageIter *array);
+ 
+diff --git a/src/technology.c b/src/technology.c
+index dcceacb..299100b 100644
+--- a/src/technology.c
++++ b/src/technology.c
+@@ -25,6 +25,8 @@
+ 
+ #include <errno.h>
+ #include <string.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
+ 
+ #include <gdbus.h>
+ 
+@@ -69,6 +71,7 @@ struct connman_technology {
+ 	char *tethering_ident;
+ 	char *tethering_passphrase;
+ 	int tethering_freq;
++	char *tethering_ipaddress;
+ 
+ 	bool enable_persistent; /* Save the tech state */
+ 
+@@ -202,6 +205,14 @@ static void technology_save(struct connman_technology *technology)
+ 				"Tethering.Freq",
+ 				technology->tethering_freq);
+ 
++	if (technology->tethering_ipaddress)
++		g_key_file_set_string(keyfile, identifier,
++				"Tethering.IP",
++				technology->tethering_ipaddress);
++	else
++		g_key_file_remove_key(keyfile, identifier,
++				"Tethering.IP", NULL);
++
+ done:
+ 	g_free(identifier);
+ 
+@@ -232,7 +243,9 @@ int connman_technology_tethering_notify(struct connman_technology *technology,
+ 		return -EALREADY;
+ 
+ 	if (enabled) {
+-		err = __connman_tethering_set_enabled();
++		const char *ip = technology->tethering_ipaddress;
++
++		err = __connman_tethering_set_enabled(ip && *ip ? ip : NULL);
+ 		if (err < 0)
+ 			return err;
+ 	} else
+@@ -491,6 +504,9 @@ static void technology_load(struct connman_technology *technology)
+ 	technology->tethering_freq = g_key_file_get_integer(keyfile,
+ 				identifier, "Tethering.Freq", NULL);
+ 
++	technology->tethering_ipaddress = g_key_file_get_string(keyfile,
++				identifier, "Tethering.IP", NULL);
++
+ done:
+ 	g_free(identifier);
+ 
+@@ -557,6 +573,39 @@ static bool connman_technology_load_offlinemode(void)
+ 	return offlinemode;
+ }
+ 
++/*
++ * webos-connman-adapter configures the tethering channel rather than the
++ * frequency, so translate between the two and keep tethering_freq as the
++ * single source of truth.  Returns 0 for a channel that has no mapping.
++ */
++static int channel2freq(unsigned int channel)
++{
++	if (channel >= 1 && channel <= 13)
++		return 2407 + channel * 5;
++
++	if (channel == 14)
++		return 2484;
++
++	if (channel >= 32 && channel <= 177)
++		return 5000 + channel * 5;
++
++	return 0;
++}
++
++static unsigned int freq2channel(int freq)
++{
++	if (freq == 2484)
++		return 14;
++
++	if (freq >= 2412 && freq <= 2472)
++		return (freq - 2407) / 5;
++
++	if (freq >= 5160 && freq <= 5885)
++		return (freq - 5000) / 5;
++
++	return 0;
++}
++
+ static void append_interfaces(DBusMessageIter *iter, void *user_data)
+ {
+ 	struct connman_technology *technology = user_data;
+@@ -590,6 +639,7 @@ static void append_properties(DBusMessageIter *iter,
+ {
+ 	DBusMessageIter dict;
+ 	dbus_bool_t val;
++	dbus_uint32_t channel;
+ 	const char *str;
+ 
+ 	connman_dbus_dict_open(iter, &dict);
+@@ -638,6 +688,16 @@ static void append_properties(DBusMessageIter *iter,
+ 				DBUS_TYPE_INT32,
+ 				&technology->tethering_freq);
+ 
++	channel = freq2channel(technology->tethering_freq);
++	connman_dbus_dict_append_basic(&dict, "TetheringChannel",
++				DBUS_TYPE_UINT32,
++				&channel);
++
++	if (technology->tethering_ipaddress)
++		connman_dbus_dict_append_basic(&dict, "TetheringIPAddress",
++					DBUS_TYPE_STRING,
++					&technology->tethering_ipaddress);
++
+ 	connman_dbus_dict_close(iter, &dict);
+ }
+ 
+@@ -1036,10 +1096,17 @@ static DBusMessage *set_property(DBusConnection *conn,
+ 		if (technology->type != CONNMAN_SERVICE_TYPE_WIFI)
+ 			return __connman_error_not_supported(msg);
+ 
+-		err = __connman_service_check_passphrase(CONNMAN_SERVICE_SECURITY_PSK,
+-							str);
+-		if (err < 0)
+-			return __connman_error_passphrase_required(msg);
++		/*
++		 * An empty passphrase means an open AP, which the
++		 * securityType=open mode of webos-connman-adapter relies on.
++		 */
++		if (*str != '\0') {
++			err = __connman_service_check_passphrase(
++						CONNMAN_SERVICE_SECURITY_PSK,
++						str);
++			if (err < 0)
++				return __connman_error_passphrase_required(msg);
++		}
+ 
+ 		if (g_strcmp0(technology->tethering_passphrase, str) != 0) {
+ 			g_free(technology->tethering_passphrase);
+@@ -1073,6 +1140,68 @@ static DBusMessage *set_property(DBusConnection *conn,
+ 					DBUS_TYPE_INT32,
+ 					&technology->tethering_freq);
+ 		}
++	} else if (g_str_equal(name, "TetheringChannel")) {
++		dbus_uint32_t channel;
++		int freq;
++
++		if (type != DBUS_TYPE_UINT32)
++			return __connman_error_invalid_arguments(msg);
++
++		dbus_message_iter_get_basic(&value, &channel);
++
++		if (technology->type != CONNMAN_SERVICE_TYPE_WIFI)
++			return __connman_error_not_supported(msg);
++
++		freq = channel2freq(channel);
++		if (freq == 0)
++			return __connman_error_invalid_arguments(msg);
++
++		if (technology->tethering_freq != freq) {
++			technology->tethering_freq = freq;
++			technology_save(technology);
++
++			connman_dbus_property_changed_basic(technology->path,
++					CONNMAN_TECHNOLOGY_INTERFACE,
++					"TetheringChannel",
++					DBUS_TYPE_UINT32,
++					&channel);
++
++			connman_dbus_property_changed_basic(technology->path,
++					CONNMAN_TECHNOLOGY_INTERFACE,
++					"TetheringFreq",
++					DBUS_TYPE_INT32,
++					&technology->tethering_freq);
++		}
++	} else if (g_str_equal(name, "TetheringIPAddress")) {
++		const char *str;
++		struct in_addr addr;
++
++		if (type != DBUS_TYPE_STRING)
++			return __connman_error_invalid_arguments(msg);
++
++		dbus_message_iter_get_basic(&value, &str);
++
++		if (technology->type != CONNMAN_SERVICE_TYPE_WIFI)
++			return __connman_error_not_supported(msg);
++
++		/* An empty address restores the automatic IP pool. */
++		if (*str != '\0' && inet_aton(str, &addr) == 0)
++			return __connman_error_invalid_arguments(msg);
++
++		if (g_strcmp0(technology->tethering_ipaddress, str) != 0) {
++			g_free(technology->tethering_ipaddress);
++			technology->tethering_ipaddress =
++					*str != '\0' ? g_strdup(str) : NULL;
++			technology_save(technology);
++
++			str = technology->tethering_ipaddress ?
++					technology->tethering_ipaddress : "";
++			connman_dbus_property_changed_basic(technology->path,
++					CONNMAN_TECHNOLOGY_INTERFACE,
++					"TetheringIPAddress",
++					DBUS_TYPE_STRING,
++					&str);
++		}
+ 	} else if (g_str_equal(name, "Powered")) {
+ 		dbus_bool_t enable;
+ 
+@@ -1293,6 +1422,7 @@ static void technology_put(struct connman_technology *technology)
+ 	g_free(technology->regdom);
+ 	g_free(technology->tethering_ident);
+ 	g_free(technology->tethering_passphrase);
++	g_free(technology->tethering_ipaddress);
+ 	g_free(technology);
+ }
+ 
+diff --git a/src/tethering.c b/src/tethering.c
+index f930a26..62258f5 100644
+--- a/src/tethering.c
++++ b/src/tethering.c
+@@ -34,6 +34,7 @@
+ #include <string.h>
+ #include <fcntl.h>
+ #include <netinet/in.h>
++#include <arpa/inet.h>
+ #include <linux/sockios.h>
+ #include <linux/if_tun.h>
+ #include <linux/if_bridge.h>
+@@ -52,12 +53,25 @@
+ 
+ #define DEFAULT_MTU	1500
+ 
++#define SUBNET_MASK_24 "255.255.255.0"
++
+ static char *private_network_primary_dns = NULL;
+ static char *private_network_secondary_dns = NULL;
+ 
+ static volatile int tethering_enabled;
+ static GDHCPServer *tethering_dhcp_server = NULL;
+ static struct connman_ippool *dhcp_ippool = NULL;
++
++/*
++ * When the technology has a TetheringIPAddress configured we serve that
++ * /24 instead of asking the IP pool for a free block.  These hold the
++ * addresses derived from it; they are all NULL when the pool is used.
++ */
++static char *tethering_ip = NULL;
++static char *tethering_gateway = NULL;
++static char *tethering_broadcast = NULL;
++static char *tethering_start_ip = NULL;
++static char *tethering_end_ip = NULL;
+ static DBusConnection *connection;
+ static GHashTable *pn_hash;
+ 
+@@ -181,11 +195,68 @@ static void dhcp_server_stop(GDHCPServer *server)
+ 	g_dhcp_server_unref(server);
+ }
+ 
++static char *get_ip(uint32_t ip)
++{
++	struct in_addr addr;
++
++	addr.s_addr = htonl(ip);
++
++	return g_strdup(inet_ntoa(addr));
++}
++
++/*
++ * Derive gateway, broadcast and the DHCP range from a statically
++ * configured address, assuming a /24.
++ */
++static int setup_static_addresses(const char *ip)
++{
++	struct in_addr addr;
++	uint32_t base;
++
++	if (inet_aton(ip, &addr) == 0)
++		return -EINVAL;
++
++	base = ntohl(addr.s_addr) & 0xffffff00;
++
++	tethering_ip = g_strdup(ip);
++	tethering_gateway = g_strdup(ip);
++	tethering_broadcast = get_ip(base + 255);
++	tethering_start_ip = get_ip(base + 2);
++	tethering_end_ip = get_ip(base + 254);
++
++	return 0;
++}
++
++static void release_addresses(int index)
++{
++	if (tethering_ip) {
++		__connman_ippool_deladdr(index, tethering_ip, 24);
++
++		g_free(tethering_ip);
++		tethering_ip = NULL;
++	}
++
++	g_free(tethering_gateway);
++	tethering_gateway = NULL;
++	g_free(tethering_broadcast);
++	tethering_broadcast = NULL;
++	g_free(tethering_start_ip);
++	tethering_start_ip = NULL;
++	g_free(tethering_end_ip);
++	tethering_end_ip = NULL;
++
++	__connman_ippool_free(dhcp_ippool);
++	dhcp_ippool = NULL;
++}
++
+ static void tethering_restart(struct connman_ippool *pool, void *user_data)
+ {
++	char *ip = g_strdup(tethering_ip);
++
+ 	DBG("pool %p", pool);
+ 	__connman_tethering_set_disabled();
+-	__connman_tethering_set_enabled();
++	__connman_tethering_set_enabled(ip);
++	g_free(ip);
+ }
+ 
+ static void unregister_client(gpointer key,
+@@ -200,7 +271,7 @@ static void unregister_all_clients(void)
+ 	g_hash_table_foreach(clients_table, unregister_client, NULL);
+ }
+ 
+-int __connman_tethering_set_enabled(void)
++int __connman_tethering_set_enabled(const char *ip)
+ {
+ 	int index;
+ 	int err;
+@@ -225,27 +296,45 @@ int __connman_tethering_set_enabled(void)
+ 	}
+ 
+ 	index = connman_inet_ifindex(BRIDGE_NAME);
+-	dhcp_ippool = __connman_ippool_create(index, 2, 252,
++
++	if (ip) {
++		if (setup_static_addresses(ip) < 0) {
++			connman_error("Invalid tethering address %s", ip);
++			release_addresses(index);
++			__connman_bridge_remove(BRIDGE_NAME);
++			__sync_fetch_and_sub(&tethering_enabled, 1);
++			return -EINVAL;
++		}
++
++		__connman_ippool_newaddr(index, tethering_gateway, 24);
++
++		gateway = tethering_gateway;
++		broadcast = tethering_broadcast;
++		subnet_mask = SUBNET_MASK_24;
++		start_ip = tethering_start_ip;
++		end_ip = tethering_end_ip;
++	} else {
++		dhcp_ippool = __connman_ippool_create(index, 2, 252,
+ 						tethering_restart, NULL);
+-	if (!dhcp_ippool) {
+-		connman_error("Fail to create IP pool");
+-		__connman_bridge_remove(BRIDGE_NAME);
+-		__sync_fetch_and_sub(&tethering_enabled, 1);
+-		return -EADDRNOTAVAIL;
+-	}
++		if (!dhcp_ippool) {
++			connman_error("Fail to create IP pool");
++			__connman_bridge_remove(BRIDGE_NAME);
++			__sync_fetch_and_sub(&tethering_enabled, 1);
++			return -EADDRNOTAVAIL;
++		}
+ 
+-	gateway = __connman_ippool_get_gateway(dhcp_ippool);
+-	broadcast = __connman_ippool_get_broadcast(dhcp_ippool);
+-	subnet_mask = __connman_ippool_get_subnet_mask(dhcp_ippool);
+-	start_ip = __connman_ippool_get_start_ip(dhcp_ippool);
+-	end_ip = __connman_ippool_get_end_ip(dhcp_ippool);
++		gateway = __connman_ippool_get_gateway(dhcp_ippool);
++		broadcast = __connman_ippool_get_broadcast(dhcp_ippool);
++		subnet_mask = __connman_ippool_get_subnet_mask(dhcp_ippool);
++		start_ip = __connman_ippool_get_start_ip(dhcp_ippool);
++		end_ip = __connman_ippool_get_end_ip(dhcp_ippool);
++	}
+ 
+ 	err = __connman_bridge_enable(BRIDGE_NAME, gateway,
+ 			connman_ipaddress_calc_netmask_len(subnet_mask),
+ 			broadcast);
+ 	if (err < 0 && err != -EALREADY) {
+-		__connman_ippool_free(dhcp_ippool);
+-		dhcp_ippool = NULL;
++		release_addresses(index);
+ 		__connman_bridge_remove(BRIDGE_NAME);
+ 		__sync_fetch_and_sub(&tethering_enabled, 1);
+ 		return -EADDRNOTAVAIL;
+@@ -281,8 +370,7 @@ int __connman_tethering_set_enabled(void)
+ 						24 * 3600, dns);
+ 	if (!tethering_dhcp_server) {
+ 		__connman_bridge_disable(BRIDGE_NAME);
+-		__connman_ippool_free(dhcp_ippool);
+-		dhcp_ippool = NULL;
++		release_addresses(index);
+ 		__connman_bridge_remove(BRIDGE_NAME);
+ 		__sync_fetch_and_sub(&tethering_enabled, 1);
+ 		return -EOPNOTSUPP;
+@@ -294,8 +382,7 @@ int __connman_tethering_set_enabled(void)
+ 		connman_error("Cannot enable NAT %d/%s", err, strerror(-err));
+ 		dhcp_server_stop(tethering_dhcp_server);
+ 		__connman_bridge_disable(BRIDGE_NAME);
+-		__connman_ippool_free(dhcp_ippool);
+-		dhcp_ippool = NULL;
++		release_addresses(index);
+ 		__connman_bridge_remove(BRIDGE_NAME);
+ 		__sync_fetch_and_sub(&tethering_enabled, 1);
+ 		return -EOPNOTSUPP;
+@@ -335,8 +422,7 @@ void __connman_tethering_set_disabled(void)
+ 
+ 	__connman_bridge_disable(BRIDGE_NAME);
+ 
+-	__connman_ippool_free(dhcp_ippool);
+-	dhcp_ippool = NULL;
++	release_addresses(index);
+ 
+ 	__connman_bridge_remove(BRIDGE_NAME);
+ 
