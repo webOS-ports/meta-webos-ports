@@ -17,6 +17,7 @@ remove_LGPL3() {
 # Needed in LuneOS
 #PACKAGECONFIG_DEFAULT:remove = "dbus"
 
+
 # Enable accessibility for qtquickcontrols
 PACKAGECONFIG:append = " accessibility"
 
@@ -40,7 +41,11 @@ PACKAGECONFIG_GRAPHICS:append:pinetab2 = " kms gbm"
 PACKAGECONFIG_GRAPHICS:append:tenderloin = " kms gbm"
 PACKAGECONFIG_GRAPHICS:append:rosy = " kms gbm"
 PACKAGECONFIG_GRAPHICS:append:tissot = " kms gbm"
-PACKAGECONFIG_DISTRO += "sql-sqlite icu glib accessibility mtdev examples fontconfig xkbcommon"
+# "examples" dropped: meta-qt6 6.12 has no PACKAGECONFIG[examples] any more -
+# examples moved out to qt6-examples.inc - and an unknown entry is fatal:
+#   ERROR: QA Issue: qtbase: invalid PACKAGECONFIG(s): examples
+# LuneOS does not ship the Qt examples, so there is nothing to carry over.
+PACKAGECONFIG_DISTRO += "sql-sqlite icu glib accessibility mtdev fontconfig xkbcommon"
 
 # We had this enabled in our old gpro/meta-qt5 recipe
 PACKAGECONFIG:append = " icu"
@@ -107,6 +112,15 @@ SRC_URI:append = " \
     file://9901-Disable-Faux-bolding-in-Qts-FreeType-FontEngine.patch \
 "
 
+# Qt 6.10 moved the QtWayland client from qtwayland into qtbase; this is the
+# qtwayland 0004 patch retargeted at the new path.
+SRC_URI:append = " file://9906-QWaylandDisplay-don-t-ignore-wayland-QT_IM_MODULE.patch;minver=6.10.0"
+
+# Same move: the libhybris server-buffer plugin came into qtbase with the
+# QtWayland client and still expects QOpenGLTexture in QtGui, where it has not
+# lived since Qt 6.0. Only halium machines build it, so upstream never sees it.
+SRC_URI:append = " file://9907-libhybris-egl-server-take-QOpenGLTexture-from-QtOpenG.patch;minver=6.10.0"
+
 # FIXME: Patches below can be dropped once all qmake-dependent components are switched to cmake.
 # https://bugreports.qt.io/browse/WEBOSCI-66
 # https://bugreports.qt.io/browse/WEBOSCI-81
@@ -131,6 +145,15 @@ TARGET_CXXFLAGS:append = " \
 
 VIRTUAL-RUNTIME_gpu-libs ?= ""
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_gpu-libs}"
+
+# FIXME: Since there is no libgles3-mesa package that would pull in the headers,
+# webos-qt-sdk should have runtime dependency on libgles3-mesa-dev because
+# /usr/include/QtGui/qtgui-config.h will either use gl3.h or gl2.h based
+# on QT_FEATURE_opengles3.
+# https://bugreports.qt.io/browse/WEBOSCI-82
+# class-target only: on native this becomes libgles3-mesa-dev-native, which
+# mesa-native does not produce, and that makes qtbase-native unbuildable.
+RRECOMMENDS:${PN}-dev:append:class-target = " libgles3-mesa-dev"
 
 # work around for issues described in:
 # https://codereview.qt-project.org/c/yocto/meta-qt6/+/483660
