@@ -9,7 +9,6 @@ SRC_URI  = " \
     file://mmsd.conf \
     file://mmsd.service \
 "
-S = "${WORKDIR}/git"
 
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE:${PN} = "${PN}.service"
@@ -22,8 +21,8 @@ do_configure:prepend () {
 
 do_install:append() {
     install -d ${D}${sysconfdir}/dbus-1/system.d
-    install -m 0644 ${WORKDIR}/${PN}.conf ${D}${sysconfdir}/dbus-1/system.d/
+    install -m 0644 ${UNPACKDIR}/${PN}.conf ${D}${sysconfdir}/dbus-1/system.d/
 
     install -d ${D}${systemd_unitdir}/system
-    install -m 0644 ${WORKDIR}/${PN}.service ${D}${systemd_unitdir}/system/
+    install -m 0644 ${UNPACKDIR}/${PN}.service ${D}${systemd_unitdir}/system/
 }

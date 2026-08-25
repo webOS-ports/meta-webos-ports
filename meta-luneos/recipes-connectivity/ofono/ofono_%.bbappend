@@ -22,18 +22,18 @@ SERVICE_FILE = "ofono.service"
 do_install:append() {
     # Override default system service configuration
     install -d ${D}${systemd_unitdir}/system
-    install -m 0644 ${WORKDIR}/${SERVICE_FILE} ${D}${systemd_unitdir}/system/ofono.service
+    install -m 0644 ${UNPACKDIR}/${SERVICE_FILE} ${D}${systemd_unitdir}/system/ofono.service
 
-    if [ -e ${WORKDIR}/msm-modem-uim-selection.sh ]; then
+    if [ -e ${UNPACKDIR}/msm-modem-uim-selection.sh ]; then
         # Install shell script which can help with MSM modems
         install -d ${D}${sbindir}
-        install -m 0755 ${WORKDIR}/msm-modem-uim-selection.sh ${D}${sbindir}/msm-modem-uim-selection.sh
+        install -m 0755 ${UNPACKDIR}/msm-modem-uim-selection.sh ${D}${sbindir}/msm-modem-uim-selection.sh
     fi
     
-    if [ -e ${WORKDIR}/70-ofono-modem.rules ]; then
+    if [ -e ${UNPACKDIR}/70-ofono-modem.rules ]; then
         # Install udev rule for mainline modem
         install -d ${D}${sysconfdir}/udev/rules.d
-        install -m 0644 ${WORKDIR}/70-ofono-modem.rules ${D}${sysconfdir}/udev/rules.d/70-ofono-modem.rules
+        install -m 0644 ${UNPACKDIR}/70-ofono-modem.rules ${D}${sysconfdir}/udev/rules.d/70-ofono-modem.rules
     fi
 }
 
