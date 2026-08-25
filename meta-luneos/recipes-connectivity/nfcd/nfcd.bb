@@ -73,3 +73,32 @@ SYSTEMD_SERVICE:${PN} = "nfcd.service"
 
 # meta-systemd defaults this to disable, but we want NFC up at boot
 SYSTEMD_AUTO_ENABLE:forcevariable = "enable"
+
+# nfcd starts every adapter in mode 0 (nothing polling): a client still has
+# to ask for a mode (webos-nfc-adapter does), and on top of that the adapter
+# also has to actually be powered, which needs nfcd's own AlwaysOn setting.
+# Real Sailfish devices get that from their (closed) per-device adaptation
+# package; on Halium there's no equivalent, so without this nothing ever
+# reaches the sensor no matter what asks for a mode. There is no dynamic
+# screen-state component to defer to here (checked nfcd's own plugins and
+# sailfishos/mce's full module list - neither touches NFC power), so seed it
+# statically. Written the same way nfcd persists it itself: 0700 dir, 0600
+# file, [Settings] group, see plugins/settings/settings_plugin.c upstream.
+# Only on first install - this is nfcd's own mutable state after that, and a
+# reinstall/upgrade must not stomp on whatever the user has since set.
+pkg_postinst:${PN}() {
+    # Runs on the device, where `install` isn't necessarily on PATH (this
+    # busybox build doesn't have it) - stick to mkdir/chmod/cat, which are.
+    settings_dir="$D${localstatedir}/lib/nfcd"
+    settings_file="$settings_dir/settings"
+    if [ ! -e "$settings_file" ]; then
+        mkdir -p "$settings_dir"
+        chmod 0700 "$settings_dir"
+        cat > "$settings_file" <<-EOF
+			[Settings]
+			Enabled=true
+			AlwaysOn=true
+			EOF
+        chmod 0600 "$settings_file"
+    fi
+}
