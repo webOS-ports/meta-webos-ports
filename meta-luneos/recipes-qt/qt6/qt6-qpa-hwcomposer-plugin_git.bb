@@ -5,7 +5,7 @@ LICENSE = "LGPL-2.1-only"
 LIC_FILES_CHKSUM = "file://hwcomposer_backend.cpp;beginline=1;endline=40;md5=09c08382077db2dbc01b1b5536ec6665"
 
 PV = "6.3.0+git"
-SRCREV = "998956aebe21ac7ba6e7315d1c12e6e11c93d742"
+SRCREV = "41e7bda3bc7a87a1cffd45d44bf6abef90460b38"
 
 DEPENDS = "qtbase libhybris qtwayland virtual/android-headers"
 
@@ -18,6 +18,8 @@ COMPATIBLE_MACHINE = "^halium$"
 
 SRC_URI = " \
     git://github.com/mer-hybris/qt5-qpa-hwcomposer-plugin.git;branch=master;protocol=https \
+    file://0001-Follow-Qt-s-qgenericunixtheme_p.h-rename.patch \
+    file://0002-hwcomposer-always-pass-the-buffer-to-set_client_targe.patch \
 "
 S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/hwcomposer"
 
