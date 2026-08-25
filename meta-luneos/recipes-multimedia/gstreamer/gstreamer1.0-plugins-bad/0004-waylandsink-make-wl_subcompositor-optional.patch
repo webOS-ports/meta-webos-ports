@@ -1,0 +1,333 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: LuneOS / webOS Ports <team@webos-ports.org>
+Date: Thu, 13 Aug 2026 00:00:00 +0000
+Subject: [PATCH] waylandsink: make wl_subcompositor optional
+
+webOS' compositor, luna-surfacemanager, does not implement wl_subcompositor.
+gst_wl_display_new_existing() lists it in VERIFY_INTERFACE_EXISTS, so
+waylandsink fails outright there:
+
+  Could not bind to wl_subcompositor. Either it is not implemented in the
+  compositor, or the implemented version doesn't match
+
+GstWlWindow normally creates two surfaces: an area_surface that carries the
+shell role and draws the black borders, and a video_surface embedded in it as
+a wl_subsurface. Without wl_subcompositor the second cannot exist.
+
+Make the interface optional and, when it is absent, render into a single
+surface: video_surface and video_surface_wrapper alias the area_surface pair,
+one viewport is shared, and the subsurface calls (set_position, set_sync,
+set_desync) plus the separate parent commits are skipped. The video is placed
+and scaled by the viewport destination that resize_video_surface() already
+sets, so the only functional loss is the black border / letterbox fill, which
+inherently needs a second surface behind the video.
+
+Three details worth noting:
+
+  - the empty input region normally set on video_surface is skipped, since in
+    this mode that surface also carries the shell role and the window would
+    otherwise accept no input at all;
+  - set_opaque() no longer marks the surface unconditionally opaque, which
+    would break video that does have an alpha channel;
+  - update_borders() is not called, as it would attach the border buffer to the
+    very surface the video was just attached to.
+
+Embedding in a foreign surface (gst_wl_window_new_in_surface, the
+GstVideoOverlay path) genuinely cannot work without wl_subcompositor, so it now
+fails cleanly instead of dereferencing a NULL subcompositor, and waylandsink
+posts an error rather than using the NULL window.
+
+This replaces 0004-waylandsink-remove-unsupported-subcompositor.patch, which
+did the same job by removing the area surface wholesale. That patch was written
+against 1.16 and by 1.28 had 4 hunks failing outright and several more applying
+only at fuzz 3 - the file has since gained viewporter, single-pixel-buffer and
+colorimetry handling. This version is written against 1.28.2 and is a third of
+the size.
+
+Upstream-Status: Inappropriate [webOS specific]
+---
+
+ .../ext/wayland/gstwaylandsink.c              |  17 ++-
+ .../gst-libs/gst/wayland/gstwldisplay.c       |  11 +-
+ .../gst-libs/gst/wayland/gstwlwindow.c        | 117 ++++++++++++------
+ 3 files changed, 104 insertions(+), 41 deletions(-)
+
+diff --git a/subprojects/gst-plugins-bad/ext/wayland/gstwaylandsink.c b/subprojects/gst-plugins-bad/ext/wayland/gstwaylandsink.c
+index 443db24..b49ff70 100644
+--- a/subprojects/gst-plugins-bad/ext/wayland/gstwaylandsink.c
++++ b/subprojects/gst-plugins-bad/ext/wayland/gstwaylandsink.c
+@@ -1296,10 +1296,19 @@ gst_wayland_sink_set_window_handle (GstVideoOverlay * overlay, guintptr handle)
+       } else {
+         self->window = gst_wl_window_new_in_surface (self->display, surface,
+             &self->render_lock);
+-        gst_wl_window_set_rotate_method (self->window,
+-            self->current_rotate_method);
+-        gst_wl_window_set_force_aspect_ratio (self->window,
+-            self->force_aspect_ratio);
++        if (G_UNLIKELY (!self->window)) {
++          /* embedding needs wl_subcompositor, which the compositor may not
++           * implement -- see gst_wl_window_new_in_surface() */
++          GST_ELEMENT_ERROR (self, RESOURCE, OPEN_READ_WRITE,
++              ("Could not embed the video in the supplied surface"),
++              ("waylandsink cannot use an externally-supplied surface on a "
++                  "compositor without wl_subcompositor"));
++        } else {
++          gst_wl_window_set_rotate_method (self->window,
++              self->current_rotate_method);
++          gst_wl_window_set_force_aspect_ratio (self->window,
++              self->force_aspect_ratio);
++        }
+       }
+     } else {
+       GST_ERROR_OBJECT (self, "Failed to find display handle, "
+diff --git a/subprojects/gst-plugins-bad/gst-libs/gst/wayland/gstwldisplay.c b/subprojects/gst-plugins-bad/gst-libs/gst/wayland/gstwldisplay.c
+index cb14810..3e9a416 100644
+--- a/subprojects/gst-plugins-bad/gst-libs/gst/wayland/gstwldisplay.c
++++ b/subprojects/gst-plugins-bad/gst-libs/gst/wayland/gstwldisplay.c
+@@ -728,11 +728,20 @@ gst_wl_display_new_existing (struct wl_display *display,
+   }
+ 
+   VERIFY_INTERFACE_EXISTS (compositor, "wl_compositor");
+-  VERIFY_INTERFACE_EXISTS (subcompositor, "wl_subcompositor");
+   VERIFY_INTERFACE_EXISTS (shm, "wl_shm");
+ 
+ #undef VERIFY_INTERFACE_EXISTS
+ 
++  /* wl_subcompositor is optional. Without it GstWlWindow renders into a single
++   * surface instead of a video subsurface embedded in an area surface; the
++   * only functional loss is the black border / letterbox fill, which needs a
++   * second surface behind the video. webOS' luna-surfacemanager does not
++   * implement wl_subcompositor. */
++  if (!priv->subcompositor) {
++    g_warning ("Wayland compositor is missing wl_subcompositor; falling back "
++        "to single-surface rendering. Black borders will not be drawn.");
++  }
++
+   /* We make the viewporter optional even though it may cause bad display.
+    * This is so one can test wayland display on older compositor or on
+    * compositor that don't implement this extension. */
+diff --git a/subprojects/gst-plugins-bad/gst-libs/gst/wayland/gstwlwindow.c b/subprojects/gst-plugins-bad/gst-libs/gst/wayland/gstwlwindow.c
+index 3c5c3cc..2649b3a 100644
+--- a/subprojects/gst-plugins-bad/gst-libs/gst/wayland/gstwlwindow.c
++++ b/subprojects/gst-plugins-bad/gst-libs/gst/wayland/gstwlwindow.c
+@@ -50,6 +50,9 @@ typedef struct _GstWlWindowPrivate
+   struct wl_surface *video_surface;
+   struct wl_surface *video_surface_wrapper;
+   struct wl_subsurface *video_subsurface;
++  /* TRUE when the compositor has no wl_subcompositor: area_surface and
++   * video_surface are then the same wl_surface and there is no subsurface. */
++  gboolean single_surface;
+   struct wp_viewport *video_viewport;
+   struct xdg_surface *xdg_surface;
+   struct xdg_toplevel *xdg_toplevel;
+@@ -255,9 +258,13 @@ gst_wl_window_finalize (GObject * gobject)
+     wp_color_representation_surface_v1_destroy
+         (priv->color_representation_surface);
+ 
+-  wl_proxy_wrapper_destroy (priv->video_surface_wrapper);
+-  wl_subsurface_destroy (priv->video_subsurface);
+-  wl_surface_destroy (priv->video_surface);
++  /* in single-surface mode these alias the area_surface objects, which are
++   * destroyed below -- destroying them here too would be a double free */
++  if (!priv->single_surface) {
++    wl_proxy_wrapper_destroy (priv->video_surface_wrapper);
++    wl_subsurface_destroy (priv->video_subsurface);
++    wl_surface_destroy (priv->video_surface);
++  }
+ 
+   if (priv->area_subsurface)
+     wl_subsurface_destroy (priv->area_subsurface);
+@@ -290,37 +297,50 @@ gst_wl_window_new_internal (GstWlDisplay * display, GMutex * render_lock)
+   g_cond_init (&priv->configure_cond);
+   priv->force_aspect_ratio = TRUE;
+ 
++  priv->single_surface = (gst_wl_display_get_subcompositor (display) == NULL);
++
+   compositor = gst_wl_display_get_compositor (display);
+   priv->area_surface = wl_compositor_create_surface (compositor);
+-  priv->video_surface = wl_compositor_create_surface (compositor);
+-
+   priv->area_surface_wrapper = wl_proxy_create_wrapper (priv->area_surface);
+-  priv->video_surface_wrapper = wl_proxy_create_wrapper (priv->video_surface);
+ 
+   event_queue = gst_wl_display_get_event_queue (display);
+   wl_proxy_set_queue ((struct wl_proxy *) priv->area_surface_wrapper,
+       event_queue);
+-  wl_proxy_set_queue ((struct wl_proxy *) priv->video_surface_wrapper,
+-      event_queue);
+ 
+-  /* embed video_surface in area_surface */
+-  priv->video_subsurface =
+-      wl_subcompositor_get_subsurface (gst_wl_display_get_subcompositor
+-      (display), priv->video_surface, priv->area_surface);
+-  wl_subsurface_set_desync (priv->video_subsurface);
++  if (priv->single_surface) {
++    /* No wl_subcompositor: the area surface *is* the video surface. Everything
++     * below that draws through video_surface{,_wrapper} then lands on the one
++     * surface that carries the shell role. */
++    priv->video_surface = priv->area_surface;
++    priv->video_surface_wrapper = priv->area_surface_wrapper;
++  } else {
++    priv->video_surface = wl_compositor_create_surface (compositor);
++    priv->video_surface_wrapper = wl_proxy_create_wrapper (priv->video_surface);
++    wl_proxy_set_queue ((struct wl_proxy *) priv->video_surface_wrapper,
++        event_queue);
++
++    /* embed video_surface in area_surface */
++    priv->video_subsurface =
++        wl_subcompositor_get_subsurface (gst_wl_display_get_subcompositor
++        (display), priv->video_surface, priv->area_surface);
++    wl_subsurface_set_desync (priv->video_subsurface);
++  }
+ 
+   viewporter = gst_wl_display_get_viewporter (display);
+   if (viewporter) {
+     priv->area_viewport = wp_viewporter_get_viewport (viewporter,
+         priv->area_surface);
+-    priv->video_viewport = wp_viewporter_get_viewport (viewporter,
+-        priv->video_surface);
++    priv->video_viewport = priv->single_surface ? priv->area_viewport :
++        wp_viewporter_get_viewport (viewporter, priv->video_surface);
+   }
+ 
+-  /* never accept input events on the video surface */
+-  region = wl_compositor_create_region (compositor);
+-  wl_surface_set_input_region (priv->video_surface, region);
+-  wl_region_destroy (region);
++  /* never accept input events on the video surface -- but not when it is also
++   * the area surface, or the window would take no input at all */
++  if (!priv->single_surface) {
++    region = wl_compositor_create_region (compositor);
++    wl_surface_set_input_region (priv->video_surface, region);
++    wl_region_destroy (region);
++  }
+ 
+   return self;
+ }
+@@ -500,6 +520,11 @@ gst_wl_window_new_in_surface (GstWlDisplay * display,
+   GstWlWindowPrivate *priv;
+   struct wl_region *region;
+ 
++  if (gst_wl_display_get_subcompositor (display) == NULL) {
++    GST_ERROR ("Cannot embed in a foreign surface without wl_subcompositor.");
++    return NULL;
++  }
++
+   self = gst_wl_window_new_internal (display, render_lock);
+   priv = gst_wl_window_get_instance_private (self);
+ 
+@@ -662,7 +687,10 @@ gst_wl_window_resize_video_surface (GstWlWindow * self)
+     gst_video_center_rect (&src, &dst, &res, FALSE);
+   }
+ 
+-  wl_subsurface_set_position (priv->video_subsurface, res.x, res.y);
++  /* with a single surface there is no subsurface to position; the video is
++   * placed by the viewport destination set above */
++  if (!priv->single_surface)
++    wl_subsurface_set_position (priv->video_subsurface, res.x, res.y);
+ 
+   priv->video_rectangle = res;
+ }
+@@ -674,12 +702,17 @@ gst_wl_window_set_opaque (GstWlWindow * self, const GstVideoInfo * info)
+   struct wl_compositor *compositor;
+   struct wl_region *region;
+ 
+-  /* Set area opaque */
+   compositor = gst_wl_display_get_compositor (priv->display);
+-  region = wl_compositor_create_region (compositor);
+-  wl_region_add (region, 0, 0, G_MAXINT32, G_MAXINT32);
+-  wl_surface_set_opaque_region (priv->area_surface, region);
+-  wl_region_destroy (region);
++
++  /* Set area opaque. Skipped in single-surface mode: the area surface is the
++   * video surface there, so marking it unconditionally opaque would break
++   * playback of video that does have an alpha channel. */
++  if (!priv->single_surface) {
++    region = wl_compositor_create_region (compositor);
++    wl_region_add (region, 0, 0, G_MAXINT32, G_MAXINT32);
++    wl_surface_set_opaque_region (priv->area_surface, region);
++    wl_region_destroy (region);
++  }
+ 
+   if (!GST_VIDEO_INFO_HAS_ALPHA (info)) {
+     /* Set video opaque */
+@@ -780,7 +813,8 @@ gst_wl_window_commit_buffer (GstWlWindow * self, GstWlBuffer * buffer)
+   }
+ 
+   if (G_UNLIKELY (needs_layout_update)) {
+-    wl_subsurface_set_sync (priv->video_subsurface);
++    if (!priv->single_surface)
++      wl_subsurface_set_sync (priv->video_subsurface);
+     gst_wl_window_resize_video_surface (self);
+     gst_wl_window_set_opaque (self, info);
+ 
+@@ -797,8 +831,12 @@ gst_wl_window_commit_buffer (GstWlWindow * self, GstWlBuffer * buffer)
+     wl_surface_commit (priv->video_surface_wrapper);
+ 
+     if (!priv->is_area_surface_mapped) {
+-      gst_wl_window_update_borders (self);
+-      wl_surface_commit (priv->area_surface_wrapper);
++      /* in single-surface mode the border buffer would be attached to the very
++       * surface the video was just attached to, blanking it */
++      if (!priv->single_surface) {
++        gst_wl_window_update_borders (self);
++        wl_surface_commit (priv->area_surface_wrapper);
++      }
+       priv->is_area_surface_mapped = TRUE;
+       g_signal_emit (self, signals[MAP], 0);
+     }
+@@ -806,8 +844,10 @@ gst_wl_window_commit_buffer (GstWlWindow * self, GstWlBuffer * buffer)
+     /* clear both video and parent surfaces */
+     wl_surface_attach (priv->video_surface_wrapper, NULL, 0, 0);
+     wl_surface_commit (priv->video_surface_wrapper);
+-    wl_surface_attach (priv->area_surface_wrapper, NULL, 0, 0);
+-    wl_surface_commit (priv->area_surface_wrapper);
++    if (!priv->single_surface) {
++      wl_surface_attach (priv->area_surface_wrapper, NULL, 0, 0);
++      wl_surface_commit (priv->area_surface_wrapper);
++    }
+     priv->is_area_surface_mapped = FALSE;
+     priv->clear_window = FALSE;
+   }
+@@ -815,8 +855,10 @@ gst_wl_window_commit_buffer (GstWlWindow * self, GstWlBuffer * buffer)
+   if (G_UNLIKELY (needs_layout_update)) {
+     /* commit also the parent (area_surface) in order to change
+      * the position of the video_subsurface */
+-    wl_surface_commit (priv->area_surface_wrapper);
+-    wl_subsurface_set_desync (priv->video_subsurface);
++    if (!priv->single_surface) {
++      wl_surface_commit (priv->area_surface_wrapper);
++      wl_subsurface_set_desync (priv->video_subsurface);
++    }
+     gst_video_info_free (priv->next_video_info);
+     priv->next_video_info = NULL;
+     g_clear_pointer (&priv->next_minfo, g_free);
+@@ -1013,21 +1055,24 @@ gst_wl_window_update_geometry (GstWlWindow * self)
+         priv->render_rectangle.y);
+   }
+ 
+-  if (priv->is_area_surface_mapped)
++  if (priv->is_area_surface_mapped && !priv->single_surface)
+     gst_wl_window_update_borders (self);
+ 
+   if (!priv->configured)
+     return;
+ 
+   if (priv->scaled_width != 0) {
+-    wl_subsurface_set_sync (priv->video_subsurface);
++    if (!priv->single_surface)
++      wl_subsurface_set_sync (priv->video_subsurface);
+     gst_wl_window_resize_video_surface (self);
+     wl_surface_commit (priv->video_surface_wrapper);
+   }
+ 
+-  wl_surface_commit (priv->area_surface_wrapper);
++  /* in single-surface mode this is the same wrapper that was just committed */
++  if (!priv->single_surface)
++    wl_surface_commit (priv->area_surface_wrapper);
+ 
+-  if (priv->scaled_width != 0)
++  if (priv->scaled_width != 0 && !priv->single_surface)
+     wl_subsurface_set_desync (priv->video_subsurface);
+ }
+ 
