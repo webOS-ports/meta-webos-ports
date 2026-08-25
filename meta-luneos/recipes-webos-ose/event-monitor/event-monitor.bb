@@ -35,3 +35,7 @@ EXTRA_OECMAKE += "-DBUILD_MOCK_PLUGIN:BOOL='NO'"
 
 #webos_event_monitor_plugin depends on event-monitor, remove circular dependency
 WEBOS_EVENT_MONITOR_PLUGIN_DEPENDS = ""
+
+# CMake 4: @VAR@ is no longer expanded in unquoted arguments (CMP0053),
+# which broke the install() DESTINATIONs in this component.
+SRC_URI += "file://0001-CMakeLists-use-CMake-variable-syntax-instead-of-VAR.patch"
