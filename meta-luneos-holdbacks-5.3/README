@@ -1,0 +1,86 @@
+meta-luneos-holdbacks-5.3
+=========================
+
+Recipes held back from oe-core *whinlatter* (Yocto 5.3) while the rest of the
+build is on *wrynose* (Yocto 6.0). This is the opposite direction to the
+meta-luneos-backports-* layers, which carry recipes NEWER than the base
+release -- hence the different name. Everything here is a verbatim copy from
+openembedded-core@whinlatter unless noted.
+
+Contents
+--------
+
+  recipes-core/systemd/systemd_257.8.bb        <- oe-core whinlatter, verbatim
+  recipes-core/systemd/systemd-257.inc         <- oe-core whinlatter systemd.inc, RENAMED
+  recipes-core/systemd/dlopen-deps-257.inc     <- oe-core whinlatter dlopen-deps.inc, RENAMED
+  recipes-core/systemd/systemd/                <- oe-core whinlatter, verbatim (36 files)
+
+Only systemd itself is held back. systemd-boot, systemd-systemctl-native,
+systemd-conf, systemd-serialgetty, systemd-machine-units and systemd-bootconf
+all stay on the wrynose versions.
+
+Why the two .inc files are renamed
+----------------------------------
+
+oe-core's systemd.inc is required by systemd_259.5.bb, systemd-boot_259.5.bb
+and systemd-systemctl-native_259.5.bb. This layer has a higher BBFILE_PRIORITY
+than oe-core, so shipping a file literally named systemd.inc would shadow
+oe-core's for all three -- silently handing the two 259.5 recipes we are NOT
+holding back the 257 SRCREV, SRCBRANCH and tag. Renaming to systemd-257.inc /
+dlopen-deps-257.inc and repointing the two `require` lines in systemd_257.8.bb
+keeps the hold-back scoped to exactly one recipe.
+
+Why systemd is held back at all
+-------------------------------
+
+systemd 258 removed cgroup v1 ('legacy' and 'hybrid' hierarchies) outright and
+always mounts cgroup2 during early boot; it also raised the minimum kernel
+baseline to 5.4. 257 is the last release that can run on a cgroup-v1-only
+kernel.
+
+LuneOS' armv7a halium MACHINEs -- tenderloin-halium, hammerhead-halium, mako,
+onyx -- run 3.4 kernels from shr-distribution/linux (branches
+<machine>/3.4/halium-9.0). Those trees have no cgroup v2 at all. Checked at the
+pinned SRCREVs: kernel/cgroup.c is the v1 monolith with a single
+file_system_type and zero occurrences of cgroup2 / sane_behavior /
+CFTYPE_ONLY_ON_DFL, and fs/kernfs -- which cgroup v2 is built on, and which
+landed in 3.14 -- does not exist. Backporting cgroup v2 would mean backporting
+kernfs first.
+
+The kernels do already carry systemd-enabling backports (PR_SET_CHILD_SUBREAPER,
+packetized pipes, seq_show_option, fanotify close-on-exec), which is why they
+run systemd 255 today. cgroup v2 is the one gap that config cannot close.
+
+Getting cgroup v1 actually enabled at runtime
+---------------------------------------------
+
+Since systemd 256, cgroup v1 is refused by default even when the build supports
+it. systemd 257's src/shared/cgroup-setup.c requires BOTH of these on the kernel
+command line:
+
+    systemd.unified_cgroup_hierarchy=0 SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE=1
+
+Note there is deliberately no build-time hierarchy change here: -Ddefault-hierarchy=
+is deprecated in 257 and only 'unified' can be selected as the build-time
+default, so one systemd build serves every MACHINE and only the 3.4 boxes need
+the two extra cmdline arguments. That keeps systemd out of MACHINE_ARCH.
+
+For the mkbootimg-based machines the place to add them is ANDROID_BOOTIMG_CMDLINE
+in the kernel recipe, e.g. meta-smartphone/meta-lg/recipes-kernel/linux/
+linux-lg-hammerhead-halium_git.bb. tenderloin-halium boots a uImage via moboot
+rather than mkbootimg, so its command line comes from the bootloader instead.
+
+Retiring this layer
+-------------------
+
+Drop the layer from bblayers.conf. Nothing else references it -- the
+PREFERRED_VERSION pin lives in conf/layer.conf precisely so that adding and
+removing the layer is the whole operation. That becomes possible once the
+armv7a halium MACHINEs are retired or move to a kernel with cgroup v2.
+
+Maintenance warning
+-------------------
+
+whinlatter is not an LTS and is at or near end of life, so there is no upstream
+stable stream feeding systemd 257 fixes. For as long as this layer is in
+bblayers.conf, LuneOS owns systemd CVE triage for it.
