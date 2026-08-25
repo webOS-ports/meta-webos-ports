@@ -20,7 +20,9 @@ inherit webos_lttng
 inherit webos_public_repo
 inherit webos_enhanced_submissions
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+    file://0001-developertools-use-setSpeedModifier-for-Qt-6.12.patch \
+"
 
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 
