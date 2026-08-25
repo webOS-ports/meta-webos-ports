@@ -4,11 +4,11 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 
 SRC_URI:halium  = " \
                     git://github.com/sailfishos/mobile-broadband-provider-info.git;protocol=https;branch=master \
-                    file://meson.build;subdir=git/${BPN} \
-                    file://apns-conf.xsl;subdir=git/${BPN} \
+                    file://meson.build;subdir=${BB_GIT_DEFAULT_DESTSUFFIX}/${BPN} \
+                    file://apns-conf.xsl;subdir=${BB_GIT_DEFAULT_DESTSUFFIX}/${BPN} \
 "
 
-S:halium = "${WORKDIR}/git/${BPN}"
+S:halium = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/${BPN}"
 
 SRCREV:halium = "fe500f1b19e8525d09655a38ac111a0fe127b5f9"
 LIC_FILES_CHKSUM:halium = "file://COPYING;md5=87964579b2a8ece4bc6744d2dc9a8b04"
