@@ -1,0 +1,71 @@
+From dd50792cbe29f3b903d1075dfa6df51a34848e45 Mon Sep 17 00:00:00 2001
+From: Herrie <Github.com@herrie.org>
+Date: Wed, 12 Aug 2026 13:14:33 +0200
+Subject: [PATCH] WebAppBase: do not abort on a non-numeric instance id in
+ window.close()
+
+WebPageClosePageRequested() calls stoi(InstanceId()) to decide whether the page
+came from a window.open(). Regular apps are given a UUID by SAM, and stoi() throws
+std::invalid_argument for any UUID that starts with a hex letter -- roughly six ids
+in sixteen. Nothing catches it, so the exception aborts WebAppMgr and takes every
+card down with it whenever such an app closes a window:
+
+  stoi -> __cxa_throw -> abort
+  WebAppBase::WebPageClosePageRequested()
+  WebPageBlink::Close()
+
+Only pages created by window.open() get a numeric id, counting up from 1000 in
+WebAppManager::GenerateInstanceId(), so require the whole id to be digits rather
+than converting blindly. strtoll() cannot throw, and insisting that it consumed the
+entire string also fixes a real misclassification: a UUID beginning with digits
+("1000abcd-...") was read by stoi() as 1000 and wrongly treated as a window.open
+page.
+
+Signed-off-by: Herrie <Github.com@herrie.org>
+---
+Upstream-Status: Inappropriate [LuneOS specific]
+
+ src/core/web_app_base.cc | 19 ++++++++++++++++---
+ 1 file changed, 16 insertions(+), 3 deletions(-)
+
+diff --git a/src/core/web_app_base.cc b/src/core/web_app_base.cc
+index dba9b45..4b6e135 100644
+--- a/src/core/web_app_base.cc
++++ b/src/core/web_app_base.cc
+@@ -16,6 +16,8 @@
+ 
+ #include "web_app_base.h"
+ 
++#include <cstdlib>
++
+ #include "application_description.h"
+ #include "log_manager.h"
+ #include "utils.h"
+@@ -266,13 +268,24 @@ void WebAppBase::WebPageClosePageRequested() {
+   }
+ 
+   close_page_requested_ = true;
+-  int process_id = stoi(InstanceId());
+-  if (process_id >= 1000) {
++  // Pages created by window.open() get a purely numeric instance id counting up from
++  // 1000 (WebAppManager::GenerateInstanceId); everything else gets a UUID from SAM.
++  // stoi() throws std::invalid_argument on a UUID that starts with a hex letter
++  // ("a486711d-..."), and that uncaught exception aborts WebAppMgr -- so require the
++  // whole id to be numeric instead of converting blindly. strtoll() also cannot throw,
++  // and demanding that the entire string was consumed correctly rejects a UUID that
++  // merely begins with digits ("1000abcd-...", which stoi() happily read as 1000).
++  const std::string instance_id = InstanceId();
++  char* end = nullptr;
++  const long long numeric_id = std::strtoll(instance_id.c_str(), &end, 10);
++  const bool created_by_window_open =
++      !instance_id.empty() && end && *end == '\0' && numeric_id >= 1000;
++  if (created_by_window_open) {
+     // this page was created by a window.open call => close it internally only
+     WebAppManager::Instance()->CloseAppInternal(this);
+   }
+   else {
+-    WebAppManager::Instance()->CloseApp(InstanceId());
++    WebAppManager::Instance()->CloseApp(instance_id);
+   }
+ }
+ 
