@@ -25,8 +25,39 @@ do_install:append() {
     # rest of the pulsecore headers come from
     # pulseaudio-pulsecore-private-headers; only config.h has to come from here,
     # because only here does it exist.
+    #
+    # Note this is the one file this recipe puts into ${includedir}/pulsecore,
+    # a directory otherwise populated entirely by
+    # pulseaudio-pulsecore-private-headers. That split is intentional (see above)
+    # but it means the directory has two producers, so if the sysroot staging of
+    # either one is ever interrupted, the leftover config.h has no owner to clean
+    # it up and every consumer then fails do_prepare_recipe_sysroot with
+    # "FileExistsError ... pulsecore/config.h". Recovering from that needs the
+    # orphan removed from the affected work/*/recipe-sysroot trees; it is not
+    # fixed by cleansstate of the consumer alone. See the PR note below.
     install -Dm644 ${B}/config.h ${D}${includedir}/pulsecore/config.h
+
+    # config.h records the absolute paths it was generated in. They are build
+    # metadata that no pulsecore consumer needs, but shipping them trips the
+    # buildpaths QA check:
+    #   File /usr/include/pulsecore/config.h in package pulseaudio-dev
+    #   contains reference to TMPDIR [buildpaths]
+    # Neutralise the values rather than dropping the defines, so anything that
+    # references them still compiles, and rather than silencing the QA check,
+    # which would let a genuine path leak through unnoticed later.
+    sed -i -e 's|^\(#define DOXYGEN_OUTPUT_DIRECTORY\) .*|\1 .|' \
+           -e 's|^\(#define PA_BUILDDIR\) .*|\1 "."|' \
+           -e 's|^\(#define PA_SRCDIR\) .*|\1 "."|' \
+           -e 's|^\(#define top_srcdir\) .*|\1 .|' \
+           ${D}${includedir}/pulsecore/config.h
 }
+
+# Staging config.h adds a file to pulseaudio's sysroot output. A build tree that
+# already staged pulseaudio from before this change keeps a hardlink to the
+# superseded component and collides on the next restage, taking out every
+# pulsecore consumer with the FileExistsError described above. Bumping PR gives
+# those trees a clean re-stage; it is a no-op for a fresh build.
+PR = "r1"
 
 inherit systemd
 

@@ -19,7 +19,7 @@ SRC_URI[sha256sum] = "053794d6671a3e397d849e478a80b82a63cb9d8ca296bd35b73317bb5c
 S = "${UNPACKDIR}/pulseaudio-${PV}"
 
 do_install() {
-    install -Dm644 ${WORKDIR}/pulsecore.pc ${D}${libdir}/pkgconfig/pulsecore.pc
+    install -Dm644 ${UNPACKDIR}/pulsecore.pc ${D}${libdir}/pkgconfig/pulsecore.pc
     sed -i 's/@PA_MAJORMINOR@/${PV}/g' ${D}${libdir}/pkgconfig/pulsecore.pc
 
     install -d ${D}${includedir}/pulsecore/filter
