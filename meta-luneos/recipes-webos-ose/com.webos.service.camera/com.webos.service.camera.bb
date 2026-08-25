@@ -8,10 +8,8 @@ require com.webos.service.camera.inc
 
 SRC_URI += " \
     file://0001-plugin-rename-basename-function-to-avoid-conflict-wi.patch \
-    file://0001-com.webos.service.camera2-Fix-outbound-permission-er.patch \
-    file://0002-sysbus-drop-client-permissions-for-ACGs-that-do-not-.patch \
 "
-PR = "${INC_PR}.3"
+PR = "${INC_PR}.2"
 
 DEPENDS = "glib-2.0 luna-service2 json-c alsa-lib pmloglib udev nlohmann-json camera-utils gstreamer1.0"
 

@@ -28,4 +28,3 @@ WEBOS_SYSTEMD_SERVICE = "filecache.service"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-filecache-Add-various-permissions-for-legacy-webOS-a.patch \
 "
-

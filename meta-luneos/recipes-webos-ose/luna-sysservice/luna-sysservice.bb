@@ -38,6 +38,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0005-luna-sysservice-TimePrefsHandler.cpp-Fix-typo.patch \
     file://0006-com.webos.service.systemservice-Add-image.management.patch \
     file://0007-Add-back-Image-and-Wallpaper-handling.patch \
+    file://0001-CMakeLists-consistent-target_link_libraries-signature.patch \
 "
 
 inherit webos_systemd

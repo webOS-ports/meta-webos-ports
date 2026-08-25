@@ -11,7 +11,7 @@ LIC_FILES_CHKSUM = " \
 "
 
 DEPENDS = "glib-2.0 luna-service2 libpbnjson pmloglib pmtrace boost icu"
-# python3 is for luneos-app-permissions, see 0007-*.patch
+# python3 is for luneos-app-permissions, see 0006-*.patch
 RDEPENDS:${PN} = " \
     applicationinstallerutility \
     ecryptfs-utils \
@@ -37,14 +37,13 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0003-AppPackage-allow-different-owner-UIDs-GIDs.patch \
     file://0004-appinstalld2-Make-org.webosports-privileged-as-well.patch \
     file://0005-Add-permission-for-rescan.patch \
-    file://0006-sysbus-drop-client-permissions-for-ACGs-that-do-not-.patch \
-    file://0007-Derive-requiredPermissions-for-legacy-apps-on-install.patch \
+    file://0006-Derive-requiredPermissions-for-legacy-apps-on-install.patch \
     file://luneos-app-permissions \
     file://luneos-app-permissions.json \
 "
 
 # Legacy ipks have no "requiredPermissions" in their appinfo.json, which leaves
-# them with an empty set of LS2 access control groups. 0007-*.patch makes
+# them with an empty set of LS2 access control groups. 0006-*.patch makes
 # appinstalld run this helper over every application it unpacks, which works out
 # the groups from the luna:// calls the application makes and fills them in.
 do_install:append() {

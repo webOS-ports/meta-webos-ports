@@ -47,6 +47,11 @@ do_fix_endlines() {
 }
 addtask do_fix_endlines before do_patch after do_unpack
 
+do_fix_endlines() {
+    sed -i -e "s,\\r,,g" "${S}/files/rules/90_Android_device.rules"
+}
+addtask do_fix_endlines before do_patch after do_unpack
+
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "physical-device-manager.service"
 
@@ -62,3 +67,7 @@ FILES:${PN} += "${datadir}"
 
 # webos doesn't have localization data for this recipe
 WEBOS_LOCALIZATION_INSTALL_RESOURCES = "false"
+
+# CMake 4: @VAR@ is no longer expanded in unquoted arguments (CMP0053),
+# which broke the install() DESTINATIONs in this component.
+SRC_URI += "file://0001-CMakeLists-use-CMake-variable-syntax-instead-of-VAR.patch"
