@@ -10,6 +10,7 @@ SRC_URI = " \
     file://surface-manager.env \
 "
 SRC_URI:append:qemuall = "file://99-virtualbox-mouse.rules"
+SRC_URI:append:halium = " file://surface-manager-daemon-after-android.conf"
 
 do_install() {
     install -d ${D}${sysconfdir}/surface-manager.d
@@ -21,8 +22,15 @@ do_install:append:qemuall() {
     install -v -m 0644 ${UNPACKDIR}/99-virtualbox-mouse.rules ${D}${sysconfdir}/udev/rules.d/99-virtualbox-mouse.rules
 }
 
+do_install:append:halium() {
+    install -d ${D}${systemd_unitdir}/system/surface-manager-daemon.service.d
+    install -v -m 0644 ${UNPACKDIR}/surface-manager-daemon-after-android.conf \
+        ${D}${systemd_unitdir}/system/surface-manager-daemon.service.d/
+}
+
 FILES:${PN} += " \
     ${sysconfdir}/surface-manager.d \
 "
 
 FILES:${PN}:append:qemuall = "${sysconfdir}/udev/rules.d"
+FILES:${PN}:append:halium = " ${systemd_unitdir}/system/surface-manager-daemon.service.d"
