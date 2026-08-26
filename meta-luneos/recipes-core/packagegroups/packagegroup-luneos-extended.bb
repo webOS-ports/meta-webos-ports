@@ -20,6 +20,8 @@ VIRTUAL-RUNTIME_settingsapp ?= "org.webosports.app.settings"
 RDEPENDS:${PN} = " \
   ${DISTRO_EXTRA_RDEPENDS} \
   \
+  luneos-device-config \
+  \
   pulseaudio-distro-conf \
   pulseaudio-misc \
   pulseaudio-module-loopback \
