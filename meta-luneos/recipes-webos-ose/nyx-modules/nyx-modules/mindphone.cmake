@@ -17,7 +17,7 @@
 #
 # LICENSE@@@
 
-# configuration file for rosy
+# configuration file for mindphone (MT6739)
 # specify all the modules to be compiled
 
 set(NYXMOD_OW_MSMMTP					TRUE)
@@ -27,11 +27,16 @@ set(NYXMOD_OW_KEYS						TRUE)
 set(NYXMOD_OW_TOUCHPANEL				FALSE)
 set(NYXMOD_OW_TOUCHPANEL_MTDEV			TRUE)
 
+# Haptics comes from nyx-modules, not nyx-modules-hybris: the hybris haptics
+# module needs <android/hardware_legacy/vibrator.h>, which android-headers
+# 11.0 does not ship (same situation as sargo/tissot-halium on headers 9.0 —
+# see the longer comment in sargo.cmake).
+set(NYXMOD_OW_HAPTICS					TRUE)
+
 # provided by nyx-modules-hybris
 set(NYXMOD_OW_DEVICEINFO				FALSE)
 set(NYXMOD_OW_SYSTEM					FALSE)
 set(NYXMOD_OW_LED						FALSE)
-set(NYXMOD_OW_HAPTICS					FALSE)
 
 add_definitions(-DKEYPAD_INPUT_DEVICE=\"/dev/input/event1\")
 add_definitions(-DBATTERY_SYSFS_PATH=\"/sys/class/power_supply/battery/\")

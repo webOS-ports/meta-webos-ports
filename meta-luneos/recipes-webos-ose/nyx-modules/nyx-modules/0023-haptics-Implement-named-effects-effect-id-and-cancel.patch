@@ -1,0 +1,249 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 28 Aug 2026 12:00:00 +0200
+Subject: [PATCH] haptics: Implement named effects, effect id and cancel
+
+Upstream-Status: Inappropriate [LuneOS-specific module added by local patch stack]
+
+LunaSysMgr requests the named effects (tapdown/tapup, notification,
+alert, ringtone) for UI feedback; the module used to reject all of them
+with NYX_ERROR_INVALID_VALUE, so every dialpad tap logged "Failed on
+nyx_haptics_vibrate!" and the device never vibrated. Map them to fixed
+one-shot durations/patterns instead.
+
+Also:
+- Embed nyx_haptics_device_t as the parent struct: nyx-lib casts the
+  device to it in nyx_haptics_get_effect_id()/set_dampening_factor(),
+  which used to read/write into the module's path pointers.
+- Track and expose a proper effect id after each vibrate.
+- Implement haptics_cancel/cancel_all so an ongoing pattern (ringtone)
+  can actually be stopped; a stop on the leds-class interface writes
+  "0" to activate rather than activating with a zero duration.
+- Guard the EFFECT_UNDEFINED path against period == 0 (division by
+  zero); treat it as a single vibration of the full duration.
+- Remove pending pattern/stop timers in nyx_module_close and track the
+  force-feedback stop watch: an untracked or un-cancelled g_timeout
+  would fire its callback on the freed device (use-after-free).
+---
+--- a/src/haptics_timedoutput/haptics.c
++++ b/src/haptics_timedoutput/haptics.c
+@@ -30,6 +30,7 @@
+ #include <nyx/nyx_module.h>
+ #include <nyx/module/nyx_utils.h>
+ #include <nyx/module/nyx_log.h>
++#include <nyx/module/nyx_device_haptics_internal.h>
+ #include "msgid.h"
+ 
+ NYX_DECLARE_MODULE(NYX_DEVICE_HAPTICS, "Main");
+@@ -38,8 +39,21 @@
+ #define HAPTICS_VIBRATOR_GPIO_PATH "/dev/input/by-path/platform-vibrator-event"
+ #endif
+ 
++/* Durations (ms) used for the named effects requested by LunaSysMgr */
++#define HAPTICS_EFFECT_TAP_DURATION            50
++#define HAPTICS_EFFECT_NOTIFICATION_DURATION   300
++#define HAPTICS_EFFECT_ALERT_PULSES            3
++#define HAPTICS_EFFECT_ALERT_ON                500
++#define HAPTICS_EFFECT_ALERT_OFF               500
++#define HAPTICS_EFFECT_RINGTONE_PULSES         4
++#define HAPTICS_EFFECT_RINGTONE_ON             800
++#define HAPTICS_EFFECT_RINGTONE_OFF            400
++
+ typedef struct {
+-	nyx_device_t _parent;
++	/* nyx-lib casts haptics devices to nyx_haptics_device_t to service
++	 * nyx_haptics_get_effect_id()/dampening factor accessors, so the
++	 * parent must be the full haptics device struct, not nyx_device_t. */
++	nyx_haptics_device_t _parent;
+ 	const char *path;             /* path for duration */
+ 	const char *path_activation;  /* path for activating the vibrator */
+ 	int fd_ioctl;
+@@ -50,8 +64,11 @@
+ 	guint doff;
+ 	gboolean on;
+ 	guint pulses;
++	int32_t effect_counter;
+ } haptics_device_t;
+ 
++static void clean_timeouts(haptics_device_t *device);
++
+ 
+ static const char* find_haptics_device_timed_output(void)
+ {
+@@ -179,6 +196,10 @@
+ 	if (device == NULL)
+ 		return NYX_ERROR_INVALID_HANDLE;
+ 
++	/* A ringtone/alert pattern may still have timers queued; they would
++	 * fire on freed memory. */
++	clean_timeouts(haptics_device);
++
+ 	if(haptics_device->fd_ioctl>0) {
+ 		close(haptics_device->fd_ioctl); 
+ 		haptics_device->fd_ioctl = 0; 
+@@ -216,6 +237,14 @@
+ 	if (duration < 0)
+ 		duration = 0;
+ 
++	/* On the leds-class interface a stop is a write of "0" to activate;
++	 * activating with a zero duration is driver-defined and may vibrate
++	 * indefinitely. */
++	if (duration == 0 && device->path_activation) {
++		device->on = FALSE;
++		return file_set_contents(device->path_activation, "0", 1);
++	}
++
+ 	gchar *content = g_strdup_printf("%d", duration);
+ 	ret = file_set_contents(device->path, content, strlen(content));
+ 
+@@ -261,6 +290,10 @@
+ static gboolean vibrate_timeout_cb(gpointer data)
+ {
+ 	haptics_device_t *device = data;
++
++	/* This source is removed by returning FALSE; forget the id so
++	 * clean_timeouts() does not remove the currently-dispatching source. */
++	device->fulltimeoutwatch = 0;
+ 	clean_timeouts(device);
+ 	return FALSE;
+ }
+@@ -281,6 +314,20 @@
+ 	return TRUE;
+ }
+ 
++static gboolean vibrate_oneshot(haptics_device_t *device, int milliseconds)
++{
++	if (milliseconds < 50)
++		milliseconds = 50;
++
++	/* A pattern is playing; treat the one-shot as merged into it rather
++	 * than erroring out (tap feedback during a ringtone/alert). */
++	if (device->pulses > 0)
++		return TRUE;
++
++	clean_timeouts(device);
++	return enable_vibrator(device, milliseconds);
++}
++
+ static gboolean toggle_timeout(gpointer data)
+ {
+ 	haptics_device_t *device = data;
+@@ -327,35 +374,60 @@
+ 	guint pulses = 0;
+ 	guint delay_on = 0;
+ 	guint delay_off = 0;
++	gint one_shot = 0;
+ 
+ 	nyx_debug(MSGID_NYX_MOD_HAPTICS_VIBRATE, 0, "%s", __PRETTY_FUNCTION__);
+ 
+ 	switch (configuration.type) {
+ 	case NYX_HAPTICS_EFFECT_UNDEFINED:
+-		pulses = configuration.duration / configuration.period;
+-		delay_off = configuration.period / 2;
+-		delay_on = configuration.period / 2;
++		if (configuration.period > 0) {
++			pulses = configuration.duration / configuration.period;
++			delay_off = configuration.period / 2;
++			delay_on = configuration.period / 2;
++			if (pulses < 1) {
++				/* duration shorter than one period (the Phone
++				 * dialpad sends period 100, duration 10): one
++				 * blip of the requested duration, not an error */
++				one_shot = configuration.duration;
++			}
++		}
++		else {
++			/* no period given: single vibration for the full duration */
++			one_shot = configuration.duration;
++		}
+ 		break;
+-	case NYX_HAPTICS_EFFECT_RINGTONE:
+-	case NYX_HAPTICS_EFFECT_ALERT:
+-	case NYX_HAPTICS_EFFECT_NOTIFICATION:
+ 	case NYX_HAPTICS_EFFECT_TAPUP:
+ 	case NYX_HAPTICS_EFFECT_TAPDOWN:
+-		nyx_error(MSGID_NYX_MOD_HAPTICS_NOSPECIAL_EFF, 0, "We're not supporting special effects at the moment!");
+-		return NYX_ERROR_INVALID_VALUE;
++		one_shot = HAPTICS_EFFECT_TAP_DURATION;
++		break;
++	case NYX_HAPTICS_EFFECT_NOTIFICATION:
++		one_shot = HAPTICS_EFFECT_NOTIFICATION_DURATION;
++		break;
++	case NYX_HAPTICS_EFFECT_ALERT:
++		pulses = HAPTICS_EFFECT_ALERT_PULSES;
++		delay_on = HAPTICS_EFFECT_ALERT_ON;
++		delay_off = HAPTICS_EFFECT_ALERT_OFF;
++		break;
++	case NYX_HAPTICS_EFFECT_RINGTONE:
++		pulses = HAPTICS_EFFECT_RINGTONE_PULSES;
++		delay_on = HAPTICS_EFFECT_RINGTONE_ON;
++		delay_off = HAPTICS_EFFECT_RINGTONE_OFF;
++		break;
+ 	}
+ 
+-	if (pulses < 0) {
++	if (one_shot <= 0 && pulses < 1) {
+ 		nyx_debug(MSGID_NYX_MOD_HAPTICS_NOPULSES_ERR, 0, "No pulses!");
+ 		return NYX_ERROR_INVALID_VALUE;
+ 	}
+ 
+ 	if (haptics_device->fd_ioctl>0) {
++		int ff_duration = one_shot > 0 ? one_shot : (gint) (pulses * (delay_on + delay_off));
++
+ 		/* upload rumble effect */
+ 		memset(&haptics_device->ff, 0, sizeof(haptics_device->ff));
+ 		haptics_device->ff.type = FF_RUMBLE,
+ 		haptics_device->ff.id = -1;
+-		haptics_device->ff.replay.length = configuration.duration;
++		haptics_device->ff.replay.length = ff_duration;
+ 		haptics_device->ff.replay.delay = 0;
+ 		haptics_device->ff.u.rumble.strong_magnitude = 0xc000;
+ 		haptics_device->ff.u.rumble.weak_magnitude = 0;
+@@ -369,23 +441,45 @@
+ 		ff_event.value = 1;
+ 		write(haptics_device->fd_ioctl, &ff_event, sizeof ff_event);
+ 
+-		/* timeout to stop vibration */
+-		g_timeout_add(configuration.duration, vibrate_timeout_cb, device);
++		/* timeout to stop vibration - tracked so cancel/close can
++		 * remove it; an untracked watch would fire after the device
++		 * is freed */
++		clean_timeouts(haptics_device);
++		haptics_device->fulltimeoutwatch = g_timeout_add(ff_duration, vibrate_timeout_cb, device);
+     }
++	else if (one_shot > 0) {
++		if (vibrate_oneshot(haptics_device, one_shot) == FALSE)
++			return NYX_ERROR_DEVICE_UNAVAILABLE;
++	}
+ 	else {
+ 		if (vibrate_pattern(haptics_device, pulses, delay_on, delay_off) == FALSE)
+ 			return NYX_ERROR_INVALID_VALUE;
+ 	}
+ 
++	haptics_device->effect_counter++;
++
++	if (haptics_device->effect_counter <= 0)
++		haptics_device->effect_counter = 1;
++
++	haptics_device->_parent.haptic_effect_id = haptics_device->effect_counter;
++
+ 	return NYX_ERROR_NONE;
+ }
+ 
+ nyx_error_t haptics_cancel(nyx_device_t *device, int32_t id)
+ {
++	haptics_device_t *haptics_device = (haptics_device_t*) device;
++
++	if (device == NULL)
++		return NYX_ERROR_INVALID_HANDLE;
++
++	clean_timeouts(haptics_device);
++	enable_vibrator(haptics_device, 0);
++
+ 	return NYX_ERROR_NONE;
+ }
+ 
+ nyx_error_t haptics_cancel_all(nyx_device_t *device)
+ {
+-	return NYX_ERROR_NONE;
++	return haptics_cancel(device, 0);
+ }
