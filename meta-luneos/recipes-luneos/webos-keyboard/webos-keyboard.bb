@@ -29,6 +29,7 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     file://0001-make-it-compatible-with-newer-hunspell.patch \
     file://0002-Handle-hardware-keyboard-input.patch \
     file://0003-language-plugins-link-Qt6Core5Compat-for-QTextCodec.patch \
+    file://0004-plugin-hardware-T9-multi-tap.patch \
 "
 
 # a lot of cases like:
