@@ -20,11 +20,12 @@ PV = "0.6-0+git"
 # org.webosports.service.audio, the audio-service LuneOS no longer ships.
 # audiod claims that bus name, so the calls were answered with "Couldn't find
 # method: volumeUp" and the keys, the on-screen indicator and the system-menu
-# slider all did nothing. Confirmed on sargo: the legacy name keeps its own
-# volume (46) which is wired to no sink, while master/* moves pcm_output.
-# Drop the branch once it lands on master.
-WEBOS_GIT_PARAM_BRANCH = "herrie/audiod"
-SRCREV = "2b65632ac0872f096395c094997d6efa4de0207f"
+# Points at the fingerprint PR branch (off master) for the lockscreen
+# fingerprint unlock. NOTE: this branch is off master and does NOT carry the
+# herrie/audiod volume fix; reconcile the two (or repoint to master) once the
+# luna-next-cardshell fingerprint PR merges.
+WEBOS_GIT_PARAM_BRANCH = "fingerprint"
+SRCREV = "f02e9e0fb8c0fbbab631d628f522d4346d0c0943"
 
 inherit webos_ports_repo
 inherit webos_cmake

@@ -14,9 +14,9 @@ inherit webos_app
 inherit pkgconfig
 
 PV = "0.4.0-1+git"
-SRCREV = "9a5b5527ec4c6a153c4c07c099e07cdb3dcb01c8"
+SRCREV = "9b481a456292165f167eed31b43fbc011502648b"
 
-WEBOS_GIT_PARAM_BRANCH = "qml-based"
+WEBOS_GIT_PARAM_BRANCH = "fingerprint"
 WEBOS_REPO_NAME = "org.webosports.app.settings"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
@@ -26,8 +26,15 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 REMOVE_ANDROID_PROPERTY_SERVICE_CMD:halium = ""
 REMOVE_ANDROID_PROPERTY_SERVICE_CMD = "sed -i 's/\"android-property-service.operation\", //g' ${D}/${webos_applicationsdir}/org.webosports.app.settings.deviceinfo/appinfo.json"
 
+# The fingerprint panel only makes sense with the halium fingerprint stack
+# (droidian-fpd + webos-fingerprint-adapter); drop the whole sub-app elsewhere
+# so its requiredPermissions don't trip the LS2 ACG validation.
+REMOVE_FINGERPRINT_APP_CMD:halium = ""
+REMOVE_FINGERPRINT_APP_CMD = "rm -rf ${D}/${webos_applicationsdir}/org.webosports.app.settings.fingerprint"
+
 do_install:append() {
     ${REMOVE_ANDROID_PROPERTY_SERVICE_CMD}
+    ${REMOVE_FINGERPRINT_APP_CMD}
 }
 
 FILES:${PN} += "${webos_applicationsdir}/org.webosports.app.settings-common \
@@ -41,6 +48,7 @@ FILES:${PN} += "${webos_applicationsdir}/org.webosports.app.settings-common \
                 ${webos_applicationsdir}/org.webosports.app.settings.deviceinfo \
                 ${webos_applicationsdir}/org.webosports.app.settings.devmodeswitcher \
                 ${webos_applicationsdir}/org.webosports.app.settings.exhibitionpreferences \
+                ${webos_applicationsdir}/org.webosports.app.settings.fingerprint \
                 ${webos_applicationsdir}/org.webosports.app.settings.help \
                 ${webos_applicationsdir}/org.webosports.app.settings.languagepicker \
                 ${webos_applicationsdir}/org.webosports.app.settings.location \
