@@ -195,6 +195,9 @@ RDEPENDS:${PN}:append:mako = " ${NFC_RDEPENDS}"
 RDEPENDS:${PN}:append:hammerhead-halium = " ${NFC_RDEPENDS}"
 RDEPENDS:${PN}:append:sargo = " ${NFC_RDEPENDS}"
 RDEPENDS:${PN}:append:sagit = " ${NFC_RDEPENDS}"
+# The GSI machine can land on any device; the stack is harmless without an
+# NFC controller (nfcd just reports unavailable).
+RDEPENDS:${PN}:append:halium-arm64 = " ${NFC_RDEPENDS}"
 
 RDEPENDS:${PN}:append:mido-halium = " waydroid"
 RDEPENDS:${PN}:append:pinephone = " waydroid"
