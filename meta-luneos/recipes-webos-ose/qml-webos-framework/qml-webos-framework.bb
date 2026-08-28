@@ -19,7 +19,7 @@ RPROVIDES:${PN}-examples = " \
 "
 
 WEBOS_VERSION = "1.0.0-171_f8586fc0655de188c38d12b911d68a589d28496f"
-PR = "r38"
+PR = "r39"
 
 inherit webos_qmake6
 inherit pkgconfig
@@ -38,6 +38,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0007-WebOSQuickWindow-make-setWindowPropery-Q_INVOKABLE.patch \
     file://0008-runner-debug-use-WEBOS_INSTALL_BINS-as-other-binarie.patch \
     file://0009-WebOSQuickWindow-use-APP_ID-env-variable-for-appId.patch \
+    file://0010-runner-register-with-appId-so-ls-hubd-can-resolve-i.patch \
 "
 
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
