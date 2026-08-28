@@ -1,0 +1,38 @@
+From: LuneOS port <webos-ports@webos-ports.org>
+Subject: [PATCH] start: retry legacy clone without CLONE_PIDFD on EINVAL
+
+The clone3() fallback for pre-5.3 kernels calls legacy clone() with
+CLONE_PIDFD still set, on the assumption that legacy clone silently
+ignores unknown flags. On arm32 4.14 (MT6739) it does not: the kernel
+rejects the flag with EINVAL and the container never starts:
+
+  clone3({...}, 88)  = -1 ENOSYS
+  clone3({...}, 64)  = -1 ENOSYS
+  clone(child_stack=NULL, flags=CLONE_PIDFD|CLONE_NEWNS|CLONE_NEWUTS|
+        CLONE_NEWIPC|CLONE_NEWPID|SIGCHLD, ...) = -1 EINVAL
+
+Retry without CLONE_PIDFD, the same escape the function already has for
+arm64. handler->pidfd stays negative, so the existing
+"if (handler->pidfd < 0) clone_flags &= ~CLONE_PIDFD" cleanup path and
+lxc_can_use_pidfd() handle the rest.
+
+Upstream-Status: Inappropriate [lxc 4.0 is EOL upstream]
+---
+--- a/src/lxc/start.c
++++ b/src/lxc/start.c
+@@ -1735,6 +1735,15 @@
+ 			handler->pid = lxc_raw_legacy_clone(handler->clone_flags & ~CLONE_PIDFD, NULL);
+ 		#else
+ 			handler->pid = lxc_raw_legacy_clone(handler->clone_flags, &handler->pidfd);
++			/*
++			 * Not every pre-pidfd kernel ignores unknown legacy
++			 * clone flags: arm32 4.14 returns EINVAL for
++			 * CLONE_PIDFD. Retry without it.
++			 */
++			if (handler->pid < 0 && errno == EINVAL) {
++				SYSTRACE("Failed legacy clone with CLONE_PIDFD, retrying without");
++				handler->pid = lxc_raw_legacy_clone(handler->clone_flags & ~CLONE_PIDFD, NULL);
++			}
+ 		#endif
+ 		}
+
