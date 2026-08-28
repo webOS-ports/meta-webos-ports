@@ -1,0 +1,193 @@
+From: LuneOS port <webos-ports@webos-ports.org>
+Subject: [PATCH] plugin: hardware T9 multi-tap for numeric keypads
+
+Feature-phone devices (e.g. the MT6739 mindphone) have a physical 12-key
+numeric keypad, not a touchscreen QWERTY. In a text field the digit keys
+should multi-tap into letters (2 -> a/b/c/2) with a commit timeout, while
+the dialer (Number/PhoneNumber content) still gets raw digits.
+
+The maliit plugin already receives hardware keys via processKeyEvent
+(setRedirectKeys on focus-in). Run the keypad through a multi-tap state
+machine that cycles a character in the preedit and commits it on timeout,
+on a different key, or on any non-keypad key. Gated on text content types.
+
+Upstream-Status: Pending
+---
+--- a/src/plugin/inputmethod_p.h
++++ b/src/plugin/inputmethod_p.h
+@@ -16,6 +16,7 @@
+ 
+ #include <QtQuick>
+ #include <QStringList>
++#include <QTimer>
+ #include <qglobal.h>
+ #include <QDebug>
+ 
+@@ -64,6 +65,14 @@
+ 
+     WordRibbon* wordRibbon;
+ 
++    // Hardware T9 multi-tap: the numeric keypad emits KEY_0..KEY_9, and in a
++    // text field these cycle through letters (2 -> a/b/c/2) with a commit
++    // timeout. t9Key is the key currently being cycled (0 = none), t9Index the
++    // position in its cycle, t9Timer the inactivity timer that finalises it.
++    Qt::Key t9Key;
++    int t9Index;
++    QTimer *t9Timer;
++
+     explicit InputMethodPrivate(InputMethod * const _q,
+                                 MAbstractInputMethodHost *host)
+         : q(_q)
+@@ -84,6 +93,9 @@
+         , m_geometry(new KeyboardGeometry(q))
+         , m_settings()
+         , wordRibbon(new WordRibbon)
++        , t9Key(Qt::Key(0))
++        , t9Index(0)
++        , t9Timer(0)
+     {
+         applicationApiWrapper->setGeometryItem(m_geometry);
+ 
+--- a/src/plugin/inputmethod.h
++++ b/src/plugin/inputmethod.h
+@@ -103,6 +103,13 @@
+     TextContentType contentType();
+     Q_SLOT void setContentType(TextContentType contentType);
+ 
++    //! Hardware T9 multi-tap. t9HandleKey runs the numeric keypad through the
++    //! multi-tap state machine and returns true when it has consumed the event;
++    //! finalizeT9 (also the inactivity-timer target) fixes the character being
++    //! cycled.
++    bool t9HandleKey(QEvent::Type keyType, Qt::Key keyCode);
++    Q_SLOT void finalizeT9();
++
+     void update();
+ 
+     const QStringList &enabledLanguages() const;
+--- a/src/plugin/inputmethod.cpp
++++ b/src/plugin/inputmethod.cpp
+@@ -37,6 +37,8 @@
+ #include "models/wordribbon.h"
+ #include "models/layout.h"
+ 
++#include <QTimer>
++
+ 
+ #include "view/setup.h"
+ 
+@@ -114,6 +116,14 @@
+     connect(this, SIGNAL(activeLanguageChanged(QString)), d->editor.wordEngine(), SLOT(onLanguageChanged(QString)));
+     connect(d->m_geometry, SIGNAL(visibleRectChanged()), this, SLOT(onVisibleRectChanged()));
+     connect(d->m_geometry, SIGNAL(popoverRectChanged()), this, SLOT(updateWindowMask()));
++
++    // Hardware T9 multi-tap inactivity timer: when it fires, the character
++    // currently being cycled is committed and the next keypress starts anew.
++    d->t9Timer = new QTimer(this);
++    d->t9Timer->setSingleShot(true);
++    d->t9Timer->setInterval(1500); // multi-tap commit window: academic (MacKenzie) 1.5s; Android uses 2s
++    connect(d->t9Timer, SIGNAL(timeout()), this, SLOT(finalizeT9()));
++
+     d->registerFeedbackSetting();
+     d->registerAutoCorrectSetting();
+     d->registerAutoCapsSetting();
+@@ -178,6 +188,87 @@
+ //! keeps preedit, word prediction and auto-caps consistent between the two
+ //! keyboards. Everything else (arrows, Tab, Escape, function keys, shortcuts)
+ //! is handed back to the application untouched.
++// The multi-tap cycle for each numeric key, ending in the digit itself. Empty
++// for keys that are not part of the T9 pad.
++static QString t9CycleFor(Qt::Key keyCode)
++{
++    switch (keyCode) {
++    case Qt::Key_1: return QStringLiteral(".,?!1");
++    case Qt::Key_2: return QStringLiteral("abc2");
++    case Qt::Key_3: return QStringLiteral("def3");
++    case Qt::Key_4: return QStringLiteral("ghi4");
++    case Qt::Key_5: return QStringLiteral("jkl5");
++    case Qt::Key_6: return QStringLiteral("mno6");
++    case Qt::Key_7: return QStringLiteral("pqrs7");
++    case Qt::Key_8: return QStringLiteral("tuv8");
++    case Qt::Key_9: return QStringLiteral("wxyz9");
++    case Qt::Key_0: return QStringLiteral(" 0");
++    default:        return QString();
++    }
++}
++
++bool InputMethod::t9HandleKey(QEvent::Type keyType, Qt::Key keyCode)
++{
++    Q_D(InputMethod);
++
++    // Only in text fields. Number/PhoneNumber fields (the dialer) must receive
++    // raw digits, so leave those to the normal path.
++    if (d->contentType != FreeTextContentType && d->contentType != EmailContentType)
++        return false;
++
++    // Backspace while a character is being cycled cancels it outright rather
++    // than committing then deleting.
++    if (keyCode == Qt::Key_Backspace && d->t9Key != 0) {
++        if (keyType == QEvent::KeyPress) {
++            d->t9Timer->stop();
++            d->t9Key = Qt::Key(0);
++            d->t9Index = 0;
++            d->editor.clearPreedit();
++        }
++        return true;
++    }
++
++    const QString cycle = t9CycleFor(keyCode);
++    if (cycle.isEmpty()) {
++        // A non-keypad key ends the character being cycled, so it is committed
++        // before the application sees the new key.
++        if (d->t9Key != 0 && keyType == QEvent::KeyPress)
++            finalizeT9();
++        return false;
++    }
++
++    // Act on the press; swallow auto-repeat and the release.
++    if (keyType != QEvent::KeyPress)
++        return true;
++
++    if (keyCode == d->t9Key && d->t9Timer->isActive()) {
++        // Same key within the window: advance the multi-tap cycle in place.
++        d->t9Index = (d->t9Index + 1) % cycle.length();
++    } else {
++        // New character: fix the previous one (if any) and start fresh.
++        if (d->t9Key != 0)
++            d->editor.commit();
++        d->t9Key = keyCode;
++        d->t9Index = 0;
++    }
++    d->editor.replacePreedit(QString(cycle.at(d->t9Index)));
++    d->t9Timer->start();
++    return true;
++}
++
++void InputMethod::finalizeT9()
++{
++    Q_D(InputMethod);
++
++    if (d->t9Key == 0)
++        return;
++
++    d->t9Timer->stop();
++    d->t9Key = Qt::Key(0);
++    d->t9Index = 0;
++    d->editor.commit();
++}
++
+ void InputMethod::processKeyEvent(QEvent::Type keyType, Qt::Key keyCode,
+                                   Qt::KeyboardModifiers modifiers,
+                                   const QString &text, bool autoRepeat, int count,
+@@ -186,6 +277,12 @@
+ {
+     Q_D(InputMethod);
+ 
++    // Hardware T9 numeric keypad -> letters (multi-tap) in text fields. Consumes
++    // the keypad keys itself; returns false for everything else (and finalises
++    // any character mid-cycle first, so the app sees committed text in order).
++    if (t9HandleKey(keyType, keyCode))
++        return;
++
+     Key key;
+     const bool isShortcut = modifiers & (Qt::ControlModifier | Qt::AltModifier |
+                                          Qt::MetaModifier);
