@@ -15,6 +15,7 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 SRC_URI = " \
     file://webos-system.pa \
     file://webos-virtual-devices.pa \
+    file://droid-audio-config-gen \
 "
 
 do_install() {
@@ -23,4 +24,16 @@ do_install() {
     install -m 0644 ${UNPACKDIR}/webos-virtual-devices.pa ${D}${sysconfdir}/pulse/
 }
 
+# Halium: generate the 16-bit-input audio policy copy for module-droid-card
+# before pulseaudio starts (see the script and the droid section of
+# webos-system.pa).
+do_install:append:halium() {
+    install -d ${D}${libexecdir}
+    install -m 0755 ${UNPACKDIR}/droid-audio-config-gen ${D}${libexecdir}/
+    install -d ${D}${systemd_system_unitdir}/pulseaudio.service.d
+    printf '[Service]\nExecStartPre=%s/droid-audio-config-gen\n' "${libexecdir}" \
+        > ${D}${systemd_system_unitdir}/pulseaudio.service.d/droid-audio.conf
+}
+
 FILES:${PN} = "${sysconfdir}/pulse"
+FILES:${PN}:append:halium = " ${libexecdir}/droid-audio-config-gen ${systemd_system_unitdir}/pulseaudio.service.d"
