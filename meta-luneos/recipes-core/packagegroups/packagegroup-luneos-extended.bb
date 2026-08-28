@@ -126,6 +126,7 @@ LIBHYBRIS_RDEPENDS = " \
     mtp-server \
     pulseaudio-modules-droid \
     pulseaudio-modules-droid-hidl \
+    gst-droid \
     qt6-qpa-hwcomposer-plugin \
     bluebinder \
     \
@@ -160,10 +161,11 @@ NFC_RDEPENDS = " \
 # (Optional?) work for Qt6:
 #     qtscenegraph-adaptation
 
-#Needs update for Qt6
-#    qtubuntu-camera
-#    libqtubuntu-media-signals2
-#    qtvideo-node
+# qtubuntu-camera, libqtubuntu-media-signals and qtvideo-node were the Ubuntu
+# Touch camera stack, dropped in the Qt5 -> Qt6 migration. Their replacement
+# is gst-droid (in LIBHYBRIS_RDEPENDS above): droidcamsrc/droiddec reach the
+# vendor camera HAL and codecs through the droidmedia services in the Android
+# container, and Qt 6 Multimedia's gstreamer backend sits on top.
 
 # Every Halium machine gets the stack through the "halium" override that
 # meta-android-halium.inc already puts in MACHINEOVERRIDES, rather than through
