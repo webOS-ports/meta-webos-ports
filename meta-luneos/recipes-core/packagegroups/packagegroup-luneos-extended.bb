@@ -136,6 +136,17 @@ LIBHYBRIS_RDEPENDS = " \
     ofono-binder-plugin \
 "
 
+# Fingerprint stack: droidian-fpd talks to the Android biometrics HAL through
+# libhybris, webos-fingerprint-adapter bridges its D-Bus API onto the
+# luna-service2 bus for the shell (lockscreen unlock) and the Settings app
+# (enrollment). Only added for machines that actually have a fingerprint
+# sensor. Note: the device's Halium system image must also ship
+# libbiometry_fp_api.so (built from droidian-fpd's android/hybris/ directory).
+FINGERPRINT_RDEPENDS = " \
+    droidian-fpd \
+    webos-fingerprint-adapter \
+"
+
 # (Optional?) work for Qt6:
 #     qtscenegraph-adaptation
 
@@ -158,6 +169,16 @@ RDEPENDS:${PN}:append:tenderloin3g = " alsa-utils-systemd rmtfs qrtr rpmsgexport
 RDEPENDS:${PN}:append:mido = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:tissot = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:rosy = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
+
+# Fingerprint-sensor devices only. These machine names come from the LuneOS
+# Halium layer; on a tree without them the overrides are simply inert.
+RDEPENDS:${PN}:append:sargo = " ${FINGERPRINT_RDEPENDS}"
+RDEPENDS:${PN}:append:sagit = " ${FINGERPRINT_RDEPENDS}"
+RDEPENDS:${PN}:append:mido-halium = " ${FINGERPRINT_RDEPENDS}"
+RDEPENDS:${PN}:append:tissot-halium = " ${FINGERPRINT_RDEPENDS}"
+# The GSI machine can land on any device; the stack is harmless without a
+# sensor (the adapter just reports unavailable).
+RDEPENDS:${PN}:append:halium-arm64 = " ${FINGERPRINT_RDEPENDS}"
 
 RDEPENDS:${PN}:append:mido-halium = " waydroid"
 RDEPENDS:${PN}:append:pinephone = " waydroid"
