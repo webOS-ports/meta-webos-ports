@@ -6,14 +6,12 @@ LIC_FILES_CHKSUM = " \
 "
 
 PV = "0.0.2-1+git"
-SRCREV = "fbcbee642deaeb725c35372995e1eeb9e884444a"
+SRCREV = "5fc9c7a80c34350cb0d7b53f2032aa4ccff154cc"
 
 DEPENDS = "qtbase qtdeclarative qtdeclarative-native qtmultimedia"
 
 WEBOS_GIT_PARAM_BRANCH = "herrie/qt6"
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
-    file://0001-CMakeLists.txt-move-camera_shaders-to-camera-qml-tar.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 inherit pkgconfig
 inherit webos_ports_repo
