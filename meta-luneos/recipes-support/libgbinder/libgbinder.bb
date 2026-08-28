@@ -19,10 +19,30 @@ SRCREV = "e906afcffbfa51b7fbefe042a13b933d9e8dfdd9"
 EXTRA_OEMAKE = "KEEP_SYMBOLS=1"
 PARALLEL_MAKE = ""
 
+do_compile:append() {
+    # Build binder-ping from tools/ against the just-built library. It is
+    # packaged separately (libgbinder-tools) and used by the Android-container
+    # readiness probe to wait for a HIDL service on /dev/hwbinder, replacing the
+    # crash-prone lshal: binder-ping returns a clean exit code and does not
+    # SIGSEGV when run before the container's linker/hwservicemanager are ready.
+    ${CC} ${CFLAGS} ${LDFLAGS} \
+        ${S}/tools/binder-ping/binder-ping.c \
+        -o ${B}/binder-ping \
+        -I${S}/include \
+        `pkg-config --cflags glib-2.0 gio-2.0 gio-unix-2.0 libglibutil` \
+        -L${B}/build/release -lgbinder \
+        `pkg-config --libs glib-2.0 gio-2.0 gio-unix-2.0 libglibutil`
+}
+
 do_install() {
     make install DESTDIR=${D}
     make install-dev DESTDIR=${D}
+    install -D -m 0755 ${B}/binder-ping ${D}${bindir}/binder-ping
 }
+
+PACKAGES =+ "libgbinder-tools"
+FILES:libgbinder-tools = "${bindir}/binder-ping"
+RDEPENDS:libgbinder-tools = "libgbinder"
 
 # Install libgbinder's config for Halium 9.0, we do this here, since for Waydroid we need a different API version it seems, so better to split it for mainline targets such as PinePhone and qemux86-64.
 do_install:append:halium() {
