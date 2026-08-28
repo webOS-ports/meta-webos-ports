@@ -1,0 +1,138 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: LuneOS <webos-ports@googlegroups.com>
+Date: Mon, 1 Jan 2024 00:00:00 +0000
+Subject: [PATCH] syscall_wrappers: don't collide with glibc's mount_setattr()
+
+glibc 2.36 added a mount_setattr() declaration to <sys/mount.h>:
+
+    extern int mount_setattr (int __dfd, const char *__path,
+                              unsigned int __flags,
+                              struct mount_attr *__uattr, size_t __usize)
+
+LXC declares its own layout-identical struct lxc_mount_attr and only defines a
+mount_setattr() wrapper when HAVE_MOUNT_SETATTR is unset. On a glibc >= 2.36
+sysroot the configure check succeeds, LXC's wrapper is compiled out, and the six
+call sites end up passing struct lxc_mount_attr * to a prototype expecting
+struct mount_attr *. GCC 14 made -Wincompatible-pointer-types an error by
+default, so this is a hard build failure rather than a warning:
+
+  src/lxc/mount_utils.c:297:29: error: passing argument 4 of 'mount_setattr'
+    from incompatible pointer type [-Werror=incompatible-pointer-types]
+
+Note the recipe already passes --disable-werror; that does not help, because the
+diagnostic is an error by default in GCC 14 rather than something -Werror
+promoted.
+
+Fixed by always routing through LXC's own wrapper under a name that cannot
+collide with libc, following the existing fsconfig_lxc/fsmount_lxc idiom, and
+pointing the call sites at it. The syscall is issued directly and
+syscall_numbers.h already carries __NR_mount_setattr fallbacks for every
+architecture, so dropping the HAVE_MOUNT_SETATTR condition loses nothing.
+Renaming the call sites rather than #define-ing over mount_setattr avoids
+depending on whether <sys/mount.h> was included before syscall_wrappers.h.
+
+LXC 5.x restructured this code; this is a 4.0.x-only fix.
+
+Upstream-Status: Inappropriate [fixed differently in lxc >= 5.0]
+---
+ src/lxc/conf.c            |  6 +++---
+ src/lxc/mount_utils.c     |  6 +++---
+ src/lxc/syscall_wrappers.h| 20 ++++++++++++++------
+ 3 files changed, 20 insertions(+), 12 deletions(-)
+
+diff --git a/src/lxc/conf.c b/src/lxc/conf.c
+index e656f63..b893ef1 100644
+--- a/src/lxc/conf.c
++++ b/src/lxc/conf.c
+@@ -2982,7 +2982,7 @@ static int __lxc_idmapped_mounts_child(struct lxc_handler *handler, FILE *f)
+ 		/* Set regular mount options. */
+ 		attr = opts.attr;
+ 		attr.propagation = 0;
+-		ret = mount_setattr(fd_from,
++		ret = mount_setattr_lxc(fd_from,
+ 				    "",
+ 				    AT_EMPTY_PATH |
+ 				    (opts.bind_recursively ? AT_RECURSIVE : 0),
+@@ -3005,7 +3005,7 @@ static int __lxc_idmapped_mounts_child(struct lxc_handler *handler, FILE *f)
+ 				.propagation = opts.attr.propagation,
+ 			};
+ 
+-			ret = mount_setattr(fd_from,
++			ret = mount_setattr_lxc(fd_from,
+ 					"",
+ 					AT_EMPTY_PATH |
+ 					(opts.propagate_recursively ? AT_RECURSIVE : 0),
+@@ -4120,7 +4120,7 @@ int lxc_idmapped_mounts_parent(struct lxc_handler *handler)
+ 
+ 		attr.attr_set	= MOUNT_ATTR_IDMAP;
+ 		attr.userns_fd	= fd_userns;
+-		ret = mount_setattr(fd_from, "",
++		ret = mount_setattr_lxc(fd_from, "",
+ 				    AT_EMPTY_PATH |
+ 				    (opts.bind_recursively ? AT_RECURSIVE : 0),
+ 				    &attr, sizeof(attr));
+diff --git a/src/lxc/mount_utils.c b/src/lxc/mount_utils.c
+index bba75f9..d450a97 100644
+--- a/src/lxc/mount_utils.c
++++ b/src/lxc/mount_utils.c
+@@ -292,7 +292,7 @@ int create_detached_idmapped_mount(const char *path, int userns_fd,
+ 	if (fd_tree_from < 0)
+ 		return syserror("Failed to create detached mount");
+ 
+-	ret = mount_setattr(fd_tree_from, "",
++	ret = mount_setattr_lxc(fd_tree_from, "",
+ 			    AT_EMPTY_PATH | (recursive ? AT_RECURSIVE : 0),
+ 			    &attr, sizeof(attr));
+ 	if (ret < 0)
+@@ -375,7 +375,7 @@ int __fd_bind_mount(int dfd_from, const char *path_from, __u64 o_flags_from,
+ 	}
+ 
+ 	if (attr.attr_set) {
+-		ret = mount_setattr(fd_tree_from, "",
++		ret = mount_setattr_lxc(fd_tree_from, "",
+ 				    AT_EMPTY_PATH | (recursive ? AT_RECURSIVE : 0),
+ 				    &attr, sizeof(attr));
+ 		if (ret < 0)
+@@ -597,7 +597,7 @@ bool can_use_bind_mounts(void)
+ 			return false;
+ 		}
+ 
+-		ret = mount_setattr(-EBADF, NULL, 0, NULL, 0);
++		ret = mount_setattr_lxc(-EBADF, NULL, 0, NULL, 0);
+ 		if (!ret || errno == ENOSYS) {
+ 			supported = 0;
+ 			return false;
+diff --git a/src/lxc/syscall_wrappers.h b/src/lxc/syscall_wrappers.h
+index a5e98b5..dbfa018 100644
+--- a/src/lxc/syscall_wrappers.h
++++ b/src/lxc/syscall_wrappers.h
+@@ -217,13 +217,23 @@ struct lxc_mount_attr {
+ 	__u64 userns_fd;
+ };
+ 
+-#if !HAVE_MOUNT_SETATTR
+-static inline int mount_setattr(int dfd, const char *path, unsigned int flags,
+-				struct lxc_mount_attr *attr, size_t size)
++/*
++ * glibc 2.36 added a mount_setattr() declaration to <sys/mount.h> whose fourth
++ * argument is "struct mount_attr *". LXC passes its own struct lxc_mount_attr,
++ * so when HAVE_MOUNT_SETATTR is set the call sites no longer match the visible
++ * prototype and GCC 14 rejects them outright rather than warning.
++ *
++ * Always go through LXC's own wrapper instead, named like the fsconfig_lxc and
++ * fsmount_lxc wrappers above so it can never collide with libc. The syscall is
++ * invoked directly and syscall_numbers.h carries __NR_mount_setattr fallbacks
++ * for every architecture, so dropping the HAVE_MOUNT_SETATTR condition costs
++ * nothing.
++ */
++static inline int mount_setattr_lxc(int dfd, const char *path, unsigned int flags,
++				    struct lxc_mount_attr *attr, size_t size)
+ {
+ 	return syscall(__NR_mount_setattr, dfd, path, flags, attr, size);
+ }
+-#endif
+ 
+ /*
+  * Arguments for how openat2(2) should open the target path. If only @flags and
+-- 
+2.34.1

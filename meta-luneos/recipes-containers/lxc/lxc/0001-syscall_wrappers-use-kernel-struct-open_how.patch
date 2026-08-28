@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: LuneOS / webOS Ports <team@webos-ports.org>
+Date: Thu, 13 Aug 2026 00:00:00 +0000
+Subject: [PATCH] syscall_wrappers: use the kernel struct open_how when the
+ system has openat2
+
+configure now detects openat2(2) and defines HAVE_OPENAT2, so lxc's own
+static inline wrapper is compiled out and the system prototype - which takes
+struct open_how * - is what the call sites see. They still pass lxc's private
+struct lxc_open_how *, which GCC 15 rejects outright:
+
+  file_utils.c:661:33: error: passing argument 3 of 'openat2' from
+  incompatible pointer type [-Wincompatible-pointer-types]
+
+The two structs are byte-identical (three __u64: flags, mode, resolve), so
+alias lxc_open_how to the kernel's open_how when it is available and keep the
+private definition only for the fallback path. This leaves all eight call
+sites untouched.
+
+Upstream-Status: Pending
+---
+ src/lxc/syscall_wrappers.h | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/src/lxc/syscall_wrappers.h b/src/lxc/syscall_wrappers.h
+index dbfa018..564a679 100644
+--- a/src/lxc/syscall_wrappers.h
++++ b/src/lxc/syscall_wrappers.h
+@@ -247,11 +247,21 @@ static inline int mount_setattr_lxc(int dfd, const char *path, unsigned int flag
+  * @mode: O_CREAT/O_TMPFILE file mode.
+  * @resolve: RESOLVE_* flags.
+  */
++#if HAVE_OPENAT2
++/*
++ * The system provides openat2(2), and with it the kernel's own struct
++ * open_how. Alias to it so the call sites below match the real prototype
++ * rather than a private struct of identical layout.
++ */
++#include <linux/openat2.h>
++#define lxc_open_how open_how
++#else
+ struct lxc_open_how {
+ 	__u64 flags;
+ 	__u64 mode;
+ 	__u64 resolve;
+ };
++#endif
+ 
+ /* how->resolve flags for openat2(2). */
+ #ifndef RESOLVE_NO_XDEV
