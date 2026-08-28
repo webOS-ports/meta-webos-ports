@@ -1,0 +1,75 @@
+From 287ca517c348cec426d72a9b7ae725b6a542e3e7 Mon Sep 17 00:00:00 2001
+From: Herrie <herrie@webos-ports.org>
+Date: Wed, 26 Aug 2026 05:47:19 +0200
+Subject: [PATCH] Add a Rename method
+
+Renaming a fingerprint only changes the local name<->template-id map,
+which the daemon already owns and persists; no HAL call is involved.
+Rejects empty names and collisions with an existing name, and emits
+ListChanged so subscribers refresh.
+Upstream-Status: Pending [should go to FuriLabs/droidian-fpd and
+sailfishos-open/sailfish-fpd-community]
+---
+ src/fpdcommunity.cpp | 33 +++++++++++++++++++++++++++++++++
+ src/fpdcommunity.h   |  1 +
+ 2 files changed, 34 insertions(+)
+
+diff --git a/src/fpdcommunity.cpp b/src/fpdcommunity.cpp
+index 98a6f6f..1436992 100644
+--- a/src/fpdcommunity.cpp
++++ b/src/fpdcommunity.cpp
+@@ -339,6 +339,39 @@ int FPDCommunity::Remove(const QString &finger, const QDBusMessage &message)
+     return FPREPLY_STARTED;
+ }
+ 
++int FPDCommunity::Rename(const QString &finger, const QString &newName, const QDBusMessage &message)
++{
++    const QString caller = message.service();
++    qDebug() << Q_FUNC_INFO << finger << "->" << newName << caller;
++
++    if (newName.isEmpty()) {
++        return FPREPLY_KEY_IS_INVALID;
++    }
++
++    // New name must not collide with an existing one (a no-op rename to the
++    // same name is allowed).
++    if (newName != finger && m_fingerMap.values().contains(newName)) {
++        return FPREPLY_KEY_ALREADY_EXISTS;
++    }
++
++    uint32_t key = 0;
++    for (auto i = m_fingerMap.constBegin(); i != m_fingerMap.constEnd(); ++i) {
++        if (i.value() == finger) {
++            key = i.key();
++            break;
++        }
++    }
++
++    if (!key) {
++        return FPREPLY_KEY_DOES_NOT_EXIST;
++    }
++
++    m_fingerMap[key] = newName;
++    saveFingers();
++    emit ListChanged();
++    return FPREPLY_STARTED;
++}
++
+ void FPDCommunity::abort()
+ {
+     m_androidFP.cancel();
+diff --git a/src/fpdcommunity.h b/src/fpdcommunity.h
+index dd188ed..5c7f7ea 100644
+--- a/src/fpdcommunity.h
++++ b/src/fpdcommunity.h
+@@ -106,6 +106,7 @@ public:
+     Q_INVOKABLE int Abort(const QDBusMessage &message);
+     Q_INVOKABLE int Verify(const QDBusMessage &message);
+     Q_INVOKABLE int Remove(const QString &finger, const QDBusMessage &message);
++    Q_INVOKABLE int Rename(const QString &finger, const QString &newName, const QDBusMessage &message);
+ 
+     Q_SIGNAL void Added(const QString &finger);
+     Q_SIGNAL void Removed(const QString &finger);
+-- 
+2.53.0
+
