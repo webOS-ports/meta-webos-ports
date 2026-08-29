@@ -113,6 +113,7 @@ RDEPENDS:${PN} = " \
   org.mer.app.fingerterm \
   org.webosports.app.terminal \
   org.webosports.app.camera \
+  luneos-rtc-engine \
 "
 
 LIBHYBRIS_RDEPENDS = " \
@@ -127,7 +128,6 @@ LIBHYBRIS_RDEPENDS = " \
     pulseaudio-modules-droid \
     pulseaudio-modules-droid-hidl \
     gst-droid \
-    luneos-rtc-engine \
     qt6-qpa-hwcomposer-plugin \
     bluebinder \
     \

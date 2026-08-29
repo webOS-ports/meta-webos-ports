@@ -15,13 +15,24 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 DEPENDS = "gstreamer1.0 gstreamer1.0-plugins-base glib-2.0 luna-service2 libpbnjson umediaserver g-camera-pipeline qtbase qtdeclarative qtmultimedia wayland webos-wayland-extensions"
-RDEPENDS:${PN} = "gst-droid g-camera-pipeline"
+RDEPENDS:${PN} = "g-camera-pipeline"
+# droidmedia capture/codec backend on Halium devices
+RDEPENDS:${PN}:append:halium = " gst-droid"
+# v4l2 capture and codec backend on mainline kernels, with software
+# fallbacks; soft dependencies so absent packages (e.g. x264 without the
+# commercial license flag) do not break the image
+RRECOMMENDS:${PN} = " \
+    gstreamer1.0-plugins-good-video4linux2 \
+    gstreamer1.0-plugins-bad-v4l2codecs \
+    gstreamer1.0-plugins-ugly-x264 \
+    gstreamer1.0-libav \
+"
+RRECOMMENDS:${PN}:halium = ""
 
-COMPATIBLE_MACHINE = "^halium$"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 PV = "1.0.0+git"
-SRCREV = "655e3e62aba493b11aac14a2754096360bf4eb8c"
+SRCREV = "bb3420cdaa4436f22fe3325ca2f6186678646be6"
 SRC_URI = "git://github.com/webOS-ports/luneos-rtc-engine.git;branch=main;protocol=https"
 
 
