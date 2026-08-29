@@ -127,6 +127,7 @@ LIBHYBRIS_RDEPENDS = " \
     pulseaudio-modules-droid \
     pulseaudio-modules-droid-hidl \
     gst-droid \
+    luneos-rtc-engine \
     qt6-qpa-hwcomposer-plugin \
     bluebinder \
     \
