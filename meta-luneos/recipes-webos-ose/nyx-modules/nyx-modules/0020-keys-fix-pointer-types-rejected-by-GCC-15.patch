@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: LuneOS / webOS Ports <team@webos-ports.org>
+Date: Thu, 13 Aug 2026 00:00:00 +0000
+Subject: [PATCH] keys: fix pointer types rejected by GCC 15
+
+GCC 14 turned -Wincompatible-pointer-types into an error and two call sites
+in keys_common.c stop building.
+
+g_key_file_get_string_list() writes the item count through a gsize *, but
+read_input_paths() handed it its own guint * out-parameter. gsize is 64-bit on
+a 64-bit target while guint is 32-bit, so glib wrote four bytes past the
+caller's variable - a real bug, not only a diagnostic. Take the count in a
+local gsize and narrow it on assignment.
+
+pipe2() wants an int *, but keypad_notifier_pipe_fds is already int[2] and was
+passed as &keypad_notifier_pipe_fds, which is int (*)[2]. The address is
+numerically the same, which is why it worked.
+
+Upstream-Status: Pending
+---
+ src/keys/keys_common.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/keys/keys_common.c b/src/keys/keys_common.c
+index 5aeba78..c962acf 100644
+--- a/src/keys/keys_common.c
++++ b/src/keys/keys_common.c
+@@ -65,6 +65,7 @@ static gchar** read_input_paths(guint *num_paths)
+     GError *error = NULL;
+     GKeyFile *keyfile = NULL;
+     gchar **result = NULL;
++    gsize path_count = 0;
+ 
+     keyfile = g_key_file_new();
+     g_key_file_set_list_separator(keyfile, ';');
+@@ -81,7 +82,8 @@ static gchar** read_input_paths(guint *num_paths)
+         goto cleanup;
+     }
+ 
+-    result = g_key_file_get_string_list(keyfile, NYX_CONF_GROUP_KEYS, NYX_CONF_KEY_PATHS, num_paths, NULL);
++    result = g_key_file_get_string_list(keyfile, NYX_CONF_GROUP_KEYS, NYX_CONF_KEY_PATHS, &path_count, NULL);
++    *num_paths = (guint) path_count;
+ 
+ cleanup:
+     g_key_file_free(keyfile);
+@@ -208,7 +210,7 @@ nyx_error_t nyx_module_open(nyx_instance_t i, nyx_device_t **d)
+ 	*d = (nyx_device_t *) keys_device;
+ 
+     notifier_thread = pthread_create(&notifier_thread, NULL, notifier_thread_func, NULL);
+-    pipe2(&keypad_notifier_pipe_fds, 0);
++    pipe2(keypad_notifier_pipe_fds, 0);
+ 
+     return NYX_ERROR_NONE;
+ 

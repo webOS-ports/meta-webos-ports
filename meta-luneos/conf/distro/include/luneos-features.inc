@@ -21,8 +21,33 @@ WEBOS_DISTRO_FEATURES_EXTENDED = "webos-touch"
 WEBOS_DISTRO_FEATURES_LD = "ld-is-lld"
 
 WEBOS_DISTRO_FEATURES_INIT = "systemd usrmerge"
-WEBOS_DISTRO_FEATURES_INIT_CONSIDERED = "sysvinit"
-DISTRO_FEATURES_BACKFILL_CONSIDERED += "${WEBOS_DISTRO_FEATURES_INIT_CONSIDERED} bluez4"
+
+# wrynose replaced the backfill mechanism: DISTRO_FEATURES_BACKFILL and
+# DISTRO_FEATURES_BACKFILL_CONSIDERED are gone, and DISTRO_FEATURES_DEFAULTS is
+# now added on top of an explicit DISTRO_FEATURES assignment like the one below.
+# Opting out is done with DISTRO_FEATURES_OPTED_OUT.
+#
+# scarthgap backfilled "pulseaudio sysvinit gobject-introspection-data ldconfig"
+# and LuneOS opted out of sysvinit only, so pulseaudio, gobject-introspection-data
+# and ldconfig were already in effect and are deliberately NOT opted out here.
+#
+# wrynose's DISTRO_FEATURES_DEFAULTS additionally brings in acl, debuginfod,
+# ipv4, x11, vfat, ptest, multiarch and vulkan, none of which LuneOS had. Of
+# those we refuse:
+#   x11        - Open webOS is wayland-only; this file has removed x11 since 2012
+#   ptest      - builds the test suites of every recipe that has them
+#   multiarch  - unused, and it perturbs the sysroot layout
+#   vulkan     - no LuneOS target has a Vulkan driver (a2xx/a3xx freedreno,
+#                Mali Utgard); qtbase filters on this feature, so leaving it on
+#                would silently enable a Qt backend nothing can run
+#   debuginfod - pulls a debuginfod client into the image
+# acl, ipv4 and vfat are left enabled: they are newly gained relative to
+# scarthgap but harmless, and vfat matches what the machine configs already ask
+# for in MACHINE_FEATURES.
+#
+# sysvinit and bluez4 are no longer listed here because neither exists in
+# wrynose's defaults any more - systemd dropped SysV compatibility entirely.
+DISTRO_FEATURES_OPTED_OUT += "x11 ptest multiarch vulkan debuginfod"
 
 DISTRO_FEATURES = "\
   ${WEBOS_DISTRO_FEATURES_DEFAULT} \

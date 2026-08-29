@@ -1,0 +1,74 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: LuneOS / webOS Ports <team@webos-ports.org>
+Date: Fri, 14 Aug 2026 00:00:00 +0000
+Subject: [PATCH] touchpanel_mtdev: fix finger type and declare the gesture
+ helpers
+
+The mtdev touchpanel module does not build with GCC 15, which defaults to
+-std=gnu23 and so rejects implicit function declarations outright:
+
+    touchpanel.c:661: error: implicit declaration of function 'add_new_finger'
+    touchpanel.c:668: error: implicit declaration of function 'update_finger'
+    touchpanel.c:681: error: implicit declaration of function
+                            'gesture_state_machine_process'
+
+All three are defined in touchpanel_gestures.c but were never declared in
+touchpanel_gestures.h, because gesture_state_machine() is the only entry point
+the header was written for. touchpanel.c drives the slot bookkeeping itself and
+calls the three helpers directly, so declare them.
+
+That in turn exposes the type mt_slot_t was using to hold a finger:
+
+    touchpanel.c:661: error: assignment to 'struct finger_t *' from 'int'
+                            makes pointer from integer without a cast
+
+touchpanel_gestures.h declares "typedef struct finger { ... } finger_t;", so
+the struct tag is "finger" and "struct finger_t" is a different, never-defined
+type. It compiled only because nothing checked it: the member was assigned from
+an implicitly-declared function returning int, and passed to another one taking
+no declared parameter types. Use finger_t, and initialise the member to NULL
+rather than -1 - the reset loop was the odd one out, the teardown path at line
+670 already uses NULL.
+
+Upstream-Status: Pending
+---
+ src/touchpanel_mtdev/touchpanel.c          |  4 ++--
+ src/touchpanel_mtdev/touchpanel_gestures.h |  9 +++++++++
+ 2 files changed, 11 insertions(+), 2 deletions(-)
+
+--- a/src/touchpanel_mtdev/touchpanel.c
++++ b/src/touchpanel_mtdev/touchpanel.c
+@@ -90,7 +90,7 @@
+ 	int posY;
+ 	int tracking_id;
+ 	int previous_tracking_id;
+-	struct finger_t *nyx_finger;
++	finger_t *nyx_finger;
+ } mt_slot_t;
+ struct mtdev *ts_mtdev = NULL;
+ /*
+@@ -444,7 +444,7 @@
+         {
+             mt_slots[iSlot].tracking_id = -1;
+             mt_slots[iSlot].previous_tracking_id = -1;
+-            mt_slots[iSlot].nyx_finger = -1;
++            mt_slots[iSlot].nyx_finger = NULL;
+         }
+     }
+ 
+--- a/src/touchpanel_mtdev/touchpanel_gestures.h
++++ b/src/touchpanel_mtdev/touchpanel_gestures.h
+@@ -130,4 +130,13 @@
+                            int fingerCount, const time_stamp_t *pTime,
+                            input_event_t *events, int *numEvents);
+ 
++/* Used by the mtdev slot handling in touchpanel.c, which tracks the fingers
++   itself instead of going through gesture_state_machine(). */
++finger_t *add_new_finger(int x, int y, int weight,
++                         const time_stamp_t *pCurTime);
++void update_finger(finger_t *finger, int x, int y, int weight,
++                   const time_stamp_t *pCurTime);
++void gesture_state_machine_process(const time_stamp_t *pCurTime,
++                                   input_event_t *events, int *numEvents);
++
+ #endif  /* __TOUCHPANEL_GESTURES_PRV_H */
