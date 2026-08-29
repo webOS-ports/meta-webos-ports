@@ -1,4 +1,4 @@
-From ee2bbef15aa432eff6c8106ea1c39eab278c93fb Mon Sep 17 00:00:00 2001
+From 12d407f488bf02563015406e07645e588a2d8841 Mon Sep 17 00:00:00 2001
 From: Herman van Hazendonk <github.com@herrie.org>
 Date: Sat, 29 Aug 2026 03:20:42 +0200
 Subject: [PATCH] Add droid camera HAL and notifier plugins for Halium devices
@@ -20,12 +20,12 @@ Upstream-Status: Inappropriate [LuneOS Halium-specific]
 ---
  src/plugins/hal/CMakeLists.txt                |   1 +
  src/plugins/hal/droid/CMakeLists.txt          |  23 ++
- src/plugins/hal/droid/droid_camera_plugin.cpp | 296 ++++++++++++++++++
- src/plugins/hal/droid/droid_camera_plugin.h   |  74 +++++
+ src/plugins/hal/droid/droid_camera_plugin.cpp | 305 ++++++++++++++++++
+ src/plugins/hal/droid/droid_camera_plugin.h   |  78 +++++
  src/plugins/notifier/CMakeLists.txt           |   1 +
  src/plugins/notifier/droid/CMakeLists.txt     |  24 ++
  src/plugins/notifier/droid/droid_notifier.cpp | 163 ++++++++++
- 7 files changed, 582 insertions(+)
+ 7 files changed, 595 insertions(+)
  create mode 100644 src/plugins/hal/droid/CMakeLists.txt
  create mode 100644 src/plugins/hal/droid/droid_camera_plugin.cpp
  create mode 100644 src/plugins/hal/droid/droid_camera_plugin.h
@@ -72,10 +72,10 @@ index 0000000..0fa7978
 +install(TARGETS ${PROJECT_NAME} DESTINATION ${WEBOS_INSTALL_LIBDIR}/camera)
 diff --git a/src/plugins/hal/droid/droid_camera_plugin.cpp b/src/plugins/hal/droid/droid_camera_plugin.cpp
 new file mode 100644
-index 0000000..5f55d96
+index 0000000..091dabd
 --- /dev/null
 +++ b/src/plugins/hal/droid/droid_camera_plugin.cpp
-@@ -0,0 +1,296 @@
+@@ -0,0 +1,305 @@
 +// Copyright (c) 2026 LuneOS project
 +//
 +// Licensed under the Apache License, Version 2.0 (the "License");
@@ -150,6 +150,7 @@ index 0000000..5f55d96
 +    format_.stream_width  = 1280;
 +    format_.stream_height = 720;
 +    format_.stream_fps    = 30;
++    format_.buffer_size   = format_.stream_width * format_.stream_height * 3 / 2;
 +}
 +
 +DroidCameraPlugin::~DroidCameraPlugin() { teardownPipeline(); }
@@ -252,6 +253,7 @@ index 0000000..5f55d96
 +
 +void DroidCameraPlugin::teardownPipeline()
 +{
++    std::lock_guard<std::mutex> guard(lock_);
 +    if (pipeline_)
 +    {
 +        gst_element_set_state(pipeline_, GST_STATE_NULL);
@@ -285,7 +287,9 @@ index 0000000..5f55d96
 +{
 +    buffer_t *buf = static_cast<buffer_t *>(outbuf);
 +
-+    if (!appsink_ || !streaming_)
++    std::lock_guard<std::mutex> guard(lock_);
++
++    if (!appsink_ || !streaming_ || !buf || !buf->start)
 +        return CAMERA_ERROR_UNKNOWN;
 +
 +    GstSample *sample = nullptr;
@@ -303,8 +307,13 @@ index 0000000..5f55d96
 +    int ret = CAMERA_ERROR_UNKNOWN;
 +    if (gbuf && gst_buffer_map(gbuf, &map, GST_MAP_READ))
 +    {
-+        std::memcpy(buf->start, map.data, map.size);
-+        buf->length = map.size;
++        /* never write more than one negotiated frame into the service's
++         * buffer; its allocation is derived from getFormat */
++        gsize n = map.size;
++        if (format_.buffer_size && n > format_.buffer_size)
++            n = format_.buffer_size;
++        std::memcpy(buf->start, map.data, n);
++        buf->length = n;
 +        gst_buffer_unmap(gbuf, &map);
 +        ret = CAMERA_ERROR_NONE;
 +    }
@@ -374,10 +383,10 @@ index 0000000..5f55d96
 +}
 diff --git a/src/plugins/hal/droid/droid_camera_plugin.h b/src/plugins/hal/droid/droid_camera_plugin.h
 new file mode 100644
-index 0000000..7d42aa1
+index 0000000..b9e7116
 --- /dev/null
 +++ b/src/plugins/hal/droid/droid_camera_plugin.h
-@@ -0,0 +1,74 @@
+@@ -0,0 +1,78 @@
 +// Copyright (c) 2026 LuneOS project
 +//
 +// Licensed under the Apache License, Version 2.0 (the "License");
@@ -402,6 +411,7 @@ index 0000000..7d42aa1
 +#include "plugin_interface.hpp"
 +
 +#include <gst/gst.h>
++#include <mutex>
 +#include <string>
 +
 +/*
@@ -449,6 +459,9 @@ index 0000000..7d42aa1
 +    GstElement *pipeline_;
 +    GstElement *appsink_;
 +    bool streaming_;
++    // serializes getBuffer against teardown: the service's preview thread
++    // pulls frames while stopCapture may run from the LS2 thread
++    std::mutex lock_;
 +};
 +
 +#endif /* DROID_CAMERA_PLUGIN_H_ */
