@@ -20,7 +20,8 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/../../recipes-webos-ose/nyx-modules/nyx-m
 COMPATIBLE_MACHINE = "^halium$"
 
 PV = "0.1.0-1+git"
-SRCREV = "6197796c176e956d2b26c107698beaab28e276b9"
+PR = "r1"
+SRCREV = "32c6e3dbc4f261487a9a1d03622dc2e64a52d17d"
 
 inherit webos_ports_repo
 inherit webos_cmake
