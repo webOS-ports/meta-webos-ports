@@ -1,0 +1,95 @@
+From 2121d6d1be742566949f23ddf2f38056d8746be1 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <Github.com@herrie.org>
+Date: Mon, 24 Aug 2026 09:20:00 +0200
+Subject: [PATCH] conversion: split XML list values on spaces as well as commas
+
+The audio policy XML separates list values with spaces:
+
+    <profile ... samplingRates="44100 48000"
+                 channelMasks="AUDIO_CHANNEL_OUT_STEREO"/>
+    <mixPort ... flags="AUDIO_OUTPUT_FLAG_PRIMARY AUDIO_OUTPUT_FLAG_FAST"/>
+
+but the non-legacy separator is "," and the flag parsers pass "|", so
+each of those attributes is taken as one long token:
+
+    [audio_policy_configuration.xml:33] Failed to parse flags
+        (AUDIO_OUTPUT_FLAG_PRIMARY AUDIO_OUTPUT_FLAG_FAST)
+    [audio_policy_configuration.xml:44] Bad sample rate value 44100 48000
+
+The sample rate case is fatal, so module-droid-card fails to load and
+there is no audio at all. Seen with the Pixel 3a's stock audio policy.
+
+pa_split() delimits with strcspn(), so its argument is a set of
+characters rather than a string, and adding the space to the set is
+enough - comma separated values keep working. This is what
+pulseaudio-modules-droid-modern already does.
+
+Skip empty entries while here, so that a stray double space is not
+parsed as a zero-length flag or an unparseable sample rate.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/common/conversion.c | 21 ++++++++++++++++++---
+ 1 file changed, 18 insertions(+), 3 deletions(-)
+
+diff --git a/src/common/conversion.c b/src/common/conversion.c
+index bd78524..9549083 100644
+--- a/src/common/conversion.c
++++ b/src/common/conversion.c
+@@ -55,7 +55,10 @@ CONVERT_FUNC(format);
+ CONVERT_FUNC(output_channel);
+ CONVERT_FUNC(input_channel);
+ 
+-#define value_separator(legacy) (legacy ? "|" : ",")
++/* pa_split() takes a set of delimiter characters, not a delimiter string,
++ * so listing them all here is enough. The XML configuration separates
++ * list values with spaces; the legacy .conf format uses "|". */
++#define value_separator(legacy) (legacy ? "|" : " ,")
+ 
+ static bool string_convert_num_to_str(const struct string_conversion *list, const uint32_t value, const char **to_str) {
+     pa_assert(list);
+@@ -266,6 +269,12 @@ static int parse_list(const struct string_conversion *table,
+     while ((entry = pa_split(str, separator, &state))) {
+         uint32_t d = 0;
+ 
++        /* consecutive separators produce empty entries */
++        if (!*entry) {
++            pa_xfree(entry);
++            continue;
++        }
++
+         if (!string_convert_str_to_num(table, entry, &d)) {
+             if (*unknown_entries) {
+                 unknown = pa_sprintf_malloc("%s|%s", *unknown_entries, entry);
+@@ -333,6 +342,12 @@ bool pa_conversion_parse_sampling_rates(const char *fn, const unsigned ln,
+     while ((entry = pa_split(str, value_separator(legacy), &state))) {
+         int32_t val;
+ 
++        /* consecutive separators produce empty entries */
++        if (!*entry) {
++            pa_xfree(entry);
++            continue;
++        }
++
+ #if AUDIO_API_VERSION_MAJ >= 3
+         if (pos == 0 && pa_streq(entry, "dynamic")) {
+             sampling_rates[pos++] = (uint32_t) -1;
+@@ -503,7 +518,7 @@ bool pa_conversion_parse_output_flags(const char *fn, const unsigned ln,
+     pa_assert(str);
+     pa_assert(flags);
+ 
+-    count = pa_conversion_parse_list(CONV_STRING_OUTPUT_FLAG, "|", str, flags, &unknown);
++    count = pa_conversion_parse_list(CONV_STRING_OUTPUT_FLAG, "| ", str, flags, &unknown);
+ 
+     return check_and_log(fn, ln, "flags", count, str, unknown, false);
+ }
+@@ -517,7 +532,7 @@ bool pa_conversion_parse_input_flags(const char *fn, const unsigned ln,
+     pa_assert(str);
+     pa_assert(flags);
+ 
+-    count = pa_conversion_parse_list(CONV_STRING_INPUT_FLAG, "|", str, flags, &unknown);
++    count = pa_conversion_parse_list(CONV_STRING_INPUT_FLAG, "| ", str, flags, &unknown);
+ 
+     return check_and_log(fn, ln, "flags", count, str, unknown, false);
+ }

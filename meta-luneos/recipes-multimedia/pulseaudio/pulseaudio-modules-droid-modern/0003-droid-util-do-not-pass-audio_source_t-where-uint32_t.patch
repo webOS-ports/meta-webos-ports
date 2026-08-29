@@ -1,0 +1,53 @@
+From 9787414141de67f924de89c9d56fa25acb59785c Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <Github.com@herrie.org>
+Date: Tue, 25 Aug 2026 07:17:26 +0200
+Subject: [PATCH] droid-util: do not pass audio_source_t* where uint32_t* is
+ expected
+
+pa_string_convert_str_to_num() takes a uint32_t*. Up to Android 11 the headers
+declared audio_source_t as a plain enum whose enumerators are all non-negative,
+so the compiler chose unsigned int and the two were compatible by accident.
+From Android 14 it is "enum : int32_t" and includes AUDIO_SOURCE_INVALID = -1,
+so the pointer types genuinely differ - and GCC 14 promoted
+-Wincompatible-pointer-types to an error, which breaks the build outright:
+
+  droid-util.c:1880: error: passing argument 3 of
+      'pa_string_convert_str_to_num' from incompatible pointer type
+
+Convert through a uint32_t and cast, at both call sites.
+Upstream-Status: Pending
+
+---
+ src/common/droid-util.c | 12 ++++++++----
+ 1 file changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/src/common/droid-util.c b/src/common/droid-util.c
+index 4e51330..38ac019 100644
+--- a/src/common/droid-util.c
++++ b/src/common/droid-util.c
+@@ -1876,8 +1876,11 @@ bool pa_droid_stream_reconfigure_input(pa_droid_stream *stream,
+     if (proplist) {
+         const char *source;
+         /* If audio source is defined in source-output proplist use that instead. */
+-        if ((source = pa_proplist_gets(proplist, EXT_PROP_AUDIO_SOURCE)))
+-            pa_string_convert_str_to_num(CONV_STRING_AUDIO_SOURCE_FANCY, source, &audio_source);
++        if ((source = pa_proplist_gets(proplist, EXT_PROP_AUDIO_SOURCE))) {
++            uint32_t value;
++            if (pa_string_convert_str_to_num(CONV_STRING_AUDIO_SOURCE_FANCY, source, &value))
++                audio_source = (audio_source_t) value;
++        }
+     }
+ 
+     /* Update audio source */
+@@ -1940,8 +1943,9 @@ bool pa_droid_stream_reconfigure_input_needed(pa_droid_stream *stream,
+ 
+         /* If audio source is defined in source-output proplist use that instead. */
+         if ((source = pa_proplist_gets(proplist, EXT_PROP_AUDIO_SOURCE))) {
+-            if (pa_string_convert_str_to_num(CONV_STRING_AUDIO_SOURCE_FANCY, source, &audio_source) &&
+-                stream->input->audio_source != audio_source) {
++            uint32_t value;
++            if (pa_string_convert_str_to_num(CONV_STRING_AUDIO_SOURCE_FANCY, source, &value) &&
++                stream->input->audio_source != (audio_source_t) value) {
+ 
+                 reconfigure_needed = true;
+                 pa_log_debug("input reconfigure needed: " EXT_PROP_AUDIO_SOURCE " changes");

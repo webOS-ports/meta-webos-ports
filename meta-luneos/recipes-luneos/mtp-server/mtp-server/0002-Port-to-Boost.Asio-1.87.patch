@@ -1,0 +1,137 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 15 Aug 2026 00:00:00 +0000
+Subject: [PATCH] Port to Boost 1.87 Asio and Filesystem
+
+wrynose ships Boost 1.90, which removed several long-deprecated interfaces this
+code still uses. UbuntuMtpDatabase.h and server.cpp each keep their own
+io_context and inotify plumbing, so both need the same treatment:
+
+    'io_service' in namespace 'asio' does not name a type
+    'buffer_cast' is not a member of 'asio'
+    class 'MtpDaemon' does not have any field named 'work'
+    'class boost::filesystem::path' has no member named 'branch_path'
+    'const class boost::filesystem::path' has no member named 'leaf'
+
+  - asio::io_service was an alias for asio::io_context.
+  - asio::io_service::work, which keeps run() from returning while there is no
+    outstanding work, is now asio::executor_work_guard, constructed through
+    asio::make_work_guard().
+  - asio::buffer_cast<T>(b) is spelled static_cast<T>(b.data()). buf.data()
+    already returns a const_buffer here, so it becomes buf.data().data().
+  - path::branch_path() and path::leaf() were the pre-1.36 spellings of
+    path::parent_path() and path::filename().
+
+The threads that drive the io_contexts are switched from boost::bind on
+&io_service::run to lambdas: run() is overloaded, and naming it through a
+pointer-to-member in a bind expression relies on the overload set that Asio
+happens to expose.
+
+Behaviour is unchanged - a work guard holds the context open exactly as
+io_service::work did, and is released the same way when the context is stopped.
+
+Upstream-Status: Pending
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+---
+ server/UbuntuMtpDatabase.h | 10 +++++-----
+ server/server.cpp          | 10 +++++-----
+ 2 files changed, 10 insertions(+), 10 deletions(-)
+
+--- a/server/server.cpp
++++ b/server/server.cpp
+@@ -64,8 +64,8 @@
+     boost::thread notifier_thread;
+     boost::thread io_service_thread;
+ 
+-    asio::io_service io_svc;
+-    asio::io_service::work work;
++    asio::io_context io_svc;
++    asio::executor_work_guard<asio::io_context::executor_type> work;
+     asio::posix::stream_descriptor stream_desc;
+     asio::streambuf buf;
+ 
+@@ -133,7 +133,7 @@
+ 
+         while(transferred - processed >= sizeof(inotify_event))
+         {
+-            const char* cdata = processed + asio::buffer_cast<const char*>(buf.data());
++            const char* cdata = processed + static_cast<const char*>(buf.data().data());
+             const inotify_event* ievent = reinterpret_cast<const inotify_event*>(cdata);
+             path storage_path ("/media");
+ 
+@@ -179,7 +179,7 @@
+ 
+     MtpDaemon(int fd):
+         stream_desc(io_svc),
+-        work(io_svc),
++        work(asio::make_work_guard(io_svc)),
+         buf(1024)
+     {
+         userdata = getpwuid (getuid());
+@@ -192,7 +192,7 @@
+ 
+         stream_desc.assign(inotify_fd);
+         notifier_thread = boost::thread(&MtpDaemon::read_more_notify, this);
+-        io_service_thread = boost::thread(boost::bind(&asio::io_service::run, &io_svc));
++        io_service_thread = boost::thread([this] { io_svc.run(); });
+ 
+ 
+         // MTP database.
+@@ -235,7 +235,7 @@
+             copy(directory_iterator(p), directory_iterator(), std::back_inserter(v));
+             for (std::vector<path>::const_iterator it(v.begin()), it_end(v.end()); it != it_end; ++it)
+             {
+-                add_removable_storage(it->string().c_str(), it->leaf().c_str());
++                add_removable_storage(it->string().c_str(), it->filename().c_str());
+             }
+ 
+             // make sure we can catch any new removable storage that gets added.
+--- a/server/UbuntuMtpDatabase.h
++++ b/server/UbuntuMtpDatabase.h
+@@ -88,8 +88,8 @@
+     boost::thread notifier_thread;
+     boost::thread io_service_thread;
+ 
+-    asio::io_service io_svc;
+-    asio::io_service::work work;
++    asio::io_context io_svc;
++    asio::executor_work_guard<asio::io_context::executor_type> work;
+     asio::posix::stream_descriptor stream_desc;
+     asio::streambuf buf;
+     int inotify_fd;
+@@ -258,7 +258,7 @@
+ 
+         while(transferred - processed >= sizeof(inotify_event))
+         {
+-            const char* cdata = processed + asio::buffer_cast<const char*>(buf.data());
++            const char* cdata = processed + static_cast<const char*>(buf.data().data());
+             const inotify_event* ievent = reinterpret_cast<const inotify_event*>(cdata);
+             MtpObjectHandle parent;
+             path p;
+@@ -346,7 +346,7 @@
+     UbuntuMtpDatabase():
+         counter(1),
+         stream_desc(io_svc),
+-        work(io_svc),
++        work(asio::make_work_guard(io_svc)),
+         buf(1024)
+     {
+         local_server = nullptr;
+@@ -363,7 +363,7 @@
+         notifier_thread = boost::thread(&UbuntuMtpDatabase::read_more_notify,
+                                        this);
+ 
+-        io_service_thread = boost::thread(boost::bind(&asio::io_service::run, &io_svc));
++        io_service_thread = boost::thread([this] { io_svc.run(); });
+     }
+ 
+     virtual ~UbuntuMtpDatabase() {
+@@ -692,7 +692,7 @@
+                     newname = strdup(buffer);
+ 
+                     oldpath /= entry.path;
+-                    newpath /= oldpath.branch_path() / "/" / newname;
++                    newpath /= oldpath.parent_path() / "/" / newname;
+ 
+                     boost::filesystem::rename(oldpath, newpath);
+ 

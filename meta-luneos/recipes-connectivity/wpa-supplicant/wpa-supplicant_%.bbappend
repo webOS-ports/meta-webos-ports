@@ -22,14 +22,21 @@ do_configure:append() {
     echo "CONFIG_DEBUG_SYSLOG=y" >> ${B}/wpa_supplicant/.config
     echo "CONFIG_DEBUG_SYSLOG_FACILITY=LOG_DAEMON" >> ${B}/wpa_supplicant/.config
 
-    # P2P config
-    echo "bss_max_count=400" >> ${WORKDIR}/wpa_supplicant.conf-sane
-    echo "max_num_sta=2" >> ${WORKDIR}/wpa_supplicant.conf-sane
-    echo "manufacturer=LGE" >> ${WORKDIR}/wpa_supplicant.conf-sane
-    echo "model_name=webOS" >> ${WORKDIR}/wpa_supplicant.conf-sane
-    echo "model_number=webOS" >> ${WORKDIR}/wpa_supplicant.conf-sane
-    echo "device_name=webOS" >> ${WORKDIR}/wpa_supplicant.conf-sane
-    echo "serial_number=webOS" >> ${WORKDIR}/wpa_supplicant.conf-sane
+    # P2P config.
+    #
+    # UNPACKDIR, not WORKDIR: oe-core installs ${UNPACKDIR}/wpa_supplicant.conf-sane
+    # as /etc/wpa_supplicant.conf, and SRC_URI files stopped landing in WORKDIR. So
+    # these appends were creating a second file that nothing installs, and every one
+    # of these settings has been silently missing from the image - the device gets
+    # the stock oe-core config with no bss_max_count, no manufacturer, no P2P
+    # identity at all.
+    echo "bss_max_count=400" >> ${UNPACKDIR}/wpa_supplicant.conf-sane
+    echo "max_num_sta=2" >> ${UNPACKDIR}/wpa_supplicant.conf-sane
+    echo "manufacturer=LGE" >> ${UNPACKDIR}/wpa_supplicant.conf-sane
+    echo "model_name=webOS" >> ${UNPACKDIR}/wpa_supplicant.conf-sane
+    echo "model_number=webOS" >> ${UNPACKDIR}/wpa_supplicant.conf-sane
+    echo "device_name=webOS" >> ${UNPACKDIR}/wpa_supplicant.conf-sane
+    echo "serial_number=webOS" >> ${UNPACKDIR}/wpa_supplicant.conf-sane
 
     # Enable P2P (aka WiFi direct) support
     echo "CONFIG_P2P=y" >> ${B}/wpa_supplicant/.config
