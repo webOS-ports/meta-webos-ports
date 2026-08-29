@@ -32,6 +32,7 @@ PV = "0.20260508+git"
 SRCREV = "e5152aee90dbb9b81c6bc45073b1fa86fc0c4194"
 SRC_URI = "git://github.com/sailfishos/gst-droid.git;branch=master;protocol=https \
     file://0001-droidcamsrc-allow-recorder-video-in-raw-preview.patch \
+    file://0002-droidcamsrc-runtime-idr-and-bitrate.patch \
 "
 
 inherit meson pkgconfig

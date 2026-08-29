@@ -30,6 +30,7 @@ DROIDMEDIA_FETCH = "git://github.com/Halium/droidmedia.git;branch=${DROIDMEDIA_B
 DROIDMEDIA_FETCH:halium-arm64 = "git://github.com/sailfishos/droidmedia.git;nobranch=1;protocol=https"
 
 SRC_URI = "${DROIDMEDIA_FETCH} \
+    file://0001-recorder-runtime-encoder-control-glue.patch \
     file://0001-meson-make-the-Qt5-flashlight-helper-optional.patch \
 "
 SRC_URI:remove:halium-arm64 = "file://0001-meson-make-the-Qt5-flashlight-helper-optional.patch"
