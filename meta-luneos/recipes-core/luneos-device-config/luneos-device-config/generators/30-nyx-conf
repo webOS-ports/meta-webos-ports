@@ -56,11 +56,33 @@ set_value() {
 set_value module.keys       paths      "${keydevs:-}"
 set_value module.touchpanel path       "${touchscreen:-}"
 
-# Tier 1 only. nyx's own power_supply walk is right wherever we have looked;
-# these exist for boards exposing more than one supply of a type, where the
-# walk picks whichever the filesystem happens to return first.
+# The USB charger supply is derived here. nyx's own fallback walks
+# /sys/class/power_supply for type == "USB" exactly, and on a modern Qualcomm
+# charger that finds pc_port - a secondary input that never reports online -
+# while the supply that actually charges is the one named "usb", whose type is
+# dynamic (USB, USB_PD, USB_DCP, ... after whatever was negotiated). Measured
+# on sargo: batteryd broadcast USBConnected:false while the battery charged at
+# 2.4A, so DisplayManager thought it was on battery and turned the lock screen
+# off after five seconds on the cable. Prefer the conventional "usb" node,
+# otherwise anything whose type starts with USB; empty still falls through to
+# nyx's own walk.
+usbpsy=
+if [ -r /sys/class/power_supply/usb/type ]; then
+    usbpsy=/sys/class/power_supply/usb
+else
+    for _d in /sys/class/power_supply/*; do
+        case "$(cat "$_d/type" 2>/dev/null)" in
+            USB*) usbpsy=$_d; break ;;
+        esac
+    done
+fi
+
+# Battery and AC stay tier 1 only: nyx's walk for those is right wherever we
+# have looked, and the pins exist for boards exposing more than one supply of
+# a type, where the walk picks whichever the filesystem happens to return
+# first. The tier 1 pin wins over the derived USB value for the same reason.
 set_value module.battery sysfs_path     "${deviceinfo_battery_sysfs_path:-}"
-set_value module.charger usb_sysfs_path "${deviceinfo_charger_usb_sysfs_path:-}"
+set_value module.charger usb_sysfs_path "${deviceinfo_charger_usb_sysfs_path:-$usbpsy}"
 set_value module.charger ac_sysfs_path  "${deviceinfo_charger_ac_sysfs_path:-}"
 
 # Nothing to say: drop the file so the caller does not bind a copy of the
