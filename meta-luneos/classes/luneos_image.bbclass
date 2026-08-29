@@ -24,3 +24,8 @@ do_rootfs[prefuncs] += "${@bb.utils.contains('DISTRO_FEATURES', 'smack', 'do_fet
 ROOTFS_POSTPROCESS_COMMAND += "\
     ${@bb.utils.contains('DISTRO_FEATURES', 'smack', ' do_smack_labeling ; ', '', d)} \
 "
+
+# Inherited after oe-core's rootfs-postcommands (which image.bbclass pulls in via
+# "inherit_defer ${IMGCLASSES}", resolved at the end of parsing) so that our
+# systemd_handle_machine_id override actually wins. See the class for why.
+IMGCLASSES += "luneos_rootfs_postcommands"

@@ -28,3 +28,16 @@ PREFERRED_VERSION_meson-native = "1.12.0"
 PREFERRED_VERSION_mesa = "26.2.0%"
 
 PREFERRED_VERSION_lttng-modules:tenderloin    = "2.13.12+git"
+
+# Per-app V8 snapshots stay off under M151.
+# ----------------------------------------
+# webos_enactjs_app.bbclass defaults WEBOS_ENACTJS_PACK_OPTS to include
+# --snapshot, which builds each app a snapshot_blob.bin with mksnapshot-cross.
+# A V8 snapshot is only loadable by the V8 that produced it, and blobs built by
+# the M120 mksnapshot made every Enact app that ships one fail to start under
+# M151 - deleting the 8 blobs on the target was what got those apps running.
+# mksnapshot-cross_151 exists and configures now, but it has not been proven per
+# target arch, so leave --snapshot off: the apps load without a custom snapshot,
+# which costs some startup time but is correct. Dropping it also drops the
+# conditional mksnapshot-cross dependency in the class.
+WEBOS_ENACTJS_PACK_OPTS = "--production --isomorphic --locales=webos"
