@@ -7,7 +7,9 @@ DEPENDS = "pidgin json-glib glib-2.0 zlib http-parser"
 
 inherit pkgconfig
 
-SRC_URI = "git://github.com/matrix-org/purple-matrix;branch=master;protocol=https"
+SRC_URI = "git://github.com/matrix-org/purple-matrix;branch=master;protocol=https \
+           file://0001-Makefile.common-do-not-force-O0-Werror.patch \
+"
 SRCREV = "2792d4db0916ad821886de1f8de3a5e46c66ca37"
 
 PV = "0.1.0+git"
