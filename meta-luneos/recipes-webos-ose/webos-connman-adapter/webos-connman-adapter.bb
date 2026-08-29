@@ -35,6 +35,11 @@ PACKAGECONFIG = "enable-multiple-routing-table"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Add-back-com.palm.wan-for-cellular-support.patch \
     file://0002-Update-webos-connman-adapter.role.json.in-Add-permis.patch \
+    file://0003-tethering-get-the-station-list-from-connman-instead-.patch \
+    file://0004-agent-implement-Cancel-and-Release-map-connman-2.0-s.patch \
+    file://0005-connectionmanager-implement-setDefaultInterface-with.patch \
+    file://0006-expose-DNS-search-domains-and-cellular-roaming-state.patch \
+    file://0007-connectionmanager-expose-per-service-timeservers-mDN.patch \
 "
 
 inherit webos_systemd

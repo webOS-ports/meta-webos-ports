@@ -1,0 +1,265 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: LuneOS <dev@luneos.org>
+Date: Mon, 17 Aug 2026 17:54:08 +0200
+Subject: [PATCH] tethering: get the station list from connman instead of
+ GetStaCount
+
+GetStaCount and the wifi technology's StationMac property are webOS OSE
+connman fork additions that do not exist upstream, so
+/tethering/getStationCount reported nothing on connman 2.0.
+
+Upstream tracks the same thing: plugins/wifi.c feeds the supplicant's
+StaAuthorized/StaDeauthorized events into connman's tethering client
+table, which is published as Manager.GetTetheringClients (a list of
+station MAC addresses) and the TetheringClientsChanged signal.  That is
+both the count and the connectedStations array, from one call, and the
+signal replaces the fork's per-technology TetheringStaAuthorized.
+
+Upstream-Status: Inappropriate [LuneOS specific]
+---
+ files/xml/connman.xml        |  8 ++++--
+ src/connman_manager.c        | 51 +++++++++++++++++++++++++++++++++---
+ src/connman_manager.h        | 10 +++++++
+ src/connman_technology.c     |  2 --
+ src/connman_technology.h     |  1 -
+ src/logging.h                |  1 +
+ src/wifi_service.c           | 14 +++++-----
+ src/wifi_tethering_service.c | 17 ++++++++----
+ 8 files changed, 82 insertions(+), 22 deletions(-)
+
+diff --git a/files/xml/connman.xml b/files/xml/connman.xml
+index 392e73a..af967f5 100644
+--- a/files/xml/connman.xml
++++ b/files/xml/connman.xml
+@@ -71,8 +71,8 @@ limitations under the License.
+ 			<arg type="s" direction="in"/>
+ 			<arg type="o" direction="out"/>
+ 		</method>
+-		<method name="GetStaCount">
+-			<arg type="i" direction="out"/>
++		<method name="GetTetheringClients">
++			<arg type="as" direction="out"/>
+ 		</method>
+ 		<method name="RegisterPeerService">
+ 			<arg name="specification" type="a{sv}" direction="in"/>
+@@ -111,6 +111,10 @@ limitations under the License.
+ 		<signal name="GroupRemoved">
+ 			<arg type="o"/>
+ 		</signal>
++		<signal name="TetheringClientsChanged">
++			<arg type="as"/>
++			<arg type="as"/>
++		</signal>
+ 	</interface>
+ 	<interface name="net.connman.Technology">
+ 		<method name="GetProperties">
+diff --git a/src/connman_manager.c b/src/connman_manager.c
+index 1c28946..a73bf87 100644
+--- a/src/connman_manager.c
++++ b/src/connman_manager.c
+@@ -24,6 +24,7 @@
+ #include "connman_manager.h"
+ #include "logging.h"
+ #include "connectionmanager_service.h"
++#include "wifi_tethering_service.h"
+ #include "utils.h"
+ #include "wfdsie/wfdinfoelemwrapper.h"
+ 
+@@ -1200,18 +1201,41 @@ guint connman_manager_get_sta_count(connman_manager_t *manager)
+ 	if (NULL == manager)
+ 		return FALSE;
+ 
++	gchar **clients = connman_manager_get_tethering_clients(manager);
++	guint sta_count = clients ? g_strv_length(clients) : 0;
++
++	g_strfreev(clients);
++
++	return sta_count;
++}
++
++/**
++ * Retrieve the MAC addresses of the stations currently associated with our
++ * tethering AP (see header for API details)
++ */
++
++GStrv connman_manager_get_tethering_clients(connman_manager_t *manager)
++{
+ 	GError *error = NULL;
+-	guint sta_count = 0;
++	gchar **clients = NULL;
++
++	if (NULL == manager)
++	{
++		return NULL;
++	}
+ 
+-	connman_interface_manager_call_get_sta_count_sync(manager->remote, &sta_count, NULL, &error);
++	connman_interface_manager_call_get_tethering_clients_sync(manager->remote,
++	        &clients, NULL, &error);
+ 
+ 	if (error)
+ 	{
++		WCALOG_ESCAPED_ERRMSG(MSGID_MANAGER_GET_TETHERING_CLIENTS_ERROR,
++		                      error->message);
+ 		g_error_free(error);
+-		return 0;
++		return NULL;
+ 	}
+ 
+-	return sta_count;
++	return clients;
+ }
+ 
+ /**
+@@ -2067,6 +2091,22 @@ saved_services_changed_cb(ConnmanInterfaceManager *proxy,
+ 	remove_services_from_list(&manager->saved_services, saved_services_removed);
+ }
+ 
++/**
++ * Callback for manager's "tethering_clients_changed" signal
++ *
++ * Connman emits this whenever a station associates with or leaves our
++ * tethering AP, which is what /tethering/getStationCount reports.
++ */
++static void
++tethering_clients_changed_cb(ConnmanInterfaceManager *proxy,
++                             gchar **clients_added, gchar **clients_removed,
++                             connman_manager_t *manager)
++{
++	WCALOG_DEBUG("Tethering clients changed");
++
++	send_sta_count_to_subscribers();
++}
++
+ /**
+  * Register for manager's "properties_changed" signal, calling the provided function whenever the callback function
+  * for the signal is called (see header for API details)
+@@ -2295,6 +2335,9 @@ connman_manager_t *connman_manager_new(void)
+ 	g_signal_connect(G_OBJECT(manager->remote), "saved-services-changed",
+ 	                 G_CALLBACK(saved_services_changed_cb), manager);
+ 
++	g_signal_connect(G_OBJECT(manager->remote), "tethering-clients-changed",
++	                 G_CALLBACK(tethering_clients_changed_cb), manager);
++
+ 	g_signal_connect(G_OBJECT(manager->remote), "group-added",
+ 	                 G_CALLBACK(group_added_cb), manager);
+ 
+diff --git a/src/connman_manager.h b/src/connman_manager.h
+index 0bdeaa5..6ba9ece 100644
+--- a/src/connman_manager.h
++++ b/src/connman_manager.h
+@@ -315,6 +315,16 @@ extern connman_group_t *connman_manager_create_group(connman_manager_t *manager,
+  */
+ extern guint connman_manager_get_sta_count(connman_manager_t *manager);
+ 
++/**
++ * @brief Retrieve the MAC addresses of the stations currently associated with
++ *        the tethering AP. Caller owns the result and must g_strfreev() it.
++ *
++ * @param[IN] manager A manager instance
++ *
++ * @return A NULL terminated array of MAC addresses, NULL on failure
++ */
++extern GStrv connman_manager_get_tethering_clients(connman_manager_t *manager);
++
+ /**
+  * Populate the group's peer_list field with all of the group's peers
+  *
+diff --git a/src/connman_technology.c b/src/connman_technology.c
+index ac98fb4..c6b9a18 100644
+--- a/src/connman_technology.c
++++ b/src/connman_technology.c
+@@ -1243,8 +1243,6 @@ void connman_technology_free(connman_technology_t *technology)
+ 	g_object_unref(technology->remote);
+ 	technology->remote = NULL;
+ 
+-	g_strfreev(technology->station_mac);
+-
+ 	g_strfreev(technology->interfaces);
+ 	technology->interfaces = NULL;
+ 
+diff --git a/src/connman_technology.h b/src/connman_technology.h
+index f16d367..f73c3ac 100644
+--- a/src/connman_technology.h
++++ b/src/connman_technology.h
+@@ -76,7 +76,6 @@ typedef struct connman_technology
+ 
+ 	gboolean removed; /* If true, the technology has been removed and should be deleted when callbacks complete*/
+ 	gint32 calls_pending; /* Number of connman DBUS calls pending. */
+-	GStrv station_mac;
+ } connman_technology_t;
+ 
+ 
+diff --git a/src/logging.h b/src/logging.h
+index 13f9c41..a208e83 100644
+--- a/src/logging.h
++++ b/src/logging.h
+@@ -88,6 +88,7 @@ extern PmLogContext gLogContext;
+ 
+ /** connman_manager.c */
+ #define MSGID_MANAGER_GET_PROPERTIES_ERROR              "MGR_GET_PROPERTIES_ERR"
++#define MSGID_MANAGER_GET_TETHERING_CLIENTS_ERROR       "MGR_GET_TETHERING_CLIENTS_ERR"
+ #define MSGID_MANAGER_GET_SERVICES_ERROR                "MGR_GET_SERVICES_ERR"
+ #define MSGID_MANAGER_GET_SAVED_SERVICES_ERROR          "MGR_GET_SAVED_SERVICES_ERR"
+ #define MSGID_MANAGER_GET_TECHNOLOGIES_ERROR            "MGR_GET_TECHNOLOGIES_ERR"
+diff --git a/src/wifi_service.c b/src/wifi_service.c
+index 541e14f..f7bc24d 100644
+--- a/src/wifi_service.c
++++ b/src/wifi_service.c
+@@ -2044,14 +2044,12 @@ static void technology_property_changed_callback(gpointer data,
+ 			send_tethering_state_to_subscribers();
+ 		}
+ 
+-		if(g_strcmp0(property, "StationMac") == 0) {
+-			GVariant *va = g_variant_get_child_value(value, 0);
+-			g_strfreev(technology->station_mac);
+-			technology->station_mac = g_variant_dup_strv(va, NULL);
+-
+-			g_variant_unref(va);
+-			send_sta_count_to_subscribers();
+-		}
++		/*
++		 * The station list used to arrive as a "StationMac" property on the
++		 * wifi technology; upstream connman reports it through the manager's
++		 * TetheringClientsChanged signal instead, which connman_manager.c
++		 * hooks up.
++		 */
+ 	}
+ 	else if (technology == connman_manager_find_ethernet_technology(manager))
+ 	{
+diff --git a/src/wifi_tethering_service.c b/src/wifi_tethering_service.c
+index 51810d4..c39208a 100644
+--- a/src/wifi_tethering_service.c
++++ b/src/wifi_tethering_service.c
+@@ -358,19 +358,26 @@ static void send_sta_count(jvalue_ref *reply)
+ 	if(NULL == reply)
+ 		return;
+ 
+-	unsigned int sta_count = connman_manager_get_sta_count(manager);
++	/*
++	 * Connman's tethering client list is fed from the supplicant's
++	 * StaAuthorized/StaDeauthorized events, so it is both the station count
++	 * and the list of station MACs.
++	 */
++	GStrv stations = connman_manager_get_tethering_clients(manager);
++	guint sta_count = stations ? g_strv_length(stations) : 0;
++
+ 	jobject_put(*reply, J_CSTR_TO_JVAL("stationCount"), jnumber_create_i32(sta_count));
+ 
+ 	jvalue_ref connected_stations_obj = jarray_create(NULL);
+ 
+-	connman_technology_t *wifi_tech = connman_manager_find_wifi_technology(manager);
+-
+-	for (int i = 0; i < g_strv_length(wifi_tech->station_mac); i++)
++	for (guint i = 0; i < sta_count; i++)
+ 	{
+-		jarray_append(connected_stations_obj, jstring_create(wifi_tech->station_mac[i]));
++		jarray_append(connected_stations_obj, jstring_create(stations[i]));
+ 	}
+ 
+ 	jobject_put(*reply, J_CSTR_TO_JVAL("connectedStations"), connected_stations_obj);
++
++	g_strfreev(stations);
+ }
+ 
+ void send_sta_count_to_subscribers(void)

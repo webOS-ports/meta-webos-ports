@@ -1,0 +1,265 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: LuneOS <dev@luneos.org>
+Date: Mon, 17 Aug 2026 18:05:20 +0200
+Subject: [PATCH] expose DNS search domains and cellular roaming state
+
+Domains.Configuration is the connman property for DNS search suffixes.
+The adapter only ever set Nameservers.Configuration, so /setdns could
+configure resolvers but not search domains.  setdns now takes an optional
+domains array, and the resolved Domains are reported back in
+/getstatus alongside dns1..dnsN.
+
+Roaming was likewise never parsed, so com.webos.service.wan could not
+tell a roaming context from a home one; it is now reported per context
+in wan/getStatus and in connectionmanager/getstatus for cellular.
+
+Upstream-Status: Inappropriate [LuneOS specific]
+---
+ src/connectionmanager_service.c | 54 +++++++++++++++++++++++++++++++--
+ src/connman_service.c           | 45 +++++++++++++++++++++++++++
+ src/connman_service.h           | 13 ++++++++
+ src/logging.h                   |  1 +
+ src/wan_service.c               |  2 ++
+ 5 files changed, 112 insertions(+), 3 deletions(-)
+
+diff --git a/src/connectionmanager_service.c b/src/connectionmanager_service.c
+index 3c62a61..b65df78 100644
+--- a/src/connectionmanager_service.c
++++ b/src/connectionmanager_service.c
+@@ -193,8 +193,28 @@ static void update_connection_status(connman_service_t *connected_service,
+ 			            jstring_create(connected_service->ipinfo.dns[i]));
+ 		}
+ 
++		if (connected_service->ipinfo.domains &&
++		        g_strv_length(connected_service->ipinfo.domains) > 0)
++		{
++			jvalue_ref domains_obj = jarray_create(NULL);
++
++			for (i = 0; i < g_strv_length(connected_service->ipinfo.domains); i++)
++			{
++				jarray_append(domains_obj,
++				              jstring_create(connected_service->ipinfo.domains[i]));
++			}
++
++			jobject_put(*status, J_CSTR_TO_JVAL("domains"), domains_obj);
++		}
++
+ 		update_string_value(status, J_CSTR_TO_JVAL("method"),connected_service->ipinfo.ipv4.method);
+ 
++		if (connected_service->type == CONNMAN_SERVICE_TYPE_CELLULAR)
++		{
++			jobject_put(*status, J_CSTR_TO_JVAL("roaming"),
++			            jboolean_create(connected_service->roaming));
++		}
++
+ 		if (connman_service_type_wifi(connected_service))
+ 		{
+ 			update_string_value(status, J_CSTR_TO_JVAL("ssid"),connected_service->name);
+@@ -1504,14 +1524,16 @@ static bool handle_set_dns_command(LSHandle *sh, LSMessage *message,
+ 	// To prevent memory leaks, schema should be checked before the variables will be initialized.
+ 	jvalue_ref parsedObj = {0};
+ 	if (!LSMessageValidateSchema(sh, message,
+-	                             j_cstr_to_buffer(STRICT_SCHEMA(PROPS_3(ARRAY(dns, string), PROP(ssid,
++	                             j_cstr_to_buffer(STRICT_SCHEMA(PROPS_4(ARRAY(dns, string),
++	                                     ARRAY(domains, string), PROP(ssid,
+ 	                                     string), PROP(interfaceName, string)) REQUIRED_1(dns))), &parsedObj))
+ 	{
+ 		return true;
+ 	}
+ 
+-	jvalue_ref dnsObj = {0};
++	jvalue_ref dnsObj = {0}, domainsObj = {0};
+ 	GStrv dns = NULL;
++	GStrv domains = NULL;
+ 	gchar *ssid = NULL;
+ 	connman_service_t *service = NULL;
+ 	gchar *interface_name = NULL;
+@@ -1536,6 +1558,30 @@ static bool handle_set_dns_command(LSHandle *sh, LSMessage *message,
+ 		dns[dns_arrsize] = NULL;
+ 	}
+ 
++	/*
++	 * Optional DNS search domains. Connman keeps these separate from the
++	 * nameserver list, in Domains.Configuration.
++	 */
++	if (jobject_get_exists(parsedObj, J_CSTR_TO_BUF("domains"), &domainsObj))
++	{
++		int i, domains_arrsize = jarray_size(domainsObj);
++		domains = (GStrv) g_new0(GStrv, domains_arrsize + 1);
++
++		for (i = 0; i < domains_arrsize; i++)
++		{
++			raw_buffer domain_buf = jstring_get(jarray_get(domainsObj, i));
++			domains[i] = g_strdup(domain_buf.m_str);
++			jstring_free_buffer(domain_buf);
++
++			if (0 == strlen(domains[i]))
++			{
++				goto invalid_params;
++			}
++		}
++
++		domains[domains_arrsize] = NULL;
++	}
++
+ 	get_string_value(parsedObj,J_CSTR_TO_BUF("ssid"),&ssid);
+ 	get_string_value(parsedObj,J_CSTR_TO_BUF("interfaceName"),&interface_name);
+ 
+@@ -1544,7 +1590,8 @@ static bool handle_set_dns_command(LSHandle *sh, LSMessage *message,
+ 
+ 	if (NULL != service)
+ 	{
+-		if (connman_service_set_nameservers(service, dns))
++		if (connman_service_set_nameservers(service, dns) &&
++		        (NULL == domains || connman_service_set_domains(service, domains)))
+ 		{
+ 			LSMessageReplySuccess(sh, message);
+ 		}
+@@ -1589,6 +1636,7 @@ invalid_params:
+ 	LSMessageReplyErrorInvalidParams(sh, message);
+ exit:
+ 	g_strfreev(dns);
++	g_strfreev(domains);
+ 	g_free(ssid);
+ 	g_free(interface_name);
+ 	j_release(&parsedObj);
+diff --git a/src/connman_service.c b/src/connman_service.c
+index 3c4e4a4..e8e3160 100644
+--- a/src/connman_service.c
++++ b/src/connman_service.c
+@@ -669,6 +669,34 @@ gboolean connman_service_set_nameservers(connman_service_t *service, GStrv dns)
+ 	return TRUE;
+ }
+ 
++/**
++ * Set the DNS search domains for the given service (see header for API details)
++ */
++
++gboolean connman_service_set_domains(connman_service_t *service, GStrv domains)
++{
++	GError *error = NULL;
++
++	if (NULL == service || NULL == domains)
++	{
++		return FALSE;
++	}
++
++	connman_interface_service_call_set_property_sync(service->remote,
++	        "Domains.Configuration",
++	        g_variant_new_variant(g_variant_new_strv((const gchar * const *)domains,
++	                              g_strv_length(domains))), NULL, &error);
++
++	if (error)
++	{
++		WCALOG_ESCAPED_ERRMSG(MSGID_SERVICE_SET_DOMAINS_ERROR, error->message);
++		g_error_free(error);
++		return FALSE;
++	}
++
++	return TRUE;
++}
++
+ /**
+  * Set auto-connect property for the given service (see header for API details)
+  */
+@@ -938,6 +966,18 @@ gboolean connman_service_get_ipinfo(connman_service_t *service)
+ 			g_variant_unref(va);
+ 		}
+ 
++		if (!g_strcmp0(key, "Domains"))
++		{
++			GVariant *v = g_variant_get_child_value(property, 1);
++			GVariant *va = g_variant_get_child_value(v, 0);
++
++			g_strfreev(service->ipinfo.domains);
++			service->ipinfo.domains = g_variant_dup_strv(va, NULL);
++
++			g_variant_unref(v);
++			g_variant_unref(va);
++		}
++
+ 		if (!g_strcmp0(key, "HostRoutes"))
+ 		{
+ 			GVariant *v = g_variant_get_child_value(property, 1);
+@@ -1743,6 +1783,10 @@ void connman_service_update_properties(connman_service_t *service,
+ 		{
+ 			service->favorite = g_variant_get_boolean(val);
+ 		}
++		else if (!g_strcmp0(key, "Roaming"))
++		{
++			service->roaming = g_variant_get_boolean(val);
++		}
+ 		else if (!g_strcmp0(key, "Online"))
+ 		{
+ 			connman_service_advance_online_state(service, val);
+@@ -2124,6 +2168,7 @@ void connman_service_free(gpointer data, gpointer user_data)
+ 	g_free(service->ipinfo.ipv6.address);
+ 	g_free(service->ipinfo.ipv6.gateway);
+ 	g_strfreev(service->ipinfo.dns);
++	g_strfreev(service->ipinfo.domains);
+ 
+ 	g_free(service->proxyinfo.method);
+ 	g_free(service->proxyinfo.url);
+diff --git a/src/connman_service.h b/src/connman_service.h
+index e0b8839..2b6bf75 100644
+--- a/src/connman_service.h
++++ b/src/connman_service.h
+@@ -66,6 +66,7 @@ typedef struct ipinfo
+ 	gchar *iface;
+ 	ipv4info_t ipv4;
+ 	GStrv dns;
++	GStrv domains; /* DNS search domains */
+ 	ipv6info_t ipv6;
+ } ipinfo_t;
+ 
+@@ -140,6 +141,7 @@ typedef struct connman_service
+ 	gboolean disconnecting;
+ 	gboolean immutable;
+ 	gboolean favorite;
++	gboolean roaming; /* Cellular service is on a roaming network */
+ 	gboolean hidden;
+ 	gboolean online;
+ 	gboolean online_checking;
+@@ -376,6 +378,17 @@ extern gboolean connman_service_set_proxy(connman_service_t *service,
+ extern gboolean connman_service_set_nameservers(connman_service_t *service,
+         GStrv dns);
+ 
++/**
++ * Set the DNS search domains for a service
++ *
++ * @param[IN]  service A service instance
++ * @param[IN]  domains A NULL terminated array of search domains
++ *
++ * @return FALSE if the call to set "Domains.Configuration" property failed, TRUE otherwise
++ */
++extern gboolean connman_service_set_domains(connman_service_t *service,
++        GStrv domains);
++
+ /**
+  * Set the "autoconnect" flag for a service
+  *
+diff --git a/src/logging.h b/src/logging.h
+index a208e83..31ee1da 100644
+--- a/src/logging.h
++++ b/src/logging.h
+@@ -119,6 +119,7 @@ extern PmLogContext gLogContext;
+ #define MSGID_SERVICE_SET_IPV4_ERROR                    "SRVC_SET_IPV4_ERR"
+ #define MSGID_SERVICE_SET_IPV6_ERROR                    "SRVC_SET_IPV6_ERR"
+ #define MSGID_SERVICE_SET_NAMESERVER_ERROR              "SRVC_SET_NAMESERVER_ERR"
++#define MSGID_SERVICE_SET_DOMAINS_ERROR                 "SRVC_SET_DOMAINS_ERR"
+ #define MSGID_SERVICE_AUTOCONNECT_ERROR                 "SRVC_AUTOCONNECT_ERR"
+ #define MSGID_SERVICE_GET_IPINFO_ERROR                  "SRVC_GET_IPINFO_ERR"
+ #define MSGID_SERVICE_FETCH_PROPERTIES_ERROR            "SRVC_FETCH_PROPERTIES_ERR"
+diff --git a/src/wan_service.c b/src/wan_service.c
+index b22aa7b..d028c53 100644
+--- a/src/wan_service.c
++++ b/src/wan_service.c
+@@ -60,6 +60,8 @@ static void retrieve_wan_context(jvalue_ref context_obj,
+ 	            jboolean_create(connman_service_is_connected(service)));
+ 	jobject_put(context_obj, J_CSTR_TO_JVAL("onInternet"),
+ 	            jboolean_create(connman_service_is_online(service)));
++	jobject_put(context_obj, J_CSTR_TO_JVAL("roaming"),
++	            jboolean_create(service->roaming));
+ 
+ 	if (service->ipinfo.iface)
+ 	{
