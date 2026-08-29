@@ -14,14 +14,14 @@ HOMEPAGE = "https://github.com/webOS-ports/luneos-rtc-engine"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-DEPENDS = "gstreamer1.0 gstreamer1.0-plugins-base glib-2.0 luna-service2 libpbnjson umediaserver g-camera-pipeline qtbase qtdeclarative wayland webos-wayland-extensions"
+DEPENDS = "gstreamer1.0 gstreamer1.0-plugins-base glib-2.0 luna-service2 libpbnjson umediaserver g-camera-pipeline qtbase qtdeclarative qtmultimedia wayland webos-wayland-extensions"
 RDEPENDS:${PN} = "gst-droid g-camera-pipeline"
 
 COMPATIBLE_MACHINE = "^halium$"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 PV = "1.0.0+git"
-SRCREV = "db8107e643db3c954ad4414e7be719fc02c10b72"
+SRCREV = "6e69a64ae328ccb2baab84f381fb79caea2aa66f"
 SRC_URI = "git://github.com/webOS-ports/luneos-rtc-engine.git;branch=main;protocol=https"
 
 
