@@ -21,7 +21,7 @@ COMPATIBLE_MACHINE = "^halium$"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 PV = "1.0.0+git"
-SRCREV = "6e69a64ae328ccb2baab84f381fb79caea2aa66f"
+SRCREV = "655e3e62aba493b11aac14a2754096360bf4eb8c"
 SRC_URI = "git://github.com/webOS-ports/luneos-rtc-engine.git;branch=main;protocol=https"
 
 
