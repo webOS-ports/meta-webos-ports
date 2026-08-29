@@ -9,6 +9,13 @@ require com.webos.service.camera.inc
 SRC_URI += " \
     file://0001-plugin-rename-basename-function-to-avoid-conflict-wi.patch \
 "
+
+# Halium: droid HAL + notifier plugins reach the Android cameras through
+# gst-droid (runtime dependency; the plugins no-op without it).
+SRC_URI:append:halium = " \
+    file://0001-Add-droid-camera-HAL-and-notifier-plugins.patch \
+"
+RRECOMMENDS:${PN}:append:halium = " gst-droid"
 PR = "${INC_PR}.2"
 
 DEPENDS = "glib-2.0 luna-service2 json-c alsa-lib pmloglib udev nlohmann-json camera-utils gstreamer1.0"

@@ -1,0 +1,665 @@
+From ee2bbef15aa432eff6c8106ea1c39eab278c93fb Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sat, 29 Aug 2026 03:20:42 +0200
+Subject: [PATCH] Add droid camera HAL and notifier plugins for Halium devices
+
+On Halium devices the cameras sit behind the Android camera HAL and no
+/dev/video capture nodes exist, so the v4l2 HAL plugin and the PDM
+notifier never find anything and getCameraList stays empty.
+
+hal-droid implements IHal over a gst-droid pipeline (droidcamsrc raw
+NV21 viewfinder into an appsink); frames are copied into the service's
+buffers per getBuffer and flow into the normal shared-memory
+distribution. notifier-droid probes the droid camera count through
+droidcamsrc's clamped camera-device property range and announces
+builtin devices with droid:<n> device nodes mapped to the droid
+subsystem. Both plugins no-op cleanly when gst-droid is not installed.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Upstream-Status: Inappropriate [LuneOS Halium-specific]
+---
+ src/plugins/hal/CMakeLists.txt                |   1 +
+ src/plugins/hal/droid/CMakeLists.txt          |  23 ++
+ src/plugins/hal/droid/droid_camera_plugin.cpp | 296 ++++++++++++++++++
+ src/plugins/hal/droid/droid_camera_plugin.h   |  74 +++++
+ src/plugins/notifier/CMakeLists.txt           |   1 +
+ src/plugins/notifier/droid/CMakeLists.txt     |  24 ++
+ src/plugins/notifier/droid/droid_notifier.cpp | 163 ++++++++++
+ 7 files changed, 582 insertions(+)
+ create mode 100644 src/plugins/hal/droid/CMakeLists.txt
+ create mode 100644 src/plugins/hal/droid/droid_camera_plugin.cpp
+ create mode 100644 src/plugins/hal/droid/droid_camera_plugin.h
+ create mode 100644 src/plugins/notifier/droid/CMakeLists.txt
+ create mode 100644 src/plugins/notifier/droid/droid_notifier.cpp
+
+diff --git a/src/plugins/hal/CMakeLists.txt b/src/plugins/hal/CMakeLists.txt
+index f2c8936..18a9d67 100644
+--- a/src/plugins/hal/CMakeLists.txt
++++ b/src/plugins/hal/CMakeLists.txt
+@@ -15,3 +15,4 @@
+ # SPDX-License-Identifier: Apache-2.0
+ 
+ add_subdirectory(v4l2)
++add_subdirectory(droid)
+diff --git a/src/plugins/hal/droid/CMakeLists.txt b/src/plugins/hal/droid/CMakeLists.txt
+new file mode 100644
+index 0000000..0fa7978
+--- /dev/null
++++ b/src/plugins/hal/droid/CMakeLists.txt
+@@ -0,0 +1,23 @@
++# Copyright (c) 2026 LuneOS project
++#
++# SPDX-License-Identifier: Apache-2.0
++
++project(hal-droid CXX)
++
++include_directories(${CMAKE_CURRENT_SOURCE_DIR})
++
++pkg_check_modules(GSTREAMER REQUIRED gstreamer-1.0)
++include_directories(${GSTREAMER_INCLUDE_DIRS})
++
++set(SRC ${CMAKE_CURRENT_SOURCE_DIR}/droid_camera_plugin.cpp)
++
++add_library(${PROJECT_NAME} SHARED ${SRC})
++
++target_link_libraries(${PROJECT_NAME}
++                      ${PMLOGLIB_LDFLAGS}
++                      ${GSTREAMER_LDFLAGS}
++                      )
++
++set_target_properties (${PROJECT_NAME} PROPERTIES VERSION 1.0 SOVERSION 1)
++
++install(TARGETS ${PROJECT_NAME} DESTINATION ${WEBOS_INSTALL_LIBDIR}/camera)
+diff --git a/src/plugins/hal/droid/droid_camera_plugin.cpp b/src/plugins/hal/droid/droid_camera_plugin.cpp
+new file mode 100644
+index 0000000..5f55d96
+--- /dev/null
++++ b/src/plugins/hal/droid/droid_camera_plugin.cpp
+@@ -0,0 +1,296 @@
++// Copyright (c) 2026 LuneOS project
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++//
++// SPDX-License-Identifier: Apache-2.0
++
++#define LOG_CONTEXT "hal.droid"
++#define LOG_TAG "DroidCameraPlugin"
++#include "droid_camera_plugin.h"
++#include "camera_log.h"
++#include "plugin.hpp"
++
++#include <cstring>
++#include <unistd.h>
++
++static const char *const kDroidPluginPath = "/usr/lib/gstreamer-1.0/libgstdroid.so";
++
++static void ensureGstInit()
++{
++    static bool done = false;
++    if (!done)
++    {
++        gst_init(nullptr, nullptr);
++        done = true;
++    }
++}
++
++/* The camera-device GParamSpec's maximum is clamped to the real camera count
++ * minus one once the element has initialized its HAL connection. */
++int DroidCameraPlugin::deviceCount()
++{
++    ensureGstInit();
++
++    if (access(kDroidPluginPath, R_OK) != 0)
++        return 0;
++
++    GstElement *e = gst_element_factory_make("droidcamsrc", nullptr);
++    if (!e)
++        return 0;
++
++    int count = 0;
++    if (gst_element_set_state(e, GST_STATE_READY) != GST_STATE_CHANGE_FAILURE)
++    {
++        gst_element_get_state(e, nullptr, nullptr, 5 * GST_SECOND);
++        GParamSpec *spec =
++            g_object_class_find_property(G_OBJECT_GET_CLASS(e), "camera-device");
++        if (spec && G_IS_PARAM_SPEC_INT(spec))
++            count = G_PARAM_SPEC_INT(spec)->maximum + 1;
++    }
++    gst_element_set_state(e, GST_STATE_NULL);
++    gst_object_unref(e);
++
++    PLOGI("droid camera count: %d", count);
++    return count;
++}
++
++DroidCameraPlugin::DroidCameraPlugin()
++    : cameraDevice_(0), pipeline_(nullptr), appsink_(nullptr), streaming_(false)
++{
++    std::memset(&format_, 0, sizeof(format_));
++    format_.pixel_format  = CAMERA_PIXEL_FORMAT_NV21;
++    format_.stream_width  = 1280;
++    format_.stream_height = 720;
++    format_.stream_fps    = 30;
++}
++
++DroidCameraPlugin::~DroidCameraPlugin() { teardownPipeline(); }
++
++int DroidCameraPlugin::openDevice(std::string devname, std::string payload)
++{
++    PLOGI("devname: %s", devname.c_str());
++
++    /* device nodes are announced by the droid notifier as droid:<n> */
++    const auto pos = devname.rfind(':');
++    cameraDevice_  = (pos != std::string::npos) ? atoi(devname.c_str() + pos + 1) : 0;
++
++    if (access(kDroidPluginPath, R_OK) != 0)
++    {
++        PLOGE("gst-droid not available");
++        return CAMERA_ERROR_UNKNOWN;
++    }
++
++    return CAMERA_ERROR_NONE;
++}
++
++int DroidCameraPlugin::closeDevice()
++{
++    teardownPipeline();
++    return CAMERA_ERROR_NONE;
++}
++
++int DroidCameraPlugin::setFormat(const void *stream_format)
++{
++    const stream_format_t *in = static_cast<const stream_format_t *>(stream_format);
++
++    PLOGI("requested %ux%u@%d fmt %d", in->stream_width, in->stream_height,
++          in->stream_fps, in->pixel_format);
++
++    /* Raw preview from droidcamsrc is NV21; the service's consumers get the
++     * effective format back from getFormat. */
++    format_               = *in;
++    format_.pixel_format  = CAMERA_PIXEL_FORMAT_NV21;
++    if (format_.stream_fps <= 0)
++        format_.stream_fps = 30;
++    format_.buffer_size =
++        format_.stream_width * format_.stream_height * 3 / 2;
++
++    if (streaming_)
++    {
++        teardownPipeline();
++        if (!buildPipeline())
++            return CAMERA_ERROR_UNKNOWN;
++    }
++    return CAMERA_ERROR_NONE;
++}
++
++int DroidCameraPlugin::getFormat(void *stream_format)
++{
++    *static_cast<stream_format_t *>(stream_format) = format_;
++    return CAMERA_ERROR_NONE;
++}
++
++int DroidCameraPlugin::setBuffer(int num_buffer, int io_mode, void **usrbufs)
++{
++    /* Frames are copied out of the appsink per getBuffer call; the io mode
++     * requested by the service needs no plugin-side buffer setup. */
++    return CAMERA_ERROR_NONE;
++}
++
++bool DroidCameraPlugin::buildPipeline()
++{
++    gchar *desc = g_strdup_printf(
++        "droidcamsrc name=droidcam camera-device=%d "
++        "droidcam.imgsrc ! fakesink async=false "
++        "droidcam.vidsrc ! fakesink async=false "
++        "droidcam.vfsrc ! capsfilter caps=video/x-raw,format=NV21,width=%u,height=%u ! "
++        "queue max-size-buffers=4 leaky=downstream ! "
++        "appsink name=sink emit-signals=false sync=false max-buffers=2 drop=true",
++        cameraDevice_, format_.stream_width, format_.stream_height);
++
++    GError *error = nullptr;
++    pipeline_     = gst_parse_launch(desc, &error);
++    g_free(desc);
++
++    if (!pipeline_)
++    {
++        PLOGE("pipeline: %s", error ? error->message : "unknown");
++        g_clear_error(&error);
++        return false;
++    }
++    g_clear_error(&error);
++
++    appsink_ = gst_bin_get_by_name(GST_BIN(pipeline_), "sink");
++
++    if (gst_element_set_state(pipeline_, GST_STATE_PLAYING) ==
++        GST_STATE_CHANGE_FAILURE)
++    {
++        PLOGE("cannot start droid pipeline");
++        teardownPipeline();
++        return false;
++    }
++    return true;
++}
++
++void DroidCameraPlugin::teardownPipeline()
++{
++    if (pipeline_)
++    {
++        gst_element_set_state(pipeline_, GST_STATE_NULL);
++        if (appsink_)
++        {
++            gst_object_unref(appsink_);
++            appsink_ = nullptr;
++        }
++        gst_object_unref(pipeline_);
++        pipeline_ = nullptr;
++    }
++    streaming_ = false;
++}
++
++int DroidCameraPlugin::startCapture()
++{
++    ensureGstInit();
++    if (!buildPipeline())
++        return CAMERA_ERROR_UNKNOWN;
++    streaming_ = true;
++    return CAMERA_ERROR_NONE;
++}
++
++int DroidCameraPlugin::stopCapture()
++{
++    teardownPipeline();
++    return CAMERA_ERROR_NONE;
++}
++
++int DroidCameraPlugin::getBuffer(void *outbuf)
++{
++    buffer_t *buf = static_cast<buffer_t *>(outbuf);
++
++    if (!appsink_ || !streaming_)
++        return CAMERA_ERROR_UNKNOWN;
++
++    GstSample *sample = nullptr;
++    /* try-pull-sample is an action signal, so no gstapp headers/library are
++     * needed at build time. */
++    g_signal_emit_by_name(appsink_, "try-pull-sample", 2 * GST_SECOND, &sample);
++    if (!sample)
++    {
++        PLOGE("no frame from droidcamsrc");
++        return CAMERA_ERROR_UNKNOWN;
++    }
++
++    GstBuffer *gbuf = gst_sample_get_buffer(sample);
++    GstMapInfo map;
++    int ret = CAMERA_ERROR_UNKNOWN;
++    if (gbuf && gst_buffer_map(gbuf, &map, GST_MAP_READ))
++    {
++        std::memcpy(buf->start, map.data, map.size);
++        buf->length = map.size;
++        gst_buffer_unmap(gbuf, &map);
++        ret = CAMERA_ERROR_NONE;
++    }
++    gst_sample_unref(sample);
++    return ret;
++}
++
++int DroidCameraPlugin::releaseBuffer(const void *) { return CAMERA_ERROR_NONE; }
++int DroidCameraPlugin::destroyBuffer() { return CAMERA_ERROR_NONE; }
++
++int DroidCameraPlugin::setProperties(const void *) { return CAMERA_ERROR_NONE; }
++
++int DroidCameraPlugin::getProperties(void *cam_out_param)
++{
++    camera_properties_t *out = static_cast<camera_properties_t *>(cam_out_param);
++    for (auto &row : out->stGetData.data)
++        for (auto &v : row)
++            v = -999; /* CONST_PARAM_DEFAULT_VALUE: not supported */
++    return CAMERA_ERROR_NONE;
++}
++
++int DroidCameraPlugin::getInfo(void *cam_info, std::string devicenode)
++{
++    camera_device_info_t *info = static_cast<camera_device_info_t *>(cam_info);
++
++    const auto pos = devicenode.rfind(':');
++    const int dev  = (pos != std::string::npos) ? atoi(devicenode.c_str() + pos + 1) : 0;
++
++    info->str_devicename = (dev == 0) ? "Droid back camera" : "Droid front camera";
++    info->str_vendorid   = "droid";
++    info->str_productid  = std::to_string(dev);
++    info->n_devicetype   = DEVICE_TYPE_CAMERA;
++    info->b_builtin      = 1;
++    info->stResolution.clear();
++    info->stResolution.emplace_back(
++        std::vector<std::string>{"1920,1080,30", "1280,720,30", "640,480,30"},
++        CAMERA_FORMAT_YUV);
++    return CAMERA_ERROR_NONE;
++}
++
++int DroidCameraPlugin::getBufferFd(int *, int *) { return CAMERA_ERROR_UNKNOWN; }
++
++extern "C"
++{
++    IPlugin *plugin_init(void)
++    {
++        Plugin *plg = new Plugin();
++        plg->setName("Droid Hal");
++        plg->setDescription("gst-droid Camera HAL for Halium devices");
++        plg->setCategory("HAL");
++        plg->setVersion("1.0.0");
++        plg->setOrganization("LuneOS project");
++        plg->registerFeature<DroidCameraPlugin>("droid");
++
++        return plg;
++    }
++
++    void __attribute__((constructor)) plugin_load(void)
++    {
++        printf("%s:%s\n", __FILENAME__, __PRETTY_FUNCTION__);
++    }
++
++    void __attribute__((destructor)) plugin_unload(void)
++    {
++        printf("%s:%s\n", __FILENAME__, __PRETTY_FUNCTION__);
++    }
++}
+diff --git a/src/plugins/hal/droid/droid_camera_plugin.h b/src/plugins/hal/droid/droid_camera_plugin.h
+new file mode 100644
+index 0000000..7d42aa1
+--- /dev/null
++++ b/src/plugins/hal/droid/droid_camera_plugin.h
+@@ -0,0 +1,74 @@
++// Copyright (c) 2026 LuneOS project
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++//
++// SPDX-License-Identifier: Apache-2.0
++
++#ifndef DROID_CAMERA_PLUGIN_H_
++#define DROID_CAMERA_PLUGIN_H_
++
++#include "camera_hal_types.h"
++#include "camera_hal_types_common.h"
++#include "plugin_interface.hpp"
++
++#include <gst/gst.h>
++#include <string>
++
++/*
++ * Camera HAL plugin for Halium devices: the cameras sit behind the Android
++ * camera HAL and are reached through gst-droid's droidcamsrc element (via
++ * the droidmedia services in the Android container). Frames are delivered
++ * to the camera service as raw NV21 system-memory buffers pulled from an
++ * appsink, which the service copies into its shared-memory distribution.
++ */
++class DroidCameraPlugin : public IHal
++{
++public:
++    DroidCameraPlugin();
++    virtual ~DroidCameraPlugin();
++
++    virtual bool queryInterface(const char *szName, void **ppInterface) override
++    {
++        *ppInterface = static_cast<void *>(static_cast<IHal *>(this));
++        return true;
++    }
++
++    virtual int openDevice(std::string devname, std::string payload) override;
++    virtual int closeDevice() override;
++    virtual int setFormat(const void *stream_format) override;
++    virtual int getFormat(void *stream_format) override;
++    virtual int setBuffer(int num_buffer, int io_mode, void **usrbufs) override;
++    virtual int getBuffer(void *outbuf) override;
++    virtual int releaseBuffer(const void *inbuf) override;
++    virtual int destroyBuffer() override;
++    virtual int startCapture() override;
++    virtual int stopCapture() override;
++    virtual int setProperties(const void *cam_in_param) override;
++    virtual int getProperties(void *cam_out_param) override;
++    virtual int getInfo(void *cam_info, std::string devicenode) override;
++    virtual int getBufferFd(int *bufFd, int *count) override;
++
++    static int deviceCount();
++
++private:
++    bool buildPipeline();
++    void teardownPipeline();
++
++    int cameraDevice_;
++    stream_format_t format_;
++    GstElement *pipeline_;
++    GstElement *appsink_;
++    bool streaming_;
++};
++
++#endif /* DROID_CAMERA_PLUGIN_H_ */
+diff --git a/src/plugins/notifier/CMakeLists.txt b/src/plugins/notifier/CMakeLists.txt
+index 1d19f78..9cc4fd6 100644
+--- a/src/plugins/notifier/CMakeLists.txt
++++ b/src/plugins/notifier/CMakeLists.txt
+@@ -15,3 +15,4 @@
+ # SPDX-License-Identifier: Apache-2.0
+ 
+ add_subdirectory(pdm)
++add_subdirectory(droid)
+diff --git a/src/plugins/notifier/droid/CMakeLists.txt b/src/plugins/notifier/droid/CMakeLists.txt
+new file mode 100644
+index 0000000..764006f
+--- /dev/null
++++ b/src/plugins/notifier/droid/CMakeLists.txt
+@@ -0,0 +1,24 @@
++# Copyright (c) 2026 LuneOS project
++#
++# SPDX-License-Identifier: Apache-2.0
++
++project(notifier-droid CXX)
++
++include_directories(${CMAKE_CURRENT_SOURCE_DIR})
++
++pkg_check_modules(GSTREAMER REQUIRED gstreamer-1.0)
++include_directories(${GSTREAMER_INCLUDE_DIRS})
++
++set(SRC ${CMAKE_CURRENT_SOURCE_DIR}/droid_notifier.cpp)
++
++add_library(${PROJECT_NAME} SHARED ${SRC})
++
++target_link_libraries(${PROJECT_NAME}
++                      ${PMLOGLIB_LDFLAGS}
++                      ${GLIB2_LDFLAGS}
++                      ${GSTREAMER_LDFLAGS}
++                      )
++
++set_target_properties (${PROJECT_NAME} PROPERTIES VERSION 1.0 SOVERSION 1)
++
++install(TARGETS ${PROJECT_NAME} DESTINATION ${WEBOS_INSTALL_LIBDIR}/camera)
+diff --git a/src/plugins/notifier/droid/droid_notifier.cpp b/src/plugins/notifier/droid/droid_notifier.cpp
+new file mode 100644
+index 0000000..670bc48
+--- /dev/null
++++ b/src/plugins/notifier/droid/droid_notifier.cpp
+@@ -0,0 +1,163 @@
++// Copyright (c) 2026 LuneOS project
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++//
++// SPDX-License-Identifier: Apache-2.0
++
++#define LOG_CONTEXT "notifier.droid"
++#define LOG_TAG "DroidNotifier"
++#include "camera_device_types.h"
++#include "camera_log.h"
++#include "plugin.hpp"
++#include "plugin_interface.hpp"
++
++#include <glib.h>
++#include <gst/gst.h>
++#include <string>
++#include <unistd.h>
++#include <vector>
++
++/*
++ * Announces the built-in Halium (Android HAL) cameras to the camera
++ * service. The device count is probed through gst-droid; devices are
++ * published once from an idle callback on the service main loop with
++ * device nodes of the form droid:<n>, which the droid HAL plugin parses.
++ */
++
++/* The camera-device GParamSpec's maximum is clamped to the real camera
++ * count minus one once droidcamsrc has initialized its HAL connection. */
++static int droid_camera_count()
++{
++    if (access("/usr/lib/gstreamer-1.0/libgstdroid.so", R_OK) != 0)
++        return 0;
++
++    static bool gst_ready = false;
++    if (!gst_ready)
++    {
++        gst_init(nullptr, nullptr);
++        gst_ready = true;
++    }
++
++    GstElement *e = gst_element_factory_make("droidcamsrc", nullptr);
++    if (!e)
++        return 0;
++
++    int count = 0;
++    if (gst_element_set_state(e, GST_STATE_READY) != GST_STATE_CHANGE_FAILURE)
++    {
++        gst_element_get_state(e, nullptr, nullptr, 5 * GST_SECOND);
++        GParamSpec *spec =
++            g_object_class_find_property(G_OBJECT_GET_CLASS(e), "camera-device");
++        if (spec && G_IS_PARAM_SPEC_INT(spec))
++            count = G_PARAM_SPEC_INT(spec)->maximum + 1;
++    }
++    gst_element_set_state(e, GST_STATE_NULL);
++    gst_object_unref(e);
++    return count;
++}
++
++class DroidNotifier : public INotifier
++{
++public:
++    DroidNotifier() {}
++    virtual ~DroidNotifier()
++    {
++        if (idle_source_)
++            g_source_destroy(idle_source_);
++    }
++
++    virtual bool queryInterface(const char *szName, void **ppInterface) override
++    {
++        *ppInterface = static_cast<void *>(static_cast<INotifier *>(this));
++        return true;
++    }
++
++    virtual void subscribeToClient(handlercb cb, void *mainLoop) override
++    {
++        updateDeviceList_ = std::move(cb);
++
++        GMainContext *ctx =
++            mainLoop ? g_main_loop_get_context(static_cast<GMainLoop *>(mainLoop))
++                     : nullptr;
++        idle_source_ = g_idle_source_new();
++        g_source_set_callback(
++            idle_source_,
++            +[](gpointer self) -> gboolean {
++                static_cast<DroidNotifier *>(self)->announce();
++                return G_SOURCE_REMOVE;
++            },
++            this, nullptr);
++        g_source_attach(idle_source_, ctx);
++    }
++
++    virtual void setLSHandle(void *) override {}
++
++private:
++    void announce()
++    {
++        idle_source_ = nullptr;
++
++        const int count = droid_camera_count();
++        PLOGI("announcing %d droid camera(s)", count);
++
++        std::vector<DEVICE_LIST_T> devList;
++        for (int i = 0; i < count; i++)
++        {
++            DEVICE_LIST_T dev;
++            dev.nDeviceNum       = i;
++            dev.nPortNum         = 0;
++            dev.isPowerOnConnect = 1;
++            dev.strVendorName    = "LuneOS";
++            dev.strProductName   = (i == 0) ? "Droid back camera" : "Droid front camera";
++            dev.strVendorID      = "droid";
++            dev.strProductID     = std::to_string(i);
++            dev.strDeviceType    = "droid";
++            dev.strDeviceSubtype = "builtin";
++            dev.strDeviceNode    = "droid:" + std::to_string(i);
++            dev.strDeviceKey     = dev.strDeviceNode;
++            devList.push_back(dev);
++        }
++
++        if (updateDeviceList_)
++            updateDeviceList_("droid", &devList);
++    }
++
++    handlercb updateDeviceList_;
++    GSource *idle_source_ = nullptr;
++};
++
++extern "C"
++{
++    IPlugin *plugin_init(void)
++    {
++        Plugin *plg = new Plugin();
++        plg->setName("Droid Notifier");
++        plg->setDescription("Built-in Halium camera notifier");
++        plg->setCategory("NOTIFIER");
++        plg->setVersion("1.0.0");
++        plg->setOrganization("LuneOS project");
++        plg->registerFeature<DroidNotifier>("droid-notifier");
++
++        return plg;
++    }
++
++    void __attribute__((constructor)) plugin_load(void)
++    {
++        printf("%s:%s\n", __FILENAME__, __PRETTY_FUNCTION__);
++    }
++
++    void __attribute__((destructor)) plugin_unload(void)
++    {
++        printf("%s:%s\n", __FILENAME__, __PRETTY_FUNCTION__);
++    }
++}
+-- 
+2.53.0
+
