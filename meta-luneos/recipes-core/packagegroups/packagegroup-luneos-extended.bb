@@ -12,6 +12,11 @@ NOT_COMPATIBLE_WITH_CURRENT_NODEJS = " \
 #LuneOS uses it's own settings app
 VIRTUAL-RUNTIME_settingsapp ?= "org.webosports.app.settings"
 
+# Web Speech API support for the browser. Chromium dlopens libspeechd.so.2 and talks to the
+# speech-dispatcher daemon; without this, speechSynthesis exists but has no voices and pages that
+# speak stay silent. Set to "" in a distro/local conf to drop it (it pulls in espeak and portaudio).
+VIRTUAL-RUNTIME_speech_synthesis ?= "speech-dispatcher"
+
 # Atlas is the default browser (VIRTUAL-RUNTIME_com.webos.app.browser) and is also listed below, so it
 # ships whichever browser is default. enactbrowser stays installed because run_browser_shell loads its
 # pdf.js as a Chromium extension for EVERY browsershell app — drop that package and Atlas loses
@@ -49,6 +54,8 @@ RDEPENDS:${PN} = " \
   org.webosports.app.preware \
   org.webosports.service.ipkg \
   com.webos.app.enactbrowser \
+  \
+  ${VIRTUAL-RUNTIME_speech_synthesis} \
   \
   org.webosports.app.atlas \
   org.webosports.app.calculator \
@@ -113,12 +120,19 @@ RDEPENDS:${PN} = " \
   org.mer.app.fingerterm \
   org.webosports.app.terminal \
   org.webosports.app.camera \
+  \
+  v4l-utils \
 "
 
+# qbootctl is listed unconditionally: LIBHYBRIS_RDEPENDS is only ever appended
+# for halium machines, one by one, below. The recipe is
+# COMPATIBLE_MACHINE = "^halium$" and its unit is conditional on the device
+# being A/B at runtime, so a non-A/B halium machine installs it harmlessly.
 LIBHYBRIS_RDEPENDS = " \
     ${VIRTUAL-RUNTIME_android-system-image} \
     android-property-service \
     android-system \
+    qbootctl \
     android-system-compat \
     android-tools \
     android-tools-adbd \
@@ -174,13 +188,13 @@ NFC_RDEPENDS = " \
 # device-config service, because nothing had added it to the list yet.
 RDEPENDS:${PN}:append:halium = " ${LIBHYBRIS_RDEPENDS}"
 
-RDEPENDS:${PN}:append:hammerhead = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
+RDEPENDS:${PN}:append:hammerhead = " alsa-utils-systemd mesa-megadriver rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:tenderloin = " alsa-utils-systemd rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:tenderloin71 = " alsa-utils-systemd rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:tenderloin3g = " alsa-utils-systemd rmtfs qrtr rpmsgexport"
-RDEPENDS:${PN}:append:mido = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
-RDEPENDS:${PN}:append:tissot = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
-RDEPENDS:${PN}:append:rosy = " alsa-utils-systemd mesa-driver-swrast rmtfs qrtr rpmsgexport"
+RDEPENDS:${PN}:append:mido = " alsa-utils-systemd mesa-megadriver rmtfs qrtr rpmsgexport"
+RDEPENDS:${PN}:append:tissot = " alsa-utils-systemd mesa-megadriver rmtfs qrtr rpmsgexport"
+RDEPENDS:${PN}:append:rosy = " alsa-utils-systemd mesa-megadriver rmtfs qrtr rpmsgexport"
 
 # Fingerprint-sensor devices only. These machine names come from the LuneOS
 # Halium layer; on a tree without them the overrides are simply inert.
@@ -210,6 +224,7 @@ RDEPENDS:${PN}:append:tissot-halium = " waydroid"
 
 QEMU_RDEPENDS = " \
     alsa-utils-systemd \
+    mesa-megadriver \
     kernel-module-snd-intel8x0 \
     phonesim \
     qt-plugin-generic-vboxtouch \
