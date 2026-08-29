@@ -32,7 +32,7 @@ RRECOMMENDS:${PN}:halium = ""
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 PV = "1.0.0+git"
-SRCREV = "fc98330f83b9dde922f6a28635c21ec342cbe085"
+SRCREV = "566d5656dac1f390e57c3041ede8ed09081d12bf"
 SRC_URI = "git://github.com/webOS-ports/luneos-rtc-engine.git;branch=main;protocol=https"
 
 
