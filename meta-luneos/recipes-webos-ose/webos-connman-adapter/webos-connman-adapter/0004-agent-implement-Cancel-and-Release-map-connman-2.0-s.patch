@@ -1,0 +1,132 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: LuneOS <dev@luneos.org>
+Date: Mon, 17 Aug 2026 17:56:25 +0200
+Subject: [PATCH] agent: implement Cancel and Release, map connman 2.0's new
+ service errors
+
+net.connman.Agent.Cancel is part of connman's agent API and it calls it
+whenever a pending RequestInput or RequestPeerAuthorization is abandoned,
+so every cancellation was answered with UnknownMethod.  Release had the
+same problem.  Both are now acknowledged; our request handlers reply
+synchronously so there is no in-flight state to unwind.
+
+connman 2.0 added two service Error values.  "blocked" is reported when
+the AP refuses the association, and "online-check-failed" when a service
+connected fine but repeatedly failed the internet reachability check,
+which is reachable now that OnlineCheckMode is set to continuous.
+Neither was mapped, so /connect answered with a null error message.
+
+Upstream-Status: Inappropriate [LuneOS specific]
+---
+ files/xml/connman.xml |  2 ++
+ src/connman_agent.c   | 41 +++++++++++++++++++++++++++++++++++++++++
+ src/errors.h          |  2 ++
+ src/wifi_service.c    | 10 ++++++++++
+ 4 files changed, 55 insertions(+)
+
+diff --git a/files/xml/connman.xml b/files/xml/connman.xml
+index af967f5..7b2e3e6 100644
+--- a/files/xml/connman.xml
++++ b/files/xml/connman.xml
+@@ -187,6 +187,8 @@ limitations under the License.
+ 	<interface name="net.connman.Agent">
+ 		<method name="Release">
+ 		</method>
++		<method name="Cancel">
++		</method>
+ 		<method name="ReportError">
+ 			<arg type="o" direction="in"/>
+ 			<arg type="s" direction="in"/>
+diff --git a/src/connman_agent.c b/src/connman_agent.c
+index faf709e..48383ec 100644
+--- a/src/connman_agent.c
++++ b/src/connman_agent.c
+@@ -113,6 +113,43 @@ static gboolean request_peer_authorization_cb(
+ 	return TRUE;
+ }
+ 
++/*
++ * Connman calls Cancel when a request it made through RequestInput or
++ * RequestPeerAuthorization is no longer needed, for instance because the
++ * service was disconnected or the input timed out. Our request handlers reply
++ * synchronously so there is nothing in flight to abort, but the method still
++ * has to exist or every cancellation answers with UnknownMethod.
++ */
++static gboolean cancel_cb(ConnmanInterfaceAgent *interface,
++                          GDBusMethodInvocation *invocation,
++                          gpointer user_data)
++{
++	connman_agent_t *agent = user_data;
++
++	WCALOG_DEBUG("Agent request cancelled by connman");
++
++	connman_interface_agent_complete_cancel(agent->interface, invocation);
++
++	return TRUE;
++}
++
++/*
++ * Release is called when connman drops the agent registration, e.g. when it
++ * is shutting down.
++ */
++static gboolean release_cb(ConnmanInterfaceAgent *interface,
++                           GDBusMethodInvocation *invocation,
++                           gpointer user_data)
++{
++	connman_agent_t *agent = user_data;
++
++	WCALOG_DEBUG("Agent released by connman");
++
++	connman_interface_agent_complete_release(agent->interface, invocation);
++
++	return TRUE;
++}
++
+ static void bus_acquired_cb(GDBusConnection *connection, const gchar *name,
+                             gpointer user_data)
+ {
+@@ -130,6 +167,10 @@ static void bus_acquired_cb(GDBusConnection *connection, const gchar *name,
+ 	                 G_CALLBACK(request_peer_authorization_cb), agent);
+ 	g_signal_connect(agent->interface, "handle-report-peer-error",
+ 	                 G_CALLBACK(report_error_cb), agent);
++	g_signal_connect(agent->interface, "handle-cancel",
++	                 G_CALLBACK(cancel_cb), agent);
++	g_signal_connect(agent->interface, "handle-release",
++	                 G_CALLBACK(release_cb), agent);
+ 
+ 	error = NULL;
+ 
+diff --git a/src/errors.h b/src/errors.h
+index 0261938..22e59b7 100644
+--- a/src/errors.h
++++ b/src/errors.h
+@@ -117,6 +117,8 @@
+ #define WCA_API_ERROR_TETHERING_IP_ADDRESS_FAILED         148
+ #define WCA_API_ERROR_TETHERING_NOT_ALLOWED_TO_CHANGE_MAX_STATION_COUNT 210
+ #define WCA_API_ERROR_TETHERING_SET_MAX_STATION_COUNT_FAILED 211
++#define WCA_API_ERROR_BLOCKED                    212
++#define WCA_API_ERROR_ONLINE_CHECK_FAILED        213
+ 
+ #define WCA_API_ERROR_INTERFACE_NOT_CONNECTED    301
+ #define WCA_API_ERROR_INTERFACE_ALREADY_DEFAULT  302
+diff --git a/src/wifi_service.c b/src/wifi_service.c
+index f7bc24d..addbf83 100644
+--- a/src/wifi_service.c
++++ b/src/wifi_service.c
+@@ -655,6 +655,16 @@ static gboolean handle_failed_connection_request(gpointer user_data)
+ 		error_message = "Out of range";
+ 		error_code = WCA_API_ERROR_OUT_OF_RANGE;
+ 	}
++	else if (g_strcmp0(service->error, "blocked") == 0)
++	{
++		error_message = "Access point refused the connection";
++		error_code = WCA_API_ERROR_BLOCKED;
++	}
++	else if (g_strcmp0(service->error, "online-check-failed") == 0)
++	{
++		error_message = "Connected but the network has no internet access";
++		error_code = WCA_API_ERROR_ONLINE_CHECK_FAILED;
++	}
+ 
+ 	LSMessageReplyCustomError(current_connect_req->handle,
+ 	                          current_connect_req->message,
