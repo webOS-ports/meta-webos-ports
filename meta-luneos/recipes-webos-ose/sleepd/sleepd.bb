@@ -15,7 +15,7 @@ DEPENDS = "nyx-lib luna-service2 json-c libxml2 sqlite3 glib-2.0"
 RDEPENDS:${PN} += "com.webos.service.battery"
 
 WEBOS_VERSION = "2.0.0-19_6166459bf5e48179ec9c5bc07ce98d6d938b0e3e"
-PR = "r13"
+PR = "r14"
 
 inherit webos_component
 inherit webos_public_repo
@@ -37,7 +37,19 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0010-Add-powerd.management-permission-needed-by-powermenu.patch \
     file://0011-Revert-Deprecation-of-com.webos.service.power.patch \
     file://0012-com.webos.service.sleep.api.json.in-Add-API-for-susp.patch \
+    file://0013-Register-the-com-palm-power-category-only-once.patch \
+    file://0014-Implement-the-legacy-wakeLockRegister-setWakeLock-AP.patch \
+    file://sleepd.conf \
 "
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "sleepd.service"
+
+# The OSE sleepd ships its suspend machinery turned off: with no configuration
+# file, enable_idle_check_thread stays at its compiled-in 0, no idle-check
+# thread is created and the daemon never initiates suspend. Install the config
+# that turns it on; without this file the device never sleeps.
+do_install:append() {
+    install -d ${D}${sysconfdir}/default
+    install -m 0644 ${UNPACKDIR}/sleepd.conf ${D}${sysconfdir}/default/sleepd.conf
+}
