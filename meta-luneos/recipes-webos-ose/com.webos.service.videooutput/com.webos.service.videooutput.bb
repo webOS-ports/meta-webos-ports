@@ -31,7 +31,6 @@ inherit webos_daemon
 inherit webos_system_bus
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 # The component configures and installs its own videooutputd.service into
 # ${sysconfdir}/systemd/system, so webos_systemd (which expects the unit to come

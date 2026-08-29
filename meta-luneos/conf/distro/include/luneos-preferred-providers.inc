@@ -15,11 +15,9 @@ SKIP_RECIPE[googletest-clang] ?= "${@oe.utils.conditional('WEBRUNTIME_TOOLCHAIN'
 SKIP_RECIPE[media-codec-interface-clang] ?= "${@oe.utils.conditional('WEBRUNTIME_TOOLCHAIN', '-clang', '', 'WEBRUNTIME_TOOLCHAIN is not set to -clang', d)}"
 SKIP_RECIPE[g-media-pipeline-clang] ?= "${@oe.utils.conditional('WEBRUNTIME_TOOLCHAIN', '-clang', '', 'WEBRUNTIME_TOOLCHAIN is not set to -clang', d)}"
 
-PREFERRED_PROVIDER_llvm = "${@oe.utils.conditional('WEBRUNTIME_TOOLCHAIN', '-clang', 'clang', 'llvm', d)}"
-PREFERRED_PROVIDER_llvm-native = "${@oe.utils.conditional('WEBRUNTIME_TOOLCHAIN', '-clang', 'clang-native', 'llvm-native', d)}"
-PREFERRED_PROVIDER_nativesdk-llvm = "${@oe.utils.conditional('WEBRUNTIME_TOOLCHAIN', '-clang', 'nativesdk-clang', 'nativesdk-llvm', d)}"
-PROVIDES:pn-clang = "llvm"
-PROVIDES:pn-clang-native = "llvm-native"
+# oe-core now ships llvm and clang as separate recipes (clang DEPENDS on
+# llvm-native), so clang must no longer be forced as the llvm provider:
+# doing so makes clang-native depend on itself.
 PROVIDES:pn-nativesdk-clang = "nativesdk-llvm"
 
 PREFERRED_PROVIDER_virtual/webruntime = "webruntime${WEBRUNTIME_TOOLCHAIN}"
@@ -38,13 +36,6 @@ VIRTUAL-RUNTIME_tar = "${@oe.utils.conditional('WEBOS_PREFERRED_PROVIDER_FOR_TAR
 # Prefer libjpeg-turbo from meta-oe as it provides SIMD optimizations
 PREFERRED_PROVIDER_jpeg = "libjpeg-turbo"
 PREFERRED_PROVIDER_jpeg-native = "libjpeg-turbo-native"
-
-PREFERRED_PROVIDER_llvm = "clang"
-PREFERRED_PROVIDER_llvm-native = "clang-native"
-PREFERRED_PROVIDER_nativesdk-llvm = "nativesdk-clang"
-PROVIDES:pn-clang = "llvm"
-PROVIDES:pn-clang-native = "llvm-native"
-PROVIDES:pn-nativesdk-clang = "nativesdk-llvm"
 
 # Just for documentation; these values are the defaults set in the recipes that
 # use them.
@@ -100,7 +91,15 @@ BAD_RECOMMENDATIONS:append:qemux86 = " kernel-vmlinux"
 # used by meta-networking/recipes-connectivity/autossh/autossh_1.4g.bb
 PREFERRED_RPROVIDER_ssh = "openssh"
 
-VIRTUAL-RUNTIME_init_manager = "systemd systemd-compat-units systemd-machine-units"
+# systemd-compat-units was removed from oe-core (d9ec9e20ee "systemd: Stop
+# supporting sysvinit compatibility")
+VIRTUAL-RUNTIME_init_manager = "systemd systemd-machine-units"
+
+# node-red can no longer be built: bitbake disabled the npmsw fetcher
+# ("security issues and no maintainer"), which node-red's shrinkwrap
+# SRC_URI depends on. Drop it from the image until the recipe is
+# reworked to fetch another way.
+VIRTUAL-RUNTIME_nodejs-module-node-red = ""
 
 # With upstart we don't need update-rc.d, as bonus fixes following avahi issue for us:
 # http://lists.openembedded.org/pipermail/openembedded-core/2013-November/086901.html

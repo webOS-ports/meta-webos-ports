@@ -18,7 +18,6 @@ WEBOS_VERSION = "1.0.0-8_4c800b266bf5d217a55ab1bc509b01fd96cb66cc"
 PR = "r0"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 do_install:append() {
     install -d  ${D}${libdir}/maliit/plugins

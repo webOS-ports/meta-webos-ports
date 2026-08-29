@@ -21,7 +21,6 @@ PV = "0.9.7+git"
 SRCREV = "597e822ae5eac23631626ab6edaa234d1c2223e2"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-S = "${WORKDIR}/git"
 
 # The repo carries its own LS2 role/permission/manifest in sysbus/; install them below rather than
 # through the class's own tasks (they need the .app.json naming the hub expects for an application).

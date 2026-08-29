@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 PV = "0.5+git"
 SRCREV = "32d4a4f49a34da9e94031a3ffaba0f15da7c5578"
 
-DEPENDS = "qtbase qtdeclarative luna-service2 luna-sysmgr-common libwebos-application qtdeclarative-native kf5bluezqt-mer"
+DEPENDS = "qtbase qtdeclarative luna-service2 luna-sysmgr-common libwebos-application qtdeclarative-native bluez-qt"
 RDEPENDS:${PN} = "qt5compat-qmlplugins"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
