@@ -18,7 +18,7 @@ inherit webos_app
 WEBOS_GIT_BRANCH = ";branch=chromium-engine"
 
 PV = "0.9.7+git"
-SRCREV = "597e822ae5eac23631626ab6edaa234d1c2223e2"
+SRCREV = "1595a2664abbc1a9f407e9413915e76df90b92d3"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 S = "${WORKDIR}/git"
