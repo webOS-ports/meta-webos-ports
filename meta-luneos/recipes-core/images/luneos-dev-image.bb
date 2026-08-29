@@ -32,6 +32,22 @@ IMAGE_INSTALL:append = " \
     kernel-modules \
 "
 
+# Legacy PDK/SDL game support: the soft-float ARM sysroot, the Palm-API shims
+# and the launcher. Nothing referenced this packagegroup before, so none of it
+# reached a device however carefully it was built.
+#
+# This needs the pdk-armel multiconfig enabled in the build - pdk-sysroot takes
+# an mcdepends on it - which means BBMULTICONFIG must list pdk-armel or the
+# image will not resolve:
+#
+#     BBMULTICONFIG = "pdk-armel"
+#
+# It also means an image build pulls in a second, complete build of a soft-float
+# ARM userland, which is not cheap. The alternative is to point
+# PDK_SYSROOT_TARBALL at a sysroot built outside BitBake, which skips the
+# multiconfig entirely - see the pdk-sysroot recipe.
+IMAGE_INSTALL:append = " packagegroup-luneos-pdk"
+
 IMAGE_INSTALL:append:tenderloin = " \
     ${MESA_PKGS} \
     luneos-mainline-debug \
