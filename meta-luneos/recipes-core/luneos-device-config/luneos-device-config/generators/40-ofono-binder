@@ -9,6 +9,21 @@
 # advertises IRadio/slot1 and /slot2 while binder.conf declared only slot1.
 #
 # Deriving it from the HAL cannot disagree with the HAL, which is the point.
+#
+# The IRadio version is derived from the same listing, with a cap. A vendor
+# registers every version it implements - the MT6739 offers 1.0 through 1.5 for
+# each slot - and the plugin's own default of 1.2 is usually too low: below 1.4
+# it sends the 1.0 getSignalStrength, which that modem answers
+# "getSignalStrengthResponse_1_2 INVALID_RESPONSE" on an endless retry, so
+# NetworkRegistration never gains a Strength property and the UI has no bars.
+#
+# Taking the highest is wrong too. 1.5 is where the plugin starts using
+# setRadioPower_1_5 and setIndicationFilter_1_5, and a vendor that registers
+# 1.5 without implementing those leaves the radio unpowered: measured on the
+# MT6739, 1.5 produces no registration at all, while 1.4 reports strength
+# immediately. 1.4 is also the last version whose requests the plugin picks up
+# for the everyday paths, so cap there and let deviceinfo override it for a
+# device that wants otherwise.
 
 LSHAL=
 for c in lshal /android/system/bin/lshal /system/bin/lshal; do
@@ -36,6 +51,21 @@ if [ -z "$slots" ]; then
     exit 0
 fi
 
+radio_interface=${deviceinfo_binder_radio_interface:-}
+if [ -z "$radio_interface" ]; then
+    highest=$($LSHAL 2>/dev/null |
+              grep -oE 'android\.hardware\.radio@[0-9]+\.[0-9]+::IRadio/slot[0-9]+' |
+              sed -E 's|.*@([0-9]+\.[0-9]+)::.*|\1|' |
+              sort -t. -k1,1n -k2,2n | tail -n 1)
+    case "$highest" in
+        1.4|1.5) radio_interface=1.4 ;;
+        1.[0-3]) radio_interface=$highest ;;
+        *) radio_interface= ;;
+    esac
+    [ -n "$radio_interface" ] &&
+        echo "luneos-device-config: IRadio $highest advertised, using $radio_interface"
+fi
+
 mkdir -p "$GEN/files/etc/ofono"
 
 # ExpectSlots names only the first: boot should not wait on slots that are
@@ -50,6 +80,7 @@ mkdir -p "$GEN/files/etc/ofono"
         echo "[$s]"
         echo "path = /ril_$((n - 1))"
         echo "slot = $((n - 1))"
+        [ -n "$radio_interface" ] && echo "radioInterface = $radio_interface"
     done
 } > "$GEN/files/etc/ofono/binder.conf"
 
