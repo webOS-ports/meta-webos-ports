@@ -118,7 +118,6 @@ INCLUDE_PATH_LIBCXX += " \
 
 # tcmalloc build is broken with clang++ and -mthumb
 ARM_INSTRUCTION_SET = "arm"
-
 # M151 turns -Wunsafe-buffer-usage on in places and is generally stricter than
 # 120. treat_warnings_as_errors is already false in webruntime-common.inc; keep
 # the narrowing demotion from the 120 recipe until a build shows it is
