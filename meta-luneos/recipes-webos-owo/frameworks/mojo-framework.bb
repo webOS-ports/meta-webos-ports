@@ -31,12 +31,16 @@ RDEPENDS:${PN} += "mojoloader"
 do_install() {
     install -d ${D}${webos_frameworksdir}
 
-    # -a: the submission's templates and images symlink into ../mojocommon
-    # with relative paths that only resolve if both land side by side.
-    cp -a ${S}/mojo ${D}${webos_frameworksdir}/
-    cp -a ${S}/mojocommon ${D}${webos_frameworksdir}/
-    cp -a ${S}/mojo.core ${D}${webos_frameworksdir}/
-    cp -a ${S}/prototype ${D}${webos_frameworksdir}/
+    # The submission's templates and images symlink into ../mojocommon with
+    # relative paths that only resolve if both land side by side, so copy
+    # recursively without dereferencing. Ownership is deliberately not carried
+    # over: -a would keep the build user's uid, and do_package then fails the
+    # whole build with "uid not found: 1000 ... may be due to host
+    # contamination", since no such user exists on the target.
+    cp -a --no-preserve=ownership ${S}/mojo ${D}${webos_frameworksdir}/
+    cp -a --no-preserve=ownership ${S}/mojocommon ${D}${webos_frameworksdir}/
+    cp -a --no-preserve=ownership ${S}/mojo.core ${D}${webos_frameworksdir}/
+    cp -a --no-preserve=ownership ${S}/prototype ${D}${webos_frameworksdir}/
     install -m 0644 ${S}/mojo-core.js ${D}${webos_frameworksdir}/mojo-core.js
 }
 
