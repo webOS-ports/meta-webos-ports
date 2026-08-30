@@ -1,5 +1,5 @@
 #!/bin/sh
-# The compositor's touchscreen node.
+# The compositor's input nodes.
 #
 # surface-manager.env is almost entirely generic - QT_IM_MODULE, EGL_PLATFORM,
 # WEBOS_COMPOSITOR_PLATFORM and the highdpi flag are the same on every Halium
@@ -7,22 +7,60 @@
 # WEBOS_COMPOSITOR_EXTRA_OPTIONS, and that is exactly derivable: precisely one
 # input device advertises ID_INPUT_TOUCHSCREEN.
 #
+# The keyboard nodes need naming for a different reason. Qt's evdevkeyboard
+# plugin discovers devices through udev's ID_INPUT_KEYBOARD, and a phone keypad
+# does not carry it: an MT6739 keypad - volume and power, plus the whole T9
+# block on the mindphone - is tagged ID_INPUT_KEY only. The bare plugin then
+# attaches to nothing and no hardware key ever reaches the compositor. $keydevs
+# is already derived from exactly that tag for nyx, so reuse it here.
+#
 # Substitute into the shipped file rather than emitting a whole copy, so the
 # generic content stays owned by luna-surfacemanager-conf and does not go stale
 # here when upstream changes it.
 SRC=/etc/surface-manager.d/surface-manager.env
 [ -f "$SRC" ] || exit 0
-[ -n "${touchscreen:-}" ] || exit 0
 
-if ! grep -q "evdevtouch:" "$SRC"; then
-    echo "luneos-device-config: WARNING: no evdevtouch anchor in $SRC; cannot set this value"
-    exit 0
+tmp=$(mktemp)
+cp "$SRC" "$tmp"
+changed=0
+
+if [ -n "${touchscreen:-}" ]; then
+    if ! grep -q "evdevtouch:" "$tmp"; then
+        echo "luneos-device-config: WARNING: no evdevtouch anchor in $SRC; cannot set this value"
+    elif ! grep -q "evdevtouch:$touchscreen\b" "$tmp"; then
+        # [^ "]* rather than event[0-9]*: the shipped value is a placeholder,
+        # not a node number, so the anchor must not assume the shape of what it
+        # replaces.
+        sed -i "s|evdevtouch:[^ \"]*|evdevtouch:$touchscreen|" "$tmp"
+        changed=1
+        echo "luneos-device-config: compositor touchscreen -> $touchscreen"
+    fi
 fi
-grep -q "evdevtouch:$touchscreen\b" "$SRC" && exit 0   # already correct, nothing to shadow
 
-mkdir -p "$GEN/files/etc/surface-manager.d"
-# [^ "]* rather than event[0-9]*: the shipped value is a placeholder, not a
-# node number, so the anchor must not assume the shape of what it replaces.
-sed "s|evdevtouch:[^ \"]*|evdevtouch:$touchscreen|" "$SRC" \
-    > "$GEN/files/etc/surface-manager.d/surface-manager.env"
-echo "luneos-device-config: compositor touchscreen -> $touchscreen"
+if [ -n "${keydevs:-}" ] && ! grep -q "evdevkeyboard:" "$tmp"; then
+    kbd=
+    oIFS=$IFS; IFS=';'
+    for k in $keydevs; do
+        [ -n "$k" ] || continue
+        kbd="$kbd -plugin evdevkeyboard:$k"
+    done
+    IFS=$oIFS
+    kbd=${kbd# }
+    if [ -z "$kbd" ]; then
+        :
+    elif ! grep -q -- "-plugin evdevkeyboard" "$tmp"; then
+        echo "luneos-device-config: WARNING: no evdevkeyboard anchor in $SRC; cannot set this value"
+    else
+        # Match the bare plugin only: the trailing class keeps this from
+        # touching a node that already carries a path.
+        sed -i "s|-plugin evdevkeyboard\([ \"]\)|$kbd\1|" "$tmp"
+        changed=1
+        echo "luneos-device-config: compositor key devices -> $keydevs"
+    fi
+fi
+
+if [ "$changed" = "1" ]; then
+    mkdir -p "$GEN/files/etc/surface-manager.d"
+    cp "$tmp" "$GEN/files/etc/surface-manager.d/surface-manager.env"
+fi
+rm -f "$tmp"
