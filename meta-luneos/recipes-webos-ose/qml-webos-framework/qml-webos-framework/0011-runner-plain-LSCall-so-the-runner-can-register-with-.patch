@@ -1,0 +1,74 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herrie <github.com@herrie.org>
+Date: Sat, 30 Aug 2025 12:00:00 +0200
+Subject: [PATCH] runner: plain LSCall, so the runner can register with SAM
+
+Since 0010 the runner registers its service by appId, which makes
+ls-hubd resolve the *application* role rather than the qml-runner
+executable role. That role is "regular", so the connection is not
+privileged, and LSCallFromApplication - which asks luna-service2 to
+speak for an application and is privileged-only - started failing:
+
+  LSCallFromApplication with application ID org.webosports.app.phone
+  but not privileged
+  Failed to LSCallFromApplication: -1031
+
+That hit the very first subscribe, registerServerStatus, so the runner
+never reached its registerApp subscription and no QML app was ever a
+registered app as far as SAM was concerned. SAM answers a relaunch of an
+unregistered non-web app by killing it and starting it again, so opening
+the app menu - which relaunches the app with "palm-command":
+"open-app-menu" - restarted the app instead, and did so for every QML
+app on the system.
+
+The appId argument is redundant now: the handle is already an
+application service registered for that appId, so the hub attaches the
+caller identity by itself and SAM matches the caller by its LS2 name.
+
+Upstream-Status: Inappropriate [LuneOS-specific, depends on patch 0010]
+
+Signed-off-by: Herrie <github.com@herrie.org>
+---
+diff --git a/tools/runner/lunaservicewrapper.cpp b/tools/runner/lunaservicewrapper.cpp
+index 6db21be..9a32a5a 100644
+--- a/tools/runner/lunaservicewrapper.cpp
++++ b/tools/runner/lunaservicewrapper.cpp
+@@ -117,17 +117,26 @@ void LunaServiceWrapper::subscribe()
+ 
+     LSError lsError;
+     LSErrorInit(&lsError);
+-    if (LSCallFromApplication(lunaHandle,
+-                              ("luna://" + m_serviceId + "/" + m_method).toLatin1(),
+-                              param.toLatin1(),
+-                              m_appId.toLatin1(),
+-                              (LSFilterFunc) staticCallbackFunc,
+-                              this,
+-                              &m_token,
+-                              &lsError)) {
++    // Plain LSCall, not LSCallFromApplication: the handle is already an
++    // application service registered for this appId, so the hub knows who is
++    // calling and attaches the identity itself. Passing the appId a second
++    // time asks luna-service2 to speak *for* an application, which only a
++    // privileged connection may do - and since the runner started registering
++    // by appId the hub resolves the app's own role, which is "regular". Every
++    // subscribe then failed with -1031, registerServerStatus included, so the
++    // runner never got as far as subscribing to registerApp. SAM saw an
++    // unregistered app and answered a relaunch by killing and restarting it
++    // instead of delivering the event: opening the app menu restarted the app.
++    if (LSCall(lunaHandle,
++               ("luna://" + m_serviceId + "/" + m_method).toLatin1(),
++               param.toLatin1(),
++               (LSFilterFunc) staticCallbackFunc,
++               this,
++               &m_token,
++               &lsError)) {
+         m_isSubscribed = true;
+     } else {
+-        qWarning() << "Failed to LSCallFromApplication:"
++        qWarning() << "Failed to LSCall:"
+                    << lsError.error_code << lsError.message;
+     }
+ }
+-- 
+2.43.0
+
