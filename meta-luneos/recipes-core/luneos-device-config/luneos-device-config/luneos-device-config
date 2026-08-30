@@ -84,9 +84,9 @@ api_level=$(prop ro.board.api_level)
 
 density=$(prop ro.sf.lcd_density)
 
-# Panel geometry from DRM. There is no fbdev on a modern Halium device - sargo
-# has no /sys/class/graphics/fb0 at all - and the virtual connector reports a
-# nonsense 4096x2160, so take the first mode of a genuinely connected one.
+# Panel geometry from DRM, where there is DRM - sargo has no
+# /sys/class/graphics/fb0 at all - and the virtual connector reports a nonsense
+# 4096x2160, so take the first mode of a genuinely connected one.
 panel_w= panel_h=
 for c in /sys/class/drm/card*-*/status; do
     [ -e "$c" ] || continue
@@ -97,6 +97,30 @@ for c in /sys/class/drm/card*-*/status; do
         [0-9]*x[0-9]*) panel_w=${mode%%x*}; panel_h=${mode##*x}; break ;;
     esac
 done
+
+# The other half of the fleet has no DRM whatsoever: a MediaTek fbdev panel
+# (MT6739) exposes only /sys/class/graphics/fb0, so the loop above finds
+# nothing and DisplayWidth/DisplayHeight keep whatever the machine conf
+# guessed. On the mindphone that was 1080x2340 against a real 480x800 panel,
+# and the whole UI came up oversized.
+#
+# Read "modes" and not "mode": "mode" empties once the compositor owns the
+# panel, so it is only populated on an idle framebuffer and reads back blank
+# exactly when this runs. The format is fbdev's own, "U:480x800p-0", so drop
+# the leading class and take the digits either side of the x. virtual_size is
+# not usable here either - it reports the scrolling buffer, 480,2400 for a
+# triple-buffered 480x800.
+if [ -z "$panel_w" ] && [ -r /sys/class/graphics/fb0/modes ]; then
+    fbmode=$(head -n1 /sys/class/graphics/fb0/modes 2>/dev/null)
+    fbmode=${fbmode#*:}
+    case "$fbmode" in
+        [0-9]*x[0-9]*)
+            panel_w=${fbmode%%x*}
+            fbmode=${fbmode#*x}
+            panel_h=${fbmode%%[!0-9]*}
+            ;;
+    esac
+fi
 
 # Touchscreen. Exactly one input device advertises ID_INPUT_TOUCHSCREEN, so
 # this needs no per-device knowledge.
