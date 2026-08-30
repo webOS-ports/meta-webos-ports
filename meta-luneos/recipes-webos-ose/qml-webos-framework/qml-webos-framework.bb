@@ -39,6 +39,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0008-runner-debug-use-WEBOS_INSTALL_BINS-as-other-binarie.patch \
     file://0009-WebOSQuickWindow-use-APP_ID-env-variable-for-appId.patch \
     file://0010-runner-register-with-appId-so-ls-hubd-can-resolve-i.patch \
+    file://0011-runner-plain-LSCall-so-the-runner-can-register-with-.patch \
 "
 
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
