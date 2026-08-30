@@ -43,8 +43,8 @@ do_install:append() {
     install -d ${D}${sysconfdir}/sensorfw/
     ln -s sensord-${MACHINE}.conf ${D}${sysconfdir}/sensorfw/primaryuse.conf
     # .. and if the file is already in WORKDIR, copy it
-    if [ -f ${WORKDIR}/sensord-${MACHINE}.conf ] ; then
-      install -m 0644 ${WORKDIR}/sensord-${MACHINE}.conf ${D}${sysconfdir}/sensorfw/
+    if [ -f ${UNPACKDIR}/sensord-${MACHINE}.conf ] ; then
+      install -m 0644 ${UNPACKDIR}/sensord-${MACHINE}.conf ${D}${sysconfdir}/sensorfw/
     fi
     # setup script which will fix the configuration symlink if needed
     install -d ${D}${bindir}

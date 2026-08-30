@@ -6,7 +6,7 @@ SRC_URI += " \
 
 do_install:append() {
     install -d ${D}${systemd_unitdir}/system/android-system.service.d
-    install -m 0644 ${WORKDIR}/change-before-dependencies.conf \
+    install -m 0644 ${UNPACKDIR}/change-before-dependencies.conf \
         ${D}${systemd_unitdir}/system/android-system.service.d
 }
 
