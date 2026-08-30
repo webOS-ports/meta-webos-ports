@@ -6,8 +6,8 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=2d5025d4aa3495befef8f17206a5b0a1"
 # We're potentially depending on libhybris so need to be MACHINE_ARCH
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-PV = "0.15.1+git"
-SRCREV = "b62d0e591d736c904128fcfc8476f22cfdbe53b9"
+PV = "0.15.2+git"
+SRCREV = "b37c5b467e8be554066dfd1c4138dbff8eec77b3"
 DEPENDS = "qtbase luna-sysmgr-common luna-service2 json-c glib-2.0 luna-sysmgr-ipc-messages"
 
 SRC_URI = " \
@@ -16,6 +16,7 @@ SRC_URI = " \
     file://0002-sensorfwd-Preload-sensors-listed-in-preload_sensors-.patch \
     file://0003-iioadaptor-Accept-input-attributes-for-IIO_CHAN_INFO.patch \
     file://0004-qt-api-do-not-marshal-invalid-QVariant-arguments.patch \
+    file://0005-compasschain-link-the-magcalibrationchain-it-calls.patch \
 "
 
 do_configure:prepend() {
