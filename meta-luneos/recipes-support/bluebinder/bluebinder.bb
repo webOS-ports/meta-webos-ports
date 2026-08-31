@@ -19,7 +19,9 @@ inherit systemd
 
 # 0001-Use-CC-as-compiler.patch was dropped at 1.0.20: upstream's Makefile now has
 # "CC ?= $(CROSS_COMPILE)gcc" (8398480), so the environment CC is already honored.
-SRC_URI = "git://github.com/mer-hybris/bluebinder.git;branch=master;protocol=https"
+SRC_URI = "git://github.com/mer-hybris/bluebinder.git;branch=master;protocol=https \
+           file://0003-bluebinder-set-under-reported-supported-commands.patch \
+"
 SRC_URI:append:tissot-halium = " file://0002-service-load-after-wifi-module-load.patch"
 
 PV = "1.0.20"
