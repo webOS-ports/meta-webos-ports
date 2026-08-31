@@ -26,6 +26,11 @@ SRC_URI = " \
     file://adaptations \
 "
 
+# Everything in SRC_URI is a local file, so nothing lands in the default
+# ${UNPACKDIR}/${BP}. Point S at the unpack directory itself instead of leaving
+# bitbake to warn about a directory that will never exist.
+S = "${UNPACKDIR}"
+
 do_install() {
     install -d ${D}${bindir}
     install -m 0755 ${UNPACKDIR}/luneos-device-config ${D}${bindir}
