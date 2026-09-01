@@ -13,7 +13,7 @@ PV = "${SPV}+git"
 # Bumped for the host-permissions patch added below: it changes what the
 # package contains without moving SRCREV or PV, so without this an already
 # installed waydroid stays at the unpatched build.
-PR = "r3"
+PR = "r6"
 
 # Pre-installed images, for machines whose system/vendor pairing is frozen.
 #
@@ -52,6 +52,7 @@ SRC_URI = "git://github.com/herrie82/waydroid.git;branch=herrie/luneos;protocol=
     file://gbinder.conf \
     file://0001-lxc-copy-host-permissions-on-non-Treble-hosts-too.patch \
     file://0002-initializer-do-not-contact-the-OTA-channel-for-pre-in.patch \
+    file://0003-user_manager-never-let-adb-failure-abort-userUnlocked.patch \
     file://waydroid-luneos-prepare.sh \
     file://waydroid-luneos-prepare.service \
     file://waydroid-luneos-session.sh \
