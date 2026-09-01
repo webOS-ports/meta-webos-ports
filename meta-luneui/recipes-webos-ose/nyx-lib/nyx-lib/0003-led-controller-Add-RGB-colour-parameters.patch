@@ -1,0 +1,225 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sun, 30 Aug 2026 12:00:00 +0200
+Subject: [PATCH] led_controller: Add RGB colour parameters to the core
+ configuration
+
+The core configuration carries brightness and a pile of fade timings but has
+never had a colour, so there is no way for a caller to ask for anything but
+"brighter" or "dimmer". nyx-modules-hybris says so at the point where it hurts:
+
+    /* no nyx params for LED RGB - hence we use grey scale */
+    hybris_light_set_pattern(notifications_device, brightness, brightness,
+                             brightness, led_on, led_off);
+
+That is not an oversight. The API was modelled on the Palm hardware it shipped
+on - board-rib.c on the Pre3 declares the LM8502 channels as keypad,
+core_navi_left, core_navi_center and core_navi_right, four single-colour LEDs -
+and single-colour hardware needs no colour parameter. Every device LuneOS
+supports today has an RGB notification LED, and per-application notification
+colours cannot be built without one.
+
+Adds NYX_LED_CONTROLLER_CORE_EFFECT_COLOUR_{RED,GREEN,BLUE}, one 0-255 channel
+each. Points worth knowing:
+
+- The new values are appended after DIRECTION, so no existing enumerator
+  renumbers and a module built against the older header is unaffected.
+
+- A channel defaults to NYX_LED_CONTROLLER_CORE_COLOUR_UNSET (-1), not to 0.
+  calloc() would have given 0, but 0 is a legal colour - black - and a module
+  has to be able to tell "the caller wants this LED off" from "the caller never
+  mentioned colour". Only the second case may fall back to the pre-colour
+  behaviour, which is what keeps CoreNaviLeds and every other brightness-only
+  caller working exactly as before.
+
+- Brightness scales the channels, out = channel * brightness / 255, so
+  brightness keeps meaning intensity while colour means hue. The consequence
+  worth flagging: brightness is 0 by default for most effects, so setting a
+  colour without also setting brightness leaves the LED dark.
+
+- Out-of-range channels are rejected with NYX_ERROR_INVALID_VALUE rather than
+  clamped. The surrounding parameters validate nothing at all, but these are
+  new, so being strict here cannot break an existing caller.
+
+Colour-blind modules need no change: a module that never asks for these
+parameters behaves as it always did.
+
+Upstream-Status: Pending
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+---
+  .../client/nyx_led_controller_core_configuration.h | 27 ++++++++++++
+  .../nyx_led_controller_core_configuration_common.h | 33 ++++++++++++++
+  .../nyx_led_controller_core_configuration_impl.c   | 50 ++++++++++++++++++++++
+  3 files changed, 110 insertions(+)
+
+diff --git a/include/public/nyx/client/nyx_led_controller_core_configuration.h b/include/public/nyx/client/nyx_led_controller_core_configuration.h
+index 7cf5928..03a311a 100644
+--- a/include/public/nyx/client/nyx_led_controller_core_configuration.h
++++ b/include/public/nyx/client/nyx_led_controller_core_configuration.h
+@@ -332,6 +332,33 @@ NYX_API_EXPORT nyx_error_t nyx_led_controller_core_configuration_create(
+  *     brightness,
+  *     duration,
+  *     direction
++ *
++ *
++ *  Colour - NYX_LED_CONTROLLER_CORE_EFFECT_COLOUR_RED,
++ *           NYX_LED_CONTROLLER_CORE_EFFECT_COLOUR_GREEN,
++ *           NYX_LED_CONTROLLER_CORE_EFFECT_COLOUR_BLUE
++ *
++ *  Accepted alongside any effect above, on the core LEDs only; the backlight
++ *  LEDs ignore it. Each channel is 0..NYX_LED_CONTROLLER_CORE_COLOUR_MAX, and
++ *  out-of-range values are rejected with NYX_ERROR_INVALID_VALUE rather than
++ *  clamped.
++ *
++ *  Brightness scales the channels, so brightness keeps meaning intensity and
++ *  the colour keeps meaning hue:
++ *
++ *      out = channel * brightness / NYX_LED_CONTROLLER_CORE_COLOUR_MAX
++ *
++ *  Note that brightness is 0 by default for most effects, so setting a colour
++ *  without also setting brightness leaves the LED dark.
++ *
++ *  A channel left at NYX_LED_CONTROLLER_CORE_COLOUR_UNSET - the value a fresh
++ *  configuration carries - means the caller expressed no colour preference.
++ *  A module must then behave exactly as it did before these parameters
++ *  existed, which for a single-colour LED is the only thing it can do anyway.
++ *  This is what keeps callers that only ever set brightness working unchanged.
++ *
++ *  Not every LED can honour a colour. A module that drives a single-colour LED
++ *  is free to ignore these, or to derive an intensity from them.
+  */
+ /**
+  * @brief Set a parameter in an LED core configuration.
+diff --git a/include/public/nyx/common/nyx_led_controller_core_configuration_common.h b/include/public/nyx/common/nyx_led_controller_core_configuration_common.h
+index c025805..e3d585f 100644
+--- a/include/public/nyx/common/nyx_led_controller_core_configuration_common.h
++++ b/include/public/nyx/common/nyx_led_controller_core_configuration_common.h
+@@ -53,6 +53,18 @@ typedef enum
+ nyx_led_controller_effect_direction_t;
+ 
+ 
++/**
++ * @brief Value a colour channel carries until a caller sets one.
++ *
++ * @see NYX_LED_CONTROLLER_CORE_EFFECT_COLOUR_RED
++ */
++#define NYX_LED_CONTROLLER_CORE_COLOUR_UNSET (-1)
++
++/**
++ * @brief Largest value a colour channel accepts.
++ */
++#define NYX_LED_CONTROLLER_CORE_COLOUR_MAX   255
++
+ /**
+  * @brief Defines the parameters used by @ref nyx_led_controller_core_configuration_set_param().
+  */
+@@ -89,6 +101,27 @@ typedef enum
+ 
+ 	NYX_LED_CONTROLLER_CORE_EFFECT_DIRECTION,       /**< direction */
+ 
++	/*
++	 * Colour of a core LED, one 0-255 channel per parameter.
++	 *
++	 * Appended after DIRECTION on purpose: every value above keeps the number it
++	 * has always had, so a module built against an older copy of this header
++	 * still resolves the parameters it does know about.
++	 *
++	 * A freshly created configuration carries
++	 * NYX_LED_CONTROLLER_CORE_COLOUR_UNSET, meaning the caller expressed no
++	 * preference and the module should keep doing whatever it did before colour
++	 * existed. Where a colour is set, brightness scales it:
++	 *
++	 *     out = channel * brightness / NYX_LED_CONTROLLER_CORE_COLOUR_MAX
++	 *
++	 * so a caller that sets a colour has to set BRIGHTNESS too. It defaults to 0
++	 * for most effects, and 0 leaves the LED dark whatever the colour says.
++	 */
++	NYX_LED_CONTROLLER_CORE_EFFECT_COLOUR_RED,      /**< colour_red, 0-255 */
++	NYX_LED_CONTROLLER_CORE_EFFECT_COLOUR_GREEN,    /**< colour_green, 0-255 */
++	NYX_LED_CONTROLLER_CORE_EFFECT_COLOUR_BLUE,     /**< colour_blue, 0-255 */
++
+ 
+ } nyx_led_controller_parameter_type_t;
+ 
+diff --git a/src/device/nyx_led_controller_core_configuration_impl.c b/src/device/nyx_led_controller_core_configuration_impl.c
+index be7ee6b..1101431 100644
+--- a/src/device/nyx_led_controller_core_configuration_impl.c
++++ b/src/device/nyx_led_controller_core_configuration_impl.c
+@@ -57,6 +57,10 @@ typedef struct
+ 
+ 	int32_t direction;
+ 
++	int32_t colour_red;
++	int32_t colour_green;
++	int32_t colour_blue;
++
+ 	bool final;
+ 
+ } nyx_led_controller_core_configuration;
+@@ -77,6 +81,16 @@ nyx_error_t nyx_led_controller_core_configuration_create(
+ 
+ 	configuration->final = false;
+ 
++	/*
++	 * calloc() zeroed these, and zero is a legal colour - black. Every
++	 * effect starts with no colour expressed instead, so that a module can
++	 * tell "caller wants the LED off" from "caller never mentioned colour"
++	 * and keep its pre-colour behaviour in the second case.
++	 */
++	configuration->colour_red = NYX_LED_CONTROLLER_CORE_COLOUR_UNSET;
++	configuration->colour_green = NYX_LED_CONTROLLER_CORE_COLOUR_UNSET;
++	configuration->colour_blue = NYX_LED_CONTROLLER_CORE_COLOUR_UNSET;
++
+ 	/* common settings */
+ 	switch (effect_type)
+ 	{
+@@ -217,6 +231,30 @@ nyx_error_t nyx_led_controller_core_configuration_set_param(
+ 			configuration->direction = new_value;
+ 			break;
+ 
++		case NYX_LED_CONTROLLER_CORE_EFFECT_COLOUR_RED:
++		case NYX_LED_CONTROLLER_CORE_EFFECT_COLOUR_GREEN:
++		case NYX_LED_CONTROLLER_CORE_EFFECT_COLOUR_BLUE:
++			if (new_value != NYX_LED_CONTROLLER_CORE_COLOUR_UNSET &&
++			        (new_value < 0 || new_value > NYX_LED_CONTROLLER_CORE_COLOUR_MAX))
++			{
++				return NYX_ERROR_INVALID_VALUE;
++			}
++
++			if (param == NYX_LED_CONTROLLER_CORE_EFFECT_COLOUR_RED)
++			{
++				configuration->colour_red = new_value;
++			}
++			else if (param == NYX_LED_CONTROLLER_CORE_EFFECT_COLOUR_GREEN)
++			{
++				configuration->colour_green = new_value;
++			}
++			else
++			{
++				configuration->colour_blue = new_value;
++			}
++
++			break;
++
+ 		default:
+ 			break;
+ 	}
+@@ -318,6 +356,18 @@ nyx_error_t nyx_led_controller_core_configuration_get_param(
+ 			*value = configuration->direction;
+ 			break;
+ 
++		case NYX_LED_CONTROLLER_CORE_EFFECT_COLOUR_RED:
++			*value = configuration->colour_red;
++			break;
++
++		case NYX_LED_CONTROLLER_CORE_EFFECT_COLOUR_GREEN:
++			*value = configuration->colour_green;
++			break;
++
++		case NYX_LED_CONTROLLER_CORE_EFFECT_COLOUR_BLUE:
++			*value = configuration->colour_blue;
++			break;
++
+ 		default:
+ 			break;
+ 	}
