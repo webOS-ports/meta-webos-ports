@@ -1,53 +1,20 @@
 From: LuneOS port <webos-ports@webos-ports.org>
 Subject: [PATCH] plugin: hardware T9 multi-tap for numeric keypads
 
-Feature-phone devices (e.g. the MT6739 mindphone) have a physical 12-key
-numeric keypad, not a touchscreen QWERTY. In a text field the digit keys
-should multi-tap into letters (2 -> a/b/c/2) with a commit timeout, while
-the dialer (Number/PhoneNumber content) still gets raw digits.
+Devices with a physical numeric keypad (e.g. the MT6739 mindphone) deliver the
+dialpad keys as hardware key events. Run the 0-9 keypad through a multi-tap
+state machine that cycles a character in the preedit (2 -> a/b/c/2, ...) and
+commits it on a 1.5s timeout or when another key is pressed. Number/PhoneNumber
+fields (the dialer) fall through to raw digits.
 
-The maliit plugin already receives hardware keys via processKeyEvent
-(setRedirectKeys on focus-in). Run the keypad through a multi-tap state
-machine that cycles a character in the preedit and commits it on timeout,
-on a different key, or on any non-keypad key. Gated on text content types.
+The compositor emits several KeyPress events for a single physical tap (~3
+within ~130ms, not flagged as auto-repeat), while deliberate taps are >250ms
+apart. De-bounce same-key presses inside a short window (t9BurstKey/t9BurstTimer)
+so one physical tap yields exactly one character (T9) or one raw digit (dialer),
+before the content-type check so it covers both paths.
 
 Upstream-Status: Pending
 ---
---- a/src/plugin/inputmethod_p.h
-+++ b/src/plugin/inputmethod_p.h
-@@ -16,6 +16,7 @@
- 
- #include <QtQuick>
- #include <QStringList>
-+#include <QTimer>
- #include <qglobal.h>
- #include <QDebug>
- 
-@@ -64,6 +65,14 @@
- 
-     WordRibbon* wordRibbon;
- 
-+    // Hardware T9 multi-tap: the numeric keypad emits KEY_0..KEY_9, and in a
-+    // text field these cycle through letters (2 -> a/b/c/2) with a commit
-+    // timeout. t9Key is the key currently being cycled (0 = none), t9Index the
-+    // position in its cycle, t9Timer the inactivity timer that finalises it.
-+    Qt::Key t9Key;
-+    int t9Index;
-+    QTimer *t9Timer;
-+
-     explicit InputMethodPrivate(InputMethod * const _q,
-                                 MAbstractInputMethodHost *host)
-         : q(_q)
-@@ -84,6 +93,9 @@
-         , m_geometry(new KeyboardGeometry(q))
-         , m_settings()
-         , wordRibbon(new WordRibbon)
-+        , t9Key(Qt::Key(0))
-+        , t9Index(0)
-+        , t9Timer(0)
-     {
-         applicationApiWrapper->setGeometryItem(m_geometry);
- 
 --- a/src/plugin/inputmethod.h
 +++ b/src/plugin/inputmethod.h
 @@ -103,6 +103,13 @@
@@ -58,12 +25,53 @@ Upstream-Status: Pending
 +    //! multi-tap state machine and returns true when it has consumed the event;
 +    //! finalizeT9 (also the inactivity-timer target) fixes the character being
 +    //! cycled.
-+    bool t9HandleKey(QEvent::Type keyType, Qt::Key keyCode);
++    bool t9HandleKey(QEvent::Type keyType, Qt::Key keyCode, bool autoRepeat);
 +    Q_SLOT void finalizeT9();
 +
      void update();
  
      const QStringList &enabledLanguages() const;
+--- a/src/plugin/inputmethod_p.h
++++ b/src/plugin/inputmethod_p.h
+@@ -16,6 +16,8 @@
+ 
+ #include <QtQuick>
+ #include <QStringList>
++#include <QTimer>
++#include <QElapsedTimer>
+ #include <qglobal.h>
+ #include <QDebug>
+ 
+@@ -64,6 +66,18 @@
+ 
+     WordRibbon* wordRibbon;
+ 
++    // Hardware T9 multi-tap: the numeric keypad emits KEY_0..KEY_9, and in a
++    // text field these cycle through letters (2 -> a/b/c/2) with a commit
++    // timeout. t9Key is the key currently being cycled (0 = none), t9Index the
++    // position in its cycle, t9Timer the inactivity timer that finalises it.
++    Qt::Key t9Key;
++    int t9Index;
++    QTimer *t9Timer;
++    // De-bounce: the compositor emits several KeyPress events for one physical
++    // keypad tap. t9BurstKey/t9BurstTimer collapse those into one press per tap.
++    Qt::Key t9BurstKey;
++    QElapsedTimer t9BurstTimer;
++
+     explicit InputMethodPrivate(InputMethod * const _q,
+                                 MAbstractInputMethodHost *host)
+         : q(_q)
+@@ -84,6 +98,10 @@
+         , m_geometry(new KeyboardGeometry(q))
+         , m_settings()
+         , wordRibbon(new WordRibbon)
++        , t9Key(Qt::Key(0))
++        , t9Index(0)
++        , t9Timer(0)
++        , t9BurstKey(Qt::Key(0))
+     {
+         applicationApiWrapper->setGeometryItem(m_geometry);
+ 
 --- a/src/plugin/inputmethod.cpp
 +++ b/src/plugin/inputmethod.cpp
 @@ -37,6 +37,8 @@
@@ -90,7 +98,7 @@ Upstream-Status: Pending
      d->registerFeedbackSetting();
      d->registerAutoCorrectSetting();
      d->registerAutoCapsSetting();
-@@ -178,6 +188,87 @@
+@@ -178,6 +188,102 @@
  //! keeps preedit, word prediction and auto-caps consistent between the two
  //! keyboards. Everything else (arrows, Tab, Escape, function keys, shortcuts)
  //! is handed back to the application untouched.
@@ -113,9 +121,24 @@ Upstream-Status: Pending
 +    }
 +}
 +
-+bool InputMethod::t9HandleKey(QEvent::Type keyType, Qt::Key keyCode)
++bool InputMethod::t9HandleKey(QEvent::Type keyType, Qt::Key keyCode, bool autoRepeat)
 +{
 +    Q_D(InputMethod);
++
++    // The compositor emits several KeyPress events for a single physical keypad
++    // tap (~3 within ~130ms; not flagged as auto-repeat), while deliberate taps
++    // are >250ms apart. De-bounce same-key presses inside a short window so a
++    // tap yields exactly one character (T9 text field) or one digit (raw
++    // Number/PhoneNumber dialer field). This runs before the content-type check
++    // so it covers both paths.
++    if (keyType == QEvent::KeyPress && !t9CycleFor(keyCode).isEmpty()) {
++        if (autoRepeat
++            || (keyCode == d->t9BurstKey && d->t9BurstTimer.isValid()
++                && d->t9BurstTimer.elapsed() < 180))
++            return true;
++        d->t9BurstKey = keyCode;
++        d->t9BurstTimer.restart();
++    }
 +
 +    // Only in text fields. Number/PhoneNumber fields (the dialer) must receive
 +    // raw digits, so leave those to the normal path.
@@ -143,7 +166,7 @@ Upstream-Status: Pending
 +        return false;
 +    }
 +
-+    // Act on the press; swallow auto-repeat and the release.
++    // Act on the press; swallow the release.
 +    if (keyType != QEvent::KeyPress)
 +        return true;
 +
@@ -178,14 +201,15 @@ Upstream-Status: Pending
  void InputMethod::processKeyEvent(QEvent::Type keyType, Qt::Key keyCode,
                                    Qt::KeyboardModifiers modifiers,
                                    const QString &text, bool autoRepeat, int count,
-@@ -186,6 +277,12 @@
+@@ -186,6 +292,13 @@
  {
      Q_D(InputMethod);
  
++
 +    // Hardware T9 numeric keypad -> letters (multi-tap) in text fields. Consumes
 +    // the keypad keys itself; returns false for everything else (and finalises
 +    // any character mid-cycle first, so the app sees committed text in order).
-+    if (t9HandleKey(keyType, keyCode))
++    if (t9HandleKey(keyType, keyCode, autoRepeat))
 +        return;
 +
      Key key;
