@@ -10,8 +10,31 @@ SECTION = "webos/support"
 SRCREV = "41f309f4c185a2c716723c081274eb56eb9263ff"
 SPV = "1.4.2"
 PV = "${SPV}+git"
+# Bumped for the host-permissions patch added below: it changes what the
+# package contains without moving SRCREV or PV, so without this an already
+# installed waydroid stays at the unpatched build.
+PR = "r1"
 
-RDEPENDS:${PN} += "waydroid-data lxc python3-gbinder python3-pygobject libgbinder python3-pyclip"
+# Pre-installed images, for machines whose system/vendor pairing is frozen.
+#
+# Waydroid disables OTA once it finds images under
+# /usr/share/waydroid-extra/images: it sets system_ota and vendor_ota to
+# "None". That is what we want on tissot and mido, whose HALIUM_9 vendor line
+# upstream stopped building, and the opposite of what a Treble target wants -
+# there the vendor type is a property of whichever device booted the image,
+# known only at runtime, so the images have to come from the OTA channel.
+#
+# Caveat for the 1.4.2 pinned above, measured on tissot: 1.4.2 still contacts
+# the channel first and only falls back to "None" after the request fails, and
+# http.retrieve() catches just ValueError and HTTPError - a DNS failure raises
+# URLError and aborts "waydroid init". So on 1.4.2 a pre-installed machine
+# still needs working DNS to initialise. 1.6.3 returns before any network call,
+# which is one more reason to land that rebase.
+#
+# Machines that should resolve their own images set this empty.
+WAYDROID_IMAGE_RDEPENDS ?= "waydroid-data"
+
+RDEPENDS:${PN} += "${WAYDROID_IMAGE_RDEPENDS} lxc python3-gbinder python3-pygobject libgbinder python3-pyclip"
 
 # these modules are directly included in android-flavored kernels
 # Note: Waydroid requires kernel >= 3.18 !
@@ -22,6 +45,7 @@ RRECOMMENDS:${PN} += " \
 
 SRC_URI = "git://github.com/herrie82/waydroid.git;branch=herrie/luneos;protocol=https \
     file://gbinder.conf \
+    file://0001-lxc-copy-host-permissions-on-non-Treble-hosts-too.patch \
 "
 
 # Needs quite new kernel (probably >= 3.18) and from LuneOS supported machines
