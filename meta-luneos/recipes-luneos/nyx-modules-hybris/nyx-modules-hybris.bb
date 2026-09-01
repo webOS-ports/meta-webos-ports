@@ -10,12 +10,13 @@ DEPENDS = "nyx-lib glib-2.0 libhybris libsuspend virtual/android-headers openssl
 
 # droidmedia would be needed here if any machine handed the torch to the hybris
 # side (NYXMOD_OW_LEDTORCH FALSE), since that module is built around
-# droid_media_camera_set_torch_mode(). No machine does yet. halium-arm64 is the
-# candidate - it runs the 16.0 GSI, whose libdroidmedia.so is the only one of ours
-# exporting that symbol - but the backend has not been exercised on hardware, so
-# the flag stays unset. Add the dependency back, scoped to the machine, when one
-# does: the cmake requires droidmedia only inside that branch, so configure fails
-# clearly if this is forgotten.
+# droid_media_camera_set_torch_mode(). No machine does, and halium-arm64 - the
+# obvious candidate - deliberately does not: that symbol exists only in the 16.0
+# GSI's libdroidmedia.so, and which GSI a device runs is a property of the image
+# flashed to it rather than of the machine it was built from. See the reasoning in
+# nyx-modules/halium-arm64.cmake. Add the dependency back, scoped to the machine,
+# if one ever does: the cmake requires droidmedia only inside that branch, so
+# configure fails clearly if this is forgotten.
 
 # We need to be ${MACHINE_ARCH} as we need to compile the source against a specific
 # Android version we select per machine
