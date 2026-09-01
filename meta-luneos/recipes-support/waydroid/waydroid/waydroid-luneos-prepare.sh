@@ -16,6 +16,23 @@ WAYDROID_HOST_HAL_LIBS="${WAYDROID_HOST_HAL_LIBS:-}"
 
 log() { echo "waydroid-prepare: $*"; }
 
+# Wait for a path, bounded. Ordering alone is not enough: the Halium mounts this
+# script depends on - binderfs and /vendor - are brought up by units that are
+# not part of this service's transaction, so After= on them does nothing. Rather
+# than name units that differ from port to port, wait for the thing itself.
+WAIT_SECS="${WAYDROID_PREPARE_WAIT:-60}"
+wait_for() {
+    _p=$1
+    [ -e "$_p" ] && return 0
+    _n=0
+    while [ "$_n" -lt "$WAIT_SECS" ]; do
+        sleep 1
+        _n=$((_n + 1))
+        [ -e "$_p" ] && { log "waited ${_n}s for $_p"; return 0; }
+    done
+    return 1
+}
+
 # ---------------------------------------------------------------- binder nodes
 #
 # On a Halium host Waydroid will not share the host HAL's /dev/binder: it looks
@@ -33,8 +50,8 @@ alloc_binder_nodes() {
     done
     [ "$have_all" = 1 ] && { log "binder nodes already present"; return 0; }
 
-    [ -e /dev/binderfs/binder-control ] || {
-        log "no binder nodes and no binderfs: the kernel must name them in CONFIG_ANDROID_BINDER_DEVICES"
+    wait_for /dev/binderfs/binder-control || {
+        log "no binder nodes and no binderfs after ${WAIT_SECS}s: the kernel must name them in CONFIG_ANDROID_BINDER_DEVICES"
         return 1
     }
 
@@ -100,6 +117,7 @@ bind_images() {
 # image supplies correctly would break a working device.
 copy_host_hal_libs() {
     [ -n "$WAYDROID_HOST_HAL_LIBS" ] || return 0
+    wait_for /vendor/lib/hw || { log "/vendor/lib/hw absent after ${WAIT_SECS}s"; return 1; }
     dest=/var/lib/waydroid/overlay/vendor/lib/hw
     mkdir -p "$dest"
     for lib in $WAYDROID_HOST_HAL_LIBS; do

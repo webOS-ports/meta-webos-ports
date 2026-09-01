@@ -1,0 +1,73 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Mon, 1 Sep 2026 18:30:00 +0200
+Subject: [PATCH] user_manager: never let adb failure abort userUnlocked
+
+userUnlocked() is the reply to a binder call the container makes from
+system_server's UserController thread. 1.4.2 calls adb_connect() there
+unguarded, and adb_connect() raises RuntimeError whenever "adb start-server"
+fails - trivially easy on a device where adb has no writable HOME:
+
+  RuntimeError: Command failed: % adb start-server
+
+The exception escapes the callback, so the reply never comes, the container's
+UserController thread stays blocked, and sixty seconds later Android's own
+watchdog kills system_server:
+
+  Watchdog: at lineageos.waydroid.UserMonitor.userUnlocked(UserMonitor.java:81)
+  Watchdog: at org.lineageos.platform.internal.WayDroidService.onUnlockUser
+  Watchdog: at com.android.server.SystemServiceManager.unlockUser
+  Watchdog: *** GOODBYE!
+
+Android restarts, unlocks the user, calls again and loops. On mindphone that
+presented as a UI stuck on "system is starting" with SystemUI unresponsive,
+processes climbing from 75 to 105 over six minutes as each generation's
+SystemUI and launcher were orphaned, and sys.boot_completed=1 the whole time -
+so nothing in "waydroid status" showed it.
+
+The app list sync immediately below never ran either, which is why no launcher
+entries ever appeared.
+
+1.6.3 both guards this call and makes it conditional on auto_adb, which 1.6.0
+turned off by default. Guarding is the half that matters here; leaving the
+call unconditional keeps existing behaviour where adb does work.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [fixed differently upstream in 1.6.3]
+---
+--- a/tools/services/user_manager.py
++++ b/tools/services/user_manager.py
+@@ -4,6 +4,7 @@
+ import os
+ import threading
+ import tools.config
++from contextlib import suppress
+ import tools.helpers.net
+ from tools.interfaces import IUserMonitor
+ from tools.interfaces import IPlatform
+@@ -66,7 +67,25 @@
+     def userUnlocked(uid):
+         logging.info("Android with user {} is ready".format(uid))
+ 
+-        tools.helpers.net.adb_connect(args)
++        # Never let this abort the callback. userUnlocked() is the reply to a
++        # binder call the container makes from system_server's UserController
++        # thread; an exception here means that reply never comes, the thread
++        # stays blocked, and sixty seconds later Android's own watchdog kills
++        # system_server:
++        #
++        #   Watchdog: at lineageos.waydroid.UserMonitor.userUnlocked
++        #   Watchdog: at ...WayDroidService.onUnlockUser
++        #   Watchdog: *** GOODBYE!
++        #
++        # Android then restarts, unlocks the user, calls again, and loops -
++        # leaving the UI stuck on "system is starting" with orphaned SystemUI
++        # processes piling up from each generation.
++        #
++        # adb_connect() raises RuntimeError whenever "adb start-server" fails,
++        # which is easy on a device where adb has no writable HOME. Worse, the
++        # app list sync below never runs, so launcher entries never appear.
++        with suppress(RuntimeError):
++            tools.helpers.net.adb_connect(args)
+ 
+         platformService = IPlatform.get_service(args)
+         if platformService:
