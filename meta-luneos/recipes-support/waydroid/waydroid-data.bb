@@ -39,6 +39,13 @@ WAYDROID_HALIUM_LEVEL:mido-halium = "HALIUM_9"
 
 WAYDROID_ARCH:x86-64 = "waydroid_x86_64"
 WAYDROID_ARCH:aarch64 = "waydroid_arm64"
+# 32-bit ARM is a separate build of both system and vendor, not an arm64
+# image with a different vendor variant: mindphone reports armeabi-v7a with
+# no arm64 in ro.product.cpu.abilist, and waydroid's arch.py maps armv7l to
+# "arm". COMPATIBLE_MACHINE claimed these arches already; without this the
+# download URL expanded with an empty arch.
+WAYDROID_ARCH:armv7a = "waydroid_arm"
+WAYDROID_ARCH:armv7ve = "waydroid_arm"
 
 WAYDROID_SYSTEM_IMAGE = "lineage-18.1-20231028-VANILLA-${WAYDROID_ARCH}-system.zip"
 WAYDROID_VENDOR_IMAGE = "lineage-18.1-20231028-MAINLINE-${WAYDROID_ARCH}-vendor.zip"

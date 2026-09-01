@@ -1,0 +1,130 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Mon, 1 Sep 2026 15:40:00 +0200
+Subject: [PATCH] initializer: do not contact the OTA channel for pre-installed
+ images
+
+setup_config() queries the system and vendor OTA channels before it looks at
+whether the images are already on disk, and only falls back to "None" after a
+request fails. But http.retrieve() catches ValueError and HTTPError and nothing
+else, so a DNS failure raises URLError, which propagates straight out and aborts
+init:
+
+  ERROR: <urlopen error [Errno -3] Temporary failure in name resolution>
+
+That makes "waydroid init" impossible without a network on exactly the machines
+that need no network, because their images are pre-installed. It also means a
+machine deliberately pinned to a matched system/vendor pair has the channel pick
+for it the moment it does have a network - which on a Halium host is how a
+vendor image ends up paired with a system image several VNDK generations away.
+
+Waydroid 1.6.3 returns early here for the same reasons. This restores that
+behaviour on 1.4.2, where the channel lookup sits ahead of the vendor type
+detection and setupBinderNodes(), so the block has to be guarded rather than
+simply moved - returning early instead would skip binder setup and leave
+args.BINDER_DRIVER unset.
+
+Reproduced on tissot-halium and mindphone, both of which carry pre-installed
+images and both of which failed to initialise until this was applied.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [fixed differently upstream in 1.6.3]
+---
+--- a/tools/actions/initializer.py
++++ b/tools/actions/initializer.py
+@@ -47,44 +47,61 @@
+         args.images_path = tools.config.defaults["images_path"]
+     cfg["waydroid"]["images_path"] = args.images_path
+ 
+-    channels_cfg = tools.config.load_channels()
+-    if not args.system_channel:
+-        args.system_channel = channels_cfg["channels"]["system_channel"]
+-    if not args.vendor_channel:
+-        args.vendor_channel = channels_cfg["channels"]["vendor_channel"]
+-    if not args.rom_type:
+-        args.rom_type = channels_cfg["channels"]["rom_type"]
+-    if not args.system_type:
+-        args.system_type = channels_cfg["channels"]["system_type"]
++    # Skip the OTA channel entirely when the images are already on disk.
++    #
++    # Contacting it first is not merely wasteful, it is fatal without DNS:
++    # http.retrieve() catches ValueError and HTTPError but not URLError, so a
++    # name resolution failure propagates out of setup_config and aborts
++    # "waydroid init" - on a machine whose images are sitting right there. It
++    # also means a machine pinned to a specific system/vendor pair can have the
++    # channel decide otherwise the moment it does have a network.
++    #
++    # 1.6.3 returns here for the same reason; this restores that behaviour on
++    # 1.4.2, whose ordering puts the channel lookup ahead of the vendor type and
++    # binder node setup, so the two cannot simply be swapped.
++    if args.images_path in preinstalled_images_paths:
++        args.system_ota = "None"
++        args.vendor_ota = "None"
++        args.vendor_type = get_vendor_type(args)
++    else:
++        channels_cfg = tools.config.load_channels()
++        if not args.system_channel:
++            args.system_channel = channels_cfg["channels"]["system_channel"]
++        if not args.vendor_channel:
++            args.vendor_channel = channels_cfg["channels"]["vendor_channel"]
++        if not args.rom_type:
++            args.rom_type = channels_cfg["channels"]["rom_type"]
++        if not args.system_type:
++            args.system_type = channels_cfg["channels"]["system_type"]
+ 
+-    args.system_ota = args.system_channel + "/" + args.rom_type + \
+-        "/waydroid_" + args.arch + "/" + args.system_type + ".json"
+-    system_request = helpers.http.retrieve(args.system_ota)
+-    if system_request[0] != 200:
+-        if args.images_path not in preinstalled_images_paths:
+-            raise ValueError(
+-                "Failed to get system OTA channel: {}, error: {}".format(args.system_ota, system_request[0]))
+-        else:
+-            args.system_ota = "None"
++        args.system_ota = args.system_channel + "/" + args.rom_type + \
++            "/waydroid_" + args.arch + "/" + args.system_type + ".json"
++        system_request = helpers.http.retrieve(args.system_ota)
++        if system_request[0] != 200:
++            if args.images_path not in preinstalled_images_paths:
++                raise ValueError(
++                    "Failed to get system OTA channel: {}, error: {}".format(args.system_ota, system_request[0]))
++            else:
++                args.system_ota = "None"
+ 
+-    device_codename = helpers.props.host_get(args, "ro.product.device")
+-    args.vendor_type = None
+-    for vendor in [device_codename, get_vendor_type(args)]:
+-        vendor_ota = args.vendor_channel + "/waydroid_" + \
+-            args.arch + "/" + vendor.replace(" ", "_") + ".json"
+-        vendor_request = helpers.http.retrieve(vendor_ota)
+-        if vendor_request[0] == 200:
+-            args.vendor_type = vendor
+-            args.vendor_ota = vendor_ota
+-            break
++        device_codename = helpers.props.host_get(args, "ro.product.device")
++        args.vendor_type = None
++        for vendor in [device_codename, get_vendor_type(args)]:
++            vendor_ota = args.vendor_channel + "/waydroid_" + \
++                args.arch + "/" + vendor.replace(" ", "_") + ".json"
++            vendor_request = helpers.http.retrieve(vendor_ota)
++            if vendor_request[0] == 200:
++                args.vendor_type = vendor
++                args.vendor_ota = vendor_ota
++                break
+ 
+-    if not args.vendor_type:
+-        if args.images_path not in preinstalled_images_paths:
+-            raise ValueError(
+-                "Failed to get vendor OTA channel: {}".format(vendor_ota))
+-        else:
+-            args.vendor_ota = "None"
+-            args.vendor_type = get_vendor_type(args)
++        if not args.vendor_type:
++            if args.images_path not in preinstalled_images_paths:
++                raise ValueError(
++                    "Failed to get vendor OTA channel: {}".format(vendor_ota))
++            else:
++                args.vendor_ota = "None"
++                args.vendor_type = get_vendor_type(args)
+ 
+     if args.system_ota != cfg["waydroid"].get("system_ota"):
+         cfg["waydroid"]["system_datetime"] = tools.config.defaults["system_datetime"]
