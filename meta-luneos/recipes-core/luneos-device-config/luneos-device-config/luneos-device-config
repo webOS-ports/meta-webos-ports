@@ -68,6 +68,65 @@ resolve_input_list_by_name() {
 
 mkdir -p "$RUN"
 
+# Wait for the hardware to exist before deriving anything from it.
+#
+# Ordering the unit after the udev coldplug is necessary but not sufficient. On
+# rosy the postmarketOS msm-firmware-loader.service carries
+# Before=systemd-udevd.service and spends over a minute linking firmware out of
+# the vendor partitions, so udev only starts about seventy seconds into the boot
+# and the msm DRM master and the PMIC key inputs bind another five seconds after
+# that. Sampling sysfs once at that moment still finds nothing.
+#
+# The predicate is "the display subsystem is up", not "a panel we can measure has
+# appeared". qemux86-64 and VirtualBox expose only a Virtual connector, which the
+# geometry loop below deliberately skips, so waiting for a *derivable* panel
+# would stall every boot there for the whole timeout while changing nothing. A
+# card directory or an fbdev node is enough, and is already true at this point on
+# every device that boots today - for them this costs one stat() and no sleep.
+#
+# Bounded, and a warning rather than a failure. rosy's edt_ft5x06 does not always
+# probe, and a phone that boots without touch is worth more than one that does
+# not boot.
+DISPLAY_WAIT=${LUNEOS_DISPLAY_WAIT:-30}
+
+display_present() {
+    for _p in /sys/class/drm/card*-*/status /sys/class/graphics/fb0/modes; do
+        [ -e "$_p" ] && return 0
+    done
+    return 1
+}
+
+# Nothing to wait for on a kernel that has neither subsystem: if the class
+# directories themselves are absent, no card and no framebuffer is ever going to
+# turn up in them, and a Halium device on an old hwcomposer-only kernel would pay
+# the whole timeout on every boot for a value it was never going to get. This is
+# checked, not assumed, because it is the one case where waiting costs a device
+# that works today. The drm class appears as soon as the drm module loads -
+# modprobe@drm.service does that in early boot, well before this runs - so rosy
+# still waits for its connector.
+if [ ! -d /sys/class/drm ] && [ ! -d /sys/class/graphics ]; then
+    log "kernel has neither a drm nor a graphics class; not waiting for a display"
+elif ! display_present; then
+    _waited=0
+    while [ "$_waited" -lt "$DISPLAY_WAIT" ]; do
+        sleep 1
+        _waited=$((_waited + 1))
+        display_present && break
+    done
+    if display_present; then
+        log "display appeared after ${_waited}s"
+    else
+        log "WARNING: no DRM connector and no framebuffer after ${DISPLAY_WAIT}s;" \
+            "deriving without one"
+    fi
+fi
+
+# Let udev drain whatever bound alongside the display. On rosy the power key and
+# the volume rocker land in the same second as the DRM master, and the ID_INPUT_*
+# properties the loops below read come from udev's database, not from sysfs, so
+# without this they are simply absent.
+udevadm settle --timeout=10 >/dev/null 2>&1 || true
+
 # ---------------------------------------------------------------- Tier 0 ----
 
 # Codename. The vendor's own idea of the device is the one that matters: on a
@@ -75,6 +134,35 @@ mkdir -p "$RUN"
 codename=$(prop ro.product.vendor.device)
 [ -n "$codename" ] || codename=$(prop ro.vendor.product.device)
 [ -n "$codename" ] || codename=$(prop ro.product.device)
+
+# There is no container on a mainline device, so every property above is empty
+# and the codename fell all the way through to "unknown" - which meant Tier 1 was
+# unreachable on rosy, mido, tissot, hammerhead, tenderloin, the PinePhones and
+# the Pis. An adaptation directory for any of them could never have been found,
+# and the log said so on every boot: "no adaptation for 'unknown'".
+#
+# The kernel knows perfectly well which device it is. The first entry of the
+# device tree's compatible list is the most specific one and is exactly the
+# vendor/codename pair we want:
+#
+#   xiaomi,rosy        qcom,msm8953        -> rosy
+#   xiaomi,tissot      qcom,msm8953        -> tissot
+#   xiaomi,mido        qcom,msm8953        -> mido
+#   lge,hammerhead     qcom,msm8974        -> hammerhead
+#   pine64,pinephone-pro rockchip,rk3399   -> pinephone-pro
+#
+# The property is a NUL-separated list of strings, so cut at the first NUL and
+# then take the part after the comma. Note the codename is the *device tree's*
+# name for the device and need not equal the Yocto MACHINE - pinephone-pro is
+# built as pinephonepro - so an adaptation directory is named for what this
+# derives, which is the name the device reports for itself.
+if [ -z "$codename" ] && [ -r /proc/device-tree/compatible ]; then
+    _compat=$(tr '\0' '\n' < /proc/device-tree/compatible 2>/dev/null | head -n1)
+    case "$_compat" in
+        *,*) codename=${_compat#*,} ;;
+    esac
+fi
+
 [ -n "$codename" ] || codename=unknown
 
 # Vendor API level: which GSI generation this vendor expects to talk to.
@@ -196,14 +284,19 @@ if [ -n "${deviceinfo_video_call:-}" ]; then
     log "video-call policy from deviceinfo: $deviceinfo_video_call"
 fi
 
+# Quoted, because LUNEOS_KEY_DEVICES is a ';' separated list. systemd's
+# EnvironmentFile= does not word-split, so this was harmless there, but anything
+# that sources the file with '.' runs the second and later nodes as commands -
+# on tissot, ". device.env" produces three "/dev/input/event3: Permission denied"
+# errors and leaves the variable holding only the first node.
 cat > "$RUN/device.env" <<EOF
-LUNEOS_DEVICE_CODENAME=$codename
-LUNEOS_VENDOR_API_LEVEL=$api_level
-LUNEOS_DISPLAY_DENSITY=$density
-LUNEOS_PANEL_WIDTH=$panel_w
-LUNEOS_PANEL_HEIGHT=$panel_h
-LUNEOS_TOUCHSCREEN_DEVICE=$touchscreen
-LUNEOS_KEY_DEVICES=$keydevs
+LUNEOS_DEVICE_CODENAME="$codename"
+LUNEOS_VENDOR_API_LEVEL="$api_level"
+LUNEOS_DISPLAY_DENSITY="$density"
+LUNEOS_PANEL_WIDTH="$panel_w"
+LUNEOS_PANEL_HEIGHT="$panel_h"
+LUNEOS_TOUCHSCREEN_DEVICE="$touchscreen"
+LUNEOS_KEY_DEVICES="$keydevs"
 EOF
 log "codename=$codename api=$api_level density=$density panel=${panel_w}x${panel_h} touch=$touchscreen keys=$keydevs"
 
