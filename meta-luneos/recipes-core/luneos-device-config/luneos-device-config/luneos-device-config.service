@@ -15,6 +15,25 @@ DefaultDependencies=no
 # failed), but a failed verdict no longer suppresses config generation.
 After=android-system.service
 Wants=android-system.service
+# And after udev, which is the ordering this unit never had.
+#
+# DefaultDependencies=no has to stay: the service is RequiredBy=basic.target, and
+# the implicit After=basic.target that default dependencies would add makes an
+# ordering cycle that systemd can only resolve by dropping one of the two jobs.
+# But switching them off also drops the implicit After=sysinit.target, which left
+# android-system.service as the only ordering on this unit - and there is no
+# android-system.service on a mainline machine. On rosy, mido, tissot,
+# hammerhead, tenderloin, the Pis, the PinePhones and the qemu targets the
+# service therefore had no ordering at all and raced udev, which it lost: it ran
+# in the first second of userspace, before /sys/class/drm had any card and before
+# udevd was even started, so every Tier 0 value came back empty and every
+# generator below fell through to its "we know nothing" branch.
+#
+# systemd-udev-trigger.service is the coldplug. It pulls in systemd-udevd.service
+# and is itself Before=sysinit.target, so ordering after it keeps this unit in the
+# same slot relative to basic.target and introduces no cycle.
+After=systemd-udev-trigger.service
+Wants=systemd-udev-trigger.service
 # Before configd, so the generated layer is in place and the stale cache is
 # gone before it builds its merged view.
 #
@@ -31,6 +50,11 @@ Before=nyx.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+# The derivation waits for the display to appear before reading it - see the
+# comment on DISPLAY_WAIT in luneos-device-config. Be explicit about the room
+# that needs rather than leaning on DefaultTimeoutStartSec, because this unit
+# sits in front of nyx.target and the compositor.
+TimeoutStartSec=120
 ExecStart=/usr/bin/luneos-device-config
 
 [Install]

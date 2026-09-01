@@ -52,9 +52,54 @@ set_value() {
     changed=1
 }
 
-# Derived by the caller.
-set_value module.keys       paths      "${keydevs:-}"
-set_value module.touchpanel path       "${touchscreen:-}"
+# Derived by the caller - but not every shipped value is a guess, and the two
+# kinds have to be told apart.
+#
+# Measured on the devices we have attached:
+#
+#   tissot  ships event0 = qpnp_pon, the power key, and nothing else. The volume
+#           rocker is event4 (gpio-keys) and never reaches nyx. Derivation finds
+#           both, so it is a real improvement and must not be suppressed.
+#   rosy    ships event0 = gpio-keys and misses the PMIC power key entirely.
+#   pinephone, pinephonepro, pinetab2 and tenderloin-halium ship
+#           /dev/input/by-path/... links instead. Those survive a change in
+#           enumeration order, which is the whole argument this file's header
+#           makes, and derivation would replace them with the numeric nodes the
+#           header condemns - and widen them, because derivation only narrows to
+#           a superset of everything claiming a key that is not the touchscreen.
+#
+# So: a value that pins by a stable path is a declaration and is kept; a bare
+# /dev/input/eventN is the guess derivation exists to replace. Tier 1 outranks
+# both - that is how sargo excludes its fingerprint sensor, and how rosy gets its
+# power key by name.
+shipped_value_of() {
+    awk -v g="[$1]" -v k="$2" '
+        /^\[/ { ing = ($0 == g); next }
+        ing && index($0, k "=") == 1 { sub(/^[^=]*=/, ""); print; exit }' "$SRC"
+}
+
+# True when the value is nothing but bare event nodes, i.e. a node-number guess.
+# Strip every /dev/input/eventN out and see whether anything is left; a by-path
+# link, or anything else we have not thought of, leaves a remainder and is
+# therefore treated as deliberate.
+looks_like_node_guess() {
+    [ -z "$(printf '%s' "$1" | sed 's#/dev/input/event[0-9][0-9]*;*##g')" ]
+}
+
+# set_derived <group> <key> <derived value> <tier 1 value, if any>
+set_derived() {
+    _shipped=$(shipped_value_of "$1" "$2")
+    if [ -n "$4" ] || [ -z "$_shipped" ] || looks_like_node_guess "$_shipped"; then
+        set_value "$1" "$2" "$3"
+    else
+        echo "luneos-device-config: nyx [$1] $2 kept as shipped ($_shipped)"
+    fi
+}
+
+set_derived module.keys       paths "${keydevs:-}" \
+            "${deviceinfo_key_devices_by_name:-}${deviceinfo_key_devices:-}"
+set_derived module.touchpanel path  "${touchscreen:-}" \
+            "${deviceinfo_touchscreen_by_name:-}${deviceinfo_touchscreen_device:-}"
 
 # The USB charger supply is derived here. nyx's own fallback walks
 # /sys/class/power_supply for type == "USB" exactly, and on a modern Qualcomm
