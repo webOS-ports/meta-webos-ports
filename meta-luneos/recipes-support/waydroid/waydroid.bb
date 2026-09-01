@@ -13,7 +13,7 @@ PV = "${SPV}+git"
 # Bumped for the host-permissions patch added below: it changes what the
 # package contains without moving SRCREV or PV, so without this an already
 # installed waydroid stays at the unpatched build.
-PR = "r1"
+PR = "r3"
 
 # Pre-installed images, for machines whose system/vendor pairing is frozen.
 #
@@ -33,6 +33,11 @@ PR = "r1"
 #
 # Machines that should resolve their own images set this empty.
 WAYDROID_IMAGE_RDEPENDS ?= "waydroid-data"
+# mindphone has no room for them: its rootfs is a 2.4G loop image with a few
+# hundred MB free, while /var lives on userdata with tens of GB. The images
+# have to come from the OTA channel into /var/lib/waydroid/images, or be
+# placed there and bind mounted over a preinstalled path.
+WAYDROID_IMAGE_RDEPENDS:mindphone = ""
 
 RDEPENDS:${PN} += "${WAYDROID_IMAGE_RDEPENDS} lxc python3-gbinder python3-pygobject libgbinder python3-pyclip"
 
@@ -46,6 +51,12 @@ RRECOMMENDS:${PN} += " \
 SRC_URI = "git://github.com/herrie82/waydroid.git;branch=herrie/luneos;protocol=https \
     file://gbinder.conf \
     file://0001-lxc-copy-host-permissions-on-non-Treble-hosts-too.patch \
+    file://0002-initializer-do-not-contact-the-OTA-channel-for-pre-in.patch \
+    file://waydroid-luneos-prepare.sh \
+    file://waydroid-luneos-prepare.service \
+    file://waydroid-luneos-session.sh \
+    file://waydroid-luneos-session.service \
+    file://waydroid-luneos.conf.mindphone \
 "
 
 # Needs quite new kernel (probably >= 3.18) and from LuneOS supported machines
@@ -60,13 +71,20 @@ COMPATIBLE_MACHINE:pinephonepro = "(.*)"
 COMPATIBLE_MACHINE:pinetab2 = "(.*)"
 COMPATIBLE_MACHINE:mido-halium = "(.*)"
 COMPATIBLE_MACHINE:tissot-halium = "(.*)"
+COMPATIBLE_MACHINE:mindphone = "(.*)"
 
 inherit pkgconfig
 inherit webos_app
 inherit webos_filesystem_paths
 inherit webos_systemd
 
-WEBOS_SYSTEMD_SERVICE = "waydroid-init.service waydroid-container.service"
+# waydroid-luneos-prepare recreates the host state Waydroid needs but does not
+# create itself - binder nodes on a binderfs kernel, the image bind mount, host
+# GPU HAL bridging - none of which survives a reboot. waydroid-luneos-session
+# starts the per-user session against the LuneOS compositor; see the script for
+# why that is interim.
+WEBOS_SYSTEMD_SERVICE = "waydroid-init.service waydroid-container.service \
+    waydroid-luneos-prepare.service waydroid-luneos-session.service"
 
 CLEANBROKEN = "1"
 
@@ -74,6 +92,21 @@ EXTRA_OEMAKE = "SYSD_DIR=${systemd_system_unitdir} USE_NFTABLES="1" WAYDROID_VER
 
 do_install() {
     make install_luneos DESTDIR=${D}
+
+    install -d ${D}${libexecdir}
+    install -m 0755 ${UNPACKDIR}/waydroid-luneos-prepare.sh ${D}${libexecdir}/waydroid-luneos-prepare
+    install -m 0755 ${UNPACKDIR}/waydroid-luneos-session.sh ${D}${libexecdir}/waydroid-luneos-session
+
+    install -d ${D}${systemd_system_unitdir}
+    install -m 0644 ${UNPACKDIR}/waydroid-luneos-prepare.service ${D}${systemd_system_unitdir}
+    install -m 0644 ${UNPACKDIR}/waydroid-luneos-session.service ${D}${systemd_system_unitdir}
+}
+
+# Device specifics for waydroid-luneos-prepare. Only machines that need one
+# ship a file; the script no-ops on every step when it is absent.
+do_install:append:mindphone() {
+    install -d ${D}${sysconfdir}/default
+    install -m 0644 ${UNPACKDIR}/waydroid-luneos.conf.mindphone ${D}${sysconfdir}/default/waydroid-luneos
 }
 
 # Provided by libgbinder already for Halium devices, but necessary to add for non-Halium devices.
