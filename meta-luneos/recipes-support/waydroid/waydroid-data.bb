@@ -27,6 +27,10 @@ SHA256SUM_VENDOR:aarch64 = "e67f0d92907bd74083f1f83da701609c94c4cdbd8ba7c662c27d
 
 SHA256SUM_VENDOR:halium = "cd5b1394f35c97c0284f365e52588eecd7b89b6aa28624aefca55aff509143e5"
 
+# The two zips unpack their .img files straight into ${UNPACKDIR}, so the
+# default S = "${UNPACKDIR}/${BP}" never comes into existence.
+S = "${UNPACKDIR}"
+
 SRC_URI = "https://sourceforge.net/projects/waydroid/files/images/system/lineage/${WAYDROID_ARCH}/${WAYDROID_SYSTEM_IMAGE};name=system \
            https://sourceforge.net/projects/waydroid/files/images/vendor/${WAYDROID_ARCH}/${WAYDROID_VENDOR_IMAGE};name=vendor \
            "

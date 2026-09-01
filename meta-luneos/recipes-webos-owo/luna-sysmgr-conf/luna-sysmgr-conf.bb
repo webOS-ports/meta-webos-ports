@@ -11,6 +11,10 @@ inherit webos_filesystem_paths
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
+# Nothing but local files, so nothing ever lands in the default
+# S = "${UNPACKDIR}/${BP}" and do_unpack warns about it.
+S = "${UNPACKDIR}"
+
 SRC_URI = " \
     file://luna-platform.conf \
     file://lunaAnimations-platform.conf \

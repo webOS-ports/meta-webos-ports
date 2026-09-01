@@ -4,6 +4,10 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
+# Nothing but local files, so nothing ever lands in the default
+# S = "${UNPACKDIR}/${BP}" and do_unpack warns about it.
+S = "${UNPACKDIR}"
+
 # /etc/default/pulseaudio.conf used to be installed here purely to set
 # PULSE_SCRIPT=/etc/pulse/webos-system.pa, but nothing ever read that variable --
 # pulseaudio.service's ExecStart names the script directly now, so the file had no
