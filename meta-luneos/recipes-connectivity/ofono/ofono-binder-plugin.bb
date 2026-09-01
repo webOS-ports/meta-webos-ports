@@ -11,6 +11,7 @@ inherit pkgconfig
 
 SRC_URI = "git://github.com/mer-hybris/ofono-binder-plugin.git;branch=master;protocol=https \
            file://0001-binder_connman-do-not-read-non-basic-property-varian.patch \
+           file://0002-binder_sim-fix-logical-access-and-add-slot-switching.patch \
 "
 
 PV = "1.1.28"

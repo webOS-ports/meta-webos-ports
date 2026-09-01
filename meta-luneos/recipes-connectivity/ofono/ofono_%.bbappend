@@ -12,6 +12,8 @@ SRC_URI:append = " \
   file://0003-common-atmodem-move-at_util_call_compare_by_id-to-dr.patch \
   file://0004-add-call-list-helper-to-manage-voice-call-lists.patch \
   file://0006-Allow-qmi-qrtr-without-data.patch \
+  file://0007-sim-add-org.ofono.EuiccManager-interface.patch \
+  file://0008-qmimodem-add-logical-channel-support.patch \
   file://msm-modem-uim-selection.sh \
   file://ofono.service \
   file://70-ofono-modem.rules \

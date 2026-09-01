@@ -172,6 +172,17 @@ NFC_RDEPENDS = " \
     webos-nfc-adapter \
 "
 
+# eSIM: lpac is the LPA (SGP.22 profile download/management), luneos-esim-adapter
+# bridges it and ofono's EuiccManager onto the luna-service2 bus for the
+# Settings app. Useful on any device whose modem can open logical channels -
+# an eSIM adapter card in the SIM slot counts, so this is not restricted to
+# machines with a soldered eUICC.
+ESIM_RDEPENDS = " \
+    lpac \
+    luneos-esim-adapter \
+    gstreamer1.0-plugins-bad-zbar \
+"
+
 # (Optional?) work for Qt6:
 #     qtscenegraph-adaptation
 
@@ -214,6 +225,11 @@ RDEPENDS:${PN}:append:sagit = " ${NFC_RDEPENDS}"
 # The GSI machine can land on any device; the stack is harmless without an
 # NFC controller (nfcd just reports unavailable).
 RDEPENDS:${PN}:append:halium-arm64 = " ${NFC_RDEPENDS}"
+
+# sargo has a real eUICC; the generic halium images cover the rest, where an
+# adapter card is the way in.
+RDEPENDS:${PN}:append:sargo = " ${ESIM_RDEPENDS}"
+RDEPENDS:${PN}:append:halium-arm64 = " ${ESIM_RDEPENDS}"
 
 RDEPENDS:${PN}:append:mido-halium = " waydroid"
 RDEPENDS:${PN}:append:pinephone = " waydroid"

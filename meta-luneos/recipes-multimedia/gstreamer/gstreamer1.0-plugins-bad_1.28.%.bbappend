@@ -7,6 +7,11 @@ EXTENDPRAUTO:append = "webos7"
 PACKAGECONFIG:remove = "rsvg"
 PACKAGECONFIG:append = " v4l2codecs"
 
+# The zbar element decodes barcodes out of a video stream, which is how the
+# eSIM settings page reads an operator's QR activation code. Nothing else on
+# the image can decode a QR - libqrencode only writes them.
+PACKAGECONFIG:append = " zbar"
+
 FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 SRC_URI:append = " \
     file://0004-waylandsink-make-wl_subcompositor-optional.patch;striplevel=3 \
