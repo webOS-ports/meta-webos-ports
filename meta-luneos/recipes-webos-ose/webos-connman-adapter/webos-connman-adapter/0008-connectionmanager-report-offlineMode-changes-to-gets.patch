@@ -1,0 +1,108 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: LuneOS <dev@luneos.org>
+Date: Tue, 1 Sep 2026 19:37:36 +0200
+Subject: [PATCH] connectionmanager: report offlineMode changes to getstatus
+ subscribers
+
+getstatus already reports offlineMode, but nothing pushed an update when
+it changed. Entering or leaving airplane mode only reached subscribers as
+a side effect of some technology changing its Powered state, which is a
+race against the manager property itself, and does not happen at all when
+no technology was powered to begin with. The shell's airplane mode
+indicator therefore could not be driven from this API.
+
+Notify on OfflineMode as well.
+
+While here, fix the ordering that made such a notification useless: the
+manager_property_changed callback ran before the new value was stored in
+the manager, so a consumer sending getstatus from it reported the value
+being replaced rather than the new one. This was already wrong for State,
+which append_connection_status() reads back through
+connman_manager_is_manager_online(). Apply the property first, then
+notify, in both the initial property sweep and the PropertiesChanged
+signal handler.
+
+Upstream-Status: Inappropriate [LuneOS specific]
+---
+ src/connman_manager.c | 24 ++++++++++++++----------
+ src/wifi_service.c    | 11 +++++++++++
+ 2 files changed, 25 insertions(+), 10 deletions(-)
+
+diff --git a/src/connman_manager.c b/src/connman_manager.c
+index a73bf87..e4361da 100644
+--- a/src/connman_manager.c
++++ b/src/connman_manager.c
+@@ -1396,11 +1396,6 @@ static void connman_manager_update_state(connman_manager_t *manager)
+ 		GVariant *va = g_variant_get_variant(v);
+ 		const gchar *key = g_variant_get_string(key_v, NULL);
+ 
+-		if (connman_update_callbacks->manager_property_changed)
+-		{
+-			connman_update_callbacks->manager_property_changed(key, va);
+-		}
+-
+ 		if (!g_strcmp0(key, "State"))
+ 		{
+ 			g_free(manager->state);
+@@ -1422,6 +1417,14 @@ static void connman_manager_update_state(connman_manager_t *manager)
+ #endif
+ 		}
+ 
++		/* Notify only once the property has been applied, so that a
++		 * consumer asking connman_manager_* for the new value gets the
++		 * new value and not the one it is replacing. */
++		if (connman_update_callbacks->manager_property_changed)
++		{
++			connman_update_callbacks->manager_property_changed(key, va);
++		}
++
+ 		g_variant_unref(v);
+ 		g_variant_unref(va);
+ 		g_variant_unref(property);
+@@ -1890,11 +1893,6 @@ property_changed_cb(ConnmanInterfaceManager *proxy, const gchar *property,
+ 	WCALOG_DEBUG("Manager property %s changed : %s", property,
+ 	             g_variant_get_string(va, NULL));
+ 
+-	if (connman_update_callbacks->manager_property_changed)
+-	{
+-		connman_update_callbacks->manager_property_changed(property, va);
+-	}
+-
+ 	if (!g_strcmp0(property, "State"))
+ 	{
+ 		g_free(manager->state);
+@@ -1905,6 +1903,12 @@ property_changed_cb(ConnmanInterfaceManager *proxy, const gchar *property,
+ 		manager->offline = g_variant_get_boolean(va);
+ 	}
+ 
++	/* Same ordering as above: apply first, then notify. */
++	if (connman_update_callbacks->manager_property_changed)
++	{
++		connman_update_callbacks->manager_property_changed(property, va);
++	}
++
+ 	if (NULL != manager->handle_property_change_fn)
+ 	{
+ 		(manager->handle_property_change_fn)((gpointer)manager, property, v);
+diff --git a/src/wifi_service.c b/src/wifi_service.c
+index addbf83..e288303 100644
+--- a/src/wifi_service.c
++++ b/src/wifi_service.c
+@@ -1776,6 +1776,17 @@ static void manager_property_changed_callback(gpointer data,
+ 	{
+ 		connectionmanager_send_status_to_subscribers();
+ 	}
++	/*
++	 * getstatus reports offlineMode, so subscribers have to be told when it
++	 * changes too. Without this the only reason an update goes out on entering
++	 * or leaving airplane mode is that some technology happens to change its
++	 * Powered state as a side effect, which is a race, and does not happen at
++	 * all when no technology was powered to begin with.
++	 */
++	else if (!g_strcmp0(property, "OfflineMode"))
++	{
++		connectionmanager_send_status_to_subscribers();
++	}
+ }
+ 
+ /**
