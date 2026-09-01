@@ -50,16 +50,25 @@ set(NYXMOD_OW_DEVICEINFO				FALSE)
 set(NYXMOD_OW_SYSTEM					FALSE)
 set(NYXMOD_OW_LED						FALSE)
 
-# NOT handed to the hybris side, despite that being the natural choice here:
-# /sys/class/leds on a Treble device belongs to Android, so the sysfs backend has
-# little it can write, and the camera-service backend would be the right answer.
+# Left unset - the sysfs torch from nyx-modules - and that is now a decision
+# rather than a placeholder.
 #
-# The blocker that used to sit here is gone: this machine no longer pins the older
-# sailfishos droidmedia, and the 16.0 GSI it runs does export
-# droid_media_camera_set_torch_mode - the symbol the hybris torch is built around,
-# and the only one that differs between our GSIs.
+# Handing it to the hybris camera-service backend reads like the natural choice on
+# a Treble device, and the plan here was to do exactly that once droidmedia stopped
+# pinning the old sailfishos revision. Hardware says no. The backend needs
+# droid_media_camera_set_torch_mode, which only the 16.0 GSI's libdroidmedia.so
+# exports, and the GSI is a property of the image flashed to a device, not of this
+# machine: tissot, an arm64 machine built from here, runs the Android 9 GSI, whose
+# libdroidmedia.so does not export it (checked on the device, against
+# droid_media_camera_connect as a control). A build-time flag cannot pick per GSI,
+# so FALSE here would take the torch away from every arm64 device not on 16.0.
 #
-# Still left unset, because that backend has not been run on hardware yet. Unset
-# gives the sysfs module, which will most likely find no torch node here and report
-# NYX_ERROR_DEVICE_UNAVAILABLE - an honest "no torch on this device" rather than a
-# broken one. Set it FALSE once the camera-service path has been tried on a device.
+# The premise that sysfs has little it can write did not survive contact either.
+# tissot exposes led:torch_0/led:torch_1 and led:switch to this side, and the sysfs
+# backend drives them: nyx-test-led leaves led:torch_0 at 200 with led:switch at 1
+# while held, and both at 0 after. So unset is not a fallback here - it is the
+# backend that actually reaches the hardware.
+#
+# If a machine ever wants the camera-service route, derive one that knows it ships
+# the 16.0 GSI and set FALSE there; that recipe also has to add droidmedia to
+# DEPENDS, since the cmake requires it only inside that branch.
