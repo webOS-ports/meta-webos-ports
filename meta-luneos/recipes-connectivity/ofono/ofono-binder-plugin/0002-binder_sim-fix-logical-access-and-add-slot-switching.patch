@@ -1,0 +1,502 @@
+From: LuneOS <webos-ports@googlegroups.com>
+Date: Mon, 01 Sep 2026 00:00:00 +0000
+Subject: [PATCH] binder_sim: fix logical access, and implement slot switching
+
+Three things, all needed before an eUICC can be reached through ofono.
+
+1. binder_sim_session_cbd_start() unreffed the RadioRequest, and so did its
+   only caller binder_sim_logical_access_transmit(), while the sibling
+   binder_sim_cbd_io_start() used by the working open_channel path does not
+   unref at all. Two unrefs dropped the library's own reference, so the request
+   was destroyed before its response arrived and every logical_access call came
+   back as RADIO_TX_STATUS_FAILED. This is why SimAuthentication never worked
+   here.
+
+2. logical_access returned only the response data, dropping SW1 SW2. The AT
+   driver sets the opposite convention - at_logical_access() hands back the
+   whole +CGLA response, status word included - and an LPA must see the status
+   word. Re-attach it, and treat a non-9000 status as an ordinary response
+   rather than an ofono error, because at the APDU layer it is one.
+
+3. Implement set_active_card_slot via IRadioConfig.setSimSlotsMapping, so
+   SimManager's existing CardSlotCount and ActiveCardSlot properties work.
+   Where the eUICC is a second physical slot behind a single logical modem,
+   nothing on it is reachable until that slot is active. The mapping is indexed
+   by logical slot, so the current map is read back with getSimSlotsStatus
+   before one entry is changed; that query is also retried on demand, because
+   at registration it can lose a race with the modem coming up.
+
+   Note the driver is now registered as version 2: version 1 copies the driver
+   structure only up to set_active_card_slot, so registering as v1 would
+   silently drop the operation.
+
+   HIDL only. AIDL RadioConfig encodes SimSlotStatus differently and is
+   untested, so there the slot count stays at 1 and ActiveCardSlot refuses
+   changes rather than sending a mapping the modem might misread.
+
+Upstream-Status: Pending
+---
+diff --git a/src/binder_sim.c b/src/binder_sim.c
+index 3a2fc15..de6dede 100644
+--- a/src/binder_sim.c
++++ b/src/binder_sim.c
+@@ -25,6 +25,7 @@
+ #include <ofono/watch.h>
+ 
+ #include <radio_client.h>
++#include <radio_config.h>
+ #include <radio_request.h>
+ #include <radio_request_group.h>
+ #include <radio_network_types.h>
+@@ -81,6 +82,10 @@ typedef struct binder_sim {
+     enum ofono_sim_password_type ofono_passwd_state;
+     BinderSimCard* card;
+     RadioRequestGroup* g;
++    RadioConfig* radio_config;
++    RadioRequest* slots_status_req;
++    guint32* slot_map;   /* logical slot -> physical slot */
++    guint slot_map_len;
+     RADIO_AIDL_INTERFACE interface_aidl;
+     RadioClient* network_client;
+     RadioRequest* query_pin_retries_req;
+@@ -119,6 +124,7 @@ typedef struct binder_sim_cbd_io {
+         ofono_query_facility_lock_cb_t query_facility_lock;
+         ofono_sim_open_channel_cb_t open_channel;
+         ofono_sim_close_channel_cb_t close_channel;
++        ofono_sim_set_active_card_slot_cb_t set_active_card_slot;
+         BinderCallback ptr;
+     } cb;
+     gpointer data;
+@@ -283,7 +289,15 @@ binder_sim_session_cbd_start(
+         cbd->req_id = 0;
+     }
+     binder_sim_card_sim_io_finished(cbd->card, finished_req);
+-    radio_request_unref(req);
++    /*
++     * No unref here. The caller owns the reference returned by
++     * radio_request_new2() and drops it itself, exactly as it does around
++     * binder_sim_cbd_io_start(). Unreffing in both places released the
++     * library's reference as well, so the request was destroyed before the
++     * response arrived and every logical_access call came back as
++     * RADIO_TX_STATUS_FAILED - which broke SimAuthentication and any other
++     * user of logical channels.
++     */
+     return ok;
+ }
+ 
+@@ -2331,6 +2345,36 @@ binder_sim_close_channel(
+     }
+ }
+ 
++/*
++ * ofono's logical_access contract, as set by the AT driver, is that the caller
++ * gets the raw APDU response *including* SW1 SW2 - at_logical_access() hands
++ * back whatever +CGLA returned, status word and all. This driver used to strip
++ * the status word off, which makes the data useless to anything that speaks
++ * APDUs for real: an LPA (SGP.22) has to see 90 00 / 61 xx / 6x xx to know what
++ * happened. Re-attach it, and treat a non-9000 status as a normal response
++ * rather than an error, because at this layer it is one.
++ */
++static
++void
++binder_sim_logical_access_complete(
++    ofono_sim_logical_access_cb_t cb,
++    const BinderSimIoResponse* res,
++    void* data)
++{
++    struct ofono_error err;
++    guint len = res->data_len;
++    guchar* buf = g_malloc(len + 2);
++
++    if (len) {
++        memcpy(buf, res->data, len);
++    }
++    buf[len] = (guchar) res->sw1;
++    buf[len + 1] = (guchar) res->sw2;
++
++    cb(binder_error_ok(&err), buf, len + 2, data);
++    g_free(buf);
++}
++
+ static
+ void
+ binder_sim_logical_access_get_results_cb(
+@@ -2358,8 +2402,8 @@ binder_sim_logical_access_get_results_cb(
+             BinderSimIoResponse* res = binder_sim_io_response_new(args,
+                 cbd->self->interface_aidl);
+ 
+-            if (binder_sim_io_response_ok(res) && error == RADIO_ERROR_NONE) {
+-                cb(binder_error_ok(&err), res->data, res->data_len, cbd->data);
++            if (res && error == RADIO_ERROR_NONE) {
++                binder_sim_logical_access_complete(cb, res, cbd->data);
+                 binder_sim_io_response_free(res);
+                 return;
+             } else if (res) {
+@@ -2485,12 +2529,8 @@ binder_sim_logical_access_cb(
+                     binder_sim_logical_access_transmit(cbd,
+                         CMD_GET_RESPONSE, 0, 0, res->sw2, NULL,
+                         binder_sim_logical_access_get_results_cb);
+-                } else if (binder_sim_io_response_ok(res)) {
+-                    cb(binder_error_ok(&err), res->data, res->data_len,
+-                        cbd->data);
+                 } else {
+-                    cb(binder_error_sim(&err, res->sw1, res->sw2), NULL, 0,
+-                        cbd->data);
++                    binder_sim_logical_access_complete(cb, res, cbd->data);
+                 }
+                 binder_sim_io_response_free(res);
+                 return;
+@@ -2609,6 +2649,11 @@ binder_sim_refresh_cb(
+     ofono_sim_refresh_full(self->sim);
+ }
+ 
++static
++void
++binder_sim_query_slots_status(
++    BinderSim* self);
++
+ static
+ gboolean
+ binder_sim_register(
+@@ -2622,6 +2667,7 @@ binder_sim_register(
+     self->idle_id = 0;
+ 
+     ofono_sim_register(self->sim);
++    binder_sim_query_slots_status(self);
+ 
+     /* Register for change notifications */
+     self->card_event_id[SIM_CARD_STATUS_EVENT] =
+@@ -2666,6 +2712,7 @@ binder_sim_probe(
+     self->empty_pin_query_allowed = modem->config.empty_pin_query;
+     self->card = binder_sim_card_ref(modem->sim_card);
+     self->g = radio_request_group_new(modem->sim_client); /* Keeps ref to client */
++    self->radio_config = radio_config_new();
+     self->interface_aidl = radio_client_aidl_interface(modem->sim_client);
+     self->network_client = radio_client_ref(modem->network_client);
+     self->watch = ofono_watch_new(binder_modem_get_path(modem));
+@@ -2689,6 +2736,9 @@ static void binder_sim_remove(struct ofono_sim *sim)
+ 
+     radio_client_remove_all_handlers(self->g->client, self->io_event_id);
+     radio_request_drop(self->query_pin_retries_req);
++    radio_request_drop(self->slots_status_req);
++    radio_config_unref(self->radio_config);
++    g_free(self->slot_map);
+     radio_request_group_cancel(self->g);
+     radio_request_group_unref(self->g);
+     radio_client_unref(self->network_client);
+@@ -2726,6 +2776,292 @@ static void binder_sim_remove(struct ofono_sim *sim)
+  * API
+  *==========================================================================*/
+ 
++/*==========================================================================*
++ * Card slot mapping
++ *
++ * On phones where the eUICC is a second *physical* UICC behind a single
++ * logical modem (Pixel 3a is one), nothing is reachable on the eUICC - not
++ * even its ISD-R - unless that slot is the one mapped to the modem. ofono
++ * already models this: SimManager exposes CardSlotCount and a settable
++ * ActiveCardSlot, backed by the set_active_card_slot driver op. This plugin
++ * never implemented the op, so the property was permanently
++ * "not implemented" and the mapping could only be changed by talking to
++ * IRadioConfig by hand.
++ *
++ * IRadioConfig.setSimSlotsMapping takes a map indexed by *logical* slot whose
++ * values are *physical* slots, so the current mapping has to be read back
++ * with getSimSlotsStatus before one entry can be changed.
++ *==========================================================================*/
++
++static
++gboolean
++binder_sim_parse_slots_status(
++    BinderSim* self,
++    RADIO_TX_STATUS status,
++    RADIO_ERROR error,
++    const GBinderReader* args)
++{
++    GBinderReader reader;
++    const RadioSimSlotStatus* slots;
++    gsize count = 0, i;
++    guint nlogical = 0;
++
++    if (status != RADIO_TX_STATUS_OK || error != RADIO_ERROR_NONE) {
++        DBG_(self, "no slot status (status %d, error %d)", status, error);
++        return FALSE;
++    }
++
++    gbinder_reader_copy(&reader, args);
++    slots = gbinder_reader_read_hidl_type_vec(&reader, RadioSimSlotStatus,
++        &count);
++    if (!slots || !count) {
++        DBG_(self, "could not parse slot status");
++        return FALSE;
++    }
++
++    /*
++     * Every active physical slot is mapped to exactly one logical modem, so
++     * the number of active slots is the size of the mapping vector.
++     */
++    for (i = 0; i < count; i++) {
++        if (slots[i].slotState == RADIO_SLOT_STATE_ACTIVE) {
++            nlogical = MAX(nlogical, slots[i].logicalSlotId + 1);
++        }
++    }
++
++    g_free(self->slot_map);
++    self->slot_map = nlogical ? g_new0(guint32, nlogical) : NULL;
++    self->slot_map_len = nlogical;
++
++    for (i = 0; i < count; i++) {
++        if (slots[i].slotState == RADIO_SLOT_STATE_ACTIVE &&
++                slots[i].logicalSlotId < nlogical) {
++            self->slot_map[slots[i].logicalSlotId] = (guint32) i;
++            if (slots[i].logicalSlotId == self->card->slot) {
++                /* ofono numbers card slots from 1 */
++                DBG_(self, "logical slot %u <- physical slot %u",
++                    self->card->slot, (guint) i);
++                ofono_sim_set_active_card_slot(self->sim, (guint) i + 1);
++            }
++        }
++    }
++
++    DBG_(self, "%u physical slot(s), %u logical", (guint) count, nlogical);
++    ofono_sim_set_card_slot_count(self->sim, (guint) count);
++
++    return self->slot_map_len > 0;
++}
++
++static
++void
++binder_sim_slots_status_cb(
++    RadioRequest* req,
++    RADIO_TX_STATUS status,
++    RADIO_CONFIG_RESP resp,
++    RADIO_ERROR error,
++    const GBinderReader* args,
++    gpointer user_data)
++{
++    BinderSim* self = user_data;
++
++    self->slots_status_req = NULL;
++    binder_sim_parse_slots_status(self, status, error, args);
++}
++
++static
++void
++binder_sim_query_slots_status(
++    BinderSim* self)
++{
++    /*
++     * Only the HIDL layout is parsed here. AIDL RadioConfig encodes
++     * SimSlotStatus differently and is untested; leaving the slot count at
++     * its default of 1 there means ActiveCardSlot rejects any change, which
++     * is better than sending a mapping the modem may misread.
++     */
++    if (self->radio_config &&
++            radio_config_interface_type(self->radio_config) ==
++                    RADIO_INTERFACE_TYPE_HIDL) {
++        RadioRequest* req = radio_config_request_new(self->radio_config,
++            RADIO_CONFIG_REQ_GET_SIM_SLOTS_STATUS, NULL,
++            binder_sim_slots_status_cb, NULL, self);
++
++        radio_request_set_timeout(req, SIM_IO_TIMEOUT_SECS * 1000);
++        if (radio_request_submit(req)) {
++            self->slots_status_req = req;
++        }
++        radio_request_unref(req);
++    }
++}
++
++typedef struct binder_sim_slot_set {
++    BinderSim* self;
++    guint index;
++    ofono_sim_set_active_card_slot_cb_t cb;
++    void* data;
++} BinderSimSlotSet;
++
++static
++void
++binder_sim_set_active_card_slot_cb(
++    RadioRequest* req,
++    RADIO_TX_STATUS status,
++    RADIO_CONFIG_RESP resp,
++    RADIO_ERROR error,
++    const GBinderReader* args,
++    gpointer user_data)
++{
++    BinderSimSlotSet* set = user_data;
++    BinderSim* self = set->self;
++    struct ofono_error err;
++
++    DBG_(self, "status %d error %d", status, error);
++
++    if (status == RADIO_TX_STATUS_OK && error == RADIO_ERROR_NONE) {
++        /* Pick up the new mapping */
++        binder_sim_query_slots_status(self);
++        set->cb(binder_error_ok(&err), set->data);
++    } else {
++        set->cb(binder_error_failure(&err), set->data);
++    }
++}
++
++static
++void
++binder_sim_slot_set_free(
++    gpointer data)
++{
++    gutil_slice_free((BinderSimSlotSet*) data);
++}
++
++/* Requires a valid slot_map */
++static
++gboolean
++binder_sim_send_slot_mapping(
++    BinderSimSlotSet* set)
++{
++    BinderSim* self = set->self;
++    GBinderWriter writer;
++    RadioRequest* req;
++    guint32* map;
++    guint len = self->slot_map_len;
++    guint i;
++    gboolean ok;
++
++    map = g_malloc(len * sizeof(guint32));
++    memcpy(map, self->slot_map, len * sizeof(guint32));
++    map[self->card->slot] = set->index;
++
++    for (i = 0; i < len; i++) {
++        DBG_(self, "logical slot %u -> physical slot %u", i, map[i]);
++    }
++
++    req = radio_config_request_new(self->radio_config,
++        RADIO_CONFIG_REQ_SET_SIM_SLOTS_MAPPING, &writer,
++        binder_sim_set_active_card_slot_cb, binder_sim_slot_set_free, set);
++
++    gbinder_writer_add_cleanup(&writer, g_free, map);
++    gbinder_writer_append_hidl_vec(&writer, map, len, sizeof(guint32));
++    radio_request_set_timeout(req, SIM_IO_TIMEOUT_SECS * 1000);
++
++    /*
++     * The first attempt after the modem has been doing anything else tends to
++     * come back as a plain failure, and an identical request a few seconds
++     * later succeeds - the card is still settling from the previous mapping.
++     * Retry rather than making every caller discover this.
++     */
++    radio_request_set_retry(req, 3000, 2);
++
++    ok = radio_request_submit(req);
++    radio_request_unref(req);
++
++    return ok;
++}
++
++/*
++ * The slot map is normally read once at registration, but that query can lose
++ * a race with the modem coming up - and with no card in the active slot it
++ * tends to. Without a retry the map stays empty and every later switch fails,
++ * which is exactly the state a user would be trying to switch *out* of. So if
++ * the map is missing, fetch it now and do the switch from the response.
++ */
++static
++void
++binder_sim_slot_set_status_cb(
++    RadioRequest* req,
++    RADIO_TX_STATUS status,
++    RADIO_CONFIG_RESP resp,
++    RADIO_ERROR error,
++    const GBinderReader* args,
++    gpointer user_data)
++{
++    BinderSimSlotSet* set = user_data;
++    BinderSim* self = set->self;
++    struct ofono_error err;
++
++    self->slots_status_req = NULL;
++
++    if (binder_sim_parse_slots_status(self, status, error, args) &&
++            self->card->slot < self->slot_map_len &&
++            binder_sim_send_slot_mapping(set)) {
++        /* Ownership of set passed to the mapping request */
++        return;
++    }
++
++    ofono_error("No slot mapping available");
++    set->cb(binder_error_failure(&err), set->data);
++    binder_sim_slot_set_free(set);
++}
++
++static
++void
++binder_sim_set_active_card_slot(
++    struct ofono_sim* sim,
++    unsigned int index,
++    ofono_sim_set_active_card_slot_cb_t cb,
++    void* data)
++{
++    BinderSim* self = binder_sim_get_data(sim);
++    BinderSimSlotSet* set;
++    struct ofono_error err;
++
++    if (!self->radio_config) {
++        ofono_error("No IRadioConfig, cannot switch slots");
++        cb(binder_error_failure(&err), data);
++        return;
++    }
++
++    set = g_slice_new0(BinderSimSlotSet);
++    set->self = self;
++    set->index = index;
++    set->cb = cb;
++    set->data = data;
++
++    if (self->slot_map_len && self->card->slot < self->slot_map_len) {
++        if (binder_sim_send_slot_mapping(set)) {
++            return;
++        }
++        cb(binder_error_failure(&err), data);
++        binder_sim_slot_set_free(set);
++        return;
++    }
++
++    /* No map yet - fetch it, then switch */
++    radio_request_drop(self->slots_status_req);
++    self->slots_status_req = radio_config_request_new(self->radio_config,
++        RADIO_CONFIG_REQ_GET_SIM_SLOTS_STATUS, NULL,
++        binder_sim_slot_set_status_cb, NULL, set);
++    radio_request_set_timeout(self->slots_status_req,
++        SIM_IO_TIMEOUT_SECS * 1000);
++
++    if (!radio_request_submit(self->slots_status_req)) {
++        radio_request_unref(self->slots_status_req);
++        self->slots_status_req = NULL;
++        cb(binder_error_failure(&err), data);
++        binder_sim_slot_set_free(set);
++    }
++}
++
+ static const struct ofono_sim_driver binder_sim_driver = {
+     .name                   = BINDER_DRIVER,
+     .probe                  = binder_sim_probe,
+@@ -2751,13 +3087,20 @@ static const struct ofono_sim_driver binder_sim_driver = {
+     .session_read_binary    = binder_sim_session_read_binary,
+     .session_read_record    = binder_sim_session_read_record,
+     .session_read_info      = binder_sim_session_read_info,
+-    .logical_access         = binder_sim_logical_access
++    .logical_access         = binder_sim_logical_access,
++    .set_active_card_slot   = binder_sim_set_active_card_slot
+ };
+ 
+ void
+ binder_sim_init()
+ {
+-    ofono_sim_driver_register(&binder_sim_driver);
++    /*
++     * Version 2, not ofono_sim_driver_register() - that is version 1, which
++     * memcpy's the driver struct only up to set_active_card_slot, so
++     * registering this driver as v1 would silently drop the op and leave
++     * SimManager's ActiveCardSlot "not implemented".
++     */
++    ofono_sim_driver_register_version(&binder_sim_driver, 2);
+ }
+ 
+ void

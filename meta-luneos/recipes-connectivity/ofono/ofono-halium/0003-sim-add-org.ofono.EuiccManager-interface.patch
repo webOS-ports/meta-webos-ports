@@ -1,0 +1,319 @@
+From: LuneOS <webos-ports@googlegroups.com>
+Date: Mon, 01 Sep 2026 00:00:00 +0000
+Subject: [PATCH] sim: add the org.ofono.EuiccManager interface
+
+eSIM profile management (GSMA SGP.22) is a large protocol with its own crypto
+and an HTTPS conversation with the operator's SM-DP+ server. That belongs in a
+Local Profile Assistant, not in ofono. What the LPA cannot do without is a
+logical channel to the card's ISD-R applet and a way to push APDUs down it.
+
+Every SIM driver that can do that already implements open_channel,
+close_channel and logical_access - they are used today only by
+org.ofono.SimAuthentication. This exposes them on D-Bus so an LPA can drive an
+eUICC while ofono keeps the modem. The alternative, handing the radio to an
+external process, breaks telephony for as long as the LPA runs: lpac's binder
+backend calls IRadio setResponseFunctions and takes over the response callback.
+
+The interface is deliberately dumb. It knows nothing about ISD-R AIDs, EIDs or
+SGP.22 state; the caller opens a channel to whichever AID it likes and talks to
+it. It is registered next to SimManager only when the driver supports the
+required operations, so it does not appear on drivers that cannot honour it.
+
+Upstream-Status: Pending
+---
+diff --git a/ofono/include/dbus.h b/ofono/include/dbus.h
+index 4873d41b..d9d6ca94 100644
+--- a/ofono/include/dbus.h
++++ b/ofono/include/dbus.h
+@@ -48,6 +48,7 @@ extern "C" {
+ #define OFONO_AUDIO_SETTINGS_INTERFACE "org.ofono.AudioSettings"
+ #define OFONO_TEXT_TELEPHONY_INTERFACE "org.ofono.TextTelephony"
+ #define OFONO_SIM_MANAGER_INTERFACE "org.ofono.SimManager"
++#define OFONO_EUICC_MANAGER_INTERFACE "org.ofono.EuiccManager"
+ #define OFONO_VOICECALL_INTERFACE "org.ofono.VoiceCall"
+ #define OFONO_VOICECALL_MANAGER_INTERFACE "org.ofono.VoiceCallManager"
+ #define OFONO_STK_INTERFACE OFONO_SERVICE ".SimToolkit"
+diff --git a/ofono/src/sim.c b/ofono/src/sim.c
+index ef99e799..9f8cc384 100644
+--- a/ofono/src/sim.c
++++ b/ofono/src/sim.c
+@@ -3522,6 +3522,245 @@ static void emulator_remove_handler(struct ofono_atom *atom, void *data)
+ 	ofono_emulator_remove_handler(em, data);
+ }
+ 
++/*
++ * eUICC support.
++ *
++ * SGP.22 profile management is done by a Local Profile Assistant, which is a
++ * sizeable piece of crypto and HTTP machinery and has no business living inside
++ * oFono. What the LPA does need is a logical channel to the ISD-R applet and a
++ * way to push APDUs down it. Every SIM driver that can do that already exposes
++ * open_channel/logical_access/close_channel; this interface simply makes them
++ * reachable over D-Bus, so an LPA can drive the eUICC while oFono keeps the
++ * modem. The alternative - handing the radio to an external process - breaks
++ * telephony for as long as the LPA runs.
++ *
++ * Deliberately dumb: no ISD-R AID knowledge, no EID, no SGP.22 state. The
++ * caller opens a channel to whatever AID it likes and talks to it.
++ */
++
++struct sim_euicc_req {
++	struct ofono_sim *sim;
++	DBusMessage *msg;
++};
++
++static struct sim_euicc_req *sim_euicc_req_new(struct ofono_sim *sim,
++							DBusMessage *msg)
++{
++	struct sim_euicc_req *req = g_new0(struct sim_euicc_req, 1);
++
++	req->sim = sim;
++	req->msg = dbus_message_ref(msg);
++
++	return req;
++}
++
++static void sim_euicc_req_reply(struct sim_euicc_req *req, DBusMessage *reply)
++{
++	if (reply)
++		g_dbus_send_message(ofono_dbus_get_connection(), reply);
++
++	dbus_message_unref(req->msg);
++	g_free(req);
++}
++
++static void sim_euicc_open_channel_cb(const struct ofono_error *error,
++						int session_id, void *data)
++{
++	struct sim_euicc_req *req = data;
++	DBusMessage *reply;
++
++	if (error->type != OFONO_ERROR_TYPE_NO_ERROR) {
++		reply = __ofono_error_failed(req->msg);
++	} else if (session_id <= 0) {
++		/*
++		 * Drivers report a failed SELECT as a non-positive session id
++		 * rather than an error - typically the card has no such applet.
++		 */
++		reply = __ofono_error_not_available(req->msg);
++	} else {
++		dbus_int32_t id = session_id;
++
++		reply = dbus_message_new_method_return(req->msg);
++		if (reply)
++			dbus_message_append_args(reply, DBUS_TYPE_INT32, &id,
++							DBUS_TYPE_INVALID);
++	}
++
++	sim_euicc_req_reply(req, reply);
++}
++
++static DBusMessage *sim_euicc_open_channel(DBusConnection *conn,
++						DBusMessage *msg, void *data)
++{
++	struct ofono_sim *sim = data;
++	const struct ofono_sim_driver *driver = sim->driver;
++	DBusMessageIter iter, array;
++	const unsigned char *aid;
++	int len;
++
++	if (!dbus_message_iter_init(msg, &iter))
++		return __ofono_error_invalid_args(msg);
++
++	if (dbus_message_iter_get_arg_type(&iter) != DBUS_TYPE_ARRAY)
++		return __ofono_error_invalid_args(msg);
++
++	dbus_message_iter_recurse(&iter, &array);
++
++	if (dbus_message_iter_get_arg_type(&array) != DBUS_TYPE_BYTE)
++		return __ofono_error_invalid_args(msg);
++
++	dbus_message_iter_get_fixed_array(&array, &aid, &len);
++
++	if (len <= 0 || len > 16)
++		return __ofono_error_invalid_args(msg);
++
++	if (driver->open_channel2)
++		driver->open_channel2(sim, aid, len,
++					sim_euicc_open_channel_cb,
++					sim_euicc_req_new(sim, msg));
++	else if (driver->open_channel && len == 16)
++		driver->open_channel(sim, aid, sim_euicc_open_channel_cb,
++					sim_euicc_req_new(sim, msg));
++	else
++		return __ofono_error_not_implemented(msg);
++
++	return NULL;
++}
++
++static void sim_euicc_close_channel_cb(const struct ofono_error *error,
++								void *data)
++{
++	struct sim_euicc_req *req = data;
++
++	sim_euicc_req_reply(req, error->type == OFONO_ERROR_TYPE_NO_ERROR ?
++					dbus_message_new_method_return(req->msg) :
++					__ofono_error_failed(req->msg));
++}
++
++static DBusMessage *sim_euicc_close_channel(DBusConnection *conn,
++						DBusMessage *msg, void *data)
++{
++	struct ofono_sim *sim = data;
++	dbus_int32_t session_id;
++
++	if (sim->driver->close_channel == NULL)
++		return __ofono_error_not_implemented(msg);
++
++	if (!dbus_message_get_args(msg, NULL, DBUS_TYPE_INT32, &session_id,
++					DBUS_TYPE_INVALID))
++		return __ofono_error_invalid_args(msg);
++
++	if (session_id <= 0)
++		return __ofono_error_invalid_args(msg);
++
++	sim->driver->close_channel(sim, session_id,
++					sim_euicc_close_channel_cb,
++					sim_euicc_req_new(sim, msg));
++
++	return NULL;
++}
++
++static void sim_euicc_transmit_apdu_cb(const struct ofono_error *error,
++			const unsigned char *resp, unsigned int len,
++			void *data)
++{
++	struct sim_euicc_req *req = data;
++	DBusMessage *reply;
++	DBusMessageIter iter, array;
++
++	if (error->type != OFONO_ERROR_TYPE_NO_ERROR) {
++		sim_euicc_req_reply(req, __ofono_error_failed(req->msg));
++		return;
++	}
++
++	reply = dbus_message_new_method_return(req->msg);
++	if (reply) {
++		dbus_message_iter_init_append(reply, &iter);
++		dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY,
++					DBUS_TYPE_BYTE_AS_STRING, &array);
++		dbus_message_iter_append_fixed_array(&array, DBUS_TYPE_BYTE,
++							&resp, len);
++		dbus_message_iter_close_container(&iter, &array);
++	}
++
++	sim_euicc_req_reply(req, reply);
++}
++
++static DBusMessage *sim_euicc_transmit_apdu(DBusConnection *conn,
++						DBusMessage *msg, void *data)
++{
++	struct ofono_sim *sim = data;
++	DBusMessageIter iter, array;
++	const unsigned char *pdu;
++	dbus_int32_t session_id;
++	int len;
++	int err;
++
++	if (!dbus_message_iter_init(msg, &iter))
++		return __ofono_error_invalid_args(msg);
++
++	if (dbus_message_iter_get_arg_type(&iter) != DBUS_TYPE_INT32)
++		return __ofono_error_invalid_args(msg);
++
++	dbus_message_iter_get_basic(&iter, &session_id);
++
++	if (!dbus_message_iter_next(&iter) ||
++			dbus_message_iter_get_arg_type(&iter) !=
++							DBUS_TYPE_ARRAY)
++		return __ofono_error_invalid_args(msg);
++
++	dbus_message_iter_recurse(&iter, &array);
++
++	if (dbus_message_iter_get_arg_type(&array) != DBUS_TYPE_BYTE)
++		return __ofono_error_invalid_args(msg);
++
++	dbus_message_iter_get_fixed_array(&array, &pdu, &len);
++
++	if (len <= 0)
++		return __ofono_error_invalid_args(msg);
++
++	/*
++	 * The buffer belongs to msg, which the request holds a reference to,
++	 * so it outlives the driver call regardless of when the driver copies.
++	 */
++	err = ofono_sim_logical_access(sim, session_id,
++					(unsigned char *) pdu, len,
++					sim_euicc_transmit_apdu_cb,
++					sim_euicc_req_new(sim, msg));
++
++	switch (err) {
++	case 0:
++		return NULL;
++	case -ENOTSUP:
++		return __ofono_error_not_implemented(msg);
++	default:
++		return __ofono_error_invalid_args(msg);
++	}
++}
++
++static const GDBusMethodTable sim_euicc_methods[] = {
++	{ GDBUS_ASYNC_METHOD("OpenChannel",
++			GDBUS_ARGS({ "aid", "ay" }),
++			GDBUS_ARGS({ "session", "i" }),
++			sim_euicc_open_channel) },
++	{ GDBUS_ASYNC_METHOD("CloseChannel",
++			GDBUS_ARGS({ "session", "i" }), NULL,
++			sim_euicc_close_channel) },
++	{ GDBUS_ASYNC_METHOD("TransmitApdu",
++			GDBUS_ARGS({ "session", "i" }, { "pdu", "ay" }),
++			GDBUS_ARGS({ "response", "ay" }),
++			sim_euicc_transmit_apdu) },
++	{ }
++};
++
++static gboolean sim_euicc_supported(struct ofono_sim *sim)
++{
++	const struct ofono_sim_driver *driver = sim->driver;
++
++	return driver->logical_access && driver->close_channel &&
++		(driver->open_channel2 || driver->open_channel);
++}
++
+ static void sim_unregister(struct ofono_atom *atom)
+ {
+ 	DBusConnection *conn = ofono_dbus_get_connection();
+@@ -3546,6 +3785,13 @@ static void sim_unregister(struct ofono_atom *atom)
+ 	__ofono_watchlist_free(sim->spn_watches);
+ 	sim->spn_watches = NULL;
+ 
++	if (sim_euicc_supported(sim)) {
++		g_dbus_unregister_interface(conn, path,
++					OFONO_EUICC_MANAGER_INTERFACE);
++		ofono_modem_remove_interface(modem,
++					OFONO_EUICC_MANAGER_INTERFACE);
++	}
++
+ 	g_dbus_unregister_interface(conn, path, OFONO_SIM_MANAGER_INTERFACE);
+ 	ofono_modem_remove_interface(modem, OFONO_SIM_MANAGER_INTERFACE);
+ }
+@@ -3679,6 +3925,19 @@ void ofono_sim_register(struct ofono_sim *sim)
+ 	}
+ 
+ 	ofono_modem_add_interface(modem, OFONO_SIM_MANAGER_INTERFACE);
++
++	if (sim_euicc_supported(sim)) {
++		if (g_dbus_register_interface(conn, path,
++					OFONO_EUICC_MANAGER_INTERFACE,
++					sim_euicc_methods, NULL, NULL,
++					sim, NULL))
++			ofono_modem_add_interface(modem,
++					OFONO_EUICC_MANAGER_INTERFACE);
++		else
++			ofono_error("Could not create %s interface",
++					OFONO_EUICC_MANAGER_INTERFACE);
++	}
++
+ 	sim->iccid_watches = __ofono_watchlist_new(g_free);
+ 	sim->imsi_watches = __ofono_watchlist_new(g_free);
+ 	sim->state_watches = __ofono_watchlist_new(g_free);

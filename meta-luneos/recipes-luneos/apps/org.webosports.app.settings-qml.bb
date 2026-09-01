@@ -14,9 +14,9 @@ inherit webos_app
 inherit pkgconfig
 
 PV = "0.4.0-1+git"
-SRCREV = "034c2787e8380822934b1303044c6bebbc0d18c7"
+SRCREV = "4a881318e47b7648f0576895f1477fb94802d725"
 
-WEBOS_GIT_PARAM_BRANCH = "qml-based"
+WEBOS_GIT_PARAM_BRANCH = "herrie/esim"
 WEBOS_REPO_NAME = "org.webosports.app.settings"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
@@ -48,6 +48,7 @@ FILES:${PN} += "${webos_applicationsdir}/org.webosports.app.settings-common \
                 ${webos_applicationsdir}/org.webosports.app.settings.dateandtime \
                 ${webos_applicationsdir}/org.webosports.app.settings.deviceinfo \
                 ${webos_applicationsdir}/org.webosports.app.settings.devmodeswitcher \
+                ${webos_applicationsdir}/org.webosports.app.settings.esim \
                 ${webos_applicationsdir}/org.webosports.app.settings.exhibitionpreferences \
                 ${webos_applicationsdir}/org.webosports.app.settings.fingerprint \
                 ${webos_applicationsdir}/org.webosports.app.settings.help \
