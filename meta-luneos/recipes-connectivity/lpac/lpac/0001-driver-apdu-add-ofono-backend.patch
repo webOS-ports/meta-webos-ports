@@ -1,0 +1,329 @@
+From: LuneOS <webos-ports@googlegroups.com>
+Date: Mon, 01 Sep 2026 00:00:00 +0000
+Subject: [PATCH] driver/apdu: add an oFono backend
+
+Every other APDU backend on a phone reaches around the telephony stack and
+takes the modem: gbinder_hidl calls IRadio setResponseFunctions and steals the
+response callback from whatever owns the radio, so ofono has to be stopped for
+as long as lpac runs, and telephony with it.
+
+This one goes through ofono's org.ofono.EuiccManager interface instead. Calls
+and data keep working while profiles are managed, and one code path covers AT
+modems, binder HIDL and binder AIDL, because ofono has already abstracted them
+- gbinder_hidl is HIDL 1.0 only and cannot work on AIDL devices at all.
+
+Selected with LPAC_APDU=ofono, built with -DLPAC_WITH_APDU_OFONO=ON. Uses the
+first modem advertising the interface, or $OFONO_MODEM_PATH.
+
+Upstream-Status: Pending
+---
+diff --git a/driver/CMakeLists.txt b/driver/CMakeLists.txt
+index 901d927..3ef0aeb 100644
+--- a/driver/CMakeLists.txt
++++ b/driver/CMakeLists.txt
+@@ -5,6 +5,7 @@ option(LPAC_WITH_APDU_PCSC "Build APDU PCSC Backend (requires PCSC libraries)" O
+ cmake_dependent_option(LPAC_WITH_APDU_AT "Build APDU AT Backend" ON UNIX OFF)
+ cmake_dependent_option(LPAC_WITH_APDU_AT_WIN32 "Build APDU AT Backend for Win32" ON WIN32 OFF)
+ option(LPAC_WITH_APDU_GBINDER "Build APDU Gbinder backend for libhybris devices (requires gbinder headers)" OFF)
++option(LPAC_WITH_APDU_OFONO "Build APDU oFono backend (requires glib/gio, talks to org.ofono.EuiccManager)" OFF)
+ option(LPAC_WITH_APDU_QMI "Build QMI backend for Qualcomm devices (requires libqmi)" OFF)
+ option(LPAC_WITH_APDU_QMI_QRTR "Build QMI-over-QRTR backend for Qualcomm devices (requires libqrtr and libqmi headers)" OFF)
+ option(LPAC_WITH_APDU_MBIM "Build MBIM backend for MBIM devices (requires libmbim)" OFF)
+@@ -75,6 +76,17 @@ if(LPAC_WITH_APDU_GBINDER)
+     endif()
+ endif()
+ 
++if(LPAC_WITH_APDU_OFONO)
++    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DLPAC_WITH_APDU_OFONO")
++    target_sources(euicc-drivers PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/apdu/ofono.c)
++    find_package(PkgConfig REQUIRED)
++    pkg_check_modules(GIO REQUIRED IMPORTED_TARGET gio-2.0)
++    target_link_libraries(euicc-drivers PkgConfig::GIO)
++    if(LPAC_DYNAMIC_DRIVERS)
++        list(APPEND LIBEUICC_DRIVERS_REQUIRES "gio-2.0")
++    endif()
++endif()
++
+ if(LPAC_WITH_APDU_QMI)
+     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DLPAC_WITH_APDU_QMI")
+     target_sources(euicc-drivers PRIVATE
+diff --git a/driver/apdu/ofono.c b/driver/apdu/ofono.c
+new file mode 100644
+index 0000000..2df3cb1
+--- /dev/null
++++ b/driver/apdu/ofono.c
+@@ -0,0 +1,238 @@
++/*
++ * APDU backend that talks to the card through oFono's org.ofono.EuiccManager
++ * interface.
++ *
++ * Every other backend on a phone (gbinder_hidl, qmi, qmi_qrtr) reaches around
++ * the telephony stack and grabs the modem directly, which means oFono has to be
++ * stopped first - gbinder_hidl in particular calls setResponseFunctions and
++ * takes IRadio's response callback away from ofono-binder-plugin. This one goes
++ * through oFono instead, so telephony keeps working while profiles are managed,
++ * and the same code path works for AT modems, binder HIDL and binder AIDL,
++ * because oFono has already abstracted them.
++ *
++ * Set OFONO_MODEM_PATH to pick a modem; otherwise the first one exposing
++ * org.ofono.EuiccManager is used.
++ */
++
++#include "ofono.h"
++
++#include <euicc/euicc.h>
++#include <euicc/interface.h>
++
++#include <gio/gio.h>
++
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++#define OFONO_SERVICE "org.ofono"
++#define OFONO_MANAGER_INTERFACE "org.ofono.Manager"
++#define OFONO_EUICC_MANAGER_INTERFACE "org.ofono.EuiccManager"
++
++#define APDU_TIMEOUT_MS 30000
++
++static struct {
++    GDBusConnection *bus;
++    char *modem;
++    gint32 session;
++} ofono_ctx;
++
++/* Returns the first modem path offering EuiccManager, or NULL. */
++static char *ofono_find_modem(GDBusConnection *bus) {
++    GError *error = NULL;
++    GVariant *reply, *modems;
++    GVariantIter iter;
++    const char *path;
++    GVariant *props;
++    char *found = NULL;
++
++    reply = g_dbus_connection_call_sync(bus, OFONO_SERVICE, "/", OFONO_MANAGER_INTERFACE, "GetModems", NULL,
++                                        G_VARIANT_TYPE("(a(oa{sv}))"), G_DBUS_CALL_FLAGS_NONE, APDU_TIMEOUT_MS, NULL,
++                                        &error);
++    if (reply == NULL) {
++        fprintf(stderr, "ofono: GetModems failed: %s\n", error->message);
++        g_error_free(error);
++        return NULL;
++    }
++
++    modems = g_variant_get_child_value(reply, 0);
++    g_variant_iter_init(&iter, modems);
++
++    while (found == NULL && g_variant_iter_next(&iter, "(&o@a{sv})", &path, &props)) {
++        GVariant *interfaces = g_variant_lookup_value(props, "Interfaces", G_VARIANT_TYPE_STRING_ARRAY);
++
++        if (interfaces) {
++            GVariantIter names;
++            const char *name;
++
++            g_variant_iter_init(&names, interfaces);
++            while (g_variant_iter_next(&names, "&s", &name)) {
++                if (strcmp(name, OFONO_EUICC_MANAGER_INTERFACE) == 0) {
++                    found = strdup(path);
++                    break;
++                }
++            }
++            g_variant_unref(interfaces);
++        }
++
++        g_variant_unref(props);
++    }
++
++    g_variant_unref(modems);
++    g_variant_unref(reply);
++
++    return found;
++}
++
++static int apdu_interface_connect(struct euicc_ctx *ctx) {
++    GError *error = NULL;
++    const char *modem = getenv("OFONO_MODEM_PATH");
++
++    ofono_ctx.session = -1;
++
++    ofono_ctx.bus = g_bus_get_sync(G_BUS_TYPE_SYSTEM, NULL, &error);
++    if (ofono_ctx.bus == NULL) {
++        fprintf(stderr, "ofono: cannot reach the system bus: %s\n", error->message);
++        g_error_free(error);
++        return -1;
++    }
++
++    ofono_ctx.modem = modem ? strdup(modem) : ofono_find_modem(ofono_ctx.bus);
++    if (ofono_ctx.modem == NULL) {
++        fprintf(stderr, "ofono: no modem exposes %s.\n", OFONO_EUICC_MANAGER_INTERFACE);
++        fprintf(stderr, "ofono: the SIM driver must support logical channels, and on multi-slot\n");
++        fprintf(stderr, "ofono: devices the eUICC has to be the active card slot.\n");
++        g_object_unref(ofono_ctx.bus);
++        ofono_ctx.bus = NULL;
++        return -1;
++    }
++
++    return 0;
++}
++
++static void apdu_interface_disconnect(struct euicc_ctx *ctx) {
++    if (ofono_ctx.bus) {
++        g_object_unref(ofono_ctx.bus);
++        ofono_ctx.bus = NULL;
++    }
++
++    free(ofono_ctx.modem);
++    ofono_ctx.modem = NULL;
++    ofono_ctx.session = -1;
++}
++
++static GVariant *ofono_call(const char *method, GVariant *args, const GVariantType *reply_type) {
++    GError *error = NULL;
++    GVariant *reply;
++
++    reply = g_dbus_connection_call_sync(ofono_ctx.bus, OFONO_SERVICE, ofono_ctx.modem,
++                                        OFONO_EUICC_MANAGER_INTERFACE, method, args, reply_type,
++                                        G_DBUS_CALL_FLAGS_NONE, APDU_TIMEOUT_MS, NULL, &error);
++    if (reply == NULL) {
++        fprintf(stderr, "ofono: %s failed: %s\n", method, error->message);
++        g_error_free(error);
++    }
++
++    return reply;
++}
++
++static int apdu_interface_logic_channel_open(struct euicc_ctx *ctx, const uint8_t *aid, uint8_t aid_len) {
++    GVariant *reply;
++    GVariantBuilder builder;
++    uint8_t i;
++
++    if (ofono_ctx.bus == NULL)
++        return -1;
++
++    g_variant_builder_init(&builder, G_VARIANT_TYPE("ay"));
++    for (i = 0; i < aid_len; i++)
++        g_variant_builder_add(&builder, "y", aid[i]);
++
++    reply = ofono_call("OpenChannel", g_variant_new("(ay)", &builder), G_VARIANT_TYPE("(i)"));
++    if (reply == NULL)
++        return -1;
++
++    g_variant_get(reply, "(i)", &ofono_ctx.session);
++    g_variant_unref(reply);
++
++    return ofono_ctx.session;
++}
++
++static void apdu_interface_logic_channel_close(struct euicc_ctx *ctx, uint8_t channel) {
++    GVariant *reply;
++
++    if (ofono_ctx.bus == NULL || ofono_ctx.session < 0)
++        return;
++
++    reply = ofono_call("CloseChannel", g_variant_new("(i)", ofono_ctx.session), G_VARIANT_TYPE("()"));
++    if (reply)
++        g_variant_unref(reply);
++
++    ofono_ctx.session = -1;
++}
++
++static int apdu_interface_transmit(struct euicc_ctx *ctx, uint8_t **rx, uint32_t *rx_len, const uint8_t *tx,
++                                   uint32_t tx_len) {
++    GVariant *reply, *resp;
++    GVariantBuilder builder;
++    const uint8_t *data;
++    gsize len = 0;
++    uint32_t i;
++
++    *rx = NULL;
++    *rx_len = 0;
++
++    if (ofono_ctx.bus == NULL || ofono_ctx.session < 0)
++        return -1;
++
++    g_variant_builder_init(&builder, G_VARIANT_TYPE("ay"));
++    for (i = 0; i < tx_len; i++)
++        g_variant_builder_add(&builder, "y", tx[i]);
++
++    reply = ofono_call("TransmitApdu", g_variant_new("(iay)", ofono_ctx.session, &builder), G_VARIANT_TYPE("(ay)"));
++    if (reply == NULL)
++        return -1;
++
++    resp = g_variant_get_child_value(reply, 0);
++    data = g_variant_get_fixed_array(resp, &len, sizeof(uint8_t));
++
++    if (len > 0) {
++        /* lpac frees this with free(), so it must come from malloc(). */
++        *rx = malloc(len);
++        if (*rx == NULL) {
++            g_variant_unref(resp);
++            g_variant_unref(reply);
++            return -1;
++        }
++        memcpy(*rx, data, len);
++        *rx_len = len;
++    }
++
++    g_variant_unref(resp);
++    g_variant_unref(reply);
++
++    return 0;
++}
++
++static int libapduinterface_init(struct euicc_apdu_interface *ifstruct) {
++    ifstruct->connect = apdu_interface_connect;
++    ifstruct->disconnect = apdu_interface_disconnect;
++    ifstruct->logic_channel_open = apdu_interface_logic_channel_open;
++    ifstruct->logic_channel_close = apdu_interface_logic_channel_close;
++    ifstruct->transmit = apdu_interface_transmit;
++
++    return 0;
++}
++
++static int libapduinterface_main(int argc, char **argv) { return 0; }
++
++static void libapduinterface_fini(struct euicc_apdu_interface *ifstruct) {}
++
++const struct euicc_driver driver_apdu_ofono = {
++    .type = DRIVER_APDU,
++    .name = "ofono",
++    .init = (int (*)(void *))libapduinterface_init,
++    .main = libapduinterface_main,
++    .fini = (void (*)(void *))libapduinterface_fini,
++};
+diff --git a/driver/apdu/ofono.h b/driver/apdu/ofono.h
+new file mode 100644
+index 0000000..1d67ec5
+--- /dev/null
++++ b/driver/apdu/ofono.h
+@@ -0,0 +1,5 @@
++#pragma once
++
++#include <driver.private.h>
++
++extern const struct euicc_driver driver_apdu_ofono;
+diff --git a/driver/driver.c b/driver/driver.c
+index ab163e6..cc6badb 100644
+--- a/driver/driver.c
++++ b/driver/driver.c
+@@ -10,6 +10,10 @@
+ #    include "driver/apdu/gbinder_hidl.h"
+ #endif
+ 
++#ifdef LPAC_WITH_APDU_OFONO
++#    include "driver/apdu/ofono.h"
++#endif
++
+ #ifdef LPAC_WITH_APDU_MBIM
+ #    include "driver/apdu/mbim.h"
+ #endif
+@@ -41,6 +45,9 @@ static const struct euicc_driver *drivers[] = {
+ #ifdef LPAC_WITH_APDU_GBINDER
+     &driver_apdu_gbinder_hidl,
+ #endif
++#ifdef LPAC_WITH_APDU_OFONO
++    &driver_apdu_ofono,
++#endif
+ #ifdef LPAC_WITH_APDU_MBIM
+     &driver_apdu_mbim,
+ #endif

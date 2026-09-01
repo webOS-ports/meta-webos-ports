@@ -1,0 +1,251 @@
+From: LuneOS <webos-ports@googlegroups.com>
+Date: Mon, 01 Sep 2026 00:00:00 +0000
+Subject: [PATCH] qmimodem: add logical channel support
+
+The AT driver has had open_channel/close_channel/logical_access for years, but
+qmimodem has never implemented them, so anything needing a logical channel to
+the card - SimAuthentication, and now an LPA talking to an eUICC - does not
+work on QMI modems. That covers every mainline-modem device: a soldered eUICC,
+or just an eSIM adapter card in the SIM slot.
+
+Wire formats are per libqmi's data/qmi-service-uim.json: Open Logical Channel
+(0x0042), Send APDU (0x003B) and Logical Channel (0x003F). Note the AID array
+is length-prefixed with a uint8 while the APDU arrays use a uint16.
+
+The response is passed up with its status word still attached, matching what
+the AT driver does with the +CGLA payload - an LPA has to see 90 00 / 61 xx /
+6x xx to know what happened.
+
+The slot is hardcoded to the first one. qmimodem has no notion of slots
+anywhere else, so inventing one here would be guesswork.
+
+Upstream-Status: Pending
+---
+--- a/drivers/qmimodem/uim.h
++++ b/drivers/qmimodem/uim.h
+@@ -15,6 +15,29 @@
+ #define QMI_UIM_VERIFY_PIN		38	/* Verify PIN */
+ #define QMI_UIM_CHANGE_PIN		40	/* Change PIN */
+ 
++#define QMI_UIM_SEND_APDU		59	/* 0x003B Send an APDU */
++#define QMI_UIM_LOGICAL_CHANNEL		63	/* 0x003F Open/close a channel */
++#define QMI_UIM_OPEN_LOGICAL_CHANNEL	66	/* 0x0042 Open a channel */
++
++/* Slots are numbered from 1 */
++#define QMI_UIM_SLOT_1			0x01
++
++/* QMI_UIM_OPEN_LOGICAL_CHANNEL */
++#define QMI_UIM_PARAM_OPEN_CHANNEL_SLOT		0x01	/* uint8 */
++#define QMI_UIM_PARAM_OPEN_CHANNEL_AID		0x10	/* uint8 len + data */
++#define QMI_UIM_RESULT_OPEN_CHANNEL_ID		0x10	/* uint8 */
++
++/* QMI_UIM_LOGICAL_CHANNEL (used here to close) */
++#define QMI_UIM_PARAM_LOGICAL_CHANNEL_SLOT	0x01	/* uint8 */
++#define QMI_UIM_PARAM_LOGICAL_CHANNEL_ID	0x11	/* uint8 */
++#define QMI_UIM_PARAM_LOGICAL_CHANNEL_TERMINATE	0x13	/* uint8 */
++
++/* QMI_UIM_SEND_APDU */
++#define QMI_UIM_PARAM_SEND_APDU_SLOT		0x01	/* uint8 */
++#define QMI_UIM_PARAM_SEND_APDU_APDU		0x02	/* uint16 len + data */
++#define QMI_UIM_PARAM_SEND_APDU_CHANNEL_ID	0x10	/* uint8 */
++#define QMI_UIM_RESULT_SEND_APDU_RESPONSE	0x10	/* uint16 len + data */
++
+ #define QMI_UIM_EVENT_REGISTRATION	46	/* Register for indications */
+ #define QMI_UIM_GET_CARD_STATUS		47	/* Get card status */
+ #define QMI_UIM_GET_CARD_STATUS_EVENT	50	/* Card status indication */
+--- a/drivers/qmimodem/sim.c
++++ b/drivers/qmimodem/sim.c
+@@ -1088,6 +1088,183 @@
+ 	l_free(data);
+ }
+ 
++/*
++ * Logical channel access, as needed by an LPA (SGP.22) to reach the ISD-R
++ * applet of an eUICC - either a soldered one or an eSIM adapter card in the
++ * SIM slot. ofono's core exposes these ops over D-Bus as
++ * org.ofono.EuiccManager; the AT driver has had them for years, this driver
++ * did not, which is why eSIM management did not work on QMI modems.
++ *
++ * The slot is hardcoded to the first one. Multi-slot QMI modems exist, but
++ * ofono's qmimodem driver has no notion of slots anywhere else either, so
++ * inventing one here would be guesswork.
++ */
++
++static void qmi_open_channel_cb(struct qmi_result *result, void *user_data)
++{
++	struct cb_data *cbd = user_data;
++	ofono_sim_open_channel_cb_t cb = cbd->cb;
++	uint8_t session_id;
++
++	DBG("");
++
++	if (qmi_result_set_error(result, NULL)) {
++		CALLBACK_WITH_FAILURE(cb, 0, cbd->data);
++		return;
++	}
++
++	if (!qmi_result_get_uint8(result, QMI_UIM_RESULT_OPEN_CHANNEL_ID,
++					&session_id)) {
++		CALLBACK_WITH_FAILURE(cb, 0, cbd->data);
++		return;
++	}
++
++	CALLBACK_WITH_SUCCESS(cb, session_id, cbd->data);
++}
++
++static void qmi_open_channel(struct ofono_sim *sim, const unsigned char *aid,
++				ofono_sim_open_channel_cb_t cb, void *user_data)
++{
++	struct sim_data *data = ofono_sim_get_data(sim);
++	struct cb_data *cbd = cb_data_new(cb, user_data);
++	unsigned char aid_data[17];
++	struct qmi_param *param;
++
++	DBG("");
++
++	/* uint8 length prefix followed by the AID itself */
++	aid_data[0] = 16;
++	memcpy(aid_data + 1, aid, 16);
++
++	param = qmi_param_new();
++
++	qmi_param_append_uint8(param, QMI_UIM_PARAM_OPEN_CHANNEL_SLOT,
++					QMI_UIM_SLOT_1);
++	qmi_param_append(param, QMI_UIM_PARAM_OPEN_CHANNEL_AID,
++					sizeof(aid_data), aid_data);
++
++	if (qmi_service_send(data->uim, QMI_UIM_OPEN_LOGICAL_CHANNEL, param,
++				qmi_open_channel_cb, cbd, l_free) > 0)
++		return;
++
++	qmi_param_free(param);
++	CALLBACK_WITH_FAILURE(cb, 0, user_data);
++	l_free(cbd);
++}
++
++static void qmi_close_channel_cb(struct qmi_result *result, void *user_data)
++{
++	struct cb_data *cbd = user_data;
++	ofono_sim_close_channel_cb_t cb = cbd->cb;
++
++	DBG("");
++
++	if (qmi_result_set_error(result, NULL))
++		CALLBACK_WITH_FAILURE(cb, cbd->data);
++	else
++		CALLBACK_WITH_SUCCESS(cb, cbd->data);
++}
++
++static void qmi_close_channel(struct ofono_sim *sim, int session_id,
++				ofono_sim_close_channel_cb_t cb,
++				void *user_data)
++{
++	struct sim_data *data = ofono_sim_get_data(sim);
++	struct cb_data *cbd = cb_data_new(cb, user_data);
++	struct qmi_param *param;
++
++	DBG("session %d", session_id);
++
++	param = qmi_param_new();
++
++	qmi_param_append_uint8(param, QMI_UIM_PARAM_LOGICAL_CHANNEL_SLOT,
++					QMI_UIM_SLOT_1);
++	qmi_param_append_uint8(param, QMI_UIM_PARAM_LOGICAL_CHANNEL_ID,
++					session_id);
++	/* Close the channel without terminating the application on the card */
++	qmi_param_append_uint8(param, QMI_UIM_PARAM_LOGICAL_CHANNEL_TERMINATE,
++					0x00);
++
++	if (qmi_service_send(data->uim, QMI_UIM_LOGICAL_CHANNEL, param,
++				qmi_close_channel_cb, cbd, l_free) > 0)
++		return;
++
++	qmi_param_free(param);
++	CALLBACK_WITH_FAILURE(cb, user_data);
++	l_free(cbd);
++}
++
++static void qmi_logical_access_cb(struct qmi_result *result, void *user_data)
++{
++	struct cb_data *cbd = user_data;
++	ofono_sim_logical_access_cb_t cb = cbd->cb;
++	const unsigned char *response;
++	uint16_t len;
++
++	DBG("");
++
++	if (qmi_result_set_error(result, NULL)) {
++		CALLBACK_WITH_FAILURE(cb, NULL, 0, cbd->data);
++		return;
++	}
++
++	response = qmi_result_get(result, QMI_UIM_RESULT_SEND_APDU_RESPONSE,
++					&len);
++	if (!response || len < 2) {
++		CALLBACK_WITH_FAILURE(cb, NULL, 0, cbd->data);
++		return;
++	}
++
++	/*
++	 * Skip the uint16 length prefix. What is left is the response with its
++	 * status word still attached, which is what callers expect - the AT
++	 * driver hands back the +CGLA payload the same way.
++	 */
++	CALLBACK_WITH_SUCCESS(cb, response + 2, len - 2, cbd->data);
++}
++
++static void qmi_logical_access(struct ofono_sim *sim, int session_id,
++				const unsigned char *pdu, unsigned int len,
++				ofono_sim_logical_access_cb_t cb,
++				void *user_data)
++{
++	struct sim_data *data = ofono_sim_get_data(sim);
++	struct cb_data *cbd = cb_data_new(cb, user_data);
++	struct qmi_param *param;
++	unsigned char *apdu_data;
++
++	DBG("session %d len %u", session_id, len);
++
++	if (len > UINT16_MAX)
++		goto error;
++
++	/* uint16 length prefix followed by the APDU */
++	apdu_data = l_malloc(len + 2);
++	apdu_data[0] = len & 0xff;
++	apdu_data[1] = (len >> 8) & 0xff;
++	memcpy(apdu_data + 2, pdu, len);
++
++	param = qmi_param_new();
++
++	qmi_param_append_uint8(param, QMI_UIM_PARAM_SEND_APDU_SLOT,
++					QMI_UIM_SLOT_1);
++	qmi_param_append(param, QMI_UIM_PARAM_SEND_APDU_APDU, len + 2,
++					apdu_data);
++	qmi_param_append_uint8(param, QMI_UIM_PARAM_SEND_APDU_CHANNEL_ID,
++					session_id);
++	l_free(apdu_data);
++
++	if (qmi_service_send(data->uim, QMI_UIM_SEND_APDU, param,
++				qmi_logical_access_cb, cbd, l_free) > 0)
++		return;
++
++	qmi_param_free(param);
++
++error:
++	CALLBACK_WITH_FAILURE(cb, NULL, 0, user_data);
++	l_free(cbd);
++}
++
+ static const struct ofono_sim_driver driver = {
+ 	.probev			= qmi_sim_probev,
+ 	.remove			= qmi_sim_remove,
+@@ -1105,6 +1282,9 @@
+ 	.query_facility_lock	= qmi_query_locked,
+ 	.lock			= qmi_lock,
+ 	.change_passwd		= qmi_change_passwd,
++	.open_channel		= qmi_open_channel,
++	.close_channel		= qmi_close_channel,
++	.logical_access		= qmi_logical_access,
+ };
+ 
+ OFONO_ATOM_DRIVER_BUILTIN(sim, qmimodem, &driver)

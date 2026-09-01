@@ -17,6 +17,7 @@ RPROVIDES:${PN}-tests += "ofono-tests"
 SRC_URI  = " \
   git://github.com/sailfishos/ofono.git;protocol=https;branch=master \
   file://0002-Add-support-for-the-Ericsson-F5521gw-modem.patch;striplevel=2 \
+  file://0003-sim-add-org.ofono.EuiccManager-interface.patch;striplevel=2 \
   file://ofono.service \
 "
 
