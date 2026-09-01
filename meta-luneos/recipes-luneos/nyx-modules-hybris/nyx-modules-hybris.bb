@@ -8,6 +8,15 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 #libcrypto is a requirement and provided by openssl
 DEPENDS = "nyx-lib glib-2.0 libhybris libsuspend virtual/android-headers openssl"
 
+# droidmedia would be needed here if any machine handed the torch to the hybris
+# side (NYXMOD_OW_LEDTORCH FALSE), since that module is built around
+# droid_media_camera_set_torch_mode(). No machine does yet. halium-arm64 is the
+# candidate - it runs the 16.0 GSI, whose libdroidmedia.so is the only one of ours
+# exporting that symbol - but the backend has not been exercised on hardware, so
+# the flag stays unset. Add the dependency back, scoped to the machine, when one
+# does: the cmake requires droidmedia only inside that branch, so configure fails
+# clearly if this is forgotten.
+
 # We need to be ${MACHINE_ARCH} as we need to compile the source against a specific
 # Android version we select per machine
 PACKAGE_ARCH = "${MACHINE_ARCH}"
@@ -20,7 +29,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/../../recipes-webos-ose/nyx-modules/nyx-m
 COMPATIBLE_MACHINE = "^halium$"
 
 PV = "0.1.0-1+git"
-PR = "r1"
+PR = "r2"
 SRCREV = "32c6e3dbc4f261487a9a1d03622dc2e64a52d17d"
 
 inherit webos_ports_repo
