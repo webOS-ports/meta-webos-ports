@@ -1,0 +1,54 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Mon, 1 Sep 2026 12:00:00 +0200
+Subject: [PATCH] lxc: copy host permissions on non-Treble hosts too
+
+setup_host_perms() copies the host's NFC and consumer-IR feature
+declarations into /var/lib/waydroid/host-permissions, which is bind
+mounted over /vendor/etc/host-permissions in the container. It bails out
+first unless ro.treble.enabled is "true".
+
+That gate is wrong for a Halium host. The container gets the host's
+/vendor bind mounted as vendor_extra regardless of Treble, so the HAL is
+visible to Android whether or not the feature XML was copied. When the
+two disagree, system_server does not degrade - it throws:
+
+  FATAL EXCEPTION IN SYSTEM PROCESS: main
+  java.lang.RuntimeException: IR HAL present, but FEATURE_CONSUMER_IR is
+      not set!
+      at com.android.server.ConsumerIrService.<init>(ConsumerIrService.java:54)
+      at com.android.server.SystemServer.startOtherServices(SystemServer.java:1152)
+
+and Android crash-loops every five seconds, never reaching
+sys.boot_completed.
+
+Reproduced on a Xiaomi Mi A1 (tissot) running LuneOS on Halium 9, which
+has an IR blaster: ro.treble.enabled is "false", so host-permissions
+stayed empty while /vendor/etc/permissions/android.hardware.consumerir.xml
+and /vendor/lib64/hw/consumerir.default.so were both present.
+
+Dropping the gate is safe. Every entry in copy_list is already guarded by
+its own os.path.exists() or glob(), so on a host that genuinely has
+neither HAL the function still copies nothing - it just no longer decides
+that in advance from an unrelated property. The sku lookup keeps working
+as before; on a non-Treble host ro.boot.product.hardware.sku is empty and
+that branch is skipped by the existing check.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ tools/helpers/lxc.py | 4 ----
+ 1 file changed, 4 deletions(-)
+
+--- a/tools/helpers/lxc.py
++++ b/tools/helpers/lxc.py
+@@ -346,10 +346,6 @@ def setup_host_perms(args):
+     if not os.path.exists(tools.config.defaults["host_perms"]):
+         os.mkdir(tools.config.defaults["host_perms"])
+
+-    treble = tools.helpers.props.host_get(args, "ro.treble.enabled")
+-    if treble != "true":
+-        return
+-
+     sku = tools.helpers.props.host_get(args, "ro.boot.product.hardware.sku")
+     copy_list = []
+     copy_list.extend(
