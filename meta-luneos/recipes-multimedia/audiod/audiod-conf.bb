@@ -8,6 +8,10 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 inherit webos_filesystem_paths
 
+# Nothing but local files, so nothing ever lands in the default
+# S = "${UNPACKDIR}/${BP}" and do_unpack warns about it.
+S = "${UNPACKDIR}"
+
 # Which sound card audiod looks for and what it does with it. The config audiod
 # itself ships names the OSE reference board's cards - b1, b2, Headphones - which
 # match nothing on any real device, so audiod finds no card, registers no device,
