@@ -52,16 +52,25 @@ an ioctl the driver does not answer to.
 
 Two sysfs shapes are handled as well, for the rest of our devices:
 
-  plain LED class    writing <node>/brightness lights the torch. What
-                     LEDS_CLASS_FLASH devices such as tissot and rosy present:
-                     `brightness` is the torch current, while flash_brightness
-                     and flash_strobe drive the momentary flash, untouched here.
+  plain LED class    writing <node>/brightness lights the torch. What a
+                     LEDS_CLASS_FLASH device presents: `brightness` is the torch
+                     current, while flash_brightness and flash_strobe drive the
+                     momentary flash, untouched here.
 
-  current + switch   qcom's qpnp-flash-v2, as on sargo. led:torch_0/brightness
-                     only arms a current; nothing lights until
-                     led:switch_0/brightness goes to 1. The switch node is
-                     derived from the torch node's name, since the driver names
-                     them as a pair.
+  current + switch   qcom's qpnp-flash-v2, as on sargo and tissot.
+                     led:torch_0/brightness only arms a current; nothing lights
+                     until the switch node goes to 1. The switch is derived from
+                     the torch node's name, since the driver names them as a
+                     pair - but the two spellings both occur and both are tried:
+                     sargo carries the index across (led:torch_0 ->
+                     led:switch_0), while tissot gates led:torch_0 and
+                     led:torch_1 with a single un-indexed led:switch.
+
+                     Deriving it wrong fails silently, which is what makes the
+                     second attempt worth making: arming the current succeeds by
+                     itself, so the write returns success and the module reports
+                     the torch on while it stays dark. Measured on tissot -
+                     led:torch_0 read 200 with led:switch still 0.
 
 Ordering in that second shape is deliberate: arm the current before enabling the
 switch, cut the switch before disarming. The reverse leaves the hardware in a
@@ -92,10 +101,11 @@ it the tool appears to do nothing at all.
 Upstream-Status: Inappropriate [LuneOS specific]
 Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
 ---
-diff -urN nm3.base/src/CMakeLists.txt nm3/src/CMakeLists.txt
---- a/src/CMakeLists.txt	2026-08-30 21:14:20.527237148 +0200
-+++ b/src/CMakeLists.txt	2026-08-30 21:33:17.953093742 +0200
-@@ -123,3 +123,20 @@
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 2302fe8..92d2ff9 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -123,3 +123,20 @@ endif()
  # built by the other recipe entirely, which is exactly where a way to poke the
  # notification LED is most wanted.
  add_subdirectory(led_controller_test)
@@ -116,9 +126,11 @@ diff -urN nm3.base/src/CMakeLists.txt nm3/src/CMakeLists.txt
 +    add_subdirectory(led_torch)
 +endif()
 +add_subdirectory(led_test)
-diff -urN nm3.base/src/led_test/CMakeLists.txt nm3/src/led_test/CMakeLists.txt
---- a/src/led_test/CMakeLists.txt	1970-01-01 01:00:00.000000000 +0100
-+++ b/src/led_test/CMakeLists.txt	2026-08-30 21:25:15.050767868 +0200
+diff --git a/src/led_test/CMakeLists.txt b/src/led_test/CMakeLists.txt
+new file mode 100644
+index 0000000..5aca542
+--- /dev/null
++++ b/src/led_test/CMakeLists.txt
 @@ -0,0 +1,19 @@
 +# Copyright (c) 2026 Herman van Hazendonk <github.com@herrie.org>
 +#
@@ -139,9 +151,11 @@ diff -urN nm3.base/src/led_test/CMakeLists.txt nm3/src/led_test/CMakeLists.txt
 +add_executable(nyx-test-led nyx_test_led.c)
 +target_link_libraries(nyx-test-led ${NYXLIB_LDFLAGS} ${GLIB2_LDFLAGS} ${PMLOG_LDFLAGS})
 +webos_build_program(NAME nyx-test-led)
-diff -urN nm3.base/src/led_test/nyx_test_led.c nm3/src/led_test/nyx_test_led.c
---- a/src/led_test/nyx_test_led.c	1970-01-01 01:00:00.000000000 +0100
-+++ b/src/led_test/nyx_test_led.c	2026-08-31 11:56:17.444905799 +0200
+diff --git a/src/led_test/nyx_test_led.c b/src/led_test/nyx_test_led.c
+new file mode 100644
+index 0000000..2d984e6
+--- /dev/null
++++ b/src/led_test/nyx_test_led.c
 @@ -0,0 +1,183 @@
 +// Copyright (c) 2026 Herman van Hazendonk <github.com@herrie.org>
 +//
@@ -326,9 +340,11 @@ diff -urN nm3.base/src/led_test/nyx_test_led.c nm3/src/led_test/nyx_test_led.c
 +	nyx_device_close(device);
 +	return 0;
 +}
-diff -urN nm3.base/src/led_torch/CMakeLists.txt nm3/src/led_torch/CMakeLists.txt
---- a/src/led_torch/CMakeLists.txt	1970-01-01 01:00:00.000000000 +0100
-+++ b/src/led_torch/CMakeLists.txt	2026-08-30 21:23:00.215478312 +0200
+diff --git a/src/led_torch/CMakeLists.txt b/src/led_torch/CMakeLists.txt
+new file mode 100644
+index 0000000..3767800
+--- /dev/null
++++ b/src/led_torch/CMakeLists.txt
 @@ -0,0 +1,22 @@
 +# Copyright (c) 2026 Herman van Hazendonk <github.com@herrie.org>
 +#
@@ -352,10 +368,12 @@ diff -urN nm3.base/src/led_torch/CMakeLists.txt nm3/src/led_torch/CMakeLists.txt
 +webos_build_nyx_module(LedTorch
 +                       SOURCES led_torch.c
 +                       LIBRARIES ${GLIB2_LDFLAGS} ${PMLOG_LDFLAGS} ${NYXLIB_LDFLAGS} -lrt -lpthread)
-diff -urN nm3.base/src/led_torch/led_torch.c nm3/src/led_torch/led_torch.c
---- a/src/led_torch/led_torch.c	1970-01-01 01:00:00.000000000 +0100
-+++ b/src/led_torch/led_torch.c	2026-08-31 11:44:03.479486181 +0200
-@@ -0,0 +1,583 @@
+diff --git a/src/led_torch/led_torch.c b/src/led_torch/led_torch.c
+new file mode 100644
+index 0000000..48f6287
+--- /dev/null
++++ b/src/led_torch/led_torch.c
+@@ -0,0 +1,633 @@
 +// Copyright (c) 2026 Herman van Hazendonk <github.com@herrie.org>
 +//
 +// Licensed under the Apache License, Version 2.0 (the "License");
@@ -381,17 +399,20 @@ diff -urN nm3.base/src/led_torch/led_torch.c nm3/src/led_torch/led_torch.c
 + * Two sysfs shapes are handled, because our devices split evenly between them:
 + *
 + *   plain LED class    write <node>/brightness and the torch lights.
-+ *                      What LEDS_CLASS_FLASH devices such as tissot and rosy
-+ *                      present: their `brightness` *is* the torch current,
-+ *                      while flash_brightness/flash_strobe drive the momentary
-+ *                      flash we deliberately do not touch.
++ *                      What a LEDS_CLASS_FLASH device presents: its
++ *                      `brightness` *is* the torch current, while
++ *                      flash_brightness/flash_strobe drive the momentary flash
++ *                      we deliberately do not touch.
 + *
-+ *   current + switch   qcom's qpnp-flash-v2, as on sargo. Writing
++ *   current + switch   qcom's qpnp-flash-v2, as on sargo and tissot. Writing
 + *                      led:torch_0/brightness only arms a current; nothing
-+ *                      lights until led:switch_0/brightness goes to 1. Note
-+ *                      the ordering below - arm before enable, disable before
++ *                      lights until the switch node goes to 1. Note the
++ *                      ordering below - arm before enable, disable before
 + *                      disarm - because a switch left on with zero current is
 + *                      a confusing state to leave the hardware in.
++ *
++ *                      See derive_switch_path() for how that node is found and
++ *                      why getting it wrong is silent rather than loud.
 + *
 + * Paths come from /etc/nyx.conf where luneos-device-config wrote them, and are
 + * otherwise derived. Nothing here is compiled in per machine: that is the whole
@@ -670,14 +691,39 @@ diff -urN nm3.base/src/led_torch/led_torch.c nm3/src/led_torch/led_torch.c
 +}
 +
 +/*
-+ * qpnp-flash-v2 names its enable node after the torch it gates: led:torch_0 is
-+ * switched by led:switch_0. Deriving that beats another per-device config key,
-+ * and a device without the convention simply has no such directory.
++ * qpnp-flash-v2 gates its torch behind a separate enable node: writing
++ * led:torch_0/brightness only arms a current, and nothing lights until the
++ * switch node goes to 1.
++ *
++ * The switch is named after the torch it gates, so it can be derived rather than
++ * spent as another per-device config key. Two spellings exist in the wild and
++ * both have to be tried: sargo carries the index across (led:torch_0 ->
++ * led:switch_0), while tissot exposes led:torch_0 and led:torch_1 gated by a
++ * single un-indexed led:switch.
++ *
++ * Guessing wrong here fails silently rather than loudly, which is why it is
++ * worth the second attempt: arming the current succeeds on its own, so the write
++ * returns success and the module reports the torch on, while the light never
++ * comes on because nothing ever opened the gate.
 + */
++static gchar *switch_path_if_present(const gchar *switch_name)
++{
++	gchar *dir = g_build_filename(LEDS_CLASS_DIR, switch_name, NULL);
++	gchar *path = NULL;
++
++	if (g_file_test(dir, G_FILE_TEST_IS_DIR))
++	{
++		path = g_build_filename(dir, "brightness", NULL);
++	}
++
++	g_free(dir);
++	return path;
++}
++
 +static gchar *derive_switch_path(const gchar *torch_dir)
 +{
 +	gchar *base = g_path_get_basename(torch_dir);
-+	gchar *switch_name, *dir, *path = NULL;
++	gchar *switch_name, *path;
 +
 +	if (!g_strstr_len(base, -1, "torch"))
 +	{
@@ -691,14 +737,36 @@ diff -urN nm3.base/src/led_torch/led_torch.c nm3/src/led_torch/led_torch.c
 +		g_strfreev(parts);
 +	}
 +
-+	dir = g_build_filename(LEDS_CLASS_DIR, switch_name, NULL);
++	path = switch_path_if_present(switch_name);
 +
-+	if (g_file_test(dir, G_FILE_TEST_IS_DIR))
++	if (NULL == path)
 +	{
-+		path = g_build_filename(dir, "brightness", NULL);
++		/*
++		 * led:switch_0 -> led:switch. Only a trailing all-digit index is
++		 * dropped, so a name that merely ends in an underscore is left alone.
++		 */
++		gchar *sep = g_strrstr(switch_name, "_");
++
++		if (sep && sep[1] != '\0')
++		{
++			gchar *c;
++
++			for (c = sep + 1; *c; c++)
++			{
++				if (!g_ascii_isdigit(*c))
++				{
++					break;
++				}
++			}
++
++			if ('\0' == *c)
++			{
++				*sep = '\0';
++				path = switch_path_if_present(switch_name);
++			}
++		}
 +	}
 +
-+	g_free(dir);
 +	g_free(switch_name);
 +	g_free(base);
 +	return path;
