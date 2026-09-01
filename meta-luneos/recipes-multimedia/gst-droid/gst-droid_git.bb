@@ -30,8 +30,51 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 PV = "0.20260508+git"
 SRCREV = "e5152aee90dbb9b81c6bc45073b1fa86fc0c4194"
-SRC_URI = "git://github.com/sailfishos/gst-droid.git;branch=master;protocol=https"
+SRC_URI = "git://github.com/sailfishos/gst-droid.git;branch=master;protocol=https \
+    file://gst-droid-gate.sh \
+    file://gst-droid-gate.service \
+"
 
-inherit meson pkgconfig
+inherit meson pkgconfig systemd
 
-FILES:${PN} += "${libdir}/gstreamer-1.0/libgstdroid.so"
+# libgstdroid must not sit in the directory GStreamer scans by default.
+#
+# It dlopens the container's libdroidmedia.so, which reaches libstagefright's
+# MediaCodecList and asks hwservicemanager for
+# android.hardware.media.omx@1.0::IOmxStore. libhidl's getService() retries
+# forever, so on a Halium base that registers no such service - tissot-halium's
+# halium-luneos-9.0 image ships no OMX service at all, and its minimediaservice
+# has no OMX support - gst-plugin-scanner hangs and takes every GStreamer client
+# with it, surface-manager included: it never reaches sd_notify(READY=1), its
+# Type=notify start times out, and the device sits in a compositor restart loop
+# showing a black screen.
+#
+# Devices whose Android side does provide the service get the plugin as before,
+# via gst-droid-gate.service. The cost of guessing wrong in this direction is
+# only the loss of hardware codecs; guessing wrong in the other direction costs
+# the whole UI, so the plugin stays gated rather than gating on a machine list.
+GST_DROID_PLUGINDIR = "${libdir}/gstreamer-1.0-gated"
+
+do_install:append() {
+    install -d ${D}${GST_DROID_PLUGINDIR}
+    mv ${D}${libdir}/gstreamer-1.0/libgstdroid.so ${D}${GST_DROID_PLUGINDIR}/
+    rmdir ${D}${libdir}/gstreamer-1.0 2>/dev/null || true
+
+    install -d ${D}${bindir}
+    install -m 0755 ${UNPACKDIR}/gst-droid-gate.sh ${D}${bindir}/
+    sed -i -e "s|@GST_DROID_PLUGINDIR@|${GST_DROID_PLUGINDIR}|" \
+        ${D}${bindir}/gst-droid-gate.sh
+
+    install -d ${D}${systemd_system_unitdir}
+    install -m 0644 ${UNPACKDIR}/gst-droid-gate.service ${D}${systemd_system_unitdir}/
+    sed -i -e "s|@BINDIR@|${bindir}|" \
+        ${D}${systemd_system_unitdir}/gst-droid-gate.service
+}
+
+# binder-ping, used by the gate to ask hwservicemanager whether the OMX service
+# is registered, comes from libgbinder-tools.
+RDEPENDS:${PN} += "libgbinder-tools"
+
+SYSTEMD_SERVICE:${PN} = "gst-droid-gate.service"
+
+FILES:${PN} += "${GST_DROID_PLUGINDIR}/libgstdroid.so"
