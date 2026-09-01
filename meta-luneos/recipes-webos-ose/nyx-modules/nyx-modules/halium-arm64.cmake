@@ -49,3 +49,17 @@ set(NYXMOD_OW_HAPTICS					TRUE)
 set(NYXMOD_OW_DEVICEINFO				FALSE)
 set(NYXMOD_OW_SYSTEM					FALSE)
 set(NYXMOD_OW_LED						FALSE)
+
+# NOT handed to the hybris side, despite that being the natural choice here:
+# /sys/class/leds on a Treble device belongs to Android, so the sysfs backend has
+# little it can write, and the camera-service backend would be the right answer.
+#
+# The blocker that used to sit here is gone: this machine no longer pins the older
+# sailfishos droidmedia, and the 16.0 GSI it runs does export
+# droid_media_camera_set_torch_mode - the symbol the hybris torch is built around,
+# and the only one that differs between our GSIs.
+#
+# Still left unset, because that backend has not been run on hardware yet. Unset
+# gives the sysfs module, which will most likely find no torch node here and report
+# NYX_ERROR_DEVICE_UNAVAILABLE - an honest "no torch on this device" rather than a
+# broken one. Set it FALSE once the camera-service path has been tried on a device.
