@@ -14,7 +14,7 @@ DEPENDS = "luna-service2 libpbnjson glib-2.0 luna-prefs openssl glib-2.0-native 
 RDEPENDS:${PN} = "connman connman-client"
 
 WEBOS_VERSION = "1.1.0-50_085b6369346df4d0e6c6338b20df0a0a7ee6245f"
-PR = "r20"
+PR = "r21"
 
 inherit webos_component
 inherit webos_public_repo
@@ -40,6 +40,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0005-connectionmanager-implement-setDefaultInterface-with.patch \
     file://0006-expose-DNS-search-domains-and-cellular-roaming-state.patch \
     file://0007-connectionmanager-expose-per-service-timeservers-mDN.patch \
+    file://0008-connectionmanager-report-offlineMode-changes-to-gets.patch \
 "
 
 inherit webos_systemd
