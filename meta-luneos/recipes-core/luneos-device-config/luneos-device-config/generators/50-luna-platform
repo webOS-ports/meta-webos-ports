@@ -23,34 +23,59 @@ GRID_UNIT_MM=${deviceinfo_grid_unit_mm:-1.44}
 
 # DPI here is the panel's true physical PPI, which is NOT derivable: it needs
 # the panel's physical dimensions, and an internal DSI panel exposes no EDID.
-# ro.sf.lcd_density is Android's density *bucket* (440 on sargo where the panel
-# is 441 PPI) - close, but writing it would make the value slightly less
-# accurate than what is shipped. So prefer the file's own DPI, fall back to the
-# density bucket only when the file has nothing, and let deviceinfo override.
-# DPI, in order of trust.
 #
-# Never read back out of $SRC. That file is a placeholder, and treating its
-# contents as a fallback is what turned an invented mid-range constant into the
-# effective DPI of every device without an adaptation.
+# This file used to say "never read back out of $SRC", and that rule came from a
+# real bug - but it was drawn too wide. The bug was that the *generic* placeholder
+# shipped an invented DPI and taking it as a fallback made that number the
+# effective DPI of every device without an adaptation. The per-machine files are
+# not placeholders: raspberrypi3 ships 133/8, tenderloin 132/10, rosy and the
+# PinePhones 282/19, hammerhead 445/26, mido and tissot 480/26. Those are
+# measured, hand-tuned numbers, and refusing to look at them meant writing
+# LAST_RESORT_DPI over every one of them - 320/18 on the whole non-Halium fleet,
+# which is a much larger error than the one the rule was written to prevent.
 #
-#   1. deviceinfo - the panel's true physical PPI. Not derivable: an internal
-#      DSI panel does not report physical dimensions.
-#   2. ro.sf.lcd_density - Android's density bucket. Close but not the same
-#      thing, and it is what the vendor believes, so it beats a constant.
-#   3. a last resort in code, so that an unknown device still boots to a usable
-#      UI rather than a zero-sized one. Deliberately here and not in the config
+# So distinguish the two cases the way the shipped files already do. The generic
+# machine ships DPI=0 GridUnit=0 (luna-sysmgr-conf/halium), which is the "we do
+# not know" marker; any non-zero value is a measurement. The universal image is
+# the generic machine, so it still derives everything; a machine we have actually
+# ported keeps what was measured on it.
+#
+# DPI, in order of trust:
+#
+#   1. deviceinfo - the panel's true physical PPI, declared by a Tier 1
+#      adaptation.
+#   2. the value this machine ships, when it is not the 0 placeholder.
+#   3. ro.sf.lcd_density - Android's density *bucket*. Close but not the same
+#      thing (440 on sargo where the panel is 441), so it loses to a measurement
+#      and beats nothing at all.
+#   4. a last resort in code, so an unknown device still boots to a usable UI
+#      rather than a zero-sized one. Deliberately here and not in the config
 #      file: a fallback belongs where it can be seen to be a fallback.
 LAST_RESORT_DPI=320
 
+# A value the machine ships, or nothing if it ships the placeholder.
+shipped_value() {
+    _v=$(sed -n "s/^$1=\\(.*\\)$/\\1/p" "$SRC" | head -n1)
+    case "$_v" in ''|0) return 1 ;; esac
+    printf '%s\n' "$_v"
+}
+
 dpi=${deviceinfo_display_dpi:-}
+[ -n "$dpi" ] || dpi=$(shipped_value DPI)
 [ -n "$dpi" ] || dpi=$density
 if [ -z "$dpi" ]; then
     dpi=$LAST_RESORT_DPI
-    echo "luneos-device-config: WARNING: no DPI from deviceinfo or the vendor;" \
-         "falling back to $dpi"
+    echo "luneos-device-config: WARNING: no DPI from deviceinfo, $SRC or the" \
+         "vendor; falling back to $dpi"
 fi
 
+# GridUnit follows the same order, and for the same reason. The 1.44 mm constant
+# reproduces sargo's 25 exactly and is within a unit or two elsewhere, but "within
+# a unit or two" is still a change: deriving from rosy's own 282 DPI gives 16
+# against the 19 it ships, and tenderloin's 132 gives 7 against 10. A tuned value
+# is not improved by being recomputed from the number it was tuned against.
 grid=${deviceinfo_grid_unit:-}
+[ -n "$grid" ] || grid=$(shipped_value GridUnit)
 if [ -z "$grid" ]; then
     grid=$(awk -v d="$dpi" -v mm="$GRID_UNIT_MM" 'BEGIN { printf "%d", (d * mm / 25.4) + 0.5 }')
 fi
