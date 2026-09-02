@@ -1,0 +1,72 @@
+#!/bin/sh
+# Translate Android's ueventd device-permission rules into udev rules.
+#
+# Android assigns ownership of its device nodes through ueventd*.rc. Halium does
+# not run ueventd, so without this those nodes are created root:root 0600 and
+# every Android daemon that runs as a non-root user - which is most of them -
+# silently fails to open the hardware it needs.
+#
+# This is the mechanism the rest of the Halium ecosystem already has; Droidian
+# and UBports ship per-device rules generated the same way. Generating at boot
+# from whatever the device actually mounts means one implementation covers every
+# machine instead of a rules file per port.
+#
+# Concretely: mnld runs as uid gps, /dev/stpgps was root:root 0600, and it could
+# never open the GPS channel - it emitted a burst of null NMEA, never searched,
+# and died. /vendor/ueventd.rc had said "0660 gps gps" all along.
+
+# Written persistently rather than to /run: the nodes this covers are created on
+# demand, sometimes long after boot, and udev reads /etc/udev/rules.d at startup.
+# Persisting means the rules are in force even on a boot where this service runs
+# late or not at all, and regenerating each boot keeps them correct if the
+# vendor partition is ever replaced.
+OUT=/etc/udev/rules.d/70-android.rules
+SRC="/ueventd.rc /ueventd.*.rc /vendor/ueventd.rc /vendor/ueventd.*.rc
+     /system/etc/ueventd.rc /odm/ueventd.rc
+     /var/lib/lxc/android/rootfs/ueventd.rc /var/lib/lxc/android/rootfs/ueventd.*.rc"
+
+mkdir -p /etc/udev/rules.d
+
+FOUND=""
+for f in $SRC; do
+    [ -f "$f" ] && FOUND="$FOUND $f"
+done
+
+if [ -z "$FOUND" ]; then
+    echo "halium-udev-rules: no ueventd rc files found, nothing to translate" >&2
+    exit 0
+fi
+
+{
+    echo "# Generated from Android ueventd rules by halium-generate-udev-rules."
+    echo "# Source:$FOUND"
+    echo "# Do not edit; regenerated on every boot."
+
+    # ueventd lines are: <path> <mode> <user> <group> [options]
+    # Only /dev entries are ours; /sys entries use a different syntax and are
+    # left alone. OWNER/GROUP/MODE are assignments, so a single '=' - the
+    # pipeline in the Halium docs uses '==' there, which would quietly match
+    # nothing instead of applying anything.
+    cat $FOUND 2>/dev/null \
+      | tr -d '\r' \
+      | grep '^/dev/' \
+      | awk '$2 != "" && $3 != "" && $4 != "" {
+              path = $1
+              sub(/^\/dev\//, "", path)
+              # A trailing * in ueventd is a prefix match; KERNEL== globs the
+              # same way, so the pattern carries over unchanged.
+              printf "ACTION==\"add\", KERNEL==\"%s\", OWNER=\"%s\", GROUP=\"%s\", MODE=\"%s\"\n", path, $3, $4, $2
+            }' \
+      | sort -u
+} > "$OUT"
+
+COUNT=$(grep -c '^ACTION' "$OUT" 2>/dev/null)
+echo "halium-udev-rules: wrote $COUNT rules to $OUT"
+
+# Nodes created before udev read these rules keep their old ownership, so apply
+# the rules once to what already exists.
+udevadm control --reload-rules 2>/dev/null
+udevadm trigger --subsystem-match=misc --action=add 2>/dev/null
+udevadm trigger --action=add 2>/dev/null
+
+exit 0
