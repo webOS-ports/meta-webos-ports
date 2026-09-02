@@ -95,13 +95,22 @@ PY
 # channel when it finds images there. On a machine whose rootfs has no room for
 # them - mindphone's is a 2.4G loop image - the images live on userdata and the
 # directory is bind mounted over the path Waydroid looks at.
+# The bind exists to put the images somewhere with room for them, not to make
+# Waydroid believe they were pre-installed. It mounts over
+# /var/lib/waydroid/images - the path Waydroid downloads into - rather than
+# /etc/waydroid-extra/images, which is one of its preinstalled_images_paths:
+# choosing that one makes setup_config set system_ota and vendor_ota to "None"
+# and the machine never sees an image update again. On the path below the
+# bytes still land on the roomy filesystem, and the OTA channel still applies.
+WAYDROID_IMAGES_TARGET=${WAYDROID_IMAGES_TARGET:-/var/lib/waydroid/images}
+
 bind_images() {
     [ -n "$WAYDROID_IMAGES_DIR" ] || return 0
     [ -d "$WAYDROID_IMAGES_DIR" ] || { log "WAYDROID_IMAGES_DIR $WAYDROID_IMAGES_DIR does not exist"; return 1; }
-    mkdir -p /etc/waydroid-extra/images
-    mountpoint -q /etc/waydroid-extra/images && { log "image store already mounted"; return 0; }
-    mount --bind "$WAYDROID_IMAGES_DIR" /etc/waydroid-extra/images || return 1
-    log "bind mounted $WAYDROID_IMAGES_DIR over /etc/waydroid-extra/images"
+    mkdir -p "$WAYDROID_IMAGES_TARGET"
+    mountpoint -q "$WAYDROID_IMAGES_TARGET" && { log "image store already mounted"; return 0; }
+    mount --bind "$WAYDROID_IMAGES_DIR" "$WAYDROID_IMAGES_TARGET" || return 1
+    log "bind mounted $WAYDROID_IMAGES_DIR over $WAYDROID_IMAGES_TARGET"
 }
 
 # -------------------------------------------------------------- host HAL libs
