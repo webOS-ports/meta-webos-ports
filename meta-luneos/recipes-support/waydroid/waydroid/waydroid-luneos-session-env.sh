@@ -34,9 +34,26 @@ waydroid_luneos_session_env() {
     }
 
     XDG_RUNTIME_DIR=$(_env_of XDG_RUNTIME_DIR)
-    DBUS_SESSION_BUS_ADDRESS=$(_env_of DBUS_SESSION_BUS_ADDRESS)
     WAYLAND_DISPLAY=$(_env_of WAYLAND_DISPLAY)
     [ -n "$XDG_RUNTIME_DIR" ] || { echo "compositor has no XDG_RUNTIME_DIR" >&2; return 1; }
+
+    # Wait for the session bus rather than taking whatever is there.
+    #
+    # The compositor is running before its DBUS_SESSION_BUS_ADDRESS is in its
+    # environment, and an empty value is worse than none: waydroid falls back
+    # to dbus-daemon autolaunch, which fails with "Using X11 for dbus-daemon
+    # autolaunch was disabled" and takes the session unit down with it. It
+    # recovered only because systemd kept restarting the unit - fifteen times,
+    # on the boot that showed this.
+    _i=0
+    while [ "$_i" -lt "$timeout" ]; do
+        DBUS_SESSION_BUS_ADDRESS=$(_env_of DBUS_SESSION_BUS_ADDRESS)
+        [ -n "$DBUS_SESSION_BUS_ADDRESS" ] && break
+        _i=$((_i + 2))
+        sleep 2
+    done
+    [ -n "$DBUS_SESSION_BUS_ADDRESS" ] || {
+        echo "compositor has no DBUS_SESSION_BUS_ADDRESS after ${timeout}s" >&2; return 1; }
     [ -n "$WAYLAND_DISPLAY" ] || WAYLAND_DISPLAY=wayland-0
     XDG_SESSION_TYPE=wayland
     export XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS WAYLAND_DISPLAY XDG_SESSION_TYPE

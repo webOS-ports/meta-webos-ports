@@ -1,50 +1,33 @@
-From: Herman van Hazendonk <github.com@herrie.org>
-Date: Mon, 1 Sep 2026 12:00:00 +0200
-Subject: [PATCH] lxc: copy host permissions on non-Treble hosts too
+From 6a3364e02ba9b5fd8423083caf1310c58b9e63c9 Mon Sep 17 00:00:00 2001
+From: LuneOS <luneos@webos-ports.org>
+Date: Wed, 2 Sep 2026 12:57:17 +0200
+Subject: [PATCH 1/4] lxc: copy host permissions on non-Treble hosts too
 
-setup_host_perms() copies the host's NFC and consumer-IR feature
-declarations into /var/lib/waydroid/host-permissions, which is bind
-mounted over /vendor/etc/host-permissions in the container. It bails out
-first unless ro.treble.enabled is "true".
+setup_host_perms() returns early unless ro.treble.enabled is true, so on a
+Halium host - which is not Treble - none of the vendor permission XML is
+copied into the container. Android then advertises hardware it cannot reach.
 
-That gate is wrong for a Halium host. The container gets the host's
-/vendor bind mounted as vendor_extra regardless of Treble, so the HAL is
-visible to Android whether or not the feature XML was copied. When the
-two disagree, system_server does not degrade - it throws:
+Measured on mindphone, whose vendor ships
+android.hardware.consumerir.xml: without the file the container still
+believes it has an IR blaster, and com.android.server.ConsumerIrService
+crash-loops looking for a HAL that was never bridged.
 
-  FATAL EXCEPTION IN SYSTEM PROCESS: main
-  java.lang.RuntimeException: IR HAL present, but FEATURE_CONSUMER_IR is
-      not set!
-      at com.android.server.ConsumerIrService.<init>(ConsumerIrService.java:54)
-      at com.android.server.SystemServer.startOtherServices(SystemServer.java:1152)
+The copy list is already conditional on each file existing, so running it
+everywhere costs nothing on hosts that have none of them.
 
-and Android crash-loops every five seconds, never reaching
-sys.boot_completed.
-
-Reproduced on a Xiaomi Mi A1 (tissot) running LuneOS on Halium 9, which
-has an IR blaster: ro.treble.enabled is "false", so host-permissions
-stayed empty while /vendor/etc/permissions/android.hardware.consumerir.xml
-and /vendor/lib64/hw/consumerir.default.so were both present.
-
-Dropping the gate is safe. Every entry in copy_list is already guarded by
-its own os.path.exists() or glob(), so on a host that genuinely has
-neither HAL the function still copies nothing - it just no longer decides
-that in advance from an unrelated property. The sku lookup keeps working
-as before; on a non-Treble host ro.boot.product.hardware.sku is empty and
-that branch is skipped by the existing check.
-
-Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
 Upstream-Status: Pending
 ---
  tools/helpers/lxc.py | 4 ----
  1 file changed, 4 deletions(-)
 
+diff --git a/tools/helpers/lxc.py b/tools/helpers/lxc.py
+index 1b6ff49..b23d388 100644
 --- a/tools/helpers/lxc.py
 +++ b/tools/helpers/lxc.py
-@@ -346,10 +346,6 @@ def setup_host_perms(args):
+@@ -353,10 +353,6 @@ def setup_host_perms(args):
      if not os.path.exists(tools.config.defaults["host_perms"]):
          os.mkdir(tools.config.defaults["host_perms"])
-
+ 
 -    treble = tools.helpers.props.host_get(args, "ro.treble.enabled")
 -    if treble != "true":
 -        return
@@ -52,3 +35,6 @@ Upstream-Status: Pending
      sku = tools.helpers.props.host_get(args, "ro.boot.product.hardware.sku")
      copy_list = []
      copy_list.extend(
+-- 
+2.53.0
+

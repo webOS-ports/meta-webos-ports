@@ -1,0 +1,104 @@
+From 738980b249790b3b778fedd7b9cfcdb56722c3fa Mon Sep 17 00:00:00 2001
+From: LuneOS <luneos@webos-ports.org>
+Date: Wed, 2 Sep 2026 12:57:46 +0200
+Subject: [PATCH 2/4] Makefile: add a LuneOS install target
+
+webOS does not use .desktop files, XDG menus or hicolor icon themes. An
+application there is a directory under /usr/palm/applications holding an
+appinfo.json, an icon and its entry point. "make install" lays out none of
+that and installs a good deal that has nowhere to go, so this adds a target
+beside it that installs the same tools with a webOS launcher entry.
+
+The application id is Waydroid rather than a reverse-DNS name because
+hwcomposer sets exactly that as the Wayland app_id of the full-UI window;
+luna-surfacemanager carries it through to WebOSSurfaceItem::appId, and the
+card shell matches a card to its app by it. Per-app entries generated later
+follow the same rule with waydroid.<package>.
+
+Upstream-Status: Inappropriate [LuneOS specific]
+---
+ Makefile | 40 ++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 40 insertions(+)
+
+diff --git a/Makefile b/Makefile
+index e28dc2d..7101630 100644
+--- a/Makefile
++++ b/Makefile
+@@ -5,9 +5,16 @@ USE_DBUS_ACTIVATION ?= 1
+ USE_NFTABLES ?= 0
+ 
+ SYSCONFDIR := /etc
++APP_ID := id.waydro.Container
++# The webOS application id, which is also the Wayland app_id hwcomposer sets on
++# the full-UI window - luna-surfacemanager carries that through to
++# WebOSSurfaceItem::appId, and the card shell matches a card to its app by it.
++APP_ID_LUNEOS := Waydroid
++WAYDROID_VERSION ?= 0.0.0
+ WAYDROID_DIR := $(PREFIX)/lib/waydroid
+ BIN_DIR := $(PREFIX)/bin
+ APPS_DIR := $(PREFIX)/share/applications
++APPS_DIR_LUNEOS := $(PREFIX)/palm/applications
+ APPS_DIRECTORY_DIR := $(PREFIX)/share/desktop-directories
+ APPS_MENU_DIR := $(SYSCONFDIR)/xdg/menus/applications-merged
+ METAINFO_DIR := $(PREFIX)/share/metainfo
+@@ -16,10 +23,12 @@ SYSD_DIR := $(PREFIX)/lib/systemd/system
+ DBUS_DIR := $(PREFIX)/share/dbus-1
+ POLKIT_DIR := $(PREFIX)/share/polkit-1
+ APPARMOR_DIR := $(SYSCONFDIR)/apparmor.d
++ETC_DIR_LUNEOS := $(SYSCONFDIR)/$(APP_ID)
+ 
+ INSTALL_WAYDROID_DIR := $(DESTDIR)$(WAYDROID_DIR)
+ INSTALL_BIN_DIR := $(DESTDIR)$(BIN_DIR)
+ INSTALL_APPS_DIR := $(DESTDIR)$(APPS_DIR)
++INSTALL_APPS_DIR_LUNEOS := $(DESTDIR)$(APPS_DIR_LUNEOS)
+ INSTALL_APPS_DIRECTORY_DIR := $(DESTDIR)$(APPS_DIRECTORY_DIR)
+ INSTALL_APPS_MENU_DIR := $(DESTDIR)$(APPS_MENU_DIR)
+ INSTALL_METAINFO_DIR := $(DESTDIR)$(METAINFO_DIR)
+@@ -28,6 +37,7 @@ INSTALL_SYSD_DIR := $(DESTDIR)$(SYSD_DIR)
+ INSTALL_DBUS_DIR := $(DESTDIR)$(DBUS_DIR)
+ INSTALL_POLKIT_DIR := $(DESTDIR)$(POLKIT_DIR)
+ INSTALL_APPARMOR_DIR := $(DESTDIR)$(APPARMOR_DIR)
++INSTALL_ETC_DIR_LUNEOS := $(DESTDIR)$(ETC_DIR_LUNEOS)
+ 
+ build:
+ 	@echo "Nothing to build, run 'make install' to copy the files!"
+@@ -59,6 +69,36 @@ install:
+ 		sed '/LXC_USE_NFT=/ s/false/true/' -i $(INSTALL_WAYDROID_DIR)/data/scripts/waydroid-net.sh; \
+ 	fi
+ 
++# webOS has no .desktop files and no XDG menus: an application is a directory
++# under $(APPS_DIR_LUNEOS) holding an appinfo.json. So this installs the same
++# tools as "install" but lays the launcher entry out the way webOS expects, and
++# skips everything freedesktop-specific.
++install_luneos:
++	install -d $(INSTALL_WAYDROID_DIR) $(INSTALL_BIN_DIR) $(INSTALL_DBUS_DIR)/system.d $(INSTALL_POLKIT_DIR)/actions
++	install -d $(INSTALL_APPS_DIR_LUNEOS)/$(APP_ID_LUNEOS) $(INSTALL_ETC_DIR_LUNEOS)
++	cp -rf data tools waydroid.py $(INSTALL_WAYDROID_DIR)
++	ln -sf \
++		$$(realpath --relative-to=$(INSTALL_BIN_DIR) $(INSTALL_WAYDROID_DIR)/waydroid.py) \
++		$(INSTALL_BIN_DIR)/waydroid
++	cp -rf $(INSTALL_WAYDROID_DIR)/data/AppIcon.png $(INSTALL_APPS_DIR_LUNEOS)/$(APP_ID_LUNEOS)/icon.png
++	cp -rf data/configs/luneos/appinfo.json $(INSTALL_APPS_DIR_LUNEOS)/$(APP_ID_LUNEOS)/appinfo.json
++	sed -i -e s:__VERSION__:$(WAYDROID_VERSION):g $(INSTALL_APPS_DIR_LUNEOS)/$(APP_ID_LUNEOS)/appinfo.json
++	install -m 0755 data/scripts/waydroid-luneos.sh $(INSTALL_APPS_DIR_LUNEOS)/$(APP_ID_LUNEOS)/waydroid.sh
++	cp -rf dbus/$(APP_ID).conf $(INSTALL_DBUS_DIR)/system.d/
++	cp -rf dbus/$(APP_ID).policy $(INSTALL_POLKIT_DIR)/actions/
++	cp -rf data/configs/environment/waydroid-luneos.env $(INSTALL_ETC_DIR_LUNEOS)/waydroid.env
++	if [ $(USE_DBUS_ACTIVATION) = 1 ]; then \
++		install -d $(INSTALL_DBUS_DIR)/system-services; \
++		cp -rf dbus/$(APP_ID).service $(INSTALL_DBUS_DIR)/system-services/$(APP_ID).service; \
++	fi
++	if [ $(USE_SYSTEMD) = 1 ]; then \
++		install -d $(INSTALL_SYSD_DIR); \
++		cp -rf systemd/waydroid-container.service $(INSTALL_SYSD_DIR); \
++	fi
++	if [ $(USE_NFTABLES) = 1 ]; then \
++		sed '/LXC_USE_NFT=/ s/false/true/' -i $(INSTALL_WAYDROID_DIR)/data/scripts/waydroid-net.sh; \
++	fi
++
+ install_apparmor:
+ 	install -d $(INSTALL_APPARMOR_DIR) $(INSTALL_APPARMOR_DIR)/lxc
+ 	mkdir -p $(INSTALL_APPARMOR_DIR)/local/
+-- 
+2.53.0
+

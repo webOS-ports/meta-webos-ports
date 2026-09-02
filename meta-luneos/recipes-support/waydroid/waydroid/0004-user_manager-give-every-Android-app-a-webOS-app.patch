@@ -1,55 +1,56 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: Herrie <github@herrie.org>
-Date: Wed, 2 Sep 2026 10:00:00 +0200
-Subject: [PATCH 5/5] user_manager: give every Android app a webOS app
+From 57231d2506697e64028a3d1f2cc3958d21ba9a79 Mon Sep 17 00:00:00 2001
+From: LuneOS <luneos@webos-ports.org>
+Date: Wed, 2 Sep 2026 12:58:46 +0200
+Subject: [PATCH 4/4] user_manager: give every Android app a webOS app
 
-Android was one tile that opened a launcher. Upstream already does the hard
-part - userUnlocked() enumerates packages through IPlatform.getAppsInfo(),
-packageStateChanged() fires on install and removal, and icons are extracted
-to ~/.local/share/waydroid/data/icons/<pkg>.png - it just emits .desktop
-files, which webOS has no use for.
+Android was one tile that opened a launcher. This makes each Android
+application a webOS application.
 
-webOS finds applications by scanning the directories in sam-conf.json, each
-holding an appinfo.json whose id is the directory name. So this writes one
-such directory per launchable package, next to the .desktop file rather than
-instead of it, so the same tree still works on a freedesktop host.
+Upstream already does the hard part - userUnlocked() enumerates packages
+through IPlatform.getAppsInfo(), packageStateChanged() reacts to installs and
+removals, and every icon is extracted - it just emits .desktop files, which
+webOS has no use for. So this writes one webOS application directory per
+launchable package alongside the .desktop file, leaving the same tree usable
+on a freedesktop host.
 
-The ids matter beyond the launcher. hwcomposer sets the Wayland app_id of a
-window to "Waydroid" for the full UI and "waydroid.<package>" for a per-app
-window, and luna-surfacemanager carries that through to
-WebOSSurfaceItem::appId; matching the webOS app ids to those is what lets the
-card switcher show an app's own title and icon instead of an anonymous card,
-and what lets SAM launch, track and close it.
+The ids match the windows: hwcomposer sets the Wayland app_id to
+"waydroid.<package>", and luna-surfacemanager carries that to
+WebOSSurfaceItem::appId, so the card switcher can show an app's own title and
+icon and SAM can launch, track and close it.
 
-SAM builds its application list once at startup and has no rescan -
-com.palm.applicationManager/rescan belongs to the legacy manager and does not
-reach it - so a set that has actually changed needs sam.service restarted.
-That is why the emission tracks whether anything changed rather than
-restarting on every unlock: at boot the directories are already on disk from
-the previous session and nothing is restarted at all.
+SAM builds its list once at startup and has no rescan, so the emission tracks
+whether the set actually changed and only then restarts sam.service; at boot
+the directories are already on disk and nothing is restarted.
 
-Kept to four functions so a rebase onto upstream only has to re-apply the
-calls to them.
+system_apps is deliberately not honoured here. Upstream hides those because a
+desktop already has a calculator, a clock and a browser; LuneOS mostly does
+not, and on the images shipped every launchable package is on that list, so
+honouring it would produce an empty launcher.
 
 Upstream-Status: Inappropriate [LuneOS specific]
 ---
+ tools/services/user_manager.py | 126 +++++++++++++++++++++++++++++++++
+ 1 file changed, 126 insertions(+)
+
+diff --git a/tools/services/user_manager.py b/tools/services/user_manager.py
+index 517812f..de51969 100644
 --- a/tools/services/user_manager.py
 +++ b/tools/services/user_manager.py
-@@ -1,7 +1,10 @@
+@@ -1,6 +1,10 @@
  # Copyright 2021 Erfan Abdi
  # SPDX-License-Identifier: GPL-3.0-or-later
 +import json
  import logging
- import os
++import os
 +import shutil
 +import subprocess
  import threading
  import tools.config
- from contextlib import suppress
-@@ -48,6 +51,101 @@
- """)
-             return 0
+ import tools.helpers.net
+@@ -91,6 +95,106 @@ def start(args, session, unlocked_cb=None):
+             migrated_apps_path.touch()
  
+     # Creates, deletes, or updates desktop file
 +    # ------------------------------------------------------------ LuneOS apps
 +    #
 +    # webOS has no .desktop files. It finds applications by scanning the
@@ -57,13 +58,12 @@ Upstream-Status: Inappropriate [LuneOS specific]
 +    # id is the directory name, so an Android app becomes a webOS app by
 +    # writing one such directory per package.
 +    #
-+    # The ids are not free choices. Waydroid's hwcomposer sets the Wayland
-+    # app_id of its window to "Waydroid" for the full UI and
-+    # "waydroid.<package>" for a per-app window, and luna-surfacemanager
-+    # carries that through to WebOSSurfaceItem::appId. Matching the webOS app
-+    # ids to those is what lets the card switcher show an app's own title and
-+    # icon instead of an anonymous card, and what lets SAM launch, track and
-+    # close it.
++    # The ids are not free choices. hwcomposer sets the Wayland app_id of a
++    # per-app window to "waydroid.<package>", and luna-surfacemanager carries
++    # that through to WebOSSurfaceItem::appId. Matching the webOS app ids to
++    # those is what lets the card switcher show an app's own title and icon
++    # instead of an anonymous card, and what lets SAM launch, track and close
++    # it.
 +    #
 +    # SAM builds its application list once, at startup, and offers no rescan -
 +    # com.palm.applicationManager/rescan belongs to the legacy manager and does
@@ -71,6 +71,11 @@ Upstream-Status: Inappropriate [LuneOS specific]
 +    # restarted; at boot the directories are already on disk from the previous
 +    # session and nothing needs restarting. Kept behind changed-set tracking so
 +    # that stays rare.
++    #
++    # Note this deliberately does not honour system_apps above. Upstream hides
++    # those because a desktop already has a calculator, a clock and a browser;
++    # LuneOS mostly does not, and on the images we ship every launchable package
++    # is on that list - honouring it would produce an empty launcher.
 +    #
 +    # Everything LuneOS-specific lives in these four functions on purpose: a
 +    # rebase onto upstream only has to re-apply the calls to them.
@@ -93,8 +98,9 @@ Upstream-Status: Inappropriate [LuneOS specific]
 +        for cat in appInfo["categories"]:
 +            if cat.strip() == "android.intent.category.LAUNCHER":
 +                showApp = True
++                break
 +        if not showApp:
-+            return False
++            return removeLuneosApp(appInfo["packageName"])
 +
 +        packageName = appInfo["packageName"]
 +        app_dir = luneosAppDir(packageName)
@@ -127,9 +133,9 @@ Upstream-Status: Inappropriate [LuneOS specific]
 +        os.chmod(launch_path, 0o755)
 +
 +        # Waydroid already extracts every app's icon for the .desktop files.
-+        icon = "{}/icons/{}.png".format(waydroid_data, packageName)
 +        with suppress(OSError):
-+            shutil.copyfile(icon, os.path.join(app_dir, "icon.png"))
++            shutil.copyfile(str(waydroid_data_icons_dir / f"{packageName}.png"),
++                            os.path.join(app_dir, "icon.png"))
 +        return True
 +
 +    def removeLuneosApp(packageName):
@@ -145,13 +151,13 @@ Upstream-Status: Inappropriate [LuneOS specific]
 +        with suppress(OSError, subprocess.SubprocessError):
 +            subprocess.run(["systemctl", "restart", "sam.service"], timeout=60)
 +
-     def makeWaydroidDesktopFile(hide):
-         desktop_file_path = apps_dir + "/Waydroid.desktop"
-         if os.path.isfile(desktop_file_path):
-@@ -104,6 +202,23 @@
-                 makeDesktopFile(app)
-             multiwin = platformService.getprop("persist.waydroid.multi_windows", "false")
-             makeWaydroidDesktopFile(multiwin == "true")
+     def updateDesktopFile(appInfo):
+         if appInfo is None:
+             return
+@@ -148,6 +252,23 @@ def start(args, session, unlocked_cb=None):
+             for existing in apps_dir.glob("waydroid.*.desktop"):
+                 if existing.name not in map(lambda appInfo: f"waydroid.{appInfo['packageName']}.desktop", appsList):
+                     existing.unlink()
 +
 +            if luneosEnabled():
 +                changed = False
@@ -172,29 +178,23 @@ Upstream-Status: Inappropriate [LuneOS specific]
          if unlocked_cb:
              unlocked_cb()
  
-@@ -112,16 +227,25 @@
+@@ -155,11 +276,16 @@ def start(args, session, unlocked_cb=None):
+         platformService = IPlatform.get_service(args)
          if platformService:
-             appInfo = platformService.getAppInfo(packageName)
-             desktop_file_path = apps_dir + "/waydroid." + packageName + ".desktop"
+             desktop_file_path = apps_dir / f"waydroid.{packageName}.desktop"
 +            changed = False
-             if mode == 0:
-                 # Package added
-                 makeDesktopFile(appInfo)
-+                changed = makeLuneosApp(appInfo)
-             elif mode == 1:
-                 if os.path.isfile(desktop_file_path):
-                     os.remove(desktop_file_path)
+             if mode == IUserMonitor.PACKAGE_REMOVED:
+                 desktop_file_path.unlink(missing_ok=True)
 +                changed = removeLuneosApp(packageName)
              else:
-                 if os.path.isfile(desktop_file_path):
-                     if makeDesktopFile(appInfo) == -1:
-                         os.remove(desktop_file_path)
-+                if makeLuneosApp(appInfo):
-+                    changed = True
-+                elif appInfo is None:
-+                    changed = removeLuneosApp(packageName)
+                 appInfo = platformService.getAppInfo(packageName)
+                 updateDesktopFile(appInfo)
++                changed = makeLuneosApp(appInfo)
 +            if changed and luneosEnabled():
 +                refreshLuneosApps()
  
      def service_thread():
          while not stopping:
+-- 
+2.53.0
+
