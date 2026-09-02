@@ -10,10 +10,10 @@ SECTION = "webos/support"
 SRCREV = "41f309f4c185a2c716723c081274eb56eb9263ff"
 SPV = "1.4.2"
 PV = "${SPV}+git"
-# Bumped for the host-permissions patch added below: it changes what the
-# package contains without moving SRCREV or PV, so without this an already
+# Bumped whenever the shipped patches or helper scripts change: they alter what
+# the package contains without moving SRCREV or PV, so without this an already
 # installed waydroid stays at the unpatched build.
-PR = "r12"
+PR = "r13"
 
 # Pre-installed images, for machines whose system/vendor pairing is frozen.
 #
