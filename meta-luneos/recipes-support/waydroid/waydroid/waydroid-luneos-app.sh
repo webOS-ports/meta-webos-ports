@@ -38,8 +38,32 @@ wpropset() { /usr/bin/waydroid prop set "$1" "$2" >/dev/null 2>&1; }
 
 waydroid_luneos_session_env 60 || exit 1
 
+# Initialise on demand, because there is no boot-time unit doing it any more.
+#
+# "waydroid init" fetches the Android system and vendor images, so it needs a
+# network - which a freshly flashed device does not have at boot, and which is
+# why running it from a unit produced a failed service and, through the
+# ordering, a failed container. Asking for Android is the moment the user has
+# both decided they want it and, usually, joined a network. It takes a while:
+# on sargo the pair is a little under 2 GB.
+if [ ! -f /var/lib/waydroid/waydroid.cfg ]; then
+    log "not initialised yet; fetching the Android images, this will take a while"
+    # Binder nodes and the image mount have to exist before the container is
+    # asked for anything. The unit is Before= the container, but nothing has
+    # pulled it in on a device that has never been initialised.
+    systemctl start waydroid-luneos-prepare.service >/dev/null 2>&1 || true
+    if ! /usr/bin/waydroid init; then
+        log "initialisation failed - check the network and try again"
+        exit 1
+    fi
+    log "initialised"
+fi
+
 # The session owns the Wayland connection Android composites through, so it has
-# to be up before anything can be shown. It normally already is.
+# to be up before anything can be shown. It normally already is; on a device
+# that was just initialised, neither it nor the container has ever run.
+systemctl is-active --quiet waydroid-container.service ||
+    systemctl start waydroid-container.service || true
 systemctl is-active --quiet waydroid-luneos-session.service ||
     systemctl start waydroid-luneos-session.service || true
 
