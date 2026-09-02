@@ -1,0 +1,267 @@
+From 3b28d9e68f8e98d80bcbe0667466880c7b98a176 Mon Sep 17 00:00:00 2001
+From: LuneOS <luneos@webos-ports.org>
+Date: Wed, 2 Sep 2026 17:30:14 +0200
+Subject: [PATCH 6/6] notification_manager: post to com.webos.notification
+
+1.6.0 added notification forwarding to org.freedesktop.Notifications on the
+session bus. LuneOS does not provide that name, so the service skipped itself
+on every session start with "could not connect to the notifications server"
+and Android notifications went nowhere. Notifications on webOS belong to
+com.webos.notification, over luna-service2, and it offers several kinds
+rather than one - so the kind is chosen from what Android said about the
+notification instead of flattening everything into a toast:
+
+  transient        -> createToast, a banner that passes and leaves nothing
+                      behind, which is what transient means
+  has actions      -> createAlert, the only kind with buttons, one per
+                      Android action
+  everything else  -> createNotification, which persists in the list and
+                      carries the sound and urgency flags
+
+Each kind is closed differently - closeToast, closeAlert, removeNotification
+- so what was created is remembered alongside its id, and replacing a
+notification closes whatever it replaces first.
+
+Attribution matters as much as delivery: sourceId is the webOS application id
+generated for that Android app, waydroid.<package>, so a notification carries
+the app's own name and icon rather than arriving as an anonymous system
+message, and tapping it raises that app.
+
+Two things do not survive the crossing. Android identifies a notification by
+an integer and webOS by a string, so the two are mapped here. And image_data
+is raw pixels while webOS wants a URI, so the icon Waydroid already extracts
+for the package stands in for it.
+
+A button's onclick is a luna-service2 URI that notificationmgr calls
+directly, and it cannot re-enter this process - so a button raises the app
+rather than invoking that particular Android action, and no listener is
+called back. Routing a real action back into Android needs a service on this
+side to receive it, which is worth doing separately.
+
+Upstream-Status: Inappropriate [LuneOS specific]
+---
+ tools/services/notification_manager.py | 175 +++++++++++++++++--------
+ 1 file changed, 120 insertions(+), 55 deletions(-)
+
+diff --git a/tools/services/notification_manager.py b/tools/services/notification_manager.py
+index c9c3b77..8da780d 100644
+--- a/tools/services/notification_manager.py
++++ b/tools/services/notification_manager.py
+@@ -1,17 +1,62 @@
+ # Copyright 2025 Alessandro Astone
+ # SPDX-License-Identifier: GPL-3.0-or-later
++import json
+ import logging
+ import os
++import subprocess
+ import threading
+ import tools.config
+ from tools.interfaces import INotifications
+ from gi.repository import GLib
+-import dbus
+ 
+ stopping = False
+-bus_signals = []
+ 
+ def start(args, session):
++    # LuneOS has no org.freedesktop.Notifications. Notifications belong to
++    # com.webos.notification, over luna-service2, and it offers several kinds
++    # rather than one - so the kind is chosen from what Android said about the
++    # notification instead of flattening everything into a toast:
++    #
++    #   transient        -> createToast, a banner that passes and leaves
++    #                       nothing behind, which is what transient means
++    #   has actions      -> createAlert, the only kind with buttons, one per
++    #                       Android action
++    #   everything else  -> createNotification, which persists in the list and
++    #                       carries the sound and urgency flags
++    #
++    # Each kind is closed differently - closeToast, closeAlert,
++    # removeNotification - so what was created is remembered alongside its id.
++    #
++    # Two things do not survive the crossing. Android identifies a notification
++    # by an integer and webOS by a string, so the two are mapped here rather
++    # than leaking either into the other. And image_data is raw pixels while
++    # webOS wants a URI, so the icon Waydroid already extracts for the package
++    # stands in for it.
++    #
++    # A button's onclick is an luna-service2 URI that notificationmgr calls
++    # directly; it cannot re-enter this process, so a button raises the Android
++    # app rather than invoking that specific action, and no listener is called
++    # back. Routing a real action back into Android needs a service on this
++    # side to receive it, which is worth doing separately.
++
++    waydroid_data = session["waydroid_data"]
++    # notification id -> (kind, webOS id)
++    posted = {}
++    next_id = [1]
++
++    URGENCY_CRITICAL = 2
++
++    def luna(method, payload):
++        """Call com.webos.notification. Returns the parsed reply, or None."""
++        try:
++            out = subprocess.run(
++                ["luna-send", "-n", "1", "-f",
++                 "luna://com.webos.notification/" + method, json.dumps(payload)],
++                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=10)
++            return json.loads(out.stdout.decode("utf-8"))
++        except (OSError, subprocess.SubprocessError, ValueError) as e:
++            logging.warning("Notification call %s failed: %s", method, e)
++            return None
+ 
+     def onListenerDeath(listener):
+         listeners.remove(listener)
+@@ -20,67 +65,89 @@ def start(args, session):
+         listener.addDeathHandler(onListenerDeath)
+         listeners.append(listener)
+ 
++    def close_posted(kind, webos_id):
++        if kind == "toast":
++            luna("closeToast", {"toastId": webos_id})
++        elif kind == "alert":
++            luna("closeAlert", {"alertId": webos_id})
++        else:
++            luna("removeNotification", {"removeNotiId": [webos_id]})
++
+     def notify(replaces_id, app_name, package_name, summary, body, actions, image_data, category, suppress_sound, expire_timeout, resident, transient, urgency):
+-        # By reading the spec, I believe app_icon should be pointing to the desktop entry Icon=
+-        # but when we set it plasmashell uses it in place of image-data.
+-        # Ignore app_icon and use desktop-entry to show the app icon.
+-        # app_icon = f"file://{waydroid_data}/icons/{package_name}.png"
+-        app_icon = ""
+-        actions_flat = [s for action in actions for s in (action.id, action.label)]
+-        hints = {
+-            "desktop-entry": f"waydroid.{package_name}",
+-            "resident": dbus.types.Boolean(resident),
+-            "transient": dbus.types.Boolean(transient),
+-            "urgency": dbus.types.Byte(urgency),
+-            "suppress-sound": dbus.types.Boolean(suppress_sound),
+-        }
+-        if category:
+-            hints["category"] = category
+-        if image_data:
+-            hints["image-data"] = dbus.types.Struct([
+-                image_data.width,
+-                image_data.height,
+-                image_data.rowstride,
+-                image_data.has_alpha,
+-                8,
+-                4 if image_data.has_alpha else 3,
+-                dbus.types.Array(image_data.data, signature = "y")
+-            ])
+-        try:
+-            return dbus_proxy.Notify(app_name, replaces_id, app_icon, summary, body, actions_flat, hints, expire_timeout)
+-        except dbus.DBusException as e:
+-            logging.warning(f"Failed to post notification: {e}")
+-            return INotifications.ID_NONE
++        app_id = "waydroid." + package_name
++        icon = "file://{}/icons/{}.png".format(waydroid_data, package_name)
++        launch = {"appId": app_id}
+ 
+-    def closeNotification(notification_id):
+-        try:
+-            dbus_proxy.CloseNotification(notification_id)
+-        except dbus.DBusException as e:
+-            logging.warning(f"Failed to close notification: {e}")
++        # Android commonly sends only a summary, so it becomes the message when
++        # there is no body, and the title only when there is one to sit above.
++        message = body if body else summary
++        title = summary if body else app_name
+ 
+-    def onActivationToken(notification_id, token):
+-        pending_tokens[int(notification_id)] = str(token)
++        if replaces_id != INotifications.ID_NONE and replaces_id in posted:
++            close_posted(*posted.pop(replaces_id))
+ 
+-    def onActionInvoked(notification_id, action_id):
+-        token = pending_tokens.pop(int(notification_id), "")
+-        for listener in listeners:
+-            listener.onActionInvoked(int(notification_id), str(action_id), str(token))
++        if transient:
++            kind, method = "toast", "createToast"
++            payload = {
++                "sourceId": app_id,
++                "iconUrl": icon,
++                "title": title,
++                "message": message,
++                "onclick": launch,
++                "persistent": False,
++            }
++        elif actions:
++            kind, method = "alert", "createAlert"
++            payload = {
++                "iconUrl": icon,
++                "title": title,
++                "message": message,
++                "modal": urgency >= URGENCY_CRITICAL,
++                "buttons": [
++                    {"label": action.label,
++                     "onclick": "luna://com.webos.applicationManager/launch",
++                     "params": {"id": app_id}}
++                    for action in actions
++                ],
++            }
++            if expire_timeout > 0:
++                payload["autoTimeout"] = int(expire_timeout / 1000)
++        else:
++            kind, method = "notification", "createNotification"
++            payload = {
++                "sourceId": app_id,
++                "iconUrl": icon,
++                "title": title,
++                "message": message,
++                "onClick": "luna://com.webos.applicationManager/launch",
++                "params": {"id": app_id},
++                "needSoundPlay": not suppress_sound,
++                "forceLcdTurnOn": urgency >= URGENCY_CRITICAL,
++                "isUnDeletable": resident,
++            }
++
++        reply = luna(method, payload)
++        if not reply or not reply.get("returnValue"):
++            return INotifications.ID_NONE
++        webos_id = reply.get({"toast": "toastId", "alert": "alertId"}.get(kind, "notiId"))
++        if not webos_id:
++            return INotifications.ID_NONE
++
++        notification_id = next_id[0]
++        next_id[0] += 1
++        posted[notification_id] = (kind, webos_id)
++        return notification_id
++
++    def closeNotification(notification_id):
++        entry = posted.pop(int(notification_id), None)
++        if entry:
++            close_posted(*entry)
+ 
+     def service_thread():
+         while not stopping:
+             INotifications.add_service(args, registerListener, notify, closeNotification)
+ 
+-    try:
+-        dbus_proxy = dbus.Interface(dbus.SessionBus().get_object("org.freedesktop.Notifications", "/org/freedesktop/Notifications"),
+-                                    "org.freedesktop.Notifications")
+-    except dbus.DBusException as e:
+-        logging.info("Skipping notification manager service because we could not connect to the notifications server: %s", str(e))
+-        return
+-
+     listeners = []
+-    pending_tokens = dict()
+-    bus_signals.append(dbus_proxy.connect_to_signal("ActivationToken", onActivationToken))
+-    bus_signals.append(dbus_proxy.connect_to_signal("ActionInvoked", onActionInvoked))
+ 
+     global stopping
+     stopping = False
+@@ -90,8 +157,6 @@ def start(args, session):
+ def stop(args):
+     global stopping
+     stopping = True
+-    for signal in bus_signals:
+-        signal.remove()
+     try:
+         if args.notificationLoop:
+             args.notificationLoop.quit()
+-- 
+2.53.0
+
