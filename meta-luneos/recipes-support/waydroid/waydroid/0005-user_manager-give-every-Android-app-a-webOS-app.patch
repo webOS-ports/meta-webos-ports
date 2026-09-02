@@ -1,0 +1,200 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herrie <github@herrie.org>
+Date: Wed, 2 Sep 2026 10:00:00 +0200
+Subject: [PATCH 5/5] user_manager: give every Android app a webOS app
+
+Android was one tile that opened a launcher. Upstream already does the hard
+part - userUnlocked() enumerates packages through IPlatform.getAppsInfo(),
+packageStateChanged() fires on install and removal, and icons are extracted
+to ~/.local/share/waydroid/data/icons/<pkg>.png - it just emits .desktop
+files, which webOS has no use for.
+
+webOS finds applications by scanning the directories in sam-conf.json, each
+holding an appinfo.json whose id is the directory name. So this writes one
+such directory per launchable package, next to the .desktop file rather than
+instead of it, so the same tree still works on a freedesktop host.
+
+The ids matter beyond the launcher. hwcomposer sets the Wayland app_id of a
+window to "Waydroid" for the full UI and "waydroid.<package>" for a per-app
+window, and luna-surfacemanager carries that through to
+WebOSSurfaceItem::appId; matching the webOS app ids to those is what lets the
+card switcher show an app's own title and icon instead of an anonymous card,
+and what lets SAM launch, track and close it.
+
+SAM builds its application list once at startup and has no rescan -
+com.palm.applicationManager/rescan belongs to the legacy manager and does not
+reach it - so a set that has actually changed needs sam.service restarted.
+That is why the emission tracks whether anything changed rather than
+restarting on every unlock: at boot the directories are already on disk from
+the previous session and nothing is restarted at all.
+
+Kept to four functions so a rebase onto upstream only has to re-apply the
+calls to them.
+
+Upstream-Status: Inappropriate [LuneOS specific]
+---
+--- a/tools/services/user_manager.py
++++ b/tools/services/user_manager.py
+@@ -1,7 +1,10 @@
+ # Copyright 2021 Erfan Abdi
+ # SPDX-License-Identifier: GPL-3.0-or-later
++import json
+ import logging
+ import os
++import shutil
++import subprocess
+ import threading
+ import tools.config
+ from contextlib import suppress
+@@ -48,6 +51,101 @@
+ """)
+             return 0
+ 
++    # ------------------------------------------------------------ LuneOS apps
++    #
++    # webOS has no .desktop files. It finds applications by scanning the
++    # directories listed in sam-conf.json, each holding an appinfo.json whose
++    # id is the directory name, so an Android app becomes a webOS app by
++    # writing one such directory per package.
++    #
++    # The ids are not free choices. Waydroid's hwcomposer sets the Wayland
++    # app_id of its window to "Waydroid" for the full UI and
++    # "waydroid.<package>" for a per-app window, and luna-surfacemanager
++    # carries that through to WebOSSurfaceItem::appId. Matching the webOS app
++    # ids to those is what lets the card switcher show an app's own title and
++    # icon instead of an anonymous card, and what lets SAM launch, track and
++    # close it.
++    #
++    # SAM builds its application list once, at startup, and offers no rescan -
++    # com.palm.applicationManager/rescan belongs to the legacy manager and does
++    # not reach it. So a set that has actually changed needs sam.service
++    # restarted; at boot the directories are already on disk from the previous
++    # session and nothing needs restarting. Kept behind changed-set tracking so
++    # that stays rare.
++    #
++    # Everything LuneOS-specific lives in these four functions on purpose: a
++    # rebase onto upstream only has to re-apply the calls to them.
++
++    luneos_apps_dir = os.environ.get(
++        "WAYDROID_LUNEOS_APPS_DIR", "/media/cryptofs/apps/usr/palm/applications")
++
++    def luneosEnabled():
++        return os.path.isdir(os.path.dirname(luneos_apps_dir))
++
++    def luneosAppDir(packageName):
++        return os.path.join(luneos_apps_dir, "waydroid." + packageName)
++
++    def makeLuneosApp(appInfo):
++        """Write one webOS application directory. True if anything changed."""
++        if appInfo is None:
++            return False
++
++        showApp = False
++        for cat in appInfo["categories"]:
++            if cat.strip() == "android.intent.category.LAUNCHER":
++                showApp = True
++        if not showApp:
++            return False
++
++        packageName = appInfo["packageName"]
++        app_dir = luneosAppDir(packageName)
++        appinfo = {
++            "id": "waydroid." + packageName,
++            "title": appInfo["name"],
++            "version": "1.0.0",
++            "main": "launch.sh",
++            "type": "native",
++            "uiRevision": 2,
++            "vendorurl": "https://waydro.id",
++            "icon": "icon.png",
++        }
++
++        existing = None
++        appinfo_path = os.path.join(app_dir, "appinfo.json")
++        with suppress(OSError, ValueError):
++            with open(appinfo_path) as f:
++                existing = json.load(f)
++        if existing == appinfo and os.path.exists(os.path.join(app_dir, "icon.png")):
++            return False
++
++        os.makedirs(app_dir, exist_ok=True)
++        with open(appinfo_path, "w") as f:
++            json.dump(appinfo, f, indent=4)
++
++        launch_path = os.path.join(app_dir, "launch.sh")
++        with open(launch_path, "w") as f:
++            f.write("#!/bin/sh\nexec /usr/libexec/waydroid-luneos-app {}\n".format(packageName))
++        os.chmod(launch_path, 0o755)
++
++        # Waydroid already extracts every app's icon for the .desktop files.
++        icon = "{}/icons/{}.png".format(waydroid_data, packageName)
++        with suppress(OSError):
++            shutil.copyfile(icon, os.path.join(app_dir, "icon.png"))
++        return True
++
++    def removeLuneosApp(packageName):
++        app_dir = luneosAppDir(packageName)
++        if os.path.isdir(app_dir):
++            with suppress(OSError):
++                shutil.rmtree(app_dir)
++            return True
++        return False
++
++    def refreshLuneosApps():
++        logging.info("Android app set changed, restarting SAM to pick it up")
++        with suppress(OSError, subprocess.SubprocessError):
++            subprocess.run(["systemctl", "restart", "sam.service"], timeout=60)
++
+     def makeWaydroidDesktopFile(hide):
+         desktop_file_path = apps_dir + "/Waydroid.desktop"
+         if os.path.isfile(desktop_file_path):
+@@ -104,6 +202,23 @@
+                 makeDesktopFile(app)
+             multiwin = platformService.getprop("persist.waydroid.multi_windows", "false")
+             makeWaydroidDesktopFile(multiwin == "true")
++
++            if luneosEnabled():
++                changed = False
++                wanted = set()
++                for app in appsList:
++                    if makeLuneosApp(app):
++                        changed = True
++                    wanted.add("waydroid." + app["packageName"])
++                # Packages uninstalled while the session was down leave their
++                # directory behind, and a stale tile launches nothing.
++                with suppress(OSError):
++                    for name in os.listdir(luneos_apps_dir):
++                        if name.startswith("waydroid.") and name not in wanted:
++                            if removeLuneosApp(name[len("waydroid."):]):
++                                changed = True
++                if changed:
++                    refreshLuneosApps()
+         if unlocked_cb:
+             unlocked_cb()
+ 
+@@ -112,16 +227,25 @@
+         if platformService:
+             appInfo = platformService.getAppInfo(packageName)
+             desktop_file_path = apps_dir + "/waydroid." + packageName + ".desktop"
++            changed = False
+             if mode == 0:
+                 # Package added
+                 makeDesktopFile(appInfo)
++                changed = makeLuneosApp(appInfo)
+             elif mode == 1:
+                 if os.path.isfile(desktop_file_path):
+                     os.remove(desktop_file_path)
++                changed = removeLuneosApp(packageName)
+             else:
+                 if os.path.isfile(desktop_file_path):
+                     if makeDesktopFile(appInfo) == -1:
+                         os.remove(desktop_file_path)
++                if makeLuneosApp(appInfo):
++                    changed = True
++                elif appInfo is None:
++                    changed = removeLuneosApp(packageName)
++            if changed and luneosEnabled():
++                refreshLuneosApps()
+ 
+     def service_thread():
+         while not stopping:

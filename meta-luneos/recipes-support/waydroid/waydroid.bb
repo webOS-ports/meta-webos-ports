@@ -13,7 +13,7 @@ PV = "${SPV}+git"
 # Bumped whenever the shipped patches or helper scripts change: they alter what
 # the package contains without moving SRCREV or PV, so without this an already
 # installed waydroid stays at the unpatched build.
-PR = "r13"
+PR = "r16"
 
 # Pre-installed images, for machines whose system/vendor pairing is frozen.
 #
@@ -53,10 +53,13 @@ SRC_URI = "git://github.com/herrie82/waydroid.git;branch=herrie/luneos;protocol=
     file://0001-lxc-copy-host-permissions-on-non-Treble-hosts-too.patch \
     file://0002-initializer-do-not-contact-the-OTA-channel-for-pre-in.patch \
     file://0003-user_manager-never-let-adb-failure-abort-userUnlocked.patch \
-    file://0004-waydroid-luneos-do-not-re-show-a-full-UI-that-is-alre.patch \
+    file://0004-luneos-launch-through-one-helper-and-name-the-app-Way.patch \
+    file://0005-user_manager-give-every-Android-app-a-webOS-app.patch \
     file://waydroid-luneos-prepare.sh \
     file://waydroid-luneos-prepare.service \
     file://waydroid-luneos-session.sh \
+    file://waydroid-luneos-session-env.sh \
+    file://waydroid-luneos-app.sh \
     file://waydroid-luneos-session.service \
     file://waydroid-luneos.conf.mindphone \
 "
@@ -98,6 +101,8 @@ do_install() {
     install -d ${D}${libexecdir}
     install -m 0755 ${UNPACKDIR}/waydroid-luneos-prepare.sh ${D}${libexecdir}/waydroid-luneos-prepare
     install -m 0755 ${UNPACKDIR}/waydroid-luneos-session.sh ${D}${libexecdir}/waydroid-luneos-session
+    install -m 0644 ${UNPACKDIR}/waydroid-luneos-session-env.sh ${D}${libexecdir}/waydroid-luneos-session-env
+    install -m 0755 ${UNPACKDIR}/waydroid-luneos-app.sh ${D}${libexecdir}/waydroid-luneos-app
 
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${UNPACKDIR}/waydroid-luneos-prepare.service ${D}${systemd_system_unitdir}
@@ -135,7 +140,7 @@ FILES:${PN} += " \
     ${datadir}/dbus-1 \
     ${datadir}/polkit-1 \
     ${prefix}/libexec \
-    ${webos_applicationsdir}/id.waydro.container \
+    ${webos_applicationsdir}/Waydroid \
 "
 
 # Usage
