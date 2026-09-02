@@ -1,34 +1,40 @@
 #!/bin/sh
 # Launch an Android application from a webOS launcher tile and stay in the
-# foreground for as long as it is on screen.
+# foreground for as long as Android has something on screen.
 #
 #   waydroid-luneos-app             show the Android full UI (app id Waydroid)
 #   waydroid-luneos-app <package>   show one app     (app id waydroid.<package>)
 #
-# Being long-running is the point, not an accident. SAM tracks a native app by
-# the process it spawned, so the original one-line launcher - which asked
-# Waydroid to start something and exited - was never "running": the launcher
-# never marked the app open and com.webos.applicationManager/close answered
-# "is not running" while the card sat there. Staying alive also gives closing
-# somewhere to land, because SAM closes a native app by signalling its process.
+# Being long-running is the point. SAM tracks a native app by the process it
+# spawned, so a script that asked Waydroid to start something and exited was
+# never "running": the launcher never marked the app open and
+# com.webos.applicationManager/close answered "is not running" while the card
+# sat there. Staying alive also gives closing somewhere to land, because SAM
+# closes a native app by signalling its process.
 #
 # The app ids are not free choices. Waydroid's hwcomposer sets the Wayland
 # app_id of its window to "Waydroid" for the full UI and "waydroid.<package>"
 # for a per-app window, and luna-surfacemanager carries that through to
 # WebOSSurfaceItem::appId. Naming the webOS apps the same way is what lets the
 # card switcher match a card to its app.
+#
+# Every container property here goes through "waydroid prop", never through
+# lxc-attach. Waydroid freezes the container whenever Android suspends - which
+# it does as soon as nothing is displayed - and lxc-attach into a frozen
+# container blocks forever, so a launcher that asked for sys.boot_completed
+# that way hung before it ever launched anything. "waydroid prop" unfreezes
+# first, and refreezes afterwards only if it was the one that unfroze.
 set -u
 
 . /usr/libexec/waydroid-luneos-session-env
 
 PKG=${1:-}
-LXC=/var/lib/waydroid/lxc
 POLL=5
 
 log() { echo "waydroid-app${PKG:+ $PKG}: $*"; }
 
-in_container() { lxc-attach -P "$LXC" -n waydroid -- "$@" 2>/dev/null; }
-getprop() { in_container /system/bin/getprop "$1"; }
+wprop()    { /usr/bin/waydroid prop get "$1" 2>/dev/null | tr -d '\r\n'; }
+wpropset() { /usr/bin/waydroid prop set "$1" "$2" >/dev/null 2>&1; }
 
 waydroid_luneos_session_env 60 || exit 1
 
@@ -37,13 +43,15 @@ waydroid_luneos_session_env 60 || exit 1
 systemctl is-active --quiet waydroid-luneos-session.service ||
     systemctl start waydroid-luneos-session.service || true
 
+# "waydroid prop get" prints nothing while the session is still coming up, so
+# waiting for the answer covers waiting for the session too.
 i=0
 while [ "$i" -lt 240 ]; do
-    [ "$(getprop sys.boot_completed)" = "1" ] && break
+    [ "$(wprop sys.boot_completed)" = "1" ] && break
     i=$((i + 3))
     sleep 3
 done
-[ "$(getprop sys.boot_completed)" = "1" ] || { log "Android did not finish booting"; exit 1; }
+[ "$(wprop sys.boot_completed)" = "1" ] || { log "Android did not finish booting"; exit 1; }
 
 closing=0
 on_term() {
@@ -52,18 +60,18 @@ on_term() {
         # waydroid.active_apps=none puts hwcomposer into closed_mode, whose
         # cleanup_stale_windows() calls clear_open_windows() - the same end
         # state as swiping the card away, and the only lever the host has.
-        in_container /system/bin/setprop waydroid.active_apps none
+        wpropset waydroid.active_apps none
     fi
     # For a single app there is no such lever, so this deliberately leaves the
     # container alone. hwcomposer only drops one task's window through
     # xdg_toplevel_handle_close(), which inserts the task into ignored_apps and
-    # erases the window - and that is reachable only from the compositor, which
-    # is what swiping the card away does. Nothing on the host substitutes for
-    # it: "am"/"cmd" abort inside the container (they are app_process wrappers
-    # and lxc-attach gives them the host environment, with no ANDROID_* in it),
-    # and killing the app's process leaves the task, so the card would survive
-    # as a snapshot of a dead app - worse than leaving it alone. So SAM's close
-    # ends this instance and the card stays until it is swiped.
+    # erases the window - reachable only from the compositor, which is what
+    # swiping the card away does. Nothing on the host substitutes for it:
+    # "am"/"cmd" abort inside the container (they are app_process wrappers and
+    # lxc-attach hands them the host environment, with no ANDROID_* in it), and
+    # killing the app's process leaves the task, so the card would survive as a
+    # snapshot of a dead app - worse than leaving it alone. So SAM's close ends
+    # this instance and the card stays until it is swiped.
 }
 trap on_term TERM INT
 
@@ -73,38 +81,39 @@ if [ -z "$PKG" ]; then
     # already up replaces the card rather than raising it. waydroid.active_apps
     # is the right question - "is a window shown" - where session state is not,
     # since the session can be running with nothing on screen.
-    if [ "$(getprop waydroid.active_apps)" != "Waydroid" ]; then
+    if [ "$(wprop waydroid.active_apps)" != "Waydroid" ]; then
         /usr/bin/waydroid show-full-ui || { log "show-full-ui failed"; exit 1; }
     fi
 else
     /usr/bin/waydroid app launch "$PKG" || { log "app launch failed"; exit 1; }
 fi
 
-# Give Android a moment to actually put something up before watching for it to
-# go away, or this exits immediately and SAM never sees the app run at all.
+# Give Android a moment to put something up before watching for it to go away,
+# or this exits immediately and SAM never sees the app run at all.
 i=0
 while [ "$i" -lt 60 ] && [ "$closing" -eq 0 ]; do
-    if [ -z "$PKG" ]; then
-        [ "$(getprop waydroid.active_apps)" = "Waydroid" ] && break
-    else
-        [ -n "$(in_container /system/bin/pidof "$PKG")" ] && break
+    a=$(wprop waydroid.active_apps)
+    if [ -n "$a" ] && [ "$a" != "none" ]; then
+        break
     fi
     i=$((i + 2))
     sleep 2
 done
 
+# Held open while Android is showing anything, rather than while this
+# particular app is the one in front. In single-window mode only one Android
+# app is displayed at a time and the others are kept as snapshot cards, so
+# "this app is frontmost" would end the instance every time the user switched
+# apps, and SAM would call an app closed while its card was still there. The
+# cost is the opposite: an app stays listed as running until Android as a whole
+# is closed.
 log "on screen; holding the SAM instance open"
 while [ "$closing" -eq 0 ]; do
     sleep "$POLL"
     [ "$closing" -eq 0 ] || break
-    if [ -z "$PKG" ]; then
-        a=$(getprop waydroid.active_apps)
-        if [ "$a" = "none" ] || [ -z "$a" ]; then
-            log "window gone"
-            break
-        fi
-    elif [ -z "$(in_container /system/bin/pidof "$PKG")" ]; then
-        log "app process gone"
+    a=$(wprop waydroid.active_apps)
+    if [ "$a" = "none" ] || [ -z "$a" ]; then
+        log "nothing shown any more"
         break
     fi
 done
