@@ -115,19 +115,19 @@ on_term() {
     if [ -z "$PKG" ]; then
         # waydroid.active_apps=none puts hwcomposer into closed_mode, whose
         # cleanup_stale_windows() calls clear_open_windows() - the same end
-        # state as swiping the card away, and the only lever the host has.
+        # state as swiping the card away, and the only lever for the full UI.
         wpropset waydroid.active_apps none
+    else
+        # For a single app, force-stop drops the task, and hwcomposer erases
+        # the window with it - measured going from open_windows=1 to 0.
+        #
+        # It has to go through "waydroid shell", not lxc-attach: am and cmd are
+        # app_process wrappers that need ANDROID_ROOT, ANDROID_DATA and the
+        # rest, and lxc-attach hands them the host's environment instead, so
+        # they abort with status 255 and no output. "waydroid shell" sets up
+        # the container environment properly.
+        /usr/bin/waydroid shell -- /system/bin/sh -c "am force-stop $PKG" >/dev/null 2>&1
     fi
-    # For a single app there is no such lever, so this deliberately leaves the
-    # container alone. hwcomposer only drops one task's window through
-    # xdg_toplevel_handle_close(), which inserts the task into ignored_apps and
-    # erases the window - reachable only from the compositor, which is what
-    # swiping the card away does. Nothing on the host substitutes for it:
-    # "am"/"cmd" abort inside the container (they are app_process wrappers and
-    # lxc-attach hands them the host environment, with no ANDROID_* in it), and
-    # killing the app's process leaves the task, so the card would survive as a
-    # snapshot of a dead app - worse than leaving it alone. So SAM's close ends
-    # this instance and the card stays until it is swiped.
 }
 trap on_term TERM INT
 
