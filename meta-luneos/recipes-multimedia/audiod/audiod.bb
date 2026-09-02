@@ -35,11 +35,15 @@ RDEPENDS:${PN} = "\
 # the pcm_output name audiod routes by, which needs this module present.
 RDEPENDS:${PN} += "pulseaudio-module-remap-sink"
 
-WEBOS_VERSION = "1.0.0-78_127c6cd6c9247979b4ead42d9b8fc8b5c48b47a2"
+# Built from the webOS-ports fork rather than webosose/audiod-pro: the fifteen
+# patches this recipe used to carry are commits on its webOS-ports/webOS-OSE
+# branch, which also starts from the submission below.
+#WEBOS_VERSION = "1.0.0-78_127c6cd6c9247979b4ead42d9b8fc8b5c48b47a2"
+PV = "1.0.0-78+git"
+SRCREV = "e7f74089c98a79ba7dc1e117b14dc8758ad42899"
 PR = "r36"
 
 inherit webos_component
-inherit webos_enhanced_submissions
 inherit webos_cmake
 # CMakeLists.txt drives all of its dependency discovery through
 # pkg_check_modules(), so pkg-config-native has to be in the build.
@@ -66,18 +70,10 @@ inherit webos_system_bus
 EXTRA_OECMAKE += "-DWEBOS_TARGET_MACHINE_IMPL=hardware"
 inherit gettext
 inherit webos_lttng
-inherit webos_public_repo
+inherit webos_ports_ose_repo
 
 WEBOS_REPO_NAME = "audiod-pro"
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-Add-palmLegacyManager-serve-the-Palm-era-com.palm.au.patch \
-    file://0002-Let-audiod-claim-the-legacy-com.palm.audio-bus-names.patch \
-    file://0003-palmLegacyManager-route-calls-via-PulseAudio-card-pr.patch \
-    file://0004-PulseAudioLink-tolerate-a-libpulse-simple-without-pa.patch \
-    file://0005-moduleManager-fix-iterator-invalidation-in-removeModules.patch \
-    file://0006-PulseAudioLink-report-play_sample-failures.patch \
-    file://0007-systemsounds-fall-back-to-samples-without-the-ondemand-suffix.patch \
-    file://0008-deviceManager-support-sinks-that-PulseAudio-already-o.patch \
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     file://audiod-after-pulseaudio.conf \
 "
 
