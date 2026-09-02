@@ -32,10 +32,11 @@ RRECOMMENDS:${PN}:halium = ""
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 PV = "1.0.0+git"
-SRCREV = "6268c0b6b121d182369ae09e2723243d649d4d72"
-SRC_URI = "git://github.com/webOS-ports/luneos-rtc-engine.git;branch=main;protocol=https"
+SRCREV = "69c852895e1c1cb9161707bc491a06660bdf27af"
+WEBOS_GIT_PARAM_BRANCH = "main"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
-
+inherit webos_ports_repo
 inherit qt6-cmake pkgconfig
 
 FILES:${PN} += "${datadir}/luna-service2 ${libdir}/qml"
