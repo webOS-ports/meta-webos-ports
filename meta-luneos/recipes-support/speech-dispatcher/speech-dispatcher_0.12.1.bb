@@ -15,7 +15,8 @@ LIC_FILES_CHKSUM = "file://COPYING.GPL-2;md5=b234ee4d69f5fce4486a80fdaf4a4263 \
 DEPENDS = "glib-2.0 dotconf libsndfile1 libtool"
 
 SRC_URI = "https://github.com/brailcom/speechd/releases/download/${PV}/speech-dispatcher-${PV}.tar.gz \
-           file://0001-modules-use-AM_LDFLAGS-instead-of-blanking-LDFLAGS.patch"
+           file://0001-modules-use-AM_LDFLAGS-instead-of-blanking-LDFLAGS.patch \
+           file://luneos-speechd.service"
 SRC_URI[sha256sum] = "b14a5238d287d2dcce4dd42bbd66ca65fa228e7e683708267f7b34036f7ba4b4"
 
 # gettext is not optional here: configure runs AM_GNU_GETTEXT, NLS defaults to
@@ -84,18 +85,48 @@ EXTRA_OECONF += "--without-ibmtts --without-voxin --without-baratinoo --without-
 # whichever backend it happens to discover.
 EXTRA_OECONF += "${@bb.utils.contains('PACKAGECONFIG', 'pulse', '--with-default-audio-method=pulse', '', d)}"
 
-SYSTEMD_SERVICE:${PN} = "speech-dispatcherd.service"
-# Started on demand: libspeechd autospawns the daemon on the first connection, which is how Chromium
-# reaches it, so there is nothing to run at boot.
-SYSTEMD_AUTO_ENABLE = "disable"
+# Chromium cannot use the autospawn path, so the daemon has to be running already.
+#
+# libspeechd connects to $XDG_RUNTIME_DIR/speech-dispatcher/speechd.sock and, finding nothing there,
+# spawns a daemon through g_spawn. That spawn closes file descriptors Chromium owns, so
+# base::CrashOnFdOwnershipViolation() aborts browser_shell the first time a page touches
+# speechSynthesis - and Cloudflare's bot detection does exactly that, so it showed up as a challenge
+# loop rather than as anything to do with speech. Reproduced and confirmed on tissot: with a daemon
+# already listening the same call is harmless.
+#
+# luneos-speechd.service runs it as wam:compositor on /tmp/xdg, matching what run_browser_shell sets,
+# so libspeechd connects instead of spawning. speech-dispatcherd.service stays installed but
+# unmanaged; it runs as root with a different socket and browser_shell would not find it.
+SYSTEMD_SERVICE:${PN} = "luneos-speechd.service"
+SYSTEMD_AUTO_ENABLE = "enable"
 
 # Output modules are dlopened helper binaries under libdir, and the daemon reads its configuration
 # from sysconfdir; both belong to the main package rather than to -dev.
 FILES:${PN} += "${libexecdir}/speech-dispatcher-modules ${libdir}/speech-dispatcher-modules \
                 ${datadir}/speech-dispatcher ${sysconfdir}/speech-dispatcher \
                 ${systemd_user_unitdir}"
+# Listed explicitly because it is no longer in SYSTEMD_SERVICE (see above), which is what would
+# otherwise have packaged it. Shipped but never enabled: it runs as root on a socket browser_shell
+# does not look at, so it is there for anyone who wants it rather than for us.
+FILES:${PN} += "${systemd_system_unitdir}/speech-dispatcherd.service"
 
 # libspeechd itself is what Chromium dlopens (soname libspeechd.so.2, from version-info 8:0:6).
 PACKAGES =+ "libspeechd"
 FILES:libspeechd = "${libdir}/libspeechd.so.*"
 RDEPENDS:${PN} += "libspeechd"
+
+# The shipped speechd.conf has every AddModule line commented out, so the daemon comes up with no
+# output modules at all and getVoices() returns an empty list however it is reached - which is the
+# very thing --enable-speech-dispatcher was turned on to fix. sd_espeak and espeak are both built and
+# installed by this recipe, so enable that one.
+do_install:append() {
+    install -d ${D}${systemd_system_unitdir}
+    install -m 0644 ${UNPACKDIR}/luneos-speechd.service ${D}${systemd_system_unitdir}/
+
+    cat >> ${D}${sysconfdir}/speech-dispatcher/speechd.conf <<EOF
+
+# LuneOS: enable an output module, or the daemon exposes no voices.
+AddModule "espeak"  "sd_espeak"  "espeak.conf"
+DefaultModule espeak
+EOF
+}
