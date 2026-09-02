@@ -132,6 +132,7 @@ LIBHYBRIS_RDEPENDS = " \
     ${VIRTUAL-RUNTIME_android-system-image} \
     android-property-service \
     android-system \
+    halium-udev-rules \
     qbootctl \
     android-system-compat \
     android-tools \
