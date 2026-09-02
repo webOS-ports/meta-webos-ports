@@ -13,7 +13,7 @@ PV = "${SPV}+git"
 # Bumped whenever the shipped patches or helper scripts change: they alter what
 # the package contains without moving SRCREV or PV, so without this an already
 # installed waydroid stays at the unpatched build.
-PR = "r22"
+PR = "r23"
 
 # Pre-installed images, for machines whose system/vendor pairing is frozen.
 #
@@ -94,7 +94,15 @@ inherit webos_systemd
 # GPU HAL bridging - none of which survives a reboot. waydroid-luneos-session
 # starts the per-user session against the LuneOS compositor; see the script for
 # why that is interim.
-WEBOS_SYSTEMD_SERVICE = "waydroid-init.service waydroid-container.service \
+# Deliberately no waydroid-init.service.
+#
+# Running "waydroid init" from a boot-time unit is wrong on a machine that
+# fetches its images over the network: on a freshly flashed device there is no
+# network yet, so the unit fails, and because waydroid-container.service was
+# ordered After= it, the container then failed too - which is exactly the state
+# tissot was found in. Initialising is a user action, and it now happens on
+# demand from the launcher, which is also the only place that can wait for it.
+WEBOS_SYSTEMD_SERVICE = "waydroid-container.service \
     waydroid-luneos-prepare.service waydroid-luneos-session.service"
 
 CLEANBROKEN = "1"
