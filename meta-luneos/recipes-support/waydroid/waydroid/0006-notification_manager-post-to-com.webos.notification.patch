@@ -1,20 +1,18 @@
-From 3b28d9e68f8e98d80bcbe0667466880c7b98a176 Mon Sep 17 00:00:00 2001
+From 8ac40e32d45b2de32e11f2fb51f7f24fbacceb33 Mon Sep 17 00:00:00 2001
 From: LuneOS <luneos@webos-ports.org>
 Date: Wed, 2 Sep 2026 17:30:14 +0200
 Subject: [PATCH 6/6] notification_manager: post to com.webos.notification
 
 1.6.0 added notification forwarding to org.freedesktop.Notifications on the
 session bus. LuneOS does not provide that name, so the service skipped itself
-on every session start with "could not connect to the notifications server"
-and Android notifications went nowhere. Notifications on webOS belong to
-com.webos.notification, over luna-service2, and it offers several kinds
-rather than one - so the kind is chosen from what Android said about the
-notification instead of flattening everything into a toast:
+on every session start and Android notifications went nowhere. Notifications
+on webOS belong to com.webos.notification, over luna-service2, and it offers
+several kinds rather than one - so the kind is chosen from what Android said
+about the notification instead of flattening everything into a toast:
 
   transient        -> createToast, a banner that passes and leaves nothing
                       behind, which is what transient means
-  has actions      -> createAlert, the only kind with buttons, one per
-                      Android action
+  has actions      -> createAlert, the only kind with buttons, one per action
   everything else  -> createNotification, which persists in the list and
                       carries the sound and urgency flags
 
@@ -27,10 +25,17 @@ generated for that Android app, waydroid.<package>, so a notification carries
 the app's own name and icon rather than arriving as an anonymous system
 message, and tapping it raises that app.
 
-Two things do not survive the crossing. Android identifies a notification by
-an integer and webOS by a string, so the two are mapped here. And image_data
-is raw pixels while webOS wants a URI, so the icon Waydroid already extracts
-for the package stands in for it.
+Two details that only showed up against a live notificationmgr. It rejects an
+empty message outright, with CA_MSG_EMPTY, and some notifications carry
+neither a body nor a summary - so the app's name is used rather than posting
+something that will be thrown away. And it silently substitutes its own
+generic alert icon for an iconUrl it cannot read, so the icon is only offered
+when Waydroid has actually extracted one for that package; notifications from
+the system come from packages that have none.
+
+Android identifies a notification by an integer and webOS by a string, so the
+two are mapped here. image_data is raw pixels while webOS wants a URI, so the
+extracted icon stands in for it.
 
 A button's onclick is a luna-service2 URI that notificationmgr calls
 directly, and it cannot re-enter this process - so a button raises the app
@@ -40,11 +45,11 @@ side to receive it, which is worth doing separately.
 
 Upstream-Status: Inappropriate [LuneOS specific]
 ---
- tools/services/notification_manager.py | 175 +++++++++++++++++--------
- 1 file changed, 120 insertions(+), 55 deletions(-)
+ tools/services/notification_manager.py | 184 +++++++++++++++++--------
+ 1 file changed, 129 insertions(+), 55 deletions(-)
 
 diff --git a/tools/services/notification_manager.py b/tools/services/notification_manager.py
-index c9c3b77..8da780d 100644
+index c9c3b77..e137442 100644
 --- a/tools/services/notification_manager.py
 +++ b/tools/services/notification_manager.py
 @@ -1,17 +1,62 @@
@@ -112,7 +117,7 @@ index c9c3b77..8da780d 100644
  
      def onListenerDeath(listener):
          listeners.remove(listener)
-@@ -20,67 +65,89 @@ def start(args, session):
+@@ -20,67 +65,98 @@ def start(args, session):
          listener.addDeathHandler(onListenerDeath)
          listeners.append(listener)
  
@@ -156,7 +161,6 @@ index c9c3b77..8da780d 100644
 -            logging.warning(f"Failed to post notification: {e}")
 -            return INotifications.ID_NONE
 +        app_id = "waydroid." + package_name
-+        icon = "file://{}/icons/{}.png".format(waydroid_data, package_name)
 +        launch = {"appId": app_id}
  
 -    def closeNotification(notification_id):
@@ -166,8 +170,18 @@ index c9c3b77..8da780d 100644
 -            logging.warning(f"Failed to close notification: {e}")
 +        # Android commonly sends only a summary, so it becomes the message when
 +        # there is no body, and the title only when there is one to sit above.
-+        message = body if body else summary
++        # notificationmgr rejects an empty message outright - CA_MSG_EMPTY - and
++        # some notifications carry neither, so fall back to the app's name
++        # rather than posting something that will be thrown away.
++        message = body or summary or app_name or package_name
 +        title = summary if body else app_name
++
++        # Only offer an icon that exists. Waydroid extracts one per package,
++        # but not for every source - notifications from the system come from
++        # packages that have none - and notificationmgr silently substitutes
++        # its own generic alert icon for a path it cannot read.
++        icon_path = "{}/icons/{}.png".format(waydroid_data, package_name)
++        icon = "file://" + icon_path if os.path.exists(icon_path) else ""
  
 -    def onActivationToken(notification_id, token):
 -        pending_tokens[int(notification_id)] = str(token)
@@ -182,7 +196,6 @@ index c9c3b77..8da780d 100644
 +            kind, method = "toast", "createToast"
 +            payload = {
 +                "sourceId": app_id,
-+                "iconUrl": icon,
 +                "title": title,
 +                "message": message,
 +                "onclick": launch,
@@ -191,7 +204,6 @@ index c9c3b77..8da780d 100644
 +        elif actions:
 +            kind, method = "alert", "createAlert"
 +            payload = {
-+                "iconUrl": icon,
 +                "title": title,
 +                "message": message,
 +                "modal": urgency >= URGENCY_CRITICAL,
@@ -208,7 +220,6 @@ index c9c3b77..8da780d 100644
 +            kind, method = "notification", "createNotification"
 +            payload = {
 +                "sourceId": app_id,
-+                "iconUrl": icon,
 +                "title": title,
 +                "message": message,
 +                "onClick": "luna://com.webos.applicationManager/launch",
@@ -217,6 +228,9 @@ index c9c3b77..8da780d 100644
 +                "forceLcdTurnOn": urgency >= URGENCY_CRITICAL,
 +                "isUnDeletable": resident,
 +            }
++
++        if icon:
++            payload["iconUrl"] = icon
 +
 +        reply = luna(method, payload)
 +        if not reply or not reply.get("returnValue"):
@@ -253,7 +267,7 @@ index c9c3b77..8da780d 100644
  
      global stopping
      stopping = False
-@@ -90,8 +157,6 @@ def start(args, session):
+@@ -90,8 +166,6 @@ def start(args, session):
  def stop(args):
      global stopping
      stopping = True
