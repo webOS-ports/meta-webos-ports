@@ -1,0 +1,110 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 2 Sep 2026 10:00:00 +0200
+Subject: [PATCH] backup-log: stop holding the shutdown open for the whole
+ journal
+
+Shutting down or restarting from the power menu takes about a minute and a
+half on tissot, nearly all of it spent in one place: at the end of the
+teardown systemd sat for 71 seconds with nothing to show for it and then
+logged "backup-log.service: Stopping timed out. Terminating." Everything
+behind it - the remaining units, the unmounts, reboot.target itself - waited
+that out. Two separate things put it there.
+
+The work is unbounded. save-journald-logs.py runs "journalctl -a", with no
+boot filter, so it walks every boot journald still has: on this device that
+is a 1.2 GB persistent journal, 36 seconds to render and ~180 MB of text
+written back into /var/log. It then tars and gzips all of /var/log into
+/var/spool/rdxd/previous_boot_logs.tar.gz - including /var/log/journal, so
+the same 1.2 GB gets compressed again, plus the dump just written. Limiting
+the dump to the boot that is ending and keeping journald's own database out
+of the tarball leaves the backup doing what it is for: a readable copy of the
+logs from the boot that just finished. The earlier boots have not gone
+anywhere; they are still in /var/log/journal where journalctl -b -1 reads
+them.
+
+The ordering is unstated. The unit declares Conflicts=shutdown.target and
+nothing else, which says the two may not both be up but says nothing about
+which job runs first. So the ExecStop= was being scheduled alongside the
+filesystem teardown rather than before it, which is why /var was already
+being unmounted while the backup was still writing to it - "umount: /var:
+target is busy", then the backup killed part-way through. Before=shutdown.target
+is what pairs with Conflicts=, and RequiresMountsFor= keeps the stop job ahead
+of the unmount, since units are stopped in reverse start order.
+
+TimeoutStopSec=30s is the backstop: a log backup is a convenience, and a
+shutdown the user asked for should not wait on it indefinitely if some future
+change makes it slow again.
+
+Upstream-Status: Pending
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+---
+diff --git a/common/lib/systemd/system/backup-log.service b/common/lib/systemd/system/backup-log.service
+index 92773cb..754a85d 100644
+--- a/common/lib/systemd/system/backup-log.service
++++ b/common/lib/systemd/system/backup-log.service
+@@ -17,9 +17,21 @@
+ [Unit]
+ Description=webos-initscripts - "%n"
+ Conflicts=shutdown.target
++# Conflicts= on its own says the unit and shutdown.target may not both be up,
++# but says nothing about the order the two jobs run in. Without Before= the
++# ExecStop= below can be scheduled alongside the filesystem teardown, which is
++# how it came to be writing into /var/log while var.mount was being stopped:
++# the unmount failed with "target is busy" and the backup was killed part-way.
++Before=shutdown.target
++# Everything this writes lives under /var. Ordering after the mount keeps the
++# stop job ahead of the unmount, since units stop in reverse start order.
++RequiresMountsFor=/var/log /var/spool
+ 
+ [Service]
+ Type=oneshot
+ ExecStart=-/bin/touch /tmp/backup-log-ready
+ ExecStop=/lib/systemd/system/scripts/save-journald-logs.py
+ RemainAfterExit=yes
++# A log backup is a convenience, not a reason to hold up a shutdown the user
++# asked for. Anything slower than this gets abandoned rather than waited on.
++TimeoutStopSec=30s
+diff --git a/common/lib/systemd/system/scripts/save-journald-logs.py b/common/lib/systemd/system/scripts/save-journald-logs.py
+index 0f882fa..5711925 100755
+--- a/common/lib/systemd/system/scripts/save-journald-logs.py
++++ b/common/lib/systemd/system/scripts/save-journald-logs.py
+@@ -29,13 +29,28 @@ def remove_journald_old_files():
+         os.remove(f)
+ 
+ def flush_journald_log_to_file():
+-    journalctl_options = ['-a']
++    # -b limits the dump to the boot that is ending. Without it this walks
++    # every boot journald still has on disk, which on a device with a
++    # persistent journal is the whole 1+ GB of it: 36 seconds to produce and
++    # ~180 MB written to flash, on every single shutdown. The older boots are
++    # still in /var/log/journal for journalctl -b -1 and friends to read, so
++    # nothing is lost by leaving them out of this text copy.
++    journalctl_options = ['-a', '-b']
+     command = ['journalctl'] + journalctl_options
+     log_file_name = "/var/log/journald-" + get_timestamp() + ".log"
+     with open(log_file_name, "w") as logFile:
+         call(command, stdout=logFile)
+     return
+ 
++def exclude_journal(tarinfo):
++    # /var/log/journal is journald's own binary database, and it is persistent
++    # here: gzipping it into the backup means compressing a copy of every boot
++    # ever recorded, alongside the text dump that was just made of the last
++    # one. The text dump is what this backup is for.
++    if tarinfo.name == 'log/journal' or tarinfo.name.startswith('log/journal/'):
++        return None
++    return tarinfo
++
+ def backup_var_log():
+     rdxdDir = "/var/spool/rdxd/"
+     if not os.path.isdir(rdxdDir):
+@@ -46,7 +61,7 @@ def backup_var_log():
+ 
+     source = '/var/log/'
+     with tarfile.open(saveFile, "w:gz") as tar:
+-        tar.add(source, arcname='log')
++        tar.add(source, arcname='log', filter=exclude_journal)
+     return
+ 
+ if __name__ == '__main__':
