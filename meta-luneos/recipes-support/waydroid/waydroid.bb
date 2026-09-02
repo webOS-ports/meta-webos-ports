@@ -13,7 +13,7 @@ PV = "${SPV}+git"
 # Bumped whenever the shipped patches or helper scripts change: they alter what
 # the package contains without moving SRCREV or PV, so without this an already
 # installed waydroid stays at the unpatched build.
-PR = "r18"
+PR = "r19"
 
 # Pre-installed images, for machines whose system/vendor pairing is frozen.
 #
@@ -38,6 +38,12 @@ WAYDROID_IMAGE_RDEPENDS ?= "waydroid-data"
 # have to come from the OTA channel into /var/lib/waydroid/images, or be
 # placed there and bind mounted over a preinstalled path.
 WAYDROID_IMAGE_RDEPENDS:mindphone = ""
+# halium-arm64 is a GSI machine: the vendor type is a property of whichever
+# device booted the image, so the pair cannot be frozen at build time. Measured
+# on sargo, which reports vndk 32 and therefore HALIUM_13: the channel serves a
+# current lineage-20.0 pair for waydroid_arm64, so the OTA path is both correct
+# and maintained here, unlike the frozen HALIUM_9 line.
+WAYDROID_IMAGE_RDEPENDS:halium-arm64 = ""
 
 RDEPENDS:${PN} += "${WAYDROID_IMAGE_RDEPENDS} lxc python3-gbinder python3-pygobject libgbinder python3-pyclip"
 
@@ -77,6 +83,7 @@ COMPATIBLE_MACHINE:pinetab2 = "(.*)"
 COMPATIBLE_MACHINE:mido-halium = "(.*)"
 COMPATIBLE_MACHINE:tissot-halium = "(.*)"
 COMPATIBLE_MACHINE:mindphone = "(.*)"
+COMPATIBLE_MACHINE:halium-arm64 = "(.*)"
 
 inherit pkgconfig
 inherit webos_app
