@@ -11,7 +11,7 @@ DEPENDS = "luna-service2 libpbnjson glib-2.0 glib-2.0-native"
 RRECOMMENDS:${PN} += "droidian-fpd"
 
 PV = "0.1.0-1+git"
-SRCREV = "878d42a485c74aab46fe49121b9464b530809fbf"
+SRCREV = "010ff42a4404da3032db59b8a5505181179deb02"
 
 inherit webos_ports_repo
 inherit webos_filesystem_paths
