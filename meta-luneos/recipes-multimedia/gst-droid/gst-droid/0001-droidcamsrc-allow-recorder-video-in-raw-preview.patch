@@ -1,0 +1,84 @@
+From 885ae346db252c232e1402271517d3f0a9e8b894 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 28 Aug 2026 20:29:24 +0200
+Subject: [PATCH] droidcamsrc: allow recorder-based video recording in raw
+ preview mode
+
+The check blocking video recording in raw preview mode exists to
+protect the droid buffer pool operations, but the pool only exists
+when the viewfinder negotiated droid-buffer memory - and only the raw
+recording path actually uses it. The external recorder
+(DroidMediaRecorder) receives encoded frames from the camera session
+inside the Android layer and is independent of the preview mode, so
+permit it in raw preview and guard every pool operation on the pool's
+existence.
+
+This lets clients that can only consume a raw viewfinder (for example
+Qt 6's GStreamer video sink through the QGStreamerVideoSource SPI)
+still record hardware-encoded video from vidsrc.
+
+Upstream-Status: Pending
+---
+ gst/droidcamsrc/gstdroidcamsrcdev.c | 22 +++++++++++++++-------
+ 1 file changed, 15 insertions(+), 7 deletions(-)
+
+diff --git a/gst/droidcamsrc/gstdroidcamsrcdev.c b/gst/droidcamsrc/gstdroidcamsrcdev.c
+index 78ac9c1..2e4f7a8 100644
+--- a/gst/droidcamsrc/gstdroidcamsrcdev.c
++++ b/gst/droidcamsrc/gstdroidcamsrcdev.c
+@@ -983,13 +983,18 @@ gst_droidcamsrc_dev_start_video_recording (GstDroidCamSrcDev * dev)
+   g_mutex_unlock (&dev->vidsrc->lock);
+ 
+   g_rec_mutex_lock (dev->lock);
+-  if (dev->use_raw_data) {
+-    GST_ELEMENT_ERROR (src, STREAM, FORMAT, ("Cannot record video in raw mode"),
+-        (NULL));
++  /* Raw recording pulls frames through the droid buffer pool, which does
++   * not exist when the viewfinder negotiated raw preview. The external
++   * recorder gets encoded frames from the camera session directly and
++   * does not touch the pool, so it works in either preview mode. */
++  if (dev->use_raw_data && !dev->use_recorder) {
++    GST_ELEMENT_ERROR (src, STREAM, FORMAT,
++        ("Cannot record raw video in raw preview mode"), (NULL));
+     goto out;
+   }
+ 
+-  gst_buffer_pool_set_flushing (dev->pool, TRUE);
++  if (dev->pool)
++    gst_buffer_pool_set_flushing (dev->pool, TRUE);
+ 
+   dev->vid->running = TRUE;
+   dev->vid->eos_sent = FALSE;
+@@ -1012,7 +1017,8 @@ gst_droidcamsrc_dev_start_video_recording (GstDroidCamSrcDev * dev)
+     gst_droidcamsrc_dev_post_preview (dev);
+ 
+ out:
+-  gst_buffer_pool_set_flushing (dev->pool, FALSE);
++  if (dev->pool)
++    gst_buffer_pool_set_flushing (dev->pool, FALSE);
+ 
+   g_rec_mutex_unlock (dev->lock);
+ 
+@@ -1024,7 +1030,8 @@ gst_droidcamsrc_dev_stop_video_recording (GstDroidCamSrcDev * dev)
+ {
+   GST_DEBUG ("dev stop video recording");
+ 
+-  gst_buffer_pool_set_flushing (dev->pool, TRUE);
++  if (dev->pool)
++    gst_buffer_pool_set_flushing (dev->pool, TRUE);
+ 
+   /* We need to make sure that some buffers have been pushed */
+   g_mutex_lock (&dev->vid->lock);
+@@ -1080,7 +1087,8 @@ gst_droidcamsrc_dev_stop_video_recording (GstDroidCamSrcDev * dev)
+   /* Update the preview callback flag again; seems to be overwritten. */
+   gst_droidcamsrc_dev_update_preview_callback_flag (dev);
+ 
+-  gst_buffer_pool_set_flushing (dev->pool, FALSE);
++  if (dev->pool)
++    gst_buffer_pool_set_flushing (dev->pool, FALSE);
+ 
+   GST_INFO ("dev stopped video recording");
+ }
+-- 
+2.53.0
+
