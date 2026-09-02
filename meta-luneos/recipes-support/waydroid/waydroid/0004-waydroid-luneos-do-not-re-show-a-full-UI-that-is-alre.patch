@@ -1,0 +1,67 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 2 Sep 2026 00:30:00 +0200
+Subject: [PATCH] waydroid-luneos: do not re-show a full UI that is already up
+
+Every launch of the LuneOS entry added a card, and none of them could be
+dismissed.
+
+The session starts Android with waydroid.background_start=true, and the
+hwcomposer sets waydroid.active_apps=Waydroid while it initialises, so the
+full-UI window exists and is already a card before anyone taps the launcher.
+Calling show-full-ui again is not idempotent: showFullUI() ends with a
+"refresh display contents" step - settingsPutString(policy_control) plus a
+status bar expand/collapse - and that makes the hwcomposer tear down its window
+and create a new one.
+
+The replacement surface is mapped as a fresh card, but the old surface is never
+destroyed or unmapped, so it stays on screen as a live second card with nothing
+behind it. Waydroid itself reports waydroid.open_windows=1 throughout, which is
+why nothing on the Android side looks wrong.
+
+Measured on mindphone from a clean boot, counting onSurfaceMapped for the
+Waydroid appId in the compositor:
+
+  session autostart only .................. 1 mapped surface, 1 card
+  after one launch of id.waydro.container .. 2 mapped surfaces, 2 cards
+
+and stopping the session removed both, confirming both belonged to it.
+
+webOS is unusually exposed to this. A mapped surface that sets no window type
+defaults to _WEBOS_WINDOW_TYPE_CARD - deliberately, so that plain Qt apps get a
+card - so a leaked surface is not merely invisible clutter, it is a card.
+
+Skip the call when the UI is already showing; the card exists and the shell
+brings it forward by itself.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [LuneOS-specific launcher]
+---
+--- a/data/scripts/waydroid-luneos.sh
++++ b/data/scripts/waydroid-luneos.sh
+@@ -1,3 +1,24 @@
+ #!/bin/sh
++# LuneOS launcher entry for the Android full UI.
++#
++# Only ask for the full UI when the session is not already running.
++#
++# The session starts Android with waydroid.background_start=true and the
++# hwcomposer sets waydroid.active_apps=Waydroid as it initialises, so once the
++# session is up the full-UI window already exists and is already a card.
++# Calling show-full-ui again is not idempotent: it ends with a "refresh display
++# contents" step - policy_control plus a status bar expand/collapse - which
++# makes the hwcomposer tear down its window and build a new one. The
++# replacement is mapped as another card while the old surface is never
++# unmapped, so every launch leaves behind a card nothing can dismiss.
++#
++# Test with "waydroid status" rather than the active_apps property: SAM runs
++# this script without the session user's DBUS_SESSION_BUS_ADDRESS, and
++# "waydroid prop get" needs it - without it the command answers "WayDroid
++# session is stopped" no matter what is on screen. "waydroid status" talks to
++# the container service on the system bus and works either way.
++if /usr/bin/waydroid status 2>/dev/null | grep -q "^Session:.*RUNNING"; then
++    exit 0
++fi
+ 
+-/usr/bin/waydroid show-full-ui
+\ No newline at end of file
++exec /usr/bin/waydroid show-full-ui
