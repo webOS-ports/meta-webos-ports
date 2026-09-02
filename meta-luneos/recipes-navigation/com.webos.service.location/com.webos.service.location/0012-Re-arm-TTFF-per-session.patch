@@ -1,0 +1,55 @@
+From a1ec12cb6fe823899c4100b2ba3f512874f7dcd0 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 2 Sep 2026 06:09:18 +0200
+Subject: [PATCH] Re-arm the time-to-first-fix measurement when a position
+ session ends
+
+getTimeToFirstFix measures the right thing but only ever once. mTTFFState
+latches on the first fix and was never cleared, so mFixRequestTime and
+mLastFixTime froze for the lifetime of the process and every later call
+returned the same stale number.
+
+Measured on device. A cold first fix outdoors took 245100ms by wall clock and
+reported 244492ms, which is accurate to the resolution of the measurement. A
+second session two minutes later, warm, took 2010ms - and still reported
+244492ms. Stopping GPS in between did not help, because STOP_POSITION_CMD
+cleared LOCATION_UPDATES_ON and shut the engine down without touching the TTFF
+state.
+
+Time to first fix is a property of a session, so reset it when the session
+ends. This also matters for anything trying to compare cold and warm starts:
+before this, the second and every subsequent measurement in a process was
+silently the first one.
+
+Upstream-Status: Inappropriate [LuneOS specific]
+---
+ src/handler/position/gps/GPSPositionProvider.cpp | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/src/handler/position/gps/GPSPositionProvider.cpp b/src/handler/position/gps/GPSPositionProvider.cpp
+index 53f24c3..8211595 100644
+--- a/src/handler/position/gps/GPSPositionProvider.cpp
++++ b/src/handler/position/gps/GPSPositionProvider.cpp
+@@ -947,6 +947,22 @@ ErrorCodes GPSPositionProvider::processRequest(PositionRequest request) {
+                 mPosTimer = 0;
+             }
+             mAPIProgressFlag &= ~LOCATION_UPDATES_ON;
++
++            /*
++             * Re-arm the time-to-first-fix measurement for the next session.
++             *
++             * mTTFFState latches on the first fix and was never cleared, so
++             * both timestamps froze for the lifetime of the process and every
++             * later getTimeToFirstFix returned the same stale number. Measured
++             * on device: a first fix took 245s and reported 244492ms, correctly;
++             * a second session two minutes later took 2010ms and still reported
++             * 244492ms. TTFF is per session, so it has to reset when the
++             * session ends.
++             */
++            mTTFFState = false;
++            mFixRequestTime = 0;
++            mLastFixTime = 0;
++            mTTFF = 0;
+             if (!mAPIProgressFlag) {
+                 if (mEngineStarted) {
+                     if (false == processCommand(COMMAND_GPS_DISABLE)) {

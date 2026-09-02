@@ -7,13 +7,13 @@ LIC_FILES_CHKSUM = " \
 DEPENDS = "qtbase glib-2.0 luna-service2 qtpositioning"
 
 PV = "6.3.0+git"
-SRCREV = "70dae9de2b1f19f8b72f3c826f14f8a0bd9ad2cb"
+SRCREV = "258b292c108214b580acee9e700d63627c2e71e3"
 
 inherit webos_ports_repo
 inherit qt6-qmake
 inherit pkgconfig
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 FILES:${PN} += " \
     ${OE_QMAKE_PATH_PLUGINS} \

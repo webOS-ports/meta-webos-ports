@@ -1,0 +1,246 @@
+From b02fafffb54943cf80c4396220cdcb0d8c23fd73 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 1 Sep 2026 20:54:17 +0200
+Subject: [PATCH] nyx_gps: add debug data and non-framework location
+ notifications
+
+Two things the GNSS HALs expose that nyx had no way to carry, so the hybris GPS
+module could fetch neither.
+
+nyx_gps_get_debug_data() surfaces IGnssDebug: the engine's own position and
+time estimates and what it believes about each satellite. That is the
+information you want when a device streams NMEA but never reports a satellite
+in view, which is exactly where we are on both test devices. It returns text
+rather than a struct on purpose - the HAL's DebugData is a nested structure
+carrying a variable-length satellite array whose shape differs between HAL
+versions, and Android itself surfaces it through dumpsys rather than an API, so
+modelling it in nyx would fix a shape that is not stable.
+
+nyx_gps_set_nfw_callback() carries the notification a 2.x HAL emits through
+IGnssVisibilityControl when something outside the platform - a carrier, the
+modem, or the GNSS chip vendor - asks for the device's location. This is
+deliberately not folded into the existing NI callbacks: an NI request asks the
+user to allow or refuse before the fact and expects a response, whereas this
+reports what already happened and takes none. Routing it through
+nyx_gps_ni_notify_callback would mean prompting for a decision that has already
+been made, so it gets its own callback and its own notification type.
+
+Both method identifiers are appended at the end of module_method_t rather than
+placed with the other GPS entries. Those identifiers are positional and shared
+with every already-built nyx module, so inserting mid-enum would renumber the
+device families that follow.
+
+Upstream-Status: Pending
+---
+ include/public/nyx/client/nyx_gps.h           | 23 +++++++
+ include/public/nyx/common/nyx_gps_common.h    | 63 +++++++++++++++++++
+ .../public/nyx/module/nyx_device_internal.h   | 21 ++++++-
+ src/device/nyx_gps_impl.c                     | 44 +++++++++++++
+ 4 files changed, 150 insertions(+), 1 deletion(-)
+
+diff --git a/include/public/nyx/client/nyx_gps.h b/include/public/nyx/client/nyx_gps.h
+index afe0f76..7c5ac50 100644
+--- a/include/public/nyx/client/nyx_gps.h
++++ b/include/public/nyx/client/nyx_gps.h
+@@ -187,6 +187,29 @@ NYX_API_EXPORT nyx_error_t nyx_gps_download_ntp_time(nyx_device_handle_t
+         handle);
+ 
+ 
++// Diagnostics
++/**
++ * Retrieve a human readable dump of the GNSS engine's internal state - its
++ * position and time estimates and what it knows about each satellite. Intended
++ * for diagnosing why a device is not getting a fix. The text is written to
++ * dest, which must be at least NYX_GPS_DEBUG_DATA_MAXLEN bytes.
++ */
++NYX_API_EXPORT nyx_error_t nyx_gps_get_debug_data(nyx_device_handle_t handle,
++        char *dest,
++        size_t dest_len);
++
++
++
++// Non-framework location notifications
++/**
++ * Register for notifications that something outside the platform asked for the
++ * device's location. Unlike a network-initiated request these are reports of
++ * what already happened and take no response.
++ */
++NYX_API_EXPORT nyx_error_t nyx_gps_set_nfw_callback(nyx_device_handle_t handle,
++        nyx_gps_nfw_callbacks_t *nfw_cbs);
++
++
+ 
+ #ifdef __cplusplus
+ }
+diff --git a/include/public/nyx/common/nyx_gps_common.h b/include/public/nyx/common/nyx_gps_common.h
+index 20fe4a6..0cf2015 100644
+--- a/include/public/nyx/common/nyx_gps_common.h
++++ b/include/public/nyx/common/nyx_gps_common.h
+@@ -18,6 +18,7 @@
+ #define _NYX_GPS_COMMON_H_
+ 
+ #include <stdint.h>
++#include <stdbool.h>
+ #include <sys/cdefs.h>
+ #include <sys/types.h>
+ #include <pthread.h>
+@@ -546,6 +547,68 @@ typedef struct
+ 
+ 
+ 
++/**
++ * Maximum length of the text returned by nyx_gps_get_debug_data(), including
++ * the terminating NUL.
++ */
++#define NYX_GPS_DEBUG_DATA_MAXLEN 4096
++
++/**
++ * Non-framework location notification.
++ *
++ * This is not a network-initiated request and carries no response: it reports
++ * that something outside the platform - a carrier, the modem, or the GNSS chip
++ * vendor - asked for the device's location, and whether that was granted. It
++ * exists to be shown to the user after the fact, where an NI notification asks
++ * the user to decide beforehand.
++ */
++typedef uint8_t nyx_gps_nfw_protocol_stack_t;
++#define NYX_GPS_NFW_PROTOCOL_CTRL_PLANE     0
++#define NYX_GPS_NFW_PROTOCOL_SUPL           1
++#define NYX_GPS_NFW_PROTOCOL_IMS            10
++#define NYX_GPS_NFW_PROTOCOL_SIM            11
++#define NYX_GPS_NFW_PROTOCOL_OTHER          100
++
++typedef uint8_t nyx_gps_nfw_requestor_t;
++#define NYX_GPS_NFW_REQUESTOR_CARRIER               0
++#define NYX_GPS_NFW_REQUESTOR_OEM                   10
++#define NYX_GPS_NFW_REQUESTOR_MODEM_CHIPSET_VENDOR  11
++#define NYX_GPS_NFW_REQUESTOR_GNSS_CHIPSET_VENDOR   12
++#define NYX_GPS_NFW_REQUESTOR_OTHER_CHIPSET_VENDOR  13
++#define NYX_GPS_NFW_REQUESTOR_AUTOMOBILE_CLIENT     20
++#define NYX_GPS_NFW_REQUESTOR_OTHER                 100
++
++typedef uint8_t nyx_gps_nfw_response_type_t;
++#define NYX_GPS_NFW_RESPONSE_REJECTED                       0
++#define NYX_GPS_NFW_RESPONSE_ACCEPTED_NO_LOCATION_PROVIDED  1
++#define NYX_GPS_NFW_RESPONSE_ACCEPTED_LOCATION_PROVIDED     2
++
++typedef struct
++{
++	/** set to sizeof(nyx_gps_nfw_notification_t) */
++	size_t                          size;
++
++	char                            proxy_app_package_name[NYX_GPS_NI_SHORT_STRING_MAXLEN];
++	nyx_gps_nfw_protocol_stack_t    protocol_stack;
++	char                            other_protocol_stack_name[NYX_GPS_NI_SHORT_STRING_MAXLEN];
++	nyx_gps_nfw_requestor_t         requestor;
++	char                            requestor_id[NYX_GPS_NI_SHORT_STRING_MAXLEN];
++	nyx_gps_nfw_response_type_t     response_type;
++	bool                            in_emergency_mode;
++	bool                            is_cached_location;
++} nyx_gps_nfw_notification_t;
++
++typedef void (* nyx_gps_nfw_notify_callback)(nyx_gps_nfw_notification_t
++        *notification, void *user_data);
++
++typedef struct
++{
++	void                                   *user_data;
++	nyx_gps_nfw_notify_callback             nfw_notify_cb;
++} nyx_gps_nfw_callbacks_t;
++
++
++
+ /** Nyx GPS Geofence callbacks structure */
+ typedef void (* nyx_gps_geofence_transition_callback)(int32_t geofence_id,
+         nyx_gps_location_t *location,
+diff --git a/include/public/nyx/module/nyx_device_internal.h b/include/public/nyx/module/nyx_device_internal.h
+index 78b2887..2770dc6 100644
+--- a/include/public/nyx/module/nyx_device_internal.h
++++ b/include/public/nyx/module/nyx_device_internal.h
+@@ -179,7 +179,15 @@ typedef enum
+ 	NYX_CEC_GET_PHYSICAL_ADDRESS_MODULE_METHOD,
+ 	NYX_CEC_SET_CONFIG_MODULE_METHOD,
+ 	NYX_CEC_GET_CONFIG_MODULE_METHOD,
+-	NYX_CEC_GET_VERSION_MODULE_METHOD
++	NYX_CEC_GET_VERSION_MODULE_METHOD,
++
++	/*
++	 * Appended, not inserted. The identifiers above are positional and are
++	 * shared with every already-built nyx module, so a new entry among the
++	 * other GPS ones would renumber all the device families that follow.
++	 */
++	NYX_GPS_GET_DEBUG_DATA_MODULE_METHOD,
++	NYX_GPS_SET_NFW_CALLBACK_MODULE_METHOD
+ }
+ module_method_t;
+ 
+@@ -466,6 +474,17 @@ typedef nyx_error_t (*nyx_gps_pause_geofence_function_t)(nyx_device_t *,
+         int32_t);
+ typedef nyx_error_t (*nyx_gps_resume_geofence_function_t)(nyx_device_t *,
+         int32_t, int);
++
++/*
++ * Diagnostics from the GNSS engine, rendered as text. The underlying HAL data
++ * is a nested structure whose shape varies by version; nyx does not model it,
++ * for the same reason Android surfaces it through dumpsys rather than an API.
++ */
++typedef nyx_error_t (*nyx_gps_get_debug_data_function_t)(nyx_device_t *, char *,
++        size_t);
++
++typedef nyx_error_t (*nyx_gps_set_nfw_callback_function_t)(nyx_device_t *,
++        nyx_gps_nfw_callbacks_t *);
+ typedef nyx_error_t (*nyx_gps_init_xtra_client_function_t)(nyx_device_t *,
+         nyx_gps_xtra_client_config_t *, nyx_gps_xtra_client_callbacks_t *);
+ typedef nyx_error_t (*nyx_gps_stop_xtra_client_function_t)(nyx_device_t *);
+diff --git a/src/device/nyx_gps_impl.c b/src/device/nyx_gps_impl.c
+index 96fed53..c36b6ad 100644
+--- a/src/device/nyx_gps_impl.c
++++ b/src/device/nyx_gps_impl.c
+@@ -338,3 +338,47 @@ nyx_error_t nyx_gps_download_ntp_time(nyx_device_handle_t handle)
+ 	}
+ }
+ 
++nyx_error_t nyx_gps_get_debug_data(nyx_device_handle_t handle, char *dest,
++                                   size_t dest_len)
++{
++	nyx_device_t *d = (nyx_device_t *)handle;
++	CHECK_DEVICE(d);
++	CHECK_DEVICE_TYPE(d, NYX_DEVICE_GPS);
++
++	if (dest == NULL || dest_len == 0)
++	{
++		return NYX_ERROR_INVALID_VALUE;
++	}
++
++	nyx_gps_get_debug_data_function_t f_ptr = LOOKUP_METHOD(d,
++	        NYX_GPS_GET_DEBUG_DATA_MODULE_METHOD);
++
++	if (f_ptr)
++	{
++		return f_ptr(d, dest, dest_len);
++	}
++	else
++	{
++		return NYX_ERROR_NOT_IMPLEMENTED;
++	}
++}
++
++nyx_error_t nyx_gps_set_nfw_callback(nyx_device_handle_t handle,
++                                     nyx_gps_nfw_callbacks_t *nfw_cbs)
++{
++	nyx_device_t *d = (nyx_device_t *)handle;
++	CHECK_DEVICE(d);
++	CHECK_DEVICE_TYPE(d, NYX_DEVICE_GPS);
++
++	nyx_gps_set_nfw_callback_function_t f_ptr = LOOKUP_METHOD(d,
++	        NYX_GPS_SET_NFW_CALLBACK_MODULE_METHOD);
++
++	if (f_ptr)
++	{
++		return f_ptr(d, nfw_cbs);
++	}
++	else
++	{
++		return NYX_ERROR_NOT_IMPLEMENTED;
++	}
++}
