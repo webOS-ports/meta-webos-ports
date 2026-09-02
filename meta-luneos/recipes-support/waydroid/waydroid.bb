@@ -13,7 +13,7 @@ PV = "${SPV}+git"
 # Bumped whenever the shipped patches or helper scripts change: they alter what
 # the package contains without moving SRCREV or PV, so without this an already
 # installed waydroid stays at the unpatched build.
-PR = "r21"
+PR = "r22"
 
 # Pre-installed images, for machines whose system/vendor pairing is frozen.
 #
@@ -55,7 +55,6 @@ RRECOMMENDS:${PN} += " \
 "
 
 SRC_URI = "git://github.com/herrie82/waydroid.git;branch=herrie/luneos;protocol=https \
-    file://gbinder.conf \
     file://0001-lxc-copy-host-permissions-on-non-Treble-hosts-too.patch \
     file://0002-initializer-do-not-contact-the-OTA-channel-for-pre-in.patch \
     file://0003-user_manager-never-let-adb-failure-abort-userUnlocked.patch \
@@ -123,24 +122,6 @@ do_install:append:mindphone() {
     install -m 0644 ${UNPACKDIR}/waydroid-luneos.conf.mindphone ${D}${sysconfdir}/default/waydroid-luneos
 }
 
-# Provided by libgbinder already for Halium devices, but necessary to add for non-Halium devices.
-
-do_install:append:pinephone() {
-    install -Dm644 -t "${D}${sysconfdir}" "${UNPACKDIR}/gbinder.conf"
-}
-
-do_install:append:pinephonepro() {
-    install -Dm644 -t "${D}${sysconfdir}" "${UNPACKDIR}/gbinder.conf"
-}
-
-do_install:append:pinetab2() {
-    install -Dm644 -t "${D}${sysconfdir}" "${UNPACKDIR}/gbinder.conf"
-}
-
-do_install:append:qemux86-64() {
-    install -Dm644 -t "${D}${sysconfdir}" "${UNPACKDIR}/gbinder.conf"
-}
-
 FILES:${PN} += " \
     ${sysconfdir} \
     ${libdir} \
@@ -158,7 +139,8 @@ FILES:${PN} += " \
 # mount --bind /tmp/luna-session /run/luna-session/
 # export XDG_RUNTIME_DIR=/run/luna-session
 # export XDG_SESSION_TYPE=wayland
-# -- also, make sure /etc/gbinder.conf has "ApiLevel = 30" (Halium 9 needs API 28)
+# -- /etc/gbinder.conf comes from libgbinder now, with the API level set per
+#    machine through GBINDER_API_LEVEL
 #
 # Then:
 # 0. waydroid init (just once, but needs network !)

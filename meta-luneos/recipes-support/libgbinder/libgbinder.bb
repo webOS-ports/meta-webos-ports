@@ -9,9 +9,7 @@ DEPENDS = "glib-2.0 libglibutil"
 
 inherit pkgconfig
 
-SRC_URI = "git://github.com/mer-hybris/libgbinder.git;branch=master;protocol=https \
-           file://gbinder.conf \
-"
+SRC_URI = "git://github.com/mer-hybris/libgbinder.git;branch=master;protocol=https"
 
 PV = "1.1.52"
 SRCREV = "e906afcffbfa51b7fbefe042a13b933d9e8dfdd9"
@@ -44,10 +42,35 @@ PACKAGES =+ "libgbinder-tools"
 FILES:libgbinder-tools = "${bindir}/binder-ping"
 RDEPENDS:libgbinder-tools = "libgbinder"
 
-# Install libgbinder's config for Halium 9.0, we do this here, since for Waydroid we need a different API version it seems, so better to split it for mainline targets such as PinePhone and qemux86-64.
-do_install:append:halium() {
+# gbinder picks the protocol presets for /dev/binder and /dev/vndbinder from an
+# API level, and with nothing configured it assumes the oldest. That level is a
+# property of the Android side the host talks to: on a Halium device the
+# vendor's, which is ro.vndk.version, and on a device whose only Android is the
+# Waydroid container, that image's.
+#
+# It used to be a static file saying 28, installed only on Halium machines,
+# with waydroid.bb installing a near-identical one saying 30 on each of the
+# others through four copies of the same do_install:append. One file, generated
+# from one variable, replaces all of that - which is also why this recipe now
+# needs PACKAGE_ARCH: tissot-halium, mido-halium and halium-arm64 share
+# TUNE_PKGARCH, so machine-specific content under the tune arch would collide
+# in sstate and in the feed.
+#
+# The presets only reach /dev/binder and /dev/vndbinder; /dev/hwbinder is not in
+# them, and Waydroid passes explicit protocols for the container's own binder
+# nodes, taken from the system image's SDK level. So this setting is about the
+# host's own Android HALs, not about Waydroid.
+GBINDER_API_LEVEL ?= "30"
+GBINDER_API_LEVEL:tissot-halium = "28"
+GBINDER_API_LEVEL:mido-halium = "28"
+GBINDER_API_LEVEL:mindphone = "30"
+GBINDER_API_LEVEL:halium-arm64 = "32"
+
+PACKAGE_ARCH = "${MACHINE_ARCH}"
+
+do_install:append() {
     install -d ${D}${sysconfdir}
-    install -m 0644 ${UNPACKDIR}/gbinder.conf ${D}${sysconfdir}/gbinder.conf
+    printf '[General]\nApiLevel = %s\n' "${GBINDER_API_LEVEL}" > ${D}${sysconfdir}/gbinder.conf
 }
 
 FILES:${PN} += " ${sysconfdir}"
