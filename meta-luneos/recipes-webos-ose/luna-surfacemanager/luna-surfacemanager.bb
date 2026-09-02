@@ -16,7 +16,7 @@ LIC_FILES_CHKSUM = " \
 DEPENDS = "qtdeclarative wayland-native qtwayland qtbase-native qt-features-webos pmloglib webos-wayland-extensions glib-2.0 qtwayland-webos"
 
 WEBOS_VERSION = "2.0.0-423_6f49cced1cd4aea27f14d136e1c8ce846beef62a"
-PR = "r61"
+PR = "r62"
 
 inherit webos_qmake6
 inherit pkgconfig
@@ -46,6 +46,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0017-com.webos.surfacemanager.groups.json-keep-the-array-.patch \
     file://0018-weboscompositor-include-what-qt-612-no-longer-pulls-in.patch \
     file://0019-weboscompositor-advertise-wp_viewporter.patch \
+    file://0020-WebOSSurfaceItem-close-ask-xdg-clients-to-close-thems.patch \
 "
 
 inherit webos_systemd
