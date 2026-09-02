@@ -13,7 +13,7 @@ PV = "${SPV}+git"
 # Bumped for the host-permissions patch added below: it changes what the
 # package contains without moving SRCREV or PV, so without this an already
 # installed waydroid stays at the unpatched build.
-PR = "r6"
+PR = "r9"
 
 # Pre-installed images, for machines whose system/vendor pairing is frozen.
 #
