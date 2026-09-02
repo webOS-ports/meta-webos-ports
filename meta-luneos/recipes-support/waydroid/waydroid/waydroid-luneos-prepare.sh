@@ -156,9 +156,50 @@ set_no_ril() {
     echo "ro.radio.noril=1" >> "$base" && log "disabled container telephony (ro.radio.noril=1)"
 }
 
+# --------------------------------------------------- no background subsurface
+#
+# Waydroid's hwcomposer, when the compositor offers both wl_subcompositor and
+# wp_viewporter, gives every window a "dedicated background surface": the
+# xdg_toplevel's own wl_surface carries only a 1x1 black buffer stretched over
+# the screen by a viewport, and all Android content is rendered into a
+# wl_subsurface underneath it.
+#
+# luna-surfacemanager offers both globals (Qt6's QWaylandCompositor implements
+# wl_subcompositor server side), but it has no notion of subsurfaces as child
+# items - QWaylandCompositor::surfaceCreated fires for every wl_surface, so
+# WebOSCoreCompositor builds a WebOSSurfaceItem for the subsurface too. It has
+# no shell role and therefore no appId, and WebOSSurfaceItem's default type is
+# _WEBOS_WINDOW_TYPE_CARD, so as soon as Android commits a frame to it the card
+# shell gets a second, anonymous card - while the real card shows nothing but
+# the stretched black background.
+#
+# The same split leaks a card at boot. hwc_open() unconditionally creates a
+# first window and, when waydroid.background_start is true (the default),
+# immediately destroys it again. ~window() frees the xdg objects and every
+# surface held in layers, but with a dedicated background surface the window's
+# own wl_surface is not in layers - it is never destroyed, and it has already
+# been mapped, so a Waydroid card survives with waydroid.open_windows=0.
+#
+# persist.waydroid.no_background_subsurface makes hwc put the window surface in
+# layers[0] and render Android straight onto it. One surface per window: one
+# card, showing the actual UI, and the boot-time window is torn down cleanly.
+#
+# Read by hwc at window creation, so it must be set before the session starts.
+# Like set_no_ril this is best effort - waydroid_base.prop only exists once
+# "waydroid init" has run.
+set_no_background_subsurface() {
+    [ "${WAYDROID_NO_BG_SUBSURFACE:-1}" = 1 ] || return 0
+    base=/var/lib/waydroid/waydroid_base.prop
+    [ -f "$base" ] || return 0
+    grep -q "^persist.waydroid.no_background_subsurface" "$base" && return 0
+    echo "persist.waydroid.no_background_subsurface=true" >> "$base" \
+        && log "rendering Android on the window surface (no background subsurface)"
+}
+
 rc=0
 alloc_binder_nodes  || rc=1
 bind_images         || rc=1
 copy_host_hal_libs  || rc=1
 set_no_ril          || rc=1
+set_no_background_subsurface || rc=1
 exit $rc
