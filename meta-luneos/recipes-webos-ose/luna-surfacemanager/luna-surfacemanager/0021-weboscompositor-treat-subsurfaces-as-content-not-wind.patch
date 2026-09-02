@@ -1,0 +1,74 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herrie <github@herrie.org>
+Date: Wed, 2 Sep 2026 09:00:00 +0200
+Subject: [PATCH 21/21] weboscompositor: treat subsurfaces as content, not
+ windows
+
+QWaylandCompositor::surfaceCreated fires for every wl_surface a client
+makes, including the ones that go on to take the wl_subsurface role. Each
+of those got its own WebOSSurfaceItem, and since a subsurface has no shell
+role it has no appId either - so with WebOSSurfaceItem defaulting to
+_WEBOS_WINDOW_TYPE_CARD, every subsurface that received a frame handed the
+card shell an anonymous extra card for what is really one window.
+
+Qt already does the right thing with subsurfaces: QWaylandQuickItem renders
+them as child items of the parent surface's item, positioned from
+subsurfacePositionChanged. So the compositor only has to stop competing
+with that, which is what this does.
+
+Waydroid's hwcomposer composes through subsurfaces whenever it composes at
+all, which is every window once persist.waydroid.multi_windows is on. Until
+now that made per-app Android windows unusable on LuneOS.
+
+The role is taken after the surface is created, so the state is tracked
+rather than tested once: parentChanged carries a non-null parent when the
+surface becomes a subsurface, and null again if it stops being one.
+
+Upstream-Status: Pending
+---
+--- a/modules/weboscompositor/weboscorecompositor.cpp
++++ b/modules/weboscompositor/weboscorecompositor.cpp
+@@ -795,11 +795,41 @@
+     QPointer<QWaylandSurface> pSurface(surface);
+     QPointer<WebOSSurfaceItem> pItem(item);
+ 
++    /* A wl_surface that takes the wl_subsurface role is not a window of its own,
++     * it is a piece of its parent's content. QWaylandQuickItem already renders
++     * subsurfaces, as child items of the parent surface's item, so all the
++     * compositor has to do is stay out of the way: an item built here for a
++     * subsurface has no shell role and therefore no appId, and
++     * WebOSSurfaceItem's default type is _WEBOS_WINDOW_TYPE_CARD, so mapping it
++     * hands the card shell an anonymous extra card for what is really one
++     * window. Waydroid hits this whenever its hwcomposer composes through
++     * subsurfaces, which is every window once multi-window mode is on.
++     *
++     * The role arrives after the surface is created, so track it rather than
++     * testing it once: parentChanged fires with a non-null parent when the
++     * surface becomes a subsurface, and with null again if it stops being one.
++     */
++    connect(pSurface, &QWaylandSurface::parentChanged, this,
++            [this, pSurface, pItem](QWaylandSurface *newParent, QWaylandSurface *) {
++        if (!pItem)
++            return;
++        const bool isSubsurface = newParent != nullptr;
++        pItem->setProperty("_luneosIsSubsurface", isSubsurface);
++        qInfo() << pSurface << pItem << (isSubsurface ? "became a subsurface" : "is no longer a subsurface");
++        // It should not have been mapped yet - clients set the role before the
++        // first commit - but do not leave a card behind if one ever is.
++        if (isSubsurface && m_surfaces.contains(pItem))
++            this->onSurfaceUnmapped(pSurface, pItem);
++    });
++
+     connect(pSurface, &QWaylandSurface::hasContentChanged, this, [this, pSurface, pItem] {
+-        if (pSurface && pSurface->hasContent())
++        if (pSurface && pSurface->hasContent()) {
++            if (pItem && pItem->property("_luneosIsSubsurface").toBool())
++                return;
+             this->onSurfaceMapped(pSurface, pItem);
+-        else if (pItem && pItem->surface() && !pItem->isBufferLocked()) // Avoid onSurfaceUnmapped when the surface is about to be destroyed
++        } else if (pItem && pItem->surface() && !pItem->isBufferLocked()) { // Avoid onSurfaceUnmapped when the surface is about to be destroyed
+             this->onSurfaceUnmapped(pSurface, pItem);
++        }
+     });
+ 
+     connect(pSurface, &QWaylandSurface::destroyed, this, [this, pSurface, pItem] {
