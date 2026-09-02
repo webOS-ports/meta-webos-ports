@@ -187,10 +187,34 @@ set_no_background_subsurface() {
         && log "rendering Android on the window surface (no background subsurface)"
 }
 
+# ------------------------------------------------ refresh container config
+#
+# The LXC configuration under /var/lib/waydroid/lxc is generated once, at
+# "waydroid init", from the layout of whatever Waydroid version wrote it. A
+# package upgrade leaves it behind: after moving from 1.4.2 to 1.6.3 the
+# container simply would not start, with lxc-info reporting STOPPED until the
+# ten-second timeout and the session dying on "container failed to start".
+#
+# "waydroid upgrade --offline" regenerates it - host permissions, the LXC
+# config and the base props - without touching the images. It is idempotent and
+# quick, so it runs on every pass rather than trying to detect staleness.
+#
+# It only stops a running container to do that, so this is skipped unless the
+# container is down. Prepare runs both before the container at boot and as the
+# session's ExecStartPre, and by the latter the container is up.
+refresh_container_config() {
+    [ -f /var/lib/waydroid/waydroid.cfg ] || return 0
+    state=$(lxc-info -P /var/lib/waydroid/lxc -n waydroid -sH 2>/dev/null)
+    [ "${state:-STOPPED}" = "STOPPED" ] || return 0
+    /usr/bin/waydroid upgrade -o >/dev/null 2>&1 &&
+        log "refreshed the container configuration"
+}
+
 rc=0
 alloc_binder_nodes  || rc=1
 bind_images         || rc=1
 copy_host_hal_libs  || rc=1
 set_no_ril          || rc=1
 set_no_background_subsurface || rc=1
+refresh_container_config || rc=1
 exit $rc

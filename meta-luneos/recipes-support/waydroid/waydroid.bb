@@ -7,13 +7,16 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=1ebbd3e34237af26da5dc08a4e440464"
 
 SECTION = "webos/support"
 
-SRCREV = "41f309f4c185a2c716723c081274eb56eb9263ff"
-SPV = "1.4.2"
-PV = "${SPV}+git"
+# Upstream, not a fork. The LuneOS additions - the install target, the launcher
+# entry and the webOS application generation - are the patches below, so they
+# are reviewable here rather than carried in a personal branch.
+SRCREV = "5b7e2e71be3f6bfaaaab3b461251dacaf1ce4991"
+SPV = "1.6.3"
+PV = "${SPV}"
 # Bumped whenever the shipped patches or helper scripts change: they alter what
 # the package contains without moving SRCREV or PV, so without this an already
-# installed waydroid stays at the unpatched build.
-PR = "r23"
+# installed waydroid stays at the previous build. Reset at the 1.6.3 move.
+PR = "r2"
 
 # Pre-installed images, for machines whose system/vendor pairing is frozen.
 #
@@ -54,12 +57,11 @@ RRECOMMENDS:${PN} += " \
     kernel-module-binder-linux \
 "
 
-SRC_URI = "git://github.com/herrie82/waydroid.git;branch=herrie/luneos;protocol=https \
+SRC_URI = "git://github.com/waydroid/waydroid.git;branch=main;protocol=https \
     file://0001-lxc-copy-host-permissions-on-non-Treble-hosts-too.patch \
-    file://0002-initializer-do-not-contact-the-OTA-channel-for-pre-in.patch \
-    file://0003-user_manager-never-let-adb-failure-abort-userUnlocked.patch \
-    file://0004-luneos-launch-through-one-helper-and-name-the-app-Way.patch \
-    file://0005-user_manager-give-every-Android-app-a-webOS-app.patch \
+    file://0002-Makefile-add-a-LuneOS-install-target.patch \
+    file://0003-data-add-the-LuneOS-application-files.patch \
+    file://0004-user_manager-give-every-Android-app-a-webOS-app.patch \
     file://waydroid-luneos-prepare.sh \
     file://waydroid-luneos-prepare.service \
     file://waydroid-luneos-session.sh \
@@ -110,7 +112,10 @@ CLEANBROKEN = "1"
 EXTRA_OEMAKE = "SYSD_DIR=${systemd_system_unitdir} USE_NFTABLES="1" WAYDROID_VERSION=${SPV}"
 
 do_install() {
-    make install_luneos DESTDIR=${D}
+    # oe_runmake, not make: EXTRA_OEMAKE carries WAYDROID_VERSION, which is what
+    # replaces __VERSION__ in the launcher entry. Called as plain make it never
+    # arrived, and every build shipped an app declaring version 0.0.0.
+    oe_runmake install_luneos DESTDIR=${D}
 
     install -d ${D}${libexecdir}
     install -m 0755 ${UNPACKDIR}/waydroid-luneos-prepare.sh ${D}${libexecdir}/waydroid-luneos-prepare
