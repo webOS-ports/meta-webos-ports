@@ -1,0 +1,1159 @@
+From 53f7358694a4ef7fa70e5cab9176c4c426cedb11 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 1 Sep 2026 19:02:24 +0200
+Subject: [PATCH 2/2] gps: wire up A-GNSS, A-GNSS RIL and XTRA assistance
+
+The GNSS module could acquire a fix but had no way to be helped towards one:
+SUPL, cell-based reference location and predicted ephemeris all live behind
+IGnss extension interfaces the module never asked for, so the nyx methods that
+carry them answered NYX_ERROR_NOT_IMPLEMENTED and a device with a SIM got no
+benefit from having one.
+
+Fetch IAGnss, IAGnssRil and IGnssXtra after the core interface is up, register a
+callback object with each, and map them onto the nyx methods that were
+previously unregistered: set_server, data_conn_open/closed/failed,
+set_ref_location, set_set_id, update_network_state,
+update_network_availability and inject_xtra_data.
+
+The extensions are optional by design - a HAL that does not implement one
+answers getExtension* with a null binder rather than an error - so each family
+is kept only if both the interface and its setCallback succeeded, and every
+method checks that before acting. They are registered unconditionally because
+nyx_module_register_method needs the nyx_instance_t that only nyx_module_open
+has, while the HAL is not bound until init(); the truthful answer therefore
+arrives at call time instead of registration time.
+
+One conversion is not a pass-through, and the compile-time checks are what
+caught it: nyx's APN bearer type still follows the legacy GPS HAL numbering
+where AGPS_APN_BEARER_IPV4 is 0, whereas HIDL's ApnIpType inserted INVALID at 0
+and shifted the rest up. Forwarding the nyx value unchanged would have told the
+HAL INVALID for every IPv4 APN, so gps_apn_ip_type_to_hidl() maps it explicitly
+and the remaining assistance constants - which do agree - are asserted instead.
+
+Two further asymmetries are handled rather than papered over:
+set_ref_location refuses nyx's MAC-address form, which IAGnssRil@1.0 cannot
+represent, and requestRefLocCb reports CELLID because that is the only kind
+this module can supply.
+
+NI and geofencing remain unimplemented; they need IGnssNi and IGnssGeofencing,
+which are still not fetched, and their callbacks are still dropped.
+
+Upstream-Status: Pending
+---
+ include/internal/msgid.h |   1 +
+ src/gps/gnss_binder.c    | 601 ++++++++++++++++++++++++++++++++++++++-
+ src/gps/gnss_binder.h    |  36 +++
+ src/gps/gps.c            | 298 ++++++++++++++++++-
+ 4 files changed, 928 insertions(+), 8 deletions(-)
+
+diff --git a/include/internal/msgid.h b/include/internal/msgid.h
+index 956dc7f..d3f7aec 100644
+--- a/include/internal/msgid.h
++++ b/include/internal/msgid.h
+@@ -41,6 +41,7 @@
+ #define MSGID_NYX_HYBRIS_GPS_TRANSACT_ERR                    "NYXGPS_TRANSACT_ERR"
+ #define MSGID_NYX_HYBRIS_GPS_OPEN_ERR                        "NYXGPS_OPEN_ERR"
+ #define MSGID_NYX_HYBRIS_GPS_METHOD_REGISTER_ERR             "NYXGPS_METHOD_REGISTER_ERR"
++#define MSGID_NYX_HYBRIS_GPS_NO_EXTENSION                    "NYXGPS_NO_EXTENSION"
+ 
+ /** Android */
+ #define MSGID_NYX_HYBRIS_ANDROID_ALARM_GET_TIME_ERR          "NYXAND_GET_TIME_ERR"
+diff --git a/src/gps/gnss_binder.c b/src/gps/gnss_binder.c
+index a662389..38bca68 100644
+--- a/src/gps/gnss_binder.c
++++ b/src/gps/gnss_binder.c
+@@ -56,6 +56,13 @@
+ #define GNSS_IFACE_1_0 "android.hardware.gnss@1.0::IGnss"
+ #define GNSS_CALLBACK_IFACE_1_0 "android.hardware.gnss@1.0::IGnssCallback"
+ 
++#define AGNSS_IFACE_1_0 "android.hardware.gnss@1.0::IAGnss"
++#define AGNSS_CALLBACK_IFACE_1_0 "android.hardware.gnss@1.0::IAGnssCallback"
++#define AGNSS_RIL_IFACE_1_0 "android.hardware.gnss@1.0::IAGnssRil"
++#define AGNSS_RIL_CALLBACK_IFACE_1_0 "android.hardware.gnss@1.0::IAGnssRilCallback"
++#define GNSS_XTRA_IFACE_1_0 "android.hardware.gnss@1.0::IGnssXtra"
++#define GNSS_XTRA_CALLBACK_IFACE_1_0 "android.hardware.gnss@1.0::IGnssXtraCallback"
++
+ /*
+  * Transaction codes are the 1-based declaration order of the methods in
+  * IGnss.hal / IGnssCallback.hal. Verified against
+@@ -69,7 +76,46 @@ enum gnss_tx {
+ 	GNSS_TX_INJECT_TIME = 5,
+ 	GNSS_TX_INJECT_LOCATION = 6,
+ 	GNSS_TX_DELETE_AIDING_DATA = 7,
+-	GNSS_TX_SET_POSITION_MODE = 8
++	GNSS_TX_SET_POSITION_MODE = 8,
++	GNSS_TX_GET_EXTENSION_AGNSS_RIL = 9,
++	GNSS_TX_GET_EXTENSION_AGNSS = 11,
++	GNSS_TX_GET_EXTENSION_XTRA = 15
++};
++
++enum agnss_tx {
++	AGNSS_TX_SET_CALLBACK = 1,
++	AGNSS_TX_DATA_CONN_CLOSED = 2,
++	AGNSS_TX_DATA_CONN_FAILED = 3,
++	AGNSS_TX_SET_SERVER = 4,
++	AGNSS_TX_DATA_CONN_OPEN = 5
++};
++
++enum agnss_ril_tx {
++	AGNSS_RIL_TX_SET_CALLBACK = 1,
++	AGNSS_RIL_TX_SET_REF_LOCATION = 2,
++	AGNSS_RIL_TX_SET_SET_ID = 3,
++	AGNSS_RIL_TX_UPDATE_NETWORK_STATE = 4,
++	AGNSS_RIL_TX_UPDATE_NETWORK_AVAILABILITY = 5
++};
++
++enum gnss_xtra_tx {
++	GNSS_XTRA_TX_SET_CALLBACK = 1,
++	GNSS_XTRA_TX_INJECT_XTRA_DATA = 2
++};
++
++enum agnss_callback_tx {
++	/* Spelled with the double S in the 1.0 HAL; not a typo here. */
++	AGNSS_CB_TX_STATUS_IPV4 = 1,
++	AGNSS_CB_TX_STATUS_IPV6 = 2
++};
++
++enum agnss_ril_callback_tx {
++	AGNSS_RIL_CB_TX_REQUEST_SET_ID = 1,
++	AGNSS_RIL_CB_TX_REQUEST_REF_LOC = 2
++};
++
++enum gnss_xtra_callback_tx {
++	GNSS_XTRA_CB_TX_DOWNLOAD_REQUEST = 1
+ };
+ 
+ enum gnss_callback_tx {
+@@ -120,6 +166,33 @@ typedef struct {
+ 	GnssSvInfoHidl gnssSvList[GNSS_BINDER_MAX_SVS];
+ } GnssSvStatusHidl;
+ 
++/* android.hardware.gnss@1.0::IAGnssCallback.AGnssStatusIpV4 */
++typedef struct {
++	guint8 type;
++	guint8 status;
++	guint32 ipV4Addr;
++} AGnssStatusIpV4Hidl;
++
++/* android.hardware.gnss@1.0::IAGnssRil.AGnssRefLocationCellID */
++typedef struct {
++	guint8 type;
++	guint16 mcc;
++	guint16 mnc;
++	guint16 lac;
++	guint32 cid;
++	guint16 tac;
++	guint16 pcid;
++} AGnssRefLocationCellIDHidl;
++
++/* android.hardware.gnss@1.0::IAGnssRil.AGnssRefLocation */
++typedef struct {
++	guint8 type;
++	AGnssRefLocationCellIDHidl cellID;
++} AGnssRefLocationHidl;
++
++G_STATIC_ASSERT(sizeof(AGnssStatusIpV4Hidl) == 8);
++G_STATIC_ASSERT(sizeof(AGnssRefLocationCellIDHidl) == 16);
++G_STATIC_ASSERT(sizeof(AGnssRefLocationHidl) == 20);
+ G_STATIC_ASSERT(sizeof(GnssLocationHidl) == 64);
+ G_STATIC_ASSERT(sizeof(GnssSvInfoHidl) == 24);
+ G_STATIC_ASSERT(sizeof(GnssSvStatusHidl) == 4 + (24 * GNSS_BINDER_MAX_SVS));
+@@ -129,6 +202,20 @@ typedef struct {
+ 	GBinderRemoteObject *remote;
+ 	GBinderClient *client;
+ 	GBinderLocalObject *callback_object;
++
++	/* Assistance extensions; any of these may legitimately stay NULL. */
++	GBinderRemoteObject *agnss_remote;
++	GBinderClient *agnss_client;
++	GBinderLocalObject *agnss_callback_object;
++
++	GBinderRemoteObject *ril_remote;
++	GBinderClient *ril_client;
++	GBinderLocalObject *ril_callback_object;
++
++	GBinderRemoteObject *xtra_remote;
++	GBinderClient *xtra_client;
++	GBinderLocalObject *xtra_callback_object;
++
+ 	gulong death_id;
+ 
+ 	/*
+@@ -388,6 +475,286 @@ static void gnss_binder_death_handler(GBinderRemoteObject *obj, void *user_data)
+ 	nyx_error(MSGID_NYX_HYBRIS_GPS_HAL_DIED, 0, "GNSS HAL died");
+ }
+ 
++/*
++ * The transact helpers above are hard-wired to the IGnss client; the extension
++ * interfaces need the same shapes against a different client.
++ */
++static gboolean gnss_binder_client_transact_bool(GBinderClient *client,
++                                                 guint32 code,
++                                                 GBinderLocalRequest *req)
++{
++	GBinderRemoteReply *reply;
++	int status = -1;
++	gboolean result = FALSE;
++
++	if (!client) {
++		gbinder_local_request_unref(req);
++		return FALSE;
++	}
++
++	reply = gbinder_client_transact_sync_reply(client, code, req, &status);
++	gbinder_local_request_unref(req);
++
++	if (reply) {
++		GBinderReader reader;
++		gint32 hidl_status = -1;
++		gboolean value = FALSE;
++
++		gbinder_remote_reply_init_reader(reply, &reader);
++
++		if (gbinder_reader_read_int32(&reader, &hidl_status) &&
++		    hidl_status == 0 &&
++		    gbinder_reader_read_bool(&reader, &value)) {
++			result = value;
++		}
++
++		gbinder_remote_reply_unref(reply);
++	}
++
++	if (status != GBINDER_STATUS_OK)
++		nyx_error(MSGID_NYX_HYBRIS_GPS_TRANSACT_ERR, 0,
++		          "GNSS extension transaction %u failed, binder status %d",
++		          code, status);
++
++	return result;
++}
++
++/*
++ * setRefLocation and setCallback on the extensions generate no value, so their
++ * replies carry only the transport status.
++ */
++static void gnss_binder_client_transact_void(GBinderClient *client,
++                                             guint32 code,
++                                             GBinderLocalRequest *req)
++{
++	GBinderRemoteReply *reply;
++	int status = -1;
++
++	if (!client) {
++		gbinder_local_request_unref(req);
++		return;
++	}
++
++	reply = gbinder_client_transact_sync_reply(client, code, req, &status);
++	gbinder_local_request_unref(req);
++
++	if (reply)
++		gbinder_remote_reply_unref(reply);
++
++	if (status != GBINDER_STATUS_OK)
++		nyx_error(MSGID_NYX_HYBRIS_GPS_TRANSACT_ERR, 0,
++		          "GNSS extension transaction %u failed, binder status %d",
++		          code, status);
++}
++
++/*
++ * Asks IGnss for one of its extension interfaces. A HAL that does not implement
++ * the extension answers with a null binder rather than an error, so a NULL
++ * result here is a normal outcome and not a failure to report.
++ */
++static GBinderRemoteObject *gnss_binder_get_extension(guint32 code,
++                                                      const char *what)
++{
++	GBinderRemoteReply *reply;
++	GBinderRemoteObject *obj = NULL;
++	int status = -1;
++
++	if (!g_gnss.client)
++		return NULL;
++
++	reply = gbinder_client_transact_sync_reply(g_gnss.client, code,
++	                                           gbinder_client_new_request(g_gnss.client),
++	                                           &status);
++
++	if (reply) {
++		GBinderReader reader;
++		gint32 hidl_status = -1;
++
++		gbinder_remote_reply_init_reader(reply, &reader);
++
++		if (gbinder_reader_read_int32(&reader, &hidl_status) &&
++		    hidl_status == 0) {
++			GBinderRemoteObject *ext = gbinder_reader_read_object(&reader);
++
++			if (ext)
++				obj = ext;
++		}
++
++		gbinder_remote_reply_unref(reply);
++	}
++
++	if (!obj)
++		nyx_info(MSGID_NYX_HYBRIS_GPS_NO_EXTENSION, 0,
++		         "GNSS HAL provides no %s extension", what);
++
++	return obj;
++}
++
++static GBinderLocalReply *gnss_binder_agnss_callback_handler(GBinderLocalObject *obj,
++                                                             GBinderRemoteRequest *req,
++                                                             guint code, guint flags,
++                                                             int *status, void *user_data)
++{
++	GBinderReader reader;
++
++	(void) obj;
++	(void) flags;
++	(void) user_data;
++
++	*status = GBINDER_STATUS_OK;
++	gbinder_remote_request_init_reader(req, &reader);
++
++	if (code == AGNSS_CB_TX_STATUS_IPV4) {
++		const AGnssStatusIpV4Hidl *st =
++			gbinder_reader_read_hidl_struct(&reader, AGnssStatusIpV4Hidl);
++
++		if (st && g_gnss.callbacks.agnss_status_cb)
++			g_gnss.callbacks.agnss_status_cb(st->type, st->status,
++			                                 st->ipV4Addr, g_gnss.user_data);
++	} else if (code == AGNSS_CB_TX_STATUS_IPV6) {
++		/*
++		 * nyx_agps_status_t has an ipv6_addr field, but nothing downstream
++		 * reads it and com.webos.service.location only ever acts on the
++		 * status value, so report the status with a zero v4 address rather
++		 * than decoding an address that would be discarded.
++		 */
++		const guint8 *st = gbinder_reader_read_hidl_struct1(&reader, 18);
++
++		if (st && g_gnss.callbacks.agnss_status_cb)
++			g_gnss.callbacks.agnss_status_cb(st[0], st[1], 0, g_gnss.user_data);
++	}
++
++	return NULL;
++}
++
++static GBinderLocalReply *gnss_binder_ril_callback_handler(GBinderLocalObject *obj,
++                                                           GBinderRemoteRequest *req,
++                                                           guint code, guint flags,
++                                                           int *status, void *user_data)
++{
++	GBinderReader reader;
++
++	(void) obj;
++	(void) flags;
++	(void) user_data;
++
++	*status = GBINDER_STATUS_OK;
++	gbinder_remote_request_init_reader(req, &reader);
++
++	if (code == AGNSS_RIL_CB_TX_REQUEST_SET_ID) {
++		gint32 flag = 0;
++
++		if (gbinder_reader_read_int32(&reader, &flag) &&
++		    g_gnss.callbacks.ril_request_set_id_cb)
++			g_gnss.callbacks.ril_request_set_id_cb((uint32_t) flag,
++			                                       g_gnss.user_data);
++	} else if (code == AGNSS_RIL_CB_TX_REQUEST_REF_LOC) {
++		if (g_gnss.callbacks.ril_request_ref_loc_cb)
++			g_gnss.callbacks.ril_request_ref_loc_cb(g_gnss.user_data);
++	}
++
++	return NULL;
++}
++
++static GBinderLocalReply *gnss_binder_xtra_callback_handler(GBinderLocalObject *obj,
++                                                            GBinderRemoteRequest *req,
++                                                            guint code, guint flags,
++                                                            int *status, void *user_data)
++{
++	(void) obj;
++	(void) req;
++	(void) flags;
++	(void) user_data;
++
++	*status = GBINDER_STATUS_OK;
++
++	if (code == GNSS_XTRA_CB_TX_DOWNLOAD_REQUEST &&
++	    g_gnss.callbacks.xtra_download_request_cb)
++		g_gnss.callbacks.xtra_download_request_cb(g_gnss.user_data);
++
++	return NULL;
++}
++
++/*
++ * Brings up one extension: fetch the interface, register our callback object
++ * with it, and keep the client only if both steps worked. Anything less is
++ * torn down so the *_available() predicate stays truthful.
++ */
++static void gnss_binder_setup_extensions(void)
++{
++	/* A-GNSS (SUPL): server configuration and data-connection handshake. */
++	g_gnss.agnss_remote = gnss_binder_get_extension(GNSS_TX_GET_EXTENSION_AGNSS,
++	                                                "IAGnss");
++	if (g_gnss.agnss_remote) {
++		gbinder_remote_object_ref(g_gnss.agnss_remote);
++		g_gnss.agnss_client = gbinder_client_new(g_gnss.agnss_remote,
++		                                         AGNSS_IFACE_1_0);
++		g_gnss.agnss_callback_object =
++			gbinder_servicemanager_new_local_object(g_gnss.sm,
++			                                        AGNSS_CALLBACK_IFACE_1_0,
++			                                        gnss_binder_agnss_callback_handler,
++			                                        NULL);
++
++		if (g_gnss.agnss_client && g_gnss.agnss_callback_object) {
++			GBinderLocalRequest *req =
++				gbinder_client_new_request(g_gnss.agnss_client);
++
++			gbinder_local_request_append_local_object(req,
++			                                          g_gnss.agnss_callback_object);
++			gnss_binder_client_transact_void(g_gnss.agnss_client,
++			                                 AGNSS_TX_SET_CALLBACK, req);
++		}
++	}
++
++	/* A-GNSS RIL: the side that actually benefits from a SIM. */
++	g_gnss.ril_remote = gnss_binder_get_extension(GNSS_TX_GET_EXTENSION_AGNSS_RIL,
++	                                              "IAGnssRil");
++	if (g_gnss.ril_remote) {
++		gbinder_remote_object_ref(g_gnss.ril_remote);
++		g_gnss.ril_client = gbinder_client_new(g_gnss.ril_remote,
++		                                       AGNSS_RIL_IFACE_1_0);
++		g_gnss.ril_callback_object =
++			gbinder_servicemanager_new_local_object(g_gnss.sm,
++			                                        AGNSS_RIL_CALLBACK_IFACE_1_0,
++			                                        gnss_binder_ril_callback_handler,
++			                                        NULL);
++
++		if (g_gnss.ril_client && g_gnss.ril_callback_object) {
++			GBinderLocalRequest *req =
++				gbinder_client_new_request(g_gnss.ril_client);
++
++			gbinder_local_request_append_local_object(req,
++			                                          g_gnss.ril_callback_object);
++			gnss_binder_client_transact_void(g_gnss.ril_client,
++			                                 AGNSS_RIL_TX_SET_CALLBACK, req);
++		}
++	}
++
++	/* XTRA: predicted ephemeris, the largest cold-start TTFF saving. */
++	g_gnss.xtra_remote = gnss_binder_get_extension(GNSS_TX_GET_EXTENSION_XTRA,
++	                                               "IGnssXtra");
++	if (g_gnss.xtra_remote) {
++		gbinder_remote_object_ref(g_gnss.xtra_remote);
++		g_gnss.xtra_client = gbinder_client_new(g_gnss.xtra_remote,
++		                                        GNSS_XTRA_IFACE_1_0);
++		g_gnss.xtra_callback_object =
++			gbinder_servicemanager_new_local_object(g_gnss.sm,
++			                                        GNSS_XTRA_CALLBACK_IFACE_1_0,
++			                                        gnss_binder_xtra_callback_handler,
++			                                        NULL);
++
++		if (g_gnss.xtra_client && g_gnss.xtra_callback_object) {
++			GBinderLocalRequest *req =
++				gbinder_client_new_request(g_gnss.xtra_client);
++
++			gbinder_local_request_append_local_object(req,
++			                                          g_gnss.xtra_callback_object);
++			gnss_binder_client_transact_bool(g_gnss.xtra_client,
++			                                 GNSS_XTRA_TX_SET_CALLBACK, req);
++		}
++	}
++}
++
+ /*
+  * Looks the GNSS instance up newest-first, so the log names the version the
+  * device really implements even though we go on to speak @1.0 to it.
+@@ -486,6 +853,13 @@ bool gnss_binder_init(const gnss_binder_callbacks *callbacks, void *user_data)
+ 		return false;
+ 	}
+ 
++	/*
++	 * Extensions come last: the core interface has to be usable before the
++	 * assistance ones are worth asking for, and a HAL without them is still a
++	 * perfectly good GNSS HAL.
++	 */
++	gnss_binder_setup_extensions();
++
+ 	return true;
+ }
+ 
+@@ -572,6 +946,193 @@ void gnss_binder_delete_aiding_data(uint32_t flags)
+ 	gnss_binder_transact_oneway(GNSS_TX_DELETE_AIDING_DATA, req);
+ }
+ 
++bool gnss_binder_agnss_available(void)
++{
++	return g_gnss.agnss_client != NULL;
++}
++
++bool gnss_binder_agnss_set_server(uint16_t type, const char *hostname, int port)
++{
++	GBinderLocalRequest *req;
++	GBinderWriter writer;
++
++	if (!g_gnss.agnss_client || !hostname)
++		return false;
++
++	req = gbinder_client_new_request(g_gnss.agnss_client);
++	gbinder_local_request_init_writer(req, &writer);
++	/* AGnssType is uint8_t but HIDL pads every primitive to 4 bytes. */
++	gbinder_writer_append_int32(&writer, type);
++	gbinder_writer_append_hidl_string(&writer, hostname);
++	gbinder_writer_append_int32(&writer, port);
++
++	return gnss_binder_client_transact_bool(g_gnss.agnss_client,
++	                                        AGNSS_TX_SET_SERVER, req);
++}
++
++bool gnss_binder_agnss_data_conn_open(const char *apn, int16_t bearer_type)
++{
++	GBinderLocalRequest *req;
++	GBinderWriter writer;
++
++	if (!g_gnss.agnss_client || !apn)
++		return false;
++
++	req = gbinder_client_new_request(g_gnss.agnss_client);
++	gbinder_local_request_init_writer(req, &writer);
++	gbinder_writer_append_hidl_string(&writer, apn);
++	gbinder_writer_append_int32(&writer, bearer_type);
++
++	return gnss_binder_client_transact_bool(g_gnss.agnss_client,
++	                                        AGNSS_TX_DATA_CONN_OPEN, req);
++}
++
++bool gnss_binder_agnss_data_conn_closed(void)
++{
++	if (!g_gnss.agnss_client)
++		return false;
++
++	return gnss_binder_client_transact_bool(g_gnss.agnss_client,
++	                                        AGNSS_TX_DATA_CONN_CLOSED,
++	                                        gbinder_client_new_request(g_gnss.agnss_client));
++}
++
++bool gnss_binder_agnss_data_conn_failed(void)
++{
++	if (!g_gnss.agnss_client)
++		return false;
++
++	return gnss_binder_client_transact_bool(g_gnss.agnss_client,
++	                                        AGNSS_TX_DATA_CONN_FAILED,
++	                                        gbinder_client_new_request(g_gnss.agnss_client));
++}
++
++bool gnss_binder_ril_available(void)
++{
++	return g_gnss.ril_client != NULL;
++}
++
++bool gnss_binder_ril_set_ref_location(uint16_t type, uint16_t mcc, uint16_t mnc,
++                                      uint16_t lac, uint32_t cid)
++{
++	GBinderLocalRequest *req;
++	GBinderWriter writer;
++	AGnssRefLocationHidl *loc;
++
++	if (!g_gnss.ril_client)
++		return false;
++
++	req = gbinder_client_new_request(g_gnss.ril_client);
++	gbinder_local_request_init_writer(req, &writer);
++
++	/*
++	 * The struct is passed by value, which on the wire means a buffer object.
++	 * It has to outlive the transaction, so let the writer own the copy.
++	 */
++	loc = gbinder_writer_new0(&writer, AGnssRefLocationHidl);
++	loc->type = (guint8) type;
++	loc->cellID.type = (guint8) type;
++	loc->cellID.mcc = mcc;
++	loc->cellID.mnc = mnc;
++	loc->cellID.lac = lac;
++	loc->cellID.cid = cid;
++
++	gbinder_writer_append_buffer_object(&writer, loc, sizeof(*loc));
++
++	gnss_binder_client_transact_void(g_gnss.ril_client,
++	                                 AGNSS_RIL_TX_SET_REF_LOCATION, req);
++	return true;
++}
++
++bool gnss_binder_ril_set_set_id(uint16_t type, const char *set_id)
++{
++	GBinderLocalRequest *req;
++	GBinderWriter writer;
++
++	if (!g_gnss.ril_client)
++		return false;
++
++	req = gbinder_client_new_request(g_gnss.ril_client);
++	gbinder_local_request_init_writer(req, &writer);
++	gbinder_writer_append_int32(&writer, type);
++	gbinder_writer_append_hidl_string(&writer, set_id ? set_id : "");
++
++	return gnss_binder_client_transact_bool(g_gnss.ril_client,
++	                                        AGNSS_RIL_TX_SET_SET_ID, req);
++}
++
++bool gnss_binder_ril_update_network_state(bool connected, int type, bool roaming)
++{
++	GBinderLocalRequest *req;
++	GBinderWriter writer;
++
++	if (!g_gnss.ril_client)
++		return false;
++
++	req = gbinder_client_new_request(g_gnss.ril_client);
++	gbinder_local_request_init_writer(req, &writer);
++	gbinder_writer_append_bool(&writer, connected);
++	gbinder_writer_append_int32(&writer, type);
++	gbinder_writer_append_bool(&writer, roaming);
++
++	return gnss_binder_client_transact_bool(g_gnss.ril_client,
++	                                        AGNSS_RIL_TX_UPDATE_NETWORK_STATE, req);
++}
++
++bool gnss_binder_ril_update_network_availability(bool available, const char *apn)
++{
++	GBinderLocalRequest *req;
++	GBinderWriter writer;
++
++	if (!g_gnss.ril_client)
++		return false;
++
++	req = gbinder_client_new_request(g_gnss.ril_client);
++	gbinder_local_request_init_writer(req, &writer);
++	gbinder_writer_append_bool(&writer, available);
++	gbinder_writer_append_hidl_string(&writer, apn ? apn : "");
++
++	return gnss_binder_client_transact_bool(g_gnss.ril_client,
++	                                        AGNSS_RIL_TX_UPDATE_NETWORK_AVAILABILITY,
++	                                        req);
++}
++
++bool gnss_binder_xtra_available(void)
++{
++	return g_gnss.xtra_client != NULL;
++}
++
++bool gnss_binder_xtra_inject_data(const char *data, int length)
++{
++	GBinderLocalRequest *req;
++	GBinderWriter writer;
++	char *copy;
++	gboolean ok;
++
++	if (!g_gnss.xtra_client || !data || length <= 0)
++		return false;
++
++	/*
++	 * injectXtraData takes a hidl_string, which is NUL-terminated on the wire,
++	 * while nyx hands us a pointer and a length. The payload is binary
++	 * ephemeris data rather than text, so copy it and terminate rather than
++	 * assuming the caller's buffer already is.
++	 */
++	copy = g_malloc(length + 1);
++	memcpy(copy, data, length);
++	copy[length] = '\0';
++
++	req = gbinder_client_new_request(g_gnss.xtra_client);
++	gbinder_local_request_init_writer(req, &writer);
++	gbinder_writer_append_hidl_string(&writer, copy);
++
++	ok = gnss_binder_client_transact_bool(g_gnss.xtra_client,
++	                                      GNSS_XTRA_TX_INJECT_XTRA_DATA, req);
++	g_free(copy);
++
++	return ok;
++}
++
+ const char *gnss_binder_provider_name(void)
+ {
+ 	return g_gnss.bound ? g_gnss.provider_name : NULL;
+@@ -597,10 +1158,48 @@ void gnss_binder_cleanup(void)
+ 		g_gnss.client = NULL;
+ 	}
+ 
++	if (g_gnss.agnss_client) {
++		gbinder_client_unref(g_gnss.agnss_client);
++		g_gnss.agnss_client = NULL;
++	}
++	if (g_gnss.ril_client) {
++		gbinder_client_unref(g_gnss.ril_client);
++		g_gnss.ril_client = NULL;
++	}
++	if (g_gnss.xtra_client) {
++		gbinder_client_unref(g_gnss.xtra_client);
++		g_gnss.xtra_client = NULL;
++	}
++
+ 	if (g_gnss.callback_object) {
+ 		gbinder_local_object_drop(g_gnss.callback_object);
+ 		g_gnss.callback_object = NULL;
+ 	}
++	if (g_gnss.agnss_callback_object) {
++		gbinder_local_object_drop(g_gnss.agnss_callback_object);
++		g_gnss.agnss_callback_object = NULL;
++	}
++	if (g_gnss.ril_callback_object) {
++		gbinder_local_object_drop(g_gnss.ril_callback_object);
++		g_gnss.ril_callback_object = NULL;
++	}
++	if (g_gnss.xtra_callback_object) {
++		gbinder_local_object_drop(g_gnss.xtra_callback_object);
++		g_gnss.xtra_callback_object = NULL;
++	}
++
++	if (g_gnss.agnss_remote) {
++		gbinder_remote_object_unref(g_gnss.agnss_remote);
++		g_gnss.agnss_remote = NULL;
++	}
++	if (g_gnss.ril_remote) {
++		gbinder_remote_object_unref(g_gnss.ril_remote);
++		g_gnss.ril_remote = NULL;
++	}
++	if (g_gnss.xtra_remote) {
++		gbinder_remote_object_unref(g_gnss.xtra_remote);
++		g_gnss.xtra_remote = NULL;
++	}
+ 
+ 	if (g_gnss.remote) {
+ 		if (g_gnss.death_id) {
+diff --git a/src/gps/gnss_binder.h b/src/gps/gnss_binder.h
+index ec24025..3ab6abd 100644
+--- a/src/gps/gnss_binder.h
++++ b/src/gps/gnss_binder.h
+@@ -78,6 +78,16 @@ typedef struct {
+ 	void (*acquire_wakelock_cb)(void *user_data);
+ 	void (*release_wakelock_cb)(void *user_data);
+ 	void (*request_utc_time_cb)(void *user_data);
++
++	/*
++	 * Assistance callbacks. Only ever fired when the corresponding extension
++	 * interface was obtained, so a HAL without A-GPS simply never calls them.
++	 */
++	void (*agnss_status_cb)(uint16_t type, uint16_t status, uint32_t ipv4_addr,
++	                        void *user_data);
++	void (*ril_request_set_id_cb)(uint32_t flags, void *user_data);
++	void (*ril_request_ref_loc_cb)(void *user_data);
++	void (*xtra_download_request_cb)(void *user_data);
+ } gnss_binder_callbacks;
+ 
+ /*
+@@ -103,6 +113,32 @@ bool gnss_binder_inject_location(double latitude, double longitude,
+                                  float accuracy_m);
+ void gnss_binder_delete_aiding_data(uint32_t flags);
+ 
++/*
++ * A-GPS / assistance.
++ *
++ * Each family lives behind an extension interface that IGnss hands out
++ * separately, and a HAL is free not to implement any of them. The *_available()
++ * predicates say whether the extension was actually obtained, which is what
++ * decides whether the matching nyx methods get registered at all - so a device
++ * without SUPL reports NYX_ERROR_NOT_IMPLEMENTED rather than silently
++ * accepting configuration it will never act on.
++ */
++bool gnss_binder_agnss_available(void);
++bool gnss_binder_agnss_set_server(uint16_t type, const char *hostname, int port);
++bool gnss_binder_agnss_data_conn_open(const char *apn, int16_t bearer_type);
++bool gnss_binder_agnss_data_conn_closed(void);
++bool gnss_binder_agnss_data_conn_failed(void);
++
++bool gnss_binder_ril_available(void);
++bool gnss_binder_ril_set_ref_location(uint16_t type, uint16_t mcc, uint16_t mnc,
++                                      uint16_t lac, uint32_t cid);
++bool gnss_binder_ril_set_set_id(uint16_t type, const char *set_id);
++bool gnss_binder_ril_update_network_state(bool connected, int type, bool roaming);
++bool gnss_binder_ril_update_network_availability(bool available, const char *apn);
++
++bool gnss_binder_xtra_available(void);
++bool gnss_binder_xtra_inject_data(const char *data, int length);
++
+ /* Human-readable name of the bound HAL, e.g.
+  * "android.hardware.gnss@1.1::IGnss/default", or NULL when not bound. Used to
+  * answer NYX_GPS_PROVIDER_NAME. */
+diff --git a/src/gps/gps.c b/src/gps/gps.c
+index 8df5bf4..7ee9638 100644
+--- a/src/gps/gps.c
++++ b/src/gps/gps.c
+@@ -74,6 +74,21 @@ G_STATIC_ASSERT(NYX_GPS_LOCATION_HAS_LAT_LONG == GPS_LOCATION_HAS_LAT_LONG);
+ G_STATIC_ASSERT(NYX_GPS_LOCATION_HAS_ALTITUDE == GPS_LOCATION_HAS_ALTITUDE);
+ G_STATIC_ASSERT(NYX_GPS_LOCATION_HAS_SPEED == GPS_LOCATION_HAS_SPEED);
+ G_STATIC_ASSERT(NYX_GPS_LOCATION_HAS_BEARING == GPS_LOCATION_HAS_BEARING);
++G_STATIC_ASSERT(NYX_AGPS_TYPE_SUPL == AGPS_TYPE_SUPL);
++G_STATIC_ASSERT(NYX_AGPS_TYPE_C2K == AGPS_TYPE_C2K);
++G_STATIC_ASSERT(NYX_AGPS_SET_ID_TYPE_IMSI == AGPS_SETID_TYPE_IMSI);
++G_STATIC_ASSERT(NYX_AGPS_SET_ID_TYPE_MSISDN == AGPS_SETID_TYPE_MSISDM);
++G_STATIC_ASSERT(NYX_AGPS_REQUEST_DATA_CONN == GNSS_REQUEST_AGNSS_DATA_CONN);
++G_STATIC_ASSERT(NYX_AGPS_RELEASE_DATA_CONN == GNSS_RELEASE_AGNSS_DATA_CONN);
++G_STATIC_ASSERT(NYX_AGPS_DATA_CONNECTED == GNSS_AGNSS_DATA_CONNECTED);
++G_STATIC_ASSERT(NYX_AGPS_DATA_CONN_DONE == GNSS_AGNSS_DATA_CONN_DONE);
++G_STATIC_ASSERT(NYX_AGPS_DATA_CONN_FAILED == GNSS_AGNSS_DATA_CONN_FAILED);
++G_STATIC_ASSERT(NYX_AGPS_REF_LOCATION_TYPE_GSM_CELLID == AGPS_REF_LOCATION_TYPE_GSM_CELLID);
++G_STATIC_ASSERT(NYX_AGPS_REF_LOCATION_TYPE_UMTS_CELLID == AGPS_REF_LOCATION_TYPE_UMTS_CELLID);
++G_STATIC_ASSERT(NYX_AGPS_RIL_NETWORK_TYPE_MOBILE == AGPS_RIL_NETWORK_TYPE_MOBILE);
++G_STATIC_ASSERT(NYX_AGPS_RIL_NETWORK_TYPE_WIFI == AGPS_RIL_NETWORK_TYPE_WIFI);
++G_STATIC_ASSERT(NYX_AGPS_RIL_REQUEST_SETID_IMSI == AGPS_RIL_REQUEST_SETID_IMSI);
++G_STATIC_ASSERT(NYX_AGPS_RIL_REQUEST_SETID_MSISDN == AGPS_RIL_REQUEST_SETID_MSISDN);
+ 
+ typedef struct methodStringPair {
+ 	module_method_t mType;
+@@ -101,9 +116,34 @@ static const methodStringPair_t mapMethodString[] = {
+ 	{NYX_GPS_SET_POSITION_MODE_MODULE_METHOD,  "set_position_mode"}
+ };
+ 
++/*
++ * Assistance methods. These cannot be registered conditionally on the extension
++ * actually existing: nyx_module_register_method needs the nyx_instance_t that
++ * only nyx_module_open has, and the HAL is not bound until init(). So they are
++ * always registered and each one answers NYX_ERROR_NOT_IMPLEMENTED when its
++ * extension was not obtained - the caller still gets a truthful answer, just at
++ * call time rather than at registration time.
++ */
++static const methodStringPair_t mapAssistMethodString[] = {
++	{NYX_GPS_SET_SERVER_MODULE_METHOD,                  "set_server"},
++	{NYX_GPS_DATA_CONN_OPEN_MODULE_METHOD,              "data_conn_open"},
++	{NYX_GPS_DATA_CONN_CLOSED_MODULE_METHOD,            "data_conn_closed"},
++	{NYX_GPS_DATA_CONN_FAILED_MODULE_METHOD,            "data_conn_failed"},
++	{NYX_GPS_SET_REF_LOCATION_MODULE_METHOD,            "set_ref_location"},
++	{NYX_GPS_SET_SET_ID_MODULE_METHOD,                  "set_set_id"},
++	{NYX_GPS_UPDATE_NETWORK_STATE_MODULE_METHOD,        "update_network_state"},
++	{NYX_GPS_UPDATE_NETWORK_AVAILABILITY_MODULE_METHOD, "update_network_availability"},
++	{NYX_GPS_INJECT_XTRA_DATA_MODULE_METHOD,            "inject_xtra_data"}
++};
++
+ static nyx_device_t *nyx_dev = NULL;
+ 
+ static nyx_gps_callbacks_t *nyx_gps_cbs = NULL;
++static nyx_gps_xtra_callbacks_t *nyx_gps_xtra_cbs = NULL;
++static nyx_agps_callbacks_t *nyx_agps_cbs = NULL;
++static nyx_agps_ril_callbacks_t *nyx_agps_ril_cbs = NULL;
++
++static nyx_agps_status_t g_agps_status;
+ 
+ /* Reused across callbacks so a fix does not allocate on the binder thread. */
+ static nyx_gps_location_t g_location;
+@@ -253,6 +293,78 @@ static void gps_request_utc_time_cb(void *user_data)
+ 		nyx_gps_cbs->request_utc_time_cb(nyx_gps_cbs->user_data);
+ }
+ 
++/*
++ * nyx's APN bearer type follows the legacy GPS HAL numbering
++ * (AGPS_APN_BEARER_IPV4 == 0), while HIDL's ApnIpType inserted INVALID at 0 and
++ * shifted the rest up by one. They are therefore NOT interchangeable: passing a
++ * nyx value straight through would send IPv4 to the HAL as INVALID. This is the
++ * one place in the module where the two enumerations genuinely disagree, which
++ * is why it is a conversion rather than a static assert.
++ */
++static int32_t gps_apn_ip_type_to_hidl(nyx_agps_bearer_type_t bearer)
++{
++	switch (bearer) {
++	case NYX_AGPS_APN_BEARER_IPV4:
++		return APN_IP_IPV4;
++	case NYX_AGPS_APN_BEARER_IPV6:
++		return APN_IP_IPV6;
++	case NYX_AGPS_APN_BEARER_IPV4V6:
++		return APN_IP_IPV4V6;
++	default:
++		return APN_IP_INVALID;
++	}
++}
++
++static void gps_agnss_status_cb(uint16_t type, uint16_t status,
++                                uint32_t ipv4_addr, void *user_data)
++{
++	(void) user_data;
++
++	if (!nyx_agps_cbs || !nyx_agps_cbs->status_cb)
++		return;
++
++	memset(&g_agps_status, 0, sizeof(g_agps_status));
++	g_agps_status.size = sizeof(g_agps_status);
++	/* nyx_agps_type_t is signed; the HIDL values are 1 and 2, so this is
++	 * value-preserving, but be explicit about the narrowing. */
++	g_agps_status.type = (nyx_agps_type_t) type;
++	g_agps_status.status = status;
++	g_agps_status.ipv4_addr = (int) ipv4_addr;
++
++	nyx_agps_cbs->status_cb(&g_agps_status, nyx_agps_cbs->user_data);
++}
++
++static void gps_ril_request_set_id_cb(uint32_t flags, void *user_data)
++{
++	(void) user_data;
++
++	if (nyx_agps_ril_cbs && nyx_agps_ril_cbs->ril_request_set_id_cb)
++		nyx_agps_ril_cbs->ril_request_set_id_cb(flags,
++		                                        nyx_agps_ril_cbs->user_data);
++}
++
++static void gps_ril_request_ref_loc_cb(void *user_data)
++{
++	(void) user_data;
++
++	/*
++	 * IAGnssRilCallback::requestRefLocCb carries no argument, while nyx's
++	 * callback takes a flags word. The only reference-location kind this
++	 * module can supply is a cell ID, so say so rather than passing zero.
++	 */
++	if (nyx_agps_ril_cbs && nyx_agps_ril_cbs->ril_request_ref_loc_cb)
++		nyx_agps_ril_cbs->ril_request_ref_loc_cb(NYX_AGPS_RIL_REQUEST_REFLOC_CELLID,
++		                                         nyx_agps_ril_cbs->user_data);
++}
++
++static void gps_xtra_download_request_cb(void *user_data)
++{
++	(void) user_data;
++
++	if (nyx_gps_xtra_cbs && nyx_gps_xtra_cbs->xtra_download_request_cb)
++		nyx_gps_xtra_cbs->xtra_download_request_cb(nyx_gps_xtra_cbs->user_data);
++}
++
+ static const gnss_binder_callbacks gnss_cbs = {
+ 	.location_cb = gps_location_cb,
+ 	.status_cb = gps_status_cb,
+@@ -261,7 +373,11 @@ static const gnss_binder_callbacks gnss_cbs = {
+ 	.set_capabilities_cb = gps_set_capabilities_cb,
+ 	.acquire_wakelock_cb = gps_acquire_wakelock_cb,
+ 	.release_wakelock_cb = gps_release_wakelock_cb,
+-	.request_utc_time_cb = gps_request_utc_time_cb
++	.request_utc_time_cb = gps_request_utc_time_cb,
++	.agnss_status_cb = gps_agnss_status_cb,
++	.ril_request_set_id_cb = gps_ril_request_set_id_cb,
++	.ril_request_ref_loc_cb = gps_ril_request_ref_loc_cb,
++	.xtra_download_request_cb = gps_xtra_download_request_cb
+ };
+ 
+ nyx_error_t init(nyx_device_handle_t handle,
+@@ -273,14 +389,12 @@ nyx_error_t init(nyx_device_handle_t handle,
+                  nyx_gps_geofence_callbacks_t *geofence_cbs)
+ {
+ 	/*
+-	 * The extension-interface callbacks are accepted and ignored: this
+-	 * module registers none of the methods that would ever invoke them, so
+-	 * storing them would only suggest otherwise.
++	 * NI and geofencing are still not implemented - they need IGnssNi and
++	 * IGnssGeofencing, which this module does not fetch - so their callbacks
++	 * are deliberately dropped rather than stored, matching the fact that
++	 * none of their methods are registered.
+ 	 */
+-	(void) xtra_cbs;
+-	(void) agps_cbs;
+ 	(void) gps_ni_cbs;
+-	(void) agps_ril_cbs;
+ 	(void) geofence_cbs;
+ 
+ 	if (nyx_dev == NULL)
+@@ -290,9 +404,15 @@ nyx_error_t init(nyx_device_handle_t handle,
+ 		return NYX_ERROR_INVALID_HANDLE;
+ 
+ 	nyx_gps_cbs = gps_cbs;
++	nyx_gps_xtra_cbs = xtra_cbs;
++	nyx_agps_cbs = agps_cbs;
++	nyx_agps_ril_cbs = agps_ril_cbs;
+ 
+ 	if (!gnss_binder_init(&gnss_cbs, NULL)) {
+ 		nyx_gps_cbs = NULL;
++		nyx_gps_xtra_cbs = NULL;
++		nyx_agps_cbs = NULL;
++		nyx_agps_ril_cbs = NULL;
+ 		return NYX_ERROR_DEVICE_UNAVAILABLE;
+ 	}
+ 
+@@ -343,6 +463,9 @@ nyx_error_t cleanup(nyx_device_handle_t handle)
+ 
+ 	gnss_binder_cleanup();
+ 	nyx_gps_cbs = NULL;
++	nyx_gps_xtra_cbs = NULL;
++	nyx_agps_cbs = NULL;
++	nyx_agps_ril_cbs = NULL;
+ 
+ 	return NYX_ERROR_NONE;
+ }
+@@ -393,6 +516,152 @@ nyx_error_t set_position_mode(nyx_device_handle_t handle,
+ 	       NYX_ERROR_NONE : NYX_ERROR_GENERIC;
+ }
+ 
++nyx_error_t set_server(nyx_device_handle_t handle, nyx_agps_type_t type,
++                       const char *hostname, int port)
++{
++	if (handle != nyx_dev)
++		return NYX_ERROR_INVALID_HANDLE;
++
++	if (!gnss_binder_agnss_available())
++		return NYX_ERROR_NOT_IMPLEMENTED;
++
++	return gnss_binder_agnss_set_server((uint16_t) type, hostname, port) ?
++	       NYX_ERROR_NONE : NYX_ERROR_GENERIC;
++}
++
++nyx_error_t data_conn_open(nyx_device_handle_t handle, nyx_agps_type_t agpsType,
++                           const char *apn, nyx_agps_bearer_type_t bearerType)
++{
++	if (handle != nyx_dev)
++		return NYX_ERROR_INVALID_HANDLE;
++
++	if (!gnss_binder_agnss_available())
++		return NYX_ERROR_NOT_IMPLEMENTED;
++
++	/*
++	 * IAGnss@1.0::dataConnOpen takes only the APN and its IP type; the AGnss
++	 * type is not part of the call, so agpsType is accepted for API
++	 * compatibility and has nothing to map onto.
++	 */
++	(void) agpsType;
++
++	return gnss_binder_agnss_data_conn_open(apn,
++	                                       (int16_t) gps_apn_ip_type_to_hidl(bearerType)) ?
++	       NYX_ERROR_NONE : NYX_ERROR_GENERIC;
++}
++
++nyx_error_t data_conn_closed(nyx_device_handle_t handle, nyx_agps_type_t agpsType)
++{
++	if (handle != nyx_dev)
++		return NYX_ERROR_INVALID_HANDLE;
++
++	if (!gnss_binder_agnss_available())
++		return NYX_ERROR_NOT_IMPLEMENTED;
++
++	(void) agpsType;
++
++	return gnss_binder_agnss_data_conn_closed() ?
++	       NYX_ERROR_NONE : NYX_ERROR_GENERIC;
++}
++
++nyx_error_t data_conn_failed(nyx_device_handle_t handle, nyx_agps_type_t agpsType)
++{
++	if (handle != nyx_dev)
++		return NYX_ERROR_INVALID_HANDLE;
++
++	if (!gnss_binder_agnss_available())
++		return NYX_ERROR_NOT_IMPLEMENTED;
++
++	(void) agpsType;
++
++	return gnss_binder_agnss_data_conn_failed() ?
++	       NYX_ERROR_NONE : NYX_ERROR_GENERIC;
++}
++
++nyx_error_t set_ref_location(nyx_device_handle_t handle,
++                             const nyx_agps_ref_location_t *agps_reflocation,
++                             size_t sz_struct)
++{
++	if (handle != nyx_dev)
++		return NYX_ERROR_INVALID_HANDLE;
++
++	if (!agps_reflocation || sz_struct < sizeof(*agps_reflocation))
++		return NYX_ERROR_INVALID_VALUE;
++
++	if (!gnss_binder_ril_available())
++		return NYX_ERROR_NOT_IMPLEMENTED;
++
++	/*
++	 * Only the cell-ID form can be forwarded. nyx also allows a MAC-address
++	 * reference location, which IAGnssRil@1.0 has no representation for.
++	 */
++	if (agps_reflocation->type != NYX_AGPS_REF_LOCATION_TYPE_GSM_CELLID &&
++	    agps_reflocation->type != NYX_AGPS_REF_LOCATION_TYPE_UMTS_CELLID)
++		return NYX_ERROR_NOT_IMPLEMENTED;
++
++	return gnss_binder_ril_set_ref_location(agps_reflocation->type,
++	                                        agps_reflocation->u.cellID.mcc,
++	                                        agps_reflocation->u.cellID.mnc,
++	                                        agps_reflocation->u.cellID.lac,
++	                                        agps_reflocation->u.cellID.cid) ?
++	       NYX_ERROR_NONE : NYX_ERROR_GENERIC;
++}
++
++nyx_error_t set_set_id(nyx_device_handle_t handle, nyx_agps_set_id_type_t type,
++                       const char *set_id)
++{
++	if (handle != nyx_dev)
++		return NYX_ERROR_INVALID_HANDLE;
++
++	if (!gnss_binder_ril_available())
++		return NYX_ERROR_NOT_IMPLEMENTED;
++
++	return gnss_binder_ril_set_set_id((uint16_t) type, set_id) ?
++	       NYX_ERROR_NONE : NYX_ERROR_GENERIC;
++}
++
++nyx_error_t update_network_state(nyx_device_handle_t handle, int connected,
++                                 int type, int roaming, const char *extra_info)
++{
++	if (handle != nyx_dev)
++		return NYX_ERROR_INVALID_HANDLE;
++
++	if (!gnss_binder_ril_available())
++		return NYX_ERROR_NOT_IMPLEMENTED;
++
++	/* IAGnssRil@1.0::updateNetworkState has no field for extra_info. */
++	(void) extra_info;
++
++	return gnss_binder_ril_update_network_state(connected != 0, type,
++	                                            roaming != 0) ?
++	       NYX_ERROR_NONE : NYX_ERROR_GENERIC;
++}
++
++nyx_error_t update_network_availability(nyx_device_handle_t handle, int available,
++                                        const char *apn)
++{
++	if (handle != nyx_dev)
++		return NYX_ERROR_INVALID_HANDLE;
++
++	if (!gnss_binder_ril_available())
++		return NYX_ERROR_NOT_IMPLEMENTED;
++
++	return gnss_binder_ril_update_network_availability(available != 0, apn) ?
++	       NYX_ERROR_NONE : NYX_ERROR_GENERIC;
++}
++
++nyx_error_t inject_xtra_data(nyx_device_handle_t handle, char *data, int length)
++{
++	if (handle != nyx_dev)
++		return NYX_ERROR_INVALID_HANDLE;
++
++	if (!gnss_binder_xtra_available())
++		return NYX_ERROR_NOT_IMPLEMENTED;
++
++	return gnss_binder_xtra_inject_data(data, length) ?
++	       NYX_ERROR_NONE : NYX_ERROR_GENERIC;
++}
++
+ nyx_error_t nyx_module_open(nyx_instance_t instance, nyx_device_t **device_ptr)
+ {
+ 	nyx_error_t error;
+@@ -431,6 +700,18 @@ nyx_error_t nyx_module_open(nyx_instance_t instance, nyx_device_t **device_ptr)
+ 		}
+ 	}
+ 
++	for (i = 0; i < G_N_ELEMENTS(mapAssistMethodString); i++) {
++		error = nyx_module_register_method(instance, nyx_dev,
++		                                   mapAssistMethodString[i].mType,
++		                                   mapAssistMethodString[i].mString);
++		if (error != NYX_ERROR_NONE) {
++			nyx_error(MSGID_NYX_HYBRIS_GPS_METHOD_REGISTER_ERR, 0,
++			          "Failed to register GPS nyx module method %s",
++			          mapAssistMethodString[i].mString);
++			goto ERROR_HANDLER;
++		}
++	}
++
+ 	/*
+ 	 * The HAL is bound in init() rather than here. nyx_module_open runs when
+ 	 * anything opens the device, which on a Halium boot can be before
+@@ -457,6 +738,9 @@ nyx_error_t nyx_module_close(nyx_device_t *device)
+ 
+ 	gnss_binder_cleanup();
+ 	nyx_gps_cbs = NULL;
++	nyx_gps_xtra_cbs = NULL;
++	nyx_agps_cbs = NULL;
++	nyx_agps_ril_cbs = NULL;
+ 
+ 	free(nyx_dev);
+ 	nyx_dev = NULL;

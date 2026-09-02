@@ -1,0 +1,349 @@
+From 541d2b34130ff6ec38ddc61ae7122cb95c7b7b1d Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 1 Sep 2026 21:20:53 +0200
+Subject: [PATCH] Add getNfwNotifications
+
+Reports when something outside the platform - a carrier, the modem, or the GNSS
+chip vendor - asks the device for its location, and whether it was given. The
+GNSS stack raises these through IGnssVisibilityControl; nyx carries them as
+nyx_gps_nfw_notification_t, and until now nothing surfaced them.
+
+This is deliberately not folded into the network-initiated location flow. An NI
+request asks the user to allow or refuse before the fact and expects an answer;
+this reports what already happened and takes none. They are different events and
+want different UI, so they get different methods.
+
+Subscription only: the notifications arrive when the stack decides to raise one,
+so there is nothing to return at call time and no handler to start. It also does
+not require the GPS handler to be on, because the point of the notification is
+to tell the user their location was accessed - which is most worth knowing when
+they did not ask for it.
+
+The callback arrives on the binder thread, so it hands off to the main loop
+before touching the subscription list, the same hop the NMEA and status
+callbacks make. Registration is separate from nyx_gps_init because it is not
+part of the position flow, and a HAL without IGnssVisibilityControl - every 1.x
+one - simply answers NYX_ERROR_NOT_IMPLEMENTED, which is logged and ignored.
+
+Upstream-Status: Inappropriate [LuneOS specific]
+---
+ .../com.webos.service.location.api.json       |   1 +
+ include/GPSNyxInterface.h                     |   2 +
+ include/ILocationCallbacks.h                  |   8 ++
+ include/LocationService.h                     |   9 ++
+ include/LunaLocationServiceUtil.h             |   6 +
+ include/ServiceAgent.h                        |   1 +
+ src/handler/position/gps/GPSNyxInterface.cpp  |  30 +++++
+ src/lunaIpc/LocationService.cpp               | 107 ++++++++++++++++++
+ 8 files changed, 164 insertions(+)
+
+diff --git a/files/sysbus/com.webos.service.location.api.json b/files/sysbus/com.webos.service.location.api.json
+index 0d0f2c0..0f12cf1 100644
+--- a/files/sysbus/com.webos.service.location.api.json
++++ b/files/sysbus/com.webos.service.location.api.json
+@@ -22,6 +22,7 @@
+     "com.webos.service.location/getReverseLocation",
+     "com.webos.service.location/getTimeToFirstFix",
+     "com.webos.service.location/getGpsDebugData",
++    "com.webos.service.location/getNfwNotifications",
+     "com.webos.service.location/getState"
+   ]
+ }
+diff --git a/include/GPSNyxInterface.h b/include/GPSNyxInterface.h
+index b02f312..05403b4 100644
+--- a/include/GPSNyxInterface.h
++++ b/include/GPSNyxInterface.h
+@@ -71,6 +71,7 @@ public:
+     static void gpsNmeaCb(int64_t timestamp, const char* nmea, int length, void *user_data);
+     static void gpsRequestUtcTimeCb(void *user_data);
+     static void gpsXtraDownloadRequestCb(void *user_data);
++    static void nfwNotifyCb(nyx_gps_nfw_notification_t *notification, void *user_data);
+     static void xtraTimeCb(int64_t utcTime, int64_t timeReference, int uncertainty);
+     static void xtraDataCb(char *data, int length);
+     static void xtraDataDownloadThread(void *arg);
+@@ -92,6 +93,7 @@ private:
+     DownloadStateEType mDownloadNtpDataStatus ;
+ public:
+     virtual void onRequestCompleted(NtpErrors error, const NTPData *data);
++    nyx_gps_nfw_callbacks_t mNfwCallbacks;
+     nyx_device_handle_t mNyxGpsSystem;
+     nyx_gps_callbacks_t mGPSCallbacks;
+     nyx_gps_location_t mPosition;
+diff --git a/include/ILocationCallbacks.h b/include/ILocationCallbacks.h
+index 7704162..caf5dfb 100644
+--- a/include/ILocationCallbacks.h
++++ b/include/ILocationCallbacks.h
+@@ -22,6 +22,7 @@
+ #include <GeoLocation.h>
+ #include <location_errors.h>
+ #include <Location.h>
++#include <nyx/common/nyx_gps_common.h>
+ 
+ class ILocationCallbacks {
+ public:
+@@ -34,6 +35,13 @@ public:
+ 
+     virtual void getGpsSatelliteDataCb(Satellite *)=0;
+ 
++    /*
++     * A non-framework entity - carrier, modem, or GNSS chip vendor - asked for
++     * the device's location. This reports what already happened and takes no
++     * response, unlike a network-initiated request.
++     */
++    virtual void nfwNotifyCb(nyx_gps_nfw_notification_t *notification)=0;
++
+     virtual void geofenceAddCb(int32_t geofence_id, int32_t status,
+             gpointer user_data)=0;
+ 
+diff --git a/include/LocationService.h b/include/LocationService.h
+index d24b2ed..bdf0605 100644
+--- a/include/LocationService.h
++++ b/include/LocationService.h
+@@ -111,6 +111,11 @@ typedef struct _NmeaData {
+     LSHandle *lsHandle;
+ } NmeaData;
+ 
++typedef struct _NfwData {
++    char *nfwString;
++    LSHandle *lsHandle;
++} NfwData;
++
+ typedef struct _SatelliteData {
+     char *satelliteString;
+     LSHandle *lsHandle;
+@@ -278,8 +283,10 @@ public:
+     // /**Callback called from Handlers********/
+ 
+     static void sendNmeaData(GObject *source, GAsyncResult *res, gpointer userdata);
++    static void sendNfwNotification(GObject *source, GAsyncResult *res, gpointer userdata);
+ 
+     static void nmeaDataUnref(gpointer data);
++    static void nfwDataUnref(gpointer data);
+ 
+     static void sendSatelliteData(GObject *source, GAsyncResult *res, gpointer userdata);
+ 
+@@ -477,6 +484,7 @@ public:
+ public:
+     void getLocationUpdateCb(GeoLocation& location, ErrorCodes errCode,HandlerTypes type);
+     void getNmeaDataCb(long long timestamp, char *data, int length);
++    void nfwNotifyCb(nyx_gps_nfw_notification_t *notification);
+     void getGpsStatusCb(int state);
+     void getGpsSatelliteDataCb(Satellite *);
+     void geofenceAddCb(int32_t geofence_id, int32_t status, gpointer user_data);
+@@ -542,6 +550,7 @@ private:
+     LOCATION_SERVICE_METHOD(getGpsSatelliteData);
+     LOCATION_SERVICE_METHOD(getTimeToFirstFix);
+     LOCATION_SERVICE_METHOD(getGpsDebugData);
++    LOCATION_SERVICE_METHOD(getNfwNotifications);
+     LOCATION_SERVICE_METHOD(getLocationUpdates);
+     LOCATION_SERVICE_METHOD(getCachedPosition);
+     LOCATION_SERVICE_METHOD(cancelSubscription);
+diff --git a/include/LunaLocationServiceUtil.h b/include/LunaLocationServiceUtil.h
+index 5792063..676ac20 100644
+--- a/include/LunaLocationServiceUtil.h
++++ b/include/LunaLocationServiceUtil.h
+@@ -164,6 +164,12 @@
+         PROP_WITH_OPT(longitude, number, "minimum":-180, "maximum":180)) \
+         REQUIRED_2(latitude, longitude))
+ 
++/*
++ * JSON SCHEMA: getNfwNotifications ([bool subscribe])
++ */
++#define JSCHEMA_GET_NFW_NOTIFICATIONS                       STRICT_SCHEMA(\
++        PROPS_1(PROP(subscribe, boolean)))
++
+ /*
+  * JSON SCHEMA: getGpsDebugData ()
+  */
+diff --git a/include/ServiceAgent.h b/include/ServiceAgent.h
+index d770d59..16a5f98 100644
+--- a/include/ServiceAgent.h
++++ b/include/ServiceAgent.h
+@@ -26,6 +26,7 @@
+  * Key values used to store Luna subscription list
+  */
+ #define SUBSC_GPS_GET_NMEA_KEY "getNmeaData"
++#define SUBSC_GET_NFW_KEY "getNfwNotifications"
+ #define SUBSC_SEND_XTRA_CMD_KEY "sendExtraCommand"
+ #define SUBSC_GET_TTFF_KEY "getTimeToFirstFix"
+ #define SUBSC_GET_GPS_SATELLITE_DATA "getGpsSatelliteData"
+diff --git a/src/handler/position/gps/GPSNyxInterface.cpp b/src/handler/position/gps/GPSNyxInterface.cpp
+index e863e2e..912fcbb 100644
+--- a/src/handler/position/gps/GPSNyxInterface.cpp
++++ b/src/handler/position/gps/GPSNyxInterface.cpp
+@@ -73,6 +73,20 @@ nyx_error_t GPSNyxInterface::initialize(void *instance) {
+         printf_debug("GPSPositionProvider exit\n");
+         return rc;
+     }
++    /*
++     * Non-framework location notifications. Registered separately from
++     * nyx_gps_init because they are not part of the GNSS position flow: they
++     * report that something outside the platform asked where we are. Absent on
++     * any HAL without IGnssVisibilityControl, which is every 1.x one, so
++     * NYX_ERROR_NOT_IMPLEMENTED is an ordinary answer and not a failure.
++     */
++    memset(&mNfwCallbacks, 0, sizeof(nyx_gps_nfw_callbacks_t));
++    mNfwCallbacks.user_data = this;
++    mNfwCallbacks.nfw_notify_cb = nfwNotifyCb;
++
++    if (NYX_ERROR_NONE != nyx_gps_set_nfw_callback(mNyxGpsSystem, &mNfwCallbacks))
++        printf_info("non-framework location notifications unavailable\n");
++
+     if (strcmp(gpsInstance->mGPSConf.mChipsetID, "Qcom") == 0) {
+         mXtraClientCallbacks.user_data = this;
+         mXtraClientCallbacks.xtra_client_data_cb =
+@@ -406,6 +420,22 @@ void GPSNyxInterface::gpsSvStatusCb(nyx_gps_sv_status_t *sat_data, void *user_da
+     }
+ }
+ 
++void GPSNyxInterface::nfwNotifyCb(nyx_gps_nfw_notification_t *notification,
++                                  void *user_data) {
++    GPSNyxInterface *self = (GPSNyxInterface *) user_data;
++
++    if (nullptr == notification || nullptr == self)
++        return;
++
++    GPSPositionProvider *providerInstance =
++            (GPSPositionProvider *) self->gpsProviderInstance;
++
++    if (nullptr == providerInstance || nullptr == providerInstance->getCallback())
++        return;
++
++    providerInstance->getCallback()->nfwNotifyCb(notification);
++}
++
+ void GPSNyxInterface::gpsNmeaCb(int64_t timestamp, const char *nmea, int length, void *user_data) {
+     GPSNyxInterface *gpsNyxInterface = (GPSNyxInterface *) user_data;
+     GPSPositionProvider *providerInstance =
+diff --git a/src/lunaIpc/LocationService.cpp b/src/lunaIpc/LocationService.cpp
+index 7a13aab..779d76a 100644
+--- a/src/lunaIpc/LocationService.cpp
++++ b/src/lunaIpc/LocationService.cpp
+@@ -48,6 +48,7 @@ LSMethod LocationService::rootMethod[] = {
+         {"getGpsSatelliteData",       LocationService::_getGpsSatelliteData},
+         {"getTimeToFirstFix",         LocationService::_getTimeToFirstFix},
+         {"getGpsDebugData",           LocationService::_getGpsDebugData},
++        {"getNfwNotifications",       LocationService::_getNfwNotifications},
+         {"getLocationUpdates",        LocationService::_getLocationUpdates},
+         {"getCachedPosition",         LocationService::_getCachedPosition},
+         {"sendExtraCommand",          LocationService::_sendExtraCommand},
+@@ -1490,6 +1491,46 @@ bool LocationService::getGpsSatelliteData(LSHandle *sh, LSMessage *message, void
+     return true;
+ }
+ 
++bool LocationService::getNfwNotifications(LSHandle *sh, LSMessage *message, void *data) {
++    printMessageDetails("LUNA-API", message, sh);
++    LSError mLSError;
++    jvalue_ref parsedObj = NULL;
++    LocationErrorCode errorCode = LOCATION_SUCCESS;
++    bool mRetVal;
++
++    LSErrorInit(&mLSError);
++
++    if (!LSMessageValidateSchemaReplyOnError(sh, message, JSCHEMA_GET_NFW_NOTIFICATIONS, &parsedObj)) {
++        LS_LOG_ERROR("Schema Error in getNfwNotifications");
++        return true;
++    }
++
++    /*
++     * Purely a subscription: these arrive when the GNSS stack decides to report
++     * one, so there is nothing to return now and no handler to start. Not gated
++     * on the GPS handler being on either - the point of the notification is to
++     * tell the user their location was accessed, which is most worth knowing
++     * when they did not ask for it.
++     */
++    mRetVal = LSSubscriptionAdd(sh, SUBSC_GET_NFW_KEY, message, &mLSError);
++
++    if (mRetVal == false) {
++        LS_LOG_ERROR("Failed to add to subscription list");
++        LSErrorPrintAndFree(&mLSError);
++        errorCode = LOCATION_UNKNOWN_ERROR;
++    }
++
++    if (!jis_null(parsedObj))
++        j_release(&parsedObj);
++
++    if (LOCATION_SUCCESS == errorCode)
++        LSMessageReplySubscriptionSuccess(sh, message);
++    else
++        LSMessageReplyError(sh, message, errorCode);
++
++    return true;
++}
++
+ bool LocationService::getGpsDebugData(LSHandle *sh, LSMessage *message, void *data) {
+     printMessageDetails("LUNA-API", message, sh);
+     bool bRetVal;
+@@ -3038,6 +3079,72 @@ void LocationService::positionDataUnref(gpointer data) {
+     g_slice_free(PositionData, data);
+ }
+ 
++void LocationService::nfwNotifyCb(nyx_gps_nfw_notification_t *notification) {
++    jvalue_ref serviceObject = NULL;
++    GSimpleAsyncResult *asyncRes = NULL;
++    NfwData *nfwData = NULL;
++    const char *retString = NULL;
++
++    if (nullptr == notification)
++        return;
++
++    serviceObject = jobject_create();
++
++    if (jis_null(serviceObject))
++        return;
++
++    location_util_form_json_reply(serviceObject, true, LOCATION_SUCCESS);
++    jobject_put(serviceObject, J_CSTR_TO_JVAL("proxyAppPackageName"),
++                jstring_create(notification->proxy_app_package_name));
++    jobject_put(serviceObject, J_CSTR_TO_JVAL("protocolStack"),
++                jnumber_create_i32(notification->protocol_stack));
++    jobject_put(serviceObject, J_CSTR_TO_JVAL("otherProtocolStackName"),
++                jstring_create(notification->other_protocol_stack_name));
++    jobject_put(serviceObject, J_CSTR_TO_JVAL("requestor"),
++                jnumber_create_i32(notification->requestor));
++    jobject_put(serviceObject, J_CSTR_TO_JVAL("requestorId"),
++                jstring_create(notification->requestor_id));
++    jobject_put(serviceObject, J_CSTR_TO_JVAL("responseType"),
++                jnumber_create_i32(notification->response_type));
++    jobject_put(serviceObject, J_CSTR_TO_JVAL("inEmergencyMode"),
++                jboolean_create(notification->in_emergency_mode));
++    jobject_put(serviceObject, J_CSTR_TO_JVAL("isCachedLocation"),
++                jboolean_create(notification->is_cached_location));
++
++    retString = jvalue_tostring_simple(serviceObject);
++
++    /*
++     * The notification arrives on the binder thread, so hand it to the main
++     * loop before touching the subscription list - the same hop the NMEA and
++     * status callbacks make.
++     */
++    asyncRes = g_simple_async_result_new(NULL, sendNfwNotification, this, NULL);
++    nfwData = g_slice_new0(NfwData);
++    nfwData->nfwString = g_strdup(retString);
++    nfwData->lsHandle = mServiceHandle;
++
++    g_simple_async_result_set_op_res_gpointer(asyncRes, nfwData, nfwDataUnref);
++    g_simple_async_result_complete_in_idle(asyncRes);
++    g_object_unref(asyncRes);
++
++    j_release(&serviceObject);
++}
++
++void LocationService::nfwDataUnref(gpointer data) {
++    NfwData *nfwData = (NfwData *) data;
++    g_free(nfwData->nfwString);
++    g_slice_free(NfwData, data);
++}
++
++void LocationService::sendNfwNotification(GObject *source, GAsyncResult *res, gpointer userdata) {
++    LocationService *locService = (LocationService *) userdata;
++    NfwData *nfwData = (NfwData *) g_simple_async_result_get_op_res_gpointer(G_SIMPLE_ASYNC_RESULT(res));
++
++    locService->LSSubscriptionNonSubscriptionRespond(nfwData->lsHandle,
++                                                     SUBSC_GET_NFW_KEY,
++                                                     nfwData->nfwString);
++}
++
+ void LocationService::sendNmeaData(GObject *source, GAsyncResult *res, gpointer userdata) {
+     printf_info("enter sendNmeaData\n");
+ 

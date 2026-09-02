@@ -12,7 +12,7 @@ LIC_FILES_CHKSUM = " \
 DEPENDS = "glib-2.0 libpbnjson libxml2 pmloglib luna-service2 luna-prefs loc-utils boost"
 
 WEBOS_VERSION = "1.0.0-108_e9470a0f741371c76db17b1b0d6eef5d269e2196"
-PR = "r4"
+PR = "r8"
 
 inherit webos_public_repo
 inherit webos_enhanced_submissions
@@ -30,6 +30,10 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0007-com.webos.service.location-Remove-gpsConfig-file.patch \
     file://0008-com.webos.service.location.perm.json-Update-for-Lune.patch \
     file://0001-Fix-build-with-gcc-15.patch \
+    file://0009-Add-getGpsDebugData.patch \
+    file://0010-Add-getNfwNotifications.patch \
+    file://0011-Seed-GNSS-with-system-time.patch \
+    file://0012-Re-arm-TTFF-per-session.patch \
 "
 
 FILES:${PN} += "${libdir}/location/plugins/lib*.so"

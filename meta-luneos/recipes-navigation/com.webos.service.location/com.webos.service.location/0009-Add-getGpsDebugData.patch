@@ -1,0 +1,211 @@
+From c6378e680291a5f3e215fc8afad99ff1887480c1 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 1 Sep 2026 21:12:07 +0200
+Subject: [PATCH] Add getGpsDebugData
+
+Surfaces the GNSS engine's own diagnostics over LS2: its position and time
+estimates and what it believes about each satellite. That is the question worth
+asking when a device streams NMEA at 1Hz but never reports a satellite in view,
+and until now there was no way to ask it from outside the HAL.
+
+The data comes from nyx_gps_get_debug_data, which the hybris GPS module answers
+from IGnssDebug. That extension is optional, so a HAL without it is reported as
+LOCATION_GPS_NYX_SOURCE_UNAVAILABLE - "Location data source not present" -
+rather than as a failed call, because the call did not fail; the device simply
+has nothing to say.
+
+The payload is text rather than structured fields on purpose: the HAL's
+DebugData carries a variable-length satellite array whose element layout is not
+pinned down across HAL versions, so neither nyx nor this service models it.
+
+Upstream-Status: Inappropriate [LuneOS specific]
+---
+ .../com.webos.service.location.api.json       |  1 +
+ include/GPSNyxInterface.h                     |  6 ++
+ include/GPSPositionProvider.h                 |  1 +
+ include/LocationService.h                     |  1 +
+ include/LunaLocationServiceUtil.h             |  5 ++
+ src/handler/position/gps/GPSNyxInterface.cpp  |  7 +++
+ .../position/gps/GPSPositionProvider.cpp      |  5 ++
+ src/lunaIpc/LocationService.cpp               | 58 +++++++++++++++++++
+ 8 files changed, 84 insertions(+)
+
+diff --git a/files/sysbus/com.webos.service.location.api.json b/files/sysbus/com.webos.service.location.api.json
+index dae475e..0d0f2c0 100644
+--- a/files/sysbus/com.webos.service.location.api.json
++++ b/files/sysbus/com.webos.service.location.api.json
+@@ -21,6 +21,7 @@
+     "com.webos.service.location/getNmeaData",
+     "com.webos.service.location/getReverseLocation",
+     "com.webos.service.location/getTimeToFirstFix",
++    "com.webos.service.location/getGpsDebugData",
+     "com.webos.service.location/getState"
+   ]
+ }
+diff --git a/include/GPSNyxInterface.h b/include/GPSNyxInterface.h
+index e21cb6d..b02f312 100644
+--- a/include/GPSNyxInterface.h
++++ b/include/GPSNyxInterface.h
+@@ -48,6 +48,12 @@ public:
+     nyx_error_t injectExtraCommand(char* command);
+     nyx_error_t updateNetworkAvailablity(NetworkInfo *networkInfo);
+     nyx_error_t deleteAidingData();
++    /*
++     * Diagnostics straight from the GNSS engine. dest must be at least
++     * NYX_GPS_DEBUG_DATA_MAXLEN bytes; the module answers
++     * NYX_ERROR_NOT_IMPLEMENTED where the HAL exposes no IGnssDebug.
++     */
++    nyx_error_t getDebugData(char *dest, size_t destLen);
+ 
+ 
+     //geofence
+diff --git a/include/GPSPositionProvider.h b/include/GPSPositionProvider.h
+index 35459c0..e0c1292 100644
+--- a/include/GPSPositionProvider.h
++++ b/include/GPSPositionProvider.h
+@@ -248,6 +248,7 @@ public:
+     GPSStatus getGPSStatus();
+ 
+     long long getTimeToFirstFixValue ();
++    nyx_error_t getDebugData(char *dest, size_t destLen);
+ private:
+     GPSPositionProvider();
+ 
+diff --git a/include/LocationService.h b/include/LocationService.h
+index 109433a..d24b2ed 100644
+--- a/include/LocationService.h
++++ b/include/LocationService.h
+@@ -541,6 +541,7 @@ private:
+     LOCATION_SERVICE_METHOD(getLocationHandlerDetails);
+     LOCATION_SERVICE_METHOD(getGpsSatelliteData);
+     LOCATION_SERVICE_METHOD(getTimeToFirstFix);
++    LOCATION_SERVICE_METHOD(getGpsDebugData);
+     LOCATION_SERVICE_METHOD(getLocationUpdates);
+     LOCATION_SERVICE_METHOD(getCachedPosition);
+     LOCATION_SERVICE_METHOD(cancelSubscription);
+diff --git a/include/LunaLocationServiceUtil.h b/include/LunaLocationServiceUtil.h
+index 2beb41d..5792063 100644
+--- a/include/LunaLocationServiceUtil.h
++++ b/include/LunaLocationServiceUtil.h
+@@ -164,6 +164,11 @@
+         PROP_WITH_OPT(longitude, number, "minimum":-180, "maximum":180)) \
+         REQUIRED_2(latitude, longitude))
+ 
++/*
++ * JSON SCHEMA: getGpsDebugData ()
++ */
++#define JSCHEMA_GET_GPS_DEBUG_DATA                          SCHEMA_ANY
++
+ /*
+  * JSON SCHEMA: getState (string Handler, [bool subscribe])
+  */
+diff --git a/src/handler/position/gps/GPSNyxInterface.cpp b/src/handler/position/gps/GPSNyxInterface.cpp
+index 568d847..e863e2e 100644
+--- a/src/handler/position/gps/GPSNyxInterface.cpp
++++ b/src/handler/position/gps/GPSNyxInterface.cpp
+@@ -181,6 +181,13 @@ nyx_error_t GPSNyxInterface::updateNetworkAvailablity(
+                                                networkInfo->available, networkInfo->apn.c_str());
+ }
+ 
++nyx_error_t GPSNyxInterface::getDebugData(char *dest, size_t destLen) {
++    if (nullptr == mNyxGpsSystem || nullptr == dest || 0 == destLen)
++        return NYX_ERROR_INVALID_VALUE;
++
++    return nyx_gps_get_debug_data(mNyxGpsSystem, dest, destLen);
++}
++
+ nyx_error_t GPSNyxInterface::deleteAidingData() {
+     return nyx_gps_delete_aiding_data(mNyxGpsSystem, NYX_GPS_DELETE_ALL);
+ }
+diff --git a/src/handler/position/gps/GPSPositionProvider.cpp b/src/handler/position/gps/GPSPositionProvider.cpp
+index 68c5fbd..53f24c3 100644
+--- a/src/handler/position/gps/GPSPositionProvider.cpp
++++ b/src/handler/position/gps/GPSPositionProvider.cpp
+@@ -772,6 +772,11 @@ ErrorCodes GPSPositionProvider::getLastPosition(Position *position,
+     return ERROR_NONE;
+ }
+ 
++nyx_error_t GPSPositionProvider::getDebugData(char *dest, size_t destLen)
++{
++    return mGPSNyxInterface.getDebugData(dest, destLen);
++}
++
+ long long GPSPositionProvider::getTimeToFirstFixValue ()
+ {
+  LS_LOG_DEBUG("getTimeToFirstFix");
+diff --git a/src/lunaIpc/LocationService.cpp b/src/lunaIpc/LocationService.cpp
+index 9a8f51f..7a13aab 100644
+--- a/src/lunaIpc/LocationService.cpp
++++ b/src/lunaIpc/LocationService.cpp
+@@ -47,6 +47,7 @@ LSMethod LocationService::rootMethod[] = {
+         {"getLocationHandlerDetails", LocationService::_getLocationHandlerDetails},
+         {"getGpsSatelliteData",       LocationService::_getGpsSatelliteData},
+         {"getTimeToFirstFix",         LocationService::_getTimeToFirstFix},
++        {"getGpsDebugData",           LocationService::_getGpsDebugData},
+         {"getLocationUpdates",        LocationService::_getLocationUpdates},
+         {"getCachedPosition",         LocationService::_getCachedPosition},
+         {"sendExtraCommand",          LocationService::_sendExtraCommand},
+@@ -1489,6 +1490,63 @@ bool LocationService::getGpsSatelliteData(LSHandle *sh, LSMessage *message, void
+     return true;
+ }
+ 
++bool LocationService::getGpsDebugData(LSHandle *sh, LSMessage *message, void *data) {
++    printMessageDetails("LUNA-API", message, sh);
++    bool bRetVal;
++    LSError mLSError;
++    jvalue_ref parsedObj = NULL;
++    jvalue_ref serviceObject = NULL;
++    char debugData[NYX_GPS_DEBUG_DATA_MAXLEN] = {0};
++    nyx_error_t rc;
++
++    LSErrorInit(&mLSError);
++
++    if (!LSMessageValidateSchemaReplyOnError(sh, message, JSCHEMA_GET_GPS_DEBUG_DATA, &parsedObj)) {
++        LS_LOG_ERROR("Schema Error in getGpsDebugData");
++        return true;
++    }
++
++    serviceObject = jobject_create();
++
++    if (jis_null(serviceObject)) {
++        j_release(&parsedObj);
++        LSMessageReplyError(sh, message, LOCATION_OUT_OF_MEM);
++        return true;
++    }
++
++    rc = mGPSProvider->getDebugData(debugData, sizeof(debugData));
++
++    if (NYX_ERROR_NONE != rc) {
++        /*
++         * Not every GNSS HAL exposes IGnssDebug - it is an optional extension -
++         * so report that as "unsupported by this device" rather than as a
++         * failure of the call.
++         */
++        j_release(&parsedObj);
++        j_release(&serviceObject);
++        LSMessageReplyError(sh, message,
++                            (NYX_ERROR_NOT_IMPLEMENTED == rc)
++                                ? LOCATION_GPS_NYX_SOURCE_UNAVAILABLE
++                                : LOCATION_UNKNOWN_ERROR);
++        return true;
++    }
++
++    location_util_form_json_reply(serviceObject, true, LOCATION_SUCCESS);
++    jobject_put(serviceObject, J_CSTR_TO_JVAL("debugData"),
++                jstring_create(debugData));
++
++    bRetVal = LSMessageReply(sh, message, jvalue_tostring_simple(serviceObject), &mLSError);
++
++    if (bRetVal == false) {
++        LSErrorPrintAndFree(&mLSError);
++    }
++
++    j_release(&parsedObj);
++    j_release(&serviceObject);
++
++    return true;
++}
++
+ bool LocationService::getTimeToFirstFix(LSHandle *sh, LSMessage *message, void *data) {
+     printMessageDetails("LUNA-API", message, sh);
+     bool bRetVal;

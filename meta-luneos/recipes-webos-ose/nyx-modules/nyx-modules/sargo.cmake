@@ -31,4 +31,11 @@ set(NYXMOD_OW_TOUCHPANEL_MTDEV			TRUE)
 set(NYXMOD_OW_DEVICEINFO				FALSE)
 set(NYXMOD_OW_SYSTEM					FALSE)
 set(NYXMOD_OW_LED						FALSE)
-set(NYXMOD_OW_HAPTICS					FALSE)
+# Haptics has to come from nyx-modules, not nyx-modules-hybris. The hybris
+# module calls the free functions vibrator_exists()/vibrator_on()/vibrator_off()
+# from <android/hardware_legacy/vibrator.h>, and that header is not in the
+# extracted android-headers for any version we ship, because
+# hardware/libhybris_legacy stopped providing it. With implicit declarations now
+# an error, FALSE here fails the nyx-modules-hybris build outright. Same
+# reasoning, and the same value, as halium-arm64.cmake.
+set(NYXMOD_OW_HAPTICS					TRUE)

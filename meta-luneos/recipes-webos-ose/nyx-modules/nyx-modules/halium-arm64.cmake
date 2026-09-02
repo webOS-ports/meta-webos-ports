@@ -50,6 +50,14 @@ set(NYXMOD_OW_DEVICEINFO				FALSE)
 set(NYXMOD_OW_SYSTEM					FALSE)
 set(NYXMOD_OW_LED						FALSE)
 
+# GPS likewise. nyx-modules' GPS module drives a serial NMEA receiver off a
+# port named in /etc/location/gpsConfig.conf, which is a PinePhone arrangement;
+# a Treble device has no such port. nyx-modules-hybris binds the GNSS HIDL
+# service on /dev/hwbinder instead, and negotiates the interface version at
+# runtime because that version follows the flashed GSI rather than this machine
+# - the same reason the torch above cannot be decided here.
+set(NYXMOD_OW_GPS						FALSE)
+
 # Left unset - the sysfs torch from nyx-modules - and that is now a decision
 # rather than a placeholder.
 #
