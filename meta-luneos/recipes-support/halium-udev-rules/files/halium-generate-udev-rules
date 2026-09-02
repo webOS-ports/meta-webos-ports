@@ -27,6 +27,28 @@ SRC="/ueventd.rc /ueventd.*.rc /vendor/ueventd.rc /vendor/ueventd.*.rc
 
 mkdir -p /etc/udev/rules.d
 
+# Nodes already covered by another rules file are left strictly alone.
+#
+# LuneOS ships /etc/udev/rules.d/65-android.rules from udev-extraconf - a static
+# generic list carried over from Canonical's lxc-android-config, 21 rules of
+# common Android nodes. It is not generated per device, which is why it does not
+# mention this platform's own nodes: MTK's /dev/stpgps among them.
+#
+# So this augments that file rather than replacing it, and must never restate a
+# node the existing rules already handle. Emitting a competing value at a higher
+# priority is not theoretical: a first version of this generated 34 rules on
+# sargo, overriding its curated set, and the GNSS engine stopped producing NMEA
+# altogether - 0 bytes where it had been emitting 69KB in 45 seconds. Removing
+# the file restored it. Additive only.
+COVERED=$(mktemp 2>/dev/null || echo /tmp/.hur_covered)
+: > "$COVERED"
+for existing in /lib/udev/rules.d/*.rules /etc/udev/rules.d/*.rules; do
+    [ -e "$existing" ] || continue
+    [ "$existing" = "$OUT" ] && continue
+    sed -n 's/.*KERNEL=="\([^"]*\)".*/\1/p' "$existing" >> "$COVERED" 2>/dev/null
+done
+sort -u "$COVERED" -o "$COVERED" 2>/dev/null
+
 FOUND=""
 for f in $SRC; do
     [ -f "$f" ] && FOUND="$FOUND $f"
@@ -57,16 +79,33 @@ fi
               # same way, so the pattern carries over unchanged.
               printf "ACTION==\"add\", KERNEL==\"%s\", OWNER=\"%s\", GROUP=\"%s\", MODE=\"%s\"\n", path, $3, $4, $2
             }' \
-      | sort -u
+      | sort -u \
+      | while IFS= read -r rule; do
+            k=$(printf '%s' "$rule" | sed -n 's/.*KERNEL=="\([^"]*\)".*/\1/p')
+            grep -qxF "$k" "$COVERED" 2>/dev/null && continue
+            printf '%s\n' "$rule"
+        done
 } > "$OUT"
 
-COUNT=$(grep -c '^ACTION' "$OUT" 2>/dev/null)
-echo "halium-udev-rules: wrote $COUNT rules to $OUT"
+rm -f "$COVERED"
 
-# Nodes created before udev read these rules keep their old ownership, so apply
-# the rules once to what already exists.
+COUNT=$(grep -c '^ACTION' "$OUT" 2>/dev/null)
+if [ "${COUNT:-0}" -eq 0 ]; then
+    rm -f "$OUT"
+    echo "halium-udev-rules: existing rules already cover every node, nothing added"
+    exit 0
+fi
+echo "halium-udev-rules: added $COUNT rules not covered elsewhere, to $OUT"
+
+# Reload so the new file is in force for nodes created from here on - which is
+# the case that matters, since these appear when a subsystem is first powered.
+#
+# Deliberately no "udevadm trigger --action=add": re-firing an add event for
+# every device on a running system is far more invasive than it looks, and on
+# sargo it stopped the GNSS engine producing NMEA even when the rules themselves
+# changed nothing it used. Nodes that already exist keep their current
+# ownership until the next boot, which is an acceptable trade for not disturbing
+# a running system.
 udevadm control --reload-rules 2>/dev/null
-udevadm trigger --subsystem-match=misc --action=add 2>/dev/null
-udevadm trigger --action=add 2>/dev/null
 
 exit 0
