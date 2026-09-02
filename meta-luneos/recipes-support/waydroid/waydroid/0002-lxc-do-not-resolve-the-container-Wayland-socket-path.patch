@@ -1,0 +1,48 @@
+From 4dbda9d28f8a549dcd098373e1fa8bbbe0370830 Mon Sep 17 00:00:00 2001
+From: LuneOS <luneos@webos-ports.org>
+Date: Wed, 2 Sep 2026 16:20:21 +0200
+Subject: [PATCH 2/5] lxc: do not resolve the container Wayland socket path on
+ the host
+
+generate_session_lxc_config() builds the container-side mount point with
+os.path.realpath(). That path - /run/xdg/wayland-0 - only means anything
+inside the container, so resolving it walks the host's filesystem instead.
+
+On a host where /run/xdg happens to be a symlink the result is silently
+wrong. tissot ships /run/xdg -> /tmp/xdg, so the socket was bind mounted to
+tmp/xdg/wayland-0 while the container's XDG_RUNTIME_DIR still pointed at
+/run/xdg. hwcomposer logged "Couldn't open Wayland display", the composer
+HAL never registered, SurfaceFlinger never started, and Android sat forever
+short of sys.boot_completed with system_server waiting on it.
+
+The host side of the mount is a host path and keeps its realpath; only the
+container side loses it.
+
+Upstream-Status: Pending
+---
+ tools/helpers/lxc.py | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/tools/helpers/lxc.py b/tools/helpers/lxc.py
+index b23d388..49ceb40 100644
+--- a/tools/helpers/lxc.py
++++ b/tools/helpers/lxc.py
+@@ -197,7 +197,14 @@ def generate_session_lxc_config(args, session):
+         raise OSError("Failed to create XDG_RUNTIME_DIR mount point")
+ 
+     wayland_host_socket = os.path.realpath(os.path.join(session["xdg_runtime_dir"], session["wayland_display"]))
+-    wayland_container_socket = os.path.realpath(os.path.join(tools.config.defaults["container_xdg_runtime_dir"], tools.config.defaults["container_wayland_display"]))
++    # No realpath here: this path is only meaningful inside the container, and
++    # resolving it against the host resolves the wrong filesystem. A host that
++    # happens to have /run/xdg as a symlink - tissot ships /run/xdg -> /tmp/xdg -
++    # turns the container mount point into tmp/xdg/wayland-0, while the
++    # container's XDG_RUNTIME_DIR still says /run/xdg. hwcomposer then reports
++    # "Couldn't open Wayland display", SurfaceFlinger never starts and Android
++    # never reaches sys.boot_completed.
++    wayland_container_socket = os.path.join(tools.config.defaults["container_xdg_runtime_dir"], tools.config.defaults["container_wayland_display"])
+     if not make_entry(wayland_host_socket, wayland_container_socket[1:]):
+         raise OSError("Failed to bind Wayland socket")
+ 
+-- 
+2.53.0
+

@@ -16,7 +16,7 @@ PV = "${SPV}"
 # Bumped whenever the shipped patches or helper scripts change: they alter what
 # the package contains without moving SRCREV or PV, so without this an already
 # installed waydroid stays at the previous build. Reset at the 1.6.3 move.
-PR = "r2"
+PR = "r4"
 
 # Pre-installed images, for machines whose system/vendor pairing is frozen.
 #
@@ -59,9 +59,10 @@ RRECOMMENDS:${PN} += " \
 
 SRC_URI = "git://github.com/waydroid/waydroid.git;branch=main;protocol=https \
     file://0001-lxc-copy-host-permissions-on-non-Treble-hosts-too.patch \
-    file://0002-Makefile-add-a-LuneOS-install-target.patch \
-    file://0003-data-add-the-LuneOS-application-files.patch \
-    file://0004-user_manager-give-every-Android-app-a-webOS-app.patch \
+    file://0002-lxc-do-not-resolve-the-container-Wayland-socket-path.patch \
+    file://0003-Makefile-add-a-LuneOS-install-target.patch \
+    file://0004-data-add-the-LuneOS-application-files.patch \
+    file://0005-user_manager-give-every-Android-app-a-webOS-app.patch \
     file://waydroid-luneos-prepare.sh \
     file://waydroid-luneos-prepare.service \
     file://waydroid-luneos-session.sh \

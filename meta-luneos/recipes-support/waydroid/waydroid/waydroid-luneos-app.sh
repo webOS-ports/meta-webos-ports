@@ -33,7 +33,38 @@ POLL=5
 
 log() { echo "waydroid-app${PKG:+ $PKG}: $*"; }
 
-wprop()    { /usr/bin/waydroid prop get "$1" 2>/dev/null | tr -d '\r\n'; }
+# Every "waydroid prop" call is bounded, because it can block indefinitely.
+#
+# tools/helpers/props.py reads a property through IPlatform.get_service(),
+# which waits for the WayDroid platform service inside the container. That
+# service does not exist until Android has booted, so before then the call
+# never returns - it does not fail, it hangs. A plain retry loop around it
+# therefore never gets to iterate: the first call blocks forever, the launcher
+# stops before it launches anything, and every press of the icon leaves another
+# wedged process behind.
+#
+# There is no timeout(1) in busybox here, so bound it by hand: run it in the
+# background, wait a fixed number of seconds, and kill it if it is still there.
+# A timed-out read answers empty, which every caller already treats as unknown.
+WPROP_TIMEOUT=10
+
+wprop() {
+    _out=$(mktemp) || return 1
+    /usr/bin/waydroid prop get "$1" >"$_out" 2>/dev/null &
+    _pid=$!
+    _n=0
+    while [ "$_n" -lt "$WPROP_TIMEOUT" ] && kill -0 "$_pid" 2>/dev/null; do
+        _n=$((_n + 1))
+        sleep 1
+    done
+    if kill -0 "$_pid" 2>/dev/null; then
+        kill -9 "$_pid" 2>/dev/null
+    fi
+    wait "$_pid" 2>/dev/null
+    tr -d '\r\n' < "$_out"
+    rm -f "$_out"
+}
+
 wpropset() { /usr/bin/waydroid prop set "$1" "$2" >/dev/null 2>&1; }
 
 waydroid_luneos_session_env 60 || exit 1
@@ -72,8 +103,9 @@ systemctl is-active --quiet waydroid-luneos-session.service ||
 i=0
 while [ "$i" -lt 240 ]; do
     [ "$(wprop sys.boot_completed)" = "1" ] && break
-    i=$((i + 3))
-    sleep 3
+    # wprop already spent up to WPROP_TIMEOUT seconds when Android is not up.
+    i=$((i + WPROP_TIMEOUT + 2))
+    sleep 2
 done
 [ "$(wprop sys.boot_completed)" = "1" ] || { log "Android did not finish booting"; exit 1; }
 
