@@ -38,30 +38,37 @@ Upstream-Status: Inappropriate [LuneOS-specific launcher]
 ---
 --- a/data/scripts/waydroid-luneos.sh
 +++ b/data/scripts/waydroid-luneos.sh
-@@ -1,3 +1,24 @@
+@@ -1,3 +1,31 @@
  #!/bin/sh
 +# LuneOS launcher entry for the Android full UI.
 +#
-+# Only ask for the full UI when the session is not already running.
++# Ask for the full UI only when it is not already on screen.
 +#
-+# The session starts Android with waydroid.background_start=true and the
-+# hwcomposer sets waydroid.active_apps=Waydroid as it initialises, so once the
-+# session is up the full-UI window already exists and is already a card.
-+# Calling show-full-ui again is not idempotent: it ends with a "refresh display
-+# contents" step - policy_control plus a status bar expand/collapse - which
-+# makes the hwcomposer tear down its window and build a new one. The
-+# replacement is mapped as another card while the old surface is never
-+# unmapped, so every launch leaves behind a card nothing can dismiss.
++# show-full-ui is not idempotent. It ends with a "refresh display contents"
++# step - policy_control plus a status bar expand/collapse - which makes the
++# hwcomposer tear down its window and build a new one. The replacement is
++# mapped as another card while the old surface is never destroyed or unmapped,
++# so calling it when a window is already up leaves a second, undismissable
++# card behind. Called when nothing is shown, it correctly produces exactly one.
 +#
-+# Test with "waydroid status" rather than the active_apps property: SAM runs
-+# this script without the session user's DBUS_SESSION_BUS_ADDRESS, and
-+# "waydroid prop get" needs it - without it the command answers "WayDroid
-+# session is stopped" no matter what is on screen. "waydroid status" talks to
-+# the container service on the system bus and works either way.
-+if /usr/bin/waydroid status 2>/dev/null | grep -q "^Session:.*RUNNING"; then
-+    exit 0
-+fi
++# So the question to ask is "is a window currently shown", which is
++# waydroid.active_apps - not "is the session running". The session can be up
++# with no window at all, and guarding on session state means the icon does
++# nothing in that state.
++#
++# Read the property straight out of the container. "waydroid prop get" would
++# need the session user's DBUS_SESSION_BUS_ADDRESS, which SAM does not give
++# this script; without it the command answers "WayDroid session is stopped"
++# whatever is on screen. getprop inside the container needs no bus at all.
++WAYDROID_LXC=/var/lib/waydroid/lxc
  
 -/usr/bin/waydroid show-full-ui
 \ No newline at end of file
++active=$(lxc-attach -P "$WAYDROID_LXC" -n waydroid -- /system/bin/getprop waydroid.active_apps 2>/dev/null)
++
++# Already showing: the card exists, nothing to do.
++if [ "$active" = "Waydroid" ]; then
++    exit 0
++fi
++
 +exec /usr/bin/waydroid show-full-ui
