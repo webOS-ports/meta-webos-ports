@@ -16,7 +16,7 @@ PV = "${SPV}"
 # Bumped whenever the shipped patches or helper scripts change: they alter what
 # the package contains without moving SRCREV or PV, so without this an already
 # installed waydroid stays at the previous build. Reset at the 1.6.3 move.
-PR = "r11"
+PR = "r13"
 
 # Pre-installed images, for machines whose system/vendor pairing is frozen.
 #
@@ -49,6 +49,14 @@ WAYDROID_IMAGE_RDEPENDS:mindphone = ""
 WAYDROID_IMAGE_RDEPENDS:halium-arm64 = ""
 
 RDEPENDS:${PN} += "${WAYDROID_IMAGE_RDEPENDS} lxc python3-gbinder python3-pygobject libgbinder python3-pyclip"
+
+# The package varies by machine - WAYDROID_IMAGE_RDEPENDS decides whether it
+# pulls waydroid-data, and mindphone gets a config file nothing else does -
+# while tissot-halium, mido-halium and halium-arm64 all share TUNE_PKGARCH
+# aarch64-halium. Without this they overwrite each other in the feed: building
+# tissot after halium-arm64 leaves a package that demands waydroid-data on the
+# GSI machine, where opkg then refuses it with "nothing provides waydroid-data".
+PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 # these modules are directly included in android-flavored kernels
 # Note: Waydroid requires kernel >= 3.18 !
