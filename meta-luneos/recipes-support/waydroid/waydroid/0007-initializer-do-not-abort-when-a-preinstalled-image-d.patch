@@ -1,0 +1,57 @@
+From aa128df3c6b62733cb2caa55150fea111a3bc2a2 Mon Sep 17 00:00:00 2001
+From: LuneOS <luneos@webos-ports.org>
+Date: Wed, 2 Sep 2026 20:31:26 +0200
+Subject: [PATCH 7/7] initializer: do not abort when a preinstalled image
+ directory is empty
+
+setup_config() decides whether images are already on disk with
+
+  os.path.isfile(system_path) or stat.S_ISBLK(os.stat(system_path).st_mode)
+
+and os.stat() raises when the path is absent - the isfile() on the left does
+not prevent it being evaluated. So a preinstalled directory that exists but
+holds no images does not fall through to the OTA channel, it aborts
+"waydroid init" with
+
+  ERROR: [Errno 2] No such file or directory: '/etc/waydroid-extra/images/system.img'
+
+which is what a machine looks like after its images have been removed, or one
+that ships the directory but not the images. Hit while moving a device from
+pre-installed images to the OTA channel: it could not be initialised again
+until the empty directory was deleted by hand.
+
+Upstream-Status: Pending
+---
+ tools/actions/initializer.py | 16 ++++++++++++++--
+ 1 file changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/tools/actions/initializer.py b/tools/actions/initializer.py
+index 0456e59..b018cfd 100644
+--- a/tools/actions/initializer.py
++++ b/tools/actions/initializer.py
+@@ -53,8 +53,20 @@ def setup_config(args):
+         if os.path.isdir(preinstalled_images):
+             system_path = preinstalled_images + "/system.img"
+             vendor_path = preinstalled_images + "/vendor.img"
+-            system_exists = os.path.isfile(system_path) or stat.S_ISBLK(os.stat(system_path).st_mode)
+-            vendor_exists = os.path.isfile(vendor_path) or stat.S_ISBLK(os.stat(vendor_path).st_mode)
++            def image_exists(path):
++                # os.stat() raises if the path is not there, and the isfile()
++                # on the left does not stop it being reached - so an empty
++                # preinstalled directory aborted "waydroid init" outright with
++                # "No such file or directory: .../system.img" instead of being
++                # passed over. A machine that has had its images removed, or
++                # that ships the directory but not the images, cannot
++                # initialise at all.
++                if not os.path.exists(path):
++                    return False
++                return os.path.isfile(path) or stat.S_ISBLK(os.stat(path).st_mode)
++
++            system_exists = image_exists(system_path)
++            vendor_exists = image_exists(vendor_path)
+             if system_exists and vendor_exists:
+                 has_preinstalled_images = True
+                 args.images_path = preinstalled_images
+-- 
+2.53.0
+
