@@ -1,0 +1,91 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] droidcamsrc: runtime IDR request and bitrate for the recorder
+
+An upstream force-key-unit event on vidsrc asks the hardware encoder
+for an IDR (the PLI equivalent for video calls), and setting
+target-bitrate while the recorder is live applies it immediately - both
+via droidmedia's new runtime encoder-control API, which older
+in-container builds simply report as unsupported.
+
+Upstream-Status: Pending
+
+diff -ru a/gst/droidcamsrc/gstdroidcamsrc.c b/gst/droidcamsrc/gstdroidcamsrc.c
+--- a/gst/droidcamsrc/gstdroidcamsrc.c	2026-08-29 14:18:17.973719909 +0200
++++ b/gst/droidcamsrc/gstdroidcamsrc.c	2026-08-29 14:18:17.997012334 +0200
+@@ -452,6 +452,12 @@
+ 
+     case PROP_TARGET_BITRATE:
+       src->target_bitrate = g_value_get_int (value);
++      /* apply to a live recorder when the platform supports it; always
++       * kept in src for the next recorder creation */
++      if (src->dev && src->dev->use_recorder && src->dev->recorder) {
++        gst_droidcamsrc_recorder_set_video_bitrate (src->dev->recorder,
++            src->target_bitrate);
++      }
+       break;
+ 
+     case PROP_POST_PREVIEW:
+@@ -1498,7 +1504,6 @@
+     case GST_EVENT_NAVIGATION:
+     case GST_EVENT_STEP:
+     case GST_EVENT_TOC_SELECT:
+-    case GST_EVENT_CUSTOM_UPSTREAM:
+     case GST_EVENT_CUSTOM_DOWNSTREAM:
+     case GST_EVENT_CUSTOM_DOWNSTREAM_OOB:
+     case GST_EVENT_CUSTOM_DOWNSTREAM_STICKY:
+@@ -1522,6 +1527,17 @@
+       /* TODO: */
+       break;
+ 
++    case GST_EVENT_CUSTOM_UPSTREAM:
++      /* an upstream force-key-unit on vidsrc asks the hardware encoder
++       * for an IDR (video calls: the PLI equivalent) */
++      if (data == src->vidsrc && gst_video_event_is_force_key_unit (event)
++          && src->dev && src->dev->use_recorder && src->dev->recorder) {
++        ret = gst_droidcamsrc_recorder_request_sync_frame (src->dev->recorder);
++      } else {
++        ret = FALSE;
++      }
++      break;
++
+     case GST_EVENT_RECONFIGURE:
+       g_mutex_lock (&src->capture_lock);
+       if (data->capture_pad && src->captures > 0) {
+diff -ru a/gst/droidcamsrc/gstdroidcamsrcrecorder.c b/gst/droidcamsrc/gstdroidcamsrcrecorder.c
+--- a/gst/droidcamsrc/gstdroidcamsrcrecorder.c	2026-08-29 14:18:17.977659029 +0200
++++ b/gst/droidcamsrc/gstdroidcamsrcrecorder.c	2026-08-29 14:18:17.996594543 +0200
+@@ -118,6 +118,21 @@
+   droid_media_recorder_stop (recorder->recorder);
+ }
+ 
++gboolean
++gst_droidcamsrc_recorder_request_sync_frame (GstDroidCamSrcRecorder * recorder)
++{
++  /* absent from older in-container droidmedia builds: the glue returns
++   * FALSE and the caller treats it as unsupported */
++  return droid_media_recorder_request_sync_frame (recorder->recorder);
++}
++
++gboolean
++gst_droidcamsrc_recorder_set_video_bitrate (GstDroidCamSrcRecorder * recorder,
++    gint32 bitrate)
++{
++  return droid_media_recorder_set_video_bitrate (recorder->recorder, bitrate);
++}
++
+ static void
+ gst_droidcamsrc_recorder_data_available (void *data,
+     DroidMediaCodecData * encoded)
+diff -ru a/gst/droidcamsrc/gstdroidcamsrcrecorder.h b/gst/droidcamsrc/gstdroidcamsrcrecorder.h
+--- a/gst/droidcamsrc/gstdroidcamsrcrecorder.h	2026-08-29 14:18:17.980861785 +0200
++++ b/gst/droidcamsrc/gstdroidcamsrcrecorder.h	2026-08-29 14:18:17.996522697 +0200
+@@ -51,6 +51,9 @@
+ gboolean gst_droidcamsrc_recorder_start (GstDroidCamSrcRecorder *recorder);
+ void gst_droidcamsrc_recorder_stop (GstDroidCamSrcRecorder *recorder);
+ 
++gboolean gst_droidcamsrc_recorder_request_sync_frame (GstDroidCamSrcRecorder *recorder);
++gboolean gst_droidcamsrc_recorder_set_video_bitrate (GstDroidCamSrcRecorder *recorder, gint32 bitrate);
++
+ G_END_DECLS
+ 
+ #endif /* __GST_DROIDCAMSRC_RECORDER_H__ */
