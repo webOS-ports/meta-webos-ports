@@ -158,35 +158,26 @@ set_no_ril() {
 
 # --------------------------------------------------- no background subsurface
 #
-# Waydroid's hwcomposer, when the compositor offers both wl_subcompositor and
-# wp_viewporter, gives every window a "dedicated background surface": the
-# xdg_toplevel's own wl_surface carries only a 1x1 black buffer stretched over
-# the screen by a viewport, and all Android content is rendered into a
-# wl_subsurface underneath it.
+# When the compositor offers both wl_subcompositor and wp_viewporter, Waydroid's
+# hwcomposer gives every window a "dedicated background surface": the
+# xdg_toplevel's own wl_surface carries a 1x1 buffer stretched over the screen
+# by a viewport, and Android's content is rendered into a wl_subsurface on top.
 #
-# luna-surfacemanager offers both globals (Qt6's QWaylandCompositor implements
-# wl_subcompositor server side), but it has no notion of subsurfaces as child
-# items - QWaylandCompositor::surfaceCreated fires for every wl_surface, so
-# WebOSCoreCompositor builds a WebOSSurfaceItem for the subsurface too. It has
-# no shell role and therefore no appId, and WebOSSurfaceItem's default type is
-# _WEBOS_WINDOW_TYPE_CARD, so as soon as Android commits a frame to it the card
-# shell gets a second, anonymous card - while the real card shows nothing but
-# the stretched black background.
+# luna-surfacemanager renders that correctly - QWaylandQuickItem draws a
+# subsurface as a child item of the parent surface's item - but only at full
+# size. The card shell shows a card by resizing its WebOSSurfaceItem, and a
+# surface is scaled to fit its item; a subsurface child item keeps the size of
+# its own surface instead, so the Android content stayed at full resolution and
+# was clipped by the card rather than scaled down with it. Every Android card
+# preview showed a corner of the app.
 #
-# The same split leaks a card at boot. hwc_open() unconditionally creates a
-# first window and, when waydroid.background_start is true (the default),
-# immediately destroys it again. ~window() frees the xdg objects and every
-# surface held in layers, but with a dedicated background surface the window's
-# own wl_surface is not in layers - it is never destroyed, and it has already
-# been mapped, so a Waydroid card survives with waydroid.open_windows=0.
+# persist.waydroid.no_background_subsurface makes hwcomposer put the window
+# surface in layers[0] and render Android straight onto it. One surface per
+# window, which the card shell can then scale like any other.
 #
-# persist.waydroid.no_background_subsurface makes hwc put the window surface in
-# layers[0] and render Android straight onto it. One surface per window: one
-# card, showing the actual UI, and the boot-time window is torn down cleanly.
-#
-# Read by hwc at window creation, so it must be set before the session starts.
-# Like set_no_ril this is best effort - waydroid_base.prop only exists once
-# "waydroid init" has run.
+# Read by hwcomposer at window creation, so it must be set before the session
+# starts. Like set_no_ril this is best effort - waydroid_base.prop only exists
+# once "waydroid init" has run.
 set_no_background_subsurface() {
     [ "${WAYDROID_NO_BG_SUBSURFACE:-1}" = 1 ] || return 0
     base=/var/lib/waydroid/waydroid_base.prop
