@@ -41,6 +41,12 @@ SRC_URI:append = " \
     file://0001-zram-on.sh-fix-for-modern-kernels.patch \
 "
 
+# Keep the shutdown log backup from holding up shutdown and reboot: bound the
+# journal it dumps, and order its stop job before the filesystems go away.
+SRC_URI:append = " \
+    file://0001-backup-log-do-not-block-shutdown-on-the-whole-journal.patch \
+"
+
 
 #EXTRA_OECMAKE += "-DWEBOS_QTTESTABILITY_ENABLED:BOOL=${@ '1' if d.getVar('WEBOS_DISTRO_PRERELEASE') != '' else '0'}"
 
