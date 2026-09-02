@@ -1,4 +1,4 @@
-From 8ac40e32d45b2de32e11f2fb51f7f24fbacceb33 Mon Sep 17 00:00:00 2001
+From 715e535dfb42e986d7139a4714f18e4383d3764c Mon Sep 17 00:00:00 2001
 From: LuneOS <luneos@webos-ports.org>
 Date: Wed, 2 Sep 2026 17:30:14 +0200
 Subject: [PATCH 6/6] notification_manager: post to com.webos.notification
@@ -6,19 +6,20 @@ Subject: [PATCH 6/6] notification_manager: post to com.webos.notification
 1.6.0 added notification forwarding to org.freedesktop.Notifications on the
 session bus. LuneOS does not provide that name, so the service skipped itself
 on every session start and Android notifications went nowhere. Notifications
-on webOS belong to com.webos.notification, over luna-service2, and it offers
-several kinds rather than one - so the kind is chosen from what Android said
-about the notification instead of flattening everything into a toast:
+on webOS belong to com.webos.notification, over luna-service2, which offers
+several kinds:
 
-  transient        -> createToast, a banner that passes and leaves nothing
-                      behind, which is what transient means
-  has actions      -> createAlert, the only kind with buttons, one per action
-  everything else  -> createNotification, which persists in the list and
-                      carries the sound and urgency flags
+  has actions -> createAlert, the only kind with buttons, one per action
+  otherwise   -> createToast, which shows a banner and then collapses into
+                 the notification list - what an Android notification is
+                 expected to do. Android's transient flag becomes persistent:
+                 a transient one passes and leaves nothing behind.
 
-Each kind is closed differently - closeToast, closeAlert, removeNotification
-- so what was created is remembered alongside its id, and replacing a
-notification closes whatever it replaces first.
+createNotification is deliberately not used, despite looking like the closer
+match by name and carrying the sound and urgency flags: it posts nothing
+visible - no banner, and on sargo not even an indicator - so a notification
+sent that way arrives and is simply never seen. Measured both ways on the
+same device.
 
 Attribution matters as much as delivery: sourceId is the webOS application id
 generated for that Android app, waydroid.<package>, so a notification carries
@@ -30,8 +31,7 @@ empty message outright, with CA_MSG_EMPTY, and some notifications carry
 neither a body nor a summary - so the app's name is used rather than posting
 something that will be thrown away. And it silently substitutes its own
 generic alert icon for an iconUrl it cannot read, so the icon is only offered
-when Waydroid has actually extracted one for that package; notifications from
-the system come from packages that have none.
+when Waydroid has actually extracted one for that package.
 
 Android identifies a notification by an integer and webOS by a string, so the
 two are mapped here. image_data is raw pixels while webOS wants a URI, so the
@@ -45,14 +45,14 @@ side to receive it, which is worth doing separately.
 
 Upstream-Status: Inappropriate [LuneOS specific]
 ---
- tools/services/notification_manager.py | 184 +++++++++++++++++--------
- 1 file changed, 129 insertions(+), 55 deletions(-)
+ tools/services/notification_manager.py | 177 +++++++++++++++++--------
+ 1 file changed, 122 insertions(+), 55 deletions(-)
 
 diff --git a/tools/services/notification_manager.py b/tools/services/notification_manager.py
-index c9c3b77..e137442 100644
+index c9c3b77..11ca4d6 100644
 --- a/tools/services/notification_manager.py
 +++ b/tools/services/notification_manager.py
-@@ -1,17 +1,62 @@
+@@ -1,17 +1,67 @@
  # Copyright 2025 Alessandro Astone
  # SPDX-License-Identifier: GPL-3.0-or-later
 +import json
@@ -70,19 +70,24 @@ index c9c3b77..e137442 100644
  
  def start(args, session):
 +    # LuneOS has no org.freedesktop.Notifications. Notifications belong to
-+    # com.webos.notification, over luna-service2, and it offers several kinds
-+    # rather than one - so the kind is chosen from what Android said about the
-+    # notification instead of flattening everything into a toast:
++    # com.webos.notification, over luna-service2, and it offers several kinds:
 +    #
-+    #   transient        -> createToast, a banner that passes and leaves
-+    #                       nothing behind, which is what transient means
-+    #   has actions      -> createAlert, the only kind with buttons, one per
-+    #                       Android action
-+    #   everything else  -> createNotification, which persists in the list and
-+    #                       carries the sound and urgency flags
++    #   has actions -> createAlert, the only kind that has buttons, one per
++    #                  Android action
++    #   otherwise   -> createToast, which shows a banner and then collapses
++    #                  into the notification list, which is what an Android
++    #                  notification is expected to do. persistent carries
++    #                  Android's transient flag: a transient one passes and
++    #                  leaves nothing behind.
 +    #
-+    # Each kind is closed differently - closeToast, closeAlert,
-+    # removeNotification - so what was created is remembered alongside its id.
++    # createNotification is deliberately not used even though it looks like the
++    # closer match by name and carries the sound and urgency flags. It posts
++    # nothing visible - no banner, and on sargo not even an indicator - so a
++    # notification sent that way arrives and is simply never seen. Measured
++    # both ways on the same device.
++    #
++    # Each kind is closed differently - closeToast, closeAlert - so what was
++    # created is remembered alongside its id.
 +    #
 +    # Two things do not survive the crossing. Android identifies a notification
 +    # by an integer and webOS by a string, so the two are mapped here rather
@@ -117,17 +122,15 @@ index c9c3b77..e137442 100644
  
      def onListenerDeath(listener):
          listeners.remove(listener)
-@@ -20,67 +65,98 @@ def start(args, session):
+@@ -20,67 +70,86 @@ def start(args, session):
          listener.addDeathHandler(onListenerDeath)
          listeners.append(listener)
  
 +    def close_posted(kind, webos_id):
-+        if kind == "toast":
-+            luna("closeToast", {"toastId": webos_id})
-+        elif kind == "alert":
++        if kind == "alert":
 +            luna("closeAlert", {"alertId": webos_id})
 +        else:
-+            luna("removeNotification", {"removeNotiId": [webos_id]})
++            luna("closeToast", {"toastId": webos_id})
 +
      def notify(replaces_id, app_name, package_name, summary, body, actions, image_data, category, suppress_sound, expire_timeout, resident, transient, urgency):
 -        # By reading the spec, I believe app_icon should be pointing to the desktop entry Icon=
@@ -192,16 +195,7 @@ index c9c3b77..e137442 100644
 -        token = pending_tokens.pop(int(notification_id), "")
 -        for listener in listeners:
 -            listener.onActionInvoked(int(notification_id), str(action_id), str(token))
-+        if transient:
-+            kind, method = "toast", "createToast"
-+            payload = {
-+                "sourceId": app_id,
-+                "title": title,
-+                "message": message,
-+                "onclick": launch,
-+                "persistent": False,
-+            }
-+        elif actions:
++        if actions:
 +            kind, method = "alert", "createAlert"
 +            payload = {
 +                "title": title,
@@ -217,16 +211,15 @@ index c9c3b77..e137442 100644
 +            if expire_timeout > 0:
 +                payload["autoTimeout"] = int(expire_timeout / 1000)
 +        else:
-+            kind, method = "notification", "createNotification"
++            kind, method = "toast", "createToast"
 +            payload = {
 +                "sourceId": app_id,
 +                "title": title,
 +                "message": message,
-+                "onClick": "luna://com.webos.applicationManager/launch",
-+                "params": {"id": app_id},
-+                "needSoundPlay": not suppress_sound,
-+                "forceLcdTurnOn": urgency >= URGENCY_CRITICAL,
-+                "isUnDeletable": resident,
++                "onclick": launch,
++                # A transient notification is a passing banner; anything else
++                # should stay in the list after the banner goes.
++                "persistent": not transient,
 +            }
 +
 +        if icon:
@@ -235,7 +228,7 @@ index c9c3b77..e137442 100644
 +        reply = luna(method, payload)
 +        if not reply or not reply.get("returnValue"):
 +            return INotifications.ID_NONE
-+        webos_id = reply.get({"toast": "toastId", "alert": "alertId"}.get(kind, "notiId"))
++        webos_id = reply.get("alertId" if kind == "alert" else "toastId")
 +        if not webos_id:
 +            return INotifications.ID_NONE
 +
@@ -267,7 +260,7 @@ index c9c3b77..e137442 100644
  
      global stopping
      stopping = False
-@@ -90,8 +166,6 @@ def start(args, session):
+@@ -90,8 +159,6 @@ def start(args, session):
  def stop(args):
      global stopping
      stopping = True
