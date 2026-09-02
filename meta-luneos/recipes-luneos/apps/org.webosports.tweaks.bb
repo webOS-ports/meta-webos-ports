@@ -10,7 +10,7 @@ inherit webos_system_bus
 inherit webos_app
 
 PV = "3.0.3+git"
-SRCREV = "71a29a3623cd1bc9fbcf5e99bf6e174cd1ab8883"
+SRCREV = "2c6e38ccdab6626c36bca07976d1dfd1cf9ca6b7"
 
 SERVICE_NAME = "org.webosports.service.tweaks.prefs"
 APP_NAME = "org.webosports.app.tweaks"

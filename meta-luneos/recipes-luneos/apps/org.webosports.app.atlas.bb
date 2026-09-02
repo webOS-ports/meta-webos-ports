@@ -17,8 +17,8 @@ inherit webos_app
 # Chromium support lives on a branch until it is merged.
 WEBOS_GIT_BRANCH = ";branch=chromium-engine"
 
-PV = "0.9.7+git"
-SRCREV = "597e822ae5eac23631626ab6edaa234d1c2223e2"
+PV = "0.9.10+git"
+SRCREV = "b4ed45a8f3ab05492a4769eb28f061b518bc49b8"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 

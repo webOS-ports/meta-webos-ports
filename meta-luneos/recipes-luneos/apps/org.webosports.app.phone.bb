@@ -15,7 +15,7 @@ inherit webos_tweaks
 inherit webos_app
 
 PV = "0.1.1-0+git"
-SRCREV = "8151703a22703be6ac0075c9214588beb7649b38"
+SRCREV = "2047aa337d3cdddc15bae09f285a31f6139cea6a"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 

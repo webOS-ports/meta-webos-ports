@@ -3,7 +3,7 @@ LICENSE = "LGPL-2.1-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 PV = "0.5+git"
-SRCREV = "7021c0f7c80c8e90c4f8bd76373025f2450fd5a2"
+SRCREV = "dde5bd90ac40bca5733c93ddb29e24374503226b"
 
 # qtmultimedia and gstreamer are for LuneOS.Camera: it hands QML a droidcamsrc
 # source to assign to CaptureSession.nativeVideoSource, which is the only way a
@@ -18,7 +18,7 @@ RDEPENDS:${PN} = "qt5compat-qmlplugins"
 # require it.
 RRECOMMENDS:${PN} += "gst-droid"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=herrie/more-fixes"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 inherit qt6-qmake
 inherit webos_ports_repo
