@@ -1,4 +1,4 @@
-From 715e535dfb42e986d7139a4714f18e4383d3764c Mon Sep 17 00:00:00 2001
+From 699171108112e5e733e87500e99d1d460e22fa6e Mon Sep 17 00:00:00 2001
 From: LuneOS <luneos@webos-ports.org>
 Date: Wed, 2 Sep 2026 17:30:14 +0200
 Subject: [PATCH 6/6] notification_manager: post to com.webos.notification
@@ -45,14 +45,14 @@ side to receive it, which is worth doing separately.
 
 Upstream-Status: Inappropriate [LuneOS specific]
 ---
- tools/services/notification_manager.py | 177 +++++++++++++++++--------
- 1 file changed, 122 insertions(+), 55 deletions(-)
+ tools/services/notification_manager.py | 236 +++++++++++++++++++------
+ 1 file changed, 182 insertions(+), 54 deletions(-)
 
 diff --git a/tools/services/notification_manager.py b/tools/services/notification_manager.py
-index c9c3b77..11ca4d6 100644
+index c9c3b77..d62224c 100644
 --- a/tools/services/notification_manager.py
 +++ b/tools/services/notification_manager.py
-@@ -1,17 +1,67 @@
+@@ -1,17 +1,97 @@
  # Copyright 2025 Alessandro Astone
  # SPDX-License-Identifier: GPL-3.0-or-later
 +import json
@@ -102,6 +102,8 @@ index c9c3b77..11ca4d6 100644
 +    # side to receive it, which is worth doing separately.
 +
 +    waydroid_data = session["waydroid_data"]
++    luneos_apps_dir = os.environ.get(
++        "WAYDROID_LUNEOS_APPS_DIR", "/media/cryptofs/apps/usr/palm/applications")
 +    # notification id -> (kind, webOS id)
 +    posted = {}
 +    next_id = [1]
@@ -119,10 +121,38 @@ index c9c3b77..11ca4d6 100644
 +        except (OSError, subprocess.SubprocessError, ValueError) as e:
 +            logging.warning("Notification call %s failed: %s", method, e)
 +            return None
++
++    def write_png(image_data, path):
++        """Write Android's raw notification icon out as a PNG.
++
++        image_data is a buffer of 8-bit samples - RGB or RGBA, rowstride bytes
++        per row - which is what Android hands over and what webOS cannot take:
++        notificationmgr wants a file. Rather than pull in an image library for
++        one format, this writes the PNG by hand; it is a length, a CRC and a
++        zlib stream per chunk.
++        """
++        channels = 4 if image_data.has_alpha else 3
++        raw = bytearray()
++        data = bytes(image_data.data)
++        for y in range(image_data.height):
++            start = y * image_data.rowstride
++            raw.append(0)  # filter type 0, none
++            raw += data[start:start + image_data.width * channels]
++
++        def chunk(tag, payload):
++            out = struct.pack(">I", len(payload)) + tag + payload
++            return out + struct.pack(">I", binascii.crc32(tag + payload) & 0xffffffff)
++
++        header = struct.pack(">IIBBBBB", image_data.width, image_data.height,
++                             8, 6 if image_data.has_alpha else 2, 0, 0, 0)
++        png = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) +
++               chunk(b"IDAT", zlib.compress(bytes(raw), 6)) + chunk(b"IEND", b""))
++        with open(path, "wb") as f:
++            f.write(png)
  
      def onListenerDeath(listener):
          listeners.remove(listener)
-@@ -20,67 +70,86 @@ def start(args, session):
+@@ -20,67 +100,117 @@ def start(args, session):
          listener.addDeathHandler(onListenerDeath)
          listeners.append(listener)
  
@@ -148,7 +178,43 @@ index c9c3b77..11ca4d6 100644
 -        }
 -        if category:
 -            hints["category"] = category
--        if image_data:
++        app_id = "waydroid." + package_name
++
++        # Android commonly sends only a summary, so it becomes the message when
++        # there is no body, and the title only when there is one to sit above.
++        # notificationmgr rejects an empty message outright - CA_MSG_EMPTY - and
++        # some notifications carry neither, so fall back to the app's name
++        # rather than posting something that will be thrown away.
++        message = body or summary or app_name or package_name
++        title = summary if body else app_name
++
++        # The icon comes from the sourceId, not from what is passed here.
++        # notificationmgr only honours iconUrl from a privileged caller, and a
++        # luna-send client is not one; for everyone else it looks the icon up
++        # with AppList::getIcon(sourceId). So the id has to name a webOS
++        # application that exists, which is exactly what the generated per-app
++        # entries are - waydroid.<package> carries that app's own icon.
++        #
++        # Not every Android notification comes from an app that has one:
++        # system notifications are posted by "android" or com.android.shell,
++        # for which nothing is generated. Those fall back to the full-UI
++        # application, so they arrive as Android rather than as an anonymous
++        # message with a generic bubble.
++        app_dir = os.path.join(luneos_apps_dir, "waydroid." + package_name)
++        if not os.path.isdir(app_dir):
++            app_id = "Waydroid"
++
++        # A plain path, never a URI: notificationmgr prepends file:// itself,
++        # so file:///... becomes file://file:///..., fails verifyFileExist and
++        # is silently replaced by the generic icon. It does honour what is
++        # passed - isPrivilegedSource matches any caller id containing
++        # "com.webos.", which a luna-send client's does.
++        #
++        # Prefer the icon Android sent with the notification over the app's,
++        # since that is what the app chose to show. It arrives as raw samples,
++        # so it has to be written out as a file first.
++        icon = ""
+         if image_data:
 -            hints["image-data"] = dbus.types.Struct([
 -                image_data.width,
 -                image_data.height,
@@ -163,38 +229,26 @@ index c9c3b77..11ca4d6 100644
 -        except dbus.DBusException as e:
 -            logging.warning(f"Failed to post notification: {e}")
 -            return INotifications.ID_NONE
-+        app_id = "waydroid." + package_name
-+        launch = {"appId": app_id}
++            noti_icon = "{}/icons/notification-{}.png".format(waydroid_data, package_name)
++            try:
++                write_png(image_data, noti_icon)
++                icon = noti_icon
++            except (OSError, AttributeError, struct.error) as e:
++                logging.warning("Could not write notification icon: %s", e)
++        if not icon:
++            icon_path = "{}/icons/{}.png".format(waydroid_data, package_name)
++            icon = icon_path if os.path.exists(icon_path) else ""
  
 -    def closeNotification(notification_id):
 -        try:
 -            dbus_proxy.CloseNotification(notification_id)
 -        except dbus.DBusException as e:
 -            logging.warning(f"Failed to close notification: {e}")
-+        # Android commonly sends only a summary, so it becomes the message when
-+        # there is no body, and the title only when there is one to sit above.
-+        # notificationmgr rejects an empty message outright - CA_MSG_EMPTY - and
-+        # some notifications carry neither, so fall back to the app's name
-+        # rather than posting something that will be thrown away.
-+        message = body or summary or app_name or package_name
-+        title = summary if body else app_name
++        launch = {"appId": app_id}
 +
-+        # Only offer an icon that exists. Waydroid extracts one per package,
-+        # but not for every source - notifications from the system come from
-+        # packages that have none - and notificationmgr silently substitutes
-+        # its own generic alert icon for a path it cannot read.
-+        icon_path = "{}/icons/{}.png".format(waydroid_data, package_name)
-+        icon = "file://" + icon_path if os.path.exists(icon_path) else ""
- 
--    def onActivationToken(notification_id, token):
--        pending_tokens[int(notification_id)] = str(token)
 +        if replaces_id != INotifications.ID_NONE and replaces_id in posted:
 +            close_posted(*posted.pop(replaces_id))
- 
--    def onActionInvoked(notification_id, action_id):
--        token = pending_tokens.pop(int(notification_id), "")
--        for listener in listeners:
--            listener.onActionInvoked(int(notification_id), str(action_id), str(token))
++
 +        if actions:
 +            kind, method = "alert", "createAlert"
 +            payload = {
@@ -224,7 +278,9 @@ index c9c3b77..11ca4d6 100644
 +
 +        if icon:
 +            payload["iconUrl"] = icon
-+
+ 
+-    def onActivationToken(notification_id, token):
+-        pending_tokens[int(notification_id)] = str(token)
 +        reply = luna(method, payload)
 +        if not reply or not reply.get("returnValue"):
 +            return INotifications.ID_NONE
@@ -236,7 +292,11 @@ index c9c3b77..11ca4d6 100644
 +        next_id[0] += 1
 +        posted[notification_id] = (kind, webos_id)
 +        return notification_id
-+
+ 
+-    def onActionInvoked(notification_id, action_id):
+-        token = pending_tokens.pop(int(notification_id), "")
+-        for listener in listeners:
+-            listener.onActionInvoked(int(notification_id), str(action_id), str(token))
 +    def closeNotification(notification_id):
 +        entry = posted.pop(int(notification_id), None)
 +        if entry:
@@ -260,7 +320,7 @@ index c9c3b77..11ca4d6 100644
  
      global stopping
      stopping = False
-@@ -90,8 +159,6 @@ def start(args, session):
+@@ -90,8 +220,6 @@ def start(args, session):
  def stop(args):
      global stopping
      stopping = True
