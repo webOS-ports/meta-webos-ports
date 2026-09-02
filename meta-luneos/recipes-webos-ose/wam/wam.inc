@@ -19,7 +19,7 @@ VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_cpushareholder}"
 
 WEBOS_VERSION = "1.0.2-99_a698bc40c4e73d338bdf3310c31d1878978d231a"
-INC_PR = "r73"
+INC_PR = "r74"
 
 WAM_BUILD_SYSTEM ?= "webos_cmake"
 WAM_BUILD_DEFAULT_PLUGIN ?= "1"
@@ -58,6 +58,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0017-BlinkWebView-null-check-the-window-created-for-window.patch \
     file://0018-WebAppBase-do-not-abort-on-a-non-numeric-instance-id.patch \
     file://0019-WebPageBlink-hand-aborted-external-protocol-navigatio.patch \
+    file://0020-WebPageBlink-scale-the-UI-with-page-zoom-not-the-devi.patch \
 "
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
