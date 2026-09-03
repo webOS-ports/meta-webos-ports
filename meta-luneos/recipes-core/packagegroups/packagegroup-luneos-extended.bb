@@ -232,11 +232,20 @@ RDEPENDS:${PN}:append:halium-arm64 = " ${NFC_RDEPENDS}"
 RDEPENDS:${PN}:append:sargo = " ${ESIM_RDEPENDS}"
 RDEPENDS:${PN}:append:halium-arm64 = " ${ESIM_RDEPENDS}"
 
+# Keep this list in step with COMPATIBLE_MACHINE in waydroid.bb: that only
+# decides whether the recipe may build, and nothing else pulls waydroid into an
+# image. A machine enabled there but missing here builds the ipk and then ships
+# an image without it - which is how mindphone, halium-arm64 and rpi all went
+# out with no container despite being wired up for one.
+RDEPENDS:${PN}:append:halium-arm = " waydroid"
+RDEPENDS:${PN}:append:halium-arm64 = " waydroid"
 RDEPENDS:${PN}:append:mido-halium = " waydroid"
+RDEPENDS:${PN}:append:mindphone = " waydroid"
 RDEPENDS:${PN}:append:pinephone = " waydroid"
 RDEPENDS:${PN}:append:pinephonepro = " waydroid"
 RDEPENDS:${PN}:append:pinetab2 = " waydroid"
 RDEPENDS:${PN}:append:qemux86-64 = " waydroid"
+RDEPENDS:${PN}:append:rpi = " waydroid"
 RDEPENDS:${PN}:append:tissot-halium = " waydroid"
 
 QEMU_RDEPENDS = " \
