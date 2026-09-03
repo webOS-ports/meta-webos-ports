@@ -1,0 +1,179 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herrie <github@herrie.org>
+Date: Thu, 3 Sep 2026 06:40:00 +0200
+Subject: [PATCH 23/23] weboscompositor: scale subsurface content with its item
+
+A card is drawn by resizing the surface item: the card shell anchors the
+item to the card and asks the client to render that size. QWaylandQuickItem
+paints its own buffer into its bounding rect, so the parent surface follows
+the card whatever size it ends up.
+
+Its subsurfaces do not. Qt gives each subsurface a child QWaylandQuickItem
+of its own, sized from the child's implicit size - the subsurface buffer -
+and positioned from subsurfacePositionChanged, both in the client's own
+coordinates. Neither is related to the size the parent item was given, so
+shrinking the parent leaves the child at full size and the card shows a
+crop of the top left corner instead of the whole window.
+
+That is invisible for a webOS client, which composes into the one surface
+the shell wrapped. Waydroid's hwcomposer composes through a subsurface for
+every window it puts up, so all of its content is on the child item and
+every Android card was a crop: one showed part of a dialpad, another the
+first two rows of Settings with the text running off the edge.
+
+Map the client's coordinate space onto the item instead. The reference is
+the size the client was configured at, which is exactly the space its
+subsurfaces are positioned in, so a subsurface covering the window fills
+the card while a smaller one stays proportionally small - scaling by the
+child's own size would blow every popup up to the full card.
+
+Reapply on subsurfacePositionChanged as well as on resize. Qt connects that
+signal to handleSubsurfacePosition, which sets the raw position; connecting
+after it - the base class has run by the time surfaceChangedEvent gets here
+- means the scaled position is the one that survives.
+
+Upstream-Status: Pending
+---
+diff --git a/modules/weboscompositor/webossurfaceitem.cpp b/modules/weboscompositor/webossurfaceitem.cpp
+index 3233a6e..7568536 100644
+--- a/modules/weboscompositor/webossurfaceitem.cpp
++++ b/modules/weboscompositor/webossurfaceitem.cpp
+@@ -1279,6 +1279,89 @@ void WebOSSurfaceItem::setConfiguredSize(const QSize &size)
+     m_configuredSize = size;
+ }
+ 
++QSizeF WebOSSurfaceItem::clientCoordinateSpace() const
++{
++    /* What the client was told to render, which is the space it positions its
++     * subsurfaces in. Fall back to what it actually produced for a client that
++     * was never configured through changeSize(). */
++    if (m_configuredSize.isValid() && !m_configuredSize.isEmpty())
++        return QSizeF(m_configuredSize);
++    if (surface() && !surface()->destinationSize().isEmpty())
++        return QSizeF(surface()->destinationSize());
++    return QSizeF();
++}
++
++void WebOSSurfaceItem::updateSubsurfaceGeometry()
++{
++    if (!surface())
++        return;
++
++    const QSizeF space = clientCoordinateSpace();
++    if (space.isEmpty() || width() <= 0 || height() <= 0)
++        return;
++
++    const qreal sx = width() / space.width();
++    const qreal sy = height() / space.height();
++
++    /* The surfaces that took the wl_subsurface role against this one. There is
++     * no public accessor for that - QWaylandSurface only reports it through
++     * parentChanged - so read the list QWaylandCompositor appends to, which is
++     * what QWaylandQuickItem itself iterates when it adopts subsurfaces. */
++    const auto subsurfaces = QWaylandSurfacePrivate::get(surface())->subsurfaceChildren;
++    if (subsurfaces.isEmpty())
++        return;
++
++    const QList<QQuickItem *> children = childItems();
++    for (QQuickItem *child : children) {
++        QWaylandQuickItem *sub = qobject_cast<QWaylandQuickItem *>(child);
++        if (!sub || !sub->surface())
++            continue;
++
++        bool isSubsurface = false;
++        for (const QPointer<QWaylandSurface> &s : subsurfaces) {
++            if (s.data() == sub->surface()) {
++                isSubsurface = true;
++                break;
++            }
++        }
++        if (!isSubsurface)
++            continue;
++
++        const QSizeF natural = sub->surface()->destinationSize();
++        if (natural.isEmpty())
++            continue;
++
++        const QPoint pos = QWaylandSurfacePrivate::get(sub->surface())->subsurfacePosition();
++        sub->setPosition(QPointF(pos.x() * sx, pos.y() * sy));
++        /* An explicit size sticks: Qt only ever sets the implicit one. */
++        sub->setSize(QSizeF(natural.width() * sx, natural.height() * sy));
++    }
++}
++
++void WebOSSurfaceItem::trackSubsurface(QWaylandSurface *childSurface)
++{
++    if (!childSurface)
++        return;
++
++    /* Connected after QWaylandQuickItem::handleSubsurfaceAdded has connected
++     * its own handler, so this runs second and the scaled position is the one
++     * that stays. */
++    connect(childSurface, &QWaylandSurface::subsurfacePositionChanged,
++            this, &WebOSSurfaceItem::updateSubsurfaceGeometry, Qt::UniqueConnection);
++    connect(childSurface, &QWaylandSurface::destinationSizeChanged,
++            this, &WebOSSurfaceItem::updateSubsurfaceGeometry, Qt::UniqueConnection);
++
++    updateSubsurfaceGeometry();
++}
++
++void WebOSSurfaceItem::geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry)
++{
++    QWaylandQuickItem::geometryChange(newGeometry, oldGeometry);
++
++    if (newGeometry.size() != oldGeometry.size())
++        updateSubsurfaceGeometry();
++}
++
+ void WebOSSurfaceItem::requestStateChange(Qt::WindowState state)
+ {
+     switch (state) {
+@@ -1809,6 +1892,14 @@ void WebOSSurfaceItem::surfaceChangedEvent(QWaylandSurface *newSurface, QWayland
+         m_surfaceGrabbed = newSurface;
+     }
+ 
++    if (newSurface) {
++        connect(newSurface, &QWaylandSurface::childAdded,
++                this, &WebOSSurfaceItem::trackSubsurface, Qt::UniqueConnection);
++        const auto existing = QWaylandSurfacePrivate::get(newSurface)->subsurfaceChildren;
++        for (const QPointer<QWaylandSurface> &child : existing)
++            trackSubsurface(child.data());
++    }
++
+     pid_t pid;
+     uid_t uid;
+ 
+diff --git a/modules/weboscompositor/webossurfaceitem.h b/modules/weboscompositor/webossurfaceitem.h
+index 6c6d304..68c215a 100644
+--- a/modules/weboscompositor/webossurfaceitem.h
++++ b/modules/weboscompositor/webossurfaceitem.h
+@@ -564,6 +564,11 @@ public:
+     QSize configuredSize() const { return m_configuredSize; }
+     void setConfiguredSize(const QSize &size);
+ 
++    /* The client's own coordinate space, which its subsurfaces are positioned
++     * and sized in. Mapped onto this item's geometry so that content composed
++     * through subsurfaces follows the item the way the item's own buffer does. */
++    QSizeF clientCoordinateSpace() const;
++
+     static WebOSSurfaceItem *getSurfaceItemFromSurface(QWaylandSurface *surface) {
+         return (!surface || surface->views().isEmpty()) ? nullptr : qobject_cast<WebOSSurfaceItem*>(surface->views().first()->renderObject());
+     }
+@@ -677,6 +682,8 @@ protected:
+ 
+     virtual bool contains(const QPointF & point) const override;
+ 
++    void geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry) override;
++
+     QList<QTouchEvent::TouchPoint> mapToTarget(const QList<QTouchEvent::TouchPoint>& points) const;
+ 
+     void takeWlKeyboardFocus() const;
+@@ -698,6 +705,8 @@ private slots:
+     void handleWindowChanged();
+     void requestStateChange(Qt::WindowState s);
+     void onSurfaceDamaged(const QRegion &region);
++    void updateSubsurfaceGeometry();
++    void trackSubsurface(QWaylandSurface *childSurface);
+ 
+ private:
+     // variables
