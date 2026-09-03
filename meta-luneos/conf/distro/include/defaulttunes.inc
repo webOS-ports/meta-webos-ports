@@ -38,17 +38,6 @@ OLDEST_KERNEL:armv7a:halium = "3.4"
 # https://github.com/shr-distribution/meta-smartphone/pull/164
 OLDEST_KERNEL:aarch64:halium = "4.9"
 
-# in meta-smartphone/meta-android/conf/machine/include/meta-android-halium.inc
-# we do:
-# TUNE_PKGARCH:append = "-halium"
-# PACKAGE_EXTRA_ARCHS:append = " ${TUNE_PKGARCH}"
-# but when building something with thumb disabled (e.g. webruntime-108), we need to search nspr in
-# cortexa8t2hf-neon-halium, not cortexa8hf-neon-halium used by webruntime, add it explicitly here, but it's far from ideal
-PACKAGE_EXTRA_ARCHS_HALIUM = "${@oe.utils.conditional('ARM_INSTRUCTION_SET', 'thumb', 'cortexa8hf-neon-halium', 'cortexa8t2hf-neon-halium', d) }"
-PACKAGE_EXTRA_ARCHS:append:tenderloin-halium = " ${PACKAGE_EXTRA_ARCHS_HALIUM}"
-PACKAGE_EXTRA_ARCHS:append:hammerhead-halium = " ${PACKAGE_EXTRA_ARCHS_HALIUM}"
-PACKAGE_EXTRA_ARCHS:append:mako = " ${PACKAGE_EXTRA_ARCHS_HALIUM}"
-
 # http://lists.openembedded.org/pipermail/openembedded-core/2019-April/281328.html
 # make sure that raspberrypi[34]-64 originally with
 # DEFAULTTUNE="cortexa53"/DEFAULTTUNE="cortexa72"
