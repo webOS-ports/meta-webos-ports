@@ -35,15 +35,6 @@ do_install:append:qemuall() {
     rm -rf ${D}/${base_libdir}/systemd/network/99-default.link
 }
 
-PR:append = "${@bb.utils.contains('DISTRO_FEATURES', 'smack', 'smack4', '', d)}"
-PATCH_SMACK = "${@bb.utils.contains('DISTRO_FEATURES', 'smack', '\
-    file://0001-SMACK-add-loading-unconfined-label.patch \
-    file://0001-meson-add-smack-default-process-label-option.patch \
-    file://0001-fileio.c-fix-build-with-smack-enabled.patch \
-', '', d)}"
-
-SRC_URI:append = " ${PATCH_SMACK}"
-
 SYSTEMD_SMACK_RUN_LABEL = "System"
 SYSTEMD_SMACK_DEFAULT_PROCESS_LABEL = "System::Run"
 
