@@ -13,10 +13,17 @@ SRCREV = "dde5bd90ac40bca5733c93ddb29e24374503226b"
 DEPENDS = "qtbase qtdeclarative luna-service2 luna-sysmgr-common libwebos-application qtdeclarative-native bluez-qt qtmultimedia gstreamer1.0"
 RDEPENDS:${PN} = "qt5compat-qmlplugins"
 
-# LuneOS.Camera is useless without the plugin that provides droidcamsrc,
-# but the components package is not Halium-only, so recommend rather than
-# require it.
-RRECOMMENDS:${PN} += "gst-droid"
+# LuneOS.Camera is useless without the plugin that provides droidcamsrc, but
+# it has to be asked for only where it can be built: gst-droid is
+# COMPATIBLE_MACHINE = "^halium$", and RRECOMMENDS is not the soft edge it
+# looks like here. NO_RECOMMENDATIONS/BAD_RECOMMENDATIONS only drop a
+# recommendation at rootfs-install time; bitbake's task graph folds
+# RRECOMMENDS into the same rdepids set as RDEPENDS (taskdata.py), so an
+# unbuildable recommendation fails this recipe and everything that pulls it
+# in - on tissot that took out luna-next-cardshell, packagegroup-luneos-
+# extended and luneos-dev-image with "Nothing RPROVIDES 'gst-droid'".
+# Off Halium the camera goes through V4L2, which needs nothing from here.
+RRECOMMENDS:${PN}:append:halium = " gst-droid"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
