@@ -16,7 +16,7 @@ PV = "${SPV}"
 # Bumped whenever the shipped patches or helper scripts change: they alter what
 # the package contains without moving SRCREV or PV, so without this an already
 # installed waydroid stays at the previous build. Reset at the 1.6.3 move.
-PR = "r15"
+PR = "r16"
 
 # Pre-installed images, for machines whose system/vendor pairing is frozen.
 #
@@ -48,7 +48,20 @@ WAYDROID_IMAGE_RDEPENDS:mindphone = ""
 # and maintained here, unlike the frozen HALIUM_9 line.
 WAYDROID_IMAGE_RDEPENDS:halium-arm64 = ""
 
-RDEPENDS:${PN} += "${WAYDROID_IMAGE_RDEPENDS} lxc python3-gbinder python3-pygobject libgbinder python3-pyclip"
+# python3-pyclip is still required: clipboard_manager.py imports it at module
+# level in 1.6.3 and gates the whole clipboard thread on the import succeeding,
+# so dropping it silently removes Android<->host copy/paste. (It has never been
+# removed upstream - the only commit touching it since the initial import just
+# reworded a warning.) It is not sufficient on its own; see the wl-clipboard
+# note below.
+#
+# The rest are things waydroid calls at runtime that only happened to be on the
+# image already: python3-dbus is imported all through tools/interfaces and
+# tools/services, and waydroid-net.sh shells out to dnsmasq, iptables and ip to
+# bring up waydroid0 and NAT the container out. Declaring them keeps a future
+# image that drops one of them from silently taking Android's networking with it.
+RDEPENDS:${PN} += "${WAYDROID_IMAGE_RDEPENDS} lxc python3-gbinder python3-pygobject \
+    libgbinder python3-pyclip python3-dbus dnsmasq iptables iproute2"
 
 # The package varies by machine - WAYDROID_IMAGE_RDEPENDS decides whether it
 # pulls waydroid-data, and mindphone gets a config file nothing else does -
@@ -120,7 +133,13 @@ WEBOS_SYSTEMD_SERVICE = "waydroid-container.service \
 
 CLEANBROKEN = "1"
 
-EXTRA_OEMAKE = "SYSD_DIR=${systemd_system_unitdir} USE_NFTABLES="1" WAYDROID_VERSION=${SPV}"
+# No USE_NFTABLES: it only patches LXC_USE_NFT=true into waydroid-net.sh, and
+# the script still gates on finding an nft binary that answers "list ruleset".
+# None of our machines ship nft and none of the kernels have NF_TABLES, so every
+# device falls through to the iptables path regardless - verified on tissot,
+# mindphone and sargo, all of which NAT the container correctly. Setting a flag
+# that nothing can honour only invites someone to believe it.
+EXTRA_OEMAKE = "SYSD_DIR=${systemd_system_unitdir} WAYDROID_VERSION=${SPV}"
 
 do_install() {
     # oe_runmake, not make: EXTRA_OEMAKE carries WAYDROID_VERSION, which is what
