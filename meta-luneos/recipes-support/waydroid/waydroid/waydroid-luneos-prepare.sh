@@ -196,6 +196,76 @@ set_no_background_subsurface() {
         && log "rendering Android on the window surface (no background subsurface)"
 }
 
+# --------------------------------------------------------- no external camera
+#
+# Waydroid's only camera path is the external one: it hands Android the host's
+# V4L2 nodes and runs android.hardware.camera.provider@2.7-external-service,
+# which is written for USB webcams. sargo's /dev/video0..2 and 32..33 are CAMSS
+# nodes, not webcams, so the provider enumerates a camera it cannot drive - and
+# then shadows the real one. Opening it gives
+#
+#   camera_metadata: validate_camera_metadata_structure: metadata is null!
+#   Camera3-Device: Camera 0: disconnectImpl: Shutting down in an error state
+#
+# and the camera app dies on it, over and over. A crash loop is what the NFC
+# stack was doing until 0008, and that one degraded every app launch on the
+# device; this is the same shape and worth heading off for the same reason.
+#
+# The real camera is not reachable from in here anyway. It belongs to the host,
+# where the vendor's android.hardware.camera.provider@2.4-service drives it for
+# com.webos.service.camera2 and minimediaservice, and nothing bridges an
+# ICameraProvider into the container. Setting ro.hardware.camera=<hal> does not
+# help either: it names a legacy in-process HAL, and the container has no
+# provider service left that would load one - tried on sargo, no effect.
+#
+# So tell the external HAL to leave the internal nodes alone. The list is
+# generated from what the host actually has rather than hardcoded, since the
+# node numbering is per device. With every node ignored the provider reports
+# zero cameras, and apps say "no camera" instead of crashing.
+#
+# Overriding /vendor/etc/external_camera_config.xml is done through the overlay
+# Waydroid already mounts (mount_overlays = True). Only the Provider section is
+# written: ExternalCameraUtils.cpp supplies defaults for everything in Device.
+disable_external_camera() {
+    [ "${WAYDROID_NO_EXTERNAL_CAMERA:-1}" = 1 ] || return 0
+
+    ids=""
+    for node in /dev/video*; do
+        [ -e "$node" ] || continue
+        n=${node#/dev/video}
+        case "$n" in
+            ''|*[!0-9]*) continue ;;
+        esac
+        ids="$ids            <id>$n</id>
+"
+    done
+    [ -n "$ids" ] || return 0
+
+    dir=/var/lib/waydroid/overlay/vendor/etc
+    out=$dir/external_camera_config.xml
+    mkdir -p "$dir" || return 1
+
+    tmp=$out.new
+    {
+        echo '<!-- Written by waydroid-luneos-prepare. The host owns the camera;'
+        echo '     see disable_external_camera() there for why none is offered. -->'
+        echo '<ExternalCamera>'
+        echo '    <Provider>'
+        echo '        <ignore>'
+        printf '%s' "$ids"
+        echo '        </ignore>'
+        echo '    </Provider>'
+        echo '</ExternalCamera>'
+    } > "$tmp" || return 1
+
+    if [ -f "$out" ] && cmp -s "$tmp" "$out"; then
+        rm -f "$tmp"
+        return 0
+    fi
+    mv -f "$tmp" "$out" || return 1
+    log "no external camera (ignoring the host's V4L2 nodes)"
+}
+
 # ------------------------------------------------ refresh container config
 #
 # The LXC configuration under /var/lib/waydroid/lxc is generated once, at
@@ -225,5 +295,6 @@ bind_images         || rc=1
 copy_host_hal_libs  || rc=1
 set_no_ril          || rc=1
 set_no_background_subsurface || rc=1
+disable_external_camera || rc=1
 refresh_container_config || rc=1
 exit $rc

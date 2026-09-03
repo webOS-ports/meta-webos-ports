@@ -1,0 +1,75 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herrie <github@herrie.org>
+Date: Thu, 3 Sep 2026 12:00:00 +0200
+Subject: [PATCH 8/8] lxc: do not claim NFC the container cannot reach
+
+setup_host_perms() copies the host's NFC feature declarations into the
+container, and a declaration is a promise: Android reads it, decides the
+hardware is present, and starts the stack that drives it. NfcService comes
+up, libnfc-nci sends an NCI command, nothing on the other end answers, and
+nfc_ncif_cmd_timeout() aborts com.android.nfc. That process is persistent,
+so Android restarts it, and it aborts again - measured on sargo at twelve
+crashes in seven minutes, from boot onwards, indefinitely.
+
+The cost is not confined to NFC. A persistent process failing on a loop
+keeps system_server busy restarting it, and the platform service goes with
+it: waydroid.active_apps and sys.boot_completed start answering empty,
+"waydroid app launch" reports success and produces no window, and app
+launches that normally take a fraction of a second take many seconds or
+never finish. It reads as Waydroid being slow and losing apps, which is how
+this was found.
+
+Copying the declaration is right on a host that hands its NFC HAL to the
+container, which is what upstream assumes. LuneOS is not that host: the
+controller belongs to the host side, where webos-nfc-adapter drives it, and
+nothing bridges an INfc into the container - nor could a second stack have
+the controller if it did. So do not claim the feature. It is the same call
+already made for telephony with ro.radio.noril: the honest answer to "is
+this reachable from in here" is no, and Android copes with absent hardware
+far better than with hardware that never replies.
+
+This is reachable here in a way it is not upstream because 0001 dropped the
+Treble check, so the copy now runs on Halium hosts too. consumerir is left
+as it is: nothing on the host claims the IR blaster.
+
+Upstream-Status: Inappropriate [LuneOS runs its own NFC stack on the host]
+---
+diff --git a/tools/helpers/lxc.py b/tools/helpers/lxc.py
+index 49ceb40..220ed5c 100644
+--- a/tools/helpers/lxc.py
++++ b/tools/helpers/lxc.py
+@@ -362,17 +362,28 @@ def setup_host_perms(args):
+ 
+     sku = tools.helpers.props.host_get(args, "ro.boot.product.hardware.sku")
+     copy_list = []
+-    copy_list.extend(
+-        glob.glob("/vendor/etc/permissions/android.hardware.nfc.*"))
++    # No NFC. A feature declaration copied in here tells Android the hardware
++    # is there, and Android then starts the stack that talks to it: NfcService
++    # comes up, libnfc-nci sends an NCI command, nothing answers, and
++    # nfc_ncif_cmd_timeout() aborts com.android.nfc. It is a persistent
++    # process, so Android restarts it and it aborts again - measured on sargo
++    # at twelve crashes in seven minutes, from boot, forever.
++    #
++    # The usual Waydroid host hands its NFC HAL to the container, so copying
++    # the declaration is right there. LuneOS never does: the NFC controller
++    # belongs to the host, where webos-nfc-adapter drives it, and a second
++    # stack inside the container could not have it even if one were bridged.
++    # So do not claim the feature. This is the same call as ro.radio.noril for
++    # telephony - the honest answer to "is this hardware reachable from in
++    # here" is no.
++    #
++    # consumerir is left alone: nothing on the host claims the IR blaster, so
++    # the declaration is what stops ConsumerIrService looking for a HAL.
+     if os.path.exists("/vendor/etc/permissions/android.hardware.consumerir.xml"):
+         copy_list.append("/vendor/etc/permissions/android.hardware.consumerir.xml")
+-    copy_list.extend(
+-        glob.glob("/odm/etc/permissions/android.hardware.nfc.*"))
+     if os.path.exists("/odm/etc/permissions/android.hardware.consumerir.xml"):
+         copy_list.append("/odm/etc/permissions/android.hardware.consumerir.xml")
+     if sku != "":
+-        copy_list.extend(
+-            glob.glob("/odm/etc/permissions/sku_{}/android.hardware.nfc.*".format(sku)))
+         if os.path.exists("/odm/etc/permissions/sku_{}/android.hardware.consumerir.xml".format(sku)):
+             copy_list.append(
+                 "/odm/etc/permissions/sku_{}/android.hardware.consumerir.xml".format(sku))
