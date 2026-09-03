@@ -14,46 +14,7 @@ EXTRA_QMAKEVARS_PRE:append:halium = "CONFIG+=autohybris "
 EXTRA_QMAKEVARS_PRE:append:halium = "CONFIG+=luneos "
 
 # Halium-9.0 devices use binder to communicate with sensors
-EXTRA_QMAKEVARS_PRE:append:hammerhead-halium = "CONFIG+=binder "
-EXTRA_QMAKEVARS_PRE:append:mako = "CONFIG+=binder "
-EXTRA_QMAKEVARS_PRE:append:mido-halium = "CONFIG+=binder "
-EXTRA_QMAKEVARS_PRE:append:mindphone = "CONFIG+=binder "
-EXTRA_QMAKEVARS_PRE:append:sagit = "CONFIG+=binder "
-EXTRA_QMAKEVARS_PRE:append:tissot-halium = "CONFIG+=binder "
-
-# sargo has no working legacy sensors HAL at all, so binder is not an
-# optimisation here but the only route. /vendor/lib64/hw/sensors.sargo.so is
-# AOSP's HAL 1.0 multihal and /vendor/etc/sensors/hals.conf points it at
-# sensors.ssc.so - but that library is a HAL *2.0* sub-HAL: 862 dynamic
-# symbols, none of them HMI, and it links android.hardware.sensors@2.0.so,
-# libhidlbase and libfmq. So the multihal loads it and then cannot find the
-# entry point:
-#
-#     I MultiHal: Loaded library from sensors.ssc.so
-#     W MultiHal: Error calling dlsym:
-#     sensorfw: no sensors found
-#
-# hw_get_module("sensors") can therefore never return a sensor on this device.
-# android.hardware.sensors@2.0::ISensors is registered and works - the
-# container's own HAL service enumerates the full set through it - so talk to
-# that instead.
-EXTRA_QMAKEVARS_PRE:append:sargo = "CONFIG+=binder "
-
-# The generic machine: binder for the same reason, generalised. A Treble
-# device exposes sensors as android.hardware.sensors over hwbinder, and the
-# legacy hw_get_module("sensors") route is the one that may or may not exist -
-# on sargo it exists and is broken, as above. Built without this, sensorfwd
-# takes the hybris HAL path and aborts inside bionic before it reports
-# anything useful:
-#
-#     linker_tls.cpp:93: unregister_tls_module
-#     CHECK 'mod.static_offset == SIZE_MAX' failed
-#
-# The per-machine list above is a hand-maintained duplicate of "is this a
-# Treble device", and should collapse into :halium once the device machines
-# retire - tenderloin-halium is the only one here that genuinely wants the
-# legacy path.
-EXTRA_QMAKEVARS_PRE:append:halium-arm64 = "CONFIG+=binder "
+EXTRA_QMAKEVARS_PRE:append:halium = "CONFIG+=binder "
 
 # Tenderloin here is an exception: sensorfw doesn't need to use Halium for the sensor
 EXTRA_QMAKEVARS_PRE:remove:tenderloin-halium = "CONFIG+=autohybris "
