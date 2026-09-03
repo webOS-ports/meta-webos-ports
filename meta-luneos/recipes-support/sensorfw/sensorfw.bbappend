@@ -20,7 +20,6 @@ EXTRA_QMAKEVARS_PRE:append:mido-halium = "CONFIG+=binder "
 EXTRA_QMAKEVARS_PRE:append:mindphone = "CONFIG+=binder "
 EXTRA_QMAKEVARS_PRE:append:sagit = "CONFIG+=binder "
 EXTRA_QMAKEVARS_PRE:append:tissot-halium = "CONFIG+=binder "
-EXTRA_QMAKEVARS_PRE:append:yggdrasil = "CONFIG+=binder "
 
 # sargo has no working legacy sensors HAL at all, so binder is not an
 # optimisation here but the only route. /vendor/lib64/hw/sensors.sargo.so is
