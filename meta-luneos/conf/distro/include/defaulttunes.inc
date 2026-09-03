@@ -16,19 +16,9 @@
 # and opkg -force-reinstall opkg-config-base distro-feed-configs
 # on target to get new /etc/opkg/arch.conf
 
-# DEFAULTTUNE:tuna = "cortexa8t-neon"
-# DEFAULTTUNE:grouper = "cortexa8t-neon"
-
-# or if you don't care about sharing binary feed between armv7a machines, 
-# add this to local.conf after that require line
-# DEFAULTTUNE:tuna = "cortexa9t-neon"
-
-# A500 is using cortexa9, because Tegra2 does not support neon, so we cannot share
-# feed with it unless we disable neon also for tuna:
-# DEFAULTTUNE_a500 = "cortexa9"
-# DEFAULTTUNE:tuna = "cortexa9"
-# but be aware that grouper doesn't have cortexa9 available and a500 does not have cortexa8
-# if you want to use cortexa8 for all add cortexa8 settings to a500 (see tuna.conf).
+# The tunes below are a distro-wide choice per machine. If you would rather
+# not carry that for a given machine, set DEFAULTTUNE for it in local.conf
+# after the require line that pulls this file in, instead of adding it here.
 
 ARM_INSTRUCTION_SET = "thumb"
 DEFAULTTUNE:tenderloin-halium = "cortexa8thf-neon"
