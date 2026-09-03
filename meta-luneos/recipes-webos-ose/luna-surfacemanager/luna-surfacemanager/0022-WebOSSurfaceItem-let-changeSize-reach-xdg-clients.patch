@@ -1,0 +1,98 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herrie <github@herrie.org>
+Date: Thu, 3 Sep 2026 06:30:00 +0200
+Subject: [PATCH 22/23] WebOSSurfaceItem: let changeSize reach xdg clients
+
+changeSize() is how the card shell tells a client what size to render at:
+CardWindowWrapper anchors the quick item to the card and then calls
+changeSize() so the client actually produces a buffer that size. It only
+ever spoke wl_webos_shell, though - m_shellSurface is set from
+WebOSShellSurface and nothing else - so for an xdg_shell client the call
+was a silent no-op.
+
+Waydroid's hwcomposer is an xdg_shell client, so the only geometry Android
+ever received was the single configure sent at toplevel creation, which is
+the full output size. The card shell reserves the bottom of the screen for
+the gesture area and hands a maximized card the height that is left, but
+Android never heard about it and kept laying out against the full panel
+height, so the bottom of every Android window sat underneath the gesture
+bar.
+
+Send an xdg_toplevel configure when there is no webOS shell surface. The
+toplevel is already on the item as _luneosXdgToplevel, put there when it
+was created. sendFullscreen() rather than sendMaximized() keeps the state
+the client was configured with initially, so this changes the size only.
+
+Configures are not free on the other end - Android relayouts every activity
+in the task - so remember what was last sent and skip a repeat. The card
+shell calls syncClientWindowSize() on every card state change and on every
+geometry change, and asks for the same size in the carded and maximized
+states, so without this the common case would reconfigure Android for
+nothing.
+
+Upstream-Status: Pending
+---
+diff --git a/modules/weboscompositor/webossurfaceitem.cpp b/modules/weboscompositor/webossurfaceitem.cpp
+index 00bf719..3233a6e 100644
+--- a/modules/weboscompositor/webossurfaceitem.cpp
++++ b/modules/weboscompositor/webossurfaceitem.cpp
+@@ -1250,7 +1250,33 @@ void WebOSSurfaceItem::updateScreenPosition()
+ 
+ void WebOSSurfaceItem::changeSize(const QSize &newSize)
+ {
+-    if (m_shellSurface) m_shellSurface->changeSize(newSize);
++    if (m_shellSurface) {
++        m_shellSurface->changeSize(newSize);
++        return;
++    }
++
++    /* No wl_webos_shell surface: this is an xdg_shell client, which has to be
++     * told through xdg_toplevel.configure instead. */
++    if (!newSize.isValid() || newSize.isEmpty())
++        return;
++
++    QWaylandXdgToplevel *toplevel = qobject_cast<QWaylandXdgToplevel *>(
++            property("_luneosXdgToplevel").value<QObject *>());
++    if (!toplevel)
++        return;
++
++    /* A configure makes the client relayout - for Waydroid that is every
++     * activity in the task - so only send one when the size actually moved. */
++    if (m_configuredSize == newSize)
++        return;
++
++    setConfiguredSize(newSize);
++    toplevel->sendFullscreen(newSize);
++}
++
++void WebOSSurfaceItem::setConfiguredSize(const QSize &size)
++{
++    m_configuredSize = size;
+ }
+ 
+ void WebOSSurfaceItem::requestStateChange(Qt::WindowState state)
+diff --git a/modules/weboscompositor/webossurfaceitem.h b/modules/weboscompositor/webossurfaceitem.h
+index 0df6886..6c6d304 100644
+--- a/modules/weboscompositor/webossurfaceitem.h
++++ b/modules/weboscompositor/webossurfaceitem.h
+@@ -558,6 +558,12 @@ public:
+ 
+     Q_INVOKABLE void changeSize(const QSize &newSize);
+ 
++    /* The size this client was last configured at. For an xdg_shell client
++     * this is what it was actually told, so it doubles as the surface-local
++     * coordinate space its subsurfaces are positioned in. */
++    QSize configuredSize() const { return m_configuredSize; }
++    void setConfiguredSize(const QSize &size);
++
+     static WebOSSurfaceItem *getSurfaceItemFromSurface(QWaylandSurface *surface) {
+         return (!surface || surface->views().isEmpty()) ? nullptr : qobject_cast<WebOSSurfaceItem*>(surface->views().first()->renderObject());
+     }
+@@ -706,6 +712,7 @@ private:
+     WebOSShellSurface* m_shellSurface;
+     ItemState m_itemState;
+     QString m_itemStateReason;
++    QSize m_configuredSize;
+ 
+     bool m_notifyPositionToClient;
+     QPointF m_position;

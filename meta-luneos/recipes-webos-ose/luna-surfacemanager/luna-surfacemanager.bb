@@ -48,6 +48,8 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0019-weboscompositor-advertise-wp_viewporter.patch \
     file://0020-WebOSSurfaceItem-close-ask-xdg-clients-to-close-thems.patch \
     file://0021-weboscompositor-treat-subsurfaces-as-content-not-wind.patch \
+    file://0022-WebOSSurfaceItem-let-changeSize-reach-xdg-clients.patch \
+    file://0023-weboscompositor-scale-subsurface-content-with-its-ite.patch \
 "
 
 inherit webos_systemd
