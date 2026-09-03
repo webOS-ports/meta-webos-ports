@@ -1,10 +1,5 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 
-# we have resolved disabled in systemd
-SRC_URI:remove = "file://0001-connman.service-stop-systemd-resolved-when-we-use-co.patch"
-# we have networkd disabled in systemd as well
-SRC_URI:remove = "file://0001-connman.service-stop-systemd-networkd-when-using-con.patch"
-
 SRC_URI += "file://0001-connman.service.in-start-after-android-system.servic.patch"
 
 # Extensions webos-connman-adapter relies on. These replace the webOS OSE
