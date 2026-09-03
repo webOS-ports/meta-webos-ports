@@ -1,0 +1,324 @@
+#!/usr/bin/env python3
+# Warm launcher for Waydroid apps.
+#
+# Launching an Android app is about forty milliseconds of work. Asking for it
+# through "waydroid app launch" costs a great deal more, and none of the
+# difference is Android: the waydroid CLI is a Python program that imports
+# gbinder, dbus and the whole tools package on every invocation, and on a phone
+# under memory pressure those imports come back off flash. Measured on sargo,
+# in one process: imports 12.97s, then six launches at 9-512ms each. The user
+# saw exactly that shape - seventeen seconds for the first app, three to five
+# for the ones after.
+#
+# So pay the imports once, here, at session start, and keep the platform
+# service open. The launcher then only has to write a package name into a FIFO,
+# which is a shell redirect and costs nothing.
+#
+# The same applies to reading waydroid.active_apps. The launcher polls it for
+# as long as its app is up, and every one of those polls used to be another
+# Python process - and worse, "waydroid prop get" unfreezes the container to
+# answer, so the polling alone kept Android awake. Here the poll happens on an
+# already-open binder connection, and the answer is published to a file the
+# launcher can read for free.
+#
+# Protocol, one line per command on the FIFO:
+#
+#   launch <package>   launch it, exactly as "waydroid app launch" would
+#   open <package>     an app is being held open; keep active_apps published
+#   close <package>    that app is done
+#
+# and the current value of waydroid.active_apps is published to
+# /run/waydroid-luneos/active_apps, rewritten atomically, while anything is
+# open. Nothing is published when nothing is open, so an idle device is left
+# alone and Android is free to suspend.
+
+import errno
+import os
+import sys
+import threading
+import time
+
+sys.path.insert(0, "/usr/lib/waydroid")
+
+RUNDIR = "/run/waydroid-luneos"
+FIFO = os.path.join(RUNDIR, "launch")
+STATUS = os.path.join(RUNDIR, "active_apps")
+POLL = 5
+
+
+def log(msg):
+    sys.stdout.write("waydroid-launchd: %s\n" % msg)
+    sys.stdout.flush()
+
+
+class Platform:
+    """The binder connection, reacquired whenever it goes away.
+
+    The container can restart underneath us - waydroid upgrade does it, so does
+    a plain systemctl restart - and every proxy we hold is dead after that. So
+    nothing holds one for long: each call goes through here, and a failure
+    drops the service so the next call builds a new one.
+    """
+
+    def __init__(self, args, iplatform):
+        self._args = args
+        self._IPlatform = iplatform
+        self._svc = None
+        self._lock = threading.Lock()
+
+    def _service(self):
+        if self._svc is None:
+            self._svc = self._IPlatform.get_service(self._args)
+        return self._svc
+
+    def call(self, fn):
+        with self._lock:
+            try:
+                svc = self._service()
+                if svc is None:
+                    return None
+                return fn(svc)
+            except Exception as e:
+                log("platform call failed (%s); will reconnect" % e)
+                self._svc = None
+                return None
+
+
+FREEZER = "/sys/fs/cgroup/freezer/lxc.payload.waydroid/freezer.state"
+
+
+def frozen():
+    try:
+        with open(FREEZER) as f:
+            return f.read().strip() == "FROZEN"
+    except OSError:
+        # No freezer to read means nothing to thaw; let the launch proceed.
+        return False
+
+
+def publish(value):
+    """Atomically, so a reader never sees a half written file."""
+    tmp = STATUS + ".new"
+    for attempt in (0, 1):
+        try:
+            with open(tmp, "w") as f:
+                f.write((value or "") + "\n")
+            os.rename(tmp, STATUS)
+            return
+        except OSError as e:
+            # systemd owns RuntimeDirectory and clears it across a restart, so
+            # it can go while this is mid write. Rebuild it and try once more.
+            if attempt == 0:
+                try:
+                    os.makedirs(RUNDIR, exist_ok=True)
+                    continue
+                except OSError:
+                    pass
+            log("could not publish active_apps: %s" % e)
+
+
+def main():
+    os.umask(0o0022)
+    try:
+        os.makedirs(RUNDIR, exist_ok=True)
+    except OSError as e:
+        log("cannot create %s: %s" % (RUNDIR, e))
+        return 1
+
+    t0 = time.time()
+    import tools
+    from tools import helpers
+    from tools.helpers import logging as tools_logging
+    from tools.interfaces import IPlatform
+    log("imports took %.2fs" % (time.time() - t0))
+
+    sys.argv = ["waydroid", "app", "launch", "placeholder"]
+    args = helpers.arguments()
+    tools.prep_args(args)
+    tools_logging.init(args)
+
+    platform = Platform(args, IPlatform)
+
+    def answered(what, value):
+        """IPlatform reports a dead transport by returning None.
+
+        It does not raise, and it carries no status: setprop, launchApp and
+        settingsPutString answer None whether they worked or not, so their
+        return value says nothing at all and only the reads can be checked.
+        Raising is what gets the connection dropped, since Platform.call
+        treats an exception as "this proxy is gone" and rebuilds it.
+        """
+        if value is None:
+            raise RuntimeError("%s: no reply from the platform service" % what)
+        return value
+
+    open_apps = set()
+    open_lock = threading.Lock()
+
+    def do_launch(pkg):
+        def go(svc):
+            # hwcomposer builds its window off waydroid.active_apps changing,
+            # not off launchApp. Setting it to what it already says is not a
+            # change, so a relaunch of the app that is already named there
+            # produces no window at all: launchApp succeeds, Android brings the
+            # activity up, and nothing is ever shown. That is reachable from a
+            # plain force-stop, which drops the window but leaves the property,
+            # and it is what left apps looking stuck.
+            #
+            # So make it a change. Only when it needs to be - going through
+            # "none" when some other app is named there would close that app's
+            # window on the way past.
+            def step(name, fn):
+                _t = time.time()
+                _r = fn()
+                steps.append("%s=%.2f" % (name, time.time() - _t))
+                return _r
+
+            if step("get", lambda: answered("getprop(active_apps)", svc.getprop(
+                    "waydroid.active_apps", "none"))) == pkg:
+                step("clear", lambda: svc.setprop(
+                    "waydroid.active_apps", "none"))
+                time.sleep(0.2)
+            step("set", lambda: svc.setprop("waydroid.active_apps", pkg))
+            step("launchApp", lambda: svc.launchApp(pkg))
+
+            # Read back what was just written. Neither setprop nor launchApp
+            # can report a failure, so without this the daemon logged
+            # "launched com.android.calculator2 in 0.103s" while the platform
+            # service was dead and nothing at all had happened - which is how
+            # a broken container kept looking healthy in the journal.
+            got = step("readback", lambda: answered(
+                "readback(active_apps)",
+                svc.getprop("waydroid.active_apps", "none")))
+            if got != pkg:
+                raise RuntimeError(
+                    "active_apps reads %r after setting it to %r" % (got, pkg))
+
+            multiwin = step("getmw", lambda: answered(
+                "getprop(multi_windows)", svc.getprop(
+                    "persist.waydroid.multi_windows", "false")))
+            step("policy", lambda: svc.settingsPutString(
+                2, "policy_control",
+                "immersive.status=*" if multiwin == "false" else "immersive.full=*"))
+            return True
+
+        steps = []
+        t = time.time()
+        # Unfreeze first - a frozen container answers nothing - but only when
+        # it is actually frozen. The DBus round trip costs well over a second
+        # on this hardware, and the freezer state is a file read away, so
+        # asking the cheap question first is worth it: most launches follow
+        # another one and the container is already thawed.
+        if frozen():
+            try:
+                import tools.helpers.ipc
+                tools.helpers.ipc.DBusContainerService().Unfreeze()
+            except Exception as e:
+                log("unfreeze failed (%s); launching anyway" % e)
+            log("unfreeze took %.3fs" % (time.time() - t))
+        t_calls = time.time()
+        ok = platform.call(go)
+        if not ok:
+            # The failed attempt dropped the connection, so this one builds a
+            # new proxy. That is the entire recovery path for a platform
+            # service that went away and came back: without it every launch
+            # went on failing until someone restarted the session by hand.
+            log("retrying %s on a fresh connection" % pkg)
+            steps = []
+            t_calls = time.time()
+            ok = platform.call(go)
+        if ok:
+            total = time.time() - t
+            # The per-call breakdown only matters when something was slow;
+            # printing it for every launch would bury that.
+            detail = ("  [%s]" % " ".join(steps)) if total > 1.0 else ""
+            log("launched %s in %.3fs (binder %.3fs)%s"
+                % (pkg, total, time.time() - t_calls, detail))
+            publish(pkg)
+        else:
+            log("could not launch %s" % pkg)
+
+    def poller():
+        """Publishes active_apps while anything is open, and only then."""
+        while True:
+            time.sleep(POLL)
+            with open_lock:
+                busy = bool(open_apps)
+            if not busy:
+                continue
+            # Never poll a frozen container. Android cannot answer while it is
+            # frozen, so the transaction just fails - once every POLL seconds,
+            # filling the journal - and asking would have to thaw it, which
+            # would keep Android awake for nothing but a status file. Leaving
+            # the last published value alone is the safe answer: it reads as
+            # "still open", and holding an app open too long is recoverable
+            # where closing a live one is not.
+            if frozen():
+                continue
+            value = platform.call(lambda s: answered(
+                "poll(active_apps)", s.getprop("waydroid.active_apps", "none")))
+            if value is not None:
+                publish(value)
+
+    threading.Thread(target=poller, daemon=True).start()
+
+    # The FIFO goes up before anything else is waited on.
+    #
+    # At boot this process is running long before Android is: the binder
+    # service manager does not exist until the container starts, and warming
+    # the platform connection blocks until it does. Doing that first would
+    # leave the FIFO missing for the whole of that time, and a launcher that
+    # finds no FIFO falls back to the waydroid CLI - which is the thirteen
+    # second path this daemon exists to avoid, taken at exactly the moment the
+    # user is most likely to be opening their first app.
+    #
+    # So publish the FIFO immediately and warm the connection behind it. A
+    # launch that arrives early blocks in Platform.call until Android is up,
+    # which is the right thing: it launches as soon as it can, rather than
+    # failing or crawling.
+    try:
+        os.mkfifo(FIFO, 0o0622)
+    except OSError as e:
+        if e.errno != errno.EEXIST:
+            log("cannot create %s: %s" % (FIFO, e))
+            return 1
+
+    def warm():
+        t0 = time.time()
+        if platform.call(lambda s: True):
+            log("platform service ready in %.2fs" % (time.time() - t0))
+        else:
+            log("platform service not up yet; will connect on demand")
+
+    threading.Thread(target=warm, daemon=True).start()
+
+    log("ready, listening on %s" % FIFO)
+    while True:
+        # Reopening every time a writer closes is the normal way to keep a FIFO
+        # server alive; the read returns empty otherwise and this would spin.
+        with open(FIFO) as fifo:
+            for line in fifo:
+                parts = line.split()
+                if not parts:
+                    continue
+                cmd, pkg = parts[0], (parts[1] if len(parts) > 1 else "")
+                if cmd == "launch" and pkg:
+                    with open_lock:
+                        open_apps.add(pkg)
+                    threading.Thread(target=do_launch, args=(pkg,),
+                                     daemon=True).start()
+                elif cmd == "open" and pkg:
+                    with open_lock:
+                        open_apps.add(pkg)
+                elif cmd == "close" and pkg:
+                    with open_lock:
+                        open_apps.discard(pkg)
+                        empty = not open_apps
+                    if empty:
+                        publish("none")
+                else:
+                    log("ignoring command: %s" % line.strip())
+
+
+if __name__ == "__main__":
+    sys.exit(main())

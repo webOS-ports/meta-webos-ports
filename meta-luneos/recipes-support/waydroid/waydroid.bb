@@ -86,11 +86,14 @@ SRC_URI = "git://github.com/waydroid/waydroid.git;branch=main;protocol=https \
     file://0005-user_manager-give-every-Android-app-a-webOS-app.patch \
     file://0006-notification_manager-post-to-com.webos.notification.patch \
     file://0007-initializer-do-not-abort-when-a-preinstalled-image-d.patch \
+    file://0008-lxc-do-not-claim-NFC-the-container-cannot-reach.patch \
     file://waydroid-luneos-prepare.sh \
     file://waydroid-luneos-prepare.service \
     file://waydroid-luneos-session.sh \
     file://waydroid-luneos-session-env.sh \
     file://waydroid-luneos-app.sh \
+    file://waydroid-luneos-launchd \
+    file://waydroid-luneos-launchd.service \
     file://waydroid-luneos-session.service \
     file://waydroid-luneos.conf.mindphone \
 "
@@ -129,7 +132,8 @@ inherit webos_systemd
 # tissot was found in. Initialising is a user action, and it now happens on
 # demand from the launcher, which is also the only place that can wait for it.
 WEBOS_SYSTEMD_SERVICE = "waydroid-container.service \
-    waydroid-luneos-prepare.service waydroid-luneos-session.service"
+    waydroid-luneos-prepare.service waydroid-luneos-session.service \
+    waydroid-luneos-launchd.service"
 
 CLEANBROKEN = "1"
 
@@ -152,10 +156,12 @@ do_install() {
     install -m 0755 ${UNPACKDIR}/waydroid-luneos-session.sh ${D}${libexecdir}/waydroid-luneos-session
     install -m 0644 ${UNPACKDIR}/waydroid-luneos-session-env.sh ${D}${libexecdir}/waydroid-luneos-session-env
     install -m 0755 ${UNPACKDIR}/waydroid-luneos-app.sh ${D}${libexecdir}/waydroid-luneos-app
+    install -m 0755 ${UNPACKDIR}/waydroid-luneos-launchd ${D}${libexecdir}/waydroid-luneos-launchd
 
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${UNPACKDIR}/waydroid-luneos-prepare.service ${D}${systemd_system_unitdir}
     install -m 0644 ${UNPACKDIR}/waydroid-luneos-session.service ${D}${systemd_system_unitdir}
+    install -m 0644 ${UNPACKDIR}/waydroid-luneos-launchd.service ${D}${systemd_system_unitdir}
 }
 
 # Device specifics for waydroid-luneos-prepare. Only machines that need one
