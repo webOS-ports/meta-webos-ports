@@ -1,0 +1,59 @@
+From: LuneOS <webos-ports@googlegroups.com>
+Date: Thu, 3 Sep 2026 00:00:00 +0000
+Subject: [PATCH] db: run the backup/restore callbacks with admin privilege
+
+MojDbServiceHandlerBase::invokeImpl() always constructs MojDbReq(false),
+so MojDb::dump()'s `if (!req->admin())` check rejects every caller that
+reaches internal/preBackup over the bus - the reply is
+"db: access denied" (MojErrDbAccessDenied) no matter who asks.  The same
+applies to the object/kind puts that internal/postRestore performs
+through MojDb::load().
+
+That makes the whole /etc/palm/backup callback protocol dead code on the
+bus: db8 ships src/db-luna/backup-com.palm.db advertising those four
+methods, and nothing can successfully call two of them.  webOS 3.0.5
+gated this on an admin role list read from /etc/palm/mojodb.conf; db8
+3.2.0 has no such file and no replacement, it simply denies everyone.
+
+Access control for these methods already exists and is enforced one
+layer up: ls-hubd only routes them for callers holding the
+"database.management" ACG group (see
+files/sysbus/com.webos.service.db.api.json.in).  Elevating the request
+inside the two handlers restores the intended behaviour without widening
+what the hub lets through.
+
+Needed by com.palm.app.backup (woce-backup), which is the first consumer
+of the backup protocol on LuneOS.
+
+Upstream-Status: Inappropriate [LuneOS specific]
+---
+--- a/src/db/MojDbServiceHandlerInternal.cpp
++++ b/src/db/MojDbServiceHandlerInternal.cpp
+@@ -131,6 +131,13 @@
+ MojErr MojDbServiceHandlerInternal::handlePostRestore(MojServiceMessage* msg, MojObject& payload, MojDbReq& req)
+ {
+     LOG_TRACE("Entering function %s", __FUNCTION__);
++	// The backup/restore callbacks are the platform's own backup protocol
++	// (registered via /etc/palm/backup) and are already gated on the
++	// database.management ACG group by the hub. MojDbServiceHandlerBase
++	// always builds a non-admin MojDbReq, so without this guard
++	// MojDb::dump()/put() reject every bus caller and the API is dead code.
++	MojDbAdminGuard adminGuard(req);
++
+ 	MojAssert(msg);
+ 
+ 	MojString dir;
+@@ -163,6 +170,13 @@
+ MojErr MojDbServiceHandlerInternal::handlePreBackup(MojServiceMessage* msg, MojObject& payload, MojDbReq& req)
+ {
+     LOG_TRACE("Entering function %s", __FUNCTION__);
++	// The backup/restore callbacks are the platform's own backup protocol
++	// (registered via /etc/palm/backup) and are already gated on the
++	// database.management ACG group by the hub. MojDbServiceHandlerBase
++	// always builds a non-admin MojDbReq, so without this guard
++	// MojDb::dump()/put() reject every bus caller and the API is dead code.
++	MojDbAdminGuard adminGuard(req);
++
+ 	MojAssert(msg);
+ 
+ 	MojErr err;
