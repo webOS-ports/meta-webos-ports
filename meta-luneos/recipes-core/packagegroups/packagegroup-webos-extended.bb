@@ -21,6 +21,15 @@ VIRTUAL-RUNTIME_webos-ime ?= ""
 VIRTUAL-RUNTIME_novacomd ?= "novacomd"
 VIRTUAL-RUNTIME_com.webos.app.browser ?= "org.webosports.app.atlas"
 VIRTUAL-RUNTIME_com.webos.app.camera ?= "com.webos.app.camera"
+# com.webos.app.camera above talks to luna://com.webos.service.camera2, so the
+# service ships wherever the app does. It is not Halium-only: the package carries
+# both HAL plugins - libhal-droid, which reaches droidcamsrc, and libhal-v4l2 for
+# /dev/video* - and finds the latter's devices through VIRTUAL-RUNTIME_pdm below.
+# Nothing pulls it in on its own (g-camera-pipeline only build-depends on it, and
+# the service is a daemon so no shlib scan generates one), which is how images
+# shipped the app with no service behind it and every call failed with "Service
+# does not exist: com.webos.service.camera2."
+VIRTUAL-RUNTIME_com.webos.service.camera ?= "com.webos.service.camera"
 VIRTUAL-RUNTIME_com.webos.app.mediagallery ?= "com.webos.app.mediagallery"
 VIRTUAL-RUNTIME_com.webos.app.notification ?= "com.webos.app.notification"
 VIRTUAL-RUNTIME_com.webos.app.statusbar ?= "com.webos.app.statusbar"
@@ -151,6 +160,7 @@ RDEPENDS:${PN} = " \
     activitymanager \
     ${@bb.utils.contains('DISTRO_FEATURES', 'smack', 'attr smack com.webos.app.test.smack.native', '', d)} \
     ${VIRTUAL-RUNTIME_com.webos.app.camera} \
+    ${VIRTUAL-RUNTIME_com.webos.service.camera} \
     ${VIRTUAL-RUNTIME_com.webos.app.home} \
     ${VIRTUAL-RUNTIME_g-camera-pipeline} \
     ${VIRTUAL-RUNTIME_g-media-pipeline} \

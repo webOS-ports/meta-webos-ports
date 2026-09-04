@@ -27,7 +27,11 @@ INSANE_SKIP:${PN}-dbg = "libdir"
 
 FILES:${PN} += "${webos_applicationsdir}/org.webosports.app.camera"
 
+# The droid camera now comes from LuneOS.Camera in luneos-components rather
+# than a copy inside the app's own CameraApp plugin, so the QML module has to
+# be on the device for the app to find a camera at all.
 RDEPENDS:${PN} = " \
     qtdeclarative-qmlplugins \
+    luneos-components \
 "
 

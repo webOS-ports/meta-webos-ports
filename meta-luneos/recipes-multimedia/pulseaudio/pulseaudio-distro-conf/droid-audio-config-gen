@@ -1,0 +1,48 @@
+#!/bin/sh
+# Generate a pulseaudio-modules-droid friendly copy of the Android audio
+# policy configuration in /run/droid-audio.
+#
+# Many vendor HALs advertise only AUDIO_FORMAT_PCM_8_24_BIT on their input
+# mix ports, which pulseaudio-modules-droid cannot match - the droid card
+# then comes up without a source and the device has no microphone. The
+# HALs accept 16-bit at stream-open time regardless (the XML is policy,
+# not capability), so rewrite input mix ports (role="sink") to 16-bit and
+# drop maxActiveCount="0" quirks. Output ports are left untouched: the
+# current output behaviour works and must not change underneath audiod.
+#
+# The vendor XML xi:includes sibling files with relative paths, so those
+# are copied alongside. If anything fails the vendor file is copied
+# verbatim, which keeps module-droid-card's behaviour identical to
+# parsing it in place.
+
+SRC=""
+for d in /android/vendor/etc /vendor/etc /android/system/etc /odm/etc; do
+    if [ -f "$d/audio_policy_configuration.xml" ]; then
+        SRC="$d"
+        break
+    fi
+done
+[ -n "$SRC" ] || exit 0
+
+OUT=/run/droid-audio
+mkdir -p "$OUT"
+
+# Included files referenced from the main XML.
+for f in $(sed -n 's/.*xi:include href="\([^"]*\)".*/\1/p' \
+        "$SRC/audio_policy_configuration.xml"); do
+    [ -f "$SRC/$f" ] && cp "$SRC/$f" "$OUT/" 2>/dev/null
+done
+
+awk '
+/<mixPort/ && /role="sink"/ { insink = 1 }
+insink {
+    gsub(/AUDIO_FORMAT_PCM_8_24_BIT/, "AUDIO_FORMAT_PCM_16_BIT")
+    gsub(/AUDIO_FORMAT_PCM_24_BIT_PACKED/, "AUDIO_FORMAT_PCM_16_BIT")
+    gsub(/ maxActiveCount="0"/, "")
+}
+/<\/mixPort>/ || (/<mixPort/ && /\/>/) { insink = 0 }
+{ print }
+' "$SRC/audio_policy_configuration.xml" > "$OUT/audio_policy_configuration.xml" \
+    || cp "$SRC/audio_policy_configuration.xml" "$OUT/audio_policy_configuration.xml"
+
+exit 0
