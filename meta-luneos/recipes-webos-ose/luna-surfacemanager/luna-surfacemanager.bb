@@ -50,6 +50,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0021-weboscompositor-treat-subsurfaces-as-content-not-wind.patch \
     file://0022-WebOSSurfaceItem-let-changeSize-reach-xdg-clients.patch \
     file://0023-weboscompositor-scale-subsurface-content-with-its-ite.patch \
+    file://0024-base-add-a-window-model-for-exhibition-dock-mode-win.patch \
 "
 
 inherit webos_systemd
