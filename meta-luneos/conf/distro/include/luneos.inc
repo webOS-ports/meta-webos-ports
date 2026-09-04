@@ -64,6 +64,20 @@ WEBOS_DISTRO_TOPDIR_REVISION ?= "${@oe.buildcfg.get_metadata_git_revision('${SET
 # WEBOS_DISTRO_TOPDIR_DESCRIBE ?= "${@oe.buildcfg.get_metadata_git_describe('${SETUP_COMMON_DIR}').strip()}"
 BUILDCFG_VARS += "WEBOS_DISTRO_TOPDIR_BRANCH WEBOS_DISTRO_TOPDIR_REVISION"
 
+# The webOS platform level LuneOS presents to applications.
+#
+# Legacy webOS applications commonly branch on deviceInfo's platformVersion /
+# platformVersionMajor to pick which of their bundled builds to load, e.g.
+#     if (deviceInfo["platformVersionMajor"] < 3) load the Mojo build
+# LuneOS's own DISTRO_VERSION is 1.0, which reads to those applications as
+# webOS 1.x and sends them to their oldest build - typically one that wants
+# frameworks LuneOS does not carry. Report the level we actually implement
+# instead; LuneOS is webOS 3.0.5 derived and ships Enyo.
+#
+# WAM prefers this over DISTRO_VERSION when it is present in /etc/buildinfo.
+WEBOS_COMPAT_VERSION ?= "3.0.5"
+BUILDCFG_VARS += "WEBOS_COMPAT_VERSION"
+
 # Add build timestamp to what's displayed in build-id.txt for use in pruning script
 BUILDCFG_VARS += "DATETIME"
 
