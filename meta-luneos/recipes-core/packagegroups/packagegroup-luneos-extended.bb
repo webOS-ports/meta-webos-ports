@@ -47,6 +47,8 @@ RDEPENDS:${PN} = " \
   \
   bluez5 \
   \
+  ${PRINT_RDEPENDS} \
+  \
   imaccountvalidator \
   imlibpurpleservice \
   messaging-accounts \
@@ -171,6 +173,26 @@ NFC_RDEPENDS = " \
     nfcd-tools \
     nfcd-binder-plugin \
     webos-nfc-adapter \
+"
+
+# Printing. luneos-print-adapter serves the webOS print API (com.palm.printmgr,
+# what the enyo print dialog in Atlas and Email call) and the flatter
+# org.webosports.service.print the Settings Print Manager page calls, both on
+# top of CUPS. Not gated on a machine: anything with a network can print, and
+# discovery is mDNS, so there is no hardware to be present or absent.
+#
+# cups-filters is what converts PDF to the Apple Raster and PWG Raster that many
+# AirPrint printers accept instead of PDF. Without it printing only works where
+# the printer takes PDF or JPEG as-is - measured, not assumed: a driverless
+# queue rejected a PDF with client-error-document-format-not-supported until it
+# was installed. It brings ghostscript, poppler and qpdf - about 40MB of ipks.
+# Drop it with BAD_RECOMMENDATIONS if an image would rather have the space than
+# the printer coverage; cups alone still prints to anything taking PDF or JPEG.
+PRINT_RDEPENDS = " \
+    luneos-print-adapter \
+    cups \
+    cups-filters \
+    avahi-daemon \
 "
 
 # eSIM: lpac is the LPA (SGP.22 profile download/management), luneos-esim-adapter
