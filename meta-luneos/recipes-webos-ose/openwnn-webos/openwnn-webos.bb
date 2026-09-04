@@ -19,6 +19,13 @@ PR = "r0"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 
+# The upstream Makefile assigns CFLAGS/LDFLAGS unconditionally, so the flags
+# bitbake exports in the environment - including DEBUG_PREFIX_MAP - are thrown
+# away and the debug info ends up carrying build paths. Override CFLAGS on the
+# make command line, where it wins over the makefile assignment, keeping the
+# include paths and -fPIC the makefile needs for the shared library.
+EXTRA_OEMAKE = "CFLAGS='-fPIC ${CXXFLAGS} -I./libs/libwnnDictionary/include -I./libs/libwnnDictionary -I./src/include'"
+
 do_install:append() {
     install -d  ${D}${libdir}/maliit/plugins
     install -m 755 ${S}/libWnnJpn.so ${D}${libdir}/maliit/plugins
