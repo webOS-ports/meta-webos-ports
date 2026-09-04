@@ -1,0 +1,149 @@
+From 702ff37ab97d207fb6866f7b62ef2dc0936455cb Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 4 Sep 2026 02:41:10 +0200
+Subject: [PATCH] WAM: give exhibition (dock) mode windows a window type of
+ their own
+
+Exhibition mode - the display a device shows while it sits in a charging
+dock - hosts an application full screen. The shell launches it with the
+parameters legacy webOS used, { "windowType": "dockModeWindow",
+"dockMode": true }, which the ported applications still look for to pick
+their dock face (com.palm.app.photos' PhotoAppLauncher::appSelect
+switches to its slideshow face on exactly that, and com.palm.app.clock
+documents the same contract).
+
+Until now such a window came up as an ordinary card, so a docked
+application also sat in the card stack behind the exhibition display.
+Honour those launch parameters with _WEBOS_WINDOW_TYPE_DOCK so the shell
+can host it apart from the cards, and accept "dock" in
+WindowTypeFromString so an application can also declare it through
+appinfo.json's defaultWindowType.
+
+A dock window is an ordinary full-screen webOS window, so the Luna app
+factory builds it as a WebAppWaylandWebOS alongside the card and system
+UI types; without that it would reach the factory only to be turned away
+as BAD_WINDOW_TYPE.
+
+The applications this is for are typically "noWindow": true - they open
+the window the user actually sees through window.open - so that child
+has to carry the type as well. It was taking it from appinfo.json's
+defaultWindowType, which knows nothing about how this launch was asked
+for, and so fell back to a card. Inherit the type the parent was created
+with when there is one, and keep the appinfo default as the fallback.
+Upstream-Status: Pending
+
+---
+ src/core/web_app_base.h                  |  3 +++
+ src/core/web_app_manager.cc              | 13 +++++++++++++
+ src/core/window_types.h                  |  1 +
+ src/platform/web_app_wayland.h           |  1 +
+ src/platform/webengine/web_page_blink.cc | 13 ++++++++++++-
+ src/plugin/web_app_factory_luna.cc       |  3 ++-
+ 6 files changed, 32 insertions(+), 2 deletions(-)
+
+diff --git a/src/core/web_app_base.h b/src/core/web_app_base.h
+index deaaf46..12effae 100644
+--- a/src/core/web_app_base.h
++++ b/src/core/web_app_base.h
+@@ -58,6 +58,9 @@ class WebAppBase : public WebPageObserver {
+   virtual void StartLaunchTimer() {}
+   virtual void SetHiddenWindow(bool hidden);
+   virtual void ConfigureWindow(const std::string& type) = 0;
++  // Window type this app was actually created with. Empty when the
++  // platform doesn't track one; WebAppWayland overrides it.
++  virtual std::string WindowType() const { return std::string(); }
+   virtual void SetKeepAlive(bool keep_alive);
+   virtual bool IsWindowed() const;
+   virtual void Relaunch(const std::string& args,
+diff --git a/src/core/web_app_manager.cc b/src/core/web_app_manager.cc
+index 66bb342..230476d 100644
+--- a/src/core/web_app_manager.cc
++++ b/src/core/web_app_manager.cc
+@@ -658,6 +658,9 @@ const std::string WebAppManager::WindowTypeFromString(const std::string& str) {
+   if (str == "system_ui") {
+     return kWtSystemUi;
+   }
++  if (str == "dock") {
++    return kWtDock;
++  }
+   return kWtCard;
+ }
+ 
+@@ -727,6 +730,16 @@ std::string WebAppManager::Launch(const std::string& app_desc_string,
+     return std::string();
+   }
+ 
++  // Exhibition (dock) mode. The shell launches an application for the dock
++  // with the parameters legacy webOS used, which the ported applications
++  // still look for to pick their dock face. Give such a window a type of its
++  // own so the shell can host it apart from the ordinary card stack, instead
++  // of it also turning up as a card behind the exhibition display.
++  if (json["dockMode"].asBool() &&
++      json["windowType"].asString() == "dockModeWindow") {
++    win_type = kWtDock;
++  }
++
+   Json::Value affinity = json["displayAffinity"];
+   if (affinity.isInt()) {
+     desc->SetDisplayAffinity(affinity.asInt());
+diff --git a/src/core/window_types.h b/src/core/window_types.h
+index 3b7ff12..6174db2 100644
+--- a/src/core/window_types.h
++++ b/src/core/window_types.h
+@@ -25,5 +25,6 @@ const char kWtNone[] = "_WEBOS_WINDOW_TYPE_NONE";
+ const char kWtFloating[] = "_WEBOS_WINDOW_TYPE_FLOATING";
+ const char kWtUnknown[] = "_WEBOS_WINDOW_TYPE_UNKNOWN";
+ const char kWtSystemUi[] = "_WEBOS_WINDOW_TYPE_SYSTEM_UI";
++const char kWtDock[] = "_WEBOS_WINDOW_TYPE_DOCK";
+ 
+ #endif  // CORE_WINDOW_TYPES_H_
+diff --git a/src/platform/web_app_wayland.h b/src/platform/web_app_wayland.h
+index 1691276..6e46668 100644
+--- a/src/platform/web_app_wayland.h
++++ b/src/platform/web_app_wayland.h
+@@ -129,6 +129,7 @@ class WebAppWayland : public WebAppBase, WebPageBlinkObserver {
+   void NavigationHistoryChanged() override;
+ 
+   std::string GetWindowType() const { return window_type_; }
++  std::string WindowType() const override { return window_type_; }
+   bool CursorVisibility() {
+     return InputManager::Instance()->GlobalCursorVisibility();
+   }
+diff --git a/src/platform/webengine/web_page_blink.cc b/src/platform/webengine/web_page_blink.cc
+index 17a36f8..0406492 100644
+--- a/src/platform/webengine/web_page_blink.cc
++++ b/src/platform/webengine/web_page_blink.cc
+@@ -1398,7 +1398,18 @@ WebView* WebPageBlink::CreateWindow(const std::string& newUrl, std::unique_ptr<W
+ 
+   // Create a new webApp instance for this page
+   WebAppManager *webAppMgr = WebAppManager::Instance();
+-  WebAppBase *newWebApp = webAppMgr->CreateWindowForAppPage(webAppMgr->WindowTypeFromString(new_app_desc->DefaultWindowType()),
++  // Inherit the type the parent was actually launched with, falling back to
++  // what appinfo.json asked for. It matters for exhibition (dock) mode: those
++  // applications are typically "noWindow": true, so the window the user
++  // actually sees is this one, and it has to carry the dock type too rather
++  // than reverting to a card.
++  std::string child_win_type =
++      webAppMgr->WindowTypeFromString(new_app_desc->DefaultWindowType());
++  WebAppBase *parentApp = webAppMgr->FindAppById(app_id_);
++  if (parentApp && !parentApp->WindowType().empty())
++    child_win_type = parentApp->WindowType();
++
++  WebAppBase *newWebApp = webAppMgr->CreateWindowForAppPage(child_win_type,
+                                     std::move(new_app_desc), "{}", app_id_, newPage);
+ 
+   if (newWebApp && height > 0) {
+diff --git a/src/plugin/web_app_factory_luna.cc b/src/plugin/web_app_factory_luna.cc
+index 22e9cad..e8b5d31 100644
+--- a/src/plugin/web_app_factory_luna.cc
++++ b/src/plugin/web_app_factory_luna.cc
+@@ -44,7 +44,8 @@ WebAppBase* WebAppFactoryLuna::CreateWebApp(
+   WebAppBase* app = nullptr;
+ 
+   if (win_type == kWtCard || win_type == kWtPopup || win_type == kWtMinimal ||
+-      win_type == kWtFloating || win_type == kWtSystemUi) {
++      win_type == kWtFloating || win_type == kWtSystemUi ||
++      win_type == kWtDock) {
+     app = new WebAppWaylandWebOS(win_type, desc);
+   } else if (win_type == kWtOverlay || win_type == kWtNone) {
+     app = new WebAppWayland(win_type, std::nullopt, std::nullopt,
