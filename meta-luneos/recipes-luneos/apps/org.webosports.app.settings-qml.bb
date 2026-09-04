@@ -54,6 +54,7 @@ FILES:${PN} += "${webos_applicationsdir}/org.webosports.app.settings-common \
                 ${webos_applicationsdir}/org.webosports.app.settings.help \
                 ${webos_applicationsdir}/org.webosports.app.settings.languagepicker \
                 ${webos_applicationsdir}/org.webosports.app.settings.location \
+                ${webos_applicationsdir}/org.webosports.app.settings.printmanager \
                 ${webos_applicationsdir}/org.webosports.app.settings.screenlock \
                 ${webos_applicationsdir}/org.webosports.app.settings.searchpreferences \
                 ${webos_applicationsdir}/org.webosports.app.settings.soundsandalerts \
