@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "glib-2.0 luna-service2 json-c nyx-lib"
 
 PV = "1.0.0+git"
-SRCREV = "e5b921b1a0da7915d927b9ef7bb8e7e70737adaf"
+SRCREV = "8563eabec0fcb8f257ade36bf8ff9ab4556d80a4"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 
