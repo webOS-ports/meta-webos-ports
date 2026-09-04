@@ -1,0 +1,237 @@
+From 98609ac288b3792dbaa371784e1f2059a03f6d0b Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 4 Sep 2026 12:34:11 +0200
+Subject: [PATCH] Db8Predictor: poll for dictionary changes instead of relying
+ on watch
+
+find with "subscribe":true does not push updates when the underlying
+result set changes - confirmed empirically (a subscribed find via
+luna-send just sits there after its one reply, even while another
+client is putting new rows into the same kind).
+
+find also accepts a "watch":true flag alongside "query" (see the
+official db8 API reference) whose reply, later, carries "fired":true
+when the result set changes - but that too turned out to be one-shot
+in practice: confirmed live on-device, the same long-lived find+watch
+call delivered exactly one fired notification, for the first change
+made after registration, and nothing for two further changes made
+afterwards despite staying open the whole time.
+
+An earlier version of this fix tried re-registering a fresh watch
+from inside its own fired handler to keep listening for further
+changes. A watch registered against a kind that already has matching
+rows apparently has no prior state to compare against, so it reports
+fired immediately - re-registering it from the fired handler is an
+infinite tight loop. Confirmed live on-device: over ten thousand
+iterations in under a second, ~87% CPU pinned on mojodb, before
+MaliitServer was stopped by hand to recover.
+
+Given both of watch's failure modes here (too quiet, or catastrophically
+too loud), the actual freshness mechanism is now a plain poll timer -
+g_timeout_add_seconds every 30s, for the life of the predictor. Fixed
+cadence, cannot loop, guaranteed eventually consistent. The one-shot
+find+watch is kept as a fast path for the first change after startup,
+since it usually beats the timer to it, but nothing depends on it for
+correctness anymore.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS-ports specific]
+---
+ src/lib/predictors/db8Predictor.cpp | 91 ++++++++++++++++++++++-------
+ src/lib/predictors/db8Predictor.h   | 30 +++++++++-
+ 2 files changed, 100 insertions(+), 21 deletions(-)
+
+diff --git a/src/lib/predictors/db8Predictor.cpp b/src/lib/predictors/db8Predictor.cpp
+index 3d36e06..23c6431 100644
+--- a/src/lib/predictors/db8Predictor.cpp
++++ b/src/lib/predictors/db8Predictor.cpp
+@@ -84,8 +84,14 @@ void Db8Predictor::connect()
+         return;
+     }
+ 
++    // The actual freshness mechanism - see the header comment for why this
++    // exists instead of relying on watch alone. Registered exactly once,
++    // for the life of this predictor; pollCallback no-ops until kind is
++    // known.
++    g_timeout_add_seconds(POLL_INTERVAL_SECONDS, Db8Predictor::pollCallback, this);
++
+     if (!kind.empty())
+-        findWords();
++        findWordsAndWatch();
+ }
+ 
+ void Db8Predictor::set_kind (const std::string& value)
+@@ -94,7 +100,7 @@ void Db8Predictor::set_kind (const std::string& value)
+     logger << INFO << "KIND: " << value << endl;
+ 
+     if (serviceHandle)
+-        findWords();
++        findWordsAndWatch();
+ }
+ 
+ 
+@@ -104,12 +110,33 @@ void Db8Predictor::set_probability (const std::string& value)
+     logger << INFO << "PROBABILITY: " << value << endl;
+ }
+ 
+-void Db8Predictor::findWords()
++// Registers ONE long-lived find, with "watch":true alongside "query" (the
++// db8 API's actual live-notification flag - see the header comment). Call
++// this exactly once per kind: the subscription it creates keeps delivering
++// "fired" notifications on its own for as long as it stays open, so it
++// must never be re-registered from inside handleFindResult().
++void Db8Predictor::findWordsAndWatch()
+ {
+     LSError error;
+     LSErrorInit(&error);
+ 
+-    std::string payload = "{\"subscribe\":true,\"query\":{\"from\":\"" + kind + "\",\"orderBy\":\"word\"}}";
++    std::string payload = "{\"query\":{\"from\":\"" + kind + "\",\"orderBy\":\"word\"},\"watch\":true}";
++
++    if (!LSCall(serviceHandle, "luna://com.palm.db/find", payload.c_str(),
++                Db8Predictor::findCallback, this, NULL, &error)) {
++        logger << ERROR << "com.palm.db/find failed: " << error.message << endl;
++        LSErrorFree(&error);
++    }
++}
++
++// One-shot refresh, no watch - used to pick up what changed once the
++// standing subscription above reports a fired notification.
++void Db8Predictor::refreshWords()
++{
++    LSError error;
++    LSErrorInit(&error);
++
++    std::string payload = "{\"query\":{\"from\":\"" + kind + "\",\"orderBy\":\"word\"}}";
+ 
+     if (!LSCall(serviceHandle, "luna://com.palm.db/find", payload.c_str(),
+                 Db8Predictor::findCallback, this, NULL, &error)) {
+@@ -144,27 +171,51 @@ void Db8Predictor::handleFindResult(const char* payload)
+     }
+ 
+     json_object* resultsObj = 0;
+-    if (!json_object_object_get_ex(root, "results", &resultsObj) ||
+-        !json_object_is_type(resultsObj, json_type_array)) {
+-        json_object_put(root);
+-        return;
+-    }
+-
+-    std::vector<std::string> newWords;
+-    int count = json_object_array_length(resultsObj);
+-    for (int i = 0; i < count; i++) {
+-        json_object* entry = json_object_array_get_idx(resultsObj, i);
+-        json_object* wordObj = 0;
+-        if (entry && json_object_object_get_ex(entry, "word", &wordObj) &&
+-            json_object_is_type(wordObj, json_type_string)) {
+-            newWords.push_back(json_object_get_string(wordObj));
++    if (json_object_object_get_ex(root, "results", &resultsObj) &&
++        json_object_is_type(resultsObj, json_type_array)) {
++        std::vector<std::string> newWords;
++        int count = json_object_array_length(resultsObj);
++        for (int i = 0; i < count; i++) {
++            json_object* entry = json_object_array_get_idx(resultsObj, i);
++            json_object* wordObj = 0;
++            if (entry && json_object_object_get_ex(entry, "word", &wordObj) &&
++                json_object_is_type(wordObj, json_type_string)) {
++                newWords.push_back(json_object_get_string(wordObj));
++            }
+         }
++
++        words = newWords;
++        logger << INFO << "Loaded " << words.size() << " words from " << kind << endl;
+     }
+ 
++    // The find+watch subscription's later replies carry "fired":true when
++    // the result set changes, and may or may not repeat "results" - fetch
++    // it explicitly with a plain one-shot find rather than relying on
++    // that. This does NOT re-register the watch: the original find+watch
++    // call stays open and keeps delivering future fired notifications by
++    // itself. (Re-registering here was the infinite-loop bug - see the
++    // header comment.)
++    json_object* firedObj = 0;
++    bool fired = json_object_object_get_ex(root, "fired", &firedObj)
++                 && json_object_get_boolean(firedObj);
++
+     json_object_put(root);
+ 
+-    words = newWords;
+-    logger << INFO << "Loaded " << words.size() << " words from " << kind << endl;
++    if (fired)
++        refreshWords();
++}
++
++// Fires on a fixed POLL_INTERVAL_SECONDS cadence for the life of this
++// predictor - see the header comment for why this, and not watch alone,
++// is what actually keeps words current. Returns TRUE (via G_SOURCE_CONTINUE)
++// unconditionally so glib keeps calling it; it cannot loop tighter than
++// its own fixed interval, unlike re-arming a watch from its own handler.
++gboolean Db8Predictor::pollCallback(gpointer ctx)
++{
++    Db8Predictor* self = static_cast<Db8Predictor*>(ctx);
++    if (!self->kind.empty())
++        self->refreshWords();
++    return G_SOURCE_CONTINUE;
+ }
+ 
+ Prediction Db8Predictor::predict(const size_t max_partial_predictions_size, const char** filter) const
+diff --git a/src/lib/predictors/db8Predictor.h b/src/lib/predictors/db8Predictor.h
+index 16cc441..43a6f80 100644
+--- a/src/lib/predictors/db8Predictor.h
++++ b/src/lib/predictors/db8Predictor.h
+@@ -27,6 +27,7 @@
+ #include "../core/dispatcher.h"
+ 
+ #include <luna-service2/lunaservice.h>
++#include <glib.h>
+ 
+ #include <vector>
+ #include <string>
+@@ -44,6 +45,29 @@
+  * property - the shape org.webosports.app.settings' Text Assist page
+  * already keeps its user dictionary in). PROBABILITY works the same
+  * way DictionaryPredictor's does.
++ *
++ * db8's find does NOT push live updates for "subscribe":true the way
++ * getPreferences-style calls do - confirmed empirically, a subscribed
++ * find just sits there after its one reply. find also accepts a
++ * "watch":true flag alongside "query" (see the official db8 reference)
++ * whose reply, later, carries "fired":true when the result set changes
++ * - but that too is one-shot in practice: confirmed live on-device, it
++ * delivered exactly one "fired" notification for the first change after
++ * registration and nothing for the two changes after that, despite the
++ * original call staying open throughout. (An earlier version of this
++ * file tried re-registering a fresh watch from inside its own fired
++ * handler to keep listening. A watch registered against a kind that
++ * already has matching rows apparently has no prior state to compare
++ * against, so it reports fired immediately - re-registering it from the
++ * fired handler is an infinite tight loop, confirmed live on-device:
++ * over ten thousand iterations in under a second, ~87% CPU pinned on
++ * mojodb. Do not reintroduce that pattern.)
++ *
++ * So the actual freshness mechanism here is a plain poll timer
++ * (POLL_INTERVAL_SECONDS, via glib) that re-fetches on a fixed cadence
++ * no matter what watch does - simple, and it cannot loop. The one-shot
++ * watch is kept only as a fast path: it typically beats the timer to
++ * the first change made right after a restart.
+  */
+ class Db8Predictor : public Predictor, public Observer {
+ public:
+@@ -61,10 +85,14 @@ public:
+ 
+ private:
+     void connect();
+-    void findWords();
++    void findWordsAndWatch();
++    void refreshWords();
+     void handleFindResult(const char* payload);
+ 
+     static bool findCallback(LSHandle* handle, LSMessage* message, void* ctx);
++    static gboolean pollCallback(gpointer ctx);
++
++    static const unsigned int POLL_INTERVAL_SECONDS = 30;
+ 
+     std::string LOGGER;
+     std::string KIND;
+-- 
+2.53.0
+
