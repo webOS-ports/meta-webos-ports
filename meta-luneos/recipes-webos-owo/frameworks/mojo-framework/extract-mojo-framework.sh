@@ -13,7 +13,9 @@
 # Only the pieces the framework needs at runtime are taken:
 #
 #   mojo/         mojo.js, the submission's assets and the builtin blobs
-#   mojocommon/   shared images and templates; mojo/ symlinks into it
+#                 (both Mojo 1's and Mojo 2's)
+#   mojo2/        Mojo 2 bootstrap mojo.js and its submission's assets
+#   mojocommon/   shared images and templates; mojo/ and mojo2/ symlink into it
 #   mojo.core/    loadable framework behind mojo-core.js
 #   prototype/    stock Prototype 1.6.0.3, used instead of the builtin rewrite
 #
@@ -43,7 +45,7 @@ mkdir -p "$DEST"
 
 # -a keeps the relative symlinks under mojo/submissions/NNN that point into
 # mojocommon; they resolve once both are installed side by side.
-for part in mojo mojocommon mojo.core prototype; do
+for part in mojo mojo2 mojocommon mojo.core prototype; do
     if [ ! -e "$FW/$part" ]; then
         echo "error: missing $FW/$part" >&2
         exit 1
@@ -52,8 +54,8 @@ for part in mojo mojocommon mojo.core prototype; do
 done
 cp -a "$FW/mojo-core.js" "$DEST/"
 
-# Other submissions and the Mojo 2 tree are dead weight for LuneOS, which
-# builds x-mojo-version="1" only.
+# Other Mojo 1 submissions are dead weight; 3.0.5 images carry only one
+# Mojo 2 submission, which is kept as-is.
 find "$DEST/mojo/submissions" -mindepth 1 -maxdepth 1 -type d \
      ! -name "$SUBMISSION" -exec rm -rf {} +
 
