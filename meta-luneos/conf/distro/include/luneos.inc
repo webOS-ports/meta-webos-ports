@@ -79,13 +79,19 @@ WEBOS_DEFAULT_EXTRA_RRECOMMENDS = ""
 DISTRO_EXTRA_RDEPENDS += " ${WEBOS_DEFAULT_EXTRA_RDEPENDS}"
 DISTRO_EXTRA_RRECOMMENDS += " ${WEBOS_DEFAULT_EXTRA_RRECOMMENDS}"
 
-DISTRO_EXTRA_RDEPENDS:append:qemuall = " kernel-module-vboxvideo kernel-module-vboxguest kernel-module-uvesafb kernel-module-virtio-gpu kernel-module-vmwgfx"
+DISTRO_EXTRA_RDEPENDS:append:qemuall = " kernel-module-vboxvideo kernel-module-vboxguest kernel-module-uvesafb kernel-module-virtio-gpu"
+# Our video.cfg asks for CONFIG_DRM_VMWGFX=m, but on the 64bit BSPs
+# yocto-kernel-cache's features/drm-bochs/drm-bochs-64.cfg is merged after it and
+# forces CONFIG_DRM_VMWGFX=y, so there is no kernel-module-vmwgfx package there.
+# 32bit qemux86 does not pull in that fragment and still builds it as a module.
+DISTRO_EXTRA_RDEPENDS:append:qemux86 = " kernel-module-vmwgfx"
 
 MACHINE_ESSENTIAL_EXTRA_RDEPENDS:remove:qemuall = "v86d"
 
 KERNEL_MODULE_AUTOLOAD:append:qemux86 = " vmwgfx vboxguest vboxsf"
 KERNEL_MODULE_PROBECONF:append:qemux86 = " vmwgfx"
-KERNEL_MODULE_AUTOLOAD:append:qemux86-64 = " vmwgfx vboxguest vboxsf"
+# vmwgfx is built into the kernel on qemux86-64, so it needs no autoloading
+KERNEL_MODULE_AUTOLOAD:append:qemux86-64 = " vboxguest vboxsf"
 KERNEL_MODULE_PROBECONF:append:qemux86-64 = " vmwgfx"
 
 # Prevent vboxvideo from loading, it conflicts with vmwgfx
