@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: LuneOS <dev@luneos.org>
+Date: Thu, 3 Sep 2026 19:30:00 +0200
+Subject: [PATCH] vpn-provider: skip connections with no object path in
+ GetConnections
+
+net.connman.vpn.Manager.GetConnections() crashes connman-vpnd the moment
+anything calls it, on a completely stock install with zero VPN profiles
+ever configured (/var/lib/connman-vpn empty). append_connection_structs()
+iterates provider_hash and skips entries with no identifier, but not
+entries with no path:
+
+    DBG("path %s", provider->path);          -> logs "path (null)"
+    if (!provider->identifier)
+            continue;
+    ...
+    dbus_message_iter_append_basic(&entry, DBUS_TYPE_OBJECT_PATH,
+                    &provider->path);
+
+Passing a NULL object-path string to dbus_message_iter_append_basic()
+trips libdbus's own _dbus_check_is_valid_path() assertion and the process
+aborts (SIGABRT), tearing down every VPN connection along with it - not a
+graceful per-call failure.
+
+There is at least one provider_hash entry with an identifier but no path
+by the time GetConnections() first runs, independent of any provider a
+caller has configured. Skip it the same way a missing identifier already
+is, rather than handing libdbus a NULL.
+
+Found via connman_vpn_client.c's connman_vpn_client_create() eagerly
+calling GetConnections() as soon as connman-vpnd appears on the bus -
+apparently the first thing on a stock LuneOS image to ever make that
+call, which is why this had gone unnoticed.
+
+Upstream-Status: Pending
+
+Signed-off-by: LuneOS <dev@luneos.org>
+---
+ vpn/vpn-provider.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/vpn/vpn-provider.c b/vpn/vpn-provider.c
+--- a/vpn/vpn-provider.c
++++ b/vpn/vpn-provider.c
+@@ -2709,7 +2709,7 @@ static void append_connection_structs(DBusMessageIter *iter, void *user_data)
+ 
+ 		DBG("path %s", provider->path);
+ 
+-		if (!provider->identifier)
++		if (!provider->identifier || !provider->path)
+ 			continue;
+ 
+ 		dbus_message_iter_open_container(iter, DBUS_TYPE_STRUCT,
+-- 
+2.43.0
