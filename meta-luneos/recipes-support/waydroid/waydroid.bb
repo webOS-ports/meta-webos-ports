@@ -47,6 +47,10 @@ WAYDROID_IMAGE_RDEPENDS:mindphone = ""
 # current lineage-20.0 pair for waydroid_arm64, so the OTA path is both correct
 # and maintained here, unlike the frozen HALIUM_9 line.
 WAYDROID_IMAGE_RDEPENDS:halium-arm64 = ""
+# halium-arm is halium-arm64's 32-bit sibling and the same reasoning applies:
+# it is a generic rootfs, not a pinned device, so the vendor pairing can only
+# be resolved at runtime over OTA.
+WAYDROID_IMAGE_RDEPENDS:halium-arm = ""
 
 # python3-pyclip is still required: clipboard_manager.py imports it at module
 # level in 1.6.3 and gates the whole clipboard thread on the import succeeding,
@@ -64,12 +68,37 @@ RDEPENDS:${PN} += "${WAYDROID_IMAGE_RDEPENDS} lxc python3-gbinder python3-pygobj
     libgbinder python3-pyclip python3-dbus dnsmasq iptables iproute2"
 
 # The package varies by machine - WAYDROID_IMAGE_RDEPENDS decides whether it
-# pulls waydroid-data, and mindphone gets a config file nothing else does -
-# while tissot-halium, mido-halium and halium-arm64 all share TUNE_PKGARCH
-# aarch64-halium. Without this they overwrite each other in the feed: building
-# tissot after halium-arm64 leaves a package that demands waydroid-data on the
-# GSI machine, where opkg then refuses it with "nothing provides waydroid-data".
-PACKAGE_ARCH = "${MACHINE_ARCH}"
+# pulls waydroid-data, and mindphone gets a config file nothing else does. That
+# only has to become a per-machine PACKAGE_ARCH where a COMPATIBLE_MACHINE entry
+# shares its TUNE_PKGARCH with another one that disagrees on content:
+#
+#   - tissot-halium, mido-halium and halium-arm64 all share TUNE_PKGARCH
+#     aarch64-halium, but only halium-arm64 sets WAYDROID_IMAGE_RDEPENDS empty -
+#     tissot-halium and mido-halium both keep the default. Left alone, building
+#     tissot after halium-arm64 overwrites the aarch64-halium feed entry with a
+#     package that demands waydroid-data, and the GSI machine's opkg then
+#     refuses it with "nothing provides waydroid-data". halium-arm64 is the odd
+#     one out, so it is the one that needs pulling into its own arch.
+#   - pinephone, pinephonepro and pinetab2 are deliberately pinned to the plain
+#     "aarch64" DEFAULTTUNE (see their machine .conf files) specifically so
+#     they can reuse each other's prebuilt packages instead of rebuilding Qt
+#     and WebEngine per device. None of them override WAYDROID_IMAGE_RDEPENDS,
+#     so forcing MACHINE_ARCH on them would defeat that sharing for no reason.
+#   - raspberrypi3 and raspberrypi4 (32-bit) likewise share the cortexa7
+#     tune and take the default content, so the same applies under :rpi.
+#   - mindphone's TUNE_PKGARCH (cortexa8 + the "-halium" suffix) is shared
+#     with hammerhead-halium and tenderloin-halium for sstate reuse, but
+#     neither of those two builds waydroid, so that pairing alone would need
+#     nothing here. halium-arm deliberately joins the same cortexa8 tune too
+#     (see halium-arm.conf) so it can share sstate with mindphone - which
+#     reopens the collision: mindphone's do_install:append:mindphone ships an
+#     extra config file halium-arm's package does not. mindphone is the one
+#     pulled into its own arch, not halium-arm, so any future device that
+#     lands on this tune with the plain content (the common case, matching
+#     how tissot-halium/mido-halium stayed the default above) keeps sharing
+#     with halium-arm without needing its own line here.
+PACKAGE_ARCH:halium-arm64 = "${MACHINE_ARCH}"
+PACKAGE_ARCH:mindphone = "${MACHINE_ARCH}"
 
 # these modules are directly included in android-flavored kernels
 # Note: Waydroid requires kernel >= 3.18 !
@@ -110,8 +139,11 @@ COMPATIBLE_MACHINE:pinephonepro = "(.*)"
 COMPATIBLE_MACHINE:pinetab2 = "(.*)"
 COMPATIBLE_MACHINE:mido-halium = "(.*)"
 COMPATIBLE_MACHINE:tissot-halium = "(.*)"
-COMPATIBLE_MACHINE:mindphone = "(.*)"
 COMPATIBLE_MACHINE:halium-arm64 = "(.*)"
+# No :mindphone entry: mindphone.conf carries "halium-arm" in its
+# MACHINEOVERRIDES precisely so it picks this up from here instead of needing
+# its own line - see the comment there.
+COMPATIBLE_MACHINE:halium-arm = "(.*)"
 
 inherit pkgconfig
 inherit webos_app
