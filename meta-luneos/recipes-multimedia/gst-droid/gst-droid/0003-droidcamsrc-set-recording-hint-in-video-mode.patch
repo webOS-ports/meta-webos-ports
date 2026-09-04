@@ -1,0 +1,58 @@
+From ef007a70a09f555ba4e90199b9977dde43a7294d Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 4 Sep 2026 10:22:49 +0200
+Subject: [PATCH] droidcamsrc: set recording-hint when switching to video mode
+
+QCOM's HAL1 only sets up the camera's recording stream once it has been told
+a recording session is coming. Without recording-hint=true the camera accepts
+startRecording() and the vendor encoder is even created and configured -
+OMX.qcom.video.encoder.avc at the negotiated size, with mm-camera logging an
+ENCODER hw_stream - but no CAMERA_MSG_VIDEO_FRAME is ever delivered. Android's
+CameraSource then sits in 'Timed out waiting for incoming camera video frames'
+and 'Waiting on an available memory base timed out. Dropping a recording
+frame.', the recorder's data callback never fires, vidsrc pushes nothing and
+the recording comes out empty. Seen on tissot (msm8953, Halium 9); the
+parameter is advertised as recording-hint=false there.
+
+Set it from apply_mode_settings() rather than next to the recorder: the
+parameter has to be in place before the recorder is created, and mode changes
+run through apply_mode_settings() with SET_AND_APPLY, well before
+start-capture. It is only touched when the HAL advertises the key, so devices
+that do not know it are left exactly as they were, and it is cleared again on
+the way back to image mode so stills do not keep the video tuning.
+
+Upstream-Status: Pending
+---
+ gst/droidcamsrc/gstdroidcamsrc.c | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/gst/droidcamsrc/gstdroidcamsrc.c b/gst/droidcamsrc/gstdroidcamsrc.c
+index c6f9a4c..abfd8b3 100644
+--- a/gst/droidcamsrc/gstdroidcamsrc.c
++++ b/gst/droidcamsrc/gstdroidcamsrc.c
+@@ -2372,6 +2372,25 @@ gst_droidcamsrc_apply_mode_settings (GstDroidCamSrc * src,
+     gst_droidcamsrc_dev_enable_face_detection (src->dev, TRUE);
+   }
+ 
++  /* recording hint
++   *
++   * QCOM's HAL1 only sets up the camera's recording stream when it has been
++   * told a recording session is coming. Without recording-hint=true,
++   * startRecording() is accepted and the vendor encoder is even created, but
++   * no CAMERA_MSG_VIDEO_FRAME ever arrives: Android's CameraSource sits in
++   * "Timed out waiting for incoming camera video frames", vidsrc pushes
++   * nothing and the recording ends up empty.
++   *
++   * The parameter has to be in place before the recorder is created, which is
++   * why it is set here - mode changes run through apply_mode_settings() with
++   * SET_AND_APPLY, well before start-capture - rather than next to the
++   * recorder itself. Only touch it when the HAL advertises it, so devices
++   * that do not know the parameter are left exactly as they were. */
++  if (gst_droidcamsrc_params_get_string (src->dev->params, "recording-hint")) {
++    gst_droidcamsrc_params_set_string (src->dev->params, "recording-hint",
++        src->mode == MODE_VIDEO ? "true" : "false");
++  }
++
+   /* image noise reduction */
+   gst_droidcamsrc_apply_quirk (src, "image-noise-reduction",
+       src->image_noise_reduction);
