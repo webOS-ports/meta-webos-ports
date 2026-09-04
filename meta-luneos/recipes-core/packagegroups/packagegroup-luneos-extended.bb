@@ -144,6 +144,7 @@ LIBHYBRIS_RDEPENDS = " \
     pulseaudio-modules-droid \
     pulseaudio-modules-droid-hidl \
     gst-droid \
+    luneos-rtc-engine \
     qt6-qpa-hwcomposer-plugin \
     bluebinder \
     \
@@ -214,6 +215,12 @@ ESIM_RDEPENDS = " \
 # is gst-droid (in LIBHYBRIS_RDEPENDS above): droidcamsrc/droiddec reach the
 # vendor camera HAL and codecs through the droidmedia services in the Android
 # container, and Qt 6 Multimedia's gstreamer backend sits on top.
+#
+# The service that sits in front of it, com.webos.service.camera, is NOT here:
+# it is machine-independent and ships from packagegroup-webos-extended next to
+# com.webos.app.camera. Its droid HAL and notifier plugins link nothing but
+# GStreamer and reach gst-droid through gst_element_factory_make("droidcamsrc"),
+# so the same package serves the v4l2 path on mainline machines.
 
 # Every Halium machine gets the stack through the "halium" override that
 # meta-android-halium.inc already puts in MACHINEOVERRIDES, rather than through
@@ -259,10 +266,13 @@ RDEPENDS:${PN}:append:halium-arm64 = " ${ESIM_RDEPENDS}"
 # image. A machine enabled there but missing here builds the ipk and then ships
 # an image without it - which is how mindphone, halium-arm64 and rpi all went
 # out with no container despite being wired up for one.
+#
+# No :mindphone line: mindphone.conf's MACHINEOVERRIDES carries "halium-arm",
+# so it already picks up the :halium-arm line below the same way it picks up
+# COMPATIBLE_MACHINE:halium-arm in waydroid.bb.
 RDEPENDS:${PN}:append:halium-arm = " waydroid"
 RDEPENDS:${PN}:append:halium-arm64 = " waydroid"
 RDEPENDS:${PN}:append:mido-halium = " waydroid"
-RDEPENDS:${PN}:append:mindphone = " waydroid"
 RDEPENDS:${PN}:append:pinephone = " waydroid"
 RDEPENDS:${PN}:append:pinephonepro = " waydroid"
 RDEPENDS:${PN}:append:pinetab2 = " waydroid"

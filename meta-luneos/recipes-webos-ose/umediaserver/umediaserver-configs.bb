@@ -24,5 +24,29 @@ EXTRA_OECMAKE += "-DWEBOS_INSTALL_CONFCAPSDIR:STRING=${webos_frameworksdir}"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
 
+# Halium: the default resource table has no video-encoder units, so any
+# pipeline that requests VENC (mediarecorder's record pipeline, future
+# call pipelines) fails its resource acquisition. The Venus VPU on these
+# SoCs handles concurrent encode sessions; declare two.
+do_install:append:halium() {
+    # insert the VENC block right after "resources = ("
+    awk 'BEGIN{done=0}
+         /^resources = \($/ && !done {
+             print;
+             print "	{";
+             print "		id = \"VENC\";";
+             print "		name = \"Digital Video Encoder\";";
+             print "		qty = 2;";
+             print "	},";
+             print "";
+             done=1; next
+         }
+         {print}' \
+        ${D}${sysconfdir}/umediaserver/umediaserver_resource_config.txt \
+        > ${D}${sysconfdir}/umediaserver/rc.tmp
+    mv ${D}${sysconfdir}/umediaserver/rc.tmp \
+        ${D}${sysconfdir}/umediaserver/umediaserver_resource_config.txt
+}
+
 FILES:${PN} += "${webos_frameworksdir}/umediaserver/*"
 EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
