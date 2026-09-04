@@ -95,9 +95,13 @@ RDEPENDS:${PN} = " \
   sensorfw \
   \
   luna-appmanager \
+  luna-authmanager \
+  luna-backupagent \
+  luna-displaymanager \
+  luna-haptics \
   luna-next-cardshell \
-  luna-sysmgr \
   luna-sysmgr-conf \
+  luneos-system-sounds \
   luneos-components \
   qtlocation-luneos-plugin \
   webos-system-update \
