@@ -25,20 +25,31 @@
 # for the everyday paths, so cap there and let deviceinfo override it for a
 # device that wants otherwise.
 
+# deviceinfo_binder_slots lets a device state its slots outright, the same way
+# it can already state the IRadio version and the signal strength range. That
+# is not only a shortcut: lshal is not dependable everywhere. On sargo it dies
+# in getDeviceHalManifest with "VINTF parse error: Not a valid XML:
+# /apex/apex-info-list.xml", so the poll below sees nothing, this generator
+# bails, and the shipped single-slot binder.conf stays - which leaves
+# ofono-binder-plugin logging "Missing path for slot slot2" for a slot the HAL
+# really does have. A device that knows its own topology should not have to ask.
+slots=${deviceinfo_binder_slots:-}
+
 LSHAL=
-for c in lshal /android/system/bin/lshal /system/bin/lshal; do
-    command -v "$c" >/dev/null 2>&1 && { LSHAL=$c; break; }
-done
-[ -n "$LSHAL" ] || exit 0
+if [ -z "$slots" ]; then
+    for c in lshal /android/system/bin/lshal /system/bin/lshal; do
+        command -v "$c" >/dev/null 2>&1 && { LSHAL=$c; break; }
+    done
+    [ -n "$LSHAL" ] || exit 0
+fi
 
 # The RIL registers asynchronously once init's gates are open, so poll rather
 # than sample once. Getting this wrong is not harmless: with no slots we write
 # nothing, ofono falls back to the shipped generic ril_subscription.conf which
 # still uses socket=/dev/socket/rild, and on a binder device that means an
 # abort-restart loop.
-slots=
 i=0
-while [ $i -lt 30 ]; do
+while [ -z "$slots" ] && [ $i -lt 30 ]; do
     slots=$($LSHAL 2>/dev/null |
             grep -oE 'android\.hardware\.radio@[0-9.]+::IRadio/slot[0-9]+' |
             sed 's|.*/||' | sort -u)
@@ -52,7 +63,7 @@ if [ -z "$slots" ]; then
 fi
 
 radio_interface=${deviceinfo_binder_radio_interface:-}
-if [ -z "$radio_interface" ]; then
+if [ -z "$radio_interface" ] && [ -n "$LSHAL" ]; then
     highest=$($LSHAL 2>/dev/null |
               grep -oE 'android\.hardware\.radio@[0-9]+\.[0-9]+::IRadio/slot[0-9]+' |
               sed -E 's|.*@([0-9]+\.[0-9]+)::.*|\1|' |
