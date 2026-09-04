@@ -1,0 +1,460 @@
+From 640b72ee5adefdcb319e5c9d1a9b517b741d1917 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 4 Sep 2026 09:14:08 +0200
+Subject: [PATCH 1/2] Add Db8Predictor: a DictionaryPredictor backed by webOS
+ db8
+
+Same idea as DictionaryPredictor - prefix-match tokens out of a word
+list - except the word list lives in webOS's db8 rather than a flat
+file. A standing db8 subscription (luna://com.palm.db/find,
+subscribe:true) keeps an in-memory copy of the current word list up
+to date; predict() only ever reads that copy, so a keystroke never
+waits on the bus, and a restore that repopulates db8 (which always
+ends in a reboot on this platform) is picked up automatically the
+next time this predictor is constructed - no separate file to
+regenerate.
+
+Configured the same way DictionaryPredictor is, with KIND (a db8
+kind name) in place of DICTIONARY (a file path) and the same
+PROBABILITY.
+
+luna-service2 and json-c are only ever available (and only ever
+needed) for the target build - this recipe also builds a native
+variant for build-time tools like text2ngram, which must keep
+configuring and building without them, so detection is non-fatal
+and Db8Predictor drops out of the build entirely (USE_DB8PREDICTOR)
+if either is missing, the same way USE_SQLITE already does for
+optional SQLite support.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS-ports specific]
+---
+ configure.ac                        |  29 ++++
+ src/lib/core/Makefile.am            |   7 +
+ src/lib/core/predictorRegistry.cpp  |   9 ++
+ src/lib/predictors/Makefile.am      |  12 +-
+ src/lib/predictors/db8Predictor.cpp | 207 ++++++++++++++++++++++++++++
+ src/lib/predictors/db8Predictor.h   |  82 +++++++++++
+ 6 files changed, 345 insertions(+), 1 deletion(-)
+ create mode 100644 src/lib/predictors/db8Predictor.cpp
+ create mode 100644 src/lib/predictors/db8Predictor.h
+
+diff --git a/configure.ac b/configure.ac
+index c4ee280..1c4e766 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -201,6 +201,35 @@ fi
+ AM_CONDITIONAL([USE_SQLITE], [test "x$use_sqlite" = "xyes"])
+ 
+ 
++dnl =========================================================
++dnl Checks for luna-service2 and json-c, needed by Db8Predictor
++dnl (webOS-ports specific; upstream presage has no notion of
++dnl either). Non-fatal and undetected by default: only the
++dnl webOS target build of this recipe asks for these via
++dnl DEPENDS, and the native variant (used for build-time tools
++dnl like text2ngram) must configure and build fine without them.
++
++have_db8predictor=yes
++
++# luna-service2's own lunaservice.h #includes <glib.h> directly, but its .pc
++# does not expose glib-2.0's cflags to a plain (non-static) pkg-config query -
++# presumably a private Requires there. webos-keyboard never hit this because
++# Qt already pulls glib into its include path some other way; presage has no
++# such path of its own, so it has to ask for glib-2.0 explicitly too.
++PKG_CHECK_MODULES([LUNASERVICE2], [luna-service2 glib-2.0],
++                   [],
++                   [have_db8predictor=no])
++PKG_CHECK_MODULES([JSONC], [json-c],
++                   [],
++                   [have_db8predictor=no])
++
++if test "x$have_db8predictor" = "xyes"
++then
++    AC_DEFINE([USE_DB8PREDICTOR], [1], [Define to 1 if webOS db8 (luna-service2 + json-c) is available for Db8Predictor])
++fi
++AM_CONDITIONAL([USE_DB8PREDICTOR], [test "x$have_db8predictor" = "xyes"])
++
++
+ dnl ==================
+ dnl Checks for CppUnit
+ dnl ==================
+diff --git a/src/lib/core/Makefile.am b/src/lib/core/Makefile.am
+index c660c31..19b328f 100644
+--- a/src/lib/core/Makefile.am
++++ b/src/lib/core/Makefile.am
+@@ -28,6 +28,13 @@ SUBDIRS =	\
+ noinst_LTLIBRARIES = 	\
+ 	libcore.la
+ 
++# predictorRegistry.cpp #includes predictors/db8Predictor.h when
++# USE_DB8PREDICTOR is defined (see configure.ac) - that header itself
++# #includes <luna-service2/lunaservice.h>, so this library's own compile
++# needs the same include path predictors/Makefile.am gives
++# libDb8Predictor.la. Empty and harmless when USE_DB8PREDICTOR is unset.
++libcore_la_CXXFLAGS =	$(LUNASERVICE2_CFLAGS) $(JSONC_CFLAGS)
++
+ libcore_la_SOURCES =	\
+ 	prediction.cpp \
+ 	prediction.h \
+diff --git a/src/lib/core/predictorRegistry.cpp b/src/lib/core/predictorRegistry.cpp
+index 3c3212d..d4b559e 100644
+--- a/src/lib/core/predictorRegistry.cpp
++++ b/src/lib/core/predictorRegistry.cpp
+@@ -33,6 +33,9 @@
+ #include "predictors/dictionaryPredictor.h"
+ #include "predictors/recencyPredictor.h"
+ #include "predictors/dejavuPredictor.h"
++#ifdef USE_DB8PREDICTOR
++# include "predictors/db8Predictor.h"
++#endif
+ 
+ #include <set>
+ #include <algorithm>
+@@ -158,6 +161,12 @@ void PredictorRegistry::addPredictor(const std::string& predictorName)
+ 	else if (predictor_class == "DictionaryPredictor" )
+ 	{
+ 	    predictor = new DictionaryPredictor(config, contextTracker, name);
++#ifdef USE_DB8PREDICTOR
++	}
++	else if (predictor_class == "Db8Predictor" )
++	{
++	    predictor = new Db8Predictor(config, contextTracker, name);
++#endif
+ #ifdef USE_SQLITE
+ 	}
+ 	else if (predictor_class == "SmoothedNgramPredictor") 
+diff --git a/src/lib/predictors/Makefile.am b/src/lib/predictors/Makefile.am
+index ea2a870..c37de0a 100644
+--- a/src/lib/predictors/Makefile.am
++++ b/src/lib/predictors/Makefile.am
+@@ -40,6 +40,11 @@ DBCONNECTOR = \
+ 	dbconnector/libdbconnector.la
+ endif
+ 
++if USE_DB8PREDICTOR
++PREDICTORS += \
++	libDb8Predictor.la
++endif
++
+ noinst_LTLIBRARIES = \
+ 	libpredictors.la \
+ 	$(PREDICTORS)
+@@ -56,7 +61,12 @@ libAbbreviationExpansionPredictor_la_SOURCES =	abbreviationExpansionPredictor.h
+ 						abbreviationExpansionPredictor.cpp 
+ 
+ libDictionaryPredictor_la_SOURCES =	dictionaryPredictor.cpp \
+-					dictionaryPredictor.h      
++					dictionaryPredictor.h
++
++libDb8Predictor_la_SOURCES =		db8Predictor.cpp \
++					db8Predictor.h
++libDb8Predictor_la_CXXFLAGS =		$(LUNASERVICE2_CFLAGS) $(JSONC_CFLAGS)
++libDb8Predictor_la_LIBADD =		$(LUNASERVICE2_LIBS) $(JSONC_LIBS)
+ 
+ libDummyPredictor_la_SOURCES =		dummyPredictor.cpp \
+ 					dummyPredictor.h           
+diff --git a/src/lib/predictors/db8Predictor.cpp b/src/lib/predictors/db8Predictor.cpp
+new file mode 100644
+index 0000000..3d36e06
+--- /dev/null
++++ b/src/lib/predictors/db8Predictor.cpp
+@@ -0,0 +1,207 @@
++/******************************************************
++ *  Presage, an extensible predictive text entry system
++ *  ---------------------------------------------------
++ *
++ *  Copyright (C) 2026  WebOS Ports
++ *
++    This program is free software; you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation; either version 2 of the License, or
++    (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License along
++    with this program; if not, write to the Free Software Foundation, Inc.,
++    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++                                                                             *
++                                                                **********(*)*/
++
++#include "db8Predictor.h"
++
++#include <json-c/json.h>
++
++// LSRegister("org.webosports.presage.dictionary", ...) + LSGmainAttach against
++// the default GMainContext is the same pattern webos-keyboard's own
++// KeyboardSettings class already uses successfully inside this same process
++// (MaliitServer) to subscribe to com.webos.service.systemservice - see
++// src/plugin/keyboardsettings.cpp there. Copied deliberately rather than
++// reinvented, since that is proof the glib/Qt event loop integration this
++// relies on actually delivers subscription callbacks in this process.
++
++Db8Predictor::Db8Predictor (Configuration* config, ContextTracker* ht, const char* name)
++    : Predictor(config,
++	     ht,
++	     name,
++	     "Db8Predictor, db8 dictionary lookup",
++	     "Db8Predictor, a dictionary based predictor that generates a prediction by extracting tokens that start with the current prefix from a webOS db8 kind"
++	     ),
++      serviceHandle (0),
++      dispatcher (this)
++{
++    LOGGER      = PREDICTORS + name + ".LOGGER";
++    KIND        = PREDICTORS + name + ".KIND";
++    PROBABILITY = PREDICTORS + name + ".PROBABILITY";
++
++    // build notification dispatch map
++    dispatcher.map (config->find (LOGGER), & Db8Predictor::set_logger);
++    dispatcher.map (config->find (KIND), & Db8Predictor::set_kind);
++    dispatcher.map (config->find (PROBABILITY), & Db8Predictor::set_probability);
++
++    connect();
++}
++
++Db8Predictor::~Db8Predictor()
++{
++    if (serviceHandle) {
++        LSError error;
++        LSErrorInit(&error);
++        if (!LSUnregister(serviceHandle, &error)) {
++            logger << ERROR << "LSUnregister failed: " << error.message << endl;
++            LSErrorFree(&error);
++        }
++    }
++}
++
++void Db8Predictor::connect()
++{
++    LSError error;
++    LSErrorInit(&error);
++
++    if (!LSRegister("org.webosports.presage.dictionary", &serviceHandle, &error)) {
++        logger << ERROR << "LSRegister failed: " << error.message << endl;
++        LSErrorFree(&error);
++        serviceHandle = 0;
++        return;
++    }
++
++    if (!LSGmainAttach(serviceHandle, g_main_loop_new(g_main_context_default(), TRUE), &error)) {
++        logger << ERROR << "LSGmainAttach failed: " << error.message << endl;
++        LSErrorFree(&error);
++        return;
++    }
++
++    if (!kind.empty())
++        findWords();
++}
++
++void Db8Predictor::set_kind (const std::string& value)
++{
++    kind = value;
++    logger << INFO << "KIND: " << value << endl;
++
++    if (serviceHandle)
++        findWords();
++}
++
++
++void Db8Predictor::set_probability (const std::string& value)
++{
++    probability = Utility::toDouble (value);
++    logger << INFO << "PROBABILITY: " << value << endl;
++}
++
++void Db8Predictor::findWords()
++{
++    LSError error;
++    LSErrorInit(&error);
++
++    std::string payload = "{\"subscribe\":true,\"query\":{\"from\":\"" + kind + "\",\"orderBy\":\"word\"}}";
++
++    if (!LSCall(serviceHandle, "luna://com.palm.db/find", payload.c_str(),
++                Db8Predictor::findCallback, this, NULL, &error)) {
++        logger << ERROR << "com.palm.db/find failed: " << error.message << endl;
++        LSErrorFree(&error);
++    }
++}
++
++bool Db8Predictor::findCallback(LSHandle* handle, LSMessage* message, void* ctx)
++{
++    (void) handle;
++
++    if (!message)
++        return true;
++
++    const char* payload = LSMessageGetPayload(message);
++    if (!payload)
++        return true;
++
++    Db8Predictor* self = static_cast<Db8Predictor*>(ctx);
++    self->handleFindResult(payload);
++
++    return true;
++}
++
++void Db8Predictor::handleFindResult(const char* payload)
++{
++    json_object* root = json_tokener_parse(payload);
++    if (!root) {
++        logger << ERROR << "Could not parse com.palm.db/find reply" << endl;
++        return;
++    }
++
++    json_object* resultsObj = 0;
++    if (!json_object_object_get_ex(root, "results", &resultsObj) ||
++        !json_object_is_type(resultsObj, json_type_array)) {
++        json_object_put(root);
++        return;
++    }
++
++    std::vector<std::string> newWords;
++    int count = json_object_array_length(resultsObj);
++    for (int i = 0; i < count; i++) {
++        json_object* entry = json_object_array_get_idx(resultsObj, i);
++        json_object* wordObj = 0;
++        if (entry && json_object_object_get_ex(entry, "word", &wordObj) &&
++            json_object_is_type(wordObj, json_type_string)) {
++            newWords.push_back(json_object_get_string(wordObj));
++        }
++    }
++
++    json_object_put(root);
++
++    words = newWords;
++    logger << INFO << "Loaded " << words.size() << " words from " << kind << endl;
++}
++
++Prediction Db8Predictor::predict(const size_t max_partial_predictions_size, const char** filter) const
++{
++    Prediction result;
++
++    std::string prefix = contextTracker->getPrefix();
++
++    unsigned int count = 0;
++    for (std::vector<std::string>::const_iterator it = words.begin();
++         it != words.end() && count < max_partial_predictions_size;
++         it++)
++    {
++        const std::string& candidate = *it;
++        if (candidate.find(prefix) == 0) {
++            if (token_satisfies_filter(candidate, prefix, filter)) {
++                result.addSuggestion(Suggestion(candidate, probability));
++                count++;
++            }
++        }
++    }
++
++    return result;
++}
++
++void Db8Predictor::learn(const std::vector<std::string>& change)
++{
++    // Nothing yet asks Presage to learn from what was typed (see
++    // WesternLanguagesPlugin::wordCandidateSelected in webos-keyboard, which
++    // is currently an empty stub) - matches DictionaryPredictor's own
++    // no-op here for the same reason. Words this predictor knows about
++    // come from db8 exclusively, via the subscription above.
++    (void) change;
++}
++
++void Db8Predictor::update (const Observable* var)
++{
++    logger << DEBUG << "About to invoke dispatcher: " << var->get_name () << " - " << var->get_value() << endl;
++    dispatcher.dispatch (var);
++}
+diff --git a/src/lib/predictors/db8Predictor.h b/src/lib/predictors/db8Predictor.h
+new file mode 100644
+index 0000000..16cc441
+--- /dev/null
++++ b/src/lib/predictors/db8Predictor.h
+@@ -0,0 +1,82 @@
++/******************************************************
++ *  Presage, an extensible predictive text entry system
++ *  ---------------------------------------------------
++ *
++ *  Copyright (C) 2026  WebOS Ports
++ *
++    This program is free software; you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation; either version 2 of the License, or
++    (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License along
++    with this program; if not, write to the Free Software Foundation, Inc.,
++    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++                                                                             *
++                                                                **********(*)*/
++
++#ifndef PRESAGE_DB8PREDICTOR
++#define PRESAGE_DB8PREDICTOR
++
++#include "predictor.h"
++#include "../core/dispatcher.h"
++
++#include <luna-service2/lunaservice.h>
++
++#include <vector>
++#include <string>
++
++
++/** db8 dictionary predictive predictor.
++ *
++ * Same idea as DictionaryPredictor - prefix-matches tokens out of a
++ * word list - except the word list lives in webOS's db8 rather than a
++ * flat file. A standing db8 subscription keeps an in-memory copy of
++ * the current word list up to date; predict() only ever reads that
++ * copy, so a keystroke never waits on the bus.
++ *
++ * KIND names the db8 kind to read (one record per word, in a "word"
++ * property - the shape org.webosports.app.settings' Text Assist page
++ * already keeps its user dictionary in). PROBABILITY works the same
++ * way DictionaryPredictor's does.
++ */
++class Db8Predictor : public Predictor, public Observer {
++public:
++    Db8Predictor (Configuration*, ContextTracker*, const char*);
++    ~Db8Predictor();
++
++    virtual Prediction predict (const size_t size, const char** filter) const;
++
++    virtual void learn (const std::vector<std::string>& change);
++
++    virtual void update (const Observable* variable);
++
++    void set_kind (const std::string& value);
++    void set_probability (const std::string& value);
++
++private:
++    void connect();
++    void findWords();
++    void handleFindResult(const char* payload);
++
++    static bool findCallback(LSHandle* handle, LSMessage* message, void* ctx);
++
++    std::string LOGGER;
++    std::string KIND;
++    std::string PROBABILITY;
++
++    std::string kind;
++    double probability;
++
++    LSHandle* serviceHandle;
++    std::vector<std::string> words;
++
++    Dispatcher<Db8Predictor> dispatcher;
++};
++
++#endif // PRESAGE_DB8PREDICTOR
+-- 
+2.53.0
+

@@ -22,15 +22,15 @@ DEPENDS = "maliit-framework-webos hunspell presage luna-service2 presage-native 
 RDEPENDS:${PN} += "maliit-framework-webos qtsvg-plugins qtmultimedia-qmlplugins"
 RRECOMMENDS:${PN} += "hunspell-dictionaries"
 
-SRCREV = "19cd63f602ff978648535f5abf779682aead34fc"
+SRCREV = "a95802ec9e11b8334147111bfeff98e9fad85e78"
 PV = "0.99.2+git"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
-    file://0001-make-it-compatible-with-newer-hunspell.patch \
-    file://0002-Handle-hardware-keyboard-input.patch \
-    file://0003-language-plugins-link-Qt6Core5Compat-for-QTextCodec.patch \
-    file://0004-plugin-hardware-T9-multi-tap.patch \
-"
+# We own webos-keyboard, so fixes belong in its actual source history, not
+# as patches carried here - unlike presage or imemanager, which are genuinely
+# upstream/third-party. 0001-0003 (hunspell API compat, hardware keyboard
+# input, Qt6Core5Compat linking) and the db8-backed user dictionary are all
+# real commits on herrie/dict-backup now; this SRCREV is the tip of that.
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 # a lot of cases like:
 # presage.h:115:40: error: ISO C++17 does not allow dynamic exception specifications
