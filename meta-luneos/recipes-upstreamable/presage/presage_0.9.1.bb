@@ -5,7 +5,14 @@ LICENSE = "GPL-2.0-or-later"
 LIC_FILES_CHKSUM = "file://COPYING;md5=94d55d512a9ba36caa9b7df079bae19f"
 
 DEPENDS = "sqlite3 libtinyxml ncurses"
-DEPENDS:append:class-target = " presage-native"
+# luna-service2 and json-c are what Db8Predictor (0006-...) needs to read
+# webOS's db8 - target-only, the native presage build (text2ngram etc, used
+# at build time) has no business linking against them. glib-2.0 has to be
+# named explicitly too: lunaservice.h #includes <glib.h> directly, but
+# luna-service2's own .pc does not expose glib-2.0's cflags to a plain
+# pkg-config query (a private Requires, presumably) - confirmed the hard way,
+# presage failed do_compile on a missing glib.h without this.
+DEPENDS:append:class-target = " presage-native luna-service2 json-c glib-2.0"
 
 BBCLASSEXTEND = "native"
 
@@ -24,6 +31,9 @@ SRC_URI = " \
     file://0003-predictors-Fix-build-with-gcc-7.patch \
     file://0004-Fix-build-with-gcc-11.patch \
     file://0005-configure.ac-don-t-use-L-usr-local-lib-in-LDFLAGS.patch \
+    file://0006-Add-Db8Predictor.patch \
+    file://0007-presage-xml-Db8Predictor.patch \
+    file://0008-Db8Predictor-poll-for-dictionary-changes.patch \
 "
 
 SRC_URI[md5sum] = "9667be297912fa0d432e748526d8dd9e"
