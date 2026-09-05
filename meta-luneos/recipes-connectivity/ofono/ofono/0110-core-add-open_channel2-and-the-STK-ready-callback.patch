@@ -1,0 +1,125 @@
+From bc6e2162932cf02a5955b107d4d7bb2dff208eb4 Mon Sep 17 00:00:00 2001
+From: LuneOS <claude.ai@herrie.org>
+Date: Thu, 3 Sep 2026 21:06:14 +0200
+Subject: [PATCH 110/114] core: add open_channel2 and the STK ready callback
+
+Two driver members Sailfish added that upstream never had, both needed by
+ofono-binder-plugin.
+
+open_channel2() is open_channel() with the AID length passed explicitly,
+which the binder SIM driver needs for logical channels, and logical
+channels are what eSIM support rests on. oFono prefers it wherever a
+driver provides it and falls back to open_channel() otherwise, so in-tree
+drivers are unaffected.
+
+It is placed immediately before set_active_card_slot in the driver struct.
+That is deliberate: ofono_sim_driver_register_version() truncates a
+version 1 registration at set_active_card_slot, so open_channel2 falls
+inside the copied region, matching the layout Sailfish-era plugins were
+compiled against.
+
+The STK driver gains ready(), invoked once an agent has registered, which
+lets a driver hold off proactive commands until something can display
+them.
+
+(cherry picked from commit 27e456cfa19ad6feeae51c8f2bbc65064000f9b5)
+Upstream-Status: Pending
+---
+ include/sim.h | 10 ++++++++++
+ include/stk.h |  2 ++
+ src/sim.c     | 24 ++++++++++++++++++------
+ src/stk.c     |  5 +++++
+ 4 files changed, 35 insertions(+), 6 deletions(-)
+
+diff --git a/include/sim.h b/include/sim.h
+index f07912a..8788440 100644
+--- a/include/sim.h
++++ b/include/sim.h
+@@ -200,6 +200,16 @@ struct ofono_sim_driver {
+ 	void (*logical_access)(struct ofono_sim *sim, int session_id,
+ 			const unsigned char *pdu, unsigned int len,
+ 			ofono_sim_logical_access_cb_t cb, void *data);
++	/*
++	 * Like open_channel, but passes the AID length explicitly. A driver
++	 * that talks to a modem which needs it should implement this one;
++	 * oFono prefers it when present. Placed before set_active_card_slot
++	 * so that a version 1 registration still carries it, matching the
++	 * layout external plugins were built against.
++	 */
++	void (*open_channel2)(struct ofono_sim *sim, const unsigned char *aid,
++			unsigned int len, ofono_sim_open_channel_cb_t cb,
++			void *data);
+ 	void (*set_active_card_slot)(struct ofono_sim *sim, unsigned int index,
+ 			ofono_sim_set_active_card_slot_cb_t cb, void *data);
+ };
+diff --git a/include/stk.h b/include/stk.h
+index c6f697a..cc2952b 100644
+--- a/include/stk.h
++++ b/include/stk.h
+@@ -39,6 +39,8 @@ struct ofono_stk_driver {
+ 					int length, const unsigned char *resp,
+ 					ofono_stk_generic_cb_t cb, void *data);
+ 	void (*user_confirmation)(struct ofono_stk *stk, ofono_bool_t confirm);
++	/* Called once an agent has registered and the driver may proceed */
++	void (*ready)(struct ofono_stk *stk);
+ };
+ 
+ int ofono_stk_driver_register(const struct ofono_stk_driver *d);
+diff --git a/src/sim.c b/src/sim.c
+index b5d1b0a..02251df 100644
+--- a/src/sim.c
++++ b/src/sim.c
+@@ -3977,9 +3977,15 @@ static void close_channel_cb(const struct ofono_error *error, void *data)
+ 		 * An atom requested to open during a close, we can re-open
+ 		 * here.
+ 		 */
+-		session->sim->driver->open_channel(session->sim,
+-				session->record->aid, open_channel_cb,
+-				session);
++		if (session->sim->driver->open_channel2)
++			session->sim->driver->open_channel2(session->sim,
++					session->record->aid,
++					session->record->aid_len,
++					open_channel_cb, session);
++		else
++			session->sim->driver->open_channel(session->sim,
++					session->record->aid, open_channel_cb,
++					session);
+ 		return;
+ 	}
+ 
+@@ -4056,9 +4062,15 @@ unsigned int __ofono_sim_add_session_watch(
+ 		 * a new session.
+ 		 */
+ 		session->state = SESSION_STATE_OPENING;
+-		session->sim->driver->open_channel(session->sim,
+-				session->record->aid, open_channel_cb,
+-				session);
++		if (session->sim->driver->open_channel2)
++			session->sim->driver->open_channel2(session->sim,
++					session->record->aid,
++					session->record->aid_len,
++					open_channel_cb, session);
++		else
++			session->sim->driver->open_channel(session->sim,
++					session->record->aid, open_channel_cb,
++					session);
+ 	} else if (session->state == SESSION_STATE_OPEN) {
+ 		/*
+ 		 * Session is already open and available, just call the
+diff --git a/src/stk.c b/src/stk.c
+index b4d8031..9f7e002 100644
+--- a/src/stk.c
++++ b/src/stk.c
+@@ -724,6 +724,11 @@ static DBusMessage *stk_register_agent(DBusConnection *conn,
+ 	if (stk->session_agent == NULL)
+ 		stk->current_agent = stk->default_agent;
+ 
++	if (stk->driver && stk->driver->ready) {
++		DBG("Reporting that the agent is ready");
++		stk->driver->ready(stk);
++	}
++
+ 	return dbus_message_new_method_return(msg);
+ }
+ 

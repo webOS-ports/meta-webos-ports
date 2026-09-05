@@ -1,0 +1,471 @@
+From e9e97900d659855d44cfb39e232aae891fa923dd Mon Sep 17 00:00:00 2001
+From: LuneOS <claude.ai@herrie.org>
+Date: Thu, 3 Sep 2026 18:41:39 +0200
+Subject: [PATCH 103/114] core: make the shared 3GPP enumerations public
+
+External atom drivers need the call, network-registration, operator,
+CLIP/CNAP and access-technology enumerations, which oFono keeps private
+in src/common.h. Move the definitions into the public headers, where
+Sailfish also puts them, and leave src/common.h defining its old
+unprefixed constant names as aliases so in-tree code is untouched.
+
+The enumeration tag names are deliberately not aliased with #define:
+several of them collide with struct member names, and a macro would
+silently rewrite call->clip_validity. The handful of 'enum <name>' uses
+are renamed instead. drivers/isimodem is left alone, since it has its
+own unrelated call_status and network_registration_status enumerations.
+
+Values are unchanged; a generated set of 43 static assertions against
+the pristine tree confirms it. OFONO_GPRS_AUTH_METHOD_ANY is appended
+rather than inserted, so the existing auth method values keep their
+meaning, and is handled in the two switches that enumerate the type.
+
+struct ofono_debug_desc gains a notify callback and OFONO_DEBUG_ATTR, so
+a plugin can place a descriptor in the __debug section and be told when
+ofonod -d enables it. Without the call in log.c the plugin's own log
+control would compile but never fire.
+
+(cherry picked from commit b506385c9ade063316e28b3bbfc1fd79c076c296)
+Upstream-Status: Pending
+---
+ drivers/qmimodem/voicecall.c |   4 +-
+ drivers/qmimodem/wds.c       |   4 ++
+ drivers/rilmodem/voicecall.c |   2 +-
+ include/ims.h                |   4 ++
+ include/log.h                |  14 ++++-
+ include/netreg.h             |  24 ++++++++
+ include/radio-settings.h     |   1 +
+ include/types.h              |  64 +++++++++++++++++++++
+ src/common.c                 |   7 ++-
+ src/common.h                 | 107 ++++++++++++++++++-----------------
+ src/log.c                    |   8 ++-
+ src/voicecall.c              |   2 +-
+ 12 files changed, 182 insertions(+), 59 deletions(-)
+
+diff --git a/drivers/qmimodem/voicecall.c b/drivers/qmimodem/voicecall.c
+index aed662d..142fe86 100644
+--- a/drivers/qmimodem/voicecall.c
++++ b/drivers/qmimodem/voicecall.c
+@@ -239,7 +239,7 @@ static bool qmi_to_ofono_status(uint8_t status, int *ret)
+ 	return err;
+ }
+ 
+-static enum call_direction qmi_to_ofono_direction(uint8_t qmi_direction)
++static enum ofono_call_direction qmi_to_ofono_direction(uint8_t qmi_direction)
+ {
+ 	return qmi_direction - 1;
+ }
+@@ -561,7 +561,7 @@ static void hangup_active(struct ofono_voicecall *vc, ofono_voicecall_cb_t cb,
+ {
+ 	struct voicecall_data *vd = ofono_voicecall_get_data(vc);
+ 	struct ofono_call *call;
+-	enum call_status active[] = {
++	enum ofono_call_status active[] = {
+ 		CALL_STATUS_ACTIVE,
+ 		CALL_STATUS_DIALING,
+ 		CALL_STATUS_ALERTING,
+diff --git a/drivers/qmimodem/wds.c b/drivers/qmimodem/wds.c
+index 07c96d4..2d6cc7d 100644
+--- a/drivers/qmimodem/wds.c
++++ b/drivers/qmimodem/wds.c
+@@ -24,6 +24,10 @@ int qmi_wds_auth_from_ofono(enum ofono_gprs_auth_method method)
+ 		return QMI_WDS_AUTHENTICATION_PAP;
+ 	case OFONO_GPRS_AUTH_METHOD_NONE:
+ 		return 0;
++	case OFONO_GPRS_AUTH_METHOD_ANY:
++		/* Let the network pick either */
++		return QMI_WDS_AUTHENTICATION_PAP |
++					QMI_WDS_AUTHENTICATION_CHAP;
+ 	}
+ 
+ 	return -ENOENT;
+diff --git a/drivers/rilmodem/voicecall.c b/drivers/rilmodem/voicecall.c
+index 6ccd529..0929601 100644
+--- a/drivers/rilmodem/voicecall.c
++++ b/drivers/rilmodem/voicecall.c
+@@ -56,7 +56,7 @@ struct change_state_req {
+ 	struct ofono_voicecall *vc;
+ 	ofono_voicecall_cb_t cb;
+ 	void *data;
+-	/* Call states affected by a local release (1 << enum call_status) */
++	/* Call states affected by a local release (1 << enum ofono_call_status) */
+ 	int affected_types;
+ };
+ 
+diff --git a/include/ims.h b/include/ims.h
+index 86193a9..0f45ddc 100644
+--- a/include/ims.h
++++ b/include/ims.h
+@@ -16,6 +16,10 @@ extern "C" {
+ 
+ #include <ofono/types.h>
+ 
++/* Registration capability bits reported by ofono_ims_status_notify() */
++#define OFONO_IMS_VOICE_CAPABLE	0x1
++#define OFONO_IMS_SMS_CAPABLE	0x4
++
+ struct ofono_ims;
+ 
+ typedef void (*ofono_ims_register_cb_t)(const struct ofono_error *error,
+diff --git a/include/log.h b/include/log.h
+index 9d535cf..22e98bf 100644
+--- a/include/log.h
++++ b/include/log.h
+@@ -27,13 +27,25 @@ extern void ofono_error(const char *format, ...)
+ extern void ofono_debug(const char *format, ...)
+ 				__attribute__((format(printf, 1, 2)));
+ 
++#define OFONO_DEBUG_ALIGN 8
++
++/*
++ * Lets an external plugin place a descriptor in the same __debug section
++ * the DBG() macro uses, so its logging can be driven by ofonod -d.
++ */
++#define OFONO_DEBUG_ATTR \
++	__attribute__((used, section("__debug"), aligned(OFONO_DEBUG_ALIGN)))
++
+ struct ofono_debug_desc {
+ 	const char *name;
+ 	const char *file;
+ #define OFONO_DEBUG_FLAG_DEFAULT (0)
+ #define OFONO_DEBUG_FLAG_PRINT   (1 << 0)
++#define OFONO_DEBUG_FLAG_HIDE_NAME (1 << 1)
+ 	unsigned int flags;
+-} __attribute__((aligned(8)));
++	/* Called when this descriptor is enabled; may be NULL */
++	void (*notify)(struct ofono_debug_desc *desc);
++} __attribute__((aligned(OFONO_DEBUG_ALIGN)));
+ 
+ /**
+  * DBG:
+diff --git a/include/netreg.h b/include/netreg.h
+index e8e6223..3794eab 100644
+--- a/include/netreg.h
++++ b/include/netreg.h
+@@ -16,6 +16,30 @@ extern "C" {
+ 
+ #include <ofono/types.h>
+ 
++/* netreg.h is now reachable from src/common.h, which may be included
++ * before modem.h; keep this header self-contained. */
++struct ofono_modem;
++
++enum ofono_netreg_status {
++	OFONO_NETREG_STATUS_NONE =			-1,
++	/* 27.007 Section 7.2 <stat> */
++	OFONO_NETREG_STATUS_NOT_REGISTERED =		0,
++	OFONO_NETREG_STATUS_REGISTERED =		1,
++	OFONO_NETREG_STATUS_SEARCHING =			2,
++	OFONO_NETREG_STATUS_DENIED =			3,
++	OFONO_NETREG_STATUS_UNKNOWN =			4,
++	OFONO_NETREG_STATUS_ROAMING =			5,
++	OFONO_NETREG_STATUS_REGISTERED_SMS_EUTRAN =	6,
++	OFONO_NETREG_STATUS_ROAMING_SMS_EUTRAN =	7,
++};
++
++enum ofono_operator_status {
++	OFONO_OPERATOR_STATUS_UNKNOWN =		0,
++	OFONO_OPERATOR_STATUS_AVAILABLE =	1,
++	OFONO_OPERATOR_STATUS_CURRENT =		2,
++	OFONO_OPERATOR_STATUS_FORBIDDEN =	3,
++};
++
+ struct ofono_netreg;
+ 
+ /* Theoretical limit is 16, but each GSM char can be encoded into
+diff --git a/include/radio-settings.h b/include/radio-settings.h
+index 83cbee4..5326c8f 100644
+--- a/include/radio-settings.h
++++ b/include/radio-settings.h
+@@ -21,6 +21,7 @@ enum ofono_radio_access_mode {
+ 	OFONO_RADIO_ACCESS_MODE_GSM	= 0x1,
+ 	OFONO_RADIO_ACCESS_MODE_UMTS	= 0x2,
+ 	OFONO_RADIO_ACCESS_MODE_LTE	= 0x4,
++	OFONO_RADIO_ACCESS_MODE_NR	= 0x8,
+ };
+ 
+ enum ofono_radio_band_gsm {
+diff --git a/include/types.h b/include/types.h
+index 3e48b8d..de6b87e 100644
+--- a/include/types.h
++++ b/include/types.h
+@@ -119,6 +119,70 @@ enum ofono_gprs_auth_method {
+ 	OFONO_GPRS_AUTH_METHOD_CHAP = 0,
+ 	OFONO_GPRS_AUTH_METHOD_PAP,
+ 	OFONO_GPRS_AUTH_METHOD_NONE,
++	/* Appended, so the values above keep their meaning */
++	OFONO_GPRS_AUTH_METHOD_ANY,
++};
++
++/*
++ * Enumerations shared with external plugins.
++ *
++ * These describe 3GPP-defined values that oFono keeps privately in
++ * src/common.h. Plugins that supply atom drivers need them, so the
++ * definitions live here and src/common.h aliases its old unprefixed
++ * names onto them. Values are unchanged.
++ */
++enum ofono_call_status {
++	OFONO_CALL_STATUS_ACTIVE =		0,
++	OFONO_CALL_STATUS_HELD =		1,
++	OFONO_CALL_STATUS_DIALING =		2,
++	OFONO_CALL_STATUS_ALERTING =		3,
++	OFONO_CALL_STATUS_INCOMING =		4,
++	OFONO_CALL_STATUS_WAITING =		5,
++	OFONO_CALL_STATUS_DISCONNECTED =	6,
++};
++
++enum ofono_call_direction {
++	OFONO_CALL_DIRECTION_MOBILE_ORIGINATED =	0,
++	OFONO_CALL_DIRECTION_MOBILE_TERMINATED =	1,
++};
++
++/* 27.007 Section 7.18 <mode> */
++enum ofono_call_mode {
++	OFONO_CALL_MODE_VOICE =		0,
++	OFONO_CALL_MODE_DATA =		1,
++	OFONO_CALL_MODE_FAX =		3,
++	OFONO_CALL_MODE_UNKNOWN =	9,
++};
++
++enum ofono_clip_validity {
++	OFONO_CLIP_VALIDITY_VALID =		0,
++	OFONO_CLIP_VALIDITY_WITHHELD =		1,
++	OFONO_CLIP_VALIDITY_NOT_AVAILABLE =	2,
++};
++
++enum ofono_cnap_validity {
++	OFONO_CNAP_VALIDITY_VALID =		0,
++	OFONO_CNAP_VALIDITY_WITHHELD =		1,
++	OFONO_CNAP_VALIDITY_NOT_AVAILABLE =	2,
++};
++
++enum ofono_access_technology {
++	OFONO_ACCESS_TECHNOLOGY_NONE =			-1,
++	/* 27.007 Section 7.3 <AcT> */
++	OFONO_ACCESS_TECHNOLOGY_GSM =			0,
++	OFONO_ACCESS_TECHNOLOGY_GSM_COMPACT =		1,
++	OFONO_ACCESS_TECHNOLOGY_UTRAN =			2,
++	OFONO_ACCESS_TECHNOLOGY_GSM_EGPRS =		3,
++	OFONO_ACCESS_TECHNOLOGY_UTRAN_HSDPA =		4,
++	OFONO_ACCESS_TECHNOLOGY_UTRAN_HSUPA =		5,
++	OFONO_ACCESS_TECHNOLOGY_UTRAN_HSDPA_HSUPA =	6,
++	OFONO_ACCESS_TECHNOLOGY_EUTRAN =		7,
++	OFONO_ACCESS_TECHNOLOGY_NB_IOT_M1 =		8,
++	OFONO_ACCESS_TECHNOLOGY_NB_IOT_NB1 =		9,
++	OFONO_ACCESS_TECHNOLOGY_EUTRA_5GCN =		10,
++	OFONO_ACCESS_TECHNOLOGY_NR_5GCN =		11,
++	OFONO_ACCESS_TECHNOLOGY_NG_RAN =		12,
++	OFONO_ACCESS_TECHNOLOGY_EUTRA_NR =		13,
+ };
+ 
+ const char *ofono_uuid_to_str(const struct ofono_uuid *uuid);
+diff --git a/src/common.c b/src/common.c
+index 06f29b9..32c2410 100644
+--- a/src/common.c
++++ b/src/common.c
+@@ -710,7 +710,7 @@ void ofono_call_init(struct ofono_call *call)
+ 	call->clip_validity = CLIP_VALIDITY_NOT_AVAILABLE;
+ }
+ 
+-const char *call_status_to_string(enum call_status status)
++const char *call_status_to_string(enum ofono_call_status status)
+ {
+ 	switch (status) {
+ 	case CALL_STATUS_ACTIVE:
+@@ -771,6 +771,8 @@ const char *gprs_auth_method_to_string(enum ofono_gprs_auth_method auth)
+ 		return "pap";
+ 	case OFONO_GPRS_AUTH_METHOD_NONE:
+ 		return "none";
++	case OFONO_GPRS_AUTH_METHOD_ANY:
++		return "any";
+ 	}
+ 
+ 	return NULL;
+@@ -788,6 +790,9 @@ bool gprs_auth_method_from_string(const char *str,
+ 	} else if (l_streq0(str, "none")) {
+ 		*auth = OFONO_GPRS_AUTH_METHOD_NONE;
+ 		return true;
++	} else if (l_streq0(str, "any")) {
++		*auth = OFONO_GPRS_AUTH_METHOD_ANY;
++		return true;
+ 	}
+ 
+ 	return false;
+diff --git a/src/common.h b/src/common.h
+index 67c6376..116573b 100644
+--- a/src/common.h
++++ b/src/common.h
+@@ -9,47 +9,44 @@
+ #include <glib.h>
+ 
+ #include <ofono/types.h>
++#include <ofono/netreg.h>
+ 
+ /* 27.007 Section 7.3 <AcT> */
+-enum access_technology {
+-	ACCESS_TECHNOLOGY_GSM =			0,
+-	ACCESS_TECHNOLOGY_GSM_COMPACT =		1,
+-	ACCESS_TECHNOLOGY_UTRAN =		2,
+-	ACCESS_TECHNOLOGY_GSM_EGPRS =		3,
+-	ACCESS_TECHNOLOGY_UTRAN_HSDPA =		4,
+-	ACCESS_TECHNOLOGY_UTRAN_HSUPA =		5,
+-	ACCESS_TECHNOLOGY_UTRAN_HSDPA_HSUPA =	6,
+-	ACCESS_TECHNOLOGY_EUTRAN =		7,
+-	ACCESS_TECHNOLOGY_NB_IOT_M1 =		8,
+-	ACCESS_TECHNOLOGY_NB_IOT_NB1 =		9,
+-};
++/* Defined publicly as enum ofono_access_technology */
++#define ACCESS_TECHNOLOGY_GSM                      OFONO_ACCESS_TECHNOLOGY_GSM
++#define ACCESS_TECHNOLOGY_GSM_COMPACT              OFONO_ACCESS_TECHNOLOGY_GSM_COMPACT
++#define ACCESS_TECHNOLOGY_UTRAN                    OFONO_ACCESS_TECHNOLOGY_UTRAN
++#define ACCESS_TECHNOLOGY_GSM_EGPRS                OFONO_ACCESS_TECHNOLOGY_GSM_EGPRS
++#define ACCESS_TECHNOLOGY_UTRAN_HSDPA              OFONO_ACCESS_TECHNOLOGY_UTRAN_HSDPA
++#define ACCESS_TECHNOLOGY_UTRAN_HSUPA              OFONO_ACCESS_TECHNOLOGY_UTRAN_HSUPA
++#define ACCESS_TECHNOLOGY_UTRAN_HSDPA_HSUPA        OFONO_ACCESS_TECHNOLOGY_UTRAN_HSDPA_HSUPA
++#define ACCESS_TECHNOLOGY_EUTRAN                   OFONO_ACCESS_TECHNOLOGY_EUTRAN
++#define ACCESS_TECHNOLOGY_NB_IOT_M1                OFONO_ACCESS_TECHNOLOGY_NB_IOT_M1
++#define ACCESS_TECHNOLOGY_NB_IOT_NB1               OFONO_ACCESS_TECHNOLOGY_NB_IOT_NB1
+ 
+ /* 27.007 Section 7.2 <stat> */
+-enum network_registration_status {
+-	NETWORK_REGISTRATION_STATUS_NOT_REGISTERED =		0,
+-	NETWORK_REGISTRATION_STATUS_REGISTERED =		1,
+-	NETWORK_REGISTRATION_STATUS_SEARCHING =			2,
+-	NETWORK_REGISTRATION_STATUS_DENIED =			3,
+-	NETWORK_REGISTRATION_STATUS_UNKNOWN =			4,
+-	NETWORK_REGISTRATION_STATUS_ROAMING =			5,
+-	NETWORK_REGISTRATION_STATUS_REGISTERED_SMS_EUTRAN =	6,
+-	NETWORK_REGISTRATION_STATUS_ROAMING_SMS_EUTRAN =	7,
+-};
++/* Defined publicly as enum ofono_netreg_status */
++#define NETWORK_REGISTRATION_STATUS_NOT_REGISTERED OFONO_NETREG_STATUS_NOT_REGISTERED
++#define NETWORK_REGISTRATION_STATUS_REGISTERED     OFONO_NETREG_STATUS_REGISTERED
++#define NETWORK_REGISTRATION_STATUS_SEARCHING      OFONO_NETREG_STATUS_SEARCHING
++#define NETWORK_REGISTRATION_STATUS_DENIED         OFONO_NETREG_STATUS_DENIED
++#define NETWORK_REGISTRATION_STATUS_UNKNOWN        OFONO_NETREG_STATUS_UNKNOWN
++#define NETWORK_REGISTRATION_STATUS_ROAMING        OFONO_NETREG_STATUS_ROAMING
++#define NETWORK_REGISTRATION_STATUS_REGISTERED_SMS_EUTRAN OFONO_NETREG_STATUS_REGISTERED_SMS_EUTRAN
++#define NETWORK_REGISTRATION_STATUS_ROAMING_SMS_EUTRAN OFONO_NETREG_STATUS_ROAMING_SMS_EUTRAN
+ 
+ /* 27.007 Section 7.3 <stat> */
+-enum operator_status {
+-	OPERATOR_STATUS_UNKNOWN =	0,
+-	OPERATOR_STATUS_AVAILABLE =	1,
+-	OPERATOR_STATUS_CURRENT =	2,
+-	OPERATOR_STATUS_FORBIDDEN =	3,
+-};
++/* Defined publicly as enum ofono_operator_status */
++#define OPERATOR_STATUS_UNKNOWN                    OFONO_OPERATOR_STATUS_UNKNOWN
++#define OPERATOR_STATUS_AVAILABLE                  OFONO_OPERATOR_STATUS_AVAILABLE
++#define OPERATOR_STATUS_CURRENT                    OFONO_OPERATOR_STATUS_CURRENT
++#define OPERATOR_STATUS_FORBIDDEN                  OFONO_OPERATOR_STATUS_FORBIDDEN
+ 
+ /* 27.007 Section 7.6 */
+-enum clip_validity {
+-	CLIP_VALIDITY_VALID =		0,
+-	CLIP_VALIDITY_WITHHELD =	1,
+-	CLIP_VALIDITY_NOT_AVAILABLE =	2,
+-};
++/* Defined publicly as enum ofono_clip_validity */
++#define CLIP_VALIDITY_VALID                        OFONO_CLIP_VALIDITY_VALID
++#define CLIP_VALIDITY_WITHHELD                     OFONO_CLIP_VALIDITY_WITHHELD
++#define CLIP_VALIDITY_NOT_AVAILABLE                OFONO_CLIP_VALIDITY_NOT_AVAILABLE
+ 
+ /* 27.007 Section 7.29 */
+ enum packet_bearer {
+@@ -64,28 +61,34 @@ enum packet_bearer {
+ };
+ 
+ /* 27.007 Section 7.30 */
+-enum cnap_validity {
+-	CNAP_VALIDITY_VALID =		0,
+-	CNAP_VALIDITY_WITHHELD =	1,
+-	CNAP_VALIDITY_NOT_AVAILABLE =	2,
+-};
++/* Defined publicly as enum ofono_cnap_validity */
++#define CNAP_VALIDITY_VALID                        OFONO_CNAP_VALIDITY_VALID
++#define CNAP_VALIDITY_WITHHELD                     OFONO_CNAP_VALIDITY_WITHHELD
++#define CNAP_VALIDITY_NOT_AVAILABLE                OFONO_CNAP_VALIDITY_NOT_AVAILABLE
+ 
+ /* 27.007 Section 7.18 */
+-enum call_status {
+-	CALL_STATUS_ACTIVE =		0,
+-	CALL_STATUS_HELD =		1,
+-	CALL_STATUS_DIALING =		2,
+-	CALL_STATUS_ALERTING =		3,
+-	CALL_STATUS_INCOMING =		4,
+-	CALL_STATUS_WAITING =		5,
+-	CALL_STATUS_DISCONNECTED
+-};
++/*
++ * Type aliases for the two enums whose names do not collide with any
++ * struct member. Sailfish does the same. clip_validity and cnap_validity
++ * are deliberately not aliased: they are member names, and a macro would
++ * silently rewrite call->clip_validity.
++ */
++#define call_status ofono_call_status
++#define call_direction ofono_call_direction
++
++/* Defined publicly as enum ofono_call_status */
++#define CALL_STATUS_ACTIVE                         OFONO_CALL_STATUS_ACTIVE
++#define CALL_STATUS_HELD                           OFONO_CALL_STATUS_HELD
++#define CALL_STATUS_DIALING                        OFONO_CALL_STATUS_DIALING
++#define CALL_STATUS_ALERTING                       OFONO_CALL_STATUS_ALERTING
++#define CALL_STATUS_INCOMING                       OFONO_CALL_STATUS_INCOMING
++#define CALL_STATUS_WAITING                        OFONO_CALL_STATUS_WAITING
++#define CALL_STATUS_DISCONNECTED                   OFONO_CALL_STATUS_DISCONNECTED
+ 
+ /* 27.007 Section 7.18 */
+-enum call_direction {
+-	CALL_DIRECTION_MOBILE_ORIGINATED =	0,
+-	CALL_DIRECTION_MOBILE_TERMINATED =	1,
+-};
++/* Defined publicly as enum ofono_call_direction */
++#define CALL_DIRECTION_MOBILE_ORIGINATED           OFONO_CALL_DIRECTION_MOBILE_ORIGINATED
++#define CALL_DIRECTION_MOBILE_TERMINATED           OFONO_CALL_DIRECTION_MOBILE_TERMINATED
+ 
+ /* 27.007 Section 7.11 */
+ enum bearer_class {
+@@ -171,7 +174,7 @@ const char *registration_tech_to_string(int tech);
+ const char *packet_bearer_to_string(int bearer);
+ 
+ gboolean is_valid_apn(const char *apn);
+-const char *call_status_to_string(enum call_status status);
++const char *call_status_to_string(enum ofono_call_status status);
+ 
+ const char *gprs_proto_to_string(enum ofono_gprs_proto proto);
+ bool gprs_proto_from_string(const char *str, enum ofono_gprs_proto *proto);
+diff --git a/src/log.c b/src/log.c
+index a0fb97b..9a4e788 100644
+--- a/src/log.c
++++ b/src/log.c
+@@ -270,8 +270,14 @@ void __ofono_log_enable(struct ofono_debug_desc *start,
+ 		return;
+ 
+ 	for (desc = start; desc < stop; desc++) {
+-		if (is_enabled(desc) == TRUE)
++		if (is_enabled(desc) == TRUE &&
++				!(desc->flags & OFONO_DEBUG_FLAG_PRINT)) {
+ 			desc->flags |= OFONO_DEBUG_FLAG_PRINT;
++
++			/* Let an external plugin react to being enabled */
++			if (desc->notify != NULL)
++				desc->notify(desc);
++		}
+ 	}
+ }
+ 
+diff --git a/src/voicecall.c b/src/voicecall.c
+index 622bcdf..08a8b5a 100644
+--- a/src/voicecall.c
++++ b/src/voicecall.c
+@@ -2290,7 +2290,7 @@ void ofono_voicecall_disconnected(struct ofono_voicecall *vc, int id,
+ 	GSList *l;
+ 	struct voicecall *call;
+ 	time_t ts;
+-	enum call_status prev_status;
++	enum ofono_call_status prev_status;
+ 	const char *number;
+ 
+ 	DBG("Got disconnection event for id: %d, reason: %d", id, reason);

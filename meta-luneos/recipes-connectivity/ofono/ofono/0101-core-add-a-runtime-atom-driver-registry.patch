@@ -1,0 +1,217 @@
+From ff428fa6bbe1ed61b2a215b2b886e82353d3090e Mon Sep 17 00:00:00 2001
+From: LuneOS <claude.ai@herrie.org>
+Date: Thu, 3 Sep 2026 18:20:49 +0200
+Subject: [PATCH 101/114] core: add a runtime atom driver registry
+
+oFono 2.x collects atom drivers at link time: OFONO_ATOM_DRIVER_BUILTIN()
+places a descriptor in a per-type ELF section and ofono_<type>_create()
+resolves the requested driver by walking that section. A dlopen()ed plugin
+cannot participate, because the daemon only walks its own sections, so
+external plugins can no longer supply atom drivers at all.
+
+Add a small runtime registry keyed by atom type and driver name, and
+consult it from a new __ofono_driver_find() before falling back to the
+builtin section. Behaviour for builtin drivers is unchanged.
+
+__ofono_driver_register_padded() supports a plugin built against an older
+header: it copies only the leading portion of the caller's driver struct
+into a zeroed full-size allocation, so the daemon never reads past the end
+of a short struct.
+
+Drivers are unregistered by their original pointer, so callers need not
+retain the name.
+
+(cherry picked from commit b1f2436ead8f26d9e2d10c17270f566c704da241)
+Upstream-Status: Pending
+---
+ src/modem.c | 101 +++++++++++++++++++++++++++++++++++++++++++++++++++-
+ src/ofono.h |  46 +++++++++++++++++++++++-
+ 2 files changed, 145 insertions(+), 2 deletions(-)
+
+diff --git a/src/modem.c b/src/modem.c
+index 3e868c6..b0ec2dd 100644
+--- a/src/modem.c
++++ b/src/modem.c
+@@ -484,6 +484,103 @@ static void flush_atoms(struct ofono_modem *modem, enum modem_state new_state)
+ 	}
+ }
+ 
++struct ofono_driver_reg {
++	char *type;
++	char *name;
++	const void *orig;	/* as passed by the caller; used to unregister */
++	void *copy;		/* padded copy, if one was made */
++	const void *driver;	/* what lookups return */
++};
++
++static GSList *driver_registry;
++
++static int driver_register_full(const char *type, const char *name,
++				const void *driver, void *copy)
++{
++	struct ofono_driver_reg *reg;
++
++	if (!type || !name || !driver) {
++		g_free(copy);
++		return -EINVAL;
++	}
++
++	reg = g_new0(struct ofono_driver_reg, 1);
++	reg->type = g_strdup(type);
++	reg->name = g_strdup(name);
++	reg->orig = driver;
++	reg->copy = copy;
++	reg->driver = copy ? copy : driver;
++
++	driver_registry = g_slist_prepend(driver_registry, reg);
++
++	DBG("%s driver '%s' registered", type, name);
++
++	return 0;
++}
++
++int __ofono_driver_register(const char *type, const char *name,
++				const void *driver)
++{
++	return driver_register_full(type, name, driver, NULL);
++}
++
++int __ofono_driver_register_padded(const char *type, const char *name,
++				const void *driver, size_t size, size_t copy)
++{
++	void *padded;
++
++	if (!driver || !size || copy > size)
++		return -EINVAL;
++
++	padded = g_malloc0(size);
++	memcpy(padded, driver, copy);
++
++	return driver_register_full(type, name, driver, padded);
++}
++
++void __ofono_driver_unregister(const char *type, const void *driver)
++{
++	GSList *l;
++
++	if (!type || !driver)
++		return;
++
++	for (l = driver_registry; l; l = l->next) {
++		struct ofono_driver_reg *reg = l->data;
++
++		if (reg->orig != driver || strcmp(reg->type, type))
++			continue;
++
++		DBG("%s driver '%s' unregistered", reg->type, reg->name);
++
++		driver_registry = g_slist_delete_link(driver_registry, l);
++		g_free(reg->type);
++		g_free(reg->name);
++		g_free(reg->copy);
++		g_free(reg);
++		return;
++	}
++}
++
++const void *__ofono_driver_find(const char *type, const char *name,
++				const struct ofono_driver_desc *start,
++				const struct ofono_driver_desc *stop)
++{
++	GSList *l;
++
++	if (!name)
++		return NULL;
++
++	for (l = driver_registry; l; l = l->next) {
++		const struct ofono_driver_reg *reg = l->data;
++
++		if (!strcmp(reg->type, type) && !strcmp(reg->name, name))
++			return reg->driver;
++	}
++
++	return __ofono_driver_builtin_find(name, start, stop);
++}
++
+ const void *__ofono_driver_builtin_find(const char *name,
+ 				const struct ofono_driver_desc *start,
+ 				const struct ofono_driver_desc *stop)
+@@ -2075,7 +2172,7 @@ int ofono_modem_register(struct ofono_modem *modem)
+ 	if (modem->driver != NULL)
+ 		return -EALREADY;
+ 
+-	drv = __ofono_driver_builtin_find(modem->driver_type,
++	drv = __ofono_driver_find("modem", modem->driver_type,
+ 						__start___modem,
+ 						__stop___modem);
+ 	if (!drv || !drv->probe)
+@@ -2339,3 +2436,5 @@ out:
+ }
+ 
+ OFONO_MODULE(modemwatch, modemwatch_init, modemwatch_cleanup)
++
++OFONO_DEFINE_ATOM_DRIVER_REGISTER(devinfo)
+diff --git a/src/ofono.h b/src/ofono.h
+index a853bba..154cdaa 100644
+--- a/src/ofono.h
++++ b/src/ofono.h
+@@ -225,6 +225,50 @@ const void *__ofono_driver_builtin_find(const char *name,
+ 				const struct ofono_driver_desc *start,
+ 				const struct ofono_driver_desc *stop);
+ 
++/*
++ * Runtime atom driver registry.
++ *
++ * Atom drivers built into ofonod are collected at link time into per-type
++ * ELF sections by OFONO_ATOM_DRIVER_BUILTIN(). That mechanism cannot work
++ * for a driver supplied by a dlopen()ed plugin, because the daemon only
++ * ever walks its own sections. Drivers registered here are consulted
++ * first, then the builtin section is searched as before.
++ *
++ * __ofono_driver_register_padded() copies only the first @copy bytes of
++ * @driver into a zeroed allocation of @size bytes. It lets a plugin built
++ * against an older header register a driver struct that is shorter than
++ * the one this daemon was compiled with, without the daemon reading past
++ * the end of it.
++ */
++int __ofono_driver_register(const char *type, const char *name,
++				const void *driver);
++int __ofono_driver_register_padded(const char *type, const char *name,
++				const void *driver, size_t size, size_t copy);
++void __ofono_driver_unregister(const char *type, const void *driver);
++const void *__ofono_driver_find(const char *type, const char *name,
++				const struct ofono_driver_desc *start,
++				const struct ofono_driver_desc *stop);
++
++/*
++ * Defines ofono_<type>_driver_register()/_unregister() for an atom type.
++ * The driver name is taken from the struct's name field, matching the
++ * registration API external plugins were written against.
++ */
++#define OFONO_DEFINE_ATOM_DRIVER_REGISTER(type)				\
++int ofono_ ## type ## _driver_register(					\
++			const struct ofono_ ## type ## _driver *d)	\
++{									\
++	if (!d || !d->name)						\
++		return -EINVAL;						\
++	return __ofono_driver_register(#type, d->name, d);		\
++}									\
++									\
++void ofono_ ## type ## _driver_unregister(				\
++			const struct ofono_ ## type ## _driver *d)	\
++{									\
++	__ofono_driver_unregister(#type, d);				\
++}
++
+ #define OFONO_DEFINE_ATOM_CREATE(type, atom_type, ...)			\
+ extern struct ofono_driver_desc __start___ ## type[];			\
+ extern struct ofono_driver_desc __stop___ ## type[];			\
+@@ -235,7 +279,7 @@ struct ofono_ ## type *ofono_ ## type ##_create(			\
+ 				...)					\
+ {									\
+ 	const struct ofono_ ## type ## _driver *drv =			\
+-		__ofono_driver_builtin_find(driver,			\
++		__ofono_driver_find(#type, driver,			\
+ 				__start___ ## type,			\
+ 				__stop___ ## type);			\
+ 	va_list args;							\

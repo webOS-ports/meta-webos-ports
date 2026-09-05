@@ -1,0 +1,49 @@
+From: LuneOS <webos-ports@googlegroups.com>
+Subject: [PATCH] ussd: accept pre-decoded UTF-8 from drivers (dcs 0xff)
+
+Sailfish's oFono treats dcs 0xff in ofono_ussd_notify() as "the driver
+already produced a NUL-terminated UTF-8 string", using the buffer as-is
+instead of running it through ussd_decode(), and frees it afterwards.
+
+ofono-binder-plugin depends on that contract - binder_ussd.c duplicates
+the message with gutil_memdup() specifically because the core frees it:
+
+    /* Message is freed by core if dcs is 0xff, we have to duplicate it. */
+    ofono_ussd_notify(self->ussd, type, 0xff, gutil_memdup(msg, len+1), len);
+
+Upstream does not know the convention, so 0xff reaches ussd_decode(),
+cbs_dcs_decode() rejects it as an invalid coding scheme, NULL comes back
+and the D-Bus reply carries an empty string. Observed on sargo/mindphone:
+"ussd length 35" in the plugin, then an empty response for every USSD
+query. The core already g_free()s utf8_str, and gutil_memdup() allocates
+with g_malloc(), so ownership transfer is correct.
+
+Upstream-Status: Inappropriate [oFono fork specific]
+
+--- a/src/ussd.c
++++ b/src/ussd.c
+@@ -432,8 +432,22 @@
+ 		goto out;
+ 	}
+ 
+-	if (data && data_len > 0)
+-		utf8_str = ussd_decode(dcs, data_len, data);
++	if (data && data_len > 0) {
++		if (dcs == 0xff)
++			/*
++			 * Sailfish convention, which the binder plugin
++			 * relies on: dcs 0xff means the driver already
++			 * handed us a NUL-terminated UTF-8 string rather
++			 * than an encoded PDU. It duplicates the buffer
++			 * precisely because the core frees it below, so
++			 * take ownership and skip the decode - passing
++			 * 0xff to ussd_decode() makes cbs_dcs_decode()
++			 * fail and the response comes out empty.
++			 */
++			utf8_str = (char *) data;
++		else
++			utf8_str = ussd_decode(dcs, data_len, data);
++	}
+ 
+ 	str = utf8_str;
+ 

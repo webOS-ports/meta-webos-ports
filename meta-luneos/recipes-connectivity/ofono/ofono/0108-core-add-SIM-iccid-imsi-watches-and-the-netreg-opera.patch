@@ -1,0 +1,228 @@
+From ca9eaa13a4ac102c8f3b45a23715bd59556794fb Mon Sep 17 00:00:00 2001
+From: LuneOS <claude.ai@herrie.org>
+Date: Thu, 3 Sep 2026 19:28:33 +0200
+Subject: [PATCH 108/114] core: add SIM iccid/imsi watches and the netreg
+ operator name
+
+The extension layer observes a SIM's ICCID and IMSI as they appear, and
+reads the registered operator's name. oFono exposes a SIM state watch and
+the IMSI value, but no way to be told when either identifier arrives, and
+no accessor for the operator name.
+
+Add both watchlists next to the existing state and SPN ones, fire them
+where the values are assigned, and report the current value to a new
+watcher immediately, which is the behaviour Sailfish's callers rely on.
+
+The D-Bus error helpers the extension layer also wanted need no change:
+__ofono_error_canceled(), __ofono_error_invalid_args() and
+__ofono_error_not_available() already exist and are exported.
+
+(cherry picked from commit cbd2f945f505c66cbc8e7b6f9a659154ff87f973)
+Upstream-Status: Pending
+---
+ include/netreg.h |   1 +
+ include/sim.h    |  12 ++++++
+ src/network.c    |   8 ++++
+ src/sim.c        | 103 +++++++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 124 insertions(+)
+
+diff --git a/include/netreg.h b/include/netreg.h
+index f01ddc6..bbc5418 100644
+--- a/include/netreg.h
++++ b/include/netreg.h
+@@ -130,6 +130,7 @@ int ofono_netreg_get_technology(struct ofono_netreg *netreg);
+ const char *ofono_netreg_get_mcc(struct ofono_netreg *netreg);
+ const char *ofono_netreg_get_mnc(struct ofono_netreg *netreg);
+ 
++const char *ofono_netreg_get_name(struct ofono_netreg *netreg);
+ ofono_bool_t ofono_netreg_spdi_lookup(struct ofono_netreg *netreg,
+ 				const char *mcc, const char *mnc);
+ 
+diff --git a/include/sim.h b/include/sim.h
+index cad7aac..f07912a 100644
+--- a/include/sim.h
++++ b/include/sim.h
+@@ -317,6 +317,18 @@ int ofono_sim_read_record(struct ofono_sim_context *context, int id,
+ 				unsigned int path_len,
+ 				ofono_sim_file_read_cb_t cb, void *data);
+ 
++typedef void (*ofono_sim_iccid_event_cb_t)(const char *iccid, void *data);
++typedef void (*ofono_sim_imsi_event_cb_t)(const char *imsi, void *data);
++
++unsigned int ofono_sim_add_iccid_watch(struct ofono_sim *sim,
++				ofono_sim_iccid_event_cb_t cb, void *data,
++				ofono_destroy_func destroy);
++void ofono_sim_remove_iccid_watch(struct ofono_sim *sim, unsigned int id);
++unsigned int ofono_sim_add_imsi_watch(struct ofono_sim *sim,
++				ofono_sim_imsi_event_cb_t cb, void *data,
++				ofono_destroy_func destroy);
++void ofono_sim_remove_imsi_watch(struct ofono_sim *sim, unsigned int id);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/src/network.c b/src/network.c
+index 25fd135..88a1d53 100644
+--- a/src/network.c
++++ b/src/network.c
+@@ -2079,3 +2079,11 @@ ofono_bool_t ofono_netreg_spdi_lookup(struct ofono_netreg *netreg,
+ 	return mcc && mnc && netreg &&
+ 			sim_spdi_lookup(netreg->spdi, mcc, mnc);
+ }
++
++const char *ofono_netreg_get_name(struct ofono_netreg *netreg)
++{
++	if (netreg == NULL || netreg->current_operator == NULL)
++		return NULL;
++
++	return netreg->current_operator->name;
++}
+diff --git a/src/sim.c b/src/sim.c
+index f1b0a8c..b5d1b0a 100644
+--- a/src/sim.c
++++ b/src/sim.c
+@@ -59,6 +59,8 @@ struct ofono_sim_aid_session {
+ struct ofono_sim {
+ 	/* Contents of the SIM file system, in rough initialization order */
+ 	char *iccid;
++	struct ofono_watchlist *iccid_watches;
++	struct ofono_watchlist *imsi_watches;
+ 
+ 	char **language_prefs;
+ 	unsigned char *efli;
+@@ -168,6 +170,99 @@ static const char *const passwd_name[] = {
+ 	[OFONO_SIM_PASSWORD_PHCORP_PUK] = "corppuk",
+ };
+ 
++static unsigned int sim_add_watch_item(struct ofono_watchlist *watchlist,
++					void *notify, void *notify_data,
++					ofono_destroy_func destroy)
++{
++	struct ofono_watchlist_item *item;
++
++	item = g_new0(struct ofono_watchlist_item, 1);
++	item->notify = notify;
++	item->notify_data = notify_data;
++	item->destroy = destroy;
++
++	return __ofono_watchlist_add_item(watchlist, item);
++}
++
++static void sim_iccid_watch_cb(gpointer data, gpointer user_data)
++{
++	struct ofono_watchlist_item *item = data;
++	struct ofono_sim *sim = user_data;
++	ofono_sim_iccid_event_cb_t cb = item->notify;
++
++	cb(sim->iccid, item->notify_data);
++}
++
++static void sim_imsi_watch_cb(gpointer data, gpointer user_data)
++{
++	struct ofono_watchlist_item *item = data;
++	struct ofono_sim *sim = user_data;
++	ofono_sim_imsi_event_cb_t cb = item->notify;
++
++	cb(sim->imsi, item->notify_data);
++}
++
++static void sim_iccid_watches_notify(struct ofono_sim *sim)
++{
++	if (sim->iccid_watches)
++		g_slist_foreach(sim->iccid_watches->items,
++					sim_iccid_watch_cb, sim);
++}
++
++static void sim_imsi_watches_notify(struct ofono_sim *sim)
++{
++	if (sim->imsi_watches)
++		g_slist_foreach(sim->imsi_watches->items,
++					sim_imsi_watch_cb, sim);
++}
++
++unsigned int ofono_sim_add_iccid_watch(struct ofono_sim *sim,
++				ofono_sim_iccid_event_cb_t cb, void *data,
++				ofono_destroy_func destroy)
++{
++	unsigned int watch_id;
++
++	if (sim == NULL || cb == NULL)
++		return 0;
++
++	watch_id = sim_add_watch_item(sim->iccid_watches, cb, data, destroy);
++
++	/* Report the current value straight away, as Sailfish does */
++	if (sim->iccid)
++		cb(sim->iccid, data);
++
++	return watch_id;
++}
++
++void ofono_sim_remove_iccid_watch(struct ofono_sim *sim, unsigned int id)
++{
++	if (sim)
++		__ofono_watchlist_remove_item(sim->iccid_watches, id);
++}
++
++unsigned int ofono_sim_add_imsi_watch(struct ofono_sim *sim,
++				ofono_sim_imsi_event_cb_t cb, void *data,
++				ofono_destroy_func destroy)
++{
++	unsigned int watch_id;
++
++	if (sim == NULL || cb == NULL)
++		return 0;
++
++	watch_id = sim_add_watch_item(sim->imsi_watches, cb, data, destroy);
++
++	if (sim->imsi)
++		cb(sim->imsi, data);
++
++	return watch_id;
++}
++
++void ofono_sim_remove_imsi_watch(struct ofono_sim *sim, unsigned int id)
++{
++	if (sim)
++		__ofono_watchlist_remove_item(sim->imsi_watches, id);
++}
++
+ static void sim_own_numbers_update(struct ofono_sim *sim);
+ 
+ static GSList *cached_pins = NULL;
+@@ -1920,6 +2015,7 @@ static void sim_imsi_obtained(struct ofono_sim *sim, const char *imsi)
+ 	const char *path = __ofono_atom_get_path(sim->atom);
+ 
+ 	sim->imsi = l_strdup(imsi);
++	sim_imsi_watches_notify(sim);
+ 
+ 	ofono_dbus_signal_property_changed(conn, path,
+ 						OFONO_SIM_MANAGER_INTERFACE,
+@@ -2497,6 +2593,7 @@ static void sim_iccid_read_cb(int ok, int length, int record,
+ 	extract_bcd_number(data, length, iccid);
+ 	iccid[20] = '\0';
+ 	sim->iccid = l_strdup(iccid);
++	sim_iccid_watches_notify(sim);
+ 
+ 	ofono_dbus_signal_property_changed(conn, path,
+ 						OFONO_SIM_MANAGER_INTERFACE,
+@@ -3518,6 +3615,10 @@ static void sim_unregister(struct ofono_atom *atom)
+ 
+ 	__ofono_modem_remove_atom_watch(modem, sim->hfp_watch);
+ 
++	__ofono_watchlist_free(sim->iccid_watches);
++	sim->iccid_watches = NULL;
++	__ofono_watchlist_free(sim->imsi_watches);
++	sim->imsi_watches = NULL;
+ 	__ofono_watchlist_free(sim->state_watches);
+ 	sim->state_watches = NULL;
+ 	__ofono_watchlist_free(sim->spn_watches);
+@@ -3646,6 +3747,8 @@ void ofono_sim_register(struct ofono_sim *sim)
+ 	}
+ 	sim->state_watches = __ofono_watchlist_new(g_free);
+ 	sim->spn_watches = __ofono_watchlist_new(g_free);
++	sim->iccid_watches = __ofono_watchlist_new(g_free);
++	sim->imsi_watches = __ofono_watchlist_new(g_free);
+ 	sim->simfs = sim_fs_new(sim, sim->driver);
+ 
+ 	ofono_sim_add_state_watch(sim, sim_ready, sim, NULL);
