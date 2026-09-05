@@ -1,0 +1,92 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 5 Sep 2026 14:40:00 +0200
+Subject: [PATCH] Process: do not leak the parent's descriptors into the HAL child
+
+Process::start() forks and execs without touching the descriptor table, so the
+camera HAL child inherits every non-O_CLOEXEC descriptor the service happened
+to hold: luna-service2 sockets, the shared-memory fds startPreview created
+moments earlier, and whatever the loaded plugins keep open.
+
+That is worth fixing on its own - a child should not hold the parent's sockets
+open - and it is the last structural difference between the HAL child and a
+plain process running the same GStreamer pipeline, which succeeds where the
+child fails.
+
+Close everything from 3 upwards between fork() and execv(), keeping
+stdin/stdout/stderr so the child's logging still reaches journald. Uses
+close_range() where available and falls back to walking /proc/self/fd.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+---
+Upstream-Status: Pending
+---
+--- a/src/services/common/process.cpp	2026-09-05 09:26:48.987457080 +0200
++++ b/src/services/common/process.cpp	2026-09-05 09:26:49.008908384 +0200
+@@ -16,6 +16,11 @@
+ 
+ #define LOG_TAG "Process"
+ #include "process.h"
++
++#include <dirent.h>
++#include <sys/syscall.h>
++#include <unistd.h>
++#include <vector>
+ #include "camera_log.h"
+ #include <iterator>
+ #include <sstream>
+@@ -36,6 +41,36 @@
+     stop();
+ }
+ 
++namespace
++{
++/* Close every descriptor from 3 upwards. close_range() does it in one call on
++ * Linux 5.9+; the /proc walk is the fallback, and reads the directory before
++ * closing so it is not iterating something it is mutating. */
++void closeInheritedDescriptors()
++{
++#if defined(__linux__) && defined(SYS_close_range)
++    if (syscall(SYS_close_range, 3, ~0U, 0) == 0)
++        return;
++#endif
++    DIR *d = opendir("/proc/self/fd");
++    if (!d)
++        return;
++
++    std::vector<int> fds;
++    const int dirFd = dirfd(d);
++    while (struct dirent *e = readdir(d))
++    {
++        int fd = atoi(e->d_name);
++        if (fd >= 3 && fd != dirFd)
++            fds.push_back(fd);
++    }
++    closedir(d);
++
++    for (int fd : fds)
++        close(fd);
++}
++} // namespace
++
+ void Process::start(const std::string &cmd)
+ {
+     PLOGI("%s", cmd.c_str());
+@@ -56,6 +91,18 @@
+             strncpy(argv[(v < SIZE_MAX) ? v++ : v], token.c_str(), token_size);
+         }
+         argv[v] = nullptr;
++
++        /* Close everything the parent had open before handing over. fork()
++         * duplicates every descriptor that is not O_CLOEXEC, and this service
++         * has plenty by the time it spawns a HAL: luna-service2 sockets, the
++         * shared-memory fds startPreview created moments earlier, and whatever
++         * the loaded plugins hold. The child re-opens what it needs, so the
++         * copies are pure inheritance, and passing them into a process that
++         * then talks to the Android side through droidmedia is asking for
++         * trouble. Keep stdin/stdout/stderr so its logging still reaches
++         * journald. */
++        closeInheritedDescriptors();
++
+         execv(argv[0], argv);
+         _exit(0);
+     }

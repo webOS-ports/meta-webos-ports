@@ -1,0 +1,245 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 5 Sep 2026 11:40:00 +0200
+Subject: [PATCH] notifier-droid: probe droidcamsrc off the service main loop
+
+droid_camera_count() takes droidcamsrc to GST_STATE_READY, and that state
+change opens the vendor camera HAL through droidmedia. That is a synchronous
+call into the Android side which does not reliably return - notably after a
+client has opened and closed a camera once.
+
+The notifier ran it from an idle callback on the camera service main loop, so
+a single stuck probe wedged the whole service: getCameraList stopped
+answering, and because com.webos.service.camera2 drives its camera2.hal child
+over synchronous luna_call_sync, nothing recovered short of a reboot. This is
+easy to hit - one open/close cycle from a client such as luneos-faced was
+enough.
+
+Move the probe to its own detached thread and publish the result back to the
+main loop through an idle source. A probe that never returns now costs one
+blocked thread instead of the service.
+
+While here, retry the probe. The first attempt after boot usually returns zero
+because the notifier runs before droidmedia is ready inside the container,
+which is why the camera service otherwise had to be restarted by hand before
+any camera showed up in getCameraList.
+
+The thread can outlive the notifier, since a probe stuck in the HAL cannot be
+interrupted, so the state it touches is held behind a shared_ptr with a
+cancelled flag that it checks before calling back.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+---
+Upstream-Status: Inappropriate [LuneOS Halium-specific]
+---
+--- a/src/plugins/notifier/droid/droid_notifier.cpp	2026-09-05 06:27:53.711641441 +0200
++++ b/src/plugins/notifier/droid/droid_notifier.cpp	2026-09-05 06:31:12.518993660 +0200
+@@ -23,14 +23,31 @@
+ 
+ #include <glib.h>
+ #include <gst/gst.h>
++#include <unistd.h>
++
++#include <atomic>
++#include <memory>
+ #include <string>
+ #include <vector>
+ 
+ /*
+  * Announces the built-in Halium (Android HAL) cameras to the camera
+- * service. The device count is probed through gst-droid; devices are
+- * published once from an idle callback on the service main loop with
+- * device nodes of the form droid:<n>, which the droid HAL plugin parses.
++ * service. Devices are published with device nodes of the form droid:<n>,
++ * which the droid HAL plugin parses.
++ *
++ * The probe runs on its own thread, never on the service main loop.
++ * droid_camera_count() takes droidcamsrc to GST_STATE_READY, and that state
++ * change opens the vendor camera HAL through droidmedia - a synchronous call
++ * into the Android side that does not always return. Run from an idle callback
++ * on the main loop, as this notifier originally did, a single stuck probe
++ * wedges the whole camera service: getCameraList stops answering, and because
++ * com.webos.service.camera2 talks to its camera2.hal child with synchronous
++ * luna_call_sync, nothing recovers short of a reboot.
++ *
++ * The thread also retries, because the first probe after boot usually returns
++ * zero: the notifier starts before droidmedia is ready inside the container,
++ * and the camera service otherwise has to be restarted by hand before any
++ * camera appears.
+  */
+ 
+ /* The camera-device GParamSpec's maximum is clamped to the real camera
+@@ -66,14 +83,105 @@
+     return count;
+ }
+ 
++namespace
++{
++/* Retry budget for the "container not ready yet" case. Six attempts two
++ * seconds apart covers a slow droidmedia start without keeping a thread alive
++ * for the whole session on a device that simply has no droid cameras. */
++constexpr int kProbeAttempts = 6;
++constexpr useconds_t kProbeRetryUs = 2 * 1000 * 1000;
++
++/* Shared between the notifier and its probe thread. The thread can outlive the
++ * notifier (a probe stuck in the HAL cannot be interrupted), so everything it
++ * touches lives here behind a shared_ptr and it checks  before
++ * calling back. */
++struct ProbeState
++{
++    GMainContext *ctx = nullptr;
++    INotifier::handlercb cb;
++    std::atomic<bool> cancelled{false};
++    int count = 0;
++};
++
++std::vector<DEVICE_LIST_T> BuildDeviceList(int count)
++{
++    std::vector<DEVICE_LIST_T> devList;
++    for (int i = 0; i < count; i++)
++    {
++        DEVICE_LIST_T dev;
++        dev.nDeviceNum       = i;
++        dev.nPortNum         = 0;
++        dev.isPowerOnConnect = 1;
++        dev.strVendorName    = "LuneOS";
++        dev.strProductName   = (i == 0) ? "Droid back camera" : "Droid front camera";
++        dev.strVendorID      = "droid";
++        dev.strProductID     = std::to_string(i);
++        dev.strDeviceType    = "droid";
++        dev.strDeviceSubtype = "builtin";
++        dev.strDeviceNode    = "droid:" + std::to_string(i);
++        dev.strDeviceKey     = dev.strDeviceNode;
++        devList.push_back(dev);
++    }
++    return devList;
++}
++
++/* Runs on the service main loop, so the callback into the camera service
++ * happens where it expects to be called. */
++gboolean PublishOnMainLoop(gpointer data)
++{
++    std::unique_ptr<std::shared_ptr<ProbeState>> holder(
++        static_cast<std::shared_ptr<ProbeState> *>(data));
++    ProbeState *st = holder->get();
++
++    if (!st->cancelled.load() && st->cb)
++    {
++        PLOGI("announcing %d droid camera(s)", st->count);
++        std::vector<DEVICE_LIST_T> devList = BuildDeviceList(st->count);
++        st->cb("droid", &devList);
++    }
++    return G_SOURCE_REMOVE;
++}
++
++gpointer ProbeThread(gpointer data)
++{
++    std::unique_ptr<std::shared_ptr<ProbeState>> holder(
++        static_cast<std::shared_ptr<ProbeState> *>(data));
++    std::shared_ptr<ProbeState> st = *holder;
++
++    int count = 0;
++    for (int attempt = 0; attempt < kProbeAttempts && !st->cancelled.load(); attempt++)
++    {
++        count = droid_camera_count();
++        if (count > 0)
++            break;
++        PLOGI("no droid cameras yet (attempt %d/%d), retrying", attempt + 1, kProbeAttempts);
++        usleep(kProbeRetryUs);
++    }
++
++    if (st->cancelled.load())
++        return nullptr;
++
++    st->count = count;
++
++    GSource *idle = g_idle_source_new();
++    g_source_set_callback(idle, PublishOnMainLoop,
++                          new std::shared_ptr<ProbeState>(st), nullptr);
++    g_source_attach(idle, st->ctx);
++    g_source_unref(idle);
++    return nullptr;
++}
++} // namespace
++
+ class DroidNotifier : public INotifier
+ {
+ public:
+     DroidNotifier() {}
+     virtual ~DroidNotifier()
+     {
+-        if (idle_source_)
+-            g_source_destroy(idle_source_);
++        /* The probe thread may still be blocked inside the HAL; it cannot be
++         * joined safely, so tell it to drop its result instead. */
++        if (state_)
++            state_->cancelled = true;
+     }
+ 
+     virtual bool queryInterface(const char *szName, void **ppInterface) override
+@@ -84,56 +192,21 @@
+ 
+     virtual void subscribeToClient(handlercb cb, void *mainLoop) override
+     {
+-        updateDeviceList_ = std::move(cb);
+-
+-        GMainContext *ctx =
+-            mainLoop ? g_main_loop_get_context(static_cast<GMainLoop *>(mainLoop))
+-                     : nullptr;
+-        idle_source_ = g_idle_source_new();
+-        g_source_set_callback(
+-            idle_source_,
+-            +[](gpointer self) -> gboolean {
+-                static_cast<DroidNotifier *>(self)->announce();
+-                return G_SOURCE_REMOVE;
+-            },
+-            this, nullptr);
+-        g_source_attach(idle_source_, ctx);
++        state_      = std::make_shared<ProbeState>();
++        state_->ctx = mainLoop ? g_main_loop_get_context(static_cast<GMainLoop *>(mainLoop))
++                               : nullptr;
++        state_->cb  = std::move(cb);
++
++        GThread *t = g_thread_new("droid-cam-probe", ProbeThread,
++                                  new std::shared_ptr<ProbeState>(state_));
++        /* Detached: nothing waits on it, and it must not hold up shutdown. */
++        g_thread_unref(t);
+     }
+ 
+     virtual void setLSHandle(void *) override {}
+ 
+ private:
+-    void announce()
+-    {
+-        idle_source_ = nullptr;
+-
+-        const int count = droid_camera_count();
+-        PLOGI("announcing %d droid camera(s)", count);
+-
+-        std::vector<DEVICE_LIST_T> devList;
+-        for (int i = 0; i < count; i++)
+-        {
+-            DEVICE_LIST_T dev;
+-            dev.nDeviceNum       = i;
+-            dev.nPortNum         = 0;
+-            dev.isPowerOnConnect = 1;
+-            dev.strVendorName    = "LuneOS";
+-            dev.strProductName   = (i == 0) ? "Droid back camera" : "Droid front camera";
+-            dev.strVendorID      = "droid";
+-            dev.strProductID     = std::to_string(i);
+-            dev.strDeviceType    = "droid";
+-            dev.strDeviceSubtype = "builtin";
+-            dev.strDeviceNode    = "droid:" + std::to_string(i);
+-            dev.strDeviceKey     = dev.strDeviceNode;
+-            devList.push_back(dev);
+-        }
+-
+-        if (updateDeviceList_)
+-            updateDeviceList_("droid", &devList);
+-    }
+-
+-    handlercb updateDeviceList_;
+-    GSource *idle_source_ = nullptr;
++    std::shared_ptr<ProbeState> state_;
+ };
+ 
+ extern "C"
