@@ -169,6 +169,8 @@ SANITY_TESTED_DISTROS ?= " \
     ubuntu-22.04 \n \
     ubuntu-23.04 \n \
     ubuntu-23.10 \n \
+    ubuntu-24.04 \n \
+    ubuntu-26.04 \n \
 "
 
 # no interactive resolving, better to fail and report later
