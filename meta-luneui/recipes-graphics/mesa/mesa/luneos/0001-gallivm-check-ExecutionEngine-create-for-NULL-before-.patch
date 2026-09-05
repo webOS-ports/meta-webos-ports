@@ -1,0 +1,64 @@
+From: LuneOS <team@webos-ports.org>
+Date: Thu, 13 Aug 2026 00:00:00 +0200
+Subject: [PATCH] gallivm: check builder.create() for NULL before using it
+
+lp_build_create_jit_compiler_for_module() dereferences the ExecutionEngine
+returned by builder.create() in the cache_out and JITEVENTS blocks, and only
+then tests it for NULL - eight lines too late. When MCJIT creation fails the
+process segfaults instead of taking the error path that is already written
+immediately below, which frees the generated code and returns the message
+LLVM put in Error.
+
+Reproducible by running any llvmpipe client under qemu-arm user-mode emulation,
+where MCJIT creation fails for the emulated target:
+
+  signal : 11 SIGSEGV (bad memory access)
+  si_addr: 0x00000000
+  pc     : /usr/lib/libgallium-26.2.0.so + 0x4ffac6
+            -> src/gallium/auxiliary/gallivm/lp_bld_misc.cpp:635
+                 JIT->setObjectCache(objcache);
+
+Moving the check to immediately after create() turns that into the intended
+"Could not create LLVM JIT" error return. It does not make the JIT succeed -
+that is a separate LLVM-under-emulation problem - but the caller gets to handle
+it rather than dying.
+
+Upstream-Status: Pending
+---
+diff --git a/src/gallium/auxiliary/gallivm/lp_bld_misc.cpp b/src/gallium/auxiliary/gallivm/lp_bld_misc.cpp
+index 51fdafa0bd3..ac920d1cfa3 100644
+--- a/src/gallium/auxiliary/gallivm/lp_bld_misc.cpp
++++ b/src/gallium/auxiliary/gallivm/lp_bld_misc.cpp
+@@ -629,6 +629,13 @@ lp_build_create_jit_compiler_for_module(LLVMExecutionEngineRef *OutJIT,
+    ExecutionEngine *JIT;
+ 
+    JIT = builder.create();
++   if (!JIT) {
++      lp_free_generated_code(*OutCode);
++      *OutCode = 0;
++      delete MM;
++      *OutError = strdup(Error.c_str());
++      return 1;
++   }
+ 
+    if (cache_out) {
+       LPObjectCache *objcache = new LPObjectCache(cache_out);
+@@ -640,15 +647,9 @@ lp_build_create_jit_compiler_for_module(LLVMExecutionEngineRef *OutJIT,
+    JITEventListener *JEL = JITEventListener::createIntelJITEventListener();
+    JIT->RegisterJITEventListener(JEL);
+ #endif
+-   if (JIT) {
+-      *OutJIT = wrap(JIT);
+-      return 0;
+-   }
+-   lp_free_generated_code(*OutCode);
+-   *OutCode = 0;
+-   delete MM;
+-   *OutError = strdup(Error.c_str());
+-   return 1;
++
++   *OutJIT = wrap(JIT);
++   return 0;
+ }
+ 
+ 
