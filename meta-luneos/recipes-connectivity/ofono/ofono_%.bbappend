@@ -2,15 +2,14 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 
 DEPENDS += "dbus-glib libmce-glib"
-RDEPENDS:${PN} += "mobile-broadband-provider-info ofono-conf"
-# Mainline modem stacks. A Halium device drives its modem through binder and
-# needs none of this.
-RDEPENDS:${PN}:append:mainline = " libsmdpkt-wrapper libqmi libmbim libqrtr-glib"
-
-# Halium machines drive the modem through ofono-binder-plugin, which needs
-# the extension APIs. Everything else is identical, so one oFono now serves
+# The modem stack differs per machine class. The default is the mainline
+# kernel stack; a Halium device instead drives its modem through
+# ofono-binder-plugin, which needs the extension APIs, and must not pull in
+# the mainline stack. Everything else is identical, so one oFono now serves
 # both; ofono-halium is retired.
-RDEPENDS:${PN}:append:halium = " ofono-ext ofono-ext-plugin ofono-binder-plugin"
+OFONO_MODEM_STACK_RDEPENDS = "libsmdpkt-wrapper libqmi libmbim libqrtr-glib"
+OFONO_MODEM_STACK_RDEPENDS:halium = "ofono-ext ofono-ext-plugin ofono-binder-plugin"
+RDEPENDS:${PN} += "mobile-broadband-provider-info ofono-conf ${OFONO_MODEM_STACK_RDEPENDS}"
 
 SRC_URI:append = " \
   file://0001-common-create-GList-helper-ofono_call_compare.patch \
