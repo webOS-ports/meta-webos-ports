@@ -27,7 +27,7 @@ RRECOMMENDS:${PN} += " \
 PV = "0.1.0-1+git"
 # PLACEHOLDER - replace with the real commit once the repo is pushed. Until then
 # this recipe only builds via externalsrc; see VPN/luneos-vpn-adapter/README.md.
-SRCREV = "0000000000000000000000000000000000000000"
+SRCREV = "40bdda2ad0fa18b8118407a35b0fded2d777b298"
 
 inherit webos_ports_repo
 inherit webos_filesystem_paths
