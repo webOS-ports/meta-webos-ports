@@ -20,7 +20,7 @@ RDEPENDS:${PN} += "nyx-conf"
 
 WEBOS_VERSION = "7.1.0-25_802df9c1da7fb70c9d7506d4b863cd858153a1b1"
 
-PR = "r26"
+PR = "r27"
 
 EXTRA_OECMAKE += "\
     -DDISTRO_VERSION:STRING='${DISTRO_VERSION}' \
@@ -81,6 +81,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0023-haptics-Implement-named-effects-effect-id-and-cancel.patch \
     file://0024-Add-nyx-test-ledcontroller-tool.patch \
     file://0025-Add-LED-torch-module-and-nyx-test-led.patch \
+    file://0026-msm_mtp-Support-configfs-UDC-gadgets-and-start-umtp.patch \
 "
 
 SRC_URI:append = " \
