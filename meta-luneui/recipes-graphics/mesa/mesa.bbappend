@@ -17,7 +17,9 @@ PACKAGECONFIG:append:class-target = " gbm"
 PACKAGECONFIG:append = " freedreno"
 GALLIUMDRIVERS:append = ",freedreno"
 
-FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
-# Allow minor patch fuzz for triple buffering patch (context differs slightly)
-ERROR_QA:remove = "patch-fuzz"
+SRC_URI += " \
+           file://0001-gallivm-check-ExecutionEngine-create-for-NULL-before-.patch \
+           file://0002-gallivm-handle-a-failed-execution-engine-instead-of-a.patch \
+"
