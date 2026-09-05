@@ -6,7 +6,7 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 DEPENDS = " \
-    json-c luna-service2 sqlite3 luna-sysmgr-ipc-messages \
+    json-c luna-service2 sqlite3 \
     pmloglib librolegen nyx-lib openssl luna-prefs \
     libpbnjson freetype luna-sysmgr-common \
     qtbase qtdeclarative serviceinstaller \
@@ -20,9 +20,9 @@ LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
-SRCREV = "be4ff4411f85020aeff4e0457e4242b150e81f18"
+SRCREV = "e1bf3fd16eb2ed0dde73880cf6d4bedc8e89aafc"
 
-PV = "1.0.0-22+git"
+PV = "1.0.0-23+git"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 

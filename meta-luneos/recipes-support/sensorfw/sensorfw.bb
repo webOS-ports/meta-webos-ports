@@ -8,7 +8,7 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 PV = "0.15.2+git"
 SRCREV = "b37c5b467e8be554066dfd1c4138dbff8eec77b3"
-DEPENDS = "qtbase luna-sysmgr-common luna-service2 json-c glib-2.0 luna-sysmgr-ipc-messages"
+DEPENDS = "qtbase luna-sysmgr-common luna-service2 json-c glib-2.0"
 
 SRC_URI = " \
     git://github.com/sailfishos/sensorfw.git;protocol=https;branch=master \
@@ -17,6 +17,7 @@ SRC_URI = " \
     file://0003-iioadaptor-Accept-input-attributes-for-IIO_CHAN_INFO.patch \
     file://0004-qt-api-do-not-marshal-invalid-QVariant-arguments.patch \
     file://0005-compasschain-link-the-magcalibrationchain-it-calls.patch \
+    file://0006-lunaservice-drop-the-LunaSysMgrIpcMessages-pkgconfig.patch \
 "
 
 do_configure:prepend() {
