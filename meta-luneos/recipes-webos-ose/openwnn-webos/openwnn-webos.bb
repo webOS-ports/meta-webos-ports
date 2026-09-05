@@ -31,5 +31,9 @@ do_install:append() {
     install -m 755 ${S}/libWnnJpn.so ${D}${libdir}/maliit/plugins
 }
 
+# QA Issue: File /usr/lib/maliit/plugins/.debug/libWnnJpn.so in package openwnn-webos-dbg contains reference to TMPDIR [buildpaths]
+ERROR_QA:remove = "buildpaths"
+WARN_QA:append = " buildpaths"
+
 TARGET_CC_ARCH += "${LDFLAGS}"
 FILES:${PN} += "${libdir}/maliit/plugins/"
