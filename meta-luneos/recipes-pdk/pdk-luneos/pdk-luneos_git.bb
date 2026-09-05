@@ -13,7 +13,7 @@ PV = "1.0.0+git"
 
 # Pin this to a release commit before shipping. AUTOREV is only appropriate while
 # the shims are still moving.
-SRCREV = "02436a7e601ba26b616c3903a43329aeb0af7c26"
+SRCREV = "37682a67a408c6f4913138e5e8105b3443ad5f8a"
 
 # Plain git fetch rather than meta-luneos's webos_ports_repo class, so this layer
 # parses standalone without meta-webos-ports present.

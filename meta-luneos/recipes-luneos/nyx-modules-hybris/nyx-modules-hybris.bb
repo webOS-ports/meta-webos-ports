@@ -36,7 +36,7 @@ COMPATIBLE_MACHINE = "^halium$"
 
 PV = "0.1.0-1+git"
 PR = "r10"
-SRCREV = "1f53064b6d3281fa1c72656fc20383a8aa4b1c0c"
+SRCREV = "e56077c6932dba23fd9fd1d9f3b4f8c6272a0e1b"
 
 inherit webos_ports_repo
 inherit webos_cmake

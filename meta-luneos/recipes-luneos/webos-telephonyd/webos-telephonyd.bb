@@ -7,7 +7,7 @@ DEPENDS = "luna-service2 json-c glib-2.0 luna-prefs glib-2.0-native python3-pack
 RRECOMMENDS:${PN} += "${VIRTUAL-RUNTIME_ofono} mmsd"
 
 PV = "0.1.0-1+git"
-SRCREV = "11b6c1a1d05a7906c3ad471c5a0c13c9c82e78bc"
+SRCREV = "cc8f15f30b5b96960aa0004552306e5e0b31175d"
 
 inherit webos_ports_ose_repo
 inherit webos_filesystem_paths
