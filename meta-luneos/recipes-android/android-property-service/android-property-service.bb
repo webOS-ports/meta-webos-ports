@@ -39,7 +39,7 @@ do_install:append() {
 }
 
 PV = "0.1.0-2+git"
-SRCREV = "6461ebfbffc7ba17d2b560f62bb9ad7b65bb69f5"
+SRCREV = "c434c9a2be80d6192a39c58d053d3843acc07672"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 SRC_URI += " \
