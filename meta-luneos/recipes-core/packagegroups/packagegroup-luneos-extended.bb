@@ -41,6 +41,7 @@ RDEPENDS:${PN} = " \
   ${VIRTUAL-RUNTIME_ofono} \
   tar \
   udev-extraconf \
+  umtprd \
   webos-connman-adapter \
   webos-telephonyd \
   iw \
@@ -144,7 +145,6 @@ LIBHYBRIS_RDEPENDS = " \
     android-tools \
     android-tools-adbd \
     lxc \
-    mtp-server \
     pulseaudio-modules-droid \
     pulseaudio-modules-droid-hidl \
     gst-droid \
