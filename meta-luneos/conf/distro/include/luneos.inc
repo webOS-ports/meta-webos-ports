@@ -7,8 +7,6 @@ require conf/distro/include/luneos-features.inc
 require conf/distro/include/luneos-toolchain.inc
 require conf/distro/include/luneos-sdk.inc
 
-require conf/distro/include/no-static-libs.inc
-
 #
 # Form the codename of a release (WEBOS_DISTRO_RELEASE_CODENAME) from a codename
 # that represents the major set of features of the platform
@@ -172,9 +170,6 @@ SANITY_TESTED_DISTROS ?= " \
     ubuntu-23.04 \n \
     ubuntu-23.10 \n \
 "
-
-require conf/distro/include/yocto-uninative.inc
-INHERIT += "uninative"
 
 # no interactive resolving, better to fail and report later
 PATCHRESOLVE = "noop"
