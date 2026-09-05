@@ -1,0 +1,163 @@
+#!/bin/sh
+# luneos-mtp-gadget - prepare/bind/tear down the FunctionFS MTP function for
+# umtprd inside a configfs USB gadget.
+#
+# Verbs (used by umtprd.service):
+#   prepare - add an ffs.mtp function to the active gadget (or create a
+#             standalone gadget), mount FunctionFS, unbind the UDC so the
+#             function set can change. Run before umtprd starts.
+#   bind    - (re)bind the gadget to the UDC. Run after umtprd has written
+#             its descriptors to ep0 (signalled via sd_notify).
+#   cleanup - unbind, remove the mtp function again, unmount FunctionFS and
+#             restore the gadget as it was. Run after umtprd stops. A gadget
+#             left bound with a dead FunctionFS function would break
+#             enumeration on the next replug.
+#
+# On Halium devices the composite gadget (adb/rndis/...) is owned by the
+# Android container; we add/remove our function in its active configuration.
+# On mainline devices with no gadget yet, a standalone one is created.
+
+CONFIGFS=/sys/kernel/config
+GADGET_ROOT=$CONFIGFS/usb_gadget
+FFS_MOUNT=/dev/ffs-mtp
+STATE_DIR=/run/luneos-mtp
+FUNC_NAME=ffs.mtp
+
+log() {
+    logger -t luneos-mtp-gadget "$@"
+}
+
+die() {
+    log "$@"
+    exit 1
+}
+
+find_gadget() {
+    # Prefer a gadget that is (or was) bound to a UDC; fall back to any
+    # existing gadget, then to creating our own.
+    for g in "$GADGET_ROOT"/*/; do
+        [ -d "$g" ] || continue
+        if [ -s "$g/UDC" ] && [ -n "$(cat "$g/UDC" 2>/dev/null)" ]; then
+            echo "${g%/}"
+            return 0
+        fi
+    done
+    for g in "$GADGET_ROOT"/*/; do
+        [ -d "$g" ] || continue
+        echo "${g%/}"
+        return 0
+    done
+    return 1
+}
+
+create_gadget() {
+    g=$GADGET_ROOT/luneos
+    mkdir -p "$g" || die "cannot create gadget directory"
+    echo 0x1d6b > "$g/idVendor"
+    echo 0x0100 > "$g/idProduct"
+    mkdir -p "$g/strings/0x409"
+    serial=$(cat /etc/machine-id 2>/dev/null || echo 0123456789)
+    echo "$serial" > "$g/strings/0x409/serialnumber"
+    echo "LuneOS" > "$g/strings/0x409/manufacturer"
+    echo "LuneOS Device" > "$g/strings/0x409/product"
+    mkdir -p "$g/configs/c.1/strings/0x409"
+    echo "LuneOS" > "$g/configs/c.1/strings/0x409/configuration"
+    echo 500 > "$g/configs/c.1/MaxPower"
+    echo "$g"
+}
+
+find_config() {
+    # First configuration of the gadget
+    for c in "$1"/configs/*/; do
+        [ -d "$c" ] || continue
+        echo "${c%/}"
+        return 0
+    done
+    return 1
+}
+
+do_prepare() {
+    mkdir -p "$STATE_DIR"
+
+    [ -d "$GADGET_ROOT" ] || modprobe libcomposite 2>/dev/null
+    [ -d "$CONFIGFS" ] || die "no configfs support"
+    mountpoint -q "$CONFIGFS" || mount -t configfs none "$CONFIGFS"
+    [ -d "$GADGET_ROOT" ] || die "no usb_gadget support in this kernel"
+
+    gadget=$(find_gadget) || gadget=$(create_gadget)
+    [ -n "$gadget" ] || die "could not find or create a USB gadget"
+    config=$(find_config "$gadget") || die "gadget has no configuration"
+
+    printf '%s' "$gadget" > "$STATE_DIR/gadget"
+
+    # Remember and release the UDC binding; the function set of a bound
+    # gadget cannot change, and FunctionFS refuses to bind before umtprd has
+    # written its descriptors anyway.
+    udc=$(cat "$gadget/UDC" 2>/dev/null)
+    if [ -n "$udc" ]; then
+        printf '%s' "$udc" > "$STATE_DIR/udc"
+        echo "" > "$gadget/UDC" 2>/dev/null
+    else
+        for u in /sys/class/udc/*; do
+            [ -e "$u" ] || continue
+            printf '%s' "${u##*/}" > "$STATE_DIR/udc"
+            break
+        done
+    fi
+    [ -s "$STATE_DIR/udc" ] || die "no UDC available"
+
+    if [ ! -d "$gadget/functions/$FUNC_NAME" ]; then
+        mkdir "$gadget/functions/$FUNC_NAME" || die "cannot create $FUNC_NAME"
+    fi
+    if [ ! -e "$config/$FUNC_NAME" ]; then
+        ln -s "$gadget/functions/$FUNC_NAME" "$config/$FUNC_NAME" \
+            || die "cannot link $FUNC_NAME into ${config##*/}"
+    fi
+
+    mkdir -p "$FFS_MOUNT"
+    mountpoint -q "$FFS_MOUNT" || mount -t functionfs mtp "$FFS_MOUNT" \
+        || die "cannot mount functionfs"
+    log "prepared $FUNC_NAME in $gadget (UDC $(cat "$STATE_DIR/udc"))"
+}
+
+do_bind() {
+    gadget=$(cat "$STATE_DIR/gadget" 2>/dev/null)
+    udc=$(cat "$STATE_DIR/udc" 2>/dev/null)
+    [ -d "$gadget" ] || die "no prepared gadget"
+    [ -n "$udc" ] || die "no UDC recorded"
+    echo "$udc" > "$gadget/UDC" || die "cannot bind $udc"
+    log "bound $gadget to $udc"
+}
+
+do_cleanup() {
+    gadget=$(cat "$STATE_DIR/gadget" 2>/dev/null)
+    udc=$(cat "$STATE_DIR/udc" 2>/dev/null)
+    [ -d "$gadget" ] || exit 0
+
+    echo "" > "$gadget/UDC" 2>/dev/null
+    for c in "$gadget"/configs/*/; do
+        rm -f "${c%/}/$FUNC_NAME"
+    done
+    mountpoint -q "$FFS_MOUNT" && umount "$FFS_MOUNT"
+    rmdir "$gadget/functions/$FUNC_NAME" 2>/dev/null
+
+    # Restore the previous binding if the gadget still has functions left
+    # (e.g. the Android composite gadget with adb/rndis). Function entries
+    # in a configuration are symlinks named <type>.<instance>.
+    has_funcs=0
+    for f in "$gadget"/configs/*/*.*; do
+        [ -L "$f" ] && has_funcs=1 && break
+    done
+    if [ -n "$udc" ] && [ "$has_funcs" = 1 ]; then
+        echo "$udc" > "$gadget/UDC" 2>/dev/null
+    fi
+    rm -f "$STATE_DIR/gadget" "$STATE_DIR/udc"
+    log "removed $FUNC_NAME from $gadget"
+}
+
+case "$1" in
+    prepare) do_prepare ;;
+    bind)    do_bind ;;
+    cleanup) do_cleanup ;;
+    *) echo "usage: $0 prepare|bind|cleanup" >&2; exit 2 ;;
+esac
