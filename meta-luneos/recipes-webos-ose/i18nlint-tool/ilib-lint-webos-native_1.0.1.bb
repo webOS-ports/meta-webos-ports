@@ -10,7 +10,7 @@ SUMMARY = "ilib-lint plugin to support webOS Platform"
 # licenses then you should change the value to separate the licenses with |
 # instead of &. If there is any doubt, check the accompanying documentation
 # to determine which situation is applicable.
-LICENSE = "Apache-2.0 & ISC & MIT"
+LICENSE = "Apache-2.0 AND ISC AND MIT"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=86d3f3a95c324c9479bd8986968f4327 \
                     file://node_modules/date-format/LICENSE;md5=11e69b4aa865a34554aefa2958c837cf \
                     file://node_modules/debug/LICENSE;md5=d85a365580888e9ee0a01fb53e8e9bf0 \

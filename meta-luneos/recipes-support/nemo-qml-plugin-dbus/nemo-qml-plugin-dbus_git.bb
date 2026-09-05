@@ -1,6 +1,6 @@
 SUMMARY = "The Nemo Mobile D-Bus QML Plugin allows you to access services on the system and session bus, as well as provide your own services."
 SECTION = "libs"
-LICENSE = "LGPL-2.1-only & BSD-3-Clause"
+LICENSE = "BSD-3-Clause AND LGPL-2.1-only"
 LIC_FILES_CHKSUM = "file://src/plugin/plugin.cpp;beginline=1;endline=30;md5=3b9f77a89aa84d67fac89051acacc1d5 \
     file://license.bsd;md5=caa037e0975ee5862b72644673e7590c \
     file://license.lgpl;md5=cb8aedd3bced19bd8026d96a8b6876d7 \

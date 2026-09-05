@@ -13,7 +13,7 @@ SUMMARY = "A loctool plugin that knows how to process ts resource files"
 # licenses then you should change the value to separate the licenses with |
 # instead of &. If there is any doubt, check the accompanying documentation
 # to determine which situation is applicable.
-LICENSE = "Apache-2.0 & ISC & MIT"
+LICENSE = "Apache-2.0 AND ISC AND MIT"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=86d3f3a95c324c9479bd8986968f4327 \
                     file://node_modules/ilib/LICENSE;md5=3b83ef96387f14655fc854ddc3c6bd57 \
                     file://node_modules/sax/LICENSE;md5=5f49410228c16917dacc5eab921004cb \

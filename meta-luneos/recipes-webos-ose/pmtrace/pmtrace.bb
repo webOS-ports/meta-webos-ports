@@ -4,7 +4,7 @@ SUMMARY = "lttng-ust tracepoints wrapper library and performance tools"
 AUTHOR = "Sukil Hong <sukil.hong@lge.com>"
 SECTION = "webos/libs"
 
-LICENSE = "LGPL-2.1-only & MIT & Apache-2.0"
+LICENSE = "Apache-2.0 AND LGPL-2.1-only AND MIT"
 LIC_FILES_CHKSUM = " \
     file://LICENSE.LGPL;md5=e2aa4f66375a24019b0ff5e99cec40ad \
     file://LICENSE.MIT;md5=19b5d9061141f7ab05cfcfdd4404ed08 \

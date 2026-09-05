@@ -3,7 +3,7 @@ HOMEPAGE = "http://www.pulseaudio.org"
 AUTHOR = "Lennart Poettering"
 SECTION = "libs/multimedia"
 
-LICENSE = "LGPL-2.1-or-later & MIT & BSD-3-Clause"
+LICENSE = "BSD-3-Clause AND LGPL-2.1-or-later AND MIT"
 
 LIC_FILES_CHKSUM = "file://LICENSE;md5=0e5cd938de1a7a53ea5adac38cc10c39 \
                     file://GPL;md5=4325afd396febcb659c36b49533135d4 \

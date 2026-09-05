@@ -2,7 +2,7 @@
 # This file configures common SRC_URI for both of mksnapshot and webruntime
 # Also it contains variables for gn command such as GN_ARGS
 
-LICENSE = "Apache-2.0 & BSD-3-Clause & LGPL-2.0-only & LGPL-2.1-only"
+LICENSE = "Apache-2.0 AND BSD-3-Clause AND LGPL-2.0-only AND LGPL-2.1-only"
 LIC_FILES_CHKSUM = "\
     ${CHROMIUM_LICENSE_CHKSUM} \
     file://src/third_party/blink/renderer/core/LICENSE-LGPL-2;md5=36357ffde2b64ae177b2494445b79d21 \

@@ -10,7 +10,7 @@ SUMMARY = "json type of file handler plugin for webOS platform loctool"
 # licenses then you should change the value to separate the licenses with |
 # instead of &. If there is any doubt, check the accompanying documentation
 # to determine which situation is applicable.
-LICENSE = "Apache-2.0 & MIT"
+LICENSE = "Apache-2.0 AND MIT"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=86d3f3a95c324c9479bd8986968f4327 \
                     file://node_modules/braces/LICENSE;md5=0f64900f8f30e53054962c9f1fc3205b \
                     file://node_modules/fill-range/LICENSE;md5=0f64900f8f30e53054962c9f1fc3205b \

@@ -9,7 +9,7 @@ HOMEPAGE = "https://github.com/FuriLabs/droidian-fpd"
 SECTION = "webos/support"
 # Daemon is GPL-3.0; the biometryd-derived bridge/HAL glue it embeds
 # (src/bridge/, src/hardware/) is LGPL-3.0 Canonical/UBports code.
-LICENSE = "GPL-3.0-only & LGPL-3.0-only"
+LICENSE = "GPL-3.0-only AND LGPL-3.0-only"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=1ebbd3e34237af26da5dc08a4e440464"
 
 DEPENDS = "qtbase libhybris"

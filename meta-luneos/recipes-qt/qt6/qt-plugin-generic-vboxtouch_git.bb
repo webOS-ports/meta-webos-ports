@@ -3,7 +3,7 @@ It uses the integrated pointer feature to create a smooth conversion from \
 the host pointer to touchscreen events in the guest, without grabbing the \
 host pointer."
 SUMMARY = "Touchscreen driver for integrated mouse pointer in VirtualBox"
-LICENSE = "GPL-2.0-or-later | LGPL-3.0-only | The-Qt-Company-Commercial"
+LICENSE = "GPL-2.0-or-later OR LGPL-3.0-only OR LicenseRef-The-Qt-Company-Commercial"
 LIC_FILES_CHKSUM = " \
     file://vboxtouch.cpp;beginline=1;endline=22;md5=ca51db8f7c0606c77f702dcee4cf31d9 \
     file://evdevmousehandler.cpp;beginline=1;endline=38;md5=e6b661a57e804d0e9c4065e9ea275f33 \

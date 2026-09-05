@@ -5,7 +5,7 @@ inherit pkgconfig
 
 require webruntime-common.inc
 
-LICENSE = "Apache-2.0-with-LLVM-exception"
+LICENSE = "Apache-2.0 WITH LLVM-exception"
 
 DEPENDS += "glib-2.0"
 

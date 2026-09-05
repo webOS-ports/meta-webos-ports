@@ -10,7 +10,7 @@ SUMMARY = "A string resource extractor for multiple files types and project type
 # licenses then you should change the value to separate the licenses with |
 # instead of &. If there is any doubt, check the accompanying documentation
 # to determine which situation is applicable.
-LICENSE = "Apache-2.0 & BSD-2-Clause & ISC & MIT & Python-2.0"
+LICENSE = "Apache-2.0 AND BSD-2-Clause AND ISC AND MIT AND Python-2.0"
 LIC_FILES_CHKSUM = "file://LICENSE.txt;md5=578915003022e6b28128e6696dddbb46 \
                     file://node_modules/@types/hast/LICENSE;md5=d4a904ca135bb7bc912156fee12726f0 \
                     file://node_modules/@types/mdast/LICENSE;md5=d4a904ca135bb7bc912156fee12726f0 \
@@ -302,7 +302,7 @@ LICENSE:${PN}-iconv-lite = "MIT"
 LICENSE:${PN}-ilib = "Apache-2.0"
 LICENSE:${PN}-ilib-tree-node = "Apache-2.0"
 LICENSE:${PN}-inherits = "ISC"
-LICENSE:${PN}-inline-style-parser = "Unknown"
+LICENSE:${PN}-inline-style-parser = "LicenseRef-Unknown"
 LICENSE:${PN}-internal-slot = "MIT"
 LICENSE:${PN}-is-alphabetical = "MIT"
 LICENSE:${PN}-is-alphanumeric = "MIT"
@@ -348,7 +348,7 @@ LICENSE:${PN}-message-accumulator = "Apache-2.0"
 LICENSE:${PN}-micromatch = "MIT"
 LICENSE:${PN}-ms = "MIT"
 LICENSE:${PN}-mysql2-lru-cache = "ISC"
-LICENSE:${PN}-mysql2 = "ISC & MIT"
+LICENSE:${PN}-mysql2 = "ISC AND MIT"
 LICENSE:${PN}-named-placeholders-lru-cache = "ISC"
 LICENSE:${PN}-named-placeholders = "MIT"
 LICENSE:${PN}-object-inspect = "MIT"

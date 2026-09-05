@@ -8,7 +8,7 @@ HOMEPAGE = "https://github.com/iLib-js/ilib-lint"
 # licenses then you should change the value to separate the licenses with |
 # instead of &. If there is any doubt, check the accompanying documentation
 # to determine which situation is applicable.
-LICENSE = "0BSD & Apache-2.0 & ISC & MIT"
+LICENSE = "0BSD AND Apache-2.0 AND ISC AND MIT"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=86d3f3a95c324c9479bd8986968f4327 \
                     file://node_modules/@formatjs/ecma402-abstract/LICENSE.md;md5=0a72329692ab7427e8a455db571e399d \
                     file://node_modules/@formatjs/fast-memoize/LICENSE.md;md5=03a30bc23ca9fba6908797a2c82b72e7 \

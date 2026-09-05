@@ -10,7 +10,7 @@ SUMMARY = "A loctool plugin that knows how to process C++ files"
 # licenses then you should change the value to separate the licenses with |
 # instead of &. If there is any doubt, check the accompanying documentation
 # to determine which situation is applicable.
-LICENSE = "Apache-2.0 & BSD-2-Clause & BSD-3-Clause & ISC & MIT & Python-2.0"
+LICENSE = "Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND ISC AND MIT AND Python-2.0"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=86d3f3a95c324c9479bd8986968f4327 \
                     file://node_modules/@types/hast/LICENSE;md5=d4a904ca135bb7bc912156fee12726f0 \
                     file://node_modules/@types/mdast/LICENSE;md5=d4a904ca135bb7bc912156fee12726f0 \
@@ -355,7 +355,7 @@ LICENSE:${PN}-message-accumulator = "Apache-2.0"
 LICENSE:${PN}-micromatch = "MIT"
 LICENSE:${PN}-ms = "MIT"
 LICENSE:${PN}-mysql2-lru-cache = "ISC"
-LICENSE:${PN}-mysql2 = "ISC & MIT"
+LICENSE:${PN}-mysql2 = "ISC AND MIT"
 LICENSE:${PN}-named-placeholders-lru-cache = "ISC"
 LICENSE:${PN}-named-placeholders = "MIT"
 LICENSE:${PN}-object-inspect = "MIT"

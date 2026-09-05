@@ -5,7 +5,7 @@ pdk-armel multiconfig; alternatively point PDK_SYSROOT_TARBALL at one produced \
 by tools/mk-sysroot.sh. See docs/yocto.md."
 HOMEPAGE = "https://github.com/webOS-ports/pdk-luneos"
 
-LICENSE = "Apache-2.0 & MIT & Zlib"
+LICENSE = "Apache-2.0 AND MIT AND Zlib"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 # The content is ARM soft-float regardless of what MACHINE this image is for. It
