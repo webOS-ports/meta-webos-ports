@@ -17,7 +17,7 @@ RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_webos-customization}"
 VIRTUAL-RUNTIME_webos-customization ?= ""
 
 WEBOS_VERSION = "2.0.0-77_7afc802ab0499a7f84e64f3f142b26682d996878"
-PR = "r32"
+PR = "r33"
 
 inherit webos_component
 inherit webos_cmake
@@ -38,6 +38,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
 	file://0008-NativeContainer-configure-native-apps.patch \
 	file://0009-Setup-QT_WAYLAND_SHELL_INTEGRATION-for-webOS.patch \
 	file://0010-com.webos.sam-Allow-surfacemanager-cardshell-to-launch-apps.patch \
+	file://0011-AppDescription-resolve-locale-relative-main-path-fro.patch \
 	file://0001-CMakeLists.txt-replace-std-gnu-0x-with-std-c-17-for-.patch \
 "
 
