@@ -1,0 +1,103 @@
+From 734498026348557a764412474e4c2d531824524d Mon Sep 17 00:00:00 2001
+From: Herrie <claude.ai@herrie.org>
+Date: Sat, 5 Sep 2026 07:53:51 +0200
+Subject: [PATCH] AppDescription: fix localized appinfo handling for legacy
+ apps
+
+Legacy Palm/HP webOS applications (com.palm.app.accounts and other
+Mojo/Enyo-era apps) ship localized appinfo.json files under
+resources/<lang>[/<region>]/ which override "main" with a path that is
+relative to the localization directory, e.g. "../../index.html".
+
+Two problems broke these apps:
+
+1. SAM re-anchors image properties (icon, splashicon, ...) against the
+   localization dir when merging localized appinfo files, but copied
+   "main" verbatim. readAppinfo() then resolved it against the app's
+   folderPath, producing e.g. /usr/palm/index.html, which does not
+   exist. WAM consequently loaded about:blank and the app came up as an
+   empty card. Treat "main" like the image properties and prefix the
+   relative localization dir so it resolves back to the real entry
+   point.
+
+2. For a locale without a script component (e.g. en-US), the
+   localization dir list contained the language dir twice - once as
+   "resources/en/" and once as "resources/en//" (empty script
+   segment). The same localized appinfo.json was applied twice, and the
+   second pass re-anchored already-anchored paths with a stray "//",
+   which URL normalization then resolved to the wrong file. Skip empty
+   script/region components when building the list.
+
+Upstream-Status: Pending
+---
+ src/base/AppDescription.cpp | 26 ++++++++++++++++++++------
+ src/base/AppDescription.h   |  1 +
+ 2 files changed, 21 insertions(+), 6 deletions(-)
+
+diff --git a/src/base/AppDescription.cpp b/src/base/AppDescription.cpp
+index 61d1603..6b7df30 100644
+--- a/src/base/AppDescription.cpp
++++ b/src/base/AppDescription.cpp
+@@ -37,6 +37,9 @@ const vector<string> AppDescription::ASSETS_SUPPORTED = {
+ const vector<string> AppDescription::PROPS_IMAGES = {
+     "icon", "largeIcon", "bgImage", "splashBackground", "miniicon", "mediumIcon", "splashicon", "imageForRecents"
+ };
++const vector<string> AppDescription::PROPS_PATHS = {
++    "main"
++};
+ 
+ const string AppDescription::CLASS_NAME = "AppDescription";
+ 
+@@ -290,11 +293,19 @@ bool AppDescription::loadAppinfo()
+     string resourcePath = m_folderPath + "/resources/" + SAMConf::getInstance().getLanguage() + "/";
+     localizationDirs.push_back(resourcePath);
+ 
+-    resourcePath += SAMConf::getInstance().getScript() + "/";
+-    localizationDirs.push_back(resourcePath);
++    // Skip empty locale components: for a locale without a script (e.g. en-US)
++    // the script dir would duplicate the language dir with a trailing "//",
++    // applying the same localized appinfo.json twice and corrupting
++    // re-anchored relative paths.
++    if (!SAMConf::getInstance().getScript().empty()) {
++        resourcePath += SAMConf::getInstance().getScript() + "/";
++        localizationDirs.push_back(resourcePath);
++    }
+ 
+-    resourcePath += SAMConf::getInstance().getRegion() + "/";
+-    localizationDirs.push_back(std::move(resourcePath));
++    if (!SAMConf::getInstance().getRegion().empty()) {
++        resourcePath += SAMConf::getInstance().getRegion() + "/";
++        localizationDirs.push_back(std::move(resourcePath));
++    }
+ 
+     // apply localization (overwrite from low to high)
+     for (const auto& localizationDir : localizationDirs) {
+@@ -340,8 +351,11 @@ bool AppDescription::loadAppinfo()
+                     continue;
+             }
+ 
+-            auto it = find(PROPS_IMAGES.begin(), PROPS_IMAGES.end(), key);
+-            if (it != PROPS_IMAGES.end()) {
++            // Path-type properties in a localized appinfo.json are relative to the
++            // localization dir (legacy apps use values like "../../index.html"),
++            // so they must be re-anchored the same way as the image properties.
++            if (find(PROPS_IMAGES.begin(), PROPS_IMAGES.end(), key) != PROPS_IMAGES.end() ||
++                find(PROPS_PATHS.begin(), PROPS_PATHS.end(), key) != PROPS_PATHS.end()) {
+                 m_appinfo.put(key, RelativeLocaleAppinfoPath + localeAppinfo[key].asString());
+             } else {
+                 m_appinfo.put(key, localeAppinfo[key]);
+diff --git a/src/base/AppDescription.h b/src/base/AppDescription.h
+index ed25f0b..47a704a 100644
+--- a/src/base/AppDescription.h
++++ b/src/base/AppDescription.h
+@@ -310,6 +310,7 @@ public:
+ private:
+     static const vector<string> PROPS_PROHIBITED;
+     static const vector<string> PROPS_IMAGES;
++    static const vector<string> PROPS_PATHS;
+     static const vector<string> ASSETS_SUPPORTED;
+     static const string CLASS_NAME;
+ 
+-- 
+2.53.0
+
