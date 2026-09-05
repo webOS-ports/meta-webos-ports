@@ -20,8 +20,8 @@ LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
-SRCREV = "d11cb31d9ed88726bb3468e954bfab60a9221ca9"
-WEBOS_GIT_PARAM_BRANCH = "herrie/sysmgr-split"
+SRCREV = "106060134b020694e1c8c60f8ff6d0a0a6e5fe3c"
+WEBOS_GIT_PARAM_BRANCH = "herrie/codecleanup"
 
 PV = "1.0.0-22+git"
 
