@@ -19,23 +19,7 @@ inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
 
-# TEMPORARY: built from the fork rather than webOS-ports/imlibpurpleservice, to test the QR
-# remote-auth transport. Revert both overrides once herrie/synergy-revival is merged into the
-# webOS-ports repo, leaving only a SRCREV bump.
-#
-# The account validators call com.palm.imlibpurple/startQRLogin, getAuthChallenge and
-# submitAuthInput. None of that exists at 134cf24 (107 commits back): the service does not
-# implement the methods, com.palm.imlibpurple.api.json does not declare them, and the role file's
-# inbound list has no entry for the accounts app -- which is the identity these calls actually
-# carry, because the validator HTML runs inside com.palm.app.accounts' web context rather than its
-# own. So WhatsApp sign-in fails with
-#     "Not permitted to send to com.palm.imlibpurple."
-# and ls-hubd logs LSHUB_NO_INB_PERMS for com.palm.app.accounts-<pid>. This revision fixes all
-# three: the methods exist, the ACG declares them, and the role file admits com.palm.app.accounts
-# plus the per-protocol validator apps.
-WEBOS_PORTS_GIT_REPO = "git://github.com/Herrie82"
-WEBOS_GIT_PARAM_BRANCH = "herrie/synergy-revival"
-SRCREV = "2ee1c411e00ce880ad454cc8192924a2918494a4"
+SRCREV = "3e1d0daddbd1ddf2a85d0ef044ae42c93ea67b25"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
