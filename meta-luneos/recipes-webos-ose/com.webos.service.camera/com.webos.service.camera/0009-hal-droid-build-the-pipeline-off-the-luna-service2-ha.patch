@@ -1,0 +1,39 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 5 Sep 2026 16:20:00 +0200
+Subject: [PATCH] hal-droid: build the pipeline off the luna-service2 handler thread
+
+Bringing droidcamsrc to PLAYING blocks, and startCapture() runs on the
+luna-service2 handler thread, so the block also stops that thread's main loop
+dispatching anything else. A plain gst-launch reaches PLAYING with an identical
+pipeline on this hardware while the camera service never does, and the calling
+context is the most visible remaining difference between the two.
+
+Run the build on a thread of its own and join it.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+---
+Upstream-Status: Inappropriate [LuneOS Halium-specific]
+---
+--- a/src/plugins/hal/droid/droid_camera_plugin.cpp	2026-09-05 10:09:55.286081813 +0200
++++ b/src/plugins/hal/droid/droid_camera_plugin.cpp	2026-09-05 10:09:55.304642930 +0200
+@@ -331,7 +331,19 @@
+     constexpr int kAttempts = 3;
+     for (int attempt = 1; attempt <= kAttempts; attempt++)
+     {
+-        if (buildPipeline())
++        /* Build on a thread of our own rather than on the luna-service2
++         * handler thread we were called from. Bringing droidcamsrc to PLAYING
++         * blocks, and doing that on the service's main loop stops it dispatching
++         * anything else - including whatever droidmedia may be waiting on. A
++         * plain gst-launch reaches PLAYING with the identical pipeline, and the
++         * calling context is the most visible thing that differs. */
++        bool built = false;
++        {
++            std::thread worker([this, &built]() { built = buildPipeline(); });
++            worker.join();
++        }
++
++        if (built)
+         {
+             if (attempt > 1)
+                 PLOGI("droid pipeline started on attempt %d", attempt);
