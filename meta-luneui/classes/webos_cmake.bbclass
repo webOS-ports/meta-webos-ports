@@ -26,9 +26,9 @@ EXTRA_OECMAKE += "-DWEBOS_INSTALL_ROOT:PATH=/"
 # 2.8.7, and webOS OSE is dormant upstream, so there is no fix to wait for.
 #
 # Set here rather than in ~100 individual recipes: of the components in this layer set that
-# declare a pre-3.5 minimum, all but two inherit this class (directly, or via webos_cmake_qt6 /
-# clang_cmake, both of which inherit it). The two that do not -- libsuspend and mtp-server --
-# inherit plain cmake and carry the flag inline instead.
+# declare a pre-3.5 minimum, all but one inherit this class (directly, or via webos_cmake_qt6 /
+# clang_cmake, both of which inherit it). The one that does not -- libsuspend --
+# inherits plain cmake and carries the flag inline instead.
 #
 # The three nodejs-module-webos-* recipes also have a pre-3.5 CMakeLists.txt upstream but need
 # nothing: they override do_configure to run node-gyp, so CMake never runs on them.
