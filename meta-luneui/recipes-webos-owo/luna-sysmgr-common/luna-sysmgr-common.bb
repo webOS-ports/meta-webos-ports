@@ -6,11 +6,10 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 DEPENDS = "glib-2.0 luna-prefs luna-service2 json-c nyx-lib libpbnjson sqlite3 pmloglib librolegen serviceinstaller"
-DEPENDS += "luna-sysmgr-ipc-messages"
 DEPENDS += "qtbase"
 
-PV = "3.0.0-3+git"
-SRCREV = "ec3ede9d92cc1a73623b7b66903331d6b72af703"
+PV = "3.0.0-4+git"
+SRCREV = "65619e0b677dcccd053d8c1a3db6a0d401c013bf"
 
 # Don't uncomment until all of the do_*() tasks have been moved out of the recipe
 inherit webos_ports_fork_repo
