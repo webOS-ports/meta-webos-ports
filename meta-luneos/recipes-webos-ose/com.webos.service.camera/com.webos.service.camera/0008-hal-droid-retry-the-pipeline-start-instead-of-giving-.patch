@@ -1,0 +1,58 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 5 Sep 2026 16:00:00 +0200
+Subject: [PATCH] hal-droid: retry the pipeline start instead of giving up at once
+
+On this hardware the vendor HAL routinely fails the first preview start with
+"error 0x1 from camera HAL", and droidcamsrc logs "error starting preview".
+That is recoverable: a plain gst-launch pipeline hits exactly the same error
+and still reaches PLAYING, because it does not tear down and try again.
+
+startCapture() gave up on the first failure, which is why the camera worked
+from gst-launch but never through the camera service. Retry the build a few
+times, staying inside the service's COMMAND_TIMEOUT_LONG budget for
+startPreview.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+---
+Upstream-Status: Inappropriate [LuneOS Halium-specific]
+---
+--- a/src/plugins/hal/droid/droid_camera_plugin.cpp	2026-09-05 10:01:23.474680902 +0200
++++ b/src/plugins/hal/droid/droid_camera_plugin.cpp	2026-09-05 10:01:23.492582287 +0200
+@@ -318,10 +318,33 @@
+ int DroidCameraPlugin::startCapture()
+ {
+     ensureGstInit();
+-    if (!buildPipeline())
+-        return CAMERA_ERROR_UNKNOWN;
+-    streaming_ = true;
+-    return CAMERA_ERROR_NONE;
++
++    /* The vendor HAL frequently fails the first preview start with
++     * "error 0x1 from camera HAL", and droidcamsrc reports "error starting
++     * preview". That is not fatal: a plain gst-launch pipeline hits exactly the
++     * same error on this hardware and still reaches PLAYING, because it keeps
++     * going instead of tearing down. We were giving up on the first attempt.
++     *
++     * Retry the whole build a couple of times. Each failed attempt costs about
++     * a second, and the budget has to stay inside the camera service's
++     * COMMAND_TIMEOUT_LONG (12 s) for startPreview. */
++    constexpr int kAttempts = 3;
++    for (int attempt = 1; attempt <= kAttempts; attempt++)
++    {
++        if (buildPipeline())
++        {
++            if (attempt > 1)
++                PLOGI("droid pipeline started on attempt %d", attempt);
++            streaming_ = true;
++            return CAMERA_ERROR_NONE;
++        }
++
++        PLOGW("droid pipeline attempt %d/%d failed", attempt, kAttempts);
++        if (attempt < kAttempts)
++            g_usleep(300 * 1000);
++    }
++
++    return CAMERA_ERROR_UNKNOWN;
+ }
+ 
+ int DroidCameraPlugin::stopCapture()

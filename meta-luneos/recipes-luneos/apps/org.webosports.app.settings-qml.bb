@@ -14,9 +14,9 @@ inherit webos_app
 inherit pkgconfig
 
 PV = "0.4.0-1+git"
-SRCREV = "4a881318e47b7648f0576895f1477fb94802d725"
+SRCREV = "5d0c770aa449cfca5101fded5e53294c8746877f"
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/esim"
+WEBOS_GIT_PARAM_BRANCH = "qml-based"
 WEBOS_REPO_NAME = "org.webosports.app.settings"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
@@ -32,9 +32,15 @@ REMOVE_ANDROID_PROPERTY_SERVICE_CMD = "sed -i 's/\"android-property-service.oper
 REMOVE_FINGERPRINT_APP_CMD:halium = ""
 REMOVE_FINGERPRINT_APP_CMD = "rm -rf ${D}/${webos_applicationsdir}/org.webosports.app.settings.fingerprint"
 
+# The face unlock panel needs the faceunlock.* ACGs, which only exist where
+# luneos-faced is installed; drop the sub-app elsewhere for the same reason.
+REMOVE_FACEUNLOCK_APP_CMD:halium = ""
+REMOVE_FACEUNLOCK_APP_CMD = "rm -rf ${D}/${webos_applicationsdir}/org.webosports.app.settings.faceunlock"
+
 do_install:append() {
     ${REMOVE_ANDROID_PROPERTY_SERVICE_CMD}
     ${REMOVE_FINGERPRINT_APP_CMD}
+    ${REMOVE_FACEUNLOCK_APP_CMD}
 }
 
 FILES:${PN} += "${webos_applicationsdir}/org.webosports.app.settings-common \
@@ -50,6 +56,7 @@ FILES:${PN} += "${webos_applicationsdir}/org.webosports.app.settings-common \
                 ${webos_applicationsdir}/org.webosports.app.settings.devmodeswitcher \
                 ${webos_applicationsdir}/org.webosports.app.settings.esim \
                 ${webos_applicationsdir}/org.webosports.app.settings.exhibitionpreferences \
+                ${webos_applicationsdir}/org.webosports.app.settings.faceunlock \
                 ${webos_applicationsdir}/org.webosports.app.settings.fingerprint \
                 ${webos_applicationsdir}/org.webosports.app.settings.help \
                 ${webos_applicationsdir}/org.webosports.app.settings.languagepicker \

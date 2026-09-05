@@ -1,0 +1,99 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 4 Sep 2026 12:00:00 +0200
+Subject: [PATCH] Makefile: make toolchain, flags and install paths overridable
+
+Four things stop the Makefile working under a cross-compiling distro build
+such as Yocto/OpenEmbedded:
+
+ 1. CC/CXX are assigned unconditionally, which overrides the values a build
+    environment exports. The result is not a build failure you can spot -
+    it silently compiles with the host compiler and no --sysroot, so the
+    target's headers are invisible and any object produced is for the wrong
+    architecture. Use ?= so the environment wins.
+
+ 2. CXXFLAGS/CFLAGS are likewise assigned, not appended, so every flag the
+    build environment supplies (--sysroot, optimisation, hardening, debug
+    prefix maps) is discarded. The hardcoded -I/usr/include/tensorflow also
+    points at the host rather than the sysroot; it is unnecessary because
+    the TensorFlow Lite headers install under ${includedir} and are reached
+    through the normal include path.
+
+ 3. The link lines do not use LDFLAGS, so the distro's linker flags are
+    dropped.
+
+ 4. install unconditionally writes to $(PREFIX)/lib/$(TRIPLET), a Debian
+    multiarch path. Add LIBDIR/INCLUDEDIR/DATADIR knobs that default to the
+    previous values, so nothing changes for Debian builds.
+
+Upstream-Status: Pending
+---
+--- a/Makefile
++++ b/Makefile
+@@ -1,5 +1,8 @@
+-CC = gcc
+-CXX = g++
++# ?= so a cross-compiling build environment can supply its own toolchain;
++# a plain assignment here would override CC/CXX from the environment and
++# silently build with the host compiler.
++CC ?= gcc
++CXX ?= g++
+ 
+ BUILDDIR = build
+ 
+@@ -13,14 +16,22 @@
+ PREFIX ?= /usr
+ TRIPLET ?= $(shell $(CC) -dumpmachine)
+ 
++# Overridable so distributions that do not use Debian multiarch paths
++# (Yocto/OpenEmbedded, for example) can point these at their own layout.
++LIBDIR ?= $(PREFIX)/lib/$(TRIPLET)
++INCLUDEDIR ?= $(PREFIX)/include
++DATADIR ?= $(PREFIX)/share
++
+ PKG_CXX_CFLAGS = $(shell pkg-config --cflags glib-2.0 opencv4 libgbinder)
+ PKG_CXX_LIBS = $(shell pkg-config --libs glib-2.0 opencv4 libgbinder) -ltensorflow-lite
+ 
+ PKG_C_CFLAGS = $(shell pkg-config --cflags gtk+-3.0 gstreamer-1.0 glib-2.0)
+ PKG_C_LIBS = $(shell pkg-config --libs gtk+-3.0 gstreamer-1.0 glib-2.0)
+ 
+-CXXFLAGS = -Iinclude -I/usr/include/tensorflow $(PKG_CXX_CFLAGS) -fPIC
+-CFLAGS = -Iinclude $(PKG_C_CFLAGS)
++# Append rather than assign, so flags supplied by the build environment
++# (cross-compile sysroot, optimisation, hardening) survive.
++CXXFLAGS += -Iinclude $(PKG_CXX_CFLAGS) -fPIC
++CFLAGS += -Iinclude $(PKG_C_CFLAGS)
+ 
+ LDFLAGS_SO = -shared
+ LDFLAGS_TEST = -L. -lfart
+@@ -36,10 +47,10 @@
+ 	mkdir -p $(BUILDDIR)
+ 
+ $(TARGET_LIBFART): $(BUILDDIR) $(CXX_OBJS)
+-	$(CXX) $(LDFLAGS_SO) -o $@ $(CXX_OBJS) $(PKG_CXX_LIBS)
++	$(CXX) $(LDFLAGS) $(LDFLAGS_SO) -o $@ $(CXX_OBJS) $(PKG_CXX_LIBS)
+ 
+ test: $(TARGET_LIBFART) $(BUILDDIR) $(C_OBJS)
+-	$(CC) -o $(TARGET_TEST) $(C_OBJS) $(LDFLAGS_TEST) $(PKG_C_LIBS)
++	$(CC) $(LDFLAGS) -o $(TARGET_TEST) $(C_OBJS) $(LDFLAGS_TEST) $(PKG_C_LIBS)
+ 
+ $(BUILDDIR)/%.o: src/%.cpp | $(BUILDDIR)
+ 	$(CXX) -c $< -o $@ $(CXXFLAGS)
+@@ -48,12 +59,12 @@
+ 	$(CC) -c $< -o $@ $(CFLAGS)
+ 
+ install: all
+-	install -d $(DESTDIR)$(PREFIX)/lib/$(TRIPLET)/
+-	install -m 0644 $(TARGET_LIBFART) $(DESTDIR)$(PREFIX)/lib/$(TRIPLET)/
+-	install -d $(DESTDIR)$(PREFIX)/include/fart
+-	install -m 0644 $(HEADERS) $(DESTDIR)$(PREFIX)/include/fart
+-	install -d $(DESTDIR)$(PREFIX)/share/fart/
+-	cp -r models $(DESTDIR)$(PREFIX)/share/fart/
++	install -d $(DESTDIR)$(LIBDIR)/
++	install -m 0644 $(TARGET_LIBFART) $(DESTDIR)$(LIBDIR)/
++	install -d $(DESTDIR)$(INCLUDEDIR)/fart
++	install -m 0644 $(HEADERS) $(DESTDIR)$(INCLUDEDIR)/fart
++	install -d $(DESTDIR)$(DATADIR)/fart/
++	cp -r models $(DESTDIR)$(DATADIR)/fart/
+ 
+ clean:
+ 	rm -rf $(BUILDDIR) $(TARGET_LIBFART) $(TARGET_TEST)

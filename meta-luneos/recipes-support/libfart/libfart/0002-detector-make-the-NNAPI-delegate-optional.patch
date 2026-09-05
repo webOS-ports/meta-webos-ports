@@ -1,0 +1,120 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 4 Sep 2026 14:00:00 +0200
+Subject: [PATCH] detector: make the NNAPI delegate optional
+
+Two problems on a glibc/Halium target, both fatal:
+
+ 1. init_common() throws outright when the Neural Networks HAL is not
+    registered in hwservicemanager. That makes libfart unusable on every
+    device whose vendor ships no NNAPI HAL, and on all non-Halium machines
+    where hwservicemanager does not exist at all - even though every NNAPI
+    call site already falls back to CPU cleanly. A missing accelerator
+    should not be a hard failure.
+
+ 2. The delegate is reached through the C API in
+    tensorflow/lite/delegates/nnapi/nnapi_delegate_c_api.h. Upstream
+    TensorFlow Lite builds that C wrapper as a separate CMake target, so a
+    stock libtensorflow-lite.so exports the C++ StatefulNnApiDelegate but
+    not TfLiteNnapiDelegateCreate/Delete/OptionsDefault. libfart then links
+    with undefined references, which a consumer built with
+    -Wl,--no-undefined cannot link against.
+
+Guard the whole NNAPI path behind FART_ENABLE_NNAPI, off by default. The
+interpreters run on CPU (XNNPACK on aarch64), which is what actually happens
+on these devices anyway: TFLite's NNAPI delegate dlopens Android's
+libneuralnetworks.so, which is bionic-side and not reachable from a glibc
+process.
+
+Distributions that build against a TensorFlow Lite providing the C wrapper,
+on a device with an NNAPI HAL, can restore the old behaviour with
+-DFART_ENABLE_NNAPI=1.
+
+Upstream-Status: Pending
+---
+--- a/src/detector.cpp
++++ b/src/detector.cpp
+@@ -20,7 +20,9 @@
+ #include <opencv2/imgproc.hpp>
+ 
+ #include "tensorflow/lite/kernels/register.h"
++#if FART_ENABLE_NNAPI
+ #include "tensorflow/lite/delegates/nnapi/nnapi_delegate_c_api.h"
++#endif
+ 
+ using json = nlohmann::json;
+ namespace fs = std::filesystem;
+@@ -72,8 +74,10 @@
+                           const std::string& recognition_model_path,
+                           const std::string& anti_spoof_model_path)
+ {
++#if FART_ENABLE_NNAPI
+     if (!find_hal("android.hardware.neuralnetworks"))
+         throw std::runtime_error("Neural Networks HAL not found in hwservicemanager");
++#endif
+ 
+     detection_model_ = tflite::FlatBufferModel::BuildFromFile(detection_model_path.c_str());
+     if (!detection_model_)
+@@ -84,6 +88,7 @@
+     if (!detector_)
+         throw std::runtime_error("Failed to build detection interpreter");
+ 
++#if FART_ENABLE_NNAPI
+     TfLiteNnapiDelegateOptions nnapi_options = TfLiteNnapiDelegateOptionsDefault();
+     nnapi_options.allow_fp16 = true;
+     nnapi_options.disallow_nnapi_cpu = false;
+@@ -99,6 +104,7 @@
+             nnapi_detection_delegate_ = nullptr;
+         }
+     }
++#endif
+ 
+     if (detector_->AllocateTensors() != kTfLiteOk)
+         throw std::runtime_error("Failed to allocate tensors for detection model");
+@@ -111,6 +117,7 @@
+     if (!recognizer_)
+         throw std::runtime_error("Failed to build recognition interpreter");
+ 
++#if FART_ENABLE_NNAPI
+     nnapi_recognition_delegate_ = TfLiteNnapiDelegateCreate(&nnapi_options);
+     if (!nnapi_recognition_delegate_) {
+         g_debug("Failed to create NNAPI delegate for recognition model, falling back to CPU");
+@@ -122,6 +129,7 @@
+             nnapi_recognition_delegate_ = nullptr;
+         }
+     }
++#endif
+ 
+     if (recognizer_->AllocateTensors() != kTfLiteOk)
+         throw std::runtime_error("Failed to allocate tensors for recognition model");
+@@ -137,6 +145,7 @@
+         if (!anti_spoofer_)
+             throw std::runtime_error("Failed to build anti-spoof interpreter");
+ 
++#if FART_ENABLE_NNAPI
+         nnapi_spoof_delegate_ = TfLiteNnapiDelegateCreate(&nnapi_options);
+         if (!nnapi_spoof_delegate_) {
+             g_debug("Failed to create NNAPI delegate for anti-spoof model, falling back to CPU");
+@@ -148,6 +157,7 @@
+                 nnapi_spoof_delegate_ = nullptr;
+             }
+         }
++#endif
+ 
+         if (anti_spoofer_->AllocateTensors() != kTfLiteOk)
+             throw std::runtime_error("Failed to allocate tensors for anti-spoof model");
+@@ -181,6 +191,7 @@
+ 
+ FaceDetector::~FaceDetector()
+ {
++#if FART_ENABLE_NNAPI
+     if (nnapi_detection_delegate_) {
+         TfLiteNnapiDelegateDelete(nnapi_detection_delegate_);
+         nnapi_detection_delegate_ = nullptr;
+@@ -193,6 +204,7 @@
+         TfLiteNnapiDelegateDelete(nnapi_spoof_delegate_);
+         nnapi_spoof_delegate_ = nullptr;
+     }
++#endif
+ }
+ 
+ std::vector<FaceDetector::DetectedFace>
