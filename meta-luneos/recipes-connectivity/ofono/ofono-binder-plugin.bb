@@ -5,13 +5,14 @@ LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=37fe900f9ece53e2621d89780f2031be"
 SECTION = "webos/support"
 
-DEPENDS = "ofono libgbinder libgbinder-radio glib-2.0 libglibutil libofonobinderpluginext"
+DEPENDS = "ofono ofono-ext libgbinder libgbinder-radio glib-2.0 libglibutil libofonobinderpluginext"
 
 inherit pkgconfig
 
 SRC_URI = "git://github.com/mer-hybris/ofono-binder-plugin.git;branch=master;protocol=https \
            file://0001-binder_connman-do-not-read-non-basic-property-varian.patch \
            file://0002-binder_sim-fix-logical-access-and-add-slot-switching.patch \
+           file://0100-adapt-to-ofono-2.x-atom-create-signatures.patch \
 "
 
 PV = "1.1.28"
@@ -28,3 +29,5 @@ do_install() {
 }
 
 FILES:${PN} += "/usr/lib/ofono/plugins/binderplugin.so"
+
+RDEPENDS:${PN} += "ofono-ext ofono-ext-plugin"

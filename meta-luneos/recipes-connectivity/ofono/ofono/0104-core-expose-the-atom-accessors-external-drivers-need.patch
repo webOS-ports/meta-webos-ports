@@ -1,0 +1,687 @@
+From 0bd9ac85b39872eb418d60de4a3378ad79aff7f4 Mon Sep 17 00:00:00 2001
+From: LuneOS <claude.ai@herrie.org>
+Date: Thu, 3 Sep 2026 19:15:08 +0200
+Subject: [PATCH 104/114] core: expose the atom accessors external drivers need
+
+ofono-binder-plugin reaches into a handful of atom internals that oFono
+does not export: the assigned type and settings of a GPRS context, the
+roaming policy, an SPDI lookup on netreg, PUK-to-PIN mapping, a full SIM
+refresh, record-oriented SIM reads, USSD decoding, and the radio access
+mode helpers. Add them, matching Sailfish's signatures and behaviour.
+
+ofono_radio_access_mode_to_string() is deliberately not the existing
+static radio_access_mode_to_string(). The static one renders combination
+masks such as 'lte,umts'; the public one reduces a mask to its highest
+single mode, which is what external drivers expect. Both are kept.
+
+struct ipv4_settings and ipv6_settings gain a pcscf list so the IMS proxy
+addresses a driver reports can be stored. The binder driver passes the
+setters as function pointers, so they have to exist even though nothing
+reads the value back out yet.
+
+ofono_voicecall_ringback_tone_notify() is accepted and discarded: the
+Sailfish VoiceCallAgent D-Bus API it forwards to is not implemented here.
+See doc/ringback-tone.txt.
+
+OFONO_GPRS_AUTH_METHOD_ANY is now handled in the five remaining driver
+switches that enumerate the auth method. Those paths are unreachable on
+binder hardware, but an explicit choice beats silent fallthrough.
+
+(cherry picked from commit e7d66c54ab8ef49cdd49fc6c3131156cd8d1624e)
+Upstream-Status: Pending
+---
+ doc/ringback-tone.txt             | 21 +++++++
+ drivers/atmodem/atutil.c          |  2 +
+ drivers/atmodem/gprs-context.c    |  9 +++
+ drivers/mbimmodem/gprs-context.c  |  2 +
+ drivers/ubloxmodem/gprs-context.c |  4 ++
+ include/gprs-context.h            |  9 +++
+ include/gprs.h                    |  8 +++
+ include/modem.h                   |  5 ++
+ include/netreg.h                  |  3 +
+ include/radio-settings.h          |  7 +++
+ include/sim.h                     | 10 ++++
+ include/ussd.h                    |  3 +
+ include/voicecall.h               |  3 +
+ src/gprs.c                        | 92 +++++++++++++++++++++++++++++++
+ src/modem.c                       |  6 ++
+ src/network.c                     |  7 +++
+ src/radio-settings.c              | 59 ++++++++++++++++++++
+ src/sim.c                         | 39 +++++++++++++
+ src/simfs.c                       | 53 ++++++++++++++++++
+ src/simfs.h                       |  6 ++
+ src/ussd.c                        | 12 ++++
+ src/voicecall.c                   | 12 ++++
+ 23 files changed, 381 insertions(+)
+ create mode 100644 doc/ringback-tone.txt
+
+diff --git a/doc/ringback-tone.txt b/doc/ringback-tone.txt
+new file mode 100644
+index 0000000..c9eb145
+--- /dev/null
++++ b/doc/ringback-tone.txt
+@@ -0,0 +1,21 @@
++Ringback tone notification
++==========================
++
++ofono_voicecall_ringback_tone_notify() exists so that a modem driver can
++tell oFono when the network is not generating in-band ringback and the
++device should play a local tone for an outgoing call. The binder driver
++calls it.
++
++In Sailfish OS the notification is forwarded to a VoiceCallAgent that the
++UI registers over D-Bus (org.ofono.VoiceCallAgent). That agent API is not
++implemented here, so the call is currently accepted and discarded.
++
++Consequence: on hardware where the network does not supply in-band
++ringback, an outgoing call is silent until it is answered. Nothing
++regresses relative to stock oFono, which has no such notification at all.
++
++Implementing this properly means porting src/voicecallagent.c and the
++RegisterVoicecallAgent/UnregisterVoicecallAgent methods on
++org.ofono.VoiceCallManager, and then teaching the LuneOS dialer to
++register an agent and play the tone. Both halves are needed; neither is
++useful alone.
+diff --git a/drivers/atmodem/atutil.c b/drivers/atmodem/atutil.c
+index c683d7c..2c9c5bf 100644
+--- a/drivers/atmodem/atutil.c
++++ b/drivers/atmodem/atutil.c
+@@ -656,6 +656,8 @@ int at_util_gprs_auth_method_to_auth_prot(
+ 		return 2;
+ 	case OFONO_GPRS_AUTH_METHOD_NONE:
+ 		return 0;
++	case OFONO_GPRS_AUTH_METHOD_ANY:
++		return 2; /* No "any" form; CHAP is the stronger choice */
+ 	}
+ 
+ 	return 0;
+diff --git a/drivers/atmodem/gprs-context.c b/drivers/atmodem/gprs-context.c
+index 7d4bd09..7eb2564 100644
+--- a/drivers/atmodem/gprs-context.c
++++ b/drivers/atmodem/gprs-context.c
+@@ -256,6 +256,10 @@ static void at_gprs_activate_primary(struct ofono_gprs_context *gc,
+ 		memset(gcd->username, 0, sizeof(gcd->username));
+ 		memset(gcd->password, 0, sizeof(gcd->password));
+ 		break;
++	case OFONO_GPRS_AUTH_METHOD_ANY:
++		/* PPP has no "any"; CHAP is what it negotiates to */
++		gcd->auth_method = G_AT_PPP_AUTH_METHOD_CHAP;
++		break;
+ 	}
+ 
+ 	gcd->state = STATE_ENABLING;
+@@ -306,6 +310,11 @@ static void at_gprs_activate_primary(struct ofono_gprs_context *gc,
+ 			snprintf(buf + len, sizeof(buf) - len - 3,
+ 					",\"%s\"", ctx->apn);
+ 			break;
++		case OFONO_GPRS_AUTH_METHOD_ANY:
++			/* No "any" form; CHAP is the stronger choice */
++			snprintf(buf + len, sizeof(buf) - len - 3,
++					",\"CHAP:%s\"", ctx->apn);
++			break;
+ 		}
+ 		break;
+ 	default:
+diff --git a/drivers/mbimmodem/gprs-context.c b/drivers/mbimmodem/gprs-context.c
+index c420e30..42edc73 100644
+--- a/drivers/mbimmodem/gprs-context.c
++++ b/drivers/mbimmodem/gprs-context.c
+@@ -62,6 +62,8 @@ static uint32_t auth_method_to_auth_protocol(enum ofono_gprs_auth_method method)
+ 		return 1; /* MBIMAuthProtocolPap */
+ 	case OFONO_GPRS_AUTH_METHOD_NONE:
+ 		return 0; /* MBIMAUthProtocolNone */
++	case OFONO_GPRS_AUTH_METHOD_ANY:
++		return 2; /* No "any" form; MBIMAuthProtocolChap */
+ 	}
+ 
+ 	return 0; /* MBIMAUthProtocolNone */
+diff --git a/drivers/ubloxmodem/gprs-context.c b/drivers/ubloxmodem/gprs-context.c
+index fab0207..1f62312 100644
+--- a/drivers/ubloxmodem/gprs-context.c
++++ b/drivers/ubloxmodem/gprs-context.c
+@@ -323,6 +323,10 @@ static void ublox_send_uauthreq(struct ofono_gprs_context *gc,
+ 		auth = 0;
+ 		username = password = "";
+ 		break;
++	case OFONO_GPRS_AUTH_METHOD_ANY:
++		/* No "any" form; CHAP is the stronger choice */
++		auth = 2;
++		break;
+ 	}
+ 
+ 	snprintf(buf, sizeof(buf), "AT+UAUTHREQ=%u,%u,\"%s\",\"%s\"",
+diff --git a/include/gprs-context.h b/include/gprs-context.h
+index 151d60b..509077f 100644
+--- a/include/gprs-context.h
++++ b/include/gprs-context.h
+@@ -109,6 +109,15 @@ void ofono_gprs_context_set_ipv6_gateway(struct ofono_gprs_context *gc,
+ 						const char *gateway);
+ void ofono_gprs_context_set_ipv6_dns_servers(struct ofono_gprs_context *gc,
+ 						const char **dns);
++enum ofono_gprs_context_type ofono_gprs_context_get_assigned_type(
++				struct ofono_gprs_context *gc);
++void ofono_gprs_context_signal_change(struct ofono_gprs_context *gc,
++				unsigned int cid);
++void ofono_gprs_context_set_ipv4_proxy_cscf(struct ofono_gprs_context *gc,
++				const char **pcscf);
++void ofono_gprs_context_set_ipv6_proxy_cscf(struct ofono_gprs_context *gc,
++				const char **pcscf);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/include/gprs.h b/include/gprs.h
+index 379ba84..8455771 100644
+--- a/include/gprs.h
++++ b/include/gprs.h
+@@ -15,6 +15,7 @@ extern "C" {
+ #include <stdarg.h>
+ 
+ #include <ofono/types.h>
++#include <ofono/gprs-context.h>
+ 
+ struct ofono_gprs;
+ struct ofono_gprs_context;
+@@ -77,6 +78,13 @@ void ofono_gprs_add_context(struct ofono_gprs *gprs,
+ void ofono_gprs_cid_activated(struct ofono_gprs  *gprs, unsigned int cid,
+ 				const char *apn);
+ 
++struct ofono_gprs_primary_context;
++
++ofono_bool_t ofono_gprs_get_roaming_allowed(struct ofono_gprs *gprs);
++const struct ofono_gprs_primary_context *ofono_gprs_context_settings_by_type(
++				struct ofono_gprs *gprs,
++				enum ofono_gprs_context_type type);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/include/modem.h b/include/modem.h
+index 9c5bff6..706af2b 100644
+--- a/include/modem.h
++++ b/include/modem.h
+@@ -160,6 +160,11 @@ struct ofono_modem *ofono_modem_find(ofono_modem_compare_cb_t func,
+ void ofono_modem_set_powered_timeout_hint(struct ofono_modem *modem,
+ 							unsigned int seconds);
+ 
++struct ofono_radio_settings;
++
++struct ofono_radio_settings *ofono_modem_get_radio_settings(
++				struct ofono_modem *modem);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/include/netreg.h b/include/netreg.h
+index 3794eab..f01ddc6 100644
+--- a/include/netreg.h
++++ b/include/netreg.h
+@@ -130,6 +130,9 @@ int ofono_netreg_get_technology(struct ofono_netreg *netreg);
+ const char *ofono_netreg_get_mcc(struct ofono_netreg *netreg);
+ const char *ofono_netreg_get_mnc(struct ofono_netreg *netreg);
+ 
++ofono_bool_t ofono_netreg_spdi_lookup(struct ofono_netreg *netreg,
++				const char *mcc, const char *mnc);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/include/radio-settings.h b/include/radio-settings.h
+index 5326c8f..018eaff 100644
+--- a/include/radio-settings.h
++++ b/include/radio-settings.h
+@@ -125,6 +125,13 @@ void *ofono_radio_settings_get_data(struct ofono_radio_settings *rs);
+ struct ofono_modem *ofono_radio_settings_get_modem(
+ 					struct ofono_radio_settings *rs);
+ 
++enum ofono_radio_access_mode ofono_radio_access_max_mode(
++				enum ofono_radio_access_mode mask);
++const char *ofono_radio_access_mode_to_string(
++				enum ofono_radio_access_mode m);
++ofono_bool_t ofono_radio_access_mode_from_string(const char *str,
++				enum ofono_radio_access_mode *mode);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/include/sim.h b/include/sim.h
+index 4fdc371..cad7aac 100644
+--- a/include/sim.h
++++ b/include/sim.h
+@@ -307,6 +307,16 @@ int ofono_sim_logical_access(struct ofono_sim *sim, int session_id,
+ 		unsigned char *pdu, unsigned int len,
+ 		ofono_sim_logical_access_cb_t cb, void *data);
+ 
++enum ofono_sim_password_type ofono_sim_puk2pin(
++				enum ofono_sim_password_type type);
++void ofono_sim_refresh_full(struct ofono_sim *sim);
++int ofono_sim_read_record(struct ofono_sim_context *context, int id,
++				enum ofono_sim_file_structure expected_type,
++				int record, int record_length,
++				const unsigned char *path,
++				unsigned int path_len,
++				ofono_sim_file_read_cb_t cb, void *data);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/include/ussd.h b/include/ussd.h
+index 213cfca..563721e 100644
+--- a/include/ussd.h
++++ b/include/ussd.h
+@@ -61,6 +61,9 @@ void ofono_ussd_remove(struct ofono_ussd *ussd);
+ void ofono_ussd_set_data(struct ofono_ussd *ussd, void *data);
+ void *ofono_ussd_get_data(struct ofono_ussd *ussd);
+ 
++char *ofono_ussd_decode(int dcs, const void *pdu, int len);
++void ofono_ussd_decode_free(char *str);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/include/voicecall.h b/include/voicecall.h
+index 19a3982..a676c52 100644
+--- a/include/voicecall.h
++++ b/include/voicecall.h
+@@ -174,6 +174,9 @@ void ofono_voicecall_ssn_mt_notify(struct ofono_voicecall *vc, unsigned int id,
+ 					int code, int index,
+ 					const struct ofono_phone_number *ph);
+ 
++void ofono_voicecall_ringback_tone_notify(struct ofono_voicecall *vc,
++				const ofono_bool_t playTone);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/src/gprs.c b/src/gprs.c
+index 2cd9a44..11824bc 100644
+--- a/src/gprs.c
++++ b/src/gprs.c
+@@ -81,6 +81,7 @@ struct ipv4_settings {
+ 	char *gateway;
+ 	char **dns;
+ 	char *proxy;
++	char **pcscf;
+ };
+ 
+ struct ipv6_settings {
+@@ -88,6 +89,7 @@ struct ipv6_settings {
+ 	unsigned char prefix_len;
+ 	char *gateway;
+ 	char **dns;
++	char **pcscf;
+ };
+ 
+ struct context_settings {
+@@ -316,6 +318,7 @@ static void context_settings_free(struct context_settings *settings)
+ 		l_free(settings->ipv4->gateway);
+ 		l_strv_free(settings->ipv4->dns);
+ 		l_free(settings->ipv4->proxy);
++		l_strv_free(settings->ipv4->pcscf);
+ 
+ 		g_free(settings->ipv4);
+ 		settings->ipv4 = NULL;
+@@ -325,6 +328,7 @@ static void context_settings_free(struct context_settings *settings)
+ 		l_free(settings->ipv6->ip);
+ 		l_free(settings->ipv6->gateway);
+ 		l_strv_free(settings->ipv6->dns);
++		l_strv_free(settings->ipv6->pcscf);
+ 
+ 		g_free(settings->ipv6);
+ 		settings->ipv6 = NULL;
+@@ -3421,3 +3425,91 @@ void *ofono_gprs_get_data(struct ofono_gprs *gprs)
+ OFONO_DEFINE_ATOM_DRIVER_REGISTER(gprs)
+ 
+ OFONO_DEFINE_ATOM_DRIVER_REGISTER(gprs_context)
++
++ofono_bool_t ofono_gprs_get_roaming_allowed(struct ofono_gprs *gprs)
++{
++	return gprs ? gprs->roaming_allowed : FALSE;
++}
++
++const struct ofono_gprs_primary_context *ofono_gprs_context_settings_by_type(
++					struct ofono_gprs *gprs,
++					enum ofono_gprs_context_type type)
++{
++	GSList *l;
++
++	if (!gprs)
++		return NULL;
++
++	for (l = gprs->contexts; l; l = l->next) {
++		struct pri_context *ctx = l->data;
++
++		if (type == OFONO_GPRS_CONTEXT_TYPE_ANY || type == ctx->type)
++			return &ctx->context;
++	}
++
++	return NULL;
++}
++
++enum ofono_gprs_context_type ofono_gprs_context_get_assigned_type(
++					struct ofono_gprs_context *gc)
++{
++	if (gc) {
++		struct ofono_gprs *gprs = gc->gprs;
++		GSList *l;
++
++		for (l = gprs->contexts; l; l = l->next) {
++			struct pri_context *pri = l->data;
++
++			if (pri->context_driver == gc)
++				return pri->type;
++		}
++	}
++
++	return OFONO_GPRS_CONTEXT_TYPE_ANY;
++}
++
++void ofono_gprs_context_signal_change(struct ofono_gprs_context *gc,
++					unsigned int cid)
++{
++	GSList *l;
++
++	if (gc->gprs == NULL)
++		return;
++
++	for (l = gc->gprs->contexts; l; l = l->next) {
++		struct pri_context *ctx = l->data;
++
++		if (ctx->context.cid != cid)
++			continue;
++
++		if (ctx->active == FALSE)
++			break;
++
++		pri_context_signal_settings(ctx, gc->settings->ipv4 != NULL,
++						gc->settings->ipv6 != NULL);
++	}
++}
++
++void ofono_gprs_context_set_ipv4_proxy_cscf(struct ofono_gprs_context *gc,
++					const char **pcscf)
++{
++	struct context_settings *settings = gc->settings;
++
++	if (settings->ipv4 == NULL)
++		return;
++
++	l_strv_free(settings->ipv4->pcscf);
++	settings->ipv4->pcscf = l_strv_copy((char **) pcscf);
++}
++
++void ofono_gprs_context_set_ipv6_proxy_cscf(struct ofono_gprs_context *gc,
++					const char **pcscf)
++{
++	struct context_settings *settings = gc->settings;
++
++	if (settings->ipv6 == NULL)
++		return;
++
++	l_strv_free(settings->ipv6->pcscf);
++	settings->ipv6->pcscf = l_strv_copy((char **) pcscf);
++}
+diff --git a/src/modem.c b/src/modem.c
+index b1124e9..4ec2570 100644
+--- a/src/modem.c
++++ b/src/modem.c
+@@ -2451,3 +2451,9 @@ void ofono_modem_driver_unregister(const struct ofono_modem_driver *d)
+ {
+ 	__ofono_driver_unregister("modem", d);
+ }
++
++struct ofono_radio_settings *ofono_modem_get_radio_settings(
++					struct ofono_modem *modem)
++{
++	return __ofono_atom_find(OFONO_ATOM_TYPE_RADIO_SETTINGS, modem);
++}
+diff --git a/src/network.c b/src/network.c
+index 45a439d..25fd135 100644
+--- a/src/network.c
++++ b/src/network.c
+@@ -2072,3 +2072,10 @@ void *ofono_netreg_get_data(struct ofono_netreg *netreg)
+ }
+ 
+ OFONO_DEFINE_ATOM_DRIVER_REGISTER(netreg)
++
++ofono_bool_t ofono_netreg_spdi_lookup(struct ofono_netreg *netreg,
++					const char *mcc, const char *mnc)
++{
++	return mcc && mnc && netreg &&
++			sim_spdi_lookup(netreg->spdi, mcc, mnc);
++}
+diff --git a/src/radio-settings.c b/src/radio-settings.c
+index 8e44f1a..df66e60 100644
+--- a/src/radio-settings.c
++++ b/src/radio-settings.c
+@@ -897,3 +897,62 @@ struct ofono_modem *ofono_radio_settings_get_modem(
+ }
+ 
+ OFONO_DEFINE_ATOM_DRIVER_REGISTER(radio_settings)
++
++/*
++ * These are the public counterparts of the static helpers above. They are
++ * deliberately not the same function: the static radio_access_mode_to_string()
++ * renders combination masks such as "lte,umts", whereas the public API reduces
++ * a mask to its highest single mode, which is what external drivers expect.
++ */
++enum ofono_radio_access_mode ofono_radio_access_max_mode(
++					enum ofono_radio_access_mode mask)
++{
++	return	(mask & OFONO_RADIO_ACCESS_MODE_NR) ?
++					OFONO_RADIO_ACCESS_MODE_NR :
++		(mask & OFONO_RADIO_ACCESS_MODE_LTE) ?
++					OFONO_RADIO_ACCESS_MODE_LTE :
++		(mask & OFONO_RADIO_ACCESS_MODE_UMTS) ?
++					OFONO_RADIO_ACCESS_MODE_UMTS :
++		(mask & OFONO_RADIO_ACCESS_MODE_GSM) ?
++					OFONO_RADIO_ACCESS_MODE_GSM :
++					OFONO_RADIO_ACCESS_MODE_ANY;
++}
++
++const char *ofono_radio_access_mode_to_string(enum ofono_radio_access_mode m)
++{
++	switch (ofono_radio_access_max_mode(m)) {
++	case OFONO_RADIO_ACCESS_MODE_ANY:
++		return "any";
++	case OFONO_RADIO_ACCESS_MODE_GSM:
++		return "gsm";
++	case OFONO_RADIO_ACCESS_MODE_UMTS:
++		return "umts";
++	case OFONO_RADIO_ACCESS_MODE_LTE:
++		return "lte";
++	case OFONO_RADIO_ACCESS_MODE_NR:
++		return "nr";
++	}
++
++	return NULL;
++}
++
++ofono_bool_t ofono_radio_access_mode_from_string(const char *str,
++					enum ofono_radio_access_mode *mode)
++{
++	if (!str)
++		return FALSE;
++	else if (g_str_equal(str, "any"))
++		*mode = OFONO_RADIO_ACCESS_MODE_ANY;
++	else if (g_str_equal(str, "gsm"))
++		*mode = OFONO_RADIO_ACCESS_MODE_GSM;
++	else if (g_str_equal(str, "umts"))
++		*mode = OFONO_RADIO_ACCESS_MODE_UMTS;
++	else if (g_str_equal(str, "lte"))
++		*mode = OFONO_RADIO_ACCESS_MODE_LTE;
++	else if (g_str_equal(str, "nr"))
++		*mode = OFONO_RADIO_ACCESS_MODE_NR;
++	else
++		return FALSE;
++
++	return TRUE;
++}
+diff --git a/src/sim.c b/src/sim.c
+index 8c0dd3f..f1b0a8c 100644
+--- a/src/sim.c
++++ b/src/sim.c
+@@ -4113,3 +4113,42 @@ void ofono_sim_driver_unregister(const struct ofono_sim_driver *d)
+ {
+ 	__ofono_driver_unregister("sim", d);
+ }
++
++enum ofono_sim_password_type ofono_sim_puk2pin(
++					enum ofono_sim_password_type type)
++{
++	switch (type) {
++	case OFONO_SIM_PASSWORD_SIM_PUK:
++		return OFONO_SIM_PASSWORD_SIM_PIN;
++	case OFONO_SIM_PASSWORD_PHFSIM_PUK:
++		return OFONO_SIM_PASSWORD_PHFSIM_PIN;
++	case OFONO_SIM_PASSWORD_SIM_PUK2:
++		return OFONO_SIM_PASSWORD_SIM_PIN2;
++	case OFONO_SIM_PASSWORD_PHNET_PUK:
++		return OFONO_SIM_PASSWORD_PHNET_PIN;
++	case OFONO_SIM_PASSWORD_PHNETSUB_PUK:
++		return OFONO_SIM_PASSWORD_PHNETSUB_PIN;
++	case OFONO_SIM_PASSWORD_PHSP_PUK:
++		return OFONO_SIM_PASSWORD_PHSP_PIN;
++	case OFONO_SIM_PASSWORD_PHCORP_PUK:
++		return OFONO_SIM_PASSWORD_PHCORP_PIN;
++	default:
++		return OFONO_SIM_PASSWORD_INVALID;
++	}
++}
++
++void ofono_sim_refresh_full(struct ofono_sim *sim)
++{
++	__ofono_sim_refresh(sim, NULL, true, true);
++}
++
++int ofono_sim_read_record(struct ofono_sim_context *context, int id,
++			enum ofono_sim_file_structure expected_type,
++			int record, int record_length,
++			const unsigned char *path, unsigned int path_len,
++			ofono_sim_file_read_cb_t cb, void *data)
++{
++	return sim_fs_read_record(context, id, expected_type, record,
++					record_length, path, path_len,
++					cb, data);
++}
+diff --git a/src/simfs.c b/src/simfs.c
+index 7f03900..f3979b8 100644
+--- a/src/simfs.c
++++ b/src/simfs.c
+@@ -972,6 +972,59 @@ static gboolean sim_fs_op_next(gpointer user_data)
+ 	return FALSE;
+ }
+ 
++int sim_fs_read_record(struct ofono_sim_context *context, int id,
++			enum ofono_sim_file_structure expected_type,
++			int record, int record_length,
++			const unsigned char *path, unsigned int path_len,
++			ofono_sim_file_read_cb_t cb, void *data)
++{
++	struct sim_fs *fs = context->fs;
++	struct sim_fs_op *op;
++
++	if (cb == NULL)
++		return -EINVAL;
++
++	if (fs->driver == NULL)
++		return -EINVAL;
++
++	if (record < 1)
++		return -EINVAL;
++
++	if ((expected_type == OFONO_SIM_FILE_STRUCTURE_FIXED &&
++			fs->driver->read_file_linear == NULL) ||
++			(expected_type == OFONO_SIM_FILE_STRUCTURE_CYCLIC &&
++				fs->driver->read_file_cyclic == NULL)) {
++		cb(0, 0, 0, NULL, 0, data);
++		return -ENOSYS;
++	}
++
++	if (fs->op_q == NULL)
++		fs->op_q = g_queue_new();
++
++	op = g_try_new0(struct sim_fs_op, 1);
++	if (op == NULL)
++		return -ENOMEM;
++
++	op->id = id;
++	op->structure = expected_type;
++	op->cb = cb;
++	op->userdata = data;
++	op->is_read = TRUE;
++	op->info_only = FALSE;
++	op->context = context;
++	op->record_length = record_length;
++	op->current = record;
++	l_memcpy(op->path, path, path_len);
++	op->path_len = path_len;
++
++	g_queue_push_tail(fs->op_q, op);
++
++	if (g_queue_get_length(fs->op_q) == 1)
++		fs->op_source = g_idle_add(sim_fs_op_next, fs);
++
++	return 0;
++}
++
+ int sim_fs_read_info(struct ofono_sim_context *context, int id,
+ 			enum ofono_sim_file_structure expected_type,
+ 			sim_fs_read_info_cb_t cb, void *data)
+diff --git a/src/simfs.h b/src/simfs.h
+index 59b218e..225f215 100644
+--- a/src/simfs.h
++++ b/src/simfs.h
+@@ -34,6 +34,12 @@ int sim_fs_read(struct ofono_sim_context *context, int id,
+ 		const unsigned char *path, unsigned int len,
+ 		ofono_sim_file_read_cb_t cb, void *data);
+ 
++int sim_fs_read_record(struct ofono_sim_context *context, int id,
++			enum ofono_sim_file_structure expected_type,
++			int record, int record_length,
++			const unsigned char *path, unsigned int len,
++			ofono_sim_file_read_cb_t cb, void *data);
++
+ int sim_fs_read_info(struct ofono_sim_context *context, int id,
+ 		enum ofono_sim_file_structure expected_type,
+ 		sim_fs_read_info_cb_t cb, void *data);
+diff --git a/src/ussd.c b/src/ussd.c
+index d4d36f3..c738a90 100644
+--- a/src/ussd.c
++++ b/src/ussd.c
+@@ -900,3 +900,15 @@ void __ofono_ussd_initiate_cancel(struct ofono_ussd *ussd)
+ }
+ 
+ OFONO_DEFINE_ATOM_DRIVER_REGISTER(ussd)
++
++char *ofono_ussd_decode(int dcs, const void *pdu, int len)
++{
++	/* Returns a NUL-terminated UTF-8 string */
++	return ussd_decode(dcs, len, pdu);
++}
++
++void ofono_ussd_decode_free(char *str)
++{
++	/* Frees a string returned by ofono_ussd_decode() */
++	g_free(str);
++}
+diff --git a/src/voicecall.c b/src/voicecall.c
+index 08a8b5a..42921cd 100644
+--- a/src/voicecall.c
++++ b/src/voicecall.c
+@@ -4137,3 +4137,15 @@ void ofono_voicecall_ssn_mo_notify(struct ofono_voicecall *vc,
+ }
+ 
+ OFONO_DEFINE_ATOM_DRIVER_REGISTER(voicecall)
++
++void ofono_voicecall_ringback_tone_notify(struct ofono_voicecall *vc,
++					const ofono_bool_t playTone)
++{
++	/*
++	 * Sailfish delivers this to a registered VoiceCallAgent over D-Bus.
++	 * That agent API is not implemented here, and nothing in the image
++	 * subscribes to it, so the notification is accepted and dropped.
++	 * See doc/ringback-tone.txt before relying on it.
++	 */
++	DBG("%p %d (no agent registered)", vc, playTone);
++}
