@@ -1,0 +1,69 @@
+From a3ea10390510061cd35b37839bf0510222eb8194 Mon Sep 17 00:00:00 2001
+From: LuneOS <claude.ai@herrie.org>
+Date: Fri, 4 Sep 2026 06:34:36 +0200
+Subject: [PATCH 114/114] radio-settings: never report a technology preference
+ as NULL
+
+radio_access_mode_to_string() only recognised single modes and three
+specific pairs, and returned NULL for anything else. That value is handed
+straight to ofono_dbus_signal_property_changed() as a D-Bus string, and
+libdbus aborts the process on a NULL string.
+
+Drivers routinely set cumulative masks - ofono-binder-plugin asks for
+'everything up to LTE', which is GSM|UMTS|LTE, and 'everything up to NR',
+which adds NR. Neither was recognised, so the daemon died with SIGABRT a
+few seconds after the SIM came up, inside radio_set_rat_mode().
+
+Recognise NR, and fall back to reporting the highest mode in the mask
+rather than NULL. Every string this function produced before is still
+produced for the same input; only the previously-fatal cases change.
+from_string() learns 'nr' so the setting round-trips.
+
+(cherry picked from commit c58931635399be45c5e502b1931e2b42853f1609)
+Upstream-Status: Pending
+---
+ src/radio-settings.c | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/src/radio-settings.c b/src/radio-settings.c
+index df66e60..09b5a72 100644
+--- a/src/radio-settings.c
++++ b/src/radio-settings.c
+@@ -55,6 +55,8 @@ static const char *radio_access_mode_to_string(unsigned int m)
+ 		return "umts";
+ 	case OFONO_RADIO_ACCESS_MODE_LTE:
+ 		return "lte";
++	case OFONO_RADIO_ACCESS_MODE_NR:
++		return "nr";
+ 	}
+ 
+ 	if (m == (OFONO_RADIO_ACCESS_MODE_UMTS|OFONO_RADIO_ACCESS_MODE_GSM))
+@@ -66,6 +68,18 @@ static const char *radio_access_mode_to_string(unsigned int m)
+ 	if (m == (OFONO_RADIO_ACCESS_MODE_LTE|OFONO_RADIO_ACCESS_MODE_GSM))
+ 		return "lte,gsm";
+ 
++	/*
++	 * Anything else is reported as its highest mode rather than NULL.
++	 * Drivers commonly set a cumulative mask - "everything up to LTE"
++	 * is GSM|UMTS|LTE - and this function feeds a D-Bus string
++	 * property directly, so returning NULL aborts the daemon inside
++	 * libdbus. Reducing to the top mode is what Sailfish reports for
++	 * the same masks.
++	 */
++	if (m)
++		return radio_access_mode_to_string(
++					ofono_radio_access_max_mode(m));
++
+ 	return NULL;
+ }
+ 
+@@ -85,6 +99,9 @@ static gboolean radio_access_mode_from_string(const char *str,
+ 	} else if (g_str_equal(str, "lte")) {
+ 		*mode = OFONO_RADIO_ACCESS_MODE_LTE;
+ 		return TRUE;
++	} else if (g_str_equal(str, "nr")) {
++		*mode = OFONO_RADIO_ACCESS_MODE_NR;
++		return TRUE;
+ 	} else if (g_str_equal(str, "umts,gsm")) {
+ 		*mode = OFONO_RADIO_ACCESS_MODE_UMTS|OFONO_RADIO_ACCESS_MODE_GSM;
+ 		return TRUE;

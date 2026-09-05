@@ -1,0 +1,217 @@
+From 82efb224e1f1321e28aea748ff8cb8d8baffe21d Mon Sep 17 00:00:00 2001
+From: LuneOS <claude.ai@herrie.org>
+Date: Thu, 3 Sep 2026 19:15:08 +0200
+Subject: [PATCH 105/114] core: answer the legacy provisioning API from the
+ provision database
+
+oFono 2.x replaced the gprs-provision plugin interface with a compiled
+provision database. Plugins written against the old API, including
+ofono-binder-plugin, still call ofono_gprs_provision_get_settings().
+
+Reinstate that API as a thin adapter over __ofono_provision_get_settings()
+so the access points a plugin looks up are answered from the new database.
+
+provider_name is always NULL. The database stores access points but not
+the operator's name: tools/provisiontool parses <provider><name> and then
+discards it, and the binary format has no field for it. Carrying it would
+mean changing the format and the generator. Callers already have to check
+the field, and the binder driver only uses it to prettify an odd operator
+name, so it falls back to the network-reported name.
+
+Note that the generator maps authentication as chap=0, pap=1, none=2,
+matching upstream's enum. This is why OFONO_GPRS_AUTH_METHOD_ANY was
+appended rather than inserted in Sailfish's order: renumbering would have
+silently misread every access point in the database.
+
+(cherry picked from commit 773de93b044f0315c2e30bef0305642dfc1e72d8)
+Upstream-Status: Pending
+---
+ Makefile.am              |  4 +-
+ include/gprs-provision.h | 53 ++++++++++++++++++++++
+ src/gprs-provision.c     | 95 ++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 150 insertions(+), 2 deletions(-)
+ create mode 100644 include/gprs-provision.h
+ create mode 100644 src/gprs-provision.c
+
+diff --git a/Makefile.am b/Makefile.am
+index cd104b9..2147210 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -167,7 +167,7 @@ pkginclude_HEADERS = include/log.h include/plugin.h include/history.h \
+ 			include/sms.h include/sim.h include/message-waiting.h \
+ 			include/netreg.h include/voicecall.h include/devinfo.h \
+ 			include/cbs.h include/call-volume.h \
+-			include/gprs.h include/gprs-context.h \
++			include/gprs.h include/gprs-context.h include/gprs-provision.h \
+ 			include/radio-settings.h include/stk.h \
+ 			include/audio-settings.h include/nettime.h \
+ 			include/ctm.h \
+@@ -669,7 +669,7 @@ src_ofonod_SOURCES = $(builtin_sources) $(gatchat_sources) src/ofono.ver \
+ 			src/netmonagent.c src/netmonagent.h \
+ 			src/module.c \
+ 			src/provisiondb.h src/provisiondb.c \
+-			src/provision.c
++			src/provision.c src/gprs-provision.c
+ 
+ src_ofonod_LDADD = gdbus/libgdbus-internal.la $(builtin_libadd) $(ell_ldadd) \
+ 			@GLIB_LIBS@ @DBUS_LIBS@ -ldl
+diff --git a/include/gprs-provision.h b/include/gprs-provision.h
+new file mode 100644
+index 0000000..a57d26a
+--- /dev/null
++++ b/include/gprs-provision.h
+@@ -0,0 +1,53 @@
++/*
++ * oFono - Open Source Telephony
++ * Copyright (C) 2008-2011  Intel Corporation
++ *
++ * SPDX-License-Identifier: GPL-2.0-only
++ */
++
++#ifndef __OFONO_GPRS_PROVISION_H
++#define __OFONO_GPRS_PROVISION_H
++
++#include <ofono/types.h>
++#include <ofono/gprs-context.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/*
++ * Legacy provisioning lookup, kept for external plugins written against
++ * oFono 1.x. It is answered from the provision database that replaced the
++ * old provisioning plugins.
++ *
++ * provider_name is always NULL: the database format does not store the
++ * operator's name, only its access points. Callers are expected to check
++ * it before use.
++ */
++struct ofono_gprs_provision_data {
++	enum ofono_gprs_context_type type;
++	enum ofono_gprs_proto proto;
++	char *provider_name;
++	ofono_bool_t provider_primary;
++	char *name;
++	char *apn;
++	char *username;
++	char *password;
++	enum ofono_gprs_auth_method auth_method;
++	char *message_proxy;
++	char *message_center;
++};
++
++ofono_bool_t ofono_gprs_provision_get_settings(const char *mcc,
++				const char *mnc, const char *spn,
++				struct ofono_gprs_provision_data **settings,
++				int *count);
++void ofono_gprs_provision_free_settings(
++				struct ofono_gprs_provision_data *settings,
++				int count);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* __OFONO_GPRS_PROVISION_H */
+diff --git a/src/gprs-provision.c b/src/gprs-provision.c
+new file mode 100644
+index 0000000..9cf21fb
+--- /dev/null
++++ b/src/gprs-provision.c
+@@ -0,0 +1,95 @@
++/*
++ *  oFono - Open Source Telephony
++ *
++ *  SPDX-License-Identifier: GPL-2.0-only
++ */
++
++#ifdef HAVE_CONFIG_H
++#include <config.h>
++#endif
++
++#include <string.h>
++#include <glib.h>
++
++#include <ofono/gprs-provision.h>
++
++#include "provisiondb.h"
++#include "ofono.h"
++
++/*
++ * Adapts the provision database to the provisioning API that external
++ * plugins were written against. Contexts are copied out so the caller can
++ * free them with ofono_gprs_provision_free_settings() as it always has.
++ */
++ofono_bool_t ofono_gprs_provision_get_settings(const char *mcc,
++				const char *mnc, const char *spn,
++				struct ofono_gprs_provision_data **settings,
++				int *count)
++{
++	struct provision_db_entry *contexts = NULL;
++	size_t n = 0;
++	size_t i;
++	struct ofono_gprs_provision_data *out;
++
++	if (settings == NULL || count == NULL)
++		return FALSE;
++
++	*settings = NULL;
++	*count = 0;
++
++	if (!__ofono_provision_get_settings(mcc, mnc, spn, &contexts, &n))
++		return FALSE;
++
++	if (n == 0) {
++		l_free(contexts);
++		return FALSE;
++	}
++
++	out = g_new0(struct ofono_gprs_provision_data, n);
++
++	for (i = 0; i < n; i++) {
++		const struct provision_db_entry *ap = contexts + i;
++
++		out[i].type = ap->type;
++		out[i].proto = ap->proto;
++		out[i].auth_method = ap->auth_method;
++		out[i].name = g_strdup(ap->name);
++		out[i].apn = g_strdup(ap->apn);
++		out[i].username = g_strdup(ap->username);
++		out[i].password = g_strdup(ap->password);
++		out[i].message_proxy = g_strdup(ap->message_proxy);
++		out[i].message_center = g_strdup(ap->message_center);
++		/* The database carries no operator name */
++		out[i].provider_name = NULL;
++		out[i].provider_primary = (i == 0);
++	}
++
++	l_free(contexts);
++
++	*settings = out;
++	*count = (int) n;
++
++	return TRUE;
++}
++
++void ofono_gprs_provision_free_settings(
++				struct ofono_gprs_provision_data *settings,
++				int count)
++{
++	int i;
++
++	if (settings == NULL)
++		return;
++
++	for (i = 0; i < count; i++) {
++		g_free(settings[i].provider_name);
++		g_free(settings[i].name);
++		g_free(settings[i].apn);
++		g_free(settings[i].username);
++		g_free(settings[i].password);
++		g_free(settings[i].message_proxy);
++		g_free(settings[i].message_center);
++	}
++
++	g_free(settings);
++}

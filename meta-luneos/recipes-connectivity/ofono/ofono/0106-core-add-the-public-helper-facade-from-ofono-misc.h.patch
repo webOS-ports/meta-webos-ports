@@ -1,0 +1,251 @@
+From a71257f935b794b294c2ed68e67484ca8fcf73a9 Mon Sep 17 00:00:00 2001
+From: LuneOS <claude.ai@herrie.org>
+Date: Thu, 3 Sep 2026 19:24:00 +0200
+Subject: [PATCH 106/114] core: add the public helper facade from ofono/misc.h
+
+External drivers need to decode SIM GET RESPONSE data, look up elementary
+file paths, format phone numbers and render the registration and access
+technology enumerations. Sailfish exposes these as ofono_* wrappers over
+helpers oFono keeps internal.
+
+They have to live in oFono rather than in a separate library: every one of
+them wraps a symbol the version script does not export, such as
+sim_parse_2g_get_response(), sim_ef_db_get_path_2g(), encode_hex_own_buf()
+and registration_tech_to_string(). A library outside the daemon could not
+reach any of them.
+
+ofono_decode_cbs_dcs_charset() is left out. It would require promoting
+enum sms_charset as well, and no external driver calls it.
+
+ofono_phone_number_to_string() uses g_strlcpy instead of Sailfish's
+strncpy followed by explicit termination. Same truncation, same NUL, and
+no warning about a copy that deliberately fills the buffer.
+
+(cherry picked from commit 9a2d8d9df7f5d63c7252cea83a4de6f886de9e6f)
+Upstream-Status: Pending
+---
+ Makefile.am    |   4 +-
+ include/misc.h |  65 +++++++++++++++++++++++++++
+ src/misc.c     | 119 +++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 186 insertions(+), 2 deletions(-)
+ create mode 100644 include/misc.h
+ create mode 100644 src/misc.c
+
+diff --git a/Makefile.am b/Makefile.am
+index 2147210..921bbec 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -167,7 +167,7 @@ pkginclude_HEADERS = include/log.h include/plugin.h include/history.h \
+ 			include/sms.h include/sim.h include/message-waiting.h \
+ 			include/netreg.h include/voicecall.h include/devinfo.h \
+ 			include/cbs.h include/call-volume.h \
+-			include/gprs.h include/gprs-context.h include/gprs-provision.h \
++			include/gprs.h include/gprs-context.h include/gprs-provision.h include/misc.h \
+ 			include/radio-settings.h include/stk.h \
+ 			include/audio-settings.h include/nettime.h \
+ 			include/ctm.h \
+@@ -669,7 +669,7 @@ src_ofonod_SOURCES = $(builtin_sources) $(gatchat_sources) src/ofono.ver \
+ 			src/netmonagent.c src/netmonagent.h \
+ 			src/module.c \
+ 			src/provisiondb.h src/provisiondb.c \
+-			src/provision.c src/gprs-provision.c
++			src/provision.c src/gprs-provision.c src/misc.c
+ 
+ src_ofonod_LDADD = gdbus/libgdbus-internal.la $(builtin_libadd) $(ell_ldadd) \
+ 			@GLIB_LIBS@ @DBUS_LIBS@ -ldl
+diff --git a/include/misc.h b/include/misc.h
+new file mode 100644
+index 0000000..a8da585
+--- /dev/null
++++ b/include/misc.h
+@@ -0,0 +1,65 @@
++/*
++ *  oFono - Open Source Telephony
++ *
++ *  Copyright (C) 2021 Jolla Ltd.
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU General Public License version 2 as
++ *  published by the Free Software Foundation.
++ *
++ *  This program is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ *  GNU General Public License for more details.
++ */
++
++#ifndef __OFONO_MISC_H
++#define __OFONO_MISC_H
++
++/*
++ * Miscellaneous utilities which do not fall into any other category.
++ *
++ * This file exists since mer/1.24+git2
++ */
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#include <ofono/netreg.h>
++
++const char *ofono_netreg_status_to_string(enum ofono_netreg_status status);
++const char *ofono_access_technology_to_string(enum ofono_access_technology t);
++
++char *ofono_sim_string_to_utf8(const unsigned char *buffer, int length);
++void ofono_sim_string_free(char *str);
++
++void ofono_encode_hex(const void *in, unsigned int n, char out[/* 2*n+1 */]);
++
++#define OFONO_UNPACK_7BIT_USSD (0x01) /* flags */
++unsigned int ofono_unpack_7bit(const void *in, unsigned int len,
++		unsigned int flags, void *out_buf, unsigned int out_buf_size);
++
++#define OFONO_PHONE_NUMBER_BUFFER_SIZE (OFONO_MAX_PHONE_NUMBER_LENGTH + 2)
++const char *ofono_phone_number_to_string(const struct ofono_phone_number *ph,
++			char buffer[/* OFONO_PHONE_NUMBER_BUFFER_SIZE */]);
++
++#define OFONO_EF_PATH_BUFFER_SIZE 6
++unsigned int ofono_get_ef_path_2g(unsigned short id,
++			unsigned char path[/* OFONO_EF_PATH_BUFFER_SIZE */]);
++unsigned int ofono_get_ef_path_3g(unsigned short id,
++			unsigned char path[/* OFONO_EF_PATH_BUFFER_SIZE */]);
++ofono_bool_t ofono_parse_get_response_2g(const void *response, unsigned int len,
++			unsigned int *file_len, unsigned int *record_len,
++			unsigned int *structure, unsigned char *access,
++			unsigned char *file_status);
++ofono_bool_t ofono_parse_get_response_3g(const void *response, unsigned int len,
++			unsigned int *file_len, unsigned int *record_len,
++			unsigned int *structure, unsigned char *access,
++			unsigned short *efid);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* __OFONO_MISC_H */
+diff --git a/src/misc.c b/src/misc.c
+new file mode 100644
+index 0000000..9380a1e
+--- /dev/null
++++ b/src/misc.c
+@@ -0,0 +1,119 @@
++/*
++ *  oFono - Open Source Telephony
++ *
++ *  SPDX-License-Identifier: GPL-2.0-only
++ */
++
++/*
++ * Public facade over helpers that oFono keeps internal. These exist so an
++ * out-of-tree driver can decode SIM responses, format phone numbers and
++ * render enumerations without linking against private symbols. They live
++ * here rather than in a separate library precisely because the helpers
++ * they wrap are not exported.
++ */
++
++#ifdef HAVE_CONFIG_H
++#include <config.h>
++#endif
++
++#include <string.h>
++#include <glib.h>
++
++#include <ofono/misc.h>
++#include <ofono/types.h>
++
++#include "common.h"
++#include "simutil.h"
++#include "smsutil.h"
++#include "util.h"
++
++const char *ofono_netreg_status_to_string(enum ofono_netreg_status status)
++{
++	return registration_status_to_string(status);
++}
++
++const char *ofono_access_technology_to_string(enum ofono_access_technology tech)
++{
++	return registration_tech_to_string(tech);
++}
++
++const char *ofono_phone_number_to_string(const struct ofono_phone_number *ph,
++			char buffer[/* OFONO_PHONE_NUMBER_BUFFER_SIZE */])
++{
++	/*
++	 * g_strlcpy rather than Sailfish's strncpy plus explicit
++	 * termination: same truncation, same NUL, no warning about a
++	 * copy that deliberately fills the buffer.
++	 */
++	if (ph->type == 145 && (strlen(ph->number) > 0) &&
++			ph->number[0] != '+') {
++		buffer[0] = '+';
++		g_strlcpy(buffer + 1, ph->number,
++				OFONO_MAX_PHONE_NUMBER_LENGTH + 1);
++	} else {
++		g_strlcpy(buffer, ph->number,
++				OFONO_PHONE_NUMBER_BUFFER_SIZE);
++	}
++
++	return buffer;
++}
++
++char *ofono_sim_string_to_utf8(const unsigned char *buffer, int length)
++{
++	return sim_string_to_utf8(buffer, length);
++}
++
++void ofono_sim_string_free(char *str)
++{
++	g_free(str);
++}
++
++void ofono_encode_hex(const void *in, unsigned int size, char out[])
++{
++	encode_hex_own_buf(in, size, 0, out);
++}
++
++unsigned int ofono_unpack_7bit(const void *in, unsigned int len,
++		unsigned int flags, void *out_buf, unsigned int out_buf_size)
++{
++	if (len) {
++		long written = 0;
++
++		unpack_7bit_own_buf(in, len, 0,
++			(flags & OFONO_UNPACK_7BIT_USSD) != 0,
++			out_buf_size, &written, 0, out_buf);
++		return (unsigned int) written;
++	} else {
++		return 0;
++	}
++}
++
++unsigned int ofono_get_ef_path_2g(unsigned short id,
++			unsigned char path[/* OFONO_EF_PATH_BUFFER_SIZE */])
++{
++	return sim_ef_db_get_path_2g(id, path);
++}
++
++unsigned int ofono_get_ef_path_3g(unsigned short id,
++			unsigned char path[/* OFONO_EF_PATH_BUFFER_SIZE */])
++{
++	return sim_ef_db_get_path_3g(id, path);
++}
++
++ofono_bool_t ofono_parse_get_response_2g(const void *response, unsigned int len,
++			unsigned int *file_len, unsigned int *record_len,
++			unsigned int *structure, unsigned char *access,
++			unsigned char *status)
++{
++	return sim_parse_2g_get_response(response, len, (int *)file_len,
++			(int *)record_len, (int *)structure, access, status);
++}
++
++ofono_bool_t ofono_parse_get_response_3g(const void *response, unsigned int len,
++			unsigned int *file_len, unsigned int *record_len,
++			unsigned int *structure, unsigned char *access,
++			unsigned short *efid)
++{
++	return sim_parse_3g_get_response(response, len, (int *)file_len,
++			(int *)record_len, (int *)structure, access, efid);
++}
