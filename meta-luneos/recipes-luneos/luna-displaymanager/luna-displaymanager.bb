@@ -3,11 +3,11 @@ SECTION = "webos/base"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-DEPENDS = "glib-2.0 luna-service2 json-c luna-sysmgr-common luna-prefs nyx-lib libpbnjson pmloglib qtbase qtsensors"
+DEPENDS = "glib-2.0 luna-service2 json-c luna-sysmgr-common luna-sysmgr-ipc luna-sysmgr-ipc-messages luna-prefs nyx-lib libpbnjson pmloglib qtbase qtsensors"
 RDEPENDS:${PN} += "sleepd com.webos.service.battery luna-authmanager"
 
 PV = "1.0.0+git"
-SRCREV = "ce2d1a05d63d1ed3bf7db593f92b6ec78c3a41dc"
+SRCREV = "cbb8a9797e7e5aab2911924727b7b785ccc268ea"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 
