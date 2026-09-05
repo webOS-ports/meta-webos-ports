@@ -7,7 +7,7 @@ DEPENDS = "glib-2.0 luna-service2 json-c luna-sysmgr-common luna-prefs nyx-lib l
 RDEPENDS:${PN} += "sleepd com.webos.service.battery luna-authmanager"
 
 PV = "1.0.0+git"
-SRCREV = "32504378fd6e4af86456a016d111bff04a0afbf5"
+SRCREV = "ce2d1a05d63d1ed3bf7db593f92b6ec78c3a41dc"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 
