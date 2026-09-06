@@ -127,7 +127,7 @@ MACHINEOVERRIDES =. "${WEBOS_EXTRA_MACHINEOVERRIDES}"
 MACHINEOVERRIDES[vardepsexclude] += "WEBOS_EXTRA_MACHINEOVERRIDES"
 OVERRIDES[vardepsexclude] += "WEBOS_EXTRA_MACHINEOVERRIDES"
 
-INHERIT_DISTRO ?= "debian devshell sstate license remove-libtool buildstats buildstats-summary image-buildinfo"
+INHERIT_DISTRO ?= "debian devshell sstate license remove-libtool uninative buildstats buildstats-summary image-buildinfo"
 
 SOURCE_MIRROR_URL = "http://sources.webos-ports.org/"
 
