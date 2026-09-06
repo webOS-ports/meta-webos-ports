@@ -16,7 +16,7 @@ VIRTUAL-RUNTIME_bash ?= "bash"
 RDEPENDS:${PN} = "luna-service2-security-conf ${VIRTUAL-RUNTIME_cpushareholder} ${VIRTUAL-RUNTIME_bash}"
 
 WEBOS_VERSION = "3.21.2-47_279bc61a3cf47985455bf536502dd87d4e813d2f"
-PR = "r36"
+PR = "r37"
 
 EXTRA_OECMAKE += "${@ '-DWEBOS_DISTRO_PRERELEASE:STRING="devel"' \
                   if d.getVar('WEBOS_DISTRO_PRERELEASE') != '' else ''} \
@@ -41,6 +41,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0004-luna-service2-Add-permissions-for-com.palm-and-org.w.patch \
     file://0005-LSMessageIsSubscription-test-if-payload-is-a-JSON-ob.patch \
     file://0006-_LSCheckProvidedTrustedGroups-reduce-log-noise.patch \
+    file://0007-GetRequiredTrustAsString-don-t-let-empty-nodes-reset.patch \
 "
 
 inherit webos_systemd
