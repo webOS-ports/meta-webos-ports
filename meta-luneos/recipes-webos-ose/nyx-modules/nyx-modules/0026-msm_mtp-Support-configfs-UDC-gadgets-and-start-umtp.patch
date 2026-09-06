@@ -1,4 +1,4 @@
-From c0ad682591c8a110f5575407fef83e4c10f4a84a Mon Sep 17 00:00:00 2001
+From 02fbbf86628480a644acb7aee4aea749a1150d2c Mon Sep 17 00:00:00 2001
 From: Herman van Hazendonk <github.com@herrie.org>
 Date: Sat, 5 Sep 2026 21:23:27 +0200
 Subject: [PATCH] msm_mtp: Support configfs/UDC gadgets and start umtprd
@@ -25,11 +25,11 @@ checks that a change callback was registered before invoking it.
 ---
 Upstream-Status: Inappropriate [LuneOS specific]
 
- src/msm_mtp/msm.c | 161 ++++++++++++++++++++++++++++++----------------
- 1 file changed, 104 insertions(+), 57 deletions(-)
+ src/msm_mtp/msm.c | 171 ++++++++++++++++++++++++++++++----------------
+ 1 file changed, 114 insertions(+), 57 deletions(-)
 
 diff --git a/src/msm_mtp/msm.c b/src/msm_mtp/msm.c
-index e08ef40..eb62e12 100644
+index e08ef40..bb1cdda 100644
 --- a/src/msm_mtp/msm.c
 +++ b/src/msm_mtp/msm.c
 @@ -1,6 +1,6 @@
@@ -80,7 +80,18 @@ index e08ef40..eb62e12 100644
  
  	if (NULL == nyxDev)
  	{
-@@ -132,7 +140,7 @@ nyx_error_t mtp_set_mode(nyx_device_handle_t handle,
+@@ -107,6 +115,10 @@ nyx_error_t mtp_set_mode(nyx_device_handle_t handle,
+ 	if ((action == NYX_MASS_STORAGE_MODE_DISABLE) ||
+ 	    (action == NYX_MASS_STORAGE_MODE_DISABLE_AFTER_FSCK))
+ 	{
++		/* stopping umtprd runs its ExecStopPost gadget cleanup, which
++		 * removes the mtp function and restores the previous gadget */
++		if (system("pidof umtprd > /dev/null") == 0)
++			system("systemctl stop umtprd --no-block");
+ 		*ret = NYX_MASS_STORAGE_MODE_SUCCESS;
+ 		return NYX_ERROR_NONE;
+ 	}
+@@ -132,7 +144,7 @@ nyx_error_t mtp_set_mode(nyx_device_handle_t handle,
  			return NYX_ERROR_NONE;
  		}
  
@@ -89,7 +100,7 @@ index e08ef40..eb62e12 100644
  			*ret = NYX_MASS_STORAGE_MODE_SUCCESS;
  			return NYX_ERROR_NONE;
  		}
-@@ -145,79 +153,113 @@ nyx_error_t mtp_set_mode(nyx_device_handle_t handle,
+@@ -145,79 +157,119 @@ nyx_error_t mtp_set_mode(nyx_device_handle_t handle,
  	return NYX_ERROR_INVALID_VALUE;
  }
  
@@ -156,7 +167,8 @@ index e08ef40..eb62e12 100644
 -	if (!device)
 -		goto reply;
 +	*state |= NYX_MASS_STORAGE_MODE_DRIVER_AVAILABLE;
-+
+ 
+-	udev_device_unref(device);
 +	attr = read_sysfs_attr(ANDROID_USB_SYSFS_PATH "/state");
 +	if ((g_strcmp0(attr, "CONFIGURED") == 0) || (g_strcmp0(attr, "CONNECTED") == 0)) {
 +		*state |= NYX_MASS_STORAGE_MODE_HOST_CONNECTED;
@@ -164,7 +176,7 @@ index e08ef40..eb62e12 100644
 +	g_free(attr);
 +}
  
--	udev_device_unref(device);
+-	device = udev_device_new_from_syspath(udev_state, ANDROID_USB_SYSFS_PATH);
 +/* configfs/libcomposite gadget: cable and enumeration state live in
 + * /sys/class/udc/<name>/state; umtprd brings its own ffs.mtp function. */
 +static void get_state_udc(nyx_mass_storage_mode_state_t *state)
@@ -173,26 +185,25 @@ index e08ef40..eb62e12 100644
 +	const gchar *entry;
 +	bool have_udc = false;
  
--	device = udev_device_new_from_syspath(udev_state, ANDROID_USB_SYSFS_PATH);
+-	if (!device)
+-		goto reply;
 +	dir = g_dir_open(UDC_CLASS_PATH, 0, NULL);
 +	if (!dir)
 +		return;
  
--	if (!device)
+-	attr = udev_device_get_sysattr_value(device, "enable");
+-	if (g_strcmp0(attr, "1") != 0)
 -		goto reply;
 +	while ((entry = g_dir_read_name(dir)) != NULL) {
 +		gchar *path;
 +		gchar *attr;
  
--	attr = udev_device_get_sysattr_value(device, "enable");
--	if (g_strcmp0(attr, "1") != 0)
--		goto reply;
-+		have_udc = true;
- 
 -	attr = udev_device_get_sysattr_value(device, "functions");
 -	running = g_strdup(attr);
 -	while ((token = strsep(&running, ","))) {
 -		mtp_enabled |= (g_strcmp0(token, "mtp") == 0);
++		have_udc = true;
++
 +		path = g_build_filename(UDC_CLASS_PATH, entry, "state", NULL);
 +		attr = read_sysfs_attr(path);
 +		if ((g_strcmp0(attr, "configured") == 0) ||
@@ -232,14 +243,6 @@ index e08ef40..eb62e12 100644
 -	if (system("pidof mtp-server > /dev/null") == 0)
 -		*state |= NYX_MASS_STORAGE_MODE_MODE_ON;
 +	*state = 0;
-+
-+	// when using mtp, internal partition is always mounted
-+	*state |= NYX_MASS_STORAGE_MODE_PARTITION_MOUNTED;
-+
-+	if (g_file_test(ANDROID_USB_SYSFS_PATH, G_FILE_TEST_IS_DIR))
-+		get_state_android_usb(state);
-+	else
-+		get_state_udc(state);
  
 -reply:
 -	if (device)
@@ -248,12 +251,26 @@ index e08ef40..eb62e12 100644
 -		udev_unref(udev_state);
 -	if (running)
 -		g_free(running);
++	// when using mtp, internal partition is always mounted
++	*state |= NYX_MASS_STORAGE_MODE_PARTITION_MOUNTED;
++
++	if (g_file_test(ANDROID_USB_SYSFS_PATH, G_FILE_TEST_IS_DIR))
++		get_state_android_usb(state);
++
++	/* Fall back to the configfs/UDC path when android_usb is absent or
++	 * inert. Halium devices (e.g. sargo) keep a vestigial android_usb node
++	 * whose functions are empty while the real gadget lives in configfs, so
++	 * a mere directory check is not enough - only trust android_usb when it
++	 * actually reported the driver as available. */
++	if (!(*state & NYX_MASS_STORAGE_MODE_DRIVER_AVAILABLE))
++		get_state_udc(state);
++
 +	if (system("pidof umtprd > /dev/null") == 0)
 +		*state |= NYX_MASS_STORAGE_MODE_MODE_ON;
  
  	return NYX_ERROR_NONE;
  }
-@@ -248,9 +290,11 @@ gboolean _handle_event(GIOChannel *channel, GIOCondition condition, gpointer dat
+@@ -248,9 +300,11 @@ gboolean _handle_event(GIOChannel *channel, GIOCondition condition, gpointer dat
  	if ((condition  & G_IO_IN) == G_IO_IN) {
  		dev = udev_monitor_receive_device(mon);
  		if (dev) {
@@ -267,7 +284,7 @@ index e08ef40..eb62e12 100644
  		}
  	}
  
-@@ -268,7 +312,10 @@ void mtp_init(void)
+@@ -268,7 +322,10 @@ void mtp_init(void)
  	}
  
  	mon = udev_monitor_new_from_netlink(udev, "udev");
