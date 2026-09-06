@@ -18,7 +18,7 @@ inherit pkgconfig
 inherit webos_system_bus
 inherit webos_systemd
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=herrie/fixes \
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     file://0001-Fix-callback-and-time-struct-types-for-GCC-15.patch \
 "
 LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
