@@ -25,6 +25,7 @@ inherit webos_public_repo
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Add-trustLevel.patch \
+    file://0002-pluginadapter-post-toasts-as-transient-light-notific.patch \
 "
 
 inherit webos_systemd
