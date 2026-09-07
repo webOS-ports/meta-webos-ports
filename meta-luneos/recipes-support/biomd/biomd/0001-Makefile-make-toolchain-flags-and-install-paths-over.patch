@@ -1,0 +1,101 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Mon, 7 Sep 2026 12:00:00 +0200
+Subject: [PATCH] Makefile: make toolchain, flags and install paths overridable
+
+Three things stop the Makefile working under a cross-compiling distro build
+such as Yocto/OpenEmbedded:
+
+ 1. CC is assigned unconditionally, which overrides the value a build
+    environment exports. That is not a failure you can spot from the log -
+    it silently compiles with the host compiler and no --sysroot, so the
+    target's headers are invisible and the objects are for the wrong
+    architecture. Use ?= so the environment wins.
+
+ 2. CFLAGS/LDFLAGS are assigned rather than appended, so every flag the
+    build environment supplies (--sysroot, optimisation, hardening, debug
+    prefix maps) is discarded. Appending to CFLAGS alone is not enough
+    here: the session, fprintd and PAM binaries each build from their own
+    CFLAGS_*/LDFLAGS_* variable and never reference the plain ones, so
+    they would still be built without the environment's flags. Capture the
+    environment's values once with := before the assignments shadow them,
+    and prepend them to every variant.
+
+ 3. install unconditionally writes the PAM module to
+    $(PREFIX)/lib/$(TRIPLET)/security, a Debian multiarch path. Add a
+    LIBDIR knob defaulting to the previous value, so nothing changes for
+    Debian builds.
+
+Upstream-Status: Pending
+---
+--- a/Makefile
++++ b/Makefile
+@@ -1,16 +1,28 @@
+-CC = gcc
++# ?= so a cross-compiling build environment can supply its own toolchain; a
++# plain assignment here would override CC from the environment and silently
++# build with the host compiler, with no --sysroot and the wrong architecture.
++CC ?= gcc
+ 
+-CFLAGS = `pkg-config --cflags gio-2.0 glib-2.0 libgbinder sqlite3` -Iinclude
+-LDFLAGS = `pkg-config --libs gio-2.0 glib-2.0 libgbinder sqlite3` -lfart -lcrypto
++# Each target below uses its own CFLAGS_*/LDFLAGS_* variable rather than the
++# plain CFLAGS/LDFLAGS, so appending to CFLAGS alone would leave the session,
++# fprintd and PAM binaries built without the environment's flags. Capture the
++# environment's values once, immediately (:= before the assignments below
++# shadow them), and prepend them to every variant. On a build that supplies
++# neither, these expand to nothing and the flags are unchanged.
++ENV_CFLAGS := $(CFLAGS)
++ENV_LDFLAGS := $(LDFLAGS)
+ 
+-CFLAGS_SESSION = `pkg-config --cflags gio-2.0 glib-2.0 gstreamer-1.0` -Iinclude -Iinclude/session
+-LDFLAGS_SESSION = `pkg-config --libs gio-2.0 glib-2.0 gstreamer-1.0`
++CFLAGS = $(ENV_CFLAGS) `pkg-config --cflags gio-2.0 glib-2.0 libgbinder sqlite3` -Iinclude
++LDFLAGS = $(ENV_LDFLAGS) `pkg-config --libs gio-2.0 glib-2.0 libgbinder sqlite3` -lfart -lcrypto
+ 
+-CFLAGS_FPRINTD = `pkg-config --cflags gio-2.0 glib-2.0` -Iinclude
+-LDFLAGS_FPRINTD = `pkg-config --libs gio-2.0 glib-2.0`
++CFLAGS_SESSION = $(ENV_CFLAGS) `pkg-config --cflags gio-2.0 glib-2.0 gstreamer-1.0` -Iinclude -Iinclude/session
++LDFLAGS_SESSION = $(ENV_LDFLAGS) `pkg-config --libs gio-2.0 glib-2.0 gstreamer-1.0`
+ 
+-CFLAGS_PAM = -fPIC -fno-stack-protector `pkg-config --cflags gio-2.0 glib-2.0` -Iinclude
+-LDFLAGS_PAM = -shared -lpam -lpthread `pkg-config --libs gio-2.0 glib-2.0`
++CFLAGS_FPRINTD = $(ENV_CFLAGS) `pkg-config --cflags gio-2.0 glib-2.0` -Iinclude
++LDFLAGS_FPRINTD = $(ENV_LDFLAGS) `pkg-config --libs gio-2.0 glib-2.0`
++
++CFLAGS_PAM = $(ENV_CFLAGS) -fPIC -fno-stack-protector `pkg-config --cflags gio-2.0 glib-2.0` -Iinclude
++LDFLAGS_PAM = $(ENV_LDFLAGS) -shared -lpam -lpthread `pkg-config --libs gio-2.0 glib-2.0`
+ 
+ SOURCES = src/biomd.c \
+           src/manager.c \
+@@ -44,6 +56,11 @@ HEADERS = include/biomd_enums.h
+ PREFIX ?= /usr
+ TRIPLET ?= $(shell $(CC) -dumpmachine)
+ 
++# Overridable so distributions that do not use Debian multiarch paths
++# (Yocto/OpenEmbedded, for example) can point this at their own layout.
++# Defaults to the previous value, so Debian builds are unchanged.
++LIBDIR ?= $(PREFIX)/lib/$(TRIPLET)
++
+ all: $(TARGET) $(TARGET_SESSION) $(TARGET_FPRINTD) $(TARGET_PAM)
+ 
+ $(TARGET):
+@@ -83,8 +100,8 @@ install: all
+ 	install -m 0644 data/10-biomd.conf $(DESTDIR)$(PREFIX)/lib/systemd/system/fprintd.service.d/
+ 	install -m 0644 data/biomd-session.service $(DESTDIR)$(PREFIX)/lib/systemd/user/
+ 
+-	install -d $(DESTDIR)$(PREFIX)/lib/$(TRIPLET)/security
+-	install -m 0644 $(TARGET_PAM) $(DESTDIR)$(PREFIX)/lib/$(TRIPLET)/security/
++	install -d $(DESTDIR)$(LIBDIR)/security
++	install -m 0644 $(TARGET_PAM) $(DESTDIR)$(LIBDIR)/security/
+ 
+ uninstall:
+ 	rm -f $(DESTDIR)$(PREFIX)/sbin/$(TARGET)
+@@ -92,7 +109,7 @@ uninstall:
+ 	rm -f $(DESTDIR)$(PREFIX)/share/dbus-1/system.d/io.FuriOS.Biomd.conf
+ 	rm -f $(DESTDIR)$(PREFIX)/libexec/$(TARGET_SESSION)
+ 	rm -f $(DESTDIR)$(PREFIX)/libexec/$(TARGET_FPRINTD)
+-	rm -f $(DESTDIR)$(PREFIX)/lib/$(TRIPLET)/security/$(TARGET_PAM)
++	rm -f $(DESTDIR)$(LIBDIR)/security/$(TARGET_PAM)
+ 	rm -f $(DESTDIR)$(PREFIX)/lib/systemd/user/biomd-session.service
+ 	rm -f $(DESTDIR)$(PREFIX)/lib/systemd/system/fprintd.service.d/10-biomd.conf
+ 	rm -f $(DESTDIR)$(PREFIX)/include/biomd/biomd_enums.h
