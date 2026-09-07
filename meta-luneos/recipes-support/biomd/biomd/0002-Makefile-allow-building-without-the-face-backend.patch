@@ -1,0 +1,126 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Mon, 7 Sep 2026 12:30:00 +0200
+Subject: [PATCH] Makefile: allow building without the face backend
+
+The face backend links libfart, which pulls in OpenCV and TensorFlow Lite.
+A deployment that only wants the fingerprint half - LuneOS is bringing up
+fingerprint first - otherwise has to build and ship that whole stack for a
+subsystem it never calls.
+
+Add WITH_FACE, defaulting to 1 so nothing changes by default. With
+WITH_FACE=0 the four face sources are replaced by src/face_disabled.c,
+which satisfies face.h with stubs, and -lfart is dropped from the link.
+
+biomd.c needs no conditionals for this: it tests *error rather than the
+return value of face_register(), and guards the matching unregister on the
+id being greater than zero, so a stub returning 0 without setting an error
+simply leaves the Face object off the bus. biomd-session is unaffected -
+it has its own face code and never linked libfart.
+
+Upstream-Status: Pending
+---
+diff --git a/Makefile b/Makefile
+index 8581b63..09e5bb2 100644
+--- a/Makefile
++++ b/Makefile
+@@ -12,8 +12,24 @@ CC ?= gcc
+ ENV_CFLAGS := $(CFLAGS)
+ ENV_LDFLAGS := $(LDFLAGS)
+ 
++# Face support pulls in libfart, and through it OpenCV and TensorFlow Lite.
++# Build with WITH_FACE=0 for a fingerprint-only daemon: the face sources are
++# replaced by src/face_disabled.c, which satisfies face.h without them.
++WITH_FACE ?= 1
++
++SOURCES_FACE = src/face.c \
++               src/face_backend.c \
++               src/face_fart_backend.c \
++               src/face_tensorflow_fart.c
++LDFLAGS_FACE = -lfart
++
++ifeq ($(WITH_FACE),0)
++SOURCES_FACE = src/face_disabled.c
++LDFLAGS_FACE =
++endif
++
+ CFLAGS = $(ENV_CFLAGS) `pkg-config --cflags gio-2.0 glib-2.0 libgbinder sqlite3` -Iinclude
+-LDFLAGS = $(ENV_LDFLAGS) `pkg-config --libs gio-2.0 glib-2.0 libgbinder sqlite3` -lfart -lcrypto
++LDFLAGS = $(ENV_LDFLAGS) `pkg-config --libs gio-2.0 glib-2.0 libgbinder sqlite3` $(LDFLAGS_FACE) -lcrypto
+ 
+ CFLAGS_SESSION = $(ENV_CFLAGS) `pkg-config --cflags gio-2.0 glib-2.0 gstreamer-1.0` -Iinclude -Iinclude/session
+ LDFLAGS_SESSION = $(ENV_LDFLAGS) `pkg-config --libs gio-2.0 glib-2.0 gstreamer-1.0`
+@@ -32,10 +48,7 @@ SOURCES = src/biomd.c \
+           src/fingerprint_binder_hidl.c \
+           src/database.c \
+           src/fpd_compat.c \
+-          src/face.c \
+-          src/face_backend.c \
+-          src/face_fart_backend.c \
+-          src/face_tensorflow_fart.c
++          $(SOURCES_FACE)
+ 
+ SOURCES_SESSION = src/session/biomd_session.c \
+                   src/session/session_face.c \
+diff --git a/src/face_disabled.c b/src/face_disabled.c
+new file mode 100644
+index 0000000..dcf352a
+--- /dev/null
++++ b/src/face_disabled.c
+@@ -0,0 +1,57 @@
++/**
++ * SPDX-License-Identifier: GPL-2.0-only
++ * Copyright (C) 2026 Bardia Moshiri <bardia@furilabs.com>
++ */
++
++/**
++ * Stand-in for the face subsystem, compiled instead of face.c and the FART
++ * backend when the daemon is built with WITH_FACE=0. It exists so that a
++ * fingerprint-only build does not have to link libfart - and through it
++ * OpenCV and TensorFlow Lite - for a subsystem it will not use.
++ *
++ * face_register() returns 0 without setting *error, so biomd.c leaves the
++ * Face object off the bus and carries on: it tests *error rather than the
++ * return value, and guards the matching unregister on the id being > 0.
++ */
++
++#include "face.h"
++
++void
++face_init(GDBusConnection *connection)
++{
++    (void) connection;
++}
++
++void
++face_cleanup(GDBusConnection *connection)
++{
++    (void) connection;
++}
++
++guint
++face_register(GDBusConnection *connection, GError **error)
++{
++    (void) connection;
++    (void) error;
++
++    g_debug("Built without face support, not registering the Face object");
++    return 0;
++}
++
++BiometricState
++face_get_state(void)
++{
++    return STATE_IDLE;
++}
++
++gboolean
++face_get_enrolled(void)
++{
++    return FALSE;
++}
++
++FaceImplementationType
++face_get_implementation_type(void)
++{
++    return TYPE_UNKNOWN;
++}

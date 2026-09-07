@@ -160,14 +160,19 @@ LIBHYBRIS_RDEPENDS = " \
     ofono-binder-plugin \
 "
 
-# Fingerprint stack: droidian-fpd talks to the Android biometrics HAL through
-# libhybris, webos-fingerprint-adapter bridges its D-Bus API onto the
+# Fingerprint stack: biomd talks to the Android biometrics HAL over binder
+# through libgbinder, webos-fingerprint-adapter bridges its D-Bus API onto the
 # luna-service2 bus for the shell (lockscreen unlock) and the Settings app
 # (enrollment). Only added for machines that actually have a fingerprint
-# sensor. Note: the device's Halium system image must also ship
-# libbiometry_fp_api.so (built from droidian-fpd's android/hybris/ directory).
+# sensor.
+#
+# This was droidian-fpd, which reaches the same HAL through libhybris and
+# dlopens libbiometry_fp_api.so - a shim that has to be built into the device's
+# Halium system image, and is not in ours. fpd does not check the dlopen
+# result, so it calls through a NULL pointer and segfaults on every start,
+# leaving the sensor dead. biomd needs nothing from the Android side.
 FINGERPRINT_RDEPENDS = " \
-    droidian-fpd \
+    biomd \
     webos-fingerprint-adapter \
 "
 
