@@ -18,9 +18,13 @@ RDEPENDS:${PN} = "lsb-release gzip"
 #LuneOS uses config per device provided by nyx-conf
 RDEPENDS:${PN} += "nyx-conf"
 
-WEBOS_VERSION = "7.1.0-25_802df9c1da7fb70c9d7506d4b863cd858153a1b1"
+# Built from the webOS-ports fork (webosose master + LuneOS modules and fixes
+# merged as commits) rather than webosose plus a patch stack. Pinned with a
+# plain SRCREV: submission tags are a webosose convention and this branch
+# carries none. The branch itself comes from webos_ports_ose_repo below.
+SRCREV = "f27361973c8b31921de197f223570037ad1a867c"
 
-PR = "r27"
+PR = "r29"
 
 EXTRA_OECMAKE += "\
     -DDISTRO_VERSION:STRING='${DISTRO_VERSION}' \
@@ -50,8 +54,7 @@ WEBOS_TARGET_CORE_OS = "rockhopper"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 inherit webos_component
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit webos_library
 inherit webos_machine_impl_dep
@@ -60,29 +63,12 @@ inherit webos_core_os_dep
 inherit webos_nyx_module_provider
 #inherit webos_distro_variant_dep
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-nyx-modules-Add-ALS.patch \
-    file://0002-nyx-modules-Add-haptics-module.patch \
-    file://0003-nyx-modules-Add-keys-module.patch \
-    file://0004-nyx-modules-Add-LED-module.patch \
-    file://0005-nyx-modules-Add-MSM-MTP-module.patch \
-    file://0006-nyx-modules-Add-touchpanel-mtdev-modules.patch \
-    file://0007-msgid-Add-messages-for-LuneOS-modules.patch \
-    file://0008-Add-LuneOS-modules-and-machine-specific-cmake-file-t.patch \
-    file://0009-Add-wait-touchscreen-conf.patch \
-    file://0010-nyx-modules-Use-etc-machine-id-for-serial-number.patch \
-    file://0011-Fix-memory-leaks-in-multiple-modules.patch \
-    file://0012-charger-read-usb_type-current_max-and-vendor_charger.patch \
-    file://0013-battery-charger-Allow-path-override-from-cmake.patch \
-    file://0014-battery.c-Return-proper-current.patch \
-    file://0020-keys-fix-pointer-types-rejected-by-GCC-15.patch \
-    file://0021-touchpanel-mtdev-fix-finger-type-and-declare-gesture-.patch \
-    file://0022-Read-device-paths-from-etc-nyx.conf-at-runtime.patch \
-    file://0023-haptics-Implement-named-effects-effect-id-and-cancel.patch \
-    file://0024-Add-nyx-test-ledcontroller-tool.patch \
-    file://0025-Add-LED-torch-module-and-nyx-test-led.patch \
-    file://0026-msm_mtp-Support-configfs-UDC-gadgets-and-start-umtp.patch \
-"
+# Set outright rather than derived from a submission tag. Kept monotonic: the
+# patch-stack recipe shipped 7.1.0-25, so anything lower would look like a
+# downgrade to opkg on an update.
+PV = "7.1.0-26"
+
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 SRC_URI:append = " \
     file://${MACHINE}.cmake \
