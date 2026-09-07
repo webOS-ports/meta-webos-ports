@@ -41,6 +41,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0006-expose-DNS-search-domains-and-cellular-roaming-state.patch \
     file://0007-connectionmanager-expose-per-service-timeservers-mDN.patch \
     file://0008-connectionmanager-report-offlineMode-changes-to-gets.patch \
+    file://0009-agent-detect-captive-portals-via-RequestBrowser-repo.patch \
 "
 
 inherit webos_systemd
