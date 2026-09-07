@@ -20,9 +20,9 @@ LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
-SRCREV = "e1bf3fd16eb2ed0dde73880cf6d4bedc8e89aafc"
+SRCREV = "1f832a86ff43bc13cc166dee983e24ea85d402fb"
 
-PV = "1.0.0-23+git"
+PV = "1.0.0-24+git"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 
