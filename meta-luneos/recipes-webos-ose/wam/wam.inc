@@ -61,6 +61,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0020-WebPageBlink-scale-the-UI-with-page-zoom-not-the-devi.patch \
     file://0021-WAM-give-exhibition-dock-mode-windows-a-window-type-.patch \
     file://0022-DeviceInfoImpl-report-the-webOS-level-LuneOS-actuall.patch \
+    file://0023-WebPageBlink-let-an-explicit-window.open-type-win-ov.patch \
 "
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
