@@ -60,6 +60,7 @@ RDEPENDS:${PN} = " \
   \
   ${VIRTUAL-RUNTIME_speech_synthesis} \
   \
+  com.palm.app.backup \
   org.webosports.app.atlas \
   org.webosports.app.calculator \
   org.webosports.app.contacts \
