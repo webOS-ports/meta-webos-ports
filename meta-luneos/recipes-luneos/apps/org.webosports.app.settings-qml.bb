@@ -27,7 +27,7 @@ REMOVE_ANDROID_PROPERTY_SERVICE_CMD:halium = ""
 REMOVE_ANDROID_PROPERTY_SERVICE_CMD = "sed -i 's/\"android-property-service.operation\", //g' ${D}/${webos_applicationsdir}/org.webosports.app.settings.deviceinfo/appinfo.json"
 
 # The fingerprint panel only makes sense with the halium fingerprint stack
-# (droidian-fpd + webos-fingerprint-adapter); drop the whole sub-app elsewhere
+# (biomd + webos-fingerprint-adapter); drop the whole sub-app elsewhere
 # so its requiredPermissions don't trip the LS2 ACG validation.
 REMOVE_FINGERPRINT_APP_CMD:halium = ""
 REMOVE_FINGERPRINT_APP_CMD = "rm -rf ${D}/${webos_applicationsdir}/org.webosports.app.settings.fingerprint"

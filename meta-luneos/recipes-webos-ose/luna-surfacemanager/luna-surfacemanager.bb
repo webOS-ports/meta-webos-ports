@@ -16,7 +16,7 @@ LIC_FILES_CHKSUM = " \
 DEPENDS = "qtdeclarative wayland-native qtwayland qtbase-native qt-features-webos pmloglib webos-wayland-extensions glib-2.0 qtwayland-webos"
 
 WEBOS_VERSION = "2.0.0-423_6f49cced1cd4aea27f14d136e1c8ce846beef62a"
-PR = "r63"
+PR = "r64"
 
 inherit webos_qmake6
 inherit pkgconfig
@@ -67,6 +67,27 @@ EXTRA_QMAKEVARS_PRE += "${PACKAGECONFIG_CONFARGS}"
 
 # We don't support configuring via cmake
 EXTRA_QMAKEVARS_POST += "CONFIG-=create_cmake"
+
+# qtbase's wayland-scanner.prf (the qmake path; the prf moved to qtbase with
+# the QtWayland client in 6.10) declares the qtwaylandscanner outputs with
+# variable_out = HEADERS but no target_predeps, so the generated
+# qwayland-server-*.h only appear in the Makefile as dependencies of objects
+# whose source qmake could dep-scan. The moc-generated objects are not among
+# them: .obj/moc_*.o depends only on its .moc/*.cpp, whose synthesized rule
+# stops at the mocable header - yet the moc output includes the generated
+# headers through the syncqt forwarding headers. On a fresh ${B} make -j
+# therefore races moc-object compilation against qtwaylandscanner, and a hot
+# ccache makes the compile side fast enough to lose reliably (moc_webossurfaceitem.o:
+# fatal error: qwayland-server-webos-surface-group.h: No such file or directory).
+# Run the scanner rules to completion before the parallel build so it starts
+# with the headers on disk. qmake_all first: on a fresh ${B} the sub-Makefiles
+# only come into existence as make descends the subdirs tree.
+do_compile:prepend() {
+    oe_runmake -C ${B} qmake_all
+    oe_runmake -C ${B}/modules/weboscompositor \
+        compiler_qtwayland_server_header_make_all \
+        compiler_qtwayland_server_code_make_all
+}
 
 FILES:${PN}-dev += " \
     ${OE_QMAKE_PATH_QT_ARCHDATA}/mkspecs/* \
