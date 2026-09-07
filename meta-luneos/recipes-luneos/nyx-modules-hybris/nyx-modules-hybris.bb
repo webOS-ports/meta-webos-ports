@@ -34,9 +34,9 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/../../recipes-webos-ose/nyx-modules/nyx-m
 # Depends on libhybris which has this restriction
 COMPATIBLE_MACHINE = "^halium$"
 
-PV = "0.1.0-1+git"
+PV = "0.1.0-2+git"
 PR = "r10"
-SRCREV = "e56077c6932dba23fd9fd1d9f3b4f8c6272a0e1b"
+SRCREV = "6b34d40866e988783cce9357752a5e4bdc8dd4d9"
 
 inherit webos_ports_repo
 inherit webos_cmake
