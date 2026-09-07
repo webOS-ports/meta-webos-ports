@@ -39,8 +39,8 @@ RDEPENDS:${PN} += "pulseaudio-module-remap-sink"
 # patches this recipe used to carry are commits on its webOS-ports/webOS-OSE
 # branch, which also starts from the submission below.
 #WEBOS_VERSION = "1.0.0-78_127c6cd6c9247979b4ead42d9b8fc8b5c48b47a2"
-PV = "1.0.0-78+git"
-SRCREV = "e7f74089c98a79ba7dc1e117b14dc8758ad42899"
+PV = "1.0.0-79+git"
+SRCREV = "7f391c5bd3177a4f16f4e3536d13d881e490509a"
 PR = "r36"
 
 inherit webos_component

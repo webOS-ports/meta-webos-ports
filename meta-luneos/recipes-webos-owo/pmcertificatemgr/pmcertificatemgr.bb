@@ -9,8 +9,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "openssl glib-2.0"
 RDEPENDS:${PN} = "ca-certificates"
 
-PV = "2.0.0-29+git"
-SRCREV = "b75ad7efc4d14264ad3168285007e31d851dba55"
+PV = "2.0.0-30+git"
+SRCREV = "1cbeaeda8e2b4b2d8f122fb33d80c18413479e06"
 
 inherit webos_ports_repo
 inherit webos_cmake

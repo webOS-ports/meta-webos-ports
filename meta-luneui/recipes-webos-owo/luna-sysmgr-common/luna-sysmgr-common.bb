@@ -9,7 +9,7 @@ DEPENDS = "glib-2.0 luna-prefs luna-service2 json-c nyx-lib libpbnjson sqlite3 p
 DEPENDS += "qtbase"
 
 PV = "3.0.0-4+git"
-SRCREV = "65619e0b677dcccd053d8c1a3db6a0d401c013bf"
+SRCREV = "9d79c681cfe415f8076deaaf92e6bcb9c2ec2626"
 
 # Don't uncomment until all of the do_*() tasks have been moved out of the recipe
 inherit webos_ports_fork_repo
