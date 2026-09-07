@@ -1,14 +1,15 @@
-SUMMARY = "LuneOS fingerprint service, bridges droidian-fpd onto the luna-service2 bus"
+SUMMARY = "LuneOS fingerprint service, bridges biomd onto the luna-service2 bus"
 SECTION = "webos/services"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-# glib-2.0-native provides gdbus-codegen, which generates the fpd D-Bus glue
+# glib-2.0-native provides gdbus-codegen, which generates the biomd D-Bus glue
 DEPENDS = "luna-service2 libpbnjson glib-2.0 glib-2.0-native"
 
-# The service is useful without droidian-fpd running (it reports the sensor as
-# unavailable), but there is no point shipping it on its own.
-RRECOMMENDS:${PN} += "droidian-fpd"
+# The service is useful without biomd running (it reports the sensor as
+# unavailable and re-attaches when biomd appears), but there is no point
+# shipping it on its own.
+RRECOMMENDS:${PN} += "biomd"
 
 PV = "0.1.0-1+git"
 SRCREV = "010ff42a4404da3032db59b8a5505181179deb02"
