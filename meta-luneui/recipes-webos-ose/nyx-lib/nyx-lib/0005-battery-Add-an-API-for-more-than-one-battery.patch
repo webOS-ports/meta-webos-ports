@@ -1,0 +1,177 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Mon, 7 Sep 2026 15:57:04 +0200
+Subject: [PATCH] battery: add an API for devices carrying more than one
+ battery
+
+The battery API assumes exactly one cell: nyx_battery_query_battery_status()
+takes a device handle and returns the readings, with no way to ask which
+battery those readings came from or whether there are others. That holds for
+every phone, and stops holding the moment a PinePhone (Pro) is docked in its
+keyboard, which has its own battery. The keyboard charges the phone over USB,
+so the kernel exposes it as a second power_supply of type "Battery" alongside
+the phone's own, and nyx's module then picks whichever one the directory walk
+returned first - a coin flip that can leave the shell reporting the keyboard's
+charge as the phone's.
+
+Add the two calls needed to enumerate instead of guess:
+
+    nyx_battery_query_battery_count()  - how many batteries the module knows
+    nyx_battery_query_battery_info()   - identity plus readings for one of them
+
+nyx_battery_info_t carries the power_supply node name, a role string ("main",
+"keyboard") for a caller that wants to label it, a primary flag, and the
+existing nyx_battery_status_t. Index 0 is the primary battery and reports what
+nyx_battery_query_battery_status() reports, so the single-battery path is
+untouched and charging logic and low-battery shutdown keep following the cell
+that actually powers the device.
+
+Both are optional: the module methods are appended to the end of
+module_method_t as that enum's own comment requires, and a module that does not
+register them makes the calls return NYX_ERROR_NOT_IMPLEMENTED, which callers
+read as "one battery, the one you already have".
+
+Upstream-Status: Pending
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+---
+ include/public/nyx/client/nyx_battery.h       | 39 +++++++++++++++++++
+ .../public/nyx/common/nyx_battery_common.h    | 25 ++++++++++++
+ .../public/nyx/module/nyx_device_internal.h   |  9 ++++-
+ src/device/nyx_battery_impl.c                 | 14 +++++++
+ 4 files changed, 86 insertions(+), 1 deletion(-)
+
+diff --git a/include/public/nyx/client/nyx_battery.h b/include/public/nyx/client/nyx_battery.h
+index 39ffa75..dcd0b88 100644
+--- a/include/public/nyx/client/nyx_battery.h
++++ b/include/public/nyx/client/nyx_battery.h
+@@ -128,6 +128,45 @@ NYX_API_EXPORT nyx_error_t nyx_battery_set_fake_mode(
+ NYX_API_EXPORT nyx_error_t nyx_battery_get_fake_mode(
+     nyx_device_handle_t handle, bool *enable);
+ 
++/**
++ * @brief Query how many batteries the module reports.
++ *
++ * Modules that only ever have one battery need not implement this, in which
++ * case NYX_ERROR_NOT_IMPLEMENTED is returned and the caller should treat the
++ * device as having exactly the one battery that @ref
++ * nyx_battery_query_battery_status() describes.
++ *
++ * The count covers batteries the module knows about, present or not; a
++ * detachable one keeps its slot with status.present false so that its
++ * disappearance is reported rather than silently dropped.
++ *
++ * @param[in]   handle - the device handle
++ * @param[out]  count_out_ptr - number of batteries (needs to be allocated by caller)
++ *
++ * @return error code (NYX_ERROR_NONE if operation is successful)
++ *
++ */
++NYX_API_EXPORT nyx_error_t nyx_battery_query_battery_count(
++    nyx_device_handle_t handle, int32_t *count_out_ptr);
++
++/**
++ * @brief Query identity and readings for one battery.
++ *
++ * Index 0 is the primary battery and reports what @ref
++ * nyx_battery_query_battery_status() reports, so a caller that walks the list
++ * need not query both.
++ *
++ * @param[in]   handle - the device handle
++ * @param[in]   index - 0 .. count-1, as reported by @ref nyx_battery_query_battery_count()
++ * @param[out]  info_out_ptr - identity and current readings (needs to be allocated by caller)
++ *
++ * @return error code (NYX_ERROR_NONE if operation is successful,
++ *         NYX_ERROR_VALUE_OUT_OF_RANGE if index is past the last battery)
++ *
++ */
++NYX_API_EXPORT nyx_error_t nyx_battery_query_battery_info(
++    nyx_device_handle_t handle, int32_t index, nyx_battery_info_t *info_out_ptr);
++
+ /** @} */
+ #ifdef __cplusplus
+ }
+diff --git a/include/public/nyx/common/nyx_battery_common.h b/include/public/nyx/common/nyx_battery_common.h
+index eee8d93..1dde114 100644
+--- a/include/public/nyx/common/nyx_battery_common.h
++++ b/include/public/nyx/common/nyx_battery_common.h
+@@ -56,6 +56,31 @@ typedef struct
+ 	int32_t health;
+ } nyx_battery_status_t;
+ 
++/**
++ * Maximum length, including the terminating NUL, of the identifying strings
++ * carried by @ref nyx_battery_info_t.
++ */
++#define NYX_BATTERY_NAME_MAX 64
++
++/**
++ * Identity and readings for one battery out of possibly several.
++ *
++ * A device can carry more than one cell: the PinePhone (Pro) keyboard has its
++ * own battery, which charges the phone over USB and appears alongside the
++ * phone's own as a second power_supply of type "Battery". @ref
++ * nyx_battery_query_battery_status() keeps reporting the primary battery, so
++ * charging logic and low-battery shutdown are unaffected; the extra cells are
++ * reached with @ref nyx_battery_query_battery_count() and @ref
++ * nyx_battery_query_battery_info().
++ */
++typedef struct
++{
++	char name[NYX_BATTERY_NAME_MAX];    /** power_supply node name, e.g. "ip5xxx-battery" */
++	char role[NYX_BATTERY_NAME_MAX];    /** what it powers: "main", "keyboard", ... */
++	bool primary;                       /** True for the battery the charging logic follows */
++	nyx_battery_status_t status;        /** Readings, as nyx_battery_query_battery_status() reports them */
++} nyx_battery_info_t;
++
+ /**
+  * Battery Charging Parameters
+  */
+diff --git a/include/public/nyx/module/nyx_device_internal.h b/include/public/nyx/module/nyx_device_internal.h
+index 404e785..b1270ef 100644
+--- a/include/public/nyx/module/nyx_device_internal.h
++++ b/include/public/nyx/module/nyx_device_internal.h
+@@ -189,7 +189,10 @@ typedef enum
+ 	 * other GPS ones would renumber all the device families that follow.
+ 	 */
+ 	NYX_GPS_GET_DEBUG_DATA_MODULE_METHOD,
+-	NYX_GPS_SET_NFW_CALLBACK_MODULE_METHOD
++	NYX_GPS_SET_NFW_CALLBACK_MODULE_METHOD,
++	/* battery module functions, multiple batteries; appended for the same reason */
++	NYX_BATTERY_QUERY_BATTERY_COUNT_MODULE_METHOD,
++	NYX_BATTERY_QUERY_BATTERY_INFO_MODULE_METHOD
+ }
+ module_method_t;
+ 
+@@ -296,6 +299,10 @@ typedef nyx_error_t (*nyx_battery_set_fake_mode_function_t)(
+     nyx_device_t *, bool);
+ typedef nyx_error_t (*nyx_battery_get_fake_mode_function_t)(
+     nyx_device_t *, bool *);
++typedef nyx_error_t (*nyx_battery_query_battery_count_function_t)(
++    nyx_device_t *, int32_t *);
++typedef nyx_error_t (*nyx_battery_query_battery_info_function_t)(
++    nyx_device_t *, int32_t, nyx_battery_info_t *);
+ typedef nyx_error_t (*nyx_firmware_update_query_current_version_function_t)(
+     nyx_device_t *, char **);
+ typedef nyx_error_t (
+diff --git a/src/device/nyx_battery_impl.c b/src/device/nyx_battery_impl.c
+index ca803e9..76d0447 100644
+--- a/src/device/nyx_battery_impl.c
++++ b/src/device/nyx_battery_impl.c
+@@ -72,3 +72,17 @@ nyx_error_t nyx_battery_get_fake_mode(nyx_device_handle_t handle,
+ 	nyx_execute_return_function(battery_get_fake_mode, BATTERY,
+ 	                            GET_FAKE_MODE, handle, enable);
+ }
++
++nyx_error_t nyx_battery_query_battery_count(nyx_device_handle_t handle,
++        int32_t *count)
++{
++	nyx_execute_return_function(battery_query_battery_count, BATTERY,
++	                            QUERY_BATTERY_COUNT, handle, count);
++}
++
++nyx_error_t nyx_battery_query_battery_info(nyx_device_handle_t handle,
++        int32_t index, nyx_battery_info_t *info)
++{
++	nyx_execute_return_function(battery_query_battery_info, BATTERY,
++	                            QUERY_BATTERY_INFO, handle, index, info);
++}
