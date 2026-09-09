@@ -176,8 +176,24 @@ fi
 # An accessory's supplies are skipped. The keyboard's boost converter is a type
 # USB supply as well, and it is the phone's own charger input that says whether
 # the phone is charging - "the keyboard is producing 5V" is not the same fact.
+#
+# A supply must also expose "online" to be worth naming. nyx decides that a
+# charger is attached by reading <usb_sysfs_path>/online and nothing else, so a
+# node without it reports "no charger" whatever is plugged in - a worse answer
+# than nyx's own walk, because it is a confident one. The PinePhone Pro is the
+# board that shows it: the phone's charger input, rk818-usb, has present,
+# health and input_current_limit but no online at all, while the fusb302 TCPM's
+# tcpm-source-psy-4-0022 carries online, usb_type and current_max - exactly the
+# three attributes the charger module reads. Sorting reached rk818-usb first
+# and the cable was never detected. Requiring online only ever skips a node
+# that could not have worked.
+usb_supply_is_usable() {
+    [ -r "$1/online" ]
+}
+
 usbpsy=
-if [ -r /sys/class/power_supply/usb/type ]; then
+if [ -r /sys/class/power_supply/usb/type ] &&
+   usb_supply_is_usable /sys/class/power_supply/usb; then
     usbpsy=/sys/class/power_supply/usb
 else
     for _d in /sys/class/power_supply/*; do
@@ -187,9 +203,54 @@ else
             esac
         fi
         case "$(cat "$_d/type" 2>/dev/null)" in
-            USB*) usbpsy=$_d; break ;;
+            USB*) usb_supply_is_usable "$_d" || continue
+                  usbpsy=$_d; break ;;
         esac
     done
+fi
+
+# The second half of the charger input, on Qualcomm smb2/smb5 parts.
+#
+# "usb" and "pc_port" are not two chargers, they are one signal split in two by
+# the driver, and the two getters are exact mirror images of each other. Both
+# start from smblib_get_prop_usb_online(); then, for a plain SDP source
+# (typec_mode SOURCE_DEFAULT or a micro-USB connector, with real_charger_type
+# USB), qpnp-smb5.c's "usb" getter forces online to 0 while its "pc_port"
+# getter forces it to 1, and for anything else - DCP, CDP, PD - the reverse.
+# Measured on sargo attached to a PC: usb/online 0, pc_port/online 1,
+# typec_mode "Source attached (default current)".
+#
+# So neither node alone can answer "is a charger attached". The kernel does not
+# try: qpnp-fg-gen3.c computes online = usb || pc_port || dc. nyx has the same
+# OR - is_charging = usb_online || ac_online || touch_online || wireless_online
+# in charger.c - so wiring both slots gives the right answer for both source
+# types, with no dependence on which one happened to be live at module init.
+#
+# The earlier revision of this file pinned "usb" alone and said pc_port "never
+# reports online". That was measured on a wall charger, where it is true; on a
+# PC it is exactly backwards, and the result was chargerStatusQuery answering
+# Charging:false with the cable in and the battery taking current.
+#
+# The slot each node goes in is not arbitrary. pc_port is the SDP half, so it
+# is the one that means "plugged into a computer" and belongs in usb_sysfs_path:
+# that way chargerStatusQuery reports USBConnected true and USBName "pc" on a
+# PC, and "wall" on a charger. Verified both ways round on sargo - swapping
+# them keeps Charging correct but inverts USBConnected and USBName.
+sdppsy=
+if [ -n "$usbpsy" ] && [ "$usbpsy" != /sys/class/power_supply/pc_port ] \
+   && [ -r /sys/class/power_supply/pc_port/online ]; then
+    sdppsy=/sys/class/power_supply/pc_port
+fi
+
+# With both halves present the SDP node takes the USB slot and the negotiated
+# one takes the AC slot; with only one, it stays where it was. An "ac" default
+# of empty leaves nyx to walk for type Mains, which on these boards finds "bms"
+# or "main" - supplies with no online attribute at all, so nothing is lost.
+if [ -n "$sdppsy" ]; then
+    acpsy=$usbpsy
+    usbpsy=$sdppsy
+else
+    acpsy=
 fi
 
 # The tier 1 pins win throughout: they exist for the boards where the
@@ -197,7 +258,7 @@ fi
 set_value module.battery sysfs_path        "${deviceinfo_battery_sysfs_path:-$mainbat}"
 set_value module.battery extra_sysfs_paths "${deviceinfo_battery_extra_sysfs_paths:-$extrabats}"
 set_value module.charger usb_sysfs_path    "${deviceinfo_charger_usb_sysfs_path:-$usbpsy}"
-set_value module.charger ac_sysfs_path     "${deviceinfo_charger_ac_sysfs_path:-}"
+set_value module.charger ac_sysfs_path     "${deviceinfo_charger_ac_sysfs_path:-$acpsy}"
 
 # Nothing to say: drop the file so the caller does not bind a copy of the
 # original over the original.
