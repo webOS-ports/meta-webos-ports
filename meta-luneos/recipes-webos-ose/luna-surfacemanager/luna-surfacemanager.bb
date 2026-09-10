@@ -15,43 +15,29 @@ LIC_FILES_CHKSUM = " \
 # qtbase-native, gated on the wayland DISTRO_FEATURE which LuneOS sets.
 DEPENDS = "qtdeclarative wayland-native qtwayland qtbase-native qt-features-webos pmloglib webos-wayland-extensions glib-2.0 qtwayland-webos"
 
-WEBOS_VERSION = "2.0.0-423_6f49cced1cd4aea27f14d136e1c8ce846beef62a"
-PR = "r64"
+# Built from the webOS-ports fork (webosose plus the LuneOS changes merged as
+# commits) rather than webosose plus a patch stack: what used to be the
+# 0001-0024 patch series in this directory now lives as commits there, so
+# nothing is applied on top any more. Pinned with a plain SRCREV - submission
+# tags are a webosose convention and this branch carries none. The branch
+# itself comes from webos_ports_ose_repo below.
+SRCREV = "10df66b2f9590a7f5ec311896827f2e21a564405"
+
+# Set outright rather than derived from a submission tag via WEBOS_VERSION.
+# Kept monotonic: the patch-stack recipe shipped 2.0.0-423, so anything lower
+# would look like a downgrade to opkg on an update.
+PV = "2.0.0-424"
+
+PR = "r65"
 
 inherit webos_qmake6
 inherit pkgconfig
 inherit webos_lttng
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_ose_repo
 inherit features_check
 ANY_OF_DISTRO_FEATURES = "vulkan opengl"
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-Add-capability-to-pass-extra-options-to-surface-mana.patch \
-    file://0002-WebOSShellSurface-add-setClientSize.patch \
-    file://0003-webosscreenshot-respect-QT_OPENGL_ES.patch \
-    file://0004-DefaultSettings.qml-Use-Prelude-for-LuneOS.patch \
-    file://0005-Update-com.webos.surfacemanager.role.json.in.patch \
-    file://0006-product.env.in-Make-it-work-with-non-drm-devices.patch \
-    file://0007-Add-additional-permissions-for-org.webosports.notifi.patch \
-    file://0008-base.pro-Remove-building-of-tests.patch \
-    file://0009-com.webos.surfacemanager.perm.json-Add-permissions-f.patch \
-    file://0010-qmldir-expose-NotificationService-component.patch \
-    file://0011-Input-panel-tie-inputPanelRect-to-the-window-mask.patch \
-    file://0012-WebOSSurfaceItem-close-Wayland-client-fallback-on-Cl.patch \
-    file://0013-Wait-for-DRI-card-on-EGLFS-platform.patch \
-    file://0014-ViewStateController.qml-Fix-TypeError.patch \
-    file://0015-NotificationService.qml-let-the-toast-model-remove-t.patch \
-    file://0016-Advertise-xdg_wm_base-so-modern-toolkits-can-map-wind.patch \
-    file://0017-com.webos.surfacemanager.groups.json-keep-the-array-.patch \
-    file://0018-weboscompositor-include-what-qt-612-no-longer-pulls-in.patch \
-    file://0019-weboscompositor-advertise-wp_viewporter.patch \
-    file://0020-WebOSSurfaceItem-close-ask-xdg-clients-to-close-thems.patch \
-    file://0021-weboscompositor-treat-subsurfaces-as-content-not-wind.patch \
-    file://0022-WebOSSurfaceItem-let-changeSize-reach-xdg-clients.patch \
-    file://0023-weboscompositor-scale-subsurface-content-with-its-ite.patch \
-    file://0024-base-add-a-window-model-for-exhibition-dock-mode-win.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "lsm-ready.path lsm-ready.service lsm-ready.target surface-manager.service surface-manager-daemon.service"
@@ -141,7 +127,14 @@ PACKAGECONFIG[compositor] = "CONFIG+=compositor_base,,qt-features-webos-native"
 PACKAGECONFIG[multi-input] = ",CONFIG+=no_multi_input,"
 PACKAGECONFIG[cursor-theme] = "CONFIG+=cursor_theme,,"
 
+# The upstream test suite under base/tests. Off by default: it ships an ACG
+# test app and a second set of LS2 role and permission files, which a
+# production image has no use for. The webos-test image feature turns it on
+# for a test image, the same feature the coverage build above keys off.
+PACKAGECONFIG[tests] = "CONFIG+=webos_tests,,"
+
 PACKAGECONFIG = "compositor cursor-theme"
+PACKAGECONFIG += "${@bb.utils.contains('IMAGE_FEATURES', 'webos-test', 'tests', '', d)}"
 
 PACKAGE_BEFORE_PN = "${PN}-gcov"
 
