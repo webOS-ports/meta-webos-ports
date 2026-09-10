@@ -356,6 +356,62 @@ if [ -d "$GENERATORS" ]; then
     done
 fi
 
+# ---------------------------------------------------------------- Tier 2 ----
+# Apply the file tree. overlayfs in one mount where the kernel has it, else a
+# bind mount per file - equally non-destructive, just noisier.
+#
+# This runs BEFORE the generated files are bound, and the order is load-bearing
+# in both directions.
+#
+# overlayfs does not traverse mounts inside its own lower layer: mounting an
+# overlay on /etc resolves every lookup against the underlying directory and
+# ignores any bind mount already established on a file within it. Applied after
+# the binds below, one Tier 2 file therefore masked all six generated configs at
+# once - nyx.conf, luna-platform.conf, the two ofono files, the configd layer
+# and surface-manager.env. The visible result was a compositor started with
+# "-plugin evdevtouch:/dev/input/PLACEHOLDER", i.e. a phone with no touch,
+# because the shipped placeholder came back from under the overlay. Measured on
+# sargo, whose adaptations/sargo/sparse/etc/libncicore.conf was the first sparse
+# file any device had; before it, apply_sparse returned at the [ -d ] test and
+# this ordering bug could not fire.
+#
+# It is also the precedence this file documents at the top. Tier 2 is the last
+# resort, so a derived Tier 0/1 value has to win over it - which is what binding
+# the generated files on top of the overlay gives.
+apply_sparse() {
+    sparse="$adaptation/sparse"
+    [ -d "$sparse" ] || return 0
+    if grep -qw overlay /proc/filesystems 2>/dev/null; then
+        for sub in etc usr/lib/luneos/device; do
+            [ -d "$sparse/$sub" ] || continue
+            mkdir -p "$RUN/work/$sub" "$RUN/upper/$sub"
+            if mount -t overlay overlay \
+                 -o "lowerdir=$sparse/$sub:/$sub,upperdir=$RUN/upper/$sub,workdir=$RUN/work/$sub" \
+                 "/$sub" 2>/dev/null; then
+                log "overlaid $sparse/$sub onto /$sub"
+                continue
+            fi
+            log "overlay of /$sub failed, falling back to bind mounts"
+            bind_tree "$sparse/$sub" "/$sub"
+        done
+    else
+        log "kernel has no overlayfs, using bind mounts"
+        bind_tree "$sparse" ""
+    fi
+}
+
+bind_tree() {
+    src=$1; prefix=$2
+    find "$src" -type f 2>/dev/null | while read -r f; do
+        rel=${f#"$src"}
+        target="$prefix$rel"
+        [ -e "$target" ] || { log "skipping $target (no such file to shadow)"; continue; }
+        mount --bind "$f" "$target" && log "bound $target"
+    done
+}
+
+apply_sparse
+
 # Shadow generated files over their targets. A target that does not exist is
 # skipped rather than created: creating it would mean writing to the rootfs.
 find "$GEN/files" -type f 2>/dev/null | while read -r f; do
@@ -392,40 +448,5 @@ if [ -n "$(ls -A "$GEN/configd" 2>/dev/null)" ] && [ -d /etc/configd/layers/over
     fi
 fi
 
-# ---------------------------------------------------------------- Tier 2 ----
-# Apply the file tree. overlayfs in one mount where the kernel has it, else a
-# bind mount per file - equally non-destructive, just noisier.
-apply_sparse() {
-    sparse="$adaptation/sparse"
-    [ -d "$sparse" ] || return 0
-    if grep -qw overlay /proc/filesystems 2>/dev/null; then
-        for sub in etc usr/lib/luneos/device; do
-            [ -d "$sparse/$sub" ] || continue
-            mkdir -p "$RUN/work/$sub" "$RUN/upper/$sub"
-            if mount -t overlay overlay \
-                 -o "lowerdir=$sparse/$sub:/$sub,upperdir=$RUN/upper/$sub,workdir=$RUN/work/$sub" \
-                 "/$sub" 2>/dev/null; then
-                log "overlaid $sparse/$sub onto /$sub"
-                continue
-            fi
-            log "overlay of /$sub failed, falling back to bind mounts"
-            bind_tree "$sparse/$sub" "/$sub"
-        done
-    else
-        log "kernel has no overlayfs, using bind mounts"
-        bind_tree "$sparse" ""
-    fi
-}
-
-bind_tree() {
-    src=$1; prefix=$2
-    find "$src" -type f 2>/dev/null | while read -r f; do
-        rel=${f#"$src"}
-        target="$prefix$rel"
-        [ -e "$target" ] || { log "skipping $target (no such file to shadow)"; continue; }
-        mount --bind "$f" "$target" && log "bound $target"
-    done
-}
-
-apply_sparse
 exit 0
+
