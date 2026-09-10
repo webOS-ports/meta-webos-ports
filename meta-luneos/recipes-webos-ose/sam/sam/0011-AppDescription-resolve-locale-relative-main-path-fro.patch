@@ -1,44 +1,58 @@
-From 734498026348557a764412474e4c2d531824524d Mon Sep 17 00:00:00 2001
-From: Herrie <claude.ai@herrie.org>
-Date: Sat, 5 Sep 2026 07:53:51 +0200
-Subject: [PATCH] AppDescription: fix localized appinfo handling for legacy
- apps
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] AppDescription: anchor localized appinfo paths against what exists
 
-Legacy Palm/HP webOS applications (com.palm.app.accounts and other
-Mojo/Enyo-era apps) ship localized appinfo.json files under
-resources/<lang>[/<region>]/ which override "main" with a path that is
-relative to the localization directory, e.g. "../../index.html".
+Applications ship localized appinfo.json files under resources/<lang>[/<region>]/
+that override "main" and the image properties, and there are two conventions in
+the wild that need opposite handling:
 
-Two problems broke these apps:
+  Legacy Palm/HP applications write the path relative to the localization dir.
+  com.palm.app.accounts has "main": "../../index.html" and
+  "icon": "../../icon.png", so those have to be re-anchored against that dir.
 
-1. SAM re-anchors image properties (icon, splashicon, ...) against the
-   localization dir when merging localized appinfo files, but copied
-   "main" verbatim. readAppinfo() then resolved it against the app's
-   folderPath, producing e.g. /usr/palm/index.html, which does not
-   exist. WAM consequently loaded about:blank and the app came up as an
-   empty card. Treat "main" like the image properties and prefix the
-   relative localization dir so it resolves back to the real entry
-   point.
+  The webOS OSE applications write it relative to the application root. Every
+  com.webos.app.* Enact application has "main": "index.multi.html", and
+  re-anchoring that yields resources/<locale>/index.multi.html - a file that
+  does not exist. SAM hands WAM an entry point it cannot stat, WAM loads
+  about:blank, and the application comes up as an empty card. Measured on
+  sargo: getAppInfo reported "/resources/en/index.multi.html" for
+  com.webos.app.imageviewer while the file sits at the application root.
 
-2. For a locale without a script component (e.g. en-US), the
-   localization dir list contained the language dir twice - once as
-   "resources/en/" and once as "resources/en//" (empty script
-   segment). The same localized appinfo.json was applied twice, and the
-   second pass re-anchored already-anchored paths with a stray "//",
-   which URL normalization then resolved to the wrong file. Skip empty
-   script/region components when building the list.
+An earlier version of this change re-anchored unconditionally, which fixed the
+legacy applications and broke all six Enact ones. Rather than guess from the
+shape of the value, form both candidates and keep whichever is on disk,
+preferring the localization-relative one so a genuinely localized asset still
+wins over a same-named file at the root.
 
+Both candidates are also normalised now. ".." segments resolve correctly when
+the filesystem sees them, but the value is handed to consumers that treat it as
+a URL rather than a path, which is why com.palm.app.accounts resolved its main
+and still showed no icon in the launcher. The icon is now "/icon.png" rather
+than "/resources/en/../../icon.png".
+
+The result is returned relative to the application folder, without a leading
+slash. applyFolderPath() takes a leading slash to mean the path is already
+absolute and returns without prefixing m_folderPath, so an icon anchored as
+"/icon.png" - or, before canonicalisation, "/resources/en/../../icon.png" - was
+published verbatim and resolved nowhere. That is why com.palm.app.accounts had
+a working main and no icon in the launcher: main is absolutised separately in
+readAppinfo(), which prepends m_folderPath unconditionally.
+
+Verified against the layouts on a sargo image - the eight affected values across
+com.palm.app.accounts and the six com.webos.app.* Enact applications all resolve
+to a file that exists.
+
+Also: for a locale without a script component (e.g. en-US), the localization dir
+list contained the language dir twice - once as "resources/en/" and once as
+"resources/en//" (empty script segment). The same localized appinfo.json was
+applied twice, and the second pass re-anchored already-anchored paths. Skip
+empty script/region components when building the list.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
 Upstream-Status: Pending
 ---
- src/base/AppDescription.cpp | 26 ++++++++++++++++++++------
- src/base/AppDescription.h   |  1 +
- 2 files changed, 21 insertions(+), 6 deletions(-)
-
-diff --git a/src/base/AppDescription.cpp b/src/base/AppDescription.cpp
-index 61d1603..6b7df30 100644
 --- a/src/base/AppDescription.cpp
 +++ b/src/base/AppDescription.cpp
-@@ -37,6 +37,9 @@ const vector<string> AppDescription::ASSETS_SUPPORTED = {
+@@ -37,6 +37,9 @@
  const vector<string> AppDescription::PROPS_IMAGES = {
      "icon", "largeIcon", "bgImage", "splashBackground", "miniicon", "mediumIcon", "splashicon", "imageForRecents"
  };
@@ -48,7 +62,64 @@ index 61d1603..6b7df30 100644
  
  const string AppDescription::CLASS_NAME = "AppDescription";
  
-@@ -290,11 +293,19 @@ bool AppDescription::loadAppinfo()
+@@ -266,6 +269,56 @@
+     return result;
+ }
+ 
++// Anchor a path taken from a localized appinfo.json against the directory it is
++// really relative to, and hand it back relative to the application folder.
++//
++// Two conventions are in use and they need opposite handling:
++//
++//   Legacy Palm/HP applications write the path relative to the localization
++//   dir - com.palm.app.accounts has "main": "../../index.html" and
++//   "icon": "../../icon.png" - so it has to be re-anchored against that dir.
++//
++//   The webOS OSE applications write it relative to the application root -
++//   every com.webos.app.* Enact application has "main": "index.multi.html" -
++//   and re-anchoring those yields resources/<locale>/index.multi.html, which
++//   does not exist. SAM then hands WAM an entry point it cannot stat, and the
++//   application comes up as an empty card.
++//
++// Rather than guess from the shape of the value, form both candidates and keep
++// whichever is actually on disk, preferring the localization-relative one so a
++// genuinely localized asset still wins over a same-named file at the root.
++//
++// The result must not start with '/': applyFolderPath() takes a leading slash
++// to mean the path is already absolute and returns without prefixing
++// m_folderPath, so an icon anchored as "/icon.png" - or, before this was
++// canonicalised, "/resources/en/../../icon.png" - is published as-is and
++// resolves nowhere. That is why com.palm.app.accounts had a working main and no
++// icon in the launcher.
++string AppDescription::anchorLocalePath(const string& relativeLocaleDir, const string& value)
++{
++    auto relativise = [](const string& path) -> string {
++        gchar* resolved = g_canonicalize_filename(path.c_str(), "/");
++        string result = (resolved != nullptr) ? resolved : path;
++        if (resolved != nullptr)
++            g_free(resolved);
++        if (!result.empty() && result[0] == '/')
++            result.erase(0, 1);
++        return result;
++    };
++
++    string localeRelative = relativise(relativeLocaleDir + value);
++    if (File::isFile(File::join(m_folderPath, localeRelative)))
++        return localeRelative;
++
++    string rootRelative = relativise(value);
++    if (File::isFile(File::join(m_folderPath, rootRelative)))
++        return rootRelative;
++
++    // Neither is present. Keep the localization-relative form so a value naming
++    // something generated later is not silently rewritten.
++    return localeRelative;
++}
++
+ bool AppDescription::loadAppinfo()
+ {
+     // Specify application description depending on available locale string.
+@@ -290,11 +343,19 @@
      string resourcePath = m_folderPath + "/resources/" + SAMConf::getInstance().getLanguage() + "/";
      localizationDirs.push_back(resourcePath);
  
@@ -72,25 +143,23 @@ index 61d1603..6b7df30 100644
  
      // apply localization (overwrite from low to high)
      for (const auto& localizationDir : localizationDirs) {
-@@ -340,8 +351,11 @@ bool AppDescription::loadAppinfo()
+@@ -340,9 +401,10 @@
                      continue;
              }
  
 -            auto it = find(PROPS_IMAGES.begin(), PROPS_IMAGES.end(), key);
 -            if (it != PROPS_IMAGES.end()) {
-+            // Path-type properties in a localized appinfo.json are relative to the
-+            // localization dir (legacy apps use values like "../../index.html"),
-+            // so they must be re-anchored the same way as the image properties.
+-                m_appinfo.put(key, RelativeLocaleAppinfoPath + localeAppinfo[key].asString());
 +            if (find(PROPS_IMAGES.begin(), PROPS_IMAGES.end(), key) != PROPS_IMAGES.end() ||
 +                find(PROPS_PATHS.begin(), PROPS_PATHS.end(), key) != PROPS_PATHS.end()) {
-                 m_appinfo.put(key, RelativeLocaleAppinfoPath + localeAppinfo[key].asString());
++                m_appinfo.put(key, anchorLocalePath(RelativeLocaleAppinfoPath,
++                                                    localeAppinfo[key].asString()));
              } else {
                  m_appinfo.put(key, localeAppinfo[key]);
-diff --git a/src/base/AppDescription.h b/src/base/AppDescription.h
-index ed25f0b..47a704a 100644
+             }
 --- a/src/base/AppDescription.h
 +++ b/src/base/AppDescription.h
-@@ -310,6 +310,7 @@ public:
+@@ -310,12 +310,14 @@
  private:
      static const vector<string> PROPS_PROHIBITED;
      static const vector<string> PROPS_IMAGES;
@@ -98,6 +167,10 @@ index ed25f0b..47a704a 100644
      static const vector<string> ASSETS_SUPPORTED;
      static const string CLASS_NAME;
  
--- 
-2.53.0
-
+     AppDescription& operator=(const AppDescription& appDesc) = delete;
+     AppDescription(const AppDescription& appDesc) = delete;
+ 
++    string anchorLocalePath(const string& relativeLocaleDir, const string& value);
+     bool loadAppinfo();
+     bool readAppinfo();
+     bool readAsset();
