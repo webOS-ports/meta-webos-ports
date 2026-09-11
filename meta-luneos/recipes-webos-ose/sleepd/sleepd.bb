@@ -14,42 +14,34 @@ DEPENDS = "nyx-lib luna-service2 json-c libxml2 sqlite3 glib-2.0"
 #Added for LuneOS
 RDEPENDS:${PN} += "com.webos.service.battery"
 
-WEBOS_VERSION = "2.0.0-19_6166459bf5e48179ec9c5bc07ce98d6d938b0e3e"
-PR = "r14"
+# Built from the webOS-ports fork (webosose plus the LuneOS changes merged as
+# commits) rather than webosose plus a patch stack: what used to be the
+# 0001-0014 patch series, sleepd.conf and sleepd.service in this directory now
+# lives as commits there, along with the static-analysis and hardening cleanup
+# on top of it, so nothing is applied here any more. Pinned with a plain
+# SRCREV - submission tags are a webosose convention and this branch carries
+# none. The branch itself comes from webos_ports_ose_repo below.
+SRCREV = "01c6a8465a639231201ffc4a80f3f8e2dbec01f7"
+
+# Set outright rather than derived from a submission tag via WEBOS_VERSION.
+# Kept monotonic: the patch-stack recipe shipped 2.0.0-19, so anything lower
+# would look like a downgrade to opkg on an update.
+PV = "2.0.0-20"
+
+PR = "r15"
 
 inherit webos_component
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+# The cleanup and hardening work (webOS-ports/sleepd#1) lives on
+# herrie/cleanup, not on the branch webos_ports_ose_repo defaults to, so the
+# SRCREV above is not reachable from webOS-ports/webOS-OSE. Drop this line
+# once herrie/cleanup is merged there.
+WEBOS_GIT_PARAM_BRANCH = "herrie/cleanup"
+inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit webos_daemon
 inherit webos_system_bus
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-Add-empty-alarms.xml-file.patch \
-    file://0002-Add-alarms.xml-to-CMakeLists.txt.patch \
-    file://0003-Use-com.palm.display-service-to-query-display-state.patch \
-    file://0004-Rework-suspend-state-machine-to-support-asynchronous.patch \
-    file://0005-Unblock-us-from-being-not-responsible-and-fixing-a-c.patch \
-    file://0006-Don-t-remove-idle-check-from-mainloop-when-currently.patch \
-    file://0007-Don-t-block-main-thread-when-in-sleep-state.patch \
-    file://0008-Don-t-handle-displayInactive-event.patch \
-    file://0009-Creating-activities-while-being-suspend-will-wakeup-.patch \
-    file://0010-Add-powerd.management-permission-needed-by-powermenu.patch \
-    file://0011-Revert-Deprecation-of-com.webos.service.power.patch \
-    file://0012-com.webos.service.sleep.api.json.in-Add-API-for-susp.patch \
-    file://0013-Register-the-com-palm-power-category-only-once.patch \
-    file://0014-Implement-the-legacy-wakeLockRegister-setWakeLock-AP.patch \
-    file://sleepd.conf \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 inherit webos_systemd
-WEBOS_SYSTEMD_SERVICE = "sleepd.service"
-
-# The OSE sleepd ships its suspend machinery turned off: with no configuration
-# file, enable_idle_check_thread stays at its compiled-in 0, no idle-check
-# thread is created and the daemon never initiates suspend. Install the config
-# that turns it on; without this file the device never sleeps.
-do_install:append() {
-    install -d ${D}${sysconfdir}/default
-    install -m 0644 ${UNPACKDIR}/sleepd.conf ${D}${sysconfdir}/default/sleepd.conf
-}
+LUNEOS_SYSTEMD_SERVICE = "sleepd.service"
