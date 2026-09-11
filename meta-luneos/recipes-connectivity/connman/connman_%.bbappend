@@ -13,6 +13,20 @@ SRC_URI += " \
     file://connman-vpn.service.d/luneos-caps.conf \
 "
 
+# Without this the OnlineCheckIPv4URL that connman-conf's main.conf points at
+# can never promote a service to "online": wispr only reports success for an
+# HTTP 200 carrying an X-ConnMan-Status header, and drops a 204 on the floor.
+# See the patch header for the measurements.
+SRC_URI += "file://0005-wispr-treat-HTTP-204-as-a-successful-online-check.patch"
+
+# ConnMan already reads the BSSID, frequency, rate and cipher out of
+# wpa_supplicant, but stops short of publishing them, so nothing on the bus can
+# say which access point it is on or on what channel. This is the same set of
+# service properties Sailfish's fork exposes, which is what libconnman-qt
+# already binds to - so the Settings app's Wi-Fi details page picks them up
+# with no change of its own.
+SRC_URI += "file://0006-service-expose-the-access-point-behind-a-WiFi-service.patch"
+
 # See connman-vpn.service.d/luneos-caps.conf for why: upstream's
 # CapabilityBoundingSet on connman-vpn.service is missing CAP_SYS_ADMIN and
 # CAP_DAC_OVERRIDE, which the l2tp plugin's client-side pppd needs to open

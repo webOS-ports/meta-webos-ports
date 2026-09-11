@@ -1,0 +1,74 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 9 Sep 2026 12:00:00 +0200
+Subject: [PATCH] wispr: treat HTTP 204 as a successful online check
+
+wispr_portal_web_result_success() switches on the HTTP status of the online
+check and has cases for 200, the 3xx redirects, 400, 404, 408, 505 and
+"unknown". 204 is not among them, so it falls through to `default: break;'.
+
+The only path that reports a successful check is portal_manage_success_status(),
+reached solely from `case GWEB_HTTP_STATUS_CODE_OK' and only when the response
+carries an X-ConnMan-Status header - which is what connman's own
+http://ipv4.connman.net/online/status.html used to return. Every endpoint that
+is actually reachable today (Google's and Android's generate_204,
+connectivity-check.ubuntu.com) answers 204 with no body and no headers, so
+wp_context->cb() is never invoked for them.
+
+The result is silent: the request succeeds, no error is recorded on the service,
+and the service simply stays in "ready" for ever. Anything keyed off "online"
+never fires - including isInternetConnectionAvailable in webos-connman-adapter,
+and through it the ActivityManager's "internet" requirement, which holds any
+activity carrying it indefinitely.
+
+Measured on qemux86-64 with OnlineCheckIPv4URL = http://www.gstatic.com/generate_204:
+
+  before: wispr_portal_web_result_success() status: 204
+          ... no complete_online_check(), service State = ready,
+          isInternetConnectionAvailable false, an activity with
+          requirements {"internet": true} only ever gets "update", never "start"
+
+  after:  State = online, isInternetConnectionAvailable true,
+          the same activity gets "update" then "start"
+
+There is no body and no X-ConnMan-* header to mine on a 204, so report success
+directly rather than going through portal_manage_success_status().
+
+Upstream-Status: Pending
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+---
+ src/wispr.c | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/src/wispr.c b/src/wispr.c
+--- a/src/wispr.c
++++ b/src/wispr.c
+@@ -1137,6 +1137,25 @@
+ 				wispr_portal_browser_reply_cb,
+ 				wp_context->status_url, wp_context);
+ 		break;
++	case GWEB_HTTP_STATUS_CODE_NO_CONTENT:
++		/*
++		 * A "204 No Content" is an unambiguous "you reached the real
++		 * server, not a captive portal" -- it is what the endpoints
++		 * everyone actually uses reply with (Android's and Google's
++		 * generate_204, connectivity-check.ubuntu.com). Without this
++		 * case a 204 falls through to `default' and the online check
++		 * completion callback is never invoked, so the service sits in
++		 * "ready" for ever with no error recorded, and anything keyed
++		 * off "online" (isInternetConnectionAvailable, and through it
++		 * the ActivityManager's "internet" requirement) never fires.
++		 *
++		 * There is no body and no X-ConnMan-* headers to mine here, so
++		 * report success directly rather than going through
++		 * portal_manage_success_status().
++		 */
++		wp_context->cb(wp_context->service, wp_context->type,
++				true, 0, NULL);
++		break;
+ 	default:
+ 		break;
+ 	}
+--
+2.43.0
