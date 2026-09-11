@@ -1,0 +1,119 @@
+From: Andrew Hunt <achunt@bellsouth.net>
+Date: Thu, 10 Sep 2026 09:45:00 -0400
+Subject: [PATCH] Adapt service, HAL-wait and make-clean for LuneOS
+
+Three adaptations on top of upstream c3e1b15:
+
+1. Makefile - "rm bluebinder" -> "rm -f bluebinder". bitbake's do_configure
+   runs "make clean" before anything has been built, and the bare rm fails
+   with "cannot remove 'bluebinder': No such file or directory". (Carried
+   over from the old 0001-Use-CC-as-compiler.patch; the $(CC) half of that
+   patch is now obsolete because upstream's Makefile uses $(CC) itself.)
+
+2. bluebinder.service - point at LuneOS paths and ordering:
+   - After=android-system.service (LuneOS) rather than droid-hal-init.service
+     (Sailfish), which does not exist here.
+   - Helper scripts live in ${sbindir}, not /usr/bin/droid.
+   - Drop ExecStartPost: bluebinder_post.sh derives the adapter address from
+     ro.bt.bdaddr_path / ro.vendor.bt.bdaddr_path / persist.vendor.service.
+     bdroid.bdaddr, and bluejay (Pixel 6a) sets NONE of them - the AIDL HAL
+     provisions the address itself - so it would always exit 1 and fail the
+     unit. Re-add it for any port that does expose those properties.
+   - Drop the sandboxing block, matching the previous LuneOS adaptation, so
+     first bring-up is not fighting DevicePolicy=strict at the same time.
+     Worth restoring (it needs /dev/binder, /dev/hwbinder, /dev/vhci,
+     /dev/rfkill) once this is known-good.
+   - WantedBy=multi-user.target; LuneOS has no graphical.target.
+
+3. bluebinder_wait.sh - upstream only matches Android service names containing
+   "bluetooth". On Broadcom/Pixel that name is "bcmbtlinux", so the loop never
+   terminated and the unit hung in ExecStartPre forever. Match the common
+   spellings instead, still excluding the separate bluetooth.audio HAL.
+
+Upstream-Status: Inappropriate [distro/device-specific paths]
+---
+diff --git a/Makefile b/Makefile
+index 988a2d4..34f8018 100644
+--- a/Makefile
++++ b/Makefile
+@@ -18,5 +18,5 @@ install:
+ 	cp bluebinder $(DESTDIR)/usr/sbin
+ 
+ clean:
+-	rm bluebinder
++	rm -f bluebinder
+ 
+diff --git a/bluebinder.service b/bluebinder.service
+index 1ee68f7..a73a72d 100644
+--- a/bluebinder.service
++++ b/bluebinder.service
+@@ -1,29 +1,15 @@
+ [Unit]
+ Description=Simple proxy for using android binder based bluetooth through vhci.
+-After=droid-hal-init.service
++After=android-system.service
+ Before=bluetooth.service
+ 
+ [Service]
+ Type=notify
+ EnvironmentFile=-/var/lib/environment/bluebinder/*.conf
+-ExecStartPre=/usr/bin/droid/bluebinder_wait.sh
++ExecStartPre=/usr/sbin/bluebinder_wait.sh
+ ExecStart=/usr/sbin/bluebinder
+-ExecStartPost=/usr/bin/droid/bluebinder_post.sh
+ Restart=always
+ TimeoutStartSec=60
+-# Sandboxing
+-CapabilityBoundingSet=CAP_DAC_READ_SEARCH
+-DeviceAllow=/dev/binder rw
+-DeviceAllow=/dev/hwbinder rw
+-DeviceAllow=/dev/vhci rw
+-DeviceAllow=/dev/rfkill r
+-DevicePolicy=strict
+-NoNewPrivileges=yes
+-RestrictAddressFamilies=AF_BLUETOOTH
+-PrivateTmp=yes
+-ProtectHome=yes
+-ProtectSystem=full
+ 
+ [Install]
+-WantedBy=graphical.target
+-
++WantedBy=multi-user.target
+diff --git a/bluebinder_wait.sh b/bluebinder_wait.sh
+index d7a059d..dbc0fff 100755
+--- a/bluebinder_wait.sh
++++ b/bluebinder_wait.sh
+@@ -1,13 +1,26 @@
+ #!/bin/sh
+ 
++# Wait for the Android-side Bluetooth HAL service to report running.
++#
++# The service name is device-specific. Upstream only matched names containing
++# "bluetooth", which is wrong on Broadcom/Pixel devices: bluejay (Pixel 6a)
++# names it "bcmbtlinux", so the original loop here span forever and the unit
++# never started. Match the common spellings instead.
++#
++# The separate bluetooth.audio HAL is excluded deliberately - it can be running
++# while the HCI HAL is not, which would let us start too early.
++#
++# init.svc_debug_pid.* lines also match the name pattern, but their value is a
++# pid rather than [running], so the [running] filter drops them.
++
+ while true
+ do
+-    /usr/bin/getprop | grep -q init.svc.*.bluetooth.audio
+-    if [ $? -eq 0 ] ; then
+-        bt_status=$(/usr/bin/getprop |grep "init.svc.*bluetooth" |grep -v audio |grep -o "\[running\]")
+-    else
+-        bt_status=$(/usr/bin/getprop |grep "init.svc.*bluetooth" |grep -o "\[running\]")
+-    fi
++    bt_status=$(/usr/bin/getprop \
++        | grep -E "init\.svc\.[^]]*(bluetooth|btlinux|bt-hal|bt_hal)" \
++        | grep -v audio \
++        | grep -o "\[running\]" \
++        | head -n 1)
++
+     if [ "$bt_status" = "[running]" ] ; then
+         echo "Bluetooth service running"
+         exit 0

@@ -1,0 +1,119 @@
+From: Andrew Hunt <achunt@bellsouth.net>
+Date: Thu, 10 Sep 2026 13:40:00 -0400
+Subject: [PATCH] Do not send close() for a HAL we never opened
+
+Some vendor Bluetooth HALs assume close() can only ever follow a successful
+initialize(), and dereference callbacks that were never installed. Pixel 6a
+(bluejay) is one: android.hardware.bluetooth-service.bcmbtlinux aborts with
+std::bad_function_call inside BluetoothHci::close():
+
+  bthal.aidl.bcmbtlinux: BluetoothHci::close()
+  F DEBUG: >>> /vendor/bin/hw/android.hardware.bluetooth-service.bcmbtlinux <<<
+    #02 std::__1::__throw_bad_function_call()
+    #03 android::hardware::bluetooth::aidl::bcmbtlinux::BluetoothHci::close()+984
+    #04 android.hardware.bluetooth-V1-ndk.so IBluetoothHci_onTransact
+  init: Service 'bcmbtlinux' received SIGABRT
+
+This is fatal rather than cosmetic, because binder_remote_died() reconnects
+and then calls configure_bt(proxy, FALSE) on the fresh instance - which has
+not been initialized either. So the close kills that one too, and bluebinder
+spins in a crash/reconnect loop forever, never bringing Bluetooth up at all.
+
+Track whether the HAL is open, separately from bluetooth_hal_initialized:
+_initialized only goes TRUE once the HAL delivers initializationComplete,
+whereas the HAL must be closed from the moment initialize() is accepted. Skip
+close() when not open, and clear the flag on remote death before reconnecting.
+
+Also gate the shutdown path on the new flag, so a HAL that was opened but
+whose init never completed is still closed on the way out.
+
+Upstream-Status: Pending
+---
+diff --git a/bluebinder.c b/bluebinder.c
+index c6724d7..3a79642 100644
+--- a/bluebinder.c
++++ b/bluebinder.c
+@@ -246,6 +246,15 @@ struct proxy {
+ 
+     bool bluetooth_hal_initialized;
+ 
++    /*
++     * TRUE from the moment initialize() is accepted by the HAL until close()
++     * has been sent. Distinct from bluetooth_hal_initialized, which only goes
++     * TRUE once the HAL delivers initializationComplete - we must not send
++     * close() for a HAL we merely opened but whose init never completed, and
++     * equally must not send it for a HAL we never opened at all.
++     */
++    bool bluetooth_hal_open;
++
+     int death_id;
+ 
+     GList *pending_packets;
+@@ -450,6 +459,8 @@ configure_bt(
+         if (status != GBINDER_STATUS_OK) {
+             fprintf(stderr, "ERROR: init reply: %p, %d\n", reply, status);
+             fail = TRUE;
++        } else {
++            proxy->bluetooth_hal_open = TRUE;
+         }
+ 
+         gbinder_remote_reply_unref(reply);
+@@ -457,8 +468,27 @@ configure_bt(
+     } else {
+         GBinderRemoteReply *reply;
+ 
++        /*
++         * Never send close() for a HAL we have not opened.
++         *
++         * Some vendor HALs assume close() can only follow a successful
++         * initialize() and dereference callbacks that were never installed.
++         * Pixel 6a's android.hardware.bluetooth-service.bcmbtlinux aborts with
++         * std::bad_function_call inside BluetoothHci::close(), which init then
++         * restarts - and since binder_remote_died() reconnects and calls us
++         * again with bluetooth_on=FALSE, that turns into an endless
++         * crash/reconnect loop that never lets Bluetooth come up at all.
++         */
++        if (!proxy->bluetooth_hal_open) {
++            fprintf(stderr, "Bluetooth already off (HAL not open), "
++                "skipping close\n");
++            proxy->bluetooth_hal_initialized = FALSE;
++            return;
++        }
++
+         fprintf(stderr, "Turning bluetooth off\n");
+         proxy->bluetooth_hal_initialized = FALSE;
++        proxy->bluetooth_hal_open = FALSE;
+ 
+         reply = gbinder_client_transact_sync_reply(proxy->binder_client,
+             proxy->protocol->tx_close, NULL, &status);
+@@ -675,6 +705,15 @@ binder_remote_died(
+ 
+     fprintf(stderr, "Remote has died, trying to reconnect...\n");
+ 
++    /*
++     * Whatever state the old HAL process was in died with it. Any instance we
++     * reconnect to is a brand new process that we have not initialized, so it
++     * is not open - clear this BEFORE reconnecting, because the reconnect path
++     * below finishes by calling configure_bt(proxy, FALSE).
++     */
++    proxy->bluetooth_hal_open = FALSE;
++    proxy->bluetooth_hal_initialized = FALSE;
++
+     gbinder_client_unref(proxy->binder_client);
+     proxy->binder_client = NULL;
+ 
+@@ -1249,7 +1288,13 @@ int main(int argc, char *argv[])
+         g_main_loop_unref(proxy.loop);
+     }
+ 
+-    if (proxy.bluetooth_hal_initialized) {
++    /*
++     * Gate on _open rather than _initialized: if initialize() was accepted but
++     * initializationComplete never arrived, the HAL is still open and does
++     * need closing on the way out - and if we never opened it, closing would
++     * crash HALs like bcmbtlinux (see configure_bt).
++     */
++    if (proxy.bluetooth_hal_open) {
+         fprintf(stderr, "Turning bluetooth off on stop.\n");
+         reply = gbinder_client_transact_sync_reply
+             (proxy.binder_client, proxy.protocol->tx_close, NULL, &status);
