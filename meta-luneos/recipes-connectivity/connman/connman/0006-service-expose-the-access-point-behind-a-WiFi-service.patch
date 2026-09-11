@@ -1,0 +1,494 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 10 Sep 2026 05:17:57 +0200
+Subject: [PATCH] service: expose the access point behind a WiFi service
+
+ConnMan already knows all of this. gsupplicant keeps a struct
+g_supplicant_bss per BSS with the BSSID, frequency, maximum rate and
+cipher suites it read from wpa_supplicant, and every network points at
+the one it is currently represented by through best_bss. None of it is
+published, so a client can be associated to an access point and still be
+unable to say which one, on what channel, at what rate.
+
+Adds BSSID, Frequency, MaxRate and EncryptionMode to net.connman.Service
+for WiFi services, plumbed the way the existing WiFi values already are:
+accessors on gsupplicant, the WiFi plugin copying them onto the network
+next to the frequency it already sets, and the service mirroring them
+the same place it mirrors the WPS values. Frequency needed no new
+plumbing below the service - connman_network_set_frequency() has always
+been called, the value simply stopped there.
+
+Each property is announced individually when it changes, and all four
+are omitted rather than published empty when the supplicant has not
+reported a BSS: a service that has only ever been seen in a scan result
+may have none backing it.
+
+gsupplicant gains a "BSS" network-changed notification, emitted when
+best_bss is replaced. The existing "Signal" notification cannot stand in
+for it because it is conditional on the strength differing, so a roam to
+an access point reading the same strength would leave the old BSSID
+published.
+
+Note this is deliberately the same set of properties Sailfish's ConnMan
+fork exposes and libconnman-qt already binds to, so clients written
+against that need no changes. Channel width is not included: it is not
+in the BSS properties wpa_supplicant sends, and would mean parsing the
+HT/VHT/HE operation elements out of the IEs.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ doc/service-api.txt       |  29 +++++++++++
+ gsupplicant/gsupplicant.h |   3 ++
+ gsupplicant/supplicant.c  |  70 ++++++++++++++++++++++++++
+ include/network.h         |   3 ++
+ plugins/wifi.c            |  39 ++++++++++++++-
+ src/network.c             |  28 +++++++++++
+ src/service.c             | 103 +++++++++++++++++++++++++++++++++++++-
+ 7 files changed, 271 insertions(+), 4 deletions(-)
+
+diff --git a/doc/service-api.txt b/doc/service-api.txt
+index 89208a6..550f2a0 100644
+--- a/doc/service-api.txt
++++ b/doc/service-api.txt
+@@ -209,6 +209,35 @@ Properties	string State [readonly]
+ 			This property will not be present for Ethernet
+ 			devices.
+ 
++		string BSSID [readonly]
++
++			The MAC address of the access point this service is
++			currently represented by, as lower case hex separated
++			by colons.
++
++			WiFi only, and only present once the supplicant has
++			reported a BSS for the service. It changes on a roam.
++
++		uint16 Frequency [readonly]
++
++			The frequency of the access point in MHz.
++
++			WiFi only, same availability as BSSID.
++
++		uint32 MaxRate [readonly]
++
++			The maximum bitrate the access point advertises, in
++			bits per second.
++
++			WiFi only, same availability as BSSID.
++
++		string EncryptionMode [readonly]
++
++			The pairwise cipher in use with the access point:
++			"aes", "tkip", "mixed", "wep" or "none".
++
++			WiFi only, same availability as BSSID.
++
+ 		boolean Favorite [readonly]
+ 
+ 			Will be true if a cable is plugged in or the user
+diff --git a/gsupplicant/gsupplicant.h b/gsupplicant/gsupplicant.h
+index 9936dd7..ff765df 100644
+--- a/gsupplicant/gsupplicant.h
++++ b/gsupplicant/gsupplicant.h
+@@ -332,6 +332,9 @@ const char *g_supplicant_network_get_mode(GSupplicantNetwork *network);
+ const char *g_supplicant_network_get_security(GSupplicantNetwork *network);
+ dbus_int16_t g_supplicant_network_get_signal(GSupplicantNetwork *network);
+ dbus_uint16_t g_supplicant_network_get_frequency(GSupplicantNetwork *network);
++const unsigned char *g_supplicant_network_get_bssid(GSupplicantNetwork *network);
++dbus_uint32_t g_supplicant_network_get_maxrate(GSupplicantNetwork *network);
++const char *g_supplicant_network_get_enc_mode(GSupplicantNetwork *network);
+ dbus_bool_t g_supplicant_network_get_wps(GSupplicantNetwork *network);
+ dbus_bool_t g_supplicant_network_is_wps_active(GSupplicantNetwork *network);
+ dbus_bool_t g_supplicant_network_is_wps_pbc(GSupplicantNetwork *network);
+diff --git a/gsupplicant/supplicant.c b/gsupplicant/supplicant.c
+index e6a65cf..8f52c82 100644
+--- a/gsupplicant/supplicant.c
++++ b/gsupplicant/supplicant.c
+@@ -1285,6 +1285,66 @@ dbus_uint16_t g_supplicant_network_get_frequency(GSupplicantNetwork *network)
+ 	return network->frequency;
+ }
+ 
++/*
++ * The access point behind the network, as opposed to the network itself.
++ * best_bss is whichever BSS the network is currently represented by, and it
++ * is NULL while a network is being torn down, so every one of these has to
++ * cope with that rather than assume a BSS is present.
++ */
++const unsigned char *g_supplicant_network_get_bssid(
++						GSupplicantNetwork *network)
++{
++	if (!network || !network->best_bss)
++		return NULL;
++
++	return network->best_bss->bssid;
++}
++
++dbus_uint32_t g_supplicant_network_get_maxrate(GSupplicantNetwork *network)
++{
++	if (!network || !network->best_bss)
++		return 0;
++
++	return network->best_bss->maxrate;
++}
++
++/*
++ * The pairwise cipher actually in use, named the way the WiFi plugin already
++ * names ciphers elsewhere. RSN is preferred over WPA when the BSS advertises
++ * both, which is what the supplicant will have selected.
++ */
++const char *g_supplicant_network_get_enc_mode(GSupplicantNetwork *network)
++{
++	unsigned int pairwise;
++
++	if (!network || !network->best_bss)
++		return NULL;
++
++	if (network->best_bss->rsn_selected)
++		pairwise = network->best_bss->rsn_pairwise;
++	else
++		pairwise = network->best_bss->wpa_pairwise;
++
++	if ((pairwise & G_SUPPLICANT_PAIRWISE_CCMP) &&
++			(pairwise & G_SUPPLICANT_PAIRWISE_TKIP))
++		return "mixed";
++
++	if (pairwise & G_SUPPLICANT_PAIRWISE_CCMP)
++		return "aes";
++
++	if (pairwise & G_SUPPLICANT_PAIRWISE_TKIP)
++		return "tkip";
++
++	/*
++	 * No pairwise cipher advertised: either the BSS is open, or it is WEP,
++	 * which has no pairwise suite to report.
++	 */
++	if (network->best_bss->privacy)
++		return "wep";
++
++	return "none";
++}
++
+ dbus_bool_t g_supplicant_network_get_wps(GSupplicantNetwork *network)
+ {
+ 	if (!network)
+@@ -2223,6 +2283,16 @@ static void interface_current_bss(GSupplicantInterface *interface,
+ 
+ 		network->best_bss = bss;
+ 
++		/*
++		 * Everything the access point itself reports - BSSID,
++		 * frequency, rate, cipher - belongs to the BSS, so it has all
++		 * just changed. Signalling this separately matters because the
++		 * signal notification below is conditional: a roam to an AP
++		 * that happens to read the same strength would otherwise go
++		 * unannounced, leaving the old BSSID published.
++		 */
++		callback_network_changed(network, "BSS");
++
+ 		if (network->signal != bss->signal) {
+ 			SUPPLICANT_DBG("New network signal %d dBm",
+ 						bss->signal);
+diff --git a/include/network.h b/include/network.h
+index 2078509..29f3ffd 100644
+--- a/include/network.h
++++ b/include/network.h
+@@ -129,6 +129,9 @@ uint8_t connman_network_get_strength(struct connman_network *network);
+ int connman_network_set_frequency(struct connman_network *network,
+ 					uint16_t frequency);
+ uint16_t connman_network_get_frequency(struct connman_network *network);
++int connman_network_set_maxrate(struct connman_network *network,
++					uint32_t maxrate);
++uint32_t connman_network_get_maxrate(struct connman_network *network);
+ int connman_network_set_autoconnect(struct connman_network *network,
+ 				bool autoconnect);
+ 
+diff --git a/plugins/wifi.c b/plugins/wifi.c
+index 5187cda..b57d792 100644
+--- a/plugins/wifi.c
++++ b/plugins/wifi.c
+@@ -3117,6 +3117,39 @@ static unsigned char calculate_strength(GSupplicantNetwork *supplicant_network)
+ 	return strength;
+ }
+ 
++/*
++ * What the access point behind this network reports about itself. All of it
++ * comes from the BSS the supplicant currently considers best, so it changes
++ * on a roam and is refreshed again from network_changed().
++ */
++static void update_network_ap_info(struct connman_network *network,
++				GSupplicantNetwork *supplicant_network)
++{
++	const unsigned char *bssid;
++	const char *enc_mode;
++
++	bssid = g_supplicant_network_get_bssid(supplicant_network);
++	if (bssid) {
++		char bssid_str[18];
++
++		snprintf(bssid_str, sizeof(bssid_str),
++				"%02x:%02x:%02x:%02x:%02x:%02x",
++				bssid[0], bssid[1], bssid[2],
++				bssid[3], bssid[4], bssid[5]);
++		connman_network_set_string(network, "WiFi.BSSID", bssid_str);
++	}
++
++	connman_network_set_frequency(network,
++			g_supplicant_network_get_frequency(supplicant_network));
++	connman_network_set_maxrate(network,
++			g_supplicant_network_get_maxrate(supplicant_network));
++
++	enc_mode = g_supplicant_network_get_enc_mode(supplicant_network);
++	if (enc_mode)
++		connman_network_set_string(network, "WiFi.EncryptionMode",
++								enc_mode);
++}
++
+ static void network_added(GSupplicantNetwork *supplicant_network)
+ {
+ 	struct connman_network *network;
+@@ -3200,8 +3233,7 @@ static void network_added(GSupplicantNetwork *supplicant_network)
+ 			connman_network_set_bool(network, "WiFi.UseWPS", true);
+ 	}
+ 
+-	connman_network_set_frequency(network,
+-			g_supplicant_network_get_frequency(supplicant_network));
++	update_network_ap_info(network, supplicant_network);
+ 
+ 	connman_network_set_available(network, true);
+ 	connman_network_set_string(network, "WiFi.Mode", mode);
+@@ -3300,6 +3332,9 @@ static void network_changed(GSupplicantNetwork *network, const char *property)
+ 							"WiFi.UseWPS", true);
+ 		}
+ 
++		update_needed = true;
++	} else if (g_str_equal(property, "BSS")) {
++		update_network_ap_info(connman_network, network);
+ 		update_needed = true;
+ 	} else if (g_str_equal(property, "Signal")) {
+ 		connman_network_set_strength(connman_network,
+diff --git a/src/network.c b/src/network.c
+index 416a7e7..b2820ab 100644
+--- a/src/network.c
++++ b/src/network.c
+@@ -63,6 +63,7 @@ struct connman_network {
+ 	bool roaming;
+ 	uint8_t strength;
+ 	uint16_t frequency;
++	uint32_t maxrate;
+ 	char *identifier;
+ 	char *name;
+ 	char *node;
+@@ -88,6 +89,8 @@ struct connman_network {
+ 		int ssid_len;
+ 		char *mode;
+ 		char *security;
++		char *bssid;
++		char *enc_mode;
+ 		char *passphrase;
+ 		char *eap;
+ 		char *identity;
+@@ -1225,6 +1228,8 @@ static void network_destruct(struct connman_network *network)
+ 
+ 	g_free(network->wifi.ssid);
+ 	g_free(network->wifi.mode);
++	g_free(network->wifi.bssid);
++	g_free(network->wifi.enc_mode);
+ 	g_free(network->wifi.security);
+ 	g_free(network->wifi.passphrase);
+ 	g_free(network->wifi.eap);
+@@ -2118,6 +2123,19 @@ uint16_t connman_network_get_frequency(struct connman_network *network)
+ 	return network->frequency;
+ }
+ 
++int connman_network_set_maxrate(struct connman_network *network,
++						uint32_t maxrate)
++{
++	network->maxrate = maxrate;
++
++	return 0;
++}
++
++uint32_t connman_network_get_maxrate(struct connman_network *network)
++{
++	return network->maxrate;
++}
++
+ int connman_network_set_autoconnect(struct connman_network *network,
+ 				bool autoconnect)
+ {
+@@ -2159,6 +2177,12 @@ int connman_network_set_string(struct connman_network *network,
+ 	} else if (g_str_equal(key, "WiFi.Security")) {
+ 		g_free(network->wifi.security);
+ 		network->wifi.security = g_strdup(value);
++	} else if (g_str_equal(key, "WiFi.BSSID")) {
++		g_free(network->wifi.bssid);
++		network->wifi.bssid = g_strdup(value);
++	} else if (g_str_equal(key, "WiFi.EncryptionMode")) {
++		g_free(network->wifi.enc_mode);
++		network->wifi.enc_mode = g_strdup(value);
+ 	} else if (g_str_equal(key, "WiFi.Passphrase")) {
+ 		g_free(network->wifi.passphrase);
+ 		network->wifi.passphrase = g_strdup(value);
+@@ -2231,6 +2255,10 @@ const char *connman_network_get_string(struct connman_network *network,
+ 		return network->wifi.mode;
+ 	else if (g_str_equal(key, "WiFi.Security"))
+ 		return network->wifi.security;
++	else if (g_str_equal(key, "WiFi.BSSID"))
++		return network->wifi.bssid;
++	else if (g_str_equal(key, "WiFi.EncryptionMode"))
++		return network->wifi.enc_mode;
+ 	else if (g_str_equal(key, "WiFi.Passphrase"))
+ 		return network->wifi.passphrase;
+ 	else if (g_str_equal(key, "WiFi.EAP"))
+diff --git a/src/service.c b/src/service.c
+index d5869b1..9ae4a68 100644
+--- a/src/service.c
++++ b/src/service.c
+@@ -202,6 +202,11 @@ struct connman_service {
+ 	char *pac;
+ 	bool wps;
+ 	bool wps_advertizing;
++	/* What the access point behind a WiFi service reports about itself. */
++	char *bssid;
++	char *enc_mode;
++	uint16_t frequency;
++	uint32_t maxrate;
+ 
+     /**
+      *  IPv4-specific "online" reachability check state.
+@@ -5305,6 +5310,30 @@ static void append_properties(DBusMessageIter *dict, dbus_bool_t limited,
+ 		connman_dbus_dict_append_basic(dict, "Strength",
+ 					DBUS_TYPE_BYTE, &service->strength);
+ 
++	/*
++	 * The access point behind a WiFi service. Each is omitted rather than
++	 * published empty when the supplicant has not reported it - a service
++	 * that has only ever been seen in a scan result may have no BSS
++	 * backing it at all.
++	 */
++	if (service->type == CONNMAN_SERVICE_TYPE_WIFI) {
++		if (service->bssid)
++			connman_dbus_dict_append_basic(dict, "BSSID",
++					DBUS_TYPE_STRING, &service->bssid);
++
++		if (service->frequency > 0)
++			connman_dbus_dict_append_basic(dict, "Frequency",
++					DBUS_TYPE_UINT16, &service->frequency);
++
++		if (service->maxrate > 0)
++			connman_dbus_dict_append_basic(dict, "MaxRate",
++					DBUS_TYPE_UINT32, &service->maxrate);
++
++		if (service->enc_mode)
++			connman_dbus_dict_append_basic(dict, "EncryptionMode",
++					DBUS_TYPE_STRING, &service->enc_mode);
++	}
++
+ 	val = service->favorite;
+ 	connman_dbus_dict_append_basic(dict, "Favorite",
+ 					DBUS_TYPE_BOOLEAN, &val);
+@@ -8087,6 +8116,8 @@ static void service_free(gpointer user_data)
+ 	g_free(service->hostname);
+ 	g_free(service->domainname);
+ 	g_free(service->pac);
++	g_free(service->bssid);
++	g_free(service->enc_mode);
+ 	g_free(service->name);
+ 	g_free(service->passphrase);
+ 	g_free(service->identifier);
+@@ -10574,6 +10605,70 @@ static void update_wps_values(struct connman_service *service,
+ 	}
+ }
+ 
++/*
++ * Mirror the access point details the WiFi plugin put on the network onto the
++ * service, where they can be published. Each is announced on its own so a
++ * client that cached GetProperties sees a roam, rather than keeping whatever
++ * the AP looked like when it first asked.
++ */
++static void update_ap_values(struct connman_service *service,
++				struct connman_network *network)
++{
++	const char *bssid = connman_network_get_string(network, "WiFi.BSSID");
++	const char *enc_mode = connman_network_get_string(network,
++							"WiFi.EncryptionMode");
++	uint16_t frequency = connman_network_get_frequency(network);
++	uint32_t maxrate = connman_network_get_maxrate(network);
++	/*
++	 * This also runs while the service is still being created from its
++	 * network, before it has been registered and given a path. Nothing can
++	 * be announced yet - and allow_property_changed() cannot even be asked,
++	 * because it hashes service->path, which is still NULL at that point.
++	 * The values are still recorded, so the first GetProperties carries
++	 * them; only the signal is skipped.
++	 */
++	bool notify = service->path && allow_property_changed(service);
++
++	if (g_strcmp0(service->bssid, bssid) != 0) {
++		g_free(service->bssid);
++		service->bssid = g_strdup(bssid);
++
++		if (service->bssid && notify)
++			connman_dbus_property_changed_basic(service->path,
++					CONNMAN_SERVICE_INTERFACE, "BSSID",
++					DBUS_TYPE_STRING, &service->bssid);
++	}
++
++	if (g_strcmp0(service->enc_mode, enc_mode) != 0) {
++		g_free(service->enc_mode);
++		service->enc_mode = g_strdup(enc_mode);
++
++		if (service->enc_mode && notify)
++			connman_dbus_property_changed_basic(service->path,
++					CONNMAN_SERVICE_INTERFACE,
++					"EncryptionMode",
++					DBUS_TYPE_STRING, &service->enc_mode);
++	}
++
++	if (service->frequency != frequency) {
++		service->frequency = frequency;
++
++		if (notify)
++			connman_dbus_property_changed_basic(service->path,
++					CONNMAN_SERVICE_INTERFACE, "Frequency",
++					DBUS_TYPE_UINT16, &service->frequency);
++	}
++
++	if (service->maxrate != maxrate) {
++		service->maxrate = maxrate;
++
++		if (notify)
++			connman_dbus_property_changed_basic(service->path,
++					CONNMAN_SERVICE_INTERFACE, "MaxRate",
++					DBUS_TYPE_UINT32, &service->maxrate);
++	}
++}
++
+ static void update_from_network(struct connman_service *service,
+ 					struct connman_network *network)
+ {
+@@ -10613,8 +10708,10 @@ static void update_from_network(struct connman_service *service,
+ 	str = connman_network_get_string(network, "WiFi.Security");
+ 	service->security = convert_wifi_security(str);
+ 
+-	if (service->type == CONNMAN_SERVICE_TYPE_WIFI)
++	if (service->type == CONNMAN_SERVICE_TYPE_WIFI) {
+ 		update_wps_values(service, network);
++		update_ap_values(service, network);
++	}
+ 
+ 	if (service->strength > strength && service->network) {
+ 		connman_network_unref(service->network);
+@@ -10802,8 +10899,10 @@ void __connman_service_update_from_network(struct connman_network *network)
+ 					DBUS_TYPE_STRING, &service->name);
+ 	}
+ 
+-	if (service->type == CONNMAN_SERVICE_TYPE_WIFI)
++	if (service->type == CONNMAN_SERVICE_TYPE_WIFI) {
+ 		update_wps_values(service, network);
++		update_ap_values(service, network);
++	}
+ 
+ 	strength = connman_network_get_strength(service->network);
+ 	if (strength == service->strength)
