@@ -12,29 +12,30 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "tzdata python3-pytz-native"
 
-WEBOS_VERSION = "2.0.1-11_b186c185d8304480e78aade0617ef795c3db3e6e"
-PR = "r20"
+# Built from the webOS-ports fork (webosose master + LuneOS customizations
+# merged as commits) rather than webosose plus a patch stack. Pinned with a
+# plain SRCREV: submission tags are a webosose convention and this branch
+# carries none. The branch itself comes from webos_ports_ose_repo below.
+SRCREV = "51eee76447e60e17f38e3e89e1f7d6d9b49b032f"
+
+PR = "r21"
 
 inherit webos_arch_indep
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+# The cleanup and hardening work (webOS-ports/luna-init#1) lives on
+# herrie/fixes, not on the branch webos_ports_ose_repo defaults to, so the
+# SRCREV above is not reachable from webOS-ports/webOS-OSE. Drop this line
+# once herrie/fixes is merged there.
+WEBOS_GIT_PARAM_BRANCH = "herrie/fixes"
+inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit python3native
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-        file://0001-luna-init-Add-cust-preferences.txt-and-CustomerCareN.patch \
-        file://0002-luna-init-Add-default-launcher-page-layout.json.patch \
-        file://0003-default-dock-positions.json-Use-variant-for-LuneOS.patch \
-        file://0004-defaultPreferences.txt-Customize-ringtone-and-wallpa.patch \
-        file://0005-defaultPreferences.txt-Add-keyboard-key-used-by-Mali.patch \
-        file://0006-command-resource-handlers.json-Switch-to-new-variant.patch \
-        file://0007-command-resource-handlers.json-Add-custom-handlers-f.patch \
-        file://0008-gen-ext-timezones.py-Update-for-python3.patch \
-        file://0009-CMakeLists.txt-Fix-install-location-of-files.patch \
-        file://0010-CMakeLists.txt-Install-mccInfo.json-as-well.patch \
-        file://0011-Delete-ext-timezones.json.patch \
-        file://0012-luna-init-gen-ext-timezones.py-Fix-typo.patch \
-"
+# Set outright rather than derived from a submission tag. Kept monotonic: the
+# patch-stack recipe shipped 2.0.1-11, so anything lower would look like a
+# downgrade to opkg on an update.
+PV = "2.0.1-12"
+
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 do_install:append() {
     # Expand fonts tarball
