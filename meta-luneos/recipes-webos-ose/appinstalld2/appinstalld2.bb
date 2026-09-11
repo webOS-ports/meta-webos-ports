@@ -11,7 +11,7 @@ LIC_FILES_CHKSUM = " \
 "
 
 DEPENDS = "glib-2.0 luna-service2 libpbnjson pmloglib pmtrace boost icu"
-# python3 is for luneos-app-permissions, see 0006-*.patch
+# python3 is for luneos-app-permissions, see do_install:append below
 RDEPENDS:${PN} = " \
     applicationinstallerutility \
     ecryptfs-utils \
@@ -21,31 +21,38 @@ RDEPENDS:${PN} = " \
     python3-json \
 "
 
-WEBOS_VERSION = "1.0.0-48_85b593a34cefb1384ca6def806bfaf18ca92b7d9"
-PR = "r8"
+# Built from the webOS-ports fork (webosose master + the former LuneOS patch
+# stack merged as commits, plus the audit/hardening work) rather than webosose
+# plus patches. Pinned with a plain SRCREV: submission tags are a webosose
+# convention and this branch carries none.
+SRCREV = "041098b8e83f76d929815363ed9c0b9fba484166"
+
+# Set outright rather than derived from a submission tag. Kept monotonic:
+# the patch-stack recipe shipped 1.0.0-48, so anything lower would look
+# like a downgrade to opkg on an update.
+PV = "1.0.0-49"
+PR = "r9"
 
 inherit webos_component
 inherit webos_cmake
-inherit webos_enhanced_submissions
+# The audit/hardening work lives on herrie/fixes, not on the branch
+# webos_ports_ose_repo defaults to, so the SRCREV above is not reachable
+# from webOS-ports/webOS-OSE. Drop this line once herrie/fixes is merged
+# there.
+WEBOS_GIT_PARAM_BRANCH = "herrie/fixes"
+inherit webos_ports_ose_repo
 inherit webos_daemon
 inherit webos_system_bus
-inherit webos_public_repo
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-Correctly-handle-ipk-URIs.patch \
-    file://0002-AppInstaller-rescan-apps-after-install.patch \
-    file://0003-AppPackage-allow-different-owner-UIDs-GIDs.patch \
-    file://0004-appinstalld2-Make-org.webosports-privileged-as-well.patch \
-    file://0005-Add-permission-for-rescan.patch \
-    file://0006-Derive-requiredPermissions-for-legacy-apps-on-install.patch \
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     file://luneos-app-permissions \
     file://luneos-app-permissions.json \
 "
 
 # Legacy ipks have no "requiredPermissions" in their appinfo.json, which leaves
-# them with an empty set of LS2 access control groups. 0006-*.patch makes
-# appinstalld run this helper over every application it unpacks, which works out
-# the groups from the luna:// calls the application makes and fills them in.
+# them with an empty set of LS2 access control groups. appinstalld runs this
+# helper over every application it unpacks, which works out the groups from
+# the luna:// calls the application makes and fills them in.
 do_install:append() {
     install -d ${D}${bindir}
     install -m 0755 ${UNPACKDIR}/luneos-app-permissions ${D}${bindir}/luneos-app-permissions
