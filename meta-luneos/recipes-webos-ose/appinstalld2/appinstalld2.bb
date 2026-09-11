@@ -25,7 +25,7 @@ RDEPENDS:${PN} = " \
 # stack merged as commits, plus the audit/hardening work) rather than webosose
 # plus patches. Pinned with a plain SRCREV: submission tags are a webosose
 # convention and this branch carries none.
-SRCREV = "041098b8e83f76d929815363ed9c0b9fba484166"
+SRCREV = "19585a5d43f84ae56bd042fc12de1765be921996"
 
 # Set outright rather than derived from a submission tag. Kept monotonic:
 # the patch-stack recipe shipped 1.0.0-48, so anything lower would look
