@@ -12,26 +12,34 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "glib-2.0 luna-service2 libpbnjson pmloglib boost libxml++-5.0 glibmm"
 
-WEBOS_VERSION = "1.0.0-28_4d4e8f2f68f6f3541f75998d11aec7f42f278e37"
-PR = "r12"
+# Built from the webOS-ports fork (webosose plus the LuneOS changes merged as
+# commits) rather than webosose plus a patch stack: what used to be the nine
+# patches in this directory now lives as commits there, along with the
+# herrie/fixes audit on top of them (memory safety, db8 query injection,
+# privilege prefix matching, displayId bounds, queue liveness) and its test
+# harness. Pinned with a plain SRCREV - submission tags are a webosose
+# convention and this branch carries none. The branch itself comes from
+# webos_ports_ose_repo below.
+SRCREV = "6f10d54cf398c6eae6fd17a92219dbfba4d35800"
+
+# Set outright rather than derived from a submission tag via WEBOS_VERSION.
+# Kept monotonic: the patch-stack recipe shipped 1.0.0-28, so anything lower
+# would look like a downgrade to opkg on an update.
+PV = "1.0.0-29"
+
+PR = "r14"
 
 inherit webos_component
 inherit webos_cmake
-inherit webos_enhanced_submissions
 inherit webos_daemon
 inherit webos_system_bus
-inherit webos_public_repo
+# The audit and test harness work lives on herrie/fixes, not on the branch
+# webos_ports_ose_repo defaults to, so the SRCREV above is not reachable from
+# webOS-ports/webOS-OSE. Drop this line once that branch is merged there.
+WEBOS_GIT_PARAM_BRANCH = "herrie/fixes"
+inherit webos_ports_ose_repo
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-CMakeLists.txt-switch-to-libxml-5.patch \
-    file://0001-Settings.cpp-Make-org.webosports-privileged-as-well.patch \
-    file://0002-Revert-97e68e38b489ab103e68b63672b5444ee7a05d49.patch \
-    file://0003-com.webos.notification.role.json.in-Fix-permission-i.patch \
-    file://0004-NotificationService.h-Add-back-bits-required-by-Lune.patch \
-    file://0005-com.webos.notification.perm.json-Fix-incorrect-value.patch \
-    file://0006-NotificationService-tell-subscribers-when-a-toast-is.patch \
-    file://0010-CMakeLists.txt-build-as-C-17-for-libxml-5.0.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "notificationmgr.service.in"
