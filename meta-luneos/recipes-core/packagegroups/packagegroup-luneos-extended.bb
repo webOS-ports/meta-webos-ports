@@ -10,7 +10,7 @@ NOT_COMPATIBLE_WITH_CURRENT_NODEJS = " \
 "
 
 #LuneOS uses it's own settings app
-VIRTUAL-RUNTIME_settingsapp ?= "org.webosports.app.settings"
+VIRTUAL-RUNTIME_settingsapp ?= "org.webosports.app.settings-qml"
 
 # Web Speech API support for the browser. Chromium dlopens libspeechd.so.2 and talks to the
 # speech-dispatcher daemon; without this, speechSynthesis exists but has no voices and pages that
