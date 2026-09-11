@@ -1,0 +1,162 @@
+diff --git a/hwcomposer/hwcomposer_backend_v20.cpp b/hwcomposer/hwcomposer_backend_v20.cpp
+index 69c16ba..398d839 100644
+--- a/hwcomposer/hwcomposer_backend_v20.cpp
++++ b/hwcomposer/hwcomposer_backend_v20.cpp
+@@ -53,6 +53,7 @@
+ #include "qsystrace_selector.h"
+ 
+ #include <inttypes.h>
++#include <unistd.h>
+ 
+ // #ifdef HWC_PLUGIN_HAVE_HWCOMPOSER1_API
+ 
+@@ -178,36 +179,10 @@ void HWC2Window::present(HWComposerNativeWindowBuffer *buffer)
+         acquireFenceFd = -1;
+     }
+ 
+-    error = hwc2_compat_display_validate(hwcDisplay, &numTypes,
+-                                                    &numRequests);
+-    if (error != HWC2_ERROR_NONE && error != HWC2_ERROR_HAS_CHANGES) {
+-        qDebug("prepare: validate failed for display %d: %d", displayId, error);
+-        return;
+-    }
+-
+-    if (numTypes || numRequests) {
+-        qDebug("prepare: validate required changes for display %d: %d",
+-               displayId, error);
+-        return;
+-    }
+-
+-    error = hwc2_compat_display_accept_changes(hwcDisplay);
+-    if (error != HWC2_ERROR_NONE) {
+-        qDebug("prepare: acceptChanges failed: %d", error);
+-        return;
+-    }
+-
+-    QPA_HWC_TIMING_SAMPLE(prepareTime);
+-
+-    QSystrace::begin("graphics", "QPA::set_client_target", "");
+-
+     int slot = -1;
+-    HWComposerNativeWindowBuffer *target = buffer;
+-
+     // Check if the current buffer is cached in any slots
+     for (size_t i = 0; i < m_slotCache.size(); i++) {
+         if (m_slotCache[i] == buffer) {
+-            target = nullptr;
+             slot = i;
+             break;
+         }
+@@ -220,15 +195,66 @@ void HWC2Window::present(HWComposerNativeWindowBuffer *buffer)
+         m_nextSlot = (m_nextSlot + 1) % m_slotCache.size();
+     }
+ 
+-    hwc2_compat_display_set_client_target(hwcDisplay, slot, target,
+-                                          acquireFenceFd,
+-                                          HAL_DATASPACE_UNKNOWN);
++    // Set buffer on primary layer (in case composition is or changes to DEVICE)
++    if (layer) {
++        int layerFenceFd = (acquireFenceFd >= 0) ? dup(acquireFenceFd) : -1;
++        error = hwc2_compat_layer_set_buffer(layer, slot, buffer, layerFenceFd);
++        if (error != HWC2_ERROR_NONE) {
++            static int layerLogCount = 0;
++            if (layerLogCount++ < 10)
++                qDebug("hwc2_compat_layer_set_buffer failed: %d", error);
++        }
++    }
++
++    error = hwc2_compat_display_validate(hwcDisplay, &numTypes,
++                                                    &numRequests);
++    if (error != HWC2_ERROR_NONE && error != HWC2_ERROR_HAS_CHANGES) {
++        qDebug("prepare: validate failed for display %d: %d", displayId, error);
++        if (acquireFenceFd >= 0)
++            close(acquireFenceFd);
++        return;
++    }
++
++    if (error == HWC2_ERROR_HAS_CHANGES || numTypes || numRequests) {
++        static int changeCount = 0;
++        if (changeCount++ < 10)
++            qDebug("prepare: validate requested changes (numTypes=%u, numRequests=%u) for display %d, accepting...",
++                   numTypes, numRequests, displayId);
++        error = hwc2_compat_display_accept_changes(hwcDisplay);
++        if (error != HWC2_ERROR_NONE) {
++            qDebug("prepare: acceptChanges failed: %d", error);
++        }
++    }
++
++    QPA_HWC_TIMING_SAMPLE(prepareTime);
++
++    QSystrace::begin("graphics", "QPA::set_client_target", "");
++
++    int clientFenceFd = (acquireFenceFd >= 0) ? dup(acquireFenceFd) : -1;
++    error = hwc2_compat_display_set_client_target(hwcDisplay, slot, buffer,
++                                                  clientFenceFd,
++                                                  HAL_DATASPACE_UNKNOWN);
++    if (error != HWC2_ERROR_NONE) {
++        static int targetLogCount = 0;
++        if (targetLogCount++ < 10)
++            qDebug("hwc2_compat_display_set_client_target failed: %d", error);
++    }
++
++    if (acquireFenceFd >= 0) {
++        close(acquireFenceFd);
++        acquireFenceFd = -1;
++    }
+ 
+     QSystrace::end("graphics", "QPA::set_client_target", "");
+ 
+     QSystrace::begin("graphics", "QPA::present", "");
+     int presentFence = -1;
+-    hwc2_compat_display_present(hwcDisplay, &presentFence);
++    error = hwc2_compat_display_present(hwcDisplay, &presentFence);
++    if (error != HWC2_ERROR_NONE) {
++        static int presentLogCount = 0;
++        if (presentLogCount++ < 10)
++            qDebug("hwc2_compat_display_present failed: %d", error);
++    }
+     QSystrace::end("graphics", "QPA::present", "");
+ 
+     QPA_HWC_TIMING_SAMPLE(setTime);
+@@ -325,6 +351,8 @@ HwComposerBackend_v20::createWindow(int width, int height)
+ 
+     hwc2_compat_layer_set_composition_type(layer, HWC2_COMPOSITION_CLIENT);
+     hwc2_compat_layer_set_blend_mode(layer, HWC2_BLEND_MODE_NONE);
++    hwc2_compat_layer_set_plane_alpha(layer, 1.0f);
++    hwc2_compat_layer_set_dataspace(layer, HAL_DATASPACE_UNKNOWN);
+     hwc2_compat_layer_set_source_crop(layer, 0.0f, 0.0f, width, height);
+     hwc2_compat_layer_set_display_frame(layer, 0, 0, width, height);
+     hwc2_compat_layer_set_visible_region(layer, 0, 0, width, height);
+@@ -372,9 +400,11 @@ HwComposerBackend_v20::sleepDisplay(bool sleep)
+         m_vsyncTimeout.stop();
+         hwc2_compat_display_set_vsync_enabled(hwc2_primary_display, HWC2_VSYNC_DISABLE);
+ 
+-        hwc2_compat_display_set_power_mode(hwc2_primary_display, HWC2_POWER_MODE_OFF);
++        hwc2_error_t err = hwc2_compat_display_set_power_mode(hwc2_primary_display, HWC2_POWER_MODE_OFF);
++        qDebug("sleepDisplay(true): set_power_mode OFF returned %d", err);
+     } else {
+-        hwc2_compat_display_set_power_mode(hwc2_primary_display, HWC2_POWER_MODE_ON);
++        hwc2_error_t err = hwc2_compat_display_set_power_mode(hwc2_primary_display, HWC2_POWER_MODE_ON);
++        qDebug("sleepDisplay(false): set_power_mode ON returned %d", err);
+ 
+         // If we have pending updates, make sure those start happening now..
+         if (m_pendingUpdate.size()) {
+@@ -409,9 +439,15 @@ HwComposerBackend_v20::getScreenSizes(int *width, int *height, float *physical_w
+     *width = config->width;
+     *height = config->height;
+ 
+-    if (dpi_x == 0 || dpi_y == 0 || *width == 0 || *height == 0) {
+-        qWarning() << "failed to read screen size from hwc1.x backend";
+-        return false;
++    if (*width <= 0 || *height <= 0) {
++        *width = 1080;
++        *height = 2400;
++    }
++
++    if (dpi_x <= 0 || dpi_y <= 0) {
++        qWarning() << "hwc reported non-positive dpi" << dpi_x << dpi_y << ", falling back to 420";
++        dpi_x = 420;
++        dpi_y = 420;
+     }
+ 
+     *physical_width = (((float)*width) * 25.4) / (float)dpi_x;
