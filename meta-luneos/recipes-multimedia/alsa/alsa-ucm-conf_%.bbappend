@@ -8,7 +8,13 @@ SRC_URI:append = " \
     file://0007-Fix-UCM-for-RK817.patch \
     git://github.com/msm8953-mainline/alsa-ucm-conf.git;protocol=https;branch=master;name=msm8953;destsuffix=${BP}/msm8953 \
 "
-SRCREV_msm8953 = "b6860eae577ddea6f55834850fb4ed403f208d2f"
+# Was b6860eae577ddea6f55834850fb4ed403f208d2f: force-pushed away on this
+# actively-rebased fork (git ls-remote now shows only one ref, master, at a
+# different tip - the old commit isn't even a dangling object anymore).
+# Bumped to current master tip; verified the directory layout do_install
+# expects (ucm2/codecs/msm8953-wcd/, ucm2/Xiaomi/{mido,vince,daisy}/HiFi.conf,
+# ucm2/conf.d/xiaomi-*/*.conf) is unchanged at this commit.
+SRCREV_msm8953 = "c842a671ef37d876d8f1bd70801906c6b7eceb51"
 
 do_install:append() {
     # msm8953: generic codecs
