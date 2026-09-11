@@ -1,4 +1,4 @@
-# Copyright (c) 2026 LuneOS
+# Copyright (c) 2026 Herman van Hazendonk <github.com@herrie.org>
 # Makes the Enyo 1 build tool (support/enyo-compress) available to other recipes.
 # enyo-1.0.bb already runs this tool to produce enyo-build.js, but it lives inside
 # the enyo-1.0 source tree where nothing else can reach it. core-apps.bb needs it
