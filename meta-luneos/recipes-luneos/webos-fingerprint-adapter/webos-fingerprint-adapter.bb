@@ -12,7 +12,7 @@ DEPENDS = "luna-service2 libpbnjson glib-2.0 glib-2.0-native"
 RRECOMMENDS:${PN} += "biomd"
 
 PV = "0.1.0-1+git"
-SRCREV = "010ff42a4404da3032db59b8a5505181179deb02"
+SRCREV = "7273fce557f219a444de694495d5a1bc1c2503be"
 
 inherit webos_ports_repo
 inherit webos_filesystem_paths
@@ -21,7 +21,11 @@ inherit pkgconfig
 inherit webos_system_bus
 inherit webos_systemd
 
-WEBOS_GIT_PARAM_BRANCH = "master"
+# Points at the biomd port branch until it lands. The client, the systemd
+# unit and the docs all moved from droidian-fpd to io.FuriOS.Biomd there;
+# master still has the fpd client, which asks for a bus name nothing
+# provides any more. Switch back to master once the PR is merged.
+WEBOS_GIT_PARAM_BRANCH = "herrie/port-to-biomd"
 WEBOS_REPO_NAME = "webos-fingerprint-adapter"
 
 LUNEOS_SYSTEMD_SERVICE = "${PN}.service"

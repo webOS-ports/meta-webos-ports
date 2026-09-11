@@ -26,6 +26,7 @@ SRC_URI = " \
     git://github.com/FuriLabs/biomd.git;protocol=https;branch=forky \
     file://0001-Makefile-make-toolchain-flags-and-install-paths-over.patch \
     file://0002-Makefile-allow-building-without-the-face-backend.patch \
+    file://0003-fingerprint-accept-free-form-finger-names.patch \
 "
 
 S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}"
