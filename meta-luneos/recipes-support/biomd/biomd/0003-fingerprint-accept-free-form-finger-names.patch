@@ -1,0 +1,158 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 9 Sep 2026 13:10:00 +0200
+Subject: [PATCH] fingerprint: accept free-form finger names
+
+is_valid_finger_name() in src/fingerprint.c matched the requested name
+against valid_finger_names[] and rejected everything else, so the ten
+fprintd finger names were the entire namespace the io.FuriOS.Biomd
+API would accept. Enroll, RemoveFinger, RenameFinger and
+GetFingerEnrollmentDate all sit behind that check.
+
+That vocabulary makes sense on net.reactivated.Fprint, where clients
+enroll a named finger and PAM looks it up again, but it is not the only
+way a fingerprint UI is built. LuneOS lets the user type a label for
+each print and rename it later, which fpd allowed and which biomd
+refuses with InvalidArgs before the sensor is ever touched.
+
+Nothing in the daemon needs the name to come from a fixed list. The
+template is identified by finger_id; finger_name is a TEXT column that
+is only ever read back out and handed to the caller, and
+database_add_fingerprint()/database_set_finger_name() take it verbatim.
+
+So make the name a label rather than an enum:
+
+  - database_is_valid_finger_name() keeps only the constraints storage
+    and the bus impose - non-empty, UTF-8, at most FINGER_NAME_MAX_BYTES.
+    It already accepted anything prefixed "finger_", so the fixed list
+    was not an invariant there either.
+
+  - is_valid_finger_name() in fingerprint.c defers to it instead of
+    scanning the list a second time. RenameFinger already checked its
+    new name with the database rule while checking the old one against
+    the list, so the two now agree.
+
+  - valid_finger_names[] stays as what the daemon picks for itself
+    (database_get_suggested_finger_name(), the enumerate path) and as
+    what ValidFingerNames advertises. It becomes a list of suggested
+    names rather than a whitelist; the property keeps its meaning for
+    callers that want to offer the fprintd names.
+
+src/fprintd/fprintd.c keeps its own strict copy of the check on
+purpose: net.reactivated.Fprint clients expect those ten names and an
+InvalidFingername error for anything else, so the bridge must not widen
+what it accepts. Its "TODO: this is in fingerprint.c too" note no
+longer applies - the two checks differ deliberately now.
+
+One caveat, unchanged from before: RemoveFinger() short-circuits any
+name starting with "finger_" by parsing the id out of the name rather
+than looking it up. A user-typed "finger_3" therefore still addresses
+template 3. Auto-named prints depend on that branch, so it is left
+alone.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+diff --git a/include/database.h b/include/database.h
+index 5316fd8..4f9ab6b 100644
+--- a/include/database.h
++++ b/include/database.h
+@@ -13,6 +13,14 @@
+ #define DB_DIR "/var/lib/biomd"
+ #define DB_PATH "/var/lib/biomd/fingerprints.db"
+ 
++/*
++ * The names the daemon picks for itself, and the ones it offers through the
++ * ValidFingerNames property. Since a caller may enroll under any label its
++ * user typed, this is a list of suggestions rather than a whitelist - see
++ * database_is_valid_finger_name(). src/fprintd/fprintd.c still treats it as a
++ * whitelist, which is correct there: net.reactivated.Fprint clients expect
++ * these ten names and nothing else.
++ */
+ static gchar *valid_finger_names[] = {
+     "right-index-finger",
+     "left-index-finger",
+@@ -27,6 +35,12 @@ static gchar *valid_finger_names[] = {
+     NULL
+ };
+ 
++/*
++ * Upper bound on a finger name, in bytes. Names are free-form, but they go
++ * into sqlite and across the bus, so they are not unbounded.
++ */
++#define FINGER_NAME_MAX_BYTES 256
++
+ /**
+  * Initialize the fingerprint database
+  * @return TRUE if successful, FALSE otherwise
+diff --git a/src/database.c b/src/database.c
+index d48f73c..e6eaf2c 100644
+--- a/src/database.c
++++ b/src/database.c
+@@ -8,6 +8,7 @@
+ #include <stdlib.h>
+ #include <sqlite3.h>
+ #include <glib.h>
++#include <string.h>
+ #include <sys/stat.h>
+ #include <sys/types.h>
+ #include <time.h>
+@@ -464,17 +465,22 @@ database_get_all_fingerprints(void)
+ gboolean
+ database_is_valid_finger_name(const gchar *finger_name)
+ {
++    gsize len;
++
+     if (finger_name == NULL)
+         return FALSE;
+-    if (g_str_has_prefix(finger_name, "finger_"))
+-        return TRUE;
+ 
+-    for (int i = 0; valid_finger_names[i] != NULL; i++) {
+-        if (g_strcmp0(finger_name, valid_finger_names[i]) == 0)
+-            return TRUE;
+-    }
++    /*
++     * A finger name is a label, not a key: finger_id is what identifies a
++     * template, the column is plain TEXT, and nothing downstream parses the
++     * name. So accept whatever the user called it and reject only what
++     * sqlite and D-Bus cannot carry - empty, over-long, or not UTF-8.
++     */
++    len = strlen(finger_name);
++    if (len == 0 || len > FINGER_NAME_MAX_BYTES)
++        return FALSE;
+ 
+-    return FALSE;
++    return g_utf8_validate(finger_name, len, NULL);
+ }
+ 
+ gchar*
+diff --git a/src/fingerprint.c b/src/fingerprint.c
+index 5e298a8..300407c 100644
+--- a/src/fingerprint.c
++++ b/src/fingerprint.c
+@@ -26,18 +26,16 @@ typedef struct {
+ 
+ static BiomFingerprint *fingerprint_state = NULL;
+ 
++/*
++ * Enroll, RemoveFinger, RenameFinger and GetFingerEnrollmentDate all take the
++ * finger name as a user-visible label, so there is one rule for what a name
++ * may be and database.c owns it. RenameFinger already called that rule for
++ * its new name; going through it here too means the two agree.
++ */
+ static gboolean
+ is_valid_finger_name(const gchar *finger_name)
+ {
+-    if (!finger_name)
+-        return FALSE;
+-
+-    for (gint i = 0; valid_finger_names[i] != NULL; i++) {
+-        if (g_strcmp0(finger_name, valid_finger_names[i]) == 0)
+-            return TRUE;
+-    }
+-
+-    return FALSE;
++    return database_is_valid_finger_name(finger_name);
+ }
+ 
+ static gboolean
