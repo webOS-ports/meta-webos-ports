@@ -71,6 +71,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0008-Add-LuneOS-modules-and-machine-specific-cmake-file-t.patch \
     file://0009-Add-wait-touchscreen-conf.patch \
     file://0010-nyx-modules-Use-etc-machine-id-for-serial-number.patch \
+    file://0011-nyx-modules-led_controller-drive-bl_power.patch \
 "
 S = "${WORKDIR}/git"
 

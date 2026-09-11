@@ -30,5 +30,5 @@ set(NYXMOD_OW_TOUCHPANEL_MTDEV			TRUE)
 # provided by nyx-modules-hybris
 set(NYXMOD_OW_DEVICEINFO				FALSE)
 set(NYXMOD_OW_SYSTEM					FALSE)
-set(NYXMOD_OW_LED						FALSE)
+set(NYXMOD_OW_LED						TRUE)
 set(NYXMOD_OW_HAPTICS					FALSE)

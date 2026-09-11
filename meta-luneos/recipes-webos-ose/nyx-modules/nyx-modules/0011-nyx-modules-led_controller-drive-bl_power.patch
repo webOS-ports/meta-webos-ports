@@ -1,0 +1,102 @@
+From: Andrew Hunt <achunt@bellsouth.net>
+Date: Thu, 10 Sep 2026 15:50:00 -0400
+Subject: [PATCH] nyx-modules: led_controller: drive bl_power as well as brightness
+
+Writing 0 to the backlight's "brightness" alone does not blank the panel on
+bluejay (Pixel 6a) - the backlight stays lit. The panel only actually turns
+off when bl_power is set to 4 (FB_BLANK_POWERDOWN), and it will not come back
+on unless bl_power is returned to 0 BEFORE a non-zero brightness is written.
+
+So on the way down: write brightness 0, then bl_power 4.
+On the way up: write bl_power 0 first, then the brightness value.
+
+Ordering matters in both directions; doing it the other way round leaves the
+panel dark with a non-zero brightness value.
+
+bl_power is optional - backlight_bl_power_path is NULL when the device has no
+such attribute - so this is a no-op on devices that do not expose it.
+
+This is half of the display-sleep fix. The other half is DisplayManager::
+isOnPuck() in luna-sysmgr returning true on this device, which makes the
+display state machine believe the phone is docked on a charging puck and
+refuse to blank at all; that still has no source fix.
+
+Upstream-Status: Pending
+---
+--- a/src/led_controller/led_controller.c
++++ b/src/led_controller/led_controller.c
+@@ -38,6 +38,7 @@
+ 
+ static const char *backlight_max_brightness_path = NULL;
+ static const char *backlight_brightness_path = NULL;
++static const char *backlight_bl_power_path = NULL;
+ 
+ static const char* backlight_device_by_type(struct udev *udev, struct udev_list_entry *devices, const char *type)
+ {
+@@ -129,6 +130,7 @@
+ 
+     backlight_max_brightness_path = g_build_filename(backlight_path, "max_brightness", NULL);
+     backlight_brightness_path = g_build_filename(backlight_path, "brightness", NULL);
++    backlight_bl_power_path = g_build_filename(backlight_path, "bl_power", NULL);
+ 
+     *d = (nyx_device_t*)nyxDev;
+ 
+@@ -140,15 +142,20 @@
+     free(d);
+ 
+     if (backlight_max_brightness_path) {
+-        free(backlight_max_brightness_path);
++        g_free((gpointer)backlight_max_brightness_path);
+         backlight_max_brightness_path = 0;
+     }
+ 
+     if (backlight_brightness_path) {
+-        free(backlight_brightness_path);
++        g_free((gpointer)backlight_brightness_path);
+         backlight_brightness_path = 0;
+     }
+ 
++    if (backlight_bl_power_path) {
++        g_free((gpointer)backlight_bl_power_path);
++        backlight_bl_power_path = 0;
++    }
++
+     return NYX_ERROR_NONE;
+ }
+ 
+@@ -214,9 +221,18 @@
+         if (effect.backlight.brightness_lcd >= 0)
+             value = (int)((max_brightness * effect.backlight.brightness_lcd) / 100.0);
+ 
+-        if (FileWriteInt(backlight_brightness_path, value) < 0) {
+-            status = NYX_CALLBACK_STATUS_FAILED;
+-            goto done;
++        if (value > 0) {
++            if (backlight_bl_power_path)
++                FileWriteInt(backlight_bl_power_path, 0);
++
++            if (FileWriteInt(backlight_brightness_path, value) < 0) {
++                status = NYX_CALLBACK_STATUS_FAILED;
++                goto done;
++            }
++        } else {
++            FileWriteInt(backlight_brightness_path, 0);
++            if (backlight_bl_power_path)
++                FileWriteInt(backlight_bl_power_path, 4);
+         }
+ 
+         break;
+@@ -251,7 +267,12 @@
+         if (FileGetInt(backlight_brightness_path, &brightness) < 0)
+             return NYX_ERROR_DEVICE_UNAVAILABLE;
+ 
+-        *state = brightness > 0 ? NYX_LED_CONTROLLER_STATE_ON : NYX_LED_CONTROLLER_STATE_OFF;
++        int bl_power = 0;
++        if (backlight_bl_power_path && FileGetInt(backlight_bl_power_path, &bl_power) == 0) {
++            *state = (brightness > 0 && bl_power == 0) ? NYX_LED_CONTROLLER_STATE_ON : NYX_LED_CONTROLLER_STATE_OFF;
++        } else {
++            *state = brightness > 0 ? NYX_LED_CONTROLLER_STATE_ON : NYX_LED_CONTROLLER_STATE_OFF;
++        }
+ 
+         return NYX_ERROR_NONE;
+     default:
