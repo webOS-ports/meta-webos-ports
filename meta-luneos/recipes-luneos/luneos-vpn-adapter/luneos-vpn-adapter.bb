@@ -25,8 +25,10 @@ RRECOMMENDS:${PN} += " \
 "
 
 PV = "0.1.0-1+git"
-# PLACEHOLDER - replace with the real commit once the repo is pushed. Until then
-# this recipe only builds via externalsrc; see VPN/luneos-vpn-adapter/README.md.
+# webOS-ports/luneos-vpn-adapter, "Initial import of luneos-vpn-adapter",
+# pushed 2026-09-05. This was a placeholder while the repo was unpublished and
+# the recipe built only via externalsrc; the commit resolves upstream now, so
+# the normal git fetch works and no externalsrc is needed.
 SRCREV = "40bdda2ad0fa18b8118407a35b0fded2d777b298"
 
 inherit webos_ports_repo
