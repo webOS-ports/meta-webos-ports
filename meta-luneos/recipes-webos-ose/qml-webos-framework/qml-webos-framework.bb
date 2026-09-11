@@ -18,29 +18,29 @@ RPROVIDES:${PN}-examples = " \
     eos.widgetgallery \
 "
 
-WEBOS_VERSION = "1.0.0-171_f8586fc0655de188c38d12b911d68a589d28496f"
-PR = "r39"
+# Built from the webOS-ports fork (webosose plus the LuneOS changes merged as
+# commits) rather than webosose plus a patch stack: what used to be the
+# 0001-0011 patch series in this directory now lives as commits there, so
+# nothing is applied on top any more. Pinned with a plain SRCREV - submission
+# tags are a webosose convention and this branch carries none. The branch
+# itself is set below via WEBOS_GIT_PARAM_BRANCH.
+SRCREV = "64c86e76b0d7332e5d955ace286a7d7b0f8fb907"
+
+# Set outright rather than derived from a submission tag via WEBOS_VERSION.
+# Kept monotonic: the patch-stack recipe shipped 1.0.0-171, so anything lower
+# would look like a downgrade to opkg on an update.
+PV = "1.0.0-172"
+
+PR = "r40"
 
 inherit webos_qmake6
 inherit pkgconfig
 inherit webos_app_generate_security_files
 inherit webos_filesystem_paths
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+WEBOS_GIT_PARAM_BRANCH = "herrie/fixes"
+inherit webos_ports_ose_repo
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-AppLoader-add-import-path-for-QML-apps.patch \
-    file://0002-Setup-missing-env-variables.patch \
-    file://0003-qml-runner-don-t-set-default-value-for-WEBOS_WINDOW_.patch \
-    file://0004-RoundedRectangle.qml-Use-GraphicalEffects-from-Qt5Co.patch \
-    file://0005-AppLoader-use-old-syntax-for-quit-connect.patch \
-    file://0006-com.webos.app.qmlrunner.role.json.in-Add-trustLevel.patch \
-    file://0007-WebOSQuickWindow-make-setWindowPropery-Q_INVOKABLE.patch \
-    file://0008-runner-debug-use-WEBOS_INSTALL_BINS-as-other-binarie.patch \
-    file://0009-WebOSQuickWindow-use-APP_ID-env-variable-for-appId.patch \
-    file://0010-runner-register-with-appId-so-ls-hubd-can-resolve-i.patch \
-    file://0011-runner-plain-LSCall-so-the-runner-can-register-with-.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 
