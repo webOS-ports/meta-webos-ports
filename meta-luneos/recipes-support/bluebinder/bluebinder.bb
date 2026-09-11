@@ -27,6 +27,14 @@ SRC_URI:append:tissot-halium = " file://0002-service-load-after-wifi-module-load
 PV = "1.0.20"
 SRCREV = "c3e1b155e308f6df9c9a02dbd909a44e7319ab7d"
 
+# base_do_configure runs "oe_runmake clean" whenever the source has a Makefile,
+# and upstream's clean target is "rm bluebinder" with no -f. On a tree that has
+# never been compiled - a fresh WORKDIR, or any rebuild forced by a changed
+# dependency such as android-headers-halium - the binary does not exist yet, rm
+# exits 1 and do_configure fails before it has done anything. CLEANBROKEN is the
+# OE-provided switch for exactly this.
+CLEANBROKEN = "1"
+
 CFLAGS += "--sysroot=${RECIPE_SYSROOT} ${LDFLAGS}"
 
 SYSTEMD_PACKAGES = "${PN}"
