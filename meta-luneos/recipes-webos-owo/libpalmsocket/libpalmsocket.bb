@@ -8,8 +8,13 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "pmloglib glib-2.0 openssl c-ares pmstatemachineengine"
 
 PV = "2.0.0-33+git"
-SRCREV = "cd3014c00eac01494578c656fa46d28dd69de243"
+SRCREV = "3316409109094c4d8e61438afd32c8cef1c6cf90"
 
+# The code quality, hardening and test harness work
+# (webOS-ports/libpalmsocket#1) lives on herrie/fixes, not on the branch
+# webos_ports_fork_repo defaults to, so the SRCREV above is not reachable
+# from webOS-ports/master. Drop this line once herrie/fixes is merged there.
+WEBOS_GIT_PARAM_BRANCH = "herrie/fixes"
 inherit webos_ports_fork_repo
 inherit webos_cmake
 inherit pkgconfig

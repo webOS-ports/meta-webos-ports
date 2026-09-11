@@ -24,7 +24,7 @@ RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_cpushareholder}"
 # nothing is applied on top any more. Pinned with a plain SRCREV - submission
 # tags are a webosose convention and this branch carries none. The branch
 # itself comes from webos_ports_ose_repo below.
-SRCREV = "5ce56b4d983eae776ab3ca4b115f8c18de213181"
+SRCREV = "c957d481989cefe02b388b6ef811d0bb3ac6f402"
 
 # Set outright rather than derived from a submission tag. Kept monotonic: the
 # patch-stack recipe shipped 1.0.2-99, so anything lower would look like a
