@@ -6,14 +6,20 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=2bdfe040dcf81b4038370ae96036c519 \
 "
 
-WEBOS_VERSION = "1.0.0-65_4c7be1bb7a3b3ba51c4f833f6ed364c7c571bd9c"
-INC_PR = "r17"
+# Built from the webOS-ports fork (webosose master + LuneOS fixes and the
+# droid HAL/notifier plugins merged as commits) rather than webosose plus a
+# patch stack. Pinned with a plain SRCREV: submission tags are a webosose
+# convention and this branch carries none.
+SRCREV = "743be909f38fb6ace643b97483f670b7edc87f03"
+PV = "1.0.0-65"
+INC_PR = "r18"
 
 inherit webos_component
 inherit webos_cmake
-inherit webos_enhanced_submissions
-inherit webos_public_repo
+inherit webos_ports_ose_repo
 inherit webos_system_bus
 inherit webos_daemon
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+WEBOS_GIT_PARAM_BRANCH = "herrie/fixes"
+
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
