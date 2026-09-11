@@ -6,11 +6,10 @@ LIC_FILES_CHKSUM = " \
 "
 
 PV = "0.0.2-1+git"
-SRCREV = "1c2d9761fc7c6029e829140d90173196a5a0c786"
+SRCREV = "0b4475028fbc7d3278fd10abcb5b7dc7e1f3038f"
 
 DEPENDS = "qtbase qtdeclarative qtdeclarative-native qtmultimedia"
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/qt6"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 inherit pkgconfig

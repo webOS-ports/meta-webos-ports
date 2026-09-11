@@ -21,7 +21,7 @@ DEPENDS = "qtdeclarative wayland-native qtwayland qtbase-native qt-features-webo
 # nothing is applied on top any more. Pinned with a plain SRCREV - submission
 # tags are a webosose convention and this branch carries none. The branch
 # itself comes from webos_ports_ose_repo below.
-SRCREV = "10df66b2f9590a7f5ec311896827f2e21a564405"
+SRCREV = "1113a6e06af8ff50702532a5d590aee7dd378ad9"
 
 # Set outright rather than derived from a submission tag via WEBOS_VERSION.
 # Kept monotonic: the patch-stack recipe shipped 2.0.0-423, so anything lower
@@ -33,6 +33,7 @@ PR = "r65"
 inherit webos_qmake6
 inherit pkgconfig
 inherit webos_lttng
+WEBOS_GIT_PARAM_BRANCH = "herrie/cleanup"
 inherit webos_ports_ose_repo
 inherit features_check
 ANY_OF_DISTRO_FEATURES = "vulkan opengl"

@@ -10,7 +10,7 @@ inherit webos_enyojs_application
 inherit webos_app
 
 PV = "2.0.3+git"
-SRCREV = "cca6470dc7b5b8f31470dd269d013e782cd0b4b8"
+SRCREV = "3337f2ebf0a470c8c54df69083b371db7cfd7943"
 
 WEBOS_REPO_NAME = "preware"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"

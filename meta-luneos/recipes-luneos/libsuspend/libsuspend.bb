@@ -3,7 +3,7 @@ LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 PV = "1.0.0-2+git"
-SRCREV = "838ef4eafcc9bb5231584ca58ce9b636e1003712"
+SRCREV = "b9c23c54254e5cfde3ebe0c41834334d4c7217bb"
 
 inherit webos_ports_repo
 inherit pkgconfig

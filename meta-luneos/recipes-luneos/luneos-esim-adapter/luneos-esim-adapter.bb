@@ -17,7 +17,7 @@ RDEPENDS:${PN} += "lpac gstreamer1.0-plugins-bad-zbar gstreamer1.0-plugins-good 
 RRECOMMENDS:${PN} += "ofono"
 
 PV = "0.1.0-1+git"
-SRCREV = "87fc6c6490a779687756b36f41a63fd03fb9c77f"
+SRCREV = "ab8bfd3ded6c484bbb381c50505433f9e7cabe57"
 
 inherit webos_ports_repo
 inherit webos_filesystem_paths
@@ -25,9 +25,6 @@ inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
 inherit webos_systemd
-
-WEBOS_GIT_PARAM_BRANCH = "master"
-WEBOS_REPO_NAME = "luneos-esim-adapter"
 
 LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
 
