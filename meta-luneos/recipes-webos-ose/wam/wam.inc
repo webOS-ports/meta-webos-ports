@@ -18,43 +18,43 @@ RDEPENDS:${PN} += "util-linux"
 VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_cpushareholder}"
 
-WEBOS_VERSION = "1.0.2-99_a698bc40c4e73d338bdf3310c31d1878978d231a"
-INC_PR = "r70"
+# Built from the webOS-ports fork (webosose plus the LuneOS changes merged as
+# commits) rather than webosose plus a patch stack: what used to be the
+# 0001-0023 patch series in this directory now lives as commits there, so
+# nothing is applied on top any more. Pinned with a plain SRCREV - submission
+# tags are a webosose convention and this branch carries none. The branch
+# itself comes from webos_ports_ose_repo below.
+SRCREV = "5ce56b4d983eae776ab3ca4b115f8c18de213181"
+
+# Set outright rather than derived from a submission tag. Kept monotonic: the
+# patch-stack recipe shipped 1.0.2-99, so anything lower would look like a
+# downgrade to opkg on an update.
+PV = "1.0.2-100"
+
+INC_PR = "r83"
 
 WAM_BUILD_SYSTEM ?= "webos_cmake"
 WAM_BUILD_DEFAULT_PLUGIN ?= "1"
 
-inherit webos_enhanced_submissions
 inherit webos_system_bus
 inherit webos_machine_dep
 inherit ${WAM_BUILD_SYSTEM}
 inherit webos_pkgconfig
 inherit webos_lttng
 #inherit webos_distro_variant_dep
-inherit webos_public_repo
+inherit webos_ports_ose_repo
 inherit webos_systemd
 inherit useradd
 
 WAM_DATA_DIR = "${webos_execstatedir}/${BPN}"
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-Fix-build-with-liburcu-0.15.0.patch \
-    file://0001-security_policy.conf-Add-paths-for-LuneOS.patch \
-    file://0002-WAM-LS2-Add-required-bits-for-LuneOS.patch \
-    file://0003-WAM-Use-Prelude-as-default-font.patch \
-    file://0004-Add-basic-implementation-for-getResource-for-webOSSy.patch \
-    file://0005-DeviceInfoImpl-add-tvDeviceInfo-data.patch \
-    file://0006-Add-relaunch-support-for-legacy-enyo-apps.patch \
-    file://0007-WAM-Add-window.open-support.patch \
-    file://0008-WebAppBase-add-noWindow-support.patch \
-    file://0009-WAM-WebPageBlink-keep-same-window-type-when-creating.patch \
-    file://0010-WebAppWayland-do-not-show-window-if-its-status-is-st.patch \
-    file://0011-WAM-Add-additional-window.open-features-management.patch \
-    file://0012-PalmSystem-add-banner-support.patch \
-    file://0013-WebAppBase-fix-window.close-for-multi-window-apps.patch \
-    file://0014-WAM-Fix-outbound-permission-error.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
+# webos_ports_ose_repo fetches into ${WORKDIR}/git, but S still defaulted to
+# ${WORKDIR}/${BP} (the tarball layout the old patch-stack recipe used), so
+# do_configure looked for CMakeLists.txt in a directory that does not exist and
+# do_populate_lic could not resolve LIC_FILES_CHKSUM. Every other recipe in this
+# layer that inherits webos_ports_ose_repo sets this too.
 S = "${WORKDIR}/git"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
