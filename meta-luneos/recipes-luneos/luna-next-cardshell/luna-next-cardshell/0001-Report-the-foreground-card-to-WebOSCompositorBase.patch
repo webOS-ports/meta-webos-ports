@@ -1,0 +1,146 @@
+From: Andrew Hunt <achunt@bellsouth.net>
+Date: Thu, 10 Sep 2026 15:05:00 -0400
+Subject: [PATCH] Report the foreground card to WebOSCompositorBase
+
+getForegroundAppInfo always returned an empty list, on both
+com.webos.surfacemanager and com.webos.service.applicationmanager, no matter
+what was on screen. Anything keying off the foreground app was therefore
+broken - most visibly, taps fell through a focused app to the launcher
+underneath, so tapping over an open app could bring up Just Type. QML apps
+were unaffected because they take a different path.
+
+Cause: WebOSCompositorBase/Views.qml declares
+
+    foregroundItems: Utils.foregroundList(viewsRoot.children)
+
+and ForegroundAppInfoMgr feeds that to getForegroundAppInfo.
+Utils.foregroundList() walks viewsRoot's DIRECT children looking for one with
+hasForegroundItem == true and a currentItem whose displayId >= 0.
+
+LuneOS overrides the ViewsRoot type in its qmldir with LuneOSViewRoot.qml, and
+keeps its windows in its own tree (CardShell -> CardsArea -> CardView) instead
+of the base views. So viewsRoot's only child was OrientationHelper, nothing
+ever had hasForegroundItem, and the list stayed empty forever.
+
+Add a small proxy child of the view root that supplies exactly what
+foregroundList() looks for, and expose the CardView up through CardsArea and
+CardShell so it can be reached.
+
+currentItem is assigned imperatively rather than bound because
+currentActiveWindow() is a function call and creates no binding dependency;
+assigning it emits currentItemChanged, which re-runs the outer foregroundItems
+binding. The timer is a safety net: currentCardChanged() is only emitted when
+the card GROUP index changes, while selecting a different card within a group
+goes through listCardGroupsModel.setCurrentCard() and emits nothing, and
+currentActiveWindow() ultimately depends on a ListModel role that cannot be
+bound to. refresh() only assigns on a real change, so it emits nothing while
+the foreground is stable.
+
+Verified on bluejay: both services now report the on-screen app, and the
+reported app tracks card switches.
+
+Upstream-Status: Pending
+---
+--- a/qml/LuneOSViewRoot.qml
++++ b/qml/LuneOSViewRoot.qml
+@@ -44,4 +44,75 @@
+             z: 1 // above the main shell
+         }
+     }
++
++    // --- foreground reporting bridge ---------------------------------
++    // WebOSCompositorBase/Views.qml declares
++    //     foregroundItems: Utils.foregroundList(viewsRoot.children)
++    // and ForegroundAppInfoMgr feeds that to getForegroundAppInfo.
++    // foregroundList() walks viewsRoot's CHILDREN looking for one with
++    // hasForegroundItem == true and a currentItem whose displayId >= 0.
++    //
++    // LuneOS overrides the ViewsRoot type (see qmldir) with this file, and
++    // keeps its windows in its own tree (CardShell -> CardsArea -> CardView)
++    // rather than in the base views. So no child ever had hasForegroundItem
++    // and getForegroundAppInfo returned an empty list forever - which is why
++    // taps fell through to the launcher instead of the focused app.
++    //
++    // This proxy child supplies exactly what foregroundList() looks for.
++    // currentItem is assigned imperatively rather than bound, because
++    // currentActiveWindow() is a function call and would create no binding
++    // dependency; the assignment emits currentItemChanged, which re-runs the
++    // outer foregroundItems binding.
++    Item {
++        id: foregroundProxy
++        visible: false
++        width: 0
++        height: 0
++
++        property bool hasForegroundItem: true
++        property bool grouped: false
++        property var groupedItems: null
++        property bool hasMultiItems: false
++        property var items: []
++        property var currentItem: null
++
++        function refresh() {
++            var shell = mainShellLoader.item;
++            var area = shell && shell.cardsAreaInstance ? shell.cardsAreaInstance : null;
++            var view = area && area.cardView ? area.cardView : null;
++            var next = view ? view.currentActiveWindow() : null;
++            if (currentItem !== next)
++                currentItem = next;
++        }
++    }
++
++    Connections {
++        target: mainShellLoader.item && mainShellLoader.item.cardsAreaInstance
++                ? mainShellLoader.item.cardsAreaInstance.cardView : null
++        ignoreUnknownSignals: true
++        function onCurrentCardChanged() { foregroundProxy.refresh(); }
++    }
++
++    // Safety net. currentCardChanged() is only emitted when the card GROUP
++    // index changes (CardGroupListView.internalListView.onCurrentIndexChanged);
++    // selecting a different card WITHIN a group goes through
++    // listCardGroupsModel.setCurrentCard() and emits nothing, so re-raising an
++    // already-running app left the reported foreground app stale.
++    // currentActiveWindow() also depends on a ListModel role, which cannot be
++    // bound to. Two property reads on a slow timer is cheap and keeps the
++    // reported state correct regardless of which path changed the current card;
++    // refresh() only assigns on a real change, so no spurious notifications.
++    Timer {
++        id: foregroundPoll
++        interval: 400
++        repeat: true
++        running: true
++        onTriggered: foregroundProxy.refresh()
++    }
++
++    Connections {
++        target: mainShellLoader
++        ignoreUnknownSignals: true
++        function onLoaded() { foregroundProxy.refresh(); }
++    }
+ }
+--- a/qml/CardShell.qml
++++ b/qml/CardShell.qml
+@@ -37,6 +37,9 @@
+ Rectangle {
+     id: root
+ 
++
++    // Exposed so the view root can reach the card view (foreground reporting).
++    property alias cardsAreaInstance: cardsArea
+     color: "black"
+     state: cardShellState // inherited from the main shell Loader
+ 
+--- a/qml/CardsArea.qml
++++ b/qml/CardsArea.qml
+@@ -42,6 +42,10 @@
+ WindowManager {
+     id: windowManager
+ 
++    // Exposed so the view root can report the foreground card to
++    // WebOSCompositorBase (see LuneOSViewRoot.qml).
++    property alias cardView: cardViewInstance
++
+     property real screenwidth: windowManager.width
+     property real screenheight: windowManager.height
+     property real screenDPI: Settings.dpi

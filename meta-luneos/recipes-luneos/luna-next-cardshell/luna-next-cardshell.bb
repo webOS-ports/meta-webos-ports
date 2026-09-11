@@ -25,7 +25,11 @@ inherit webos_filesystem_paths
 
 EXTRA_OECMAKE += "-DLUNA_NEXT_SHELL_DIR=${OE_QMAKE_PATH_QML}/WebOSCompositor"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
+
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
+    file://0001-Report-the-foreground-card-to-WebOSCompositorBase.patch \
+"
 S = "${WORKDIR}/git"
 
 # inheriting webos_application requires the appinfo.json file, which we don't have here.
