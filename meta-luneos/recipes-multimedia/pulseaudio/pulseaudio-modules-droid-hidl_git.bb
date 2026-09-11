@@ -16,6 +16,7 @@ SRCREV = "96f02cfe157ab271646f37ba374e2f5be3cfdf55"
 
 SRC_URI = "git://github.com/droidian/pulseaudio-modules-droid-hidl.git;branch=bookworm;protocol=https \
     file://0001-module-hidl-use-PA_MAJORMINOR-as-PA_MODULE_VERSION-.patch \
+    file://0002-module-droid-hidl-guard-dbus_done-against-a-null-pr.patch \
 "
 
 EXTRA_OECONF = "--with-module-dir=${libdir}/pulseaudio/modules"
