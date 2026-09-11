@@ -22,9 +22,9 @@ RDEPENDS:${PN} += "nyx-conf"
 # merged as commits) rather than webosose plus a patch stack. Pinned with a
 # plain SRCREV: submission tags are a webosose convention and this branch
 # carries none. The branch itself comes from webos_ports_ose_repo below.
-SRCREV = "76af80d1c7ed66f769b322e1cbc5ca545bd76b02"
+SRCREV = "6b719258c5c4ddfe91c8c299cdf5a5cc2e9172d2"
 
-PR = "r30"
+PR = "r33"
 
 EXTRA_OECMAKE += "\
     -DDISTRO_VERSION:STRING='${DISTRO_VERSION}' \
@@ -68,7 +68,7 @@ inherit webos_nyx_module_provider
 # downgrade to opkg on an update.
 PV = "7.1.0-26"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=herrie/battery"
 
 SRC_URI:append = " \
     file://${MACHINE}.cmake \

@@ -1,0 +1,267 @@
+From eccac191b83269931fc24f08ee94c9c617376040 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 11 Sep 2026 14:50:34 +0200
+Subject: [PATCH] battery: fall back to charge_counter when charge_now cannot
+ answer
+
+capacity_mAh has been reading -1 on a Qualcomm device whose battery
+reports its charge perfectly well. battery_coulomb() reads charge_now
+and only charge_now, and that is not the node the charge is on there.
+
+On a tissot both power supplies carry the figure, and neither carries it
+where we look:
+
+    battery/charge_counter = 2634787   battery/charge_now = absent
+    bms/charge_counter     = 2634787   bms/charge_now     = 0
+    bms/charge_now_raw     = 2634787   bms/charge_full    = 3080000
+
+The "battery" supply - the one the module picks - has no charge_now at
+all, and the "bms" supply has one that is hardwired to zero with the
+real value sitting in charge_now_raw beside it. So the answer was -1 on
+a pack that knows the answer and publishes it twice.
+
+charge_counter is the same quantity in the same unit, accumulated charge
+in uAh, and is the node Android reads for BATTERY_PROPERTY_CHARGE_COUNTER.
+Prefer charge_now where it works, so nothing changes on a device that
+was already answering, and fall back to charge_counter where it does
+not. A charge_now of zero falls back for the same reason: a pack with
+nothing left in it is a device that has switched off, so a zero there in
+practice only ever means the node is not wired up - though it is still
+returned rather than turned into a failure when there is no counter to
+prefer.
+
+On the tissot this turns capacity_mAh from -1 into 2634.787, which
+against the charge_full of 3080 mAh that battery_full40() already reads
+agrees with the 89% the gauge reports.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+
+Upstream-Status: Pending [carried until the fix is merged in the
+webOS-ports nyx-modules fork and SRCREV moves]
+---
+ src/battery/battery.c                | 42 +++++++++++++-
+ src/battery/tests/test_dev_battery.c | 84 ++++++++++++++++++++--------
+ 2 files changed, 101 insertions(+), 25 deletions(-)
+
+diff --git a/src/battery/battery.c b/src/battery/battery.c
+index ceab19c..32c0960 100644
+--- a/src/battery/battery.c
++++ b/src/battery/battery.c
+@@ -79,6 +79,7 @@ typedef struct
+ 	char charge_now_path[PATH_LEN];
+ 	char charge_full_path[PATH_LEN];
+ 	char charge_full_design_path[PATH_LEN];
++	char charge_counter_path[PATH_LEN];
+ 	char temperature_path[PATH_LEN];
+ 	char voltage_path[PATH_LEN];
+ 	char current_path[PATH_LEN];
+@@ -387,7 +388,26 @@ double battery_rawcoulomb(int index)
+ }
+ 
+ /**
+- * @brief Read battery current capacity
++ * @brief Read how much charge is in the battery right now, in mAh.
++ *
++ * charge_now is the obvious node and the one to prefer, but it is not the
++ * only node that carries this and on some drivers it is not the one that
++ * works. Qualcomm's charger and fuel-gauge drivers export the charge on the
++ * "battery" supply as charge_counter with no charge_now beside it at all,
++ * and put a charge_now on the companion "bms" supply that is hardwired to
++ * zero while the charge_now_raw next to it holds the real figure. Reading
++ * only charge_now therefore answers -1 on a pack that is reporting perfectly
++ * well.
++ *
++ * charge_counter is the same quantity in the same unit - accumulated charge
++ * in uAh - and is what Android reads for BATTERY_PROPERTY_CHARGE_COUNTER, so
++ * falling back to it costs nothing where charge_now works and is what makes
++ * the question answerable at all where it does not.
++ *
++ * A charge_now of zero falls back for the same reason: a pack with no charge
++ * left in it is a device that has switched off, so in practice a zero here
++ * only ever means the node is not wired up. It is still returned if there is
++ * no counter to prefer, rather than being turned into a failure.
+  *
+  * @retval Battery capacity (double)
+  */
+@@ -395,9 +415,23 @@ double battery_rawcoulomb(int index)
+ double battery_coulomb(int index)
+ {
+ 	battery_device_t *b = battery_at(index);
+-	int charge_now;
++	int charge_now, charge_counter;
++
++	if (!b)
++	{
++		return -1;
++	}
+ 
+-	if (!b || (charge_now = nyx_utils_read_value(b->charge_now_path)) < 0)
++	if ((charge_now = nyx_utils_read_value(b->charge_now_path)) <= 0)
++	{
++		if ((charge_counter =
++		         nyx_utils_read_value(b->charge_counter_path)) >= 0)
++		{
++			charge_now = charge_counter;
++		}
++	}
++
++	if (charge_now < 0)
+ 	{
+ 		return -1;
+ 	}
+@@ -490,6 +524,8 @@ static void battery_set_paths(battery_device_t *b, const char *sysfs_path,
+ 	snprintf(b->charge_full_path, PATH_LEN, "%s/charge_full", sysfs_path);
+ 	snprintf(b->charge_full_design_path, PATH_LEN, "%s/charge_full_design",
+ 	         sysfs_path);
++	snprintf(b->charge_counter_path, PATH_LEN, "%s/charge_counter",
++	         sysfs_path);
+ 	snprintf(b->temperature_path, PATH_LEN, "%s/temp", sysfs_path);
+ 	snprintf(b->voltage_path, PATH_LEN, "%s/voltage_now", sysfs_path);
+ 	snprintf(b->current_path, PATH_LEN, "%s/current_now", sysfs_path);
+diff --git a/src/battery/tests/test_dev_battery.c b/src/battery/tests/test_dev_battery.c
+index 93d0e71..3e19ecd 100644
+--- a/src/battery/tests/test_dev_battery.c
++++ b/src/battery/tests/test_dev_battery.c
+@@ -160,6 +160,7 @@ static char *test_batt_energy_now_path = "Battery/energy_now";
+ static char *test_batt_energy_full_path = "Battery/energy_full";
+ static char *test_batt_energy_full_design_path = "Battery/energy_full_design";
+ static char *test_batt_charge_now_path = "Battery/charge_now";
++static char *test_batt_charge_counter_path = "Battery/charge_counter";
+ static char *test_batt_charge_full_path = "Battery/charge_full";
+ static char *test_batt_charge_full_design_path = "Battery/charge_full_design";
+ static char *test_batt_temperature_path = "Battery/temp";
+@@ -211,6 +212,7 @@ int32_t test_batt_energy_now_path_retval = 0;
+ int32_t test_batt_energy_full_path_retval = 0;
+ int32_t test_batt_energy_full_design_path_retval = 0;
+ int32_t test_batt_charge_now_path_retval = 0;
++int32_t test_batt_charge_counter_path_retval = 0;
+ int32_t test_batt_charge_full_path_retval = 0;
+ int32_t test_batt_charge_full_design_path_retval = 0;
+ int32_t test_batt_temperature_path_retval = 0;
+@@ -231,17 +233,18 @@ int32_t nyx_utils_read_value(char *path)
+ {
+ 	//fprintf(stderr,"path (%s) passed to nyx_utils_read_value\n", path);
+ 	ifMatchReturnRetvalForTestPath(test_batt_capacity_path)
+-	else ifMatchReturnRetvalForTestPath(test_batt_energy_now_path)
+-		else ifMatchReturnRetvalForTestPath(test_batt_energy_full_path)
+-			else ifMatchReturnRetvalForTestPath(test_batt_energy_full_design_path)
+-				else ifMatchReturnRetvalForTestPath(test_batt_charge_now_path)
+-					else ifMatchReturnRetvalForTestPath(test_batt_charge_full_path)
+-						else ifMatchReturnRetvalForTestPath(test_batt_charge_full_design_path)
+-							else ifMatchReturnRetvalForTestPath(test_batt_temperature_path)
+-								else ifMatchReturnRetvalForTestPath(test_batt_voltage_path)
+-									else ifMatchReturnRetvalForTestPath(test_batt_current_path)
+-										else ifMatchReturnRetvalForTestPath(test_batt_present_path)
+-											else ifMatchReturnRetvalForTestPath(test_batt_fake_battery_path)
++		else ifMatchReturnRetvalForTestPath(test_batt_energy_now_path)
++			else ifMatchReturnRetvalForTestPath(test_batt_energy_full_path)
++				else ifMatchReturnRetvalForTestPath(test_batt_energy_full_design_path)
++					else ifMatchReturnRetvalForTestPath(test_batt_charge_now_path)
++						else ifMatchReturnRetvalForTestPath(test_batt_charge_counter_path)
++							else ifMatchReturnRetvalForTestPath(test_batt_charge_full_path)
++								else ifMatchReturnRetvalForTestPath(test_batt_charge_full_design_path)
++									else ifMatchReturnRetvalForTestPath(test_batt_temperature_path)
++										else ifMatchReturnRetvalForTestPath(test_batt_voltage_path)
++											else ifMatchReturnRetvalForTestPath(test_batt_current_path)
++												else ifMatchReturnRetvalForTestPath(test_batt_present_path)
++													else ifMatchReturnRetvalForTestPath(test_batt_fake_battery_path)
+ 
+ 												// bad path: print error, force g_assert, and return -1
+ 												fprintf(stderr, "Bad path (%s) passed to nyx_utils_read_value\n", path);
+@@ -457,6 +460,7 @@ int32_t test_batt_energy_now_path_exists = false;
+ int32_t test_batt_energy_full_path_exists = false;
+ int32_t test_batt_energy_full_design_path_exists = false;
+ int32_t test_batt_charge_now_path_exists = false;
++int32_t test_batt_charge_counter_path_exists = false;
+ int32_t test_batt_charge_full_path_exists = false;
+ int32_t test_batt_charge_full_design_path_exists = false;
+ int32_t test_batt_temperature_path_exists = false;
+@@ -504,17 +508,18 @@ gboolean g_file_test(const gchar *path, GFileTest test)
+ 	}
+ 
+ 	ifMatchReturnExistsForTestPath(test_batt_capacity_path)
+-	else ifMatchReturnExistsForTestPath(test_batt_energy_now_path)
+-		else ifMatchReturnExistsForTestPath(test_batt_energy_full_path)
+-			else ifMatchReturnExistsForTestPath(test_batt_energy_full_design_path)
+-				else ifMatchReturnExistsForTestPath(test_batt_charge_now_path)
+-					else ifMatchReturnExistsForTestPath(test_batt_charge_full_path)
+-						else ifMatchReturnExistsForTestPath(test_batt_charge_full_design_path)
+-							else ifMatchReturnExistsForTestPath(test_batt_temperature_path)
+-								else ifMatchReturnExistsForTestPath(test_batt_voltage_path)
+-									else ifMatchReturnExistsForTestPath(test_batt_current_path)
+-										else ifMatchReturnExistsForTestPath(test_batt_present_path)
+-											else ifMatchReturnExistsForTestPath(test_batt_fake_battery_path)
++		else ifMatchReturnExistsForTestPath(test_batt_energy_now_path)
++			else ifMatchReturnExistsForTestPath(test_batt_energy_full_path)
++				else ifMatchReturnExistsForTestPath(test_batt_energy_full_design_path)
++					else ifMatchReturnExistsForTestPath(test_batt_charge_now_path)
++						else ifMatchReturnExistsForTestPath(test_batt_charge_counter_path)
++							else ifMatchReturnExistsForTestPath(test_batt_charge_full_path)
++								else ifMatchReturnExistsForTestPath(test_batt_charge_full_design_path)
++									else ifMatchReturnExistsForTestPath(test_batt_temperature_path)
++										else ifMatchReturnExistsForTestPath(test_batt_voltage_path)
++											else ifMatchReturnExistsForTestPath(test_batt_current_path)
++												else ifMatchReturnExistsForTestPath(test_batt_present_path)
++													else ifMatchReturnExistsForTestPath(test_batt_fake_battery_path)
+ 
+ 												// bad path: print error, force g_assert, and return -1
+ 												fprintf(stderr, "Bad path (%s) passed to g_file_test\n", path);
+@@ -819,6 +824,7 @@ void reset_battery_path_retvals(void)
+ 	test_batt_energy_full_path_exists = false;
+ 	test_batt_energy_full_design_path_exists = false;
+ 	test_batt_charge_now_path_exists = false;
++	test_batt_charge_counter_path_exists = false;
+ 	test_batt_charge_full_path_exists = false;
+ 	test_batt_charge_full_design_path_exists = false;
+ 	test_batt_temperature_path_exists = false;
+@@ -832,6 +838,7 @@ void reset_battery_path_retvals(void)
+ 	test_batt_energy_full_path_retval = -1;
+ 	test_batt_energy_full_design_path_retval = -1;
+ 	test_batt_charge_now_path_retval = -1;
++	test_batt_charge_counter_path_retval = -1;
+ 	test_batt_charge_full_path_retval = -1;
+ 	test_batt_charge_full_design_path_retval = -1;
+ 	test_batt_temperature_path_retval = -1;
+@@ -1223,6 +1230,39 @@ test_battery_coulomb(/*api_test_fixture *fixture, gconstpointer unused*/)
+ 	test_batt_charge_now_path_retval = 1840000;
+ 	g_assert_true((1840000 / 1000) == battery_coulomb(BATTERY_PRIMARY));
+ 
++	// A driver with no charge_now at all, which is how Qualcomm's charger
++	// driver exports the "battery" supply: charge_counter carries the charge
++	// and nothing else does. 2634787 uAh is a tissot reading.
++	reset_battery_path_retvals();
++	test_batt_charge_counter_path_exists = true;
++	test_batt_charge_counter_path_retval = 2634787;
++	g_assert_true((2634787 / 1000.0) == battery_coulomb(BATTERY_PRIMARY));
++
++	// A charge_now that is present and permanently zero, which is how the
++	// same platform exports the "bms" supply. The counter beside it wins.
++	reset_battery_path_retvals();
++	test_batt_charge_now_path_exists = true;
++	test_batt_charge_now_path_retval = 0;
++	test_batt_charge_counter_path_exists = true;
++	test_batt_charge_counter_path_retval = 2634787;
++	g_assert_true((2634787 / 1000.0) == battery_coulomb(BATTERY_PRIMARY));
++
++	// charge_now wins when it has something to say, so nothing changes on a
++	// device that was already answering.
++	reset_battery_path_retvals();
++	test_batt_charge_now_path_exists = true;
++	test_batt_charge_now_path_retval = 1840000;
++	test_batt_charge_counter_path_exists = true;
++	test_batt_charge_counter_path_retval = 2634787;
++	g_assert_true((1840000 / 1000) == battery_coulomb(BATTERY_PRIMARY));
++
++	// A flat-zero charge_now with no counter to prefer is still reported as
++	// zero rather than turned into a failure.
++	reset_battery_path_retvals();
++	test_batt_charge_now_path_exists = true;
++	test_batt_charge_now_path_retval = 0;
++	g_assert_true(0 == battery_coulomb(BATTERY_PRIMARY));
++
+ 	forget_batteries();
+ }
+ 
+-- 
+2.53.0
+
