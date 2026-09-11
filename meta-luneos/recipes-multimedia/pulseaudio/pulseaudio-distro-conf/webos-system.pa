@@ -18,13 +18,29 @@
 # This startup script is used only if PulseAudio is started in system
 # mode.
 
+### Restore each card's last-used profile. Must be loaded before the modules
+### that create cards below, because it acts on the card-new hook -- loaded
+### afterwards it would never see the cards that already exist.
+load-module module-card-restore
+
 ### Automatically load driver modules depending on the hardware available
-.ifexists module-udev-detect.so
-load-module module-udev-detect
-.else
-### Use the static hardware detection module (for systems that lack udev/hal support)
-load-module module-detect
-.endif
+###
+### Left off deliberately. audiod owns device loading now: it reads
+### audiod_internal_device_loading.json, tells module-palm-policy which sinks to
+### create and by what name, and routes the virtual sinks onto them. udev-detect
+### gets there first, loads module-alsa-card for every card it finds and takes
+### the PCM with it, so audiod's own sink then fails to load and nothing is ever
+### routed - silently, because a card was found and a sink does exist, just not
+### the one anything is looking for.
+###
+### Turn these back on together with audiod, not instead of it, if a machine
+### ever needs PulseAudio to do the discovering.
+#.ifexists module-udev-detect.so
+#load-module module-udev-detect
+#.else
+#### Use the static hardware detection module (for systems that lack udev/hal support)
+#load-module module-detect
+#.endif
 
 ### Load several protocols
 .ifexists module-esound-protocol-unix.so
@@ -34,8 +50,42 @@ load-module module-native-protocol-unix auth-anonymous=true
 
 ### LuneOS addition: Automatically load the Pulseaudio Droid
 .ifexists module-droid-card.so
-load-module module-droid-card
+# /run/droid-audio is generated before startup (droid-audio-config-gen,
+# ExecStartPre drop-in): a copy of the vendor audio policy XML with input
+# mix ports rewritten to 16-bit so the droid source (microphone) can be
+# created - many vendor HALs advertise only 24-bit input, which
+# pulseaudio-modules-droid cannot match.
+#
+# The generator writes the file whenever the device has a vendor audio
+# policy XML at all (verbatim copy if patching fails), so the config path
+# is authoritative; .nofail keeps pulseaudio alive on the pathological
+# no-vendor-XML case instead of failing the whole daemon. Note the CLI
+# language cannot nest .ifexists and module-droid-card is not load-once
+# (a plain-load fallback line here would create a duplicate card).
+.nofail
+load-module module-droid-card config=/run/droid-audio/audio_policy_configuration.xml
+.fail
+# audiod and module-palm-policy route by sink name: audioRouter hands a name to
+# setSoundOutputOnRange() and the policy module resolves it with pa_namereg_get().
+# The name they expect is pcm_output, but module-droid-card names its sink
+# sink.primary_output, so nothing resolves and every stream stays on the virtual
+# sink it was created on - audible as complete silence with a perfectly healthy
+# audio stack underneath.
+#
+# Alias it rather than renaming anything. The Android HAL has to keep the card
+# on these devices - it is what sets up the mixer paths, so talking to the PCM
+# directly tends to give you a device that opens and stays silent - and audiod
+# is told the sink is preloaded so it never tries to load one itself.
 .endif
+
+# .nofail rather than .ifexists: this has to sit outside the block above because
+# PulseAudio refuses to nest .ifexists ("Nested .ifexists ... not supported" and
+# the daemon then fails to start at all), and on a machine with no droid card
+# there is no sink.primary_output to remap, so the load is expected to fail
+# there and must not be fatal.
+.nofail
+load-module module-remap-sink sink_name=pcm_output master=sink.primary_output remix=no
+.fail
 
 .ifexists module-droid-hidl.so
 load-module module-droid-hidl
@@ -44,7 +94,7 @@ load-module module-droid-hidl
 
 .ifexists module-dbus-protocol.so
 load-module module-dbus-protocol
-.endif 
+.endif
 
 ### Automatically restore the volume of streams and devices
 load-module module-stream-restore
@@ -64,3 +114,17 @@ load-module module-suspend-on-idle
 
 ### Enable positioned event sounds
 load-module module-position-event-sounds
+### LuneOS addition: audiod's control socket.
+### audiod does not mix through libpulse -- it drives PulseAudio over an abstract
+### UNIX socket served by this module, and is inert without it. Guarded by
+### .ifexists so this is a no-op on images that still use audio-service: the
+### module is only installed as a runtime dependency of audiod.
+
+.ifexists module-palm-policy.so
+# Virtual sinks/sources module-palm-policy routes between. It resolves these by
+# name and aborts if one is missing, so they must exist before it loads. Kept
+# inside this guard so images built with audio-service instead of audiod, which
+# has no policy module, do not carry 30 unused null sinks.
+.include /etc/pulse/webos-virtual-devices.pa
+load-module module-palm-policy
+.endif
