@@ -43,6 +43,7 @@ RDEPENDS:${PN} = " \
   udev-extraconf \
   umtprd \
   webos-connman-adapter \
+  ${VPN_RDEPENDS} \
   webos-telephonyd \
   iw \
   \
@@ -56,6 +57,7 @@ RDEPENDS:${PN} = " \
   \
   org.webosports.app.preware \
   org.webosports.service.ipkg \
+  ${TORCH_RDEPENDS} \
   com.webos.app.enactbrowser \
   \
   ${VIRTUAL-RUNTIME_speech_synthesis} \
@@ -176,6 +178,35 @@ FINGERPRINT_RDEPENDS = " \
     webos-fingerprint-adapter \
 "
 
+# Face unlock. luneos-faced pulls frames from com.webos.service.camera2 into
+# shared memory with no preview, runs them through libfart (detection,
+# MiniFASNet passive anti-spoofing, MobileFaceNet match) and exposes
+# com.webos.service.faceunlock for the shell (lockscreen) and the Settings app
+# (enrollment). libfart comes in as an RDEPENDS of luneos-faced.
+#
+# NOT halium-only. luneos-faced talks to com.webos.service.camera2 over luna,
+# which is machine-independent and serves the v4l2 path on mainline machines just
+# as it serves droid on halium ones - the same reason com.webos.service.camera
+# itself ships from packagegroup-webos-extended rather than from here. libfart's
+# one Android-shaped dependency, the NNAPI delegate, is off by default since
+# FART_ENABLE_NNAPI, precisely so it works where hwservicemanager does not exist.
+#
+# The gate is 64-bit, not halium. libfart bundles ~66 MB of TFLite models and
+# drags in opencv and libtensorflow-lite, which is not worth putting on the armv7
+# devices (mako, tenderloin, hammerhead, athene, onyx, halium-arm, mindphone) -
+# where none of it has ever been built, let alone run an inference at a sensible
+# frame rate. aarch64 covers the halium machines and the mainline pine64 ones
+# alike, and does not silently exclude a new machine the way a per-device list
+# does.
+#
+# This has to track REMOVE_FACEUNLOCK_APP_CMD in org.webosports.app.settings-qml:
+# ship the panel without the service and the shell just retries
+# com.webos.service.faceunlock every three seconds while ls-hubd logs
+# LSHUB_NOT_LSTED for a bus name nothing ever registers.
+FACEUNLOCK_RDEPENDS = " \
+    luneos-faced \
+"
+
 # NFC stack: nfcd talks to the Android NFC HAL over binder, webos-nfc-adapter
 # bridges its D-Bus API onto the luna-service2 bus for apps and the shell.
 # Only added for machines that actually have an NFC controller.
@@ -204,6 +235,42 @@ PRINT_RDEPENDS = " \
     cups \
     cups-filters \
     avahi-daemon \
+"
+
+# VPN. luneos-vpn-adapter bridges connman-vpnd (net.connman.vpn over gio) onto
+# the luna-service2 bus as com.webos.service.vpn, which is what the Settings VPN
+# panel calls - getAgentFormFields, getProfileDetails, importProfile,
+# importCertificate, uiPromptResponse. Ship the panel without it and every one of
+# those answers "Service does not exist: com.webos.service.vpn".
+#
+# Not gated on a machine, for the same reason printing is not: connman-vpnd is
+# pure mainline, there is no Android side to it, and connman-vpn is already in
+# the image. The adapter itself is ~150 KB and its runtime deps (connman-vpn,
+# glib, libpbnjson, luna-service2) are all present already.
+#
+# The per-provider tunnel plugins are RRECOMMENDS of the adapter rather than
+# listed here, so what getAgents reports as available follows the package that
+# actually consumes them.
+VPN_RDEPENDS = " \
+    luneos-vpn-adapter \
+"
+
+# Torch (flashlight). org.webosports.service.torch serves the torch API on the
+# luna-service2 bus for the shell's power menu; the shell subscribes to it and
+# renders the entry "Unavailable" when nobody answers, which looks exactly like a
+# device with no torch at all.
+#
+# Not gated on a machine: everything device-specific sits behind NYX_DEVICE_LED
+# "Torch", which resolves at runtime to whichever nyx module the machine built -
+# the sysfs one or the hybris camera-service one - so the service itself only
+# needs nyx-lib. Verified on sargo: nyxLedTorch.module is installed and
+# /sys/class/leds/led:torch_0 drives the LED.
+#
+# The client grant the shell needs (torch.operation, which luna-surfacemanager
+# does not list for com.webos.surfacemanager*) ships from the component itself,
+# so there is nothing to add here for it.
+TORCH_RDEPENDS = " \
+    org.webosports.service.torch \
 "
 
 # eSIM: lpac is the LPA (SGP.22 profile download/management), luneos-esim-adapter
@@ -249,7 +316,6 @@ RDEPENDS:${PN}:append:rosy = " alsa-utils-systemd mesa-megadriver rmtfs qrtr rpm
 
 # Fingerprint-sensor devices only. These machine names come from the LuneOS
 # Halium layer; on a tree without them the overrides are simply inert.
-RDEPENDS:${PN}:append:sargo = " ${FINGERPRINT_RDEPENDS}"
 RDEPENDS:${PN}:append:sagit = " ${FINGERPRINT_RDEPENDS}"
 RDEPENDS:${PN}:append:mido-halium = " ${FINGERPRINT_RDEPENDS}"
 RDEPENDS:${PN}:append:tissot-halium = " ${FINGERPRINT_RDEPENDS}"
@@ -257,18 +323,21 @@ RDEPENDS:${PN}:append:tissot-halium = " ${FINGERPRINT_RDEPENDS}"
 # sensor (the adapter just reports unavailable).
 RDEPENDS:${PN}:append:halium-arm64 = " ${FINGERPRINT_RDEPENDS}"
 
+# Face unlock, on every 64-bit machine - halium and mainline alike. Harmless on
+# one with no usable camera: luneos-faced just reports available=false.
+RDEPENDS:${PN}:append:aarch64 = " ${FACEUNLOCK_RDEPENDS}"
+
 # NFC-capable devices only.
 RDEPENDS:${PN}:append:mako = " ${NFC_RDEPENDS}"
 RDEPENDS:${PN}:append:hammerhead-halium = " ${NFC_RDEPENDS}"
-RDEPENDS:${PN}:append:sargo = " ${NFC_RDEPENDS}"
 RDEPENDS:${PN}:append:sagit = " ${NFC_RDEPENDS}"
 # The GSI machine can land on any device; the stack is harmless without an
 # NFC controller (nfcd just reports unavailable).
 RDEPENDS:${PN}:append:halium-arm64 = " ${NFC_RDEPENDS}"
 
-# sargo has a real eUICC; the generic halium images cover the rest, where an
-# adapter card is the way in.
-RDEPENDS:${PN}:append:sargo = " ${ESIM_RDEPENDS}"
+# sargo has a real eUICC and the generic halium images cover it and the rest,
+# where an adapter card is the way in. No :sargo line: sargo builds only a boot
+# image now (see sargo.conf) and runs this rootfs.
 RDEPENDS:${PN}:append:halium-arm64 = " ${ESIM_RDEPENDS}"
 
 # Keep this list in step with COMPATIBLE_MACHINE in waydroid.bb: that only
