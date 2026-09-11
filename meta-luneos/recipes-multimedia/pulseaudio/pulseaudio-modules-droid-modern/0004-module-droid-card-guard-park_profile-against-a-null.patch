@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andrew <andrew@localhost>
+Date: Fri, 11 Sep 2026 06:55:00 -0400
+Subject: [PATCH] module-droid-card: guard park_profile against a null
+ am->source
+
+Ported from the jb2q-fork patch of the same name in the recipe next to
+this one - park_profile() has been byte-for-byte identical between the
+two forks since before the Android-11 split, this bug included.
+
+If the Android input stream failed to open (e.g. the HAL rejected the
+open call), pa_droid_source_new() returns NULL and am->source is left
+NULL with no error propagated - init_profile() and update_profile()
+don't check it either. park_profile() (called whenever the active card
+profile is switched away from) then unconditionally calls
+pa_source_set_port(am->source, ...) - a PulseAudio core API that hard
+asserts on a null source, aborting the whole daemon.
+
+Originally found and fixed against the jb2q fork (2026-09-04) while
+tracking down a real SIGABRT on this project's own device, before
+discovering (2026-09-11) that jb2q is the wrong generation for that
+device's Android 14 vendor in the first place - see the SUMMARY of
+pulseaudio-modules-droid_git.bb. Porting the same one-line guard here
+so the correct-generation build carries it too.
+
+The output/sink side already only sets a port for primary mappings and
+happens to always succeed in practice; guard the input/source side the
+same way sink already implicitly is, by additionally requiring
+am->source to be non-null before touching it.
+
+Signed-off-by: Andrew <andrew@localhost>
+Upstream-Status: Pending
+---
+ src/droid/module-droid-card.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/droid/module-droid-card.c b/src/droid/module-droid-card.c
+--- a/src/droid/module-droid-card.c
++++ b/src/droid/module-droid-card.c
+@@ -445,7 +445,7 @@ static void park_profile(pa_droid_profile *dp) {
+ 
+     /* Virtual profiles don't have input mappings. */
+     if ((am = dp->input_mapping)) {
+-        if (pa_droid_mapping_is_primary(am))
++        if (pa_droid_mapping_is_primary(am) && am->source)
+             pa_source_set_port(am->source, PA_DROID_INPUT_PARKING, false);
+     };
+ }
+-- 
+2.53.0
