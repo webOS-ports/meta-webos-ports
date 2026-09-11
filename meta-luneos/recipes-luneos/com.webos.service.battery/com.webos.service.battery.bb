@@ -10,7 +10,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "nyx-lib luna-service2 json-c glib-2.0"
 
 PV = "1.0.0-1+git"
-SRCREV = "c95ab6a8c9c6c21e656d68f6f8c79ef9ea46df6b"
+PR = "r1"
+SRCREV = "622c176e8d55de4b266843be4f2185e876f3d87d"
 
 inherit webos_ports_fork_repo
 inherit webos_cmake
@@ -18,14 +19,5 @@ inherit pkgconfig
 inherit webos_system_bus
 inherit webos_systemd
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
-    file://0001-Fix-callback-and-time-struct-types-for-GCC-15.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
-
-# /OE/build/luneos-master/webos-ports/tmp-glibc/work/core2-64-webos-linux/powerd/4.0.0-25+gitAUTOINC+bbb74058dc-r0/recipe-sysroot-native/usr/bin/x86_64-webos-linux/../../libexec/x86_64-webos-linux/gcc/x86_64-webos-linux/10.2.0/ld: error: powerd/CMakeFiles/powerd.dir/charging/charging_logic.c.o: multiple definition of 'battery_ctia_params'
-# /OE/build/luneos-master/webos-ports/tmp-glibc/work/core2-64-webos-linux/powerd/4.0.0-25+gitAUTOINC+bbb74058dc-r0/recipe-sysroot-native/usr/bin/x86_64-webos-linux/../../libexec/x86_64-webos-linux/gcc/x86_64-webos-linux/10.2.0/ld: powerd/CMakeFiles/powerd.dir/charging/battery.c.o: previous definition here
-CFLAGS += "-fcommon"
-
-# com.webos.service.battery/1.0.0-1+git/git/batteryd/utils/uevent.c:88:9: error: too many arguments to function 'func'; expected 0, have 2
-CFLAGS += "-std=gnu17"
