@@ -2,17 +2,21 @@
 #
 # Source layout for webruntime 151.
 #
-# 108 and 120 fetch a ready-made LG tree from the webOS OSE git server, where
-# //neva, //webos and //ozone are already part of the checkout. There is no LG
-# drop for 151, so this one is assembled instead: pristine Chromium from the
-# upstream tarball, then three patch layers applied in order.
+# The retired 108 and 120 recipes fetched a ready-made LG tree from the webOS
+# OSE git server, where //neva, //webos and //ozone were already part of the
+# checkout. There is no LG drop for 151, so this one is assembled instead:
+# pristine Chromium from the upstream tarball, then three patch layers applied
+# in order.
 #
 #   1. neva      the LG port itself (//neva, //webos, //ozone plus the
 #                modifications those need in upstream subsystems). Generated
-#                from the 120 -> 151 forward port; see files/151/README.md.
+#                from the 120 -> 151 forward port; see the README committed in
+#                the chromium151 repo (a97ebbdf50).
 #   2. oe        OpenEmbedded build fixes, taken from meta-browser so they stay
 #                in sync with the layer that maintains them.
 #   3. luneos    the LuneOS patches, unchanged in intent from the 120 series.
+#                These used to live in files/ as 0001..0012; they are commits
+#                in the repo now, so files/ no longer carries them.
 #
 # Keeping the three apart is the point: when Chromium 152 lands, each layer can
 # be rebased on its own and it stays obvious which changes are LG's, which are
