@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: LuneOS Porter <luneos@webos-ports.org>
+Date: Wed, 9 Sep 2026 09:18:00 -0400
+Subject: [PATCH] webosshellsurface: handle set_state for unmapped surfaces
+
+Chromium Ozone Wayland (WebosShellSurfaceWrapper) calls
+wl_webos_shell_surface_set_state(FULLSCREEN) during window creation
+before attaching a buffer.
+
+Upstream code ignored set_state if !m_surface->isMapped(), dropping the
+request without emitting stateChangeRequested and without sending
+wl_webos_shell_surface_send_state_changed back to the client.
+Because Chromium holds frame submission until the state change is confirmed,
+this caused a deadlock where web apps (Settings, Messages, Clock, etc.)
+never attached buffers and remained invisible.
+
+Handle set_state for unmapped surfaces by updating m_state, sending
+state_changed immediately to the client, and emitting stateChangeRequested.
+
+Upstream-Status: Inappropriate [LuneOS specific]
+---
+ modules/weboscompositor/shell/webosshellsurface.cpp | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+--- a/modules/weboscompositor/shell/webosshellsurface.cpp
++++ b/modules/weboscompositor/shell/webosshellsurface.cpp
+@@ -297,7 +297,13 @@ void WebOSShellSurface::set_state(struct wl_client *client, struct wl_resource *
+     }
+ 
+     if (!that->m_surface->isMapped()) {
+-        qWarning() << "Ignored for unmapped surface" << that->m_surface << that << that->m_state << newState;
++        qInfo() << "Handling set_state for unmapped surface:" << that->m_surface << that << that->m_state << "->" << newState;
++        that->m_state = newState;
++        that->m_preparedState = Qt::WindowNoState;
++        if (that->m_shellSurface) {
++            wl_webos_shell_surface_send_state_changed(that->m_shellSurface, waylandStateFromQtWindowState(newState));
++        }
++        emit that->stateChangeRequested(newState);
+         return;
+     }
+ 
+-- 
+2.43.0

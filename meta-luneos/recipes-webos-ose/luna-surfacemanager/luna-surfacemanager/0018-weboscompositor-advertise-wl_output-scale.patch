@@ -1,0 +1,119 @@
+From: Andrew Hunt <achunt@bellsouth.net>
+Date: Thu, 10 Sep 2026 14:55:00 -0400
+Subject: [PATCH] weboscompositor: advertise wl_output.scale via its own knob
+
+Web apps on a 1080x2400 phone panel were unusable: either laid out at the full
+1080 CSS px (everything tiny), or - with a device pixel ratio configured - laid
+out small and then stretched, i.e. blurry AND oversized at the same time.
+
+Measured on bluejay with a test app reporting its own viewport: innerWidth=450,
+devicePixelRatio=1, and rulers of known CSS width came out 5.75x on screen,
+i.e. 2.4 squared. Chromium's --force-device-scale-factor moves LAYOUT but not
+RASTERISATION on Ozone/Wayland, so the ratio was applied twice: once shrinking
+the layout, once stretching the undersized buffer.
+
+wl_output.scale is the protocol-level mechanism for this and needs no client
+flag, but the compositor never called QWaylandOutput::setScaleFactor() at all.
+
+The scale gets its OWN setting, WEBOS_COMPOSITOR_OUTPUT_SCALE, rather than
+reusing the "s" ratio of compositorGeometry. That ratio also sizes the
+compositor's own QML scene - weboscompositorwindow.cpp does
+resize(screenSize / dpr) and derives outputGeometry from it - so driving the
+client scale from it shrinks the entire shell into the top-left corner of the
+panel. Learned the hard way; the two must stay independent.
+
+ - registerWindow()/commitOutputUpdate(): call setScaleFactor(). The output
+   mode stays PHYSICAL and compositorGeometry semantics are untouched.
+ - The wl_shell configure from 0015 now sends physical/scale, replacing a
+   hardcoded 2.4 divisor that was the wrong lever entirely.
+
+Default is 1, i.e. inert unless WEBOS_COMPOSITOR_OUTPUT_SCALE is set. Setting
+it to 3 on a 1080x2400 panel gives clients a 360 CSS px viewport - the standard
+phone width - rasterised into a full 1080x2400 buffer.
+
+Upstream-Status: Pending
+---
+--- a/modules/weboscompositor/weboscorecompositor.cpp
++++ b/modules/weboscompositor/weboscorecompositor.cpp
+@@ -206,6 +206,22 @@
+ #endif
+ }
+ 
++// Client-facing Wayland output scale (wl_output.scale).
++//
++// Deliberately NOT derived from the "s" ratio of compositorGeometry: that field
++// also sizes the compositor's OWN QML scene (weboscompositorwindow.cpp does
++// resize(screenSize / dpr) and derives outputGeometry from it), so reusing it
++// shrinks the whole shell into the corner of the panel instead of only changing
++// what clients are told. The two have to stay independent knobs.
++//
++// wl_output.scale is an integer in the protocol. 1 means "unchanged", which is
++// the default when unset, so this is inert until configured.
++static int webOSOutputScale()
++{
++    int scale = qEnvironmentVariableIntValue("WEBOS_COMPOSITOR_OUTPUT_SCALE");
++    return scale > 0 ? scale : 1;
++}
++
+ WebOSCoreCompositor::WebOSCoreCompositor(ExtensionFlags extensions, const char *socketName)
+     : QWaylandCompositor(*new WebOSCoreCompositorPrivate(this))
+     , m_previousFullscreenSurfaceItem(0)
+@@ -249,22 +265,23 @@
+             return;
+ 
+         auto sendConfig = [this, shellSurface]() {
+-            QSize size = m_outputGeometry.isValid() ? m_outputGeometry.size() : (defaultOutput() ? defaultOutput()->geometry().size() : QSize(1080, 2400));
+-            double dpr = 2.4;
+-            if (qEnvironmentVariableIsSet("LUNEOS_DPR")) {
+-                bool ok = false;
+-                double val = qgetenv("LUNEOS_DPR").toDouble(&ok);
+-                if (ok && val > 0.1)
+-                    dpr = val;
+-            } else if (qEnvironmentVariableIsSet("WEBOS_DEVICE_PIXEL_RATIO")) {
+-                bool ok = false;
+-                double val = qgetenv("WEBOS_DEVICE_PIXEL_RATIO").toDouble(&ok);
+-                if (ok && (val > 1.05 || val < 0.95) && val > 0.1)
+-                    dpr = val;
+-            }
+-            if (dpr > 0.1)
+-                size = QSize(qRound(size.width() / dpr), qRound(size.height() / dpr));
+-            qInfo() << "Sending wl_shell_surface configure size:" << size << "(dpr:" << dpr << ") to" << shellSurface;
++            // wl_shell_surface.configure carries SURFACE-LOCAL (logical) size.
++            // The output mode is physical, so divide by the output scale; the
++            // client multiplies back up when it rasterises.
++            //
++            // The previous version divided by a hardcoded 2.4 from
++            // WEBOS_DEVICE_PIXEL_RATIO/LUNEOS_DPR. That was the wrong lever: it
++            // shrank the client's LAYOUT while the client still rasterised at
++            // devicePixelRatio 1, so the buffer came out scale^2 too small and
++            // was then stretched - measured at 5.75x on a 2.4 setting.
++            const int scale = webOSOutputScale();
++            QSize size = m_outputGeometry.isValid() ? m_outputGeometry.size()
++                : (defaultOutput() ? defaultOutput()->geometry().size() : QSize(1080, 2400));
++            if (scale > 1)
++                size = QSize(qRound((qreal) size.width() / scale),
++                             qRound((qreal) size.height() / scale));
++            qInfo() << "Sending wl_shell_surface configure size:" << size
++                    << "(output scale:" << scale << ") to" << shellSurface;
+             shellSurface->sendConfigure(size, QWaylandWlShellSurface::NoneEdge);
+         };
+ 
+@@ -360,6 +377,10 @@
+     QWaylandOutputMode mode(m_outputGeometry.isValid() ? m_outputGeometry.size() : window->size(), 60000);
+     output->addMode(mode, true);
+     output->setCurrentMode(mode);
++    // Tell clients the output is HiDPI so they rasterise at full resolution.
++    // Chromium's --force-device-scale-factor moves layout but NOT rasterisation
++    // on Ozone/Wayland, so wl_output.scale is the mechanism that actually works.
++    output->setScaleFactor(webOSOutputScale());
+ 
+     WebOSCompositorWindow *webosWindow = static_cast<WebOSCompositorWindow *>(window);
+     insertToWindows(webosWindow);
+@@ -1425,6 +1446,7 @@
+     QWaylandOutputMode mode(geometry.size() * ratio, output->currentMode().refreshRate());
+     output->addMode(mode, true);
+     output->setCurrentMode(mode);
++    output->setScaleFactor(webOSOutputScale());
+ 
+     if (rotation % 360 == 270)
+         setScreenOrientation(output, Qt::PortraitOrientation);

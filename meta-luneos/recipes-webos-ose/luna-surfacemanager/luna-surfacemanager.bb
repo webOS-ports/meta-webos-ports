@@ -12,7 +12,7 @@ LIC_FILES_CHKSUM = " \
 DEPENDS = "qtdeclarative wayland-native qtwayland qtwayland-native qt-features-webos pmloglib webos-wayland-extensions glib-2.0 qtwayland-webos"
 
 WEBOS_VERSION = "2.0.0-402_3fae203063a880806a982cb522f235ca04d1c9a5"
-PR = "r61"
+PR = "r62"
 
 inherit webos_qmake6
 inherit pkgconfig
@@ -37,6 +37,10 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0012-WebOSSurfaceItem-close-Wayland-client-fallback-on-Cl.patch \
     file://0013-Wait-for-DRI-card-on-EGLFS-platform.patch \
     file://0014-ViewStateController.qml-Fix-TypeError.patch \
+    file://0015-weboscorecompositor-drive-wl_shell-configure.patch \
+    file://0016-product.env.in-skip-writeback-connectors.patch \
+    file://0017-webosshellsurface-handle-unmapped-set_state.patch \
+    file://0018-weboscompositor-advertise-wl_output-scale.patch \
 "
 
 S = "${WORKDIR}/git"
