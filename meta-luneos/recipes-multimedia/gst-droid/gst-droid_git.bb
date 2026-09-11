@@ -36,6 +36,8 @@ SRC_URI = "git://github.com/sailfishos/gst-droid.git;branch=master;protocol=http
     file://0003-droidcamsrc-set-recording-hint-in-video-mode.patch \
     file://gst-droid-gate.sh \
     file://gst-droid-gate.service \
+    file://camera-droid-heal.sh \
+    file://camera-droid-heal.service \
 "
 
 inherit meson pkgconfig systemd
@@ -68,16 +70,22 @@ do_install:append() {
     sed -i -e "s|@GST_DROID_PLUGINDIR@|${GST_DROID_PLUGINDIR}|" \
         ${D}${bindir}/gst-droid-gate.sh
 
+    install -m 0755 ${UNPACKDIR}/camera-droid-heal.sh ${D}${bindir}/
+    sed -i -e "s|@GST_DROID_PLUGINDIR@|${GST_DROID_PLUGINDIR}|" \
+        ${D}${bindir}/camera-droid-heal.sh
+
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${UNPACKDIR}/gst-droid-gate.service ${D}${systemd_system_unitdir}/
+    install -m 0644 ${UNPACKDIR}/camera-droid-heal.service ${D}${systemd_system_unitdir}/
     sed -i -e "s|@BINDIR@|${bindir}|" \
-        ${D}${systemd_system_unitdir}/gst-droid-gate.service
+        ${D}${systemd_system_unitdir}/gst-droid-gate.service \
+        ${D}${systemd_system_unitdir}/camera-droid-heal.service
 }
 
 # binder-ping, used by the gate to ask hwservicemanager whether the OMX service
 # is registered, comes from libgbinder-tools.
 RDEPENDS:${PN} += "libgbinder-tools"
 
-SYSTEMD_SERVICE:${PN} = "gst-droid-gate.service"
+SYSTEMD_SERVICE:${PN} = "gst-droid-gate.service camera-droid-heal.service"
 
 FILES:${PN} += "${GST_DROID_PLUGINDIR}/libgstdroid.so"
