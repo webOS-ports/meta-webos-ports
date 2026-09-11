@@ -85,15 +85,13 @@ do_copy_target_rustlibs () {
 }
 addtask copy_target_rustlibs after do_configure before do_compile
 
-# The 120 recipe carries ten clang-22 fixup patches
-# (webruntime-clang/0001-skcms... through 0010-blink-...gperf-33). They are
-# deliberately NOT carried here: they fix Chromium 120 code against a clang far
-# newer than it was written for, and M151 is contemporary with LLVM 21/22.
-# Several are known fixed upstream (the perfetto and blink template-keyword
-# cases, the sandbox SYS_SECCOMP one is now covered by meta-browser's
-# fix-SYS_SECCOMP-redefinition.patch). If any turn out to still be needed, add
-# them back one at a time rather than reinstating the set - each one that is no
-# longer required is a patch that will fail to apply on the next uprev.
+# The retired 120 recipe carried ten clang-22 fixup patches, dropped together
+# with it. They fixed Chromium 120 code against a clang far newer than it was
+# written for; M151 is contemporary with LLVM 21/22 and needs none of them.
+# Several were known fixed upstream (the perfetto and blink template-keyword
+# cases; the sandbox SYS_SECCOMP one is covered by meta-browser's
+# fix-SYS_SECCOMP-redefinition.patch, carried as a commit in the chromium151
+# repo). See git history of this directory if one ever needs resurrecting.
 
 # Don't use gold even when selected by default with ld-is-gold in DISTRO_FEATURES
 EXTRA_OEGN_GOLD = ""
@@ -118,6 +116,7 @@ INCLUDE_PATH_LIBCXX += " \
 
 # tcmalloc build is broken with clang++ and -mthumb
 ARM_INSTRUCTION_SET = "arm"
+
 # M151 turns -Wunsafe-buffer-usage on in places and is generally stricter than
 # 120. treat_warnings_as_errors is already false in webruntime-common.inc; keep
 # the narrowing demotion from the 120 recipe until a build shows it is
@@ -244,12 +243,15 @@ do_configure:prepend() {
 # webruntime-common.inc feeds PARALLEL_MAKE straight into NINJA_OPTS, and
 # local.conf sets "-j 64" globally, so this is the per-recipe override.
 #
-# The host is a Threadripper 2990WX, 32 cores / 64 threads, 125 GB. It is only
-# that roomy when the BlueStacks guest is down AND its hugepage pool has been
-# released - qemu reserves 32768 x 2 MB, and that 64 GB stays reserved even
-# after the VM exits, showing up as "used" that no process accounts for
-# (check HugePages_Total in /proc/meminfo; free it with
-# sysctl vm.nr_hugepages=0). With the guest running, drop this to about 24.
+# The host is a Threadripper 2990WX, 32 cores / 64 threads, 125 GB.
+#
+# -j 64 is still the memory cliff to watch: M151's clang invocations are big
+# enough that 64 of them alongside a desktop session fills the 15 GB swap, and
+# once swap is full the short python codegen actions (mojom bindings) degrade
+# far worse than the compiles - measured at 2s -> 240s per action on the
+# 2026-09 build. A full swap never drains by itself; swapoff/swapon once RAM
+# allows. If builds keep thrashing, prefer lowering this to -j 40..48 over any
+# GN-side change.
 #
 # concurrent_links stays at 1 regardless: Chromium sizes it from MemTotal at
 # 30-50 GB per link, and the libcbe.so lld invocation is the single biggest
