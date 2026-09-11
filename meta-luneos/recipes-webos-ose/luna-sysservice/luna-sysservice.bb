@@ -16,12 +16,28 @@ DEPENDS = "luna-service2 libpbnjson uriparser libxml2 sqlite3 pmloglib nyx-lib l
 
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_ntp} tzcode luna-init"
 
-WEBOS_VERSION = "4.4.0-31_b768ff291f1bed353c8652bd430cc43ee80c8c79"
-PR = "r16"
+# Built from the webOS-ports fork (webosose plus the LuneOS changes merged as
+# commits) rather than webosose plus a patch stack: what used to be the
+# 0001-0009 patch series plus the CMake target_link_libraries fix in this
+# directory now lives as commits there, so nothing is applied here any more.
+# Pinned with a plain SRCREV - submission tags are a webosose convention and
+# this branch carries none. The branch itself comes from webos_ports_ose_repo
+# below.
+SRCREV = "c2f38bf1fd71f9cc35ce983aa548aefdb8aaa4bf"
+
+# Set outright rather than derived from a submission tag via WEBOS_VERSION.
+# Kept monotonic: the patch-stack recipe shipped 4.4.0-31, so anything lower
+# would look like a downgrade to opkg on an update.
+PV = "4.4.0-32"
+
+PR = "r17"
 
 inherit webos_component
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+# The code audit work lives on herrie/fixes, not on the branch
+# webos_ports_ose_repo defaults to, so the SRCREV above is not reachable from
+# webOS-ports/webOS-OSE. Drop this line once herrie/fixes is merged there.
+WEBOS_GIT_PARAM_BRANCH = "herrie/fixes"
+inherit webos_ports_ose_repo
 inherit webos_system_bus
 inherit webos_daemon
 inherit webos_cmake
@@ -30,28 +46,19 @@ PACKAGECONFIG ??= "qt"
 PACKAGECONFIG[qt] = ",,qtbase"
 inherit_defer ${@bb.utils.contains('PACKAGECONFIG', 'qt', 'qt6-cmake', '', d)}
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-Add-ImageService.patch \
-    file://0002-luna-sysservice-Fix-spacing-issues.patch \
-    file://0003-luna-sysservice-Add-required-bits-for-LuneOS.patch \
-    file://0004-luna-sysservice-Fix-permissions-for-telephony.patch \
-    file://0005-luna-sysservice-TimePrefsHandler.cpp-Fix-typo.patch \
-    file://0006-com.webos.service.systemservice-Add-image.management.patch \
-    file://0007-Add-back-Image-and-Wallpaper-handling.patch \
-    file://0008-com.webos.service.systemservice-Allow-cardshell-to-query-settings.patch \
-    file://0009-luna-sysservice-TimePrefsHandler.cpp-Fix-supportDST-typo.patch \
-    file://0001-CMakeLists-consistent-target_link_libraries-signature.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 inherit webos_systemd
-WEBOS_SYSTEMD_SERVICE = "luna-sys-service.service"
+# The unit ships in the repository (files/systemd/), like the other LuneOS
+# components, rather than being injected from this directory.
+LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
 
 do_install:append() {
     install -d ${D}${datadir}/localization/${BPN}
     cp -rf ${S}/resources ${D}/${datadir}/localization/${BPN}
     # FIXME: We still need this or registration fails
     rm -rf ${D}${webos_sysbus_prvrolesdir}/com.webos.*
-    rm -rf ${D}${webos_sysbus_pubrolesdir}/com.webos.* 
+    rm -rf ${D}${webos_sysbus_pubrolesdir}/com.webos.*
 }
 
 FILES:${PN} += "${datadir}/localization/${BPN}"
