@@ -23,12 +23,33 @@ SECTION = "webos/libs"
 
 DEPENDS = "glib-2.0 pmloglib"
 
-WEBOS_VERSION = "7.3.0-13_0ee217947853f7fbd0e0a625d99c229ecd33ab91"
-PR = "r12"
+# Built from the webOS-ports fork (webosose plus the LuneOS changes merged as
+# commits) rather than webosose plus a patch stack: the six patches that used
+# to live in this directory - the asynchronous suspend/resume methods, the nyx
+# systemd target, the led_controller RGB parameters, the nyx_gps debug and
+# non-framework location notifications, and the multi-battery API - are commits
+# on webOS-ports/webOS-OSE, along with the memory-safety work that branch adds
+# on top of them (nyx_device NULL-iterator and truncation handling, nyx_file_io
+# no longer reporting failed reads and writes as successes, the transposed
+# calloc arguments in nyx_led_controller, and a thread-attribute leak).
+#
+# NOT yet on that branch: 0006-battery-carry-the-battery-s-condition-and-
+# shipped-capacity, which is only on herrie/battery-health. Bump SRCREV once
+# that PR is merged, otherwise the battery condition and shipped capacity are
+# missing from this build.
+#
+# Pinned with a plain SRCREV - submission tags are a webosose convention and
+# this branch carries none.
+SRCREV = "c5d253eb0ac1800457b2df9b5d44cba2a5809b5b"
+
+# Set outright rather than derived from a submission tag via WEBOS_VERSION.
+# Kept monotonic: the patch-stack recipe shipped 7.3.0-13, so anything lower
+# would look like a downgrade to opkg on an update.
+PV = "7.3.0-14"
+
+PR = "r14"
 
 inherit webos_component
-inherit webos_public_repo
-inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit webos_library
 inherit systemd
@@ -36,13 +57,9 @@ inherit systemd
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE:${PN} = "nyx.target"
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-Implement-asynchronous-suspend-resume-methods-for-sy.patch \
-    file://0002-add-nyx-target.patch \
-    file://0003-led-controller-Add-RGB-colour-parameters.patch \
-    file://0004-nyx_gps-add-debug-data-and-non-framework-location-no.patch \
-    file://0005-battery-Add-an-API-for-more-than-one-battery.patch \
-"
+inherit webos_ports_ose_repo
+
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=herrie/battery-health"
 
 do_install:append() {
     install -d ${D}${systemd_unitdir}/system
