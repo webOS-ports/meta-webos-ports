@@ -4,13 +4,25 @@ inherit webos_qt_global
 
 EXTENDPRAUTO:append = "webos121"
 
-# Remove LGPL3-only files
+# Remove LGPL3-only files.
+#
+# Kept as pure Python on purpose. bitbake adds every exported variable
+# (CC, CFLAGS, CCACHE_*, PKG_CONFIG_*, ...) to the dependency set of a *shell*
+# task function, so appending a shell function to do_patch made qtbase's
+# do_patch basehash track the toolchain and ccache configuration. Any change
+# there - e.g. adding CCACHE_COMPILERCHECK to local.conf - re-hashed do_patch
+# while do_fetch/do_unpack were unaffected, so bitbake re-ran do_patch alone
+# against the already-patched tree and it died with
+# "Reversed (or previously applied) patch detected". A Python function only
+# depends on the variables it actually references.
 python do_patch:append() {
-    bb.build.exec_func('remove_LGPL3', d)
-}
+    import glob
+    import os
 
-remove_LGPL3() {
-    rm -vf ${S}/src/plugins/platforms/andr*oid/extract.cpp
+    pattern = os.path.join(d.getVar("S"), "src/plugins/platforms/andr*oid/extract.cpp")
+    for path in glob.glob(pattern):
+        os.remove(path)
+        bb.note("removed LGPL3-only file %s" % path)
 }
 
 # Disable features we don't use in all webOS products
