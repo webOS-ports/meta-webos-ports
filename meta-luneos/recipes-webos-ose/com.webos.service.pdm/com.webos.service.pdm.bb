@@ -13,20 +13,35 @@ LIC_FILES_CHKSUM = " \
 
 VIRTUAL-RUNTIME_pdm-plugin ?= "pdm-plugin"
 
-DEPENDS = "glib-2.0 luna-service2 libpbnjson pmloglib udev libwebosi18n libusb"
+DEPENDS = "glib-2.0 luna-service2 libpbnjson pmloglib udev libwebosi18n libusb gtest"
 RDEPENDS:${PN} = "fuse-utils hdparm gphoto2 gphotofs sdparm gptfdisk-sgdisk e2fsprogs-e2fsck e2fsprogs-tune2fs ntfs-3g ntfs-3g-ntfsprogs dosfstools simple-mtpfs lsof smartmontools"
 
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_pdm-plugin}"
 
-WEBOS_VERSION = "1.0.1-87_75a15955e26415fe121eae36e61bd4ad1b951aaf"
-PR = "r11"
+# Built from the webOS-ports fork (webosose plus the LuneOS changes merged as
+# commits) rather than webosose plus a patch stack: what used to be the
+# 0001-0005 patch series plus the CMake 4 @VAR@ fix in this directory now lives
+# as commits there, so nothing is applied here any more. Pinned with a plain
+# SRCREV - submission tags are a webosose convention and this branch carries
+# none. The branch itself comes from webos_ports_ose_repo below.
+SRCREV = "a2fb14023ca31d727be34a1e33113911cb50e851"
+
+# Set outright rather than derived from a submission tag via WEBOS_VERSION.
+# Kept monotonic: the patch-stack recipe shipped 1.0.1-87, so anything lower
+# would look like a downgrade to opkg on an update.
+PV = "1.0.1-88"
+
+PR = "r14"
 
 inherit webos_component
-inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_daemon
-inherit webos_public_repo
+# The audit and test-harness work lives on herrie/fixes, not on the branch
+# webos_ports_ose_repo defaults to, so the SRCREV below is not reachable from
+# webOS-ports/webOS-OSE. Drop this line once herrie/fixes is merged there.
+WEBOS_GIT_PARAM_BRANCH = "herrie/fixes"
+inherit webos_ports_ose_repo
 inherit webos_localizable
 inherit useradd
 
@@ -34,23 +49,7 @@ USERADD_PARAM:${PN} = "-g pdmgroup -d /home/pdmuser -m -s /bin/sh pdmuser"
 GROUPADD_PARAM:${PN} = "-g 2023 pdmgroup"
 USERADD_PACKAGES = "${PN}"
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-NfcDeviceHandler-Fix-incorrect-name.patch \
-	file://0002-Remove-the-Android-Auto-bits.patch \
-    file://0003-com.webos.service.pdm.perm.json-Fix-incorrect-permis.patch \
-    file://0004-com.webos.service.pdm-Gracefully-handle-BIND-actions.patch \
-    file://0005-SoundSubsystem-derive-the-card-number-when-udev-does-.patch \
-"
-
-do_fix_endlines() {
-    sed -i -e "s,\\r,,g" "${S}/files/rules/90_Android_device.rules"
-}
-addtask do_fix_endlines before do_patch after do_unpack
-
-do_fix_endlines() {
-    sed -i -e "s,\\r,,g" "${S}/files/rules/90_Android_device.rules"
-}
-addtask do_fix_endlines before do_patch after do_unpack
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "physical-device-manager.service"
@@ -68,6 +67,11 @@ FILES:${PN} += "${datadir}"
 # webos doesn't have localization data for this recipe
 WEBOS_LOCALIZATION_INSTALL_RESOURCES = "false"
 
-# CMake 4: @VAR@ is no longer expanded in unquoted arguments (CMP0053),
-# which broke the install() DESTINATIONs in this component.
-SRC_URI += "file://0001-CMakeLists-use-CMake-variable-syntax-instead-of-VAR.patch"
+# Build and package the gtest suite under tests/. INSTALL_TESTS implies
+# BUILD_TESTS; without either, tests/CMakeLists.txt returns immediately and
+# gtest is only a build-time dependency. Same arrangement as sam.
+EXTRA_OECMAKE += "-DWEBOS_CONFIG_INSTALL_TESTS:BOOL=TRUE"
+
+PACKAGES =+ "${PN}-tests"
+ALLOW_EMPTY:${PN}-tests = "1"
+FILES:${PN}-tests = "${webos_testsdir}/* ${libexecdir}/tests/*"
