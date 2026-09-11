@@ -1,10 +1,7 @@
-SUMMARY = "LuneOS audiod stack (opt-in, replaces audio-service)"
-DESCRIPTION = "audiod plus the PulseAudio policy module it drives. Kept separate \
-from packagegroup-luneos-extended so images can be built with either the current \
-audio-service or audiod while the migration is in progress. audiod claims \
+SUMMARY = "LuneOS audiod stack"
+DESCRIPTION = "audiod plus the PulseAudio policy module it drives. audiod claims \
 com.webos.service.audio and, via palmLegacyManager, com.palm.audio and \
-org.webosports.service.audio -- the latter two are also claimed by audio-service, \
-so the two must not be installed together."
+org.webosports.service.audio."
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
@@ -16,5 +13,3 @@ RDEPENDS:${PN} = "\
     com.webos.service.audiofocusmanager \
     com.webos.service.audiooutput \
 "
-
-RCONFLICTS:${PN} = "audio-service"
