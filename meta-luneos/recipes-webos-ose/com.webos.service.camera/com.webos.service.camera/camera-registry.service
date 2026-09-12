@@ -16,6 +16,43 @@
 Description=meta-webos - "%n"
 DefaultDependencies=no
 
+# Wait until /var/tmp is actually usable, and until the registry directory's
+# filesystem is mounted.
+#
+# This unit is DefaultDependencies=no, so with no explicit ordering it runs very
+# early. On LuneOS /var/tmp is a symlink to volatile/tmp, /var/volatile is a
+# tmpfs, and the symlink's TARGET is created by systemd-tmpfiles -
+# /usr/lib/tmpfiles.d/00-create-volatile.conf:
+#
+#   d /var/volatile/tmp 1777 - -
+#   L /var/tmp - - - - /var/volatile/tmp
+#
+# So until systemd-tmpfiles-setup.service has run, /var/tmp resolves to nothing:
+# mkdir -p cannot create it, the redirect of camera-plugin-inspect's output
+# fails, no registry is written, and com.webos.service.camera then loads zero
+# HAL plugins - "registry parsing error", getCameraList returns an empty
+# deviceList - so everything needing a camera fails (face-unlock enrollment
+# reports "camera unavailable: no cameras reported"). The camera app is
+# unaffected, because it drives droidcamsrc directly and never reads the
+# registry, which is what makes this easy to miss.
+#
+# Because it is a not-yet-created path rather than a missing parent directory,
+# the mkdir -p in camera-registry.sh cannot fix it on its own.
+#
+# local-fs.target is NOT a sufficient barrier, which was the first attempt here:
+# var-volatile.mount is ordered before that target, but systemd-tmpfiles-setup
+# runs after it, so the mount exists while /var/volatile/tmp still does not.
+# Measured on tissot: target reached at 09:31:39.671, this unit started at
+# 09:31:39.674, and mkdir still failed at 09:31:39.764.
+#
+# RequiresMountsFor makes systemd derive the mount dependencies itself, so this
+# keeps holding if either path moves to a different filesystem.
+After=local-fs.target systemd-tmpfiles-setup.service
+RequiresMountsFor=/var/tmp /mnt/lg
+
+# Still ordered before the service that consumes the registry; that unit already
+# declares After=camera-registry.service.
+
 [Service]
 Type=oneshot
 ExecStart=/lib/systemd/system/scripts/camera-registry.sh
