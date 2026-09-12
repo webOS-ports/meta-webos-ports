@@ -133,6 +133,17 @@ SRC_URI:append = " file://9906-QWaylandDisplay-don-t-ignore-wayland-QT_IM_MODULE
 # lived since Qt 6.0. Only halium machines build it, so upstream never sees it.
 SRC_URI:append = " file://9907-libhybris-egl-server-take-QOpenGLTexture-from-QtOpenG.patch;minver=6.10.0"
 
+# Same move again: the client-side EGL hardware integration stopped being
+# published as the QtWaylandEglClientHwIntegration private module and is now
+# built as a plugin with no installed headers. The plugin does still export
+# the types (Q_WAYLANDCLIENT_EXPORT covers their vtables and typeinfo), so
+# qtwayland-webos can link its QWaylandEglWindow /
+# QWaylandEglClientBufferIntegration subclasses straight against it - it just
+# needs the declarations. Installing those four private headers is what lets
+# qtwayland-webos drop its vendored copy of the sources, which had to be
+# refreshed by hand every time this SRCREV moved.
+SRC_URI:append = " file://9908-wayland-egl-install-the-client-integration-private-headers.patch;minver=6.10.0"
+
 # FIXME: Patches below can be dropped once all qmake-dependent components are switched to cmake.
 # https://bugreports.qt.io/browse/WEBOSCI-66
 # https://bugreports.qt.io/browse/WEBOSCI-81
