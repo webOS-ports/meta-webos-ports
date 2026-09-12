@@ -359,6 +359,56 @@ RDEPENDS:${PN}:append:qemux86-64 = " waydroid"
 RDEPENDS:${PN}:append:rpi = " waydroid"
 RDEPENDS:${PN}:append:tissot-halium = " waydroid"
 
+# waydroid-sensors is a second recipe and needs its own lines for exactly the
+# reason above: its COMPATIBLE_MACHINE only permits the build, nothing pulls it
+# in. It had fallen into the same gap - neither sargo (halium-arm64) nor tissot
+# had the package or /usr/bin/waydroid-sensord, and both were running with
+# waydroid.stub_sensors_hal=1.
+#
+# The daemon answers android.hardware.sensors@1.0::ISensors on the host side of
+# the anbox-hwbinder and reads the real hardware through sensorfw. Without it
+# Android in the container gets no accelerometer, gyroscope, magnetometer,
+# proximity or light data at all, screen rotation included.
+#
+# This list tracks waydroid-sensors.bb's COMPATIBLE_MACHINE, which now matches
+# waydroid's above except for rpi - the sensors recipe does not claim it, so rpi
+# gets no line here or the image would pull an ipk the recipe refuses to build.
+#
+# The eight fall into three groups, which is why no single override covers them:
+#
+#   halium-arm, halium-arm64 - the generic Halium rootfs machines. Device
+#     machines like sargo, bluejay, panther and surya build only a boot image and
+#     run the halium-arm64 rootfs, so they are covered here rather than by name.
+#     mindphone rides the halium-arm line through its MACHINEOVERRIDES, the same
+#     way it does for waydroid itself.
+#
+#   mido-halium, tissot-halium - Halium devices that still build a rootfs of
+#     their own, so they have to be named. They cannot fold into halium-arm64:
+#     neither has a vendor partition, so vendor.img must travel inside the rootfs
+#     and VIRTUAL-RUNTIME_android-system-image stays set where the halium-arm64
+#     machines set it to "" - see the comments in their machine confs. Only if
+#     that changes can these two lines and waydroid's equivalents above go.
+#
+#   pinephone, pinephonepro, pinetab2, qemux86-64 - mainline kernel, not Halium
+#     at all: no meta-android-halium.inc, no android-system-image, their own
+#     linux-pine* kernels. With no vendor HAL and no ro.vndk.version to read,
+#     Waydroid's get_vendor_type lands on MAINLINE - the pairing waydroid-data.bb
+#     deliberately keeps for these four. Their kernel fragment sets
+#     CONFIG_ANDROID_BINDERFS=y with CONFIG_ANDROID_BINDER_DEVICES left at
+#     "binder,hwbinder,vndbinder", so the anbox-* trio the daemon's
+#     ConditionPathExists waits for is allocated at runtime by
+#     waydroid-luneos-prepare, where waydroid-kernel.inc names it in
+#     CONFIG_ANDROID_BINDER_DEVICES outright on the Halium machines. The daemon
+#     is still the right answer here: sensorfw is the sensor source either way.
+RDEPENDS:${PN}:append:halium-arm = " waydroid-sensors"
+RDEPENDS:${PN}:append:halium-arm64 = " waydroid-sensors"
+RDEPENDS:${PN}:append:mido-halium = " waydroid-sensors"
+RDEPENDS:${PN}:append:pinephone = " waydroid-sensors"
+RDEPENDS:${PN}:append:pinephonepro = " waydroid-sensors"
+RDEPENDS:${PN}:append:pinetab2 = " waydroid-sensors"
+RDEPENDS:${PN}:append:qemux86-64 = " waydroid-sensors"
+RDEPENDS:${PN}:append:tissot-halium = " waydroid-sensors"
+
 QEMU_RDEPENDS = " \
     alsa-utils-systemd \
     mesa-megadriver \
