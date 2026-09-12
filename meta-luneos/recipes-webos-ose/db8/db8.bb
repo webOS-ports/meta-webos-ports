@@ -22,12 +22,23 @@ VIRTUAL-RUNTIME_bash ?= "bash"
 RDEPENDS:${PN}:append:class-target = " ${VIRTUAL-RUNTIME_stat} ${VIRTUAL-RUNTIME_bash}"
 RDEPENDS:${PN}-tests:append:class-target = " ${VIRTUAL-RUNTIME_bash}"
 
-WEBOS_VERSION = "3.2.0-32_11ae879176e14f80d8dd103150947f9a4f8b7a5d"
-PR = "r42"
+# Built from the webOS-ports fork (webosose plus the LuneOS changes merged as
+# commits) rather than webosose plus a patch stack: what used to be the
+# 0001-0003 (plus the two role/groups patches applied separately below) patch
+# series in this directory now lives as commits on that branch, so nothing is
+# applied on top any more. Pinned with a plain SRCREV - submission tags are a
+# webosose convention and this branch carries none. The branch itself is set
+# below via WEBOS_GIT_PARAM_BRANCH.
+SRCREV = "1c0eed785c2724cf53a37f61341575eb6cbb40b6"
+
+# Set outright rather than derived from a submission tag via WEBOS_VERSION.
+# Kept monotonic: the patch-stack recipe shipped 3.2.0-32, so anything lower
+# would look like a downgrade to opkg on an update.
+PV = "3.2.0-33"
+
+PR = "r43"
 
 inherit webos_component
-inherit webos_public_repo
-inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_daemon
@@ -38,13 +49,10 @@ EXTRA_OECMAKE += "-DWEBOS_DB8_BACKEND:STRING='leveldb;sandwich' -DCMAKE_SKIP_RPA
 EXTRA_OECMAKE:append:class-target = " -DWEBOS_CONFIG_BUILD_TESTS:BOOL=TRUE  -DUSE_PMLOG:BOOL=TRUE  -DBUILD_LS2:BOOL=TRUE -DWANT_PROFILING:BOOL=${@ 'true' if '${WEBOS_DISTRO_PRERELEASE}' != '' else 'false'}"
 EXTRA_OECMAKE:append:class-native = " -DWEBOS_CONFIG_BUILD_TESTS:BOOL=FALSE -DUSE_PMLOG:BOOL=FALSE -DBUILD_LS2:BOOL=FALSE"
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-com.palm.db.role.json.in-More-generic-app-access.patch \
-    file://0002-db-Update-db8.groups.json-for-test-API-s.patch \
-    file://0001-CMakeLists.txt-replace-std-c-14-with-std-c-17-for-ic.patch \
-    file://0002-test-Don-t-use-long-deprecated-boost-filesystem-path.patch \
-    file://0003-db-run-backup-restore-callbacks-with-admin-privilege.patch \
-"
+WEBOS_GIT_PARAM_BRANCH = "herrie/fixes"
+inherit webos_ports_ose_repo
+
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "db8-maindb.service db8-mediadb.service db8-pre-config.service db8-tempdb.service db8.service"
