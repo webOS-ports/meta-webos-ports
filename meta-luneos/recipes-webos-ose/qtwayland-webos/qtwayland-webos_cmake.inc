@@ -9,7 +9,11 @@ FILES:${PN}-dev += " \
 "
 
 # http://gpro.lge.com/c/webosose/qtwayland-webos/+/349070 Use QtWebOSEglClientBuffer for cmake]
-# Does it have to be applied only for CMake build?
+# This one stays a patch rather than moving to a commit on the webOS-ports
+# branch: it is genuinely CMake-only. The qmake build's
+# webos-wayland-egl-support.pro declares TARGET = WebOSEglClientBuffer and
+# syncqt.pl looks that exact name up in sync.profile, so renaming the key
+# unconditionally breaks it with "No such module: WebOSEglClientBuffer".
 SRC_URI:append = "\
     file://0001-Use-QtWebOSEglClientBuffer-for-cmake.patch \
 "

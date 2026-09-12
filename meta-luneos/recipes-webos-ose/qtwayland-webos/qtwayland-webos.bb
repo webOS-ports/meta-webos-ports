@@ -15,8 +15,22 @@ LIC_FILES_CHKSUM = " \
 # qtbase-native, gated on the wayland DISTRO_FEATURE which LuneOS sets.
 DEPENDS = "qtwayland webos-wayland-extensions libxkbcommon qt-features-webos wayland-native qtbase-native wayland-protocols"
 
-WEBOS_VERSION = "6.0.0-94_bc155a885ed03c8243bde3bb40e65a08dfe4c94d"
-PR = "r20"
+# Built from the webOS-ports fork (webosose plus the LuneOS changes merged as
+# commits) rather than webosose plus a patch stack: what used to be the
+# 0001-0005 patch series in this directory now lives as commits there, so
+# nothing is applied on top any more. The one patch that remains is the
+# CMake-only sync.profile rename, applied from qtwayland-webos_cmake.inc.
+# Pinned with a plain SRCREV - submission tags are a webosose convention and
+# this branch carries none. The branch itself is set below via
+# WEBOS_GIT_PARAM_BRANCH.
+SRCREV = "61df72efe74d5a19d8dbfbed6f9e4d6b0f3ca6c9"
+
+# Set outright rather than derived from a submission tag via WEBOS_VERSION.
+# Kept monotonic: the patch-stack recipe shipped 6.0.0-94, so anything lower
+# would look like a downgrade to opkg on an update.
+PV = "6.0.0-95"
+
+PR = "r21"
 
 #QT_BUILD_SYSTEM ?= "${@ 'cmake' if d.getVar('QT_VERSION')[0] == '6' else 'qmake' }"
 #Force qmake for now since cmake gives build errors
@@ -32,17 +46,21 @@ require ${BPN}_${QT_BUILD_SYSTEM}.inc
 
 inherit pkgconfig
 inherit webos_lttng
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+# The LuneOS changes and the code audit work live on herrie/fixes, not on the
+# branch webos_ports_ose_repo defaults to, so the SRCREV above is not
+# reachable from webOS-ports/webOS-OSE. Drop this line once herrie/fixes is
+# merged there.
+WEBOS_GIT_PARAM_BRANCH = "herrie/fixes"
+inherit webos_ports_ose_repo
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-Fix-platform-keys.patch \
-    file://0002-WebOSIntegration-enable-all-capabilities-for-LuneOS.patch \
-    file://0003-WebOSShellSurfacePrivate-add-client_size_changed.patch \
-    file://qt-wayland-egl-client \
-    file://0004-webos-wayland-egl-build-client-egl-integration-in-tree.patch \
-    file://0005-webos-wayland-egl-follow-qtwayland-api-changes.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+
+# Since Qt 6.10 the client-side EGL integration this plugin subclasses is
+# only published as qtbase's wayland-egl client buffer plugin, so we link
+# against it (see webos-wayland-egl.pro) and need it at runtime. It lands in
+# qtbase-plugins, which the images already pull in - make it explicit so the
+# dependency cannot be dropped by accident.
+RDEPENDS:${PN} += "qtbase-plugins"
 
 # No debian package renaming
 DEBIAN_NOAUTONAME:${PN} = "1"
@@ -88,15 +106,3 @@ do_install:append() {
 # ERROR: qtwayland-webos-6.0.0-93-r20 do_package_qa: QA Issue: File /usr/lib/libWebOSEglClientBuffer.prl in package qtwayland-webos-dev contains reference to TMPDIR [buildpaths]
 ERROR_QA:remove = "buildpaths"
 WARN_QA:append = " buildpaths"
-
-# Qt 6.10 moved the QtWayland client into qtbase and stopped publishing the
-# client-side EGL hardware integration as a private module, so
-# webos-wayland-egl - which subclasses QWaylandEglWindow and
-# QWaylandEglClientBufferIntegration - has nothing to build against. The
-# sources still exist in qtbase but are compiled into a plugin with no
-# installed headers, so they are imported here and built into the webOS plugin
-# instead. See qt-wayland-egl-client/README.webos for provenance and how to
-# refresh them when the qtbase SRCREV moves.
-do_configure:prepend() {
-    cp -a ${UNPACKDIR}/qt-wayland-egl-client ${S}/src/plugins/platforms/webos-wayland-egl/
-}
