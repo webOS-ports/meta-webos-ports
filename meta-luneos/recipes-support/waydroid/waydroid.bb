@@ -16,7 +16,7 @@ PV = "${SPV}"
 # Bumped whenever the shipped patches or helper scripts change: they alter what
 # the package contains without moving SRCREV or PV, so without this an already
 # installed waydroid stays at the previous build. Reset at the 1.6.3 move.
-PR = "r16"
+PR = "r17"
 
 # Pre-installed images, for machines whose system/vendor pairing is frozen.
 #
@@ -163,6 +163,21 @@ inherit webos_systemd
 # ordered After= it, the container then failed too - which is exactly the state
 # tissot was found in. Initialising is a user action, and it now happens on
 # demand from the launcher, which is also the only place that can wait for it.
+
+# Note on waydroid-container.service: do not delete the copy in this recipe's
+# files directory. It never appears in SRC_URI above, but webos_systemd.bbclass
+# synthesises one entry per name listed here, so removing the file fails the
+# build at fetch time with "Unable to get checksum for waydroid SRC_URI entry".
+#
+# It does not currently reach the image, though. install_luneos (0003) copies
+# upstream's systemd/waydroid-container.service into ${D} first, and the class's
+# install_units postfunc then reports "Up-to-date" for it rather than replacing
+# it, so the 170-byte upstream unit is what ships - confirmed in the r16 ipk and
+# on a booted sargo, neither of which carries the Requires=/ConditionPathExists=
+# lines this file has. Its content also predates waydroid-luneos-session-env,
+# which stopped assuming a /run/luna-session and reads the real session off the
+# compositor instead. So it is required to exist but is inert; sorting that out
+# means deciding whether the LuneOS variant should win, not deleting it.
 WEBOS_SYSTEMD_SERVICE = "waydroid-container.service \
     waydroid-luneos-prepare.service waydroid-luneos-session.service \
     waydroid-luneos-launchd.service"

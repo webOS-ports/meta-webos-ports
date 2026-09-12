@@ -266,6 +266,59 @@ disable_external_camera() {
     log "no external camera (ignoring the host's V4L2 nodes)"
 }
 
+# ------------------------------------------- SurfaceFlinger configstore props
+#
+# The container runs its own SurfaceFlinger, and SurfaceFlingerProperties falls
+# back to android.hardware.configstore@1.0::ISurfaceFlingerConfigs for every
+# value not set as a ro.surface_flinger.* sysprop. On a Halium host that
+# fallback cannot be satisfied, for two reasons that meet in the middle.
+#
+# Waydroid's patched /system/lib64/libhidlbase.so resolves HIDL for *system*
+# processes through /dev/host_hwbinder - the host HAL's binder domain - while
+# the container's own vendor HALs register on /dev/hwbinder (anbox-hwbinder)
+# through the unpatched VNDK libhidlbase. Measured on sargo, surfaceflinger's
+# service-manager handle (desc 0) sits in the host domain and it holds no refs
+# at all in anbox-hwbinder: it asks the *host* hwservicemanager for configstore,
+# never the container's, even though the container's own copy is registered and
+# idle.
+#
+# Host-side nothing answers. stubbed-services.d/<machine> replaces
+# vendor/bin/hw/android.hardware.configstore@1.1-service with a shell no-op
+# because the real one is seccomp-killed (SIGSYS) inside registerAsService()
+# and never finishes registering anyway. That stub was written when nothing
+# under Halium ran a SurfaceFlinger at all - Waydroid is the case it predates.
+#
+# So getService retries once a second forever, SurfaceFlinger never registers
+# with servicemanager, system_server blocks on it and is killed, and
+# sys.boot_completed is never set: "waydroid status" reports Session and
+# Container RUNNING with IP address UNKNOWN indefinitely.
+#
+# Setting the sysprops removes the fallback rather than trying to repair it.
+# These are the values ISurfaceFlingerConfigs can supply; the image already
+# provides vsync_event_phase_offset_ns, vsync_sf_event_phase_offset_ns,
+# max_frame_buffer_acquired_buffers and running_without_sync_framework, and a
+# ro. prop cannot be rewritten once set, so only the missing nine are added.
+# They carry the AOSP compiled-in defaults - what the clients would have used
+# had configstore ever answered.
+set_surfaceflinger_props() {
+    [ "${WAYDROID_SF_CONFIGSTORE_PROPS:-1}" = 1 ] || return 0
+    base=/var/lib/waydroid/waydroid_base.prop
+    [ -f "$base" ] || return 0
+    grep -q "^ro.surface_flinger.use_context_priority" "$base" && return 0
+    cat >> "$base" <<'EOF'
+ro.surface_flinger.use_context_priority=true
+ro.surface_flinger.has_wide_color_display=false
+ro.surface_flinger.has_HDR_display=false
+ro.surface_flinger.present_time_offset_from_vsync_ns=0
+ro.surface_flinger.force_hwc_copy_for_virtual_displays=false
+ro.surface_flinger.max_virtual_display_dimension=4096
+ro.surface_flinger.use_vr_flinger=false
+ro.surface_flinger.start_graphics_allocator_service=false
+ro.surface_flinger.primary_display_orientation=ORIENTATION_0
+EOF
+    log "set SurfaceFlinger sysprops (no configstore fallback)"
+}
+
 # ------------------------------------------------ refresh container config
 #
 # The LXC configuration under /var/lib/waydroid/lxc is generated once, at
@@ -293,8 +346,18 @@ rc=0
 alloc_binder_nodes  || rc=1
 bind_images         || rc=1
 copy_host_hal_libs  || rc=1
+disable_external_camera || rc=1
+
+# refresh_container_config runs "waydroid upgrade -o", which regenerates
+# waydroid_base.prop from scratch. Every append below therefore has to happen
+# after it, not before: with the prop setters running first, the journal showed
+# ro.radio.noril and persist.waydroid.no_background_subsurface being written and
+# then discarded about a second later in the same pass, so on sargo neither had
+# ever actually reached the container - grep of the generated base prop came
+# back empty on a fully booted device.
+refresh_container_config || rc=1
+
 set_no_ril          || rc=1
 set_no_background_subsurface || rc=1
-disable_external_camera || rc=1
-refresh_container_config || rc=1
+set_surfaceflinger_props || rc=1
 exit $rc

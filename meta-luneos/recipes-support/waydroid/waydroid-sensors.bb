@@ -27,11 +27,14 @@ SRC_URI = "git://github.com/waydroid/waydroid-sensors.git;branch=main;protocol=h
 DEPENDS = "glib-2.0 libglibutil libgbinder"
 
 # Same machines as waydroid itself: the daemon is only useful with a container
-# to answer, and needs the anbox-* binder nodes that come with it.
+# to answer, and needs the anbox-* binder nodes that come with it. That means
+# halium-arm rather than mindphone by name - mindphone.conf is the only machine
+# whose MACHINEOVERRIDES carries halium-arm, so it picks the line up the same way
+# it does COMPATIBLE_MACHINE:halium-arm in waydroid.bb.
 COMPATIBLE_MACHINE ?= "(^$)"
 COMPATIBLE_MACHINE:mido-halium = "(.*)"
 COMPATIBLE_MACHINE:tissot-halium = "(.*)"
-COMPATIBLE_MACHINE:mindphone = "(.*)"
+COMPATIBLE_MACHINE:halium-arm = "(.*)"
 COMPATIBLE_MACHINE:halium-arm64 = "(.*)"
 COMPATIBLE_MACHINE:pinephone = "(.*)"
 COMPATIBLE_MACHINE:pinephonepro = "(.*)"
