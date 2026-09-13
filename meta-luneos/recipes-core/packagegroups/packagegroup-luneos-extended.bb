@@ -28,6 +28,7 @@ RDEPENDS:${PN} = " \
   luneos-device-config \
   \
   powertop \
+  luneos-power-report \
   \
   pulseaudio-distro-conf \
   pulseaudio-misc \
