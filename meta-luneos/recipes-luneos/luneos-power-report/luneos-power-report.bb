@@ -9,6 +9,9 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 SRC_URI = "file://luneos-power-report"
 
+# file:// sources land directly in UNPACKDIR; there is no ${BP} subdirectory.
+S = "${UNPACKDIR}"
+
 # ps -eo comes from procps; everything else the script needs is busybox or
 # optional (journalctl, pactl, iw are probed and skipped when absent).
 RDEPENDS:${PN} = "procps"
