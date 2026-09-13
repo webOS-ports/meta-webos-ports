@@ -1,0 +1,941 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sun, 30 Aug 2026 12:00:00 +0200
+Subject: [PATCH] Add LED torch module and nyx-test-led
+
+NYX_DEVICE_LED has been declared in nyx-lib since the beginning, with
+nyx_led_set_brightness()/get_brightness(), and no module has ever implemented
+it - on either the native or the hybris side. So LuneOS has never had a torch at
+any layer. The one trace of one is a "Flashlight" entry in cardshell's system
+menu calling luna://ca.canucksoftware.systoolsmgr/flashOn, a webOS 1.x homebrew
+service that was never part of any LuneOS image and so reports "Off" forever.
+
+This implements the two backends that do not need libhybris. Brightness is a
+percentage, per nyx_led.h.
+
+MediaTek is probed first and looks nothing like the others: CONFIG_MTK_FLASHLIGHT
+(mindphone) puts the torch behind /dev/flashlight ioctls, and that device's
+/sys/class/leds holds only keyboard-backlight, lcd-backlight and vibrator -
+checked on hardware - so there is no LED-class node for the other path to find.
+
+Three things about the MTK interface that only the hardware revealed:
+
+- The driver also exposes flashlight_strobe under /sys/class/flashlight_core,
+  and it is useless here: flashlights_led_gpio.c implements strobe_store as
+  enable, msleep(dur), disable - a one-shot flash capped at 3000 ms. A torch has
+  to come from the ioctl path, where SET_TIME_OUT_TIME_MS(0) disarms the driver's
+  auto-off hrtimer and SET_ONOFF(1) then stays on.
+
+- The ioctl takes 1-based *ids*, which flashlight-core converts to the 0-based
+  *indices* its device table is keyed on ("return type_id - 1"), while the sysfs
+  strobe attribute takes indices directly. So "0 0 0 1 500" is right for sysfs
+  and wrong for the ioctl: id 0 fails validation before the device lookup and
+  returns EINVAL, which is indistinguishable from "no driver registered".
+
+- Opening /dev/flashlight is not proof of a torch. flashlight-core creates the
+  node at its own init whether or not a sub-driver registered, so the module
+  asks GET_PROTOCOL_VERSION first - resolved after the device lookup, so it fails
+  exactly when nothing registered - and falls through to the LED class if it
+  fails, rather than claiming a backend that can never work.
+
+Duty is capped at the torch end of the range. led_gpio_enable() picks its pin
+state from the duty - <= 2 is the torch pin, above that the flash pin - and flash
+current is specified for a strobe of milliseconds. Since holding the light on
+indefinitely is precisely this module's job, exposing the upper range would let a
+caller cook the LED by asking for 100%. Percentages map onto 0..2 only.
+
+The ioctl numbers and struct flashlight_user_arg are restated from
+drivers/misc/mediatek/flashlight/flashlight.h because there is no uapi export.
+The _IOR on commands that plainly write is the kernel's own quirk, kept verbatim:
+the direction bits are part of the command number, so "fixing" them would produce
+an ioctl the driver does not answer to.
+
+Two sysfs shapes are handled as well, for the rest of our devices:
+
+  plain LED class    writing <node>/brightness lights the torch. What
+                     LEDS_CLASS_FLASH devices such as tissot and rosy present:
+                     `brightness` is the torch current, while flash_brightness
+                     and flash_strobe drive the momentary flash, untouched here.
+
+  current + switch   qcom's qpnp-flash-v2, as on sargo. led:torch_0/brightness
+                     only arms a current; nothing lights until
+                     led:switch_0/brightness goes to 1. The switch node is
+                     derived from the torch node's name, since the driver names
+                     them as a pair.
+
+Ordering in that second shape is deliberate: arm the current before enabling the
+switch, cut the switch before disarming. The reverse leaves the hardware in a
+state - switch on, current zero - that is meaningless and that a failed write
+would strand it in.
+
+Paths come from [module.led] torch_path / torch_switch_path in /etc/nyx.conf when
+set, otherwise derived by scanning /sys/class/leds. "torch" is preferred over
+"flash": where a device exposes both, the flash node is the momentary strobe.
+The shipped nyx.conf deliberately does not declare these keys - detection covers
+what we have, and luneos-device-config's generator warns about undeclared keys -
+so they exist purely as a per-device escape hatch.
+
+Owned per machine by NYXMOD_OW_LEDTORCH, like the LED controller: TRUE (the
+default) builds this module, FALSE hands the torch to nyx-modules-hybris, which
+drives the Android camera service through droid_media_camera_set_torch_mode() -
+the route that works where /sys/class/leds belongs to the Android side, and the
+one SailfishOS uses.
+
+nyx-test-led is the matching CLI - on/off/set/get - kept separate from
+nyx-test-ledcontroller because they drive genuinely different nyx devices. It
+takes -t <seconds> to hold the torch on: closing the nyx device switches the
+torch off, deliberately, so a crashed service cannot leave it burning, which
+means a one-shot "on" lights it only for as long as the process takes to exit.
+A service holds the handle instead; -t is the equivalent for a CLI, and without
+it the tool appears to do nothing at all.
+
+Upstream-Status: Inappropriate [LuneOS specific]
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+---
+diff -urN nm3.base/src/CMakeLists.txt nm3/src/CMakeLists.txt
+--- a/src/CMakeLists.txt	2026-08-30 21:14:20.527237148 +0200
++++ b/src/CMakeLists.txt	2026-08-30 21:33:17.953093742 +0200
+@@ -123,3 +123,20 @@
+ # built by the other recipe entirely, which is exactly where a way to poke the
+ # notification LED is most wanted.
+ add_subdirectory(led_controller_test)
++
++# The torch has two backends, so like the LED controller it needs a per-machine
++# owner. Here it is the sysfs one; NYXMOD_OW_LEDTORCH FALSE hands it to
++# nyx-modules-hybris, which drives the Android camera service instead - the
++# route that works where /sys/class/leds belongs to the Android side.
++#
++# Defaulted rather than required of all 57 machine files: sysfs is the right
++# answer for every native device, and a halium machine that needs the other
++# backend says so explicitly.
++if(NOT DEFINED NYXMOD_OW_LEDTORCH)
++    set(NYXMOD_OW_LEDTORCH TRUE)
++endif()
++
++if(NYXMOD_OW_LEDTORCH)
++    add_subdirectory(led_torch)
++endif()
++add_subdirectory(led_test)
+diff -urN nm3.base/src/led_test/CMakeLists.txt nm3/src/led_test/CMakeLists.txt
+--- a/src/led_test/CMakeLists.txt	1970-01-01 01:00:00.000000000 +0100
++++ b/src/led_test/CMakeLists.txt	2026-08-30 21:25:15.050767868 +0200
+@@ -0,0 +1,19 @@
++# Copyright (c) 2026 Herman van Hazendonk <github.com@herrie.org>
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++# http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++#
++# SPDX-License-Identifier: Apache-2.0
++
++add_executable(nyx-test-led nyx_test_led.c)
++target_link_libraries(nyx-test-led ${NYXLIB_LDFLAGS} ${GLIB2_LDFLAGS} ${PMLOG_LDFLAGS})
++webos_build_program(NAME nyx-test-led)
+diff -urN nm3.base/src/led_test/nyx_test_led.c nm3/src/led_test/nyx_test_led.c
+--- a/src/led_test/nyx_test_led.c	1970-01-01 01:00:00.000000000 +0100
++++ b/src/led_test/nyx_test_led.c	2026-08-31 11:56:17.444905799 +0200
+@@ -0,0 +1,183 @@
++// Copyright (c) 2026 Herman van Hazendonk <github.com@herrie.org>
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++//
++// SPDX-License-Identifier: Apache-2.0
++
++/*
++ * nyx-test-led - drive a NYX_DEVICE_LED instance, i.e. the torch.
++ *
++ * Companion to nyx-test-ledcontroller, which drives the other LED device type.
++ * They are kept apart because they are genuinely different nyx devices: the
++ * controller does effects on the notification LEDs, this does plain brightness
++ * on a single named LED.
++ */
++
++#include <libgen.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++
++#include <nyx/nyx_client.h>
++
++static void usage(const char *prog)
++{
++	printf(
++	    "Usage: %s [-d <instance>] <on|off|get|set <percent>>\n"
++	    "\n"
++	    "Commands:\n"
++	    "  on             full brightness (100%%)\n"
++	    "  off            0%%\n"
++	    "  set <percent>  0-100\n"
++	    "  get            report current brightness\n"
++	    "\n"
++	    "Options:\n"
++	    "  -d <instance>  NYX_DEVICE_LED instance name (default: Torch, which\n"
++	    "                 nyx resolves to nyxLedTorch.module)\n"
++	    "  -t <seconds>   hold the torch on for <seconds>, then switch it off.\n"
++	    "                 Needed to see anything: closing the nyx device switches\n"
++	    "                 the torch off, so a plain \"on\" lights it only for as long\n"
++	    "                 as this process takes to exit. A service keeps the handle\n"
++	    "                 open instead; this is the equivalent for a one-shot CLI.\n"
++	    "\n"
++	    "Examples:\n"
++	    "  %s on\n"
++	    "  %s set 30\n"
++	    "  %s get\n"
++	    "  %s off\n", prog, prog, prog, prog, prog);
++}
++
++int main(int argc, char **argv)
++{
++	const char *prog = (argc > 0 && argv[0]) ? basename(argv[0]) : "nyx-test-led";
++	const char *instance = "Torch";
++	int hold_seconds = 0;
++	nyx_device_handle_t device = NULL;
++	nyx_error_t err;
++	int32_t brightness;
++	int argi = 1;
++
++	while (argc > argi + 1 &&
++	        (strcmp(argv[argi], "-d") == 0 || strcmp(argv[argi], "-t") == 0))
++	{
++		if (strcmp(argv[argi], "-d") == 0)
++		{
++			instance = argv[argi + 1];
++		}
++		else
++		{
++			hold_seconds = atoi(argv[argi + 1]);
++		}
++
++		argi += 2;
++	}
++
++	if (argi >= argc)
++	{
++		usage(prog);
++		return 1;
++	}
++
++	err = nyx_device_open(NYX_DEVICE_LED, instance, &device);
++
++	if (err != NYX_ERROR_NONE || device == NULL)
++	{
++		fprintf(stderr,
++		        "error: could not open NYX_DEVICE_LED \"%s\" (nyx error %d).\n"
++		        "Either nyxLed%s.module is not installed, or it found no torch node:\n"
++		        "check /sys/class/leds for one whose name contains \"torch\", and\n"
++		        "[module.led] torch_path in /etc/nyx.conf.\n", instance, err, instance);
++		return 1;
++	}
++
++	if (strcmp(argv[argi], "get") == 0)
++	{
++		err = nyx_led_get_brightness(device, &brightness);
++
++		if (err != NYX_ERROR_NONE)
++		{
++			fprintf(stderr, "error: could not read brightness: nyx error %d\n", err);
++			nyx_device_close(device);
++			return 1;
++		}
++
++		printf("%s: %d%%\n", instance, brightness);
++		nyx_device_close(device);
++		return 0;
++	}
++
++	if (strcmp(argv[argi], "on") == 0)
++	{
++		brightness = 100;
++	}
++	else if (strcmp(argv[argi], "off") == 0)
++	{
++		brightness = 0;
++	}
++	else if (strcmp(argv[argi], "set") == 0)
++	{
++		if (argi + 1 >= argc)
++		{
++			fprintf(stderr, "error: 'set' needs a percentage\n");
++			nyx_device_close(device);
++			return 1;
++		}
++
++		brightness = atoi(argv[argi + 1]);
++	}
++	else
++	{
++		fprintf(stderr, "error: unknown command '%s'\n", argv[argi]);
++		usage(prog);
++		nyx_device_close(device);
++		return 1;
++	}
++
++	printf("%s: setting %d%%\n", instance, brightness);
++	fflush(stdout);
++
++	err = nyx_led_set_brightness(device, brightness);
++
++	if (err == NYX_ERROR_INVALID_VALUE)
++	{
++		fprintf(stderr, "error: brightness must be 0-100\n");
++		nyx_device_close(device);
++		return 1;
++	}
++
++	if (err != NYX_ERROR_NONE)
++	{
++		fprintf(stderr,
++		        "error: setting brightness failed: nyx error %d.\n"
++		        "If the node exists, this is usually permissions - the sysfs write is\n"
++		        "only reported at close. See the udev rules that relax the torch node.\n",
++		        err);
++		nyx_device_close(device);
++		return 1;
++	}
++
++	printf("ok\n");
++
++	if (hold_seconds > 0 && brightness > 0)
++	{
++		printf("holding for %ds, then switching off...\n", hold_seconds);
++		fflush(stdout);
++		sleep((unsigned)hold_seconds);
++		nyx_led_set_brightness(device, 0);
++		printf("off\n");
++	}
++
++	nyx_device_close(device);
++	return 0;
++}
+diff -urN nm3.base/src/led_torch/CMakeLists.txt nm3/src/led_torch/CMakeLists.txt
+--- a/src/led_torch/CMakeLists.txt	1970-01-01 01:00:00.000000000 +0100
++++ b/src/led_torch/CMakeLists.txt	2026-08-30 21:23:00.215478312 +0200
+@@ -0,0 +1,22 @@
++# Copyright (c) 2026 Herman van Hazendonk <github.com@herrie.org>
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++# http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++#
++# SPDX-License-Identifier: Apache-2.0
++
++include_directories(.)
++
++# LedTorch, not LedFlash: nyx resolves NYX_DEVICE_LED "Torch" to nyxLedTorch.module.
++webos_build_nyx_module(LedTorch
++                       SOURCES led_torch.c
++                       LIBRARIES ${GLIB2_LDFLAGS} ${PMLOG_LDFLAGS} ${NYXLIB_LDFLAGS} -lrt -lpthread)
+diff -urN nm3.base/src/led_torch/led_torch.c nm3/src/led_torch/led_torch.c
+--- a/src/led_torch/led_torch.c	1970-01-01 01:00:00.000000000 +0100
++++ b/src/led_torch/led_torch.c	2026-08-31 11:44:03.479486181 +0200
+@@ -0,0 +1,583 @@
++// Copyright (c) 2026 Herman van Hazendonk <github.com@herrie.org>
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++//
++// SPDX-License-Identifier: Apache-2.0
++
++/*
++ * NYX_DEVICE_LED "Torch" - the camera flash LED run as a steady torch.
++ *
++ * Opened as nyx_device_open(NYX_DEVICE_LED, "Torch", &handle), which nyx
++ * resolves to nyxLedTorch.module. Brightness is a percentage, per nyx_led.h.
++ *
++ * Two sysfs shapes are handled, because our devices split evenly between them:
++ *
++ *   plain LED class    write <node>/brightness and the torch lights.
++ *                      What LEDS_CLASS_FLASH devices such as tissot and rosy
++ *                      present: their `brightness` *is* the torch current,
++ *                      while flash_brightness/flash_strobe drive the momentary
++ *                      flash we deliberately do not touch.
++ *
++ *   current + switch   qcom's qpnp-flash-v2, as on sargo. Writing
++ *                      led:torch_0/brightness only arms a current; nothing
++ *                      lights until led:switch_0/brightness goes to 1. Note
++ *                      the ordering below - arm before enable, disable before
++ *                      disarm - because a switch left on with zero current is
++ *                      a confusing state to leave the hardware in.
++ *
++ * Paths come from /etc/nyx.conf where luneos-device-config wrote them, and are
++ * otherwise derived. Nothing here is compiled in per machine: that is the whole
++ * point of the nyx.conf mechanism.
++ *
++ * MediaTek is the third shape, and does not look like the other two at all:
++ * CONFIG_MTK_FLASHLIGHT (mindphone) exposes /dev/flashlight with ioctls and
++ * nothing useful in /sys/class/leds. It is probed first, because a device that
++ * has it has no LED-class torch node to find.
++ */
++
++#include <errno.h>
++#include <fcntl.h>
++#include <stdbool.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/ioctl.h>
++#include <unistd.h>
++
++#include <glib.h>
++
++#include <nyx/nyx_module.h>
++#include <nyx/module/nyx_log.h>
++
++#include "msgid.h"
++#include "nyx_conf.h"
++
++NYX_DECLARE_MODULE(NYX_DEVICE_LED, "Torch");
++
++/* Overridable so the module can be exercised against a fake sysfs tree. */
++#ifndef LEDS_CLASS_DIR
++#define LEDS_CLASS_DIR "/sys/class/leds"
++#endif
++
++#ifndef MTK_FLASHLIGHT_DEV
++#define MTK_FLASHLIGHT_DEV "/dev/flashlight"
++#endif
++
++/*
++ * MediaTek's flashlight ABI, from drivers/misc/mediatek/flashlight/flashlight.h.
++ * There is no uapi export of it, so it is restated here and has to match the
++ * kernel exactly.
++ *
++ * The _IOR on commands that plainly write is the kernel's own quirk, not a
++ * transcription error: the direction bits are part of the command number, so
++ * "correcting" them would simply produce an ioctl the driver does not answer to.
++ */
++#define MTK_FLASHLIGHT_MAGIC 'S'
++
++struct mtk_flashlight_user_arg
++{
++	int type_id;
++	int ct_id;
++	int arg;
++};
++
++#define MTK_IOC_X_SET_DRIVER       _IOWR(MTK_FLASHLIGHT_MAGIC, 30, int)
++#define MTK_IOC_SET_TIME_OUT_MS    _IOR(MTK_FLASHLIGHT_MAGIC, 100, int)
++#define MTK_IOC_SET_DUTY           _IOR(MTK_FLASHLIGHT_MAGIC, 110, int)
++#define MTK_IOC_SET_ONOFF          _IOR(MTK_FLASHLIGHT_MAGIC, 115, int)
++#define MTK_IOC_GET_PROTOCOL_VER   _IOR(MTK_FLASHLIGHT_MAGIC, 190, int)
++
++/*
++ * Duty is capped at the torch end of the driver's range on purpose.
++ *
++ * flashlights_led_gpio.c picks its pin state from the duty: <= 2 drives the
++ * torch pin, above that the flash pin. The flash current is meant for a strobe
++ * of a few milliseconds, and this module's whole job is to hold the light on
++ * indefinitely, so exposing the upper range would let a caller cook the LED by
++ * asking for 100%. Percentages therefore map onto 0..MTK_TORCH_DUTY_MAX only.
++ */
++#define MTK_TORCH_DUTY_MAX 2
++
++typedef enum
++{
++	TORCH_BACKEND_NONE = 0,
++	TORCH_BACKEND_MTK,
++	TORCH_BACKEND_SYSFS,
++} torch_backend_t;
++
++static torch_backend_t backend = TORCH_BACKEND_NONE;
++static int mtk_fd = -1;
++static int mtk_brightness = 0;
++
++static gchar *torch_brightness_path = NULL;
++static gchar *torch_max_brightness_path = NULL;
++static gchar *torch_switch_path = NULL;
++static int torch_max_brightness = 255;
++
++static bool file_read_int(const gchar *path, int *value_out)
++{
++	gchar *contents = NULL;
++	gsize len = 0;
++	gchar *end = NULL;
++	long parsed;
++
++	if (!path || !g_file_get_contents(path, &contents, &len, NULL))
++	{
++		return false;
++	}
++
++	parsed = strtol(contents, &end, 10);
++
++	if (end == contents)
++	{
++		g_free(contents);
++		return false;
++	}
++
++	g_free(contents);
++
++	if (value_out)
++	{
++		*value_out = (int)parsed;
++	}
++
++	return true;
++}
++
++static bool file_write_int(const gchar *path, int value)
++{
++	FILE *fp;
++
++	if (!path)
++	{
++		return false;
++	}
++
++	fp = fopen(path, "w");
++
++	if (!fp)
++	{
++		nyx_error(MSGID_NYX_MOD_LED_OPENFILE_ERR, 0, "could not open %s for writing: %s",
++		          path, strerror(errno));
++		return false;
++	}
++
++	fprintf(fp, "%d", value);
++
++	/*
++	 * fclose() is where a sysfs store() actually reports failure - the write is
++	 * buffered until then - so an unchecked close would hide, for example, the
++	 * EACCES from a node whose permissions no udev rule has relaxed.
++	 */
++	if (fclose(fp) != 0)
++	{
++		nyx_error(MSGID_NYX_MOD_LED_OPENFILE_ERR, 0, "writing %d to %s failed: %s",
++		          value, path, strerror(errno));
++		return false;
++	}
++
++	return true;
++}
++
++static bool mtk_ioctl(unsigned long cmd, int arg, const char *what)
++{
++	struct mtk_flashlight_user_arg fl_arg;
++
++	/*
++	 * 1, not 0. The ioctl interface takes *ids*, which flashlight-core validates
++	 * as 1-based and converts with "return type_id - 1" to the 0-based *indices*
++	 * its device table is keyed on - so id 1 is the first device, and id 0 is
++	 * rejected outright, before the lookup even happens.
++	 *
++	 * Confusingly the sysfs strobe attribute takes the indices directly, which is
++	 * why "0 0 0 1 500" is right there and wrong here. Passing 0 here costs an
++	 * EINVAL that looks exactly like "no flashlight driver registered".
++	 */
++	fl_arg.type_id = 1;
++	fl_arg.ct_id = 1;
++	fl_arg.arg = arg;
++
++	if (ioctl(mtk_fd, cmd, &fl_arg) < 0)
++	{
++		nyx_error(MSGID_NYX_MOD_LED_OPENFILE_ERR, 0, "%s failed on %s: %s", what,
++		          MTK_FLASHLIGHT_DEV, strerror(errno));
++		return false;
++	}
++
++	return true;
++}
++
++static bool mtk_set(int brightness)
++{
++	int duty;
++
++	if (brightness == 0)
++	{
++		if (!mtk_ioctl(MTK_IOC_SET_ONOFF, 0, "SET_ONOFF(0)"))
++		{
++			return false;
++		}
++
++		/* Releasing the driver is what actually drops the regulator. */
++		mtk_ioctl(MTK_IOC_X_SET_DRIVER, 0, "X_SET_DRIVER(0)");
++		mtk_brightness = 0;
++		return true;
++	}
++
++	/* Round up, so any non-zero percentage lights something. */
++	duty = (brightness * MTK_TORCH_DUTY_MAX + 99) / 100;
++
++	if (duty > MTK_TORCH_DUTY_MAX)
++	{
++		duty = MTK_TORCH_DUTY_MAX;
++	}
++
++	if (!mtk_ioctl(MTK_IOC_X_SET_DRIVER, 1, "X_SET_DRIVER(1)"))
++	{
++		return false;
++	}
++
++	/*
++	 * Zero timeout before anything else. The driver arms an hrtimer from this
++	 * value and switches the light off when it expires; a torch that turns
++	 * itself off after whatever the last caller left here is not a torch.
++	 */
++	if (!mtk_ioctl(MTK_IOC_SET_TIME_OUT_MS, 0, "SET_TIME_OUT_TIME_MS(0)") ||
++	        !mtk_ioctl(MTK_IOC_SET_DUTY, duty, "SET_DUTY") ||
++	        !mtk_ioctl(MTK_IOC_SET_ONOFF, 1, "SET_ONOFF(1)"))
++	{
++		mtk_ioctl(MTK_IOC_X_SET_DRIVER, 0, "X_SET_DRIVER(0)");
++		return false;
++	}
++
++	mtk_brightness = brightness;
++	return true;
++}
++
++/*
++ * Pick a torch node out of /sys/class/leds.
++ *
++ * Preferring "torch" over "flash" matters: on a device exposing both, the flash
++ * node is the momentary strobe and driving it as a torch either does nothing or
++ * fires a single burst. Sorting first makes the choice deterministic where a
++ * device has several, rather than dependent on readdir order.
++ */
++static gchar *find_torch_node(void)
++{
++	GDir *dir = g_dir_open(LEDS_CLASS_DIR, 0, NULL);
++	const gchar *name;
++	GSList *torches = NULL, *flashes = NULL, *l;
++	gchar *chosen = NULL;
++
++	if (!dir)
++	{
++		return NULL;
++	}
++
++	while ((name = g_dir_read_name(dir)) != NULL)
++	{
++		if (g_strstr_len(name, -1, "torch"))
++		{
++			torches = g_slist_insert_sorted(torches, g_strdup(name), (GCompareFunc)g_strcmp0);
++		}
++		else if (g_strstr_len(name, -1, "flash"))
++		{
++			flashes = g_slist_insert_sorted(flashes, g_strdup(name), (GCompareFunc)g_strcmp0);
++		}
++	}
++
++	g_dir_close(dir);
++
++	l = torches ? torches : flashes;
++
++	if (l)
++	{
++		chosen = g_build_filename(LEDS_CLASS_DIR, (const gchar *)l->data, NULL);
++	}
++
++	g_slist_free_full(torches, g_free);
++	g_slist_free_full(flashes, g_free);
++
++	return chosen;
++}
++
++/*
++ * qpnp-flash-v2 names its enable node after the torch it gates: led:torch_0 is
++ * switched by led:switch_0. Deriving that beats another per-device config key,
++ * and a device without the convention simply has no such directory.
++ */
++static gchar *derive_switch_path(const gchar *torch_dir)
++{
++	gchar *base = g_path_get_basename(torch_dir);
++	gchar *switch_name, *dir, *path = NULL;
++
++	if (!g_strstr_len(base, -1, "torch"))
++	{
++		g_free(base);
++		return NULL;
++	}
++
++	{
++		gchar **parts = g_strsplit(base, "torch", 2);
++		switch_name = g_strjoinv("switch", parts);
++		g_strfreev(parts);
++	}
++
++	dir = g_build_filename(LEDS_CLASS_DIR, switch_name, NULL);
++
++	if (g_file_test(dir, G_FILE_TEST_IS_DIR))
++	{
++		path = g_build_filename(dir, "brightness", NULL);
++	}
++
++	g_free(dir);
++	g_free(switch_name);
++	g_free(base);
++	return path;
++}
++
++nyx_error_t nyx_module_open(nyx_instance_t i, nyx_device_t **d)
++{
++	nyx_device_t *dev;
++	gchar *torch_dir = NULL;
++
++	/*
++	 * MediaTek first: a board with /dev/flashlight keeps its torch entirely
++	 * behind that interface and has no LED-class node for the sysfs path to
++	 * find, so probing the other way round would just fail slower.
++	 *
++	 * Opening it is not enough to conclude there is a torch. flashlight-core
++	 * creates the node at module init whether or not any sub-driver went on to
++	 * register, so on a board where the flashlight driver did not probe, the
++	 * node exists and every ioctl answers -EINVAL. Ask it something harmless
++	 * and see: the core looks the device up before it even inspects the
++	 * command, so GET_PROTOCOL_VERSION fails exactly when nothing registered,
++	 * and touches no hardware when it succeeds.
++	 */
++	mtk_fd = open(MTK_FLASHLIGHT_DEV, O_RDWR);
++
++	if (mtk_fd >= 0 && !mtk_ioctl(MTK_IOC_GET_PROTOCOL_VER, 0, "GET_PROTOCOL_VERSION"))
++	{
++		nyx_info(MSGID_NYX_MOD_LED_NODEVICE_ERR, 0,
++		         "%s exists but no flashlight driver registered behind it; "
++		         "falling through to the LED class", MTK_FLASHLIGHT_DEV);
++		close(mtk_fd);
++		mtk_fd = -1;
++	}
++
++	if (mtk_fd >= 0)
++	{
++		dev = (nyx_device_t *)calloc(1, sizeof(nyx_device_t));
++
++		if (NULL == dev)
++		{
++			close(mtk_fd);
++			mtk_fd = -1;
++			return NYX_ERROR_OUT_OF_MEMORY;
++		}
++
++		backend = TORCH_BACKEND_MTK;
++		nyx_info(MSGID_NYX_MOD_LED_NODEVICE_ERR, 0, "torch: %s (MediaTek, duty 0-%d)",
++		         MTK_FLASHLIGHT_DEV, MTK_TORCH_DUTY_MAX);
++
++		nyx_module_register_method(i, dev, NYX_LED_SET_BRIGHTNESS_MODULE_METHOD,
++		                           "led_set_brightness");
++		nyx_module_register_method(i, dev, NYX_LED_GET_BRIGHTNESS_MODULE_METHOD,
++		                           "led_get_brightness");
++		*d = dev;
++		return NYX_ERROR_NONE;
++	}
++
++	torch_dir = nyx_conf_get_path("module.led", "torch_path");
++
++	if (!torch_dir)
++	{
++		torch_dir = find_torch_node();
++	}
++
++	if (!torch_dir)
++	{
++		nyx_error(MSGID_NYX_MOD_LED_NODEVICE_ERR, 0,
++		          "no torch LED found under %s and none configured in [module.led] torch_path",
++		          LEDS_CLASS_DIR);
++		return NYX_ERROR_DEVICE_UNAVAILABLE;
++	}
++
++	dev = (nyx_device_t *)calloc(1, sizeof(nyx_device_t));
++
++	if (NULL == dev)
++	{
++		g_free(torch_dir);
++		return NYX_ERROR_OUT_OF_MEMORY;
++	}
++
++	torch_brightness_path = g_build_filename(torch_dir, "brightness", NULL);
++	torch_max_brightness_path = g_build_filename(torch_dir, "max_brightness", NULL);
++
++	torch_switch_path = nyx_conf_get_path("module.led", "torch_switch_path");
++
++	if (!torch_switch_path)
++	{
++		torch_switch_path = derive_switch_path(torch_dir);
++	}
++
++	if (!file_read_int(torch_max_brightness_path, &torch_max_brightness) ||
++	        torch_max_brightness <= 0)
++	{
++		torch_max_brightness = 255;
++	}
++
++	backend = TORCH_BACKEND_SYSFS;
++	nyx_info(MSGID_NYX_MOD_LED_NODEVICE_ERR, 0,
++	         "torch: %s (max %d)%s%s", torch_brightness_path, torch_max_brightness,
++	         torch_switch_path ? ", switch " : "",
++	         torch_switch_path ? torch_switch_path : "");
++
++	g_free(torch_dir);
++
++	nyx_module_register_method(i, dev, NYX_LED_SET_BRIGHTNESS_MODULE_METHOD,
++	                           "led_set_brightness");
++	nyx_module_register_method(i, dev, NYX_LED_GET_BRIGHTNESS_MODULE_METHOD,
++	                           "led_get_brightness");
++
++	*d = dev;
++	return NYX_ERROR_NONE;
++}
++
++nyx_error_t nyx_module_close(nyx_device_t *d)
++{
++	if (mtk_fd >= 0)
++	{
++		/* Same reasoning as the hybris backend: never leave it burning. */
++		if (mtk_brightness > 0)
++		{
++			mtk_set(0);
++		}
++
++		close(mtk_fd);
++		mtk_fd = -1;
++	}
++
++	backend = TORCH_BACKEND_NONE;
++
++	g_free(torch_brightness_path);
++	torch_brightness_path = NULL;
++	g_free(torch_max_brightness_path);
++	torch_max_brightness_path = NULL;
++	g_free(torch_switch_path);
++	torch_switch_path = NULL;
++
++	free(d);
++	return NYX_ERROR_NONE;
++}
++
++nyx_error_t led_set_brightness(nyx_device_handle_t handle, int32_t brightness)
++{
++	int value;
++
++	if (NULL == handle)
++	{
++		return NYX_ERROR_INVALID_HANDLE;
++	}
++
++	if (brightness < 0 || brightness > 100)
++	{
++		return NYX_ERROR_INVALID_VALUE;
++	}
++
++	if (backend == TORCH_BACKEND_MTK)
++	{
++		return mtk_set(brightness) ? NYX_ERROR_NONE : NYX_ERROR_INVALID_OPERATION;
++	}
++
++	/* Round rather than truncate, so 1% is not silently the same as off. */
++	value = (brightness * torch_max_brightness + 50) / 100;
++
++	if (brightness > 0 && value == 0)
++	{
++		value = 1;
++	}
++
++	if (brightness == 0)
++	{
++		/* Cut the output before disarming, never the other way round. */
++		if (torch_switch_path && !file_write_int(torch_switch_path, 0))
++		{
++			return NYX_ERROR_INVALID_OPERATION;
++		}
++
++		if (!file_write_int(torch_brightness_path, 0))
++		{
++			return NYX_ERROR_INVALID_OPERATION;
++		}
++
++		return NYX_ERROR_NONE;
++	}
++
++	if (!file_write_int(torch_brightness_path, value))
++	{
++		return NYX_ERROR_INVALID_OPERATION;
++	}
++
++	if (torch_switch_path && !file_write_int(torch_switch_path, 1))
++	{
++		return NYX_ERROR_INVALID_OPERATION;
++	}
++
++	return NYX_ERROR_NONE;
++}
++
++nyx_error_t led_get_brightness(nyx_device_handle_t handle,
++                               int32_t *brightness_out_ptr)
++{
++	int value = 0, enabled = 1;
++
++	if (NULL == handle)
++	{
++		return NYX_ERROR_INVALID_HANDLE;
++	}
++
++	if (NULL == brightness_out_ptr)
++	{
++		return NYX_ERROR_INVALID_VALUE;
++	}
++
++	if (backend == TORCH_BACKEND_MTK)
++	{
++		/*
++		 * The ioctl interface is write-only - there is no GET_ONOFF - so this
++		 * reports what we last set, as the hybris backend does for the same
++		 * reason.
++		 */
++		*brightness_out_ptr = mtk_brightness;
++		return NYX_ERROR_NONE;
++	}
++
++	if (!file_read_int(torch_brightness_path, &value))
++	{
++		return NYX_ERROR_DEVICE_UNAVAILABLE;
++	}
++
++	/*
++	 * An armed current with the switch off is not light, so report it as off
++	 * rather than as whatever was left in the brightness node.
++	 */
++	if (torch_switch_path && file_read_int(torch_switch_path, &enabled) && enabled == 0)
++	{
++		value = 0;
++	}
++
++	*brightness_out_ptr = (value * 100 + torch_max_brightness / 2) /
++	                      torch_max_brightness;
++	return NYX_ERROR_NONE;
++}

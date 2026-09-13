@@ -24,7 +24,7 @@ SECTION = "webos/libs"
 DEPENDS = "glib-2.0 pmloglib"
 
 WEBOS_VERSION = "7.3.0-13_0ee217947853f7fbd0e0a625d99c229ecd33ab91"
-PR = "r9"
+PR = "r10"
 
 inherit webos_component
 inherit webos_public_repo
@@ -39,6 +39,7 @@ SYSTEMD_SERVICE:${PN} = "nyx.target"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Implement-asynchronous-suspend-resume-methods-for-sy.patch \
     file://0002-add-nyx-target.patch \
+    file://0003-led-controller-Add-RGB-colour-parameters.patch \
 "
 
 do_install:append() {

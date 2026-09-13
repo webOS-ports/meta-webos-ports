@@ -27,6 +27,8 @@ RDEPENDS:${PN} = " \
   \
   luneos-device-config \
   \
+  powertop \
+  \
   pulseaudio-distro-conf \
   pulseaudio-misc \
   pulseaudio-module-loopback \

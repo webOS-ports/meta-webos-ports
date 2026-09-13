@@ -8,6 +8,11 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 #libcrypto is a requirement and provided by openssl
 DEPENDS = "nyx-lib glib-2.0 libhybris libsuspend virtual/android-headers openssl"
 
+# The torch module calls droid_media_camera_set_torch_mode(); droidmedia's
+# hybris.c resolves it out of the Android-side libdroidmedia.so, so this is a
+# build-time dependency only.
+DEPENDS += "droidmedia"
+
 # We need to be ${MACHINE_ARCH} as we need to compile the source against a specific
 # Android version we select per machine
 PACKAGE_ARCH = "${MACHINE_ARCH}"
@@ -20,7 +25,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/../../recipes-webos-ose/nyx-modules/nyx-m
 COMPATIBLE_MACHINE = "^halium$"
 
 PV = "0.1.0-1+git"
-PR = "r1"
+PR = "r2"
 SRCREV = "32c6e3dbc4f261487a9a1d03622dc2e64a52d17d"
 
 inherit webos_ports_repo

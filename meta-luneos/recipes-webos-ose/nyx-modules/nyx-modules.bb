@@ -20,7 +20,7 @@ RDEPENDS:${PN} += "nyx-conf"
 
 WEBOS_VERSION = "7.1.0-25_802df9c1da7fb70c9d7506d4b863cd858153a1b1"
 
-PR = "r23"
+PR = "r25"
 
 EXTRA_OECMAKE += "\
     -DDISTRO_VERSION:STRING='${DISTRO_VERSION}' \
@@ -79,6 +79,8 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0021-touchpanel-mtdev-fix-finger-type-and-declare-gesture-.patch \
     file://0022-Read-device-paths-from-etc-nyx.conf-at-runtime.patch \
     file://0023-haptics-Implement-named-effects-effect-id-and-cancel.patch \
+    file://0024-Add-nyx-test-ledcontroller-tool.patch \
+    file://0025-Add-LED-torch-module-and-nyx-test-led.patch \
 "
 
 SRC_URI:append = " \
@@ -102,3 +104,4 @@ PACKAGES += "${PN}-tests"
 FILES:${PN} += "${libdir}/nyx/modules/*"
 FILES:${PN} += "${systemd_system_unitdir}/*"
 FILES:${PN}-tests += "${bindir}/nyx-test-ledcontroller"
+FILES:${PN}-tests += "${bindir}/nyx-test-led"

@@ -49,3 +49,8 @@ set(NYXMOD_OW_HAPTICS					TRUE)
 set(NYXMOD_OW_DEVICEINFO				FALSE)
 set(NYXMOD_OW_SYSTEM					FALSE)
 set(NYXMOD_OW_LED						FALSE)
+
+# The torch likewise. /sys/class/leds on a Treble device belongs to the Android
+# side, so the sysfs backend has nothing it can write; the hybris module asks
+# the camera service instead, which is device-agnostic by construction.
+set(NYXMOD_OW_LEDTORCH					FALSE)
