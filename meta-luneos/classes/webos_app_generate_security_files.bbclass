@@ -87,7 +87,7 @@ def webos_app_generate_security_files_write_permission_file(d, app_info):
 
     return permission_file
 
-def webos_app_generate_security_files_write_role_file(d, app_info):
+def webos_app_generate_security_files_write_role_file(d, app_info, app_subdir=None):
     import os
     import json
 
@@ -99,7 +99,14 @@ def webos_app_generate_security_files_write_role_file(d, app_info):
     if type == "native":
         exe_name = app_info["main"]
         app_dir = d.getVar("webos_applicationsdir")
-        role["exeName"] = app_dir + "/" + d.getVar("BPN") + "/" + exe_name
+        # The directory the app is actually installed into is not always BPN:
+        # Waydroid's recipe is "waydroid" but its appinfo id, and therefore its
+        # directory, is "Waydroid". Using BPN produced an exeName no running
+        # process can ever match, so the hub refused the app its bus name
+        # ("No role file for executable"). The caller knows the real directory
+        # name; fall back to BPN only when it does not.
+        subdir = app_subdir or d.getVar("BPN")
+        role["exeName"] = app_dir + "/" + subdir + "/" + exe_name
         role["type"]  = "regular"
         role["allowedNames"] = [app_id + "*"]
         role["permissions"] = [{"service": app_id, "outbound": ["*"] }]
@@ -199,7 +206,7 @@ fakeroot python do_configure_security() {
 
         type = app_info["type"]
         if type in ["qml", "web", "native"]:
-            role_file       = webos_app_generate_security_files_write_role_file(d, app_info)
+            role_file       = webos_app_generate_security_files_write_role_file(d, app_info, app)
             permission_file = webos_app_generate_security_files_write_permission_file(d, app_info)
 }
 
