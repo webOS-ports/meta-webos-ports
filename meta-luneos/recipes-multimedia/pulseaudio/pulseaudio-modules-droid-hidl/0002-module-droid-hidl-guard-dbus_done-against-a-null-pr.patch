@@ -1,0 +1,70 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andrew <andrew@localhost>
+Date: Fri, 11 Sep 2026 08:00:00 -0400
+Subject: [PATCH] module-droid-hidl: guard dbus_done against a null
+ dbus_protocol
+
+Found 2026-09-11 testing a freshly-built pulseaudio-modules-droid on
+real hardware where the droid HAL open legitimately fails (EINVAL - no
+audio DSP running behind it on that particular boot): with
+module-droid-card unable to open the HAL, module-droid-hidl's own
+pa__init() correctly detects this (its DROID_HW_HANDLE/
+DROID_SET_PARAMETERS/DROID_GET_PARAMETERS pa_shared_get() lookups all
+fail - "Couldn't get hw module functions, is module-droid-card
+loaded?") and jumps to its fail: label *before* ever calling
+dbus_init(u). That label unconditionally calls pa__done(), which
+unconditionally calls dbus_done(u).
+
+u is allocated with pa_xnew0(), so u->dbus_protocol is still NULL at
+that point - dbus_init() is the only place that sets it, and it never
+ran. dbus_done() then calls
+pa_dbus_protocol_unregister_extension(NULL, ...) unconditionally,
+which asserts inside PulseAudio core:
+
+    E: [pulseaudio] droid-util.c: Failed to open audio hw device : Invalid argument (22).
+    E: [pulseaudio] module.c: Failed to load module "module-droid-card" ...: initialization failed.
+    E: [pulseaudio] module-droid-hidl.c: Couldn't get hw module functions, is module-droid-card loaded?
+    E: [pulseaudio] protocol-dbus.c: Assertion 'p' failed at .../protocol-dbus.c:1116, function pa_dbus_protocol_unregister_extension(). Aborting.
+    systemd[1]: pulseaudio.service: Main process exited, code=dumped, status=6/ABRT
+
+So a HAL-open failure that should just mean "no droid card, and
+module-droid-hidl declines to load too" instead takes the whole
+daemon down - unrelated to and much more disruptive than the actual
+failure. This is a real upstream bug, not LuneOS-specific: it fires
+whenever the droid HAL open fails for any reason on any device using
+this module, not just on a board with no DSP behind it.
+
+Guard the same way module-droid-card's own park_profile() null check
+does - by checking the thing that dbus_init() is the sole setter of
+before touching it.
+
+Signed-off-by: Andrew <andrew@localhost>
+Upstream-Status: Pending
+---
+ src/hidl/module-droid-hidl.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/src/hidl/module-droid-hidl.c b/src/hidl/module-droid-hidl.c
+--- a/src/hidl/module-droid-hidl.c
++++ b/src/hidl/module-droid-hidl.c
+@@ -167,6 +167,18 @@ static void dbus_init(struct userdata *u) {
+ static void dbus_done(struct userdata *u) {
+     pa_assert(u);
+ 
++    /* pa__init() jumps to its fail: label, which unconditionally calls
++     * pa__done() -> dbus_done(), on several checks that run before
++     * dbus_init() (e.g. the DROID_HW_HANDLE shared-value lookup, which
++     * fails whenever module-droid-card did not load - this project's own
++     * case, and in general any device where the droid HAL open fails).
++     * u is pa_xnew0()'d, so u->dbus_protocol is still NULL in that case,
++     * and unregistering against a NULL protocol asserts inside
++     * pulseaudio core (protocol-dbus.c: Assertion 'p' failed ... Aborting),
++     * taking the whole daemon down instead of just failing this module. */
++    if (!u->dbus_protocol)
++        return;
++
+     pa_dbus_protocol_unregister_extension(u->dbus_protocol, AUDIOSYSTEM_PASSTHROUGH_IFACE);
+     pa_dbus_protocol_remove_interface(u->dbus_protocol, AUDIOSYSTEM_PASSTHROUGH_PATH, passthrough_info.name);
+     pa_dbus_protocol_unref(u->dbus_protocol);
+-- 
+2.53.0
