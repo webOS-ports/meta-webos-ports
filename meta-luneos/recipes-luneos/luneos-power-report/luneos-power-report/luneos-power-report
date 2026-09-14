@@ -32,6 +32,15 @@ read_or() { cat "$1" 2>/dev/null || printf '%s' "${2:--}"; }
 boottime()  { cut -d' ' -f1 /proc/uptime; }
 monotonic() { awk '/^now at/ { printf "%.2f", $3 / 1000000000; exit }' /proc/timer_list 2>/dev/null; }
 
+# The battery supply is only called "battery" on Android-derived kernels.
+# Mainline names it after the fuel gauge: rk818-battery on a PinePhone Pro,
+# axp20x-battery on a PinePhone. Take the first supply of type Battery.
+BATT=
+for _d in /sys/class/power_supply/*/; do
+    [ "$(cat "${_d}type" 2>/dev/null)" = "Battery" ] && { BATT=${_d%/}; break; }
+done
+[ -n "$BATT" ] || BATT=/sys/class/power_supply/battery
+
 snap() {
     d=$1
     mkdir -p "$d"
@@ -42,7 +51,8 @@ snap() {
         [ -d "$c" ] || continue
         printf '%s %s %s\n' "$c" "$(read_or "$c/usage" 0)" "$(read_or "$c/time" 0)"
     done > "$d/cpuidle"
-    read_or /sys/class/power_supply/battery/charge_counter '' > "$d/charge"
+    read_or "$BATT/charge_counter" '' > "$d/charge"
+    read_or "$BATT/current_now" '' > "$d/current"
     boottime  > "$d/boottime"
     monotonic > "$d/monotonic"
     grep -E 'success|^fail' /sys/kernel/debug/suspend_stats 2>/dev/null | head -n 2 > "$d/suspend"
@@ -83,16 +93,29 @@ UPT=${BT%.*}
 case "$MEMSLEEP" in *"[s2idle]"*deep*) flag "mem_sleep selects s2idle although deep is available" ;; esac
 
 # ---------------------------------------------------------------- battery --
-hdr "battery"
-CUR=$(read_or /sys/class/power_supply/battery/current_now '')
-say "capacity: $(read_or /sys/class/power_supply/battery/capacity)%  status: $(read_or /sys/class/power_supply/battery/status)"
-[ -n "$CUR" ] && say "$(awk -v c="$CUR" 'BEGIN { printf "current_now: %.1f mA (sign convention is per-device)", c/1000 }')"
+hdr "battery ($BATT)"
+say "capacity: $(read_or "$BATT/capacity")%  status: $(read_or "$BATT/status")"
+CUR_A=$(cat "$S/a/current") CUR_B=$(cat "$S/b/current")
+[ -n "$CUR_B" ] && say "$(awk -v a="${CUR_A:-0}" -v b="$CUR_B" 'BEGIN {
+    printf "current_now: %.1f -> %.1f mA (instantaneous; sign convention is per-device)", a/1000, b/1000 }')"
+
+# On a device that suspends, sleep(1) only counts awake (monotonic) time, so
+# the window stretches across suspend. Average the drain over the wall
+# (boottime) span and report how much of it was spent suspended - on a
+# healthy device that suspended share is the whole story.
+WALL=$(awk -v a="$(cat "$S/a/boottime")" -v b="$(cat "$S/b/boottime")" 'BEGIN { print b-a }')
+SLEPT=$(awk -v w="$WALL" -v a="$(cat "$S/a/monotonic")" -v b="$(cat "$S/b/monotonic")" 'BEGIN {
+    d = w-(b-a); if (d < 0) d = 0; printf "%.0f", d }')
+say "window: ${WINDOW}s awake, $(awk -v w="$WALL" 'BEGIN { printf "%.0f", w }')s wall clock (${SLEPT}s suspended during window)"
+
 CA=$(cat "$S/a/charge") CB=$(cat "$S/b/charge")
 if [ -n "$CA" ] && [ -n "$CB" ]; then
-    say "$(awk -v a="$CA" -v b="$CB" -v w="$WINDOW" 'BEGIN {
+    say "$(awk -v a="$CA" -v b="$CB" -v w="$WALL" 'BEGIN {
         printf "charge_counter delta: %.2f mAh over window (avg %.1f mA)", (b-a)/1000, (b-a)*3.6/w }')"
+else
+    say "no charge_counter on this fuel gauge - compare the current_now endpoints above"
 fi
-case "$(read_or /sys/class/power_supply/battery/status)" in
+case "$(read_or "$BATT/status")" in
     Charging|Full) say "NOTE: on external power - drain figures are meaningless, measure on battery" ;;
 esac
 
