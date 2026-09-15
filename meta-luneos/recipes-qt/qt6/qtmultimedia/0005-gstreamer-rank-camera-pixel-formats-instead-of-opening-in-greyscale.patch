@@ -1,0 +1,104 @@
+From: LuneOS <team@webos-ports.org>
+Date: Tue, 15 Sep 2026 16:00:00 +0200
+Subject: [PATCH] gstreamer: rank camera pixel formats instead of opening in
+ greyscale
+
+QPlatformCamera::findBestCameraFormat() picks a format by comparing a tuple:
+
+    isValid, sufficientFrameRate, width * height, pixelFormatScore, maxFrameRate
+
+Three of those are degenerate for a libcamera device. libcamerasrc reports a
+maxFrameRate of 0 for every format, which flattens the 2nd and 5th members;
+every format of a given sensor reaches the same maximum resolution, which
+flattens the 3rd. The 4th comes from cameraPixelFormatScore(), a virtual that
+the base class answers with 0 and which only the Darwin backend overrides, so
+it is flat too.
+
+Every candidate therefore compares equal, ranges::max() returns the first
+element, and libcamera enumerates greyscale first. The result is that a colour
+camera opens in greyscale on the GStreamer backend, and an application has to
+notice and re-assign QCamera::cameraFormat afterwards. That correction is not
+free: it tears the camera down and rebuilds it a second time. On a PinePhone
+Pro, switching sensors then reconfigures three times in 1.5 seconds -
+
+    configuring streams: (0) 3264x2448-R8/Rec709
+    configuring streams: (0) 4208x3120-R8/Rec709
+    configuring streams: (0) 1280x720-YUV420/Rec709
+
+- and the pipeline does not survive it.
+
+Implement the scoring hook for GStreamer so a colour format is chosen up front
+and the second reconfiguration never happens. Monochrome layouts rank lowest,
+above only Format_Invalid, so a genuinely monochrome sensor still works.
+Packed YUV ranks below planar: it maps to a DRM fourcc whose EGL image must be
+sampled with samplerExternalOES while the dmabuf import binds a plain
+sampler2D, so it renders incorrectly wherever camera buffers arrive as dmabuf.
+JPEG ranks below raw colour as it costs a decoder hop.
+
+Upstream-Status: Pending
+---
+diff -ruN sc_a/src/plugins/multimedia/gstreamer/mediacapture/qgstreamercamera.cpp sc_b/src/plugins/multimedia/gstreamer/mediacapture/qgstreamercamera.cpp
+--- a/src/plugins/multimedia/gstreamer/mediacapture/qgstreamercamera.cpp
++++ b/src/plugins/multimedia/gstreamer/mediacapture/qgstreamercamera.cpp
+@@ -188,6 +188,48 @@
+     return true;
+ }
+ 
++int QGstreamerCamera::cameraPixelFormatScore(QVideoFrameFormat::PixelFormat format,
++                                             QVideoFrameFormat::ColorRange) const
++{
++    /*
++     * findBestCameraFormat() ranks formats on a tuple whose other members are
++     * frequently degenerate: libcamerasrc reports a maxFrameRate of 0 for every
++     * format, and every format of a given sensor reaches the same maximum
++     * resolution. With the base implementation returning 0 for everything, all
++     * criteria tie, std::max returns the first element, and libcamera
++     * enumerates greyscale first - so a colour camera opens in greyscale.
++     *
++     * Rank what the pipeline can actually present instead.
++     */
++    switch (format) {
++    case QVideoFrameFormat::Format_Invalid:
++        return 0;
++
++    case QVideoFrameFormat::Format_Y8:
++    case QVideoFrameFormat::Format_Y16:
++        /* Monochrome: correct only for a genuinely monochrome sensor. */
++        return 1;
++
++    case QVideoFrameFormat::Format_YUYV:
++    case QVideoFrameFormat::Format_UYVY:
++        /*
++         * Packed YUV maps to a DRM fourcc whose EGL image has to be sampled
++         * with samplerExternalOES. The dmabuf import binds a plain sampler2D,
++         * so these render incorrectly wherever camera buffers arrive as
++         * dmabuf. Usable as a fallback, but never a first choice.
++         */
++        return 2;
++
++    case QVideoFrameFormat::Format_Jpeg:
++        /* Needs a decoder hop, and gives no control over the decoded layout. */
++        return 3;
++
++    default:
++        /* Planar and semi-planar YUV, and the RGB layouts. */
++        return 4;
++    }
++}
++
+ void QGstreamerCamera::updateCameraProperties()
+ {
+ #if QT_CONFIG(linux_v4l)
+diff -ruN sc_a/src/plugins/multimedia/gstreamer/mediacapture/qgstreamercamera_p.h sc_b/src/plugins/multimedia/gstreamer/mediacapture/qgstreamercamera_p.h
+--- a/src/plugins/multimedia/gstreamer/mediacapture/qgstreamercamera_p.h
++++ b/src/plugins/multimedia/gstreamer/mediacapture/qgstreamercamera_p.h
+@@ -78,6 +78,9 @@
+ private:
+     QGstreamerCamera(QCamera *camera);
+ 
++    int cameraPixelFormatScore(QVideoFrameFormat::PixelFormat format,
++                               QVideoFrameFormat::ColorRange colorRange) const override;
++
+     void updateCameraProperties();
+ 
+ #if QT_CONFIG(linux_v4l)

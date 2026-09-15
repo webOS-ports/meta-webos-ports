@@ -1,0 +1,77 @@
+From: LuneOS <team@webos-ports.org>
+Date: Mon, 14 Sep 2026 18:00:00 +0200
+Subject: [PATCH] gstreamer: honour the GstMemory offset when importing dmabuf
+ planes
+
+mapFromDmaBuffer() maps every plane of a dmabuf GstBuffer to a separate
+EGLImage. To locate a plane inside the buffer it uses:
+
+    auto planeOffset = [&](int plane) -> EGLAttrib {
+        // videoMeta/videoInfo offset can be incorrect when each plane has a
+        // separate memory black.
+        if (nPlanes == nMemoryBlocks)
+            return 0;
+        ...
+    };
+
+The assumption is that when a buffer carries one GstMemory per plane, each of
+those memories starts at offset 0 of its own dma-buf, so the videoMeta offsets
+must not be applied. That holds for allocators which really do hand out one
+dma-buf per plane, but it is not true in general: a GstMemory may be a *view*
+into a larger dma-buf, and the part of the buffer it refers to is described by
+GstMemory::offset. gst_dmabuf_memory_get_fd() returns the fd of the whole
+allocation and knows nothing about that view.
+
+libcamera's GStreamer element is exactly such a producer. In
+gstlibcameraallocator.cpp each plane is wrapped as:
+
+    GstMemory *mem = gst_fd_allocator_alloc(allocator, plane.fd.get(),
+                                            plane.offset + plane.length, ...);
+    gst_memory_resize(mem, plane.offset, plane.length);
+
+For a single-planar V4L2 format such as V4L2_PIX_FMT_YUV420 libcamera makes one
+allocation per frame, so plane.fd is the *same* fd for all three planes and only
+plane.offset differs. The buffer therefore has nPlanes == nMemoryBlocks == 3,
+every gst_dmabuf_memory_get_fd() returns the same fd, and planeOffset() returns
+0 for all of them. All three EGLImages are created over the start of the
+allocation, so the U and V textures both sample the luma plane.
+
+Measured on a PinePhone Pro (rkisp1, ov8858) against a neutral scene that
+libcamera itself renders as R=74.7 G=72.9 B=74.1, the I420 preview came out as
+R=67.0 G=115.2 B=60.9. Solving Qt's BT709 conversion backwards from those
+values yields U-0.5 = -0.07454 and V-0.5 = -0.07444 - the two chroma planes
+carrying identical data, and that data tracking luma rather than chroma. The
+result is a heavy green cast on every frame. GRAY8 is unaffected because it has
+a single plane at offset 0, which is why a greyscale preview looked correct
+while every colour layout did not.
+
+Use the offset of each plane's own GstMemory instead. When an allocator really
+does provide one dma-buf per plane that offset is 0 and behaviour is unchanged;
+when the memories are views into a shared allocation it is the offset that was
+being discarded.
+
+Upstream-Status: Pending
+---
+ .../multimedia/gstreamer/common/qgstvideobuffer.cpp | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+--- a/src/plugins/multimedia/gstreamer/common/qgstvideobuffer.cpp
++++ b/src/plugins/multimedia/gstreamer/common/qgstvideobuffer.cpp
+@@ -412,9 +412,15 @@
+     };
+ 
+     auto planeOffset = [&](int plane) -> EGLAttrib {
+-        // videoMeta/videoInfo offset can be incorrect when each plane has a separate memory black.
++        // One GstMemory per plane does not imply that each plane starts at
++        // offset 0 of its own dma-buf: a GstMemory can be a view into a larger
++        // allocation, and gst_dmabuf_memory_get_fd() returns the fd of that
++        // whole allocation. libcamerasrc produces exactly this for single-planar
++        // formats - one fd shared by every plane, distinguished only by the
++        // memory offset. Use that offset; it is 0 for allocators which do hand
++        // out one dma-buf per plane, so they are unaffected.
+         if (nPlanes == nMemoryBlocks)
+-            return 0;
++            return EGLAttrib(gst_buffer_peek_memory(buffer, plane)->offset);
+         if (videoMeta)
+             return videoMeta->offset[plane];
+         return GST_VIDEO_INFO_PLANE_OFFSET(&gstVideoInfo, plane);

@@ -1,0 +1,163 @@
+From: LuneOS <team@webos-ports.org>
+Date: Tue, 15 Sep 2026 12:30:00 +0200
+Subject: [PATCH] gstreamer: imagecapture: write an encoded image, not the raw
+ frame
+
+QGstreamerImageCapture builds a capture bin that ends in a JPEG encoder:
+
+    queue ! capsfilter ! videoconvert ! jpegenc ! jifmux ! fakesink
+
+but the buffer probe that does the capturing is installed on the queue's src
+pad, upstream of the encoder:
+
+    addProbeToPad(queue.staticPad("src").pad(), false);
+
+and saveBufferToFile() writes whatever that probe hands it straight to disk:
+
+    if (gst_buffer_map(buffer.get(), &info, GST_MAP_READ)) {
+        f.write(reinterpret_cast<const char *>(info.data), info.size);
+
+The encoder branch is never read from - it terminates in a fakesink - so every
+captured file is an uncompressed frame carrying a .jpg name. On a PinePhone Pro
+capturing at 1280x720 in I420 that is a 1382400 byte file (1280 * 720 * 1.5),
+which no image viewer can open.
+
+The raw buffer is still needed: convertBufferToImage() turns it into the QImage
+delivered by imageCaptured(). So rather than moving the probe, save that
+converted image. QImage::save() picks the format from the file name, so the
+file now matches its extension.
+
+The conversion cannot simply be moved into saveBufferToFile()'s thread pool
+task: QVideoFrame::toImage() has to run on the application thread here, as the
+comments in convertBufferToImage() record (QTBUG-131107, QTBUG-130970 - on
+Wayland doing it on a worker thread crashes the application thread). The save
+is therefore hung off the existing conversion, which already runs on the right
+thread, and only the encoding of the finished QImage happens in the pool.
+
+Upstream-Status: Pending
+---
+diff -ruN ic_a/src/plugins/multimedia/gstreamer/mediacapture/qgstreamerimagecapture.cpp ic_b/src/plugins/multimedia/gstreamer/mediacapture/qgstreamerimagecapture.cpp
+--- a/src/plugins/multimedia/gstreamer/mediacapture/qgstreamerimagecapture.cpp
++++ b/src/plugins/multimedia/gstreamer/mediacapture/qgstreamerimagecapture.cpp
+@@ -9,6 +9,7 @@
+ #include <QtMultimedia/private/qplatformimagecapture_p.h>
+ #include <QtMultimedia/private/qvideoframe_p.h>
+ #include <QtGui/qguiapplication.h>
++#include <QtGui/qimage.h>
+ #include <QtCore/qdebug.h>
+ #include <QtCore/qdir.h>
+ #include <QtCore/qstandardpaths.h>
+@@ -232,28 +233,19 @@
+     return m_lastId;
+ }
+ 
+-void QGstreamerImageCapture::saveBufferToFile(QGstBufferHandle buffer, QString filename, int taskId)
++void QGstreamerImageCapture::saveImageToFile(QImage image, QString filename, int taskId)
+ {
+     Q_ASSERT(!filename.isEmpty());
+ 
+     runInThreadPool(
+-            [this, taskId, filename = std::move(filename), buffer = std::move(buffer)]() mutable {
+-        QMutexLocker guard(&m_mutex);
++            [this, taskId, filename = std::move(filename), image = std::move(image)]() mutable {
+         qCDebug(qLcImageCaptureGst) << "saving image as" << filename;
+ 
+-        QFile f(filename);
+-        if (!f.open(QFile::WriteOnly)) {
+-            qCDebug(qLcImageCaptureGst) << "   could not open image file for writing";
++        if (!image.save(filename)) {
++            qCDebug(qLcImageCaptureGst) << "   could not save image file" << filename;
+             return;
+         }
+ 
+-        GstMapInfo info;
+-        if (gst_buffer_map(buffer.get(), &info, GST_MAP_READ)) {
+-            f.write(reinterpret_cast<const char *>(info.data), info.size);
+-            gst_buffer_unmap(buffer.get(), &info);
+-        }
+-        f.close();
+-
+         QMetaObject::invokeMethod(this, [this, taskId, filename = std::move(filename)]() mutable {
+             emit imageSaved(taskId, filename);
+         });
+@@ -261,6 +253,7 @@
+ }
+ void QGstreamerImageCapture::convertBufferToImage(const QMutexLocker<QRecursiveMutex> &locker,
+                                                   QGstBufferHandle buffer, QGstCaps caps,
++                                                  QString saveFileName,
+                                                   QMediaMetaData metadata, int taskId)
+ {
+     using namespace Qt::Literals;
+@@ -288,14 +281,17 @@
+ 
+         metadata.insert(QMediaMetaData::Resolution, frame.size());
+ 
+-        invokeDeferred(
+-                [this, frame = std::move(frame), taskId, metadata = std::move(metadata)]() mutable {
++        invokeDeferred([this, frame = std::move(frame), taskId, metadata = std::move(metadata),
++                        saveFileName = std::move(saveFileName)]() mutable {
+             QImage img = frame.toImage();
+             if (img.isNull()) {
+                 qDebug() << "received a null image";
+                 return;
+             }
+ 
++            if (!saveFileName.isEmpty())
++                saveImageToFile(img, std::move(saveFileName), taskId);
++
+             emit imageExposed(taskId);
+             qCDebug(qLcImageCaptureGst) << "Image available!";
+             emit imageAvailable(taskId, frame);
+@@ -304,6 +300,7 @@
+         });
+     } else {
+         runInThreadPool([this, taskId, buffer = std::move(buffer), caps = std::move(caps),
++                         saveFileName = std::move(saveFileName),
+                          metadata = std::move(metadata)]() mutable {
+             QMutexLocker guard(&m_mutex);
+             if (!m_session) {
+@@ -328,6 +325,9 @@
+                 return;
+             }
+ 
++            if (!saveFileName.isEmpty())
++                saveImageToFile(img, std::move(saveFileName), taskId);
++
+             QMediaMetaData imageMetaData = metaData();
+             imageMetaData.insert(QMediaMetaData::Resolution, frame.size());
+ 
+@@ -379,17 +379,12 @@
+         emit readyForCaptureChanged(ready);
+     });
+ 
+-    // save file
++    // convert to image, then emit and save the converted image
+     PendingImage imageData = pendingImages.dequeue();
+-    QString saveFileName = imageData.filename;
+-    if (!saveFileName.isEmpty())
+-        saveBufferToFile(bufferHandle, std::move(saveFileName), imageData.id);
+-
+-    // convert to image and emit
+     QGstCaps caps = bin.staticPad("sink").currentCaps();
+     QMediaMetaData imageMetaData = metaData();
+-    convertBufferToImage(guard, bufferHandle, std::move(caps), std::move(imageMetaData),
+-                         imageData.id);
++    convertBufferToImage(guard, bufferHandle, std::move(caps), std::move(imageData.filename),
++                         std::move(imageMetaData), imageData.id);
+ 
+     return true;
+ }
+diff -ruN ic_a/src/plugins/multimedia/gstreamer/mediacapture/qgstreamerimagecapture_p.h ic_b/src/plugins/multimedia/gstreamer/mediacapture/qgstreamerimagecapture_p.h
+--- a/src/plugins/multimedia/gstreamer/mediacapture/qgstreamerimagecapture_p.h
++++ b/src/plugins/multimedia/gstreamer/mediacapture/qgstreamerimagecapture_p.h
+@@ -64,8 +64,9 @@
+ 
+     void setResolution(const QSize &resolution);
+     int doCapture(QString fileName);
+-    void saveBufferToFile(QGstBufferHandle, QString filename, int id);
++    void saveImageToFile(QImage, QString filename, int id);
+     void convertBufferToImage(const QMutexLocker<QRecursiveMutex> &, QGstBufferHandle, QGstCaps,
++                              QString saveFileName,
+                               QMediaMetaData, int id);
+ 
+     mutable QRecursiveMutex m_mutex; // guard all elements accessed from gstreamer / worker threads

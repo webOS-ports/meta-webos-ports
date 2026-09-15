@@ -1,0 +1,181 @@
+From: LuneOS <team@webos-ports.org>
+Date: Tue, 15 Sep 2026 18:30:00 +0200
+Subject: [PATCH] gstreamer: survive tearing a camera down with requests in
+ flight
+
+Destroying a libcamerasrc while requests are still in flight crashes or hangs
+the application. Four separate problems contribute, all in the same area.
+
+1. The requestCompleted signal is never disconnected. gst_libcamera_src_open()
+   does
+
+       cam->requestCompleted.connect(self->state, &GstLibcameraSrcState::requestCompleted);
+
+   and GstLibcameraSrcState is a plain struct, not a libcamera::Object, so the
+   connection is not dropped automatically when finalize() deletes the state.
+   gst_libcamera_src_close() releases the camera without disconnecting, and the
+   Camera outlives the element because the CameraManager holds it, so a
+   completion arriving afterwards - a late metadata callback from an isolated
+   IPA, say - runs on freed memory:
+
+       #0  std::_Map_base<..., libcamera::ControlValue>::operator[]
+       #1  libcamera::ControlList::find(unsigned int)
+       #3  libcamera::ControlList::merge(...)
+       #4  GstLibcameraSrcState::requestCompleted(libcamera::Request *)
+       #7  libcamera::ipa::rkisp1::IPAProxyRkISP1Isolated::metadataReadyHandler(...)
+
+2. requestCompleted() merges a request's metadata before checking whether the
+   request was cancelled. PipelineHandler::stop() cancels and completes every
+   in-flight request, so this runs for requests that never produced anything,
+   on the camera manager thread, while the device is being torn down:
+
+       #3  libcamera::ControlList::merge(...)
+       #4  GstLibcameraSrcState::requestCompleted(libcamera::Request *)
+       #6  libcamera::V4L2VideoDevice::streamOff()
+       #7  libcamera::RkISP1Path::stop()
+       #9  libcamera::PipelineHandler::stop(libcamera::Camera *)
+
+3. Completions are assumed to arrive in the order the requests were queued:
+
+       wrap = std::move(queuedRequests_.front());
+       queuedRequests_.pop();
+       g_return_if_fail(wrap->request_.get() == request);
+
+   which does not hold around a stop. A completion can arrive once the queue
+   has drained - front() on an empty std::queue being undefined behaviour - and
+   otherwise consumes an unrelated wrapper, leaving two requests mishandled and
+
+       assertion 'wrap->request_.get() == request' failed
+
+   repeating until the pipeline stalls.
+
+4. clearRequests() empties only completedRequests_, so a wrapper still queued
+   when a session ends is carried into the next one.
+
+Disconnect the signal before releasing the camera, skip the metadata of a
+cancelled request, look the wrapper up by the request it belongs to, ignore a
+completion that has none, and drop the queued wrappers when a session ends.
+queuedRequests_ becomes a std::deque so a matching entry can be erased from the
+middle.
+
+All of this is reachable from an ordinary application: switching between the
+front and back sensors of a PinePhone Pro destroys one libcamerasrc and creates
+another on the same pipeline handler. Before this change the preview locked up
+and the process died with SIGSEGV.
+
+Upstream-Status: Pending
+---
+diff -ruN gs72_a/src/gstreamer/gstlibcamerasrc.cpp gs72_b/src/gstreamer/gstlibcamerasrc.cpp
+--- a/src/gstreamer/gstlibcamerasrc.cpp
++++ b/src/gstreamer/gstlibcamerasrc.cpp
+@@ -21,7 +21,9 @@
+ 
+ #include "gstlibcamerasrc.h"
+ 
++#include <algorithm>
+ #include <atomic>
++#include <deque>
+ #include <queue>
+ #include <tuple>
+ #include <utility>
+@@ -122,7 +124,7 @@
+ 	 * gst_pad_query()).
+ 	 */
+ 	GMutex lock_;
+-	std::queue<std::unique_ptr<RequestWrap>> queuedRequests_;
++	std::deque<std::unique_ptr<RequestWrap>> queuedRequests_;
+ 	std::queue<std::unique_ptr<RequestWrap>> completedRequests_;
+ 
+ 	ControlList initControls_;
+@@ -215,7 +217,7 @@
+ 	{
+ 		GLibLocker locker(&lock_);
+ 		cam_->queueRequest(wrap->request_.get());
+-		queuedRequests_.push(std::move(wrap));
++		queuedRequests_.push_back(std::move(wrap));
+ 	}
+ 
+ 	/* The RequestWrap will be deleted in the completion handler. */
+@@ -229,18 +231,45 @@
+ 
+ 	std::unique_ptr<RequestWrap> wrap;
+ 
++	const bool cancelled = request->status() == Request::RequestCancelled;
++
+ 	{
+ 		GLibLocker locker(&lock_);
+ 
+-		controls_.readMetadata(request);
++		/*
++		 * Only a request that actually ran carries usable metadata.
++		 * Every in-flight request is cancelled and completed from
++		 * PipelineHandler::stop(), and merging the metadata of one of
++		 * those while the camera is being torn down crashes in
++		 * ControlList::merge().
++		 */
++		if (!cancelled)
++			controls_.readMetadata(request);
+ 
+-		wrap = std::move(queuedRequests_.front());
+-		queuedRequests_.pop();
+-	}
++		/*
++		 * Take the wrapper belonging to this request rather than
++		 * whatever happens to be at the head of the queue. Completions
++		 * are not guaranteed to arrive in the order the requests were
++		 * queued, and one can arrive after the queue has been drained,
++		 * for a request cancelled by stop() whose completion was
++		 * already on its way. front() on an empty queue is undefined
++		 * behaviour, and consuming an unrelated wrapper leaves both
++		 * requests mishandled.
++		 */
++		auto it = std::find_if(queuedRequests_.begin(), queuedRequests_.end(),
++				       [request](const std::unique_ptr<RequestWrap> &w) {
++					       return w->request_.get() == request;
++				       });
++		if (it == queuedRequests_.end()) {
++			GST_DEBUG_OBJECT(src_, "Completion for an unknown request, ignoring");
++			return;
++		}
+ 
+-	g_return_if_fail(wrap->request_.get() == request);
++		wrap = std::move(*it);
++		queuedRequests_.erase(it);
++	}
+ 
+-	if ((request->status() == Request::RequestCancelled)) {
++	if (cancelled) {
+ 		GST_DEBUG_OBJECT(src_, "Request was cancelled");
+ 		return;
+ 	}
+@@ -453,6 +482,12 @@
+ void GstLibcameraSrcState::clearRequests()
+ {
+ 	GLibLocker locker(&lock_);
++	/*
++	 * Drop the queued requests as well. They belong to the session that has
++	 * just been stopped and cam_->stop() has cancelled them, so leaving
++	 * them behind carries dead wrappers into the next session.
++	 */
++	queuedRequests_.clear();
+ 	completedRequests_ = {};
+ }
+ 
+@@ -960,6 +995,17 @@
+ 
+ 	GST_DEBUG_OBJECT(self, "Releasing resources");
+ 
++	/*
++	 * Stop listening before giving the camera up. GstLibcameraSrcState is a
++	 * plain struct rather than a libcamera::Object, so the connection made
++	 * in gst_libcamera_src_open() is not torn down automatically when the
++	 * state is deleted in finalize(). The Camera outlives this element -
++	 * the CameraManager keeps it alive - so a completion delivered after
++	 * the element has gone, for instance a late metadata callback from an
++	 * isolated IPA, would call requestCompleted() on freed memory.
++	 */
++	state->cam_->requestCompleted.disconnect(state);
++
+ 	state->config_.reset();
+ 
+ 	ret = state->cam_->release();
