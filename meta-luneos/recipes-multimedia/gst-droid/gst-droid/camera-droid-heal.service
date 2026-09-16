@@ -8,17 +8,26 @@ Requires=gst-droid-gate.service
 # droid notifier probes droidcamsrc to enumerate the cameras, and before any
 # app can ask it for a preview.
 Before=com.webos.service.camera.service
-# Deliberately NOT ordered before surface-manager-daemon.service: on a healthy
-# boot this costs about a second, but on a wedged one it can spend the best part
-# of a minute restarting and re-probing, and the compositor must not wait for it.
+# Explicitly ordered AFTER the compositor, not merely "not before" it. Being
+# absent from the compositor's own dependency chain is not enough: this is a
+# oneshot in the same boot transaction, and on MP01 a probe that blocked forever
+# held surface-manager-daemon.service - and bootd, and sam - queued behind it for
+# the full TimeoutStartSec. A camera that needs healing is never a reason to
+# delay the UI, so make the ordering a guarantee rather than an assumption.
+After=surface-manager-daemon.service
 ConditionPathExists=/dev/hwbinder
+# Opt-in per device: this heals one specific sargo defect. luneos-device-config
+# ships @HEAL_CONF@ for the boards that need it; everywhere else the unit is a
+# no-op that never opens a camera. The script re-checks the same path, so the
+# condition is an optimisation, not the only gate.
+ConditionPathExists=@HEAL_CONF@
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=@BINDIR@/camera-droid-heal.sh
-# Bounded well above the worst case (four probes and three provider restarts),
-# so a hung probe is cut loose rather than left holding the camera service.
+# A backstop only: each probe is bounded by PROBE_TIMEOUT in the script, so the
+# worst case is four probes and three provider restarts, well inside this.
 TimeoutStartSec=180s
 
 [Install]

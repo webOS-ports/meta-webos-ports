@@ -66,6 +66,17 @@ PLUGINDIR="@GST_DROID_PLUGINDIR@"
 ATTEMPTS=4
 CAMERA_DEVICE=0
 
+# Opt-in per device. This heals one specific sargo defect (see above); on every
+# other board the probe is at best a wasted camera open during boot, and at
+# worst - when that board's provider blocks rather than answers - three minutes
+# of a oneshot unit sitting in the boot transaction. Boards that need it ship
+# @HEAL_CONF@ from luneos-device-config.
+HEAL_CONF="@HEAL_CONF@"
+[ -e "${HEAL_CONF}" ] || {
+    echo "${HEAL_CONF} not present, this board does not opt in to camera healing"
+    exit 0
+}
+
 # gst-droid-gate.service normally puts the plugin dir on GST_PLUGIN_PATH for
 # every unit started after it, but do not depend on having inherited it.
 [ -e "${PLUGINDIR}/libgstdroid.so" ] || {
@@ -92,8 +103,16 @@ command -v setprop >/dev/null 2>&1 || {
 # return 0 for a pipeline that never produced anything - so key off the frame
 # gst-droid announces when the buffer queue first delivers ("CAMERA_STARTUP
 # ... first buffer-queue frame available"). No frame, no working camera.
+# Always bounded. A wedged provider does not make droidcamsrc return an error -
+# it makes it block: libhidl's getService() and CamX's acquire both retry
+# forever, so the pipeline sits in futex_wait with no frame and no exit. Without
+# a timeout here the only bound on the whole unit is TimeoutStartSec, and the
+# unit then spends that entire budget inside a single probe, which on MP01 was
+# measured to hold the boot transaction for the full three minutes.
+PROBE_TIMEOUT=25
 probe_camera() {
-    gst-launch-1.0 -q droidcamsrc camera-device="${CAMERA_DEVICE}" \
+    timeout -k 5 "${PROBE_TIMEOUT}" \
+        gst-launch-1.0 -q droidcamsrc camera-device="${CAMERA_DEVICE}" \
         ! fakesink num-buffers=1 2>&1 | grep -q "first buffer"
 }
 

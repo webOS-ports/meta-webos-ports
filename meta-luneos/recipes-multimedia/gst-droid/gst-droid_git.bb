@@ -60,6 +60,14 @@ inherit meson pkgconfig systemd
 # the whole UI, so the plugin stays gated rather than gating on a machine list.
 GST_DROID_PLUGINDIR = "${libdir}/gstreamer-1.0-gated"
 
+# camera-droid-heal is opt-in per device. It works around a sargo-specific
+# defect (a closed v4l-subdev handle clearing the sensor's is_probe_succeed,
+# see camera-droid-heal.sh), and running it on a board that does not have that
+# defect is at best a wasted camera open during boot. Boards that want it ship
+# this file - contents irrelevant, existence is the switch - from their
+# luneos-device-config.
+CAMERA_DROID_HEAL_CONF = "${sysconfdir}/gst-droid/camera-heal.conf"
+
 do_install:append() {
     install -d ${D}${GST_DROID_PLUGINDIR}
     mv ${D}${libdir}/gstreamer-1.0/libgstdroid.so ${D}${GST_DROID_PLUGINDIR}/
@@ -72,6 +80,7 @@ do_install:append() {
 
     install -m 0755 ${UNPACKDIR}/camera-droid-heal.sh ${D}${bindir}/
     sed -i -e "s|@GST_DROID_PLUGINDIR@|${GST_DROID_PLUGINDIR}|" \
+        -e "s|@HEAL_CONF@|${CAMERA_DROID_HEAL_CONF}|" \
         ${D}${bindir}/camera-droid-heal.sh
 
     install -d ${D}${systemd_system_unitdir}
@@ -79,6 +88,8 @@ do_install:append() {
     install -m 0644 ${UNPACKDIR}/camera-droid-heal.service ${D}${systemd_system_unitdir}/
     sed -i -e "s|@BINDIR@|${bindir}|" \
         ${D}${systemd_system_unitdir}/gst-droid-gate.service \
+        ${D}${systemd_system_unitdir}/camera-droid-heal.service
+    sed -i -e "s|@HEAL_CONF@|${CAMERA_DROID_HEAL_CONF}|" \
         ${D}${systemd_system_unitdir}/camera-droid-heal.service
 }
 
