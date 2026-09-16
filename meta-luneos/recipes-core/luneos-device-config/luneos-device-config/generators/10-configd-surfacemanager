@@ -62,17 +62,35 @@ fi
 # earlier boot. Deriving it removes that dependency on stored state entirely.
 #
 # r0s1 is rotation 0, scale 1. A panel whose native scanout is not the way the
-# device is held declares deviceinfo_compositor_geometry instead; nothing we
-# have needs that yet, and guessing a rotation from the panel aspect would be
-# wrong for tablets.
+# device is held declares deviceinfo_compositor_geometry instead - the MP01 does,
+# with r270, matching what its stock firmware states as
+# ro.surface_flinger.primary_display_orientation=ORIENTATION_270 - and guessing a
+# rotation from the panel aspect would be wrong for tablets.
 geometry=${deviceinfo_compositor_geometry:-}
 if [ -z "$geometry" ] && [ -n "${panel_w:-}" ] && [ -n "${panel_h:-}" ]; then
     geometry="${panel_w}x${panel_h}+0+0r0s1"
 fi
 
+# configd caches the merged result of all its layers in
+# /var/preferences/configd_db.json and answers from that cache, so a value this
+# generator changes after the first boot is served stale indefinitely - the layer
+# file on disk says one thing and getConfigs returns another. It cost a long
+# debugging session on the MP01: compositorGeometry was written as r270, read
+# back as r0, and the compositor duly rotated nothing. Drop the cache whenever
+# what we just wrote is not what the cache holds; configd rebuilds it on start.
+invalidate_configd_cache_if_stale() {
+    _db=/var/preferences/configd_db.json
+    [ -f "$_db" ] || return 0
+    grep -qF "\"compositorGeometry\": \"$1\"" "$_db" 2>/dev/null && return 0
+    grep -qF "\"compositorGeometry\":\"$1\"" "$_db" 2>/dev/null && return 0
+    rm -f "$_db" /var/preferences/configd_debug_db.json
+    echo "luneos-device-config: dropped stale configd cache (compositorGeometry)"
+}
+
 if [ -n "$geometry" ]; then
     printf '{\n    "devicePixelRatio": "%s",\n    "compositorGeometry": "%s"\n}\n' \
         "$dpr" "$geometry" > "$GEN/configd/com.webos.surfacemanager.json"
+    invalidate_configd_cache_if_stale "$geometry"
     echo "luneos-device-config: devicePixelRatio=$dpr compositorGeometry=$geometry"
 else
     printf '{\n    "devicePixelRatio": "%s"\n}\n' "$dpr" > "$GEN/configd/com.webos.surfacemanager.json"
