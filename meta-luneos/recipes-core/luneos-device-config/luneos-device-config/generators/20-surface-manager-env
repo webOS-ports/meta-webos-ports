@@ -66,6 +66,49 @@ if [ -n "${keydevs:-}" ] && ! grep -q "evdevkeyboard:" "$tmp"; then
     fi
 fi
 
+# Rotate touch to match a panel that is mounted rotated.
+#
+# deviceinfo_compositor_geometry carries the rotation the compositor applies to
+# its output (the "r" field - see 10-configd-surfacemanager). evdevtouch reports
+# in the panel's own orientation and knows nothing about that, so without the
+# same rotation here every tap lands a quarter turn from what is drawn. Derive it
+# from the one declaration rather than asking boards to state it twice.
+#
+# Not to be confused with the gesture positions fixed in luna-next-cardshell's
+# OrientationHelper: this corrects what Qt delivers to items, that corrects what
+# GestureHandler reads straight off QScreen.
+case "${deviceinfo_compositor_geometry:-}" in
+    *r90s*)  touch_rotate=90 ;;
+    *r180s*) touch_rotate=180 ;;
+    *r270s*) touch_rotate=270 ;;
+    *)       touch_rotate= ;;
+esac
+if [ -n "$touch_rotate" ] && grep -q "evdevtouch:" "$tmp" && ! grep -q "rotate=" "$tmp"; then
+    sed -i "s|\(evdevtouch:[^ \"]*\)|\1:rotate=$touch_rotate|" "$tmp"
+    changed=1
+    echo "luneos-device-config: compositor touch rotation -> $touch_rotate"
+fi
+
+# Do not open the hwcomposer HAL a second time in the compositor process.
+#
+# qt6-qpa-hwcomposer-plugin normally calls hw_get_module()/open() to discover the
+# HWC version before handing the work to libhwc2_compat_layer, which reaches the
+# HAL over HIDL. On MediaTek that second open constructs an HWCMediator which
+# immediately tries to take DRM master, and the Android composer service already
+# holds it - neither yields, and the compositor spends its whole start timeout
+# logging "[DRMDEV] failed to get drm master". The plugin has an escape hatch for
+# exactly this case and its comment names it: "on some devices loading hwc2
+# module twice breaks graphics (The first load is in the composer android
+# service.)".
+#
+# Opt-in, because on adaptations where the extra open is harmless the plugin's
+# version probe is worth keeping.
+if [ "${deviceinfo_force_hwc2:-0}" = "1" ] && ! grep -q "QT_QPA_FORCE_HWC2" "$tmp"; then
+    echo 'QT_QPA_FORCE_HWC2=1' >> "$tmp"
+    changed=1
+    echo "luneos-device-config: compositor QT_QPA_FORCE_HWC2=1"
+fi
+
 if [ "$changed" = "1" ]; then
     mkdir -p "$GEN/files/etc/surface-manager.d"
     cp "$tmp" "$GEN/files/etc/surface-manager.d/surface-manager.env"
