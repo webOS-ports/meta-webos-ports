@@ -39,6 +39,16 @@ do_install:append:halium() {
         ${D}${sysconfdir}/connman/main.conf
 }
 
+# wlan0 carries a placeholder MAC until the firmware loads (see the drop-in);
+# connman keys saved networks by MAC, so bring the interface up first.
+SRC_URI:append:halium = " file://10-halium-wlan0-factory-mac.conf"
+do_install:append:halium() {
+    install -d ${D}${systemd_system_unitdir}/connman.service.d
+    install -m 0644 ${UNPACKDIR}/10-halium-wlan0-factory-mac.conf \
+        ${D}${systemd_system_unitdir}/connman.service.d/
+}
+FILES:${PN}:append:halium = " ${systemd_system_unitdir}/connman.service.d"
+
 # MediaTek CCCI (the AP<->modem link on MTK Halium devices) exposes a "LAN"
 # netdev alongside the numbered cellular-data ones: ccmni0, ccmni1, ... plus a
 # trailing ccmni-lan. connman has no idea what that is, so it falls through to
