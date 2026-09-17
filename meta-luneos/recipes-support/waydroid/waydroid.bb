@@ -116,6 +116,7 @@ SRC_URI = "git://github.com/waydroid/waydroid.git;branch=main;protocol=https \
     file://0006-notification_manager-post-to-com.webos.notification.patch \
     file://0007-initializer-do-not-abort-when-a-preinstalled-image-d.patch \
     file://0008-lxc-do-not-claim-NFC-the-container-cannot-reach.patch \
+    file://0010-container_manager-leave-the-host-s-nfcd-alone.patch \
     file://waydroid-luneos-prepare.sh \
     file://waydroid-luneos-prepare.service \
     file://waydroid-luneos-session.sh \
