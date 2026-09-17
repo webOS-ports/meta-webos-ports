@@ -244,7 +244,62 @@ INSANE_SKIP:append:armv7a = " 32bit-time"
 # do_validate_ls2_acg complain. List them here so the check stays useful for
 # real mistakes. Drop an entry as soon as the providing service is added.
 #############################################################################
+# Three different reasons to skip, kept apart on purpose.
+#
+# (a) The provider exists in the tree but is machine-gated, so the group is
+#     real on some images and absent on others. The Settings sub-apps ship
+#     everywhere while their adapters do not:
+#         esim.operation      luneos-esim-adapter
+#         nfc.operation       webos-nfc-adapter
+#         fingerprint.query   webos-fingerprint-adapter (halium only)
+#     Drop an entry here if the sub-app is ever gated on its provider the way
+#     REMOVE_FACEUNLOCK_APP_CMD gates the face unlock panel.
+#
+# (b) The provider is a session service LuneOS does not ship yet, but the
+#     client scaffolding is real and degrades cleanly. Do NOT "clean these up"
+#     by deleting the grants - they are the hook, not leftovers:
+#         account.query       com.webos.service.account/getSession(s). LG's
+#                             session manager was never open sourced; it is a
+#                             multi-user/multi-display thing, not our
+#                             com.palm.service.accounts (which is alive and
+#                             correctly grouped under accountsservice.*).
+#                             luna-surfacemanager subscribes to getSessions in
+#                             base/qml/WebOSCompositorBase/global/LS.qml and
+#                             feeds the resulting sessionId into
+#                             applicationManager and SystemSettings, so
+#                             settings subscriptions can be scoped per display.
+#                             With no service it keeps waiting on
+#                             registerServerStatus and sessionId stays empty,
+#                             which every consumer guards for.
+#                             bluetooth2 and hfp short-circuit in ls2utils.cpp
+#                             on sessionId == "host" and never make the call.
+#                             Also held by audiofocusmanager, intent,
+#                             mediacontroller, memorymanager and pdm.
+#         session.management  same family (imageviewer, videoplayer).
+#
+# (c) No provider anywhere - a webOS OSE TV group we do not ship. Each entry
+#     lists what has to land before it can go:
+#         media.displayControl  luna-surfacemanager only, dropped on
+#         media.displayInfo     webOS-ports/luna-surfacemanager
+#                               herrie/acg-fixup. Remove both once that merges
+#                               and the SRCREV is bumped.
+# Bus names that answer calls without making any, so an empty outbound list is
+# correct. Verified against each component's source: no luna:// call sites.
+# Anything that does call out and has an empty list is a real bug - the camera
+# and record pipelines were exactly that, see the sysbus patches in
+# g-camera-pipeline and com.webos.service.mediarecorder.
+WEBOS_LS2_CONF_VALIDATE_SKIP_NO_OUTBOUND = " \
+    com.webos.service.audiooutput \
+    com.webos.service.cec \
+    com.webos.service.peripheralmanager \
+    com.webos.service.nettools \
+    com.webos.booster \
+"
+
 WEBOS_LS2_CONF_VALIDATE_SKIP_GROUP = " \
+    esim.operation \
+    nfc.operation \
+    fingerprint.query \
     account.query \
     media.displayControl \
     media.displayInfo \

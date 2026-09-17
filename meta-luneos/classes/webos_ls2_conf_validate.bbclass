@@ -7,6 +7,9 @@ inherit webos_filesystem_paths
 
 WEBOS_LS2_CONF_VALIDATE_ERROR_ON_WARNING ?= "0"
 WEBOS_LS2_CONF_VALIDATE_SKIP_GROUP ?= ""
+# Bus names that legitimately answer calls without making any, so an empty
+# outbound list is correct rather than a mistake.
+WEBOS_LS2_CONF_VALIDATE_SKIP_NO_OUTBOUND ?= ""
 
 # For some reason, using expr directly doesn't work
 accumulate() {
@@ -284,9 +287,20 @@ fakeroot python do_validate_ls2_wiring() {
         "groups":    d.getVar("webos_sysbus_groupsdir"),
         "services":  d.getVar("webos_sysbus_servicedir"),
     }
+    # /usr/share/dbus-1/{services,system-services} are not stray D-Bus files:
+    # they are webOS's legacy public/private LS2 service directories, and
+    # /usr/share/ls2/roles/{pub,prv} the matching legacy role directories.
+    # webos_configure_manifest scans them on purpose.
+    legacy_service_dirs = [d.getVar("webos_sysbus_pubservicesdir"),
+                           d.getVar("webos_sysbus_prvservicesdir")]
+    legacy_role_dirs = [d.getVar("webos_sysbus_pubrolesdir"),
+                        d.getVar("webos_sysbus_prvrolesdir")]
     if not os.path.isdir(rootfs + dirs["manifests"]):
         bb.note("No %s, skipping." % dirs["manifests"])
         return
+
+    skip_no_outbound = set(
+        (d.getVar("WEBOS_LS2_CONF_VALIDATE_SKIP_NO_OUTBOUND") or "").split())
 
     problems = []
     def report(code, subject, msg):
@@ -411,11 +425,19 @@ fakeroot python do_validate_ls2_wiring() {
                     report("ROLE_NO_ID", entry, "neither exeName nor appId")
                     continue
                 if rid in roles and roles[rid]["file"] != entry:
-                    report("ROLE_ID_COLLISION", rid,
-                           "declared by both %s and %s. RoleMap::Add() keeps whichever "
-                           "the hub reads first (readdir order) and logs 'Role already "
-                           "exists' for the other."
-                           % (roles[rid]["file"], entry))
+                    prev = roles[rid]["file"]
+                    def _legacy(pth):
+                        return any(pth.startswith(ld + "/") for ld in legacy_role_dirs if ld)
+                    if _legacy(prev) and _legacy(entry):
+                        # LSHubRoleMergeAllowedNames() merges a pub/prv pair
+                        bb.debug(1, "legacy pub/prv role pair for %s, merged by the hub" % rid)
+                    else:
+                        report("ROLE_ID_COLLISION", rid,
+                               "declared by both %s and %s. One is a modern roles.d file "
+                               "and the other a legacy ls2/roles one, which RoleMap::Add() "
+                               "does not merge: it keeps whichever the hub reads first "
+                               "(readdir order) and logs 'Role already exists' for the "
+                               "other." % (prev, entry))
                     continue
                 roles[rid] = {
                     "file": entry,
@@ -470,7 +492,7 @@ fakeroot python do_validate_ls2_wiring() {
             outbound = []
             for pe in entries.values():
                 outbound += pe.get("outbound", [])
-            if not outbound:
+            if not outbound and allowed not in skip_no_outbound:
                 report("NO_OUTBOUND", allowed,
                        "the permissions entry in %s grants no outbound at all, so "
                        "LSHubIsClientAllowedOutbound() refuses every call it makes."
@@ -487,11 +509,12 @@ fakeroot python do_validate_ls2_wiring() {
             path = rootfs + entry
             if not os.path.exists(path):
                 continue
-            if "/luna-service2/services.d/" not in entry:
+            known = [dirs["services"]] + legacy_service_dirs
+            if not any(entry.startswith(kd + "/") for kd in known if kd):
                 report("FOREIGN_SERVICE_FILE", entry,
                        "manifest %s registers this as a luna-service2 service file, "
-                       "but it lives outside services.d -- a D-Bus activation file "
-                       "pulled into the LS2 namespace." % name)
+                       "but it is in none of the service directories (%s)."
+                       % (name, ", ".join(kd for kd in known if kd)))
             names, execs = [], None
             with open(path) as fp:
                 for line in fp:
