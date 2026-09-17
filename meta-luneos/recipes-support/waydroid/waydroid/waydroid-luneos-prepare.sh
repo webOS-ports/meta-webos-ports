@@ -35,6 +35,40 @@ wait_for() {
 
 # ---------------------------------------------------------------- binder nodes
 #
+# Does anything other than this script mount binderfs on this machine? On a
+# Halium port mount-android.sh does, out of android-system.service, which is
+# not part of this transaction - that is what the bounded wait below is for.
+# A port with no Halium side has no such unit, and then nothing mounts it at
+# all: the wait can only ever run out the clock. Measured on qemux86-64, this
+# service spent 60.3s of a 63.4s userspace boot waiting for a mount nobody was
+# going to make, and then failed - which is also why Waydroid could not start
+# there, on a kernel that has CONFIG_ANDROID_BINDERFS and could run it fine.
+binderfs_has_other_owner() {
+    for _f in /usr/lib/systemd/system/android-system.service \
+              /lib/systemd/system/android-system.service \
+              /etc/systemd/system/dev-binderfs.mount \
+              /run/systemd/system/dev-binderfs.mount \
+              /usr/lib/systemd/system/dev-binderfs.mount \
+              /lib/systemd/system/dev-binderfs.mount; do
+        [ -e "$_f" ] && return 0
+    done
+    grep -qs '[[:space:]]/dev/binderfs[[:space:]]' /etc/fstab && return 0
+    return 1
+}
+
+# Mount binderfs here. Deliberately the same shape as the block in
+# mount-android.sh - both guard on the mount being absent, so a Halium host
+# that runs both still ends up with exactly one binderfs, whichever got there
+# first. A kernel without CONFIG_ANDROID_BINDERFS has to name the nodes in
+# CONFIG_ANDROID_BINDER_DEVICES instead, and the caller reports that.
+mount_binderfs() {
+    mountpoint -q /dev/binderfs 2>/dev/null && return 0
+    grep -qw binder /proc/filesystems 2>/dev/null || return 1
+    mkdir -p /dev/binderfs || return 1
+    mount -t binder binder /dev/binderfs 2>/dev/null || return 1
+    log "mounted binderfs at /dev/binderfs"
+}
+
 # On a Halium host Waydroid will not share the host HAL's /dev/binder: it looks
 # for anbox-binder, puddlejumper or bonder and raises when none exist. It never
 # probes for them on that path, so something else has to create them.
@@ -50,8 +84,18 @@ alloc_binder_nodes() {
     done
     [ "$have_all" = 1 ] && { log "binder nodes already present"; return 0; }
 
-    wait_for /dev/binderfs/binder-control || {
-        log "no binder nodes and no binderfs after ${WAIT_SECS}s: the kernel must name them in CONFIG_ANDROID_BINDER_DEVICES"
+    # Wait only where there is something to wait for. Where the wait does run
+    # and still times out, fall through to mounting it here rather than giving
+    # up: a Halium host whose android-system.service failed is exactly the case
+    # that used to cost 60s and then leave Waydroid unable to start.
+    if binderfs_has_other_owner; then
+        wait_for /dev/binderfs/binder-control ||
+            log "binderfs did not appear after ${WAIT_SECS}s, mounting it here"
+    fi
+    mount_binderfs
+
+    [ -e /dev/binderfs/binder-control ] || {
+        log "no binder nodes and no binderfs: the kernel needs CONFIG_ANDROID_BINDERFS, or must name the nodes in CONFIG_ANDROID_BINDER_DEVICES"
         return 1
     }
 
@@ -370,7 +414,6 @@ keep_missing_namespaces() {
     echo "lxc.namespace.keep =$keep" >> "$cfg" || return 1
     log "kernel lacks the$keep namespace(s); container keeps the host's"
 }
-
 
 rc=0
 alloc_binder_nodes  || rc=1
