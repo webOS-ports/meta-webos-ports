@@ -7,12 +7,18 @@
 # WEBOS_COMPOSITOR_EXTRA_OPTIONS, and that is exactly derivable: precisely one
 # input device advertises ID_INPUT_TOUCHSCREEN.
 #
-# The keyboard nodes need naming for a different reason. Qt's evdevkeyboard
-# plugin discovers devices through udev's ID_INPUT_KEYBOARD, and a phone keypad
-# does not carry it: an MT6739 keypad - volume and power, plus the whole T9
-# block on the mindphone - is tagged ID_INPUT_KEY only. The bare plugin then
-# attaches to nothing and no hardware key ever reaches the compositor. $keydevs
-# is already derived from exactly that tag for nyx, so reuse it here.
+# The keyboard plugin stays as shipped: one bare "-plugin evdevkeyboard". This
+# used to emit one "-plugin evdevkeyboard:<node>" per device in $keydevs, on the
+# theory that Qt's discovery only matches ID_INPUT_KEYBOARD and so misses a
+# keypad tagged ID_INPUT_KEY. Neither half holds. QDeviceDiscovery matches
+# ID_INPUT_KEY too (qdevicediscovery_udev.cpp), so a keypad is found unaided.
+# And surface-manager.sh exports QT_QPA_EVDEV_KEYBOARD_PARAMETERS=keymap=...,
+# which QEvdevKeyboardManager takes *instead of* the plugin's own spec whenever
+# it is non-empty - so every named node was discarded and each instance fell
+# back to discovery anyway. Two instances then each attached to every key
+# device and every key press arrived twice. Measured on the MP01 (two devices
+# in $keydevs): two fds per event node in the compositor and every QWERTY key
+# registering double; with the one bare instance, one fd each and single keys.
 #
 # Substitute into the shipped file rather than emitting a whole copy, so the
 # generic content stays owned by luna-surfacemanager-conf and does not go stale
@@ -41,28 +47,6 @@ if [ -n "${touchscreen:-}" ]; then
         sed -i "s|evdevtouch:[^ \"]*|evdevtouch:$touchscreen|" "$tmp"
         changed=1
         echo "luneos-device-config: compositor touchscreen -> $touchscreen"
-    fi
-fi
-
-if [ -n "${keydevs:-}" ] && ! grep -q "evdevkeyboard:" "$tmp"; then
-    kbd=
-    oIFS=$IFS; IFS=';'
-    for k in $keydevs; do
-        [ -n "$k" ] || continue
-        kbd="$kbd -plugin evdevkeyboard:$k"
-    done
-    IFS=$oIFS
-    kbd=${kbd# }
-    if [ -z "$kbd" ]; then
-        :
-    elif ! grep -q -- "-plugin evdevkeyboard" "$tmp"; then
-        echo "luneos-device-config: WARNING: no evdevkeyboard anchor in $SRC; cannot set this value"
-    else
-        # Match the bare plugin only: the trailing class keeps this from
-        # touching a node that already carries a path.
-        sed -i "s|-plugin evdevkeyboard\([ \"]\)|$kbd\1|" "$tmp"
-        changed=1
-        echo "luneos-device-config: compositor key devices -> $keydevs"
     fi
 fi
 
