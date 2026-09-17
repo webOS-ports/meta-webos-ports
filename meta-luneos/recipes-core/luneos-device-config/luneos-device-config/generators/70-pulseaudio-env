@@ -1,0 +1,57 @@
+#!/bin/sh
+# pulseaudio's environment, for adaptations whose audio HAL needs the vendor's
+# VNDK libraries.
+#
+# module-droid loads the vendor audio HAL into pulseaudio itself. A vendor
+# built for an older platform needs that platform's libbase/libcutils, which a
+# newer GSI's /system no longer matches - on the Minimal Phone MP01 (VNDK 31)
+# the HAL fails on
+#
+#   cannot locate symbol "android::base::Basename(std::string const&)"
+#     referenced by "/android/vendor/lib64/libnvram.so"
+#
+# and pulseaudio crashes. HYBRIS_PREFER_VNDK (libhybris 0006) makes hybris
+# resolve from the vendor's VNDK APEX instead.
+#
+# Opt-in per adaptation, never global: on sargo (VNDK 32) the same variable
+# breaks pulseaudio, see pulseaudio.service. Machine-specific rootfs builds
+# (tissot, mido) set it with a unit drop-in instead; this is the route for
+# devices running the shared halium rootfs.
+#
+# pulseaudio.service reads /etc/default/pulseaudio.conf as an optional
+# EnvironmentFile. This package ships that file empty so there is something to
+# shadow.
+SRC=/etc/default/pulseaudio.conf
+if [ "${deviceinfo_hybris_prefer_vndk:-0}" = "1" ] && [ -f "$SRC" ]; then
+    out=$GEN/files${SRC}
+    mkdir -p "$(dirname "$out")"
+    {
+        cat "$SRC"
+        echo "HYBRIS_PREFER_VNDK=1"
+    } > "$out"
+    echo "luneos-device-config: pulseaudio HYBRIS_PREFER_VNDK=1"
+fi
+
+# The rate module-droid-card opens the HAL outputs at.
+#
+# Unset, pulseaudio picks its default (44100 Hz). The MP01's HAL accepts that
+# but its DL paths run at 48000 Hz, so the HAL resamples every stream and the
+# result sounds audibly off; opening the card at 48000 fixes it. Substituted
+# into the shipped webos-system.pa rather than replacing it, so the rest of the
+# script stays owned by pulseaudio-distro-conf.
+PA=/etc/pulse/webos-system.pa
+rate=${deviceinfo_audio_sample_rate:-}
+case "$rate" in
+    "") ;;
+    *[!0-9]*)
+        echo "luneos-device-config: WARNING: deviceinfo_audio_sample_rate='$rate' is not a number, ignoring" ;;
+    *)
+        if [ -f "$PA" ] && grep -q '^load-module module-droid-card ' "$PA"; then
+            out=$GEN/files${PA}
+            mkdir -p "$(dirname "$out")"
+            sed "/^load-module module-droid-card /{/ rate=/!s/\$/ rate=$rate/}" "$PA" > "$out"
+            echo "luneos-device-config: pulseaudio module-droid-card rate=$rate"
+        else
+            echo "luneos-device-config: WARNING: no module-droid-card line in $PA; cannot set the rate"
+        fi ;;
+esac

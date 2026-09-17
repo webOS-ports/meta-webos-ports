@@ -24,6 +24,8 @@ SRC_URI = " \
     file://luneos-device-config.service \
     file://generators \
     file://adaptations \
+    file://pulseaudio.conf \
+    file://bluebinder-luneos-device.conf \
 "
 
 # Everything in SRC_URI is a local file, so nothing lands in the default
@@ -48,8 +50,17 @@ do_install() {
     # already declares it at priority 900; shipping the mount point means the
     # runtime bind does not have to mkdir into the rootfs.
     install -d ${D}${sysconfdir}/configd/layers/overlay
+
+    # Empty target for generators/70-pulseaudio-env to shadow.
+    install -d ${D}${sysconfdir}/default
+    install -m 0644 ${UNPACKDIR}/pulseaudio.conf ${D}${sysconfdir}/default/pulseaudio.conf
+
+    # Empty target for generators/80-bluebinder-env to shadow.
+    install -d ${D}${localstatedir}/lib/environment/bluebinder
+    install -m 0644 ${UNPACKDIR}/bluebinder-luneos-device.conf \
+        ${D}${localstatedir}/lib/environment/bluebinder/luneos-device.conf
 }
 
-FILES:${PN} += "${datadir}/luneos/adaptations ${libdir}/luneos-device-config ${sysconfdir}/configd/layers/overlay"
+FILES:${PN} += "${datadir}/luneos/adaptations ${libdir}/luneos-device-config ${sysconfdir}/configd/layers/overlay ${sysconfdir}/default/pulseaudio.conf ${localstatedir}/lib/environment/bluebinder/luneos-device.conf"
 
 SYSTEMD_SERVICE:${PN} = "luneos-device-config.service"
