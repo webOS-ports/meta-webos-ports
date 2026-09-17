@@ -342,6 +342,36 @@ refresh_container_config() {
         log "refreshed the container configuration"
 }
 
+# ------------------------------------------------ namespaces the kernel lacks
+#
+# LXC clones a fresh namespace of every type unless told to keep the host's.
+# A kernel built without one of them makes that clone fail outright:
+#
+#   lxc-start: waydroid: start.c: lxc_spawn: Invalid argument -
+#       Failed to clone a new set of namespaces
+#
+# and Waydroid reports "container failed to start". MediaTek GKI kernels leave
+# CONFIG_IPC_NS and CONFIG_USER_NS out on purpose - enabling them breaks the
+# stock vendor modules' KMI - so the Minimal Phone MP01 hit this on every
+# session. The Android container already keeps both for the same reason
+# (android-system's lxc-config).
+#
+# Derived from /proc/self/ns rather than listed per device, and written after
+# refresh_container_config, which regenerates the config from scratch.
+keep_missing_namespaces() {
+    cfg=/var/lib/waydroid/lxc/waydroid/config
+    [ -f "$cfg" ] || return 0
+    keep=""
+    for ns in ipc user; do
+        [ -e "/proc/self/ns/$ns" ] || keep="$keep $ns"
+    done
+    sed -i '/^lxc\.namespace\.keep[[:space:]]*=/d' "$cfg" || return 1
+    [ -n "$keep" ] || return 0
+    echo "lxc.namespace.keep =$keep" >> "$cfg" || return 1
+    log "kernel lacks the$keep namespace(s); container keeps the host's"
+}
+
+
 rc=0
 alloc_binder_nodes  || rc=1
 bind_images         || rc=1
@@ -356,6 +386,7 @@ disable_external_camera || rc=1
 # ever actually reached the container - grep of the generated base prop came
 # back empty on a fully booted device.
 refresh_container_config || rc=1
+keep_missing_namespaces || rc=1
 
 set_no_ril          || rc=1
 set_no_background_subsurface || rc=1
