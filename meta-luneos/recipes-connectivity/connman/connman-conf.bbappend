@@ -34,8 +34,18 @@ do_install:append() {
 # ported to 2.0, and nothing drives a second station. Keep connman off both.
 # The list is prefix matched, and it replaces the built-in default rather than
 # extending it, so this appends to what main.conf already sets.
+#
+# Broadcom/Synaptics (synadhd) Wi-Fi on the Pixels also registers aware_nmi0,
+# the Wi-Fi Aware (NAN) data interface, and p2p-dev-wlan0. connman took
+# aware_nmi0 as a second Wi-Fi interface (Interfaces = [ wlan0, aware_nmi0 ]),
+# and on the first connect to a saved network wpa_supplicant associated on it
+# too; the disconnect that followed Oopsed the driver
+# (wl_cfg80211_disconnect+0x240 [synadhd], NULL deref) and, with panic_on_oops,
+# reset the tablet about four minutes into every boot on which Wi-Fi was used.
+# Seen on tangorpro (cp3a.260905.009 vendor); the same driver ships on bluejay
+# and panther. Nothing on LuneOS drives NAN or P2P, so keep connman off them.
 do_install:append:halium() {
-    sed -i 's/^\(NetworkInterfaceBlacklist = .*\)$/\1,wlan1,p2p0/' \
+    sed -i 's/^\(NetworkInterfaceBlacklist = .*\)$/\1,wlan1,p2p0,aware_nmi,p2p-dev,p2p/' \
         ${D}${sysconfdir}/connman/main.conf
 }
 
