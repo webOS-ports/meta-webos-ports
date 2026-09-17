@@ -26,6 +26,10 @@ RDEPENDS:${PN} = " \
   ${DISTRO_EXTRA_RDEPENDS} \
   \
   luneos-device-config \
+  luneos-kernel-log-quirks \
+  \
+  powertop \
+  luneos-power-report \
   \
   pulseaudio-distro-conf \
   pulseaudio-misc \
@@ -313,6 +317,11 @@ RDEPENDS:${PN}:append:tenderloin3g = " alsa-utils-systemd rmtfs qrtr rpmsgexport
 RDEPENDS:${PN}:append:mido = " alsa-utils-systemd mesa-megadriver rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:tissot = " alsa-utils-systemd mesa-megadriver rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:rosy = " alsa-utils-systemd mesa-megadriver rmtfs qrtr rpmsgexport"
+
+# tissot only: its vendor starts wcnss_filter even though the BT HAL owns the
+# SMD channels itself, and the filter then busy-loops at ~96% of a CPU core
+# while flooding logd. Drop this once the vendor image stops starting it.
+RDEPENDS:${PN}:append:tissot = " wcnss-filter-fixup"
 
 # Fingerprint-sensor devices only. These machine names come from the LuneOS
 # Halium layer; on a tree without them the overrides are simply inert.
