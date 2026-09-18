@@ -16,7 +16,7 @@ RDEPENDS:${PN} += " \
 
 PV = "0.6-0+git"
 
-SRCREV = "88f6c094187c595ab92b8c858f98ff0f2c7ff7f1"
+SRCREV = "c126c5d9370d92f40b3a94866f3c807c30265775"
 
 inherit webos_ports_repo
 inherit webos_cmake
@@ -26,7 +26,7 @@ inherit webos_filesystem_paths
 
 EXTRA_OECMAKE += "-DLUNA_NEXT_SHELL_DIR=${OE_QMAKE_PATH_QML}/WebOSCompositor"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=herrie/shutdown-screen-signal"
 
 # inheriting webos_application requires the appinfo.json file, which we don't have here.
 # so just install manually db8 permissions.
