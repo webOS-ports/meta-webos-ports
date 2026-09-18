@@ -7,8 +7,8 @@ DEPENDS = "glib-2.0 luna-service2 json-c luna-sysmgr-common luna-prefs nyx-lib l
 RDEPENDS:${PN} += "sleepd com.webos.service.battery luna-authmanager"
 
 PV = "1.0.0+git"
-PR = "r1"
-SRCREV = "525a8837e3145d5a28a6c9fc83a6bcd69181b488"
+PR = "r2"
+SRCREV = "657b7a28d9350f21b7b18d7f32d720a0d7079e2e"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 
@@ -21,6 +21,6 @@ inherit webos_filesystem_paths
 
 LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=herrie/display-policy"
 
 FILES:${PN} += "${webos_sysconfdir}"
