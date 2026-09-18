@@ -6,7 +6,7 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 #libcrypto is a requirement and provided by openssl
-DEPENDS = "nyx-lib glib-2.0 libhybris libsuspend virtual/android-headers openssl"
+DEPENDS = "nyx-lib glib-2.0 libhybris virtual/android-headers openssl"
 
 # The GPS module talks to the GNSS HIDL service on /dev/hwbinder rather than
 # going through libhybris: the legacy gps.h HAL that hw_get_module() can reach
@@ -35,14 +35,14 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/../../recipes-webos-ose/nyx-modules/nyx-m
 COMPATIBLE_MACHINE = "^halium$"
 
 PV = "0.1.0-2+git"
-PR = "r10"
-SRCREV = "6b34d40866e988783cce9357752a5e4bdc8dd4d9"
+PR = "r11"
+SRCREV = "8cc0f11896b5c0189c0ff5e4ed9eae5b082d85a4"
 
 inherit webos_ports_repo
 inherit webos_cmake
 inherit pkgconfig
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=herrie/suspend-unified"
 
 SRC_URI:append = " \
     file://${MACHINE}.cmake \

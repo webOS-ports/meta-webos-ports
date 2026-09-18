@@ -40,14 +40,14 @@ DEPENDS = "glib-2.0 pmloglib"
 #
 # Pinned with a plain SRCREV - submission tags are a webosose convention and
 # this branch carries none.
-SRCREV = "c5d253eb0ac1800457b2df9b5d44cba2a5809b5b"
+SRCREV = "22a57a27e60ae1f2094817b619c79fc67680aaf5"
 
 # Set outright rather than derived from a submission tag via WEBOS_VERSION.
 # Kept monotonic: the patch-stack recipe shipped 7.3.0-13, so anything lower
 # would look like a downgrade to opkg on an update.
 PV = "7.3.0-14"
 
-PR = "r14"
+PR = "r15"
 
 inherit webos_component
 inherit webos_cmake
@@ -59,7 +59,7 @@ SYSTEMD_SERVICE:${PN} = "nyx.target"
 
 inherit webos_ports_ose_repo
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=herrie/battery-health"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=herrie/suspend-contract"
 
 do_install:append() {
     install -d ${D}${systemd_unitdir}/system
