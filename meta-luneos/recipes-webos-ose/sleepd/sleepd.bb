@@ -21,21 +21,21 @@ RDEPENDS:${PN} += "com.webos.service.battery"
 # on top of it, so nothing is applied here any more. Pinned with a plain
 # SRCREV - submission tags are a webosose convention and this branch carries
 # none. The branch itself comes from webos_ports_ose_repo below.
-SRCREV = "01c6a8465a639231201ffc4a80f3f8e2dbec01f7"
+SRCREV = "91fbf6f930aa2254477ca14450cdd42a07087170"
 
 # Set outright rather than derived from a submission tag via WEBOS_VERSION.
 # Kept monotonic: the patch-stack recipe shipped 2.0.0-19, so anything lower
 # would look like a downgrade to opkg on an update.
 PV = "2.0.0-20"
 
-PR = "r15"
+PR = "r16"
 
 inherit webos_component
 # The cleanup and hardening work (webOS-ports/sleepd#1) lives on
 # herrie/cleanup, not on the branch webos_ports_ose_repo defaults to, so the
 # SRCREV above is not reachable from webOS-ports/webOS-OSE. Drop this line
 # once herrie/cleanup is merged there.
-WEBOS_GIT_PARAM_BRANCH = "herrie/cleanup"
+WEBOS_GIT_PARAM_BRANCH = "herrie/suspend-fixes"
 inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit webos_daemon
