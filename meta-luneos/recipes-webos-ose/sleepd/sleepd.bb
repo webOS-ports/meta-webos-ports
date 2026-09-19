@@ -21,14 +21,14 @@ RDEPENDS:${PN} += "com.webos.service.battery"
 # on top of it, so nothing is applied here any more. Pinned with a plain
 # SRCREV - submission tags are a webosose convention and this branch carries
 # none. The branch itself comes from webos_ports_ose_repo below.
-SRCREV = "419b9d05f4de542ec95519e558c63c44c1d61b2d"
+SRCREV = "32598dfc887c769b6e173cf346e19139d5353c98"
 
 # Set outright rather than derived from a submission tag via WEBOS_VERSION.
 # Kept monotonic: the patch-stack recipe shipped 2.0.0-19, so anything lower
 # would look like a downgrade to opkg on an update.
 PV = "2.0.0-20"
 
-PR = "r18"
+PR = "r19"
 
 inherit webos_component
 # The cleanup and hardening work (webOS-ports/sleepd#1) lives on
@@ -45,3 +45,14 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 inherit webos_systemd
 LUNEOS_SYSTEMD_SERVICE = "sleepd.service"
+
+# Where nyx suspends through logind, systemd-sleep must not fall through to a
+# lighter state when deep sleep aborts: that is a wakeup_count handshake abort
+# and sleepd retries it. Single state; see the drop-in.
+do_install:append() {
+    install -d ${D}${systemd_unitdir}/sleep.conf.d
+    install -m 0644 ${S}/files/systemd/sleep.conf.d/10-sleepd.conf \
+        ${D}${systemd_unitdir}/sleep.conf.d/
+}
+
+FILES:${PN} += "${systemd_unitdir}/sleep.conf.d/10-sleepd.conf"
