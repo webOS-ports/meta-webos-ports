@@ -21,14 +21,14 @@ RDEPENDS:${PN} += "com.webos.service.battery"
 # on top of it, so nothing is applied here any more. Pinned with a plain
 # SRCREV - submission tags are a webosose convention and this branch carries
 # none. The branch itself comes from webos_ports_ose_repo below.
-SRCREV = "91fbf6f930aa2254477ca14450cdd42a07087170"
+SRCREV = "4a9b6efb3b99522feb1887d9ee47ab3c49a0c5d5"
 
 # Set outright rather than derived from a submission tag via WEBOS_VERSION.
 # Kept monotonic: the patch-stack recipe shipped 2.0.0-19, so anything lower
 # would look like a downgrade to opkg on an update.
 PV = "2.0.0-20"
 
-PR = "r16"
+PR = "r17"
 
 inherit webos_component
 # The cleanup and hardening work (webOS-ports/sleepd#1) lives on
