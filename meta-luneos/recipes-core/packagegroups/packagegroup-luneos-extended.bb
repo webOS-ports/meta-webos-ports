@@ -331,7 +331,20 @@ RDEPENDS:${PN}:append:rosy = " alsa-utils-systemd mesa-megadriver rmtfs qrtr rpm
 # tissot only: its vendor starts wcnss_filter even though the BT HAL owns the
 # SMD channels itself, and the filter then busy-loops at ~96% of a CPU core
 # while flooding logd. Drop this once the vendor image stops starting it.
+#
+# Both machine names are needed. The image LuneOS actually ships for this phone
+# is MACHINE=tissot-halium, and bitbake overrides match the machine name
+# exactly, so the ":tissot" line alone never applied to it: measured
+# 2026-09-19, a running tissot-halium had no wcnss-filter-fixup installed and
+# wcnss_filter was burning 95% of a core with logd at 36% behind it. The
+# recipe's COMPATIBLE_MACHINE already covers both.
+#
+# The other ":tissot" line above (alsa-utils-systemd, mesa-megadriver, rmtfs,
+# qrtr, rpmsgexport) is deliberately NOT mirrored here: those belong to the
+# mainline-style tissot machine, and mesa-megadriver in particular has no place
+# next to libhybris on a Halium image.
 RDEPENDS:${PN}:append:tissot = " wcnss-filter-fixup"
+RDEPENDS:${PN}:append:tissot-halium = " wcnss-filter-fixup"
 
 # Fingerprint-sensor devices only. These machine names come from the LuneOS
 # Halium layer; on a tree without them the overrides are simply inert.
