@@ -17,7 +17,7 @@ S = "${UNPACKDIR}"
 
 inherit systemd
 
-PR = "r1"
+PR = "r2"
 
 RDEPENDS:${PN} = "python3-core python3-ctypes python3-fcntl luna-service2"
 COMPATIBLE_MACHINE = "(tissot|sargo|halium)"
