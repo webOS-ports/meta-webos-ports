@@ -30,6 +30,7 @@ RDEPENDS:${PN} = " \
   \
   powertop \
   luneos-power-report \
+  luneos-remote-wakelock \
   \
   pulseaudio-distro-conf \
   pulseaudio-misc \
