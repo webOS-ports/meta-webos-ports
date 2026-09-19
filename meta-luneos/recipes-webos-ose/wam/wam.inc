@@ -22,16 +22,20 @@ RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_cpushareholder}"
 # commits) rather than webosose plus a patch stack: what used to be the
 # 0001-0023 patch series in this directory now lives as commits there, so
 # nothing is applied on top any more. Pinned with a plain SRCREV - submission
-# tags are a webosose convention and this branch carries none. The branch
-# itself comes from webos_ports_ose_repo below.
-SRCREV = "c957d481989cefe02b388b6ef811d0bb3ac6f402"
+# tags are a webosose convention and this branch carries none.
+SRCREV = "d6d65c6b94ee0c6b38e2a58d89307ef8c5a0d7fb"
+
+# The compositor-rotation work sits on herrie/panel-fix, not on the
+# webOS-ports/webOS-OSE that webos_ports_ose_repo defaults to, so the SRCREV
+# above is not reachable from the default branch. Drop this once it is merged.
+WEBOS_GIT_PARAM_BRANCH = "herrie/panel-fix"
 
 # Set outright rather than derived from a submission tag. Kept monotonic: the
 # patch-stack recipe shipped 1.0.2-99, so anything lower would look like a
 # downgrade to opkg on an update.
 PV = "1.0.2-100"
 
-INC_PR = "r83"
+INC_PR = "r84"
 
 WAM_BUILD_SYSTEM ?= "webos_cmake"
 WAM_BUILD_DEFAULT_PLUGIN ?= "1"

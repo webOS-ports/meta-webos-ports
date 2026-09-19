@@ -9,7 +9,17 @@ DEPENDS = "glib-2.0 luna-prefs luna-service2 json-c nyx-lib libpbnjson sqlite3 p
 DEPENDS += "qtbase"
 
 PV = "3.0.0-4+git"
-SRCREV = "9d79c681cfe415f8076deaaf92e6bcb9c2ec2626"
+
+# The ALS work (cover-glass calibration, and HostBase actually emitting the
+# reading) lives on herrie/als-calibration, not on the webOS-ports/master that
+# webos_ports_fork_repo defaults to, so the SRCREV below is not reachable from
+# the default branch. Drop the branch line once it is merged there.
+WEBOS_GIT_PARAM_BRANCH = "herrie/als-calibration"
+SRCREV = "87300dfb2e32863027244eb7b1d9f86fb7aaace0"
+
+# PV carries no SRCREV, so a revision bump alone leaves PKGV untouched and opkg
+# sees no upgrade on the device. Bump PR on every SRCREV move.
+PR = "r1"
 
 # Don't uncomment until all of the do_*() tasks have been moved out of the recipe
 inherit webos_ports_fork_repo

@@ -10,6 +10,11 @@ PV = "1.0.0+git"
 PR = "r5"
 SRCREV = "0f691947324171e0b96603eb5b1ef14c29bb211b"
 
+# Set here rather than appended to SRC_URI: WEBOS_PORTS_GIT_REPO_COMPLETE
+# already carries a ";branch=", which defaults to master through
+# webos_public_repo, so a second one in SRC_URI left the fetcher with two.
+WEBOS_GIT_PARAM_BRANCH = "herrie/display-policy"
+
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 
 inherit webos_ports_repo
@@ -21,6 +26,6 @@ inherit webos_filesystem_paths
 
 LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=herrie/display-policy"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 FILES:${PN} += "${webos_sysconfdir}"

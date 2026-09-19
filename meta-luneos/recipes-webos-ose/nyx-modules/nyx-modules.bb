@@ -21,7 +21,15 @@ RDEPENDS:${PN} += "nyx-conf"
 # Built from the webOS-ports fork (webosose master + LuneOS modules and fixes
 # merged as commits) rather than webosose plus a patch stack. Pinned with a
 # plain SRCREV: submission tags are a webosose convention and this branch
-# carries none. The branch itself comes from webos_ports_ose_repo below.
+# carries none.
+#
+# The charger, ALS and suspend work sits on herrie/charger-resync, not on the
+# webOS-ports/webOS-OSE that webos_ports_ose_repo defaults to. Set through
+# WEBOS_GIT_PARAM_BRANCH rather than appended to SRC_URI: the class already
+# puts a ";branch=" in WEBOS_PORTS_GIT_REPO_COMPLETE, so appending a second one
+# left the URL carrying two, and which one the fetcher honours is an accident
+# of how it parses parameters.
+WEBOS_GIT_PARAM_BRANCH = "herrie/charger-resync"
 SRCREV = "9749e07fa2825459c9d71547b64b96e9acfe8880"
 
 PR = "r38"
@@ -68,7 +76,7 @@ inherit webos_nyx_module_provider
 # downgrade to opkg on an update.
 PV = "7.1.0-26"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=herrie/charger-resync"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 SRC_URI:append = " \
     file://${MACHINE}.cmake \
