@@ -24,6 +24,10 @@ set(DEVICEINFO_PRODUCT_NAME				"PinePhonePro")
 set(NYXMOD_OW_BATTERY					TRUE)
 set(NYXMOD_OW_CHARGER					TRUE)
 set(NYXMOD_OW_KEYS						TRUE)
+# stk3310, an IIO illuminance channel next to the proximity sensor. The module
+# only understood evdev nodes until it learned to read IIO, which is why no
+# machine enabled it before.
+set(NYXMOD_OW_ALS						TRUE)
 set(NYXMOD_OW_TOUCHPANEL				FALSE)
 set(NYXMOD_OW_TOUCHPANEL_MTDEV			TRUE)
 set(NYXMOD_OW_LED						TRUE)
