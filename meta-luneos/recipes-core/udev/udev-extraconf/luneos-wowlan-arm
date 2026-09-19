@@ -1,0 +1,34 @@
+#!/bin/sh
+# Arm the best WoWLAN trigger this phy supports, so cfg80211 keeps the
+# association across suspend instead of tearing it down.
+#
+# Without any trigger, wiphy_suspend() calls cfg80211_leave_all() and the
+# device disconnects on every suspend, reconnects on resume, and the driver's
+# own wakelocks then block the next attempt (measured on sargo: WiFi down and
+# up on every cycle until magic-packet was armed).
+#
+# What is supported differs per chip, so ask rather than assume:
+#   qcacld/prima (sargo, tissot)  magic-packet
+#   rtw88 (PineTab2)              no magic-packet; "disconnect" only
+#   brcmfmac (PinePhone Pro)      none at all - nothing to do
+# "any" is deliberately not used: it keeps the chip fully powered and saves
+# nothing.
+PHY=${1:-phy0}
+IW=/usr/sbin/iw
+TAG=luneos-wowlan-arm
+
+[ -x "$IW" ] || exit 0
+[ -d "/sys/class/ieee80211/$PHY" ] || exit 0
+
+caps=$("$IW" phy "$PHY" info 2>/dev/null | sed -n '/WoWLAN support:/,/^	[a-z]/p')
+case "$caps" in
+    *"wake up on magic packet"*) trigger="magic-packet" ;;
+    *"wake up on disconnect"*)   trigger="disconnect" ;;
+    *)                           logger -t "$TAG" "$PHY: no usable WoWLAN trigger, leaving it off"; exit 0 ;;
+esac
+
+if "$IW" phy "$PHY" wowlan enable "$trigger" 2>/dev/null; then
+    logger -t "$TAG" "$PHY: armed $trigger"
+else
+    logger -t "$TAG" "$PHY: arming $trigger failed"
+fi
