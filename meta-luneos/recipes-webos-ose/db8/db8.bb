@@ -29,14 +29,14 @@ RDEPENDS:${PN}-tests:append:class-target = " ${VIRTUAL-RUNTIME_bash}"
 # applied on top any more. Pinned with a plain SRCREV - submission tags are a
 # webosose convention and this branch carries none. The branch itself is set
 # below via WEBOS_GIT_PARAM_BRANCH.
-SRCREV = "1c0eed785c2724cf53a37f61341575eb6cbb40b6"
+SRCREV = "2356159219aecde22a0e51bbb29ff3f3943f3730"
 
 # Set outright rather than derived from a submission tag via WEBOS_VERSION.
 # Kept monotonic: the patch-stack recipe shipped 3.2.0-32, so anything lower
 # would look like a downgrade to opkg on an update.
 PV = "3.2.0-33"
 
-PR = "r43"
+PR = "r44"
 
 inherit webos_component
 inherit webos_cmake
@@ -49,7 +49,7 @@ EXTRA_OECMAKE += "-DWEBOS_DB8_BACKEND:STRING='leveldb;sandwich' -DCMAKE_SKIP_RPA
 EXTRA_OECMAKE:append:class-target = " -DWEBOS_CONFIG_BUILD_TESTS:BOOL=TRUE  -DUSE_PMLOG:BOOL=TRUE  -DBUILD_LS2:BOOL=TRUE -DWANT_PROFILING:BOOL=${@ 'true' if '${WEBOS_DISTRO_PRERELEASE}' != '' else 'false'}"
 EXTRA_OECMAKE:append:class-native = " -DWEBOS_CONFIG_BUILD_TESTS:BOOL=FALSE -DUSE_PMLOG:BOOL=FALSE -DBUILD_LS2:BOOL=FALSE"
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/fixes"
+WEBOS_GIT_PARAM_BRANCH = "herrie/no-wake-maintenance"
 inherit webos_ports_ose_repo
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"

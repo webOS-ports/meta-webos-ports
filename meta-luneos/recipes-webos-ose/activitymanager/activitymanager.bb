@@ -12,22 +12,21 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "luna-service2 db8 boost libpbnjson glib-2.0 pmloglib ${VIRTUAL-RUNTIME_init_manager}"
 
-WEBOS_VERSION = "3.0.0-45_d5cbb51df2b1f2b8d12f40dd493632b3e80131cc"
-PR = "r17"
+# webOS-ports fork of OSE 3.0.0-45 (d5cbb51): the four LuneOS patches are
+# commits on the branch, plus the per-schedule "wake" flag that lets a
+# scheduled activity opt out of waking a suspended device.
+SRCREV = "cf1931d7bc52b7d02c359f753abda304c4de1c73"
+PV = "3.0.0-45"
+PR = "r18"
 
 inherit webos_component
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+WEBOS_GIT_PARAM_BRANCH = "herrie/wake-only-when-needed"
+inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_daemon
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-Allow-for-1-minute-intervals.patch \
-    file://0002-Revert-Retire-the-deprecated-APIs.patch \
-    file://0003-activitymanager-Fix-outbound-permissions-to-com.webo.patch \
-    file://0001-CMakeLists.txt-replace-std-c-11-with-std-c-17-for-ic.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "activitymanager.service"
