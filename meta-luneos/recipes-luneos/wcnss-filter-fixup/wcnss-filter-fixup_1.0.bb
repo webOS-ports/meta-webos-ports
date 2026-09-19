@@ -32,6 +32,8 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 inherit systemd
 
+PR = "r1"
+
 SRC_URI = " \
     file://wcnss-filter-fixup.sh \
     file://wcnss-filter-fixup.service \
@@ -41,7 +43,12 @@ S = "${UNPACKDIR}"
 
 do_install() {
     install -d ${D}${sbindir}
-    install -m 0755 ${UNPACKDIR}/wcnss-filter-fixup.sh ${D}${sbindir}/
+    # The unit's ExecStart, the script's own logger tag and this name have to
+    # agree: they did not, so the service failed with 203/EXEC on every boot
+    # since the package was written and the filter kept spinning (found
+    # 2026-09-19 on tissot, 95% of a core for hours).
+    install -m 0755 ${UNPACKDIR}/wcnss-filter-fixup.sh \
+        ${D}${sbindir}/tissot-wcnss-filter-fixup.sh
 
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${UNPACKDIR}/wcnss-filter-fixup.service ${D}${systemd_unitdir}/system/
