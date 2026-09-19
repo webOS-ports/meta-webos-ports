@@ -17,13 +17,13 @@ DEPENDS = "glib-2.0 libpbnjson libxml2 pmloglib luna-service2 luna-prefs loc-uti
 # subscription-key truncations, geofence-id bounds and the GNSS-callback UB).
 # Pinned with a plain SRCREV: submission tags are a webosose convention and
 # this branch carries none.
-SRCREV = "db8512ce8dab116680b5f1c32391f2b94d2a59ab"
-WEBOS_GIT_PARAM_BRANCH = "herrie/fixes"
+SRCREV = "96d89ae078c6a50cf751b0d82ee289989d7889b8"
+WEBOS_GIT_PARAM_BRANCH = "herrie/sleepd-resume-types"
 
 # Set outright rather than derived from a submission tag. Kept monotonic:
 # the patch-stack recipe shipped 1.0.0-108 r8.
 PV = "1.0.0-109"
-PR = "r0"
+PR = "r1"
 
 inherit webos_ports_repo
 inherit webos_cmake

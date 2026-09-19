@@ -17,21 +17,21 @@ RDEPENDS:${PN} = "connman connman-client"
 # commits) rather than webosose plus a patch stack. Pinned with a plain
 # SRCREV: submission tags are a webosose convention and this branch carries
 # none. The branch itself comes from webos_ports_ose_repo below.
-SRCREV = "de143e1115280295f70edd1da9136f590ff4b143"
+SRCREV = "a3a57d9c1b2ccb827e4f0ecbab3cabdc0ba9bf91"
 
 # Set outright rather than derived from a submission tag. Kept monotonic: the
 # patch-stack recipe shipped 1.1.0-50, so anything lower would look like a
 # downgrade to opkg on an update.
 PV = "1.1.0-51"
 
-PR = "r22"
+PR = "r23"
 
 inherit webos_component
 # The code quality and hardening work (webOS-ports/webos-connman-adapter#1)
 # lives on herrie/fixes, not on the branch webos_ports_ose_repo defaults to,
 # so the SRCREV above is not reachable from webOS-ports/webOS-OSE. Drop this
 # line once herrie/fixes is merged there.
-WEBOS_GIT_PARAM_BRANCH = "herrie/fixes"
+WEBOS_GIT_PARAM_BRANCH = "herrie/quiet-reconnect-churn"
 inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit webos_daemon
