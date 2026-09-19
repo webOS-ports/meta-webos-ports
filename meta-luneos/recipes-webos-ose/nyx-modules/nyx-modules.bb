@@ -22,9 +22,9 @@ RDEPENDS:${PN} += "nyx-conf"
 # merged as commits) rather than webosose plus a patch stack. Pinned with a
 # plain SRCREV: submission tags are a webosose convention and this branch
 # carries none. The branch itself comes from webos_ports_ose_repo below.
-SRCREV = "4d9cc861e0188acadafd6f07a7731ea0774b8d3e"
+SRCREV = "403fb2a5cf0bee14fb62bb6da5203f54a8669320"
 
-PR = "r35"
+PR = "r36"
 
 EXTRA_OECMAKE += "\
     -DDISTRO_VERSION:STRING='${DISTRO_VERSION}' \
