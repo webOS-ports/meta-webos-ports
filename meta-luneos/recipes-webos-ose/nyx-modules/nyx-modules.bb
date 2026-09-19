@@ -22,9 +22,9 @@ RDEPENDS:${PN} += "nyx-conf"
 # merged as commits) rather than webosose plus a patch stack. Pinned with a
 # plain SRCREV: submission tags are a webosose convention and this branch
 # carries none. The branch itself comes from webos_ports_ose_repo below.
-SRCREV = "4aebc1e3f132026ab5d5d2601caae492e0441586"
+SRCREV = "4d9cc861e0188acadafd6f07a7731ea0774b8d3e"
 
-PR = "r34"
+PR = "r35"
 
 EXTRA_OECMAKE += "\
     -DDISTRO_VERSION:STRING='${DISTRO_VERSION}' \
@@ -68,7 +68,7 @@ inherit webos_nyx_module_provider
 # downgrade to opkg on an update.
 PV = "7.1.0-26"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=herrie/suspend-unified"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=herrie/charger-resync"
 
 SRC_URI:append = " \
     file://${MACHINE}.cmake \
