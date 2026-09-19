@@ -1,0 +1,69 @@
+#!/bin/sh
+# wlan-suspend-mode - tell the Qualcomm WLAN driver when the display is off.
+#
+# On Halium phones with the prima driver (WCNSS/Pronto, e.g. tissot) the firmware's
+# broadcast/multicast filter, ARP/NS offload and multicast-address list are armed only
+# by the Android private ioctl "DRIVER SETSUSPENDMODE 1" (hdd_set_wlan_suspend_mode);
+# the cfg80211 suspend callback does not arm them. Without it every LAN broadcast
+# holds qcom_rx_wakelock for 50 ms and the phone is woken every few seconds while
+# suspended. Android sends the command on screen off / screen on; this daemon does
+# the same from luna://com.palm.display/control/status. On qcacld-3.0 (sargo) the
+# command is a no-op (drv_cmd_dummy), so it is harmless there.
+#
+# Subscription semantics: the first reply carries "state": on|off|dimmed; every later
+# push carries only "event": displayOff|displayOn|displayDimmed|displayActive|
+# displayInactive|blockedDisplay|unblockedDisplay.
+
+IF=${IF:-wlan0}
+STATE=/run/wlan-suspend-mode
+cur=$(cat $STATE 2>/dev/null)
+
+log() { echo "$(date -u +%FT%TZ) $*"; }
+
+drvcmd() {
+    # SIOCDEVPRIVATE+1 with hdd_priv_data_t {u8 *buf; int used_len; int total_len;}
+    python3 - "$IF" "$1" <<'PY'
+import sys, socket, fcntl, ctypes, struct
+ifname, cmd = sys.argv[1], sys.argv[2].encode() + b"\0"
+buf = ctypes.create_string_buffer(cmd, 4096)
+priv = ctypes.create_string_buffer(struct.pack("PiiI", ctypes.addressof(buf), len(cmd), 4096, 0))
+ifr = struct.pack("16sP", ifname.encode(), ctypes.addressof(priv)) + b"\0" * 16
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+try:
+    fcntl.ioctl(s.fileno(), 0x89F1, ifr)
+except OSError as e:
+    sys.exit("DRIVER %s failed: %s" % (cmd[:-1].decode(), e))
+PY
+}
+
+apply() {  # $1 = suspendmode|normal, $2 = reason
+    if [ "$1" = "$cur" ]; then log "$2 -> already $1"; return; fi
+    if [ "$1" = suspendmode ]; then n=1; else n=0; fi
+    if drvcmd "SETSUSPENDMODE $n"; then
+        cur=$1; echo "$1" > $STATE; log "$2 -> SETSUSPENDMODE $n ok (mode=$1)"
+    else
+        log "$2 -> SETSUSPENDMODE $n FAILED"
+    fi
+}
+
+case "$1" in
+    on|normal)       apply normal "manual"; exit ;;
+    off|suspendmode) apply suspendmode "manual"; exit ;;
+    status)          echo "mode=${cur:-unset}"; exit ;;
+esac
+
+log "watching luna://com.palm.display/control/status on $IF (current mode=${cur:-unset})"
+tail -f /dev/null | luna-send -i -f luna://com.palm.display/control/status '{"subscribe":true}' 2>/dev/null |
+while read -r line; do
+    case "$line" in
+        *'"state"'*'"off"'*)                        apply suspendmode "state off" ;;
+        *'"state"'*'"on"'*|*'"state"'*'"dimmed"'*)  apply normal "state $(echo "$line" | tr -d ' ,')" ;;
+        *'"event"'*'"displayOff"'*)                 apply suspendmode "event displayOff" ;;
+        *'"event"'*'"displayOn"'*)                  apply normal "event displayOn" ;;
+        *'"event"'*'"displayDimmed"'*)              apply normal "event displayDimmed" ;;
+    esac
+done
+# luna-send went away (display manager restarted?) - leave the driver in normal mode
+# so a screen-on phone is never left filtering; systemd restarts us.
+apply normal "subscription ended"
+exit 1

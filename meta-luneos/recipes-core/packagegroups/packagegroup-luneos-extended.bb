@@ -139,6 +139,14 @@ RDEPENDS:${PN} = " \
   v4l-utils \
 "
 
+# wlan-suspend-mode follows com.palm.display and sends the Android private
+# DRIVER SETSUSPENDMODE ioctl to the Qualcomm WLAN driver on screen off/on.
+# prima (WCNSS, tissot) only arms its firmware broadcast/multicast filter,
+# ARP/NS offload and multicast list through that ioctl, never from the
+# cfg80211 suspend callback, so without it every LAN broadcast wakes the
+# suspended phone. qcacld-3.0 (sargo) filters on its own; there the ioctl is
+# accepted and changes nothing, so it is safe to ship on every Halium machine.
+#
 # qbootctl is listed unconditionally: LIBHYBRIS_RDEPENDS is only ever appended
 # for halium machines, one by one, below. The recipe is
 # COMPATIBLE_MACHINE = "^halium$" and its unit is conditional on the device
@@ -165,6 +173,7 @@ LIBHYBRIS_RDEPENDS = " \
     nyx-modules-hybris \
     \
     ofono-binder-plugin \
+    wlan-suspend-mode \
 "
 
 # Fingerprint stack: biomd talks to the Android biometrics HAL over binder
