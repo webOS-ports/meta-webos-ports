@@ -13,6 +13,8 @@ SRC_URI = "file://luneos-charger-debug.conf"
 
 S = "${UNPACKDIR}"
 
+PR = "r1"
+
 # Installed under ${libdir}/tmpfiles.d rather than ${sysconfdir}/tmpfiles.d so
 # that it is shipped configuration a user can still override by dropping a file
 # of the same name in /etc/tmpfiles.d.
