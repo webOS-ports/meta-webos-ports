@@ -13,6 +13,13 @@
 # Subscription semantics: the first reply carries "state": on|off|dimmed; every later
 # push carries only "event": displayOff|displayOn|displayDimmed|displayActive|
 # displayInactive|blockedDisplay|unblockedDisplay.
+#
+# MediaTek's gen4m driver (MP01, module wlan_drv_gen4m_*) implements the same
+# command (priv_driver_set_suspend_mode: ARP/NS offload and the multicast white
+# list) but takes the request as struct priv_driver_cmd_s {char buf[512]; int
+# used_len; int total_len} with the buffer inline, where the Qualcomm drivers
+# take {char *buf; int used_len; int total_len}. The layout is picked by the
+# loaded module; the wrong one is rejected with EINVAL and does nothing.
 
 IF=${IF:-wlan0}
 STATE=/run/wlan-suspend-mode
@@ -21,12 +28,21 @@ cur=$(cat $STATE 2>/dev/null)
 log() { echo "$(date -u +%FT%TZ) $*"; }
 
 drvcmd() {
-    # SIOCDEVPRIVATE+1 with hdd_priv_data_t {u8 *buf; int used_len; int total_len;}
-    python3 - "$IF" "$1" <<'PY'
+    # SIOCDEVPRIVATE+1 (0x89F1). Qualcomm: hdd_priv_data_t {u8 *buf; int used_len;
+    # int total_len}. MediaTek gen4m: priv_driver_cmd_s {char buf[512]; int used_len;
+    # int total_len}.
+    layout=qcom
+    for m in /sys/module/wlan_drv_gen4m*; do [ -e "$m" ] && layout=mtk; done
+    python3 - "$IF" "$1" "$layout" <<'PY'
 import sys, socket, fcntl, ctypes, struct
-ifname, cmd = sys.argv[1], sys.argv[2].encode() + b"\0"
-buf = ctypes.create_string_buffer(cmd, 4096)
-priv = ctypes.create_string_buffer(struct.pack("PiiI", ctypes.addressof(buf), len(cmd), 4096, 0))
+ifname, cmd, layout = sys.argv[1], sys.argv[2].encode() + b"\0", sys.argv[3]
+if layout == "mtk":
+    priv = ctypes.create_string_buffer(512 + 8)
+    ctypes.memmove(priv, cmd, len(cmd))
+    struct.pack_into("ii", priv, 512, len(cmd), 512)
+else:
+    buf = ctypes.create_string_buffer(cmd, 4096)
+    priv = ctypes.create_string_buffer(struct.pack("PiiI", ctypes.addressof(buf), len(cmd), 4096, 0))
 ifr = struct.pack("16sP", ifname.encode(), ctypes.addressof(priv)) + b"\0" * 16
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 try:

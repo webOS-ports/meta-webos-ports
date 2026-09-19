@@ -1,4 +1,4 @@
-SUMMARY = "Put the Qualcomm Halium WLAN driver into screen-off (SETSUSPENDMODE) mode while the display is off"
+SUMMARY = "Put the Qualcomm or MediaTek Halium WLAN driver into screen-off (SETSUSPENDMODE) mode while the display is off"
 DESCRIPTION = "prima (WCNSS) arms its firmware broadcast/multicast filter, ARP/NS offload and \
 multicast list only through Android's private DRIVER SETSUSPENDMODE ioctl, not from the cfg80211 \
 suspend callback. Without it every LAN broadcast wakes the suspended phone (qcom_rx_wakelock). \
@@ -16,6 +16,8 @@ SRC_URI = " \
 S = "${UNPACKDIR}"
 
 inherit systemd
+
+PR = "r1"
 
 RDEPENDS:${PN} = "python3-core python3-ctypes python3-fcntl luna-service2"
 COMPATIBLE_MACHINE = "(tissot|sargo|halium)"
