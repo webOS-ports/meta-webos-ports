@@ -14,9 +14,12 @@ inherit webos_app
 inherit pkgconfig
 
 PV = "0.4.0-1+git"
-SRCREV = "d1fea2b49e711dbcb76a6289a83cb7a7474de641"
+SRCREV = "81ca75d423ba2f0a25533b3285ae9d8f806b7411"
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/device-name"
+# qml-based is the integration branch: it carries herrie/device-name
+# unchanged plus the merged E Ink panel (PR #135), which is what the new
+# org.webosports.service.eink answers. Fast-forward, nothing dropped.
+WEBOS_GIT_PARAM_BRANCH = "qml-based"
 WEBOS_REPO_NAME = "org.webosports.app.settings"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
