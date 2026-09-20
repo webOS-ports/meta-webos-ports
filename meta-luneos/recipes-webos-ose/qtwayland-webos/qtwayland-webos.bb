@@ -23,14 +23,14 @@ DEPENDS = "qtwayland webos-wayland-extensions libxkbcommon qt-features-webos way
 # Pinned with a plain SRCREV - submission tags are a webosose convention and
 # this branch carries none. The branch itself is set below via
 # WEBOS_GIT_PARAM_BRANCH.
-SRCREV = "61df72efe74d5a19d8dbfbed6f9e4d6b0f3ca6c9"
+SRCREV = "7df8b2e7987bd61197977222370dfcfc6e964a05"
 
 # Set outright rather than derived from a submission tag via WEBOS_VERSION.
 # Kept monotonic: the patch-stack recipe shipped 6.0.0-94, so anything lower
 # would look like a downgrade to opkg on an update.
 PV = "6.0.0-95"
 
-PR = "r21"
+PR = "r22"
 
 #QT_BUILD_SYSTEM ?= "${@ 'cmake' if d.getVar('QT_VERSION')[0] == '6' else 'qmake' }"
 #Force qmake for now since cmake gives build errors
