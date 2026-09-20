@@ -27,6 +27,7 @@ SRC_URI = " \
     file://0001-Makefile-make-toolchain-flags-and-install-paths-over.patch \
     file://0002-Makefile-allow-building-without-the-face-backend.patch \
     file://0003-fingerprint-accept-free-form-finger-names.patch \
+    file://0004-fingerprint-add-an-AIDL-backend.patch \
 "
 
 S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}"
