@@ -12,7 +12,7 @@
 #
 # Nothing is ever copied into the rootfs. A universal image that has been
 # rewritten to suit the first device it booted on is no longer universal, so
-# adaptations are applied by overlay or bind mount and re-derived every boot.
+# adaptations are applied by bind mount and re-derived every boot.
 
 set -u
 
@@ -367,47 +367,34 @@ if [ -d "$GENERATORS" ]; then
 fi
 
 # ---------------------------------------------------------------- Tier 2 ----
-# Apply the file tree. overlayfs in one mount where the kernel has it, else a
-# bind mount per file - equally non-destructive, just noisier.
+# Apply the file tree, one bind mount per file. Non-destructive: the rootfs
+# keeps its own content and the adaptation is re-applied every boot.
 #
-# This runs BEFORE the generated files are bound, and the order is load-bearing
-# in both directions.
+# This used to be a single overlayfs mount over /etc, with the writable upper
+# layer in /run. That made every later write to /etc volatile, because the
+# upper layer is a tmpfs: a package installed on a running phone landed there
+# and was gone at the next boot. Measured on sargo (2026-09-19/20): db8's
+# 30-minute no-wake maintenance activities and the WoWLAN udev rule were both
+# installed, verified on the device, and both silently reverted to the image's
+# versions after a reboot - the phone then woke every five minutes all night
+# and ran with WiFi disconnecting on every suspend. opkg reported the new
+# packages as installed throughout, because /var/lib/opkg is not under the
+# overlay.
 #
-# overlayfs does not traverse mounts inside its own lower layer: mounting an
-# overlay on /etc resolves every lookup against the underlying directory and
-# ignores any bind mount already established on a file within it. Applied after
-# the binds below, one Tier 2 file therefore masked all six generated configs at
-# once - nyx.conf, luna-platform.conf, the two ofono files, the configd layer
-# and surface-manager.env. The visible result was a compositor started with
-# "-plugin evdevtouch:/dev/input/PLACEHOLDER", i.e. a phone with no touch,
-# because the shipped placeholder came back from under the overlay. Measured on
-# sargo, whose adaptations/sargo/sparse/etc/libncicore.conf was the first sparse
-# file any device had; before it, apply_sparse returned at the [ -d ] test and
-# this ordering bug could not fire.
+# Per-file binds keep the property the overlay was chosen for - nothing is ever
+# copied into the rootfs, and the adaptation disappears when the service stops
+# - while leaving /etc itself a normal, persistent directory.
 #
-# It is also the precedence this file documents at the top. Tier 2 is the last
-# resort, so a derived Tier 0/1 value has to win over it - which is what binding
-# the generated files on top of the overlay gives.
+# This runs BEFORE the generated files are bound, and the order matters: a
+# later bind on the same path wins, so Tier 0/1 generated values must be bound
+# after Tier 2, which is the precedence this file documents at the top.
 apply_sparse() {
     sparse="$adaptation/sparse"
     [ -d "$sparse" ] || return 0
-    if grep -qw overlay /proc/filesystems 2>/dev/null; then
-        for sub in etc usr/lib/luneos/device; do
-            [ -d "$sparse/$sub" ] || continue
-            mkdir -p "$RUN/work/$sub" "$RUN/upper/$sub"
-            if mount -t overlay overlay \
-                 -o "lowerdir=$sparse/$sub:/$sub,upperdir=$RUN/upper/$sub,workdir=$RUN/work/$sub" \
-                 "/$sub" 2>/dev/null; then
-                log "overlaid $sparse/$sub onto /$sub"
-                continue
-            fi
-            log "overlay of /$sub failed, falling back to bind mounts"
-            bind_tree "$sparse/$sub" "/$sub"
-        done
-    else
-        log "kernel has no overlayfs, using bind mounts"
-        bind_tree "$sparse" ""
-    fi
+    for sub in etc usr/lib/luneos/device; do
+        [ -d "$sparse/$sub" ] || continue
+        bind_tree "$sparse/$sub" "/$sub"
+    done
 }
 
 bind_tree() {
@@ -415,7 +402,19 @@ bind_tree() {
     find "$src" -type f 2>/dev/null | while read -r f; do
         rel=${f#"$src"}
         target="$prefix$rel"
-        [ -e "$target" ] || { log "skipping $target (no such file to shadow)"; continue; }
+        # A bind mount needs something to mount onto. Where the adaptation adds
+        # a file the image does not have, create an empty placeholder: it holds
+        # no content (the bind supplies that, every boot) and it keeps this the
+        # only write the tier makes.
+        if [ ! -e "$target" ]; then
+            mkdir -p "$(dirname "$target")" 2>/dev/null
+            if : > "$target" 2>/dev/null; then
+                log "created empty $target to bind onto"
+            else
+                log "skipping $target (cannot create it)"
+                continue
+            fi
+        fi
         mount --bind "$f" "$target" && log "bound $target"
     done
 }
