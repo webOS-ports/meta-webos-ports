@@ -20,6 +20,17 @@
 # used_len; int total_len} with the buffer inline, where the Qualcomm drivers
 # take {char *buf; int used_len; int total_len}. The layout is picked by the
 # loaded module; the wrong one is rejected with EINVAL and does nothing.
+#
+# gen4m also takes "DRIVER SET_MDTIM <which> <n>", which sets how many DTIM
+# periods the firmware skips before it listens for buffered group-addressed
+# traffic: <which> 0 is the value used while wake-on-WLAN is armed (the
+# suspended case, "WOW On MDTIM"), anything else the value used otherwise
+# ("WOW Off MDTIM"). Listening on every DTIM is what makes the chip raise the
+# host for each beacon that announces buffered broadcast traffic, which on MP01
+# was the largest single wake source ("WLAN timeout"). With SETSUSPENDMODE 1
+# already dropping that traffic in the firmware, listening every DTIM buys
+# nothing, so the screen-off path raises the suspend-time value. Qualcomm
+# drivers do not implement SET_MDTIM; the command is only sent for gen4m.
 
 IF=${IF:-wlan0}
 STATE=/run/wlan-suspend-mode
@@ -27,12 +38,20 @@ cur=$(cat $STATE 2>/dev/null)
 
 log() { echo "$(date -u +%FT%TZ) $*"; }
 
-drvcmd() {
+# MDTIM periods to skip while suspended. 1 keeps the pre-existing behaviour.
+MDTIM=${MDTIM:-3}
+
+driver_layout() {
     # SIOCDEVPRIVATE+1 (0x89F1). Qualcomm: hdd_priv_data_t {u8 *buf; int used_len;
     # int total_len}. MediaTek gen4m: priv_driver_cmd_s {char buf[512]; int used_len;
     # int total_len}.
     layout=qcom
     for m in /sys/module/wlan_drv_gen4m*; do [ -e "$m" ] && layout=mtk; done
+    echo "$layout"
+}
+
+drvcmd() {
+    layout=$(driver_layout)
     python3 - "$IF" "$1" "$layout" <<'PY'
 import sys, socket, fcntl, ctypes, struct
 ifname, cmd, layout = sys.argv[1], sys.argv[2].encode() + b"\0", sys.argv[3]
@@ -55,6 +74,13 @@ PY
 apply() {  # $1 = suspendmode|normal, $2 = reason
     if [ "$1" = "$cur" ]; then log "$2 -> already $1"; return; fi
     if [ "$1" = suspendmode ]; then n=1; else n=0; fi
+    if [ "$n" = 1 ] && [ "$(driver_layout)" = mtk ] && [ "$MDTIM" -gt 1 ]; then
+        if drvcmd "SET_MDTIM 0 $MDTIM"; then
+            log "$2 -> SET_MDTIM 0 $MDTIM ok"
+        else
+            log "$2 -> SET_MDTIM 0 $MDTIM FAILED"
+        fi
+    fi
     if drvcmd "SETSUSPENDMODE $n"; then
         cur=$1; echo "$1" > $STATE; log "$2 -> SETSUSPENDMODE $n ok (mode=$1)"
     else
