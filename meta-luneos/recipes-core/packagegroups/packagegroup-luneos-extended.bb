@@ -283,8 +283,14 @@ VPN_RDEPENDS = " \
 # The client grant the shell needs (torch.operation, which luna-surfacemanager
 # does not list for com.webos.surfacemanager*) ships from the component itself,
 # so there is nothing to add here for it.
+# The standalone app rides along with the service rather than on a machine
+# feature of its own: there is no MACHINE_FEATURE for "has a flash LED", and
+# the app asks the same service the shell's power-menu entry does, so on a
+# device with no torch it reports unavailable exactly as that entry already
+# does.
 TORCH_RDEPENDS = " \
     org.webosports.service.torch \
+    org.webosports.app.torch \
 "
 
 # eSIM: lpac is the LPA (SGP.22 profile download/management), luneos-esim-adapter
