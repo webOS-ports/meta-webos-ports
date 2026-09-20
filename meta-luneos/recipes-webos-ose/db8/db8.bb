@@ -62,7 +62,35 @@ WEBOS_SYSTEMD_SCRIPT = "db8-maindb.sh"
 # The service file in the repository is not used, so please delete it.
 # See the page below for more details.
 # http://collab.lge.com/main/pages/viewpage.action?pageId=2031668745
+# The gtest clients' ACG files ship in files/sysbus/static, so they install even
+# though the binaries they describe (/usr/lib/db8/tests/*) go to db8-tests,
+# which a normal image does not pull in. ls-hubd then loads four roles keyed on
+# absent executables and offers to launch one of them on demand.
+#
+# Drop them here rather than moving them to FILES:${PN}-tests: webos_system_bus
+# generates db8.manifest.json by scanning what is installed, so with the files
+# merely repackaged the manifest would still list them and ls-hubd would fail
+# the WHOLE manifest on the missing paths - taking com.palm.db's role, service
+# and permissions with it. configure_manifest runs after do_install, so
+# removing them here keeps them out of the generated manifest too.
+#
+# Fixed upstream on webOS-ports/db8 herrie/acg-test-roles, which installs
+# files/sysbus/test only under WEBOS_CONFIG_BUILD_TESTS; drop this block once
+# that is merged and the SRCREV bumped.
+WEBOS_DB8_TEST_SYSBUS_FILES = " \
+    ${webos_sysbus_rolesdir}/com.webos.db8.test.client.role.json \
+    ${webos_sysbus_rolesdir}/com.webos.db8.test.lunaservice.role.json \
+    ${webos_sysbus_rolesdir}/com.webos.db8.test.media.role.json \
+    ${webos_sysbus_rolesdir}/com.webos.db8.test.stress.role.json \
+    ${webos_sysbus_servicedir}/com.webos.db8.test.lunaservice.service \
+    ${webos_sysbus_apipermissionsdir}/com.webos.service.db.test.api.json \
+    ${webos_sysbus_permissionsdir}/com.webos.service.db.test.perm.json \
+"
+
 do_install:append() {
+    for f in ${WEBOS_DB8_TEST_SYSBUS_FILES}; do
+        rm -f ${D}$f
+    done
     rm -f ${D}${sysconfdir}/systemd/system/db8-maindb.service
     rm -f ${D}${sysconfdir}/systemd/system/scripts/db8-maindb.sh
     rm -f ${D}${sysconfdir}/systemd/system/db8-mediadb.service
