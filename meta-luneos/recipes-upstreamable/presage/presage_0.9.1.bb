@@ -64,3 +64,24 @@ FILES:${PN} += "\
 do_configure:prepend:class-target() {
    sed -i "s#\$(top_builddir)/src/tools/text2ngram#${STAGING_BINDIR_NATIVE}/text2ngram#g" ${S}/resources/Makefile.am
 }
+
+# presage builds and installs three demo n-gram databases into
+# ${datadir}/${BPN} - en 5.5M, es 24M, it 6.8M, 34.7M together - and nothing
+# reads them. webos-keyboard is the only thing linking libpresage on LuneOS
+# (purple-presage is the Signal prpl, an unrelated crate that shares the name),
+# and each of its language plugins overrides
+# DefaultSmoothedNgramPredictor.DBFILENAME in its constructor to point at
+# ${datadir}/maliit/plugins/org/luneos/lib/<lang>/database_<lang>.db. The es
+# one is doubly wasteful: it is built from the same el_quijote corpus the
+# keyboard already ships as its own 23M database_es.db.
+#
+# DBFILENAME in presage.xml is repointed at the keyboard's English database
+# rather than left dangling, so the stock config still names a file that
+# exists for anything that never sets it - SmoothedNgramPredictor is in the
+# active PREDICTORS list, unlike the dejavu/arpa entries alongside it whose
+# paths presage has always shipped dangling.
+do_install:append:class-target() {
+    rm -f ${D}${datadir}/${BPN}/database_*.db
+    sed -i -e "s|${datadir}/${BPN}/database_en.db|${datadir}/maliit/plugins/org/luneos/lib/en/database_en.db|" \
+        ${D}${sysconfdir}/presage.xml
+}
