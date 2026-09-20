@@ -65,6 +65,11 @@ GBINDER_API_LEVEL:tissot-halium = "28"
 GBINDER_API_LEVEL:mido-halium = "28"
 GBINDER_API_LEVEL:mindphone = "30"
 GBINDER_API_LEVEL:halium-arm64 = "32"
+# A15 vendor. The servicemanager flavour, unlike the protocol, keeps moving
+# past 30 - 35 is aidl5 and 36 aidl6 - and getting it wrong means AIDL
+# service lookups on /dev/binder fail outright, which is how an A13+ vendor
+# ends up looking like it has no fingerprint HAL at all.
+GBINDER_API_LEVEL:athena = "35"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
