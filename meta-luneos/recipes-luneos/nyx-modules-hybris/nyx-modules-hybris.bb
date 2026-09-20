@@ -18,42 +18,35 @@ DEPENDS += "libgbinder libglibutil"
 # droid_media_camera_set_torch_mode(). No machine does, and halium-arm64 - the
 # obvious candidate - deliberately does not: that symbol exists only in the 16.0
 # GSI's libdroidmedia.so, and which GSI a device runs is a property of the image
-# flashed to it rather than of the machine it was built from. See the reasoning in
-# nyx-modules/halium-arm64.cmake. Add the dependency back, scoped to the machine,
-# if one ever does: the cmake requires droidmedia only inside that branch, so
-# configure fails clearly if this is forgotten.
+# flashed to it rather than of the machine it was built from. Add the dependency
+# back, scoped to the machine, if one ever does: src/CMakeLists.txt requires
+# droidmedia only inside that branch, so configure fails clearly if this is
+# forgotten. NYXMOD_OW_LEDTORCH is deliberately not listed in
+# nyx-modules-machines.inc - both providers default it to TRUE when undefined,
+# which is what keeps the torch on the sysfs side.
 
 # We need to be ${MACHINE_ARCH} as we need to compile the source against a specific
 # Android version we select per machine
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-# Let us fetch the machine-specific CMake configuration used by nyx-modules, to
-# define it only once
-FILESEXTRAPATHS:prepend := "${THISDIR}/../../recipes-webos-ose/nyx-modules/nyx-modules:"
-
 # Depends on libhybris which has this restriction
 COMPATIBLE_MACHINE = "^halium$"
 
 PV = "0.1.0-2+git"
-PR = "r12"
-SRCREV = "bea1dd78df3f893f16ecd6d8bd91d23a3825e063"
+PR = "r13"
+SRCREV = "f81f5e8be307aa5747a8442e318ad8a8416389d2"
 
 inherit webos_ports_repo
 inherit webos_cmake
 inherit pkgconfig
 
+# For NYX_MODULES_REQUIRED, which this recipe did not take before: the
+# NYXMOD_OW_* flags it tests arrived in src/machine.cmake, unpacked out of
+# nyx-modules' files directory. They now come from the same place nyx-modules
+# gets them, so the two cannot drift apart and describe a machine differently.
+inherit webos_nyx_module_provider
+require recipes-webos-ose/nyx-modules/nyx-modules-machines.inc
+
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=herrie/suspend-unified"
-
-SRC_URI:append = " \
-    file://${MACHINE}.cmake \
-"
-
-do_configure:prepend() {
-    # Install additional machine specific nyx configuration before CMake is started
-    if [ -f ${UNPACKDIR}/${MACHINE}.cmake ]
-    then
-        cp ${UNPACKDIR}/${MACHINE}.cmake ${S}/machine.cmake
-    fi
-}
 
 FILES:${PN} += "${libdir}/nyx/modules/*"

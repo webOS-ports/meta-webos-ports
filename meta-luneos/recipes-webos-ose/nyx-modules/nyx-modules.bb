@@ -30,9 +30,9 @@ RDEPENDS:${PN} += "nyx-conf"
 # left the URL carrying two, and which one the fetcher honours is an accident
 # of how it parses parameters.
 WEBOS_GIT_PARAM_BRANCH = "herrie/charger-resync"
-SRCREV = "9749e07fa2825459c9d71547b64b96e9acfe8880"
+SRCREV = "966d58380b3ef2c5e059f6ffe943be439b8487bf"
 
-PR = "r38"
+PR = "r39"
 
 EXTRA_OECMAKE += "\
     -DDISTRO_VERSION:STRING='${DISTRO_VERSION}' \
@@ -71,24 +71,16 @@ inherit webos_core_os_dep
 inherit webos_nyx_module_provider
 #inherit webos_distro_variant_dep
 
+# Which modules this provider owns, per machine. Shared with nyx-modules-hybris,
+# which has to agree with us: these flags pick a provider, not a build.
+require recipes-webos-ose/nyx-modules/nyx-modules-machines.inc
+
 # Set outright rather than derived from a submission tag. Kept monotonic: the
 # patch-stack recipe shipped 7.1.0-25, so anything lower would look like a
 # downgrade to opkg on an update.
 PV = "7.1.0-26"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-
-SRC_URI:append = " \
-    file://${MACHINE}.cmake \
-"
-
-do_configure:prepend() {
-    # Install additional machine specific nyx configuration before CMake is started
-    if [ -f ${UNPACKDIR}/${MACHINE}.cmake ]
-    then
-        cp ${UNPACKDIR}/${MACHINE}.cmake ${S}/src/machine.cmake
-    fi
-}
 
 do_install:append:tenderloin-halium() {
     install -d ${D}${systemd_system_unitdir}/nyx.target.d/
