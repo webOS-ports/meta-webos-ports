@@ -7,8 +7,8 @@ DEPENDS = "glib-2.0 luna-service2 json-c luna-sysmgr-common luna-prefs nyx-lib l
 RDEPENDS:${PN} += "sleepd com.webos.service.battery luna-authmanager"
 
 PV = "1.0.0+git"
-PR = "r5"
-SRCREV = "0f691947324171e0b96603eb5b1ef14c29bb211b"
+PR = "r6"
+SRCREV = "fb6b08848d5b12138530a422d215b89a3dba1469"
 
 # Set here rather than appended to SRC_URI: WEBOS_PORTS_GIT_REPO_COMPLETE
 # already carries a ";branch=", which defaults to master through
