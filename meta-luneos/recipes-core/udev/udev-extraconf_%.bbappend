@@ -16,4 +16,4 @@ RDEPENDS:${PN} += "iw"
 
 # Bumped when the rules shipped from here change, so installed images pick
 # up a new rule on upgrade: the base recipe's revision does not move for it.
-PR = "r2"
+PR = "r3"
