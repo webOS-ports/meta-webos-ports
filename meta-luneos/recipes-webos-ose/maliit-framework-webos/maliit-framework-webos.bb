@@ -10,23 +10,59 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=1b633545a82af651ad37b9f03288651e \
 "
 
-DEPENDS = "qtbase qtdeclarative qtwayland-webos libxkbcommon pmloglib luna-service2 glib-2.0 udev wayland"
-RDEPENDS:${PN} = "qtbase-plugins configd imemanager"
+DEPENDS = "qtbase qtdeclarative qtwayland-webos libxkbcommon pmloglib luna-service2 glib-2.0 udev wayland qt-features-webos"
+# imemanager was pulled in here purely for its LS2 files - the
+# com.webos.service.ime role/service/permission set that MaliitServer registers
+# under. Those describe this package's own binary, so they now live in the
+# maliit-framework-webos source tree under service/ and imemanager is gone,
+# taking libplugin-global.so, its 8.6 MB of .dic files and the openwnn-webos
+# libWnnJpn.so it dragged in with it. The LuneOS keyboard
+# (libluneos-keyboard-plugin.so, MALIIT_DEFAULT_PLUGIN below) was always the
+# active plugin; the global one was only ever loaded and then ignored.
+RDEPENDS:${PN} = "qtbase-plugins configd"
+
+# The com.webos.service.ime.* files this package now installs are at paths
+# imemanager owned until now, so an upgrade over an installed imemanager is a
+# file conflict unless this package is declared to supersede it. RPROVIDES
+# additionally keeps anything that still RDEPENDS on the old name resolvable.
+RPROVIDES:${PN} += "imemanager"
+RREPLACES:${PN} += "imemanager"
+RCONFLICTS:${PN} += "imemanager"
 
 PACKAGECONFIG[libim] = "CONFIG+=enable-libim,CONFIG-=enable-libim,libim"
 
-WEBOS_VERSION = "0.99.0+20-103_71e5f78c3c8610e522e4ed01f536f740818efebb"
-PR = "r37"
+# Built from the webOS-ports fork rather than webosose plus a patch stack: the
+# service/ LS2 files, the audit fixes, and what used to be the 0001-0003 patch
+# series in this directory all live there as commits, so nothing is applied on
+# top any more. Pinned with a plain SRCREV - submission tags are a webosose
+# convention and this branch carries none past submissions/103.
+WEBOS_GIT_PARAM_BRANCH = "herrie/fixes"
+
+SRCREV = "d31f37a17887dc4194326e281bbff2d137934e09"
+
+# Set outright rather than derived from a submission tag, and deliberately not
+# "0.99.0+20-104". webos_enhanced_submissions appended SRCPV here, so the
+# shipped r37 package was 0.99.0+20-1030+71e5f78c3c; opkg compares the digit
+# run after "0.99.0+20-", and 104 sorts below 1030, so the obvious next
+# submission number would read as a downgrade on update. "-1040" keeps the
+# submission-104 reading and still sorts above. Without the submissions class
+# PKGV is now just PV, so what is written here is what ships.
+PV = "0.99.0+20-1040"
+
+# Bump PR on every SRCREV move from here on. The submissions class used to
+# append SRCPV to PKGV, so a new revision changed the package version by
+# itself; now PKGV is just PV, and a SRCREV bump alone rebuilds but produces an
+# identically-versioned package that opkg sees no reason to install.
+PR = "r40"
 
 inherit pkgconfig
 inherit webos_qmake6
 inherit webos_filesystem_paths
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_ose_repo
 inherit features_check
 ANY_OF_DISTRO_FEATURES = "vulkan opengl"
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 
@@ -40,9 +76,6 @@ EXTRA_QMAKEVARS_PRE += "${EXTRA_CONF_PACKAGECONFIG}"
 SSTATE_SCAN_FILES += "*.prf *.pc"
 
 SRC_URI += " \
-    file://0001-Correctly-detect-wayland-platform.patch \
-    file://0002-Give-plugins-the-character-for-every-printable-keysym.patch \
-    file://0003-mimhwkeyboardtracker-size-EVIOCGBIT-buffers-for-the-k.patch \
     file://maliit-server.conf \
     file://maliit-server.service \
     file://maliit-server@.service \
@@ -51,6 +84,15 @@ SRC_URI += " \
 "
 
 inherit systemd
+
+# service/ in the source tree installs the com.webos.service.ime LS2 files via
+# webos-service.prf. This class adds ${webos_sysbus_*} to FILES:${PN} and
+# generates maliit-framework-webos.manifest.json from them at package time.
+# Its own do_install would additionally copy ${S}/service/*.json into the
+# deprecated roles-prv/roles-pub locations, so skip its tasks - same reason
+# imemanager set this.
+inherit webos_system_bus
+WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE:${PN} = "maliit-server.service"
