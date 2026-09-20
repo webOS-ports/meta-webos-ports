@@ -32,9 +32,15 @@ REMOVE_ANDROID_PROPERTY_SERVICE_CMD = "sed -i 's/\"android-property-service.oper
 REMOVE_FINGERPRINT_APP_CMD:halium = ""
 REMOVE_FINGERPRINT_APP_CMD = "rm -rf ${D}/${webos_applicationsdir}/org.webosports.app.settings.fingerprint"
 
-# The face unlock panel needs the faceunlock.* ACGs, which only exist where
-# luneos-faced is installed; drop the sub-app elsewhere for the same reason.
-REMOVE_FACEUNLOCK_APP_CMD:halium = ""
+# The face unlock panel needs the faceunlock.* ACGs, which come from
+# luneos-faced. That is gated on aarch64, not on halium - see
+# FACEUNLOCK_RDEPENDS in packagegroup-luneos-extended, which says in as many
+# words that this override has to track it. Keying it off halium pruned the
+# panel on pinephone and pinetab2, which do ship luneos-faced, while
+# General/FaceUnlockPage.qml stayed in -common: the page was reachable and
+# every enroll/abort/clear came back "Denied method call" because the sub-app
+# that carries the faceunlock.* grants was not installed.
+REMOVE_FACEUNLOCK_APP_CMD:aarch64 = ""
 REMOVE_FACEUNLOCK_APP_CMD = "rm -rf ${D}/${webos_applicationsdir}/org.webosports.app.settings.faceunlock"
 
 do_install:append() {
