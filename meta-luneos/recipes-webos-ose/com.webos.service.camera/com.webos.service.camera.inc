@@ -10,7 +10,7 @@ LIC_FILES_CHKSUM = " \
 # droid HAL/notifier plugins merged as commits) rather than webosose plus a
 # patch stack. Pinned with a plain SRCREV: submission tags are a webosose
 # convention and this branch carries none.
-SRCREV = "743be909f38fb6ace643b97483f670b7edc87f03"
+SRCREV = "0517568bff10a17c80005649a01e908365cf99a0"
 PV = "1.0.0-65"
 INC_PR = "r18"
 
