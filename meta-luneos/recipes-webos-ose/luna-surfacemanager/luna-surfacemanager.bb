@@ -21,14 +21,14 @@ DEPENDS = "qtdeclarative wayland-native qtwayland qtbase-native qt-features-webo
 # nothing is applied on top any more. Pinned with a plain SRCREV - submission
 # tags are a webosose convention and this branch carries none. The branch
 # itself comes from webos_ports_ose_repo below.
-SRCREV = "8dcdf67c8a502ce3a99a8934443b02a16709be89"
+SRCREV = "7ec57f7496c161627e2814d3cb78ca29022be31a"
 
 # Set outright rather than derived from a submission tag via WEBOS_VERSION.
 # Kept monotonic: the patch-stack recipe shipped 2.0.0-423, so anything lower
 # would look like a downgrade to opkg on an update.
 PV = "2.0.0-424"
 
-PR = "r67"
+PR = "r68"
 
 inherit webos_qmake6
 inherit pkgconfig
