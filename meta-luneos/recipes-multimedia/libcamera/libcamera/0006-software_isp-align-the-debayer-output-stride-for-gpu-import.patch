@@ -1,0 +1,49 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 18 Sep 2026 00:00:00 +0200
+Subject: [PATCH] software_isp: align the debayer output stride for GPU import
+
+The debayered buffers are handed to userspace as dma-bufs and are routinely
+imported straight into the GPU as textures, but their stride is only rounded
+up to a multiple of 8 bytes. Mesa requires a 64-byte aligned pitch and refuses
+anything else:
+
+  MESA: error: WSI pitch not properly aligned
+  could not create EGL image for plane 0 , EGL error 0x3003
+
+which leaves the application with a black viewfinder and no error it can act
+on. The debayered width is the input width less the eight border pixels, so
+every sensor mode whose width is a multiple of 16 - which is all of them on
+the PineTab2's OV5648 - produces a stride exactly 32 bytes short of alignment:
+632x480 RGBA gives 2528, and 2528 mod 64 is 32.
+
+Round up to 64 instead. The padding at the end of each line is never read.
+
+Upstream-Status: Pending
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+---
+diff -ruN st_a/src/libcamera/software_isp/debayer_cpu.cpp st_b/src/libcamera/software_isp/debayer_cpu.cpp
+--- a/src/libcamera/software_isp/debayer_cpu.cpp	2026-09-18 14:12:37.394218180 +0200
++++ b/src/libcamera/software_isp/debayer_cpu.cpp	2026-09-18 14:12:37.411412834 +0200
+@@ -781,8 +781,19 @@
+ 	if (getOutputConfig(outputFormat, config) != 0)
+ 		return std::make_tuple(0, 0);
+ 
+-	/* round up to multiple of 8 for 64 bits alignment */
+-	unsigned int stride = (size.width * config.bpp / 8 + 7) & ~7;
++	/*
++	 * Round the stride up to a multiple of 64 bytes.
++	 *
++	 * Eight would be enough for the debayering itself, but these buffers
++	 * are handed to userspace as dma-bufs and are routinely imported
++	 * straight into the GPU as textures. Mesa refuses a pitch that is not
++	 * 64-byte aligned - "WSI pitch not properly aligned", and eglCreateImage
++	 * fails with EGL_BAD_ALLOC - and the debayered width is the input width
++	 * less the eight border pixels, so every sensor mode whose width is a
++	 * multiple of 16 lands exactly 32 bytes short of alignment. The padding
++	 * at the end of each line is never read.
++	 */
++	unsigned int stride = (size.width * config.bpp / 8 + 63) & ~63;
+ 
+ 	return std::make_tuple(stride, stride * size.height);
+ }

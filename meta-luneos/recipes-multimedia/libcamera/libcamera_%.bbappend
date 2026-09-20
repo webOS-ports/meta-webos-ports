@@ -56,3 +56,17 @@ SRC_URI += "file://0002-ipa-rkisp1-cproc-take-brightness-contrast-saturation-fro
 # application switches between the front and back sensors - crashed or hung the
 # application four different ways. Not fixed in v0.7.2 either.
 SRC_URI += "file://0003-gstreamer-do-not-mismatch-request-completions-across-a-restart.patch"
+
+# The simple pipeline handler matches on the media device driver name and has no
+# entry for rockchip-cif, so a camera behind the Rockchip VICAP block is never
+# enumerated even with the whole media graph linked - which is the PineTab2.
+SRC_URI += "file://0004-pipeline-simple-support-the-Rockchip-VICAP-capture-block.patch"
+
+# libipa has helpers for the OV5640/5647/5670/5675/5693 but not the OV5648 that
+# the PineTab2 uses, so the software ISP cannot convert its gain codes and AEGC
+# drives the sensor with meaningless values.
+SRC_URI += "file://0005-ipa-libipa-add-a-camera-sensor-helper-for-the-OV5648.patch"
+SRC_URI += "file://0006-software_isp-align-the-debayer-output-stride-for-gpu-import.patch"
+SRC_URI += "file://0007-ipa-simple-add-a-tuning-file-for-the-OV5648.patch"
+SRC_URI += "file://0008-ipa-libipa-add-a-camera-sensor-helper-for-the-GC02M2.patch"
+SRC_URI += "file://0009-ipa-simple-add-a-tuning-file-for-the-GC02M2.patch"
