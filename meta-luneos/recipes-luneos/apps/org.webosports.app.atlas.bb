@@ -14,9 +14,9 @@ inherit webos_filesystem_paths
 inherit webos_app
 
 PV = "0.9.10+git"
-SRCREV = "b4ed45a8f3ab05492a4769eb28f061b518bc49b8"
+SRCREV = "10be0befb3c61c7d499a60089e496394ef1fb87b"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE};branch=phone-ui"
 
 # The repo carries its own LS2 role/permission/manifest in sysbus/; install them below rather than
 # through the class's own tasks (they need the .app.json naming the hub expects for an application).
