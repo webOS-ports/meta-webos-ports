@@ -30,9 +30,9 @@ RDEPENDS:${PN} += "nyx-conf"
 # left the URL carrying two, and which one the fetcher honours is an accident
 # of how it parses parameters.
 WEBOS_GIT_PARAM_BRANCH = "herrie/charger-resync"
-SRCREV = "2660934d1dd6d71f0727d2aacae8eb9b3cf3a49f"
+SRCREV = "5b553fe15da24c04adeeef0fb88f937188830602"
 
-PR = "r40"
+PR = "r41"
 
 EXTRA_OECMAKE += "\
     -DDISTRO_VERSION:STRING='${DISTRO_VERSION}' \
