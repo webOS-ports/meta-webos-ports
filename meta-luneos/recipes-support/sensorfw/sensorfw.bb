@@ -61,6 +61,15 @@ do_install:append() {
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.service ${D}${webos_sysbus_servicedir}/${SERVICE_NAME}.service
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.role.json ${D}${webos_sysbus_rolesdir}/${SERVICE_NAME}.role.json
     rm -rf ${D}/mkspecs
+
+    # The QTestLib unit tests get QT_TESTCASE_BUILDDIR - an absolute ${B} path -
+    # baked in by mkspecs/features/testlib_defines.prf, which does it
+    # unconditionally, so there is no qmake flag that turns it off. They were
+    # landing in ${PN} because FILES:${PN} takes all of ${bindir}, which shipped
+    # build host paths to the device and is what the buildpaths QA check flags.
+    # Nothing on a target image runs them, so drop them rather than mute QA.
+    rm -f ${D}${bindir}/*-test
+    rm -rf ${D}${datadir}/sensorfw-tests
 }
 
 RDEPENDS:${PN} = "bash"
@@ -72,13 +81,3 @@ FILES:${PN} = " \
     ${sysconfdir} \
     ${libdir} \
 "
-
-# ERROR: sensorfw-0.14.4+git-r0 do_package_qa: QA Issue: File /usr/bin/sensorbenchmark-test in package sensorfw contains reference to TMPDIR
-# File /usr/bin/sensordataflow-test in package sensorfw contains reference to TMPDIR
-# File /usr/bin/sensoradaptors-test in package sensorfw contains reference to TMPDIR
-# File /usr/bin/sensormetadata-test in package sensorfw contains reference to TMPDIR
-# File /usr/bin/sensorapi-test in package sensorfw contains reference to TMPDIR
-# File /usr/bin/sensorfilters-test in package sensorfw contains reference to TMPDIR
-# File /usr/bin/sensorchains-test in package sensorfw contains reference to TMPDIR [buildpaths]
-ERROR_QA:remove = "buildpaths"
-WARN_QA:append = " buildpaths"
