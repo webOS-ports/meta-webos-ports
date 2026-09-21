@@ -28,16 +28,26 @@ DEPENDS = "maliit-framework-webos hunspell presage luna-service2 presage-native 
 RDEPENDS:${PN} += "maliit-framework-webos qtsvg-plugins qtmultimedia-qmlplugins"
 RRECOMMENDS:${PN} += "hunspell-dictionaries"
 
-SRCREV = "6a8838867e3c43dbf99ef8eb2798273b8b791070"
+SRCREV = "cf6c3096f00faa6688b9fa3c433d2f676d003025"
 PV = "0.99.2+git"
 
 # We own webos-keyboard, so fixes belong in its actual source history, not
 # as patches carried here - unlike presage, which is genuinely third-party.
 # 0001-0003 (hunspell API compat, hardware keyboard input, Qt6Core5Compat
-# linking) and the db8-backed user dictionary are all real commits on
-# herrie/dict-backup; this SRCREV is the tip of herrie/prediction-corpora,
-# which branches off it and adds the nine missing prediction corpora plus the
-# libwesternsupport.a install removal.
+# linking), the db8-backed user dictionary and the prediction corpora are all
+# real commits on the repo now.
+#
+# This SRCREV is the tip of herrie/hw-special-keys: master plus the two
+# commits that resolve the Alt and Sym levels a device's physical keyboard
+# prints on its key faces, for the KEY2, both Titans, the Titan Pocket/Slim
+# and the MP01. The per-device profiles land in ${datadir}/org/luneos/
+# hwkeyboard/ and are already covered by FILES:${PN} below.
+#
+# That branch is not merged yet, so it has to be named: WEBOS_GIT_PARAM_BRANCH
+# defaults to master and the fetch would not find this revision there.
+# **Drop the branch line again once it is merged** so this goes back to
+# tracking master like every other webOS-ports recipe.
+WEBOS_GIT_PARAM_BRANCH = "herrie/hw-special-keys"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 # a lot of cases like:
