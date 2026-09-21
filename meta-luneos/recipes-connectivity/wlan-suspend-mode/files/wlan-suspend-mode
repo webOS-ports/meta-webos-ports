@@ -40,6 +40,7 @@ log() { echo "$(date -u +%FT%TZ) $*"; }
 
 # MDTIM periods to skip while suspended. 1 keeps the pre-existing behaviour.
 MDTIM=${MDTIM:-3}
+IW=${IW:-/usr/sbin/iw}
 
 driver_layout() {
     # SIOCDEVPRIVATE+1 (0x89F1). Qualcomm: hdd_priv_data_t {u8 *buf; int used_len;
@@ -71,6 +72,44 @@ except OSError as e:
 PY
 }
 
+# Some drivers have no screen-off command at all. MediaTek's older gen2
+# (mindphone, MT6739) answers a private command set of three - GET_WIFI_TYPE,
+# SETALWAYSSCANSTATE, SET_CHIP - and rejects SETSUSPENDMODE with EINVAL, so
+# nothing tells its firmware to stop handing packets to the host. Its RX
+# interrupt takes a wakelock each time, measured at 21 per second with the
+# screen off and the phone idle, and the suspend handshake can never win
+# against that: sleepd's every write to /sys/power/state returns EBUSY and the
+# device stays awake at about 283 mA, for ever.
+#
+# With the interface down the same counter falls to 1 per second and the phone
+# suspends normally: measured on mindphone 2026-09-21, 4 suspends in a 957 s
+# window, 948 s of it asleep, longest 588 s, against zero suspends in the run
+# before it.
+#
+# So where the driver cannot filter, take the station interface down instead.
+# That is only acceptable because nothing is being given up: this chip
+# advertises no magic-packet trigger either (only "any", which keeps the chip
+# fully powered, and "disconnect"), so cfg80211 would tear the association
+# down on suspend regardless. Where a driver does accept the command, or the
+# chip can be woken by a magic packet, this path is never used.
+iface_down_allowed() {
+    [ "${WLAN_DOWN_FALLBACK:-auto}" = "never" ] && return 1
+    [ "${WLAN_DOWN_FALLBACK:-auto}" = "always" ] && return 0
+    # auto: only when the chip could not be woken over the air anyway
+    "$IW" phy "$(iface_phy)" info 2>/dev/null | grep -q "wake up on magic packet" && return 1
+    return 0
+}
+
+iface_phy() {
+    if [ -e "/sys/class/net/$IF/phy80211" ]; then
+        basename "$(readlink -f "/sys/class/net/$IF/phy80211")"
+    else
+        echo phy0
+    fi
+}
+
+iface_state() { cat "/sys/class/net/$IF/operstate" 2>/dev/null; }
+
 apply() {  # $1 = suspendmode|normal, $2 = reason
     if [ "$1" = "$cur" ]; then log "$2 -> already $1"; return; fi
     if [ "$1" = suspendmode ]; then n=1; else n=0; fi
@@ -83,8 +122,27 @@ apply() {  # $1 = suspendmode|normal, $2 = reason
     fi
     if drvcmd "SETSUSPENDMODE $n"; then
         cur=$1; echo "$1" > $STATE; log "$2 -> SETSUSPENDMODE $n ok (mode=$1)"
+        return
+    fi
+
+    log "$2 -> SETSUSPENDMODE $n FAILED"
+    if ! iface_down_allowed; then
+        return
+    fi
+    if [ "$n" = 1 ]; then
+        if ip link set "$IF" down 2>/dev/null; then
+            cur=$1; echo "$1" > $STATE
+            log "$2 -> no driver filter, $IF down instead (state=$(iface_state))"
+        else
+            log "$2 -> no driver filter and $IF could not be brought down"
+        fi
     else
-        log "$2 -> SETSUSPENDMODE $n FAILED"
+        if ip link set "$IF" up 2>/dev/null; then
+            cur=$1; echo "$1" > $STATE
+            log "$2 -> $IF up again (state=$(iface_state))"
+        else
+            log "$2 -> $IF could not be brought up"
+        fi
     fi
 }
 
