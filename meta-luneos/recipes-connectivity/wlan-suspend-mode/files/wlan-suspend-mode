@@ -58,6 +58,12 @@ cur=$(cat $STATE 2>/dev/null)
 
 log() { echo "$(date -u +%FT%TZ) $*"; }
 
+# Whether to try the nl80211 testmode suspend request when the private ioctl is
+# rejected: "auto" tries it, "never" goes straight to the interface-down
+# fallback. Default never, because the only chip that accepts the call so far
+# is made worse by it - see the measurement above testmode_cmd().
+WLAN_TESTMODE=${WLAN_TESTMODE:-never}
+
 # MDTIM periods to skip while suspended. 1 keeps the pre-existing behaviour.
 MDTIM=${MDTIM:-3}
 IW=${IW:-/usr/sbin/iw}
@@ -92,6 +98,24 @@ except OSError as e:
 PY
 }
 
+# MEASURED, AND OFF BY DEFAULT. The gen2 chip accepts this call and reports
+# success, but the firmware carries on handing packets to the host: the WLAN
+# wakelocks (WLAN TX THREAD, WLAN Timer, WLAN AHB ISR) are taken exactly as
+# before and the suspend handshake never wins. Back-to-back runs on the
+# mindphone 2026-09-22, same build, same phone, screen off, off charger:
+#
+#   interface down (fallback):  1058 s window, 98.5% asleep, longest 1017 s,
+#                               1 failed suspend, 4.227 -> 4.206 V
+#   testmode, interface up:     1182 s window,  0.0% asleep, no sleep at all,
+#                              43 failed suspends, 4.364 -> 4.153 V
+#
+# So an accepted TESTMODE command is not evidence of anything: this one is
+# either ignored or sets something that is not the broadcast filter. Keep the
+# code - it is the only lead for a chip that has no other filtering path, and
+# a different gen2/gen4m firmware may honour it - but never let it displace a
+# fallback that works. Enable with WLAN_TESTMODE=auto to test a new chip, and
+# measure the asleep fraction before trusting it.
+#
 # nl80211 testmode suspend, for drivers that reject the private ioctl. Pure
 # python over a generic-netlink socket rather than libnl: the daemon already
 # depends on python3 for the ioctl, and this adds no library to the image.
@@ -254,15 +278,19 @@ apply() {  # $1 = suspendmode|normal, $2 = reason
         [ "$n" = 0 ] && undo_iface_down "$2"
         return
     fi
-    log "$2 -> SETSUSPENDMODE $n failed (${err:-no detail}), trying nl80211 testmode"
+    log "$2 -> SETSUSPENDMODE $n failed (${err:-no detail})"
 
-    # Same request, different transport: the gen2 driver takes it here.
-    if err=$(testmode_cmd "$n" 2>&1); then
-        cur=$1; echo "$1" > $STATE; log "$2 -> testmode suspend=$n ok (mode=$1)"
-        [ "$n" = 0 ] && undo_iface_down "$2"
-        return
+    # Same request, different transport. Opt-in only: accepted is not the same
+    # as honoured, and on the one chip measured so far it is much worse than
+    # the fallback below.
+    if [ "$WLAN_TESTMODE" != never ]; then
+        if err=$(testmode_cmd "$n" 2>&1); then
+            cur=$1; echo "$1" > $STATE; log "$2 -> testmode suspend=$n ok (mode=$1)"
+            [ "$n" = 0 ] && undo_iface_down "$2"
+            return
+        fi
+        log "$2 -> testmode suspend=$n failed (${err:-no detail})"
     fi
-    log "$2 -> testmode suspend=$n failed (${err:-no detail})"
 
     # Only now is there genuinely no way to make the firmware filter.
     if ! iface_down_allowed; then
