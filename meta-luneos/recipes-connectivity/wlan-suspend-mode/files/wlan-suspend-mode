@@ -49,6 +49,11 @@
 
 IF=${IF:-wlan0}
 STATE=/run/wlan-suspend-mode
+# Set while the interface is down *because we downed it*, so the way back up is
+# not tied to which mechanism is in use. Without it, a phone left down by the
+# fallback and then upgraded to a build whose testmode call succeeds would take
+# the early return and never bring the interface back.
+DOWNMARK=/run/wlan-suspend-mode.ifdown
 cur=$(cat $STATE 2>/dev/null)
 
 log() { echo "$(date -u +%FT%TZ) $*"; }
@@ -222,6 +227,18 @@ iface_phy() {
 
 iface_state() { cat "/sys/class/net/$IF/operstate" 2>/dev/null; }
 
+# Bring the station interface back if the fallback had taken it down. Safe to
+# call whenever we return to normal: it does nothing unless we left the marker.
+undo_iface_down() {
+    [ -e "$DOWNMARK" ] || return 0
+    if ip link set "$IF" up 2>/dev/null; then
+        rm -f $DOWNMARK
+        log "$1 -> $IF brought back up after earlier fallback (state=$(iface_state))"
+    else
+        log "$1 -> $IF still down and could not be brought up"
+    fi
+}
+
 apply() {  # $1 = suspendmode|normal, $2 = reason
     if [ "$1" = "$cur" ]; then log "$2 -> already $1"; return; fi
     if [ "$1" = suspendmode ]; then n=1; else n=0; fi
@@ -234,6 +251,7 @@ apply() {  # $1 = suspendmode|normal, $2 = reason
     fi
     if err=$(drvcmd "SETSUSPENDMODE $n" 2>&1); then
         cur=$1; echo "$1" > $STATE; log "$2 -> SETSUSPENDMODE $n ok (mode=$1)"
+        [ "$n" = 0 ] && undo_iface_down "$2"
         return
     fi
     log "$2 -> SETSUSPENDMODE $n failed (${err:-no detail}), trying nl80211 testmode"
@@ -241,6 +259,7 @@ apply() {  # $1 = suspendmode|normal, $2 = reason
     # Same request, different transport: the gen2 driver takes it here.
     if err=$(testmode_cmd "$n" 2>&1); then
         cur=$1; echo "$1" > $STATE; log "$2 -> testmode suspend=$n ok (mode=$1)"
+        [ "$n" = 0 ] && undo_iface_down "$2"
         return
     fi
     log "$2 -> testmode suspend=$n failed (${err:-no detail})"
@@ -251,14 +270,14 @@ apply() {  # $1 = suspendmode|normal, $2 = reason
     fi
     if [ "$n" = 1 ]; then
         if ip link set "$IF" down 2>/dev/null; then
-            cur=$1; echo "$1" > $STATE
+            cur=$1; echo "$1" > $STATE; : > $DOWNMARK
             log "$2 -> no driver filter, $IF down instead (state=$(iface_state))"
         else
             log "$2 -> no driver filter and $IF could not be brought down"
         fi
     else
         if ip link set "$IF" up 2>/dev/null; then
-            cur=$1; echo "$1" > $STATE
+            cur=$1; echo "$1" > $STATE; rm -f $DOWNMARK
             log "$2 -> $IF up again (state=$(iface_state))"
         else
             log "$2 -> $IF could not be brought up"
