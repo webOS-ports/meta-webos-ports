@@ -28,7 +28,7 @@ DEPENDS = "maliit-framework-webos hunspell presage luna-service2 presage-native 
 RDEPENDS:${PN} += "maliit-framework-webos qtsvg-plugins qtmultimedia-qmlplugins"
 RRECOMMENDS:${PN} += "hunspell-dictionaries"
 
-SRCREV = "7513d0eeb946ad00c0e8bf5463144d0bf171f876"
+SRCREV = "0c7a5cef4fcd763d01c0246bd37e6782df9b396b"
 PV = "0.99.2+git"
 
 # We own webos-keyboard, so fixes belong in its actual source history, not
