@@ -70,3 +70,10 @@ SRC_URI += "file://0006-software_isp-align-the-debayer-output-stride-for-gpu-imp
 SRC_URI += "file://0007-ipa-simple-add-a-tuning-file-for-the-OV5648.patch"
 SRC_URI += "file://0008-ipa-libipa-add-a-camera-sensor-helper-for-the-GC02M2.patch"
 SRC_URI += "file://0009-ipa-simple-add-a-tuning-file-for-the-GC02M2.patch"
+
+# The rk3566/rk3568 ISP ("V21") reports media hardware revision 15. The kernel
+# treats it as V12-compatible for stats/params and receives through a CSI2RX
+# host, but the rkisp1 IPA only allow-listed V10/V12/IMX8MP and bailed out with
+# "Hardware revision 15 is currently not supported", so the PineTab2 rear
+# camera (ov5648) could not stream through the hardware ISP. Accept V21.
+SRC_URI += "file://0010-ipa-rkisp1-support-the-rk3566-rk3568-V21-ISP.patch"

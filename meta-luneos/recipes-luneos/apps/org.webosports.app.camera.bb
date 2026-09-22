@@ -9,7 +9,7 @@ PV = "0.0.2-1+git"
 # herrie/camera: camera and format selection, full-frame mode and zoom,
 # viewfinder rotation, flash LED, cpufreq pin - until it is merged to master.
 WEBOS_GIT_BRANCH = ";branch=herrie/camera"
-SRCREV = "0dd0ffaa0d73028d14130ca31c8d0e33cd86192c"
+SRCREV = "8898dd9a2d38cf0165a923cbdf6267a918d07d41"
 
 DEPENDS = "qtbase qtdeclarative qtdeclarative-native qtmultimedia"
 
