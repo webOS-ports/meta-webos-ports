@@ -19,34 +19,17 @@ RDEPENDS:${PN} = "${VIRTUAL-RUNTIME_init_manager} ${VIRTUAL-RUNTIME_bash} python
 PROVIDES = "initscripts"
 RPROVIDES:${PN} = "initscripts initd-functions"
 
-WEBOS_VERSION = "3.0.0-102_3ac4a454a79375f9bfaf97a8964de04ef90089ac"
-PR = "r19"
+SRCREV = "00e94529e71473002228b29f6bc91ceb89a6ec38"
+
+PV = "3.0.0-103"
+
+PR = "r20"
 
 inherit webos_component
-inherit webos_enhanced_submissions
+inherit webos_ports_ose_repo
 inherit webos_cmake
 
-inherit webos_public_repo
-
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-tmpfiles-create-var-cache-xdg-traversable.patch \
-"
-
-# Fix zram-on.sh for modern kernels (Linux 5.x/6.x)
-# - Suppress grep errors for missing optional config file
-# - Skip deprecated max_comp_streams sysfs file
-# - Handle comp_algorithm gracefully
-
-SRC_URI:append = " \
-    file://0001-zram-on.sh-fix-for-modern-kernels.patch \
-"
-
-# Keep the shutdown log backup from holding up shutdown and reboot: bound the
-# journal it dumps, and order its stop job before the filesystems go away.
-SRC_URI:append = " \
-    file://0001-backup-log-do-not-block-shutdown-on-the-whole-journal.patch \
-"
-
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 #EXTRA_OECMAKE += "-DWEBOS_QTTESTABILITY_ENABLED:BOOL=${@ '1' if d.getVar('WEBOS_DISTRO_PRERELEASE') != '' else '0'}"
 
