@@ -92,6 +92,26 @@ if [ -z "$grid" ]; then
     grid=$(awk -v d="$dpi" -v mm="$GRID_UNIT_MM" 'BEGIN { printf "%d", (d * mm / 25.4) + 0.5 }')
 fi
 
+# A panel mounted a quarter turn off scans out landscape while the device is held
+# portrait, and the compositor rotates its output to match (the "r" field of
+# deviceinfo_compositor_geometry - see 10-configd-surfacemanager). panel_w and
+# panel_h come straight from the DRM connector and know nothing about that, so
+# without swapping them here luna-sysmgr and every web app lay out to the raw
+# 800x600 while the display presents 600x800: the app renders at the wrong
+# resolution and only looks right once the device is physically turned.
+#
+# Swap for the quarter turns only. 180 keeps the same aspect and needs nothing.
+case "${deviceinfo_compositor_geometry:-}" in
+    *r90s*|*r270s*)
+        if [ -n "${panel_w:-}" ] && [ -n "${panel_h:-}" ]; then
+            _pw=$panel_w
+            panel_w=$panel_h
+            panel_h=$_pw
+            echo "luneos-device-config: panel is mounted rotated, using ${panel_w}x${panel_h}"
+        fi
+        ;;
+esac
+
 changed=0
 tmp=$(mktemp)
 cp "$SRC" "$tmp"
@@ -106,9 +126,20 @@ set_kv() {
 set_kv DPI "$dpi"
 set_kv GridUnit "$grid"
 
+# How far below the real ambient level this device's ALS reads, because of the
+# cover glass in front of it. Not derivable - the sensor reports nothing about
+# what is covering it - so it is only written when an adaptation declares it,
+# leaving the shipped 1.0 (take the reading at face value) otherwise.
+[ -n "${deviceinfo_als_calibration:-}" ] && set_kv AlsCalibration "$deviceinfo_als_calibration"
+
+# How much brighter (or dimmer) the backlight goes outdoors, as a percentage of
+# the user's setting. Only an adaptation knows whether its panel is emissive or
+# reflective, so this too is written only when one declares it.
+[ -n "${deviceinfo_backlight_outdoor_scale:-}" ] && set_kv BrightnessOutdoorScale "$deviceinfo_backlight_outdoor_scale"
+
 if [ "$changed" = "1" ]; then
     mkdir -p "$GEN/files/etc/palm"
     cp "$tmp" "$GEN/files/etc/palm/luna-platform.conf"
-    echo "luneos-device-config: luna-platform ${panel_w}x${panel_h} dpi=$dpi gridUnit=$grid"
+    echo "luneos-device-config: luna-platform ${panel_w}x${panel_h} dpi=$dpi gridUnit=$grid${deviceinfo_als_calibration:+ alsCal=$deviceinfo_als_calibration}${deviceinfo_backlight_outdoor_scale:+ outdoorScale=$deviceinfo_backlight_outdoor_scale}"
 fi
 rm -f "$tmp"

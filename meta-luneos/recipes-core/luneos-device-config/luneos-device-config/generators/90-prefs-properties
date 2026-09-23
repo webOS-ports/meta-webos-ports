@@ -1,0 +1,86 @@
+#!/bin/sh
+# The device's human-readable name, for luna-prefs.
+#
+# luna-prefs answers com.palm.properties.deviceName out of
+# /etc/prefs/properties/deviceName, which luna-prefs-data writes at build time
+# from PRODUCT_DEVICE_NAME. That defaults to "LuneOS Device" and no machine has
+# ever overridden it, so Settings' Device Info page fell through to
+# com.palm.properties.machineName instead - which luna-prefs-data writes as the
+# Yocto MACHINE. The name field read "pinephonepro".
+#
+# A build-time name cannot work for the shared images in any case: halium-arm64
+# is one rootfs across bluejay, sargo, tissot, panther and the rest, so there is
+# no single right answer to bake into it. The name has to be worked out on the
+# device, like everything else here.
+#
+# Precedence, highest first:
+#
+#   Tier 1  deviceinfo_name from the adaptation.
+#   Tier 0  ro.product.manufacturer + ro.product.model, where there is a
+#           container. This is the pair Settings asks android-property-service
+#           for directly today, so deriving it here gives every other consumer
+#           of deviceName the same answer.
+#   Tier 0  /proc/device-tree/model on a mainline device, which is the board's
+#           own description of itself ("Pine64 PinePhone Pro", "Raspberry Pi 4
+#           Model B Rev 1.4").
+#
+# With none of those available the shipped default stands - nothing is written
+# and the bind loop has nothing to shadow.
+
+DST=/etc/prefs/properties/deviceName
+[ -f "$DST" ] || exit 0
+
+GETPROP=/android/system/bin/getprop
+prop() { [ -x "$GETPROP" ] && "$GETPROP" "$1" 2>/dev/null || echo ""; }
+
+# Collapse runs of whitespace and strip the ends. ro.product.model is free text
+# set by the vendor and has been seen with a trailing space.
+tidy() { echo "$1" | tr -s '[:space:]' ' ' | sed 's/^ //; s/ $//'; }
+
+name=${deviceinfo_name:-}
+short=${deviceinfo_name_short:-}
+
+if [ -z "$name" ]; then
+    _model=$(tidy "$(prop ro.product.model)")
+    _manu=$(tidy "$(prop ro.product.manufacturer)")
+    if [ -n "$_model" ]; then
+        # Vendors are inconsistent about whether the model already carries the
+        # brand: Google ships model "Pixel 6a" with manufacturer "Google", so
+        # concatenating unconditionally gives "Google Google Pixel 6a".
+        case "$_model" in
+            "$_manu"*) name=$_model ;;
+            *)         name=$(tidy "$_manu $_model") ;;
+        esac
+        [ -n "$short" ] || short=$_model
+    fi
+fi
+
+if [ -z "$name" ] && [ -r /proc/device-tree/model ]; then
+    # A device-tree string property is NUL-terminated.
+    name=$(tidy "$(tr -d '\0' < /proc/device-tree/model 2>/dev/null)")
+fi
+
+[ -n "$name" ] || exit 0
+[ -n "$short" ] || short=$name
+
+# Every one of these is "LuneOS Device" in the image - they are placeholders,
+# not values anybody chose - so they all become the real name. deviceName and
+# deviceNameShort are what Settings and the shell read; the Branded pair exists
+# for carrier builds and has no separate answer here.
+for f in deviceName deviceNameBranded; do
+    [ -f "/etc/prefs/properties/$f" ] || continue
+    out=$GEN/files/etc/prefs/properties/$f
+    mkdir -p "$(dirname "$out")"
+    # No trailing newline: luna-prefs hands back the file's exact bytes, and
+    # luna-prefs-data writes these with echo -n for the same reason.
+    printf '%s' "$name" > "$out"
+done
+
+for f in deviceNameShort deviceNameShortBranded; do
+    [ -f "/etc/prefs/properties/$f" ] || continue
+    out=$GEN/files/etc/prefs/properties/$f
+    mkdir -p "$(dirname "$out")"
+    printf '%s' "$short" > "$out"
+done
+
+echo "luneos-device-config: device name -> $name"

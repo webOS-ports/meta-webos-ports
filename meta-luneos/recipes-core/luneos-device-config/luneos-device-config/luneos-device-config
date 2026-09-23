@@ -12,7 +12,7 @@
 #
 # Nothing is ever copied into the rootfs. A universal image that has been
 # rewritten to suit the first device it booted on is no longer universal, so
-# adaptations are applied by overlay or bind mount and re-derived every boot.
+# adaptations are applied by bind mount and re-derived every boot.
 
 set -u
 
@@ -183,7 +183,17 @@ for c in /sys/class/drm/card*-*/status; do
     case "$c" in */card*-Virtual-*) continue ;; esac
     mode=$(head -n1 "${c%/status}/modes" 2>/dev/null)
     case "$mode" in
-        [0-9]*x[0-9]*) panel_w=${mode%%x*}; panel_h=${mode##*x}; break ;;
+        [0-9]*x[0-9]*)
+            panel_w=${mode%%x*}
+            # Take the digits after the first 'x' only. The exynos DRM driver
+            # (Pixel 6a/7/Tablet) appends the refresh to the mode name,
+            # "1600x2560x60@60", so ${mode##*x} returned "60@60" as the height
+            # and the compositor rejected the derived geometry
+            # ("Invalid geometry string 1600x60@60+0+0r0s1") and fell back to
+            # its 1920x1080 TV default.
+            panel_h=${mode#*x}
+            panel_h=${panel_h%%[!0-9]*}
+            break ;;
     esac
 done
 
@@ -356,6 +366,61 @@ if [ -d "$GENERATORS" ]; then
     done
 fi
 
+# ---------------------------------------------------------------- Tier 2 ----
+# Apply the file tree, one bind mount per file. Non-destructive: the rootfs
+# keeps its own content and the adaptation is re-applied every boot.
+#
+# This used to be a single overlayfs mount over /etc, with the writable upper
+# layer in /run. That made every later write to /etc volatile, because the
+# upper layer is a tmpfs: a package installed on a running phone landed there
+# and was gone at the next boot. Measured on sargo (2026-09-19/20): db8's
+# 30-minute no-wake maintenance activities and the WoWLAN udev rule were both
+# installed, verified on the device, and both silently reverted to the image's
+# versions after a reboot - the phone then woke every five minutes all night
+# and ran with WiFi disconnecting on every suspend. opkg reported the new
+# packages as installed throughout, because /var/lib/opkg is not under the
+# overlay.
+#
+# Per-file binds keep the property the overlay was chosen for - nothing is ever
+# copied into the rootfs, and the adaptation disappears when the service stops
+# - while leaving /etc itself a normal, persistent directory.
+#
+# This runs BEFORE the generated files are bound, and the order matters: a
+# later bind on the same path wins, so Tier 0/1 generated values must be bound
+# after Tier 2, which is the precedence this file documents at the top.
+apply_sparse() {
+    sparse="$adaptation/sparse"
+    [ -d "$sparse" ] || return 0
+    for sub in etc usr/lib/luneos/device; do
+        [ -d "$sparse/$sub" ] || continue
+        bind_tree "$sparse/$sub" "/$sub"
+    done
+}
+
+bind_tree() {
+    src=$1; prefix=$2
+    find "$src" -type f 2>/dev/null | while read -r f; do
+        rel=${f#"$src"}
+        target="$prefix$rel"
+        # A bind mount needs something to mount onto. Where the adaptation adds
+        # a file the image does not have, create an empty placeholder: it holds
+        # no content (the bind supplies that, every boot) and it keeps this the
+        # only write the tier makes.
+        if [ ! -e "$target" ]; then
+            mkdir -p "$(dirname "$target")" 2>/dev/null
+            if : > "$target" 2>/dev/null; then
+                log "created empty $target to bind onto"
+            else
+                log "skipping $target (cannot create it)"
+                continue
+            fi
+        fi
+        mount --bind "$f" "$target" && log "bound $target"
+    done
+}
+
+apply_sparse
+
 # Shadow generated files over their targets. A target that does not exist is
 # skipped rather than created: creating it would mean writing to the rootfs.
 find "$GEN/files" -type f 2>/dev/null | while read -r f; do
@@ -392,40 +457,5 @@ if [ -n "$(ls -A "$GEN/configd" 2>/dev/null)" ] && [ -d /etc/configd/layers/over
     fi
 fi
 
-# ---------------------------------------------------------------- Tier 2 ----
-# Apply the file tree. overlayfs in one mount where the kernel has it, else a
-# bind mount per file - equally non-destructive, just noisier.
-apply_sparse() {
-    sparse="$adaptation/sparse"
-    [ -d "$sparse" ] || return 0
-    if grep -qw overlay /proc/filesystems 2>/dev/null; then
-        for sub in etc usr/lib/luneos/device; do
-            [ -d "$sparse/$sub" ] || continue
-            mkdir -p "$RUN/work/$sub" "$RUN/upper/$sub"
-            if mount -t overlay overlay \
-                 -o "lowerdir=$sparse/$sub:/$sub,upperdir=$RUN/upper/$sub,workdir=$RUN/work/$sub" \
-                 "/$sub" 2>/dev/null; then
-                log "overlaid $sparse/$sub onto /$sub"
-                continue
-            fi
-            log "overlay of /$sub failed, falling back to bind mounts"
-            bind_tree "$sparse/$sub" "/$sub"
-        done
-    else
-        log "kernel has no overlayfs, using bind mounts"
-        bind_tree "$sparse" ""
-    fi
-}
-
-bind_tree() {
-    src=$1; prefix=$2
-    find "$src" -type f 2>/dev/null | while read -r f; do
-        rel=${f#"$src"}
-        target="$prefix$rel"
-        [ -e "$target" ] || { log "skipping $target (no such file to shadow)"; continue; }
-        mount --bind "$f" "$target" && log "bound $target"
-    done
-}
-
-apply_sparse
 exit 0
+
