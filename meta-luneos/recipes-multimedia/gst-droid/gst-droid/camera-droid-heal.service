@@ -1,0 +1,48 @@
+[Unit]
+Description=Recover the Android camera provider if it came up wedged
+# After the gate, because the probe needs libgstdroid on GST_PLUGIN_PATH, and
+# the gate is what puts it there for everything systemd starts afterwards.
+After=gst-droid-gate.service
+Requires=gst-droid-gate.service
+# Before the webOS camera service, so a wedged provider is replaced before its
+# droid notifier probes droidcamsrc to enumerate the cameras, and before any
+# app can ask it for a preview.
+Before=com.webos.service.camera.service
+# Explicitly ordered AFTER the compositor, not merely "not before" it. Being
+# absent from the compositor's own dependency chain is not enough: this is a
+# oneshot in the same boot transaction, and on MP01 a probe that blocked forever
+# held surface-manager-daemon.service - and bootd, and sam - queued behind it for
+# the full TimeoutStartSec. A camera that needs healing is never a reason to
+# delay the UI, so make the ordering a guarantee rather than an assumption.
+After=surface-manager-daemon.service
+ConditionPathExists=/dev/hwbinder
+# REQUIRED, not decoration. @HEAL_CONF@ is Tier 2 in luneos-device-config: a
+# sparse/ file applied by one bind mount per file, so it does not exist until
+# that unit has run. Measured on sargo 2026-09-21 without this line, both units
+# were started in the same second and the race went the wrong way -
+#
+#   [25.447] Starting Derive LuneOS device configuration...
+#   [25.482] Starting Recover the Android camera provider if it came up wedged...
+#   [28.715] luneos-device-config: bound /etc/libncicore.conf
+#
+# - so ConditionPathExists was evaluated about 3 s before the file appeared and
+# the unit was skipped for the whole boot. Note that the After=surface-manager-daemon
+# above does NOT imply this: the compositor is not in this unit's transaction,
+# and the healer in fact ran at 25 s, long before it.
+After=luneos-device-config.service
+# Opt-in per device: this heals one specific sargo defect. luneos-device-config
+# ships @HEAL_CONF@ for the boards that need it; everywhere else the unit is a
+# no-op that never opens a camera. The script re-checks the same path, so the
+# condition is an optimisation, not the only gate.
+ConditionPathExists=@HEAL_CONF@
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=@BINDIR@/camera-droid-heal.sh
+# A backstop only: each probe is bounded by PROBE_TIMEOUT in the script, so the
+# worst case is four probes and three provider restarts, well inside this.
+TimeoutStartSec=180s
+
+[Install]
+WantedBy=android-system.service
