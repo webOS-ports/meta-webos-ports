@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 10 Sep 2026 10:00:00 +0200
+Subject: [PATCH] droid-util: convert audio source through a uint32_t temporary
+
+pa_string_convert_str_to_num() takes a uint32_t*, but both call sites pass
+an audio_source_t*. That only ever worked because audio_source_t used to be
+compatible with uint32_t; against newer android-headers it is not, and GCC
+14+ makes -Wincompatible-pointer-types an error rather than a warning:
+
+  droid-util.c:1828:82: error: passing argument 3 of
+    'pa_string_convert_str_to_num' from incompatible pointer type
+    [-Wincompatible-pointer-types]
+    note: expected 'uint32_t *' but argument is of type 'audio_source_t *'
+
+Surfaced by building this (legacy, Android <= 10) tree against
+android-headers-halium 16.0, which the Xiaomi Mi A1 needs: its vendor is
+Android 9 so it wants these modules rather than the -modern ones, while
+libhybris forces the 16.0 headers because it gates Android 16 support on
+ANDROID_VERSION_MAJOR.
+
+Convert through a uint32_t temporary and cast on assignment. Harmless on the
+older headers, where the cast is a no-op.
+
+Upstream-Status: Pending
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+---
+--- a/src/common/droid-util.c
++++ b/src/common/droid-util.c
+@@ -1824,8 +1824,11 @@
+     if (proplist) {
+         const char *source;
+         /* If audio source is defined in source-output proplist use that instead. */
+-        if ((source = pa_proplist_gets(proplist, EXT_PROP_AUDIO_SOURCE)))
+-            pa_string_convert_str_to_num(CONV_STRING_AUDIO_SOURCE_FANCY, source, &audio_source);
++        if ((source = pa_proplist_gets(proplist, EXT_PROP_AUDIO_SOURCE))) {
++            uint32_t value;
++            if (pa_string_convert_str_to_num(CONV_STRING_AUDIO_SOURCE_FANCY, source, &value))
++                audio_source = (audio_source_t) value;
++        }
+     }
+ 
+     /* Update audio source */
+@@ -1871,8 +1874,9 @@
+ 
+         /* If audio source is defined in source-output proplist use that instead. */
+         if ((source = pa_proplist_gets(proplist, EXT_PROP_AUDIO_SOURCE))) {
+-            if (pa_string_convert_str_to_num(CONV_STRING_AUDIO_SOURCE_FANCY, source, &audio_source) &&
+-                s->module->state.audio_source != audio_source) {
++            uint32_t value;
++            if (pa_string_convert_str_to_num(CONV_STRING_AUDIO_SOURCE_FANCY, source, &value) &&
++                s->module->state.audio_source != (audio_source_t) value) {
+ 
+                 reconfigure_needed = true;
+                 pa_log_debug("input reconfigure needed: " EXT_PROP_AUDIO_SOURCE " changes");
