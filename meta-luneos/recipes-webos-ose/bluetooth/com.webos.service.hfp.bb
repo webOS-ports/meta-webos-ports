@@ -13,7 +13,7 @@ LIC_FILES_CHKSUM = " \
 DEPENDS = "glib-2.0 glib-2.0-native luna-service2 pmloglib libpbnjson python3-packaging-native"
 
 WEBOS_VERSION = "1.0.0-35_1c8e66b1e794a31d36d11fdc2afd4834184d70dd"
-PR = "r10"
+PR = "r12"
 
 inherit webos_component
 inherit webos_enhanced_submissions
@@ -34,6 +34,8 @@ EXTRA_OECMAKE += "-DWEBOS_HFP_ENABLED_ROLE:STRING='${WEBOS_HFP_ENABLED_ROLE}'"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
            file://0001-HfpHFRole-init-mHfpOfonoManager-to-nullptr.patch \
+           file://0002-sysbus-allow-the-HFP-AG-to-reach-telephony.patch \
+           file://0003-sysbus-grant-the-HFP-AG-the-telephony-query-ACG.patch \
 "
 
 inherit webos_systemd
