@@ -22,12 +22,13 @@ VIRTUAL-RUNTIME_bash ?= "bash"
 RDEPENDS:${PN}:append:class-target = " ${VIRTUAL-RUNTIME_stat} ${VIRTUAL-RUNTIME_bash}"
 RDEPENDS:${PN}-tests:append:class-target = " ${VIRTUAL-RUNTIME_bash}"
 
-WEBOS_VERSION = "3.2.0-32_11ae879176e14f80d8dd103150947f9a4f8b7a5d"
-PR = "r42"
+SRCREV = "698670fc3939c5656674aeb4197e83838d33971e"
+
+PV = "3.2.0-33"
+
+PR = "r45"
 
 inherit webos_component
-inherit webos_public_repo
-inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_daemon
@@ -38,13 +39,9 @@ EXTRA_OECMAKE += "-DWEBOS_DB8_BACKEND:STRING='leveldb;sandwich' -DCMAKE_SKIP_RPA
 EXTRA_OECMAKE:append:class-target = " -DWEBOS_CONFIG_BUILD_TESTS:BOOL=TRUE  -DUSE_PMLOG:BOOL=TRUE  -DBUILD_LS2:BOOL=TRUE -DWANT_PROFILING:BOOL=${@ 'true' if '${WEBOS_DISTRO_PRERELEASE}' != '' else 'false'}"
 EXTRA_OECMAKE:append:class-native = " -DWEBOS_CONFIG_BUILD_TESTS:BOOL=FALSE -DUSE_PMLOG:BOOL=FALSE -DBUILD_LS2:BOOL=FALSE"
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-com.palm.db.role.json.in-More-generic-app-access.patch \
-    file://0002-db-Update-db8.groups.json-for-test-API-s.patch \
-    file://0001-CMakeLists.txt-replace-std-c-14-with-std-c-17-for-ic.patch \
-    file://0002-test-Don-t-use-long-deprecated-boost-filesystem-path.patch \
-    file://0003-db-run-backup-restore-callbacks-with-admin-privilege.patch \
-"
+inherit webos_ports_ose_repo
+
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "db8-maindb.service db8-mediadb.service db8-pre-config.service db8-tempdb.service db8.service"
@@ -54,7 +51,20 @@ WEBOS_SYSTEMD_SCRIPT = "db8-maindb.sh"
 # The service file in the repository is not used, so please delete it.
 # See the page below for more details.
 # http://collab.lge.com/main/pages/viewpage.action?pageId=2031668745
+WEBOS_DB8_TEST_SYSBUS_FILES = " \
+    ${webos_sysbus_rolesdir}/com.webos.db8.test.client.role.json \
+    ${webos_sysbus_rolesdir}/com.webos.db8.test.lunaservice.role.json \
+    ${webos_sysbus_rolesdir}/com.webos.db8.test.media.role.json \
+    ${webos_sysbus_rolesdir}/com.webos.db8.test.stress.role.json \
+    ${webos_sysbus_servicedir}/com.webos.db8.test.lunaservice.service \
+    ${webos_sysbus_apipermissionsdir}/com.webos.service.db.test.api.json \
+    ${webos_sysbus_permissionsdir}/com.webos.service.db.test.perm.json \
+"
+
 do_install:append() {
+    for f in ${WEBOS_DB8_TEST_SYSBUS_FILES}; do
+        rm -f ${D}$f
+    done
     rm -f ${D}${sysconfdir}/systemd/system/db8-maindb.service
     rm -f ${D}${sysconfdir}/systemd/system/scripts/db8-maindb.sh
     rm -f ${D}${sysconfdir}/systemd/system/db8-mediadb.service
