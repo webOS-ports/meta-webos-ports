@@ -7,7 +7,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "jemalloc db8 boost curl libpalmsocket libsandbox pmloglib icu json-c glib-2.0 luna-service2"
 
 PV = "2.0.0-99+git"
-SRCREV = "74993ce0766010dbafdcf2838ced51be426386ae"
+PR = "r1"
+SRCREV = "350073d1eaf5fa9382cd04e6b6a4ab598f3e2e3b"
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/mojomail:"
 
@@ -17,5 +18,3 @@ inherit pkgconfig
 
 WEBOS_REPO_NAME = "mojomail"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-
-CXXFLAGS += "-fpermissive"
