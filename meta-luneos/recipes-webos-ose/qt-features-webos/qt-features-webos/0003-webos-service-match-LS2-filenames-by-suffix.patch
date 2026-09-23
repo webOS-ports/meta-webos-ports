@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sat, 12 Sep 2026 08:40:21 +0200
+Subject: [PATCH] webos-service: match LS2 filenames by suffix, not by
+ substring
+
+The ACG loop globbed "*<type>*.in" for type in (role, service), which assumes
+the type word appears nowhere else in the filename. webOS service names
+routinely contain "service" - com.webos.service.* is the usual convention - so
+for any such component "*service*.in" matched its <name>.role.json.in as well
+as its <name>.service.in.
+
+The role file was therefore substituted twice and installed twice: once into
+roles.d, correctly, and once into services.d, where a role JSON is not a
+D-Bus service file and has no business being. On LuneOS this put a stray
+com.webos.service.ime.role.json in services.d on every image.
+
+Matching the whole suffix instead - *.role.json.in and *.service.in - is exact
+for both types and for every naming convention in the tree, including the
+components whose names do not contain "service" at all. Verified with qmake
+against com.webos.service.ime.*, com.palm.smtp.* and browser-shell.*.
+
+The parallel loop below for perm/api/group already anchors its glob with a
+leading dot ("*.<type>*.json"), so it never had this problem and is left
+alone. An unhandled type now errors out rather than silently reusing the
+previous iteration's pattern.
+
+Upstream-Status: Pending
+---
+ features/webos-service.prf | 13 ++++++++++++-
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/features/webos-service.prf b/features/webos-service.prf
+index db65542..cc613a5 100644
+--- a/features/webos-service.prf
++++ b/features/webos-service.prf
+@@ -117,8 +117,19 @@ group.path = $$WEBOS_INSTALL_SYSBUS_GROUPDIR
+     SYSBUS_FILE_TYPE_IN = role service
+     SYSBUS_FILE_TYPE = perm api group
+ 
++    # Match the whole filename suffix rather than "*<type>*". webOS service
++    # names routinely contain "service" themselves - com.webos.service.* is the
++    # usual convention - so "*service*.in" also matched that component's
++    # <name>.role.json.in, and the role file was substituted and installed a
++    # second time, into services.d alongside the real .service file.
+     for (type, SYSBUS_FILE_TYPE_IN) {
+-        found_files = $$files("$$WEBOS_SYSBUS_DIR/*$$type*.in")
++        unset(SYSBUS_GLOB_IN)
++        equals(type, role):    SYSBUS_GLOB_IN = *.role.json.in
++        equals(type, service): SYSBUS_GLOB_IN = *.service.in
++        isEmpty(SYSBUS_GLOB_IN): \
++            error("webos-service: no filename pattern defined for LS2 file type '$$type'")
++
++        found_files = $$files("$$WEBOS_SYSBUS_DIR/$$SYSBUS_GLOB_IN")
+         !isEmpty(found_files) {
+             message("Found SYSBUS_FILE_TYPE_IN: $$found_files")
+             QMAKE_SUBSTITUTES += $$found_files
