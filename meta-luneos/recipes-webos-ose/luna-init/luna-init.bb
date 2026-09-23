@@ -12,29 +12,18 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "tzdata python3-pytz-native"
 
-WEBOS_VERSION = "2.0.1-11_b186c185d8304480e78aade0617ef795c3db3e6e"
-PR = "r20"
+SRCREV = "980077069ce7438bcc1bb0dfe96f8601ad7fc283"
+
+PR = "r22"
 
 inherit webos_arch_indep
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit python3native
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-        file://0001-luna-init-Add-cust-preferences.txt-and-CustomerCareN.patch \
-        file://0002-luna-init-Add-default-launcher-page-layout.json.patch \
-        file://0003-default-dock-positions.json-Use-variant-for-LuneOS.patch \
-        file://0004-defaultPreferences.txt-Customize-ringtone-and-wallpa.patch \
-        file://0005-defaultPreferences.txt-Add-keyboard-key-used-by-Mali.patch \
-        file://0006-command-resource-handlers.json-Switch-to-new-variant.patch \
-        file://0007-command-resource-handlers.json-Add-custom-handlers-f.patch \
-        file://0008-gen-ext-timezones.py-Update-for-python3.patch \
-        file://0009-CMakeLists.txt-Fix-install-location-of-files.patch \
-        file://0010-CMakeLists.txt-Install-mccInfo.json-as-well.patch \
-        file://0011-Delete-ext-timezones.json.patch \
-        file://0012-luna-init-gen-ext-timezones.py-Fix-typo.patch \
-"
+PV = "2.0.1-12"
+
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 do_install:append() {
     # Expand fonts tarball
