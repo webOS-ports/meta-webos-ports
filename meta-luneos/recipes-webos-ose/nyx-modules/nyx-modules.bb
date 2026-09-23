@@ -22,9 +22,9 @@ RDEPENDS:${PN} += "nyx-conf"
 # merged as commits) rather than webosose plus a patch stack. Pinned with a
 # plain SRCREV: submission tags are a webosose convention and this branch
 # carries none. The branch itself comes from webos_ports_ose_repo below.
-SRCREV = "f27361973c8b31921de197f223570037ad1a867c"
+SRCREV = "12ad966241631a238f501c443091250728e49f8e"
 
-PR = "r29"
+PR = "r43"
 
 EXTRA_OECMAKE += "\
     -DDISTRO_VERSION:STRING='${DISTRO_VERSION}' \
@@ -63,24 +63,16 @@ inherit webos_core_os_dep
 inherit webos_nyx_module_provider
 #inherit webos_distro_variant_dep
 
+# Which modules this provider owns, per machine. Shared with nyx-modules-hybris,
+# which has to agree with us: these flags pick a provider, not a build.
+require recipes-webos-ose/nyx-modules/nyx-modules-machines.inc
+
 # Set outright rather than derived from a submission tag. Kept monotonic: the
 # patch-stack recipe shipped 7.1.0-25, so anything lower would look like a
 # downgrade to opkg on an update.
 PV = "7.1.0-26"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-
-SRC_URI:append = " \
-    file://${MACHINE}.cmake \
-"
-
-do_configure:prepend() {
-    # Install additional machine specific nyx configuration before CMake is started
-    if [ -f ${UNPACKDIR}/${MACHINE}.cmake ]
-    then
-        cp ${UNPACKDIR}/${MACHINE}.cmake ${S}/src/machine.cmake
-    fi
-}
 
 do_install:append:tenderloin-halium() {
     install -d ${D}${systemd_system_unitdir}/nyx.target.d/
