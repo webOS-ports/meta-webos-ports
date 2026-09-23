@@ -49,7 +49,6 @@ DEPENDS:append = " compiler-rt compiler-rt-native libcxx-native"
 # do_add_clang_latest and the clang_* GN args live in chromium-host-llvm.inc,
 # shared with mksnapshot-cross_151.bb.
 
-
 # Rust
 # ----
 # Rust is not optional in M151: //url depends on //url:url_rust, so the build
@@ -85,16 +84,6 @@ do_copy_target_rustlibs () {
 }
 addtask copy_target_rustlibs after do_configure before do_compile
 
-# The 120 recipe carries ten clang-22 fixup patches
-# (webruntime-clang/0001-skcms... through 0010-blink-...gperf-33). They are
-# deliberately NOT carried here: they fix Chromium 120 code against a clang far
-# newer than it was written for, and M151 is contemporary with LLVM 21/22.
-# Several are known fixed upstream (the perfetto and blink template-keyword
-# cases, the sandbox SYS_SECCOMP one is now covered by meta-browser's
-# fix-SYS_SECCOMP-redefinition.patch). If any turn out to still be needed, add
-# them back one at a time rather than reinstating the set - each one that is no
-# longer required is a patch that will fail to apply on the next uprev.
-
 # Don't use gold even when selected by default with ld-is-gold in DISTRO_FEATURES
 EXTRA_OEGN_GOLD = ""
 
@@ -118,6 +107,7 @@ INCLUDE_PATH_LIBCXX += " \
 
 # tcmalloc build is broken with clang++ and -mthumb
 ARM_INSTRUCTION_SET = "arm"
+
 # M151 turns -Wunsafe-buffer-usage on in places and is generally stricter than
 # 120. treat_warnings_as_errors is already false in webruntime-common.inc; keep
 # the narrowing demotion from the 120 recipe until a build shows it is
