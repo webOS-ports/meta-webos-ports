@@ -244,7 +244,18 @@ INSANE_SKIP:append:armv7a = " 32bit-time"
 # do_validate_ls2_acg complain. List them here so the check stays useful for
 # real mistakes. Drop an entry as soon as the providing service is added.
 #############################################################################
+WEBOS_LS2_CONF_VALIDATE_SKIP_NO_OUTBOUND = " \
+    com.webos.service.audiooutput \
+    com.webos.service.cec \
+    com.webos.service.peripheralmanager \
+    com.webos.service.nettools \
+    com.webos.booster \
+"
+
 WEBOS_LS2_CONF_VALIDATE_SKIP_GROUP = " \
+    esim.operation \
+    nfc.operation \
+    fingerprint.query \
     account.query \
     media.displayControl \
     media.displayInfo \
