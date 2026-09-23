@@ -35,6 +35,40 @@ wait_for() {
 
 # ---------------------------------------------------------------- binder nodes
 #
+# Does anything other than this script mount binderfs on this machine? On a
+# Halium port mount-android.sh does, out of android-system.service, which is
+# not part of this transaction - that is what the bounded wait below is for.
+# A port with no Halium side has no such unit, and then nothing mounts it at
+# all: the wait can only ever run out the clock. Measured on qemux86-64, this
+# service spent 60.3s of a 63.4s userspace boot waiting for a mount nobody was
+# going to make, and then failed - which is also why Waydroid could not start
+# there, on a kernel that has CONFIG_ANDROID_BINDERFS and could run it fine.
+binderfs_has_other_owner() {
+    for _f in /usr/lib/systemd/system/android-system.service \
+              /lib/systemd/system/android-system.service \
+              /etc/systemd/system/dev-binderfs.mount \
+              /run/systemd/system/dev-binderfs.mount \
+              /usr/lib/systemd/system/dev-binderfs.mount \
+              /lib/systemd/system/dev-binderfs.mount; do
+        [ -e "$_f" ] && return 0
+    done
+    grep -qs '[[:space:]]/dev/binderfs[[:space:]]' /etc/fstab && return 0
+    return 1
+}
+
+# Mount binderfs here. Deliberately the same shape as the block in
+# mount-android.sh - both guard on the mount being absent, so a Halium host
+# that runs both still ends up with exactly one binderfs, whichever got there
+# first. A kernel without CONFIG_ANDROID_BINDERFS has to name the nodes in
+# CONFIG_ANDROID_BINDER_DEVICES instead, and the caller reports that.
+mount_binderfs() {
+    mountpoint -q /dev/binderfs 2>/dev/null && return 0
+    grep -qw binder /proc/filesystems 2>/dev/null || return 1
+    mkdir -p /dev/binderfs || return 1
+    mount -t binder binder /dev/binderfs 2>/dev/null || return 1
+    log "mounted binderfs at /dev/binderfs"
+}
+
 # On a Halium host Waydroid will not share the host HAL's /dev/binder: it looks
 # for anbox-binder, puddlejumper or bonder and raises when none exist. It never
 # probes for them on that path, so something else has to create them.
@@ -50,8 +84,18 @@ alloc_binder_nodes() {
     done
     [ "$have_all" = 1 ] && { log "binder nodes already present"; return 0; }
 
-    wait_for /dev/binderfs/binder-control || {
-        log "no binder nodes and no binderfs after ${WAIT_SECS}s: the kernel must name them in CONFIG_ANDROID_BINDER_DEVICES"
+    # Wait only where there is something to wait for. Where the wait does run
+    # and still times out, fall through to mounting it here rather than giving
+    # up: a Halium host whose android-system.service failed is exactly the case
+    # that used to cost 60s and then leave Waydroid unable to start.
+    if binderfs_has_other_owner; then
+        wait_for /dev/binderfs/binder-control ||
+            log "binderfs did not appear after ${WAIT_SECS}s, mounting it here"
+    fi
+    mount_binderfs
+
+    [ -e /dev/binderfs/binder-control ] || {
+        log "no binder nodes and no binderfs: the kernel needs CONFIG_ANDROID_BINDERFS, or must name the nodes in CONFIG_ANDROID_BINDER_DEVICES"
         return 1
     }
 
@@ -266,6 +310,59 @@ disable_external_camera() {
     log "no external camera (ignoring the host's V4L2 nodes)"
 }
 
+# ------------------------------------------- SurfaceFlinger configstore props
+#
+# The container runs its own SurfaceFlinger, and SurfaceFlingerProperties falls
+# back to android.hardware.configstore@1.0::ISurfaceFlingerConfigs for every
+# value not set as a ro.surface_flinger.* sysprop. On a Halium host that
+# fallback cannot be satisfied, for two reasons that meet in the middle.
+#
+# Waydroid's patched /system/lib64/libhidlbase.so resolves HIDL for *system*
+# processes through /dev/host_hwbinder - the host HAL's binder domain - while
+# the container's own vendor HALs register on /dev/hwbinder (anbox-hwbinder)
+# through the unpatched VNDK libhidlbase. Measured on sargo, surfaceflinger's
+# service-manager handle (desc 0) sits in the host domain and it holds no refs
+# at all in anbox-hwbinder: it asks the *host* hwservicemanager for configstore,
+# never the container's, even though the container's own copy is registered and
+# idle.
+#
+# Host-side nothing answers. stubbed-services.d/<machine> replaces
+# vendor/bin/hw/android.hardware.configstore@1.1-service with a shell no-op
+# because the real one is seccomp-killed (SIGSYS) inside registerAsService()
+# and never finishes registering anyway. That stub was written when nothing
+# under Halium ran a SurfaceFlinger at all - Waydroid is the case it predates.
+#
+# So getService retries once a second forever, SurfaceFlinger never registers
+# with servicemanager, system_server blocks on it and is killed, and
+# sys.boot_completed is never set: "waydroid status" reports Session and
+# Container RUNNING with IP address UNKNOWN indefinitely.
+#
+# Setting the sysprops removes the fallback rather than trying to repair it.
+# These are the values ISurfaceFlingerConfigs can supply; the image already
+# provides vsync_event_phase_offset_ns, vsync_sf_event_phase_offset_ns,
+# max_frame_buffer_acquired_buffers and running_without_sync_framework, and a
+# ro. prop cannot be rewritten once set, so only the missing nine are added.
+# They carry the AOSP compiled-in defaults - what the clients would have used
+# had configstore ever answered.
+set_surfaceflinger_props() {
+    [ "${WAYDROID_SF_CONFIGSTORE_PROPS:-1}" = 1 ] || return 0
+    base=/var/lib/waydroid/waydroid_base.prop
+    [ -f "$base" ] || return 0
+    grep -q "^ro.surface_flinger.use_context_priority" "$base" && return 0
+    cat >> "$base" <<'EOF'
+ro.surface_flinger.use_context_priority=true
+ro.surface_flinger.has_wide_color_display=false
+ro.surface_flinger.has_HDR_display=false
+ro.surface_flinger.present_time_offset_from_vsync_ns=0
+ro.surface_flinger.force_hwc_copy_for_virtual_displays=false
+ro.surface_flinger.max_virtual_display_dimension=4096
+ro.surface_flinger.use_vr_flinger=false
+ro.surface_flinger.start_graphics_allocator_service=false
+ro.surface_flinger.primary_display_orientation=ORIENTATION_0
+EOF
+    log "set SurfaceFlinger sysprops (no configstore fallback)"
+}
+
 # ------------------------------------------------ refresh container config
 #
 # The LXC configuration under /var/lib/waydroid/lxc is generated once, at
@@ -289,12 +386,52 @@ refresh_container_config() {
         log "refreshed the container configuration"
 }
 
+# ------------------------------------------------ namespaces the kernel lacks
+#
+# LXC clones a fresh namespace of every type unless told to keep the host's.
+# A kernel built without one of them makes that clone fail outright:
+#
+#   lxc-start: waydroid: start.c: lxc_spawn: Invalid argument -
+#       Failed to clone a new set of namespaces
+#
+# and Waydroid reports "container failed to start". MediaTek GKI kernels leave
+# CONFIG_IPC_NS and CONFIG_USER_NS out on purpose - enabling them breaks the
+# stock vendor modules' KMI - so the Minimal Phone MP01 hit this on every
+# session. The Android container already keeps both for the same reason
+# (android-system's lxc-config).
+#
+# Derived from /proc/self/ns rather than listed per device, and written after
+# refresh_container_config, which regenerates the config from scratch.
+keep_missing_namespaces() {
+    cfg=/var/lib/waydroid/lxc/waydroid/config
+    [ -f "$cfg" ] || return 0
+    keep=""
+    for ns in ipc user; do
+        [ -e "/proc/self/ns/$ns" ] || keep="$keep $ns"
+    done
+    sed -i '/^lxc\.namespace\.keep[[:space:]]*=/d' "$cfg" || return 1
+    [ -n "$keep" ] || return 0
+    echo "lxc.namespace.keep =$keep" >> "$cfg" || return 1
+    log "kernel lacks the$keep namespace(s); container keeps the host's"
+}
+
 rc=0
 alloc_binder_nodes  || rc=1
 bind_images         || rc=1
 copy_host_hal_libs  || rc=1
+disable_external_camera || rc=1
+
+# refresh_container_config runs "waydroid upgrade -o", which regenerates
+# waydroid_base.prop from scratch. Every append below therefore has to happen
+# after it, not before: with the prop setters running first, the journal showed
+# ro.radio.noril and persist.waydroid.no_background_subsurface being written and
+# then discarded about a second later in the same pass, so on sargo neither had
+# ever actually reached the container - grep of the generated base prop came
+# back empty on a fully booted device.
+refresh_container_config || rc=1
+keep_missing_namespaces || rc=1
+
 set_no_ril          || rc=1
 set_no_background_subsurface || rc=1
-disable_external_camera || rc=1
-refresh_container_config || rc=1
+set_surfaceflinger_props || rc=1
 exit $rc
