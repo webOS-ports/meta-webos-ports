@@ -1,8 +1,7 @@
 SUMMARY = "Lightweight USB Media Transfer Protocol responder daemon"
 DESCRIPTION = "uMTP-Responder serves files over MTP through a FunctionFS or \
-GadgetFS USB gadget function. It replaces the libhybris-based mtp-server: it \
-has no Android dependencies, so the same MTP stack runs on Halium and \
-mainline devices alike."
+GadgetFS USB gadget function. It has no Android dependencies, so the same \
+MTP stack runs on Halium and mainline devices alike."
 HOMEPAGE = "https://github.com/viveris/uMTP-Responder"
 LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=d32239bcb673463ab874e80d47fae504"
