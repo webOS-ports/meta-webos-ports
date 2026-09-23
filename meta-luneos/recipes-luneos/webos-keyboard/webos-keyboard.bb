@@ -1,11 +1,12 @@
 SUMMARY = "webOS on-screen keyboard based on the Ubuntu Touch keyboard"
 HOMEPAGE = "https://launchpad.net/ubuntu-keyboard"
-LICENSE = "LGPL-3.0-only & BSD-3-Clause & Apache-2.0 & CC-BY-3.0"
+LICENSE = "LGPL-3.0-only & BSD-3-Clause & Apache-2.0 & CC-BY-3.0 & CC-BY-2.0"
 LIC_FILES_CHKSUM = " \
     file://COPYING;md5=6a6a8e020838b23406c81b19c1d46df6 \
     file://COPYING.BSD;md5=9b2310382ed07cfdae9c4953c8d29078 \
     file://COPYING.Apache-2.0;beginline=37;endline=212;md5=0c4ad33a0fa7b32f42fd54ed3710d7eb \
     file://COPYING.CC-BY;md5=c14dd4d440694f070fc6520d9c9a65eb \
+    file://plugins/CORPORA.md;md5=a6c8dc2742b00f66707c53ed5c95bb34 \
 "
 
 inherit qt6-qmake
@@ -22,8 +23,9 @@ DEPENDS = "maliit-framework-webos hunspell presage luna-service2 presage-native 
 RDEPENDS:${PN} += "maliit-framework-webos qtsvg-plugins qtmultimedia-qmlplugins"
 RRECOMMENDS:${PN} += "hunspell-dictionaries"
 
-SRCREV = "a95802ec9e11b8334147111bfeff98e9fad85e78"
+SRCREV = "989d2f2321219cfbc624cd7e22c3533b54a3180f"
 PV = "0.99.2+git"
+PR = "r1"
 
 # We own webos-keyboard, so fixes belong in its actual source history, not
 # as patches carried here - unlike presage or imemanager, which are genuinely
@@ -47,7 +49,7 @@ EXTRA_QMAKEVARS_PRE = "\
     CONFIG+=enable-hunspell \
 "
 
-INSANE_SKIP:${PN} += "libdir staticdev"
+INSANE_SKIP:${PN} += "libdir"
 INSANE_SKIP:${PN}-dbg += "libdir"
 
 FILES:${PN} += "\
