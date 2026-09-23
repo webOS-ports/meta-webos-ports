@@ -1,0 +1,229 @@
+#!/bin/sh
+# luneos-remote-wakelock - keep the device awake while a developer shell is
+# attached over ssh or adb.
+#
+# LuneOS devices suspend on battery once sleepd decides the system is idle. A
+# developer logged in over ssh or adb is not "activity" sleepd knows about, so
+# the device suspended under the session (and on mainline machines re-DHCPs on
+# resume). The primitive that vetoes a suspend between sleepd's decision and
+# the kernel write is a kernel wakelock in /sys/power/wake_lock: the nyx system
+# module's wakeup_count handshake refuses to suspend while one is active. This
+# script holds two of them:
+#
+#   luneos-ssh   while any sshd@<connection>.service instance is alive (sshd is
+#                socket-activated with Accept=yes on LuneOS, so every ssh, scp
+#                and sftp session is its own unit). The unit's drop-in calls
+#                "lock ssh %i" from ExecStartPre and "unlock ssh %i" from
+#                ExecStopPost, so the lock follows the session exactly. As a
+#                safety net for an sshd that is not socket-activated (or for
+#                dropbear) the watcher also holds it while any TCP connection
+#                to an ssh port is ESTABLISHED.
+#   luneos-adb   while adbd has a child process (every "adb shell", interactive
+#                or one-shot, is a child of adbd), or while adbd itself burned
+#                CPU in the last poll (an adb push/pull in progress). A cable
+#                to a charger or to an idle PC does not do either: an idle adbd
+#                blocks in the ffs endpoint read and accrues no ticks, so plain
+#                USB charging never takes the lock.
+#
+# Every lock is written with a 60 s timeout and re-armed by the watcher every
+# POLL_S while the reason for it persists, so a holder that dies without
+# unlocking (watcher killed, token left behind) costs at most a minute of
+# wakefulness. Tokens live in /run, which is empty after every boot, like the
+# kernel's wakelock table.
+#
+# Usage:
+#   luneos-remote-wakelock lock   <class> <token>   take a lock for <token>
+#   luneos-remote-wakelock unlock <class> <token>   drop it; release the class
+#                                                   when no token is left
+#   luneos-remote-wakelock watch                    poll loop (the service)
+#   luneos-remote-wakelock release                  drop every lock we hold
+#   luneos-remote-wakelock status                   print what is held and why
+#
+# Exits 0 without doing anything on a kernel without /sys/power/wake_lock
+# (CONFIG_PM_WAKELOCKS unset, e.g. mido): there is nothing to hold there, and
+# sleepd's own wakelock API is a no-op on such a kernel as well.
+
+# The LUNEOS_REMOTE_WAKELOCK_* environment overrides exist for testing the
+# script off-device.
+SYSFS_POWER=${LUNEOS_REMOTE_WAKELOCK_SYSFS:-/sys/power}
+WAKE_LOCK=$SYSFS_POWER/wake_lock
+WAKE_UNLOCK=$SYSFS_POWER/wake_unlock
+RUNDIR=${LUNEOS_REMOTE_WAKELOCK_RUNDIR:-/run/luneos-remote-wakelock}
+PREFIX=luneos-
+
+# Seconds between polls, and the kernel-side timeout each lock is armed with.
+# The timeout must comfortably exceed the poll interval.
+POLL_S=5
+TIMEOUT_S=60
+# Local TCP ports that count as ssh for the safety net.
+SSH_PORTS="22"
+# adbd CPU ticks (1/100 s) per poll above which it counts as transferring.
+ADB_BUSY_TICKS=2
+
+CONF=${LUNEOS_REMOTE_WAKELOCK_CONF:-/etc/default/luneos-remote-wakelock}
+[ -r "$CONF" ] && . "$CONF"
+
+cmd=$1
+case "$cmd" in
+    lock|unlock)
+        # Called from a socket-activated sshd@ unit: its stdin/stdout/stderr
+        # ARE the client's TCP connection (StandardInput=socket, the rest
+        # inherit). Anything written there corrupts the ssh handshake.
+        exec </dev/null >/dev/null 2>&1
+        ;;
+esac
+
+[ -w "$WAKE_LOCK" ] && [ -w "$WAKE_UNLOCK" ] || exit 0
+
+log() {
+    logger -t luneos-remote-wakelock -p daemon.info -- "$*" 2>/dev/null || :
+}
+
+# ---- kernel side -----------------------------------------------------------
+
+kernel_lock() {
+    # "<name> <timeout_ns>"; re-arming an active timed lock extends its expiry.
+    echo "$PREFIX$1 ${TIMEOUT_S}000000000" > "$WAKE_LOCK" 2>/dev/null
+}
+
+kernel_unlock() {
+    # EINVAL for a name the kernel never saw (or already expired); harmless.
+    echo "$PREFIX$1" > "$WAKE_UNLOCK" 2>/dev/null
+}
+
+# $RUNDIR/held/<class> exists while we believe the kernel lock is held, so
+# transitions can be logged and a class is only unlocked once.
+hold() {
+    kernel_lock "$1" || return 1
+    if [ ! -e "$RUNDIR/held/$1" ]; then
+        : > "$RUNDIR/held/$1"
+        log "holding $PREFIX$1 ($2)"
+    fi
+}
+
+drop() {
+    if [ -e "$RUNDIR/held/$1" ]; then
+        rm -f "$RUNDIR/held/$1"
+        kernel_unlock "$1"
+        log "released $PREFIX$1 ($2)"
+    fi
+}
+
+# ---- the reasons -----------------------------------------------------------
+
+# Tokens deposited by the sshd@.service drop-in, dropped once their unit is
+# gone (ExecStopPost normally removes them; this covers a unit that never got
+# there). "activating" counts: our own ExecStartPre runs in that state.
+ssh_tokens_alive() {
+    alive=1
+    for t in "$RUNDIR"/ssh/*; do
+        [ -e "$t" ] || continue
+        case $(systemctl show -p ActiveState --value "sshd@${t##*/}.service" 2>/dev/null) in
+            active|activating|deactivating|reloading) alive=0 ;;
+            *) rm -f "$t" ;;
+        esac
+    done
+    return $alive
+}
+
+# Any ESTABLISHED (st 01) TCP connection whose local port is an ssh port.
+# sshd.socket listens dual-stack, so IPv4 sessions show up in tcp6 too.
+ssh_tcp_established() {
+    for p in $SSH_PORTS; do
+        awk -v port=":$(printf '%04X' "$p")" \
+            'NR > 1 && $4 == "01" && substr($2, length($2) - 4) == port { found = 1 }
+             END { exit !found }' /proc/net/tcp /proc/net/tcp6 2>/dev/null && return 0
+    done
+    return 1
+}
+
+adb_pid=
+adb_ticks=
+
+# Sets adb_reason when adbd is serving somebody; empty otherwise.
+adb_in_use() {
+    adb_reason=
+    if [ -z "$adb_pid" ] || [ "$(cat "/proc/$adb_pid/comm" 2>/dev/null)" != adbd ]; then
+        adb_pid=$(pgrep -o -x adbd 2>/dev/null)
+        adb_ticks=
+        [ -n "$adb_pid" ] || return 1
+    fi
+    if pgrep -P "$adb_pid" >/dev/null 2>&1; then
+        adb_reason="adb shell attached"
+    fi
+    # utime+stime of the whole process; adbd's comm has no spaces, so the
+    # fields are where they should be.
+    ticks=$(awk '{ print $14 + $15 }' "/proc/$adb_pid/stat" 2>/dev/null)
+    if [ -n "$ticks" ] && [ -n "$adb_ticks" ] && [ $((ticks - adb_ticks)) -ge "$ADB_BUSY_TICKS" ]; then
+        adb_reason="${adb_reason:-adb transfer in progress}"
+    fi
+    adb_ticks=$ticks
+    [ -n "$adb_reason" ]
+}
+
+evaluate() {
+    if ssh_tokens_alive; then
+        hold ssh "ssh session"
+    elif ssh_tcp_established; then
+        hold ssh "tcp connection to port $SSH_PORTS"
+    else
+        drop ssh "no ssh session"
+    fi
+
+    if adb_in_use; then
+        hold adb "$adb_reason"
+    else
+        drop adb "adbd idle"
+    fi
+}
+
+# ---- commands --------------------------------------------------------------
+
+mkdir -p "$RUNDIR/held" "$RUNDIR/ssh"
+exec 9> "$RUNDIR/lock"
+
+case "$cmd" in
+    lock)
+        [ -n "$3" ] || exit 2
+        flock 9
+        mkdir -p "$RUNDIR/$2"
+        : > "$RUNDIR/$2/$3"
+        hold "$2" "$2 $3"
+        ;;
+    unlock)
+        [ -n "$3" ] || exit 2
+        flock 9
+        rm -f "$RUNDIR/$2/$3"
+        # rmdir-style emptiness test without ls: any entry left?
+        for t in "$RUNDIR/$2"/*; do
+            [ -e "$t" ] && exit 0
+        done
+        drop "$2" "$2 $3 gone"
+        ;;
+    watch)
+        log "watching for ssh and adb sessions every ${POLL_S}s (lock timeout ${TIMEOUT_S}s)"
+        while :; do
+            flock 9
+            evaluate
+            flock -u 9
+            sleep "$POLL_S"
+        done
+        ;;
+    release)
+        flock 9
+        for c in ssh adb; do drop "$c" "released"; done
+        ;;
+    status)
+        printf 'kernel wakelocks: %s\n' "$(cat "$WAKE_LOCK")"
+        for c in ssh adb; do
+            [ -e "$RUNDIR/held/$c" ] && printf 'held: %s%s\n' "$PREFIX" "$c"
+        done
+        for t in "$RUNDIR"/ssh/*; do
+            [ -e "$t" ] && printf 'ssh token: %s\n' "${t##*/}"
+        done
+        ;;
+    *)
+        echo "usage: $0 lock|unlock <class> <token> | watch | release | status" >&2
+        exit 2
+        ;;
+esac
