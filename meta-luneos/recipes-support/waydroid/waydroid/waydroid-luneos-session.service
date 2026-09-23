@@ -2,6 +2,32 @@
 Description=Waydroid session for the LuneOS compositor
 After=waydroid-container.service surface-manager.service
 Requires=waydroid-container.service
+# Restart with the compositor.
+#
+# The Wayland socket reaches the container as an inode-level bind mount, written
+# into the LXC config at session start:
+#
+#   lxc.mount.entry = /tmp/xdg/wayland-0 run/xdg/wayland-0 none rbind,create=file
+#
+# so it pins one inode rather than a path. When surface-manager-daemon restarts
+# it creates a fresh /tmp/xdg/wayland-0 and the container keeps the previous,
+# unlistened one. Nothing inside recovers: hwcomposer logs "Couldn't open
+# Wayland display" and exits 1, init respawns it forever, SurfaceFlinger never
+# starts and Android never reaches sys.boot_completed - "waydroid status" sits
+# at Session/Container RUNNING with IP address UNKNOWN. Measured on sargo, where
+# the daemon's main process started at 20:11:33, after the session had bind
+# mounted the 20:09 socket, and the container then churned ~550 pids per 25s for
+# hours.
+#
+# Ordering alone is already right and is not the problem: surface-manager.service
+# is a oneshot whose ExecStart is a blocking "systemctl start
+# surface-manager-daemon.service", and the daemon is Type=notify, so After= on
+# the wrapper does wait for a listening socket. Only a later replacement needs
+# handling. PartOf= gets that - stop/restart of the daemon propagates here - and
+# because this unit's ExecStart is "waydroid session start", which owns the
+# container, restarting it tears the container down and rebuilds config_session
+# against whatever socket is current.
+PartOf=surface-manager-daemon.service
 # Only meaningful once "waydroid init" has produced a config.
 ConditionPathExists=/var/lib/waydroid/waydroid.cfg
 
