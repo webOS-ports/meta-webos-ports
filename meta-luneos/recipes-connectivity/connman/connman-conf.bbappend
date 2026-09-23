@@ -35,7 +35,7 @@ do_install:append() {
 # The list is prefix matched, and it replaces the built-in default rather than
 # extending it, so this appends to what main.conf already sets.
 do_install:append:halium() {
-    sed -i 's/^\(NetworkInterfaceBlacklist = .*\)$/\1,wlan1,p2p0/' \
+    sed -i 's/^\(NetworkInterfaceBlacklist = .*\)$/\1,wlan1,p2p0,aware_nmi,p2p-dev,p2p/' \
         ${D}${sysconfdir}/connman/main.conf
 }
 
@@ -64,11 +64,20 @@ do_install:append:halium() {
 # exactly rather than the ccmni prefix: ccmni0/ccmni1 are the actual cellular
 # data interfaces the modem stack uses and must stay usable.
 #
-# mindphone (MT6739) is the only MTK machine this layer builds today, so this
-# is scoped to it directly rather than to a SoC-family override that does not
-# exist yet. If a second MTK device shows up, promote this to a MACHINEOVERRIDES
-# family override (:mtk or similar) the way :halium already works above.
+# The same happens on the MP01 (MT6789): connman's stop hangs in ccmni_close()
+# holding RTNL, wpa_supplicant queues behind it in nl80211_pre_doit(), neither
+# dies to SIGKILL, and every shutdown sits through ~80s of stop timeouts before
+# systemd-shutdown gets to reboot.
+#
+# Two MTK machines now, scoped per machine because no SoC-family override
+# exists yet. A third should promote this to a MACHINEOVERRIDES family override
+# (:mtk or similar) the way :halium already works above.
 do_install:append:mindphone() {
+    sed -i 's/^\(NetworkInterfaceBlacklist = .*\)$/\1,ccmni-lan/' \
+        ${D}${sysconfdir}/connman/main.conf
+}
+
+do_install:append:mp01() {
     sed -i 's/^\(NetworkInterfaceBlacklist = .*\)$/\1,ccmni-lan/' \
         ${D}${sysconfdir}/connman/main.conf
 }

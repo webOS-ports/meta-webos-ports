@@ -13,6 +13,10 @@ SRC_URI += " \
     file://connman-vpn.service.d/luneos-caps.conf \
 "
 
+SRC_URI += "file://0005-wispr-treat-HTTP-204-as-a-successful-online-check.patch"
+
+SRC_URI += "file://0006-service-expose-the-access-point-behind-a-WiFi-service.patch"
+
 # See connman-vpn.service.d/luneos-caps.conf for why: upstream's
 # CapabilityBoundingSet on connman-vpn.service is missing CAP_SYS_ADMIN and
 # CAP_DAC_OVERRIDE, which the l2tp plugin's client-side pppd needs to open
