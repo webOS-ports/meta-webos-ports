@@ -267,68 +267,68 @@ LICENSE_rimraf-2.2.6 = "MIT"
 LICENSE_semver-2.2.1 = "ISC"
 LICENSE_sigmund-1.0.0 = "ISC"
 LICENSE_sntp-0.2.4 = "BSD-3-Clause"
-LICENSE_tar-0.1.19 = "ISC & MIT"
-LICENSE_tough-cookie-0.12.1 = "CC0-1.0 & (MPL-1.1 | GPL-2.0-only | LGPL-2.1-only) & MIT"
+LICENSE_tar-0.1.19 = "ISC AND MIT"
+LICENSE_tough-cookie-0.12.1 = "CC0-1.0 AND (MPL-1.1 OR GPL-2.0-only OR LGPL-2.1-only) AND MIT"
 LICENSE_tunnel-agent-0.3.0 = "Apache-2.0"
 LICENSE_which-1.0.5 = "MIT"
 
 ALL_LICENSES = "\
-${LICENSE_abbrev-1.0.5} & \
-${LICENSE_ansi-0.2.1} & \
-${LICENSE_asn1-0.1.11} & \
-${LICENSE_assert-plus-0.1.2} & \
-${LICENSE_async-0.2.10} & \
-${LICENSE_aws-sign2-0.5.0} & \
-${LICENSE_block-stream-0.0.7} & \
-${LICENSE_boom-0.4.2} & \
-${LICENSE_combined-stream-0.0.4} & \
-${LICENSE_cryptiles-0.2.2} & \
-${LICENSE_ctype-0.5.2} & \
-${LICENSE_delayed-stream-0.0.5} & \
-${LICENSE_forever-agent-0.5.2} & \
-${LICENSE_form-data-0.1.2} & \
-${LICENSE_fstream-0.1.25} & \
-${LICENSE_glob-3.2.9} & \
-${LICENSE_graceful-fs-1.2.3} & \
-${LICENSE_graceful-fs-2.0.3} & \
-${LICENSE_grunt-0.4.5} & \
-${LICENSE_grunt-contrib-concat-0.5.1} & \
-${LICENSE_grunt-contrib-jshint-0.10.0} & \
-${LICENSE_grunt-contrib-nodeunit-0.4.1} & \
-${LICENSE_grunt-contrib-qunit-0.7.0} & \
-${LICENSE_grunt-contrib-uglify-0.5.0} & \
-${LICENSE_grunt-contrib-watch-0.6.1} & \
-${LICENSE_hawk-1.0.0} & \
-${LICENSE_hoek-0.9.1} & \
-${LICENSE_http-signature-0.10.0} & \
-${LICENSE_inherits-2.0.1} & \
-${LICENSE_json-stringify-safe-5.0.0} & \
-${LICENSE_lru-cache-2.5.0} & \
-${LICENSE_mime-1.2.11} & \
-${LICENSE_minimatch-0.2.14} & \
-${LICENSE_mkdirp-0.3.5} & \
-${LICENSE_mkdirp-0.4.0} & \
-${LICENSE_node-uuid-1.4.1} & \
-${LICENSE_nopt-2.2.1} & \
-${LICENSE_npmlog-0.0.6} & \
-${LICENSE_oauth-sign-0.3.0} & \
-${LICENSE_osenv-0.0.3} & \
-${LICENSE_punycode-1.2.4} & \
-${LICENSE_qs-0.6.6} & \
-${LICENSE_qunitjs-1.18.0} & \
-${LICENSE_request-2.34.0} & \
-${LICENSE_rimraf-2.2.6} & \
-${LICENSE_semver-2.2.1} & \
-${LICENSE_sigmund-1.0.0} & \
-${LICENSE_sntp-0.2.4} & \
-${LICENSE_tar-0.1.19} & \
-${LICENSE_tough-cookie-0.12.1} & \
-${LICENSE_tunnel-agent-0.3.0} & \
+${LICENSE_abbrev-1.0.5} AND \
+${LICENSE_ansi-0.2.1} AND \
+${LICENSE_asn1-0.1.11} AND \
+${LICENSE_assert-plus-0.1.2} AND \
+${LICENSE_async-0.2.10} AND \
+${LICENSE_aws-sign2-0.5.0} AND \
+${LICENSE_block-stream-0.0.7} AND \
+${LICENSE_boom-0.4.2} AND \
+${LICENSE_combined-stream-0.0.4} AND \
+${LICENSE_cryptiles-0.2.2} AND \
+${LICENSE_ctype-0.5.2} AND \
+${LICENSE_delayed-stream-0.0.5} AND \
+${LICENSE_forever-agent-0.5.2} AND \
+${LICENSE_form-data-0.1.2} AND \
+${LICENSE_fstream-0.1.25} AND \
+${LICENSE_glob-3.2.9} AND \
+${LICENSE_graceful-fs-1.2.3} AND \
+${LICENSE_graceful-fs-2.0.3} AND \
+${LICENSE_grunt-0.4.5} AND \
+${LICENSE_grunt-contrib-concat-0.5.1} AND \
+${LICENSE_grunt-contrib-jshint-0.10.0} AND \
+${LICENSE_grunt-contrib-nodeunit-0.4.1} AND \
+${LICENSE_grunt-contrib-qunit-0.7.0} AND \
+${LICENSE_grunt-contrib-uglify-0.5.0} AND \
+${LICENSE_grunt-contrib-watch-0.6.1} AND \
+${LICENSE_hawk-1.0.0} AND \
+${LICENSE_hoek-0.9.1} AND \
+${LICENSE_http-signature-0.10.0} AND \
+${LICENSE_inherits-2.0.1} AND \
+${LICENSE_json-stringify-safe-5.0.0} AND \
+${LICENSE_lru-cache-2.5.0} AND \
+${LICENSE_mime-1.2.11} AND \
+${LICENSE_minimatch-0.2.14} AND \
+${LICENSE_mkdirp-0.3.5} AND \
+${LICENSE_mkdirp-0.4.0} AND \
+${LICENSE_node-uuid-1.4.1} AND \
+${LICENSE_nopt-2.2.1} AND \
+${LICENSE_npmlog-0.0.6} AND \
+${LICENSE_oauth-sign-0.3.0} AND \
+${LICENSE_osenv-0.0.3} AND \
+${LICENSE_punycode-1.2.4} AND \
+${LICENSE_qs-0.6.6} AND \
+${LICENSE_qunitjs-1.18.0} AND \
+${LICENSE_request-2.34.0} AND \
+${LICENSE_rimraf-2.2.6} AND \
+${LICENSE_semver-2.2.1} AND \
+${LICENSE_sigmund-1.0.0} AND \
+${LICENSE_sntp-0.2.4} AND \
+${LICENSE_tar-0.1.19} AND \
+${LICENSE_tough-cookie-0.12.1} AND \
+${LICENSE_tunnel-agent-0.3.0} AND \
 ${LICENSE_which-1.0.5} \
 "
 
 # Remove the duplicates
-LICENSE = "${@ ' & '.join(sorted(set('${ALL_LICENSES}'.strip().split(' & ')))) }"
+LICENSE = "${@ ' AND '.join(sorted(set('${ALL_LICENSES}'.strip().split(' AND ')))) }"
 
 LIC_FILES_CHKSUM = "\
 file://${UNPACKDIR}/${BPN}/abbrev_1.0.5/package/LICENSE;md5=b3245a33f2d41818f14c489bd33bc4a8 \
