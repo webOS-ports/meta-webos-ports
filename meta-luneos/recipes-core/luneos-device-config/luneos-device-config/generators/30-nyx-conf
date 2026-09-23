@@ -101,34 +101,180 @@ set_derived module.keys       paths "${keydevs:-}" \
 set_derived module.touchpanel path  "${touchscreen:-}" \
             "${deviceinfo_touchscreen_by_name:-}${deviceinfo_touchscreen_device:-}"
 
-# The USB charger supply is derived here. nyx's own fallback walks
-# /sys/class/power_supply for type == "USB" exactly, and on a modern Qualcomm
-# charger that finds pc_port - a secondary input that never reports online -
-# while the supply that actually charges is the one named "usb", whose type is
-# dynamic (USB, USB_PD, USB_DCP, ... after whatever was negotiated). Measured
-# on sargo: batteryd broadcast USBConnected:false while the battery charged at
-# 2.4A, so DisplayManager thought it was on battery and turned the lock screen
-# off after five seconds on the cable. Prefer the conventional "usb" node,
-# otherwise anything whose type starts with USB; empty still falls through to
-# nyx's own walk.
+# The camera flash / torch LED. nyx's nyxLedTorch module drives
+# <torch_path>/brightness; find the /sys/class/leds node whose name marks it a
+# torch or flash. Prefer "torch" over "flash": a device exposing both (qcom
+# qpnp-flash) uses the torch node for steady light, and the flash node is the
+# momentary strobe. Empty falls through to the module's own identical search.
+torchled=
+for _d in /sys/class/leds/*torch*; do
+    [ -d "$_d" ] && { torchled=$_d; break; }
+done
+if [ -z "$torchled" ]; then
+    for _d in /sys/class/leds/*flash*; do
+        [ -d "$_d" ] && { torchled=$_d; break; }
+    done
+fi
+set_value module.led torch_path "${deviceinfo_torch_sysfs_path:-$torchled}"
+
+# The power supplies, derived together because telling them apart takes the
+# same information.
+#
+# Not every battery the kernel lists belongs to the device. A PinePhone (Pro)
+# docked in its keyboard has two supplies of type "Battery": its own and the
+# keyboard's, which charges the phone over USB. nyx used to take whichever the
+# directory walk returned first, so which cell the shell displayed came down to
+# filesystem order.
+#
+# This is a table, not a heuristic. A battery is an accessory's because we know
+# the driver behind it; anything unrecognised is left alone for the tier 1 pin
+# to settle, because there is no property of a power_supply that says "this one
+# powers the device" and guessing would be worse than nyx's own fallback.
+accessory_battery_role() {
+    case "${1##*/}" in
+        ip5xxx-battery) echo keyboard ;;   # PinePhone (Pro) keyboard, IP5209
+        *)              echo "" ;;
+    esac
+}
+
+# The sysfs device a power_supply hangs off. Supplies belonging to one piece of
+# hardware share it, which is how the keyboard's boost converter is recognised
+# as part of the keyboard rather than as this device's charger.
+supply_device() {
+    _real=$(readlink -f "$1" 2>/dev/null) || return 1
+    case "$_real" in
+        */power_supply/*) echo "${_real%/power_supply/*}" ;;
+        *)                return 1 ;;
+    esac
+}
+
+mainbat=
+extrabats=
+accessory_devices=
+ambiguous=0
+
+for _d in /sys/class/power_supply/*; do
+    [ -r "$_d/type" ] || continue
+    [ "$(cat "$_d/type" 2>/dev/null)" = "Battery" ] || continue
+
+    _role=$(accessory_battery_role "$_d")
+
+    if [ -n "$_role" ]; then
+        extrabats="${extrabats}${_role}:${_d};"
+        if _dev=$(supply_device "$_d"); then
+            accessory_devices="${accessory_devices}${_dev} "
+        fi
+    elif [ -z "$mainbat" ]; then
+        mainbat=$_d
+    else
+        # Two batteries that both look like the device's own. Nothing here can
+        # say which one powers it, so say nothing.
+        ambiguous=1
+    fi
+done
+
+if [ "$ambiguous" = 1 ]; then
+    echo "luneos-device-config: WARNING: more than one battery that is not a known accessory;" \
+         "set deviceinfo_battery_sysfs_path to pin the primary"
+    mainbat=
+fi
+
+# The USB charger supply. nyx's own fallback walks /sys/class/power_supply for
+# type == "USB" exactly, and on a modern Qualcomm charger that finds pc_port -
+# a secondary input that never reports online - while the supply that actually
+# charges is the one named "usb", whose type is dynamic (USB, USB_PD, USB_DCP,
+# ... after whatever was negotiated). Measured on sargo: batteryd broadcast
+# USBConnected:false while the battery charged at 2.4A, so DisplayManager
+# thought it was on battery and turned the lock screen off after five seconds
+# on the cable. Prefer the conventional "usb" node, otherwise anything whose
+# type starts with USB; empty still falls through to nyx's own walk.
+#
+# An accessory's supplies are skipped. The keyboard's boost converter is a type
+# USB supply as well, and it is the phone's own charger input that says whether
+# the phone is charging - "the keyboard is producing 5V" is not the same fact.
+#
+# A supply must also expose "online" to be worth naming. nyx decides that a
+# charger is attached by reading <usb_sysfs_path>/online and nothing else, so a
+# node without it reports "no charger" whatever is plugged in - a worse answer
+# than nyx's own walk, because it is a confident one. The PinePhone Pro is the
+# board that shows it: the phone's charger input, rk818-usb, has present,
+# health and input_current_limit but no online at all, while the fusb302 TCPM's
+# tcpm-source-psy-4-0022 carries online, usb_type and current_max - exactly the
+# three attributes the charger module reads. Sorting reached rk818-usb first
+# and the cable was never detected. Requiring online only ever skips a node
+# that could not have worked.
+usb_supply_is_usable() {
+    [ -r "$1/online" ]
+}
+
 usbpsy=
-if [ -r /sys/class/power_supply/usb/type ]; then
+if [ -r /sys/class/power_supply/usb/type ] &&
+   usb_supply_is_usable /sys/class/power_supply/usb; then
     usbpsy=/sys/class/power_supply/usb
 else
     for _d in /sys/class/power_supply/*; do
+        if [ -n "$accessory_devices" ] && _dev=$(supply_device "$_d"); then
+            case " $accessory_devices " in
+                *" $_dev "*) continue ;;
+            esac
+        fi
         case "$(cat "$_d/type" 2>/dev/null)" in
-            USB*) usbpsy=$_d; break ;;
+            USB*) usb_supply_is_usable "$_d" || continue
+                  usbpsy=$_d; break ;;
         esac
     done
 fi
 
-# Battery and AC stay tier 1 only: nyx's walk for those is right wherever we
-# have looked, and the pins exist for boards exposing more than one supply of
-# a type, where the walk picks whichever the filesystem happens to return
-# first. The tier 1 pin wins over the derived USB value for the same reason.
-set_value module.battery sysfs_path     "${deviceinfo_battery_sysfs_path:-}"
-set_value module.charger usb_sysfs_path "${deviceinfo_charger_usb_sysfs_path:-$usbpsy}"
-set_value module.charger ac_sysfs_path  "${deviceinfo_charger_ac_sysfs_path:-}"
+# The second half of the charger input, on Qualcomm smb2/smb5 parts.
+#
+# "usb" and "pc_port" are not two chargers, they are one signal split in two by
+# the driver, and the two getters are exact mirror images of each other. Both
+# start from smblib_get_prop_usb_online(); then, for a plain SDP source
+# (typec_mode SOURCE_DEFAULT or a micro-USB connector, with real_charger_type
+# USB), qpnp-smb5.c's "usb" getter forces online to 0 while its "pc_port"
+# getter forces it to 1, and for anything else - DCP, CDP, PD - the reverse.
+# Measured on sargo attached to a PC: usb/online 0, pc_port/online 1,
+# typec_mode "Source attached (default current)".
+#
+# So neither node alone can answer "is a charger attached". The kernel does not
+# try: qpnp-fg-gen3.c computes online = usb || pc_port || dc. nyx has the same
+# OR - is_charging = usb_online || ac_online || touch_online || wireless_online
+# in charger.c - so wiring both slots gives the right answer for both source
+# types, with no dependence on which one happened to be live at module init.
+#
+# The earlier revision of this file pinned "usb" alone and said pc_port "never
+# reports online". That was measured on a wall charger, where it is true; on a
+# PC it is exactly backwards, and the result was chargerStatusQuery answering
+# Charging:false with the cable in and the battery taking current.
+#
+# The slot each node goes in is not arbitrary. pc_port is the SDP half, so it
+# is the one that means "plugged into a computer" and belongs in usb_sysfs_path:
+# that way chargerStatusQuery reports USBConnected true and USBName "pc" on a
+# PC, and "wall" on a charger. Verified both ways round on sargo - swapping
+# them keeps Charging correct but inverts USBConnected and USBName.
+sdppsy=
+if [ -n "$usbpsy" ] && [ "$usbpsy" != /sys/class/power_supply/pc_port ] \
+   && [ -r /sys/class/power_supply/pc_port/online ]; then
+    sdppsy=/sys/class/power_supply/pc_port
+fi
+
+# With both halves present the SDP node takes the USB slot and the negotiated
+# one takes the AC slot; with only one, it stays where it was. An "ac" default
+# of empty leaves nyx to walk for type Mains, which on these boards finds "bms"
+# or "main" - supplies with no online attribute at all, so nothing is lost.
+if [ -n "$sdppsy" ]; then
+    acpsy=$usbpsy
+    usbpsy=$sdppsy
+else
+    acpsy=
+fi
+
+# The tier 1 pins win throughout: they exist for the boards where the
+# convention, or the table above, is wrong.
+set_value module.battery sysfs_path        "${deviceinfo_battery_sysfs_path:-$mainbat}"
+set_value module.battery extra_sysfs_paths "${deviceinfo_battery_extra_sysfs_paths:-$extrabats}"
+set_value module.charger usb_sysfs_path    "${deviceinfo_charger_usb_sysfs_path:-$usbpsy}"
+set_value module.charger ac_sysfs_path     "${deviceinfo_charger_ac_sysfs_path:-$acpsy}"
 
 # Nothing to say: drop the file so the caller does not bind a copy of the
 # original over the original.
