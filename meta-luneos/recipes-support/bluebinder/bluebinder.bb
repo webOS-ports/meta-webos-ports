@@ -27,6 +27,8 @@ SRC_URI:append:tissot-halium = " file://0002-service-load-after-wifi-module-load
 PV = "1.0.20"
 SRCREV = "c3e1b155e308f6df9c9a02dbd909a44e7319ab7d"
 
+CLEANBROKEN = "1"
+
 CFLAGS += "--sysroot=${RECIPE_SYSROOT} ${LDFLAGS}"
 
 SYSTEMD_PACKAGES = "${PN}"
