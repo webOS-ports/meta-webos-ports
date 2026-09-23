@@ -4,19 +4,19 @@ inherit webos_qt_global
 
 EXTENDPRAUTO:append = "webos121"
 
-# Remove LGPL3-only files
 python do_patch:append() {
-    bb.build.exec_func('remove_LGPL3', d)
-}
+    import glob
+    import os
 
-remove_LGPL3() {
-    rm -vf ${S}/src/plugins/platforms/andr*oid/extract.cpp
+    pattern = os.path.join(d.getVar("S"), "src/plugins/platforms/andr*oid/extract.cpp")
+    for path in glob.glob(pattern):
+        os.remove(path)
+        bb.note("removed LGPL3-only file %s" % path)
 }
 
 # Disable features we don't use in all webOS products
 # Needed in LuneOS
 #PACKAGECONFIG_DEFAULT:remove = "dbus"
-
 
 # Enable accessibility for qtquickcontrols
 PACKAGECONFIG:append = " accessibility"
@@ -120,6 +120,8 @@ SRC_URI:append = " file://9906-QWaylandDisplay-don-t-ignore-wayland-QT_IM_MODULE
 # QtWayland client and still expects QOpenGLTexture in QtGui, where it has not
 # lived since Qt 6.0. Only halium machines build it, so upstream never sees it.
 SRC_URI:append = " file://9907-libhybris-egl-server-take-QOpenGLTexture-from-QtOpenG.patch;minver=6.10.0"
+
+SRC_URI:append = " file://9908-wayland-egl-install-the-client-integration-private-headers.patch;minver=6.10.0"
 
 # FIXME: Patches below can be dropped once all qmake-dependent components are switched to cmake.
 # https://bugreports.qt.io/browse/WEBOSCI-66

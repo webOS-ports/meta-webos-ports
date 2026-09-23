@@ -1,0 +1,61 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sat, 12 Sep 2026 09:00:00 +0200
+Subject: [PATCH] gstreamer: stop the pipeline at end-of-media
+
+At natural end-of-stream QGstreamerMediaPlayer tells the application that
+playback has stopped:
+
+    mediaStatusChanged(QMediaPlayer::EndOfMedia);
+    stateChanged(QMediaPlayer::StoppedState);
+
+but nothing takes the underlying GstPlay pipeline out of GST_STATE_PLAYING.
+QGstreamerMediaPlayer::stop() issues gst_play_stop() for exactly that purpose;
+the EOS path never does. GstPlay's own EOS handling only updates its reported
+GstPlayState, it does not touch the playbin state either.
+
+The result is that a finished player keeps its audio sink open. With the
+PulseAudio sink that matters: pulsesink corks its stream only on a
+PLAYING->PAUSED transition, so the stream stays uncorked indefinitely even
+though QMediaPlayer::playbackState() reports StoppedState. PulseAudio's
+module-suspend-on-idle only suspends a sink that has no uncorked inputs, so the
+output sink can never be suspended and keeps rendering silence for as long as
+the player object lives.
+
+Measured on LuneOS (Qt 6.12.0, GStreamer 1.28.2, Pixel 3a): a QML MediaPlayer
+that plays one short boot chime and is then left alone held an uncorked
+PulseAudio stream for the entire lifetime of the compositor process. The audio
+sink stayed RUNNING and pulseaudio sat at 10.1% of a CPU core permanently;
+force-suspending the sink dropped it to 0.1%. On an untouched device the
+sink-input was still reported "Corked: no" 35 minutes after the clip had
+finished. Adding an explicit stop() from QML at EndOfMedia released it, which
+is what identified this path.
+
+Calling gst_play_stop() here makes the pipeline match the state that was just
+reported. Replay after EOS is unaffected: play() already resets position and
+media status when mediaStatus() == EndOfMedia and then calls gst_play_play(),
+which re-prepares a stopped GstPlay.
+
+Upstream-Status: Pending
+---
+ .../multimedia/gstreamer/common/qgstreamermediaplayer.cpp    | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+--- a/src/plugins/multimedia/gstreamer/common/qgstreamermediaplayer.cpp
++++ b/src/plugins/multimedia/gstreamer/common/qgstreamermediaplayer.cpp
+@@ -675,6 +675,16 @@
+             mediaStatusChanged(QMediaPlayer::EndOfMedia);
+             stateChanged(QMediaPlayer::StoppedState);
+             gstVideoOutput->setActive(false);
++
++            // We have just reported StoppedState, but neither GstPlay's EOS
++            // handling nor anything above takes the pipeline out of
++            // GST_STATE_PLAYING, so the audio sink stays open. With pulsesink
++            // the stream is then never corked - it corks only on a
++            // PLAYING->PAUSED transition - and module-suspend-on-idle can never
++            // suspend the output sink, which keeps rendering silence for as
++            // long as this player lives. Put the pipeline where the state we
++            // just reported says it is.
++            gst_play_stop(m_gstPlay.get());
+         }
+ 
+         return false;
