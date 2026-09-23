@@ -14,7 +14,7 @@ LIC_FILES_CHKSUM = " \
 VIRTUAL-RUNTIME_pdm-plugin ?= "pdm-plugin"
 
 DEPENDS = "glib-2.0 luna-service2 libpbnjson pmloglib udev libwebosi18n libusb gtest"
-RDEPENDS:${PN} = "fuse-utils hdparm gphoto2 gphotofs sdparm gptfdisk-sgdisk e2fsprogs-e2fsck e2fsprogs-tune2fs ntfs-3g ntfs-3g-ntfsprogs dosfstools simple-mtpfs lsof smartmontools"
+RDEPENDS:${PN} = "fuse-utils hdparm gphoto2 gphotofs sdparm e2fsprogs-e2fsck e2fsprogs-tune2fs ntfs-3g ntfs-3g-ntfsprogs dosfstools simple-mtpfs lsof smartmontools"
 
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_pdm-plugin}"
 
