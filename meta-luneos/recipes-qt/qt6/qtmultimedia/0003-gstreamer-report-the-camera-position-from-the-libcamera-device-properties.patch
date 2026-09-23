@@ -1,0 +1,48 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 15 Sep 2026 12:00:00 +0200
+Subject: [PATCH] gstreamer: report the camera position from the libcamera
+ device properties
+
+QGstreamerVideoDevices::findVideoInputs() fills in the description, the id and
+the isDefault flag of every camera it finds, but never touches
+QCameraDevicePrivate::position. Every camera therefore reports
+QCameraDevice::UnspecifiedPosition, and an application has no way to tell a
+front camera from a back one.
+
+libcamera does publish this. Its GStreamer element exposes the camera's
+Location property on the GstDevice:
+
+    camera-properties, api.libcamera.Location=(string)CameraLocationFront, ...
+    camera-properties, api.libcamera.Location=(string)CameraLocationBack, ...
+
+Map it onto QCameraDevice::Position. On a PinePhone Pro this makes the ov8858
+report FrontFace and the imx258 BackFace instead of both reporting
+UnspecifiedPosition, so a camera application's front/back switch can work.
+
+Devices that do not carry the property, including v4l2 ones, are unaffected and
+keep reporting UnspecifiedPosition.
+
+Upstream-Status: Pending
+---
+diff -ruN vd_a/src/plugins/multimedia/gstreamer/qgstreamervideodevices.cpp vd_b/src/plugins/multimedia/gstreamer/qgstreamervideodevices.cpp
+--- a/src/plugins/multimedia/gstreamer/qgstreamervideodevices.cpp
++++ b/src/plugins/multimedia/gstreamer/qgstreamervideodevices.cpp
+@@ -82,6 +82,18 @@
+             QGstStructureView view{ properties };
+             auto def = view["is-default"].toBool();
+             info->isDefault = def && *def;
++
++            /*
++             * libcamera publishes which way a camera faces as a device
++             * property. Without it every camera reports UnspecifiedPosition and
++             * an application cannot tell the front camera from the back one.
++             */
++            if (const char *location = view["api.libcamera.Location"].toString()) {
++                if (!qstrcmp(location, "CameraLocationFront"))
++                    info->position = QCameraDevice::FrontFace;
++                else if (!qstrcmp(location, "CameraLocationBack"))
++                    info->position = QCameraDevice::BackFace;
++            }
+         }
+ 
+         if (info->isDefault)
