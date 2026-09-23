@@ -9,7 +9,12 @@ DEPENDS = "glib-2.0 luna-prefs luna-service2 json-c nyx-lib libpbnjson sqlite3 p
 DEPENDS += "qtbase"
 
 PV = "3.0.0-4+git"
-SRCREV = "9d79c681cfe415f8076deaaf92e6bcb9c2ec2626"
+
+SRCREV = "a898e6313572cefe05f494f3f62b4f159dff0e1e"
+
+# PV carries no SRCREV, so a revision bump alone leaves PKGV untouched and opkg
+# sees no upgrade on the device. Bump PR on every SRCREV move.
+PR = "r2"
 
 # Don't uncomment until all of the do_*() tasks have been moved out of the recipe
 inherit webos_ports_fork_repo
