@@ -16,7 +16,7 @@ DEPENDS = "glib-2.0 luna-service2 pmloglib nlohmann-json"
 DEPENDS += "boost gstreamer1.0 gstreamer1.0-plugins-base gstreamer1.0-plugins-bad"
 
 WEBOS_VERSION = "1.0.0-17_255f198c5ee9a9ca5aec4445cd34d5c20086df9f"
-INC_PR = "r6"
+INC_PR = "r7"
 
 inherit webos_component
 inherit webos_cmake
@@ -27,7 +27,9 @@ inherit webos_daemon
 inherit features_check
 ANY_OF_DISTRO_FEATURES = "vulkan opengl"
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+    file://0001-sysbus-let-the-record-pipeline-reach-camera2.patch \
+"
 
 # Define machine
 PACKAGECONFIG[use-rpi] = "-DUSE_RPI:BOOL=True,-DUSE_RPI:BOOL=False,"
