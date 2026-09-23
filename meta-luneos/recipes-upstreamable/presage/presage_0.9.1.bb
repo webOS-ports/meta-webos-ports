@@ -64,3 +64,9 @@ FILES:${PN} += "\
 do_configure:prepend:class-target() {
    sed -i "s#\$(top_builddir)/src/tools/text2ngram#${STAGING_BINDIR_NATIVE}/text2ngram#g" ${S}/resources/Makefile.am
 }
+
+do_install:append:class-target() {
+    rm -f ${D}${datadir}/${BPN}/database_*.db
+    sed -i -e "s|${datadir}/${BPN}/database_en.db|${datadir}/maliit/plugins/org/luneos/lib/en/database_en.db|" \
+        ${D}${sysconfdir}/presage.xml
+}
