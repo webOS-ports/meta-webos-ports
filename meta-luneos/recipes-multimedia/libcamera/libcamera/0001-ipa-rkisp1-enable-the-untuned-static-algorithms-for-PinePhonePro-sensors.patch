@@ -1,0 +1,133 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 15 Sep 2026 14:00:00 +0200
+Subject: [PATCH] ipa: rkisp1: give the PinePhone Pro sensors a usable colour
+ pipeline
+
+The rkisp1 tuning files for the PinePhone Pro sensors were added in 2023 by
+commit 36435e2ae ("ipa: rkisp1: Add tuning files for PinephonePro sensors")
+and have only ever carried lens shading tables:
+
+    ov8858: Agc, Awb, LensShadingCorrection
+    imx258: Agc, Awb, BlackLevelCorrection, LensShadingCorrection
+
+libcamera's own generator, utils/tuning/rkisp1.py, emits a much longer list for
+any rkisp1 sensor, including several StaticModule entries that take fixed
+parameters rather than measured data and so need no calibration:
+
+    tuner.add([agc, awb, blc, ccm, color_processing, filter,
+               gamma_out, lsc, lux, wdr, compress])
+    gamma_out = StaticModule('GammaOutCorrection', {'gamma': 2.2})
+
+Enable those here. GammaOutCorrection matters most: with no output gamma the
+ISP hands out near-linear data and the preview is dark and flat. Measured on a
+PinePhone Pro front sensor, same white wall before and after:
+
+    before:  black floor  66   median  85   p99 105   range 33
+    after:   black floor 143   median 179   p99 201   range 45
+
+Also add colour correction matrices. No rkisp1 tuning file upstream contains a
+CCM - not one of the seven - so camera RGB reaches the display uncorrected and
+saturated colours come out muted and hue-shifted; a bright red renders as a
+dark orange. Proper matrices require a Macbeth chart, which does not exist for
+these sensors, so the ones here are borrowed from the closest same-vendor
+sensors that libcamera does ship measured data for: ov5647 (Raspberry Pi VC4
+tuning) for the ov8858, and imx219 for the imx258. A CCM corrects colour
+mixing, which is broadly similar across comparable colour filter arrays, so a
+same-vendor matrix is a large improvement over the identity matrix that applies
+today. It is explicitly an approximation, not a calibration: expect red to read
+as red rather than orange, but not colorimetric accuracy.
+
+Measured chroma energy on one scene: 3.18 with nothing, 9.75 with the CCM.
+
+ColorProcessing is enabled with saturation left at 1.0. Raising it to 1.5 was
+tried and reverted: a CCM already supplies saturation, so the two compound and
+a white wall picks up visible pink and green casts (chroma energy 16.68).
+
+Two things are deliberately NOT done here. WideDynamicRange and Compress made
+no measurable difference to brightness or range while slightly increasing
+chroma error. And the AWB is left as grey world: switching to the bayes
+algorithm needs a 'colourGains' curve, and unlike a CCM that curve encodes the
+sensor's absolute per-channel response - what white actually looks like on that
+silicon. Borrowing ov5647's produced a grossly wrong white point (mean V 65.6
+against a neutral 128, i.e. a solid green cast), so it must be measured rather
+than transplanted.
+
+While here, give the ov8858 camera sensor helper its black level, the same way
+commit 27e4d3fc3 did for the imx258. Without it the IPA logs on every open:
+
+    WARN RkISP1Blc blc.cpp:72 No black levels provided by camera sensor helper,
+                              please fix
+
+Upstream-Status: Pending
+---
+diff -ruN fin_a/src/ipa/libipa/camera_sensor_helper.cpp fin_b/src/ipa/libipa/camera_sensor_helper.cpp
+--- a/src/ipa/libipa/camera_sensor_helper.cpp
++++ b/src/ipa/libipa/camera_sensor_helper.cpp
+@@ -758,6 +758,8 @@
+ public:
+ 	CameraSensorHelperOv8858()
+ 	{
++		/* From datasheet: 0x40 at 10bits. */
++		blackLevel_ = 4096;
+ 		/*
+ 		 * \todo Validate the selected 1/128 step value as it differs
+ 		 * from what the sensor manual describes.
+diff -ruN fin_a/src/ipa/rkisp1/data/imx258.yaml fin_b/src/ipa/rkisp1/data/imx258.yaml
+--- a/src/ipa/rkisp1/data/imx258.yaml
++++ b/src/ipa/rkisp1/data/imx258.yaml
+@@ -5,6 +5,25 @@
+ algorithms:
+   - Agc:
+   - Awb:
++  - Ccm:
++      ccms:
++        - ct: 2860
++          ccm: [ 2.121, -0.525, -0.596, -0.853, 2.804, -0.951, -0.269, -1.148, 2.417 ]
++        - ct: 2960
++          ccm: [ 2.270, -0.542, -0.728, -0.770, 2.603, -0.833, -0.260, -1.513, 2.773 ]
++        - ct: 3603
++          ccm: [ 2.186, -0.661, -0.525, -0.778, 2.695, -0.916, -0.252, -0.831, 2.083 ]
++        - ct: 4650
++          ccm: [ 2.182, -0.709, -0.473, -0.702, 2.764, -1.062, -0.252, -0.720, 1.971 ]
++        - ct: 5858
++          ccm: [ 2.324, -0.884, -0.440, -0.638, 2.583, -0.945, -0.285, -0.541, 1.827 ]
++        - ct: 7580
++          ccm: [ 2.212, -0.532, -0.679, -0.579, 3.079, -1.500, -0.277, -0.733, 2.010 ]
++  - ColorProcessing:
++      saturation: 1.0
++  - Filter:
++  - GammaOutCorrection:
++      gamma: 2.2
+   - BlackLevelCorrection:
+   - LensShadingCorrection:
+       x-size: [ 0.0625, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625 ]
+diff -ruN fin_a/src/ipa/rkisp1/data/ov8858.yaml fin_b/src/ipa/rkisp1/data/ov8858.yaml
+--- a/src/ipa/rkisp1/data/ov8858.yaml
++++ b/src/ipa/rkisp1/data/ov8858.yaml
+@@ -5,6 +5,26 @@
+ algorithms:
+   - Agc:
+   - Awb:
++  - BlackLevelCorrection:
++  - Ccm:
++      ccms:
++        - ct: 2873
++          ccm: [ 1.882, -0.262, -0.619, -0.638, 2.115, -0.477, -0.135, -0.997, 2.133 ]
++        - ct: 2965
++          ccm: [ 2.150, -0.519, -0.632, -0.536, 1.926, -0.390, 0.018, -1.486, 2.467 ]
++        - ct: 3606
++          ccm: [ 1.975, -0.438, -0.537, -0.562, 1.998, -0.436, -0.124, -0.771, 1.895 ]
++        - ct: 4700
++          ccm: [ 2.010, -0.515, -0.495, -0.521, 2.010, -0.489, -0.095, -0.673, 1.768 ]
++        - ct: 5890
++          ccm: [ 2.136, -0.653, -0.483, -0.484, 1.931, -0.448, -0.135, -0.548, 1.683 ]
++        - ct: 7600
++          ccm: [ 2.066, -0.392, -0.674, -0.509, 2.275, -0.766, -0.140, -0.661, 1.801 ]
++  - ColorProcessing:
++      saturation: 1.0
++  - Filter:
++  - GammaOutCorrection:
++      gamma: 2.2
+   - LensShadingCorrection:
+       x-size: [ 0.0625, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625 ]
+       y-size: [ 0.0625, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625 ]

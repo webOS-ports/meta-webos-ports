@@ -1,0 +1,53 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Mon, 22 Sep 2026 18:00:00 +0200
+Subject: [PATCH] ipa: rkisp1: awb: program the measurement window every frame
+
+The AWB measurement window is configured only on the first frame. On the
+rk3566/rk3568 (ISP V21) the ISP does not apply the very first parameters
+buffer, so the AWB window is never written to hardware: it stays zero, the
+AWB measurement never completes, no statistics buffer is produced and the
+capture pipeline stalls (video7/stats never dequeues, no frames delivered).
+
+Send the AWB measurement configuration on every frame. It is idempotent
+and cheap, and makes the rear camera stream through the hardware ISP.
+
+Upstream-Status: Pending
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+---
+diff --git a/src/ipa/rkisp1/algorithms/awb.cpp b/src/ipa/rkisp1/algorithms/awb.cpp
+index 0eb05c2b6..ed1df576d 100644
+--- a/src/ipa/rkisp1/algorithms/awb.cpp
++++ b/src/ipa/rkisp1/algorithms/awb.cpp
+@@ -211,7 +211,7 @@ void Awb::queueRequest(IPAContext &context,
+ /**
+  * \copydoc libcamera::ipa::Algorithm::prepare
+  */
+-void Awb::prepare(IPAContext &context, const uint32_t frame,
++void Awb::prepare(IPAContext &context, [[maybe_unused]] const uint32_t frame,
+ 		  IPAFrameContext &frameContext, RkISP1Params *params)
+ {
+ 	/*
+@@ -232,10 +232,16 @@ void Awb::prepare(IPAContext &context, const uint32_t frame,
+ 	gainConfig->gain_red = std::clamp<int>(256 * frameContext.awb.gains.r(), 0, 0x3ff);
+ 	gainConfig->gain_green_r = std::clamp<int>(256 * frameContext.awb.gains.g(), 0, 0x3ff);
+ 
+-	/* If we have already set the AWB measurement parameters, return. */
+-	if (frame > 0)
+-		return;
+-
++	/*
++	 * The AWB measurement window and mode normally only need programming
++	 * once, on the first frame. On the rk3568 (V21) the very first
++	 * parameters buffer is not applied by the ISP, so a measurement block
++	 * configured only on frame 0 - the AWB window here - never reaches the
++	 * hardware: the window stays zero, no AWB statistics are produced and
++	 * the capture pipeline stalls waiting for stats. Program the
++	 * measurement configuration on every frame instead; it is idempotent
++	 * and cheap.
++	 */
+ 	auto awbConfig = params->block<BlockType::Awb>();
+ 	awbConfig.setEnabled(true);
+ 
+-- 
+2.43.0
