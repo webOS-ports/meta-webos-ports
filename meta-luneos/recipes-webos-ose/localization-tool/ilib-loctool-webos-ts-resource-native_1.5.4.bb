@@ -23,7 +23,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=86d3f3a95c324c9479bd8986968f4327 \
 PR = "r0"
 
 SRC_URI = " \
-    npm://registry.npmjs.org/;package=ilib-loctool-webos-ts-resource;version=${PV} \
+    npm://registry.npmjs.org/;package=ilib-loctool-webos-ts-resource;version=${PV};sha256sum=ec254dc1138ff5f663a8c4f77c469d0bdb0126093577fd7a68df1054b721968b \
     npmsw://${THISDIR}/${BPN}/npm-shrinkwrap.json \
 "
 

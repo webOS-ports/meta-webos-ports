@@ -140,7 +140,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=86d3f3a95c324c9479bd8986968f4327 \
                     file://node_modules/which-typed-array/LICENSE;md5=5db8fa3e421a3211e6a3dc68544da455"
 
 SRC_URI = " \
-    npm://registry.npmjs.org/;package=ilib-lint;version=${PV} \
+    npm://registry.npmjs.org/;package=ilib-lint;version=${PV};sha256sum=545879e3dfd9d6bd118010c8c69d4138493e247cee973fe9009507e171192b75 \
     npmsw://${THISDIR}/${BPN}/npm-shrinkwrap.json \
 "
 
