@@ -19,14 +19,17 @@ inherit webos_pkgconfig
 inherit features_check
 ANY_OF_DISTRO_FEATURES = "vulkan opengl"
 
-PR = "r20"
+PR = "r22"
 
 DEPENDS = "boost gstreamer1.0 gstreamer1.0-plugins-base gstreamer1.0-plugins-bad umediaserver media-resource-calculator com.webos.service.camera webos-wayland-extensions"
 DEPENDS:append:rpi = " userland"
 
 WEBOS_VERSION = "1.0.0-gav.74_34ab300c64090fc1fc88c04ef592aa782f90781d"
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+           file://0001-sysbus-drop-the-hand-written-manifest-that-collides-.patch \
+           file://0002-sysbus-let-the-camera-pipeline-reach-camera2.patch \
+"
 
 FILES_SOLIBSDEV = ""
 FILES:${PN} += "${libdir}/*.so"
