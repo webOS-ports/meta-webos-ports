@@ -13,12 +13,14 @@ SECTION = "webos/services"
 DEPENDS = "luna-service2 libpbnjson glib-2.0 luna-prefs openssl glib-2.0-native wca-support-api wca-support nyx-lib python3-packaging-native"
 RDEPENDS:${PN} = "connman connman-client"
 
-WEBOS_VERSION = "1.1.0-50_085b6369346df4d0e6c6338b20df0a0a7ee6245f"
-PR = "r21"
+SRCREV = "2f995dc04abc54a2843a86b2f37aa95112e22d6b"
+
+PV = "1.1.0-51"
+
+PR = "r24"
 
 inherit webos_component
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit webos_daemon
 inherit webos_system_bus
@@ -32,17 +34,7 @@ EXTRA_OECMAKE += "-DENABLE_SCAN_ON_SOFTAP=true"
 PACKAGECONFIG[enable-multiple-routing-table] = "-DMULTIPLE_ROUTING_TABLE:BOOL=true,-DMULTIPLE_ROUTING_TABLE:BOOL=false,"
 PACKAGECONFIG = "enable-multiple-routing-table"
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-Add-back-com.palm.wan-for-cellular-support.patch \
-    file://0002-Update-webos-connman-adapter.role.json.in-Add-permis.patch \
-    file://0003-tethering-get-the-station-list-from-connman-instead-.patch \
-    file://0004-agent-implement-Cancel-and-Release-map-connman-2.0-s.patch \
-    file://0005-connectionmanager-implement-setDefaultInterface-with.patch \
-    file://0006-expose-DNS-search-domains-and-cellular-roaming-state.patch \
-    file://0007-connectionmanager-expose-per-service-timeservers-mDN.patch \
-    file://0008-connectionmanager-report-offlineMode-changes-to-gets.patch \
-    file://0009-agent-detect-captive-portals-via-RequestBrowser-repo.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "webos-connman-adapter.service"
