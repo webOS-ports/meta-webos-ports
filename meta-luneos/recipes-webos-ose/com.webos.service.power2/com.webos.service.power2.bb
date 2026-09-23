@@ -9,7 +9,7 @@ SECTION = "webos/libs"
 DEPENDS = "luna-service2 glib-2.0 libpmscore virtual/pmssupportreference pmloglib libpbnjson nyx-lib"
 
 WEBOS_VERSION = "1.0.0-13_1d3601a6701d213e8d67d3db0a2913d8ebb4073b"
-PR = "r3"
+PR = "r5"
 
 inherit webos_component
 inherit webos_enhanced_submissions
@@ -19,7 +19,10 @@ inherit webos_system_bus
 inherit webos_public_repo
 inherit webos_library
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
+           file://0001-sysbus-allow-powermgr-to-reach-db8-and-the-alarm-ser.patch \
+           file://0002-sysbus-grant-powermgr-the-db8-and-alarm-ACGs.patch \
+"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "powermgr.service"
