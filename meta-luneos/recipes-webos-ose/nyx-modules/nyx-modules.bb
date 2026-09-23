@@ -21,10 +21,10 @@ RDEPENDS:${PN} += "nyx-conf"
 # Built from the webOS-ports fork (webosose master + LuneOS modules and fixes
 # merged as commits) rather than webosose plus a patch stack. Pinned with a
 # plain SRCREV: submission tags are a webosose convention and this branch
-# carries none. The branch itself comes from webos_ports_ose_repo below.
-SRCREV = "12ad966241631a238f501c443091250728e49f8e"
+# carries none.
+SRCREV = "39e4a3179d04ffe5de0b79ed282171dfa37fd85b"
 
-PR = "r43"
+PR = "r44"
 
 EXTRA_OECMAKE += "\
     -DDISTRO_VERSION:STRING='${DISTRO_VERSION}' \
