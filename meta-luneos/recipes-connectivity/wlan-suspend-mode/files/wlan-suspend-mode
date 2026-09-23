@@ -1,0 +1,344 @@
+#!/bin/sh
+# wlan-suspend-mode - tell the Qualcomm WLAN driver when the display is off.
+#
+# On Halium phones with the prima driver (WCNSS/Pronto, e.g. tissot) the firmware's
+# broadcast/multicast filter, ARP/NS offload and multicast-address list are armed only
+# by the Android private ioctl "DRIVER SETSUSPENDMODE 1" (hdd_set_wlan_suspend_mode);
+# the cfg80211 suspend callback does not arm them. Without it every LAN broadcast
+# holds qcom_rx_wakelock for 50 ms and the phone is woken every few seconds while
+# suspended. Android sends the command on screen off / screen on; this daemon does
+# the same from luna://com.palm.display/control/status. On qcacld-3.0 (sargo) the
+# command is a no-op (drv_cmd_dummy), so it is harmless there.
+#
+# Subscription semantics: the first reply carries "state": on|off|dimmed; every later
+# push carries only "event": displayOff|displayOn|displayDimmed|displayActive|
+# displayInactive|blockedDisplay|unblockedDisplay.
+#
+# MediaTek's gen4m driver (MP01, module wlan_drv_gen4m_*) implements the same
+# command (priv_driver_set_suspend_mode: ARP/NS offload and the multicast white
+# list) but takes the request as struct priv_driver_cmd_s {char buf[512]; int
+# used_len; int total_len} with the buffer inline, where the Qualcomm drivers
+# take {char *buf; int used_len; int total_len}. The layout is picked by the
+# loaded module; the wrong one is rejected with EINVAL and does nothing.
+#
+# MediaTek's older gen2 driver (mindphone, MT6739, module wlan_drv_gen2)
+# answers a private command set of three - GET_WIFI_TYPE, SETALWAYSSCANSTATE,
+# SET_CHIP - and rejects SETSUSPENDMODE with EINVAL. It does, however,
+# advertise nl80211 testmode, and takes the same suspend request that way:
+# NL80211_CMD_TESTMODE with NL80211_ATTR_TESTDATA carrying
+# struct {u32 idx; u32 buflen; u8 suspend;} with idx 101 (TESTMODE_CMD_ID_SUSPEND).
+# That is the mechanism FuriLabs' batman uses for this driver generation
+# (src/wifi.c, wifi_set_wmtwifi, itself descended from Jolla's wmtWifi
+# handling); the two paths are tried in turn because which one a chip answers
+# is a property of the driver generation, not of the request.
+#
+# The private ioctl is tried first so that every chip that already answers it -
+# prima, qcacld, gen4m - behaves exactly as before and testmode is only reached
+# where the ioctl has failed.
+#
+# gen4m also takes "DRIVER SET_MDTIM <which> <n>", which sets how many DTIM
+# periods the firmware skips before it listens for buffered group-addressed
+# traffic: <which> 0 is the value used while wake-on-WLAN is armed (the
+# suspended case, "WOW On MDTIM"), anything else the value used otherwise
+# ("WOW Off MDTIM"). Listening on every DTIM is what makes the chip raise the
+# host for each beacon that announces buffered broadcast traffic, which on MP01
+# was the largest single wake source ("WLAN timeout"). With SETSUSPENDMODE 1
+# already dropping that traffic in the firmware, listening every DTIM buys
+# nothing, so the screen-off path raises the suspend-time value. Qualcomm
+# drivers do not implement SET_MDTIM; the command is only sent for gen4m.
+
+IF=${IF:-wlan0}
+STATE=/run/wlan-suspend-mode
+# Set while the interface is down *because we downed it*, so the way back up is
+# not tied to which mechanism is in use. Without it, a phone left down by the
+# fallback and then upgraded to a build whose testmode call succeeds would take
+# the early return and never bring the interface back.
+DOWNMARK=/run/wlan-suspend-mode.ifdown
+cur=$(cat $STATE 2>/dev/null)
+
+log() { echo "$(date -u +%FT%TZ) $*"; }
+
+# Whether to try the nl80211 testmode suspend request when the private ioctl is
+# rejected: "auto" tries it, "never" goes straight to the interface-down
+# fallback. Default never, because the only chip that accepts the call so far
+# is made worse by it - see the measurement above testmode_cmd().
+WLAN_TESTMODE=${WLAN_TESTMODE:-never}
+
+# MDTIM periods to skip while suspended. 1 keeps the pre-existing behaviour.
+MDTIM=${MDTIM:-3}
+IW=${IW:-/usr/sbin/iw}
+
+driver_layout() {
+    # SIOCDEVPRIVATE+1 (0x89F1). Qualcomm: hdd_priv_data_t {u8 *buf; int used_len;
+    # int total_len}. MediaTek gen4m: priv_driver_cmd_s {char buf[512]; int used_len;
+    # int total_len}.
+    layout=qcom
+    for m in /sys/module/wlan_drv_gen4m*; do [ -e "$m" ] && layout=mtk; done
+    echo "$layout"
+}
+
+drvcmd() {
+    layout=$(driver_layout)
+    python3 - "$IF" "$1" "$layout" <<'PY'
+import sys, socket, fcntl, ctypes, struct
+ifname, cmd, layout = sys.argv[1], sys.argv[2].encode() + b"\0", sys.argv[3]
+if layout == "mtk":
+    priv = ctypes.create_string_buffer(512 + 8)
+    ctypes.memmove(priv, cmd, len(cmd))
+    struct.pack_into("ii", priv, 512, len(cmd), 512)
+else:
+    buf = ctypes.create_string_buffer(cmd, 4096)
+    priv = ctypes.create_string_buffer(struct.pack("PiiI", ctypes.addressof(buf), len(cmd), 4096, 0))
+ifr = struct.pack("16sP", ifname.encode(), ctypes.addressof(priv)) + b"\0" * 16
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+try:
+    fcntl.ioctl(s.fileno(), 0x89F1, ifr)
+except OSError as e:
+    sys.exit("DRIVER %s failed: %s" % (cmd[:-1].decode(), e))
+PY
+}
+
+# MEASURED, AND OFF BY DEFAULT. The gen2 chip accepts this call and reports
+# success, but the firmware carries on handing packets to the host: the WLAN
+# wakelocks (WLAN TX THREAD, WLAN Timer, WLAN AHB ISR) are taken exactly as
+# before and the suspend handshake never wins. Back-to-back runs on the
+# mindphone 2026-09-22, same build, same phone, screen off, off charger:
+#
+#   interface down (fallback):  1058 s window, 98.5% asleep, longest 1017 s,
+#                               1 failed suspend, 4.227 -> 4.206 V
+#   testmode, interface up:     1182 s window,  0.0% asleep, no sleep at all,
+#                              43 failed suspends, 4.364 -> 4.153 V
+#
+# So an accepted TESTMODE command is not evidence of anything: this one is
+# either ignored or sets something that is not the broadcast filter. Keep the
+# code - it is the only lead for a chip that has no other filtering path, and
+# a different gen2/gen4m firmware may honour it - but never let it displace a
+# fallback that works. Enable with WLAN_TESTMODE=auto to test a new chip, and
+# measure the asleep fraction before trusting it.
+#
+# nl80211 testmode suspend, for drivers that reject the private ioctl. Pure
+# python over a generic-netlink socket rather than libnl: the daemon already
+# depends on python3 for the ioctl, and this adds no library to the image.
+# A driver without testmode answers EOPNOTSUPP, which is a clean "not me".
+testmode_cmd() {
+    python3 - "$IF" "$1" <<'PY'
+import os, socket, struct, sys
+
+NETLINK_GENERIC = 16
+GENL_ID_CTRL = 0x10
+CTRL_CMD_GETFAMILY = 3
+CTRL_ATTR_FAMILY_ID = 1
+CTRL_ATTR_FAMILY_NAME = 2
+NLM_F_REQUEST, NLM_F_ACK = 1, 4
+NLMSG_ERROR, NLMSG_DONE = 2, 3
+NL80211_CMD_TESTMODE = 45
+NL80211_ATTR_IFINDEX = 3
+NL80211_ATTR_TESTDATA = 69
+TESTMODE_CMD_ID_SUSPEND = 101
+
+ifname, suspend = sys.argv[1], int(sys.argv[2])
+
+def nla(t, payload):
+    return struct.pack("HH", 4 + len(payload), t) + payload + b"\0" * (-len(payload) % 4)
+
+def msg(family, cmd, payload, seq):
+    g = struct.pack("BBH", cmd, 0, 0) + payload
+    return struct.pack("IHHII", 16 + len(g), family, NLM_F_REQUEST | NLM_F_ACK, seq, 0) + g
+
+def attrs_of(buf):
+    out, i = {}, 0
+    while i + 4 <= len(buf):
+        ln, t = struct.unpack_from("HH", buf, i)
+        if ln < 4:
+            break
+        out[t] = buf[i + 4:i + ln]
+        i += (ln + 3) & ~3
+    return out
+
+s = socket.socket(socket.AF_NETLINK, socket.SOCK_RAW, NETLINK_GENERIC)
+s.bind((0, 0))
+s.settimeout(3)
+
+# Replies are matched on sequence number: a request made with NLM_F_ACK is
+# answered by the reply *and* a trailing ACK, and taking whatever arrives next
+# would read the family lookup's ACK as the testmode result.
+s.send(msg(GENL_ID_CTRL, CTRL_CMD_GETFAMILY, nla(CTRL_ATTR_FAMILY_NAME, b"nl80211\0"), 1))
+fam = None
+try:
+    while fam is None:
+        data = s.recv(65535)
+        ln, mtype, _, seq, _ = struct.unpack_from("IHHII", data, 0)
+        if seq != 1:
+            continue
+        if mtype == NLMSG_ERROR:
+            err = struct.unpack_from("i", data, 16)[0]
+            if err == 0:
+                continue
+            sys.exit("nl80211 lookup: %s" % os.strerror(-err))
+        a = attrs_of(data[20:ln])
+        if CTRL_ATTR_FAMILY_ID in a:
+            fam = struct.unpack("H", a[CTRL_ATTR_FAMILY_ID][:2])[0]
+except socket.timeout:
+    sys.exit("nl80211 lookup timed out")
+if not fam:
+    sys.exit("no nl80211 generic netlink family")
+
+try:
+    idx = socket.if_nametoindex(ifname)
+except OSError as e:
+    sys.exit("%s: %s" % (ifname, e))
+
+# struct testmode_cmd_suspend {u32 idx; u32 buflen; u8 suspend;} - 12 bytes
+# once the compiler has padded it out to its 4-byte alignment, which is the
+# size the driver expects.
+testdata = struct.pack("IIB", TESTMODE_CMD_ID_SUSPEND, 0, suspend) + b"\0" * 3
+payload = nla(NL80211_ATTR_IFINDEX, struct.pack("I", idx)) + \
+          nla(NL80211_ATTR_TESTDATA, testdata)
+s.send(msg(fam, NL80211_CMD_TESTMODE, payload, 2))
+try:
+    while True:
+        data = s.recv(65535)
+        _, mtype, _, seq, _ = struct.unpack_from("IHHII", data, 0)
+        if seq != 2:
+            continue
+        if mtype == NLMSG_ERROR:
+            err = struct.unpack_from("i", data, 16)[0]
+            if err == 0:
+                break
+            sys.exit("TESTMODE suspend=%d: %s" % (suspend, os.strerror(-err)))
+        if mtype == NLMSG_DONE:
+            break
+except socket.timeout:
+    sys.exit("TESTMODE suspend=%d timed out" % suspend)
+PY
+}
+
+# Some drivers have no screen-off command at all. MediaTek's older gen2
+# (mindphone, MT6739) answers a private command set of three - GET_WIFI_TYPE,
+# SETALWAYSSCANSTATE, SET_CHIP - and rejects SETSUSPENDMODE with EINVAL, so
+# nothing tells its firmware to stop handing packets to the host. Its RX
+# interrupt takes a wakelock each time, measured at 21 per second with the
+# screen off and the phone idle, and the suspend handshake can never win
+# against that: sleepd's every write to /sys/power/state returns EBUSY and the
+# device stays awake at about 283 mA, for ever.
+#
+# With the interface down the same counter falls to 1 per second and the phone
+# suspends normally: measured on mindphone 2026-09-21, 4 suspends in a 957 s
+# window, 948 s of it asleep, longest 588 s, against zero suspends in the run
+# before it.
+#
+# So where the driver cannot filter, take the station interface down instead.
+# That is only acceptable because nothing is being given up: this chip
+# advertises no magic-packet trigger either (only "any", which keeps the chip
+# fully powered, and "disconnect"), so cfg80211 would tear the association
+# down on suspend regardless. Where a driver does accept the command, or the
+# chip can be woken by a magic packet, this path is never used.
+iface_down_allowed() {
+    [ "${WLAN_DOWN_FALLBACK:-auto}" = "never" ] && return 1
+    [ "${WLAN_DOWN_FALLBACK:-auto}" = "always" ] && return 0
+    # auto: only when the chip could not be woken over the air anyway
+    "$IW" phy "$(iface_phy)" info 2>/dev/null | grep -q "wake up on magic packet" && return 1
+    return 0
+}
+
+iface_phy() {
+    if [ -e "/sys/class/net/$IF/phy80211" ]; then
+        basename "$(readlink -f "/sys/class/net/$IF/phy80211")"
+    else
+        echo phy0
+    fi
+}
+
+iface_state() { cat "/sys/class/net/$IF/operstate" 2>/dev/null; }
+
+# Bring the station interface back if the fallback had taken it down. Safe to
+# call whenever we return to normal: it does nothing unless we left the marker.
+undo_iface_down() {
+    [ -e "$DOWNMARK" ] || return 0
+    if ip link set "$IF" up 2>/dev/null; then
+        rm -f $DOWNMARK
+        log "$1 -> $IF brought back up after earlier fallback (state=$(iface_state))"
+    else
+        log "$1 -> $IF still down and could not be brought up"
+    fi
+}
+
+apply() {  # $1 = suspendmode|normal, $2 = reason
+    if [ "$1" = "$cur" ]; then log "$2 -> already $1"; return; fi
+    if [ "$1" = suspendmode ]; then n=1; else n=0; fi
+    if [ "$n" = 1 ] && [ "$(driver_layout)" = mtk ] && [ "$MDTIM" -gt 1 ]; then
+        if drvcmd "SET_MDTIM 0 $MDTIM"; then
+            log "$2 -> SET_MDTIM 0 $MDTIM ok"
+        else
+            log "$2 -> SET_MDTIM 0 $MDTIM FAILED"
+        fi
+    fi
+    if err=$(drvcmd "SETSUSPENDMODE $n" 2>&1); then
+        cur=$1; echo "$1" > $STATE; log "$2 -> SETSUSPENDMODE $n ok (mode=$1)"
+        [ "$n" = 0 ] && undo_iface_down "$2"
+        return
+    fi
+    log "$2 -> SETSUSPENDMODE $n failed (${err:-no detail})"
+
+    # Same request, different transport. Opt-in only: accepted is not the same
+    # as honoured, and on the one chip measured so far it is much worse than
+    # the fallback below.
+    if [ "$WLAN_TESTMODE" != never ]; then
+        if err=$(testmode_cmd "$n" 2>&1); then
+            cur=$1; echo "$1" > $STATE; log "$2 -> testmode suspend=$n ok (mode=$1)"
+            [ "$n" = 0 ] && undo_iface_down "$2"
+            return
+        fi
+        log "$2 -> testmode suspend=$n failed (${err:-no detail})"
+    fi
+
+    # Only now is there genuinely no way to make the firmware filter.
+    if ! iface_down_allowed; then
+        return
+    fi
+    if [ "$n" = 1 ]; then
+        if ip link set "$IF" down 2>/dev/null; then
+            cur=$1; echo "$1" > $STATE; : > $DOWNMARK
+            log "$2 -> no driver filter, $IF down instead (state=$(iface_state))"
+        else
+            log "$2 -> no driver filter and $IF could not be brought down"
+        fi
+    else
+        if ip link set "$IF" up 2>/dev/null; then
+            cur=$1; echo "$1" > $STATE; rm -f $DOWNMARK
+            log "$2 -> $IF up again (state=$(iface_state))"
+        else
+            log "$2 -> $IF could not be brought up"
+        fi
+    fi
+}
+
+case "$1" in
+    on|normal)       apply normal "manual"; exit ;;
+    off|suspendmode) apply suspendmode "manual"; exit ;;
+    status)          echo "mode=${cur:-unset}"; exit ;;
+esac
+
+# The unit starts with the display manager, which on a Halium phone is before
+# the container has loaded the WLAN driver: no wlan0 yet, and the private ioctl
+# answers ENODEV. Wait for the interface (measured on tissot: it appears about
+# a minute into boot) rather than firing the first command into nothing.
+while [ ! -e /sys/class/net/$IF ]; do sleep 2; done
+log "watching luna://com.palm.display/control/status on $IF (current mode=${cur:-unset})"
+# A subscription that fails (hub not ready, display manager restarting) ends
+# the reader loop; systemd restarts the unit, and the state file keeps the last
+# mode across that.
+tail -f /dev/null | luna-send -i -f luna://com.palm.display/control/status '{"subscribe":true}' 2>/dev/null |
+while read -r line; do
+    case "$line" in
+        *'"state"'*'"off"'*)                        apply suspendmode "state off" ;;
+        *'"state"'*'"on"'*|*'"state"'*'"dimmed"'*)  apply normal "state $(echo "$line" | tr -d ' ,')" ;;
+        *'"event"'*'"displayOff"'*)                 apply suspendmode "event displayOff" ;;
+        *'"event"'*'"displayOn"'*)                  apply normal "event displayOn" ;;
+        *'"event"'*'"displayDimmed"'*)              apply normal "event displayDimmed" ;;
+    esac
+done
+# luna-send went away (display manager restarted?) - leave the driver in normal mode
+# so a screen-on phone is never left filtering; systemd restarts us.
+apply normal "subscription ended"
+exit 1
