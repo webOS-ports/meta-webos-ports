@@ -23,9 +23,44 @@ depend() {
 	before modemmanager
 }
 
+# Could a QMI modem ever appear on this machine? Every source the wait loop
+# below knows about is Qualcomm-only: /dev/modem is exported by the rpmsg modem
+# driver, /dev/wwan0qmi0 by the wwan one, and QRTR is a Qualcomm IPC socket
+# family. Where none of them is even possible the loop cannot do anything but
+# run out its 45 seconds and report "No modem available", with ofono blocked
+# behind it as ExecStartPre the whole time - measured on qemux86-64 at 45.8s of
+# a 48.9s userspace boot, every boot. Every mainline non-Qualcomm target pays
+# that: qemu, pine64, pinetab2, raspberrypi, rockchip. (Halium ports avoid it
+# by shipping ofono-halium.service, which has no ExecStartPre at all.)
+#
+# On Qualcomm hardware every branch below still returns 0, so the wait is
+# unchanged where it has something to wait for.
+qmi_modem_possible() {
+	# Already up - nothing to decide.
+	[ -e /dev/modem ] && return 0
+	[ -e /dev/wwan0qmi0 ] && return 0
+	# Not up yet, but it is a Qualcomm SoC, so it still might be: the
+	# socinfo driver exports soc0 and the modem drivers probe later.
+	[ -d /sys/devices/soc0 ] && return 0
+	# QRTR is a kernel socket family rather than a device, so it does not
+	# appear under /dev at all. If it is not built in, qmicli fails the
+	# socket() outright and no amount of waiting changes that. Matched at
+	# the start of the line because that is the protocol-name column, and
+	# without \b - busybox grep does not implement it, and a pattern that
+	# never matches would skip the wait on hardware that needs it.
+	grep -qiE '^(qipcrtr|qrtr)' /proc/net/protocols 2>/dev/null && return 0
+	return 1
+}
+
 # All of the logic is placed in the service start method as we want to block
 # other services while the modem isn't ready yet.
 start() {
+	if ! qmi_modem_possible
+	then
+		eend 0 'No Qualcomm QMI modem on this platform, nothing to select.'
+		return 0
+	fi
+
 	case "$(cat /sys/devices/soc0/machine)" in
 	APQ*)
 		eend 0 'Skipping SIM configuration on APQ SoC.'
