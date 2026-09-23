@@ -12,22 +12,17 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "luna-service2 db8 boost libpbnjson glib-2.0 pmloglib ${VIRTUAL-RUNTIME_init_manager}"
 
-WEBOS_VERSION = "3.0.0-45_d5cbb51df2b1f2b8d12f40dd493632b3e80131cc"
-PR = "r17"
+SRCREV = "bf16f54a85e5577bc755b3cc6deb9a7f047bb274"
+PV = "3.0.0-45"
+PR = "r19"
 
 inherit webos_component
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_daemon
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-Allow-for-1-minute-intervals.patch \
-    file://0002-Revert-Retire-the-deprecated-APIs.patch \
-    file://0003-activitymanager-Fix-outbound-permissions-to-com.webo.patch \
-    file://0001-CMakeLists.txt-replace-std-c-11-with-std-c-17-for-ic.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "activitymanager.service"
