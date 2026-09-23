@@ -10,7 +10,7 @@ NOT_COMPATIBLE_WITH_CURRENT_NODEJS = " \
 "
 
 #LuneOS uses it's own settings app
-VIRTUAL-RUNTIME_settingsapp ?= "org.webosports.app.settings"
+VIRTUAL-RUNTIME_settingsapp ?= "org.webosports.app.settings-qml"
 
 # Web Speech API support for the browser. Chromium dlopens libspeechd.so.2 and talks to the
 # speech-dispatcher daemon; without this, speechSynthesis exists but has no voices and pages that
@@ -26,6 +26,11 @@ RDEPENDS:${PN} = " \
   ${DISTRO_EXTRA_RDEPENDS} \
   \
   luneos-device-config \
+  luneos-kernel-log-quirks \
+  \
+  powertop \
+  luneos-power-report \
+  luneos-remote-wakelock \
   \
   pulseaudio-distro-conf \
   pulseaudio-misc \
@@ -43,6 +48,7 @@ RDEPENDS:${PN} = " \
   udev-extraconf \
   umtprd \
   webos-connman-adapter \
+  ${VPN_RDEPENDS} \
   webos-telephonyd \
   iw \
   \
@@ -56,6 +62,7 @@ RDEPENDS:${PN} = " \
   \
   org.webosports.app.preware \
   org.webosports.service.ipkg \
+  ${TORCH_RDEPENDS} \
   com.webos.app.enactbrowser \
   \
   ${VIRTUAL-RUNTIME_speech_synthesis} \
@@ -115,7 +122,7 @@ RDEPENDS:${PN} = " \
   \
   webos-users-groups \
   \
-  ${VIRTUAL-RUNTIME_audio_service} \
+  packagegroup-luneos-audiod \
   com.palm.keymanager \
   mediaindexer \
   media-permission-service \
@@ -158,6 +165,7 @@ LIBHYBRIS_RDEPENDS = " \
     nyx-modules-hybris \
     \
     ofono-binder-plugin \
+    wlan-suspend-mode \
 "
 
 # Fingerprint stack: biomd talks to the Android biometrics HAL over binder
@@ -174,6 +182,10 @@ LIBHYBRIS_RDEPENDS = " \
 FINGERPRINT_RDEPENDS = " \
     biomd \
     webos-fingerprint-adapter \
+"
+
+FACEUNLOCK_RDEPENDS = " \
+    luneos-faced \
 "
 
 # NFC stack: nfcd talks to the Android NFC HAL over binder, webos-nfc-adapter
@@ -204,6 +216,15 @@ PRINT_RDEPENDS = " \
     cups \
     cups-filters \
     avahi-daemon \
+"
+
+VPN_RDEPENDS = " \
+    luneos-vpn-adapter \
+"
+
+TORCH_RDEPENDS = " \
+    org.webosports.service.torch \
+    org.webosports.app.torch \
 "
 
 # eSIM: lpac is the LPA (SGP.22 profile download/management), luneos-esim-adapter
@@ -247,9 +268,11 @@ RDEPENDS:${PN}:append:mido = " alsa-utils-systemd mesa-megadriver rmtfs qrtr rpm
 RDEPENDS:${PN}:append:tissot = " alsa-utils-systemd mesa-megadriver rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:rosy = " alsa-utils-systemd mesa-megadriver rmtfs qrtr rpmsgexport"
 
+RDEPENDS:${PN}:append:tissot = " wcnss-filter-fixup"
+RDEPENDS:${PN}:append:tissot-halium = " wcnss-filter-fixup"
+
 # Fingerprint-sensor devices only. These machine names come from the LuneOS
 # Halium layer; on a tree without them the overrides are simply inert.
-RDEPENDS:${PN}:append:sargo = " ${FINGERPRINT_RDEPENDS}"
 RDEPENDS:${PN}:append:sagit = " ${FINGERPRINT_RDEPENDS}"
 RDEPENDS:${PN}:append:mido-halium = " ${FINGERPRINT_RDEPENDS}"
 RDEPENDS:${PN}:append:tissot-halium = " ${FINGERPRINT_RDEPENDS}"
@@ -257,18 +280,18 @@ RDEPENDS:${PN}:append:tissot-halium = " ${FINGERPRINT_RDEPENDS}"
 # sensor (the adapter just reports unavailable).
 RDEPENDS:${PN}:append:halium-arm64 = " ${FINGERPRINT_RDEPENDS}"
 
+# Face unlock, on every 64-bit machine - halium and mainline alike. Harmless on
+# one with no usable camera: luneos-faced just reports available=false.
+RDEPENDS:${PN}:append:aarch64 = " ${FACEUNLOCK_RDEPENDS}"
+
 # NFC-capable devices only.
 RDEPENDS:${PN}:append:mako = " ${NFC_RDEPENDS}"
 RDEPENDS:${PN}:append:hammerhead-halium = " ${NFC_RDEPENDS}"
-RDEPENDS:${PN}:append:sargo = " ${NFC_RDEPENDS}"
 RDEPENDS:${PN}:append:sagit = " ${NFC_RDEPENDS}"
 # The GSI machine can land on any device; the stack is harmless without an
 # NFC controller (nfcd just reports unavailable).
 RDEPENDS:${PN}:append:halium-arm64 = " ${NFC_RDEPENDS}"
 
-# sargo has a real eUICC; the generic halium images cover the rest, where an
-# adapter card is the way in.
-RDEPENDS:${PN}:append:sargo = " ${ESIM_RDEPENDS}"
 RDEPENDS:${PN}:append:halium-arm64 = " ${ESIM_RDEPENDS}"
 
 # Keep this list in step with COMPATIBLE_MACHINE in waydroid.bb: that only
@@ -289,6 +312,15 @@ RDEPENDS:${PN}:append:pinetab2 = " waydroid"
 RDEPENDS:${PN}:append:qemux86-64 = " waydroid"
 RDEPENDS:${PN}:append:rpi = " waydroid"
 RDEPENDS:${PN}:append:tissot-halium = " waydroid"
+
+RDEPENDS:${PN}:append:halium-arm = " waydroid-sensors"
+RDEPENDS:${PN}:append:halium-arm64 = " waydroid-sensors"
+RDEPENDS:${PN}:append:mido-halium = " waydroid-sensors"
+RDEPENDS:${PN}:append:pinephone = " waydroid-sensors"
+RDEPENDS:${PN}:append:pinephonepro = " waydroid-sensors"
+RDEPENDS:${PN}:append:pinetab2 = " waydroid-sensors"
+RDEPENDS:${PN}:append:qemux86-64 = " waydroid-sensors"
+RDEPENDS:${PN}:append:tissot-halium = " waydroid-sensors"
 
 QEMU_RDEPENDS = " \
     alsa-utils-systemd \
