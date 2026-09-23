@@ -16,12 +16,14 @@ DEPENDS = "luna-service2 libpbnjson uriparser libxml2 sqlite3 pmloglib nyx-lib l
 
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_ntp} tzcode luna-init"
 
-WEBOS_VERSION = "4.4.0-31_b768ff291f1bed353c8652bd430cc43ee80c8c79"
-PR = "r16"
+SRCREV = "7e0141df63e832492fc8c79f3e52ba55711f40ad"
+
+PV = "4.4.0-32"
+
+PR = "r18"
 
 inherit webos_component
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_ose_repo
 inherit webos_system_bus
 inherit webos_daemon
 inherit webos_cmake
@@ -30,28 +32,19 @@ PACKAGECONFIG ??= "qt"
 PACKAGECONFIG[qt] = ",,qtbase"
 inherit_defer ${@bb.utils.contains('PACKAGECONFIG', 'qt', 'qt6-cmake', '', d)}
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-Add-ImageService.patch \
-    file://0002-luna-sysservice-Fix-spacing-issues.patch \
-    file://0003-luna-sysservice-Add-required-bits-for-LuneOS.patch \
-    file://0004-luna-sysservice-Fix-permissions-for-telephony.patch \
-    file://0005-luna-sysservice-TimePrefsHandler.cpp-Fix-typo.patch \
-    file://0006-com.webos.service.systemservice-Add-image.management.patch \
-    file://0007-Add-back-Image-and-Wallpaper-handling.patch \
-    file://0008-com.webos.service.systemservice-Allow-cardshell-to-query-settings.patch \
-    file://0009-luna-sysservice-TimePrefsHandler.cpp-Fix-supportDST-typo.patch \
-    file://0001-CMakeLists-consistent-target_link_libraries-signature.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 inherit webos_systemd
-WEBOS_SYSTEMD_SERVICE = "luna-sys-service.service"
+# The unit ships in the repository (files/systemd/), like the other LuneOS
+# components, rather than being injected from this directory.
+LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
 
 do_install:append() {
     install -d ${D}${datadir}/localization/${BPN}
     cp -rf ${S}/resources ${D}/${datadir}/localization/${BPN}
     # FIXME: We still need this or registration fails
     rm -rf ${D}${webos_sysbus_prvrolesdir}/com.webos.*
-    rm -rf ${D}${webos_sysbus_pubrolesdir}/com.webos.* 
+    rm -rf ${D}${webos_sysbus_pubrolesdir}/com.webos.*
 }
 
 FILES:${PN} += "${datadir}/localization/${BPN}"
