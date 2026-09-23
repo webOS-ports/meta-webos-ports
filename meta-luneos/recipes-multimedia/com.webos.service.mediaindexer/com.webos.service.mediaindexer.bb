@@ -54,7 +54,4 @@ do_install:append() {
 
 inherit useradd
 USERADD_PACKAGES = "${PN}"
-
-GROUPMEMS_PARAM:${PN} = " \
-    -a media -g video; \
-"
+USERMOD_PARAM:${PN} = "--append --groups video media"
