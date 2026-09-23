@@ -14,42 +14,27 @@ DEPENDS = "nyx-lib luna-service2 json-c libxml2 sqlite3 glib-2.0"
 #Added for LuneOS
 RDEPENDS:${PN} += "com.webos.service.battery"
 
-WEBOS_VERSION = "2.0.0-19_6166459bf5e48179ec9c5bc07ce98d6d938b0e3e"
-PR = "r14"
+SRCREV = "472951734cfbfa68e16ff87219d0faf65d15fe33"
+
+PV = "2.0.0-20"
+
+PR = "r20"
 
 inherit webos_component
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit webos_daemon
 inherit webos_system_bus
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-Add-empty-alarms.xml-file.patch \
-    file://0002-Add-alarms.xml-to-CMakeLists.txt.patch \
-    file://0003-Use-com.palm.display-service-to-query-display-state.patch \
-    file://0004-Rework-suspend-state-machine-to-support-asynchronous.patch \
-    file://0005-Unblock-us-from-being-not-responsible-and-fixing-a-c.patch \
-    file://0006-Don-t-remove-idle-check-from-mainloop-when-currently.patch \
-    file://0007-Don-t-block-main-thread-when-in-sleep-state.patch \
-    file://0008-Don-t-handle-displayInactive-event.patch \
-    file://0009-Creating-activities-while-being-suspend-will-wakeup-.patch \
-    file://0010-Add-powerd.management-permission-needed-by-powermenu.patch \
-    file://0011-Revert-Deprecation-of-com.webos.service.power.patch \
-    file://0012-com.webos.service.sleep.api.json.in-Add-API-for-susp.patch \
-    file://0013-Register-the-com-palm-power-category-only-once.patch \
-    file://0014-Implement-the-legacy-wakeLockRegister-setWakeLock-AP.patch \
-    file://sleepd.conf \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 inherit webos_systemd
-WEBOS_SYSTEMD_SERVICE = "sleepd.service"
+LUNEOS_SYSTEMD_SERVICE = "sleepd.service"
 
-# The OSE sleepd ships its suspend machinery turned off: with no configuration
-# file, enable_idle_check_thread stays at its compiled-in 0, no idle-check
-# thread is created and the daemon never initiates suspend. Install the config
-# that turns it on; without this file the device never sleeps.
 do_install:append() {
-    install -d ${D}${sysconfdir}/default
-    install -m 0644 ${UNPACKDIR}/sleepd.conf ${D}${sysconfdir}/default/sleepd.conf
+    install -d ${D}${systemd_unitdir}/sleep.conf.d
+    install -m 0644 ${S}/files/systemd/sleep.conf.d/10-sleepd.conf \
+        ${D}${systemd_unitdir}/sleep.conf.d/
 }
+
+FILES:${PN} += "${systemd_unitdir}/sleep.conf.d/10-sleepd.conf"
