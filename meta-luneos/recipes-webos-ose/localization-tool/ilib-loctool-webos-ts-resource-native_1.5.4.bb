@@ -15,10 +15,10 @@ SUMMARY = "A loctool plugin that knows how to process ts resource files"
 # to determine which situation is applicable.
 LICENSE = "Apache-2.0 & ISC & MIT"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=86d3f3a95c324c9479bd8986968f4327 \
-                    file://node_modules/ilib/LICENSE;md5=3b83ef96387f14655fc854ddc3c6bd57 \
-                    file://node_modules/sax/LICENSE;md5=5f49410228c16917dacc5eab921004cb \
-                    file://node_modules/xml-js/LICENSE;md5=7500faf5d0f9d9fa8a6846c3a9d4d2df \
-                    file://node_modules/pretty-data/README.md;md5=cb335af5033fff681cde255b64c6999a"
+                    file://../node_modules/ilib/LICENSE;md5=3b83ef96387f14655fc854ddc3c6bd57 \
+                    file://../node_modules/sax/LICENSE;md5=5f49410228c16917dacc5eab921004cb \
+                    file://../node_modules/xml-js/LICENSE;md5=7500faf5d0f9d9fa8a6846c3a9d4d2df \
+                    file://../node_modules/pretty-data/README.md;md5=cb335af5033fff681cde255b64c6999a"
 
 PR = "r0"
 
