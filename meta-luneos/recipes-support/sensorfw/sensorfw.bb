@@ -61,6 +61,9 @@ do_install:append() {
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.service ${D}${webos_sysbus_servicedir}/${SERVICE_NAME}.service
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.role.json ${D}${webos_sysbus_rolesdir}/${SERVICE_NAME}.role.json
     rm -rf ${D}/mkspecs
+
+    rm -f ${D}${bindir}/*-test
+    rm -rf ${D}${datadir}/sensorfw-tests
 }
 
 RDEPENDS:${PN} = "bash"
@@ -72,13 +75,3 @@ FILES:${PN} = " \
     ${sysconfdir} \
     ${libdir} \
 "
-
-# ERROR: sensorfw-0.14.4+git-r0 do_package_qa: QA Issue: File /usr/bin/sensorbenchmark-test in package sensorfw contains reference to TMPDIR
-# File /usr/bin/sensordataflow-test in package sensorfw contains reference to TMPDIR
-# File /usr/bin/sensoradaptors-test in package sensorfw contains reference to TMPDIR
-# File /usr/bin/sensormetadata-test in package sensorfw contains reference to TMPDIR
-# File /usr/bin/sensorapi-test in package sensorfw contains reference to TMPDIR
-# File /usr/bin/sensorfilters-test in package sensorfw contains reference to TMPDIR
-# File /usr/bin/sensorchains-test in package sensorfw contains reference to TMPDIR [buildpaths]
-ERROR_QA:remove = "buildpaths"
-WARN_QA:append = " buildpaths"
