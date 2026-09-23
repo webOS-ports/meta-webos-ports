@@ -1,0 +1,49 @@
+#!/bin/sh
+# Arm the best WoWLAN trigger this phy supports, so cfg80211 keeps the
+# association across suspend instead of tearing it down.
+#
+# Without any trigger, wiphy_suspend() calls cfg80211_leave_all() and the
+# device disconnects on every suspend, reconnects on resume, and the driver's
+# own wakelocks then block the next attempt (measured on sargo: WiFi down and
+# up on every cycle until magic-packet was armed).
+#
+# What is supported differs per chip, so ask rather than assume:
+#   qcacld/prima (sargo, tissot)  magic-packet
+#   rtw88 (PineTab2)              no magic-packet; "disconnect" only
+#   brcmfmac (PinePhone Pro)      none at all - nothing to do
+# "any" is deliberately not used: it keeps the chip fully powered and saves
+# nothing.
+PHY=${1:-phy0}
+IW=/usr/sbin/iw
+TAG=luneos-wowlan-arm
+
+[ -x "$IW" ] || exit 0
+
+# The udev rule passes %k from the ieee80211 subsystem, so the argument is a
+# phy. By hand the obvious thing to type is the interface, which used to exit
+# here without a word and look like "the helper did nothing"; accept it.
+if [ ! -d "/sys/class/ieee80211/$PHY" ] && [ -e "/sys/class/net/$PHY/phy80211" ]; then
+    PHY=$(basename "$(readlink -f "/sys/class/net/$PHY/phy80211")")
+fi
+
+[ -d "/sys/class/ieee80211/$PHY" ] || exit 0
+
+caps=$("$IW" phy "$PHY" info 2>/dev/null | sed -n '/WoWLAN support:/,/^	[a-z]/p')
+# Only magic-packet. "disconnect" looks like a cheap way to keep the
+# association across suspend, and on the PineTab2's bes2600 it stops the phone
+# suspending at all: the driver waits five seconds for the chip to reach its
+# low-power state, gives up ("wait device idle timeout"), cfg80211's
+# wiphy_suspend returns -EBUSY and the kernel aborts the whole transition.
+# Measured 2026-09-20: 46 consecutive failed suspends with the trigger armed,
+# and the first attempt succeeded the moment it was disabled. "any" is worse
+# still - it keeps the chip fully powered.
+case "$caps" in
+    *"wake up on magic packet"*) trigger="magic-packet" ;;
+    *)                           logger -t "$TAG" "$PHY: no magic-packet trigger, leaving WoWLAN off"; exit 0 ;;
+esac
+
+if "$IW" phy "$PHY" wowlan enable "$trigger" 2>/dev/null; then
+    logger -t "$TAG" "$PHY: armed $trigger"
+else
+    logger -t "$TAG" "$PHY: arming $trigger failed"
+fi
