@@ -65,6 +65,7 @@ GBINDER_API_LEVEL:tissot-halium = "28"
 GBINDER_API_LEVEL:mido-halium = "28"
 GBINDER_API_LEVEL:mindphone = "30"
 GBINDER_API_LEVEL:halium-arm64 = "32"
+GBINDER_API_LEVEL:athena = "35"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
