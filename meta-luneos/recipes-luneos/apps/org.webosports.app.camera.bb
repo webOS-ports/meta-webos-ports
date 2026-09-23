@@ -6,11 +6,13 @@ LIC_FILES_CHKSUM = " \
 "
 
 PV = "0.0.2-1+git"
-SRCREV = "1c2d9761fc7c6029e829140d90173196a5a0c786"
+# herrie/camera: camera and format selection, full-frame mode and zoom,
+# viewfinder rotation, flash LED, cpufreq pin - until it is merged to master.
+WEBOS_GIT_BRANCH = ";branch=herrie/camera"
+SRCREV = "8898dd9a2d38cf0165a923cbdf6267a918d07d41"
 
 DEPENDS = "qtbase qtdeclarative qtdeclarative-native qtmultimedia"
 
-WEBOS_GIT_PARAM_BRANCH = "herrie/qt6"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 inherit pkgconfig
@@ -34,4 +36,5 @@ RDEPENDS:${PN} = " \
     qtdeclarative-qmlplugins \
     luneos-components \
 "
+
 
