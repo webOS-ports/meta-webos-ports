@@ -15,16 +15,17 @@ VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 VIRTUAL-RUNTIME_bash ?= "bash"
 RDEPENDS:${PN} = "luna-service2-security-conf ${VIRTUAL-RUNTIME_cpushareholder} ${VIRTUAL-RUNTIME_bash}"
 
-WEBOS_VERSION = "3.21.2-47_279bc61a3cf47985455bf536502dd87d4e813d2f"
-PR = "r37"
+SRCREV = "77eeb2cf5bfc5e0ed9779bd2064b2b79a8acd49e"
+
+PV = "3.21.2-48"
+PR = "r1"
 
 EXTRA_OECMAKE += "${@ '-DWEBOS_DISTRO_PRERELEASE:STRING="devel"' \
                   if d.getVar('WEBOS_DISTRO_PRERELEASE') != '' else ''} \
                   -DWEBOS_TARGET_MACHINE_IMPL=hardware"
 
 inherit webos_component
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit webos_library
 inherit webos_daemon
@@ -34,15 +35,7 @@ inherit webos_core_os_dep
 inherit webos_lttng
 inherit webos_test_provider
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-hub.cpp-add-org.webosports.service-in-the-migrated-s.patch \
-    file://0002-ls-hubd-print-more-useful-error-for-outbound-permiss.patch \
-    file://0003-hub.cpp-Add-support-for-org.webosports-and-org.webos.patch \
-    file://0004-luna-service2-Add-permissions-for-com.palm-and-org.w.patch \
-    file://0005-LSMessageIsSubscription-test-if-payload-is-a-JSON-ob.patch \
-    file://0006-_LSCheckProvidedTrustedGroups-reduce-log-noise.patch \
-    file://0007-GetRequiredTrustAsString-don-t-let-empty-nodes-reset.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "ls-hubd.service"
