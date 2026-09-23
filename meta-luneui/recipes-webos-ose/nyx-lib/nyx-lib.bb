@@ -23,12 +23,13 @@ SECTION = "webos/libs"
 
 DEPENDS = "glib-2.0 pmloglib"
 
-WEBOS_VERSION = "7.3.0-13_0ee217947853f7fbd0e0a625d99c229ecd33ab91"
-PR = "r11"
+SRCREV = "5240410b0f900af95a68b6f10202b9f07800e061"
+
+PV = "7.3.0-14"
+
+PR = "r16"
 
 inherit webos_component
-inherit webos_public_repo
-inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit webos_library
 inherit systemd
@@ -36,12 +37,9 @@ inherit systemd
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE:${PN} = "nyx.target"
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-Implement-asynchronous-suspend-resume-methods-for-sy.patch \
-    file://0002-add-nyx-target.patch \
-    file://0003-led-controller-Add-RGB-colour-parameters.patch \
-    file://0004-nyx_gps-add-debug-data-and-non-framework-location-no.patch \
-"
+inherit webos_ports_ose_repo
+
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 do_install:append() {
     install -d ${D}${systemd_unitdir}/system
