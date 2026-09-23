@@ -13,16 +13,30 @@
 # Runs as wam:compositor because that is what browser_shell runs as, and on
 # /tmp/xdg because that is the XDG_RUNTIME_DIR run_browser_shell sets. The
 # socket path is given explicitly rather than inherited so the two cannot drift.
+# Ordering: none against surface-manager, deliberately. The only thing this
+# needed from the compositor was /tmp/xdg itself - surface-manager-daemon
+# creates it in its own ExecStartPre - and waiting for the whole compositor to
+# come up to get one directory put this on the critical path: measured on
+# qemux86-64, multi-user.target was gated by this unit on 49 of 50 boots,
+# reached at 3.08s because speech-dispatcher only started at 2.67s, once
+# surface-manager had finished. Creating the directory here instead lets the
+# two start together. Nothing else here touches Wayland; the daemon just
+# listens on a unix socket.
 [Unit]
 Description=Speech-Dispatcher for browser_shell (webOS)
-After=surface-manager.service
-Requires=surface-manager.service
 
 [Service]
 Type=forking
 User=wam
 Group=compositor
 Environment=XDG_RUNTIME_DIR=/tmp/xdg
+# Same directory, mode and ownership surface-manager-daemon uses, so whichever
+# gets there first wins and the other is a no-op. "+" runs these as root
+# regardless of User= above, which is what lets this unit stop waiting for the
+# compositor.
+ExecStartPre=+/bin/mkdir -p /tmp/xdg
+ExecStartPre=+/bin/chmod 0770 /tmp/xdg
+ExecStartPre=+/bin/chown nobody:compositor /tmp/xdg
 ExecStartPre=/bin/mkdir -p /tmp/xdg/speech-dispatcher
 ExecStart=/usr/bin/speech-dispatcher -d -t 0 -S /tmp/xdg/speech-dispatcher/speechd.sock
 ExecReload=/bin/kill -HUP $MAINPID
