@@ -12,7 +12,8 @@ DEPENDS = "luna-service2 libpbnjson glib-2.0 glib-2.0-native"
 RRECOMMENDS:${PN} += "biomd"
 
 PV = "0.1.0-1+git"
-SRCREV = "010ff42a4404da3032db59b8a5505181179deb02"
+PR = "r1"
+SRCREV = "5be0ad3c59e4ed0d4470b7affb73551890c28d2d"
 
 inherit webos_ports_repo
 inherit webos_filesystem_paths
@@ -21,7 +22,6 @@ inherit pkgconfig
 inherit webos_system_bus
 inherit webos_systemd
 
-WEBOS_GIT_PARAM_BRANCH = "master"
 WEBOS_REPO_NAME = "webos-fingerprint-adapter"
 
 LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
