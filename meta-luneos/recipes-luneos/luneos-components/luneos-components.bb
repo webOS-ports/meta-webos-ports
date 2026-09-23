@@ -3,7 +3,7 @@ LICENSE = "LGPL-2.1-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 PV = "0.5+git"
-SRCREV = "262d5b2281f1f67848512ada59648649f156a675"
+SRCREV = "c71b7f943329af2d7ff5d03aecdff44abfcfb070"
 
 # qtmultimedia and gstreamer are for LuneOS.Camera: it hands QML a droidcamsrc
 # source to assign to CaptureSession.nativeVideoSource, which is the only way a
