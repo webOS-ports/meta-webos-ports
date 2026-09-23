@@ -12,26 +12,19 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "glib-2.0 luna-service2 libpbnjson pmloglib boost libxml++-5.0 glibmm"
 
-WEBOS_VERSION = "1.0.0-28_4d4e8f2f68f6f3541f75998d11aec7f42f278e37"
-PR = "r12"
+SRCREV = "d2da55ffb904059e76288b0ee26a6bcd7a8b5671"
+
+PV = "1.0.0-29"
+
+PR = "r15"
 
 inherit webos_component
 inherit webos_cmake
-inherit webos_enhanced_submissions
 inherit webos_daemon
 inherit webos_system_bus
-inherit webos_public_repo
+inherit webos_ports_ose_repo
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-CMakeLists.txt-switch-to-libxml-5.patch \
-    file://0001-Settings.cpp-Make-org.webosports-privileged-as-well.patch \
-    file://0002-Revert-97e68e38b489ab103e68b63672b5444ee7a05d49.patch \
-    file://0003-com.webos.notification.role.json.in-Fix-permission-i.patch \
-    file://0004-NotificationService.h-Add-back-bits-required-by-Lune.patch \
-    file://0005-com.webos.notification.perm.json-Fix-incorrect-value.patch \
-    file://0006-NotificationService-tell-subscribers-when-a-toast-is.patch \
-    file://0010-CMakeLists.txt-build-as-C-17-for-libxml-5.0.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "notificationmgr.service.in"
