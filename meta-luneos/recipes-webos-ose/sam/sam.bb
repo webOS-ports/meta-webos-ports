@@ -10,37 +10,26 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=2bdfe040dcf81b4038370ae96036c519 \
 "
 
-DEPENDS = "glib-2.0 luna-service2 libpbnjson boost icu pmloglib libwebosi18n"
+DEPENDS = "glib-2.0 luna-service2 libpbnjson boost icu pmloglib libwebosi18n gtest"
 RDEPENDS:${PN} = "ecryptfs-utils"
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_webos-customization}"
 
 VIRTUAL-RUNTIME_webos-customization ?= ""
 
-WEBOS_VERSION = "2.0.0-77_7afc802ab0499a7f84e64f3f142b26682d996878"
-PR = "r33"
+SRCREV = "d43720458d0beaa63510db7f679ba726191c2605"
+
+PV = "2.0.0-81"
+
+PR = "r40"
 
 inherit webos_component
 inherit webos_cmake
-inherit webos_enhanced_submissions
 inherit webos_daemon
 inherit webos_system_bus
 #inherit webos_distro_variant_dep
-inherit webos_public_repo
+inherit webos_ports_ose_repo
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-	file://0001-com.webos.sam.role.json.in-Fix-various-outbound-perm.patch \
-	file://0002-Allow-getAppBasePath-also-from-trusted-apps.patch \
-	file://0003-RunningApp-disable-killer-timeout-for-app-relaunch.patch \
-	file://0004-Setup-QML-style-for-LuneOS.patch \
-	file://0005-Handle-noWindow-apps.patch \
-	file://0006-AppDescription.h-Add-org.webosports-as-privileged-as.patch \
-	file://0007-Setup-QT_IM_MODULE-for-client-apps.patch \
-	file://0008-NativeContainer-configure-native-apps.patch \
-	file://0009-Setup-QT_WAYLAND_SHELL_INTEGRATION-for-webOS.patch \
-	file://0010-com.webos.sam-Allow-surfacemanager-cardshell-to-launch-apps.patch \
-	file://0011-AppDescription-resolve-locale-relative-main-path-fro.patch \
-	file://0001-CMakeLists.txt-replace-std-gnu-0x-with-std-c-17-for-.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "sam.service"
@@ -49,6 +38,8 @@ WEBOS_SYSTEMD_SCRIPT = "sam.sh"
 PACKAGECONFIG:append = " ${@bb.utils.filter('DISTRO_FEATURES', 'smack', d)}"
 PACKAGECONFIG[smack] = "-Dapply_webos_smack:BOOL=True"
 
+EXTRA_OECMAKE += "-DWEBOS_CONFIG_INSTALL_TESTS:BOOL=TRUE"
+
 PACKAGES =+ "${PN}-tests"
 ALLOW_EMPTY:${PN}-tests = "1"
-FILES:${PN}-tests = "${libexecdir}/tests/*"
+FILES:${PN}-tests = "${webos_testsdir}/* ${libexecdir}/tests/*"
