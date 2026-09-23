@@ -1,0 +1,1778 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sun, 20 Sep 2026 14:00:00 +0200
+Subject: [PATCH] fingerprint: add an AIDL backend
+
+biomd only speaks the HIDL fingerprint HAL,
+android.hardware.biometrics.fingerprint@2.1. From Android 13 a new vendor
+image only has to implement the AIDL interface, and on those devices the
+HIDL service is not merely unused, it is absent: init cannot start fps_hal
+because /vendor/bin/hw/...fingerprint@2.1-service does not exist, while
+servicemanager lists
+android.hardware.biometrics.fingerprint.IFingerprint/default and the
+vendor.fingerprint-default process is up and healthy. biomd then logs
+"Failed to get fingerprint remote service" and gives up, and the sensor is
+dead on a device whose HAL is working perfectly.
+
+This is not device specific - it is every vendor that has moved, which from
+A13 onwards is all of them.
+
+Add a second backend behind the existing FingerprintBackend vtable, which
+was already HAL agnostic, so nothing above it changes. fingerprint.c tries
+AIDL first and falls back to HIDL; neither constructor is destructive when
+its HAL is missing, each just fails to find its service and returns NULL, so
+a HIDL-only device is unaffected beyond one extra servicemanager lookup.
+
+The AIDL HAL differs from HIDL in more than names:
+
+ - It lives on /dev/binder with the ordinary servicemanager rather than on
+   /dev/hwbinder with hwservicemanager.
+
+ - It is session based. IFingerprint::createSession() hands out an ISession
+   for a (sensor, user) pair and everything happens on that. The session is
+   opened once at init and kept.
+
+ - There is no global cancel. enroll() and authenticate() each return an
+   ICancellationSignal, so cancel goes to whichever signal the running
+   operation handed back.
+
+ - Error dropped LOCKOUT, which is now its own onLockoutTimed and
+   onLockoutPermanent callbacks, and AcquiredInfo shifted every value by one
+   to make room for UNKNOWN. Both are translated back onto the values
+   fingerprint.c and the D-Bus API already speak, so the vocabulary above
+   the backend is unchanged. onAuthenticationFailed is reported the way HIDL
+   reported a rejected touch, as a non-terminal UNABLE_TO_PROCESS, which is
+   what the per-touch miss feedback on the lockscreen expects.
+
+ - onEnrollmentsEnumerated and onEnrollmentsRemoved deliver the whole set in
+   one array where HIDL called back once per finger with a countdown.
+   fingerprint.c finalises on remaining == 0, so the array is replayed as
+   that sequence - including one call for an empty array, or the enrolled
+   list is never reconciled.
+
+ - The gatekeeper handshake that mints an enrollment token is AIDL too, and
+   returns a structured HardwareAuthToken rather than the packed 69-byte
+   hw_auth_token_t, so the token goes straight from IGatekeeper::verify into
+   ISession::enroll without being flattened. The password handle is kept in
+   the same /var/lib/biomd/handle-<uid>.blob the HIDL path uses. A device
+   with no AIDL gatekeeper still authenticates and removes; only enroll may
+   be refused, and that is logged rather than being fatal.
+
+Transaction codes are FIRST_CALL_TRANSACTION plus the method's index in the
+.aidl file, since declaration order is the wire contract; the enums are
+transcribed from the interface definitions and must stay in that order.
+
+Note for integrators: libgbinder picks the /dev/binder protocol and
+servicemanager flavour from ApiLevel in /etc/gbinder.conf, and the
+servicemanager flavour changes at API 35 (aidl5) and 36 (aidl6). A level
+that is too low means the AIDL service lookup fails and this backend never
+sees the HAL at all, so ApiLevel has to match the vendor's API level.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+diff --git a/Makefile b/Makefile
+index 09e5bb2..e376c34 100644
+--- a/Makefile
++++ b/Makefile
+@@ -46,6 +46,8 @@ SOURCES = src/biomd.c \
+           src/fingerprint_backend.c \
+           src/fingerprint_hidl_backend.c \
+           src/fingerprint_binder_hidl.c \
++          src/fingerprint_aidl_backend.c \
++          src/fingerprint_binder_aidl.c \
+           src/database.c \
+           src/fpd_compat.c \
+           $(SOURCES_FACE)
+diff --git a/include/fingerprint_aidl_backend.h b/include/fingerprint_aidl_backend.h
+new file mode 100644
+index 0000000..39ffd91
+--- /dev/null
++++ b/include/fingerprint_aidl_backend.h
+@@ -0,0 +1,31 @@
++/**
++ * SPDX-License-Identifier: GPL-2.0-only
++ * Copyright (C) 2026 Bardia Moshiri <bardia@furilabs.com>
++ */
++
++#ifndef FINGERPRINT_AIDL_BACKEND_H
++#define FINGERPRINT_AIDL_BACKEND_H
++
++#include <glib.h>
++#include "fingerprint_backend.h"
++
++/*
++ * The AIDL HAL reports its own Error and AcquiredInfo enumerations, which do
++ * not line up with the HIDL ones - AIDL dropped LOCKOUT from Error (it has
++ * dedicated onLockoutTimed/onLockoutPermanent callbacks instead) and shifted
++ * every AcquiredInfo value by one to make room for UNKNOWN. The binder layer
++ * translates both onto the FingerprintError/FingerprintAcquiredInfo values
++ * declared in fingerprint_hidl_backend.h, which are what fingerprint.c and the
++ * D-Bus API speak, so nothing above the backend has to know which HAL answered.
++ */
++
++/**
++* Create a new AIDL backend instance with the specified callbacks
++*
++* @param callbacks Callback functions to be invoked by the backend
++* @return A new FingerprintBackend instance or NULL if creation failed
++*/
++FingerprintBackend *
++fingerprint_aidl_backend_new(FingerprintBackendCallbacks callbacks);
++
++#endif // FINGERPRINT_AIDL_BACKEND_H
+diff --git a/include/fingerprint_binder_aidl.h b/include/fingerprint_binder_aidl.h
+new file mode 100644
+index 0000000..732ebf4
+--- /dev/null
++++ b/include/fingerprint_binder_aidl.h
+@@ -0,0 +1,145 @@
++/**
++ * SPDX-License-Identifier: GPL-2.0-only
++ * Copyright (C) 2026 Bardia Moshiri <bardia@furilabs.com>
++ */
++
++#ifndef FINGERPRINT_BINDER_AIDL_H
++#define FINGERPRINT_BINDER_AIDL_H
++
++#include <glib.h>
++#include <gio/gio.h>
++#include "fingerprint_hidl_backend.h"
++
++typedef struct _BiomFingerprintAidl BiomFingerprintAidl;
++
++/*
++ * Deliberately the same shape as FingerprintHidlCallbacks: the two HALs differ
++ * in how they say things, not in what the daemon needs to hear, and keeping one
++ * vocabulary means fingerprint.c is identical either way.
++ */
++typedef struct {
++    /**
++     * Called when enrollment progress is made
++     * @param user_data User-provided data pointer
++     * @param finger_id ID of the finger being enrolled
++     * @param group_id Group ID for the fingerprint (always 0 on AIDL)
++     * @param remaining Number of steps remaining for enrollment
++     */
++    void (*enroll_result)(gpointer user_data, guint32 finger_id, guint32 group_id, guint32 remaining);
++
++    /**
++     * Called when fingerprint sample is acquired
++     * @param user_data User-provided data pointer
++     * @param acquired_info Information about the quality of the acquired sample
++     * @param vendor_code Vendor-specific information
++     */
++    void (*acquired)(gpointer user_data, FingerprintAcquiredInfo acquired_info, guint32 vendor_code);
++
++    /**
++     * Called when authentication is successful
++     * @param user_data User-provided data pointer
++     * @param finger_id ID of the authenticated finger
++     * @param group_id Group ID for the fingerprint (always 0 on AIDL)
++     */
++    void (*authenticated)(gpointer user_data, guint32 finger_id, guint32 group_id);
++
++    /**
++     * Called when an error occurs
++     * @param user_data User-provided data pointer
++     * @param error_code Error code describing what went wrong
++     * @param vendor_code Vendor-specific error information
++     */
++    void (*error)(gpointer user_data, FingerprintError error_code, guint32 vendor_code);
++
++    /**
++     * Called when a fingerprint is removed
++     * @param user_data User-provided data pointer
++     * @param finger_id ID of the removed finger
++     * @param group_id Group ID for the fingerprint (always 0 on AIDL)
++     * @param remaining Number of fingerprints still to come in this batch
++     */
++    void (*removed)(gpointer user_data, guint32 finger_id, guint32 group_id, guint32 remaining);
++
++    /**
++     * Called when enumerating through enrolled fingerprints
++     * @param user_data User-provided data pointer
++     * @param finger_id ID of the current finger in enumeration
++     * @param group_id Group ID for the fingerprint (always 0 on AIDL)
++     * @param remaining Number of fingerprints remaining to enumerate
++     */
++    void (*enumerate)(gpointer user_data, guint32 finger_id, guint32 group_id, guint32 remaining);
++} FingerprintAidlCallbacks;
++
++/**
++ * Initialize the AIDL fingerprint backend
++ *
++ * Looks up android.hardware.biometrics.fingerprint.IFingerprint/default on
++ * /dev/binder and opens an ISession for it. Returns NULL when the service is
++ * not registered, which is the normal answer on a HIDL-only device.
++ *
++ * @param callbacks Callback functions to be invoked by the backend
++ * @param user_data User data to pass to callbacks
++ * @return A new BiomFingerprintAidl instance or NULL on failure
++ */
++BiomFingerprintAidl*
++fingerprint_aidl_init(const FingerprintAidlCallbacks *callbacks, gpointer user_data);
++
++/**
++ * Check if the AIDL fingerprint hardware is available
++ * @param aidl The AIDL instance
++ * @return TRUE if available, FALSE otherwise
++ */
++gboolean
++fingerprint_aidl_is_available(BiomFingerprintAidl *aidl);
++
++/**
++ * Set up the default configuration for the AIDL backend
++ * @param aidl The AIDL instance
++ * @return TRUE on success, FALSE on failure
++ */
++gboolean
++fingerprint_aidl_setup(BiomFingerprintAidl *aidl);
++
++/**
++ * Start fingerprint enrollment process
++ * @param aidl The AIDL instance
++ * @param password Password for secure storage
++ * @param timeout_sec Timeout in seconds for the operation
++ * @return TRUE on successful start, FALSE on failure
++ */
++gboolean
++fingerprint_aidl_perform_enrollment(BiomFingerprintAidl *aidl, const gchar *password, guint32 timeout_sec);
++
++/**
++ * Start fingerprint authentication process
++ * @param aidl The AIDL instance
++ * @return TRUE on successful start, FALSE on failure
++ */
++gboolean
++fingerprint_aidl_perform_authentication(BiomFingerprintAidl *aidl);
++
++/**
++ * Cancel current fingerprint operation
++ * @param aidl The AIDL instance
++ * @return TRUE on successful cancel, FALSE on failure
++ */
++gboolean
++fingerprint_aidl_cancel_operation(BiomFingerprintAidl *aidl);
++
++/**
++ * Remove an enrolled fingerprint
++ * @param aidl The AIDL instance
++ * @param finger_id ID of fingerprint to remove
++ * @return TRUE on success, FALSE on failure
++ */
++gboolean
++fingerprint_aidl_remove_fingerprint(BiomFingerprintAidl *aidl, guint32 finger_id);
++
++/**
++ * Clean up AIDL resources
++ * @param aidl The AIDL instance to clean up
++ */
++void
++fingerprint_aidl_cleanup(BiomFingerprintAidl *aidl);
++
++#endif // FINGERPRINT_BINDER_AIDL_H
+diff --git a/src/fingerprint.c b/src/fingerprint.c
+index 300407c..4988ca4 100644
+--- a/src/fingerprint.c
++++ b/src/fingerprint.c
+@@ -8,6 +8,7 @@
+ #include "database.h"
+ #include "fpd_compat.h"
+ #include "fingerprint_hidl_backend.h"
++#include "fingerprint_aidl_backend.h"
+ 
+ static GDBusNodeInfo *fingerprint_introspection_data = NULL;
+ 
+@@ -1012,7 +1013,24 @@ fingerprint_init(GDBusConnection *connection)
+         .user_data = NULL
+     };
+ 
+-    fingerprint_state->backend = fingerprint_hidl_backend_new(callbacks);
++    /*
++     * AIDL first. From Android 13 a new vendor image only has to implement
++     * android.hardware.biometrics.fingerprint.IFingerprint, and on those
++     * devices the HIDL service does not exist at all - init cannot even start
++     * fps_hal because the @2.1 binary is not installed. Older vendors are the
++     * other way round, and a few carry both, where AIDL is the one being
++     * maintained. Neither constructor is destructive when its HAL is missing:
++     * each one just fails to find its service and returns NULL.
++     */
++    fingerprint_state->backend = fingerprint_aidl_backend_new(callbacks);
++
++    if (fingerprint_state->backend) {
++        g_debug("Using the AIDL fingerprint HAL");
++    } else {
++        fingerprint_state->backend = fingerprint_hidl_backend_new(callbacks);
++        if (fingerprint_state->backend)
++            g_debug("Using the HIDL fingerprint HAL");
++    }
+ 
+     if (fingerprint_state->backend) {
+         fingerprint_state->backend_available = fingerprint_backend_is_available(fingerprint_state->backend);
+@@ -1024,7 +1042,9 @@ fingerprint_init(GDBusConnection *connection)
+             g_warning("Fingerprint backend not available");
+         }
+     } else {
+-        g_warning("Failed to initialize fingerprint backend");
++        g_warning("No usable fingerprint HAL: neither %s nor the HIDL "
++                  "IBiometricsFingerprint service answered",
++                  "android.hardware.biometrics.fingerprint.IFingerprint");
+     }
+ 
+     update_enrolled_fingers_from_database();
+diff --git a/src/fingerprint_aidl_backend.c b/src/fingerprint_aidl_backend.c
+new file mode 100644
+index 0000000..ebfb9a1
+--- /dev/null
++++ b/src/fingerprint_aidl_backend.c
+@@ -0,0 +1,159 @@
++/**
++ * SPDX-License-Identifier: GPL-2.0-only
++ * Copyright (C) 2026 Bardia Moshiri <bardia@furilabs.com>
++ */
++
++#include "fingerprint_aidl_backend.h"
++#include "fingerprint_binder_aidl.h"
++#include <glib.h>
++
++typedef struct {
++    BiomFingerprintAidl *aidl;
++    GDBusConnection *connection;
++} FingerprintAidlData;
++
++static void
++aidl_enroll_result_cb(gpointer user_data, guint32 finger_id, guint32 group_id, guint32 remaining)
++{
++    FingerprintBackend *backend = (FingerprintBackend *)user_data;
++    if (backend && backend->callbacks.enroll_result)
++        backend->callbacks.enroll_result(backend->callbacks.user_data, finger_id, group_id, remaining);
++}
++
++static void
++aidl_acquired_cb(gpointer user_data, FingerprintAcquiredInfo acquired_info, guint32 vendor_code)
++{
++    FingerprintBackend *backend = (FingerprintBackend *)user_data;
++    if (backend && backend->callbacks.acquired)
++        backend->callbacks.acquired(backend->callbacks.user_data, (guint32)acquired_info, vendor_code);
++}
++
++static void
++aidl_authenticated_cb(gpointer user_data, guint32 finger_id, guint32 group_id)
++{
++    FingerprintBackend *backend = (FingerprintBackend *)user_data;
++    if (backend && backend->callbacks.authenticated)
++        backend->callbacks.authenticated(backend->callbacks.user_data, finger_id, group_id);
++}
++
++static void
++aidl_error_cb(gpointer user_data, FingerprintError error_code, guint32 vendor_code)
++{
++    FingerprintBackend *backend = (FingerprintBackend *)user_data;
++    if (backend && backend->callbacks.error)
++        backend->callbacks.error(backend->callbacks.user_data, (guint32)error_code, vendor_code);
++}
++
++static void
++aidl_removed_cb(gpointer user_data, guint32 finger_id, guint32 group_id, guint32 remaining)
++{
++    FingerprintBackend *backend = (FingerprintBackend *)user_data;
++    if (backend && backend->callbacks.removed)
++        backend->callbacks.removed(backend->callbacks.user_data, finger_id, group_id, remaining);
++}
++
++static void
++aidl_enumerate_cb(gpointer user_data, guint32 finger_id, guint32 group_id, guint32 remaining)
++{
++    FingerprintBackend *backend = (FingerprintBackend *)user_data;
++    if (backend && backend->callbacks.enumerate)
++        backend->callbacks.enumerate(backend->callbacks.user_data, finger_id, group_id, remaining);
++}
++
++static gboolean
++aidl_is_available(FingerprintBackend *self)
++{
++    FingerprintAidlData *data = (FingerprintAidlData *)self->impl_data;
++    return data && data->aidl && fingerprint_aidl_is_available(data->aidl);
++}
++
++static gboolean
++aidl_setup_default(FingerprintBackend *self)
++{
++    FingerprintAidlData *data = (FingerprintAidlData *)self->impl_data;
++    return data && data->aidl && fingerprint_aidl_setup(data->aidl);
++}
++
++static gboolean
++aidl_perform_enrollment(FingerprintBackend *self, const gchar *password, guint32 timeout)
++{
++    FingerprintAidlData *data = (FingerprintAidlData *)self->impl_data;
++    return data && data->aidl && fingerprint_aidl_perform_enrollment(data->aidl, password, timeout);
++}
++
++static gboolean
++aidl_perform_authentication(FingerprintBackend *self)
++{
++    FingerprintAidlData *data = (FingerprintAidlData *)self->impl_data;
++    return data && data->aidl && fingerprint_aidl_perform_authentication(data->aidl);
++}
++
++static gboolean
++aidl_cancel_operation(FingerprintBackend *self)
++{
++    FingerprintAidlData *data = (FingerprintAidlData *)self->impl_data;
++    return data && data->aidl && fingerprint_aidl_cancel_operation(data->aidl);
++}
++
++static gboolean
++aidl_remove_fingerprint(FingerprintBackend *self, guint32 finger_id)
++{
++    FingerprintAidlData *data = (FingerprintAidlData *)self->impl_data;
++    return data && data->aidl && fingerprint_aidl_remove_fingerprint(data->aidl, finger_id);
++}
++
++static void
++aidl_cleanup(FingerprintBackend *self)
++{
++    FingerprintAidlData *data = (FingerprintAidlData *)self->impl_data;
++    if (data) {
++        if (data->aidl)
++            fingerprint_aidl_cleanup(data->aidl);
++        g_free(data);
++        self->impl_data = NULL;
++    }
++}
++
++FingerprintBackend*
++fingerprint_aidl_backend_new(FingerprintBackendCallbacks callbacks)
++{
++    FingerprintBackendVTable vtable = {
++        .is_available = aidl_is_available,
++        .setup_default = aidl_setup_default,
++        .perform_enrollment = aidl_perform_enrollment,
++        .perform_authentication = aidl_perform_authentication,
++        .cancel_operation = aidl_cancel_operation,
++        .remove_fingerprint = aidl_remove_fingerprint,
++        .cleanup = aidl_cleanup
++    };
++
++    FingerprintBackend *backend = fingerprint_backend_new(vtable, callbacks);
++    if (!backend)
++        return NULL;
++
++    FingerprintAidlData *data = g_new0(FingerprintAidlData, 1);
++    backend->impl_data = data;
++
++    FingerprintAidlCallbacks aidl_callbacks = {
++        .enroll_result = aidl_enroll_result_cb,
++        .acquired = aidl_acquired_cb,
++        .authenticated = aidl_authenticated_cb,
++        .error = aidl_error_cb,
++        .removed = aidl_removed_cb,
++        .enumerate = aidl_enumerate_cb
++    };
++
++    data->aidl = fingerprint_aidl_init(&aidl_callbacks, backend);
++    if (!data->aidl) {
++        /*
++         * Not a warning: a HIDL-only device reaches this every boot, and the
++         * caller falls back. fingerprint_aidl_init() has already said at debug
++         * level whether the service was simply absent or something failed.
++         */
++        g_debug("AIDL fingerprint HAL not usable");
++        fingerprint_backend_free(backend);
++        return NULL;
++    }
++
++    return backend;
++}
+diff --git a/src/fingerprint_binder_aidl.c b/src/fingerprint_binder_aidl.c
+new file mode 100644
+index 0000000..dedc07e
+--- /dev/null
++++ b/src/fingerprint_binder_aidl.c
+@@ -0,0 +1,1285 @@
++/**
++ * SPDX-License-Identifier: GPL-2.0-only
++ * Copyright (C) 2026 Bardia Moshiri <bardia@furilabs.com>
++ */
++
++#include "fingerprint_binder_aidl.h"
++#include <sys/stat.h>
++#include <string.h>
++#include <stdio.h>
++#include <gbinder.h>
++
++/*
++ * The AIDL biometrics HAL, for devices whose vendor no longer ships
++ * android.hardware.biometrics.fingerprint@2.1. Android 13 made the AIDL
++ * interface the only one a new vendor image has to implement, and from then on
++ * the HIDL service simply is not there: init cannot start fps_hal because
++ * /vendor/bin/hw/...fingerprint@2.1-service does not exist, while
++ * servicemanager happily lists
++ * android.hardware.biometrics.fingerprint.IFingerprint/default.
++ *
++ * Two things differ from the HIDL path beyond the names:
++ *
++ *  - AIDL lives on /dev/binder with the ordinary servicemanager, not on
++ *    /dev/hwbinder with hwservicemanager.
++ *
++ *  - It is session based. IFingerprint hands out an ISession for a
++ *    (sensor, user) pair and every operation happens on that, with the
++ *    long-running ones returning an ICancellationSignal instead of there being
++ *    one global cancel. So the session is opened once at init and kept, and
++ *    cancel goes to whichever signal the running operation handed back.
++ *
++ * Transaction codes are FIRST_CALL_TRANSACTION plus the method's index in the
++ * .aidl file - declaration order is the wire contract - so the enums below are
++ * transcribed from the interface definitions and must stay in that order.
++ */
++
++#define BINDER_DEVICE       "/dev/binder"
++
++#define FP_AIDL             "android.hardware.biometrics.fingerprint.IFingerprint"
++#define FP_AIDL_SESSION     "android.hardware.biometrics.fingerprint.ISession"
++#define FP_AIDL_CALLBACK    "android.hardware.biometrics.fingerprint.ISessionCallback"
++#define FP_AIDL_CANCEL      "android.hardware.biometrics.common.ICancellationSignal"
++#define FP_AIDL_SERVICE     FP_AIDL "/default"
++
++#define GK_AIDL             "android.hardware.gatekeeper.IGatekeeper"
++#define GK_AIDL_SERVICE     GK_AIDL "/default"
++
++/* android.hardware.biometrics.fingerprint.IFingerprint */
++enum FingerprintAidlFunctions {
++    FP_GET_SENSOR_PROPS = GBINDER_FIRST_CALL_TRANSACTION,   /* 1 */
++    FP_CREATE_SESSION,                                      /* 2 */
++};
++
++/* android.hardware.biometrics.fingerprint.ISession */
++enum SessionAidlFunctions {
++    SESSION_GENERATE_CHALLENGE = GBINDER_FIRST_CALL_TRANSACTION, /* 1 */
++    SESSION_REVOKE_CHALLENGE,                               /* 2 */
++    SESSION_ENROLL,                                         /* 3 */
++    SESSION_AUTHENTICATE,                                   /* 4 */
++    SESSION_DETECT_INTERACTION,                             /* 5 */
++    SESSION_ENUMERATE_ENROLLMENTS,                          /* 6 */
++    SESSION_REMOVE_ENROLLMENTS,                             /* 7 */
++    SESSION_GET_AUTHENTICATOR_ID,                           /* 8 */
++    SESSION_INVALIDATE_AUTHENTICATOR_ID,                    /* 9 */
++    SESSION_RESET_LOCKOUT,                                  /* 10 */
++    SESSION_CLOSE,                                          /* 11 */
++};
++
++/* android.hardware.biometrics.common.ICancellationSignal */
++enum CancellationAidlFunctions {
++    CANCELLATION_CANCEL = GBINDER_FIRST_CALL_TRANSACTION,   /* 1 */
++};
++
++/* android.hardware.biometrics.fingerprint.ISessionCallback */
++enum SessionCallbackAidlFunctions {
++    CB_ON_CHALLENGE_GENERATED = GBINDER_FIRST_CALL_TRANSACTION, /* 1 */
++    CB_ON_CHALLENGE_REVOKED,                                /* 2 */
++    CB_ON_ACQUIRED,                                         /* 3 */
++    CB_ON_ERROR,                                            /* 4 */
++    CB_ON_ENROLLMENT_PROGRESS,                              /* 5 */
++    CB_ON_AUTHENTICATION_SUCCEEDED,                         /* 6 */
++    CB_ON_AUTHENTICATION_FAILED,                            /* 7 */
++    CB_ON_LOCKOUT_TIMED,                                    /* 8 */
++    CB_ON_LOCKOUT_PERMANENT,                                /* 9 */
++    CB_ON_LOCKOUT_CLEARED,                                  /* 10 */
++    CB_ON_INTERACTION_DETECTED,                             /* 11 */
++    CB_ON_ENROLLMENTS_ENUMERATED,                           /* 12 */
++    CB_ON_ENROLLMENTS_REMOVED,                              /* 13 */
++    CB_ON_AUTHENTICATOR_ID_RETRIEVED,                       /* 14 */
++    CB_ON_AUTHENTICATOR_ID_INVALIDATED,                     /* 15 */
++    CB_ON_SESSION_CLOSED,                                   /* 16 */
++};
++
++/* android.hardware.gatekeeper.IGatekeeper */
++enum GatekeeperAidlFunctions {
++    GK_AIDL_DELETE_ALL_USERS = GBINDER_FIRST_CALL_TRANSACTION, /* 1 */
++    GK_AIDL_DELETE_USER,                                    /* 2 */
++    GK_AIDL_ENROLL,                                         /* 3 */
++    GK_AIDL_VERIFY,                                         /* 4 */
++};
++
++/*
++ * android.hardware.biometrics.fingerprint.Error. @Backing(type="byte"), but
++ * Parcel::writeByte() forwards to writeInt32(), so it is four bytes on the wire.
++ */
++typedef enum {
++    AIDL_ERROR_UNKNOWN = 0,
++    AIDL_ERROR_HW_UNAVAILABLE = 1,
++    AIDL_ERROR_UNABLE_TO_PROCESS = 2,
++    AIDL_ERROR_TIMEOUT = 3,
++    AIDL_ERROR_NO_SPACE = 4,
++    AIDL_ERROR_CANCELED = 5,
++    AIDL_ERROR_UNABLE_TO_REMOVE = 6,
++    AIDL_ERROR_VENDOR = 7,
++    AIDL_ERROR_BAD_CALIBRATION = 8,
++    AIDL_ERROR_POWER_PRESS = 9,
++} AidlError;
++
++/* android.hardware.biometrics.fingerprint.AcquiredInfo, same byte backing */
++typedef enum {
++    AIDL_ACQUIRED_UNKNOWN = 0,
++    AIDL_ACQUIRED_GOOD = 1,
++    AIDL_ACQUIRED_PARTIAL = 2,
++    AIDL_ACQUIRED_INSUFFICIENT = 3,
++    AIDL_ACQUIRED_SENSOR_DIRTY = 4,
++    AIDL_ACQUIRED_TOO_SLOW = 5,
++    AIDL_ACQUIRED_TOO_FAST = 6,
++    AIDL_ACQUIRED_VENDOR = 7,
++    AIDL_ACQUIRED_START = 8,
++    AIDL_ACQUIRED_TOO_DARK = 9,
++    AIDL_ACQUIRED_TOO_BRIGHT = 10,
++    AIDL_ACQUIRED_IMMOBILE = 11,
++    AIDL_ACQUIRED_RETRYING_CAPTURE = 12,
++    AIDL_ACQUIRED_LIFT_TOO_SOON = 13,
++    AIDL_ACQUIRED_POWER_PRESS = 14,
++} AidlAcquiredInfo;
++
++/* android.hardware.gatekeeper.IGatekeeper status codes */
++#define GK_AIDL_STATUS_OK           0
++#define GK_AIDL_STATUS_REENROLL     1
++
++/*
++ * android.hardware.security.keymint.HardwareAuthToken, as the AIDL gatekeeper
++ * returns it and as ISession::enroll wants it. Unlike HIDL - which passed the
++ * packed 69-byte hw_auth_token_t around, big-endian fields and all - AIDL keeps
++ * it a structured parcelable, so it is read into this and written straight back
++ * out without ever being flattened.
++ */
++#define HW_AUTH_TOKEN_MAX_MAC 64
++
++typedef struct {
++    gint64 challenge;
++    gint64 user_id;
++    gint64 authenticator_id;
++    gint32 authenticator_type;
++    gint64 timestamp_ms;
++    guint8 mac[HW_AUTH_TOKEN_MAX_MAC];
++    gsize mac_len;
++    gboolean valid;
++} AidlHardwareAuthToken;
++
++struct _BiomFingerprintAidl {
++    GBinderServiceManager* sm;
++
++    GBinderRemoteObject* fingerprint_remote;
++    GBinderClient* fingerprint_client;
++
++    GBinderRemoteObject* session_remote;
++    GBinderClient* session_client;
++    GBinderLocalObject* session_callback;
++
++    /*
++     * Handed back by whichever of enroll/authenticate is running. AIDL has no
++     * session-wide cancel, so this is the only way to stop an operation.
++     */
++    GBinderRemoteObject* cancel_remote;
++    GBinderClient* cancel_client;
++
++    GBinderRemoteObject* gatekeeper_remote;
++    GBinderClient* gatekeeper_client;
++
++    gint32 sensor_id;
++    gboolean available;
++
++    FingerprintAidlCallbacks callbacks;
++    gpointer user_data;
++};
++
++/*==========================================================================*
++ * Enum translation
++ *==========================================================================*/
++
++static FingerprintError
++fingerprint_aidl_map_error(gint32 aidl_error)
++{
++    switch (aidl_error) {
++        case AIDL_ERROR_UNKNOWN:            return FINGERPRINT_ERROR_HW_UNAVAILABLE;
++        case AIDL_ERROR_HW_UNAVAILABLE:     return FINGERPRINT_ERROR_HW_UNAVAILABLE;
++        case AIDL_ERROR_UNABLE_TO_PROCESS:  return FINGERPRINT_ERROR_UNABLE_TO_PROCESS;
++        case AIDL_ERROR_TIMEOUT:            return FINGERPRINT_ERROR_TIMEOUT;
++        case AIDL_ERROR_NO_SPACE:           return FINGERPRINT_ERROR_NO_SPACE;
++        case AIDL_ERROR_CANCELED:           return FINGERPRINT_ERROR_CANCELED;
++        case AIDL_ERROR_UNABLE_TO_REMOVE:   return FINGERPRINT_ERROR_UNABLE_TO_REMOVE;
++        case AIDL_ERROR_VENDOR:             return FINGERPRINT_ERROR_VENDOR;
++        /*
++         * No HIDL equivalent. A miscalibrated sensor and a power-button press
++         * that was not meant as a touch both leave the operation unable to
++         * proceed, which is what UNABLE_TO_PROCESS says to the UI.
++         */
++        case AIDL_ERROR_BAD_CALIBRATION:    return FINGERPRINT_ERROR_UNABLE_TO_PROCESS;
++        case AIDL_ERROR_POWER_PRESS:        return FINGERPRINT_ERROR_UNABLE_TO_PROCESS;
++        default:                            return FINGERPRINT_ERROR_VENDOR;
++    }
++}
++
++static FingerprintAcquiredInfo
++fingerprint_aidl_map_acquired(gint32 aidl_info)
++{
++    switch (aidl_info) {
++        case AIDL_ACQUIRED_GOOD:            return FINGERPRINT_ACQUIRED_GOOD;
++        case AIDL_ACQUIRED_PARTIAL:         return FINGERPRINT_ACQUIRED_PARTIAL;
++        case AIDL_ACQUIRED_INSUFFICIENT:    return FINGERPRINT_ACQUIRED_INSUFFICIENT;
++        case AIDL_ACQUIRED_SENSOR_DIRTY:    return FINGERPRINT_ACQUIRED_IMAGER_DIRTY;
++        case AIDL_ACQUIRED_TOO_SLOW:        return FINGERPRINT_ACQUIRED_TOO_SLOW;
++        case AIDL_ACQUIRED_TOO_FAST:        return FINGERPRINT_ACQUIRED_TOO_FAST;
++        case AIDL_ACQUIRED_VENDOR:          return FINGERPRINT_ACQUIRED_VENDOR;
++        /*
++         * START is "the sensor is now listening", and the rest are advice about
++         * a capture that did not land. HIDL has no code for any of them;
++         * INSUFFICIENT is the closest honest answer - the UI's "try again".
++         */
++        case AIDL_ACQUIRED_UNKNOWN:         return FINGERPRINT_ACQUIRED_INSUFFICIENT;
++        case AIDL_ACQUIRED_START:           return FINGERPRINT_ACQUIRED_GOOD;
++        default:                            return FINGERPRINT_ACQUIRED_INSUFFICIENT;
++    }
++}
++
++/*==========================================================================*
++ * Parcel helpers
++ *==========================================================================*/
++
++/*
++ * An AIDL byte[] is an int32 count followed by the bytes, padded out to a
++ * four-byte boundary. gbinder_writer_append_bytes() appends exactly what it is
++ * given, so the count and the padding are written here - without the padding
++ * every field after a byte[] of non-multiple-of-four length is read at the
++ * wrong offset.
++ */
++static void
++fingerprint_aidl_append_byte_array(GBinderWriter* writer, const void* data, gsize len)
++{
++    static const guint8 padding[4] = { 0, 0, 0, 0 };
++    const gsize aligned = (len + 3) & ~(gsize)3;
++
++    gbinder_writer_append_int32(writer, (gint32)len);
++    if (len) {
++        gbinder_writer_append_bytes(writer, data, len);
++        if (aligned > len)
++            gbinder_writer_append_bytes(writer, padding, aligned - len);
++    }
++}
++
++/*==========================================================================*
++ * AIDL reply plumbing
++ *==========================================================================*/
++
++/*
++ * An AIDL reply parcel starts with android::binder::Status - an int32 exception
++ * code, 0 meaning none - and the return values follow it. libgbinder writes and
++ * strips the *request* header for us but knows nothing about Status, so every
++ * reply has to be opened through here before its payload can be read.
++ */
++static gboolean
++fingerprint_aidl_reply_ok(GBinderRemoteReply* reply, int status, GBinderReader* reader,
++                          const char* what)
++{
++    gint32 exception = -1;
++
++    if (status != GBINDER_STATUS_OK || !reply) {
++        g_warning("%s: binder transaction failed (status %d)", what, status);
++        return FALSE;
++    }
++
++    gbinder_remote_reply_init_reader(reply, reader);
++
++    if (!gbinder_reader_read_int32(reader, &exception)) {
++        g_warning("%s: reply carried no status header", what);
++        return FALSE;
++    }
++
++    if (exception != 0) {
++        g_warning("%s: HAL returned exception %d", what, exception);
++        return FALSE;
++    }
++
++    return TRUE;
++}
++
++/* Fire and forget a void method whose only reply is the Status header */
++static gboolean
++fingerprint_aidl_call_void(GBinderClient* client, guint32 code, GBinderLocalRequest* req,
++                           const char* what)
++{
++    GBinderRemoteReply* reply;
++    GBinderReader reader;
++    int status = GBINDER_STATUS_FAILED;
++    gboolean ok;
++
++    reply = gbinder_client_transact_sync_reply(client, code, req, &status);
++    ok = fingerprint_aidl_reply_ok(reply, status, &reader, what);
++
++    gbinder_remote_reply_unref(reply);
++    gbinder_local_request_unref(req);
++
++    return ok;
++}
++
++/*==========================================================================*
++ * HardwareAuthToken
++ *==========================================================================*/
++
++/*
++ * Read a big-endian field out of hw_auth_token_t. The struct is packed and,
++ * unlike every other field, authenticator_type and timestamp are stored in
++ * network order - a quirk of the original hardware/libhardware definition that
++ * the HIDL gatekeeper still honours.
++ */
++static guint32
++hw_auth_token_be32(const guint8* p)
++{
++    return ((guint32)p[0] << 24) | ((guint32)p[1] << 16) |
++           ((guint32)p[2] << 8)  | (guint32)p[3];
++}
++
++static guint64
++hw_auth_token_be64(const guint8* p)
++{
++    guint64 v = 0;
++    int i;
++
++    for (i = 0; i < 8; i++)
++        v = (v << 8) | p[i];
++
++    return v;
++}
++
++static guint64
++hw_auth_token_le64(const guint8* p)
++{
++    guint64 v;
++
++    memcpy(&v, p, sizeof(v));
++    return GUINT64_FROM_LE(v);
++}
++
++/*
++ * HardwareAuthToken on the wire:
++ *
++ *   int32  parcelable size (this field included)
++ *   int64  challenge
++ *   int64  userId
++ *   int64  authenticatorId
++ *   int32  authenticatorType
++ *   Timestamp { int32 parcelable size; int64 milliSeconds; }
++ *   byte[] mac
++ */
++#define TIMESTAMP_PARCELABLE_SIZE 12
++
++static void
++fingerprint_aidl_write_auth_token(GBinderWriter* writer, const AidlHardwareAuthToken* hat)
++{
++    static const AidlHardwareAuthToken empty = { 0, 0, 0, 0, 0, { 0 }, 0, FALSE };
++    gsize mac_len;
++    gint32 size;
++
++    if (!hat)
++        hat = &empty;
++
++    mac_len = hat->mac_len;
++
++    /* 4 size + 8 challenge + 8 user + 8 authenticator + 4 type + 12 timestamp
++     * + 4 mac count + the padded mac itself */
++    size = (gint32)(48 + ((mac_len + 3) & ~(gsize)3));
++
++    gbinder_writer_append_int32(writer, size);
++    gbinder_writer_append_int64(writer, hat->challenge);
++    gbinder_writer_append_int64(writer, hat->user_id);
++    gbinder_writer_append_int64(writer, hat->authenticator_id);
++    gbinder_writer_append_int32(writer, hat->authenticator_type);
++
++    gbinder_writer_append_int32(writer, TIMESTAMP_PARCELABLE_SIZE);
++    gbinder_writer_append_int64(writer, hat->timestamp_ms);
++
++    fingerprint_aidl_append_byte_array(writer, hat->mac, mac_len);
++}
++
++static gboolean
++fingerprint_aidl_read_auth_token(GBinderReader* reader, AidlHardwareAuthToken* hat)
++{
++    gint32 parcelable_size = 0, timestamp_size = 0;
++    const void* mac;
++    gsize mac_len = 0;
++
++    memset(hat, 0, sizeof(*hat));
++
++    if (!gbinder_reader_read_int32(reader, &parcelable_size) ||
++        !gbinder_reader_read_int64(reader, &hat->challenge) ||
++        !gbinder_reader_read_int64(reader, &hat->user_id) ||
++        !gbinder_reader_read_int64(reader, &hat->authenticator_id) ||
++        !gbinder_reader_read_int32(reader, &hat->authenticator_type) ||
++        !gbinder_reader_read_int32(reader, &timestamp_size) ||
++        !gbinder_reader_read_int64(reader, &hat->timestamp_ms))
++        return FALSE;
++
++    mac = gbinder_reader_read_byte_array(reader, &mac_len);
++    if (!mac)
++        return FALSE;
++
++    if (mac_len > HW_AUTH_TOKEN_MAX_MAC) {
++        g_warning("HardwareAuthToken carries a %zu byte mac, which is longer than "
++                  "anything this understands", mac_len);
++        return FALSE;
++    }
++
++    if (mac_len)
++        memcpy(hat->mac, mac, mac_len);
++
++    hat->mac_len = mac_len;
++    hat->valid = TRUE;
++
++    return TRUE;
++}
++
++/*==========================================================================*
++ * Gatekeeper
++ *
++ * Same dance as the HIDL backend: the HAL will not enroll a finger without a
++ * HardwareAuthToken proving a recent password check, so a throwaway password is
++ * enrolled once and verified each time to mint one. The handle is kept in the
++ * same /var/lib/biomd/handle-<uid>.blob the HIDL path uses, so a device that
++ * changes HAL generation does not have to re-enroll.
++ *==========================================================================*/
++
++static gboolean
++fingerprint_aidl_gatekeeper_load_handle(guint32 uid, void** handle, guint32* handle_size)
++{
++    FILE* fp;
++    gboolean success = FALSE;
++    char* path = g_strdup_printf("/var/lib/biomd/handle-%u.blob", uid);
++
++    *handle = NULL;
++    *handle_size = 0;
++
++    fp = fopen(path, "rb");
++    if (fp) {
++        long size;
++
++        fseek(fp, 0, SEEK_END);
++        size = ftell(fp);
++        fseek(fp, 0, SEEK_SET);
++
++        if (size > 0) {
++            *handle = g_malloc(size);
++            if (fread(*handle, 1, size, fp) == (size_t)size) {
++                *handle_size = (guint32)size;
++                success = TRUE;
++            } else {
++                g_free(*handle);
++                *handle = NULL;
++            }
++        }
++        fclose(fp);
++    }
++
++    g_free(path);
++    return success;
++}
++
++static gboolean
++fingerprint_aidl_gatekeeper_save_handle(guint32 uid, const void* data, guint32 size)
++{
++    FILE* fp;
++    gboolean success = FALSE;
++    char* path = g_strdup_printf("/var/lib/biomd/handle-%u.blob", uid);
++    char* tmp = g_strdup_printf("%s.tmp", path);
++    struct stat st = { 0 };
++
++    if (stat("/var/lib/biomd", &st) == -1 && mkdir("/var/lib/biomd", 0700) == -1) {
++        g_warning("Failed to create /var/lib/biomd");
++        goto out;
++    }
++
++    fp = fopen(tmp, "wb");
++    if (fp) {
++        if (fwrite(data, 1, size, fp) == size)
++            success = TRUE;
++        fclose(fp);
++
++        if (success && rename(tmp, path) != 0) {
++            g_warning("Failed to store gatekeeper handle");
++            success = FALSE;
++        }
++        if (!success)
++            unlink(tmp);
++        if (success)
++            chmod(path, 0600);
++    }
++
++out:
++    g_free(tmp);
++    g_free(path);
++    return success;
++}
++
++static void
++fingerprint_aidl_gatekeeper_delete_user(BiomFingerprintAidl* self, guint32 uid)
++{
++    GBinderLocalRequest* req;
++    GBinderWriter writer;
++
++    if (!self->gatekeeper_client)
++        return;
++
++    /* void deleteUser(in int uid); */
++    req = gbinder_client_new_request2(self->gatekeeper_client, GK_AIDL_DELETE_USER);
++    gbinder_local_request_init_writer(req, &writer);
++    gbinder_writer_append_int32(&writer, uid);
++
++    fingerprint_aidl_call_void(self->gatekeeper_client, GK_AIDL_DELETE_USER, req,
++                               "IGatekeeper::deleteUser");
++}
++
++static gboolean
++fingerprint_aidl_gatekeeper_enroll(BiomFingerprintAidl* self, guint32 uid, const char* password)
++{
++    GBinderLocalRequest* req;
++    GBinderRemoteReply* reply;
++    GBinderWriter writer;
++    GBinderReader reader;
++    int status = GBINDER_STATUS_FAILED;
++    gboolean success = FALSE;
++    gint32 parcelable_size = 0, status_code = 0, timeout_ms = 0;
++    gint64 secure_user_id = 0;
++    const void* data;
++    gsize len = 0;
++
++    if (!self->gatekeeper_client)
++        return FALSE;
++
++    /*
++     * GatekeeperEnrollResponse enroll(in int uid, in byte[] currentPasswordHandle,
++     *     in byte[] currentPassword, in byte[] desiredPassword);
++     *
++     * Enrolling fresh rather than replacing, so the two "current" arrays go out
++     * empty.
++     */
++    req = gbinder_client_new_request2(self->gatekeeper_client, GK_AIDL_ENROLL);
++    gbinder_local_request_init_writer(req, &writer);
++    gbinder_writer_append_int32(&writer, uid);
++    fingerprint_aidl_append_byte_array(&writer, NULL, 0);
++    fingerprint_aidl_append_byte_array(&writer, NULL, 0);
++    fingerprint_aidl_append_byte_array(&writer, password, strlen(password));
++
++    reply = gbinder_client_transact_sync_reply(self->gatekeeper_client, GK_AIDL_ENROLL,
++                                               req, &status);
++
++    if (fingerprint_aidl_reply_ok(reply, status, &reader, "IGatekeeper::enroll")) {
++        /* GatekeeperEnrollResponse { int statusCode; int timeoutMs;
++         *                            long secureUserId; byte[] data; } */
++        if (gbinder_reader_read_int32(&reader, &parcelable_size) &&
++            gbinder_reader_read_int32(&reader, &status_code) &&
++            gbinder_reader_read_int32(&reader, &timeout_ms) &&
++            gbinder_reader_read_int64(&reader, &secure_user_id) &&
++            (data = gbinder_reader_read_byte_array(&reader, &len)) != NULL &&
++            len > 0) {
++
++            if (status_code == GK_AIDL_STATUS_OK || status_code == GK_AIDL_STATUS_REENROLL)
++                success = fingerprint_aidl_gatekeeper_save_handle(uid, data, (guint32)len);
++            else
++                g_warning("IGatekeeper::enroll refused with status %d (retry in %d ms)",
++                          status_code, timeout_ms);
++        } else {
++            g_warning("IGatekeeper::enroll reply did not carry a password handle");
++        }
++    }
++
++    gbinder_remote_reply_unref(reply);
++    gbinder_local_request_unref(req);
++
++    return success;
++}
++
++static gboolean
++fingerprint_aidl_gatekeeper_verify(BiomFingerprintAidl* self, guint32 uid, guint64 challenge,
++                                   const void* handle, guint32 handle_size,
++                                   const char* password, AidlHardwareAuthToken* auth_token)
++{
++    GBinderLocalRequest* req;
++    GBinderRemoteReply* reply;
++    GBinderWriter writer;
++    GBinderReader reader;
++    int status = GBINDER_STATUS_FAILED;
++    gboolean success = FALSE;
++    gint32 parcelable_size = 0, status_code = 0, timeout_ms = 0;
++
++    if (!self->gatekeeper_client)
++        return FALSE;
++
++    /*
++     * GatekeeperVerifyResponse verify(in int uid, in long challenge,
++     *     in byte[] enrolledPasswordHandle, in byte[] providedPassword);
++     */
++    req = gbinder_client_new_request2(self->gatekeeper_client, GK_AIDL_VERIFY);
++    gbinder_local_request_init_writer(req, &writer);
++    gbinder_writer_append_int32(&writer, uid);
++    gbinder_writer_append_int64(&writer, challenge);
++    fingerprint_aidl_append_byte_array(&writer, handle, handle_size);
++    fingerprint_aidl_append_byte_array(&writer, password, strlen(password));
++
++    reply = gbinder_client_transact_sync_reply(self->gatekeeper_client, GK_AIDL_VERIFY,
++                                               req, &status);
++
++    if (fingerprint_aidl_reply_ok(reply, status, &reader, "IGatekeeper::verify")) {
++        /*
++         * GatekeeperVerifyResponse { int statusCode; int timeoutMs;
++         *                            HardwareAuthToken hardwareAuthToken; }
++         *
++         * The token arrives structured, so it goes straight into the shape
++         * ISession::enroll wants - no hw_auth_token_t in sight.
++         */
++        if (gbinder_reader_read_int32(&reader, &parcelable_size) &&
++            gbinder_reader_read_int32(&reader, &status_code) &&
++            gbinder_reader_read_int32(&reader, &timeout_ms)) {
++
++            if (status_code == GK_AIDL_STATUS_OK || status_code == GK_AIDL_STATUS_REENROLL) {
++                success = fingerprint_aidl_read_auth_token(&reader, auth_token);
++                if (!success)
++                    g_warning("IGatekeeper::verify returned an unreadable HardwareAuthToken");
++            } else {
++                g_warning("IGatekeeper::verify refused with status %d (retry in %d ms)",
++                          status_code, timeout_ms);
++            }
++        } else {
++            g_warning("IGatekeeper::verify reply was malformed");
++        }
++    }
++
++    gbinder_remote_reply_unref(reply);
++    gbinder_local_request_unref(req);
++
++    return success;
++}
++
++/*==========================================================================*
++ * ISessionCallback
++ *==========================================================================*/
++
++static int
++fingerprint_aidl_handle_acquired(BiomFingerprintAidl* self, GBinderReader* reader)
++{
++    gint32 info, vendor_code;
++
++    /* void onAcquired(in AcquiredInfo info, in int vendorCode); */
++    if (gbinder_reader_read_int32(reader, &info) &&
++        gbinder_reader_read_int32(reader, &vendor_code)) {
++
++        g_debug("onAcquired info: %d, vendor_code: %d", info, vendor_code);
++
++        if (self->callbacks.acquired)
++            self->callbacks.acquired(self->user_data,
++                                     fingerprint_aidl_map_acquired(info),
++                                     (guint32)vendor_code);
++
++        return GBINDER_STATUS_OK;
++    }
++
++    g_warning("Failed to parse ISessionCallback::onAcquired payload");
++    return GBINDER_STATUS_FAILED;
++}
++
++static int
++fingerprint_aidl_handle_error(BiomFingerprintAidl* self, GBinderReader* reader)
++{
++    gint32 error, vendor_code;
++
++    /* void onError(in Error error, in int vendorCode); */
++    if (gbinder_reader_read_int32(reader, &error) &&
++        gbinder_reader_read_int32(reader, &vendor_code)) {
++
++        g_debug("onError error: %d, vendor_code: %d", error, vendor_code);
++
++        if (self->callbacks.error)
++            self->callbacks.error(self->user_data,
++                                  fingerprint_aidl_map_error(error),
++                                  (guint32)vendor_code);
++
++        return GBINDER_STATUS_OK;
++    }
++
++    g_warning("Failed to parse ISessionCallback::onError payload");
++    return GBINDER_STATUS_FAILED;
++}
++
++static int
++fingerprint_aidl_handle_enrollment_progress(BiomFingerprintAidl* self, GBinderReader* reader)
++{
++    gint32 enrollment_id, remaining;
++
++    /* void onEnrollmentProgress(in int enrollmentId, int remaining); */
++    if (gbinder_reader_read_int32(reader, &enrollment_id) &&
++        gbinder_reader_read_int32(reader, &remaining)) {
++
++        g_debug("onEnrollmentProgress enrollment_id: %d, remaining: %d",
++                enrollment_id, remaining);
++
++        if (self->callbacks.enroll_result)
++            self->callbacks.enroll_result(self->user_data, (guint32)enrollment_id,
++                                          0 /* no group on AIDL */, (guint32)remaining);
++
++        return GBINDER_STATUS_OK;
++    }
++
++    g_warning("Failed to parse ISessionCallback::onEnrollmentProgress payload");
++    return GBINDER_STATUS_FAILED;
++}
++
++static int
++fingerprint_aidl_handle_authentication_succeeded(BiomFingerprintAidl* self, GBinderReader* reader)
++{
++    gint32 enrollment_id;
++
++    /*
++     * void onAuthenticationSucceeded(in int enrollmentId, in HardwareAuthToken hat);
++     * The token is for keystore; nothing here consumes it, so it is left unread.
++     */
++    if (gbinder_reader_read_int32(reader, &enrollment_id)) {
++        g_debug("onAuthenticationSucceeded enrollment_id: %d", enrollment_id);
++
++        if (self->callbacks.authenticated)
++            self->callbacks.authenticated(self->user_data, (guint32)enrollment_id, 0);
++
++        return GBINDER_STATUS_OK;
++    }
++
++    g_warning("Failed to parse ISessionCallback::onAuthenticationSucceeded payload");
++    return GBINDER_STATUS_FAILED;
++}
++
++static int
++fingerprint_aidl_handle_authentication_failed(BiomFingerprintAidl* self)
++{
++    g_debug("onAuthenticationFailed");
++
++    /*
++     * A rejected touch. HIDL reported this as onError(UNABLE_TO_PROCESS) with
++     * the sensor still armed, and fingerprint.c already treats that as a
++     * non-terminal miss, so it is reported the same way here.
++     */
++    if (self->callbacks.error)
++        self->callbacks.error(self->user_data, FINGERPRINT_ERROR_UNABLE_TO_PROCESS, 0);
++
++    return GBINDER_STATUS_OK;
++}
++
++/*
++ * onEnrollmentsEnumerated and onEnrollmentsRemoved each deliver the whole set in
++ * one array, where HIDL called back once per finger with a countdown.
++ * fingerprint.c is written against the countdown - it finalises when remaining
++ * reaches 0 - so the array is replayed as that sequence. An empty array still
++ * has to produce one call, or the "enumeration finished" edge never arrives and
++ * the enrolled list is never reconciled.
++ */
++static int
++fingerprint_aidl_replay_id_array(BiomFingerprintAidl* self, GBinderReader* reader,
++                                 void (*cb)(gpointer, guint32, guint32, guint32),
++                                 const char* what)
++{
++    gint32 count = 0;
++    gint32 i;
++
++    if (!gbinder_reader_read_int32(reader, &count)) {
++        g_warning("Failed to parse %s payload", what);
++        return GBINDER_STATUS_FAILED;
++    }
++
++    /* A null array is serialised as -1 and means the same as empty here */
++    if (count < 0)
++        count = 0;
++
++    g_debug("%s: %d enrollment(s)", what, count);
++
++    if (count == 0) {
++        if (cb)
++            cb(self->user_data, 0, 0, 0);
++        return GBINDER_STATUS_OK;
++    }
++
++    for (i = 0; i < count; i++) {
++        gint32 id;
++
++        if (!gbinder_reader_read_int32(reader, &id)) {
++            g_warning("Failed to parse %s entry %d", what, i);
++            return GBINDER_STATUS_FAILED;
++        }
++
++        if (cb)
++            cb(self->user_data, (guint32)id, 0, (guint32)(count - 1 - i));
++    }
++
++    return GBINDER_STATUS_OK;
++}
++
++static GBinderLocalReply*
++fingerprint_aidl_session_callback(GBinderLocalObject* obj, GBinderRemoteRequest* req,
++                                  guint code, guint flags, int* status, void* user_data)
++{
++    BiomFingerprintAidl* self = (BiomFingerprintAidl*) user_data;
++    const char* iface = gbinder_remote_request_interface(req);
++
++    if (!g_strcmp0(iface, FP_AIDL_CALLBACK)) {
++        GBinderReader reader;
++        gbinder_remote_request_init_reader(req, &reader);
++
++        switch (code) {
++        case CB_ON_ACQUIRED:
++            *status = fingerprint_aidl_handle_acquired(self, &reader);
++            break;
++        case CB_ON_ERROR:
++            *status = fingerprint_aidl_handle_error(self, &reader);
++            break;
++        case CB_ON_ENROLLMENT_PROGRESS:
++            *status = fingerprint_aidl_handle_enrollment_progress(self, &reader);
++            break;
++        case CB_ON_AUTHENTICATION_SUCCEEDED:
++            *status = fingerprint_aidl_handle_authentication_succeeded(self, &reader);
++            break;
++        case CB_ON_AUTHENTICATION_FAILED:
++            *status = fingerprint_aidl_handle_authentication_failed(self);
++            break;
++        case CB_ON_ENROLLMENTS_ENUMERATED:
++            *status = fingerprint_aidl_replay_id_array(self, &reader,
++                self->callbacks.enumerate, "onEnrollmentsEnumerated");
++            break;
++        case CB_ON_ENROLLMENTS_REMOVED:
++            *status = fingerprint_aidl_replay_id_array(self, &reader,
++                self->callbacks.removed, "onEnrollmentsRemoved");
++            break;
++        case CB_ON_LOCKOUT_TIMED:
++        case CB_ON_LOCKOUT_PERMANENT:
++            /*
++             * AIDL split lockout out of Error; fold it back so the existing
++             * FPERROR_LOCKOUT handling and the lockscreen's retry budget
++             * behave as they do on HIDL.
++             */
++            g_debug("onLockout (code %u)", code);
++            if (self->callbacks.error)
++                self->callbacks.error(self->user_data, FINGERPRINT_ERROR_LOCKOUT, 0);
++            *status = GBINDER_STATUS_OK;
++            break;
++        case CB_ON_CHALLENGE_GENERATED:
++        case CB_ON_CHALLENGE_REVOKED:
++        case CB_ON_LOCKOUT_CLEARED:
++        case CB_ON_INTERACTION_DETECTED:
++        case CB_ON_AUTHENTICATOR_ID_RETRIEVED:
++        case CB_ON_AUTHENTICATOR_ID_INVALIDATED:
++        case CB_ON_SESSION_CLOSED:
++            /*
++             * Nothing here drives these, but they are part of the interface and
++             * the HAL blocks on the reply, so they are acknowledged rather than
++             * refused.
++             */
++            g_debug("ISessionCallback %u acknowledged", code);
++            *status = GBINDER_STATUS_OK;
++            break;
++        default:
++            g_warning("ISessionCallback %u unknown callback", code);
++            *status = GBINDER_STATUS_FAILED;
++            break;
++        }
++    } else {
++        g_warning("Session callback event unhandled: %s %u", iface, code);
++        *status = GBINDER_STATUS_FAILED;
++    }
++
++    /* Every ISessionCallback method returns void: the reply is just Status */
++    return (*status == GBINDER_STATUS_OK) ? gbinder_local_reply_append_int32
++        (gbinder_local_object_new_reply(obj), 0) : NULL;
++}
++
++/*==========================================================================*
++ * Session setup
++ *==========================================================================*/
++
++/*
++ * getSensorProps() answers SensorProps[], whose first field is a CommonProps
++ * whose first field is the sensor id. Reading further would mean tracking a
++ * parcelable that has grown every release, and the id is all createSession
++ * needs, so this reads just far enough and leaves the rest of the parcel alone.
++ */
++static gint32
++fingerprint_aidl_get_sensor_id(BiomFingerprintAidl* self)
++{
++    GBinderLocalRequest* req;
++    GBinderRemoteReply* reply;
++    GBinderReader reader;
++    int status = GBINDER_STATUS_FAILED;
++    gint32 sensor_id = 0;
++    gint32 count = 0, props_size = 0, common_size = 0;
++
++    req = gbinder_client_new_request2(self->fingerprint_client, FP_GET_SENSOR_PROPS);
++    reply = gbinder_client_transact_sync_reply(self->fingerprint_client,
++                                                FP_GET_SENSOR_PROPS, req, &status);
++
++    if (fingerprint_aidl_reply_ok(reply, status, &reader, "IFingerprint::getSensorProps")) {
++        if (gbinder_reader_read_int32(&reader, &count) && count > 0 &&
++            gbinder_reader_read_int32(&reader, &props_size) &&
++            gbinder_reader_read_int32(&reader, &common_size) &&
++            gbinder_reader_read_int32(&reader, &sensor_id)) {
++            g_debug("IFingerprint::getSensorProps reported %d sensor(s), first id %d",
++                    count, sensor_id);
++        } else {
++            g_warning("Could not read a sensor id out of getSensorProps, assuming 0");
++            sensor_id = 0;
++        }
++    } else {
++        g_warning("IFingerprint::getSensorProps failed, assuming sensor id 0");
++    }
++
++    gbinder_remote_reply_unref(reply);
++    gbinder_local_request_unref(req);
++
++    return sensor_id;
++}
++
++static gboolean
++fingerprint_aidl_create_session(BiomFingerprintAidl* self)
++{
++    GBinderLocalRequest* req;
++    GBinderRemoteReply* reply;
++    GBinderWriter writer;
++    GBinderReader reader;
++    int status = GBINDER_STATUS_FAILED;
++    gboolean success = FALSE;
++
++    /* ISession createSession(in int sensorId, in int userId, in ISessionCallback cb); */
++    req = gbinder_client_new_request2(self->fingerprint_client, FP_CREATE_SESSION);
++    gbinder_local_request_init_writer(req, &writer);
++    gbinder_writer_append_int32(&writer, self->sensor_id);
++    gbinder_writer_append_int32(&writer, 0 /* userId */);
++    gbinder_writer_append_local_object(&writer, self->session_callback);
++
++    reply = gbinder_client_transact_sync_reply(self->fingerprint_client,
++                                                FP_CREATE_SESSION, req, &status);
++
++    if (fingerprint_aidl_reply_ok(reply, status, &reader, "IFingerprint::createSession")) {
++        self->session_remote = gbinder_reader_read_object(&reader);
++        if (self->session_remote) {
++            self->session_client = gbinder_client_new(self->session_remote, FP_AIDL_SESSION);
++            success = (self->session_client != NULL);
++        } else {
++            g_warning("IFingerprint::createSession returned no session object");
++        }
++    }
++
++    gbinder_remote_reply_unref(reply);
++    gbinder_local_request_unref(req);
++
++    return success;
++}
++
++/* Take the ICancellationSignal a long-running operation handed back */
++static void
++fingerprint_aidl_take_cancel_signal(BiomFingerprintAidl* self, GBinderReader* reader)
++{
++    GBinderRemoteObject* obj;
++
++    g_clear_pointer(&self->cancel_client, gbinder_client_unref);
++    g_clear_pointer(&self->cancel_remote, gbinder_remote_object_unref);
++
++    obj = gbinder_reader_read_object(reader);
++    if (obj) {
++        self->cancel_remote = obj;
++        self->cancel_client = gbinder_client_new(obj, FP_AIDL_CANCEL);
++    } else {
++        g_debug("Operation returned no cancellation signal; cancel will be a no-op");
++    }
++}
++
++/*==========================================================================*
++ * Public interface
++ *==========================================================================*/
++
++BiomFingerprintAidl*
++fingerprint_aidl_init(const FingerprintAidlCallbacks* callbacks, gpointer user_data)
++{
++    GBinderServiceManager* sm;
++    GBinderRemoteObject* fingerprint_remote;
++    BiomFingerprintAidl* self;
++
++    g_debug("Initializing fingerprint AIDL interface");
++
++    sm = gbinder_servicemanager_new(BINDER_DEVICE);
++    if (!sm) {
++        g_warning("Failed to create gbinder service manager for %s", BINDER_DEVICE);
++        return NULL;
++    }
++
++    fingerprint_remote = gbinder_servicemanager_get_service_sync(sm, FP_AIDL_SERVICE, NULL);
++    if (!fingerprint_remote) {
++        /*
++         * Expected on a HIDL device, so this is not a warning: the caller tries
++         * the HIDL backend next.
++         */
++        g_debug("%s is not registered", FP_AIDL_SERVICE);
++        gbinder_servicemanager_unref(sm);
++        return NULL;
++    }
++
++    self = g_new0(BiomFingerprintAidl, 1);
++    self->sm = sm;
++    self->fingerprint_remote = fingerprint_remote;
++    self->available = FALSE;
++
++    if (callbacks)
++        self->callbacks = *callbacks;
++
++    self->user_data = user_data;
++
++    self->fingerprint_client = gbinder_client_new(self->fingerprint_remote, FP_AIDL);
++    if (!self->fingerprint_client) {
++        g_warning("Failed to create fingerprint client");
++        fingerprint_aidl_cleanup(self);
++        return NULL;
++    }
++
++    /*
++     * The HAL is @VintfStability and refuses a callback object that does not
++     * declare the same, so this has to be set before the object goes across.
++     */
++    self->session_callback = gbinder_servicemanager_new_local_object(
++        sm, FP_AIDL_CALLBACK, fingerprint_aidl_session_callback, self);
++    if (!self->session_callback) {
++        g_warning("Failed to create session callback object");
++        fingerprint_aidl_cleanup(self);
++        return NULL;
++    }
++    gbinder_local_object_set_stability(self->session_callback, GBINDER_STABILITY_VINTF);
++
++    self->sensor_id = fingerprint_aidl_get_sensor_id(self);
++
++    if (!fingerprint_aidl_create_session(self)) {
++        g_warning("Failed to open an AIDL fingerprint session");
++        fingerprint_aidl_cleanup(self);
++        return NULL;
++    }
++
++    /*
++     * Gatekeeper is only needed to mint an enrollment token. A device without it
++     * can still authenticate and remove, so this is not fatal.
++     */
++    self->gatekeeper_remote = gbinder_servicemanager_get_service_sync(sm, GK_AIDL_SERVICE, NULL);
++    if (self->gatekeeper_remote) {
++        self->gatekeeper_client = gbinder_client_new(self->gatekeeper_remote, GK_AIDL);
++    } else {
++        g_warning("%s is not registered; enrollment may be refused by the HAL",
++                  GK_AIDL_SERVICE);
++    }
++
++    self->available = TRUE;
++    g_debug("Fingerprint AIDL initialization complete, sensor id: %d", self->sensor_id);
++
++    return self;
++}
++
++gboolean
++fingerprint_aidl_is_available(BiomFingerprintAidl* self)
++{
++    return self && self->available;
++}
++
++gboolean
++fingerprint_aidl_setup(BiomFingerprintAidl* self)
++{
++    GBinderLocalRequest* req;
++
++    if (!self || !self->available)
++        return FALSE;
++
++    /*
++     * HIDL needed setActiveGroup before anything else; AIDL binds the user to
++     * the session instead, so the only setup left is asking what is enrolled.
++     * The answer arrives on onEnrollmentsEnumerated.
++     */
++    req = gbinder_client_new_request2(self->session_client, SESSION_ENUMERATE_ENROLLMENTS);
++    return fingerprint_aidl_call_void(self->session_client, SESSION_ENUMERATE_ENROLLMENTS,
++                                      req, "ISession::enumerateEnrollments");
++}
++
++gboolean
++fingerprint_aidl_perform_enrollment(BiomFingerprintAidl* self, const gchar* password,
++                                    guint32 timeout_sec)
++{
++    GBinderLocalRequest* req;
++    GBinderRemoteReply* reply;
++    GBinderWriter writer;
++    GBinderReader reader;
++    int status = GBINDER_STATUS_FAILED;
++    AidlHardwareAuthToken auth_token;
++    gboolean have_token = FALSE;
++    gboolean success = FALSE;
++    void* handle = NULL;
++    guint32 handle_size = 0;
++
++    if (!self || !self->available) {
++        g_warning("Fingerprint AIDL interface not available for enrollment");
++        return FALSE;
++    }
++
++    g_debug("Starting AIDL fingerprint enrollment sequence");
++
++    memset(&auth_token, 0, sizeof(auth_token));
++
++    if (!password)
++        password = "default_password";
++
++    if (self->gatekeeper_client) {
++        if (!fingerprint_aidl_gatekeeper_load_handle(0, &handle, &handle_size)) {
++            g_debug("No existing handle found, enrolling password first");
++            fingerprint_aidl_gatekeeper_delete_user(self, 0);
++            fingerprint_aidl_gatekeeper_enroll(self, 0, password);
++            fingerprint_aidl_gatekeeper_load_handle(0, &handle, &handle_size);
++        }
++
++        if (handle) {
++            /*
++             * HIDL took the challenge from preEnroll(). AIDL's equivalent is
++             * generateChallenge(), which answers asynchronously on
++             * onChallengeGenerated - and no HAL seen so far checks the challenge
++             * in the token it is given at enroll time, only the MAC. So the
++             * token is minted against challenge 0 rather than adding a round
++             * trip and a wait for a value nothing verifies.
++             */
++            have_token = fingerprint_aidl_gatekeeper_verify(self, 0, 0, handle, handle_size,
++                                                            password, &auth_token);
++            g_free(handle);
++        }
++
++        if (!have_token)
++            g_warning("Could not mint an auth token; enrolling with an empty one");
++    }
++
++    /* ICancellationSignal enroll(in HardwareAuthToken hat); */
++    req = gbinder_client_new_request2(self->session_client, SESSION_ENROLL);
++    gbinder_local_request_init_writer(req, &writer);
++    fingerprint_aidl_write_auth_token(&writer, have_token ? &auth_token : NULL);
++
++    reply = gbinder_client_transact_sync_reply(self->session_client, SESSION_ENROLL,
++                                                req, &status);
++
++    if (fingerprint_aidl_reply_ok(reply, status, &reader, "ISession::enroll")) {
++        fingerprint_aidl_take_cancel_signal(self, &reader);
++        success = TRUE;
++    }
++
++    gbinder_remote_reply_unref(reply);
++    gbinder_local_request_unref(req);
++
++    return success;
++}
++
++gboolean
++fingerprint_aidl_perform_authentication(BiomFingerprintAidl* self)
++{
++    GBinderLocalRequest* req;
++    GBinderRemoteReply* reply;
++    GBinderWriter writer;
++    GBinderReader reader;
++    int status = GBINDER_STATUS_FAILED;
++    gboolean success = FALSE;
++
++    if (!self || !self->available) {
++        g_warning("Fingerprint AIDL interface not available for authentication");
++        return FALSE;
++    }
++
++    /*
++     * ICancellationSignal authenticate(in long operationId);
++     * operationId 0 means "not tied to a keystore operation", which is what an
++     * unlock check is.
++     */
++    req = gbinder_client_new_request2(self->session_client, SESSION_AUTHENTICATE);
++    gbinder_local_request_init_writer(req, &writer);
++    gbinder_writer_append_int64(&writer, 0);
++
++    reply = gbinder_client_transact_sync_reply(self->session_client, SESSION_AUTHENTICATE,
++                                                req, &status);
++
++    if (fingerprint_aidl_reply_ok(reply, status, &reader, "ISession::authenticate")) {
++        fingerprint_aidl_take_cancel_signal(self, &reader);
++        success = TRUE;
++    }
++
++    gbinder_remote_reply_unref(reply);
++    gbinder_local_request_unref(req);
++
++    return success;
++}
++
++gboolean
++fingerprint_aidl_cancel_operation(BiomFingerprintAidl* self)
++{
++    GBinderLocalRequest* req;
++    gboolean ok;
++
++    if (!self || !self->available)
++        return FALSE;
++
++    if (!self->cancel_client) {
++        g_debug("No operation to cancel");
++        return FALSE;
++    }
++
++    /* void cancel(); */
++    req = gbinder_client_new_request2(self->cancel_client, CANCELLATION_CANCEL);
++    ok = fingerprint_aidl_call_void(self->cancel_client, CANCELLATION_CANCEL, req,
++                                    "ICancellationSignal::cancel");
++
++    /*
++     * The HAL answers with onError(CANCELED) and the signal is spent either way,
++     * so drop it here rather than leaving a stale one to be cancelled twice.
++     */
++    g_clear_pointer(&self->cancel_client, gbinder_client_unref);
++    g_clear_pointer(&self->cancel_remote, gbinder_remote_object_unref);
++
++    return ok;
++}
++
++gboolean
++fingerprint_aidl_remove_fingerprint(BiomFingerprintAidl* self, guint32 finger_id)
++{
++    GBinderLocalRequest* req;
++    GBinderWriter writer;
++
++    if (!self || !self->available)
++        return FALSE;
++
++    /* void removeEnrollments(in int[] enrollmentIds); */
++    req = gbinder_client_new_request2(self->session_client, SESSION_REMOVE_ENROLLMENTS);
++    gbinder_local_request_init_writer(req, &writer);
++    gbinder_writer_append_int32(&writer, 1);
++    gbinder_writer_append_int32(&writer, (gint32)finger_id);
++
++    return fingerprint_aidl_call_void(self->session_client, SESSION_REMOVE_ENROLLMENTS,
++                                      req, "ISession::removeEnrollments");
++}
++
++void
++fingerprint_aidl_cleanup(BiomFingerprintAidl* self)
++{
++    if (!self)
++        return;
++
++    self->available = FALSE;
++
++    if (self->session_client) {
++        /* void close(); - lets the HAL release the sensor for the next client */
++        GBinderLocalRequest* req = gbinder_client_new_request2(self->session_client,
++                                                               SESSION_CLOSE);
++        fingerprint_aidl_call_void(self->session_client, SESSION_CLOSE, req,
++                                   "ISession::close");
++    }
++
++    g_clear_pointer(&self->cancel_client, gbinder_client_unref);
++    g_clear_pointer(&self->cancel_remote, gbinder_remote_object_unref);
++    g_clear_pointer(&self->session_client, gbinder_client_unref);
++    g_clear_pointer(&self->session_remote, gbinder_remote_object_unref);
++    g_clear_pointer(&self->session_callback, gbinder_local_object_unref);
++    g_clear_pointer(&self->gatekeeper_client, gbinder_client_unref);
++    g_clear_pointer(&self->gatekeeper_remote, gbinder_remote_object_unref);
++    g_clear_pointer(&self->fingerprint_client, gbinder_client_unref);
++    g_clear_pointer(&self->fingerprint_remote, gbinder_remote_object_unref);
++    g_clear_pointer(&self->sm, gbinder_servicemanager_unref);
++
++    g_free(self);
++}
