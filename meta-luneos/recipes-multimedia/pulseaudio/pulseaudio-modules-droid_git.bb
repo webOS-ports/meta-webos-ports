@@ -20,6 +20,8 @@ SRCREV = "894f8da11f8335b09e336c599affbfc7d5fab536"
 SRC_URI = "git://github.com/droidian/pulseaudio-modules-droid.git;branch=bookworm;protocol=https \
     file://0001-module-droid-use-PA_MAJORMINOR-as-PA_MODULE_VERSION-.patch \
     file://0001-conversion-split-XML-list-values-on-spaces-as-well-a.patch \
+    file://0001-droid-util-convert-audio-source-through-a-uint32_t-te.patch \
+    file://0002-module-droid-card-guard-park_profile-against-a-null.patch \
 "
 
 EXTRA_OECONF = "--with-module-dir=${libdir}/pulseaudio/modules"
