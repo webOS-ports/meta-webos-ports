@@ -31,7 +31,7 @@ DEPENDS = "glib-2.0 libglibutil libgbinder"
 COMPATIBLE_MACHINE ?= "(^$)"
 COMPATIBLE_MACHINE:mido-halium = "(.*)"
 COMPATIBLE_MACHINE:tissot-halium = "(.*)"
-COMPATIBLE_MACHINE:mindphone = "(.*)"
+COMPATIBLE_MACHINE:halium-arm = "(.*)"
 COMPATIBLE_MACHINE:halium-arm64 = "(.*)"
 COMPATIBLE_MACHINE:pinephone = "(.*)"
 COMPATIBLE_MACHINE:pinephonepro = "(.*)"
@@ -46,8 +46,6 @@ inherit cmake pkgconfig webos_systemd
 # raise the floor here instead of carrying a patch for an otherwise untouched
 # tree.
 EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
-
-
 
 WEBOS_SYSTEMD_SERVICE = "waydroid-sensors.service"
 
