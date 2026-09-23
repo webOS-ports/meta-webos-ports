@@ -17,6 +17,8 @@ WEBOS_VERSION = "3.0.0-22_c6aab21b1159ff70875149a57644e1ad34313489"
 PR = "r18"
 
 inherit webos_public_repo
+WEBOS_SYSTEM_BUS_FILES_LOCATION = ""
+
 inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit webos_program
