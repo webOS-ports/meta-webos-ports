@@ -10,23 +10,29 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=1b633545a82af651ad37b9f03288651e \
 "
 
-DEPENDS = "qtbase qtdeclarative qtwayland-webos libxkbcommon pmloglib luna-service2 glib-2.0 udev wayland"
-RDEPENDS:${PN} = "qtbase-plugins configd imemanager"
+DEPENDS = "qtbase qtdeclarative qtwayland-webos libxkbcommon pmloglib luna-service2 glib-2.0 udev wayland qt-features-webos"
+RDEPENDS:${PN} = "qtbase-plugins configd"
+
+RPROVIDES:${PN} += "imemanager"
+RREPLACES:${PN} += "imemanager"
+RCONFLICTS:${PN} += "imemanager"
 
 PACKAGECONFIG[libim] = "CONFIG+=enable-libim,CONFIG-=enable-libim,libim"
 
-WEBOS_VERSION = "0.99.0+20-103_71e5f78c3c8610e522e4ed01f536f740818efebb"
-PR = "r37"
+SRCREV = "ccfe70370b673faf3f13d17e9efb12191ce308ad"
+
+PV = "0.99.0+20-1040"
+
+PR = "r41"
 
 inherit pkgconfig
 inherit webos_qmake6
 inherit webos_filesystem_paths
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_repo
 inherit features_check
 ANY_OF_DISTRO_FEATURES = "vulkan opengl"
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 
@@ -40,9 +46,6 @@ EXTRA_QMAKEVARS_PRE += "${EXTRA_CONF_PACKAGECONFIG}"
 SSTATE_SCAN_FILES += "*.prf *.pc"
 
 SRC_URI += " \
-    file://0001-Correctly-detect-wayland-platform.patch \
-    file://0002-Give-plugins-the-character-for-every-printable-keysym.patch \
-    file://0003-mimhwkeyboardtracker-size-EVIOCGBIT-buffers-for-the-k.patch \
     file://maliit-server.conf \
     file://maliit-server.service \
     file://maliit-server@.service \
@@ -51,6 +54,9 @@ SRC_URI += " \
 "
 
 inherit systemd
+
+inherit webos_system_bus
+WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE:${PN} = "maliit-server.service"
