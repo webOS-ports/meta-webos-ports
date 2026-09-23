@@ -6,7 +6,7 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 #libcrypto is a requirement and provided by openssl
-DEPENDS = "nyx-lib glib-2.0 libhybris libsuspend virtual/android-headers openssl"
+DEPENDS = "nyx-lib glib-2.0 libhybris virtual/android-headers openssl"
 
 # The GPS module talks to the GNSS HIDL service on /dev/hwbinder rather than
 # going through libhybris: the legacy gps.h HAL that hw_get_module() can reach
@@ -27,33 +27,20 @@ DEPENDS += "libgbinder libglibutil"
 # Android version we select per machine
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-# Let us fetch the machine-specific CMake configuration used by nyx-modules, to
-# define it only once
-FILESEXTRAPATHS:prepend := "${THISDIR}/../../recipes-webos-ose/nyx-modules/nyx-modules:"
-
 # Depends on libhybris which has this restriction
 COMPATIBLE_MACHINE = "^halium$"
 
 PV = "0.1.0-2+git"
-PR = "r10"
-SRCREV = "6b34d40866e988783cce9357752a5e4bdc8dd4d9"
+PR = "r15"
+SRCREV = "9014ba0ea0cf6c1ee81f3309e9e554d8635bab70"
 
 inherit webos_ports_repo
 inherit webos_cmake
 inherit pkgconfig
 
+inherit webos_nyx_module_provider
+require recipes-webos-ose/nyx-modules/nyx-modules-machines.inc
+
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-
-SRC_URI:append = " \
-    file://${MACHINE}.cmake \
-"
-
-do_configure:prepend() {
-    # Install additional machine specific nyx configuration before CMake is started
-    if [ -f ${UNPACKDIR}/${MACHINE}.cmake ]
-    then
-        cp ${UNPACKDIR}/${MACHINE}.cmake ${S}/machine.cmake
-    fi
-}
 
 FILES:${PN} += "${libdir}/nyx/modules/*"
