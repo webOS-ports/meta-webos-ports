@@ -209,7 +209,7 @@ LIC_FILES_CHKSUM = "file://LICENSE.txt;md5=578915003022e6b28128e6696dddbb46 \
 PR = "r0"
 
 SRC_URI = " \
-    npm://registry.npmjs.org/;package=loctool;version=${PV} \
+    npm://registry.npmjs.org/;package=loctool;version=${PV};sha256sum=ea9e33c6469e510ab7c7535608829f81a8fd4495ed885f804674fcf96b4e88f4 \
     npmsw://${THISDIR}/${BPN}/npm-shrinkwrap.json \
 "
 

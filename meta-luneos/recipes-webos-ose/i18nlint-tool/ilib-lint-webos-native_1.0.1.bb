@@ -27,7 +27,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=86d3f3a95c324c9479bd8986968f4327 \
                     file://node_modules/universalify/LICENSE;md5=a734c6ad6e37a515025ac5e8e90ef786"
 
 SRC_URI = " \
-    npm://registry.npmjs.org/;package=ilib-lint-webos;version=${PV} \
+    npm://registry.npmjs.org/;package=ilib-lint-webos;version=${PV};sha256sum=49e9d2bafbcb04e341ad6a15632e60c27ed924b0e6d3b18aed625acccf420343 \
     npmsw://${THISDIR}/${BPN}/npm-shrinkwrap.json \
     file://ilib-lint-config.json \
 "
