@@ -10,7 +10,7 @@ LIC_FILES_CHKSUM = " \
 "
 
 WEBOS_VERSION = "1.0.0-33_7fa0b6f1caa10d35238a409ef2e05f4c5b102323"
-PR = "r13"
+PR = "r14"
 
 inherit webos_cmake
 inherit pkgconfig
@@ -29,6 +29,7 @@ RDEPENDS:${PN} = "${VIRTUAL-RUNTIME_pdm} db8"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Fix-app-permissions.patch \
     file://0001-mediaitem.cpp-Fix-build-with-gcc-14.patch \
+    file://0002-sysbus-grant-mediaindexer-the-settings-query-ACG.patch \
 "
 
 inherit webos_systemd
