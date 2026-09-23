@@ -14,7 +14,7 @@ LIC_FILES_CHKSUM = " \
 DEPENDS = "luna-service2 libpbnjson pmloglib glib-2.0 boost"
 
 WEBOS_VERSION = "2.0.0-25_dc4ebefbd8b8288fcc74c92eb30dab29f07aad67"
-PR = "r21"
+PR = "r22"
 
 inherit webos_component
 inherit webos_enhanced_submissions
@@ -27,6 +27,7 @@ inherit webos_prerelease_dep
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-DefaultBootSequencer.cpp-Add-LuneOS-bits.patch \
+    file://0002-sysbus-grant-bootd-the-ACGs-its-own-clients-need.patch \
 "
 
 inherit webos_systemd
