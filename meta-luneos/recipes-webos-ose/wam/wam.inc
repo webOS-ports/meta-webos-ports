@@ -18,51 +18,28 @@ RDEPENDS:${PN} += "util-linux"
 VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_cpushareholder}"
 
-WEBOS_VERSION = "1.0.2-99_a698bc40c4e73d338bdf3310c31d1878978d231a"
-INC_PR = "r74"
+SRCREV = "d59bc34c17e82a720fe6c5bfcdada99abb66fc45"
+
+PV = "1.0.2-100"
+
+INC_PR = "r84"
 
 WAM_BUILD_SYSTEM ?= "webos_cmake"
 WAM_BUILD_DEFAULT_PLUGIN ?= "1"
 
-inherit webos_enhanced_submissions
 inherit webos_system_bus
 inherit webos_machine_dep
 inherit ${WAM_BUILD_SYSTEM}
 inherit webos_pkgconfig
 inherit webos_lttng
 #inherit webos_distro_variant_dep
-inherit webos_public_repo
+inherit webos_ports_ose_repo
 inherit webos_systemd
 inherit useradd
 
 WAM_DATA_DIR = "${webos_execstatedir}/${BPN}"
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-Fix-build-with-liburcu-0.15.0.patch \
-    file://0001-security_policy.conf-Add-paths-for-LuneOS.patch \
-    file://0002-WAM-LS2-Add-required-bits-for-LuneOS.patch \
-    file://0003-WAM-Use-Prelude-as-default-font.patch \
-    file://0004-Add-basic-implementation-for-getResource-for-webOSSy.patch \
-    file://0005-DeviceInfoImpl-add-tvDeviceInfo-data.patch \
-    file://0006-Add-relaunch-support-for-legacy-enyo-apps.patch \
-    file://0007-WAM-Add-window.open-support.patch \
-    file://0008-WebAppBase-add-noWindow-support.patch \
-    file://0009-WAM-WebPageBlink-keep-same-window-type-when-creating.patch \
-    file://0010-WebAppWayland-do-not-show-window-if-its-status-is-st.patch \
-    file://0011-WAM-Add-additional-window.open-features-management.patch \
-    file://0012-PalmSystem-add-banner-support.patch \
-    file://0013-WebAppBase-fix-window.close-for-multi-window-apps.patch \
-    file://0014-WAM-Fix-outbound-permission-error.patch \
-    file://0015-PalmSystem-fix-banner-removal.patch \
-    file://0016-DeviceInfoImpl-publish-display-metrics-when-known.patch \
-    file://0017-BlinkWebView-null-check-the-window-created-for-window.patch \
-    file://0018-WebAppBase-do-not-abort-on-a-non-numeric-instance-id.patch \
-    file://0019-WebPageBlink-hand-aborted-external-protocol-navigatio.patch \
-    file://0020-WebPageBlink-scale-the-UI-with-page-zoom-not-the-devi.patch \
-    file://0021-WAM-give-exhibition-dock-mode-windows-a-window-type-.patch \
-    file://0022-DeviceInfoImpl-report-the-webOS-level-LuneOS-actuall.patch \
-    file://0023-WebPageBlink-let-an-explicit-window.open-type-win-ov.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 
