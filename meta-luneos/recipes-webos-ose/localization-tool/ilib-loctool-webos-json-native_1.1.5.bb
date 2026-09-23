@@ -12,13 +12,13 @@ SUMMARY = "json type of file handler plugin for webOS platform loctool"
 # to determine which situation is applicable.
 LICENSE = "Apache-2.0 AND MIT"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=86d3f3a95c324c9479bd8986968f4327 \
-                    file://node_modules/braces/LICENSE;md5=0f64900f8f30e53054962c9f1fc3205b \
-                    file://node_modules/fill-range/LICENSE;md5=0f64900f8f30e53054962c9f1fc3205b \
-                    file://node_modules/ilib/LICENSE;md5=3b83ef96387f14655fc854ddc3c6bd57 \
-                    file://node_modules/is-number/LICENSE;md5=0f64900f8f30e53054962c9f1fc3205b \
-                    file://node_modules/micromatch/LICENSE;md5=0f64900f8f30e53054962c9f1fc3205b \
-                    file://node_modules/picomatch/LICENSE;md5=abd0e25891525eb13d5a794f550a6ee4 \
-                    file://node_modules/to-regex-range/LICENSE;md5=b561e0a423bedc9d9ca9c8c67d40abb9"
+                    file://../node_modules/braces/LICENSE;md5=0f64900f8f30e53054962c9f1fc3205b \
+                    file://../node_modules/fill-range/LICENSE;md5=0f64900f8f30e53054962c9f1fc3205b \
+                    file://../node_modules/ilib/LICENSE;md5=3b83ef96387f14655fc854ddc3c6bd57 \
+                    file://../node_modules/is-number/LICENSE;md5=0f64900f8f30e53054962c9f1fc3205b \
+                    file://../node_modules/micromatch/LICENSE;md5=0f64900f8f30e53054962c9f1fc3205b \
+                    file://../node_modules/picomatch/LICENSE;md5=abd0e25891525eb13d5a794f550a6ee4 \
+                    file://../node_modules/to-regex-range/LICENSE;md5=b561e0a423bedc9d9ca9c8c67d40abb9"
 
 PR = "r0"
 
