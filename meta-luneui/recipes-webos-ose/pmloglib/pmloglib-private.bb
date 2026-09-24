@@ -9,12 +9,12 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=2bdfe040dcf81b4038370ae96036c519 \
 "
 
-WEBOS_VERSION = "3.3.0-13_a8e65eb3bf328f981750f235b30a3c3b4c6e23f7"
-PR = "r3"
+PV = "3.3.0-13+git"
+SRCREV = "2243bfb49b8feaf7d5c86b5a91345b37b007a071"
+PR = "r4"
 
 inherit webos_component
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit webos_pkgconfig
 
@@ -24,9 +24,6 @@ B = "${S}/build-private"
 EXTRA_OECMAKE += "-DBUILD_PRIVATE=ON"
 
 WEBOS_REPO_NAME = "pmloglib"
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
 
-# CMake 4: @VAR@ is no longer expanded in unquoted arguments (CMP0053),
-# which broke the install() DESTINATIONs in this component.
-SRC_URI += "file://0001-CMakeLists-use-CMake-variable-syntax-instead-of-VAR.patch"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
