@@ -15,11 +15,11 @@ LIC_FILES_CHKSUM = " \
 # qtbase-native, gated on the wayland DISTRO_FEATURE which LuneOS sets.
 DEPENDS = "qtdeclarative wayland-native qtwayland qtbase-native qt-features-webos pmloglib webos-wayland-extensions glib-2.0 qtwayland-webos"
 
-SRCREV = "d7f2b3f31ba8dcdb93739e77b8294ea55af1268f"
+SRCREV = "0a78bad58db51899e52b6d1748465d5c4e3d8006"
 
 PV = "2.0.0-424"
 
-PR = "r69"
+PR = "r70"
 
 inherit webos_qmake6
 inherit pkgconfig
