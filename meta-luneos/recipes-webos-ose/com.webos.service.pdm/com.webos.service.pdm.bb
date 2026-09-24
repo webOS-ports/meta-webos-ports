@@ -18,11 +18,11 @@ RDEPENDS:${PN} = "fuse-utils hdparm gphoto2 gphotofs sdparm gptfdisk-sgdisk e2fs
 
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_pdm-plugin}"
 
-SRCREV = "7d27a1f518c47055d32c52e9e21264807856c26a"
+SRCREV = "69dec81b1ed8faccd84d0607208c5084b38df423"
 
 PV = "1.0.1-88"
 
-PR = "r15"
+PR = "r16"
 
 inherit webos_component
 inherit webos_cmake
