@@ -12,15 +12,15 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "glib-2.0 libpbnjson"
 
-WEBOS_VERSION = "3.3.0-13_a8e65eb3bf328f981750f235b30a3c3b4c6e23f7"
-PR = "r13"
+PV = "3.3.0-13+git"
+SRCREV = "2243bfb49b8feaf7d5c86b5a91345b37b007a071"
+PR = "r14"
 
 LEAD_SONAME = "libPmLogLib.so"
 EXTRA_OECMAKE += "-DWEBOS_DISTRO_PRERELEASE:STRING='${WEBOS_DISTRO_PRERELEASE}'"
 
 inherit webos_component
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit webos_library
 inherit webos_pmlog_config
@@ -28,8 +28,4 @@ inherit webos_pmlog_config
 PACKAGECONFIG ??= ""
 PACKAGECONFIG[whitelist] = "-DENABLE_WHITELIST:BOOL=TRUE, -DENABLE_WHITELIST:BOOL=FALSE"
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
-
-# CMake 4: @VAR@ is no longer expanded in unquoted arguments (CMP0053),
-# which broke the install() DESTINATIONs in this component.
-SRC_URI += "file://0001-CMakeLists-use-CMake-variable-syntax-instead-of-VAR.patch"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
