@@ -1,0 +1,86 @@
+#!/bin/sh
+# wlan-dynamic-start - create wlan0 on a qcacld-3.0 driver built for dynamic start.
+#
+# qcacld-3.0 can be built so that loading the module does NOT register a netdev.
+# Instead it creates a character device, /dev/wlan, and brings the interface up
+# only when something writes "ON" to it (hdd_driver_mode_change_store, the
+# con_mode / wlan_hdd_state node). Android's WiFi HAL does that write; on LuneOS
+# nothing did, so wlan.ko loaded, /dev/wlan appeared, the driver reported
+# "wlan_hdd_state wlan major(491) initialized" - and wlan0 never existed.
+#
+# Seen on athena (BlackBerry KEY2, in-tree qcacld-3.0 against a 4.19 kernel).
+# Harmless everywhere else: a driver that registers its netdev at module load
+# already has wlan0 by the time this runs, and this exits straight away.
+#
+# Ordering matters more than it looks. connman only publishes a "wifi"
+# technology for an interface it can see, and wpa_supplicant must be able to
+# attach to it; if either starts first the UI shows an empty network list and
+# every scan answers "No carrier" until both are restarted by hand. The unit is
+# therefore ordered Before= both of them - see wlan-dynamic-start.service.
+set -u
+
+log() { echo "wlan-dynamic-start: $*"; }
+
+# The interface name is not always wlan0 (a MAC-based rename, or a second
+# radio), so ask the driver's own netdevs rather than assuming.
+wlan_iface() {
+    for _n in /sys/class/net/*; do
+        [ -e "$_n/device/driver" ] || continue
+        case "$(readlink -f "$_n/device/driver")" in
+            *wlan*|*cld*|*cnss*) basename "$_n"; return 0 ;;
+        esac
+    done
+    [ -e /sys/class/net/wlan0 ] && { echo wlan0; return 0; }
+    return 1
+}
+
+wait_for() { # wait_for <seconds> <test-command...>
+    _t=$1; shift
+    _i=0
+    while [ "$_i" -lt "$_t" ]; do
+        "$@" >/dev/null 2>&1 && return 0
+        sleep 1
+        _i=$((_i + 1))
+    done
+    return 1
+}
+
+# systemd-modules-load handles this from /etc/modules-load.d, but the module may
+# also be built in or already present; none of those is an error here.
+if [ ! -d /sys/module/wlan ]; then
+    modprobe wlan 2>/dev/null || true
+    wait_for 10 test -d /sys/module/wlan || true
+fi
+
+# Already have an interface: this driver registers its netdev at module load and
+# there is nothing to start. The common case on every other port.
+if IFACE=$(wlan_iface); then
+    log "$IFACE already present; no dynamic start needed"
+    ip link set "$IFACE" up 2>/dev/null || true
+    exit 0
+fi
+
+# No /dev/wlan means this driver has no dynamic-start node. Not a failure -
+# this service ships on every Halium machine and only athena-shaped builds use
+# it - so say so and leave the exit status clean.
+if ! wait_for 20 test -c /dev/wlan; then
+    log "no /dev/wlan and no interface; not a dynamic-start driver, nothing to do"
+    exit 0
+fi
+
+log "writing ON to /dev/wlan"
+if ! printf ON > /dev/wlan 2>/dev/null; then
+    log "write to /dev/wlan failed" >&2
+    exit 1
+fi
+
+# From here a failure IS a failure: the node existed and accepted the write, so
+# an interface was supposed to appear.
+if ! wait_for 20 wlan_iface; then
+    log "wrote ON but no interface appeared" >&2
+    exit 1
+fi
+
+IFACE=$(wlan_iface)
+ip link set "$IFACE" up || { log "cannot bring $IFACE up" >&2; exit 1; }
+log "$IFACE up"
