@@ -166,6 +166,7 @@ LIBHYBRIS_RDEPENDS = " \
     \
     ofono-binder-plugin \
     wlan-suspend-mode \
+    wlan-dynamic-start \
 "
 
 # Fingerprint stack: biomd talks to the Android biometrics HAL over binder

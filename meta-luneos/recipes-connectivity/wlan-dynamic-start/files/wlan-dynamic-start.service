@@ -1,0 +1,39 @@
+[Unit]
+Description=Bring up a qcacld-3.0 WLAN interface that needs a dynamic start
+Documentation=file:///usr/sbin/wlan-dynamic-start
+
+# Only where a WLAN module is loaded at all. Same gate wlan-suspend-mode.service
+# uses; the script itself decides whether this particular driver needs the
+# dynamic start and exits 0 when it does not.
+ConditionPathExistsGlob=/sys/module/wlan*
+
+# The module comes from /etc/modules-load.d, and the firmware the driver asks
+# for (wlan_mac.bin, /vendor/firmware/wlan/qca_cld/) lives under /vendor, which
+# mount-android.sh mounts as android-system.service's ExecStartPre.
+#
+# android-system.service, NOT lxc@android.service: the generic LXC template unit
+# is not what LuneOS starts the container with, is not enabled here, and nothing
+# in the image references it - so an After= on it would be silently ignored and
+# order nothing. android-system.service is the real one, and it is enabled by
+# default (its [Install] is RequiredBy=basic.target).
+After=systemd-modules-load.service android-system.service
+
+# The whole point of the unit. connman publishes a "wifi" technology only for an
+# interface it can see, and wpa_supplicant has to be able to attach to it. Start
+# either one before the interface exists and the network list stays empty with
+# "No carrier" on every scan until both are restarted by hand.
+#
+# Ordering, NOT "ExecStartPost=systemctl start wpa-supplicant.service": that unit
+# is static but connman.service already carries Wants=/After=wpa-supplicant.service
+# (and there is a D-Bus activation file naming it), so it does not need pulling
+# in - and calling systemctl from inside a unit that the same transaction is
+# waiting on is how you deadlock the manager.
+Before=wpa-supplicant.service connman.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/wlan-dynamic-start
+
+[Install]
+WantedBy=multi-user.target
