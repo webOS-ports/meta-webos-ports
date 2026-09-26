@@ -24,12 +24,29 @@ log() { echo "wlan-dynamic-start: $*"; }
 # The interface name is not always wlan0 (a MAC-based rename, or a second
 # radio), so ask the driver's own netdevs rather than assuming.
 wlan_iface() {
+    _other=
     for _n in /sys/class/net/*; do
         [ -e "$_n/device/driver" ] || continue
         case "$(readlink -f "$_n/device/driver")" in
-            *wlan*|*cld*|*cnss*) basename "$_n"; return 0 ;;
+            *wlan*|*cld*|*cnss*) ;;
+            *) continue ;;
+        esac
+        case "$(basename "$_n")" in
+            # qcacld-3.0 registers a Wi-Fi Direct netdev on the same driver as
+            # the station one. It cannot be brought up this way - "ip link set
+            # p2p0 up" answers "RTNETLINK answers: Operation not supported" -
+            # and /sys/class/net/* is read in name order, so p2p0 was found
+            # before wlan0 and this unit failed while Wi-Fi itself was fine.
+            p2p*) continue ;;
+            # The normal case, and the one to prefer when a driver has more
+            # than one netdev.
+            wlan*) basename "$_n"; return 0 ;;
+            # A MAC-based rename or a second radio: usable, but only if no
+            # wlan* turns up later in the scan.
+            *) [ -n "$_other" ] || _other=$(basename "$_n") ;;
         esac
     done
+    [ -n "$_other" ] && { echo "$_other"; return 0; }
     [ -e /sys/class/net/wlan0 ] && { echo wlan0; return 0; }
     return 1
 }
