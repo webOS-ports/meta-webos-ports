@@ -10,11 +10,17 @@ DEPENDS += "qtbase"
 
 PV = "3.0.0-4+git"
 
-SRCREV = "a2364531fdbe1ca87258dc219fe2ba04e741695a"
+# The panel-shape keys Settings carries for a shell that has to lay out around a
+# notch (Cutouts / CornerRadii in [Display]). Branched off webOS-ports/master at
+# a2364531, which is the revision this recipe pinned before, so the build gets
+# that plus the two new keys and nothing else. Revert to a plain master SRCREV
+# once it merges.
+WEBOS_GIT_PARAM_BRANCH = "herrie/panel-cutouts"
+SRCREV = "fb33804c73a5ca8984ebee18076e6fe9091b34d8"
 
 # PV carries no SRCREV, so a revision bump alone leaves PKGV untouched and opkg
 # sees no upgrade on the device. Bump PR on every SRCREV move.
-PR = "r3"
+PR = "r4"
 
 # Don't uncomment until all of the do_*() tasks have been moved out of the recipe
 inherit webos_ports_fork_repo
