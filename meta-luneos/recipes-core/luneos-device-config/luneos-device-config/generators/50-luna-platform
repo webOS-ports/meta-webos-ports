@@ -92,6 +92,96 @@ if [ -z "$grid" ]; then
     grid=$(awk -v d="$dpi" -v mm="$GRID_UNIT_MM" 'BEGIN { printf "%d", (d * mm / 25.4) + 0.5 }')
 fi
 
+# The panel's shape: the rectangles the UI has to keep clear of, and the corner
+# radii. Neither is derivable - no sysfs node, no EDID and no Android property
+# reports a notch - so these are written only when an adaptation declares them,
+# leaving the shipped empty values (an ordinary rectangular panel) otherwise.
+#
+# Rects are "x y w h" in the panel's own scanout pixels, ';' separated, and the
+# radii are one value or "tl;tr;br;bl". Rectangles rather than the SVG paths
+# gmobile and Android use, because the only thing that consumes them is a layout
+# that needs to know how much room it lost; a path would only buy a prettier
+# corner mask, which nothing draws yet.
+#
+# Where to get the numbers, in order of trust:
+#
+#   1. The vendor's own gmobile display-panel JSON, where one exists. radon is
+#      the easy case: FuriLabs ship furilabs,flx1s.json themselves, and its
+#      notch path is already an axis-aligned rectangle.
+#   2. The LineageOS device tree's config_mainBuiltInDisplayCutout. Mind the
+#      origin - Android's is CENTRE-top, so x_here = x_android + panel_w / 2.
+#   3. Measured on the hardware.
+#
+# Rotation. A rect is only meaningful together with the orientation it was
+# measured in, and 10-configd-surfacemanager may tell the compositor to rotate
+# its output (the MP01 is r270). The shell lays out in the rotated space, so a
+# rect declared in scanout space has to be turned to match here - doing it in the
+# shell instead would mean every QML consumer had to know about outputRotation.
+# This is the same correction the panel_w/panel_h swap below makes, for the same
+# reason, so the two are kept together.
+rotate_rects() {
+    # $1 = ';' separated "x y w h" list, $2 = rotation, $3/$4 = scanout w/h
+    awk -v list="$1" -v rot="$2" -v pw="$3" -v ph="$4" 'BEGIN {
+        n = split(list, rects, ";")
+        out = ""
+        for (i = 1; i <= n; i++) {
+            if (rects[i] == "") continue
+            split(rects[i], f, " ")
+            if (length(f) != 4) continue
+            x = f[1]; y = f[2]; w = f[3]; h = f[4]
+            # Clockwise output rotation by rot takes scanout (x,y) to the
+            # rotated frame; w/h swap on the quarter turns.
+            if (rot == 90)       { nx = ph - y - h; ny = x;            nw = h; nh = w }
+            else if (rot == 180) { nx = pw - x - w; ny = ph - y - h;   nw = w; nh = h }
+            else if (rot == 270) { nx = y;          ny = pw - x - w;   nw = h; nh = w }
+            else                 { nx = x;          ny = y;            nw = w; nh = h }
+            out = out (out == "" ? "" : ";") nx " " ny " " nw " " nh
+        }
+        print out
+    }'
+}
+
+# The four radii follow the same turn: tl;tr;br;bl is a cycle, so a clockwise
+# quarter turn of the frame shifts every corner one place along it.
+rotate_radii() {
+    awk -v list="$1" -v rot="$2" 'BEGIN {
+        n = split(list, r, ";")
+        if (n == 1) { r[2] = r[1]; r[3] = r[1]; r[4] = r[1]; n = 4 }
+        if (n != 4) { print list; exit }
+        shift = 0
+        if (rot == 90) shift = 1; else if (rot == 180) shift = 2; else if (rot == 270) shift = 3
+        for (i = 0; i < 4; i++) {
+            # corner i of the rotated frame was corner (i - shift) of the panel
+            j = ((i - shift) % 4 + 4) % 4 + 1
+            printf "%s%s", (i ? ";" : ""), r[j]
+        }
+        printf "\n"
+    }'
+}
+
+cutouts=${deviceinfo_display_cutouts:-}
+corner_radii=${deviceinfo_display_corner_radii:-}
+
+# The rotation the compositor applies, parsed out of WxH+X+Y r<rot> s<scale>.
+out_rot=0
+case "${deviceinfo_compositor_geometry:-}" in
+    *r90s*)  out_rot=90 ;;
+    *r180s*) out_rot=180 ;;
+    *r270s*) out_rot=270 ;;
+esac
+
+if [ -n "$cutouts" ] && [ "$out_rot" != "0" ]; then
+    if [ -n "${panel_w:-}" ] && [ -n "${panel_h:-}" ]; then
+        cutouts=$(rotate_rects "$cutouts" "$out_rot" "$panel_w" "$panel_h")
+        echo "luneos-device-config: rotated cutouts by r$out_rot -> $cutouts"
+    else
+        echo "luneos-device-config: WARNING: cutouts declared and output is r$out_rot," \
+             "but no panel size to rotate them about; leaving them as declared"
+    fi
+fi
+[ -n "$corner_radii" ] && [ "$out_rot" != "0" ] && \
+    corner_radii=$(rotate_radii "$corner_radii" "$out_rot")
+
 # A panel mounted a quarter turn off scans out landscape while the device is held
 # portrait, and the compositor rotates its output to match (the "r" field of
 # deviceinfo_compositor_geometry - see 10-configd-surfacemanager). panel_w and
@@ -121,6 +211,40 @@ set_kv() {
     sed -i "s|^$1=.*|$1=$2|" "$tmp"
     changed=1
 }
+# set_kv insists on an anchor in the shipped file, and for DisplayWidth or DPI
+# that is right - a missing one there means the template is wrong and a silent
+# insert would hide it. The panel-shape keys are different: no template declares
+# them, and none should have to. /etc/palm/luna-platform.conf is a bind mount
+# over the copy this generator writes, so the generated file is the live one and
+# the template is only a starting point; requiring an anchor would mean editing
+# every machine's template to add two empty lines.
+#
+# So: rewrite the key if it is there, otherwise append it to the end of the named
+# section.
+set_or_add_kv() {
+    if grep -q "^$1=" "$tmp"; then
+        set_kv "$1" "$2"
+        return
+    fi
+    if ! grep -q "^\[$3\]$" "$tmp"; then
+        echo "luneos-device-config: WARNING: no [$3] section in $SRC for $1"
+        return
+    fi
+    # Insert after the section's last real line, keeping any blank line that
+    # separates it from the next header - hold blanks back while inside the
+    # section and flush them after the inserted key.
+    awk -v sect="[$3]" -v line="$1=$2" '
+        function flush() { while (held > 0) { print ""; held-- } }
+        $0 == sect          { inside = 1; print; next }
+        inside && /^\[/     { print line; flush(); inside = 0; print; next }
+        inside && /^$/      { held++; next }
+        inside              { flush(); print; next }
+                            { print }
+        END                 { if (inside) { print line; flush() } }
+    ' "$tmp" > "$tmp.new" && mv "$tmp.new" "$tmp"
+    changed=1
+}
+
 [ -n "${panel_w:-}" ] && set_kv DisplayWidth "$panel_w"
 [ -n "${panel_h:-}" ] && set_kv DisplayHeight "$panel_h"
 set_kv DPI "$dpi"
@@ -137,9 +261,14 @@ set_kv GridUnit "$grid"
 # reflective, so this too is written only when one declares it.
 [ -n "${deviceinfo_backlight_outdoor_scale:-}" ] && set_kv BrightnessOutdoorScale "$deviceinfo_backlight_outdoor_scale"
 
+# The panel's shape. Only written when declared, for the reason above the
+# rotate_rects() helper: an undeclared panel is a rectangular one.
+[ -n "$cutouts" ] && set_or_add_kv Cutouts "$cutouts" Display
+[ -n "$corner_radii" ] && set_or_add_kv CornerRadii "$corner_radii" Display
+
 if [ "$changed" = "1" ]; then
     mkdir -p "$GEN/files/etc/palm"
     cp "$tmp" "$GEN/files/etc/palm/luna-platform.conf"
-    echo "luneos-device-config: luna-platform ${panel_w}x${panel_h} dpi=$dpi gridUnit=$grid${deviceinfo_als_calibration:+ alsCal=$deviceinfo_als_calibration}${deviceinfo_backlight_outdoor_scale:+ outdoorScale=$deviceinfo_backlight_outdoor_scale}"
+    echo "luneos-device-config: luna-platform ${panel_w}x${panel_h} dpi=$dpi gridUnit=$grid${deviceinfo_als_calibration:+ alsCal=$deviceinfo_als_calibration}${deviceinfo_backlight_outdoor_scale:+ outdoorScale=$deviceinfo_backlight_outdoor_scale}${cutouts:+ cutouts=$cutouts}${corner_radii:+ radii=$corner_radii}"
 fi
 rm -f "$tmp"
