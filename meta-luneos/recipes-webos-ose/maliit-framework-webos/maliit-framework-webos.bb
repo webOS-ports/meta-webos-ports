@@ -19,11 +19,16 @@ RCONFLICTS:${PN} += "imemanager"
 
 PACKAGECONFIG[libim] = "CONFIG+=enable-libim,CONFIG-=enable-libim,libim"
 
-SRCREV = "ccfe70370b673faf3f13d17e9efb12191ce308ad"
+# Hardware keyboard detection: MImHwKeyboardTracker now finds a keyboard from
+# the EV_KEY capabilities in /proc/bus/input/devices instead of asking for a
+# SW_TABLET_MODE switch that no LuneOS device with a fixed keyboard has. Until
+# this is merged, the branch rather than master.
+WEBOS_GIT_PARAM_BRANCH = "herrie/hw-keyboard-presence"
+SRCREV = "deed201abdd8d3981b04990d148c82097f44657d"
 
 PV = "0.99.0+20-1040"
 
-PR = "r41"
+PR = "r44"
 
 inherit pkgconfig
 inherit webos_qmake6
@@ -100,3 +105,24 @@ FILES:${PN} += "${OE_QMAKE_PATH_QT_ARCHDATA} ${systemd_unitdir}/system/scripts"
 # File /usr/lib/mkspecs/features/maliit-plugins.prf in package maliit-framework-webos-dev contains reference to TMPDIR [buildpaths]
 ERROR_QA:remove = "buildpaths"
 WARN_QA:append = " buildpaths"
+
+# getKeyboardStatus and setOnScreenKeyboardForced are new methods on an already
+# registered service, and a bare install leaves them denied - see the same
+# comment in luna-displaymanager.bb. ls-hubd has to re-read the ACG files first,
+# and only then can the provider re-register its category.
+#
+# maliit-server.service is the launcher; the instance maliit-server@0 is what
+# actually holds com.webos.service.ime, and restarting the launcher restarts it.
+pkg_postinst:${PN}() {
+    if [ -n "$D" ]; then
+        exit 0
+    fi
+
+    if command -v ls-control > /dev/null 2>&1; then
+        ls-control scan-services || true
+    fi
+
+    if systemctl is-active --quiet maliit-server.service; then
+        systemctl restart maliit-server.service || true
+    fi
+}

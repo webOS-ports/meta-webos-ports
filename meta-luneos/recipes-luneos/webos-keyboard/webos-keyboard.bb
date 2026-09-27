@@ -23,9 +23,15 @@ DEPENDS = "maliit-framework-webos hunspell presage luna-service2 presage-native 
 RDEPENDS:${PN} += "maliit-framework-webos qtsvg-plugins qtmultimedia-qmlplugins"
 RRECOMMENDS:${PN} += "hunspell-dictionaries"
 
-SRCREV = "989d2f2321219cfbc624cd7e22c3533b54a3180f"
+# Keeps the on-screen keyboard down while a hardware keyboard is the active
+# input source, and adds the test and static-analysis harness. Needs the
+# matching maliit-framework-webos branch: without it Maliit::Hardware is never
+# selected and the new code never runs. Until this is merged, the branch rather
+# than master.
+WEBOS_GIT_PARAM_BRANCH = "herrie/hw-keyboard-vkb"
+SRCREV = "8df85b5a73e1c9e98b5df71d4fb8c4a877b2c8bc"
 PV = "0.99.2+git"
-PR = "r1"
+PR = "r4"
 
 # We own webos-keyboard, so fixes belong in its actual source history, not
 # as patches carried here - unlike presage or imemanager, which are genuinely
