@@ -14,7 +14,7 @@ DEPENDS = "glib-2.0 glibmm luna-service2 libpbnjson pmloglib openssl libbson boo
 RDEPENDS:${PN} = "settingsservice-conf db8"
 
 WEBOS_VERSION = "1.0.22-22_176fed142cb4a6417b5eaf4ca7cde0a114b1b1b4"
-PR = "r26"
+PR = "r27"
 
 inherit webos_component
 inherit webos_enhanced_submissions
@@ -26,6 +26,7 @@ inherit webos_public_repo
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-service-update-SettingsService-path.patch \
     file://0002-com.webos.settingsservice-Change-luna.internal-to-se.patch \
+    file://0003-com.webos.settingsservice-Add-settings.privileged-gr.patch \
 "
 
 #FIXME Remove service folder to avoid duplicate legacy and ACG role files
