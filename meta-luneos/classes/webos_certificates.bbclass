@@ -56,7 +56,7 @@ webos_certificates_linkcertificates() {
     webos_certificates_linkfiles ".crt" ".pem" "`pwd`/"
 
     # create hash symlinks
-    c_rehash $DESTDIR > /dev/null 2>&1
+    openssl rehash $DESTDIR > /dev/null 2>&1
 
     # Remove the links we created before c_rehash and then replace them with new ones.
     webos_certificates_delete_files $TEMPORARY_LINKS
