@@ -13,6 +13,4 @@ EXTENDPRAUTO:append = "webos4"
 PACKAGECONFIG[tests] = "-Dtests=enabled -Dinstalled_tests=true,-Dtests=disabled -Dinstalled_tests=false,gsl gmp"
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
-SRC_URI:append = " file://0001-Add-support-for-seamless-seek-trickplay.patch;striplevel=3"
-#SRC_URI:append:qemux86 = " file://0001-Add-support-for-seamless-seek-trickplay.patch;striplevel=3"
-#SRC_URI:append:qemux86-64 = " file://0001-Add-support-for-seamless-seek-trickplay.patch;striplevel=3"
+SRC_URI:append = " file://0001-Add-support-for-seamless-seek-trickplay.patch"
