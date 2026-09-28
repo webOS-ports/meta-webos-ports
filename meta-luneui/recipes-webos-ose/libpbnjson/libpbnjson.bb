@@ -34,6 +34,7 @@ PACKAGECONFIG[tools] = "-DPBNJSON_INSTALL_TOOLS:BOOL=TRUE,-DPBNJSON_INSTALL_TOOL
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-format_attribute.h-fix-typo-in-macro-name.patch \
     file://0002-validation-port-add_custom_command-off-SOURCE-signature.patch \
+    file://0003-CMakeLists.txt-drop-D__STRICT_ANSI__.patch \
 "
 
 BBCLASSEXTEND = "native"
