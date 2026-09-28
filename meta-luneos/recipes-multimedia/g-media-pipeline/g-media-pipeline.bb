@@ -38,5 +38,6 @@ WEBOS_GIT_PARAM_BRANCH = "@gav"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}\ 
     file://0001-Add-generic-config.patch \
     file://0001-CMakeLists-pass-library-dirs-to-link_directories.patch \
+    file://0001-PlayerFactory.cpp-fix-build-with-newer-libc.patch \
 "
 
