@@ -21,7 +21,9 @@ ALTERNATIVE:${PN} = "openssl-cnf2"
 ALTERNATIVE_LINK_NAME[openssl-cnf2] = "${sysconfdir}/ssl/openssl.cnf"
 ALTERNATIVE_PRIORITY[openssl-cnf2] ?= "10"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
+    file://0001-cert-Fix-build-with-OpenSSL-4.0.patch \
+"
 
 do_install:append() {
     # We ship our own modified openssl configuration and as long as the
