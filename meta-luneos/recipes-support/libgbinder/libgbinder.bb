@@ -23,23 +23,36 @@ do_compile:append() {
     # readiness probe to wait for a HIDL service on /dev/hwbinder, replacing the
     # crash-prone lshal: binder-ping returns a clean exit code and does not
     # SIGSEGV when run before the container's linker/hwservicemanager are ready.
-    ${CC} ${CFLAGS} ${LDFLAGS} \
-        ${S}/tools/binder-ping/binder-ping.c \
-        -o ${B}/binder-ping \
-        -I${S}/include \
-        `pkg-config --cflags glib-2.0 gio-2.0 gio-unix-2.0 libglibutil` \
-        -L${B}/build/release -lgbinder \
-        `pkg-config --libs glib-2.0 gio-2.0 gio-unix-2.0 libglibutil`
+    # binder-list too: it ENUMERATES the services on a binder node, which
+    # binder-ping cannot - ping answers "is this one name alive", list answers
+    # "what is registered". luneos-device-config's 40-ofono-binder needs the
+    # latter to discover the modem's IRadio/slotN topology, and its only source
+    # for that was lshal, which returns nothing at all on some devices (radon's
+    # MT6877; sargo dies in getDeviceHalManifest with a VINTF parse error). On
+    # radon that left the shipped single-slot binder.conf in place and the phone
+    # showed one SIM on dual-SIM hardware. Verified by hand there:
+    #   binder-list -d /dev/hwbinder | grep IRadio/slot
+    #   -> android.hardware.radio@1.0..1.6::IRadio/slot1 and /slot2
+    for t in binder-ping binder-list; do
+        ${CC} ${CFLAGS} ${LDFLAGS} \
+            ${S}/tools/$t/$t.c \
+            -o ${B}/$t \
+            -I${S}/include \
+            `pkg-config --cflags glib-2.0 gio-2.0 gio-unix-2.0 libglibutil` \
+            -L${B}/build/release -lgbinder \
+            `pkg-config --libs glib-2.0 gio-2.0 gio-unix-2.0 libglibutil`
+    done
 }
 
 do_install() {
     make install DESTDIR=${D}
     make install-dev DESTDIR=${D}
     install -D -m 0755 ${B}/binder-ping ${D}${bindir}/binder-ping
+    install -D -m 0755 ${B}/binder-list ${D}${bindir}/binder-list
 }
 
 PACKAGES =+ "libgbinder-tools"
-FILES:libgbinder-tools = "${bindir}/binder-ping"
+FILES:libgbinder-tools = "${bindir}/binder-ping ${bindir}/binder-list"
 RDEPENDS:libgbinder-tools = "libgbinder"
 
 # gbinder picks the protocol presets for /dev/binder and /dev/vndbinder from an
@@ -60,12 +73,54 @@ RDEPENDS:libgbinder-tools = "libgbinder"
 # them, and Waydroid passes explicit protocols for the container's own binder
 # nodes, taken from the system image's SDK level. So this setting is about the
 # host's own Android HALs, not about Waydroid.
+# ONE value, not a per-machine table. This is only a fallback.
+#
+# The level must match the VENDOR the device boots against, not the device's
+# age and not the GSI generation - the runtime source is ro.board.api_level,
+# then ro.vndk.version, then ro.build.version.sdk, all of which come off the
+# vendor partition. Moving a machine from a 9.0 GSI to the 16.0 one does not
+# change it.
+#
+# But it is written at runtime anyway. luneos-device-config reads those same
+# vendor properties and writes /etc/gbinder.d/10-luneos-device.conf, and files
+# in /etc/gbinder.d override /etc/gbinder.conf (gbinder_config.c says so in as
+# many words). Its unit is After=android-system.service, so the properties
+# exist by then, and Before= every consumer there is - surface-manager,
+# sensorfwd, ofono, configd, nfcd, pulseaudio, bluebinder, nyx.target. So the
+# generated file is always in place before anything can read the packaged one.
+#
+# That is why the per-machine overrides are gone. They were
+#
+#   tissot-halium 28   mido-halium 28   athena 35
+#   mindphone 30       halium-arm  30   halium-arm64 32
+#
+# and every one of them was either inert or actively misleading:
+#
+#   - mindphone and halium-arm were identical to this default, so no-ops.
+#   - tissot-halium, mido-halium and athena were correct for their vendors but
+#     superseded on every boot, so editing them could never change anything.
+#   - halium-arm64 = 32 was the actual trap. That rootfs is SHARED by sargo,
+#     sunfish, bramble and bluejay, whose vendors are not all SDK 32 (sargo is
+#     32, a LineageOS 23.2 vendor is 36). One value baked into one image cannot
+#     be right for all of them, and the runtime file is what saves them.
+#
+# Keeping a table that cannot take effect invites someone to "fix" a device by
+# editing a number here and conclude the stack is broken when nothing changes.
+#
+# This value still matters in exactly one case: a machine with no Android
+# container at all, where luneos-device-config finds no vendor properties, logs
+# "no vendor api_level found, leaving gbinder at the packaged default", and this
+# is what gbinder uses. 30 is the sane middle of the available presets (28, 29,
+# 30, 31, 33, 35, 36; the highest <= ApiLevel wins).
+#
+# To check what a device actually ended up with, read it off the device rather
+# than the metadata:
+#
+#   cat /etc/gbinder.d/10-luneos-device.conf   # what the runtime chose
+#   cat /etc/gbinder.conf                      # this fallback
+#
+# See luneos-device-config and hal-userspace.md.
 GBINDER_API_LEVEL ?= "30"
-GBINDER_API_LEVEL:tissot-halium = "28"
-GBINDER_API_LEVEL:mido-halium = "28"
-GBINDER_API_LEVEL:mindphone = "30"
-GBINDER_API_LEVEL:halium-arm64 = "32"
-GBINDER_API_LEVEL:athena = "35"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
