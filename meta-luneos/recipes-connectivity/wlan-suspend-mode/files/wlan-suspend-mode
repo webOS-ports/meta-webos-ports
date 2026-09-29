@@ -74,6 +74,20 @@ driver_layout() {
     # int total_len}.
     layout=qcom
     for m in /sys/module/wlan_drv_gen4m*; do [ -e "$m" ] && layout=mtk; done
+    # ...and when gen4m is built into the kernel there is no module directory to
+    # find, so the loop above leaves "qcom" and the wrong struct goes down the
+    # ioctl. Measured on radon (MT6877, CONFIG_MTK_COMBO=y), wlan0 up:
+    #
+    #   SETSUSPENDMODE 0  layout=qcom -> EINVAL
+    #   SETSUSPENDMODE 0  layout=mtk  -> OK
+    #
+    # so this is not cosmetic: fixing only the unit's condition would have left
+    # the command failing on every screen-off. /dev/wmtWifi is MediaTek's WMT
+    # character device, created by the combo driver whether it is built in or
+    # loaded, and it is already what mtk-connectivity keys off. Checked only
+    # after the module loop, so a machine with the module keeps deciding the
+    # same way it always did.
+    [ "$layout" = qcom ] && [ -e /dev/wmtWifi ] && layout=mtk
     echo "$layout"
 }
 
@@ -276,7 +290,12 @@ apply() {  # $1 = suspendmode|normal, $2 = reason
     if err=$(drvcmd "SETSUSPENDMODE $n" 2>&1); then
         cur=$1; echo "$1" > $STATE; log "$2 -> SETSUSPENDMODE $n ok (mode=$1)"
         [ "$n" = 0 ] && undo_iface_down "$2"
-        return
+        # return 0, not a bare return: the test above is the last command run,
+        # and it is FALSE whenever n is 1, so a bare return hands back 1 from
+        # the path that just succeeded. The manual CLI form exits on that
+        # status, so "wlan-suspend-mode off" reported failure every time it
+        # worked (measured on radon: SETSUSPENDMODE 1 ok, rc=1).
+        return 0
     fi
     log "$2 -> SETSUSPENDMODE $n failed (${err:-no detail})"
 
@@ -287,7 +306,7 @@ apply() {  # $1 = suspendmode|normal, $2 = reason
         if err=$(testmode_cmd "$n" 2>&1); then
             cur=$1; echo "$1" > $STATE; log "$2 -> testmode suspend=$n ok (mode=$1)"
             [ "$n" = 0 ] && undo_iface_down "$2"
-            return
+            return 0
         fi
         log "$2 -> testmode suspend=$n failed (${err:-no detail})"
     fi
@@ -323,7 +342,23 @@ esac
 # the container has loaded the WLAN driver: no wlan0 yet, and the private ioctl
 # answers ENODEV. Wait for the interface (measured on tissot: it appears about
 # a minute into boot) rather than firing the first command into nothing.
-while [ ! -e /sys/class/net/$IF ]; do sleep 2; done
+#
+# Bounded, because this wait is now the only gate. The unit used to carry
+# ConditionPathExistsGlob=/sys/module/wlan*, which silently excluded every
+# machine whose driver is built in rather than loaded - radon ran for its whole
+# uptime with ConditionResult=no. Waiting here instead covers module and
+# built-in alike, but an unbounded loop would then leave a process spinning for
+# ever on a machine that has no WLAN at all, so give up and tell systemd not to
+# restart us (exit 3 is in the unit's RestartPreventExitStatus).
+waited=0
+while [ ! -e /sys/class/net/$IF ]; do
+    waited=$((waited + 2))
+    if [ $waited -ge ${WLAN_IFACE_WAIT:-300} ]; then
+        log "no $IF after ${waited}s - nothing to manage on this machine, giving up"
+        exit 3
+    fi
+    sleep 2
+done
 log "watching luna://com.palm.display/control/status on $IF (current mode=${cur:-unset})"
 # A subscription that fails (hub not ready, display manager restarting) ends
 # the reader loop; systemd restarts the unit, and the state file keeps the last
