@@ -19,21 +19,16 @@ RCONFLICTS:${PN} += "imemanager"
 
 PACKAGECONFIG[libim] = "CONFIG+=enable-libim,CONFIG-=enable-libim,libim"
 
-# Hardware keyboard detection: MImHwKeyboardTracker now finds a keyboard from
-# the EV_KEY capabilities in /proc/bus/input/devices instead of asking for a
-# SW_TABLET_MODE switch that no LuneOS device with a fixed keyboard has. Until
-# this is merged, the branch rather than master.
-WEBOS_GIT_PARAM_BRANCH = "herrie/hw-keyboard-presence"
-SRCREV = "deed201abdd8d3981b04990d148c82097f44657d"
+SRCREV = "5a08b6e953099efc7ee816be296d79eedd6cdc6b"
 
 PV = "0.99.0+20-1040"
 
-PR = "r44"
+PR = "r59"
 
 inherit pkgconfig
 inherit webos_qmake6
 inherit webos_filesystem_paths
-inherit webos_ports_repo
+inherit webos_ports_ose_repo
 inherit features_check
 ANY_OF_DISTRO_FEATURES = "vulkan opengl"
 
@@ -56,6 +51,7 @@ SRC_URI += " \
     file://maliit-server@.service \
     file://maliit-server.sh.in \
     file://maliit-env.conf \
+    file://hwkeyboard-layout \
 "
 
 inherit systemd
@@ -79,6 +75,9 @@ do_install:append() {
 
     install -d ${D}${sysconfdir}/maliit
     install -m 0644 ${UNPACKDIR}/maliit-env.conf ${D}${sysconfdir}/maliit/
+    # Shipped as all comment and shadowed per device by luneos-device-config's
+    # 77-hwkeyboard-layout generator, which needs the file to exist to bind over.
+    install -m 0644 ${UNPACKDIR}/hwkeyboard-layout ${D}${sysconfdir}/maliit/
 
     install -d ${D}${localstatedir}/lib/maliit
 }

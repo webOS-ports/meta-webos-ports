@@ -23,15 +23,10 @@ DEPENDS = "maliit-framework-webos hunspell presage luna-service2 presage-native 
 RDEPENDS:${PN} += "maliit-framework-webos qtsvg-plugins qtmultimedia-qmlplugins"
 RRECOMMENDS:${PN} += "hunspell-dictionaries"
 
-# Keeps the on-screen keyboard down while a hardware keyboard is the active
-# input source, and adds the test and static-analysis harness. Needs the
-# matching maliit-framework-webos branch: without it Maliit::Hardware is never
-# selected and the new code never runs. Until this is merged, the branch rather
-# than master.
-WEBOS_GIT_PARAM_BRANCH = "herrie/hw-keyboard-vkb"
-SRCREV = "8df85b5a73e1c9e98b5df71d4fb8c4a877b2c8bc"
+
+SRCREV = "303fd9f086c218ea27f080d1164ad10bc713bf96"
 PV = "0.99.2+git"
-PR = "r4"
+PR = "r23"
 
 # We own webos-keyboard, so fixes belong in its actual source history, not
 # as patches carried here - unlike presage or imemanager, which are genuinely
@@ -50,9 +45,10 @@ EXTRA_QMAKEVARS_PRE = "\
     MALIIT_PLUGINS_DATA_DIR=${datadir} \
     LIBDIR=${libdir} \
     CONFIG+=nodoc \
-    CONFIG+=notests \
+    ${@bb.utils.contains('PTEST_ENABLED', '1', '', 'CONFIG+=notests', d)} \
     CONFIG+=enable-presage \
     CONFIG+=enable-hunspell \
+    LUNEOS_KEYBOARD_TEST_DIR=${libdir}/webos-keyboard/tests \
 "
 
 INSANE_SKIP:${PN} += "libdir"
@@ -62,5 +58,15 @@ FILES:${PN} += "\
     ${libdir}/maliit \
     ${datadir} \
 "
+
+# The unit tests, for a device where they are wanted. Built only when ptest is
+# enabled, because the suite is a handful of binaries nobody wants in a shipping
+# image - and because the tests deliberately do not link Maliit (they compile the
+# sources they cover straight in), so they are the one part of this recipe that
+# would build even without it. PACKAGES:prepend so this claims the files before
+# FILES:${PN} sweeps up ${libdir}.
+PACKAGES:prepend = "${PN}-tests "
+FILES:${PN}-tests = "${libdir}/webos-keyboard/tests"
+RDEPENDS:${PN}-tests += "${PN}"
 
 EXTRA_OEMAKE += "INSTALL_ROOT=${D}"
