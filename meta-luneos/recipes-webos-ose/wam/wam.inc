@@ -18,15 +18,11 @@ RDEPENDS:${PN} += "util-linux"
 VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_cpushareholder}"
 
-# keyboardAvailable / keyboardSlider in PalmSystem.deviceInfo, read from
-# /proc/bus/input/devices instead of hardcoded false.
-# Until this is merged, the branch rather than master.
-WEBOS_GIT_PARAM_BRANCH = "herrie/hwkbd-deviceinfo"
-SRCREV = "3c3344bbae4a0b2ecee349f7d7bb050927c1a9fd"
+SRCREV = "32f95b8d641c81e82a6ddb6190a33737581055c9"
 
 PV = "1.0.2-100"
 
-INC_PR = "r85"
+INC_PR = "r87"
 
 WAM_BUILD_SYSTEM ?= "webos_cmake"
 WAM_BUILD_DEFAULT_PLUGIN ?= "1"

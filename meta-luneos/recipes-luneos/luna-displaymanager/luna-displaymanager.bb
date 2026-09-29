@@ -7,14 +7,9 @@ DEPENDS = "glib-2.0 luna-service2 json-c luna-sysmgr-common luna-prefs nyx-lib l
 RDEPENDS:${PN} += "sleepd com.webos.service.battery luna-authmanager"
 
 PV = "1.0.0+git"
-PR = "r10"
+PR = "r11"
 
-# com.palm.display/control/notifyUserActivity, so typing can keep the
-# screen awake - nyx carries no ordinary keyboard keys, so nothing could
-# say so before.
-# Until this is merged, the branch rather than master.
-WEBOS_GIT_PARAM_BRANCH = "herrie/hwkbd-activity"
-SRCREV = "95d4e78c7ad0140743425ba638004347bb1a9a22"
+SRCREV = "c699dd79856b0d530fd4aaa817e2fef9563b4afa"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 

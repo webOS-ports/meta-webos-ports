@@ -16,7 +16,7 @@ SECTION = "webos/frameworks"
 LICENSE = "CLOSED"
 
 PV = "1.0-506+git"
-SRCREV = "0cc0b56cea5e1455f1aa0488d19845a81f782d12"
+SRCREV = "6465fc92537e6197d0df88ac9eb80f67299018e1"
 
 inherit webos_ports_repo
 inherit webos_filesystem_paths
