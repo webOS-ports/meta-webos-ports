@@ -15,7 +15,9 @@ inherit webos_app
 
 PV = "0.9.10+git"
 PR = "r1"
-SRCREV = "5fce962d1985bb2aac366e82653e9f5930e971ee"
+
+WEBOS_GIT_PARAM_BRANCH = "phone-addressbar-focus"
+SRCREV = "1a687c296bf3851f3d87102e76598829eadf5aa5"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 

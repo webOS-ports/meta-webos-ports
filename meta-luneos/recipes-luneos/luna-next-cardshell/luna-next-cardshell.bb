@@ -16,12 +16,8 @@ RDEPENDS:${PN} += " \
 
 PV = "0.6-0+git"
 
-# Reports typing to luna-displaymanager through a compositor key filter,
-# which is the only place in the shell that sees keys going to an
-# application.
-# Until this is merged, the branch rather than master.
-WEBOS_GIT_PARAM_BRANCH = "herrie/hwkbd-activity"
-SRCREV = "2564cc2a44e179c8950be07465a3c41386a2ef60"
+WEBOS_GIT_PARAM_BRANCH = "herrie/hwkbd-trackpad"
+SRCREV = "4543ab9f175677650bb9476c5b1809425fc61669"
 
 inherit webos_ports_repo
 inherit webos_cmake
