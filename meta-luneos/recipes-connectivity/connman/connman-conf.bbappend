@@ -34,11 +34,6 @@ do_install:append() {
 # ported to 2.0, and nothing drives a second station. Keep connman off both.
 # The list is prefix matched, and it replaces the built-in default rather than
 # extending it, so this appends to what main.conf already sets.
-do_install:append:halium() {
-    sed -i 's/^\(NetworkInterfaceBlacklist = .*\)$/\1,wlan1,p2p0,aware_nmi,p2p-dev,p2p/' \
-        ${D}${sysconfdir}/connman/main.conf
-}
-
 # MediaTek CCCI (the AP<->modem link on MTK Halium devices) exposes a "LAN"
 # netdev alongside the numbered cellular-data ones: ccmni0, ccmni1, ... plus a
 # trailing ccmni-lan. connman has no idea what that is, so it falls through to
@@ -69,16 +64,16 @@ do_install:append:halium() {
 # dies to SIGKILL, and every shutdown sits through ~80s of stop timeouts before
 # systemd-shutdown gets to reboot.
 #
-# Two MTK machines now, scoped per machine because no SoC-family override
-# exists yet. A third should promote this to a MACHINEOVERRIDES family override
-# (:mtk or similar) the way :halium already works above.
-do_install:append:mindphone() {
-    sed -i 's/^\(NetworkInterfaceBlacklist = .*\)$/\1,ccmni-lan/' \
-        ${D}${sysconfdir}/connman/main.conf
-}
-
-do_install:append:mp01() {
-    sed -i 's/^\(NetworkInterfaceBlacklist = .*\)$/\1,ccmni-lan/' \
+# Folded into the :halium block above rather than listed per machine. It was
+# scoped to mindphone and mp01 with a note to promote it to an SoC-family
+# override once a third MediaTek machine turned up; radon was that third, and
+# hit it in the most expensive way - one core pinned from 22s after boot, which
+# is where its load average of 8, sluggish UI and hanging daemon-reload came
+# from. An :mtk family override is not worth inventing for this: ccmni exists
+# only behind an Android container, and no non-MediaTek Halium device has an
+# interface by this name, so the entry is simply inert there.
+do_install:append:halium() {
+    sed -i 's/^\(NetworkInterfaceBlacklist = .*\)$/\1,wlan1,p2p0,aware_nmi,p2p-dev,p2p,ccmni-lan/' \
         ${D}${sysconfdir}/connman/main.conf
 }
 
