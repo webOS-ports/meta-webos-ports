@@ -49,3 +49,38 @@ SRC_URI:append:rosy = " \
 SRC_URI:append:tissot = " \
     file://sensord-tissot.conf \
 "
+
+SRC_URI:append:a3-2015 = " \
+    file://sensord-a3-2015.conf \
+"
+
+### Make the sensor chain libraries findable by the dynamic linker ###
+#
+# The chain libraries (libmagcalibrationchain-qt6.so and friends) install into
+# ${libdir}/sensord-qt6 next to the plugins, and the plugins link against them by
+# soname with no RPATH/RUNPATH. That directory is not on the linker's search path,
+# so loading libcompasschain-qt6.so fails:
+#
+#     Plugin loading error: "compasschain" - "Cannot load library
+#     /usr/lib/sensord-qt6/libcompasschain-qt6.so: libmagcalibrationchain-qt6.so:
+#     cannot open shared object file: No such file or directory"
+#     plugin marked invalid:  "compasschain"
+#     plugin marked invalid:  "rotationsensor"
+#
+# rotationsensor is what QtSensors clients ask for, so Messwerk reported no
+# rotation while the UI still rotated - the UI reads orientation/accelerometer,
+# which loads fine, so this stayed hidden.
+#
+# Verified on pinephone 2026-09-25: creating this file and running ldconfig puts
+# libmagcalibrationchain-qt6.so in the cache and the load error goes away.
+# ${sysconfdir}/ld.so.conf on these images already has
+# "include /etc/ld.so.conf.d/*.conf", but the directory itself did not exist.
+#
+# FILES:${PN} is set explicitly in the recipe, so the new file has to be added to
+# it or it will not be packaged.
+do_install:append() {
+    install -d ${D}${sysconfdir}/ld.so.conf.d
+    echo "${libdir}/sensord-qt6" > ${D}${sysconfdir}/ld.so.conf.d/sensorfw.conf
+}
+
+FILES:${PN} += "${sysconfdir}/ld.so.conf.d/sensorfw.conf"
