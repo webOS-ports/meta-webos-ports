@@ -532,5 +532,87 @@ if [ -n "$(ls -A "$GEN/configd" 2>/dev/null)" ] && [ -d /etc/configd/layers/over
     fi
 fi
 
+
+# ---------------------------------------------------- analog mixer init ----
+# Apply the adaptation's ALSA mixer settings, for devices whose audio HAL never
+# touches the mixer.
+#
+# MediaTek's HAL routes through the audio DSP over audio_ipi and sets no ALSA
+# control at all - a full "amixer contents" dump on the Zinwa Q25 is
+# byte-identical during playback and at idle. Whatever the kernel leaves in those
+# controls is therefore what the device is stuck with, and on the Q25 the kernel
+# leaves "Lineout Volume" at 0: the *minimum* of its range, which runs -10 dB to
+# +8 dB in 1 dB steps, so the speaker plays 18 dB below unity.
+#
+# One shot at boot is enough, and not because the register keeps the value - it
+# does not. mt6358 writes a mute code into the gain register when the path powers
+# down, which is why these controls read 31 at idle against a declared max of 18.
+# What it also does is cache the *control's* value and re-apply it on each
+# power-up: measured on the Q25, where the codec logged "set_speaker_gain(),
+# spk_gain = 0" before the control was set and "= 18" afterwards, with nothing
+# writing the register in between. The ALSA control is the durable thing, so
+# setting it once here is the right shape - and this unit is already ordered
+# Before=pulseaudio.service.
+#
+# Controls are named, never numid'd, for the same reason input devices are:
+# numids are handed out in registration order and move when the codec or the
+# machine driver gains a control, while the name belongs to the control.
+#
+# Format: ';' separated "Control Name=value". The value reaches amixer verbatim,
+# so a two-channel control takes amixer's comma form and an enum its item name:
+#
+#   deviceinfo_alsa_mixer_init="Lineout Volume=10,10;RCV Mux=Voice Playback"
+#
+# A control that does not exist, or a value amixer rejects, is logged and
+# skipped: the remaining settings are worth more than none, the same way
+# resolve_input_list_by_name treats a name that does not resolve.
+if [ -n "${deviceinfo_alsa_mixer_init:-}" ]; then
+    if ! command -v amixer >/dev/null 2>&1; then
+        log "WARNING: deviceinfo_alsa_mixer_init is set but amixer is missing (alsa-utils); mixer left alone"
+    else
+        # The card appears when the vendor's audio modules load, which on a
+        # halium device races this service. Wait for it - but only for an
+        # adaptation that asked for mixer settings, and not for long: this unit
+        # sits in front of nyx.target and the compositor, so a device whose card
+        # never arrives must not spend its boot here.
+        _card=
+        _waited=0
+        while [ -z "$_card" ] && [ "$_waited" -lt 5 ]; do
+            _card=$(awk '$1 ~ /^[0-9]+$/ { print $1; exit }' /proc/asound/cards 2>/dev/null)
+            [ -n "$_card" ] && break
+            sleep 1
+            _waited=$((_waited + 1))
+        done
+
+        if [ -z "$_card" ]; then
+            log "WARNING: no ALSA card appeared in ${_waited}s; mixer settings not applied"
+        else
+            _rest=$deviceinfo_alsa_mixer_init
+            while [ -n "$_rest" ]; do
+                _item=${_rest%%;*}
+                if [ "$_item" = "$_rest" ]; then
+                    _rest=
+                else
+                    _rest=${_rest#*;}
+                fi
+                [ -n "$_item" ] || continue
+                case "$_item" in
+                    *=*) ;;
+                    *)
+                        log "WARNING: mixer setting '$_item' has no '=', ignoring"
+                        continue ;;
+                esac
+                _ctl=${_item%%=*}
+                _val=${_item#*=}
+                if amixer -c "$_card" cset name="$_ctl" "$_val" >/dev/null 2>&1; then
+                    log "mixer: $_ctl=$_val"
+                else
+                    log "WARNING: mixer: card $_card rejected '$_ctl'='$_val'"
+                fi
+            done
+        fi
+    fi
+fi
+
 exit 0
 
