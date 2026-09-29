@@ -26,3 +26,11 @@ SRC_URI += "file://0009-ipa-simple-add-a-tuning-file-for-the-GC02M2.patch"
 
 SRC_URI += "file://0010-ipa-rkisp1-support-the-rk3566-rk3568-V21-ISP.patch"
 SRC_URI += "file://0011-ipa-rkisp1-awb-program-the-measurement-window-every-frame.patch"
+
+# PinePhone front camera (GalaxyCore GC2145): sensor properties so libcamera
+# stops falling back to unverified defaults, and a gain helper so the software
+# ISP's exposure loop can interpret the gain code. Both numbers are taken from
+# drivers/media/i2c/gc2145.c rather than a datasheet.
+SRC_URI += "file://0012-libcamera-add-sensor-properties-for-the-GC2145.patch"
+SRC_URI += "file://0013-ipa-libipa-add-a-camera-sensor-helper-for-the-GC2145.patch"
+SRC_URI += "file://0014-ipa-simple-add-a-tuning-file-for-the-GC2145.patch"
