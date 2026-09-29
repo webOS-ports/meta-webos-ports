@@ -1,0 +1,59 @@
+[Unit]
+Description=Reload the cfg80211 regulatory database
+Documentation=man:iw(8)
+
+# cfg80211 is built into the kernel on most of the devices in this tree, so it
+# runs regulatory_init() during the kernel's own initcalls and asks for
+# regulatory.db there - before any root filesystem is mounted. The direct load
+# from /lib/firmware therefore cannot succeed, and the kernel falls back to the
+# sysfs firmware helper and waits for userspace. Measured on radon:
+#
+#   cfg80211: Loaded X.509 cert 'sforshee: ...'
+#   cfg80211: Loaded X.509 cert 'wens: ...'
+#   platform regulatory.0: Direct firmware load for regulatory.db failed, error -2
+#   platform regulatory.0: Falling back to syfs fallback for: regulatory.db
+#   ueventd: firmware: could not find firmware for regulatory.db
+#   cfg80211: failed to load regulatory.db
+#
+# On a Halium device the process that answers that fallback is the Android
+# container's ueventd, which searches /etc/firmware, /odm/firmware,
+# /vendor/firmware and /firmware/image - never the LuneOS root - so it always
+# answers "not found".
+#
+# The failure is then LATCHED. net/wireless/reg.c sets
+#
+#   regdb = ERR_PTR(-ENODATA)
+#
+# in regdb_fw_cb(), and query_regdb() returns that error for the rest of the
+# uptime without ever issuing another request_firmware(). Installing
+# wireless-regdb-static into the rootfs is consequently not enough on its own,
+# and neither is "iw reg set XX" - it is accepted, returns 0, and changes
+# nothing, which is exactly what radon showed: country 00, every 5 GHz band
+# NO-IR/PASSIVE-SCAN, and a 5 GHz AP the radio would never probe for despite
+# having 25 usable 5 GHz channels.
+#
+# NL80211_CMD_RELOAD_REGDB - "iw reg reload" - is the one thing that clears the
+# latch: reg_reload_regdb() drops the cached pointer and re-requests the file,
+# which by now is in /lib/firmware where the kernel can load it directly.
+#
+# The alternative is to put regulatory.db in the initramfs, which is unpacked
+# at rootfs_initcall and so is in place before cfg80211 asks. meta-hp does that
+# for tenderloin. It works, but it costs a boot image rebuild and reflash on
+# every device and does nothing for a kernel whose cfg80211 is a module loaded
+# later, so it is not the general answer.
+ConditionPathExists=/lib/firmware/regulatory.db
+
+# Before anything scans. wpa_supplicant and connman inherit whatever domain is
+# in force when they bring the interface up; starting them first means the
+# first scan is a world-domain one.
+Before=connman.service wpa_supplicant.service wpa_supplicant-nl80211@.service
+Wants=network-pre.target
+Before=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/cfg80211-regdb-reload
+
+[Install]
+WantedBy=multi-user.target
