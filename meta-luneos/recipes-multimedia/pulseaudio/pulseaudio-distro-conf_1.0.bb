@@ -22,10 +22,26 @@ SRC_URI = " \
     file://droid-audio-config-gen \
 "
 
+# Which sink webos-system.pa remaps pcm_output onto. sink.primary_output is right
+# nearly everywhere; a machine whose HAL gives that output a very small FAST
+# buffer can point at a deeper one instead - athena underruns audibly on 384-frame
+# periods where deep_buffer runs 1920. Set it from the machine .conf rather than
+# copying the whole of webos-system.pa for one word.
+WEBOS_PCM_OUTPUT_MASTER ?= "sink.primary_output"
+
 do_install() {
     install -d ${D}${sysconfdir}/pulse
     install -m 0644 ${UNPACKDIR}/webos-system.pa ${D}${sysconfdir}/pulse/
     install -m 0644 ${UNPACKDIR}/webos-virtual-devices.pa ${D}${sysconfdir}/pulse/
+
+    sed -i -e 's|@PCM_OUTPUT_MASTER@|${WEBOS_PCM_OUTPUT_MASTER}|g' \
+        ${D}${sysconfdir}/pulse/webos-system.pa
+
+    # An unknown token would install verbatim and only fail when PulseAudio
+    # tried to resolve a sink literally called @SOMETHING@.
+    if grep -qE '@[A-Z_]+@' ${D}${sysconfdir}/pulse/webos-system.pa; then
+        bbfatal "unsubstituted @TOKEN@ left in webos-system.pa"
+    fi
 }
 
 # Halium: generate the 16-bit-input audio policy copy for module-droid-card
