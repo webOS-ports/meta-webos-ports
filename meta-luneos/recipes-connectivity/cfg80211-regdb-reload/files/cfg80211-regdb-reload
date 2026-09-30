@@ -1,0 +1,39 @@
+#!/bin/sh
+# Make the cfg80211 regulatory database take effect on a kernel that asked for
+# it before the root filesystem existed.
+#
+# See cfg80211-regdb-reload.service for why this is needed at all. In short:
+# the failure is latched in the kernel, "iw reg reload" is the only thing that
+# clears it, and until it is cleared the device is stuck in the world domain.
+
+IW=$(command -v iw) || exit 0
+
+[ -r /lib/firmware/regulatory.db ] || exit 0
+
+# NL80211_CMD_RELOAD_REGDB landed in 4.15. On anything older this prints
+# "command failed: Operation not supported" and there is nothing to be done
+# from userspace - put regulatory.db in the initramfs for those, the way
+# meta-hp does for tenderloin.
+if ! "$IW" reg reload 2>/dev/null; then
+    echo "cfg80211-regdb-reload: kernel has no RELOAD_REGDB; regulatory.db must be in the initramfs"
+    exit 0
+fi
+
+# Optional static country, in the file Debian's crda package has always used.
+# Nothing ships one: without it cfg80211 stays in the world domain and adopts
+# a domain from the AP's country IE on association, which is the right default
+# for a phone that travels. A device that must be pinned to one country (a
+# fixed installation, or a radio whose vendor blob dislikes 00) can drop in
+#
+#     REGDOMAIN=NL
+#
+# at /etc/default/crda.
+if [ -r /etc/default/crda ]; then
+    . /etc/default/crda
+    if [ -n "$REGDOMAIN" ]; then
+        "$IW" reg set "$REGDOMAIN" ||
+            echo "cfg80211-regdb-reload: could not set regulatory domain $REGDOMAIN"
+    fi
+fi
+
+exit 0
