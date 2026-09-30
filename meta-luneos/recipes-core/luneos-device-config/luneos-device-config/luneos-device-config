@@ -165,8 +165,49 @@ fi
 
 [ -n "$codename" ] || codename=unknown
 
-# Vendor API level: which GSI generation this vendor expects to talk to.
+# Vendor API level: which GSI generation this vendor expects to talk to, and the
+# number libgbinder's ApiLevel wants, which is an SDK level (see the gbinder
+# section below).
+#
+# Android 15 changed the FORMAT of ro.board.api_level from an SDK number
+# (28..34) to a YYYYMM date - 202404 for Android 15, 202504 for Android 16 - and
+# deprecated VNDK at the same time, so ro.vndk.version is simply absent on those
+# vendors and there is no older property to fall back to. Measured on two A15
+# vendors, both of which report the date and no vndk version at all:
+#
+#   fajita (LineageOS 22.2)  ro.board.api_level=202404  ro.vendor.build.version.sdk=35
+#   surya  (/e/OS A15)       ro.board.api_level=202404  ro.vendor.build.version.sdk=35
+#
+# Passing the date through is not a cosmetic error. libgbinder picks the highest
+# preset <= ApiLevel from {36,35,33,31,30,29,28}, so any date sails past all of
+# them and always selects the newest: preset 36, servicemanager "aidl6", on a
+# vendor whose servicemanager speaks "aidl5" (preset 35). The two presets differ
+# in exactly that string. The symptom is an AIDL HAL lookup that the container's
+# own servicemanager resolves happily while libgbinder's does not - the same
+# shape as the sunfish failure quoted below, and the suspected cause of surya's
+# sensorfwd ISensors lookups failing.
+#
+# So resolve a date to the vendor build's own platform SDK, which is the number
+# gbinder wants, and keep a table for the known dates in case a vendor omits it.
 api_level=$(prop ro.board.api_level)
+case "$api_level" in
+    [0-9][0-9][0-9][0-9][0-9][0-9])
+        _vendor_sdk=$(prop ro.vendor.build.version.sdk)
+        if [ -n "$_vendor_sdk" ]; then
+            log "vendor API level $api_level is an Android 15+ date; using the" \
+                "vendor's own SDK $_vendor_sdk"
+            api_level=$_vendor_sdk
+        else
+            case "$api_level" in
+                202404) api_level=35 ;;
+                202504) api_level=36 ;;
+                *) log "WARNING: dated vendor API level $api_level is not in the" \
+                       "table and the vendor declares no SDK - passing it" \
+                       "through, which will select libgbinder's newest preset" ;;
+            esac
+        fi
+        ;;
+esac
 [ -n "$api_level" ] || api_level=$(prop ro.vndk.version)
 [ -n "$api_level" ] || api_level=$(prop ro.build.version.sdk)
 
@@ -317,6 +358,40 @@ LUNEOS_TOUCHSCREEN_DEVICE="$touchscreen"
 LUNEOS_KEY_DEVICES="$keydevs"
 EOF
 log "codename=$codename api=$api_level density=$density panel=${panel_w}x${panel_h} touch=$touchscreen keys=$keydevs"
+
+# libgbinder's protocol presets, from the vendor's own API level.
+#
+# This decides the servicemanager protocol libgbinder speaks to the device's
+# Android HALs - the shape of calls like registerForNotifications - and it has to
+# match the vendor, not the device's age. libgbinder picks the highest preset
+# <= ApiLevel; it has presets for 28, 29, 30, 31, 33, 35 and 36.
+#
+# It cannot be a build-time setting for these devices: the halium-arm64 rootfs is
+# one image shared by sargo (vendor SDK 32), sunfish and bramble (LineageOS 23.2
+# vendor, SDK 36) and others, so libgbinder.bb can only bake in one value. Hence
+# here, at runtime, from the vendor we actually booted against.
+#
+# Observed when this was wrong (sunfish on the baked-in 32, i.e. the API 31
+# preset, against an SDK 36 vendor): the NFC HAL was running and nfcd healthy,
+# and the only failure was
+#
+#   nfcd: [gbinder] WARNING! registerForNotifications(
+#         android.hardware.nfc.INfc/default) tx error -2147483647
+#
+# Files in /etc/gbinder.d overwrite /etc/gbinder.conf (gbinder_config.c says so
+# in as many words), so this wins over the packaged default without replacing it.
+if [ -n "$api_level" ]; then
+    gbconf=/etc/gbinder.d/10-luneos-device.conf
+    if mkdir -p /etc/gbinder.d 2>/dev/null; then
+        printf '[General]\nApiLevel = %s\n' "$api_level" > "$gbconf".tmp 2>/dev/null &&
+            mv -f "$gbconf".tmp "$gbconf" 2>/dev/null &&
+            log "gbinder ApiLevel -> $api_level ($gbconf)" ||
+            log "WARNING: could not write $gbconf"
+    fi
+else
+    log "WARNING: no vendor api_level found, leaving gbinder at the packaged default"
+fi
+
 
 # ------------------------------------------------------- generators ----
 # Each concern is a small script under generators/, run in name order with the

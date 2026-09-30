@@ -18,54 +18,43 @@ EXTRA_OEMAKE = "KEEP_SYMBOLS=1"
 PARALLEL_MAKE = ""
 
 do_compile:append() {
-    # Build binder-ping from tools/ against the just-built library. It is
-    # packaged separately (libgbinder-tools) and used by the Android-container
-    # readiness probe to wait for a HIDL service on /dev/hwbinder, replacing the
-    # crash-prone lshal: binder-ping returns a clean exit code and does not
-    # SIGSEGV when run before the container's linker/hwservicemanager are ready.
-    ${CC} ${CFLAGS} ${LDFLAGS} \
-        ${S}/tools/binder-ping/binder-ping.c \
-        -o ${B}/binder-ping \
-        -I${S}/include \
-        `pkg-config --cflags glib-2.0 gio-2.0 gio-unix-2.0 libglibutil` \
-        -L${B}/build/release -lgbinder \
-        `pkg-config --libs glib-2.0 gio-2.0 gio-unix-2.0 libglibutil`
+    # binder-ping and binder-list from tools/, packaged as libgbinder-tools.
+    # ping tests one name, list enumerates a node; both replace lshal, which
+    # SIGSEGVs before the container is up and returns nothing on some devices.
+    # 40-ofono-binder uses list to find the modem's IRadio/slotN topology.
+    for t in binder-ping binder-list; do
+        ${CC} ${CFLAGS} ${LDFLAGS} \
+            ${S}/tools/$t/$t.c \
+            -o ${B}/$t \
+            -I${S}/include \
+            `pkg-config --cflags glib-2.0 gio-2.0 gio-unix-2.0 libglibutil` \
+            -L${B}/build/release -lgbinder \
+            `pkg-config --libs glib-2.0 gio-2.0 gio-unix-2.0 libglibutil`
+    done
 }
 
 do_install() {
     make install DESTDIR=${D}
     make install-dev DESTDIR=${D}
     install -D -m 0755 ${B}/binder-ping ${D}${bindir}/binder-ping
+    install -D -m 0755 ${B}/binder-list ${D}${bindir}/binder-list
 }
 
 PACKAGES =+ "libgbinder-tools"
-FILES:libgbinder-tools = "${bindir}/binder-ping"
+FILES:libgbinder-tools = "${bindir}/binder-ping ${bindir}/binder-list"
 RDEPENDS:libgbinder-tools = "libgbinder"
 
-# gbinder picks the protocol presets for /dev/binder and /dev/vndbinder from an
-# API level, and with nothing configured it assumes the oldest. That level is a
-# property of the Android side the host talks to: on a Halium device the
-# vendor's, which is ro.vndk.version, and on a device whose only Android is the
-# Waydroid container, that image's.
+# Fallback only. gbinder picks a protocol preset from an API level; the level
+# belongs to the vendor the device boots against, which is only knowable at
+# runtime, so luneos-device-config writes /etc/gbinder.d/10-luneos-device.conf
+# from the vendor properties and that overrides this file. Per-machine values
+# used to live here and could never take effect - halium-arm64's rootfs is
+# shared by devices with different vendor SDKs, so no baked-in number is right.
+# This is used only where there is no Android container to read properties from;
+# 30 is mid-range of the presets (28, 29, 30, 31, 33, 35, 36).
 #
-# It used to be a static file saying 28, installed only on Halium machines,
-# with waydroid.bb installing a near-identical one saying 30 on each of the
-# others through four copies of the same do_install:append. One file, generated
-# from one variable, replaces all of that - which is also why this recipe now
-# needs PACKAGE_ARCH: tissot-halium, mido-halium and halium-arm64 share
-# TUNE_PKGARCH, so machine-specific content under the tune arch would collide
-# in sstate and in the feed.
-#
-# The presets only reach /dev/binder and /dev/vndbinder; /dev/hwbinder is not in
-# them, and Waydroid passes explicit protocols for the container's own binder
-# nodes, taken from the system image's SDK level. So this setting is about the
-# host's own Android HALs, not about Waydroid.
+# PACKAGE_ARCH: machines sharing TUNE_PKGARCH would otherwise collide in sstate.
 GBINDER_API_LEVEL ?= "30"
-GBINDER_API_LEVEL:tissot-halium = "28"
-GBINDER_API_LEVEL:mido-halium = "28"
-GBINDER_API_LEVEL:mindphone = "30"
-GBINDER_API_LEVEL:halium-arm64 = "32"
-GBINDER_API_LEVEL:athena = "35"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
@@ -76,7 +65,5 @@ do_install:append() {
 
 FILES:${PN} += " ${sysconfdir}"
 
-#     src/gbinder_writer.c:1318:60: error: passing argument 2 of 'gbinder_cleanup_add' from incompatible pointer type [-Wincompatible-pointer-types]
-#     src/gbinder_writer.c:1329:55: error: passing argument 4 of 'gbinder_writer_alloc' from incompatible pointer type [-Wincompatible-pointer-types]
-#     src/gbinder_writer.c:1337:56: error: passing argument 4 of 'gbinder_writer_alloc' from incompatible pointer type [-Wincompatible-pointer-types]
+# gnu17: gbinder_writer.c passes incompatible pointer types, fatal under gnu23.
 CFLAGS += "-std=gnu17"
