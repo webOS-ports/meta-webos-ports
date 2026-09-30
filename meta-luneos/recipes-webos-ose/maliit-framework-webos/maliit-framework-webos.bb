@@ -19,16 +19,16 @@ RCONFLICTS:${PN} += "imemanager"
 
 PACKAGECONFIG[libim] = "CONFIG+=enable-libim,CONFIG-=enable-libim,libim"
 
-SRCREV = "ccfe70370b673faf3f13d17e9efb12191ce308ad"
+SRCREV = "5a08b6e953099efc7ee816be296d79eedd6cdc6b"
 
 PV = "0.99.0+20-1040"
 
-PR = "r41"
+PR = "r59"
 
 inherit pkgconfig
 inherit webos_qmake6
 inherit webos_filesystem_paths
-inherit webos_ports_repo
+inherit webos_ports_ose_repo
 inherit features_check
 ANY_OF_DISTRO_FEATURES = "vulkan opengl"
 
@@ -51,6 +51,7 @@ SRC_URI += " \
     file://maliit-server@.service \
     file://maliit-server.sh.in \
     file://maliit-env.conf \
+    file://hwkeyboard-layout \
 "
 
 inherit systemd
@@ -74,6 +75,9 @@ do_install:append() {
 
     install -d ${D}${sysconfdir}/maliit
     install -m 0644 ${UNPACKDIR}/maliit-env.conf ${D}${sysconfdir}/maliit/
+    # All comment; luneos-device-config's 77-hwkeyboard-layout binds over it per
+    # device, and needs the file to exist to do so.
+    install -m 0644 ${UNPACKDIR}/hwkeyboard-layout ${D}${sysconfdir}/maliit/
 
     install -d ${D}${localstatedir}/lib/maliit
 }
@@ -100,3 +104,24 @@ FILES:${PN} += "${OE_QMAKE_PATH_QT_ARCHDATA} ${systemd_unitdir}/system/scripts"
 # File /usr/lib/mkspecs/features/maliit-plugins.prf in package maliit-framework-webos-dev contains reference to TMPDIR [buildpaths]
 ERROR_QA:remove = "buildpaths"
 WARN_QA:append = " buildpaths"
+
+# getKeyboardStatus and setOnScreenKeyboardForced are new methods on an already
+# registered service, and a bare install leaves them denied - see the same
+# comment in luna-displaymanager.bb. ls-hubd has to re-read the ACG files first,
+# and only then can the provider re-register its category.
+#
+# maliit-server.service is the launcher; the instance maliit-server@0 is what
+# actually holds com.webos.service.ime, and restarting the launcher restarts it.
+pkg_postinst:${PN}() {
+    if [ -n "$D" ]; then
+        exit 0
+    fi
+
+    if command -v ls-control > /dev/null 2>&1; then
+        ls-control scan-services || true
+    fi
+
+    if systemctl is-active --quiet maliit-server.service; then
+        systemctl restart maliit-server.service || true
+    fi
+}
