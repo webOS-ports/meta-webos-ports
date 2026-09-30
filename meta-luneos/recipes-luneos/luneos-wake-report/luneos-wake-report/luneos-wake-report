@@ -1,0 +1,39 @@
+#!/bin/sh
+# luneos-wake-report - for every power-key press this boot, show what the kernel
+# and the display were doing: whether the press itself woke the SoC, how long
+# before it the last resume was, and how long the display took to come on.
+#
+# The standard first step for "the screen takes a second to come on": it
+# separates a slow *wake* (the SoC was suspended and the press had to resume it)
+# from a slow *display* (the SoC was already awake and the compositor or the
+# panel took the time), which need entirely different fixes.
+#
+# Usage: reproduce it on battery - USB blocks suspend, so a device on a cable
+# never shows the interesting case - then plug in and run:
+#
+#     luneos-wake-report | tail -n 20
+#
+# What it reads from the journal, all of it optional:
+#   "Power key pressed"        the key event (nyx / the PMIC's key driver)
+#   "event displayOn/Off"      LunaDisplayManager turning the panel on and off
+#   "PM: suspend entry/exit"   the kernel entering and leaving suspend
+#   "Resume caused by"         the wake source, on platforms that name one
+#                              (Qualcomm PMICs report pon_kpdpwr for the power
+#                              key); elsewhere the cause reads "(none logged)"
+#                              and the timings are still right.
+journalctl -b --no-pager -o short-monotonic 2>/dev/null |
+grep -E "Power key pressed|event display(On|Off)|PM: suspend (entry|exit)|Resume caused by" |
+awk -F'[][]' '
+{ t = $2 + 0 }
+/suspend entry/ { insusp = 1; entry = t; next }
+/Resume caused/ { cause = $0; sub(/.*Resume caused by /, "", cause); next }
+/suspend exit/  { insusp = 0; ex = t; lastcause = cause; cause = "(none logged)"; next }
+/Power key/ {
+    if (pend) printf "  press at %.1f: display never came on before the next press\n", pend
+    pend = t; pdisp = disp; pcause = lastcause; pex = ex; next }
+/displayOn/ {
+    if (pend && pdisp != "on")
+        printf "press %.1f -> display on after %.2f s | last resume %.1f s before press, cause: %s\n", pend, t - pend, pend - pex, pcause
+    pend = 0; disp = "on"; next }
+/displayOff/ { if (pend) pend = 0; disp = "off"; next }
+'

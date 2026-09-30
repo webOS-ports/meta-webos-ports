@@ -22,14 +22,21 @@ VIRTUAL-RUNTIME_speech_synthesis ?= "speech-dispatcher"
 # pdf.js as a Chromium extension for EVERY browsershell app — drop that package and Atlas loses
 # in-browser PDF as well.
 
+# ttf-noto-emoji-color: nothing in the image could draw a codepoint above
+# U+FFFF, so every emoji was a tofu box. 9.5MB, and it serves Chromium apps, QML
+# apps, the shell and the keyboard at once. Chromium reads the font list once at
+# start, so a hand-install needs webapp-mgr restarted to take effect.
 RDEPENDS:${PN} = " \
   ${DISTRO_EXTRA_RDEPENDS} \
   \
   luneos-device-config \
   luneos-kernel-log-quirks \
   \
+  ttf-noto-emoji-color \
+  \
   powertop \
   luneos-power-report \
+  luneos-wake-report \
   luneos-remote-wakelock \
   \
   pulseaudio-distro-conf \
@@ -134,9 +141,7 @@ RDEPENDS:${PN} = " \
   org.webosports.app.messwerk \
   org.mer.app.fingerterm \
   org.webosports.app.terminal \
-  org.webosports.app.camera \
   \
-  v4l-utils \
 "
 
 # qbootctl is listed unconditionally: LIBHYBRIS_RDEPENDS is only ever appended
@@ -189,6 +194,29 @@ FACEUNLOCK_RDEPENDS = " \
     luneos-faced \
 "
 
+# kbdscroll: turns a slide over a touch surface that is not the touchscreen - a
+# capacitive keymat, or a trackpad beside the keys - into scrolling, and into
+# cursor movement with Alt held.
+#
+# Two features, for the two shapes the hardware comes in: keyboard-touch (the
+# keys themselves are the surface, e.g. athena) and trackpad (a separate pad,
+# e.g. q25). Deliberately not gated on keyboard-qwerty/keyboard-t9 - most
+# keyboards have no touch surface. An optical pad reporting REL_X/REL_Y is
+# already a pointer and is not what this reads.
+KEYBOARD_TOUCH_RDEPENDS = " \
+    kbdscroll \
+"
+
+# Camera, gated on the topology rather than unconditional: face unlock needs a
+# FRONT-facing sensor. camera-rear and camera-front are the usual pair;
+# camera-swivel is one sensor on a rotating mount, declared instead of both.
+# The HAL half lives elsewhere - gst-droid in LIBHYBRIS_RDEPENDS,
+# com.webos.service.camera in packagegroup-webos-extended.
+CAMERA_RDEPENDS = " \
+    org.webosports.app.camera \
+    v4l-utils \
+"
+
 # NFC stack: nfcd talks to the Android NFC HAL over binder, webos-nfc-adapter
 # bridges its D-Bus API onto the luna-service2 bus for apps and the shell.
 # Only added for machines that actually have an NFC controller.
@@ -226,6 +254,30 @@ VPN_RDEPENDS = " \
 TORCH_RDEPENDS = " \
     org.webosports.service.torch \
     org.webosports.app.torch \
+"
+
+# Hardware privacy switches. The shell's status-bar indicator, its alert and the
+# camera app all key off what this daemon reports. A machine declaring the
+# feature must also ship conf/killswitchd.conf.<machine> in the service's own
+# repo; without it the unit's ConditionPathExists keeps systemd from starting it.
+KILLSWITCH_RDEPENDS = " \
+    org.webosports.service.killswitch \
+"
+
+# cfg80211 regulatory database. Only linux-firmware-pine64 pulled it in before,
+# so every phone ran without one - and with no regulatory.db the kernel stays in
+# the built-in "world" domain, where every 5 GHz channel is NO-IR/PASSIVE-SCAN so
+# the radio never probes there at all (radon: 25 usable 5 GHz channels in the
+# PHY, none visible to connman).
+#
+# -static is the variant the kernel loads directly from /lib/firmware; the
+# non-static package is the CRDA layout nothing has used since 4.15, and the two
+# RCONFLICT. Needs wens.hex in the kernel's net/wireless/certs on a tree built
+# with CONFIG_CFG80211_REQUIRE_SIGNED_REGDB, or the db is loaded then rejected.
+# cfg80211-regdb-reload is the other half; see its recipe.
+WIRELESS_REGDB_RDEPENDS = " \
+    wireless-regdb-static \
+    cfg80211-regdb-reload \
 "
 
 # eSIM: lpac is the LPA (SGP.22 profile download/management), luneos-esim-adapter
@@ -268,32 +320,48 @@ RDEPENDS:${PN}:append:tenderloin3g = " alsa-utils-systemd rmtfs qrtr rpmsgexport
 RDEPENDS:${PN}:append:mido = " alsa-utils-systemd mesa-megadriver rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:tissot = " alsa-utils-systemd mesa-megadriver rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:rosy = " alsa-utils-systemd mesa-megadriver rmtfs qrtr rpmsgexport"
+RDEPENDS:${PN}:append:a3-2015 = " alsa-utils-systemd mesa-megadriver rmtfs qrtr rpmsgexport"
 
 RDEPENDS:${PN}:append:tissot = " wcnss-filter-fixup"
 RDEPENDS:${PN}:append:tissot-halium = " wcnss-filter-fixup"
 
-# Fingerprint-sensor devices only. These machine names come from the LuneOS
-# Halium layer; on a tree without them the overrides are simply inert.
-RDEPENDS:${PN}:append:sagit = " ${FINGERPRINT_RDEPENDS}"
-RDEPENDS:${PN}:append:mido-halium = " ${FINGERPRINT_RDEPENDS}"
-RDEPENDS:${PN}:append:tissot-halium = " ${FINGERPRINT_RDEPENDS}"
-# The GSI machine can land on any device; the stack is harmless without a
-# sensor (the adapter just reports unavailable).
-RDEPENDS:${PN}:append:halium-arm64 = " ${FINGERPRINT_RDEPENDS}"
+# Hardware-gated stacks, driven by MACHINE_FEATURES.
+#
+# These were per-machine RDEPENDS:append lines, which put the hardware question
+# in the wrong place and got it wrong - radon shipped nfcd and biomd for hardware
+# the FLX1s has no HAL for. The machine declares what it has; this only maps that
+# to packages. nfc is the standard OE feature; fingerprint, esim, faceunlock,
+# keyboard-touch and trackpad are LuneOS-specific.
+RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'fingerprint', ' ${FINGERPRINT_RDEPENDS}', '', d)}"
+RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'nfc',         ' ${NFC_RDEPENDS}',         '', d)}"
+RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'esim',        ' ${ESIM_RDEPENDS}',        '', d)}"
+RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'wifi',        ' ${WIRELESS_REGDB_RDEPENDS}', '', d)}"
+RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'killswitch',   ' ${KILLSWITCH_RDEPENDS}', '', d)}"
+RDEPENDS:${PN}:append = "${@bb.utils.contains_any('MACHINE_FEATURES', 'keyboard-touch trackpad', ' ${KEYBOARD_TOUCH_RDEPENDS}', '', d)}"
+# ...and unconditionally on the generic rootfs, because that machine cannot see
+# the feature. athena declares keyboard-touch and q25 declares trackpad, but
+# neither builds a rootfs of its own - they build a boot image and run
+# halium-arm64's - so the line above evaluates against halium-arm64's
+# MACHINE_FEATURES, which has neither, and kbdscroll never reached either
+# device. Same shape as 70-q25.rules and the luneos-device-config adaptations:
+# ship it on the generic image and let the runtime decide.
+#
+# Safe because that is already how kbdscroll behaves: with no touch surface
+# besides the touchscreen it logs "nothing to do" and exits 0, deliberately, so
+# systemd does not restart it. Its own comment says the package is expected on
+# machines that have no surface.
+RDEPENDS:${PN}:append:halium-arm64 = " ${KEYBOARD_TOUCH_RDEPENDS}"
+RDEPENDS:${PN}:append:halium-arm = " ${KEYBOARD_TOUCH_RDEPENDS}"
+RDEPENDS:${PN}:append = "${@bb.utils.contains_any('MACHINE_FEATURES', 'camera-front camera-rear camera-swivel', ' ${CAMERA_RDEPENDS}', '', d)}"
 
-# Face unlock, on every 64-bit machine - halium and mainline alike. Harmless on
-# one with no usable camera: luneos-faced just reports available=false.
-RDEPENDS:${PN}:append:aarch64 = " ${FACEUNLOCK_RDEPENDS}"
-
-# NFC-capable devices only.
-RDEPENDS:${PN}:append:mako = " ${NFC_RDEPENDS}"
-RDEPENDS:${PN}:append:hammerhead-halium = " ${NFC_RDEPENDS}"
-RDEPENDS:${PN}:append:sagit = " ${NFC_RDEPENDS}"
-# The GSI machine can land on any device; the stack is harmless without an
-# NFC controller (nfcd just reports unavailable).
-RDEPENDS:${PN}:append:halium-arm64 = " ${NFC_RDEPENDS}"
-
-RDEPENDS:${PN}:append:halium-arm64 = " ${ESIM_RDEPENDS}"
+# Face unlock needs a camera pointing AT the user. A rear-only device must not
+# get luneos-faced: it would enumerate the only camera it has and try to
+# authenticate against whatever that is aimed at. camera-swivel counts as
+# front-capable - the sensor rotates to face the user.
+#
+# "faceunlock" remains accepted as an explicit opt-in for machines that have not
+# yet declared their camera topology; drop it once they do.
+RDEPENDS:${PN}:append = "${@bb.utils.contains_any('MACHINE_FEATURES', 'camera-front camera-swivel faceunlock', ' ${FACEUNLOCK_RDEPENDS}', '', d)}"
 
 # Keep this list in step with COMPATIBLE_MACHINE in waydroid.bb: that only
 # decides whether the recipe may build, and nothing else pulls waydroid into an
