@@ -10,7 +10,7 @@ PROVIDES = "virtual/webappmanager-webos"
 
 WEBOS_REPO_NAME = "wam"
 
-PR = "${INC_PR}.8"
+PR = "${INC_PR}.9"
 
 PACKAGECONFIG += "${@bb.utils.contains('USE_WEBRUNTIME_LIBCXX', '1', 'webruntime-libcxx', 'system-libcxx', d)}"
 PACKAGECONFIG[webruntime-libcxx] = ",,chromium-toolchain-native chromium-stdlib"

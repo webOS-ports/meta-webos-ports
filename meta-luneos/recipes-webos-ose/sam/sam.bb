@@ -16,11 +16,11 @@ RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_webos-customization}"
 
 VIRTUAL-RUNTIME_webos-customization ?= ""
 
-SRCREV = "d43720458d0beaa63510db7f679ba726191c2605"
+SRCREV = "c6aa1b0aee609183dc73bab393abacb177dc3b1f"
 
 PV = "2.0.0-81"
 
-PR = "r40"
+PR = "r41"
 
 inherit webos_component
 inherit webos_cmake
