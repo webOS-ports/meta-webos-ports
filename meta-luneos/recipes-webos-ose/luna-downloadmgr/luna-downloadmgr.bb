@@ -13,25 +13,23 @@ LIC_FILES_CHKSUM = " \
 DEPENDS = "libpbnjson luna-service2 sqlite3 curl uriparser pmloglib jemalloc luna-prefs boost glib-2.0"
 RDEPENDS:${PN} = "applicationinstallerutility"
 
-WEBOS_VERSION = "4.0.0-15_b81bbbde2f9c65d7b524dbe0aeabbdcf30bd7be0"
-PR = "r14"
+# Built from the webOS-ports fork - webosose master with the LuneOS changes as
+# commits - so the four patches this recipe used to apply are history there.
+# Plain SRCREV: submission tags are a webosose convention, absent on this branch.
+PV = "4.0.0-15+git"
+SRCREV = "2ee51cbf809cc8df3a92031c14abb959c5f66a09"
+PR = "r15"
 
 inherit webos_component
 inherit webos_library
-inherit webos_enhanced_submissions
 inherit webos_cmake
 inherit webos_system_bus
-inherit webos_public_repo
+inherit webos_ports_ose_repo
 
 #WEBOS_MACHINE ?= "${MACHINE}"
 #EXTRA_OECMAKE += "-DMACHINE=${WEBOS_MACHINE}"
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-luna-downloadmanager-Fix-format-warnings-remove-unus.patch \
-    file://0002-luna-downloadmgr-Fix-LS2-permissions.patch \
-    file://0003-filesystemStatusCheck-first-implementation.patch \
-    file://0004-DownloadManager.cpp-Make-org.webosports-privileged-a.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "luna-download-mgr.service.in"
