@@ -41,6 +41,7 @@ PACKAGECONFIG_GRAPHICS:append:pinetab2 = " kms gbm"
 PACKAGECONFIG_GRAPHICS:append:tenderloin = " kms gbm"
 PACKAGECONFIG_GRAPHICS:append:rosy = " kms gbm"
 PACKAGECONFIG_GRAPHICS:append:tissot = " kms gbm"
+PACKAGECONFIG_GRAPHICS:append:a3-2015 = " kms gbm"
 # "examples" dropped: meta-qt6 6.12 has no PACKAGECONFIG[examples] any more -
 # examples moved out to qt6-examples.inc - and an unknown entry is fatal:
 #   ERROR: QA Issue: qtbase: invalid PACKAGECONFIG(s): examples
