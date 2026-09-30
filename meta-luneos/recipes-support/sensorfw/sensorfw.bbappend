@@ -49,3 +49,22 @@ SRC_URI:append:rosy = " \
 SRC_URI:append:tissot = " \
     file://sensord-tissot.conf \
 "
+
+SRC_URI:append:a3-2015 = " \
+    file://sensord-a3-2015.conf \
+"
+
+### Put the sensor chain libraries on the linker path ###
+#
+# They install into ${libdir}/sensord-qt6 beside the plugins, which link them by
+# soname with no RPATH, so compasschain and rotationsensor both failed to load on
+# libmagcalibrationchain-qt6.so and were marked invalid. rotationsensor is what
+# QtSensors clients ask for, so Messwerk saw no rotation while the UI still
+# rotated. ld.so.conf already includes ld.so.conf.d/*.conf; the directory did not
+# exist. FILES:${PN} is explicit in the recipe, so the new file must be added.
+do_install:append() {
+    install -d ${D}${sysconfdir}/ld.so.conf.d
+    echo "${libdir}/sensord-qt6" > ${D}${sysconfdir}/ld.so.conf.d/sensorfw.conf
+}
+
+FILES:${PN} += "${sysconfdir}/ld.so.conf.d/sensorfw.conf"
