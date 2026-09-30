@@ -16,7 +16,7 @@ SRC_URI = " \
     file://0002-sensorfwd-Preload-sensors-listed-in-preload_sensors-.patch \
     file://0003-iioadaptor-Accept-input-attributes-for-IIO_CHAN_INFO.patch \
     file://0004-qt-api-do-not-marshal-invalid-QVariant-arguments.patch \
-    file://0005-compasschain-link-the-magcalibrationchain-it-calls.patch \
+    file://0005-compasschain-link-the-sibling-libraries-it-calls.patch \
     file://0006-lunaservice-drop-the-LunaSysMgrIpcMessages-pkgconfig.patch \
 "
 

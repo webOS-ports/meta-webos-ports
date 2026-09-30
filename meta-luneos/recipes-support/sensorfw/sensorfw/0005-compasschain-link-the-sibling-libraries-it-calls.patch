@@ -1,0 +1,91 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] compasschain: link the sibling libraries it calls into
+
+CompassChain::resetCalibration() forwards to MagCalibrationChain, but the
+plugin only added magcalibrationchain to INCLUDEPATH and never linked it. The
+library builds regardless, carrying an undefined
+_ZN19MagCalibrationChain16resetCalibrationEv with no DT_NEEDED that could
+resolve it, and sensorfwd then rejects it at load:
+
+  Plugin loading error: "compasschain" - "Cannot load library
+  /usr/lib/sensord-qt6/libcompasschain-qt6.so: undefined symbol:
+  _ZN19MagCalibrationChain16resetCalibrationEv"
+  plugin marked invalid: "compasschain" / "compasssensor"
+
+compasssensor is invalidated along with it, and sensortestapp aborts outright
+with the shipped testapp.conf because loading that plugin fails.
+
+This is not a one-off. Resolving each undefined symbol only exposes the next,
+because none of the siblings on INCLUDEPATH were ever linked:
+
+  undefined symbol: _ZN19MagCalibrationChain16resetCalibrationEv
+  undefined symbol: _ZN16DownsampleFilter10setTimeoutEi
+  undefined symbol: _ZN17DeclinationFilter21declinationCorrectionEv
+
+so all of them are linked here rather than chasing them one at a time. The
+original instance was: CompassChain also casts
+downsampleFilter to DownsampleFilter and calls setTimeout() on it, while
+downsamplefilter was likewise only on INCLUDEPATH. With just the
+magcalibrationchain link in place the loader simply reaches the next one:
+
+  Cannot load library /usr/lib/sensord-qt6/libcompasschain-qt6.so:
+  undefined symbol: _ZN16DownsampleFilter10setTimeoutEi
+
+so both have to be linked. rotationsensor is invalidated along with
+compasschain, which is why QtSensors clients (Messwerk) saw no rotation while
+the UI - which reads orientation/accelerometer - still rotated.
+
+Link them the same way every other component here links a sibling library, and
+declare the build dependency that link implies. chains/ is not CONFIG+=ordered
+- only the top-level .pro is, and that only serialises chains against filters,
+sensors, ... not the subdirs inside chains/ - so without compasschain.depends
+make starts both subdirs at once and the link races the library it needs:
+
+  ld: cannot find -lmagcalibrationchain-qt6
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+--- a/chains/compasschain/compasschain.pro
++++ b/chains/compasschain/compasschain.pro
+@@ -17,4 +17,25 @@
+                ../../filters/magcoordinatealignfilter \
+                ../../filters/declinationfilter
+ 
++# CompassChain calls into every one of the siblings above, but the plugin only
++# ever put them on INCLUDEPATH and never linked any of them. The .so builds
++# regardless, carrying undefined symbols with no DT_NEEDED that could resolve
++# them, and sensorfwd rejects it at load - one symbol at a time, so fixing them
++# individually just moves the error:
++#   undefined symbol: _ZN19MagCalibrationChain16resetCalibrationEv
++#   undefined symbol: _ZN16DownsampleFilter10setTimeoutEi
++#   undefined symbol: _ZN17DeclinationFilter21declinationCorrectionEv
++# compasssensor and rotationsensor are invalidated along with compasschain, and
++# rotationsensor is what QtSensors clients (Messwerk) ask for - which is why
++# rotation never reported while the UI, reading orientation/accelerometer, still
++# rotated. sensortestapp also aborts with the stock testapp.conf.
++#
++# Link the lot, so this cannot regress one symbol at a time again.
++LIBS += -L../magcalibrationchain            -lmagcalibrationchain-qt$${QT_MAJOR_VERSION}
++LIBS += -L../../filters/downsamplefilter    -ldownsamplefilter-qt$${QT_MAJOR_VERSION}
++LIBS += -L../../filters/declinationfilter   -ldeclinationfilter-qt$${QT_MAJOR_VERSION}
++LIBS += -L../../filters/coordinatealignfilter -lcoordinatealignfilter-qt$${QT_MAJOR_VERSION}
++LIBS += -L../../filters/magcoordinatealignfilter -lmagcoordinatealignfilter-qt$${QT_MAJOR_VERSION}
++LIBS += -L../../filters/avgaccfilter        -lavgaccfilter-qt$${QT_MAJOR_VERSION}
++
+ include( ../chain-config.pri )
+--- a/chains/chains.pro	2026-09-03 10:01:13.366234061 +0200
++++ b/chains/chains.pro	2026-09-03 10:01:13.372234167 +0200
+@@ -7,3 +7,12 @@
+            orientationchain \
+            magcalibrationchain \
+            compasschain
++
++# compasschain links -lmagcalibrationchain-qt$${QT_MAJOR_VERSION}, so it cannot
++# be built at the same time as the chain it links. This directory is not
++# CONFIG+=ordered (only the top level is, and that only serialises chains
++# against filters, sensors, ... - not the subdirs within it), so without an
++# explicit dependency make is free to start both at once and compasschain's
++# link step loses the race:
++#   ld: cannot find -lmagcalibrationchain-qt6
++compasschain.depends = magcalibrationchain
