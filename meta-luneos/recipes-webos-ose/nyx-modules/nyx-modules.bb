@@ -22,9 +22,9 @@ RDEPENDS:${PN} += "nyx-conf"
 # merged as commits) rather than webosose plus a patch stack. Pinned with a
 # plain SRCREV: submission tags are a webosose convention and this branch
 # carries none.
-SRCREV = "39e4a3179d04ffe5de0b79ed282171dfa37fd85b"
+SRCREV = "4f37fd6c47d4c98435530026b0d1b436e1be897e"
 
-PR = "r44"
+PR = "r50"
 
 EXTRA_OECMAKE += "\
     -DDISTRO_VERSION:STRING='${DISTRO_VERSION}' \
@@ -84,3 +84,4 @@ FILES:${PN} += "${libdir}/nyx/modules/*"
 FILES:${PN} += "${systemd_system_unitdir}/*"
 FILES:${PN}-tests += "${bindir}/nyx-test-ledcontroller"
 FILES:${PN}-tests += "${bindir}/nyx-test-led"
+FILES:${PN}-tests += "${bindir}/nyx-test-system"
