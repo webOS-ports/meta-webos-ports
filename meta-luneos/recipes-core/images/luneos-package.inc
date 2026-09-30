@@ -14,6 +14,12 @@ ZIP_NAME = "${ZIP_BASENAME}${IMAGE_VERSION_SUFFIX}"
 
 inherit webos_ports_repo kernel-artifact-names deploy nopackages
 
+# Offset at which lk2nd expects the real Android boot image; it is padded to
+# exactly this so lk2nd does not read into the image it hands control to. The
+# msm8953-mainline fork (tissot, rosy, mido) uses 1 MiB; upstream lk2nd on
+# msm8916-mainline uses 512 KiB, so those machines override it.
+LK2ND_BOOT_IMAGE_OFFSET ?= "1M"
+
 PV = "1.0.3+git"
 SRCREV = "b69bf00f602138628521184b7f6d0773736d5f8b"
 
@@ -34,7 +40,7 @@ do_deploy() {
         bbnote "Found lk2nd bootloader image, packing fastboot image and lk2nd together."
 
         cp $LK2ND ${WORKDIR}/lk2nd-${MACHINE}.img.tmp
-        truncate -s 1M ${WORKDIR}/lk2nd-${MACHINE}.img.tmp
+        truncate -s ${LK2ND_BOOT_IMAGE_OFFSET} ${WORKDIR}/lk2nd-${MACHINE}.img.tmp
         cat ${WORKDIR}/lk2nd-${MACHINE}.img.tmp $FASTBOOT > ${WORKDIR}/${KERNEL_IMAGETYPE}.fastboot-lk2nd
         
         FASTBOOT=${WORKDIR}/${KERNEL_IMAGETYPE}.fastboot-lk2nd
