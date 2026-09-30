@@ -2,6 +2,22 @@
 Description=Telephony service
 Requires=dbus.service
 After=dbus.service
+# Start after the generated ofono config exists, and after the container that
+# provides the RIL.
+#
+# ofono-binder-plugin reads /etc/ofono/binder.conf ONCE at startup, and
+# luneos-device-config writes that file from the modem's advertised IRadio
+# slots. With no ordering, ofono won the race and came up against the shipped
+# single-slot config: on radon (dual SIM, HAL offers IRadio/slot1 and /slot2)
+# ofono exposed only /ril_0, and a plain `systemctl restart ofono` afterwards
+# produced both /ril_0 and /ril_1 from the very same files. Nothing failed, so
+# Restart=always never triggered - it just silently ran with one SIM.
+#
+# android-system.service is the LuneOS equivalent of the lxc@android.service
+# FuriLabs order their own ofono after, for the same reason: the vendor RIL
+# lives in the container and registers on /dev/hwbinder once it is up.
+After=luneos-device-config.service android-system.service
+Wants=luneos-device-config.service
 
 [Service]
 Type=dbus
@@ -14,11 +30,22 @@ StateDirectory=ofono
 # Only environment.conf is a shell-style env file; the rest of /etc/ofono
 # is ofono's own INI configuration and must not be parsed as one.
 EnvironmentFile=-/etc/ofono/environment.conf
+# Wait for the RIL to register every slot binder.conf names before starting.
+# Ordering after luneos-device-config guarantees the CONFIG is in place; it does
+# not guarantee the vendor RIL inside the container has registered yet, and
+# ofono-binder-plugin enumerates slots once and never retries. Without this, a
+# dual-SIM device comes up with one modem at boot and two after a restart - see
+# the script for the measurements.
+ExecStartPre=/usr/sbin/ofono-binder-wait.sh
 # No msm-modem-uim-selection.sh here: it probes for a Qualcomm QMI modem
 # that a binder device does not have, blocking startup for minutes.
 # --nobacktrace is a Sailfish-only option; upstream ofonod rejects it.
 ExecStart=/usr/sbin/ofonod -n $OFONO_OPTIONS
-StandardError=null
+# Was StandardError=null, which threw away everything ofono-binder-plugin
+# reports - including which slots it found and any "Missing path for slot"
+# complaint. That is the only log there is for the modem stack, and hiding it
+# cost real time diagnosing the single-SIM case above.
+StandardError=journal
 Restart=always
 RestartSec=3
 

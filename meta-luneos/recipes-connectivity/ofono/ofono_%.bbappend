@@ -8,7 +8,7 @@ DEPENDS += "dbus-glib libmce-glib"
 # the mainline stack. Everything else is identical, so one oFono now serves
 # both; ofono-halium is retired.
 OFONO_MODEM_STACK_RDEPENDS = "libsmdpkt-wrapper libqmi libmbim libqrtr-glib"
-OFONO_MODEM_STACK_RDEPENDS:halium = "ofono-ext ofono-ext-plugin ofono-binder-plugin"
+OFONO_MODEM_STACK_RDEPENDS:halium = "ofono-ext ofono-ext-plugin ofono-binder-plugin libgbinder-tools"
 RDEPENDS:${PN} += "mobile-broadband-provider-info ofono-conf ${OFONO_MODEM_STACK_RDEPENDS}"
 
 SRC_URI:append = " \
@@ -20,6 +20,7 @@ SRC_URI:append = " \
   file://0007-sim-add-org.ofono.EuiccManager-interface.patch \
   file://0008-qmimodem-add-logical-channel-support.patch \
   file://msm-modem-uim-selection.sh \
+  file://ofono-binder-wait.sh \
   file://ofono.service \
   file://ofono-halium.service \
   file://70-ofono-modem.rules \
@@ -85,6 +86,12 @@ do_install:append() {
         # Install shell script which can help with MSM modems
         install -d ${D}${sbindir}
         install -m 0755 ${UNPACKDIR}/msm-modem-uim-selection.sh ${D}${sbindir}/msm-modem-uim-selection.sh
+    fi
+
+    # Halium only: binder slot readiness probe, invoked from ofono-halium.service.
+    if [ "${SERVICE_FILE}" = "ofono-halium.service" ]; then
+        install -d ${D}${sbindir}
+        install -m 0755 ${UNPACKDIR}/ofono-binder-wait.sh ${D}${sbindir}/ofono-binder-wait.sh
     fi
 
     if [ -e ${UNPACKDIR}/70-ofono-modem.rules ]; then
