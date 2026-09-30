@@ -23,9 +23,10 @@ DEPENDS = "maliit-framework-webos hunspell presage luna-service2 presage-native 
 RDEPENDS:${PN} += "maliit-framework-webos qtsvg-plugins qtmultimedia-qmlplugins"
 RRECOMMENDS:${PN} += "hunspell-dictionaries"
 
-SRCREV = "989d2f2321219cfbc624cd7e22c3533b54a3180f"
+
+SRCREV = "303fd9f086c218ea27f080d1164ad10bc713bf96"
 PV = "0.99.2+git"
-PR = "r1"
+PR = "r23"
 
 # We own webos-keyboard, so fixes belong in its actual source history, not
 # as patches carried here - unlike presage or imemanager, which are genuinely
@@ -44,9 +45,10 @@ EXTRA_QMAKEVARS_PRE = "\
     MALIIT_PLUGINS_DATA_DIR=${datadir} \
     LIBDIR=${libdir} \
     CONFIG+=nodoc \
-    CONFIG+=notests \
+    ${@bb.utils.contains('PTEST_ENABLED', '1', '', 'CONFIG+=notests', d)} \
     CONFIG+=enable-presage \
     CONFIG+=enable-hunspell \
+    LUNEOS_KEYBOARD_TEST_DIR=${libdir}/webos-keyboard/tests \
 "
 
 INSANE_SKIP:${PN} += "libdir"
@@ -56,5 +58,11 @@ FILES:${PN} += "\
     ${libdir}/maliit \
     ${datadir} \
 "
+
+# Unit tests, under ptest only - a handful of binaries nobody wants in a shipping
+# image. PACKAGES:prepend so they are claimed before FILES:${PN} sweeps ${libdir}.
+PACKAGES:prepend = "${PN}-tests "
+FILES:${PN}-tests = "${libdir}/webos-keyboard/tests"
+RDEPENDS:${PN}-tests += "${PN}"
 
 EXTRA_OEMAKE += "INSTALL_ROOT=${D}"
