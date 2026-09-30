@@ -10,11 +10,11 @@ DEPENDS += "qtbase"
 
 PV = "3.0.0-4+git"
 
-SRCREV = "a2364531fdbe1ca87258dc219fe2ba04e741695a"
+SRCREV = "3e18f062b06bc598ed0942404b8f0b8a14bfdb75"
 
 # PV carries no SRCREV, so a revision bump alone leaves PKGV untouched and opkg
 # sees no upgrade on the device. Bump PR on every SRCREV move.
-PR = "r3"
+PR = "r6"
 
 # Don't uncomment until all of the do_*() tasks have been moved out of the recipe
 inherit webos_ports_fork_repo
