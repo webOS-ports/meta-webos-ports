@@ -1,5 +1,5 @@
 DESCRIPTION = "Derive device configuration at runtime so one rootfs boots on any device"
-PR = "r3"
+PR = "r5"
 
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
@@ -28,6 +28,7 @@ SRC_URI = " \
     file://adaptations \
     file://pulseaudio.conf \
     file://bluebinder-luneos-device.conf \
+    file://hardware-keys.json \
 "
 
 # Everything in SRC_URI is a local file, so nothing lands in the default
@@ -57,12 +58,18 @@ do_install() {
     install -d ${D}${sysconfdir}/default
     install -m 0644 ${UNPACKDIR}/pulseaudio.conf ${D}${sysconfdir}/default/pulseaudio.conf
 
+    # Empty target for generators/76-hardware-keys to shadow. The shell reads this
+    # for per-device hardware key actions; "{}" - what a device that overrides
+    # nothing gets - leaves it on the defaults the shell itself ships.
+    install -d ${D}${sysconfdir}/luneos
+    install -m 0644 ${UNPACKDIR}/hardware-keys.json ${D}${sysconfdir}/luneos/hardware-keys.json
+
     # Empty target for generators/80-bluebinder-env to shadow.
     install -d ${D}${localstatedir}/lib/environment/bluebinder
     install -m 0644 ${UNPACKDIR}/bluebinder-luneos-device.conf \
         ${D}${localstatedir}/lib/environment/bluebinder/luneos-device.conf
 }
 
-FILES:${PN} += "${datadir}/luneos/adaptations ${libdir}/luneos-device-config ${sysconfdir}/configd/layers/overlay ${sysconfdir}/default/pulseaudio.conf ${localstatedir}/lib/environment/bluebinder/luneos-device.conf"
+FILES:${PN} += "${datadir}/luneos/adaptations ${libdir}/luneos-device-config ${sysconfdir}/configd/layers/overlay ${sysconfdir}/default/pulseaudio.conf ${localstatedir}/lib/environment/bluebinder/luneos-device.conf ${sysconfdir}/luneos/hardware-keys.json"
 
 SYSTEMD_SERVICE:${PN} = "luneos-device-config.service"
