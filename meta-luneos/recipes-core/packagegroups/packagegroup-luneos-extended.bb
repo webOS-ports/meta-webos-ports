@@ -60,7 +60,7 @@ RDEPENDS:${PN} = " \
   imlibpurpleservice \
   messaging-accounts \
   \
-  org.webosports.app.preware \
+  com.palm.app.preware2 \
   org.webosports.service.ipkg \
   ${TORCH_RDEPENDS} \
   com.webos.app.enactbrowser \
