@@ -31,8 +31,8 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 COMPATIBLE_MACHINE = "^halium$"
 
 PV = "0.1.0-2+git"
-PR = "r15"
-SRCREV = "9014ba0ea0cf6c1ee81f3309e9e554d8635bab70"
+PR = "r17"
+SRCREV = "d01ea62554e388d480cf182116350195217448fd"
 
 inherit webos_ports_repo
 inherit webos_cmake
