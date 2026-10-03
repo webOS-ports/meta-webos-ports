@@ -57,6 +57,58 @@ first_config(){   # echo the first config dir of gadget $1
     return 1
 }
 
+# A host picks its driver by vendor/product ID. Halium's gadget presents the
+# adb-only ID (Google's 18d1:4ee7 on athena), which Windows' Android driver
+# claims as a whole, single-interface device - so the MTP interface added beside
+# adb never got a driver of its own and nothing showed up on the PC. Present
+# what Android does for "mtp,adb", Google's 18d1:4ee2 (or 4ee1 with no adb),
+# while MTP is up, and put the gadget's own IDs back afterwards. mainline mode
+# builds its gadget with an MTP ID already.
+# While this marker exists, a USB disconnect/connect is one of our own UDC
+# rebinds, not the cable: the nyx msm_mtp module then keeps MTP up, and
+# storaged's udev script does not report it (otherwise storaged takes the
+# rebind for an unplug and a re-plug, and the system UI pops up "USB
+# connected" again). Held across every rebind - bringing MTP up and tearing it
+# down - and cleared a few seconds after, once the uevents have settled. The
+# token keeps an older timer from clearing a newer rebind's marker.
+MARKER=$STATE/reconfiguring
+
+hold_marker(){
+    mkdir -p "$STATE"
+    echo "$$" > "$MARKER"
+}
+
+# Scheduled through systemd-run rather than a background sleep: cleanup runs as
+# umtprd.service's ExecStopPost, and systemd kills whatever is left in the
+# service's cgroup when that returns - a background timer would die with it and
+# leave the marker in place, hiding every later real unplug from storaged.
+release_marker_later(){
+    _tok=$(cat "$MARKER" 2>/dev/null)
+    _clear="[ \"\$(cat $MARKER 2>/dev/null)\" = \"$_tok\" ] && rm -f $MARKER; rmdir $STATE 2>/dev/null; true"
+    if ! systemd-run --quiet --on-active=5 /bin/sh -c "$_clear" 2>/dev/null; then
+        ( sleep 5; /bin/sh -c "$_clear" ) >/dev/null 2>&1 &
+    fi
+}
+
+set_mtp_ids(){   # $1=gadget dir; UDC must be unbound
+    _g=$1
+    if [ ! -e "$STATE/idVendor" ]; then
+        cat "$_g/idVendor" > "$STATE/idVendor" 2>/dev/null
+        cat "$_g/idProduct" > "$STATE/idProduct" 2>/dev/null
+    fi
+    _pid=0x4ee1
+    [ -s "$STATE/adb_links" ] && _pid=0x4ee2
+    echo 0x18d1 > "$_g/idVendor"
+    echo "$_pid" > "$_g/idProduct"
+    log "presenting 0x18d1:$_pid while MTP is up (was $(cat "$STATE/idVendor"):$(cat "$STATE/idProduct"))"
+}
+
+restore_ids(){   # $1=gadget dir; UDC must be unbound
+    _g=$1
+    [ -s "$STATE/idVendor" ] && cat "$STATE/idVendor" > "$_g/idVendor"
+    [ -s "$STATE/idProduct" ] && cat "$STATE/idProduct" > "$_g/idProduct"
+}
+
 do_prepare(){
     mkdir -p "$STATE"
     [ -d "$GROOT" ] || modprobe libcomposite 2>/dev/null
@@ -114,12 +166,28 @@ do_bind(){
     # report to storaged as a cable unplug, which would DISABLE the MTP we are
     # bringing up. This marker tells the nyx module to ignore that self-induced
     # transition; a background timer clears it once the uevents have settled.
-    touch "$STATE/reconfiguring"
+    hold_marker
 
     echo "" > "$gadget/UDC" 2>/dev/null           # unbind to edit function list
+    # Interfaces are numbered in the order functions are linked, and hosts
+    # expect Android's layout for 0x4ee2: MTP on interface 0, adb on 1 (on
+    # Windows the Android driver claims MI_01 by ID, whatever it is). The adb
+    # function was linked first at boot, so take it out, link MTP, and put adb
+    # back behind it. adbd keeps its FunctionFS open throughout.
+    adb_links=""
+    for l in "$config"/ffs.adb*; do
+        [ -L "$l" ] || continue
+        adb_links="$adb_links ${l##*/}=$(readlink -f "$l")"
+        rm -f "$l"
+    done
     [ -e "$config/$FUNC" ] || ln -s "$gadget/functions/$FUNC" "$config/$FUNC"
-    bind_udc "$gadget" "$udc" || { rm -f "$STATE/reconfiguring"; die "failed to bind UDC $udc"; }
-    ( sleep 5; rm -f "$STATE/reconfiguring" ) >/dev/null 2>&1 &
+    for a in $adb_links; do
+        ln -s "${a#*=}" "$config/${a%%=*}"
+    done
+    printf '%s' "$adb_links" > "$STATE/adb_links"
+    set_mtp_ids "$gadget"
+    bind_udc "$gadget" "$udc" || { rm -f "$MARKER"; die "failed to bind UDC $udc"; }
+    release_marker_later
     log "bound $FUNC on $gadget -> $udc"
 }
 
@@ -128,6 +196,7 @@ do_cleanup(){
     udc=$(cat "$STATE/udc" 2>/dev/null); mode=$(cat "$STATE/mode" 2>/dev/null)
     [ -d "$gadget" ] || { rm -rf "$STATE"; exit 0; }
 
+    hold_marker
     echo "" > "$gadget/UDC" 2>/dev/null
     rm -f "$config/$FUNC" 2>/dev/null
     mountpoint -q "$FFS" 2>/dev/null && umount "$FFS"
@@ -139,9 +208,12 @@ do_cleanup(){
         rmdir "$gadget" 2>/dev/null
     else
         # halium: rebind the original gadget (adb-only again)
+        restore_ids "$gadget"
         bind_udc "$gadget" "$udc" || log "warning: could not rebind $udc"
     fi
-    rm -rf "$STATE"
+    rm -f "$STATE/gadget" "$STATE/config" "$STATE/udc" "$STATE/mode" \
+          "$STATE/idVendor" "$STATE/idProduct" "$STATE/adb_links"
+    release_marker_later
     log "cleaned up $FUNC"
 }
 
