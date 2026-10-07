@@ -188,10 +188,12 @@ LIBHYBRIS_RDEPENDS = " \
 FINGERPRINT_RDEPENDS = " \
     biomd \
     webos-fingerprint-adapter \
+    ${VIRTUAL-RUNTIME_settingsapp}-fingerprint \
 "
 
 FACEUNLOCK_RDEPENDS = " \
     luneos-faced \
+    ${VIRTUAL-RUNTIME_settingsapp}-faceunlock \
 "
 
 # kbdscroll: turns a slide over a touch surface that is not the touchscreen - a
@@ -215,7 +217,27 @@ KEYBOARD_TOUCH_RDEPENDS = " \
 CAMERA_RDEPENDS = " \
     org.webosports.app.camera \
     v4l-utils \
+    libcamera \
+    libcamera-gst \
 "
+
+# libcamera is what actually drives a mainline camera, so it belongs here rather
+# than in each machine's own MACHINE_EXTRA_RDEPENDS - which is where it lived,
+# meaning every new mainline port silently shipped a camera app with nothing
+# behind it until someone noticed.
+#
+# The reason it is needed at all is that the kernel side stops short of
+# streaming: qcom-camss, and the other mainline camera subsystems, leave every
+# link in their media graph disabled and expect userspace to build the pipeline
+# - sensor, CSIPHY, CSID, ISPIF, VFE - before a frame moves. Nothing else does
+# that. libcamera also carries the software ISP, which is not optional in
+# practice: sensors come up at minimum gain with nothing driving exposure, so
+# captures without it are nearly black and have no white balance.
+#
+# Halium machines are the exception. Their cameras go through the Android HAL
+# via gst-droid in LIBHYBRIS_RDEPENDS above, so libcamera would be dead weight -
+# it cannot see a camera that only exists behind binder.
+CAMERA_RDEPENDS:remove:halium = "libcamera libcamera-gst"
 
 # NFC stack: nfcd talks to the Android NFC HAL over binder, webos-nfc-adapter
 # bridges its D-Bus API onto the luna-service2 bus for apps and the shell.
@@ -225,6 +247,16 @@ NFC_RDEPENDS = " \
     nfcd-tools \
     nfcd-binder-plugin \
     webos-nfc-adapter \
+    ${VIRTUAL-RUNTIME_settingsapp}-nfc \
+"
+
+# Infrared transmitter: irblasterd puts it on the bus (Samsung's sec_ir FPGA or
+# /dev/lirc0), and Remote turns the tablet or phone into a universal remote.
+# Only added for machines that have one: the "ir-blaster" feature, not the
+# standard "irda", which is OE's name for the IrDA serial data link.
+IR_BLASTER_RDEPENDS = " \
+    org.webosports.service.ir \
+    org.webosports.app.remote \
 "
 
 # Printing. luneos-print-adapter serves the webOS print API (com.palm.printmgr,
@@ -285,10 +317,18 @@ WIRELESS_REGDB_RDEPENDS = " \
 # Settings app. Useful on any device whose modem can open logical channels -
 # an eSIM adapter card in the SIM slot counts, so this is not restricted to
 # machines with a soldered eUICC.
+# Settings pages that only make sense with a modem: cell broadcast, and Network Settings (mobile data,
+# roaming, APNs, SIMs). webos-telephonyd itself stays on every machine, other components query it.
+MODEM_SETTINGS_RDEPENDS = " \
+    ${VIRTUAL-RUNTIME_settingsapp}-cellbroadcast \
+    ${VIRTUAL-RUNTIME_settingsapp}-networksettings \
+"
+
 ESIM_RDEPENDS = " \
     lpac \
     luneos-esim-adapter \
     gstreamer1.0-plugins-bad-zbar \
+    ${VIRTUAL-RUNTIME_settingsapp}-esim \
 "
 
 # (Optional?) work for Qt6:
@@ -313,6 +353,23 @@ ESIM_RDEPENDS = " \
 # device-config service, because nothing had added it to the list yet.
 RDEPENDS:${PN}:append:halium = " ${LIBHYBRIS_RDEPENDS}"
 
+# hammerhead-halium brings Bluetooth up with hciattach on /dev/ttyHS99 (see
+# systemd-machine-units). bluebinder asks the Android Bluetooth HAL to open that
+# same UART, and cannot succeed on this kernel: the vendor library looks for the
+# bluesleep /proc entries and an rfkill power switch, which the backports-based
+# Bluetooth stack does not have, so the HAL never answers HCI_Reset. It then
+# restarts forever (115 times in one session) and fights hciattach for the port.
+# With it left out hci0 comes up with an address and bluez works.
+RDEPENDS:${PN}:remove:hammerhead-halium = "bluebinder"
+
+# tenderloin-halium too: its CSR BlueCore is attached on the host by tenderloin-bluetooth-utilities (BCSP on
+# /dev/ttyHS0) and there is no Android Bluetooth HAL in its vendor at all. bluebinder's ExecStartPre then
+# waits for that HAL for ever, and bluetooth.service, ordered after it, never starts: hci0 stays down and
+# nothing can scan (7 Oct 2026).
+RDEPENDS:${PN}:remove:tenderloin-halium = "bluebinder"
+
+# sm-t520 also leaves bluebinder out (see the end of this file, where its remove list is).
+
 RDEPENDS:${PN}:append:hammerhead = " alsa-utils-systemd mesa-megadriver rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:tenderloin = " alsa-utils-systemd rmtfs qrtr rpmsgexport"
 RDEPENDS:${PN}:append:tenderloin71 = " alsa-utils-systemd rmtfs qrtr rpmsgexport"
@@ -331,10 +388,13 @@ RDEPENDS:${PN}:append:tissot-halium = " wcnss-filter-fixup"
 # in the wrong place and got it wrong - radon shipped nfcd and biomd for hardware
 # the FLX1s has no HAL for. The machine declares what it has; this only maps that
 # to packages. nfc is the standard OE feature; fingerprint, esim, faceunlock,
-# keyboard-touch and trackpad are LuneOS-specific.
+# ir-blaster, keyboard-touch and trackpad are LuneOS-specific.
 RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'fingerprint', ' ${FINGERPRINT_RDEPENDS}', '', d)}"
 RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'nfc',         ' ${NFC_RDEPENDS}',         '', d)}"
 RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'esim',        ' ${ESIM_RDEPENDS}',        '', d)}"
+RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'ir-blaster',  ' ${IR_BLASTER_RDEPENDS}',  '', d)}"
+# These settings pages need a modem; the machine says so with "phone".
+RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'phone',       ' ${MODEM_SETTINGS_RDEPENDS}', '', d)}"
 RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'wifi',        ' ${WIRELESS_REGDB_RDEPENDS}', '', d)}"
 RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'killswitch',   ' ${KILLSWITCH_RDEPENDS}', '', d)}"
 RDEPENDS:${PN}:append = "${@bb.utils.contains_any('MACHINE_FEATURES', 'keyboard-touch trackpad', ' ${KEYBOARD_TOUCH_RDEPENDS}', '', d)}"
