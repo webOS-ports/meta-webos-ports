@@ -19,7 +19,7 @@ SRCREV = "588649071911b40915eb2631571a3fd75a08c4fc"
 
 PV = "2.0.0-424"
 
-PR = "r86"
+PR = "r87"
 
 inherit webos_qmake6
 inherit pkgconfig

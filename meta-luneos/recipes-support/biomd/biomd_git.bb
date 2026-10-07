@@ -28,6 +28,8 @@ SRC_URI = " \
     file://0002-Makefile-allow-building-without-the-face-backend.patch \
     file://0003-fingerprint-accept-free-form-finger-names.patch \
     file://0004-fingerprint-add-an-AIDL-backend.patch \
+    file://biomd-hal-wait.sh \
+    file://10-hal-wait.conf \
 "
 
 S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}"
@@ -68,6 +70,11 @@ do_install() {
     # fingerprint HAL in.
     sed -i 's/^After=lxc@android\.service$/After=android-system.service/' \
         ${D}${systemd_system_unitdir}/biomd.service
+
+    # The HAL is looked up once; wait for it to register first.
+    install -D -m 0755 ${UNPACKDIR}/biomd-hal-wait.sh ${D}${libexecdir}/biomd-hal-wait.sh
+    install -D -m 0644 ${UNPACKDIR}/10-hal-wait.conf \
+        ${D}${systemd_system_unitdir}/biomd.service.d/10-hal-wait.conf
 }
 
 SYSTEMD_SERVICE:${PN} = "biomd.service"
@@ -95,7 +102,12 @@ RDEPENDS:${PN}-session += "${PN}"
 FILES:${PN}-client = "${bindir}/biomdctl"
 RDEPENDS:${PN}-client += "${PN} python3-core python3-dbus python3-pygobject"
 
-FILES:${PN} += "${datadir}/dbus-1/system.d/io.FuriOS.Biomd.conf"
+FILES:${PN} += " \
+    ${datadir}/dbus-1/system.d/io.FuriOS.Biomd.conf \
+    ${libexecdir}/biomd-hal-wait.sh \
+    ${systemd_system_unitdir}/biomd.service.d/10-hal-wait.conf \
+"
+RDEPENDS:${PN} += "libgbinder-tools"
 
 # pam_biomd.so is a PAM module, not a shared library with a SONAME; it belongs
 # in -pam rather than -dev, and has no dev symlink.

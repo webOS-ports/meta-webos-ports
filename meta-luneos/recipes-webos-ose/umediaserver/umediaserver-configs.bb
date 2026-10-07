@@ -48,5 +48,39 @@ do_install:append:halium() {
         ${D}${sysconfdir}/umediaserver/umediaserver_resource_config.txt
 }
 
+# Two faults in the upstream table that stop anything playing through the webOS
+# media server (HTML5 audio and video in web apps, e.g. the Testr app). Found on
+# the SM-T220 and then confirmed on hammerhead and q25, so this is not
+# device-specific:
+#
+# 1. The "media" pipeline entry launches /usr/sbin/reference-media-pipeline.
+#    This tree ships the GStreamer pipeline, which installs
+#    /usr/sbin/g-media-pipeline, and no package provides the other name, so
+#    every pipeline process failed with ENOENT at exec (seen with strace on
+#    umediaserver) and the web page got MEDIA_ERROR_FORMAT.
+#
+# 2. Even a plain WAV makes g-media-pipeline ask the resource manager for
+#    1 ADEC and 8 VDEC, against a table of 2 each ("no suitable candidate
+#    found"). A page that opens two players at once needs twice that. The
+#    counts are abstract units, so declare enough that ordinary playback is
+#    not refused.
+do_install:append() {
+    sed -i \
+        -e 's|/usr/sbin/reference-media-pipeline|/usr/sbin/g-media-pipeline|' \
+        -e '/id = "VDEC";/,/qty/ s/qty = [0-9]*;/qty = 16;/' \
+        -e '/id = "ADEC";/,/qty/ s/qty = [0-9]*;/qty = 8;/' \
+        ${D}${sysconfdir}/umediaserver/umediaserver_resource_config.txt
+
+    # Fail here, not on a device, if upstream changes the table so that an
+    # edit above no longer matches.
+    grep -q 'bin  = "/usr/sbin/g-media-pipeline";' \
+        ${D}${sysconfdir}/umediaserver/umediaserver_resource_config.txt \
+        || bbfatal "umediaserver_resource_config.txt: pipeline binary was not rewritten"
+    grep -A3 'id = "VDEC";' ${D}${sysconfdir}/umediaserver/umediaserver_resource_config.txt | grep -q 'qty = 16;' \
+        || bbfatal "umediaserver_resource_config.txt: VDEC count was not raised"
+    grep -A3 'id = "ADEC";' ${D}${sysconfdir}/umediaserver/umediaserver_resource_config.txt | grep -q 'qty = 8;' \
+        || bbfatal "umediaserver_resource_config.txt: ADEC count was not raised"
+}
+
 FILES:${PN} += "${webos_frameworksdir}/umediaserver/*"
 EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"

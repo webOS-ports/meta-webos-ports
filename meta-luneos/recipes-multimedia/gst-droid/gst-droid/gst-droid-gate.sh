@@ -28,7 +28,22 @@ if [ ! -e "${PLUGINDIR}/libgstdroid.so" ]; then
     exit 0
 fi
 
-if binder-ping -d /dev/hwbinder "${SERVICE}" >/dev/null 2>&1; then
+# The OMX service registers a few seconds after the container's init starts its "main" class, which
+# is after this unit would otherwise have asked. Wait for it, but only on a device whose container
+# actually defines a media codec service, so a device without one does not pay for the wait.
+omx_up() {
+    binder-ping -d /dev/hwbinder "${SERVICE}" >/dev/null 2>&1
+}
+
+if ! omx_up && getprop 2>/dev/null | grep -qiE '^\[init\.svc\.[^]]*(omx|mediacodec|media\.codec)'; then
+    i=0
+    while [ "$i" -lt "${GST_DROID_GATE_WAIT:-30}" ] && ! omx_up; do
+        sleep 1
+        i=$((i + 1))
+    done
+fi
+
+if omx_up; then
     # Preserve an existing GST_PLUGIN_PATH rather than clobbering it, and do
     # not append twice if this unit is restarted: the value set below is
     # inherited by everything systemd starts afterwards, this script included.

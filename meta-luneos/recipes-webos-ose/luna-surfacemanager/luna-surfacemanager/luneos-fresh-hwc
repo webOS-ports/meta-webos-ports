@@ -1,0 +1,37 @@
+#!/bin/sh
+# Start the compositor against a fresh Android composer HAL. Run from
+# surface-manager-daemon.service (ExecStartPre) when deviceinfo_hwc_fresh_start=1.
+#
+# The composer HAL serves its first client fine. After that client is torn down
+# ("destroying composer client ... performing a final presentDisplay") the next
+# client is shown black: frames reach the panel (self-refresh exits fire) but the
+# screen stays dark, with the backlight on. Only a new HAL process cures it, and
+# Android's init restarts one when it is killed.
+#
+# So the first compositor start after boot uses the HAL as it is, and every start
+# after that replaces it first.
+FLAG=${LUNEOS_HWC_FLAG:-/run/luneos-hwc-client-seen}
+
+# The HAL's pids. Matched on the program being run (the first word of its command
+# line), not on the whole line: a shell that merely mentions the name, an adb
+# command line say, must never be taken for the HAL and killed.
+hal() { ps -eo pid,args | awk '$2 ~ /android\.hardware\.graphics\.composer@/ { print $1 }'; }
+
+if [ ! -e "$FLAG" ]; then
+    : > "$FLAG"
+    exit 0
+fi
+
+old=$(hal)
+for p in $old; do kill "$p"; done
+
+# wait for init to start a new one, then for it to register
+i=0
+while [ $i -lt 30 ]; do
+    new=$(hal)
+    [ -n "$new" ] && [ "$new" != "$old" ] && break
+    sleep 1
+    i=$((i + 1))
+done
+sleep 2
+exit 0
