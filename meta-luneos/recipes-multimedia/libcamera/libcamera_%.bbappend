@@ -33,3 +33,10 @@ SRC_URI += "file://0011-ipa-rkisp1-awb-program-the-measurement-window-every-fram
 SRC_URI += "file://0012-libcamera-add-sensor-properties-for-the-GC2145.patch"
 SRC_URI += "file://0013-ipa-libipa-add-a-camera-sensor-helper-for-the-GC2145.patch"
 SRC_URI += "file://0014-ipa-simple-add-a-tuning-file-for-the-GC2145.patch"
+
+# Samsung Galaxy A3 (2015) front camera (S5K5E3YX): a gain helper for the
+# software ISP's exposure loop, and the sensor's physical pixel size. Numbers
+# taken from the kernel driver, not a datasheet.
+SRC_URI += "file://0015-ipa-libipa-add-a-camera-sensor-helper-for-the-S5K5E3.patch"
+SRC_URI += "file://0016-libcamera-add-sensor-properties-for-the-S5K5E3YX.patch"
+
