@@ -20,7 +20,13 @@ EXTRA_QMAKEVARS_PRE:append:halium = "CONFIG+=binder "
 EXTRA_QMAKEVARS_PRE:remove:tenderloin-halium = "CONFIG+=autohybris "
 SRC_URI:append:tenderloin-halium = " \
     file://sensord-tenderloin-halium.conf \
+    file://90-tenderloin-halium-sensors.rules \
 "
+
+do_install:append:tenderloin-halium() {
+    install -d ${D}${sysconfdir}/udev/rules.d
+    install -m 0644 ${UNPACKDIR}/90-tenderloin-halium-sensors.rules ${D}${sysconfdir}/udev/rules.d/
+}
 
 ### Mainline devices related configuration ###
 SRC_URI:append:tenderloin = " \

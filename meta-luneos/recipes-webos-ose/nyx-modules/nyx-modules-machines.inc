@@ -120,6 +120,3 @@ NYX_MODULES_REQUIRED_NO_ALS = "\
 "
 NYX_MODULES_REQUIRED:pinetab2 = "${NYX_MODULES_REQUIRED_NO_ALS}"
 
-# The A3 2015's cm36652 light/proximity combo has no mainline driver, so the ALS
-# module would only log NYX_OPEN_ERR every boot.
-NYX_MODULES_REQUIRED:a3-2015 = "${NYX_MODULES_REQUIRED_NO_ALS}"
