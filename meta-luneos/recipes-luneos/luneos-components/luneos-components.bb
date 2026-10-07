@@ -4,7 +4,9 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 PV = "0.5+git"
 
-SRCREV = "7798d87d1b72b21ead591013b5586dfc95f29e7b"
+SRCREV = "64a8550d50acfe04ffc3166441825df0e6bc0a07"
+
+PR = "r2"
 
 # qtmultimedia and gstreamer are for LuneOS.Camera: it hands QML a droidcamsrc
 # source to assign to CaptureSession.nativeVideoSource, which is the only way a
@@ -12,7 +14,9 @@ SRCREV = "7798d87d1b72b21ead591013b5586dfc95f29e7b"
 # from qtmultimedia built with -DFEATURE_gstreamer_qt_api=ON; without it the
 # factory compiles to a stub and reports itself unavailable.
 DEPENDS = "qtbase qtdeclarative luna-service2 luna-sysmgr-common libwebos-application qtdeclarative-native bluez-qt qtmultimedia gstreamer1.0"
-RDEPENDS:${PN} = "qt5compat-qmlplugins"
+# TextField draws its background with QtQuick.Effects, which lives in
+# qtdeclarative-qmlplugins (this used to be Qt5Compat's ColorOverlay).
+RDEPENDS:${PN} = "qtdeclarative-qmlplugins"
 
 # LuneOS.Camera is useless without the plugin that provides droidcamsrc, but
 # it has to be asked for only where it can be built: gst-droid is

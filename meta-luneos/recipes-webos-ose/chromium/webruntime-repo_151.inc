@@ -82,7 +82,7 @@ WEBRUNTIME_REPO_VERSION = "151"
 # With the name present it emits a single webos-enh-sub-warning instead, which
 # ERROR_QA:remove below drops - same approach as mksnapshot-cross_151.bb.
 SRC_URI = "git://github.com/webos-ports/chromium151.git;protocol=https;branch=main;name=chromium"
-SRCREV = "f300dcf4433a4c58727104c2f0f043ac0d9dcf5f"
+SRCREV = "38c5761c2419a7c15539a4f60907f98c500ead7c"
 
 ERROR_QA:remove = "webos-enh-sub-warning"
 WARN_QA:remove = "webos-enh-sub-warning"
