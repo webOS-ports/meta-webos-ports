@@ -1,0 +1,69 @@
+From 4ed60ca776aa97d78d6c9e0f827a50c7afeced12 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 7 Oct 2026 08:34:20 +0200
+Subject: [PATCH] memorymanager: scale the memory levels with the device's RAM
+
+The low and critical levels are absolute (low below 350 MiB available,
+back to normal above 380 MiB; critical below 200 MiB). That suits a
+device with 2 GiB or more, but an 824 MiB HP TouchPad has about 350 MiB
+available with its UI up, so the level is "low" for good, and every
+requireMemory call, that is every app launch, ends in "Failed to reclaim
+required memory. All apps were closed".
+
+Scale the four levels by MemTotal / 2 GiB on devices with less than
+2 GiB; larger devices keep the values they have.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/memorymanager/setting/SettingManager.cpp | 27 ++++++++++++++++++++
+ 1 file changed, 27 insertions(+)
+
+diff --git a/src/memorymanager/setting/SettingManager.cpp b/src/memorymanager/setting/SettingManager.cpp
+index 2c2f2df..0d15f7b 100644
+--- a/src/memorymanager/setting/SettingManager.cpp
++++ b/src/memorymanager/setting/SettingManager.cpp
+@@ -15,6 +15,8 @@
+ // SPDX-License-Identifier: Apache-2.0
+ 
+ #include "SettingManager.h"
++
++#include <cstdio>
+ #include "util/Logger.h"
+ 
+ #include <glib.h>
+@@ -47,6 +49,31 @@ void SettingManager::initEnv()
+     m_memoryLevelLowExit = 380;
+     m_memoryLevelCriticalEnter = 200;
+     m_memoryLevelCriticalExit = 230;
++
++    // The levels above are absolute and suit a device with 2 GiB or more. On a smaller one they
++    // are most of what is ever available: an 824 MiB tablet with its UI up has about 350 MiB
++    // available, so it sits in "low" for good, and requireMemory then refuses every launch with
++    // "Failed to reclaim required memory". Scale them with the memory the device has.
++    long totalMiB = 0;
++    FILE *fp = fopen("/proc/meminfo", "r");
++    if (fp) {
++        char line[128];
++        while (fgets(line, sizeof(line), fp)) {
++            long kib;
++            if (sscanf(line, "MemTotal: %ld kB", &kib) == 1) {
++                totalMiB = kib / 1024;
++                break;
++            }
++        }
++        fclose(fp);
++    }
++    const long referenceMiB = 2048;
++    if (totalMiB > 0 && totalMiB < referenceMiB) {
++        m_memoryLevelLowEnter = m_memoryLevelLowEnter * totalMiB / referenceMiB;
++        m_memoryLevelLowExit = m_memoryLevelLowExit * totalMiB / referenceMiB;
++        m_memoryLevelCriticalEnter = m_memoryLevelCriticalEnter * totalMiB / referenceMiB;
++        m_memoryLevelCriticalExit = m_memoryLevelCriticalExit * totalMiB / referenceMiB;
++    }
+ }
+ 
+ int SettingManager::getMemoryLevelLowEnter()
+-- 
+2.53.0
+
