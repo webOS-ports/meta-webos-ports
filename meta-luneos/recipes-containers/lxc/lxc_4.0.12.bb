@@ -70,7 +70,7 @@ SRC_URI[sha256sum] = "db242f8366fc63e8c7588bb2017b354173cf3c4b20abc18780debdc48b
 #
 # We deliberately stay on 4.0.x anyway, because of the kernel floor. lxc is in
 # packagegroup-luneos-extended, so it lands on every extended image and not just
-# the machines waydroid lists, and linux-lg-mako is 3.4.113. 4.0.x is the
+# the machines waydroid lists, and linux-lg-mako-halium is 3.4.113. 4.0.x is the
 # generation LuneOS has actually run on those kernels. 4.0.12 stays safe there:
 # every new-mount-API path is gated behind can_use_mount_api(), which treats
 # ENOSYS as unsupported, and the mount_setattr calls live in the idmapped-mounts
