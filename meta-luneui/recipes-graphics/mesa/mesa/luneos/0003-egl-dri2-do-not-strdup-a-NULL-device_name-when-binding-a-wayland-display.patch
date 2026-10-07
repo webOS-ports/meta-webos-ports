@@ -1,0 +1,48 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] egl/dri2: do not strdup() a NULL device_name when binding a wayland display
+
+dri2_bind_wayland_display_wl() asks drmGetRenderDeviceNameFromFd() for the
+render device name and, when there is none, falls back to
+strdup(dri2_dpy->device_name) without checking that device_name is set.
+
+With the GBM backend on its software fallback there is no render device:
+fd_render_gpu is only opened when the device is not a software one, and
+device_name is filled in from that fd. A display controller without a GPU
+node gets there as soon as the hardware driver cannot create a screen (GBM
+then falls back to kms_swrast/swrast). Binding a Wayland display on such an
+EGL display, which the Qt Wayland compositor does at start-up through its
+wayland-egl hardware integration, then ends in strdup(NULL):
+
+  Program terminated with signal SIGSEGV, Segmentation fault.
+  #0  strlen ()
+  #1  strdup (s=0x0)
+  #2  ?? () from /usr/lib/libEGL.so.1
+
+seen with Mesa 26.0.5 on an LG Nexus 5 running a mainline kernel whose msm
+DRM device has no GPU (surface-manager of LuneOS, started with
+-platform eglfs).
+
+The caller already handles a NULL device_name: the next line takes the fail
+path and eglBindWaylandDisplayWL() returns EGL_FALSE, which is what a
+compositor expects when the display cannot be shared. So only the strdup()
+needs guarding.
+
+Tested on that device: with the stock libEGL surface-manager dies with the
+backtrace above under every Qt Wayland hardware integration (wayland-egl and
+both linux-dmabuf variants); with this patch it starts and keeps running.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+
+diff --git a/src/egl/drivers/dri2/egl_dri2.c b/src/egl/drivers/dri2/egl_dri2.c
+--- a/src/egl/drivers/dri2/egl_dri2.c
++++ b/src/egl/drivers/dri2/egl_dri2.c
+@@ -2695,7 +2695,7 @@
+       goto fail;
+ 
+    device_name = drmGetRenderDeviceNameFromFd(dri2_dpy->fd_render_gpu);
+-   if (!device_name)
++   if (!device_name && dri2_dpy->device_name)
+       device_name = strdup(dri2_dpy->device_name);
+    if (!device_name)
+       goto fail;
