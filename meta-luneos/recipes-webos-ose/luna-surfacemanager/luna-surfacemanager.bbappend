@@ -12,3 +12,12 @@ do_install:append:tenderloin() {
 }
 
 FILES:${PN}:append:tenderloin = " ${sysconfdir}/systemd/system/surface-manager.service.d"
+
+# Run from surface-manager-daemon.service on devices whose composer HAL cannot serve a
+# second compositor (deviceinfo_hwc_fresh_start=1).
+SRC_URI:append = " file://luneos-fresh-hwc"
+
+do_install:append() {
+    install -d ${D}${bindir}
+    install -m 0755 ${UNPACKDIR}/luneos-fresh-hwc ${D}${bindir}/luneos-fresh-hwc
+}
