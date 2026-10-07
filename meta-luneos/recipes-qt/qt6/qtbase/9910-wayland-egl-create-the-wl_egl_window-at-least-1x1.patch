@@ -1,0 +1,66 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 2 Oct 2026 00:00:00 +0000
+Subject: [PATCH] wayland-egl: create the wl_egl_window at least 1x1
+
+QWaylandGLContext::makeCurrent() creates the EGL surface from the window's
+buffer size. A QML window that has not been sized yet, and has not been
+configured by the compositor, is 0x0 at its first render. libwayland-egl's
+wl_egl_window_create() returns NULL when either dimension is 0 (and accepts
+1x1), so no EGL surface is created and the context cannot be made current:
+
+  QWARNING: Could not create wl_egl_window with size 0x0
+  QWARNING: QWaylandGLContext::makeCurrent: eglError: 0x3009
+  QWARNING: QRhiGles2: Failed to make context current. Expect bad things to happen.
+  QWARNING: Failed to create RHI (backend 2)
+  QFATAL: Failed to initialize graphics backend for OpenGL.
+
+The application aborts before it has shown anything. On LuneOS this is what
+happens to the Settings pages (Appearance, Device Info, ...) on a Halium device.
+
+Clamp the size to at least 1x1 in createSurface() and updateSurfaceSize(). The
+real size is applied by wl_egl_window_resize() as soon as the compositor has
+configured the window. QWaylandGLContext already creates its dummy window
+with 1x1 for the same reason.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+--- a/src/plugins/platforms/wayland/plugins/hardwareintegration/wayland-egl/qwaylandeglwindow.cpp
++++ b/src/plugins/platforms/wayland/plugins/hardwareintegration/wayland-egl/qwaylandeglwindow.cpp
+@@ -68,7 +68,7 @@
+     return m_bufferSize;
+ }
+ 
+-void QWaylandEglWindow::updateSurfaceSize(const QSize &initialSize)
++void QWaylandEglWindow::updateSurfaceSize(const QSize &requestedSize)
+ {
+     // potentially called from a render thread
+     // eglSurfaceLock should be locked before calling this method
+@@ -76,6 +76,9 @@
+     if (!m_waylandEglWindow)
+         return;
+ 
++    // wl_egl_windows must have both width and height > 0
++    const QSize initialSize(qMax(requestedSize.width(), 1), qMax(requestedSize.height(), 1));
++
+     int current_width = 0;
+     int current_height = 0;
+     static bool disableResizeCheck = qgetenv("QT_WAYLAND_DISABLE_RESIZECHECK").toInt();
+@@ -91,11 +94,15 @@
+     }
+ }
+ 
+-void QWaylandEglWindow::createSurface(const QSize &initialSize)
++void QWaylandEglWindow::createSurface(const QSize &requestedSize)
+ {
+     // potentially called from a render thread
+     // eglSurfaceLock should be locked before calling this method
+ 
++    // wl_egl_window_create() returns NULL if either dimension is 0, and the window
++    // is 0x0 until the compositor has configured it, so make sure the size is at least 1
++    const QSize initialSize(qMax(requestedSize.width(), 1), qMax(requestedSize.height(), 1));
++
+     QReadLocker locker(&mSurfaceLock);
+     if (mSurface) {
+         wl_egl_window *eglWindow = wl_egl_window_create(mSurface->object(), initialSize.width(), initialSize.height());

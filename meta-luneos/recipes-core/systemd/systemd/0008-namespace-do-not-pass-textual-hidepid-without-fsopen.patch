@@ -1,0 +1,45 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] namespace: do not pass textual hidepid= without fsopen()
+
+mount_procfs() decides whether to pass hidepid= and subset=pid with
+mount_option_supported() != 0. That function returns -EAGAIN, meaning "cannot
+tell", when the kernel has no fsopen(), and -EAGAIN is not 0, so the options
+are passed anyway.
+
+A kernel without fsopen() (added in 5.2) is older than 5.8, where the textual
+hidepid= values and subset= appeared, so the proc mount is refused. On the
+LuneOS Linux 3.4 Halium machines the kernel logs
+
+  proc: unrecognized mount option "hidepid=invisible" or missing value
+
+and every unit with ProtectProc=invisible or ProcSubset=pid, which includes
+systemd-userdbd, systemd-hostnamed and systemd-localed, fails with EINVAL in
+its mount namespace setup.
+
+Only add the options when mount_option_supported() reports > 0.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [systemd's minimum kernel is much newer than 3.4]
+---
+--- a/src/core/namespace.c
++++ b/src/core/namespace.c
+@@ -1434,14 +1434,17 @@
+                  * fsopen()/fsconfig() was also backported on some distros which allows us to detect
+                  * hidepid=/subset= support in even more scenarios. */
+ 
+-                if (mount_option_supported("proc", "hidepid", hpv) != 0) {
++                /* > 0, not != 0: a kernel without fsopen() makes this return -EAGAIN ("cannot tell"),
++                 * and such a kernel is older than 5.8, which is where the textual hidepid= and subset=
++                 * values appeared. Passing them anyway makes the proc mount fail with EINVAL. */
++                if (mount_option_supported("proc", "hidepid", hpv) > 0) {
+                         opts = strjoin("hidepid=", hpv);
+                         if (!opts)
+                                 return -ENOMEM;
+                 }
+ 
+                 if (p->proc_subset == PROC_SUBSET_PID &&
+-                    mount_option_supported("proc", "subset", "pid") != 0)
++                    mount_option_supported("proc", "subset", "pid") > 0)
+                         if (!strextend_with_separator(&opts, ",", "subset=pid"))
+                                 return -ENOMEM;
+         }

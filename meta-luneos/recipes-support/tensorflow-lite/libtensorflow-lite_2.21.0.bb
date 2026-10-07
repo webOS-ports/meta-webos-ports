@@ -82,7 +82,22 @@ EXTRA_OECMAKE:append:riscv32 = " -DTFLITE_ENABLE_XNNPACK=ON"
 EXTRA_OECMAKE:append:riscv64 = " -DTFLITE_ENABLE_XNNPACK=ON"
 EXTRA_OECMAKE:append:x86-64 = " -DTFLITE_ENABLE_XNNPACK=ON"
 
+# The bundled cpuinfo calls syscall() on 32-bit ARM Linux without including
+# <unistd.h>:
+#
+#   cpuinfo/src/api.c:318:30: error: implicit declaration of function 'syscall'
+#
+# GCC 14 turned an implicit function declaration into an error. The symbol is
+# in libc, so the call links fine once the diagnostic is demoted again. Only the
+# 32-bit ARM path reaches that line, so nothing else is affected.
+CFLAGS:append:arm = " -Wno-error=implicit-function-declaration"
+
 TENSORFLOW_TARGET_ARCH = "${TARGET_ARCH}"
+# Becomes CMAKE_SYSTEM_PROCESSOR, and cpuinfo only recognises 32-bit ARM as
+# "armv[5-8].*". The plain "arm" that TARGET_ARCH gives is declared an
+# unsupported platform, cpuinfo_arm_linux_init is never built, and libcpuinfo
+# fails to link. Any armv7a machine that is not listed below needs this.
+TENSORFLOW_TARGET_ARCH:armv7a = "armv7"
 TENSORFLOW_TARGET_ARCH:raspberrypi = "armv6"
 TENSORFLOW_TARGET_ARCH:raspberrypi0 = "armv6"
 TENSORFLOW_TARGET_ARCH:raspberrypi0-wifi = "armv6"

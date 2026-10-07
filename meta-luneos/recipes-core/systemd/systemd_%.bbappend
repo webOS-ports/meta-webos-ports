@@ -12,6 +12,21 @@ SRC_URI += " \
     file://0006-Change-ownership-of-media-directory-to-support-non-r.patch \
 "
 
+# unposix_lock() has no fallback for a kernel without open file description
+# locks (Linux 3.15), so on the 3.4 Halium machines systemd-sysusers cannot take
+# the /etc/passwd lock. Only the machines on those kernels need the patch.
+SRC_URI:append:armv7a:halium = " file://0007-lock-util-fall-back-to-POSIX-locks-without-OFD-support.patch"
+
+# A kernel without fsopen() makes mount_option_supported() answer "cannot tell",
+# which mount_procfs() reads as "supported", so units with ProtectProc=invisible
+# fail on 3.4 where the proc mount rejects the textual hidepid= value.
+SRC_URI:append:armv7a:halium = " file://0008-namespace-do-not-pass-textual-hidepid-without-fsopen.patch"
+
+# pivot_root(".", ".") followed by umount2(".", MNT_DETACH) detaches the new root
+# on a 3.4 kernel, and the next mount() on it oopses the kernel. Every unit with
+# a mount namespace hits that. Always switch root with MS_MOVE and chroot().
+SRC_URI:append:armv7a:halium = " file://0009-mount-util-always-switch-root-with-MS_MOVE.patch"
+
 RDEPENDS:${PN}:remove = "update-rc.d"
 
 PACKAGECONFIG:remove = " \

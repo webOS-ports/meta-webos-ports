@@ -1,0 +1,42 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] terminal: treat EINVAL from TIOCGPTPEER like ENOTTY
+
+lxc_devpts_terminal() opens the pty slave with ioctl(TIOCGPTPEER). When the
+ioctl is not available it expects ENOTTY, and falls back to opening the slave
+by its pty number from the devpts instance, which it is allowed to do for the
+container's own console and ttys. Any other errno is a hard failure.
+
+On a Linux 3.4 kernel the ioctl does not exist and the pty master answers with
+EINVAL instead:
+
+  ioctl(40, TIOCSPTLCK, [0])         = 0
+  ioctl(40, TIOCGPTPEER, 0x80102)    = -1 EINVAL
+
+so lxc stops with
+
+  terminal.c:lxc_devpts_terminal:998 - Invalid argument - Failed to allocate new pty device
+  conf.c:lxc_setup_console:2123 - Failed to allocate console from container's devpts instance
+  start.c:do_start:1275 - Failed to setup container "android"
+
+and the Android container of the Halium image never starts.
+
+Take the same fallback for EINVAL as for ENOTTY. Callers that require
+TIOCGPTPEER still get ENODEV.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+--- a/src/lxc/terminal.c
++++ b/src/lxc/terminal.c
+@@ -989,6 +989,11 @@
+ 	if (fd_pty < 0) {
+ 		switch (errno) {
+ 		case ENOTTY:
++		case EINVAL:
++			/*
++			 * Kernels without TIOCGPTPEER are expected to answer
++			 * ENOTTY, but the pty master on Linux 3.4 returns EINVAL.
++			 */
+ 			SYSTRACE("Pure fd-based terminal allocation not possible");
+ 			break;
+ 		case ENOSPC:

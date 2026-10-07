@@ -12,6 +12,8 @@ IMAGE_NAME = "${IMAGE_BASENAME}-image"
 ZIP_BASENAME = "${IMAGE_BASENAME}-package-${MACHINE}"
 ZIP_NAME = "${ZIP_BASENAME}${IMAGE_VERSION_SUFFIX}"
 
+FILESEXTRAPATHS:prepend := "${THISDIR}/luneos-package:"
+
 inherit webos_ports_repo kernel-artifact-names deploy nopackages
 
 # Offset at which lk2nd expects the real Android boot image; it is padded to
@@ -25,6 +27,10 @@ SRCREV = "b69bf00f602138628521184b7f6d0773736d5f8b"
 
 WEBOS_REPO_NAME = "android-update-package"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+
+# webos_deploy.sh runs busybox-static to extract the rootfs, which does not work
+# on a recovery with an old kernel (TWRP on a 3.4 kernel), so make it fall back.
+SRC_URI += "file://0001-webos_deploy-fall-back-to-the-recovery-s-busybox.patch"
 
 do_deploy() {
     IMG="${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}-${MACHINE}${IMAGE_NAME_SUFFIX}.tar.gz"

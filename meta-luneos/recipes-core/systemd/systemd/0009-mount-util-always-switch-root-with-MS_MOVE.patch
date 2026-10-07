@@ -1,0 +1,45 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] mount-util: always switch root with MS_MOVE
+
+mount_switch_root_full() tucks the new root under the old one with
+pivot_root(".", ".") and then runs umount2(".", MNT_DETACH), relying on that to
+act on the top-most mount at the cwd, the old root.
+
+On the LuneOS Linux 3.4 Halium machines it does not. umount2(".") resolves to
+the mount the cwd itself is on, so it detaches the new root and leaves the
+process in a mount that belongs to no namespace. The next mount() on it faults
+in the kernel:
+
+  mount(NULL, "/", NULL, MS_REC|MS_SHARED, NULL) -> killed by SIGSEGV
+  Unable to handle kernel NULL pointer dereference at virtual address 00000014
+  PC is at do_mount+0x52c/0xb24
+
+Every unit that sets up a mount namespace (ProtectSystem=, PrivateTmp=, ...)
+dies this way, including systemd-udevd, systemd-logind and systemd-userdbd.
+
+Reproduced outside systemd, in a forked child on a booted device: setting the
+propagation of "." works right after pivot_root() and crashes only after
+umount2(".", MNT_DETACH). The MS_MOVE and chroot() sequence the function
+already has as its fallback does the switch without crashing, and a following
+propagation change succeeds.
+
+Set force_ms_move so the fallback is always taken.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [systemd's minimum kernel is much newer than 3.4]
+---
+--- a/src/shared/mount-util.c
++++ b/src/shared/mount-util.c
+@@ -517,6 +517,12 @@
+         if (fchdir(fd_newroot) < 0)
+                 return log_debug_errno(errno, "Failed to chdir into new rootfs '%s': %m", path);
+ 
++        /* mount_switch_root_pivot() relies on umount2(".", MNT_DETACH) acting on the top-most mount at the
++         * cwd. A 3.4 kernel resolves "." to the mount the cwd itself is on, so it detaches the new root
++         * instead of the stacked old one, and the next mount() on it dereferences a NULL mount namespace
++         * and oopses. MS_MOVE plus chroot() behaves the same on every kernel, so always use it. */
++        force_ms_move = true;
++
+         /* Make this a NOP if we are supposed to switch to our current root fs. After all, both pivot_root()
+          * and MS_MOVE don't like that. */
+         if (!is_current_root) {
