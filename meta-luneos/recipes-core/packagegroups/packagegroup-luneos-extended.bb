@@ -429,27 +429,28 @@ RDEPENDS:${PN}:append = "${@bb.utils.contains_any('MACHINE_FEATURES', 'camera-fr
 # an image without it - which is how mindphone, halium-arm64 and rpi all went
 # out with no container despite being wired up for one.
 #
-# No :mindphone line: mindphone.conf's MACHINEOVERRIDES carries "halium-arm",
-# so it already picks up the :halium-arm line below the same way it picks up
-# COMPATIBLE_MACHINE:halium-arm in waydroid.bb.
-RDEPENDS:${PN}:append:halium-arm = " waydroid"
-RDEPENDS:${PN}:append:halium-arm64 = " waydroid"
-RDEPENDS:${PN}:append:mido-halium = " waydroid"
-RDEPENDS:${PN}:append:pinephone = " waydroid"
-RDEPENDS:${PN}:append:pinephonepro = " waydroid"
-RDEPENDS:${PN}:append:pinetab2 = " waydroid"
-RDEPENDS:${PN}:append:qemux86-64 = " waydroid"
+# ":halium" covers every machine with an Android container, which is waydroid's
+# actual requirement; the mainline machines that can run it are named explicitly.
+# rpi gets waydroid but not waydroid-sensors, as before.
+RDEPENDS:${PN}:append:halium = " waydroid waydroid-sensors"
+RDEPENDS:${PN}:append:pinephone = " waydroid waydroid-sensors"
+RDEPENDS:${PN}:append:pinephonepro = " waydroid waydroid-sensors"
+RDEPENDS:${PN}:append:pinetab2 = " waydroid waydroid-sensors"
+RDEPENDS:${PN}:append:qemux86-64 = " waydroid waydroid-sensors"
 RDEPENDS:${PN}:append:rpi = " waydroid"
-RDEPENDS:${PN}:append:tissot-halium = " waydroid"
 
-RDEPENDS:${PN}:append:halium-arm = " waydroid-sensors"
-RDEPENDS:${PN}:append:halium-arm64 = " waydroid-sensors"
-RDEPENDS:${PN}:append:mido-halium = " waydroid-sensors"
-RDEPENDS:${PN}:append:pinephone = " waydroid-sensors"
-RDEPENDS:${PN}:append:pinephonepro = " waydroid-sensors"
-RDEPENDS:${PN}:append:pinetab2 = " waydroid-sensors"
-RDEPENDS:${PN}:append:qemux86-64 = " waydroid-sensors"
-RDEPENDS:${PN}:append:tissot-halium = " waydroid-sensors"
+# Waydroid needs a kernel of 3.18 or newer (binder, ashmem and the namespaces its
+# LineageOS container uses), and the four Halium machines on a 3.4 vendor kernel
+# (sm-t520 is the fourth, the Exynos 5420 tablet) have none of that. The ":halium" line above would otherwise pull waydroid and its
+# 18.1 system image into them; for mako-halium, which is 32-bit ARM, that fetch
+# does not even work, because the checksums in waydroid-data are the arm64 builds.
+RDEPENDS:${PN}:remove:hammerhead-halium = "waydroid waydroid-sensors"
+RDEPENDS:${PN}:remove:tenderloin-halium = "waydroid waydroid-sensors"
+RDEPENDS:${PN}:remove:mako-halium = "waydroid waydroid-sensors"
+# bluebinder as well: the tablet's Android Bluetooth HAL aborts with "Unimplemented packet type 12"
+# after opening /dev/ttySAC0, so bluebinder only times out, and bcm-hciattach.service in
+# systemd-machine-units brings the controller up instead, as on hammerhead-halium.
+RDEPENDS:${PN}:remove:sm-t520 = "waydroid waydroid-sensors bluebinder"
 
 QEMU_RDEPENDS = " \
     alsa-utils-systemd \

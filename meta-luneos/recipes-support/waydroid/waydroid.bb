@@ -41,16 +41,20 @@ WAYDROID_IMAGE_RDEPENDS ?= "waydroid-data"
 # have to come from the OTA channel into /var/lib/waydroid/images, or be
 # placed there and bind mounted over a preinstalled path.
 WAYDROID_IMAGE_RDEPENDS:mindphone = ""
-# halium-arm64 is a GSI machine: the vendor type is a property of whichever
-# device booted the image, so the pair cannot be frozen at build time. Measured
-# on sargo, which reports vndk 32 and therefore HALIUM_13: the channel serves a
-# current lineage-20.0 pair for waydroid_arm64, so the OTA path is both correct
-# and maintained here, unlike the frozen HALIUM_9 line.
-WAYDROID_IMAGE_RDEPENDS:halium-arm64 = ""
-# halium-arm is halium-arm64's 32-bit sibling and the same reasoning applies:
-# it is a generic rootfs, not a pinned device, so the vendor pairing can only
-# be resolved at runtime over OTA.
-WAYDROID_IMAGE_RDEPENDS:halium-arm = ""
+# Every other Halium machine resolves its images at runtime as well. The vendor
+# type is a property of the device (vndk), and the frozen pairs only exist for
+# the HALIUM_9 line, which only tissot-halium and mido-halium need. Anywhere
+# else WAYDROID_HALIUM_LEVEL is empty and waydroid-data's vendor URL comes out as
+#   .../lineage-16.0-20250809--waydroid_arm64-vendor.zip
+# which is a 404, failing do_fetch for the whole image (seen on sargo).
+# Measured on sargo, which reports vndk 32 and therefore HALIUM_13: the channel
+# serves a current lineage-20.0 pair for waydroid_arm64, so the OTA path is both
+# correct and maintained here, unlike the frozen HALIUM_9 line. halium-arm64 and
+# halium-arm are the generic GSI rootfs images and fall under the same rule.
+# Machine names override "halium", so the two pinned machines can opt back in.
+WAYDROID_IMAGE_RDEPENDS:halium = ""
+WAYDROID_IMAGE_RDEPENDS:tissot-halium = "waydroid-data"
+WAYDROID_IMAGE_RDEPENDS:mido-halium = "waydroid-data"
 
 # python3-pyclip is still required: clipboard_manager.py imports it at module
 # level in 1.6.3 and gates the whole clipboard thread on the import succeeding,
@@ -97,7 +101,13 @@ RDEPENDS:${PN} += "${WAYDROID_IMAGE_RDEPENDS} lxc python3-gbinder python3-pygobj
 #     lands on this tune with the plain content (the common case, matching
 #     how tissot-halium/mido-halium stayed the default above) keeps sharing
 #     with halium-arm without needing its own line here.
-PACKAGE_ARCH:halium-arm64 = "${MACHINE_ARCH}"
+# Content differs from tissot-halium/mido-halium, which share the tune, so every
+# other Halium machine gets its own arch. halium-arm stays on the cortexa8 tune
+# it shares with mindphone, as explained above.
+PACKAGE_ARCH:halium = "${MACHINE_ARCH}"
+PACKAGE_ARCH:tissot-halium = "${TUNE_PKGARCH}"
+PACKAGE_ARCH:mido-halium = "${TUNE_PKGARCH}"
+PACKAGE_ARCH:halium-arm = "${TUNE_PKGARCH}"
 PACKAGE_ARCH:mindphone = "${MACHINE_ARCH}"
 
 # these modules are directly included in android-flavored kernels
@@ -139,13 +149,12 @@ COMPATIBLE_MACHINE:rpi = "(.*)"
 COMPATIBLE_MACHINE:pinephone = "(.*)"
 COMPATIBLE_MACHINE:pinephonepro = "(.*)"
 COMPATIBLE_MACHINE:pinetab2 = "(.*)"
-COMPATIBLE_MACHINE:mido-halium = "(.*)"
-COMPATIBLE_MACHINE:tissot-halium = "(.*)"
-COMPATIBLE_MACHINE:halium-arm64 = "(.*)"
-# No :mindphone entry: mindphone.conf carries "halium-arm" in its
-# MACHINEOVERRIDES precisely so it picks this up from here instead of needing
-# its own line - see the comment there.
-COMPATIBLE_MACHINE:halium-arm = "(.*)"
+# Every halium machine, via the "halium" MACHINEOVERRIDES entry that
+# meta-android-halium.inc sets. A container and binder are exactly what waydroid
+# needs, so that is the real condition; the per-machine list this replaces missed
+# q25, athena, mp01 and radon, which build their own rootfs rather than running
+# halium-arm64's and so never got it.
+COMPATIBLE_MACHINE:halium = "(.*)"
 
 inherit pkgconfig
 inherit webos_app
