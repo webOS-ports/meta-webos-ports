@@ -1,0 +1,47 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Mon, 5 Oct 2026 09:30:00 +0200
+Subject: [PATCH] zram-on: do not loop for ever on a kernel without "managed" in zoneinfo
+
+zram-on.sh sizes the zram disk from the Normal and HighMem zones in /proc/zoneinfo. It waited,
+with `until ... = "managed"`, for the zone's "managed" line, which Linux 3.4 does not print: the
+loop read to the end of the file and kept going on the last line, at 11% of a core, so the disk
+size was never written, swap-on.sh failed with "read swap header failed" and the device ran
+without swap (seen on the Galaxy Tab Pro 10.1, which has 1.7 GB of RAM and 48 MB free with the
+UI up).
+
+Read the two lines with awk instead: "managed" where the kernel prints it, as before, and
+"present" where it does not. On the tablet that is 518157 pages, a 506 MB zram disk.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+--- a/common/lib/systemd/system/scripts/zram-on.sh.in	2026-10-05 09:24:57.726306902 +0200
++++ b/common/lib/systemd/system/scripts/zram-on.sh.in	2026-10-05 09:24:57.749721330 +0200
+@@ -72,20 +72,13 @@
+         fi
+ 
+         # get total free
+-        TOTAL_FREE=0
+-        while read line
+-        do
+-            ZONE=`echo $line | awk '/^Node/ {print $4}'`
+-            if [ "$ZONE" = "Normal" ] || [ "$ZONE" = "HighMem" ]
+-            then
+-                read line
+-                until [ "`echo $line | awk '{print $1}'`" = "managed" ]; do
+-                    read line
+-                done
+-                ZONESIZE=`echo $line | awk '{print $2}'`
+-                TOTAL_FREE=`expr $TOTAL_FREE + $ZONESIZE`
+-            fi
+-        done < /proc/zoneinfo
++        # Pages in the Normal and HighMem zones: "managed" where the kernel prints it, "present" where it
++        # does not. The loop that stood here waited for a "managed" line and never ended on a 3.4 kernel,
++        # which prints none: zram-on.sh spun for ever, the disk size was never set and swap never came on.
++        TOTAL_FREE=`awk '/^Node/ { zone = $4; next }
++                         (zone == "Normal" || zone == "HighMem") && $1 == "present" { present[zone] = $2 }
++                         (zone == "Normal" || zone == "HighMem") && $1 == "managed" { managed[zone] = $2 }
++                         END { for (z in present) total += (z in managed) ? managed[z] : present[z]; print total + 0 }' /proc/zoneinfo`
+         TOTAL_FREE=$(($TOTAL_FREE*$PAGE_SIZE/1024/1024))
+ 
+         if [ $TOTAL_FREE -lt $BASE_FREE ]; then

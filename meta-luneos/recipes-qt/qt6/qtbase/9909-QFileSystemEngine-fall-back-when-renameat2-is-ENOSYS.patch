@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 1 Oct 2026 00:00:00 +0000
+Subject: [PATCH] QFileSystemEngine: fall back when renameat2 is ENOSYS
+
+QFileSystemEngine::renameFile() tries renameat2(RENAME_NOREPLACE) first and
+only continues to its link()+unlink() fallback when that fails with EINVAL,
+which is what some non-local filesystems return. Any other errno is
+reported to the caller as the result of the rename.
+
+When Qt is built against headers that provide renameat2() but runs on a
+kernel that does not implement the syscall, the call fails with ENOSYS, and
+so does every QFile::rename(), QDir::rename() and anything built on them.
+The LuneOS armv7 Halium machines (tenderloin-halium, hammerhead-halium)
+run Linux 3.4, which predates renameat2() (3.15), so a rename could never
+succeed there.
+
+Treat ENOSYS like EINVAL and fall through to the link()+unlink() path that
+is already there for filesystems without renameat2() support. That path
+keeps the no-replace semantics, so behaviour is unchanged on kernels that
+have the syscall.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+--- a/src/corelib/io/qfilesystemengine_unix.cpp
++++ b/src/corelib/io/qfilesystemengine_unix.cpp
+@@ -1764,8 +1764,10 @@
+     if (renameat2(AT_FDCWD, srcPath, AT_FDCWD, tgtPath, RENAME_NOREPLACE) == 0)
+         return true;
+ 
+-    // We can also get EINVAL for some non-local filesystems.
+-    if (errno != EINVAL) {
++    // We can also get EINVAL for some non-local filesystems, and ENOSYS from a
++    // kernel older than the one the headers were built against (renameat2()
++    // is Linux 3.15).
++    if (errno != EINVAL && errno != ENOSYS) {
+         error = QSystemError(errno, QSystemError::StandardLibraryError);
+         return false;
+     }

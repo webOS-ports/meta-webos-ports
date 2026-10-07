@@ -124,6 +124,16 @@ SRC_URI:append = " file://9907-libhybris-egl-server-take-QOpenGLTexture-from-QtO
 
 SRC_URI:append = " file://9908-wayland-egl-install-the-client-integration-private-headers.patch;minver=6.10.0"
 
+# QFile::rename() and QDir::rename() fail outright on the 3.4 Halium kernels:
+# Qt only falls back from renameat2() on EINVAL, and a kernel without the
+# syscall (renameat2 is 3.15) returns ENOSYS.
+SRC_URI:append = " file://9909-QFileSystemEngine-fall-back-when-renameat2-is-ENOSYS.patch;minver=6.12.0"
+
+# A QML window is still 0x0 at its first render, wl_egl_window_create() returns
+# NULL for a zero dimension, and the app dies with "Failed to create RHI". That
+# is what kept the Settings pages from launching on Halium.
+SRC_URI:append = " file://9910-wayland-egl-create-the-wl_egl_window-at-least-1x1.patch;minver=6.12.0"
+
 # FIXME: Patches below can be dropped once all qmake-dependent components are switched to cmake.
 # https://bugreports.qt.io/browse/WEBOSCI-66
 # https://bugreports.qt.io/browse/WEBOSCI-81
