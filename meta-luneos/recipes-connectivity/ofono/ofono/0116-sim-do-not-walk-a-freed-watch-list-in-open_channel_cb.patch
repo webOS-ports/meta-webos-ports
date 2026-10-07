@@ -1,0 +1,43 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] sim: do not walk a freed watch list in open_channel_cb
+
+open_channel_cb() notifies each session watcher while iterating the
+watch list, and only advances the iterator after notify() returns. A
+watcher may remove its own watch from inside notify(), which frees both
+the watchlist item and the GSList node the loop is standing on. The
+following g_slist_next() then reads freed memory.
+
+simfs does exactly that when the driver fails a session read
+synchronously: get_session_cb() -> session_read_info() -> failure ->
+sim_fs_op_error() -> sim_fs_end_current() ->
+__ofono_sim_remove_session_watch(). ofono-binder-plugin implements
+session_read_info as a stub that calls back immediately with an error,
+so any SIM with an ISIM application (VoLTE SIMs, read for EFimpi in
+discover_apps_cb) takes ofonod down. Observed on the Unihertz Titan
+Pocket: "SIM card OK", "session_read_info not implemented", SIGSEGV,
+30 restarts in a row and no telephony.
+
+Advance the iterator before calling notify().
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+
+--- a/src/sim.c
++++ b/src/sim.c
+@@ -4034,9 +4034,14 @@
+ 		struct ofono_watchlist_item *item = iter->data;
+ 		ofono_sim_session_event_cb_t notify = item->notify;
+ 
+-		notify(active, session->session_id, item->notify_data);
+-
++		/*
++		 * Step past this node before calling out: the watcher may
++		 * remove its own watch from inside notify(), which frees
++		 * both item and the list node iter points at.
++		 */
+ 		iter = g_slist_next(iter);
++
++		notify(active, session->session_id, item->notify_data);
+ 	}
+ }
+ 
