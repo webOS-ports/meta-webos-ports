@@ -12,7 +12,7 @@ LIC_FILES_CHKSUM = " \
 DEPENDS = "glib-2.0 glib-2.0-native luna-service2 libpbnjson pmloglib python3-packaging-native"
 
 WEBOS_VERSION = "1.0.0-65_701456ce1ba2d761b244dd106f496a5e059ee6d6"
-PR = "r14"
+PR = "r15"
 
 inherit webos_component
 inherit webos_cmake
@@ -25,6 +25,7 @@ inherit python3native
 SRC_URI = " \
     ${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-com.webos.service.memorymanager-Fix-outbound-permiss.patch \
+    file://0002-memorymanager-scale-the-memory-levels-with-the-device-s-RAM.patch \
 "
 
 inherit webos_systemd
