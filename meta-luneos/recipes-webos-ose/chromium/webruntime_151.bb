@@ -56,6 +56,23 @@ GN_ARGS:append = " use_x11=false"
 PACKAGECONFIG[google_ozone_wayland] = "import(\"//neva/gow.gn\")"
 PACKAGECONFIG += "google_ozone_wayland"
 
+# webruntime.inc turns the media block on through PACKAGECONFIG:append:hardware,
+# but that override only exists in recipes that inherit webos_machine_impl_dep,
+# and webruntime.inc has that inherit commented out. So the whole block
+# silently stays off on every machine except qemux86-64, which has its own
+# append. With use_webos_camera=false create_video_capture_device_factory.cc
+# picks the plain V4L2 factory, which finds no usable camera on our devices.
+#
+# Turn on what the devices already ship the runtime for: camera2 (camera),
+# umediaserver + g-media-pipeline (neva-media, gstreamer, gav), pulseaudio and
+# audiod (pulseaudio, webos-audio).
+#
+# Deliberately NOT enabled:
+# - webos-codec: media-codec-interface has no hardware backend for our SoCs
+#   (only virtual/libomxil for rpi), and it is installed on no device.
+# - av1-codec: software decode only, see the comment in webruntime.inc.
+PACKAGECONFIG += "webos-camera neva-media gstreamer umediaserver gav pulseaudio webos-audio"
+
 # intel_ozone_wayland is deliberately NOT enabled on 151, unlike 108/120.
 #
 # //neva/iow.gn sets ozone_platform_wayland_external=true, which builds LG's
