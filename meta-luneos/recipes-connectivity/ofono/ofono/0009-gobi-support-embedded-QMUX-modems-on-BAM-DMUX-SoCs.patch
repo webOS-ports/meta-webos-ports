@@ -1,0 +1,291 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] gobi: support embedded QMUX modems on BAM-DMUX SoCs
+
+The modem built into msm8916 and its relatives exposes its telephony
+services - DMS, NAS, WDS, UIM, VOICE, WMS - over QMUX on the rpmsg channel
+DATA5_CNTL, which the kernel's rpmsg_wwan_ctrl presents as a wwan QMI port
+(/dev/wwan0qmi0). Data goes over BAM-DMUX, whose netdevs (wwan0..wwan7)
+are raw-IP channels, one per mux id. QRTR carries only the platform
+services on these SoCs, so qrtrqmi never finds a telephony modem there.
+
+gobi speaks exactly this protocol, but nothing created a modem for it:
+
+ - udevng's check_wwan_device() only handled ports with an MHI parent,
+   and check_net_device() only rmnet_* netdevs, so both halves of the
+   modem were dropped.
+ - gobi_probe() required Bus "usb" and a qmi_wwan netdev, and the enable
+   path wrote qmi_wwan's raw_ip/pass_through sysfs attributes, which do
+   not exist for BAM-DMUX.
+
+Group the QMI port and the BAM-DMUX netdevs under their common parent,
+the remoteproc platform device, as an embedded gobi modem, using channel
+0 (dev_port 0) - the data channel paired with DATA5_CNTL, rmnet0 under
+Android. The modem only becomes real once a BAM-DMUX netdev has joined,
+so a QMI wwan port on a platform without BAM-DMUX is left alone and
+modems handled by qrtrsoc are unaffected.
+
+In gobi, accept Bus "embedded" with a 'bam-dmux' network driver, and keep
+the qmi_wwan-only steps - the sysfs knobs and the WDA data format
+negotiation, which names a USB endpoint - to qmi_wwan modems. The
+existing single-context path then binds the one gprs context to the
+BAM-DMUX netdev.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+diff --git a/plugins/gobi.c b/plugins/gobi.c
+index 135b195..c4af7e2 100644
+--- a/plugins/gobi.c
++++ b/plugins/gobi.c
+@@ -111,6 +111,7 @@ struct gobi_data {
+ 	enum wda_data_format data_format;
+ 	uint8_t off_opmode;
+ 	bool no_pass_through : 1;
++	bool qmi_wwan : 1;
+ };
+ 
+ static void gobi_debug(const char *str, void *user_data)
+@@ -211,7 +212,10 @@ static int qmi_wwan_set_pass_through(const char *interface, char value)
+  *   'qmi_wwan' is supported.
+  *
+  * Bus
+- *   The bus of the modem.  Values can be "usb"
++ *   The bus of the modem.  Values can be "usb", or "embedded" for a modem
++ *   built into an older Qualcomm SoC (msm8916 and relatives), reached over
++ *   QMUX on an rpmsg wwan port, with 'bam-dmux' as the network driver.
++ *   InterfaceNumber is not used for an embedded modem.
+  */
+ static int gobi_probe(struct ofono_modem *modem)
+ {
+@@ -241,22 +245,35 @@ static int gobi_probe(struct ofono_modem *modem)
+ 	if (!if_driver || !ifname || !ifindex || !bus)
+ 		return -EPROTO;
+ 
+-	if (!L_IN_STRSET(if_driver, "qmi_wwan"))
+-		return -ENOTSUP;
++	if (L_IN_STRSET(bus, "embedded")) {
++		/*
++		 * BAM-DMUX netdevs are raw-IP channels already, one per mux
++		 * id: no qmi_wwan sysfs knobs, no QMAP, no USB interface.
++		 */
++		if (!L_IN_STRSET(if_driver, "bam-dmux"))
++			return -ENOTSUP;
+ 
+-	if (!L_IN_STRSET(bus, "usb"))
+-		return -ENOTSUP;
++		interface_number = 0;
++		no_pass_through = true;
++	} else {
++		if (!L_IN_STRSET(if_driver, "qmi_wwan"))
++			return -ENOTSUP;
+ 
+-	if (l_safe_atox8(ofono_modem_get_string(modem, "InterfaceNumber"),
+-				&interface_number) < 0)
+-		return -EINVAL;
++		if (!L_IN_STRSET(bus, "usb"))
++			return -ENOTSUP;
+ 
+-	pass_through = l_strdup_printf(QMI_WWAN_PASS_THROUGH, ifname);
+-	if (stat(pass_through, &st) == -1) {
+-		if (errno == ENOENT)
+-			no_pass_through = true;
+-		else
+-			return -errno;
++		if (l_safe_atox8(ofono_modem_get_string(modem,
++							"InterfaceNumber"),
++					&interface_number) < 0)
++			return -EINVAL;
++
++		pass_through = l_strdup_printf(QMI_WWAN_PASS_THROUGH, ifname);
++		if (stat(pass_through, &st) == -1) {
++			if (errno == ENOENT)
++				no_pass_through = true;
++			else
++				return -errno;
++		}
+ 	}
+ 
+ 	if (opmode) {
+@@ -273,6 +290,7 @@ static int gobi_probe(struct ofono_modem *modem)
+ 	l_strlcpy(data->main_net_name, ifname, sizeof(data->main_net_name));
+ 	data->interface_number = interface_number;
+ 	data->no_pass_through = no_pass_through;
++	data->qmi_wwan = L_IN_STRSET(if_driver, "qmi_wwan");
+ 	/* See drivers/net/ethernet/qualcomm/rmnet/rmnet_private.h */
+ 	data->max_aggregation_size = 16384;
+ 	data->off_opmode = off_opmode;
+@@ -831,7 +849,11 @@ static void discover_cb(void *user_data)
+ 	if (data->features & GOBI_UIM)
+ 		add_service_request(data, &data->uim, QMI_SERVICE_UIM);
+ 
+-	if (data->features & GOBI_WDA) {
++	/*
++	 * The data format negotiation below drives qmi_wwan and names a USB
++	 * endpoint; it has no meaning for a BAM-DMUX channel.
++	 */
++	if ((data->features & GOBI_WDA) && data->qmi_wwan) {
+ 		if (qmi_qmux_device_create_client(data->device,
+ 				QMI_SERVICE_WDA, create_wda_cb, modem, NULL))
+ 			return;
+@@ -857,6 +879,9 @@ static void init_powered_down_cb(int error, uint16_t type,
+ 	if (error)
+ 		goto error;
+ 
++	if (!data->qmi_wwan)
++		goto discover;
++
+ 	DBG("Setting QMI_WWAN to 802.3 mode");
+ 
+ 	/* Must set pass_through first, before toggling raw_ip */
+@@ -874,6 +899,8 @@ static void init_powered_down_cb(int error, uint16_t type,
+ 		goto error;
+ 	}
+ 
++discover:
++
+ 	r = qmi_qmux_device_discover(data->device, discover_cb, modem, NULL);
+ 	if (!r)
+ 		return;
+diff --git a/plugins/udevng.c b/plugins/udevng.c
+index fbd48a3..0d65b39 100644
+--- a/plugins/udevng.c
++++ b/plugins/udevng.c
+@@ -351,6 +351,46 @@ static gboolean setup_qrtrsoc(struct modem_info *modem)
+ 	return TRUE;
+ }
+ 
++/*
++ * A modem built into the SoC on the older Qualcomm platforms (msm8916 and
++ * relatives). Its QMI services are reached over QMUX on the rpmsg control
++ * channel DATA5_CNTL, which rpmsg_wwan_ctrl exposes as a wwan QMI port, and its
++ * data over BAM-DMUX, whose netdevs are raw-IP channels, one per mux id.
++ * Channel 0 is the one paired with DATA5_CNTL (rmnet0 under Android).
++ */
++static gboolean setup_gobi_embedded(struct modem_info *modem)
++{
++	const struct device_info *qmi = NULL;
++	const struct device_info *net = NULL;
++	GSList *list;
++
++	DBG("%s", modem->syspath);
++
++	for (list = modem->devices; list; list = list->next) {
++		const struct device_info *info = list->data;
++		const char *subsystem =
++			udev_device_get_subsystem(info->udev_device);
++
++		if (l_streq0(subsystem, "wwan"))
++			qmi = info;
++		else if (l_streq0(subsystem, "net") &&
++				l_streq0(udev_device_get_sysattr_value(
++						info->udev_device, "dev_port"),
++						"0"))
++			net = info;
++	}
++
++	if (qmi == NULL || net == NULL)
++		return FALSE;
++
++	DBG("qmi=%s net=%s", qmi->devnode, get_ifname(net));
++
++	ofono_modem_set_string(modem->modem, "Device", qmi->devnode);
++	ofono_modem_set_string(modem->modem, "Bus", "embedded");
++
++	return setup_qmi_netdev(modem, net) == 0;
++}
++
+ static gboolean setup_gobi(struct modem_info *modem)
+ {
+ 	const struct device_info *qmi = NULL;
+@@ -359,6 +399,9 @@ static gboolean setup_gobi(struct modem_info *modem)
+ 
+ 	DBG("%s", modem->syspath);
+ 
++	if (modem->type == MODEM_TYPE_EMBEDDED)
++		return setup_gobi_embedded(modem);
++
+ 	for (list = modem->devices; list; list = list->next) {
+ 		const struct device_info *info = list->data;
+ 		const char *subsystem =
+@@ -2396,14 +2439,59 @@ static bool add_mhi_device(struct udev_device *device,
+ 	return false;
+ }
+ 
++/*
++ * The modem device both halves of an embedded SoC modem hang off: the wwan
++ * port's grandparent (port -> wwanN -> remoteproc) and a BAM-DMUX netdev's
++ * grandparent (netdev -> bam-dmux -> remoteproc).
++ */
++static struct udev_device *embedded_modem_parent(struct udev_device *device)
++{
++	struct udev_device *parent = udev_device_get_parent(device);
++
++	if (!parent)
++		return NULL;
++
++	parent = udev_device_get_parent(parent);
++	if (!parent || !l_streq0(udev_device_get_subsystem(parent),
++								"platform"))
++		return NULL;
++
++	return parent;
++}
++
++static void check_embedded_wwan_port(struct udev_device *device)
++{
++	struct udev_device *parent;
++	const char *type;
++
++	/* Only the QMI control port; AT ports are not used by gobi */
++	type = udev_device_get_sysattr_value(device, "type");
++	if (!l_streq0(type, "QMI"))
++		return;
++
++	parent = embedded_modem_parent(device);
++	if (!parent)
++		return;
++
++	/*
++	 * Nothing more is checked here: setup_gobi_embedded() only succeeds
++	 * once a BAM-DMUX netdev has joined the same modem, so a QMI port on a
++	 * platform without BAM-DMUX never becomes a modem.
++	 */
++	add_device(udev_device_get_syspath(parent), NULL, "gobi",
++			NULL, NULL, MODEM_TYPE_EMBEDDED, device, NULL);
++}
++
+ static void check_wwan_device(struct udev_device *device)
+ {
+ 	struct udev_device *parent;
+ 
+ 	parent = udev_device_get_parent_with_subsystem_devtype(device,
+ 								"mhi", NULL);
+-	if (!parent)
++	if (!parent) {
++		check_embedded_wwan_port(device);
+ 		return;
++	}
+ 
+ 	/* If this is an MHI device, find the MHI parent */
+ 	parent = udev_device_get_parent(parent);
+@@ -2443,6 +2531,20 @@ static void check_net_device(struct udev_device *device)
+ 		return;
+ 	}
+ 
++	if (l_streq0(udev_device_get_property_value(device, "ID_NET_DRIVER"),
++							"bam-dmux") ||
++			l_streq0(udev_device_get_driver(
++					udev_device_get_parent(device)),
++							"bam-dmux")) {
++		parent = embedded_modem_parent(device);
++		if (parent)
++			add_device(udev_device_get_syspath(parent), NULL,
++					"gobi", NULL, NULL,
++					MODEM_TYPE_EMBEDDED, device,
++					"bam-dmux");
++		return;
++	}
++
+ 	name = udev_device_get_sysname(device);
+ 	if (l_str_has_prefix(name, "phonet")) {
+ 		add_serial_device(device);

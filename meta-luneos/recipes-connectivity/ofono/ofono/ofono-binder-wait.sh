@@ -31,6 +31,21 @@
 # will simply come up with whatever is there, which is what happens today.
 CONF=/etc/ofono/binder.conf
 TIMEOUT=${OFONO_BINDER_WAIT_TIMEOUT:-30}
+# Seconds to keep waiting after every slot is registered. A slot registering only means the
+# RIL's HIDL service is up; some vendor RILs (Qualcomm's qcril on hammerhead) are still
+# bringing the modem up for a few seconds more, and ofono's first request, sent into that
+# window, is never answered: "Power request failed" 30 s later, the SIM never appears, and
+# only `systemctl restart ofono` recovers. A device that needs this sets it in a drop-in;
+# the default leaves every other device exactly as it was.
+SETTLE=${OFONO_BINDER_WAIT_SETTLE:-0}
+
+# luneos-device-config writes this when the device says deviceinfo_modem="false" (a Wi-Fi-only
+# tablet): no RIL will ever register, and waiting for the single slot the shipped binder.conf names
+# only costs the full TIMEOUT on every boot (34 s on the SM-T520, 5 Oct 2026).
+if [ -e /run/luneos/no-modem ]; then
+    echo "ofono-binder-wait: the device has no modem, not waiting"
+    exit 0
+fi
 
 command -v binder-list >/dev/null 2>&1 || exit 0
 [ -r "$CONF" ] || exit 0
@@ -49,6 +64,10 @@ while [ "$i" -lt "$TIMEOUT" ]; do
     done
     if [ -z "$missing" ]; then
         echo "ofono-binder-wait: all slots registered:$(echo $slots | sed 's/^/ /')"
+        if [ "$SETTLE" -gt 0 ]; then
+            echo "ofono-binder-wait: letting the RIL settle for ${SETTLE}s"
+            sleep "$SETTLE"
+        fi
         exit 0
     fi
     sleep 1

@@ -19,6 +19,7 @@ SRC_URI:append = " \
   file://0006-Allow-qmi-qrtr-without-data.patch \
   file://0007-sim-add-org.ofono.EuiccManager-interface.patch \
   file://0008-qmimodem-add-logical-channel-support.patch \
+  file://0009-gobi-support-embedded-QMUX-modems-on-BAM-DMUX-SoCs.patch \
   file://msm-modem-uim-selection.sh \
   file://ofono-binder-wait.sh \
   file://ofono.service \
@@ -50,6 +51,7 @@ SRC_URI:append = " \
   file://0113-build-make-the-installed-headers-usable-from-out-of-.patch \
   file://0114-radio-settings-never-report-a-technology-preference-.patch \
   file://0115-ussd-accept-pre-decoded-UTF-8-from-drivers.patch \
+  file://0116-sim-do-not-walk-a-freed-watch-list-in-open_channel_cb.patch \
 "
 
 # On Halium the modem is driven by ofono-binder-plugin. The in-tree ril
