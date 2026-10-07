@@ -29,10 +29,9 @@ DEPENDS = "glib-2.0 libglibutil libgbinder"
 # Same machines as waydroid itself: the daemon is only useful with a container
 # to answer, and needs the anbox-* binder nodes that come with it.
 COMPATIBLE_MACHINE ?= "(^$)"
-COMPATIBLE_MACHINE:mido-halium = "(.*)"
-COMPATIBLE_MACHINE:tissot-halium = "(.*)"
-COMPATIBLE_MACHINE:halium-arm = "(.*)"
-COMPATIBLE_MACHINE:halium-arm64 = "(.*)"
+# Every halium machine, matching waydroid.bb: this answers ISensors for the
+# container, so the condition is having one.
+COMPATIBLE_MACHINE:halium = "(.*)"
 COMPATIBLE_MACHINE:pinephone = "(.*)"
 COMPATIBLE_MACHINE:pinephonepro = "(.*)"
 COMPATIBLE_MACHINE:pinetab2 = "(.*)"
