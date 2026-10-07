@@ -17,13 +17,16 @@ LIC_FILES_CHKSUM = " \
 DEPENDS = "qtdeclarative pmloglib luna-service2 libpbnjson"
 DEPENDS:append = " ${@ 'qtshadertools-native' if d.getVar('QT_VERSION')[0] == '6' else '' }"
 
-RDEPENDS:${PN} += "qml-webos-framework qml-webos-bridge"
+# qml-app-components provides the QmlAppComponents module the app imports (16 files);
+# without it appMain.qml fails to load and the app exits as soon as it starts.
+RDEPENDS:${PN} += "qml-webos-framework qml-webos-bridge qml-app-components"
 
 WEBOS_VERSION = "1.0.0-17_4fe324a62ee8d06e344e935f17cbda3d3e568b59"
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-appinfo.json-drop-requiredPermissions-for-ACGs-that-.patch \
+    file://0002-Port-the-thumbnails-from-QtGraphicalEffects-to-QtQuick.Effects.patch \
 "
-PR = "r5"
+PR = "r6"
 
 inherit webos_enhanced_submissions
 inherit webos_public_repo
