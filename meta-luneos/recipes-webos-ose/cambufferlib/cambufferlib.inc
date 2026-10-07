@@ -24,8 +24,22 @@ CXXFLAGS += " \
 "
 
 WEBOS_VERSION = "1.0.0-17_7f4fed57d44bed5a16ed72ca16e81dd9213100dc"
-INC_PR = "r4"
+INC_PR = "r5"
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+
+# camera-buffer.pc comes out with "libdir=" and "includedir=" empty: the
+# component's top-level CMakeLists.txt never loads the webOS CMake modules, so
+# WEBOS_INSTALL_LIBDIR / WEBOS_INSTALL_INCLUDEDIR are undefined when
+# camera-buffer.pc.in is configured. The files themselves install to the right
+# places (CMake's default lib/ and include/ destinations), only the .pc is
+# wrong. Nothing read it until webruntime enabled use_webos_camera, and then GN
+# stopped in pkg_config("webos_camera_buffer_config") with "Empty directory
+# path" because pkg-config returned a bare -L and -I.
+do_install:append() {
+    sed -i -e 's|^libdir=.*|libdir=${libdir}|' \
+           -e 's|^includedir=.*|includedir=${includedir}|' \
+           ${D}${datadir}/pkgconfig/camera-buffer.pc
+}
 
 PACKAGECONFIG[testapp] = "-DTEST_APP=ON, -DTEST_APP=OFF, opencv, "

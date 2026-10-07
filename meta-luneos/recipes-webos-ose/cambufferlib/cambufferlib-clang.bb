@@ -15,6 +15,8 @@ PACKAGECONFIG[system-libcxx] = ",,libcxx"
 do_install:append() {
     install -d ${D}/${LIBCBE_DIR}
     mv ${D}/${libdir}/*.so* ${D}/${LIBCBE_DIR}
+    # The libraries moved to ${LIBCBE_DIR}, so the .pc has to point there.
+    sed -i 's|^libdir=.*|libdir=${LIBCBE_DIR}|' ${D}${datadir}/pkgconfig/camera-buffer.pc
 }
 
 FILES:${PN} += "${LIBCBE_DIR}/lib*${SOLIBS}"
