@@ -15,6 +15,9 @@ SRC_URI = " \
 "
 SRC_URI:append:qemuall = "file://99-virtualbox-mouse.rules"
 SRC_URI:append:halium = " file://surface-manager-daemon-after-android.conf"
+# Only the 32-bit machines are slow enough to need it; the file itself sits in
+# the halium directory next to the one above.
+SRC_URI:append:armv7a:halium = " file://surface-manager-daemon-timeout.conf"
 
 do_install() {
     install -d ${D}${sysconfdir}/surface-manager.d
@@ -29,6 +32,11 @@ do_install:append:qemuall() {
 do_install:append:halium() {
     install -d ${D}${systemd_unitdir}/system/surface-manager-daemon.service.d
     install -v -m 0644 ${UNPACKDIR}/surface-manager-daemon-after-android.conf \
+        ${D}${systemd_unitdir}/system/surface-manager-daemon.service.d/
+}
+
+do_install:append:armv7a:halium() {
+    install -v -m 0644 ${UNPACKDIR}/surface-manager-daemon-timeout.conf \
         ${D}${systemd_unitdir}/system/surface-manager-daemon.service.d/
 }
 
