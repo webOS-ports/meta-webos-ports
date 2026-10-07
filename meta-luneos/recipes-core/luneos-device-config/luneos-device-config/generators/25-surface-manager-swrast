@@ -1,0 +1,52 @@
+#!/bin/sh
+# Software rendering for a device whose GPU cannot be used.
+#
+# deviceinfo_gpu_accelerated="false" - the key postmarketOS adaptations already
+# use for this - makes the compositor render with Mesa's software rasteriser
+# instead of probing a GPU driver that has no hardware to talk to. Without it
+# freedreno fails every query on a DRM device that came up without a GPU, and
+# surface-manager dies in Mesa soon after starting.
+#
+# Mesa is built without LLVM here, so softpipe is the only software rasteriser
+# there is; LIBGL_ALWAYS_SOFTWARE makes the loader choose it and GALLIUM_DRIVER
+# names it. Slow, but it draws.
+#
+# Builds on the file 20-surface-manager-env may already have written, and falls
+# back to the shipped one, so the two compose whichever of them has something to
+# say for a device.
+[ "${deviceinfo_gpu_accelerated:-}" = "false" ] || exit 0
+
+# Mainline only. A Halium device shares its adaptation with the mainline build of
+# the same phone (both resolve to the same codename), but there the vendor's GLES
+# driver is reached through libhybris whatever Mesa can or cannot do, and forcing
+# the software rasteriser would throw the GPU away. $api_level comes from the
+# Android vendor properties, so it is set exactly when a container is present.
+[ -z "${api_level:-}" ] || exit 0
+
+OUT="$GEN/files/etc/surface-manager.d/surface-manager.env"
+if [ -f "$OUT" ]; then
+    SRC="$OUT"
+else
+    SRC=/etc/surface-manager.d/surface-manager.env
+fi
+[ -f "$SRC" ] || exit 0
+
+tmp=$(mktemp)
+cp "$SRC" "$tmp"
+# A file that does not end in a newline would glue the first line on to its last.
+[ -n "$(tail -c1 "$tmp")" ] && echo >> "$tmp"
+
+changed=0
+for kv in LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=softpipe; do
+    if ! grep -q "^${kv%%=*}=" "$tmp"; then
+        echo "$kv" >> "$tmp"
+        changed=1
+    fi
+done
+
+if [ "$changed" = "1" ]; then
+    mkdir -p "$GEN/files/etc/surface-manager.d" && cp "$tmp" "$OUT" &&
+        echo "luneos-device-config: compositor renders in software (deviceinfo_gpu_accelerated=false)" ||
+        echo "luneos-device-config: WARNING: could not write $OUT"
+fi
+rm -f "$tmp"

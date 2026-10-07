@@ -42,8 +42,10 @@ NYX_MODULES_REQUIRED_HALIUM_NO_HAPTICS = "\
     NYXMOD_OW_SYSTEM;\
     NYXMOD_OW_TOUCHPANEL;\
 "
+# hammerhead-halium is not listed above: its vibrator is a kernel timed_output device, which the
+# generic haptics module drives. The hybris one calls libhardware_legacy's vibrator_exists(), which
+# the 16.0 GSI no longer exports.
 NYX_MODULES_REQUIRED:athene            = "${NYX_MODULES_REQUIRED_HALIUM_NO_HAPTICS}"
-NYX_MODULES_REQUIRED:hammerhead-halium = "${NYX_MODULES_REQUIRED_HALIUM_NO_HAPTICS}"
 NYX_MODULES_REQUIRED:mako              = "${NYX_MODULES_REQUIRED_HALIUM_NO_HAPTICS}"
 NYX_MODULES_REQUIRED:onyx              = "${NYX_MODULES_REQUIRED_HALIUM_NO_HAPTICS}"
 NYX_MODULES_REQUIRED:oxygen            = "${NYX_MODULES_REQUIRED_HALIUM_NO_HAPTICS}"
