@@ -22,6 +22,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 SRC_URI += " \
            file://0001-gallivm-check-ExecutionEngine-create-for-NULL-before-.patch \
            file://0002-gallivm-handle-a-failed-execution-engine-instead-of-a.patch \
+           file://0003-egl-dri2-do-not-strdup-a-NULL-device_name-when-binding-a-wayland-display.patch \
 "
 
 EXTRA_OEMESON:append:class-target = " -Dlegacy-wayland=bind-wayland-display"
