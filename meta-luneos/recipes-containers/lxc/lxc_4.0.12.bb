@@ -39,6 +39,7 @@ RDEPENDS:${PN}-networking += "iptables"
 SRC_URI = "http://linuxcontainers.org/downloads/${BPN}/${BPN}-${PV}.tar.gz \
 	file://lxc-1.0.0-disable-udhcp-from-busybox-template.patch \
 	file://0001-syscall_wrappers-use-kernel-struct-open_how.patch \
+	file://0002-terminal-treat-EINVAL-from-TIOCGPTPEER-like-ENOTTY.patch \
 	file://run-ptest \
 	file://lxc-fix-B-S.patch \
 	file://lxc-doc-upgrade-to-use-docbook-3.1-DTD.patch \
