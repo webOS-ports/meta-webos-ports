@@ -54,22 +54,16 @@ FILES:${PN} += "${webos_sysconfdir}/db \
                 ${webos_applicationsdir}/org.webosports.app.settings.backup \
                 ${webos_applicationsdir}/org.webosports.app.settings.battery \
                 ${webos_applicationsdir}/org.webosports.app.settings.bluetooth \
-                ${webos_applicationsdir}/org.webosports.app.settings.cellbroadcast \
                 ${webos_applicationsdir}/org.webosports.app.settings.certificate \
                 ${webos_applicationsdir}/org.webosports.app.settings.dateandtime \
                 ${webos_applicationsdir}/org.webosports.app.settings.deviceinfo \
                 ${webos_applicationsdir}/org.webosports.app.settings.devmodeswitcher \
                 ${webos_applicationsdir}/org.webosports.app.settings.display \
                 ${webos_applicationsdir}/org.webosports.app.settings.encryption \
-                ${webos_applicationsdir}/org.webosports.app.settings.esim \
                 ${webos_applicationsdir}/org.webosports.app.settings.exhibitionpreferences \
-                ${webos_applicationsdir}/org.webosports.app.settings.faceunlock \
-                ${webos_applicationsdir}/org.webosports.app.settings.fingerprint \
                 ${webos_applicationsdir}/org.webosports.app.settings.help \
                 ${webos_applicationsdir}/org.webosports.app.settings.languagepicker \
                 ${webos_applicationsdir}/org.webosports.app.settings.location \
-                ${webos_applicationsdir}/org.webosports.app.settings.networksettings \
-                ${webos_applicationsdir}/org.webosports.app.settings.nfc \
                 ${webos_applicationsdir}/org.webosports.app.settings.notifications \
                 ${webos_applicationsdir}/org.webosports.app.settings.printmanager \
                 ${webos_applicationsdir}/org.webosports.app.settings.screenlock \
@@ -88,3 +82,32 @@ FILES:${PN} += "${webos_sysconfdir}/db \
 RDEPENDS:${PN} = " \
     qtdeclarative-qmlplugins \
 "
+
+# The panels of hardware a machine may not have are packages of their own, so that a machine that lacks the
+# hardware does not get a settings page for it (the Galaxy Tab Pro 10.1 had NFC and Fingerprint panels with
+# neither). packagegroup-luneos-extended adds each one with the stack it belongs to, which is decided by
+# MACHINE_FEATURES: nfc, fingerprint, esim, a front camera for face unlock, and phone (a modem) for
+# cell broadcast and the cellular network settings.
+PACKAGES =+ "${PN}-nfc ${PN}-fingerprint ${PN}-esim ${PN}-faceunlock ${PN}-cellbroadcast ${PN}-networksettings"
+FILES:${PN}-nfc = "${webos_applicationsdir}/org.webosports.app.settings.nfc"
+FILES:${PN}-fingerprint = "${webos_applicationsdir}/org.webosports.app.settings.fingerprint"
+FILES:${PN}-esim = "${webos_applicationsdir}/org.webosports.app.settings.esim"
+FILES:${PN}-faceunlock = "${webos_applicationsdir}/org.webosports.app.settings.faceunlock"
+FILES:${PN}-cellbroadcast = "${webos_applicationsdir}/org.webosports.app.settings.cellbroadcast"
+# "Network Settings" is the cellular page: mobile data, roaming, APNs and the SIMs.
+FILES:${PN}-networksettings = "${webos_applicationsdir}/org.webosports.app.settings.networksettings"
+# The fingerprint and face unlock apps are still removed on the architectures where their stacks do not
+# exist (see the REMOVE_* commands above); the package is then empty, and an empty package that a package
+# group asks for must still exist.
+ALLOW_EMPTY:${PN}-nfc = "1"
+ALLOW_EMPTY:${PN}-fingerprint = "1"
+ALLOW_EMPTY:${PN}-esim = "1"
+ALLOW_EMPTY:${PN}-faceunlock = "1"
+ALLOW_EMPTY:${PN}-cellbroadcast = "1"
+ALLOW_EMPTY:${PN}-networksettings = "1"
+RDEPENDS:${PN}-nfc = "${PN}"
+RDEPENDS:${PN}-fingerprint = "${PN}"
+RDEPENDS:${PN}-esim = "${PN}"
+RDEPENDS:${PN}-faceunlock = "${PN}"
+RDEPENDS:${PN}-cellbroadcast = "${PN}"
+RDEPENDS:${PN}-networksettings = "${PN}"
