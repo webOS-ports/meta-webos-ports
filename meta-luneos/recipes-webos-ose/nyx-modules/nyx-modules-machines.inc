@@ -52,6 +52,23 @@ NYX_MODULES_REQUIRED:onyx              = "${NYX_MODULES_REQUIRED_HALIUM_NO_HAPTI
 NYX_MODULES_REQUIRED:oxygen            = "${NYX_MODULES_REQUIRED_HALIUM_NO_HAPTICS}"
 NYX_MODULES_REQUIRED:sagit             = "${NYX_MODULES_REQUIRED_HALIUM_NO_HAPTICS}"
 
+# The HP TouchPad's light sensor (isl29023) has no Android sensors HAL, only its 3.4 kernel driver's lux
+# attribute, which the generic als module reads; without the module the display manager had no lux to set
+# the backlight from.
+NYX_MODULES_REQUIRED:tenderloin-halium = "\
+    NYXMOD_OW_ALS;\
+    NYXMOD_OW_BATTERY;\
+    NYXMOD_OW_CHARGER;\
+    NYXMOD_OW_DISPLAY;\
+    NYXMOD_OW_HAPTICS;\
+    NYXMOD_OW_KEYS;\
+    NYXMOD_OW_LED;\
+    NYXMOD_OW_MSMMTP;\
+    NYXMOD_OW_OSINFO;\
+    NYXMOD_OW_SYSTEM;\
+    NYXMOD_OW_TOUCHPANEL;\
+"
+
 NYX_MODULES_REQUIRED:rpi = "\
     NYXMOD_OW_DEVICEINFO;\
     NYXMOD_OW_DISPLAY;\
