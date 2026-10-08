@@ -21,6 +21,7 @@ inherit systemd
 # "CC ?= $(CROSS_COMPILE)gcc" (8398480), so the environment CC is already honored.
 SRC_URI = "git://github.com/mer-hybris/bluebinder.git;branch=master;protocol=https \
            file://0003-bluebinder-set-under-reported-supported-commands.patch \
+           file://0004-bluebinder_post-read-the-address-file-through-the-co.patch \
 "
 SRC_URI:append:tissot-halium = " file://0002-service-load-after-wifi-module-load.patch"
 
