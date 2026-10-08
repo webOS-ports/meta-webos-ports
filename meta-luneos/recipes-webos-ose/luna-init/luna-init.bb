@@ -12,9 +12,10 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "tzdata python3-pytz-native"
 
-SRCREV = "5aef28572bf422a90c9996b60ffe9a108705d7f9"
+SRCREV = "39d6be09cffbc490a1004048b1ca6ac1b08b0499"
+WEBOS_GIT_PARAM_BRANCH = "herrie/atlas-handlers"
 
-PR = "r23"
+PR = "r24"
 
 inherit webos_arch_indep
 inherit webos_ports_ose_repo

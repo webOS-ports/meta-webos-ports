@@ -260,6 +260,12 @@ do_install() {
         sed -i '/--enable-file-cookies\\/a\  --enable-speech-dispatcher\\' \
             ${D}${BROWSERSHELL_APPLICATION_DIR}/run_browser_shell
 
+        # pdf.js ships on its own as com.webos.app.enactbrowser-pdfjs, without the
+        # Enact browser it came from; follow it to where that recipe installs it.
+        sed -i 's|--load-extension="/usr/palm/applications/com.webos.app.enactbrowser/pdf.js"|--load-extension="${datadir}/browser-shell/pdf.js"|' \
+            ${D}${BROWSERSHELL_APPLICATION_DIR}/run_browser_shell
+        grep -q -- '--load-extension="${datadir}/browser-shell/pdf.js"' ${D}${BROWSERSHELL_APPLICATION_DIR}/run_browser_shell
+
         ln -f ${D}${CBE_DATA_PATH}/snapshot_blob.bin ${D}${BROWSERSHELL_APPLICATION_DIR}/snapshot_blob.bin
     else
         install -d ${D}${APP_SHELL_RUNTIME_DIR}
