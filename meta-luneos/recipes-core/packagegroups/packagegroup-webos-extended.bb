@@ -20,17 +20,16 @@ VIRTUAL-RUNTIME_surface-manager-extension ?= ""
 VIRTUAL-RUNTIME_webos-ime ?= ""
 VIRTUAL-RUNTIME_novacomd ?= "novacomd"
 VIRTUAL-RUNTIME_com.webos.app.browser ?= "org.webosports.app.atlas"
-VIRTUAL-RUNTIME_com.webos.app.camera ?= "com.webos.app.camera"
-# com.webos.app.camera above talks to luna://com.webos.service.camera2, so the
-# service ships wherever the app does. It is not Halium-only: the package carries
+# com.webos.service.camera (luna://com.webos.service.camera2) serves the
+# webruntime camera block behind WebRTC getUserMedia, so com.webos.app.videocall
+# needs it. It is not Halium-only: the package carries
 # both HAL plugins - libhal-droid, which reaches droidcamsrc, and libhal-v4l2 for
 # /dev/video* - and finds the latter's devices through VIRTUAL-RUNTIME_pdm below.
 # Nothing pulls it in on its own (g-camera-pipeline only build-depends on it, and
-# the service is a daemon so no shlib scan generates one), which is how images
-# shipped the app with no service behind it and every call failed with "Service
-# does not exist: com.webos.service.camera2."
+# the service is a daemon so no shlib scan generates one), so it is listed here.
+# LG's com.webos.app.camera is not shipped; org.webosports.app.camera is the
+# camera app, from packagegroup-luneos-extended.
 VIRTUAL-RUNTIME_com.webos.service.camera ?= "com.webos.service.camera"
-VIRTUAL-RUNTIME_com.webos.app.mediagallery ?= "com.webos.app.mediagallery"
 VIRTUAL-RUNTIME_com.webos.app.notification ?= "com.webos.app.notification"
 VIRTUAL-RUNTIME_com.webos.app.statusbar ?= "com.webos.app.statusbar"
 VIRTUAL-RUNTIME_com.webos.app.volume ?= "com.webos.app.volume"
@@ -63,11 +62,6 @@ VIRTUAL-RUNTIME_unifiedsearch ?= "luna-applauncher luna-universalsearchmgr"
 #
 
 WEBOS_PACKAGESET_TESTAPPS = " \
-    bareapp \
-    com.webos.app.test.enact \
-    com.webos.app.test.v8snapshot \
-    com.webos.app.test.webosose \
-    com.webos.app.test.webrtc \
     com.webos.app.test.youtube \
 "
 
@@ -131,9 +125,6 @@ WEBOS_PACKAGESET_UI = " \
 "
 
 WEBOS_PACKAGESET_ENACTAPPS = " \
-    com.webos.app.imageviewer \
-    ${VIRTUAL-RUNTIME_com.webos.app.mediagallery} \
-    com.webos.app.videoplayer \
     com.webos.app.videocall \
 "
 
@@ -145,7 +136,6 @@ WEBOS_PACKAGESET_MEDIA = " \
     gstreamer1.0-plugins-good \
     gstreamer1.0-plugins-ugly \
     ${VIRTUAL-RUNTIME_umediaserver} \
-    com.webos.app.videoplayer \
     ${VIRTUAL-RUNTIME_com.webos.service.mediacontroller} \
     ${VIRTUAL-RUNTIME_mediarecorder} \
     com.webos.service.mediaindexer \
@@ -159,7 +149,6 @@ WEBOS_PACKAGESET_MEDIA = " \
 RDEPENDS:${PN} = " \
     activitymanager \
     ${@bb.utils.contains('DISTRO_FEATURES', 'smack', 'attr smack com.webos.app.test.smack.native', '', d)} \
-    ${VIRTUAL-RUNTIME_com.webos.app.camera} \
     ${VIRTUAL-RUNTIME_com.webos.service.camera} \
     ${VIRTUAL-RUNTIME_com.webos.app.home} \
     ${VIRTUAL-RUNTIME_g-camera-pipeline} \
@@ -205,7 +194,6 @@ RDEPENDS:${PN} = " \
     ${VIRTUAL-RUNTIME_appinstalld} \
     ${VIRTUAL-RUNTIME_event-monitor-network} \
     ${VIRTUAL-RUNTIME_com.webos.app.browser} \
-    ${VIRTUAL-RUNTIME_com.webos.app.mediagallery} \
     ${VIRTUAL-RUNTIME_com.webos.app.notification} \
     ${VIRTUAL-RUNTIME_com.webos.app.volume} \
     ${VIRTUAL-RUNTIME_com.webos.service.intent} \
