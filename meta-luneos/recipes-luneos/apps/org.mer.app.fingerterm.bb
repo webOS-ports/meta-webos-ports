@@ -4,14 +4,15 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263"
 
 SPV = "1.3.6"
 PV = "${SPV}+git"
-SRCREV = "4cfd21a3dbc83bac707828745ffdf0ebe5af768a"
+SRCREV = "17f371ad2147d537ffa4559a5453794cd32c7d36"
+WEBOS_REPO_NAME = "fingerterm"
+WEBOS_GIT_PARAM_BRANCH = "herrie/qt6"
 
 DEPENDS = "qtbase qtdeclarative qttools-native qt5compat"
 RDEPENDS:${PN} = "ttf-liberation-mono"
 
 SRC_URI = " \
-    git://github.com/herrie82/fingerterm-1.git;protocol=https;branch=herrie/qt6 \
-    file://0001-terminal-make-ch_ESC-constexpr.patch \
+    ${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     file://appinfo.json \
 "
 
