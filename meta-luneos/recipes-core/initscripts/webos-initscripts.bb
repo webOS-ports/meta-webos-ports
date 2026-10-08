@@ -19,20 +19,18 @@ RDEPENDS:${PN} = "${VIRTUAL-RUNTIME_init_manager} ${VIRTUAL-RUNTIME_bash} python
 PROVIDES = "initscripts"
 RPROVIDES:${PN} = "initscripts initd-functions"
 
-SRCREV = "00e94529e71473002228b29f6bc91ceb89a6ec38"
+SRCREV = "bdefbe71c145320a3054da1aeee6e6a6535cc7bd"
+WEBOS_GIT_PARAM_BRANCH = "herrie/fold-patches-drop-intent"
 
 PV = "3.0.0-103"
 
-PR = "r21"
+PR = "r22"
 
 inherit webos_component
 inherit webos_ports_ose_repo
 inherit webos_cmake
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-SRC_URI += "file://0001-zram-on-do-not-loop-for-ever-on-a-kernel-without-managed.patch \
-    file://0002-swap-on-give-zram-priority-over-disk-swap.patch \
-"
 
 #EXTRA_OECMAKE += "-DWEBOS_QTTESTABILITY_ENABLED:BOOL=${@ '1' if d.getVar('WEBOS_DISTRO_PRERELEASE') != '' else '0'}"
 

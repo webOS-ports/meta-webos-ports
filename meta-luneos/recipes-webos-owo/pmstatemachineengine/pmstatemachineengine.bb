@@ -9,8 +9,9 @@ DEPENDS = "pmloglib"
 
 PV = "2.0.0-14+git"
 
-SRCREV = "ffba7faa9b768027021f0670d41a93e26a318900"
-PR = "r1"
+SRCREV = "000e8c8b24748fd0023ac50528a450f52e429c63"
+WEBOS_GIT_PARAM_BRANCH = "herrie/fold-patches"
+PR = "r2"
 
 inherit webos_ports_fork_repo
 inherit webos_cmake
@@ -18,4 +19,3 @@ inherit pkgconfig
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
-SRC_URI += "file://0001-Disable-using-a-version-script-as-its-causing-us-rig.patch"
