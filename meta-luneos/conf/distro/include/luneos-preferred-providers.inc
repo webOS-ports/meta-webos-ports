@@ -76,12 +76,6 @@ PREFERRED_RPROVIDER_ssh = "openssh"
 # supporting sysvinit compatibility")
 VIRTUAL-RUNTIME_init_manager = "systemd systemd-machine-units"
 
-# node-red can no longer be built: bitbake disabled the npmsw fetcher
-# ("security issues and no maintainer"), which node-red's shrinkwrap
-# SRC_URI depends on. Drop it from the image until the recipe is
-# reworked to fetch another way.
-VIRTUAL-RUNTIME_nodejs-module-node-red = ""
-
 # With upstart we don't need update-rc.d, as bonus fixes following avahi issue for us:
 # http://lists.openembedded.org/pipermail/openembedded-core/2013-November/086901.html
 BAD_RECOMMENDATIONS += "update-rc.d"
