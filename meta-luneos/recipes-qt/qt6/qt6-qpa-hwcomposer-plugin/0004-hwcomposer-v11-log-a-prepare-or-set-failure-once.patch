@@ -1,0 +1,55 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 8 Oct 2026 16:25:40 +0200
+Subject: [PATCH] hwcomposer: v11: log a prepare or set failure once, not per frame
+
+HWC_PLUGIN_EXPECT_ZERO logged every failing prepare() and set(), so a
+module that fails one of them on every frame wrote a journal line per
+frame. Qualcomm's display-caf HWC for msm8960, which the HP TouchPad's
+msm8660 uses, does: hwc_set() walks the display list up to and including
+numDisplays, the entry past the end lands in its "-EINVAL" default case,
+and as the last one it decides the return value, although the primary
+display was drawn and committed. On the TouchPad that was up to a dozen
+"err in present returned -22" lines a second.
+
+Log a failure when its code first shows up and again only when it
+changes.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+--- a/hwcomposer_backend_v11.cpp
++++ b/hwcomposer_backend_v11.cpp
+@@ -155,14 +155,31 @@
+ 
+     QPA_HWC_TIMING_SAMPLE(syncTime);
+ 
++    /*
++     * A failure is logged when it first shows up, not for every frame. Some modules fail every
++     * set without anything being wrong: Qualcomm's display-caf HWC for msm8960 (the HP TouchPad's
++     * msm8660 uses it) walks the display list up to and including numDisplays, and the entry past
++     * the end ends in its "-EINVAL" default case after the primary display has been committed.
++     * Logged per frame, that was up to a dozen journal lines a second.
++     */
++    static int lastPrepareErr = 0, lastSetErr = 0;
++
+     int err = hwcdevice->prepare(hwcdevice, num_displays, mlist);
+-    HWC_PLUGIN_EXPECT_ZERO(err);
++    if (err != lastPrepareErr) {
++        if (err != 0)
++            qWarning("QPA-HWC: prepare returned %i (logged again only when it changes)", err);
++        lastPrepareErr = err;
++    }
+ 
+     QPA_HWC_TIMING_SAMPLE(prepareTime);
+ 
+     QSystrace::begin("graphics", "QPA::set", "");
+     err = hwcdevice->set(hwcdevice, num_displays, mlist);
+-    HWC_PLUGIN_EXPECT_ZERO(err);
++    if (err != lastSetErr) {
++        if (err != 0)
++            qWarning("QPA-HWC: set returned %i (logged again only when it changes)", err);
++        lastSetErr = err;
++    }
+     QSystrace::end("graphics", "QPA::set", "");
+ 
+     QPA_HWC_TIMING_SAMPLE(setTime);

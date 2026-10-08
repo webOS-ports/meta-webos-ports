@@ -21,6 +21,7 @@ SRC_URI = " \
     file://0001-Follow-Qt-s-qgenericunixtheme_p.h-rename.patch \
     file://0002-hwcomposer-always-pass-the-buffer-to-set_client_targe.patch \
     file://0003-hwcomposer-do-not-render-while-the-display-is-off.patch \
+    file://0004-hwcomposer-v11-log-a-prepare-or-set-failure-once.patch \
 "
 S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/hwcomposer"
 
