@@ -465,7 +465,3 @@ QEMU_RDEPENDS = " \
 
 RDEPENDS:${PN}:append:qemux86 = " ${QEMU_RDEPENDS}"
 RDEPENDS:${PN}:append:qemux86-64 = " ${QEMU_RDEPENDS}"
-
-RDEPENDS:${PN}:append:arm = " \
-    crash-handler \
-"
