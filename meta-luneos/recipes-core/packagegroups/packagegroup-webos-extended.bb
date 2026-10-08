@@ -40,11 +40,7 @@ VIRTUAL-RUNTIME_ai ?= "com.webos.service.ai"
 VIRTUAL-RUNTIME_memorymanager ?= "com.webos.service.memorymanager"
 VIRTUAL-RUNTIME_g-media-pipeline ?= "g-media-pipeline"
 VIRTUAL-RUNTIME_g-camera-pipeline ?= "g-camera-pipeline"
-VIRTUAL-RUNTIME_nodejs-module-node-red ?= "node-red"
-VIRTUAL-RUNTIME_contextintentmgr ?= "com.webos.service.contextintentmgr"
 VIRTUAL-RUNTIME_mojoservicelauncher ?= "mojoservicelauncher"
-VIRTUAL-RUNTIME_com.webos.service.flowmanager ?= "com.webos.service.flowmanager"
-VIRTUAL-RUNTIME_com.webos.service.intent ?= "com.webos.service.intent"
 VIRTUAL-RUNTIME_tts ?= "com.webos.service.tts"
 VIRTUAL-RUNTIME_com.webos.service.mediacontroller ?= "com.webos.service.mediacontroller"
 VIRTUAL-RUNTIME_umediaserver ?= "umediaserver"
@@ -196,12 +192,10 @@ RDEPENDS:${PN} = " \
     ${VIRTUAL-RUNTIME_com.webos.app.browser} \
     ${VIRTUAL-RUNTIME_com.webos.app.notification} \
     ${VIRTUAL-RUNTIME_com.webos.app.volume} \
-    ${VIRTUAL-RUNTIME_com.webos.service.intent} \
     ${VIRTUAL-RUNTIME_memorymanager} \
     ${VIRTUAL-RUNTIME_mojoservicelauncher} \
     ${VIRTUAL-RUNTIME_tts} \
     ${VIRTUAL-RUNTIME_com.webos.service.location} \
-    ${VIRTUAL-RUNTIME_nodejs-module-node-red} \
     ${WEBOS_PACKAGESET_TZDATA} \
     ${WEBOS_FOSS_MISSING_FROM_RDEPENDS} \
     ${WEBOS_PACKAGESET_SYSTEMAPPS} \
