@@ -1,0 +1,96 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 8 Oct 2026 13:52:49 +0200
+Subject: [PATCH] hwcomposer: do not render while the display is off
+
+With the display off, requestUpdate() handed every window update to Qt's
+own timer, so the scene graph went on rendering at the refresh rate, and
+swapToWindow() then dropped each frame without eglSwapBuffers, logging
+"Swap requested while display is off" for every one of them.
+
+That is wasted CPU, and on drivers that submit a frame's commands only on
+eglSwapBuffers it is a leak: the Adreno 220 driver of the HP TouchPad kept
+every dropped frame's 64 KB command buffers. After an hour or two with the
+display off surface-manager held about 2800 GPU allocations, 216 MB, and
+had no GPU address space left ("kgsl_mmu_get_gpuaddr: gen_pool_alloc
+failed"); the first frame after the display came back on crashed its
+render thread with a SIGSEGV, and the screen stayed dark until the
+compositor had restarted.
+
+While the display is off, keep the update as pending instead: sleepDisplay
+(false) already delivers pending updates once the display is on again. A
+frame that is rendered anyway is flushed, so its commands still reach the
+GPU, and the warning is logged once.
+
+On the TouchPad, a minute with the display off now leaves the compositor's
+GPU allocations and CPU time where they were, and the first frame after
+power-on reaches the panel 0.17 s after it is powered.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+--- a/hwcomposer_backend_v11.cpp
++++ b/hwcomposer_backend_v11.cpp
+@@ -517,9 +517,13 @@
+ 
+ bool HwComposerBackend_v11::requestUpdate(QEglFSWindow *window)
+ {
+-    // If the display is off, do updates via the normal Qt-based timer.
+-    if (m_displayOff)
+-        return false;
++    // While the display is off, keep the window's update for when it comes back on (sleepDisplay(false)
++    // delivers it) instead of handing it to Qt's timer, which went on rendering frames at the refresh
++    // rate that nobody could see.
++    if (m_displayOff) {
++        m_pendingUpdate.insert(window->window());
++        return true;
++    }
+ 
+     if (m_vsyncTimeout.isActive()) {
+         m_vsyncTimeout.stop();
+--- a/hwcomposer_backend_v20.cpp
++++ b/hwcomposer_backend_v20.cpp
+@@ -467,9 +467,13 @@
+ 
+ bool HwComposerBackend_v20::requestUpdate(QEglFSWindow *window)
+ {
+-    // If the display is off, do updates via the normal Qt-based timer.
+-    if (m_displayOff)
+-        return false;
++    // While the display is off, keep the window's update for when it comes back on (sleepDisplay(false)
++    // delivers it) instead of handing it to Qt's timer, which went on rendering frames at the refresh
++    // rate that nobody could see.
++    if (m_displayOff) {
++        m_pendingUpdate.insert(window->window());
++        return true;
++    }
+ 
+     if (m_vsyncTimeout.isActive()) {
+         m_vsyncTimeout.stop();
+--- a/hwcomposer_context.cpp
++++ b/hwcomposer_context.cpp
+@@ -51,6 +51,7 @@
+ #include "hwcomposer_backend.h"
+ 
+ #include <qcoreapplication.h>
++#include <GLES2/gl2.h>
+ 
+ QT_BEGIN_NAMESPACE
+ 
+@@ -138,7 +139,16 @@
+ void HwComposerContext::swapToWindow(QEglFSContext *context, QPlatformSurface *surface)
+ {
+     if (display_off) {
+-        qWarning("Swap requested while display is off");
++        // A frame rendered anyway is not presented, but its commands must still go to the GPU: drivers
++        // that submit them only on eglSwapBuffers (Adreno 2xx) otherwise keep every such frame's
++        // command buffers, until the process runs out of GPU address space (the HP TouchPad's
++        // surface-manager died with a SIGSEGV on waking up after an hour or two with the display off).
++        static bool warned = false;
++        if (!warned) {
++            qWarning("Swap requested while display is off");
++            warned = true;
++        }
++        glFlush();
+         return;
+     }
+ 
