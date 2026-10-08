@@ -23,6 +23,7 @@ inherit systemd
 # the image - silently, because nothing failed.
 SRC_URI = " \
     file://luneos-device-config \
+    file://luneos-adaptation \
     file://luneos-device-config.service \
     file://generators \
     file://adaptations \
@@ -39,6 +40,7 @@ S = "${UNPACKDIR}"
 do_install() {
     install -d ${D}${bindir}
     install -m 0755 ${UNPACKDIR}/luneos-device-config ${D}${bindir}
+    install -m 0755 ${UNPACKDIR}/luneos-adaptation ${D}${bindir}
 
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${UNPACKDIR}/luneos-device-config.service ${D}${systemd_unitdir}/system
