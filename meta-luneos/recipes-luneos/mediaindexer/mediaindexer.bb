@@ -8,7 +8,9 @@ DEPENDS += "db8 glib-2.0 luna-service2 sqlite3 taglib qtbase luna-sysmgr-common"
 RDEPENDS:${PN} += "shared-mime-info"
 
 PV = "0.1.0-14+git"
-SRCREV = "f9784494312c961c25b870f7fc7083492ea9f0e1"
+SRCREV = "e23718ffa1813677edb77476343b78fe56cf20dc"
+WEBOS_GIT_PARAM_BRANCH = "herrie/fold-patches"
+PR = "r1"
 
 inherit webos_ports_repo
 inherit webos_system_bus
@@ -20,9 +22,7 @@ inherit pkgconfig
 
 LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
-    file://0001-Fix-build-with-gcc-13.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 do_install:append() {
     install -d ${D}${webos_sysconfdir}/db/kinds

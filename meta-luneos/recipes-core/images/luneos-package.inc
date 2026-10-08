@@ -23,14 +23,11 @@ inherit webos_ports_repo kernel-artifact-names deploy nopackages
 LK2ND_BOOT_IMAGE_OFFSET ?= "1M"
 
 PV = "1.0.3+git"
-SRCREV = "b69bf00f602138628521184b7f6d0773736d5f8b"
+SRCREV = "de4d5dfbbe318f3f00c61857fe8a16dbdde83d30"
+WEBOS_GIT_PARAM_BRANCH = "herrie/fold-patches"
 
 WEBOS_REPO_NAME = "android-update-package"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-
-# webos_deploy.sh runs busybox-static to extract the rootfs, which does not work
-# on a recovery with an old kernel (TWRP on a 3.4 kernel), so make it fall back.
-SRC_URI += "file://0001-webos_deploy-fall-back-to-the-recovery-s-busybox.patch"
 
 do_deploy() {
     IMG="${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}-${MACHINE}${IMAGE_NAME_SUFFIX}.tar.gz"

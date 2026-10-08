@@ -16,13 +16,11 @@ LIC_FILES_CHKSUM = " \
 inherit webos_ports_ose_repo
 
 PV = "1.0.0-2+git"
-SRCREV = "18417a723b9a8e72d3e9eee00a6061364b02b290"
+SRCREV = "595e7aa26554ff0f808cf7f1097faccbba1299b9"
+WEBOS_GIT_PARAM_BRANCH = "herrie/fold-patches"
+PR = "r1"
 
-FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
-
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
-    file://0001-base-stop-shipping-a-made-up-compositor-geometry.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 

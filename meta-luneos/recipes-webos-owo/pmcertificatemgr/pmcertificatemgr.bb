@@ -10,7 +10,8 @@ DEPENDS = "openssl glib-2.0"
 RDEPENDS:${PN} = "ca-certificates"
 
 PV = "2.0.0-30+git"
-SRCREV = "1cbeaeda8e2b4b2d8f122fb33d80c18413479e06"
+SRCREV = "33948af730fe58755d8824ce08a49ffb17e95bb7"
+WEBOS_GIT_PARAM_BRANCH = "herrie/fold-patches"
 
 inherit webos_ports_repo
 inherit webos_cmake
@@ -21,9 +22,7 @@ ALTERNATIVE:${PN} = "openssl-cnf2"
 ALTERNATIVE_LINK_NAME[openssl-cnf2] = "${sysconfdir}/ssl/openssl.cnf"
 ALTERNATIVE_PRIORITY[openssl-cnf2] ?= "10"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
-    file://0001-cert-Fix-build-with-OpenSSL-4.0.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 do_install:append() {
     # We ship our own modified openssl configuration and as long as the
