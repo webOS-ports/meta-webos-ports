@@ -1,0 +1,73 @@
+#!/bin/sh
+# Which device is this, and which of the adaptations under
+# /usr/share/luneos/adaptations is its own?
+#
+#   luneos-adaptation             path of this device's deviceinfo, or nothing
+#   luneos-adaptation --codename  the codename, "unknown" if none can be found
+#
+# A rootfs carries the adaptations of every device the distribution knows, so
+# that one image can boot on several of them (the halium-arm64 rootfs runs on
+# sargo, sunfish and bramble). Anything that wants a deviceinfo value has to pick
+# the right one, and the same way luneos-device-config does: sourcing them all
+# lets whichever sorts last win, which is how n2awifi's Android skip list ended
+# up replacing every other device's in start-android-hals.sh. This is the one
+# place that answers the question.
+#
+# Works before luneos-device-config has run (start-android-hals.sh needs it while
+# android-system.service is still starting, and luneos-device-config is ordered
+# after that service), as long as the container's properties can be read.
+
+set -u
+
+ADAPT_ROOT=/usr/share/luneos/adaptations
+GETPROP=/android/system/bin/getprop
+
+prop() { [ -x "$GETPROP" ] && "$GETPROP" "$1" 2>/dev/null || echo ""; }
+
+# The vendor's own idea of the device is the one that matters: on a GSI,
+# ro.product.device is the GSI's (halium_arm64), not the phone's.
+codename=$(prop ro.product.vendor.device)
+[ -n "$codename" ] || codename=$(prop ro.vendor.product.device)
+[ -n "$codename" ] || codename=$(prop ro.product.device)
+
+# There is no container on a mainline device, so every property above is empty
+# and the codename fell all the way through to "unknown" - which meant Tier 1 was
+# unreachable on rosy, mido, tissot, hammerhead, tenderloin, the PinePhones and
+# the Pis. An adaptation directory for any of them could never have been found,
+# and the log said so on every boot: "no adaptation for 'unknown'".
+#
+# The kernel knows perfectly well which device it is. The first entry of the
+# device tree's compatible list is the most specific one and is exactly the
+# vendor/codename pair we want:
+#
+#   xiaomi,rosy        qcom,msm8953        -> rosy
+#   xiaomi,tissot      qcom,msm8953        -> tissot
+#   xiaomi,mido        qcom,msm8953        -> mido
+#   lge,hammerhead     qcom,msm8974        -> hammerhead
+#   pine64,pinephone-pro rockchip,rk3399   -> pinephone-pro
+#
+# The property is a NUL-separated list of strings, so cut at the first NUL and
+# then take the part after the comma. Note the codename is the *device tree's*
+# name for the device and need not equal the Yocto MACHINE - pinephone-pro is
+# built as pinephonepro - so an adaptation directory is named for what this
+# derives, which is the name the device reports for itself.
+if [ -z "$codename" ] && [ -r /proc/device-tree/compatible ]; then
+    _compat=$(tr '\0' '\n' < /proc/device-tree/compatible 2>/dev/null | head -n1)
+    case "$_compat" in
+        *,*) codename=${_compat#*,} ;;
+    esac
+fi
+
+[ -n "$codename" ] || codename=unknown
+
+case "${1:-}" in
+    --codename)
+        echo "$codename" ;;
+    "")
+        [ -f "$ADAPT_ROOT/$codename/deviceinfo" ] && echo "$ADAPT_ROOT/$codename/deviceinfo"
+        ;;
+    *)
+        echo "usage: luneos-adaptation [--codename]" >&2
+        exit 2 ;;
+esac
+exit 0
