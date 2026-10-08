@@ -10,7 +10,7 @@ LIC_FILES_CHKSUM = " \
 "
 
 WEBOS_VERSION = "1.0.0-17.browsershell.15_b9eab572b47b35018320bd6512a20d6cf8412ffe"
-PR = "r27"
+PR = "r28"
 
 inherit webos_public_repo
 inherit webos_enhanced_submissions
@@ -112,6 +112,19 @@ do_install:append() {
     install -m 0644 ${UNPACKDIR}/icon.png ${D}${APP_PATH}/icon.png
     install -m 0644 ${UNPACKDIR}/icon-256x256.png ${D}${APP_PATH}/icon-256x256.png
 }
+
+# LuneOS ships only pdf.js from this recipe, not the browser: run_browser_shell
+# loads it as a Chromium extension for every browser-shell app, Atlas included
+# (see webruntime.inc). Move it out of the app directory so it can be installed
+# without the app; the path must match the --load-extension there.
+do_install:append() {
+    install -d ${D}${datadir}/browser-shell
+    mv ${D}${webos_applicationsdir}/${WEBOS_ENACTJS_APP_ID}/pdf.js ${D}${datadir}/browser-shell/pdf.js
+}
+
+PACKAGES =+ "${PN}-pdfjs"
+FILES:${PN}-pdfjs = "${datadir}/browser-shell/pdf.js"
+RDEPENDS:${PN} += "${PN}-pdfjs"
 
 FILES:${PN} += "${webos_applicationsdir}"
 

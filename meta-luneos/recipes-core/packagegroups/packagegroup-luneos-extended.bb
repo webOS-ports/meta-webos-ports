@@ -18,9 +18,9 @@ VIRTUAL-RUNTIME_settingsapp ?= "org.webosports.app.settings-qml"
 VIRTUAL-RUNTIME_speech_synthesis ?= "speech-dispatcher"
 
 # Atlas is the default browser (VIRTUAL-RUNTIME_com.webos.app.browser) and is also listed below, so it
-# ships whichever browser is default. enactbrowser stays installed because run_browser_shell loads its
-# pdf.js as a Chromium extension for EVERY browsershell app — drop that package and Atlas loses
-# in-browser PDF as well.
+# ships whichever browser is default. The Enact browser is not shipped, but its pdf.js is:
+# run_browser_shell loads it as a Chromium extension for EVERY browsershell app, so without
+# com.webos.app.enactbrowser-pdfjs Atlas loses in-browser PDF.
 
 # ttf-noto-emoji-color: nothing in the image could draw a codepoint above
 # U+FFFF, so every emoji was a tofu box. 9.5MB, and it serves Chromium apps, QML
@@ -70,7 +70,7 @@ RDEPENDS:${PN} = " \
   com.palm.app.preware2 \
   org.webosports.service.ipkg \
   ${TORCH_RDEPENDS} \
-  com.webos.app.enactbrowser \
+  com.webos.app.enactbrowser-pdfjs \
   \
   ${VIRTUAL-RUNTIME_speech_synthesis} \
   \

@@ -16,7 +16,8 @@ RDEPENDS:${PN} += " \
 
 PV = "0.6-0+git"
 
-SRCREV = "5c55a8ea6280263469684291ab73277653c42d0b"
+SRCREV = "f29464801a0f599c984e8e30c7bd938a55076310"
+WEBOS_GIT_PARAM_BRANCH = "herrie/atlas-default"
 
 inherit webos_ports_repo
 inherit webos_cmake
