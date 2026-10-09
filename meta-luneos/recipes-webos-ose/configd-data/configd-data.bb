@@ -16,9 +16,8 @@ LIC_FILES_CHKSUM = " \
 inherit webos_ports_ose_repo
 
 PV = "1.0.0-2+git"
-SRCREV = "595e7aa26554ff0f808cf7f1097faccbba1299b9"
-WEBOS_GIT_PARAM_BRANCH = "herrie/fold-patches"
-PR = "r1"
+SRCREV = "50632e28100688651f8938c809c0a81719fdb626"
+PR = "r2"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 

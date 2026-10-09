@@ -2,9 +2,10 @@ SUMMARY = "FreeImage tool used by WhatsApp Purple"
 SECTION = "webos/support"
 
 #Due to issues with CRLF line endings in LibWebP now using our own fork, so we don't need to patch in OE which caused issues. In future we migth be able to go back to upstream 3.18.0 release directly for example.
-SRC_URI = "git://github.com/webos-ports/FreeImage;branch=herrie/gcc6-arm;protocol=https"
+SRC_URI = "git://github.com/webos-ports/FreeImage;branch=master;protocol=https"
 
-SRCREV = "c01653d6b12939877e79d2787d3695865e8b1ee3"
+SRCREV = "7531e316827a6c95d3a42a72394aa736879db9f0"
+PR = "r1"
 
 LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = " \
