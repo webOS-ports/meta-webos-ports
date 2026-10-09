@@ -52,7 +52,16 @@ if omx_up; then
         ::)                 NEW="${PLUGINDIR}" ;;
         *)                  NEW="${GST_PLUGIN_PATH}:${PLUGINDIR}" ;;
     esac
-    systemctl set-environment "GST_PLUGIN_PATH=${NEW}"
+    # A registry of their own for the processes that get the extended path. Units
+    # started before this point keep the default path, and both groups shared one
+    # registry file, so whichever loaded GStreamer next found it built for the
+    # other plugin set and rescanned everything: on the TouchPad gst-plugin-scan
+    # ran again and again through the 30 seconds after the UI came up, reading
+    # every plugin from flash while WebAppMgr was starting.
+    CACHE=$(systemctl show-environment 2>/dev/null | sed -n 's/^XDG_CACHE_HOME=//p')
+    [ -n "${CACHE}" ] || CACHE="${XDG_CACHE_HOME:-${HOME:-/root}/.cache}"
+    systemctl set-environment "GST_PLUGIN_PATH=${NEW}" \
+        "GST_REGISTRY=${CACHE}/gstreamer-1.0/registry-droid.bin"
     echo "gst-droid-gate: ${SERVICE} is registered, added ${PLUGINDIR} to GST_PLUGIN_PATH"
 else
     echo "gst-droid-gate: ${SERVICE} is not registered; leaving gst-droid out of the"
