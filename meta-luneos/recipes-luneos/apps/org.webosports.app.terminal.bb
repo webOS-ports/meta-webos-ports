@@ -3,7 +3,8 @@ LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=b234ee4d69f5fce4486a80fdaf4a4263"
 
 PV = "0.1+git"
-SRCREV = "3b13b9a4f543a1e3bf169fd8e4eed253b19012b5"
+SRCREV = "1133de53177b7250bfbaf8c2f1b28b1db3958caf"
+WEBOS_GIT_PARAM_BRANCH = "herrie/qt6-rework"
 
 DEPENDS = "qtbase qtdeclarative qtdeclarative-native"
 RDEPENDS:${PN} = "qmltermwidget "
