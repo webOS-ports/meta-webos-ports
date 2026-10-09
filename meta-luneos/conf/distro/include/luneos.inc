@@ -91,6 +91,26 @@ WEBOS_DEFAULT_EXTRA_RRECOMMENDS = ""
 DISTRO_EXTRA_RDEPENDS += " ${WEBOS_DEFAULT_EXTRA_RDEPENDS}"
 DISTRO_EXTRA_RRECOMMENDS += " ${WEBOS_DEFAULT_EXTRA_RRECOMMENDS}"
 
+# The boot-time hardware state dump, on every machine.
+#
+# It used to be opted into per machine, by the three Pine64 boards and the Mecha
+# Comet, which meant each new device had to remember. Nothing in it is
+# board-specific - it is generic sysfs (dwc3/UDC/gadget, Type-C and tcpm, extcon,
+# power supplies, DRM, regdb) and just as useful on a Halium device as a mainline
+# one, so the sensible default is everywhere.
+#
+# A recommendation rather than a dependency, so an image that does not want it
+# can drop it with BAD_RECOMMENDATIONS.
+#
+# Two things were fixed in the script before switching it on fleet-wide, both of
+# which would have hurt Halium devices specifically: it enabled dwc3 dynamic
+# debug unconditionally and never turned it off (now behind
+# LUNEOS_DIAG_DWC3_DEBUG=1), and the udev-triggered event dump appended without
+# limit, which on an Android kernel means growth for as long as a cable is in,
+# because power_supply "change" fires every few seconds while charging (now
+# capped at LUNEOS_DIAG_MAX_BYTES).
+DISTRO_EXTRA_RRECOMMENDS += " luneos-diag"
+
 DISTRO_EXTRA_RDEPENDS:append:qemuall = " kernel-module-vboxvideo kernel-module-vboxguest kernel-module-uvesafb kernel-module-virtio-gpu"
 # Our video.cfg asks for CONFIG_DRM_VMWGFX=m, but on the 64bit BSPs
 # yocto-kernel-cache's features/drm-bochs/drm-bochs-64.cfg is merged after it and
