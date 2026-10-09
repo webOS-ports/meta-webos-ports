@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=4641e94ec96f98fabc56ff9cc48be14b"
 # QMLTermWidget 2.0 (Qt 6 without Qt5Compat), with the webOS-ports audit
 # fixes and the install fix carried as commits
 PV = "2.0+git"
-SRCREV = "c001aae365eae37d0cde9d3945eefc09268fcb0b"
+SRCREV = "1b81f4b63610ccdc60b3f02db35847f84cc7ac35"
 
 DEPENDS = "qtbase qtdeclarative"
 RDEPENDS:${PN} = "ttf-liberation-mono"
