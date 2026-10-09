@@ -35,3 +35,14 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 FILES:${PN} += "${base_libdir}"
 EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
+
+# backup-log.service runs save-journald-logs.py on every shutdown: it dumps the whole boot's journal as
+# text into /var/log and tar.gz's /var/log into /var/spool/rdxd/previous_boot_logs.tar.gz for webOS's rdxd
+# crash reporter. LuneOS ships no rdxd, so nothing ever reads the result, and the journal is persistent
+# where the image keeps it (journalctl -b -1 has the previous boot). On the HP TouchPad it was the
+# longest step of a shutdown after normal uptime: 15.9 s, with the random-seed save slowed alongside it.
+do_install:append() {
+    rm -f ${D}${systemd_system_unitdir}/backup-log.service \
+          ${D}${systemd_system_unitdir}/multi-user.target.wants/backup-log.service \
+          ${D}${systemd_system_unitdir}/scripts/save-journald-logs.py
+}
