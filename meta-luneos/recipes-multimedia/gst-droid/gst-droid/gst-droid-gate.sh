@@ -62,6 +62,12 @@ if omx_up; then
     [ -n "${CACHE}" ] || CACHE="${XDG_CACHE_HOME:-${HOME:-/root}/.cache}"
     systemctl set-environment "GST_PLUGIN_PATH=${NEW}" \
         "GST_REGISTRY=${CACHE}/gstreamer-1.0/registry-droid.bin"
+    # GStreamer writes its registry 0600, and XDG_CACHE_HOME is the same root-owned directory for
+    # every user, so the media services (umediaserver, mediaindexer, mediacontroller and each
+    # g-media-pipeline, all running as "media") could neither read it nor write their own: every
+    # one of them rescanned every plugin in memory each time it started. A valid registry only has
+    # to be readable to be used; nothing in it is private.
+    chmod 0644 "${CACHE}"/gstreamer-1.0/registry*.bin 2>/dev/null
     echo "gst-droid-gate: ${SERVICE} is registered, added ${PLUGINDIR} to GST_PLUGIN_PATH"
 else
     echo "gst-droid-gate: ${SERVICE} is not registered; leaving gst-droid out of the"
