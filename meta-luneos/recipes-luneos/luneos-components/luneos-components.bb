@@ -4,9 +4,14 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 PV = "0.5+git"
 
-SRCREV = "64a8550d50acfe04ffc3166441825df0e6bc0a07"
+# herrie/settings-display-size-from-screen: master plus three commits with no PR yet - the camera
+# queues the video of a hardware recording with its audio, records the rotation and a bitrate that
+# fits the picture, and Settings takes the display size from the screen when it is not configured.
+# Drop the branch once they have landed on master.
+SRCREV = "bc12224e600c9368e93f86c4a463b9d98f035d89"
+WEBOS_GIT_PARAM_BRANCH = "herrie/settings-display-size-from-screen"
 
-PR = "r2"
+PR = "r3"
 
 # qtmultimedia and gstreamer are for LuneOS.Camera: it hands QML a droidcamsrc
 # source to assign to CaptureSession.nativeVideoSource, which is the only way a
