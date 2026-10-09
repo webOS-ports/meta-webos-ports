@@ -12,8 +12,7 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "tzdata python3-pytz-native"
 
-SRCREV = "39d6be09cffbc490a1004048b1ca6ac1b08b0499"
-WEBOS_GIT_PARAM_BRANCH = "herrie/atlas-handlers"
+SRCREV = "a2b13bfefffe2d92ac87c78f3a68b34da1aac093"
 
 PR = "r24"
 
