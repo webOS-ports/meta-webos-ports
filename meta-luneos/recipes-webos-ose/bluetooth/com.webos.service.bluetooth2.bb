@@ -49,7 +49,7 @@ WEBOS_BLUETOOTH_ENABLED_SERVICE_CLASSES = "GATT FTP OPP A2DP SPP HFP AVRCP PAN A
 WEBOS_BLUETOOTH_PAIRING_IO_CAPABILITY ??= "NoInputNoOutput"
 
 WEBOS_VERSION = "1.0.0-79_e5c85df2c743755aace12c613ced5627392a2c4b"
-PR = "r11"
+PR = "r12"
 
 inherit webos_component
 inherit webos_public_repo
@@ -72,6 +72,7 @@ PACKAGECONFIG[support-response-bt-prepare-suspend-done] = "-DSUPPORT_RESPONSE_BT
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-com.webos.service.bluetooth2.role.json.in-Add-additi.patch \
+    file://0002-main-handle-SIGTERM-and-SIGINT-from-the-main-loop.patch \
 "
 
 inherit webos_systemd
