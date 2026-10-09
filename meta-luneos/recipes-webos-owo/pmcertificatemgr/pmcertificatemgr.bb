@@ -10,8 +10,7 @@ DEPENDS = "openssl glib-2.0"
 RDEPENDS:${PN} = "ca-certificates"
 
 PV = "2.0.0-30+git"
-SRCREV = "33948af730fe58755d8824ce08a49ffb17e95bb7"
-WEBOS_GIT_PARAM_BRANCH = "herrie/fold-patches"
+SRCREV = "e127308f96987af80d4c2bf24ff338a23d3ef7d9"
 
 inherit webos_ports_repo
 inherit webos_cmake
