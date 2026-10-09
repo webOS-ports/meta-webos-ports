@@ -1,0 +1,96 @@
+From 41a5062bc1915a80f2c78758d002ff0ed9200d39 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 9 Oct 2026 22:49:52 +0200
+Subject: [PATCH] main: handle SIGTERM and SIGINT from the main loop
+
+term_handler() was a plain signal() handler that logged through PmLog and
+called g_main_loop_quit(), neither of which is async-signal-safe, and it
+stayed installed after main() had unreferenced the loop. When bluetoothd
+goes away at shutdown the service quits on its own; a SIGTERM from
+systemd that arrives while it is already in exit() then ran
+g_main_loop_quit() on the freed loop and blocked on a lock for good. On
+the HP TouchPad (LuneOS) this held up shutdown until systemd killed the
+service after its 10 s stop timeout.
+
+Register the handlers with g_unix_signal_add(): GLib's own signal handler
+only wakes the loop, and term_handler() now runs from the loop. Clear
+mainLoop once it is freed.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+Upstream-Status: Pending
+
+ src/main.cpp | 32 ++++++++++++--------------------
+ 1 file changed, 12 insertions(+), 20 deletions(-)
+
+diff --git a/src/main.cpp b/src/main.cpp
+index 629879f..98a9995 100644
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -20,6 +20,9 @@
+ #include "logging.h"
+ #include "utils.h"
+ 
++#include <glib-unix.h>
++#include <signal.h>
++
+ 
+ 
+ PmLogContext logContext;
+@@ -35,26 +38,14 @@ static GOptionEntry options[] = {
+ 
+ static GMainLoop *mainLoop = nullptr;
+ 
+-extern "C" void term_handler(int signal)
++// Runs from the main loop, not in signal context: g_unix_signal_add()'s own
++// handler only wakes the loop, so a signal that arrives while the service is
++// already exiting (after the loop is gone) no longer calls into GLib.
++static gboolean term_handler(gpointer user_data)
+ {
+-	const char *str = nullptr;
+-	switch (signal) {
+-		case SIGTERM:
+-			str = "SIGTERM";
+-			break;
+-		case SIGABRT:
+-			str = "SIGABRT";
+-			break;
+-		case SIGINT:
+-			str = "SIGINT";
+-			break;
+-		default:
+-			str = "Unknown";
+-			break;
+-	}
+-
+-	BT_DEBUG("signal received.. signal[%s]", str);
++	BT_DEBUG("signal received.. signal[%s]", static_cast<const char *>(user_data));
+ 	g_main_loop_quit(mainLoop);
++	return G_SOURCE_CONTINUE;
+ }
+ 
+ int main(int argc, char **argv)
+@@ -92,9 +83,9 @@ int main(int argc, char **argv)
+ 			abort();
+ 		}
+ 
+-		signal(SIGTERM, term_handler);
+-		signal(SIGINT, term_handler);
+ 		mainLoop = g_main_loop_new(NULL, FALSE);
++		g_unix_signal_add(SIGTERM, term_handler, const_cast<char *>("SIGTERM"));
++		g_unix_signal_add(SIGINT, term_handler, const_cast<char *>("SIGINT"));
+ 
+ 		BT_DEBUG("Starting bluetooth manager service");
+ 
+@@ -104,6 +95,7 @@ int main(int argc, char **argv)
+ 		g_main_loop_run(mainLoop);
+ 
+ 		g_main_loop_unref(mainLoop);
++		mainLoop = nullptr;
+ 
+ 	}
+ 	catch (const std::length_error& le) // CID 163501 (#1 of 5): Uncaught exception (UNCAUGHT_EXCEPT)
+-- 
+2.53.0
+
