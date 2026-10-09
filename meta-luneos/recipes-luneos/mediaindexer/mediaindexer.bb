@@ -8,9 +8,8 @@ DEPENDS += "db8 glib-2.0 luna-service2 sqlite3 taglib qtbase luna-sysmgr-common"
 RDEPENDS:${PN} += "shared-mime-info"
 
 PV = "0.1.0-14+git"
-SRCREV = "e23718ffa1813677edb77476343b78fe56cf20dc"
-WEBOS_GIT_PARAM_BRANCH = "herrie/fold-patches"
-PR = "r1"
+SRCREV = "cfea0ee6ed25b572dd52f0e8f89926fbdf6acb2d"
+PR = "r2"
 
 inherit webos_ports_repo
 inherit webos_system_bus

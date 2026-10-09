@@ -9,8 +9,7 @@ DEPENDS = "pmloglib"
 
 PV = "2.0.0-14+git"
 
-SRCREV = "000e8c8b24748fd0023ac50528a450f52e429c63"
-WEBOS_GIT_PARAM_BRANCH = "herrie/fold-patches"
+SRCREV = "45d441f3074f712eafc0fe6518f3b5db3a2ccea9"
 PR = "r2"
 
 inherit webos_ports_fork_repo
