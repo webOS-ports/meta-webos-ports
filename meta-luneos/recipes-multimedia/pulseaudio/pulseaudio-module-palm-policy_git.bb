@@ -18,10 +18,9 @@ DEPENDS = "pulseaudio pulseaudio-pulsecore-private-headers alsa-lib"
 RDEPENDS:${PN} = "pulseaudio-server"
 
 PV = "15.0+git"
-SRCREV = "872586e51216f733f38cdf27358860849a0d4095"
+SRCREV = "1e2e8ae0bfb07a815922786b9b0949a3fd7ea8e4"
 
-SRC_URI = "git://github.com/webosose/pulseaudio-webos.git;branch=master;protocol=https \
-    file://0001-module-palm-policy-build-out-of-tree-against-upstrea.patch \
+SRC_URI = "git://github.com/webOS-ports/pulseaudio-webos.git;branch=webOS-ports/webOS-OSE;protocol=https \
     file://Makefile \
 "
 
