@@ -19,12 +19,11 @@ RDEPENDS:${PN} = "${VIRTUAL-RUNTIME_init_manager} ${VIRTUAL-RUNTIME_bash} python
 PROVIDES = "initscripts"
 RPROVIDES:${PN} = "initscripts initd-functions"
 
-SRCREV = "bdefbe71c145320a3054da1aeee6e6a6535cc7bd"
-WEBOS_GIT_PARAM_BRANCH = "herrie/fold-patches-drop-intent"
+SRCREV = "43b2624d370c425c922c44d78804b1df18772bce"
 
 PV = "3.0.0-103"
 
-PR = "r22"
+PR = "r23"
 
 inherit webos_component
 inherit webos_ports_ose_repo
