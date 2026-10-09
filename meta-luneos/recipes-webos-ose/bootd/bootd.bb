@@ -28,6 +28,7 @@ inherit webos_prerelease_dep
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-DefaultBootSequencer.cpp-Add-LuneOS-bits.patch \
     file://0002-sysbus-grant-bootd-the-ACGs-its-own-clients-need.patch \
+    file://0003-DefaultBootSequencer-signal-the-boot-stages-before-l.patch \
 "
 
 inherit webos_systemd
