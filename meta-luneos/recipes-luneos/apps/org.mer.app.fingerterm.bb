@@ -2,9 +2,9 @@ SUMMARY = "A terminal emulator with a custom virtual keyboard"
 LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263"
 
-SPV = "1.3.6"
+SPV = "1.4.17"
 PV = "${SPV}+git"
-SRCREV = "19161d77c7bea0f592b0b8032a61d6030525cd61"
+SRCREV = "37e83d224beb997cec61090fb78f780d5a20db90"
 WEBOS_REPO_NAME = "fingerterm"
 WEBOS_GIT_PARAM_BRANCH = "herrie/qt6-rebase"
 
@@ -19,6 +19,7 @@ SRC_URI = " \
 EXTRA_QMAKEVARS_PRE = "\
     DEFAULT_FONT=LiberationMono \
     DEPLOYMENT_PATH=/usr/palm/applications/${PN} \
+    VERSION_STRING=${SPV} \
 "
 
 inherit webos_ports_fork_repo
