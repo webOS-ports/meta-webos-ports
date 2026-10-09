@@ -4,11 +4,11 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263"
 
 SPV = "1.3.6"
 PV = "${SPV}+git"
-SRCREV = "17f371ad2147d537ffa4559a5453794cd32c7d36"
+SRCREV = "19161d77c7bea0f592b0b8032a61d6030525cd61"
 WEBOS_REPO_NAME = "fingerterm"
-WEBOS_GIT_PARAM_BRANCH = "herrie/qt6"
+WEBOS_GIT_PARAM_BRANCH = "herrie/qt6-rebase"
 
-DEPENDS = "qtbase qtdeclarative qttools-native qt5compat"
+DEPENDS = "qtbase qtdeclarative qttools-native"
 RDEPENDS:${PN} = "ttf-liberation-mono"
 
 SRC_URI = " \
