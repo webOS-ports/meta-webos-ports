@@ -1,0 +1,57 @@
+From 8d8a9b07075fa269529abb756dd7d3e7d20145fe Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 9 Oct 2026 06:53:32 +0200
+Subject: [PATCH] DefaultBootSequencer: signal the boot stages before launching
+ the boot apps
+
+The boot apps, com.webos.app.notification and com.webos.app.volume, are
+web apps, so their launch waits for WebAppMgr to come up, timing out and
+retrying every 5 seconds until it does. The minimal/rest/boot-done
+signals came after those launches, so everything started on them -
+notificationmgr among it - waited for WebAppMgr as well: on the HP
+TouchPad the signals came 30 to 40 seconds after the UI was up, and the
+UI showed no notifications in the meantime.
+
+Signal the boot stages first, then launch the apps. They still launch as
+soon as WebAppMgr can take them, and boot-complete is still triggered
+after them.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [LuneOS specific, applies on top of 0001]
+---
+ src/bootd/sequencer/DefaultBootSequencer.cpp | 15 +++++++++++----
+ 1 file changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/src/bootd/sequencer/DefaultBootSequencer.cpp b/src/bootd/sequencer/DefaultBootSequencer.cpp
+index 366f7de..a817844 100644
+--- a/src/bootd/sequencer/DefaultBootSequencer.cpp
++++ b/src/bootd/sequencer/DefaultBootSequencer.cpp
+@@ -68,6 +68,16 @@ void DefaultBootSequencer::doBoot()
+     proceedDataStoreInitStart();
+     ApplicationManager::instance()->listLaunchPoints(&m_bootManager, EventCoreTimeout::EventCoreTimeout_Max);
+ 
++    // Signal the boot stages before launching the boot apps, not after. Both
++    // apps are web apps, so their launch waits for WebAppMgr to come up and
++    // retries every 5 seconds until it does; with the signals behind them,
++    // everything started on minimal/rest-boot-done - notificationmgr among
++    // it - waited for that too, half a minute after the UI was up on a slow
++    // device. The apps still launch as soon as WebAppMgr can take them.
++    proceedMinimalBootDone();
++    proceedRestBootDone();
++    proceedBootDone();
++
+     int iDisplay = 0;
+     // first, start the core apps (launcher, systemui...) with keepalive
+     for (iDisplay=0; iDisplay<displayCnt; ++iDisplay) {
+@@ -81,10 +91,7 @@ void DefaultBootSequencer::doBoot()
+             launchTargetApp(appId, true, false, iDisplay); // launchedHidden : false , keepAlive : false
+         }
+     }
+-    
+-    proceedMinimalBootDone();
+-    proceedRestBootDone();
+-    proceedBootDone();
++
+     ApplicationManager::instance()->running(&m_bootManager, this);
+ 
+     DynamicEventDB::instance()->triggerEvent(DynamicEventDB::EVENT_BOOT_COMPLETE);
