@@ -1,0 +1,51 @@
+#!/bin/sh
+# Hide the Torch app on a device that has no torch.
+#
+# packagegroup-luneos-extended ships org.webosports.app.torch to every machine:
+# there is no machine feature to gate it on, and a list of machines with a flash
+# LED would be one more per-device table to keep in step. So the app is
+# installed everywhere and this hides its launcher icon where it cannot work -
+# a virtual machine, a tablet without a rear flash - by shadowing its appinfo
+# with "visible": false. SAM scans the applications after this has run.
+#
+# "Has a torch" is the same test nyx makes: torchd drives the LED through nyx's
+# NYX_DEVICE_LED "Torch", and every machine builds that from the sysfs
+# nyxLedTorch module (none hands it to the hybris one - see
+# nyx-modules-hybris.bb), which uses torch_path or else the /sys/class/leds
+# node named for a torch or flash. 30-nyx-conf derives torch_path the same way.
+# Where neither exists, nyx falls back to Samsung's on/off switch,
+# /sys/class/camera/flash/rear_flash (the Galaxy A3 (2015)'s rt5033 and other
+# Samsung flash drivers register no LED class node), so that counts too.
+#
+# deviceinfo_has_torch="true" or "false" overrides the search, for a torch
+# driven some other way or an LED whose name says flash but is not one.
+SRC=/usr/palm/applications/org.webosports.app.torch/appinfo.json
+[ -f "$SRC" ] || exit 0
+
+case "${deviceinfo_has_torch:-}" in
+    true)  exit 0 ;;
+    false) has_torch= ;;
+    *)
+        has_torch=
+        if [ -n "${deviceinfo_torch_sysfs_path:-}" ]; then
+            has_torch=1
+        else
+            for _d in /sys/class/leds/*torch* /sys/class/leds/*flash*; do
+                [ -d "$_d" ] && { has_torch=1; break; }
+            done
+            [ -z "$has_torch" ] && [ -w /sys/class/camera/flash/rear_flash ] && has_torch=1
+        fi
+        ;;
+esac
+[ -n "$has_torch" ] && exit 0
+
+out=$GEN/files$SRC
+mkdir -p "$(dirname "$out")"
+# Rewrite an existing "visible" key, or add one after the opening brace.
+if grep -q '"visible"[[:space:]]*:' "$SRC"; then
+    sed 's/"visible"[[:space:]]*:[[:space:]]*[a-z"]*/"visible": false/' "$SRC" > "$out"
+else
+    # awk, not sed's 0,/re/ address: busybox sed does not have it.
+    awk '!done && sub(/\{/, "{\n    \"visible\": false,") { done = 1 } { print }' "$SRC" > "$out"
+fi
+echo "luneos-device-config: no torch, hiding org.webosports.app.torch"
