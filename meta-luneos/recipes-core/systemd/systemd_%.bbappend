@@ -14,13 +14,18 @@ SRC_URI += " \
 
 # unposix_lock() has no fallback for a kernel without open file description
 # locks (Linux 3.15), so on the 3.4 Halium machines systemd-sysusers cannot take
-# the /etc/passwd lock. Only the machines on those kernels need the patch.
-SRC_URI:append:armv7a:halium = " file://0007-lock-util-fall-back-to-POSIX-locks-without-OFD-support.patch"
+# the /etc/passwd lock. The arm64 Halium machines include bullhead-halium on 3.10,
+# which has no OFD locks either; the fallback only runs where the kernel refuses
+# F_OFD_SETLK, so the newer kernels are not affected.
+SRC_URI:append:halium = " file://0007-lock-util-fall-back-to-POSIX-locks-without-OFD-support.patch"
 
 # A kernel without fsopen() makes mount_option_supported() answer "cannot tell",
 # which mount_procfs() reads as "supported", so units with ProtectProc=invisible
-# fail on 3.4 where the proc mount rejects the textual hidepid= value.
-SRC_URI:append:armv7a:halium = " file://0008-namespace-do-not-pass-textual-hidepid-without-fsopen.patch"
+# fail where the proc mount rejects the textual hidepid= value (before 5.8): on
+# 3.4, and on bullhead-halium's 3.10, where systemd-udevd, systemd-logind,
+# systemd-userdbd and connman-vpn all failed with 226/NAMESPACE. A kernel with
+# fsopen() (5.2 on) still gets a definite answer, so nothing changes there.
+SRC_URI:append:halium = " file://0008-namespace-do-not-pass-textual-hidepid-without-fsopen.patch"
 
 # pivot_root(".", ".") followed by umount2(".", MNT_DETACH) detaches the new root
 # on a 3.4 kernel, and the next mount() on it oopses the kernel. Every unit with
