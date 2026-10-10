@@ -28,9 +28,10 @@ SRC_URI:append:halium = " file://0007-lock-util-fall-back-to-POSIX-locks-without
 SRC_URI:append:halium = " file://0008-namespace-do-not-pass-textual-hidepid-without-fsopen.patch"
 
 # pivot_root(".", ".") followed by umount2(".", MNT_DETACH) detaches the new root
-# on a 3.4 kernel, and the next mount() on it oopses the kernel. Every unit with
-# a mount namespace hits that. Always switch root with MS_MOVE and chroot().
-SRC_URI:append:armv7a:halium = " file://0009-mount-util-always-switch-root-with-MS_MOVE.patch"
+# on kernels before 3.15 (3.4: the next mount() oopses; 3.10: units exit with
+# 226/NAMESPACE). Every unit with a mount namespace hits that. Switch root with
+# MS_MOVE and chroot() there; newer kernels keep pivot_root().
+SRC_URI:append:halium = " file://0009-mount-util-switch-root-with-MS_MOVE-before-Linux-3.15.patch"
 
 RDEPENDS:${PN}:remove = "update-rc.d"
 
