@@ -77,24 +77,54 @@ if IFACE=$(wlan_iface); then
     exit 0
 fi
 
+# qcacld-2.0 built into the kernel (bullhead: CONFIG_QCA_CLD_WLAN=y) has no
+# /dev/wlan either: hdd_module_init() only registers the fwpath parameter and
+# delays the whole driver start to fwpath_changed_handler(), which runs when
+# "sta" is written to it. Android's WiFi HAL does that write (the vendor
+# init.bullhead.rc chowns the node to wifi for it); on LuneOS nothing did, so
+# cnss probed and wlan0 never appeared (10 Oct 2026). The driver then asks for
+# qwlan30.bin and WCNSS_qcom_cfg.ini through the container's ueventd, which is
+# up by now (this unit runs after android-system.service).
+FWPATH=/sys/module/wlan/parameters/fwpath
+FWPATH_START=0
+
 # No /dev/wlan means this driver has no dynamic-start node. Not a failure -
 # this service ships on every Halium machine and only athena-shaped builds use
 # it - so say so and leave the exit status clean.
 if ! wait_for 20 test -c /dev/wlan; then
-    log "no /dev/wlan and no interface; not a dynamic-start driver, nothing to do"
-    exit 0
+    # Only behind the CNSS platform driver (the PCIe QCA6174 of qcacld-2.0).
+    # prima (Galaxy A3 2015) has the same parameter, but writing it before the
+    # WCNSS control channel is up fails for good; a3-prima-wlan.service waits
+    # for that channel and does the write itself.
+    if [ -w "$FWPATH" ] && [ -d /sys/bus/platform/drivers/cnss ]; then
+        FWPATH_START=1
+    else
+        log "no /dev/wlan, no fwpath and no interface; not a dynamic-start driver, nothing to do"
+        exit 0
+    fi
 fi
 
-log "writing ON to /dev/wlan"
-if ! printf ON > /dev/wlan 2>/dev/null; then
-    log "write to /dev/wlan failed" >&2
-    exit 1
+if [ "$FWPATH_START" = 1 ]; then
+    # The handler ignores a second write of the same mode, so this is
+    # written once and not retried.
+    log "no /dev/wlan; writing sta to $FWPATH"
+    if ! echo sta > "$FWPATH" 2>/dev/null; then
+        log "write to $FWPATH failed" >&2
+        exit 1
+    fi
+else
+    log "writing ON to /dev/wlan"
+    if ! printf ON > /dev/wlan 2>/dev/null; then
+        log "write to /dev/wlan failed" >&2
+        exit 1
+    fi
 fi
 
 # From here a failure IS a failure: the node existed and accepted the write, so
 # an interface was supposed to appear.
-if ! wait_for 20 wlan_iface; then
-    log "wrote ON but no interface appeared" >&2
+# 30 s: qcacld-2.0 downloads its firmware over PCIe before it registers wlan0.
+if ! wait_for 30 wlan_iface; then
+    log "started the driver but no interface appeared" >&2
     exit 1
 fi
 
