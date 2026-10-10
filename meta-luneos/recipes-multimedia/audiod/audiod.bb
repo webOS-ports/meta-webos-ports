@@ -41,6 +41,9 @@ RDEPENDS:${PN} += "pulseaudio-module-remap-sink"
 #WEBOS_VERSION = "1.0.0-78_127c6cd6c9247979b4ead42d9b8fc8b5c48b47a2"
 PV = "1.0.0-79+git"
 SRCREV = "6269b8613b16fe793bac92f3444c1bd11fef34fb"
+# 6269b861 is on herrie/routing-msgtype (webOS-ports/audiod-pro PR #5), not yet merged into
+# webOS-ports/webOS-OSE; back to that branch once it is.
+WEBOS_GIT_PARAM_BRANCH = "herrie/routing-msgtype"
 PR = "r37"
 
 inherit webos_component
