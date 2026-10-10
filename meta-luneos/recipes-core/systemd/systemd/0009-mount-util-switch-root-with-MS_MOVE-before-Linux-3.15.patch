@@ -1,0 +1,65 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] mount-util: switch root with MS_MOVE before Linux 3.15
+
+mount_switch_root_full() tucks the new root under the old one with
+pivot_root(".", ".") and then runs umount2(".", MNT_DETACH), relying on that to
+act on the top-most mount at the cwd, the old root.
+
+umount2() resolves its path that way only since Linux 3.15, which brought
+user_path_mountpoint_at(). On the LuneOS Halium machines with 3.4 and 3.10
+kernels umount2(".") resolves to the mount the cwd itself is on, so it detaches
+the new root and leaves the process in a mount that belongs to no namespace. The
+next mount() on it faults in the 3.4 kernel:
+
+  mount(NULL, "/", NULL, MS_REC|MS_SHARED, NULL) -> killed by SIGSEGV
+  Unable to handle kernel NULL pointer dereference at virtual address 00000014
+  PC is at do_mount+0x52c/0xb24
+
+and every unit that sets up a mount namespace (ProtectSystem=, PrivateTmp=, ...)
+dies, including systemd-udevd, systemd-logind and systemd-userdbd. On the 3.10
+Nexus 5X, whose umount has the same lookup, the same units exit with
+226/NAMESPACE without saying why; this is the likely cause, not a proven one.
+
+Reproduced outside systemd, in a forked child on a booted 3.4 device: setting
+the propagation of "." works right after pivot_root() and crashes only after
+umount2(".", MNT_DETACH). The MS_MOVE and chroot() sequence the function already
+has as its fallback does the switch without crashing, and a following
+propagation change succeeds.
+
+Take that fallback when the running kernel is older than 3.15. Newer kernels
+keep pivot_root().
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [systemd's minimum kernel is much newer than 3.15]
+---
+--- a/src/shared/mount-util.c
++++ b/src/shared/mount-util.c
+@@ -5,6 +5,7 @@
+ #include <sys/mount.h>
+ #include <sys/stat.h>
+ #include <sys/statvfs.h>
++#include <sys/utsname.h>
+ #include <unistd.h>
+ #include <linux/loop.h>
+ #if WANT_LINUX_FS_H
+@@ -517,6 +518,20 @@
+         if (fchdir(fd_newroot) < 0)
+                 return log_debug_errno(errno, "Failed to chdir into new rootfs '%s': %m", path);
+ 
++        /* mount_switch_root_pivot() relies on umount2(".", MNT_DETACH) acting on the top-most mount at the
++         * cwd. umount2() resolves its path that way only since Linux 3.15 (user_path_mountpoint_at()); an
++         * older kernel resolves "." to the mount the cwd itself is on, so it detaches the new root instead
++         * of the stacked old one, and the next mount() on it fails or, on 3.4, oopses. MS_MOVE plus chroot()
++         * behaves the same on every kernel, so take it there. */
++        if (!force_ms_move) {
++                struct utsname u;
++                unsigned major, minor;
++
++                if (uname(&u) >= 0 && sscanf(u.release, "%u.%u", &major, &minor) == 2 &&
++                    (major < 3 || (major == 3 && minor < 15)))
++                        force_ms_move = true;
++        }
++
+         /* Make this a NOP if we are supposed to switch to our current root fs. After all, both pivot_root()
+          * and MS_MOVE don't like that. */
+         if (!is_current_root) {
