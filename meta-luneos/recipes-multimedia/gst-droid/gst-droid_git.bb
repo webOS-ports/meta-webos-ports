@@ -35,6 +35,7 @@ SRC_URI = "git://github.com/sailfishos/gst-droid.git;branch=master;protocol=http
     file://0002-droidcamsrc-runtime-idr-and-bitrate.patch \
     file://0003-droidcamsrc-set-recording-hint-in-video-mode.patch \
     file://0004-droidcamsrc-keep-raw-preview-during-recorder-recording.patch \
+    file://0005-droidcamsrc-send-the-zoom-index-and-int-jpeg-quality.patch \
     file://gst-droid-gate.sh \
     file://gst-droid-gate.service \
     file://camera-droid-heal.sh \
