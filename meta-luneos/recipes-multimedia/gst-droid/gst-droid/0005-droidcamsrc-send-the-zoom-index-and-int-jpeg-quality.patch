@@ -1,0 +1,71 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sat, 10 Oct 2026 22:29:17 +0200
+Subject: [PATCH] droidcamsrc: send the zoom index, and read jpeg-quality as
+ the int it is
+
+Two properties never reached the HAL as asked:
+
+- zoom: set_zoom() wrote the GstPhotography zoom as a float ("2.000000")
+  into the Android "zoom" parameter, which is an index into "zoom-ratios"
+  starting at 0, while droidcamsrc's zoom starts at 1 (see
+  set_zoom_to_droid(), which does subtract the 1). Every zoom landed one
+  step too far, and 1x could not be set back at all. Send the index.
+
+- jpeg-quality: installed with g_param_spec_int() but read with
+  g_value_get_uint() and written with g_value_set_uint(), so setting it
+  raised "g_value_get_uint: assertion 'G_VALUE_HOLDS_UINT (value)' failed"
+  and stored 0, which then went to the HAL as the JPEG quality. Use the
+  int accessors.
+
+The jpeg-quality assertion is the one the LuneOS camera hit on the Unihertz
+Q25 (Halium); the zoom offset follows from set_zoom() and
+set_zoom_to_droid() disagreeing.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ gst/droidcamsrc/gstdroidcamsrc.c            | 4 ++--
+ gst/droidcamsrc/gstdroidcamsrcphotography.c | 4 +++-
+ 2 files changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/gst/droidcamsrc/gstdroidcamsrc.c b/gst/droidcamsrc/gstdroidcamsrc.c
+index abfd8b3..671ee9c 100644
+--- a/gst/droidcamsrc/gstdroidcamsrc.c
++++ b/gst/droidcamsrc/gstdroidcamsrc.c
+@@ -351,7 +351,7 @@ gst_droidcamsrc_get_property (GObject * object, guint prop_id, GValue * value,
+       break;
+ 
+     case PROP_JPEG_QUALITY:
+-      g_value_set_uint (value, src->jpeg_quality);
++      g_value_set_int (value, src->jpeg_quality);
+       break;
+ 
+     default:
+@@ -508,7 +508,7 @@ gst_droidcamsrc_set_property (GObject * object, guint prop_id,
+       break;
+ 
+     case PROP_JPEG_QUALITY:
+-      src->jpeg_quality = g_value_get_uint(value);
++      src->jpeg_quality = g_value_get_int (value);
+       gst_droidcamsrc_apply_mode_settings (src, SET_AND_APPLY);
+       break;
+ 
+diff --git a/gst/droidcamsrc/gstdroidcamsrcphotography.c b/gst/droidcamsrc/gstdroidcamsrcphotography.c
+index 23a8cc6..6bddd23 100644
+--- a/gst/droidcamsrc/gstdroidcamsrcphotography.c
++++ b/gst/droidcamsrc/gstdroidcamsrcphotography.c
+@@ -1338,7 +1338,9 @@ gst_droidcamsrc_set_zoom (GstDroidCamSrc * src, gfloat zoom)
+   src->photo->settings.zoom = zoom;
+   GST_OBJECT_UNLOCK (src);
+ 
+-  value = g_strdup_printf ("%f", zoom);
++  /* Android's "zoom" is an index into "zoom-ratios" starting at 0, while
++   * ours starts at 1; see gst_droidcamsrc_photography_set_zoom_to_droid(). */
++  value = g_strdup_printf ("%d", MAX ((int) zoom - 1, 0));
+   ret = gst_droidcamsrc_set_and_apply (src, "zoom", value);
+ 
+   GST_DEBUG_OBJECT (src, "zoom set to %s", value);
+-- 
+2.53.0
+
