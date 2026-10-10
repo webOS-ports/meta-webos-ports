@@ -3,7 +3,7 @@ LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=b234ee4d69f5fce4486a80fdaf4a4263"
 
 PV = "0.1+git"
-SRCREV = "5cbd93d160e0dd06f92f133a06d14bbc82835dd1"
+SRCREV = "8ab06c4e23681187474de2c78e5872d852ba3010"
 WEBOS_GIT_PARAM_BRANCH = "herrie/qt6-rework"
 
 DEPENDS = "qtbase qtdeclarative qtdeclarative-native"
