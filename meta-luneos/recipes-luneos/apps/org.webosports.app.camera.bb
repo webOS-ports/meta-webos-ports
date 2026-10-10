@@ -8,7 +8,7 @@ LIC_FILES_CHKSUM = " \
 PV = "0.0.2-1+git"
 SRCREV = "b237daeef96cd09c40edf169c620525a7a9dc5e6"
 
-DEPENDS = "qtbase qtdeclarative qtdeclarative-native qtmultimedia"
+DEPENDS = "qtbase qtdeclarative qtdeclarative-native qtmultimedia libexif"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
