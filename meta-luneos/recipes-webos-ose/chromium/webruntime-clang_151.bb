@@ -5,7 +5,7 @@ require chromium-host-llvm.inc
 
 PROVIDES = "virtual/webruntime"
 
-PR = "r0"
+PR = "r1"
 
 # Restated here as well as in webruntime_151.bb: this file is reached through
 

@@ -1,0 +1,86 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sun, 11 Oct 2026 05:59:11 +0200
+Subject: [PATCH] Halium: let a device opt out of the low 4GB reservation
+
+PartitionAlloc reserves the first 4GB + 1MB of a 64-bit Linux process as an
+inaccessible "zero segment" (enable_user_space_zero_segment, on by default
+for 64-bit Linux), and V8's sandbox reserves the same range itself when
+PartitionAlloc has not. Both are hardening against Smi/pointer confusion.
+
+The 3.10 kgsl driver of the Adreno 4xx (Nexus 5X, msm8992) can only map a
+GPU buffer that the CPU also maps at an address below 0xc0000000, because the
+GPU addresses 32 bits. With the whole range reserved, every such mapping in
+the process fails with -ENOMEM, EGL never initialises and the in-process GPU
+thread of WebAppMgr and the browser crashes. /proc/<pid>/maps of WebAppMgr
+shows the reservation as "00010000-100100000 ---p ... [anon:partition_alloc]".
+
+Skip both reservations when /etc/webruntime/no-low-4gb-reservation exists,
+so only the device that needs it installs that file and every other device
+keeps the hardening.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+---
+Upstream-Status: Inappropriate [Halium specific]
+---
+
+diff --git a/src/base/allocator/partition_allocator/src/partition_alloc/partition_address_space.cc b/src/base/allocator/partition_allocator/src/partition_alloc/partition_address_space.cc
+--- a/src/base/allocator/partition_allocator/src/partition_alloc/partition_address_space.cc
++++ b/src/base/allocator/partition_allocator/src/partition_alloc/partition_address_space.cc
+@@ -39,6 +39,10 @@
+ #include <sys/mman.h>
+ #endif
+ 
++#if PA_CONFIG(ENABLE_USER_SPACE_ZERO_SEGMENT) && PA_BUILDFLAG(IS_LINUX)
++#include <unistd.h>
++#endif
++
+ namespace partition_alloc::internal {
+ 
+ #if PA_BUILDFLAG(HAS_64_BIT_POINTERS)
+@@ -251,6 +255,17 @@
+     return;
+   }
+ 
++#if PA_BUILDFLAG(IS_LINUX)
++  // Some GPU drivers can only map buffers into the low 4GB: the 3.10 kgsl
++  // driver of the Adreno 4xx needs CPU addresses below 0xc0000000 because the
++  // GPU addresses 32 bits. Reserving that range makes every GPU buffer
++  // allocation fail there, so a device can opt out with a marker file. V8
++  // checks the same file before it reserves the range itself.
++  if (access("/etc/webruntime/no-low-4gb-reservation", F_OK) == 0) {
++    return;
++  }
++#endif
++
+   const size_t min_zero_segment_size =
+       static_cast<size_t>(PA_CONFIG(USER_SPACE_ZERO_SEGMENT_SIZE_MB)) * 1024 *
+       1024;
+diff --git a/src/v8/src/sandbox/sandbox.cc b/src/v8/src/sandbox/sandbox.cc
+--- a/src/v8/src/sandbox/sandbox.cc
++++ b/src/v8/src/sandbox/sandbox.cc
+@@ -24,6 +24,7 @@
+ 
+ #if V8_OS_LINUX
+ #include <sys/mman.h>
++#include <unistd.h>
+ #endif
+ 
+ namespace v8 {
+@@ -309,7 +310,16 @@
+   // Also try to reserve the first 4GB of the process' address space. This
+   // mitigates Smi<->HeapObject confusion bugs in which we end up treating a
+   // Smi value as a pointer.
+-  if (!smi_address_range_reserved_) {
++  bool reserve_smi_address_range = true;
++#if V8_OS_LINUX
++  // A device whose GPU driver can only map buffers below 4GB opts out of this
++  // reservation with the same marker file PartitionAlloc checks before it
++  // reserves its zero segment.
++  if (access("/etc/webruntime/no-low-4gb-reservation", F_OK) == 0) {
++    reserve_smi_address_range = false;
++  }
++#endif
++  if (reserve_smi_address_range && !smi_address_range_reserved_) {
+     // Make the guard region extend a little past the first 4GB to also catch
+     // accesses to in-object properties which are bounded by the JSObject
+     // instance size.
