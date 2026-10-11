@@ -7,7 +7,7 @@ DEPENDS = "luna-service2 json-c glib-2.0 luna-prefs glib-2.0-native python3-pack
 RRECOMMENDS:${PN} += "${VIRTUAL-RUNTIME_ofono} mmsd"
 
 PV = "0.1.0-1+git"
-SRCREV = "cc8f15f30b5b96960aa0004552306e5e0b31175d"
+SRCREV = "d5b9080e357233f60777f0e7ed73d62580e64c68"
 
 inherit webos_ports_ose_repo
 inherit webos_filesystem_paths
@@ -76,9 +76,3 @@ do_install:append() {
 # webos-telephonyd/0.1.0-1+git/git/drivers/ofono/ofonomessagemanager.c:54:27: error: initialization of 'void (*)(void *, GCancellable *, void (*)(GObject *, GAsyncResult *, void *), void *)' {aka 'void (*)(void *, struct _GCancellable *, void (*)(struct _GObject *, struct _GAsyncResult *, void *), void *)'} from incompatible pointer type 'void (*)(OfonoInterfaceMessageManager *, GCancellable *, void (*)(GObject *, GAsyncResult *, void *), void *)' {aka 'void (*)(struct _OfonoInterfaceMessageManager *, struct _GCancellable *, void (*)(struct _GObject *, struct _GAsyncResult *, void *), void *)'} [-Wincompatible-pointer-types]
 # webos-telephonyd/0.1.0-1+git/git/drivers/ofono/ofonomessagemanager.c:55:34: error: initialization of 'gboolean (*)(void *, GVariant **, GAsyncResult *, GError **)' {aka 'int (*)(void *, struct _GVariant **, struct _GAsyncResult *, struct _GError **)'} from incompatible pointer type 'gboolean (*)(OfonoInterfaceMessageManager *, GVariant **, GAsyncResult *, GError **)' {aka 'int (*)(struct _OfonoInterfaceMessageManager *, struct _GVariant **, struct _GAsyncResult *, struct _GError **)'} [-Wincompatible-pointer-types]
 CFLAGS += "-Wno-error=incompatible-pointer-types"
-
-# ERROR: webos-telephonyd-0.1.0-1+git-r0 do_package_qa: QA Issue: File /usr/src/debug/webos-telephonyd/0.1.0-1+git/Configured/src/ofono-interface.c in package webos-telephonyd-src contains reference to TMPDIR [buildpaths]
-# Scoped to -src: only the generated source carries the build path, and that
-# package never reaches an image. Demoting the check for the whole recipe
-# would also stop it catching a build path in something that does ship.
-INSANE_SKIP:${PN}-src += "buildpaths"

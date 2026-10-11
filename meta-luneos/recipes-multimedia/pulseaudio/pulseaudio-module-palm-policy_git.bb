@@ -18,11 +18,9 @@ DEPENDS = "pulseaudio pulseaudio-pulsecore-private-headers alsa-lib"
 RDEPENDS:${PN} = "pulseaudio-server"
 
 PV = "15.0+git"
-SRCREV = "1e2e8ae0bfb07a815922786b9b0949a3fd7ea8e4"
+SRCREV = "fbd51efb7aa6409368b825cbadc7b4bc211084ce"
 
-# 1e2e8ae0 is on herrie/palm-policy-fixes (webOS-ports/pulseaudio-webos PR #1), not yet merged
-# into webOS-ports/webOS-OSE; back to that branch once it is.
-SRC_URI = "git://github.com/webOS-ports/pulseaudio-webos.git;branch=herrie/palm-policy-fixes;protocol=https \
+SRC_URI = "git://github.com/webOS-ports/pulseaudio-webos.git;branch=webOS-ports/webOS-OSE;protocol=https \
     file://Makefile \
 "
 

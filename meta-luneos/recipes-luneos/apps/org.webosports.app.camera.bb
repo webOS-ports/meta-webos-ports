@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = " \
 "
 
 PV = "0.0.2-1+git"
-SRCREV = "b237daeef96cd09c40edf169c620525a7a9dc5e6"
+SRCREV = "471662d032640c6cfab430ec0d6f649171572aa4"
 
 DEPENDS = "qtbase qtdeclarative qtdeclarative-native qtmultimedia libexif"
 
@@ -24,7 +24,12 @@ inherit webos_cmake
 INSANE_SKIP:${PN} = "libdir"
 INSANE_SKIP:${PN}-dbg = "libdir"
 
-FILES:${PN} += "${webos_applicationsdir}/org.webosports.app.camera"
+FILES:${PN} += " \
+    ${webos_applicationsdir}/org.webosports.app.camera \
+    ${datadir}/luna-service2/roles.d/org.webosports.app.camera.app.json \
+    ${datadir}/luna-service2/manifests.d/org.webosports.app.camera.json \
+    ${datadir}/luna-service2/client-permissions.d/org.webosports.app.camera.perm.json \
+"
 
 # The droid camera now comes from LuneOS.Camera in luneos-components rather
 # than a copy inside the app's own CameraApp plugin, so the QML module has to
