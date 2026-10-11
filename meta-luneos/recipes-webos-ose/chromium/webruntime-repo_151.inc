@@ -149,3 +149,10 @@ do_configure:prepend() {
 SRC_URI:append:halium = " \
     file://0001-Halium-Disable-DRI-build.patch \
 "
+
+# A device whose GPU driver can only map buffers below 4GB (Adreno 4xx on a
+# 3.10 kgsl) opts out of the low 4GB reservation with
+# /etc/webruntime/no-low-4gb-reservation; the machine layer installs it.
+SRC_URI:append:halium = " \
+    file://0002-Halium-let-a-device-opt-out-of-the-low-4GB-reservation.patch \
+"
