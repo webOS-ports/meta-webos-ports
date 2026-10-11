@@ -13,7 +13,7 @@ RRECOMMENDS:${PN} += "biomd"
 
 PV = "0.1.0-1+git"
 PR = "r1"
-SRCREV = "5be0ad3c59e4ed0d4470b7affb73551890c28d2d"
+SRCREV = "e01795a31bd5b4a5986c78b8cda54837418951b4"
 
 inherit webos_ports_repo
 inherit webos_filesystem_paths
@@ -27,8 +27,3 @@ WEBOS_REPO_NAME = "webos-fingerprint-adapter"
 LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
-
-# gdbus-codegen writes an absolute #include for the header it generates, same
-# QA hit as webos-nfc-adapter/webos-telephonyd.
-ERROR_QA:remove = "buildpaths"
-WARN_QA:append = " buildpaths"

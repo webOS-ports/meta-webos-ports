@@ -3,10 +3,10 @@ LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=b234ee4d69f5fce4486a80fdaf4a4263"
 
 PV = "0.1+git"
-SRCREV = "3b13b9a4f543a1e3bf169fd8e4eed253b19012b5"
+SRCREV = "c71ced73877f69b98d378f113f03c845e9e38dde"
 
 DEPENDS = "qtbase qtdeclarative qtdeclarative-native"
-RDEPENDS:${PN} = "qmltermwidget "
+RDEPENDS:${PN} = "qmltermwidget luneos-components"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
@@ -21,4 +21,9 @@ EXTRA_QMAKEVARS_PRE = "\
     DEPLOYMENT_PATH=${APP_PATH} \
 "
 
-FILES:${PN} += "${APP_PATH}"
+FILES:${PN} += " \
+    ${APP_PATH} \
+    ${datadir}/luna-service2/roles.d/org.webosports.app.terminal.app.json \
+    ${datadir}/luna-service2/manifests.d/org.webosports.app.terminal.manifest.json \
+    ${datadir}/luna-service2/client-permissions.d/org.webosports.app.terminal.perm.json \
+"
