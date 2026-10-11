@@ -7,6 +7,9 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 FILESEXTRAPATHS:prepend := "${THISDIR}/luneos-emulator-appliance:"
 SRC_URI = "file://luneos-emulator.ovf"
 
+# file:// sources land directly in UNPACKDIR; there is no ${BP} subdirectory.
+S = "${UNPACKDIR}"
+
 IMAGE_BASENAME = "luneos"
 
 SRC_VMDK_NAME = "${IMAGE_BASENAME}-image-${MACHINE}${IMAGE_NAME_SUFFIX}.wic.vmdk"
