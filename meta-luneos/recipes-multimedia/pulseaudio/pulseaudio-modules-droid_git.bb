@@ -33,5 +33,6 @@ FILES:${PN} += "${libdir}/pulseaudio/modules/*.so"
 FILES:${PN}-dev += "${libdir}/pulseaudio/modules/*.la"
 FILES:${PN}-staticdev += "${libdir}/pulseaudio/modules/*.a"
 
-# Add pulse user to audio group so he can access audio dev nodes from Android
-GROUPMEMS_PARAM:${PN} = "-a pulse -g audio -G input"
+# pulse's groups (audio, and input on Halium for droid-extevdev) are set in
+# pulseaudio_%.bbappend: this recipe does not inherit useradd, so a GROUPMEMS_PARAM here does
+# nothing.

@@ -114,3 +114,11 @@ GROUPMEMS_PARAM:pulseaudio-server = " \
     -a pulse -g pulse-access; \
     -a pulse -g audio; \
 "
+# On Halium pulseaudio-modules-droid's droid-extevdev reads /dev/input/event* (group input, from
+# udev and from the container's ueventd alike) for the codec's headphone and microphone jack
+# switches; without the group it logs "Permission denied" for every node and never sees a
+# headphone plugged in. The droid module recipes asked for this with "-G input", which groupmems
+# does not know, and they do not inherit useradd, so it never took effect.
+GROUPMEMS_PARAM:pulseaudio-server:append:halium = " \
+    -a pulse -g input; \
+"
