@@ -25,7 +25,7 @@ RRECOMMENDS:${PN} += " \
 "
 
 PV = "0.1.0-1+git"
-SRCREV = "40bdda2ad0fa18b8118407a35b0fded2d777b298"
+SRCREV = "15639aea43cca8458c71f07b816f6aa2cb7ede8d"
 
 inherit webos_ports_repo
 inherit webos_filesystem_paths
@@ -44,9 +44,3 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 # The per-provider vpnFormFields descriptors are data, not compiled-in tables,
 # so a wrong field can be fixed without a rebuild.
 FILES:${PN} += "${datadir}/luneos-vpn-adapter"
-
-# gdbus-codegen writes an absolute #include for the header it generates, so the
-# generated source shipped in -src carries a build path. Same construct and the
-# same QA hit as webos-nfc-adapter and webos-telephonyd.
-ERROR_QA:remove = "buildpaths"
-WARN_QA:append = " buildpaths"

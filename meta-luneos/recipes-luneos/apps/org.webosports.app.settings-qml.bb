@@ -14,7 +14,7 @@ inherit webos_app
 inherit pkgconfig
 
 PV = "0.4.0-1+git"
-SRCREV = "02fafb0aaa6267ba5eb444c88e3e26bff4f81831"
+SRCREV = "408fb8a355f217cc86fa4bd9760d3a217056043b"
 
 # This app is developed on qml-based, not master.
 WEBOS_GIT_PARAM_BRANCH = "qml-based"
