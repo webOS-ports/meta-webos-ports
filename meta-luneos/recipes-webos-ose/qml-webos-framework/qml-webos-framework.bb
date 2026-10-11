@@ -22,7 +22,7 @@ SRCREV = "bfeb43a377d2f7ad0660281bb787876110d552bf"
 
 PV = "1.0.0-172"
 
-PR = "r42"
+PR = "r43"
 
 inherit webos_qmake6
 inherit pkgconfig
@@ -56,8 +56,10 @@ FILES:${PN}-tools += "${webos_sdkdir}/*"
 # we don't provide cmake tests
 EXTRA_QMAKEVARS_POST += "CONFIG-=create_cmake"
 
-# ERROR: qml-webos-framework-1.0.0-169-r38 do_package_qa: QA Issue: File /usr/src/debug/qml-webos-framework/1.0.0-169/src/Eos/Items/qrc_beziergon.cpp in package qml-webos-framework-src contains reference to TMPDIR
-# File /usr/src/debug/qml-webos-framework/1.0.0-169/examples/com.webos.exampleapp.canvastablet/.rcc/qrc_com.webos.exampleapp.canvastablet.cpp in package qml-webos-framework-src contains reference to TMPDIR
-# File /usr/src/debug/qml-webos-framework/1.0.0-169/examples/com.webos.exampleapp.tabletevent/.rcc/qrc_com.webos.exampleapp.tabletevent.cpp in package qml-webos-framework-src contains reference to TMPDIR [buildpaths]
-ERROR_QA:remove = "buildpaths"
-WARN_QA:append = " buildpaths"
+# The QTestLib binaries carry QT_TESTCASE_BUILDDIR, the build directory baked
+# in by qmake's testlib_defines.prf for QFINDTESTDATA, which these tests do not
+# use. Drop them, as sensorfw does, rather than mute buildpaths QA; the stress
+# script stays in ${PN}-tests.
+do_install:append() {
+    rm -f ${D}${datadir}/booster/tests/tst_*
+}
