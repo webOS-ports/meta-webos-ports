@@ -41,6 +41,8 @@ SRC_URI += " \
     file://0025-Add-support-for-meshd-to-use-RAW-channel.patch \
     file://0026-Enable-mesh-fixed-ell-undefined-symbol-error.patch \
     file://0027-Sync-Add-support-for-meshd-to-use-RAW-channel-with-b.patch \
+    file://0028-obexd-remove-the-part-of-a-push-the-sender-disconnec.patch \
+    file://0029-gobex-retry-a-write-the-socket-cannot-take-yet.patch \
     file://main.conf \
     file://brcm43438.service \
 "

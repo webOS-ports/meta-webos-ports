@@ -1,0 +1,394 @@
+From 5d59535d54acdfca014f2cd0894642a9313ff9c8 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sun, 11 Oct 2026 13:15:49 +0200
+Subject: [PATCH] gobex: retry a write the socket cannot take yet
+
+write_stream() and write_packet() treat every status other than
+G_IO_STATUS_NORMAL as a failure, but GLib sets a GError only for
+G_IO_STATUS_ERROR. When the socket is full the write returns
+G_IO_STATUS_AGAIN, no error is set, and since commit 7e7d826aa1db
+("gobex: Print error if data cannot be written") write_data() then
+passes the pending request to its response function with neither an
+error nor a packet. transfer_response() reads the NULL packet:
+
+  #0 g_obex_packet_get_operation  gobex/gobex-packet.c:77
+  #1 transfer_response            gobex/gobex-transfer.c:200
+  #2 write_data                   gobex/gobex.c:501
+
+obexd's client hits this on an Object Push over L2CAP to a slow link:
+between two btvirt controllers, pushes of 256 KiB, 1 MiB, 4 MiB and
+8 MiB each killed obexd with SIGSEGV right after the first PUT was
+answered with Continue, while 64 KiB fits the socket and passes. With
+gobex debug output enabled, the g_obex_debug() on err->message would
+crash first.
+
+Keep the data when the socket is full and try again. An L2CAP socket
+polls writable while it still has no room for a whole packet (the
+packet is split into PDUs that each count against the send buffer), so
+waiting for G_IO_OUT alone makes write_data() spin: a 1 MiB push on the
+link above took 26512 failed writes and 3.2 s of obexd CPU for a 6.3 s
+transfer. Retry after 5 ms instead: the same push then took 1099
+failed writes and 0.6 s of CPU for a 6.5 s transfer. Give the other
+failures an error, including a short write of a packet, which must go
+out whole.
+
+On a real write error the request was freed while still set as the
+pending request, so the next response, timeout or g_obex_unref() used
+it again. Clear it before it is freed.
+
+unit/test-gobex gets a write that returns G_IO_STATUS_AGAIN once or
+for 50 ms, a short packet write and a write error, on stream and packet
+transports.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ gobex/gobex.c     |  62 ++++++++++++++-
+ unit/test-gobex.c | 196 ++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 255 insertions(+), 3 deletions(-)
+
+diff --git a/gobex/gobex.c b/gobex/gobex.c
+index df80d79..3a97947 100644
+--- a/gobex/gobex.c
++++ b/gobex/gobex.c
+@@ -24,6 +24,8 @@
+ 
+ #define G_OBEX_DEFAULT_TIMEOUT	10
+ #define G_OBEX_ABORT_TIMEOUT	5
++/* Milliseconds to wait when the socket refuses a write */
++#define G_OBEX_WRITE_RETRY_MS	5
+ 
+ #define G_OBEX_OP_NONE		0xff
+ 
+@@ -254,6 +256,14 @@ static gboolean req_timeout(gpointer user_data)
+ 	return FALSE;
+ }
+ 
++static void write_failed(GError **err, GIOStatus status)
++{
++	/* GLib sets an error only for G_IO_STATUS_ERROR */
++	if (err != NULL && *err == NULL)
++		g_set_error(err, G_OBEX_ERROR, G_OBEX_ERROR_FAILED,
++				"Unable to write data (status %d)", status);
++}
++
+ static gboolean write_stream(GObex *obex, GError **err)
+ {
+ 	GIOStatus status;
+@@ -263,8 +273,14 @@ static gboolean write_stream(GObex *obex, GError **err)
+ 	buf = (char *) &obex->tx_buf[obex->tx_sent];
+ 	status = g_io_channel_write_chars(obex->io, buf, obex->tx_data,
+ 							&bytes_written, err);
+-	if (status != G_IO_STATUS_NORMAL)
++	/* Socket full: nothing was written, try again when writable */
++	if (status == G_IO_STATUS_AGAIN)
++		return TRUE;
++
++	if (status != G_IO_STATUS_NORMAL) {
++		write_failed(err, status);
+ 		return FALSE;
++	}
+ 
+ 	g_obex_dump(G_OBEX_DEBUG_DATA, "<", buf, bytes_written);
+ 
+@@ -283,11 +299,22 @@ static gboolean write_packet(GObex *obex, GError **err)
+ 	buf = (char *) &obex->tx_buf[obex->tx_sent];
+ 	status = g_io_channel_write_chars(obex->io, buf, obex->tx_data,
+ 							&bytes_written, err);
+-	if (status != G_IO_STATUS_NORMAL)
++	/* Socket full: the packet was not sent, try again when writable */
++	if (status == G_IO_STATUS_AGAIN)
++		return TRUE;
++
++	if (status != G_IO_STATUS_NORMAL) {
++		write_failed(err, status);
+ 		return FALSE;
++	}
+ 
+-	if (bytes_written != obex->tx_data)
++	/* A packet goes out whole or not at all */
++	if (bytes_written != obex->tx_data) {
++		g_set_error(err, G_OBEX_ERROR, G_OBEX_ERROR_FAILED,
++				"Short write: %zu of %zu bytes",
++				bytes_written, obex->tx_data);
+ 		return FALSE;
++	}
+ 
+ 	g_obex_dump(G_OBEX_DEBUG_DATA, "<", buf, bytes_written);
+ 
+@@ -424,12 +451,25 @@ static void setup_srm(GObex *obex, GObexPacket *pkt, gboolean outgoing)
+ 		check_srm_final(obex, op);
+ }
+ 
++static void enable_tx(GObex *obex);
++
++static gboolean retry_tx(gpointer user_data)
++{
++	GObex *obex = user_data;
++
++	obex->write_source = 0;
++	enable_tx(obex);
++
++	return FALSE;
++}
++
+ static gboolean write_data(GIOChannel *io, GIOCondition cond,
+ 							gpointer user_data)
+ {
+ 	GObex *obex = user_data;
+ 	struct pending_pkt *p = NULL;
+ 	GError *err = NULL;
++	size_t sent;
+ 
+ 	if (cond & G_IO_NVAL)
+ 		return FALSE;
+@@ -493,10 +533,17 @@ encode:
+ 		return FALSE;
+ 	}
+ 
++	sent = obex->tx_sent;
++
+ 	if (!obex->write(obex, &err)) {
+ 		g_obex_debug(G_OBEX_DEBUG_ERROR, "%s", err->message);
+ 
+ 		if (p) {
++			/* p may be the pending request: do not leave it
++			 * there once it is freed */
++			if (obex->pending_req == p)
++				obex->pending_req = NULL;
++
+ 			if (p->rsp_func)
+ 				p->rsp_func(obex, err, NULL, p->rsp_data);
+ 
+@@ -507,6 +554,15 @@ encode:
+ 		goto stop_tx;
+ 	}
+ 
++	/* Nothing was taken: an L2CAP socket can poll writable and still
++	 * refuse a packet it has no room for yet. Wait a moment instead of
++	 * polling it again at once. */
++	if (obex->tx_data > 0 && obex->tx_sent == sent) {
++		obex->write_source = g_timeout_add(G_OBEX_WRITE_RETRY_MS,
++							retry_tx, obex);
++		return FALSE;
++	}
++
+ done:
+ 	if (obex->tx_data > 0 || g_queue_get_length(obex->tx_queue) > 0)
+ 		return TRUE;
+diff --git a/unit/test-gobex.c b/unit/test-gobex.c
+index 122bf42..538dd7f 100644
+--- a/unit/test-gobex.c
++++ b/unit/test-gobex.c
+@@ -1290,6 +1290,192 @@ static void test_move(void)
+ 	g_assert_no_error(d.err);
+ }
+ 
++enum write_fault {
++	FAULT_AGAIN,
++	FAULT_AGAIN_50MS,
++	FAULT_SHORT,
++	FAULT_ERROR,
++};
++
++static GIOFuncs fault_funcs;
++static GIOFuncs *real_funcs;
++static enum write_fault fault;
++static int fault_writes;
++static gint64 fault_start;
++
++/* Fails the first write the way a full or broken socket would */
++static GIOStatus fault_write(GIOChannel *channel, const gchar *buf,
++				gsize count, gsize *bytes_written, GError **err)
++{
++	if (fault == FAULT_AGAIN_50MS) {
++		fault_writes++;
++
++		if (g_get_monotonic_time() - fault_start < 50000) {
++			*bytes_written = 0;
++			return G_IO_STATUS_AGAIN;
++		}
++
++		return real_funcs->io_write(channel, buf, count,
++							bytes_written, err);
++	}
++
++	if (fault_writes++ > 0)
++		return real_funcs->io_write(channel, buf, count,
++							bytes_written, err);
++
++	switch (fault) {
++	case FAULT_AGAIN:
++	case FAULT_AGAIN_50MS:
++		*bytes_written = 0;
++		return G_IO_STATUS_AGAIN;
++	case FAULT_SHORT:
++		return real_funcs->io_write(channel, buf, count - 1,
++							bytes_written, err);
++	case FAULT_ERROR:
++	default:
++		*bytes_written = 0;
++		g_set_error(err, G_IO_CHANNEL_ERROR, G_IO_CHANNEL_ERROR_FAILED,
++							"Injected failure");
++		return G_IO_STATUS_ERROR;
++	}
++}
++
++struct fault_data {
++	int responses;
++	gboolean got_error;
++	gboolean got_packet;
++};
++
++static void fault_rsp(GObex *obex, GError *err, GObexPacket *rsp,
++							gpointer user_data)
++{
++	struct fault_data *d = user_data;
++
++	d->responses++;
++	d->got_error = (err != NULL);
++	d->got_packet = (rsp != NULL);
++
++	g_main_loop_quit(mainloop);
++}
++
++static gboolean fault_peer(GIOChannel *io, GIOCondition cond,
++							gpointer user_data)
++{
++	uint8_t buf[255];
++	gsize len;
++
++	if (cond & (G_IO_HUP | G_IO_ERR | G_IO_NVAL))
++		return FALSE;
++
++	if (g_io_channel_read_chars(io, (char *) buf, sizeof(buf), &len,
++						NULL) != G_IO_STATUS_NORMAL)
++		return TRUE;
++
++	g_io_channel_write_chars(io, (char *) pkt_connect_rsp,
++				sizeof(pkt_connect_rsp), &len, NULL);
++
++	return TRUE;
++}
++
++static gboolean fault_timeout(gpointer user_data)
++{
++	g_main_loop_quit(mainloop);
++
++	return FALSE;
++}
++
++static void send_with_write_fault(int sock_type, enum write_fault f,
++					gboolean expect_error)
++{
++	struct fault_data d = { 0, FALSE, FALSE };
++	GIOChannel *io, *peer;
++	GObexPacket *req;
++	GObex *obex;
++	guint8 connect_data[] = { 0x10, 0x00, 0x10, 0x00 };
++	guint timer, watch;
++	int sv[2];
++
++	g_assert(socketpair(AF_UNIX, sock_type | SOCK_NONBLOCK, 0, sv) == 0);
++
++	io = g_io_channel_unix_new(sv[0]);
++	g_io_channel_set_close_on_unref(io, TRUE);
++	real_funcs = io->funcs;
++	fault_funcs = *io->funcs;
++	fault_funcs.io_write = fault_write;
++	io->funcs = &fault_funcs;
++	fault = f;
++	fault_writes = 0;
++	fault_start = g_get_monotonic_time();
++
++	obex = g_obex_new(io, sock_type == SOCK_STREAM ?
++					G_OBEX_TRANSPORT_STREAM :
++					G_OBEX_TRANSPORT_PACKET, -1, -1);
++	g_assert(obex != NULL);
++
++	peer = g_io_channel_unix_new(sv[1]);
++	g_io_channel_set_encoding(peer, NULL, NULL);
++	g_io_channel_set_buffered(peer, FALSE);
++	g_io_channel_set_close_on_unref(peer, TRUE);
++	watch = g_io_add_watch(peer, G_IO_IN | G_IO_HUP | G_IO_ERR | G_IO_NVAL,
++							fault_peer, NULL);
++
++	req = g_obex_packet_new(G_OBEX_OP_CONNECT, TRUE, G_OBEX_HDR_INVALID);
++	g_obex_packet_set_data(req, connect_data, sizeof(connect_data),
++							G_OBEX_DATA_REF);
++	g_assert(g_obex_send_req(obex, req, -1, fault_rsp, &d, NULL) > 0);
++
++	mainloop = g_main_loop_new(NULL, FALSE);
++	timer = g_timeout_add_seconds(1, fault_timeout, NULL);
++	g_main_loop_run(mainloop);
++	g_main_loop_unref(mainloop);
++	mainloop = NULL;
++	if (d.responses > 0)
++		g_source_remove(timer);
++	g_source_remove(watch);
++
++	g_assert_cmpint(d.responses, ==, 1);
++	g_assert(d.got_error == expect_error);
++	g_assert(d.got_packet == !expect_error);
++
++	/* Frees what is left of the request: must not be freed twice */
++	g_obex_unref(obex);
++	g_io_channel_unref(io);
++	g_io_channel_unref(peer);
++}
++
++static void test_write_again_stream(void)
++{
++	send_with_write_fault(SOCK_STREAM, FAULT_AGAIN, FALSE);
++}
++
++static void test_write_again_pkt(void)
++{
++	send_with_write_fault(SOCK_SEQPACKET, FAULT_AGAIN, FALSE);
++}
++
++/* A socket that polls writable but refuses writes for 50 ms is not
++ * polled again at once: a few tries, not thousands. */
++static void test_write_again_backoff_pkt(void)
++{
++	send_with_write_fault(SOCK_SEQPACKET, FAULT_AGAIN_50MS, FALSE);
++	g_assert_cmpint(fault_writes, <, 100);
++}
++
++static void test_write_short_pkt(void)
++{
++	send_with_write_fault(SOCK_SEQPACKET, FAULT_SHORT, TRUE);
++}
++
++static void test_write_error_stream(void)
++{
++	send_with_write_fault(SOCK_STREAM, FAULT_ERROR, TRUE);
++}
++
++static void test_write_error_pkt(void)
++{
++	send_with_write_fault(SOCK_SEQPACKET, FAULT_ERROR, TRUE);
++}
++
+ int main(int argc, char *argv[])
+ {
+ 	g_test_init(&argc, &argv, NULL);
+@@ -1357,5 +1543,15 @@ int main(int argc, char *argv[])
+ 	g_test_add_func("/gobex/test_copy", test_copy);
+ 	g_test_add_func("/gobex/test_move", test_move);
+ 
++	g_test_add_func("/gobex/test_write_again_stream",
++						test_write_again_stream);
++	g_test_add_func("/gobex/test_write_again_pkt", test_write_again_pkt);
++	g_test_add_func("/gobex/test_write_again_backoff_pkt",
++						test_write_again_backoff_pkt);
++	g_test_add_func("/gobex/test_write_short_pkt", test_write_short_pkt);
++	g_test_add_func("/gobex/test_write_error_stream",
++						test_write_error_stream);
++	g_test_add_func("/gobex/test_write_error_pkt", test_write_error_pkt);
++
+ 	return g_test_run();
+ }
+-- 
+2.53.0
+
