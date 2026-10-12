@@ -11,16 +11,19 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "glib-2.0"
 
-WEBOS_VERSION = "1.0.0-26_d1236c28f289d0e40f4d26c5d73ad198158e62bb"
-PR = "r4"
+# Built from the webOS-ports fork: webosose submissions/26 with the LuneOS
+# changes as commits, the CMake 4 fix this recipe used to patch in among them.
+# Plain SRCREV: submission tags are a webosose convention.
+PV = "1.0.0-26+git"
+SRCREV = "80746873c94cfafa4b83ef2d4dd2a94bf2f868ee"
+PR = "r5"
 
 inherit webos_component
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit webos_pkgconfig
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 EXTRA_OECMAKE += "-DWEBOS_CONFIG_BUILD_TESTS:BOOL=TRUE"
 
@@ -29,7 +32,3 @@ FILES:${PN}-tests = "${bindir}/bluetooth-sil-tester"
 
 ALLOW_EMPTY:${PN} = "1"
 EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
-
-# CMake 4: @VAR@ is no longer expanded in unquoted arguments (CMP0053),
-# which broke the install() DESTINATIONs in this component.
-SRC_URI += "file://0001-CMakeLists-use-CMake-variable-syntax-instead-of-VAR.patch"

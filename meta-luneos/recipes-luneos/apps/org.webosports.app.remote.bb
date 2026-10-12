@@ -9,7 +9,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-3.0-only;md5=c79ff39f19dfec
 PV = "1.0.0+git"
 
 # Pinned, never AUTOREV: see org.webosports.service.torch.bb.
-SRCREV = "d54b61085ea3c47d7a841494ef009e261b5dfa75"
+SRCREV = "a32a1067cd5079cb0683a8b6408de3d8decf26f8"
 # Flipper-IRDB, converted into the app's JSON at build time by the app's
 # tools/build-irdb.py; bump this to pick up newer codes.
 SRCREV_irdb = "d126fb1b6f1e114c52b4a8c19839ea65e3a9c24d"

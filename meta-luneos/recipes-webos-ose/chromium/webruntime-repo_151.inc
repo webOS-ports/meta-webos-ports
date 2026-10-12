@@ -84,7 +84,7 @@ WEBRUNTIME_REPO_VERSION = "151"
 SRC_URI = "git://github.com/webos-ports/chromium151.git;protocol=https;branch=main;name=chromium \
     file://0001-bytemuck-fix-build-with-rust-1.95.patch \
 "
-SRCREV = "2fa0f7dbb2f03e3f9eb9b5be4b995aa1656048ae"
+SRCREV = "cacb244520dd299b9db9aaa21512b9a866693862"
 
 ERROR_QA:remove = "webos-enh-sub-warning"
 WARN_QA:remove = "webos-enh-sub-warning"

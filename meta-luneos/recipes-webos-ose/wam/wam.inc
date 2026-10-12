@@ -18,11 +18,11 @@ RDEPENDS:${PN} += "util-linux"
 VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_cpushareholder}"
 
-SRCREV = "77de3a1c1bc5281e32916f9355e9e5ca7a28bb4c"
+SRCREV = "2e6fcb63081673d8bd44c294a3cb18803f01a87e"
 
 PV = "1.0.2-100"
 
-INC_PR = "r89"
+INC_PR = "r91"
 
 WAM_BUILD_SYSTEM ?= "webos_cmake"
 WAM_BUILD_DEFAULT_PLUGIN ?= "1"
