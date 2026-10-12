@@ -17,18 +17,20 @@ WEBOS_BLUETOOTH_ENABLED_SERVICE_CLASSES ??= ""
 # Add runtime dependency on bluez5 OBEX service when we have to support FTP
 RDEPENDS:${PN} += "${@ bb.utils.contains('WEBOS_BLUETOOTH_ENABLED_SERVICE_CLASSES', 'FTP', 'bluez5-obex', '', d)}"
 
-WEBOS_VERSION = "0.1.0-87_91ed8541e63b298cda488585595a782b095da90c"
-PR = "r13"
+# Built from the webOS-ports fork: webosose submissions/87 with the LuneOS
+# changes as commits. Plain SRCREV: submission tags are a webosose convention.
+PV = "0.1.0-87+git"
+SRCREV = "b52f79e55b06f880f10c0f83d3ce27edf17d1113"
+PR = "r14"
 
 inherit webos_component
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit webos_pkgconfig
 inherit webos_bluetooth_sil
 inherit python3native
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 # FIXME-buildpaths!!!
 # [WRP-10883] buildpath QA issues
