@@ -16,7 +16,7 @@ PV = "1.0.0-1+git"
 # at PARSE time, so a repo that is unreachable - or, as happened here, not yet
 # pushed - halts parsing for the entire layer rather than failing this one
 # recipe, taking every other build sharing that layer with it.
-SRCREV = "d447e6f92b1a46b8597e93571c33ace45b7760a5"
+SRCREV = "6c902444f2a9260dbce129bac6ff7dd0bc32bbad"
 
 inherit webos_ports_repo
 inherit webos_cmake

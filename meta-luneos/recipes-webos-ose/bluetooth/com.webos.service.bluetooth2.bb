@@ -48,12 +48,15 @@ WEBOS_BLUETOOTH_ENABLED_SERVICE_CLASSES = "GATT FTP OPP A2DP SPP HFP AVRCP PAN A
 # emulator), which means that the pairing should happen without user intervention.
 WEBOS_BLUETOOTH_PAIRING_IO_CAPABILITY ??= "NoInputNoOutput"
 
-WEBOS_VERSION = "1.0.0-79_e5c85df2c743755aace12c613ced5627392a2c4b"
-PR = "r12"
+# Built from the webOS-ports fork: webosose submissions/79 with the LuneOS
+# changes as commits, the two patches this recipe used to apply among them.
+# Plain SRCREV: submission tags are a webosose convention.
+PV = "1.0.0-79+git"
+SRCREV = "f0babdaba5e45458688429646f5da1e369c0c9de"
+PR = "r13"
 
 inherit webos_component
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit webos_daemon
 inherit webos_system_bus
@@ -70,10 +73,7 @@ EXTRA_OECMAKE += "-DWEBOS_BLUETOOTH_PAIRING_IO_CAPABILITY:STRING='${WEBOS_BLUETO
 
 PACKAGECONFIG[support-response-bt-prepare-suspend-done] = "-DSUPPORT_RESPONSE_BT_PREPARE_SUSPEND_DONE:BOOL=true,-DSUPPORT_RESPONSE_BT_PREPARE_SUSPEND_DONE:BOOL=false,"
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-com.webos.service.bluetooth2.role.json.in-Add-additi.patch \
-    file://0002-main-handle-SIGTERM-and-SIGINT-from-the-main-loop.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "webos-bluetooth-service.service"
