@@ -19,11 +19,11 @@ RCONFLICTS:${PN} += "imemanager"
 
 PACKAGECONFIG[libim] = "CONFIG+=enable-libim,CONFIG-=enable-libim,libim"
 
-SRCREV = "2376ff2b4c2d1f7b34cdbf9630157133909d22cc"
+SRCREV = "a4d44f3e94184707d35e5e55883b9837a47368cc"
 
 PV = "0.99.0+20-1040"
 
-PR = "r66"
+PR = "r67"
 
 inherit pkgconfig
 inherit webos_qmake6
