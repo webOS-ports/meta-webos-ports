@@ -1,0 +1,75 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] dqevent: fall back to the 120-byte struct on pre-4.0 kernels
+
+The old Halium device kernels that were forward-ported to build v4l2loopback
+(the HP TouchPad's 3.4 tree) define struct v4l2_event with a 4-byte-aligned
+union: it has no __s64 member there, so the struct is 120 bytes. glibc's modern
+uapi pads the union to 8 bytes (v4l2_event_ctrl carries __s64), making the
+struct 128 bytes - so VIDIOC_DQEVENT encodes a different _IOC_SIZE and the old
+kernel does not recognise it, returning EINVAL. VIDIOC_SUBSCRIBE_EVENT is
+unaffected (its argument has no timespec/union), which is why subscribing works
+but dequeuing fails.
+
+Issue the dequeue with the kernel's 120-byte layout as a fallback, only after
+the standard call fails with EINVAL. type and the event payload sit at the same
+offsets in both layouts, so the client-usage handling below is unchanged. On
+4.0+ kernels the 128-byte struct matches and the fallback never runs.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [LuneOS support for forward-ported pre-4.0 kernels]
+---
+ src/droidcam2v4l2.c | 34 ++++++++++++++++++++++++++++++++++
+ 1 file changed, 34 insertions(+)
+
+diff --git a/src/droidcam2v4l2.c b/src/droidcam2v4l2.c
+index 0000000..0000001 100644
+--- a/src/droidcam2v4l2.c
++++ b/src/droidcam2v4l2.c
+@@ -558,6 +558,28 @@ stop_preview(camera_config *conf)
+     pthread_mutex_unlock(&camera_lock);
+ }
+ 
++/*
++ * Pre-4.0 kernels forward-ported for v4l2loopback (e.g. the HP TouchPad's 3.4
++ * tree) define struct v4l2_event with a 4-byte-aligned union - it has no __s64
++ * member there - so the struct is 120 bytes. glibc's modern uapi pads the union
++ * to 8 bytes (it carries __s64 in v4l2_event_ctrl), making the struct 128 bytes
++ * and VIDIOC_DQEVENT a different ioctl number that such kernels reject (EINVAL).
++ * This is the kernel's 120-byte layout and matching dequeue request; it is used
++ * only as a fallback when the standard call fails with EINVAL, so modern (4.0+)
++ * kernels, where the 128-byte struct matches, are unaffected.
++ */
++struct v4l2_event_k120 {
++	__u32 type;
++	union {
++		__u8 data[64];
++	} u;
++	__u32 pending;
++	__u32 sequence;
++	struct timespec timestamp;
++	__u32 reserved[9];
++};
++#define VIDIOC_DQEVENT_K120 _IOR('V', 89, struct v4l2_event_k120)
++
+ void*
+ camera_event_loop(void *userdata)
+ {
+@@ -570,6 +592,18 @@ camera_event_loop(void *userdata)
+         struct v4l2_event event;
+         g_debug("[CAMERA %d] Waiting for events...", conf->v4l2_idx);
+         int ret = ioctl(conf->v4l2_fd, VIDIOC_DQEVENT, &event);
++        if (ret < 0 && errno == EINVAL) {
++            /* Old (pre-4.0) kernel with the 120-byte struct v4l2_event: retry
++             * with its layout. type and u sit at the same offsets, so the
++             * client-usage payload below still reads correctly. */
++            struct v4l2_event_k120 ek;
++            ret = ioctl(conf->v4l2_fd, VIDIOC_DQEVENT_K120, &ek);
++            if (ret >= 0) {
++                memset(&event, 0, sizeof(event));
++                event.type = ek.type;
++                memcpy(event.u.data, ek.u.data, sizeof(ek.u.data));
++            }
++        }
+         if (ret < 0) {
+             if (errno == EBADF) {
+                 if (!conf->asleep)
