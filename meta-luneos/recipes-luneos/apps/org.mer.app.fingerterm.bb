@@ -4,7 +4,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263"
 
 SPV = "1.4.17"
 PV = "${SPV}+git"
-SRCREV = "37e83d224beb997cec61090fb78f780d5a20db90"
+SRCREV = "86d424ecf16dc42d14923cca706c763265c9729d"
 WEBOS_REPO_NAME = "fingerterm"
 WEBOS_GIT_PARAM_BRANCH = "herrie/qt6-rebase"
 

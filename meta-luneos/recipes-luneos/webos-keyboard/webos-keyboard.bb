@@ -24,7 +24,7 @@ RDEPENDS:${PN} += "maliit-framework-webos qtsvg-plugins qtmultimedia-qmlplugins"
 RRECOMMENDS:${PN} += "hunspell-dictionaries"
 
 
-SRCREV = "f61e50b89f4484fde45a61bc9789b48aec95d6db"
+SRCREV = "17a9fb6b8af82da306b270b5510737adb4560bac"
 PV = "0.99.2+git"
 PR = "r32"
 
