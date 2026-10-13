@@ -87,7 +87,6 @@ RDEPENDS:${PN} = " \
   org.webosports.app.phone \
   org.webosports.app.photos \
   ${VIRTUAL-RUNTIME_settingsapp} \
-  org.webosports.app.tasks \
   \
   org.webosports.cdav \
   org.webosports.tweaks \
