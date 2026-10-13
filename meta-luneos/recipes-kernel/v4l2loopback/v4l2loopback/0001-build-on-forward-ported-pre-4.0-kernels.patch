@@ -1,0 +1,60 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] build on forward-ported pre-4.0 kernels
+
+Upstream gates this module off below Linux 4.0 with a hard #error, because it
+uses the idr allocator, timespec64/ktime_get_ts64, list_first_entry_or_null,
+the modern colorspace/buffer-timestamp/event-subscription enumerators, struct
+v4l2_subscribed_event_ops and the video_device vfl_dir/dev_debug fields - none
+of which the stock pre-4.0 V4L2 core has.
+
+On LuneOS the old Halium device kernels that need a /dev/video bridge
+(droidcam2v4l2) have those symbols backported additively into their V4L2 core
+(the per-device shr-distribution/linux branches). With that in place the only
+thing the kernel cannot provide is mapping the modern four-argument
+v4l2_event_subscribe() onto the arity its core actually keeps, because the
+signature changed across the 2.6.29 -> 4.0 range these kernels span. Relax the
+version gate and, below 4.0, map the call: a forward-ported kernel defines
+V4L2L_SUBSCRIBE_TAKES_ELEMS (in <media/v4l2-event.h>) when its core function is
+the three-argument (fh, sub, elems) form, otherwise the oldest two-argument form
+is used. The per-subscription element count and the (here unused) event ops are
+handled kernel-side.
+
+The change is confined to LINUX_VERSION_CODE < 4.0.0, so builds on 4.0+ kernels
+(every other Halium device using this recipe) are byte-for-byte unaffected.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [upstream intentionally requires kernel >= 4.0]
+---
+ v4l2loopback.c | 25 +++++++++++++++++++++++-
+ 1 file changed, 24 insertions(+), 1 deletion(-)
+
+--- a/v4l2loopback.c
++++ b/v4l2loopback.c
+@@ -39,7 +39,26 @@
+ #define V4L2LOOPBACK_CTL_QUERY_legacy 0x4C82
+ 
+ #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)
+-#error This module is not supported on kernels before 4.0.0.
++/* LuneOS: build on the forward-ported pre-4.0 Halium device kernels, whose
++ * V4L2 core has been extended additively with the idr allocator, timespec64 /
++ * ktime_get_ts64, list_first_entry_or_null, the colorspace / buffer-timestamp /
++ * event-subscription enumerators, device_caps, struct v4l2_subscribed_event_ops
++ * and the video_device vfl_dir / dev_debug fields this module uses (see the
++ * per-device shr-distribution/linux branches). The one thing that cannot live
++ * in the kernel is matching the modern four-argument v4l2_event_subscribe() to
++ * the arity that tree's core actually keeps, which varies across the
++ * 2.6.29 -> 4.0 span these kernels cover. A forward-ported kernel advertises it
++ * through <media/v4l2-event.h>: V4L2L_SUBSCRIBE_TAKES_OPS when the core already
++ * has the four-argument form (call it directly), V4L2L_SUBSCRIBE_TAKES_ELEMS
++ * for the three-argument (fh, sub, elems) form, else the oldest two-argument
++ * form. The per-subscription ops are handled kernel-side and dropped here. */
++#ifdef V4L2L_SUBSCRIBE_TAKES_OPS
++/* core already takes (fh, sub, elems, ops); no remapping needed */
++#elif defined(V4L2L_SUBSCRIBE_TAKES_ELEMS)
++#define v4l2_event_subscribe(fh, sub, elems, ops) (v4l2_event_subscribe)(fh, sub, elems)
++#else
++#define v4l2_event_subscribe(fh, sub, elems, ops) (v4l2_event_subscribe)(fh, sub)
++#endif
+ #endif
+ 
+ #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 3, 0)
