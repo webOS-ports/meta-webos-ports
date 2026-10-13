@@ -21,6 +21,7 @@ SRC_URI = " \
     file://kbdscroll.service \
     file://profiles/athena.conf \
     file://profiles/q25.conf \
+    file://profiles/titan_pocket.conf \
 "
 
 # file:// sources land directly in UNPACKDIR; there is no ${BP} subdirectory.
