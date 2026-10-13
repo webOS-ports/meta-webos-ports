@@ -1,0 +1,162 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] adapt preview format/rate to the camera, convert NV21, skip AF on fixed-focus
+
+droidcam2v4l2 hardcoded preview-format=yuv420p and preview-frame-rate=30 and
+always drove autofocus. That holds on modern sensors but not on old Qualcomm
+HALs such as the HP TouchPad's: it advertises preview-format-values=yuv420sp
+(NV21 only, no yuv420p), preview-frame-rate-values=31 (no 30) and
+focus-mode-values=infinity (fixed focus, no AF). The hardcoded parameters made
+set_parameters() reject the whole call ("Failed to add parameters"), and even
+once that was fixed, start_auto_focus() blocked forever on the AF-less sensor,
+hanging start_preview().
+
+Make it adaptive:
+  - preview-format: keep yuv420p when offered; otherwise request yuv420sp and
+    convert NV21 -> I420 (libyuv) per frame before the existing rotate/write,
+    since the v4l2loopback node is planar I420.
+  - preview-frame-rate: prefer 30, else the first advertised rate.
+  - autofocus: only call start_auto_focus() (at start and per frame) when the
+    camera advertises an auto/continuous focus mode.
+
+Modern cameras that support yuv420p / 30 fps / autofocus are unchanged (no
+conversion, AF still driven). Verified on the TouchPad: real preview frames now
+reach /dev/videoN.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/droidcam2v4l2.c | 70 +++++++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 66 insertions(+), 4 deletions(-)
+
+diff --git a/src/droidcam2v4l2.c b/src/droidcam2v4l2.c
+--- a/src/droidcam2v4l2.c
++++ b/src/droidcam2v4l2.c
+@@ -28,6 +28,7 @@
+ 
+ #include <libyuv.h>
+ #include <libyuv/rotate.h>
++#include <libyuv/convert.h>
+ 
+ /* These variables are not necessarily the exact size we'll end up getting.
+  * We'll do our best to get as close as possible.
+@@ -54,6 +55,14 @@
+ 
+     bool asleep;
+     pthread_t thread;
++
++    /* True when the camera only offers yuv420sp (NV21) preview, so frames must
++     * be converted to the planar I420 the v4l2loopback node expects. */
++    bool nv21;
++
++    /* True only when the camera advertises an auto/continuous focus mode.
++     * Fixed-focus (infinity-only) sensors hang in start_auto_focus(). */
++    bool autofocus;
+ } camera_config;
+ 
+ camera_config cameras[MAX_CAMERAS];
+@@ -375,13 +384,36 @@
+         last_intermediate_size = y_size + uv_size * 2;
+     }
+ 
+-    /* we need to pump focus every frame to keep it focused on movement */
+-    droid_media_camera_start_auto_focus(cfg->camera);
++    /* we need to pump focus every frame to keep it focused on movement
++     * (only for cameras that actually have autofocus) */
++    if (cfg->autofocus)
++        droid_media_camera_start_auto_focus(cfg->camera);
++
++    /* Cameras that deliver NV21 (yuv420sp) give Y plane + interleaved VU; the
++     * rotate/write path below expects planar I420, so convert first. */
++    const uint8_t *src = (const uint8_t *) data->data;
++    if (cfg->nv21) {
++        static size_t i420_size = 0;
++        static uint8_t *i420 = NULL;
++        if ((size_t)(y_size + uv_size * 2) > i420_size) {
++            if (i420)
++                free(i420);
++            i420 = malloc(y_size + uv_size * 2);
++            i420_size = y_size + uv_size * 2;
++        }
++        NV21ToI420((const uint8_t *) data->data, cfg->width,
++                   (const uint8_t *) data->data + y_size, cfg->width,
++                   i420, cfg->width,
++                   i420 + y_size, cfg->width / 2,
++                   i420 + y_size + uv_size, cfg->width / 2,
++                   cfg->width, cfg->height);
++        src = i420;
++    }
+ 
+     /* Intermediate buffer ends up giving us a nice chance to rotate the image. */
+-    rotate_yuv420p(data->data,                      /* Source Y */
+-                   data->data + y_size,             /* Source U */
+-                   data->data + y_size + uv_size,   /* Source V */
++    rotate_yuv420p(src,                             /* Source Y */
++                   src + y_size,                    /* Source U */
++                   src + y_size + uv_size,          /* Source V */
+                    intermediate,                    /* Destination Y */
+                    intermediate + y_size + uv_size, /* Destination U (swapped!) */
+                    intermediate + y_size,           /* Destination V (swapped!) */
+@@ -465,8 +497,42 @@
+         return NULL;
+     }
+ 
+-    /* everything we get from droidmedia supports yuv420p. hardcoding this should be safe */
+-    sprintf(parameter_buffer, "preview-size=%dx%d;preview-frame-rate=30;preview-format=yuv420p;", width, height);
++    /* Pick a preview format and frame rate the camera actually supports. Prefer
++     * yuv420p (planar I420, consumed directly by the frame callback); if only
++     * yuv420sp (NV21) is offered - as old Qualcomm HALs do - request that and
++     * convert per frame. Prefer 30 fps but fall back to an advertised rate.
++     * Setting an unsupported value makes the HAL reject the whole call. */
++    char supported[1024];
++    const char *preview_format = "yuv420p";
++    bool need_nv21_convert = false;
++    if (droid_media_camera_get_parameter_value(camera, "preview-format-values", supported, sizeof(supported), NULL) > 0
++        && !strstr(supported, "yuv420p")) {
++        preview_format = "yuv420sp";
++        need_nv21_convert = true;
++    }
++
++    /* Fixed-focus sensors advertise only "infinity" and hang in
++     * start_auto_focus(); only drive AF when auto/continuous is offered. */
++    bool has_autofocus = false;
++    if (droid_media_camera_get_parameter_value(camera, "focus-mode-values", supported, sizeof(supported), NULL) > 0)
++        has_autofocus = (strstr(supported, "auto") != NULL) || (strstr(supported, "continuous") != NULL);
++
++    int frame_rate = 30;
++    if (droid_media_camera_get_parameter_value(camera, "preview-frame-rate-values", supported, sizeof(supported), NULL) > 0) {
++        bool has_30 = false;
++        int first_rate = -1;
++        for (char *tok = strtok(supported, ","); tok; tok = strtok(NULL, ",")) {
++            int v = atoi(tok);
++            if (first_rate < 0)
++                first_rate = v;
++            if (v == 30)
++                has_30 = true;
++        }
++        if (!has_30 && first_rate > 0)
++            frame_rate = first_rate;
++    }
++
++    sprintf(parameter_buffer, "preview-size=%dx%d;preview-frame-rate=%d;preview-format=%s;", width, height, frame_rate, preview_format);
+ 
+     /* OK, close the camera to give direct consumers a chance (and to let the camera HAL sleep)
+      * It will be reopened on demand. */
+@@ -496,6 +562,8 @@
+     conf->camera = NULL;
+     conf->camera_idx = index;
+     conf->parameters = strdup(parameter_buffer);
++    conf->nv21 = need_nv21_convert;
++    conf->autofocus = has_autofocus;
+ 
+     return conf;
+ }
+@@ -534,7 +602,8 @@
+     callbacks.preview_frame_cb = preview_frame_callback;
+     droid_media_camera_set_callbacks(conf->camera, &callbacks, conf);
+ 
+-    droid_media_camera_start_auto_focus(conf->camera);
++    if (conf->autofocus)
++        droid_media_camera_start_auto_focus(conf->camera);
+ 
+     if (!droid_media_camera_start_preview(conf->camera)) {
+         g_warning("[CAMERA %d] Failed to start preview.", conf->v4l2_idx);

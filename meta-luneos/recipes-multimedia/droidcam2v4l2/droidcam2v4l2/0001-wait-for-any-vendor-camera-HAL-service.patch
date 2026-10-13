@@ -1,0 +1,76 @@
+From 822725d04cb12e1db6f50780fbec35dcdc8db131 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Mon, 12 Oct 2026 12:04:25 +0200
+Subject: [PATCH] Wait for any vendor's camera HAL service, not just
+ camerahalserver
+
+The daemon blocked forever on init.svc.camerahalserver=running, which is the
+MediaTek/FuriLabs vendor's service name. Qualcomm (and other) vendors call it
+vendor.camera-provider-2-4, camera_service, cameraserver, etc., so droidcam2v4l2
+never started on them. Wait for any of a small list of known names (or an
+explicit $DROIDCAM2V4L2_SERVICE override) so one binary works across Halium
+vendors.
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/droidcam2v4l2.c | 40 +++++++++++++++++++++++++++++++++++-----
+ 1 file changed, 35 insertions(+), 5 deletions(-)
+
+diff --git a/src/droidcam2v4l2.c b/src/droidcam2v4l2.c
+index 14c0bf8..6e36f14 100644
+--- a/src/droidcam2v4l2.c
++++ b/src/droidcam2v4l2.c
+@@ -725,15 +725,45 @@ main(int argc, char *argv[])
+     int desired_camera;
+     char service_state[PROP_VALUE_MAX];
+ 
++    /* The Android service that signals "the camera HAL is up" is named
++     * differently per vendor: camerahalserver on MediaTek/FuriLabs, but
++     * vendor.camera-provider-2-4 / camera_service on Qualcomm, and so on.
++     * Wait for any known one so the same binary works across Halium vendors.
++     * The name may also be given explicitly in $DROIDCAM2V4L2_SERVICE. */
++    static const char * const camera_services[] = {
++        "camerahalserver",
++        "vendor.camera-provider-2-4",
++        "camera-provider-2-4",
++        "cameraserver",
++        "camera_service",
++        NULL,
++    };
++    const char *forced_service = getenv("DROIDCAM2V4L2_SERVICE");
++
+     while (1) {
+-        g_debug("waiting for camerahalserver to start...");
+-        property_get("init.svc.camerahalserver", service_state, "");
++        int running = 0;
++        char key[128];
++
++        if (forced_service && *forced_service) {
++            snprintf(key, sizeof(key), "init.svc.%s", forced_service);
++            property_get(key, service_state, "");
++            running = (strcmp(service_state, "running") == 0);
++        } else {
++            for (int i = 0; camera_services[i] != NULL; ++i) {
++                snprintf(key, sizeof(key), "init.svc.%s", camera_services[i]);
++                property_get(key, service_state, "");
++                if (strcmp(service_state, "running") == 0) {
++                    g_debug("%s is running", camera_services[i]);
++                    running = 1;
++                    break;
++                }
++            }
++        }
+ 
+-        if (strcmp(service_state, "running") == 0) {
+-            g_debug("camerahalserver is running");
++        if (running)
+             break;
+-        }
+ 
++        g_debug("waiting for a camera HAL service to start...");
+         sleep(5);
+     }
+ 
+-- 
+2.53.0
+

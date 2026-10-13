@@ -172,7 +172,16 @@ LIBHYBRIS_RDEPENDS = " \
     ofono-binder-plugin \
     wlan-suspend-mode \
     wlan-dynamic-start \
+    \
+    droidcam2v4l2 \
 "
+# droidcam2v4l2 bridges each Android (droidmedia) camera to a V4L2 node so
+# ordinary Linux V4L2 consumers (browsers/WebRTC, video-call apps) see the
+# cameras; LuneOS's own camera app still uses gst-droid. Generic to every
+# Halium device, hence here rather than per-machine. Its kernel half,
+# v4l2loopback, is an out-of-tree module and so is named per-machine in
+# MACHINE_EXTRA_RDEPENDS (like wireguard-module); where it is absent the
+# droidcam2v4l2 service is a clean no-op (ConditionPathExists=/dev/v4l2loopback).
 
 # Fingerprint stack: biomd talks to the Android biometrics HAL over binder
 # through libgbinder, webos-fingerprint-adapter bridges its D-Bus API onto the
