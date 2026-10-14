@@ -21,11 +21,13 @@ inherit kernel-artifact-names deploy nopackages
 #
 # vbmeta: the machine's own vbmeta-disabled.img when it deploys one, otherwise
 # one generated here - an AvbVBMetaImageHeader with no key, no signature and no
-# descriptors and AVB_VBMETA_IMAGE_FLAGS_VERIFICATION_DISABLED (2) set, which is
-# what "avbtool make_vbmeta_image --flags 2" writes. The same image as
-# luneos-odin-package's; on the SM-T220 (MT6765) bring-up it is what flashing
-# needed. Only meaningful with the bootloader unlocked. A machine with no
-# vbmeta partition sets FASTBOOT_VBMETA_PARTITION = "".
+# descriptors and flags 3 (HASHTREE_DISABLED | VERIFICATION_DISABLED), which is
+# what "avbtool make_vbmeta_image --flags 3" writes. Droidian and FuriOS ship
+# the same image. flash.sh writes either one with --disable-verity
+# --disable-verification, as UBports and Sailfish OS do, so a machine's own
+# vbmeta ends at flags 3 too. (luneos-odin-package keeps flags 2: Odin has no
+# such options.) Only meaningful with the bootloader unlocked. A machine with
+# no vbmeta partition sets FASTBOOT_VBMETA_PARTITION = "".
 FASTBOOT_VBMETA_IMAGE ?= "vbmeta-disabled.img"
 FASTBOOT_VBMETA_PARTITION ?= "vbmeta"
 
@@ -76,12 +78,12 @@ import struct, sys
 fmt = '>4sIIQQI10QQII48s80x'
 hdr = struct.pack(fmt, b'AVB0', 1, 0, 0, 0, 0,
                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                  0, 2, 0, b'avbtool 1.2.0')
+                  0, 3, 0, b'avbtool 1.2.0')
 assert len(hdr) == 256
 open(sys.argv[1], 'wb').write(hdr.ljust(4096, b'\0'))
 PYEOF
         fi
-        vbmeta_line="fastboot flash ${FASTBOOT_VBMETA_PARTITION} vbmeta.img"
+        vbmeta_line="fastboot --disable-verity --disable-verification flash ${FASTBOOT_VBMETA_PARTITION} vbmeta.img"
     fi
 
     boot_lines=""
