@@ -19,7 +19,7 @@ SRC_URI = "git://github.com/umlaeute/v4l2loopback.git;branch=main;protocol=https
 # 4-arg v4l2_event_subscribe() onto whichever arity (2/3/4-arg) the tree's core
 # keeps; it is a no-op on 4.0+ kernels, so the many Halium devices on 4.x/5.x
 # kernels are unaffected. The pre-4.0 devices (tenderloin, hammerhead, mako,
-# sm-t520, bullhead, a002, goyavewifi, a3-2015) each carry the V4L2-core
+# sm-t520, bullhead, a002, goyavewifi, a3-2015, flo-halium) each carry the V4L2-core
 # forward-port the patch header describes in their shr-distribution/linux branch.
 SRCREV = "0f9ee86760b7f2bea174b7e3e7a1d38845da0ab4"
 PV = "0.15.4"
