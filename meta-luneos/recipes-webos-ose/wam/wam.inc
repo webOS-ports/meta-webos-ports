@@ -22,7 +22,7 @@ SRCREV = "2e6fcb63081673d8bd44c294a3cb18803f01a87e"
 
 PV = "1.0.2-100"
 
-INC_PR = "r91"
+INC_PR = "r92"
 
 WAM_BUILD_SYSTEM ?= "webos_cmake"
 WAM_BUILD_DEFAULT_PLUGIN ?= "1"
@@ -40,6 +40,9 @@ inherit useradd
 WAM_DATA_DIR = "${webos_execstatedir}/${BPN}"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+
+# Restarts WebAppMgr together with the compositor; see the file.
+SRC_URI += "file://webapp-mgr-compositor.conf"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 
@@ -80,6 +83,10 @@ do_install:append() {
     # add loaderror.html and geterror.js to next to resources directory (webos_localization_resources_dir)
     install -d ${D}${datadir}/localization/${BPN}/
     cp -vf ${WAM_ERROR_SCRIPTS_PATH}/* ${D}${datadir}/localization/${BPN}/
+
+    install -d ${D}${systemd_system_unitdir}/webapp-mgr.service.d
+    install -v -m 0644 ${UNPACKDIR}/webapp-mgr-compositor.conf \
+        ${D}${systemd_system_unitdir}/webapp-mgr.service.d/
 }
 
 WEBOS_SYSTEMD_SERVICE = "webapp-mgr.service"
