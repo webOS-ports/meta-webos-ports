@@ -4,7 +4,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 PV = "0.5+git"
 
-SRCREV = "0f60b71a1dfa8fbc0674b7629ba061e4def8a1c4"
+SRCREV = "88cdc3ea19b5221c0305028e3ff3c7a57dd21b63"
 
 PR = "r4"
 
