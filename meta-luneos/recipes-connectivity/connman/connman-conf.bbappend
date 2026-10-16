@@ -67,8 +67,15 @@ do_install:append() {
 # Scoped per machine until radon became the third MediaTek device to hit it, so
 # folded into :halium - ccmni exists only behind an Android container, so the
 # entry is inert on anything else.
+#
+# rmnet_usb: the Qualcomm QMI data links to a modem on HSIC (the Nexus 4's
+# MDM9215: rmnet_usb0..3) are Ethernet-type netdevs, so connman made each one a
+# "Wired" service and brought it to ready. With those ready the phone did not
+# join its known Wi-Fi network at boot (mako-halium, 16 Oct 2026); joining by
+# hand worked, and with this entry connman rejoined it by itself. Mobile data on
+# these links is ofono's.
 do_install:append:halium() {
-    sed -i 's/^\(NetworkInterfaceBlacklist = .*\)$/\1,wlan1,p2p0,aware_nmi,p2p-dev,p2p,ccmni-lan/' \
+    sed -i 's/^\(NetworkInterfaceBlacklist = .*\)$/\1,wlan1,p2p0,aware_nmi,p2p-dev,p2p,ccmni-lan,rmnet_usb/' \
         ${D}${sysconfdir}/connman/main.conf
 }
 
