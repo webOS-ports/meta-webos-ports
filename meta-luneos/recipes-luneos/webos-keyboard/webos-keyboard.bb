@@ -24,9 +24,9 @@ RDEPENDS:${PN} += "maliit-framework-webos qtsvg-plugins qtmultimedia-qmlplugins"
 RRECOMMENDS:${PN} += "hunspell-dictionaries"
 
 
-SRCREV = "84da9d70a4a2d93883e37cc29f68566a0e2a4c8d"
+SRCREV = "715bee551ae984aff941e20ea1e2fd0dae982508"
 PV = "0.99.2+git"
-PR = "r32"
+PR = "r33"
 
 # We own webos-keyboard, so fixes belong in its actual source history, not
 # as patches carried here - unlike presage or imemanager, which are genuinely
