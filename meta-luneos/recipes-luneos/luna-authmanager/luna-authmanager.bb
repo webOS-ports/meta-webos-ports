@@ -3,10 +3,12 @@ SECTION = "webos/base"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-DEPENDS = "glib-2.0 luna-service2 json-c qtbase"
+DEPENDS = "glib-2.0 luna-service2 json-c qtbase libxcrypt"
 
 PV = "1.0.0+git"
-SRCREV = "3a224ec200a2ad244cc4e662e6df3b2a56bbfe64"
+SRCREV = "5ec2fa59cd1fb569c669633ddc85427950e1279d"
+# 5ec2fa59 is on herrie/auth-verify (luna-authmanager PR #1), not yet merged into master; back to that branch once it is.
+WEBOS_GIT_PARAM_BRANCH = "herrie/auth-verify"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 
