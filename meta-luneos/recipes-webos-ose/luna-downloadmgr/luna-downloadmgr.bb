@@ -17,7 +17,7 @@ RDEPENDS:${PN} = "applicationinstallerutility"
 # commits - so the four patches this recipe used to apply are history there.
 # Plain SRCREV: submission tags are a webosose convention, absent on this branch.
 PV = "4.0.0-15+git"
-SRCREV = "ec112abe2c0c4021c96e9e761d73fc33623fb320"
+SRCREV = "06aa20d83cb0baabf917a8304ee76268d6d57fd5"
 PR = "r15"
 
 inherit webos_component
