@@ -1,5 +1,7 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 
+PR = "r1"
+
 # The GStreamer-specific Qt SPI (QGStreamerVideoSource + QGStreamerInterface,
 # QtMultimedia/spi/) is off by default (AUTODETECT false). The Camera app
 # needs it on Halium devices to feed gst-droid's droidcamsrc into a
