@@ -17,3 +17,7 @@ SRC_URI += "file://0004-gstreamer-imagecapture-write-an-encoded-image-not-the-ra
 SRC_URI += "file://0005-gstreamer-rank-camera-pixel-formats-instead-of-opening-in-greyscale.patch"
 
 SRC_URI += "file://0006-gstreamer-mediarecorder-apply-the-audio-settings-to-the-encoder.patch"
+
+SRC_URI += "file://0007-video-pack-padded-rows-before-uploading-them-where-the-RHI-cannot-take-a-stride.patch"
+
+SRC_URI += "file://0008-gstreamer-show-gst-droid-hardware-decoder-buffers-as-external-textures.patch"
