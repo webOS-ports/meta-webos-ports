@@ -76,6 +76,7 @@ RDEPENDS:${PN} = " \
   ${VIRTUAL-RUNTIME_speech_synthesis} \
   \
   com.palm.app.backup \
+  com.palm.stark.files \
   org.webosports.app.atlas \
   org.webosports.app.authenticator \
   org.webosports.app.calculator \
