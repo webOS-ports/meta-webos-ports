@@ -76,8 +76,10 @@ RDEPENDS:${PN} = " \
   \
   com.palm.app.backup \
   org.webosports.app.atlas \
+  org.webosports.app.authenticator \
   org.webosports.app.calculator \
   org.webosports.app.contacts \
+  org.webosports.app.documents \
   org.webosports.app.filemanager \
   org.webosports.app.firstuse \
   org.webosports.app.maps \
@@ -86,6 +88,11 @@ RDEPENDS:${PN} = " \
   org.webosports.app.pdf \
   org.webosports.app.phone \
   org.webosports.app.photos \
+  org.webosports.app.simtoolkit \
+  org.webosports.app.soundrecorder \
+  org.webosports.app.sysmonitor \
+  org.webosports.app.videoplayer \
+  org.webosports.app.weather \
   ${VIRTUAL-RUNTIME_settingsapp} \
   \
   org.webosports.cdav \
