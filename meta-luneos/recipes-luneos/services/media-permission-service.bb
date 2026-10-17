@@ -9,7 +9,7 @@ inherit allarch
 inherit webos_filesystem_paths
 
 PV = "0.1.0+git"
-SRCREV = "5010b7e7021bd1c2b32f1ae968d39159b77a9b15"
+SRCREV = "0d89db371e4c6860031d12894326e4ed9973520a"
 SERVICE_NAME = "com.palm.mediapermissions"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
