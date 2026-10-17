@@ -1,0 +1,65 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 16 Oct 2026 16:46:30 +0200
+Subject: [PATCH] droidvdec: do not take the stream lock again in drain()
+
+GstVideoDecoder calls drain() with the stream lock held
+(gst_video_decoder_drain_out(): "This function has to be called with the
+stream lock taken"). gst_droidvdec_drain() took it a second time, and
+_finish () only lets go of it once while it waits for the codec's EOS. The
+lock stayed held through that wait, so the codec's callbacks, which need
+it (_size_changed (), _frame_available ()), blocked, EOS never came, and
+the pipeline hung on its first drain. playbin3/decodebin3 drain the decoder
+right after it starts, so with droidvdec's hardware-buffer output every
+video stopped there: on the HP TouchPad, Qt Multimedia's player stayed at
+"Loading" with the decoder thread in _finish () and the codec callback
+thread in _size_changed () waiting on the stream lock.
+
+Rely on the base class's hold of the lock instead.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ gst/droidcodec/gstdroidvdec.c | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/gst/droidcodec/gstdroidvdec.c b/gst/droidcodec/gstdroidvdec.c
+index 01376ca..5644b8d 100644
+--- a/gst/droidcodec/gstdroidvdec.c
++++ b/gst/droidcodec/gstdroidvdec.c
+@@ -1303,21 +1303,23 @@ gst_droidvdec_drain (GstVideoDecoder * decoder)
+ 
+   GST_DEBUG_OBJECT (dec, "drain");
+ 
+-  GST_VIDEO_DECODER_STREAM_LOCK (decoder);
++  /* GstVideoDecoder calls drain() with the stream lock already held, and
++   * _finish () lets go of it once while it waits for the codec's EOS, so the
++   * codec's callbacks (_size_changed (), _frame_available ()) can take it.
++   * Taking it again here would leave it held through that wait: the callbacks
++   * block, EOS never comes, and the pipeline hangs on its first drain. */
+ 
+   GST_DROIDVDEC_STATE_LOCK (dec);
+ 
+   if (G_UNLIKELY (!dec->running)) {
+     GST_DEBUG_OBJECT (dec, "codec is not running");
+     GST_DROIDVDEC_STATE_UNLOCK (dec);
+-    GST_VIDEO_DECODER_STREAM_UNLOCK (decoder);
+     return GST_FLOW_FLUSHING;
+   }
+ 
+   if (dec->state == GST_DROID_VDEC_STATE_WAITING_FOR_EOS) {
+     GST_DEBUG_OBJECT (dec, "already draining");
+     GST_DROIDVDEC_STATE_UNLOCK (dec);
+-    GST_VIDEO_DECODER_STREAM_UNLOCK (decoder);
+     return GST_FLOW_EOS;
+   }
+ 
+@@ -1325,8 +1327,6 @@ gst_droidvdec_drain (GstVideoDecoder * decoder)
+ 
+   ret = gst_droidvdec_finish (decoder);
+ 
+-  GST_VIDEO_DECODER_STREAM_UNLOCK (decoder);
+-
+   return ret;
+ }
+ 

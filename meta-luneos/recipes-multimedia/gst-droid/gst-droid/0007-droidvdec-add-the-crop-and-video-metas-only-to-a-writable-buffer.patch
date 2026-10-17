@@ -1,0 +1,71 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 16 Oct 2026 16:46:31 +0200
+Subject: [PATCH] droidvdec: add the crop and video metas only to a
+ writable buffer
+
+_frame_available () takes the GstBuffer that belongs to the droid buffer the
+codec has just filled and adds a crop meta and a video meta to it. After a
+flush (a seek, a change of audio track) the codec can fill a buffer whose
+GstBuffer is still held downstream: a video sink keeps the last frame on
+screen until the next one replaces it. Such a buffer is not writable,
+gst_buffer_add_video_crop_meta () returns NULL ("gst_buffer_add_meta:
+assertion 'gst_buffer_is_writable (buffer)' failed"), and the next line
+wrote through it: Qt Multimedia's player crashed on the HP TouchPad when an
+MKV's audio track was switched, in _frame_available () on the codec's
+callback thread.
+
+A buffer handed back this way still carries the metas of its last use, so
+leave them as they are when it is not writable.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ gst/droidcodec/gstdroidvdec.c | 34 ++++++++++++++++++++++------------
+ 1 file changed, 22 insertions(+), 12 deletions(-)
+
+diff --git a/gst/droidcodec/gstdroidvdec.c b/gst/droidcodec/gstdroidvdec.c
+index 5644b8d..8822406 100644
+--- a/gst/droidcodec/gstdroidvdec.c
++++ b/gst/droidcodec/gstdroidvdec.c
+@@ -545,18 +545,28 @@ gst_droidvdec_frame_available (void *user, DroidMediaBuffer * buffer)
+ 
+   gst_video_info_set_format (&video_info, dec->format, width, height);
+ 
+-  crop_meta = gst_buffer_add_video_crop_meta (buff);
+-  crop_meta->x = droid_info.crop_rect.left;
+-  crop_meta->y = droid_info.crop_rect.top;
+-  crop_meta->width = droid_info.crop_rect.right - droid_info.crop_rect.left;
+-  crop_meta->height = droid_info.crop_rect.bottom - droid_info.crop_rect.top;
+-
+-  GST_LOG_OBJECT (dec, "crop info: x=%d, y=%d, w=%d, h=%d", crop_meta->x,
+-      crop_meta->y, crop_meta->width, crop_meta->height);
+-
+-  gst_buffer_add_video_meta_full (buff, GST_VIDEO_FRAME_FLAG_NONE, dec->format,
+-      droid_info.width, droid_info.height, video_info.finfo->n_planes,
+-      video_info.offset, video_info.stride);
++  /* The pool hands back the GstBuffer that belongs to this droid buffer. After
++   * a flush (a seek, a change of audio track) the codec can fill a buffer whose
++   * GstBuffer the sink still holds - it keeps the frame on screen until the next
++   * one replaces it - and a buffer that is not writable takes no new metas:
++   * gst_buffer_add_video_crop_meta () returns NULL. Such a buffer still carries
++   * the metas of its last use, so leave them be. */
++  if (gst_buffer_is_writable (buff)) {
++    crop_meta = gst_buffer_add_video_crop_meta (buff);
++    crop_meta->x = droid_info.crop_rect.left;
++    crop_meta->y = droid_info.crop_rect.top;
++    crop_meta->width = droid_info.crop_rect.right - droid_info.crop_rect.left;
++    crop_meta->height = droid_info.crop_rect.bottom - droid_info.crop_rect.top;
++
++    GST_LOG_OBJECT (dec, "crop info: x=%d, y=%d, w=%d, h=%d", crop_meta->x,
++        crop_meta->y, crop_meta->width, crop_meta->height);
++
++    gst_buffer_add_video_meta_full (buff, GST_VIDEO_FRAME_FLAG_NONE,
++        dec->format, droid_info.width, droid_info.height,
++        video_info.finfo->n_planes, video_info.offset, video_info.stride);
++  } else {
++    GST_DEBUG_OBJECT (dec, "buffer still held downstream, keeping its metas");
++  }
+ 
+   frame = gst_video_decoder_get_oldest_frame (decoder);
+ 
