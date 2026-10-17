@@ -11,7 +11,7 @@ DEPENDS += "glib-2.0 luna-service2"
 inherit webos_system_bus
 
 WEBOS_VERSION = "3.0.1-15_a8d17fa1037cd0056449a95aa22c01ded2989d85"
-PR = "${INC_PR}.0"
+PR = "${INC_PR}.1"
 
 SRC_URI += "file://0001-Fix-build-with-nodejs-20.patch"
 
@@ -19,6 +19,7 @@ SRC_URI += " \
     file://0001-Fix-off-by-one-error-preventing-ACG-security-from-fu.patch \
     file://0002-com.webos.nodejs.role.json-Add-permissions-required-.patch \
     file://0003-LS2Handle-findMyAppId-might-not-work-with-mojoservic.patch \
+    file://0004-Message-add-senderExePath.patch \
 "
 
 do_configure() {
