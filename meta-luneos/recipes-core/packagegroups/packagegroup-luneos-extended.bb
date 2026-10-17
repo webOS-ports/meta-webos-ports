@@ -52,6 +52,7 @@ RDEPENDS:${PN} = " \
   alsa-conf \
   ${VIRTUAL-RUNTIME_ofono} \
   tar \
+  7zip \
   udev-extraconf \
   umtprd \
   webos-connman-adapter \
