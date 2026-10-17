@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=db37b6ead2dec60580595736ff983452"
 
 PV = "2.0.0+git"
 PR = "r1"
-SRCREV = "1bda636abbcd36a74d0e1b31b086717c796da702"
+SRCREV = "e3c072bbb2837e279d8d06b5fc5fedb45ed102e0"
 
 DEPENDS = "qtbase qtdeclarative qtdeclarative-native poppler"
 
@@ -23,7 +23,12 @@ inherit webos_cmake
 INSANE_SKIP:${PN} = "libdir"
 INSANE_SKIP:${PN}-dbg = "libdir"
 
-FILES:${PN} += "${webos_applicationsdir}/org.webosports.app.pdf"
+FILES:${PN} += " \
+    ${webos_applicationsdir}/org.webosports.app.pdf \
+    ${datadir}/luna-service2/roles.d/org.webosports.app.pdf.app.json \
+    ${datadir}/luna-service2/manifests.d/org.webosports.app.pdf.manifest.json \
+    ${datadir}/luna-service2/client-permissions.d/org.webosports.app.pdf.perm.json \
+"
 
 RDEPENDS:${PN} = " \
     qtdeclarative-qmlplugins \
