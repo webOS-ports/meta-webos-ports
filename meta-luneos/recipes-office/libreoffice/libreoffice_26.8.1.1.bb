@@ -108,6 +108,10 @@ do_configure() {
     # The build machine's configure unsets CC and CXX but not CPP and CXXCPP,
     # and would take the target's preprocessor; let both sides find their own.
     unset CPP CXXCPP
+    # CONFIG_SITE holds the target's autoconf answers (ac_cv_sizeof_long=4 on
+    # arm), which the build machine's configure would take as its own. The
+    # target's configure compiles its checks and does not need them either.
+    unset CONFIG_SITE
     # configure in the source tree: gbuild wants SRCDIR == BUILDDIR here.
     # CONFIGUREOPTS is not used: LibreOffice's configure refuses --target and
     # the libtool options autotools.bbclass adds.
