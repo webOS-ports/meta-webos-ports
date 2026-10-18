@@ -16,7 +16,7 @@ PV = "${SPV}"
 # Bumped whenever the shipped patches or helper scripts change: they alter what
 # the package contains without moving SRCREV or PV, so without this an already
 # installed waydroid stays at the previous build. Reset at the 1.6.3 move.
-PR = "r17"
+PR = "r18"
 
 # Pre-installed images, for machines whose system/vendor pairing is frozen.
 #
@@ -70,6 +70,17 @@ WAYDROID_IMAGE_RDEPENDS:mido-halium = "waydroid-data"
 # image that drops one of them from silently taking Android's networking with it.
 RDEPENDS:${PN} += "${WAYDROID_IMAGE_RDEPENDS} lxc python3-gbinder python3-pygobject \
     libgbinder python3-pyclip python3-dbus dnsmasq iptables iproute2"
+
+# The first-start download (0011, waydroid-luneos-download): luna-send to ask
+# notificationmgr and downloadmgr, the JSON both answer in, zipfile for the
+# images and the look inside them, shlex for the launcher's summary of the
+# plan, and flock so that two taps do not ask twice. zipfile was needed before
+# too and only happened to be on the image.
+RDEPENDS:${PN} += "luna-service2 python3-json python3-compression python3-shell \
+    util-linux-flock"
+# downloadmgr does the transfer when it is there; without it Waydroid falls
+# back to fetching the images itself, as upstream does, with no progress shown.
+RRECOMMENDS:${PN} += "luna-downloadmgr"
 
 # The package varies by machine - WAYDROID_IMAGE_RDEPENDS decides whether it
 # pulls waydroid-data, and mindphone gets a config file nothing else does. That
@@ -128,11 +139,17 @@ SRC_URI = "git://github.com/waydroid/waydroid.git;branch=main;protocol=https \
     file://0008-lxc-do-not-claim-NFC-the-container-cannot-reach.patch \
     file://0009-appinfo-request-the-ACGs-Waydroid-actually-uses.patch \
     file://0010-container_manager-leave-the-host-s-nfcd-alone.patch \
+    file://0011-images-say-what-a-download-will-take-and-fetch-it-th.patch \
+    file://0012-data-pass-SAM-s-launch-parameters-on-to-the-LuneOS-l.patch \
     file://waydroid-luneos-prepare.sh \
     file://waydroid-luneos-prepare.service \
     file://waydroid-luneos-session.sh \
     file://waydroid-luneos-session-env.sh \
     file://waydroid-luneos-app.sh \
+    file://waydroid-luneos-download.sh \
+    file://waydroid-luneos-init.service \
+    file://waydroid-download-dashboard/appinfo.json \
+    file://waydroid-download-dashboard/qml/main.qml \
     file://waydroid-luneos-launchd \
     file://waydroid-luneos-launchd.service \
     file://waydroid-luneos-session.service \
@@ -202,12 +219,26 @@ do_install() {
     install -m 0755 ${UNPACKDIR}/waydroid-luneos-session.sh ${D}${libexecdir}/waydroid-luneos-session
     install -m 0644 ${UNPACKDIR}/waydroid-luneos-session-env.sh ${D}${libexecdir}/waydroid-luneos-session-env
     install -m 0755 ${UNPACKDIR}/waydroid-luneos-app.sh ${D}${libexecdir}/waydroid-luneos-app
+    install -m 0644 ${UNPACKDIR}/waydroid-luneos-download.sh ${D}${libexecdir}/waydroid-luneos-download
     install -m 0755 ${UNPACKDIR}/waydroid-luneos-launchd ${D}${libexecdir}/waydroid-luneos-launchd
 
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${UNPACKDIR}/waydroid-luneos-prepare.service ${D}${systemd_system_unitdir}
     install -m 0644 ${UNPACKDIR}/waydroid-luneos-session.service ${D}${systemd_system_unitdir}
     install -m 0644 ${UNPACKDIR}/waydroid-luneos-launchd.service ${D}${systemd_system_unitdir}
+    # Not in WEBOS_SYSTEMD_SERVICE: that would have it enabled, and it is
+    # started on demand only. See the unit.
+    install -m 0644 ${UNPACKDIR}/waydroid-luneos-init.service ${D}${systemd_system_unitdir}
+
+    # The download's dashboard in the notification list; see its main.qml. A
+    # QML app of its own, so webos_app_generate_security_files gives it a
+    # role and permissions from its appinfo like any other app here. It shows
+    # Waydroid's icon, which install_luneos has just put in place.
+    dash=${D}${webos_applicationsdir}/org.webosports.app.waydroid.download
+    install -d $dash/qml
+    install -m 0644 ${UNPACKDIR}/waydroid-download-dashboard/appinfo.json $dash/
+    install -m 0644 ${UNPACKDIR}/waydroid-download-dashboard/qml/main.qml $dash/qml/
+    install -m 0644 ${D}${webos_applicationsdir}/Waydroid/icon.png $dash/
 }
 
 # Device specifics for waydroid-luneos-prepare. Only machines that need one
@@ -224,6 +255,7 @@ FILES:${PN} += " \
     ${datadir}/polkit-1 \
     ${prefix}/libexec \
     ${webos_applicationsdir}/Waydroid \
+    ${webos_applicationsdir}/org.webosports.app.waydroid.download \
 "
 
 # Usage
