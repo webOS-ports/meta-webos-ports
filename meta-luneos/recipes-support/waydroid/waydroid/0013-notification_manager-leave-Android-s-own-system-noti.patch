@@ -1,0 +1,74 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sun, 18 Oct 2026 14:28:37 +0200
+Subject: [PATCH] notification_manager: leave Android's own system
+ notifications out
+
+Every Android notification was forwarded to com.webos.notification,
+including the ones Android's system server and SystemUI raise about the
+container's view of the hardware. On LuneOS that hardware belongs to the
+host, which already notifies about it, so each arrived twice: measured on a
+Zinwa Q25, "Charging this device via USB", "USB debugging connected" and
+"Configure physical keyboard" all came from package "android" next to
+LuneOS's own; SystemUI's battery and battery-saver warnings are the same
+case.
+
+Notifications from those two packages are no longer forwarded. Apps are
+untouched, including Android's own apps under com.android.* (Contacts,
+Calendar, Downloads): only the system server and SystemUI are left out.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [LuneOS specific]
+---
+ tools/services/notification_manager.py | 21 +++++++++++++++++++--
+ 1 file changed, 19 insertions(+), 2 deletions(-)
+
+diff --git a/tools/services/notification_manager.py b/tools/services/notification_manager.py
+index b88287c..f795d00 100644
+--- a/tools/services/notification_manager.py
++++ b/tools/services/notification_manager.py
+@@ -11,6 +11,17 @@ from gi.repository import GLib
+ 
+ stopping = False
+ 
++# Android's own system notifications are not forwarded. The packages that
++# raise them describe the container's view of hardware the host owns: the
++# system server ("android") posts "Charging this device via USB", "USB
++# debugging connected" and "Configure physical keyboard", SystemUI the battery
++# and battery-saver warnings. LuneOS already shows its own notification for
++# each of those, so forwarding them only put a second, Android-branded copy
++# next to it - measured on a Q25, where all three of the above arrived twice.
++# Notifications from apps, including Android's own apps (Contacts, Calendar,
++# Downloads...), are untouched.
++IGNORED_PACKAGES = frozenset(("android", "com.android.systemui"))
++
+ def start(args, session):
+     # LuneOS has no org.freedesktop.Notifications. Notifications belong to
+     # com.webos.notification, over luna-service2, and it offers several kinds:
+@@ -110,6 +121,11 @@ def start(args, session):
+             luna("closeToast", {"toastId": webos_id})
+ 
+     def notify(replaces_id, app_name, package_name, summary, body, actions, image_data, category, suppress_sound, expire_timeout, resident, transient, urgency):
++        if package_name in IGNORED_PACKAGES:
++            logging.debug("Not forwarding a system notification from %s: %s",
++                          package_name, summary)
++            return INotifications.ID_NONE
++
+         app_id = "waydroid." + package_name
+ 
+         # Android commonly sends only a summary, so it becomes the message when
+@@ -128,8 +144,9 @@ def start(args, session):
+         # entries are - waydroid.<package> carries that app's own icon.
+         #
+         # Not every Android notification comes from an app that has one:
+-        # system notifications are posted by "android" or com.android.shell,
+-        # for which nothing is generated. Those fall back to the full-UI
++        # com.android.shell, for one, has nothing generated for it (the system
++        # server's and SystemUI's are not forwarded at all, see
++        # IGNORED_PACKAGES). Those fall back to the full-UI
+         # application, so they arrive as Android rather than as an anonymous
+         # message with a generic bubble.
+         app_dir = os.path.join(luneos_apps_dir, "waydroid." + package_name)
+-- 
+2.53.0
+
