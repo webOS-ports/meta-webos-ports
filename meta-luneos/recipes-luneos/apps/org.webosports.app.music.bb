@@ -4,7 +4,7 @@ LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 PV = "1.0.0+git"
-SRCREV = "62c3ffdde1cb1433bdcaaa793d424094464120d4"
+SRCREV = "4c6b03a3d155785ca7dbe9e8f5880febb8467437"
 
 # The QML plugin (MusicApp) links TagLib for tags and covers.
 DEPENDS = "qtbase qtdeclarative qtdeclarative-native taglib"
@@ -43,7 +43,10 @@ RDEPENDS:${PN} = " \
     qml-webos-framework \
     luneos-components \
 "
-RRECOMMENDS:${PN} = "libqofono"
+# libqofono to pause for calls; luneos-synergy-music for the streaming
+# services (signed in through Accounts), which the app finds at run time
+# and does without.
+RRECOMMENDS:${PN} = "libqofono luneos-synergy-music"
 
 # What plays the formats it lists (appinfo.json mimeTypes) through Qt
 # Multimedia's GStreamer backend: playbin and typefinding, conversion and
@@ -69,4 +72,12 @@ RRECOMMENDS:${PN} += " \
     gstreamer1.0-plugins-base-vorbis \
     gstreamer1.0-plugins-base-opus \
     gstreamer1.0-libav \
+"
+
+# Streams: HTTP(S) sources (souphttpsrc, and glib-networking for TLS) and
+# HLS, which SoundCloud falls back to.
+RRECOMMENDS:${PN} += " \
+    gstreamer1.0-plugins-good-soup \
+    glib-networking \
+    gstreamer1.0-plugins-bad-hls \
 "
