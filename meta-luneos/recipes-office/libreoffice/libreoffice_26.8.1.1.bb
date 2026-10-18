@@ -43,12 +43,11 @@ DEPENDS = " \
     curl nss nspr hunspell \
 "
 
-# The bundled externals (download.lst) that are not taken from the system are
-# fetched by LibreOffice's own Makefile.fetch into one directory shared by all
-# machines. TODO: list them in SRC_URI so that do_fetch gets them.
-LO_EXTERNAL_TAR = "${DL_DIR}/libreoffice-externals"
-do_configure[network] = "1"
-do_compile[network] = "1"
+# The bundled externals (download.lst) that are not taken from the system:
+# fetched by do_fetch into externals/, where LibreOffice's Makefile.fetch finds
+# them with their checksums and fetches nothing itself.
+require libreoffice-externals.inc
+LO_EXTERNAL_TAR = "${UNPACKDIR}/externals"
 
 LO_LANGS ?= "en-US"
 
@@ -104,7 +103,6 @@ export PYTHON_CFLAGS = "-I${STAGING_INCDIR_NATIVE}/python${PYTHON_BASEVERSION}"
 export PYTHON_LIBS = "-L${STAGING_LIBDIR_NATIVE} -lpython${PYTHON_BASEVERSION}"
 
 do_configure() {
-    mkdir -p ${LO_EXTERNAL_TAR}
     # The build machine's configure unsets CC and CXX but not CPP and CXXCPP,
     # and would take the target's preprocessor; let both sides find their own.
     unset CPP CXXCPP
