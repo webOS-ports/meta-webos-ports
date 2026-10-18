@@ -17,7 +17,6 @@ RDEPENDS:${PN} += " \
 PV = "0.6-0+git"
 
 SRCREV = "d833e75794509910ee1649f411ead6e83f9247f5"
-WEBOS_GIT_PARAM_BRANCH = "herrie/exhibition-dock-window"
 
 inherit webos_ports_repo
 inherit webos_cmake
