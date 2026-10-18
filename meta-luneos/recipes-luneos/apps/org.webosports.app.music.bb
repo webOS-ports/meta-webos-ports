@@ -4,14 +4,14 @@ LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 PV = "1.0.0+git"
-SRCREV = "4c6b03a3d155785ca7dbe9e8f5880febb8467437"
+SRCREV = "c83bac596b8f3acc855c51d71fdefeca51878651"
 
 # The QML plugin (MusicApp) links TagLib for tags and covers.
 DEPENDS = "qtbase qtdeclarative qtdeclarative-native taglib"
 
-# The QML rewrite lives on herrie/LuneOS of the app's repository; main still
-# holds the Enyo Music+Spotify fork.
-SRC_URI = "git://github.com/Herrie82/org.webosports.app.music.git;branch=herrie/LuneOS;protocol=https"
+inherit webos_ports_repo
+WEBOS_GIT_PARAM_BRANCH = "main"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 inherit webos_application
 inherit webos_filesystem_paths
