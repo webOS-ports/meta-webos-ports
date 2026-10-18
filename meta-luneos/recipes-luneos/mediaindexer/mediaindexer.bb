@@ -8,7 +8,8 @@ DEPENDS += "db8 glib-2.0 luna-service2 sqlite3 taglib qtbase luna-sysmgr-common"
 RDEPENDS:${PN} += "shared-mime-info"
 
 PV = "0.1.0-14+git"
-SRCREV = "1b238aeefa191f13ac6a7c2f8b821e59bb9ce8f5"
+SRCREV = "76b5792d02fbdf0fbde610e387b11fbf63b1428e"
+WEBOS_GIT_PARAM_BRANCH = "herrie/music-read-grant"
 PR = "r2"
 
 inherit webos_ports_repo
