@@ -19,17 +19,31 @@ waydroid_luneos_session_env() {
     timeout=${1:-120}
     _pid=""
 
+    # The compositor by its process name, not "pgrep -f": that matches every
+    # command line containing the name, and took whichever came first - a
+    # "systemctl restart surface-manager", a "journalctl -u surface-manager",
+    # even the shell running this. Its environment has no session in it, or
+    # the process is already gone, and the waits below then ran out their
+    # whole timeout and failed the session unit.
+    _compositor_pid() {
+        pgrep -x "$WAYDROID_COMPOSITOR" | head -n 1
+    }
+
     # The process exists well before it is serving, so wait for the socket too.
     _i=0
     while [ "$_i" -lt "$timeout" ]; do
-        _pid=$(pgrep -f "$WAYDROID_COMPOSITOR" | head -n 1)
+        _pid=$(_compositor_pid)
         [ -n "$_pid" ] && break
         _i=$((_i + 2))
         sleep 2
     done
     [ -n "$_pid" ] || { echo "no $WAYDROID_COMPOSITOR after ${timeout}s" >&2; return 1; }
 
+    # Looked up again once the process is gone: the compositor can restart
+    # while this waits for its session bus.
     _env_of() {
+        [ -d "/proc/$_pid" ] || _pid=$(_compositor_pid)
+        [ -n "$_pid" ] || return 0
         tr '\0' '\n' < "/proc/$_pid/environ" 2>/dev/null | grep "^$1=" | cut -d= -f2-
     }
 
