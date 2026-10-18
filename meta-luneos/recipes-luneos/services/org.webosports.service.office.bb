@@ -14,9 +14,7 @@ RDEPENDS:${PN} = "libreoffice"
 PV = "1.0.0-1+git"
 
 # Pinned, never AUTOREV: see org.webosports.service.torch.bb.
-# The editing sessions, until webOS-ports/org.webosports.service.office#1 is merged
-SRCREV = "8ab73725f8763a70f73acae92669a7e2bdc46c47"
-WEBOS_GIT_PARAM_BRANCH = "herrie/edit-sessions"
+SRCREV = "1b0d3f58f94a2b8ffe58ffd6e5622cadf72ea3ec"
 
 inherit webos_ports_repo
 inherit webos_cmake

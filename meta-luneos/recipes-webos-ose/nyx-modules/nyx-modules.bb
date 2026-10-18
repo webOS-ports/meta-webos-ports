@@ -22,11 +22,7 @@ RDEPENDS:${PN} += "nyx-conf"
 # merged as commits) rather than webosose plus a patch stack. Pinned with a
 # plain SRCREV: submission tags are a webosose convention and this branch
 # carries none.
-# TEMPORARY: herrie/battery-current-unit (current_unit in [module.battery], for
-# drivers that report current in mA, such as Samsung's sec-battery on the SM-T520).
-# Back to the webOS-OSE branch and its merge commit once that is merged.
-WEBOS_GIT_PARAM_BRANCH = "herrie/battery-current-unit"
-SRCREV = "76d2686618006b91672311a90e62288e0c15ba23"
+SRCREV = "633e23e5452fc7f2ae8a14885386e659b32baef5"
 
 PR = "r58"
 

@@ -6,8 +6,8 @@ SECTION = "webos/apps"
 LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=5b4473596678d62d9d83096273422c8c"
 
-PV = "0.3.0+git"
-SRCREV = "90f16a093e01eda6fe424224c9c75d2682eb094e"
+PV = "0.3.1+git"
+SRCREV = "d92a7e98611faee8bb114e760e69d262b2d71395"
 
 SERVICE_NAME = "com.palm.stark.files.service"
 
