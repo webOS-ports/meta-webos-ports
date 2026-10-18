@@ -379,7 +379,9 @@ EOF
 # container is down. Prepare runs both before the container at boot and as the
 # session's ExecStartPre, and by the latter the container is up.
 refresh_container_config() {
-    [ -f /var/lib/waydroid/waydroid.cfg ] || return 0
+    # Not before init has finished: a config can exist with no images yet.
+    [ -f /var/lib/waydroid/waydroid.cfg ] && [ -d /var/lib/waydroid/rootfs ] ||
+        return 0
     state=$(lxc-info -P /var/lib/waydroid/lxc -n waydroid -sH 2>/dev/null)
     [ "${state:-STOPPED}" = "STOPPED" ] || return 0
     /usr/bin/waydroid upgrade -o >/dev/null 2>&1 &&
