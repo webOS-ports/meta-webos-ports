@@ -5,7 +5,6 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 PV = "0.5+git"
 
 SRCREV = "71bd0641d719e5a4d51609396c3da96c933b4369"
-WEBOS_GIT_PARAM_BRANCH = "herrie/music-shared-parts"
 
 PR = "r4"
 
