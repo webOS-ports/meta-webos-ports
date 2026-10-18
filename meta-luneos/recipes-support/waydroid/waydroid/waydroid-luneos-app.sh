@@ -3,6 +3,7 @@
 # foreground for as long as Android has something on screen.
 #
 #   waydroid-luneos-app             show the Android full UI (app id Waydroid)
+#   waydroid-luneos-app <params>    the same, with SAM's launch parameters
 #   waydroid-luneos-app <package>   show one app     (app id waydroid.<package>)
 #
 # Being long-running is the point. SAM tracks a native app by the process it
@@ -29,6 +30,14 @@ set -u
 . /usr/libexec/waydroid-luneos-session-env
 
 PKG=${1:-}
+# SAM hands a native app its launch parameters as one JSON argument, and the
+# full UI's entry point passes them on - it is how a button on one of the
+# alerts below gets its answer back here, by relaunching Waydroid with it. A
+# package name never starts with a brace.
+PARAMS=""
+case "$PKG" in
+    "{"*) PARAMS=$PKG; PKG="" ;;
+esac
 POLL=5
 # Consecutive answered "nothing is shown" polls before the instance is ended.
 MAX_MISSES=3
@@ -165,19 +174,18 @@ waydroid_luneos_session_env 60 || exit 1
 # network - which a freshly flashed device does not have at boot, and which is
 # why running it from a unit produced a failed service and, through the
 # ordering, a failed container. Asking for Android is the moment the user has
-# both decided they want it and, usually, joined a network. It takes a while:
-# on sargo the pair is a little under 2 GB.
-if [ ! -f /var/lib/waydroid/waydroid.cfg ]; then
-    log "not initialised yet; fetching the Android images, this will take a while"
+# both decided they want it and, usually, joined a network. It takes a while,
+# and it is close to a gigabyte, so the user is asked first; see
+# waydroid-luneos-download for how.
+. /usr/libexec/waydroid-luneos-download
+if ! waydroid_initialised; then
     # Binder nodes and the image mount have to exist before the container is
-    # asked for anything. The unit is Before= the container, but nothing has
-    # pulled it in on a device that has never been initialised.
+    # asked for anything, and before Waydroid can say what it would download:
+    # that goes through the same setup, which looks for the binder nodes. The
+    # unit is Before= the container, but nothing has pulled it in on a device
+    # that has never been initialised.
     systemctl start waydroid-luneos-prepare.service >/dev/null 2>&1 || true
-    if ! /usr/bin/waydroid init; then
-        log "initialisation failed - check the network and try again"
-        exit 1
-    fi
-    log "initialised"
+    waydroid_luneos_first_start "$PARAMS" || exit 0
 fi
 
 # The session owns the Wayland connection Android composites through, so it has

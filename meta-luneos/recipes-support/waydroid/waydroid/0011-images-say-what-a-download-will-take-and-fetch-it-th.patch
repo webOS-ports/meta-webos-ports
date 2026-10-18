@@ -1,0 +1,795 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sun, 18 Oct 2026 07:40:11 +0200
+Subject: [PATCH] images: say what a download will take, and fetch it through
+ luna-downloadmgr
+
+"waydroid init" on a machine without pre-installed images downloads the
+system and vendor zips from the OTA channel. On the current channel that is
+954 MB for arm64 (912 MB system, 42 MB vendor) and 712 MB for armv7, which
+unpack to 2.1 GB and 1.4 GB. On LuneOS this started the moment the Waydroid
+icon was tapped, with nothing on screen for as long as it took and no way to
+know it was happening, let alone over mobile data.
+
+Three changes, all inert where luna-send is absent.
+
+"waydroid init --plan FILE" works out what init would download and the room
+it needs, and writes that as JSON, without downloading or configuring
+anything. It runs the same setup_config as init, against a throwaway config
+next to FILE: the real waydroid.cfg existing is what the LuneOS units take to
+mean Waydroid is set up. The size of each zip comes from the channel; what it
+unpacks to comes from the zip's central directory, read with a few HTTP Range
+requests rather than the download. The room needed is the worst moment of
+the install - one zip next to everything unpacked so far - per filesystem,
+since /media/internal and /var are separate mounts.
+
+images.get() asks both channels before fetching either, so the size of the
+whole download is known from the start, and reports progress against it:
+into /run/waydroid-luneos/download.json on every update, and as a toast in
+the notification list. That is a dashboard when LuneOS ships one
+(org.webosports.app.waydroid.download, launched here): a window of its
+own in the list, which reads the state file and stays current, with one
+light banner to say the download started. Without it there are only
+toasts, which cannot be updated, only replaced, each popping a banner -
+so then a toast is replaced at 0, 25, 50 and 75 per cent rather than on
+each of the twenty updates per file downloadmgr sends. Either one, tapped,
+relaunches Waydroid to ask where things are. The state file carries the
+writer's pid, so a reader can tell a download whose process was killed.
+
+http.download() hands the transfer to luna-downloadmgr when it answers,
+into /media/internal/downloads/waydroid - the manager only accepts a
+targetDir under /media/internal from an unprivileged caller, which
+luna-send is. It holds a wake lock for the transfer and pauses and resumes it
+with the network. Measured on mindphone (armv7) with the 23.5 MB armv7
+vendor zip: SourceForge's two redirect hops followed, sha256 matching the
+channel's id. Its replies drive what happens here:
+
+  completed and completionStatusCode 200      done; the target path is used
+  interrupted (11)                            paused; autoResume carries on
+                                              under the same ticket
+  aborted (12), or completed with any other   failed - a 404 arrives as
+  code                                        completed with -5
+
+Progress uses e_amountReceived, the 64-bit count as a string, not
+amountReceived, an int32. Each redirect hop reports its own small total
+before the file starts, so progress is measured against the channel's size.
+
+Two things are guarded against because downloadmgr outlives whoever asked
+for a file. A SIGTERM - stopping the unit that runs init - is turned into an
+exception, so the ticket is cancelled on the way out, and init then exits 143
+as the signal would have; and before a download
+starts, any earlier one into the same directory still running, queued or
+interrupted is cancelled, since downloadmgr resumes interrupted downloads by
+itself when it starts and would otherwise fetch the best part of a gigabyte
+after a reboot for nobody. A transfer that receives nothing for ten minutes
+is given up on.
+
+The replies are read with os.read into a buffer of our own. readline() on
+the pipe pulled every pending reply into Python's buffer, and the select()
+that followed then waited on an empty pipe with the completion already in
+hand - a hang the host tests hit as soon as the last update and the
+completion arrived together.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [LuneOS specific]
+---
+ tools/actions/initializer.py |  35 +++++
+ tools/helpers/__init__.py    |   1 +
+ tools/helpers/arguments.py   |   4 +
+ tools/helpers/http.py        | 250 ++++++++++++++++++++++++++++++++++-
+ tools/helpers/images.py      | 145 +++++++++++++-------
+ tools/helpers/luna.py        | 164 +++++++++++++++++++++++
+ 6 files changed, 551 insertions(+), 48 deletions(-)
+ create mode 100644 tools/helpers/luna.py
+
+diff --git a/tools/actions/initializer.py b/tools/actions/initializer.py
+index b018cfd..5146549 100644
+--- a/tools/actions/initializer.py
++++ b/tools/actions/initializer.py
+@@ -1,7 +1,9 @@
+ # Copyright 2021 Erfan Abdi
+ # SPDX-License-Identifier: GPL-3.0-or-later
++import json
+ import logging
+ import os
++from contextlib import suppress
+ from tools import helpers
+ import tools.config
+ import stat
+@@ -133,7 +135,40 @@ def setup_config(args):
+     tools.config.save(args, cfg)
+     return True
+ 
++def write_plan(args):
++    """ waydroid init --plan FILE: what init would download and the room that
++        needs, worked out the way init works it out, with nothing downloaded
++        and nothing configured.
++
++        LuneOS asks before it fetches the best part of a gigabyte, and this is
++        where the size it quotes comes from. """
++    # setup_config saves what it works out. Keep that away from the real
++    # config: its existence is what tells the LuneOS units Waydroid is set up,
++    # so a config with no images behind it would have the container started
++    # at the next boot.
++    args.config = args.plan + ".cfg"
++    with suppress(OSError):
++        os.remove(args.config)
++    try:
++        if not setup_config(args):
++            return False
++        if args.images_path in tools.config.defaults["preinstalled_images_paths"]:
++            plan = {"download": 0, "files": [], "space": []}
++        else:
++            plan = helpers.images.plan(args)
++    finally:
++        with suppress(OSError):
++            os.remove(args.config)
++    tmp = args.plan + ".tmp"
++    with open(tmp, "w", encoding="utf-8") as f:
++        json.dump(plan, f)
++    os.replace(tmp, args.plan)
++    return True
++
+ def init(args):
++    if getattr(args, "plan", None):
++        return write_plan(args)
++
+     if is_initialized(args) and not args.force:
+         logging.info("Already initialized")
+ 
+diff --git a/tools/helpers/__init__.py b/tools/helpers/__init__.py
+index 73c1a2a..7729ce5 100644
+--- a/tools/helpers/__init__.py
++++ b/tools/helpers/__init__.py
+@@ -8,6 +8,7 @@ import tools.helpers.images
+ import tools.helpers.drivers
+ import tools.helpers.mount
+ import tools.helpers.http
++import tools.helpers.luna
+ import tools.helpers.ipc
+ import tools.helpers.gpu
+ import tools.helpers.protocol
+diff --git a/tools/helpers/arguments.py b/tools/helpers/arguments.py
+index 98b8d9d..5bd9336 100644
+--- a/tools/helpers/arguments.py
++++ b/tools/helpers/arguments.py
+@@ -34,6 +34,10 @@ def arguments_init(subparser):
+     ret.add_argument("-s", "--system_type",
+                      help="system type (options: VANILLA, FOSS or GAPPS; default is VANILLA)")
+     ret.add_argument("--client", help="run as user mode, connecting to the remote initializer service", action="store_true")
++    ret.add_argument("--plan", metavar="FILE",
++                     help="write what init would download, and the room it"
++                          " needs, to FILE as JSON; nothing is downloaded or"
++                          " configured")
+     return ret
+ 
+ def arguments_status(subparser):
+diff --git a/tools/helpers/http.py b/tools/helpers/http.py
+index 9131fb7..a8c4bde 100644
+--- a/tools/helpers/http.py
++++ b/tools/helpers/http.py
+@@ -1,18 +1,251 @@
+ # Copyright 2021 Oliver Smith
+ # SPDX-License-Identifier: GPL-3.0-or-later
+ import hashlib
++import io
++import json
+ import logging
+ import os
++import selectors
+ import shutil
++import signal
++import subprocess
+ import threading
+ import urllib.request
++import zipfile
+ 
++import tools.helpers.luna
+ import tools.helpers.run
+ import time
+ 
++# LuneOS: luna-downloadmgr does the transfer when it is there, so a download of
++# the best part of a gigabyte is one the system knows about - it holds a wake
++# lock for it, pauses it when the network goes and resumes it when the network
++# comes back, and reports how far it has got.
++DOWNLOADMGR = "luna://com.webos.service.downloadmanager/"
++# The manager only accepts a targetDir under /media/internal from a caller that
++# is not privileged, which luna-send is not.
++LUNA_DOWNLOAD_DIR = "/media/internal/downloads/waydroid"
++# How long a transfer may go without a byte arriving before it is given up on.
++# It covers a lost network too: downloadmgr pauses then, and resumes on its own
++# if the network is back in time.
++LUNA_STALL_TIMEOUT = 600
++
++
++def use_downloadmgr():
++    if not tools.helpers.luna.available():
++        return False
++    reply = tools.helpers.luna.call(DOWNLOADMGR + "listPending", {})
++    return bool(reply and reply.get("returnValue"))
++
++
++def download_dir(args):
++    """ Where download() puts what it fetches. """
++    if use_downloadmgr():
++        return LUNA_DOWNLOAD_DIR
++    return args.work + "/cache_http"
++
++
++def _cancel_stale_luna_downloads():
++    """ Cancels what an earlier run left behind in LUNA_DOWNLOAD_DIR.
++
++        downloadmgr outlives whoever asked it for a file, and it resumes
++        interrupted downloads by itself when it starts - so an init that was
++        killed part way would otherwise leave a download of hundreds of MB
++        running, or coming back after a reboot, with nobody waiting for it. """
++    reply = tools.helpers.luna.call(DOWNLOADMGR + "getAllHistory",
++                                    {"owner": "com.webos.lunasend"})
++    for item in (reply or {}).get("items", []):
++        if item.get("state") not in ("running", "queued", "interrupted"):
++            continue
++        try:
++            record = json.loads(item.get("recordString") or "{}")
++        except ValueError:
++            continue
++        if record.get("destPath", "").rstrip("/") == LUNA_DOWNLOAD_DIR:
++            logging.info("Cancelling an earlier download of {}".format(
++                record.get("destFile")))
++            tools.helpers.luna.call(DOWNLOADMGR + "cancelDownload",
++                                    {"ticket": item["ticket"]})
++
++
++class DownloadStopped(SystemExit):
++    """ A download stopped by SIGTERM: what stopping the unit that runs init
++        does. Exits 143, as dying of the signal would, which the unit counts
++        as success - stopping it was asked for - and reads as below. """
++
++    def __init__(self):
++        super().__init__(143)
++
++    def __str__(self):
++        return "Download stopped"
++
++
++def _luna_download(url, path, on_progress):
++    """ Fetches url to path through luna-downloadmgr.
++
++        :returns: the path the file was saved at """
++    target_dir, filename = os.path.split(path)
++    os.makedirs(target_dir, exist_ok=True)
++    _cancel_stale_luna_downloads()
++    request = {"target": url, "targetDir": target_dir,
++               "targetFilename": filename,
++               "canHandlePause": True, "autoResume": True,
++               "subscribe": True}
++    proc = subprocess.Popen(
++        [tools.helpers.luna.LUNA_SEND, "-i", DOWNLOADMGR + "download",
++         json.dumps(request)],
++        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
++
++    # Stopping the unit that runs this sends SIGTERM, which would otherwise
++    # end Python without running the finally below, and leave downloadmgr
++    # fetching for nobody.
++    def on_term(signum, frame):
++        raise DownloadStopped()
++    old_term = None
++    if threading.current_thread() is threading.main_thread():
++        old_term = signal.signal(signal.SIGTERM, on_term)
++
++    ticket = None
++    finished = False
++    fd = proc.stdout.fileno()
++    sel = selectors.DefaultSelector()
++    sel.register(fd, selectors.EVENT_READ)
++    try:
++        unread = b""
++        received = -1
++        last_byte_at = time.monotonic()
++        while True:
++            idle = time.monotonic() - last_byte_at
++            if idle >= LUNA_STALL_TIMEOUT:
++                raise RuntimeError("Download stalled: nothing arrived for {}"
++                                   " minutes".format(LUNA_STALL_TIMEOUT // 60))
++            # Lines already read come first. Several replies can arrive in
++            # one read - the last update and the completion often do - and
++            # select() only reports what is still in the pipe, so waiting
++            # on it with a reply in hand would wait for good.
++            line, newline, rest = unread.partition(b"\n")
++            if not newline:
++                if not sel.select(LUNA_STALL_TIMEOUT - idle):
++                    continue
++                chunk = os.read(fd, 65536)
++                if not chunk:
++                    raise RuntimeError("luna-downloadmgr stopped answering")
++                unread += chunk
++                continue
++            unread = rest
++            try:
++                reply = json.loads(line.decode("utf-8", "replace"))
++            except ValueError:
++                continue
++            if not isinstance(reply, dict):
++                continue
++            if ticket is None and "ticket" in reply:
++                ticket = reply["ticket"]
++            if reply.get("returnValue") is False:
++                raise RuntimeError("luna-downloadmgr refused the download: {}"
++                                   .format(reply.get("errorText")))
++
++            if "completed" in reply:
++                code = reply.get("completionStatusCode")
++                if reply.get("completed") and code == 200:
++                    finished = True
++                    return reply.get("target") or path
++                if reply.get("interrupted"):
++                    # Paused, usually because the network went. With
++                    # autoResume set the same ticket carries on when it is
++                    # back, and its updates still arrive here.
++                    logging.info("Download paused; waiting for the network")
++                    continue
++                if reply.get("aborted"):
++                    raise RuntimeError("Download cancelled")
++                raise RuntimeError("Download failed: HTTP {}, status {}".format(
++                    reply.get("httpStatus"), code))
++
++            if "e_amountReceived" in reply:
++                # The 64-bit count, as a string. amountReceived is an int32,
++                # which a file over 2 GiB would overflow.
++                try:
++                    n = int(reply["e_amountReceived"])
++                except ValueError:
++                    continue
++                if n != received:
++                    last_byte_at = time.monotonic()
++                received = n
++                if on_progress:
++                    on_progress(n)
++    finally:
++        if old_term is not None:
++            signal.signal(signal.SIGTERM, old_term)
++        if not finished and ticket is not None:
++            tools.helpers.luna.call(DOWNLOADMGR + "cancelDownload",
++                                    {"ticket": ticket})
++        sel.close()
++        proc.stdout.close()
++        if proc.poll() is None:
++            proc.terminate()
++        proc.wait()
++
++
++class _RangeReader(io.RawIOBase):
++    """ A remote file, read in pieces with HTTP Range requests. """
++
++    def __init__(self, url, timeout):
++        self.timeout = timeout
++        head = urllib.request.Request(url, method="HEAD")
++        with urllib.request.urlopen(head, timeout=timeout) as r:
++            # Ask the mirror the redirects ended at, not the redirector.
++            self.url = r.geturl()
++            self.size = int(r.headers["Content-Length"])
++        self.pos = 0
++
++    def readable(self):
++        return True
++
++    def seekable(self):
++        return True
++
++    def tell(self):
++        return self.pos
++
++    def seek(self, offset, whence=io.SEEK_SET):
++        base = {io.SEEK_SET: 0, io.SEEK_CUR: self.pos,
++                io.SEEK_END: self.size}[whence]
++        self.pos = base + offset
++        return self.pos
++
++    def readinto(self, b):
++        n = min(len(b), self.size - self.pos)
++        if n <= 0:
++            return 0
++        req = urllib.request.Request(self.url, headers={
++            "Range": "bytes={}-{}".format(self.pos, self.pos + n - 1)})
++        with urllib.request.urlopen(req, timeout=self.timeout) as r:
++            # A server that ignores Range answers 200 with the whole file.
++            if r.status != 206:
++                raise OSError("server ignored the Range request")
++            data = r.read(n)
++        b[:len(data)] = data
++        self.pos += len(data)
++        return len(data)
++
++
++def unpacked_size(url, timeout=20):
++    """ The total size of what the zip at url unpacks to, or None.
++
++        Read from the zip's central directory, which is at the end of the
++        file, so it costs a few small Range requests rather than the
++        download. Best effort: anything that goes wrong answers None. """
++    try:
++        reader = io.BufferedReader(_RangeReader(url, timeout), 64 * 1024)
++        with zipfile.ZipFile(reader) as z:
++            return sum(i.file_size for i in z.infolist())
++    except Exception as e:
++        logging.debug("Could not read the size inside {}: {}".format(url, e))
++        return None
++
+ 
+ def download(args, url, prefix, cache=True, loglevel=logging.INFO,
+-             allow_404=False):
++             allow_404=False, on_progress=None):
+     """ Download a file to disk.
+ 
+         :param url: the http(s) address of to the file to download
+@@ -26,8 +259,21 @@ def download(args, url, prefix, cache=True, loglevel=logging.INFO,
+         :param allow_404: do not raise an exception when the server responds
+                           with a 404 Not Found error. Only display a warning on
+                           stdout (no matter if loglevel is changed).
++        :param on_progress: called now and then with the bytes received so far
+         :returns: path to the downloaded file in the cache or None on 404 """
+ 
++    if use_downloadmgr():
++        path = LUNA_DOWNLOAD_DIR + "/" + prefix.replace("/", "_")
++        if os.path.exists(path):
++            if cache:
++                return path
++            os.remove(path)
++        logging.log(loglevel, "Downloading {} through luna-downloadmgr"
++                    .format(url))
++        # allow_404 is not honoured here: downloadmgr reports a 404 as a
++        # failed transfer, and nothing that reaches this path passes it.
++        return _luna_download(url, path, on_progress)
++
+     # helper functions for progress
+     def fromBytesToMB(numBytes, decimalPlaces=2):
+         return round(int(numBytes)/1000000, decimalPlaces)
+@@ -88,6 +334,8 @@ def download(args, url, prefix, cache=True, loglevel=logging.INFO,
+ 
+             # print progress bar
+             print(f"\r[Downloading] {currentSize} MB/{totalSize} MB    {downloadSpeed}(approx.)", end=" ")
++            if on_progress:
++                on_progress(os.path.getsize(destinationPath))
+             time.sleep(2)
+ 
+     # Create cache folder
+diff --git a/tools/helpers/images.py b/tools/helpers/images.py
+index 36bd09b..807cdde 100644
+--- a/tools/helpers/images.py
++++ b/tools/helpers/images.py
+@@ -22,65 +22,116 @@ def sha256sum(f):
+     return h.hexdigest()
+ 
+ 
+-def get(args):
++def pending(args):
++    """ The system and vendor builds newer than the installed ones, as
++        (kind, channel entry) pairs, without downloading anything. """
+     cfg = tools.config.load(args)
+-    system_ota = cfg["waydroid"]["system_ota"]
+-    system_request = helpers.http.retrieve(system_ota)
+-    if system_request[0] != 200:
+-        raise ValueError(
+-            "Failed to get system OTA channel: {}, error: {}".format(args.system_ota, system_request[0]))
+-    system_responses = json.loads(system_request[1].decode('utf8'))["response"]
+-    if len(system_responses) < 1:
+-        raise ValueError("No images found on system channel")
+-
+-    for system_response in system_responses:
+-        if system_response['datetime'] > int(cfg["waydroid"]["system_datetime"]):
+-            images_zip = helpers.http.download(
+-                args, system_response['url'], system_response['filename'], cache=False)
+-            logging.info("Validating system image")
+-            with open(images_zip, 'rb') as f:
+-                if sha256sum(f) != system_response['id']:
+-                    with suppress(OSError):
+-                        os.remove(images_zip)
+-                    raise ValueError("Downloaded system image hash doesn't match, expected: {}".format(
+-                        system_response['id']))
+-                logging.info("Extracting to " + args.images_path)
+-                with zipfile.ZipFile(f, 'r') as zip_ref:
+-                    zip_ref.extractall(args.images_path)
+-            cfg["waydroid"]["system_datetime"] = str(system_response['datetime'])
+-            tools.config.save(args, cfg)
+-            os.remove(images_zip)
+-            break
+-
+-    vendor_ota = cfg["waydroid"]["vendor_ota"]
+-    vendor_request = helpers.http.retrieve(vendor_ota)
+-    if vendor_request[0] != 200:
+-        raise ValueError(
+-            "Failed to get vendor OTA channel: {}, error: {}".format(vendor_ota, vendor_request[0]))
+-    vendor_responses = json.loads(vendor_request[1].decode('utf8'))["response"]
+-    if len(vendor_responses) < 1:
+-        raise ValueError("No images found on vendor channel")
+-
+-    for vendor_response in vendor_responses:
+-        if vendor_response['datetime'] > int(cfg["waydroid"]["vendor_datetime"]):
++    picks = []
++    for kind in ("system", "vendor"):
++        ota = cfg["waydroid"][kind + "_ota"]
++        request = helpers.http.retrieve(ota)
++        if request[0] != 200:
++            raise ValueError(
++                "Failed to get {} OTA channel: {}, error: {}".format(kind, ota, request[0]))
++        responses = json.loads(request[1].decode('utf8'))["response"]
++        if len(responses) < 1:
++            raise ValueError("No images found on {} channel".format(kind))
++        for response in responses:
++            if response['datetime'] > int(cfg["waydroid"][kind + "_datetime"]):
++                picks.append((kind, response))
++                break
++    return picks
++
++
++def get(args):
++    # Both channels are asked before anything is fetched, so that the size of
++    # the whole download is known from the start rather than one file at a
++    # time - it is what the progress is measured against.
++    picks = pending(args)
++    progress = helpers.luna.DownloadProgress(
++        sum(int(response.get('size') or 0) for _, response in picks))
++    if picks:
++        progress.start()
++    try:
++        for kind, response in picks:
+             images_zip = helpers.http.download(
+-                args, vendor_response['url'], vendor_response['filename'], cache=False)
+-            logging.info("Validating vendor image")
++                args, response['url'], response['filename'], cache=False,
++                on_progress=progress.update)
++            progress.file_done(int(response.get('size') or 0))
++            logging.info("Validating {} image".format(kind))
+             with open(images_zip, 'rb') as f:
+-                if sha256sum(f) != vendor_response['id']:
++                if sha256sum(f) != response['id']:
+                     with suppress(OSError):
+                         os.remove(images_zip)
+-                    raise ValueError("Downloaded vendor image hash doesn't match, expected: {}".format(
+-                        vendor_response['id']))
++                    raise ValueError("Downloaded {} image hash doesn't match, expected: {}".format(
++                        kind, response['id']))
++                progress.extracting(kind)
+                 logging.info("Extracting to " + args.images_path)
+                 with zipfile.ZipFile(f, 'r') as zip_ref:
+                     zip_ref.extractall(args.images_path)
+-            cfg["waydroid"]["vendor_datetime"] = str(vendor_response['datetime'])
++            cfg = tools.config.load(args)
++            cfg["waydroid"][kind + "_datetime"] = str(response['datetime'])
+             tools.config.save(args, cfg)
+             os.remove(images_zip)
+-            break
++    except BaseException as e:
++        progress.failed(e)
++        raise
++    progress.finished()
+     remove_overlay(args)
+ 
++
++def _device_and_free(path):
++    """ The filesystem path is on, and the bytes free on it. """
++    while not os.path.exists(path):
++        path = os.path.dirname(path)
++    st = os.statvfs(path)
++    return os.stat(path).st_dev, st.f_bavail * st.f_frsize
++
++
++def plan(args):
++    """ What get() would download, and the room that needs, as a dict:
++
++          download   bytes to fetch
++          files      kind, filename, size and unpacked size of each zip;
++                     unpacked is None where it could not be read
++          space      for each filesystem written to: path, needed, free
++
++        Nothing is downloaded. """
++    picks = pending(args)
++    files = []
++    for kind, response in picks:
++        files.append({"kind": kind,
++                      "filename": response['filename'],
++                      "size": int(response.get('size') or 0),
++                      "unpacked": helpers.http.unpacked_size(response['url'])})
++
++    # get() fetches one zip at a time and deletes it once it is unpacked, so
++    # the worst moment is the end of unpacking: every image so far on disk,
++    # next to the zip it came out of. The zips and the images can be on
++    # different filesystems - /media/internal and /var are separate mounts.
++    # An unpacked size that could not be read counts as nothing, which makes
++    # the result a lower bound rather than a guess.
++    download_dir = helpers.http.download_dir(args)
++    zip_dev, zip_free = _device_and_free(download_dir)
++    img_dev, img_free = _device_and_free(args.images_path)
++    path = {zip_dev: download_dir, img_dev: args.images_path}
++    free = {zip_dev: zip_free, img_dev: img_free}
++    needed = {zip_dev: 0, img_dev: 0}
++    images = 0
++    for f in files:
++        images += f["unpacked"] or 0
++        use = {zip_dev: 0, img_dev: 0}
++        use[img_dev] += images
++        use[zip_dev] += f["size"]
++        for dev in use:
++            needed[dev] = max(needed[dev], use[dev])
++
++    return {"download": sum(f["size"] for f in files),
++            "files": files,
++            "space": [{"path": path[dev], "needed": needed[dev],
++                       "free": free[dev]} for dev in needed]}
++
++
+ def validate(args, channel, f):
+     # Verify that the zip comes from the channel
+     cfg = tools.config.load(args)
+diff --git a/tools/helpers/luna.py b/tools/helpers/luna.py
+new file mode 100644
+index 0000000..e25fa76
+--- /dev/null
++++ b/tools/helpers/luna.py
+@@ -0,0 +1,164 @@
++# Copyright 2026 Herman van Hazendonk
++# SPDX-License-Identifier: GPL-3.0-or-later
++#
++# LuneOS: luna-service2 from Python, and what the image download tells the
++# user while it runs.
++#
++# There are no Python bindings for luna-service2 here, so every call goes
++# through luna-send, the way notification_manager already does. A luna-send
++# client is com.webos.lunasend on the bus, which is allowed to call both
++# com.webos.notification and com.webos.service.downloadmanager.
++import json
++import logging
++import os
++import subprocess
++
++LUNA_SEND = "/usr/bin/luna-send"
++
++# Shared with the LuneOS launcher, which reads it to say how far a download
++# that is already running has got, and to report why one failed.
++STATE_FILE = "/run/waydroid-luneos/download.json"
++
++# The dashboard that shows the download in the notification list, and keeps
++# showing it current; a QML app the LuneOS recipe ships next to Waydroid.
++DASHBOARD = "org.webosports.app.waydroid.download"
++
++
++def available():
++    return os.access(LUNA_SEND, os.X_OK)
++
++
++def call(uri, payload, timeout=10):
++    """ One call through luna-send.
++
++        :returns: the reply as a dict, or None when there was no usable one """
++    if not available():
++        return None
++    try:
++        out = subprocess.run([LUNA_SEND, "-n", "1", uri, json.dumps(payload)],
++                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
++                             timeout=timeout, check=False)
++        reply = json.loads(out.stdout.decode("utf-8", "replace"))
++    except (OSError, subprocess.SubprocessError, ValueError) as e:
++        logging.debug("luna-send {} failed: {}".format(uri, e))
++        return None
++    return reply if isinstance(reply, dict) else None
++
++
++def megabytes(n):
++    """ Sizes as the user is shown them: decimal, like upstream's progress. """
++    if n >= 10**9:
++        return "{:.1f} GB".format(n / 10**9)
++    return "{} MB".format(max(1, round(n / 10**6)))
++
++
++def write_state(**state):
++    """ Replaces the state file in one step, so a reader never sees half. """
++    if not available():
++        return
++    try:
++        os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
++        tmp = STATE_FILE + ".tmp"
++        # The pid lets a reader tell a download that is still going from one
++        # whose process was killed without writing its end.
++        state["pid"] = os.getpid()
++        with open(tmp, "w", encoding="utf-8") as f:
++            json.dump(state, f)
++        os.replace(tmp, STATE_FILE)
++    except OSError as e:
++        logging.debug("Could not write {}: {}".format(STATE_FILE, e))
++
++
++class DownloadProgress:
++    """ Progress of one batch of image downloads, told to the user.
++
++        The state file gets every update downloadmgr sends - about twenty per
++        file - and the dashboard (DASHBOARD) shows it from there, as one entry
++        in the notification list that stays current until the install is
++        done.
++
++        Without the dashboard there are only toasts, and a toast cannot be
++        updated: the closest thing is closing it and posting the next, and
++        every post pops a banner. So then the toast is replaced at a few
++        milestones instead. """
++
++    MILESTONE = 25
++
++    def __init__(self, total):
++        self.total = total
++        self.done = 0
++        self.toast_id = None
++        self.shown = 0
++        self.dashboard = False
++
++    def _toast(self, message, kind="standard"):
++        self.close()
++        reply = call("luna://com.webos.notification/createToast", {
++            "sourceId": "Waydroid",
++            "title": "Waydroid",
++            "message": message,
++            # "standard" stays in the notification list after its banner, so
++            # it can be found again mid-download; "light" is the banner alone.
++            "type": kind,
++            # Tapping it asks the launcher where things stand, and that
++            # answer is where the download can be stopped.
++            "onclick": {"appId": "Waydroid", "params": {"download": "status"}},
++        })
++        if reply and reply.get("returnValue"):
++            self.toast_id = reply.get("toastId")
++
++    def close(self):
++        if self.toast_id:
++            call("luna://com.webos.notification/closeToast",
++                 {"toastId": self.toast_id})
++            self.toast_id = None
++
++    def start(self):
++        """ Says what is being fetched before any of it arrives: the first
++            update can already be past a milestone, and the size is the one
++            thing the user most needs to see. """
++        write_state(state="downloading", received=0, total=self.total,
++                    percent=0)
++        self.shown = 0
++        reply = call("luna://com.webos.applicationManager/launch",
++                     {"id": DASHBOARD})
++        self.dashboard = bool(reply and reply.get("returnValue"))
++        # With the dashboard in the list a banner is all that is needed to
++        # say it started; without it, this toast is the list entry.
++        self._toast("Downloading Android: {}".format(megabytes(self.total)),
++                    "light" if self.dashboard else "standard")
++        if self.dashboard:
++            # A banner goes by itself; there is nothing to close.
++            self.toast_id = None
++
++    def update(self, received):
++        """ received: bytes of the file being downloaded now """
++        now = min(self.done + received, self.total) if self.total else 0
++        percent = now * 100 // self.total if self.total else 0
++        write_state(state="downloading", received=now, total=self.total,
++                    percent=percent)
++        step = percent // self.MILESTONE * self.MILESTONE
++        if not self.dashboard and self.shown < step < 100:
++            self.shown = step
++            self._toast("Downloading Android: {}% of {}".format(
++                step, megabytes(self.total)))
++
++    def file_done(self, size):
++        self.done += size
++
++    def extracting(self, name):
++        write_state(state="extracting", received=self.done, total=self.total,
++                    percent=min(100, self.done * 100 // max(self.total, 1)),
++                    image=name)
++        if not self.dashboard:
++            self._toast("Installing the Android {} image".format(name))
++
++    def finished(self):
++        self.close()
++        write_state(state="done", received=self.total, total=self.total,
++                    percent=100)
++
++    def failed(self, error):
++        self.close()
++        write_state(state="failed", received=self.done, total=self.total,
++                    error=str(error))
+-- 
+2.53.0
+
