@@ -141,6 +141,7 @@ SRC_URI = "git://github.com/waydroid/waydroid.git;branch=main;protocol=https \
     file://0010-container_manager-leave-the-host-s-nfcd-alone.patch \
     file://0011-images-say-what-a-download-will-take-and-fetch-it-th.patch \
     file://0012-data-pass-SAM-s-launch-parameters-on-to-the-LuneOS-l.patch \
+    file://0013-notification_manager-leave-Android-s-own-system-noti.patch \
     file://waydroid-luneos-prepare.sh \
     file://waydroid-luneos-prepare.service \
     file://waydroid-luneos-session.sh \
