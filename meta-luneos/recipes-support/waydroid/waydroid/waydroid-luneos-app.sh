@@ -233,7 +233,15 @@ cleanup() {
 run_cleanup() {
     [ "$cleaned" -eq 1 ] && return 0
     cleaned=1
-    [ -n "$PKG" ] && launchd_send "close $PKG"
+    # Not force-stopped as well when the warm launcher took the close. A tap
+    # on a running app's icon makes SAM close this instance and launch a new
+    # one, and a force-stop landing after that launch killed the app just
+    # brought up. Nor is it needed: swiping the card away closes the Wayland
+    # toplevel, which makes the hwcomposer remove the task itself, and a task
+    # that outlives a SAM close is simply shown again by the next launch.
+    if [ -n "$PKG" ] && launchd_send "close $PKG"; then
+        return 0
+    fi
     cleanup
 }
 
