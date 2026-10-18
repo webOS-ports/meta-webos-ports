@@ -19,6 +19,8 @@ SRC_URI = " \
     https://download.documentfoundation.org/libreoffice/src/${DIRV}/libreoffice-${PV}.tar.xz \
     file://0001-configure-probe-isystem-with-a-directory-in-the-buil.patch \
     file://0002-gbuild-create-UnpackedTarball-before-writing-a-.vers.patch \
+    file://0003-external-link-the-autotools-externals-with-the-confi.patch \
+    file://0004-sal-allow-the-source-directory-in-log-locations-to-b.patch \
 "
 SRC_URI[sha256sum] = "296ba78e7ab0d381b94c3d6342f4ebb2320ee5097ca58781b9b744cab90b9785"
 
@@ -36,7 +38,7 @@ inherit autotools-brokensep pkgconfig python3native perlnative
 # with python. The -native
 # libraries are for the build machine's configure (CONF-FOR-BUILD).
 DEPENDS = " \
-    bison-native flex-native gperf-native zip-native unzip-native ninja-native \
+    bison-native flex-native gperf-native zip-native unzip-native ninja-native patchelf-native \
     libxml2-native libxslt-native zlib-native expat-native fontconfig-native freetype-native \
     cairo fontconfig freetype icu \
     libxml2 libxslt expat zlib zstd libpng libjpeg-turbo libwebp tiff lcms \
@@ -114,6 +116,9 @@ do_configure() {
     # CONFIGUREOPTS is not used: LibreOffice's configure refuses --target and
     # the libtool options autotools.bbclass adds.
     ${S}/configure ${EXTRA_OECONF}
+    # The source tree is compiled in as SRC_ROOT for vcldemo's icon themes:
+    # name where the sources go for debugging instead, as for __FILE__.
+    sed -i 's|^#define SRC_ROOT .*|#define SRC_ROOT "${TARGET_DBGSRC_DIR}"|' ${S}/config_host/config_folders.h
 }
 
 do_compile() {
@@ -123,11 +128,13 @@ do_compile() {
     unset PKG_CONFIG_DISABLE_UNINSTALLED
     # gbuild runs make itself with --with-parallelism; PARALLEL_MAKE would
     # multiply it.
-    oe_runmake -j1 build
+    # sal shortens SAL_INFO locations (__FILE__, mapped to TARGET_DBGSRC_DIR
+    # by DEBUG_PREFIX_MAP) by this, rather than by the build directory
+    oe_runmake -j1 SAL_LOG_SRCDIR=${TARGET_DBGSRC_DIR} build
 }
 
 do_install() {
-    oe_runmake -j1 DESTDIR=${D} distro-pack-install
+    oe_runmake -j1 SAL_LOG_SRCDIR=${TARGET_DBGSRC_DIR} DESTDIR=${D} distro-pack-install
     # LibreOfficeKit headers, for the services that load it
     install -d ${D}${includedir}/LibreOfficeKit
     install -m 0644 ${S}/include/LibreOfficeKit/*.h ${S}/include/LibreOfficeKit/*.hxx \
@@ -137,6 +144,14 @@ do_install() {
     rm -rf ${D}${bindir} ${D}${datadir}/applications ${D}${datadir}/mime \
         ${D}${datadir}/icons ${D}${datadir}/metainfo ${D}${datadir}/bash-completion \
         ${D}${mandir}
+    # The bundled cairo comes straight from meson's build directory, with its
+    # RPATH to the bundled pixman's; pixman is installed next to it.
+    patchelf --set-rpath '$ORIGIN' ${D}${LO_DIR}/program/libcairo-lo.so.2
+    # The sources flex, bison and gperf generate name the build tree (#line,
+    # the gperf command line); some go into ${PN}-src. Name where the sources
+    # are installed instead, as DEBUG_PREFIX_MAP does for the compiler.
+    grep -rlF '${S}' ${S}/workdir/LexTarget ${S}/workdir/YaccTarget ${S}/workdir/CustomTarget \
+        | xargs -r sed -i 's|${S}|${TARGET_DBGSRC_DIR}|g'
 }
 
 LO_DIR = "${libdir}/libreoffice"
@@ -147,16 +162,9 @@ FILES:${PN}-lok-dev = "${includedir}/LibreOfficeKit"
 FILES:${PN} += "${LO_DIR} ${datadir}"
 # The .so files under program/ are dlopen()ed modules, not development links.
 FILES_SOLIBSDEV = ""
-INSANE_SKIP:${PN} += "dev-so"
 
 # The bundled pixman (for the bundled cairo, which --enable-cairo-rgba
 # uses) has the system's soname; it is LibreOffice's own copy.
 PRIVATE_LIBS = "libpixman-1.so.0"
 
-# TODO: the externals LibreOffice builds itself (libwpd, libmwaw, raptor...)
-# are linked without OE's LDFLAGS (no GNU_HASH), the bundled cairo has an
-# RPATH into the build tree, and libmergedlo/libuno_sal/cairo embed build
-# paths. Skipped for now; to be fixed before this goes upstream.
-INSANE_SKIP:${PN} += "ldflags rpaths buildpaths"
-INSANE_SKIP:${PN}-src += "buildpaths"
 RRECOMMENDS:${PN} += "${PN}-fonts"
