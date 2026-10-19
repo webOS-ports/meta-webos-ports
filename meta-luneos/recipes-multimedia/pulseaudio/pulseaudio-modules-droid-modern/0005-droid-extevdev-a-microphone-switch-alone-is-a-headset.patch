@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Mon, 19 Oct 2026 07:54:44 +0200
+Subject: [PATCH] droid-extevdev: a microphone switch alone is a headset
+
+MediaTek's accdet driver (mt6358-accdet.c and its siblings in the
+vendor kernels) reports a 4-pole headset as SND_JACK_MICROPHONE only:
+the input device sees SW_MICROPHONE_INSERT=1 and never
+SW_HEADPHONE_INSERT. notify_ports() required the headphone (or
+line-out) switch as well before calling it a headset, so on those
+devices output-wired_headset, input-wired_headset and the headphone
+ports all stayed unavailable with a headset plugged in, and nothing
+above PulseAudio could tell anything was in the jack.
+
+Android's WiredAccessoryManager maps SW_MICROPHONE_INSERT on its own
+to BIT_HEADSET, the same as headphone and microphone together, which
+is what these kernels are written against. Do the same: the headset
+ports follow the microphone switch, and the headphone ports keep
+meaning a plug without a microphone, so the two stay exclusive.
+
+Seen on the Zinwa Q25 (mt6789/mt6366): dmesg logs "accdet
+MICROPHONE(4-pole) PlugIn" and the jack's evdev node reports
+SW_MICROPHONE_INSERT 1 and 0, while both wired ports stayed
+"not available" until this change.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/droid/droid-extevdev.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/src/droid/droid-extevdev.c b/src/droid/droid-extevdev.c
+index d192d0c..b05ebf5 100644
+--- a/src/droid/droid-extevdev.c
++++ b/src/droid/droid-extevdev.c
+@@ -135,9 +135,13 @@ static void notify_ports(pa_droid_extevdev *u) {
+             pa_device_port_set_available(p, has_headphone);
+     }
+ 
++    /* A microphone switch on its own is a headset too: MediaTek's accdet
++     * reports a 4-pole plug as SW_MICROPHONE_INSERT alone, without
++     * SW_HEADPHONE_INSERT, and Android's WiredAccessoryManager maps that to
++     * BIT_HEADSET just like both bits together. Requiring the headphone bit
++     * as well meant a headset was never seen on those devices. */
+     pa_available_t has_headset =
+-        ((u->sw_headphone_insert || u->sw_lineout_insert)
+-        && u->sw_microphone_insert) ? PA_AVAILABLE_YES : PA_AVAILABLE_NO;
++        u->sw_microphone_insert ? PA_AVAILABLE_YES : PA_AVAILABLE_NO;
+ 
+     for (i=0; i < N_ELEMENTS(headset_ports); i++) {
+         pa_device_port *p = pa_hashmap_get(u->card->ports, headset_ports[i]);
+-- 
+2.53.0
