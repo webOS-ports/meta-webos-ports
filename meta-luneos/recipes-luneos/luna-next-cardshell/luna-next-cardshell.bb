@@ -16,7 +16,10 @@ RDEPENDS:${PN} += " \
 
 PV = "0.6-0+git"
 
-SRCREV = "d833e75794509910ee1649f411ead6e83f9247f5"
+# The card size a new xdg_shell window starts at, until
+# webOS-ports/luna-next-cardshell#440 is merged
+SRCREV = "8ce3315e581ba5a9441de0cec49262e9d08c4902"
+WEBOS_GIT_PARAM_BRANCH = "herrie/xdg-default-window-size"
 
 inherit webos_ports_repo
 inherit webos_cmake

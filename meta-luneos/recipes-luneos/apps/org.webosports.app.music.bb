@@ -4,13 +4,15 @@ LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 PV = "1.0.0+git"
-SRCREV = "c83bac596b8f3acc855c51d71fdefeca51878651"
+# db8 through LuneOS.Service's Db8Model, until
+# webOS-ports/org.webosports.app.music#1 is merged
+SRCREV = "b8e82a3cb2af7e5d4677f4cc12e05746d32b8229"
 
 # The QML plugin (MusicApp) links TagLib for tags and covers.
 DEPENDS = "qtbase qtdeclarative qtdeclarative-native taglib"
 
 inherit webos_ports_repo
-WEBOS_GIT_PARAM_BRANCH = "main"
+WEBOS_GIT_PARAM_BRANCH = "herrie/db8model"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 inherit webos_application
