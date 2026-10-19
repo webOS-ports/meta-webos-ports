@@ -87,6 +87,7 @@ RDEPENDS:${PN} = " \
   org.webosports.app.maps \
   org.webosports.app.memos \
   org.webosports.app.messaging \
+  org.webosports.app.music \
   org.webosports.app.pdf \
   org.webosports.app.phone \
   org.webosports.app.photos \
