@@ -10,18 +10,11 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=db37b6ead2dec60580595736ff983452 \
 "
 
 PV = "0.1.0+git"
-SRCREV = "71e42215034ca2f857375533d2013d17029d447e"
+SRCREV = "0f324aa4de15fb43951b67eaba49e98a1188f136"
 
 SERVICE_NAME = "org.webosports.app.documents.service"
 
-# The app's repository has no bus files for its service: installed as an
-# ipk, appinstalld writes them. These are the same, for the image.
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
-    file://${SERVICE_NAME}.service \
-    file://${SERVICE_NAME}.role.json \
-    file://${SERVICE_NAME}.api.json \
-    file://${SERVICE_NAME}.groups.json \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 inherit webos_ports_repo
 inherit allarch
@@ -53,10 +46,13 @@ do_install() {
     install -d ${D}${webos_sysbus_rolesdir}
     install -d ${D}${webos_sysbus_apipermissionsdir}
     install -d ${D}${webos_sysbus_groupsdir}
-    install -v -m 0644 ${UNPACKDIR}/${SERVICE_NAME}.service ${D}${webos_sysbus_servicedir}/
-    install -v -m 0644 ${UNPACKDIR}/${SERVICE_NAME}.role.json ${D}${webos_sysbus_rolesdir}/
-    install -v -m 0644 ${UNPACKDIR}/${SERVICE_NAME}.api.json ${D}${webos_sysbus_apipermissionsdir}/
-    install -v -m 0644 ${UNPACKDIR}/${SERVICE_NAME}.groups.json ${D}${webos_sysbus_groupsdir}/
+    # Its bus files: installed as an ipk, appinstalld writes them; for the
+    # image they come from the repository's own files/sysbus, which it ships
+    # since #1 - the recipe no longer carries copies of them.
+    install -v -m 0644 ${S}/files/sysbus/${SERVICE_NAME}.service ${D}${webos_sysbus_servicedir}/
+    install -v -m 0644 ${S}/files/sysbus/${SERVICE_NAME}.role.json ${D}${webos_sysbus_rolesdir}/
+    install -v -m 0644 ${S}/files/sysbus/${SERVICE_NAME}.api.json ${D}${webos_sysbus_apipermissionsdir}/
+    install -v -m 0644 ${S}/files/sysbus/${SERVICE_NAME}.groups.json ${D}${webos_sysbus_groupsdir}/
 }
 
 # webos_app writes the app's client permissions from appinfo.json; the app
