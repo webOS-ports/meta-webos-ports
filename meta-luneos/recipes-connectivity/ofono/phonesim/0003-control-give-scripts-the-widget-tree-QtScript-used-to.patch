@@ -1,0 +1,97 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Mon, 19 Oct 2026 13:21:50 +0200
+Subject: [PATCH] control: give scripts the widget tree QtScript used to
+
+phonesim scripts, run through org.ofono.phonesim.Script.Run, reach the
+control UI as tabCall.gbIncomingCall.pbIncomingCall.click() and the like.
+That relied on QtScript, which made every named child of an exported
+QObject a property of it. The port to Qt 6 replaced QtScript with
+QJSEngine, which does not, so every such path now fails with "Cannot read
+property ... of undefined" and no script can drive phonesim at all - an
+incoming call cannot be simulated without the GUI.
+
+Build the same tree by hand: wrap each tab, and hang every named child off
+its parent's wrapper, recursively. A real property of an object keeps
+precedence over a child of the same name.
+
+Tested on a Zinwa Q25 with phonesim run offscreen: a script setting
+tabCall.gbIncomingCall.leCaller.text and clicking pbIncomingCall produces
+an incoming call in oFono again.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [fixes 0001-Phonesim-Port-to-CMake-and-Qt6.patch, which is LuneOS-only]
+---
+ src/control.cpp | 40 ++++++++++++++++++++++++++++++++--------
+ 1 file changed, 32 insertions(+), 8 deletions(-)
+
+diff --git a/src/control.cpp b/src/control.cpp
+index d45ff91..cb04906 100644
+--- a/src/control.cpp
++++ b/src/control.cpp
+@@ -636,31 +636,55 @@ void ControlWidget::modemSilentReset()
+     emit unsolicitedCommand("+CRST:");
+ }
+ 
++/*
++ * QtScript made every named child of an exported QObject a property of it, and
++ * every phonesim script is written against that: tabCall.gbIncomingCall.
++ * pbIncomingCall.click(). QJSEngine does not, so after the port to Qt 6 each
++ * of those paths ended in "Cannot read property ... of undefined". Build the
++ * same tree by hand: one wrapper per widget, each named child hung off its
++ * parent's wrapper, recursively.
++ */
++static QJSValue exportWithChildren(QJSEngine &engine, QObject *obj)
++{
++    QJSValue value = engine.newQObject(obj);
++
++    for (QObject *child : obj->children()) {
++        const QString name = child->objectName();
++        if (name.isEmpty() || name.startsWith(QLatin1String("qt_")))
++            continue;
++        if (value.hasOwnProperty(name))
++            continue;   /* a real property of the object wins */
++        value.setProperty(name, exportWithChildren(engine, child));
++    }
++
++    return value;
++}
++
+ Script::Script(QObject *obj, Ui_ControlBase *ui) : QDBusAbstractAdaptor(obj)
+ {
+     /* Export tabs to be accessed by script */
+-    QJSValue qsTab = engine.newQObject(ui->tab);
++    QJSValue qsTab = exportWithChildren(engine, ui->tab);
+     engine.globalObject().setProperty("tabRegistration", qsTab);
+ 
+-    QJSValue qsTab2 = engine.newQObject(ui->tab_2);
++    QJSValue qsTab2 = exportWithChildren(engine, ui->tab_2);
+     engine.globalObject().setProperty("tabCBM", qsTab2);
+ 
+-    QJSValue qsTab3 = engine.newQObject(ui->tab_3);
++    QJSValue qsTab3 = exportWithChildren(engine, ui->tab_3);
+     engine.globalObject().setProperty("tabSMS", qsTab3);
+ 
+-    QJSValue qsTab4 = engine.newQObject(ui->tab_4);
++    QJSValue qsTab4 = exportWithChildren(engine, ui->tab_4);
+     engine.globalObject().setProperty("tabVoiceMail", qsTab4);
+ 
+-    QJSValue qsTab5 = engine.newQObject(ui->tab_5);
++    QJSValue qsTab5 = exportWithChildren(engine, ui->tab_5);
+     engine.globalObject().setProperty("tabUSSD", qsTab5);
+ 
+-    QJSValue qsTab6 = engine.newQObject(ui->tab_6);
++    QJSValue qsTab6 = exportWithChildren(engine, ui->tab_6);
+     engine.globalObject().setProperty("tabSIM", qsTab6);
+ 
+-    QJSValue qsTab8 = engine.newQObject(ui->tab_8);
++    QJSValue qsTab8 = exportWithChildren(engine, ui->tab_8);
+     engine.globalObject().setProperty("tabPosition", qsTab8);
+ 
+-    QJSValue qsTab9 = engine.newQObject(ui->tab_9);
++    QJSValue qsTab9 = exportWithChildren(engine, ui->tab_9);
+     engine.globalObject().setProperty("tabCall", qsTab9);
+ }
+ 
+-- 
+2.53.0
