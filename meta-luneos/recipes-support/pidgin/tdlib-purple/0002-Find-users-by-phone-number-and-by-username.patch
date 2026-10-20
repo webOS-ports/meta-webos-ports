@@ -1,0 +1,127 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:24:26 +0200
+Subject: [PATCH] Find users by phone number and by @username
+
+getUsersByPurpleName() understands two kinds of name: an "id<n>" buddy and
+a display name. Anything else ends in "User not found", so a message or a
+call addressed the way a phone dialer or an address book would address it
+goes nowhere:
+
+- a phone number, e.g. "+15555550100". TdAccountData already keeps a phone
+  index (getUserByPhone), so look the number up there.
+- a Telegram @username. Add TdAccountData::getUsersByUsername(), which
+  matches case-insensitively, with or without the leading '@', against the
+  editable username and every active username, and try it when no display
+  name matches.
+
+Display names still take precedence over usernames, so nothing that resolved
+before resolves differently now.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ account-data.cpp | 35 +++++++++++++++++++++++++++++++++++
+ account-data.h   |  4 ++++
+ client-utils.cpp | 16 +++++++++++++++-
+ 3 files changed, 54 insertions(+), 1 deletion(-)
+
+diff --git a/account-data.cpp b/account-data.cpp
+index 214a3e6..57817a9 100644
+--- a/account-data.cpp
++++ b/account-data.cpp
+@@ -6,6 +6,7 @@
+ #include <algorithm>
+ #include <stdio.h>
+ #include <unistd.h>
++#include <cctype>
+ 
+ static bool isCanonicalPhoneNumber(const char *s)
+ {
+@@ -617,6 +618,40 @@ void TdAccountData::getUsersByDisplayName(const char *displayName,
+             users.push_back(entry.second.user.get());
+ }
+ 
++// Match by Telegram @username. Telegram usernames are case-insensitive; accept an optional leading
++// '@'. Checks the editable username and any active usernames.
++void TdAccountData::getUsersByUsername(const char *username,
++                                       std::vector<const td::td_api::user*> &users)
++{
++    users.clear();
++    if (!username || (*username == '\0'))
++        return;
++    if (*username == '@')
++        username++;
++    std::string want(username);
++    std::transform(want.begin(), want.end(), want.begin(), ::tolower);
++    if (want.empty())
++        return;
++
++    auto equalsIgnoreCase = [&want](const std::string &candidate) {
++        std::string s(candidate);
++        std::transform(s.begin(), s.end(), s.begin(), ::tolower);
++        return s == want;
++    };
++
++    for (const UserMap::value_type &entry: m_userInfo) {
++        const td::td_api::user *u = entry.second.user.get();
++        if (!u || !u->usernames_)
++            continue;
++        bool hit = equalsIgnoreCase(u->usernames_->editable_username_);
++        if (!hit)
++            for (const std::string &active: u->usernames_->active_usernames_)
++                if (equalsIgnoreCase(active)) { hit = true; break; }
++        if (hit)
++            users.push_back(u);
++    }
++}
++
+ const td::td_api::basicGroup *TdAccountData::getBasicGroup(BasicGroupId groupId) const
+ {
+     auto it = m_groups.find(groupId);
+diff --git a/account-data.h b/account-data.h
+index f8d57bb..7b6fb77 100644
+--- a/account-data.h
++++ b/account-data.h
+@@ -404,6 +404,10 @@ public:
+     std::string                   getDisplayName(UserId userId) const;
+     void                          getUsersByDisplayName(const char *displayName,
+                                                         std::vector<const td::td_api::user*> &users);
++    // Resolve a Telegram @username (case-insensitive, optional leading '@') to loaded users, so
++    // that a message addressed to a handle rather than an "id<n>" buddy can find its user.
++    void                          getUsersByUsername(const char *username,
++                                                     std::vector<const td::td_api::user*> &users);
+ 
+     const td::td_api::basicGroup *getBasicGroup(BasicGroupId groupId) const;
+     const td::td_api::basicGroupFullInfo *getBasicGroupInfo(BasicGroupId groupId) const;
+diff --git a/client-utils.cpp b/client-utils.cpp
+index 16e0fea..e2d05a6 100644
+--- a/client-utils.cpp
++++ b/client-utils.cpp
+@@ -209,11 +209,25 @@ std::vector<const td::td_api::user *> getUsersByPurpleName(const char *buddyName
+             result.push_back(tdUser);
+         else if (action)
+             purple_debug_warning(config::pluginId, "Cannot %s: no user with id %s\n", action, buddyName);
++    } else if (isPhoneNumber(buddyName)) {
++        // A front-end may address a contact by phone number (e.g. "+15555550100", as a dialer or an
++        // address book would) rather than by an "id<n>" buddy or a display name. Resolve the number
++        // to the Telegram user through the phone index.
++        const td::td_api::user *tdUser = account.getUserByPhone(buddyName);
++        if (tdUser != nullptr)
++            result.push_back(tdUser);
++        else if (action)
++            purple_debug_warning(config::pluginId, "Cannot %s: no Telegram user with phone number %s\n", action, buddyName);
+     } else {
+         account.getUsersByDisplayName(buddyName, result);
++        // A conversation may also be addressed by Telegram @username rather than an "id<n>" buddy
++        // or the display name; fall back to a username match so those sends resolve instead of
++        // failing with "User not found".
++        if (result.empty())
++            account.getUsersByUsername(buddyName, result);
+         if (action) {
+             if (result.empty())
+-                purple_debug_warning(config::pluginId, "Cannot %s: no user with display name '%s'\n",
++                purple_debug_warning(config::pluginId, "Cannot %s: no user with display name or username '%s'\n",
+                                     action, buddyName);
+             else if (result.size() != 1)
+                 purple_debug_warning(config::pluginId, "Cannot %s: more than one user with display name '%s'\n",

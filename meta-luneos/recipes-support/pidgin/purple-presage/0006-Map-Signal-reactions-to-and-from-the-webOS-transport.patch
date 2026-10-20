@@ -1,0 +1,629 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:26:28 +0200
+Subject: [PATCH] Map Signal reactions to and from the webOS transport
+
+Incoming: a DataMessage carrying a reaction is not shown as a "Reacted
+with X" line any more. It is forwarded as the "webos-im-reaction" signal
+(target sent timestamp, emoji, reactor; an empty emoji removes it).
+Every message stores its Signal id (sent timestamp in ms) on the
+conversation as "webos-msg-id", including messages sent from another of
+the user's devices, so a later reaction can find its target.
+
+Outgoing: the transport emits "webos-im-send-reaction"; a handler sends
+it as a DataMessage reaction, looking the target author up in the
+message store. After a message sent from the app goes out, its server
+id is reported back via "webos-im-outbox-id".
+
+The signals are defined by the webOS imlibpurpletransport, so this is
+not for upstream.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ src/c/connection.c              |  42 +++++++++++++
+ src/c/presage.h                 |   7 +++
+ src/c/receive_text.c            |  82 +++++++++++++++++++++++++
+ src/rust/src/bridge.rs          |  58 ++++++++++++++++++
+ src/rust/src/bridge_commands.rs |  76 +++++++++++++++++++-----
+ src/rust/src/core.rs            |  42 ++++++++++++-
+ src/rust/src/receive.rs         |  12 ++++
+ src/rust/src/send.rs            | 102 +++++++++++++++++++++++++++++++-
+ src/rust/src/structs.rs         |  10 ++++
+ 9 files changed, 414 insertions(+), 17 deletions(-)
+
+diff --git a/src/c/connection.c b/src/c/connection.c
+index c3b9ee4..326b7a5 100755
+--- a/src/c/connection.c
++++ b/src/c/connection.c
+@@ -32,6 +32,38 @@ rust_main(void* account) {
+     return 0;
+ }
+ 
++/* webOS reactions (SEND): the transport emits "webos-im-send-reaction" when the user places a reaction
++ * from the app. Params: (account, targetServiceMessageId, emoji, peer, removeFlag). We resolve this
++ * account's Rust command channel and hand the reaction to the Rust side to transmit over Signal.
++ * targetServiceMessageId is the reacted-to message's sent timestamp (ms, decimal); removeFlag "1"
++ * retracts the user's emoji. Runs on the libpurple main thread (signal emit). */
++static void presage_send_reaction_cb(PurpleAccount *account, const char *target_id, const char *emoji, const char *peer, const char *remove_flag, void *unused) {
++    (void)unused;
++    if (account == NULL || peer == NULL || target_id == NULL) {
++        return;
++    }
++    // The signal fires process-wide for EVERY prpl's reactions - filter to Signal accounts before
++    // touching protocol_data (reading another prpl's protocol_data as a Presage* would be garbage).
++    if (g_strcmp0(purple_account_get_protocol_id(account), "prpl-hehoe-presage") != 0) {
++        return;
++    }
++    PurpleConnection *connection = purple_account_get_connection(account);
++    if (connection == NULL) {
++        return;
++    }
++    Presage *presage = purple_connection_get_protocol_data(connection);
++    if (presage == NULL || presage->tx_ptr == NULL) {
++        return;
++    }
++    uint64_t target_ts = g_ascii_strtoull(target_id, NULL, 10);
++    if (target_ts == 0) {
++        purple_debug_error(PLUGIN_NAME, "webos-im-send-reaction: unparseable target id \"%s\"\n", target_id);
++        return;
++    }
++    int remove = (remove_flag != NULL && remove_flag[0] == '1' && remove_flag[1] == '\0') ? 1 : 0;
++    presage_rust_send_reaction(account, rust_runtime, presage->tx_ptr, peer, target_ts, emoji, remove);
++}
++
+ void presage_login(PurpleAccount *account) {
+     purple_debug_info(PLUGIN_NAME, "login for account: %p\n", account);
+     g_return_if_fail(rust_runtime != NULL);
+@@ -44,6 +76,16 @@ void presage_login(PurpleAccount *account) {
+     pc_flags |= PURPLE_CONNECTION_FLAG_NO_BGCOLOR;
+     purple_connection_set_flags(connection, pc_flags);
+     purple_connection_set_state(connection, PURPLE_CONNECTION_STATE_CONNECTING);
++    // webOS reactions (SEND): connect ONCE to the transport's "webos-im-send-reaction" signal so a
++    // reaction the user places from the app is transmitted over Signal. The signal is registered by the
++    // transport on the conversations handle; connect with a static guard so reconnects/multiple accounts
++    // don't stack duplicate handlers (one handler serves all presage accounts; it routes per account).
++    static gboolean send_reaction_connected = FALSE;
++    if (!send_reaction_connected) {
++        purple_signal_connect(purple_conversations_get_handle(), "webos-im-send-reaction", purple_get_core(),
++            PURPLE_CALLBACK(presage_send_reaction_cb), NULL);
++        send_reaction_connected = TRUE;
++    }
+     Presage *presage = g_new0(Presage, 1);
+     purple_connection_set_protocol_data(connection, presage);
+     #ifdef WIN32
+diff --git a/src/c/presage.h b/src/c/presage.h
+index 1f1dd32..8d60066 100755
+--- a/src/c/presage.h
++++ b/src/c/presage.h
+@@ -35,6 +35,8 @@ void presage_rust_drop_attachment(RustAttachmentPtr);
+ void presage_rust_get_group_members(PurpleAccount *, RustRuntimePtr, RustChannelPtr, const char *);
+ void presage_rust_get_profile(PurpleAccount *, RustRuntimePtr, RustChannelPtr, const char *);
+ void presage_rust_list_groups(PurpleAccount *, RustRuntimePtr, RustChannelPtr);
++// webOS reactions (SEND): transmit a reaction the user placed from the app. (peer, target sent timestamp, emoji, remove flag)
++void presage_rust_send_reaction(PurpleAccount *, RustRuntimePtr, RustChannelPtr, const char *peer, uint64_t target_ts, const char *emoji, int remove);
+ 
+ // connection.c - per-account store teardown: hooked to libpurple's "account-removed" signal at plugin
+ // load; deletes <purple_user_dir()>/presage/<username>.db3 (+ sqlite sidecars) for the removed account.
+@@ -102,6 +104,11 @@ void presage_handle_uuid(PurpleConnection *connection, const char *uuid);
+ 
+ // text messages
+ void presage_handle_text(PurpleConnection *connection, const char *who, const char *name, const char *group, PurpleMessageFlags sent, time_t timestamp_seconds, uint64_t timestamp_ms, const char *body);
++// webOS reactions: emit the cross-prpl "webos-im-reaction" signal (called from the Rust receive loop).
++void presage_emit_reaction(PurpleAccount *account, const char *target_id, const char *emoji, const char *sender);
++// webOS reactions: emit the cross-prpl "webos-im-outbox-id" signal - the server id (sent timestamp) of a
++// message the user sent from the app (called from the Rust command loop).
++void presage_emit_outbox_id(PurpleAccount *account, const char *service_message_id, const char *text);
+ int presage_send_im(PurpleConnection *connection, const char *who, const char *message, PurpleMessageFlags flags);
+ int presage_send_chat(PurpleConnection *connection, int id, const gchar *message, PurpleMessageFlags flags);
+ 
+diff --git a/src/c/receive_text.c b/src/c/receive_text.c
+index 22254c1..358824c 100755
+--- a/src/c/receive_text.c
++++ b/src/c/receive_text.c
+@@ -1,5 +1,66 @@
+ #include "presage.h"
+ 
++/* webOS reactions: emit the cross-prpl "webos-im-reaction" signal for a Signal reaction. Called from
++ * the Rust receive loop (worker thread), so - like presage_append_message - copy the strings and hop
++ * to the libpurple main thread before touching purple_signal_emit. emoji "" means the reaction was
++ * removed; target_id is the reacted-to message's sent timestamp (its serviceMessageId); sender is the
++ * reactor's UUID. */
++typedef struct {
++    PurpleAccount *account;
++    char *target_id;
++    char *emoji;
++    char *sender;
++} PresageReactionEvt;
++
++static gboolean presage_reaction_apply(gpointer data) {
++    PresageReactionEvt *e = (PresageReactionEvt *)data;
++    purple_signal_emit(purple_conversations_get_handle(), "webos-im-reaction",
++        e->account, e->target_id, e->emoji, e->sender);
++    g_free(e->target_id); g_free(e->emoji); g_free(e->sender); g_free(e);
++    return FALSE; /* one-shot */
++}
++
++void presage_emit_reaction(PurpleAccount *account, const char *target_id, const char *emoji, const char *sender) {
++    if (account == NULL || target_id == NULL || *target_id == '\0') {
++        return;
++    }
++    PresageReactionEvt *e = g_new0(PresageReactionEvt, 1);
++    e->account = account;
++    e->target_id = g_strdup(target_id);
++    e->emoji = g_strdup(emoji ? emoji : "");
++    e->sender = g_strdup(sender ? sender : "");
++    purple_timeout_add(0, presage_reaction_apply, e); /* thread-safe; runs on the main thread */
++}
++
++/* webOS reactions: emit the cross-prpl "webos-im-outbox-id" signal, telling the transport the server
++ * id (sent timestamp) of a message the user sent from the app. Called from the Rust command loop
++ * (worker thread), so - like presage_emit_reaction - copy the strings and hop to the libpurple main
++ * thread before touching purple_signal_emit. */
++typedef struct {
++    PurpleAccount *account;
++    char *service_message_id;
++    char *text;
++} PresageOutboxEvt;
++
++static gboolean presage_outbox_id_apply(gpointer data) {
++    PresageOutboxEvt *e = (PresageOutboxEvt *)data;
++    purple_signal_emit(purple_conversations_get_handle(), "webos-im-outbox-id",
++        e->account, e->service_message_id, e->text);
++    g_free(e->service_message_id); g_free(e->text); g_free(e);
++    return FALSE; /* one-shot */
++}
++
++void presage_emit_outbox_id(PurpleAccount *account, const char *service_message_id, const char *text) {
++    if (account == NULL || service_message_id == NULL || *service_message_id == '\0') {
++        return;
++    }
++    PresageOutboxEvt *e = g_new0(PresageOutboxEvt, 1);
++    e->account = account;
++    e->service_message_id = g_strdup(service_message_id);
++    e->text = g_strdup(text ? text : "");
++    purple_timeout_add(0, presage_outbox_id_apply, e); /* thread-safe; runs on the main thread */
++}
++
+ void presage_handle_text(PurpleConnection *connection, const char *who, const char *name, const char *group, PurpleMessageFlags flags, time_t timestamp_seconds, uint64_t timestamp_ms, const char *text) {
+     PurpleAccount *account = purple_connection_get_account(connection);
+     if (group == NULL) {
+@@ -12,8 +73,23 @@ void presage_handle_text(PurpleConnection *connection, const char *who, const ch
+             if (conv == NULL) {
+                 conv = purple_conversation_new(PURPLE_CONV_TYPE_IM, account, who); // MEMCHECK: caller takes ownership
+             }
++            // webOS reactions/carbons: a message we sent from ANOTHER device (REMOTE_SEND, not a local
++            // echo) is stored by the transport as an Outbox row - stash its id (sent timestamp) as the
++            // serviceMessageId so a later reaction can attach to our own message. Local echoes carry
++            // PURPLE_MESSAGE_SEND only (no REMOTE_SEND) and are left to the app's own send path.
++            if (flags & PURPLE_MESSAGE_REMOTE_SEND) {
++                char idbuf[32]; g_snprintf(idbuf, sizeof idbuf, "%llu", (unsigned long long)timestamp_ms);
++                purple_conversation_set_data(conv, "webos-msg-id", g_strdup(idbuf));
++            }
+             purple_conv_im_write(purple_conversation_get_im_data(conv), who, text, flags, timestamp_seconds);
+         } else {
++            // webOS reactions: stash the Signal message id (its sent timestamp in ms) so the
++            // transport stores it as serviceMessageId (read in incoming_message_cb during
++            // serv_got_im); a later reaction targets it by target_sent_timestamp.
++            PurpleConversation *rconv = purple_find_conversation_with_account(PURPLE_CONV_TYPE_IM, who, account);
++            if (rconv == NULL) rconv = purple_conversation_new(PURPLE_CONV_TYPE_IM, account, who);
++            { char idbuf[32]; g_snprintf(idbuf, sizeof idbuf, "%llu", (unsigned long long)timestamp_ms);
++              purple_conversation_set_data(rconv, "webos-msg-id", g_strdup(idbuf)); }
+             purple_serv_got_im(connection, who, text, flags, timestamp_seconds);
+         }
+     } else {
+@@ -39,6 +115,12 @@ void presage_handle_text(PurpleConnection *connection, const char *who, const ch
+             // who must be set in a chat, even for an error message
+             who = purple_account_get_username(account);
+         }
++        // webOS reactions: stash the message id on the chat conv (RECV only) as serviceMessageId.
++        if (!(flags & PURPLE_MESSAGE_SEND)) {
++            PurpleConversation *gconv = purple_find_chat(connection, g_str_hash(group));
++            if (gconv) { char idbuf[32]; g_snprintf(idbuf, sizeof idbuf, "%llu", (unsigned long long)timestamp_ms);
++                purple_conversation_set_data(gconv, "webos-msg-id", g_strdup(idbuf)); }
++        }
+         purple_serv_got_chat_in(connection, g_str_hash(group), who, flags, text, timestamp_seconds);
+     }
+ }
+diff --git a/src/rust/src/bridge.rs b/src/rust/src/bridge.rs
+index a6a769d..61aa140 100755
+--- a/src/rust/src/bridge.rs
++++ b/src/rust/src/bridge.rs
+@@ -111,6 +111,64 @@ extern "C" {
+         account: *mut crate::bridge_structs::PurpleAccount,
+         who: *const std::os::raw::c_char,
+     ) -> *const std::os::raw::c_char;
++
++    // implemented by receive_text.c - emit the cross-prpl "webos-im-reaction" signal.
++    fn presage_emit_reaction(
++        account: *mut crate::bridge_structs::PurpleAccount,
++        target_id: *const std::os::raw::c_char,
++        emoji: *const std::os::raw::c_char,
++        sender: *const std::os::raw::c_char,
++    );
++
++    // implemented by receive_text.c - emit the cross-prpl "webos-im-outbox-id" signal, telling the
++    // transport the server id (sent timestamp) of a message the user sent from the app.
++    fn presage_emit_outbox_id(
++        account: *mut crate::bridge_structs::PurpleAccount,
++        service_message_id: *const std::os::raw::c_char,
++        text: *const std::os::raw::c_char,
++    );
++}
++
++// webOS reactions: forward a Signal reaction to the transport via the "webos-im-reaction" signal.
++// target_id is the reacted-to message's sent timestamp (its serviceMessageId); sender is the reactor's
++// UUID; an empty emoji ("") means the reaction was removed.
++pub fn emit_reaction(
++    account: *const crate::bridge_structs::PurpleAccount,
++    target_id: String,
++    emoji: String,
++    sender: String,
++) {
++    let target = std::ffi::CString::new(target_id).unwrap_or_default();
++    let emoji = std::ffi::CString::new(emoji).unwrap_or_default();
++    let sender = std::ffi::CString::new(sender).unwrap_or_default();
++    unsafe {
++        presage_emit_reaction(
++            account as *mut crate::bridge_structs::PurpleAccount,
++            target.as_ptr(),
++            emoji.as_ptr(),
++            sender.as_ptr(),
++        );
++    }
++}
++
++// webOS reactions: tell the transport the server id of a message the user sent from the app, via the
++// "webos-im-outbox-id" signal. service_message_id is the message's sent timestamp (its serviceMessageId,
++// in ms, decimal); text is the sent body (used by the transport only as a correlation hint). The C side
++// hops to the libpurple main thread before emitting.
++pub fn emit_outbox_id(
++    account: *const crate::bridge_structs::PurpleAccount,
++    service_message_id: String,
++    text: String,
++) {
++    let id = std::ffi::CString::new(service_message_id).unwrap_or_default();
++    let text = std::ffi::CString::new(text).unwrap_or_default();
++    unsafe {
++        presage_emit_outbox_id(
++            account as *mut crate::bridge_structs::PurpleAccount,
++            id.as_ptr(),
++            text.as_ptr(),
++        );
++    }
+ }
+ 
+ // I want to forward a Vec of groups to the C part, but the rust-allocated C-compatible CStrings must live somewhere, so we have this intermediate type
+diff --git a/src/rust/src/bridge_commands.rs b/src/rust/src/bridge_commands.rs
+index f3fd1f8..baf41e0 100755
+--- a/src/rust/src/bridge_commands.rs
++++ b/src/rust/src/bridge_commands.rs
+@@ -88,6 +88,23 @@ pub unsafe extern "C" fn presage_rust_get_group_members(
+     }
+ }
+ 
++// Classify a conversation destination string into a Recipient exactly like presage_rust_send: a
++// 36-char dashed string is a contact UUID, a "+<digits>" string is an E.164 phone (resolved to a
++// UUID in the command loop), anything else is a hex group master key. Shared by the send + reaction
++// FFI entry points so both classify peers identically.
++fn classify_recipient(destination: &str) -> Result<crate::structs::Recipient, anyhow::Error> {
++    let d = destination.as_bytes();
++    if d.len() == 36 && d[8] == b'-' && d[13] == b'-' && d[18] == b'-' && d[23] == b'-' {
++        presage::libsignal_service::prelude::Uuid::parse_str(destination)
++            .map(|uuid| crate::structs::Recipient::Contact(uuid))
++            .map_err(|err| anyhow::anyhow!(err))
++    } else if d.first() == Some(&b'+') && d.len() > 1 && d[1..].iter().all(|c| c.is_ascii_digit()) {
++        Ok(crate::structs::Recipient::ContactByPhone(destination.to_owned()))
++    } else {
++        parse_group_master_key(destination).map(|master_key_bytes| crate::structs::Recipient::Group(master_key_bytes))
++    }
++}
++
+ #[no_mangle]
+ pub unsafe extern "C" fn presage_rust_send(
+     account: *mut crate::bridge_structs::PurpleAccount,
+@@ -98,20 +115,7 @@ pub unsafe extern "C" fn presage_rust_send(
+     xfer: *const crate::bridge_structs::PurpleXfer,
+ ) {
+     let destination = std::ffi::CStr::from_ptr(c_destination).to_str().unwrap();
+-    let d = destination.as_bytes();
+-    let recipient = if d.len() == 36 && d[8] == b'-' && d[13] == b'-' && d[18] == b'-' && d[23] == b'-' {
+-        // destination looks like a UUID, assume it is a contact
+-        presage::libsignal_service::prelude::Uuid::parse_str(destination)
+-            .map(|uuid| crate::structs::Recipient::Contact(uuid))
+-            .map_err(|err| anyhow::anyhow!(err))
+-    } else if d.first() == Some(&b'+') && d.len() > 1 && d[1..].iter().all(|c| c.is_ascii_digit()) {
+-        // destination is an E.164 phone number (e.g. "+15555550100") -> resolve to the contact's
+-        // UUID in the command loop. Previously this fell through to parse_group_master_key(), which
+-        // failed with "Invalid character '+' at position 0" and (below) disconnected the account.
+-        Ok(crate::structs::Recipient::ContactByPhone(destination.to_owned()))
+-    } else {
+-        parse_group_master_key(destination).map(|master_key_bytes| crate::structs::Recipient::Group(master_key_bytes))
+-    };
++    let recipient = classify_recipient(destination);
+     match recipient {
+         Ok(recipient) => {
+             let cmd = crate::structs::Cmd::Send {
+@@ -138,6 +142,50 @@ pub unsafe extern "C" fn presage_rust_send(
+     }
+ }
+ 
++/// webOS reactions (SEND): transmit a reaction the user placed from the app. Called by
++/// presage_send_reaction_cb (connection.c), which handles the "webos-im-send-reaction" signal. `c_peer`
++/// is the conversation peer (contact UUID / E.164 / group hex), classified exactly like a send;
++/// `target_ts` is the reacted-to message's sent timestamp; `c_emoji` is the (always supplied) emoji;
++/// `remove` nonzero retracts the user's reaction.
++#[no_mangle]
++pub unsafe extern "C" fn presage_rust_send_reaction(
++    account: *mut crate::bridge_structs::PurpleAccount,
++    rt: *mut tokio::runtime::Runtime,
++    tx: *mut tokio::sync::mpsc::Sender<crate::structs::Cmd>,
++    c_peer: *const std::os::raw::c_char,
++    target_ts: u64,
++    c_emoji: *const std::os::raw::c_char,
++    remove: std::os::raw::c_int,
++) {
++    let peer = match std::ffi::CStr::from_ptr(c_peer).to_str() {
++        Ok(s) => s,
++        Err(_) => return,
++    };
++    let emoji = if c_emoji.is_null() {
++        String::new()
++    } else {
++        std::ffi::CStr::from_ptr(c_emoji).to_str().unwrap_or("").to_owned()
++    };
++    match classify_recipient(peer) {
++        Ok(recipient) => {
++            let cmd = crate::structs::Cmd::SendReaction {
++                recipient,
++                target_ts,
++                emoji,
++                remove: remove != 0,
++            };
++            send_cmd(account, rt, tx, cmd);
++        }
++        Err(err) => {
++            crate::bridge::purple_debug(
++                account,
++                crate::bridge_structs::PURPLE_DEBUG_ERROR,
++                format!("Cannot send reaction: unrecognized peer \"{peer}\": {err}\n"),
++            );
++        }
++    }
++}
++
+ /*
+  * Taken from presage-cli
+  */
+diff --git a/src/rust/src/core.rs b/src/rust/src/core.rs
+index b6c2f45..30c2caa 100755
+--- a/src/rust/src/core.rs
++++ b/src/rust/src/core.rs
+@@ -88,12 +88,16 @@ async fn run<C: presage::store::Store + 'static>(
+             }
+             // now do the actual sending and error-handling
+             match crate::send::send(&mut manager, recipient, message.clone(), xfer).await {
+-                Ok(_) => {
++                Ok(sent_ts) => {
+                     // NOTE: for Spectrum, send-acknowledgements should be PURPLE_MESSAGE_SEND only (without PURPLE_MESSAGE_REMOTE_SEND)
+                     msg.flags = crate::bridge_structs::PurpleMessageFlags::PURPLE_MESSAGE_SEND;
+                     if let Some(body) = message {
+                         msg.body = Some(body);
+                     }
++                    // webOS reactions: surface the server id (the sent timestamp, in ms) of this
++                    // app-composed message so the transport (OutboxIdHandler) can label the Outbox row
++                    // -> a later reaction can target the user's own message by its serviceMessageId.
++                    crate::bridge::emit_outbox_id(account, sent_ts.to_string(), msg.body.clone().unwrap_or_default());
+                 }
+                 Err(err) => {
+                     // TODO: remove this purple_debug once handling errors is reasonably well tested
+@@ -110,6 +114,42 @@ async fn run<C: presage::store::Store + 'static>(
+             crate::bridge::append_message(msg);
+             Ok(true)
+         }
++        crate::structs::Cmd::SendReaction {
++            recipient,
++            target_ts,
++            emoji,
++            remove,
++        } => {
++            // Resolve a phone-number recipient to the contact's UUID (same policy as Cmd::Send: never
++            // disconnect over one unsendable reaction).
++            let recipient = match recipient {
++                crate::structs::Recipient::ContactByPhone(phone) => match resolve_phone_to_uuid(&mut manager, &phone).await {
++                    Some(uuid) => crate::structs::Recipient::Contact(uuid),
++                    None => {
++                        crate::bridge::purple_debug(
++                            account,
++                            crate::bridge_structs::PURPLE_DEBUG_ERROR,
++                            format!("Cannot send reaction: no Signal contact found for {phone}\n"),
++                        );
++                        return Ok(true);
++                    }
++                },
++                other => other,
++            };
++            match crate::send::send_reaction(&mut manager, recipient, target_ts, emoji, remove).await {
++                Ok(_) => crate::bridge::purple_debug(
++                    account,
++                    crate::bridge_structs::PURPLE_DEBUG_INFO,
++                    format!("sent reaction targeting {target_ts}\n"),
++                ),
++                Err(err) => crate::bridge::purple_debug(
++                    account,
++                    crate::bridge_structs::PURPLE_DEBUG_ERROR,
++                    format!("Error sending reaction targeting {target_ts}: {err}\n"),
++                ),
++            }
++            Ok(true)
++        }
+         crate::structs::Cmd::ListGroups => {
+             crate::contacts::forward_groups(account, &mut manager).await;
+             Ok(true)
+diff --git a/src/rust/src/receive.rs b/src/rust/src/receive.rs
+index 9805a5f..4981969 100755
+--- a/src/rust/src/receive.rs
++++ b/src/rust/src/receive.rs
+@@ -321,6 +321,18 @@ async fn process_data_message<C: presage::store::Store>(
+     message: crate::bridge::Message,
+     data_message: &presage::proto::DataMessage,
+ ) -> Option<String> {
++    // webOS reactions: a reaction is not a message. Forward it to the transport as a typed
++    // "webos-im-reaction" signal (targeting the reacted-to message by its sent timestamp, which is
++    // that message's serviceMessageId) and suppress the prose "Reacted with X" line that would
++    // otherwise appear as a separate message. An empty emoji signals removal to the transport.
++    if let Some(reaction) = &data_message.reaction {
++        if let Some(target) = reaction.target_sent_timestamp {
++            let emoji = if reaction.remove() { String::new() } else { reaction.emoji().to_string() };
++            let sender = message.who.clone().unwrap_or_default();
++            crate::bridge::emit_reaction(message.account, target.to_string(), emoji, sender);
++        }
++        return None;
++    }
+     // download sticker if present
+     if let Some(sticker) = &data_message.sticker {
+         if let Some(attachment) = &sticker.data {
+diff --git a/src/rust/src/send.rs b/src/rust/src/send.rs
+index 0f7af9b..91d6c32 100755
+--- a/src/rust/src/send.rs
++++ b/src/rust/src/send.rs
+@@ -60,8 +60,9 @@ pub async fn send<C: presage::store::Store + 'static>(
+     recipient: crate::structs::Recipient,
+     body: Option<String>,
+     xfer: *const crate::bridge_structs::PurpleXfer,
+-) -> Result<(), anyhow::Error> {
+-    // -> Result<(), presage::Error<<C>::Error>>
++) -> Result<u64, anyhow::Error> {
++    // Returns the message's sent timestamp (its serviceMessageId, in ms). The caller emits this back
++    // to the transport via "webos-im-outbox-id" so a later reaction can target the user's own message.
+     if let Some(body) = body.as_ref() {
+         if body.len() > 2048 {
+             // until https://github.com/whisperfish/presage/pull/384 is merged
+@@ -141,6 +142,103 @@ pub async fn send<C: presage::store::Store + 'static>(
+         }
+     }
+ 
++    Ok(timestamp)
++}
++
++/*
++ * Looks up the ACI (author) of a stored message by its sent timestamp within a thread.
++ *
++ * Used to fill Reaction.target_author_aci, which the reaction signal does not carry. For an incoming
++ * message the sender is the peer; for our own (synchronized) message it is our own ACI -- so this
++ * resolves both directions correctly, provided the message is in the store.
++ */
++async fn lookup_message_author_by_timestamp<S: presage::store::Store>(
++    manager: &presage::Manager<S, presage::manager::Registered>,
++    thread: &presage::store::Thread,
++    timestamp: u64,
++) -> Option<presage::libsignal_service::prelude::Uuid> {
++    match manager.store().message(thread, timestamp).await {
++        Ok(Some(content)) => Some(content.metadata.sender.raw_uuid()),
++        _ => None,
++    }
++}
++
++/*
++ * Sends a reaction (an ordinary outgoing DataMessage with the `reaction` field set) to a recipient.
++ *
++ * `target_ts` is the reacted-to message's sent timestamp; `emoji` is always supplied (even on removal
++ * so backends that retract a specific reaction have it); `remove` true retracts the user's reaction.
++ */
++pub async fn send_reaction<C: presage::store::Store + 'static>(
++    manager: &mut presage::Manager<C, presage::manager::Registered>,
++    recipient: crate::structs::Recipient,
++    target_ts: u64,
++    emoji: String,
++    remove: bool,
++) -> Result<(), anyhow::Error> {
++    // Build the thread that keys the store lookup for the reacted-to message's author.
++    let thread = match &recipient {
++        crate::structs::Recipient::Contact(uuid) => {
++            presage::store::Thread::Contact(presage::libsignal_service::protocol::ServiceId::Aci((*uuid).into()))
++        }
++        crate::structs::Recipient::ContactByPhone(_) => unreachable!("phone recipient is resolved to a UUID before send_reaction()"),
++        crate::structs::Recipient::Group(key) => presage::store::Thread::Group(*key),
++    };
++
++    // Resolve the target author's ACI. The store lookup is authoritative for both incoming and own
++    // (synchronized) messages. Groups MUST use it (Signal requires the correct author). For a 1:1 we
++    // fall back to the peer UUID if the message is not in the store (the common case: reacting to a
++    // message the peer sent us); reacting to our OWN 1:1 message that is not in the store is the only
++    // case this mis-attributes -- see the runtime note.
++    let target_author = match lookup_message_author_by_timestamp(manager, &thread, target_ts).await {
++        Some(uuid) => uuid,
++        None => match &recipient {
++            crate::structs::Recipient::Contact(uuid) => *uuid,
++            _ => {
++                return Err(anyhow::anyhow!(
++                    "Cannot resolve reaction target author for timestamp {target_ts} (message not in store)."
++                ))
++            }
++        },
++    };
++
++    let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis() as u64;
++    let reaction = presage::proto::data_message::Reaction {
++        emoji: Some(emoji),
++        remove: Some(remove),
++        target_author_aci: Some(target_author.to_string()),
++        target_sent_timestamp: Some(target_ts),
++        target_author_aci_binary: Some(target_author.as_bytes().to_vec()),
++    };
++    let mut data_message = presage::libsignal_service::content::DataMessage {
++        timestamp: Some(timestamp),
++        reaction: Some(reaction),
++        ..Default::default()
++    };
++
++    match recipient {
++        crate::structs::Recipient::Contact(uuid) => {
++            manager
++                .send_message(
++                    presage::libsignal_service::protocol::ServiceId::Aci(uuid.into()),
++                    presage::libsignal_service::content::ContentBody::DataMessage(data_message),
++                    timestamp,
++                )
++                .await?;
++        }
++        crate::structs::Recipient::ContactByPhone(_) => unreachable!("phone recipient is resolved to a UUID before send_reaction()"),
++        crate::structs::Recipient::Group(master_key) => {
++            data_message.group_v2 = Some(presage::proto::GroupContextV2 {
++                master_key: Some(master_key.to_vec()),
++                revision: Some(0),
++                ..Default::default()
++            });
++            manager
++                .send_message_to_group(&master_key, presage::libsignal_service::content::ContentBody::DataMessage(data_message), timestamp)
++                .await?;
++        }
++    }
++
+     Ok(())
+ }
+ 
+diff --git a/src/rust/src/structs.rs b/src/rust/src/structs.rs
+index d6f96b8..27c2c1a 100755
+--- a/src/rust/src/structs.rs
++++ b/src/rust/src/structs.rs
+@@ -10,6 +10,16 @@ pub enum Cmd {
+         message: Option<String>,
+         xfer: *const crate::bridge_structs::PurpleXfer,
+     },
++    // webOS reactions (SEND): transmit a reaction the user placed from the app. `recipient` is the
++    // conversation peer (contact UUID / phone / group key); `target_ts` is the reacted-to message's
++    // sent timestamp (its serviceMessageId); `remove` true retracts the user's emoji. Carries only
++    // Send data, so the `unsafe impl Send for Cmd` above stays sound.
++    SendReaction {
++        recipient: Recipient,
++        target_ts: u64,
++        emoji: String,
++        remove: bool,
++    },
+     ListGroups,
+     GetGroupMembers {
+         master_key_bytes: [u8; 32],
+-- 
+2.53.0
+

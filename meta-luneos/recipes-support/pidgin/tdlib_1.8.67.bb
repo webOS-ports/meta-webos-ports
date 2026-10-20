@@ -8,12 +8,11 @@ LIC_FILES_CHKSUM = "file://LICENSE_1_0.txt;md5=e4224ccaecb14d942c71d31bef20d78c"
 
 DEPENDS = "openssl zlib gperf-native"
 
-# Built from the vendored copy in luneos-synergy-connectors rather than upstream, because that is
-# the tree tdlib-purple is developed and tested against. Fetched at the SRCREV the plugin recipes
-# share -- see luneos-synergy-connectors.inc for why it is pinned rather than AUTOREV.
-require recipes-luneos/synergy/luneos-synergy-connectors.inc
-
-S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/telegram/plugin/tdlib-src"
+# Pristine upstream, pinned to the "Update version to 1.8.67." commit: TDLib does not tag releases.
+# 1.8.67 is the release tdlib-purple (UnitedMarsupials) follows. Moving it forward means checking
+# tdlib-purple's use of the TDLib API too.
+SRC_URI = "git://github.com/tdlib/td.git;branch=master;protocol=https"
+SRCREV = "bc9c263e2bfee06aaab41e82db51a103376030bc"
 
 inherit cmake
 

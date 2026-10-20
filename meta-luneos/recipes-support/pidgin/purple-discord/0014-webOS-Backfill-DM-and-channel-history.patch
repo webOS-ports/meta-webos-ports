@@ -1,0 +1,211 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:23:17 +0200
+Subject: [PATCH] webOS: Backfill DM and channel history
+
+webOS keeps no local message logs, so an opened DM or channel showed an
+empty thread unless messages arrived while it was open.
+
+- After READY, fetch the last 25 messages of each DM active in the last
+  30 days once (per-DM "dm-backfilled-<id>" account setting), staggered
+  by 800 ms. Seed last_message_id_dm from the read states so DMs only
+  known from read states are included.
+- When a channel is opened, load the newest 25 messages first and then
+  the forward catch-up, so the latest message is visible at once.
+- On the first explicit open of a channel that join_chat considered up
+  to date, fetch the last 100 messages; on later opens, fetch forward
+  from the last rendered id. Subscribe the channel on the gateway again
+  each time, as a reopen does not go through discord_open_chat.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ libdiscord.c | 137 ++++++++++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 136 insertions(+), 1 deletion(-)
+
+diff --git a/libdiscord.c b/libdiscord.c
+index 80bbefd..f892969 100644
+--- a/libdiscord.c
++++ b/libdiscord.c
+@@ -1949,6 +1949,7 @@ static void discord_got_avatar(DiscordAccount *da, JsonNode *node, gpointer user
+ static void discord_get_avatar(DiscordAccount *da, DiscordUser *user, gboolean is_buddy);
+ static void discord_buddy_guild(DiscordAccount *da, DiscordGuild *guild);
+ static void discord_add_dm_buddy(DiscordAccount *da, const gchar *merged_username, DiscordUser *user);
++static void discord_backfill_dm_history(DiscordAccount *da);
+ static void discord_guild_get_offline_users(DiscordAccount *da, const gchar *guild_id);
+ 
+ static const gchar *discord_normalise_room_name(const gchar *guild_name, const gchar *name);
+@@ -5097,6 +5098,9 @@ discord_process_dispatch(DiscordAccount *da, const gchar *type, JsonObject *data
+ 			}
+ 		}
+ 
++		/* webOS: backfill recent DM history so opened DM threads aren't empty */
++		discord_backfill_dm_history(da);
++
+ 		if (json_object_has_member(data, "resume_gateway_url")) {
+ 			const gchar *resume_gateway_url = json_object_get_string_member(data, "resume_gateway_url");
+ 			if (strncmp(resume_gateway_url, "wss://", 6) == 0) {
+@@ -6510,6 +6514,46 @@ discord_get_history(DiscordAccount *da, const gchar *channel_id, const gchar *la
+ static guint64 discord_get_room_last_id(DiscordAccount *da, guint64 id);
+ static void discord_set_room_last_id(DiscordAccount *da, guint64 channel_id, guint64 last_id);
+ 
++/* webOS has no local message logs, so opening a DM shows an empty thread unless we
++ * proactively backfill it. Fetch the most recent messages once per DM (persisted
++ * "dm-backfilled-<id>" marker in accounts.xml so reconnects don't re-fetch/duplicate),
++ * and only for DMs active within the last 30 days to bound API calls + pipeline load.
++ * Requests are staggered to respect Discord's rate limits. */
++static void
++discord_backfill_dm_history(DiscordAccount *da)
++{
++	if (!purple_account_get_bool(da->account, "fetch-unread-on-start", TRUE))
++		return;
++
++	const gint64 recent_cutoff = (gint64) time(NULL) - (30 * 24 * 3600);
++	GHashTableIter iter;
++	gpointer key, value;
++	guint delay = 0;
++
++	g_hash_table_iter_init(&iter, da->one_to_ones);
++	while (g_hash_table_iter_next(&iter, &key, &value)) {
++		const gchar *channel_id = key;
++
++		const gchar *last_msg = g_hash_table_lookup(da->last_message_id_dm, channel_id);
++		guint64 last_id = last_msg ? to_int(last_msg) : 0;
++		if (last_id == 0)
++			continue;
++		if ((gint64) discord_time_from_snowflake(last_id) < recent_cutoff)
++			continue; /* dead DM, skip */
++
++		gchar *marker = g_strdup_printf("dm-backfilled-%s", channel_id);
++		if (!purple_account_get_bool(da->account, marker, FALSE)) {
++			purple_account_set_bool(da->account, marker, TRUE);
++			gchar *url = g_strdup_printf("https://" DISCORD_API_SERVER "/api/" DISCORD_API_VERSION
++			                             "/channels/%s/messages?limit=25", channel_id);
++			discord_fetch_url_with_delay(da, url, NULL, discord_got_history_static, NULL, delay);
++			delay += 800; /* stagger requests */
++			g_free(url);
++		}
++		g_free(marker);
++	}
++}
++
+ static void
+ discord_got_read_states(DiscordAccount *da, JsonNode *node, gpointer user_data)
+ {
+@@ -6532,6 +6576,17 @@ discord_got_read_states(DiscordAccount *da, JsonNode *node, gpointer user_data)
+ 		if (channel) {
+ 			gboolean isDM = g_hash_table_contains(da->one_to_ones, channel);
+ 
++			/* webOS: seed last_message_id_dm from the read state so discord_backfill_dm_history
++			 * (runs right after got_read_states) will backfill DMs that are known only via a
++			 * read_state entry, not READY's private_channels list (Discord trims that list, so
++			 * partners like mazzinia/rab.be.me have no cached last_message_id and would be
++			 * skipped by backfill's `last_id == 0 -> continue` guard, leaving empty history). */
++			if (isDM && last_id != 0) {
++				const gchar *have = g_hash_table_lookup(da->last_message_id_dm, channel);
++				if (have == NULL || to_int(have) == 0)
++					g_hash_table_replace(da->last_message_id_dm, g_strdup(channel), g_strdup(last_id_s));
++			}
++
+ 			if (isDM && mentions) {
+ 				discord_get_history(da, channel, last_id_s, mentions * 2);
+ 			} else if (!isDM) {
+@@ -8828,6 +8883,18 @@ discord_join_chat_by_id(DiscordAccount *da, guint64 id, gboolean present)
+ 		g_free(url);
+ 		return TRUE;
+ 	} else {
++		/* webOS: render the newest messages immediately (fast tail), then backfill the older gap in the
++		 * background. The old forward-only "?after=<last-seen>" fetch paginated oldest-first over several
++		 * seconds, so the latest message - the one the user wants - appeared last and the channel looked
++		 * empty meanwhile. Fire one most-recent batch first ("?limit=25", newest, emitted oldest->newest
++		 * by discord_got_history_static); the forward catch-up below then fills the gap ABOVE it. This is
++		 * safe now that discord_process_message dedups by message id (received_message_ids), so the two
++		 * fetches' overlap no longer double-writes. The app's list is a timestamp-ordered bottom-up db8
++		 * query, so the newest batch lands at the bottom instantly and history slots in above. */
++		gchar *recent_url = g_strdup_printf("https://" DISCORD_API_SERVER "/api/" DISCORD_API_VERSION "/channels/%" G_GUINT64_FORMAT "/messages?limit=25", id);
++		discord_fetch_url(da, recent_url, NULL, discord_got_history_static, channel);
++		g_free(recent_url);
++
+ 		gchar *url = g_strdup_printf("https://" DISCORD_API_SERVER "/api/" DISCORD_API_VERSION "/channels/%" G_GUINT64_FORMAT "/messages?limit=100&after=%" G_GUINT64_FORMAT, id, last_message_id);
+ 		discord_fetch_url(da, url, NULL, discord_got_history_of_room, channel);
+ 		g_free(url);
+@@ -8843,7 +8910,75 @@ discord_join_chat(PurpleConnection *pc, GHashTable *chatdata)
+ 
+ 	guint64 id = to_int(g_hash_table_lookup(chatdata, "id"));
+ 
+-	discord_join_chat_by_id(da, id, TRUE);
++	gboolean fetched = discord_join_chat_by_id(da, id, TRUE);
++
++	/* webOS keeps no local message logs, so an explicitly-opened channel shows an empty
++	 * thread whenever discord_join_chat_by_id declined to fetch -- typically because the
++	 * stored last-seen id already equals the channel's last_message_id (seeded by the
++	 * login-time limit=1 poll), so it thinks it is "up to date" with a log that does not
++	 * exist here. This is the channel-side analogue of discord_backfill_dm_history: the
++	 * first time a channel is opened, backfill its most recent messages. A persisted
++	 * "chan-backfilled-<id>" marker means reconnects / re-taps neither re-fetch nor
++	 * duplicate. discord_open_chat() (run inside join_chat_by_id with present=TRUE) has
++	 * already created the conversation, so discord_got_history_of_room routes correctly. */
++	gchar *marker = g_strdup_printf("chan-backfilled-%" G_GUINT64_FORMAT, id);
++	DiscordChannel *bchannel = discord_get_channel_global_int(da, id);
++	if (!fetched && !purple_account_get_bool(da->account, marker, FALSE)) {
++		// FIRST open of this channel: backfill a fuller recent window (100).
++		gchar *url = g_strdup_printf("https://" DISCORD_API_SERVER "/api/" DISCORD_API_VERSION
++		                             "/channels/%" G_GUINT64_FORMAT "/messages?limit=100", id);
++		if (bchannel)
++			discord_fetch_url(da, url, NULL, discord_got_history_of_room, bchannel);
++		else
++			discord_fetch_url(da, url, NULL, discord_got_history_static, NULL);
++		g_free(url);
++	} else if (!fetched) {
++		// webOS: RE-open of an already-joined + already-backfilled channel. discord_join_chat_by_id
++		// returns early here -- discord_open_chat yields NULL once the conversation exists, so its whole
++		// forward catch-up (the recent-batch + "?after=<last-seen>" pagination) never runs, and messages
++		// that arrived while the channel wasn't focused are missing (Discord's lazy user-account gateway
++		// may not push a channel's MESSAGE_CREATE unless it's being "viewed").
++		//
++		// A flat "?limit=25" static fetch was wrong twice over: it is a FIXED WINDOW (a busy channel
++		// gets >25 messages in the gap, so a whole day above the window is lost) AND every id is run
++		// through the PERSISTED received_message_ids dedup, so a re-open renders only the 1-2 genuinely
++		// new ids ("only pulled 1 msg", "not the last").
++		//
++		// Instead fetch FORWARD from the last id we actually RENDERED for this channel:
++		// discord_get_room_last_id is persisted per-channel in blist.xml and advanced ONLY by
++		// discord_got_history_of_room (never by the login limit=1 poll), so it is a true "last rendered"
++		// anchor. discord_got_history_of_room self-paginates "?after=" in 100-message batches until it
++		// reaches channel->last_message_id, so the ENTIRE gap is filled regardless of size, the newest
++		// message included, and the marker advances so the next open resumes where this left off.
++		// discord_process_message still dedups by id, so anything already in db8 is not re-written.
++		guint64 room_last = discord_get_room_last_id(da, id);
++		if (bchannel != NULL && room_last != 0) {
++			gchar *url = g_strdup_printf("https://" DISCORD_API_SERVER "/api/" DISCORD_API_VERSION
++			                             "/channels/%" G_GUINT64_FORMAT "/messages?limit=100&after=%" G_GUINT64_FORMAT, id, room_last);
++			discord_fetch_url(da, url, NULL, discord_got_history_of_room, bchannel);
++			g_free(url);
++		} else {
++			// No rendered anchor yet (marker unset) -- pull a fuller recent window instead of a thin tail.
++			gchar *url = g_strdup_printf("https://" DISCORD_API_SERVER "/api/" DISCORD_API_VERSION
++			                             "/channels/%" G_GUINT64_FORMAT "/messages?limit=100", id);
++			if (bchannel)
++				discord_fetch_url(da, url, NULL, discord_got_history_of_room, bchannel);
++			else
++				discord_fetch_url(da, url, NULL, discord_got_history_static, NULL);
++			g_free(url);
++		}
++	}
++	// webOS: also (re-)subscribe the channel on the gateway so Discord starts live-pushing its
++	// MESSAGE_CREATE. discord_open_chat only subscribes on a FIRST join; a re-open (or a channel joined
++	// before a reconnect) is otherwise never subscribed, so live messages never arrive. Safe to repeat.
++	if (bchannel != NULL && bchannel->guild_id != 0) {
++		DiscordGuild *guild = discord_get_guild(da, bchannel->guild_id);
++		if (guild != NULL) {
++			discord_subscribe_channel(da, guild, id);
++		}
++	}
++	purple_account_set_bool(da->account, marker, TRUE);
++	g_free(marker);
+ }
+ 
+ static void
+-- 
+2.53.0
+

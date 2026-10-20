@@ -1,0 +1,153 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:24:45 +0200
+Subject: [PATCH] Send voice recordings and videos as such, not as documents
+
+Every file transfer is sent as inputMessageDocument. For two kinds of file
+that is the wrong thing on the receiving side:
+
+- a video (.mp4, .m4v, .mov, .3gp) sent as a document is turned by Telegram
+  into a looping GIF-style animation. Send it as inputMessageVideo with
+  supports_streaming set, so it arrives as a video with a player; duration
+  and dimensions are left at 0 for Telegram to work out.
+- an Ogg/Opus recording (.ogg) arrives as a file attachment rather than a
+  voice message. Send it as inputMessageVoiceNote. A voice note needs a
+  duration, which is taken from the granule position of the last Ogg page
+  (Opus granules are always at 48 kHz); the waveform is left empty and
+  Telegram draws a flat one.
+
+The objects are built by field name, and the wrapping in inputVideo and
+inputVoiceNote is guarded by TDLIB_API_INPUT_PHOTO like inputDocument
+already is, so older TDLib releases keep building.
+
+Everything else is still sent as a document. The choice is made by file
+name only: an .ogg that is not a voice recording (Ogg Vorbis music, say)
+would also go out as a voice note.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ file-transfer.cpp | 93 ++++++++++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 87 insertions(+), 6 deletions(-)
+
+diff --git a/file-transfer.cpp b/file-transfer.cpp
+index 3daefaa..5321389 100644
+--- a/file-transfer.cpp
++++ b/file-transfer.cpp
+@@ -7,6 +7,37 @@
+ #include "sticker.h"
+ #include "purple-info.h"
+ #include <unistd.h>
++#include <cstdio>
++#include <cstring>
++#include <cstdint>
++#include <vector>
++
++// Voice messages: a recording sent as an Ogg/Opus .ogg file goes out as a Telegram voice note,
++// which needs a duration; derive it from the Opus stream's final granule position (Opus
++// granules are always at 48 kHz), by scanning the Ogg pages for the last valid granulepos. Returns
++// seconds (min 1). 0 on any parse problem.
++static int oggOpusDurationSeconds(const char *path)
++{
++    if (!path) return 0;
++    FILE *f = fopen(path, "rb");
++    if (!f) return 0;
++    fseek(f, 0, SEEK_END); long sz = ftell(f); fseek(f, 0, SEEK_SET);
++    if (sz <= 14) { fclose(f); return 0; }
++    std::vector<unsigned char> buf((size_t)sz);
++    size_t rd = fread(buf.data(), 1, (size_t)sz, f);
++    fclose(f);
++    if (rd != (size_t)sz) return 0;
++    int64_t granule = 0;
++    for (long i = 0; i + 14 <= sz; i++) {
++        if (buf[i] == 'O' && buf[i+1] == 'g' && buf[i+2] == 'g' && buf[i+3] == 'S') {
++            int64_t g = 0;
++            for (int b = 0; b < 8; b++) g |= (int64_t)buf[i + 6 + b] << (8 * b);
++            if (g > 0) granule = g; // last valid granule = total 48 kHz samples
++        }
++    }
++    int sec = (int)(granule / 48000);
++    return sec > 0 ? sec : 1;
++}
+ 
+ enum {
+     FILE_UPLOAD_PRIORITY = 1,
+@@ -82,6 +113,23 @@ void uploadResponseError(PurpleXfer *xfer, const std::string &message, TdAccount
+     purple_xfer_unref(xfer);
+ }
+ 
++// Telegram turns an mp4 sent as a plain *document* into a looping GIF/animation. Detecting
++// video files by extension lets us send them as inputMessageVideo (streamable) so they arrive as a
++// proper video with a player instead.
++static bool isVideoFilename(const char *name)
++{
++    if (!name)
++        return false;
++    const char *dot = strrchr(name, '.');
++    if (!dot)
++        return false;
++    static const char *exts[] = { ".mp4", ".m4v", ".mov", ".3gp", NULL };
++    for (int i = 0; exts[i]; i++)
++        if (g_ascii_strcasecmp(dot, exts[i]) == 0)
++            return true;
++    return false;
++}
++
+ static void updateDocumentUploadProgress(const td::td_api::file &file, PurpleXfer *upload, ChatId chatId,
+                                          TdTransceiver &transceiver, TdAccountData &account,
+                                          TdTransceiver::ResponseCb sendMessageResponse)
+@@ -105,15 +153,48 @@ static void updateDocumentUploadProgress(const td::td_api::file &file, PurpleXfe
+             purple_xfer_unref(upload);
+             account.removeFileTransfer(file.id_);
+             auto sendMessageRequest = td::td_api::make_object<td::td_api::sendMessage>();
+-            auto content = td::td_api::make_object<td::td_api::inputMessageDocument>();
+-            content->caption_ = td::td_api::make_object<td::td_api::formattedText>();
++            const char *localName = purple_xfer_get_local_filename(upload);
++            size_t nameLen = localName ? strlen(localName) : 0;
++            if (nameLen > 4 && g_ascii_strcasecmp(localName + nameLen - 4, ".ogg") == 0) {
++                // An Ogg/Opus recording: send it as a Telegram VOICE NOTE (not a document). Duration
++                // from the Opus granule; waveform left empty (Telegram renders a default bar).
++                auto content = td::td_api::make_object<td::td_api::inputMessageVoiceNote>();
++                content->caption_ = td::td_api::make_object<td::td_api::formattedText>();
++#if TDLIB_API_INPUT_PHOTO
++                content->voice_note_ = td::td_api::make_object<td::td_api::inputVoiceNote>();
++                content->voice_note_->voice_note_ = td::td_api::make_object<td::td_api::inputFileId>(file.id_);
++                content->voice_note_->duration_ = oggOpusDurationSeconds(localName);
++#else
++                content->voice_note_ = td::td_api::make_object<td::td_api::inputFileId>(file.id_);
++                content->duration_ = oggOpusDurationSeconds(localName);
++#endif
++                sendMessageRequest->input_message_content_ = std::move(content);
++            } else if (isVideoFilename(localName)) {
++                // A video: send as a streamable Telegram VIDEO (not a document, which Telegram
++                // auto-converts to a GIF/animation). Duration/dimensions left 0 so Telegram derives
++                // them server-side; supports_streaming makes it a proper in-place video player.
++                auto content = td::td_api::make_object<td::td_api::inputMessageVideo>();
++                content->caption_ = td::td_api::make_object<td::td_api::formattedText>();
+ #if TDLIB_API_INPUT_PHOTO
+-            content->document_ = td::td_api::make_object<td::td_api::inputDocument>();
+-            content->document_->document_ = td::td_api::make_object<td::td_api::inputFileId>(file.id_);
++                content->video_ = td::td_api::make_object<td::td_api::inputVideo>();
++                content->video_->video_ = td::td_api::make_object<td::td_api::inputFileId>(file.id_);
++                content->video_->supports_streaming_ = true;
+ #else
+-            content->document_ = td::td_api::make_object<td::td_api::inputFileId>(file.id_);
++                content->video_ = td::td_api::make_object<td::td_api::inputFileId>(file.id_);
++                content->supports_streaming_ = true;
+ #endif
+-            sendMessageRequest->input_message_content_ = std::move(content);
++                sendMessageRequest->input_message_content_ = std::move(content);
++            } else {
++                auto content = td::td_api::make_object<td::td_api::inputMessageDocument>();
++                content->caption_ = td::td_api::make_object<td::td_api::formattedText>();
++#if TDLIB_API_INPUT_PHOTO
++                content->document_ = td::td_api::make_object<td::td_api::inputDocument>();
++                content->document_->document_ = td::td_api::make_object<td::td_api::inputFileId>(file.id_);
++#else
++                content->document_ = td::td_api::make_object<td::td_api::inputFileId>(file.id_);
++#endif
++                sendMessageRequest->input_message_content_ = std::move(content);
++            }
+             sendMessageRequest->chat_id_ = chatId.value();
+ 
+             uint64_t requestId = transceiver.sendQuery(std::move(sendMessageRequest), sendMessageResponse);

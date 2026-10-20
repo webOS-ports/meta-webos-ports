@@ -1,0 +1,152 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:23:14 +0200
+Subject: [PATCH] webOS: Add DM partners to the buddy list
+
+The webOS Messaging and Contacts apps only show people who are buddies,
+but Discord only sends relationships (friends), so a 1:1 DM with someone
+who is not a friend never showed up. Add every 1:1 DM partner as a
+buddy, with avatar and global name as alias, both from the initial
+channel list and from CHANNEL_CREATE.
+
+Such partners only get presence through guild member updates, which
+discord_update_status handled internally without updating the buddy.
+Forward it to the buddy list as discord_got_presences does.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ libdiscord.c | 64 ++++++++++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 62 insertions(+), 2 deletions(-)
+
+diff --git a/libdiscord.c b/libdiscord.c
+index c6d533e..80bbefd 100644
+--- a/libdiscord.c
++++ b/libdiscord.c
+@@ -1948,6 +1948,7 @@ static void discord_got_guilds(DiscordAccount *da, JsonNode *node, gpointer user
+ static void discord_got_avatar(DiscordAccount *da, JsonNode *node, gpointer user_data);
+ static void discord_get_avatar(DiscordAccount *da, DiscordUser *user, gboolean is_buddy);
+ static void discord_buddy_guild(DiscordAccount *da, DiscordGuild *guild);
++static void discord_add_dm_buddy(DiscordAccount *da, const gchar *merged_username, DiscordUser *user);
+ static void discord_guild_get_offline_users(DiscordAccount *da, const gchar *guild_id);
+ 
+ static const gchar *discord_normalise_room_name(const gchar *guild_name, const gchar *name);
+@@ -4446,6 +4447,29 @@ discord_handle_guild_member_update(DiscordAccount *da, guint64 guild_id, JsonObj
+ 	if (guild && user) {
+ 		discord_update_status(user, json_object_get_object_member(data, "presence"));
+ 
++		/* webOS: DM partners (e.g. mazzinia, rad.be.me) are non-friends whose presence
++		 * only ever arrives via guild member updates, not PRESENCE_UPDATE. discord_update_status
++		 * updates the internal DiscordUser but never pushes to the buddy list, so these DM
++		 * buddies always read offline on webOS even though Discord shows them online. If this
++		 * user is a DM buddy, propagate the presence to the blist (mirrors discord_got_presences). */
++		{
++			JsonObject *presence = json_object_get_object_member(data, "presence");
++			if (presence != NULL) {
++				gchar *dm_name = discord_create_fullname(user);
++				if (dm_name != NULL) {
++					if (purple_blist_find_buddy(da->account, dm_name) != NULL) {
++						const gchar *pstatus = json_object_get_string_member(presence, "status");
++						if (pstatus != NULL) {
++							purple_protocol_got_user_status(da->account, dm_name, pstatus, "message",
++								user->game ? user->game : user->custom_status, NULL);
++							purple_protocol_got_user_idle(da->account, dm_name, purple_strequal(pstatus, "idle"), 0);
++						}
++					}
++					g_free(dm_name);
++				}
++			}
++		}
++
+ 		const gchar *new_nick = json_object_get_string_member(data, "nick");
+ 		const gchar *old_nick = g_hash_table_lookup_int64(guild->nicknames, user->id);
+ 
+@@ -4873,6 +4897,7 @@ discord_process_dispatch(DiscordAccount *da, const gchar *type, JsonObject *data
+ 			JsonObject *first_recipient = json_array_get_object_element(json_object_get_array_member(data, "recipients"), 0);
+ 
+ 			if (first_recipient != NULL) {
++				DiscordUser *dm_user = discord_upsert_user(da->new_users, first_recipient);
+ 				const gchar *username = json_object_get_string_member(first_recipient, "username");
+ 				const gchar *discriminator = json_object_get_string_member(first_recipient, "discriminator");
+ 				gchar *combined_username = discord_combine_username(username, discriminator);
+@@ -4880,6 +4905,8 @@ discord_process_dispatch(DiscordAccount *da, const gchar *type, JsonObject *data
+ 				if (combined_username != NULL) {
+ 					g_hash_table_replace(da->one_to_ones, g_strdup(channel_id), g_strdup(combined_username));
+ 					g_hash_table_replace(da->last_message_id_dm, g_strdup(channel_id), g_strdup(last_message_id));
++					/* webOS: also add as a contact (see discord_add_dm_buddy) */
++					discord_add_dm_buddy(da, combined_username, dm_user);
+ 					g_hash_table_replace(da->one_to_ones_rev, combined_username, g_strdup(channel_id));
+ 				}
+ 			}
+@@ -5929,6 +5956,33 @@ discord_create_relationship(DiscordAccount *da, JsonObject *json)
+ 	g_free(merged_username);
+ }
+ 
++/* Add a 1:1 DM partner to the buddy list. Discord only sends "relationships"
++ * (friends) for auto-buddy, but on webOS the Messaging/Contacts UI only surfaces
++ * people who are actual buddies -> DM partners that aren't friends (e.g. someone
++ * you message in a shared server) would never appear. Mirror the friend buddy-add
++ * so every open 1:1 DM shows up as a contact. */
++static void
++discord_add_dm_buddy(DiscordAccount *da, const gchar *merged_username, DiscordUser *user)
++{
++	if (merged_username == NULL || *merged_username == '\0') {
++		return;
++	}
++
++	PurpleBuddy *buddy = purple_blist_find_buddy(da->account, merged_username);
++	if (buddy == NULL) {
++		PurpleGroup *buddy_group = discord_get_or_create_default_group();
++		buddy = purple_buddy_new(da->account, merged_username, user ? user->name : NULL);
++		purple_blist_add_buddy(buddy, NULL, buddy_group, NULL);
++	}
++
++	if (user != NULL) {
++		discord_get_avatar(da, user, TRUE);
++		if (user->global_name && *user->global_name) {
++			purple_serv_got_alias(da->pc, merged_username, user->global_name);
++		}
++	}
++}
++
+ static void
+ discord_got_initial_load_users(DiscordAccount *da, JsonNode *node, gpointer user_data)
+ {
+@@ -5967,6 +6021,7 @@ discord_got_private_channels(DiscordAccount *da, JsonNode *node, gpointer user_d
+ 
+ 		if (room_type == 1) {
+ 			gchar *merged_username = NULL;
++			DiscordUser *dm_user = NULL;
+ 
+ 			/* One-to-one DM */
+ 			if (recipients == NULL) {
+@@ -5974,12 +6029,13 @@ discord_got_private_channels(DiscordAccount *da, JsonNode *node, gpointer user_d
+ 				recipients = json_object_get_array_member(channel, "recipient_ids");
+ 				const gchar *user_id = json_array_get_string_element(recipients, 0);
+ 
+-				DiscordUser *user = discord_get_user(da, to_int(user_id));
+-				merged_username = discord_create_fullname(user);
++				dm_user = discord_get_user(da, to_int(user_id));
++				merged_username = discord_create_fullname(dm_user);
+ 
+ 			} else {
+ 				// Old API
+ 				JsonObject *user = json_array_get_object_element(recipients, 0);
++				dm_user = discord_upsert_user(da->new_users, user);
+ 				const gchar *username = json_object_get_string_member(user, "username");
+ 				const gchar *discriminator = json_object_get_string_member(user, "discriminator");
+ 				merged_username = discord_combine_username(username, discriminator);
+@@ -5991,6 +6047,10 @@ discord_got_private_channels(DiscordAccount *da, JsonNode *node, gpointer user_d
+ 				g_hash_table_replace(da->one_to_ones_rev, g_strdup(merged_username), g_strdup(room_id));
+ 				g_hash_table_replace(da->last_message_id_dm, g_strdup(room_id), g_strdup(last_message_id));
+ 
++				/* webOS: surface the DM partner as a contact (not just an internal
++				 * one_to_ones entry) so it appears in Messaging/Contacts. */
++				discord_add_dm_buddy(da, merged_username, dm_user);
++
+ 				g_free(merged_username);
+ 			}
+ 		} else if (room_type == 3) {
+-- 
+2.53.0
+

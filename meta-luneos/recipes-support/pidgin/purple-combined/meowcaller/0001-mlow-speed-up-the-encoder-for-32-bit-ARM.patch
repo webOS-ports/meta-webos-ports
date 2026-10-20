@@ -1,0 +1,556 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:32:41 +0200
+Subject: [PATCH] mlow: speed up the encoder for 32-bit ARM
+
+On the HP TouchPad (ARMv7) the pure-Go MLow encoder does not keep up with the
+60 ms frame budget, so the send loop drops frames and the far end hears
+gaps. Profiling showed most of the time in values that never change and
+in a few scalar inner loops:
+
+- cache the FFT twiddle factors per (length, sign) instead of calling
+  cos/sin on every transform, and build the LPC DCT tables once
+- on GOARCH=arm with cgo, run the FFT, the CELP Toeplitz and MA filter
+  kernels and the pitch cross-correlation in C built with
+  -mfpu=neon -O3; every other build keeps the Go code through the
+  *_fallback.go build tags
+
+The mlow tests pass on amd64 with these changes.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ mlow/celp_enc.go      |   8 +++
+ mlow/celp_fallback.go |  12 +++++
+ mlow/celp_neon.c      |  91 +++++++++++++++++++++++++++++++++
+ mlow/celp_neon.go     |  38 ++++++++++++++
+ mlow/fft.go           |  44 +++++++++++++---
+ mlow/fft_fallback.go  |   6 +++
+ mlow/fft_neon.c       | 116 ++++++++++++++++++++++++++++++++++++++++++
+ mlow/fft_neon.go      |  26 ++++++++++
+ mlow/lpc.go           |  21 ++++++--
+ mlow/pitch_enc.go     |  21 +++++---
+ 10 files changed, 366 insertions(+), 17 deletions(-)
+ create mode 100644 mlow/celp_fallback.go
+ create mode 100644 mlow/celp_neon.c
+ create mode 100644 mlow/celp_neon.go
+ create mode 100644 mlow/fft_fallback.go
+ create mode 100644 mlow/fft_neon.c
+ create mode 100644 mlow/fft_neon.go
+
+diff --git a/mlow/celp_enc.go b/mlow/celp_enc.go
+index 86a99c0..a9ef081 100644
+--- a/mlow/celp_enc.go
++++ b/mlow/celp_enc.go
+@@ -180,6 +180,10 @@ func celpQ(num, den []float32, l int, q []float32) {
+ // 2*lResp-1; x must be readable up to n+lResp (zero padded).
+ func celpMultSymtoepl2(c []float32, lResp int, x, y []float32, n int) {
+ 	// Source of truth: https://github.com/oxidezap/whatsapp-rust/blob/ed12f359a086b28e807ba236f0977af1000859fe/wacore/src/voip/mlow/smpl_celp.rs#L312-L334
++	if celpNeonAvail {
++		neonMultSymtoepl2(c, lResp, x, y, n)
++		return
++	}
+ 	length := lResp
+ 	nn := 0
+ 	for nn < lResp-1 {
+@@ -214,6 +218,10 @@ func celpFiltAr16(x []float32, n int, coef []float32, yBase int, y []float32) {
+ // celpFiltMa: MA filter; (coefLen-1) history samples sit before x[xBase]. x != y.
+ func celpFiltMa(x []float32, xBase, n int, coef []float32, coefLen int, y []float32) {
+ 	// Source of truth: https://github.com/oxidezap/whatsapp-rust/blob/ed12f359a086b28e807ba236f0977af1000859fe/wacore/src/voip/mlow/smpl_celp.rs#L350-L370
++	if celpNeonAvail {
++		neonFiltMa(x, xBase, n, coef, coefLen, y)
++		return
++	}
+ 	var i int
+ 	if coef[0] == 1.0 {
+ 		for k := 0; k < n; k++ {
+diff --git a/mlow/celp_fallback.go b/mlow/celp_fallback.go
+new file mode 100644
+index 0000000..12ef296
+--- /dev/null
++++ b/mlow/celp_fallback.go
+@@ -0,0 +1,12 @@
++//go:build !(arm && cgo)
++
++package mlow
++
++// Non-ARM / no-cgo builds keep the pure-Go CELP kernels.
++const celpNeonAvail = false
++
++func neonMultSymtoepl2(c []float32, lResp int, x, y []float32, n int) {}
++func neonFiltMa(x []float32, xBase, n int, coef []float32, coefLen int, y []float32) {}
++func neonPeCalcCE2(c, e2, ltpbuf []float32, ltpbufLen, numsubfrs, lagSubfrlen, minpitch, numlags int) {}
++func neonPeCorr40Row(c []float32, cbase int, h []float32, hbase int, x []float32, xoff, lagbase, n int, hthres float32) {
++}
+diff --git a/mlow/celp_neon.c b/mlow/celp_neon.c
+new file mode 100644
+index 0000000..15fa52b
+--- /dev/null
++++ b/mlow/celp_neon.c
+@@ -0,0 +1,91 @@
++//go:build arm && cgo
++
++// NEON-accelerated coarse CELP DSP kernels (webOS device build). These are the self-contained
++// dot-product / FIR loops the encoder runs many times per frame; compiled with -mfpu=neon
++// -ftree-vectorize -ffast-math the inner contiguous loops auto-vectorize. Only the COARSE functions
++// live here (one cgo call does ~80+ dot products or a whole FIR pass) so the cgo call overhead is
++// negligible; the tiny leaf dot-products stay in Go. Ports of the same-named Go functions; NOT
++// bit-identical (-ffast-math reorders the accumulation), validated by PESQ.
++
++// celpMultSymtoepl2: symmetric-Toeplitz matrix x vector (smpl_celp.rs). Three runs of a sliding
++// dot-product with varying length/offset, exactly mirroring the Go.
++void wa_celp_mult_symtoepl2(const float *c, int lResp, const float *x, float *y, int n) {
++	int length = lResp;
++	int nn = 0;
++	for (; nn < lResp - 1; nn++) {
++		const float *a = c + (lResp - 1 - nn);
++		float r = 0.0f;
++		for (int i = 0; i < length; i++) r += a[i] * x[i];
++		y[nn] = r;
++		length++;
++	}
++	length = 2 * lResp;
++	for (; nn < n - lResp; nn++) {
++		const float *b = x + (nn + 1 - lResp);
++		float r = 0.0f;
++		for (int i = 0; i < length; i++) r += c[i] * b[i];
++		y[nn] = r;
++	}
++	for (; nn < n; nn++) {
++		length--;
++		const float *b = x + (nn + 1 - lResp);
++		float r = 0.0f;
++		for (int i = 0; i < length; i++) r += c[i] * b[i];
++		y[nn] = r;
++	}
++}
++
++// peCalcCE2: stage-1 pitch cross-correlation C + target energy E2 (smpl_pitch). For each subframe,
++// numlags dense 20-tap dot-products of the target against lagged history -> the dominant coarse pitch
++// kernel (one call/frame). The 20-tap inner loops vectorize.
++void wa_pe_calc_ce2(float *c, float *e2, const float *ltpbuf, int ltpbufLen, int numsubfrs,
++                    int lagSubfrlen, int minpitch, int numlags) {
++	int t = ltpbufLen - lagSubfrlen * numsubfrs;
++	for (int sf = 0; sf < numsubfrs; sf++) {
++		const float *tgt = ltpbuf + t;
++		int reg0 = t - minpitch;
++		for (int i = 0; i < numlags; i++) {
++			const float *r = ltpbuf + (reg0 - i);
++			float s = 0.0f;
++			for (int k = 0; k < 20; k++) s += tgt[k] * r[k];
++			c[sf * numlags + i] = s;
++		}
++		t += lagSubfrlen;
++		float e = 0.0f;
++		for (int k = 0; k < 20; k++) e += tgt[k] * tgt[k];
++		e2[sf] = e > 1e-9f ? e : 1e-9f;
++	}
++}
++
++// wa_pe_corr40_row: the stage-2 40-tap correlation row (smpl_pitch): for each lag i whose harmonicity
++// h passes the threshold, c[cbase+i] = 0.5 * dot40(x[xoff], x[xoff-(lagbase+i)]). One call per
++// subframe-block (~32/frame) instead of per-lag; the 40-tap dot vectorizes.
++void wa_pe_corr40_row(float *c, int cbase, const float *h, int hbase, const float *x, int xoff,
++                      int lagbase, int n, float hthres) {
++	for (int i = 0; i < n; i++) {
++		if (h[hbase + i] > hthres) {
++			const float *a = x + xoff;
++			const float *b = x + xoff - (lagbase + i);
++			float s = 0.0f;
++			for (int k = 0; k < 40; k++) s += a[k] * b[k];
++			c[cbase + i] = 0.5f * s;
++		}
++	}
++}
++
++// celpFiltMa: FIR (moving-average) filter y[k] = sum_i coef[i]*x[xBase+k-i]. The per-tap inner loops
++// over k are contiguous and vectorize.
++void wa_celp_filt_ma(const float *x, int xBase, int n, const float *coef, int coefLen, float *y) {
++	int i;
++	if (coef[0] == 1.0f) {
++		for (int k = 0; k < n; k++) y[k] = x[xBase + k] + coef[1] * x[xBase + k - 1];
++		i = 2;
++	} else {
++		for (int k = 0; k < n; k++) y[k] = coef[0] * x[xBase + k];
++		i = 1;
++	}
++	for (; i < coefLen; i++) {
++		float ci = coef[i];
++		for (int k = 0; k < n; k++) y[k] += ci * x[xBase + k - i];
++	}
++}
+\ No newline at end of file
+diff --git a/mlow/celp_neon.go b/mlow/celp_neon.go
+new file mode 100644
+index 0000000..3e285b1
+--- /dev/null
++++ b/mlow/celp_neon.go
+@@ -0,0 +1,38 @@
++//go:build arm && cgo
++
++package mlow
++
++// NEON bridge for the coarse CELP kernels (webOS TouchPad build). Pure-Go fallback in celp_fallback.go.
++
++// #cgo CFLAGS: -O3 -mfpu=neon -ffast-math -g0
++// void wa_celp_mult_symtoepl2(const float *c, int lResp, const float *x, float *y, int n);
++// void wa_celp_filt_ma(const float *x, int xBase, int n, const float *coef, int coefLen, float *y);
++// void wa_pe_calc_ce2(float *c, float *e2, const float *ltpbuf, int ltpbufLen, int numsubfrs, int lagSubfrlen, int minpitch, int numlags);
++// void wa_pe_corr40_row(float *c, int cbase, const float *h, int hbase, const float *x, int xoff, int lagbase, int n, float hthres);
++import "C"
++
++import "unsafe"
++
++const celpNeonAvail = true
++
++func neonMultSymtoepl2(c []float32, lResp int, x, y []float32, n int) {
++	C.wa_celp_mult_symtoepl2((*C.float)(unsafe.Pointer(&c[0])), C.int(lResp),
++		(*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])), C.int(n))
++}
++
++func neonFiltMa(x []float32, xBase, n int, coef []float32, coefLen int, y []float32) {
++	C.wa_celp_filt_ma((*C.float)(unsafe.Pointer(&x[0])), C.int(xBase), C.int(n),
++		(*C.float)(unsafe.Pointer(&coef[0])), C.int(coefLen), (*C.float)(unsafe.Pointer(&y[0])))
++}
++
++func neonPeCalcCE2(c, e2, ltpbuf []float32, ltpbufLen, numsubfrs, lagSubfrlen, minpitch, numlags int) {
++	C.wa_pe_calc_ce2((*C.float)(unsafe.Pointer(&c[0])), (*C.float)(unsafe.Pointer(&e2[0])),
++		(*C.float)(unsafe.Pointer(&ltpbuf[0])), C.int(ltpbufLen), C.int(numsubfrs),
++		C.int(lagSubfrlen), C.int(minpitch), C.int(numlags))
++}
++
++func neonPeCorr40Row(c []float32, cbase int, h []float32, hbase int, x []float32, xoff, lagbase, n int, hthres float32) {
++	C.wa_pe_corr40_row((*C.float)(unsafe.Pointer(&c[0])), C.int(cbase),
++		(*C.float)(unsafe.Pointer(&h[0])), C.int(hbase), (*C.float)(unsafe.Pointer(&x[0])),
++		C.int(xoff), C.int(lagbase), C.int(n), C.float(hthres))
++}
+diff --git a/mlow/fft.go b/mlow/fft.go
+index 91bf0af..33d1d04 100644
+--- a/mlow/fft.go
++++ b/mlow/fft.go
+@@ -1,6 +1,34 @@
+ package mlow
+ 
+-import "math"
++import (
++	"math"
++	"sync"
++)
++
++// twiddleCache memoizes the per-length roots of unity W[m] = exp(sign*2*pi*i*m/n), keyed by (n,sign).
++// The FFT twiddles are constants that depend only on (n,sign); the original code recomputed cos/sin on
++// every transform, which profiled at ~half of the whole MLow encode time. The MLow analysis calls the
++// FFT at a handful of fixed sizes each frame, so after the first frame every angle is a table lookup.
++// The angle is formed from the reduced index m in [0,n) (mathematically identical since cos/sin are
++// 2*pi periodic, and numerically cleaner than the original float32 k*j product).
++var twiddleCache sync.Map // key uint64 (n<<1 | signbit) -> []cpx of length n
++
++func twiddles(n int, sign float32) []cpx {
++	key := uint64(n) << 1
++	if sign > 0 {
++		key |= 1
++	}
++	if v, ok := twiddleCache.Load(key); ok {
++		return v.([]cpx)
++	}
++	t := make([]cpx, n)
++	for m := 0; m < n; m++ {
++		ang := float64(sign) * 2.0 * math.Pi * float64(m) / float64(n)
++		t[m] = cpx{re: float32(math.Cos(ang)), im: float32(math.Sin(ang))}
++	}
++	twiddleCache.Store(key, t)
++	return t
++}
+ 
+ // cpx is a single-precision complex value.
+ //
+@@ -46,13 +74,11 @@ func fftRec(x []cpx, stride, n int, sign float32, out []cpx) {
+ 	}
+ 	p := smallestFactor(n)
+ 	if p == n {
++		w := twiddles(n, sign) // W[m] = exp(sign*2pi*i*m/n); index by (k*j) mod n
+ 		for k := 0; k < n; k++ {
+ 			var acc cpx
+-			angK := sign * 2.0 * smplPI * float32(k) / float32(n)
+ 			for j := 0; j < n; j++ {
+-				ang := angK * float32(j)
+-				w := cpx{re: float32(math.Cos(float64(ang))), im: float32(math.Sin(float64(ang)))}
+-				acc = acc.add(x[j*stride].mul(w))
++				acc = acc.add(x[j*stride].mul(w[(k*j)%n]))
+ 			}
+ 			out[k] = acc
+ 		}
+@@ -63,13 +89,12 @@ func fftRec(x []cpx, stride, n int, sign float32, out []cpx) {
+ 	for q := 0; q < p; q++ {
+ 		fftRec(x[q*stride:], stride*p, m, sign, sub[q*m:(q+1)*m])
+ 	}
++	w := twiddles(n, sign) // twiddle exp(sign*2pi*i*k*q/n) -> index (k*q) mod n
+ 	for k := 0; k < n; k++ {
+ 		kmod := k % m
+ 		var acc cpx
+ 		for q := 0; q < p; q++ {
+-			ang := sign * 2.0 * smplPI * float32(k) * float32(q) / float32(n)
+-			tw := cpx{re: float32(math.Cos(float64(ang))), im: float32(math.Sin(float64(ang)))}
+-			acc = acc.add(sub[q*m+kmod].mul(tw))
++			acc = acc.add(sub[q*m+kmod].mul(w[(k*q)%n]))
+ 		}
+ 		out[k] = acc
+ 	}
+@@ -79,6 +104,9 @@ func fftRec(x []cpx, stride, n int, sign float32, out []cpx) {
+ // +1 inverse.
+ func cfft(input, out []cpx, sign float32) {
+ 	// Source of truth: https://github.com/oxidezap/whatsapp-rust/blob/674e85164b35ca19115dfebcf605708d15951ee7/wacore/src/voip/mlow/smpl_perc.rs#L408-L412
++	if neonCfft(input, out, sign) { // NEON kernel on ARM+cgo, pure-Go fallback elsewhere
++		return
++	}
+ 	fftRec(input, 1, len(input), sign, out)
+ }
+ 
+diff --git a/mlow/fft_fallback.go b/mlow/fft_fallback.go
+new file mode 100644
+index 0000000..5e7efca
+--- /dev/null
++++ b/mlow/fft_fallback.go
+@@ -0,0 +1,6 @@
++//go:build !(arm && cgo)
++
++package mlow
++
++// Non-ARM / no-cgo builds have no NEON kernel; cfft uses the pure-Go fftRec.
++func neonCfft(input, out []cpx, sign float32) bool { return false }
+diff --git a/mlow/fft_neon.c b/mlow/fft_neon.c
+new file mode 100644
+index 0000000..fae24e5
+--- /dev/null
++++ b/mlow/fft_neon.c
+@@ -0,0 +1,116 @@
++//go:build arm && cgo
++
++// NEON-accelerated mixed-radix FFT for the MLow encoder's hot path.
++//
++// A straight port of the Go fftRec (same recursion, same twiddle convention W[m]=exp(sign*2pi*i*m/n)
++// indexed by the reduced index m), compiled with -mfpu=neon -ftree-vectorize -ffast-math so the
++// compiler auto-vectorizes the contiguous radix-2 butterfly (the whole tree for the 512-pt LPC FFT)
++// and the radix-p combine (the 576 = 2^6*3^2 perceptual FFT). One cgo call per transform, so the
++// call overhead is negligible against O(n log n) work.
++//
++// NOT bit-identical to the Go path: -ffast-math reorders float ops. Validated by PESQ instead.
++#include <math.h>
++#include <stdlib.h>
++#include <pthread.h>
++
++typedef struct { float re, im; } cpxf;
++
++// twiddle cache: W[m] = exp(sign*2*pi*i*m/n), one table per (n, sign). The recursion touches only a
++// handful of sizes (512,256,..2 and 576,288,..3), so a tiny linear cache under a mutex is plenty; it
++// is read-mostly after the first frame and callable from the concurrent encode/decode goroutines.
++#define WA_FFT_MAXTW 48
++static struct { int n; float sign; cpxf *t; } wa_tw[WA_FFT_MAXTW];
++static int wa_tw_n = 0;
++static pthread_mutex_t wa_tw_mx = PTHREAD_MUTEX_INITIALIZER;
++
++static const cpxf *wa_get_tw(int n, float sign) {
++	pthread_mutex_lock(&wa_tw_mx);
++	for (int i = 0; i < wa_tw_n; i++) {
++		if (wa_tw[i].n == n && wa_tw[i].sign == sign) {
++			const cpxf *r = wa_tw[i].t;
++			pthread_mutex_unlock(&wa_tw_mx);
++			return r;
++		}
++	}
++	cpxf *t = (cpxf *)malloc(sizeof(cpxf) * n);
++	for (int m = 0; m < n; m++) {
++		double a = (double)sign * 2.0 * M_PI * (double)m / (double)n;
++		t[m].re = (float)cos(a);
++		t[m].im = (float)sin(a);
++	}
++	const cpxf *r = t;
++	if (wa_tw_n < WA_FFT_MAXTW) {
++		wa_tw[wa_tw_n].n = n;
++		wa_tw[wa_tw_n].sign = sign;
++		wa_tw[wa_tw_n].t = t;
++		wa_tw_n++;
++	} // else: leak the (bounded) overflow table rather than risk unbounded growth
++	pthread_mutex_unlock(&wa_tw_mx);
++	return r;
++}
++
++static int wa_smallest_factor(int n) {
++	if (n % 2 == 0) return 2;
++	for (int p = 3; (long)p * p <= n; p += 2)
++		if (n % p == 0) return p;
++	return n;
++}
++
++// out[0:n] = DFT of x[0:n:stride]; scratch is a caller-owned arena (>= ~2n) reused down the recursion.
++static void wa_fftrec(const cpxf *x, int stride, int n, float sign, cpxf *out, cpxf *scratch) {
++	if (n == 1) {
++		out[0] = x[0];
++		return;
++	}
++	int p = wa_smallest_factor(n);
++	const cpxf *w = wa_get_tw(n, sign);
++	if (p == n) { // prime (only small n=2,3 in practice) -> direct DFT
++		for (int k = 0; k < n; k++) {
++			float accre = 0.0f, accim = 0.0f;
++			for (int j = 0; j < n; j++) {
++				cpxf xj = x[j * stride];
++				cpxf wk = w[(k * j) % n];
++				accre += xj.re * wk.re - xj.im * wk.im;
++				accim += xj.re * wk.im + xj.im * wk.re;
++			}
++			out[k].re = accre;
++			out[k].im = accim;
++		}
++		return;
++	}
++	int m = n / p;
++	cpxf *sub = scratch;              // sub[0:n] holds the p child transforms
++	cpxf *child = scratch + n;        // transient scratch for each child (reused; children run serially)
++	for (int q = 0; q < p; q++)
++		wa_fftrec(x + q * stride, stride * p, m, sign, sub + q * m, child);
++	if (p == 2) {
++		// radix-2 butterfly: out[k] = even[kmod] + W[k]*odd[kmod]. Contiguous -> vectorizes.
++		for (int k = 0; k < n; k++) {
++			int km = k >= m ? k - m : k;
++			cpxf e = sub[km], o = sub[m + km], tw = w[k];
++			float orr = o.re * tw.re - o.im * tw.im;
++			float oii = o.re * tw.im + o.im * tw.re;
++			out[k].re = e.re + orr;
++			out[k].im = e.im + oii;
++		}
++	} else {
++		for (int k = 0; k < n; k++) {
++			int km = k % m;
++			float accre = 0.0f, accim = 0.0f;
++			for (int q = 0; q < p; q++) {
++				cpxf s = sub[q * m + km];
++				cpxf tw = w[(k * q) % n];
++				accre += s.re * tw.re - s.im * tw.im;
++				accim += s.re * tw.im + s.im * tw.re;
++			}
++			out[k].re = accre;
++			out[k].im = accim;
++		}
++	}
++}
++
++// Entry point called from Go. in/out are interleaved re,im (== Go []cpx). n <= 576 in MLow.
++void wa_neon_cfft(const float *in, float *out, int n, float sign) {
++	cpxf arena[576 * 4]; // recursion arena; the depth-summed size for n<=576 is ~1150 cpx
++	wa_fftrec((const cpxf *)in, 1, n, sign, (cpxf *)out, arena);
++}
+\ No newline at end of file
+diff --git a/mlow/fft_neon.go b/mlow/fft_neon.go
+new file mode 100644
+index 0000000..79fda1a
+--- /dev/null
++++ b/mlow/fft_neon.go
+@@ -0,0 +1,26 @@
++//go:build arm && cgo
++
++package mlow
++
++// NEON FFT bridge. On ARM with cgo (the webOS TouchPad build) route the FFT through the
++// auto-vectorized C kernel in fft_neon.c; everywhere else the build-tag fallback (fft_fallback.go)
++// keeps the pure-Go path. cpx is {re,im float32} with no padding, so a []cpx aliases a contiguous
++// interleaved float32 buffer that the C side reads as its cpxf.
++
++// #cgo CFLAGS: -O3 -mfpu=neon -ffast-math -g0
++// void wa_neon_cfft(const float *in, float *out, int n, float sign);
++import "C"
++
++import "unsafe"
++
++func neonCfft(input, out []cpx, sign float32) bool {
++	n := len(input)
++	if n == 0 || len(out) < n {
++		return false
++	}
++	C.wa_neon_cfft(
++		(*C.float)(unsafe.Pointer(&input[0])),
++		(*C.float)(unsafe.Pointer(&out[0])),
++		C.int(n), C.float(sign))
++	return true
++}
+diff --git a/mlow/lpc.go b/mlow/lpc.go
+index a68462c..ff0bf38 100644
+--- a/mlow/lpc.go
++++ b/mlow/lpc.go
+@@ -1,6 +1,21 @@
+ package mlow
+ 
+-import "math"
++import (
++	"math"
++	"sync"
++)
++
++// The DCT cosine tables are constants (they depend only on nfft/order), but the analysis rebuilt them
++// via genCosRow on every frame — ~16 rows of cos, profiled ~5% of the encode. Build once, reuse.
++var (
++	dctTablesOnce   sync.Once
++	dctTablesCached dctTables
++)
++
++func getDctTables() *dctTables {
++	dctTablesOnce.Do(func() { dctTablesCached = buildDctTables() })
++	return &dctTablesCached
++}
+ 
+ const (
+ 	SmplLPCOrder  = 16
+@@ -271,9 +286,9 @@ func smplLPCAnalyzeWithF2(windowed *[SmplLPCBufLen]float32) ([SmplLPCOrder + 1]f
+ 		f2d[i] = float64(f2[i])
+ 	}
+ 
+-	tables := buildDctTables()
++	tables := getDctTables()
+ 	var r [SmplLPCOrder + 1]float64
+-	bruteDct(&tables, f2d, SmplLPCOrder, r[:])
++	bruteDct(tables, f2d, SmplLPCOrder, r[:])
+ 
+ 	var rc [SmplLPCOrder]float32
+ 	ac2rcDbl(r[:], SmplLPCOrder, smplLPCReg, rc[:])
+diff --git a/mlow/pitch_enc.go b/mlow/pitch_enc.go
+index 3a1516b..a893a10 100644
+--- a/mlow/pitch_enc.go
++++ b/mlow/pitch_enc.go
+@@ -239,6 +239,10 @@ func peCalcE1(e1, ltpbuf []float32, ltpbufLen, numsubfrs, minpitch, maxpitch, la
+ 
+ // peCalcCE2 is smpl_pitch_calc_C_E2: stage-1 cross-correlation C + target energy E2.
+ func peCalcCE2(c, e2, ltpbuf []float32, ltpbufLen, numsubfrs int) {
++	if celpNeonAvail {
++		neonPeCalcCE2(c, e2, ltpbuf, ltpbufLen, numsubfrs, peLagSubfrlenStage1, peMinpitchStage1, peNumLagsStage1)
++		return
++	}
+ 	t := ltpbufLen - peLagSubfrlenStage1*numsubfrs
+ 	for sf := 0; sf < numsubfrs; sf++ {
+ 		tgt := ltpbuf[t : t+20]
+@@ -536,12 +540,17 @@ func SmplPitch(st *PitchEstState, ltpBuf []float32, f2 *[SmplFLen]float32, coded
+ 					tmp := 0.5 * (sqrtE1[i] + sqrtE2)
+ 					e[ePtr+block*pePitchblock+i] = 0.5 * tmp * tmp
+ 				}
+-				for i := 0; i < pePitchblock; i++ {
+-					if h[hPtr+block*pePitchblock+i] > hThres {
+-						lag := peMinpitchLen + block*pePitchblock + i
+-						a := ltpBufHp[ltpOff:]
+-						b := ltpBufHp[ltpOff-lag:]
+-						c[cPtr+block*pePitchblock+i] = 0.5 * peDotProd40(a, b)
++				if celpNeonAvail {
++					neonPeCorr40Row(c, cPtr+block*pePitchblock, h, hPtr+block*pePitchblock,
++						ltpBufHp, ltpOff, peMinpitchLen+block*pePitchblock, pePitchblock, hThres)
++				} else {
++					for i := 0; i < pePitchblock; i++ {
++						if h[hPtr+block*pePitchblock+i] > hThres {
++							lag := peMinpitchLen + block*pePitchblock + i
++							a := ltpBufHp[ltpOff:]
++							b := ltpBufHp[ltpOff-lag:]
++							c[cPtr+block*pePitchblock+i] = 0.5 * peDotProd40(a, b)
++						}
+ 					}
+ 				}
+ 			}
+-- 
+2.53.0
+

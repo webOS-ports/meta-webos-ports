@@ -1,0 +1,419 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:28:16 +0200
+Subject: [PATCH] webOS: reactions, sent-message ids and delivery/read ticks
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The webOS Messaging app shows reactions as badges on message rows, lets the
+user react, and shows single/double ticks on outgoing messages. All three
+need the plugin to talk to the transport (imlibpurpletransport) about
+individual messages, which libpurple 2 has no API for, so this goes through
+conversation data and custom signals the transport registers:
+
+- Message ids. Each shown message - incoming, or a carbon of one sent from
+  another client - gets the key "<chatId>:<messageId>" (Telegram message
+  ids are only unique within a chat), stashed on the conversation as
+  "webos-msg-id" right before serv_got_im/serv_got_chat_in or the carbon's
+  write, where the transport picks it up as the row's serviceMessageId.
+  Messages sent from this client are stored by the app's own send path, so
+  for them the id is announced once TDLib has one: updateMessageSendSucceeded
+  emits "webos-im-outbox-id" with the key and the plain text as a
+  correlation hint.
+- Incoming reactions. Telegram reports a summary per message, not
+  per-sender events, so updateMessageInteractionInfo emits
+  "webos-im-reaction-set" with the key and "<count> <emoji>\n" per unicode
+  emoji reaction; the transport replaces the message's badges with that set,
+  and an empty set clears them. Custom (sticker) emoji reactions are skipped.
+  This is done next to the plugin's own updateMessageReactions(), which
+  still writes its per-reaction notices into the conversation.
+- Outgoing reactions. The transport emits "webos-im-send-reaction" for every
+  account; the plugin connects to it once, filters to its own accounts, and
+  calls addMessageReaction/removeMessageReaction (setMessageReactions is
+  bot-only). Emoji variation selectors (U+FE0E/U+FE0F) are stripped first,
+  or TDLib rejects "❤️" as an unknown reaction.
+- Ticks. A send that succeeded means the message reached Telegram's servers:
+  emit a "delivered" watermark for the chat. updateChatReadOutbox carries
+  the last message the peer has read: emit a "read" watermark. Both go out
+  as "webos-im-receipt-hwm" 2.5 s later, because the transport attaches the
+  outbox id asynchronously and a watermark that arrives first matches no
+  row; the watermark is cumulative, so the delay loses nothing.
+
+Not for upstream: the signals and conversation-data keys are a private
+contract with the webOS transport.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ receiving.cpp    |  68 +++++++++++++++++++++++++---
+ receiving.h      |   8 +++-
+ td-client.cpp    | 113 +++++++++++++++++++++++++++++++++++++++++++++++
+ td-client.h      |   4 ++
+ tdlib-purple.cpp |  38 ++++++++++++++++
+ 5 files changed, 225 insertions(+), 6 deletions(-)
+
+diff --git a/receiving.cpp b/receiving.cpp
+index e429ffa..ab27bfd 100644
+--- a/receiving.cpp
++++ b/receiving.cpp
+@@ -416,7 +416,8 @@ void sendConversationReadReceipts(TdAccountData &account, PurpleConversation *co
+ }
+ 
+ void showMessageTextIm(TdAccountData &account, const char *purpleUserName, const char *text,
+-                       const char *notification, time_t timestamp, PurpleMessageFlags flags)
++                       const char *notification, time_t timestamp, PurpleMessageFlags flags,
++                       const char *serviceMessageId)
+ {
+     PurpleConversation *conv = NULL;
+ 
+@@ -425,10 +426,22 @@ void showMessageTextIm(TdAccountData &account, const char *purpleUserName, const
+             // serv_got_im seems to work for messages sent from another client, but not for
+             // echoed messages from this client. Therefore, this (code snippet from facebook plugin).
+             conv = getImConversation(account.purpleAccount, purpleUserName);
++            // webOS reactions: stash this carbon's id so the transport (incoming_message_cb, which sees
++            // this write with PURPLE_MESSAGE_REMOTE_SEND) stores it as the Outbox row's serviceMessageId.
++            if (serviceMessageId && *serviceMessageId) {
++                purple_conversation_set_data(conv, "webos-msg-id", g_strdup(serviceMessageId));
++            }
+             purple_conv_im_write(purple_conversation_get_im_data(conv),
+                                  purple_account_get_name_for_display(account.purpleAccount),
+                                  text, flags, timestamp);
+         } else {
++            // webOS reactions: stash this message's id on the conv BEFORE serv_got_im so the transport
++            // stores it as serviceMessageId (read in incoming_message_cb); a later reaction update
++            // targets it by "<chatId>:<messageId>".
++            if (serviceMessageId && *serviceMessageId) {
++                conv = getImConversation(account.purpleAccount, purpleUserName);
++                purple_conversation_set_data(conv, "webos-msg-id", g_strdup(serviceMessageId));
++            }
+             serv_got_im(purple_account_get_connection(account.purpleAccount), purpleUserName, text,
+                         flags, timestamp);
+             conv = getImConversation(account.purpleAccount, purpleUserName);
+@@ -451,7 +464,8 @@ void showMessageTextIm(TdAccountData &account, const char *purpleUserName, const
+ 
+ static void showMessageTextChat(TdAccountData &account, const td::td_api::chat &chat,
+                                 const TgMessageInfo &message, const char *text,
+-                                const char *notification, PurpleMessageFlags flags)
++                                const char *notification, PurpleMessageFlags flags,
++                                const char *serviceMessageId = NULL)
+ {
+     // Again, doing what facebook plugin does
+     int purpleId = account.getPurpleChatId(getId(chat));
+@@ -471,6 +485,13 @@ static void showMessageTextChat(TdAccountData &account, const td::td_api::chat &
+                 std::string who = message.incomingGroupchatSender.empty() ? "someone" : message.incomingGroupchatSender;
+                 if (!message.incomingGroupchatSenderId.empty())
+                     who = message.incomingGroupchatSenderId + "\x1f" + who;
++                // webOS reactions: stash this message's id on the chat conv BEFORE serv_got_chat_in so
++                // the transport stores it as serviceMessageId; a later reaction update targets it.
++                if (serviceMessageId && *serviceMessageId) {
++                    PurpleConversation *baseConv = conv ? purple_conv_chat_get_conversation(conv) : NULL;
++                    if (baseConv)
++                        purple_conversation_set_data(baseConv, "webos-msg-id", g_strdup(serviceMessageId));
++                }
+                 serv_got_chat_in(purple_account_get_connection(account.purpleAccount), purpleId,
+                                  who.c_str(), flags, text, message.timestamp);
+             }
+@@ -660,20 +681,57 @@ void showMessageText(TdAccountData &account, const td::td_api::chat &chat, const
+     if (!newText.empty())
+         text = newText.c_str();
+ 
++    // webOS reactions: a stable per-message key the transport stores as serviceMessageId. Telegram
++    // message ids are unique only within a chat, so scope it with the chat id: "<chatId>:<messageId>".
++    // A later updateMessageInteractionInfo emits reactions targeting this same key. Stash it for
++    // incoming messages AND for carbons of messages we sent from another client (outgoing but not
++    // sentLocally) - the transport stores those as Outbox rows, so reactions can attach to them too.
++    // Local echoes (sentLocally) are stored by the app's own send path, so we skip them.
++    std::string serviceMessageId;
++    if (message.id.valid() && (!message.outgoing || !message.sentLocally))
++        serviceMessageId = std::to_string(getId(chat).value()) + ":" + std::to_string(message.id.value());
++    const char *svcMsgId = serviceMessageId.empty() ? NULL : serviceMessageId.c_str();
++
+     const td::td_api::user *privateUser = account.getUserByPrivateChat(chat);
+     if (privateUser) {
+         std::string userName = getPrivateChatPurpleName(account, *privateUser);
+-        showMessageTextIm(account, userName.c_str(), text, notification, message.timestamp, flags);
++        showMessageTextIm(account, userName.c_str(), text, notification, message.timestamp, flags, svcMsgId);
+     }
+ 
+     SecretChatId secretChatId = getSecretChatId(chat);
+     if (secretChatId.valid()) {
+         std::string userName = getSecretChatBuddyName(secretChatId);
+-        showMessageTextIm(account, userName.c_str(), text, notification, message.timestamp, flags);
++        showMessageTextIm(account, userName.c_str(), text, notification, message.timestamp, flags, svcMsgId);
+     }
+ 
+     if (getBasicGroupId(chat).valid() || getSupergroupId(chat).valid())
+-        showMessageTextChat(account, chat, message, text, notification, flags);
++        showMessageTextChat(account, chat, message, text, notification, flags, svcMsgId);
++}
++
++// webOS reactions: turn a message's aggregated reaction summary into the "count<SP>emoji\n..." set
++// the transport expects and emit it. See showReactions() declaration in receiving.h.
++void showReactions(TdAccountData &account, int64_t chatId, int64_t messageId,
++                   const td::td_api::messageInteractionInfo *info)
++{
++    std::string serialized;
++    if (info && info->reactions_) {
++        for (const auto &r : info->reactions_->reactions_) {
++            if (!r || !r->type_ || r->total_count_ <= 0)
++                continue;
++            // Only unicode emoji reactions map to something we can render; skip custom (sticker) emoji.
++            if (r->type_->get_id() != td::td_api::reactionTypeEmoji::ID)
++                continue;
++            const auto &emojiType = static_cast<const td::td_api::reactionTypeEmoji &>(*r->type_);
++            if (emojiType.emoji_.empty())
++                continue;
++            serialized += std::to_string(r->total_count_) + " " + emojiType.emoji_ + "\n";
++        }
++    }
++
++    // Target key must match the serviceMessageId stashed when the message was shown.
++    std::string targetId = std::to_string(chatId) + ":" + std::to_string(messageId);
++    purple_signal_emit(purple_conversations_get_handle(), "webos-im-reaction-set",
++                       account.purpleAccount, targetId.c_str(), serialized.c_str(), (const char *)NULL);
+ }
+ 
+ void showChatNotification(TdAccountData &account, const td::td_api::chat &chat,
+diff --git a/receiving.h b/receiving.h
+index ae61bb7..f78db8e 100644
+--- a/receiving.h
++++ b/receiving.h
+@@ -27,7 +27,13 @@ void sendConversationReadReceipts(TdAccountData &account, PurpleConversation *co
+ void showMessageText(TdAccountData &account, const td::td_api::chat &chat, const TgMessageInfo &message,
+                      const char *text, const char *notification, uint32_t extraFlags = 0);
+ void showMessageTextIm(TdAccountData &account, const char *purpleUserName, const char *text,
+-                       const char *notification, time_t timestamp, PurpleMessageFlags flags);
++                       const char *notification, time_t timestamp, PurpleMessageFlags flags,
++                       const char *serviceMessageId = NULL);
++// webOS reactions: push the aggregated reaction summary of one message to the transport
++// ("webos-im-reaction-set" signal), which REPLACES that message's reaction badges. A NULL/empty
++// interaction_info clears them. serviceMessageId is "<chatId>:<messageId>" (matching the stash).
++void showReactions(TdAccountData &account, int64_t chatId, int64_t messageId,
++                   const td::td_api::messageInteractionInfo *info);
+ void showChatNotification(TdAccountData &account, const td::td_api::chat &chat,
+                           const char *notification, PurpleMessageFlags extraFlags = (PurpleMessageFlags)0);
+ void showChatNotification(TdAccountData &account, const td::td_api::chat &chat,
+diff --git a/td-client.cpp b/td-client.cpp
+index ca02d60..32f1d26 100644
+--- a/td-client.cpp
++++ b/td-client.cpp
+@@ -13,6 +13,30 @@
+ #include <stdlib.h>
+ #include <algorithm>
+ 
++// webOS delivery/read receipts: the transport matches an outgoing message's Outbox row by its
++// serviceMessageId, which OutboxIdHandler stamps ASYNCHRONOUSLY right after updateMessageSendSucceeded.
++// Emitting the delivered/read watermark immediately races that stamp - the just-sent row is still
++// unlabeled, so the watermark matches nothing (seen as "matched no outbox rows" for the newest id).
++// Defer the emit briefly to let the id land; the watermark is cumulative, so the delayed sweep also
++// picks up any earlier messages at/under the boundary.
++struct WebosTgReceipt { PurpleAccount *account; gchar *scope; gchar *watermark; gchar *status; };
++static gboolean webos_tg_receipt_emit(gpointer data) {
++    WebosTgReceipt *e = static_cast<WebosTgReceipt *>(data);
++    purple_signal_emit(purple_conversations_get_handle(), "webos-im-receipt-hwm",
++                       e->account, e->scope, e->watermark, e->status);
++    g_free(e->scope); g_free(e->watermark); g_free(e->status); g_free(e);
++    return FALSE; // one-shot
++}
++static void webos_tg_emit_receipt_delayed(PurpleAccount *account, const std::string &scope,
++                                          int64_t watermark, const char *status) {
++    WebosTgReceipt *e = g_new0(WebosTgReceipt, 1);
++    e->account = account;
++    e->scope = g_strdup(scope.c_str());
++    e->watermark = g_strdup(std::to_string(watermark).c_str());
++    e->status = g_strdup(status);
++    purple_timeout_add(2500, webos_tg_receipt_emit, e);
++}
++
+ enum {
+     // Typing notifications seems to be resent every 5-6 seconds, so 10s timeout hould be appropriate
+     REMOTE_TYPING_NOTICE_TIMEOUT = 10,
+@@ -164,6 +188,28 @@ void PurpleTdClient::processUpdate(td::td_api::Object &update)
+             m_data.renameShownMessage(getChatId(*sendSucceeded.message_), getOldMessageId(sendSucceeded),
+                                       getId(*sendSucceeded.message_));
+         }
++        // webOS: the message the user sent FROM THE APP now has its real network id. Its Outbox row was
++        // persisted with no serviceMessageId (the app can't know the id at send time), so emit the same
++        // "<chatId>:<messageId>" key incoming messages use, plus the plain text as a correlation hint;
++        // the transport's OutboxIdHandler attaches it to the row so the user can react to their own msg.
++        if (sendSucceeded.message_ && sendSucceeded.message_->is_outgoing_) {
++            const td::td_api::message &msg = *sendSucceeded.message_;
++            std::string svcMsgId = std::to_string(msg.chat_id_) + ":" + std::to_string(msg.id_);
++            std::string text;
++            if (msg.content_ && msg.content_->get_id() == td::td_api::messageText::ID) {
++                const auto &mt = static_cast<const td::td_api::messageText &>(*msg.content_);
++                if (mt.text_) text = mt.text_->text_;
++            }
++            purple_debug_misc(config::pluginId, "outbox-id: sent message now has id %s\n", svcMsgId.c_str());
++            purple_signal_emit(purple_conversations_get_handle(), "webos-im-outbox-id",
++                               m_account, svcMsgId.c_str(), text.c_str());
++            // webOS delivery ticks (single tick): the message reached Telegram's servers. Emit a
++            // "delivered" watermark scoped to this chat so the transport marks this + earlier outgoing
++            // messages delivered. Telegram (like its own UI) has no distinct delivered-to-device state;
++            // "read" (double tick) arrives separately via updateChatReadOutbox.
++            std::string chatScope = std::string("msgid:") + std::to_string(msg.chat_id_) + ":";
++            webos_tg_emit_receipt_delayed(m_account, chatScope, msg.id_, "delivered");
++        }
+         break;
+     }
+ 
+@@ -192,6 +238,11 @@ void PurpleTdClient::processUpdate(td::td_api::Object &update)
+         auto &interactionUpdate = static_cast<const td::td_api::updateMessageInteractionInfo &>(update);
+         updateMessageReactions(m_data, getChatId(interactionUpdate), getMessageId(interactionUpdate),
+                                interactionUpdate.interaction_info_.get());
++        // webOS reactions: Telegram reports reactions as an aggregated per-emoji summary (not
++        // per-sender events). Push the whole summary to the transport too, which REPLACES this
++        // message's reaction badges. A null interaction_info clears them.
++        showReactions(m_data, interactionUpdate.chat_id_, interactionUpdate.message_id_,
++                      interactionUpdate.interaction_info_.get());
+         break;
+     }
+ 
+@@ -290,6 +341,16 @@ void PurpleTdClient::processUpdate(td::td_api::Object &update)
+         break;
+     };
+ 
++    case td::td_api::updateChatReadOutbox::ID: {
++        // webOS read ticks (double tick): the recipient has READ all our outgoing messages in this chat
++        // up to last_read_outbox_message_id_. Emit a "read" watermark scoped to the chat; the transport
++        // marks every outgoing message at/under that id as read.
++        auto &readOutbox = static_cast<const td::td_api::updateChatReadOutbox &>(update);
++        std::string chatScope = std::string("msgid:") + std::to_string(readOutbox.chat_id_) + ":";
++        webos_tg_emit_receipt_delayed(m_account, chatScope, readOutbox.last_read_outbox_message_id_, "read");
++        break;
++    };
++
+     default:
+         purple_debug_misc(config::pluginId, "Incoming update: ignorig ID=%d\n", update.get_id());
+         break;
+@@ -1285,6 +1346,58 @@ void PurpleTdClient::updateChatLastMessage(td::td_api::updateChatLastMessage &la
+     }
+ }
+ 
++void PurpleTdClient::sendReactionResponse(uint64_t requestId, td::td_api::object_ptr<td::td_api::Object> object)
++{
++    if (object && object->get_id() == td::td_api::error::ID) {
++        auto &err = static_cast<td::td_api::error &>(*object);
++        purple_debug_warning(config::pluginId, "add/removeMessageReaction FAILED: %d %s\n", err.code_, err.message_.c_str());
++    } else {
++        purple_debug_misc(config::pluginId, "add/removeMessageReaction OK\n");
++    }
++}
++
++void PurpleTdClient::sendReaction(int64_t chatId, int64_t messageId, const std::string &emojiIn, bool remove)
++{
++    // Telegram's reaction set uses the BARE emoji: strip emoji variation selectors (U+FE0E/U+FE0F,
++    // UTF-8 "EF B8 8E/8F") that the picker/decoder may include (e.g. "❤️" -> "❤"), else
++    // add/removeMessageReaction rejects it as an unknown reaction.
++    std::string emoji;
++    for (size_t i = 0; i < emojiIn.size();) {
++        if (i + 2 < emojiIn.size() && (unsigned char)emojiIn[i] == 0xEF && (unsigned char)emojiIn[i+1] == 0xB8 &&
++            ((unsigned char)emojiIn[i+2] == 0x8F || (unsigned char)emojiIn[i+2] == 0x8E)) {
++            i += 3;
++            continue;
++        }
++        emoji.push_back(emojiIn[i]);
++        i++;
++    }
++    if (emoji.empty()) {
++        purple_debug_warning(config::pluginId, "sendReaction: empty emoji, ignoring (chat=%" G_GINT64_FORMAT ")\n", chatId);
++        return;
++    }
++    // setMessageReactions is bot-only ("400 Only bots can use the method"); regular user accounts must
++    // use add/removeMessageReaction with a specific reaction. Both need the bare emoji, so the app
++    // carries it through even on removal. addMessageReaction replaces my prior reaction (non-premium =
++    // one reaction/message), matching the app's one-reaction-per-user model.
++    purple_debug_misc(config::pluginId, "sendReaction %s chat=%" G_GINT64_FORMAT " msg=%" G_GINT64_FORMAT " emoji='%s'\n",
++                      remove ? "remove" : "add", chatId, messageId, emoji.c_str());
++    if (remove) {
++        auto req = td::td_api::make_object<td::td_api::removeMessageReaction>();
++        req->chat_id_       = chatId;
++        req->message_id_    = messageId;
++        req->reaction_type_ = td::td_api::make_object<td::td_api::reactionTypeEmoji>(emoji);
++        m_transceiver.sendQuery(std::move(req), &PurpleTdClient::sendReactionResponse);
++    } else {
++        auto req = td::td_api::make_object<td::td_api::addMessageReaction>();
++        req->chat_id_                 = chatId;
++        req->message_id_              = messageId;
++        req->reaction_type_           = td::td_api::make_object<td::td_api::reactionTypeEmoji>(emoji);
++        req->is_big_                  = false;
++        req->update_recent_reactions_ = true;
++        m_transceiver.sendQuery(std::move(req), &PurpleTdClient::sendReactionResponse);
++    }
++}
++
+ int PurpleTdClient::sendMessage(const char *buddyName, const char *message)
+ {
+     // Auth-input fallback: while waiting for a login code, 2FA password or display name (asked
+diff --git a/td-client.h b/td-client.h
+index 3e9beab..94868ba 100644
+--- a/td-client.h
++++ b/td-client.h
+@@ -27,6 +27,10 @@ public:
+     static std::string getDatabaseDir(const char *username);
+     static std::string getFilesDir(const char *username);
+     int  sendMessage(const char *buddyName, const char *message);
++    // webOS reactions (SEND): add (remove=false) or remove (remove=true) MY `emoji` reaction on a
++    // message via TDLib add/removeMessageReaction. Called from the webos-im-send-reaction handler.
++    void sendReaction(int64_t chatId, int64_t messageId, const std::string &emoji, bool remove);
++    void sendReactionResponse(uint64_t requestId, td::td_api::object_ptr<td::td_api::Object> object);
+     void sendTyping(const char *buddyName, bool isTyping);
+     void sendReadReceipts(PurpleConversation *conversation);
+ 
+diff --git a/tdlib-purple.cpp b/tdlib-purple.cpp
+index 3f0e9df..c392c63 100644
+--- a/tdlib-purple.cpp
++++ b/tdlib-purple.cpp
+@@ -324,6 +324,35 @@ conversation_updated_cb(PurpleConversation *conv, PurpleConvUpdateType type)
+     }
+ }
+ 
++// webOS reactions (SEND): the transport emits "webos-im-send-reaction" (registered process-wide) when
++// the user reacts from the TouchPad. It fires for EVERY account, so filter to Telegram. targetId is
++// "<chatId>:<messageId>" (matching the composite serviceMessageId we stored). `removeFlag` is "1" to
++// remove my `emoji` reaction, else add it (the emoji is always supplied, even on removal).
++static void tgprpl_send_reaction_cb(PurpleAccount *account, const char *targetId, const char *emoji,
++                                    const char *peer, const char *removeFlag, void *data)
++{
++    if (!account || !targetId || !*targetId) {
++        return;
++    }
++    if (g_strcmp0(purple_account_get_protocol_id(account), config::pluginId) != 0) {
++        return; // not a Telegram account
++    }
++    PurpleTdClient *tdClient = getTdClient(account);
++    if (!tdClient) {
++        return;
++    }
++    const char *colon = strchr(targetId, ':');
++    if (!colon) {
++        return;
++    }
++    int64_t chatId    = g_ascii_strtoll(targetId, NULL, 10);
++    int64_t messageId = g_ascii_strtoll(colon + 1, NULL, 10);
++    if (chatId == 0 || messageId == 0) {
++        return;
++    }
++    tdClient->sendReaction(chatId, messageId, emoji ? emoji : "", removeFlag && removeFlag[0] == '1');
++}
++
+ static void tgprpl_login (PurpleAccount *acct)
+ {
+     purple_debug_misc(config::pluginId, "version %s\n", config::versionString);
+@@ -336,6 +365,15 @@ static void tgprpl_login (PurpleAccount *acct)
+ 
+     purple_signal_connect(purple_conversations_get_handle(), "conversation-updated",
+                           acct, PURPLE_CALLBACK(conversation_updated_cb), NULL);
++
++    // Connect once (process-wide) to the transport's send-reaction signal; the callback filters to
++    // Telegram accounts. The transport registers the signal at init, before any account logs in.
++    static bool s_sendReactionConnected = false;
++    if (!s_sendReactionConnected) {
++        s_sendReactionConnected = true;
++        purple_signal_connect(purple_conversations_get_handle(), "webos-im-send-reaction",
++                              purple_get_core(), PURPLE_CALLBACK(tgprpl_send_reaction_cb), NULL);
++    }
+ }
+ 
+ static void tgprpl_close (PurpleConnection *gc)

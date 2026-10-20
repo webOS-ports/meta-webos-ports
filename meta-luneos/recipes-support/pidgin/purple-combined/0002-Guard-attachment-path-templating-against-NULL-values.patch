@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:26:26 +0200
+Subject: [PATCH] Guard attachment path templating against NULL values
+
+gowhatsapp_attachment_fill_template() substitutes placeholders through
+replace_placeholder(), which passes the hash table value straight to
+purple_strreplace(). Some values can be NULL - an unset buddy or chat
+alias, or a missing filename or extension, e.g. for a message we sent
+ourselves from another device whose recipient is not in the buddy list.
+purple_strreplace() then fails its 'replacement != NULL' assertion and
+returns NULL, the template result becomes NULL, and the NULL path later
+crashes in g_path_get_dirname() / create_symlinks_recurse(), taking the
+whole libpurple process down.
+
+Substitute an empty string for a NULL value, stop replacing once the text
+is NULL, and make create_symlinks_recurse() return on NULL paths.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ glue/handle_attachment.c | 11 +++++++++--
+ 1 file changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/glue/handle_attachment.c b/glue/handle_attachment.c
+index 5dfef98..664d173 100644
+--- a/glue/handle_attachment.c
++++ b/glue/handle_attachment.c
+@@ -129,8 +129,15 @@ static void download_via_xfer_mechanism(gowhatsapp_message_t *gwamsg) {
+ 
+ static void replace_placeholder(gpointer key, gpointer value, gpointer user_data) {
+     char **text = user_data;
++    // A NULL replacement value (e.g. an unset alias, filename or extension) must NOT reach
++    // purple_strreplace: it asserts 'replacement != NULL', returns NULL, nulls *text, and the
++    // resulting NULL path later crashes g_path_get_dirname. Coalesce NULL to "" and skip once
++    // *text is NULL.
++    if (*text == NULL) {
++        return;
++    }
+     // NOTE: I am not using g_string_replace here since the GLib shipped with win32 Pidgin is ancient
+-    char *replaced = purple_strreplace(*text, key, value);
++    char *replaced = purple_strreplace(*text, key, value ? (const char *)value : "");
+     g_free(*text);
+     *text = replaced;
+ }
+@@ -177,7 +184,7 @@ char * gowhatsapp_attachment_fill_template(const char *template, time_t timestam
+ // TODO: for a cross-platform-solution, check out https://github.com/nyaosorg/go-windows-junction
+ void create_symlinks_recurse(char *path, char *aliased_path) {
+     //purple_debug_info(GOWHATSAPP_NAME, "create_symlinks_recurse(%s, %s)…\n", aliased_path, path);
+-    if (strlen(path) <= 1 || strlen(aliased_path) <= 1) {
++    if (path == NULL || aliased_path == NULL || strlen(path) <= 1 || strlen(aliased_path) <= 1) {
+         // we reached / or . – stop recursion
+         return;
+     }
+-- 
+2.53.0
+

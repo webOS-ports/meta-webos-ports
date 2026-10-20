@@ -1,0 +1,212 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:26:09 +0200
+Subject: [PATCH] webOS: keep the TDLib store on /media/cryptofs, and remove it
+ with the account
+
+TDLib's database directory, which is also its files directory, lives under
+purple_user_dir(), which on webOS is /var/preferences: a ~62 MB "store-var"
+partition. Both the sqlite database (tens of MB on an active account) and
+the unbounded media cache (photos, videos, files, stickers) fill it.
+
+Put both on the large /media/cryptofs partition instead, as sibling
+per-username directories created up front:
+/media/cryptofs/.purple-tdlib-db/<username> and
+/media/cryptofs/.purple-tdlib-files/<username>. cryptofs is FUSE-POSIX and
+copes with sqlite WAL (WebKit keeps WAL databases there); the vfat
+/media/internal must not hold the database, having no reliable fcntl locking
+or -shm mmap. use_file_database is turned on with it, so that TDLib keeps
+track of the files in that cache across restarts.
+
+Nothing removed that store when an account was deleted, leaving the session
+keys and the media cache behind. Hook libpurple's "account-removed" signal
+and wipe both directories for the removed account, keyed strictly on its own
+username. If the account is deleted while still connecting (stuck at the
+code prompt, say), purple_accounts_delete() has not run tgprpl_close() and
+TDLib is still writing to the store, so the live client is first destroyed
+synchronously (~TdTransceiver sends close and joins the poll thread), with
+protocol_data cleared so the later tgprpl_close() does not free it again.
+Both sendTdlibParameters() and the teardown build the paths through
+PurpleTdClient::getDatabaseDir()/getFilesDir(), so they always agree.
+
+Not for upstream: the paths are those of the webOS partition layout.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ td-client.cpp    | 33 ++++++++++++++++++--
+ td-client.h      |  5 +++
+ tdlib-purple.cpp | 80 ++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 115 insertions(+), 3 deletions(-)
+
+diff --git a/td-client.cpp b/td-client.cpp
+index 54c1b78..0fb940f 100644
+--- a/td-client.cpp
++++ b/td-client.cpp
+@@ -422,6 +422,21 @@ std::string PurpleTdClient::getBaseDatabasePath()
+     return std::string(purple_user_dir()) + G_DIR_SEPARATOR_S + config::configSubdir;
+ }
+ 
++// webOS: the default database_directory == files_directory lives under purple_user_dir()
++// = /var/preferences (a tiny ~62MB partition). BOTH the sqlite database AND the unbounded media
++// cache are redirected to the large (24GB) /media/cryptofs partition, as sibling per-username dirs.
++// Keep these two builders authoritative: sendTdlibParameters() creates them and the account-removed
++// store-teardown hook removes them, so both must agree byte-for-byte.
++std::string PurpleTdClient::getDatabaseDir(const char *username)
++{
++    return std::string("/media/cryptofs/.purple-tdlib-db") + G_DIR_SEPARATOR_S + username;
++}
++
++std::string PurpleTdClient::getFilesDir(const char *username)
++{
++    return std::string("/media/cryptofs/.purple-tdlib-files") + G_DIR_SEPARATOR_S + username;
++}
++
+ static void stuff(td::td_api::setTdlibParameters &parameters)
+ {
+     std::string s(config::stuff);
+@@ -439,9 +454,21 @@ void PurpleTdClient::sendTdlibParameters()
+ {
+     auto parameters = td::td_api::make_object<td::td_api::setTdlibParameters>();
+     const char *username = purple_account_get_username(m_account);
+-    parameters->database_directory_ = getBaseDatabasePath() + G_DIR_SEPARATOR_S + username;
+-    purple_debug_misc(config::pluginId, "Account %s using database directory %s\n",
+-                      username, parameters->database_directory_.c_str());
++    // webOS: the default database_directory == files_directory lives under purple_user_dir()
++    // = /var/preferences (a tiny ~62MB partition, "store-var"). BOTH the sqlite database
++    // (db.sqlite grows to tens of MB with an active account) AND the unbounded media cache
++    // (photos/videos/files/stickers) would fill /var. Redirect BOTH to the large (24GB)
++    // /media/cryptofs partition. cryptofs is FUSE-POSIX and supports sqlite WAL reliably
++    // (verified: WebKit runs WAL DBs there); vfat /media/internal must NOT hold the DB (no
++    // reliable fcntl locking / -shm mmap). Keep DB and media as sibling dirs; create up front
++    // so TDLib can use them immediately.
++    parameters->database_directory_ = getDatabaseDir(username);
++    parameters->files_directory_ = getFilesDir(username);
++    g_mkdir_with_parents(parameters->database_directory_.c_str(), 0700);
++    g_mkdir_with_parents(parameters->files_directory_.c_str(), 0700);
++    purple_debug_misc(config::pluginId, "Account %s using database directory %s, files directory %s\n",
++                      username, parameters->database_directory_.c_str(), parameters->files_directory_.c_str());
++    parameters->use_file_database_ = true;
+     parameters->use_chat_info_database_ = true;
+     parameters->use_message_database_ = true;
+     parameters->use_secret_chats_ = (purple_account_get_bool(m_account, AccountOptions::EnableSecretChats,
+diff --git a/td-client.h b/td-client.h
+index 34c531e..3018d61 100644
+--- a/td-client.h
++++ b/td-client.h
+@@ -21,6 +21,11 @@ public:
+     static void setLogLevel(int level);
+     static void setTdlibLogCallback(td::ClientManager::LogMessageCallbackPtr callback);
+     static std::string getBaseDatabasePath();
++    // webOS per-account store paths: the tdlib sqlite DB and the (unbounded) media cache live under
++    // /media/cryptofs, keyed on the account username. sendTdlibParameters() and the account-removed
++    // store-teardown hook both build the paths through these so they always match exactly.
++    static std::string getDatabaseDir(const char *username);
++    static std::string getFilesDir(const char *username);
+     int  sendMessage(const char *buddyName, const char *message);
+     void sendTyping(const char *buddyName, bool isTyping);
+     void sendReadReceipts(PurpleConversation *conversation);
+diff --git a/tdlib-purple.cpp b/tdlib-purple.cpp
+index 8d35d43..35fef48 100644
+--- a/tdlib-purple.cpp
++++ b/tdlib-purple.cpp
+@@ -6,6 +6,7 @@
+ #include "format.h"
+ #include "buildopt.h"
+ #include <purple.h>
++#include <glib/gstdio.h>
+ 
+ #include <cstdint>
+ #include <functional>
+@@ -987,12 +988,91 @@ static gboolean tgprpl_unload (PurplePlugin *plugin)
+     return TRUE;
+ }
+ 
++// Recursively delete a directory tree (glib has no recursive rmdir). Best-effort: keeps going on
++// per-entry failures. Does not descend into symlinked directories (unlinks the link itself).
++static void removeDirRecursive(const std::string &path)
++{
++    GDir *dir = g_dir_open(path.c_str(), 0, NULL);
++    if (dir) {
++        const gchar *name;
++        while ((name = g_dir_read_name(dir)) != NULL) {
++            std::string child = path + G_DIR_SEPARATOR_S + name;
++            if (g_file_test(child.c_str(), G_FILE_TEST_IS_DIR) &&
++                !g_file_test(child.c_str(), G_FILE_TEST_IS_SYMLINK))
++                removeDirRecursive(child);
++            else
++                g_unlink(child.c_str());
++        }
++        g_dir_close(dir);
++    }
++    g_rmdir(path.c_str());
++}
++
++// Per-account store teardown on account deletion.
++//
++// The webOS transport deletes an account via purple_accounts_delete(), which first disconnects it
++// (-> tgprpl_close -> `delete PurpleTdClient`, releasing the tdlib instance) and only THEN emits
++// libpurple's "account-removed" signal. Without this hook the per-username tdlib sqlite DB (session
++// keys) and the unbounded media cache under /media/cryptofs are left orphaned. We remove both,
++// keyed strictly on the removed account's own username so one account's deletion never touches
++// another's store. Paths are built through PurpleTdClient::get{Database,Files}Dir() so they match
++// sendTdlibParameters() exactly.
++static void tgprpl_account_removed_cb(PurpleAccount *account, gpointer unused)
++{
++    (void)unused;
++    if (!account)
++        return;
++    // The signal fires process-wide for EVERY prpl - only act on Telegram accounts.
++    if (g_strcmp0(purple_account_get_protocol_id(account), config::pluginId) != 0)
++        return;
++
++    const char *username = purple_account_get_username(account);
++    if (!username || !*username)
++        return;
++
++    // Normally the account is already disconnected before this fires (tgprpl_close -> delete client,
++    // a SYNCHRONOUS close: ~TdTransceiver sends td_api::close and joins the poll thread, which returns
++    // only on authorizationStateClosed), so getTdClient() is NULL and the store is safe to wipe. But
++    // when the account is deleted while still CONNECTING (e.g. stuck at the phone-code step),
++    // purple_accounts_delete has not run tgprpl_close, so the client is still live and its background
++    // thread is actively writing the sqlite DB + binlog. The old code called the fire-and-forget async
++    // logOut() and immediately wiped the store, which RACED the open tdlib: it re-created
++    // db.sqlite/td.binlog under removeDirRecursive so g_rmdir failed and the store survived ("Telegram
++    // data remains after delete"). Fix: tear the live client down SYNCHRONOUSLY here (same path as
++    // tgprpl_close) so tdlib has fully flushed + closed before we remove the files, and clear
++    // protocol_data so libpurple's later tgprpl_close doesn't double-free. A local close (not a network
++    // logOut) so account teardown never blocks on the network; the wipe below removes the session keys
++    // regardless, so the device can no longer access the account even though its server-side session
++    // entry lingers until the user clears it in Telegram.
++    PurpleTdClient *tdClient = getTdClient(account);
++    if (tdClient) {
++        purple_debug_info(config::pluginId, "account-removed: closing live tdlib client for %s before store teardown\n",
++                          username);
++        delete tdClient;
++        PurpleConnection *gc = purple_account_get_connection(account);
++        if (gc)
++            purple_connection_set_protocol_data(gc, NULL);
++    }
++
++    std::string databaseDir = PurpleTdClient::getDatabaseDir(username);
++    std::string filesDir    = PurpleTdClient::getFilesDir(username);
++    purple_debug_info(config::pluginId, "account-removed: removing tdlib store for %s (%s ; %s)\n",
++                      username, databaseDir.c_str(), filesDir.c_str());
++    removeDirRecursive(databaseDir);
++    removeDirRecursive(filesDir);
++}
++
+ static gboolean tgprpl_load (PurplePlugin *plugin)
+ {
+     if (!checkTdlibVersion())
+         return FALSE;
+     registerMessageLinks();
+ 
++    // Per-account store teardown: hook "account-removed" (emitted by purple_accounts_delete) so a
++    // deleted Telegram account's tdlib DB + media cache are not orphaned. Handle is the plugin.
++    purple_signal_connect(purple_accounts_get_handle(), "account-removed", plugin,
++                          PURPLE_CALLBACK(tgprpl_account_removed_cb), NULL);
++
+     purple_cmd_register("kick", "s", PURPLE_CMD_P_PLUGIN,
+                         (PurpleCmdFlag)(PURPLE_CMD_FLAG_CHAT | PURPLE_CMD_FLAG_PRPL_ONLY),
+                         config::pluginId, tgprpl_cmd_kick,

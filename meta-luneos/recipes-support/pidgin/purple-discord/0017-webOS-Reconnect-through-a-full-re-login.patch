@@ -1,0 +1,116 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:23:29 +0200
+Subject: [PATCH] webOS: Reconnect through a full re-login
+
+The in-place reconnects (OP_RECONNECT, the five minute restart,
+websocket close and lost connection) call discord_start_socket on the
+existing DiscordAccount. When the transport has closed the account in
+between, the hash tables are gone, and the reconnected account logs
+GLib criticals and cannot send or sync.
+
+Report a network error instead, so the webOS transport closes the
+account and logs in again with fresh state. As a safety net,
+discord_start_socket also recreates any table a close has freed.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ libdiscord.c | 53 +++++++++++++++++++++++++++++++++++++++++++++-------
+ 1 file changed, 46 insertions(+), 7 deletions(-)
+
+diff --git a/libdiscord.c b/libdiscord.c
+index 5f007cd..0c347e0 100644
+--- a/libdiscord.c
++++ b/libdiscord.c
+@@ -5794,8 +5794,10 @@ static void discord_start_socket(DiscordAccount *ya);
+ static void
+ discord_restart_channel(DiscordAccount *da)
+ {
+-	purple_connection_set_state(da->pc, PURPLE_CONNECTION_CONNECTING);
+-	discord_start_socket(da);
++	/* webOS: clean full re-login (purple_connection_error -> discord_close -> fresh discord_login)
++	 * instead of a partial in-place discord_start_socket that reuses a torn-down DiscordAccount.
++	 * See the rationale on the heartbeat-ACK watchdog in discord_send_heartbeat. */
++	purple_connection_error(da->pc, PURPLE_CONNECTION_ERROR_NETWORK_ERROR, _("Reconnecting"));
+ }
+ 
+ static void
+@@ -7378,7 +7380,8 @@ discord_process_frame(DiscordAccount *da, const gchar *frame)
+ 		}
+ 
+ 		case OP_RECONNECT: { /* Reconnect */
+-			discord_start_socket(da);
++			/* webOS: clean full re-login (see discord_send_heartbeat) not a partial in-place reconnect */
++			purple_connection_error(da->pc, PURPLE_CONNECTION_ERROR_NETWORK_ERROR, _("Server requested reconnect"));
+ 			break;
+ 		}
+ 
+@@ -7693,8 +7696,8 @@ discord_socket_got_data(gpointer userdata, PurpleSslConnection *conn, PurpleInpu
+ 						}
+ 					}
+ 
+-					/* Try reconnect */
+-					discord_start_socket(ya);
++					/* Try reconnect (webOS: clean full re-login, not partial in-place) */
++					purple_connection_error(ya->pc, PURPLE_CONNECTION_ERROR_NETWORK_ERROR, _("Reconnecting"));
+ 
+ 					return;
+ 				} else if (ya->packet_code == 137) {
+@@ -7812,8 +7815,8 @@ discord_socket_got_data(gpointer userdata, PurpleSslConnection *conn, PurpleInpu
+ 		if (ya->frames_since_reconnect < 2) {
+ 			purple_connection_error(ya->pc, PURPLE_CONNECTION_ERROR_NETWORK_ERROR, _("Lost connection to server"));
+ 		} else {
+-			/* Try reconnect */
+-			discord_start_socket(ya);
++			/* Try reconnect (webOS: clean full re-login, not partial in-place) */
++			purple_connection_error(ya->pc, PURPLE_CONNECTION_ERROR_NETWORK_ERROR, _("Lost connection to server"));
+ 		}
+ 	}
+ }
+@@ -7881,6 +7884,42 @@ discord_start_socket(DiscordAccount *da)
+ 
+ 	da->heartbeat_ack_pending = FALSE; /* webOS #1: fresh connection starts with no outstanding ACK */
+ 
++	/* webOS #1 FIX: a reconnect (OP_RECONNECT/op7, the 5-min restart, the heartbeat-ACK watchdog, ...)
++	 * calls us DIRECTLY, without re-running discord_login. If a discord_close ran in between (a full
++	 * disconnect - common during a reboot's flaky first connect), it g_hash_table_unref'd and NULLed
++	 * these tables and nothing re-created them. The socket would then come back up ("logged in") but
++	 * every message-processing / dedup access hits "g_hash_table_*: assertion 'hash_table != NULL'
++	 * failed" and the account is half-dead: cannot send or sync, servers/channels never appear. Re-
++	 * create any table a close cleared so the reconnect has a usable account. discord_login allocates
++	 * these before the initial socket, so on first connect they are non-NULL and skipped here. */
++	if (da->cookie_table == NULL)
++		da->cookie_table = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
++	if (da->one_to_ones == NULL)
++		da->one_to_ones = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
++	if (da->one_to_ones_rev == NULL)
++		da->one_to_ones_rev = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
++	if (da->last_message_id_dm == NULL)
++		da->last_message_id_dm = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
++	if (da->sent_message_ids == NULL)
++		da->sent_message_ids = g_hash_table_new_full(g_str_insensitive_hash, g_str_insensitive_equal, g_free, NULL);
++	if (da->received_message_ids == NULL) {
++		da->received_message_ids = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
++	}
++	if (da->result_callbacks == NULL)
++		da->result_callbacks = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
++	if (da->msgid_to_channel == NULL)
++		da->msgid_to_channel = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
++	if (da->webos_quote_cache == NULL)
++		da->webos_quote_cache = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
++	if (da->received_message_queue == NULL)
++		da->received_message_queue = g_queue_new();
++	if (da->new_users == NULL)
++		da->new_users = g_hash_table_new_full(g_int64_hash, g_int64_equal, NULL, discord_free_user);
++	if (da->new_guilds == NULL)
++		da->new_guilds = g_hash_table_new_full(g_int64_hash, g_int64_equal, NULL, discord_free_guild);
++	if (da->group_dms == NULL)
++		da->group_dms = g_hash_table_new_full(g_int64_hash, g_int64_equal, NULL, discord_free_channel);
++
+ 	if (da->heartbeat_timeout) {
+ 		g_source_remove(da->heartbeat_timeout);
+ 	}
+-- 
+2.53.0
+

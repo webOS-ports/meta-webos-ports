@@ -49,7 +49,7 @@ RRECOMMENDS:${PN} += " \
     libpurple-protocol-zephyr \
 "
 
-# All six luneos-synergy-connectors plug-ins are enabled. purple-combined provides TWO prpls from one
+# All six recipes-support/pidgin plug-ins are enabled. purple-combined provides TWO prpls from one
 # shared object -- prpl-hehoe-whatsmeow (WhatsApp) and prpl-gometa (Facebook Messenger) -- because
 # they share a Go runtime.
 #

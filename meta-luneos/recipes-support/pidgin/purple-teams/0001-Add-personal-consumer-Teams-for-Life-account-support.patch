@@ -1,0 +1,1156 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:18:55 +0200
+Subject: [PATCH] Add personal/consumer (Teams-for-Life) account support
+
+Under ENABLE_TEAMS_PERSONAL, make login and messaging work for personal
+Microsoft (live.com) accounts next to the work/school path:
+
+- Split OAuth and API routing by host so the consumer teams.live.com
+  mt/beta endpoints get their own Bearer token; they reject the org one.
+- Load the classic Skype contact roster for consumer accounts, which have
+  no org self-details, and route consumer 1:1 chats through the Teams
+  thread model (the legacy "8:<user>" peer form 404s there).
+- Add a headless OAuth auth-code login and deliver device-code sign-in
+  instructions as an IM on UIs without a notify UI.
+- Persist the refresh token as the account password so later logins take
+  the silent refresh path.
+- Personal accounts get no real-time Trouter message push, so poll
+  history on a timer, seed the poll cursor once so the window is not
+  always empty, and dedup re-fetched messages by server id.
+- Plumb a real error callback through teams_post_or_get_with_error(),
+  cap the dedup cache, guard the poll against overlapping fetches, and
+  make HTTP body logging opt-in (verbose + unsafe debug) since bodies
+  carry names and tokens.
+
+The plugin ids stay unchanged, and both can be overridden at build time.
+
+This is the squashed state of the open upstream pull request #85, plus
+the two fixes for the build errors reported in its review:
+teams_mt_oauth_cb() is now only built with ENABLE_TEAMS_PERSONAL, and the
+dedup cache uses g_hash_table_insert(), because g_hash_table_add() needs
+GLib 2.32 and the Windows build uses 2.28.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Submitted [https://github.com/EionRobb/purple-teams/pull/85]
+---
+ libteams.c         |  82 +++++++++++++++-
+ libteams.h         |  37 +++++++-
+ teams_connection.c |  65 +++++++++++--
+ teams_connection.h |   4 +
+ teams_contacts.c   | 227 ++++++++++++++++++++++++++++++++++++++++-----
+ teams_contacts.h   |   4 +
+ teams_login.c      | 169 +++++++++++++++++++++++++++------
+ teams_login.h      |   9 ++
+ teams_messages.c   | 110 +++++++++++++++++-----
+ 9 files changed, 620 insertions(+), 87 deletions(-)
+
+diff --git a/libteams.c b/libteams.c
+index 8b81706..27d9f35 100644
+--- a/libteams.c
++++ b/libteams.c
+@@ -23,6 +23,36 @@
+ #include "teams_util.h"
+ #include "teams_trouter.h"
+ 
++#ifdef ENABLE_TEAMS_PERSONAL
++/* Personal/TFL: real-time message delivery via Trouter push does not work for
++ * consumer (Teams-for-Life) accounts — new messages arrive as neither a /messaging
++ * EventMessage nor a trouter.message_loss (only presence pushes route through). So we
++ * poll for new messages on a timer; teams_get_offline_history() fetches conversations
++ * since the advancing cursor, and process_message_resource() dedups by server id so
++ * re-fetched messages are never re-delivered. */
++static gboolean
++teams_poll_messages(gpointer user_data)
++{
++	TeamsAccount *sa = user_data;
++
++	if (!PURPLE_CONNECTION_IS_VALID(sa->pc)) {
++		sa->poll_timeout = 0;
++		return G_SOURCE_REMOVE;
++	}
++
++	/* Don't stack fetches: if the previous poll's conversations request hasn't
++	 * completed (slow network), skip this tick. teams_got_all_convs() and the fetch
++	 * error callback clear the flag, so a failed request can't wedge polling. */
++	if (sa->poll_in_flight) {
++		purple_debug_info("teams", "poll: previous fetch still in flight, skipping tick\n");
++		return G_SOURCE_CONTINUE;
++	}
++	sa->poll_in_flight = TRUE;
++	teams_get_offline_history(sa);
++	return G_SOURCE_CONTINUE;
++}
++#endif /* ENABLE_TEAMS_PERSONAL */
++
+ void
+ teams_do_all_the_things(TeamsAccount *sa)
+ {
+@@ -44,17 +74,31 @@ teams_do_all_the_things(TeamsAccount *sa)
+ 	} else {
+ 		teams_get_self_details(sa);
+ 		
+-		if (sa->authcheck_timeout) 
++		if (sa->authcheck_timeout)
+ 			g_source_remove(sa->authcheck_timeout);
+ 		teams_check_authrequests(sa);
+ 		sa->authcheck_timeout = g_timeout_add_seconds(120, (GSourceFunc)teams_check_authrequests, sa);
+ 		purple_connection_set_state(sa->pc, PURPLE_CONNECTION_CONNECTED);
++		/* Personal/TFL: mark full setup done so the async teams_get_self_details
++		 * callback below (teams_got_self_details) does not recurse into this function
++		 * again. Replaces the old IS_CONNECTED re-entry guard, which our early-connect
++		 * fix would otherwise have tripped early (skipping this whole block). */
++		sa->logged_in = TRUE;
+ 
+ 		teams_get_friend_list(sa);
+ 		teams_trouter_begin(sa);
+ 		
+ 		teams_get_offline_history(sa);
+ 
++#ifdef ENABLE_TEAMS_PERSONAL
++		/* Personal/TFL: periodic message poll (real-time Trouter push is
++		 * dead for consumer accounts). Dedup in process_message_resource() keeps
++		 * re-fetches from duplicating already-shown messages. */
++		if (sa->poll_timeout)
++			g_source_remove(sa->poll_timeout);
++		sa->poll_timeout = g_timeout_add_seconds(TEAMS_MESSAGE_POLL_SECONDS, teams_poll_messages, sa);
++#endif /* ENABLE_TEAMS_PERSONAL */
++
+ 		teams_set_status(sa->account, purple_account_get_active_status(sa->account));
+ 		teams_idle_update(sa);
+ 		if (sa->idle_timeout) 
+@@ -579,6 +623,7 @@ teams_login(PurpleAccount *account)
+ 	sa->pc = pc;
+ 	sa->cookie_jar = purple_http_cookie_jar_new();
+ 	sa->sent_messages_hash = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
++	sa->received_messages_hash = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+ 	sa->buddy_to_chat_lookup = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+ 	sa->chat_to_buddy_lookup = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+ 	sa->calendar_reminder_timeouts = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+@@ -605,12 +650,36 @@ teams_login(PurpleAccount *account)
+ 		sa->tenant = g_strdup(tenant);
+ 	}
+ 	
+-	if (password && *password) {
++	if (password && *password && !purple_strequal(password, "devicecode")
++			&& !g_str_has_prefix(password, "webauth:")) {
+ 		sa->refresh_token = g_strdup(password);
+ 		purple_connection_update_progress(pc, _("Authenticating"), 1, 3);
+ 		teams_oauth_refresh_token(sa);
+ 	} else {
+-		teams_do_devicecode_login(sa);
++		/* Credential is the "devicecode" sentinel, empty, or a "webauth:<redirect
++		 * URL>" captured by an embedding OAuth browser. (Some transports reject an
++		 * EMPTY stored password before login is even called, so accounts may store a
++		 * non-empty sentinel instead.)
++		 *
++		 * Personal/TFL priority: (1) a refresh_token persisted from a previous
++		 * successful login -> silent refresh (this also means a one-shot "webauth:"
++		 * auth code is never replayed after it has been exchanged once); else
++		 * (2) a "webauth:" auth-code URL -> exchange it for tokens; else
++		 * (3) the interactive device-code flow. */
++		gchar *saved_refresh = teams_load_refresh_token_password(account);
++		if (saved_refresh && *saved_refresh) {
++			sa->refresh_token = saved_refresh; /* take ownership */
++			purple_debug_info("teams", "Using persisted refresh_token for silent login\n");
++			purple_connection_update_progress(pc, _("Authenticating"), 1, 3);
++			teams_oauth_refresh_token(sa);
++		} else if (password && g_str_has_prefix(password, "webauth:")) {
++			g_free(saved_refresh);
++			purple_debug_info("teams", "Using webauth auth-code from OAuth browser\n");
++			teams_do_authcode_login(sa, password + strlen("webauth:"));
++		} else {
++			g_free(saved_refresh);
++			teams_do_devicecode_login(sa);
++		}
+ 	}
+ 	
+ 	if (!conversation_updated_signal) {
+@@ -714,6 +783,7 @@ teams_close(PurpleConnection *pc)
+ 	g_queue_free(sa->processed_event_messages);
+ 	
+ 	g_hash_table_destroy(sa->sent_messages_hash);
++	g_hash_table_destroy(sa->received_messages_hash);
+ 	g_hash_table_destroy(sa->buddy_to_chat_lookup);
+ 	g_hash_table_destroy(sa->chat_to_buddy_lookup);
+ 	g_hash_table_destroy(sa->calendar_reminder_timeouts);
+@@ -1328,6 +1398,12 @@ teams_protocol_roomlist_iface_init(PurpleProtocolRoomlistIface *prpl_info)
+ 	plugin->info = info;
+ 
+ #ifdef ENABLE_TEAMS_PERSONAL
++	/* Personal/TFL: build the personal/consumer flavour (Skype/live.com
++	 * endpoints + personal OAuth client id) for personal Microsoft accounts —
++	 * the work/school build hits "Guest user OID is missing. User is not
++	 * redeemed." at teams.microsoft.com for these. Use the distinct personal
++	 * prpl id so this can run side by side with the work build; downstreams that
++	 * need a specific id (e.g. webOS) override TEAMS_PERSONAL_PLUGIN_ID at build time. */
+ 	plugin->info->id = TEAMS_PERSONAL_PLUGIN_ID;
+ 	plugin->info->name = "Teams (Personal/Free)";
+ 	prpl_info->list_icon = teams_personal_list_icon;
+diff --git a/libteams.h b/libteams.h
+index f76302d..79fdbcb 100644
+--- a/libteams.h
++++ b/libteams.h
+@@ -113,13 +113,27 @@
+ #endif
+ 
+ #define TEAMS_CALENDAR_REFRESH_MINUTES 15
++/* Personal/TFL: how often to poll for new messages (real-time Trouter push is
++ * dead for consumer accounts, so this drives message delivery latency). */
++#define TEAMS_MESSAGE_POLL_SECONDS 8
+ #define TEAMS_MAX_MSG_RETRY 2
+ #define TEAMS_MAX_PROCESSED_EVENT_BUFFER 10
+-
++/* Cap the in-session received-message dedup cache. The poll only re-fetches recent
++ * messages, so keys past this many are never queried again — bounding memory. */
++#define TEAMS_MAX_DEDUP_CACHE 4096
++
++/* Keep the established plugin ids so existing accounts keep resolving and the
++ * work/personal builds can run side by side. Both are overridable at build time
++ * (e.g. the webOS transport derives the prpl id from the service name and expects
++ * "prpl-teams", so that port builds with -DTEAMS_PERSONAL_PLUGIN_ID='"prpl-teams"'). */
++#ifndef TEAMS_PLUGIN_ID
+ #define TEAMS_PLUGIN_ID "prpl-eionrobb-msteams"
++#endif
+ #define TEAMS_PLUGIN_VERSION "1.0"
+ 
++#ifndef TEAMS_PERSONAL_PLUGIN_ID
+ #define TEAMS_PERSONAL_PLUGIN_ID "prpl-eionrobb-msteams-personal"
++#endif
+ 
+ #define TEAMS_LOCKANDKEY_APPID "msmsgs@msnmsgr.com"
+ #define TEAMS_LOCKANDKEY_SECRET "Q1P7W2E4J9R8U3S5"
+@@ -186,7 +200,7 @@ struct _TeamsAccount {
+ 	gchar *username;
+ 	gchar *primary_member_name;
+ 	gchar *self_display_name;
+-	
++
+ 	PurpleAccount *account;
+ 	PurpleConnection *pc;
+ 	PurpleHttpKeepalivePool *keepalive_pool;
+@@ -194,7 +208,12 @@ struct _TeamsAccount {
+ 	PurpleHttpCookieJar *cookie_jar;
+ 	
+ 	GHashTable *sent_messages_hash;
++	/* Personal/TFL: dedup incoming messages by server id (+edit marker) so the
++	 * periodic poll / offline-history re-fetch never re-delivers an already-shown
++	 * message. See process_message_resource() and teams_poll_messages(). */
++	GHashTable *received_messages_hash;
+ 	guint poll_timeout;
++	gboolean poll_in_flight; /* a poll's conversations fetch is outstanding; skip overlapping ticks */
+ 	guint watchdog_timeout;
+ 	
+ 	guint authcheck_timeout;
+@@ -215,6 +234,12 @@ struct _TeamsAccount {
+ 	
+ 	//teams
+ 	gchar *id_token;
++	/* Personal/TFL: personal (TFL) mt/beta endpoints (teams.live.com/api/mt/beta:
++	 * searchV2, contactsv3, contacts/buddylist) reject the primary id_token (audience
++	 * mtsvc.fl.teams.microsoft.com) with HTTP 401. This holds a token for a resource
++	 * those endpoints accept, fetched separately in teams_oauth_refresh_services and
++	 * used as the mt/beta Bearer (connection.c). NULL -> fall back to id_token. */
++	gchar *mt_access_token;
+ 	gchar *refresh_token;
+ 	gchar *messages_cursor;
+ 	gchar *tenant;
+@@ -249,6 +274,14 @@ struct _TeamsAccount {
+ 	gchar *login_device_code;
+ 	guint login_device_code_timeout;
+ 	guint login_device_code_expires_timeout;
++
++	/* Personal/TFL: set TRUE once teams_do_all_the_things() has run the full
++	 * post-login setup (friend list, trouter, etc). Used to gate that setup instead
++	 * of PURPLE_CONNECTION_IS_CONNECTED, because our early-CONNECTED watchdog fix
++	 * (teams_login.c) makes IS_CONNECTED true during the device-code wait -> the
++	 * old `if (!IS_CONNECTED)` guard in teams_got_self_details would skip the buddy-
++	 * list fetch entirely. */
++	gboolean logged_in;
+ };
+ 
+ struct _TeamsBuddy {
+diff --git a/teams_connection.c b/teams_connection.c
+index 9b5ef91..7be6ab3 100644
+--- a/teams_connection.c
++++ b/teams_connection.c
+@@ -36,7 +36,18 @@ teams_post_or_get_cb(PurpleHttpConnection *http_conn, PurpleHttpResponse *respon
+ 	gsize len;
+ 	
+ 	data = purple_http_response_get_data(response, &len);
+-	
++
++	/* Opt-in diagnostic: response bodies can carry names, MRIs and tokens, so only
++	 * emit them when the user has explicitly enabled verbose + unsafe debugging
++	 * (purple_debug -U / -V), never at the default level. */
++	if (purple_debug_is_verbose() && purple_debug_is_unsafe()) {
++		int code = purple_http_response_get_code(response);
++		const gchar *errmsg = purple_http_response_get_error(response);
++		purple_debug_info("teams", "HTTP-DIAG url=%s code=%d len=%u err=%s body=%.240s\n",
++			conn->url ? conn->url : "(null)", code, (unsigned)len,
++			errmsg ? errmsg : "-", (len && data) ? data : "");
++	}
++
+ 	if (conn->callback != NULL) {
+ 		if (!len)
+ 		{
+@@ -65,10 +76,10 @@ teams_post_or_get_cb(PurpleHttpConnection *http_conn, PurpleHttpResponse *respon
+ 	teams_destroy_connection(conn);
+ }
+ 
+-TeamsConnection *teams_post_or_get(TeamsAccount *sa, TeamsMethod method,
++TeamsConnection *teams_post_or_get_with_error(TeamsAccount *sa, TeamsMethod method,
+ 		const gchar *host, const gchar *url, const gchar *postdata,
+-		TeamsProxyCallbackFunc callback_func, gpointer user_data,
+-		gboolean keepalive)
++		TeamsProxyCallbackFunc callback_func, TeamsProxyCallbackErrorFunc error_callback_func,
++		gpointer user_data, gboolean keepalive)
+ {
+ 	TeamsConnection *conn;
+ 	PurpleHttpRequest *request;
+@@ -125,9 +136,20 @@ TeamsConnection *teams_post_or_get(TeamsAccount *sa, TeamsMethod method,
+ 	if ((g_str_equal(host, TEAMS_CONTACTS_HOST) || g_str_equal(host, TEAMS_VIDEOMAIL_HOST) || g_str_equal(host, TEAMS_NEW_CONTACTS_HOST)) &&
+ 		(!g_str_equal(host, TEAMS_BASE_ORIGIN_HOST) || g_str_has_prefix(url, "/api/chatsvc"))) {
+ #ifdef ENABLE_TEAMS_PERSONAL
+-		purple_http_request_header_set_printf(request, "Authentication", "skypetoken=%s", sa->skype_token);
+-		purple_http_request_header_set(request, "ms-ic3-product", "tfl");
+-		purple_http_request_header_set(request, "ms-ic3-additional-product", "Sfl");
++		/* Personal/TFL: consumer auth splits by host (both verified live against MS):
++		 *  - contacts.skype.com (TEAMS_NEW_CONTACTS_HOST, the classic Skype contacts svc)
++		 *    wants "X-Skypetoken" ONLY — "Authentication: skypetoken=" gets 401 there.
++		 *  - teams.live.com chatsvc/consumer wants "Authentication: skypetoken=" + ms-ic3
++		 *    product tfl — and rejects X-Skypetoken.
++		 * (The mt/beta endpoints are NOT here — they need Bearer<mtsvc>+X-Skypetoken and
++		 * fall through to the TEAMS_BASE_ORIGIN_HOST branch below.) */
++		if (g_str_equal(host, TEAMS_NEW_CONTACTS_HOST)) {
++			purple_http_request_header_set(request, "X-Skypetoken", sa->skype_token);
++		} else {
++			purple_http_request_header_set_printf(request, "Authentication", "skypetoken=%s", sa->skype_token);
++			purple_http_request_header_set(request, "ms-ic3-product", "tfl");
++			purple_http_request_header_set(request, "ms-ic3-additional-product", "Sfl");
++		}
+ #else
+ 		purple_http_request_header_set(request, "X-Skypetoken", sa->skype_token);
+ #endif
+@@ -177,7 +199,17 @@ TeamsConnection *teams_post_or_get(TeamsAccount *sa, TeamsMethod method,
+ 			purple_http_request_header_set_printf(request, "Authorization", "Bearer %s", sa->csa_access_token);
+ #endif
+ 		} else {
+-			purple_http_request_header_set_printf(request, "Authorization", "Bearer %s", sa->id_token);
++			/* mt/beta endpoints (contacts/buddylist, contactsv3, users/searchV2, …).
++			 * Personal/TFL — VERIFIED live against MS: the CONSUMER mt/beta needs
++			 * BOTH an AAD Bearer for the mtsvc audience AND X-Skypetoken; either alone
++			 * 401s (Bearer-alone → "UnauthorizedAccess/Workload Unknown"). The right
++			 * Bearer is the mt_access_token minted for the
++			 * https://mtsvc.fl.teams.microsoft.com/teams.mt.readwrite scope
++			 * (teams_login.c). Falls back to id_token until that token arrives (first
++			 * fetch may 401; teams_mt_oauth_cb re-fetches once it's in). Work/corporate
++			 * uses the same shape with its own mtsvc-audience token. */
++			const gchar *mt_bearer = sa->mt_access_token ? sa->mt_access_token : sa->id_token;
++			purple_http_request_header_set_printf(request, "Authorization", "Bearer %s", mt_bearer);
+ 		}
+ 		purple_http_request_header_set(request, "X-Skypetoken", sa->skype_token);
+ 		purple_http_request_header_set(request, "Accept", "application/json");
+@@ -199,13 +231,26 @@ TeamsConnection *teams_post_or_get(TeamsAccount *sa, TeamsMethod method,
+ 	conn->user_data = user_data;
+ 	conn->url = real_url;
+ 	conn->callback = callback_func;
+-	
++	conn->error_callback = error_callback_func;
++
+ 	conn->http_conn = purple_http_request(sa->pc, request, teams_post_or_get_cb, conn);
+ 	if (conn->http_conn != NULL) {
+ 		purple_http_connection_set_add(sa->conns, conn->http_conn);
+ 	}
+ 	
+ 	purple_http_request_unref(request);
+-	
++
+ 	return conn;
+ }
++
++/* Back-compat wrapper: most callers don't need a distinct error callback (the parse
++ * failure is just logged). Those that must advance state even on an unparseable body
++ * call teams_post_or_get_with_error() directly. */
++TeamsConnection *teams_post_or_get(TeamsAccount *sa, TeamsMethod method,
++		const gchar *host, const gchar *url, const gchar *postdata,
++		TeamsProxyCallbackFunc callback_func, gpointer user_data,
++		gboolean keepalive)
++{
++	return teams_post_or_get_with_error(sa, method, host, url, postdata,
++			callback_func, NULL, user_data, keepalive);
++}
+diff --git a/teams_connection.h b/teams_connection.h
+index fcf93e7..d070ed9 100644
+--- a/teams_connection.h
++++ b/teams_connection.h
+@@ -50,6 +50,10 @@ TeamsConnection *teams_post_or_get(TeamsAccount *sa, TeamsMethod method,
+ 		const gchar *host, const gchar *url, const gchar *postdata,
+ 		TeamsProxyCallbackFunc callback_func, gpointer user_data,
+ 		gboolean keepalive);
++TeamsConnection *teams_post_or_get_with_error(TeamsAccount *sa, TeamsMethod method,
++		const gchar *host, const gchar *url, const gchar *postdata,
++		TeamsProxyCallbackFunc callback_func, TeamsProxyCallbackErrorFunc error_callback_func,
++		gpointer user_data, gboolean keepalive);
+ 
+ void teams_update_cookies(TeamsAccount *sa, const gchar *headers);		
+ gchar *teams_cookies_to_string(TeamsAccount *sa);
+diff --git a/teams_contacts.c b/teams_contacts.c
+index 9feeb4f..9e7cf92 100644
+--- a/teams_contacts.c
++++ b/teams_contacts.c
+@@ -1030,6 +1030,10 @@ teams_chat_can_receive_file(PurpleConnection *pc, int id)
+ }
+ 
+ 
++#ifdef ENABLE_TEAMS_PERSONAL
++static void teams_get_skype_contacts_before_login(TeamsAccount *sa);
++#endif
++
+ static void
+ teams_got_self_details(TeamsAccount *sa, JsonNode *node, gpointer user_data)
+ {
+@@ -1042,27 +1046,42 @@ teams_got_self_details(TeamsAccount *sa, JsonNode *node, gpointer user_data)
+ 		return;
+ 	userobj = json_node_get_object(node);
+ 	
+-	if (!json_object_has_member(userobj, "skypeName")) {
+-		purple_debug_error("teams", "No skypeName in self details\n");
++	/* Personal/TFL: only accounts migrated from a classic Skype account carry a
++	 * skypeName; personal accounts created later (MSN/Microsoft, post-merger) have
++	 * none and expose only primaryMemberName (the MSA MRI, e.g. "live:.cid.<hex>").
++	 * The stock code bailed when skypeName was absent, so teams_do_all_the_things()
++	 * never ran and login never completed (stayed offline). Fall back to
++	 * primaryMemberName when skypeName is absent so those accounts can finish login
++	 * and fetch the buddy list. */
++	if (json_object_has_member(userobj, "skypeName")) {
++		username = json_object_get_string_member(userobj, "skypeName");
++	} else if (json_object_has_member(userobj, "primaryMemberName")) {
++		username = json_object_get_string_member(userobj, "primaryMemberName");
++		purple_debug_info("teams", "No skypeName in self details; using primaryMemberName '%s' as identity\n", username ? username : "(null)");
++	} else {
++		purple_debug_error("teams", "No skypeName or primaryMemberName in self details\n");
+ 		return;
+ 	}
+-	username = json_object_get_string_member(userobj, "skypeName");
+ 	g_free(sa->username); sa->username = g_strdup(username);
+ 	purple_connection_set_display_name(sa->pc, sa->username);
+-	
++
+ 	old_alias = purple_account_get_private_alias(sa->account);
+-	if (!old_alias || !*old_alias) {
++	/* Consumer self-details omit userDetails entirely — guard the parse (the stock
++	 * json_decode_object(NULL) / has_member(NULL) path would misbehave). */
++	if ((!old_alias || !*old_alias) && json_object_has_member(userobj, "userDetails")) {
+ 		JsonObject *userDetails = json_decode_object(json_object_get_string_member(userobj, "userDetails"), -1);
+-		
+-		if (json_object_has_member(userDetails, "name"))
+-			displayname = json_object_get_string_member(userDetails, "name");
+-		if (!displayname || purple_strequal(displayname, username))
+-			displayname = json_object_get_string_member(userDetails, "upn");
+-	
+-		if (displayname)
+-			purple_account_set_private_alias(sa->account, displayname);
+-		
+-		json_object_unref(userDetails);
++
++		if (userDetails) {
++			if (json_object_has_member(userDetails, "name"))
++				displayname = json_object_get_string_member(userDetails, "name");
++			if ((!displayname || purple_strequal(displayname, username)) && json_object_has_member(userDetails, "upn"))
++				displayname = json_object_get_string_member(userDetails, "upn");
++
++			if (displayname)
++				purple_account_set_private_alias(sa->account, displayname);
++
++			json_object_unref(userDetails);
++		}
+ 	}
+ 	
+ 	if (json_object_has_member(userobj, "primaryMemberName")) {
+@@ -1070,8 +1089,25 @@ teams_got_self_details(TeamsAccount *sa, JsonNode *node, gpointer user_data)
+ 		sa->primary_member_name = g_strdup(json_object_get_string_member(userobj, "primaryMemberName"));
+ 	}
+ 	
+-	if (!PURPLE_CONNECTION_IS_CONNECTED(sa->pc)) {
++	/* Personal/TFL: gate on our own logged_in flag, NOT IS_CONNECTED. The
++	 * early-CONNECTED watchdog fix sets the connection CONNECTED during the device-
++	 * code wait, so an IS_CONNECTED check here would be true on the first pass and
++	 * skip teams_do_all_the_things() -> no friend list. logged_in is only set once
++	 * the full setup has actually run (else-branch of teams_do_all_the_things). */
++	if (!sa->logged_in) {
++#ifdef ENABLE_TEAMS_PERSONAL
++		/* Personal/TFL: load the Skype buddy roster into libpurple's blist BEFORE
++		 * we report the connection CONNECTED. A headless transport UI may run a
++		 * ONE-SHOT buddy-list consolidation the instant the login-state reaches
++		 * "retrieving-buddies" (i.e. at CONNECTED), reading the in-memory blist at
++		 * that exact moment — with no way to re-query. If our async contacts fetch lands after
++		 * that, Messaging caches an EMPTY buddy list forever. So fetch the contacts,
++		 * populate the blist, THEN connect. Falls through to teams_do_all_the_things()
++		 * even if the fetch fails, so login never hangs. */
++		teams_get_skype_contacts_before_login(sa);
++#else
+ 		teams_do_all_the_things(sa);
++#endif
+ 	}
+ }
+ 
+@@ -2393,6 +2429,132 @@ teams_get_buddylist_cb(TeamsAccount *sa, JsonNode *node, gpointer user_data)
+ 
+ 
+ 
++#ifdef ENABLE_TEAMS_PERSONAL
++/* Personal/TFL: parse the classic Skype contacts service response
++ * (contacts.skype.com/contacts/v2/users/SELF). For consumer/Teams-for-Life
++ * accounts this — NOT the mt/beta buddylist (which is empty) — is where the real
++ * contacts live. Schema (verified live):
++ *   {"contacts":[{"mri":"8:live:.cid.xxxxxxxx","display_name":"…","authorized":true,
++ *                 "blocked":false,"profile":{…}}, …],"blocklist":[],"groups":[]}  */
++static void
++teams_got_skype_contacts_cb(TeamsAccount *sa, JsonNode *node, gpointer user_data)
++{
++	JsonObject *obj;
++	JsonArray *contacts;
++	PurpleGroup *group = teams_get_blist_group(sa);
++	GSList *users_to_fetch = NULL;
++	guint index, length;
++
++	if (node == NULL || json_node_get_node_type(node) != JSON_NODE_OBJECT)
++		return;
++	obj = json_node_get_object(node);
++	if (!json_object_has_member(obj, "contacts"))
++		return;
++	contacts = json_object_get_array_member(obj, "contacts");
++	length = json_array_get_length(contacts);
++
++	for (index = 0; index < length; index++) {
++		JsonObject *contact = json_array_get_object_element(contacts, index);
++		const gchar *mri = json_object_has_member(contact, "mri") ?
++			json_object_get_string_member(contact, "mri") : NULL;
++		const gchar *display_name = json_object_has_member(contact, "display_name") ?
++			json_object_get_string_member(contact, "display_name") : NULL;
++		gboolean blocked = json_object_has_member(contact, "blocked") &&
++			json_object_get_boolean_member(contact, "blocked");
++		PurpleBuddy *buddy;
++		TeamsBuddy *sbuddy;
++		const gchar *id;
++
++		if (!mri || !*mri)
++			continue;
++		id = teams_strip_user_prefix(mri);
++		if (!id || !*id)
++			continue;
++		/* never add ourselves */
++		if (purple_strequal(id, sa->primary_member_name))
++			continue;
++
++		buddy = purple_blist_find_buddy(sa->account, id);
++		if (!buddy) {
++			buddy = purple_buddy_new(sa->account, id, display_name);
++			purple_blist_add_buddy(buddy, NULL, group, NULL);
++		}
++
++		sbuddy = purple_buddy_get_protocol_data(buddy);
++		if (sbuddy == NULL) {
++			sbuddy = g_new0(TeamsBuddy, 1);
++			sbuddy->skypename = g_strdup(id);
++			sbuddy->sa = sa;
++			sbuddy->buddy = buddy;
++			purple_buddy_set_protocol_data(buddy, sbuddy);
++		}
++
++		if (display_name && *display_name) {
++			g_free(sbuddy->display_name);
++			sbuddy->display_name = g_strdup(display_name);
++			if (!purple_strequal(purple_buddy_get_local_alias(buddy), sbuddy->display_name))
++				purple_serv_got_alias(sa->pc, id, sbuddy->display_name);
++		}
++
++		teams_get_icon(buddy);
++
++		if (blocked) {
++			purple_account_privacy_deny_add(sa->account, id, TRUE);
++		} else {
++			users_to_fetch = g_slist_prepend(users_to_fetch, sbuddy->skypename);
++		}
++	}
++
++	if (users_to_fetch) {
++		teams_get_friend_profiles(sa, users_to_fetch);
++		teams_subscribe_to_contact_status(sa, users_to_fetch);
++		g_slist_free(users_to_fetch);
++	}
++}
++
++void
++teams_get_skype_contacts(TeamsAccount *sa)
++{
++	if (!PURPLE_IS_CONNECTION(sa->pc))
++		return;
++	teams_post_or_get(sa, TEAMS_METHOD_GET | TEAMS_METHOD_SSL, TEAMS_NEW_CONTACTS_HOST,
++		"/contacts/v2/users/SELF?delta=&reason=default", NULL,
++		teams_got_skype_contacts_cb, NULL, TRUE);
++}
++
++/* Pre-login variant: add the buddies to the blist, THEN report CONNECTED (via
++ * teams_do_all_the_things) so the transport's login-time buddy-list consolidation
++ * sees a populated roster. Runs teams_do_all_the_things even on fetch failure (node
++ * NULL) so a network hiccup can't wedge the login. */
++static void
++teams_skype_contacts_before_login_cb(TeamsAccount *sa, JsonNode *node, gpointer user_data)
++{
++	teams_got_skype_contacts_cb(sa, node, user_data);
++	teams_do_all_the_things(sa);
++}
++
++/* teams_post_or_get invokes NEITHER callback when it receives a non-empty but
++ * unparseable body (e.g. an HTML proxy/auth error page). Without an error callback
++ * that would stall login forever, so advance login regardless. */
++static void
++teams_skype_contacts_before_login_err_cb(TeamsAccount *sa, const gchar *data, gssize len, gpointer user_data)
++{
++	teams_do_all_the_things(sa);
++}
++
++static void
++teams_get_skype_contacts_before_login(TeamsAccount *sa)
++{
++	if (!PURPLE_IS_CONNECTION(sa->pc)) {
++		teams_do_all_the_things(sa);
++		return;
++	}
++	teams_post_or_get_with_error(sa, TEAMS_METHOD_GET | TEAMS_METHOD_SSL, TEAMS_NEW_CONTACTS_HOST,
++		"/contacts/v2/users/SELF?delta=&reason=default", NULL,
++		teams_skype_contacts_before_login_cb, teams_skype_contacts_before_login_err_cb, NULL, TRUE);
++}
++#endif /* ENABLE_TEAMS_PERSONAL */
++
+ gboolean
+ teams_get_friend_list(TeamsAccount *sa)
+ {
+@@ -2401,6 +2563,12 @@ teams_get_friend_list(TeamsAccount *sa)
+ 		return FALSE;
+ 	}
+ 
++#ifdef ENABLE_TEAMS_PERSONAL
++	/* Personal/TFL: consumer/TFL contacts come from the classic Skype contacts
++	 * service, not the (empty) mt/beta buddylist. Fetch them. */
++	teams_get_skype_contacts(sa);
++#endif
++
+ 	// Remove any meeting chats that were persisted from previous sessions
+ 	teams_purge_meeting_chats_from_blist(sa);
+ 
+@@ -2428,6 +2596,28 @@ teams_get_friend_list(TeamsAccount *sa)
+ 	teams_post_or_get(sa, TEAMS_METHOD_GET | TEAMS_METHOD_SSL, "aus.loki.delve.office.com", search_url, NULL, teams_get_workingwith_cb, NULL, TRUE);
+ 	g_free(search_url);
+ 
++	// The mt/beta endpoints need the MT bearer token, which may not have arrived yet
++	// on the first pass; teams_mt_oauth_cb() re-runs just these once it has.
++	teams_get_mt_beta_contacts(sa);
++
++	// Look up all the contacts in the buddy list
++	teams_lookup_buddy_list_contacts(sa);
++
++	return FALSE;
++}
++
++/* The two mt/beta contact endpoints (People app contactsv3 + the personal buddy
++ * list) are the only friend-list calls that depend on sa->mt_access_token. Split
++ * them out so teams_mt_oauth_cb() can retry ONLY these when the MT token arrives,
++ * instead of re-running the whole ~7-call teams_get_friend_list() pipeline. */
++void
++teams_get_mt_beta_contacts(TeamsAccount *sa)
++{
++	const gchar *url;
++
++	if (!PURPLE_IS_CONNECTION(sa->pc))
++		return;
++
+ 	// Search the People app
+ 	url = "/api/mt/beta/contactsv3/";
+ 	teams_post_or_get(sa, TEAMS_METHOD_GET | TEAMS_METHOD_SSL, TEAMS_BASE_ORIGIN_HOST, url, NULL, teams_get_friend_list_cb, NULL, TRUE);
+@@ -2435,11 +2625,6 @@ teams_get_friend_list(TeamsAccount *sa)
+ 	// Teams personal has a buddy list?!@
+ 	url = "/api/mt/beta/contacts/buddylist?migrationRequested=true&federatedContactsSupported=true";
+ 	teams_post_or_get(sa, TEAMS_METHOD_GET | TEAMS_METHOD_SSL, TEAMS_BASE_ORIGIN_HOST, url, NULL, teams_get_buddylist_cb, NULL, TRUE);
+-
+-	// Look up all the contacts in the buddy list
+-	teams_lookup_buddy_list_contacts(sa);
+-
+-	return FALSE;
+ }
+ 
+ typedef struct {
+diff --git a/teams_contacts.h b/teams_contacts.h
+index 134076b..a899877 100644
+--- a/teams_contacts.h
++++ b/teams_contacts.h
+@@ -57,6 +57,10 @@ void teams_get_friend_profiles(TeamsAccount *sa, GSList *contacts);
+ void teams_get_friend_profile(TeamsAccount *sa, const gchar *who);
+ 
+ gboolean teams_get_friend_list(TeamsAccount *sa);
++void teams_get_mt_beta_contacts(TeamsAccount *sa);
++#ifdef ENABLE_TEAMS_PERSONAL
++void teams_get_skype_contacts(TeamsAccount *sa);
++#endif
+ gboolean teams_check_calendar(TeamsAccount *sa);
+ void teams_get_info(PurpleConnection *pc, const gchar *username);
+ void teams_get_self_details(TeamsAccount *sa);
+diff --git a/teams_login.c b/teams_login.c
+index af7b15d..285b13a 100644
+--- a/teams_login.c
++++ b/teams_login.c
+@@ -18,6 +18,7 @@
+ 
+ #include "teams_login.h"
+ #include "teams_util.h"
++#include "teams_contacts.h"	/* Personal/TFL: teams_get_friend_list (mt-token re-fetch) */
+ #include "http.h"
+ 
+ 
+@@ -122,11 +123,31 @@ save_bitlbee_password(PurpleAccount *account, const gchar *password)
+ 
+ 
+ 
++/* Personal/TFL: the OAuth refresh_token is persisted as the account password so
++ * steady-state logins take the silent refresh path (teams_oauth_refresh_token)
++ * with no device code. teams_load_refresh_token_password() reads it back at login. */
++gchar *
++teams_load_refresh_token_password(PurpleAccount *account)
++{
++	const gchar *password = purple_account_get_password(account);
++	if (password == NULL || *password == '\0')
++		return NULL;
++	/* The "devicecode" and "webauth:<url>" sentinels are login-flow selectors, not
++	 * refresh tokens. Return NULL for them so the caller falls through to the
++	 * device-code / auth-code paths instead of POSTing the sentinel to the token
++	 * endpoint. */
++	if (purple_strequal(password, "devicecode") || g_str_has_prefix(password, "webauth:"))
++		return NULL;
++	return g_strdup(password); /* caller frees */
++}
++
+ static void
+ teams_save_refresh_token_password(PurpleAccount *account, const gchar *password)
+ {
++	/* NULL/empty clears it, e.g. on invalid_grant so the next login cleanly
++	 * falls back to the device-code flow. */
+ 	purple_account_set_password(account, password, NULL, NULL);
+-	
++
+ 	if (g_strcmp0(purple_core_get_ui(), "BitlBee") == 0) {
+ 		save_bitlbee_password(account, password);
+ 	}
+@@ -262,7 +283,15 @@ teams_login_get_api_skypetoken(TeamsAccount *sa, const gchar *url, const gchar *
+ #	define TEAMS_SKYPETOKEN_SERVICE TEAMS_OAUTH_SERVICE
+ #endif // ENABLE_TEAMS_PERSONAL
+ #	define TEAMS_OAUTH_SCOPE TEAMS_OAUTH_SERVICE " openid profile offline_access"
++#ifdef ENABLE_TEAMS_PERSONAL
++/* Personal/MSA: v2.0 for this Teams client only accepts the NATIVE app redirect (web redirects get
++ * invalid_request). The embedding browser intercepts the msauth...://auth?code= navigation and returns the
++ * code; this MUST match the redirect_uri the app put in the authorize request, and is sent again here
++ * at the /oauth2/v2.0/token exchange (AAD requires authorize/redeem redirect_uri to match). */
++#define TEAMS_OAUTH_REDIRECT_URI "msauth.com.microsoft.teams://auth"
++#else
+ #define TEAMS_OAUTH_REDIRECT_URI "https://login.microsoftonline.com/common/oauth2/nativeclient"
++#endif
+ 
+ // Personal client id maybe: 4b3e8f46-56d3-427f-b1e2-d239b2ea6bca
+ // Personal tenant id: 9188040d-6c67-4c5b-b112-36a304b66dad
+@@ -417,6 +446,40 @@ teams_substrate_oauth_cb(PurpleHttpConnection *http_conn, PurpleHttpResponse *re
+ 	json_object_unref(obj);
+ }
+ 
++#ifdef ENABLE_TEAMS_PERSONAL
++/* Personal/TFL: fetch a token for the personal mt/beta endpoints (which reject
++ * the mtsvc-audience id_token with 401). Store it and re-run the friend-list fetch
++ * now that the correct token is available (the first fetch, kicked off by
++ * teams_do_all_the_things, likely raced ahead of this token and 401'd). */
++static void
++teams_mt_oauth_cb(PurpleHttpConnection *http_conn, PurpleHttpResponse *response, gpointer user_data)
++{
++	TeamsAccount *sa = user_data;
++	JsonObject *obj;
++	const gchar *raw_response;
++	gsize response_len;
++
++	raw_response = purple_http_response_get_data(response, &response_len);
++	obj = json_decode_object(raw_response, response_len);
++
++	if (purple_http_response_is_successful(response) && obj)
++	{
++		const gchar *tok = json_object_get_string_member(obj, "access_token");
++		g_free(sa->mt_access_token);
++		sa->mt_access_token = g_strdup(tok);
++		purple_debug_info("teams", "MT-TOKEN acquired for mt/beta; re-fetching mt/beta contacts\n");
++		/* Only the mt/beta endpoints depend on this token — retry just those, not the
++		 * whole friend-list pipeline (which already ran from teams_do_all_the_things). */
++		teams_get_mt_beta_contacts(sa);
++	} else {
++		purple_debug_info("teams", "MT-TOKEN fetch failed (code %d)\n",
++			purple_http_response_get_code(response));
++	}
++
++	if (obj) json_object_unref(obj);
++}
++#endif // ENABLE_TEAMS_PERSONAL
++
+ static void
+ teams_oauth_refresh_token_for_scope(TeamsAccount *sa, const gchar *scope, PurpleHttpCallback callback) 
+ {
+@@ -472,6 +535,15 @@ teams_oauth_refresh_services(TeamsAccount *sa)
+ 	teams_oauth_refresh_token_for_scope(sa, "service::api.fl.spaces.skype.com::MBI_SSL openid profile offline_access", teams_oauth_refreshed_skypetoken_access);
+ 	teams_oauth_refresh_token_for_scope(sa, "https://substrate.office.com/M365.Access openid profile offline_access", teams_substrate_oauth_cb);
+ 
++	/* Personal/TFL: dedicated Bearer for the consumer mt/beta endpoints
++	 * (teams.live.com/api/mt/beta/…). VERIFIED live against MS: mt/beta needs
++	 * Bearer<mtsvc> + X-Skypetoken together (see teams_connection.c). The correct
++	 * audience is the MT read/write service — the SAME scope the browser login used
++	 * (https://mtsvc.fl.teams.microsoft.com/teams.mt.readwrite). teams_mt_oauth_cb
++	 * stores it as sa->mt_access_token and re-fetches the friend list.
++	 * (The earlier api.spaces.skype.com audience was wrong and always 401'd.) */
++	teams_oauth_refresh_token_for_scope(sa, "https://mtsvc.fl.teams.microsoft.com/teams.mt.readwrite openid profile offline_access", teams_mt_oauth_cb);
++
+ 	// TODO do we need to register these?
+ 	(void) teams_presence_oauth_cb;
+ 	(void) teams_csa_oauth_cb;
+@@ -503,27 +575,23 @@ teams_oauth_with_code(TeamsAccount *sa, const gchar *auth_code)
+ 	const gchar *tenant_host;
+ 	gchar *auth_url;
+ 	
+-	if (strstr(auth_code, "nativeclient")) {
+-		gchar *tmp = strchr(auth_code, '?');
+-		if (tmp == NULL) {
+-			//todo error
+-			return;
+-		}
+-		auth_code = tmp + 1;
+-		
+-		tmp = strstr(auth_code, "code=");
+-		if (tmp == NULL) {
+-			//todo error
+-			return;
+-		}
+-		auth_code = tmp + 5;
+-		
+-		tmp = strchr(auth_code, '&');
+-		if (tmp != NULL) {
+-			*tmp = '\0';
++	/* If handed a full redirect URL rather than a bare code, extract the code. Covers BOTH the work
++	 * "...nativeclient?code=<code>&..." web redirect AND the personal/MSA native scheme
++	 * "msauth.com.microsoft.teams://auth?code=<code>&..." (captured by the embedding browser's navigation hook).
++	 * A bare code has no "code=" substring, so it passes through untouched. Work on a private copy so
++	 * we never mutate the caller's credential string. */
++	gchar *code_copy = NULL;
++	{
++		const gchar *cp = strstr(auth_code, "code=");
++		if (cp != NULL) {
++			code_copy = g_strdup(cp + 5);
++			gchar *amp = strchr(code_copy, '&');
++			if (amp != NULL) {
++				*amp = '\0';
++			}
++			/* purple_url_decode returns a static-buffer pointer valid until the next call */
++			auth_code = purple_url_decode(code_copy);
+ 		}
+-		
+-		auth_code = purple_url_decode(auth_code);
+ 	}
+ 
+ 	postdata = g_string_new(NULL);
+@@ -546,9 +614,10 @@ teams_oauth_with_code(TeamsAccount *sa, const gchar *auth_code)
+ 
+ 	purple_http_request(pc, request, teams_oauth_with_code_cb, sa);
+ 	purple_http_request_unref(request);
+-	
++
+ 	g_string_free(postdata, TRUE);
+ 	g_free(auth_url);
++	g_free(code_copy);
+ }
+ 
+ static void
+@@ -584,7 +653,7 @@ teams_do_web_auth(TeamsAccount *sa)
+ 	purple_notify_uri(pc, auth_url);
+ 	purple_request_input(pc, _("Authorization Code"), auth_url,
+ 		_("Please login in your browser"),
+-		_("and then paste the URL of the blank page here (should contain 'nativeclient')"), FALSE, FALSE, NULL, 
++		_("and then paste the URL of the blank page here (it will contain '" TEAMS_OAUTH_REDIRECT_URI "')"), FALSE, FALSE, NULL,
+ 		_("OK"), G_CALLBACK(teams_authcode_input_cb), 
+ 		_("Cancel"), G_CALLBACK(teams_authcode_input_cancel_cb), 
+ 		purple_request_cpar_from_connection(pc), sa);
+@@ -592,6 +661,21 @@ teams_do_web_auth(TeamsAccount *sa)
+ 	g_free(auth_url);
+ }
+ 
++/* Personal/TFL: headless auth-code login. An embedding browser
++ * signs the user in and captures the redirect to
++ * .../oauth2/nativeclient?code=<code>; the Teams app stores that redirect URL as
++ * the account credential ("webauth:<url>"). Here we hand it straight to
++ * teams_oauth_with_code (which strips everything up to "code=") — no interactive
++ * purple_request_input (which the headless transport can't service, unlike
++ * teams_do_web_auth). On success teams_oauth_with_code_cb persists the
++ * refresh_token, so the next login takes the silent refresh path. */
++void
++teams_do_authcode_login(TeamsAccount *sa, const gchar *code_or_url)
++{
++	purple_connection_update_progress(sa->pc, _("Authenticating"), 1, 3);
++	teams_oauth_with_code(sa, code_or_url);
++}
++
+ static gboolean
+ teams_devicecode_login_expires_cb(gpointer user_data)
+ {
+@@ -755,10 +839,23 @@ teams_devicecode_login_cb(PurpleHttpConnection *http_conn, PurpleHttpResponse *r
+ 		purple_notify_message(sa->pc, PURPLE_NOTIFY_MSG_INFO, _("Authorization Code"),
+ 			message, NULL, NULL, NULL);
+ 
+-		if (g_strcmp0(purple_core_get_ui(), "spectrum") == 0) {
++		/* Personal/TFL: headless UIs (transports such as spectrum and the webOS
++		 * "adapter") implement no interactive purple_notify UI, so the notify_message/
++		 * notify_uri above are invisible to the user. Only for those UIs, also deliver
++		 * the sign-in instructions (verification URL + user code) as an incoming IM from
++		 * a synthetic "TeamsLogin" buddy so they surface through the conversation uiops.
++		 * Interactive UIs (Pidgin, bitlbee) already showed the notify and must not get a
++		 * duplicate. Detect headless by the absence of a notify_message uiop (with a
++		 * known-headless UI-id fallback). Always log it for retrieval from the debug log. */
++		PurpleNotifyUiOps *notify_ops = purple_notify_get_ui_ops();
++		const gchar *core_ui = purple_core_get_ui();
++		gboolean headless_ui = (notify_ops == NULL || notify_ops->notify_message == NULL)
++			|| purple_strequal(core_ui, "spectrum") || purple_strequal(core_ui, "adapter");
++
++		purple_debug_info("teams", "DEVICE-CODE-LOGIN: %s\n", message);
++		if (headless_ui)
+ 			purple_serv_got_im(sa->pc, "TeamsLogin", message, PURPLE_MESSAGE_RECV, time(NULL));
+-		}
+-		
++
+ 		g_free(message);
+ 		
+ 		if (sa->login_device_code) g_free(sa->login_device_code);
+@@ -768,10 +865,26 @@ teams_devicecode_login_cb(PurpleHttpConnection *http_conn, PurpleHttpResponse *r
+ 			g_source_remove(sa->login_device_code_timeout);
+ 		sa->login_device_code_timeout = g_timeout_add_seconds(interval, (GSourceFunc)teams_devicecode_login_poll, sa);
+ 		
+-		if (sa->login_device_code_expires_timeout) 
++		if (sa->login_device_code_expires_timeout)
+ 			g_source_remove(sa->login_device_code_expires_timeout);
+ 		sa->login_device_code_expires_timeout = g_timeout_add_seconds(expires_in, (GSourceFunc)teams_devicecode_login_expires_cb, sa);
+-		
++
++		/* Personal/TFL: some UIs/transports run a login watchdog that calls
++		 * purple_account_disconnect if the account has not signed on within a short
++		 * window. The device-code flow needs the user to authorise in a browser,
++		 * which takes minutes -> the watchdog could kill the connection (and the
++		 * in-memory device_code) before it completes. Mark the connection CONNECTED
++		 * now so such a watchdog stands down and the poll loop can run the full
++		 * expires_in window. The real login (token success -> libteams.c set_state
++		 * CONNECTED) still runs and re-asserts CONNECTED, so this only pre-empts the
++		 * watchdog; it does not skip any setup. First-time bootstrap only: once the
++		 * refresh_token is saved as the password, subsequent logins take the fast
++		 * refresh path with no device code. Headless UIs only: an interactive UI has
++		 * no such watchdog and marking it CONNECTED early would let it flush buffered
++		 * messages before login truly completes. */
++		if (headless_ui)
++			purple_connection_set_state(sa->pc, PURPLE_CONNECTION_CONNECTED);
++
+ 	} else {
+ 		if (obj != NULL) {
+ 			if (json_object_has_member(obj, "error")) {
+diff --git a/teams_login.h b/teams_login.h
+index 1a49916..fad35a1 100644
+--- a/teams_login.h
++++ b/teams_login.h
+@@ -32,4 +32,13 @@ gboolean teams_oauth_refresh_token(TeamsAccount *sa);
+ void teams_do_web_auth(TeamsAccount *sa);
+ void teams_do_devicecode_login(TeamsAccount *sa);
+ 
++/* Personal/TFL: read the persisted OAuth refresh_token (stored as the account
++ * password) for this account. Returns a newly-allocated string or NULL. */
++gchar *teams_load_refresh_token_password(PurpleAccount *account);
++
++/* Personal/TFL: headless OAuth auth-code login. Feed the redirect URL (or bare
++ * code) captured by an external browser; exchanges it for tokens and persists the
++ * refresh_token for silent future logins. */
++void teams_do_authcode_login(TeamsAccount *sa, const gchar *code_or_url);
++
+ #endif /* TEAMS_LOGIN_H */
+diff --git a/teams_messages.c b/teams_messages.c
+index 4a2c1e5..fcd7d31 100644
+--- a/teams_messages.c
++++ b/teams_messages.c
+@@ -430,6 +430,49 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+ 		g_strfreev(messagetype_parts);
+ 		return;
+ 	}
++
++	/* Personal/TFL: dedup so the periodic message poll (and offline-history
++	 * catch-up) never re-delivers a message the user has already seen. Consumer
++	 * (Teams-for-Life) messages carry no usable top-level "id" — they are keyed by a
++	 * numeric "sequenceId" — so we build the dedup key from sequenceId (falling back
++	 * to "id"). The key includes an edit marker (skypeeditedid / properties.edittime)
++	 * so genuine edits still get through as fresh updates. */
++	{
++		gchar *dedup_id = NULL;
++		if (json_object_has_member(resource, "sequenceId")) {
++			gint64 seq = json_object_get_int_member(resource, "sequenceId");
++			if (seq != 0)
++				dedup_id = g_strdup_printf("%" G_GINT64_FORMAT, seq);
++		}
++		if (dedup_id == NULL && json_object_has_member(resource, "id")) {
++			const gchar *sid = json_object_get_string_member(resource, "id");
++			if (sid && *sid)
++				dedup_id = g_strdup(sid);
++		}
++		if (dedup_id != NULL) {
++			const gchar *edit_marker = NULL;
++			if (json_object_has_member(resource, "skypeeditedid"))
++				edit_marker = json_object_get_string_member(resource, "skypeeditedid");
++			if ((!edit_marker || !*edit_marker) && json_object_has_member(resource, "properties")) {
++				JsonObject *dedup_props = json_object_get_object_member(resource, "properties");
++				if (dedup_props && json_object_has_member(dedup_props, "edittime"))
++					edit_marker = json_object_get_string_member(dedup_props, "edittime");
++			}
++			gchar *dedup_key = g_strdup_printf("%s|%s", dedup_id, edit_marker ? edit_marker : "");
++			g_free(dedup_id);
++			if (g_hash_table_contains(sa->received_messages_hash, dedup_key)) {
++				g_free(dedup_key);
++				g_strfreev(messagetype_parts);
++				return;
++			}
++			/* Bound the cache: the poll advances its cursor, so keys older than the
++			 * current re-fetch window are never looked up again. Once it grows past the
++			 * cap, drop the lot — worst case a very old message could be re-shown once. */
++			if (g_hash_table_size(sa->received_messages_hash) >= TEAMS_MAX_DEDUP_CACHE)
++				g_hash_table_remove_all(sa->received_messages_hash);
++			g_hash_table_insert(sa->received_messages_hash, dedup_key, dedup_key); /* not g_hash_table_add: GLib 2.28 on Win32 */
++		}
++	}
+ 	
+ 	if (json_object_has_member(resource, "skypeeditedid")) {
+ 		skypeeditedid = json_object_get_string_member(resource, "skypeeditedid");
+@@ -1868,6 +1911,14 @@ teams_get_conversation_history(TeamsAccount *sa, const gchar *convname)
+ 	g_string_free(timestamp_key, TRUE);
+ }
+ 
++static void
++teams_poll_convs_err_cb(TeamsAccount *sa, const gchar *data, gssize len, gpointer user_data)
++{
++	/* Conversations fetch failed (no parseable body) — release the poll guard so the
++	 * next tick can retry instead of the poll wedging forever. */
++	sa->poll_in_flight = FALSE;
++}
++
+ static void
+ teams_got_all_convs(TeamsAccount *sa, JsonNode *node, gpointer user_data)
+ {
+@@ -1875,12 +1926,17 @@ teams_got_all_convs(TeamsAccount *sa, JsonNode *node, gpointer user_data)
+ 	JsonObject *obj;
+ 	JsonArray *conversations;
+ 	gint index, length;
+-	
++
++	/* The (possibly poll-driven) conversations fetch has returned — release the guard. */
++	sa->poll_in_flight = FALSE;
++
+ 	if (node == NULL || json_node_get_node_type(node) != JSON_NODE_OBJECT)
+ 		return;
+ 	obj = json_node_get_object(node);
+-	
++
+ 	conversations = json_object_get_array_member(obj, "conversations");
++	if (conversations == NULL)
++		return;
+ 	length = json_array_get_length(conversations);
+ 	for(index = 0; index < length; index++) {
+ 		JsonObject *conversation = json_array_get_object_element(conversations, index);
+@@ -1910,15 +1966,27 @@ teams_get_all_conversations_since(TeamsAccount *sa, gint since)
+ 	gchar *url;
+ 	url = g_strdup_printf(TEAMS_CONTACTS_PATH_PREFIX "/v1/users/ME/conversations?startTime=%d000&pageSize=100&view=msnp24Equivalent&targetType=Passport|Skype|Lync|Thread|PSTN|Agent", since);
+ 	
+-	teams_post_or_get(sa, TEAMS_METHOD_GET | TEAMS_METHOD_SSL, TEAMS_CONTACTS_HOST, url, NULL, teams_got_all_convs, GINT_TO_POINTER(since), TRUE);
+-	
++	teams_post_or_get_with_error(sa, TEAMS_METHOD_GET | TEAMS_METHOD_SSL, TEAMS_CONTACTS_HOST, url, NULL, teams_got_all_convs, teams_poll_convs_err_cb, GINT_TO_POINTER(since), TRUE);
++
+ 	g_free(url);
+ }
+ 
+ void
+ teams_get_offline_history(TeamsAccount *sa)
+ {
+-	teams_get_all_conversations_since(sa, purple_account_get_int(sa->account, "last_message_timestamp", ((gint) time(NULL))));
++	/* The poll cursor. It MUST be seeded once to a fixed value: if we let it
++	 * default to time(NULL) on every call, each poll tick asks for messages since
++	 * "now", an always-forward-empty window, so a live message lands in the gap
++	 * between its send time and the next tick's cursor and is never fetched (the
++	 * cursor only advances when a message is received -> bootstrapping deadlock).
++	 * Seed it to now on first use so subsequent polls query [seed, now] and catch
++	 * new messages; process_message_resource() dedups re-fetched ones by server id. */
++	gint since = purple_account_get_int(sa->account, "last_message_timestamp", 0);
++	if (since == 0) {
++		since = (gint) time(NULL);
++		purple_account_set_int(sa->account, "last_message_timestamp", since);
++	}
++	teams_get_all_conversations_since(sa, since);
+ }
+ 
+ 
+@@ -2598,19 +2666,17 @@ teams_send_typing(PurpleConnection *pc, const gchar *name, PurpleIMTypingState s
+ {
+ 	TeamsAccount *sa = purple_connection_get_protocol_data(pc);
+ 
+-#ifdef ENABLE_TEAMS_PERSONAL
+-	if (G_UNLIKELY(strchr(name, ':') == NULL)) {
+-		// Send Skype messages without using a thread
+-		g_hash_table_insert(sa->buddy_to_chat_lookup, g_strdup(name), g_strconcat("8:", name, NULL));
+-	}
+-#endif
+-	
++	/* Personal/TFL: do NOT inject a legacy "8:<user>" mapping here. Consumer 1:1s
++	 * are threads (19:uni01_...), and poisoning buddy_to_chat_lookup with "8:<user>"
++	 * would also break teams_send_im (it 404s on the consumer backend). Only send a
++	 * typing indicator if we already know the real thread; otherwise skip it (typing
++	 * is best-effort and the thread gets learned/created on the first real send). */
+ 	const gchar *channel = g_hash_table_lookup(sa->buddy_to_chat_lookup, name);
+-	
++
+ 	if (channel) {
+ 		return teams_conv_send_typing_to_channel(sa, channel, state);
+ 	}
+-	
++
+ 	return 0;
+ }
+ 
+@@ -2867,20 +2933,18 @@ const gchar *who, const gchar *message, PurpleMessageFlags flags)
+ 	
+ 	if (TEAMS_BUDDY_IS_NOTIFICATIONS(who)) {
+ 		convname = who;
+-#ifdef ENABLE_TEAMS_PERSONAL
+-	} else if (G_UNLIKELY(strchr(who, ':') == NULL)) {
+-		// Send Skype messages without using a thread
+-		gchar *direct_convname = g_strconcat("8:", who, NULL);
+-		g_hash_table_insert(sa->buddy_to_chat_lookup, g_strdup(who), direct_convname);
+-		convname = direct_convname;
+-#endif
+ 	} else {
++		/* Personal/TFL: consumer/TFL 1:1 chats flow through the Teams THREAD model
++		 * (19:uni01_...@thread.v2), same as corporate — NOT the legacy Skype peer-to-peer
++		 * "8:<user>" form, which the consumer backend (chatsvc/consumer) 404s. Resolve the
++		 * buddy to its known 1:1 thread; if we haven't learned it yet, fall through to
++		 * teams_initiate_chat() below, which creates/redirects to the uniquerosterthread. */
+ 		convname = g_hash_table_lookup(sa->buddy_to_chat_lookup, who);
+ 	}
+-	
++
+ 	//convname should be like
+ 	//19:{guid of user1}_{guid of user2}@unq.gpl.spaces
+-	
++
+ 	if (!convname) {
+ 		teams_initiate_chat(sa, who, TRUE, message);
+ 		return 0;
+-- 
+2.53.0
+

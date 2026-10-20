@@ -1,0 +1,214 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:27:57 +0200
+Subject: [PATCH] NetworkSocketPosix: fall back to IPv4 when the kernel has no
+ IPv6
+
+NetworkSocketPosix::Open() only ever creates a dual-stack PF_INET6 socket.
+On a kernel built without IPv6 that fails with EAFNOSUPPORT, the socket is
+marked failed, and the call goes straight to STATE_FAILED while the peer
+sits at "Connecting" forever. The HP TouchPad kernel is one such kernel.
+
+Telegram's relays are reachable over IPv4, so when PF_INET6 cannot be
+created, open a plain PF_INET socket instead and remember that in
+isV4Socket. Open(), Send(), Receive() and GetLocalPort() then use
+sockaddr_in directly and skip the v4-mapped/NAT64 handling, which does not
+apply to an IPv4-only socket. IPv6 packets are dropped with a warning
+rather than handed to sendto() with the wrong address family.
+
+Dual-stack hosts are unaffected: the new paths are taken only when the
+PF_INET6 socket cannot be created.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ os/posix/NetworkSocketPosix.cpp | 115 +++++++++++++++++++++++++-------
+ os/posix/NetworkSocketPosix.h   |   1 +
+ 2 files changed, 91 insertions(+), 25 deletions(-)
+
+diff --git a/os/posix/NetworkSocketPosix.cpp b/os/posix/NetworkSocketPosix.cpp
+index 52f98c5..c3fcc30 100644
+--- a/os/posix/NetworkSocketPosix.cpp
++++ b/os/posix/NetworkSocketPosix.cpp
+@@ -82,7 +82,19 @@ void NetworkSocketPosix::Send(NetworkPacket packet){
+ 		return;
+ 	}
+ 	int res;
+-	if(protocol==NetworkProtocol::UDP){
++	if(protocol==NetworkProtocol::UDP && isV4Socket){
++		// IPv4-only socket (no-IPv6 kernel): send straight to the v4 reflector, no v4-mapping/NAT64.
++		if(packet.address.isIPv6){
++			LOGW("dropping IPv6 packet on IPv4-only socket");
++			return;
++		}
++		sockaddr_in a4;
++		memset(&a4, 0, sizeof(a4));
++		a4.sin_family=AF_INET;
++		a4.sin_addr.s_addr=packet.address.addr.ipv4;
++		a4.sin_port=htons(packet.port);
++		res=(int)sendto(fd, *packet.data, packet.data.Length(), 0, (const sockaddr *) &a4, sizeof(a4));
++	}else if(protocol==NetworkProtocol::UDP){
+ 		sockaddr_in6 addr;
+ 		if(!packet.address.isIPv6){
+ 			if(needUpdateNat64Prefix && !isV4Available && VoIPController::GetCurrentTime()>switchToV6at && switchToV6at!=0){
+@@ -184,7 +196,23 @@ NetworkPacket NetworkSocketPosix::Receive(size_t maxLen){
+ 	if(failed){
+ 		return NetworkPacket::Empty();
+ 	}
+-	if(protocol==NetworkProtocol::UDP){
++	if(protocol==NetworkProtocol::UDP && isV4Socket){
++		int addrLen=sizeof(sockaddr_in);
++		sockaddr_in srcAddr;
++		memset(&srcAddr, 0, sizeof(srcAddr));
++		ssize_t len=recvfrom(fd, *recvBuffer, std::min(recvBuffer.Length(), maxLen), 0, (sockaddr *) &srcAddr, (socklen_t *) &addrLen);
++		if(len>0){
++			return NetworkPacket{
++				Buffer::CopyOf(recvBuffer, 0, (size_t)len),
++				NetworkAddress::IPv4(srcAddr.sin_addr.s_addr),
++				ntohs(srcAddr.sin_port),
++				NetworkProtocol::UDP
++			};
++		}else{
++			LOGE("error receiving %d / %s", errno, strerror(errno));
++			return NetworkPacket::Empty();
++		}
++	}else if(protocol==NetworkProtocol::UDP){
+ 		int addrLen=sizeof(sockaddr_in6);
+ 		sockaddr_in6 srcAddr;
+ 		ssize_t len=recvfrom(fd, *recvBuffer, std::min(recvBuffer.Length(), maxLen), 0, (sockaddr *) &srcAddr, (socklen_t *) &addrLen);
+@@ -234,16 +262,27 @@ void NetworkSocketPosix::Open(){
+ 		return;
+ 	fd=socket(PF_INET6, SOCK_DGRAM, IPPROTO_UDP);
+ 	if(fd<0){
+-		LOGE("error creating socket: %d / %s", errno, strerror(errno));
+-		failed=true;
+-		return;
++		// webOS/old kernels can lack IPv6 entirely: socket(PF_INET6) -> EAFNOSUPPORT. Telegram voip
++		// reflectors are IPv4, so fall back to a plain AF_INET socket; the v4-mapped/dual-stack paths
++		// in Send/Receive/Open are then bypassed via isV4Socket.
++		LOGW("IPv6 socket failed (%d / %s); falling back to IPv4-only", errno, strerror(errno));
++		fd=socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);
++		if(fd<0){
++			LOGE("error creating socket: %d / %s", errno, strerror(errno));
++			failed=true;
++			return;
++		}
++		isV4Socket=true;
+ 	}
+ 	int flag=0;
+-	int res=setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &flag, sizeof(flag));
+-	if(res<0){
+-		LOGE("error enabling dual stack socket: %d / %s", errno, strerror(errno));
+-		failed=true;
+-		return;
++	int res=0;
++	if(!isV4Socket){
++		res=setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &flag, sizeof(flag));
++		if(res<0){
++			LOGE("error enabling dual stack socket: %d / %s", errno, strerror(errno));
++			failed=true;
++			return;
++		}
+ 	}
+ 
+ 	SetMaxPriority();
+@@ -260,36 +299,56 @@ void NetworkSocketPosix::Open(){
+ 
+ 	int tries=0;
+ 	sockaddr_in6 addr;
+-	//addr.sin6_addr.s_addr=0;
++	sockaddr_in  addr4;
+ 	memset(&addr, 0, sizeof(sockaddr_in6));
+-	//addr.sin6_len=sizeof(sa_family_t);
++	memset(&addr4, 0, sizeof(sockaddr_in));
+ 	addr.sin6_family=AF_INET6;
++	addr4.sin_family=AF_INET;
++	addr4.sin_addr.s_addr=INADDR_ANY;
+ 	for(tries=0;tries<10;tries++){
+-		addr.sin6_port=htons(GenerateLocalPort());
+-		res=::bind(fd, (sockaddr *) &addr, sizeof(sockaddr_in6));
+-		LOGV("trying bind to port %u", ntohs(addr.sin6_port));
++		uint16_t port=htons(GenerateLocalPort());
++		if(isV4Socket){
++			addr4.sin_port=port;
++			res=::bind(fd, (sockaddr *) &addr4, sizeof(sockaddr_in));
++		}else{
++			addr.sin6_port=port;
++			res=::bind(fd, (sockaddr *) &addr, sizeof(sockaddr_in6));
++		}
++		LOGV("trying bind to port %u", ntohs(port));
+ 		if(res<0){
+-			LOGE("error binding to port %u: %d / %s", ntohs(addr.sin6_port), errno, strerror(errno));
++			LOGE("error binding to port %u: %d / %s", ntohs(port), errno, strerror(errno));
+ 		}else{
+ 			break;
+ 		}
+ 	}
+ 	if(tries==10){
+-		addr.sin6_port=0;
+-		res=::bind(fd, (sockaddr *) &addr, sizeof(sockaddr_in6));
++		if(isV4Socket){
++			addr4.sin_port=0;
++			res=::bind(fd, (sockaddr *) &addr4, sizeof(sockaddr_in));
++		}else{
++			addr.sin6_port=0;
++			res=::bind(fd, (sockaddr *) &addr, sizeof(sockaddr_in6));
++		}
+ 		if(res<0){
+-			LOGE("error binding to port %u: %d / %s", ntohs(addr.sin6_port), errno, strerror(errno));
+-			//SetState(STATE_FAILED);
++			LOGE("error binding to port 0: %d / %s", errno, strerror(errno));
+ 			failed=true;
+ 			return;
+ 		}
+ 	}
+-	size_t addrLen=sizeof(sockaddr_in6);
+-	getsockname(fd, (sockaddr*)&addr, (socklen_t*) &addrLen);
+-	LOGD("Bound to local UDP port %u", ntohs(addr.sin6_port));
++	uint16_t boundPort;
++	if(isV4Socket){
++		size_t addrLen=sizeof(sockaddr_in);
++		getsockname(fd, (sockaddr*)&addr4, (socklen_t*) &addrLen);
++		boundPort=ntohs(addr4.sin_port);
++	}else{
++		size_t addrLen=sizeof(sockaddr_in6);
++		getsockname(fd, (sockaddr*)&addr, (socklen_t*) &addrLen);
++		boundPort=ntohs(addr.sin6_port);
++	}
++	LOGD("Bound to local UDP port %u", boundPort);
+ 
+-	needUpdateNat64Prefix=true;
+-	isV4Available=false;
++	needUpdateNat64Prefix=!isV4Socket;
++	isV4Available=isV4Socket;   // an IPv4-only socket already IS on IPv4; no NAT64/v6 probing
+ 	switchToV6at=VoIPController::GetCurrentTime()+ipv6Timeout;
+ }
+ 
+@@ -433,6 +492,12 @@ std::string NetworkSocketPosix::GetLocalInterfaceInfo(NetworkAddress *v4addr, Ne
+ }
+ 
+ uint16_t NetworkSocketPosix::GetLocalPort(){
++	if(isV4Socket){
++		sockaddr_in addr;
++		size_t addrLen=sizeof(sockaddr_in);
++		getsockname(fd, (sockaddr*)&addr, (socklen_t*) &addrLen);
++		return ntohs(addr.sin_port);
++	}
+ 	sockaddr_in6 addr;
+ 	size_t addrLen=sizeof(sockaddr_in6);
+ 	getsockname(fd, (sockaddr*)&addr, (socklen_t*) &addrLen);
+diff --git a/os/posix/NetworkSocketPosix.h b/os/posix/NetworkSocketPosix.h
+index 5d68213..de1849c 100644
+--- a/os/posix/NetworkSocketPosix.h
++++ b/os/posix/NetworkSocketPosix.h
+@@ -63,6 +63,7 @@ private:
+ 	bool nat64Present;
+ 	double switchToV6at;
+ 	bool isV4Available;
++	bool isV4Socket=false;   // set when the kernel has no IPv6 and we fell back to a plain AF_INET socket
+ 	std::atomic<bool> closing;
+ 	NetworkAddress tcpConnectedAddress=NetworkAddress::Empty();
+ 	uint16_t tcpConnectedPort;
+-- 
+2.53.0
+

@@ -1,0 +1,71 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:19:05 +0200
+Subject: [PATCH] Drop history re-delivered across logins behind TEAMS_WEBOS
+
+received_messages_hash is rebuilt empty on every login, so the history
+re-fetch done at login hands every already-seen message to the UI again.
+Pidgin only shows it once more in the scrollback, but the webOS Messaging
+database stores each copy as a new message with a fresh arrival time.
+
+Keep a per-conversation high-water mark of the server's monotonic
+sequenceId in the account settings and drop any non-edit message at or
+below it. Edits always pass so real message updates still show.
+
+The code is only compiled with -DTEAMS_WEBOS, so Pidgin and other
+upstream builds are unchanged. It is part of upstream pull request #85.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Submitted [https://github.com/EionRobb/purple-teams/pull/85]
+---
+ teams_messages.c | 34 ++++++++++++++++++++++++++++++++--
+ 1 file changed, 32 insertions(+), 2 deletions(-)
+
+diff --git a/teams_messages.c b/teams_messages.c
+index fcd7d31..1d982f0 100644
+--- a/teams_messages.c
++++ b/teams_messages.c
+@@ -535,8 +535,38 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+ 		chatname = teams_thread_url_to_name(conversationLink);
+ 		convname = g_strdup(chatname);
+ 	}
+-	
+-	if (chatname && !g_hash_table_lookup(sa->chat_to_buddy_lookup, chatname) 
++
++#ifdef TEAMS_WEBOS
++	/* webOS Teams port: cross-login dedup. received_messages_hash (the in-session
++	 * dedup above) is rebuilt empty on every login, so the offline-history / history-days
++	 * re-fetch that runs at each login would re-insert every already-seen message into
++	 * the webOS Messaging DB (each with a fresh arrival time). Persist a per-conversation
++	 * high-water mark on the monotonic per-conversation "sequenceId" and drop any non-edit
++	 * message at or below it. Edits (skypeeditedid / properties.edittime set) always pass
++	 * through so genuine message updates still appear. Stored as a string to survive
++	 * sequenceId values beyond 32 bits. */
++	if (convname && (!skypeeditedid || !*skypeeditedid)
++			&& json_object_has_member(resource, "sequenceId")) {
++		gint64 seq = json_object_get_int_member(resource, "sequenceId");
++		if (seq != 0) {
++			gchar *seqkey = g_strdup_printf("%s_lastseq", convname);
++			gint64 prev_seq = g_ascii_strtoll(
++				purple_account_get_string(sa->account, seqkey, "0"), NULL, 10);
++			if (seq <= prev_seq) {
++				g_free(seqkey);
++				g_free(convname);
++				g_strfreev(messagetype_parts);
++				return;
++			}
++			gchar *seqval = g_strdup_printf("%" G_GINT64_FORMAT, seq);
++			purple_account_set_string(sa->account, seqkey, seqval);
++			g_free(seqval);
++			g_free(seqkey);
++		}
++	}
++#endif /* TEAMS_WEBOS */
++
++	if (chatname && !g_hash_table_lookup(sa->chat_to_buddy_lookup, chatname)
+ 			&& !strstr(chatname, "@unq.gbl.spaces") && !strstr(chatname, "@oneToOne.skype")) {
+ 		// This is a Thread/Group chat message
+ 		const gchar *topic;
+-- 
+2.53.0
+

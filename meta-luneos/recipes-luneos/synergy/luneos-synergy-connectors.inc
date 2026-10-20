@@ -6,8 +6,8 @@
 # shares the one git clone between them; each recipe only sets S to its own subdirectory
 # (LSC_SRCDIR is the root of the checkout).
 #
-# Pinned deliberately. Bump SRCREV when you want the new work; AUTOREV would make every LuneOS
-# build depend on whatever main happened to be that day.
+# The commit is pinned in luneos-synergy-connectors-srcrev.inc, which the libpurple plug-in
+# recipes share.
 #
 # destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX} is the git fetcher's own default, so it changes nothing
 # for most recipes -- but it is stated explicitly because go.bbclass's go_do_unpack REWRITES the
@@ -25,6 +25,7 @@
 HOMEPAGE ?= "https://github.com/webOS-ports/luneos-synergy-connectors"
 
 SRC_URI = "git://github.com/webOS-ports/luneos-synergy-connectors.git;branch=main;protocol=https;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX}"
-SRCREV = "a7c1efb5220dbe3c8ce8314bb56330f1b665e050"
+require recipes-luneos/synergy/luneos-synergy-connectors-srcrev.inc
+SRCREV = "${LSC_SRCREV}"
 
 LSC_SRCDIR = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}"

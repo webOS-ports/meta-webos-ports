@@ -2,32 +2,45 @@ SUMMARY = "Microsoft Teams protocol plug-in for libpurple"
 LICENSE = "GPL-3.0-or-later"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=30441c91ba0022ea994b5dae832bd063"
 
-require purple-synergy.inc
+require purple-connectors.inc
+
+# 0001-0002 are upstream PR #85 (personal/consumer accounts), 0003-0007 generic fixes meant for
+# upstream; 0008 onwards adapt the plug-in to imlibpurpletransport and the webOS Messaging app.
+# Upstream's teams_messages.c has CRLF line endings and so do the patches against it: keep the
+# .patch files byte-exact.
+SRC_URI += " \
+    git://github.com/EionRobb/purple-teams.git;branch=master;protocol=https;name=upstream;destsuffix=purple-teams \
+    file://0001-Add-personal-consumer-Teams-for-Life-account-support.patch \
+    file://0002-Drop-history-re-delivered-across-logins-behind-TEAMS.patch \
+    file://0003-Reconnect-Trouter-with-a-backoff-and-survive-empty-r.patch \
+    file://0004-Fix-two-crashes-when-sending-or-echoing-an-image.patch \
+    file://0005-Ignore-async-callbacks-that-arrive-after-the-account.patch \
+    file://0006-Send-the-skype-token-to-regional-.asm.skype.com-medi.patch \
+    file://0007-Send-image-attachments-as-inline-AMSImage-pictures.patch \
+    file://0008-webOS-Send-and-receive-message-reactions-through-tra.patch \
+    file://0009-webOS-Show-replies-as-quote-cards-and-send-replies-w.patch \
+    file://0010-webOS-Show-received-media-inline-and-send-voice-note.patch \
+    file://0011-webOS-Add-Teams-voice-and-video-calling-for-the-webO.patch \
+    file://0012-webOS-Always-report-the-account-as-active-and-Availa.patch \
+"
+SRCREV_upstream = "f7eb519b9968ed7844ff59319bff5c1859c46851"
 
 DEPENDS = "pidgin json-glib glib-2.0 zlib"
 
-S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/teams/plugin/purple-teams"
+S = "${UNPACKDIR}/purple-teams"
 
-# Same as tdlib-purple and purple-combined: S is the plugin subdirectory, so
-# the automatic ${S} prefix-map misses im/_core/include, which this build also
-# compiles, and those paths would survive into the debug info and trip
-# buildpaths QA. Map the whole unpacked tree.
-DEBUG_PREFIX_MAP:append = " -ffile-prefix-map=${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}=/usr/src/debug/${PN}/${PV}"
+# TEAMS_WEBOS turns on 0002's dedup of history that Teams re-delivers across logins; the webOS
+# Messaging app would otherwise show it twice.
+CFLAGS:append = " -DTEAMS_WEBOS"
 
-# The default target builds both variants: libteams.so (commercial, Skype for Business) and
-# libteams-personal.so (consumer). webOS uses the consumer one; both are installed, as upstream
-# does, since the extra object costs little and keeps the recipe close to the Makefile.
+# The default target builds both variants: libteams.so (commercial) and libteams-personal.so
+# (consumer). webOS uses the consumer one; both are installed, as upstream does.
 #
-# NOT built here: the webOS calling bridge. teams_call_luna.c (com.palm.teams.call),
-# teams_calling.c and h264_rtp.c are absent from the upstream Makefile's file list --
-# build-teams.sh compiles them separately -- so this is the messaging plug-in without calling.
-# For the same reason im/teams/files/sysbus/ (the com.palm.teams.call bus files) is not installed.
-# Adding it needs those files taught to the Makefile plus im/_core/include/webos-ls2-compat.h
-# (which maps the legacy split-bus LS2 API onto the single-bus one 3.21.2 provides) and
-# DEPENDS += "luna-service2". Video needs more still: it binds libpalmgstskype.so, a
-# gstreamer-0.10 plug-in present only in legacy webOS firmware. voipkit_none.c is the null
-# backend that lets it link without one.
-
+# NOT built here: the calling bridge from 0011 (teams_calling.c, teams_call_luna.c, h264_rtp.c,
+# voipkit_none.c, teams_video_relay.cpp). The upstream Makefile does not list them; building them
+# needs -DTEAMS_WEBOS_CALL, ${CONNECTORS_DIR}/im/_core/include for webos-ls2-compat.h,
+# luna-service2, and the separate teams_media engine at runtime. Without TEAMS_WEBOS_CALL the
+# calling hooks compile out and the plug-in shows upstream's "Incoming call" message instead.
 EXTRA_OEMAKE = " \
     CC='${CC}' \
     PKG_CONFIG='${STAGING_BINDIR_NATIVE}/pkg-config' \
@@ -37,11 +50,8 @@ do_compile() {
     oe_runmake
 }
 
-# Installed by hand rather than with `make install`, so no Pidgin pixmaps are shipped. That
-# target also runs install-icons, which drops PNGs into ${datadir}/pixmaps/pidgin/protocols --
-# a directory only Pidgin's GTK UI ever reads. There is no Pidgin here: libpurple is loaded
-# headless by imlibpurpletransport, and webOS takes its account icons from the account template.
-# Same reasoning as purple-discord and purple-googlechat, which install this way too.
+# Installed by hand rather than with `make install`, so no Pidgin pixmaps are shipped -- see
+# purple-connectors.inc.
 do_install() {
     install -d ${D}${libdir}/purple-2
     install -m 0755 ${S}/libteams.so          ${D}${libdir}/purple-2/libteams.so
@@ -49,9 +59,9 @@ do_install() {
 
     # Account template, so Teams can actually be added as an account.
     install -d ${D}${webos_accttemplatesdir}
-    cp -rf ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/teams/account/com.palm.teams ${D}${webos_accttemplatesdir}/
+    cp -rf ${CONNECTORS_DIR}/im/teams/account/com.palm.teams ${D}${webos_accttemplatesdir}/
 
     # Validator app named by the template's validator.customUI.appId.
     install -d ${D}${webos_applicationsdir}
-    cp -rf ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/teams/apps/com.palm.app.teams ${D}${webos_applicationsdir}/
+    cp -rf ${CONNECTORS_DIR}/im/teams/apps/com.palm.app.teams ${D}${webos_applicationsdir}/
 }

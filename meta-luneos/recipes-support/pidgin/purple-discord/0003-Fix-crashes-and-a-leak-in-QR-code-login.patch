@@ -1,0 +1,78 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:22:33 +0200
+Subject: [PATCH] Fix crashes and a leak in QR code login
+
+- discord_display_qrcode dereferenced the request UI ops without
+  checking them. A headless UI that installs no request ops crashed
+  here; fall back to the IM message in that case too.
+- discord_fetch_token_and_start_socket called strlen() on the
+  encrypted_token member without checking that it exists. When Discord
+  answers remote-auth/login without one (for example when it wants a
+  captcha), this was a NULL dereference. Fail the connection with an
+  authentication error instead, and also report an error rather than
+  silently stalling when there is no response at all.
+- The QRcode returned by QRcode_encodeString was never freed.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ discord_rsa.c |  3 +--
+ libdiscord.c  | 14 +++++++++++++-
+ 2 files changed, 14 insertions(+), 3 deletions(-)
+
+diff --git a/discord_rsa.c b/discord_rsa.c
+index fd6058c..07435e2 100644
+--- a/discord_rsa.c
++++ b/discord_rsa.c
+@@ -43,8 +43,7 @@ discord_display_qrcode(PurpleConnection *pc, const gchar *qr_code_raw, const gch
+ {
+ 	DiscordAccount *da = purple_connection_get_protocol_data(pc);
+ 	PurpleRequestUiOps *ui_ops = purple_request_get_ui_ops();
+-	
+-	if (!ui_ops->request_fields) {
++	if (!ui_ops || !ui_ops->request_fields) {
+ 		// The UI hasn't implemented the func we want, just output as a message instead
+ 		
+ 		gchar *msg_out;
+diff --git a/libdiscord.c b/libdiscord.c
+index 468e34e..d9fd21e 100644
+--- a/libdiscord.c
++++ b/libdiscord.c
+@@ -6570,13 +6570,23 @@ discord_fetch_token_and_start_socket(DiscordAccount *da, JsonNode *node,
+ {
+ 	if (node == NULL) {
+ 		purple_debug_error("discord", "no json node\n");
++		purple_connection_error(da->pc, PURPLE_CONNECTION_ERROR_NETWORK_ERROR,
++		                        _("Discord login failed (no response)"));
+ 		return;
+ 	}
+ 
+ 	JsonObject *response = json_node_get_object(node);
++	if (!json_object_has_member(response, "encrypted_token")) {
++		purple_debug_error("discord", "remote-auth login: no encrypted_token in response\n");
++		purple_connection_error(da->pc, PURPLE_CONNECTION_ERROR_AUTHENTICATION_FAILED,
++		                        _("Discord login failed"));
++		discord_qrauth_free_keys(da);
++		return;
++	}
++
+ 	const gchar *encrypted_token = json_object_get_string_member(response,
+ 	                                                             "encrypted_token");
+-	if (strlen(encrypted_token) == 0) {
++	if (encrypted_token == NULL || strlen(encrypted_token) == 0) {
+ 		purple_debug_error("discord", "Got empty token\n");
+ 		return;
+ 	}
+@@ -6679,6 +6689,8 @@ discord_process_qrcode_auth_frame(DiscordAccount *da, const gchar *frame)
+ 
+ 			discord_display_qrcode(da->pc, qrcode_url, qrcode_utf8, qrcode_image, qrcode_image_len);
+ 
++			QRcode_free(qrcode);
++
+ 			g_free(qrcode_url);
+ 			g_free(qrcode_image);
+ 			g_free(qrcode_utf8);
+-- 
+2.53.0
+

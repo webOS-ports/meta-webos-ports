@@ -1,0 +1,2746 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:34:49 +0200
+Subject: [PATCH] Add a Facebook Messenger protocol (prpl-gometa) to the plugin
+
+Register a second prpl, prpl-gometa ("Facebook (E2EE)"), from the same
+shared object. It talks to Messenger through messagix
+(go.mau.fi/mautrix-meta/pkg/messagix) and handles end-to-end encrypted
+threads through whatsmeow's Facebook (armadillo) client. It has to live
+in this plugin rather than in one of its own: whatsmeow and messagix are
+both Go, and two Go c-archives cannot share one process, so both
+protocols run on this plugin's Go runtime. All of its identifiers are
+prefixed gometa to stay clear of the WhatsApp code.
+
+- gometa.go: login with e-mail, password and an interactive second
+  factor (the session is cached in the account), contact and thread
+  sync, incoming messages, plaintext sends, presence
+- gometa_e2ee.go: E2EE threads - registration, sending, reactions and
+  receipts; a plaintext send that Facebook does not confirm is retried
+  over E2EE and the thread remembered as encrypted
+- gometa_media.go, gometa_video.go: pictures, voice notes, video and
+  documents, plaintext and E2EE
+- gometabridge.[ch], glue/gometa_init.c: the C side and the prpl
+  registration
+- incoming E2EE media is downloaded through the Facebook client
+  (fbDownloadable) and shown like WhatsApp media; download_attachment()
+  now recovers from a panic, which would otherwise abort the whole
+  process from inside a cgo call
+- the account-removed and send-reaction handlers of the webOS
+  integration also serve prpl-gometa accounts, and deleting one removes
+  its gometa-e2ee-<user>.db
+
+go.mod pins mautrix-meta v0.2607.0 and mirrors the beeper/req replace
+that its messagix package needs. On top of 1.27.0's whatsmeow, mautrix
+moves to v0.32.0 (v0.29.0 does not build against go.mau.fi/util v0.11.0)
+and the beeper/req replace moves to v3.0.0-20260925135712-b49593750e56
+(the older one does not build against quic-go v0.61.0). mautrix-meta
+v0.2608.0 and later rename the messagix events and split
+types.MessengerLite, and are not used yet.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [LuneOS addition, not part of purple-gowhatsapp]
+---
+ bridge.go            |  11 +
+ glue/gometa_init.c   | 205 +++++++++++
+ glue/init.c          |  16 +-
+ glue/login.c         |   6 +-
+ go.mod               |  31 +-
+ go.sum               |  68 +++-
+ gometa.go            | 812 +++++++++++++++++++++++++++++++++++++++++++
+ gometa_e2ee.go       | 303 ++++++++++++++++
+ gometa_media.go      | 452 ++++++++++++++++++++++++
+ gometa_video.go      |  92 +++++
+ gometabridge.c       | 210 +++++++++++
+ gometabridge.h       |  54 +++
+ handle_attachment.go | 158 ++++++++-
+ 13 files changed, 2405 insertions(+), 13 deletions(-)
+ create mode 100644 glue/gometa_init.c
+ create mode 100644 gometa.go
+ create mode 100644 gometa_e2ee.go
+ create mode 100644 gometa_media.go
+ create mode 100644 gometa_video.go
+ create mode 100644 gometabridge.c
+ create mode 100644 gometabridge.h
+
+diff --git a/bridge.go b/bridge.go
+index ba717ce..15ff8db 100644
+--- a/bridge.go
++++ b/bridge.go
+@@ -178,6 +178,17 @@ func gowhatsapp_go_send_file(account *PurpleAccount, who *C.char, filename *C.ch
+ //export gowhatsapp_go_download_attachment
+ func gowhatsapp_go_download_attachment(account *PurpleAccount, local_file_path *C.char, download_handle C.uintptr_t) *C.char {
+ 	handler, ok := handlers[account]
++	if !ok {
++		// webOS: Facebook (E2EE / gometa) accounts are NOT in the WhatsApp handlers[] map -- they live in
++		// gometaHandlers[]. Without this, every incoming FB image/video/document hit "Not connected." here
++		// and download_attachment was NEVER called (no file, silently dropped). download_attachment's FB
++		// branch resolves the media client via gometaHandlers[handler.account] and only reads
++		// handler.account, so a minimal synthesized handler is sufficient for the download.
++		if _, gok := gometaHandlers[account]; gok {
++			handler = &Handler{account: account}
++			ok = true
++		}
++	}
+ 	if ok {
+ 		h := cgo.Handle(download_handle)
+ 		var err error = nil
+diff --git a/glue/gometa_init.c b/glue/gometa_init.c
+new file mode 100644
+index 0000000..9c9a6ca
+--- /dev/null
++++ b/glue/gometa_init.c
+@@ -0,0 +1,205 @@
++// gometa_init.c — registers the Facebook (messagix) protocol as a SECOND prpl inside the
++// combined whatsmeow .so (one .so, one Go runtime). plugin_init() in init.c calls
++// gometa_register_second_prpl(). Uses the manual-registration pattern proven on-device
++// (purple_plugin_new + purple_plugin_register). Every prpl needs list_icon+login+close.
++#include <purple.h>
++#include "../gometabridge.h"  // GOMETA_PLUGIN_ID / _NAME / _SUMMARY / _AUTHOR
++#include <string.h>
++#include "libwhatsmeow.h"     // gometa_go_login / gometa_go_close / gometa_go_send_message (cgo exports)
++
++#ifndef PLUGIN_VERSION
++#define PLUGIN_VERSION 0.0.0
++#endif
++#define GM_STR(x) _GM_STR(x)
++#define _GM_STR(x) #x
++
++static const char *gometa_list_icon(PurpleAccount *account, PurpleBuddy *buddy) {
++    return "facebook";
++}
++
++static GList *gometa_status_types(PurpleAccount *account) {
++    GList *types = NULL;
++    types = g_list_append(types, purple_status_type_new_full(PURPLE_STATUS_AVAILABLE, NULL, NULL, TRUE, TRUE, FALSE));
++    types = g_list_append(types, purple_status_type_new_full(PURPLE_STATUS_OFFLINE, NULL, NULL, TRUE, TRUE, FALSE));
++    return types;
++}
++
++// login(): hand the account password (Facebook cookie JSON) to Go.
++static void gometa_login(PurpleAccount *account) {
++    PurpleConnection *pc = purple_account_get_connection(account);
++    purple_connection_set_state(pc, PURPLE_CONNECTING);
++    const char *cookies = purple_account_get_password(account);
++    char *username = (char *)purple_account_get_username(account);
++    char *user_dir = (char *)purple_user_dir();
++    gometa_go_login(account, user_dir, username, (char *)(cookies ? cookies : ""), (char *)"");
++    webos_connect_send_reaction_once();
++}
++
++static void gometa_close(PurpleConnection *pc) {
++    gometa_go_close(purple_connection_get_account(pc));
++}
++
++static int gometa_send_im(PurpleConnection *pc, const char *who, const char *message, PurpleMessageFlags flags) {
++    // webOS replies: the transport stashes the reply target's serviceMessageId as "webos-reply-to" on
++    // the conversation before serv_send_im; read + clear it and pass it down so the reply threads.
++    PurpleConversation *conv = purple_find_conversation_with_account(PURPLE_CONV_TYPE_IM, who, purple_connection_get_account(pc));
++    gchar *reply_to = conv ? (gchar *)purple_conversation_get_data(conv, "webos-reply-to") : NULL;
++    int ret = gometa_go_send_message(purple_connection_get_account(pc), (char *)who, (char *)message, reply_to ? (char *)reply_to : (char *)"");
++    if (reply_to != NULL) {
++        purple_conversation_set_data(conv, "webos-reply-to", NULL);
++        g_free(reply_to);
++    }
++    return ret;
++}
++
++// ---- group chat callbacks (threads registered with component "id" = thread key) ----
++static GList *gometa_chat_info(PurpleConnection *pc) {
++    struct proto_chat_entry *pce = g_new0(struct proto_chat_entry, 1);
++    pce->label = "Thread ID";
++    pce->identifier = "id";
++    pce->required = TRUE;
++    return g_list_append(NULL, pce);
++}
++
++static GHashTable *gometa_chat_info_defaults(PurpleConnection *pc, const char *chat_name) {
++    GHashTable *defaults = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, g_free);
++    if (chat_name) g_hash_table_insert(defaults, (gpointer)"id", g_strdup(chat_name));
++    return defaults;
++}
++
++static char *gometa_get_chat_name(GHashTable *components) {
++    const char *id = (const char *)g_hash_table_lookup(components, "id");
++    return g_strdup(id ? id : "");
++}
++
++// Like purple_blist_find_chat but works while still connecting; matches the "id" component.
++static PurpleChat *gometa_find_blist_chat(PurpleAccount *account, const char *id) {
++    PurpleBlistNode *node;
++    for (node = purple_blist_get_root(); node != NULL; node = purple_blist_node_next(node, TRUE)) {
++        if (PURPLE_BLIST_NODE_IS_CHAT(node)) {
++            PurpleChat *chat = (PurpleChat *)node;
++            if (purple_chat_get_account(chat) != account) continue;
++            GHashTable *comp = purple_chat_get_components(chat);
++            const char *cid = comp ? (const char *)g_hash_table_lookup(comp, "id") : NULL;
++            if (cid && strcmp(cid, id) == 0) return chat;
++        }
++    }
++    return NULL;
++}
++
++static void gometa_join_chat(PurpleConnection *pc, GHashTable *components) {
++    const char *id = (const char *)g_hash_table_lookup(components, "id");
++    if (!id) return;
++    int chat_id = (int)g_str_hash(id);
++    if (purple_find_chat(pc, chat_id) == NULL) {
++        serv_got_joined_chat(pc, chat_id, id);
++    }
++}
++
++// Group send: the chat was joined with its thread key as the conversation name
++// (serv_got_joined_chat(pc, g_str_hash(threadKey), threadKey)), so recover the thread key from
++// the conversation and reuse the same send path as 1:1 (Go maps it to SendMessageTask.ThreadId).
++// ---- file / image send (PurpleXfer -> gometa_go_send_file, which uploads via messagix/whatsmeow) ----
++static void gometa_xfer_send_init(PurpleXfer *xfer) {
++    PurpleAccount *account = purple_xfer_get_account(xfer);
++    const char *who = purple_xfer_get_remote_user(xfer);
++    const char *filename = purple_xfer_get_local_filename(xfer);
++    char *error = gometa_go_send_file(account, (char *)who, (char *)filename);
++    if (error && error[0]) {
++        purple_xfer_error(purple_xfer_get_type(xfer), account, who, error);
++        purple_xfer_cancel_local(xfer);
++    } else {
++        purple_xfer_set_bytes_sent(xfer, purple_xfer_get_size(xfer));
++        purple_xfer_set_completed(xfer, TRUE);
++    }
++    g_free(error);
++}
++
++static PurpleXfer *gometa_new_xfer(PurpleConnection *pc, const char *who) {
++    PurpleAccount *account = purple_connection_get_account(pc);
++    PurpleXfer *xfer = purple_xfer_new(account, PURPLE_XFER_SEND, who);
++    purple_xfer_set_init_fnc(xfer, gometa_xfer_send_init);
++    return xfer;
++}
++
++static void gometa_send_file(PurpleConnection *pc, const char *who, const char *filename) {
++    PurpleXfer *xfer = gometa_new_xfer(pc, who);
++    if (filename && *filename) {
++        purple_xfer_request_accepted(xfer, filename);
++    } else {
++        purple_xfer_request(xfer);
++    }
++}
++
++// Group file send: the chat conversation name is the thread key (see gometa_chat_send).
++static void gometa_chat_send_file(PurpleConnection *pc, int id, const char *filename) {
++    PurpleConversation *conv = purple_find_chat(pc, id);
++    if (conv != NULL) {
++        const char *who = purple_conversation_get_name(conv);
++        if (who != NULL && *who) {
++            gometa_send_file(pc, who, filename);
++        }
++    }
++}
++
++static int gometa_chat_send(PurpleConnection *pc, int id, const char *message, PurpleMessageFlags flags) {
++    (void)flags;
++    PurpleConversation *conv = purple_find_chat(pc, id);
++    if (conv == NULL) return -1;
++    const char *threadKey = purple_conversation_get_name(conv);
++    if (threadKey == NULL || *threadKey == '\0') return -1;
++    // webOS replies: read + clear the reply target the transport stashed on this chat conversation.
++    gchar *reply_to = (gchar *)purple_conversation_get_data(conv, "webos-reply-to");
++    gometa_go_send_message(purple_connection_get_account(pc), (char *)threadKey, (char *)message, reply_to ? (char *)reply_to : (char *)"");
++    if (reply_to != NULL) {
++        purple_conversation_set_data(conv, "webos-reply-to", NULL);
++        g_free(reply_to);
++    }
++    return 0;
++}
++
++static PurplePluginProtocolInfo gometa_prpl_info = {
++    .struct_size = sizeof(PurplePluginProtocolInfo),
++    .options = OPT_PROTO_IM_IMAGE,
++    .list_icon = gometa_list_icon,
++    .status_types = gometa_status_types,
++    .login = gometa_login,
++    .close = gometa_close,
++    .send_im = gometa_send_im,
++    .new_xfer = gometa_new_xfer,
++    .send_file = gometa_send_file,
++    .chat_send_file = gometa_chat_send_file,
++    .chat_info = gometa_chat_info,
++    .chat_info_defaults = gometa_chat_info_defaults,
++    .join_chat = gometa_join_chat,
++    .get_chat_name = gometa_get_chat_name,
++    .find_blist_chat = gometa_find_blist_chat,
++    .chat_send = gometa_chat_send,
++};
++
++static PurplePluginInfo gometa_info = {
++    .magic = PURPLE_PLUGIN_MAGIC,
++    .major_version = PURPLE_MAJOR_VERSION,
++    .minor_version = PURPLE_MINOR_VERSION,
++    .type = PURPLE_PLUGIN_PROTOCOL,
++    .priority = PURPLE_PRIORITY_DEFAULT,
++    .id = GOMETA_PLUGIN_ID,
++    .name = GOMETA_PLUGIN_NAME,
++    .version = GM_STR(PLUGIN_VERSION),
++    .summary = GOMETA_PLUGIN_SUMMARY,
++    .description = GOMETA_PLUGIN_SUMMARY,
++    .author = GOMETA_AUTHOR,
++    .homepage = "https://github.com/mautrix/meta",
++    .extra_info = &gometa_prpl_info,
++};
++
++void gometa_register_second_prpl(void) {
++    PurplePlugin *p = purple_plugin_new(TRUE, NULL);
++    p->info = &gometa_info;
++    purple_plugin_load(p);
++    if (purple_plugin_register(p)) {
++        purple_debug_info("gometa", "registered second prpl %s\n", GOMETA_PLUGIN_ID);
++    } else {
++        purple_debug_error("gometa", "FAILED to register %s\n", GOMETA_PLUGIN_ID);
++    }
++}
+diff --git a/glue/init.c b/glue/init.c
+index 9d8feba..11ac895 100644
+--- a/glue/init.c
++++ b/glue/init.c
+@@ -23,7 +23,8 @@
+ 
+ #include "gowhatsapp.h"
+ #include "constants.h"       // GOWHATSAPP_CREDENTIALS_KEY (for locating the device to unlink on delete)
+-#include "libwhatsmeow.h" // for gowhatsapp_go_init + gowhatsapp_go_account_removed
++#include "../gometabridge.h" // GOMETA_PLUGIN_ID (branch account-removed by protocol id)
++#include "libwhatsmeow.h" // for gowhatsapp_go_init + gowhatsapp_go_account_removed / gometa_go_account_removed
+ #include "call.h"         // whatsapp_call_luna_init -- register at plugin load, not per-account login
+ #include <gmodule.h>      // g_module_make_resident - pin the Go .so so libpurple can't dlclose/unmap it
+ 
+@@ -153,9 +154,13 @@ static PurplePluginProtocolInfo prpl_info = {
+     #endif
+ };
+ 
++// Registers the Facebook (messagix) protocol as a second prpl in this same .so.
++extern void gometa_register_second_prpl(void);
++
+ // Per-account store teardown on account deletion. libpurple's purple_accounts_delete() emits
+ // "account-removed" (on purple_accounts_get_handle()) for the account being deleted, then destroys
+-// it synchronously. We filter by protocol id and hand off to the Go export. Everything must complete
++// it synchronously. This one .so hosts BOTH prpls, so a single handler covers WhatsApp and gometa;
++// we branch by protocol id and hand off to the matching Go export. Everything must complete
+ // synchronously here — the account pointer is freed the moment this returns, so the Go side must not
+ // defer any work that dereferences it.
+ static void
+@@ -176,6 +181,8 @@ webos_account_removed_cb(PurpleAccount *account, gpointer data)
+             credentials = purple_account_get_password(account);
+         }
+         gowhatsapp_go_account_removed(account, user_dir, username, (char *)(credentials ? credentials : ""));
++    } else if (g_strcmp0(proto, GOMETA_PLUGIN_ID) == 0) {
++        gometa_go_account_removed(account, user_dir, username);
+     }
+ }
+ 
+@@ -200,7 +207,10 @@ static void plugin_init(PurplePlugin *plugin) {
+         g_module_make_resident((GModule *) plugin->handle);
+     }
+     prpl_info.protocol_options = gowhatsapp_add_account_options(prpl_info.protocol_options);
+-    // Clean up the per-JID device row in the shared whatsmeow.db when an account is deleted.
++    gometa_register_second_prpl();
++    // Clean up per-account backend stores when an account is deleted (WhatsApp: per-JID device row
++    // from the shared whatsmeow.db; Facebook-E2EE: the per-account gometa-e2ee-<user>.db). Covers both
++    // prpls in this .so via one handler.
+     webos_connect_account_removed(plugin);
+ }
+ 
+diff --git a/glue/login.c b/glue/login.c
+index bd314c5..8b191fd 100644
+--- a/glue/login.c
++++ b/glue/login.c
+@@ -1,5 +1,6 @@
+ #include "gowhatsapp.h"
+-#include "libwhatsmeow.h" // for gowhatsapp_go_login / gowhatsapp_go_send_reaction
++#include "libwhatsmeow.h" // for gowhatsapp_go_login / gowhatsapp_go_send_reaction / gometa_go_send_reaction
++#include "../gometabridge.h" // for GOMETA_PLUGIN_ID
+ 
+ // webOS reactions (SEND): the transport emits "webos-im-send-reaction" (registered process-wide) when
+ // the user reacts from the TouchPad. It fires for EVERY account, so we filter by protocol id and route
+@@ -23,6 +24,9 @@ static void webos_send_reaction_cb(PurpleAccount *account, const char *targetId,
+         gowhatsapp_go_send_reaction(account, (char *)targetId, (char *)(emoji ? emoji : ""),
+                                     (char *)(peer ? peer : ""), (char *)(targetSender ? targetSender : ""),
+                                     (char *)(removeFlag ? removeFlag : ""));
++    } else if (g_strcmp0(proto, GOMETA_PLUGIN_ID) == 0) {
++        gometa_go_send_reaction(account, (char *)targetId, (char *)(emoji ? emoji : ""),
++                                (char *)(peer ? peer : ""), (char *)(removeFlag ? removeFlag : ""));
+     }
+ }
+ 
+diff --git a/go.mod b/go.mod
+index ca39d3e..d9c400d 100644
+--- a/go.mod
++++ b/go.mod
+@@ -4,27 +4,36 @@ go 1.27.2
+ 
+ require (
+ 	github.com/alfg/mp4 v0.0.0-20210728035756-55ea58c08aeb
+-	github.com/lib/pq v1.10.4
++	github.com/google/uuid v1.6.0
++	github.com/lib/pq v1.12.3
+ 	github.com/mdp/qrterminal/v3 v3.0.0
+ 	github.com/purpshell/meowcaller v0.0.0-20260717112041-9769d5aaaeca
+ 	github.com/rs/zerolog v1.35.1
+ 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
++	go.mau.fi/mautrix-meta v0.2607.0
+ 	go.mau.fi/whatsmeow v0.0.0-20261017175727-b2b1e71d45e2
+ 	golang.org/x/image v0.44.0
+ 	golang.org/x/net v0.61.0
+ 	google.golang.org/protobuf v1.36.12
++	maunium.net/go/mautrix v0.32.0
+ 	modernc.org/sqlite v1.34.5
+ )
+ 
+ require (
+ 	filippo.io/edwards25519 v1.2.0 // indirect
++	github.com/andybalholm/brotli v1.2.4 // indirect
+ 	github.com/beeper/argo-go v1.1.2 // indirect
++	github.com/beeper/poly1305 v0.0.0-20250815183548-d4eede7bbf3c // indirect
+ 	github.com/coder/websocket v1.8.15 // indirect
++	github.com/coreos/go-systemd/v22 v22.7.0 // indirect
+ 	github.com/dustin/go-humanize v1.0.1 // indirect
+ 	github.com/elliotchance/orderedmap/v3 v3.1.0 // indirect
+-	github.com/google/uuid v1.6.0 // indirect
++	github.com/google/go-querystring v1.2.0 // indirect
+ 	github.com/hajimehoshi/go-mp3 v0.3.4 // indirect
+-	github.com/mattn/go-colorable v0.1.14 // indirect
++	github.com/icholy/digest v1.2.0 // indirect
++	github.com/imroc/req/v3 v3.56.0 // indirect
++	github.com/klauspost/compress v1.20.0 // indirect
++	github.com/mattn/go-colorable v0.1.15 // indirect
+ 	github.com/mattn/go-isatty v0.0.20 // indirect
+ 	github.com/ncruces/go-strftime v0.1.9 // indirect
+ 	github.com/petermattis/goid v0.0.0-20260918085751-abfca077860b // indirect
+@@ -35,21 +44,37 @@ require (
+ 	github.com/pion/randutil v0.1.0 // indirect
+ 	github.com/pion/sctp v1.9.4 // indirect
+ 	github.com/pion/transport/v4 v4.0.1 // indirect
++	github.com/quic-go/qpack v0.6.0 // indirect
++	github.com/quic-go/quic-go v0.61.0 // indirect
++	github.com/refraction-networking/utls v1.8.2 // indirect
+ 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
++	github.com/rs/xid v1.6.0 // indirect
++	github.com/tidwall/gjson v1.20.0 // indirect
++	github.com/tidwall/match v1.1.1 // indirect
++	github.com/tidwall/pretty v1.2.1 // indirect
++	github.com/tidwall/sjson v1.2.5 // indirect
+ 	github.com/vektah/gqlparser/v2 v2.5.27 // indirect
++	github.com/yuin/goldmark v1.8.6 // indirect
+ 	go.mau.fi/libsignal v0.2.2 // indirect
+ 	go.mau.fi/util v0.11.0 // indirect
++	go.mau.fi/zeroconfig v0.2.0 // indirect
+ 	golang.org/x/crypto v0.58.0 // indirect
+ 	golang.org/x/exp v0.0.0-20261014143641-f0251eb4aa3e // indirect
+ 	golang.org/x/sync v0.24.0 // indirect
+ 	golang.org/x/sys v0.49.0 // indirect
+ 	golang.org/x/text v0.43.0 // indirect
++	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
++	gopkg.in/yaml.v3 v3.0.1 // indirect
+ 	modernc.org/libc v1.55.3 // indirect
+ 	modernc.org/mathutil v1.6.0 // indirect
+ 	modernc.org/memory v1.8.0 // indirect
+ 	rsc.io/qr v0.2.0 // indirect
+ )
+ 
++// messagix needs beeper's fork of imroc/req, as in mautrix-meta's own go.mod; this revision
++// builds against the quic-go v0.61.0 that the rest of the module graph selects.
++replace github.com/imroc/req/v3 => github.com/beeper/req/v3 v3.0.0-20260925135712-b49593750e56
++
+ // meowcaller is built from a patched checkout of github.com/purpshell/meowcaller at
+ // v0.0.0-20260717112041-9769d5aaaeca (see the LuneOS recipe), placed in third_party/meowcaller.
+ replace github.com/purpshell/meowcaller => ./third_party/meowcaller
+diff --git a/go.sum b/go.sum
+index 8b324c6..ccf0883 100644
+--- a/go.sum
++++ b/go.sum
+@@ -8,16 +8,27 @@ github.com/alfg/mp4 v0.0.0-20210728035756-55ea58c08aeb h1:v8z8Yym2Z/NCYgXO/aFqmY
+ github.com/alfg/mp4 v0.0.0-20210728035756-55ea58c08aeb/go.mod h1:RfuO8OqkqAcWXXkaS3MuymrBQJbKJWi04H/bs6vNvh0=
+ github.com/andreyvit/diff v0.0.0-20170406064948-c7f18ee00883 h1:bvNMNQO63//z+xNgfBlViaCIJKLlCJ6/fmUseuG0wVQ=
+ github.com/andreyvit/diff v0.0.0-20170406064948-c7f18ee00883/go.mod h1:rCTlJbsFo29Kk6CurOXKm700vrz8f0KW0JNfpkRJY/8=
++github.com/andybalholm/brotli v1.2.4 h1:649LN6qF+/7JJYNN3Wdu4Dt5PS6eC/yP/Go3Bb0/AHI=
++github.com/andybalholm/brotli v1.2.4/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
+ github.com/beeper/argo-go v1.1.2 h1:UQI2G8F+NLfGTOmTUI0254pGKx/HUU/etbUGTJv91Fs=
+ github.com/beeper/argo-go v1.1.2/go.mod h1:M+LJAnyowKVQ6Rdj6XYGEn+qcVFkb3R/MUpqkGR0hM4=
++github.com/beeper/poly1305 v0.0.0-20250815183548-d4eede7bbf3c h1:Axyrzr6L42CLNJIQq0S87UhgK0Hq+4hCed4rc6sDdao=
++github.com/beeper/poly1305 v0.0.0-20250815183548-d4eede7bbf3c/go.mod h1:mo9x0FBxrMo75mAnk1ALdXrHfe8NG3C25CFDf4RSRpc=
++github.com/beeper/req/v3 v3.0.0-20260925135712-b49593750e56 h1:VQTcNnqViZfzYJtDue7HUF9Y979KdafTdJkX/DPasSQ=
++github.com/beeper/req/v3 v3.0.0-20260925135712-b49593750e56/go.mod h1:1nX+ECJqEyUXbQHlubo2nKckcfIF7L8+xrG4k4gx1F4=
+ github.com/coder/websocket v1.8.15 h1:6B2JPeOGlpff2Uz6vOEH1Vzpi0iUz20A+lPVhPHtNUA=
+ github.com/coder/websocket v1.8.15/go.mod h1:NX3SzP+inril6yawo5CQXx8+fk145lPDC6pumgx0mVg=
++github.com/coreos/go-systemd/v22 v22.7.0 h1:LAEzFkke61DFROc7zNLX/WA2i5J8gYqe0rSj9KI28KA=
++github.com/coreos/go-systemd/v22 v22.7.0/go.mod h1:xNUYtjHu2EDXbsxz1i41wouACIwT7Ybq9o0BQhMwD0w=
+ github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=
+ github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
+ github.com/elliotchance/orderedmap/v3 v3.1.0 h1:j4DJ5ObEmMBt/lcwIecKcoRxIQUEnw0L804lXYDt/pg=
+ github.com/elliotchance/orderedmap/v3 v3.1.0/go.mod h1:G+Hc2RwaZvJMcS4JpGCOyViCnGeKf0bTYCGTO4uhjSo=
++github.com/google/go-cmp v0.6.0/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=
+ github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
+ github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
++github.com/google/go-querystring v1.2.0 h1:yhqkPbu2/OH+V9BfpCVPZkNmUXhb2gBxJArfhIxNtP0=
++github.com/google/go-querystring v1.2.0/go.mod h1:8IFJqpSRITyJ8QhQ13bmbeMBDfmeEJZD5A0egEOmkqU=
+ github.com/google/pprof v0.0.0-20240409012703-83162a5b38cd h1:gbpYu9NMq8jhDVbvlGkMFWCjLFlqqEZjEmObmhUy6Vo=
+ github.com/google/pprof v0.0.0-20240409012703-83162a5b38cd/go.mod h1:kf6iHlnVGwgKolg33glAes7Yg/8iWP8ukqeldJSO7jw=
+ github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
+@@ -25,11 +36,19 @@ github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+
+ github.com/hajimehoshi/go-mp3 v0.3.4 h1:NUP7pBYH8OguP4diaTZ9wJbUbk3tC0KlfzsEpWmYj68=
+ github.com/hajimehoshi/go-mp3 v0.3.4/go.mod h1:fRtZraRFcWb0pu7ok0LqyFhCUrPeMsGRSVop0eemFmo=
+ github.com/hajimehoshi/oto/v2 v2.3.1/go.mod h1:seWLbgHH7AyUMYKfKYT9pg7PhUu9/SisyJvNTT+ASQo=
+-github.com/lib/pq v1.10.4 h1:SO9z7FRPzA03QhHKJrH5BXA6HU1rS4V2nIVrrNC1iYk=
+-github.com/lib/pq v1.10.4/go.mod h1:AlVN5x4E4T544tWzH6hKfbfQvm3HdbOxrmggDNAPY9o=
++github.com/icholy/digest v1.2.0 h1:oTbG4IsNOmidJ+421ehG7Ty93yt1yotq13kFMG569yw=
++github.com/icholy/digest v1.2.0/go.mod h1:1P1+LzUv48ybX7bu8tVpZ2QWdd+xRuePNuGawHjwRUE=
++github.com/klauspost/compress v1.20.0 h1:a3C1ke2ohxFymNlb2HWAHjDeKCI90scRskErZkR0ezA=
++github.com/klauspost/compress v1.20.0/go.mod h1:LUdAzn7YLVvxLpc7y3V1m40wESHTgc1422pwwBSKYuI=
++github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=
++github.com/kr/pretty v0.3.1/go.mod h1:hoEshYVHaxMs3cyo3Yncou5ZscifuDolrwPKZanG3xk=
++github.com/kr/text v0.2.0 h1:5Nx0Ya0ZqY2ygV366QzturHI13Jq95ApcVaJBhpS+AY=
++github.com/kr/text v0.2.0/go.mod h1:eLer722TekiGuMkidMxC/pM04lWEeraHUUmBw8l2grE=
++github.com/lib/pq v1.12.3 h1:tTWxr2YLKwIvK90ZXEw8GP7UFHtcbTtty8zsI+YjrfQ=
++github.com/lib/pq v1.12.3/go.mod h1:/p+8NSbOcwzAEI7wiMXFlgydTwcgTr3OSKMsD2BitpA=
+ github.com/mattn/go-colorable v0.1.2/go.mod h1:U0ppj6V5qS13XJ6of8GYAs25YV2eR4EVcfRqFIhoBtE=
+-github.com/mattn/go-colorable v0.1.14 h1:9A9LHSqF/7dyVVX6g0U9cwm9pG3kP9gSzcuIPHPsaIE=
+-github.com/mattn/go-colorable v0.1.14/go.mod h1:6LmQG8QLFO4G5z1gPvYEzlUgJ2wF+stgPZH1UqBm1s8=
++github.com/mattn/go-colorable v0.1.15 h1:+u9SLTRGnXv73cEsnsmoZBom+dMU88B2M0aDcWy0/jY=
++github.com/mattn/go-colorable v0.1.15/go.mod h1:6LmQG8QLFO4G5z1gPvYEzlUgJ2wF+stgPZH1UqBm1s8=
+ github.com/mattn/go-isatty v0.0.8/go.mod h1:Iq45c/XA43vh69/j3iqttzPXn0bhXyGjM0Hdxcsrc5s=
+ github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWEY=
+ github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
+@@ -56,8 +75,20 @@ github.com/pion/sctp v1.9.4 h1:cMxEu0F5tbP4qH07bKf1Zjf4rUih9LIo0qQt424e258=
+ github.com/pion/sctp v1.9.4/go.mod h1:N20Dq6LY+JvJDAh9VVh1JELngb2rQ8dPgds5yBWiPgw=
+ github.com/pion/transport/v4 v4.0.1 h1:sdROELU6BZ63Ab7FrOLn13M6YdJLY20wldXW2Cu2k8o=
+ github.com/pion/transport/v4 v4.0.1/go.mod h1:nEuEA4AD5lPdcIegQDpVLgNoDGreqM/YqmEx3ovP4jM=
++github.com/quic-go/go-ossfuzz-seeds v0.1.0 h1:APacT+iIaNF6fd8AGEiN3bT/Jtkd2jz4v4TzM7MFjy0=
++github.com/quic-go/go-ossfuzz-seeds v0.1.0/go.mod h1:3IOHRbJIc+L6YKMwfDtJAM9Vj9k0YY4muhuyUYk5tbk=
++github.com/quic-go/qpack v0.6.0 h1:g7W+BMYynC1LbYLSqRt8PBg5Tgwxn214ZZR34VIOjz8=
++github.com/quic-go/qpack v0.6.0/go.mod h1:lUpLKChi8njB4ty2bFLX2x4gzDqXwUpaO1DP9qMDZII=
++github.com/quic-go/quic-go v0.61.0 h1:ui88A53s8MSVYLC56en0KQ17HARk+9986Dn0SBfKNvA=
++github.com/quic-go/quic-go v0.61.0/go.mod h1:9So2anK4Tp22URSQq00k+Vo2PNkle96ycDPDHL4s9vs=
++github.com/refraction-networking/utls v1.8.2 h1:j4Q1gJj0xngdeH+Ox/qND11aEfhpgoEvV+S9iJ2IdQo=
++github.com/refraction-networking/utls v1.8.2/go.mod h1:jkSOEkLqn+S/jtpEHPOsVv/4V4EVnelwbMQl4vCWXAM=
+ github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=
+ github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
++github.com/rogpeppe/go-internal v1.10.0 h1:TMyTOH3F/DB16zRVcYyreMH6GnZZrwQVAoYjRBZyWFQ=
++github.com/rogpeppe/go-internal v1.10.0/go.mod h1:UQnix2H7Ngw/k4C5ijL5+65zddjncjaFoBhdsK/akog=
++github.com/rs/xid v1.6.0 h1:fV591PaemRlL6JfRxGDEPl69wICngIQ3shQtzfy2gxU=
++github.com/rs/xid v1.6.0/go.mod h1:7XoLgs4eV+QndskICGsho+ADou8ySMSjJKDIan90Nz0=
+ github.com/rs/zerolog v1.35.1 h1:m7xQeoiLIiV0BCEY4Hs+j2NG4Gp2o2KPKmhnnLiazKI=
+ github.com/rs/zerolog v1.35.1/go.mod h1:EjML9kdfa/RMA7h/6z6pYmq1ykOuA8/mjWaEvGI+jcw=
+ github.com/sergi/go-diff v1.3.1 h1:xkr+Oxo4BOQKmkn/B9eMK0g5Kg/983T9DqqPHwYqD+8=
+@@ -66,14 +97,34 @@ github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e h1:MRM5ITcdelLK2j1
+ github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e/go.mod h1:XV66xRDqSt+GTGFMVlhk3ULuV0y9ZmzeVGR4mloJI3M=
+ github.com/stretchr/testify v1.12.0 h1:K6Mr6jO9JICuend/5xzTM03ydSV3vdNRYAdPSukj8uI=
+ github.com/stretchr/testify v1.12.0/go.mod h1:bOYBZb5qJ00vPzWfIqBUZPaxK8jWiXc6d3ErP4Ca9Gw=
++github.com/tidwall/gjson v1.14.2/go.mod h1:/wbyibRr2FHMks5tjHJ5F8dMZh3AcwJEMf5vlfC0lxk=
++github.com/tidwall/gjson v1.20.0 h1:+agJ3rEzKcCXKDKo0ml26UROcpcAlnZyjq+TjbY5Fto=
++github.com/tidwall/gjson v1.20.0/go.mod h1:V37/opeE/JbLUOfH0QTXiNez2l0RUjYUhpT4szFQAfc=
++github.com/tidwall/match v1.1.1 h1:+Ho715JplO36QYgwN9PGYNhgZvoUSc9X2c80KVTi+GA=
++github.com/tidwall/match v1.1.1/go.mod h1:eRSPERbgtNPcGhD8UCthc6PmLEQXEWd3PRB5JTxsfmM=
++github.com/tidwall/pretty v1.2.0/go.mod h1:ITEVvHYasfjBbM0u2Pg8T2nJnzm8xPwvNhhsoaGGjNU=
++github.com/tidwall/pretty v1.2.1 h1:qjsOFOWWQl+N3RsoF5/ssm1pHmJJwhjlSbZ51I6wMl4=
++github.com/tidwall/pretty v1.2.1/go.mod h1:ITEVvHYasfjBbM0u2Pg8T2nJnzm8xPwvNhhsoaGGjNU=
++github.com/tidwall/sjson v1.2.5 h1:kLy8mja+1c9jlljvWTlSazM7cKDRfJuR/bOJhcY5NcY=
++github.com/tidwall/sjson v1.2.5/go.mod h1:Fvgq9kS/6ociJEDnK0Fk1cpYF4FIW6ZF7LAe+6jwd28=
+ github.com/vektah/gqlparser/v2 v2.5.27 h1:RHPD3JOplpk5mP5JGX8RKZkt2/Vwj/PZv0HxTdwFp0s=
+ github.com/vektah/gqlparser/v2 v2.5.27/go.mod h1:D1/VCZtV3LPnQrcPBeR/q5jkSQIPti0uYCP/RI0gIeo=
++github.com/xyproto/randomstring v1.2.0 h1:y7PXAEBM3XlwJjPG2JQg4voxBYZ4+hPgRdGKCfU8wik=
++github.com/xyproto/randomstring v1.2.0/go.mod h1:rgmS5DeNXLivK7YprL0pY+lTuhNQW3iGxZ18UQApw/E=
++github.com/yuin/goldmark v1.8.6 h1:d0VcaP1sx9GkFVkoW+KtggpGi2KZ965i14b0+bDQST4=
++github.com/yuin/goldmark v1.8.6/go.mod h1:ip/1k0VRfGynBgxOz0yCqHrbZXhcjxyuS66Brc7iBKg=
+ go.mau.fi/libsignal v0.2.2 h1:QV+XdzQkm3x3aSG7FcqfGSZuFXz83pRZPBFaPygHbOU=
+ go.mau.fi/libsignal v0.2.2/go.mod h1:CRlIQg2J8uYTfDFvNoO8/KcZjs5cey0vbc6oj/bssY0=
++go.mau.fi/mautrix-meta v0.2607.0 h1:30RnRDgkARyifmsQHOPPIguZY+4PKGyOUb3R5/nlMF8=
++go.mau.fi/mautrix-meta v0.2607.0/go.mod h1:yS5QKbkbHBRWF0J67qDTAYA1UEf7WlXIO2xkr1SF+lc=
+ go.mau.fi/util v0.11.0 h1:JNEpkVRxfTdJUC0DIGKiRlLKzl4G/qLX/eVzoP7QuwY=
+ go.mau.fi/util v0.11.0/go.mod h1:04AEFVsc4zNdIkDC1gkdqbg/nZFolHY50pyXh2DSy7s=
+ go.mau.fi/whatsmeow v0.0.0-20261017175727-b2b1e71d45e2 h1:/2ifXqR9Ls19CcIJ6ukwF8wpS7DJjhviJ3YJzwKa9+o=
+ go.mau.fi/whatsmeow v0.0.0-20261017175727-b2b1e71d45e2/go.mod h1:iY4lm61nTLWsNiIE1EmHUZwhKGBeoV4dhnVE2uMtNoQ=
++go.mau.fi/zeroconfig v0.2.0 h1:e/OGEERqVRRKlgaro7E6bh8xXiKFSXB3eNNIud7FUjU=
++go.mau.fi/zeroconfig v0.2.0/go.mod h1:J0Vn0prHNOm493oZoQ84kq83ZaNCYZnq+noI1b1eN8w=
++go.uber.org/mock v0.6.0 h1:hyF9dfmbgIX5EfOdasqLsWD6xqpNZlXblLB/Dbnwv3Y=
++go.uber.org/mock v0.6.0/go.mod h1:KiVJ4BqZJaMj4svdfmHM0AUx4NJYO8ZNpPnZn1Z+BBU=
+ golang.org/x/crypto v0.58.0 h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=
+ golang.org/x/crypto v0.58.0/go.mod h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w=
+ golang.org/x/exp v0.0.0-20261014143641-f0251eb4aa3e h1:HgI6W1OolKK6tcV74is+rl9SMT0njsHlp0TbQiGXI/A=
+@@ -99,8 +150,17 @@ golang.org/x/tools v0.52.0 h1:ryxg4U63oaUYk7uOLTF37n43f4qgtGvqV4Ioit1BaEs=
+ golang.org/x/tools v0.52.0/go.mod h1:ItcP5UNaVGG+Yc4eIYmaFLNJ4soEopkx5Y2d4lcEurs=
+ google.golang.org/protobuf v1.36.12 h1:pJOKDDOyeXErUroCihFAd5LQuwXBSpVnKGrj5o/fwxc=
+ google.golang.org/protobuf v1.36.12/go.mod h1:HTf+CrKn2C3g5S8VImy6tdcUvCska2kB7j23XfzDpco=
++gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
++gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c h1:Hei/4ADfdWqJk1ZMxUNpqntNwaWcugrBjAiHlqqRiVk=
++gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c/go.mod h1:JHkPIbrfpd72SG/EVd6muEfDQjcINNoR0C8j2r3qZ4Q=
++gopkg.in/natefinch/lumberjack.v2 v2.2.1 h1:bBRl1b0OH9s/DuPhuXpNl+VtCaJXFZ5/uEFST95x9zc=
++gopkg.in/natefinch/lumberjack.v2 v2.2.1/go.mod h1:YD8tP3GAjkrDg1eZH7EGmyESg/lsYskCTPBJVb9jqSc=
+ gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
+ gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
++gotest.tools/v3 v3.5.2 h1:7koQfIKdy+I8UTetycgUqXWSDwpgv193Ka+qRsmBY8Q=
++gotest.tools/v3 v3.5.2/go.mod h1:LtdLGcnqToBH83WByAAi/wiwSFCArdFIUV/xxN4pcjA=
++maunium.net/go/mautrix v0.32.0 h1:xuAZzzyWce0pFkBhV/MCLFiJdVs2rFkY3Eep7hNng4I=
++maunium.net/go/mautrix v0.32.0/go.mod h1:tZSwPzw+/0pa0dxGufkh0uJqM84BNxB6e2I0+S0UyjU=
+ modernc.org/cc/v4 v4.21.4 h1:3Be/Rdo1fpr8GrQ7IVw9OHtplU4gWbb+wNgeoBMmGLQ=
+ modernc.org/cc/v4 v4.21.4/go.mod h1:HM7VJTZbUCR3rV8EYBi9wxnJ0ZBRiGE5OeGXNA0IsLQ=
+ modernc.org/ccgo/v4 v4.19.2 h1:lwQZgvboKD0jBwdaeVCTouxhxAyN6iawF3STraAal8Y=
+diff --git a/gometa.go b/gometa.go
+new file mode 100644
+index 0000000..cc2e60c
+--- /dev/null
++++ b/gometa.go
+@@ -0,0 +1,812 @@
++// gometa.go — the Facebook (messagix) half of the combined plugin. Shares ONE Go runtime
++// with the whatsmeow code (same package main). All package-level identifiers are gometa*-
++// prefixed to avoid clashing with whatsmeow's login/handlers/Handler/reportError.
++//
++// Login is email + password + interactive 2FA (messagix MessengerLite/Bloks DoLoginSteps),
++// NOT a pasted cookie blob: the account's username is the email, its password is the FB
++// password, and any 2FA/captcha step is prompted via purple_request_input. On success the
++// session cookies are cached in the account (setting "gometa_session") so later logins skip
++// the password/2FA entirely.
++package main
++
++/*
++#include "gometabridge.h"
++#include <stdlib.h>
++*/
++import "C"
++
++import (
++	"context"
++	"encoding/json"
++	"fmt"
++	"os"
++	"path/filepath"
++	"strconv"
++	"strings"
++	"sync"
++	"time"
++	"unsafe"
++
++	"github.com/rs/zerolog"
++	"go.mau.fi/mautrix-meta/pkg/messagix"
++	"go.mau.fi/mautrix-meta/pkg/messagix/cookies"
++	"go.mau.fi/mautrix-meta/pkg/messagix/methods"
++	"go.mau.fi/mautrix-meta/pkg/messagix/socket"
++	"go.mau.fi/mautrix-meta/pkg/messagix/table"
++	"go.mau.fi/whatsmeow"
++	"go.mau.fi/mautrix-meta/pkg/messagix/types"
++	"maunium.net/go/mautrix/bridgev2"
++)
++
++const gometaSessionSetting = "gometa_session"
++
++// ---- exported prpl callbacks (wired from the C glue's second prpl) ----
++
++//export gometa_go_login
++func gometa_go_login(account *PurpleAccount, purpleUserDir *C.char, username *C.char, password *C.char, proxy *C.char) {
++	gometaLogin(account, C.GoString(purpleUserDir), C.GoString(username), C.GoString(password), C.GoString(proxy))
++}
++
++//export gometa_go_close
++func gometa_go_close(account *PurpleAccount) {
++	if h, ok := gometaHandlers[account]; ok {
++		h.close()
++	}
++}
++
++//export gometa_go_account_removed
++// Fired from the libpurple "account-removed" signal (see glue/init.c) when a Facebook-E2EE account is
++// DELETED on webOS. Closes any live client and deletes ONLY this account's per-account E2EE store.
++func gometa_go_account_removed(account *PurpleAccount, purpleUserDir *C.char, username *C.char) {
++	gometaAccountRemoved(account, C.GoString(purpleUserDir), C.GoString(username))
++}
++
++// gometaAccountRemoved tears down a deleted Facebook-E2EE account: it closes any live messagix + E2EE
++// (whatsmeow) client for THIS account, then deletes only this account's per-account E2EE store
++// (gometa-e2ee-<username>.db and its -wal/-shm sidecars). The DB path embeds the account username
++// (the FB email, exactly as connectE2EE builds it), so removal is strictly scoped to this account and
++// never touches another account's store. Unlike WhatsApp's shared whatsmeow.db, this per-account file
++// is safe to delete whole. (The messagix E2EE whatsmeow client has MessengerConfig set, so it cannot
++// Logout() server-side — deleting the local Signal store is the correct teardown here.)
++func gometaAccountRemoved(account *PurpleAccount, purpleUserDir, username string) {
++	if h, ok := gometaHandlers[account]; ok {
++		h.close() // disconnect e2ee + messagix client, cancel ctx, drop from registry
++	}
++	if username == "" {
++		return
++	}
++	dbPath := filepath.Join(purpleUserDir, "gometa-e2ee-"+username+".db")
++	for _, p := range []string{dbPath, dbPath + "-wal", dbPath + "-shm"} {
++		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
++			// Best-effort: log to stderr only. Do NOT route through gometaReportError/gometa_process_message
++			// here — those defer a dispatch (purple_timeout_add) that reads the account pointer, but the
++			// account is destroyed synchronously right after this "account-removed" signal returns.
++			fmt.Fprintf(os.Stderr, "gometa: could not remove E2EE store %s: %v\n", p, err)
++		}
++	}
++}
++
++//export gometa_go_send_message
++func gometa_go_send_message(account *PurpleAccount, who *C.char, message *C.char, reply_to *C.char) C.int {
++	// During interactive login the 2FA prompt is shown in a "Facebook" auth chat (imlibpurple
++	// has no request-input UI-op, so purple_request_input can't surface). The user replies with
++	// the code in that chat; if an input prompt is pending for this account, capture the reply
++	// as the code instead of sending it as a real message.
++	gometaInputMu.Lock()
++	ch := gometaInputWaiters[account]
++	gometaInputMu.Unlock()
++	if ch != nil {
++		select {
++		case ch <- strings.TrimSpace(C.GoString(message)):
++		default:
++		}
++		return 1
++	}
++	h, ok := gometaHandlers[account]
++	if !ok {
++		return 0
++	}
++	go h.sendMessage(C.GoString(who), C.GoString(message), C.GoString(reply_to))
++	return 1
++}
++
++//export gometa_go_send_reaction
++// webOS reactions (SEND): react to a Facebook message. targetId = the FB MessageId (plaintext) or the
++// numeric whatsmeow message id (E2EE); emoji = the reaction (ignored when removeFlag=="1"); peer = the
++// thread key; removeFlag "1" removes my reaction. Routes plaintext vs E2EE by e2eeContacts, like
++// sendMessage.
++func gometa_go_send_reaction(account *PurpleAccount, targetId *C.char, emoji *C.char, peer *C.char, removeFlag *C.char) {
++	h, ok := gometaHandlers[account]
++	if !ok {
++		return
++	}
++	remove := C.GoString(removeFlag) == "1"
++	go h.sendReaction(C.GoString(peer), C.GoString(targetId), C.GoString(emoji), remove)
++}
++
++//export gometa_go_submit_input
++// The UI's answer to an interactive login prompt (2FA/captcha code). Empty = cancelled.
++func gometa_go_submit_input(account *PurpleAccount, value *C.char) {
++	gometaInputMu.Lock()
++	ch := gometaInputWaiters[account]
++	gometaInputMu.Unlock()
++	if ch != nil {
++		select {
++		case ch <- C.GoString(value):
++		default:
++		}
++	}
++}
++
++// ---- interactive-input plumbing (2FA/captcha) ----
++
++var (
++	gometaInputMu      sync.Mutex
++	gometaInputWaiters = make(map[*PurpleAccount]chan string)
++)
++
++// promptInput asks the UI for a value and blocks (on a goroutine) until submitted.
++func (h *gometaHandler) promptInput(prompt string) string {
++	ch := make(chan string, 1)
++	gometaInputMu.Lock()
++	gometaInputWaiters[h.account] = ch
++	gometaInputMu.Unlock()
++	defer func() {
++		gometaInputMu.Lock()
++		delete(gometaInputWaiters, h.account)
++		gometaInputMu.Unlock()
++	}()
++	cPrompt := C.CString(prompt)
++	C.gometa_request_input(h.account, cPrompt) // schedules purple_request_input on the main thread
++	C.free(unsafe.Pointer(cPrompt))
++	select {
++	case v := <-ch:
++		return v
++	case <-h.ctx.Done():
++		return ""
++	}
++}
++
++// ---- account settings helpers ----
++
++func gometaGetSetting(account *PurpleAccount, key string) string {
++	cKey := C.CString(key)
++	defer C.free(unsafe.Pointer(cKey))
++	cVal := C.gometa_get_setting(account, cKey)
++	if cVal == nil {
++		return ""
++	}
++	defer C.free(unsafe.Pointer(cVal))
++	return C.GoString(cVal)
++}
++
++func gometaSetSetting(account *PurpleAccount, key, value string) {
++	cKey := C.CString(key)
++	cVal := C.CString(value)
++	defer C.free(unsafe.Pointer(cKey))
++	defer C.free(unsafe.Pointer(cVal))
++	C.gometa_set_setting(account, cKey, cVal)
++}
++
++// ---- handler ----
++
++var gometaHandlers = make(map[*PurpleAccount]*gometaHandler)
++
++type gometaHandler struct {
++	account  *PurpleAccount
++	username string
++	client   *messagix.Client
++	logger   zerolog.Logger
++	ctx      context.Context
++	cancel   context.CancelFunc
++	selfID   int64
++
++	purpleUserDir string
++
++	mu          sync.Mutex
++	threadGroup map[int64]bool   // thread key -> is a group chat
++	contactName map[int64]string // fbid -> display name
++	sentOtids   map[int64]bool   // otids we sent ourselves, to drop their server echo
++
++	// E2EE (whatsmeow) — Messenger encrypted threads ride WhatsApp's Signal transport.
++	e2ee         *whatsmeow.Client
++	e2eeContacts map[int64]bool // fbids known to use E2EE (learned from encrypted messages)
++	// Per encrypted-message metadata (message id -> who sent it). Needed to build the MessageKey when
++	// reacting over E2EE (whatsmeow's ReactionMessage requires the original message's FromMe/sender,
++	// which isn't otherwise recorded per-message). Populated on both send and receive of E2EE messages.
++	e2eeMsgMeta map[string]e2eeMsgInfo
++}
++
++type e2eeMsgInfo struct {
++	fromMe bool
++	sender string // fbid of the original message's sender
++	text   string // webOS replies: the message body, so a reply quoting this id can show its text
++}
++
++func (h *gometaHandler) eventHandler(ctx context.Context, rawEvt any) {
++	switch evt := rawEvt.(type) {
++	case *messagix.Event_Ready:
++		h.logger.Info().Bool("new_session", evt.IsNewSession).Msg("connected (CONNACK)")
++		h.notify(C.gometa_message_type_connected, "", "", 0)
++	case *messagix.Event_Reconnected:
++		h.notify(C.gometa_message_type_connected, "", "", 0)
++	case *messagix.Event_SocketError:
++		h.logger.Warn().Err(evt.Err).Int("attempts", evt.ConnectionAttempts).Msg("socket error")
++	case *messagix.Event_PermanentError:
++		h.notifyError(fmt.Sprintf("Facebook connection failed: %v", evt.Err), true)
++	case *messagix.Event_PublishResponse:
++		h.parseTable(evt.Table)
++	default:
++		h.logger.Trace().Str("type", fmt.Sprintf("%T", rawEvt)).Msg("unhandled event")
++	}
++}
++
++// sendMessage sends a text message to a thread. `who` is the thread key: for a 1:1 chat it's the
++// recipient's fbid (send_im buddy id); for a group it's the thread key resolved from the chat
++// conversation name (see gometa_chat_send). Non-E2EE send via the messagix SendMessageTask; E2EE
++// threads are a later milestone (PrepareE2EEClient/whatsmeow).
++func (h *gometaHandler) sendMessage(who, text, replyTo string) {
++	threadID, err := strconv.ParseInt(who, 10, 64)
++	if err != nil {
++		h.notifyError(fmt.Sprintf("Cannot send: invalid recipient %q", who), false)
++		return
++	}
++	if h.client == nil {
++		h.notifyError("Cannot send: Facebook not connected", false)
++		return
++	}
++	// Encrypted threads must go over the whatsmeow (E2EE) transport — a plaintext task to an
++	// E2EE thread is silently rejected by Facebook (HandleInvalidSendToOpen).
++	h.mu.Lock()
++	isE2EE := h.e2eeContacts[threadID]
++	h.mu.Unlock()
++	if isE2EE {
++		if h.e2ee == nil {
++			h.notifyError("Cannot send: this is an encrypted thread and E2EE isn't connected yet", false)
++			return
++		}
++		if err := h.sendE2EE(threadID, text, replyTo); err != nil {
++			h.logger.Warn().Err(err).Int64("thread", threadID).Msg("e2ee send failed")
++			h.notifyError(fmt.Sprintf("Failed to send encrypted message: %v", err), false)
++			return
++		}
++		h.logger.Info().Int64("thread", threadID).Msg("e2ee message sent")
++		return
++	}
++	ctx, cancel := context.WithTimeout(h.ctx, 30*time.Second)
++	defer cancel()
++	if werr := h.client.WaitUntilCanSendMessages(ctx, 20*time.Second); werr != nil {
++		h.notifyError(fmt.Sprintf("Cannot send yet (connecting): %v", werr), false)
++		return
++	}
++	otid := methods.GenerateEpochID()
++	h.mu.Lock()
++	h.sentOtids[otid] = true
++	h.mu.Unlock()
++	task := &socket.SendMessageTask{
++		ThreadId:         threadID,
++		Otid:             otid,
++		Source:           table.MESSENGER_INBOX_IN_THREAD,
++		InitiatingSource: table.FACEBOOK_INBOX,
++		SendType:         table.TEXT,
++		SyncGroup:        1,
++		Text:             text,
++	}
++	// webOS replies: thread the reply on the network so other clients link it to the original.
++	if replyTo != "" {
++		task.ReplyMetaData = &socket.ReplyMetaData{ReplyMessageId: replyTo, ReplySourceType: 1, ReplyType: 0}
++	}
++	resp, err := h.client.ExecuteTasks(ctx, task)
++	if err != nil {
++		h.logger.Warn().Err(err).Int64("thread", threadID).Msg("send failed")
++		h.notifyError(fmt.Sprintf("Failed to send Facebook message: %v", err), false)
++		return
++	}
++	// A successful send echoes our OTID back in LSReplaceOptimsiticMessage. If it's absent, Facebook
++	// rejected the plaintext send — almost always because the thread is actually E2EE (the
++	// HandleInvalidSendToOpen case). Auto-retry over the encrypted transport and remember it.
++	otidStr := strconv.FormatInt(otid, 10)
++	confirmed := false
++	serverMsgID := ""
++	if resp != nil {
++		for _, r := range resp.LSReplaceOptimsiticMessage {
++			if r.OfflineThreadingId == otidStr {
++				confirmed = true
++				serverMsgID = r.MessageId // the FB MessageId matching our otid
++				break
++			}
++		}
++	}
++	if confirmed {
++		h.logger.Info().Int64("thread", threadID).Msg("message sent")
++		// webOS outbox-id: hand the server-assigned FB MessageId to the transport so this app-sent
++		// message's Outbox row becomes reactable (react-to-your-own-message).
++		if serverMsgID != "" {
++			purple_handle_outbox_id(h.account, serverMsgID, text)
++		}
++		return
++	}
++	h.mu.Lock()
++	delete(h.sentOtids, otid) // no echo will come for a rejected send
++	h.mu.Unlock()
++	h.logger.Warn().Int64("thread", threadID).Msg("plaintext send not confirmed; treating thread as E2EE")
++	if h.e2ee == nil {
++		h.notifyError("Couldn't send — this looks like an encrypted thread and E2EE isn't connected yet.", false)
++		return
++	}
++	h.mu.Lock()
++	h.e2eeContacts[threadID] = true
++	h.mu.Unlock()
++	if eerr := h.sendE2EE(threadID, text, replyTo); eerr != nil {
++		h.logger.Warn().Err(eerr).Int64("thread", threadID).Msg("e2ee retry failed")
++		h.notifyError(fmt.Sprintf("Failed to send encrypted message: %v", eerr), false)
++		return
++	}
++	h.logger.Info().Int64("thread", threadID).Msg("e2ee message sent (after plaintext rejection)")
++}
++
++// sendReaction sends (or removes, when reaction is empty) a reaction to a Facebook message. Plaintext
++// threads use the messagix SendReactionTask; encrypted threads route over the whatsmeow transport
++// (sendReactionE2EE), mirroring sendMessage's plaintext-vs-E2EE split.
++func (h *gometaHandler) sendReaction(peer, targetID, emoji string, remove bool) {
++	threadID, err := strconv.ParseInt(peer, 10, 64)
++	if err != nil {
++		h.notifyError(fmt.Sprintf("Cannot react: invalid recipient %q", peer), false)
++		return
++	}
++	reaction := emoji
++	if remove {
++		reaction = ""
++	}
++	h.mu.Lock()
++	isE2EE := h.e2eeContacts[threadID]
++	h.mu.Unlock()
++	if isE2EE {
++		if h.e2ee == nil {
++			h.notifyError("Cannot react: this is an encrypted thread and E2EE isn't connected yet", false)
++			return
++		}
++		if err := h.sendReactionE2EE(threadID, targetID, reaction); err != nil {
++			h.logger.Warn().Err(err).Int64("thread", threadID).Msg("e2ee reaction failed")
++		}
++		return
++	}
++	if h.client == nil {
++		h.notifyError("Cannot react: Facebook not connected", false)
++		return
++	}
++	ctx, cancel := context.WithTimeout(h.ctx, 30*time.Second)
++	defer cancel()
++	if werr := h.client.WaitUntilCanSendMessages(ctx, 20*time.Second); werr != nil {
++		h.notifyError(fmt.Sprintf("Cannot react yet (connecting): %v", werr), false)
++		return
++	}
++	task := &socket.SendReactionTask{
++		ThreadKey: threadID,
++		MessageID: targetID,
++		ActorID:   h.selfID,
++		Reaction:  reaction,
++		SyncGroup: 1,
++	}
++	if _, err := h.client.ExecuteTasks(ctx, task); err != nil {
++		h.logger.Warn().Err(err).Int64("thread", threadID).Msg("reaction send failed")
++		h.notifyError(fmt.Sprintf("Failed to send reaction: %v", err), false)
++	}
++}
++
++func (h *gometaHandler) close() {
++	if h.cancel != nil {
++		h.cancel()
++	}
++	if h.e2ee != nil {
++		h.e2ee.Disconnect()
++	}
++	if h.client != nil {
++		h.client.Disconnect()
++	}
++	delete(gometaHandlers, h.account)
++}
++
++func (h *gometaHandler) notify(msgtype C.int, who, text string, ts int64) {
++	msg := C.gometa_message_t{account: h.account, msgtype: C.char(msgtype), timestamp: C.time_t(ts)}
++	if who != "" {
++		msg.who = C.CString(who)
++	}
++	if text != "" {
++		msg.text = C.CString(text)
++	}
++	C.gometa_process_message(msg)
++}
++
++func (h *gometaHandler) notifyError(text string, fatal bool) {
++	gometaReportError(h.account, text, fatal)
++}
++
++func gometaReportError(account *PurpleAccount, text string, fatal bool) {
++	msg := C.gometa_message_t{account: account, msgtype: C.char(C.gometa_message_type_error), text: C.CString(text)}
++	if fatal {
++		msg.fatal = 1
++	}
++	C.gometa_process_message(msg)
++}
++
++// ---- LSTable -> purple (contacts, group chats, incoming messages) ----
++
++// parseTable translates a Facebook LSTable (from the initial load or a realtime publish) into
++// buddies, group chats and messages. Called from the login goroutine and event goroutines, so
++// the shared maps are mutex-guarded.
++func (h *gometaHandler) parseTable(tbl *table.LSTable) {
++	if tbl == nil {
++		return
++	}
++	// Full contact rows.
++	for _, c := range tbl.LSDeleteThenInsertContact {
++		h.addContact(c.Id, c.Name)
++	}
++	// Referenced contacts (arrive when a thread/message names someone); skip our own row.
++	for _, c := range tbl.LSVerifyContactRowExists {
++		if c.IsSelf {
++			continue
++		}
++		h.addContact(c.ContactId, c.Name)
++	}
++	// Threads: a 1:1 thread's ThreadKey IS the other user's fbid (ThreadName = their name),
++	// so it becomes a buddy; a group thread becomes a chat.
++	for _, t := range tbl.LSDeleteThenInsertThread {
++		if t.ThreadKey == 0 {
++			continue
++		}
++		isGroup := !t.ThreadType.IsOneToOne()
++		h.mu.Lock()
++		h.threadGroup[t.ThreadKey] = isGroup
++		// Threads already typed as "encrypted over WA" are E2EE — flag them so sends route
++		// over the whatsmeow transport without waiting to receive an encrypted message first.
++		if t.ThreadType.IsWhatsApp() {
++			h.e2eeContacts[t.ThreadKey] = true
++		}
++		h.mu.Unlock()
++		if isGroup {
++			h.notifyChat(t.ThreadKey, t.ThreadName)
++		} else {
++			h.addContact(t.ThreadKey, t.ThreadName)
++		}
++	}
++	// Group participants become buddies too.
++	for _, p := range tbl.LSAddParticipantIdToGroupThread {
++		h.addContact(p.ContactId, p.Nickname)
++	}
++	// Contact presence (online/offline). Status 0 = offline; non-zero = active/available.
++	for _, p := range tbl.LSDeleteThenInsertContactPresence {
++		if p.ContactId == 0 {
++			continue
++		}
++		h.notifyPresence(p.ContactId, p.Status != 0)
++	}
++	for _, m := range tbl.LSInsertMessage {
++		h.handleMessage(m.ThreadKey, m.SenderId, m.Text, m.OfflineThreadingId, m.MessageId, m.TimestampMs)
++	}
++	for _, m := range tbl.LSUpsertMessage {
++		h.handleMessage(m.ThreadKey, m.SenderId, m.Text, m.OfflineThreadingId, m.MessageId, m.TimestampMs)
++	}
++	// webOS reactions: attach a reaction to its TARGET message (by MessageId) via the shared
++	// "webos-im-reaction" signal instead of a separate message. Facebook sends these as both V1 and
++	// V2 tables; add/change carries the emoji, delete removes it (emoji "").
++	for _, r := range tbl.LSUpsertReaction {
++		h.notifyReaction(r.ThreadKey, r.MessageId, r.ActorId, r.Reaction)
++	}
++	for _, r := range tbl.LSUpdateOrInsertReactionV2 {
++		h.notifyReaction(r.ThreadKey, r.MessageID, r.ReactionFBID, r.ReactionLiteral)
++	}
++	for _, r := range tbl.LSDeleteReaction {
++		h.notifyReaction(r.ThreadKey, r.MessageId, r.ActorId, "")
++	}
++	for _, r := range tbl.LSDeleteReactionV2 {
++		h.notifyReaction(r.ThreadKey, r.MessageID, r.ReactionFBID, "")
++	}
++	// webOS delivery/read receipts: the peer delivered/read our outgoing messages up to a per-thread
++	// watermark timestamp (Facebook has no per-message receipt). Emit a watermark scoped by ThreadKey
++	// (== the recipient's fbid / the outbox row's to.addr for a 1:1 thread); the transport marks every
++	// outgoing message whose timestamp is at/under it. Skip our own read position (ContactId == self).
++	for _, r := range tbl.LSUpdateReadReceipt {
++		if r.ContactId == h.selfID || r.ThreadKey == 0 || r.ReadWatermarkTimestampMs == 0 {
++			continue
++		}
++		purple_handle_receipt_watermark(h.account, "ts:"+strconv.FormatInt(r.ThreadKey, 10),
++			strconv.FormatInt(r.ReadWatermarkTimestampMs, 10), "read")
++	}
++	for _, r := range tbl.LSUpdateDeliveryReceipt {
++		if r.ContactId == h.selfID || r.ThreadKey == 0 || r.DeliveredWatermarkTimestampMs == 0 {
++			continue
++		}
++		purple_handle_receipt_watermark(h.account, "ts:"+strconv.FormatInt(r.ThreadKey, 10),
++			strconv.FormatInt(r.DeliveredWatermarkTimestampMs, 10), "delivered")
++	}
++}
++
++// addContact records a display name and adds/updates the buddy, skipping empty ids and self.
++func (h *gometaHandler) addContact(id int64, name string) {
++	if id == 0 || id == h.selfID {
++		return
++	}
++	h.mu.Lock()
++	if name != "" {
++		h.contactName[id] = name
++	}
++	h.mu.Unlock()
++	h.notifyBuddy(id, name)
++}
++
++func (h *gometaHandler) handleMessage(threadKey, senderID int64, text, offlineThreadingID, messageID string, tsMs int64) {
++	if text == "" || threadKey == 0 {
++		return
++	}
++	// Drop the server echo of a message we just sent from here (the transport already recorded it).
++	if offlineThreadingID != "" {
++		if otid, err := strconv.ParseInt(offlineThreadingID, 10, 64); err == nil {
++			h.mu.Lock()
++			mine := h.sentOtids[otid]
++			delete(h.sentOtids, otid)
++			h.mu.Unlock()
++			if mine {
++				return
++			}
++		}
++	}
++	h.mu.Lock()
++	isGroup := h.threadGroup[threadKey]
++	name := h.contactName[senderID]
++	partnerName := h.contactName[threadKey]
++	h.mu.Unlock()
++	// For a 1:1 thread the ThreadKey is the conversation partner's fbid — make sure they exist
++	// as a buddy even if we never saw a thread/contact row for them.
++	if !isGroup {
++		h.addContact(threadKey, partnerName)
++	}
++	h.notifyMessage(strconv.FormatInt(threadKey, 10), strconv.FormatInt(senderID, 10),
++		name, text, messageID, tsMs/1000, isGroup, senderID == h.selfID, "", "", "")
++}
++
++// webOS reactions: forward a Facebook reaction to the shared "webos-im-reaction" signal (via the
++// account-agnostic purple_handle_reaction) so it attaches to the target message. emoji "" = removed.
++func (h *gometaHandler) notifyReaction(threadKey int64, messageID string, actorID int64, emoji string) {
++	if messageID == "" {
++		return
++	}
++	purple_handle_reaction(h.account, strconv.FormatInt(threadKey, 10), messageID,
++		emoji, strconv.FormatInt(actorID, 10))
++}
++
++func (h *gometaHandler) notifyBuddy(id int64, name string) {
++	msg := C.gometa_message_t{account: h.account, msgtype: C.char(C.gometa_message_type_buddy)}
++	msg.who = C.CString(strconv.FormatInt(id, 10))
++	if name != "" {
++		msg.name = C.CString(name)
++	}
++	C.gometa_process_message(msg)
++}
++
++func (h *gometaHandler) notifyPresence(fbid int64, online bool) {
++	msg := C.gometa_message_t{account: h.account, msgtype: C.char(C.gometa_message_type_presence)}
++	msg.who = C.CString(strconv.FormatInt(fbid, 10))
++	if online {
++		msg.isOutgoing = 1
++	}
++	C.gometa_process_message(msg)
++}
++
++func (h *gometaHandler) notifyChat(threadKey int64, name string) {
++	msg := C.gometa_message_t{account: h.account, msgtype: C.char(C.gometa_message_type_chat)}
++	msg.conv = C.CString(strconv.FormatInt(threadKey, 10))
++	if name != "" {
++		msg.name = C.CString(name)
++	}
++	C.gometa_process_message(msg)
++}
++
++func (h *gometaHandler) notifyMessage(conv, who, name, text, messageID string, ts int64, isGroup, isOutgoing bool, quotedText, quotedFrom, quotedId string) {
++	msg := C.gometa_message_t{account: h.account, msgtype: C.char(C.gometa_message_type_text), timestamp: C.time_t(ts)}
++	msg.conv = C.CString(conv)
++	msg.who = C.CString(who)
++	if name != "" {
++		msg.name = C.CString(name)
++	}
++	msg.text = C.CString(text)
++	// webOS reactions: carry the Facebook MessageId so the bridge can stash it on the conversation
++	// -> stored as serviceMessageId, which a later reaction (LSUpsertReaction.MessageId) targets.
++	if messageID != "" {
++		msg.id = C.CString(messageID)
++	}
++	// webOS replies: carry the quoted-original (if this message is a reply) to the C stash.
++	if quotedText != "" {
++		msg.quotedText = C.CString(quotedText)
++		if quotedFrom != "" {
++			msg.quotedFrom = C.CString(quotedFrom)
++		}
++		if quotedId != "" {
++			msg.quotedId = C.CString(quotedId)
++		}
++	}
++	if isGroup {
++		msg.isGroup = 1
++	}
++	if isOutgoing {
++		msg.isOutgoing = 1
++	}
++	C.gometa_process_message(msg)
++}
++
++// ---- login ----
++
++func gometaLogin(account *PurpleAccount, purpleUserDir, email, password, proxy string) {
++	if _, ok := gometaHandlers[account]; ok {
++		gometaReportError(account, "This connection already exists.", true)
++		return
++	}
++	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.Kitchen}).
++		With().Str("account", email).Timestamp().Logger()
++	ctx, cancel := context.WithCancel(context.Background())
++	h := &gometaHandler{
++		account: account, username: email, logger: logger, ctx: ctx, cancel: cancel,
++		purpleUserDir: purpleUserDir,
++		threadGroup:   make(map[int64]bool), contactName: make(map[int64]string),
++		sentOtids:    make(map[int64]bool),
++		e2eeContacts: make(map[int64]bool),
++		e2eeMsgMeta:  make(map[string]e2eeMsgInfo),
++	}
++	gometaHandlers[account] = h
++
++	go func() {
++		ck, err := h.obtainCookies(email, password)
++		if err != nil {
++			h.notifyError(fmt.Sprintf("Facebook login failed: %v", err), true)
++			return
++		}
++		h.selfID = ck.GetUserID()
++		client := messagix.NewClient(ck, logger, &messagix.Config{})
++		h.client = client
++		client.SetEventHandler(h.eventHandler)
++
++		loadCtx, loadCancel := context.WithTimeout(ctx, 90*time.Second)
++		user, tbl, err := client.LoadMessagesPage(loadCtx)
++		loadCancel()
++		if err != nil {
++			// cached cookies may have expired — drop them so the next attempt re-does credentials
++			gometaSetSetting(account, gometaSessionSetting, "")
++			h.notifyError(fmt.Sprintf("Facebook load failed (session may have expired, try again): %v", err), true)
++			return
++		}
++		h.logger.Info().Str("name", user.GetName()).Msg("authenticated")
++		// Buddies come from the tables themselves (threads, participants, contact rows) — Messenger
++		// does not hand over a bulk friend list on login (the search task 452 times out), so we
++		// mirror mautrix-meta and create contacts lazily from every table we receive, here and in
++		// the realtime publish stream (see parseTable + eventHandler).
++		h.parseTable(tbl)
++		if err := client.Connect(ctx); err != nil {
++			h.notifyError(fmt.Sprintf("Facebook connect failed: %v", err), true)
++			return
++		}
++		// Bring up the E2EE (whatsmeow) transport so encrypted threads can send/receive.
++		// Non-fatal: plaintext threads keep working even if this fails.
++		if err := h.connectE2EE(ck.GetUserID()); err != nil {
++			h.logger.Warn().Err(err).Msg("E2EE setup failed (encrypted threads unavailable)")
++		}
++	}()
++}
++
++// obtainCookies returns a usable messagix session: cached cookies if present, otherwise the
++// email/password login. For two-factor it AUTO-SELECTS "Notification on another device"
++// (login approval — no typed code; you approve on your phone) and waits. Code-based methods
++// (authenticator/SMS/email/backup) are not supported yet (they'd need an interactive prompt
++// the webOS transport can't surface) and abort with a clear message — NEVER loop.
++func (h *gometaHandler) obtainCookies(email, password string) (*cookies.Cookies, error) {
++	// 1) cached session
++	if blob := gometaGetSetting(h.account, gometaSessionSetting); blob != "" {
++		ck := &cookies.Cookies{Platform: types.Facebook}
++		if err := json.Unmarshal([]byte(blob), ck); err == nil && ck.IsLoggedIn() {
++			h.logger.Info().Msg("using cached Facebook session")
++			return ck, nil
++		}
++	}
++	if email == "" || password == "" {
++		return nil, fmt.Errorf("enter your Facebook email and password")
++	}
++	// Bound the whole login so an unapproved login-approval can't wait forever.
++	ctx, cancel := context.WithTimeout(h.ctx, 5*time.Minute)
++	defer cancel()
++
++	loginClient := messagix.NewClient(&cookies.Cookies{Platform: types.MessengerLite}, h.logger, &messagix.Config{})
++	var userInput map[string]string
++	credsSent := false
++	for iter := 0; iter < 40; iter++ { // hard loop guard
++		step, newCookies, err := loginClient.MessengerLite.DoLoginSteps(ctx, userInput)
++		if err != nil {
++			return nil, err
++		}
++		if step == nil { // login complete
++			if newCookies == nil {
++				return nil, fmt.Errorf("login returned no session")
++			}
++			ck := &cookies.Cookies{Platform: types.Facebook}
++			ck.UpdateValues(newCookies.GetAll())
++			if b, e := json.Marshal(ck); e == nil {
++				gometaSetSetting(h.account, gometaSessionSetting, string(b))
++			}
++			return ck, nil
++		}
++		switch step.Type {
++		case bridgev2.LoginStepTypeDisplayAndWait:
++			// Login approval: Facebook sent a notification to your other device. The next
++			// DoLoginSteps call blocks (polling on a timer) until you approve — not a busy loop.
++			h.logger.Info().Str("info", step.Instructions).Msg("waiting for login approval on your other device")
++			userInput = nil
++		case bridgev2.LoginStepTypeUserInput:
++			ui, err := h.fillLoginStep(step, email, password, &credsSent)
++			if err != nil {
++				return nil, err // can't fill (code method / rejected creds) -> abort, do not loop
++			}
++			userInput = ui
++		default:
++			return nil, fmt.Errorf("unsupported Facebook login step %q", step.Type)
++		}
++	}
++	return nil, fmt.Errorf("Facebook login did not complete")
++}
++
++// fillLoginStep builds the submit map: email/password from the account, 2FA method auto-set
++// to login-approval. Returns an error (which aborts the login) for anything requiring a typed
++// code, so we never spin on a prompt that can't be shown.
++func (h *gometaHandler) fillLoginStep(step *bridgev2.LoginStep, email, password string, credsSent *bool) (map[string]string, error) {
++	out := map[string]string{}
++	if step.UserInputParams == nil {
++		return out, nil
++	}
++	for _, f := range step.UserInputParams.Fields {
++		switch f.Type {
++		case bridgev2.LoginInputFieldTypeEmail, bridgev2.LoginInputFieldTypeUsername, bridgev2.LoginInputFieldTypePhoneNumber:
++			if *credsSent {
++				return nil, fmt.Errorf("Facebook rejected the email/password")
++			}
++			out[f.ID] = email
++		case bridgev2.LoginInputFieldTypePassword:
++			out[f.ID] = password
++			*credsSent = true
++		case bridgev2.LoginInputFieldTypeSelect:
++			// 2FA method picker: choose a code method (Authentication app / Text message);
++			// the code is then entered in the Facebook auth chat (see the 2FACode case).
++			choice := gometaPreferredMFA(f.Options)
++			if choice == "" {
++				return nil, fmt.Errorf("this Facebook account offers no code-based two-factor method we can use (%v) — enable Authentication app or Text message in Facebook Security settings", f.Options)
++			}
++			h.logger.Info().Str("mfa", choice).Msg("selecting 2FA method")
++			out[f.ID] = choice
++		case bridgev2.LoginInputFieldType2FACode:
++			// Facebook wants the login/2FA code. imlibpurple has no request-input UI-op, so we
++			// surface the prompt in a "Facebook" auth chat and block until the user replies
++			// there with the code (captured in gometa_go_send_message). Mirrors Telegram.
++			h.logger.Info().Str("prompt", step.Instructions).Msg("waiting for 2FA code from the Facebook auth chat")
++			code := strings.TrimSpace(h.promptInput("Facebook needs your login/2FA code. Reply to this chat with the code: " + step.Instructions))
++			if code == "" {
++				return nil, fmt.Errorf("no Facebook 2FA code was entered")
++			}
++			out[f.ID] = code
++		default:
++			return nil, fmt.Errorf("this Facebook login needs a typed %q, which isn't supported yet", f.Type)
++		}
++	}
++	return out, nil
++}
++
++// gometaPreferredMFA picks a 2FA method we can complete by typing a code into the Facebook
++// auth chat. Code methods are preferred in this order. "Notification on another device" (AFAD)
++// is deliberately NOT selected: Meta rejects it in this messagix flow (the afad_state.async RPC
++// returns an error, which older mautrix-meta even crashes parsing), so it can never complete.
++func gometaPreferredMFA(options []string) string {
++	for _, want := range []string{"Authentication app", "Text message", "WhatsApp"} {
++		for _, o := range options {
++			if o == want {
++				return o
++			}
++		}
++	}
++	return ""
++}
+diff --git a/gometa_e2ee.go b/gometa_e2ee.go
+new file mode 100644
+index 0000000..0a19a1a
+--- /dev/null
++++ b/gometa_e2ee.go
+@@ -0,0 +1,303 @@
++package main
++
++// Facebook Messenger E2EE (encrypted threads) support. Messenger's end-to-end encryption rides
++// WhatsApp's Signal transport ("encrypted over WA"), so messagix exposes a whatsmeow client for it
++// via RegisterE2EE + PrepareE2EEClient. Encrypted threads CANNOT use the plaintext SendMessageTask
++// (Facebook rejects it with HandleInvalidSendToOpen) — they must go through this whatsmeow client.
++//
++// The whatsmeow device (Signal identity + prekeys) is persisted in a per-account SQLite DB (pure-Go
++// modernc driver, registered by login.go) so the E2EE session survives restarts. This client is
++// entirely separate from the WhatsApp account's own whatsmeow client (different device + DB).
++
++import (
++	"context"
++	"database/sql"
++	"fmt"
++	"path/filepath"
++	"strconv"
++	"time"
++
++	"github.com/google/uuid"
++	"go.mau.fi/whatsmeow"
++	"go.mau.fi/whatsmeow/proto/waCommon"
++	"go.mau.fi/whatsmeow/proto/waConsumerApplication"
++	"go.mau.fi/whatsmeow/proto/waMsgApplication"
++	"go.mau.fi/whatsmeow/store"
++	"go.mau.fi/whatsmeow/store/sqlstore"
++	waTypes "go.mau.fi/whatsmeow/types"
++	"go.mau.fi/whatsmeow/types/events"
++	waLog "go.mau.fi/whatsmeow/util/log"
++	"go.mau.fi/mautrix-meta/pkg/messagix/methods"
++	"google.golang.org/protobuf/proto"
++)
++
++const gometaWADeviceSetting = "gometa_wa_jid"
++
++// connectE2EE registers (once) and connects the whatsmeow client that carries Messenger's
++// encrypted threads. Best-effort: a failure only disables encrypted threads, not plaintext ones.
++func (h *gometaHandler) connectE2EE(fbid int64) error {
++	dbLog := waLog.Zerolog(h.logger.With().Str("component", "e2ee-db").Logger())
++	dbPath := filepath.Join(h.purpleUserDir, "gometa-e2ee-"+h.username+".db")
++	addr := "file:" + dbPath + "?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"
++	db, err := sql.Open("sqlite", addr)
++	if err != nil {
++		return fmt.Errorf("open e2ee db: %w", err)
++	}
++	db.SetMaxOpenConns(1)
++	container := sqlstore.NewWithDB(db, "sqlite", dbLog)
++	if err := container.Upgrade(h.ctx); err != nil {
++		return fmt.Errorf("upgrade e2ee db: %w", err)
++	}
++
++	// Reuse the saved device if we have one, otherwise register a fresh one.
++	var device *store.Device
++	if jidStr := gometaGetSetting(h.account, gometaWADeviceSetting); jidStr != "" {
++		if jid, perr := waTypes.ParseJID(jidStr); perr == nil {
++			device, _ = container.GetDevice(h.ctx, jid)
++		}
++	}
++	isNew := device == nil
++	if isNew {
++		device = container.NewDevice()
++	}
++	if suggested := h.client.MessengerLite.GetSuggestedDeviceID(); suggested != uuid.Nil {
++		device.FacebookUUID = suggested
++	}
++	h.client.SetDevice(device)
++
++	if isNew {
++		h.logger.Info().Msg("registering new E2EE device")
++		if err := h.client.RegisterE2EE(h.ctx, fbid); err != nil {
++			return fmt.Errorf("register e2ee: %w", err)
++		}
++		if device.ID != nil {
++			gometaSetSetting(h.account, gometaWADeviceSetting, device.ID.String())
++		}
++		if err := device.Save(h.ctx); err != nil {
++			return fmt.Errorf("save e2ee device: %w", err)
++		}
++	}
++
++	e2ee, err := h.client.PrepareE2EEClient()
++	if err != nil {
++		return fmt.Errorf("prepare e2ee client: %w", err)
++	}
++	e2ee.AddEventHandler(h.e2eeEventHandler)
++	if err := e2ee.Connect(); err != nil {
++		return fmt.Errorf("connect e2ee socket: %w", err)
++	}
++	h.e2ee = e2ee
++	h.logger.Info().Msg("E2EE (whatsmeow) client connected")
++	return nil
++}
++
++// e2eeEventHandler receives events from the encrypted (whatsmeow) socket.
++func (h *gometaHandler) e2eeEventHandler(rawEvt any) {
++	switch evt := rawEvt.(type) {
++	case *events.FBMessage:
++		h.handleE2EEMessage(evt)
++	case *events.Connected:
++		h.logger.Info().Msg("E2EE socket connected")
++	case *events.LoggedOut:
++		h.logger.Warn().Msg("E2EE socket logged out")
++	case *events.Receipt:
++		// webOS delivery/read receipts on E2EE (encrypted Messenger) threads: these arrive as
++		// whatsmeow receipts on this socket (FB E2EE rides WhatsApp's transport), NOT as the messagix
++		// LSUpdate*Receipt tables handled in parseTable. evt.MessageIDs are the OTIDs we surfaced as
++		// serviceMessageId, so key on them directly (same by-id path as WhatsApp).
++		var status string
++		if evt.Type == waTypes.ReceiptTypeRead || evt.Type == waTypes.ReceiptTypeReadSelf {
++			status = "read"
++		} else if evt.Type == waTypes.ReceiptTypeDelivered {
++			status = "delivered"
++		}
++		if status != "" {
++			for _, mid := range evt.MessageIDs {
++				purple_handle_receipt(h.account, string(mid), status)
++			}
++		}
++	default:
++		// Surface anything we don't handle (e.g. if reactions ever arrive as a distinct event type
++		// rather than an FBMessage) so it's visible in the log instead of silently dropped.
++		h.logger.Debug().Str("type", fmt.Sprintf("%T", rawEvt)).Msg("unhandled E2EE event")
++	}
++}
++
++// handleE2EEMessage turns an encrypted message into a buddy + incoming message, and records the
++// chat/sender as E2EE so future sends to them route over the encrypted transport.
++func (h *gometaHandler) handleE2EEMessage(evt *events.FBMessage) {
++	chatFbid, _ := strconv.ParseInt(evt.Info.Chat.User, 10, 64)
++	senderFbid, _ := strconv.ParseInt(evt.Info.Sender.User, 10, 64)
++	if chatFbid == 0 {
++		return
++	}
++	h.mu.Lock()
++	h.e2eeContacts[chatFbid] = true
++	if senderFbid != 0 {
++		h.e2eeContacts[senderFbid] = true
++	}
++	name := h.contactName[senderFbid]
++	// Drop the echo of a message we just sent from here (tracked by the id we passed to SendFBMessage).
++	var mine bool
++	if otid, err := strconv.ParseInt(string(evt.Info.ID), 10, 64); err == nil {
++		mine = h.sentOtids[otid]
++		delete(h.sentOtids, otid)
++	}
++	h.mu.Unlock()
++	if mine {
++		return
++	}
++
++	var text string
++	if consumer, ok := evt.Message.(*waConsumerApplication.ConsumerApplication); ok {
++		content := consumer.GetPayload().GetContent()
++		// webOS reactions: on an ENCRYPTED Messenger thread a reaction arrives HERE as a
++		// ConsumerApplication carrying a ReactionMessage (over the whatsmeow socket) - NOT via the
++		// messagix LSUpsertReaction table that plaintext threads use. Forward it to the shared
++		// "webos-im-reaction" signal so it attaches to the target message, then return (nothing to
++		// display). Key.ID = the reacted-to message id (matches the serviceMessageId we stored from
++		// evt.Info.ID); Text = the emoji ("" means the reaction was removed); sender = who reacted.
++		if rm := content.GetReactionMessage(); rm != nil {
++			targetID := rm.GetKey().GetID()
++			if targetID != "" {
++				purple_handle_reaction(h.account, strconv.FormatInt(chatFbid, 10), targetID,
++					rm.GetText(), strconv.FormatInt(senderFbid, 10))
++			}
++			return
++		}
++		// webOS: incoming media (image/video/audio/document) over an ENCRYPTED thread arrives here as an
++		// armadillo media message inside the ConsumerApplication. Download + display it via the shared
++		// attachment path (handleE2EEMedia). Without this the message was silently dropped -- only text
++		// and reactions were handled, so a Facebook video/image never appeared in the Messaging app.
++		if h.handleE2EEMedia(content, evt, chatFbid, senderFbid, name) {
++			return
++		}
++		text = content.GetMessageText().GetText()
++	}
++	if text == "" {
++		return
++	}
++	// Record who sent this message so a later reaction over E2EE can build a correct MessageKey
++	// (FromMe / sender). Keyed by the message id (matches the serviceMessageId we store below).
++	if id := string(evt.Info.ID); id != "" {
++		h.mu.Lock()
++		h.e2eeMsgMeta[id] = e2eeMsgInfo{fromMe: evt.Info.IsFromMe, sender: strconv.FormatInt(senderFbid, 10), text: text}
++		h.mu.Unlock()
++	}
++	// webOS replies: an encrypted reply carries the quoted-original in the MessageApplication metadata.
++	// StanzaID matches the serviceMessageId we store (evt.Info.ID); recover the quoted text + author from
++	// the per-message cache (populated above on every E2EE message received/sent this session).
++	var quotedText, quotedFrom, quotedId string
++	if qm := evt.FBApplication.GetMetadata().GetQuotedMessage(); qm != nil {
++		quotedId = qm.GetStanzaID()
++		if quotedId != "" {
++			h.mu.Lock()
++			if meta, ok := h.e2eeMsgMeta[quotedId]; ok {
++				quotedText = meta.text
++				if sf, perr := strconv.ParseInt(meta.sender, 10, 64); perr == nil {
++					quotedFrom = h.contactName[sf]
++				}
++			}
++			h.mu.Unlock()
++		}
++	}
++	h.addContact(chatFbid, name)
++	h.notifyMessage(strconv.FormatInt(chatFbid, 10), strconv.FormatInt(senderFbid, 10),
++		name, text, evt.Info.ID, evt.Info.Timestamp.Unix(), false, evt.Info.IsFromMe, quotedText, quotedFrom, quotedId)
++}
++
++// sendE2EE sends a text message over the encrypted (whatsmeow) transport to a Messenger thread.
++// replyTo (webOS replies) = the StanzaID of the message this one replies to ("" for a normal message).
++func (h *gometaHandler) sendE2EE(threadID int64, text, replyTo string) error {
++	to := waTypes.JID{User: strconv.FormatInt(threadID, 10), Server: waTypes.MessengerServer}
++	msg := &waConsumerApplication.ConsumerApplication{
++		Payload: &waConsumerApplication.ConsumerApplication_Payload{
++			Payload: &waConsumerApplication.ConsumerApplication_Payload_Content{
++				Content: &waConsumerApplication.ConsumerApplication_Content{
++					Content: &waConsumerApplication.ConsumerApplication_Content_MessageText{
++						MessageText: &waCommon.MessageText{Text: proto.String(text)},
++					},
++				},
++			},
++		},
++	}
++	otid := methods.GenerateEpochID()
++	otidStr := strconv.FormatInt(otid, 10)
++	h.mu.Lock()
++	h.sentOtids[otid] = true
++	// Record this as our own message so a later reaction/reply over E2EE builds a FromMe=true MessageKey
++	// (and can quote this message's text).
++	h.e2eeMsgMeta[otidStr] = e2eeMsgInfo{fromMe: true, sender: strconv.FormatInt(h.selfID, 10), text: text}
++	h.mu.Unlock()
++	// webOS replies: attach the quoted-original so the reply threads. StanzaID = the target message id;
++	// Participant = its sender's Messenger JID (recovered from the per-message cache).
++	metadata := &waMsgApplication.MessageApplication_Metadata{}
++	if replyTo != "" {
++		participant := ""
++		h.mu.Lock()
++		if meta, ok := h.e2eeMsgMeta[replyTo]; ok && meta.sender != "" {
++			participant = waTypes.JID{User: meta.sender, Server: waTypes.MessengerServer}.String()
++		}
++		h.mu.Unlock()
++		qm := &waMsgApplication.MessageApplication_Metadata_QuotedMessage{
++			StanzaID:  proto.String(replyTo),
++			RemoteJID: proto.String(to.String()),
++		}
++		if participant != "" {
++			qm.Participant = proto.String(participant)
++		}
++		metadata.QuotedMessage = qm
++	}
++	ctx, cancel := context.WithTimeout(h.ctx, 30*time.Second)
++	defer cancel()
++	_, err := h.e2ee.SendFBMessage(ctx, to, msg, metadata,
++		whatsmeow.SendRequestExtra{ID: waTypes.MessageID(otidStr)})
++	if err == nil {
++		// webOS outbox-id: the otid we passed as SendRequestExtra{ID} IS this message's id — hand it to
++		// the transport so this app-sent encrypted message's Outbox row becomes reactable.
++		purple_handle_outbox_id(h.account, otidStr, text)
++	}
++	return err
++}
++
++// sendReactionE2EE reacts to (or, when reaction is empty, un-reacts) an encrypted Messenger message by
++// sending a ConsumerApplication ReactionMessage over the whatsmeow transport. E2EE here is 1:1 only, so
++// no Participant is needed. The MessageKey's FromMe comes from the per-message metadata recorded on
++// send/receive; if the target is unknown we default FromMe=false (best-effort — only our own known
++// messages get FromMe=true).
++func (h *gometaHandler) sendReactionE2EE(threadID int64, targetID, reaction string) error {
++	to := waTypes.JID{User: strconv.FormatInt(threadID, 10), Server: waTypes.MessengerServer}
++	h.mu.Lock()
++	meta, known := h.e2eeMsgMeta[targetID]
++	h.mu.Unlock()
++	fromMe := false
++	if known {
++		fromMe = meta.fromMe
++	}
++	key := &waCommon.MessageKey{
++		RemoteJID: proto.String(to.String()),
++		FromMe:    proto.Bool(fromMe),
++		ID:        proto.String(targetID),
++	}
++	msg := &waConsumerApplication.ConsumerApplication{
++		Payload: &waConsumerApplication.ConsumerApplication_Payload{
++			Payload: &waConsumerApplication.ConsumerApplication_Payload_Content{
++				Content: &waConsumerApplication.ConsumerApplication_Content{
++					Content: &waConsumerApplication.ConsumerApplication_Content_ReactionMessage{
++						ReactionMessage: &waConsumerApplication.ConsumerApplication_ReactionMessage{
++							Key:               key,
++							Text:              proto.String(reaction),
++							SenderTimestampMS: proto.Int64(time.Now().UnixMilli()),
++						},
++					},
++				},
++			},
++		},
++	}
++	otid := methods.GenerateEpochID()
++	ctx, cancel := context.WithTimeout(h.ctx, 30*time.Second)
++	defer cancel()
++	_, err := h.e2ee.SendFBMessage(ctx, to, msg, &waMsgApplication.MessageApplication_Metadata{},
++		whatsmeow.SendRequestExtra{ID: waTypes.MessageID(strconv.FormatInt(otid, 10))})
++	return err
++}
+diff --git a/gometa_media.go b/gometa_media.go
+new file mode 100644
+index 0000000..c3a7614
+--- /dev/null
++++ b/gometa_media.go
+@@ -0,0 +1,452 @@
++package main
++
++// Facebook picture/attachment SEND. Plaintext threads: upload to Facebook's Mercury media endpoint
++// and send a MEDIA task referencing the attachment fbid. Encrypted threads: upload+encrypt via
++// whatsmeow and send an armadillo ImageMessage over the E2EE transport. Mirrors mautrix-meta's
++// msgconv (SendMercuryUploadRequest / reuploadMediaToWhatsApp).
++
++/*
++#include <stdlib.h>
++#include "opusreader.h"
++*/
++import "C"
++
++import (
++	"bytes"
++	"context"
++	"fmt"
++	"image"
++	_ "image/gif"
++	_ "image/jpeg"
++	_ "image/png"
++	"net/http"
++	"os"
++	"path/filepath"
++	"strconv"
++	"strings"
++	"time"
++
++	"go.mau.fi/mautrix-meta/pkg/messagix/httpclient"
++	"go.mau.fi/mautrix-meta/pkg/messagix/methods"
++	"go.mau.fi/mautrix-meta/pkg/messagix/socket"
++	"go.mau.fi/mautrix-meta/pkg/messagix/table"
++	"go.mau.fi/whatsmeow"
++	"go.mau.fi/whatsmeow/proto/waConsumerApplication"
++	"go.mau.fi/whatsmeow/proto/waMediaTransport"
++	"go.mau.fi/whatsmeow/proto/waMsgApplication"
++	waTypes "go.mau.fi/whatsmeow/types"
++	"google.golang.org/protobuf/proto"
++)
++
++//export gometa_go_send_file
++// Send a local file to a thread. Returns "" on success or an error string (freed by the C caller).
++func gometa_go_send_file(account *PurpleAccount, who *C.char, filename *C.char) *C.char {
++	h, ok := gometaHandlers[account]
++	if !ok {
++		return C.CString("Facebook connection not found")
++	}
++	if err := h.sendFile(C.GoString(who), C.GoString(filename)); err != nil {
++		h.logger.Warn().Err(err).Msg("send file failed")
++		return C.CString(err.Error())
++	}
++	return C.CString("")
++}
++
++func (h *gometaHandler) sendFile(who, filename string) error {
++	threadID, err := strconv.ParseInt(who, 10, 64)
++	if err != nil {
++		return fmt.Errorf("invalid recipient %q", who)
++	}
++	if h.client == nil {
++		return fmt.Errorf("Facebook not connected")
++	}
++	data, err := os.ReadFile(filename)
++	if err != nil {
++		return fmt.Errorf("read %s: %w", filename, err)
++	}
++	mime := http.DetectContentType(data)
++	isImage := strings.HasPrefix(mime, "image/")
++	// The transport transcodes recorded voice notes to Ogg/Opus; http.DetectContentType reports those
++	// as "application/ogg". Treat any ogg/audio as a voice note.
++	isAudio := mime == "application/ogg" || strings.HasPrefix(mime, "audio/")
++	isVideo := strings.HasPrefix(mime, "video/")
++
++	h.mu.Lock()
++	isE2EE := h.e2eeContacts[threadID]
++	h.mu.Unlock()
++	if isE2EE {
++		if h.e2ee == nil {
++			return fmt.Errorf("encrypted thread and E2EE isn't connected yet")
++		}
++		if isImage {
++			return h.sendImageE2EE(threadID, data, mime)
++		}
++		if isAudio {
++			return h.sendAudioE2EE(threadID, data)
++		}
++		if isVideo {
++			return h.sendVideoE2EE(threadID, data, mime)
++		}
++		// Anything else (pdf/docx/xlsx/zip/...) goes as an armadillo DocumentMessage.
++		return h.sendDocumentE2EE(threadID, data, filepath.Base(filename), mime)
++	}
++	return h.sendMediaPlaintext(threadID, data, filepath.Base(filename), mime)
++}
++
++// sendMediaPlaintext uploads to Facebook and sends a MEDIA task. If Facebook doesn't confirm the
++// send (the E2EE-thread rejection), it auto-retries the image over the encrypted transport.
++func (h *gometaHandler) sendMediaPlaintext(threadID int64, data []byte, filename, mime string) error {
++	ctx, cancel := context.WithTimeout(h.ctx, 120*time.Second)
++	defer cancel()
++	if err := h.client.WaitUntilCanSendMessages(ctx, 20*time.Second); err != nil {
++		return err
++	}
++	resp, err := h.client.GetHTTP().SendMercuryUploadRequest(ctx, threadID, &httpclient.MercuryUploadMedia{
++		Filename:  filename,
++		MimeType:  mime,
++		MediaData: data,
++	})
++	if err != nil {
++		return fmt.Errorf("upload: %w", err)
++	}
++	attachmentID := resp.Payload.RealMetadata.GetFbId()
++	if attachmentID == 0 {
++		return fmt.Errorf("upload returned no attachment id")
++	}
++	otid := methods.GenerateEpochID()
++	h.mu.Lock()
++	h.sentOtids[otid] = true
++	h.mu.Unlock()
++	task := &socket.SendMessageTask{
++		ThreadId:         threadID,
++		Otid:             otid,
++		Source:           table.MESSENGER_INBOX_IN_THREAD,
++		InitiatingSource: table.FACEBOOK_INBOX,
++		SendType:         table.MEDIA,
++		SyncGroup:        1,
++		AttachmentFBIds:  []int64{attachmentID},
++	}
++	sendResp, err := h.client.ExecuteTasks(ctx, task)
++	if err != nil {
++		return err
++	}
++	otidStr := strconv.FormatInt(otid, 10)
++	if sendResp != nil {
++		for _, r := range sendResp.LSReplaceOptimsiticMessage {
++			if r.OfflineThreadingId == otidStr {
++				// webOS outbox-id: stamp the app-sent image's Outbox row with its otid (the id a later
++				// reaction targets) so reactions to our own sent image attach instead of being dropped.
++				purple_handle_outbox_id(h.account, otidStr, "")
++				h.logger.Info().Int64("thread", threadID).Msg("media sent")
++				return nil
++			}
++		}
++	}
++	// Not confirmed — likely an encrypted thread. Retry the media over E2EE and remember it.
++	h.mu.Lock()
++	delete(h.sentOtids, otid)
++	h.mu.Unlock()
++	isImg := strings.HasPrefix(mime, "image/")
++	isAud := mime == "application/ogg" || strings.HasPrefix(mime, "audio/")
++	isVid := strings.HasPrefix(mime, "video/")
++	if h.e2ee != nil {
++		h.mu.Lock()
++		h.e2eeContacts[threadID] = true
++		h.mu.Unlock()
++		h.logger.Warn().Int64("thread", threadID).Msg("media send not confirmed; retrying over E2EE")
++		if isAud {
++			return h.sendAudioE2EE(threadID, data)
++		}
++		if isVid {
++			return h.sendVideoE2EE(threadID, data, mime)
++		}
++		if isImg {
++			return h.sendImageE2EE(threadID, data, mime)
++		}
++		return h.sendDocumentE2EE(threadID, data, filename, mime)
++	}
++	return fmt.Errorf("send not confirmed (thread may be encrypted)")
++}
++
++// sendImageE2EE uploads+encrypts an image via whatsmeow and sends it over the E2EE transport.
++func (h *gometaHandler) sendImageE2EE(threadID int64, data []byte, mime string) error {
++	ctx, cancel := context.WithTimeout(h.ctx, 120*time.Second)
++	defer cancel()
++	uploaded, err := h.e2ee.Upload(ctx, data, whatsmeow.MediaImage)
++	if err != nil {
++		return fmt.Errorf("e2ee upload: %w", err)
++	}
++	w, ht := imageDims(data)
++	mediaTransport := &waMediaTransport.WAMediaTransport{
++		Integral: &waMediaTransport.WAMediaTransport_Integral{
++			FileSHA256:        uploaded.FileSHA256,
++			MediaKey:          uploaded.MediaKey,
++			FileEncSHA256:     uploaded.FileEncSHA256,
++			DirectPath:        &uploaded.DirectPath,
++			MediaKeyTimestamp: proto.Int64(time.Now().Unix()),
++		},
++		Ancillary: &waMediaTransport.WAMediaTransport_Ancillary{
++			FileLength: proto.Uint64(uint64(len(data))),
++			Mimetype:   &mime,
++			// Messenger iOS/Android refuse to render media without a thumbnail w/h.
++			Thumbnail: &waMediaTransport.WAMediaTransport_Ancillary_Thumbnail{
++				ThumbnailWidth:  proto.Uint32(uint32(w)),
++				ThumbnailHeight: proto.Uint32(uint32(ht)),
++			},
++			ObjectID: &uploaded.ObjectID,
++		},
++	}
++	imageMsg := &waConsumerApplication.ConsumerApplication_ImageMessage{}
++	if err := imageMsg.Set(&waMediaTransport.ImageTransport{
++		Integral: &waMediaTransport.ImageTransport_Integral{Transport: mediaTransport},
++		Ancillary: &waMediaTransport.ImageTransport_Ancillary{
++			Height: proto.Uint32(uint32(ht)),
++			Width:  proto.Uint32(uint32(w)),
++		},
++	}); err != nil {
++		return fmt.Errorf("build image message: %w", err)
++	}
++	msg := &waConsumerApplication.ConsumerApplication{
++		Payload: &waConsumerApplication.ConsumerApplication_Payload{
++			Payload: &waConsumerApplication.ConsumerApplication_Payload_Content{
++				Content: &waConsumerApplication.ConsumerApplication_Content{
++					Content: &waConsumerApplication.ConsumerApplication_Content_ImageMessage{ImageMessage: imageMsg},
++				},
++			},
++		},
++	}
++	otid := methods.GenerateEpochID()
++	otidStr := strconv.FormatInt(otid, 10)
++	h.mu.Lock()
++	h.sentOtids[otid] = true
++	// Record this as our own message so a later reaction over E2EE builds a FromMe=true MessageKey
++	// (mirrors sendE2EE for text).
++	h.e2eeMsgMeta[otidStr] = e2eeMsgInfo{fromMe: true, sender: strconv.FormatInt(h.selfID, 10)}
++	h.mu.Unlock()
++	to := waTypes.JID{User: strconv.FormatInt(threadID, 10), Server: waTypes.MessengerServer}
++	if _, err := h.e2ee.SendFBMessage(ctx, to, msg, &waMsgApplication.MessageApplication_Metadata{},
++		whatsmeow.SendRequestExtra{ID: waTypes.MessageID(otidStr)}); err != nil {
++		return fmt.Errorf("e2ee image send: %w", err)
++	}
++	// webOS outbox-id: the otid we forced as SendRequestExtra{ID} IS this image's message id, and it is
++	// exactly what a later reaction targets (reaction Key.ID == this otid). Hand it to the transport so
++	// the app-sent image's Outbox row gets that serviceMessageId and becomes reactable. Text is empty for
++	// media, so OutboxIdHandler falls back to the most-recent-unlabeled Outbox row (the image). Without
++	// this the sent image carried no id and reactions to it were silently dropped. Mirrors sendE2EE.
++	purple_handle_outbox_id(h.account, otidStr, "")
++	h.logger.Info().Int64("thread", threadID).Msg("e2ee image sent")
++	return nil
++}
++
++// sendVideoE2EE uploads+encrypts a video via whatsmeow and sends it as an armadillo VideoMessage
++// over the E2EE transport. Mirrors sendImageE2EE; dimensions/duration come from the mp4 boxes so
++// Messenger clients render (and can scrub) the video instead of showing a broken tile.
++func (h *gometaHandler) sendVideoE2EE(threadID int64, data []byte, mime string) error {
++	ctx, cancel := context.WithTimeout(h.ctx, 120*time.Second)
++	defer cancel()
++	uploaded, err := h.e2ee.Upload(ctx, data, whatsmeow.MediaVideo)
++	if err != nil {
++		return fmt.Errorf("e2ee video upload: %w", err)
++	}
++	w, ht, secs := videoInfoMP4(data)
++	if w == 0 || ht == 0 {
++		// Messenger refuses media without non-zero dimensions; fall back to a 4:3 default.
++		w, ht = 640, 480
++	}
++	mediaTransport := &waMediaTransport.WAMediaTransport{
++		Integral: &waMediaTransport.WAMediaTransport_Integral{
++			FileSHA256:        uploaded.FileSHA256,
++			MediaKey:          uploaded.MediaKey,
++			FileEncSHA256:     uploaded.FileEncSHA256,
++			DirectPath:        &uploaded.DirectPath,
++			MediaKeyTimestamp: proto.Int64(time.Now().Unix()),
++		},
++		Ancillary: &waMediaTransport.WAMediaTransport_Ancillary{
++			FileLength: proto.Uint64(uint64(len(data))),
++			Mimetype:   &mime,
++			Thumbnail: &waMediaTransport.WAMediaTransport_Ancillary_Thumbnail{
++				ThumbnailWidth:  proto.Uint32(w),
++				ThumbnailHeight: proto.Uint32(ht),
++			},
++			ObjectID: &uploaded.ObjectID,
++		},
++	}
++	videoMsg := &waConsumerApplication.ConsumerApplication_VideoMessage{}
++	if err := videoMsg.Set(&waMediaTransport.VideoTransport{
++		Integral: &waMediaTransport.VideoTransport_Integral{Transport: mediaTransport},
++		Ancillary: &waMediaTransport.VideoTransport_Ancillary{
++			Height:      proto.Uint32(ht),
++			Width:       proto.Uint32(w),
++			Seconds:     proto.Uint32(secs),
++			GifPlayback: proto.Bool(false), // a real video, not a looping GIF
++		},
++	}); err != nil {
++		return fmt.Errorf("build video message: %w", err)
++	}
++	msg := &waConsumerApplication.ConsumerApplication{
++		Payload: &waConsumerApplication.ConsumerApplication_Payload{
++			Payload: &waConsumerApplication.ConsumerApplication_Payload_Content{
++				Content: &waConsumerApplication.ConsumerApplication_Content{
++					Content: &waConsumerApplication.ConsumerApplication_Content_VideoMessage{VideoMessage: videoMsg},
++				},
++			},
++		},
++	}
++	otid := methods.GenerateEpochID()
++	otidStr := strconv.FormatInt(otid, 10)
++	h.mu.Lock()
++	h.sentOtids[otid] = true
++	h.e2eeMsgMeta[otidStr] = e2eeMsgInfo{fromMe: true, sender: strconv.FormatInt(h.selfID, 10)}
++	h.mu.Unlock()
++	to := waTypes.JID{User: strconv.FormatInt(threadID, 10), Server: waTypes.MessengerServer}
++	if _, err := h.e2ee.SendFBMessage(ctx, to, msg, &waMsgApplication.MessageApplication_Metadata{},
++		whatsmeow.SendRequestExtra{ID: waTypes.MessageID(otidStr)}); err != nil {
++		return fmt.Errorf("e2ee video send: %w", err)
++	}
++	purple_handle_outbox_id(h.account, otidStr, "")
++	h.logger.Info().Int64("thread", threadID).Uint32("seconds", secs).Msg("e2ee video sent")
++	return nil
++}
++
++// sendDocumentE2EE uploads+encrypts a file via whatsmeow and sends it as an armadillo DocumentMessage
++// over the E2EE transport. Mirrors sendImageE2EE; the original filename rides on the DocumentMessage so
++// Messenger shows it (mirrors mautrix-meta's MsgFile path).
++func (h *gometaHandler) sendDocumentE2EE(threadID int64, data []byte, filename, mime string) error {
++	ctx, cancel := context.WithTimeout(h.ctx, 120*time.Second)
++	defer cancel()
++	uploaded, err := h.e2ee.Upload(ctx, data, whatsmeow.MediaDocument)
++	if err != nil {
++		return fmt.Errorf("e2ee document upload: %w", err)
++	}
++	mediaTransport := &waMediaTransport.WAMediaTransport{
++		Integral: &waMediaTransport.WAMediaTransport_Integral{
++			FileSHA256:        uploaded.FileSHA256,
++			MediaKey:          uploaded.MediaKey,
++			FileEncSHA256:     uploaded.FileEncSHA256,
++			DirectPath:        &uploaded.DirectPath,
++			MediaKeyTimestamp: proto.Int64(time.Now().Unix()),
++		},
++		Ancillary: &waMediaTransport.WAMediaTransport_Ancillary{
++			FileLength: proto.Uint64(uint64(len(data))),
++			Mimetype:   &mime,
++			ObjectID:   &uploaded.ObjectID,
++		},
++	}
++	docMsg := &waConsumerApplication.ConsumerApplication_DocumentMessage{FileName: &filename}
++	if err := docMsg.Set(&waMediaTransport.DocumentTransport{
++		Integral:  &waMediaTransport.DocumentTransport_Integral{Transport: mediaTransport},
++		Ancillary: &waMediaTransport.DocumentTransport_Ancillary{},
++	}); err != nil {
++		return fmt.Errorf("build document message: %w", err)
++	}
++	msg := &waConsumerApplication.ConsumerApplication{
++		Payload: &waConsumerApplication.ConsumerApplication_Payload{
++			Payload: &waConsumerApplication.ConsumerApplication_Payload_Content{
++				Content: &waConsumerApplication.ConsumerApplication_Content{
++					Content: &waConsumerApplication.ConsumerApplication_Content_DocumentMessage{DocumentMessage: docMsg},
++				},
++			},
++		},
++	}
++	otid := methods.GenerateEpochID()
++	otidStr := strconv.FormatInt(otid, 10)
++	h.mu.Lock()
++	h.sentOtids[otid] = true
++	h.e2eeMsgMeta[otidStr] = e2eeMsgInfo{fromMe: true, sender: strconv.FormatInt(h.selfID, 10)}
++	h.mu.Unlock()
++	to := waTypes.JID{User: strconv.FormatInt(threadID, 10), Server: waTypes.MessengerServer}
++	if _, err := h.e2ee.SendFBMessage(ctx, to, msg, &waMsgApplication.MessageApplication_Metadata{},
++		whatsmeow.SendRequestExtra{ID: waTypes.MessageID(otidStr)}); err != nil {
++		return fmt.Errorf("e2ee document send: %w", err)
++	}
++	purple_handle_outbox_id(h.account, otidStr, "")
++	h.logger.Info().Int64("thread", threadID).Str("filename", filename).Msg("e2ee document sent")
++	return nil
++}
++
++// sendAudioE2EE uploads+encrypts an Ogg/Opus voice note via whatsmeow and sends it as a PTT audio
++// message over the E2EE transport (armadillo AudioTransport, OPUS format). Mirrors sendImageE2EE.
++func (h *gometaHandler) sendAudioE2EE(threadID int64, data []byte) error {
++	ctx, cancel := context.WithTimeout(h.ctx, 120*time.Second)
++	defer cancel()
++
++	// Duration + waveform from the Opus stream (same reader WhatsApp uses in send_file.go).
++	cdata := C.CBytes(data)
++	info := C.opusfile_get_info(cdata, C.size_t(len(data)))
++	C.free(cdata)
++	seconds := int64(info.length_seconds)
++	if seconds < 0 {
++		return fmt.Errorf("invalid ogg/opus voice note")
++	}
++	waveform := make([]byte, C.WAVEFORM_SAMPLES_COUNT)
++	for i := range info.waveform {
++		waveform[i] = byte(info.waveform[i])
++	}
++
++	uploaded, err := h.e2ee.Upload(ctx, data, whatsmeow.MediaAudio)
++	if err != nil {
++		return fmt.Errorf("e2ee audio upload: %w", err)
++	}
++	mime := "audio/ogg; codecs=opus"
++	opusFmt := waMediaTransport.AudioTransport_Integral_OPUS
++	mediaTransport := &waMediaTransport.WAMediaTransport{
++		Integral: &waMediaTransport.WAMediaTransport_Integral{
++			FileSHA256:        uploaded.FileSHA256,
++			MediaKey:          uploaded.MediaKey,
++			FileEncSHA256:     uploaded.FileEncSHA256,
++			DirectPath:        &uploaded.DirectPath,
++			MediaKeyTimestamp: proto.Int64(time.Now().Unix()),
++		},
++		Ancillary: &waMediaTransport.WAMediaTransport_Ancillary{
++			FileLength: proto.Uint64(uint64(len(data))),
++			Mimetype:   &mime,
++			ObjectID:   &uploaded.ObjectID,
++		},
++	}
++	audioMsg := &waConsumerApplication.ConsumerApplication_AudioMessage{PTT: proto.Bool(true)}
++	if err := audioMsg.Set(&waMediaTransport.AudioTransport{
++		Integral: &waMediaTransport.AudioTransport_Integral{
++			Transport:   mediaTransport,
++			AudioFormat: &opusFmt,
++		},
++		Ancillary: &waMediaTransport.AudioTransport_Ancillary{
++			Seconds:  proto.Uint32(uint32(seconds)),
++			Waveform: waveform,
++		},
++	}); err != nil {
++		return fmt.Errorf("build audio message: %w", err)
++	}
++	msg := &waConsumerApplication.ConsumerApplication{
++		Payload: &waConsumerApplication.ConsumerApplication_Payload{
++			Payload: &waConsumerApplication.ConsumerApplication_Payload_Content{
++				Content: &waConsumerApplication.ConsumerApplication_Content{
++					Content: &waConsumerApplication.ConsumerApplication_Content_AudioMessage{AudioMessage: audioMsg},
++				},
++			},
++		},
++	}
++	otid := methods.GenerateEpochID()
++	otidStr := strconv.FormatInt(otid, 10)
++	h.mu.Lock()
++	h.sentOtids[otid] = true
++	h.e2eeMsgMeta[otidStr] = e2eeMsgInfo{fromMe: true, sender: strconv.FormatInt(h.selfID, 10)}
++	h.mu.Unlock()
++	to := waTypes.JID{User: strconv.FormatInt(threadID, 10), Server: waTypes.MessengerServer}
++	if _, err := h.e2ee.SendFBMessage(ctx, to, msg, &waMsgApplication.MessageApplication_Metadata{},
++		whatsmeow.SendRequestExtra{ID: waTypes.MessageID(otidStr)}); err != nil {
++		return fmt.Errorf("e2ee audio send: %w", err)
++	}
++	purple_handle_outbox_id(h.account, otidStr, "")
++	h.logger.Info().Int64("thread", threadID).Int64("seconds", seconds).Msg("e2ee voice note sent")
++	return nil
++}
++
++// imageDims returns the image dimensions, or 400x400 if they can't be decoded (Messenger requires
++// non-zero width/height on media).
++func imageDims(data []byte) (int, int) {
++	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
++	if err != nil || cfg.Width == 0 || cfg.Height == 0 {
++		return 400, 400
++	}
++	return cfg.Width, cfg.Height
++}
+diff --git a/gometa_video.go b/gometa_video.go
+new file mode 100644
+index 0000000..b3a595b
+--- /dev/null
++++ b/gometa_video.go
+@@ -0,0 +1,92 @@
++package main
++
++// Minimal MP4 box walker to pull width/height/duration out of a video before sending it over the
++// Facebook E2EE transport. Messenger clients render an armadillo VideoMessage much better when the
++// dimensions and duration are populated (mirrors the thumbnail-w/h requirement in sendImageE2EE).
++// We intentionally avoid a full mp4 decode: we only read the moov/mvhd (duration) and the first
++// video trak's tkhd (display width/height, stored as 16.16 fixed point).
++
++func be32(b []byte) uint32 {
++	return uint32(b[0])<<24 | uint32(b[1])<<16 | uint32(b[2])<<8 | uint32(b[3])
++}
++
++// findBoxes returns the payloads (header stripped) of every top-level box named `name` in data.
++func findBoxes(data []byte, name string) [][]byte {
++	var out [][]byte
++	i := 0
++	for i+8 <= len(data) {
++		size := int(be32(data[i:]))
++		typ := string(data[i+4 : i+8])
++		hdr := 8
++		if size == 1 { // 64-bit largesize; assume the high 32 bits are zero (< 4 GiB)
++			if i+16 > len(data) {
++				break
++			}
++			size = int(be32(data[i+12:]))
++			hdr = 16
++		} else if size == 0 { // box extends to end of data
++			size = len(data) - i
++		}
++		if size < hdr || i+size > len(data) {
++			break
++		}
++		if typ == name {
++			out = append(out, data[i+hdr:i+size])
++		}
++		i += size
++	}
++	return out
++}
++
++// videoInfoMP4 extracts (width, height, seconds) from an mp4. Returns zeros for any field it can't
++// parse; the caller substitutes defaults so the send still goes through.
++func videoInfoMP4(data []byte) (width, height, seconds uint32) {
++	moovs := findBoxes(data, "moov")
++	if len(moovs) == 0 {
++		return
++	}
++	moov := moovs[0]
++
++	if mvhds := findBoxes(moov, "mvhd"); len(mvhds) > 0 {
++		mvhd := mvhds[0]
++		if len(mvhd) >= 4 {
++			ver := mvhd[0]
++			var ts, dur uint32
++			if ver == 1 {
++				// version 1: creation(8) mod(8) timescale(4) duration(8)
++				if len(mvhd) >= 32 {
++					ts = be32(mvhd[20:])
++					dur = be32(mvhd[28:]) // low 32 bits of the 64-bit duration
++				}
++			} else {
++				// version 0: creation(4) mod(4) timescale(4) duration(4)
++				if len(mvhd) >= 20 {
++					ts = be32(mvhd[12:])
++					dur = be32(mvhd[16:])
++				}
++			}
++			if ts > 0 {
++				seconds = dur / ts
++			}
++		}
++	}
++
++	// Take the first trak whose tkhd reports non-zero display dimensions (the video track).
++	for _, trak := range findBoxes(moov, "trak") {
++		tkhds := findBoxes(trak, "tkhd")
++		if len(tkhds) == 0 {
++			continue
++		}
++		tk := tkhds[0]
++		// width/height are the final 8 bytes of tkhd, each a 16.16 fixed-point value.
++		if len(tk) >= 8 {
++			w := be32(tk[len(tk)-8:]) >> 16
++			h := be32(tk[len(tk)-4:]) >> 16
++			if w > 0 && h > 0 {
++				width, height = w, h
++				break
++			}
++		}
++	}
++	return
++}
+diff --git a/gometabridge.c b/gometabridge.c
+new file mode 100644
+index 0000000..803ad58
+--- /dev/null
++++ b/gometabridge.c
+@@ -0,0 +1,210 @@
++// gometabridge.c — the Go->purple boundary for the Facebook half. Mirrors the whatsmeow
++// bridge.c pattern (g_memdup2 + purple_timeout_add to the glib main thread), gometa_-prefixed.
++#include "gometabridge.h"
++#include <stdlib.h> // free/malloc
++#include <string.h> // strdup
++#include <time.h>   // time
++
++// Forward-declare the cgo export (declared in the go-generated libwhatsmeow.h, which does
++// not exist yet when cgo compiles this file in stage 1). Signature must match the //export.
++extern void gometa_go_submit_input(PurpleAccount *account, char *value);
++
++#if !GLIB_CHECK_VERSION(2, 68, 0)
++#define g_memdup2 g_memdup
++#endif
++
++// ---- account settings (cache the login session) ----
++char *gometa_get_setting(PurpleAccount *account, const char *key) {
++    const char *v = purple_account_get_string(account, key, NULL);
++    return (v && *v) ? strdup(v) : NULL;
++}
++void gometa_set_setting(PurpleAccount *account, const char *key, const char *value) {
++    purple_account_set_string(account, key, value ? value : "");
++}
++
++// ---- interactive login prompt (2FA/captcha) ----
++struct gometa_req { PurpleAccount *account; char *prompt; };
++
++static gboolean gometa_do_request(gpointer data) {
++    struct gometa_req *r = (struct gometa_req *)data;
++    PurpleConnection *gc = purple_account_get_connection(r->account);
++    // imlibpurple leaves the request UI-ops NULL, so purple_request_input never reaches the
++    // user. Surface the prompt in a "Facebook" auth conversation instead (like the QR / Telegram
++    // login-code flow); the user's reply is captured in gometa_go_send_message and fed back to
++    // the waiting login goroutine via its input channel.
++    if (gc) {
++        // NB: serv_got_im, NOT purple_serv_got_im — the device's libpurple 2.x exports the
++        // classic name (as Telegram uses); purple_serv_got_im is undefined there and aborts
++        // the transport with a symbol lookup error the moment this path runs.
++        serv_got_im(gc, "Facebook", r->prompt, PURPLE_MESSAGE_RECV, time(NULL));
++    }
++    free(r->prompt);
++    g_free(r);
++    return FALSE;
++}
++void gometa_request_input(PurpleAccount *account, const char *prompt) {
++    struct gometa_req *r = g_new0(struct gometa_req, 1);
++    r->account = account;
++    r->prompt = strdup(prompt ? prompt : "");
++    purple_timeout_add(0, gometa_do_request, r);
++}
++
++static void gometa_free_strings(gometa_message_t *m) {
++    free(m->who);
++    free(m->conv);
++    free(m->name);
++    free(m->text);
++    free(m->id);
++    free(m->quotedText);
++    free(m->quotedFrom);
++    free(m->quotedId);
++}
++
++/* webOS replies: stash the quoted-original (text/from/id) on a conversation right beside webos-msg-id,
++ * so the transport records an inline quote card. No-op when the message is not a reply. The transport
++ * g_free's the values after reading them. */
++static void gometa_stash_quote(PurpleConversation *conv, const char *quotedText, const char *quotedFrom, const char *quotedId) {
++    if (!conv || !quotedText || !*quotedText) return;
++    purple_conversation_set_data(conv, "webos-quoted-text", g_strdup(quotedText));
++    if (quotedFrom && *quotedFrom) purple_conversation_set_data(conv, "webos-quoted-from", g_strdup(quotedFrom));
++    if (quotedId && *quotedId) purple_conversation_set_data(conv, "webos-quoted-id", g_strdup(quotedId));
++}
++
++// The buddy-list group all Facebook contacts/chats live under.
++PurpleGroup *gometa_blist_group(void) {
++    PurpleGroup *g = purple_find_group("Facebook");
++    if (!g) { g = purple_group_new("Facebook"); purple_blist_add_group(g, NULL); }
++    return g;
++}
++
++static void gometa_ensure_buddy(PurpleAccount *account, const char *id, const char *name) {
++    if (!id || !*id) return;
++    PurpleBuddy *b = purple_find_buddy(account, id);
++    if (!b) {
++        b = purple_buddy_new(account, id, name);
++        purple_blist_add_buddy(b, NULL, gometa_blist_group(), NULL);
++    }
++    if (name && *name) {
++        serv_got_alias(purple_account_get_connection(account), id, name);
++        purple_blist_node_set_string(&b->node, "server_alias", name);
++    }
++}
++
++// Register a group thread as a blist chat (component "id" = thread key, used by find_blist_chat).
++static void gometa_ensure_chat(PurpleAccount *account, const char *threadKey, const char *name) {
++    if (!threadKey || !*threadKey) return;
++    PurpleChat *chat = purple_blist_find_chat(account, name && *name ? name : threadKey);
++    if (!chat) {
++        GHashTable *comp = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, g_free);
++        g_hash_table_insert(comp, (gpointer)"id", g_strdup(threadKey));
++        chat = purple_chat_new(account, name && *name ? name : threadKey, comp);
++        purple_blist_add_chat(chat, gometa_blist_group(), NULL);
++    } else if (name && *name) {
++        purple_blist_alias_chat(chat, name);
++    }
++}
++
++static void gometa_group_message(PurpleConnection *pc, const char *threadKey, const char *senderName,
++                                 const char *text, time_t ts, int isOutgoing, const char *msgId,
++                                 const char *quotedText, const char *quotedFrom, const char *quotedId) {
++    int chat_id = (int)g_str_hash(threadKey);
++    if (purple_find_chat(pc, chat_id) == NULL) {
++        serv_got_joined_chat(pc, chat_id, threadKey);
++    }
++    // webOS reactions: stash the message id on the chat conv so the transport stores it as
++    // serviceMessageId (read in incoming_message_cb during serv_got_chat_in). RECV only.
++    if (!isOutgoing && msgId && *msgId) {
++        PurpleConversation *conv = purple_find_chat(pc, chat_id);
++        if (conv) purple_conversation_set_data(conv, "webos-msg-id", g_strdup(msgId));
++    }
++    if (!isOutgoing) {
++        gometa_stash_quote(purple_find_chat(pc, chat_id), quotedText, quotedFrom, quotedId);
++    }
++    const char *from = (senderName && *senderName) ? senderName : "unknown";
++    serv_got_chat_in(pc, chat_id, from, isOutgoing ? PURPLE_MESSAGE_SEND : PURPLE_MESSAGE_RECV, text, ts);
++}
++
++static gboolean gometa_dispatch(gpointer data) {
++    gometa_message_t *m = (gometa_message_t *)data;
++    PurpleConnection *pc = purple_account_get_connection(m->account);
++    if (pc != NULL) {
++        time_t ts = m->timestamp ? m->timestamp : time(NULL);
++        switch (m->msgtype) {
++            case gometa_message_type_connected:
++                purple_connection_set_state(pc, PURPLE_CONNECTED);
++                break;
++            case gometa_message_type_disconnected:
++                purple_connection_set_state(pc, PURPLE_DISCONNECTED);
++                break;
++            case gometa_message_type_error:
++                if (m->fatal) {
++                    // A fatal error means "stop, this won't succeed on its own" (e.g. login/2FA
++                    // failed, session expired). Report it with a reason libpurple considers FATAL
++                    // (AUTHENTICATION_FAILED) so the account is taken offline and does NOT
++                    // auto-reconnect. NETWORK_ERROR is treated as transient -> libpurple retries
++                    // every minute, which for a failed Facebook 2FA login just hammers the login
++                    // endpoint forever (and can get the account flagged). The user re-enables the
++                    // account to try again once they can complete 2FA.
++                    purple_connection_error_reason(pc, PURPLE_CONNECTION_ERROR_AUTHENTICATION_FAILED,
++                        m->text ? m->text : "Unknown error");
++                } else {
++                    purple_debug_error(GOMETA_PLUGIN_ID, "%s\n", m->text ? m->text : "error");
++                }
++                break;
++            case gometa_message_type_buddy:
++                gometa_ensure_buddy(m->account, m->who, m->name);
++                break;
++            case gometa_message_type_chat:
++                gometa_ensure_chat(m->account, m->conv, m->name);
++                break;
++            case gometa_message_type_presence:
++                if (m->who && *m->who) {
++                    purple_prpl_got_user_status(m->account, m->who,
++                        m->isOutgoing ? "available" : "offline", NULL);
++                }
++                break;
++            case gometa_message_type_text:
++                if (m->text && m->conv) {
++                    if (m->isGroup) {
++                        gometa_group_message(pc, m->conv, m->name ? m->name : m->who, m->text, ts, m->isOutgoing, m->id,
++                                m->quotedText, m->quotedFrom, m->quotedId);
++                    } else if (m->isOutgoing) {
++                        // A message we sent from ANOTHER client (phone) - handleMessage already dropped
++                        // the echoes of our OWN sends (sentOtids), so everything here is a genuine
++                        // carbon. Write it with PURPLE_MESSAGE_REMOTE_SEND so the transport stores it as
++                        // an Outbox row (making it appear on the sent side of the thread), and stash the
++                        // message id as its serviceMessageId so a reaction can attach to our own message.
++                        PurpleConversation *conv = purple_find_conversation_with_account(PURPLE_CONV_TYPE_IM, m->conv, m->account);
++                        if (!conv) conv = purple_conversation_new(PURPLE_CONV_TYPE_IM, m->account, m->conv);
++                        if (m->id && *m->id) {
++                            purple_conversation_set_data(conv, "webos-msg-id", g_strdup(m->id));
++                        }
++                        gometa_stash_quote(conv, m->quotedText, m->quotedFrom, m->quotedId);
++                        purple_conv_im_write(purple_conversation_get_im_data(conv), m->conv, m->text,
++                                (PurpleMessageFlags)(PURPLE_MESSAGE_SEND | PURPLE_MESSAGE_REMOTE_SEND), ts);
++                    } else {
++                        // webOS reactions/replies: stash the message id + any quoted-original on the conv
++                        // so the transport stores serviceMessageId (for reactions) and the inline quote card.
++                        PurpleConversation *iconv = purple_find_conversation_with_account(PURPLE_CONV_TYPE_IM, m->conv, m->account);
++                        if (!iconv) iconv = purple_conversation_new(PURPLE_CONV_TYPE_IM, m->account, m->conv);
++                        if (m->id && *m->id) {
++                            purple_conversation_set_data(iconv, "webos-msg-id", g_strdup(m->id));
++                        }
++                        gometa_stash_quote(iconv, m->quotedText, m->quotedFrom, m->quotedId);
++                        serv_got_im(pc, m->conv, m->text, PURPLE_MESSAGE_RECV, ts);
++                    }
++                }
++                break;
++            default:
++                break;
++        }
++    }
++    gometa_free_strings(m);
++    g_free(m);
++    return FALSE;
++}
++
++void gometa_process_message(gometa_message_t msg) {
++    gometa_message_t *heap = g_memdup2(&msg, sizeof msg);
++    purple_timeout_add(0, gometa_dispatch, heap);
++}
+diff --git a/gometabridge.h b/gometabridge.h
+new file mode 100644
+index 0000000..9e2e780
+--- /dev/null
++++ b/gometabridge.h
+@@ -0,0 +1,54 @@
++#pragma once
++// Facebook (messagix) half of the combined plugin. All identifiers are gometa_-prefixed
++// so they don't collide with the whatsmeow (gowhatsapp_) half in the same .so / package.
++#include <purple.h>
++#include <time.h>
++
++#define GOMETA_PLUGIN_ID      "prpl-gometa"
++#define GOMETA_PLUGIN_NAME    "Facebook (E2EE)"
++#define GOMETA_PLUGIN_SUMMARY "Facebook Messenger via mautrix-meta's messagix (with E2EE)"
++#define GOMETA_AUTHOR         "webOS Synergy Revival"
++
++enum gometa_message_type {
++    gometa_message_type_error,        // text = error; fatal = connection-fatal
++    gometa_message_type_connected,
++    gometa_message_type_disconnected,
++    gometa_message_type_text,         // incoming message (see fields below)
++    gometa_message_type_buddy,        // add/update a contact: who=fbid, name=display name
++    gometa_message_type_chat,         // register a group chat: conv=threadKey, name=thread name
++    gometa_message_type_presence,     // buddy presence: who=fbid, isOutgoing=1 -> available else offline
++};
++
++typedef struct gometa_message {
++    PurpleAccount *account;
++    char *who;   // for text: sender fbid; for buddy: contact fbid
++    char *conv;  // for text: conversation/thread key (1:1 = other user, group = thread); for chat: thread key
++    char *name;  // display name (sender name, contact name, or group name)
++    char *text;  // message body / error text
++    char *id;    // message id (optional)
++    char *quotedText; // webOS replies: replied-to original's text (NULL if not a reply)
++    char *quotedFrom; // webOS replies: replied-to original's author display name
++    char *quotedId;   // webOS replies: replied-to original's message id
++    time_t timestamp;
++    char msgtype;
++    char isGroup;
++    char isOutgoing;
++    char fatal;
++} gometa_message_t;
++
++// Go -> purple; C glue owns/free()s the strings and marshals onto the glib main thread.
++extern void gometa_process_message(gometa_message_t msg);
++
++// Interactive login prompt (2FA/captcha). Schedules purple_request_input on the main
++// thread; the answer comes back via the Go export gometa_go_submit_input(account, value).
++extern void gometa_request_input(PurpleAccount *account, const char *prompt);
++
++// Account settings (used to cache the login session). Returned string is malloc'd;
++// the Go caller frees it. Returns NULL if unset.
++extern char *gometa_get_setting(PurpleAccount *account, const char *key);
++extern void gometa_set_setting(PurpleAccount *account, const char *key, const char *value);
++
++// webOS reactions (SEND): connect once (process-wide) to the transport's "webos-im-send-reaction"
++// signal. Defined in glue/login.c; called from both login paths (guarded by a static bool so a
++// double connect is harmless).
++extern void webos_connect_send_reaction_once(void);
+diff --git a/handle_attachment.go b/handle_attachment.go
+index 9b7d125..5140b47 100644
+--- a/handle_attachment.go
++++ b/handle_attachment.go
+@@ -14,14 +14,18 @@ import (
+ 	"mime"
+ 	"os"
+ 	"path/filepath"
++	"strconv"
+ 	"strings"
+ 	"time"
+ 
+ 	"golang.org/x/image/webp"
+ 
+ 	"go.mau.fi/whatsmeow"
++	"go.mau.fi/whatsmeow/proto/waConsumerApplication"
+ 	"go.mau.fi/whatsmeow/proto/waE2E"
++	"go.mau.fi/whatsmeow/proto/waMediaTransport"
+ 	"go.mau.fi/whatsmeow/types"
++	"go.mau.fi/whatsmeow/types/events"
+ )
+ 
+ func extension_from_mimetype(mimeType *string) string {
+@@ -168,7 +172,18 @@ func sanitize_attachment_name(name string) string {
+ 	}, name)
+ }
+ 
+-func (handler *Handler) download_attachment(local_file_path string, message whatsmeow.DownloadableMessage) error {
++func (handler *Handler) download_attachment(local_file_path string, message whatsmeow.DownloadableMessage) (retErr error) {
++	// gometa: Facebook E2EE media receive used to crash the whole transport during the download.
++	// This function is invoked across the cgo boundary (C download_to_templated_destination ->
++	// gowhatsapp_go_download_attachment), where an unrecovered Go panic aborts the entire process.
++	// Recover here so a bad download degrades to a failed attachment instead of taking every account
++	// offline, and log the recovered value.
++	defer func() {
++		if r := recover(); r != nil {
++			purple_debug(4, fmt.Sprintf("gometa: download_attachment PANIC recovered: %v", r))
++			retErr = fmt.Errorf("download panic: %v", r)
++		}
++	}()
+ 	os.MkdirAll(filepath.Dir(local_file_path), 0o755)
+ 	// Download to memory then write the file ourselves. whatsmeow's DownloadToFile streams to an
+ 	// *os.File and unconditionally calls fallocate(2), which some filesystems (tmpfs/vfat) reject
+@@ -183,7 +198,29 @@ func (handler *Handler) download_attachment(local_file_path string, message what
+ 	// error instead.
+ 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+ 	defer cancel()
+-	data, err := handler.client.Download(ctx, message)
++	var data []byte
++	var err error
++	if fb, ok := message.(*fbDownloadable); ok {
++		// Facebook E2EE (armadillo) media: download via the FB e2ee whatsmeow client with the explicit
++		// media type (a different client + endpoint than WhatsApp's handler.client).
++		g, gok := gometaHandlers[handler.account]
++		if !gok || g.e2ee == nil {
++			return fmt.Errorf("facebook e2ee not connected")
++		}
++		purple_debug(2, fmt.Sprintf("gometa: DownloadFB start (type=%s directPathLen=%d)", fb.mediaType, len(fb.integral.GetDirectPath())))
++		data, err = g.e2ee.DownloadFB(ctx, fb.integral, fb.mediaType)
++		purple_debug(2, fmt.Sprintf("gometa: DownloadFB returned %d bytes err=%v", len(data), err))
++		if err != nil {
++			// Log (do NOT purple_error - that disconnects the account); the caller renders the failure
++			// as a per-message error. directPath/key lengths help distinguish a bad-integral extraction
++			// (wrong nesting) from a genuine network/HMAC failure.
++			purple_debug(4, fmt.Sprintf("gometa: DownloadFB failed (type=%s directPathLen=%d keyLen=%d fileSHA=%d encSHA=%d): %v",
++				fb.mediaType, len(fb.integral.GetDirectPath()), len(fb.integral.GetMediaKey()),
++				len(fb.integral.GetFileSHA256()), len(fb.integral.GetFileEncSHA256()), err))
++		}
++	} else {
++		data, err = handler.client.Download(ctx, message)
++	}
+ 	if err != nil {
+ 		return err
+ 	}
+@@ -205,6 +242,7 @@ func (handler *Handler) download_attachment(local_file_path string, message what
+ 	if err := os.WriteFile(local_file_path, data, 0o644); err != nil {
+ 		return err
+ 	}
++	purple_debug(2, fmt.Sprintf("gometa: wrote attachment %d bytes -> %s", len(data), local_file_path))
+ 	// For videos, also drop the sender's embedded JPEG thumbnail next to the file as "<base>.jpg".
+ 	// The Messaging app uses it as a <video poster> — a first-view preview that loads as a plain
+ 	// image (independent of the clip's own data), which lets the player stay preload="none". The old
+@@ -218,3 +256,119 @@ func (handler *Handler) download_attachment(local_file_path string, message what
+ 	}
+ 	return nil
+ }
++
++// fbDownloadable adapts a Facebook E2EE (armadillo) media transport to whatsmeow.DownloadableMessage so
++// an incoming FB image/video/audio/document flows through the SAME attachment display path as WhatsApp
++// media (purple_handle_attachment -> lazy download -> inline render). download_attachment recognises it
++// and routes the fetch to the FB e2ee client's DownloadFB (a different client/endpoint than WhatsApp).
++type fbDownloadable struct {
++	integral  *waMediaTransport.WAMediaTransport_Integral
++	mediaType whatsmeow.MediaType
++}
++
++func (f *fbDownloadable) GetDirectPath() string   { return f.integral.GetDirectPath() }
++func (f *fbDownloadable) GetMediaKey() []byte      { return f.integral.GetMediaKey() }
++func (f *fbDownloadable) GetFileSHA256() []byte    { return f.integral.GetFileSHA256() }
++func (f *fbDownloadable) GetFileEncSHA256() []byte { return f.integral.GetFileEncSHA256() }
++
++// handleE2EEMedia downloads + displays an incoming Facebook E2EE media message (image/video/audio/
++// document) carried inside a ConsumerApplication. Returns true if the content WAS a media message (so
++// the caller stops -- otherwise media was silently dropped, only text/reactions were handled). Mirrors
++// the WhatsApp handle_attachment path.
++func (h *gometaHandler) handleE2EEMedia(content *waConsumerApplication.ConsumerApplication_Content, evt *events.FBMessage, chatFbid, senderFbid int64, name string) bool {
++	var (
++		wa        *waMediaTransport.WAMediaTransport
++		mediaType whatsmeow.MediaType
++		dataType  C.int = C.gowhatsapp_attachment_type_none
++		filename  string
++		caption   string
++	)
++	if vm := content.GetVideoMessage(); vm != nil {
++		if t, err := vm.Decode(); err == nil {
++			wa = t.GetIntegral().GetTransport()
++			caption = t.GetAncillary().GetCaption().GetText()
++			mediaType, dataType = whatsmeow.MediaVideo, C.gowhatsapp_attachment_type_video
++		} else {
++			purple_debug(4, fmt.Sprintf("gometa: VideoMessage.Decode failed: %v", err))
++		}
++	} else if im := content.GetImageMessage(); im != nil {
++		if t, err := im.Decode(); err == nil {
++			wa = t.GetIntegral().GetTransport()
++			mediaType, dataType = whatsmeow.MediaImage, C.gowhatsapp_attachment_type_image
++		}
++	} else if am := content.GetAudioMessage(); am != nil {
++		if t, err := am.Decode(); err == nil {
++			wa = t.GetIntegral().GetTransport()
++			mediaType, dataType = whatsmeow.MediaAudio, C.gowhatsapp_attachment_type_audio
++		}
++	} else if dm := content.GetDocumentMessage(); dm != nil {
++		if t, err := dm.Decode(); err == nil {
++			wa = t.GetIntegral().GetTransport()
++			filename = dm.GetFileName()
++			mediaType, dataType = whatsmeow.MediaDocument, C.gowhatsapp_attachment_type_document
++		}
++	}
++	if wa == nil || dataType == C.gowhatsapp_attachment_type_none {
++		return false
++	}
++	integral := wa.GetIntegral()
++	if integral == nil {
++		return false
++	}
++	purple_debug(2, fmt.Sprintf("gometa: E2EE media type=%s mime=%q len=%d directPathLen=%d keyLen=%d encSHA=%d -> queueing download",
++		mediaType, wa.GetAncillary().GetMimetype(), wa.GetAncillary().GetFileLength(),
++		len(integral.GetDirectPath()), len(integral.GetMediaKey()), len(integral.GetFileEncSHA256())))
++	mimetype := wa.GetAncillary().GetMimetype()
++	hash := hex.EncodeToString(integral.GetFileSHA256())
++	extension := ""
++	if filename != "" { // document: keep its real name (shown on the chip), split off the extension
++		extension = filepath.Ext(filename)
++		if extension != "" {
++			filename = strings.TrimSuffix(filename, extension)
++		}
++		if safe := sanitize_attachment_name(filename); safe != "" {
++			hash = safe
++		}
++	}
++	if extension == "" {
++		extension = extension_from_mimetype(&mimetype)
++	}
++	// Record who sent this (keyed by serviceMessageId) so a later reaction/reply over E2EE resolves.
++	id := string(evt.Info.ID)
++	if id != "" {
++		h.mu.Lock()
++		h.e2eeMsgMeta[id] = e2eeMsgInfo{fromMe: evt.Info.IsFromMe, sender: strconv.FormatInt(senderFbid, 10), text: caption}
++		h.mu.Unlock()
++	}
++	h.addContact(chatFbid, name)
++	// FB media CANNOT go through purple_handle_attachment: that path marshals the work onto the glib main
++	// loop via purple_timeout_add, which never fires from the FB e2ee event context (proved by the C-side
++	// fsync trace -- gowhatsapp_handle_attachment was never reached; the goroutine variant scheduled a
++	// callback that never ran, the synchronous variant blocked the read loop forever). FB TEXT works
++	// precisely because it uses the DIRECT notifyMessage/serv_got_im path, not the timeout bridge. So
++	// download the media here and display it exactly like FB text: a message whose body is the file://
++	// URL, which the Messaging app renders inline (the same media-URL bubble WhatsApp uses). Bounded
++	// context so a stalled fetch can't wedge the read loop; notifyMessage itself is cheap.
++	chatStr := strconv.FormatInt(chatFbid, 10)
++	senderStr := strconv.FormatInt(senderFbid, 10)
++	dir := "/media/internal/.im-attachments/facebook"
++	os.MkdirAll(dir, 0o755)
++	localPath := dir + "/" + hash + extension
++	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
++	defer cancel()
++	data, derr := h.e2ee.DownloadFB(ctx, integral, mediaType)
++	if derr != nil {
++		purple_debug(4, fmt.Sprintf("gometa: DownloadFB failed (mime=%s): %v", mimetype, derr))
++		return true
++	}
++	if werr := os.WriteFile(localPath, data, 0o644); werr != nil {
++		purple_debug(4, fmt.Sprintf("gometa: write FB media failed: %v", werr))
++		return true
++	}
++	body := "file://" + localPath
++	if caption != "" {
++		body = body + "\n" + caption
++	}
++	h.notifyMessage(chatStr, senderStr, name, body, id, evt.Info.Timestamp.Unix(), false, evt.Info.IsFromMe, "", "", "")
++	return true
++}
+-- 
+2.53.0
+

@@ -1,0 +1,196 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:22:40 +0200
+Subject: [PATCH] webOS: Always report the account as active and Available
+
+On webOS the Teams account runs as an always-on background bridge.
+libpurple's idle time there is the device's touchscreen and keyboard idle
+time, which is "idle" nearly all the time, so:
+
+- teams_set_idle() reported isActive:false every couple of minutes;
+- libpurple's auto-away set the account to Away;
+- the forceavailability override set at login expires and was never
+  renewed.
+
+Teams does not route calls to an account it sees as away or inactive.
+Callers got "we couldn't complete the call" without any signalling
+reaching the device, and contacts saw a stale "last seen".
+
+- Always report isActive:true in teams_set_idle().
+- Re-send "Available" to /v1/me/forceavailability/ from the 120 s
+  teams_idle_update() timer.
+- Turn off /purple/away/away_when_idle at login. This is a process-wide
+  libpurple preference.
+- Trace both presence requests and their responses to the call log.
+
+This goes against what a desktop user expects from idle and away, so it
+is webOS-only. It is not behind a build flag, so it applies to every
+build that carries this patch.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ libteams.c       | 14 ++++++++
+ teams_messages.c | 84 +++++++++++++++++++++++++++++++++++++++++-------
+ 2 files changed, 87 insertions(+), 11 deletions(-)
+
+diff --git a/libteams.c b/libteams.c
+index 9cd8852..c792b6f 100644
+--- a/libteams.c
++++ b/libteams.c
+@@ -652,6 +652,20 @@ teams_login(PurpleAccount *account)
+ 	const gchar *tenant;
+ 	const gchar *password = purple_connection_get_password(pc);
+ 
++	/* Found+fixed 2026-08-05: libpurple core's own auto-away (driven by the SAME physical
++	 * touchscreen/keyboard idle clock teams_set_idle's comment already documents as idle almost
++	 * permanently on this always-on-bridge device) periodically fires the standard
++	 * prpl_info->set_status callback (teams_set_status) with an "Away" status, independent of and
++	 * in addition to anything this plugin does on its own. CAPTURED LIVE: even with
++	 * teams_idle_update's 120s periodic re-publish of "Available" already in place (see
++	 * teams_messages.c), the account still visibly flipped back to "Away" ~40s after a periodic
++	 * refresh - core auto-away firing in the gap between our own refreshes and undoing them, with
++	 * up to ~80s of real "Away" exposure to peers (and, per teams_set_idle's own comment, broken
++	 * incoming call routing) each cycle. This is a process-global libpurple pref, not
++	 * Teams-specific, but harmless to set redundantly if another connector later does the same;
++	 * setting it here (once per Teams login) is enough to stop it firing for this account. */
++	purple_prefs_set_bool("/purple/away/away_when_idle", FALSE);
++
+ 	purple_connection_set_protocol_data(pc, sa);
+ 	teams_account_mark_live(sa);
+ 
+diff --git a/teams_messages.c b/teams_messages.c
+index bd7de9d..efaa7ae 100644
+--- a/teams_messages.c
++++ b/teams_messages.c
+@@ -25,6 +25,7 @@
+ #include "teams_contacts.h"
+ #include "teams_trouter.h"
+ #include "teams_cards.h"
++#include "teams_calling.h"
+ #include "util.h"
+ 
+ 
+@@ -3171,19 +3172,27 @@ teams_send_typing(PurpleConnection *pc, const gchar *name, PurpleIMTypingState s
+ }
+ 
+ 
++static void
++teams_forceavailability_cb(TeamsAccount *sa, JsonNode *node, gpointer user_data)
++{
++	(void) sa; (void) user_data;
++	teams_call_log("forceavailability: response received (node=%p)", (void *) node);
++}
++
+ static void
+ teams_set_global_statusid(TeamsAccount *sa, const gchar *status)
+ {
+ 	gchar *post;
+-	
++
+ 	g_return_if_fail(status);
+-	
++
+ 	// This sets our status everywhere, including on other clients
+ 
+ 	post = g_strdup_printf("{\"availability\":\"%s\"}", status);
+-	teams_post_or_get(sa, TEAMS_METHOD_PUT | TEAMS_METHOD_SSL, TEAMS_PRESENCE_HOST, "/v1/me/forceavailability/", post, NULL, NULL, TRUE);
++	teams_call_log("forceavailability: PUTting availability=%s", status);
++	teams_post_or_get(sa, TEAMS_METHOD_PUT | TEAMS_METHOD_SSL, TEAMS_PRESENCE_HOST, "/v1/me/forceavailability/", post, teams_forceavailability_cb, NULL, TRUE);
+ 	g_free(post);
+-	
++
+ 
+ }
+ 
+@@ -3233,20 +3242,47 @@ teams_set_status(PurpleAccount *account, PurpleStatus *status)
+ 	teams_set_mood_message(sa, purple_status_get_attr_string(status, "message"));
+ }
+ 
++/* Diagnostic-only response callback for the isActive heartbeat POST below - purple_debug_info's
++ * "teams" category isn't visible in this deployment's log config at all (confirmed empty grep
++ * across a whole session's imstdout.log), so there was previously zero visibility into whether
++ * this periodic heartbeat was actually firing/succeeding. Routes through teams_call_log() instead,
++ * which reliably reaches teams-call.log (added 2026-08-05 while investigating a real live symptom:
++ * account showing "Away"/a stale "last seen" on the peer's client, correlating with "we couldn't
++ * complete the call" - see teams_set_idle's own comment for why stale isActive breaks call
++ * routing specifically). */
++static void
++teams_report_activity_cb(TeamsAccount *sa, JsonNode *node, gpointer user_data)
++{
++	(void) sa; (void) user_data;
++	teams_call_log("reportmyactivity: response received (node=%p)", (void *) node);
++}
++
+ void
+ teams_set_idle(PurpleConnection *pc, int time)
+ {
+ 	TeamsAccount *sa = purple_connection_get_protocol_data(pc);
+-	gboolean is_active = FALSE;
++	gboolean is_active = TRUE;
+ 	gchar *post;
+-	
+-	if (time < 30) {
+-		is_active = TRUE;
+-	}
+-	
++
++	/* CAPTURED LIVE (2026-08-01): `time` here is webOS's PHYSICAL touchscreen/keyboard idle
++	 * clock (libpurple core also calls this directly via prpl_info->set_idle whenever that
++	 * clock ticks, not just from teams_idle_update's 120s poll below). This device runs the
++	 * Teams account as an always-on background messaging bridge, not something anyone sits
++	 * and touches - so that clock is "idle" almost permanently, and gating isActive on it
++	 * reported isActive:false to Microsoft's presence backend every ~2 minutes. Teams gates
++	 * whether a call can even be ROUTED to an account on its published availability, so the
++	 * account read as Away/unavailable most of the time and callers got an instant "Cannot
++	 * complete the call" without any signaling ever reaching us - until a fresh login
++	 * (teams_set_status force-publishes Available) or a lucky screen-wake right before
++	 * dialing reset the clock. Always report active instead, same as the other always-on
++	 * connectors on this device. */
++	(void) time;
++
+ 	post = g_strdup_printf("{\"endpointId\":\"%s\",\"isActive\":%s}", sa->endpoint, is_active ? "true" : "false");
++	teams_call_log("reportmyactivity: POSTing isActive=%s (endpoint=%s)", is_active ? "true" : "false",
++	               sa->endpoint ? sa->endpoint : "(null)");
+ 	//TODO check if it's a 404 response and recreate the endpoint (by resetting the availability) if it's gone
+-	teams_post_or_get(sa, TEAMS_METHOD_POST | TEAMS_METHOD_SSL, TEAMS_PRESENCE_HOST, "/v1/me/reportmyactivity/", post, NULL, NULL, TRUE);
++	teams_post_or_get(sa, TEAMS_METHOD_POST | TEAMS_METHOD_SSL, TEAMS_PRESENCE_HOST, "/v1/me/reportmyactivity/", post, teams_report_activity_cb, NULL, TRUE);
+ 	g_free(post);
+ 
+ 	// send isactive on trouter if it's connected
+@@ -3271,6 +3307,32 @@ teams_idle_update(TeamsAccount *sa)
+ 	is_idle = purple_presence_is_idle(presence);
+ 	teams_set_idle(sa->pc, is_idle ? 30 : 0);
+ 
++	/* Found+fixed 2026-08-05: teams_set_status()'s PUT to /v1/me/forceavailability/ (see
++	 * teams_set_global_statusid) is a TIME-LIMITED override - the real trouter presence push
++	 * captured in teams_trouter_send_authentication's own comment shows a "forcedAvailability"
++	 * object with an explicit "expiry" field. It was only ever called ONCE, at login
++	 * (libteams.c's "logged in" handler), with nothing refreshing it afterward - unlike the
++	 * isActive heartbeat above, which this same function already re-fires every 120s and was
++	 * confirmed live to keep working throughout a call. CAPTURED LIVE: an account showed as
++	 * "Away"/a stale "last seen" (correlating almost exactly with a several-minute-old value) to
++	 * a peer despite isActive pings landing on schedule the whole time, and every incoming call
++	 * during that window failed instantly with "we couldn't complete the call" - see
++	 * teams_set_idle's own comment for why Teams gates call routing on published availability.
++	 * Piggyback the refresh on this already-proven-reliable 120s timer instead of adding a new
++	 * one.
++	 *
++	 * Hardcode "Available" rather than re-publishing purple_account_get_active_status()
++	 * (found+fixed 2026-08-05, same session): CAPTURED LIVE, that status genuinely reads back as
++	 * "Away" on this device - libpurple's own core auto-away, driven by the same physical
++	 * touchscreen/keyboard idle clock teams_set_idle's comment already explains is idle almost
++	 * permanently here. Re-publishing it just faithfully (and now reliably) broadcast "Away"
++	 * instead of fixing anything. Matches teams_set_endpoint_statusid's own established pattern
++	 * just above, which already unconditionally hardcodes "Available" for the same always-on-bridge
++	 * reason - and bypasses teams_set_status/the "set-global-status" pref entirely, since this is
++	 * an internal keep-alive refresh, not a real user-driven status change (those still go through
++	 * the normal prpl_info->set_status path via teams_set_status, unaffected by this). */
++	teams_set_global_statusid(sa, "Available");
++
+ 	return TRUE;
+ }
+ 
+-- 
+2.53.0
+

@@ -1,0 +1,2555 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:29:05 +0200
+Subject: [PATCH] webOS: integrate with the LuneOS Messaging app
+
+The LuneOS IM transport (imlibpurpletransport) drives libpurple headless
+for the webOS Messaging app. The app shows reactions, quotes, edits,
+deletions and delivery ticks on the message bubble itself, which needs
+structured data rather than the text renderings libpurple clients get.
+This patch provides that data through process-wide purple signals and
+conversation data that the transport registers and reads:
+
+- reactions are emitted as "webos-im-reaction" instead of a "reacted
+  with X" message; reactions from the app arrive through
+  "webos-im-send-reaction" and go out through BuildReaction(), with the
+  original sender taken from the message cache or, failing that, from
+  the transport
+- the server id of every message sent from the app is emitted as
+  "webos-im-outbox-id", so the user can react to their own messages
+- delivery and read receipts are emitted as "webos-im-receipt"
+  ("webos-im-receipt-hwm" carries watermark receipts)
+- edits and "delete for everyone" are emitted as "webos-im-edit" and
+  "webos-im-delete" so the original bubble is updated in place
+- the WhatsApp id of each received message, and the quoted message of
+  a reply, are stashed as conversation data ("webos-msg-id",
+  "webos-quoted-*"); replies from the app arrive as "webos-reply-to"
+  and are sent as quotes
+- poll votes from the app arrive through "webos-im-send-poll-vote" and
+  are sent with BuildPollVote(); the message cache now records the raw
+  sender, FromMe and IsGroup that BuildPollVote() needs
+- locations, contact cards, events and polls are rendered as tokens and
+  file:// links that the app turns into chips; link previews show their
+  thumbnail, title and description; stickers are transcoded from WebP
+  to PNG because the webOS WebKit has no WebP decoder; WebP files sent
+  from the app go out as stickers; received documents keep their real
+  file name; a video's thumbnail is saved next to it as its poster; an
+  image and its caption are delivered as one message
+- WhatsApp Channels (newsletters) are shown: their names are fetched on
+  connect, joining one fetches its recent history, and posts seen twice
+  (offline sync and history) are dropped; the "ignore-newsletters"
+  option therefore defaults to off. Status updates are routed to a
+  per-sender "<phone>@broadcast" chat instead of a 1:1 chat
+- deleting a WhatsApp account removes only that account's device from
+  the shared whatsmeow store ("account-removed")
+- defaults suited to the device: a 500-message cache (replies and
+  reactions need it), profile pictures on ("preview"), group subjects
+  fetched on connect, and a lost buddy icon is re-fetched
+
+The quote strings added to gowhatsapp_message are freed in
+gowhatsapp_free_message().
+
+Rebased onto 1.27.0, where incoming text is HTML-escaped in Go and
+outgoing HTML is stripped in Go: the escape argument of
+gowhatsapp_display_text_message() is gone, and the caption folded into
+the media message is escaped where it is built.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ bridge.go                | 176 +++++++++++++-
+ bridge.h                 |   9 +
+ glue/bridge.c            |   3 +
+ glue/display_message.c   |  51 +++-
+ glue/gowhatsapp.h        |   2 +-
+ glue/groups.c            |  11 +
+ glue/handle_attachment.c |  28 ++-
+ glue/init.c              |  43 +++-
+ glue/login.c             |  74 +++++-
+ glue/options.c           |   8 +-
+ glue/presence.c          |  19 +-
+ glue/process_message.c   |  74 +++++-
+ glue/send_message.c      |  24 +-
+ go.mod                   |   1 +
+ go.sum                   |   2 +
+ handle_attachment.go     |  66 ++++-
+ handle_message.go        | 503 +++++++++++++++++++++++++++++++++------
+ handle_newsletter.go     | 143 +++++++++++
+ handler.go               |  22 +-
+ login.go                 | 118 +++++++++
+ message_cache.go         |  27 ++-
+ newsletter_seen.go       |  65 +++++
+ profile.go               |   3 +-
+ send_file.go             |  34 ++-
+ send_message.go          | 218 ++++++++++++++++-
+ 25 files changed, 1603 insertions(+), 121 deletions(-)
+ create mode 100644 handle_newsletter.go
+ create mode 100644 newsletter_seen.go
+
+diff --git a/bridge.go b/bridge.go
+index 4e88676..ba717ce 100644
+--- a/bridge.go
++++ b/bridge.go
+@@ -92,21 +92,33 @@ func gowhatsapp_go_send_typing(account *PurpleAccount, who *C.char, typing C.int
+ 	}
+ }
+ 
++//export gowhatsapp_go_account_removed
++// Fired from the libpurple "account-removed" signal (see glue/init.c) when a WhatsApp account is
++// DELETED on webOS. Unlinks this device server-side (if a live client exists) and removes ONLY this
++// account's row from the SHARED whatsmeow.db — never the whole file. credentials = the account's
++// "credentials" setting ("deviceJID|registrationId"), used to find the exact device to delete.
++func gowhatsapp_go_account_removed(account *PurpleAccount, purple_user_dir *C.char, username *C.char, credentials *C.char) {
++	whatsapp_account_removed(account, C.GoString(purple_user_dir), C.GoString(username), C.GoString(credentials))
++}
++
+ //export gowhatsapp_go_send_message
+-func gowhatsapp_go_send_message(account *PurpleAccount, who *C.char, message *C.char, is_group C.int) int {
++func gowhatsapp_go_send_message(account *PurpleAccount, who *C.char, message *C.char, is_group C.int, reply_to *C.char) int {
+ 	handler, ok := handlers[account]
+ 	if ok {
++		// webOS replies: reply_to = the serviceMessageId (whatsmeow StanzaID) of the message this one
++		// replies to, "" for a normal message. Resolved to a QuotedMessage in send_text_message.
++		replyTo := C.GoString(reply_to)
+ 		setting := purple_get_string(handler.account, C.GOWHATSAPP_ECHO_OPTION, C.GOWHATSAPP_ECHO_CHOICE_ON_SUCCESS)
+ 		if setting == C.GoString(C.GOWHATSAPP_ECHO_CHOICE_INTERNAL) {
+ 			// blocking mode
+-			if handler.send_message(C.GoString(who), C.GoString(message), Cint_to_bool(is_group)) {
++			if handler.send_message(C.GoString(who), C.GoString(message), Cint_to_bool(is_group), replyTo) {
+ 				return 1 // indicate success for purple
+ 			} else {
+ 				return -1 // indicate error for purple
+ 			}
+ 		} else {
+ 			// non-blocking mode
+-			go handler.send_message(C.GoString(who), C.GoString(message), Cint_to_bool(is_group))
++			go handler.send_message(C.GoString(who), C.GoString(message), Cint_to_bool(is_group), replyTo)
+ 			if setting == C.GoString(C.GOWHATSAPP_ECHO_CHOICE_IMMEDIATELY) {
+ 				// indicate immediate success, message is echoed back into conversation by purple
+ 				return 1
+@@ -119,6 +131,40 @@ func gowhatsapp_go_send_message(account *PurpleAccount, who *C.char, message *C.
+ 	return -107 // ENOTCONN, see libpurple/prpl.h
+ }
+ 
++//export gowhatsapp_go_send_reaction
++// webOS reactions (SEND): react to a WhatsApp message. targetId = the bare whatsmeow message id
++// (info.ID, no chat prefix); emoji = the reaction (ignored when removeFlag=="1"); peer = the chat JID
++// the transport uses; targetSender = the reacted-to message's ORIGINAL sender (db8 fallback so we can
++// build the reaction without a message-cache entry; "" if unknown); removeFlag "1" removes my reaction.
++// Runs the actual send on a goroutine.
++func gowhatsapp_go_send_reaction(account *PurpleAccount, targetId *C.char, emoji *C.char, peer *C.char, targetSender *C.char, removeFlag *C.char) {
++	handler, ok := handlers[account]
++	if !ok {
++		return
++	}
++	remove := C.GoString(removeFlag) == "1"
++	go handler.send_reaction(C.GoString(peer), C.GoString(targetId), C.GoString(emoji), C.GoString(targetSender), remove)
++}
++
++//export gowhatsapp_go_send_poll_vote
++// webOS polls (SEND): vote on a poll. pollMessageId = the poll creation message's server id; peer =
++// the chat JID; optionNamesJoined = the FULL current selection, "\x1f"-separated (empty string =
++// clear my vote); senderJid = the poll creation message's ORIGINAL sender (db8 fallback, same as
++// gowhatsapp_go_send_reaction's targetSender, so we can build the vote without a message-cache
++// entry; "" if unknown). Runs the actual send on a goroutine.
++func gowhatsapp_go_send_poll_vote(account *PurpleAccount, peer *C.char, pollMessageId *C.char, optionNamesJoined *C.char, senderJid *C.char) {
++	handler, ok := handlers[account]
++	if !ok {
++		return
++	}
++	joined := C.GoString(optionNamesJoined)
++	var optionNames []string
++	if joined != "" {
++		optionNames = strings.Split(joined, "\x1f")
++	}
++	go handler.send_poll_vote(C.GoString(peer), C.GoString(pollMessageId), optionNames, C.GoString(senderJid))
++}
++
+ //export gowhatsapp_go_send_file
+ func gowhatsapp_go_send_file(account *PurpleAccount, who *C.char, filename *C.char) *C.char {
+ 	err := "Not connected."
+@@ -248,6 +294,15 @@ func gowhatsapp_go_query_groups(account *PurpleAccount) {
+ 	}
+ }
+ 
++//export gowhatsapp_go_fetch_newsletter_history
++func gowhatsapp_go_fetch_newsletter_history(account *PurpleAccount, jidStr *C.char) {
++	handler, ok := handlers[account]
++	if !ok || jidStr == nil {
++		return
++	}
++	go handler.fetch_newsletter_history(C.GoString(jidStr))
++}
++
+ //export gowhatsapp_go_get_contacts
+ func gowhatsapp_go_get_contacts(account *PurpleAccount, flush C.int) {
+ 	handler, ok := handlers[account]
+@@ -407,7 +462,7 @@ func purple_disconnected(account *PurpleAccount) {
+  * This will display a text message.
+  * Single participants and group chats.
+  */
+-func purple_display_text_message(account *PurpleAccount, remoteJid string, isGroup bool, isOutgoing bool, senderJid string, pushName *string, timestamp time.Time, text string, id *string) {
++func purple_display_text_message(account *PurpleAccount, remoteJid string, isGroup bool, isOutgoing bool, senderJid string, pushName *string, timestamp time.Time, text string, id *string, quotedText string, quotedFrom string, quotedId string) {
+ 	cmessage := C.struct_gowhatsapp_message{
+ 		account:    account,
+ 		msgtype:    C.char(C.gowhatsapp_message_type_text),
+@@ -424,6 +479,16 @@ func purple_display_text_message(account *PurpleAccount, remoteJid string, isGro
+ 	if id != nil {
+ 		cmessage.messageId = C.CString(*id)
+ 	}
++	// webOS replies: carry the structured quote (if this message replies to another) to the C stash.
++	if quotedText != "" {
++		cmessage.quotedText = C.CString(quotedText)
++		if quotedFrom != "" {
++			cmessage.quotedFrom = C.CString(quotedFrom)
++		}
++		if quotedId != "" {
++			cmessage.quotedId = C.CString(quotedId)
++		}
++	}
+ 	C.gowhatsapp_process_message_bridge(cmessage)
+ }
+ 
+@@ -500,6 +565,109 @@ func purple_set_profile_picture(account *PurpleAccount, who string, data []byte,
+ 	C.gowhatsapp_process_message_bridge(cmessage)
+ }
+ 
++/*
++ * webOS reactions: forward a reaction to the transport's cross-prpl "webos-im-reaction" signal
++ * (emitted C-side in process_message on the libpurple main thread) instead of posting a "reacted
++ * with X" message. targetId = the reacted-to message id, emoji = "" means the reaction was removed,
++ * sender = who reacted. The message bridge frees the CStrings.
++ */
++func purple_handle_reaction(account *PurpleAccount, remoteJid string, targetId string, emoji string, sender string) {
++	cmessage := C.struct_gowhatsapp_message{
++		account:   account,
++		msgtype:   C.char(C.gowhatsapp_message_type_reaction),
++		remoteJid: C.CString(remoteJid),
++		senderJid: C.CString(sender),
++		messageId: C.CString(targetId),
++		text:      C.CString(emoji),
++	}
++	C.gowhatsapp_process_message_bridge(cmessage)
++}
++
++/*
++ * webOS outbox-id: forward the server-assigned id of a message the app just sent to the transport's
++ * cross-prpl "webos-im-outbox-id" signal (emitted C-side in process_message on the libpurple main
++ * thread). The transport attaches the id to the Outbox row so the user can react to their own sent
++ * message. id = the message's service id, text = the message body (correlation hint). Account-agnostic:
++ * used by all three send paths (WhatsApp, FB plaintext, FB E2EE). The message bridge frees the CStrings.
++ */
++func purple_handle_outbox_id(account *PurpleAccount, id string, text string) {
++	if id == "" {
++		return
++	}
++	cmessage := C.struct_gowhatsapp_message{
++		account:   account,
++		msgtype:   C.char(C.gowhatsapp_message_type_outbox_id),
++		messageId: C.CString(id),
++		text:      C.CString(text),
++	}
++	C.gowhatsapp_process_message_bridge(cmessage)
++}
++
++// webOS delivery/read receipts: the recipient delivered/read one of our outgoing messages. id is the
++// message's server id (== its serviceMessageId); status is "delivered" or "read". Forwarded to the
++// transport's "webos-im-receipt" signal (status carried in the text field).
++func purple_handle_receipt(account *PurpleAccount, id string, status string) {
++	if id == "" {
++		return
++	}
++	cmessage := C.struct_gowhatsapp_message{
++		account:   account,
++		msgtype:   C.char(C.gowhatsapp_message_type_receipt),
++		messageId: C.CString(id),
++		text:      C.CString(status),
++	}
++	C.gowhatsapp_process_message_bridge(cmessage)
++}
++
++// webOS delivery/read receipts (WATERMARK, Facebook): the peer delivered/read everything in a thread up
++// to a timestamp. scope is the transport match rule ("ts:<threadKey>"), watermark the boundary (ms
++// decimal), status "delivered" or "read". Forwarded to the transport's "webos-im-receipt-hwm" signal
++// (scope in remoteJid, watermark in messageId, status in text).
++// purple_handle_message_edit: the sender edited a previously-sent message (targetId = that message's
++// server id == serviceMessageId); newText is the new body. The transport finds the stored bubble by
++// serviceMessageId and updates its text in place (rather than showing a separate "[EDIT]" message).
++func purple_handle_message_edit(account *PurpleAccount, targetId string, newText string) {
++	if targetId == "" {
++		return
++	}
++	cmessage := C.struct_gowhatsapp_message{
++		account:   account,
++		msgtype:   C.char(C.gowhatsapp_message_type_edit),
++		messageId: C.CString(targetId),
++		text:      C.CString(newText),
++	}
++	C.gowhatsapp_process_message_bridge(cmessage)
++}
++// purple_handle_message_delete: the sender deleted a previously-sent message "for everyone"
++// (targetId = that message's server id == serviceMessageId). The transport finds the stored bubble
++// by serviceMessageId and replaces its text with a "This message was deleted." placeholder in
++// place - the same find-by-serviceMessageId + merge-messageText mechanism as an edit, just with a
++// canned body instead of a new one (see gowhatsapp_message_type_delete in glue/process_message.c).
++func purple_handle_message_delete(account *PurpleAccount, targetId string) {
++	if targetId == "" {
++		return
++	}
++	cmessage := C.struct_gowhatsapp_message{
++		account:   account,
++		msgtype:   C.char(C.gowhatsapp_message_type_delete),
++		messageId: C.CString(targetId),
++	}
++	C.gowhatsapp_process_message_bridge(cmessage)
++}
++func purple_handle_receipt_watermark(account *PurpleAccount, scope string, watermark string, status string) {
++	if scope == "" || watermark == "" {
++		return
++	}
++	cmessage := C.struct_gowhatsapp_message{
++		account:   account,
++		msgtype:   C.char(C.gowhatsapp_message_type_receipt_hwm),
++		remoteJid: C.CString(scope),
++		messageId: C.CString(watermark),
++		text:      C.CString(status),
++	}
++	C.gowhatsapp_process_message_bridge(cmessage)
++}
++
+ /*
+  * This will inform purple that the remote user started typing.
+  */
+diff --git a/bridge.h b/bridge.h
+index ec97e45..82983ea 100644
+--- a/bridge.h
++++ b/bridge.h
+@@ -24,6 +24,12 @@
+     MESSAGE_TYPE(typing_stopped) \
+     MESSAGE_TYPE(text) \
+     MESSAGE_TYPE(attachment) \
++    MESSAGE_TYPE(reaction) \
++    MESSAGE_TYPE(outbox_id) \
++    MESSAGE_TYPE(receipt) \
++    MESSAGE_TYPE(receipt_hwm) \
++    MESSAGE_TYPE(edit) \
++    MESSAGE_TYPE(delete) \
+     MESSAGE_TYPE(profile_picture) \
+     MESSAGE_TYPE(group) \
+     MESSAGE_TYPE(max) \
+@@ -57,6 +63,9 @@ struct gowhatsapp_message {
+     char *remoteJid; /// conversation identifier (may be a single contact or a group)
+     char *senderJid; /// message author's identifier (useful in group chats)
+     char *messageId; /// message ID
++    char *quotedText; /// webOS replies: replied-to original's text (NULL if not a reply)
++    char *quotedFrom; /// webOS replies: replied-to original's author display name
++    char *quotedId; /// webOS replies: replied-to original's message ID (== StanzaID)
+     char *text; /// the message payload (interpretation depends on type)
+     char *pairing_code; /// 6-character pairing code
+     char *pairing_qrdata; /// the pairing QR-code raw data
+diff --git a/glue/bridge.c b/glue/bridge.c
+index 9e66a14..2bd640d 100644
+--- a/glue/bridge.c
++++ b/glue/bridge.c
+@@ -65,6 +65,9 @@ void gowhatsapp_free_message(gowhatsapp_message_t *gwamsg) {
+     g_free(gwamsg->extension);
+     g_free(gwamsg->mimetype);
+     g_free(gwamsg->messageId);
++    g_free(gwamsg->quotedText); // webOS replies
++    g_free(gwamsg->quotedFrom);
++    g_free(gwamsg->quotedId);
+     g_free(gwamsg->pairing_code);
+     g_free(gwamsg->pairing_qrdata);
+     g_free(gwamsg->pairing_qrterminal);
+diff --git a/glue/display_message.c b/glue/display_message.c
+index e978cab..55d9c2e 100644
+--- a/glue/display_message.c
++++ b/glue/display_message.c
+@@ -1,8 +1,24 @@
+ #include "gowhatsapp.h"
+ #include "constants.h"
+ 
++/* webOS replies: stash the quoted-original (text/from/id) on a conversation right beside webos-msg-id,
++ * so the transport records an inline quote card instead of the "> ..." fold we used to put in the body.
++ * No-op when the message is not a reply. Strings are g_strdup'd here and freed by the transport. */
++static void gowhatsapp_stash_webos_quote(PurpleConversation *conv, const gchar *quotedText, const gchar *quotedFrom, const gchar *quotedId) {
++    if (conv == NULL || quotedText == NULL || *quotedText == '\0') {
++        return;
++    }
++    purple_conversation_set_data(conv, "webos-quoted-text", g_strdup(quotedText));
++    if (quotedFrom != NULL && *quotedFrom != '\0') {
++        purple_conversation_set_data(conv, "webos-quoted-from", g_strdup(quotedFrom));
++    }
++    if (quotedId != NULL && *quotedId != '\0') {
++        purple_conversation_set_data(conv, "webos-quoted-id", g_strdup(quotedId));
++    }
++}
++
+ void gowhatsapp_display_text_message(
+-    PurpleAccount *account, 
++    PurpleAccount *account,
+     const gchar * senderJid,
+     const gchar * remoteJid,
+     const gchar * text,
+@@ -11,7 +27,10 @@ void gowhatsapp_display_text_message(
+     const gboolean isOutgoing,
+     const gchar * name,
+     PurpleMessageFlags flags,
+-    const gchar * messageId
++    const gchar * messageId,
++    const gchar * quotedText,
++    const gchar * quotedFrom,
++    const gchar * quotedId
+ ) {
+     g_return_if_fail(account != NULL);
+     
+@@ -53,8 +72,18 @@ void gowhatsapp_display_text_message(
+         text_with_id = g_strdup(text); // MEMCHECK: released here (see below)
+     }
+     
++    // webOS reactions: stash this message's WhatsApp id on the conversation right before serv_got_*
++    // (which synchronously drives the transport's incoming_message_cb). The transport reads it as
++    // "webos-msg-id" and stores it as serviceMessageId so a later reaction can target this message.
++    // Only for RECV messages - the transport ignores our own echoes.
+     if (isGroup) {
+-        gowhatsapp_enter_group_chat(connection, remoteJid, NULL);
++        PurpleConversation *gconv = gowhatsapp_enter_group_chat(connection, remoteJid, NULL);
++        if (gconv != NULL && (flags & PURPLE_MESSAGE_RECV) && messageId != NULL && *messageId != '\0') {
++            purple_conversation_set_data(gconv, "webos-msg-id", g_strdup(messageId));
++        }
++        if (gconv != NULL && (flags & PURPLE_MESSAGE_RECV)) {
++            gowhatsapp_stash_webos_quote(gconv, quotedText, quotedFrom, quotedId);
++        }
+         purple_serv_got_chat_in(connection, g_str_hash(remoteJid), senderJid, flags, text_with_id, timestamp);
+     } else {
+         if (flags & PURPLE_MESSAGE_SEND) {
+@@ -64,11 +93,27 @@ void gowhatsapp_display_text_message(
+             if (conv == NULL) {
+                 conv = purple_conversation_new(PURPLE_CONV_TYPE_IM, account, remoteJid); // MEMCHECK: caller takes ownership
+             }
++            // webOS reactions/carbons: a message we sent from ANOTHER device carries REMOTE_SEND and the
++            // transport stores it as an Outbox row - stash its id as the serviceMessageId so a later
++            // reaction can attach to our own message. A plain local echo (SEND without REMOTE_SEND) is
++            // left to the app's own send path, so don't stash for it.
++            if ((flags & PURPLE_MESSAGE_REMOTE_SEND) && messageId != NULL && *messageId != '\0') {
++                purple_conversation_set_data(conv, "webos-msg-id", g_strdup(messageId));
++            }
++            gowhatsapp_stash_webos_quote(conv, quotedText, quotedFrom, quotedId);
+             purple_conv_im_write(purple_conversation_get_im_data(conv), remoteJid, text_with_id, flags, timestamp);
+         } else {
+             if (purple_account_get_bool(account, GOWHATSAPP_UPDATE_BUDDY_ON_MESSAGE_OPTION, TRUE)) {
+                 gowhatsapp_ensure_buddy_in_blist(account, remoteJid, name);
+             }
++            PurpleConversation *conv = purple_find_conversation_with_account(PURPLE_CONV_TYPE_IM, remoteJid, account);
++            if (conv == NULL) {
++                conv = purple_conversation_new(PURPLE_CONV_TYPE_IM, account, remoteJid);
++            }
++            if (messageId != NULL && *messageId != '\0') {
++                purple_conversation_set_data(conv, "webos-msg-id", g_strdup(messageId));
++            }
++            gowhatsapp_stash_webos_quote(conv, quotedText, quotedFrom, quotedId);
+             purple_serv_got_im(connection, remoteJid, text_with_id, flags, timestamp);
+         }
+     }
+diff --git a/glue/gowhatsapp.h b/glue/gowhatsapp.h
+index 1900e2e..df8fdb3 100644
+--- a/glue/gowhatsapp.h
++++ b/glue/gowhatsapp.h
+@@ -33,7 +33,7 @@ void gowhatsapp_close_qrcode(PurpleAccount *account);
+ void gowhatsapp_process_message(gowhatsapp_message_t *gwamsg);
+ 
+ // display_message
+-void gowhatsapp_display_text_message(PurpleAccount *account, const gchar * senderJid, const gchar * remoteJid, const gchar * text, const time_t timestamp, const gboolean isGroup, const gboolean isOutgoing, const gchar * name, PurpleMessageFlags flags, const gchar * messageId);
++void gowhatsapp_display_text_message(PurpleAccount *account, const gchar * senderJid, const gchar * remoteJid, const gchar * text, const time_t timestamp, const gboolean isGroup, const gboolean isOutgoing, const gchar * name, PurpleMessageFlags flags, const gchar * messageId, const gchar * quotedText, const gchar * quotedFrom, const gchar * quotedId);
+ 
+ // message_filtering
+ gboolean gowhatsapp_append_message_id_if_not_exists(PurpleAccount *account, char *message_id);
+diff --git a/glue/groups.c b/glue/groups.c
+index 0336962..5cfed3c 100644
+--- a/glue/groups.c
++++ b/glue/groups.c
+@@ -76,9 +76,20 @@ GHashTable * gowhatsapp_chat_info_defaults(PurpleConnection *pc, const char *cha
+  */
+ void gowhatsapp_join_chat(PurpleConnection *pc, GHashTable *data) {
+     const char *remoteJid = g_hash_table_lookup(data, "name");
++    if (remoteJid == NULL) {
++        // webOS: the transport keys channel joins (openChannel -> serv_join_chat) by "id", not "name".
++        remoteJid = g_hash_table_lookup(data, "id");
++    }
+     if (remoteJid != NULL) {
+         // add chat to buddy list (optional)
+         PurpleAccount *account = purple_connection_get_account(pc);
++        // webOS: a WhatsApp Channel (newsletter) has no MUC to enter - fetch its recent history on
++        // demand instead. The replayed posts route back through the normal message path into the
++        // "WhatsApp Channels" server thread (see handle_newsletter.go / LibpurpleAdapter routing).
++        if (g_str_has_suffix(remoteJid, "@newsletter")) {
++            gowhatsapp_go_fetch_newsletter_history(account, (char *)remoteJid);
++            return;
++        }
+         const char *topic = g_hash_table_lookup(data, "topic");
+         if (purple_account_get_bool(account, GOWHATSAPP_UPDATE_BUDDY_ON_MESSAGE_OPTION, TRUE)) {
+             gowhatsapp_ensure_group_chat_in_blist(account, remoteJid, topic);
+diff --git a/glue/handle_attachment.c b/glue/handle_attachment.c
+index 664d173..18b7e8d 100644
+--- a/glue/handle_attachment.c
++++ b/glue/handle_attachment.c
+@@ -32,7 +32,7 @@ static void gowhatsapp_display_image_inline(gowhatsapp_message_t *gwamsg, const
+             int img_id = purple_imgstore_add_with_id(data, len, NULL); // MEMCHECK: released by purple_imgstore_unref_by_id (see below)
+             if (img_id > 0) {
+                 gchar * text = g_strdup_printf("<img id=\"%u\"/>", img_id); // MEMCHECK: released here
+-                gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid, text, gwamsg->timestamp, gwamsg->isGroup, gwamsg->isOutgoing, NULL, PURPLE_MESSAGE_IMAGES, gwamsg->messageId);
++                gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid, text, gwamsg->timestamp, gwamsg->isGroup, gwamsg->isOutgoing, NULL, PURPLE_MESSAGE_IMAGES, gwamsg->messageId, NULL, NULL, NULL);
+                 g_free(text);
+                 purple_imgstore_unref_by_id(img_id);
+             }
+@@ -42,7 +42,7 @@ static void gowhatsapp_display_image_inline(gowhatsapp_message_t *gwamsg, const
+ 
+ static void gowhatsapp_display_caption(gowhatsapp_message_t *gwamsg) {
+     if (gwamsg->text && gwamsg->text[0]) {
+-        gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid, gwamsg->text, gwamsg->timestamp, gwamsg->isGroup, gwamsg->isOutgoing, gwamsg->name, 0, gwamsg->messageId);
++        gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid, gwamsg->text, gwamsg->timestamp, gwamsg->isGroup, gwamsg->isOutgoing, gwamsg->name, 0, gwamsg->messageId, NULL, NULL, NULL);
+     }
+ }
+ 
+@@ -244,7 +244,7 @@ void download_to_templated_destination(gowhatsapp_message_t *gwamsg, const char
+     char *error = gowhatsapp_go_download_attachment(gwamsg->account, local_path, gwamsg->download_handle);
+     gowhatsapp_go_delete_handle(gwamsg->download_handle);
+     if (error && error[0]) {
+-        gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid, error, gwamsg->timestamp, gwamsg->isGroup, gwamsg->isOutgoing, gwamsg->name, PURPLE_MESSAGE_ERROR, gwamsg->messageId);
++        gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid, error, gwamsg->timestamp, gwamsg->isGroup, gwamsg->isOutgoing, gwamsg->name, PURPLE_MESSAGE_ERROR, gwamsg->messageId, NULL, NULL, NULL);
+     } else {
+         #ifndef WIN32
+             if (purple_account_get_bool(gwamsg->account, GOWHATSAPP_ATTACHMENT_SYMLINK_OPTION, TRUE)) {
+@@ -256,10 +256,26 @@ void download_to_templated_destination(gowhatsapp_message_t *gwamsg, const char
+         if (url_template && url_template[0]) {
+             url = gowhatsapp_attachment_fill_template(url_template, gwamsg->timestamp, gwamsg->hash_hex, gwamsg->filename, gwamsg->extension, gwamsg->remoteJid, gwamsg->senderJid, chat_alias, buddy_alias, gwamsg->messageId, flags);
+         }
+-        gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid, url, gwamsg->timestamp, gwamsg->isGroup, gwamsg->isOutgoing, gwamsg->name, 0, gwamsg->messageId);
++        // webOS: deliver the media URL and its caption as ONE message, not two. The Messaging app
++        // strips the media URL from the body, renders it inline as an image/chip, and shows the
++        // remaining caption text - so a "url<br>caption" body is a single picture+caption bubble.
++        // Upstream posts the caption as a separate message with the SAME messageId, which the app
++        // renders as a second stand-alone bubble. The caption is plain text from WhatsApp, so it is
++        // HTML-escaped here like any other incoming text.
++        if (gwamsg->text && gwamsg->text[0]) {
++            gchar *html = purple_markup_escape_text(gwamsg->text, -1);
++            gchar *caption = purple_strdup_withhtml(html);
++            char *combined = g_strdup_printf("%s<br>%s", url, caption);
++            gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid, combined, gwamsg->timestamp, gwamsg->isGroup, gwamsg->isOutgoing, gwamsg->name, 0, gwamsg->messageId, NULL, NULL, NULL);
++            g_free(combined);
++            g_free(caption);
++            g_free(html);
++        } else {
++            gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid, url, gwamsg->timestamp, gwamsg->isGroup, gwamsg->isOutgoing, gwamsg->name, 0, gwamsg->messageId, NULL, NULL, NULL);
++        }
+         g_free(url);
+         gowhatsapp_display_image_inline(gwamsg, local_path);
+-        gowhatsapp_display_caption(gwamsg);
++        // caption folded into the URL message above (was: gowhatsapp_display_caption(gwamsg))
+     }
+     g_free(error);
+     g_free(local_path);
+@@ -270,7 +286,7 @@ static gboolean download_to_temporary_directory(gowhatsapp_message_t *gwamsg) {
+     char *error = gowhatsapp_go_download_attachment(gwamsg->account, local_path_tmp, gwamsg->download_handle);
+     gowhatsapp_go_delete_handle(gwamsg->download_handle);
+     if (error && error[0]) {
+-        gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid, error, gwamsg->timestamp, gwamsg->isGroup, gwamsg->isOutgoing, gwamsg->name, PURPLE_MESSAGE_ERROR, gwamsg->messageId);
++        gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid, error, gwamsg->timestamp, gwamsg->isGroup, gwamsg->isOutgoing, gwamsg->name, PURPLE_MESSAGE_ERROR, gwamsg->messageId, NULL, NULL, NULL);
+     } else {
+         gowhatsapp_display_image_inline(gwamsg, local_path_tmp);
+         gowhatsapp_display_caption(gwamsg);
+diff --git a/glue/init.c b/glue/init.c
+index 5621bde..246feb9 100644
+--- a/glue/init.c
++++ b/glue/init.c
+@@ -22,7 +22,8 @@
+   */
+ 
+ #include "gowhatsapp.h"
+-#include "libwhatsmeow.h" // for gowhatsapp_go_init
++#include "constants.h"       // GOWHATSAPP_CREDENTIALS_KEY (for locating the device to unlink on delete)
++#include "libwhatsmeow.h" // for gowhatsapp_go_init + gowhatsapp_go_account_removed
+ #include <gmodule.h>      // g_module_make_resident - pin the Go .so so libpurple can't dlclose/unmap it
+ 
+ #ifndef PLUGIN_VERSION
+@@ -138,6 +139,44 @@ static PurplePluginProtocolInfo prpl_info = {
+     #endif
+ };
+ 
++// Per-account store teardown on account deletion. libpurple's purple_accounts_delete() emits
++// "account-removed" (on purple_accounts_get_handle()) for the account being deleted, then destroys
++// it synchronously. We filter by protocol id and hand off to the Go export. Everything must complete
++// synchronously here — the account pointer is freed the moment this returns, so the Go side must not
++// defer any work that dereferences it.
++static void
++webos_account_removed_cb(PurpleAccount *account, gpointer data)
++{
++    (void)data;
++    if (account == NULL) {
++        return;
++    }
++    const char *proto = purple_account_get_protocol_id(account);
++    char *user_dir = (char *)purple_user_dir();                    // cgo does not support const
++    char *username = (char *)purple_account_get_username(account); // cgo does not support const
++    if (g_strcmp0(proto, GOWHATSAPP_PRPL_ID) == 0) {
++        // Match login.c: the device JID lives in the "credentials" setting (bitlbee falls back to
++        // the password field). Go uses it to delete ONLY this account's row from the shared store.
++        const char *credentials = purple_account_get_string(account, GOWHATSAPP_CREDENTIALS_KEY, NULL);
++        if (credentials == NULL) {
++            credentials = purple_account_get_password(account);
++        }
++        gowhatsapp_go_account_removed(account, user_dir, username, (char *)(credentials ? credentials : ""));
++    }
++}
++
++// Connect the "account-removed" handler once, using `plugin` as the signal handle so
++// libpurple2_plugin_unload's purple_signals_disconnect_by_handle(plugin) cleans it up. Called from
++// plugin_init (the module is pinned resident, so the callback can never be unmapped). The accounts
++// subsystem and its "account-removed" signal are registered by purple_core_init well before any
++// plugin is probed, so the handle is always valid here.
++static void
++webos_connect_account_removed(PurplePlugin *plugin)
++{
++    purple_signal_connect(purple_accounts_get_handle(), "account-removed",
++                          plugin, PURPLE_CALLBACK(webos_account_removed_cb), NULL);
++}
++
+ static void plugin_init(PurplePlugin *plugin) {
+     // The Go runtime (cgo c-archive) cannot survive g_module_close(): libpurple dlcloses plugins
+     // during its startup plugin probe, which unmaps code the Go scheduler threads are still executing
+@@ -147,6 +186,8 @@ static void plugin_init(PurplePlugin *plugin) {
+         g_module_make_resident((GModule *) plugin->handle);
+     }
+     prpl_info.protocol_options = gowhatsapp_add_account_options(prpl_info.protocol_options);
++    // Clean up the per-JID device row in the shared whatsmeow.db when an account is deleted.
++    webos_connect_account_removed(plugin);
+ }
+ 
+ static PurplePluginInfo info = {
+diff --git a/glue/login.c b/glue/login.c
+index 3f82f44..bd314c5 100644
+--- a/glue/login.c
++++ b/glue/login.c
+@@ -1,5 +1,74 @@
+ #include "gowhatsapp.h"
+-#include "libwhatsmeow.h" // for gowhatsapp_go_login
++#include "libwhatsmeow.h" // for gowhatsapp_go_login / gowhatsapp_go_send_reaction
++
++// webOS reactions (SEND): the transport emits "webos-im-send-reaction" (registered process-wide) when
++// the user reacts from the TouchPad. It fires for EVERY account, so we filter by protocol id and route
++// to the matching Go send-reaction handler. Params (5): account, targetServiceMessageId, emoji (already
++// decoded UTF-8, always supplied even on removal), peer (the thread/chat id the transport uses),
++// removeFlag ("1" = remove my reaction, else add). This one .so hosts BOTH prpls (WhatsApp + gometa),
++// so the same callback covers both.
++static void webos_send_reaction_cb(PurpleAccount *account, const char *targetId, const char *emoji,
++                                   const char *peer, const char *removeFlag, void *data)
++{
++    (void)data;
++    if (!account || !targetId || !*targetId) {
++        return;
++    }
++    const char *proto = purple_account_get_protocol_id(account);
++    if (g_strcmp0(proto, GOWHATSAPP_PRPL_ID) == 0) {
++        // db8 fallback: the transport stashed the reacted-to message's ORIGINAL sender on the account
++        // right before this (synchronous) emit, so whatsmeow can set FromMe/Participant on BuildReaction
++        // without a live message-cache entry (survives transport restart / very old messages). "" if unknown.
++        const char *targetSender = purple_account_get_string(account, "webos-reaction-target-sender", "");
++        gowhatsapp_go_send_reaction(account, (char *)targetId, (char *)(emoji ? emoji : ""),
++                                    (char *)(peer ? peer : ""), (char *)(targetSender ? targetSender : ""),
++                                    (char *)(removeFlag ? removeFlag : ""));
++    }
++}
++
++// webOS polls (SEND): the transport emits "webos-im-send-poll-vote" when the user taps a poll
++// option. Params (4): account, peer (chat id), pollMessageId, optionNamesJoined ("\x1f"-separated,
++// "" clears the vote). Polls are WhatsApp-only (gometa/Facebook has no polls), so only that prpl id
++// is handled here.
++static void webos_send_poll_vote_cb(PurpleAccount *account, const char *peer, const char *pollMessageId,
++                                    const char *optionNamesJoined, void *data)
++{
++    (void)data;
++    if (!account || !pollMessageId || !*pollMessageId) {
++        return;
++    }
++    const char *proto = purple_account_get_protocol_id(account);
++    if (g_strcmp0(proto, GOWHATSAPP_PRPL_ID) == 0) {
++        // db8 fallback: the transport stashed the poll's ORIGINAL sender on the account right before
++        // this (synchronous) emit, same as webos-reaction-target-sender - lets whatsmeow build+encrypt
++        // the vote without a live message-cache entry (survives transport restart / very old polls).
++        const char *senderJid = purple_account_get_string(account, "webos-pollvote-sender", "");
++        gowhatsapp_go_send_poll_vote(account, (char *)(peer ? peer : ""), (char *)pollMessageId,
++                                     (char *)(optionNamesJoined ? optionNamesJoined : ""),
++                                     (char *)(senderJid ? senderJid : ""));
++    }
++}
++
++// Connect once (process-wide) to the transport's send-reaction signal. The signal lives on
++// purple_conversations_get_handle(), so a single connect covers every account of both prpls in this
++// process. Called from BOTH login paths (gowhatsapp_login here and gometa_login) so it fires whether
++// the user has a WhatsApp account, a Facebook account, or both; the static guard prevents a double
++// connect. The transport registers the signal at init, before any account logs in.
++void webos_connect_send_reaction_once(void)
++{
++    static gboolean s_connected = FALSE;
++    if (s_connected) {
++        return;
++    }
++    s_connected = TRUE;
++    purple_signal_connect(purple_conversations_get_handle(), "webos-im-send-reaction",
++                          purple_get_core(), PURPLE_CALLBACK(webos_send_reaction_cb), NULL);
++    // Polls are WhatsApp-only, but connecting here (alongside reactions) means it's covered by the
++    // same idempotent guard and the same "called from both login paths" arrangement, so it's ready
++    // before an instant-reconnect (saved-session) WhatsApp login can race it.
++    purple_signal_connect(purple_conversations_get_handle(), "webos-im-send-poll-vote",
++                          purple_get_core(), PURPLE_CALLBACK(webos_send_poll_vote_cb), NULL);
++}
+ 
+ void
+ gowhatsapp_login(PurpleAccount *account)
+@@ -62,8 +131,9 @@ gowhatsapp_login(PurpleAccount *account)
+     char *user_dir = (char *)purple_user_dir(); // cgo does not suport const
+     gowhatsapp_go_login(account, user_dir, username, (char *)credentials, proxy_address); // cgo does not suport const
+     g_free(proxy_address);
+-    
++
+     gowhatsapp_receipts_init(pc);
++    webos_connect_send_reaction_once();
+ }
+ 
+ void
+diff --git a/glue/options.c b/glue/options.c
+index 500368b..6969c36 100644
+--- a/glue/options.c
++++ b/glue/options.c
+@@ -69,7 +69,7 @@ gowhatsapp_add_account_options(GList *account_options)
+     option = purple_account_option_int_new(
+                 "Number of messages to cache",
+                 GOWHATSAPP_MESSAGE_CACHE_SIZE_OPTION,
+-                0
++                500 // webOS: non-zero so replies/reactions can resolve their target (see add_to_cache)
+                 );
+     account_options = g_list_append(account_options, option);
+ 
+@@ -119,8 +119,10 @@ gowhatsapp_add_account_options(GList *account_options)
+         
+     {
+         GList *choices = NULL;
+-        choices = add_choice(choices, "no", GOWHATSAPP_ICONS_CHOICE_NO);
++        // webOS: "preview" FIRST so it's the default (a purple list option defaults to the first choice) --
++        // avatars on by default, matching the platform + the code fallback in presence.c / profile.go.
+         choices = add_choice(choices, "preview", GOWHATSAPP_ICONS_CHOICE_PREVIEW);
++        choices = add_choice(choices, "no", GOWHATSAPP_ICONS_CHOICE_NO);
+         choices = add_choice(choices, "original", GOWHATSAPP_ICONS_CHOICE_ORIGINAL);
+         option = purple_account_option_list_new( // MEMCHECK: account_options takes ownership
+             "Download user profile pictures",
+@@ -202,7 +204,7 @@ gowhatsapp_add_account_options(GList *account_options)
+     option = purple_account_option_bool_new( // MEMCHECK: account_options takes ownership
+         "Ignore channel (newsletter) messages",
+         GOWHATSAPP_IGNORE_NEWSLETTERS_OPTION,
+-        TRUE
++        FALSE // webOS: followed Channels are shown in the Messaging app's Servers tab (see handle_newsletter.go)
+         );
+     account_options = g_list_append(account_options, option);
+ 
+diff --git a/glue/presence.c b/glue/presence.c
+index bcf83f5..fc87656 100644
+--- a/glue/presence.c
++++ b/glue/presence.c
+@@ -146,9 +146,26 @@ gowhatsapp_subscribe_presence_updates(PurpleAccount *account, PurpleBuddy *buddy
+ void gowhatsapp_request_profile_picture(PurpleAccount *account, PurpleBuddy *buddy) {
+     g_return_if_fail(buddy != NULL);
+ 
+-    if (!purple_strequal(purple_account_get_string(account, GOWHATSAPP_ICONS_OPTION, GOWHATSAPP_ICONS_CHOICE_NO), GOWHATSAPP_ICONS_CHOICE_NO)) {
++    // webOS: default to PREVIEW (fetch avatars) when the setting is unset. The upstream default was "no"
++    // (avatars off, opt-in), so an account that never stored the option -- or lost it on a db8/accounts.xml
++    // re-provision -- silently stopped fetching avatars, and none ever came back. webOS shows contact
++    // avatars, so on-by-default matches the platform (and profile.go's downloader already defaults preview).
++    if (!purple_strequal(purple_account_get_string(account, GOWHATSAPP_ICONS_OPTION, GOWHATSAPP_ICONS_CHOICE_PREVIEW), GOWHATSAPP_ICONS_CHOICE_NO)) {
+         const char *picture_id = purple_blist_node_get_string(&buddy->node, "picture_id");
+         const char *picture_date = purple_blist_node_get_string(&buddy->node, "picture_date");
++        // webOS avatar RESTORE: if libpurple has NO icon for this buddy right now (its contact photo was
++        // wiped by a partial-roster consolidation and the icon didn't survive the reconnect), passing the
++        // stored picture_id makes whatsmeow answer "you already have that picture" (GetProfilePictureInfo
++        // returns nil for a matching ExistingID) and NOT re-send it -- so the avatar never comes back.
++        // Force a fresh download by requesting with an empty id/date, so whatsmeow re-delivers the image
++        // (-> gowhatsapp_handle_profile_picture -> purple_buddy_icons_set_for_user -> BuddyStatusHandler
++        // re-writes the contact photo). connection_set_online already calls this for every buddy on connect,
++        // so lost avatars come back on the next reconnect. When an icon IS present we keep the id so we only
++        // fetch on a genuine change.
++        if (purple_buddy_get_icon(buddy) == NULL) {
++            picture_id = "";
++            picture_date = "";
++        }
+         gowhatsapp_go_request_profile_picture(account, buddy->name, (char *)picture_date, (char *)picture_id); // cgo does not suport const
+     }
+ }
+diff --git a/glue/process_message.c b/glue/process_message.c
+index 8fa809f..e52f799 100644
+--- a/glue/process_message.c
++++ b/glue/process_message.c
+@@ -35,6 +35,12 @@ static void gowhatsapp_connection_set_online(PurpleConnection *connection) {
+     gowhatsapp_set_presence(account, purple_account_get_active_status(account));
+ 
+     gowhatsapp_for_all_buddies(account, gowhatsapp_request_profile_picture);
++
++    // webOS: fetch every group's info on connect so its name/subject is set (each group flows through
++    // gowhatsapp_handle_group -> ensure_group_chat_in_blist, which aliases the chat). Without this,
++    // query_groups only ran when the room picker was opened, so group chats showed the raw JID
++    // ("<digits>-<digits>@g.us") in the conversation list instead of their name.
++    gowhatsapp_go_query_groups(account);
+ }
+ 
+ /*
+@@ -115,11 +121,11 @@ gowhatsapp_process_message(gowhatsapp_message_t *gwamsg)
+             break;
+         case gowhatsapp_message_type_text:
+             if (!gowhatsapp_message_is_old(gwamsg)) {
+-                gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid, gwamsg->text, gwamsg->timestamp, gwamsg->isGroup, gwamsg->isOutgoing, gwamsg->name, 0, gwamsg->messageId);
++                gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid, gwamsg->text, gwamsg->timestamp, gwamsg->isGroup, gwamsg->isOutgoing, gwamsg->name, 0, gwamsg->messageId, gwamsg->quotedText, gwamsg->quotedFrom, gwamsg->quotedId);
+             }
+             break;
+         case gowhatsapp_message_type_system:
+-            gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid, gwamsg->text, gwamsg->timestamp, gwamsg->isGroup, gwamsg->isOutgoing, gwamsg->name, PURPLE_MESSAGE_SYSTEM, gwamsg->messageId);
++            gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid, gwamsg->text, gwamsg->timestamp, gwamsg->isGroup, gwamsg->isOutgoing, gwamsg->name, PURPLE_MESSAGE_SYSTEM, gwamsg->messageId, NULL, NULL, NULL);
+             break;
+         case gowhatsapp_message_type_typing:
+             serv_got_typing(pc, gwamsg->remoteJid, 0, PURPLE_TYPING);
+@@ -135,6 +141,70 @@ gowhatsapp_process_message(gowhatsapp_message_t *gwamsg)
+                 gowhatsapp_handle_attachment(gwamsg);
+             }
+             break;
++        case gowhatsapp_message_type_reaction:
++            // webOS reactions: forward to the transport's cross-prpl "webos-im-reaction" signal
++            // (registered by imlibpurpletransport) instead of showing a "reacted with X" message.
++            // messageId = the reacted-to message's id, text = emoji ("" = removed), senderJid = reactor.
++            // Runs on the libpurple main thread (message bridge), so emitting the signal here is safe.
++            purple_signal_emit(purple_conversations_get_handle(), "webos-im-reaction",
++                    gwamsg->account, gwamsg->messageId,
++                    gwamsg->text ? gwamsg->text : "",
++                    gwamsg->senderJid ? gwamsg->senderJid : "");
++            break;
++        case gowhatsapp_message_type_outbox_id:
++            // webOS outbox-id: an app-sent message just got its server id. Forward it to the
++            // transport's cross-prpl "webos-im-outbox-id" signal so the Outbox row gets the id
++            // (making the user's own sent message reactable). messageId = the server id, text =
++            // the message body (correlation hint). Runs on the libpurple main thread (message
++            // bridge), so emitting the signal here is safe.
++            purple_signal_emit(purple_conversations_get_handle(), "webos-im-outbox-id",
++                    gwamsg->account, gwamsg->messageId ? gwamsg->messageId : "",
++                    gwamsg->text ? gwamsg->text : "");
++            break;
++        case gowhatsapp_message_type_receipt:
++            // webOS delivery/read receipt: the recipient delivered/read our outgoing message.
++            // messageId = the message's server id (== serviceMessageId), text = status
++            // ("delivered"/"read"). Forward to the transport's cross-prpl "webos-im-receipt" signal
++            // (by-id), which upgrades the Outbox row's deliveryStatus. Runs on the libpurple main thread.
++            purple_signal_emit(purple_conversations_get_handle(), "webos-im-receipt",
++                    gwamsg->account, gwamsg->messageId ? gwamsg->messageId : "",
++                    gwamsg->text ? gwamsg->text : "");
++            break;
++        case gowhatsapp_message_type_receipt_hwm:
++            // webOS delivery/read receipt (watermark, Facebook): everything in a thread up to a
++            // timestamp was delivered/read. remoteJid = scope ("ts:<threadKey>"), messageId = watermark
++            // (ms), text = status. Forward to the transport's "webos-im-receipt-hwm" signal.
++            purple_signal_emit(purple_conversations_get_handle(), "webos-im-receipt-hwm",
++                    gwamsg->account, gwamsg->remoteJid ? gwamsg->remoteJid : "",
++                    gwamsg->messageId ? gwamsg->messageId : "",
++                    gwamsg->text ? gwamsg->text : "");
++            break;
++        case gowhatsapp_message_type_edit:
++            // webOS message edit-in-place: the sender edited a previously-sent message. messageId = that
++            // message's server id (== serviceMessageId), text = the new body. HTML-escape it exactly like a
++            // normal incoming message (gowhatsapp_display_message, glue/display_message.c) so the stored text
++            // stays consistent (the conversation view renders bodies as HTML), then forward to the transport's
++            // "webos-im-edit" signal, which merges it onto the original bubble. Runs on the libpurple main thread.
++            {
++                const char *raw = gwamsg->text ? gwamsg->text : "";
++                gchar *html = purple_markup_escape_text(raw, -1);
++                gchar *escaped = purple_strdup_withhtml(html);
++                purple_signal_emit(purple_conversations_get_handle(), "webos-im-edit",
++                        gwamsg->account, gwamsg->messageId ? gwamsg->messageId : "",
++                        escaped ? escaped : "");
++                g_free(escaped);
++                g_free(html);
++            }
++            break;
++        case gowhatsapp_message_type_delete:
++            // webOS "delete for everyone": the sender revoked a previously-sent message. messageId =
++            // that message's server id (== serviceMessageId). Forward to the transport's
++            // "webos-im-delete" signal, which replaces the stored bubble's text with a placeholder
++            // in place (same find-by-serviceMessageId + merge mechanism as webos-im-edit above, just
++            // with a canned body instead of a new one). Runs on the libpurple main thread.
++            purple_signal_emit(purple_conversations_get_handle(), "webos-im-delete",
++                    gwamsg->account, gwamsg->messageId ? gwamsg->messageId : "");
++            break;
+         case gowhatsapp_message_type_profile_picture:
+             gowhatsapp_handle_profile_picture(gwamsg);
+             break;
+diff --git a/glue/send_message.c b/glue/send_message.c
+index 2afab1c..637b325 100644
+--- a/glue/send_message.c
++++ b/glue/send_message.c
+@@ -2,11 +2,12 @@
+ #include "libwhatsmeow.h"
+ 
+ static int
+-send_message(PurpleConnection *pc, const gchar *who, const gchar *message, gboolean is_group) {
++send_message(PurpleConnection *pc, const gchar *who, const gchar *message, gboolean is_group, const gchar *reply_to) {
+     PurpleAccount *account = purple_connection_get_account(pc);
+     char *w = (char *)who; // cgo does not suport const
+     char *m = (char *)message; // cgo does not suport const
+-    return gowhatsapp_go_send_message(account, w, m, is_group);
++    char *r = (char *)(reply_to ? reply_to : ""); // webOS replies: "" == not a reply
++    return gowhatsapp_go_send_message(account, w, m, is_group, r);
+ }
+ 
+ int
+@@ -14,7 +15,16 @@ gowhatsapp_send_im(PurpleConnection *pc, const gchar *who, const gchar *message,
+     if (is_command(message)) {
+         return execute_command(pc, message, who, NULL);
+     } else {
+-        return send_message(pc, who, message, FALSE);
++        // webOS replies: the transport stashes the reply target's serviceMessageId (whatsmeow StanzaID)
++        // as "webos-reply-to" on the conversation before serv_send_im; read + clear it and pass it down.
++        PurpleConversation *conv = purple_find_conversation_with_account(PURPLE_CONV_TYPE_IM, who, purple_connection_get_account(pc));
++        gchar *reply_to = conv ? (gchar *)purple_conversation_get_data(conv, "webos-reply-to") : NULL;
++        int ret = send_message(pc, who, message, FALSE, reply_to);
++        if (reply_to != NULL) {
++            purple_conversation_set_data(conv, "webos-reply-to", NULL);
++            g_free(reply_to);
++        }
++        return ret;
+     }
+ }
+ 
+@@ -29,7 +39,13 @@ gowhatsapp_send_chat(
+             if (is_command(message)) {
+                 return execute_command(pc, message, who, conv);
+             } else {
+-                int ret = send_message(pc, who, message, TRUE);
++                // webOS replies: read + clear the reply target the transport stashed on this chat conv.
++                gchar *reply_to = (gchar *)purple_conversation_get_data(conv, "webos-reply-to");
++                int ret = send_message(pc, who, message, TRUE, reply_to);
++                if (reply_to != NULL) {
++                    purple_conversation_set_data(conv, "webos-reply-to", NULL);
++                    g_free(reply_to);
++                }
+                 if (ret > 0) {
+                     // Group chats need an explicit local echo since the implicit echo is implemented for direct messages only.
+                     // See https://keep.imfreedom.org/pidgin/pidgin/file/v2.14.12/libpurple/conversation.c#l191.
+diff --git a/go.mod b/go.mod
+index bc1660c..8207d22 100644
+--- a/go.mod
++++ b/go.mod
+@@ -8,6 +8,7 @@ require (
+ 	github.com/mdp/qrterminal/v3 v3.0.0
+ 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
+ 	go.mau.fi/whatsmeow v0.0.0-20261017175727-b2b1e71d45e2
++	golang.org/x/image v0.44.0
+ 	golang.org/x/net v0.61.0
+ 	google.golang.org/protobuf v1.36.12
+ 	modernc.org/sqlite v1.34.5
+diff --git a/go.sum b/go.sum
+index 49be264..7c780a8 100644
+--- a/go.sum
++++ b/go.sum
+@@ -61,6 +61,8 @@ golang.org/x/crypto v0.58.0 h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=
+ golang.org/x/crypto v0.58.0/go.mod h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w=
+ golang.org/x/exp v0.0.0-20261014143641-f0251eb4aa3e h1:HgI6W1OolKK6tcV74is+rl9SMT0njsHlp0TbQiGXI/A=
+ golang.org/x/exp v0.0.0-20261014143641-f0251eb4aa3e/go.mod h1:DBoxwWhjaW8DJJw/YeM4zpeOKMC1FMXSblsYy+1mFSw=
++golang.org/x/image v0.44.0 h1:+tDekMZED9+LrtB3G5xzRggpVh9CARjZqROla3R3R+I=
++golang.org/x/image v0.44.0/go.mod h1:V8K3KE9KKKE+pLpQDOeN18w9oacNSvy1tDOirTu4xtY=
+ golang.org/x/mod v0.42.0 h1:ICeL3t2L30ljSPHHxDnR4fqVcBt/zR2zJAb9juavmQg=
+ golang.org/x/mod v0.42.0/go.mod h1:u5fzIrRInkL8MaO1cbRkUHT64v303YIT5KEqpNr7jRs=
+ golang.org/x/net v0.61.0 h1:RR+6j/BTBCrggOLugxa+66R8FvoN6MHlzDlZIbN9YFw=
+diff --git a/handle_attachment.go b/handle_attachment.go
+index 1163f4b..9b7d125 100644
+--- a/handle_attachment.go
++++ b/handle_attachment.go
+@@ -6,14 +6,19 @@ package main
+ import "C"
+ 
+ import (
++	"bytes"
+ 	"context"
+ 	"encoding/hex"
++	"fmt"
++	"image/png"
+ 	"mime"
+ 	"os"
+ 	"path/filepath"
+ 	"strings"
+ 	"time"
+ 
++	"golang.org/x/image/webp"
++
+ 	"go.mau.fi/whatsmeow"
+ 	"go.mau.fi/whatsmeow/proto/waE2E"
+ 	"go.mau.fi/whatsmeow/types"
+@@ -105,9 +110,15 @@ func (handler *Handler) handle_attachment(message *waE2E.Message, id string, sou
+ 		if sm != nil {
+ 			downloadable = sm
+ 			hash = hex.EncodeToString(sm.GetFileSHA256())
+-			extension = extension_from_mimetype(sm.Mimetype)
++			// webOS: a sticker is WhatsApp's own .webp - this device's WebKit predates WebP (2010) and
++			// has no decoder for it, and the fallback pixbuf-mimetype gate (pixbuf.c, built without GDK
++			// pixbuf loader detection) only allow-lists jpeg/png, so a sticker attachment posted no
++			// message body at all ("stickers don't display"). download_attachment transcodes the
++			// downloaded bytes to PNG (golang.org/x/image/webp decode -> image/png encode) before
++			// writing the file, so always claim PNG here regardless of the source's real mimetype.
++			extension = ".png"
+ 			data_type = C.gowhatsapp_attachment_type_sticker
+-			mimetype = sm.GetMimetype()
++			mimetype = "image/png"
+ 			length = sm.GetFileLength()
+ 		}
+ 	}
+@@ -128,6 +139,13 @@ func (handler *Handler) handle_attachment(message *waE2E.Message, id string, sou
+ 			mimetype = dm.GetMimetype()
+ 			length = dm.GetFileLength()
+ 			caption = dm.GetCaption()
++			// webOS: name the downloaded document by its REAL filename (not the content hash) so the
++			// Messaging app's attachment chip shows e.g. "Q3-Report.pdf" instead of a hash / generic
++			// label. The path template uses $hash, so put the sanitized real name there; keep the
++			// content hash as a fallback when the document has no filename.
++			if safe := sanitize_attachment_name(filename); safe != "" {
++				hash = safe
++			}
+ 		}
+ 	}
+ 	if data_type != C.gowhatsapp_attachment_type_none {
+@@ -137,6 +155,19 @@ func (handler *Handler) handle_attachment(message *waE2E.Message, id string, sou
+ 	}
+ }
+ 
++// sanitize_attachment_name makes a document's real filename safe to use as a single path component AND
++// to survive the Messaging app's media-URL regex (which stops at whitespace): directory separators,
++// control chars, spaces and characters that break a URL/path all map to "_".
++func sanitize_attachment_name(name string) string {
++	name = strings.TrimSpace(name)
++	return strings.Map(func(r rune) rune {
++		if r <= 0x20 || strings.ContainsRune("/\\?#\"'<>|:*&", r) {
++			return '_'
++		}
++		return r
++	}, name)
++}
++
+ func (handler *Handler) download_attachment(local_file_path string, message whatsmeow.DownloadableMessage) error {
+ 	os.MkdirAll(filepath.Dir(local_file_path), 0o755)
+ 	// Download to memory then write the file ourselves. whatsmeow's DownloadToFile streams to an
+@@ -156,5 +187,34 @@ func (handler *Handler) download_attachment(local_file_path string, message what
+ 	if err != nil {
+ 		return err
+ 	}
+-	return os.WriteFile(local_file_path, data, 0o644)
++	// webOS stickers: this device's WebKit has no WebP decoder, so transcode a sticker's native .webp
++	// to PNG before writing (see the extension=".png"/mimetype="image/png" override in the caller's
++	// StickerMessage branch, which already chose a .png local_file_path to match). x/image/webp only
++	// decodes the first frame of an animated sticker - animated stickers show as a static image.
++	if _, isSticker := message.(*waE2E.StickerMessage); isSticker {
++		img, decErr := webp.Decode(bytes.NewReader(data))
++		if decErr != nil {
++			return fmt.Errorf("sticker webp decode failed: %v", decErr)
++		}
++		var pngBuf bytes.Buffer
++		if encErr := png.Encode(&pngBuf, img); encErr != nil {
++			return fmt.Errorf("sticker png encode failed: %v", encErr)
++		}
++		data = pngBuf.Bytes()
++	}
++	if err := os.WriteFile(local_file_path, data, 0o644); err != nil {
++		return err
++	}
++	// For videos, also drop the sender's embedded JPEG thumbnail next to the file as "<base>.jpg".
++	// The Messaging app uses it as a <video poster> — a first-view preview that loads as a plain
++	// image (independent of the clip's own data), which lets the player stay preload="none". The old
++	// webOS WebKit can't paint a poster frame from an unplayed <video> otherwise, so without this the
++	// preview box is black until the clip has been played once. Best-effort: a missing poster is fine.
++	if vm, ok := message.(*waE2E.VideoMessage); ok {
++		if thumb := vm.GetJPEGThumbnail(); len(thumb) > 0 {
++			poster := strings.TrimSuffix(local_file_path, filepath.Ext(local_file_path)) + ".jpg"
++			os.WriteFile(poster, thumb, 0o644)
++		}
++	}
++	return nil
+ }
+diff --git a/handle_message.go b/handle_message.go
+index 1671787..c24bfaa 100644
+--- a/handle_message.go
++++ b/handle_message.go
+@@ -8,9 +8,13 @@ import "C"
+ import (
+ 	"context"
+ 	"crypto/sha256"
++	"encoding/base64"
++	"encoding/json"
+ 	"fmt"
++	"net/url"
++	"os"
++	"path/filepath"
+ 	"strings"
+-	"time"
+ 
+ 	"go.mau.fi/whatsmeow/proto/waE2E"
+ 	"go.mau.fi/whatsmeow/types"
+@@ -34,11 +38,285 @@ func GetAnyPollCreationMessage(message *waE2E.Message) *waE2E.PollCreationMessag
+ 	return nil
+ }
+ 
++// messageHasAttachment reports whether message carries a media payload that handle_attachment will
++// turn into its own bubble - used to skip the redundant "[STATUS] " placeholder text for a status
++// update that already has a picture/video/etc, so it doesn't show up as two separate messages.
++func messageHasAttachment(message *waE2E.Message) bool {
++	return message.GetImageMessage() != nil ||
++		message.GetVideoMessage() != nil ||
++		message.GetAudioMessage() != nil ||
++		message.GetDocumentMessage() != nil ||
++		message.GetStickerMessage() != nil
++}
++
++// write_link_preview_thumbnail persists an ExtendedTextMessage's inline link-preview JPEG thumbnail
++// to the account's attachment directory and returns a file:// URL for it (or "" on failure / when the
++// attachment path isn't configured). The directory is the static prefix of the account's
++// attachment-path-template (everything before the first "$" placeholder) - the same dir real
++// downloaded attachments land in - so the Messaging app can load it as an inline <img>. The file is
++// named by a content hash so an identical thumbnail is written once and re-render is idempotent.
++// attachment_dir resolves the account's attachment directory (the static prefix of its
++// attachment-path-template, before the first "$" placeholder) - the same dir real downloaded
++// attachments land in - creating it if needed. Returns "" if unconfigured/relative.
++func (handler *Handler) attachment_dir() string {
++	tmpl := purple_get_string(handler.account, C.GOWHATSAPP_ATTACHMENT_PATH_TEMPLATE_OPTION, C.GOWHATSAPP_ATTACHMENT_PATH_TEMPLATE_DEFAULT)
++	prefix := strings.SplitN(tmpl, "$", 2)[0]
++	if prefix == "" {
++		return "" // no attachment path configured (or template starts with a placeholder) - skip
++	}
++	dir := filepath.Dir(prefix + "x") // keep the full directory even when the prefix ends in "/"
++	if !filepath.IsAbs(dir) {
++		return ""
++	}
++	if err := os.MkdirAll(dir, 0o755); err != nil {
++		return ""
++	}
++	return dir
++}
++
++func (handler *Handler) write_link_preview_thumbnail(data []byte) string {
++	dir := handler.attachment_dir()
++	if dir == "" {
++		return ""
++	}
++	sum := sha256.Sum256(data)
++	local := filepath.Join(dir, fmt.Sprintf("linkpreview_%x.jpg", sum[:16]))
++	if err := os.WriteFile(local, data, 0o644); err != nil {
++		return ""
++	}
++	return "file://" + local
++}
++
++// write_vcard_attachment persists a shared ContactMessage's vcard (or, for a multi-contact share,
++// several vcards concatenated - still a valid .vcf) to the account's attachment directory and
++// returns a file:// URL for it, so the Messaging app can offer it as a tappable ".vcf" chip
++// (ConversationItem's document-chip path, extended with a "contact" kind) that launches the
++// Contacts app's existing vCard import flow (com.palm.service.contacts countVCardContacts/
++// readVCard, wired in ContactsApp.handleVCardLaunch) instead of just a name/phone-number text line.
++func (handler *Handler) write_vcard_attachment(vcard string) string {
++	dir := handler.attachment_dir()
++	if dir == "" {
++		return ""
++	}
++	sum := sha256.Sum256([]byte(vcard))
++	local := filepath.Join(dir, fmt.Sprintf("contact_%x.vcf", sum[:16]))
++	if err := os.WriteFile(local, []byte(vcard), 0o644); err != nil {
++		return ""
++	}
++	return "file://" + local
++}
++
++// formatLocationMessage renders a shared pin (or the initial snapshot of a live-location share) as
++// a text summary plus a "geo:lat,lng" URI. There is no dedicated map-bubble UI, so the webOS
++// Messaging app (ConversationItem.extractLocations/buildLocationChip) parses that URI back out and
++// shows a tappable pin chip that opens the coordinates in the Maps app, instead of displaying the
++// raw URI as text. webOS also has no way to render the periodic position updates that follow a live
++// share, so a live share is shown once, as a snapshot, not a running track.
++func formatLocationMessage(lat, lon float64, name, address, locationURL string, isLive bool) string {
++	var b strings.Builder
++	if isLive {
++		b.WriteString("Live location")
++	} else {
++		b.WriteString("Location")
++	}
++	if name != "" {
++		b.WriteString(" " + name)
++	}
++	b.WriteString("\n")
++	if address != "" {
++		b.WriteString(address + "\n")
++	}
++	if locationURL != "" {
++		b.WriteString(locationURL + "\n")
++	}
++	if lat != 0 || lon != 0 {
++		b.WriteString(fmt.Sprintf("geo:%f,%f", lat, lon))
++	}
++	return strings.TrimRight(b.String(), "\n")
++}
++
++// vcardFieldValue returns the value of the first "<FIELD>[;params]:value" line in a vcard (one
++// field per line, CRLF or LF separated - the shape WhatsApp's ContactMessage.Vcard uses; this does
++// not attempt to handle folded/multi-line vcard values).
++func vcardFieldValue(vcard, field string) string {
++	for _, line := range strings.Split(strings.ReplaceAll(vcard, "\r\n", "\n"), "\n") {
++		i := strings.IndexByte(line, ':')
++		if i < 0 {
++			continue
++		}
++		key := strings.SplitN(line[:i], ";", 2)[0]
++		if strings.EqualFold(key, field) {
++			return strings.TrimSpace(line[i+1:])
++		}
++	}
++	return ""
++}
++
++// vcardPhoneNumbers returns every "TEL[;params]:value" line's value, in the order they appear.
++func vcardPhoneNumbers(vcard string) []string {
++	var phones []string
++	for _, line := range strings.Split(strings.ReplaceAll(vcard, "\r\n", "\n"), "\n") {
++		i := strings.IndexByte(line, ':')
++		if i < 0 {
++			continue
++		}
++		key := strings.SplitN(line[:i], ";", 2)[0]
++		if strings.EqualFold(key, "TEL") {
++			if v := strings.TrimSpace(line[i+1:]); v != "" {
++				phones = append(phones, v)
++			}
++		}
++	}
++	return phones
++}
++
++// formatContactMessage renders a shared contact card as just a tappable chip - no separate "name +
++// phone number" caption text, since the chip itself (ConversationItem's buildAttachmentChip, kind
++// "contact") shows the contact's name as its label. write_vcard_attachment persists the vcard to
++// the account's attachment dir (it's inline in the message, not a downloadable attachment, so it
++// can't ride the existing file-transfer path) and the name rides along as a "?name=" query param on
++// the returned file:// URL so the frontend can label the chip without parsing the vcard itself.
++// Tapping the chip opens Contacts' existing vCard import flow. Falls back to a plain text summary
++// if the attachment dir isn't configured (write_vcard_attachment returned "").
++func (handler *Handler) formatContactMessage(displayName, vcard string) string {
++	name := displayName
++	if name == "" {
++		name = vcardFieldValue(vcard, "FN")
++	}
++	if name == "" {
++		name = "(unnamed contact)"
++	}
++	fileURL := handler.write_vcard_attachment(vcard)
++	if fileURL == "" {
++		text := "Contact: " + name
++		if phones := vcardPhoneNumbers(vcard); len(phones) > 0 {
++			text += "\n" + strings.Join(phones, "\n")
++		}
++		return text
++	}
++	return fileURL + "?name=" + url.QueryEscape(name)
++}
++
++// formatContactsArrayMessage is formatContactMessage's multi-contact counterpart: a single chip
++// (labelled with the share's display name, or "N contacts") linking to all the vcards concatenated
++// into one .vcf - Contacts' existing multi-contact import flow (countVCardContacts -> "Would you
++// like to import N contacts?") takes it from there.
++func (handler *Handler) formatContactsArrayMessage(displayName string, contacts []*waE2E.ContactMessage) string {
++	var vcards strings.Builder
++	n := 0
++	for _, c := range contacts {
++		if c == nil {
++			continue
++		}
++		n++
++		if vc := c.GetVcard(); vc != "" {
++			vcards.WriteString(vc)
++			if !strings.HasSuffix(vc, "\n") {
++				vcards.WriteString("\n")
++			}
++		}
++	}
++	label := displayName
++	if label == "" {
++		label = fmt.Sprintf("%d contacts", n)
++	}
++	if vcards.Len() == 0 {
++		return "Contacts: " + label
++	}
++	fileURL := handler.write_vcard_attachment(vcards.String())
++	if fileURL == "" {
++		return "Contacts: " + label
++	}
++	return fileURL + "?name=" + url.QueryEscape(label)
++}
++
++// pollPayload is the compact JSON shape ConversationItem.extractPolls decodes back out of a
++// "poll:<base64>" token to render a real (read-only) radio-button/checkbox list instead of a
++// "1: Option" text dump. Max mirrors PollCreationMessage.SelectableOptionsCount: 1 = single-select
++// (radio), 0 or >1 = multi-select (checkbox). There is no vote-SENDING backend yet (whatsmeow
++// BuildPollVote isn't wired up), so the rendered inputs are inert/disabled - this only upgrades the
++// display, it doesn't make polls interactive.
++type pollPayload struct {
++	Name    string   `json:"name"`
++	Options []string `json:"options"`
++	Max     int      `json:"max"`
++}
++
++// formatPollMessage renders a poll as just a "poll:<base64-json>" token (like formatEventMessage) -
++// ConversationItem.buildPollBlock parses it into the radio/checkbox list. The caller must already
++// have filled in each option's OptionHash (needed later for matching an incoming vote) before
++// calling this; that side effect is independent of the returned text.
++func formatPollMessage(pcm *waE2E.PollCreationMessage) string {
++	opts := pcm.GetOptions()
++	names := make([]string, 0, len(opts))
++	for _, option := range opts {
++		names = append(names, option.GetOptionName())
++	}
++	payload := pollPayload{Name: pcm.GetName(), Options: names, Max: int(pcm.GetSelectableOptionsCount())}
++	data, err := json.Marshal(payload)
++	if err != nil {
++		return "Poll: " + pcm.GetName()
++	}
++	return "poll:" + base64.RawURLEncoding.EncodeToString(data)
++}
++
++// eventPayload is the compact JSON shape ConversationItem.extractEvents decodes back out of an
++// "event:<base64>" token to build the Calendar app's documented "New Calendar Event" launch params
++// (newEvent: {subject, location, note, dtstart, dtend} - all field names/ms timestamps match what
++// AppView.js/DetailView.js already expect). RawURLEncoding (no +, /, = or padding) keeps the token
++// safe to embed directly in message text with no escaping.
++type eventPayload struct {
++	Name     string `json:"name"`
++	Location string `json:"location"`
++	Note     string `json:"note"`
++	Start    int64  `json:"start"` // ms epoch, 0 = unknown
++	End      int64  `json:"end"`   // ms epoch, 0 = unknown
++}
++
++// formatEventMessage renders a shared WhatsApp Event as a text summary plus an "event:<base64-json>"
++// token - there is no dedicated event bubble UI, so the Messaging app
++// (ConversationItem.extractEvents/buildEventChip) parses the token back out and shows a tappable
++// "Add to Calendar" chip that launches the stock Calendar app's own event-creation flow directly
++// (pre-filled, one tap to confirm/save) - no ICS file or import feature needed, since webOS's
++// Calendar app has no ICS import at all but DOES have this documented cross-app launch spec.
++func formatEventMessage(em *waE2E.EventMessage) string {
++	name := em.GetName()
++	if name == "" {
++		name = "(untitled event)"
++	}
++	locText := ""
++	if loc := em.GetLocation(); loc != nil {
++		locText = loc.GetName()
++		if a := loc.GetAddress(); a != "" {
++			if locText != "" {
++				locText += ", "
++			}
++			locText += a
++		}
++	}
++	payload := eventPayload{Name: name, Location: locText, Note: em.GetDescription()}
++	if st := em.GetStartTime(); st > 0 {
++		payload.Start = st * 1000
++	}
++	if et := em.GetEndTime(); et > 0 {
++		payload.End = et * 1000
++	}
++	text := name
++	if locText != "" {
++		text += "\n" + locText
++	}
++	if data, err := json.Marshal(payload); err == nil {
++		text += "\nevent:" + base64.RawURLEncoding.EncodeToString(data)
++	}
++	return text
++}
++
+ func (handler *Handler) handle_message(message *waE2E.Message, info types.MessageInfo, evt *events.Message) {
+ 	//handler.log.Infof("message: %#v", message)
+ 	if info.MessageSource.Chat.Server == types.NewsletterServer {
+ 		// Channel (newsletter) posts would show up as chats with a raw JID.
+-		if purple_get_bool(handler.account, C.GOWHATSAPP_IGNORE_NEWSLETTERS_OPTION, true) {
++		// webOS: default off, followed Channels are shown (see glue/options.c and handle_newsletter.go)
++		if purple_get_bool(handler.account, C.GOWHATSAPP_IGNORE_NEWSLETTERS_OPTION, false) {
+ 			handler.log.Infof("Ignoring channel (newsletter) message.")
+ 			return
+ 		}
+@@ -50,11 +328,40 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 			handler.log.Warnf("Ignoring status broadcast.")
+ 			return
+ 		} else {
+-			// the protocol implements status broadcasts in the form of a group
+-			// we just treat those messages as if they were direct messages
+-			info.MessageSource.Chat = info.MessageSource.Sender
++			// webOS: route status updates into the Servers tab (like followed WhatsApp Channels)
++			// instead of masquerading as an ordinary 1:1 chat from the sender - collapsing Chat to
++			// Sender made every status update show up as a random new chat (e.g. "+15555550102").
++			// Use a synthetic "<phone>@broadcast" JID (types.BroadcastServer) so LibpurpleAdapter's
++			// incoming_message_cb can recognize + bucket it (isWhatsAppStatus), the same way
++			// "<id>@newsletter" is recognized for followed Channels.
++			statusJid := types.JID{User: info.MessageSource.Sender.User, Server: types.BroadcastServer}
++			// PushName is frequently absent on a status-broadcast event even for a contact with a
++			// perfectly well-known name (unlike a regular 1:1/group message) - fall back to the local
++			// WhatsApp contact-sync store (address-book match, populated independently of any message
++			// ever having a PushName) before resorting to purple_get_alias, which - if this contact
++			// has ALSO never been messaged 1:1 (status-only sender) - has nothing to fall back to
++			// itself and returns the raw JID string, which is what was showing up as the channel name.
++			name := info.PushName
++			if name == "" {
++				if contactInfo, err := handler.client.Store.Contacts.GetContact(context.TODO(), info.MessageSource.Sender); err == nil {
++					name = contactInfo.FullName
++					if name == "" {
++						name = contactInfo.FirstName
++					}
++					if name == "" {
++						name = contactInfo.BusinessName
++					}
++				}
++			}
++			if name == "" {
++				name = purple_get_alias(handler.account, info.MessageSource.Sender.ToNonAD().String())
++			}
++			if name != "" {
++				// creates/aliases the synthetic status buddy, same sink fetch_newsletter_names uses
++				purple_update_name(handler.account, statusJid.String(), name)
++			}
++			info.MessageSource.Chat = statusJid
+ 			info.MessageSource.IsGroup = false
+-			text = "[STATUS] "
+ 		}
+ 	}
+ 	info.MessageSource.Chat = handler.lidToPn(info.MessageSource.Chat, "handling message chat")
+@@ -75,29 +382,64 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 		handler.log.Infof("Ignoring SenderKeyDistributionMessage.")
+ 		return
+ 	}
++	// Dedup WhatsApp Channel (newsletter) posts: they reach us TWICE - whatsmeow offline-syncs recent
++	// posts as live messages on connect, AND fetch_newsletter_history replays the last 50 when the
++	// channel is opened in the Servers tab. The WhatsApp message id is stable across both paths, so
++	// skip a post we've already delivered (otherwise every channel post shows up doubled). The seen set
++	// is loaded at login and saved on close (newsletter_seen.go), so a reopen next session won't re-dup.
++	if info.MessageSource.Chat.Server == types.NewsletterServer && handler.newsletterAlreadySeen(info.ID) {
++		return
++	}
+ 	isEdit := false
++	editTargetId := ""
+ 	{
+ 		if pm := message.GetProtocolMessage(); pm != nil {
+ 			if em := pm.GetEditedMessage(); em != nil {
+ 				message = em
+ 				isEdit = true
++				// pm.Key points at the ORIGINAL message being edited; its id is the serviceMessageId under
++				// which we stored that message, so the transport can find & update that bubble in place.
++				editTargetId = pm.GetKey().GetID()
++			} else if pm.Type != nil && pm.GetType() == waE2E.ProtocolMessage_REVOKE {
++				// webOS "delete for everyone": the sender revoked a previously-sent message. Checking
++				// pm.Type != nil (not just GetType()==REVOKE) matters since REVOKE is protobuf enum
++				// value 0, the same zero-value GetType() returns for an unset Type field - only a
++				// genuine revoke has Type explicitly set. pm.Key points at the ORIGINAL message; its id
++				// is the serviceMessageId we stored it under, so the transport can find & blank that
++				// bubble in place. There is nothing else to display, so return immediately (same as the
++				// reaction handling above).
++				if targetId := pm.GetKey().GetID(); targetId != "" {
++					purple_handle_message_delete(handler.account, targetId)
++				}
++				return
+ 			}
+ 		}
+ 	}
+ 	text += message.GetConversation()
++	var quotedText, quotedFrom, quotedId string
+ 	{
+ 		etm := message.ExtendedTextMessage
+ 		if etm != nil {
+ 			// message containing quote or link to group
+ 			// link messages have message.Conversation set to nil anyway
+ 			// it should be safe to overwrite here
+-			// quoted message repeats the text
++			// webOS replies: capture the quoted-original as STRUCTURED data (author/text/StanzaID) so the
++			// transport renders an inline quote card, instead of folding "> ..." into the message body.
+ 			ci := etm.ContextInfo
+ 			if ci != nil {
+ 				cm := ci.QuotedMessage
+-				if cm != nil && cm.Conversation != nil {
+-					quotelines := strings.Split(*cm.Conversation, "\n")
+-					text = "> " + strings.Join(quotelines, "\n> ") + "\n"
++				if cm != nil {
++					quotedId = ci.GetStanzaID()
++					if p := ci.GetParticipant(); p != "" {
++						if pjid, err := types.ParseJID(p); err == nil {
++							quotedFrom = purple_get_alias(handler.account, handler.lidToPn(pjid, "resolving quote author").ToNonAD().String())
++						}
++					}
++					qt := cm.GetConversation()
++					if qt == "" {
++						qt = cm.GetExtendedTextMessage().GetText()
++					}
++					quotedText = strings.ReplaceAll(strings.ReplaceAll(qt, "\r", " "), "\n", " ")
+ 				}
+ 			}
+ 			if etm.Text != nil {
+@@ -111,79 +453,89 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 				}
+ 				text += etmText
+ 			}
++			// webOS: WhatsApp link-preview posts (news channels like BBC News / Dumpert) arrive as an
++			// ExtendedTextMessage with a URL preview - an inline JPEG thumbnail + a title - NOT an image
++			// attachment, so previously only the raw body text showed. Prepend the preview card: the
++			// thumbnail (written to the attachment dir, referenced as a file:// URL the app renders
++			// inline) then the title, above the body. GetJPEGThumbnail/GetTitle are empty for
++			// plain/quoted ExtendedTextMessages, so this only fires for actual link previews.
++			{
++				preview := ""
++				if thumb := etm.GetJPEGThumbnail(); len(thumb) > 0 {
++					preview = handler.write_link_preview_thumbnail(thumb)
++				}
++				if title := etm.GetTitle(); title != "" {
++					if preview != "" {
++						preview += "\n"
++					}
++					preview += title
++				}
++				if desc := etm.GetDescription(); desc != "" {
++					if preview != "" {
++						preview += "\n"
++					}
++					preview += desc
++				}
++				if preview != "" {
++					text = preview + "\n" + text
++				}
++			}
+ 		}
+ 
+ 	}
+ 	{
+ 		rm := message.GetReactionMessage()
+ 		if rm != nil && rm.Text != nil && rm.Key != nil && rm.Key.ID != nil {
+-			quote := fmt.Sprintf("unknown message with ID %s", rm.Key.GetID())
+-			cached_message := handler.lookup_cached_message_by_id(rm.Key.GetID())
+-			if cached_message != nil {
+-				//handler.log.Infof("Lookup yielded message: %#v", &cached_message.Message)
+-				text := cached_message.Message.GetConversation()
+-				if cached_message.Message.ExtendedTextMessage != nil {
+-					text = cached_message.Message.ExtendedTextMessage.GetText()
+-				}
+-				if text != "" {
+-					ellipsis := ""
+-					if len(text) > 50 {
+-						ellipsis = "…" // add elipis to indicate message body truncation
+-					}
+-					quote = fmt.Sprintf("message „%.50s%s“", text, ellipsis)
+-				} else {
+-					message_type := "message of unknown type"
+-					if cached_message.Message.ImageMessage != nil {
+-						message_type = "image"
+-					}
+-					if cached_message.Message.VideoMessage != nil {
+-						message_type = "video"
+-					}
+-					if cached_message.Message.PtvMessage != nil {
+-						message_type = "voice message"
+-					}
+-					if cached_message.Message.AudioMessage != nil {
+-						message_type = "audio message"
+-					}
+-					if cached_message.Message.StickerMessage != nil {
+-						message_type = "sticker"
+-					}
+-					if cached_message.Message.DocumentMessage != nil {
+-						message_type = "document"
+-					}
+-					quote = fmt.Sprintf("%s from %s", message_type, cached_message.Timestamp.Format(time.RFC822))
+-				}
+-			}
+-			if *rm.Text == "" {
+-				text += fmt.Sprintf("removed their reaction to %s.", quote)
+-			} else {
+-				text += fmt.Sprintf("reacted with %s to %s.", *rm.Text, quote)
+-			}
++			// webOS reactions: attach to the target message via the transport's reaction signal
++			// instead of posting a "reacted with X" message. rm.Key.ID = the reacted-to message id,
++			// rm.Text = the emoji ("" means the reaction was removed), Sender = who reacted. Return
++			// early: a ReactionMessage carries nothing else to display.
++			chat := info.MessageSource.Chat.ToNonAD().String()
++			sender := info.MessageSource.Sender.ToNonAD().String()
++			purple_handle_reaction(handler.account, chat, rm.Key.GetID(), rm.GetText(), sender)
++			return
+ 		}
+ 	}
+ 	{
+ 		pcm := GetAnyPollCreationMessage(message)
+ 		if pcm != nil {
+ 			//handler.log.Infof("message poll creation: %#v", pcm)
+-			text = fmt.Sprintf("[POLL] %s\n", pcm.GetName())
+-			for i, option := range pcm.GetOptions() {
++			for _, option := range pcm.GetOptions() {
+ 				if option.OptionHash == nil {
+ 					// taken from whatsmeow.HashPollOptions()
+ 					hash := fmt.Sprintf("%X", sha256.Sum256([]byte(option.GetOptionName())))
+ 					option.OptionHash = &hash
+ 				}
+-				text += fmt.Sprintf("%d: %s\n", i+1, option.GetOptionName())
+-				//handler.log.Infof("message poll creation option #%d: %#v", i, option)
+-			}
+-			selectable_options := pcm.GetSelectableOptionsCount()
+-			switch selectable_options {
+-			case 0:
+-				text += "One may chose multiple answers."
+-			case 1:
+-				text += "One may chose one answer."
+-			default:
+-				text += fmt.Sprintf("One may chose up to %d answers.", selectable_options)
++				//handler.log.Infof("message poll creation option: %#v", option)
+ 			}
++			text = formatPollMessage(pcm)
++		}
++	}
++	{
++		// webOS: a shared pin drops silently without this - LocationMessage/LiveLocationMessage carry
++		// no Conversation/ExtendedTextMessage text, so nothing rendered at all. Summarize as text (a
++		// Maps link) rather than a real map bubble - no attachment involved, same text-summary
++		// approach as the poll display below.
++		if lm := message.GetLocationMessage(); lm != nil {
++			text = formatLocationMessage(lm.GetDegreesLatitude(), lm.GetDegreesLongitude(), lm.GetName(), lm.GetAddress(), lm.GetURL(), lm.GetIsLive())
++		} else if llm := message.GetLiveLocationMessage(); llm != nil {
++			text = formatLocationMessage(llm.GetDegreesLatitude(), llm.GetDegreesLongitude(), "", "", "", true)
++		}
++	}
++	{
++		// webOS: a shared contact card likewise carries no plain text - ContactMessage/
++		// ContactsArrayMessage drop silently without this. Summarize as text (name + phone numbers
++		// parsed out of the vcard) rather than a real contact-card bubble.
++		if cm := message.GetContactMessage(); cm != nil {
++			text = handler.formatContactMessage(cm.GetDisplayName(), cm.GetVcard())
++		} else if cam := message.GetContactsArrayMessage(); cam != nil {
++			text = handler.formatContactsArrayMessage(cam.GetDisplayName(), cam.GetContacts())
++		}
++	}
++	{
++		// webOS: a shared Event likewise carries no plain text - drops silently without this.
++		if em := message.GetEventMessage(); em != nil {
++			text = formatEventMessage(em)
+ 		}
+ 	}
+ 	{
+@@ -233,16 +585,23 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 		}
+ 	}
+ 	if text != "" {
+-		if isEdit {
+-			text = "[EDIT] " + text
++		if isEdit && editTargetId != "" {
++			// webOS edit-in-place: update the ORIGINAL bubble's text (found by editTargetId ==
++			// serviceMessageId) instead of posting a separate "[EDIT] ..." message. If we somehow lack the
++			// target id we fall through below to a normal display so the edit isn't silently lost.
++			purple_handle_message_edit(handler.account, editTargetId, text)
++		} else {
++			if isEdit {
++				text = "[EDIT] " + text
++			}
++			// WhatsApp is a plain-text protocol (allowing < and >), but Pidgin expects HTML (demanding br and swallowing things which are looking like tags)
++			text := strings.ReplaceAll(html.EscapeString(text), "\n", "<br>")
++			// note: info.PushName always denotes the sender (not the chat)
++			purple_display_text_message(handler.account, info.MessageSource.Chat.ToNonAD().String(), info.MessageSource.IsGroup, false, info.MessageSource.Sender.ToNonAD().String(), &info.PushName, info.Timestamp, text, &info.ID, quotedText, quotedFrom, quotedId)
+ 		}
+-		// WhatsApp is a plain-text protocol (allowing < and >), but Pidgin expects HTML (demanding br and swallowing things which are looking like tags)
+-		text := strings.ReplaceAll(html.EscapeString(text), "\n", "<br>")
+-		// note: info.PushName always denotes the sender (not the chat)
+-		purple_display_text_message(handler.account, info.MessageSource.Chat.ToNonAD().String(), info.MessageSource.IsGroup, false, info.MessageSource.Sender.ToNonAD().String(), &info.PushName, info.Timestamp, text, &info.ID)
+ 	}
+ 	if !isEdit { // edited messages contain the changed texts, but attachments are absent since they cannot be changed
+ 		handler.handle_attachment(message, info.ID, info.MessageSource, info.Timestamp)
+ 	}
+-	handler.add_to_cache(message, info.ID, info.MessageSource.Chat, info.MessageSource.Sender, info.Timestamp)
++	handler.add_to_cache(message, info.ID, info.MessageSource.Chat, info.MessageSource.Sender, evt.Info.MessageSource.Sender, info.MessageSource.IsFromMe, info.MessageSource.IsGroup, info.Timestamp)
+ }
+diff --git a/handle_newsletter.go b/handle_newsletter.go
+new file mode 100644
+index 0000000..a273c29
+--- /dev/null
++++ b/handle_newsletter.go
+@@ -0,0 +1,143 @@
++package main
++
++import (
++	"context"
++	"io"
++	"net/http"
++
++	"go.mau.fi/whatsmeow"
++	"go.mau.fi/whatsmeow/types"
++	"go.mau.fi/whatsmeow/types/events"
++)
++
++/*
++ * WhatsApp Channels (newsletters) support.
++ *
++ * whatsmeow delivers a followed Channel as a 1:1 message whose peer JID is "<id>@newsletter", and it
++ * carries no channel name - the only name on a message is the SENDER push-name, which is empty for a
++ * channel. So without help the buddy is created showing the raw "<id>@newsletter" JID.
++ *
++ * The readable title lives in the newsletter metadata, reachable only via an explicit query. Fetch the
++ * account's subscribed channels once on connect and push each real name through purple_update_name -
++ * the same sink used for contact push-names. That both CREATES the newsletter buddy (so followed but
++ * quiet channels still show up) and ALIASES it with its real title, which the webOS transport then
++ * files under the "WhatsApp Channels" server.
++ */
++func (handler *Handler) fetch_newsletter_names() {
++	cli := handler.client
++	if cli == nil {
++		return
++	}
++	metas, err := cli.GetSubscribedNewsletters(context.TODO())
++	if err != nil {
++		handler.log.Warnf("GetSubscribedNewsletters failed: %#v", err)
++		return
++	}
++	handler.log.Infof("Fetched %d subscribed WhatsApp Channels.", len(metas))
++	for _, meta := range metas {
++		if meta == nil {
++			continue
++		}
++		name := meta.ThreadMeta.Name.Text
++		if name != "" {
++			// meta.ID is the "<id>@newsletter" JID; purple_update_name creates/aliases the buddy under it.
++			purple_update_name(handler.account, meta.ID.String(), name)
++		}
++		// webOS: also set the channel ICON. Newsletters aren't regular contacts, so the contact
++		// avatar path (events.Picture -> GetProfilePictureInfo) never fires for them - but the picture
++		// URL is right here in the metadata. Set it so BBC/Dumpert/etc. show their logo.
++		handler.set_newsletter_icon(meta)
++	}
++}
++
++// set_newsletter_icon downloads a subscribed Channel's icon from its metadata and pushes it through
++// purple_set_profile_picture (the same sink contact avatars use). Prefers the small preview (matches
++// the default PREVIEW icon setting), falling back to the full picture; both carry a directly
++// downloadable URL. Best-effort: a missing/failed icon just leaves the channel iconless.
++func (handler *Handler) set_newsletter_icon(meta *types.NewsletterMetadata) {
++	// The subscribed-channels LIST query does NOT fetch the picture (it sends no fetch_full_image), so
++	// meta's Preview/Picture URLs are empty. Re-query THIS channel with GetNewsletterInfo, which sets
++	// fetch_full_image=true and returns a populated, directly-downloadable picture URL.
++	full, err := handler.client.GetNewsletterInfo(context.TODO(), meta.ID)
++	if err != nil || full == nil {
++		handler.log.Warnf("newsletter icon: GetNewsletterInfo(%s) failed: %#v", meta.ID.String(), err)
++		return
++	}
++	// The metadata's picture URL is empty; only a signed direct_path is provided. Prefer the small
++	// preview (192x192, ideal for an icon), fall back to the full picture. If a URL is ever present,
++	// HTTP GET it; otherwise download by direct_path via the media connection - profile pictures are
++	// unencrypted, so DownloadMediaWithOnlyPath needs no keys.
++	url := full.ThreadMeta.Preview.URL
++	dp := full.ThreadMeta.Preview.DirectPath
++	id := full.ThreadMeta.Preview.ID
++	if url == "" && dp == "" && full.ThreadMeta.Picture != nil {
++		url = full.ThreadMeta.Picture.URL
++		dp = full.ThreadMeta.Picture.DirectPath
++		id = full.ThreadMeta.Picture.ID
++	}
++	var data []byte
++	if url != "" {
++		resp, gerr := http.Get(url)
++		if gerr != nil {
++			return
++		}
++		defer resp.Body.Close()
++		if resp.StatusCode != http.StatusOK {
++			return
++		}
++		data, _ = io.ReadAll(resp.Body)
++	} else if dp != "" {
++		data, err = handler.client.DownloadMediaWithOnlyPath(context.TODO(), dp)
++		if err != nil {
++			handler.log.Warnf("newsletter icon: download for %s failed: %#v", meta.ID.String(), err)
++			return
++		}
++	}
++	if len(data) == 0 {
++		return
++	}
++	handler.log.Infof("Set WhatsApp Channel icon for %s, %d bytes.", full.ThreadMeta.Name.Text, len(data))
++	purple_set_profile_picture(handler.account, meta.ID.String(), data, "", id)
++}
++
++/*
++ * Fetch a WhatsApp Channel's recent history on demand. Called when the user opens the channel in the
++ * Servers tab: the transport's openChannel -> serv_join_chat -> gowhatsapp_join_chat routes a
++ * "<id>@newsletter" join here (a newsletter has no MUC to enter). We pull the last 50 posts via
++ * whatsmeow and replay each through the normal handle_message path, so text/media extraction and the
++ * newsletter->"WhatsApp Channels" routing (LibpurpleAdapter incoming_message_cb) are all reused.
++ */
++func (handler *Handler) fetch_newsletter_history(jidStr string) {
++	cli := handler.client
++	if cli == nil {
++		return
++	}
++	jid, err := parseJID(jidStr)
++	if err != nil {
++		handler.log.Warnf("newsletter history: invalid jid %s: %#v", jidStr, err)
++		return
++	}
++	msgs, err := cli.GetNewsletterMessages(context.TODO(), jid, &whatsmeow.GetNewsletterMessagesParams{Count: 50})
++	if err != nil {
++		handler.log.Warnf("GetNewsletterMessages(%s) failed: %#v", jidStr, err)
++		return
++	}
++	handler.log.Infof("Fetched %d history messages for WhatsApp Channel %s.", len(msgs), jidStr)
++	// Replay oldest-first so posts thread in chronological order.
++	for i := len(msgs) - 1; i >= 0; i-- {
++		nm := msgs[i]
++		if nm == nil || nm.Message == nil {
++			continue
++		}
++		info := types.MessageInfo{
++			MessageSource: types.MessageSource{
++				Chat:    jid,
++				Sender:  jid,
++				IsGroup: false,
++			},
++			ID:        nm.MessageID,
++			Timestamp: nm.Timestamp,
++		}
++		handler.handle_message(nm.Message, info, &events.Message{Info: info, Message: nm.Message})
++	}
++}
+diff --git a/handler.go b/handler.go
+index 3c421b5..c32e059 100644
+--- a/handler.go
++++ b/handler.go
+@@ -28,6 +28,8 @@ type Handler struct {
+ 	client           *whatsmeow.Client
+ 	deferredReceipts map[types.JID]map[types.JID][]types.MessageID // holds ID and sender of a received message so the receipt can be sent later.
+ 	cachedMessages   []CachedMessage                               // for looking up reactions and quotes
++	newsletterSeen      map[types.MessageID]bool // dedup WhatsApp Channel posts (live delivery vs history replay)
++	newsletterSeenOrder []types.MessageID        // FIFO order for bounding newsletterSeen
+ 	pictureRequests  chan ProfilePictureRequest
+ 	httpClient       *http.Client // for executing picture requests
+ }
+@@ -68,6 +70,9 @@ func (handler *Handler) eventHandler(rawEvt interface{}) {
+ 	case *events.Connected:
+ 		// connected – start downloading profile pictures now.
+ 		go handler.profile_picture_downloader()
++		// webOS: fetch the real names of followed WhatsApp Channels (newsletters) so they show a title
++		// instead of the raw "<id>@newsletter" JID. Also creates their buddies so quiet channels appear.
++		go handler.fetch_newsletter_names()
+ 		handler.handle_connected()
+ 	case *events.Disconnected:
+ 		// TODO: Find out if it would be more sensible to handle this as a non-error disconnect.
+@@ -85,10 +90,21 @@ func (handler *Handler) eventHandler(rawEvt interface{}) {
+ 	case *events.Message:
+ 		handler.handle_message(evt.Message, evt.Info, evt)
+ 	case *events.Receipt:
++		// webOS delivery/read receipts: the recipient delivered/read messages WE sent. evt.MessageIDs
++		// are the ids we surfaced via purple_handle_outbox_id (== serviceMessageId). "read"/"read-self"
++		// -> double tick; "delivered" -> single tick. (Sender/played/etc are ignored.)
++		var receiptStatus string
+ 		if evt.Type == types.ReceiptTypeRead || evt.Type == types.ReceiptTypeReadSelf {
+ 			log.Infof("%v was read by %s at %s", evt.MessageIDs, evt.SourceString(), evt.Timestamp)
++			receiptStatus = "read"
+ 		} else if evt.Type == types.ReceiptTypeDelivered {
+ 			log.Infof("%s was delivered to %s at %s", evt.MessageIDs[0], evt.SourceString(), evt.Timestamp)
++			receiptStatus = "delivered"
++		}
++		if receiptStatus != "" {
++			for _, mid := range evt.MessageIDs {
++				purple_handle_receipt(handler.account, string(mid), receiptStatus)
++			}
+ 		}
+ 	case *events.Presence:
+ 		handler.handle_presence(evt)
+@@ -131,14 +147,14 @@ func (handler *Handler) eventHandler(rawEvt interface{}) {
+ 		chat := handler.lidToPn(bcm.From, "handling call offer")
+ 		sender := handler.lidToPn(bcm.CallCreator, "handling call offer")
+ 		text := "This contact is trying to call you, but whatsmeow does not support calls."
+-		purple_display_text_message(handler.account, chat.ToNonAD().String(), false, false, sender.ToNonAD().String(), nil, bcm.Timestamp, text, nil)
++		purple_display_text_message(handler.account, chat.ToNonAD().String(), false, false, sender.ToNonAD().String(), nil, bcm.Timestamp, text, nil, "", "", "")
+ 	case *events.CallOfferNotice:
+ 		// same as CallOffer, but is a group
+ 		bcm := evt.BasicCallMeta
+ 		chat := handler.lidToPn(bcm.From, "handling call offer notice")
+ 		sender := handler.lidToPn(bcm.CallCreator, "handling call offer notice")
+ 		text := "This contact is trying to make you notice a call, but whatsmeow does not support calls."
+-		purple_display_text_message(handler.account, chat.ToNonAD().String(), true, false, sender.ToNonAD().String(), nil, bcm.Timestamp, text, nil)
++		purple_display_text_message(handler.account, chat.ToNonAD().String(), true, false, sender.ToNonAD().String(), nil, bcm.Timestamp, text, nil, "", "", "")
+ 	case *events.CallRelayLatency:
+ 		// related to calls. ignore silently.
+ 	case *events.CallTerminate:
+@@ -159,7 +175,7 @@ func (handler *Handler) eventHandler(rawEvt interface{}) {
+ 		info := evt.Info
+ 		source := info.MessageSource
+ 		text := fmt.Sprintf("sent an undecryptable %s message. Check the message on your main device.", evt.UnavailableType)
+-		purple_display_text_message(handler.account, source.Chat.ToNonAD().String(), source.IsGroup, false, source.Sender.ToNonAD().String(), &info.PushName, info.Timestamp, text, &info.ID)
++		purple_display_text_message(handler.account, source.Chat.ToNonAD().String(), source.IsGroup, false, source.Sender.ToNonAD().String(), &info.PushName, info.Timestamp, text, &info.ID, "", "", "")
+ 	default:
+ 		log.Warnf("Event type not handled: %#v", rawEvt)
+ 	}
+diff --git a/login.go b/login.go
+index fe775ef..3a4b666 100644
+--- a/login.go
++++ b/login.go
+@@ -12,6 +12,7 @@ import (
+ 	"path/filepath"
+ 	"strconv"
+ 	"strings"
++	"time"
+ 
+ 	_ "github.com/lib/pq"
+ 	"github.com/mdp/qrterminal/v3"
+@@ -162,6 +163,7 @@ func login(account *PurpleAccount, purple_user_dir string, username string, cred
+ 	}
+ 	handlers[account] = &handler
+ 	handler.LoadCachedMessages(filepath.Join(purple_user_dir, username+".json"))
++	handler.LoadNewsletterSeen(filepath.Join(purple_user_dir, username+".nlseen.json"))
+ 	handler.client.AddEventHandler(handler.eventHandler)
+ 
+ 	if proxy_address != "" {
+@@ -251,6 +253,121 @@ func (handler *Handler) prune_devices(deviceJid types.JID) {
+ 	}
+ }
+ 
++/*
++ * whatsapp_account_removed is invoked from the libpurple "account-removed" signal (fired by
++ * purple_accounts_delete) when the user DELETES a WhatsApp account on webOS. Its job is to unlink
++ * this device server-side and remove ONLY this account's row from the SHARED whatsmeow.db.
++ *
++ * The whatsmeow store (default file:$purple_user_dir/whatsmeow.db) is shared by every WhatsApp
++ * account in this transport — the default DB address has no $username in it. So we must NEVER delete
++ * the whole file (that would orphan every other WhatsApp account and log them all out). Instead we
++ * key strictly on THIS account's device JID and delete just that one device's rows.
++ *
++ * Per-account isolation:
++ *   - Preferred path: if a live, connected client for this account still exists, client.Logout()
++ *     sends a "remove-companion-device" IQ (unlinks server-side, clearing the "ghost linked device")
++ *     and then deletes only its own device from the store.
++ *   - Fallback (the usual case — libpurple disables + disconnects, and thus tears down the handler,
++ *     BEFORE emitting account-removed): open the shared store, look up this account's stored device
++ *     JID (from the "credentials" setting = "deviceJID|registrationId") and delete only that device's
++ *     rows via whatsmeow's store (Container.DeleteDevice, per-JID). A fresh pairing QR then works on
++ *     re-add. NOTE: while disconnected we cannot unlink server-side, so a stale linked device may
++ *     linger on the phone until the user removes it there — hooking a connected teardown would
++ *     require an earlier signal, but "account-disabled" also fires for a plain disable, which must
++ *     NOT wipe the store.
++ */
++func whatsapp_account_removed(account *PurpleAccount, purple_user_dir string, username string, credentials string) {
++	log := PurpleLogger(account, "AccountRemoved")
++
++	// Preferred: a live, connected client can Logout() (unlink server-side + delete its own row).
++	if handler, ok := handlers[account]; ok {
++		if handler.client != nil && handler.client.Store != nil && handler.client.Store.ID != nil {
++			deviceJid := *handler.client.Store.ID
++			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
++			defer cancel()
++			if err := handler.client.Logout(ctx); err != nil {
++				// e.g. not actually connected: fall back to deleting just this device's row via the
++				// container the handler already holds (still strictly per-JID).
++				log.Warnf("Logout failed (%v); deleting device %s from shared store", err, deviceJid.String())
++				whatsapp_delete_device(handler.container, deviceJid)
++			} else {
++				log.Infof("Logged out and removed device %s from shared whatsmeow store", deviceJid.String())
++			}
++		}
++		return
++	}
++
++	// Usual case: no live handler. Look up THIS account's stored device JID and delete only it.
++	creds := strings.Split(credentials, "|")
++	if len(creds) < 1 || creds[0] == "" {
++		log.Infof("No stored WhatsApp credentials for removed account; nothing to clean up.")
++		return
++	}
++	deviceJid, err := parseJID(creds[0])
++	if err != nil {
++		log.Warnf("Stored device JID %q is not valid; skipping store cleanup: %v", creds[0], err)
++		return
++	}
++	container, db, err := whatsapp_open_container(account, purple_user_dir, username)
++	if err != nil {
++		log.Warnf("Cannot open whatsmeow store to remove device %s: %v", deviceJid.String(), err)
++		return
++	}
++	defer db.Close()
++	whatsapp_delete_device(container, deviceJid)
++	log.Infof("Removed device %s from shared whatsmeow store (server-side unlink not possible while disconnected).", deviceJid.String())
++}
++
++/*
++ * whatsapp_delete_device removes exactly one device's rows (keyed by JID) from the shared store.
++ * This is the per-JID delete that keeps other WhatsApp accounts in the same whatsmeow.db intact.
++ */
++func whatsapp_delete_device(container *sqlstore.Container, deviceJid types.JID) {
++	if container == nil {
++		return
++	}
++	ctx := context.TODO()
++	device, err := container.GetDevice(ctx, deviceJid)
++	if err != nil || device == nil {
++		// no such device (already gone / never paired) — nothing to delete
++		return
++	}
++	_ = device.Delete(ctx) // Device.Delete -> Container.DeleteDevice(device): removes only this JID
++}
++
++/*
++ * whatsapp_open_container opens the SHARED whatsmeow store using the exact same address resolution
++ * as login() (the "database-address" account option, $purple_user_dir/$username substitution and the
++ * legacy _foreign_keys=on rewrite). Caller owns the returned *sql.DB and must Close() it.
++ */
++func whatsapp_open_container(account *PurpleAccount, purple_user_dir string, username string) (*sqlstore.Container, *sql.DB, error) {
++	dbLog := PurpleLogger(account, "Database")
++	address := purple_get_string(account, C.GOWHATSAPP_DATABASE_ADDRESS_OPTION, C.GOWHATSAPP_DATABASE_ADDRESS_DEFAULT)
++	address = strings.Replace(address, "$purple_user_dir", purple_user_dir, -1)
++	address = strings.Replace(address, "$username", username, -1)
++	address = strings.Replace(address, "_foreign_keys=on", "_pragma=foreign_keys(1)", -1)
++	dialect := "sqlite"
++	maxOpenConns := 1
++	if strings.HasPrefix(address, "postgres:") {
++		dialect = "postgres"
++		maxOpenConns = 0
++		address = strings.Replace(address, "postgres:", "", -1)
++	}
++	db, err := sql.Open(dialect, address)
++	if err != nil {
++		return nil, nil, err
++	}
++	if maxOpenConns > 0 {
++		db.SetMaxOpenConns(maxOpenConns)
++	}
++	container := sqlstore.NewWithDB(db, dialect, dbLog)
++	if err := container.Upgrade(context.TODO()); err != nil {
++		db.Close()
++		return nil, nil, err
++	}
++	return container, db, nil
++}
++
+ /*
+  * This is the go part of purple's close() function.
+  */
+@@ -266,5 +383,6 @@ func (handler *Handler) close(account *PurpleAccount, purple_user_dir string, us
+ 	}
+ 	handler.client.Disconnect()
+ 	handler.SaveCachedMessages(filepath.Join(purple_user_dir, username+".json"))
++	handler.SaveNewsletterSeen(filepath.Join(purple_user_dir, username+".nlseen.json"))
+ 	delete(handlers, account)
+ }
+diff --git a/message_cache.go b/message_cache.go
+index 758ead0..8375367 100644
+--- a/message_cache.go
++++ b/message_cache.go
+@@ -16,9 +16,18 @@ import (
+ )
+ 
+ type CachedMessage struct {
+-	ID        types.MessageID
++	ID types.MessageID
++	// Sender is the LID-resolved (phone-number, display-friendly) form (see handler.lidToPn) used for
++	// reactions/quotes/UI. RawSender is whatsmeow's own ORIGINAL sender for this message (possibly a
++	// LID) - only send_poll_vote uses it, because whatsmeow.storeMessageSecret keys the per-message
++	// encryption secret it needs for BuildPollVote by the exact (chat, sender, id) it saw internally,
++	// with no LID/PN fallback (unlike e.g. GetPrivacyToken); voting with the resolved Sender would
++	// look up the wrong key and fail for a LID-identified contact whenever the two forms differ.
+ 	Chat      types.JID
+ 	Sender    types.JID
++	RawSender types.JID
++	IsFromMe  bool
++	IsGroup   bool
+ 	Timestamp time.Time
+ 	Message   waE2E.Message
+ }
+@@ -27,7 +36,7 @@ type CachedMessage struct {
+  * Add a message to the message cache to it can be looked up later.
+  * Useful for replying to a specific message and for displaying relevant information when dealing with reactions.
+  */
+-func (handler *Handler) add_to_cache(message *waE2E.Message, id types.MessageID, chat types.JID, sender types.JID, timestamp time.Time) {
++func (handler *Handler) add_to_cache(message *waE2E.Message, id types.MessageID, chat types.JID, sender types.JID, rawSender types.JID, isFromMe bool, isGroup bool, timestamp time.Time) {
+ 	if message.GetReactionMessage() != nil {
+ 		// ReactionMessage cannot be referred to, do not cache
+ 		return
+@@ -57,11 +66,21 @@ func (handler *Handler) add_to_cache(message *waE2E.Message, id types.MessageID,
+ 		ID:        id,
+ 		Chat:      chat,
+ 		Sender:    sender,
++		RawSender: rawSender,
++		IsFromMe:  isFromMe,
++		IsGroup:   isGroup,
+ 		Timestamp: timestamp,
+-		// TODO: also add FromMe and IsGroup since they are necessary for BuildPollVote
+ 	})
+ 	// from https://www.delftstack.com/howto/go/queue-implementation-in-golang/
+-	if len(handler.cachedMessages) > purple_get_int(handler.account, C.GOWHATSAPP_MESSAGE_CACHE_SIZE_OPTION, 0) {
++	// webOS: the "message-cache-size" account option defaults to 0 (cache disabled) upstream, and it is
++	// never configured on-device — which silently broke replies (and weakened reaction sender lookup),
++	// since lookup_cached_message_by_id could never find the target. Floor it to a sane default so the
++	// cache actually holds recent messages that a reply/reaction can reference.
++	cacheSize := purple_get_int(handler.account, C.GOWHATSAPP_MESSAGE_CACHE_SIZE_OPTION, 0)
++	if cacheSize <= 0 {
++		cacheSize = 500
++	}
++	if len(handler.cachedMessages) > cacheSize {
+ 		handler.cachedMessages = handler.cachedMessages[1:]
+ 	}
+ }
+diff --git a/newsletter_seen.go b/newsletter_seen.go
+new file mode 100644
+index 0000000..3abb07a
+--- /dev/null
++++ b/newsletter_seen.go
+@@ -0,0 +1,65 @@
++package main
++
++// Dedup for WhatsApp Channel (newsletter) posts.
++//
++// A followed Channel's posts reach us TWICE: whatsmeow offline-syncs recent posts as live messages on
++// connect, AND fetch_newsletter_history replays the last 50 when the channel is opened in the Servers
++// tab. Without dedup each post is stored twice (the user sees every post doubled). We remember the
++// WhatsApp message IDs we've already delivered (the id is stable between the live and history paths) and
++// skip repeats. The set is bounded (FIFO) and persisted next to the message cache, so a reopen in a later
++// session doesn't re-duplicate posts already written to db8.
++
++import (
++	"encoding/json"
++	"os"
++
++	"go.mau.fi/whatsmeow/types"
++)
++
++const newsletterSeenMax = 4000
++
++// newsletterAlreadySeen reports whether this Channel post was already delivered, recording it if not.
++func (handler *Handler) newsletterAlreadySeen(id types.MessageID) bool {
++	if id == "" {
++		return false
++	}
++	if handler.newsletterSeen == nil {
++		handler.newsletterSeen = make(map[types.MessageID]bool)
++	}
++	if handler.newsletterSeen[id] {
++		return true
++	}
++	handler.newsletterSeen[id] = true
++	handler.newsletterSeenOrder = append(handler.newsletterSeenOrder, id)
++	if len(handler.newsletterSeenOrder) > newsletterSeenMax {
++		drop := handler.newsletterSeenOrder[0]
++		handler.newsletterSeenOrder = handler.newsletterSeenOrder[1:]
++		delete(handler.newsletterSeen, drop)
++	}
++	return false
++}
++
++func (handler *Handler) LoadNewsletterSeen(filePath string) {
++	data, err := os.ReadFile(filePath)
++	if err != nil {
++		return // no file yet — fine on first run
++	}
++	var ids []types.MessageID
++	if json.Unmarshal(data, &ids) != nil {
++		return
++	}
++	handler.newsletterSeen = make(map[types.MessageID]bool, len(ids))
++	for _, id := range ids {
++		handler.newsletterSeen[id] = true
++	}
++	handler.newsletterSeenOrder = ids
++	handler.log.Infof("Loaded %d seen WhatsApp Channel post ids.", len(ids))
++}
++
++func (handler *Handler) SaveNewsletterSeen(filePath string) {
++	data, err := json.Marshal(handler.newsletterSeenOrder)
++	if err != nil {
++		return
++	}
++	_ = os.WriteFile(filePath, data, 0600)
++}
+diff --git a/profile.go b/profile.go
+index 38a4281..2228212 100644
+--- a/profile.go
++++ b/profile.go
+@@ -21,7 +21,8 @@ type ProfilePictureRequest struct {
+ }
+ 
+ func (handler *Handler) request_profile_picture(jid types.JID, picture_date string, picture_id string) {
+-	setting := purple_get_string(handler.account, C.GOWHATSAPP_ICONS_OPTION, C.GOWHATSAPP_ICONS_CHOICE_NO)
++	// webOS: default PREVIEW (fetch avatars) when unset -- see presence.c gowhatsapp_request_profile_picture.
++	setting := purple_get_string(handler.account, C.GOWHATSAPP_ICONS_OPTION, C.GOWHATSAPP_ICONS_CHOICE_PREVIEW)
+ 	if setting != C.GoString(C.GOWHATSAPP_ICONS_CHOICE_NO) {
+ 		select {
+ 		case handler.pictureRequests <- ProfilePictureRequest{jid: jid, picture_date: picture_date, picture_id: picture_id}:
+diff --git a/send_file.go b/send_file.go
+index 0fa03f1..76df4be 100644
+--- a/send_file.go
++++ b/send_file.go
+@@ -30,10 +30,12 @@ func (handler *Handler) send_file(who string, filename string) string {
+ 	if err != nil {
+ 		return fmt.Sprintf("Failed to open %s: %v", filename, err)
+ 	}
+-	_, err = handler.send_file_bytes(recipient, isGroup, data, filepath.Base(filename), true)
++	send_response, err := handler.send_file_bytes(recipient, isGroup, data, filepath.Base(filename), true)
+ 	if err != nil {
+ 		return err.Error()
+ 	}
++	// webOS outbox-id: make this app-sent file reactable (react-to-your-own-message).
++	purple_handle_outbox_id(handler.account, send_response.ID, filepath.Base(filename))
+ 	return ""
+ }
+ 
+@@ -51,6 +53,10 @@ func (handler *Handler) send_file_bytes(recipient types.JID, isGroup bool, data
+ 	switch mimetype {
+ 	case "image/jpeg", "image/png":
+ 		msg, err = handler.send_file_image(data, mimetype)
++	case "image/webp":
++		// A .webp picked from the compose attachment picker is a sticker in WhatsApp's world (not a
++		// regular Image message) - the same distinction real WhatsApp clients make purely by format.
++		msg, err = handler.send_file_sticker(data, mimetype)
+ 	case "application/ogg", "audio/ogg":
+ 		cdata := C.CBytes(data)
+ 		opusfile_info := C.opusfile_get_info(cdata, C.size_t(len(data)))
+@@ -90,7 +96,7 @@ func (handler *Handler) send_file_bytes(recipient types.JID, isGroup bool, data
+ 		return nil, fmt.Errorf("error sending file: %v", err)
+ 	}
+ 	msg.Conversation = &filename // this ends up in the cache, so the message may be looked up by the name of the file
+-	handler.add_to_cache(msg, send_response.ID, recipient, send_response.Sender, send_response.Timestamp)
++	handler.add_to_cache(msg, send_response.ID, recipient, send_response.Sender, send_response.Sender, true, isGroup, send_response.Timestamp)
+ 	return &send_response, nil
+ }
+ 
+@@ -111,6 +117,30 @@ func (handler *Handler) send_file_image(data []byte, mimetype string) (*waE2E.Me
+ 	return msg, nil
+ }
+ 
++// send_file_sticker uploads a .webp as a sticker (the "WhatsApp Image Keys" media bucket - whatsmeow
++// has no separate media type for a single sticker send, only for sticker PACKS). Width/Height are
++// hardcoded to WhatsApp's standard 512x512 sticker canvas rather than parsed from the webp, which
++// is good enough for the server/receiving clients to render it - stock clients always send square
++// stickers on that canvas anyway.
++func (handler *Handler) send_file_sticker(data []byte, mimetype string) (*waE2E.Message, error) {
++	uploaded, err := handler.client.Upload(context.Background(), data, whatsmeow.MediaImage)
++	if err != nil {
++		return nil, err
++	}
++	msg := &waE2E.Message{StickerMessage: &waE2E.StickerMessage{
++		URL:           proto.String(uploaded.URL),
++		DirectPath:    proto.String(uploaded.DirectPath),
++		MediaKey:      uploaded.MediaKey,
++		Mimetype:      proto.String(mimetype),
++		FileEncSHA256: uploaded.FileEncSHA256,
++		FileSHA256:    uploaded.FileSHA256,
++		FileLength:    proto.Uint64(uint64(len(data))),
++		Width:         proto.Uint32(512),
++		Height:        proto.Uint32(512),
++	}}
++	return msg, nil
++}
++
+ func (handler *Handler) send_file_audio(data []byte, mimetype string, seconds uint32, c_waveform [C.WAVEFORM_SAMPLES_COUNT]C.char) (*waE2E.Message, error) {
+ 	uploaded, err := handler.client.Upload(context.Background(), data, whatsmeow.MediaAudio)
+ 	if err != nil {
+diff --git a/send_message.go b/send_message.go
+index db465c4..6c34d25 100644
+--- a/send_message.go
++++ b/send_message.go
+@@ -12,10 +12,12 @@ import (
+ 	"fmt"
+ 	"io"
+ 	"net/http"
++	"os"
+ 	"path/filepath"
+ 	"regexp"
+ 	"strconv"
+ 	"strings"
++	"time"
+ 
+ 	"go.mau.fi/whatsmeow/proto/waE2E"
+ 	"go.mau.fi/whatsmeow/types"
+@@ -71,7 +73,7 @@ func (handler *Handler) prepare_reply(chat types.JID, text string) (bool, *Cache
+  *
+  * Returns true on success.
+  */
+-func (handler *Handler) send_text_message(recipient types.JID, isGroup bool, message string) bool {
++func (handler *Handler) send_text_message(recipient types.JID, isGroup bool, message string, replyTo string) bool {
+ 	stripped_message, image_ids := decompose_html(message)
+ 	handler.log.Infof("After decomposing, message is „%s“ with %d images.", stripped_message, len(image_ids))
+ 	if len(image_ids) > 1 {
+@@ -92,7 +94,7 @@ func (handler *Handler) send_text_message(recipient types.JID, isGroup bool, mes
+ 		setting := purple_get_string(handler.account, C.GOWHATSAPP_ECHO_OPTION, C.GOWHATSAPP_ECHO_CHOICE_ON_SUCCESS)
+ 		if setting == C.GoString(C.GOWHATSAPP_ECHO_CHOICE_ON_SUCCESS) {
+ 			// injects the original message (with the image tag)
+-			purple_display_text_message(handler.account, recipient.ToNonAD().String(), isGroup, true, handler.client.Store.ID.ToNonAD().String(), nil, send_response.Timestamp, message, nil)
++			purple_display_text_message(handler.account, recipient.ToNonAD().String(), isGroup, true, handler.client.Store.ID.ToNonAD().String(), nil, send_response.Timestamp, message, nil, "", "", "")
+ 		}
+ 		return true
+ 	}
+@@ -110,6 +112,14 @@ func (handler *Handler) send_text_message(recipient types.JID, isGroup bool, mes
+ 		}
+ 	}
+ 	is_reply, cached_message, stripped_message := handler.prepare_reply(recipient, stripped_message)
++	// webOS replies: the Messaging app sends the reply target's serviceMessageId out-of-band
++	// (webos-reply-to) rather than the "?reply <id>" text command. Resolve it from the cache and quote it.
++	if !is_reply && replyTo != "" {
++		cached_message = handler.lookup_cached_message_by_id(replyTo)
++		if cached_message != nil {
++			is_reply = true
++		}
++	}
+ 	if is_reply {
+ 		if cached_message == nil {
+ 			purple_display_system_message(handler.account, recipient.ToNonAD().String(), isGroup, "Unable to prepare reply: Quoted message not found in cache.")
+@@ -143,13 +153,200 @@ func (handler *Handler) send_text_message(recipient types.JID, isGroup bool, mes
+ 			ownJid := handler.client.Store.ID.ToNonAD().String()
+ 			recipientJid := recipient.ToNonAD().String()
+ 			msgID := send_response.ID
+-			purple_display_text_message(handler.account, recipientJid, isGroup, true, ownJid, nil, send_response.Timestamp, message, &msgID)
++			purple_display_text_message(handler.account, recipientJid, isGroup, true, ownJid, nil, send_response.Timestamp, message, &msgID, "", "", "")
+ 		}
+-		handler.add_to_cache(msg, send_response.ID, recipient, send_response.Sender, send_response.Timestamp)
++		handler.add_to_cache(msg, send_response.ID, recipient, send_response.Sender, send_response.Sender, true, isGroup, send_response.Timestamp)
++		// webOS outbox-id: hand the server id of this app-sent message to the transport so its Outbox
++		// row becomes reactable (react-to-your-own-message).
++		purple_handle_outbox_id(handler.account, send_response.ID, stripped_message)
+ 		return true
+ 	}
+ }
+ 
++/*
++ * webOS reactions (SEND): send (or remove) a reaction to a WhatsApp message.
++ *
++ *   peer     = the chat JID the transport uses (parsed like a send recipient)
++ *   targetId = the bare whatsmeow message id of the message being reacted to
++ *   emoji    = the reaction emoji (ignored when remove is true)
++ *   remove   = true removes my previous reaction (sends an empty reaction)
++ *
++ * whatsmeow's BuildReaction/BuildMessageKey needs the ORIGINAL message's sender to set FromMe: for a
++ * message I sent, FromMe must be true; for one I received, FromMe is false (and, in a group, Participant
++ * is the sender). We recover the sender from the local message cache (populated on both send and
++ * receive). targetSender is the db8 FALLBACK: the transport supplies the reacted-to message's original
++ * sender (from the app's message row), so a reaction still builds correctly when the cache has no entry
++ * for the target - after a transport restart/crash, or for a message older than the cache. Only if BOTH
++ * miss do we guess (1:1 -> received from peer; group -> own message).
++ */
++func (handler *Handler) send_reaction(peer string, targetId string, emoji string, targetSender string, remove bool) {
++	chat, err := parseJID(peer)
++	if err != nil {
++		purple_display_system_message(handler.account, peer, false, fmt.Sprintf("Cannot react: invalid recipient: %v", err))
++		return
++	}
++	reaction := emoji
++	if remove {
++		reaction = ""
++	}
++	// Recover the reacted-to message's sender so FromMe/Participant are correct.
++	var sender types.JID
++	resolved := false
++	if cached := handler.lookup_cached_message_by_id(targetId); cached != nil {
++		sender = cached.Sender.ToNonAD()
++		resolved = true
++	} else if targetSender != "" {
++		// db8 fallback: transport supplied the original sender (the app's from.addr). Works for any
++		// message regardless of cache state; whatsmeow derives FromMe from this JID vs our own.
++		if sj, perr := parseJID(targetSender); perr == nil {
++			sender = sj.ToNonAD()
++			resolved = true
++		} else {
++			handler.log.Warnf("send_reaction: unparseable targetSender %q: %v", targetSender, perr)
++		}
++	}
++	if !resolved {
++		// Neither cache nor a usable supplied sender - last-resort heuristic.
++		if chat.Server == types.DefaultUserServer || chat.Server == types.HiddenUserServer {
++			// 1:1: assume a received message (sender = peer, FromMe=false), the common case.
++			sender = chat.ToNonAD()
++		} else {
++			// Group: assume it's our own message (empty sender => FromMe=true).
++			sender = types.EmptyJID
++		}
++	}
++	msg := handler.client.BuildReaction(chat, sender, types.MessageID(targetId), reaction)
++	_, err = handler.client.SendMessage(context.Background(), chat, msg)
++	if err != nil {
++		handler.log.Warnf("Failed to send reaction to %s (target %s): %v", chat.String(), targetId, err)
++		purple_display_system_message(handler.account, chat.ToNonAD().String(), false, fmt.Sprintf("Failed to send reaction: %v", err))
++	}
++}
++
++// pollVoteSenderCandidates returns the sender JIDs to try for a poll's message-secret lookup, most
++// likely first. The secret is keyed by the EXACT sender whatsmeow saw when the poll arrived, and
++// SQLStore.GetMessageSecret matches `sender.ToNonAD()` EXACTLY - unlike the privacy-token query
++// right beside it in that same file, it has NO LID<->PN fallback, and a miss returns
++// (nil, nil) rather than an error. So handing it the wrong form of the same person's JID fails
++// SILENTLY. db8 only ever stores the phone-number form (from.addr), so for a LID-identified
++// contact the PN we get back is the wrong key and voting on any non-cached poll dies here.
++func (handler *Handler) pollVoteSenderCandidates(ctx context.Context, sender types.JID) []types.JID {
++	candidates := []types.JID{sender}
++	var other types.JID
++	var err error
++	if sender.Server == types.HiddenUserServer {
++		other, err = handler.client.Store.LIDs.GetPNForLID(ctx, sender)
++	} else {
++		other, err = handler.client.Store.LIDs.GetLIDForPN(ctx, sender)
++	}
++	if err == nil && !other.IsEmpty() && other.ToNonAD() != sender.ToNonAD() {
++		candidates = append(candidates, other)
++	}
++	return candidates
++}
++
++// send_poll_vote sends (or replaces) the user's vote on a poll they received. optionNames is the
++// FULL current selection (not a delta) - whatsmeow's BuildPollVote/PollVoteMessage always carries
++// the complete set of selected options, same as a real WhatsApp client re-sending the whole
++// selection on every tap. peer = the chat the poll lives in; pollMessageID = the poll creation
++// message's serviceMessageId (== info.ID at receive time).
++//
++// Prefers the in-memory cache (it has the exact RawSender whatsmeow used); on a miss - i.e. any
++// poll from before the last transport restart - falls back to senderJid (db8's stored sender, the
++// same db8-fallback pattern send_reaction uses) and PROBES the message-secret store for each
++// plausible JID form before building, rather than assuming one. See pollVoteSenderCandidates.
++//
++// Logging goes to stderr, NOT handler.log: purple_debug output (which is what waLog/purpleLogger
++// funnels into) never reaches imstdout.log on this device - confirmed live, zero "[Handler]"/
++// "[Client]" lines and zero hits for known-firing Infof calls - so every diagnostic here was
++// invisible while this was being debugged. stderr is the channel the wa-call engine already uses
++// successfully.
++func (handler *Handler) send_poll_vote(peer string, pollMessageID string, optionNames []string, senderJid string) {
++	ctx := context.Background()
++	chat, err := parseJID(peer)
++	if err != nil {
++		fmt.Fprintf(os.Stderr, "wa-poll: invalid peer %q: %v\n", peer, err)
++		purple_display_system_message(handler.account, peer, false, fmt.Sprintf("Cannot vote: invalid recipient: %v", err))
++		return
++	}
++	var msgSource types.MessageSource
++	var timestamp time.Time
++	cached := handler.lookup_cached_message_by_id(pollMessageID)
++	if cached != nil {
++		msgSource = types.MessageSource{
++			Chat: cached.Chat,
++			// RawSender (not the LID-resolved Sender): the per-message secret was stored under the
++			// EXACT sender whatsmeow saw - see CachedMessage.RawSender's comment.
++			Sender:   cached.RawSender,
++			IsFromMe: cached.IsFromMe,
++			IsGroup:  cached.IsGroup,
++		}
++		timestamp = cached.Timestamp
++	} else if senderJid != "" {
++		sender, perr := parseJID(senderJid)
++		if perr != nil {
++			fmt.Fprintf(os.Stderr, "wa-poll: unparseable senderJid %q: %v\n", senderJid, perr)
++			purple_display_system_message(handler.account, chat.ToNonAD().String(), false, "Cannot vote: poll not found (try reopening the conversation).")
++			return
++		}
++		isFromMe := handler.client.Store.ID != nil && sender.ToNonAD() == handler.client.Store.ID.ToNonAD()
++		isGroup := chat.Server == types.GroupServer
++		// Probe the secret store for each JID form and use whichever actually holds the secret -
++		// that is exactly what BuildPollVote will look up, so this turns a silent failure into a
++		// resolved sender (or an explicit, logged diagnosis).
++		resolved := sender
++		found := false
++		for _, cand := range handler.pollVoteSenderCandidates(ctx, sender) {
++			secret, realSender, serr := handler.client.Store.MsgSecrets.GetMessageSecret(ctx, chat, cand, pollMessageID)
++			fmt.Fprintf(os.Stderr, "wa-poll: secret probe chat=%s cand=%s -> found=%v realSender=%s err=%v\n",
++				chat, cand, len(secret) > 0, realSender, serr)
++			if serr == nil && len(secret) > 0 {
++				resolved = cand
++				found = true
++				break
++			}
++		}
++		if !found {
++			fmt.Fprintf(os.Stderr, "wa-poll: NO message secret for poll %s in chat %s (tried %v) - vote cannot be encrypted\n",
++				pollMessageID, chat, handler.pollVoteSenderCandidates(ctx, sender))
++			purple_display_system_message(handler.account, chat.ToNonAD().String(), false,
++				"Cannot vote: this poll's encryption key is not on this device (it arrived before this device was linked).")
++			return
++		}
++		msgSource = types.MessageSource{
++			Chat:     chat,
++			Sender:   resolved,
++			IsFromMe: isFromMe,
++			IsGroup:  isGroup,
++		}
++		timestamp = time.Now()
++	} else {
++		fmt.Fprintf(os.Stderr, "wa-poll: poll %s not cached and no senderJid supplied (%d cached)\n", pollMessageID, len(handler.cachedMessages))
++		purple_display_system_message(handler.account, chat.ToNonAD().String(), false, "Cannot vote: poll not found (try reopening the conversation).")
++		return
++	}
++	fmt.Fprintf(os.Stderr, "wa-poll: voting poll=%s cached=%v chat=%s sender=%s isFromMe=%v isGroup=%v options=%v\n",
++		pollMessageID, cached != nil, msgSource.Chat, msgSource.Sender, msgSource.IsFromMe, msgSource.IsGroup, optionNames)
++	pollInfo := types.MessageInfo{
++		ID:            types.MessageID(pollMessageID),
++		Timestamp:     timestamp,
++		MessageSource: msgSource,
++	}
++	voteMsg, err := handler.client.BuildPollVote(ctx, &pollInfo, optionNames)
++	if err != nil {
++		fmt.Fprintf(os.Stderr, "wa-poll: BuildPollVote FAILED for %s: %v\n", pollMessageID, err)
++		purple_display_system_message(handler.account, chat.ToNonAD().String(), false, fmt.Sprintf("Failed to vote: %v", err))
++		return
++	}
++	resp, err := handler.client.SendMessage(ctx, chat, voteMsg)
++	if err != nil {
++		fmt.Fprintf(os.Stderr, "wa-poll: SendMessage FAILED for %s: %v\n", pollMessageID, err)
++		purple_display_system_message(handler.account, chat.ToNonAD().String(), false, fmt.Sprintf("Failed to send vote: %v", err))
++		return
++	}
++	fmt.Fprintf(os.Stderr, "wa-poll: SENT poll=%s vote OK server_id=%s ts=%s\n", pollMessageID, resp.ID, resp.Timestamp)
++}
++
+ /*
+  * Send a message to a contact.
+  *
+@@ -161,7 +358,7 @@ func (handler *Handler) send_text_message(recipient types.JID, isGroup bool, mes
+  *
+  * Returns true on success.
+  */
+-func (handler *Handler) send_message(who string, message string, isGroup bool) bool {
++func (handler *Handler) send_message(who string, message string, isGroup bool, replyTo string) bool {
+ 	recipient, err := parseJID(who)
+ 	if err != nil {
+ 		purple_error(handler.account, fmt.Sprintf("%#v", err), ERROR_FATAL)
+@@ -170,17 +367,18 @@ func (handler *Handler) send_message(who string, message string, isGroup bool) b
+ 		// I am interacting with this recipient. Mark all messages they have sent as "read".
+ 		handler.mark_read_if_on_answer(recipient)
+ 		// now do the actual sending
+-		if handler.is_link_only_message(message) {
++		if handler.is_link_only_message(message) && replyTo == "" {
+ 			// this is a link-only message – try to send the linked file, if compatible
++			// (a reply must keep its quote metadata, so replies always go the text path)
+ 			if handler.send_link_message(recipient, isGroup, message) {
+ 				return true
+ 			} else {
+ 				// sending the link message failed. just send as a normal text message
+-				return handler.send_text_message(recipient, isGroup, message)
++				return handler.send_text_message(recipient, isGroup, message, replyTo)
+ 			}
+ 		} else {
+ 			// this is a normal message
+-			return handler.send_text_message(recipient, isGroup, message)
++			return handler.send_text_message(recipient, isGroup, message, replyTo)
+ 		}
+ 	}
+ }
+@@ -246,12 +444,14 @@ func (handler *Handler) send_link_message(recipient types.JID, isGroup bool, lin
+ 	}
+ 	data := b.Bytes()
+ 	filename := filepath.Base(resp.Request.URL.Path)
+-	_, err = handler.send_file_bytes(recipient, isGroup, data, filename, handler.check_url_trust(link))
++	send_response, err := handler.send_file_bytes(recipient, isGroup, data, filename, handler.check_url_trust(link))
+ 	if err != nil {
+ 		handler.log.Infof("Error while sending file: %s", err)
+ 		return false
+ 	} else {
+ 		purple_display_system_message(handler.account, recipient.ToNonAD().String(), isGroup, fmt.Sprintf("%s has been forwarded.", link)) // TODO: specify whether image, video, audio or document message has been chosen
++		// webOS outbox-id: make this app-sent media message reactable (react-to-your-own-message).
++		purple_handle_outbox_id(handler.account, send_response.ID, link)
+ 		return true
+ 	}
+ }
+-- 
+2.53.0
+
