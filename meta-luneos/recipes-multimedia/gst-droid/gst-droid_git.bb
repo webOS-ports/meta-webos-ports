@@ -29,6 +29,7 @@ COMPATIBLE_MACHINE = "^halium$"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 PV = "0.20260508+git"
+PR = "r1"
 SRCREV = "e5152aee90dbb9b81c6bc45073b1fa86fc0c4194"
 SRC_URI = "git://github.com/sailfishos/gst-droid.git;branch=master;protocol=https \
     file://0001-droidcamsrc-allow-recorder-video-in-raw-preview.patch \
@@ -36,6 +37,8 @@ SRC_URI = "git://github.com/sailfishos/gst-droid.git;branch=master;protocol=http
     file://0003-droidcamsrc-set-recording-hint-in-video-mode.patch \
     file://0004-droidcamsrc-keep-raw-preview-during-recorder-recording.patch \
     file://0005-droidcamsrc-send-the-zoom-index-and-int-jpeg-quality.patch \
+    file://0006-droidvdec-do-not-take-the-stream-lock-again-in-drain.patch \
+    file://0007-droidvdec-add-the-crop-and-video-metas-only-to-a-writable-buffer.patch \
     file://gst-droid-gate.sh \
     file://gst-droid-gate.service \
     file://camera-droid-heal.sh \
