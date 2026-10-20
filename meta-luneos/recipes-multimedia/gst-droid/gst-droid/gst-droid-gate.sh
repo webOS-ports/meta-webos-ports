@@ -60,8 +60,27 @@ if omx_up; then
     # every plugin from flash while WebAppMgr was starting.
     CACHE=$(systemctl show-environment 2>/dev/null | sed -n 's/^XDG_CACHE_HOME=//p')
     [ -n "${CACHE}" ] || CACHE="${XDG_CACHE_HOME:-${HOME:-/root}/.cache}"
+    # gst-droid's AAC elements, out of the running. They rank PRIMARY+1, so
+    # decodebin and encodebin take them over FFmpeg's, and neither works:
+    # droidadec fails to start on the TouchPad (every AAC file, mono or
+    # stereo, 44.1 or 48 kHz: "Failed to start the decoder"), and on the
+    # mindphone (Android 16, no ResourceManagerService: Halium disables
+    # mediaserver and the vendor ships none) MediaCodec refuses to create the
+    # codec and droidmedia then crashes the process, so no file with AAC
+    # sound plays at all; droidaenc fails the same way, so AAC recording
+    # fails. FFmpeg decodes AAC for next to nothing. avenc_aac comes up
+    # ranked NONE, and Qt Multimedia only offers encoders ranked MARGINAL or
+    # higher, so it is raised to take droidaenc's place. The video elements
+    # keep their rank.
+    RANKS="droidadec:NONE,droidaenc:NONE,avenc_aac:PRIMARY"
+    case ",${GST_PLUGIN_FEATURE_RANK}," in
+        *",${RANKS},"*) ;;
+        ,,) GST_PLUGIN_FEATURE_RANK="${RANKS}" ;;
+        *)  GST_PLUGIN_FEATURE_RANK="${GST_PLUGIN_FEATURE_RANK},${RANKS}" ;;
+    esac
     systemctl set-environment "GST_PLUGIN_PATH=${NEW}" \
-        "GST_REGISTRY=${CACHE}/gstreamer-1.0/registry-droid.bin"
+        "GST_REGISTRY=${CACHE}/gstreamer-1.0/registry-droid.bin" \
+        "GST_PLUGIN_FEATURE_RANK=${GST_PLUGIN_FEATURE_RANK}"
     # GStreamer writes its registry 0600, and XDG_CACHE_HOME is the same root-owned directory for
     # every user, so the media services (umediaserver, mediaindexer, mediacontroller and each
     # g-media-pipeline, all running as "media") could neither read it nor write their own: every
