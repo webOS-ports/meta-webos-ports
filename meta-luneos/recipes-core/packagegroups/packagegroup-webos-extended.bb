@@ -134,7 +134,6 @@ WEBOS_PACKAGESET_MEDIA = " \
     ${VIRTUAL-RUNTIME_umediaserver} \
     ${VIRTUAL-RUNTIME_com.webos.service.mediacontroller} \
     ${VIRTUAL-RUNTIME_mediarecorder} \
-    com.webos.service.mediaindexer \
 "
 
 # nyx-lib needs nyx-modules at runtime, but a runtime dependency is not defined
@@ -182,7 +181,6 @@ RDEPENDS:${PN} = " \
     ${VIRTUAL-RUNTIME_bluetooth_service} \
     ${VIRTUAL-RUNTIME_com.webos.service.cec} \
     com.webos.service.hfp \
-    com.webos.service.mediaindexer \
     ${VIRTUAL-RUNTIME_initscripts} \
     ${VIRTUAL-RUNTIME_pdm} \
     com.webos.service.peripheralmanager \
