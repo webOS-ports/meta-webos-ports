@@ -1,0 +1,241 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:26:49 +0200
+Subject: [PATCH] webOS: hand the transport what it needs for contacts and
+ presence
+
+The webOS IM transport turns libpurple buddies into db8 contacts and group
+messages into Messaging app rows. Four things it needs that stock
+tdlib-purple does not give it:
+
+- Profile fields. Telegram knows a user's phone number, @username and
+  first/last name, but tdlib-purple only shows them in the user-info popup.
+  Store them on the buddy's blist node (tdlib-phone, tdlib-username,
+  tdlib-first-name, tdlib-last-name; the transport reads these keys
+  literally), for new and existing buddies alike, removing a key when the
+  field is empty.
+- Presence. Upstream maps every status other than online to AWAY, which the
+  transport shows as an orange "idle" dot on every contact. Map only
+  userStatusRecently ("seen within the last couple of days", the usual
+  privacy-limited answer) to AWAY, and everything else - offline, last
+  week, last month, hidden - to OFFLINE.
+- The sender of a group message. serv_got_chat_in() has a single `who`
+  slot, which carries the display name; there is no way to reach the
+  sender from it. Send "id<userId>\x1f<display name>" instead when the
+  sender is a user; the transport splits on \x1f, using the id as the
+  routable address (so the app can open a 1:1 with the sender) and the
+  rest as the name.
+- Handle-style addressing. webOS reduces a contact's display name to a
+  handle - ASCII alphanumerics only, lowercased ("Herman van Hazendonk" ->
+  "hermanvanhazendonk") - and may address a conversation by it. Resolve
+  such names as a last resort, after display name and @username.
+
+Not for upstream: the blist keys, the \x1f convention and the handle
+normalization are contracts with the webOS transport, and other front-ends
+would show the raw "id<n>\x1f" prefix in group chats.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ account-data.cpp | 26 ++++++++++++++++++++++++++
+ account-data.h   |  9 +++++++++
+ client-utils.cpp | 41 +++++++++++++++++++++++++++++++++++++++--
+ purple-info.h    |  6 ++++++
+ receiving.cpp    | 20 +++++++++++++++++---
+ 5 files changed, 97 insertions(+), 5 deletions(-)
+
+diff --git a/account-data.cpp b/account-data.cpp
+index 57817a9..ad1da3d 100644
+--- a/account-data.cpp
++++ b/account-data.cpp
+@@ -652,6 +652,32 @@ void TdAccountData::getUsersByUsername(const char *username,
+     }
+ }
+ 
++// webOS: reduce a name to a handle the way webOS does: keep only ASCII alphanumerics, lowercased.
++static std::string normalizeHandle(const std::string &s)
++{
++    std::string out;
++    out.reserve(s.size());
++    for (unsigned char c: s)
++        if (std::isalnum(c))
++            out += (char) std::tolower(c);
++    return out;
++}
++
++void TdAccountData::getUsersByNormalizedDisplayName(const char *name,
++                                                    std::vector<const td::td_api::user*> &users)
++{
++    users.clear();
++    if (!name || (*name == '\0'))
++        return;
++    std::string want = normalizeHandle(name);
++    if (want.empty())
++        return;
++
++    for (const UserMap::value_type &entry: m_userInfo)
++        if (normalizeHandle(entry.second.displayName) == want)
++            users.push_back(entry.second.user.get());
++}
++
+ const td::td_api::basicGroup *TdAccountData::getBasicGroup(BasicGroupId groupId) const
+ {
+     auto it = m_groups.find(groupId);
+diff --git a/account-data.h b/account-data.h
+index 7b6fb77..e7f713c 100644
+--- a/account-data.h
++++ b/account-data.h
+@@ -138,6 +138,9 @@ struct TgMessageInfo {
+     MessageId   id;
+     Type        type = Type::Other;
+     std::string incomingGroupchatSender;
++    // webOS: the group message sender's routable purple id ("id<userId>"), separate from the display
++    // name above, so the transport can offer "message this person" (open a 1:1) from a group message.
++    std::string incomingGroupchatSenderId;
+     time_t      timestamp = 0;
+     bool        outgoing = false;
+     bool        sentLocally = false; // For outgoing messages, whether sent by this very client
+@@ -154,6 +157,7 @@ struct TgMessageInfo {
+         id = other.id;
+         type = other.type;
+         incomingGroupchatSender = other.incomingGroupchatSender;
++        incomingGroupchatSenderId = other.incomingGroupchatSenderId;
+         timestamp = other.timestamp;
+         outgoing = other.outgoing;
+         sentLocally = other.sentLocally;
+@@ -408,6 +412,11 @@ public:
+     // that a message addressed to a handle rather than an "id<n>" buddy can find its user.
+     void                          getUsersByUsername(const char *username,
+                                                      std::vector<const td::td_api::user*> &users);
++    // webOS: match a NORMALIZED display name (lowercase, only [a-z0-9] kept). webOS turns a
++    // contact's display name into a handle this way ("Herman van Hazendonk" -> "hermanvanhazendonk",
++    // "Pine64 Protocol Bot" -> "pine64protocolbot"), and addresses conversations by that handle.
++    void                          getUsersByNormalizedDisplayName(const char *name,
++                                                     std::vector<const td::td_api::user*> &users);
+ 
+     const td::td_api::basicGroup *getBasicGroup(BasicGroupId groupId) const;
+     const td::td_api::basicGroupFullInfo *getBasicGroupInfo(BasicGroupId groupId) const;
+diff --git a/client-utils.cpp b/client-utils.cpp
+index e2d05a6..2fa4b3b 100644
+--- a/client-utils.cpp
++++ b/client-utils.cpp
+@@ -180,10 +180,21 @@ std::string proxyTypeToString(PurpleProxyType proxyType)
+ 
+ const char *getPurpleStatusId(const td::td_api::UserStatus &tdStatus)
+ {
+-    if (tdStatus.get_id() == td::td_api::userStatusOnline::ID)
++    // webOS: online -> AVAILABLE (green). "seen recently" -> AWAY (the transport renders AWAY as
++    // IDLE / orange dot): userStatusRecently means active within ~the last couple of days (privacy
++    // may hide the exact time), so a distinct dot reads as "around lately" vs a hard grey offline.
++    // Everything else - genuinely offline, last week / last month, hidden, empty - stays OFFLINE
++    // (grey). NB: mapping ALL non-online to AWAY was tried before and turned EVERY contact orange
++    // ("everyone busy"); scoping AWAY to ONLY userStatusRecently avoids that - lastWeek/lastMonth
++    // (the bulk of privacy-limited contacts) stay grey.
++    switch (tdStatus.get_id()) {
++    case td::td_api::userStatusOnline::ID:
+         return purple_primitive_get_id_from_type(PURPLE_STATUS_AVAILABLE);
+-    else
++    case td::td_api::userStatusRecently::ID:
+         return purple_primitive_get_id_from_type(PURPLE_STATUS_AWAY);
++    default:
++        return purple_primitive_get_id_from_type(PURPLE_STATUS_OFFLINE);
++    }
+ }
+ 
+ std::string getPurpleBuddyName(const td::td_api::user &user)
+@@ -225,6 +236,10 @@ std::vector<const td::td_api::user *> getUsersByPurpleName(const char *buddyName
+         // failing with "User not found".
+         if (result.empty())
+             account.getUsersByUsername(buddyName, result);
++        // webOS turns a display name into a handle ("Herman van Hazendonk" -> "hermanvanhazendonk")
++        // and may address the conversation by that; fall back to a normalized-display-name match.
++        if (result.empty())
++            account.getUsersByNormalizedDisplayName(buddyName, result);
+         if (action) {
+             if (result.empty())
+                 purple_debug_warning(config::pluginId, "Cannot %s: no user with display name or username '%s'\n",
+@@ -431,6 +446,28 @@ void updatePrivateChat(TdAccountData &account, const td::td_api::chat *chat, con
+             purple_buddy_icons_set_for_user(account.purpleAccount, purpleUserName.c_str(), NULL, 0, NULL);
+         }
+     }
++
++    // webOS: stash the user's extra profile info on the buddy node (both new + existing buddies) so the
++    // transport can enrich the db8 contact (phone, @username, first/last name). tdlib exposes these but
++    // stock tdlib-purple only surfaces them in the user-info popup. Cleared when a field is empty.
++    {
++        PurpleBlistNode *node = PURPLE_BLIST_NODE(buddy);
++        auto setOrClear = [node](const char *key, const std::string &val) {
++            if (!val.empty())
++                purple_blist_node_set_string(node, key, val.c_str());
++            else
++                purple_blist_node_remove_setting(node, key);
++        };
++        std::string uname;
++        if (user.usernames_)
++            uname = !user.usernames_->editable_username_.empty() ? user.usernames_->editable_username_
++                    : (!user.usernames_->active_usernames_.empty() ? user.usernames_->active_usernames_.front()
++                                                                    : std::string());
++        setOrClear(BuddyOptions::Phone,     user.phone_number_);
++        setOrClear(BuddyOptions::Username,  uname);
++        setOrClear(BuddyOptions::FirstName, user.first_name_);
++        setOrClear(BuddyOptions::LastName,  user.last_name_);
++    }
+ }
+ 
+ static void updateGroupChat(TdAccountData &account, const td::td_api::chat &chat,
+diff --git a/purple-info.h b/purple-info.h
+index ceb2148..6edba24 100644
+--- a/purple-info.h
++++ b/purple-info.h
+@@ -64,6 +64,12 @@ namespace AccountOptions {
+ 
+ namespace BuddyOptions {
+     constexpr const char *ProfilePhotoId = "tdlib-profile-photo-id";
++    // webOS: extra profile fields stashed on the buddy blist node so the transport can enrich the db8
++    // contact (the transport reads these keys as literals - keep the strings in sync).
++    constexpr const char *Phone     = "tdlib-phone";
++    constexpr const char *Username  = "tdlib-username";
++    constexpr const char *FirstName = "tdlib-first-name";
++    constexpr const char *LastName  = "tdlib-last-name";
+ };
+ 
+ unsigned getAutoDownloadLimitKb(PurpleAccount *account);
+diff --git a/receiving.cpp b/receiving.cpp
+index 8aa7656..e429ffa 100644
+--- a/receiving.cpp
++++ b/receiving.cpp
+@@ -463,10 +463,17 @@ static void showMessageTextChat(TdAccountData &account, const td::td_api::chat &
+                 purple_conv_chat_write(conv, purple_account_get_name_for_display(account.purpleAccount),
+                                        text, flags, message.timestamp);
+         } else {
+-            if (purpleId != 0)
++            if (purpleId != 0) {
++                // webOS: smuggle the sender's routable id + display name through the single `who` slot
++                // as "id<userId>\x1f<Display Name>". The webOS transport splits on \x1f -> from.addr =
++                // the id (so the app can open a 1:1 with the sender), from.name = the display name.
++                // Other libpurple UIs just see the combined string. No id -> plain display name.
++                std::string who = message.incomingGroupchatSender.empty() ? "someone" : message.incomingGroupchatSender;
++                if (!message.incomingGroupchatSenderId.empty())
++                    who = message.incomingGroupchatSenderId + "\x1f" + who;
+                 serv_got_chat_in(purple_account_get_connection(account.purpleAccount), purpleId,
+-                                 message.incomingGroupchatSender.empty() ? "someone" : message.incomingGroupchatSender.c_str(),
+-                                 flags, text, message.timestamp);
++                                 who.c_str(), flags, text, message.timestamp);
++            }
+         }
+     }
+ 
+@@ -1468,6 +1475,13 @@ void makeFullMessage(const td::td_api::chat &chat, td::td_api::object_ptr<td::td
+     messageInfo.id               = getId(*message);
+     messageInfo.type             = TgMessageInfo::Type::Other;
+     messageInfo.incomingGroupchatSender = getIncomingGroupchatSenderPurpleName(chat, *message, account);
++    // webOS: also record the sender's routable purple id ("id<userId>") so the transport/app can
++    // offer opening a 1:1 with them from a group message. Only for real user senders.
++    {
++        UserId gcSenderId = getSenderUserId(*message);
++        if (gcSenderId.valid())
++            messageInfo.incomingGroupchatSenderId = "id" + std::to_string(gcSenderId.value());
++    }
+     messageInfo.anonymousChannelPost    = isAnonymousChannelPost(chat, *message);
+     // In Pidgin, links to each size a photo or video comes in, below it; here already, as a download
+     // may start, and finish, before the message is shown

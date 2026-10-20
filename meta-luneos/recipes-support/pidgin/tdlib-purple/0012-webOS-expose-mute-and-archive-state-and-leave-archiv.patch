@@ -1,0 +1,310 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:27:22 +0200
+Subject: [PATCH] webOS: expose mute and archive state, and leave archived
+ chats out
+
+The webOS transport suppresses notifications for conversations the user has
+muted, and silences archived ones, by reading two booleans off the blist
+node: "muted" and "archived". Keep them in sync with Telegram:
+
+- handle updateChatNotificationSettings (a chat muted or unmuted, here or on
+  another client), storing the new settings, and refresh both flags then
+  and whenever a chat is (re)processed in updateChat(). A chat counts as
+  muted only when it is muted explicitly (mute_for > 0, not deferring to
+  the scope default); "mute all groups" style defaults are not considered.
+  A chat counts as archived when it has a position in the Archive list and
+  none in the Main list.
+- leave chats that are only in the Archive list out of the buddy list
+  (isChatInContactList), so archived people and groups do not show up as
+  webOS contacts.
+- add /archive and /unarchive chat commands, which move the current chat
+  into or out of the Archive list with addChatToList.
+
+Not for upstream as it is: the blist keys are a contract with the webOS
+transport, and hiding archived chats from the buddy list changes what
+every other front-end shows. The two commands could be offered on their
+own.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ account-data.cpp | 22 ++++++++++++
+ account-data.h   |  1 +
+ identifiers.cpp  |  5 +++
+ identifiers.h    |  2 ++
+ td-client.cpp    | 94 ++++++++++++++++++++++++++++++++++++++++++++++++
+ td-client.h      |  5 +++
+ tdlib-purple.cpp | 29 +++++++++++++++
+ 7 files changed, 158 insertions(+)
+
+diff --git a/account-data.cpp b/account-data.cpp
+index ad1da3d..fd034bb 100644
+--- a/account-data.cpp
++++ b/account-data.cpp
+@@ -73,6 +73,21 @@ UserId getUserIdByPrivateChat(const td::td_api::chat &chat)
+ 
+ bool isChatInContactList(const td::td_api::chat &chat, const td::td_api::user *privateChatUser)
+ {
++    // webOS: exclude chats that live only in the Archive list - archived people/chats should not
++    // appear as webOS buddies. Archived = has an Archive-list position (order!=0) and no Main one.
++    bool hasMain = false, hasArchive = false;
++    for (const auto &pos : chat.positions_) {
++        if (!pos || !pos->list_ || pos->order_ == 0)
++            continue;
++        int32_t listId = pos->list_->get_id();
++        if (listId == td::td_api::chatListMain::ID)
++            hasMain = true;
++        else if (listId == td::td_api::chatListArchive::ID)
++            hasArchive = true;
++    }
++    if (hasArchive && !hasMain)
++        return false;
++
+     return !chat.positions_.empty() || (privateChatUser && privateChatUser->is_contact_);
+ }
+ 
+@@ -485,6 +500,13 @@ void TdAccountData::updateChatTitle(ChatId chatId, const std::string &title)
+         it->second.chat->title_ = title;
+ }
+ 
++void TdAccountData::updateChatNotificationSettings(ChatId chatId, td::td_api::object_ptr<td::td_api::chatNotificationSettings> settings)
++{
++    auto it = m_chatInfo.find(chatId);
++    if (it != m_chatInfo.end())
++        it->second.chat->notification_settings_ = std::move(settings);
++}
++
+ void TdAccountData::updateSmallChatPhoto(ChatId chatId, td::td_api::object_ptr<td::td_api::file> photo)
+ {
+     auto it = m_chatInfo.find(chatId);
+diff --git a/account-data.h b/account-data.h
+index e7f713c..2756891 100644
+--- a/account-data.h
++++ b/account-data.h
+@@ -388,6 +388,7 @@ public:
+     void addChat(TdChatPtr chat); // Updates existing chat if any
+     void updateChatPosition(ChatId chatId, td::td_api::object_ptr<td::td_api::chatPosition> &&position);
+     void updateChatTitle(ChatId chatId, const std::string &title);
++    void updateChatNotificationSettings(ChatId chatId, td::td_api::object_ptr<td::td_api::chatNotificationSettings> settings);
+     void updateSmallChatPhoto(ChatId chatId, td::td_api::object_ptr<td::td_api::file> photo);
+     void setContacts(const td::td_api::users &users);
+     void getContactsWithNoChat(std::vector<UserId> &userIds);
+diff --git a/identifiers.cpp b/identifiers.cpp
+index 34c9ba1..bd42c25 100644
+--- a/identifiers.cpp
++++ b/identifiers.cpp
+@@ -125,6 +125,11 @@ ChatId getChatId(const td::td_api::updateChatLastMessage &update)
+     return ChatId(update.chat_id_);
+ }
+ 
++ChatId getChatId(const td::td_api::updateChatNotificationSettings &update)
++{
++    return ChatId(update.chat_id_);
++}
++
+ ChatId getChatId(const td::td_api::updateMessageContent &update)
+ {
+     return ChatId(update.chat_id_);
+diff --git a/identifiers.h b/identifiers.h
+index d3e5a1c..91c6cff 100644
+--- a/identifiers.h
++++ b/identifiers.h
+@@ -82,6 +82,7 @@ DEFINE_ID_CLASS(ChatId, int64_t)
+     friend ChatId getChatId(const td::td_api::updateMessageInteractionInfo &update);
+     friend ChatId getChatId(const td::td_api::updateMessageUnreadReactions &update);
+     friend ChatId getChatId(const td::td_api::messageSenderChat &sender);
++    friend ChatId getChatId(const td::td_api::updateChatNotificationSettings &update);
+ };
+ 
+ DEFINE_ID_CLASS(BasicGroupId, int64_t)
+@@ -143,6 +144,7 @@ ChatId       getChatId(const td::td_api::updateDeleteMessages &update);
+ ChatId       getChatId(const td::td_api::updateMessageInteractionInfo &update);
+ ChatId       getChatId(const td::td_api::updateMessageUnreadReactions &update);
+ ChatId       getChatId(const td::td_api::messageSenderChat &sender);
++ChatId       getChatId(const td::td_api::updateChatNotificationSettings &update);
+ 
+ BasicGroupId getBasicGroupId(const td::td_api::updateBasicGroupFullInfo &update);
+ BasicGroupId getBasicGroupId(const td::td_api::chatTypeBasicGroup &chatType);
+diff --git a/td-client.cpp b/td-client.cpp
+index 0fb940f..ca02d60 100644
+--- a/td-client.cpp
++++ b/td-client.cpp
+@@ -239,6 +239,20 @@ void PurpleTdClient::processUpdate(td::td_api::Object &update)
+         break;
+     }
+ 
++    case td::td_api::updateChatNotificationSettings::ID: {
++        // webOS: chat was muted/unmuted (on this or another client). Update the stored settings
++        // and refresh the "muted" blist flag so the transport suppresses/allows notifications.
++        auto &notifUpdate = static_cast<td::td_api::updateChatNotificationSettings &>(update);
++        purple_debug_misc(config::pluginId, "Incoming update: notification settings for chat %" G_GINT64_FORMAT "\n",
++                          notifUpdate.chat_id_);
++        ChatId chatId = getChatId(notifUpdate);
++        m_data.updateChatNotificationSettings(chatId, std::move(notifUpdate.notification_settings_));
++        const td::td_api::chat *chat = m_data.getChat(chatId);
++        if (chat)
++            updateChatMuteState(*chat);
++        break;
++    }
++
+     case td::td_api::updateOption::ID: {
+         const td::td_api::updateOption &option = static_cast<const td::td_api::updateOption &>(update);
+         updateOption(option, m_data);
+@@ -1551,6 +1565,86 @@ void PurpleTdClient::updateChat(const td::td_api::chat *chat)
+ 
+     if (secretChatId.valid())
+         updateKnownSecretChat(secretChatId, m_transceiver, m_data);
++
++    // webOS: keep the blist "muted" flag in sync whenever we (re)process a chat.
++    updateChatMuteState(*chat);
++}
++
++// webOS: a chat is "archived" when it sits in Telegram's Archive chat list and not the Main list.
++// Each chatPosition carries its list (Main/Archive/Folder) and an order (0 == not in that list).
++bool isChatArchived(const td::td_api::chat &chat)
++{
++    bool hasMain = false, hasArchive = false;
++    for (const auto &pos : chat.positions_) {
++        if (!pos || !pos->list_ || pos->order_ == 0)
++            continue;
++        int32_t listId = pos->list_->get_id();
++        if (listId == td::td_api::chatListMain::ID)
++            hasMain = true;
++        else if (listId == td::td_api::chatListArchive::ID)
++            hasArchive = true;
++    }
++    return hasArchive && !hasMain;
++}
++
++void PurpleTdClient::updateChatMuteState(const td::td_api::chat &chat)
++{
++    if (!purple_account_is_connected(m_account))
++        return;
++
++    // Effective per-chat mute: the user explicitly muted THIS chat (mute_for > 0 and not deferring
++    // to the scope default). Scope-level defaults ("mute all groups/channels") are intentionally
++    // not considered in this version - only an explicit per-chat mute suppresses notifications.
++    bool muted = chat.notification_settings_ &&
++                 !chat.notification_settings_->use_default_mute_for_ &&
++                 (chat.notification_settings_->mute_for_ > 0);
++
++    // Resolve the blist node: a buddy for a 1:1 private chat, a chat for a group/supergroup.
++    PurpleBlistNode *node = nullptr;
++    const td::td_api::user *privateUser = m_data.getUserByPrivateChat(chat);
++    if (privateUser) {
++        std::string buddyName = getPurpleBuddyName(*privateUser);
++        PurpleBuddy *buddy = purple_find_buddy(m_account, buddyName.c_str());
++        if (buddy)
++            node = (PurpleBlistNode *)buddy;
++    } else {
++        std::string chatName = getPurpleChatName(chat);
++        if (!chatName.empty()) {
++            PurpleChat *purpleChat = purple_blist_find_chat(m_account, chatName.c_str());
++            if (purpleChat)
++                node = (PurpleBlistNode *)purpleChat;
++        }
++    }
++
++    if (node) {
++        purple_blist_node_set_bool(node, "muted", muted);
++        // webOS: also expose the archived state so the transport can silence archived chats.
++        purple_blist_node_set_bool(node, "archived", isChatArchived(chat));
++        purple_debug_misc(config::pluginId, "Chat %" G_GINT64_FORMAT " muted=%d archived=%d\n",
++                          chat.id_, (int)muted, (int)isChatArchived(chat));
++    }
++}
++
++// webOS: move a chat into (archived=true) or out of (archived=false) Telegram's Archive list.
++// Invoked by the /archive and /unarchive chat commands; the app-facing trigger is wired separately.
++void PurpleTdClient::setChatArchived(PurpleConversation *conv, bool archived)
++{
++    int purpleChatId = purple_conv_chat_get_id(PURPLE_CONV_CHAT(conv));
++    const td::td_api::chat *chat = m_data.getChatByPurpleId(purpleChatId);
++    if (!chat) {
++        purple_conversation_write(conv, "", "Chat not found", PURPLE_MESSAGE_NO_LOG, time(NULL));
++        return;
++    }
++
++    auto request = td::td_api::make_object<td::td_api::addChatToList>();
++    request->chat_id_ = chat->id_;
++    if (archived)
++        request->chat_list_ = td::td_api::make_object<td::td_api::chatListArchive>();
++    else
++        request->chat_list_ = td::td_api::make_object<td::td_api::chatListMain>();
++    m_transceiver.sendQuery(std::move(request), nullptr);
++    purple_debug_misc(config::pluginId, "Chat %" G_GINT64_FORMAT " -> %s\n", chat->id_,
++                      archived ? "archived" : "unarchived");
+ }
+ 
+ void PurpleTdClient::updateUserInfo(const td::td_api::user &user, const td::td_api::chat *privateChat)
+diff --git a/td-client.h b/td-client.h
+index 3018d61..3e9beab 100644
+--- a/td-client.h
++++ b/td-client.h
+@@ -44,6 +44,8 @@ public:
+     int  sendGroupMessage(int purpleChatId, const char *message);
+     void setGroupDescription(int purpleChatId, const char *description);
+     void kickUserFromChat(PurpleConversation *conv, const char *name);
++    // webOS: archive (true) / unarchive (false) the chat backing this conversation.
++    void setChatArchived(PurpleConversation *conv, bool archived);
+     void addUserToChat(int purpleChatId, const char *name);
+     void showInviteLink(const std::string &purpleChatName);
+     void getGroupChatList(PurpleRoomlist *roomlist);
+@@ -115,6 +117,9 @@ private:
+     void       updateGroup(td::td_api::object_ptr<td::td_api::basicGroup> group);
+     void       updateSupergroup(td::td_api::object_ptr<td::td_api::supergroup> group);
+     void       updateChat(const td::td_api::chat *chat);
++    // webOS: mirror a chat's server-side mute state onto its buddy/chat blist node as a "muted"
++    // bool, which imlibpurpletransport reads to suppress notifications for muted conversations.
++    void       updateChatMuteState(const td::td_api::chat &chat);
+     void       updateUserInfo(const td::td_api::user &user, const td::td_api::chat *privateChat);
+     void       downloadChatPhoto(const td::td_api::chat &chat);
+     void       requestBasicGroupFullInfo(BasicGroupId groupId);
+diff --git a/tdlib-purple.cpp b/tdlib-purple.cpp
+index 35fef48..3f0e9df 100644
+--- a/tdlib-purple.cpp
++++ b/tdlib-purple.cpp
+@@ -754,6 +754,25 @@ static PurpleCmdRet tgprpl_cmd_kick(PurpleConversation *conv, const gchar *cmd,
+     return PURPLE_CMD_RET_OK;
+ }
+ 
++// webOS: /archive and /unarchive move the current chat in/out of Telegram's Archive list.
++static PurpleCmdRet tgprpl_cmd_archive(PurpleConversation *conv, const gchar *cmd, gchar **args, gchar **error, void *data)
++{
++    PurpleTdClient *tdClient = getTdClient(purple_conversation_get_account(conv));
++    if (!tdClient)
++        return PURPLE_CMD_RET_FAILED;
++    tdClient->setChatArchived(conv, true);
++    return PURPLE_CMD_RET_OK;
++}
++
++static PurpleCmdRet tgprpl_cmd_unarchive(PurpleConversation *conv, const gchar *cmd, gchar **args, gchar **error, void *data)
++{
++    PurpleTdClient *tdClient = getTdClient(purple_conversation_get_account(conv));
++    if (!tdClient)
++        return PURPLE_CMD_RET_FAILED;
++    tdClient->setChatArchived(conv, false);
++    return PURPLE_CMD_RET_OK;
++}
++
+ static PurpleMediaCaps getMediaCaps(PurpleAccount *account, const char *who)
+ {
+ #ifndef NoVoip
+@@ -1085,6 +1104,16 @@ static gboolean tgprpl_load (PurplePlugin *plugin)
+                         // TRANSLATOR: Command description, the initial "hangup" must remain verbatim!
+                         _("hangup: Terminate any active call (with any user)"), NULL);
+ 
++    // webOS: archive / unarchive the current chat (moves it in/out of Telegram's Archive list).
++    purple_cmd_register("archive", "", PURPLE_CMD_P_PLUGIN,
++                        (PurpleCmdFlag)(PURPLE_CMD_FLAG_CHAT | PURPLE_CMD_FLAG_PRPL_ONLY),
++                        config::pluginId, tgprpl_cmd_archive,
++                        _("archive: Move this chat to the Telegram archive"), NULL);
++    purple_cmd_register("unarchive", "", PURPLE_CMD_P_PLUGIN,
++                        (PurpleCmdFlag)(PURPLE_CMD_FLAG_CHAT | PURPLE_CMD_FLAG_PRPL_ONLY),
++                        config::pluginId, tgprpl_cmd_unarchive,
++                        _("unarchive: Move this chat out of the Telegram archive"), NULL);
++
+     return TRUE;
+ }
+ 

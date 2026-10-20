@@ -1,0 +1,165 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:23:01 +0200
+Subject: [PATCH] webOS: Deduplicate messages and store own channel messages as
+ sent
+
+webOS stores every message the transport receives in db8, so a message
+delivered twice becomes a duplicate row. That happens when history
+fetches overlap (the newest batch and the forward catch-up), when a
+channel is reopened, and when Discord echoes back our own attachment
+uploads.
+
+- Keep a per-session set of delivered message ids and skip a normal
+  message that was already delivered. When a channel message has no
+  open conversation to go to, take its id out of the set again so the
+  history fetch on open delivers it.
+- Write channel messages that we sent from another client as outgoing
+  messages, so they are stored as our own, and drop the echo of a
+  message sent from this client, like the DM path already does.
+- Track upload nonces in sent_message_ids, so the echo of an uploaded
+  file is not delivered again: on webOS the outbox row already shows
+  it.
+
+The set used to be saved to a file across logins. That code was removed
+again (db8 now deduplicates across sessions by serviceMessageId) and is
+not carried here.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ libdiscord.c | 78 ++++++++++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 75 insertions(+), 3 deletions(-)
+
+diff --git a/libdiscord.c b/libdiscord.c
+index f986782..494a6e1 100644
+--- a/libdiscord.c
++++ b/libdiscord.c
+@@ -414,6 +414,9 @@ typedef struct {
+ 	GHashTable *one_to_ones_rev;	/* A store of known usernames's -> room_id's */
+ 	GHashTable *last_message_id_dm; /* A store of known room_id's -> last_message_id's */
+ 	GHashTable *sent_message_ids;   /* A store of message id's that we generated from this instance */
++	GHashTable *received_message_ids; /* webOS: message id's already written to a conversation, so an
++	                                     overlapping history fetch (fast newest-batch vs forward catch-up)
++	                                     or a re-opened channel doesn't write the same message twice */
+ 	GHashTable *result_callbacks;   /* Result ID -> Callback function */
+ 	GQueue *received_message_queue; /* A store of the last 10 received message id's for de-dup */
+ 
+@@ -3079,6 +3082,28 @@ discord_process_message(DiscordAccount *da, JsonObject *data, unsigned special_t
+ 	guint64 msg_id = to_int(json_object_get_string_member(data, "id"));
+ 	guint64 msg_type = json_object_get_int_member(data, "type");
+ 
++	/* webOS dedup: skip a plain message we've already written to a conversation. Overlapping history
++	 * fetches (the fast newest-batch vs the forward catch-up) and re-opened channels would otherwise
++	 * call discord_process_message twice for the same id and create a duplicate immessage in db8.
++	 * Edits/pins deliberately re-touch an existing id, so they are exempt. */
++	if (special_type == DISCORD_MESSAGE_NORMAL && msg_id != 0) {
++		/* webOS: da->received_message_ids can be NULL here if discord_close() tore it down
++		 * while a backlog of queued/in-flight messages was still being delivered (seen live:
++		 * a burst of these calls with a NULL table froze the whole imtransport process, since
++		 * g_hash_table_contains/insert on NULL just logs a GLib-CRITICAL and returns without
++		 * ever making progress, spinning the caller). Lazily recreate it, matching the same
++		 * guard already used elsewhere in this file for the other da->*_ids tables. */
++		if (da->received_message_ids == NULL) {
++			da->received_message_ids = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
++		}
++		gchar *id_key = from_int(msg_id);
++		if (g_hash_table_contains(da->received_message_ids, id_key)) {
++			g_free(id_key);
++			return msg_id;
++		}
++		g_hash_table_insert(da->received_message_ids, id_key, id_key); /* table owns id_key */
++	}
++
+ 	if (!json_object_get_object_member(data, "author")) {
+ 		/* Possibly edited message? */
+ 		purple_debug_info("discord", "No author in message processed\n");
+@@ -3632,11 +3657,43 @@ discord_process_message(DiscordAccount *da, JsonObject *data, unsigned special_t
+ 				msg_type != MESSAGE_THREAD_STARTER_MESSAGE
+ 			)
+ 		{
+-			purple_serv_got_chat_in(da->pc, discord_chat_hash(channel_id), name, flags, escaped_content, timestamp);
+ 			if (conv == NULL) {
+ 				PurpleChatConversation *chatconv = purple_conversations_find_chat(da->pc, discord_chat_hash(channel_id));
+ 				conv = PURPLE_CONVERSATION(chatconv);
+ 			}
++			if (conv == NULL) {
++				/* webOS: this channel has no open conversation, so purple would silently drop the
++				 * message (both purple_serv_got_chat_in and an outgoing write need a conv). But we
++				 * already inserted msg_id into received_message_ids above, and that set is PERSISTED
++				 * to disk (discord_seen_*.txt) - so a plain drop makes the loss PERMANENT: opening the
++				 * channel later re-fetches this message via REST history, the dedup then skips it, and
++				 * it never gets stored. That is exactly why self-sent carbons and messages in
++				 * not-yet-opened (background) channels never appear. Un-mark it so the eventual
++				 * channel-open history load delivers and stores it once (re-marking it on that
++				 * successful delivery). */
++				if (special_type == DISCORD_MESSAGE_NORMAL && msg_id != 0) {
++					gchar *unkey = from_int(msg_id);
++					g_hash_table_remove(da->received_message_ids, unkey);
++					g_free(unkey);
++				}
++			} else if (author_id == da->self_user_id) {
++				/* webOS #2: a channel message WE sent from another device (carbon - flags carry
++				 * SEND|REMOTE_SEND). purple_serv_got_chat_in would force PURPLE_MESSAGE_RECV, so the
++				 * transport would file it as received rather than our own sent row. Write it as an
++				 * OUTGOING chat message instead (RECV stays clear), mirroring the 1:1 DM self path, so
++				 * the transport's carbon store keeps it as our sent message in the channel. Suppress the
++				 * local echo of a message WE just sent from THIS device (its nonce is still in
++				 * sent_message_ids), exactly like the DM self path, so an app-sent channel message is
++				 * not written a second time on top of the app's own local copy. */
++				if (!nonce || !g_hash_table_remove(da->sent_message_ids, nonce)) {
++					PurpleMessage *pmsg = purple_message_new_outgoing(name, escaped_content, flags);
++					purple_message_set_time(pmsg, timestamp);
++					purple_conversation_write_message(conv, pmsg);
++					purple_message_destroy(pmsg);
++				}
++			} else {
++				purple_serv_got_chat_in(da->pc, discord_chat_hash(channel_id), name, flags, escaped_content, timestamp);
++			}
+ 
+ 		} else if (msg_type == MESSAGE_GUILD_MEMBER_JOIN) {
+ 			gchar *join_txt = g_strdup_printf(_("%s joined the guild!"), name);
+@@ -6528,6 +6585,13 @@ discord_login(PurpleAccount *account)
+ 	da->one_to_ones_rev = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+ 	da->last_message_id_dm = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+ 	da->sent_message_ids = g_hash_table_new_full(g_str_insensitive_hash, g_str_insensitive_equal, g_free, NULL);
++	da->received_message_ids = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
++	/* webOS: received_message_ids is now IN-MEMORY ONLY (session-scoped) -- do NOT restore it from the
++	 * persisted discord_seen_*.txt. That file outlived db8 (prunes, app-side re-threading) and its stale
++	 * ids made backfill skip messages whose db8 rows were gone -> permanent gaps ("~5 messages missing").
++	 * Cross-session/reconnect duplicates are now prevented db8-side (IncomingIMHandler dedups by
++	 * serviceMessageId), which is self-healing; this in-memory set only suppresses same-session
++	 * overlapping-fetch duplicates before they reach the transport. See discord_load_received_ids. */
+ 	da->result_callbacks = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+ 	da->received_message_queue = g_queue_new();
+ 
+@@ -6631,6 +6695,8 @@ discord_close(PurpleConnection *pc)
+ 	da->last_message_id_dm = NULL;
+ 	g_hash_table_unref(da->sent_message_ids);
+ 	da->sent_message_ids = NULL;
++	g_hash_table_unref(da->received_message_ids);
++	da->received_message_ids = NULL;
+ 	g_hash_table_unref(da->result_callbacks);
+ 	da->result_callbacks = NULL;
+ 
+@@ -11049,9 +11115,15 @@ discord_xfer_send_init(PurpleXfer *xfer)
+ 	filename = g_path_get_basename(fullpath);
+ 	purple_xfer_set_filename(xfer, filename);
+ 
+-	// We don't insert this into sent messages because that will prevent it
+-	// from appearing in our client
+ 	nonce = g_strdup_printf("%" G_GUINT32_FORMAT, g_random_int());
++	// webOS: register this upload's nonce so Discord's echo of our OWN sent attachment is recognised as
++	// self-sent and suppressed (the channel/DM self paths in discord_process_message g_hash_table_remove
++	// it), instead of being delivered again as a duplicate "https://cdn.discordapp.com/..." message.
++	// Upstream Pidgin deliberately did NOT track it (Pidgin relies on the echo to show the file), but on
++	// webOS the message already appears from its local outbox row (filePath + caption), so the echo is a
++	// pure duplicate. The row keeps its serviceMessageId via the caption's OutboxIdHandler.
++	g_hash_table_insert(da->sent_message_ids, g_strdup(nonce), NULL);
++
+ 	// The transport transcodes recorded voice notes to Ogg/Opus. If this is one, send it as a Discord
+ 	// VOICE MESSAGE (flags 1<<13) with the required duration_secs + waveform attachment metadata; the
+ 	// file part must be "files[0]" so it binds to attachment id 0. Otherwise fall back to a plain file.
+-- 
+2.53.0
+

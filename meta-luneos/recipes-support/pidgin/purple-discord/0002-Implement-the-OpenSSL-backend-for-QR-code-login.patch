@@ -1,0 +1,187 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:22:30 +0200
+Subject: [PATCH] Implement the OpenSSL backend for QR code login
+
+discord_rsa.c has an OpenSSL section, but it was only a TODO, and
+USE_OPENSSL_CRYPTO was force-undefined everywhere except macOS and
+OpenBSD, so QR login on Linux needed NSS.
+
+Implement the remote-auth crypto with the OpenSSL EVP API, mirroring the
+NSS backend: generate an RSA-2048 key pair, export the public key as
+base64 SubjectPublicKeyInfo DER (i2d_PUBKEY), and decrypt with
+RSA-OAEP using SHA-256 for both the hash and MGF1. Drop the
+<openssl/engine.h> include, which is deprecated in OpenSSL 3 and not
+needed, and the #undef that disabled the backend.
+
+Add USE_OPENSSL_CRYPTO=1 to the Makefile, which builds QR login against
+openssl + libqrencode from pkg-config instead of nss + libqrencode.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ Makefile      |   9 +++-
+ discord_rsa.c | 120 +++++++++++++++++++++++++++++++++++++++++++++++---
+ 2 files changed, 122 insertions(+), 7 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index fc39e39..17f4ba2 100644
+--- a/Makefile
++++ b/Makefile
+@@ -97,8 +97,13 @@ ifneq ($(USE_QRCODE_AUTH), 0)
+ 	WIN32_LDFLAGS += -L$(WIN32_DEV_TOP)/nss-3.24-nspr-4.12/lib -L$(WIN32_DEV_TOP)/qrencode-4.1.1 -lnss3 -lqrencode
+ 	
+ 	ifneq ($(OS),Windows_NT)
+-		CFLAGS += $(shell ${PKG_CONFIG} --cflags nss libqrencode) -DUSE_QRCODE_AUTH
+-		LDFLAGS += $(shell ${PKG_CONFIG} --libs nss libqrencode)
++		ifeq ($(USE_OPENSSL_CRYPTO), 1)
++			CFLAGS += $(shell ${PKG_CONFIG} --cflags openssl libqrencode) -DUSE_QRCODE_AUTH -DUSE_OPENSSL_CRYPTO
++			LDFLAGS += $(shell ${PKG_CONFIG} --libs openssl libqrencode)
++		else
++			CFLAGS += $(shell ${PKG_CONFIG} --cflags nss libqrencode) -DUSE_QRCODE_AUTH
++			LDFLAGS += $(shell ${PKG_CONFIG} --libs nss libqrencode)
++		endif
+ 	endif
+ endif
+ 
+diff --git a/discord_rsa.c b/discord_rsa.c
+index f0ce383..fd6058c 100644
+--- a/discord_rsa.c
++++ b/discord_rsa.c
+@@ -18,9 +18,8 @@
+ 
+ 
+ 
+-#if defined USE_OPENSSL_CRYPTO && !(defined __APPLE__ || defined __OpenBSD__)
+-#	undef USE_OPENSSL_CRYPTO
+-#endif
++/* webOS: the OpenSSL backend below is fully implemented (RSA-OAEP-SHA256 via EVP),
++ * so do NOT undef it on Linux like upstream did (upstream left it a stub). */
+ 
+ #if !defined USE_MBEDTLS_CRYPTO && !defined USE_OPENSSL_CRYPTO && !defined USE_NSS_CRYPTO && !defined USE_GCRYPT_CRYPTO
+ // #	ifdef _WIN32
+@@ -451,8 +450,119 @@ discord_qrauth_decrypt(DiscordAccount *da, const gchar *encrypted_nonce, gsize *
+ #include <openssl/bn.h>
+ #include <openssl/err.h>
+ #include <openssl/evp.h>
+-#include <openssl/engine.h>
++#include <openssl/x509.h>
+ 
+-// TODO
++/* Discord "remote auth" (QR login) crypto, OpenSSL/EVP implementation.
++ * Mirrors the NSS backend above: RSA-2048 keypair, SubjectPublicKeyInfo (SPKI)
++ * DER public key base64 (i2d_PUBKEY), and RSA-OAEP with SHA-256 hash + MGF1-SHA256
++ * private decrypt. Keypair stashed on the DiscordAccount via g_dataset. */
++
++gboolean
++discord_qrauth_generate_keys(DiscordAccount *da)
++{
++	EVP_PKEY *pkey = NULL;
++	EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, NULL);
++
++	if (!ctx) {
++		return FALSE;
++	}
++	if (EVP_PKEY_keygen_init(ctx) <= 0 ||
++	    EVP_PKEY_CTX_set_rsa_keygen_bits(ctx, 2048) <= 0 ||
++	    EVP_PKEY_keygen(ctx, &pkey) <= 0) {
++		EVP_PKEY_CTX_free(ctx);
++		return FALSE;
++	}
++	EVP_PKEY_CTX_free(ctx);
++
++	g_dataset_set_data(da, "evp_pkey", pkey);
++	return TRUE;
++}
++
++void
++discord_qrauth_free_keys(DiscordAccount *da)
++{
++	EVP_PKEY *pkey = g_dataset_get_data(da, "evp_pkey");
++	if (pkey) {
++		EVP_PKEY_free(pkey);
++		g_dataset_remove_data(da, "evp_pkey");
++	}
++}
++
++gchar *
++discord_qrauth_get_pubkey_base64(DiscordAccount *da)
++{
++	EVP_PKEY *pkey = g_dataset_get_data(da, "evp_pkey");
++	unsigned char *der = NULL;
++	int derlen;
++	gchar *b64;
++
++	if (!pkey) {
++		return NULL;
++	}
++
++	derlen = i2d_PUBKEY(pkey, &der);   /* SubjectPublicKeyInfo DER */
++	if (derlen <= 0 || der == NULL) {
++		return NULL;
++	}
++
++	b64 = g_base64_encode(der, derlen);
++	OPENSSL_free(der);
++	return b64;
++}
++
++guchar *
++discord_qrauth_decrypt(DiscordAccount *da, const gchar *encrypted_nonce, gsize *proof_len)
++{
++	EVP_PKEY *pkey = g_dataset_get_data(da, "evp_pkey");
++	EVP_PKEY_CTX *ctx = NULL;
++	guchar *nonce = NULL;
++	gsize nonce_len = 0;
++	guchar *out = NULL;
++	size_t outlen = 0;
++
++	if (proof_len != NULL) {
++		*proof_len = 0;
++	}
++	if (!pkey) {
++		return NULL;
++	}
++
++	nonce = g_base64_decode(encrypted_nonce, &nonce_len);
++
++	ctx = EVP_PKEY_CTX_new(pkey, NULL);
++	if (!ctx ||
++	    EVP_PKEY_decrypt_init(ctx) <= 0 ||
++	    EVP_PKEY_CTX_set_rsa_padding(ctx, RSA_PKCS1_OAEP_PADDING) <= 0 ||
++	    EVP_PKEY_CTX_set_rsa_oaep_md(ctx, EVP_sha256()) <= 0 ||
++	    EVP_PKEY_CTX_set_rsa_mgf1_md(ctx, EVP_sha256()) <= 0) {
++		goto fail;
++	}
++
++	/* size the output buffer, then decrypt */
++	if (EVP_PKEY_decrypt(ctx, NULL, &outlen, nonce, nonce_len) <= 0) {
++		goto fail;
++	}
++	out = g_new0(guchar, outlen);
++	if (EVP_PKEY_decrypt(ctx, out, &outlen, nonce, nonce_len) <= 0) {
++		g_free(out);
++		out = NULL;
++		goto fail;
++	}
++
++	g_free(nonce);
++	EVP_PKEY_CTX_free(ctx);
++	if (proof_len != NULL) {
++		*proof_len = outlen;
++	}
++	return out;
++
++fail:
++	purple_debug_error("discord", "OpenSSL RSA-OAEP decrypt failed\n");
++	if (ctx) {
++		EVP_PKEY_CTX_free(ctx);
++	}
++	g_free(nonce);
++	return NULL;
++}
+ 
+ #endif
+-- 
+2.53.0
+

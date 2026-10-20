@@ -1,0 +1,600 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:20:25 +0200
+Subject: [PATCH] webOS: Send and receive message reactions through transport
+ signals
+
+The webOS Messaging app shows reactions as badges on a message, not as
+extra text lines. The webOS libpurple transport provides process-wide
+signals for this, and this patch talks to them:
+
+- Received: stash each message's server id as "webos-msg-id" on the
+  conversation the message is written to, so the transport can store it
+  as the serviceMessageId. Turn properties.emotions[] and live
+  "reactionInChat" trouter activities into one aggregated
+  "webos-im-reaction-set" signal, with emoji in the HTML-entity form the
+  app renders. This replaces the "N users reacted with :x:" text.
+- Sent: handle "webos-im-send-reaction" for this plugin's accounts and
+  PUT (add) or DELETE (remove) {"emotions":{"key":...,"value":<ms>}} on
+  .../messages/<id>/properties?name=emotions. teams_post_or_get() now
+  attaches the body and Content-Type to a DELETE as well.
+- Our own sent messages: emit "webos-im-outbox-id" with the server id
+  from the echo, so the user can react to their own messages.
+
+On a libpurple without these signals, purple_signal_connect() returns 0
+and nothing is sent, but received reactions are then no longer shown as
+text. A version for upstream would need to keep that text when no
+listener is connected.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ libteams.c         |  12 ++
+ libteams.h         |   9 +
+ teams_connection.c |   4 +-
+ teams_messages.c   | 407 +++++++++++++++++++++++++++++++++++++++------
+ teams_messages.h   |   5 +
+ 5 files changed, 382 insertions(+), 55 deletions(-)
+
+diff --git a/libteams.c b/libteams.c
+index f64a998..61f76b0 100644
+--- a/libteams.c
++++ b/libteams.c
+@@ -480,6 +480,7 @@ static gulong conversation_updated_signal = 0;
+ static gulong conversation_updated_title_signal = 0;
+ static gulong chat_conversation_typing_signal = 0;
+ static gulong im_conversation_created_signal = 0;
++static gulong send_reaction_signal = 0;
+ 
+ static void
+ teams_conversation_updated_title(PurpleConversation *conv, PurpleConversationUpdateType type)
+@@ -731,6 +732,17 @@ teams_login(PurpleAccount *account)
+ 	if (!im_conversation_created_signal) {
+ 		im_conversation_created_signal = purple_signal_connect(purple_conversations_get_handle(), "conversation-created", purple_connection_get_protocol(pc), PURPLE_CALLBACK(teams_im_conversation_created), NULL);
+ 	}
++	// webOS reactions (SEND): connect once, process-wide, to the transport's send-reaction
++	// signal. It fires for every account; teams_send_reaction_signal_cb filters to ours. The
++	// transport registers this signal at init (before any account logs in); on non-webOS
++	// libpurple the signal doesn't exist and purple_signal_connect harmlessly returns 0.
++	if (!send_reaction_signal) {
++		send_reaction_signal = purple_signal_connect(purple_conversations_get_handle(), "webos-im-send-reaction", purple_get_core(), PURPLE_CALLBACK(teams_send_reaction_signal_cb), NULL);
++		if (!send_reaction_signal) {
++			// Signal not registered (non-webOS build); don't retry every login.
++			send_reaction_signal = G_MAXULONG;
++		}
++	}
+ 	// Setup callbacks for the preferences.
+ 	// handle = purple_proxy_get_handle();
+ 	// purple_prefs_connect_callback(handle, "/purple/proxy/type", proxy_pref_cb, NULL);
+diff --git a/libteams.h b/libteams.h
+index 0d62b9e..3a4e6dc 100644
+--- a/libteams.h
++++ b/libteams.h
+@@ -135,6 +135,15 @@
+ #define TEAMS_PERSONAL_PLUGIN_ID "prpl-eionrobb-msteams-personal"
+ #endif
+ 
++/* The protocol id THIS build registers (see teams_protocol_init / plugin init): the
++ * personal build overrides info->id to the personal id. Reaction signal handlers use this
++ * to filter the process-wide "webos-im-send-reaction" signal to our own accounts. */
++#ifdef ENABLE_TEAMS_PERSONAL
++#define TEAMS_THIS_PLUGIN_ID TEAMS_PERSONAL_PLUGIN_ID
++#else
++#define TEAMS_THIS_PLUGIN_ID TEAMS_PLUGIN_ID
++#endif
++
+ #define TEAMS_LOCKANDKEY_APPID "msmsgs@msnmsgr.com"
+ #define TEAMS_LOCKANDKEY_SECRET "Q1P7W2E4J9R8U3S5"
+ 
+diff --git a/teams_connection.c b/teams_connection.c
+index 7be6ab3..5379260 100644
+--- a/teams_connection.c
++++ b/teams_connection.c
+@@ -111,7 +111,9 @@ TeamsConnection *teams_post_or_get_with_error(TeamsAccount *sa, TeamsMethod meth
+ 	purple_http_request_set_timeout(request, 120);
+ 	purple_http_request_set_max_len(request, -1);
+ 	
+-	if (method & (TEAMS_METHOD_POST | TEAMS_METHOD_PUT)) {
++	// DELETE included so a DELETE-with-body (Teams reaction removal PUTs its JSON via DELETE) gets the
++	// Content-Type + contents attached; a bodyless DELETE just gets a harmless Content-Type header.
++	if (method & (TEAMS_METHOD_POST | TEAMS_METHOD_PUT | TEAMS_METHOD_DELETE)) {
+ 		if (postdata && (postdata[0] == '[' || postdata[0] == '{')) {
+ 			purple_http_request_header_set(request, "Content-Type", "application/json"); // hax
+ 		} else {
+diff --git a/teams_messages.c b/teams_messages.c
+index 1551c94..88c1ba3 100644
+--- a/teams_messages.c
++++ b/teams_messages.c
+@@ -400,6 +400,189 @@ teams_parse_media_call_recording_content(const gchar *content)
+ 	return html;
+ }
+ 
++/* ------------------------------------------------------------------------------------
++ * webOS reactions: Teams "emotion" <-> Unicode emoji mapping + emit/stash helpers.
++ *
++ * Teams/Skype consumer reactions are named "emotions": properties.emotions[] is an array
++ * of { "key": <named reaction>, "users": [{ "mri", "time", "value" }, ...] }. The webOS
++ * transport speaks Unicode emoji, so we translate both directions. Unknown keys/emoji are
++ * skipped (return NULL) — robustness over completeness. Key names verified against the read
++ * shape documented in process_message_resource() ("like","heart","laugh","sad","angry",
++ * "surprised"); a few known Skype aliases fold onto the same emoji.
++ * ------------------------------------------------------------------------------------ */
++typedef struct {
++	const gchar *key;      /* Teams emotion key */
++	const gchar *emoji;    /* raw UTF-8 Unicode emoji - for the OUTGOING reverse lookup (app -> key) */
++	const gchar *display;  /* HTML-entity form the Messaging app's emojify() renders - for the INCOMING
++	                        * reaction-set. The transport's encodeAstralEntities() only encodes ASTRAL
++	                        * code points, so a raw BMP emoji (U+2764 heart) survives raw and the app
++	                        * shows nothing; emit the pre-encoded entity (incl. the U+FE0F VS16 the
++	                        * picker uses for the heart) so ALL incoming reactions render. */
++} TeamsEmotionMap;
++
++static const TeamsEmotionMap teams_emotion_map[] = {
++	{ "like",      "\xF0\x9F\x91\x8D", "&#128077;"        }, /* U+1F44D  thumbs up   */
++	{ "yes",       "\xF0\x9F\x91\x8D", "&#128077;"        }, /* alias   -> thumbs up  */
++	{ "heart",     "\xE2\x9D\xA4",     "&#10084;&#65039;" }, /* U+2764(+VS16) red heart - BMP: needs this */
++	{ "love",      "\xE2\x9D\xA4",     "&#10084;&#65039;" }, /* alias   -> red heart   */
++	{ "laugh",     "\xF0\x9F\x98\x86", "&#128518;"        }, /* U+1F606  laughing     */
++	{ "cheeky",    "\xF0\x9F\x98\x86", "&#128518;"        }, /* alias   -> laughing    */
++	{ "sad",       "\xF0\x9F\x98\xA2", "&#128546;"        }, /* U+1F622  crying        */
++	{ "angry",     "\xF0\x9F\x98\xA0", "&#128544;"        }, /* U+1F620  angry         */
++	{ "surprised", "\xF0\x9F\x98\xAE", "&#128558;"        }, /* U+1F62E  astonished    */
++	{ "raiseHands", "\xF0\x9F\x99\x8F", "&#128591;"       }, /* U+1F64F folded hands (picker 🙏) */
++	{ "applause",  "\xF0\x9F\x91\x8F", "&#128079;"        }, /* U+1F44F  clapping     */
++};
++
++/* Incoming reactions: the HTML-entity form the Messaging app renders (see the .display note above). */
++static const gchar *
++teams_emotion_key_to_display(const gchar *key)
++{
++	guint i;
++	if (key == NULL)
++		return NULL;
++	for (i = 0; i < G_N_ELEMENTS(teams_emotion_map); i++) {
++		if (g_ascii_strcasecmp(key, teams_emotion_map[i].key) == 0)
++			return teams_emotion_map[i].display;
++	}
++	return NULL;
++}
++
++static const gchar *
++teams_emoji_to_emotion_key(const gchar *emoji)
++{
++	guint i;
++	gchar *norm;
++	const gchar *result = NULL;
++	gsize len;
++
++	if (emoji == NULL || !*emoji)
++		return NULL;
++
++	/* The app's reaction picker may append a VS16 (U+FE0F, "\xEF\xB8\x8F")
++	 * emoji-presentation selector that our stored table entries omit; strip a trailing
++	 * one before matching so "\xE2\x9D\xA4\xEF\xB8\x8F" still resolves to "heart". */
++	norm = g_strdup(emoji);
++	len = strlen(norm);
++	if (len >= 3 && memcmp(norm + len - 3, "\xEF\xB8\x8F", 3) == 0)
++		norm[len - 3] = '\0';
++
++	for (i = 0; i < G_N_ELEMENTS(teams_emotion_map); i++) {
++		const gchar *cand = teams_emotion_map[i].emoji;
++		if (g_str_equal(norm, cand) || g_str_has_prefix(norm, cand)) {
++			result = teams_emotion_map[i].key;
++			break;
++		}
++	}
++	g_free(norm);
++	return result;
++}
++
++/* Stash resource["id"] on the conversation as "webos-msg-id" right before a serv_got_*
++ * call. The webOS transport reads this in incoming_message_cb and records it as the
++ * message's serviceMessageId, which is the key a later reaction (set) targets. Mirrors
++ * tdlib-purple's receiving.cpp. No-op (and harmless) in non-webOS builds. */
++static void
++teams_stash_webos_msg_id(PurpleConversation *conv, JsonObject *resource)
++{
++	const gchar *sid;
++	if (conv == NULL || resource == NULL || !json_object_has_member(resource, "id"))
++		return;
++	sid = json_object_get_string_member(resource, "id");
++	if (sid && *sid) {
++		purple_conversation_set_data(conv, "webos-msg-id", g_strdup(sid));
++		purple_debug_info("teams", "webos: stashed msg-id %s on conv '%s'\n",
++				sid, purple_conversation_get_name(conv));
++	}
++}
++
++/* Turn a message's aggregated properties.emotions[] into the transport's
++ * "count<SP>emoji\n..." set and emit "webos-im-reaction-set" (an aggregated REPLACE keyed
++ * by the message's service id). An empty serialization clears all reactions (last one
++ * removed). Skips emotions with an unknown key or zero users. */
++static void
++teams_emit_reaction_set(TeamsAccount *sa, const gchar *msgid, JsonArray *emotions)
++{
++	GString *serialized;
++	guint i, len;
++
++	if (sa == NULL || msgid == NULL || !*msgid)
++		return;
++
++	serialized = g_string_new("");
++	len = emotions ? json_array_get_length(emotions) : 0;
++	for (i = 0; i < len; i++) {
++		JsonObject *emotion = json_array_get_object_element(emotions, i);
++		const gchar *key = json_object_get_string_member(emotion, "key");
++		/* Emit the app-renderable HTML-entity form (.display), NOT the raw UTF-8 (.emoji): the
++		 * transport doesn't encode BMP emoji, so a raw heart (U+2764) would never render. */
++		const gchar *emoji = teams_emotion_key_to_display(key);
++		JsonArray *users = json_object_has_member(emotion, "users")
++			? json_object_get_array_member(emotion, "users") : NULL;
++		guint count = users ? json_array_get_length(users) : 0;
++
++		if (emoji == NULL || count == 0)
++			continue; /* unknown reaction or nobody -> skip */
++		g_string_append_printf(serialized, "%u %s\n", count, emoji);
++	}
++
++	purple_debug_info("teams", "webos: reaction-set on msg %s -> [%s]\n",
++			msgid, serialized->str);
++	purple_signal_emit(purple_conversations_get_handle(), "webos-im-reaction-set",
++		sa->account, msgid, serialized->str, (const gchar *)NULL);
++	g_string_free(serialized, TRUE);
++}
++
++/* webOS reactions (trouter REAL-TIME): Teams pushes a live reaction as a "reactionInChat"
++ * activity (properties.activity of a NewMessage/MessageUpdate on the notifications stream),
++ * NOT as properties.emotions[] (which only the offline-history poll carries). activityContext
++ * holds the FULL aggregated per-emotion counts (e.g. {"heart":"1","like":"1", <metadata>...}),
++ * so map the known emotion keys to the app's emoji and emit the same aggregated
++ * webos-im-reaction-set the emotions[] path uses, keyed by the reacted message's sourceMessageId.
++ * Unknown keys (WebhookCorrelationId, realm, ...) are skipped. Empty set clears all reactions. */
++static void
++teams_process_reaction_activity(TeamsAccount *sa, JsonObject *activity)
++{
++	GString *serialized;
++	gchar *msgid;
++	JsonObject *ctx;
++	gint64 sid;
++
++	if (sa == NULL || activity == NULL || !json_object_has_member(activity, "sourceMessageId"))
++		return;
++	sid = json_object_get_int_member(activity, "sourceMessageId");
++	if (sid == 0)
++		return;
++	msgid = g_strdup_printf("%" G_GINT64_FORMAT, sid);
++
++	serialized = g_string_new("");
++	ctx = json_object_has_member(activity, "activityContext")
++		? json_object_get_object_member(activity, "activityContext") : NULL;
++	if (ctx != NULL) {
++		GList *keys = json_object_get_members(ctx), *it;
++		for (it = keys; it; it = it->next) {
++			const gchar *key = it->data;
++			const gchar *display = teams_emotion_key_to_display(key);
++			const gchar *cntstr;
++			guint count;
++			if (display == NULL)
++				continue; /* metadata key, not an emotion */
++			cntstr = json_object_get_string_member(ctx, key);
++			count = cntstr ? (guint) g_ascii_strtoull(cntstr, NULL, 10) : 0;
++			if (count == 0)
++				continue;
++			g_string_append_printf(serialized, "%u %s\n", count, display);
++		}
++		g_list_free(keys);
++	}
++
++	purple_debug_info("teams", "webos: reactionInChat on msg %s -> [%s]\n", msgid, serialized->str);
++	purple_signal_emit(purple_conversations_get_handle(), "webos-im-reaction-set",
++		sa->account, msgid, serialized->str, (const gchar *)NULL);
++	g_string_free(serialized, TRUE);
++	g_free(msgid);
++}
++
+ static void
+ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+ {
+@@ -431,7 +614,20 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+ 		clientmessageid = json_object_get_string_member(resource, "clientmessageid");
+ 	
+ 	if (clientmessageid && *clientmessageid && g_hash_table_remove(sa->sent_messages_hash, clientmessageid)) {
+-		// We sent this message from here already
++		// We sent this message from here already.
++		// webOS reactions (react-to-own-sent): the echo carries the real server "id" for the
++		// message the user just sent from the app. Its Outbox row was persisted with no
++		// serviceMessageId (the app can't know it at send time), so hand the transport the id
++		// + text; OutboxIdHandler attaches it so the user can react to their own message.
++		if (json_object_has_member(resource, "id")) {
++			const gchar *sent_id = json_object_get_string_member(resource, "id");
++			const gchar *sent_text = json_object_has_member(resource, "content")
++				? json_object_get_string_member(resource, "content") : "";
++			if (sent_id && *sent_id) {
++				purple_signal_emit(purple_conversations_get_handle(), "webos-im-outbox-id",
++					sa->account, sent_id, sent_text ? sent_text : "");
++			}
++		}
+ 		g_strfreev(messagetype_parts);
+ 		return;
+ 	}
+@@ -484,6 +680,20 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+ 	}
+ 	if (json_object_has_member(resource, "properties")) {
+ 		properties = json_object_get_object_member(resource, "properties");
++
++		/* webOS reactions (trouter real-time): a live reaction arrives as a "reactionInChat"
++		 * activity on the notifications stream, with an EMPTY content body. Emit it as a reaction
++		 * and STOP - otherwise it falls through as a blank Text message (all we did before was
++		 * stash its msg-id). The offline-history poll separately carries properties.emotions[]. */
++		if (json_object_has_member(properties, "activity")) {
++			JsonObject *activity = json_object_get_object_member(properties, "activity");
++			if (purple_strequal(json_object_get_string_member(activity, "activityType"), "reactionInChat")) {
++				teams_process_reaction_activity(sa, activity);
++				g_strfreev(messagetype_parts);
++				return;
++			}
++		}
++
+ 		if (json_object_has_member(properties, "edittime")) {
+ 			skypeeditedid = json_object_get_string_member(properties, "edittime");
+ 		}
+@@ -621,9 +831,14 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+ 		GString *chat_last_timestamp = make_last_timestamp_setting(convname);
+ 		purple_account_set_int(sa->account, chat_last_timestamp->str, composetimestamp);
+ 		g_string_free(chat_last_timestamp, TRUE);
+-		
++
+ 		conv = PURPLE_CONVERSATION(chatconv);
+-		
++
++		// webOS reactions: stash this message's service id on the chat conv so the transport
++		// records it as serviceMessageId for every serv_got_chat_in below; a later reaction
++		// (set) update targets it by resource["id"].
++		teams_stash_webos_msg_id(conv, resource);
++
+ 		if (g_str_equal(messagetype_parts[0], "Control") && (g_str_equal(messagetype_parts[1], "ClearTyping") || g_str_equal(messagetype_parts[1], "Typing"))) {
+ 			PurpleChatUserFlags cbflags;
+ 			PurpleChatUser *cb;
+@@ -770,29 +985,16 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+ 				}
+ 				
+ 				if (json_object_has_member(properties, "emotions")) {
++					// webOS reactions: emit the aggregated reaction set (keyed by the message
++					// service id) instead of flattening it into a chat text message.
+ 					JsonArray *emotions = json_object_get_array_member(properties, "emotions");
+-					guint i, len = json_array_get_length(emotions);
+-					GString *emotion_text = g_string_new("");
+-					
+-					for(i = 0; i < len; i++) {
+-						JsonObject *emotion = json_array_get_object_element(emotions, i);
+-						const gchar *emotion_name = json_object_get_string_member(emotion, "key");
+-						JsonArray *emotion_users = json_object_get_array_member(emotion, "users");
+-						guint emotion_users_count = json_array_get_length(emotion_users);
+-						//TODO include a portion of the original string (in html)
+-						//TODO list names of users   "users":[{"mri":"8:orgid:..."},{"mri":"..."}]
+-						//for (j = 0; j < emotion_users_count; j++) {
+-						g_string_append_printf(emotion_text, _("%u users reacted with a :%s:\n"), emotion_users_count, emotion_name);
+-					}
+-					
++					const gchar *msgid = json_object_has_member(resource, "id")
++						? json_object_get_string_member(resource, "id") : NULL;
++					teams_emit_reaction_set(sa, msgid, emotions);
++
+ 					g_free(html);
+-					if (emotion_text->str && *emotion_text->str) {
+-						html = g_strconcat("<b>", emotion_text->str, "</b>", NULL);
+-					} else {
+-						html = NULL;
+-					}
+-					g_string_free(emotion_text, TRUE);
+-					
++					html = NULL; /* don't also render the reaction as a chat message */
++
+ 				} else {
+ 					html = teams_process_files_in_properties(properties, &html);
+ 					html = teams_process_cards_in_properties(properties, &html);
+@@ -1117,36 +1319,16 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+ 				}
+ 				
+ 				if (json_object_has_member(properties, "emotions")) {
++					// webOS reactions: emit the aggregated reaction set (keyed by the message
++					// service id) instead of flattening it into an IM text message.
+ 					JsonArray *emotions = json_object_get_array_member(properties, "emotions");
+-					guint i, len = json_array_get_length(emotions);
+-					GString *emotion_text = g_string_new("");
+-					
+-					for(i = 0; i < len; i++) {
+-						JsonObject *emotion = json_array_get_object_element(emotions, i);
+-						const gchar *emotion_name = json_object_get_string_member(emotion, "key");
+-						JsonArray *emotion_users = json_object_get_array_member(emotion, "users");
+-						guint j, emotion_users_count = json_array_get_length(emotion_users);
+-						
+-						for (j = 0; j < emotion_users_count; j++) {
+-							JsonObject *emotion_user = json_array_get_object_element(emotion_users, j);
+-							const gchar *mri = json_object_get_string_member(emotion_user, "mri");
+-							const gchar *buddyid = teams_strip_user_prefix(mri);
+-							
+-							if (!teams_is_user_self(sa, buddyid)) {
+-								//TODO include a portion of the original string (in html)
+-								g_string_append_printf(emotion_text, _("Reacted with a :%s:\n"), emotion_name);
+-							}
+-						}
+-					}
+-					
++					const gchar *msgid = json_object_has_member(resource, "id")
++						? json_object_get_string_member(resource, "id") : NULL;
++					teams_emit_reaction_set(sa, msgid, emotions);
++
+ 					g_free(html);
+-					if (emotion_text->str && *emotion_text->str) {
+-						html = g_strconcat("<b>", emotion_text->str, "</b>", NULL);
+-					} else {
+-						html = NULL;
+-					}
+-					g_string_free(emotion_text, TRUE);
+-				
++					html = NULL; /* don't also render the reaction as an IM message */
++
+ 				} else {
+ 					html = teams_process_files_in_properties(properties, &html);
+ 					html = teams_process_cards_in_properties(properties, &html);
+@@ -1201,7 +1383,12 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+ 					imconv = purple_im_conversation_new(sa->account, modified_convbuddyname);
+ 				}
+ 				conv = PURPLE_CONVERSATION(imconv);
+-				
++
++				// webOS reactions: stash this message's service id on the IM conv so the
++				// transport records it as serviceMessageId (for both the self-carbon write and
++				// the serv_got_im below); a later reaction (set) update targets it.
++				teams_stash_webos_msg_id(conv, resource);
++
+ 				teams_find_incoming_img(sa, conv, composetimestamp, from, &html);
+ 				
+ 				if (teams_is_user_self(sa, from)) {
+@@ -1215,6 +1402,14 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+ 					}
+ 					
+ 				} else {
++					// Stash the id on the exact conv serv_got_im uses (keyed by `from`); the earlier
++					// stash was on modified_convbuddyname, which can differ from `from` in Teams, so the
++					// transport read serviceMessageId off the wrong conversation (incoming msgs got none).
++					PurpleIMConversation *rconv = purple_conversations_find_im_with_account(from, sa->account);
++					if (rconv == NULL) {
++						rconv = purple_im_conversation_new(sa->account, from);
++					}
++					teams_stash_webos_msg_id(PURPLE_CONVERSATION(rconv), resource);
+ 					purple_serv_got_im(sa->pc, from, html, PURPLE_MESSAGE_RECV | (is_whisper ? PURPLE_MESSAGE_WHISPER : 0), composetimestamp);
+ 				}
+ 				g_free(html);
+@@ -2947,8 +3142,112 @@ teams_send_message(TeamsAccount *sa, const gchar *convname, const gchar *message
+ }
+ 
+ 
++/* ------------------------------------------------------------------------------------
++ * webOS reactions (SEND): handle the transport's "webos-im-send-reaction" signal.
++ * ------------------------------------------------------------------------------------ */
++static void
++teams_send_reaction_cb(TeamsAccount *sa, JsonNode *node, gpointer user_data)
++{
++	(void) sa;
++	(void) user_data;
++	if (node != NULL && json_node_get_node_type(node) == JSON_NODE_OBJECT) {
++		gchar *str = teams_jsonobj_to_string(json_node_get_object(node));
++		purple_debug_info("teams", "send-reaction response: %s\n", str ? str : "(null)");
++		g_free(str);
++	} else {
++		purple_debug_info("teams", "send-reaction response: (empty / non-object)\n");
++	}
++}
++
++/* Connected once (process-wide) from teams_login(). The transport fires this for EVERY
++ * account when the user reacts on the TouchPad, so we filter to this plugin. `peer` is the
++ * buddy/chat name the transport tracked, `targetServiceMessageId` the message id we stashed,
++ * `emoji` the Unicode emoji, `removeFlag` "1" to clear the user's reaction. */
++void
++teams_send_reaction_signal_cb(PurpleAccount *account, const gchar *targetServiceMessageId,
++	const gchar *emoji, const gchar *peer, const gchar *removeFlag, gpointer user_data)
++{
++	PurpleConnection *pc;
++	TeamsAccount *sa;
++	const gchar *convname;
++	const gchar *emotion_key;
++	gchar *enc_conv, *enc_msg, *url, *post;
++	JsonObject *obj, *emotions_obj;
++	gboolean remove = (removeFlag && removeFlag[0] == '1');
++
++	(void) user_data;
++
++	if (account == NULL || targetServiceMessageId == NULL || !*targetServiceMessageId)
++		return;
++	/* The signal is process-wide; only handle our own protocol's accounts. */
++	if (!purple_strequal(purple_account_get_protocol_id(account), TEAMS_THIS_PLUGIN_ID))
++		return;
++
++	pc = purple_account_get_connection(account);
++	if (pc == NULL)
++		return;
++	sa = purple_connection_get_protocol_data(pc);
++	if (sa == NULL)
++		return;
++
++	emotion_key = teams_emoji_to_emotion_key(emoji);
++	if (emotion_key == NULL) {
++		purple_debug_warning("teams", "send-reaction: no Teams emotion for emoji '%s', ignoring\n",
++			emoji ? emoji : "(null)");
++		return;
++	}
++
++	/* Resolve peer -> conversation/thread id exactly as teams_send_im does: a 1:1 buddy maps
++	 * through buddy_to_chat_lookup to its thread; a group chat name IS already the thread id. */
++	convname = peer ? g_hash_table_lookup(sa->buddy_to_chat_lookup, peer) : NULL;
++	if (convname == NULL)
++		convname = peer;
++	if (convname == NULL || !*convname) {
++		purple_debug_warning("teams", "send-reaction: could not resolve conversation for peer '%s'\n",
++			peer ? peer : "(null)");
++		return;
++	}
++
++	/* ---------------------------------------------------------------------------------
++	 * Confirmed against the decompiled Teams Android app (consumer chatsvc / Skype-lineage):
++	 *   ADD:    PUT    .../v1/users/ME/conversations/{conv}/messages/{id}/properties?name=emotions
++	 *   REMOVE: DELETE (with the SAME body) to the same URL
++	 *   body (both): {"emotions":{"key":"<emotion>","value":<ms>}}
++	 * `value` is an UNQUOTED client timestamp in ms (a JSON NUMBER) - a string body returns 2xx but
++	 * is silently ignored. Content-Type must be application/json (teams_post_or_get sets it for
++	 * PUT/DELETE-with-body). Removal is a DELETE carrying the body, NOT a PUT with an "unset" field.
++	 * --------------------------------------------------------------------------------- */
++	emotions_obj = json_object_new();
++	json_object_set_string_member(emotions_obj, "key", emotion_key);
++	json_object_set_int_member(emotions_obj, "value", teams_get_js_time());
++	obj = json_object_new();
++	json_object_set_object_member(obj, "emotions", emotions_obj);
++	post = teams_jsonobj_to_string(obj);
++
++	/* purple_url_encode() returns a shared static buffer — encode each component into its
++	 * own allocation before composing the URL, or the second call clobbers the first. */
++	enc_conv = g_strdup(purple_url_encode(convname));
++	enc_msg = g_strdup(purple_url_encode(targetServiceMessageId));
++	url = g_strdup_printf(TEAMS_CONTACTS_PATH_PREFIX
++		"/v1/users/ME/conversations/%s/messages/%s/properties?name=emotions",
++		enc_conv, enc_msg);
++
++	purple_debug_info("teams", "send-reaction %s emoji='%s' key='%s' -> %s https://%s%s body=%s\n",
++		remove ? "REMOVE" : "ADD", emoji ? emoji : "", emotion_key,
++		remove ? "DELETE" : "PUT", TEAMS_CONTACTS_HOST, url, post);
++
++	teams_post_or_get(sa, (remove ? TEAMS_METHOD_DELETE : TEAMS_METHOD_PUT) | TEAMS_METHOD_SSL,
++		TEAMS_CONTACTS_HOST, url, post, teams_send_reaction_cb, NULL, TRUE);
++
++	g_free(enc_conv);
++	g_free(enc_msg);
++	g_free(url);
++	g_free(post);
++	json_object_unref(obj);
++}
++
+ gint
+-teams_chat_send(PurpleConnection *pc, gint id, 
++teams_chat_send(PurpleConnection *pc, gint id,
+ #if PURPLE_VERSION_CHECK(3, 0, 0)
+ PurpleMessage *msg)
+ {
+diff --git a/teams_messages.h b/teams_messages.h
+index de60299..e3d37cd 100644
+--- a/teams_messages.h
++++ b/teams_messages.h
+@@ -69,4 +69,9 @@ void teams_mark_conv_seen(PurpleConversation *conv, PurpleConversationUpdateType
+ 
+ void teams_gather_self_properties(TeamsAccount *sa);
+ 
++/* webOS reactions (SEND): connected once (process-wide) to the transport's
++ * "webos-im-send-reaction" signal; filters to this plugin's accounts and PUTs the emotion. */
++void teams_send_reaction_signal_cb(PurpleAccount *account, const gchar *targetServiceMessageId,
++	const gchar *emoji, const gchar *peer, const gchar *removeFlag, gpointer user_data);
++
+ #endif /* TEAMS_MESSAGES_H */
+-- 
+2.53.0
+

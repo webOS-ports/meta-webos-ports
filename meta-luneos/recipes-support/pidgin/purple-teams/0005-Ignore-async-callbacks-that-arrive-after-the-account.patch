@@ -1,0 +1,203 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:19:39 +0200
+Subject: [PATCH] Ignore async callbacks that arrive after the account was
+ freed
+
+teams_close() frees the TeamsAccount, but a request or timer started by
+the old connection can still complete afterwards: the repeating presence
+subscribe timeout is not cancelled by purple_http_conn_cancel_all(), and
+in-flight callbacks can race it. Run against the freed account, the dedup
+and presence loops find NULL hash tables and queues. That floods
+"hash_table != NULL" criticals fast enough to hang the device, or crashes
+in g_queue_push_tail(). It happens often when the connection drops and
+logs back in every few minutes.
+
+Keep the set of live TeamsAccount pointers (added in teams_login(),
+removed in teams_close() just before the free) and return early from
+process_message_resource(), process_conversation_resource(),
+teams_process_event_message(), teams_subscribe_to_contact_status(),
+its delayed variant, teams_drain_presence_queue() and
+teams_got_contact_statuses() when the account is not live. The check
+compares pointers only, so it never reads freed memory. The existing
+PURPLE_CONNECTION_IS_VALID(sa->pc) checks did read it.
+
+The set is filled with g_hash_table_insert() rather than
+g_hash_table_add(), which needs GLib 2.32; the Windows build uses 2.28.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ libteams.c       | 36 +++++++++++++++++++++++++++++++++++-
+ libteams.h       |  4 ++++
+ teams_messages.c | 34 +++++++++++++++++++++++++++++++++-
+ 3 files changed, 72 insertions(+), 2 deletions(-)
+
+diff --git a/libteams.c b/libteams.c
+index 27d9f35..f64a998 100644
+--- a/libteams.c
++++ b/libteams.c
+@@ -601,6 +601,38 @@ teams_im_conversation_created(PurpleConversation *conv)
+ 	teams_fetch_conv_history_paginated(sa, convname, since);
+ }
+ 
++// webOS: purple-teams fires many async HTTP requests carrying `sa` as user_data. On this
++// consumer/personal account the connection FLAPS (re-login every few minutes); teams_close frees
++// `sa`, but an in-flight request from the OLD connection can still complete afterwards and run its
++// handler against the freed sa -- whose zeroed memory makes sa->*_hash read NULL, so the dedup loops
++// in process_message_resource / process_conversation_resource FLOOD thousands of
++// "g_hash_table_insert/contains: assertion 'hash_table != NULL' failed" criticals in milliseconds,
++// pegging the CPU and HANGING the device (purple_http_conn_cancel_all(pc) in teams_close does not
++// always catch every request). Track live TeamsAccount pointers in a global set so the batch
++// processors can bail on a dead sa -- checked by POINTER, never dereferencing the freed sa.
++static GHashTable *teams_live_accounts = NULL;
++
++gboolean
++teams_account_is_live(TeamsAccount *sa)
++{
++	return sa != NULL && teams_live_accounts != NULL && g_hash_table_contains(teams_live_accounts, sa);
++}
++
++static void
++teams_account_mark_live(TeamsAccount *sa)
++{
++	if (teams_live_accounts == NULL)
++		teams_live_accounts = g_hash_table_new(g_direct_hash, g_direct_equal);
++	g_hash_table_insert(teams_live_accounts, sa, sa); // not g_hash_table_add: Win32 builds use GLib 2.28
++}
++
++static void
++teams_account_mark_dead(TeamsAccount *sa)
++{
++	if (teams_live_accounts != NULL)
++		g_hash_table_remove(teams_live_accounts, sa);
++}
++
+ static void
+ teams_login(PurpleAccount *account)
+ {
+@@ -609,8 +641,9 @@ teams_login(PurpleAccount *account)
+ 	PurpleConnectionFlags flags;
+ 	const gchar *tenant;
+ 	const gchar *password = purple_connection_get_password(pc);
+-	
++
+ 	purple_connection_set_protocol_data(pc, sa);
++	teams_account_mark_live(sa);
+ 
+ 	flags = purple_connection_get_flags(pc);
+ 	flags |= PURPLE_CONNECTION_FLAG_HTML | PURPLE_CONNECTION_FLAG_NO_BGCOLOR | PURPLE_CONNECTION_FLAG_NO_FONTSIZE;
+@@ -828,6 +861,7 @@ teams_close(PurpleConnection *pc)
+ 	g_free(sa->primary_member_name);
+ 	g_free(sa->self_display_name);
+ 	g_free(sa->username);
++	teams_account_mark_dead(sa); // webOS: stop late async handlers from touching this freed sa (hash-flood hang)
+ 	g_free(sa);
+ }
+ 
+diff --git a/libteams.h b/libteams.h
+index fcfac0e..0d62b9e 100644
+--- a/libteams.h
++++ b/libteams.h
+@@ -306,6 +306,10 @@ struct _TeamsBuddy {
+ 
+ void teams_buddy_free(PurpleBuddy *buddy);
+ 
++// webOS: TRUE while `sa` is a live (logged-in, not-yet-freed) account. Async HTTP handlers that fire
++// after a re-login flap must check this before touching sa, to avoid the freed-sa hash-flood hang.
++gboolean teams_account_is_live(TeamsAccount *sa);
++
+ void teams_do_all_the_things(TeamsAccount *sa);
+ 
+ #endif /* LIBTEAMS_H */
+diff --git a/teams_messages.c b/teams_messages.c
+index ba338b8..1551c94 100644
+--- a/teams_messages.c
++++ b/teams_messages.c
+@@ -403,6 +403,11 @@ teams_parse_media_call_recording_content(const gchar *content)
+ static void
+ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+ {
++	// webOS: bail if this is a late handler for an account freed by a re-login flap (checked by
++	// pointer, no deref) -- otherwise the dedup hash access below floods NULL-hash criticals and hangs.
++	if (!teams_account_is_live(sa))
++		return;
++
+ 	const gchar *clientmessageid = NULL;
+ 	const gchar *skypeeditedid = NULL;
+ 	const gchar *messagetype = json_object_get_string_member(resource, "messagetype");
+@@ -1430,6 +1435,10 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+ static void
+ process_conversation_resource(TeamsAccount *sa, JsonObject *resource)
+ {
++	// webOS: bail on a late handler for an account freed by a re-login flap (see process_message_resource).
++	if (!teams_account_is_live(sa))
++		return;
++
+ 	const gchar *id = json_object_get_string_member(resource, "id");
+ 	JsonObject *threadProperties = json_object_get_object_member(resource, "threadProperties");
+ 	JsonObject *lastMessage = json_object_get_object_member(resource, "lastMessage");
+@@ -1565,6 +1574,10 @@ process_endpointpresence_resource(TeamsAccount *sa, JsonObject *resource)
+ void
+ teams_process_event_message(TeamsAccount *sa, JsonObject *message)
+ {
++	// webOS: bail on a late poll/trouter batch for an account freed by a re-login flap (hash-flood hang).
++	if (!teams_account_is_live(sa))
++		return;
++
+ 	const gchar *resourceType = json_object_get_string_member(message, "resourceType");
+ 	const gchar *time = json_object_get_string_member(message, "time");
+ 	JsonObject *resource = json_object_get_object_member(message, "resource");
+@@ -2118,6 +2131,11 @@ teams_drain_presence_queue(gpointer user_data)
+ {
+ 	TeamsAccount *sa = user_data;
+ 
++	// webOS: if sa was freed by a re-login flap, bail WITHOUT touching it (pointer check first, so we
++	// never deref the freed sa->pc / sa->pending_presences). The source id is gone with the old sa.
++	if (!teams_account_is_live(sa))
++		return G_SOURCE_REMOVE;
++
+ 	if (!PURPLE_IS_CONNECTION(sa->pc)) {
+ 		// If the connection has dropped discard all pending messages and stop.
+ 		while (!g_queue_is_empty(sa->pending_presences)) {
+@@ -2322,6 +2340,12 @@ teams_drain_presence_queue(gpointer user_data)
+ void
+ teams_got_contact_statuses(TeamsAccount *sa, JsonNode *node, gpointer user_data)
+ {
++	// webOS: a presence-snapshot response that lands after a re-login flap would loop over the
++	// presences inserting into the freed sa's NULL hashes (flood) and then g_queue_push into the freed
++	// NULL pending_presences queue -> SIGSEGV. Bail by pointer check (no deref of the freed sa).
++	if (!teams_account_is_live(sa))
++		return;
++
+ 	JsonArray *responses = json_node_get_array(node);
+ 
+ 	if (responses == NULL || json_array_get_length(responses) == 0) {
+@@ -2498,8 +2522,11 @@ teams_subscribe_to_contact_status_delay(gpointer contacts_ptr)
+ 		return FALSE;
+ 	}
+ 
++	// webOS: this repeating g_timeout isn't cancelled by teams_close's purple_http_conn_cancel_all, so
++	// it can fire against a freed sa after a re-login flap. teams_account_is_live() checks by pointer
++	// (no deref) and must come FIRST so we never reach PURPLE_CONNECTION_IS_VALID(sa->pc) on a freed sa.
+ 	TeamsAccount *sa = g_dataset_get_data(contacts, "teams_account");
+-	if (sa == NULL || !PURPLE_CONNECTION_IS_VALID(sa->pc)) {
++	if (!teams_account_is_live(sa) || !PURPLE_CONNECTION_IS_VALID(sa->pc)) {
+ 		g_slist_free_full(contacts, g_free);
+ 		g_dataset_destroy(contacts);
+ 		return FALSE;
+@@ -2534,6 +2561,11 @@ teams_subscribe_to_contact_status(TeamsAccount *sa, GSList *contacts)
+ 	if (contacts == NULL) {
+ 		return;
+ 	}
++	// webOS: guard against a late call for a freed account (the subscribed_contacts insert loop below
++	// would otherwise flood NULL-hash criticals and hang). Pointer check, no deref of a freed sa.
++	if (!teams_account_is_live(sa)) {
++		return;
++	}
+ 
+ 	if (sa->trouter_surl == NULL) {
+ 		purple_debug_info("teams", "No trouter surl yet\n");
+-- 
+2.53.0
+

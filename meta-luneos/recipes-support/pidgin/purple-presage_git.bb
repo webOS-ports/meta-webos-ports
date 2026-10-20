@@ -4,123 +4,175 @@ built as a staticlib and linked into the C plugin."
 LICENSE = "GPL-3.0-or-later"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=5b4473596678d62d9d83096273422c8c"
 
-require purple-synergy.inc
+require purple-connectors.inc
+
+# Built from luneos-synergy-connectors, the version ended in its commit alone (1.0+git0+d22c6be58f).
+# With the upstream commit now in front it can sort lower, so bump the epoch to keep package feeds
+# moving forward.
+PE = "1"
 require purple-presage-crates.inc
 require purple-presage-git-deps.inc
 
-DEPENDS = "pidgin glib-2.0 openssl sqlite3 protobuf-native"
+# 0001-0009 adapt the plug-in to imlibpurpletransport and the webOS Messaging app; the Pending
+# ones are generic fixes meant for upstream.
+#
+# The webOS tree also carries 1:1 voice calls (call.c, call_bridge.rs, call_media.rs, ice.rs, and
+# a presage patch exposing the identified push service). That is left out here on purpose:
+#   * it only works on legacy webOS: it spawns a media engine from /media/internal, uses WPE and
+#     gst paths that do not exist on LuneOS, LD_PRELOADs libasound and assumes there is no IPv6;
+#   * it writes the TURN credentials into log files;
+#   * upstream's build does not compile call.c, which needs luna-service2 and the split-bus
+#     compat header, so with the Rust half calling into it the plug-in would not even dlopen.
+# None of 0001-0009 reference it, and without it the Rust half keeps upstream's Cargo.toml and
+# Cargo.lock unchanged. The one generic fix it contained -- announce "connected" only once per
+# receive session -- is 0009 here.
+SRC_URI += " \
+    git://github.com/hoehermann/purple-presage.git;branch=master;protocol=https;name=upstream;destsuffix=purple-presage \
+    file://0001-qrcode-hand-the-device-link-URI-to-the-UI-instead-of.patch \
+    file://0002-Keep-the-connection-up-on-receive-and-command-errors.patch \
+    file://0003-contacts-sync-names-from-the-primary-and-resolve-unk.patch \
+    file://0004-Pin-the-module-resident-and-delete-the-store-when-an.patch \
+    file://0005-bridge-carry-the-message-timestamp-in-milliseconds-a.patch \
+    file://0006-Map-Signal-reactions-to-and-from-the-webOS-transport.patch \
+    file://0007-Show-Signal-replies-as-inline-quote-cards-on-webOS.patch \
+    file://0008-Report-delivery-and-read-receipts-to-the-webOS-trans.patch \
+    file://0009-Announce-the-connection-only-once-per-receive-sessio.patch \
+"
+SRCREV_upstream = "c4c9b8d8e1a822f973520e8870aba1d2347b18c6"
 
-# protobuf-native for protoc: libsignal-svrb's build script (and other libsignal crates') runs
-# protobuf-parse on its .proto files, which panics with "protoc binary not found" without one.
-# PROTOC names it explicitly rather than relying on PATH.
-export PROTOC = "${STAGING_BINDIR_NATIVE}/protoc"
+# gdk-pixbuf is only asked which image types it can load (pixbuf.c); without it the plug-in
+# assumes JPEG and PNG. protobuf-native supplies protoc for the prost-build scripts of
+# libsignal, libsignal-service and spqr. openssl is libcrypto for the bundled SQLCipher.
+DEPENDS = "pidgin glib-2.0 gdk-pixbuf openssl protobuf-native"
 
-# boring-sys runs bindgen over the BoringSSL headers, through libclang. Without a target and a
-# sysroot, clang parses the BUILD host's /usr/include and stops at its x86-64 bits/floatn.h
-# ("__float128 is not supported on this target"). Same settings as thin-provisioning-tools in
-# meta-oe: libclang from clang-native, the target triple and the tune's -m flags, and the
-# --sysroot that TOOLCHAIN_OPTIONS carries.
-DEPENDS += "clang-native"
-export LIBCLANG_PATH = "${STAGING_LIBDIR_NATIVE}"
-BINDGEN_EXTRA_CLANG_ARGS = "${HOST_CC_ARCH}${TOOLCHAIN_OPTIONS} --target=${TARGET_SYS}"
-export BINDGEN_EXTRA_CLANG_ARGS
-
-S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/signal/plugin/purple-presage"
+S = "${UNPACKDIR}/purple-presage"
 CARGO_SRC_DIR = "src/rust"
 
-# cargo builds the Rust half (libpurple_presage_backend.a); the C prpl around it is compiled and
-# linked by hand below, the way build-presage.sh (the device build this plug-in was developed
-# with) does it. Not with upstream's CMakeLists.txt: that pulls Corrosion with FetchContent, a
-# git clone at configure time that a build without network cannot do, and its source list leaves
-# out src/c/call.c -- which init.c and connection.c call unconditionally (callLunaInit), so a
-# libpresage.so linked from it would not even load under -z now.
 inherit cargo cargo-update-recipe-crates
 
-# presage's dependencies arrive from two places, because they come from two:
+# Built with the rust/cargo 1.94 from oe-core wrynose. Upstream's Cargo.lock is lockfile version 4
+# and nothing in it needs a newer rust, so it is used exactly as upstream ships it.
 #
-#   purple-presage-crates.inc     443 crates.io packages, as crate:// entries. Regenerate with
-#                                 `bitbake -c update_crates purple-presage`.
-#   purple-presage-git-deps.inc   the 24 that are signalapp/whisperfish forks and are NOT on
-#                                 crates.io. Fetched as 8 git repos and wired in with [patch] --
-#                                 see that file for why cargo_common.bbclass's own git support
-#                                 cannot express them.
+# Upstream builds with CMake, which FetchContent-clones Corrosion at configure time to drive cargo.
+# That needs network outside do_fetch and duplicates what cargo.bbclass does, so CMake is not used:
+# cargo.bbclass builds the staticlib (offline, --frozen), and do_compile:append compiles the C
+# sources -- every file in src/c, the same list as upstream's CMakeLists.txt -- and links them with
+# it, as upstream's Makefile does.
+
+# The libsqlite3-sys built here is SQLCipher, linked against the system libcrypto.
+export OPENSSL_LIB_DIR = "${STAGING_LIBDIR}"
+export OPENSSL_INCLUDE_DIR = "${STAGING_INCDIR}"
+export PROTOC = "${STAGING_BINDIR_NATIVE}/protoc"
+
+# The C parts of ring and SQLCipher are compiled by cc-rs inside the vendored crates under
+# ${CARGO_HOME} and the git-deps checkouts, both in ${UNPACKDIR} but outside ${S} and ${B}, so the
+# default prefix maps miss them and the debug info keeps TMPDIR paths (QA buildpaths). Prepended,
+# so the more specific ${S} and ${B} maps still win for the plug-in's own sources.
+DEBUG_PREFIX_MAP:prepend = "-ffile-prefix-map=${UNPACKDIR}=${TARGET_DBGSRC_DIR} "
+
+# Replaces cargo_common.bbclass's function of the same name. That one maps every git SRC_URI entry
+# with a name and destsuffix to `[patch."<repo>"] <name> = { path = "<destsuffix>" }`, which only
+# works for a repository holding a single crate at its root. Here it would also catch the upstream
+# and connectors checkouts, and the libsignal repository holds nine of the crates in
+# subdirectories. This one uses the explicit crate -> repo:path list in purple-presage-git-deps.inc.
 #
-# Both pin revisions from src/rust/Cargo.lock, so the build is reproducible and needs no network
-# during do_compile, which cargo.bbclass forbids anyway (it builds --frozen).
+# libsqlite3-sys needs different handling: upstream's Cargo.toml takes it from git through
+# [patch.crates-io], and cargo cannot [patch] a source that itself comes from a [patch]; it then
+# tries to fetch it and fails offline. So that entry in Cargo.toml is pointed at the checkout
+# directly.
 #
-# The Rust half links libcrypto for SQLCipher, so openssl has to be visible to the crate build
-# scripts and not only to the final C link. boring-sys builds BoringSSL from its own submodule,
-# which is the slowest part of this recipe by a wide margin.
+# As in the original, the lock's `source = "git+..."` lines are dropped (from a saved .orig, so
+# this can run more than once): the patched crates are path crates now and --frozen does not let
+# cargo rewrite the lock itself.
+python cargo_common_do_patch_paths() {
+    import re, shutil, tomllib
 
-# C code compiled by crate build scripts (SQLCipher in libsqlite3-sys, ring) sits outside ${S}:
-# under ${UNPACKDIR}/git-deps and the crates.io vendor directory. OE's automatic prefix maps cover
-# ${S} and ${B} only, so those paths survive into the debug info and trip buildpaths QA:
-#   File /usr/lib/purple-2/.debug/libpresage.so in package purple-presage-dbg contains
-#   reference to TMPDIR [buildpaths]
-# Map the whole unpack directory, as purple-teams and purple-combined do.
-DEBUG_PREFIX_MAP:append = " -ffile-prefix-map=${UNPACKDIR}=${TARGET_DBGSRC_DIR}"
+    unpackdir = d.getVar('UNPACKDIR')
+    patches = {}
+    paths = {}
+    for entry in (d.getVar('PRESAGE_GIT_CRATES') or '').split():
+        crate, location = entry.split('=', 1)
+        repo, subdir = location.split(':', 1)
+        path = os.path.join(unpackdir, 'git-deps', repo, subdir)
+        if not os.path.exists(os.path.join(path, 'Cargo.toml')):
+            bb.fatal('%s: no Cargo.toml in %s' % (crate, path))
+        paths[crate] = path
+        url = d.getVarFlag('PRESAGE_GIT_URL', repo)
+        if not url:
+            bb.fatal('PRESAGE_GIT_URL[%s] is not set' % repo)
+        patches.setdefault(url, []).append((crate, '%s = { path = "%s" }' % (crate, path)))
 
-# luna-service2 for src/c/call.c, the com.palm.signal.call service the Phone app talks to.
-DEPENDS += "luna-service2"
+    manifest = d.getVar('CARGO_MANIFEST_PATH')
+    with open(manifest, 'rb') as f:
+        crates_io_patched = tomllib.load(f).get('patch', {}).get('crates-io', {})
+    with open(manifest) as f:
+        text = f.read()
+    for crate, spec in crates_io_patched.items():
+        if isinstance(spec, dict) and 'git' in spec:
+            if crate not in paths:
+                bb.fatal('%s is patched from git in Cargo.toml but not in PRESAGE_GIT_CRATES' % crate)
+            text, n = re.subn(r'(?m)^%s\s*=.*$' % re.escape(crate),
+                              '%s = { path = "%s" }' % (crate, paths[crate]), text)
+            if n != 1:
+                bb.fatal('could not rewrite %s in %s' % (crate, manifest))
+            for url in patches:
+                patches[url] = [p for p in patches[url] if p[0] != crate]
+    with open(manifest, 'w') as f:
+        f.write(text)
 
-# The C half: every file build-presage.sh compiles, call.c included.
-PRESAGE_C_SOURCES = "init bridge connection qrcode receive_text send_text blist status groups \
-                     receive_attachment send_file profile options attachment_common pixbuf call"
+    with open(os.path.join(d.getVar('CARGO_HOME'), 'config.toml'), 'a') as config:
+        for url, entries in patches.items():
+            if entries:
+                print('\n[patch."%s"]' % url, file=config)
+                for crate, line in entries:
+                    print(line, file=config)
 
-do_compile:append() {
-    # PLUGIN_VERSION is stringified by init.c (MAKE_STR), so it goes in as a bare token.
-    # webos-ls2-compat.h, which call.c includes, maps the legacy split-bus LS2 API onto the
-    # single-bus luna-service2 3.x LuneOS ships; luna-service2's own .pc gives only
-    # -I${includedir}, while lunaservice.h is included bare.
-    PCFLAGS="${CFLAGS} -fPIC -DPURPLE_PLUGINS -DPLUGIN_VERSION=${PV} \
-             -I${S}/src/c -I${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/_core/include \
-             -I${STAGING_INCDIR}/luna-service2 \
-             $(pkg-config --cflags purple glib-2.0 gmodule-2.0 luna-service2)"
-    OBJS=""
-    for s in ${PRESAGE_C_SOURCES}; do
-        ${CC} $PCFLAGS -c ${S}/src/c/$s.c -o ${B}/presage_$s.o
-        OBJS="$OBJS ${B}/presage_$s.o"
-    done
-
-    # The staticlib's native dependencies, as `cargo rustc -- --print native-static-libs` lists
-    # them (and build-presage.sh links them), plus libcrypto for SQLCipher.
-    ${CC} -shared -fPIC ${LDFLAGS} -Wl,-soname,libpresage.so -o ${B}/libpresage.so \
-        $OBJS \
-        -Wl,--start-group ${B}/target/${CARGO_TARGET_SUBDIR}/libpurple_presage_backend.a \
-        $(pkg-config --libs purple glib-2.0 gmodule-2.0 luna-service2) -lcrypto -Wl,--end-group \
-        -lstdc++ -lpthread -ldl -lm -lrt -lutil -lgcc_s
-
-    # A plug-in libpurple cannot initialise links just as happily; check here, not at runtime.
-    if ! ${NM} -D --defined-only ${B}/libpresage.so | grep -q ' purple_init_plugin$'; then
-        bbfatal "libpresage.so exports no purple_init_plugin; libpurple would reject it"
-    fi
+    lockfile = d.getVar('CARGO_LOCK_PATH')
+    lockfile_orig = lockfile + '.orig'
+    if not os.path.exists(lockfile_orig):
+        shutil.copy(lockfile, lockfile_orig)
+    with open(lockfile_orig) as f:
+        lines = [l for l in f if not l.startswith('source = "git')]
+    with open(lockfile, 'w') as f:
+        f.writelines(lines)
 }
 
-# NOTE, unrelated to whether this builds: Signal has been disabled on webOS. libpresage aborted
-# the whole imlibpurple transport on login there, from an uncaught "Couldn't find prpl" raised in
-# Util::getProtocolInfo. That is a transport bug rather than a LuneOS one, but a green build here
-# does not mean a working plugin.
+# init.c reports this as the plug-in version. Upstream composes it from the crate version, the
+# commit date, the commit count and the presage commit, asking git and cargo metadata; here it is
+# the crate version and the two pinned commits. The preprocessor stringifies it, so it has to stay
+# a single token.
+PRESAGE_PLUGIN_VERSION = "0.0.0_${@d.getVar('SRCREV_upstream')[:7]}_${@d.getVar('SRCREV_presage')[:7]}"
 
+# The libraries are the ones `cargo rustc -- --print native-static-libs` lists for the Rust half,
+# plus libcrypto for SQLCipher and gmodule-2.0 for g_module_make_resident() from 0004.
+# --no-undefined turns a symbol that would only be missed at dlopen time into a link error.
+do_compile:append() {
+    install -d ${B}/c
+    for src in ${S}/src/c/*.c; do
+        ${CC} ${CFLAGS} -fPIC -DPLUGIN_VERSION=${PRESAGE_PLUGIN_VERSION} \
+            $(pkg-config --cflags purple glib-2.0 gdk-pixbuf-2.0) \
+            -c $src -o ${B}/c/$(basename $src .c).o
+    done
+    ${CC} ${LDFLAGS} -shared -Wl,--no-undefined -o ${B}/libpresage.so \
+        ${B}/c/*.o \
+        ${B}/target/${CARGO_TARGET_SUBDIR}/libpurple_presage_backend.a \
+        $(pkg-config --libs purple gmodule-2.0 glib-2.0 gdk-pixbuf-2.0) \
+        -lcrypto -lgcc_s -lutil -lrt -lpthread -lm -ldl
+}
+
+# Installed by hand, so no Pidgin pixmaps are shipped -- see purple-connectors.inc. This also
+# replaces cargo.bbclass's do_install, which only knows about binaries and Rust libraries.
+#
+# Not yet run on LuneOS: a clean build says the plug-in links and loads, not that Signal works.
 do_install() {
     install -d ${D}${libdir}/purple-2
     install -m 0755 ${B}/libpresage.so ${D}${libdir}/purple-2/libpresage.so
 
-    # Account template, so Signal can be added as an account.
+    # Account template, so Signal can actually be added as an account.
     install -d ${D}${webos_accttemplatesdir}
-    cp -rf ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/signal/account/com.palm.signal ${D}${webos_accttemplatesdir}/
+    cp -rf ${CONNECTORS_DIR}/im/signal/account/com.palm.signal ${D}${webos_accttemplatesdir}/
 
     # Validator app named by the template's validator.customUI.appId.
     install -d ${D}${webos_applicationsdir}
-    cp -rf ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/signal/apps/com.palm.app.signal ${D}${webos_applicationsdir}/
-
-    # The call service call.c builds: its bus name is listed, never activated (imlibpurpleservice,
-    # which loads this plug-in, registers com.palm.signal.call itself, so the .service file is
-    # Type=static), and the Phone app is granted imlibpurple-call.operation to call it. The role
-    # and the group come with imlibpurpleservice; webos_configure_manifest lists both files in
-    # this package's manifest.
-    install -d ${D}${webos_sysbus_servicedir} ${D}${webos_sysbus_permissionsdir}
-    install -m 0644 ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/signal/files/sysbus/com.palm.signal.call.service \
-        ${D}${webos_sysbus_servicedir}/
-    install -m 0644 ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/signal/files/sysbus/com.palm.signal.call.perm.json \
-        ${D}${webos_sysbus_permissionsdir}/
+    cp -rf ${CONNECTORS_DIR}/im/signal/apps/com.palm.app.signal ${D}${webos_applicationsdir}/
 }

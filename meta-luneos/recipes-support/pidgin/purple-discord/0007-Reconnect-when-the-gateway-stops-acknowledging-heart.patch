@@ -1,0 +1,95 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:22:47 +0200
+Subject: [PATCH] Reconnect when the gateway stops acknowledging heartbeats
+
+Discord ACKs every heartbeat with op 11. When the gateway connection
+goes half-dead it stops delivering events and stops ACKing, but sends
+no close frame, so nothing notices and new messages only show up after
+a manual reconnect.
+
+Track whether the previous heartbeat was acknowledged. If it was not by
+the time the next one is due, report a network error so the account is
+reconnected, as the gateway documentation recommends.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ libdiscord.c | 29 ++++++++++++++++++++++++++++-
+ 1 file changed, 28 insertions(+), 1 deletion(-)
+
+diff --git a/libdiscord.c b/libdiscord.c
+index fb70f69..2d5b192 100644
+--- a/libdiscord.c
++++ b/libdiscord.c
+@@ -407,6 +407,7 @@ typedef struct {
+ 
+ 	gint64 seq; /* incrementing counter */
+ 	guint heartbeat_timeout;
++	gboolean heartbeat_ack_pending; /* webOS #1: set when a heartbeat is sent, cleared on OP_HEARTBEAT_ACK; still set at the next heartbeat => gateway zombied => reconnect */
+ 	guint five_minute_restart;
+ 
+ 	GHashTable *one_to_ones;		/* A store of known room_id's -> username's */
+@@ -1858,11 +1859,33 @@ discord_send_auth(DiscordAccount *da)
+ 	json_object_unref(obj);
+ }
+ 
++static void discord_start_socket(DiscordAccount *da); /* webOS #1: used by the heartbeat-ACK watchdog below */
++
+ static gboolean
+ discord_send_heartbeat(gpointer userdata)
+ {
+ 	DiscordAccount *da = userdata;
+-	JsonObject *obj = json_object_new();
++	JsonObject *obj;
++
++	/* webOS #1: zombie-connection watchdog. Discord ACKs every heartbeat (OP_HEARTBEAT_ACK). If our
++	 * previous heartbeat was never ACKed, the socket is half-dead - Discord has stopped delivering
++	 * events (new messages) and sends no close frame, so nothing else notices. Reconnect now so
++	 * real-time delivery recovers automatically, instead of silently dying until a manual re-login
++	 * (this was the "Discord messages only arrive after logout/login" bug). */
++	if (da->heartbeat_ack_pending) {
++		purple_debug_error("discord", "heartbeat not ACKed - gateway zombied, reconnecting\n");
++		da->heartbeat_ack_pending = FALSE;
++		da->heartbeat_timeout = 0; /* we're inside this source; returning FALSE drops it - don't let discord_close double-remove */
++		/* webOS: clean reconnect. Do NOT call discord_start_socket() here - that partial in-place
++		 * reconnect reuses the same DiscordAccount whose hash tables / signal state discord_close may
++		 * have torn down, hitting NULL-hash floods + freed-signal-name crashes. Route through
++		 * purple_connection_error instead: the transport does a full re-login (discord_close ->
++		 * discord_login) that reallocates ALL account state from scratch. */
++		purple_connection_error(da->pc, PURPLE_CONNECTION_ERROR_NETWORK_ERROR, _("Gateway zombied (heartbeat not ACKed) - reconnecting"));
++		return FALSE;              /* drop this (now stale) timer */
++	}
++
++	obj = json_object_new();
+ 
+ #ifdef USE_QRCODE_AUTH
+ 	if (da->running_auth_qrcode)
+@@ -1873,6 +1896,7 @@ discord_send_heartbeat(gpointer userdata)
+ 	json_object_set_int_member(obj, "op", OP_HEARTBEAT);
+ 	json_object_set_int_member(obj, "d", da->seq);
+ 
++	da->heartbeat_ack_pending = TRUE; /* expect an ACK before the next heartbeat fires */
+ 	discord_socket_write_json(da, obj);
+ 
+ 	json_object_unref(obj);
+@@ -6847,6 +6871,7 @@ discord_process_frame(DiscordAccount *da, const gchar *frame)
+ 		}
+ 
+ 		case OP_HEARTBEAT_ACK: { /* Heartbeat ACK */
++			da->heartbeat_ack_pending = FALSE; /* webOS #1: gateway is alive and delivering */
+ 			break;
+ 		}
+ 
+@@ -7314,6 +7339,8 @@ discord_start_socket(DiscordAccount *da)
+ {
+ 	const gchar *server;
+ 
++	da->heartbeat_ack_pending = FALSE; /* webOS #1: fresh connection starts with no outstanding ACK */
++
+ 	if (da->heartbeat_timeout) {
+ 		g_source_remove(da->heartbeat_timeout);
+ 	}
+-- 
+2.53.0
+

@@ -1,0 +1,954 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:21:34 +0200
+Subject: [PATCH] webOS: Show received media inline and send voice notes and
+ video
+
+The webOS transport drops libpurple imgstore images (<img id=N>), and the
+Messaging app can only show media from a URL or a local file. Teams voice
+notes and video clips also need their own message formats to show up on
+other Teams clients.
+
+Received:
+- Save downloaded media under /media/internal/.im-attachments/teams/,
+  named by SHA-1 with an extension from the magic bytes, and put a
+  file:// URL in the message instead of an imgstore image and a "Click
+  here to view full version" link. Accept */* so audio comes through.
+- Download audio, video and animation media cards to such a file bubble,
+  and remove the empty InputExtension placeholder span so a voice note is
+  not followed by a blank message.
+- Convert AAC .m4a voice notes to WAV with gst-launch-0.10, since the
+  legacy webOS media server cannot play AAC.
+- Show OneDrive file attachments (docx, pptx, ...) as a link to their
+  shareUrl or fileUrl, since objectUrl needs a browser session.
+
+Sent:
+- Voice notes: convert the recorder's audio to AAC/M4A with faac and
+  ffmpeg (run with a clean environment), upload it as a "sharing/audio"
+  object and send an audio card with the duration taken from the Ogg
+  source.
+- Video (mp4, mov, m4v, 3gp): upload as "sharing/video" and send an
+  inline AMSVideo <video> element with width, height and duration read
+  from the mp4 header, which is the format Teams clients send.
+
+The paths and helper binaries are those of legacy webOS (HP TouchPad).
+gst-launch-0.10 and faac are not on LuneOS, so there the conversions
+fail and the original file is kept. Parts of the sending side (audio
+card, AMSVideo) could go upstream once separated from the webOS file
+handling.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ teams_contacts.c | 427 ++++++++++++++++++++++++++++++++++++++++++-----
+ teams_messages.c | 280 +++++++++++++++++++++++++++++--
+ teams_messages.h |   6 +-
+ 3 files changed, 659 insertions(+), 54 deletions(-)
+
+diff --git a/teams_contacts.c b/teams_contacts.c
+index 0d6dfd2..0a3b3c4 100644
+--- a/teams_contacts.c
++++ b/teams_contacts.c
+@@ -28,6 +28,9 @@
+ #include "teams_util.h"
+ 
+ #include "http.h"
++
++#include <stdio.h> // webOS: fopen/fwrite to persist received media to a WebKit-readable file
++#include <glib/gstdio.h> // webOS: g_spawn/g_unlink/g_stat for the voice-note WAV->M4A transcode
+ #include "util.h"
+ #include "xfer.h"
+ #include "image-store.h"
+@@ -82,6 +85,10 @@ typedef struct {
+ 	gchar *id;
+ 	TeamsAccount *sa;
+ 	gboolean is_image; // webOS: send as an inline AMSImage picture, not a File.1 attachment
++	gboolean is_audio; // webOS: send as a Teams voice note (audio card), not a File.1 attachment
++	gboolean is_video; // webOS: send as a Teams video clip (inline AMSVideo), not a File.1 attachment
++	guint duration_secs; // webOS: voice-note / video length in seconds (captured before upload)
++	guint width, height; // webOS: video display dimensions (parsed from the mp4 tkhd) for the AMSVideo markup
+ } TeamsFileTransfer;
+ 
+ static guint active_icon_downloads = 0;
+@@ -300,56 +307,145 @@ typedef struct SkypeImgMsgContext_ {
+ 	gchar* from;
+ } SkypeImgMsgContext;
+ 
++/* webOS: transcode a downloaded audio file to WAV for in-app playback. Teams voice notes are AAC in
++ * MP4 (.m4a); the WebKit <audio> gate accepts "audio/aac" but the media server then "Failed to get a
++ * pipeline" for AAC/MP4 (it plays Ogg/Opus and raw WAV fine, not AAC). Raw WAV is the simplest
++ * pipeline, so we transcode m4a -> wav and hand the app the .wav. gst-launch runs with a CLEAN env --
++ * the transport's LD_PRELOAD/wpe-glibc LD_LIBRARY_PATH SEGFAULTs stock binaries (same as the outgoing
++ * faac/ffmpeg path). Returns a newly-allocated .wav path (caller frees) or NULL to keep the original. */
++static gchar *
++teams_audio_to_wav(const gchar *in_path)
++{
++	gchar *stem = NULL, *wav = NULL, *result = NULL, *loc_in = NULL, *loc_out = NULL;
++	const gchar *dot;
++	gint status = 0;
++	gboolean ok;
++
++	if (in_path == NULL)
++		return NULL;
++	dot = strrchr(in_path, '.');
++	if (dot == NULL)
++		return NULL;
++	stem = g_strndup(in_path, dot - in_path);
++	wav = g_strconcat(stem, ".wav", NULL);
++	loc_in = g_strconcat("location=", in_path, NULL);
++	loc_out = g_strconcat("location=", wav, NULL);
++
++	{
++		gchar *envp[] = { (gchar *) "PATH=/usr/bin:/bin", NULL };
++		gchar *argv[] = { (gchar *) "/usr/bin/gst-launch-0.10",
++			(gchar *) "filesrc", loc_in,
++			(gchar *) "!", (gchar *) "decodebin2",
++			(gchar *) "!", (gchar *) "audioconvert",
++			(gchar *) "!", (gchar *) "wavenc",
++			(gchar *) "!", (gchar *) "filesink", loc_out, NULL };
++		ok = g_spawn_sync(NULL, argv, envp, G_SPAWN_STDOUT_TO_DEV_NULL | G_SPAWN_STDERR_TO_DEV_NULL,
++			NULL, NULL, NULL, NULL, &status, NULL);
++	}
++	if (ok && g_file_test(wav, G_FILE_TEST_EXISTS)) {
++		GStatBuf st;
++		if (g_stat(wav, &st) == 0 && st.st_size > 44) /* bigger than a bare WAV header */
++			result = g_strdup(wav);
++	}
++
++	g_free(stem);
++	g_free(wav);
++	g_free(loc_in);
++	g_free(loc_out);
++	return result;
++}
++
+ static void
+ teams_got_imagemessage(PurpleHttpConnection *http_conn, PurpleHttpResponse *response, gpointer user_data)
+ {
+-	gint icon_id;
+ 	gchar *msg_tmp;
+ 	const gchar *url_text;
+ 	gsize len;
+-	PurpleImage *image;
+-	PurpleMessageFlags flags = PURPLE_MESSAGE_NO_LOG | PURPLE_MESSAGE_IMAGES;
+-	
++	PurpleMessageFlags flags = PURPLE_MESSAGE_NO_LOG;
++
+ 	SkypeImgMsgContext *ctx = user_data;
+ 	PurpleConversation *conv = ctx->conv;
+ 	PurpleConnection *pc = purple_conversation_get_connection(conv);
+-	TeamsAccount *sa = purple_connection_get_protocol_data(pc);
+-	
++	TeamsAccount *sa = pc ? purple_connection_get_protocol_data(pc) : NULL;
++
+ 	time_t ts = ctx->composetimestamp;
+ 	gchar* ctx_from = ctx->from;
+ 	ctx->from = NULL;
+ 	g_free(ctx);
+-	
+-	// Conversation could have been closed before we retrieved the image
+-	if (!purple_conversation_is_valid(conv)) {
++
++	// Bail if the account was freed by a re-login flap, or the conversation was closed, before this
++	// (authenticated) media download returned. teams_account_is_live is a pointer check (no deref).
++	if (!teams_account_is_live(sa) || !purple_conversation_is_valid(conv)) {
+ 		g_free(ctx_from);
+ 		return;
+ 	}
+-	
++
+ 	url_text = purple_http_response_get_data(response, &len);
+-	
++
+ 	if (!url_text || !len || url_text[0] == '{' || url_text[0] == '<') {
+ 		g_free(ctx_from);
+ 		return;
+ 	}
+-	
++
+ 	if (!purple_http_response_is_successful(response)) {
+ 		g_free(ctx_from);
+ 		return;
+ 	}
+-	
+-	image = purple_image_new_from_data(g_memdup2(url_text, len), len);
+-	icon_id = purple_image_store_add(image);
+-	msg_tmp = g_strdup_printf("<img id='%d'>", icon_id);
+-	
++
++	// webOS: persist the (authenticated - fetched with the skype_token cookie) media to a WebKit-
++	// readable file and surface it as a file:// URL in the message body. The transport renders that
++	// inline (image) or with the audio player (voice note), the SAME path as remote image URLs --
++	// whereas a libpurple imgstore <img id=N> is DROPPED by incoming_message_cb, and handing the app
++	// the raw authenticated ASM URL shows an unloadable link (and, for audio, storm-spawns
++	// media-pipeline on the failing fetch, exhausting fds). Detect the type from the magic bytes.
++	const guchar *b = (const guchar *) url_text;
++	const gchar *ext = ".bin";
++	if      (len >= 3  && b[0]==0xFF && b[1]==0xD8 && b[2]==0xFF)                                   ext = ".jpg";
++	else if (len >= 4  && b[0]==0x89 && b[1]=='P'  && b[2]=='N'  && b[3]=='G')                      ext = ".png";
++	else if (len >= 6  && b[0]=='G'  && b[1]=='I'  && b[2]=='F')                                    ext = ".gif";
++	else if (len >= 12 && b[0]=='R'  && b[1]=='I'  && b[2]=='F'  && b[3]=='F' && b[8]=='W'  && b[9]=='E' && b[10]=='B' && b[11]=='P') ext = ".webp";
++	else if (len >= 4  && b[0]=='O'  && b[1]=='g'  && b[2]=='g'  && b[3]=='S')                      ext = ".ogg";
++	else if (len >= 3  && b[0]=='I'  && b[1]=='D'  && b[2]=='3')                                    ext = ".mp3";
++	else if (len >= 12 && b[0]=='R'  && b[1]=='I'  && b[2]=='F'  && b[3]=='F' && b[8]=='W'  && b[9]=='A' && b[10]=='V' && b[11]=='E') ext = ".wav";
++	else if (len >= 8  && b[4]=='f'  && b[5]=='t'  && b[6]=='y'  && b[7]=='p')                      ext = ".m4a"; // ISO-BMFF (m4a/aac)
++
++	gchar *hash = g_compute_checksum_for_data(G_CHECKSUM_SHA1, b, len);
++	g_mkdir_with_parents("/media/internal/.im-attachments/teams", 0755);
++	gchar *path = g_strdup_printf("/media/internal/.im-attachments/teams/%s%s", hash, ext);
++	g_free(hash);
++
++	FILE *f = fopen(path, "wb");
++	if (f == NULL) {
++		purple_debug_error("teams", "failed to save received media to %s\n", path);
++		g_free(path);
++		g_free(ctx_from);
++		return;
++	}
++	fwrite(url_text, 1, len, f);
++	fclose(f);
++
++	// webOS: an AAC .m4a (Teams voice note) can't be played by the in-app media server ("Failed to get
++	// a pipeline" for AAC/MP4), so transcode it to WAV, which plays. Keep the original if it fails.
++	if (g_str_equal(ext, ".m4a")) {
++		gchar *wav = teams_audio_to_wav(path);
++		if (wav != NULL) {
++			g_unlink(path);
++			g_free(path);
++			path = wav;
++		}
++	}
++
++	msg_tmp = g_strdup_printf("file://%s", path);
++	g_free(path);
++
+ 	if (sa && teams_is_user_self(sa, ctx_from)) {
+ 		flags |= PURPLE_MESSAGE_SEND;
+ 	} else {
+ 		flags |= PURPLE_MESSAGE_RECV;
+ 	}
+-	
++
+ 	purple_conversation_write_img_message(conv, ctx_from, msg_tmp, flags, ts);
+-	
++
+ 	g_free(msg_tmp);
+ 	g_free(ctx_from);
+ }
+@@ -391,25 +487,20 @@ teams_download_uri_to_conv(TeamsAccount *sa, const gchar *uri, PurpleConversatio
+ 		purple_http_request_header_set_printf(request, "Cookie", "skypetoken_asm=%s", sa->skype_token);
+ 	}
+ 	
+-	purple_http_request_header_set(request, "Accept", "image/*");
++	purple_http_request_header_set(request, "Accept", "*/*"); // webOS: also allow audio/* voice notes, not just image/*
+ 	SkypeImgMsgContext *ctx = g_new(SkypeImgMsgContext, 1);
+ 	ctx->composetimestamp = ts;
+ 	ctx->conv = conv;
+ 	ctx->from = g_strdup(from);
+ 	purple_http_request(sa->pc, request, teams_got_imagemessage, ctx);
+ 	purple_http_request_unref(request);
+-	
+-	if (teams_is_user_self(sa, from)) {
+-		flags |= PURPLE_MESSAGE_SEND;
+-	} else {
+-		flags |= PURPLE_MESSAGE_RECV;
+-	}
+ 
+-	text = g_strdup_printf("<a href=\"%s\">Click here to view full version</a>", url);
+-	purple_conversation_write_img_message(conv, from, text, flags, ts);
+-	
++	// webOS: no synchronous "Click here to view full version" link -- teams_got_imagemessage now saves
++	// the download to a file:// the app renders inline (image) / plays (audio). The bare link was the
++	// "weird link" the user saw, and for audio it let the app storm-spawn media-pipeline on the
++	// unloadable authenticated URL.
++	(void) flags;
+ 	g_free(url);
+-	g_free(text);
+ }
+ 
+ void
+@@ -832,6 +923,115 @@ teams_xfer_send_contents_reader(PurpleHttpConnection *con, gchar *buf, size_t of
+ 	cb(con, TRUE, read != len, read);
+ }
+ 
++/* webOS: best-effort duration (seconds) of a voice note for the audio card. Opus/Ogg voice notes
++ * carry a 48kHz granule position in their last OggS page; other/unparsable formats fall back to 0
++ * (the card still plays -- only the displayed length is off). */
++static guint
++teams_audio_duration_secs(const gchar *path)
++{
++	FILE *f;
++	long fsize, tail, start, i;
++	unsigned char hdr[4];
++	unsigned char *buf;
++	guint secs = 0;
++
++	if (path == NULL)
++		return 0;
++	f = fopen(path, "rb");
++	if (f == NULL)
++		return 0;
++	if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return 0; }
++	fsize = ftell(f);
++	if (fsize <= 27 || fseek(f, 0, SEEK_SET) != 0 || fread(hdr, 1, 4, f) != 4 ||
++			memcmp(hdr, "OggS", 4) != 0) {
++		fclose(f);
++		return 0;
++	}
++	/* scan the tail for the LAST OggS page and read its 64-bit LE granule position (page offset +6) */
++	tail = fsize > 65536 ? 65536 : fsize;
++	start = fsize - tail;
++	buf = g_malloc(tail);
++	if (fseek(f, start, SEEK_SET) == 0 && (long) fread(buf, 1, tail, f) == tail) {
++		for (i = tail - 27; i >= 0; i--) {
++			if (buf[i] == 'O' && buf[i+1] == 'g' && buf[i+2] == 'g' && buf[i+3] == 'S') {
++				guint64 g = 0;
++				int k;
++				for (k = 0; k < 8; k++)
++					g |= ((guint64) buf[i + 6 + k]) << (8 * k);
++				if (g != G_MAXUINT64)
++					secs = (guint) (g / 48000);
++				break;
++			}
++		}
++	}
++	g_free(buf);
++	fclose(f);
++	return secs;
++}
++
++// webOS: pull display width/height (tkhd, 16.16 fixed) and duration (mvhd) out of an mp4 for the
++// AMSVideo markup. Best-effort: reads up to the first 8 MB (faststart moov lives at the front); leaves
++// outputs at 0 if it can't parse (the recipient re-derives real dimensions from the video itself).
++static guint32 teams_be32(const guchar *b) {
++	return ((guint32)b[0] << 24) | ((guint32)b[1] << 16) | ((guint32)b[2] << 8) | (guint32)b[3];
++}
++// Return the payload (past the 8/16-byte header) of the first child box named `name` within [data,end).
++static const guchar *teams_mp4_find(const guchar *data, gsize len, const char *name, gsize *out_len) {
++	gsize i = 0;
++	while (i + 8 <= len) {
++		guint32 size = teams_be32(data + i);
++		gsize hdr = 8;
++		if (size == 1) { if (i + 16 > len) break; size = teams_be32(data + i + 12); hdr = 16; }
++		else if (size == 0) size = len - i;
++		if (size < hdr || i + size > len) break;
++		if (memcmp(data + i + 4, name, 4) == 0) { if (out_len) *out_len = size - hdr; return data + i + hdr; }
++		i += size;
++	}
++	return NULL;
++}
++static void teams_mp4_video_info(const char *path, guint *w, guint *h, guint *secs) {
++	*w = *h = *secs = 0;
++	FILE *f = g_fopen(path, "rb");
++	if (f == NULL) return;
++	gsize cap = 8 * 1024 * 1024;
++	guchar *buf = g_malloc(cap);
++	gsize n = fread(buf, 1, cap, f);
++	fclose(f);
++
++	gsize moovlen = 0;
++	const guchar *moov = teams_mp4_find(buf, n, "moov", &moovlen);
++	if (moov != NULL) {
++		gsize mvlen = 0;
++		const guchar *mvhd = teams_mp4_find(moov, moovlen, "mvhd", &mvlen);
++		if (mvhd != NULL && mvlen >= 20) {
++			guint32 ts = 0, dur = 0;
++			if (mvhd[0] == 1 && mvlen >= 32) { ts = teams_be32(mvhd + 20); dur = teams_be32(mvhd + 28); }
++			else { ts = teams_be32(mvhd + 12); dur = teams_be32(mvhd + 16); }
++			if (ts > 0) *secs = dur / ts;
++		}
++		// First trak whose tkhd carries non-zero display dimensions is the video track.
++		gsize scan = 0;
++		while (scan + 8 <= moovlen) {
++			guint32 size = teams_be32(moov + scan);
++			gsize hdr = 8;
++			if (size == 1) { if (scan + 16 > moovlen) break; size = teams_be32(moov + scan + 12); hdr = 16; }
++			else if (size == 0) size = moovlen - scan;
++			if (size < hdr || scan + size > moovlen) break;
++			if (memcmp(moov + scan + 4, "trak", 4) == 0) {
++				gsize tklen = 0;
++				const guchar *tkhd = teams_mp4_find(moov + scan + hdr, size - hdr, "tkhd", &tklen);
++				if (tkhd != NULL && tklen >= 8) {
++					guint32 tw = teams_be32(tkhd + tklen - 8) >> 16;
++					guint32 th = teams_be32(tkhd + tklen - 4) >> 16;
++					if (tw > 0 && th > 0) { *w = tw; *h = th; break; }
++				}
++			}
++			scan += size;
++		}
++	}
++	g_free(buf);
++}
++
+ static void
+ teams_xfer_send_done(PurpleHttpConnection *conn, PurpleHttpResponse *resp, gpointer user_data)
+ {
+@@ -871,6 +1071,35 @@ teams_xfer_send_done(PurpleHttpConnection *conn, PurpleHttpResponse *resp, gpoin
+ 		return;
+ 	}
+ 
++	if (swft->is_audio) {
++		// webOS: the audio content is uploaded -> send it as a Teams voice note (audio card) now, no
++		// status poll (mirrors the is_image path). The recipient plays /views/audio inline.
++		TeamsAccount *sa = swft->sa;
++		PurpleXfer *xfer = swft->xfer;
++		// duration was captured from the Opus source in teams_xfer_send_init (the xfer now points at the
++		// .m4a, which teams_audio_duration_secs can't parse); fall back to parsing if it wasn't set.
++		guint dur = swft->duration_secs > 0 ? swft->duration_secs
++			: teams_audio_duration_secs(purple_xfer_get_local_filename(xfer));
++		purple_xfer_set_completed(xfer, TRUE);
++		teams_send_audio_card(sa, swft->from, swft->id, dur);
++		teams_free_xfer(xfer);
++		purple_xfer_unref(xfer);
++		return;
++	}
++
++	if (swft->is_video) {
++		// webOS: the video content is uploaded -> send it as a Teams video card now, no status poll
++		// (mirrors is_image/is_audio). The recipient plays /views/video inline; a File.1 URIObject would
++		// show "Unsupported Content".
++		TeamsAccount *sa = swft->sa;
++		PurpleXfer *xfer = swft->xfer;
++		purple_xfer_set_completed(xfer, TRUE);
++		teams_send_video_card(sa, swft->from, swft->id, swft->width, swft->height, swft->duration_secs);
++		teams_free_xfer(xfer);
++		purple_xfer_unref(xfer);
++		return;
++	}
++
+ 	g_timeout_add_seconds(1, poll_file_send_progress, user_data);
+ }
+ 
+@@ -892,12 +1121,13 @@ teams_xfer_send_begin(gpointer user_data)
+ 
+ 	PurpleHttpRequest *request = purple_http_request_new("");
+ 	purple_http_request_set_keepalive_pool(request, sa->keepalive_pool);
+-	// webOS: images upload to the image content view (imgpsh) as octet-stream; generic files to the
+-	// original view as multipart/form-data (the recipient renders the former inline, see is_image).
+-	purple_http_request_set_url_printf(request, "https://%s/v1/objects/%s/content/%s", TEAMS_XFER_HOST, purple_url_encode(swft->id), swft->is_image ? "imgpsh" : "original");
++	// webOS: images upload to the image content view (imgpsh) and audio to the audio view, both as
++	// octet-stream; generic files to the original view as multipart/form-data (the recipient renders
++	// the former two inline -- see is_image/is_audio).
++	purple_http_request_set_url_printf(request, "https://%s/v1/objects/%s/content/%s", TEAMS_XFER_HOST, purple_url_encode(swft->id), swft->is_image ? "imgpsh" : (swft->is_audio ? "audio" : (swft->is_video ? "video" : "original")));
+ 	purple_http_request_set_method(request, "PUT");
+ 	purple_http_request_header_set(request, "Host", TEAMS_XFER_HOST);
+-	purple_http_request_header_set(request, "Content-Type", swft->is_image ? "application/octet-stream" : "multipart/form-data");
++	purple_http_request_header_set(request, "Content-Type", (swft->is_image || swft->is_audio || swft->is_video) ? "application/octet-stream" : "multipart/form-data");
+ 	purple_http_request_header_set_printf(request, "Content-Length", "%" G_GSIZE_FORMAT, (gsize) purple_xfer_get_size(xfer));
+ 	purple_http_request_header_set_printf(request, "Authorization", "skype_token %s", sa->skype_token);
+ 	purple_http_request_set_contents_reader(request, teams_xfer_send_contents_reader, purple_xfer_get_size(xfer), user_data);
+@@ -950,12 +1180,111 @@ teams_got_object_for_file(PurpleHttpConnection *http_conn, PurpleHttpResponse *r
+ 	
+ }
+ 
++/* webOS: transcode a recorded voice note's source PCM WAV to AAC/M4A. Teams' clients only play
++ * voice notes as AAC/M4A (audio card /views/audio) -- an Ogg/Opus upload shows "Can't play message"
++ * on Android. Our transport hands us an Opus .ogg but keeps voicenote_X.wav next to it; this device's
++ * ffmpeg has no PCM/Opus decoder, so we go from the WAV via the standalone faac + ffmpeg binaries:
++ *   1) faac  -o X.aac X.wav                          (PCM WAV -> raw ADTS AAC; this faac lacks MP4)
++ *   2) ffmpeg -i X.aac -acodec copy -f mp4 X.m4a     (wrap AAC in MP4; --disable-bsfs build, and it
++ *                                                      won't infer the muxer from .m4a, hence -f mp4)
++ * Returns a newly-allocated .m4a path (caller frees) or NULL to fall back to the original file. */
++static gchar *
++teams_voicenote_to_m4a(const gchar *audio_path)
++{
++	gchar *stem = NULL, *wav = NULL, *aac = NULL, *m4a = NULL, *result = NULL;
++	const gchar *dot;
++	gint status = 0;
++	gboolean ok;
++
++	if (audio_path == NULL)
++		return NULL;
++	dot = strrchr(audio_path, '.');
++	if (dot == NULL)
++		return NULL;
++
++	stem = g_strndup(audio_path, dot - audio_path);
++	wav = (g_ascii_strcasecmp(dot, ".wav") == 0) ? g_strdup(audio_path) : g_strconcat(stem, ".wav", NULL);
++	if (!g_file_test(wav, G_FILE_TEST_EXISTS))
++		goto out;
++
++	aac = g_strconcat(stem, ".aac", NULL);
++	m4a = g_strconcat(stem, ".m4a", NULL);
++
++	// CRITICAL: run faac/ffmpeg with a CLEAN environment. The transport is launched with an
++	// LD_PRELOAD (app libstdc++ + wpe-glibc librt + libasound) and a wpe-glibc-first LD_LIBRARY_PATH;
++	// inherited by the child, those make the stock /usr/bin/faac (and ffmpeg) SEGFAULT. A minimal env
++	// lets the default loader pick their normal system libs. (envp replaces, not augments, the env.)
++	{
++		gchar *envp[] = { (gchar *) "PATH=/usr/bin:/bin", NULL };
++		gchar *argv[] = { (gchar *) "/usr/bin/faac", (gchar *) "-o", aac, wav, NULL };
++		ok = g_spawn_sync(NULL, argv, envp, G_SPAWN_STDOUT_TO_DEV_NULL | G_SPAWN_STDERR_TO_DEV_NULL,
++			NULL, NULL, NULL, NULL, &status, NULL);
++	}
++	if (!ok || !g_file_test(aac, G_FILE_TEST_EXISTS))
++		goto out;
++
++	{
++		// RE-ENCODE (not -acodec copy): faac emits ADTS-framed AAC, and this ffmpeg has NO aac_adtstoasc
++		// bitstream filter (--disable-bsfs) to strip it, so a stream-copy leaves ADTS sync headers in the
++		// MP4 with no proper esds codec-config -> Teams/Android shows the card but "can't play". Decoding
++		// the ADTS and re-encoding through libfaac writes a clean raw-AAC MP4 (correct esds). 16 kHz is a
++		// safe AAC-LC rate (the 8 kHz source upsamples; fine for voice).
++		gchar *envp[] = { (gchar *) "PATH=/usr/bin:/bin", NULL };
++		gchar *argv[] = { (gchar *) "/usr/bin/ffmpeg", (gchar *) "-y", (gchar *) "-i", aac,
++			(gchar *) "-acodec", (gchar *) "libfaac", (gchar *) "-ar", (gchar *) "16000",
++			(gchar *) "-f", (gchar *) "mp4", m4a, NULL };
++		ok = g_spawn_sync(NULL, argv, envp, G_SPAWN_STDOUT_TO_DEV_NULL | G_SPAWN_STDERR_TO_DEV_NULL,
++			NULL, NULL, NULL, NULL, &status, NULL);
++	}
++	if (ok && g_file_test(m4a, G_FILE_TEST_EXISTS))
++		result = g_strdup(m4a);
++
++out:
++	if (aac != NULL)
++		g_unlink(aac); // drop the intermediate raw-AAC
++	g_free(stem);
++	g_free(wav);
++	g_free(aac);
++	g_free(m4a);
++	return result;
++}
++
+ static void
+ teams_xfer_send_init(PurpleXfer *xfer)
+ {
+ 	PurpleConnection *pc = purple_account_get_connection(purple_xfer_get_account(xfer));
+ 	TeamsAccount *sa = purple_connection_get_protocol_data(pc);
+-	gchar *basename = g_path_get_basename(purple_xfer_get_local_filename(xfer));
++	gchar *basename;
++
++	// webOS: a recorded voice note reaches us as Opus (.ogg); Teams needs AAC/M4A (else Android shows
++	// "Can't play message"). Transcode the source WAV -> M4A and send that instead. Repoint the xfer so
++	// the object create/upload + is_audio detection below all see the .m4a.
++	{
++		const gchar *lf = purple_xfer_get_local_filename(xfer);
++		const gchar *d = lf ? strrchr(lf, '.') : NULL;
++		if (d != NULL && (g_ascii_strcasecmp(d, ".ogg") == 0 || g_ascii_strcasecmp(d, ".opus") == 0)) {
++			// Capture the length from the Opus source NOW -- after we repoint the xfer to the .m4a,
++			// teams_audio_duration_secs (Ogg-granule only) can't read it and the card would show PT1S.
++			TeamsFileTransfer *swft0 = purple_xfer_get_protocol_data(xfer);
++			guint dur = teams_audio_duration_secs(lf);
++			gchar *m4a = teams_voicenote_to_m4a(lf);
++			if (m4a != NULL) {
++				GStatBuf st;
++				if (swft0 != NULL)
++					swft0->duration_secs = dur;
++				purple_xfer_set_local_filename(xfer, m4a);
++				if (g_stat(m4a, &st) == 0)
++					purple_xfer_set_size(xfer, (size_t) st.st_size);
++				purple_debug_info("teams", "voice note transcoded to M4A: %s (%ld bytes, %us)\n",
++					m4a, (long) purple_xfer_get_size(xfer), dur);
++				g_free(m4a);
++			} else {
++				purple_debug_warning("teams", "voice-note WAV->M4A transcode failed; sending Opus as-is\n");
++			}
++		}
++	}
++
++	basename = g_path_get_basename(purple_xfer_get_local_filename(xfer));
+ 	gchar *id, *post;
+ 	TeamsFileTransfer *swft = purple_xfer_get_protocol_data(xfer);
+ 	JsonObject *obj = json_object_new();
+@@ -975,9 +1304,31 @@ teams_xfer_send_init(PurpleXfer *xfer)
+ 			g_ascii_strcasecmp(dot, ".png")  == 0 || g_ascii_strcasecmp(dot, ".jpg") == 0 ||
+ 			g_ascii_strcasecmp(dot, ".jpeg") == 0 || g_ascii_strcasecmp(dot, ".gif") == 0 ||
+ 			g_ascii_strcasecmp(dot, ".webp") == 0 || g_ascii_strcasecmp(dot, ".bmp") == 0);
+-	}
+-
+-	json_object_set_string_member(obj, "type", swft->is_image ? "pish/image" : "sharing/file");
++		// webOS: a voice note is created as a "pish/audio" (Inline) object so it gets a /views/audio
++		// view, then sent as an audio card (teams_send_audio_card) -- NOT a File.1 URIObject.
++		swft->is_audio = dot != NULL && (
++			g_ascii_strcasecmp(dot, ".ogg")  == 0 || g_ascii_strcasecmp(dot, ".opus") == 0 ||
++			g_ascii_strcasecmp(dot, ".mp3")  == 0 || g_ascii_strcasecmp(dot, ".m4a")  == 0 ||
++			g_ascii_strcasecmp(dot, ".wav")  == 0 || g_ascii_strcasecmp(dot, ".amr")  == 0);
++		// webOS: a video clip is created as a "sharing/video" object (parallels sharing/audio) so it gets
++		// a /views/video view, then sent as a video card (teams_send_video_card) -- NOT a File.1 URIObject
++		// (which modern Teams shows as "Unsupported Content").
++		swft->is_video = dot != NULL && (
++			g_ascii_strcasecmp(dot, ".mp4")  == 0 || g_ascii_strcasecmp(dot, ".mov")  == 0 ||
++			g_ascii_strcasecmp(dot, ".m4v")  == 0 || g_ascii_strcasecmp(dot, ".3gp")  == 0);
++	}
++
++	if (swft->is_video) {
++		// Parse the mp4 for the AMSVideo width/height/duration hints (see teams_send_video_card).
++		teams_mp4_video_info(purple_xfer_get_local_filename(xfer), &swft->width, &swft->height, &swft->duration_secs);
++		purple_debug_info("teams", "video info: %ux%u %us\n", swft->width, swft->height, swft->duration_secs);
++	}
++
++	// webOS: a voice note is a "sharing/audio" object (verified against a real incoming Teams voice
++	// note) -- its /views/audio serves audio/mp4 to the recipient. "pish/audio" creates an object whose
++	// /views/audio 400s ("Can't play message"). Images are "pish/image" (Inline AMSImage), video is
++	// "sharing/video" (/views/video), else File.1.
++	json_object_set_string_member(obj, "type", swft->is_image ? "pish/image" : (swft->is_audio ? "sharing/audio" : (swft->is_video ? "sharing/video" : "sharing/file")));
+ 	json_object_set_string_member(obj, "filename", basename);
+ 	if (swft->is_image) {
+ 		json_object_set_string_member(obj, "sharingMode", "Inline");
+diff --git a/teams_messages.c b/teams_messages.c
+index b90a07b..bd7de9d 100644
+--- a/teams_messages.c
++++ b/teams_messages.c
+@@ -27,6 +27,7 @@
+ #include "teams_cards.h"
+ #include "util.h"
+ 
++
+ static GString* make_last_timestamp_setting(const gchar *convname) {
+ 	GString *rv = g_string_new(NULL);
+ 	g_string_printf(rv, "%s_last_message_timestamp", convname);
+@@ -157,19 +158,41 @@ teams_process_files_in_properties(JsonObject *properties, gchar **html)
+ 		GString *files_string = g_string_new(NULL);
+ 		guint i, len = json_array_get_length(files);
+ 
+-		if (len > 0) {
+-			g_string_append(files_string, "<br>");
+-			g_string_append(files_string, _("Files sent"));
+-			g_string_append(files_string, "</b>: <br>");
+-		}
+ 		for(i = 0; i < len; i++) {
+ 			JsonObject *file = json_array_get_object_element(files, i);
+-			g_string_append(files_string, "* <a href=\"");
+-			g_string_append(files_string, json_object_get_string_member(file, "objectUrl"));
+-			g_string_append(files_string, "\">");
+-			g_string_append(files_string, json_object_get_string_member(file, "fileName"));
+-			g_string_append(files_string, "</a><br>");
+-			
++			const gchar *fileName = json_object_has_member(file, "fileName") ? json_object_get_string_member(file, "fileName") : NULL;
++			const gchar *fileType = json_object_has_member(file, "fileType") ? json_object_get_string_member(file, "fileType") : NULL;
++			// webOS: a Teams file (docx/pptx/...) is a OneDrive item, NOT a skype_token-downloadable ASM
++			// object -- so we can't fetch it inline like an image/voice note (its share link 403s without
++			// a Microsoft browser session). Emit a clean tappable link to fileInfo.shareUrl (the 1drv.ms
++			// share URL, which opens the file in the browser where the user is signed in). Prefer shareUrl,
++			// then objectUrl/fileUrl.
++			const gchar *href = NULL;
++			if (json_object_has_member(file, "fileInfo")) {
++				JsonObject *fi = json_object_get_object_member(file, "fileInfo");
++				if (fi != NULL) {
++					if (json_object_has_member(fi, "shareUrl"))
++						href = json_object_get_string_member(fi, "shareUrl");
++					if ((href == NULL || !*href) && json_object_has_member(fi, "fileUrl"))
++						href = json_object_get_string_member(fi, "fileUrl");
++				}
++			}
++			if ((href == NULL || !*href) && json_object_has_member(file, "objectUrl"))
++				href = json_object_get_string_member(file, "objectUrl");
++
++			if (href != NULL && *href) {
++				g_string_append(files_string, "\xF0\x9F\x93\x8E <a href=\""); // 📎
++				g_string_append(files_string, href);
++				g_string_append(files_string, "\">");
++				g_string_append(files_string, fileName ? fileName : _("File"));
++				g_string_append(files_string, "</a>");
++				if (fileType != NULL && *fileType) {
++					g_string_append(files_string, " (");
++					g_string_append(files_string, fileType);
++					g_string_append(files_string, ")");
++				}
++				g_string_append(files_string, "<br>");
++			}
+ 			//Potentially use the preview image in  file.filePreview.previewUrl
+ 		}
+ 
+@@ -186,7 +209,8 @@ teams_process_files_in_properties(JsonObject *properties, gchar **html)
+ }
+ 
+ static gchar *
+-teams_process_cards_in_properties(JsonObject *properties, gchar **html)
++teams_process_cards_in_properties(JsonObject *properties, gchar **html,
++	TeamsAccount *sa, PurpleConversation *conv, time_t msg_time, const gchar *msg_who)
+ {
+ 	if (html == NULL) {
+ 		return NULL;
+@@ -198,11 +222,72 @@ teams_process_cards_in_properties(JsonObject *properties, gchar **html)
+ 		GString *cards_string = g_string_new(NULL);
+ 		guint i, len = json_array_get_length(cards);
+ 
++		// webOS: a card message's body is an empty InputExtension placeholder span for the card; strip
++		// it (and any now-empty <div> wrapper) so it doesn't render as a blank SECOND bubble beside the
++		// card. Voice notes carry only this placeholder, so *html becomes empty -> no stray text bubble.
++		if (*html && strstr(*html, "schema.skype.com/InputExtension")) {
++			static GRegex *ie_re = NULL;
++			gchar *stripped, *plain;
++			if (ie_re == NULL)
++				ie_re = g_regex_new("<span[^>]*schema\\.skype\\.com/InputExtension[^>]*>\\s*</span>",
++					G_REGEX_CASELESS, 0, NULL);
++			stripped = g_regex_replace(ie_re, *html, -1, 0, "", 0, NULL);
++			if (stripped != NULL) {
++				g_free(*html);
++				*html = stripped;
++			}
++			plain = purple_markup_strip_html(*html);
++			if (plain != NULL) {
++				g_strstrip(plain);
++				if (*plain == '\0') {
++					g_free(*html);
++					*html = g_strdup("");
++				}
++				g_free(plain);
++			}
++		}
++
+ 		for(i = 0; i < len; i++) {
+ 			JsonObject *card = json_array_get_object_element(cards, i);
+ 			JsonObject *content = json_object_get_object_member(card, "content");
+ 			const gchar *contentType = json_object_get_string_member(card, "contentType");
+ 
++			// webOS: an audio/video/animation media card is a Teams voice note / media clip. Download the
++			// media object authenticated (skype_token) and emit it as a playable file:// bubble
++			// (teams_download_uri_to_conv -> teams_got_imagemessage does magic-byte ext detection incl
++			// ogg/mp3/m4a/wav) instead of the bare "Media:<url>" text teams_convert_media_card_to_html
++			// would render.
++			if (sa != NULL && content != NULL &&
++					(purple_strequal(contentType, "application/vnd.microsoft.card.audio") ||
++					 purple_strequal(contentType, "application/vnd.microsoft.card.video") ||
++					 purple_strequal(contentType, "application/vnd.microsoft.card.animation")) &&
++					json_object_has_member(content, "media")) {
++				// The 1:1 IM path runs this BEFORE it creates the conversation (conv is NULL here) and a
++				// voice note's html body is empty, so the later emit block that would create the conv never
++				// runs. Find/create the IM conv from the sender ourselves and download into it (mirrors the
++				// RichText/UriObject image path); a group chat passes its chat conv in. Skip our own carbon
++				// echo (the app already shows the outgoing bubble) so it isn't misfiled under the self id.
++				PurpleConversation *target = conv;
++				if (target == NULL && msg_who != NULL && *msg_who && !teams_is_user_self(sa, msg_who)) {
++					PurpleIMConversation *imc = purple_conversations_find_im_with_account(msg_who, sa->account);
++					if (imc == NULL)
++						imc = purple_im_conversation_new(sa->account, msg_who);
++					target = PURPLE_CONVERSATION(imc);
++				}
++				if (target != NULL) {
++					JsonArray *media = json_object_get_array_member(content, "media");
++					guint m, mlen = json_array_get_length(media);
++					for (m = 0; m < mlen; m++) {
++						JsonObject *media_item = json_array_get_object_element(media, m);
++						const gchar *url = json_object_get_string_member(media_item, "url");
++						if (url && *url) {
++							teams_download_uri_to_conv(sa, url, target, msg_time, msg_who);
++						}
++					}
++				}
++				continue; // handled as a file:// download; no text html for this card
++			}
++
+ 			gchar *card_html = teams_convert_card_to_html(content, contentType);
+ 			if (card_html == NULL) {
+ 				// Couldn't process or unknown content type, dump the raw data
+@@ -732,7 +817,7 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+ 	gboolean is_whisper = FALSE;
+ 	
+ 	g_return_if_fail(messagetype != NULL);
+-	
++
+ 	messagetype_parts = g_strsplit(messagetype, "/", -1);
+ 	
+ 	if (json_object_has_member(resource, "clientmessageid"))
+@@ -1126,7 +1211,7 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+ 
+ 				} else {
+ 					html = teams_process_files_in_properties(properties, &html);
+-					html = teams_process_cards_in_properties(properties, &html);
++					html = teams_process_cards_in_properties(properties, &html, sa, conv, composetimestamp, from);
+ 
+ 				}
+ 			}
+@@ -1463,7 +1548,7 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+ 
+ 				} else {
+ 					html = teams_process_files_in_properties(properties, &html);
+-					html = teams_process_cards_in_properties(properties, &html);
++					html = teams_process_cards_in_properties(properties, &html, sa, conv, composetimestamp, from);
+ 					
+ 				}
+ 			}
+@@ -3283,6 +3368,171 @@ teams_send_message(TeamsAccount *sa, const gchar *convname, const gchar *message
+ 	g_hash_table_insert(sa->sent_messages_hash, clientmessageid_str, clientmessageid_str);
+ }
+ 
++/* webOS voice notes (SEND). A Teams voice note is NOT a File.1 URIObject -- it is a
++ * RichText/Html message carrying an audio CARD in properties.cards (captured from a real
++ * Android->Teams voice note):
++ *   content:  <div><span itemid="<GUID>" itemscope="" itemtype="http://schema.skype.com/InputExtension"></span></div>
++ *   amsreferences: ["<audio-object-id>"]
++ *   properties.cards: [{"cardClientId":"<GUID>","content":{"duration":"PT<N>S",
++ *                       "media":[{"url":".../objects/<id>/views/audio"}]},
++ *                       "contentType":"application/vnd.microsoft.card.audio"}]
++ *   properties.formatVariant: "TEAMS"
++ * The GUID ties the content span's itemid to the card's cardClientId. The audio object must
++ * have been created as an audio ASM object (so it has a /views/audio view) and its content
++ * uploaded -- see teams_xfer_send_init/_begin (is_audio). */
++void
++teams_send_audio_card(TeamsAccount *sa, const gchar *who, const gchar *object_id, guint duration_secs)
++{
++	gchar *post, *url, *content, *cards, *media_url, *guid, *convname_enc;
++	const gchar *convname;
++	JsonObject *obj, *props;
++	JsonArray *amsrefs;
++	gint64 clientmessageid;
++	gchar *clientmessageid_str;
++
++	if (object_id == NULL || !*object_id)
++		return;
++
++	/* Resolve buddy -> 1:1 thread the same way teams_send_im does; a group name is already a thread id. */
++	convname = who ? g_hash_table_lookup(sa->buddy_to_chat_lookup, who) : NULL;
++	if (convname == NULL)
++		convname = who;
++	if (convname == NULL || !*convname)
++		return;
++
++	convname_enc = g_strdup(purple_url_encode(convname));
++	url = g_strdup_printf(TEAMS_CONTACTS_PATH_PREFIX "/v1/users/ME/conversations/%s/messages", convname_enc);
++	g_free(convname_enc);
++
++	clientmessageid = teams_get_js_time();
++	clientmessageid_str = g_strdup_printf("%" G_GINT64_FORMAT "", clientmessageid);
++
++	/* 32-hex GUID (no dashes), used as BOTH the content span's itemid and the card's cardClientId. */
++	guid = g_strdup_printf("%08x%08x%08x%08x", g_random_int(), g_random_int(), g_random_int(), g_random_int());
++
++	media_url = g_strdup_printf("https://%s/v1/objects/%s/views/audio", TEAMS_XFER_HOST, purple_url_encode(object_id));
++
++	content = g_strdup_printf(
++		"<div><span itemid=\"%s\" itemscope=\"\" itemtype=\"http://schema.skype.com/InputExtension\"></span></div>",
++		guid);
++
++	/* properties.cards is itself a JSON STRING (a serialised one-element array), matching the wire format. */
++	cards = g_strdup_printf(
++		"[{\"cardClientId\":\"%s\",\"content\":{\"duration\":\"PT%uS\",\"media\":[{\"url\":\"%s\"}]},"
++		"\"contentType\":\"application/vnd.microsoft.card.audio\"}]",
++		guid, duration_secs > 0 ? duration_secs : 1, media_url);
++
++	obj = json_object_new();
++	json_object_set_string_member(obj, "clientmessageid", clientmessageid_str);
++	json_object_set_string_member(obj, "content", content);
++	json_object_set_string_member(obj, "messagetype", "RichText/Html");
++	json_object_set_string_member(obj, "contenttype", "text");
++	json_object_set_string_member(obj, "imdisplayname", sa->self_display_name ? sa->self_display_name : sa->username);
++
++	amsrefs = json_array_new();
++	json_array_add_string_element(amsrefs, object_id);
++	json_object_set_array_member(obj, "amsreferences", amsrefs);
++
++	props = json_object_new();
++	json_object_set_string_member(props, "cards", cards);
++	json_object_set_string_member(props, "formatVariant", "TEAMS");
++	json_object_set_object_member(obj, "properties", props);
++
++	post = teams_jsonobj_to_string(obj);
++	purple_debug_info("teams", "sending voice-note card: %s\n", post);
++
++	teams_post_or_get(sa, TEAMS_METHOD_POST | TEAMS_METHOD_SSL, TEAMS_CONTACTS_HOST, url, post, teams_sent_message_cb, g_strdup(convname), TRUE);
++
++	g_free(post);
++	json_object_unref(obj);
++	g_free(url);
++	g_free(content);
++	g_free(cards);
++	g_free(media_url);
++	g_free(guid);
++
++	g_hash_table_insert(sa->sent_messages_hash, clientmessageid_str, clientmessageid_str);
++}
++
++/* webOS video clips (SEND). A Teams video message is a RichText/Html message whose content is an inline
++ * AMSVideo <video> element -- exactly parallel to how an image is an inline AMSImage <img> (NOT a card).
++ * Verified against a real incoming Teams video:
++ *   content: <p><video src=".../objects/<id>/views/video" itemscope="" itemtype="http://schema.skype.com/AMSVideo"
++ *                       width="720" height="1280" data-duration="PT27S" alt="Media"
++ *                       style="separateMediaAttachmentEnabled:true"></video></p>
++ *   amsreferences: ["<id>"]
++ *   properties.formatVariant: "TEAMS"
++ * The object must have been created as a "sharing/video" ASM object with its content uploaded to
++ * /content/video (so it has a /views/video view) -- see teams_xfer_send_init/_begin (is_video).
++ * width/height/duration are parsed from the mp4 (teams_mp4_video_info); 0 => omit the hint. */
++void
++teams_send_video_card(TeamsAccount *sa, const gchar *who, const gchar *object_id,
++	guint width, guint height, guint duration_secs)
++{
++	gchar *post, *url, *content, *media_url, *dur_attr, *dim_attr, *convname_enc;
++	const gchar *convname;
++	JsonObject *obj, *props;
++	JsonArray *amsrefs;
++	gint64 clientmessageid;
++	gchar *clientmessageid_str;
++
++	if (object_id == NULL || !*object_id)
++		return;
++
++	/* Resolve buddy -> 1:1 thread the same way teams_send_im does; a group name is already a thread id. */
++	convname = who ? g_hash_table_lookup(sa->buddy_to_chat_lookup, who) : NULL;
++	if (convname == NULL)
++		convname = who;
++	if (convname == NULL || !*convname)
++		return;
++
++	convname_enc = g_strdup(purple_url_encode(convname));
++	url = g_strdup_printf(TEAMS_CONTACTS_PATH_PREFIX "/v1/users/ME/conversations/%s/messages", convname_enc);
++	g_free(convname_enc);
++
++	clientmessageid = teams_get_js_time();
++	clientmessageid_str = g_strdup_printf("%" G_GINT64_FORMAT "", clientmessageid);
++
++	media_url = g_strdup_printf("https://%s/v1/objects/%s/views/video", TEAMS_XFER_HOST, purple_url_encode(object_id));
++	dim_attr = (width > 0 && height > 0) ? g_strdup_printf(" width=\"%u\" height=\"%u\"", width, height) : g_strdup("");
++	dur_attr = (duration_secs > 0) ? g_strdup_printf(" data-duration=\"PT%uS\"", duration_secs) : g_strdup("");
++
++	content = g_strdup_printf(
++		"<p><video src=\"%s\" itemscope=\"\" itemtype=\"http://schema.skype.com/AMSVideo\"%s%s "
++		"alt=\"Media\" style=\"separateMediaAttachmentEnabled:true\"></video></p>",
++		media_url, dim_attr, dur_attr);
++
++	obj = json_object_new();
++	json_object_set_string_member(obj, "clientmessageid", clientmessageid_str);
++	json_object_set_string_member(obj, "content", content);
++	json_object_set_string_member(obj, "messagetype", "RichText/Html");
++	json_object_set_string_member(obj, "contenttype", "text");
++	json_object_set_string_member(obj, "imdisplayname", sa->self_display_name ? sa->self_display_name : sa->username);
++
++	amsrefs = json_array_new();
++	json_array_add_string_element(amsrefs, object_id);
++	json_object_set_array_member(obj, "amsreferences", amsrefs);
++
++	props = json_object_new();
++	json_object_set_string_member(props, "formatVariant", "TEAMS");
++	json_object_set_object_member(obj, "properties", props);
++
++	post = teams_jsonobj_to_string(obj);
++	purple_debug_info("teams", "sending video message: %s\n", post);
++
++	teams_post_or_get(sa, TEAMS_METHOD_POST | TEAMS_METHOD_SSL, TEAMS_CONTACTS_HOST, url, post, teams_sent_message_cb, g_strdup(convname), TRUE);
++
++	g_free(post);
++	json_object_unref(obj);
++	g_free(url);
++	g_free(content);
++	g_free(media_url);
++	g_free(dim_attr);
++	g_free(dur_attr);
++
++	g_hash_table_insert(sa->sent_messages_hash, clientmessageid_str, clientmessageid_str);
++}
++
+ 
+ /* ------------------------------------------------------------------------------------
+  * webOS reactions (SEND): handle the transport's "webos-im-send-reaction" signal.
+diff --git a/teams_messages.h b/teams_messages.h
+index e3d37cd..c691ab8 100644
+--- a/teams_messages.h
++++ b/teams_messages.h
+@@ -30,7 +30,11 @@ gint teams_send_im(PurpleConnection *pc,
+ #endif
+ );
+ 
+-gint teams_chat_send(PurpleConnection *pc, gint id, 
++/* webOS: send an uploaded ASM audio object as a Teams voice note (audio card). */
++void teams_send_audio_card(TeamsAccount *sa, const gchar *who, const gchar *object_id, guint duration_secs);
++void teams_send_video_card(TeamsAccount *sa, const gchar *who, const gchar *object_id, guint width, guint height, guint duration_secs);
++
++gint teams_chat_send(PurpleConnection *pc, gint id,
+ #if PURPLE_VERSION_CHECK(3, 0, 0)
+ PurpleMessage *msg
+ #else
+-- 
+2.53.0
+

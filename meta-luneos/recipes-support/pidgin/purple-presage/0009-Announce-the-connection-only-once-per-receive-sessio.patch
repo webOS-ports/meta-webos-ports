@@ -1,0 +1,80 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:57:37 +0200
+Subject: [PATCH] Announce the connection only once per receive session
+
+Received::QueueEmpty does not arrive only once after the backlog has
+been drained. The receive stream is re-opened after every network
+hiccup, and each re-open drains to a fresh QueueEmpty, every 30-90 s on
+an otherwise idle connection. Each one re-sent connected:1, which makes
+the C side re-broadcast the presence of every buddy, and re-ran
+prime_contact_phone_numbers(), which does the same through
+presage_blist_set_online() for every stored contact.
+
+Do both only on the first QueueEmpty of a receive() call. A new login
+starts a new receive() call and so still announces itself once.
+
+This was part of the calling patch in the webOS tree; it is split out
+here because it does not depend on calling.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/rust/src/core.rs    |  7 ++++++-
+ src/rust/src/receive.rs | 10 +++++++++-
+ 2 files changed, 15 insertions(+), 2 deletions(-)
+
+diff --git a/src/rust/src/core.rs b/src/rust/src/core.rs
+index 5d8f9c0..d1854ac 100755
+--- a/src/rust/src/core.rs
++++ b/src/rust/src/core.rs
+@@ -397,6 +397,11 @@ async fn receive<S: presage::store::Store + Clone + 'static>(
+     // only give up after several *consecutive* hard errors (which usually means the main device
+     // unlinked us). Once catching-up finishes, handle_received() marks the account connected.
+     let mut consecutive_errors: u32 = 0;
++    // The stream is re-opened transparently after network hiccups, and every re-open drains to a
++    // fresh Received::QueueEmpty. Reporting connected and priming phone numbers only need to happen
++    // once per login, so remember whether they have been done. Scoped to this receive() call, so a
++    // genuinely new login still gets them.
++    let mut first_connect = true;
+     loop {
+         match manager.receive_messages().await {
+             Err(err) => {
+@@ -415,7 +420,7 @@ async fn receive<S: presage::store::Store + Clone + 'static>(
+                 futures::pin_mut!(messages);
+                 while let Some(received) = futures::StreamExt::next(&mut messages).await {
+                     crate::bridge::purple_debug(account, crate::bridge_structs::PURPLE_DEBUG_INFO, format!("received: {received:?}\n"));
+-                    crate::receive::handle_received(&mut manager, account, received).await;
++                    crate::receive::handle_received(&mut manager, account, received, &mut first_connect).await;
+                 }
+                 crate::bridge::purple_debug(account, crate::bridge_structs::PURPLE_DEBUG_INFO, format!("receive stream ended; reconnecting…\n"));
+             }
+diff --git a/src/rust/src/receive.rs b/src/rust/src/receive.rs
+index d32b6c2..beb568f 100755
+--- a/src/rust/src/receive.rs
++++ b/src/rust/src/receive.rs
+@@ -537,12 +537,20 @@ pub async fn handle_received<S: presage::store::Store + Clone + 'static>(
+     manager: &mut presage::Manager<S, presage::manager::Registered>,
+     account: *mut crate::bridge_structs::PurpleAccount,
+     received: presage::model::messages::Received,
++    first_connect: &mut bool,
+ ) {
+     match received {
+         presage::model::messages::Received::QueueEmpty => {
+-            // this happens once after all old messages have been received and processed
++            // Not only once after the backlog: this fires again whenever the receive stream is
++            // re-opened and has drained, every 30-90 s on an otherwise idle connection.
+             crate::bridge::purple_debug(account, crate::bridge_structs::PURPLE_DEBUG_INFO, format!("finished catching up.\n"));
+ 
++            if !*first_connect {
++                crate::bridge::purple_debug(account, crate::bridge_structs::PURPLE_DEBUG_INFO, format!("already connected, not announcing again.\n"));
++                return;
++            }
++            *first_connect = false;
++
+             // webOS chatthread fix: prime every stored contact's phone_number attribute from the
+             // persistent store BEFORE reporting connected, so the transport's getFullBuddyList (fired
+             // on connected) writes each Signal buddy's ims.value as +E.164 rather than the raw ACI.
+-- 
+2.53.0
+
