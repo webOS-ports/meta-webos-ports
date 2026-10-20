@@ -460,6 +460,10 @@ RDEPENDS:${PN}:remove:mako-halium = "waydroid waydroid-sensors"
 # after opening /dev/ttySAC0, so bluebinder only times out, and bcm-hciattach.service in
 # systemd-machine-units brings the controller up instead, as on hammerhead-halium.
 RDEPENDS:${PN}:remove:sm-t520 = "waydroid waydroid-sensors bluebinder"
+# flo-halium, the Nexus 7 (2013) Wi-Fi, is a fifth: a 32-bit 3.4 kernel. Its Bluetooth is the WCNSS
+# controller, which the kernel's hci_smd driver registers as hci0 (flo-hci-smd.service), and its vendor
+# has only a passthrough Bluetooth HAL, which no service in the container exposes for bluebinder to reach.
+RDEPENDS:${PN}:remove:flo-halium = "waydroid waydroid-sensors bluebinder"
 
 QEMU_RDEPENDS = " \
     alsa-utils-systemd \
