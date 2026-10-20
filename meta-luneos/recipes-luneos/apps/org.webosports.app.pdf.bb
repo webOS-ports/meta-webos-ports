@@ -1,15 +1,35 @@
-SUMMARY = "PDF viewer application based on Mozilla's pdf.js"
+SUMMARY = "PDF viewer for LuneOS, drawing with poppler"
 SECTION = "webos/apps"
-LICENSE = "Apache-2.0"
-LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
+LICENSE = "GPL-3.0-only"
+LIC_FILES_CHKSUM = "file://COPYING;md5=db37b6ead2dec60580595736ff983452"
 
-inherit webos_ports_repo
-inherit allarch
-inherit webos_enyojs_application
-inherit webos_filesystem_paths
-inherit webos_app
+PV = "2.0.0+git"
+PR = "r1"
+SRCREV = "e3c072bbb2837e279d8d06b5fc5fedb45ed102e0"
 
-PV = "1.0.0+git"
-SRCREV = "afe7cfaa1e5a1ead3ffc6c2b1446248af3c32518"
+DEPENDS = "qtbase qtdeclarative qtdeclarative-native poppler"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+
+inherit pkgconfig
+inherit webos_ports_repo
+inherit webos_application
+inherit webos_filesystem_paths
+
+inherit qt6-cmake
+inherit webos_cmake
+
+# The QML plugin lives in the app's own directory, as Camera's does.
+INSANE_SKIP:${PN} = "libdir"
+INSANE_SKIP:${PN}-dbg = "libdir"
+
+FILES:${PN} += " \
+    ${webos_applicationsdir}/org.webosports.app.pdf \
+    ${datadir}/luna-service2/roles.d/org.webosports.app.pdf.app.json \
+    ${datadir}/luna-service2/manifests.d/org.webosports.app.pdf.manifest.json \
+    ${datadir}/luna-service2/client-permissions.d/org.webosports.app.pdf.perm.json \
+"
+
+RDEPENDS:${PN} = " \
+    qtdeclarative-qmlplugins \
+"
