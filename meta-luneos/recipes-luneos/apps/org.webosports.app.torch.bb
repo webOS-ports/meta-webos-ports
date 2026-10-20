@@ -4,7 +4,7 @@ LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-3.0-only;md5=c79ff39f19dfec6d293b95dea7b07891"
 PV = "1.0.0+git"
 
-SRCREV = "1c9d248a7743ab36258838b1db1e28af99b28aee"
+SRCREV = "ca12f295319ef39902f8482df614ae1073790d43"
 
 RDEPENDS:${PN} = "luna-next-cardshell"
 

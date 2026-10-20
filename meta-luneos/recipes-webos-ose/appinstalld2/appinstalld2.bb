@@ -21,7 +21,7 @@ RDEPENDS:${PN} = " \
     python3-json \
 "
 
-SRCREV = "ce625e77ee14fa2e4ee2c228ed6478d8c14b1535"
+SRCREV = "bf3e1bc0b82ab250d1345b36c4ab18b9d9aac03c"
 
 PV = "1.0.0-49"
 PR = "r10"
