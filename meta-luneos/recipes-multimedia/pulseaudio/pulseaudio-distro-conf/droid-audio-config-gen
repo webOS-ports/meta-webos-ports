@@ -55,7 +55,6 @@ if [ -z "$SRC" ]; then
     echo "load-module module-droid-card" > "$CARD"
     exit 0
 fi
-echo "load-module module-droid-card config=$OUT/audio_policy_configuration.xml" > "$CARD"
 
 # Included files referenced from the main XML.
 for f in $(sed -n 's/.*xi:include href="\([^"]*\)".*/\1/p' \
@@ -82,5 +81,24 @@ insink {
 { print }
 ' "$SRC/audio_policy_configuration.xml" > "$OUT/audio_policy_configuration.xml" \
     || cp "$SRC/audio_policy_configuration.xml" "$OUT/audio_policy_configuration.xml"
+
+# The card's rate. Without rate= module-droid-card opened the Q25's and the
+# mindphone's outputs at 44.1 kHz, from mix ports that list "44100 48000". The
+# Q25's HAL converts 44.1 kHz to the 48 kHz it drives the speaker at, and what
+# comes out is every sound on the device chopped into rapid on/off bursts. At
+# 48 kHz it plays cleanly, and so does the mindphone, whose HAL runs 44.1 kHz
+# natively and was fine either way. So use 48 kHz when the primary output offers
+# it in a PCM format; otherwise leave the module's choice alone.
+RATE=""
+if awk '
+/<mixPort/ { prim = (/role="source"/ && /AUDIO_OUTPUT_FLAG_PRIMARY/); fmt = "" }
+prim && match($0, /format="[^"]*"/) { fmt = substr($0, RSTART, RLENGTH) }
+prim && fmt ~ /AUDIO_FORMAT_PCM/ && /samplingRates="([^"]*[ ,])?48000([ ,][^"]*)?"/ { found = 1 }
+/<\/mixPort>/ { prim = 0 }
+END { exit !found }
+' "$OUT/audio_policy_configuration.xml"; then
+    RATE=" rate=48000"
+fi
+echo "load-module module-droid-card config=$OUT/audio_policy_configuration.xml$RATE" > "$CARD"
 
 exit 0
