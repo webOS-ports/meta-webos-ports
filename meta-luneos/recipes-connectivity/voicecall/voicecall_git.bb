@@ -15,6 +15,7 @@ SRC_URI = "git://github.com/sailfishos/voicecall.git;protocol=https;branch=maste
            file://voicecall-manager.service \
            file://0001-Support-building-against-Qt-6.patch \
            file://0002-Build-cell-broadcast-support-without-mlite.patch \
+           file://0003-ofono-an-ended-incoming-call-is-disconnected-not-inc.patch \
 "
 
 #enable debugging in voicecall. This is now merged upstream so we don't need patches anymore to enable this for each individual file.
