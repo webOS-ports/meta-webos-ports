@@ -2,17 +2,15 @@ SUMMARY = "A terminal emulator with a custom virtual keyboard"
 LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263"
 
-SPV = "1.4.17"
+SPV = "1.5.0"
 PV = "${SPV}+git"
-SRCREV = "86d424ecf16dc42d14923cca706c763265c9729d"
-WEBOS_REPO_NAME = "fingerterm"
-WEBOS_GIT_PARAM_BRANCH = "herrie/qt6-rebase"
+SRCREV = "5c34953368952e3475f8c4bf3c67d34407612c96"
 
 DEPENDS = "qtbase qtdeclarative qttools-native"
 RDEPENDS:${PN} = "ttf-liberation-mono"
 
 SRC_URI = " \
-    ${WEBOS_PORTS_GIT_REPO_COMPLETE} \
+    git://github.com/sailfishos/fingerterm.git;protocol=https;branch=master \
     file://appinfo.json \
 "
 
@@ -22,7 +20,6 @@ EXTRA_QMAKEVARS_PRE = "\
     VERSION_STRING=${SPV} \
 "
 
-inherit webos_ports_fork_repo
 inherit webos_filesystem_paths
 inherit qt6-qmake
 
