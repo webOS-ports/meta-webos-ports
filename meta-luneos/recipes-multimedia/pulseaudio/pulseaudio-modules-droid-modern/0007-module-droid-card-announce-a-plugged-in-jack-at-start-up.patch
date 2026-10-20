@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Mon, 19 Oct 2026 13:19:38 +0200
+Subject: [PATCH] module-droid-card: announce a plugged-in jack at start-up
+
+The previous change tells the HAL about wired headphones and headsets from
+the port availability hook, which only fires on a change. The jack is read
+in pa__init() before that hook is connected, so headphones that are already
+plugged in when the module loads - at boot, or whenever PulseAudio is
+restarted - are never announced, and a MediaTek HAL keeps dropping what is
+written to them until they are pulled out and plugged in again.
+
+Announce them once after connecting the hook. Only the wired ports, and
+only when something is in the jack: droid-card leaves every other port at
+its default of available, and telling the HAL that a USB or Bluetooth
+device is connected would be a lie.
+
+Seen on the Zinwa Q25 (mt6789): with headphones in at PulseAudio start,
+nothing was announced and playback stayed silent until a replug; with this
+change the log shows "Notifying Android of port 'output-wired_headphone'
+(8) becoming available" at start-up and the headphones play.
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+
+---
+ src/droid/module-droid-card.c | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/src/droid/module-droid-card.c b/src/droid/module-droid-card.c
+index 38b8926..0201603 100644
+--- a/src/droid/module-droid-card.c
++++ b/src/droid/module-droid-card.c
+@@ -956,6 +956,25 @@ int pa__init(pa_module *m) {
+                            PA_HOOK_NORMAL,
+                            port_availability_changed_hook_callback, u);
+ 
++    /* The jack was read above, before this hook existed, so headphones that
++     * were already plugged in when the module loaded - at boot, or when
++     * PulseAudio restarts - have never been announced, and the HAL keeps
++     * dropping what is written to them until they are pulled and plugged in
++     * again. Announce them now. Only the wired ports, and only when something
++     * is in the jack: droid-card leaves every other port available by default,
++     * and telling the HAL a USB or Bluetooth device is connected would be a
++     * lie. */
++    {
++        pa_device_port *port;
++        void *state;
++
++        PA_HASHMAP_FOREACH(port, u->card->ports, state) {
++            if (port->available == PA_AVAILABLE_YES &&
++                pa_startswith(port->name, "output-wired_"))
++                port_availability_changed_hook_callback(NULL, port, u);
++        }
++    }
++
+     pa_card_put(u->card);
+ 
+     return 0;
+-- 
+2.53.0
+
