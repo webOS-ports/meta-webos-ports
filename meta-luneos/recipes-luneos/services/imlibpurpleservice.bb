@@ -18,8 +18,13 @@ inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
+# The LS2 .service declares Type=static, so the hub will not launch the transport. Without this
+# the unit in files/systemd ships nowhere and nothing starts it at all.
+inherit webos_systemd
 
-SRCREV = "1db4e21510d4da85bf026431276f087c2e3d3635"
+LUNEOS_SYSTEMD_SERVICE = "imlibpurpleservice.service"
+
+SRCREV = "c346d03aa3d0e2b178c47209327616ff910b9ace"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
