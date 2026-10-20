@@ -45,7 +45,12 @@ SRC_URI += " \
     file://0029-gobex-retry-a-write-the-socket-cannot-take-yet.patch \
     file://main.conf \
     file://brcm43438.service \
+    file://bluetooth.service.d/luneos-uinput.conf \
 "
+
+# See bluetooth.service.d/luneos-uinput.conf: bluetoothd needs the
+# bluetooth group to open /dev/uinput, or headset buttons never become keys.
+FILES:${PN} += "${systemd_system_unitdir}/bluetooth.service.d/luneos-uinput.conf"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "obex.service"
@@ -64,6 +69,9 @@ EXTRA_OECONF:remove = "--enable-external-ell"
 do_install:append () {
     install -d ${D}${sysconfdir}/bluetooth
     install -v -m 0644  ${UNPACKDIR}/main.conf ${D}${sysconfdir}/bluetooth/
+    install -d ${D}${systemd_system_unitdir}/bluetooth.service.d
+    install -m 0644 ${UNPACKDIR}/bluetooth.service.d/luneos-uinput.conf \
+        ${D}${systemd_system_unitdir}/bluetooth.service.d/luneos-uinput.conf
 }
 
 do_install:append:raspberrypi4 () {
