@@ -1,0 +1,155 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 15 Oct 2026 11:48:39 +0200
+Subject: [PATCH] gstreamer: mediarecorder: apply the audio settings to the
+ encoder
+
+QGstreamerMediaRecorder hands encodebin an audio profile with the codec's
+caps and nothing else:
+
+    gst_encoding_audio_profile_new(caps, nullptr, // preset
+                                   nullptr, // restriction
+                                   0); // presence
+
+and nothing else in the backend reads QMediaEncoderSettings::quality(),
+encodingMode(), audioBitRate(), audioChannelCount() or audioSampleRate().
+Every recording comes out in stereo at the input's rate, at the encoder's
+own defaults: an MP3 recorded at LowQuality and one at VeryHighQuality came
+out at 77 and 80 kbit/s on the same device.
+
+Pass the channel count and sample rate as the profile's restriction caps,
+so encodebin converts and resamples to them before the encoder.
+
+encodebin picks and creates the encoder itself when a pad is requested, so
+set the encoder's properties from its "deep-element-added" signal, for the
+encoders the backend is known to pick: lamemp3enc (VBR quality, or a bit
+rate), vorbisenc (quality, or a managed bit rate), opusenc and avenc_aac (a
+bit rate). NormalQuality is each encoder's own default, so recordings at
+the default settings do not change. Values go through
+gst_util_set_object_arg() so each is parsed against its property's type
+(lamemp3enc's target is an enum, which the profile's element-properties
+map cannot set from a parsed structure), and properties an encoder does
+not have are skipped.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+--- a/src/plugins/multimedia/gstreamer/mediacapture/qgstreamermediarecorder.cpp
++++ b/src/plugins/multimedia/gstreamer/mediacapture/qgstreamermediarecorder.cpp
+@@ -155,15 +155,108 @@
+     if (!caps)
+         return nullptr;
+ 
++    // The channel count and sample rate asked for, as caps on what goes into
++    // the encoder: encodebin converts and resamples to meet them.
++    GstCaps *restriction = nullptr;
++    if (settings.audioChannelCount() > 0 || settings.audioSampleRate() > 0) {
++        restriction = gst_caps_new_empty_simple("audio/x-raw");
++        if (settings.audioChannelCount() > 0)
++            gst_caps_set_simple(restriction, "channels", G_TYPE_INT, settings.audioChannelCount(),
++                                nullptr);
++        if (settings.audioSampleRate() > 0)
++            gst_caps_set_simple(restriction, "rate", G_TYPE_INT, settings.audioSampleRate(),
++                                nullptr);
++    }
++
+     GstEncodingProfile *profile =
+             (GstEncodingProfile *)gst_encoding_audio_profile_new(const_cast<GstCaps *>(caps.caps()),
+                                                                  nullptr, // preset
+-                                                                 nullptr, // restriction
++                                                                 restriction,
+                                                                  0); // presence
++    if (restriction)
++        gst_caps_unref(restriction);
+ 
+     return profile;
+ }
+ 
++namespace {
++
++using EncoderProperties = QList<std::pair<const char *, QByteArray>>;
++
++// Properties for the audio encoders the GStreamer backend is known to pick,
++// from the quality, or from the bit rate when one is asked for with a
++// bit rate encoding mode. NormalQuality is each encoder's own default.
++EncoderProperties audioEncoderProperties(QByteArrayView factory,
++                                         const QMediaEncoderSettings &settings)
++{
++    const int quality = qBound(int(QMediaRecorder::VeryLowQuality), int(settings.quality()),
++                               int(QMediaRecorder::VeryHighQuality));
++    const bool constant = settings.encodingMode() == QMediaRecorder::ConstantBitRateEncoding;
++    const bool byBitRate = (constant
++                            || settings.encodingMode() == QMediaRecorder::AverageBitRateEncoding)
++            && settings.audioBitRate() > 0;
++    const int bitRate = settings.audioBitRate();
++
++    if (factory == "lamemp3enc") {
++        if (byBitRate)
++            return { { "target", "bitrate" },
++                     { "bitrate", QByteArray::number(qBound(8, bitRate / 1000, 320)) },
++                     { "cbr", constant ? "true" : "false" } };
++        // VBR quality: 0 is the best, 9.999 the smallest.
++        static constexpr const char *vbrQuality[] = { "9", "7", "4", "2", "0" };
++        return { { "target", "quality" }, { "quality", vbrQuality[quality] } };
++    }
++    if (factory == "vorbisenc") {
++        if (byBitRate)
++            return { { "managed", constant ? "true" : "false" },
++                     { "bitrate", QByteArray::number(bitRate) } };
++        static constexpr const char *vbrQuality[] = { "0.1", "0.2", "0.3", "0.5", "0.7" };
++        return { { "quality", vbrQuality[quality] } };
++    }
++    if (factory == "opusenc") {
++        static constexpr int bitRates[] = { 24000, 32000, 64000, 96000, 128000 };
++        EncoderProperties properties{ { "bitrate",
++                                        QByteArray::number(byBitRate ? bitRate
++                                                                     : bitRates[quality]) } };
++        if (constant)
++            properties.push_back({ "bitrate-type", "cbr" });
++        return properties;
++    }
++    if (factory == "avenc_aac") {
++        static constexpr int bitRates[] = { 64000, 96000, 128000, 192000, 256000 };
++        return { { "bitrate", QByteArray::number(byBitRate ? bitRate : bitRates[quality]) } };
++    }
++    return {};
++}
++
++// encodebin picks and creates the encoder itself, when a pad is requested:
++// set its properties as it is added.
++void applyAudioEncoderSettings(const QGstBin &encodebin, const QMediaEncoderSettings &settings)
++{
++    auto onElementAdded = +[](GstBin *, GstBin *, GstElement *element,
++                              QMediaEncoderSettings *asked) {
++        GstElementFactory *factory = gst_element_get_factory(element);
++        if (!factory)
++            return;
++        const auto properties = audioEncoderProperties(
++                QByteArrayView(gst_plugin_feature_get_name(GST_PLUGIN_FEATURE(factory))),
++                *asked);
++        for (const auto &[name, value] : properties) {
++            if (!g_object_class_find_property(G_OBJECT_GET_CLASS(element), name))
++                continue;
++            gst_util_set_object_arg(G_OBJECT(element), name, value.constData());
++        }
++    };
++    g_signal_connect_data(encodebin.object(), "deep-element-added", G_CALLBACK(onElementAdded),
++                          new QMediaEncoderSettings(settings),
++                          [](gpointer data, GClosure *) {
++                              delete static_cast<QMediaEncoderSettings *>(data);
++                          },
++                          GConnectFlags(0));
++}
++
++} // namespace
++
+ 
+ static GstEncodingContainerProfile *createEncodingProfile(const QMediaEncoderSettings &settings)
+ {
+@@ -278,6 +371,7 @@
+     auto *encodingProfile = createEncodingProfile(settings);
+     g_object_set(gstEncodebin.object(), "profile", encodingProfile, nullptr);
+     gst_encoding_profile_unref(encodingProfile);
++    applyAudioEncoderSettings(gstEncodebin, settings);
+ 
+     QGstElement gstFileSink = QGstElement::createFromFactory("filesink", "filesink");
+     Q_ASSERT(gstFileSink);
