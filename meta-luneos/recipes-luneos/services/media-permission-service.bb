@@ -9,10 +9,15 @@ inherit allarch
 inherit webos_filesystem_paths
 
 PV = "0.1.0+git"
-SRCREV = "5010b7e7021bd1c2b32f1ae968d39159b77a9b15"
+PR = "r1"
+SRCREV = "0d89db371e4c6860031d12894326e4ed9973520a"
 SERVICE_NAME = "com.palm.mediapermissions"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+
+# The indexer grants what the user allows (grantRead); the bus module tells
+# the service which program sent an answer (Message.senderExePath()).
+RDEPENDS:${PN} += "mediaindexer nodejs-module-webos-sysbus"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files/sysbus"
@@ -26,7 +31,8 @@ do_install:append() {
     install -d ${D}${webos_sysbus_apipermissionsdir}
     install -d ${D}${webos_sysbus_groupsdir}
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.service ${D}${webos_sysbus_servicedir}/${SERVICE_NAME}.service
-    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.perm.json ${D}${webos_sysbus_permissionsdir}/${SERVICE_NAME}.perm.json
+    # the service's own, and those letting every app ask and the shell answer
+    install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/*.perm.json ${D}${webos_sysbus_permissionsdir}/
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.role.json ${D}${webos_sysbus_rolesdir}/${SERVICE_NAME}.role.json
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.api.json ${D}${webos_sysbus_apipermissionsdir}/${SERVICE_NAME}.api.json
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${SERVICE_NAME}.groups.json ${D}${webos_sysbus_groupsdir}/${SERVICE_NAME}.groups.json
@@ -36,4 +42,11 @@ do_install:append() {
     install -d ${D}${webos_sysconfdir}/db/permissions
     cp -vrf ${S}/service/configuration/db/kinds/* ${D}${webos_sysconfdir}/db/kinds/
     cp -vrf ${S}/service/configuration/db/permissions/* ${D}${webos_sysconfdir}/db/permissions/
+
+    # The service itself, which run-js-service starts from here
+    install -d ${D}${webos_servicesdir}/${SERVICE_NAME}
+    install -v -m 0644 ${S}/service/services.json ${S}/service/sources.json ${D}${webos_servicesdir}/${SERVICE_NAME}/
+    cp -vr ${S}/service/javascript ${D}${webos_servicesdir}/${SERVICE_NAME}/
 }
+
+FILES:${PN} += "${webos_servicesdir}"
