@@ -52,6 +52,7 @@ RDEPENDS:${PN} = " \
   alsa-conf \
   ${VIRTUAL-RUNTIME_ofono} \
   tar \
+  7zip \
   udev-extraconf \
   umtprd \
   webos-connman-adapter \
@@ -75,6 +76,7 @@ RDEPENDS:${PN} = " \
   ${VIRTUAL-RUNTIME_speech_synthesis} \
   \
   com.palm.app.backup \
+  com.palm.stark.files \
   org.webosports.app.atlas \
   org.webosports.app.calculator \
   org.webosports.app.contacts \
