@@ -19,7 +19,7 @@ inherit webos_cmake
 inherit pkgconfig
 inherit webos_system_bus
 
-SRCREV = "3e1d0daddbd1ddf2a85d0ef044ae42c93ea67b25"
+SRCREV = "1db4e21510d4da85bf026431276f087c2e3d3635"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 

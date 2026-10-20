@@ -4,7 +4,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 PV = "0.5+git"
 
-SRCREV = "0f60b71a1dfa8fbc0674b7629ba061e4def8a1c4"
+SRCREV = "c60aece5c5818884bd67770303abd2b1fbe7c12c"
 
 PR = "r4"
 
@@ -13,7 +13,7 @@ PR = "r4"
 # QML app sees the camera on a Halium device. The SPI header it needs comes
 # from qtmultimedia built with -DFEATURE_gstreamer_qt_api=ON; without it the
 # factory compiles to a stub and reports itself unavailable.
-DEPENDS = "qtbase qtdeclarative luna-service2 luna-sysmgr-common libwebos-application qtdeclarative-native bluez-qt qtmultimedia gstreamer1.0 gstreamer1.0-plugins-bad zbar"
+DEPENDS = "qtbase qtdeclarative luna-service2 luna-sysmgr-common libwebos-application qtdeclarative-native bluez-qt qtmultimedia qtsvg gstreamer1.0 gstreamer1.0-plugins-bad zbar"
 # TextField draws its background with QtQuick.Effects, which lives in
 # qtdeclarative-qmlplugins (this used to be Qt5Compat's ColorOverlay).
 RDEPENDS:${PN} = "qtdeclarative-qmlplugins"

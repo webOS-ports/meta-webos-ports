@@ -24,7 +24,7 @@ RRECOMMENDS:${PN} += "com.webos.service.camera"
 
 PV = "0.1.0-1+git"
 
-SRCREV = "10afec6c02e37f62960ee0d5a52231d4c0c2a0f6"
+SRCREV = "45b4dea077acb59e1c86314586b5a8c540c7bc88"
 
 inherit webos_ports_repo
 WEBOS_GIT_PARAM_BRANCH = "master"
