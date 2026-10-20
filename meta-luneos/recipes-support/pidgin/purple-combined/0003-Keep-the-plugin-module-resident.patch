@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:26:36 +0200
+Subject: [PATCH] Keep the plugin module resident
+
+libpurple probes every plugin at start-up and g_module_close()s the ones it
+does not need right away. For this plugin that unmaps a Go c-archive whose
+runtime has already started its scheduler threads in plugin_init(); those
+threads keep executing code from the unmapped pages and the host process
+dies with SIGSEGV/SIGBUS. On a headless libpurple host that loads all
+plugins at boot this turns into a crash loop.
+
+Mark the GModule resident in plugin_init() so g_module_close() never
+unloads it.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ glue/init.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/glue/init.c b/glue/init.c
+index ed9a0a7..5621bde 100644
+--- a/glue/init.c
++++ b/glue/init.c
+@@ -23,6 +23,7 @@
+ 
+ #include "gowhatsapp.h"
+ #include "libwhatsmeow.h" // for gowhatsapp_go_init
++#include <gmodule.h>      // g_module_make_resident - pin the Go .so so libpurple can't dlclose/unmap it
+ 
+ #ifndef PLUGIN_VERSION
+ #error Must set PLUGIN_VERSION in build system
+@@ -138,6 +139,13 @@ static PurplePluginProtocolInfo prpl_info = {
+ };
+ 
+ static void plugin_init(PurplePlugin *plugin) {
++    // The Go runtime (cgo c-archive) cannot survive g_module_close(): libpurple dlcloses plugins
++    // during its startup plugin probe, which unmaps code the Go scheduler threads are still executing
++    // -> SIGSEGV/SIGBUS in the host process. Pin this module resident so g_module_close can never
++    // unmap it. plugin->handle is the GModule* set by purple's probe.
++    if (plugin->handle) {
++        g_module_make_resident((GModule *) plugin->handle);
++    }
+     prpl_info.protocol_options = gowhatsapp_add_account_options(prpl_info.protocol_options);
+ }
+ 
+-- 
+2.53.0
+

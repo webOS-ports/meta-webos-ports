@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:27:08 +0200
+Subject: [PATCH] Download attachments into memory, with a timeout
+
+download_attachment() creates the destination file and hands it to
+whatsmeow's DownloadToFile(). That path fallocate()s the *os.File before
+streaming into it. Filesystems without fallocate support (vfat, older
+tmpfs) answer EOPNOTSUPP; whatsmeow treats that like a network error and
+retries against the next media host, writing into the same, never
+truncated file, until the HMAC check fails with "invalid media hmac". The
+attachment is lost.
+
+The download also used context.TODO(). It runs synchronously on the
+whatsmeow event goroutine through a blocking cgo call, so a stalled media
+host blocks event handling, including keep-alives, for as long as the
+retries take.
+
+Fetch the media with Download(), which reads into memory and verifies the
+HMAC without touching the file system, write the file with os.WriteFile(),
+and bound the request to 90 seconds.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ handle_attachment.go | 17 +++++++++++++++--
+ 1 file changed, 15 insertions(+), 2 deletions(-)
+
+diff --git a/handle_attachment.go b/handle_attachment.go
+index b462d0f..1163f4b 100644
+--- a/handle_attachment.go
++++ b/handle_attachment.go
+@@ -139,9 +139,22 @@ func (handler *Handler) handle_attachment(message *waE2E.Message, id string, sou
+ 
+ func (handler *Handler) download_attachment(local_file_path string, message whatsmeow.DownloadableMessage) error {
+ 	os.MkdirAll(filepath.Dir(local_file_path), 0o755)
+-	file, err := os.Create(local_file_path)
++	// Download to memory then write the file ourselves. whatsmeow's DownloadToFile streams to an
++	// *os.File and unconditionally calls fallocate(2), which some filesystems (tmpfs/vfat) reject
++	// with EOPNOTSUPP; that gets misclassified as a network error, retried across hosts, and the
++	// reused-but-not-truncated file corrupts the payload into an "invalid media hmac" failure.
++	// The in-memory Download() path does io.ReadAll (no fallocate, no *os.File) and verifies the HMAC.
++	//
++	// This runs synchronously on the whatsmeow event goroutine (purple_handle_attachment ->
++	// download_to_templated_destination -> gowhatsapp_go_download_attachment is a blocking cgo call).
++	// context.TODO() has no deadline, so a failing/stalled download could block event handling (and
++	// keep-alive) for minutes. Bound every download so a bad media fetch surfaces as a per-message
++	// error instead.
++	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
++	defer cancel()
++	data, err := handler.client.Download(ctx, message)
+ 	if err != nil {
+ 		return err
+ 	}
+-	return handler.client.DownloadToFile(context.TODO(), message, file)
++	return os.WriteFile(local_file_path, data, 0o644)
+ }
+-- 
+2.53.0
+

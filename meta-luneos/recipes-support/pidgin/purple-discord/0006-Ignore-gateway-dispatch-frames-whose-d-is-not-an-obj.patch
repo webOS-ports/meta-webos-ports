@@ -1,0 +1,84 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:22:43 +0200
+Subject: [PATCH] Ignore gateway dispatch frames whose "d" is not an object
+
+A DISPATCH frame whose "d" member is missing or not a JSON object made
+json_object_get_object_member assert, and discord_process_dispatch then
+worked on a NULL (or, with checks disabled, bogus) object, flooding the
+log with GLib criticals. This has been seen during the presence sync
+burst right after login.
+
+Check the member's type before fetching it, skip such frames with a
+debug message, and make discord_process_dispatch return early on NULL
+data.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ libdiscord.c | 42 +++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 41 insertions(+), 1 deletion(-)
+
+diff --git a/libdiscord.c b/libdiscord.c
+index d054353..fb70f69 100644
+--- a/libdiscord.c
++++ b/libdiscord.c
+@@ -4276,6 +4276,21 @@ static void discord_send_lazy_guild_request(DiscordAccount *da, DiscordGuild *gu
+ static void
+ discord_process_dispatch(DiscordAccount *da, const gchar *type, JsonObject *data)
+ {
++	/* webOS: data is json_object_get_object_member(obj, "d") from the caller
++	 * (discord_process_frame) - NULL whenever a dispatch frame's "d" is absent or the wrong
++	 * JSON type (an occasional malformed/unusual gateway frame, same flakiness class as every
++	 * other connector's guarded call sites - see teams_trouter.c). Every branch below reads off
++	 * data unconditionally; without this guard a single bad frame cascaded into 100+
++	 * g_hash_table_contains/insert_internal "hash_table != NULL" criticals from operating on
++	 * the resulting NULL object throughout this function - confirmed live, clustered right at
++	 * login (presence-sync burst). Skip this one event instead; the single unavoidable
++	 * json_object_get_object_member warning at the call site is json-glib's own behavior, not
++	 * ours to suppress. */
++	if (data == NULL) {
++		purple_debug_info("discord", "discord_process_dispatch: no/malformed data for %s, skipping\n", type ? type : "(null)");
++		return;
++	}
++
+ 	if (purple_strequal(type, "PRESENCE_UPDATE")) {
+ 		JsonObject *userdata = json_object_get_object_member(data, "user");
+ 		DiscordUser *user = discord_upsert_user(da->new_users, userdata);
+@@ -6769,7 +6784,32 @@ discord_process_frame(DiscordAccount *da, const gchar *frame)
+ 			gint64 seq = json_object_get_int_member(obj, "s");
+ 
+ 			da->seq = seq;
+-			discord_process_dispatch(da, type, json_object_get_object_member(obj, "d"));
++
++			/* webOS: check "d"'s type BEFORE calling json_object_get_object_member on it,
++			 * don't rely on its return value for safety. Confirmed live via an LD_PRELOAD
++			 * interposition shim (backtrace() itself returns 0 frames on this ARM build, no
++			 * unwind tables - had to intercept json_object_get_object_member directly and
++			 * capture the caller's return address instead): "d" arrived as a JSON ARRAY for a
++			 * real DISPATCH frame during a Discord presence-sync burst, tripping the
++			 * 'JSON_NODE_HOLDS_OBJECT || JSON_NODE_HOLDS_NULL' assertion. On this build
++			 * g_return_val_if_fail's early-return apparently doesn't reliably stop execution
++			 * (G_DISABLE_CHECKS?), so the function fell through and reinterpreted the array
++			 * node's internal union AS an object - a garbage-but-non-NULL JsonObject* handed
++			 * to discord_process_dispatch, which then flooded 100+
++			 * g_hash_table_contains/insert_internal "hash_table != NULL" criticals from
++			 * repeatedly misusing it as a hash table. discord_process_dispatch's own
++			 * data==NULL guard (added earlier) never caught this because data was never
++			 * actually NULL - just corrupt. Checking the type here avoids calling the fallible
++			 * getter at all when it doesn't hold. */
++			JsonNode *d_node = json_object_get_member(obj, "d");
++			JsonObject *d_obj = (d_node != NULL && (JSON_NODE_HOLDS_OBJECT(d_node) || JSON_NODE_HOLDS_NULL(d_node)))
++			                    ? json_object_get_object_member(obj, "d") : NULL;
++			if (d_node != NULL && d_obj == NULL && !JSON_NODE_HOLDS_NULL(d_node)) {
++				purple_debug_info("discord", "discord_process_frame: \"d\" is not an object (type %d) for event %s, skipping\n",
++				                   (int) json_node_get_node_type(d_node), type ? type : "(null)");
++				break;
++			}
++			discord_process_dispatch(da, type, d_obj);
+ 
+ 			break;
+ 		}
+-- 
+2.53.0
+

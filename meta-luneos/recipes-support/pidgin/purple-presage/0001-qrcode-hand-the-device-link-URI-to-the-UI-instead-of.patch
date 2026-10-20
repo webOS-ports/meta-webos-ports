@@ -1,0 +1,115 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:26:28 +0200
+Subject: [PATCH] qrcode: hand the device-link URI to the UI instead of
+ rendering it
+
+webOS has no libqrencode on the device and its accounts UI renders the
+QR code itself from a string. Skip the PBM rendering and only add the
+image field when image bytes exist; the transport forwards the
+"qr_string" request field to the accounts QR AuthChannel.
+
+The add-account flow also logs in once with the phone number the user
+typed as the username, before the Signal UUID is known. Instead of
+failing that connection with "Username for this account must be ...",
+store the UUID as the account "token" so the transport can re-create the
+account with username=UUID, and close the QR request.
+
+Both changes depend on the webOS imlibpurpletransport and drop the
+qrencode rendering for every other UI, so they are not for upstream as
+they stand. A build option making qrencode optional would be the
+upstreamable form of the first half.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ src/c/qrcode.c | 55 +++++++++++++++++---------------------------------
+ 1 file changed, 18 insertions(+), 37 deletions(-)
+
+diff --git a/src/c/qrcode.c b/src/c/qrcode.c
+index 7da09b0..87d0205 100755
+--- a/src/c/qrcode.c
++++ b/src/c/qrcode.c
+@@ -1,5 +1,8 @@
+ #include "presage.h"
+-#include <qrencode.h>
++/* webOS: no qrencode on device. We do NOT render the QR image here; instead we surface the
++ * device-link URI as the "qr_string" request field, which imlibpurpletransport's request_fields
++ * UI-op forwards to the accounts QR AuthChannel (same path as WhatsApp/Discord). The app renders
++ * the QR from the string. So qrencode is dropped entirely. */
+ 
+ static void qrcode_hide(PurpleConnection *connection, PurpleRequestFields *fields) {
+     // nothing to do.
+@@ -19,7 +22,9 @@ static void show_qrcode(PurpleConnection *connection, const char *qrstring, gcha
+         PurpleRequestField *field = purple_request_field_string_new("qr_string", "QR Code Data", qrstring, FALSE);
+         purple_request_field_group_add_field(group, field);
+     }
+-    {
++    /* webOS: only add the image field if we actually have image bytes. On device we pass NULL
++     * (no qrencode) and rely on qr_string, which the transport publishes to the QR AuthChannel. */
++    if (qrimgdata != NULL && qrimglen > 0) {
+         PurpleRequestField *field = purple_request_field_image_new("qr_code", "QR Code", qrimgdata, qrimglen);
+         purple_request_field_group_add_field(group, field);
+     }
+@@ -37,38 +42,10 @@ static void show_qrcode(PurpleConnection *connection, const char *qrstring, gcha
+ 
+ static void generate_and_show_qrcode(PurpleConnection *connection, const char *data) {
+     g_return_if_fail(data != NULL);
+-    QRcode * qrcode = QRcode_encodeString(data, 0, QR_ECLEVEL_L, QR_MODE_8, 1);
+-    if (qrcode != NULL) {
+-        int border = 4;
+-        int zoom = 6;
+-        int qrcodewidth = qrcode->width;
+-        int imgwidth = (border*2+qrcodewidth)*zoom;
+-        // poor man's PBM encoder
+-        gchar *head = g_strdup_printf("P1 %d %d ", imgwidth, imgwidth);
+-        int headlen = strlen(head);
+-        const gsize qrimglen = headlen+imgwidth*2*imgwidth*2;
+-        gchar * qrimgdata = g_strndup(head, qrimglen);
+-        g_free(head);
+-        gchar *imgptr = qrimgdata+headlen;
+-        // inspired by printQr in https://github.com/nayuki/QR-Code-generator/blob/master/c/qrcodegen-demo.c
+-        for (int y = 0; y/zoom < qrcodewidth + border*2; y++) {
+-            for (int x = 0; x/zoom < qrcodewidth + border*2; x++) {
+-                int yoffset = y/zoom - border;
+-                int xoffset = x/zoom - border;
+-                char pixel = '0';
+-                if (yoffset >= 0 && yoffset < qrcodewidth && xoffset >= 0 && xoffset < qrcodewidth) {
+-                    pixel = (qrcode->data[yoffset*qrcodewidth + xoffset] & 1) ? '1' : '0';
+-                }
+-                *imgptr++ = pixel;
+-                *imgptr++ = ' ';
+-            }
+-        }
+-        QRcode_free(qrcode);
+-        show_qrcode(connection, data, qrimgdata, qrimglen);
+-        g_free(qrimgdata);
+-    } else {
+-        purple_debug_info(PLUGIN_NAME, "qrcodegen failed.\n");
+-    }
++    /* webOS: skip on-device QR rendering (no qrencode). Surface the raw device-link URI as the
++     * qr_string request field; the transport forwards it to the accounts QR AuthChannel and the
++     * app renders the QR from the string. */
++    show_qrcode(connection, data, NULL, 0);
+ }
+ 
+ static void write_qrcode_as_conversation(PurpleConnection *connection, const char *data) {
+@@ -107,8 +84,12 @@ void presage_handle_uuid(PurpleConnection *connection, const char *uuid) {
+     if (purple_strequal(username, uuid)) {
+         purple_request_close_with_handle(connection); // close request displaying the QR code
+     } else {
+-        char *errmsg = g_strdup_printf("Username for this account must be '%s'.", uuid);
+-        purple_connection_error(connection, PURPLE_CONNECTION_ERROR_OTHER_ERROR, errmsg);
+-        g_free(errmsg);
++        // webOS create-after-confirm: the preview login's username is the phone number the user
++        // typed, not the Signal UUID. Rather than erroring the connection, surface the real UUID as
++        // the account "token" so imlibpurpletransport captures it (account_logged_in_cb ->
++        // AuthChannel::setConfirmed) and the accounts validator re-creates the account with
++        // username=UUID. Close the QR request and let the connection reach CONNECTED.
++        purple_account_set_string(account, "token", uuid);
++        purple_request_close_with_handle(connection);
+     }
+ }
+-- 
+2.53.0
+

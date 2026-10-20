@@ -1,8 +1,6 @@
 SUMMARY = "VoIP library used by Telegram clients"
-DESCRIPTION = "libtgvoip, the voice engine tdlib-purple links for Telegram calling. Built from the \
-monorepo's copy rather than upstream: it carries webOS-specific work in VoIPController.cpp, and it \
-is the tree tdlib-purple's call.cpp is written against."
-HOMEPAGE = "https://github.com/telegramdesktop/libtgvoip"
+DESCRIPTION = "libtgvoip, the voice engine tdlib-purple links for Telegram calling."
+HOMEPAGE = "https://github.com/grishka/libtgvoip"
 SECTION = "libs"
 LICENSE = "Unlicense"
 LIC_FILES_CHKSUM = "file://UNLICENSE;md5=1d267ceb3a8d8f75f1be3011ee4cbf53"
@@ -11,14 +9,19 @@ LIC_FILES_CHKSUM = "file://UNLICENSE;md5=1d267ceb3a8d8f75f1be3011ee4cbf53"
 # libopus for the codec; both are linked by tdlib-purple too, because this builds static.
 DEPENDS = "libopus alsa-lib openssl"
 
-# From luneos-synergy-connectors at the SRCREV the plugin recipes share. purple-synergy.inc is not
-# required (this is a library, not a prpl, so none of its purple-2 packaging applies); the shared
-# source include is, so a bump moves the engine and the plugin together.
-require recipes-luneos/synergy/luneos-synergy-connectors.inc
+# grishka's tree rather than telegramdesktop's fork: tdlib-purple's call.cpp is written against its
+# API, and the tdesktop fork reworked it (TgVoip.h, no autotools). 6c82c9d is the head of the
+# public branch, which has been dormant since 2019.
+SRC_URI = " \
+    git://github.com/grishka/libtgvoip.git;branch=public;protocol=https \
+    file://0001-Build-VideoPacketSender.cpp-and-VideoFEC.cpp-with-au.patch \
+    file://0002-Include-the-fixed-width-integer-headers-where-they-a.patch \
+    file://0003-NetworkSocketPosix-fall-back-to-IPv4-when-the-kernel.patch \
+"
+SRCREV = "6c82c9de85cca69ea099a738fcbd2ab2de4f839d"
 
-PV = "1.0+git"
-
-S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/telegram/plugin/libtgvoip"
+# From configure.ac's AC_INIT.
+PV = "2.4.4+git"
 
 inherit autotools pkgconfig
 
@@ -74,10 +77,3 @@ EXTRA_OEMAKE = "OBJCXXLINK='$(CXXLINK)'"
 # Headers land in ${includedir}/tgvoip (Makefile.am: tgvoipincludedir). Nothing ships at runtime
 # because the only output is a static archive, so the main package is empty by design.
 ALLOW_EMPTY:${PN} = "1"
-
-# GCC 15 no longer pulls <cstdint> in transitively, and this vendored copy of
-# libtgvoip/json11 uses uint8_t, uint32_t and friends without including it:
-#   json11.cpp:98:32: error: 'uint8_t' does not name a type
-# At least ten headers and translation units are affected, so force-include it
-# rather than patching each one of an upstream vendored tree.
-CXXFLAGS:append = " -include cstdint"

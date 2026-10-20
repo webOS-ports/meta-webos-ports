@@ -1,0 +1,3778 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:22:20 +0200
+Subject: [PATCH] webOS: Add Teams voice and video calling for the webOS Phone
+ app
+
+Add 1:1 Teams calling for personal (Teams for Life) accounts on webOS,
+driven by the stock Phone app:
+
+- teams_calling.c/.h: parse the NGC call notifications from the Trouter
+  (SDP offer, SRTP key, MS-TURN relay, control links), track call state,
+  and answer, reject, hang up and dial over the call control plane. Media
+  runs in the separate teams_media helper.
+- teams_call_luna.c/.h: the com.palm.teams.call luna-service2 service the
+  Phone app's CallSynergizer talks to. It is registered when the plugin
+  loads, so it is on the bus before the Phone app subscribes at boot.
+- h264_rtp.c/.h, teams_video_relay.cpp/.h, voipkit.cpp/.h: the H.264
+  video bridge to legacy webOS's libpalmgstskype.so. voipkit_none.c is a
+  null backend for systems without that library, such as LuneOS.
+- teams_trouter.c: register the personal calling endpoint
+  (SkypeSpacesWeb, TFL context, registrationId = epid, at
+  teams.microsoft.com), route /callAgent/ and bare-surl frames to the call
+  handler, renew registrations every 5 minutes instead of once a day
+  (call routing went stale long before 24 h), and log registrar
+  responses.
+
+Calling is only compiled in with -DTEAMS_WEBOS_CALL. Without it the
+trouter still prints the "Incoming call" message as upstream does, and
+teams_call_log() compiles to nothing. Before this, a build with the
+upstream Makefile left teams_calling_handle_trouter and teams_call_log
+undefined in the plugin, so libpurple could not load it.
+
+The upstream Makefile does not build these files. A calling build adds
+teams_calling.c, teams_call_luna.c, h264_rtp.c, teams_video_relay.cpp and
+voipkit.cpp or voipkit_none.c, with -DTEAMS_WEBOS_CALL, the luna-service2
+and PmLogLib headers, the directory with webos-ls2-compat.h on the include
+path, and links against luna-service2 and libstdc++.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ h264_rtp.c            |  183 +++++
+ h264_rtp.h            |   54 ++
+ libteams.c            |   26 +-
+ libteams.h            |    4 +
+ teams_call_luna.c     |  572 +++++++++++++++
+ teams_call_luna.h     |   33 +
+ teams_calling.c       | 1534 +++++++++++++++++++++++++++++++++++++++++
+ teams_calling.h       |  147 ++++
+ teams_trouter.c       |  108 ++-
+ teams_video_relay.cpp |  177 +++++
+ teams_video_relay.h   |   32 +
+ voipkit.cpp           |  460 ++++++++++++
+ voipkit.h             |   66 ++
+ voipkit_none.c        |   62 ++
+ 14 files changed, 3437 insertions(+), 21 deletions(-)
+ create mode 100644 h264_rtp.c
+ create mode 100644 h264_rtp.h
+ create mode 100644 teams_call_luna.c
+ create mode 100644 teams_call_luna.h
+ create mode 100644 teams_calling.c
+ create mode 100644 teams_calling.h
+ create mode 100644 teams_video_relay.cpp
+ create mode 100644 teams_video_relay.h
+ create mode 100644 voipkit.cpp
+ create mode 100644 voipkit.h
+ create mode 100644 voipkit_none.c
+
+diff --git a/h264_rtp.c b/h264_rtp.c
+new file mode 100644
+index 0000000..2f1820f
+--- /dev/null
++++ b/h264_rtp.c
+@@ -0,0 +1,183 @@
++// h264_rtp.c — see h264_rtp.h.
++#include "h264_rtp.h"
++#include <stdlib.h>
++#include <string.h>
++
++static const unsigned char kStartCode[4] = {0, 0, 0, 1};
++
++void h264_depacketizer_init(h264_depacketizer *d) {
++	memset(d, 0, sizeof(*d));
++}
++
++void h264_depacketizer_free(h264_depacketizer *d) {
++	free(d->buf);
++	memset(d, 0, sizeof(*d));
++}
++
++static int buf_reserve(h264_depacketizer *d, size_t extra) {
++	if (d->len + extra <= d->cap) return 1;
++	size_t want = d->cap ? d->cap * 2 : 4096;
++	while (want < d->len + extra) want *= 2;
++	unsigned char *n = (unsigned char *)realloc(d->buf, want);
++	if (!n) return 0;
++	d->buf = n;
++	d->cap = want;
++	return 1;
++}
++
++static int buf_append(h264_depacketizer *d, const unsigned char *data, size_t n) {
++	if (!buf_reserve(d, n)) return 0;
++	memcpy(d->buf + d->len, data, n);
++	d->len += n;
++	return 1;
++}
++
++static int append_nal(h264_depacketizer *d, const unsigned char *nal, size_t nal_len) {
++	if (!buf_append(d, kStartCode, 4)) return 0;
++	return buf_append(d, nal, nal_len);
++}
++
++int h264_depacketizer_feed(h264_depacketizer *d, const unsigned char *payload, size_t len,
++                            int marker, const unsigned char **out_data, size_t *out_len) {
++	if (len < 1) return 0;
++	unsigned char nal_type = payload[0] & 0x1f;
++	int appended_any = 0;
++
++	if (nal_type >= 1 && nal_type <= 23) {
++		// Single NAL unit packet (RFC 6184 5.6): payload is the whole NAL (header+data).
++		d->fu_active = 0;
++		appended_any = append_nal(d, payload, len);
++	} else if (nal_type == 24) {
++		// STAP-A (5.7.1): payload[0] is the STAP-A header, followed by a sequence of
++		// (2-byte big-endian size, NAL bytes) entries.
++		d->fu_active = 0;
++		size_t off = 1;
++		while (off + 2 <= len) {
++			size_t nal_len = ((size_t)payload[off] << 8) | payload[off + 1];
++			off += 2;
++			if (off + nal_len > len) break; // malformed: truncated NAL, stop here
++			if (!append_nal(d, payload + off, nal_len)) return 0;
++			appended_any = 1;
++			off += nal_len;
++		}
++	} else if (nal_type == 28) {
++		// FU-A (5.8): payload[0]=FU indicator, payload[1]=FU header, payload[2..]=fragment.
++		if (len < 2) return 0;
++		unsigned char fu_indicator = payload[0];
++		unsigned char fu_header = payload[1];
++		int start = (fu_header >> 7) & 1;
++		int end = (fu_header >> 6) & 1;
++		unsigned char orig_nal_type = fu_header & 0x1f;
++		const unsigned char *frag = payload + 2;
++		size_t frag_len = len - 2;
++		if (start) {
++			unsigned char reconstructed_header = (unsigned char)((fu_indicator & 0xe0) | orig_nal_type);
++			if (!buf_append(d, kStartCode, 4)) return 0;
++			if (!buf_append(d, &reconstructed_header, 1)) return 0;
++			if (!buf_append(d, frag, frag_len)) return 0;
++			d->fu_active = 1;
++			appended_any = 1;
++		} else if (d->fu_active) {
++			if (!buf_append(d, frag, frag_len)) return 0;
++			appended_any = 1;
++		}
++		// else: missed the start fragment (e.g. a dropped packet) — drop this one; the
++		// partially-accumulated NAL (if any) stays incomplete and gets discarded when the
++		// access unit is reset below, rather than being handed upstream corrupted.
++		if (end) d->fu_active = 0;
++	}
++	// Unknown/unsupported NAL type (25-27, 29-31 reserved/STAP-B/MTAP/FU-B): dropped.
++
++	(void)appended_any;
++	if (marker && d->len > 0) {
++		*out_data = d->buf;
++		*out_len = d->len;
++		d->len = 0; // buffer/capacity kept for reuse; next feed starts a fresh access unit
++		d->fu_active = 0;
++		return 1;
++	}
++	return 0;
++}
++
++static int payload_is_start3(const unsigned char *p) {
++	return p[0] == 0 && p[1] == 0 && p[2] == 1;
++}
++static int payload_is_start4(const unsigned char *p) {
++	return p[0] == 0 && p[1] == 0 && p[2] == 0 && p[3] == 1;
++}
++
++void h264_packetize(const unsigned char *access_unit, size_t len, size_t mtu,
++                     h264_rtp_emit_fn emit, void *ctx) {
++	if (!emit || len < 4 || mtu < 3) return;
++
++	// Find NAL boundaries: Annex-B start codes (3- or 4-byte 0x000001 / 0x00000001).
++	// Collect (offset,len) pairs first so we know which one is last (for the marker bit).
++	size_t starts[256];
++	size_t lens[256];
++	int n = 0;
++	size_t i = 0;
++	while (i + 3 <= len && n < 256) {
++		size_t sc_len = 0;
++		if (i + 4 <= len && payload_is_start4(access_unit + i)) sc_len = 4;
++		else if (payload_is_start3(access_unit + i)) sc_len = 3;
++		if (sc_len == 0) { i++; continue; }
++		size_t nal_off = i + sc_len;
++		size_t j = nal_off;
++		while (j + 3 <= len && !payload_is_start3(access_unit + j)) j++;
++		size_t nal_end;
++		if (j + 3 > len) {
++			nal_end = len; // no further start code: this NAL runs to the end
++		} else {
++			// j is where the NEXT "00 00 01" begins. If it's actually the tail of a
++			// 4-byte "00 00 00 01" start code, that leading zero belongs to the start
++			// code, not this NAL's data — trim it. (Safe: H.264's emulation-prevention
++			// byte guarantees real NAL payload never contains a 00 00 01 run, 3- or
++			// 4-byte, so any match here is genuinely a start code, never data.)
++			nal_end = (j > nal_off && access_unit[j - 1] == 0) ? j - 1 : j;
++		}
++		if (nal_end > nal_off) {
++			starts[n] = nal_off;
++			lens[n] = nal_end - nal_off;
++			n++;
++		}
++		i = j;
++	}
++
++	for (int k = 0; k < n; k++) {
++		const unsigned char *nal = access_unit + starts[k];
++		size_t nal_len = lens[k];
++		int is_last_nal = (k == n - 1);
++		if (nal_len == 0) continue;
++
++		if (nal_len <= mtu) {
++			emit(ctx, nal, nal_len, is_last_nal ? 1 : 0);
++			continue;
++		}
++
++		// FU-A fragmentation (RFC 6184 5.8).
++		unsigned char nal_header = nal[0];
++		unsigned char nal_type = nal_header & 0x1f;
++		unsigned char nri = nal_header & 0x60;
++		unsigned char fu_indicator = (unsigned char)(nri | 28);
++		const unsigned char *data = nal + 1;
++		size_t data_len = nal_len - 1;
++		size_t chunk = mtu - 2; // 2 bytes overhead: FU indicator + FU header
++		unsigned char frag[1500];
++		size_t chunk_cap = chunk < sizeof(frag) - 2 ? chunk : sizeof(frag) - 2;
++		size_t off = 0;
++		while (off < data_len) {
++			size_t take = data_len - off;
++			if (take > chunk_cap) take = chunk_cap;
++			int is_start = (off == 0);
++			int is_end = (off + take >= data_len);
++			unsigned char fu_header = (unsigned char)((is_start ? 0x80 : 0) |
++			                                            (is_end ? 0x40 : 0) | nal_type);
++			frag[0] = fu_indicator;
++			frag[1] = fu_header;
++			memcpy(frag + 2, data + off, take);
++			int marker = (is_end && is_last_nal) ? 1 : 0;
++			emit(ctx, frag, take + 2, marker);
++			off += take;
++		}
++	}
++}
+diff --git a/h264_rtp.h b/h264_rtp.h
+new file mode 100644
+index 0000000..fefa539
+--- /dev/null
++++ b/h264_rtp.h
+@@ -0,0 +1,54 @@
++// h264_rtp.h — minimal RFC 6184 (H.264 over RTP) depacketizer/packetizer.
++//
++// Pure byte-buffer logic, no sockets, no SkypeKit dependency — used by glue/voipkit.cpp to
++// convert between mediaserver's local SkypeKit RTP packets and meowcaller's Annex-B access
++// units (see messaging/whatsapp/calling/WHATSAPP_VIDEO_STATUS.md Part 18 for the RTP framing
++// this was reverse-engineered against, and the plan this implements).
++//
++// Handles single-NAL-unit packets (RFC 6184 §5.6), STAP-A aggregation (§5.7.1), and FU-A
++// fragmentation (§5.8) — the three packetization modes any ordinary H.264 RTP sender/receiver
++// needs. STAP-B/MTAP/FU-B (rarely used, interleaved-only) are not implemented.
++#ifndef H264_RTP_H
++#define H264_RTP_H
++
++#include <stddef.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++// Accumulates RTP payloads (H.264 payload only, no RTP header) into Annex-B access units.
++// One instance per direction/stream; not thread-safe (caller serializes calls per stream).
++typedef struct {
++	unsigned char *buf;
++	size_t len;
++	size_t cap;
++	int fu_active; // currently mid-way through reassembling an FU-A fragmented NAL
++} h264_depacketizer;
++
++void h264_depacketizer_init(h264_depacketizer *d);
++void h264_depacketizer_free(h264_depacketizer *d);
++
++// Feed one RTP payload + its marker bit. Returns 1 if this call completed an access unit
++// (marker bit set and at least one whole NAL was accumulated): *out_data/*out_len point at
++// the completed Annex-B access unit, valid only until the next h264_depacketizer_feed call on
++// this same instance — the caller must consume it (e.g. hand it to Go) before calling again.
++// Returns 0 if still accumulating (no output this call) or the packet was malformed/dropped.
++int h264_depacketizer_feed(h264_depacketizer *d, const unsigned char *payload, size_t len,
++                            int marker, const unsigned char **out_data, size_t *out_len);
++
++// Called once per resulting RTP payload when packetizing an access unit, in order. marker is
++// set only on the very last packet of the very last NAL in the access unit.
++typedef void (*h264_rtp_emit_fn)(void *ctx, const unsigned char *payload, size_t len, int marker);
++
++// Splits one Annex-B access unit (as delivered by meowcaller's VideoSink) into a sequence of
++// RTP payloads, fragmenting any NAL larger than mtu bytes into FU-A fragments. Calls emit once
++// per resulting packet. Never allocates — emit's payload buffer is stack/caller-owned per call.
++void h264_packetize(const unsigned char *access_unit, size_t len, size_t mtu,
++                     h264_rtp_emit_fn emit, void *ctx);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif
+diff --git a/libteams.c b/libteams.c
+index 3f58284..9cd8852 100644
+--- a/libteams.c
++++ b/libteams.c
+@@ -22,6 +22,9 @@
+ #include "teams_messages.h"
+ #include "teams_util.h"
+ #include "teams_trouter.h"
++#ifdef TEAMS_WEBOS_CALL
++#include "teams_call_luna.h"
++#endif
+ 
+ #ifdef ENABLE_TEAMS_PERSONAL
+ /* Personal/TFL: real-time message delivery via Trouter push does not work for
+@@ -87,7 +90,13 @@ teams_do_all_the_things(TeamsAccount *sa)
+ 
+ 		teams_get_friend_list(sa);
+ 		teams_trouter_begin(sa);
+-		
++
++#ifdef TEAMS_WEBOS_CALL
++		/* Register the com.palm.teams.call LS2 bridge so the stock Phone app can
++		 * ring/drive NGC voice calls (webOS build only; needs luna-service2). */
++		teams_call_luna_init(sa);
++#endif
++
+ 		teams_get_offline_history(sa);
+ 
+ #ifdef ENABLE_TEAMS_PERSONAL
+@@ -1140,7 +1149,20 @@ plugin_load(PurplePlugin *plugin
+ 						NULL);
+ 	
+ 	purple_signal_connect(purple_get_core(), "uri-handler", plugin, PURPLE_CALLBACK(teams_uri_handler), NULL);
+-	
++
++#ifdef TEAMS_WEBOS_CALL
++	/* Register com.palm.teams.call at plugin LOAD - NOT at login. The stock Phone app's CallSynergizer
++	 * subscribes to every PHONE transport's callStateQuery ONCE at its own launch (device boot) and does
++	 * not reliably re-subscribe if a transport was absent then. Binding registration to teams login
++	 * (teams_login.c -> teams_call_luna_init) means a slow Teams login (trouter/websocket) can leave
++	 * com.palm.teams.call off the bus at boot -> CallSynergizer gets "not running", never retries, and
++	 * incoming Teams calls never ring the Phone app. Registering here puts the service on the bus first.
++	 * teams_call_luna_init(NULL) leaves g_sa NULL (callStateQuery returns empty lines until an account
++	 * connects); the login path calls it again to bind the TeamsAccount (idempotent). Mirrors the Signal
++	 * fix in purple-presage init.c. */
++	teams_call_luna_init(NULL);
++#endif
++
+ 	return TRUE;
+ }
+ 
+diff --git a/libteams.h b/libteams.h
+index 641eaa3..1342244 100644
+--- a/libteams.h
++++ b/libteams.h
+@@ -284,6 +284,10 @@ struct _TeamsAccount {
+ 	guint trouter_reconnect_backoff;   /* webOS: current backoff seconds, doubles on repeat failure */
+ 	JsonObject *trouter_socket_obj;
+ 
++	/* NGC voice calling (teams_calling.c): the account's current call, or NULL. Typed
++	 * gpointer to avoid pulling teams_calling.h into every TU that includes libteams.h. */
++	gpointer active_call;
++
+ 	//devicecode login
+ 	gchar *login_device_code;
+ 	guint login_device_code_timeout;
+diff --git a/teams_call_luna.c b/teams_call_luna.c
+new file mode 100644
+index 0000000..00ea8cf
+--- /dev/null
++++ b/teams_call_luna.c
+@@ -0,0 +1,572 @@
++/*
++ * Teams NGC calling - webOS LS2 bridge (com.palm.teams.call). See teams_call_luna.h.
++ * Ported from the Telegram call-luna.cpp mediator, in C, driving teams_calling.c.
++ */
++
++#include "teams_call_luna.h"
++#include "teams_calling.h"
++#include "voipkit.h"
++#include "teams_video_relay.h"
++
++#include "webos-ls2-compat.h"   /* legacy split-bus API on either luna-service2 */
++#include <glib.h>
++#include <string.h>
++#include <stdlib.h>
++#include <dirent.h>
++#include <sys/resource.h>
++
++/* One service per process (whichever Teams account logs in first owns it). */
++static LSPalmService *g_service = NULL;
++static LSHandle      *g_pub     = NULL;
++static LSHandle      *g_prv     = NULL;
++static GMainLoop     *g_loopRef = NULL;
++static TeamsAccount  *g_sa      = NULL;
++
++/* Last state pushed, so a late subscriber gets the current picture in its first reply. */
++static gchar   *g_state    = NULL;
++static gchar   *g_peerAddr = NULL;
++static gchar   *g_peerName = NULL;
++static gchar   *g_cause    = NULL;
++static gboolean g_outgoing = FALSE;
++/* Call's video INTENT (TeamsCall.video_requested - known from ring/dial time), distinct from
++ * g_videoActive below (the clonk/skypekit bridge's own streaming-active state, confirmed-late).
++ * See TeamsCall.video_requested's comment in teams_calling.h for why using g_videoActive alone
++ * for the UI's video marker (this file's original approach, mirroring an equivalent bug already
++ * found and fixed in the Telegram/WhatsApp mediators) left the Phone app never seeing a video
++ * marker while incoming/dialing, only after answer. */
++static gboolean g_callIsVideo = FALSE;
++
++/* Native SkypeKit video bridge state (see the clonk lifecycle functions near the end of this
++ * file). g_clonkUri = the open clonk session's palm:// LS2 URI, if any; g_videoActive mirrors
++ * whether that session/bridge is currently up. g_clonkOpening guards teams_call_luna_open_clonk()
++ * against a real, documented race (found+fixed 2026-08-05, ported from
++ * WHATSAPP_VIDEO_STATUS.md's glue/call.c): g_clonkUri alone isn't enough, since it's only
++ * populated inside clonk_open_reply_cb()'s ASYNC reply - two triggers close together (e.g. this
++ * call's own video_active flipping true via both the mediaAnswer path and a near-simultaneous
++ * renegotiation) can both see it still empty and both fire a real LSCallOneReply, opening/starting
++ * the SAME session multiple times over, each with its own videoCaptureStart/videoPlayerStart.
++ * WhatsApp's own investigation found mediaserver's pipeline construction is not safe against
++ * overlapping start calls for one session - exactly matching this being the one thing broken here
++ * that isn't shared, connector-agnostic firmware (WhatsApp already carries this same fix; this
++ * file didn't). Set synchronously, before the async call goes out; cleared in
++ * clonk_open_reply_cb() once that reply lands, success or failure. */
++static gchar   *g_clonkUri    = NULL;
++static gboolean g_videoActive = FALSE;
++static gboolean g_clonkOpening = FALSE;
++
++#define SUBKEY "callState"
++
++static void
++setstr(gchar **slot, const char *v)
++{
++	g_free(*slot);
++	*slot = g_strdup(v ? v : "");
++}
++
++/* Build the CallSynergizer callStateQuery payload. Fields MUST be flat (address/displayName
++ * directly on each call - CallSynergyContact.create() throws if address is missing) and carry
++ * transport = this mediator's PHONE account templateId ("com.palm.teams") so the Phone app
++ * treats it as the IM call it is, not a cellular number. Mirrors the Telegram mediator. */
++static gchar *
++build_payload(void)
++{
++	/* ActiveCall.js reads outgoingVideo/incomingVideo/incomingVideoState directly off the LINE
++	 * object (activeLines[0].outgoingVideo etc.), NOT off calls[] - confirmed against the
++	 * WhatsApp mediator (call.go), the one known to actually drive the Phone app's video UI. A
++	 * plain per-call "video" bool (this file's original approach, still emitted below for
++	 * completeness/robustness) is simply never read by the UI on its own. incomingVideoState is
++	 * CallSynergizer's tri-state: "unavailable" (not a video call) / "available" (video call,
++	 * not yet streaming - e.g. still ringing/dialing) / "streaming" (the clonk/skypekit bridge is
++	 * actually up). */
++	const char *videoState = g_videoActive ? "streaming" : (g_callIsVideo ? "available" : "unavailable");
++	const char *videoBool  = g_videoActive ? "true" : "false";
++
++	GString *p = g_string_new("{\"returnValue\":true,\"allowVideoCalls\":true,\"videoURI\":\"");
++	if (g_clonkUri) {
++		gchar *uri = g_strescape(g_clonkUri, "");
++		g_string_append(p, uri);
++		g_free(uri);
++	}
++	g_string_append(p, "\",\"lines\":[");
++	if (g_state && *g_state) {
++		gchar *addr = g_strescape(g_peerAddr ? g_peerAddr : "", "");
++		gchar *name = g_strescape((g_peerName && *g_peerName) ? g_peerName : (g_peerAddr ? g_peerAddr : ""), "");
++		gchar *cause = g_strescape(g_cause ? g_cause : "", "");
++
++		g_string_append_printf(p, "{\"state\":\"%s\",", g_state);
++		if (g_strcmp0(g_state, "disconnected") == 0)
++			g_string_append_printf(p, "\"disconnectDetails\":{\"cause\":\"%s\"},", cause);
++		g_string_append_printf(p, "\"incomingVideo\":%s,\"outgoingVideo\":%s,\"incomingVideoState\":\"%s\",",
++			videoBool, videoBool, videoState);
++		g_string_append_printf(p,
++			"\"calls\":[{\"id\":\"teams\",\"origin\":\"%s\","
++			"\"incomingVideo\":%s,\"outgoingVideo\":%s,\"incomingVideoState\":\"%s\","
++			"\"transport\":\"com.palm.teams\",\"address\":\"%s\",\"displayName\":\"%s\"}]}",
++			g_outgoing ? "outgoing" : "incoming", videoBool, videoBool, videoState, addr, name);
++		g_free(addr); g_free(name); g_free(cause);
++	}
++	g_string_append(p, "]}");
++	return g_string_free(p, FALSE);
++}
++
++/* tiny top-level string field extractor (avoids a JSON dep) */
++static gchar *
++get_field(const char *json, const char *key)
++{
++	gchar *needle, *ret = NULL;
++	const char *k, *c, *e;
++	if (!json) return NULL;
++	needle = g_strdup_printf("\"%s\"", key);
++	k = strstr(json, needle);
++	if (k) {
++		c = strchr(k + strlen(needle), ':');
++		if (c) {
++			while (*++c == ' ') ;
++			if (*c == '"') {
++				e = strchr(++c, '"');
++				if (e) ret = g_strndup(c, e - c);
++			}
++		}
++	}
++	g_free(needle);
++	return ret;
++}
++
++/* tiny top-level bool field extractor, mirrors get_field() above */
++static gboolean
++get_bool_field(const char *json, const char *key)
++{
++	gchar *needle; const char *k, *c; gboolean ret = FALSE;
++	if (!json) return FALSE;
++	needle = g_strdup_printf("\"%s\"", key);
++	k = strstr(json, needle);
++	if (k) {
++		c = strchr(k + strlen(needle), ':');
++		if (c) {
++			while (*++c == ' ') ;
++			ret = (strncmp(c, "true", 4) == 0);
++		}
++	}
++	g_free(needle);
++	return ret;
++}
++
++/* ------------------------------------------------------------------- methods */
++
++static bool
++cb_call_state_query(LSHandle *sh, LSMessage *msg, void *ctx)
++{
++	LSError err; bool subscribed = FALSE; gchar *payload;
++	(void) ctx;
++	LSErrorInit(&err);
++	LSSubscriptionProcess(sh, msg, &subscribed, &err);
++	if (subscribed)
++		LSSubscriptionAdd(sh, SUBKEY, msg, &err);
++	payload = build_payload();
++	LSMessageReply(sh, msg, payload, &err);
++	g_free(payload);
++	if (LSErrorIsSet(&err)) { purple_debug_warning("teams", "callStateQuery: %s\n", err.message); LSErrorFree(&err); }
++	return TRUE;
++}
++
++static bool
++cb_dial(LSHandle *sh, LSMessage *msg, void *ctx)
++{
++	LSError err; gchar *addr; gboolean video, ok;
++	const char *payload = LSMessageGetPayload(msg);
++	(void) ctx;
++	LSErrorInit(&err);
++	addr = get_field(payload, "address");
++	video = get_bool_field(payload, "video");
++	ok = g_sa && addr && *addr && teams_calling_dial(g_sa, addr, video);
++	teams_call_log("cbDial addr=%s video=%d ok=%d", addr ? addr : "(null)", (int) video, (int) ok);
++	LSMessageReply(sh, msg, ok ? "{\"returnValue\":true}" : "{\"returnValue\":false}", &err);
++	g_free(addr);
++	if (LSErrorIsSet(&err)) LSErrorFree(&err);
++	return TRUE;
++}
++
++static bool
++cb_answer(LSHandle *sh, LSMessage *msg, void *ctx)
++{
++	LSError err; (void) ctx;
++	LSErrorInit(&err);
++	if (g_sa) teams_calling_answer(g_sa);
++	LSMessageReply(sh, msg, "{\"returnValue\":true}", &err);
++	if (LSErrorIsSet(&err)) LSErrorFree(&err);
++	return TRUE;
++}
++
++static bool
++cb_disconnect(LSHandle *sh, LSMessage *msg, void *ctx)
++{
++	LSError err; (void) ctx;
++	LSErrorInit(&err);
++	if (g_sa) teams_calling_hangup(g_sa);
++	LSMessageReply(sh, msg, "{\"returnValue\":true}", &err);
++	if (LSErrorIsSet(&err)) LSErrorFree(&err);
++	return TRUE;
++}
++
++static bool
++cb_noop(LSHandle *sh, LSMessage *msg, void *ctx)
++{
++	LSError err; (void) ctx;
++	LSErrorInit(&err);
++	LSMessageReply(sh, msg, "{\"returnValue\":true}", &err);
++	if (LSErrorIsSet(&err)) LSErrorFree(&err);
++	return TRUE;
++}
++
++static LSMethod g_methods[] = {
++	{ "callStateQuery",  cb_call_state_query },
++	{ "dial",            cb_dial             },
++	{ "answer",          cb_answer           },
++	{ "disconnect",      cb_disconnect       },
++	{ "hangupAll",       cb_disconnect       },
++	{ "hangupAllActive", cb_disconnect       },
++	{ "hold",            cb_noop             },
++	{ "swap",            cb_noop             },
++	{ "merge",           cb_noop             },
++	{ "extract",         cb_noop             },
++	{ "dtmf",            cb_noop             },
++	{ "dtmfEnd",         cb_noop             },
++	{ "changeMedia",     cb_noop             },
++	{ NULL, NULL }
++};
++
++/* ------------------------------------------------------------- state push in */
++
++static void push_to(LSHandle *h, const char *payload)
++{
++	LSError err;
++	if (!h) return;
++	LSErrorInit(&err);
++	LSSubscriptionReply(h, SUBKEY, payload, &err);
++	if (LSErrorIsSet(&err)) { purple_debug_warning("teams", "pushState: %s\n", err.message); LSErrorFree(&err); }
++}
++
++/* teams_calling state callback: cache + push to both connections (public = untrusted apps,
++ * private = the stock Phone app), and drive call audio on active/idle. */
++static void
++on_call_state(TeamsAccount *sa, const char *state, const char *peerAddress,
++              const char *peerName, gboolean isOutgoing, const char *cause,
++              gboolean isVideo)
++{
++	gchar *payload;
++	(void) sa;
++	setstr(&g_state, state);
++	setstr(&g_peerAddr, peerAddress);
++	setstr(&g_peerName, peerName);
++	setstr(&g_cause, cause);
++	g_outgoing = isOutgoing;
++	g_callIsVideo = isVideo;
++	teams_call_log("pushState state=%s addr=%s pub=%p prv=%p", g_state, g_peerAddr, (void*)g_pub, (void*)g_prv);
++
++	if (g_strcmp0(g_state, "active") == 0)      teams_call_luna_set_audio(TRUE);
++	else if (!g_state || !*g_state || g_strcmp0(g_state, "disconnected") == 0) teams_call_luna_set_audio(FALSE);
++
++	if (!g_pub && !g_prv) return;
++	payload = build_payload();
++	push_to(g_pub, payload);
++	push_to(g_prv, payload);
++	g_free(payload);
++}
++
++/* --------------------------------------------------------------- init/shutdown */
++
++static void on_video_active_changed(TeamsAccount *sa, gboolean active);
++
++gboolean
++teams_call_luna_init(TeamsAccount *sa)
++{
++	LSError err;
++	g_sa = sa;
++	teams_calling_set_state_cb(on_call_state);
++	teams_calling_set_video_cb(on_video_active_changed);
++	teams_call_log("teams_call_luna_init account=%s service=%p",
++	               sa && sa->username ? sa->username : "(null)", (void*)g_service);
++	if (g_service) return TRUE;   /* already registered */
++
++	LSErrorInit(&err);
++	if (!LSRegisterPalmService("com.palm.teams.call", &g_service, &err)) {
++		teams_call_log("LSRegisterPalmService FAIL: %s", err.message);
++		LSErrorFree(&err); return FALSE;
++	}
++	if (!LSPalmServiceRegisterCategory(g_service, "/", g_methods, g_methods, NULL, NULL, &err)) {
++		teams_call_log("RegisterCategory FAIL: %s", err.message);
++		LSErrorFree(&err); return FALSE;
++	}
++	g_loopRef = g_main_loop_new(g_main_context_default(), FALSE);
++	if (!LSGmainAttachPalmService(g_service, g_loopRef, &err)) {
++		teams_call_log("GmainAttach FAIL: %s", err.message);
++		LSErrorFree(&err); return FALSE;
++	}
++	g_pub = LSPalmServiceGetPublicConnection(g_service);
++	g_prv = LSPalmServiceGetPrivateConnection(g_service);
++	teams_call_log("com.palm.teams.call REGISTERED pub=%p prv=%p", (void*)g_pub, (void*)g_prv);
++	return TRUE;
++}
++
++void
++teams_call_luna_shutdown(TeamsAccount *sa)
++{
++	if (g_sa == sa) g_sa = NULL;
++}
++
++/* --------------------------------------------------------------- call audio */
++
++static bool audiod_reply(LSHandle *sh, LSMessage *m, void *ctx) { (void)sh;(void)m;(void)ctx; return TRUE; }
++
++static void
++audiod_send(const char *uri, const char *payload)
++{
++	LSError err; LSMessageToken tok;
++	if (!g_prv) return;
++	LSErrorInit(&err);
++	if (!LSCallOneReply(g_prv, uri, payload, audiod_reply, NULL, &tok, &err)) {
++		purple_debug_warning("teams", "audiod %s: %s\n", uri, err.message);
++		LSErrorFree(&err);
++	}
++}
++
++/* Raise (or restore) the scheduling priority of EVERY thread in this process. Ported from
++ * WhatsApp's wa_renice_all_threads() (glue/call.c) - same TouchPad, same ~2x-oversubscribed
++ * contention (chatthreader, mojodb, WebAppMgr fighting for 2 cores), same failure mode: this
++ * process's skypekit Thread A/B and the relay reader thread need to hand off frames within
++ * mediaserver's own tight deadlines, and losing a core mid-handoff silently drops the frame
++ * rather than erroring. WhatsApp needed this to get video actually flowing on this hardware;
++ * Teams never had it. Per-thread because Linux nice is per-task - renice all of /proc/self/task. */
++static void
++teams_renice_all_threads(int nice_val)
++{
++	DIR *d = opendir("/proc/self/task");
++	if (!d) return;
++	struct dirent *e;
++	int n = 0;
++	while ((e = readdir(d))) {
++		if (e->d_name[0] < '0' || e->d_name[0] > '9') continue;
++		if (setpriority(PRIO_PROCESS, (id_t) atoi(e->d_name), nice_val) == 0) n++;
++	}
++	closedir(d);
++	teams_call_log("reniced %d threads to %d", n, nice_val);
++}
++
++void
++teams_call_luna_set_audio(gboolean active)
++{
++	teams_call_log("set_audio active=%d prv=%p", (int) active, (void*)g_prv);
++	teams_renice_all_threads(active ? -15 : 0);
++	/* NOTE: teams_media routes call audio through the Atlas qspkd/qmicd daemons (media speaker + mic),
++	 * NOT the pvoip phone path - because the new-glibc wpe-gst engine can't reach PulseAudio's pvoip.
++	 * We deliberately do NOT call setCurrentScenario("phone_back_speaker") - that scenario suppresses
++	 * qspkd's media-speaker output (verified: a qspk tone goes silent under it), breaking RX playback.
++	 *
++	 * BUT we DO send a CallStatusUpdate "kick" here - reverse-engineered finding (Ghidra decompile of
++	 * /usr/sbin/audiod, cross-checked against github.com/webosose/audiod-pro's State::setCallMode /
++	 * TopazDevice::updateCallMode, which share the same class layout): TopazDevice::updateCallMode()'s
++	 * VoIP route-switch block (the msm_en_device/msm_capture_route/UCM device-set calls that actually
++	 * (re)power the mic/speaker route) is gated behind a "loopback armed" flag that's ONLY set by a
++	 * prior CARRIER-mode CallStatusUpdate - and only CONSUMED (never re-armed) by the next VoIP one.
++	 * On a Wi-Fi-only device with no real carrier, that flag is armed at most once per audiod process
++	 * lifetime, so only the FIRST VoIP call each audiod session actually re-inits mic/speaker hardware
++	 * routing; every call after that silently no-ops (matches the long-standing "mic/audio randomly
++	 * stops, reboot fixes it" pattern). Sending a synthetic transport="com.palm.telephony" (Carrier)
++	 * CallStatusUpdate immediately before the real one re-arms that flag every time, forcing a genuine
++	 * route re-init on every call. This does NOT invoke setCurrentScenario (confirmed in the decompile:
++	 * that's only called when the CURRENT scenario is already bluetooth_sco), so it should not disturb
++	 * qspkd's routing. See webos-audiod-re/ for the full writeup + decompiled/reconstructed source. */
++	if (active) {
++		audiod_send("palm://com.palm.audio/phone/CallStatusUpdate",
++		            "{\"lines\":[{\"state\":\"active\",\"calls\":[{\"id\":\"kick\",\"transport\":\"com.palm.telephony\"}]}]}");
++		audiod_send("palm://com.palm.audio/phone/CallStatusUpdate",
++		            "{\"lines\":[{\"state\":\"active\",\"calls\":[{\"id\":\"1\",\"transport\":\"com.palm.teams\"}]}]}");
++	} else {
++		/* a bare {"lines":[]} skips _callStatusUpdate's per-line loop entirely (0 lines -> State::
++		 * setCallMode is never called at all) - send a real "disconnected" line so State's own
++		 * bookkeeping (mNumVoip, mCallMode) stays consistent, even though the known audiod bug means
++		 * this alone won't re-sync TopazDevice's cached mode (updateCallMode() isn't called here). */
++		audiod_send("palm://com.palm.audio/phone/CallStatusUpdate",
++		            "{\"lines\":[{\"state\":\"disconnected\",\"calls\":[{\"id\":\"1\",\"transport\":\"com.palm.teams\"}]}]}");
++	}
++}
++
++/* --------------------------------------------------------------- video (clonk bridge) */
++/* Native SkypeKit H.264 video bridge, ported from Telegram's call-luna.cpp clonk chain (see that
++ * file + messaging/whatsapp/calling/WHATSAPP_VIDEO_STATUS.md Parts 1-21 for the full
++ * reverse-engineering trail this mirrors) - voipkit.cpp/h264_rtp.c/teams_video_relay.cpp now link
++ * directly into THIS process (libteams-personal.so), same as Telegram, so the sequencing is
++ * identical to Telegram's: voipkit_video_start() blocks, teams_video_relay_connect() hooks it up
++ * to teams_media's raw-RTP relay socket, then videoPlayerStart fires immediately after (Thread A is
++ * now bound+listening - WHATSAPP_VIDEO_STATUS.md Part 17: mediaserver won't dial the outbound
++ * socket until the inbound one has an accepted peer). The network RTP/SRTP/ICE transport itself
++ * still lives in the separate teams_media subprocess - see teams_media.c's top-of-file comment for
++ * why that split is necessary. */
++
++static bool clonk_capture_start_reply_cb(LSHandle *sh, LSMessage *msg, void *ctx);
++static bool clonk_player_start_reply_cb(LSHandle *sh, LSMessage *msg, void *ctx);
++static bool clonk_keyframe_start_reply_cb(LSHandle *sh, LSMessage *msg, void *ctx);
++
++static void
++clonk_uri_call(const char *method, const char *json_payload, LSFilterFunc cb, void *ctx)
++{
++	LSError err; LSMessageToken tok; gchar *uri;
++	if (!g_prv || !g_clonkUri) return;
++	LSErrorInit(&err);
++	uri = g_strdup_printf("%s%s", g_clonkUri, method);
++	if (!LSCallOneReply(g_prv, uri, json_payload, cb, ctx, &tok, &err)) {
++		teams_call_log("clonk %s call failed: %s", method, err.message);
++		LSErrorFree(&err);
++	}
++	g_free(uri);
++}
++
++static bool
++clonk_capture_start_reply_cb(LSHandle *sh, LSMessage *msg, void *ctx)
++{
++	(void) sh; (void) ctx;
++	teams_call_log("clonk videoCaptureStart: %s", LSMessageGetPayload(msg));
++	voipkit_video_start();
++	if (!teams_video_relay_connect())
++		teams_call_log("video relay connect failed (is teams_media up?) - continuing anyway");
++	/* MUST wait for Thread B to actually connect to mediaserver before firing videoPlayerStart -
++	 * see voipkit_video_wait_thread_b()'s comment (WHATSAPP_VIDEO_STATUS.md Part 17). This file
++	 * was missing this call entirely (found+fixed 2026-08-05): mediaserver's RunVideoHost() only
++	 * gets ONE non-retried attempt to dial our capture thread, and without this wait that attempt
++	 * routinely lands before Thread B has finished connecting - the call proceeds looking totally
++	 * healthy (Thread A still logs "accepted a connection" since our own listen socket is fine)
++	 * but silently sends zero outgoing video for the rest of the call. Confirmed via a live
++	 * packet capture: Android's video correctly reached webOS, but webOS sent nothing back, on a
++	 * call where SDP/ICE/modalities had already been verified fully correct. */
++	if (!voipkit_video_wait_thread_b(3000))
++		teams_call_log("skypekit thread B did not connect within 3s, firing videoPlayerStart anyway");
++	clonk_uri_call("videoPlayerStart", "{\"args\":[320,240]}", clonk_player_start_reply_cb, NULL);
++	return TRUE;
++}
++
++static bool
++clonk_player_start_reply_cb(LSHandle *sh, LSMessage *msg, void *ctx)
++{
++	(void) sh; (void) ctx;
++	teams_call_log("clonk videoPlayerStart: %s", LSMessageGetPayload(msg));
++	return TRUE;
++}
++
++static bool
++clonk_open_reply_cb(LSHandle *sh, LSMessage *msg, void *ctx)
++{
++	const char *p = LSMessageGetPayload(msg);
++	gchar *uri;
++	(void) sh; (void) ctx;
++	g_clonkOpening = FALSE; /* the open attempt this reply belongs to is no longer in flight */
++	uri = get_field(p, "location");
++	if (uri && *uri) {
++		g_free(g_clonkUri);
++		g_clonkUri = uri;
++		teams_call_log("clonk session open: %s", g_clonkUri);
++		/* Re-push immediately so subscribers (the Phone app's ActiveCall.js) get the real
++		 * videoURI without waiting for the next unrelated call-state change - mirrors
++		 * WhatsApp's glue/call.c clonk_open_reply(). */
++		if (g_pub || g_prv) {
++			gchar *payload = build_payload();
++			push_to(g_pub, payload);
++			push_to(g_prv, payload);
++			g_free(payload);
++		}
++		/* videoCaptureStart args are (w,h,fps,bitrate) on the wire, but ClonkPipeline::
++		 * setCamCapsFilter() reads the wrong VideoSettings offsets (+4/+8 instead of +0/+4) - a
++		 * real firmware bug (WHATSAPP_VIDEO_STATUS.md Part 16). Shifting width into the h slot
++		 * and height into the fps slot lands the correct values once that bug reads them one
++		 * field over. */
++		clonk_uri_call("videoCaptureStart", "{\"args\":[320,320,240,400000]}",
++		               clonk_capture_start_reply_cb, NULL);
++	} else {
++		g_free(uri);
++		teams_call_log("clonk session open failed: %s", p ? p : "(no payload)");
++	}
++	return TRUE;
++}
++
++/* Opens a clonk session and drives it through videoCaptureStart -> voipkit_video_start() ->
++ * videoPlayerStart. Call once per video call, from on_video_active_changed below. */
++static void
++teams_call_luna_open_clonk(void)
++{
++	LSError err; LSMessageToken tok;
++	if (g_clonkUri || g_clonkOpening || !g_prv) return;
++	g_clonkOpening = TRUE; /* set BEFORE the async call goes out - see g_clonkOpening's comment */
++	g_videoActive = TRUE;
++	LSErrorInit(&err);
++	if (!LSCallOneReply(g_prv, "palm://com.palm.mediad/service/clonk", "{}",
++	                    clonk_open_reply_cb, NULL, &tok, &err)) {
++		teams_call_log("clonk open call failed: %s", err.message);
++		g_clonkOpening = FALSE; /* the reply that would have cleared this never fires now */
++		LSErrorFree(&err);
++	}
++}
++
++static bool
++clonk_stop_reply_cb(LSHandle *sh, LSMessage *msg, void *ctx)
++{
++	(void) sh;
++	teams_call_log("clonk %s: %s", (const char *) ctx, LSMessageGetPayload(msg));
++	return TRUE;
++}
++
++/* Tears down the skypekit bridge + clonk session. No confirmed explicit session-teardown method
++ * (mediaserver tears a session down when its creating client's LS2 connection drops, shared with
++ * the rest of this long-lived process) - a fresh session is opened next time video starts. */
++static void
++teams_call_luna_close_clonk(void)
++{
++	if (!g_clonkUri) { g_videoActive = FALSE; return; }
++	teams_video_relay_disconnect(); /* stop relaying to teams_media before telling mediaserver to stop */
++	voipkit_video_stop();
++	clonk_uri_call("videoPlayerStop", "{\"args\":[]}", clonk_stop_reply_cb, (void *) "videoPlayerStop");
++	clonk_uri_call("videoCaptureStop", "{\"args\":[]}", clonk_stop_reply_cb, (void *) "videoCaptureStop");
++	g_free(g_clonkUri); g_clonkUri = NULL;
++	g_videoActive = FALSE;
++}
++
++static bool
++clonk_keyframe_start_reply_cb(LSHandle *sh, LSMessage *msg, void *ctx)
++{
++	(void) sh; (void) ctx;
++	teams_call_log("clonk keyframe-restart videoCaptureStart: %s", LSMessageGetPayload(msg));
++	return TRUE;
++}
++
++static bool
++clonk_keyframe_stop_reply_cb(LSHandle *sh, LSMessage *msg, void *ctx)
++{
++	(void) sh; (void) ctx;
++	teams_call_log("clonk keyframe-restart videoCaptureStop: %s", LSMessageGetPayload(msg));
++	/* Thread A/B and the clonk session itself stay up throughout - only the capture pipeline
++	 * restarts, so no voipkit_video_start()/videoPlayerStart here. */
++	clonk_uri_call("videoCaptureStart", "{\"args\":[320,320,240,400000]}", clonk_keyframe_start_reply_cb, NULL);
++	return TRUE;
++}
++
++/* No LS2-exposed keyframe trigger exists on the clonk surface, so force a fresh SPS/PPS/IDR by
++ * restarting capture instead. Not currently wired to a real PLI/FIR (no RTX/NACK/PLI handling in
++ * this build - see the video plan's known limitations); kept for parity with WhatsApp/Telegram
++ * and as a manual diagnostic hook. */
++static void
++teams_call_luna_request_keyframe(void)
++{
++	if (!g_clonkUri) return;
++	teams_call_log("keyframe requested, restarting capture");
++	clonk_uri_call("videoCaptureStop", "{\"args\":[]}", clonk_keyframe_stop_reply_cb, NULL);
++}
++
++/* teams_calling_set_video_cb() handler: open/close the clonk bridge as call->video_active flips,
++ * in either direction (inbound renegotiation, video already active in the initial offer/answer,
++ * or the callee's confirmation of an outgoing dial-with-video request). */
++static void
++on_video_active_changed(TeamsAccount *sa, gboolean active)
++{
++	(void) sa;
++	teams_call_log("video_active changed -> %d", (int) active);
++	if (active) teams_call_luna_open_clonk();
++	else        teams_call_luna_close_clonk();
++}
+diff --git a/teams_call_luna.h b/teams_call_luna.h
+new file mode 100644
+index 0000000..1f9ab94
+--- /dev/null
++++ b/teams_call_luna.h
+@@ -0,0 +1,33 @@
++/*
++ * Teams NGC calling - webOS LS2 bridge to the stock Phone app (CallSynergizer).
++ * webOS Synergy Revival.
++ *
++ * Registers com.palm.teams.call (dial/answer/disconnect/callStateQuery), exactly like the
++ * Telegram (com.palm.telegram.call) and WhatsApp mediators, so the stock dialer / in-call
++ * screen / call log drive Teams calls with no custom UI. Runs inside imlibpurpletransport on
++ * libpurple's glib mainloop. The signaling + (eventually) media live in teams_calling.c;
++ * this only translates the webOS call contract to/from teams_calling_{dial,answer,hangup}
++ * and pushes teams_calling's state transitions to callStateQuery subscribers.
++ *
++ * webOS-only: compiled by build-teams.sh (which links luna-service2), NOT by the upstream
++ * Makefile.
++ */
++
++#ifndef TEAMS_CALL_LUNA_H
++#define TEAMS_CALL_LUNA_H
++
++#include "libteams.h"
++
++/* Register the com.palm.teams.call service (idempotent) and bind it to this Teams account.
++ * Also registers the teams_calling state callback so call-state transitions reach the Phone
++ * app. Call when the account finishes logging in. Returns FALSE (and logs) on LS2 failure. */
++gboolean teams_call_luna_init(TeamsAccount *sa);
++
++/* Unbind the account (service stays registered for the process lifetime). */
++void teams_call_luna_shutdown(TeamsAccount *sa);
++
++/* Drive audiod's phone scenario so the media engine's voip/voipsource PCMs carry real
++ * loudspeaker/mic audio. Called with TRUE when a call goes active, FALSE on hangup. */
++void teams_call_luna_set_audio(gboolean active);
++
++#endif /* TEAMS_CALL_LUNA_H */
+diff --git a/teams_calling.c b/teams_calling.c
+new file mode 100644
+index 0000000..91f4c0a
+--- /dev/null
++++ b/teams_calling.c
+@@ -0,0 +1,1534 @@
++/*
++ * Teams Plugin for libpurple/Pidgin - NGC (NextGenCalling) voice calling.
++ * webOS Synergy Revival.  See teams_calling.h for the protocol overview.
++ *
++ * SCOPE (this file, initial drop):
++ *   - CAPTURE: dump every raw NGC call notification (SDP blob, udpKey, links, codecs) to
++ *     /media/internal/teams-call-capture.log  -> the ground truth for finishing media.
++ *   - PARSE:   turn the callNotification into a TeamsCall (peer, sdp, key, ticket, links).
++ *   - STATE:   drive incoming/dialing/active/disconnected and notify the Phone-app bridge.
++ *   - CONTROL: reject (POST to the reject link) works today; answer posts the SDP answer to
++ *     the mediaAnswer/attach link once the media engine produces one; dial (outgoing) is a
++ *     documented stub (the outgoing-call control flow needs an outgoing-call capture).
++ *   - MEDIA:   handed to the out-of-process teams_media engine; traced stubs until the
++ *     capture confirms codec (SILK/Satin/G.722) + MS-TURN ticket auth.
++ *
++ * Everything marked "CONFIRM WITH CAPTURE" is a best-effort guess from Eion Robb's
++ * reverse-engineered comments that a single real call will pin down.
++ */
++
++#include "teams_calling.h"
++#include "teams_connection.h"
++#include "teams_util.h"
++
++#include <purple.h>
++#include <string.h>
++#include <stdio.h>
++#include <stdarg.h>
++#include <time.h>
++#include <unistd.h>
++
++#define TEAMS_CALL_LOG      "/media/internal/teams-call.log"
++#define TEAMS_CALL_CAPTURE  "/media/internal/teams-call-capture.log"
++
++/* ------------------------------------------------------------------ logging */
++
++void
++teams_call_log(const char *fmt, ...)
++{
++	FILE *f = fopen(TEAMS_CALL_LOG, "a");
++	va_list ap;
++	time_t now = time(NULL);
++	char ts[32];
++	struct tm *tm = localtime(&now);
++	strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", tm);
++
++	if (f) {
++		fprintf(f, "%s ", ts);
++		va_start(ap, fmt);
++		vfprintf(f, fmt, ap);
++		va_end(ap);
++		fputc('\n', f);
++		fclose(f);
++	}
++	/* also to purple debug for the desktop build */
++	{
++		char buf[1024];
++		va_start(ap, fmt);
++		vsnprintf(buf, sizeof(buf), fmt, ap);
++		va_end(ap);
++		purple_debug_info("teams", "call: %s\n", buf);
++	}
++}
++
++/* ------------------------------------------------------- NULL-safe JSON getters
++ * NGC notifications are reverse-engineered and fields drop in/out between tenants;
++ * json-glib's own getters assert on a missing/typed-wrong member, so guard everything. */
++
++static const gchar *
++sget(JsonObject *o, const gchar *k)
++{
++	JsonNode *n;
++	if (!o || !json_object_has_member(o, k)) return NULL;
++	n = json_object_get_member(o, k);
++	if (n && JSON_NODE_HOLDS_VALUE(n)) return json_node_get_string(n);
++	return NULL;
++}
++
++static JsonObject *
++oget(JsonObject *o, const gchar *k)
++{
++	JsonNode *n;
++	if (!o || !json_object_has_member(o, k)) return NULL;
++	n = json_object_get_member(o, k);
++	if (n && JSON_NODE_HOLDS_OBJECT(n)) return json_node_get_object(n);
++	return NULL;
++}
++
++/* --------------------------------------------------------- state / media hooks */
++
++static TeamsCallStateCb g_state_cb = NULL;
++
++void
++teams_calling_set_state_cb(TeamsCallStateCb cb)
++{
++	g_state_cb = cb;
++}
++
++/* ---- media engine integration (teams_media, out-of-process) -----------------------------
++ * On answer we: parse the offer SDP (peer ice-ufrag/pwd, a=crypto GCM key, opus PT, candidates),
++ * spawn `teams_media --answer`, feed it START + the peer candidates, read back OUR ice creds +
++ * TX SRTP key + local candidates, build an SDP answer and POST it to links.attach. teams_media
++ * does the ICE + SRTP + Opus <-> ALSA voip. FIRST-ATTEMPT wiring - the exact answer-SDP shape and
++ * the POST body/auth need on-device iteration (heavily logged). */
++#define TEAMS_MEDIA_BIN "/media/internal/teams_media"
++
++typedef struct {
++	TeamsCall  *call;
++	GPid        pid;
++	int         in_fd;         /* -> child stdin */
++	GIOChannel *out_ch;        /* <- child stdout */
++	guint       out_watch;
++	gchar      *our_ufrag, *our_pwd, *our_txkey;
++	GString    *our_cands;     /* accumulated "candidate:..." lines, one per line */
++	gboolean    ready, answered;
++	guint       answer_timer;
++	gboolean    is_caller;      /* TRUE = outgoing (we build+POST the offer via cpconv) */
++	gchar      *callagent_id;   /* our client-generated callAgent uuid (outgoing) */
++
++	/* want_video is the OUTGOING request (dial-with-video), read by media_send_offer() to decide
++	 * whether to add a video m-line - NOT the same as call->video_active, which only goes TRUE once
++	 * the callee's answer actually confirms it (teams_calling_handle_media_answer). The skypekit/
++	 * clonk video bridge itself lives in this same process (teams_call_luna.c calls it directly,
++	 * same as Telegram) - no cross-process ack needed here anymore. */
++	gboolean          want_video;
++
++	/* Set by teams_calling_handle_renegotiation() right after it sends a RESTART to the engine;
++	 * consumed by media_on_output() when the engine's matching RESTARTED line arrives. We can't
++	 * build+POST the renegotiation answer synchronously in the same call as the RESTART write -
++	 * nice_agent_restart_stream() regenerates OUR OWN local ice-ufrag/pwd (see teams_media.c's
++	 * RESTART handler), and build_answer_sdp() needs those NEW values, which only reach us
++	 * asynchronously over the pipe (the same UFRAG/PWD lines media_on_output already parses for
++	 * the initial START). Answering immediately would race and very likely still send the STALE
++	 * pre-restart local creds. */
++	gchar            *pending_reneg_answer_link;
++
++	/* Last remote ice-ufrag we actually applied via RESTART. Teams' trouter redelivers the same
++	 * renegotiation push (observed live: 3 identical-ufrag frames within ~2s of each other) - see
++	 * teams_calling_handle_renegotiation()'s dedup check. Without this, every redelivery tears
++	 * down and rebuilds the ICE agent, so no single ICE session ever gets enough uninterrupted
++	 * time to finish connectivity checks before being restarted again. */
++	gchar            *last_restarted_ufrag;
++} TeamsMediaProc;
++
++static TeamsCallVideoCb g_video_cb = NULL;
++
++void
++teams_calling_set_video_cb(TeamsCallVideoCb cb)
++{
++	g_video_cb = cb;
++}
++
++/* POST JSON to a flightproxy/calling URL WITH the x-skypetoken auth header (teams_post_or_get does
++ * not add it for api.flightproxy.skype.com -> "Anonymous access is not allowed" 403). Logs the
++ * response. Used for both the cpconv create (offer) and the mediaAnswer/attach POST (answer). */
++static void
++flightproxy_resp_cb(PurpleHttpConnection *hc, PurpleHttpResponse *resp, gpointer u)
++{
++	int code; size_t len = 0; const gchar *data;
++	(void) hc; (void) u;
++	code = purple_http_response_get_code(resp);
++	data = purple_http_response_get_data(resp, &len);
++	if (code <= 0)
++		teams_call_log("FLIGHTPROXY resp code=%d err=%s", code,
++		               purple_http_response_get_error(resp) ? purple_http_response_get_error(resp) : "(none)");
++	else
++		teams_call_log("FLIGHTPROXY resp code=%d body=%.300s", code, data ? data : "(none)");
++}
++
++/* Teams calling client identity (matches teams.live.com's SkypeSpacesWeb TFL client string). */
++#define TEAMS_SKYPE_CLIENT "SkypeSpaces/1415/26070217343/os=linux; osVer=undefined; " \
++	"deviceType=computer; browser=chrome; browserVer=150.0.0.0/TsCallingVersion=2026.24.01.6/Ovb=0"
++
++/* Full form: POST with the calling headers + a caller-supplied response callback and user data.
++ * cb may be NULL (falls back to flightproxy_resp_cb which just logs). */
++static void
++flightproxy_post_cb(TeamsAccount *sa, const gchar *url, const gchar *body,
++                    PurpleHttpCallback cb, gpointer user)
++{
++	gchar *chain = purple_uuid_random(), *msgid = purple_uuid_random();
++	PurpleHttpRequest *req = purple_http_request_new(url);
++	purple_http_request_set_method(req, "POST");
++	purple_http_request_set_keepalive_pool(req, sa->keepalive_pool);
++	purple_http_request_header_set(req, "Content-Type", "application/json");
++	purple_http_request_header_set(req, "X-Skypetoken", sa->skype_token);
++	/* calling backend rejects requests without a client identity as 400 Bad Request */
++	purple_http_request_header_set(req, "X-Microsoft-Skype-Client", TEAMS_SKYPE_CLIENT);
++	purple_http_request_header_set(req, "X-Microsoft-Skype-Chain-Id", chain);
++	purple_http_request_header_set(req, "X-Microsoft-Skype-Message-Id", msgid);
++	purple_http_request_header_set(req, "ms-teams-ring", "general");
++	purple_http_request_set_contents(req, body, strlen(body));
++	purple_http_request(sa->pc, req, cb ? cb : flightproxy_resp_cb, user);
++	purple_http_request_unref(req);
++	g_free(chain); g_free(msgid);
++}
++
++static void
++flightproxy_post(TeamsAccount *sa, const gchar *url, const gchar *body)
++{
++	flightproxy_post_cb(sa, url, body, NULL, NULL);
++}
++
++/* DELETE (leave/end) a conversation-controller resource - same auth headers as flightproxy_post_cb,
++ * just a different HTTP method and no body. CONFIRM WITH CAPTURE: no HAR of an actual client-
++ * initiated hangup exists yet; DELETE on the "conv/<id>" REST resource matches the conversation-
++ * service's naming (leaving/ending a conversation) and is the best-effort guess used by
++ * teams_calling_hangup() for an ACTIVE call - untested against a live backend. */
++static void
++flightproxy_delete(TeamsAccount *sa, const gchar *url)
++{
++	gchar *chain, *msgid;
++	PurpleHttpRequest *req;
++	if (!url) return;
++	chain = purple_uuid_random(); msgid = purple_uuid_random();
++	req = purple_http_request_new(url);
++	purple_http_request_set_method(req, "DELETE");
++	purple_http_request_set_keepalive_pool(req, sa->keepalive_pool);
++	purple_http_request_header_set(req, "X-Skypetoken", sa->skype_token);
++	purple_http_request_header_set(req, "X-Microsoft-Skype-Client", TEAMS_SKYPE_CLIENT);
++	purple_http_request_header_set(req, "X-Microsoft-Skype-Chain-Id", chain);
++	purple_http_request_header_set(req, "X-Microsoft-Skype-Message-Id", msgid);
++	purple_http_request(sa->pc, req, flightproxy_resp_cb, NULL);
++	purple_http_request_unref(req);
++	g_free(chain); g_free(msgid);
++}
++
++/* build a callAgent trouter control path: <surl>callAgent/<agent>/<hash8>/<kind>/<name>/ */
++static gchar *
++callagent_path(TeamsCall *call, const char *agent, const char *kind, const char *name)
++{
++	gchar *hash = g_strdup_printf("%08x", g_random_int());
++	gchar *surl = call->sa->trouter_surl ? call->sa->trouter_surl : "";
++	gchar *p = g_strdup_printf("%scallAgent/%s/%s/%s/%s/", surl, agent, hash, kind, name);
++	g_free(hash);
++	return p;
++}
++
++static TeamsMediaProc *g_mproc;
++
++/* return the value after "a=<prefix>:" on the first matching line (newly-allocated), or NULL */
++static gchar *
++sdp_line_val(const char *sdp, const char *prefix)
++{
++	gchar **lines, *ret = NULL;
++	int i;
++	if (!sdp) return NULL;
++	lines = g_strsplit(sdp, "\n", -1);
++	for (i = 0; lines[i]; i++) {
++		gchar *l = g_strstrip(lines[i]);
++		if (g_str_has_prefix(l, prefix)) { ret = g_strdup(l + strlen(prefix)); break; }
++	}
++	g_strfreev(lines);
++	return ret;
++}
++
++/* the AEAD_AES_256_GCM inline key (base64, up to the '|') from the offer's a=crypto lines */
++static gchar *
++sdp_gcm_key(const char *sdp)
++{
++	gchar **lines; int i; gchar *ret = NULL;
++	if (!sdp) return NULL;
++	lines = g_strsplit(sdp, "\n", -1);
++	for (i = 0; lines[i]; i++) {
++		gchar *l = g_strstrip(lines[i]);
++		if (strstr(l, "AEAD_AES_256_GCM") && strstr(l, "inline:")) {
++			gchar *k = strstr(l, "inline:") + 7;
++			gchar *bar = strchr(k, '|');
++			ret = bar ? g_strndup(k, bar - k) : g_strdup(k);
++			break;
++		}
++	}
++	g_strfreev(lines);
++	return ret;
++}
++
++/* Direction attribute ("sendrecv"/"recvonly"/"sendonly"/"inactive") from the FIRST m=video
++ * section only - sdp_line_val() alone would find the audio section's a=sendrecv first, since
++ * it scans the whole SDP and audio comes before video in every SDP this codebase builds/parses.
++ * Returns NULL if the SDP has no m=video line at all (no video offered/negotiated). */
++static gchar *
++sdp_video_direction(const char *sdp)
++{
++	gchar **lines; int i; gboolean in_video = FALSE, found_video = FALSE; gchar *ret = NULL;
++	if (!sdp) return NULL;
++	lines = g_strsplit(sdp, "\n", -1);
++	for (i = 0; lines[i]; i++) {
++		gchar *l = g_strstrip(lines[i]);
++		if (g_str_has_prefix(l, "m=video")) { in_video = TRUE; found_video = TRUE; continue; }
++		if (l[0] == 'm' && l[1] == '=') { if (in_video) break; continue; }
++		if (!in_video) continue;
++		if (!strcmp(l, "a=sendrecv") || !strcmp(l, "a=recvonly") ||
++		    !strcmp(l, "a=sendonly") || !strcmp(l, "a=inactive")) {
++			ret = g_strdup(l + 2); break;
++		}
++	}
++	g_strfreev(lines);
++	/* RFC 3264 3.7: an m-line with no explicit direction attribute defaults to sendrecv - it does
++	 * NOT mean "no video". CAPTURED LIVE (2026-08-05): real Android/Teams mediaRenegotiation pushes
++	 * routinely omit this line despite fully negotiating H.264 codecs/ICE/crypto for the video
++	 * m-line (callModalities explicitly listing "video"), which every caller of this function was
++	 * silently reading as "peer doesn't want video" - call->video_active never flipped, our video
++	 * RTP bridge never activated, while the peer believed video was live and kept escalating until
++	 * it gave up with MediaError/410. Only fall back to NULL when there's truly no m=video section. */
++	if (!ret && found_video) ret = g_strdup("sendrecv");
++	return ret;
++}
++
++static void teams_calling_post_answer(TeamsCall *call, const char *answer_sdp);
++static void call_http_post(TeamsAccount *sa, const gchar *full_url, const gchar *body);
++
++/* dump the exact SDP answer we send, for offline diffing against the web client's accepted answer */
++static void
++teams_calling_log_sdp(const char *sdp)
++{
++	g_file_set_contents("/media/internal/teams-answer.sdp", sdp ? sdp : "", -1, NULL);
++}
++
++static void answer_ok_cb(TeamsAccount *sa, JsonNode *node, gpointer u);
++static void answer_err_cb(TeamsAccount *sa, const gchar *data, gssize len, gpointer u);
++
++/* Build the SDP answer from our media params + the offer (SDES-GCM path; the offer supports both
++ * SDES a=crypto and DTLS, and our engine keys via SDES). Shape mirrors the web client's accepted
++ * answer: BUNDLE + mid:audio_0/video_1 + rtcp-mux + label, a=crypto instead of DTLS fingerprint.
++ * CAPTURED LIVE (2026-08-01, rtcstats_dump from a real teams.live.com call - see
++ * messaging/teams/calling/captures/): the video m-line's direction is ALWAYS a=sendrecv in every
++ * one of a real client's answers, including the very first one before video is ever "on" and
++ * across all 5 renegotiation rounds of a normal call - direction never toggles to a=inactive.
++ * Actual video flow is controlled at the track/encoding level (whether H.264 RTP is actually being
++ * sent), not by the SDP m-line direction. Gating this on call->video_active (mirroring the offer's
++ * direction back to the peer instead of always sendrecv) is what the previous version of this
++ * function did, and is the leading suspect for the MediaError-410 storm every call has hit: it's
++ * simply not what Teams' backend expects to see. The offer/answer m-line-mirroring requirement
++ * still means we must ALWAYS emit the m-line at all (or the peer rejects the whole answer,
++ * FinalAnswerError 406/4122) - only the direction attribute's conditional was wrong.
++ * Codec/fmtp/rtcp-fb values are the real ones from a captured live Teams video call (H264/90000
++ * PT 107, rtx PT 99, packetization-mode=1, profile-level-id=42e01f). Shared by the initial answer
++ * (media_send_answer, below) and any later mid-call renegotiation
++ * (teams_calling_handle_renegotiation) - both reuse the SAME bundled ICE/crypto, only the
++ * direction/content changes. Caller owns the returned GString. */
++static GString *
++build_answer_sdp(TeamsMediaProc *mp)
++{
++	GString *a;
++	gchar *our_ip = NULL; int our_port = 3480;
++
++	/* Derive our OWN connection address for c=/m= from the first UDP host candidate (NOT the offerer's
++	 * relay IP - advertising the peer's address as ours confuses the NGC validator). */
++	if (mp->our_cands) {
++		gchar **cl = g_strsplit(mp->our_cands->str, "\n", -1); int i;
++		for (i = 0; cl[i]; i++) {
++			/* "candidate:<f> <comp> UDP <pri> <ip> <port> typ host ..." */
++			if (strstr(cl[i], " UDP ") && strstr(cl[i], "typ host")) {
++				gchar **t = g_strsplit(g_strstrip(cl[i]), " ", -1);
++				if (t[0] && t[1] && t[2] && t[3] && t[4] && t[5]) {
++					our_ip = g_strdup(t[4]); our_port = atoi(t[5]);
++				}
++				g_strfreev(t);
++				break;
++			}
++		}
++		g_strfreev(cl);
++	}
++
++	a = g_string_new("");
++	g_string_append(a, "v=0\r\n");
++	g_string_append_printf(a, "o=- %u 2 IN IP4 %s\r\n", g_random_int(), our_ip ? our_ip : "127.0.0.1");
++	g_string_append(a, "s=-\r\n");
++	g_string_append(a, "b=CT:4000\r\nt=0 0\r\n");
++	g_string_append(a, "a=extmap-allow-mixed\r\n");
++	g_string_append(a, "a=msid-semantic: WMS *\r\n");
++	g_string_append(a, "a=group:BUNDLE audio_0 video_1\r\n");
++	g_string_append_printf(a, "m=audio %d RTP/SAVP 102 9 0 8 101\r\n", our_port);
++	g_string_append_printf(a, "c=IN IP4 %s\r\n", our_ip ? our_ip : "127.0.0.1");
++	g_string_append(a, "a=rtpmap:102 opus/48000/2\r\n");
++	g_string_append(a, "a=rtpmap:9 G722/8000\r\n");
++	g_string_append(a, "a=rtpmap:0 PCMU/8000\r\n");
++	g_string_append(a, "a=rtpmap:8 PCMA/8000\r\n");
++	g_string_append(a, "a=rtpmap:101 telephone-event/8000\r\n");
++	g_string_append(a, "a=fmtp:102 minptime=10;useinbandfec=1\r\n");
++	g_string_append(a, "a=mid:audio_0\r\n");
++	g_string_append(a, "a=sendrecv\r\n");
++	g_string_append_printf(a, "a=ice-ufrag:%s\r\n", mp->our_ufrag);
++	g_string_append_printf(a, "a=ice-pwd:%s\r\n", mp->our_pwd);
++	g_string_append_printf(a, "a=crypto:4 AEAD_AES_256_GCM inline:%s|2^31\r\n", mp->our_txkey);
++	/* Emit UDP candidates only - Teams' NGC parser can reject the whole answer over ICE-TCP lines. */
++	if (mp->our_cands) {
++		gchar **cl = g_strsplit(mp->our_cands->str, "\n", -1); int i;
++		for (i = 0; cl[i]; i++)
++			if (cl[i][0] && strstr(cl[i], " UDP ")) g_string_append_printf(a, "a=%s\r\n", cl[i]);
++		g_strfreev(cl);
++	}
++	g_string_append(a, "a=ice-options:trickle\r\n");
++	g_string_append(a, "a=rtcp-mux\r\n");
++	g_string_append(a, "a=label:main-audio\r\n");
++
++	g_string_append_printf(a, "m=video %d RTP/SAVP 107 99\r\n", our_port);
++	g_string_append_printf(a, "c=IN IP4 %s\r\n", our_ip ? our_ip : "127.0.0.1");
++	g_string_append(a, "a=rtpmap:107 H264/90000\r\n");
++	g_string_append(a, "a=rtpmap:99 rtx/90000\r\n");
++	g_string_append(a, "a=fmtp:107 level-asymmetry-allowed=1;packetization-mode=1;"
++	                    "profile-level-id=42e01f;max-fs=8160;max-mbps=244800;max-fps=3000\r\n");
++	g_string_append(a, "a=fmtp:99 apt=107\r\n");
++	g_string_append(a, "a=rtcp-fb:107 goog-remb\r\n");
++	g_string_append(a, "a=rtcp-fb:107 transport-cc\r\n");
++	g_string_append(a, "a=rtcp-fb:107 nack\r\n");
++	g_string_append(a, "a=rtcp-fb:107 nack pli\r\n");
++	g_string_append(a, "a=mid:video_1\r\n");
++	g_string_append(a, "a=sendrecv\r\n");   /* always - see this function's header comment */
++	g_string_append_printf(a, "a=ice-ufrag:%s\r\n", mp->our_ufrag);
++	g_string_append_printf(a, "a=ice-pwd:%s\r\n", mp->our_pwd);
++	g_string_append_printf(a, "a=crypto:4 AEAD_AES_256_GCM inline:%s|2^31\r\n", mp->our_txkey);
++	g_string_append(a, "a=rtcp-mux\r\n");
++	g_string_append(a, "a=rtcp-rsize\r\n");
++	g_string_append(a, "a=label:main-video\r\n");
++
++	g_free(our_ip);
++	return a;
++}
++
++/* Kicks off the two-step media-controller handshake (attach -> parse acceptance link -> accept
++ * w/ SDP) using build_answer_sdp() above. If the peer's OFFER already has an active m=video line,
++ * activates video from this very first answer rather than waiting for a later renegotiation. */
++static void
++media_send_answer(TeamsMediaProc *mp)
++{
++	TeamsCall *call = mp->call;
++	GString *a;
++
++	if (mp->answered || !mp->our_ufrag || !mp->our_pwd || !mp->our_txkey) return;
++	mp->answered = TRUE;
++
++	{ gchar *dir = sdp_video_direction(call->sdp_offer);
++	  if (dir && strcmp(dir, "inactive") != 0 && !call->video_active) {
++	      call->video_active = TRUE;   /* needed now - build_answer_sdp() below reads it */
++	      teams_call_log("answer: offer already wants video (a=%s), activating from the start", dir);
++	      /* Defer the actual g_video_cb() (Clonk camera pipeline bring-up) until attach_resp_cb()
++	       * confirms the attach POST succeeded - see video_cb_pending's comment in teams_calling.h. */
++	      call->video_cb_pending = TRUE;
++	  }
++	  g_free(dir); }
++
++	a = build_answer_sdp(mp);
++
++	g_free(call->our_answer_sdp);
++	call->our_answer_sdp = g_strdup(a->str);
++	teams_call_log("ANSWER SDP built (%d bytes, video=%d) - starting attach->accept handshake",
++	               (int) a->len, call->video_active);
++	teams_calling_log_sdp(call->our_answer_sdp);   /* dump full answer for offline diffing */
++	teams_calling_post_answer(call, a->str);   /* now = attach then accept */
++	g_string_free(a, TRUE);
++}
++
++/* CALLER: build the OFFER SDP from our media params + POST the cpconv create request to place the
++ * call (mirrors the teams.live.com web client's api/v2/cpconv flow). FIRST-ATTEMPT. */
++static void
++media_send_offer(TeamsMediaProc *mp)
++{
++	TeamsCall *call = mp->call;
++	const char *agent = mp->callagent_id;
++	GString *sdp, *body;
++	gchar *offer_esc, *legid, *epid, *pid, *to_pid;
++	int i;
++	if (mp->answered || !mp->our_ufrag || !mp->our_pwd || !mp->our_txkey) return;
++	mp->answered = TRUE;
++
++	/* Derive our OWN connection address for c=/m= from the first UDP host candidate, same as
++	 * build_answer_sdp() - a hardcoded 0.0.0.0:3480 placeholder (the previous version of this
++	 * offer) is not what a real client sends. */
++	gchar *our_ip = NULL; int our_port = 3480;
++	if (mp->our_cands) {
++		gchar **cl = g_strsplit(mp->our_cands->str, "\n", -1); int j;
++		for (j = 0; cl[j]; j++) {
++			if (strstr(cl[j], " UDP ") && strstr(cl[j], "typ host")) {
++				gchar **t = g_strsplit(g_strstrip(cl[j]), " ", -1);
++				if (t[0] && t[1] && t[2] && t[3] && t[4] && t[5]) {
++					our_ip = g_strdup(t[4]); our_port = atoi(t[5]);
++				}
++				g_strfreev(t);
++				break;
++			}
++		}
++		g_strfreev(cl);
++	}
++
++	sdp = g_string_new(mp->want_video
++		? "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nb=CT:4000\r\nt=0 0\r\na=group:BUNDLE 0 1\r\n"
++		: "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nb=CT:4000\r\nt=0 0\r\na=group:BUNDLE 0\r\n");
++	g_string_append_printf(sdp, "m=audio %d RTP/SAVP 102 9 0 8\r\n", our_port);
++	g_string_append_printf(sdp, "c=IN IP4 %s\r\n", our_ip ? our_ip : "0.0.0.0");
++	g_string_append(sdp, "a=rtpmap:102 opus/48000/2\r\na=rtpmap:9 G722/8000\r\na=rtpmap:0 PCMU/8000\r\na=rtpmap:8 PCMA/8000\r\n");
++	g_string_append(sdp, "a=fmtp:102 minptime=10;useinbandfec=1\r\na=rtcp-mux\r\na=mid:0\r\na=sendrecv\r\na=label:main-audio\r\n");
++	g_string_append_printf(sdp, "a=ice-ufrag:%s\r\na=ice-pwd:%s\r\n", mp->our_ufrag, mp->our_pwd);
++	g_string_append_printf(sdp, "a=crypto:4 AEAD_AES_256_GCM inline:%s|2^31\r\n", mp->our_txkey);
++	/* Emit UDP candidates only - same fix as build_answer_sdp(): Teams' NGC parser can reject the
++	 * WHOLE blob over ICE-TCP lines. This offer previously included every candidate unfiltered
++	 * (TCP included), which is the leading suspect for outgoing calls consistently getting
++	 * "attached" (rung, answered) but then timing out with no signaling ever coming back from the
++	 * callee (code 408) - matches a parser silently rejecting our SDP wholesale, not a real
++	 * connectivity failure. */
++	if (mp->our_cands) { gchar **cl = g_strsplit(mp->our_cands->str, "\n", -1);
++		for (i = 0; cl[i]; i++) if (cl[i][0] && strstr(cl[i], " UDP ")) g_string_append_printf(sdp, "a=%s\r\n", cl[i]);
++		g_strfreev(cl); }
++	g_string_append(sdp, "a=ice-options:trickle\r\n");
++
++	/* Outgoing video (dial-with-video): add a second m-line matching build_answer_sdp's video
++	 * codec shape - no HAR reference for an outgoing-with-video offer (only incoming was
++	 * captured), so this is first-attempt, same as the rest of this offer's own documented
++	 * "CONFIRM WITH CAPTURE" status. call->video_active only goes TRUE once the callee's answer
++	 * confirms it (teams_calling_handle_media_answer) - this just reflects our OWN request. */
++	if (mp->want_video) {
++		g_string_append_printf(sdp, "m=video %d RTP/SAVP 107 99\r\n", our_port);
++		g_string_append_printf(sdp, "c=IN IP4 %s\r\n", our_ip ? our_ip : "0.0.0.0");
++		g_string_append(sdp, "a=rtpmap:107 H264/90000\r\na=rtpmap:99 rtx/90000\r\n");
++		g_string_append(sdp, "a=fmtp:107 level-asymmetry-allowed=1;packetization-mode=1;"
++		                     "profile-level-id=42e01f;max-fs=8160;max-mbps=244800;max-fps=3000\r\n");
++		g_string_append(sdp, "a=fmtp:99 apt=107\r\n");
++		g_string_append(sdp, "a=rtcp-fb:107 goog-remb\r\na=rtcp-fb:107 transport-cc\r\n");
++		g_string_append(sdp, "a=rtcp-fb:107 nack\r\na=rtcp-fb:107 nack pli\r\n");
++		g_string_append(sdp, "a=rtcp-mux\r\na=rtcp-rsize\r\na=mid:1\r\na=sendrecv\r\na=label:main-video\r\n");
++		g_string_append_printf(sdp, "a=ice-ufrag:%s\r\na=ice-pwd:%s\r\n", mp->our_ufrag, mp->our_pwd);
++		g_string_append_printf(sdp, "a=crypto:4 AEAD_AES_256_GCM inline:%s|2^31\r\n", mp->our_txkey);
++	}
++	g_free(our_ip);
++
++	/* Dump the exact bytes we sent, mirroring build_answer_sdp()'s teams-answer.sdp - lets a real
++	 * test call be checked for whether the video m-line actually went out as intended, instead of
++	 * inferring it from the want_video bool + byte count alone. */
++	g_file_set_contents("/media/internal/teams-offer.sdp", sdp->str, -1, NULL);
++
++	offer_esc = g_strescape(sdp->str, "");
++	legid = g_strdup_printf("%08X%08X%08X%08X", g_random_int(), g_random_int(), g_random_int(), g_random_int());
++	/* endpointId must be our REGISTERED calling endpoint so callAgent response frames route back. */
++	epid = g_strdup(call->sa->endpoint ? call->sa->endpoint : "");
++	pid = purple_uuid_random(); to_pid = purple_uuid_random();
++
++/* append "name":"<callagent path>", to body for the given control kind (conversation|call) */
++#define AGL(kind, nm) do { gchar *_p = callagent_path(call, agent, kind, nm); \
++	g_string_append_printf(body, "\"%s\":\"%s\",", nm, _p); g_free(_p); } while (0)
++
++	/* conversationRequest holds ONLY {type,subject,suppressDialout,applicationType,roster,properties,links};
++	 * participants/callInvitation/endpoint* are TOP-LEVEL siblings of conversationRequest (not nested). */
++	body = g_string_new("{\"conversationRequest\":{\"conversationType\":null,\"subject\":null,"
++		"\"suppressDialout\":false,\"applicationType\":\"TFL\",");
++	{ gchar *r = callagent_path(call, agent, "conversation", "rosterUpdate");
++	  g_string_append_printf(body, "\"roster\":{\"type\":\"Delta\",\"rosterUpdate\":\"%s\"},", r); g_free(r); }
++	g_string_append(body, "\"properties\":{\"allowConversationWithoutHost\":true,"
++		"\"enableGroupCallEventMessages\":true,\"enableGroupCallUpgradeMessage\":false,"
++		"\"enableGroupCallMeetupGeneration\":false},");
++	g_string_append(body, "\"links\":{");
++	AGL("conversation", "conversationEnd"); AGL("conversation", "conversationUpdate");
++	AGL("conversation", "localParticipantUpdate"); AGL("conversation", "addParticipantSuccess");
++	AGL("conversation", "addParticipantFailure"); AGL("conversation", "addModalitySuccess");
++	AGL("conversation", "addModalityFailure"); AGL("conversation", "confirmUnmute");
++	AGL("conversation", "receiveMessage");
++	g_string_truncate(body, body->len - 1);   /* drop trailing comma */
++	g_string_append(body, "}},");              /* close links, close conversationRequest */
++
++	/* ---- top-level siblings ---- */
++	g_string_append(body, "\"contentSharing\":null,");
++	g_string_append_printf(body, "\"participants\":{\"from\":{\"id\":\"8:%s\",\"displayName\":\"webOS\","
++		"\"endpointId\":\"%s\",\"participantId\":\"%s\",\"languageId\":\"en-us\"},",
++		call->sa->username ? call->sa->username : "", epid, pid);
++	g_string_append_printf(body, "\"to\":[{\"id\":\"%s\",\"participantId\":\"%s\"}]},",
++		call->peer_mri ? call->peer_mri : "", to_pid);
++	g_string_append(body, "\"capabilities\":null,\"endpointCapabilities\":73463,"
++		"\"clientEndpointCapabilities\":42876960,\"endpointMetadata\":{\"holographicCapabilities\":3},"
++		"\"groupContext\":null,\"groupChat\":null,\"meetingInfo\":null,\"meetingData\":null,"
++		"\"endpointState\":{\"endpointStateSequenceNumber\":2,\"endpointProperties\":"
++		"{\"additionalEndpointProperties\":{\"infoShownInReportMode\":\"FullInformation\"}}},");
++	g_string_append_printf(body, "\"callInvitation\":{\"callModalities\":[%s],\"replaces\":null,"
++		"\"transferor\":null,\"clientTransferContext\":null,\"customContext\":null,\"links\":{",
++		mp->want_video ? "\"Audio\",\"Video\"" : "\"Audio\"");
++	AGL("call", "progress"); AGL("call", "mediaAnswer"); AGL("call", "acceptance");
++	AGL("call", "redirection"); AGL("call", "end");
++	g_string_truncate(body, body->len - 1);
++	g_string_append(body, "},\"clientContentForMediaController\":{");
++	AGL("call", "controlVideoStreaming"); AGL("call", "csrcInfo");
++	g_string_truncate(body, body->len - 1);
++	g_string_append(body, "},\"pstnContent\":{\"emergencyCallCountry\":\"\","
++		"\"platformName\":\"" TEAMS_SKYPE_CLIENT "\",\"publicApiCall\":false},\"emergencyContent\":null,");
++	g_string_append_printf(body, "\"mediaContent\":{\"blob\":\"%s\",\"contentType\":\"application/sdp-ngc-1.0\","
++		"\"requiredFeatures\":\"nonByPass\",\"clientLocation\":\"NL\",\"mediaLegId\":\"%s\"},",
++		offer_esc, legid);
++	g_string_append(body, "\"voicemailSettings\":{},\"locationContent\":null,"
++		"\"networkContent\":null,\"areaContent\":null},");   /* close callInvitation */
++	g_string_append(body, "\"debugContent\":{},\"participantPropertyBag\":{}}");   /* close outer */
++#undef AGL
++
++	teams_call_log("dial: OFFER built (%d bytes sdp, %d body), POSTing cpconv to place call to %s",
++	               (int) sdp->len, (int) body->len, call->peer_mri ? call->peer_mri : "?");
++	flightproxy_post(call->sa, "https://api.flightproxy.skype.com/api/v2/cpconv", body->str);
++
++	g_string_free(sdp, TRUE); g_string_free(body, TRUE);
++	g_free(offer_esc); g_free(legid); g_free(epid); g_free(pid); g_free(to_pid);
++}
++
++static gboolean
++media_answer_timeout(gpointer user)
++{
++	TeamsMediaProc *mp = user;
++	mp->answer_timer = 0;
++	if (mp->is_caller) media_send_offer(mp);   /* outgoing: build+POST the offer (place the call) */
++	else               media_send_answer(mp);  /* incoming: build+POST the answer */
++	return G_SOURCE_REMOVE;
++}
++
++/* Build + POST a mid-call renegotiation answer using WHATEVER local ufrag/pwd/cands mp currently
++ * holds. Shared by teams_calling_handle_renegotiation() (the no-restart-needed fallback, answered
++ * immediately) and media_on_output()'s RESTARTED handler (answered only once the engine's fresh
++ * post-restart local creds have actually arrived - see pending_reneg_answer_link's comment). */
++static void
++send_reneg_answer(TeamsMediaProc *mp, const gchar *answer_link)
++{
++	TeamsCall *call = mp->call;
++	GString *a = build_answer_sdp(mp);
++	gchar *esc = g_strescape(a->str, "");
++	gchar *body = g_strdup_printf(
++	    "{\"mediaAnswer\":{\"callModalities\":[%s],"
++	      "\"mediaContent\":{\"blob\":\"%s\",\"contentType\":\"application/sdp-ngc-1.0\"}}}",
++	    call->video_active ? "\"Audio\",\"Video\"" : "\"Audio\"", esc);
++	teams_call_log("renegotiate: POSTing updated answer (%d bytes, video=%d) to %s",
++	               (int) strlen(body), call->video_active, answer_link);
++	flightproxy_post_cb(call->sa, answer_link, body, flightproxy_resp_cb, NULL);
++	g_free(body); g_free(esc); g_string_free(a, TRUE);
++}
++
++/* read UFRAG/PWD/TXKEY/CAND/READY/RESTARTED/AUDIOD from teams_media's stdout */
++static gboolean
++media_on_output(GIOChannel *ch, GIOCondition cond, gpointer user)
++{
++	TeamsMediaProc *mp = user;
++	gchar *line = NULL; gsize len = 0;
++	if (cond & (G_IO_HUP | G_IO_ERR)) return FALSE;
++	while (g_io_channel_read_line(ch, &line, &len, NULL, NULL) == G_IO_STATUS_NORMAL && line) {
++		g_strchomp(line);
++		if (g_str_has_prefix(line, "UFRAG ")) { g_free(mp->our_ufrag); mp->our_ufrag = g_strdup(line + 6); }
++		else if (g_str_has_prefix(line, "PWD ")) { g_free(mp->our_pwd); mp->our_pwd = g_strdup(line + 4); }
++		else if (g_str_has_prefix(line, "TXKEY ")) { g_free(mp->our_txkey); mp->our_txkey = g_strdup(line + 6); }
++		else if (g_str_has_prefix(line, "CAND ")) { if (mp->our_cands) g_string_append_printf(mp->our_cands, "%s\n", line + 5); }
++		else if (!strcmp(line, "RESTARTED")) {
++			/* The RESTART's fresh UFRAG/PWD lines are always emitted BEFORE this marker (see
++			 * teams_media.c), so mp->our_ufrag/our_pwd are already the new post-restart values
++			 * by the time we get here - safe to answer now. */
++			if (mp->pending_reneg_answer_link) {
++				gchar *link = mp->pending_reneg_answer_link;
++				mp->pending_reneg_answer_link = NULL;
++				send_reneg_answer(mp, link);
++				g_free(link);
++			}
++		}
++		else if (g_str_has_prefix(line, "ERR ")) {
++			teams_call_log("media engine ERR: %s", line + 4);
++			if (mp->pending_reneg_answer_link) {
++				teams_call_log("renegotiate: engine restart failed, dropping pending answer");
++				g_free(mp->pending_reneg_answer_link);
++				mp->pending_reneg_answer_link = NULL;
++			}
++		}
++		else if (g_str_has_prefix(line, "READY")) {
++			mp->ready = TRUE;
++			teams_call_log("media engine READY; gathering candidates before answer");
++			/* give ICE ~1.5s to gather candidates, then build + POST the answer */
++			if (!mp->answer_timer) mp->answer_timer = g_timeout_add(1500, media_answer_timeout, mp);
++		}
++		else if (g_str_has_prefix(line, "AUDIOD ")) teams_call_log("media audiod %s", line + 7);
++		g_free(line); line = NULL;
++	}
++	return TRUE;
++}
++
++static void
++teams_media_start(TeamsCall *call)
++{
++	TeamsMediaProc *mp;
++	gchar *ruf, *rpw, *rxkey, *pt_s = NULL;
++	int pt = 102;
++	gchar **lines; int i;
++	const gchar *argv[] = { TEAMS_MEDIA_BIN, "--answer", NULL };
++	/* teams_media needs the WPE gst runtime env (it runs patchelf'd to the wpe-glibc loader). The
++	 * transport already has LD_LIBRARY_PATH from imwrap.sh; add the gst plugin path + registry. */
++	const gchar *W = "/media/cryptofs/apps/usr/palm/applications/org.webosports.app.atlas/deviceroot/wpe-252/lib";
++	gchar *gstenv = g_strdup_printf("GST_PLUGIN_SYSTEM_PATH_1_0=%s/gstreamer-1.0", W);
++	gchar *regenv = g_strdup("GST_REGISTRY=/media/internal/teams-gst-registry.bin");
++	gchar **envp = g_get_environ();
++	GError *err = NULL;
++	GPid pid; int in_fd = -1, out_fd = -1;
++
++	ruf   = sdp_line_val(call->sdp_offer, "a=ice-ufrag:");
++	rpw   = sdp_line_val(call->sdp_offer, "a=ice-pwd:");
++	rxkey = sdp_gcm_key(call->sdp_offer);
++	pt_s  = sdp_line_val(call->sdp_offer, "a=rtpmap:"); /* not exact; opus is 102 in practice */
++	g_free(pt_s);
++	if (!ruf || !rpw || !rxkey) {
++		teams_call_log("media_start: offer missing ice/crypto (uf=%d pw=%d key=%d) - cannot answer",
++		               ruf != NULL, rpw != NULL, rxkey != NULL);
++		g_free(ruf); g_free(rpw); g_free(rxkey); g_strfreev(envp); g_free(gstenv); g_free(regenv);
++		return;
++	}
++
++	envp = g_environ_setenv(envp, "GST_PLUGIN_SYSTEM_PATH_1_0", strchr(gstenv, '=') + 1, TRUE);
++	envp = g_environ_setenv(envp, "GST_REGISTRY", strchr(regenv, '=') + 1, TRUE);
++	/* capture detailed GStreamer errors (esp. srtp decrypt / rtp depay) to a file for diagnosis */
++	envp = g_environ_setenv(envp, "GST_DEBUG", "2,GST_PADS:5,srtpdec:5,rtpopusdepay:5,opusdec:4,nicesrc:5,appsink:5", TRUE);
++	envp = g_environ_setenv(envp, "GST_DEBUG_FILE", "/media/internal/teams-gst.log", TRUE);
++	envp = g_environ_setenv(envp, "GST_DEBUG_NO_COLOR", "1", TRUE);
++	/* ALSA "voip"/"voipsource" are PulseAudio PCMs defined ONLY in the system /etc/asound.conf, which
++	 * only the SYSTEM libasound reads. The wpe-252 libasound (in our RUNPATH) uses its own config that
++	 * lacks them -> "Unknown PCM voip". Force the system libasound (via LD_PRELOAD, same as the
++	 * transport) + the system ALSA config so alsasink/alsasrc can open voip/voipsource -> PulseAudio. */
++	envp = g_environ_setenv(envp, "LD_PRELOAD",
++		"/usr/lib/synergy-runtime/libstdc++.so.6 "
++		"/media/cryptofs/wpe-glibc/lib/librt.so.1 /usr/lib/libasound.so.2", TRUE);
++	envp = g_environ_setenv(envp, "ALSA_CONFIG_PATH", "/usr/share/alsa/alsa.conf", TRUE);
++	envp = g_environ_setenv(envp, "ALSA_PLUGIN_DIR", "/usr/lib/alsa-lib", TRUE);
++	/* teams_media (unlike imlibpurpletransport/WhatsApp/Telegram) is NOT patched to the wpe-glibc
++	 * interpreter - it uses the stock /lib/ld-linux.so.3 (confirmed via readelf -l). Spawned as our
++	 * child, it just inherits OUR OWN LD_LIBRARY_PATH (set by imwrap.sh) unmodified - no override
++	 * needed. An explicit override was tried once, to route around a libpalmgstskype.so ->
++	 * libmedia-clonk.so -> libpbnjson_cpp.so GLIBCXX conflict, when this subprocess linked the
++	 * H.264/skypekit video bridge directly - but that approach was abandoned (the bridge now lives
++	 * in the plugin process instead; see teams_media.c's top-of-file comment) and this subprocess is
++	 * back to a pure gst-1.20/nice build with no libpalmgstskype.so dependency, so the inherited
++	 * environment (already proven for audio-only calls) is sufficient again. */
++
++	if (!g_spawn_async_with_pipes(NULL, (gchar **) argv, envp,
++	                              G_SPAWN_DO_NOT_REAP_CHILD, NULL, NULL,
++	                              &pid, &in_fd, &out_fd, NULL, &err)) {
++		teams_call_log("media_start: spawn %s failed: %s", TEAMS_MEDIA_BIN, err ? err->message : "?");
++		if (err) g_error_free(err);
++		g_free(ruf); g_free(rpw); g_free(rxkey); g_strfreev(envp); g_free(gstenv); g_free(regenv);
++		return;
++	}
++	g_strfreev(envp); g_free(gstenv); g_free(regenv);
++
++	mp = g_new0(TeamsMediaProc, 1);
++	mp->call = call; mp->pid = pid; mp->in_fd = in_fd;
++	mp->our_cands = g_string_new("");
++	mp->out_ch = g_io_channel_unix_new(out_fd);
++	g_io_channel_set_flags(mp->out_ch, G_IO_FLAG_NONBLOCK, NULL);
++	mp->out_watch = g_io_add_watch(mp->out_ch, G_IO_IN | G_IO_HUP | G_IO_ERR, media_on_output, mp);
++	g_mproc = mp;
++
++	/* Give the engine a STUN server so it gathers server-reflexive (srflx) candidates - host-only
++	 * ICE can't traverse NAT to Teams' relay. Teams' media relay (udpTransport, :3478) also answers
++	 * STUN binding requests, so point STUN at it. Must precede START. */
++	if (call->udp_transport) {
++		const gchar *h = call->udp_transport;
++		gchar *hc, *slash, *colon; int rport = 3478;
++		if (g_str_has_prefix(h, "udp://")) h += 6;
++		hc = g_strdup(h);
++		if ((slash = strchr(hc, '/'))) *slash = '\0';
++		if ((colon = strrchr(hc, ':'))) { rport = atoi(colon + 1); *colon = '\0'; }
++		{ gchar *r = g_strdup_printf("RELAY stun %s %d\n", hc, rport);
++		  if (write(in_fd, r, strlen(r)) < 0) {} g_free(r); }
++		teams_call_log("media_start: RELAY stun %s %d", hc, rport);
++		g_free(hc);
++	}
++
++	/* START <rx_master_b64> <remote_ufrag> <remote_pwd> <pt> */
++	{ gchar *s = g_strdup_printf("START %s %s %s %d\n", rxkey, ruf, rpw, pt);
++	  if (write(in_fd, s, strlen(s)) < 0) teams_call_log("media_start: write START failed"); g_free(s); }
++	/* feed the peer's ICE candidates from the offer */
++	lines = g_strsplit(call->sdp_offer, "\n", -1);
++	for (i = 0; lines[i]; i++) {
++		gchar *l = g_strstrip(lines[i]);
++		if (g_str_has_prefix(l, "a=candidate:")) {
++			gchar *r = g_strdup_printf("RCAND %s\n", l + 2); /* strip "a=" -> "candidate:..." */
++			if (write(in_fd, r, strlen(r)) < 0) {} g_free(r);
++		}
++	}
++	g_strfreev(lines);
++	teams_call_log("media_start: spawned teams_media pid=%d, START sent (pt=%d relay=%s)", (int) pid, pt,
++	               call->udp_transport ? call->udp_transport : "(none)");
++	g_free(ruf); g_free(rpw); g_free(rxkey);
++}
++
++static void
++teams_media_stop(void)
++{
++	TeamsMediaProc *mp = g_mproc;
++	if (!mp) return;
++	g_mproc = NULL;
++	if (mp->answer_timer) g_source_remove(mp->answer_timer);
++	if (mp->in_fd >= 0) { const char *s = "STOP\n"; if (write(mp->in_fd, s, 5) < 0) {} close(mp->in_fd); }
++	if (mp->out_watch) g_source_remove(mp->out_watch);
++	if (mp->out_ch) g_io_channel_unref(mp->out_ch);
++	if (mp->pid) { g_spawn_close_pid(mp->pid); }
++	g_string_free(mp->our_cands, TRUE);
++	g_free(mp->our_ufrag); g_free(mp->our_pwd); g_free(mp->our_txkey); g_free(mp->callagent_id);
++	g_free(mp->pending_reneg_answer_link);
++	g_free(mp->last_restarted_ufrag);
++	g_free(mp);
++	teams_call_log("media stopped");
++}
++
++/* POST the SDP answer to the call's attach link (resolves the mediaAnswer "cc://ma"). Body shape is
++ * a best-effort mirror of the offer's mediaContent - CONFIRM/iterate against a web-client answer. */
++/* log whether Teams accepted our SDP answer - critical: if rejected, Teams never runs ICE with us. */
++static void answer_ok_cb(TeamsAccount *sa, JsonNode *node, gpointer u)
++{ (void)sa;(void)u; { gchar *s = node ? json_to_string(node, FALSE) : NULL;
++  teams_call_log("ANSWER POST: ACCEPTED (2xx) resp=%.200s", s ? s : "(empty)"); g_free(s); } }
++static void answer_err_cb(TeamsAccount *sa, const gchar *data, gssize len, gpointer u)
++{ (void)sa;(void)len;(void)u; teams_call_log("ANSWER POST: REJECTED/err resp=%.260s", data ? data : "(no body)"); }
++
++/* Step 2: POST the accept (with our SDP answer) to the acceptance link parsed from the attach
++ * response. Body = callAcceptance{acceptedBy, acceptedCallModalities, caps, mediaContent{blob,...}}.
++ * acceptedCallModalities was hardcoded to ["Audio"] always (found+fixed 2026-08-05): once
++ * sdp_video_direction()'s missing-direction-defaults-to-sendrecv fix started making media_send_answer
++ * correctly build an active m=video line (call->video_active TRUE) for offers that want video from the
++ * start, this POST's own SDP blob and its acceptedCallModalities list contradicted each other - video
++ * active in the SDP, but only "Audio" declared accepted. CAPTURED LIVE: every incoming call that
++ * reached this path with call->video_active TRUE died within the same second with "Call Controller
++ * timed out while waiting for acknowledgement" (408), while plain audio-only accepts (video_active
++ * FALSE, so this mismatch didn't exist) continued working - matches Teams' backend treating a
++ * modalities/SDP mismatch as a malformed acceptance rather than acknowledging it. Mirrors the same
++ * conditional already used for the OUTGOING offer's callModalities in media_send_offer(). */
++static void
++teams_calling_post_accept(TeamsCall *call, const gchar *acceptance_url)
++{
++	TeamsAccount *sa = call->sa;
++	const char *agent = call->callagent_id;
++	gchar *esc, *legid, *body;
++	gchar *l_reneg, *l_xfer, *l_repl, *l_bal, *l_retgt, *l_ctlvid, *l_updmd, *cc_ctlvid, *cc_csrc;
++	if (!call->our_answer_sdp) { teams_call_log("accept: no answer SDP"); return; }
++	esc = g_strescape(call->our_answer_sdp, "");
++	legid = g_strdup_printf("%08X%08X%08X%08X", g_random_int(), g_random_int(), g_random_int(), g_random_int());
++	l_reneg  = callagent_path(call, agent, "call", "mediaRenegotiation");
++	l_xfer   = callagent_path(call, agent, "call", "transfer");
++	l_repl   = callagent_path(call, agent, "call", "replacement");
++	l_bal    = callagent_path(call, agent, "call", "balanceUpdate");
++	l_retgt  = callagent_path(call, agent, "call", "retargetCompletion");
++	l_ctlvid = callagent_path(call, agent, "call", "controlVideoStreaming");
++	l_updmd  = callagent_path(call, agent, "call", "updateMediaDescriptions");
++	cc_ctlvid = callagent_path(call, agent, "call", "controlVideoStreaming");
++	cc_csrc   = callagent_path(call, agent, "call", "csrcInfo");
++	body = g_strdup_printf(
++		"{\"callAcceptance\":{"
++		  "\"acceptedBy\":{\"id\":\"8:%s\",\"displayName\":\"webOS\",\"endpointId\":\"%s\","
++		    "\"participantId\":\"%s\",\"languageId\":\"en-us\"},"
++		  "\"acceptedCallModalities\":[%s],"
++		  "\"capabilities\":null,\"endpointCapabilities\":73463,\"clientEndpointCapabilities\":42876960,"
++		  "\"links\":{\"mediaRenegotiation\":\"%s\",\"transfer\":\"%s\",\"replacement\":\"%s\","
++		    "\"balanceUpdate\":\"%s\",\"retargetCompletion\":\"%s\",\"controlVideoStreaming\":\"%s\","
++		    "\"updateMediaDescriptions\":\"%s\"},"
++		  "\"clientContentForMediaController\":{\"controlVideoStreaming\":\"%s\",\"csrcInfo\":\"%s\"},"
++		  "\"mediaContent\":{\"blob\":\"%s\",\"contentType\":\"application/sdp-ngc-1.0\","
++		    "\"clientLocation\":\"NL\",\"mediaLegId\":\"%s\"},"
++		  "\"pstnContent\":{\"emergencyCallCountry\":\"\",\"platformName\":\"" TEAMS_SKYPE_CLIENT "\","
++		    "\"publicApiCall\":false},"
++		  "\"callKeepAliveInterval\":null,"
++		  "\"applicationType\":\"TFL\"}}",
++		sa->username ? sa->username : "",
++		call->our_endpoint_id ? call->our_endpoint_id : "",
++		call->our_participant_id ? call->our_participant_id : "",
++		call->video_active ? "\"Audio\",\"Video\"" : "\"Audio\"",
++		l_reneg, l_xfer, l_repl, l_bal, l_retgt, l_ctlvid, l_updmd, cc_ctlvid, cc_csrc,
++		esc, legid);
++	teams_call_log("accept -> POST %d-byte body to acceptance link", (int) strlen(body));
++	flightproxy_post_cb(sa, acceptance_url, body, flightproxy_resp_cb, NULL);
++	g_free(esc); g_free(legid); g_free(body);
++	g_free(l_reneg); g_free(l_xfer); g_free(l_repl); g_free(l_bal); g_free(l_retgt);
++	g_free(l_ctlvid); g_free(l_updmd); g_free(cc_ctlvid); g_free(cc_csrc);
++}
++
++/* Step 1 response handler: parse callInvitation.links.acceptance from the attach response, then
++ * POST the accept (our SDP answer). */
++static void
++attach_resp_cb(PurpleHttpConnection *hc, PurpleHttpResponse *resp, gpointer u)
++{
++	TeamsCall *call = (TeamsCall *) u;
++	int code; const gchar *data; size_t len = 0;
++	JsonObject *root, *ci, *links; const gchar *acc = NULL;
++	(void) hc;
++	code = purple_http_response_get_code(resp);
++	data = purple_http_response_get_data(resp, &len);
++	teams_call_log("attach resp code=%d (%d bytes) success=%d err=%s", code, (int) len,
++	               (int) purple_http_response_is_successful(resp),
++	               purple_http_response_get_error(resp) ? purple_http_response_get_error(resp) : "(none)");
++	if (code < 200 || code >= 300 || !data) {
++		teams_call_log("attach FAILED: %.240s", data ? data : "(no body)");
++		return;
++	}
++	root = json_decode_object(data, len);
++	if (root && (ci = oget(root, "callInvitation")) && (links = oget(ci, "links")))
++		acc = sget(links, "acceptance");
++	if (acc) {
++		gchar *acc_dup = g_strdup(acc);
++		teams_call_log("attach OK -> acceptance link acquired, posting accept");
++		teams_calling_post_accept(call, acc_dup);
++		g_free(acc_dup);
++	} else {
++		teams_call_log("attach OK but no callInvitation.links.acceptance in response");
++	}
++	/* Attach (and the accept POST just fired above) are both now in flight - safe to bring up the
++	 * local camera pipeline. See video_cb_pending's comment: doing this any earlier risked
++	 * blocking the event loop long enough to kill the attach request outright. */
++	if (call->video_cb_pending) {
++		call->video_cb_pending = FALSE;
++		if (g_video_cb) g_video_cb(call->sa, TRUE);
++	}
++	if (root) json_object_unref(root);
++}
++
++/* Incoming answer = two-step media-controller handshake (see media_send_answer). Step 1 here:
++ * POST attach to the offer's link_attach; the response yields the acceptance link (step 2). */
++static void
++teams_calling_post_answer(TeamsCall *call, const char *answer_sdp)
++{
++	const char *agent;
++	gchar *end_link, *body;
++	(void) answer_sdp;   /* already stored on call->our_answer_sdp; posted in step 2 */
++	if (!call->link_attach) { teams_call_log("post_answer: no attach link"); return; }
++
++	/* generate our endpoint/participant/callAgent identity for this call (reused in accept) */
++	if (!call->our_endpoint_id)    call->our_endpoint_id = g_strdup(call->sa->endpoint ? call->sa->endpoint : "");
++	if (!call->our_participant_id) call->our_participant_id = purple_uuid_random();
++	if (!call->callagent_id)       call->callagent_id = purple_uuid_random();
++	agent = call->callagent_id;
++	end_link = callagent_path(call, agent, "call", "end");
++
++	body = g_strdup_printf(
++		"{\"attach\":{\"requireMediaContent\":false,\"links\":{\"end\":\"%s\"},"
++		  "\"locationContent\":null,\"networkContent\":null,\"areaContent\":null,"
++		  "\"applicationType\":\"TFL\"},"
++		"\"capabilities\":null,\"endpointCapabilities\":73463}",
++		end_link);
++	teams_call_log("post_answer: attach (step 1/2) -> %d-byte body, url=%s", (int) strlen(body), call->link_attach);
++	flightproxy_post_cb(call->sa, call->link_attach, body, attach_resp_cb, call);
++	g_free(end_link); g_free(body);
++}
++
++/* ------------------------------------------------------------------ TeamsCall */
++
++static const char *
++state_str(TeamsCallState s)
++{
++	switch (s) {
++		case TEAMS_CALL_INCOMING:     return "incoming";
++		case TEAMS_CALL_DIALING:      return "dialing";
++		case TEAMS_CALL_ACTIVE:       return "active";
++		case TEAMS_CALL_DISCONNECTED: return "disconnected";
++		default:                      return ""; /* idle */
++	}
++}
++
++static void
++push_state(TeamsCall *call, const char *cause)
++{
++	if (!g_state_cb || !call) return;
++	g_state_cb(call->sa, state_str(call->state),
++	           call->peer_mri ? teams_strip_user_prefix(call->peer_mri) : NULL,
++	           call->peer_name, call->is_outgoing, cause,
++	           call->video_requested);
++}
++
++static void
++teams_call_free(TeamsCall *call)
++{
++	if (!call) return;
++	g_free(call->call_id);
++	g_free(call->peer_mri);
++	g_free(call->peer_name);
++	g_free(call->sdp_offer);
++	g_free(call->media_leg_id);
++	g_free(call->session_key_b64);
++	g_free(call->ticket);
++	g_free(call->link_attach);
++	g_free(call->link_media_answer);
++	g_free(call->link_progress);
++	g_free(call->link_reject);
++	g_free(call->udp_transport);
++	g_free(call->conversation_controller);
++	g_free(call->our_answer_sdp);
++	g_free(call->our_endpoint_id);
++	g_free(call->our_participant_id);
++	g_free(call->callagent_id);
++	g_free(call);
++}
++
++TeamsCall *
++teams_calling_current(TeamsAccount *sa)
++{
++	return sa ? (TeamsCall *) sa->active_call : NULL;
++}
++
++static void
++set_current(TeamsAccount *sa, TeamsCall *call)
++{
++	TeamsCall *old = (TeamsCall *) sa->active_call;
++	if (old && old != call) teams_call_free(old);
++	sa->active_call = call;
++}
++
++/* ------------------------------------------------------------------- capture */
++
++/* Append the full raw notification (pretty-printed) plus a decoded summary to the capture
++ * log. This is the single most important output of the initial drop: it lets us confirm
++ * the exact sdp-ngc dialect, the codec/payload list, and whether the SRTP key rides in the
++ * SDP a=crypto line or only in udpKey.sessionKey - none of which are documented. */
++static void
++capture_notification(TeamsAccount *sa, JsonObject *body_obj, const gchar *request_url)
++{
++	FILE *f = fopen(TEAMS_CALL_CAPTURE, "a");
++	gchar *pretty;
++	time_t now = time(NULL);
++	char ts[32];
++	struct tm *tm = localtime(&now);
++	strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", tm);
++
++	if (!f) return;
++	pretty = teams_jsonobj_to_string(body_obj); /* pretty JSON */
++	fprintf(f, "\n===== %s  url=%s  account=%s =====\n", ts, request_url ? request_url : "?",
++	        sa && sa->username ? sa->username : "?");
++	if (pretty) {
++		fputs(pretty, f);
++		fputc('\n', f);
++		g_free(pretty);
++	}
++	fclose(f);
++}
++
++/* --------------------------------------------------------------- parse offer */
++
++static TeamsCall *
++parse_call_notification(TeamsAccount *sa, JsonObject *body_obj)
++{
++	JsonObject *cn = oget(body_obj, "callNotification");
++	JsonObject *from, *to, *links, *media, *udpKey, *convInv, *debug;
++	const gchar *fromId, *toId;
++	TeamsCall *call;
++
++	if (!cn) return NULL;
++
++	from   = oget(cn, "from");
++	to     = oget(cn, "to");
++	links  = oget(cn, "links");
++	media  = oget(cn, "mediaContent");
++	udpKey = oget(cn, "udpKey");
++	convInv = oget(body_obj, "conversationInvitation");
++	debug  = oget(body_obj, "debugContent");
++
++	fromId = from ? sget(from, "id") : NULL;
++	toId   = to ? sget(to, "id") : NULL;
++
++	call = g_new0(TeamsCall, 1);
++	call->sa = sa;
++
++	/* incoming vs outgoing: if WE are the caller it's an outgoing call notification (a fork
++	 * / carbon of our own placed call), and the peer is the callee. */
++	if (fromId && teams_is_user_self(sa, fromId)) {
++		call->is_outgoing = TRUE;
++		call->peer_mri  = g_strdup(toId);
++		call->peer_name = g_strdup(to ? sget(to, "displayName") : NULL);
++	} else {
++		call->is_outgoing = FALSE;
++		call->peer_mri  = g_strdup(fromId);
++		call->peer_name = g_strdup(from ? sget(from, "displayName") : NULL);
++	}
++
++	if (debug)  call->call_id = g_strdup(sget(debug, "callId"));
++
++	if (media) {
++		call->sdp_offer    = g_strdup(sget(media, "blob"));
++		call->media_leg_id = g_strdup(sget(media, "mediaLegId"));
++		if (call->sdp_offer) {
++			gchar *dir = sdp_video_direction(call->sdp_offer);
++			call->video_requested = dir && strcmp(dir, "inactive") != 0;
++			g_free(dir);
++		}
++	}
++	if (udpKey) {
++		call->session_key_b64 = g_strdup(sget(udpKey, "sessionKey"));
++		call->ticket          = g_strdup(sget(udpKey, "ticket"));
++	}
++	if (links) {
++		call->link_attach       = g_strdup(sget(links, "attach"));
++		call->link_media_answer = g_strdup(sget(links, "mediaAnswer"));
++		call->link_progress     = g_strdup(sget(links, "progress"));
++		call->link_reject       = g_strdup(sget(links, "reject"));
++		call->udp_transport     = g_strdup(sget(links, "udpTransport"));
++	}
++	if (convInv)
++		call->conversation_controller = g_strdup(sget(convInv, "conversationController"));
++
++	return call;
++}
++
++/* --------------------------------------------------------------- HTTP control */
++
++/* POST (empty or small body) to a full https URL from the notification's links. Splits the
++ * URL into host + path for teams_post_or_get. Auth headers are added by teams_post_or_get
++ * for skype/teams hosts; CONFIRM WITH CAPTURE that flightproxy accepts the same token. */
++static void
++call_http_post(TeamsAccount *sa, const gchar *full_url, const gchar *body)
++{
++	const gchar *p;
++	gchar *host, *path;
++	const gchar *slash;
++
++	if (!full_url) return;
++	if (g_str_has_prefix(full_url, "https://")) p = full_url + 8;
++	else if (g_str_has_prefix(full_url, "http://")) p = full_url + 7;
++	else { teams_call_log("http_post: non-http link '%s' (skipped)", full_url); return; }
++
++	slash = strchr(p, '/');
++	if (slash) {
++		host = g_strndup(p, slash - p);
++		path = g_strdup(slash);
++	} else {
++		host = g_strdup(p);
++		path = g_strdup("/");
++	}
++	teams_call_log("http_post host=%s path=%.80s body=%d bytes", host, path, body ? (int) strlen(body) : 0);
++	teams_post_or_get(sa, TEAMS_METHOD_POST | TEAMS_METHOD_SSL, host, path, body, NULL, NULL, FALSE);
++	g_free(host);
++	g_free(path);
++}
++
++/* --------------------------------------------------------------- trouter entry */
++
++/* DEBUG auto-answer timer: answer the current incoming call (see the toggle in handle_trouter). */
++static gboolean
++teams_calling_autoanswer_cb(gpointer user)
++{
++	TeamsAccount *sa = user;
++	teams_call_log("AUTO-ANSWER firing");
++	teams_calling_answer(sa);
++	return G_SOURCE_REMOVE;
++}
++
++/* Outgoing call: the callee accepted and Teams delivered their SDP answer on our callAgent
++ * mediaAnswer link. Extract ice-ufrag/pwd + the a=crypto RX key + candidates, and feed them to the
++ * caller media engine (ANSWER + RCAND) so it applies the peer's key, sets remote creds and connects
++ * ICE. The exact frame shape isn't fully known yet, so probe a few likely blob locations. */
++static void
++teams_calling_handle_media_answer(TeamsAccount *sa, JsonObject *body_obj)
++{
++	TeamsCall *call = teams_calling_current(sa);
++	TeamsMediaProc *mp = g_mproc;
++	JsonObject *mc = NULL, *sub;
++	const gchar *blob = NULL;
++	gchar *ruf, *rpw, *rxkey, **lines; int i;
++
++	if (!call || !mp || !mp->is_caller || mp->in_fd < 0) {
++		teams_call_log("mediaAnswer: no outgoing caller engine to apply it to"); return;
++	}
++	if ((mc = oget(body_obj, "mediaContent")))            blob = sget(mc, "blob");
++	if (!blob && (sub = oget(body_obj, "mediaAnswer")) && (mc = oget(sub, "mediaContent"))) blob = sget(mc, "blob");
++	if (!blob && (sub = oget(body_obj, "callNotification")) && (mc = oget(sub, "mediaContent"))) blob = sget(mc, "blob");
++	if (!blob) { teams_call_log("mediaAnswer: no SDP blob found (see capture log for shape)"); return; }
++
++	ruf = sdp_line_val(blob, "a=ice-ufrag:");
++	rpw = sdp_line_val(blob, "a=ice-pwd:");
++	rxkey = sdp_gcm_key(blob);
++	if (!ruf || !rpw || !rxkey) {
++		teams_call_log("mediaAnswer: answer missing ice/crypto (uf=%d pw=%d key=%d)",
++		               ruf != NULL, rpw != NULL, rxkey != NULL);
++		g_free(ruf); g_free(rpw); g_free(rxkey); return;
++	}
++	teams_call_log("mediaAnswer: applying peer answer -> ANSWER + RCAND to caller engine");
++	{ gchar *s = g_strdup_printf("ANSWER %s %s %s\n", rxkey, ruf, rpw);
++	  if (write(mp->in_fd, s, strlen(s)) < 0) {} g_free(s); }
++	lines = g_strsplit(blob, "\n", -1);
++	for (i = 0; lines[i]; i++) {
++		gchar *l = g_strstrip(lines[i]);
++		if (g_str_has_prefix(l, "a=candidate:")) {
++			gchar *r = g_strdup_printf("RCAND %s\n", l + 2);
++			if (write(mp->in_fd, r, strlen(r)) < 0) {} g_free(r);
++		}
++	}
++	g_strfreev(lines);
++	call->state = TEAMS_CALL_ACTIVE;
++	push_state(call, NULL);
++
++	/* Outgoing dial-with-video: only now, once the callee's OWN answer confirms an active video
++	 * m-line, do we consider video actually negotiated (mp->want_video alone was just our request -
++	 * see media_send_offer). Mirrors the incoming path's "activate on real negotiated state, not
++	 * on request alone" principle. */
++	if (mp->want_video && !call->video_active) {
++		gchar *dir = sdp_video_direction(blob);
++		if (dir && strcmp(dir, "inactive") != 0) {
++			call->video_active = TRUE;
++			teams_call_log("mediaAnswer: callee confirmed video (a=%s)", dir);
++			if (g_video_cb) g_video_cb(sa, TRUE);
++		} else {
++			teams_call_log("mediaAnswer: video was requested but callee's answer didn't confirm it");
++		}
++		g_free(dir);
++	}
++	g_free(ruf); g_free(rpw); g_free(rxkey);
++}
++
++/* Peer pushed a mid-call renegotiation offer (e.g. they turned their camera on/off), delivered via
++ * the mediaRenegotiation link we generated and handed them in our own accept
++ * (teams_calling_post_accept's l_reneg). Real, captured behavior of an actual Teams client: video
++ * is commonly added AFTER an audio-only accept this way, not always present in the initial offer -
++ * see media_send_answer's offer-time check for the other case. CONFIRM WITH CAPTURE: the exact
++ * mediaAnswer link resolution is inferred from a HAR of this flow (mediaNegotiation.links.mediaAnswer
++ * in the push body), not yet exercised against a live Teams backend by this code. */
++static void
++teams_calling_handle_renegotiation(TeamsAccount *sa, JsonObject *body_obj, const gchar *request_url)
++{
++	TeamsCall *call = teams_calling_current(sa);
++	TeamsMediaProc *mp = g_mproc;
++	JsonObject *mn, *mc, *links;
++	const gchar *blob = NULL, *answer_link = NULL;
++	gchar *dir;
++	gboolean peer_wants_video;
++	(void) request_url;
++
++	if (!call || !mp) { teams_call_log("renegotiate: no active call/engine"); return; }
++	mn = oget(body_obj, "mediaNegotiation");
++	if (!mn) { teams_call_log("renegotiate: no mediaNegotiation object (see capture log)"); return; }
++	if ((mc = oget(mn, "mediaContent"))) blob = sget(mc, "blob");
++	if ((links = oget(mn, "links")))     answer_link = sget(links, "mediaAnswer");
++	if (!blob) { teams_call_log("renegotiate: no SDP blob in mediaNegotiation"); return; }
++
++	dir = sdp_video_direction(blob);
++	peer_wants_video = dir && strcmp(dir, "inactive") != 0;
++	teams_call_log("renegotiate: video m-line direction=%s", dir ? dir : "(none)");
++	g_free(dir);
++
++	/* CAPTURED LIVE (2026-08-01): a renegotiation push commonly swaps the peer to a brand-new
++	 * media leg - fresh ice-ufrag/pwd (and sometimes a whole new a=crypto key/mediaLegId/relay),
++	 * not just a direction flip. Previously we only read the video direction out of this blob and
++	 * never told the running media engine about the new remote ICE creds/candidates, so the engine
++	 * kept trying to reach the STALE leg while we happily POSTed back an "answer" to the new one -
++	 * every leg after the first was a silent no-op. Teams cycles a few times, then kills the whole
++	 * call as MediaError (code 410) once none of them ever connect. Apply the new creds/key +
++	 * candidates via RESTART/RCAND (see teams_media.c) before replying, same as the initial-answer
++	 * path (teams_calling_handle_media_answer) already does for the caller side. */
++	gboolean sent_restart = FALSE;
++	if (mp->in_fd >= 0) {
++		gchar *ruf = sdp_line_val(blob, "a=ice-ufrag:");
++		gchar *rpw = sdp_line_val(blob, "a=ice-pwd:");
++		gchar *rxkey = sdp_gcm_key(blob);
++		if (ruf && rpw) {
++			/* Dedup: Teams' trouter can redeliver the identical renegotiation push (same remote
++			 * ufrag) - a real client only actually changes ICE creds when it genuinely moves to a
++			 * new leg. Restarting the ICE agent on every redelivery never lets a session finish
++			 * connectivity checks before being torn down again. Skip the RESTART (but still update
++			 * video_active/answer below) when the ufrag hasn't actually changed. */
++			if (mp->last_restarted_ufrag && !strcmp(mp->last_restarted_ufrag, ruf)) {
++				teams_call_log("renegotiate: same ufrag as last RESTART (uf=%s) - skipping, "
++				               "ICE session already in progress", ruf);
++			} else {
++				gchar *s = g_strdup_printf("RESTART %s %s %s\n", rxkey ? rxkey : "-", ruf, rpw);
++				if (write(mp->in_fd, s, strlen(s)) < 0) {}
++				g_free(s);
++				{ gchar **rlines = g_strsplit(blob, "\n", -1); int j;
++				  for (j = 0; rlines[j]; j++) {
++					  gchar *l = g_strstrip(rlines[j]);
++					  if (g_str_has_prefix(l, "a=candidate:")) {
++						  gchar *r = g_strdup_printf("RCAND %s\n", l + 2);
++						  if (write(mp->in_fd, r, strlen(r)) < 0) {}
++						  g_free(r);
++					  }
++				  }
++				  g_strfreev(rlines);
++				}
++				teams_call_log("renegotiate: sent RESTART+cands to engine (uf=%s)", ruf);
++				g_free(mp->last_restarted_ufrag);
++				mp->last_restarted_ufrag = g_strdup(ruf);
++				sent_restart = TRUE;
++			}
++		} else {
++			teams_call_log("renegotiate: offer missing ice-ufrag/pwd, cannot restart ICE (uf=%d pw=%d)",
++			               ruf != NULL, rpw != NULL);
++		}
++		g_free(ruf); g_free(rpw); g_free(rxkey);
++	}
++
++	if (peer_wants_video && !call->video_active) {
++		call->video_active = TRUE;
++		teams_call_log("renegotiate: video ADDED mid-call");
++		if (g_video_cb) g_video_cb(sa, TRUE);
++	} else if (!peer_wants_video && call->video_active) {
++		call->video_active = FALSE;
++		teams_call_log("renegotiate: video REMOVED mid-call");
++		if (g_video_cb) g_video_cb(sa, FALSE);
++	}
++
++	if (!answer_link || !mp->our_ufrag || !mp->our_pwd || !mp->our_txkey) {
++		teams_call_log("renegotiate: missing answer link or media params (uf=%d pw=%d key=%d link=%d), "
++		               "cannot respond", mp->our_ufrag != NULL, mp->our_pwd != NULL,
++		               mp->our_txkey != NULL, answer_link != NULL);
++		return;
++	}
++
++	if (sent_restart) {
++		/* Engine's RESTART is in flight - it's about to regenerate OUR OWN local ice-ufrag/pwd
++		 * (real RFC 5245 restart, see teams_media.c), so mp->our_ufrag/our_pwd are stale RIGHT
++		 * NOW and answering with them would hand the peer credentials our own agent no longer
++		 * recognizes. Defer: media_on_output() calls send_reneg_answer() once the engine's
++		 * RESTARTED line confirms the fresh local creds have already landed in mp. A second
++		 * renegotiation arriving before the first's RESTARTED comes back simply supersedes it. */
++		g_free(mp->pending_reneg_answer_link);
++		mp->pending_reneg_answer_link = g_strdup(answer_link);
++		return;
++	}
++	send_reneg_answer(mp, answer_link);
++}
++
++void
++teams_calling_handle_trouter(TeamsAccount *sa, JsonObject *body_obj, const gchar *request_url)
++{
++	/* Always capture first - even notifications we don't yet model are ground truth. */
++	capture_notification(sa, body_obj, request_url);
++
++	if (request_url && strstr(request_url, "callAgent/"))
++		teams_call_log("callAgent frame: %s", strstr(request_url, "callAgent/"));
++
++	/* Outgoing call: callee is ringing (progress) or has answered (mediaAnswer). */
++	if (request_url && (strstr(request_url, "/mediaAnswer") || strstr(request_url, "/mediaanswer"))) {
++		teams_call_log("outgoing: MEDIA ANSWER frame received");
++		teams_calling_handle_media_answer(sa, body_obj);
++		return;
++	}
++	/* Mid-call renegotiation push (e.g. peer turns their camera on/off) on the mediaRenegotiation
++	 * link we generated in our own accept - see teams_calling_post_accept's l_reneg. */
++	if (request_url && strstr(request_url, "/mediaRenegotiation")) {
++		teams_call_log("RENEGOTIATION frame received");
++		teams_calling_handle_renegotiation(sa, body_obj, request_url);
++		return;
++	}
++	if (request_url && strstr(request_url, "/progress")) {
++		TeamsCall *call = teams_calling_current(sa);
++		teams_call_log("outgoing: PROGRESS frame (callee ringing)");
++		if (call) push_state(call, "ringing");
++		return;
++	}
++
++	/* Call ended */
++	if (request_url && (strstr(request_url, "/call/end") || g_str_has_suffix(request_url, "/end")
++	                    || g_str_has_suffix(request_url, "/end/"))) {
++		TeamsCall *call = teams_calling_current(sa);
++		if (call) {
++			JsonObject *ce = oget(body_obj, "callEnd");
++			const gchar *phrase = ce ? sget(ce, "phrase") : NULL;
++			const gchar *reason = ce ? sget(ce, "reason") : NULL;
++			gint64 code = ce && json_object_has_member(ce, "code") ? json_object_get_int_member(ce, "code") : 0;
++			/* Map the Teams callEnd to a webOS Phone-app cause. The Phone app shows "Call dropped" for
++			 * any cause string it doesn't recognise (e.g. the raw "LocalUserInitiated"). Recognised
++			 * causes: "normal"/"rejected"/"missed"/"busy"/"error". A normal hang-up (either side) or a
++			 * successfully-connected call that ended = "normal"; declines/timeouts map accordingly. */
++			const gchar *cause = "normal";
++			if (phrase && (strstr(phrase, "Decline") || strstr(phrase, "Reject")))      cause = "rejected";
++			else if (phrase && (strstr(phrase, "Unanswer") || strstr(phrase, "Timeout") ||
++			                    strstr(phrase, "NoAnswer") || strstr(phrase, "Ring")))   cause = "missed";
++			else if (phrase && strstr(phrase, "Busy"))                                   cause = "busy";
++			else if (phrase && (strstr(phrase, "UserInitiated") || strstr(phrase, "Success"))) cause = "normal";
++			else if (g_strcmp0(reason, "clientError") == 0 && code && code != 0 && code != 200 &&
++			         call->state != TEAMS_CALL_ACTIVE)                                    cause = "error";
++			call->state = TEAMS_CALL_DISCONNECTED;
++			teams_call_log("call ended: phrase=%s reason=%s code=%d -> cause=%s",
++			               phrase ? phrase : "(none)", reason ? reason : "(none)", (int) code, cause);
++			push_state(call, cause);
++			teams_media_stop();
++			set_current(sa, NULL);
++		}
++		return;
++	}
++
++	/* Roster update mid-call - not modeled yet, capture only. */
++	if (request_url && g_str_has_suffix(request_url, "/rosterUpdate"))
++		return;
++
++	/* Incoming/outgoing call setup (callNotification present). */
++	if (json_object_has_member(body_obj, "callNotification")) {
++		TeamsCall *call = parse_call_notification(sa, body_obj);
++		if (!call) return;
++
++		call->state = call->is_outgoing ? TEAMS_CALL_DIALING : TEAMS_CALL_INCOMING;
++		set_current(sa, call);
++
++		teams_call_log("%s call  peer=%s (%s)  sdp=%d bytes  key=%s  ticket=%s  relay=%s  reject=%s",
++		               call->is_outgoing ? "OUTGOING" : "INCOMING",
++		               call->peer_mri ? call->peer_mri : "?",
++		               call->peer_name ? call->peer_name : "?",
++		               call->sdp_offer ? (int) strlen(call->sdp_offer) : 0,
++		               call->session_key_b64 ? "yes" : "no",
++		               call->ticket ? "yes" : "no",
++		               call->udp_transport ? call->udp_transport : "?",
++		               call->link_reject ? "yes" : "no");
++
++		/* Ring the Phone app (incoming) / show dialing (outgoing carbon). */
++		push_state(call, NULL);
++
++		/* DEBUG auto-answer: if /media/internal/teams-autoanswer exists, answer an INCOMING call
++		 * automatically after 3s. Lets the media path be tested by just placing a call (no physical
++		 * tap on the device). Toggle by creating/removing the file; no rebuild needed. */
++		if (!call->is_outgoing && g_file_test("/media/internal/teams-autoanswer", G_FILE_TEST_EXISTS)) {
++			teams_call_log("AUTO-ANSWER armed (toggle present) - answering in 3s");
++			g_timeout_add_seconds(3, teams_calling_autoanswer_cb, sa);
++		}
++		return;
++	}
++}
++
++/* --------------------------------------------------------------- actions (LS2) */
++
++gboolean
++teams_calling_answer(TeamsAccount *sa)
++{
++	TeamsCall *call = teams_calling_current(sa);
++	if (!call || call->state != TEAMS_CALL_INCOMING) {
++		teams_call_log("answer: no incoming call");
++		return FALSE;
++	}
++	teams_call_log("answer: starting media for call with %s", call->peer_mri ? call->peer_mri : "?");
++
++	/* Start the media engine. It will (once wired) allocate on the MS-TURN relay with the
++	 * ticket, set up SRTP from sessionKey, negotiate the offered codec, and hand back an
++	 * SDP answer. That answer then gets POSTed to link_media_answer/attach. For now the
++	 * media start is a stub, so we only transition state so the flow is exercisable. */
++	teams_media_start(call);
++
++	/* TODO(capture): POST the produced SDP answer to call->link_media_answer ("cc://ma" is
++	 * an alias resolved via link_attach on api.flightproxy...). Exact body shape =
++	 * { "mediaContent": { "contentType": "application/sdp-ngc-0.5", "blob": <answer>,
++	 *   "mediaLegId": <call->media_leg_id> } } - CONFIRM WITH CAPTURE. */
++
++	call->state = TEAMS_CALL_ACTIVE;
++	push_state(call, NULL);
++	return TRUE;
++}
++
++gboolean
++teams_calling_reject(TeamsAccount *sa)
++{
++	TeamsCall *call = teams_calling_current(sa);
++	if (!call) { teams_call_log("reject: no call"); return FALSE; }
++	teams_call_log("reject: rejecting call from %s", call->peer_mri ? call->peer_mri : "?");
++
++	if (call->link_reject)
++		call_http_post(sa, call->link_reject, NULL); /* reject is a bare POST, no body */
++
++	call->state = TEAMS_CALL_DISCONNECTED;
++	push_state(call, "rejected");
++	teams_media_stop();
++	set_current(sa, NULL);
++	return TRUE;
++}
++
++gboolean
++teams_calling_hangup(TeamsAccount *sa)
++{
++	TeamsCall *call = teams_calling_current(sa);
++	if (!call) { teams_call_log("hangup: no call"); return FALSE; }
++	teams_call_log("hangup: ending call with %s", call->peer_mri ? call->peer_mri : "?");
++
++	/* CAPTURED LIVE (2026-08-01): this used to be a no-op for an ACTIVE call - only the
++	 * still-ringing/not-yet-accepted case (link_reject) sent anything to Teams. Hanging up an
++	 * ACTIVE call tore down our own media/state locally but told Teams' backend and the peer
++	 * NOTHING, so the peer's client (e.g. the Android app) kept sitting there mid-negotiation
++	 * after we'd already disconnected. An active call is ended via the conversation controller
++	 * (conversationInvitation.conversationController, parsed into call->conversation_controller
++	 * at notification time but never previously used anywhere). CONFIRM WITH CAPTURE the exact
++	 * end/hangup shape - flightproxy_delete()'s DELETE-with-no-body is a best-effort guess
++	 * (REST "leave/end this conversation" semantics), not yet verified against a live backend. */
++	if (call->state == TEAMS_CALL_INCOMING && call->link_reject)
++		call_http_post(sa, call->link_reject, NULL);
++	else if (call->conversation_controller)
++		flightproxy_delete(sa, call->conversation_controller);
++
++	call->state = TEAMS_CALL_DISCONNECTED;
++	push_state(call, "normal");
++	teams_media_stop();
++	set_current(sa, NULL);
++	return TRUE;
++}
++
++gboolean
++teams_calling_dial(TeamsAccount *sa, const gchar *peer_mri, gboolean video)
++{
++	/* Outgoing (caller): spawn teams_media --caller to gather our ICE + generate the offer's SRTP
++	 * key, then media_send_offer() builds the SDP offer and POSTs the cpconv create request (which
++	 * makes the peer ring). The answer comes back over the trouter callAgent path. FIRST-ATTEMPT. */
++	TeamsCall *call;
++	TeamsMediaProc *mp;
++	const gchar *argv[] = { TEAMS_MEDIA_BIN, "--caller", NULL };
++	const gchar *W = "/media/cryptofs/apps/usr/palm/applications/org.webosports.app.atlas/deviceroot/wpe-252/lib";
++	gchar *gstpath = g_strdup_printf("%s/gstreamer-1.0", W);
++	gchar **envp = g_get_environ();
++	GError *err = NULL;
++	GPid pid; int in_fd = -1, out_fd = -1;
++
++	if (!sa->trouter_surl) { teams_call_log("dial: no trouter surl - cannot place call"); g_strfreev(envp); g_free(gstpath); return FALSE; }
++
++	envp = g_environ_setenv(envp, "GST_PLUGIN_SYSTEM_PATH_1_0", gstpath, TRUE);
++	envp = g_environ_setenv(envp, "GST_REGISTRY", "/media/internal/teams-gst-registry.bin", TRUE);
++	g_free(gstpath);
++	/* Same ALSA voip/voipsource PCM fix as teams_media_start() (answerer path) - see that copy's
++	 * comment. No LD_LIBRARY_PATH override here either, for the same reason: teams_media is back to
++	 * a pure gst-1.20/nice build (no libpalmgstskype.so), so simply inheriting our own environment
++	 * (set by imwrap.sh) is sufficient. */
++	envp = g_environ_setenv(envp, "LD_PRELOAD",
++		"/usr/lib/synergy-runtime/libstdc++.so.6 "
++		"/media/cryptofs/wpe-glibc/lib/librt.so.1 /usr/lib/libasound.so.2", TRUE);
++	envp = g_environ_setenv(envp, "ALSA_CONFIG_PATH", "/usr/share/alsa/alsa.conf", TRUE);
++	envp = g_environ_setenv(envp, "ALSA_PLUGIN_DIR", "/usr/lib/alsa-lib", TRUE);
++
++	if (!g_spawn_async_with_pipes(NULL, (gchar **) argv, envp, G_SPAWN_DO_NOT_REAP_CHILD, NULL, NULL,
++	                              &pid, &in_fd, &out_fd, NULL, &err)) {
++		teams_call_log("dial: spawn %s --caller failed: %s", TEAMS_MEDIA_BIN, err ? err->message : "?");
++		if (err) g_error_free(err); g_strfreev(envp); return FALSE;
++	}
++	g_strfreev(envp);
++
++	call = g_new0(TeamsCall, 1);
++	call->sa = sa;
++	call->is_outgoing = TRUE;
++	call->state = TEAMS_CALL_DIALING;
++	call->peer_mri = g_str_has_prefix(peer_mri, "8:") ? g_strdup(peer_mri) : g_strdup_printf("8:%s", peer_mri);
++	call->video_requested = video;
++	set_current(sa, call);
++
++	mp = g_new0(TeamsMediaProc, 1);
++	mp->call = call; mp->pid = pid; mp->in_fd = in_fd; mp->is_caller = TRUE;
++	mp->want_video = video;
++	mp->callagent_id = purple_uuid_random();
++	mp->our_cands = g_string_new("");
++	mp->out_ch = g_io_channel_unix_new(out_fd);
++	g_io_channel_set_flags(mp->out_ch, G_IO_FLAG_NONBLOCK, NULL);
++	mp->out_watch = g_io_add_watch(mp->out_ch, G_IO_IN | G_IO_HUP | G_IO_ERR, media_on_output, mp);
++	g_mproc = mp;
++
++	/* CALLER START: no rx key (we produce the offer). pt=102 for opus. */
++	{ const char *s = "START 102\n"; if (write(in_fd, s, strlen(s)) < 0) teams_call_log("dial: write START failed"); }
++
++	teams_call_log("dial: spawned teams_media --caller pid=%d, calling %s (callAgent=%s)",
++	               (int) pid, call->peer_mri, mp->callagent_id);
++	push_state(call, NULL);   /* dialing */
++	return TRUE;
++}
+diff --git a/teams_calling.h b/teams_calling.h
+new file mode 100644
+index 0000000..0c67527
+--- /dev/null
++++ b/teams_calling.h
+@@ -0,0 +1,147 @@
++/*
++ * Teams Plugin for libpurple/Pidgin - NGC (NextGenCalling) voice calling.
++ * webOS Synergy Revival.
++ *
++ * Microsoft Teams 1:1 voice calls use "NGC" (NextGenCalling / SkypeNgc), the legacy
++ * Skype media stack Teams inherited - NOT browser WebRTC. An incoming call arrives as
++ * a Trouter notification on /NGCallManagerWin (or /SkypeSpacesWeb) carrying:
++ *   - mediaContent.blob : an "application/sdp-ngc-0.5" SDP offer (RTP/SAVP, SDES-SRTP)
++ *   - udpKey.sessionKey : the SRTP master keying material (base64; RFC 3711 AES-CM)
++ *   - udpKey.ticket     : the MRAS token that authenticates to the MS-TURN media relay
++ *   - links.udpTransport: udp://<relay-ip>:3478/   (the MS-TURN relay)
++ *   - links.{attach,mediaAnswer("cc://ma"),progress,reject} : the HTTP control plane
++ *
++ * This module: (1) CAPTURES the full raw notification to a log so the exact SDP dialect,
++ * codec list and key placement can be confirmed from a real call; (2) parses it into a
++ * TeamsCall; (3) drives the call control plane (answer/reject/hangup/dial) over the
++ * links; and (4) hands the media parameters to the separate media engine (teams_media,
++ * a fork of the on-device-proven Signal gst-1.20 nice+srtp+alsa engine).
++ *
++ * The stock webOS Phone app drives this via the LS2 bridge (teams_call_luna).
++ */
++
++#ifndef TEAMS_CALLING_H
++#define TEAMS_CALLING_H
++
++#include "libteams.h"
++#include <json-glib/json-glib.h>
++
++typedef enum {
++	TEAMS_CALL_IDLE = 0,
++	TEAMS_CALL_INCOMING,
++	TEAMS_CALL_DIALING,
++	TEAMS_CALL_ACTIVE,
++	TEAMS_CALL_DISCONNECTED
++} TeamsCallState;
++
++typedef struct _TeamsCall {
++	TeamsAccount *sa;
++
++	gchar *call_id;
++	gchar *peer_mri;    /* the OTHER party's id, e.g. "8:orgid:..." (prefix-stripped for display) */
++	gchar *peer_name;   /* resolved display name, may be NULL */
++	gboolean is_outgoing;
++	TeamsCallState state;
++
++	/* --- media offer (callNotification.mediaContent) --- */
++	gchar *sdp_offer;       /* the raw application/sdp-ngc-0.5 blob (plaintext SDP) */
++	gchar *media_leg_id;
++
++	/* --- keying / relay (callNotification.udpKey) --- */
++	gchar *session_key_b64; /* SRTP master key||salt, base64 (RFC 3711 AES_CM_128_HMAC_SHA1_80) */
++	gchar *ticket;          /* MRAS ticket for MS-TURN relay auth */
++
++	/* --- control-plane links (callNotification.links) --- */
++	gchar *link_attach;
++	gchar *link_media_answer;  /* "cc://ma" - where the SDP answer is posted */
++	gchar *link_progress;
++	gchar *link_reject;
++	gchar *udp_transport;      /* "udp://<ip>:3478/" MS-TURN relay */
++	gchar *conversation_controller; /* conversationInvitation.conversationController */
++
++	/* --- answer flow (incoming): the media controller answer is a two-step handshake -
++	 * POST attach (offer's link_attach) -> parse callInvitation.links.acceptance from the
++	 * response -> POST accept (callAcceptance.mediaContent.blob = our SDP answer). --- */
++	gchar *our_answer_sdp;     /* the SDP answer our media engine produced (held across attach->accept) */
++	gchar *our_endpoint_id;    /* our calling endpoint id (= sa->endpoint), used in acceptedBy */
++	gchar *our_participant_id; /* our participantId (generated), reused in attach join + acceptedBy */
++	gchar *callagent_id;       /* generated callAgent id for our control paths (end link, etc.) */
++
++	/* Video: TRUE once video is actually negotiated active for this call (either present in the
++	 * initial offer/answer, or added later via a mid-call renegotiation push - see
++	 * teams_calling_handle_renegotiation in teams_calling.c). Drives both what SDP we build and
++	 * teams_calling_set_video_cb()'s notifications (which teams_call_luna.c uses to open/close the
++	 * clonk video bridge). NOT set for an outgoing dial-with-video request until the callee's
++	 * answer actually confirms it - see TeamsMediaProc.want_video in teams_calling.c. */
++	gboolean video_active;
++
++	/* Video intent, known from the moment the call starts (unlike video_active above, which is
++	 * confirmed-late: only true once actually negotiated). Incoming: whether the initial offer's
++	 * SDP has a non-inactive m=video line, checked at parse_call_notification() time. Outgoing:
++	 * the dial()'s own video param, set at call creation. This is what the webOS UI's video
++	 * marker/switch-to-video affordance should be driven by - using video_active for this (as
++	 * this file originally did, mirroring an equivalent bug already found and fixed in the
++	 * Telegram/WhatsApp mediators) means an incoming ring or an outgoing dial never shows a video
++	 * marker, since video_active only flips true well after answer/negotiation completes. */
++	gboolean video_requested;
++
++	/* CAPTURED LIVE (2026-08-01): TRUE when media_send_answer() has decided the call starts with
++	 * video active (offer already wanted it) but has deliberately NOT yet fired g_video_cb() -
++	 * doing so synchronously before the attach POST blocked the event loop long enough (bringing
++	 * up the local Clonk camera pipeline is not cheap) that the attach request itself died with
++	 * a bare connection failure (code 0, no response at all) - Teams/the peer never even saw an
++	 * answer, so the call sat on "Calling..." forever. attach_resp_cb() fires the deferred
++	 * callback once the attach round-trip has actually completed. */
++	gboolean video_cb_pending;
++} TeamsCall;
++
++/* Called from teams_trouter.c's /NGCallManagerWin handler with the decoded callNotification
++ * container (body_obj). Captures the raw notification, parses it, tracks call state and
++ * notifies the Phone-app bridge. request_url distinguishes the notification kind
++ * (/NGCallManagerWin incoming/outgoing, /end, /rosterUpdate). */
++void teams_calling_handle_trouter(TeamsAccount *sa, JsonObject *body_obj, const gchar *request_url);
++
++/* The LS2 bridge (teams_call_luna) registers this to receive call-state transitions to push
++ * to the stock Phone app's CallSynergizer. state is one of the CallSynergizer strings:
++ * "incoming"/"dialing"/"active"/"disconnected"/"" (idle). Kept as a hook (rather than a direct
++ * call) so this module compiles/links without luna-service2 present. */
++typedef void (*TeamsCallStateCb)(TeamsAccount *sa, const char *state, const char *peerAddress,
++                                 const char *peerName, gboolean isOutgoing, const char *cause,
++                                 gboolean isVideo);
++void teams_calling_set_state_cb(TeamsCallStateCb cb);
++
++/* Phone-app-facing actions (called by the LS2 bridge). Return FALSE if no such call / not
++ * possible. answer/dial spin up the media engine; reject/hangup tear down + POST control.
++ * dial's video param requests a video m-line in our offer (see TeamsMediaProc.want_video in
++ * teams_calling.c) - whether it actually goes active depends on the callee's answer. */
++gboolean teams_calling_answer(TeamsAccount *sa);
++gboolean teams_calling_reject(TeamsAccount *sa);
++gboolean teams_calling_hangup(TeamsAccount *sa);
++gboolean teams_calling_dial(TeamsAccount *sa, const gchar *peer_mri, gboolean video);
++
++/* The LS2 bridge registers this to learn when TeamsCall.video_active flips, in either direction
++ * (an inbound renegotiation, video already active in the initial offer/answer, or the callee's
++ * answer to an outgoing dial-with-video request). Drives teams_call_luna.c's clonk video bridge
++ * lifecycle (teams_call_luna_open_clonk/close_clonk), which calls voipkit_video_start/stop()
++ * directly - voipkit.cpp lives in this same process/library, not a separate subprocess. */
++typedef void (*TeamsCallVideoCb)(TeamsAccount *sa, gboolean active);
++void teams_calling_set_video_cb(TeamsCallVideoCb cb);
++
++/* The account's current call (or NULL). */
++TeamsCall *teams_calling_current(TeamsAccount *sa);
++
++/* On-device trace to /media/internal/teams-call.log (purple_debug doesn't reach the webOS
++ * system log). printf-style. Without TEAMS_WEBOS_CALL teams_calling.c is not linked in, so the
++ * trace calls in teams_trouter.c / teams_messages.c compile to nothing; the plugin must not be
++ * left with an unresolved symbol, which would stop libpurple from loading it at all. */
++#ifdef TEAMS_WEBOS_CALL
++void teams_call_log(const char *fmt, ...) G_GNUC_PRINTF(1, 2);
++#else
++static inline void G_GNUC_PRINTF(1, 2)
++teams_call_log(const char *fmt, ...)
++{
++	(void) fmt;
++}
++#endif
++
++#endif /* TEAMS_CALLING_H */
+diff --git a/teams_trouter.c b/teams_trouter.c
+index 50ba061..26a1f58 100644
+--- a/teams_trouter.c
++++ b/teams_trouter.c
+@@ -19,6 +19,7 @@
+ #include "teams_trouter.h"
+ 
+ #include "glib.h"
++#include "teams_calling.h"
+ #include "teams_contacts.h"
+ #include "teams_messages.h"
+ #include "teams_util.h"
+@@ -28,7 +29,7 @@
+ #define TEAMS_TROUTER_TCCV "2024.23.01.2"
+ 
+ static gboolean teams_trouter_register(gpointer user_data);
+-static void teams_trouter_register_one(TeamsAccount *sa, const gchar *appId, const gchar *templateKey, const gchar *path, const gchar *productContext);
++static void teams_trouter_register_one(TeamsAccount *sa, const gchar *appId, const gchar *templateKey, const gchar *path, const gchar *productContext, const gchar *transport_context, const gchar *registrar_url);
+ 
+ void
+ teams_trouter_stop(TeamsAccount *sa)
+@@ -180,10 +181,12 @@ teams_trouter_websocket_cb(PurpleWebsocket *ws, gpointer user_data, PurpleWebsoc
+ 	purple_debug_info("teams", "Trouter WS: %d %.*s\n", op, (int) len, msg);
+ 	if (op == PURPLE_WEBSOCKET_OPEN) {
+ 		purple_debug_info("teams", "Trouter WS: Opened\n");
++		teams_call_log("TROUTER connected (websocket open)");
+ 		sa->trouter_reconnect_backoff = 0; /* webOS: healthy connection - reset backoff */
+ 		return;
+ 	} else if (op == PURPLE_WEBSOCKET_CLOSE) {
+ 		purple_debug_info("teams", "Trouter WS: Closed\n");
++		teams_call_log("TROUTER closed");
+ 		// _CLOSE calls abort internally, bypass to prevent double-free
+ 		sa->trouter_socket = NULL;
+ 		// webOS: reopen on a backoff, not instantly, to avoid the reconnect storm
+@@ -191,6 +194,7 @@ teams_trouter_websocket_cb(PurpleWebsocket *ws, gpointer user_data, PurpleWebsoc
+ 		return;
+ 	} else if (op == PURPLE_WEBSOCKET_ERROR) {
+ 		purple_debug_info("teams", "Trouter WS: Error\n");
++		teams_call_log("TROUTER error");
+ 		// _ERROR calls abort internally, bypass to prevent double-free
+ 		sa->trouter_socket = NULL;
+ 		// webOS: reopen on a backoff, not instantly, to avoid the reconnect storm
+@@ -302,6 +306,7 @@ teams_trouter_websocket_cb(PurpleWebsocket *ws, gpointer user_data, PurpleWebsoc
+ 			}
+ 
+ 			const gchar *request_url = json_object_get_string_member(request, "url");
++			teams_call_log("TROUTER frame url=%s", request_url ? request_url : "(null)");
+ 			// if request_url ends with /TeamsUnifiedPresenceService
+ 			if (g_str_has_suffix(request_url, "/TeamsUnifiedPresenceService") ||
+ 					g_str_has_suffix(request_url, "/unifiedPresenceService")) {
+@@ -322,7 +327,16 @@ teams_trouter_websocket_cb(PurpleWebsocket *ws, gpointer user_data, PurpleWebsoc
+ 					teams_process_event_message(sa, body_obj);
+ 				}
+ 
+-			} else if (g_str_has_suffix(request_url, "/NGCallManagerWin") || strstr(request_url, "/SkypeSpacesWeb")) {
++			} else if (g_str_has_suffix(request_url, "/NGCallManagerWin") || strstr(request_url, "/SkypeSpacesWeb")
++					|| strstr(request_url, "/callAgent/")
++					|| (sa->trouter_surl && request_url && request_url[0] && strstr(sa->trouter_surl, request_url))) {
++				/* The last clause: a frame delivered to the BARE base surl (our TFL SkypeSpacesWeb
++				 * calling registration path) - personal Teams delivers call setup here with the
++				 * call detail in the BODY (not a /callAgent/ sub-path in the url). */
++				/* /callAgent/... = the personal/TFL consumer calling delivery path (call setup,
++				 * ring, end, conversation). Enterprise NGC uses /NGCallManagerWin. Both hand off to
++				 * teams_calling.c, which captures the raw frame (so the exact TFL offer format lands
++				 * in teams-call-capture.log) and drives state/answer/reject. */
+ 
+ 				// Incoming call:
+ 				/// body: "{\"evt\":107,\"cp\":\"...\",\"callId\":\"... callid guid ...\",\"callerId\":\"orgid:...\"}"
+@@ -389,6 +403,12 @@ teams_trouter_websocket_cb(PurpleWebsocket *ws, gpointer user_data, PurpleWebsoc
+ 				// 	},
+ 				// 	"groupContext":null
+ 				// }
++#ifdef TEAMS_WEBOS_CALL
++				/* NGC voice calling: capture the raw notification, parse the offer
++				 * (sdp/udpKey/links), track state and ring the Phone-app bridge. See
++				 * teams_calling.c. (Without calling support this only prints an "Incoming call" IM.) */
++				teams_calling_handle_trouter(sa, body_obj, request_url);
++#else
+ 				if (json_object_has_member(body_obj, "callNotification")) {
+ 					JsonObject *callNotification = json_object_get_object_member(body_obj, "callNotification");
+ 					JsonObject *from = json_object_get_object_member(callNotification, "from");
+@@ -408,6 +428,7 @@ teams_trouter_websocket_cb(PurpleWebsocket *ws, gpointer user_data, PurpleWebsoc
+ 
+ 					purple_serv_got_im(sa->pc, convbuddyname, message, PURPLE_MESSAGE_RECV | PURPLE_MESSAGE_SYSTEM, time(NULL));
+ 				}
++#endif
+ 
+ 				// Call started?
+ 				// {
+@@ -423,9 +444,15 @@ teams_trouter_websocket_cb(PurpleWebsocket *ws, gpointer user_data, PurpleWebsoc
+ 
+ 			} else if (g_str_has_suffix(request_url, "/rosterUpdate")) {
+ 				// In progress call has added or removed users
++#ifdef TEAMS_WEBOS_CALL
++				teams_calling_handle_trouter(sa, body_obj, request_url);
++#endif
+ 
+ 			} else if (g_str_has_suffix(request_url, "/end")) {
+ 				// Call ended
++#ifdef TEAMS_WEBOS_CALL
++				teams_calling_handle_trouter(sa, body_obj, request_url);
++#endif
+ 				// {
+ 				//   "callEnd": {
+ 				//     "reason": "clientError",
+@@ -461,6 +488,7 @@ teams_trouter_websocket_cb(PurpleWebsocket *ws, gpointer user_data, PurpleWebsoc
+ 				
+ 			} else {
+ 				purple_debug_info("teams", "Trouter WS: Unknown request: %s\n", request_url);
++				{ gchar *_bs = teams_jsonobj_to_string(body_obj); teams_call_log("UNKNOWN frame url=%s body=%.500s", request_url ? request_url : "(null)", _bs ? _bs : "(none)"); g_free(_bs); }
+ 			}
+ 
+ 			json_object_unref(orig_body);
+@@ -481,7 +509,7 @@ teams_trouter_websocket_cb(PurpleWebsocket *ws, gpointer user_data, PurpleWebsoc
+ 			JsonObject *obj = json_decode_object((const gchar *) &msg[i], len - i);
+ 			const gchar *name = json_object_get_string_member(obj, "name"); /* guarded macro: NULL-safe */
+ 			if (purple_strequal(name, "trouter.message_loss")) {
+-				teams_trouter_register_one(sa, "TeamsCDLWebWorker", "TeamsCDLWebWorker_1.9", sa->trouter_surl, NULL);
++				teams_trouter_register_one(sa, "TeamsCDLWebWorker", "TeamsCDLWebWorker_1.9", sa->trouter_surl, NULL, "", NULL);
+ 			}
+ 			if (obj) json_object_unref(obj); /* webOS: empty 5: frame decodes to NULL */
+ 		}
+@@ -538,8 +566,24 @@ teams_trouter_send_ping(gpointer user_data)
+ 	return teams_trouter_send_message(sa, "{\"name\":\"ping\"}");
+ }
+ 
++/* webOS diagnostic: log the registrar's response so we can see whether the calling-endpoint
++ * registration (NextGenCalling etc.) actually succeeds. appId (a string literal) is passed as
++ * user_data. A non-2xx here explains "rings on the caller, never on the device". */
+ static void
+-teams_trouter_register_one(TeamsAccount *sa, const gchar *appId, const gchar *templateKey, const gchar *path, const gchar *productContext)
++teams_trouter_reg_response_cb(PurpleHttpConnection *http_conn, PurpleHttpResponse *response, gpointer user_data)
++{
++	const gchar *appId = user_data;
++	int code = purple_http_response_get_code(response);
++	size_t len = 0;
++	const gchar *body = purple_http_response_get_data(response, &len);
++	const gchar *err = purple_http_response_get_error(response);
++	(void) http_conn;
++	teams_call_log("REGISTRAR resp appId=%s code=%d err=%s body=%.240s",
++	               appId ? appId : "?", code, err ? err : "(none)", body ? body : "(none)");
++}
++
++static void
++teams_trouter_register_one(TeamsAccount *sa, const gchar *appId, const gchar *templateKey, const gchar *path, const gchar *productContext, const gchar *transport_context, const gchar *registrar_url)
+ {
+ 	JsonObject *reg_obj = json_object_new();
+ 	JsonObject *clientDescription = json_object_new();
+@@ -558,7 +602,10 @@ teams_trouter_register_one(TeamsAccount *sa, const gchar *appId, const gchar *te
+ 		json_object_set_string_member(clientDescription, "productContext", productContext);
+ 	}
+ 
+-	json_object_set_string_member(trouter_obj, "context", "");
++	/* transport context: "" for messaging, "TFL" for the personal calling (SkypeSpacesWeb)
++	 * registration - a captured web-client registration shows calls only route to a TFL-context
++	 * SkypeSpacesWeb endpoint. */
++	json_object_set_string_member(trouter_obj, "context", transport_context ? transport_context : "");
+ 	json_object_set_string_member(trouter_obj, "path", path);
+ 	json_object_set_int_member(trouter_obj, "ttl", TEAMS_TROUTER_TTL);
+ 
+@@ -566,12 +613,15 @@ teams_trouter_register_one(TeamsAccount *sa, const gchar *appId, const gchar *te
+ 	json_object_set_array_member(transports, "TROUTER", trouter);
+ 
+ 	json_object_set_object_member(reg_obj, "clientDescription", clientDescription);
++	/* registrationId MUST equal the trouter endpoint id (sa->endpoint / epid) for the endpoint to
++	 * be a routable target - the web client registers both messaging (TeamsCDLWebWorker) AND calling
++	 * (SkypeSpacesWeb) under the epid, not a random UUID. */
+ 	gchar *regId = NULL;
+-	if (purple_strequal("TeamsCDLWebWorker", appId)
++	if (purple_strequal("SkypeSpacesWeb", appId) || (purple_strequal("TeamsCDLWebWorker", appId)
+ #ifdef ENABLE_TEAMS_PERSONAL
+ 		&& purple_strequal(productContext, "TFL")
+ #endif
+-	) {
++	)) {
+ 		regId = g_strdup(sa->endpoint);
+ 	} else {
+ 		regId = purple_uuid_random();
+@@ -592,14 +642,17 @@ teams_trouter_register_one(TeamsAccount *sa, const gchar *appId, const gchar *te
+ #	define TEAMS_REGISTRAR_URL "https://teams.microsoft.com/registrar/prod/V2/registrations"
+ #endif
+ 
+-	PurpleHttpRequest *request = purple_http_request_new(TEAMS_REGISTRAR_URL);
++	/* Per-registration registrar: personal messaging uses edge.skype.com, but personal CALLING
++	 * (SkypeSpacesWeb) registers at teams.microsoft.com (captured from the web client). */
++	PurpleHttpRequest *request = purple_http_request_new(registrar_url ? registrar_url : TEAMS_REGISTRAR_URL);
+ 	purple_http_request_set_method(request, "POST");
+ 	purple_http_request_set_keepalive_pool(request, sa->keepalive_pool);
+ 	purple_http_request_header_set(request, "Content-Type", "application/json");
+ 	purple_http_request_header_set(request, "X-Skypetoken", sa->skype_token);
++	purple_http_request_header_set(request, "x-ms-migration", "True");
+ 	purple_http_request_header_set_printf(request, "Authorization", "Bearer %s", sa->id_token); // Only for chat?
+ 	purple_http_request_set_contents(request, reg_str, strlen(reg_str));
+-	purple_http_request(sa->pc, request, NULL, NULL);
++	purple_http_request(sa->pc, request, teams_trouter_reg_response_cb, (gpointer) appId);
+ 	purple_http_request_unref(request);
+ 
+ 	g_free(reg_str);
+@@ -641,21 +694,31 @@ teams_trouter_register(gpointer user_data)
+ 	//TODO scan through buddy list and call teams_subscribe_to_contact_status instead
+ 	teams_get_friend_list(sa);
+ 
++#ifdef ENABLE_TEAMS_PERSONAL
++	/* Personal/TFL CALLING: a captured teams.live.com web-client registration shows personal Teams
++	 * has NO "NextGenCalling" endpoint (that's enterprise NGC). Calls instead route to a
++	 * "SkypeSpacesWeb" endpoint registered at teams.microsoft.com with templateKey
++	 * TFLSkypeSpacesWeb_2.0, transport context "TFL", the BASE trouter surl as path (no app suffix),
++	 * and registrationId = epid. Incoming calls then arrive as /callAgent/... sub-paths of that surl.
++	 * (See messaging/teams/calling/TEAMS_CALLING_STATUS.md.) */
++	teams_call_log("registering TFL calling endpoint (SkypeSpacesWeb) surl=%s", sa->trouter_surl ? sa->trouter_surl : "(null)");
++	teams_trouter_register_one(sa, "SkypeSpacesWeb", "TFLSkypeSpacesWeb_2.0", sa->trouter_surl, NULL,
++	                           "TFL", "https://teams.microsoft.com/registrar/prod/v2/registrations");
++
++	teams_trouter_register_one(sa, "TeamsCDLWebWorker", "TeamsCDLWebWorker_2.6", sa->trouter_surl, "TFL", "", NULL);
++	teams_trouter_register_one(sa, "TeamsCDLWebWorker", "TeamsCDLWebWorker_2.3", sa->trouter_surl, "", "", NULL);
++#else
++	/* Enterprise NGC calling. */
+ 	gchar *ngc_path = g_strconcat(sa->trouter_surl, "NGCallManagerWin", NULL);
+-	teams_trouter_register_one(sa, "NextGenCalling", "DesktopNgc_2.3:SkypeNgc", ngc_path, NULL);
++	teams_call_log("registering NGC calling endpoint: surl=%s path=%s", sa->trouter_surl ? sa->trouter_surl : "(null)", ngc_path);
++	teams_trouter_register_one(sa, "NextGenCalling", "DesktopNgc_2.3:SkypeNgc", ngc_path, NULL, "", NULL);
+ 	g_free(ngc_path);
+ 
+ 	gchar *ssw_path = g_strconcat(sa->trouter_surl, "SkypeSpacesWeb", NULL);
+-	teams_trouter_register_one(sa, "SkypeSpacesWeb", "SkypeSpacesWeb_2.3", ssw_path, NULL);
++	teams_trouter_register_one(sa, "SkypeSpacesWeb", "SkypeSpacesWeb_2.3", ssw_path, NULL, "", NULL);
+ 	g_free(ssw_path);
+ 
+-	//teams_trouter_register_one(sa, "com.microsoft.calendar", "Calendar_2.0", sa->trouter_surl, NULL);
+-
+-#ifdef ENABLE_TEAMS_PERSONAL
+-	teams_trouter_register_one(sa, "TeamsCDLWebWorker", "TeamsCDLWebWorker_2.6", sa->trouter_surl, "TFL");
+-	teams_trouter_register_one(sa, "TeamsCDLWebWorker", "TeamsCDLWebWorker_2.3", sa->trouter_surl, "");
+-#else
+-	teams_trouter_register_one(sa, "TeamsCDLWebWorker", "TeamsCDLWebWorker_2.1", sa->trouter_surl, NULL);
++	teams_trouter_register_one(sa, "TeamsCDLWebWorker", "TeamsCDLWebWorker_2.1", sa->trouter_surl, NULL, "", NULL);
+ #endif
+ 
+ 
+@@ -737,7 +800,14 @@ teams_trouter_sessionid_cb(PurpleHttpConnection *http_conn, PurpleHttpResponse *
+ 	}
+ 	sa->trouter_surl = g_strdup(json_object_get_string_member(obj, "surl"));
+ 
+-	sa->trouter_registration_timeout = purple_timeout_add_seconds(TEAMS_TROUTER_TTL - 10, teams_trouter_register, sa);
++	/* NOT TEAMS_TROUTER_TTL-10 (~24h): that assumed the registrar honors the 86400s ttl we send in
++	 * the registration body. Real-world testing (2026-08-04) showed otherwise -- a call placed
++	 * ~30 minutes after the last successful registration (with zero renewal in between, since the
++	 * 24h timer never gets close to firing in any real session) failed in ~2s on the caller's side
++	 * with NOTHING reaching our trouter at all: the SkypeSpacesWeb/TFL calling registration had
++	 * gone stale well before 24h. Renewing every 5 minutes gives comfortable margin under that
++	 * observed window without spamming the registrar. */
++	sa->trouter_registration_timeout = purple_timeout_add_seconds(300, teams_trouter_register, sa);
+ 
+ 	json_object_unref(obj);
+ 	g_strfreev(node_parts);
+diff --git a/teams_video_relay.cpp b/teams_video_relay.cpp
+new file mode 100644
+index 0000000..6ad1c80
+--- /dev/null
++++ b/teams_video_relay.cpp
+@@ -0,0 +1,177 @@
++// teams_video_relay.cpp — see teams_video_relay.h. Connects voipkit.cpp's callback-based H.264
++// bridge (this process, has LS2/clonk access) to teams_media's raw-RTP relay socket (a separate
++// subprocess, owns the actual SRTP/ICE network transport). We build/parse the 12-byte RTP header
++// ourselves here (h264_depacketizer_feed/h264_packetize work on the payload only) since this is now
++// the ONLY place in the whole call path that needs to know both "this is an RTP packet" and "this
++// is an H.264 access unit" at once.
++
++#include "voipkit.h"
++#include "h264_rtp.h"
++#include "teams_video_relay.h"
++
++#include <cstdio>
++#include <cstring>
++#include <cstdint>
++#include <cstdlib>
++#include <pthread.h>
++#include <unistd.h>
++#include <errno.h>
++#include <sys/socket.h>
++#include <sys/un.h>
++
++#define TM_RELAY_SOCK "/tmp/teams-video-relay.sock"
++static const unsigned kVideoPt = 107;
++static const size_t kRtpMtu = 1200;
++
++static int g_relay_fd = -1;
++static pthread_t g_reader_thread;
++static volatile int g_running = 0;
++static h264_depacketizer g_rx_depkt;
++static uint16_t g_tx_seq;
++static uint32_t g_tx_ts;
++static uint32_t g_tx_ssrc;
++
++static bool send_all(int fd, const void *buf, size_t n)
++{
++	const unsigned char *p = (const unsigned char *)buf;
++	while (n) {
++		ssize_t w = send(fd, p, n, MSG_NOSIGNAL);
++		if (w <= 0) { if (w < 0 && errno == EINTR) continue; return false; }
++		p += w; n -= (size_t)w;
++	}
++	return true;
++}
++
++static bool recv_all(int fd, void *buf, size_t n)
++{
++	unsigned char *p = (unsigned char *)buf;
++	size_t got = 0;
++	while (got < n) {
++		ssize_t r = recv(fd, p + got, n - got, 0);
++		if (r <= 0) { if (r < 0 && errno == EINTR) continue; return false; }
++		got += (size_t)r;
++	}
++	return true;
++}
++
++static void rtp_build_header(unsigned char *hdr, uint16_t seq, uint32_t ts, uint32_t ssrc, int marker)
++{
++	hdr[0] = 0x80;
++	hdr[1] = (unsigned char)((marker ? 0x80 : 0) | (kVideoPt & 0x7f));
++	hdr[2] = (unsigned char)(seq >> 8);
++	hdr[3] = (unsigned char)(seq & 0xff);
++	hdr[4] = (unsigned char)(ts >> 24);
++	hdr[5] = (unsigned char)(ts >> 16);
++	hdr[6] = (unsigned char)(ts >> 8);
++	hdr[7] = (unsigned char)(ts & 0xff);
++	hdr[8]  = (unsigned char)(ssrc >> 24);
++	hdr[9]  = (unsigned char)(ssrc >> 16);
++	hdr[10] = (unsigned char)(ssrc >> 8);
++	hdr[11] = (unsigned char)(ssrc & 0xff);
++}
++
++// h264_packetize()'s emit callback: build one RTP packet around the fragment and send it,
++// length-prefixed, to teams_media over the relay socket. Runs on skypekit's Thread A.
++static void relay_emit(void *ctx, const unsigned char *payload, size_t len, int marker)
++{
++	(void)ctx;
++	if (g_relay_fd < 0 || len > 1500) return;
++	unsigned char pkt[12 + 1500];
++	rtp_build_header(pkt, g_tx_seq++, g_tx_ts, g_tx_ssrc, marker);
++	memcpy(pkt + 12, payload, len);
++	uint16_t framelen = (uint16_t)(12 + len);
++	unsigned char lenhdr[2] = { (unsigned char)(framelen >> 8), (unsigned char)(framelen & 0xff) };
++	if (send_all(g_relay_fd, lenhdr, 2)) send_all(g_relay_fd, pkt, framelen);
++}
++
++// skypekit's Thread A callback: one complete access unit from our own camera capture, ready to be
++// RTP-packetized and relayed to teams_media for SRTP-encrypt + network send.
++static void on_frame_out(const unsigned char *au, unsigned int len)
++{
++	g_tx_ts += 90000 / 30;   // nominal ~30fps step; one timestamp per frame
++	h264_packetize(au, len, kRtpMtu, relay_emit, nullptr);
++}
++
++// Reader thread: pulls length-prefixed RTP packets off the relay socket (packets arriving from the
++// network peer, already SRTP-decrypted by teams_media), depacketizes, and feeds completed access
++// units to skypekit for on-screen display. Exits (and the connection is torn down) on any read
++// error/EOF or when teams_video_relay_disconnect() shuts the socket down from under it.
++static void *reader_main(void *)
++{
++	while (g_running) {
++		unsigned char lenhdr[2];
++		if (!recv_all(g_relay_fd, lenhdr, 2)) break;
++		uint16_t framelen = (uint16_t)((lenhdr[0] << 8) | lenhdr[1]);
++		if (framelen < 12 || framelen > 1600) break;
++		unsigned char pkt[1600];
++		if (!recv_all(g_relay_fd, pkt, framelen)) break;
++		int marker = (pkt[1] & 0x80) ? 1 : 0;
++		const unsigned char *au = nullptr; size_t au_len = 0;
++		if (h264_depacketizer_feed(&g_rx_depkt, pkt + 12, framelen - 12, marker, &au, &au_len))
++			voipkit_video_receive_frame(au, (unsigned int)au_len);
++	}
++	fprintf(stderr, "tm-call: video relay reader exiting\n");
++	return nullptr;
++}
++
++extern "C" int teams_video_relay_connect(void)
++{
++	if (g_relay_fd >= 0) return 1;   // idempotent
++
++	struct sockaddr_un addr;
++	memset(&addr, 0, sizeof addr);
++	addr.sun_family = AF_UNIX;
++	strncpy(addr.sun_path, TM_RELAY_SOCK, sizeof(addr.sun_path) - 1);
++
++	/* Found+fixed 2026-08-05: this was a SINGLE connect() attempt with no retry at all, racing
++	 * teams_media's own relay_listen_start() - for the CALLER role that's deferred until
++	 * tm_apply_answer() fires, triggered by the SAME mediaAnswer event that also kicks off this
++	 * whole clonk video chain in the plugin process, with no synchronization between the two
++	 * processes. CAPTURED LIVE: "video relay connect() failed (is teams_media up?)" still fired on
++	 * real test calls even after voipkit_video_wait_thread_b() was added (that only orders the
++	 * plugin<->mediaserver bridge, not this separate plugin<->teams_media one) - meaning every
++	 * outgoing video frame silently had nowhere to go for the whole call. Retry briefly instead of
++	 * giving up on the first attempt; a short blocking retry here is consistent with this same
++	 * call chain already blocking up to 3s in voipkit_video_wait_thread_b() right after this. */
++	int fd = -1;
++	for (int attempt = 0; attempt < 20; attempt++) {
++		fd = socket(AF_UNIX, SOCK_STREAM, 0);
++		if (fd < 0) { fprintf(stderr, "tm-call: video relay socket() failed\n"); return 0; }
++		if (connect(fd, (struct sockaddr *)&addr, sizeof addr) == 0) break;
++		close(fd); fd = -1;
++		usleep(100000); /* 100ms */
++	}
++	if (fd < 0) {
++		fprintf(stderr, "tm-call: video relay connect() failed after retries (is teams_media up?)\n");
++		return 0;
++	}
++
++	g_relay_fd = fd;
++	g_tx_seq  = (uint16_t)(random() & 0xffff);
++	g_tx_ts   = (uint32_t)random();
++	g_tx_ssrc = (uint32_t)random();
++	h264_depacketizer_init(&g_rx_depkt);
++	voipkit_set_frame_out_callback(on_frame_out);
++
++	g_running = 1;
++	if (pthread_create(&g_reader_thread, nullptr, reader_main, nullptr) != 0) {
++		fprintf(stderr, "tm-call: video relay reader thread create failed\n");
++		g_running = 0;
++		close(g_relay_fd); g_relay_fd = -1;
++		h264_depacketizer_free(&g_rx_depkt);
++		return 0;
++	}
++	fprintf(stderr, "tm-call: video relay connected to %s\n", TM_RELAY_SOCK);
++	return 1;
++}
++
++extern "C" void teams_video_relay_disconnect(void)
++{
++	if (g_relay_fd < 0 && !g_running) return;
++	g_running = 0;
++	if (g_relay_fd >= 0) shutdown(g_relay_fd, SHUT_RDWR);   // unblock the reader thread's recv()
++	pthread_join(g_reader_thread, nullptr);
++	if (g_relay_fd >= 0) { close(g_relay_fd); g_relay_fd = -1; }
++	h264_depacketizer_free(&g_rx_depkt);
++	fprintf(stderr, "tm-call: video relay disconnected\n");
++}
+diff --git a/teams_video_relay.h b/teams_video_relay.h
+new file mode 100644
+index 0000000..368d148
+--- /dev/null
++++ b/teams_video_relay.h
+@@ -0,0 +1,32 @@
++// teams_video_relay.h — bridges voipkit.cpp's callback-based H.264 video API to teams_media's
++// raw-RTP relay socket (see teams_media.c's top-of-file comment for why this extra hop exists:
++// the SRTP/ICE network I/O lives in that separate subprocess, but the clonk/skypekit video bridge
++// has to live here, in the main plugin process, since only this process's runtime environment can
++// satisfy libpalmgstskype.so's transitive dependency chain).
++//
++// Wire format on the relay socket (both directions): a 2-byte big-endian length prefix followed
++// by exactly one whole RTP packet (12-byte header + H.264 payload) — see teams_media.c.
++#ifndef TEAMS_VIDEO_RELAY_H
++#define TEAMS_VIDEO_RELAY_H
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++// Connects to teams_media's relay socket, registers our frame-out callback with voipkit.cpp, and
++// starts the reader thread that depacketizes inbound RTP video and feeds skypekit's display path.
++// Call AFTER voipkit_video_start() (mirrors Telegram's call-luna.cpp ordering: capture must be
++// live before we start handing it frames to send). Returns false if the socket isn't there yet
++// (teams_media not up / pipeline not built) — caller should treat this as "no video this call"
++// rather than retrying forever.
++int teams_video_relay_connect(void);
++
++// Stops the reader thread and closes the relay connection. Idempotent. Call BEFORE
++// voipkit_video_stop().
++void teams_video_relay_disconnect(void);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif
+diff --git a/voipkit.cpp b/voipkit.cpp
+new file mode 100644
+index 0000000..4ccf750
+--- /dev/null
++++ b/voipkit.cpp
+@@ -0,0 +1,460 @@
++// voipkit.cpp — native bridge between mediaserver's local SkypeKit RTP sockets and the network
++// peer's RTP stream. Lives in the main plugin process (libteams-personal.so); teams_video_relay.cpp
++// drives this via voipkit_set_frame_out_callback / voipkit_video_receive_frame, and itself
++// shuttles the RTP-framed H.264 access units across one more hop (a UNIX relay socket) to/from the
++// teams_media subprocess, which owns the actual SRTP/ICE network transport (see teams_media.c's
++// top-of-file comment for why the network I/O and the clonk bridge can't live in the same process).
++// See voipkit.h and messaging/whatsapp/calling/WHATSAPP_VIDEO_STATUS.md (Parts 10-18) for the
++// full reverse-engineering trail this is built from.
++//
++// Adapted verbatim from messaging/telegram/plugin/tdlib-purple/voipkit.cpp (itself adapted from
++// messaging/facebook-e2ee/plugin/purple-combined/glue/voipkit.cpp) — identical thread logic;
++// Thread A delivers decoded access units via a settable callback
++// (voipkit_set_frame_out_callback) rather than a protocol-specific export, so this file has no
++// dependency on any particular calling protocol's media stack.
++//
++// Links directly against the real, extracted libpalmgstskype.so (no public SDK headers exist
++// for SkypeKit) via the asm-mangled-symbol binding trick proven in
++// messaging/whatsapp/calling/skypekit_send_test.cpp and skypekit_decode_test.cpp — we only need
++// our own object layout to be right (sizes, which offset holds what), not the wire format; the
++// real compiled code does 100% of the encoding/decoding. Safety property (same as those test
++// tools): a layout mistake can only crash THIS process, since mediaserver only ever sees bytes
++// that already passed through its own trusted encoder, and only after our own decode calls
++// return successfully do we trust what they handed back.
++//
++// Two threads, one per SkypeKit socket:
++//   Thread A ("capture->peer"): binds+listens /tmp/vidrtp_to_skypekit_key (mediaserver dials
++//     out here once /tmp/vidrtp_from_skypekit_key has an accepted peer — Part 17), decodes each
++//     SendRTPPacket call with the real Sid::Protocol::BinServer, strips the RTP header,
++//     reassembles access units via h264_rtp.c, and hands complete ones to the registered callback.
++//   Thread B ("peer->display"): connects as a client to /tmp/vidrtp_from_skypekit_key (its mere
++//     connection is what unlocks Thread A's dial per Part 17), and on each access unit handed to
++//     it via voipkit_video_receive_frame, RTP-packetizes it (h264_rtp.c, with our own local
++//     seq/timestamp/SSRC state) and sends each resulting packet as a real RtpPacketReceived
++//     call, exactly as skypekit_send_test.cpp proved for one canned payload.
++
++#include <pthread.h>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <cstdint>
++#include <ctime>
++#include <unistd.h>
++
++#include "voipkit.h"
++#include "h264_rtp.h"
++
++// ---------------- SkypeKit bindings (see skypekit_send_test.cpp / skypekit_decode_test.cpp
++// for how each of these was found and confirmed via disassembly + live testing) ----------------
++extern "C" {
++	void avtw_ctor(void *self) asm("_ZN3Sid18AVTransportWrapperC1Ev");
++	void avtw_dtor(void *self) asm("_ZN3Sid18AVTransportWrapperD1Ev");
++	int avtw_connect(void *self, const char *name, int isServer, int timeoutMs)
++		asm("_ZN3Sid18AVTransportWrapper7ConnectEPKcbi");
++	void avtw_terminate(void *self) asm("_ZN3Sid18AVTransportWrapper9terminateEv");
++
++	void binclient_ctor(void *self, void *transport)
++		asm("_ZN3Sid8Protocol9BinClientC1EPNS_18TransportInterfaceE");
++	int binclient_wr_call_lst(void *self, void *ci, const unsigned int *cmdId,
++	                            const char *cmdName, unsigned int *responseIdOut,
++	                            void *fields, unsigned int fieldCount, ...)
++		asm("_ZN3Sid8Protocol9BinClient11wr_call_lstEPNS_16CommandInitiatorERKjPKcRjPNS_5FieldEjz");
++	extern unsigned char M_SkypeVideoRTPInterface_fields[]
++		asm("_ZN3Sid5Field31M_SkypeVideoRTPInterface_fieldsE");
++
++	void binserver_ctor(void *self, void *api, void *transport)
++		asm("_ZN3Sid8Protocol9BinServerC1EPNS_3ApiEPNS_18TransportInterfaceE");
++	int binserver_rd_command(void *self, void *ci, void *command)
++		asm("_ZN3Sid8Protocol9BinServer10rd_commandEPNS_16CommandInitiatorERNS0_7CommandE");
++	int binserver_rd_call(void *self, void *ci, unsigned int *cmdId, unsigned int *arg2,
++	                        unsigned int *arg3)
++		asm("_ZN3Sid8Protocol9BinServer7rd_callEPNS_16CommandInitiatorERjS4_S4_");
++	int binserver_rd_parms(void *self, void *ci, void *fields, unsigned int fieldIndex, void *buf)
++		asm("_ZN3Sid8Protocol9BinServer8rd_parmsEPNS_16CommandInitiatorEPNS_5FieldEjPv");
++	extern unsigned char M_SkypeVideoRTPInterfaceCb_fields[]
++		asm("_ZN3Sid5Field33M_SkypeVideoRTPInterfaceCb_fieldsE");
++
++	void sebinary_set(void *self, const void *data, unsigned len) asm("_ZN8SEBinary3setEPKvj");
++}
++
++// Was 20 (0x14): see WHATSAPP_VIDEO_STATUS.md Part 36 -- traced ProcessCall's real dispatch via
++// VideoHost's ELF-relocation vtable dump. RtpPacketReceived's real vtable slot is +0x58, which
++// ProcessCall's case 0x13 calls (parses one param via rd_parms, returns without wr_response --
++// fire-and-forget, matching this call's known behavior). Case 0x14 calls vtable+0x60
++// (StopPlayback), takes no params, and IS request/response -- this was silently invoking
++// StopPlayback() with no arguments instead of RtpPacketReceived on every single call.
++static const unsigned kRtpPacketReceivedCmdId = 19;
++static const unsigned kRtpPacketReceivedFieldIndex = 91;
++static const unsigned kSendRTPPacketFieldIndex = 0;
++static const unsigned kRtpPayloadType = 96; // confirmed live, Part 15/18 (H.264 dynamic PT)
++static const size_t kRtpMtu = 1200;         // conservative local-IPC payload budget for FU-A
++
++// SEBinary's real layout (Part 14/18): +4 data ptr, +8 size, +12 "resizable" flag (nonzero =
++// normal/growable). Must be nonzero before the first set() or resize() silently no-ops.
++static void sebinary_init(unsigned char *buf) {
++	memset(buf, 0, 256);
++	*(uint32_t *)(buf + 12) = 1;
++}
++
++// ---------------- RTP header helpers ----------------
++
++static void rtp_build_header(unsigned char *hdr, uint16_t seq, uint32_t ts, uint32_t ssrc,
++                              int marker) {
++	hdr[0] = 0x80;
++	hdr[1] = (unsigned char)((marker ? 0x80 : 0) | (kRtpPayloadType & 0x7f));
++	hdr[2] = (unsigned char)(seq >> 8);
++	hdr[3] = (unsigned char)(seq & 0xff);
++	hdr[4] = (unsigned char)(ts >> 24);
++	hdr[5] = (unsigned char)(ts >> 16);
++	hdr[6] = (unsigned char)(ts >> 8);
++	hdr[7] = (unsigned char)(ts & 0xff);
++	hdr[8] = (unsigned char)(ssrc >> 24);
++	hdr[9] = (unsigned char)(ssrc >> 16);
++	hdr[10] = (unsigned char)(ssrc >> 8);
++	hdr[11] = (unsigned char)(ssrc & 0xff);
++}
++
++static int rtp_parse_header(const unsigned char *pkt, size_t len, int *marker,
++                             const unsigned char **payload, size_t *payload_len) {
++	if (len < 12) return 0;
++	*marker = (pkt[1] & 0x80) ? 1 : 0;
++	*payload = pkt + 12;
++	*payload_len = len - 12;
++	return 1;
++}
++
++// ---------------- shared bridge state ----------------
++
++static pthread_t g_thread_a, g_thread_b;
++static volatile int g_running = 0;
++static volatile int g_thread_a_started = 0; // set the moment thread A enters, before it blocks
++// Set once Thread B's own avtw_connect() to mediaserver's /tmp/vidrtp_from_skypekit_key actually
++// succeeds (not just once the thread starts). PORTED FROM WHATSAPP'S voipkit.cpp (found+fixed
++// 2026-08-05): this codebase's copy was missing both this flag and voipkit_video_wait_thread_b()
++// below, so teams_call_luna.c fired videoPlayerStart immediately after voipkit_video_start()
++// with no wait at all. CAPTURED LIVE: mediaserver's RunVideoHost() (triggered by videoPlayerStart)
++// does a SINGLE, non-retried 500ms-timeout outbound dial to reach Thread A once its own inbound
++// side (what Thread B connects to) is satisfied - miss that one window and no video frame we
++// capture ever leaves the device for the rest of the call, with no error anywhere in our own
++// logs (Thread A still logs "accepted a connection" since OUR listen socket is fine - confirmed
++// via a live packet capture: Android's video correctly arrived at webOS, but webOS sent zero
++// video bytes back, for a call where every other step - SDP negotiation, ICE, acceptedCallModalities
++// - had already been fixed and verified working). See WHATSAPP_VIDEO_STATUS.md Part 17.
++static volatile int g_thread_b_connected = 0;
++static pthread_mutex_t g_start_mx = PTHREAD_MUTEX_INITIALIZER;
++static pthread_cond_t g_start_cv = PTHREAD_COND_INITIALIZER;
++
++static void (*g_frame_out_cb)(const unsigned char *, unsigned int) = nullptr;
++
++void voipkit_set_frame_out_callback(void (*cb)(const unsigned char *, unsigned int)) {
++	g_frame_out_cb = cb;
++}
++
++// Thread B's pending-frame handoff: caller overwrites, thread B drains. Live video wants the
++// latest frame, not a backlog (see voipkit.h).
++static pthread_mutex_t g_pending_mx = PTHREAD_MUTEX_INITIALIZER;
++static pthread_cond_t g_pending_cv = PTHREAD_COND_INITIALIZER;
++static unsigned char *g_pending_data = nullptr;
++static unsigned int g_pending_len = 0;
++static int g_pending_ready = 0;
++
++// ---------------- Thread A: capture -> peer ----------------
++
++static void *thread_a_main(void *) {
++	pthread_mutex_lock(&g_start_mx);
++	g_thread_a_started = 1;
++	pthread_cond_broadcast(&g_start_cv);
++	pthread_mutex_unlock(&g_start_mx);
++
++	unsigned char transport[1024];
++	unsigned char binserver[1024];
++	unsigned char sebinary[256];
++	h264_depacketizer depkt;
++	h264_depacketizer_init(&depkt);
++
++	for (;;) {
++		memset(transport, 0, sizeof(transport));
++		avtw_ctor(transport);
++		// isServer=true: real bind+listen+poll+accept in one call (Part 17 disassembly of
++		// Sid::AVServer::Connect, the same primitive RunVideoHost() itself uses for its own
++		// inbound socket) — retries indefinitely at mediaserver's own ~10s cadence until
++		// something connects, or until pthread_cancel unwinds us out of the blocking accept.
++		int ok = avtw_connect(transport, "/tmp/vidrtp_to_skypekit_key", /*isServer=*/1,
++		                       /*timeoutMs=*/10000);
++		if (!ok) {
++			avtw_dtor(transport);
++			continue;
++		}
++		fprintf(stderr, "tm-call: skypekit thread A accepted a connection\n");
++
++		memset(binserver, 0, sizeof(binserver));
++		binserver_ctor(binserver, nullptr, transport);
++
++		for (;;) {
++			unsigned char command_buf[16];
++			memset(command_buf, 0, sizeof(command_buf));
++			int rc0 = binserver_rd_command(binserver, nullptr, command_buf);
++			if (rc0 != 0) {
++				fprintf(stderr, "tm-call: skypekit thread A rd_command=%d, disconnecting\n", rc0);
++				break;
++			}
++			uint32_t type = *(uint32_t *)command_buf;
++			if (type != 0x52) continue; // not a call ('R') — ignore, keep reading
++
++			unsigned int cmdId = 0, arg2 = 0, arg3 = 0;
++			int rc1 = binserver_rd_call(binserver, nullptr, &cmdId, &arg2, &arg3);
++			if (rc1 != 0) {
++				fprintf(stderr, "tm-call: skypekit thread A rd_call=%d, disconnecting\n", rc1);
++				break;
++			}
++
++			sebinary_init(sebinary);
++			int rc2 = binserver_rd_parms(binserver, nullptr, M_SkypeVideoRTPInterfaceCb_fields,
++			                               kSendRTPPacketFieldIndex, sebinary);
++			if (rc2 != 0) {
++				fprintf(stderr, "tm-call: skypekit thread A rd_parms=%d, dropping call\n", rc2);
++				continue; // malformed call — drop it, stay connected
++			}
++			uint8_t *data = *(uint8_t **)(sebinary + 4);
++			uint32_t len = *(uint32_t *)(sebinary + 8);
++			if (!data || len == 0) continue;
++
++			int marker;
++			const unsigned char *payload;
++			size_t payload_len;
++			if (!rtp_parse_header(data, len, &marker, &payload, &payload_len)) continue;
++
++			const unsigned char *au;
++			size_t au_len;
++			if (h264_depacketizer_feed(&depkt, payload, payload_len, marker, &au, &au_len)) {
++				if (g_frame_out_cb) g_frame_out_cb(au, (unsigned int)au_len);
++			}
++		}
++
++		fprintf(stderr, "tm-call: skypekit thread A connection closed, re-listening\n");
++		avtw_dtor(transport);
++		h264_depacketizer_free(&depkt);
++		h264_depacketizer_init(&depkt);
++		if (!g_running) break;
++	}
++	return nullptr;
++}
++
++// ---------------- Thread B: peer -> display ----------------
++
++struct SendCtx {
++	void *binclient;
++	uint16_t seq;
++	uint32_t ts;
++	uint32_t ssrc;
++};
++
++static void send_one_packet(void *vctx, const unsigned char *payload, size_t len, int marker) {
++	SendCtx *ctx = (SendCtx *)vctx;
++	unsigned char pkt[12 + kRtpMtu];
++	if (len > kRtpMtu) return; // h264_packetize already respects kRtpMtu; defensive only
++	rtp_build_header(pkt, ctx->seq, ctx->ts, ctx->ssrc, marker);
++	memcpy(pkt + 12, payload, len);
++	ctx->seq++;
++
++	unsigned char sebinary[256];
++	sebinary_init(sebinary);
++	sebinary_set(sebinary, pkt, (unsigned)(12 + len));
++
++	// wr_call_lst's 3rd/4th params ("cmdId"/"cmdName") are actually consumed as
++	// bl_write_bytes(ci, length, data) -- *cmdId* bytes are written raw, unencoded onto the wire
++	// starting at the cmdName pointer. The real header format is [0x5a]['R'=0x52][2 LEB128
++	// varints]; wr_preencoded_lst's own internal wr_value(&responseId) call appends the 3rd
++	// varint automatically. Passing (&cmdId, "RtpPacketReceived") wrote raw bytes of the literal
++	// debug string onto the wire -- never a real protocol header. See WHATSAPP_VIDEO_STATUS.md.
++	unsigned char header[4];
++	header[0] = 0x5a;
++	header[1] = 0x52;
++	header[2] = 0x00;
++	header[3] = (unsigned char)kRtpPacketReceivedCmdId;
++	unsigned int headerLen = sizeof(header);
++	unsigned int responseId = 0;
++	int wr_rc = binclient_wr_call_lst(ctx->binclient, /*ci=*/nullptr, &headerLen, (const char *)header,
++	                        &responseId, M_SkypeVideoRTPInterface_fields,
++	                        kRtpPacketReceivedFieldIndex, sebinary);
++	if (wr_rc != 0) {
++		fprintf(stderr, "tm-call: send_one_packet wr_call_lst FAILED rc=%d len=%u\n", wr_rc, (unsigned)len);
++	}
++}
++
++// Thread B never blocks in a way that needs pthread_cancel to interrupt (see the comment on
++// its queue-wait below for why that matters) — every blocking call it makes is naturally
++// bounded (avtw_connect's own timeoutMs, or a short usleep), so checking g_running between
++// them gives clean, prompt, cancellation-free shutdown.
++static void *thread_b_main(void *) {
++	unsigned char transport[1024];
++	unsigned char binclient[1024];
++
++	while (g_running) {
++		memset(transport, 0, sizeof(transport));
++		avtw_ctor(transport);
++		int connected = 0;
++		while (g_running) {
++			if (avtw_connect(transport, "/tmp/vidrtp_from_skypekit_key", /*isServer=*/0,
++			                   /*timeoutMs=*/500)) {
++				connected = 1;
++				break;
++			}
++			avtw_dtor(transport);
++			memset(transport, 0, sizeof(transport));
++			avtw_ctor(transport);
++			usleep(5000);
++		}
++		if (!connected) { avtw_dtor(transport); continue; }
++		fprintf(stderr, "tm-call: skypekit thread B connected to mediaserver\n");
++		pthread_mutex_lock(&g_start_mx);
++		g_thread_b_connected = 1;
++		pthread_cond_broadcast(&g_start_cv);
++		pthread_mutex_unlock(&g_start_mx);
++
++		memset(binclient, 0, sizeof(binclient));
++		binclient_ctor(binclient, transport);
++
++		SendCtx ctx;
++		ctx.binclient = binclient;
++		ctx.seq = (uint16_t)(rand() & 0xffff);
++		ctx.ts = (uint32_t)time(nullptr);
++		ctx.ssrc = ((uint32_t)rand() << 16) ^ (uint32_t)rand();
++
++		int broken = 0;
++		while (!broken && g_running) {
++			// Wait for a frame with a bounded timeout and an explicit g_running check,
++			// rather than an unconditional pthread_cond_wait. This is deliberate: thread B is
++			// never pthread_cancel'd (unlike thread A) precisely because cancelling a thread
++			// blocked in cond_wait/cond_timedwait re-locks the mutex as part of POSIX's
++			// cancellation cleanup, and without a matching pthread_cleanup_push/pop that mutex
++			// stays locked forever once the thread exits — deadlocking voipkit_video_stop()'s
++			// own later lock of it (hit this live during WhatsApp's bridge development). Every
++			// blocking call thread B makes is naturally bounded, so checking g_running between
++			// them is enough for clean shutdown without cancellation at all.
++			pthread_mutex_lock(&g_pending_mx);
++			while (!g_pending_ready && g_running) {
++				struct timespec ts;
++				ts.tv_sec = time(nullptr) + 1;
++				ts.tv_nsec = 0;
++				pthread_cond_timedwait(&g_pending_cv, &g_pending_mx, &ts);
++			}
++			if (!g_running) {
++				pthread_mutex_unlock(&g_pending_mx);
++				broken = 1;
++				break;
++			}
++			unsigned char *data = g_pending_data;
++			unsigned int len = g_pending_len;
++			g_pending_data = nullptr;
++			g_pending_ready = 0;
++			pthread_mutex_unlock(&g_pending_mx);
++
++			h264_packetize(data, len, kRtpMtu, send_one_packet, &ctx);
++			free(data);
++			ctx.ts += 3000; // 90kHz clock / 30fps, matching the clonk pipeline's fixed framerate
++		}
++
++		fprintf(stderr, "tm-call: skypekit thread B disconnected, retrying\n");
++		avtw_dtor(transport);
++		if (!g_running) break;
++	}
++	return nullptr;
++}
++
++// ---------------- public entry points ----------------
++
++void voipkit_video_start(void) {
++	if (g_running) return;
++	g_running = 1;
++	g_thread_a_started = 0;
++	g_thread_b_connected = 0;
++	pthread_create(&g_thread_a, nullptr, thread_a_main, nullptr);
++
++	// Best-effort ordering guarantee (Part 17): wait for thread A to at least start running
++	// before letting the caller proceed to videoPlayerStart. This doesn't prove bind()+listen()
++	// completed (Sid::AVTransportWrapper::Connect does bind+listen+accept as one call, with no
++	// intermediate signal), but bind()+listen() are the first, near-instant syscalls inside
++	// that call, and videoPlayerStart's own LS2 round-trip + mediaserver's pipeline
++	// construction comfortably outlasts that — matching every successful timing this session's
++	// live testing already relied on (Part 16/17).
++	// time(), not clock_gettime(): clock_gettime pulls in a GLIBC_2.17 symbol version this
++	// device's much older libc doesn't have (see vidrtp_sniffer.c for the same finding).
++	struct timespec deadline;
++	deadline.tv_sec = time(nullptr) + 2;
++	deadline.tv_nsec = 0;
++	pthread_mutex_lock(&g_start_mx);
++	while (!g_thread_a_started) {
++		if (pthread_cond_timedwait(&g_start_cv, &g_start_mx, &deadline) != 0) break;
++	}
++	pthread_mutex_unlock(&g_start_mx);
++	usleep(150000); // small additional margin, see comment above
++
++	pthread_create(&g_thread_b, nullptr, thread_b_main, nullptr);
++}
++
++// Blocks until Thread B's own connect to mediaserver's /tmp/vidrtp_from_skypekit_key actually
++// succeeds, up to timeoutMs. Returns nonzero if connected, zero on timeout (the caller logs and
++// proceeds anyway rather than hanging the mainloop indefinitely - a best-effort ordering
++// guarantee, not a hard requirement, matching voipkit_video_start()'s own Thread A wait
++// philosophy above). PORTED FROM WHATSAPP - see g_thread_b_connected's comment for why this
++// exists: unlike Thread A's near-instant bind+listen, Thread B must wait for Thread A to already
++// be listening and then complete its own connect-retry loop (up to 500ms per attempt), which a
++// fixed short delay before videoPlayerStart cannot reliably outlast.
++int voipkit_video_wait_thread_b(int timeoutMs) {
++	struct timespec deadline;
++	deadline.tv_sec = time(nullptr) + (timeoutMs / 1000);
++	deadline.tv_nsec = (long)(timeoutMs % 1000) * 1000000L;
++	pthread_mutex_lock(&g_start_mx);
++	while (!g_thread_b_connected) {
++		if (pthread_cond_timedwait(&g_start_cv, &g_start_mx, &deadline) != 0) break;
++	}
++	int connected = g_thread_b_connected;
++	pthread_mutex_unlock(&g_start_mx);
++	return connected;
++}
++
++void voipkit_video_stop(void) {
++	if (!g_running) return;
++	g_running = 0;
++
++	// Thread A spends nearly all its time blocked in a real accept()/read() deep inside the
++	// SkypeKit binary's own code, with no g_running check reachable from there — pthread_cancel
++	// unwinds it at that cancellation point. Any partially-used AVTransportWrapper/BinServer
++	// state is simply abandoned (lives on the cancelled thread's own stack, never reused), which
++	// is safe: we never touch that instance again, and the rest of the process is unaffected —
++	// the same safety property this whole bridge relies on (WHATSAPP_VIDEO_STATUS.md Part 14).
++	//
++	// Thread B is deliberately NOT cancelled — see the comment on its queue-wait: cancelling it
++	// while blocked in pthread_cond_timedwait would leave g_pending_mx locked forever. It exits
++	// on its own via the g_running checks below; broadcasting just wakes it immediately instead
++	// of waiting out its up-to-1s poll interval.
++	pthread_cancel(g_thread_a);
++	pthread_mutex_lock(&g_pending_mx);
++	pthread_cond_broadcast(&g_pending_cv);
++	pthread_mutex_unlock(&g_pending_mx);
++
++	pthread_join(g_thread_a, nullptr);
++	pthread_join(g_thread_b, nullptr);
++
++	pthread_mutex_lock(&g_pending_mx);
++	free(g_pending_data);
++	g_pending_data = nullptr;
++	g_pending_ready = 0;
++	pthread_mutex_unlock(&g_pending_mx);
++}
++
++void voipkit_video_receive_frame(const unsigned char *access_unit, unsigned int len) {
++	if (!g_running || !access_unit || len == 0) return;
++	unsigned char *copy = (unsigned char *)malloc(len);
++	if (!copy) return;
++	memcpy(copy, access_unit, len);
++
++	pthread_mutex_lock(&g_pending_mx);
++	free(g_pending_data); // drop any not-yet-sent previous frame — see voipkit.h
++	g_pending_data = copy;
++	g_pending_len = len;
++	g_pending_ready = 1;
++	pthread_cond_signal(&g_pending_cv);
++	pthread_mutex_unlock(&g_pending_mx);
++}
+diff --git a/voipkit.h b/voipkit.h
+new file mode 100644
+index 0000000..465b8a5
+--- /dev/null
++++ b/voipkit.h
+@@ -0,0 +1,66 @@
++// voipkit.h — C entry points for the native SkypeKit video bridge (voipkit.cpp).
++//
++// Bridges mediaserver's local SkypeKit RTP sockets (the /tmp/vidrtp_{to,from}_skypekit_key
++// abstract Unix sockets — see messaging/whatsapp/calling/WHATSAPP_VIDEO_STATUS.md Parts 10-18)
++// to the network peer's RTP stream. Lives in the main plugin process (libteams-personal.so)
++// alongside teams_call_luna.c, which drives the clonk session lifecycle (videoCaptureStart/
++// videoPlayerStart) and calls voipkit_video_start()/voipkit_video_stop() directly (in-process,
++// same pattern as Telegram's call-luna.cpp) at the right points in that sequence. The actual
++// network RTP I/O (SRTP/ICE) lives in a separate subprocess, teams_media — teams_video_relay.cpp
++// bridges this module's callback API to that subprocess over a UNIX-domain relay socket, since
++// teams_media's runtime environment can't satisfy this file's libpalmgstskype.so dependency chain
++// (see teams_media.c's top-of-file comment for the full glibc/libstdc++ ABI conflict rationale).
++//
++// Adapted verbatim from messaging/telegram/plugin/tdlib-purple/voipkit.h — Thread A's decoded
++// access units are delivered via a settable callback here instead of a protocol-specific export,
++// so this header has no dependency on any particular calling protocol's media stack.
++#ifndef VOIPKIT_H
++#define VOIPKIT_H
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++// Registers the callback Thread A calls with each complete access unit it reassembles from
++// mediaserver's own camera capture pipeline (Annex-B H.264, one call per frame). Must be set
++// before voipkit_video_start() — typically once, from VoipKitVideoSource's constructor.
++// The passed pointer is only valid for the duration of the call; the callee must copy if it
++// needs to retain the data.
++void voipkit_set_frame_out_callback(void (*cb)(const unsigned char *access_unit, unsigned int len));
++
++// Starts the bridge for the current call: binds+listens the capture->peer socket
++// (/tmp/vidrtp_to_skypekit_key) and blocks until that's confirmed listening, then starts the
++// peer->display socket's connect-retry loop (/tmp/vidrtp_from_skypekit_key). Idempotent — a
++// second call while already running is a no-op.
++//
++// MUST be called after videoCaptureStart and BEFORE videoPlayerStart (WHATSAPP_VIDEO_STATUS.md
++// Part 17: mediaserver's RunVideoHost() won't dial the outbound socket until something has
++// already connected to the inbound one, and won't even attempt the outbound dial until AFTER
++// the inbound accept succeeds — the capture->peer listener must be up first so that dial lands).
++void voipkit_video_start(void);
++
++// Blocks (up to timeoutMs) until Thread B's own connect to mediaserver actually succeeds; returns
++// nonzero if connected, zero on timeout. Call this AFTER voipkit_video_start() and BEFORE firing
++// videoPlayerStart — mediaserver's RunVideoHost() outbound dial to Thread A (WHATSAPP_VIDEO_STATUS.md
++// Part 17) is a single, non-retried attempt, so any timing slop here silently drops every outgoing
++// video frame for the rest of the call with no error anywhere in the logs (found+fixed 2026-08-05:
++// this file was missing this call entirely, matching a confirmed live capture where Android's
++// video reached webOS fine but webOS sent none back).
++int voipkit_video_wait_thread_b(int timeoutMs);
++
++// Signals both bridge threads to stop and joins them. Idempotent; safe to call even if
++// voipkit_video_start was never called or already stopped.
++void voipkit_video_stop(void);
++
++// Called with one decoded peer access unit (complete Annex-B H.264, as libtgvoip's
++// VideoRenderer::DecodeAndDisplay delivers it via VoipKitVideoRenderer). Copies the bytes (the
++// pointer is only valid for the duration of this call) and hands them to the peer->display
++// thread; overwrites any not-yet-sent previous frame rather than queueing (live video wants the
++// latest frame, not a backlog). No-op if the bridge isn't running.
++void voipkit_video_receive_frame(const unsigned char *access_unit, unsigned int len);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif
+diff --git a/voipkit_none.c b/voipkit_none.c
+new file mode 100644
+index 0000000..c2c8ca7
+--- /dev/null
++++ b/voipkit_none.c
+@@ -0,0 +1,62 @@
++// voipkit_none.c -- stand-in for voipkit.cpp on targets without libpalmgstskype.so.
++//
++// The real bridge (voipkit.cpp) binds directly to libpalmgstskype.so, SkypeKit's native RTP
++// transport, which ships as a gstreamer-0.10 plugin in the legacy webOS 3.0.5 firmware. LuneOS
++// has neither gstreamer-0.10 nor that library, so there is nothing to bind to there.
++//
++// Rather than thread #ifdefs through teams_call_luna.c's call sequencing, the whole video bridge
++// is swapped out at link time: build-teams.sh compiles this file instead of voipkit.cpp when
++// TEAMS_VOIPKIT=0, and drops -lpalmgstskype. Everything else in the plugin -- messaging,
++// contacts, login, trouter, and voice calling -- is unaffected, so what is lost is video only.
++//
++// These are deliberately not silent. A call that reaches voipkit_video_start() on a build with
++// no bridge is a wiring mistake worth seeing in the log, not something to swallow.
++#include <stdio.h>
++
++#include "voipkit.h"
++
++static int s_warned = 0;
++
++static void warn_once(const char *fn)
++{
++	if (s_warned)
++		return;
++	s_warned = 1;
++	fprintf(stderr, "teams: %s called, but this build has no SkypeKit video bridge "
++	                "(libpalmgstskype.so is legacy webOS only). Video is unavailable; "
++	                "voice calling is not affected.\n", fn);
++}
++
++void voipkit_set_frame_out_callback(void (*cb)(const unsigned char *access_unit, unsigned int len))
++{
++	(void) cb;   /* nothing will ever produce frames in this build */
++}
++
++void voipkit_video_start(void)
++{
++	warn_once("voipkit_video_start");
++}
++
++/*
++ * The real implementation returns non-zero once Thread B is up. Returning 0 (timed out) is the
++ * honest answer here and is the value teams_call_luna.c already handles: it logs and carries on
++ * without video rather than failing the call.
++ */
++int voipkit_video_wait_thread_b(int timeoutMs)
++{
++	(void) timeoutMs;
++	warn_once("voipkit_video_wait_thread_b");
++	return 0;
++}
++
++void voipkit_video_stop(void)
++{
++	/* Called unconditionally on teardown, including when start never ran -- stay quiet. */
++}
++
++void voipkit_video_receive_frame(const unsigned char *access_unit, unsigned int len)
++{
++	(void) access_unit;
++	(void) len;
++	/* Inbound frames are dropped: there is no renderer without the bridge. */
++}
+-- 
+2.53.0
+

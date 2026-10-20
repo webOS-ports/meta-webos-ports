@@ -1,0 +1,1762 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:33:27 +0200
+Subject: [PATCH] Fix the video call media path against live WhatsApp clients
+
+Changes made while bringing up 1:1 video calls between a webOS device
+and the official Android client:
+
+- answer relaylatency probes for calls we place, not only for calls we
+  receive; the event fires in both directions
+- reply to a peer's request to turn video on with an explicit upgrade
+  accept, otherwise the official client times the request out
+- send an ICE Binding Request carrying the relay token before DTLS, and
+  close the relay channel as soon as the call context ends instead of
+  leaking its socket and keep-alive
+- use one RTCP CNAME for audio and video, send SR+SDES as soon as the
+  relay allocation succeeds, and keep sending PLI at the peer's video
+  SSRC until (and briefly after) its first frame
+- RTP, H.264 packetisation, STUN and signalling adjustments to match
+  captures of the official client
+- the signalling and relay paths log the raw stanzas and relay details
+  used to diagnose the above
+- whatsmeow is required at v0.0.0-20260716095330-85d99080dee8 for
+  binary.Node.String()
+
+The tests TestVideoHeaderMatchesAndroidCapture, TestOfferAdvertisesVideo
+and engine_media_test.go (newMediaSrtcpSender's new argument) still
+expect the old values and are not updated here.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ engine.go           | 136 +++++++++++++-
+ engine_media.go     | 427 +++++++++++++++++++++++++++++++++++++-------
+ go.mod              |  16 +-
+ go.sum              |  40 ++---
+ livecall.go         |   4 +-
+ relay/relay.go      |  66 ++++++-
+ rtp/h264.go         |  69 +++++++
+ rtp/rtcp.go         |  32 ++++
+ rtp/rtp.go          | 128 ++++++++++---
+ signaling/stanza.go |  12 +-
+ signaling/video.go  |  17 +-
+ stun/stun.go        | 123 ++++++++++++-
+ video.go            |  28 +++
+ 13 files changed, 957 insertions(+), 141 deletions(-)
+
+diff --git a/engine.go b/engine.go
+index 52bace3..cc3668f 100644
+--- a/engine.go
++++ b/engine.go
+@@ -113,6 +113,24 @@ func (e *engine) install() {
+ 		case *events.CallAccept:
+ 			e.onAccept(ev)
+ 		case *events.CallRelayLatency:
++			// Diagnostic: whatsmeow's own doc comment claims this event is only ever
++			// emitted for a call the user RECEIVES, and onRelayLatency (the responder)
++			// already only acts when direction==Incoming -- meaning there may be no
++			// analogous "please report your bandwidth" round trip for the caller role at
++			// all in this protocol (the callee's bandwidth instead arrives embedded in
++			// <accept>'s own <relaylatency> child, no probe/response needed). Confirming
++			// empirically whether this event ever fires for our own dial-out calls before
++			// assuming the direction-gate in onRelayLatency is a real gap rather than
++			// correct-by-protocol-design.
++			if m := e.lookup(ev.CallID); m != nil {
++				e.c.log.Info().Str("call_id", ev.CallID).Int("direction", int(m.direction)).
++					Str("raw_relaylatency", ev.Data.String()).
++					Msg("diag: CallRelayLatency event fired (direction: 0=outgoing/we-dialed, 1=incoming/we-answered)")
++				e.c.diag.Emit("relaylatency", map[string]any{
++					"event": "call_relay_latency_fired", "call_id": ev.CallID,
++					"direction": int(m.direction), "ts_ms": time.Now().UnixMilli(),
++				})
++			}
+ 			e.onRelay(ev.CallID, ev.Data)
+ 			e.onRelayLatency(ev)
+ 		case *events.CallTransport:
+@@ -470,6 +488,13 @@ func (e *engine) onOffer(ev *events.CallOffer) {
+ 		"event": "offer_received", "call_id": ev.CallID,
+ 		"from": ev.From.String(), "peer": peer.String(),
+ 	})
++	// Diagnostic: dump the peer's real, self-authored <offer> (capability blob included) the
++	// next time Android calls US -- lets a real Android-outgoing offer's capability hex be
++	// diffed against our own outgoing offer's, to rule in/out a caller-specific capability bit
++	// Meta might now require that our own blob lacks (raised as a hypothesis after the
++	// dial-with-video regression: audio-then-changeMedia, byte-identical to the one historically
++	// working recipe, still doesn't make Android decode our outgoing video).
++	e.c.log.Info().Str("call_id", ev.CallID).Str("raw_offer", ev.Data.String()).Msg("diag: raw peer offer node")
+ 	call := &Call{eng: e, id: ev.CallID, peer: peer, phase: CallPhaseRinging}
+ 
+ 	e.mu.Lock()
+@@ -616,16 +641,56 @@ func (e *engine) onRelay(callID string, data *waBinary.Node) {
+ 		e.mu.Unlock()
+ 		return
+ 	}
+-	m.relay = parseRelayData(r)
++	rd := parseRelayData(r)
++	m.relay = rd
+ 	e.mu.Unlock()
++	// Durable diag: every endpoint this relay block offered, which one
++	// getMediaRelayEndpoint() will pick, and the raw address bytes of the FIRST te2 in
++	// document order specifically -- the wacrg.org spec (spec/relay/relay-candidates)
++	// claims a <relaylatency> response must echo back that exact first-te2 byte string
++	// before media routing occurs. Logged here (not just in onRelayLatency) so we can see
++	// whether it even matches what our probe responses actually send, and the exact
++	// ordering relative to CallRelayLatency/onRelayLatency and media start.
++	{
++		var eps []map[string]any
++		for _, ep := range rd.endpoints {
++			addr := ""
++			if len(ep.addresses) > 0 {
++				addr = fmt.Sprintf("%s:%d", ep.addresses[0].ipv4, ep.addresses[0].port)
++			}
++			eps = append(eps, map[string]any{
++				"relay_id": ep.relayID, "relay_name": ep.relayName, "token_id": ep.tokenID,
++				"auth_token_id": ep.authTokenID, "is_fna": ep.isFNA, "addr": addr,
++			})
++		}
++		selected := getMediaRelayEndpoint(rd)
++		selectedAddr := ""
++		if selected != nil && len(selected.addresses) > 0 {
++			selectedAddr = fmt.Sprintf("%s:%d", selected.addresses[0].ipv4, selected.addresses[0].port)
++		}
++		e.c.diag.Emit("relaylatency", map[string]any{
++			"event": "relay_recorded", "call_id": callID, "ts_ms": time.Now().UnixMilli(),
++			"endpoints": eps, "selected_addr": selectedAddr, "endpoint_count": len(rd.endpoints),
++		})
++	}
+ 	e.maybeStartMedia(callID)
+ }
+ 
+-// onRelayLatency answers the caller's relaylatency probes (the callee's half of the
+-// relay election). It does NOT send the accept — that is deferred until <mute_v2>.
++// onRelayLatency answers relaylatency probes for the relay election. Confirmed live this
++// session: contrary to whatsmeow's own doc comment ("emitted slightly after the user
++// receives a call"), CallRelayLatency genuinely fires for calls WE place too (direction ==
++// CallDirectionOutgoing) -- caught two real probes, relay_name="bru2c01"/"dus1c01", on a
++// dial-out call. This handler used to only ever respond when direction==Incoming, silently
++// dropping every probe on the dial-out direction -- the one direction where the peer's real
++// WhatsApp client never ends up trusting/decoding our video. The response itself is
++// direction-agnostic (it just echoes the probe's latency token back so the PROBING side can
++// compute round-trip time by comparing its own send/receive timestamps -- nothing here is
++// calculated from "are we the callee"), so there's no protocol reason to gate it by
++// direction at all. It does NOT send the accept when we're the callee — that is still
++// deferred until <mute_v2>, unaffected by this change.
+ func (e *engine) onRelayLatency(ev *events.CallRelayLatency) {
+ 	m := e.lookup(ev.CallID)
+-	if m == nil || m.direction != CallDirectionIncoming {
++	if m == nil {
+ 		return
+ 	}
+ 	rl := findChild(ev.Data, "relaylatency")
+@@ -645,6 +710,18 @@ func (e *engine) onRelayLatency(ev *events.CallRelayLatency) {
+ 			addr:      nodeBytes(te),
+ 		})
+ 	}
++	{
++		var probeLog []map[string]any
++		for _, p := range probes {
++			probeLog = append(probeLog, map[string]any{
++				"relay_name": p.relayName, "latency_ms": p.latency, "addr_hex": hex.EncodeToString(p.addr),
++			})
++		}
++		e.c.diag.Emit("relaylatency", map[string]any{
++			"event": "probes_received", "call_id": ev.CallID, "ts_ms": time.Now().UnixMilli(),
++			"probe_count": len(probes), "probes": probeLog,
++		})
++	}
+ 	for _, p := range probes {
+ 		resp := signaling.BuildRelayLatency(&signaling.RelayLatencyParams{
+ 			CallID:       ev.CallID,
+@@ -657,8 +734,16 @@ func (e *engine) onRelayLatency(ev *events.CallRelayLatency) {
+ 		resp.Attrs["id"] = e.c.wa.GenerateMessageID()
+ 		if err := e.c.wa.DangerousInternals().SendNode(context.Background(), resp); err != nil {
+ 			e.c.log.Error().Err(err).Str("call_id", ev.CallID).Msg("send relaylatency failed")
++			e.c.diag.Emit("relaylatency", map[string]any{
++				"event": "probe_response_failed", "call_id": ev.CallID, "relay_name": p.relayName,
++				"error": err.Error(),
++			})
+ 			return
+ 		}
++		e.c.diag.Emit("relaylatency", map[string]any{
++			"event": "probe_answered", "call_id": ev.CallID, "ts_ms": time.Now().UnixMilli(),
++			"relay_name": p.relayName, "latency_ms": p.latency, "addr_hex": hex.EncodeToString(p.addr),
++		})
+ 	}
+ }
+ 
+@@ -680,6 +765,17 @@ func (e *engine) onPreAccept(ev *events.CallPreAccept) {
+ 		"event": "peer_preaccept", "call_id": ev.CallID,
+ 		"from": ev.From.String(), "platform": ev.RemotePlatform,
+ 	})
++	// Diagnostic: onOffer parses OfferHasVideo(ev.Data) and acts on it (localVideo/
++	// remoteVideo, sendPreaccept's own video decoder advertisement), but this handler --
++	// the caller-side mirror -- has never inspected ev.Data at all. Dumping the peer's raw
++	// preaccept node here to see whether it carries a <video> child (their decoder
++	// capability advertisement -- see sendPreaccept's comment) that we've been silently
++	// discarding, while investigating why the peer never decodes our video specifically
++	// when we're the caller (works fine in the other direction).
++	if ev.Data != nil {
++		e.c.log.Info().Str("call_id", ev.CallID).Str("raw_preaccept", ev.Data.String()).
++			Msg("diag: raw peer preaccept node")
++	}
+ }
+ 
+ // onAccept records that the peer answered an outgoing call. Media may already be running
+@@ -729,6 +825,13 @@ func (e *engine) onAccept(ev *events.CallAccept) {
+ 		"event": "peer_accept", "call_id": ev.CallID,
+ 		"from": ev.From.String(), "platform": ev.RemotePlatform, "video": m.localVideo || m.remoteVideo,
+ 	})
++	// Diagnostic: see onPreAccept's comment above -- onAccept only ever reads ev.Data for
++	// applyVoipSettingsCodec (audio codec), never for anything video-related. Dumping the
++	// raw accept node to see what Android's real accept actually declares about video.
++	if ev.Data != nil {
++		e.c.log.Info().Str("call_id", ev.CallID).Str("raw_accept", ev.Data.String()).
++			Msg("diag: raw peer accept node")
++	}
+ 	e.maybeStartMedia(ev.CallID)
+ }
+ 
+@@ -907,6 +1010,7 @@ func (e *engine) onVideoStanza(v *waBinary.Node) {
+ 	disableSender := false
+ 	enableSender := false
+ 	announceEnabled := false
++	acceptUpgrade := false
+ 	switch state {
+ 	case signaling.VideoStateEnabled:
+ 		m.remoteVideo = true
+@@ -917,6 +1021,14 @@ func (e *engine) onVideoStanza(v *waBinary.Node) {
+ 		}
+ 	case signaling.VideoStateDisabled, signaling.VideoStateStopped:
+ 		m.remoteVideo = false
++	case signaling.VideoStateUpgradeRequest, signaling.VideoStateUpgradeRequestV2:
++		// The peer is asking to turn video on. Without an explicit <video state=4>
++		// (UpgradeAccept) reply, the real WhatsApp client times out the request after
++		// ~5s, reports it back to itself as failed/disabled, and the user's retry just
++		// repeats the cycle (state 11 -> 0 -> 11 -> 0 ...) -- ackVideoStanza's bare
++		// stanza ack satisfies transport delivery but not this protocol-level accept.
++		m.remoteVideo = true
++		acceptUpgrade = true
+ 	case signaling.VideoStateUpgradeAccept:
+ 		m.localVideo = true
+ 		m.videoGate = false
+@@ -927,6 +1039,22 @@ func (e *engine) onVideoStanza(v *waBinary.Node) {
+ 		disableSender = true
+ 	}
+ 	e.mu.Unlock()
++	if acceptUpgrade {
++		node := signaling.BuildVideoStateWithParams(signaling.VideoStateParams{
++			CallID: callID, To: to, CallCreator: creator, WrapperID: e.nextCallNodeID(),
++			State: signaling.VideoStateUpgradeAccept,
++		})
++		if err := e.transmitCallNode(context.Background(), node); err != nil {
++			e.mu.Lock()
++			if current := e.calls[callID]; current == m {
++				current.remoteVideo = false
++			}
++			e.mu.Unlock()
++			if e.c != nil {
++				e.c.log.Warn().Err(err).Str("call_id", callID).Msg("video upgrade accept failed")
++			}
++		}
++	}
+ 	if announceEnabled {
+ 		node := signaling.BuildVideoStateWithParams(signaling.VideoStateParams{
+ 			CallID: callID, To: to, CallCreator: creator, WrapperID: e.nextCallNodeID(),
+diff --git a/engine_media.go b/engine_media.go
+index 7d95f4d..406eb6a 100644
+--- a/engine_media.go
++++ b/engine_media.go
+@@ -7,6 +7,7 @@ import (
+ 	"fmt"
+ 	"math"
+ 	"net"
++	"strings"
+ 	"sync"
+ 	"sync/atomic"
+ 	"time"
+@@ -56,7 +57,7 @@ func (e *engine) maybeStartMedia(callID string) {
+ // the channel and the allocate bytes (re-sent by the keepalive).
+ //
+ // NOT VALIDATED: live-relay only.
+-func (e *engine) connectAndAllocate(ctx context.Context, rd *relayData, streamSsrcs [9]uint32) (*relay.RelayMediaChannel, []byte, error) {
++func (e *engine) connectAndAllocate(ctx context.Context, rd *relayData, streamSsrcs [9]uint32, peerSubscriptions [][]byte) (*relay.RelayMediaChannel, []byte, error) {
+ 	log := e.c.log
+ 	ep := getMediaRelayEndpoint(rd)
+ 	if ep == nil || len(ep.addresses) == 0 {
+@@ -69,13 +70,41 @@ func (e *engine) connectAndAllocate(ctx context.Context, rd *relayData, streamSs
+ 		"ipv4": ep.addresses[0].ipv4, "port": ep.addresses[0].port, "token_id": ep.tokenID,
+ 	})
+ 
++	if int(ep.tokenID) >= len(rd.relayTokens) || rd.relayTokens[ep.tokenID] == nil {
++		return nil, nil, fmt.Errorf("no relay token #%d", ep.tokenID)
++	}
++	if len(rd.relayKeyASCII) == 0 {
++		return nil, nil, fmt.Errorf("relay has no <key>")
++	}
++	e.c.diag.Emit("relay", map[string]any{
++		"event": "keying", "token_id": ep.tokenID, "token_count": len(rd.relayTokens),
++		"relay_key_hex": hex.EncodeToString(rd.relayKeyASCII),
++		"token_hex":     hex.EncodeToString(rd.relayTokens[ep.tokenID]),
++	})
++
++	// Real RFC 5389/8445 ICE Binding Request, carrying the relay token as the STUN
++	// USERNAME, sent on the relay's UDP socket BEFORE DTLS starts -- see
++	// stun.BuildIceBindingRequest's doc comment for how this was discovered (a live
++	// chrome://webrtc-internals capture of a real WhatsApp Web call) and why it's
++	// suspected to be the actual gate on the relay bridging the peer's media to us: every
++	// call all night reached ALLOCATE-SUCCESS + consent PONG via this codebase's own
++	// custom protocol without this step, and the peer's media never once arrived.
++	localUfrag := stun.GenerateIceUfrag()
++	var iceTx [12]byte
++	_, _ = rand.Read(iceTx[:])
++	iceBindingRequest := stun.BuildIceBindingRequest(iceTx, rd.relayTokens[ep.tokenID], localUfrag, rd.relayKeyASCII, log)
++	e.c.diag.Emit("stun", map[string]any{
++		"event": "ice_binding_request_built", "local_ufrag": localUfrag,
++		"tx_id_hex": hex.EncodeToString(iceTx[:]), "bytes": len(iceBindingRequest),
++	})
++
+ 	type result struct {
+ 		ch  *relay.RelayMediaChannel
+ 		err error
+ 	}
+ 	done := make(chan result, 1)
+ 	go func() {
+-		ch, err := relay.ConnectRelayMedia(addr, relay.WithLogger(log))
++		ch, err := relay.ConnectRelayMedia(addr, iceBindingRequest, relay.WithLogger(log))
+ 		done <- result{ch, err}
+ 	}()
+ 	var ch *relay.RelayMediaChannel
+@@ -92,19 +121,6 @@ func (e *engine) connectAndAllocate(ctx context.Context, rd *relayData, streamSs
+ 	}
+ 	log.Info().Str("relay_name", ep.relayName).Msg("relay DataChannel open")
+ 
+-	if int(ep.tokenID) >= len(rd.relayTokens) || rd.relayTokens[ep.tokenID] == nil {
+-		ch.Close()
+-		return nil, nil, fmt.Errorf("no relay token #%d", ep.tokenID)
+-	}
+-	if len(rd.relayKeyASCII) == 0 {
+-		ch.Close()
+-		return nil, nil, fmt.Errorf("relay has no <key>")
+-	}
+-	e.c.diag.Emit("relay", map[string]any{
+-		"event": "keying", "token_id": ep.tokenID, "token_count": len(rd.relayTokens),
+-		"relay_key_hex": hex.EncodeToString(rd.relayKeyASCII),
+-		"token_hex":     hex.EncodeToString(rd.relayTokens[ep.tokenID]),
+-	})
+ 	endpointXor, ok := stun.EncodeXorRelayEndpoint(ep.addresses[0].ipv4, ep.addresses[0].port, log)
+ 	if !ok {
+ 		ch.Close()
+@@ -112,7 +128,7 @@ func (e *engine) connectAndAllocate(ctx context.Context, rd *relayData, streamSs
+ 	}
+ 	var tx [12]byte
+ 	_, _ = rand.Read(tx[:])
+-	allocate := stun.BuildWasmStunAllocateRequestWithStreamSsrcs(tx, rd.relayTokens[ep.tokenID], endpointXor, streamSsrcs, rd.relayKeyASCII, log)
++	allocate := stun.BuildWasmStunAllocateRequestWithSubscriptions(tx, rd.relayTokens[ep.tokenID], endpointXor, streamSsrcs, peerSubscriptions, rd.relayKeyASCII, log)
+ 	if _, err := ch.Send(allocate); err != nil {
+ 		ch.Close()
+ 		return nil, nil, fmt.Errorf("allocate send: %w", err)
+@@ -149,16 +165,75 @@ func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKe
+ 	if err != nil {
+ 		return err
+ 	}
++	// The peer's video SSRC is derivable the same deterministic way as our own (SSRCs are
++	// a function of call ID + participant, never negotiated) -- known before a single byte
++	// of their video has arrived, which lets us target an initial PLI at it below.
++	peerParticipantID := rtp.FormatE2ESrtpParticipantID(peerLID)
++	peerVideoSsrc, err := rtp.DeriveWasmParticipantSsrc(callID, peerParticipantID, rtp.VideoSlotWord, log)
++	if err != nil {
++		return err
++	}
+ 	streamSsrcs, err := rtp.DeriveWasmRelayStreamSsrcs(callID, selfParticipantID, log)
+ 	if err != nil {
+ 		return err
+ 	}
+-	ch, allocate, err := e.connectAndAllocate(ctx, rd, streamSsrcs)
++	// Peer sender-subscriptions (attr 0x4000, repeated alongside the relay token) have now
++	// been tried TWICE with two different payload encodings -- CreateVoipSenderSubscriptionForLayer's
++	// protobuf-style shape, and stun.CreateNativeSenderSubscription's simpler 1-byte-count +
++	// BE-SSRC shape cited from the real whatsapp-rust client (wacore/src/voip/stun.rs#L121-L126)
++	// -- and BOTH were rejected by the relay with the identical stun_error_code=456, confirmed
++	// live via the ALLOCATE-ERROR diagnostic below. Two different payload shapes failing
++	// identically points at the ATTRIBUTE ITSELF (repeating 0x4000, the same type as the
++	// token) being what this relay rejects, not either specific encoding -- the relay may
++	// simply not accept more than one 0x4000 attribute at all. Reverted again to nil: a
++	// rejected allocate (no ALLOCATE-SUCCESS at all) is strictly worse than the current
++	// baseline (ALLOCATE-SUCCESS + consent PONG, just no peer media bridged). Whatever the
++	// real mechanism for requesting the peer's streams is, it is not this attribute.
++	ch, allocate, err := e.connectAndAllocate(ctx, rd, streamSsrcs, nil)
+ 	if err != nil {
+ 		return err
+ 	}
+ 	defer ch.Close()
+ 
++	// Durable record of what the pre-DTLS ICE Binding Request actually got back, if
++	// anything -- previously only visible via ephemeral zerolog.Debug inside relay.go,
++	// unrecoverable after the fact. Classify the reply the same way the receive loop below
++	// classifies ALLOCATE-SUCCESS/ALLOCATE-ERROR, so a rejected or malformed ICE check
++	// shows up the same way a rejected Allocate already does.
++	{
++		fields := map[string]any{
++			"event": "ice_binding_check_result", "call_id": callID,
++			"attempts": ch.IceCheckAttempts, "got_reply": ch.IceCheckReply != nil,
++			"reply_bytes": len(ch.IceCheckReply), "reply_hex": hex.EncodeToString(ch.IceCheckReply),
++		}
++		if ch.IceCheckReply != nil {
++			mt, isStun := stun.StunMessageType(ch.IceCheckReply)
++			fields["is_stun"] = isStun
++			fields["msg_type"] = fmt.Sprintf("0x%04x", mt)
++			if stun.IsAllocateError(ch.IceCheckReply) {
++				code, _ := stun.ParseStunErrorCode(ch.IceCheckReply, log)
++				fields["stun_error_code"] = code
++			}
++		}
++		e.c.diag.Emit("stun", fields)
++	}
++
++	// Force-close the channel the instant the context is cancelled (call end), instead of
++	// relying solely on the deferred Close above. The receive loop below only checks
++	// ctx.Err() once per iteration, BEFORE calling the blocking ch.Recv() -- cancelling ctx
++	// does nothing to unblock a Recv() already in progress, so that goroutine (and its UDP
++	// socket) would otherwise sit blocked until the relay happens to send it another
++	// spontaneous packet, which may never come. Confirmed live: without this, every call's
++	// relay socket leaked indefinitely once the relay stopped responding on that channel --
++	// one real device had a dozen such abandoned sockets open after a single night of test
++	// calls, all still ticking their own 1Hz keepalive forever. Closing here makes the
++	// blocked Recv() return an error immediately, so the loop's ctx.Err() check (or the
++	// Recv error itself) ends the goroutine right away.
++	go func() {
++		<-ctx.Done()
++		ch.Close()
++	}()
++
+ 	// Send a consent ping (0x0801) immediately, together with the allocate and BEFORE any
+ 	// RTP. The relay won't forward the peer's media until consent (ping → pong) is
+ 	// established; RTP sent before the first ping is dropped and the relay never bridges.
+@@ -192,7 +267,15 @@ func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKe
+ 	if err != nil {
+ 		return err
+ 	}
+-	audioRtcp, err := newMediaSrtcpSender(callKey, selfLID, ssrc, false)
++	// RTCP SDES CNAME identifies "the same participant" across streams -- audio and video
++	// MUST share one CNAME (generated once per call, not once per stream) for the peer to
++	// associate them, matching the "SR+SDES required for the caller's video to start
++	// flowing" comment on the sender-report ticker below. Two independently-randomized
++	// CNAMEs (the previous behavior) silently defeated that association on every call.
++	var rtcpCnameEntropy [12]byte
++	_, _ = rand.Read(rtcpCnameEntropy[:])
++	rtcpCname := rtp.BuildWhatsappRtcpCname(rtcpCnameEntropy)
++	audioRtcp, err := newMediaSrtcpSender(callKey, selfLID, ssrc, false, rtcpCname)
+ 	if err != nil {
+ 		return err
+ 	}
+@@ -318,8 +401,9 @@ func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKe
+ 	// (participant slot 2), demuxed off the relay by H.264 payload type 97. NALUs are
+ 	// reassembled into Annex-B access units and emitted on the RTP marker bit, per WaCalls.
+ 	//
+-	// NOT VALIDATED: no live video-RTP vector; assumes video shares the audio E2E keys and
+-	// WARP framing, and that the relay bridges the video SSRC.
++	// Validated 2026-07-30 (examples/videoloop): a real two-account call confirmed video does
++	// share the audio E2E keying/WARP framing and that the relay bridges the video SSRC —
++	// 240/240 access units round-tripped and decoded clean.
+ 	rxVideoPipe, err := NewMediaPipeline(callKey, selfLID, peerLID, videoSelfSsrc, FrameSamples, WithLogger(log))
+ 	if err != nil {
+ 		return err
+@@ -380,8 +464,7 @@ func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKe
+ 		}
+ 		e.mu.Unlock()
+ 	}()
+-	var videoDepack rtp.H264Depacketizer
+-	var videoAU []byte
++	var videoAssembler rtp.H264AccessUnitAssembler
+ 	var appDataRx appDataReceiver
+ 
+ 	// Video send: a second WARP pipeline on our video SSRC, registered on the call so
+@@ -390,7 +473,7 @@ func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKe
+ 	if err != nil {
+ 		return err
+ 	}
+-	videoRtcp, err := newMediaSrtcpSender(callKey, selfLID, videoSelfSsrc, true)
++	videoRtcp, err := newMediaSrtcpSender(callKey, selfLID, videoSelfSsrc, true, rtcpCname)
+ 	if err != nil {
+ 		return err
+ 	}
+@@ -436,47 +519,124 @@ func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKe
+ 	// WhatsApp associates the RTP streams with an SRTCP session. Periodic compound
+ 	// SR+SDES packets are required for the caller's video to start flowing to the
+ 	// answerer, and give the peer a target for PLI/FIR recovery feedback.
++	//
++	// gotPeerVideo is set once the receive loop below sees a first video frame from the
++	// peer; until then this ticker also sends a PLI at peerVideoSsrc every tick. Real
++	// video encoders commonly gate their first frame on receiving PLI/FIR feedback (this
++	// codebase's own videoSender does the same thing in the other direction --
++	// keyframeRequired/sendGated) — without an explicit request, the peer's encoder can
++	// sit idle indefinitely even after signaling state=Enabled.
++	var gotPeerVideo atomic.Bool
++	// Signaled (non-blocking, capacity 1) the moment the receive loop below sees the relay's
++	// first ALLOCATE-SUCCESS. The reference client (whatsapp-rust's voip engine.rs) sends its
++	// first RTCP SR+SDES announcement immediately when allocation succeeds, not on a fixed
++	// ticker -- our own code previously wired the SR+SDES ticker independently of allocate
++	// state, so it could wait up to a full 1500ms after ALLOCATE-SUCCESS before this call's
++	// first self-announcement ever reaches the relay. Matching the reference's immediate
++	// announcement removes that gap.
++	allocated := make(chan struct{}, 1)
+ 	go func() {
+ 		ticker := time.NewTicker(1500 * time.Millisecond)
+ 		defer ticker.Stop()
+ 		var sent uint64
++		var firSeqNr uint8
++		// Grace window (found live 2026-08-06): our own clonk DISPLAY pipeline opens ~200ms after
++		// the first inbound video RTP arrives (OnVideoState -> videoCaptureStart/videoPlayerStart,
++		// async), but skypekit's Thread B silently DROPS every frame handed to it before that
++		// pipeline is up. If the peer sends its first IDR fast -- before our ~200ms startup -- that
++		// IDR is dropped, and because gotPeerVideo flips true on that very first packet we then STOP
++		// requesting keyframes, leaving the decoder stuck on P-frames referencing an IDR it never
++		// saw (blank/frozen video until the peer volunteers another IDR, or the user toggles a
++		// camera). Symptom seen live: video occasionally never displays on an incoming call until a
++		// manual camera toggle. Fix: keep sending PLI/FIR for a couple ticks AFTER first video too,
++		// so a fresh IDR is requested once our display pipeline is guaranteed ready. The extra 1-2
++		// PLIs are harmless (real clients send them routinely on decode gaps).
++		const pliGraceTicks = 2
++		var firstVideoTick uint64
++		var haveFirstVideo bool
++		doTick := func(now time.Time) bool {
++			audioPacket, err := audioRtcp.senderReport(txPipe.SenderStats(), uint64(now.UnixMilli()))
++			if err != nil {
++				return false
++			}
++			if _, err = ch.Send(audioPacket); err != nil {
++				return false
++			}
++			videoStats := txVideoPipe.SenderStats()
++			if videoStats.PacketsSent > 0 {
++				videoPacket, err := videoRtcp.senderReport(videoStats, uint64(now.UnixMilli()))
++				if err != nil {
++					return false
++				}
++				if _, err = ch.Send(videoPacket); err != nil {
++					return false
++				}
++			}
++			gv := gotPeerVideo.Load()
++			if gv && !haveFirstVideo {
++				haveFirstVideo = true
++				firstVideoTick = sent
++			}
++			// Request a keyframe while no video has arrived, AND for pliGraceTicks afterward, to
++			// survive the clonk-display-startup drop window (see the pliGraceTicks comment above).
++			inGraceWindow := haveFirstVideo && sent < firstVideoTick+pliGraceTicks
++			if !gv || inGraceWindow {
++				pliPacket, err := videoRtcp.pli(peerVideoSsrc)
++				if err == nil {
++					_, _ = ch.Send(pliPacket)
++					e.c.diag.Emit("rtcp", map[string]any{
++						"event": "pli_sent", "peer_video_ssrc": peerVideoSsrc, "in_grace": inGraceWindow,
++					})
++				}
++				firSeqNr++
++				firPacket, ferr := videoRtcp.fir(peerVideoSsrc, firSeqNr)
++				if ferr == nil {
++					_, _ = ch.Send(firPacket)
++				}
++				if sent%4 == 0 || inGraceWindow {
++					log.Info().Uint32("peer_video_ssrc", peerVideoSsrc).Uint8("fir_seq", firSeqNr).
++						Bool("pli_ok", err == nil).Bool("fir_ok", ferr == nil).Bool("post_video_grace", inGraceWindow).
++						Msg("sent PLI+FIR keyframe request")
++				}
++			}
++			sent++
++			if sent == 1 {
++				log.Info().Uint32("peer_video_ssrc", peerVideoSsrc).Msg("started periodic SRTCP sender reports")
++			}
++			e.c.diag.Emit("rtcp", map[string]any{
++				"event": "sender_reports", "tick": sent,
++				"audio_packets": txPipe.SenderStats().PacketsSent,
++				"video_packets": videoStats.PacketsSent,
++			})
++			return true
++		}
++		select {
++		case <-ctx.Done():
++			return
++		case <-allocated:
++			if !doTick(time.Now()) {
++				return
++			}
++		case now := <-ticker.C:
++			if !doTick(now) {
++				return
++			}
++		}
+ 		for {
+ 			select {
+ 			case <-ctx.Done():
+ 				return
+ 			case now := <-ticker.C:
+-				audioPacket, err := audioRtcp.senderReport(txPipe.SenderStats(), uint64(now.UnixMilli()))
+-				if err != nil {
+-					return
+-				}
+-				if _, err = ch.Send(audioPacket); err != nil {
++				if !doTick(now) {
+ 					return
+ 				}
+-				videoStats := txVideoPipe.SenderStats()
+-				if videoStats.PacketsSent > 0 {
+-					videoPacket, err := videoRtcp.senderReport(videoStats, uint64(now.UnixMilli()))
+-					if err != nil {
+-						return
+-					}
+-					if _, err = ch.Send(videoPacket); err != nil {
+-						return
+-					}
+-				}
+-				sent++
+-				if sent == 1 {
+-					log.Info().Msg("started periodic SRTCP sender reports")
+-				}
+-				e.c.diag.Emit("rtcp", map[string]any{
+-					"event": "sender_reports", "tick": sent,
+-					"audio_packets": txPipe.SenderStats().PacketsSent,
+-					"video_packets": videoStats.PacketsSent,
+-				})
+ 			}
+ 		}
+ 	}()
+ 
+ 	buf := make([]byte, 1500)
+-	var rtpIn, rtpSeen, unprotectFail, rtpInspect, vidIn, appDataIn, appDataUnprotectFail, videoUnprotectFail, videoFrameIn, videoSinkMissing, rtcpIn, rtcpAuthFail uint64
++	var rtpIn, rtpSeen, unprotectFail, rtpInspect, vidIn, appDataIn, appDataUnprotectFail, videoUnprotectFail, videoFrameIn, videoSinkMissing, rtcpIn, rtcpAuthFail, allocOK, allocErr, pongIn uint64
++	var hexCaptured uint64
+ 	for {
+ 		if ctx.Err() != nil {
+ 			return ctx.Err()
+@@ -541,6 +701,36 @@ func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKe
+ 					})
+ 				}
+ 			}
++			// The relay's own Allocate/Pong responses were previously absorbed here silently --
++			// IsAllocateOrBindingSuccess/IsAllocateError/IsWhatsappPong/ParseStunErrorCode
++			// already existed but were never called from the receive path, so a rejected
++			// allocate (wrong token, malformed stream descriptor, anything) looked identical
++			// to "working fine, just no peer media yet" in every log we had.
++			if mt == stun.MsgAllocateSuccess {
++				if allocOK++; allocOK == 1 {
++					log.Info().Msg("relay ALLOCATE-SUCCESS received")
++					e.c.diag.Emit("stun", map[string]any{"event": "allocate_success", "call_id": callID})
++					select {
++					case allocated <- struct{}{}:
++					default:
++					}
++				}
++			}
++			if stun.IsAllocateError(pkt) {
++				code, _ := stun.ParseStunErrorCode(pkt, log)
++				if allocErr++; allocErr == 1 {
++					log.Warn().Uint16("stun_error_code", code).Msg("relay ALLOCATE-ERROR received -- this is why nothing bridges")
++					e.c.diag.Emit("stun", map[string]any{
++						"event": "allocate_error", "call_id": callID, "stun_error_code": code,
++					})
++				}
++			}
++			if stun.IsWhatsappPong(pkt, nil) {
++				if pongIn++; pongIn == 1 {
++					log.Info().Msg("relay consent PONG received, ping/pong consent established")
++					e.c.diag.Emit("stun", map[string]any{"event": "pong_received", "call_id": callID})
++				}
++			}
+ 			continue
+ 		case relay.RelayPacketOther:
+ 			continue
+@@ -606,6 +796,9 @@ func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKe
+ 		// Demux H.264 (PT 97) to video and emit Annex-B access units on the marker bit.
+ 		// Source of truth: https://github.com/JotaDev66/WaCalls/blob/2d6a1f666426049a89ef9541414e771acdcf8a16/internal/voip/call/callmanager_video.go#L86-L126
+ 		if kind == mediaPayloadVideo {
++			// Any video RTP at all, unprotected or not, means the peer's encoder is
++			// running -- stop sending PLIs once that's established.
++			gotPeerVideo.Store(true)
+ 			_, vpayload, vunok := rxVideoPipe.UnprotectAudio(pkt)
+ 			if !vunok {
+ 				if videoUnprotectFail++; videoUnprotectFail == 1 {
+@@ -617,14 +810,35 @@ func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKe
+ 				e.c.diag.Emit("video", map[string]any{"event": "unprotect_failed", "ssrc": vh.Ssrc, "seq": vh.SequenceNumber})
+ 				continue
+ 			}
+-			for _, nalu := range videoDepack.Depacketize(vpayload) {
+-				videoAU = append(videoAU, 0x00, 0x00, 0x00, 0x01)
+-				videoAU = append(videoAU, nalu...)
++			// H264AccessUnitAssembler (upstream purpshell/meowcaller, rtp/h264.go) replaces our
++			// previous manual depacketize-and-concatenate loop, which had NO loss/reorder recovery
++			// at all: a single dropped or reordered RTP packet mid-frame silently corrupted the
++			// reassembled access unit (wrong NAL boundaries / missing reference data) and handed
++			// it straight to mediaserver's decoder anyway -- previously only logged via the
++			// seq_gap diagnostic, never actually acted on. Matches the exact empirically-found
++			// symptom this session: video sometimes never displays after a call connects, and
++			// forcing the peer to toggle their camera (a fresh, guaranteed-clean IDR) is what
++			// recovers it. The assembler now discards a corrupted access unit and withholds every
++			// subsequent frame until a real IDR arrives, instead of ever handing the decoder
++			// something broken -- self-healing the same way the camera-toggle workaround does,
++			// but automatically and without user intervention.
++			frame, complete, recoveryNeeded := videoAssembler.Push(vh.SequenceNumber, vh.Marker, vpayload)
++			if recoveryNeeded {
++				e.c.diag.Emit("video", map[string]any{
++					"event": "recovery", "ssrc": vh.Ssrc, "seq": vh.SequenceNumber,
++				})
+ 			}
+-			if vh.Marker && len(videoAU) > 0 {
+-				frame := videoAU
+-				videoAU = nil
+-				e.c.diag.Emit("video", map[string]any{"event": "frame", "ssrc": vh.Ssrc, "bytes": len(frame)})
++			if complete && len(frame) > 0 {
++				fields := map[string]any{"event": "frame", "ssrc": vh.Ssrc, "bytes": len(frame)}
++				// Dump reassembled access units in full so a real corruption (bad NAL types,
++				// missing/garbled SPS-PPS, wrong start codes) can be inspected directly instead
++				// of inferred. Capped so a long call cannot blow up the log.
++				if (videoFrameIn < 8 || recoveryNeeded) && hexCaptured < 60 {
++					fields["frame_hex"] = hex.EncodeToString(frame)
++					fields["nal_types"] = h264NalTypes(frame)
++					hexCaptured++
++				}
++				e.c.diag.Emit("video", fields)
+ 				if sink := callVideoSink(call); sink != nil {
+ 					if err := sink.WriteVideo(frame); err != nil {
+ 						log.Warn().Err(err).Uint32("ssrc", vh.Ssrc).Int("bytes", len(frame)).Msg("failed to write WhatsApp video frame to sink")
+@@ -642,8 +856,21 @@ func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKe
+ 				}
+ 			}
+ 			if vidIn++; vidIn == 1 {
+-				log.Info().Uint32("ssrc", vh.Ssrc).Msg("first video RTP demuxed from relay (NOT VALIDATED)")
++				log.Info().Uint32("ssrc", vh.Ssrc).Msg("first video RTP demuxed from relay")
+ 				e.c.diag.Emit("meta", map[string]any{"event": "first_video_rtp_in", "call_id": callID, "ssrc": vh.Ssrc})
++				// The peer's <video state=1> stanza is only sent for a mid-call audio->video
++				// upgrade, never for video that was already present in the initial offer/accept
++				// (confirmed: zero OnVideoState firings across many real from-start video calls).
++				// Without this, OnVideoState's caller-side "streaming" flag never flips even
++				// though real decoded video is on its way, so a UI that shows a placeholder
++				// until "streaming" arrives would show nothing but that placeholder for the
++				// entire call. Real video RTP actually arriving is a stronger, always-true
++				// substitute signal for "the peer's video is live" than that stanza is.
++				if call != nil {
++					if fn := call.onVideoStateFn(); fn != nil {
++						fn(VideoState{Active: true, Raw: 1})
++					}
++				}
+ 			}
+ 			continue
+ 		}
+@@ -726,7 +953,8 @@ func videoRtpDurationSamples(duration time.Duration) uint32 {
+ // protects them with the video pipeline, and sends them to the relay. The send path is
+ // fed encoded H.264 (e.g. from the VideoBridge / WebCodecs), not raw frames.
+ //
+-// NOT VALIDATED: the video send media path is unproven.
++// Validated 2026-07-30 (examples/videoloop): 240/240 sent access units arrived at the peer
++// and decoded clean over a real two-account WhatsApp call.
+ type videoSender struct {
+ 	mu               sync.Mutex
+ 	pipe             *MediaPipeline
+@@ -782,15 +1010,13 @@ func (r *mediaSrtcpReceiver) unprotect(senderSSRC uint32, packet []byte) ([]byte
+ 	return srtp.UnprotectSrtcp(&r.keys, senderSSRC, packet)
+ }
+ 
+-func newMediaSrtcpSender(callKey []byte, selfLID string, ssrc uint32, profile bool) (*mediaSrtcpSender, error) {
++func newMediaSrtcpSender(callKey []byte, selfLID string, ssrc uint32, profile bool, cname [rtp.WhatsappRtcpCnameLen]byte) (*mediaSrtcpSender, error) {
+ 	keys, err := srtp.DeriveE2eSrtcpKeys(callKey, rtp.FormatE2ESrtpParticipantID(selfLID))
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	var entropy [12]byte
+-	_, _ = rand.Read(entropy[:])
+ 	return &mediaSrtcpSender{
+-		keys: keys, ssrc: ssrc, cname: rtp.BuildWhatsappRtcpCname(entropy),
++		keys: keys, ssrc: ssrc, cname: cname,
+ 		profile: profile, index: 1,
+ 	}, nil
+ }
+@@ -806,6 +1032,36 @@ func (s *mediaSrtcpSender) senderReport(stats rtp.RtcpSenderStats, nowMs uint64)
+ 	return packet, err
+ }
+ 
++// pli builds and protects a Picture Loss Indication requesting a keyframe from
++// mediaSsrc (the peer's video SSRC). s must be the sender's own video RTCP context
++// (SSRC identifies us as the PLI's sender).
++func (s *mediaSrtcpSender) pli(mediaSsrc uint32) ([]byte, error) {
++	s.mu.Lock()
++	defer s.mu.Unlock()
++	plain := rtp.BuildRtcpPli(s.ssrc, mediaSsrc)
++	packet, err := srtp.ProtectSrtcp(&s.keys, s.ssrc, s.index, plain[:])
++	if err == nil {
++		s.index++
++	}
++	return packet, err
++}
++
++// fir builds and protects a Full Intra Request (RFC 5104) requesting a keyframe from
++// mediaSsrc -- an alternative to pli() above that some real clients require instead of
++// (or alongside) PLI before their encoder will start sending video at all. seqNr must
++// increment across calls for the same target (RFC 5104 4.3.1.1) so the receiver can tell
++// a fresh request apart from a stale retransmit.
++func (s *mediaSrtcpSender) fir(mediaSsrc uint32, seqNr uint8) ([]byte, error) {
++	s.mu.Lock()
++	defer s.mu.Unlock()
++	plain := rtp.BuildRtcpFir(s.ssrc, mediaSsrc, seqNr)
++	packet, err := srtp.ProtectSrtcp(&s.keys, s.ssrc, s.index, plain[:])
++	if err == nil {
++		s.index++
++	}
++	return packet, err
++}
++
+ func (vs *videoSender) protectAccessUnit(au []byte, duration time.Duration) [][]byte {
+ 	vs.mu.Lock()
+ 	defer vs.mu.Unlock()
+@@ -817,20 +1073,42 @@ func (vs *videoSender) protectAccessUnitLocked(au []byte, duration time.Duration
+ 		return nil
+ 	}
+ 	idr := rtp.AUHasIDR(au)
+-	if vs.keyframeRequired && !idr {
+-		return nil
+-	}
++	// Previously dropped every non-IDR frame here while keyframeRequired was true, waiting for
++	// the next native-capture-restart-produced IDR (debounced to at most once per 5s -- see
++	// KEYFRAME_COOLDOWN_US in glue/call.c -- specifically to avoid a documented self-inflicted
++	// restart storm). That meant a single genuine peer PLI/FIR -- which arrives far more often
++	// than every 5s when the peer isn't decoding anything -- could silently starve the
++	// outgoing stream down to ~1-2 frames every 5 seconds for the entire call (confirmed live
++	// via diagnostics this session, on the one direction where the peer's real WhatsApp client
++	// never once instantiates a video decoder). A receiver that hasn't started decoding yet
++	// has no "wrong reference frame" state to corrupt by receiving P-frames -- sending it a
++	// continuous real stream, even one that occasionally references a keyframe it may have
++	// missed, gives its jitter buffer/decoder-setup logic actual data to reason about, instead
++	// of confirming its own suspicion that the stream is dead and never bothering to spin up a
++	// decoder at all. Keep tracking keyframeRequired (cleared below once an IDR gets through)
++	// purely for the mediaFrameInfo IDR/Delta marking -- just stop using it to withhold frames.
+ 	nalus := rtp.SplitAnnexB(au)
+-	var payloads [][]byte
++	var packedAccessUnit []byte
+ 	for _, n := range nalus {
+ 		if len(n) == 0 || n[0]&0x1f == 9 {
+ 			continue
+ 		}
+-		payloads = append(payloads, rtp.PackageH264NALU(n)...)
++		if len(packedAccessUnit) > 0 {
++			packedAccessUnit = append(packedAccessUnit, 0, 0, 0, 1)
++		}
++		packedAccessUnit = append(packedAccessUnit, n...)
+ 	}
+-	if len(payloads) == 0 {
++	if len(packedAccessUnit) == 0 {
+ 		return nil
+ 	}
++	// WhatsApp fragments the WHOLE Annex-B access unit as one RTP NAL unit (STAP/FU-A over
++	// the combined SPS+PPS+IDR blob), not one RTP unit per NALU. Found by diffing against
++	// upstream purpshell/meowcaller@2d1c5bfe ("match WhatsApp access unit packetization"):
++	// our previous per-NALU packetization sent real, valid H.264 (confirmed via our own
++	// wire diagnostics -- every frame reached the relay with no errors) in a framing a real
++	// WhatsApp client's depacketizer never reassembles correctly, so nothing ever decoded
++	// on the peer's end despite our own send-side reporting success the whole time.
++	payloads := rtp.PackageH264NALU(packedAccessUnit)
+ 	vs.stream.SetTimestampStride(videoRtpDurationSamples(duration))
+ 	mediaFrameInfo := rtp.VideoMediaFrameInfoDelta
+ 	if idr {
+@@ -919,6 +1197,21 @@ func (vs *videoSender) send(au []byte, duration time.Duration) {
+ 	}
+ }
+ 
++// h264NalTypes lists each NAL unit's type byte (Annex-B, per SplitAnnexB) in an access
++// unit, e.g. "7,8,5" for SPS,PPS,IDR -- lets a diagnostic reader spot a malformed
++// reassembly (missing SPS/PPS before an IDR, an unexpected type) without decoding hex.
++func h264NalTypes(au []byte) string {
++	nalus := rtp.SplitAnnexB(au)
++	types := make([]string, 0, len(nalus))
++	for _, n := range nalus {
++		if len(n) == 0 {
++			continue
++		}
++		types = append(types, fmt.Sprintf("%d", n[0]&0x1f))
++	}
++	return strings.Join(types, ",")
++}
++
+ // rmsFloat32 returns the root-mean-square level of a PCM frame, a cheap loudness
+ // metric for the media diagnostic streams (avoids inlining raw float32 PCM).
+ func rmsFloat32(f []float32) float64 {
+diff --git a/go.mod b/go.mod
+index ba848f8..8472bd7 100644
+--- a/go.mod
++++ b/go.mod
+@@ -10,14 +10,14 @@ require (
+ 	github.com/pion/opus v0.1.0
+ 	github.com/pion/sctp v1.9.4
+ 	github.com/rs/zerolog v1.35.1
+-	go.mau.fi/whatsmeow v0.0.0-20260609091626-4e622162b959
++	go.mau.fi/whatsmeow v0.0.0-20260716095330-85d99080dee8
+ 	google.golang.org/protobuf v1.36.11
+ )
+ 
+ require (
+ 	filippo.io/edwards25519 v1.2.0 // indirect
+ 	github.com/beeper/argo-go v1.1.2 // indirect
+-	github.com/coder/websocket v1.8.14 // indirect
++	github.com/coder/websocket v1.8.15 // indirect
+ 	github.com/elliotchance/orderedmap/v3 v3.1.0 // indirect
+ 	github.com/google/uuid v1.6.0 // indirect
+ 	github.com/mattn/go-colorable v0.1.14 // indirect
+@@ -26,10 +26,10 @@ require (
+ 	github.com/pion/transport/v4 v4.0.1 // indirect
+ 	github.com/vektah/gqlparser/v2 v2.5.27 // indirect
+ 	go.mau.fi/libsignal v0.2.2 // indirect
+-	go.mau.fi/util v0.9.9 // indirect
+-	golang.org/x/crypto v0.52.0 // indirect
+-	golang.org/x/net v0.55.0 // indirect
+-	golang.org/x/sync v0.20.0 // indirect
+-	golang.org/x/sys v0.45.0 // indirect
+-	golang.org/x/text v0.37.0 // indirect
++	go.mau.fi/util v0.9.11 // indirect
++	golang.org/x/crypto v0.54.0 // indirect
++	golang.org/x/net v0.57.0 // indirect
++	golang.org/x/sync v0.22.0 // indirect
++	golang.org/x/sys v0.47.0 // indirect
++	golang.org/x/text v0.40.0 // indirect
+ )
+diff --git a/go.sum b/go.sum
+index efc8182..7da159a 100644
+--- a/go.sum
++++ b/go.sum
+@@ -6,8 +6,8 @@ github.com/andreyvit/diff v0.0.0-20170406064948-c7f18ee00883 h1:bvNMNQO63//z+xNg
+ github.com/andreyvit/diff v0.0.0-20170406064948-c7f18ee00883/go.mod h1:rCTlJbsFo29Kk6CurOXKm700vrz8f0KW0JNfpkRJY/8=
+ github.com/beeper/argo-go v1.1.2 h1:UQI2G8F+NLfGTOmTUI0254pGKx/HUU/etbUGTJv91Fs=
+ github.com/beeper/argo-go v1.1.2/go.mod h1:M+LJAnyowKVQ6Rdj6XYGEn+qcVFkb3R/MUpqkGR0hM4=
+-github.com/coder/websocket v1.8.14 h1:9L0p0iKiNOibykf283eHkKUHHrpG7f65OE3BhhO7v9g=
+-github.com/coder/websocket v1.8.14/go.mod h1:NX3SzP+inril6yawo5CQXx8+fk145lPDC6pumgx0mVg=
++github.com/coder/websocket v1.8.15 h1:6B2JPeOGlpff2Uz6vOEH1Vzpi0iUz20A+lPVhPHtNUA=
++github.com/coder/websocket v1.8.15/go.mod h1:NX3SzP+inril6yawo5CQXx8+fk145lPDC6pumgx0mVg=
+ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
+ github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
+ github.com/elliotchance/orderedmap/v3 v3.1.0 h1:j4DJ5ObEmMBt/lcwIecKcoRxIQUEnw0L804lXYDt/pg=
+@@ -23,8 +23,8 @@ github.com/mattn/go-colorable v0.1.14 h1:9A9LHSqF/7dyVVX6g0U9cwm9pG3kP9gSzcuIPHP
+ github.com/mattn/go-colorable v0.1.14/go.mod h1:6LmQG8QLFO4G5z1gPvYEzlUgJ2wF+stgPZH1UqBm1s8=
+ github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWEY=
+ github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
+-github.com/petermattis/goid v0.0.0-20260330135022-df67b199bc81 h1:WDsQxOJDy0N1VRAjXLpi8sCEZRSGarLWQevDxpTBRrM=
+-github.com/petermattis/goid v0.0.0-20260330135022-df67b199bc81/go.mod h1:pxMtw7cyUw6B2bRH0ZBANSPg+AoSud1I1iyJHI69jH4=
++github.com/petermattis/goid v0.0.0-20260713124913-97594f28f5ca h1:GHSUVE4yOgX4E7kTRzpxCPbCOYkd3Kj8Dgdod30OI1E=
++github.com/petermattis/goid v0.0.0-20260713124913-97594f28f5ca/go.mod h1:pxMtw7cyUw6B2bRH0ZBANSPg+AoSud1I1iyJHI69jH4=
+ github.com/pion/datachannel v1.6.0 h1:XecBlj+cvsxhAMZWFfFcPyUaDZtd7IJvrXqlXD/53i0=
+ github.com/pion/datachannel v1.6.0/go.mod h1:ur+wzYF8mWdC+Mkis5Thosk+u/VOL287apDNEbFpsIk=
+ github.com/pion/dtls/v3 v3.1.2 h1:gqEdOUXLtCGW+afsBLO0LtDD8GnuBBjEy6HRtyofZTc=
+@@ -51,24 +51,24 @@ github.com/vektah/gqlparser/v2 v2.5.27 h1:RHPD3JOplpk5mP5JGX8RKZkt2/Vwj/PZv0HxTd
+ github.com/vektah/gqlparser/v2 v2.5.27/go.mod h1:D1/VCZtV3LPnQrcPBeR/q5jkSQIPti0uYCP/RI0gIeo=
+ go.mau.fi/libsignal v0.2.2 h1:QV+XdzQkm3x3aSG7FcqfGSZuFXz83pRZPBFaPygHbOU=
+ go.mau.fi/libsignal v0.2.2/go.mod h1:CRlIQg2J8uYTfDFvNoO8/KcZjs5cey0vbc6oj/bssY0=
+-go.mau.fi/util v0.9.9 h1:ujDeXCo07HBor5oQLyO1tHklupmqVmPgasc53d7q/NE=
+-go.mau.fi/util v0.9.9/go.mod h1:pqt4Vcrt+5gcH/CgrHZg11qSx+b34o6mknGzOEA6waY=
+-go.mau.fi/whatsmeow v0.0.0-20260609091626-4e622162b959 h1:5MpMyxG2lGLgnN0zKfD6fnDBvyGXoOlruLK34tV281w=
+-go.mau.fi/whatsmeow v0.0.0-20260609091626-4e622162b959/go.mod h1:9hto2r5yVE5yyNTRrZErKNSflGBKxIplUVXAD3EJFDE=
+-golang.org/x/crypto v0.52.0 h1:RMs7fP2rXdep0CftQlK8Uf+kibLm7qkCcradZWYz988=
+-golang.org/x/crypto v0.52.0/go.mod h1:1QgfPxDqh0T2M/elOJtp9RvuR95kVjir0e6/BvEmGbc=
+-golang.org/x/exp v0.0.0-20260508232706-74f9aab9d74a h1:+3jdDGGB8NGb1Zktc737jlt3/A5f6UlwSzmvqUuufxw=
+-golang.org/x/exp v0.0.0-20260508232706-74f9aab9d74a/go.mod h1:d2fgXJLVs4dYDHUk5lwMIfzRzSrWCfGZb0ZqeLa/Vcw=
+-golang.org/x/net v0.55.0 h1:bcvxaJn3e1U6InsFWt1JUq1aSjnRxLzT2rtD2KfkDF8=
+-golang.org/x/net v0.55.0/go.mod h1:L5U2KuzuOe1lY7Z+aWVIKK6qEeJXnXV9yzGA+WCHJww=
+-golang.org/x/sync v0.20.0 h1:e0PTpb7pjO8GAtTs2dQ6jYa5BWYlMuX047Dco/pItO4=
+-golang.org/x/sync v0.20.0/go.mod h1:9xrNwdLfx4jkKbNva9FpL6vEN7evnE43NNNJQ2LF3+0=
++go.mau.fi/util v0.9.11 h1:Cus1Lu/t7d3OG6VF4aYWvlUUS0Q4O1/lcpPNJZ0jsw0=
++go.mau.fi/util v0.9.11/go.mod h1:xunp/oIQfFD68HHcNHfG0pOiHkvEtDhTweeIwKJ//+Q=
++go.mau.fi/whatsmeow v0.0.0-20260716095330-85d99080dee8 h1:7RQA3v4pCZcmgHaEQXKfHKLVSqPThizkApt6Uw+DcA8=
++go.mau.fi/whatsmeow v0.0.0-20260716095330-85d99080dee8/go.mod h1:SX7VdCALDRNx7HZ7mqZxjyi3U7N0QtbSXXXTl8rG5S4=
++golang.org/x/crypto v0.54.0 h1:YLIA59K4fiNzHzjnZt2tUJQjQtUWfWbeHBqKtk3eScw=
++golang.org/x/crypto v0.54.0/go.mod h1:KWL8ny2AZdGR2cWmzeHrp2azQPGogOv+HeQaVEXC2dk=
++golang.org/x/exp v0.0.0-20260709172345-9ea1abe57597 h1:qLvzZeaANDgyVOA8pyHCOStGlXn0rseXma+GQjeuv2g=
++golang.org/x/exp v0.0.0-20260709172345-9ea1abe57597/go.mod h1:EdfpwwqSu+0Li0mzskwHU6FWDV3t9Q+RZDo3QMUtL3Q=
++golang.org/x/net v0.57.0 h1:K5+3DljvIuDG9/Jv9rvyMywYNFCQ9RSUY6OOTTkT+tE=
++golang.org/x/net v0.57.0/go.mod h1:KpXc8iv+r3XplLAG/f7Jsf9RPszJzdR0f58q9vGOuEU=
++golang.org/x/sync v0.22.0 h1:SZjpbeLmrCk4xhRSZFNZW5gFUeCeFgjekvI/+gfScek=
++golang.org/x/sync v0.22.0/go.mod h1:9xrNwdLfx4jkKbNva9FpL6vEN7evnE43NNNJQ2LF3+0=
+ golang.org/x/sys v0.0.0-20220712014510-0a85c31ab51e/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+ golang.org/x/sys v0.6.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+-golang.org/x/sys v0.45.0 h1:dO4czNzziLiiXplLQgBCEpCvXQ3dnkn0SdaZSYdQ+FY=
+-golang.org/x/sys v0.45.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
+-golang.org/x/text v0.37.0 h1:Cqjiwd9eSg8e0QAkyCaQTNHFIIzWtidPahFWR83rTrc=
+-golang.org/x/text v0.37.0/go.mod h1:a5sjxXGs9hsn/AJVwuElvCAo9v8QYLzvavO5z2PiM38=
++golang.org/x/sys v0.47.0 h1:o7XGOvZQCADBQQ4Y7VNq2dRWQR7JmOUW8Kxx4ZsNgWs=
++golang.org/x/sys v0.47.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
++golang.org/x/text v0.40.0 h1:Ub2Z6/xjgF1WrYQz2nuITOEegKFtiIy+rieRJ5lHZKs=
++golang.org/x/text v0.40.0/go.mod h1:hpnzDAfGV753zIKo+wk3u1bVKCGPbrnF7+7LBF/UHVY=
+ golang.org/x/time v0.10.0 h1:3usCWA8tQn0L8+hFJQNgzpWbd89begxN66o1Ojdn5L4=
+ golang.org/x/time v0.10.0/go.mod h1:3BpzKBy/shNhVucY/MWOyx10tF3SFh9QdLuxbVysPQM=
+ google.golang.org/protobuf v1.36.11 h1:fV6ZwhNocDyBLK0dj+fg8ektcVegBBuEolpbTQyBNVE=
+diff --git a/livecall.go b/livecall.go
+index 9e6bf83..c5f85f8 100644
+--- a/livecall.go
++++ b/livecall.go
+@@ -145,7 +145,9 @@ func (c *Call) Receive(sink AudioSink) {
+ // the inbound video is discarded. The video analog of Receive; AnnexBRecorder records to a
+ // .h264 file, or use VideoSinkFunc to forward to a callback.
+ //
+-// NOT VALIDATED: the inbound-video media path is unproven (no captured video-RTP vector).
++// Validated 2026-07-30 (examples/videoloop): a real two-account WhatsApp video call sent 240
++// synthetic access units end to end; the callee's sink received all 240 and the reassembled
++// stream decoded clean in ffmpeg, byte-identical in length to the source. See CHANGELOG.
+ func (c *Call) ReceiveVideo(sink VideoSink) {
+ 	c.mu.Lock()
+ 	c.videoSink = sink
+diff --git a/relay/relay.go b/relay/relay.go
+index 0e07142..1339c3a 100644
+--- a/relay/relay.go
++++ b/relay/relay.go
+@@ -3,6 +3,7 @@ package relay
+ import (
+ 	"fmt"
+ 	"net"
++	"time"
+ 
+ 	"github.com/pion/datachannel"
+ 	"github.com/pion/dtls/v3"
+@@ -80,6 +81,16 @@ type RelayMediaChannel struct {
+ 	assoc    *sctp.Association
+ 	dc       *datachannel.DataChannel
+ 	log      zerolog.Logger
++
++	// IceCheckReply is the raw bytes of the first reply received to the pre-DTLS ICE
++	// Binding Request (see ConnectRelayMedia's iceBindingRequest param), or nil if none
++	// arrived within the retry budget. IceCheckAttempts is how many send/wait cycles ran
++	// (1-3). Exported so the caller can classify the reply (BindingSuccess/Error/nothing)
++	// and log it durably -- performIceBindingCheck itself only logs via ephemeral
++	// zerolog.Debug, which is unrecoverable after the fact, and that gap made it
++	// impossible to tell whether a real call's ICE check ever got answered.
++	IceCheckReply    []byte
++	IceCheckAttempts int
+ }
+ 
+ // Close tears down the media stack in reverse order of construction.
+@@ -123,10 +134,19 @@ func (c *RelayMediaChannel) Recv(buf []byte) (int, error) {
+ 	return n, nil
+ }
+ 
+-// ConnectRelayMedia connects the full media stack (UDP→DTLS→SCTP→DataChannel) to one
+-// relay endpoint. Self-signed cert; server-cert verification skipped (media auth is
++// ConnectRelayMedia connects the full media stack (UDP→[ICE check]→DTLS→SCTP→DataChannel)
++// to one relay endpoint. Self-signed cert; server-cert verification skipped (media auth is
+ // HBH SRTP, not DTLS). No vector — validated only against a live relay.
+-func ConnectRelayMedia(relayAddr *net.UDPAddr, opts ...Option) (*RelayMediaChannel, error) {
++//
++// iceBindingRequest, if non-nil, is a pre-built STUN Binding Request (see
++// stun.BuildIceBindingRequest) sent on the SAME UDP socket BEFORE the DTLS handshake
++// starts, mirroring a real WhatsApp Web browser client's actual connectivity-check
++// ordering (confirmed live via chrome://webrtc-internals — see that function's doc
++// comment). This must happen on the identical local port DTLS subsequently uses, which is
++// why it lives here rather than as a separate connection attempt in the caller. Best
++// effort: a missing or unanswered response does not abort the connect, since neither the
++// real behavior on failure nor a strict retry/timeout budget has been validated live yet.
++func ConnectRelayMedia(relayAddr *net.UDPAddr, iceBindingRequest []byte, opts ...Option) (*RelayMediaChannel, error) {
+ 	// NOT VALIDATED: no vector exists for the live transport; exercised only against a real relay.
+ 	// Source of truth: https://github.com/oxidezap/whatsapp-rust/blob/41095d4e6ba4610e054e9ede3af1d5e88a83faee/src/voip/transport.rs#L136-L195
+ 	cfg := resolveConfig(opts)
+@@ -151,6 +171,14 @@ func ConnectRelayMedia(relayAddr *net.UDPAddr, opts ...Option) (*RelayMediaChann
+ 	cleanup = append(cleanup, udp.Close)
+ 	lg.Debug().Str("local_addr", udp.LocalAddr().String()).Msg("relay udp socket bound")
+ 
++	// 1b. Real ICE STUN Binding Request/Response connectivity check, on this same UDP
++	// socket, before DTLS starts -- see doc comment above.
++	var iceCheckReply []byte
++	var iceCheckAttempts int
++	if len(iceBindingRequest) > 0 {
++		iceCheckReply, iceCheckAttempts = performIceBindingCheck(udp, relayAddr, iceBindingRequest, lg)
++	}
++
+ 	// 2. DTLS client (self-signed cert; skip server-cert verification).
+ 	cert, err := selfsign.GenerateSelfSignedWithDNS("wa-voip")
+ 	if err != nil {
+@@ -186,5 +214,35 @@ func ConnectRelayMedia(relayAddr *net.UDPAddr, opts ...Option) (*RelayMediaChann
+ 	}
+ 	lg.Debug().Str("label", DataChannelLabel).Msg("relay datachannel open")
+ 
+-	return &RelayMediaChannel{udp: udp, dtlsConn: dtlsConn, assoc: assoc, dc: dc, log: lg}, nil
++	return &RelayMediaChannel{
++		udp: udp, dtlsConn: dtlsConn, assoc: assoc, dc: dc, log: lg,
++		IceCheckReply: iceCheckReply, IceCheckAttempts: iceCheckAttempts,
++	}, nil
++}
++
++// performIceBindingCheck sends pkt to relayAddr on udp and waits briefly for any reply, up
++// to 3 attempts. Best effort only (see ConnectRelayMedia's doc comment): never returns an
++// error, since this is purely about getting the request onto the wire in the right order
++// before DTLS, not about strictly validating a real ICE-conformant response here. Returns
++// the raw reply bytes (nil if none arrived) and how many send/wait cycles ran, so the
++// caller can log the outcome durably -- see RelayMediaChannel.IceCheckReply's doc comment.
++func performIceBindingCheck(udp *net.UDPConn, relayAddr *net.UDPAddr, pkt []byte, lg zerolog.Logger) ([]byte, int) {
++	buf := make([]byte, 1500)
++	for attempt := 1; attempt <= 3; attempt++ {
++		if _, err := udp.WriteToUDP(pkt, relayAddr); err != nil {
++			lg.Debug().Err(err).Int("attempt", attempt).Msg("ICE binding check: send failed")
++			return nil, attempt
++		}
++		_ = udp.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
++		n, _, err := udp.ReadFromUDP(buf)
++		if err == nil {
++			lg.Debug().Int("attempt", attempt).Int("reply_bytes", n).Msg("ICE binding check: got a reply")
++			_ = udp.SetReadDeadline(time.Time{})
++			return append([]byte(nil), buf[:n]...), attempt
++		}
++		lg.Debug().Err(err).Int("attempt", attempt).Msg("ICE binding check: no reply yet")
++	}
++	_ = udp.SetReadDeadline(time.Time{})
++	lg.Debug().Msg("ICE binding check: no reply after 3 attempts, proceeding to DTLS anyway")
++	return nil, 3
+ }
+diff --git a/rtp/h264.go b/rtp/h264.go
+index 6693b7f..de3b01a 100644
+--- a/rtp/h264.go
++++ b/rtp/h264.go
+@@ -12,6 +12,7 @@ const (
+ 	mtuPayloadMax = 800
+ 
+ 	maxFuReassemblyBytes = 4 << 20
++	maxAccessUnitBytes   = 8 << 20
+ )
+ 
+ // AUHasIDR reports whether an Annex-B access unit contains an IDR NAL unit.
+@@ -162,6 +163,67 @@ type H264Depacketizer struct {
+ 	fuType   byte
+ 	fuNriF   byte
+ 	fuActive bool
++	overflow bool
++}
++
++// H264AccessUnitAssembler reconstructs complete Annex-B access units while
++// withholding damaged interframes until an IDR restores decoder state.
++type H264AccessUnitAssembler struct {
++	depacketizer   H264Depacketizer
++	accessUnit     []byte
++	expectedSeq    uint16
++	hasSequence    bool
++	keyframeNeeded bool
++}
++
++// Push consumes one ordered RTP payload and returns a complete, decodable access
++// unit when the marker closes the frame.
++func (a *H264AccessUnitAssembler) Push(sequence uint16, marker bool, payload []byte) ([]byte, bool, bool) {
++	// Source of truth: https://github.com/JotaDev66/WaCalls/blob/2d6a1f666426049a89ef9541414e771acdcf8a16/internal/voip/transport/h264_packet.go#L138-L210
++	recoveryNeeded := false
++	if a.hasSequence && sequence != a.expectedSeq {
++		recoveryNeeded = !a.keyframeNeeded
++		a.depacketizer = H264Depacketizer{}
++		a.accessUnit = nil
++		a.keyframeNeeded = true
++	}
++	a.hasSequence = true
++	a.expectedSeq = sequence + 1
++
++	for _, nalu := range a.depacketizer.Depacketize(payload) {
++		if len(a.accessUnit)+4+len(nalu) > maxAccessUnitBytes {
++			recoveryNeeded = recoveryNeeded || !a.keyframeNeeded
++			a.depacketizer = H264Depacketizer{}
++			a.accessUnit = nil
++			a.keyframeNeeded = true
++			break
++		}
++		a.accessUnit = append(a.accessUnit, 0x00, 0x00, 0x00, 0x01)
++		a.accessUnit = append(a.accessUnit, nalu...)
++	}
++	if a.depacketizer.overflow {
++		recoveryNeeded = recoveryNeeded || !a.keyframeNeeded
++		a.depacketizer = H264Depacketizer{}
++		a.accessUnit = nil
++		a.keyframeNeeded = true
++	}
++	if !marker {
++		return nil, false, recoveryNeeded
++	}
++
++	accessUnit := a.accessUnit
++	a.accessUnit = nil
++	a.depacketizer = H264Depacketizer{}
++	if len(accessUnit) == 0 {
++		return nil, false, recoveryNeeded
++	}
++	if a.keyframeNeeded {
++		if !AUHasIDR(accessUnit) {
++			return nil, false, recoveryNeeded
++		}
++		a.keyframeNeeded = false
++	}
++	return accessUnit, true, recoveryNeeded
+ }
+ 
+ // Depacketize consumes one RTP payload and returns the NAL units it produced (zero for a
+@@ -210,6 +272,12 @@ func (d *H264Depacketizer) Depacketize(payload []byte) [][]byte {
+ 		body := payload[2:]
+ 
+ 		if startBit != 0 {
++			if 1+len(body) > maxFuReassemblyBytes {
++				d.fuActive = false
++				d.fuBuf = d.fuBuf[:0]
++				d.overflow = true
++				return nil
++			}
+ 			d.fuActive = true
+ 			d.fuType = origType
+ 			d.fuNriF = fbitAndNri
+@@ -219,6 +287,7 @@ func (d *H264Depacketizer) Depacketize(payload []byte) [][]byte {
+ 			if len(d.fuBuf)+len(body) > maxFuReassemblyBytes {
+ 				d.fuActive = false
+ 				d.fuBuf = d.fuBuf[:0]
++				d.overflow = true
+ 				return nil
+ 			}
+ 			d.fuBuf = append(d.fuBuf, body...)
+diff --git a/rtp/rtcp.go b/rtp/rtcp.go
+index 09d0676..ae1c981 100644
+--- a/rtp/rtcp.go
++++ b/rtp/rtcp.go
+@@ -161,6 +161,38 @@ func BuildSenderReportWithSdes(localSsrc uint32, stats *RtcpSenderStats, nowMs u
+ 	return out
+ }
+ 
++// BuildRtcpPli builds a 12-byte Picture Loss Indication (RTCP PT 206, FMT 1) — the
++// receiver-side counterpart to RtcpRequestsKeyframe below. senderSsrc identifies us (the
++// PLI sender); mediaSsrc is the peer's video SSRC we want a keyframe from.
++func BuildRtcpPli(senderSsrc, mediaSsrc uint32) [12]byte {
++	var buf [12]byte
++	buf[0] = 0x81 // V=2, P=0, FMT=1 (PLI)
++	buf[1] = RtcpPtPsfb
++	buf[3] = 2 // (2+1)*4 = 12 bytes
++	binary.BigEndian.PutUint32(buf[4:8], senderSsrc)
++	binary.BigEndian.PutUint32(buf[8:12], mediaSsrc)
++	return buf
++}
++
++// BuildRtcpFir builds a 20-byte Full Intra Request (RTCP PT 206, FMT 4, RFC 5104 4.3.1) --
++// an alternative keyframe-request mechanism some clients require instead of (or alongside)
++// PLI. senderSsrc identifies us; mediaSsrc is the peer's video SSRC; seqNr is FIR's own
++// per-target sequence number (must increment across repeated FIR requests for the same
++// target per RFC 5104 4.3.1.1, so the receiver can distinguish a fresh request from a
++// duplicate/retransmit).
++func BuildRtcpFir(senderSsrc, mediaSsrc uint32, seqNr uint8) [20]byte {
++	var buf [20]byte
++	buf[0] = 0x84 // V=2, P=0, FMT=4 (FIR)
++	buf[1] = RtcpPtPsfb
++	buf[3] = 4 // (4+1)*4 = 20 bytes
++	binary.BigEndian.PutUint32(buf[4:8], senderSsrc)
++	// bytes 8:12 (media source SSRC) stay 0 for FIR -- the real target lives in the FCI below.
++	binary.BigEndian.PutUint32(buf[12:16], mediaSsrc)
++	buf[16] = seqNr
++	// buf[17:20] reserved, must be 0 (already zero from var declaration)
++	return buf
++}
++
+ // RtcpRequestsKeyframe reports whether a compound RTCP packet contains PLI/FIR
+ // feedback for localVideoSsrc.
+ func RtcpRequestsKeyframe(data []byte, localVideoSsrc uint32) bool {
+diff --git a/rtp/rtp.go b/rtp/rtp.go
+index 8971c4d..29af618 100644
+--- a/rtp/rtp.go
++++ b/rtp/rtp.go
+@@ -23,8 +23,8 @@ const (
+ 	WhatsappRtpHeaderDtxSize    int    = 20
+ 	WhatsappVideoRtpHeaderSize  int    = 28
+ 	WhatsappRtpExtensionDtxWord uint32 = 0x30010000
+-	VideoMediaFrameInfoIDR      uint8  = 0x09
+-	VideoMediaFrameInfoDelta    uint8  = 0x01
++	VideoMediaFrameInfoIDR      uint8  = 0x08
++	VideoMediaFrameInfoDelta    uint8  = 0x20
+ 
+ 	rtpVersion          = 2
+ 	srtpAuthTagLen      = 10
+@@ -106,14 +106,43 @@ func EstimateSrtpRtpWireBytes(opusPayload []byte) int {
+ 	return headerSize + len(opusPayload) + tagLen
+ }
+ 
+-// VideoRtpExtension is WhatsApp's captured 12-byte video extension block.
++// VideoRtpExtension is WhatsApp's video RTP metadata extension set.
+ type VideoRtpExtension struct {
+ 	MediaFrameInfo    uint8
++	FrameNumber       *uint16
+ 	InitialBandwidth  uint16
+ 	ShortOffset       int16
+ 	TransportSequence uint16
+ }
+ 
++// DisplayOrientation returns the CVO receiver rotation as clockwise quarter turns.
++func (e *VideoRtpExtension) DisplayOrientation() int {
++	// Source of truth: https://www.etsi.org/deliver/etsi_ts/126100_126199/126114/15.05.00_60/ts_126114v150500p.pdf
++	return int(e.MediaFrameInfo & 0x03)
++}
++
++func (e *VideoRtpExtension) encode() []byte {
++	frameInfoLength := 1
++	if e.FrameNumber != nil {
++		frameInfoLength = 3
++	}
++	ext := make([]byte, 0, 16)
++	ext = append(ext, 0x30|byte(frameInfoLength-1), e.MediaFrameInfo)
++	if e.FrameNumber != nil {
++		ext = binary.BigEndian.AppendUint16(ext, *e.FrameNumber)
++	}
++	ext = append(ext, 0x51)
++	ext = binary.BigEndian.AppendUint16(ext, e.InitialBandwidth)
++	ext = append(ext, 0x61)
++	ext = binary.BigEndian.AppendUint16(ext, uint16(e.ShortOffset))
++	ext = append(ext, 0x91)
++	ext = binary.BigEndian.AppendUint16(ext, e.TransportSequence)
++	for len(ext)%4 != 0 {
++		ext = append(ext, 0)
++	}
++	return ext
++}
++
+ // RtpHeader is the fixed RTP header plus an optional 0xdebe extension.
+ type RtpHeader struct {
+ 	Marker         bool
+@@ -129,7 +158,7 @@ type RtpHeader struct {
+ func (h *RtpHeader) ByteSize() int {
+ 	// Source of truth: https://github.com/oxidezap/whatsapp-rust/blob/41095d4e6ba4610e054e9ede3af1d5e88a83faee/wacore/src/voip/rtp.rs#L93-L99
+ 	if h.VideoExtension != nil {
+-		return WhatsappVideoRtpHeaderSize
++		return WhatsappRtpHeaderSize + len(h.VideoExtension.encode())
+ 	}
+ 	if h.ExtensionWord != nil {
+ 		return WhatsappRtpHeaderDtxSize
+@@ -193,20 +222,61 @@ func RtpExtensionProfileAndData(data []byte) (uint16, []byte, bool) {
+ 	return binary.BigEndian.Uint16(data[extensionOffset : extensionOffset+2]), data[dataStart:dataEnd], true
+ }
+ 
+-// ParseWhatsappVideoExtension decodes WhatsApp's exact video extension layout.
++// ParseWhatsappVideoExtension decodes WhatsApp's one-byte-header video extensions.
+ func ParseWhatsappVideoExtension(data []byte) (*VideoRtpExtension, bool) {
++	// Source of truth: https://github.com/purpshell/meowcaller/blob/2af70f9b5f88de1ab3b9ba5e9ecda8687810f498/datasheets/group-video-reactions.md#L109-L117
+ 	profile, ext, ok := RtpExtensionProfileAndData(data)
+-	if !ok || profile != WhatsappRtpExtensionProfile || len(ext) != 12 ||
+-		ext[0] != 0x30 || ext[2] != 0x51 || ext[5] != 0x61 ||
+-		ext[8] != 0x91 || ext[11] != 0 {
++	if !ok || profile != WhatsappRtpExtensionProfile {
+ 		return nil, false
+ 	}
+-	return &VideoRtpExtension{
+-		MediaFrameInfo:    ext[1],
+-		InitialBandwidth:  binary.BigEndian.Uint16(ext[3:5]),
+-		ShortOffset:       int16(binary.BigEndian.Uint16(ext[6:8])),
+-		TransportSequence: binary.BigEndian.Uint16(ext[9:11]),
+-	}, true
++	parsed := &VideoRtpExtension{}
++	var hasFrameInfo, hasShortOffset bool
++	for offset := 0; offset < len(ext); {
++		header := ext[offset]
++		offset++
++		if header == 0 {
++			continue
++		}
++		id := header >> 4
++		length := int(header&0x0f) + 1
++		if id == 15 || offset+length > len(ext) {
++			return nil, false
++		}
++		value := ext[offset : offset+length]
++		offset += length
++		switch id {
++		case 3:
++			if length != 1 && length != 3 {
++				return nil, false
++			}
++			parsed.MediaFrameInfo = value[0]
++			if length == 3 {
++				frameNumber := binary.BigEndian.Uint16(value[1:3])
++				parsed.FrameNumber = &frameNumber
++			}
++			hasFrameInfo = true
++		case 5:
++			if length != 2 {
++				return nil, false
++			}
++			parsed.InitialBandwidth = binary.BigEndian.Uint16(value)
++		case 6:
++			if length != 2 {
++				return nil, false
++			}
++			parsed.ShortOffset = int16(binary.BigEndian.Uint16(value))
++			hasShortOffset = true
++		case 9:
++			if length != 2 {
++				return nil, false
++			}
++			parsed.TransportSequence = binary.BigEndian.Uint16(value)
++		}
++	}
++	if !hasFrameInfo || !hasShortOffset {
++		return nil, false
++	}
++	return parsed, true
+ }
+ 
+ // IsRtpVersion2 reports a version-2 RTP packet.
+@@ -254,26 +324,22 @@ func EncodeRtpHeader(header *RtpHeader, log ...zerolog.Logger) []byte {
+ 	buf[3] = byte(header.SequenceNumber)
+ 	binary.BigEndian.PutUint32(buf[4:8], header.Timestamp)
+ 	binary.BigEndian.PutUint32(buf[8:12], header.Ssrc)
++	var videoExtension []byte
++	if header.VideoExtension != nil {
++		videoExtension = header.VideoExtension.encode()
++	}
+ 	if size >= 16 {
+ 		binary.BigEndian.PutUint16(buf[12:14], WhatsappRtpExtensionProfile)
+ 		var extWords uint16
+ 		if header.VideoExtension != nil {
+-			extWords = 3
++			extWords = uint16(len(videoExtension) / 4)
+ 		} else if header.ExtensionWord != nil {
+ 			extWords = 1
+ 		}
+ 		binary.BigEndian.PutUint16(buf[14:16], extWords)
+ 	}
+ 	if header.VideoExtension != nil {
+-		ext := header.VideoExtension
+-		buf[16] = 0x30
+-		buf[17] = ext.MediaFrameInfo
+-		buf[18] = 0x51
+-		binary.BigEndian.PutUint16(buf[19:21], ext.InitialBandwidth)
+-		buf[21] = 0x61
+-		binary.BigEndian.PutUint16(buf[22:24], uint16(ext.ShortOffset))
+-		buf[24] = 0x91
+-		binary.BigEndian.PutUint16(buf[25:27], ext.TransportSequence)
++		copy(buf[16:], videoExtension)
+ 	} else if size >= 20 && header.ExtensionWord != nil {
+ 		binary.BigEndian.PutUint32(buf[16:20], *header.ExtensionWord)
+ 	}
+@@ -303,10 +369,12 @@ type VideoRtpStream struct {
+ 	sent              bool
+ 	tsStride          uint32
+ 	transportSequence uint16
++	frameNumber       uint16
++	firstPacket       bool
+ }
+ 
+ func NewVideoRtpStream(ssrc, tsStride uint32) *VideoRtpStream {
+-	return &VideoRtpStream{ssrc: ssrc, tsStride: tsStride}
++	return &VideoRtpStream{ssrc: ssrc, seq: 1, tsStride: tsStride, frameNumber: 1, firstPacket: true}
+ }
+ 
+ func (s *VideoRtpStream) RtpTimestamp() uint32 {
+@@ -325,8 +393,14 @@ func (s *VideoRtpStream) SetTimestampStride(tsStride uint32) bool {
+ }
+ 
+ func (s *VideoRtpStream) NextPacket(lastInAccessUnit bool, mediaFrameInfo uint8) RtpHeader {
++	var frameNumber *uint16
++	if s.firstPacket {
++		value := s.frameNumber
++		frameNumber = &value
++	}
+ 	ext := &VideoRtpExtension{
+ 		MediaFrameInfo:    mediaFrameInfo,
++		FrameNumber:       frameNumber,
+ 		InitialBandwidth:  0,
+ 		ShortOffset:       0,
+ 		TransportSequence: s.transportSequence,
+@@ -345,6 +419,10 @@ func (s *VideoRtpStream) NextPacket(lastInAccessUnit bool, mediaFrameInfo uint8)
+ 	s.transportSequence++
+ 	if lastInAccessUnit {
+ 		s.timestamp += s.tsStride
++		s.frameNumber++
++		s.firstPacket = true
++	} else {
++		s.firstPacket = false
+ 	}
+ 	return header
+ }
+diff --git a/signaling/stanza.go b/signaling/stanza.go
+index 1cd964c..6df74e4 100644
+--- a/signaling/stanza.go
++++ b/signaling/stanza.go
+@@ -18,7 +18,17 @@ import (
+ var CapabilityOffer = []byte{0x01, 0x05, 0xf7, 0x09, 0xe0, 0xbb, 0x13}
+ 
+ // CapabilityVideoOffer is the capability blob observed in WhatsApp video offers.
+-var CapabilityVideoOffer = []byte{0x01, 0x05, 0xf7, 0x09, 0xe0, 0xfa, 0x13}
++//
++// Last byte changed 0x13 -> 0x53 to match the real Android WhatsApp client's own
++// self-reported capability, captured verbatim from its <preaccept>/<accept> in every real
++// test call tonight (`<capability ver="1">0105f709e0fa53</capability>`, identical both times).
++// Speculative -- we don't have the bitmask semantics -- but it's a concrete, previously
++// unnoticed byte-level discrepancy between what we advertise as a video caller and what a real,
++// current client reports, raised as one of a caller-capability-bit hypothesis after the
++// dial-with-video regression persisted through an exact replay of the one historically-working
++// recipe (audio-then-changeMedia, byte-identical, still not decoded by Android). NOT YET
++// VALIDATED live.
++var CapabilityVideoOffer = []byte{0x01, 0x05, 0xf7, 0x09, 0xe0, 0xfa, 0x53}
+ 
+ // CapabilityPreaccept is the capability blob for <preaccept> (ver=1).
+ var CapabilityPreaccept = []byte{0x01, 0x05, 0xf7, 0x09, 0xe0, 0xbb, 0x07}
+diff --git a/signaling/video.go b/signaling/video.go
+index 8f93195..95bfca4 100644
+--- a/signaling/video.go
++++ b/signaling/video.go
+@@ -112,10 +112,19 @@ func BuildVideoAck(original *waBinary.Node) (waBinary.Node, bool) {
+ // <audio> children, before <net>).
+ func videoOfferNode() waBinary.Node {
+ 	return waBinary.Node{Tag: "video", Attrs: waBinary.Attrs{
+-		"enc":                videoOfferEncH264,
+-		"dec":                videoOfferDecH264,
+-		"screen_width":       "1920",
+-		"screen_height":      "1080",
++		"enc": videoOfferEncH264,
++		"dec": videoOfferDecH264,
++		// Copied from a captured iPhone offer, this claimed a screen size (1920x1080) that
++		// has nothing to do with what this device actually encodes and sends (320x240 --
++		// see glue/call.c's videoCaptureStart args). This is the one signaling field that
++		// differs between the offer (this, dial-only) and the accept/preaccept (which omit
++		// dimensions or send "0","0") -- and outgoing video reaching the peer only ever
++		// fails specifically on the dial path, never on answer. If the peer's client sizes
++		// its receive-side video surface off this signaled value rather than the actual
++		// decoded SPS dimensions, claiming 1920x1080 while sending a 320x240 stream is
++		// exactly the kind of mismatch that would make it reject every frame outright.
++		"screen_width":       "320",
++		"screen_height":      "240",
+ 		"device_orientation": "0",
+ 	}}
+ }
+diff --git a/stun/stun.go b/stun/stun.go
+index 0af9ef5..e59b3b1 100644
+--- a/stun/stun.go
++++ b/stun/stun.go
+@@ -3,7 +3,9 @@ package stun
+ import (
+ 	"bytes"
+ 	"crypto/hmac"
++	"crypto/rand"
+ 	"crypto/sha1"
++	"encoding/base64"
+ 	"encoding/binary"
+ 	"hash/crc32"
+ 	"strconv"
+@@ -21,12 +23,16 @@ const (
+ 	stunFingerprintXor = 0x5354554e
+ 	stunXorPort        = 0x2112
+ 
++	attrUsername              = 0x0006
+ 	attrMessageIntegrity      = 0x0008
+-	attrFingerprint           = 0x8028
+ 	attrErrorCode             = 0x0009
++	attrPriority              = 0x0024
++	attrUseCandidate          = 0x0025
+ 	attrRelayToken            = 0x4000
+ 	attrStreamDescriptors     = 0x4024
+ 	attrWasmRelayEndpoint     = 0x0016
++	attrIceControlling        = 0x802a
++	attrFingerprint           = 0x8028
+ 	attrSenderSubscriptionsV2 = 0x4025
+ )
+ 
+@@ -177,25 +183,46 @@ func createWasmRelayEndpointAttr(endpointXor [6]byte) [8]byte {
+ // BuildWasmStunAllocateRequest builds the WASM/Web DataChannel Allocate: 0x4000
+ // token + 0x4024 stream desc + 0x0016 endpoint + MI, no FP.
+ func BuildWasmStunAllocateRequest(transactionID [12]byte, relayToken []byte, endpointXor [6]byte, integrityKey []byte, log ...zerolog.Logger) []byte {
+-	return buildWasmStunAllocateRequest(transactionID, relayToken, endpointXor, wasmStreamDescriptorsTemplate, integrityKey, log...)
++	return buildWasmStunAllocateRequest(transactionID, relayToken, endpointXor, wasmStreamDescriptorsTemplate, nil, integrityKey, log...)
+ }
+ 
+ // BuildWasmStunAllocateRequestWithStreamSsrcs builds the WASM/Web allocate with
+ // per-call stream descriptors. The static KAT template only proves the wire shape; live
+ // calls must carry the SSRCs derived from the current call ID and participant LID.
+ func BuildWasmStunAllocateRequestWithStreamSsrcs(transactionID [12]byte, relayToken []byte, endpointXor [6]byte, streamSsrcs [9]uint32, integrityKey []byte, log ...zerolog.Logger) []byte {
+-	return buildWasmStunAllocateRequest(transactionID, relayToken, endpointXor, CreateWasmStreamDescriptors(streamSsrcs), integrityKey, log...)
++	return buildWasmStunAllocateRequest(transactionID, relayToken, endpointXor, CreateWasmStreamDescriptors(streamSsrcs), nil, integrityKey, log...)
++}
++
++// BuildWasmStunAllocateRequestWithSubscriptions is BuildWasmStunAllocateRequestWithStreamSsrcs
++// plus explicit peer sender-subscriptions (attr 0x4025, repeated: one per remote stream we
++// want the relay to bridge to us). CreateVoipSenderSubscription/attrSenderSubscriptionsV2
++// already existed in this file but were never called from the live allocate path -- the
++// allocate only ever declared OUR OWN outbound streams, never which of the PEER's streams we
++// want to receive. That is consistent with every symptom seen live: the relay confirms
++// ALLOCATE-SUCCESS and consent PONG (both proven via direct log evidence), yet the peer's
++// media never arrives -- a relay with no subscription record for us has no reason to forward
++// anything the peer sends, regardless of how healthy our own side of the handshake is.
++func BuildWasmStunAllocateRequestWithSubscriptions(transactionID [12]byte, relayToken []byte, endpointXor [6]byte, streamSsrcs [9]uint32, peerSubscriptions [][]byte, integrityKey []byte, log ...zerolog.Logger) []byte {
++	return buildWasmStunAllocateRequest(transactionID, relayToken, endpointXor, CreateWasmStreamDescriptors(streamSsrcs), peerSubscriptions, integrityKey, log...)
+ }
+ 
+-func buildWasmStunAllocateRequest(transactionID [12]byte, relayToken []byte, endpointXor [6]byte, streamDescriptors []byte, integrityKey []byte, log ...zerolog.Logger) []byte {
++func buildWasmStunAllocateRequest(transactionID [12]byte, relayToken []byte, endpointXor [6]byte, streamDescriptors []byte, peerSubscriptions [][]byte, integrityKey []byte, log ...zerolog.Logger) []byte {
+ 	// Source of truth: https://github.com/oxidezap/whatsapp-rust/blob/41095d4e6ba4610e054e9ede3af1d5e88a83faee/wacore/src/voip/stun.rs#L155-L177
+ 	lg := pickLog(log)
+ 	lg.Debug().
+ 		Int("relay_token_bytes", len(relayToken)).
+ 		Int("stream_descriptor_bytes", len(streamDescriptors)).
++		Int("subscription_count", len(peerSubscriptions)).
+ 		Bool("message_integrity", integrityKey != nil).
+ 		Msg("building wasm allocate request")
+ 	attrs := stunAttr(attrRelayToken, relayToken)
++	// CreateVoipSenderSubscriptions/CreateVoipSenderSubscriptionForLayer's own citation says
++	// these are attr 0x4000 (attrRelayToken's own value) for the WASM/Web variant, repeated
++	// alongside the token itself -- NOT attrSenderSubscriptionsV2 (0x4025), which is the APK
++	// variant's distinct attribute. STUN allows repeated attributes of the same type.
++	for _, sub := range peerSubscriptions {
++		attrs = append(attrs, stunAttr(attrRelayToken, sub)...)
++	}
+ 	attrs = append(attrs, stunAttr(attrStreamDescriptors, streamDescriptors)...)
+ 	wep := createWasmRelayEndpointAttr(endpointXor)
+ 	attrs = append(attrs, stunAttr(attrWasmRelayEndpoint, wep[:])...)
+@@ -254,6 +281,74 @@ func BuildWhatsappPing(transactionID [12]byte, log ...zerolog.Logger) [20]byte {
+ 	return out
+ }
+ 
++// BuildIceBindingRequest builds a standards-compliant (RFC 5389/8445) ICE STUN Binding
++// Request carrying WhatsApp's relay token inside the USERNAME attribute, matching what
++// WhatsApp Web's real browser client sends before its DTLS handshake ever starts.
++//
++// Discovered from a live chrome://webrtc-internals capture of a real WhatsApp Web video
++// call (2026-08-03), not from the whatsapp-rust reference source cited elsewhere in this
++// file (that client is native/APK-oriented and doesn't use this browser-specific
++// ICE-credential trick). The browser's self-synthesized SDP "answer" sets the REMOTE
++// ice-ufrag to a huge base64 blob -- exactly base64(relay_token) by byte length -- and
++// ice-pwd to a short base64 string matching this codebase's own relayKeyASCII
++// MESSAGE-INTEGRITY key in both length and role. Chrome's native WebRTC stack then
++// performs a real ICE connectivity check against the relay using
++// USERNAME="{remote_ufrag}:{local_ufrag}" and MESSAGE-INTEGRITY keyed by the remote
++// ice-pwd, BEFORE DTLS ever starts -- a completely different, and until now never sent,
++// authentication step from this codebase's own custom MsgAllocateRequest (0x0003), which
++// every capture all night showed succeeding (ALLOCATE-SUCCESS + consent PONG) while the
++// relay still never bridged the peer's media.
++//
++// A first attempt at this (USERNAME + MESSAGE-INTEGRITY + FINGERPRINT only) shipped and
++// was tested live but made no difference. A real Wireshark capture of a genuine WhatsApp
++// Web call (2026-08-03, wavideo.pcapng) showed the actual attribute set a working client
++// sends, byte for byte, in order: USERNAME, a libwebrtc-proprietary NETWORK-INFO attribute
++// (0xC057, cosmetic -- carries interface id/cost for multipath ranking, safely omittable),
++// ICE-CONTROLLING (0x802A, 8-byte tie-breaker), USE-CANDIDATE (0x0025, zero-length),
++// PRIORITY (0x0024, 4 bytes), MESSAGE-INTEGRITY, FINGERPRINT. USE-CANDIDATE is the real
++// RFC 8445 ICE nomination signal -- without it, even a fully credential-valid Binding
++// Request is just a connectivity probe to an ICE-lite agent, never a nomination, and the
++// far side has no reason to ever commit this candidate pair as the one to bridge media on.
++// That gap, not the credentials themselves, is suspected to be why every prior attempt
++// tonight got a clean ALLOCATE-SUCCESS/consent-PONG-equivalent yet zero peer media.
++func BuildIceBindingRequest(transactionID [12]byte, relayToken []byte, localUfrag string, integrityKey []byte, log ...zerolog.Logger) []byte {
++	lg := pickLog(log)
++	username := base64.StdEncoding.EncodeToString(relayToken) + ":" + localUfrag
++	attrs := stunAttr(attrUsername, []byte(username))
++
++	// ICE-CONTROLLING: 8-byte tie-breaker signaling we are the controlling agent (we are
++	// always the one initiating checks against a server-side relay, never the other way
++	// round, so there is no real role-conflict scenario here -- any random value works).
++	var tieBreaker [8]byte
++	_, _ = rand.Read(tieBreaker[:])
++	attrs = append(attrs, stunAttr(attrIceControlling, tieBreaker[:])...)
++
++	// USE-CANDIDATE: zero-length, nominates this pair. See doc comment above -- this is
++	// the piece missing from the first attempt, and the leading suspect for why that
++	// attempt made no observable difference.
++	attrs = append(attrs, stunAttr(attrUseCandidate, nil)...)
++
++	// PRIORITY: real value observed live (0x6e7e1eff). The exact number only matters for
++	// ranking among multiple candidate pairs; with a single pair here there is nothing to
++	// rank, so the confirmed-real constant is reused rather than deriving one from the
++	// RFC 8445 formula from scratch.
++	var priority [4]byte
++	binary.BigEndian.PutUint32(priority[:], 0x6e7e1eff)
++	attrs = append(attrs, stunAttr(attrPriority, priority[:])...)
++
++	lg.Debug().Int("username_bytes", len(username)).Msg("building ICE STUN binding request")
++	return EncodeStunRequest(MsgBindingRequest, transactionID, attrs, integrityKey, true, lg)
++}
++
++// GenerateIceUfrag returns a short random ICE-style local ufrag: 3 random bytes,
++// base64-encoded to exactly 4 characters with no padding -- matching the length WhatsApp
++// Web's own browser client uses for its local side (observed live: "+KoB").
++func GenerateIceUfrag() string {
++	var b [3]byte
++	_, _ = rand.Read(b[:])
++	return base64.StdEncoding.EncodeToString(b[:])
++}
++
+ // IsStunPacket reports whether data looks like a STUN packet (top two bits zero).
+ func IsStunPacket(data []byte) bool {
+ 	// Source of truth: https://github.com/oxidezap/whatsapp-rust/blob/41095d4e6ba4610e054e9ede3af1d5e88a83faee/wacore/src/voip/stun.rs#L188-L190
+@@ -399,14 +494,28 @@ func pbLenDelim(out []byte, field uint32, b []byte) []byte {
+ 	return append(out, b...)
+ }
+ 
+-// CreateVoipSenderSubscriptions builds voip.SenderSubscriptions (WASM, attr 0x4000).
++// CreateVoipSenderSubscriptions builds voip.SenderSubscriptions (WASM, attr 0x4000) for the
++// AUDIO layer (kept for compatibility with the KAT-shape reference); see
++// CreateVoipSenderSubscriptionForLayer for a specific stream_layer (e.g. video).
+ func CreateVoipSenderSubscriptions(ssrc uint32) []byte {
+ 	// Source of truth: https://github.com/oxidezap/whatsapp-rust/blob/41095d4e6ba4610e054e9ede3af1d5e88a83faee/wacore/src/voip/stun.rs#L299-L310
++	return CreateVoipSenderSubscriptionForLayer(ssrc, 0)
++}
++
++// CreateVoipSenderSubscriptionForLayer builds one voip.SenderSubscriptions entry (WASM,
++// repeated attr 0x4025) subscribing to a remote SSRC on the given stream_layer -- this is
++// how we tell the relay which of the PEER's streams to bridge to us; the relay's own
++// ALLOCATE-SUCCESS only ever covers OUR declared outbound streams (see
++// BuildWasmStunAllocateRequestWithSubscriptions). layer follows this session's own 0/1/2
++// per-participant slot grouping (0=audio, matching CreateVoipSenderSubscriptions above;
++// 1=video is the next untested layer value -- NOT KAT-validated, best inference from the
++// only real reference shape we have).
++func CreateVoipSenderSubscriptionForLayer(ssrc uint32, layer uint64) []byte {
+ 	var sender []byte
+ 	sender = pbTag(sender, 3, 0) // ssrc
+ 	sender = binary.AppendUvarint(sender, uint64(ssrc))
+-	sender = pbTag(sender, 5, 0) // stream_layer = AUDIO(0)
+-	sender = binary.AppendUvarint(sender, 0)
++	sender = pbTag(sender, 5, 0) // stream_layer
++	sender = binary.AppendUvarint(sender, layer)
+ 	sender = pbTag(sender, 6, 0) // payload_type = MEDIA(0)
+ 	sender = binary.AppendUvarint(sender, 0)
+ 	return pbLenDelim(nil, 1, sender)
+diff --git a/video.go b/video.go
+index b24dba1..6e7ec9d 100644
+--- a/video.go
++++ b/video.go
+@@ -2,8 +2,11 @@ package meowcaller
+ 
+ import (
+ 	"bufio"
++	"bytes"
+ 	"os"
+ 	"sync"
++
++	"go.mau.fi/whatsmeow/types"
+ )
+ 
+ // Video in meowcaller is encoded H.264, carried as Annex-B access units (one frame's worth
+@@ -23,6 +26,12 @@ type VideoSink interface {
+ 	Close() error
+ }
+ 
++// VideoOrientationSink receives display orientation discovered in RTP frame metadata.
++// The value is clockwise quarter turns suitable for rendering the decoded frame upright.
++type VideoOrientationSink interface {
++	SetOrientation(orientation int)
++}
++
+ // VideoSinkFunc adapts a plain function to a VideoSink (Close is a no-op).
+ type VideoSinkFunc func(accessUnit []byte)
+ 
+@@ -46,6 +55,25 @@ type VideoState struct {
+ 	Raw int
+ }
+ 
++// ParticipantVideoFrame is one authenticated H.264 access unit attributed to a
++// participant device. AccessUnit is owned by the callback and may be retained.
++type ParticipantVideoFrame struct {
++	ParticipantID string
++	Sender        types.JID
++	Device        types.JID
++	PID           uint32
++	HasPID        bool
++	SSRC          uint32
++	Orientation   int
++	AccessUnit    []byte
++}
++
++func cloneParticipantVideoFrame(frame ParticipantVideoFrame) ParticipantVideoFrame {
++	// Source of truth: https://github.com/purpshell/meowcaller/blob/36d54857c74e45ccb08f6444a32d2afa13f20be9/datasheets/group-video-reactions.md#L32-L54
++	frame.AccessUnit = bytes.Clone(frame.AccessUnit)
++	return frame
++}
++
+ // annexBRecorder records the peer's H.264 to a raw Annex-B .h264 file.
+ type annexBRecorder struct {
+ 	mu     sync.Mutex
+-- 
+2.53.0
+

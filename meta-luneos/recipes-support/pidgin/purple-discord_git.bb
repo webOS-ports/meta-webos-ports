@@ -2,56 +2,81 @@ SUMMARY = "Discord protocol plug-in for libpurple"
 LICENSE = "GPL-3.0-or-later"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=1ebbd3e34237af26da5dc08a4e440464"
 
-require purple-synergy.inc
+require purple-connectors.inc
+
+# Built from luneos-synergy-connectors, the version ended in its commit alone (1.0+git0+d22c6be58f).
+# With the upstream commit now in front it can sort lower, so bump the epoch to keep package feeds
+# moving forward.
+PE = "1"
+
+# 0001-0010 are generic fixes meant for upstream; 0011 onwards adapt the plug-in to
+# imlibpurpletransport and the webOS Messaging app.
+SRC_URI += " \
+    git://github.com/EionRobb/purple-discord.git;branch=master;protocol=https;name=upstream;destsuffix=purple-discord \
+    file://0001-Allow-the-plugin-id-to-be-set-at-build-time.patch \
+    file://0002-Implement-the-OpenSSL-backend-for-QR-code-login.patch \
+    file://0003-Fix-crashes-and-a-leak-in-QR-code-login.patch \
+    file://0004-Only-require-an-email-address-for-password-login.patch \
+    file://0005-Create-a-channel-s-thread-table-before-using-it.patch \
+    file://0006-Ignore-gateway-dispatch-frames-whose-d-is-not-an-obj.patch \
+    file://0007-Reconnect-when-the-gateway-stops-acknowledging-heart.patch \
+    file://0008-Make-file-uploads-survive-a-briefly-unavailable-conn.patch \
+    file://0009-Send-Ogg-Opus-uploads-as-voice-messages.patch \
+    file://0010-Subscribe-to-a-guild-channel-when-it-is-opened.patch \
+    file://0011-webOS-Deduplicate-messages-and-store-own-channel-mes.patch \
+    file://0012-webOS-Bridge-message-ids-reactions-and-replies-to-th.patch \
+    file://0013-webOS-Add-DM-partners-to-the-buddy-list.patch \
+    file://0014-webOS-Backfill-DM-and-channel-history.patch \
+    file://0015-webOS-Sign-in-with-a-token-password-or-by-QR-code.patch \
+    file://0016-webOS-Hand-a-remote-auth-captcha-to-the-account-UI.patch \
+    file://0017-webOS-Reconnect-through-a-full-re-login.patch \
+    file://0018-webOS-Add-gateway-and-channel-list-diagnostics.patch \
+"
+SRCREV_upstream = "b5cbd6221695b8a61a8529064a6b23d5812bf639"
 
 DEPENDS = "pidgin json-glib glib-2.0 zlib qrencode openssl"
 
-S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/discord/plugin/purple-discord"
+S = "${UNPACKDIR}/purple-discord"
 
-# QR remote-auth is NOT optional in this fork: discord_rsa.c includes <qrencode.h>
-# unconditionally, so the plug-in does not compile without it. qrencode comes from meta-oe and
-# ships libqrencode.pc, the module name the Makefile probes for.
+# QR remote-auth with the OpenSSL backend that 0002 adds; USE_OPENSSL_CRYPTO=1 makes the Makefile
+# take the RSA code from openssl rather than NSS, and pull in libqrencode, both via pkg-config.
 #
-# USE_QRCODE_AUTH=0 reads backwards but is deliberate, and matches build-discord.sh. It only
-# switches off the upstream Makefile's QR auto-detect block, which would pull the RSA backend in
-# from NSS via pkg-config. This fork uses the OpenSSL backend instead (USE_OPENSSL_CRYPTO in
-# discord_rsa.c), so the feature is enabled through CFLAGS below and NSS is never involved.
-#
-# The defines go through CFLAGS rather than a CPPFLAGS= assignment in EXTRA_OEMAKE: quoting a
-# multi-word value there does not survive into make reliably -- the first attempt reached make as
-# an empty CPPFLAGS= plus two stray arguments. The Makefile uses both $(CFLAGS) and $(CPPFLAGS)
-# on its link line, and declares CFLAGS with ?= so bitbake's exported value wins anyway.
-CFLAGS:append = " -DUSE_QRCODE_AUTH -DUSE_OPENSSL_CRYPTO"
+# imlibpurpleservice and the account template know the protocol as "prpl-discord", not upstream's
+# "prpl-eionrobb-discord", so 0001 lets the id be set at build time. It is defined in a header that
+# every compile force-includes, rather than as -DDISCORD_PLUGIN_ID="..." in CFLAGS: the string's
+# quotes do not survive bitbake's export of CFLAGS and make's shell intact.
+do_configure() {
+    echo '#define DISCORD_PLUGIN_ID "prpl-discord"' > ${B}/luneos-plugin-id.h
+}
+CFLAGS:append = " -include ${B}/luneos-plugin-id.h"
 
 EXTRA_OEMAKE = " \
     CC='${CC}' \
     PKG_CONFIG='${STAGING_BINDIR_NATIVE}/pkg-config' \
-    USE_QRCODE_AUTH=0 \
+    USE_OPENSSL_CRYPTO=1 \
 "
 
 do_compile() {
-    oe_runmake LDFLAGS="${LDFLAGS} $(${STAGING_BINDIR_NATIVE}/pkg-config --libs libqrencode openssl)"
+    oe_runmake
 }
 
-# Installed by hand rather than with `make install`, so no Pidgin pixmaps are shipped -- same as
-# purple-teams and purple-googlechat. See purple-synergy.inc for why none of them ship icons.
+# Installed by hand rather than with `make install`, so no Pidgin pixmaps are shipped -- see
+# purple-connectors.inc. Here `make install` cannot run at all anyway: it depends on discord16.png
+# and friends, which the Makefile renders from discord-alt-logo.svg with ImageMagick.
 #
-# Here there is a second reason: `make install` cannot run at all. It depends on discord16.png
-# and friends, which are in upstream's own .gitignore -- the Makefile renders them from
-# discord-alt-logo.svg with ImageMagick at install time, so the target fails with
-# "magick: No such file or directory" and would otherwise need imagemagick-native purely to
-# generate artwork that nothing on this platform reads.
+# Animated stickers are rendered through librlottie, which upstream dlopen()s at runtime; without
+# it installed they are simply shown as static images.
 do_install() {
     install -d ${D}${libdir}/purple-2
     install -m 0755 ${S}/libdiscord.so ${D}${libdir}/purple-2/libdiscord.so
 
     # Account template, so Discord can actually be added as an account.
     install -d ${D}${webos_accttemplatesdir}
-    cp -rf ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/discord/account/com.palm.discord ${D}${webos_accttemplatesdir}/
+    cp -rf ${CONNECTORS_DIR}/im/discord/account/com.palm.discord ${D}${webos_accttemplatesdir}/
 
     # Validator app named by the template's validator.customUI.appId. Only com.palm.app.discord:
     # apps/com.palm.app.discordqr is the superseded full-screen QR card, which validator.js now
-    # renders inline instead ("This replaces the old flow ...").
+    # renders inline instead.
     install -d ${D}${webos_applicationsdir}
-    cp -rf ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/discord/apps/com.palm.app.discord ${D}${webos_applicationsdir}/
+    cp -rf ${CONNECTORS_DIR}/im/discord/apps/com.palm.app.discord ${D}${webos_applicationsdir}/
 }

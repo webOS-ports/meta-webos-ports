@@ -1,0 +1,256 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:26:28 +0200
+Subject: [PATCH] Keep the connection up on receive and command errors
+
+The receive stream ends spuriously (network hiccups) and, on a freshly
+linked device, often before Received::QueueEmpty, so the account never
+reaches "connected". Re-open the stream when it ends and only report a
+network error after six consecutive failures, with a 3 s back-off
+between attempts.
+
+A single failed command, an unparseable recipient or a stray
+SynchronizeMessage in process_received_message used to call
+purple_error(), which libpurple turns into a full disconnect. Log these
+with purple_debug() instead and keep the loops running.
+
+Also accept an E.164 phone number ("+<digits>") as a send destination:
+it used to fall through to parse_group_master_key() and fail with
+"Invalid character '+' at position 0". It is resolved to the UUID of a
+stored contact carrying that number, or reported in the conversation
+when there is none.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/rust/src/bridge_commands.rs | 15 +++++-
+ src/rust/src/core.rs            | 96 ++++++++++++++++++++++++++++-----
+ src/rust/src/receive.rs         |  9 ++--
+ src/rust/src/send.rs            |  2 +
+ src/rust/src/structs.rs         |  3 ++
+ 5 files changed, 107 insertions(+), 18 deletions(-)
+
+diff --git a/src/rust/src/bridge_commands.rs b/src/rust/src/bridge_commands.rs
+index e234830..f3fd1f8 100755
+--- a/src/rust/src/bridge_commands.rs
++++ b/src/rust/src/bridge_commands.rs
+@@ -104,6 +104,11 @@ pub unsafe extern "C" fn presage_rust_send(
+         presage::libsignal_service::prelude::Uuid::parse_str(destination)
+             .map(|uuid| crate::structs::Recipient::Contact(uuid))
+             .map_err(|err| anyhow::anyhow!(err))
++    } else if d.first() == Some(&b'+') && d.len() > 1 && d[1..].iter().all(|c| c.is_ascii_digit()) {
++        // destination is an E.164 phone number (e.g. "+15555550100") -> resolve to the contact's
++        // UUID in the command loop. Previously this fell through to parse_group_master_key(), which
++        // failed with "Invalid character '+' at position 0" and (below) disconnected the account.
++        Ok(crate::structs::Recipient::ContactByPhone(destination.to_owned()))
+     } else {
+         parse_group_master_key(destination).map(|master_key_bytes| crate::structs::Recipient::Group(master_key_bytes))
+     };
+@@ -121,8 +126,14 @@ pub unsafe extern "C" fn presage_rust_send(
+             send_cmd(account, rt, tx, cmd);
+         }
+         Err(err) => {
+-            let c_errmsg = std::ffi::CString::new(err.to_string()).unwrap();
+-            presage_account_error(account, crate::bridge_structs::PURPLE_CONNECTION_ERROR_OTHER_ERROR, c_errmsg.as_ptr());
++            // Do NOT tear the whole Signal connection down over a single unparseable recipient
++            // (this used to purple_error(OTHER_ERROR) -> disconnect on every send to an
++            // unrecognized address). Just log it; the message simply is not sent.
++            crate::bridge::purple_debug(
++                account,
++                crate::bridge_structs::PURPLE_DEBUG_ERROR,
++                format!("Cannot send: unrecognized recipient \"{destination}\": {err}\n"),
++            );
+         }
+     }
+ }
+diff --git a/src/rust/src/core.rs b/src/rust/src/core.rs
+index b34023d..c12f969 100755
+--- a/src/rust/src/core.rs
++++ b/src/rust/src/core.rs
+@@ -1,3 +1,25 @@
++// Resolve an E.164 phone number ("+15555550100") to a stored contact's UUID, so a phone-addressed
++// Signal send (which reaches us via cross-service contact linking) can be delivered. None if no
++// stored contact carries that number.
++async fn resolve_phone_to_uuid<C: presage::store::Store>(
++    manager: &mut presage::Manager<C, presage::manager::Registered>,
++    phone: &str,
++) -> Option<presage::libsignal_service::prelude::Uuid> {
++    match manager.store().contacts().await {
++        Ok(contacts) => {
++            for contact in contacts.flatten() {
++                if let Some(pn) = &contact.phone_number {
++                    if pn.to_string() == phone {
++                        return Some(contact.uuid);
++                    }
++                }
++            }
++            None
++        }
++        Err(_) => None,
++    }
++}
++
+ /*
+  * Runs a command.
+  *
+@@ -24,6 +46,28 @@ async fn run<C: presage::store::Store + 'static>(
+             message,
+             xfer,
+         } => {
++            // Resolve a phone-number recipient to the contact's UUID (see resolve_phone_to_uuid). If
++            // there is no matching Signal contact, report it in the conversation and keep the loop
++            // running -- never disconnect over one unsendable message.
++            let recipient = match recipient {
++                crate::structs::Recipient::ContactByPhone(phone) => {
++                    match resolve_phone_to_uuid(&mut manager, &phone).await {
++                        Some(uuid) => crate::structs::Recipient::Contact(uuid),
++                        None => {
++                            crate::bridge::append_message(crate::bridge::Message {
++                                account: account,
++                                who: Some(phone.clone()),
++                                flags: crate::bridge_structs::PurpleMessageFlags::PURPLE_MESSAGE_ERROR,
++                                body: Some(format!("Error: no Signal contact found for {phone}")),
++                                timestamp_seconds: Some(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()),
++                                ..Default::default()
++                            });
++                            return Ok(true);
++                        }
++                    }
++                }
++                other => other,
++            };
+             // prepare a PurplePresage message for providing feed-back (send success or error)
+             let mut msg = crate::bridge::Message {
+                 account: account,
+@@ -35,6 +79,7 @@ async fn run<C: presage::store::Store + 'static>(
+                 crate::structs::Recipient::Contact(uuid) => {
+                     msg.who = Some(uuid.to_string());
+                 }
++                crate::structs::Recipient::ContactByPhone(_) => {} // resolved to Contact above; unreachable
+                 crate::structs::Recipient::Group(master_key) => {
+                     msg.group = Some(hex::encode(master_key));
+                 }
+@@ -124,7 +169,13 @@ pub async fn command_loop<C: presage::store::Store + 'static>(
+                     keep_running = keep_running_commands;
+                 }
+                 Err(err) => {
+-                    crate::bridge::purple_error(account, crate::bridge_structs::PURPLE_CONNECTION_ERROR_OTHER_ERROR, format!("run Err {err:?}"));
++                    // Do NOT tear the whole account down for a single failed command. This branch
++                    // used to call purple_error(OTHER_ERROR), which the webOS transport turns into a
++                    // full connection failure -> Signal disconnected on basically every send (the
++                    // sent message's sync echo, a profile/group lookup, or any transient "Invalid…"
++                    // surfaced here). Log it and keep the mainloop running; genuine connection loss
++                    // is handled by the receive loop (receive_messages retry / stream-ended reconnect).
++                    crate::bridge::purple_debug(account, crate::bridge_structs::PURPLE_DEBUG_ERROR, format!("command error (connection kept alive): {err:?}\n"));
+                 }
+             },
+             None => {
+@@ -295,20 +346,39 @@ async fn receive<S: presage::store::Store>(
+     mut manager: presage::Manager<S, presage::manager::Registered>,
+     account: *mut crate::bridge_structs::PurpleAccount,
+ ) {
+-    match manager.receive_messages().await {
+-        Err(err) => crate::bridge::purple_error(account, crate::bridge_structs::PURPLE_CONNECTION_ERROR_NETWORK_ERROR, err.to_string()),
+-        Ok(messages) => {
+-            crate::bridge::purple_debug(account, crate::bridge_structs::PURPLE_DEBUG_INFO, format!("message stream open. stand by while catching up…\n"));
+-            futures::pin_mut!(messages);
+-            while let Some(received) = futures::StreamExt::next(&mut messages).await {
+-                crate::bridge::purple_debug(account, crate::bridge_structs::PURPLE_DEBUG_INFO, format!("received: {received:?}\n"));
+-                crate::receive::handle_received(&mut manager, account, received).await;
++    // webOS: the receive stream ends spuriously (network hiccups) and, on a freshly-linked device,
++    // often before Received::QueueEmpty — so `connected:1` (receive.rs) is never sent and the account
++    // never reaches "online". The upstream code's own comment says "re-connecting is a good idea", but
++    // it forwarded a fatal network error instead, which libpurple/the transport turned into a hard
++    // login failure (account stuck "signing in" then offline). Loop and re-open the stream on end;
++    // only give up after several *consecutive* hard errors (which usually means the main device
++    // unlinked us). Once catching-up finishes, handle_received() marks the account connected.
++    let mut consecutive_errors: u32 = 0;
++    loop {
++        match manager.receive_messages().await {
++            Err(err) => {
++                consecutive_errors += 1;
++                if consecutive_errors >= 6 {
++                    crate::bridge::purple_error(account, crate::bridge_structs::PURPLE_CONNECTION_ERROR_NETWORK_ERROR,
++                        format!("Receiver failed {consecutive_errors} times (device may have been unlinked): {err}"));
++                    return;
++                }
++                crate::bridge::purple_debug(account, crate::bridge_structs::PURPLE_DEBUG_INFO,
++                    format!("receive_messages error ({consecutive_errors}/6): {err}; retrying…\n"));
++            }
++            Ok(messages) => {
++                consecutive_errors = 0;
++                crate::bridge::purple_debug(account, crate::bridge_structs::PURPLE_DEBUG_INFO, format!("message stream open. stand by while catching up…\n"));
++                futures::pin_mut!(messages);
++                while let Some(received) = futures::StreamExt::next(&mut messages).await {
++                    crate::bridge::purple_debug(account, crate::bridge_structs::PURPLE_DEBUG_INFO, format!("received: {received:?}\n"));
++                    crate::receive::handle_received(&mut manager, account, received).await;
++                }
++                crate::bridge::purple_debug(account, crate::bridge_structs::PURPLE_DEBUG_INFO, format!("receive stream ended; reconnecting…\n"));
+             }
+-            // we can end up here when the main device unlinks this device
+-            // this also happens spuriously, perhaps due to network issues
+-            // re-connecting is a good idea in either case, so we forward a network error to purple
+-            crate::bridge::purple_error(account, crate::bridge_structs::PURPLE_CONNECTION_ERROR_NETWORK_ERROR, format!("Receiver was disconnected."));
+         }
++        // brief back-off so we never busy-spin on immediate failures
++        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+     }
+ }
+ 
+diff --git a/src/rust/src/receive.rs b/src/rust/src/receive.rs
+index 1d35588..85bde22 100755
+--- a/src/rust/src/receive.rs
++++ b/src/rust/src/receive.rs
+@@ -380,10 +380,13 @@ async fn process_received_message<C: presage::store::Store>(
+         presage::libsignal_service::content::ContentBody::NullMessage(_) => Some("Null message (for example deleted)".to_string()),
+         presage::libsignal_service::content::ContentBody::DataMessage(data_message) => process_data_message(manager, message.clone(), data_message).await,
+         presage::libsignal_service::content::ContentBody::SynchronizeMessage(_) => {
+-            crate::bridge::purple_error(
++            // Defensive: a SynchronizeMessage should have been routed to process_sync_message by the
++            // dispatch. If one slips through, just log it -- do NOT purple_error, which would drop the
++            // whole Signal connection over a single stray message.
++            crate::bridge::purple_debug(
+                 message.account,
+-                crate::bridge_structs::PURPLE_CONNECTION_ERROR_OTHER_ERROR,
+-                "SynchronizeMessage ended up in process_received_message!".to_string(),
++                crate::bridge_structs::PURPLE_DEBUG_WARNING,
++                "SynchronizeMessage ended up in process_received_message (ignored)\n".to_string(),
+             );
+             None
+         }
+diff --git a/src/rust/src/send.rs b/src/rust/src/send.rs
+index a320e4c..0f7af9b 100755
+--- a/src/rust/src/send.rs
++++ b/src/rust/src/send.rs
+@@ -78,6 +78,7 @@ pub async fn send<C: presage::store::Store + 'static>(
+     let body = if let Some(reply_needle) = body.as_ref().and_then(|s| get_needle_for_replying(s)) {
+         let thread = match recipient {
+             crate::structs::Recipient::Contact(uuid) => presage::store::Thread::Contact(presage::libsignal_service::protocol::ServiceId::Aci(uuid.into())),
++            crate::structs::Recipient::ContactByPhone(_) => unreachable!("phone recipient is resolved to a UUID before send()"),
+             crate::structs::Recipient::Group(key) => presage::store::Thread::Group(key),
+         };
+         //print!("(xx:xx:xx) presage: Trying to Quote something with {pat:?}. Thread is {thread:?}.“\n");
+@@ -127,6 +128,7 @@ pub async fn send<C: presage::store::Store + 'static>(
+                 )
+                 .await?;
+         }
++        crate::structs::Recipient::ContactByPhone(_) => unreachable!("phone recipient is resolved to a UUID before send()"),
+         crate::structs::Recipient::Group(master_key) => {
+             data_message.group_v2 = Some(presage::proto::GroupContextV2 {
+                 master_key: Some(master_key.to_vec()),
+diff --git a/src/rust/src/structs.rs b/src/rust/src/structs.rs
+index ab5a282..d6f96b8 100755
+--- a/src/rust/src/structs.rs
++++ b/src/rust/src/structs.rs
+@@ -26,5 +26,8 @@ pub enum Cmd {
+ #[derive(Debug, Clone)]
+ pub enum Recipient {
+     Contact(presage::libsignal_service::prelude::Uuid),
++    // An E.164 phone number (e.g. "+15555550100"); resolved to a contact UUID in the command loop.
++    // Signal buddies are UUID-keyed, but a phone address reaches us from cross-service contact linking.
++    ContactByPhone(String),
+     Group(presage::libsignal_service::zkgroup::GroupMasterKeyBytes),
+ }
+-- 
+2.53.0
+

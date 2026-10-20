@@ -1,0 +1,148 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:26:28 +0200
+Subject: [PATCH] Report delivery and read receipts to the webOS transport
+
+Forward receipts for our outgoing messages as the "webos-im-receipt"
+signal, one per target sent timestamp: delivery receipts as "delivered",
+read and viewed receipts as "read". The messaging app shows them as
+single and double ticks.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ src/c/presage.h         |  1 +
+ src/c/receive_text.c    | 30 ++++++++++++++++++++++++++++++
+ src/rust/src/bridge.rs  | 29 +++++++++++++++++++++++++++++
+ src/rust/src/receive.rs | 15 ++++++++++++++-
+ 4 files changed, 74 insertions(+), 1 deletion(-)
+
+diff --git a/src/c/presage.h b/src/c/presage.h
+index 1018a24..c956fa9 100755
+--- a/src/c/presage.h
++++ b/src/c/presage.h
+@@ -109,6 +109,7 @@ void presage_emit_reaction(PurpleAccount *account, const char *target_id, const
+ // webOS reactions: emit the cross-prpl "webos-im-outbox-id" signal - the server id (sent timestamp) of a
+ // message the user sent from the app (called from the Rust command loop).
+ void presage_emit_outbox_id(PurpleAccount *account, const char *service_message_id, const char *text);
++void presage_emit_receipt(PurpleAccount *account, const char *target_id, const char *status);
+ int presage_send_im(PurpleConnection *connection, const char *who, const char *message, PurpleMessageFlags flags);
+ int presage_send_chat(PurpleConnection *connection, int id, const gchar *message, PurpleMessageFlags flags);
+ 
+diff --git a/src/c/receive_text.c b/src/c/receive_text.c
+index f7a4cb5..f174741 100755
+--- a/src/c/receive_text.c
++++ b/src/c/receive_text.c
+@@ -62,6 +62,36 @@ void presage_emit_outbox_id(PurpleAccount *account, const char *service_message_
+     purple_timeout_add(0, presage_outbox_id_apply, e); /* thread-safe; runs on the main thread */
+ }
+ 
++/* webOS delivery/read receipts: emit the cross-prpl "webos-im-receipt" signal telling the transport
++ * that the recipient DELIVERED or READ one of our outgoing messages. Like presage_emit_reaction this
++ * runs on the Rust worker thread, so copy the strings and hop to the libpurple main thread before
++ * touching purple_signal_emit. target_id is the message's sent timestamp (its serviceMessageId);
++ * status is "delivered" or "read". */
++typedef struct {
++    PurpleAccount *account;
++    char *target_id;
++    char *status;
++} PresageReceiptEvt;
++
++static gboolean presage_receipt_apply(gpointer data) {
++    PresageReceiptEvt *e = (PresageReceiptEvt *)data;
++    purple_signal_emit(purple_conversations_get_handle(), "webos-im-receipt",
++        e->account, e->target_id, e->status);
++    g_free(e->target_id); g_free(e->status); g_free(e);
++    return FALSE; /* one-shot */
++}
++
++void presage_emit_receipt(PurpleAccount *account, const char *target_id, const char *status) {
++    if (account == NULL || target_id == NULL || *target_id == '\0' || status == NULL) {
++        return;
++    }
++    PresageReceiptEvt *e = g_new0(PresageReceiptEvt, 1);
++    e->account = account;
++    e->target_id = g_strdup(target_id);
++    e->status = g_strdup(status);
++    purple_timeout_add(0, presage_receipt_apply, e); /* thread-safe; runs on the main thread */
++}
++
+ /* webOS replies: the Rust receive layer sentinel-encodes an inline quote into the body as
+  *   \x01 <id> \x1f <from> \x1f <text> \x02 <reply body>
+  * Split it out here so we can stash webos-quoted-* on the conversation (the transport renders those
+diff --git a/src/rust/src/bridge.rs b/src/rust/src/bridge.rs
+index 61aa140..24edc1a 100755
+--- a/src/rust/src/bridge.rs
++++ b/src/rust/src/bridge.rs
+@@ -127,6 +127,15 @@ extern "C" {
+         service_message_id: *const std::os::raw::c_char,
+         text: *const std::os::raw::c_char,
+     );
++
++    // implemented by receive_text.c - emit the cross-prpl "webos-im-receipt" signal telling the
++    // transport the recipient delivered/read one of our outgoing messages. target_id is the message's
++    // sent timestamp (its serviceMessageId); status is "delivered" or "read".
++    fn presage_emit_receipt(
++        account: *mut crate::bridge_structs::PurpleAccount,
++        target_id: *const std::os::raw::c_char,
++        status: *const std::os::raw::c_char,
++    );
+ }
+ 
+ // webOS reactions: forward a Signal reaction to the transport via the "webos-im-reaction" signal.
+@@ -171,6 +180,26 @@ pub fn emit_outbox_id(
+     }
+ }
+ 
++// webOS delivery/read receipts: tell the transport the recipient delivered/read one of our outgoing
++// messages, via the "webos-im-receipt" signal. target_id is the message's sent timestamp (its
++// serviceMessageId, ms decimal); status is "delivered" or "read". The C side hops to the libpurple
++// main thread before emitting.
++pub fn emit_receipt(
++    account: *const crate::bridge_structs::PurpleAccount,
++    target_id: String,
++    status: String,
++) {
++    let target = std::ffi::CString::new(target_id).unwrap_or_default();
++    let status = std::ffi::CString::new(status).unwrap_or_default();
++    unsafe {
++        presage_emit_receipt(
++            account as *mut crate::bridge_structs::PurpleAccount,
++            target.as_ptr(),
++            status.as_ptr(),
++        );
++    }
++}
++
+ // I want to forward a Vec of groups to the C part, but the rust-allocated C-compatible CStrings must live somewhere, so we have this intermediate type
+ struct CGroup {
+     key: Option<std::ffi::CString>,
+diff --git a/src/rust/src/receive.rs b/src/rust/src/receive.rs
+index 3853b88..d32b6c2 100755
+--- a/src/rust/src/receive.rs
++++ b/src/rust/src/receive.rs
+@@ -418,7 +418,20 @@ async fn process_received_message<C: presage::store::Store>(
+         }) => process_data_message(manager, message.clone(), &data_message).await,
+         // TODO: forward these properly
+         presage::libsignal_service::content::ContentBody::TypingMessage(_) => None, // TODO Some(Msg::Received(&thread, "is typing...".into())), // too annyoing for now. also does not differentiate between "started typing" and "stopped typing"
+-        presage::libsignal_service::content::ContentBody::ReceiptMessage(_) => None, // TODO Some(Msg::Received(&thread, "received a message.".into())), // works, but too annyoing for now
++        presage::libsignal_service::content::ContentBody::ReceiptMessage(receipt) => {
++            // webOS delivery/read receipts: the recipient delivered/read messages we sent.
++            // receipt.timestamp lists the target sent-timestamps (each == our serviceMessageId);
++            // receipt.type is Delivery(0)/Read(1)/Viewed(2). Emit a per-id receipt so the transport
++            // upgrades each Outbox row's deliveryStatus (single/double tick).
++            let status = match presage::proto::receipt_message::Type::try_from(receipt.r#type.unwrap_or(0)) {
++                Ok(presage::proto::receipt_message::Type::Read) | Ok(presage::proto::receipt_message::Type::Viewed) => "read",
++                _ => "delivered",
++            };
++            for ts in &receipt.timestamp {
++                crate::bridge::emit_receipt(message.account, ts.to_string(), status.to_string());
++            }
++            None
++        }
+         c => {
+             // catch-all for everything else
+             crate::bridge::purple_debug(message.account, crate::bridge_structs::PURPLE_DEBUG_WARNING, format!("Unsupported message {c:?}\n"));
+-- 
+2.53.0
+

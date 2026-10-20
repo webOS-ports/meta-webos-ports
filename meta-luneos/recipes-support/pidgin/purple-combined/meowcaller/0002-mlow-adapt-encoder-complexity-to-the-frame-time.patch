@@ -1,0 +1,128 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:32:44 +0200
+Subject: [PATCH] mlow: adapt encoder complexity to the frame time
+
+Even with the faster kernels, dense music can push a single frame's
+encode past the 60 ms budget on an ARMv7 TouchPad. Measure each frame's
+encode time and, for the next frame, lower the FCB survivor budget and
+the bitrate controller's complexity when it ran long (over 50 ms), and
+raise them again when it was cheap (under 38 ms). The bitstream stays
+valid; only the heaviest frames lose a little quality.
+
+The knobs are package-level and only touched by the single send loop,
+which holds for one call per process but is not a general solution.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ mlow/adaptive_webos.go | 50 ++++++++++++++++++++++++++++++++++++++++++
+ mlow/analysis.go       |  4 ++--
+ mlow/encoder.go        |  6 ++++-
+ 3 files changed, 57 insertions(+), 3 deletions(-)
+ create mode 100644 mlow/adaptive_webos.go
+
+diff --git a/mlow/adaptive_webos.go b/mlow/adaptive_webos.go
+new file mode 100644
+index 0000000..1d35c7f
+--- /dev/null
++++ b/mlow/adaptive_webos.go
+@@ -0,0 +1,50 @@
++package mlow
++
++// webOS device patch (NOT upstream): adaptive encoder complexity to hold the 60ms real-time budget on
++// a slow ARMv7 core. The MLow reference always encodes at full complexity 8 / 100 FCB survivors; on
++// dense music that pushes a frame's encode past 60ms and the send loop drops it. Here the encoder
++// watches its own per-frame time and lowers the two cost knobs (FCB survivor budget + the bitrate
++// controller's Complexity) when it runs long, then restores them on light frames. Lower survivors just
++// pick a slightly less-optimal codeword -- the bitstream stays valid, quality dips marginally only on
++// the heaviest frames. Only the single send-loop goroutine reads/writes these, so no locking.
++import "time"
++
++var (
++	adaptiveFcbSurvMax = int32(smplFcbTotSurv20msMax) // 100 (max); floor adaptiveFcbSurvFloor
++	adaptiveComplexity = int32(smplComplexity)        // 8 (max); floor adaptiveComplexityFloor
++)
++
++const (
++	adaptiveFcbSurvFloor    = 12
++	adaptiveComplexityFloor = 2
++	adaptiveHighMs          = 50 // frame ran long -> back off for headroom under the 60ms budget
++	adaptiveLowMs           = 38 // frame was cheap -> recover quality
++)
++
++// adaptObserve feeds one frame's measured encode time back into the complexity knobs (for the NEXT
++// frame). Reactive with one frame of lag, which converges within a few frames on sustained music.
++func adaptObserve(d time.Duration) {
++	ms := d.Milliseconds()
++	switch {
++	case ms > adaptiveHighMs:
++		if adaptiveFcbSurvMax > adaptiveFcbSurvFloor {
++			adaptiveFcbSurvMax = adaptiveFcbSurvMax * 3 / 4
++			if adaptiveFcbSurvMax < adaptiveFcbSurvFloor {
++				adaptiveFcbSurvMax = adaptiveFcbSurvFloor
++			}
++		}
++		if adaptiveComplexity > adaptiveComplexityFloor {
++			adaptiveComplexity--
++		}
++	case ms < adaptiveLowMs:
++		if adaptiveFcbSurvMax < int32(smplFcbTotSurv20msMax) {
++			adaptiveFcbSurvMax += 8
++			if adaptiveFcbSurvMax > int32(smplFcbTotSurv20msMax) {
++				adaptiveFcbSurvMax = int32(smplFcbTotSurv20msMax)
++			}
++		}
++		if adaptiveComplexity < int32(smplComplexity) {
++			adaptiveComplexity++
++		}
++	}
++}
+diff --git a/mlow/analysis.go b/mlow/analysis.go
+index 255cd0c..0802bf4 100644
+--- a/mlow/analysis.go
++++ b/mlow/analysis.go
+@@ -367,7 +367,7 @@ func runCelpSubframes(cs *celpFrameCtx, predcoefs *[SmplSubfrCount][17]float32,
+ 
+ 	enc := BitrateControllerInputs{
+ 		InternalSampleRate: 16000, PayloadSizeMs: 60, FecBitRate: 0, MainBitRate: smplMainBitRate,
+-		Complexity: smplComplexity, UseFecRateCompensation: 0, UseDtx: 0, SubFrameImportanceFactor: 1.0,
++		Complexity: adaptiveComplexity, UseFecRateCompensation: 0, UseDtx: 0, SubFrameImportanceFactor: 1.0,
+ 	}
+ 
+ 	for sf := 0; sf < SmplSubfrCount; sf++ {
+@@ -385,7 +385,7 @@ func runCelpSubframes(cs *celpFrameCtx, predcoefs *[SmplSubfrCount][17]float32,
+ 		for i := range numsurv {
+ 			numsurv[i] = 1
+ 		}
+-		totSurv := int32(1000 * (smplFcbTotSurv20msMax * smplCelpFcbSubfrlen) / (20 * 16000))
++		totSurv := int32(1000 * (int(adaptiveFcbSurvMax) * smplCelpFcbSubfrlen) / (20 * 16000))
+ 		smplDistributeFcbSurv(numsurv, int32(maxPulses[1]), totSurv)
+ 
+ 		lags := []float32{blockLags[sf][0], blockLags[sf][1], blockLags[sf][1]}
+diff --git a/mlow/encoder.go b/mlow/encoder.go
+index 8dac026..2b82026 100644
+--- a/mlow/encoder.go
++++ b/mlow/encoder.go
+@@ -3,6 +3,7 @@ package mlow
+ import (
+ 	"errors"
+ 	"math"
++	"time"
+ 
+ 	"github.com/rs/zerolog"
+ )
+@@ -641,6 +642,9 @@ func (e *MlowEncoder) Encode(pcm []float32) ([]byte, error) {
+ 		}
+ 		clean[i] = s
+ 	}
++	start := time.Now()
+ 	fp := smplAnalyzeFrameSt(&e.state, clean)
+-	return EncodeSmplFrame(&fp, e.log)
++	out, err := EncodeSmplFrame(&fp, e.log)
++	adaptObserve(time.Since(start)) // webOS: keep the next frame's encode within the real-time budget
++	return out, err
+ }
+-- 
+2.53.0
+
