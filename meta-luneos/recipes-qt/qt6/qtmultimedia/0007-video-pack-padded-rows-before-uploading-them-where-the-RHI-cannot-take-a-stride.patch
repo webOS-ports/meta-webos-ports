@@ -1,0 +1,106 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 16 Oct 2026 16:45:54 +0200
+Subject: [PATCH] video: pack padded rows before uploading them where the
+ RHI cannot take a stride
+
+updateTextureWithMap() hands every plane to QRhi with
+setDataStride(bytesPerLine). QRhi documents the data stride as unsupported
+where QRhi::ImageDataStride is false, which is OpenGL ES 2.0 without
+GL_UNPACK_ROW_LENGTH, and its GLES2 backend then uploads the rows as if
+they were packed tightly. Software decoders pad their rows when the sink
+takes GstVideoMeta: avdec aligns an 854 wide I420 frame to strides of
+896/448/448 instead of 856/428/428. Each row then starts further off than
+the last and the picture turns into diagonal streaks. Every 854x480 (and
+other odd width) video was unwatchable on the HP TouchPad (Adreno 220,
+OpenGL ES 2.0, no GL_EXT_unpack_subimage); 640, 1280 and 1920 wide video
+was fine because those rows carry no padding.
+
+Where the backend cannot take a stride and the rows are padded, copy them
+into a tightly packed buffer first. Elsewhere nothing changes.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/multimedia/video/qvideotexturehelper.cpp | 54 ++++++++++++++++++--
+ 1 file changed, 49 insertions(+), 5 deletions(-)
+
+diff --git a/src/multimedia/video/qvideotexturehelper.cpp b/src/multimedia/video/qvideotexturehelper.cpp
+index f4ba81750..e0c4e2fc1 100644
+--- a/src/multimedia/video/qvideotexturehelper.cpp
++++ b/src/multimedia/video/qvideotexturehelper.cpp
+@@ -11,6 +11,8 @@
+ #include "private/qtmm_alignment_support_p.h"
+ 
+ #include <QtCore/qfile.h>
++
++#include <cstring>
+ #include <qpainter.h>
+ #include <qloggingcategory.h>
+ 
+@@ -714,6 +716,26 @@ enum class UpdateTextureWithMapResult : uint8_t {
+     UpdatedWithDataReference
+ };
+ 
++// Bytes per texel of the formats video planes are uploaded as, or 0 for
++// any other.
++static int videoTexelSize(QRhiTexture::Format format)
++{
++    switch (format) {
++    case QRhiTexture::R8:
++    case QRhiTexture::RED_OR_ALPHA8:
++        return 1;
++    case QRhiTexture::RG8:
++    case QRhiTexture::R16:
++        return 2;
++    case QRhiTexture::RGBA8:
++    case QRhiTexture::BGRA8:
++    case QRhiTexture::RG16:
++        return 4;
++    default:
++        return 0;
++    }
++}
++
+ static UpdateTextureWithMapResult updateTextureWithMap(const QVideoFrame &frame, QRhi &rhi,
+                                                        QRhiResourceUpdateBatch &rub, int plane,
+                                                        std::unique_ptr<QRhiTexture> &tex)
+@@ -771,11 +793,33 @@ static UpdateTextureWithMapResult updateTextureWithMap(const QVideoFrame &frame,
+         subresDesc.setImage(image);
+ 
+     } else {
+-        // Note, QByteArray::fromRawData creare QByteArray as a view without data copying
+-        subresDesc.setData(QByteArray::fromRawData(
+-                reinterpret_cast<const char *>(frame.bits(plane)), frame.mappedBytes(plane)));
+-        subresDesc.setDataStride(frame.bytesPerLine(plane));
+-        result = UpdateTextureWithMapResult::UpdatedWithDataReference;
++        const int stride = frame.bytesPerLine(plane);
++        const int rowBytes = planeSize.width() * videoTexelSize(tex->format());
++        if (rowBytes > 0 && stride > rowBytes && !rhi.isFeatureSupported(QRhi::ImageDataStride)) {
++            // Rows with padding after them (a decoder's aligned stride, e.g.
++            // 896 bytes for an 854 wide plane), on a backend that cannot be
++            // told the stride: OpenGL ES 2.0 without GL_UNPACK_ROW_LENGTH
++            // ignores setDataStride() and reads the rows tightly packed, so
++            // every row starts further off and the picture turns into
++            // diagonal streaks. Pack the rows first.
++            const int rows = planeSize.height();
++            if (qint64(stride) * (rows - 1) + rowBytes > frame.mappedBytes(plane)) {
++                qWarning("Video plane %d is smaller than its stride says", plane);
++                return UpdateTextureWithMapResult::Failed;
++            }
++            QByteArray packed(qsizetype(rowBytes) * rows, Qt::Uninitialized);
++            const uchar *src = frame.bits(plane);
++            char *dst = packed.data();
++            for (int row = 0; row < rows; ++row)
++                memcpy(dst + qsizetype(row) * rowBytes, src + qsizetype(row) * stride, rowBytes);
++            subresDesc.setData(packed);
++        } else {
++            // Note, QByteArray::fromRawData creare QByteArray as a view without data copying
++            subresDesc.setData(QByteArray::fromRawData(
++                    reinterpret_cast<const char *>(frame.bits(plane)), frame.mappedBytes(plane)));
++            subresDesc.setDataStride(stride);
++            result = UpdateTextureWithMapResult::UpdatedWithDataReference;
++        }
+     }
+ 
+     QRhiTextureUploadEntry entry(0, 0, subresDesc);

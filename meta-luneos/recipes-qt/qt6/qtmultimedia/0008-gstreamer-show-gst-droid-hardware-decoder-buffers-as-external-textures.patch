@@ -1,0 +1,462 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 16 Oct 2026 16:46:12 +0200
+Subject: [PATCH] gstreamer: show gst-droid's hardware decoder buffers as
+ external textures
+
+On Halium devices gst-droid's droidvdec decodes on the Android hardware
+codec. It has two output modes: into its own gralloc buffers
+(video/x-raw(memory:DroidMediaQueueBuffer)), or copied out as plain raw
+frames. The video sink only takes plain raw frames, so droidvdec always
+took the second mode, which needs the vendor's colour converter. On the
+HP TouchPad (MSM8660) that converter cannot allocate its buffers, so the
+decoder never starts and every H.264 and MPEG-4 video either failed or
+fell back to software (720p at 25 of 30 fps with both cores busy, 1080p
+not at all). In its own buffers the same decoder runs 720p at about 64
+fps.
+
+Accept gst-droid's buffers and import them the way Android's own
+compositor does: an EGL image of the gralloc buffer
+(EGL_NATIVE_BUFFER_ANDROID), bound to a GL_TEXTURE_EXTERNAL_OES texture
+and drawn with Qt's existing Format_SamplerExternalOES shaders. The frame
+never leaves the GPU's memory.
+
+- The sink offers memory:DroidMediaQueueBuffer first, and the sink bin's
+  pixel-aspect-ratio capsfilter lets it through (plain "video/x-raw" means
+  system memory) without asking for square pixels: videoconvertscale
+  cannot rescale buffers it cannot map, so a stream with non-square pixels
+  would not negotiate at all. The frame and its viewport are widened by the
+  stream's pixel aspect ratio instead, which is what the video item lays
+  itself out by; the texture is sampled with normalised coordinates, so
+  the same texels are drawn. A 640x480 clip with 4:3 pixels shows at 16:9.
+- No buffer pool is proposed for these caps: droidvdec reads the
+  configuration of every proposed pool, and a pool entry without a pool
+  has none. It uses its own pool.
+- The caps carry the vendor's layout (NV12_64Z32, ENCODED, ...), which
+  has no QVideoFrameFormat, so the frame size comes from the buffer's
+  GstVideoMeta.
+- eglCreateImageKHR, eglDestroyImageKHR and glEGLImageTargetTexture2DOES
+  come from eglGetProcAddress: libhybris only unwraps its images in those
+  (the EGL 1.5 eglCreateImage is not wrapped).
+- gst_droid_media_buffer_memory_get_buffer() is looked up at run time in
+  libgstdroid-1.0.so.0, so nothing links against gst-droid and a device
+  without it keeps the plain path. QT_GSTREAMER_DISABLE_DROID=1 turns the
+  path off.
+
+On the TouchPad 720p H.264 now plays at 30 fps on about 45% of one core,
+and Xvid 640x360 at 25 fps on 35%. Needs gst-droid's drain() not to take
+the stream lock twice, or playback hangs on the first drain.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ .../multimedia/gstreamer/common/qgst.cpp      |  5 +
+ .../multimedia/gstreamer/common/qgst_p.h      |  2 +-
+ .../gstreamer/common/qgstreameregldisplay.cpp | 40 +++++++-
+ .../gstreamer/common/qgstreameregldisplay_p.h | 13 +++
+ .../gstreamer/common/qgstreamervideosink.cpp  | 16 ++++
+ .../gstreamer/common/qgstvideobuffer.cpp      | 96 ++++++++++++++++++-
+ .../common/qgstvideorenderersink.cpp          | 66 ++++++++++++-
+ 7 files changed, 227 insertions(+), 11 deletions(-)
+
+diff --git a/src/plugins/multimedia/gstreamer/common/qgst.cpp b/src/plugins/multimedia/gstreamer/common/qgst.cpp
+index 10293d490..abf99dd14 100644
+--- a/src/plugins/multimedia/gstreamer/common/qgst.cpp
++++ b/src/plugins/multimedia/gstreamer/common/qgst.cpp
+@@ -610,6 +610,8 @@ QGstCaps::MemoryFormat QGstCaps::memoryFormat() const
+         return GLTexture;
+     if (gst_caps_features_contains(features, "memory:DMABuf"))
+         return DMABuf;
++    if (gst_caps_features_contains(features, "memory:DroidMediaQueueBuffer"))
++        return DroidMediaBuffer;
+     return CpuMemory;
+ }
+ 
+@@ -1715,6 +1717,9 @@ QGstCaps::MemoryFormat qMemoryFormatFromGstBuffer(GstBuffer *buffer)
+     if (gst_is_gl_memory(mem))
+         memoryFormat = QGstCaps::GLTexture;
+ #endif
++    // gst-droid's hardware decoder buffers (Android gralloc buffers)
++    if (mem && gst_memory_is_type(mem, "droidmediabuffer"))
++        memoryFormat = QGstCaps::DroidMediaBuffer;
+     return memoryFormat;
+ }
+ 
+diff --git a/src/plugins/multimedia/gstreamer/common/qgst_p.h b/src/plugins/multimedia/gstreamer/common/qgst_p.h
+index 4d2d133b7..c653e77a8 100644
+--- a/src/plugins/multimedia/gstreamer/common/qgst_p.h
++++ b/src/plugins/multimedia/gstreamer/common/qgst_p.h
+@@ -391,7 +391,7 @@ public:
+     QGstCaps &operator=(const QGstCaps &) = default;
+     QGstCaps &operator=(QGstCaps &&) noexcept = default;
+ 
+-    enum MemoryFormat { CpuMemory, GLTexture, DMABuf };
++    enum MemoryFormat { CpuMemory, GLTexture, DMABuf, DroidMediaBuffer };
+ 
+     int size() const;
+     QGstStructureView at(int index) const;
+diff --git a/src/plugins/multimedia/gstreamer/common/qgstreameregldisplay.cpp b/src/plugins/multimedia/gstreamer/common/qgstreameregldisplay.cpp
+index e5f94776a..cf5d8a347 100644
+--- a/src/plugins/multimedia/gstreamer/common/qgstreameregldisplay.cpp
++++ b/src/plugins/multimedia/gstreamer/common/qgstreameregldisplay.cpp
+@@ -13,6 +13,8 @@
+ 
+ #include <EGL/egl.h>
+ 
++#include <dlfcn.h>
++
+ QT_BEGIN_NAMESPACE
+ 
+ struct EglHolder
+@@ -20,9 +22,22 @@ struct EglHolder
+     QMutex mutex;
+     Qt::HANDLE display = nullptr;
+ 
+-#  if QT_CONFIG(linux_dmabuf)
+     QFunctionPointer targetTexture2D = eglGetProcAddress("glEGLImageTargetTexture2DOES");
+-#  endif
++
++    // gst-droid's hardware video buffers. The KHR entry points, from
++    // eglGetProcAddress: on libhybris only those unwrap the images it hands
++    // out (the EGL 1.5 eglCreateImage is not wrapped). The buffer accessor is
++    // looked up at run time, so nothing is linked against gst-droid and a
++    // device without it simply has no droid path.
++    QFunctionPointer createImageKHR = eglGetProcAddress("eglCreateImageKHR");
++    QFunctionPointer destroyImageKHR = eglGetProcAddress("eglDestroyImageKHR");
++    QFunctionPointer droidBufferOf = [] {
++        if (qEnvironmentVariableIntValue("QT_GSTREAMER_DISABLE_DROID"))
++            return QFunctionPointer(nullptr);
++        void *lib = dlopen("libgstdroid-1.0.so.0", RTLD_NOW | RTLD_LOCAL);
++        return lib ? QFunctionPointer(dlsym(lib, "gst_droid_media_buffer_memory_get_buffer"))
++                   : QFunctionPointer(nullptr);
++    }();
+ 
+     void queryDisplay()
+     {
+@@ -44,6 +59,27 @@ Qt::HANDLE qGstEglDisplay()
+     return holder->display;
+ }
+ 
++bool qGstEglCanMapDroidBuffer()
++{
++    EglHolder *holder = s_eglHolder();
++    if (!holder) // the application is gone
++        return false;
++    QMutexLocker lock(&holder->mutex);
++    if (!holder->display && QThread::isMainThread())
++        holder->queryDisplay();
++    return holder->display && holder->targetTexture2D && holder->createImageKHR
++            && holder->destroyImageKHR && holder->droidBufferOf;
++}
++
++QGstDroidEglFunctions qGstDroidEglFunctions()
++{
++    EglHolder *holder = s_eglHolder();
++    if (!holder)
++        return {};
++    return { holder->targetTexture2D, holder->createImageKHR, holder->destroyImageKHR,
++             holder->droidBufferOf };
++}
++
+ #  if QT_CONFIG(linux_dmabuf)
+ bool qGstEglCanMapDmaBuf()
+ {
+diff --git a/src/plugins/multimedia/gstreamer/common/qgstreameregldisplay_p.h b/src/plugins/multimedia/gstreamer/common/qgstreameregldisplay_p.h
+index 263a4d1aa..9174328c2 100644
+--- a/src/plugins/multimedia/gstreamer/common/qgstreameregldisplay_p.h
++++ b/src/plugins/multimedia/gstreamer/common/qgstreameregldisplay_p.h
+@@ -15,6 +15,7 @@
+ // We mean it.
+ //
+ 
++#include <QtCore/qfunctionpointer.h>
+ #include <QtCore/qnamespace.h>
+ #include <QtMultimedia/private/qtmultimediaglobal_p.h>
+ 
+@@ -23,6 +24,18 @@ QT_BEGIN_NAMESPACE
+ #if QT_CONFIG(gstreamer_gl) && QT_CONFIG(gstreamer_gl_egl)
+ Qt::HANDLE qGstEglDisplay();
+ 
++// gst-droid's hardware video buffers, imported as EGL images (see
++// qgstreameregldisplay.cpp)
++struct QGstDroidEglFunctions
++{
++    QFunctionPointer imageTargetTexture2D; // glEGLImageTargetTexture2DOES
++    QFunctionPointer createImageKHR;       // eglCreateImageKHR
++    QFunctionPointer destroyImageKHR;      // eglDestroyImageKHR
++    QFunctionPointer droidBufferOf;        // gst_droid_media_buffer_memory_get_buffer
++};
++bool qGstEglCanMapDroidBuffer();
++QGstDroidEglFunctions qGstDroidEglFunctions();
++
+ #  if QT_CONFIG(linux_dmabuf)
+ QFunctionPointer qGstEglImageTargetTexture2D();
+ bool qGstEglCanMapDmaBuf();
+diff --git a/src/plugins/multimedia/gstreamer/common/qgstreamervideosink.cpp b/src/plugins/multimedia/gstreamer/common/qgstreamervideosink.cpp
+index 4986692c7..9c6d3b851 100644
+--- a/src/plugins/multimedia/gstreamer/common/qgstreamervideosink.cpp
++++ b/src/plugins/multimedia/gstreamer/common/qgstreamervideosink.cpp
+@@ -6,6 +6,9 @@
+ #include <common/qgst_debug_p.h>
+ #include <common/qgstutils_p.h>
+ #include <rhi/qrhi.h>
++#if QT_CONFIG(gstreamer_gl) && QT_CONFIG(gstreamer_gl_egl)
++#  include <common/qgstreameregldisplay_p.h>
++#endif
+ 
+ #include <QtCore/qdebug.h>
+ #include <QtCore/qloggingcategory.h>
+@@ -128,6 +131,19 @@ QGstreamerRelayVideoSink::QGstreamerRelayVideoSink(QObject *parent)
+             gst_caps_new_simple("video/x-raw", "pixel-aspect-ratio", GST_TYPE_FRACTION, 1, 1, NULL),
+             QGstCaps::HasRef,
+         };
++#if QT_CONFIG(gstreamer_gl) && QT_CONFIG(gstreamer_gl_egl)
++        // "video/x-raw" alone means system memory, which would keep gst-droid's
++        // buffers (and the sink's droid caps) out. No pixel-aspect-ratio here:
++        // videoconvertscale cannot rescale buffers it cannot map, so a stream
++        // with non-square pixels would fail to negotiate at all. QGstVideoRenderer
++        // applies the pixel aspect ratio to these frames instead.
++        if (qGstEglCanMapDroidBuffer()) {
++            GstCaps *droid = gst_caps_new_empty_simple("video/x-raw");
++            gst_caps_set_features(droid, 0,
++                                  gst_caps_features_new("memory:DroidMediaQueueBuffer", NULL));
++            gst_caps_append(capsFilterCaps.get(), droid);
++        }
++#endif
+         g_object_set(m_gstCapsFilter.element(), "caps", capsFilterCaps.caps(), NULL);
+     }
+ 
+diff --git a/src/plugins/multimedia/gstreamer/common/qgstvideobuffer.cpp b/src/plugins/multimedia/gstreamer/common/qgstvideobuffer.cpp
+index 72014b519..15d318e1b 100644
+--- a/src/plugins/multimedia/gstreamer/common/qgstvideobuffer.cpp
++++ b/src/plugins/multimedia/gstreamer/common/qgstvideobuffer.cpp
+@@ -26,6 +26,7 @@
+ #  if QT_CONFIG(gstreamer_gl_egl)
+ #    include <EGL/egl.h>
+ #    include <EGL/eglext.h>
++#    include <common/qgstreameregldisplay_p.h>
+ #  endif
+ 
+ #  if QT_CONFIG(gstreamer_gl_egl) && QT_CONFIG(linux_dmabuf)
+@@ -236,7 +237,8 @@ public:
+         , m_glTextures(textures)
+     {
+         QRhiTexture::Flags textureFlags = {};
+-        if (QVideoTextureHelper::forceGlTextureExternalOesIsSet()
++        if ((QVideoTextureHelper::forceGlTextureExternalOesIsSet()
++             || memoryFormat == QGstCaps::DroidMediaBuffer)
+             && m_rhi && rhi->backend() == QRhi::OpenGLES2)
+             textureFlags = {QRhiTexture::ExternalOES};
+ 
+@@ -515,6 +517,81 @@ static GlTextures mapFromDmaBuffer(QRhi *rhi, const QGstBufferHandle &bufferHand
+ #endif
+ #endif
+ 
++#  if QT_CONFIG(gstreamer_gl_egl)
++#    ifndef EGL_NATIVE_BUFFER_ANDROID
++#      define EGL_NATIVE_BUFFER_ANDROID 0x3140
++#    endif
++#    ifndef GL_TEXTURE_EXTERNAL_OES
++#      define GL_TEXTURE_EXTERNAL_OES 0x8D65
++#    endif
++
++// A gst-droid hardware buffer (an Android gralloc buffer, in the vendor's
++// layout) as one external texture: an EGL image of the buffer, bound with
++// glEGLImageTargetTexture2DOES. The image goes right away - the texture keeps
++// the buffer - and the GstBuffer, held by the frame until the next one has
++// replaced it, goes back to the decoder after that.
++static GlTextures mapFromDroidBuffer(QRhi *rhi, const QGstBufferHandle &bufferHandle)
++{
++    using DroidBufferOf = void *(*)(GstMemory *);
++    const QGstDroidEglFunctions egl = qGstDroidEglFunctions();
++    const auto droidBufferOf = reinterpret_cast<DroidBufferOf>(egl.droidBufferOf);
++    const auto createImage = reinterpret_cast<PFNEGLCREATEIMAGEKHRPROC>(egl.createImageKHR);
++    const auto destroyImage = reinterpret_cast<PFNEGLDESTROYIMAGEKHRPROC>(egl.destroyImageKHR);
++    const auto imageTargetTexture2D =
++            reinterpret_cast<PFNGLEGLIMAGETARGETTEXTURE2DOESPROC>(egl.imageTargetTexture2D);
++    const auto display = static_cast<EGLDisplay>(qGstEglDisplay());
++    if (!droidBufferOf || !createImage || !destroyImage || !imageTargetTexture2D || !display)
++        return {};
++
++    auto *nativeHandles = static_cast<const QRhiGles2NativeHandles *>(rhi->nativeHandles());
++    QOpenGLContext *glContext = nativeHandles ? nativeHandles->context : nullptr;
++    if (!glContext) {
++        qCWarning(qLcGstVideoBuffer) << "no GL context";
++        return {};
++    }
++
++    GstMemory *mem = gst_buffer_peek_memory(bufferHandle.get(), 0);
++    void *droidBuffer = mem ? droidBufferOf(mem) : nullptr;
++    if (!droidBuffer) {
++        qCWarning(qLcGstVideoBuffer) << "gst-droid buffer without a DroidMediaBuffer";
++        return {};
++    }
++
++    // The DroidMediaBuffer starts with its ANativeWindowBuffer, which is what
++    // EGL_NATIVE_BUFFER_ANDROID takes.
++    const EGLint attributes[] = { EGL_IMAGE_PRESERVED_KHR, EGL_TRUE, EGL_NONE };
++    EGLImageKHR image = createImage(display, EGL_NO_CONTEXT, EGL_NATIVE_BUFFER_ANDROID,
++                                    static_cast<EGLClientBuffer>(droidBuffer), attributes);
++    if (image == EGL_NO_IMAGE_KHR) {
++        qCWarning(qLcGstVideoBuffer) << "could not create an EGL image of a gst-droid buffer,"
++                                     << "EGL error 0x" << Qt::hex << eglGetError();
++        return {};
++    }
++
++    GlTextures textures;
++    textures.owned = true;
++    textures.count = 1;
++    QOpenGLFunctions functions(glContext);
++    functions.glGenTextures(1, textures.names.data());
++    functions.glBindTexture(GL_TEXTURE_EXTERNAL_OES, textures.names[0]);
++    functions.glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
++    functions.glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++    functions.glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++    functions.glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++    imageTargetTexture2D(GL_TEXTURE_EXTERNAL_OES, image);
++    const GLenum error = functions.glGetError();
++    destroyImage(display, image);
++    functions.glBindTexture(GL_TEXTURE_EXTERNAL_OES, 0);
++    if (error != GL_NO_ERROR) {
++        qCWarning(qLcGstVideoBuffer) << "glEGLImageTargetTexture2DOES failed, GL error 0x"
++                                     << Qt::hex << error;
++        functions.glDeleteTextures(1, textures.names.data());
++        return {};
++    }
++    return textures;
++}
++#  endif
++
+ QVideoFrameTexturesUPtr QGstVideoBuffer::mapTextures(QRhi &rhi, QVideoFrameTexturesUPtr& /*oldTextures*/)
+ {
+ #if QT_CONFIG(gstreamer_gl)
+@@ -522,6 +599,10 @@ QVideoFrameTexturesUPtr QGstVideoBuffer::mapTextures(QRhi &rhi, QVideoFrameTextu
+     if (m_memoryFormat == QGstCaps::GLTexture)
+         textures = mapFromGlTexture(m_buffer, m_frame, m_videoInfo.gstVideoInfo);
+ 
++#  if QT_CONFIG(gstreamer_gl_egl)
++    else if (m_memoryFormat == QGstCaps::DroidMediaBuffer && rhi.backend() == QRhi::OpenGLES2)
++        textures = mapFromDroidBuffer(&rhi, m_buffer);
++#  endif
+ #  if QT_CONFIG(gstreamer_gl_egl) && QT_CONFIG(linux_dmabuf)
+     else if (m_memoryFormat == QGstCaps::DMABuf && qGstEglCanMapDmaBuf()
+              && rhi.backend() == QRhi::OpenGLES2)
+@@ -529,10 +610,15 @@ QVideoFrameTexturesUPtr QGstVideoBuffer::mapTextures(QRhi &rhi, QVideoFrameTextu
+                                     qGstEglImageTargetTexture2D());
+ 
+ #  endif
+-    if (textures.count > 0)
+-        return std::make_unique<QGstQVideoFrameTextures>(
+-                &rhi, QSize{ m_videoInfo.gstVideoInfo.width, m_videoInfo.gstVideoInfo.height },
+-                m_frameFormat.pixelFormat(), textures, m_memoryFormat);
++    if (textures.count > 0) {
++        // gst-droid's caps carry no size Qt can use; the frame format has the
++        // buffer's own (see QGstVideoRenderer::render()).
++        const QSize size = m_memoryFormat == QGstCaps::DroidMediaBuffer
++                ? m_frameFormat.frameSize()
++                : QSize{ m_videoInfo.gstVideoInfo.width, m_videoInfo.gstVideoInfo.height };
++        return std::make_unique<QGstQVideoFrameTextures>(&rhi, size, m_frameFormat.pixelFormat(),
++                                                          textures, m_memoryFormat);
++    }
+ #endif
+     return {};
+ }
+diff --git a/src/plugins/multimedia/gstreamer/common/qgstvideorenderersink.cpp b/src/plugins/multimedia/gstreamer/common/qgstvideorenderersink.cpp
+index efc9dcadb..b747b51e1 100644
+--- a/src/plugins/multimedia/gstreamer/common/qgstvideorenderersink.cpp
++++ b/src/plugins/multimedia/gstreamer/common/qgstvideorenderersink.cpp
+@@ -30,8 +30,10 @@
+ #endif // #if QT_CONFIG(gstreamer_gl)
+ 
+ // DMA support
+-#if QT_CONFIG(gstreamer_gl_egl) && QT_CONFIG(linux_dmabuf)
++#if QT_CONFIG(gstreamer_gl_egl)
+ #  include <common/qgstreameregldisplay_p.h>
++#endif
++#if QT_CONFIG(gstreamer_gl_egl) && QT_CONFIG(linux_dmabuf)
+ #  include <gst/allocators/gstdmabuf.h>
+ #endif
+ 
+@@ -90,6 +92,23 @@ QGstCaps QGstVideoRenderer::createSurfaceCaps([[maybe_unused]] QGstreamerRelayVi
+         if (qGstEglCanMapDmaBuf()) {
+             caps.addPixelFormats(formats, GST_CAPS_FEATURE_MEMORY_DMABUF);
+         }
++#  endif
++#  if QT_CONFIG(gstreamer_gl_egl)
++        // gst-droid's hardware decoders (Halium): their gralloc buffers are
++        // imported as EGL images and sampled as external textures, whatever
++        // the vendor layout. Offered first, so droidvdec decodes into its
++        // own buffers - its other mode, plain raw frames, is the one that
++        // needs the vendor's colour converter and does not work everywhere.
++        if (qGstEglCanMapDroidBuffer()) {
++            QGstCaps droidCaps{
++                gst_caps_from_string("video/x-raw(memory:DroidMediaQueueBuffer), "
++                                     "format=(string){ NV12_64Z32, YV12, NV16, NV12, NV21, "
++                                     "YUY2, RGBA, RGBx, RGB, RGB16, BGRA, ENCODED }"),
++                QGstCaps::HasRef,
++            };
++            gst_caps_append(droidCaps.get(), gst_caps_copy(caps.get()));
++            caps = std::move(droidCaps);
++        }
+ #  endif
+     }
+ #endif
+@@ -207,7 +226,13 @@ bool QGstVideoRenderer::proposeAllocation(GstQuery *query)
+     // in a mix of dmabuf and system memory buffers. The query sender should use its own buffer
+     // pool, and will only take the size value and our suggested minimum buffers into account.
+     // The driver can force a higher minimum if minBuffers is set too low, making 3 sufficient.
+-    gst_query_add_allocation_pool(query, nullptr, size, minBuffers, 0);
++    //
++    // Not for gst-droid's buffers: droidvdec reads the configuration of every pool proposed to
++    // it, and there is none in a pool entry without a pool. It makes its own buffer pool.
++    const bool droidBuffers =
++            QGstCaps(queryCaps, QGstCaps::NeedsRef).memoryFormat() == QGstCaps::DroidMediaBuffer;
++    if (!droidBuffers)
++        gst_query_add_allocation_pool(query, nullptr, size, minBuffers, 0);
+ 
+     // Advertise GstVideoMeta support, often needed for DMA buffer negotiation.
+     gst_query_add_allocation_meta(query, GST_VIDEO_META_API_TYPE, nullptr);
+@@ -271,7 +296,42 @@ GstFlowReturn QGstVideoRenderer::render(GstBuffer *buffer)
+ #endif
+         return false;
+     }();
+-    if (setFormat_RGBA8888) {
++    // gst-droid's buffers are sampled through an EGL image as one external texture.
++    // Their caps carry the vendor's layout (NV12_64Z32, ENCODED, ...), which has no
++    // QVideoFrameFormat, so m_format has no size either: take it from the buffer.
++    if (bufferMemoryFormat == QGstCaps::DroidMediaBuffer) {
++        QSize size = m_format.frameSize();
++        if (const GstVideoMeta *videoMeta = gst_buffer_get_video_meta(buffer))
++            size = QSize(int(videoMeta->width), int(videoMeta->height));
++        else if (!size.isValid())
++            size = QSize(GST_VIDEO_INFO_WIDTH(&m_videoInfo.gstVideoInfo),
++                         GST_VIDEO_INFO_HEIGHT(&m_videoInfo.gstVideoInfo));
++        // The crop meta (above) when there is one, else the whole frame.
++        QRect viewport = meta ? m_format.viewport() : QRect(QPoint(), size);
++        // Plain frames reach the sink with square pixels, rescaled upstream to the
++        // pixel-aspect-ratio=1/1 the sink bin asks for. These cannot be rescaled, so
++        // they arrive at their stored size, and the video item lays itself out by the
++        // viewport: widen frame and viewport alike to the display size. The texture
++        // is sampled with normalised coordinates, so the same texels are drawn.
++        const gint parN = GST_VIDEO_INFO_PAR_N(&m_videoInfo.gstVideoInfo);
++        const gint parD = GST_VIDEO_INFO_PAR_D(&m_videoInfo.gstVideoInfo);
++        if (parN > 0 && parD > 0 && parN != parD) {
++            const qint64 width = qint64(size.width()) * parN / parD;
++            const qint64 left = qint64(viewport.x()) * parN / parD;
++            const qint64 right = qint64(viewport.x() + viewport.width()) * parN / parD;
++            if (width > 0 && width <= 16384 && right <= width) {
++                size.setWidth(int(width));
++                viewport = QRect(int(left), viewport.y(), int(right - left), viewport.height());
++            }
++        }
++        bufferVideoFrameFormat =
++                QVideoFrameFormat(size, QVideoFrameFormat::Format_SamplerExternalOES);
++        bufferVideoFrameFormat.setViewport(viewport);
++        bufferVideoFrameFormat.setStreamFrameRate(m_format.streamFrameRate());
++        bufferVideoFrameFormat.setColorRange(m_format.colorRange());
++        bufferVideoFrameFormat.setColorTransfer(m_format.colorTransfer());
++        bufferVideoFrameFormat.setColorSpace(m_format.colorSpace());
++    } else if (setFormat_RGBA8888) {
+         // TODO: Replace with new private setter of pixel format.
+         qCDebug(qLcGstVideoRenderer) << "Setting pixel format to Format_RGBA8888";
+         bufferVideoFrameFormat = QVideoFrameFormat(m_format.frameSize(),
