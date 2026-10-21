@@ -10,22 +10,21 @@ LIC_FILES_CHKSUM = " \
     file://oss-pkg-info.yaml;md5=2bdfe040dcf81b4038370ae96036c519 \
 "
 
-DEPENDS = "glib-2.0 luna-service2 json-c pmloglib curl"
+DEPENDS = "glib-2.0 luna-service2 libpbnjson pmloglib"
 
-WEBOS_VERSION = "1.0.0-41_f85e0b7caa8a92ede08e13db56827ca20cd4ff71"
-PR = "r9"
+SRCREV = "23947e3f9c7d3b05548baa2247ce021f0986393d"
+
+PV = "1.0.0-41"
+
+PR = "r10"
 
 inherit webos_component
 inherit webos_cmake
-inherit webos_enhanced_submissions
-inherit webos_public_repo
 inherit webos_system_bus
 inherit webos_daemon
+inherit webos_ports_ose_repo
 
-SRC_URI = " \
-    ${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-com.webos.service.mediacontroller.role.json.in-Fix-o.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "com.webos.service.mediacontroller.service"
 

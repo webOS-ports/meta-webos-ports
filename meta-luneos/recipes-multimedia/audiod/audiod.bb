@@ -40,7 +40,7 @@ RDEPENDS:${PN} += "pulseaudio-module-remap-sink"
 # branch, which also starts from the submission below.
 #WEBOS_VERSION = "1.0.0-78_127c6cd6c9247979b4ead42d9b8fc8b5c48b47a2"
 PV = "1.0.0-79+git"
-SRCREV = "81c79c0f7f5edd88295db72f792fe54d3a29426f"
+SRCREV = "e1eda9f73948b79e38a04d9cc817195aa5bca311"
 PR = "r37"
 
 inherit webos_component

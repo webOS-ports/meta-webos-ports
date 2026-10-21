@@ -16,11 +16,11 @@ DEPENDS = "luna-service2 libpbnjson uriparser libxml2 sqlite3 pmloglib nyx-lib l
 
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_ntp} tzcode luna-init"
 
-SRCREV = "eb93b89aca16d50ace3ced0b80542e4f647170e9"
+SRCREV = "73073b9a3e2c5ff7731b9cec7cb82bb9cc98eac9"
 
 PV = "4.4.0-32"
 
-PR = "r19"
+PR = "r20"
 
 inherit webos_component
 inherit webos_ports_ose_repo
