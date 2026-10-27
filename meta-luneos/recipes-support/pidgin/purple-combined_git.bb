@@ -8,7 +8,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=5b4473596678d62d9d83096273422c8c"
 require purple-synergy.inc
 
 # luna-service2 is for glue/call.c (com.palm.whatsapp.call). It compiles against 3.21.2 thanks to
-# messaging/common/webos-ls2-compat.h, which re-expresses the legacy split-bus API -- LSPalmService
+# im/_core/include/webos-ls2-compat.h, which re-expresses the legacy split-bus API -- LSPalmService
 # and friends were removed outright in 3.x.
 #
 # alsa-lib is also glue/call.c: call audio is captured and played through ALSA directly.
@@ -21,7 +21,7 @@ require purple-synergy.inc
 # gometa_media.go attach to outgoing voice notes.
 DEPENDS = "pidgin glib-2.0 libopus libogg opusfile alsa-lib luna-service2"
 
-S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/messaging/facebook-e2ee/plugin/purple-combined"
+S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/whatsapp/plugin/purple-combined"
 # B defaults to ${WORKDIR}/build in go.bbclass; left at the default.
 
 # `go`, deliberately not `go-mod`. go-mod adds
@@ -95,7 +95,7 @@ do_compile() {
     # the header sits at ${includedir}/luna-service2/lunaservice.h and webos-ls2-compat.h includes it
     # bare as <lunaservice.h>.
     GCFLAGS="${CFLAGS} -fPIC -DPURPLE_PLUGINS -DPLUGIN_VERSION=$PLUGIN_VERSION \
-             -I${S}/glue -I${S} -I${B} -I${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/messaging/common \
+             -I${S}/glue -I${S} -I${B} -I${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/_core/include \
              -I${STAGING_INCDIR}/luna-service2 \
              $(pkg-config --cflags purple glib-2.0 opus opusfile ogg alsa luna-service2)"
 
@@ -155,11 +155,11 @@ do_compile() {
 
 # The WebRTC DSP sources live in the Telegram plug-in's libtgvoip copy, in the same monorepo
 # checkout -- purple-combined reuses them rather than carrying a second copy.
-WEBRTC_DSP = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/messaging/telegram/plugin/libtgvoip/webrtc_dsp"
+WEBRTC_DSP = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/telegram/plugin/libtgvoip/webrtc_dsp"
 
-# S points at messaging/facebook-e2ee/plugin/purple-combined, so OE's automatic
+# S points at im/whatsapp/plugin/purple-combined, so OE's automatic
 # ${S} prefix-map covers only that subtree. This recipe also compiles siblings
-# of it -- messaging/common and the libtgvoip webrtc_dsp sources above -- whose
+# of it -- im/_core/include and the libtgvoip webrtc_dsp sources above -- whose
 # paths therefore survive into the debug info:
 #   File /usr/lib/purple-2/.debug/libwhatsmeow.so in package purple-combined-dbg
 #   contains reference to TMPDIR [buildpaths]
@@ -175,12 +175,24 @@ do_install() {
     # prpl-hehoe-whatsmeow and com.palm.gometa for prpl-gometa. Without them the protocols are
     # loaded but cannot be added as accounts.
     install -d ${D}${webos_accttemplatesdir}
-    cp -rf ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/messaging/whatsapp/account/com.palm.whatsapp ${D}${webos_accttemplatesdir}/
-    cp -rf ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/messaging/facebook-e2ee/account/com.palm.gometa ${D}${webos_accttemplatesdir}/
+    cp -rf ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/whatsapp/account/com.palm.whatsapp ${D}${webos_accttemplatesdir}/
+    cp -rf ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/facebook/account/com.palm.gometa ${D}${webos_accttemplatesdir}/
 
     # ...and the validator apps those templates name in validator.customUI.appId. Without them the
     # account type appears but selecting it finds no validator.html.
     install -d ${D}${webos_applicationsdir}
-    cp -rf ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/messaging/whatsapp/apps/com.palm.app.whatsapp ${D}${webos_applicationsdir}/
-    cp -rf ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/messaging/facebook-e2ee/apps/com.palm.app.gometa ${D}${webos_applicationsdir}/
+    cp -rf ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/whatsapp/apps/com.palm.app.whatsapp ${D}${webos_applicationsdir}/
+    cp -rf ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/facebook/apps/com.palm.app.gometa ${D}${webos_applicationsdir}/
+
+    # The whatsapp call service (glue/call.c builds it): its bus name is listed, never activated --
+    # imlibpurpleservice, which loads this plug-in, registers com.palm.whatsapp.call itself, so the
+    # .service file is Type=static -- and the Phone app is granted imlibpurple-call.operation to
+    # call it. The role letting imlibpurpleservice own the name, and the api-permissions/groups
+    # behind that group, ship with imlibpurpleservice. webos_configure_manifest lists both files
+    # in this package's manifest.
+    install -d ${D}${webos_sysbus_servicedir} ${D}${webos_sysbus_permissionsdir}
+    install -m 0644 ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/whatsapp/files/sysbus/com.palm.whatsapp.call.service \
+        ${D}${webos_sysbus_servicedir}/
+    install -m 0644 ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/whatsapp/files/sysbus/com.palm.whatsapp.call.perm.json \
+        ${D}${webos_sysbus_permissionsdir}/
 }
