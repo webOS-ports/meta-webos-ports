@@ -27,10 +27,10 @@ require purple-synergy.inc
 # them; both libraries are readily available here, so this build keeps sticker decoding instead.
 DEPENDS = "pidgin glib-2.0 zlib openssl tdlib libtgvoip libopus alsa-lib luna-service2 libwebp libpng"
 
-S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/messaging/telegram/plugin/tdlib-purple"
+S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/telegram/plugin/tdlib-purple"
 
 # S is the plugin subdirectory, so OE's automatic ${S} prefix-map covers only
-# that. The build also pulls in messaging/common, a sibling of S, whose paths
+# that. The build also pulls in im/_core/include, a sibling of S, whose paths
 # then survive into the debug info:
 #   File /usr/lib/purple-2/.debug/libtelegram-tdlib.so in package
 #   tdlib-purple-dbg contains reference to TMPDIR [buildpaths]
@@ -60,7 +60,7 @@ inherit cmake pkgconfig
 # NoTgcallsLite=ON is the one deviation from the device build. tgcalls-lite is the newer ICE/
 # DTLS-SRTP video engine and CMake enables it by default, pulling in ../tgcalls-lite/*.cpp and
 # REQUIRing nice/libsrtp2/json-glib at configure time. Those sources are not in the repository --
-# messaging/telegram/plugin/tgcalls-lite/ is untracked local work -- so a clean clone cannot build
+# tgcalls-lite was not imported into luneos-synergy-connectors -- so a clean clone cannot build
 # it at all, and configure fails before that even becomes visible. Turn this back off (and add
 # libnice/libsrtp/json-glib to DEPENDS) once the engine is committed.
 #
@@ -71,7 +71,7 @@ inherit cmake pkgconfig
 # lunaservice_* both need overriding. The defaults are the legacy webOS ones: the library there is
 # liblunaservice.so, whereas LuneOS ships libluna-service2.so, and CMakeLists links the value
 # unconditionally -- left alone it fails with `cannot find -llunaservice`. The include list also
-# carries messaging/common, which is where webos-ls2-compat.h lives; call-luna.cpp includes it to
+# carries im/_core/include, which is where webos-ls2-compat.h lives; call-luna.cpp includes it to
 # map the legacy split-bus API onto 3.21.2's single bus, and passing it here is the same seam
 # build-prpl.sh uses. The luna-service2 subdirectory is explicit because the header is included
 # bare as <lunaservice.h> while the .pc offers only -I${includedir}.
@@ -86,7 +86,7 @@ EXTRA_OECMAKE = " \
     -DNoTranslations=ON \
     -Dtgvoip_INCLUDE_DIRS=${STAGING_INCDIR}/tgvoip \
     -Dtgvoip_LIBRARIES='tgvoip;opus;asound;crypto' \
-    -Dlunaservice_INCLUDE_DIRS='${STAGING_INCDIR}/luna-service2;${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/messaging/common' \
+    -Dlunaservice_INCLUDE_DIRS='${STAGING_INCDIR}/luna-service2;${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/_core/include' \
     -Dlunaservice_LIBRARIES=luna-service2 \
 "
 
@@ -112,9 +112,21 @@ do_install:append() {
 
     # Account template, so Telegram can actually be added as an account.
     install -d ${D}${webos_accttemplatesdir}
-    cp -rf ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/messaging/telegram/account/com.palm.telegram ${D}${webos_accttemplatesdir}/
+    cp -rf ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/telegram/account/com.palm.telegram ${D}${webos_accttemplatesdir}/
 
     # Validator app named by the template's validator.customUI.appId.
     install -d ${D}${webos_applicationsdir}
-    cp -rf ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/messaging/telegram/apps/com.palm.app.telegram ${D}${webos_applicationsdir}/
+    cp -rf ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/telegram/apps/com.palm.app.telegram ${D}${webos_applicationsdir}/
+
+    # The telegram call service (call-luna.cpp, with NoVoip=OFF builds it): its bus name is listed, never activated --
+    # imlibpurpleservice, which loads this plug-in, registers com.palm.telegram.call itself, so the
+    # .service file is Type=static -- and the Phone app is granted imlibpurple-call.operation to
+    # call it. The role letting imlibpurpleservice own the name, and the api-permissions/groups
+    # behind that group, ship with imlibpurpleservice. webos_configure_manifest lists both files
+    # in this package's manifest.
+    install -d ${D}${webos_sysbus_servicedir} ${D}${webos_sysbus_permissionsdir}
+    install -m 0644 ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/telegram/files/sysbus/com.palm.telegram.call.service \
+        ${D}${webos_sysbus_servicedir}/
+    install -m 0644 ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/telegram/files/sysbus/com.palm.telegram.call.perm.json \
+        ${D}${webos_sysbus_permissionsdir}/
 }

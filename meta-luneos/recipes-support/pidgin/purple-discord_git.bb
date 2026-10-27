@@ -6,7 +6,7 @@ require purple-synergy.inc
 
 DEPENDS = "pidgin json-glib glib-2.0 zlib qrencode openssl"
 
-S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/messaging/discord/plugin/purple-discord"
+S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/discord/plugin/purple-discord"
 
 # QR remote-auth is NOT optional in this fork: discord_rsa.c includes <qrencode.h>
 # unconditionally, so the plug-in does not compile without it. qrencode comes from meta-oe and
@@ -47,11 +47,11 @@ do_install() {
 
     # Account template, so Discord can actually be added as an account.
     install -d ${D}${webos_accttemplatesdir}
-    cp -rf ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/messaging/discord/account/com.palm.discord ${D}${webos_accttemplatesdir}/
+    cp -rf ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/discord/account/com.palm.discord ${D}${webos_accttemplatesdir}/
 
     # Validator app named by the template's validator.customUI.appId. Only com.palm.app.discord:
     # apps/com.palm.app.discordqr is the superseded full-screen QR card, which validator.js now
     # renders inline instead ("This replaces the old flow ...").
     install -d ${D}${webos_applicationsdir}
-    cp -rf ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/messaging/discord/apps/com.palm.app.discord ${D}${webos_applicationsdir}/
+    cp -rf ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/discord/apps/com.palm.app.discord ${D}${webos_applicationsdir}/
 }

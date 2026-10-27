@@ -1,32 +1,22 @@
-# Shared bits for the libpurple protocol plugins that live in webos-synergy-revival.
+# Shared bits for the libpurple protocol plugins that live in luneos-synergy-connectors (im/).
 #
 # They are all forks carrying webOS-specific work (LS2 call services, media glue, UI quirks), so
-# they are built from the monorepo rather than from each upstream. One clone serves them all --
-# bitbake shares the git fetch across recipes with the same SRC_URI and SRCREV -- and each recipe
-# only sets S to its own subdirectory.
-#
-# SRCREV is pinned deliberately, like purple-matrix_git.bb. Bump it when you want the new work;
-# AUTOREV would make every LuneOS build depend on whatever the branch happened to be that day.
+# they are built from that repository rather than from each upstream. Where it comes from, and the
+# pinned SRCREV every recipe shares, is luneos-synergy-connectors.inc; each recipe here only sets S
+# to its own plugin directory.
 
-HOMEPAGE = "https://github.com/Herrie82/webos-synergy-revival"
+require recipes-luneos/synergy/luneos-synergy-connectors.inc
+
 SECTION = "webos/services"
-
-# destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX} is the git fetcher's own default, so it changes nothing for most of these -- but
-# it is stated explicitly because go.bbclass's go_do_unpack REWRITES the destsuffix when a git URL
-# does not set one, relocating the checkout to ${WORKDIR}/<basename S>/src/${GO_IMPORT} for a
-# GOPATH layout. purple-combined inherits go-mod, so without this its sources land somewhere else
-# entirely and S points at an empty directory tree.
-SRC_URI = "git://github.com/Herrie82/webos-synergy-revival.git;branch=herrie/telegram-tdlib-1.8.66;protocol=https;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX}"
-SRCREV = "8a37e0cf8c8462d7ba18c5aa2208af56845c4f18"
 
 PV = "1.0+git"
 
 inherit pkgconfig
 
 # webos_filesystem_paths is for webos_accttemplatesdir and webos_applicationsdir. Each plugin
-# installs two things from the monorepo besides its .so: the account template from
-# messaging/<protocol>/account/, which makes the protocol an addable account type, and the
-# validator app from messaging/<protocol>/apps/, which is the UI the template's
+# installs two things from the repository besides its .so: the account template from
+# im/<protocol>/account/, which makes the protocol an addable account type, and the
+# validator app from im/<protocol>/apps/, which is the UI the template's
 # validator.customUI.appId names. Both belong with the plugin that implements the protocol rather
 # than in messaging-accounts, which carries the legacy org.webosports.messaging.* set from a
 # different repository and only ships the shared org.webosports.app.imvalidator.

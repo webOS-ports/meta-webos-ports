@@ -6,10 +6,10 @@ require purple-synergy.inc
 
 DEPENDS = "pidgin json-glib glib-2.0 zlib"
 
-S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/messaging/teams/plugin/purple-teams"
+S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/teams/plugin/purple-teams"
 
 # Same as tdlib-purple and purple-combined: S is the plugin subdirectory, so
-# the automatic ${S} prefix-map misses messaging/common, which this build also
+# the automatic ${S} prefix-map misses im/_core/include, which this build also
 # compiles, and those paths would survive into the debug info and trip
 # buildpaths QA. Map the whole unpacked tree.
 DEBUG_PREFIX_MAP:append = " -ffile-prefix-map=${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}=/usr/src/debug/${PN}/${PV}"
@@ -21,7 +21,8 @@ DEBUG_PREFIX_MAP:append = " -ffile-prefix-map=${UNPACKDIR}/${BB_GIT_DEFAULT_DEST
 # NOT built here: the webOS calling bridge. teams_call_luna.c (com.palm.teams.call),
 # teams_calling.c and h264_rtp.c are absent from the upstream Makefile's file list --
 # build-teams.sh compiles them separately -- so this is the messaging plug-in without calling.
-# Adding it needs those files taught to the Makefile plus messaging/common/webos-ls2-compat.h
+# For the same reason im/teams/files/sysbus/ (the com.palm.teams.call bus files) is not installed.
+# Adding it needs those files taught to the Makefile plus im/_core/include/webos-ls2-compat.h
 # (which maps the legacy split-bus LS2 API onto the single-bus one 3.21.2 provides) and
 # DEPENDS += "luna-service2". Video needs more still: it binds libpalmgstskype.so, a
 # gstreamer-0.10 plug-in present only in legacy webOS firmware. voipkit_none.c is the null
@@ -48,9 +49,9 @@ do_install() {
 
     # Account template, so Teams can actually be added as an account.
     install -d ${D}${webos_accttemplatesdir}
-    cp -rf ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/messaging/teams/account/com.palm.teams ${D}${webos_accttemplatesdir}/
+    cp -rf ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/teams/account/com.palm.teams ${D}${webos_accttemplatesdir}/
 
     # Validator app named by the template's validator.customUI.appId.
     install -d ${D}${webos_applicationsdir}
-    cp -rf ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/messaging/teams/apps/com.palm.app.teams ${D}${webos_applicationsdir}/
+    cp -rf ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/teams/apps/com.palm.app.teams ${D}${webos_applicationsdir}/
 }

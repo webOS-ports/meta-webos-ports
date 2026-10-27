@@ -8,13 +8,12 @@ LIC_FILES_CHKSUM = "file://LICENSE_1_0.txt;md5=e4224ccaecb14d942c71d31bef20d78c"
 
 DEPENDS = "openssl zlib gperf-native"
 
-# Built from the monorepo's vendored copy rather than upstream, because that is the tree
-# tdlib-purple is developed and tested against. SRCREV is shared with the plugin recipes -- see
-# purple-synergy.inc for why it is pinned rather than AUTOREV.
-SRC_URI = "git://github.com/Herrie82/webos-synergy-revival.git;branch=herrie/telegram-tdlib-1.8.66;protocol=https"
-SRCREV = "8a37e0cf8c8462d7ba18c5aa2208af56845c4f18"
+# Built from the vendored copy in luneos-synergy-connectors rather than upstream, because that is
+# the tree tdlib-purple is developed and tested against. Fetched at the SRCREV the plugin recipes
+# share -- see luneos-synergy-connectors.inc for why it is pinned rather than AUTOREV.
+require recipes-luneos/synergy/luneos-synergy-connectors.inc
 
-S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/messaging/telegram/plugin/tdlib-src"
+S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/telegram/plugin/tdlib-src"
 
 inherit cmake
 
