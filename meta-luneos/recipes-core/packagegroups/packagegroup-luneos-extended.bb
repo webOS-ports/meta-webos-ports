@@ -67,6 +67,7 @@ RDEPENDS:${PN} = " \
   imaccountvalidator \
   imlibpurpleservice \
   messaging-accounts \
+  ${SYNERGY_RDEPENDS} \
   \
   com.palm.app.preware2 \
   org.webosports.service.ipkg \
@@ -295,6 +296,24 @@ PRINT_RDEPENDS = " \
     cups \
     cups-filters \
     avahi-daemon \
+"
+
+# Synergy account types beyond messaging: the cloud/file connectors from luneos-synergy-connectors
+# (each needs synergy-cloudcore, which they pull in themselves). Music is listed with the
+# other apps above.
+SYNERGY_RDEPENDS = " \
+    synergy-cloud-box \
+    synergy-cloud-dropbox \
+    synergy-cloud-flickr \
+    synergy-cloud-gdrive \
+    synergy-cloud-hidrive \
+    synergy-cloud-kdrive \
+    synergy-cloud-koofr \
+    synergy-cloud-mega \
+    synergy-cloud-onedrive \
+    synergy-cloud-pcloud \
+    synergy-cloud-s3 \
+    synergy-cloud-yandex \
 "
 
 VPN_RDEPENDS = " \
