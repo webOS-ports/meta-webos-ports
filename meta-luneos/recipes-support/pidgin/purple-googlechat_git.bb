@@ -8,7 +8,7 @@ require purple-synergy.inc
 # runs to regenerate the .pb-c.c sources.
 DEPENDS = "pidgin json-glib glib-2.0 zlib protobuf-c protobuf-c-native"
 
-S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/messaging/googlechat/plugin/purple-googlechat"
+S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/googlechat/plugin/purple-googlechat"
 
 # INCLUDES is hardcoded to -I/usr/include/protobuf-c in the Makefile's Linux
 # branch, which is a host path and trips poison-system-directories:
@@ -39,9 +39,9 @@ do_install() {
 
     # Account template, so Google Chat can actually be added as an account.
     install -d ${D}${webos_accttemplatesdir}
-    cp -rf ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/messaging/googlechat/account/com.palm.googlechat ${D}${webos_accttemplatesdir}/
+    cp -rf ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/googlechat/account/com.palm.googlechat ${D}${webos_accttemplatesdir}/
 
     # Validator app named by the template's validator.customUI.appId.
     install -d ${D}${webos_applicationsdir}
-    cp -rf ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/messaging/googlechat/apps/com.palm.app.googlechat ${D}${webos_applicationsdir}/
+    cp -rf ${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/googlechat/apps/com.palm.app.googlechat ${D}${webos_applicationsdir}/
 }

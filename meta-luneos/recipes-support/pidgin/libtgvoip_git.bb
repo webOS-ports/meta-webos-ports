@@ -11,15 +11,14 @@ LIC_FILES_CHKSUM = "file://UNLICENSE;md5=1d267ceb3a8d8f75f1be3011ee4cbf53"
 # libopus for the codec; both are linked by tdlib-purple too, because this builds static.
 DEPENDS = "libopus alsa-lib openssl"
 
-# Pinned with the plugin recipes -- see purple-synergy.inc. Not required here (this is a library,
-# not a prpl, so none of that file's purple-2 packaging applies), but kept on the same SRCREV so a
-# bump moves the engine and the plugin together.
-SRC_URI = "git://github.com/Herrie82/webos-synergy-revival.git;branch=herrie/telegram-tdlib-1.8.66;protocol=https;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX}"
-SRCREV = "8a37e0cf8c8462d7ba18c5aa2208af56845c4f18"
+# From luneos-synergy-connectors at the SRCREV the plugin recipes share. purple-synergy.inc is not
+# required (this is a library, not a prpl, so none of its purple-2 packaging applies); the shared
+# source include is, so a bump moves the engine and the plugin together.
+require recipes-luneos/synergy/luneos-synergy-connectors.inc
 
 PV = "1.0+git"
 
-S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/messaging/telegram/plugin/libtgvoip"
+S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/im/telegram/plugin/libtgvoip"
 
 inherit autotools pkgconfig
 
