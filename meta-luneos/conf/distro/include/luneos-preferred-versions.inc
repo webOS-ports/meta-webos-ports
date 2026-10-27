@@ -10,6 +10,23 @@ PREFERRED_VERSION_mksnapshot-cross-${TARGET_ARCH} = "${PREFERRED_VERSION_webrunt
 
 PREFERRED_VERSION_lttng-modules:tenderloin    = "2.13.12+git"
 
+# Go 1.27 rather than wrynose's 1.26. The recipes are carried in
+# meta-luneos-backports-6.1/recipes-devtools/go, from oe-core blacksail; drop
+# them and this block when the layer moves to an oe-core release with
+# go >= 1.27. Needed because go 1.26's _rt0_arm_lib leaves SP 4 mod 8 on armv7
+# when it calls into C, so a Go c-archive loaded into a process dies with
+# SIGBUS in glibc's create_thread (purple-combined's libwhatsmeow.so took
+# imlibpurpleservice down). golang/go#58548, fixed in 1.27 by CL 706417.
+GOVERSION ?= "1.27%"
+PREFERRED_VERSION_go = "${GOVERSION}"
+PREFERRED_VERSION_nativesdk-go = "${GOVERSION}"
+PREFERRED_VERSION_go-runtime = "${GOVERSION}"
+PREFERRED_VERSION_nativesdk-go-runtime = "${GOVERSION}"
+PREFERRED_VERSION_go-binary-native = "${GOVERSION}"
+PREFERRED_VERSION_go-cross-${TUNE_PKGARCH} = "${GOVERSION}"
+PREFERRED_VERSION_go-crosssdk-${SDK_SYS} = "${GOVERSION}"
+PREFERRED_VERSION_go-cross-canadian-${TRANSLATED_TARGET_ARCH} = "${GOVERSION}"
+
 # Per-app V8 snapshots stay off under M151.
 # ----------------------------------------
 # webos_enactjs_app.bbclass defaults WEBOS_ENACTJS_PACK_OPTS to include
