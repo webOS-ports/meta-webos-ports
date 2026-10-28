@@ -22,6 +22,7 @@ SRC_URI += " \
     file://0010-webOS-Show-received-media-inline-and-send-voice-note.patch \
     file://0011-webOS-Add-Teams-voice-and-video-calling-for-the-webO.patch \
     file://0012-webOS-Always-report-the-account-as-active-and-Availa.patch \
+    file://0013-Report-a-rejected-sign-in-code-as-an-authentication-.patch \
 "
 SRCREV_upstream = "f7eb519b9968ed7844ff59319bff5c1859c46851"
 
