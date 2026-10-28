@@ -10,7 +10,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=db37b6ead2dec60580595736ff983452 \
 "
 
 PV = "0.1.0+git"
-SRCREV = "0f324aa4de15fb43951b67eaba49e98a1188f136"
+SRCREV = "e96defe59f6a925d74184a9987e5cda5933a0505"
 
 SERVICE_NAME = "org.webosports.app.documents.service"
 
