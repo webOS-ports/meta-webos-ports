@@ -163,7 +163,12 @@ do_compile() {
         # paths and buildpaths QA rejects the result:
         #   File /usr/lib/purple-2/.debug/libwhatsmeow.so in package purple-combined-dbg
         #   contains reference to TMPDIR [buildpaths]
-        ${CC} -O2 -fPIC -std=gnu11 ${DEBUG_PREFIX_MAP} -DNDEBUG -DWEBRTC_POSIX -DWEBRTC_APM_DEBUG_DUMP=0 \
+        # The list mixes C with one C++ file, dot_product_with_scale.cc.
+        case $s in
+        *.cc) compile="${CXX} -std=c++11" ;;
+        *) compile="${CC} -std=gnu11" ;;
+        esac
+        $compile -O2 -fPIC ${DEBUG_PREFIX_MAP} -DNDEBUG -DWEBRTC_POSIX -DWEBRTC_APM_DEBUG_DUMP=0 \
               -DWEBRTC_NS_FLOAT -I${WEBRTC_DSP} -c ${WEBRTC_DSP}/$s -o ${B}/ns_$(echo $s | tr / _).o
         OBJS="$OBJS ${B}/ns_$(echo $s | tr / _).o"
     done
@@ -173,9 +178,9 @@ do_compile() {
         OBJS="$OBJS ${B}/aec_$(echo $s | tr / _).o"
     done
 
-    # 3. link. -Bsymbolic-functions: this plugin and purple-teams both define the identically
-    # named voipkit_* bridge symbols and are dlopen'd into the same process, so without it ELF
-    # interposition can route one plugin's calls into the other's copy depending on load order.
+    # 3. link. -Bsymbolic-functions: every plug-in is dlopen'd into the same process, so without it
+    # ELF interposition can route this plug-in's calls to its own functions (the voipkit_* bridge,
+    # the WebRTC DSP) into a same-named copy in another plug-in, depending on load order.
     ${CC} -shared -fPIC ${LDFLAGS} -Wl,-Bsymbolic-functions \
         -Wl,-soname,libwhatsmeow.so -o ${B}/libwhatsmeow.so \
         $OBJS ${B}/libwhatsmeow.a \
