@@ -24,7 +24,7 @@ BBCLASSEXTEND = "native"
 inherit autotools gettext pkgconfig python3-dir python3native
 
 SRC_URI = " \
-    http://downloads.sourceforge.net/${BPN}/${BP}.tar.gz \
+    ${SOURCEFORGE_MIRROR}/${BPN}/${BPN}/${PV}/${BP}.tar.gz \
     file://0001-configure.ac-disable-help2man.patch \
     file://0001-presageDemo-pass-a-format-string-to-mvprintw-mvwprin.patch \
     file://0002-iso8859_1.h-Fix-build-with-gcc-6.patch \
