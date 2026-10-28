@@ -12,6 +12,10 @@ PACKAGECONFIG:append = " v4l2codecs"
 # the image can decode a QR - libqrencode only writes them.
 PACKAGECONFIG:append = " zbar"
 
+# srtpenc and srtpdec, for the audio of Teams and Signal calls (the call media engines in
+# luneos-synergy-connectors). libsrtp is built with OpenSSL for the GCM ciphers both use.
+PACKAGECONFIG:append = " srtp"
+
 FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 SRC_URI:append = " \
     file://0004-waylandsink-make-wl_subcompositor-optional.patch;striplevel=3 \
