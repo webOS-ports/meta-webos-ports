@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 28 Oct 2026 07:23:36 +0100
+Subject: [PATCH] svga: keep the contents of imported surfaces
+
+svga_texture_from_handle() leaves surface_state at
+SVGA_SURFACE_STATE_CREATED. The first time a render target view is made
+for the texture, svga_validate_surface_view() takes that to mean the
+surface holds nothing yet and sends SVGA3D_InvalidateGBSurface for it,
+which throws away what the buffer contains.
+
+An imported surface was created, and usually filled, by someone else, so
+its contents are not ours to drop. The Android EGL platform makes this
+visible: it imports the gralloc buffer it dequeued as a new DRI image on
+every frame (get_back_bo()), so every frame starts from an invalidated
+buffer while eglQuerySurface(EGL_BUFFER_AGE_EXT) still reports the age the
+buffer queue tracks. hwui trusts that age and redraws only the damaged
+region, and the rest of the window comes out black. Seen with Waydroid
+(Android 11, Mesa 23.2.1) on VirtualBox VMSVGA with a VGPU10 device: with
+this change Files and Settings draw fully with buffer age on; without
+it only the region drawn last is shown.
+
+Mark level 0 of an imported texture as defined and its surface state as
+UPDATED, as for a texture whose contents came from an upload.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/gallium/drivers/svga/svga_resource_texture.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/src/gallium/drivers/svga/svga_resource_texture.c b/src/gallium/drivers/svga/svga_resource_texture.c
+index 8ce5b94..403f8a0 100644
+--- a/src/gallium/drivers/svga/svga_resource_texture.c
++++ b/src/gallium/drivers/svga/svga_resource_texture.c
+@@ -1213,6 +1213,14 @@ svga_texture_from_handle(struct pipe_screen *screen,
+ 
+    tex->imported = true;
+ 
++   /* The surface was created and filled by someone else. Mark it as holding
++    * content, so that rendering to it does not first invalidate it: that
++    * discards what is there, and EGL platforms that re-import the same
++    * buffer every frame (Android) rely on it surviving for buffer age.
++    */
++   svga_define_texture_level(tex, 0, 0);
++   tex->surface_state = SVGA_SURFACE_STATE_UPDATED;
++
+    ss->hud.num_resources++;
+ 
+    return &tex->b;
