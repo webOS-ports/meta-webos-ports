@@ -13,8 +13,8 @@ PE = "1"
 require purple-presage-crates.inc
 require purple-presage-git-deps.inc
 
-# 0001-0009 adapt the plug-in to imlibpurpletransport and the webOS Messaging app; the Pending
-# ones are generic fixes meant for upstream.
+# 0001-0005 are generic fixes meant for upstream; the webOS: ones from 0006 adapt the plug-in to
+# imlibpurpletransport and the webOS Messaging app.
 #
 # The webOS tree also carries 1:1 voice calls (call.c, call_bridge.rs, call_media.rs, ice.rs, and
 # a presage patch exposing the identified push service). That is left out here on purpose:
@@ -25,18 +25,18 @@ require purple-presage-git-deps.inc
 #     compat header, so with the Rust half calling into it the plug-in would not even dlopen.
 # None of 0001-0009 reference it, and without it the Rust half keeps upstream's Cargo.toml and
 # Cargo.lock unchanged. The one generic fix it contained -- announce "connected" only once per
-# receive session -- is 0009 here.
+# receive session -- is 0005 here.
 SRC_URI += " \
     git://github.com/hoehermann/purple-presage.git;branch=master;protocol=https;name=upstream;destsuffix=purple-presage \
-    file://0001-qrcode-hand-the-device-link-URI-to-the-UI-instead-of.patch \
-    file://0002-Keep-the-connection-up-on-receive-and-command-errors.patch \
-    file://0003-contacts-sync-names-from-the-primary-and-resolve-unk.patch \
-    file://0004-Pin-the-module-resident-and-delete-the-store-when-an.patch \
-    file://0005-bridge-carry-the-message-timestamp-in-milliseconds-a.patch \
-    file://0006-Map-Signal-reactions-to-and-from-the-webOS-transport.patch \
-    file://0007-Show-Signal-replies-as-inline-quote-cards-on-webOS.patch \
-    file://0008-Report-delivery-and-read-receipts-to-the-webOS-trans.patch \
-    file://0009-Announce-the-connection-only-once-per-receive-sessio.patch \
+    file://0001-Keep-the-connection-up-on-receive-and-command-errors.patch \
+    file://0002-contacts-sync-names-from-the-primary-and-resolve-unk.patch \
+    file://0003-Pin-the-module-resident-and-delete-the-store-when-an.patch \
+    file://0004-bridge-carry-the-message-timestamp-in-milliseconds-a.patch \
+    file://0005-Announce-the-connection-only-once-per-receive-sessio.patch \
+    file://0006-webOS-hand-the-device-link-URI-to-the-UI-instead-of-.patch \
+    file://0007-webOS-map-Signal-reactions-to-and-from-the-transport.patch \
+    file://0008-webOS-show-Signal-replies-as-inline-quote-cards.patch \
+    file://0009-webOS-report-delivery-and-read-receipts-to-the-trans.patch \
 "
 SRCREV_upstream = "c4c9b8d8e1a822f973520e8870aba1d2347b18c6"
 
@@ -144,7 +144,7 @@ python cargo_common_do_patch_paths() {
 PRESAGE_PLUGIN_VERSION = "0.0.0_${@d.getVar('SRCREV_upstream')[:7]}_${@d.getVar('SRCREV_presage')[:7]}"
 
 # The libraries are the ones `cargo rustc -- --print native-static-libs` lists for the Rust half,
-# plus libcrypto for SQLCipher and gmodule-2.0 for g_module_make_resident() from 0004.
+# plus libcrypto for SQLCipher and gmodule-2.0 for g_module_make_resident() from 0003.
 # --no-undefined turns a symbol that would only be missed at dlopen time into a link error.
 do_compile:append() {
     install -d ${B}/c

@@ -9,6 +9,18 @@
 # A recipe adds its upstream to SRC_URI with name=upstream and destsuffix=<plugin>, sets
 # SRCREV_upstream, and points S at ${UNPACKDIR}/<plugin>.
 #
+# Each patch series is split in two, so it is clear at a glance what can go upstream:
+#
+#   generic   plain subject, Upstream-Status Pending (or Submitted/Backport once sent), and
+#             numbered first. Bug fixes and features any libpurple UI could use; these are the
+#             ones to send upstream, one pull request at a time.
+#   webOS     subject starting "webOS:", Upstream-Status Inappropriate [reason], numbered after
+#             the generic ones. They adapt a plug-in to imlibpurpletransport, the webOS apps or
+#             LuneOS services, and are not meant for upstream as they are.
+#
+# A new patch goes in the half it belongs to. When a generic patch is sent or merged, update its
+# Upstream-Status; when it is merged, drop it with the SRCREV bump that brings it in.
+#
 # SRCREVs are pinned deliberately, like purple-matrix_git.bb. Bump them when you want the new
 # work; AUTOREV would make every LuneOS build depend on whatever the branch happened to be that day.
 # The connectors commit is the one luneos-synergy-connectors-srcrev.inc pins for the cloud and
