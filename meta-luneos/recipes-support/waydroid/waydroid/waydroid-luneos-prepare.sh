@@ -363,6 +363,45 @@ EOF
     log "set SurfaceFlinger sysprops (no configstore fallback)"
 }
 
+# ------------------------------------------- software GL on VMware SVGA
+#
+# Under VirtualBox (VMSVGA) and VMware the render node belongs to vmwgfx, and
+# Waydroid picks gralloc.gbm with Mesa's svga driver for it. SurfaceFlinger
+# composes fine on that, but every app dies on its first frame:
+#
+#   EGL user error 0x3009 (EGL_BAD_MATCH) in eglCreateWindowSurface:
+#       Unsupported surfacetype/colorspace configuration
+#   F OpenGLRenderer: drawRenderNode called on a context with no surface!
+#
+# svga accepts RGBA-ordered display targets only as R8G8B8A8_UNORM_SRGB, so the
+# Android EGL platform builds its RGBA_8888 configs from sRGB DRI configs alone,
+# and then skips BGRA because RGBA exists. hwui asks for a linear window
+# surface, and the config it picks has no linear double-buffered DRI config
+# behind it. Measured on qemux86-64 in VirtualBox with the image's Mesa 23.2.1;
+# Mesa main has the same logic. The launcher and system UI crash-loop and every
+# Android app window closes as soon as it maps.
+#
+# Until a fixed Mesa reaches the image, render with SwiftShader there: gralloc
+# "default" and EGL "swiftshader", which is what Waydroid itself falls back to
+# when it finds no render node. The base prop names the render node Waydroid
+# chose (gralloc.gbm.device), so its driver is what is checked, and any other
+# GPU keeps Mesa. Like the prop setters above this runs after
+# refresh_container_config, which regenerates the base prop.
+set_software_gl_on_vmwgfx() {
+    [ "${WAYDROID_VMWGFX_SOFTWARE_GL:-1}" = 1 ] || return 0
+    base=/var/lib/waydroid/waydroid_base.prop
+    [ -f "$base" ] || return 0
+    node=$(sed -n 's/^gralloc\.gbm\.device=//p' "$base")
+    [ -n "$node" ] || return 0
+    driver=$(sed -n 's/^DRIVER=//p' \
+        "/sys/class/drm/${node##*/}/device/uevent" 2>/dev/null)
+    [ "$driver" = vmwgfx ] || return 0
+    sed -i -e '/^gralloc\.gbm\.device=/d' \
+        -e 's/^ro\.hardware\.gralloc=.*/ro.hardware.gralloc=default/' \
+        -e 's/^ro\.hardware\.egl=.*/ro.hardware.egl=swiftshader/' "$base" &&
+        log "vmwgfx render node: software GL (SwiftShader) for the container"
+}
+
 # ------------------------------------------------ refresh container config
 #
 # The LXC configuration under /var/lib/waydroid/lxc is generated once, at
@@ -436,4 +475,5 @@ keep_missing_namespaces || rc=1
 set_no_ril          || rc=1
 set_no_background_subsurface || rc=1
 set_surfaceflinger_props || rc=1
+set_software_gl_on_vmwgfx || rc=1
 exit $rc
