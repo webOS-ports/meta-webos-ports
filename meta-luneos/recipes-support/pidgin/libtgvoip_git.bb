@@ -5,9 +5,14 @@ SECTION = "libs"
 LICENSE = "Unlicense"
 LIC_FILES_CHKSUM = "file://UNLICENSE;md5=1d267ceb3a8d8f75f1be3011ee4cbf53"
 
-# ALSA rather than PulseAudio, matching --without-pulse below. openssl is for the call crypto,
-# libopus for the codec; both are linked by tdlib-purple too, because this builds static.
-DEPENDS = "libopus alsa-lib openssl"
+# Both audio backends are built. AudioIO tries PulseAudio first, which is what calls use on
+# LuneOS: tdlib-purple names the call devices (the voipcall sink and the webcall source) as the
+# PulseAudio device ids. ALSA stays as the fallback when no PulseAudio server answers.
+# pulseaudio is only for configure's libpulse check and the headers: libtgvoip dlopen()s
+# libpulse.so.0 at run time, so nothing links it -- tdlib-purple RDEPENDS on it instead.
+# openssl is for the call crypto, libopus for the codec; both are linked by tdlib-purple too,
+# because this builds static.
+DEPENDS = "libopus alsa-lib openssl pulseaudio"
 
 # grishka's tree rather than telegramdesktop's fork: tdlib-purple's call.cpp is written against its
 # API, and the tdesktop fork reworked it (TgVoip.h, no autotools). 6c82c9d is the head of the
@@ -38,7 +43,7 @@ inherit autotools pkgconfig
 # Static only otherwise, which is how tdlib-purple consumes it on the device too. A shared
 # libtgvoip would also work, but keeping the two builds alike means a linkage problem here is a
 # real problem and not a configuration difference.
-EXTRA_OECONF = "--without-pulse --with-alsa --enable-static --disable-shared --with-pic"
+EXTRA_OECONF = "--with-pulse --with-alsa --enable-static --disable-shared --with-pic"
 
 # libtool: "unable to infer tagged configuration" / "specify a tag with '--tag'" when linking
 # libtgvoip.la.
