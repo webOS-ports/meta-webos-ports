@@ -30,10 +30,11 @@ RDEPENDS:${PN} = "\
     pulseaudio-server \
     pulseaudio-module-palm-policy \
 "
-# Halium machines drive the codec through the Android HAL, so their sink is
-# named by module-droid-card and not by audiod. webos-system.pa aliases it to
-# the pcm_output name audiod routes by, which needs this module present.
-RDEPENDS:${PN} += "pulseaudio-module-remap-sink"
+# Halium machines drive the codec through the Android HAL, so their sink and
+# source are named by module-droid-card and not by audiod. webos-system.pa
+# aliases them to the pcm_output and pcm_input names audiod routes by, which
+# needs these modules present.
+RDEPENDS:${PN} += "pulseaudio-module-remap-sink pulseaudio-module-remap-source"
 
 # Built from the webOS-ports fork rather than webosose/audiod-pro: the fifteen
 # patches this recipe used to carry are commits on its webOS-ports/webOS-OSE
@@ -41,7 +42,7 @@ RDEPENDS:${PN} += "pulseaudio-module-remap-sink"
 #WEBOS_VERSION = "1.0.0-78_127c6cd6c9247979b4ead42d9b8fc8b5c48b47a2"
 PV = "1.0.0-79+git"
 SRCREV = "e1eda9f73948b79e38a04d9cc817195aa5bca311"
-PR = "r37"
+PR = "r38"
 
 inherit webos_component
 inherit webos_cmake
