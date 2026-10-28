@@ -16,16 +16,15 @@ require purple-presage-git-deps.inc
 # 0001-0005 are generic fixes meant for upstream; the webOS: ones from 0006 adapt the plug-in to
 # imlibpurpletransport and the webOS Messaging app.
 #
-# The webOS tree also carries 1:1 voice calls (call.c, call_bridge.rs, call_media.rs, ice.rs, and
-# a presage patch exposing the identified push service). That is left out here on purpose:
-#   * it only works on legacy webOS: it spawns a media engine from /media/internal, uses WPE and
-#     gst paths that do not exist on LuneOS, LD_PRELOADs libasound and assumes there is no IPv6;
-#   * it writes the TURN credentials into log files;
-#   * upstream's build does not compile call.c, which needs luna-service2 and the split-bus
-#     compat header, so with the Rust half calling into it the plug-in would not even dlopen.
-# None of 0001-0009 reference it, and without it the Rust half keeps upstream's Cargo.toml and
-# Cargo.lock unchanged. The one generic fix it contained -- announce "connected" only once per
-# receive session -- is 0005 here.
+# 0010 adds 1:1 voice calls through the Phone app: call.c registers com.palm.signal.call (one
+# luna-service2 handle) and reports active calls to audiod; the Rust half does the RingRTC
+# signaling and runs the signal-call-media engine for each call. It changes Cargo.toml (serde,
+# serde_json, tokio "time") and the root package's entry in Cargo.lock; the crates were already in
+# the lock, so the crates and git-deps lists do not change. presage's "cdsi" feature, which calling
+# a number that is no stored contact would need, is not enabled: it pulls in BoringSSL.
+#
+# presage/0001 is for presage itself (the git-deps checkout, hence its patchdir): it makes
+# Manager::identified_push_service() public, which 0010 uses to fetch the TURN relays.
 SRC_URI += " \
     git://github.com/hoehermann/purple-presage.git;branch=master;protocol=https;name=upstream;destsuffix=purple-presage \
     file://0001-Keep-the-connection-up-on-receive-and-command-errors.patch \
@@ -37,13 +36,21 @@ SRC_URI += " \
     file://0007-webOS-map-Signal-reactions-to-and-from-the-transport.patch \
     file://0008-webOS-show-Signal-replies-as-inline-quote-cards.patch \
     file://0009-webOS-report-delivery-and-read-receipts-to-the-trans.patch \
+    file://0010-webOS-add-1-1-Signal-voice-calls-through-the-Phone-a.patch \
+    file://presage/0001-manager-make-the-identified-push-service-public.patch;patchdir=${UNPACKDIR}/git-deps/presage \
 "
 SRCREV_upstream = "c4c9b8d8e1a822f973520e8870aba1d2347b18c6"
 
 # gdk-pixbuf is only asked which image types it can load (pixbuf.c); without it the plug-in
 # assumes JPEG and PNG. protobuf-native supplies protoc for the prost-build scripts of
 # libsignal, libsignal-service and spqr. openssl is libcrypto for the bundled SQLCipher.
-DEPENDS = "pidgin glib-2.0 gdk-pixbuf openssl protobuf-native"
+# luna-service2 is for call.c.
+DEPENDS = "pidgin glib-2.0 gdk-pixbuf openssl protobuf-native luna-service2"
+
+# The call media engine 0010 runs for each call; call_bridge.rs takes its path from this at build
+# time.
+export SIGNAL_MEDIA_ENGINE = "${libexecdir}/signal-call-media"
+RDEPENDS:${PN} += "signal-call-media"
 
 S = "${UNPACKDIR}/purple-presage"
 CARGO_SRC_DIR = "src/rust"
@@ -144,19 +151,26 @@ python cargo_common_do_patch_paths() {
 PRESAGE_PLUGIN_VERSION = "0.0.0_${@d.getVar('SRCREV_upstream')[:7]}_${@d.getVar('SRCREV_presage')[:7]}"
 
 # The libraries are the ones `cargo rustc -- --print native-static-libs` lists for the Rust half,
-# plus libcrypto for SQLCipher and gmodule-2.0 for g_module_make_resident() from 0003.
+# plus libcrypto for SQLCipher, gmodule-2.0 for g_module_make_resident() from 0003 and
+# luna-service2 for call.c from 0010.
 # --no-undefined turns a symbol that would only be missed at dlopen time into a link error.
+#
+# The version script exports purple_init_plugin, the one symbol libpurple looks up, and nothing
+# else: without it every global symbol of the plug-in and of the Rust staticlib (about 11,800) ends
+# up in the dynamic symbol table, where it can interpose on the same names in other libraries.
 do_compile:append() {
+    printf '{\n    global: purple_init_plugin;\n    local: *;\n};\n' > ${B}/libpresage.map
     install -d ${B}/c
     for src in ${S}/src/c/*.c; do
         ${CC} ${CFLAGS} -fPIC -DPLUGIN_VERSION=${PRESAGE_PLUGIN_VERSION} \
-            $(pkg-config --cflags purple glib-2.0 gdk-pixbuf-2.0) \
+            $(pkg-config --cflags purple glib-2.0 gdk-pixbuf-2.0 luna-service2) \
             -c $src -o ${B}/c/$(basename $src .c).o
     done
-    ${CC} ${LDFLAGS} -shared -Wl,--no-undefined -o ${B}/libpresage.so \
+    ${CC} ${LDFLAGS} -shared -Wl,--no-undefined -Wl,--version-script=${B}/libpresage.map \
+        -o ${B}/libpresage.so \
         ${B}/c/*.o \
         ${B}/target/${CARGO_TARGET_SUBDIR}/libpurple_presage_backend.a \
-        $(pkg-config --libs purple gmodule-2.0 glib-2.0 gdk-pixbuf-2.0) \
+        $(pkg-config --libs purple gmodule-2.0 glib-2.0 gdk-pixbuf-2.0 luna-service2) \
         -lcrypto -lgcc_s -lutil -lrt -lpthread -lm -ldl
 }
 
@@ -175,4 +189,16 @@ do_install() {
     # Validator app named by the template's validator.customUI.appId.
     install -d ${D}${webos_applicationsdir}
     cp -rf ${CONNECTORS_DIR}/im/signal/apps/com.palm.app.signal ${D}${webos_applicationsdir}/
+
+    # The signal call service (call.c, from 0010): its bus name is listed, never activated --
+    # imlibpurpleservice, which loads this plug-in, registers com.palm.signal.call itself, so the
+    # .service file is Type=static -- and the Phone app is granted imlibpurple-call.operation to
+    # call it. The role letting imlibpurpleservice own the name, and the api-permissions/groups
+    # behind that group, ship with imlibpurpleservice. webos_configure_manifest lists both files
+    # in this package's manifest.
+    install -d ${D}${webos_sysbus_servicedir} ${D}${webos_sysbus_permissionsdir}
+    install -m 0644 ${CONNECTORS_DIR}/im/signal/files/sysbus/com.palm.signal.call.service \
+        ${D}${webos_sysbus_servicedir}/
+    install -m 0644 ${CONNECTORS_DIR}/im/signal/files/sysbus/com.palm.signal.call.perm.json \
+        ${D}${webos_sysbus_permissionsdir}/
 }

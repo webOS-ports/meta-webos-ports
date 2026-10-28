@@ -1,0 +1,2205 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:26:28 +0200
+Subject: [PATCH] webOS: add 1:1 Signal voice calls through the Phone app
+
+Registers the luna-service2 service com.palm.signal.call (call.c) when
+the plug-in loads, with one handle on LuneOS's single bus, so the stock
+Phone app rings for incoming Signal calls and can place outgoing ones.
+The account binds to it at login and lets go of it in presage_close,
+hanging up a call it still had.
+
+call.c keeps the call state the Phone app's callStateQuery sees and
+handles dial, answer and disconnect. When a call becomes active it
+reports it to audiod with phone/CallStatusUpdate, a voice-only line
+with transport com.palm.signal and a string call id, and sends
+{"lines":[]} when it ends. It does not set an audiod scenario: audiod
+starts the call on the earpiece. Events of another call than the one on
+the card, and ends of calls no longer on it, are ignored.
+
+The Rust side handles the RingRTC CallMessages (Offer, Answer,
+IceUpdate, Hangup, Busy) and runs the signal-call-media engine for
+each call (call_bridge.rs). The engine is its own recipe, built from
+luneos-synergy-connectors im/signal/calling/media; its path comes from
+SIGNAL_MEDIA_ENGINE at build time (default
+/usr/libexec/signal-call-media). call_media.rs encodes and decodes the
+RingRTC opaque blobs, and ice.rs fetches the STUN/TURN relays from
+/v2/calling/relays through presage's Manager::identified_push_service(),
+which a separate presage patch makes public. They are fetched at login
+and again when their credentials are due (half the ttl the server
+gives, or an hour), checked before an outgoing call and when an Offer
+arrives, after the phone has started ringing. A failed fetch keeps the
+previous relays. Both incoming and outgoing engines get the relays
+before START, IPv6 relays included.
+
+The engine for an incoming call starts on the Offer, so ICE is ready
+when the user answers, but the engine records nothing until then;
+answering sends it ACCEPT, which opens the microphone and sends
+RingRTC's Accepted. If the engine could not
+start, answering ends the call and hangs up on the caller. A call that
+cannot be placed (number not a stored contact, no engine, no random
+bytes) ends the dialer's card instead of leaving it on "Connecting".
+Keys and ICE credentials come from /dev/urandom; a call is not set up
+if it cannot be read.
+
+An Offer while another call is up (an engine still running, or an
+outgoing call waiting for its Answer) is answered with Busy, as RingRTC
+does, and neither rings nor starts an engine; it is noted as a missed
+call once. A hangup we send is HANGUP_NORMAL without a device id, as
+RingRTC sends it (Hangup::Normal carries none).
+
+Only an incoming call nobody answered is reported as a missed call:
+not one we placed, not one accepted here, and not one accepted or
+declined on another of the account's devices.
+
+A dialled number is resolved through the stored contacts only. Calling
+a number that is no contact would need Contact Discovery, i.e.
+presage's "cdsi" feature, which pulls in BoringSSL; it is not enabled.
+
+serde and serde_json are added for the relays JSON (both already in
+Cargo.lock through presage, so only the root package's dependency list
+changes), and tokio's "time" feature for the relays timeout.
+
+CMakeLists.txt builds call.c and links luna-service2.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ CMakeLists.txt                  |   6 +
+ src/c/call.c                    | 394 +++++++++++++++++++++++
+ src/c/connection.c              |   4 +
+ src/c/init.c                    |  12 +
+ src/c/presage.h                 |   9 +
+ src/rust/Cargo.lock             |   2 +
+ src/rust/Cargo.toml             |   4 +-
+ src/rust/src/bridge.rs          |  39 +++
+ src/rust/src/bridge_commands.rs |  51 +++
+ src/rust/src/call_bridge.rs     | 533 ++++++++++++++++++++++++++++++++
+ src/rust/src/call_media.rs      | 201 ++++++++++++
+ src/rust/src/core.rs            | 236 +++++++++++++-
+ src/rust/src/ice.rs             | 199 ++++++++++++
+ src/rust/src/lib.rs             |   3 +
+ src/rust/src/receive.rs         | 160 +++++++++-
+ src/rust/src/structs.rs         |  46 +++
+ 16 files changed, 1896 insertions(+), 3 deletions(-)
+ create mode 100644 src/c/call.c
+ create mode 100644 src/rust/src/call_bridge.rs
+ create mode 100644 src/rust/src/call_media.rs
+ create mode 100644 src/rust/src/ice.rs
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 8bd77f2..4058d23 100755
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -36,6 +36,8 @@ find_package(PkgConfig QUIET)
+ if (${PKG_CONFIG_FOUND})
+     pkg_check_modules(PIXBUF gdk-pixbuf-2.0)
+ endif()
++# call.c registers the com.palm.signal.call service for the webOS Phone app
++pkg_check_modules(LS2 REQUIRED luna-service2)
+ 
+ include(FetchContent)
+ FetchContent_Declare(Corrosion GIT_REPOSITORY https://github.com/corrosion-rs/corrosion.git)
+@@ -86,6 +88,7 @@ add_library(${TARGET_NAME} SHARED
+     "src/c/attachment_common.c"
+     "src/c/init.c"
+     "src/c/pixbuf.c"
++    "src/c/call.c"
+ )
+ target_compile_definitions(${TARGET_NAME} PRIVATE PLUGIN_VERSION=${PLUGIN_VERSION})
+ # depend on the rust part
+@@ -96,6 +99,9 @@ target_link_libraries(${TARGET_NAME} PRIVATE ${PURPLE_LIBRARIES})
+ # depend on pixbuf (technically optiona, but does not hurt)
+ target_include_directories(${TARGET_NAME} PRIVATE ${PIXBUF_INCLUDE_DIRS})
+ target_link_libraries(${TARGET_NAME} PRIVATE ${PIXBUF_LIBRARIES})
++# depend on luna-service2 (call.c)
++target_include_directories(${TARGET_NAME} PRIVATE ${LS2_INCLUDE_DIRS})
++target_link_libraries(${TARGET_NAME} PRIVATE ${LS2_LIBRARIES})
+ # depend on qrencode
+ target_include_directories(${TARGET_NAME} PRIVATE ${QRENCODE_INCLUDE_DIR})
+ target_link_libraries(${TARGET_NAME} PRIVATE ${QRENCODE_LIBRARIES})
+diff --git a/src/c/call.c b/src/c/call.c
+new file mode 100644
+index 0000000..7c06048
+--- /dev/null
++++ b/src/c/call.c
+@@ -0,0 +1,394 @@
++/* Signal 1:1 voice calls for the webOS Phone app.
++ *
++ * The luna-service2 service com.palm.signal.call, which the Phone app's CallSynergizer talks to with
++ * the same contract as the Telegram and WhatsApp call services: callStateQuery (subscribable) for
++ * the call card, and dial/answer/disconnect. Incoming and outgoing calls are signalled by the Rust
++ * half (receive.rs, core.rs), which also runs the media engine (call_bridge.rs); this file holds the
++ * call state the Phone app sees and reports the call to audiod.
++ *
++ * Registered from inside imlibpurpletransport, on the GMainContext libpurple runs. LuneOS has one
++ * bus, so it is one handle; the transport's role must allow the name com.palm.signal.call.
++ */
++
++#include "presage.h"
++#include <luna-service2/lunaservice.h>
++#include <glib.h>
++#include <string.h>
++#include <stdbool.h>
++#include <stdint.h>
++
++/* call states pushed from the Rust receive loop (must match bridge.rs constants) */
++#define SIG_CALL_INCOMING 0u
++#define SIG_CALL_ENDED    1u
++#define SIG_CALL_DECLINED 2u
++#define SIG_CALL_BUSY     3u
++#define SIG_CALL_ACTIVE   4u   /* peer answered OUR outgoing call -> connected */
++#define SIG_CALL_DIALING  5u   /* we placed an outgoing call (Offer sent) -> ringing peer */
++#define SIG_CALL_ANSWERED 6u   /* LOCAL-only: user tapped Answer on an INCOMING call (cb_answer);
++                                * flip the line to active, keep origin=incoming. Not sent from
++                                * Rust, so it need not match a bridge.rs constant. */
++
++static LSHandle      *g_sh      = NULL;   /* com.palm.signal.call                     */
++static PurpleAccount *g_account = NULL;   /* the bound Signal account                  */
++
++/* last state we pushed, so a late subscriber gets the current picture immediately */
++static char *g_state    = NULL;   /* "incoming" | "dialing" | "active" | "disconnected" | NULL (idle) */
++static char *g_cause    = NULL;   /* only meaningful for "disconnected"        */
++static char *g_addr     = NULL;
++static char *g_name     = NULL;
++static uint64_t g_call_id = 0;
++static bool g_outgoing = false;   /* true while an OUTGOING call is up (origin=outgoing in the card) */
++
++static const char *SUBKEY = "callState";
++
++static void set_str(char **slot, const char *v)
++{
++    g_free(*slot);
++    *slot = v ? g_strdup(v) : NULL;
++}
++
++static gchar *json_escape(const char *s)
++{
++    if (!s) return g_strdup("");
++    GString *o = g_string_new(NULL);
++    for (const char *p = s; *p; ++p) {
++        switch (*p) {
++            case '"':  g_string_append(o, "\\\""); break;
++            case '\\': g_string_append(o, "\\\\"); break;
++            case '\n': g_string_append(o, "\\n");  break;
++            case '\r': g_string_append(o, "\\r");  break;
++            case '\t': g_string_append(o, "\\t");  break;
++            default:   g_string_append_c(o, *p);   break;
++        }
++    }
++    return g_string_free(o, FALSE);
++}
++
++/* Build the CallSynergizer callStateQuery payload. Dispatch is on the LINE-level "state"; an empty
++ * state => idle (no lines). Voice only: the line reports no video either way. */
++static gchar *build_payload(void)
++{
++    if (!g_state) {
++        return g_strdup("{\"returnValue\":true,\"lines\":[]}");
++    }
++    gchar *st   = json_escape(g_state);
++    gchar *addr = json_escape(g_addr);
++    gchar *nm   = json_escape((g_name && *g_name) ? g_name : g_addr);
++    gchar *disc = g_strcmp0(g_state, "disconnected") == 0
++        ? g_strdup_printf("\"disconnectDetails\":{\"cause\":\"%s\"},", g_cause ? g_cause : "normal")
++        : g_strdup("");
++    /* CallSynergizer reads call.address / call.displayName directly off each call and
++     * CallSynergyContact.create() throws if address is missing, so the fields are flat, as the
++     * Telegram and WhatsApp services send them. transport is this connector's own PHONE account
++     * template id: without it the call is taken for a cellular one and the Signal UUID is shown
++     * formatted as a phone number. */
++    gchar *p = g_strdup_printf(
++        "{\"returnValue\":true,\"lines\":["
++        "{\"state\":\"%s\",%s\"incomingVideo\":false,\"outgoingVideo\":false,"
++        "\"calls\":[{\"id\":\"sig\",\"origin\":\"%s\",\"transport\":\"com.palm.signal\","
++        "\"address\":\"%s\",\"displayName\":\"%s\"}]}]}",
++        st, disc, g_outgoing ? "outgoing" : "incoming", addr, nm);
++    g_free(st); g_free(addr); g_free(nm); g_free(disc);
++    return p;
++}
++
++/* Minimal JSON string-field extractor for the flat LS2 dial payload (e.g. {"address":"<uuid>"}).
++ * Returns a newly-allocated unescaped value, or NULL if absent. Good enough for the dialer's simple,
++ * machine-generated payloads (no nested objects with the same key, no unicode escapes expected). */
++static gchar *json_get_string(const char *payload, const char *key)
++{
++    if (!payload || !key) return NULL;
++    gchar *needle = g_strdup_printf("\"%s\"", key);
++    const char *k = strstr(payload, needle);
++    g_free(needle);
++    if (!k) return NULL;
++    const char *c = strchr(k, ':');
++    if (!c) return NULL;
++    c++;
++    while (*c == ' ' || *c == '\t') c++;
++    if (*c != '"') return NULL;   /* only string values */
++    c++;
++    GString *o = g_string_new(NULL);
++    for (; *c && *c != '"'; ++c) {
++        if (*c == '\\' && c[1]) { c++; g_string_append_c(o, *c); }
++        else g_string_append_c(o, *c);
++    }
++    return g_string_free(o, FALSE);
++}
++
++static void reply(LSHandle *sh, LSMessage *msg, const char *payload)
++{
++    LSError err; LSErrorInit(&err);
++    if (!LSMessageReply(sh, msg, payload, &err)) LSErrorFree(&err);
++}
++
++/* The account's Rust command channel, or NULL while it is not connected. */
++static Presage *bound_presage(void)
++{
++    PurpleConnection *pc = g_account ? purple_account_get_connection(g_account) : NULL;
++    Presage *presage = pc ? (Presage *)purple_connection_get_protocol_data(pc) : NULL;
++    return (presage && presage->tx_ptr) ? presage : NULL;
++}
++
++static bool cb_call_state_query(LSHandle *sh, LSMessage *msg, void *ctx)
++{
++    (void)ctx;
++    LSError err; LSErrorInit(&err);
++    bool subscribed = false;
++    LSSubscriptionProcess(sh, msg, &subscribed, &err);   /* honours {"subscribe":true} */
++    if (subscribed) LSSubscriptionAdd(sh, SUBKEY, msg, &err);
++    gchar *payload = build_payload();
++    LSMessageReply(sh, msg, payload, &err);
++    g_free(payload);
++    if (LSErrorIsSet(&err)) { purple_debug_warning(PLUGIN_NAME, "callStateQuery: %s\n", err.message); LSErrorFree(&err); }
++    return true;
++}
++
++/* Place an OUTGOING Signal call. The dialer POSTs {"address":"<signal-uuid or +E.164>"}. The Rust
++ * command loop resolves the address, generates our media keys and sends the RingRTC Offer; the
++ * peer's Answer then starts the media engine in caller role (call_bridge.rs on_answer). The card is
++ * driven by the real call events: "dialing" once the Offer is out, with the real call_id, then
++ * "active" or "disconnected" - one call_id, so the dialer logs one call. If the call cannot be
++ * placed, the command loop reports it ended, which clears the dialer's card. */
++static bool cb_dial(LSHandle *sh, LSMessage *msg, void *ctx)
++{
++    (void)ctx;
++    gchar *addr = json_get_string(LSMessageGetPayload(msg), "address");
++    Presage *presage = bound_presage();
++
++    if (!addr || !*addr) {
++        reply(sh, msg, "{\"returnValue\":false,\"errorText\":\"dial: missing address\"}");
++    } else if (!presage) {
++        reply(sh, msg, "{\"returnValue\":false,\"errorText\":\"Signal account not connected\"}");
++    } else {
++        purple_debug_info(PLUGIN_NAME, "call: dialling\n");
++        presage_rust_place_call(g_account, rust_runtime, presage->tx_ptr, addr);
++        reply(sh, msg, "{\"returnValue\":true}");
++    }
++    g_free(addr);
++    return true;
++}
++
++/* User tapped Answer on an incoming Signal call. The media engine started on the offer, so ICE is
++ * ready; answering tells it to send RingRTC's rtp-data Accepted - without which the caller keeps
++ * ringing with media gated - and to open the microphone. Locally the line turns active, which
++ * reports the call to audiod. If there is no engine for the call, the command loop ends it. */
++static bool cb_answer(LSHandle *sh, LSMessage *msg, void *ctx)
++{
++    (void)ctx;
++    Presage *presage = bound_presage();
++    if (presage && g_call_id && g_strcmp0(g_state, "incoming") == 0) {
++        presage_rust_accept_call(g_account, rust_runtime, presage->tx_ptr, g_call_id);
++        presage_handle_call_state(g_account, g_addr, g_name, SIG_CALL_ANSWERED, g_call_id);
++        reply(sh, msg, "{\"returnValue\":true}");
++    } else {
++        reply(sh, msg, "{\"returnValue\":false,\"errorText\":\"no incoming Signal call\"}");
++    }
++    return true;
++}
++
++/* Decline or hang up: send the peer a Signal Hangup and stop our media engine, so their phone stops
++ * ringing and the audio stops, then clear the line. */
++static bool cb_disconnect(LSHandle *sh, LSMessage *msg, void *ctx)
++{
++    (void)ctx;
++    Presage *presage = bound_presage();
++    if (presage && g_addr && *g_addr && g_call_id)
++        presage_rust_hangup_call(g_account, rust_runtime, presage->tx_ptr, g_addr, g_call_id);
++    if (g_state)
++        presage_handle_call_state(g_account, g_addr, g_name, SIG_CALL_DECLINED, g_call_id);
++    reply(sh, msg, "{\"returnValue\":true}");
++    return true;
++}
++
++static bool cb_noop(LSHandle *sh, LSMessage *msg, void *ctx)
++{
++    (void)ctx;
++    reply(sh, msg, "{\"returnValue\":true}");
++    return true;
++}
++
++static LSMethod g_methods[] = {
++    { "callStateQuery", cb_call_state_query, LUNA_METHOD_FLAGS_NONE },
++    { "dial",           cb_dial,             LUNA_METHOD_FLAGS_NONE },
++    { "answer",         cb_answer,           LUNA_METHOD_FLAGS_NONE },
++    { "disconnect",     cb_disconnect,       LUNA_METHOD_FLAGS_NONE },
++    { "hangupAll",      cb_disconnect,       LUNA_METHOD_FLAGS_NONE },
++    { "hangupAllActive",cb_disconnect,       LUNA_METHOD_FLAGS_NONE },
++    { "hold",           cb_noop,             LUNA_METHOD_FLAGS_NONE },
++    { "swap",           cb_noop,             LUNA_METHOD_FLAGS_NONE },
++    { "merge",          cb_noop,             LUNA_METHOD_FLAGS_NONE },
++    { "extract",        cb_noop,             LUNA_METHOD_FLAGS_NONE },
++    { "dtmf",           cb_noop,             LUNA_METHOD_FLAGS_NONE },
++    { "dtmfEnd",        cb_noop,             LUNA_METHOD_FLAGS_NONE },
++    { "changeMedia",    cb_noop,             LUNA_METHOD_FLAGS_NONE },
++    { NULL, NULL, LUNA_METHOD_FLAGS_NONE }
++};
++
++void callLunaInit(PurpleAccount *account)
++{
++    if (account) g_account = account;
++    if (g_sh) return;   /* already registered (one service, whichever account connects first) */
++
++    LSError err; LSErrorInit(&err);
++    if (!LSRegister("com.palm.signal.call", &g_sh, &err)) {
++        purple_debug_error(PLUGIN_NAME, "registering com.palm.signal.call: %s\n", err.message);
++        LSErrorFree(&err);
++        g_sh = NULL;
++        return;
++    }
++    /* attach to the context libpurple already services (its glib eventloop runs the default context) */
++    if (!LSRegisterCategory(g_sh, "/", g_methods, NULL, NULL, &err) ||
++        !LSGmainContextAttach(g_sh, g_main_context_default(), &err)) {
++        purple_debug_error(PLUGIN_NAME, "registering com.palm.signal.call: %s\n", err.message);
++        LSErrorFree(&err);
++        LSErrorInit(&err);
++        if (!LSUnregister(g_sh, &err)) LSErrorFree(&err);
++        g_sh = NULL;
++        return;
++    }
++    purple_debug_info(PLUGIN_NAME, "com.palm.signal.call registered\n");
++}
++
++/* The account is going offline (presage_close, before the command channel is dropped): hang up a
++ * call it still had, so the peer is not left in it, then forget the account so a later dial cannot
++ * reach a connection that is gone. The service stays registered for the process lifetime. */
++void callLunaShutdown(PurpleAccount *account)
++{
++    if (!account || g_account != account) return;
++    Presage *presage = bound_presage();
++    if (presage && g_addr && *g_addr && g_call_id)
++        presage_rust_hangup_call(account, rust_runtime, presage->tx_ptr, g_addr, g_call_id);
++    if (g_state)
++        presage_handle_call_state(account, g_addr, g_name, SIG_CALL_ENDED, g_call_id);
++    g_account = NULL;
++}
++
++/* Tell audiod about the call: an active VoIP line, so it routes the call audio (voipcall/webcall)
++ * to the call's output and input, the earpiece first; no lines when it ends. The transport is the
++ * connector's own, never com.palm.telephony, which would switch the modem's voice call path in.
++ * The call "id" must be a string: PmBtEngine's HFG reads it as one for Bluetooth call audio. */
++static bool audiod_reply(LSHandle *sh, LSMessage *m, void *ctx) { (void)sh; (void)m; (void)ctx; return true; }
++static void audiod_send(const char *uri, const char *payload)
++{
++    if (!g_sh) return;
++    LSError err; LSErrorInit(&err);
++    LSMessageToken tok;
++    if (!LSCallOneReply(g_sh, uri, payload, audiod_reply, NULL, &tok, &err)) {
++        purple_debug_warning(PLUGIN_NAME, "audiod %s: %s\n", uri, err.message);
++        LSErrorFree(&err);
++    }
++}
++
++/* heap-marshalled call event: the Rust receive loop runs on a worker pthread, so (like
++ * presage_append_message) we copy the data and hop to the main thread before touching LS2. */
++typedef struct {
++    uint32_t state;
++    uint64_t call_id;
++    char    *who;
++    char    *name;
++} CallEvt;
++
++/* runs on the MAIN thread: apply the new state and push it to callStateQuery subscribers */
++static gboolean call_state_apply(gpointer data)
++{
++    CallEvt *e = (CallEvt *)data;
++    bool was_active = g_strcmp0(g_state, "active") == 0;
++
++    /* An event for another call than the one on the card (a second caller while busy) must not
++     * overwrite it, and the end of a call that is no longer on the card (the peer's hangup after we
++     * declined) must not push a second "disconnected". call_id 0 is a call that never got one (a
++     * dial that could not be placed), which is still reported. */
++    bool is_end = e->state == SIG_CALL_ENDED || e->state == SIG_CALL_DECLINED || e->state == SIG_CALL_BUSY;
++    bool other_call = (g_state && e->call_id && g_call_id && e->call_id != g_call_id) ||
++                      (!g_state && e->call_id && is_end);
++    if (other_call) {
++        purple_debug_info(PLUGIN_NAME, "call: ignoring state %u of another call\n", e->state);
++        g_free(e->who); g_free(e->name); g_free(e);
++        return FALSE;
++    }
++
++    switch (e->state) {
++        case SIG_CALL_INCOMING:
++            g_outgoing = false;
++            set_str(&g_state, "incoming"); set_str(&g_cause, NULL);
++            set_str(&g_addr, e->who); set_str(&g_name, e->name); g_call_id = e->call_id;
++            break;
++        case SIG_CALL_DIALING:
++            /* We placed an outgoing call (Offer sent). Show the outgoing "dialing" card with the
++             * real call_id so the whole call (dialing -> active -> disconnected) is one entry. */
++            g_outgoing = true;
++            set_str(&g_state, "dialing"); set_str(&g_cause, NULL);
++            set_str(&g_addr, e->who); set_str(&g_name, e->name); g_call_id = e->call_id;
++            break;
++        case SIG_CALL_ACTIVE:
++            /* Peer answered our outgoing call. Keep addr/name/origin; flip the line to active so the
++             * dialer shows a connected call. call_id may arrive here for the first time. */
++            g_outgoing = true;
++            set_str(&g_state, "active"); set_str(&g_cause, NULL);
++            if (e->call_id) g_call_id = e->call_id;
++            break;
++        case SIG_CALL_ANSWERED:
++            /* User tapped Answer on an INCOMING call: keep g_outgoing=false and the caller's
++             * addr/name from SIG_CALL_INCOMING. */
++            set_str(&g_state, "active"); set_str(&g_cause, NULL);
++            break;
++        case SIG_CALL_DECLINED:
++            set_str(&g_state, "disconnected"); set_str(&g_cause, "rejected");
++            break;
++        case SIG_CALL_BUSY:
++            set_str(&g_state, "disconnected"); set_str(&g_cause, "busy");
++            break;
++        case SIG_CALL_ENDED:
++        default:
++            /* A dial that could not be placed has no card of its own yet: report it under the
++             * address the user dialled, so the dialer clears its "Connecting" card. */
++            if (!g_state) { set_str(&g_addr, e->who); set_str(&g_name, e->name); g_outgoing = true; }
++            set_str(&g_state, "disconnected"); set_str(&g_cause, "normal");
++            break;
++    }
++
++    if (g_sh) {
++        gchar *payload = build_payload();
++        LSError err; LSErrorInit(&err);
++        if (!LSSubscriptionReply(g_sh, SUBKEY, payload, &err)) {
++            purple_debug_warning(PLUGIN_NAME, "call pushState: %s\n", err.message);
++            LSErrorFree(&err);
++        }
++        g_free(payload);
++    }
++
++    /* audiod: report the active call once, and clear it when a call that was active ends. Must run
++     * before the idle reset below (which clears g_state). */
++    if (!was_active && g_strcmp0(g_state, "active") == 0) {
++        audiod_send("palm://com.palm.audio/phone/CallStatusUpdate",
++                    "{\"lines\":[{\"state\":\"active\",\"calls\":[{\"id\":\"sig\",\"video\":false,"
++                    "\"transport\":\"com.palm.signal\"}]}]}");
++    } else if (was_active && g_strcmp0(g_state, "disconnected") == 0) {
++        audiod_send("palm://com.palm.audio/phone/CallStatusUpdate", "{\"lines\":[]}");
++    }
++
++    /* after a terminal state, return to idle so the next call starts clean */
++    if (g_strcmp0(g_state, "disconnected") == 0) {
++        set_str(&g_state, NULL); set_str(&g_cause, NULL);
++        set_str(&g_addr, NULL);  set_str(&g_name, NULL); g_call_id = 0;
++        g_outgoing = false;
++    }
++
++    g_free(e->who); g_free(e->name); g_free(e);
++    return FALSE;   /* one-shot */
++}
++
++/* Called from the Rust receive and command loops (worker threads) when a call changes state, and
++ * from the LS2 handlers above (main thread). Marshals to the main thread before touching LS2. */
++void presage_handle_call_state(PurpleAccount *account, const char *who, const char *name,
++                               uint32_t state, uint64_t call_id)
++{
++    (void)account;
++    CallEvt *e = g_new0(CallEvt, 1);
++    e->state = state;
++    e->call_id = call_id;
++    e->who = g_strdup(who);
++    e->name = g_strdup(name);
++    purple_timeout_add(0, call_state_apply, e);   /* thread-safe; runs on the main thread */
++}
+diff --git a/src/c/connection.c b/src/c/connection.c
+index 326b7a5..841913f 100755
+--- a/src/c/connection.c
++++ b/src/c/connection.c
+@@ -76,6 +76,9 @@ void presage_login(PurpleAccount *account) {
+     pc_flags |= PURPLE_CONNECTION_FLAG_NO_BGCOLOR;
+     purple_connection_set_flags(connection, pc_flags);
+     purple_connection_set_state(connection, PURPLE_CONNECTION_STATE_CONNECTING);
++    // Signal calling: bind this account to com.palm.signal.call (registered at plugin load), so the
++    // Phone app's calls reach it. Idempotent on reconnect.
++    callLunaInit(account);
+     // webOS reactions (SEND): connect ONCE to the transport's "webos-im-send-reaction" signal so a
+     // reaction the user places from the app is transmitted over Signal. The signal is registered by the
+     // transport on the conversations handle; connect with a static guard so reconnects/multiple accounts
+@@ -114,6 +117,7 @@ void presage_login(PurpleAccount *account) {
+ void presage_close(PurpleConnection *connection) {
+     PurpleAccount *account = purple_connection_get_account(connection);
+     Presage *presage = purple_connection_get_protocol_data(connection);
++    callLunaShutdown(account);
+     presage_rust_exit(account, rust_runtime, presage->tx_ptr);
+     presage->tx_ptr = NULL; // presage_rust_exit drops tx, we must no longer use it
+ }
+diff --git a/src/c/init.c b/src/c/init.c
+index 05348dc..8574bce 100644
+--- a/src/c/init.c
++++ b/src/c/init.c
+@@ -49,6 +49,18 @@ static gboolean libpurple2_plugin_load(PurplePlugin *plugin) {
+     // orphaned on-disk Signal store is removed. Handle is the plugin, so it is disconnected in unload.
+     purple_signal_connect(purple_accounts_get_handle(), "account-removed", plugin,
+                           PURPLE_CALLBACK(presage_account_removed_cb), NULL);
++
++    // Register com.palm.signal.call NOW, at plugin load - NOT at presage_login. The stock Phone app's
++    // CallSynergizer subscribes to every PHONE transport's callStateQuery ONCE at its own launch (device
++    // boot) and does NOT reliably re-subscribe if a transport was absent then. presage login is slow and
++    // flaky (the adopt-vs-reconnect bug: Signal shows online but only really connects on a manual toggle),
++    // so binding registration to login meant com.palm.signal.call was still absent at boot -> CallSynergizer
++    // got "com.palm.signal.call is not running", never retried, and incoming Signal calls never rang the
++    // Phone app (Telegram/WhatsApp won only because they log in fast). Registering here - decoupled from
++    // login - puts the service on the bus before the Phone app subscribes. callLunaInit(NULL) leaves
++    // g_account NULL (callStateQuery just returns empty lines until an account connects); presage_login
++    // later calls callLunaInit(account) which is idempotent for the service and only binds g_account.
++    callLunaInit(NULL);
+     return TRUE;
+ }
+ 
+diff --git a/src/c/presage.h b/src/c/presage.h
+index c956fa9..83a55b8 100755
+--- a/src/c/presage.h
++++ b/src/c/presage.h
+@@ -35,6 +35,9 @@ void presage_rust_drop_attachment(RustAttachmentPtr);
+ void presage_rust_get_group_members(PurpleAccount *, RustRuntimePtr, RustChannelPtr, const char *);
+ void presage_rust_get_profile(PurpleAccount *, RustRuntimePtr, RustChannelPtr, const char *);
+ void presage_rust_list_groups(PurpleAccount *, RustRuntimePtr, RustChannelPtr);
++void presage_rust_place_call(PurpleAccount *, RustRuntimePtr, RustChannelPtr, const char *); /* outgoing call: callee address */
++void presage_rust_hangup_call(PurpleAccount *, RustRuntimePtr, RustChannelPtr, const char *, uint64_t); /* hang up: callee address + call_id */
++void presage_rust_accept_call(PurpleAccount *, RustRuntimePtr, RustChannelPtr, uint64_t); /* accept incoming: call_id -> engine sends rtp-data Accepted */
+ // webOS reactions (SEND): transmit a reaction the user placed from the app. (peer, target sent timestamp, emoji, remove flag)
+ void presage_rust_send_reaction(PurpleAccount *, RustRuntimePtr, RustChannelPtr, const char *peer, uint64_t target_ts, const char *emoji, int remove);
+ 
+@@ -42,6 +45,12 @@ void presage_rust_send_reaction(PurpleAccount *, RustRuntimePtr, RustChannelPtr,
+ // load; deletes <purple_user_dir()>/presage/<username>.db3 (+ sqlite sidecars) for the removed account.
+ void presage_account_removed_cb(PurpleAccount *account, void *unused);
+ 
++// call.c - Signal calling: the com.palm.signal.call LS2 service the Phone app uses for Signal calls.
++// presage_handle_call_state is called from the Rust receive and command loops.
++void callLunaInit(PurpleAccount *account);
++void callLunaShutdown(PurpleAccount *account);
++void presage_handle_call_state(PurpleAccount *account, const char *who, const char *name, uint32_t state, uint64_t call_id);
++
+ extern RustRuntimePtr rust_runtime;
+ 
+ // structures for receiving messages from rust
+diff --git a/src/rust/Cargo.lock b/src/rust/Cargo.lock
+index 8fbef92..52b88c0 100644
+--- a/src/rust/Cargo.lock
++++ b/src/rust/Cargo.lock
+@@ -2414,6 +2414,8 @@ dependencies = [
+  "presage",
+  "presage-store-sqlite",
+  "reqwest 0.12.28",
++ "serde",
++ "serde_json",
+  "tokio",
+  "tracing",
+  "tracing-core",
+diff --git a/src/rust/Cargo.toml b/src/rust/Cargo.toml
+index f63f809..e3797a8 100755
+--- a/src/rust/Cargo.toml
++++ b/src/rust/Cargo.toml
+@@ -22,6 +22,8 @@ chrono = { version = "0.4", default-features = false, features = ["serde", "cloc
+ #stdint = "0.2" # TODO: find out how to use this for more reliable type widths
+ # these are mentioned in https://github.com/whisperfish/presage/blob/f74b96e/Cargo.lock
+ reqwest = { version = "0.12.28", default-features = false, features = [] }
++serde = { version = "1", features = ["derive"] }
++serde_json = "1"
+ hyper-util = "0.1.20"
+ itertools = "*"
+ # these version numbers are taken from https://github.com/whisperfish/presage/blob/f74b96e/presage-cli/Cargo.toml
+@@ -30,7 +32,7 @@ tracing-core = "0.1"
+ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+ futures = "0.3"
+ hex = "0.4"
+-tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "io-std", "io-util"] }
++tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "io-std", "io-util", "time"] }
+ 
+ # https://github.com/johnthagen/min-sized-rust
+ [profile.release]
+diff --git a/src/rust/src/bridge.rs b/src/rust/src/bridge.rs
+index 24edc1a..4d365cf 100755
+--- a/src/rust/src/bridge.rs
++++ b/src/rust/src/bridge.rs
+@@ -112,6 +112,15 @@ extern "C" {
+         who: *const std::os::raw::c_char,
+     ) -> *const std::os::raw::c_char;
+ 
++    // implemented by call.c - push a Signal call state to the com.palm.signal.call LS2 service
++    fn presage_handle_call_state(
++        account: *mut crate::bridge_structs::PurpleAccount,
++        who: *const std::os::raw::c_char,
++        name: *const std::os::raw::c_char,
++        state: u32,
++        call_id: u64,
++    );
++
+     // implemented by receive_text.c - emit the cross-prpl "webos-im-reaction" signal.
+     fn presage_emit_reaction(
+         account: *mut crate::bridge_structs::PurpleAccount,
+@@ -138,6 +147,33 @@ extern "C" {
+     );
+ }
+ 
++// Signal call states pushed to the Phone app's com.palm.signal.call service (must match call.c).
++pub const CALL_STATE_INCOMING: u32 = 0;
++pub const CALL_STATE_ENDED: u32 = 1; // remote hung up / call ended
++#[allow(dead_code)] // call.c handles it; nothing on this side reports a decline yet
++pub const CALL_STATE_DECLINED: u32 = 2;
++pub const CALL_STATE_BUSY: u32 = 3;
++pub const CALL_STATE_ACTIVE: u32 = 4; // peer answered OUR outgoing call -> connected
++pub const CALL_STATE_DIALING: u32 = 5; // we placed an outgoing call (Offer sent) -> ringing peer
++
++// Push a Signal call's state to the Phone app through call.c (thread-safe: call.c hops to the
++// main thread).
++pub fn handle_call_state(
++    account: *const crate::bridge_structs::PurpleAccount,
++    who: Option<String>,
++    name: Option<String>,
++    state: u32,
++    call_id: u64,
++) {
++    let who = who.and_then(|s| std::ffi::CString::new(s).ok());
++    let name = name.and_then(|s| std::ffi::CString::new(s).ok());
++    let who_p = who.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
++    let name_p = name.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
++    unsafe {
++        presage_handle_call_state(account as *mut crate::bridge_structs::PurpleAccount, who_p, name_p, state, call_id);
++    }
++}
++
+ // webOS reactions: forward a Signal reaction to the transport via the "webos-im-reaction" signal.
+ // target_id is the reacted-to message's sent timestamp (its serviceMessageId); sender is the reactor's
+ // UUID; an empty emoji ("") means the reaction was removed.
+@@ -389,6 +425,9 @@ pub unsafe extern "C" fn presage_rust_main(
+ 
+     // create a channel for asynchronous communication of commands c → rust
+     let (tx, rx) = tokio::sync::mpsc::channel(32);
++    // give the call media bridge a clone so its per-call reader thread can enqueue outgoing
++    // CallMessage Answer/IceUpdate for the command loop (which owns the Manager) to send.
++    crate::call_bridge::set_command_sender(tx.clone());
+     // put the sender into a box so it can live in the C part
+     let tx_box = Box::new(tx);
+     append_message(Message {
+diff --git a/src/rust/src/bridge_commands.rs b/src/rust/src/bridge_commands.rs
+index 0dcc5a7..b764731 100755
+--- a/src/rust/src/bridge_commands.rs
++++ b/src/rust/src/bridge_commands.rs
+@@ -55,6 +55,57 @@ pub unsafe extern "C" fn presage_rust_whoami(
+     send_cmd(account, rt, tx, cmd);
+ }
+ 
++/// Place an OUTGOING Signal call to `c_callee` (the dialer's address, i.e. the Signal UUID). The
++/// command loop resolves the recipient + identity keys, has the call bridge generate our keypair,
++/// and sends the RingRTC Offer. call.c invokes this from its LS2 `dial` handler.
++#[no_mangle]
++pub unsafe extern "C" fn presage_rust_place_call(
++    account: *mut crate::bridge_structs::PurpleAccount,
++    rt: *mut tokio::runtime::Runtime,
++    tx: *mut tokio::sync::mpsc::Sender<crate::structs::Cmd>,
++    c_callee: *const std::os::raw::c_char,
++) {
++    let callee = match std::ffi::CStr::from_ptr(c_callee).to_str() {
++        Ok(s) => s.to_string(),
++        Err(_) => return,
++    };
++    let cmd = crate::structs::Cmd::PlaceCall { callee };
++    send_cmd(account, rt, tx, cmd);
++}
++
++/// The user tapped Answer on an incoming call: tell the media engine to emit the RingRTC rtp-data
++/// `Accepted` so the caller connects (stops ringing + ungates audio). Local only, no callee needed.
++#[no_mangle]
++pub unsafe extern "C" fn presage_rust_accept_call(
++    account: *mut crate::bridge_structs::PurpleAccount,
++    rt: *mut tokio::runtime::Runtime,
++    tx: *mut tokio::sync::mpsc::Sender<crate::structs::Cmd>,
++    call_id: u64,
++) {
++    let cmd = crate::structs::Cmd::AcceptCall { call_id };
++    send_cmd(account, rt, tx, cmd);
++}
++
++/// The user hung up: send the peer a Hangup for `call_id` and tear down our media engine. `c_callee`
++/// is the peer's Signal UUID (the dialer's call address).
++#[no_mangle]
++pub unsafe extern "C" fn presage_rust_hangup_call(
++    account: *mut crate::bridge_structs::PurpleAccount,
++    rt: *mut tokio::runtime::Runtime,
++    tx: *mut tokio::sync::mpsc::Sender<crate::structs::Cmd>,
++    c_callee: *const std::os::raw::c_char,
++    call_id: u64,
++) {
++    let callee = match std::ffi::CStr::from_ptr(c_callee).to_str() {
++        Ok(s) => s.trim().to_string(),
++        Err(_) => return,
++    };
++    // Pass the raw address through - it may be a UUID or (for an outgoing call reported under the dialed
++    // number) an E.164. The command handler resolves it, so hangup works either way.
++    let cmd = crate::structs::Cmd::HangupCall { callee, call_id };
++    send_cmd(account, rt, tx, cmd);
++}
++
+ // TODO: wire this up completely
+ #[no_mangle]
+ pub unsafe extern "C" fn presage_rust_list_groups(
+diff --git a/src/rust/src/call_bridge.rs b/src/rust/src/call_bridge.rs
+new file mode 100644
+index 0000000..cd32b77
+--- /dev/null
++++ b/src/rust/src/call_bridge.rs
+@@ -0,0 +1,533 @@
++//! Signal 1:1 call media bridge (presage side).
++//!
++//! Runs the signal-call-media engine (built and installed by its own recipe, from
++//! luneos-synergy-connectors im/signal/calling/media) as a child process for each call and relays
++//! the RingRTC signaling both ways:
++//!
++//!   incoming Offer   --> decode ConnectionParametersV4 (call_media.rs)
++//!                        generate our ephemeral X25519 private key + ICE ufrag/pwd
++//!                        spawn the engine with --answer, feed RELAY + START
++//!                        engine reports PUB  -> send CallMessage Answer   (encode_answer_opaque)
++//!                        engine reports CAND -> send CallMessage IceUpdate (encode_ice_opaque)
++//!   outgoing call    --> place_call: our key via a short-lived engine PREPARE, Offer sent by core.rs
++//!                        on_answer: spawn the engine with --caller, feed RELAY + START
++//!   incoming IceUpdate --> decode_ice_opaque -> feed the engine "RCAND <candidate>"
++//!   user answered    --> "ACCEPT <call_id>": the engine opens the mic and sends RingRTC's Accepted
++//!   hangup/busy      --> "STOP" and reap the engine
++//!
++//! The engine does the X25519 DH, the AEAD_AES_256_GCM SRTP keying, ICE, Opus and the PulseAudio
++//! I/O; this side is signaling only. Sends go through the command channel (Cmd::SendCall*) so the
++//! command loop, which owns the Manager, does the manager.send_message.
++
++use std::collections::{HashMap, HashSet};
++use std::io::{BufRead, BufReader, Read, Write};
++use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
++use std::sync::{Mutex, OnceLock};
++
++use crate::structs::Cmd;
++use presage::libsignal_service::prelude::Uuid;
++
++/// The media engine. The recipe sets SIGNAL_MEDIA_ENGINE to ${libexecdir}/signal-call-media.
++const SIGNAL_MEDIA_ENGINE: &str = match option_env!("SIGNAL_MEDIA_ENGINE") {
++    Some(p) => p,
++    None => "/usr/libexec/signal-call-media",
++};
++
++/// Command sender, stashed from presage_rust_main, so a per-call reader thread can enqueue the
++/// Answer/IceUpdate for the command loop (which owns the Manager) to send.
++static CMD_TX: OnceLock<Mutex<Option<tokio::sync::mpsc::Sender<Cmd>>>> = OnceLock::new();
++
++struct CallProc {
++    child: Child,
++    stdin: ChildStdin,
++}
++/// Running engines keyed by RingRTC call_id.
++static CALLS: OnceLock<Mutex<HashMap<u64, CallProc>>> = OnceLock::new();
++
++fn calls() -> &'static Mutex<HashMap<u64, CallProc>> {
++    CALLS.get_or_init(|| Mutex::new(HashMap::new()))
++}
++
++/// Signal's STUN/TURN servers from /v2/calling/relays (see ice.rs), fetched at login and before an
++/// outgoing call, and handed to every engine as RELAY lines. Without them the engine only has host
++/// candidates and a peer outside the LAN cannot be reached.
++static ICE_SERVERS: OnceLock<Mutex<Vec<crate::ice::IceServer>>> = OnceLock::new();
++fn ice_servers() -> &'static Mutex<Vec<crate::ice::IceServer>> {
++    ICE_SERVERS.get_or_init(|| Mutex::new(Vec::new()))
++}
++
++/// When the ICE servers were fetched and when to fetch them again: halfway through the lifetime the
++/// server gave the credentials, or after an hour if it gave none.
++static ICE_REFRESH_AT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
++
++/// Keep the ICE servers for the engines started from now on. `ttl` is the credentials' lifetime in
++/// seconds, if the server said.
++pub fn set_ice_servers(servers: Vec<crate::ice::IceServer>, ttl: Option<u64>) {
++    *ice_servers().lock().unwrap() = servers;
++    let refresh_after = std::time::Duration::from_secs(ttl.map_or(3600, |t| t / 2));
++    *ICE_REFRESH_AT.lock().unwrap() = Some(std::time::Instant::now() + refresh_after);
++}
++
++/// True if there are no ICE servers yet or their credentials are due for a refresh.
++pub fn ice_servers_need_refresh() -> bool {
++    ICE_REFRESH_AT.lock().unwrap().is_none_or(|at| std::time::Instant::now() >= at)
++}
++
++/// Write the STUN/TURN servers as `RELAY` lines. They must precede `START`, as the engine sets them
++/// on the nice agent before it gathers candidates.
++fn write_relay_lines<W: Write>(w: &mut W) -> std::io::Result<()> {
++    let servers = ice_servers().lock().unwrap();
++    for s in servers.iter() {
++        match s.kind {
++            crate::ice::IceKind::Stun => writeln!(w, "RELAY stun {} {}", s.host, s.port)?,
++            crate::ice::IceKind::Turn => writeln!(
++                w,
++                "RELAY turn {} {} {} {} {}",
++                s.host, s.port, s.username, s.password, s.transport
++            )?,
++        }
++    }
++    Ok(())
++}
++
++fn cmd_tx_slot() -> &'static Mutex<Option<tokio::sync::mpsc::Sender<Cmd>>> {
++    CMD_TX.get_or_init(|| Mutex::new(None))
++}
++
++/// Called once from presage_rust_main with a clone of the command channel sender.
++pub fn set_command_sender(tx: tokio::sync::mpsc::Sender<Cmd>) {
++    *cmd_tx_slot().lock().unwrap() = Some(tx);
++}
++
++/// Enqueue a Cmd for the command loop from an engine's reader thread (no async context there, so
++/// blocking_send is right).
++fn enqueue(cmd: Cmd) {
++    if let Some(tx) = cmd_tx_slot().lock().unwrap().as_ref() {
++        let _ = tx.blocking_send(cmd);
++    }
++}
++
++/// Enqueue a Cmd from async code (the receive loop), where blocking_send would panic.
++fn enqueue_async(cmd: Cmd) {
++    if let Some(tx) = cmd_tx_slot().lock().unwrap().as_ref() {
++        let _ = tx.try_send(cmd);
++    }
++}
++
++/// Ask the command loop to hang up `call_id` with `peer`.
++pub fn request_hangup(peer: Uuid, call_id: u64) {
++    enqueue_async(Cmd::HangupCall { callee: peer.to_string(), call_id });
++}
++
++/// Answer `call_id` from `peer` with Busy, and remember it so its Hangup is not reported missed again.
++pub fn request_busy(peer: Uuid, call_id: u64) {
++    let mut replied = busy_replied().lock().unwrap();
++    if !replied.contains(&call_id) {
++        if replied.len() >= 16 {
++            replied.remove(0);
++        }
++        replied.push(call_id);
++    }
++    drop(replied);
++    enqueue_async(Cmd::SendCallBusy { uuid: peer, call_id });
++}
++
++/// The calls answered Busy, most recent last (a short list: only their Hangup is looked up).
++static BUSY_REPLIED: OnceLock<Mutex<Vec<u64>>> = OnceLock::new();
++fn busy_replied() -> &'static Mutex<Vec<u64>> {
++    BUSY_REPLIED.get_or_init(|| Mutex::new(Vec::new()))
++}
++/// True (once) if `call_id` was answered Busy.
++pub fn take_busy_replied(call_id: u64) -> bool {
++    let mut replied = busy_replied().lock().unwrap();
++    match replied.iter().position(|&id| id == call_id) {
++        Some(i) => {
++            replied.remove(i);
++            true
++        }
++        None => false,
++    }
++}
++
++/// True if a call other than `call_id` is up: its engine is still running, or it is an outgoing call
++/// still waiting for its Answer (for at most two minutes, so a lost reply cannot block every later
++/// call).
++pub fn busy_with_other_call(call_id: u64) -> bool {
++    let engine = calls()
++        .lock()
++        .unwrap()
++        .iter_mut()
++        .any(|(&id, cp)| id != call_id && matches!(cp.child.try_wait(), Ok(None)));
++    engine
++        || pending()
++            .lock()
++            .unwrap()
++            .iter()
++            .any(|(&id, p)| id != call_id && p.created.elapsed() < std::time::Duration::from_secs(120))
++}
++
++fn hex(b: &[u8]) -> String {
++    b.iter().map(|x| format!("{:02x}", x)).collect()
++}
++fn unhex(s: &str) -> Option<Vec<u8>> {
++    if s.len() % 2 != 0 {
++        return None;
++    }
++    (0..s.len())
++        .step_by(2)
++        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
++        .collect()
++}
++/// `n` bytes from the kernel's CSPRNG, or None: a call is never set up with predictable keys.
++fn rand_bytes(n: usize) -> Option<Vec<u8>> {
++    let mut buf = vec![0u8; n];
++    std::fs::File::open("/dev/urandom").ok()?.read_exact(&mut buf).ok()?;
++    Some(buf)
++}
++/// Random ICE token of `n` hex chars (a valid RFC5245 ice-char subset).
++fn rand_token(n: usize) -> Option<String> {
++    let s = hex(&rand_bytes(n.div_ceil(2))?);
++    Some(s[..n].to_string())
++}
++
++/// The peer of each call we know about (incoming from the Offer, outgoing from place_call), so the
++/// command loop can hang a call up by its id alone.
++static PEERS: OnceLock<Mutex<HashMap<u64, Uuid>>> = OnceLock::new();
++fn peers() -> &'static Mutex<HashMap<u64, Uuid>> {
++    PEERS.get_or_init(|| Mutex::new(HashMap::new()))
++}
++/// The peer of `call_id`, if the call is still known.
++pub fn peer(call_id: u64) -> Option<Uuid> {
++    peers().lock().unwrap().get(&call_id).copied()
++}
++
++/// Spawn the engine in `mode` with its stdin and stdout piped. Its stderr is the transport's.
++fn spawn_engine(mode: &str) -> Result<(Child, ChildStdin, ChildStdout), String> {
++    let mut child = Command::new(SIGNAL_MEDIA_ENGINE)
++        .arg(mode)
++        .stdin(Stdio::piped())
++        .stdout(Stdio::piped())
++        .spawn()
++        .map_err(|e| format!("could not start {SIGNAL_MEDIA_ENGINE}: {e}"))?;
++    match (child.stdin.take(), child.stdout.take()) {
++        (Some(stdin), Some(stdout)) => Ok((child, stdin, stdout)),
++        _ => {
++            let _ = child.kill();
++            let _ = child.wait();
++            Err("the engine has no stdin/stdout".to_string())
++        }
++    }
++}
++
++/// Feed a freshly spawned engine its RELAY lines and START. On failure the engine is killed.
++fn start_engine(child: &mut Child, stdin: &mut ChildStdin, start: &str) -> Result<(), String> {
++    let r = write_relay_lines(stdin)
++        .and_then(|_| stdin.write_all(start.as_bytes()))
++        .and_then(|_| stdin.flush());
++    if let Err(e) = r {
++        let _ = child.kill();
++        let _ = child.wait();
++        return Err(format!("could not start the engine: {e}"));
++    }
++    Ok(())
++}
++
++/// Start media for an incoming call, so ICE is ready by the time the user answers. `caller_uuid` is
++/// who we send Answer/ICE back to.
++///
++/// `caller_id` / `callee_id` are the 32-byte raw Curve25519 identity public keys bound into the SRTP
++/// KDF (RingRTC negotiate_srtp_keys: caller = the offerer's ACI identity key, callee = ours). If
++/// either is missing the call still connects, but the SRTP keys will not match the peer's: no audio.
++pub fn start_incoming(
++    caller_uuid: Uuid,
++    call_id: u64,
++    offer_opaque: &[u8],
++    caller_id: &[u8],
++    callee_id: &[u8],
++) -> Result<(), String> {
++    peers().lock().unwrap().insert(call_id, caller_uuid);
++    if calls().lock().unwrap().contains_key(&call_id) {
++        return Ok(()); // the same Offer delivered twice
++    }
++    let params = crate::call_media::decode_offer_opaque(offer_opaque)
++        .ok_or_else(|| "could not decode the offer".to_string())?;
++    let no_random = || "no random bytes".to_string();
++    let priv32 = rand_bytes(32).ok_or_else(no_random)?;
++    let our_ufrag = rand_token(4).ok_or_else(no_random)?;
++    let our_pwd = rand_token(24).ok_or_else(no_random)?;
++
++    let (mut child, mut stdin, stdout) = spawn_engine("--answer")?;
++    let start = format!(
++        "START {} {} {} {} {} {} {} {}\n",
++        hex(&priv32),
++        hex(&params.public_key),
++        hex(caller_id),
++        hex(callee_id),
++        our_ufrag,
++        our_pwd,
++        params.ice_ufrag,
++        params.ice_pwd,
++    );
++    start_engine(&mut child, &mut stdin, &start)?;
++
++    // Reader thread: turn the engine's PUB/CAND lines into outgoing CallMessages.
++    std::thread::spawn(move || {
++        for line in BufReader::new(stdout).lines() {
++            let line = match line { Ok(l) => l, Err(_) => break };
++            if let Some(pubhex) = line.strip_prefix("PUB ") {
++                if let Some(pk) = unhex(pubhex.trim()) {
++                    let opaque = crate::call_media::encode_answer_opaque(&pk, &our_ufrag, &our_pwd);
++                    enqueue(Cmd::SendCallAnswer { uuid: caller_uuid, call_id, opaque });
++                }
++            } else if let Some(cand) = line.strip_prefix("CAND ") {
++                let opaque = crate::call_media::encode_ice_opaque(cand.trim());
++                enqueue(Cmd::SendCallIce { uuid: caller_uuid, call_id, opaque });
++            }
++            // READY / AUDIOD / ERR are informational; call.c reports the call to audiod.
++        }
++    });
++
++    calls().lock().unwrap().insert(call_id, CallProc { child, stdin });
++    Ok(())
++}
++
++// ---------------------------------------------------------------------------------------------
++// OUTGOING (caller) side.
++//
++// Unlike an incoming call (where the Offer already carries the peer's key + ICE creds so the engine
++// starts immediately), a caller sends its Offer FIRST and only learns the peer's key/creds from the
++// Answer. So place_call() generates our ephemeral keypair + ICE creds, derives our public key via a
++// throwaway engine PREPARE (reusing the engine's X25519), and returns the Offer opaque for the
++// command loop to send. The engine proper is not started until on_answer().
++// ---------------------------------------------------------------------------------------------
++
++/// Outgoing call awaiting the peer's Answer (keyed by call_id).
++struct Pending {
++    callee: Uuid,          // who we send the Offer/ICE to (and receive the Answer from)
++    priv32: Vec<u8>,       // our ephemeral X25519 private key
++    our_ufrag: String,
++    our_pwd: String,
++    caller_id: Vec<u8>,    // OUR identity key (we are the caller) - bound into the SRTP KDF
++    callee_id: Vec<u8>,    // the peer's identity key
++    buffered_ice: Vec<Vec<u8>>, // peer IceUpdate opaques that arrived before the engine started
++    created: std::time::Instant,
++}
++static PENDING: OnceLock<Mutex<HashMap<u64, Pending>>> = OnceLock::new();
++fn pending() -> &'static Mutex<HashMap<u64, Pending>> {
++    PENDING.get_or_init(|| Mutex::new(HashMap::new()))
++}
++
++/// call_ids we placed (OUTGOING). Kept until the call is stopped so the receive loop can tell an
++/// outgoing call's hangup apart from a genuinely missed INCOMING call (no "Missed voice call" line).
++static OUTGOING: OnceLock<Mutex<HashSet<u64>>> = OnceLock::new();
++fn outgoing() -> &'static Mutex<HashSet<u64>> {
++    OUTGOING.get_or_init(|| Mutex::new(HashSet::new()))
++}
++/// True if this call_id is one WE placed (so its hangup is not a missed incoming call).
++pub fn is_outgoing_call(call_id: u64) -> bool {
++    outgoing().lock().unwrap().contains(&call_id)
++}
++
++/// For an OUTGOING call, the exact address the user dialed (e.g. an E.164 number) as opposed to the
++/// Signal UUID the call goes to. The Phone app keys its "Connecting" card on the dialed address, so
++/// every state pushed for this call must report that address too, or it shows a second card. Keyed
++/// by call_id; set in place_call, read in the state pushes, cleared in stop.
++static DIALED: OnceLock<Mutex<HashMap<u64, String>>> = OnceLock::new();
++fn dialed() -> &'static Mutex<HashMap<u64, String>> {
++    DIALED.get_or_init(|| Mutex::new(HashMap::new()))
++}
++pub fn set_dialed_address(call_id: u64, addr: String) {
++    dialed().lock().unwrap().insert(call_id, addr);
++}
++/// The dialed address for an outgoing call_id, or None (incoming / unknown).
++pub fn dialed_address(call_id: u64) -> Option<String> {
++    dialed().lock().unwrap().get(&call_id).cloned()
++}
++
++/// call_ids the user has ACCEPTED on THIS (linked) device. LuneOS is a secondary Signal device; an
++/// incoming call rings this device AND the user's primary phone. When we accept, the caller broadcasts
++/// `Hangup{type=ACCEPTED, device_id=<us>}` to the account so the OTHER devices stop ringing - but Signal
++/// fans it out to us too. We must NOT tear down our own accepted call on that notification.
++static ACCEPTED: OnceLock<Mutex<HashSet<u64>>> = OnceLock::new();
++fn accepted() -> &'static Mutex<HashSet<u64>> {
++    ACCEPTED.get_or_init(|| Mutex::new(HashSet::new()))
++}
++/// True if the user accepted this call_id on this device (so a HANGUP_ACCEPTED for it is our own).
++pub fn was_accepted(call_id: u64) -> bool {
++    accepted().lock().unwrap().contains(&call_id)
++}
++
++/// Derive our X25519 public key from `priv32` by driving a throwaway engine PREPARE. Returns the
++/// 32-byte public key, or None on failure. Short-lived: the child exits when we drop its stdin.
++fn derive_pubkey(priv32: &[u8]) -> Option<Vec<u8>> {
++    let (mut child, mut stdin, stdout) = spawn_engine("--caller").ok()?;
++    let _ = writeln!(stdin, "PREPARE {}", hex(priv32));
++    let _ = stdin.flush();
++    let mut pub_hex = None;
++    for line in BufReader::new(stdout).lines() {
++        let line = match line { Ok(l) => l, Err(_) => break };
++        if let Some(p) = line.strip_prefix("PUB ") {
++            pub_hex = Some(p.trim().to_string());
++            break;
++        }
++        if line.starts_with("ERR") {
++            break;
++        }
++    }
++    drop(stdin); // EOF -> engine leaves its IPC loop and exits
++    let _ = child.kill();
++    let _ = child.wait();
++    pub_hex.and_then(|h| unhex(&h))
++}
++
++/// Place an OUTGOING call. Generates our ephemeral keypair + ICE creds, stores pending state (so
++/// on_answer can start media), and returns (call_id, offer_opaque) for the command loop to send as
++/// a CallMessage Offer to `callee`.
++pub fn place_call(callee: Uuid, caller_id: Vec<u8>, callee_id: Vec<u8>) -> Result<(u64, Vec<u8>), String> {
++    let no_random = || "no random bytes".to_string();
++    let priv32 = rand_bytes(32).ok_or_else(no_random)?;
++    let pub32 = derive_pubkey(&priv32).ok_or_else(|| "could not derive our public key".to_string())?;
++    let our_ufrag = rand_token(4).ok_or_else(no_random)?;
++    let our_pwd = rand_token(24).ok_or_else(no_random)?;
++    // RingRTC call_id is a random u64.
++    let mut idb = [0u8; 8];
++    idb.copy_from_slice(&rand_bytes(8).ok_or_else(no_random)?);
++    let call_id = u64::from_be_bytes(idb);
++
++    let opaque = crate::call_media::encode_offer_opaque(&pub32, &our_ufrag, &our_pwd, 2_000_000);
++    pending().lock().unwrap().insert(
++        call_id,
++        Pending {
++            callee,
++            priv32,
++            our_ufrag,
++            our_pwd,
++            caller_id,
++            callee_id,
++            buffered_ice: Vec::new(),
++            created: std::time::Instant::now(),
++        },
++    );
++    outgoing().lock().unwrap().insert(call_id);
++    peers().lock().unwrap().insert(call_id, callee);
++    Ok((call_id, opaque))
++}
++
++/// The peer ANSWERED our outgoing call: decode their ConnectionParametersV4, start the media engine
++/// in caller role, wire its CAND lines to outgoing IceUpdates, and flush any early remote ICE.
++/// Ok(false) if `call_id` is not an outgoing call waiting for its Answer.
++pub fn on_answer(call_id: u64, answer_opaque: &[u8]) -> Result<bool, String> {
++    let p = match pending().lock().unwrap().remove(&call_id) {
++        Some(p) => p,
++        None => return Ok(false), // not our outgoing call (or already started)
++    };
++    let params = crate::call_media::decode_offer_opaque(answer_opaque)
++        .ok_or_else(|| "could not decode the answer".to_string())?;
++
++    let (mut child, mut stdin, stdout) = spawn_engine("--caller")?;
++    // Caller START: same 8 fields as the answerer, but the engine (--caller) flips RX/TX keys, and
++    // remote_pub / remote_ufrag / remote_pwd come from the ANSWER; caller_id = OUR identity.
++    let start = format!(
++        "START {} {} {} {} {} {} {} {}\n",
++        hex(&p.priv32),
++        hex(&params.public_key),
++        hex(&p.caller_id),
++        hex(&p.callee_id),
++        p.our_ufrag,
++        p.our_pwd,
++        params.ice_ufrag,
++        params.ice_pwd,
++    );
++    start_engine(&mut child, &mut stdin, &start)?;
++
++    // Reader thread: the caller only relays its local candidates (it already sent the Offer; the
++    // engine emits no PUB in caller mode).
++    let callee = p.callee;
++    std::thread::spawn(move || {
++        for line in BufReader::new(stdout).lines() {
++            let line = match line { Ok(l) => l, Err(_) => break };
++            if let Some(cand) = line.strip_prefix("CAND ") {
++                let opaque = crate::call_media::encode_ice_opaque(cand.trim());
++                enqueue(Cmd::SendCallIce { uuid: callee, call_id, opaque });
++            }
++        }
++    });
++
++    // Flush any remote ICE that arrived between our Offer and this Answer.
++    for op in &p.buffered_ice {
++        if let Some(cand) = crate::call_media::decode_ice_opaque(op) {
++            let _ = writeln!(stdin, "RCAND {cand}");
++        }
++    }
++    let _ = stdin.flush();
++
++    calls().lock().unwrap().insert(call_id, CallProc { child, stdin });
++    Ok(true)
++}
++
++/// Feed the engine one or more remote ICE candidates decoded from incoming IceUpdate opaques. If
++/// the call is still a pending OUTGOING one (engine not started until the Answer), buffer them.
++pub fn feed_remote_ice(call_id: u64, candidate_opaques: &[Vec<u8>]) {
++    {
++        let mut pend = pending().lock().unwrap();
++        if let Some(p) = pend.get_mut(&call_id) {
++            p.buffered_ice.extend_from_slice(candidate_opaques);
++            return;
++        }
++    }
++    let mut guard = calls().lock().unwrap();
++    if let Some(cp) = guard.get_mut(&call_id) {
++        for op in candidate_opaques {
++            if let Some(cand) = crate::call_media::decode_ice_opaque(op) {
++                let _ = writeln!(cp.stdin, "RCAND {cand}");
++            }
++        }
++        let _ = cp.stdin.flush();
++    }
++}
++
++/// User accepted an incoming call: tell the engine to open the mic and start sending the RingRTC
++/// rtp-data `Accepted` message. Until the caller receives it, RingRTC keeps the caller ringing and
++/// gates all media. Returns false if there is no engine for the call, which then cannot connect.
++pub fn accept(call_id: u64) -> bool {
++    let mut guard = calls().lock().unwrap();
++    let cp = match guard.get_mut(&call_id) {
++        Some(cp) => cp,
++        None => return false,
++    };
++    if writeln!(cp.stdin, "ACCEPT {call_id}").and_then(|_| cp.stdin.flush()).is_err() {
++        return false; // the engine has exited
++    }
++    accepted().lock().unwrap().insert(call_id);
++    true
++}
++
++/// Tear down the engine for a call (hangup/busy). Also drops any pending outgoing state (the peer
++/// declined/was-busy before answering, so the engine was never started).
++pub fn stop(call_id: u64) {
++    pending().lock().unwrap().remove(&call_id);
++    outgoing().lock().unwrap().remove(&call_id);
++    accepted().lock().unwrap().remove(&call_id);
++    dialed().lock().unwrap().remove(&call_id);
++    peers().lock().unwrap().remove(&call_id);
++    let cp = calls().lock().unwrap().remove(&call_id);
++    if let Some(CallProc { mut child, mut stdin }) = cp {
++        let _ = writeln!(stdin, "STOP");
++        drop(stdin); // EOF -> engine leaves its stdin loop and calls signal_media_stop()
++        // Reap off-thread so we never block the receive loop; kill as a backstop.
++        std::thread::spawn(move || {
++            std::thread::sleep(std::time::Duration::from_millis(1500));
++            let _ = child.kill();
++            let _ = child.wait();
++        });
++    }
++}
++
++/// Stop every call (the account is going offline).
++pub fn stop_all() {
++    let mut ids: Vec<u64> = calls().lock().unwrap().keys().copied().collect();
++    ids.extend(pending().lock().unwrap().keys().copied());
++    for id in ids {
++        stop(id);
++    }
++}
+diff --git a/src/rust/src/call_media.rs b/src/rust/src/call_media.rs
+new file mode 100644
+index 0000000..3cf69c2
+--- /dev/null
++++ b/src/rust/src/call_media.rs
+@@ -0,0 +1,201 @@
++//! Signal 1:1 call MEDIA signaling helpers (presage side).
++//!
++//! Encodes/decodes the `opaque` bytes carried by the CallMessage Offer/Answer/IceUpdate - i.e.
++//! RingRTC's ConnectionParametersV4 and IceCandidate. Checked byte for byte against a real captured
++//! call (the tests below).
++//!
++//! Flow for an INCOMING call (we are the answerer):
++//!   1. decode_offer_opaque(offer.opaque) -> peer public_key + ice_ufrag/ice_pwd (+ bitrate).
++//!   2. media engine generates OUR X25519 keypair + ICE ufrag/pwd/candidates; SRTP keys come from
++//!      signal_negotiate_srtp_keys() (luneos-synergy-connectors im/signal/calling/media/srtp_kdf.c)
++//!      using the DH.
++//!   3. encode_answer_opaque(our_public_key, our_ufrag, our_pwd) -> send as a CallMessage Answer.
++//!   4. our local ICE candidates -> encode_ice_opaque(candidate_string) -> send as IceUpdate(s).
++//!   5. peer IceUpdates -> decode_ice_opaque -> feed to the media engine.
++//! No DTLS: SRTP is AEAD_AES_256_GCM keyed by the Curve25519 DH.
++
++/// Decoded ConnectionParametersV4 (the audio-relevant fields; video codecs are ignored).
++#[derive(Debug, Default, Clone)]
++pub struct ConnParamsV4 {
++    pub public_key: Vec<u8>,   // 32-byte Curve25519
++    pub ice_ufrag: String,
++    pub ice_pwd: String,
++    #[allow(dead_code)] // decoded for completeness; only the tests read it
++    pub max_bitrate_bps: u64,
++}
++
++fn put_varint(out: &mut Vec<u8>, mut v: u64) {
++    loop {
++        let mut b = (v & 0x7f) as u8;
++        v >>= 7;
++        if v != 0 { b |= 0x80; }
++        out.push(b);
++        if v == 0 { break; }
++    }
++}
++fn put_len_field(out: &mut Vec<u8>, field: u64, data: &[u8]) {
++    put_varint(out, (field << 3) | 2);
++    put_varint(out, data.len() as u64);
++    out.extend_from_slice(data);
++}
++
++fn read_varint(b: &[u8], i: &mut usize) -> Option<u64> {
++    let mut r = 0u64;
++    let mut s = 0;
++    loop {
++        let x = *b.get(*i)?;
++        *i += 1;
++        r |= ((x & 0x7f) as u64) << s;
++        s += 7;
++        if x & 0x80 == 0 { break; }
++        if s >= 64 { return None; }
++    }
++    Some(r)
++}
++
++enum Field<'a> { Len(u64, &'a [u8]), Var(u64, u64) }
++
++fn iter_fields(b: &[u8]) -> Vec<Field<'_>> {
++    let mut out = Vec::new();
++    let mut i = 0;
++    while i < b.len() {
++        let key = match read_varint(b, &mut i) { Some(k) => k, None => break };
++        let f = key >> 3;
++        match key & 7 {
++            2 => {
++                let ln = match read_varint(b, &mut i) { Some(l) => l as usize, None => break };
++                if i + ln > b.len() { break; }
++                out.push(Field::Len(f, &b[i..i + ln]));
++                i += ln;
++            }
++            0 => match read_varint(b, &mut i) { Some(v) => out.push(Field::Var(f, v)), None => break },
++            _ => break,
++        }
++    }
++    out
++}
++
++/// Offer/Answer opaque = message { ConnectionParametersV4 v4 = 4 }.
++pub fn decode_offer_opaque(op: &[u8]) -> Option<ConnParamsV4> {
++    for f in iter_fields(op) {
++        if let Field::Len(4, v4) = f {
++            let mut c = ConnParamsV4::default();
++            for g in iter_fields(v4) {
++                match g {
++                    Field::Len(1, b) => c.public_key = b.to_vec(),
++                    Field::Len(2, b) => c.ice_ufrag = String::from_utf8_lossy(b).into_owned(),
++                    Field::Len(3, b) => c.ice_pwd = String::from_utf8_lossy(b).into_owned(),
++                    Field::Var(5, v) => c.max_bitrate_bps = v,
++                    _ => {}
++                }
++            }
++            return Some(c);
++        }
++    }
++    None
++}
++
++/// Build OUR Answer opaque: message { ConnectionParametersV4 v4 = 4 { ... } }.
++///
++/// RingRTC uses the SAME ConnectionParametersV4 for the Offer AND the Answer, so the Answer must
++/// carry the SAME fields a real Offer does: field 4 (receive_video_codecs, the constant VideoCodec
++/// {1:8} we mirror from the captured reference) and field 5 (max_bitrate_bps). A stripped-down answer
++/// with only public_key/ufrag/pwd is rejected by a live Signal peer, which then hangs up within ~1s
++/// (the "disconnects right after accept" symptom) - the same reason encode_offer_opaque carries them.
++pub fn encode_answer_opaque(public_key: &[u8], ufrag: &str, pwd: &str) -> Vec<u8> {
++    encode_offer_opaque(public_key, ufrag, pwd, 2_000_000)
++}
++
++/// Build OUR Offer opaque (OUTGOING call): message { ConnectionParametersV4 v4 = 4 {
++///   public_key=1, ice_ufrag=2, ice_pwd=3, <field4 const>, max_bitrate_bps=5 } }.
++/// Same ConnectionParametersV4 as the Answer, plus the two fields a real RingRTC OFFER carries (the
++/// small field-4 sub-message and the max-bitrate) so a live Signal answerer accepts it.
++/// decode_offer_opaque round-trips fields 1/2/3/5.
++pub fn encode_offer_opaque(public_key: &[u8], ufrag: &str, pwd: &str, max_bitrate_bps: u64) -> Vec<u8> {
++    let mut v4 = Vec::new();
++    put_len_field(&mut v4, 1, public_key);
++    put_len_field(&mut v4, 2, ufrag.as_bytes());
++    put_len_field(&mut v4, 3, pwd.as_bytes());
++    // Field 4: the small nested message a real RingRTC offer includes (constant { 1: 8 } in the
++    // captured reference). Carried verbatim for interop; the answerer's decoder ignores it.
++    put_len_field(&mut v4, 4, &[0x08, 0x08]);
++    // Field 5: max audio bitrate (varint). Real offers advertise 2_000_000.
++    put_varint(&mut v4, (5 << 3) | 0);
++    put_varint(&mut v4, max_bitrate_bps);
++    let mut op = Vec::new();
++    put_len_field(&mut op, 4, &v4);
++    op
++}
++
++/// IceUpdate opaque = message { IceCandidate added = field 2 { string candidate = field 1 } }.
++pub fn decode_ice_opaque(op: &[u8]) -> Option<String> {
++    for f in iter_fields(op) {
++        if let Field::Len(_, inner) = f {
++            for g in iter_fields(inner) {
++                if let Field::Len(1, s) = g {
++                    return Some(String::from_utf8_lossy(s).into_owned());
++                }
++            }
++        }
++    }
++    None
++}
++
++/// Build an IceUpdate opaque from an SDP candidate string.
++pub fn encode_ice_opaque(candidate: &str) -> Vec<u8> {
++    let mut inner = Vec::new();
++    put_len_field(&mut inner, 1, candidate.as_bytes());
++    let mut op = Vec::new();
++    put_len_field(&mut op, 2, &inner);
++    op
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    fn unhex(s: &str) -> Vec<u8> {
++        (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
++    }
++    fn hex(b: &[u8]) -> String { b.iter().map(|x| format!("{:02x}", x)).collect() }
++
++    #[test]
++    fn decodes_real_offer() {
++        // Alan's real captured offer opaque (2026-07-21).
++        let offer = unhex("224a0a20364fb3e8d71d17b656aca498ca2c4e9ffacfab68b6a7255507a8ca1d5863736112044e6c506e1a18456762473838716f385845773870506e5572613956504658220208082880897a");
++        let c = decode_offer_opaque(&offer).unwrap();
++        assert_eq!(hex(&c.public_key), "364fb3e8d71d17b656aca498ca2c4e9ffacfab68b6a7255507a8ca1d58637361");
++        assert_eq!(c.ice_ufrag, "NlPn");
++        assert_eq!(c.ice_pwd, "EgbG88qo8XEw8pPnUra9VPFX");
++        assert_eq!(c.max_bitrate_bps, 2_000_000);
++    }
++
++    #[test]
++    fn answer_round_trips() {
++        let pk = unhex("07a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c");
++        let ans = encode_answer_opaque(&pk, "AbCd", "our24charpasswordxxxxxxxx");
++        let back = decode_offer_opaque(&ans).unwrap();
++        assert_eq!(back.public_key, pk);
++        assert_eq!(back.ice_ufrag, "AbCd");
++        assert_eq!(back.ice_pwd, "our24charpasswordxxxxxxxx");
++    }
++
++    #[test]
++    fn offer_round_trips() {
++        let pk = unhex("07a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c");
++        let off = encode_offer_opaque(&pk, "AbCd", "our24charpasswordxxxxxxxx", 2_000_000);
++        let back = decode_offer_opaque(&off).unwrap();
++        assert_eq!(back.public_key, pk);
++        assert_eq!(back.ice_ufrag, "AbCd");
++        assert_eq!(back.ice_pwd, "our24charpasswordxxxxxxxx");
++        assert_eq!(back.max_bitrate_bps, 2_000_000);
++    }
++
++    #[test]
++    fn ice_candidate_is_byte_identical() {
++        // A real captured IceUpdate opaque; decode + re-encode must reproduce it exactly.
++        let ice = unhex("127a0a7863616e6469646174653a333130383232383138382031207564702032313232323032383739203139322e3136382e3137382e34322035323937362074797020686f73742067656e65726174696f6e2030207566726167204e6c506e206e6574776f726b2d69642034206e6574776f726b2d636f7374203130");
++        let cand = decode_ice_opaque(&ice).unwrap();
++        assert!(cand.starts_with("candidate:3108228188 1 udp"));
++        assert_eq!(encode_ice_opaque(&cand), ice);
++    }
++}
+diff --git a/src/rust/src/core.rs b/src/rust/src/core.rs
+index d1854ac..d72ec28 100755
+--- a/src/rust/src/core.rs
++++ b/src/rust/src/core.rs
+@@ -189,7 +189,233 @@ async fn run<C: presage::store::Store + 'static>(
+             crate::attachment::get_attachment(account, manager, attachment_pointer, xfer).await;
+             Ok(true)
+         }
+-        crate::structs::Cmd::Exit {} => Ok(false),
++        crate::structs::Cmd::SendCallAnswer { uuid, call_id, opaque } => {
++            let cm = presage::proto::CallMessage {
++                answer: Some(presage::proto::call_message::Answer {
++                    id: Some(call_id),
++                    opaque: Some(opaque),
++                }),
++                ..Default::default()
++            };
++            send_call_message(&mut manager, account, uuid, cm, "Answer").await;
++            Ok(true)
++        }
++        crate::structs::Cmd::SendCallIce { uuid, call_id, opaque } => {
++            let cm = presage::proto::CallMessage {
++                ice_update: vec![presage::proto::call_message::IceUpdate {
++                    id: Some(call_id),
++                    opaque: Some(opaque),
++                }],
++                ..Default::default()
++            };
++            send_call_message(&mut manager, account, uuid, cm, "IceUpdate").await;
++            Ok(true)
++        }
++        crate::structs::Cmd::SendCallBusy { uuid, call_id } => {
++            let cm = presage::proto::CallMessage {
++                busy: Some(presage::proto::call_message::Busy { id: Some(call_id) }),
++                ..Default::default()
++            };
++            send_call_message(&mut manager, account, uuid, cm, "Busy").await;
++            Ok(true)
++        }
++        crate::structs::Cmd::HangupCall { callee, call_id } => {
++            // The peer of a call we know; otherwise the dialer-card address: a UUID for incoming, or
++            // the dialed E.164 for an outgoing call.
++            let uuid = match crate::call_bridge::peer(call_id) {
++                Some(u) => Some(u),
++                None => match presage::libsignal_service::prelude::Uuid::parse_str(&callee) {
++                    Ok(u) => Some(u),
++                    Err(_) => resolve_phone_to_uuid(&mut manager, &callee).await,
++                },
++            };
++            // Tell the peer the call is over (so their phone stops ringing / hangs up) ...
++            if let Some(uuid) = uuid {
++                let cm = presage::proto::CallMessage {
++                    hangup: Some(presage::proto::call_message::Hangup {
++                        id: Some(call_id),
++                        r#type: Some(0), // HANGUP_NORMAL
++                        device_id: None, // RingRTC sends none with a normal hangup
++                    }),
++                    ..Default::default()
++                };
++                send_call_message(&mut manager, account, uuid, cm, "Hangup").await;
++            }
++            // ... and tear down our local media engine (always, even if the address didn't resolve).
++            crate::call_bridge::stop(call_id);
++            Ok(true)
++        }
++        crate::structs::Cmd::AcceptCall { call_id } => {
++            // Tell the engine to emit the RingRTC rtp-data `Accepted`; no CallMessage is sent. With no
++            // engine (it could not start on the Offer) the call cannot connect: end it, for the caller
++            // too.
++            if !crate::call_bridge::accept(call_id) {
++                crate::bridge::purple_debug(
++                    account,
++                    crate::bridge_structs::PURPLE_DEBUG_ERROR,
++                    format!("call bridge: call {call_id} has no media engine, ending it\n"),
++                );
++                if let Some(uuid) = crate::call_bridge::peer(call_id) {
++                    let cm = presage::proto::CallMessage {
++                        hangup: Some(presage::proto::call_message::Hangup {
++                            id: Some(call_id),
++                            r#type: Some(0), // HANGUP_NORMAL
++                            device_id: None, // RingRTC sends none with a normal hangup
++                        }),
++                        ..Default::default()
++                    };
++                    send_call_message(&mut manager, account, uuid, cm, "Hangup").await;
++                }
++                crate::call_bridge::stop(call_id);
++                crate::bridge::handle_call_state(account, None, None, crate::bridge::CALL_STATE_ENDED, call_id);
++            }
++            Ok(true)
++        }
++        crate::structs::Cmd::PlaceCall { callee } => {
++            // Resolve the callee to an ACI. The dialer usually passes the Signal UUID, but for a
++            // cross-service-linked contact (a Signal thread keyed by a phone number) it passes an
++            // E.164 number, which is looked up in the stored contacts like the phone-addressed send
++            // path does. A number that is no stored contact cannot be called: that would need a
++            // Contact Discovery lookup, i.e. presage's "cdsi" feature and BoringSSL.
++            let callee_str = callee.trim().to_string();
++            let resolved = match presage::libsignal_service::prelude::Uuid::parse_str(&callee_str) {
++                Ok(u) => Some(u),
++                Err(_) => resolve_phone_to_uuid(&mut manager, &callee_str).await,
++            };
++            let uuid = match resolved {
++                Some(u) => u,
++                None => {
++                    crate::bridge::purple_debug(
++                        account,
++                        crate::bridge_structs::PURPLE_DEBUG_ERROR,
++                        "call bridge: place_call: the number is not a stored Signal contact\n".to_string(),
++                    );
++                    // Fail cleanly: clear the dialer's "Connecting" card instead of hanging.
++                    crate::bridge::handle_call_state(
++                        account,
++                        Some(callee_str.clone()),
++                        None,
++                        crate::bridge::CALL_STATE_ENDED,
++                        0,
++                    );
++                    return Ok(true);
++                }
++            };
++            // Identity keys bound into the SRTP KDF: caller_id = OURS (we are the caller),
++            // callee_id = the peer's (empty if we have no session with them yet: the call connects
++            // but the SRTP keys will not match, so there is no audio).
++            use presage::libsignal_service::protocol::{DeviceId, IdentityKeyStore, ProtocolAddress};
++            let aci_store = manager.store().aci_protocol_store();
++            let caller_id: Vec<u8> = aci_store
++                .get_identity_key_pair()
++                .await
++                .ok()
++                .map(|kp| kp.identity_key().serialize()[1..].to_vec())
++                .unwrap_or_default();
++            let callee_id: Vec<u8> = match DeviceId::try_from(1u32) {
++                Ok(dev) => {
++                    let addr = ProtocolAddress::new(uuid.to_string(), dev);
++                    aci_store
++                        .get_identity(&addr)
++                        .await
++                        .ok()
++                        .flatten()
++                        .map(|ik| ik.serialize()[1..].to_vec())
++                        .unwrap_or_default()
++                }
++                Err(_) => Vec::new(),
++            };
++            // Fetch Signal's STUN/TURN relays now so they're stashed before the engine spawns when
++            // the peer answers (on_answer). Without them ICE gathers host-only candidates -> no NAT
++            // traversal -> the call hangs on "Connecting".
++            crate::ice::refresh_ice_servers(&manager, account, std::time::Duration::from_secs(5), false).await;
++            let (call_id, opaque) = match crate::call_bridge::place_call(uuid, caller_id, callee_id) {
++                Ok(c) => c,
++                Err(e) => {
++                    crate::bridge::purple_debug(
++                        account,
++                        crate::bridge_structs::PURPLE_DEBUG_ERROR,
++                        format!("call bridge: place_call: {e}\n"),
++                    );
++                    crate::bridge::handle_call_state(
++                        account,
++                        Some(callee_str.clone()),
++                        None,
++                        crate::bridge::CALL_STATE_ENDED,
++                        0,
++                    );
++                    return Ok(true);
++                }
++            };
++            let cm = presage::proto::CallMessage {
++                offer: Some(presage::proto::call_message::Offer {
++                    id: Some(call_id),
++                    r#type: Some(presage::proto::call_message::offer::Type::OfferAudioCall as i32),
++                    opaque: Some(opaque),
++                    ..Default::default()
++                }),
++                ..Default::default()
++            };
++            send_call_message(&mut manager, account, uuid, cm, "Offer").await;
++            // Drive the dialer with the REAL call_id (matching the Answer/Hangup that follow) AND
++            // the DIALED address, not the resolved UUID: the dialer's pending "Connecting" card is
++            // keyed on what the user dialed (e.g. an E.164 number), so reporting the UUID here makes
++            // it show a SECOND card for a number it never dialed. Stash the dialed address so the
++            // later active/ended pushes (receive.rs) stay consistent. Mirrors Telegram's
++            // getCallDialedAddress. blist_get_alias resolves the name off the UUID (correct person).
++            crate::call_bridge::set_dialed_address(call_id, callee_str.clone());
++            let name = crate::bridge::blist_get_alias(account, uuid.to_string());
++            crate::bridge::handle_call_state(
++                account,
++                Some(callee_str.clone()),
++                Some(name),
++                crate::bridge::CALL_STATE_DIALING,
++                call_id,
++            );
++            Ok(true)
++        }
++        crate::structs::Cmd::Exit {} => {
++            crate::call_bridge::stop_all();
++            Ok(false)
++        }
++    }
++}
++
++/// Send a RingRTC CallMessage (Answer / IceUpdate) to `uuid`. Errors are logged, never fatal -- a
++/// dropped signaling message must not tear down the Signal connection (same policy as command_loop).
++async fn send_call_message<C: presage::store::Store + 'static>(
++    manager: &mut presage::Manager<C, presage::manager::Registered>,
++    account: *mut crate::bridge_structs::PurpleAccount,
++    uuid: presage::libsignal_service::prelude::Uuid,
++    call_message: presage::proto::CallMessage,
++    kind: &str,
++) {
++    let timestamp = std::time::SystemTime::now()
++        .duration_since(std::time::UNIX_EPOCH)
++        .map(|d| d.as_millis() as u64)
++        .unwrap_or(0);
++    match manager
++        .send_message(
++            presage::libsignal_service::protocol::ServiceId::Aci(uuid.into()),
++            presage::libsignal_service::content::ContentBody::CallMessage(call_message),
++            timestamp,
++        )
++        .await
++    {
++        Ok(_) => {
++            crate::bridge::purple_debug(
++                account,
++                crate::bridge_structs::PURPLE_DEBUG_INFO,
++                format!("call bridge: sent {kind} to {uuid}\n"),
++            )
++        }
++        Err(err) => {
++            crate::bridge::purple_debug(
++                account,
++                crate::bridge_structs::PURPLE_DEBUG_ERROR,
++                format!("call bridge: failed to send {kind} to {uuid}: {err}\n"),
++            )
++        }
+     }
+ }
+ 
+@@ -396,6 +622,14 @@ async fn receive<S: presage::store::Store + Clone + 'static>(
+     // login failure (account stuck "signing in" then offline). Loop and re-open the stream on end;
+     // only give up after several *consecutive* hard errors (which usually means the main device
+     // unlinked us). Once catching-up finishes, handle_received() marks the account connected.
++    // Prefetch Signal's ICE/TURN relays now (right after login) and cache them, so an INCOMING call's
++    // start_incoming does NOT block this single receive loop on a network fetch. That per-call fetch
++    // delayed the answerer's engine spawn ~2s, so our Answer + our responses to the caller's early ICE
++    // connectivity checks were late and the answerer's ICE failed (the caller path fetches before it
++    // dials, so it was unaffected). An Offer refreshes them only once their credentials are due.
++    {
++        crate::ice::refresh_ice_servers(&manager, account, std::time::Duration::from_secs(5), true).await;
++    }
+     let mut consecutive_errors: u32 = 0;
+     // The stream is re-opened transparently after network hiccups, and every re-open drains to a
+     // fresh Received::QueueEmpty. Reporting connected and priming phone numbers only need to happen
+diff --git a/src/rust/src/ice.rs b/src/rust/src/ice.rs
+new file mode 100644
+index 0000000..5973161
+--- /dev/null
++++ b/src/rust/src/ice.rs
+@@ -0,0 +1,199 @@
++//! Fetch Signal's calling ICE/TURN relays (`GET /v2/calling/relays`) and turn them into the STUN/TURN
++//! servers the signal_media libnice agent needs.
++//!
++//! Without these the agent only gathers `typ host` candidates on the device's private LAN IP, so a
++//! remote peer on the internet can't reach it and the call sits on "Connecting" forever (Signal
++//! relays all calls through its TURN servers for IP privacy). The servers are passed to the media
++//! engine as `RELAY` lines ahead of `START` (see call_bridge.rs), and the engine wires them into the
++//! nice agent via nice_agent_set_stun_server() / nice_agent_set_relay_info() (signal_media.c).
++
++use presage::libsignal_service::configuration::Endpoint;
++use presage::libsignal_service::push_service::HttpAuthOverride;
++use presage::manager::Registered;
++use presage::store::Store;
++use presage::Manager;
++
++use crate::bridge::purple_debug;
++use crate::bridge_structs::{PurpleAccount, PURPLE_DEBUG_INFO, PURPLE_DEBUG_WARNING};
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum IceKind {
++    Stun,
++    Turn,
++}
++
++#[derive(Clone, Debug)]
++pub struct IceServer {
++    pub kind: IceKind,
++    pub host: String, // an IP address (from urlsWithIps) when available - libnice relay info wants IPs
++    pub port: u16,
++    pub transport: String, // "udp" | "tcp" | "tls"
++    pub username: String,
++    pub password: String,
++}
++
++#[derive(serde::Deserialize)]
++struct RelaysResponse {
++    #[serde(default)]
++    relays: Vec<Relay>,
++}
++
++#[derive(serde::Deserialize)]
++struct Relay {
++    #[serde(default)]
++    username: String,
++    #[serde(default)]
++    password: String,
++    #[serde(default, rename = "urlsWithIps")]
++    urls_with_ips: Vec<String>,
++    #[serde(default)]
++    urls: Vec<String>,
++    /// How long the credentials are valid, in seconds, when the server says.
++    #[serde(default)]
++    ttl: Option<u64>,
++}
++
++/// Parse a WebRTC ICE URL ("turn:1.2.3.4:80?transport=udp", "stun:1.2.3.4:3478") into an IceServer.
++fn parse_ice_url(url: &str, username: &str, password: &str) -> Option<IceServer> {
++    let (scheme, rest) = url.split_once(':')?;
++    let kind = match scheme {
++        "stun" | "stuns" => IceKind::Stun,
++        "turn" | "turns" => IceKind::Turn,
++        _ => return None,
++    };
++    // rest = "host:port" or "host:port?transport=udp"
++    let (hostport, query) = match rest.split_once('?') {
++        Some((hp, q)) => (hp, Some(q)),
++        None => (rest, None),
++    };
++    // "host:port", "[v6]:port" (urlsWithIps brackets IPv6), or a bare host (e.g. Signal's
++    // `turn:141.101.90.1`), which gets the standard STUN/TURN port 3478. The port-less entry is the
++    // UDP TURN relay, the one path that reliably traverses NAT and Wi-Fi client isolation.
++    let (host, port) = if let Some(v6) = hostport.strip_prefix('[') {
++        let (h, after) = v6.split_once(']')?;
++        match after.strip_prefix(':') {
++            Some(p) => (h, p.parse::<u16>().ok()?),
++            None if after.is_empty() => (h, 3478u16),
++            None => return None,
++        }
++    } else {
++        match hostport.rsplit_once(':') {
++            Some((h, p)) => (h, p.parse::<u16>().ok()?),
++            None => (hostport, 3478u16),
++        }
++    };
++    if host.is_empty() {
++        return None;
++    }
++    let transport = query
++        .and_then(|q| q.split('&').find_map(|kv| kv.strip_prefix("transport=")))
++        .unwrap_or(if scheme.ends_with('s') { "tls" } else { "udp" })
++        .to_string();
++    Some(IceServer {
++        kind,
++        host: host.to_string(),
++        port,
++        transport,
++        username: username.to_string(),
++        password: password.to_string(),
++    })
++}
++
++/// Fetch the relays unless the ones in call_bridge are still fresh (or `force`), and keep them there.
++/// A failed fetch keeps the old ones: possibly expired credentials beat none. `timeout` bounds the
++/// wait, since the caller is the single receive or command loop.
++pub async fn refresh_ice_servers<C: Store>(
++    manager: &Manager<C, Registered>,
++    account: *mut PurpleAccount,
++    timeout: std::time::Duration,
++    force: bool,
++) {
++    if !force && !crate::call_bridge::ice_servers_need_refresh() {
++        return;
++    }
++    if let Some((servers, ttl)) = fetch_ice_servers(manager, account, timeout).await {
++        if !servers.is_empty() {
++            crate::call_bridge::set_ice_servers(servers, ttl);
++        }
++    }
++}
++
++/// GET /v2/calling/relays with the account's identified credentials and flatten it to a STUN/TURN
++/// list, with the shortest credential lifetime the server gave. None on any failure.
++async fn fetch_ice_servers<C: Store>(
++    manager: &Manager<C, Registered>,
++    account: *mut PurpleAccount,
++    timeout: std::time::Duration,
++) -> Option<(Vec<IceServer>, Option<u64>)> {
++    let warn = |msg: String| purple_debug(account, PURPLE_DEBUG_WARNING, format!("ice: {msg}\n"));
++    let push = manager.identified_push_service();
++    let builder = match push.request(
++        reqwest::Method::GET,
++        Endpoint::Service {
++            path: "/v2/calling/relays".into(),
++        },
++        HttpAuthOverride::NoOverride,
++    ) {
++        Ok(b) => b,
++        Err(e) => {
++            warn(format!("could not build the /v2/calling/relays request: {e}"));
++            return None;
++        }
++    };
++    // Hard timeout on the whole request: this runs INSIDE presage's single command/receive loop, so a
++    // hanging relays fetch would wedge all Signal traffic and the call would never even spawn the
++    // engine.
++    let fetch = async {
++        let resp = builder.send().await.map_err(|e| format!("send: {e}"))?;
++        let bytes = resp.bytes().await.map_err(|e| format!("body: {e}"))?;
++        Ok::<_, String>(bytes)
++    };
++    let bytes = match tokio::time::timeout(timeout, fetch).await {
++        Ok(Ok(b)) => b,
++        Ok(Err(e)) => {
++            warn(format!("GET /v2/calling/relays failed: {e}"));
++            return None;
++        }
++        Err(_) => {
++            warn("GET /v2/calling/relays timed out".to_string());
++            return None;
++        }
++    };
++    let parsed: RelaysResponse = match serde_json::from_slice(&bytes) {
++        Ok(p) => p,
++        Err(e) => {
++            warn(format!("parsing the relays failed: {e}"));
++            return None;
++        }
++    };
++
++    let mut servers = Vec::new();
++    for relay in &parsed.relays {
++        // Prefer urlsWithIps: libnice's set_relay_info/set_stun_server want an IP, not a hostname.
++        let urls = if !relay.urls_with_ips.is_empty() {
++            &relay.urls_with_ips
++        } else {
++            &relay.urls
++        };
++        servers.extend(urls.iter().filter_map(|u| parse_ice_url(u, &relay.username, &relay.password)));
++    }
++    // Prefer UDP TURN and drop the TCP/TLS duplicates for the same relay. All three transports point
++    // at the SAME server and we only need one; applying all of them makes the engine run 3 simultaneous
++    // TURN allocations (3 separate client sockets, one per transport), and that fd churn during
++    // gathering was found (via forced libnice conncheck logging) to trigger a libnice bug where a UDP
++    // socket recv spuriously fails with ENOTTY and gets PERMANENTLY detached from the event loop -
++    // silently discarding every reply on it for the rest of the call. Cutting to one TURN allocation
++    // removes most of that churn. Falls back to keeping TCP/TLS if no UDP TURN was offered at all
++    // (some networks block UDP TURN outright), so relay capability is never lost, just de-duplicated.
++    if servers.iter().any(|s| s.kind == IceKind::Turn && s.transport == "udp") {
++        servers.retain(|s| s.kind != IceKind::Turn || s.transport == "udp");
++    }
++
++    purple_debug(
++        account,
++        PURPLE_DEBUG_INFO,
++        format!("ice: {} STUN/TURN entries from {} relay(s)\n", servers.len(), parsed.relays.len()),
++    );
++    let ttl = parsed.relays.iter().filter_map(|r| r.ttl).min();
++    Some((servers, ttl))
++}
+diff --git a/src/rust/src/lib.rs b/src/rust/src/lib.rs
+index 7091708..dfbad8a 100755
+--- a/src/rust/src/lib.rs
++++ b/src/rust/src/lib.rs
+@@ -2,6 +2,9 @@
+ 
+ mod attachment;
+ mod bridge;
++mod call_bridge;
++mod call_media;
++mod ice;
+ mod bridge_commands;
+ mod contacts;
+ mod core;
+diff --git a/src/rust/src/receive.rs b/src/rust/src/receive.rs
+index beb568f..f1b6ce6 100755
+--- a/src/rust/src/receive.rs
++++ b/src/rust/src/receive.rs
+@@ -411,7 +411,165 @@ async fn process_received_message<C: presage::store::Store>(
+             );
+             None
+         }
+-        presage::libsignal_service::content::ContentBody::CallMessage(_) => Some("is calling!".to_string()),
++        presage::libsignal_service::content::ContentBody::CallMessage(call_message) => {
++            // Ring the Phone app on an Offer, show the line active on the peer's Answer to our call, end
++            // it on Hangup/Busy, and put a "Missed voice call" line in the chat for an incoming call
++            // nobody answered. The media engine is driven below.
++            let call_id = call_message
++                .offer
++                .as_ref()
++                .and_then(|o| o.id)
++                .or_else(|| call_message.answer.as_ref().and_then(|a| a.id))
++                .or_else(|| call_message.hangup.as_ref().and_then(|h| h.id))
++                .or_else(|| call_message.busy.as_ref().and_then(|b| b.id))
++                // A trickled IceUpdate carries ONLY ice_update entries (each with the call id) - no
++                // offer/answer. Without this it fell through to 0, so feed_remote_ice(0,...) never
++                // matched the engine and the peer's candidates were dropped -> ICE never connected.
++                .or_else(|| call_message.ice_update.iter().find_map(|i| i.id))
++                .unwrap_or(0);
++            // Multi-device: webOS is a LINKED (secondary) Signal device. An incoming call rings this
++            // device AND the user's primary phone. When the user accepts HERE, the caller broadcasts
++            // Hangup{type=ACCEPTED, device_id=<us>} to the account so the phone stops ringing - but
++            // Signal delivers it to THIS device too. Acting on it would tear down our own live call
++            // (that was the ~1-2s "disconnect"). RingRTC hangup types: 0=NORMAL 1=ACCEPTED 2=DECLINED
++            // 3=BUSY. A type=ACCEPTED for a call we've accepted is our own acceptance echo -> ignore it.
++            let hangup_type = call_message.hangup.as_ref().and_then(|h| h.r#type);
++            let self_accept_hangup = hangup_type == Some(1) && crate::call_bridge::was_accepted(call_id);
++            // An Offer while another call is up is answered Busy, as RingRTC does, and does not ring.
++            let busy = call_message.offer.is_some() && crate::call_bridge::busy_with_other_call(call_id);
++            let (state, chat) = if busy {
++                (u32::MAX, Some("Missed voice call".to_string()))
++            } else if call_message.offer.is_some() {
++                (crate::bridge::CALL_STATE_INCOMING, None)
++            } else if call_message.answer.is_some() {
++                // Peer answered OUR outgoing call -> tell the dialer the line is now active.
++                (crate::bridge::CALL_STATE_ACTIVE, None)
++            } else if self_accept_hangup {
++                // "Accepted on this (our) device" notification for OUR live call - not a call end.
++                (u32::MAX, None)
++            } else if call_message.busy.is_some() {
++                (crate::bridge::CALL_STATE_BUSY, None)
++            } else if call_message.hangup.is_some() {
++                // Only an incoming call nobody answered is missed: not one we placed, not one the user
++                // accepted here, not one accepted or declined on another of their devices, and not
++                // one already reported when we answered it Busy.
++                let missed = !crate::call_bridge::take_busy_replied(call_id)
++                    && !crate::call_bridge::is_outgoing_call(call_id)
++                    && !crate::call_bridge::was_accepted(call_id)
++                    && hangup_type != Some(1)
++                    && hangup_type != Some(2);
++                (crate::bridge::CALL_STATE_ENDED, missed.then(|| "Missed voice call".to_string()))
++            } else {
++                (u32::MAX, None)
++            };
++            if state != u32::MAX {
++                // message.name is None for a direct contact (only the async resolver fills the buddy
++                // alias), so resolve the caller's friendly name by UUID here. blist_get_alias returns
++                // the UUID unchanged when no alias is known yet; process_incoming_message has already
++                // kicked off resolve_name_background for this sender, so a saved/previously-messaged
++                // contact resolves immediately. Without this the Phone app shows the raw Signal UUID
++                // ("Unknown Caller") instead of the contact name.
++                let name = message.name.clone().or_else(|| {
++                    message.who.clone().map(|uuid| crate::bridge::blist_get_alias(message.account, uuid))
++                });
++                // For an OUTGOING call (e.g. the peer's Answer -> ACTIVE), report the address the user
++                // DIALED, not the peer's UUID - so the dialer keeps the single card it opened instead of
++                // spawning a UUID-addressed second one (same reason as place_call). Incoming keeps who.
++                let card_addr = crate::call_bridge::dialed_address(call_id).or_else(|| message.who.clone());
++                crate::bridge::handle_call_state(message.account, card_addr, name, state, call_id);
++            }
++
++            // Media: offer -> start the engine (the user answers later); answer -> start it for our
++            // outgoing call; ice_update -> feed remote candidates; hangup/busy -> tear it down. The
++            // Answer and our ICE go back through the command loop.
++            let caller_uuid = message
++                .who
++                .as_ref()
++                .and_then(|w| presage::libsignal_service::prelude::Uuid::parse_str(w).ok());
++            if let (true, Some(uuid)) = (busy, caller_uuid) {
++                crate::call_bridge::request_busy(uuid, call_id);
++            } else if let Some(offer) = call_message.offer.as_ref() {
++                if let (Some(uuid), Some(op)) = (caller_uuid, offer.opaque.as_ref()) {
++                    // Source the 32-byte RAW Curve25519 identity public keys the RingRTC SRTP KDF
++                    // binds in: caller = the offerer/peer's ACI identity key, callee = ours.
++                    // IdentityKey::serialize() is the 33-byte 0x05-prefixed form; strip the prefix.
++                    use presage::libsignal_service::protocol::{DeviceId, IdentityKeyStore, ProtocolAddress};
++                    let aci_store = manager.store().aci_protocol_store();
++                    let callee_id: Vec<u8> = aci_store
++                        .get_identity_key_pair()
++                        .await
++                        .ok()
++                        .map(|kp| kp.identity_key().serialize()[1..].to_vec())
++                        .unwrap_or_default();
++                    let caller_id: Vec<u8> = match (message.who.as_ref(), DeviceId::try_from(1u32)) {
++                        (Some(w), Ok(dev)) => {
++                            let addr = ProtocolAddress::new(w.clone(), dev);
++                            aci_store
++                                .get_identity(&addr)
++                                .await
++                                .ok()
++                                .flatten()
++                                .map(|ik| ik.serialize()[1..].to_vec())
++                                .unwrap_or_default()
++                        }
++                        _ => Vec::new(),
++                    };
++                    // The ICE/TURN relays are cached from login. Only when their credentials are due
++                    // are they fetched again here, briefly: this is the single receive loop, and a
++                    // late engine means a late Answer, which made the caller's ICE fail. The phone
++                    // is already ringing (the state push above).
++                    crate::ice::refresh_ice_servers(manager, message.account, std::time::Duration::from_secs(3), false).await;
++                    if let Err(e) = crate::call_bridge::start_incoming(uuid, call_id, op, &caller_id, &callee_id) {
++                        // It still rings; answering it ends it (call_bridge::accept finds no engine).
++                        crate::bridge::purple_debug(
++                            message.account,
++                            crate::bridge_structs::PURPLE_DEBUG_ERROR,
++                            format!("call bridge: incoming call {call_id}: {e}\n"),
++                        );
++                    }
++                }
++            }
++            // The peer answered one of OUR outgoing calls -> start media in caller role.
++            if let Some(answer) = call_message.answer.as_ref() {
++                if let Some(op) = answer.opaque.as_ref() {
++                    if let Err(e) = crate::call_bridge::on_answer(call_id, op) {
++                        crate::bridge::purple_debug(
++                            message.account,
++                            crate::bridge_structs::PURPLE_DEBUG_ERROR,
++                            format!("call bridge: outgoing call {call_id}: {e}\n"),
++                        );
++                        // The line was just reported active; without media it has to end, for
++                        // the peer too.
++                        if let Some(peer) = crate::call_bridge::peer(call_id) {
++                            crate::call_bridge::request_hangup(peer, call_id);
++                        } else {
++                            crate::call_bridge::stop(call_id);
++                        }
++                        crate::bridge::handle_call_state(
++                            message.account,
++                            None,
++                            None,
++                            crate::bridge::CALL_STATE_ENDED,
++                            call_id,
++                        );
++                    }
++                }
++            }
++            if !call_message.ice_update.is_empty() {
++                let opaques: Vec<Vec<u8>> = call_message
++                    .ice_update
++                    .iter()
++                    .filter_map(|ice| ice.opaque.clone())
++                    .collect();
++                if !opaques.is_empty() {
++                    crate::call_bridge::feed_remote_ice(call_id, &opaques);
++                }
++            }
++            if (call_message.hangup.is_some() || call_message.busy.is_some()) && !self_accept_hangup {
++                crate::call_bridge::stop(call_id);
++            }
++            chat
++        }
+         presage::libsignal_service::content::ContentBody::EditMessage(presage::proto::EditMessage {
+             data_message: Some(data_message),
+             ..
+diff --git a/src/rust/src/structs.rs b/src/rust/src/structs.rs
+index 9c9cbbc..68c3ae4 100755
+--- a/src/rust/src/structs.rs
++++ b/src/rust/src/structs.rs
+@@ -34,8 +34,54 @@ pub enum Cmd {
+         attachment_pointer: presage::proto::AttachmentPointer,
+         xfer: *const crate::bridge_structs::PurpleXfer,
+     },
++    // Emitted by the call media bridge (call_bridge.rs) so the command loop -- which owns the
++    // concrete Manager -- sends our RingRTC Answer / IceUpdate CallMessages back to the caller.
++    // `opaque` is the already-encoded ConnectionParametersV4 (answer) or IceCandidate (ice) blob.
++    SendCallAnswer {
++        uuid: presage::libsignal_service::prelude::Uuid,
++        call_id: u64,
++        opaque: Vec<u8>,
++    },
++    SendCallIce {
++        uuid: presage::libsignal_service::prelude::Uuid,
++        call_id: u64,
++        opaque: Vec<u8>,
++    },
++    // Another call is up: answer this Offer with Busy, as RingRTC does.
++    SendCallBusy {
++        uuid: presage::libsignal_service::prelude::Uuid,
++        call_id: u64,
++    },
++    // Place an OUTGOING call to `callee` (a Signal UUID or e164). The command loop resolves the
++    // recipient + identity keys, has call_bridge generate our keypair, and sends the Offer.
++    PlaceCall {
++        callee: String,
++    },
++    // End the current call locally (the user pressed hang up): send the peer a Hangup CallMessage so
++    // their phone stops ringing / the call ends, and tear down our media engine. `callee` is the address
++    // from the dialer's card - a Signal UUID OR (for an outgoing call now reported under the dialed
++    // number) an E.164; the handler resolves a non-UUID like place_call does.
++    HangupCall {
++        callee: String,
++        call_id: u64,
++    },
++    // User tapped Answer on an INCOMING call: tell the media engine to start sending the RingRTC
++    // rtp-data `Accepted` message (PT 101 / SSRC 0xD, SRTP) so the caller's phone stops ringing and
++    // both sides ungate media. Purely local -> no CallMessage; just drives the engine over its stdin.
++    AcceptCall {
++        call_id: u64,
++    },
+ }
+ 
++// Cmd already crosses threads today: it is pushed onto a tokio mpsc from the C-invoked send_cmd
++// thread and drained on the runtime thread (tokio mpsc does not bound T: Send, so this compiles
++// without the marker). The call bridge additionally needs to hold the Sender<Cmd> in a global so a
++// std reader thread can enqueue SendCallAnswer/SendCallIce -- and a static Sender<Cmd> requires
++// Cmd: Send. The raw pointers in the Send/GetAttachment variants are only ever dereferenced on the
++// main/runtime thread (append_message etc.); the call-bridge variants carry only Send data. This
++// unsafe impl formalises the thread movement that already happens.
++unsafe impl Send for Cmd {}
++
+ #[derive(Debug, Clone)]
+ pub enum Recipient {
+     Contact(presage::libsignal_service::prelude::Uuid),
+-- 
+2.53.0
+
