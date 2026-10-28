@@ -28,6 +28,7 @@ EXTRA_OECMAKE += "-DLUNA_NEXT_SHELL_DIR=${OE_QMAKE_PATH_QML}/WebOSCompositor"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 SRC_URI += "file://0001-SystemMenu-hand-connman-passphrase-request-to-the-Wi-Fi-app.patch"
+SRC_URI += "file://0002-Optionally-open-the-notification-panel-with-a-fingerprint-sensor-tap.patch"
 
 # inheriting webos_application requires the appinfo.json file, which we don't have here.
 # so just install manually db8 permissions.
