@@ -4,8 +4,9 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=30441c91ba0022ea994b5dae832bd063"
 
 require purple-connectors.inc
 
-# 0001-0002 are upstream PR #85 (personal/consumer accounts), 0003-0007 generic fixes meant for
-# upstream; 0008 onwards adapt the plug-in to imlibpurpletransport and the webOS Messaging app.
+# 0001-0002 are upstream PR #85 (personal/consumer accounts), 0003-0008 generic fixes meant for
+# upstream; the webOS: ones from 0009 adapt the plug-in to imlibpurpletransport and the webOS
+# Messaging app.
 # Upstream's teams_messages.c has CRLF line endings and so do the patches against it: keep the
 # .patch files byte-exact.
 SRC_URI += " \
@@ -17,12 +18,12 @@ SRC_URI += " \
     file://0005-Ignore-async-callbacks-that-arrive-after-the-account.patch \
     file://0006-Send-the-skype-token-to-regional-.asm.skype.com-medi.patch \
     file://0007-Send-image-attachments-as-inline-AMSImage-pictures.patch \
-    file://0008-webOS-Send-and-receive-message-reactions-through-tra.patch \
-    file://0009-webOS-Show-replies-as-quote-cards-and-send-replies-w.patch \
-    file://0010-webOS-Show-received-media-inline-and-send-voice-note.patch \
-    file://0011-webOS-Add-Teams-voice-and-video-calling-for-the-webO.patch \
-    file://0012-webOS-Always-report-the-account-as-active-and-Availa.patch \
-    file://0013-Report-a-rejected-sign-in-code-as-an-authentication-.patch \
+    file://0008-Report-a-rejected-sign-in-code-as-an-authentication-.patch \
+    file://0009-webOS-Send-and-receive-message-reactions-through-tra.patch \
+    file://0010-webOS-Show-replies-as-quote-cards-and-send-replies-w.patch \
+    file://0011-webOS-Show-received-media-inline-and-send-voice-note.patch \
+    file://0012-webOS-Add-Teams-voice-and-video-calling-for-the-webO.patch \
+    file://0013-webOS-Always-report-the-account-as-active-and-Availa.patch \
 "
 SRCREV_upstream = "f7eb519b9968ed7844ff59319bff5c1859c46851"
 
@@ -37,7 +38,7 @@ CFLAGS:append = " -DTEAMS_WEBOS"
 # The default target builds both variants: libteams.so (commercial) and libteams-personal.so
 # (consumer). webOS uses the consumer one; both are installed, as upstream does.
 #
-# NOT built here: the calling bridge from 0011 (teams_calling.c, teams_call_luna.c, h264_rtp.c,
+# NOT built here: the calling bridge from 0012 (teams_calling.c, teams_call_luna.c, h264_rtp.c,
 # voipkit_none.c, teams_video_relay.cpp). The upstream Makefile does not list them; building them
 # needs -DTEAMS_WEBOS_CALL, ${CONNECTORS_DIR}/im/_core/include for webos-ls2-compat.h,
 # luna-service2, and the separate teams_media engine at runtime. Without TEAMS_WEBOS_CALL the
