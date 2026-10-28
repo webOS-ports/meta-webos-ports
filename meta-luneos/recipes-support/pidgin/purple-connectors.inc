@@ -29,7 +29,7 @@
 HOMEPAGE = "https://github.com/webOS-ports/luneos-synergy-connectors"
 SECTION = "webos/services"
 
-SRC_URI = "git://github.com/webOS-ports/luneos-synergy-connectors.git;branch=main;protocol=https;name=connectors;destsuffix=connectors"
+SRC_URI = "git://github.com/webOS-ports/luneos-synergy-connectors.git;branch=${LSC_BRANCH};protocol=https;name=connectors;destsuffix=connectors"
 require recipes-luneos/synergy/luneos-synergy-connectors-srcrev.inc
 SRCREV_connectors = "${LSC_SRCREV}"
 SRCREV_FORMAT = "upstream_connectors"
