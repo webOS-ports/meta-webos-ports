@@ -12,8 +12,14 @@ the stock webOS Phone app drives.
 - call.go: the Go side - dial/answer/hang up, call state, audio frames
   between meowcaller and C, video access units in and out
 - glue/call.c: the LS2 service (callStateQuery etc.), ALSA capture and
-  playback, headset detection, and a video test-injection harness
-  (glue/test_stream_data.h holds a recorded H.264 stream for it)
+  playback, and a video test-injection harness (glue/test_stream_data.h
+  holds a recorded H.264 stream for it)
+- call audio plays on the ALSA "voip" device and is captured from
+  "voipsource", the PulseAudio call sink and source; the call is
+  reported to audiod with phone/CallStatusUpdate (transport
+  com.palm.whatsapp), and audiod picks the output device itself, the
+  earpiece first. The service registers a single LS2 handle: LuneOS
+  has one bus, so the public/private split of legacy webOS is not used
 - glue/denoise.c, glue/aec.c: WebRTC noise suppression and the mobile
   echo canceller (AECM) for the microphone path; the WebRTC DSP sources
   come from libtgvoip and are compiled by the build, not carried here
@@ -41,7 +47,7 @@ Upstream-Status: Inappropriate [webOS specific]
  call.go                 |  759 ++++++
  glue/aec.c              |   67 +
  glue/aec.h              |   13 +
- glue/call.c             | 1089 ++++++++
+ glue/call.c             | 1037 ++++++++
  glue/call.h             |    9 +
  glue/denoise.c          |   94 +
  glue/denoise.h          |   11 +
@@ -57,7 +63,7 @@ Upstream-Status: Inappropriate [webOS specific]
  handler.go              |   28 +-
  logger.go               |   32 +-
  login.go                |   21 +
- 19 files changed, 8378 insertions(+), 7 deletions(-)
+ 19 files changed, 8326 insertions(+), 7 deletions(-)
  create mode 100644 call.go
  create mode 100644 glue/aec.c
  create mode 100644 glue/aec.h
@@ -931,10 +937,10 @@ index 0000000..862583f
 +#endif
 diff --git a/glue/call.c b/glue/call.c
 new file mode 100644
-index 0000000..ac9504f
+index 0000000..50e447f
 --- /dev/null
 +++ b/glue/call.c
-@@ -0,0 +1,1089 @@
+@@ -0,0 +1,1037 @@
 +// call.c — luna-service2 call service for WhatsApp calling, hosted INSIDE the
 +// messaging plugin (imlibpurpletransport) instead of a separate wacallm process.
 +//
@@ -954,7 +960,7 @@ index 0000000..ac9504f
 +// C -> Go exports (from libwhatsmeow.h): gowhatsapp_go_call_dial/_answer/_hangup/_hangup_all
 +
 +#include <glib.h>
-+#include "webos-ls2-compat.h"   /* legacy split-bus API on either luna-service2 */
++#include <luna-service2/lunaservice.h>
 +#include <alsa/asoundlib.h>
 +#include <pthread.h>
 +#include <unistd.h>
@@ -966,8 +972,6 @@ index 0000000..ac9504f
 +#include <dirent.h>
 +#include <sys/resource.h>
 +#include <fcntl.h>
-+#include <sys/ioctl.h>
-+#include <linux/input.h> // EVIOCGSW / SW_HEADPHONE_INSERT — detect a plugged headset for call routing
 +#ifndef M_PI
 +#define M_PI 3.14159265358979323846
 +#endif
@@ -984,10 +988,8 @@ index 0000000..ac9504f
 +#include "voipkit.h"     // native SkypeKit RTP bridge (see WHATSAPP_VIDEO_STATUS.md "hook it
 +                          // up properly" plan) — capture/playback socket threads
 +
-+static LSPalmService *g_psh = NULL;
-+static LSHandle *g_pub = NULL;
-+static LSHandle *g_prv = NULL;
-+static GMainLoop *g_loopRef = NULL;
++// LuneOS has one bus, so one handle serves the Phone app, audiod and mediad alike.
++static LSHandle *g_sh = NULL;
 +static int g_registered = 0;
 +
 +/* ---------- minimal JSON helpers (flat CallSynergizer payloads only) ---------- */
@@ -1098,13 +1100,13 @@ index 0000000..ac9504f
 +// callers always pass a literal "{\"args\":[...]}" string, never "{}".
 +static void clonk_uri_call_ctx(const char *method, const char *payload, LSFilterFunc cb,
 +                                void *ctx) {
-+	if (!g_prv || !g_clonk_uri[0]) return;
++	if (!g_sh || !g_clonk_uri[0]) return;
 +	char uri[320];
 +	snprintf(uri, sizeof uri, "%s%s", g_clonk_uri, method);
 +	LSError e;
 +	LSErrorInit(&e);
 +	LSMessageToken t;
-+	if (!LSCallOneReply(g_prv, uri, payload, cb, ctx, &t, &e)) {
++	if (!LSCallOneReply(g_sh, uri, payload, cb, ctx, &t, &e)) {
 +		fprintf(stderr, "wa-call: clonk %s call failed: %s\n", method, e.message);
 +		LSErrorFree(&e);
 +	}
@@ -1460,8 +1462,8 @@ index 0000000..ac9504f
 +	char *out = inject_video_uri(json);
 +	LSError e;
 +	LSErrorInit(&e);
-+	if (g_pub) LSSubscriptionReply(g_pub, "callState", out, &e);
-+	if (g_prv) LSSubscriptionReply(g_prv, "callState", out, &e);
++	if (g_sh && !LSSubscriptionReply(g_sh, "callState", out, &e))
++		LSErrorFree(&e);
 +	g_free(out);
 +}
 +
@@ -1495,7 +1497,7 @@ index 0000000..ac9504f
 +// path can both fire within the same moment) sees it and backs off, instead of both
 +// racing past a check that only g_clonk_uri (populated inside the reply) would satisfy.
 +static void clonk_open(void) {
-+	if (g_clonk_uri[0] || g_clonk_opening || !g_prv) {
++	if (g_clonk_uri[0] || g_clonk_opening || !g_sh) {
 +		clonk_diag_log("clonk_open: skipped (uri=%s opening=%d)", g_clonk_uri, g_clonk_opening);
 +		return;
 +	}
@@ -1504,7 +1506,7 @@ index 0000000..ac9504f
 +	LSError e;
 +	LSErrorInit(&e);
 +	LSMessageToken t;
-+	if (!LSCallOneReply(g_prv, "palm://com.palm.mediad/service/clonk", "{}",
++	if (!LSCallOneReply(g_sh, "palm://com.palm.mediad/service/clonk", "{}",
 +	                    clonk_open_reply, NULL, &t, &e)) {
 +		fprintf(stderr, "wa-call: clonk open call failed: %s\n", e.message);
 +		LSErrorFree(&e);
@@ -1558,9 +1560,9 @@ index 0000000..ac9504f
 +}
 +
 +/* ---------- audio bridge: ALSA voip/voipsource (routes through PulseAudio) ---------- */
-+// meowcaller PCM is float32, 16 kHz, mono, 960 samples/frame. "voip"/"voipsource"
-+// (not "default") -> PA pvoip/pvoipsource, which module-palm-policy routes under the
-+// phone scenario, so we coexist with audiod/PA (no hw conflict).
++// meowcaller PCM is float32, 16 kHz, mono, 960 samples/frame. "voip"/"voipsource" (not
++// "default") are the ALSA aliases /etc/alsa/conf.d/60-webos-voip.conf gives the PulseAudio call
++// sink and source, voipcall and webcall; audiod routes those to the device for the call.
 +#define WA_RATE 16000
 +#define WA_FRAME 320  /* 20ms mic read chunk (was 960/60ms) — lower capture granularity = less mic->peer delay; still a multiple of the NS 160-sample frame */
 +#define MIC_RING 16000 /* ~1s of int16 mono */
@@ -1751,45 +1753,11 @@ index 0000000..ac9504f
 +	LSError e;
 +	LSErrorInit(&e);
 +	LSMessageToken t;
-+	if (g_prv && !LSCallOneReply(g_prv, uri, payload, audiod_reply, NULL, &t, &e)) {
++	if (g_sh && !LSCallOneReply(g_sh, uri, payload, audiod_reply, NULL, &t, &e)) {
 +		fprintf(stderr, "wa-call: audiod %s failed: %s\n", uri, e.message);
 +		LSErrorFree(&e);
 +	}
 +}
-+// Is a wired headset/headphone plugged in right now? Read the kernel switch state directly (EVIOCGSW on
-+// the "headset" input device) — the ground truth. audiod's own /sys/devices/platform/headset-detect nodes
-+// don't exist on this custom kernel, so we can't rely on it choosing the route; we pick the scenario
-+// ourselves. We key on SW_HEADPHONE_INSERT only (audio out present); the headset's own mic (bit
-+// SW_MICROPHONE_INSERT) is deliberately ignored so capture always stays on the tablet mic (see below).
-+#ifndef SW_HEADPHONE_INSERT
-+#define SW_HEADPHONE_INSERT 0x02
-+#endif
-+#ifndef SW_MAX
-+#define SW_MAX 0x0f
-+#endif
-+static int wa_headset_present(void) {
-+	int present = 0;
-+	for (int i = 0; i < 32; i++) {
-+		char path[32];
-+		snprintf(path, sizeof path, "/dev/input/event%d", i);
-+		int fd = open(path, O_RDONLY | O_NONBLOCK);
-+		if (fd < 0) continue;
-+		char name[64] = "";
-+		if (ioctl(fd, EVIOCGNAME(sizeof name), name) >= 0 && strcmp(name, "headset") == 0) {
-+			unsigned long sw[(SW_MAX / (sizeof(long) * 8)) + 1];
-+			memset(sw, 0, sizeof sw);
-+			if (ioctl(fd, EVIOCGSW(sizeof sw), sw) >= 0) {
-+				present = (sw[SW_HEADPHONE_INSERT / (sizeof(long) * 8)]
-+				           >> (SW_HEADPHONE_INSERT % (sizeof(long) * 8))) & 1;
-+			}
-+			close(fd);
-+			return present; // the "headset" device is unique — done
-+		}
-+		close(fd);
-+	}
-+	return present;
-+}
-+
 +static gboolean audiod_status_idle(gpointer d) {
 +	int active = GPOINTER_TO_INT(d);
 +	if (active) {
@@ -1799,17 +1767,7 @@ index 0000000..ac9504f
 +		// was a string.) "transport" stays our real service (a 1-byte PmBtEngine patch accepts non-skype).
 +		audiod_send("palm://com.palm.audio/phone/CallStatusUpdate",
 +		            "{\"lines\":[{\"state\":\"active\",\"calls\":[{\"id\":\"1\",\"address\":\"whatsapp\",\"origin\":\"outgoing\",\"video\":false,\"transport\":\"com.palm.whatsapp\"}]}]}");
-+		// The TouchPad has NO earpiece/receiver, so with nothing plugged in we force the LOUDSPEAKER
-+		// (phone_back_speaker) — audiod would otherwise default an active phone call to the (silent)
-+		// earpiece scenario. When a headset IS plugged in, use phone_headset: it routes DAC -> headphone
-+		// while leaving the CAPTURE path untouched (verified: the mic mixer state is byte-identical between
-+		// the two scenarios), so playback moves to the headset but the mic stays on the tablet — exactly
-+		// what we want (and headsets here are typically 3-pole/no-mic anyway).
-+		int headset = wa_headset_present();
-+		audiod_send("palm://com.palm.audio/phone/setCurrentScenario",
-+		            headset ? "{\"scenario\":\"phone_headset\"}"
-+		                    : "{\"scenario\":\"phone_back_speaker\"}");
-+		fprintf(stderr, "wa-call: audiod voip call ON (%s)\n", headset ? "headset" : "loudspeaker");
++		fprintf(stderr, "wa-call: audiod voip call ON\n");
 +	} else {
 +		audiod_send("palm://com.palm.audio/phone/CallStatusUpdate", "{\"lines\":[]}");
 +		fprintf(stderr, "wa-call: audiod voip call OFF\n");
@@ -1973,24 +1931,24 @@ index 0000000..ac9504f
 +}
 +
 +static LSMethod methods[] = {
-+	{"dial", m_dial},
-+	{"answer", m_answer},
-+	{"disconnect", m_disconnect},
-+	{"hangupAll", m_hangupall},
-+	{"hangupAllActive", m_hangupall},
-+	{"hangupAllHeld", m_hangupall},
-+	{"hangupMMI", m_hangupall},
-+	{"callStateQuery", m_callstate},
-+	{"hold", m_ok},
-+	{"swap", m_ok},
-+	{"merge", m_ok},
-+	{"extract", m_ok},
-+	{"dtmf", m_ok},
-+	{"dtmfEnd", m_ok},
-+	{"changeMedia", m_changemedia},
-+	{"testInjectVideo", m_test_inject_video},
-+	{"testStopInjectVideo", m_test_stop_inject_video},
-+	{NULL, NULL},
++	{"dial", m_dial, LUNA_METHOD_FLAGS_NONE},
++	{"answer", m_answer, LUNA_METHOD_FLAGS_NONE},
++	{"disconnect", m_disconnect, LUNA_METHOD_FLAGS_NONE},
++	{"hangupAll", m_hangupall, LUNA_METHOD_FLAGS_NONE},
++	{"hangupAllActive", m_hangupall, LUNA_METHOD_FLAGS_NONE},
++	{"hangupAllHeld", m_hangupall, LUNA_METHOD_FLAGS_NONE},
++	{"hangupMMI", m_hangupall, LUNA_METHOD_FLAGS_NONE},
++	{"callStateQuery", m_callstate, LUNA_METHOD_FLAGS_NONE},
++	{"hold", m_ok, LUNA_METHOD_FLAGS_NONE},
++	{"swap", m_ok, LUNA_METHOD_FLAGS_NONE},
++	{"merge", m_ok, LUNA_METHOD_FLAGS_NONE},
++	{"extract", m_ok, LUNA_METHOD_FLAGS_NONE},
++	{"dtmf", m_ok, LUNA_METHOD_FLAGS_NONE},
++	{"dtmfEnd", m_ok, LUNA_METHOD_FLAGS_NONE},
++	{"changeMedia", m_changemedia, LUNA_METHOD_FLAGS_NONE},
++	{"testInjectVideo", m_test_inject_video, LUNA_METHOD_FLAGS_NONE},
++	{"testStopInjectVideo", m_test_stop_inject_video, LUNA_METHOD_FLAGS_NONE},
++	{NULL, NULL, LUNA_METHOD_FLAGS_NONE},
 +};
 +
 +// whatsapp_call_luna_init — register com.palm.whatsapp.call on libpurple's default
@@ -2001,24 +1959,20 @@ index 0000000..ac9504f
 +	LSError e;
 +	LSErrorInit(&e);
 +
-+	if (!LSRegisterPalmService("com.palm.whatsapp.call", &g_psh, &e)) {
-+		fprintf(stderr, "wa-call: LSRegisterPalmService: %s\n", e.message);
-+		LSErrorFree(&e);
-+		return;
-+	}
-+	g_pub = LSPalmServiceGetPublicConnection(g_psh);
-+	g_prv = LSPalmServiceGetPrivateConnection(g_psh);
-+
-+	if (!LSPalmServiceRegisterCategory(g_psh, "/", methods, methods, NULL, NULL, &e)) {
-+		fprintf(stderr, "wa-call: RegisterCategory: %s\n", e.message);
++	if (!LSRegister("com.palm.whatsapp.call", &g_sh, &e)) {
++		fprintf(stderr, "wa-call: LSRegister: %s\n", e.message);
 +		LSErrorFree(&e);
 +		return;
 +	}
 +	// Attach to the GMainContext libpurple already services (no separate loop/thread).
-+	g_loopRef = g_main_loop_new(g_main_context_default(), FALSE);
-+	if (!LSGmainAttachPalmService(g_psh, g_loopRef, &e)) {
-+		fprintf(stderr, "wa-call: GmainAttach: %s\n", e.message);
++	if (!LSRegisterCategory(g_sh, "/", methods, NULL, NULL, &e) ||
++	    !LSGmainContextAttach(g_sh, g_main_context_default(), &e)) {
++		fprintf(stderr, "wa-call: registering com.palm.whatsapp.call: %s\n", e.message);
 +		LSErrorFree(&e);
++		LSErrorInit(&e);
++		LSUnregister(g_sh, &e);
++		LSErrorFree(&e);
++		g_sh = NULL;
 +		return;
 +	}
 +	g_registered = 1;
