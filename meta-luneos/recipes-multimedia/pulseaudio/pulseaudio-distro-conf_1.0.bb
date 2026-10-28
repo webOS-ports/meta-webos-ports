@@ -20,6 +20,7 @@ SRC_URI = " \
     file://webos-system.pa \
     file://webos-virtual-devices.pa \
     file://droid-audio-config-gen \
+    file://60-webos-voip.conf \
 "
 
 # Which sink webos-system.pa remaps pcm_output onto. sink.primary_output is right
@@ -28,6 +29,8 @@ SRC_URI = " \
 # periods where deep_buffer runs 1920. Set it from the machine .conf rather than
 # copying the whole of webos-system.pa for one word.
 WEBOS_PCM_OUTPUT_MASTER ?= "sink.primary_output"
+# And the source webos-system.pa remaps pcm_input onto.
+WEBOS_PCM_INPUT_MASTER ?= "source.primary_input"
 
 do_install() {
     install -d ${D}${sysconfdir}/pulse
@@ -35,7 +38,13 @@ do_install() {
     install -m 0644 ${UNPACKDIR}/webos-virtual-devices.pa ${D}${sysconfdir}/pulse/
 
     sed -i -e 's|@PCM_OUTPUT_MASTER@|${WEBOS_PCM_OUTPUT_MASTER}|g' \
+           -e 's|@PCM_INPUT_MASTER@|${WEBOS_PCM_INPUT_MASTER}|g' \
         ${D}${sysconfdir}/pulse/webos-system.pa
+
+    # The ALSA names the messaging connectors' VoIP calls play to and record
+    # from; see the file.
+    install -d ${D}${sysconfdir}/alsa/conf.d
+    install -m 0644 ${UNPACKDIR}/60-webos-voip.conf ${D}${sysconfdir}/alsa/conf.d/
 
     # An unknown token would install verbatim and only fail when PulseAudio
     # tried to resolve a sink literally called @SOMETHING@.
@@ -69,5 +78,5 @@ do_install:append:halium() {
 # both hit exactly this.
 RDEPENDS:${PN} += "pulseaudio-module-null-source"
 
-FILES:${PN} = "${sysconfdir}/pulse"
+FILES:${PN} = "${sysconfdir}/pulse ${sysconfdir}/alsa"
 FILES:${PN}:append:halium = " ${libexecdir}/droid-audio-config-gen ${systemd_system_unitdir}/pulseaudio.service.d"
