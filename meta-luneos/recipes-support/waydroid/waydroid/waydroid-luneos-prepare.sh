@@ -363,11 +363,12 @@ EOF
     log "set SurfaceFlinger sysprops (no configstore fallback)"
 }
 
-# ------------------------------------------- software GL on VMware SVGA
+# ------------------------------------------------------------ GL on VMware SVGA
 #
 # Under VirtualBox (VMSVGA) and VMware the render node belongs to vmwgfx, and
-# Waydroid picks gralloc.gbm with Mesa's svga driver for it. SurfaceFlinger
-# composes fine on that, but every app dies on its first frame:
+# Waydroid picks gralloc.gbm with Mesa's svga driver for it. With the image's
+# own driver SurfaceFlinger composes fine, but every app dies on its first
+# frame:
 #
 #   EGL user error 0x3009 (EGL_BAD_MATCH) in eglCreateWindowSurface:
 #       Unsupported surfacetype/colorspace configuration
@@ -377,18 +378,28 @@ EOF
 # Android EGL platform builds its RGBA_8888 configs from sRGB DRI configs alone,
 # and then skips BGRA because RGBA exists. hwui asks for a linear window
 # surface, and the config it picks has no linear double-buffered DRI config
-# behind it. Measured on qemux86-64 in VirtualBox with the image's Mesa 23.2.1;
-# Mesa main has the same logic. The launcher and system UI crash-loop and every
-# Android app window closes as soon as it maps.
+# behind it. Fixing only that leaves a second svga bug: it invalidates a
+# buffer it imports before rendering to it, and the Android platform re-imports
+# the window buffer every frame, so with hwui's partial redraws (buffer age)
+# everything outside the redrawn region is black. Measured on qemux86-64 in
+# VirtualBox with the image's Mesa 23.2.1; Mesa main has the same code.
 #
-# Until a fixed Mesa reaches the image, render with SwiftShader there: gralloc
-# "default" and EGL "swiftshader", which is what Waydroid itself falls back to
-# when it finds no render node. The base prop names the render node Waydroid
-# chose (gralloc.gbm.device), so its driver is what is checked, and any other
-# GPU keeps Mesa. Like the prop setters above this runs after
-# refresh_container_config, which regenerates the base prop.
-set_software_gl_on_vmwgfx() {
-    [ "${WAYDROID_VMWGFX_SOFTWARE_GL:-1}" = 1 ] || return 0
+# waydroid-vmwgfx-dri ships the image's Mesa release with both fixed. When it
+# is installed, put its driver into Waydroid's vendor overlay (lowerdir over
+# the vendor image, mounted when the container starts) and keep Mesa. Without
+# it, or with overlays off - Waydroid turns mount_overlays off by itself when
+# an overlay mount fails - render with SwiftShader: gralloc "default" and EGL
+# "swiftshader", which is what Waydroid itself falls back to when it finds no
+# render node. WAYDROID_VMWGFX_SOFTWARE_GL=1 forces SwiftShader, =0 keeps the
+# GPU path even without the fixed driver.
+#
+# The base prop names the render node Waydroid chose (gralloc.gbm.device), so
+# its driver is what is checked, and any other GPU keeps Mesa untouched. Like
+# the prop setters above this runs after refresh_container_config, which
+# regenerates the base prop.
+VMWGFX_DRI=/usr/share/waydroid-extra/vmwgfx/vmwgfx_dri.so
+
+pick_gl_for_vmwgfx() {
     base=/var/lib/waydroid/waydroid_base.prop
     [ -f "$base" ] || return 0
     node=$(sed -n 's/^gralloc\.gbm\.device=//p' "$base")
@@ -396,10 +407,34 @@ set_software_gl_on_vmwgfx() {
     driver=$(sed -n 's/^DRIVER=//p' \
         "/sys/class/drm/${node##*/}/device/uevent" 2>/dev/null)
     [ "$driver" = vmwgfx ] || return 0
+
+    mode=${WAYDROID_VMWGFX_SOFTWARE_GL:-auto}
+    [ "$mode" = 0 ] && return 0
+    if [ "$mode" = auto ] && install_vmwgfx_dri; then
+        return 0
+    fi
     sed -i -e '/^gralloc\.gbm\.device=/d' \
         -e 's/^ro\.hardware\.gralloc=.*/ro.hardware.gralloc=default/' \
         -e 's/^ro\.hardware\.egl=.*/ro.hardware.egl=swiftshader/' "$base" &&
         log "vmwgfx render node: software GL (SwiftShader) for the container"
+}
+
+# Succeeds when the container will load the fixed driver: it is installed,
+# overlays are on, and the overlay holds the same file. The overlay is only
+# written while the container is stopped, since it is a mounted lowerdir once
+# the container runs; a running container started from this same state.
+install_vmwgfx_dri() {
+    [ -f "$VMWGFX_DRI" ] || return 1
+    grep -q '^mount_overlays[[:space:]]*=[[:space:]]*True' \
+        /var/lib/waydroid/waydroid.cfg 2>/dev/null || return 1
+    dest=/var/lib/waydroid/overlay/vendor/lib64/dri/vmwgfx_dri.so
+    cmp -s "$VMWGFX_DRI" "$dest" && return 0
+    state=$(lxc-info -P /var/lib/waydroid/lxc -n waydroid -sH 2>/dev/null)
+    [ "${state:-STOPPED}" = "STOPPED" ] || return 1
+    mkdir -p "${dest%/*}" &&
+        cp "$VMWGFX_DRI" "$dest.new" && chmod 0644 "$dest.new" &&
+        mv "$dest.new" "$dest" || return 1
+    log "vmwgfx render node: fixed svga driver in the vendor overlay"
 }
 
 # ------------------------------------------------ refresh container config
@@ -475,5 +510,5 @@ keep_missing_namespaces || rc=1
 set_no_ril          || rc=1
 set_no_background_subsurface || rc=1
 set_surfaceflinger_props || rc=1
-set_software_gl_on_vmwgfx || rc=1
+pick_gl_for_vmwgfx  || rc=1
 exit $rc
