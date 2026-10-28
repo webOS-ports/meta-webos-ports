@@ -474,7 +474,7 @@ RDEPENDS:${PN}:append:halium = " waydroid waydroid-sensors"
 RDEPENDS:${PN}:append:pinephone = " waydroid waydroid-sensors"
 RDEPENDS:${PN}:append:pinephonepro = " waydroid waydroid-sensors"
 RDEPENDS:${PN}:append:pinetab2 = " waydroid waydroid-sensors"
-RDEPENDS:${PN}:append:qemux86-64 = " waydroid waydroid-sensors"
+RDEPENDS:${PN}:append:qemux86-64 = " waydroid waydroid-sensors waydroid-vmwgfx-dri"
 RDEPENDS:${PN}:append:rpi = " waydroid"
 
 # Waydroid needs a kernel of 3.18 or newer (binder, ashmem and the namespaces its
