@@ -1,0 +1,185 @@
+#!/usr/bin/python3
+"""
+luneos-key-actions - give a held hardware key something to do.
+
+Reads the evdev nodes of every input device that advertises one of the
+configured keys and runs that key's action once the key has been held for
+longPressMs. A shorter press is left alone: the device is not grabbed, so the
+compositor keeps getting every event and a tap means whatever it meant before.
+
+Why a daemon and not the shell's HardwareKeys: the compositor's keymap
+(webos-keymap.qmap) has no entry for the camera keys (KEY_CAMERA 212,
+KEY_CAMERA_FOCUS 0x210, Sony's full-press 0x2fe), so the shell never sees them
+as anything it could tell apart.
+
+Configuration: /etc/luneos/key-actions.json (optional), for example
+  { "longPressMs": 600,
+    "keys": { "766": "launch:org.webosports.app.camera",
+              "212": "launch:org.webosports.app.camera" } }
+Keys are evdev codes (decimal, or "0x2fe"). Actions:
+  launch:<appId>     applicationManager/launch
+  luna:<uri> <json>  any luna-send -n 1 call
+  none               disable a default
+The file's "keys" are merged over the defaults below.
+
+With no matching key on any input device this exits 0 and stays down, so it is
+harmless on a device without a camera key.
+"""
+
+import glob
+import json
+import os
+import select
+import struct
+import subprocess
+import sys
+import threading
+import time
+
+CONFIG = "/etc/luneos/key-actions.json"
+CAMERA_APP = "org.webosports.app.camera"
+
+DEFAULT_KEYS = {
+    212: "launch:" + CAMERA_APP,    # KEY_CAMERA, what most devices send
+    0x2fe: "launch:" + CAMERA_APP,  # Sony full press ("KEY_CAMERA_SNAPSHOT")
+}
+DEFAULT_LONG_PRESS_MS = 600
+
+EV_KEY = 1
+EVENT = struct.Struct("llHHi")  # struct input_event, native long size
+
+
+def log(msg):
+    print("luneos-key-actions: " + msg, flush=True)
+
+
+def parse_code(s):
+    return int(s, 0) if isinstance(s, str) else int(s)
+
+
+def load_config():
+    keys = dict(DEFAULT_KEYS)
+    long_ms = DEFAULT_LONG_PRESS_MS
+    try:
+        with open(CONFIG) as f:
+            cfg = json.load(f)
+        long_ms = int(cfg.get("longPressMs", long_ms))
+        for k, v in cfg.get("keys", {}).items():
+            keys[parse_code(k)] = v
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        log("ignoring %s: %s" % (CONFIG, e))
+    keys = {k: v for k, v in keys.items() if v and v != "none"}
+    return keys, long_ms / 1000.0
+
+
+def device_keys(event_path):
+    """The key codes an evdev node advertises, from sysfs."""
+    name = os.path.basename(event_path)
+    try:
+        with open("/sys/class/input/%s/device/capabilities/key" % name) as f:
+            words = f.read().split()
+    except OSError:
+        return set()
+    codes = set()
+    for i, w in enumerate(reversed(words)):
+        v = int(w, 16)
+        bit = 0
+        while v:
+            if v & 1:
+                codes.add(i * 64 + bit)
+            v >>= 1
+            bit += 1
+    return codes
+
+
+def device_name(event_path):
+    try:
+        with open("/sys/class/input/%s/device/name" % os.path.basename(event_path)) as f:
+            return f.read().strip()
+    except OSError:
+        return "?"
+
+
+def run(action):
+    if action.startswith("launch:"):
+        cmd = ["luna-send", "-n", "1",
+               "luna://com.webos.service.applicationManager/launch",
+               json.dumps({"id": action[len("launch:"):]})]
+    elif action.startswith("luna:"):
+        uri, _, payload = action[len("luna:"):].strip().partition(" ")
+        cmd = ["luna-send", "-n", "1", uri, payload or "{}"]
+    else:
+        log("unknown action " + action)
+        return
+    log("running " + " ".join(cmd))
+    # In a thread, so a slow reply does not hold up the next key, and logged,
+    # so a refused launch is not silent.
+    def call():
+        try:
+            out = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                 timeout=30).stdout.decode(errors="replace").strip()
+            log("reply: " + out[:300])
+        except (OSError, subprocess.SubprocessError) as e:
+            log("luna-send failed: %s" % e)
+    threading.Thread(target=call, daemon=True).start()
+
+
+def main():
+    keys, long_s = load_config()
+    fds = {}
+    for path in sorted(glob.glob("/dev/input/event*")):
+        wanted = device_keys(path) & set(keys)
+        if not wanted:
+            continue
+        try:
+            fds[os.open(path, os.O_RDONLY | os.O_NONBLOCK)] = path
+            log("watching %s (%s) for %s" % (path, device_name(path),
+                                             ", ".join(hex(c) for c in sorted(wanted))))
+        except OSError as e:
+            log("cannot open %s: %s" % (path, e))
+    if not fds:
+        log("no input device has a configured key, nothing to do")
+        return 0
+
+    held = {}  # code -> monotonic time of the press, until it fires or is released
+    poller = select.poll()
+    for fd in fds:
+        poller.register(fd, select.POLLIN)
+
+    while True:
+        now = time.monotonic()
+        timeout = None
+        if held:
+            timeout = max(0, min(held.values()) + long_s - now) * 1000
+        for fd, ev in poller.poll(timeout):
+            if ev & (select.POLLERR | select.POLLHUP | select.POLLNVAL):
+                log("lost %s, exiting so systemd restarts us" % fds[fd])
+                return 1
+            try:
+                data = os.read(fd, EVENT.size * 64)
+            except BlockingIOError:
+                continue
+            for off in range(0, len(data) - EVENT.size + 1, EVENT.size):
+                _, _, etype, code, value = EVENT.unpack_from(data, off)
+                if etype != EV_KEY or code not in keys:
+                    continue
+                if value == 1:
+                    held[code] = time.monotonic()
+                elif value == 0:
+                    since = held.pop(code, None)
+                    if since is not None:
+                        log("short press of %s (%d ms), left alone"
+                            % (hex(code), (time.monotonic() - since) * 1000))
+                # value 2 (autorepeat) changes nothing
+        now = time.monotonic()
+        for code, since in list(held.items()):
+            if now - since >= long_s:
+                del held[code]  # once per hold
+                log("long press of %s" % hex(code))
+                run(keys[code])
+
+
+if __name__ == "__main__":
+    sys.exit(main())

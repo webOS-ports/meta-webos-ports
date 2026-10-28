@@ -234,6 +234,7 @@ KEYBOARD_TOUCH_RDEPENDS = " \
 # com.webos.service.camera in packagegroup-webos-extended.
 CAMERA_RDEPENDS = " \
     org.webosports.app.camera \
+    luneos-key-actions \
     v4l-utils \
     libcamera \
     libcamera-gst \
