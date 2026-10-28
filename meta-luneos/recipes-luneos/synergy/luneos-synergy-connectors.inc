@@ -25,6 +25,6 @@
 HOMEPAGE ?= "https://github.com/webOS-ports/luneos-synergy-connectors"
 
 SRC_URI = "git://github.com/webOS-ports/luneos-synergy-connectors.git;branch=main;protocol=https;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX}"
-SRCREV = "d22c6be58feeb75458602fa97275756c5e41c9f3"
+SRCREV = "a7c1efb5220dbe3c8ce8314bb56330f1b665e050"
 
 LSC_SRCDIR = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}"

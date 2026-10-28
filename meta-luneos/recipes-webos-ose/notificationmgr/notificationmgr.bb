@@ -12,7 +12,7 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "glib-2.0 luna-service2 libpbnjson pmloglib boost libxml++-5.0 glibmm"
 
-SRCREV = "501fbb3813f61d7fb4d4c066c4298ff4c92f42d6"
+SRCREV = "b6fb333825eba42bfa2ca53f28993d7c97c28927"
 
 PV = "1.0.0-29"
 
