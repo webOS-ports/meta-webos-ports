@@ -24,7 +24,7 @@
 # ?= so the vendored-library recipes keep their upstream HOMEPAGE.
 HOMEPAGE ?= "https://github.com/webOS-ports/luneos-synergy-connectors"
 
-SRC_URI = "git://github.com/webOS-ports/luneos-synergy-connectors.git;branch=main;protocol=https;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX}"
+SRC_URI = "git://github.com/webOS-ports/luneos-synergy-connectors.git;branch=${LSC_BRANCH};protocol=https;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX}"
 require recipes-luneos/synergy/luneos-synergy-connectors-srcrev.inc
 SRCREV = "${LSC_SRCREV}"
 
