@@ -50,9 +50,8 @@ SRCREV_meowcaller = "9769d5aaaeca43f6c69d612a913aeb10298b2c07"
 SRCREV_libtgvoip = "6c82c9de85cca69ea099a738fcbd2ab2de4f839d"
 SRCREV_FORMAT = "upstream_meowcaller_libtgvoip_connectors"
 
-# luna-service2 is for glue/call.c (com.palm.whatsapp.call). It compiles against 3.21.2 thanks to
-# im/_core/include/webos-ls2-compat.h from luneos-synergy-connectors, which re-expresses the legacy split-bus API -- LSPalmService
-# and friends were removed outright in 3.x.
+# luna-service2 is for glue/call.c (com.palm.whatsapp.call). It registers one handle with
+# LSRegister: LuneOS has a single bus, so the public/private split of legacy webOS is not needed.
 #
 # alsa-lib is also glue/call.c: call audio is captured and played through ALSA directly.
 #
@@ -137,13 +136,8 @@ do_compile() {
     # the symbol is purple_init_plugin with and without the flag.
     #
     # -DPLUGIN_VERSION, by contrast, IS required: glue/init.c #errors without it.
-    #
-    # luna-service2 needs its own -I on top of pkg-config: the .pc gives only -I${includedir}, while
-    # the header sits at ${includedir}/luna-service2/lunaservice.h and webos-ls2-compat.h includes it
-    # bare as <lunaservice.h>.
     GCFLAGS="${CFLAGS} -fPIC -DPURPLE_PLUGINS -DPLUGIN_VERSION=$PLUGIN_VERSION \
-             -I${S}/glue -I${S} -I${B} -I${CONNECTORS_DIR}/im/_core/include \
-             -I${STAGING_INCDIR}/luna-service2 \
+             -I${S}/glue -I${S} -I${B} \
              $(pkg-config --cflags purple glib-2.0 opus opusfile ogg alsa luna-service2)"
 
     # 2. the C glue, including the webOS files 0006-0007 add.
