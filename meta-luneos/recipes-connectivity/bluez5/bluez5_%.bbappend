@@ -46,11 +46,16 @@ SRC_URI += " \
     file://main.conf \
     file://brcm43438.service \
     file://bluetooth.service.d/luneos-uinput.conf \
+    file://luneos-bluetooth-rfkill.conf \
 "
 
 # See bluetooth.service.d/luneos-uinput.conf: bluetoothd needs the
 # bluetooth group to open /dev/uinput, or headset buttons never become keys.
 FILES:${PN} += "${systemd_system_unitdir}/bluetooth.service.d/luneos-uinput.conf"
+
+# See luneos-bluetooth-rfkill.conf: a saved Bluetooth soft-block is never the
+# user's choice on LuneOS, and systemd-rfkill restoring it breaks the toggle.
+FILES:${PN} += "${nonarch_libdir}/tmpfiles.d/luneos-bluetooth-rfkill.conf"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "obex.service"
@@ -72,6 +77,9 @@ do_install:append () {
     install -d ${D}${systemd_system_unitdir}/bluetooth.service.d
     install -m 0644 ${UNPACKDIR}/bluetooth.service.d/luneos-uinput.conf \
         ${D}${systemd_system_unitdir}/bluetooth.service.d/luneos-uinput.conf
+    install -d ${D}${nonarch_libdir}/tmpfiles.d
+    install -m 0644 ${UNPACKDIR}/luneos-bluetooth-rfkill.conf \
+        ${D}${nonarch_libdir}/tmpfiles.d/luneos-bluetooth-rfkill.conf
 }
 
 do_install:append:raspberrypi4 () {
