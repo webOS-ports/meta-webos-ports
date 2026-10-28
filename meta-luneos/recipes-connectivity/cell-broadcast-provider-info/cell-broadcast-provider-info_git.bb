@@ -10,7 +10,11 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=e98a055826fc65091d1e31bc3c808f9a"
 
 PV = "20260511+git"
-SRCREV = "c0fc49adf329d70b8f40d2a313d2dcd4674730e5"
+# c0fc49a was dropped from master when upstream rewrote its history; it now
+# survives only under refs/pull/1/head, so do_fetch fails with "Unable to find
+# revision ... in branch master". cc5e80c (tag 0.9.0, on master) has the
+# identical tree (e359f6133b77), so this changes the ref, not the content.
+SRCREV = "cc5e80c21fcc10511dde53ae520c9b3ec64370e3"
 
 SRC_URI = "git://github.com/sailfishos/cell-broadcast-provider-info.git;protocol=https;branch=master"
 
