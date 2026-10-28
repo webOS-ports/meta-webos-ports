@@ -22,12 +22,12 @@ SRC_URI += " \
     file://0009-webOS-Send-and-receive-message-reactions-through-tra.patch \
     file://0010-webOS-Show-replies-as-quote-cards-and-send-replies-w.patch \
     file://0011-webOS-Show-received-media-inline-and-send-voice-note.patch \
-    file://0012-webOS-Add-Teams-voice-and-video-calling-for-the-webO.patch \
+    file://0012-webOS-Add-Teams-voice-calling-for-the-webOS-Phone-ap.patch \
     file://0013-webOS-Always-report-the-account-as-active-and-Availa.patch \
 "
 SRCREV_upstream = "f7eb519b9968ed7844ff59319bff5c1859c46851"
 
-DEPENDS = "pidgin json-glib glib-2.0 zlib"
+DEPENDS = "pidgin json-glib glib-2.0 zlib luna-service2"
 
 S = "${UNPACKDIR}/purple-teams"
 
@@ -35,18 +35,25 @@ S = "${UNPACKDIR}/purple-teams"
 # Messaging app would otherwise show it twice.
 CFLAGS:append = " -DTEAMS_WEBOS"
 
+# libpurple only looks up purple_init_plugin (G_MODULE_EXPORT); keep the rest, including the
+# bundled purple2compat http/socket code other plug-ins also carry, out of the dynamic symbol table.
+CFLAGS:append = " -fvisibility=hidden"
+
 # The default target builds both variants: libteams.so (commercial) and libteams-personal.so
 # (consumer). webOS uses the consumer one; both are installed, as upstream does.
 #
-# NOT built here: the calling bridge from 0012 (teams_calling.c, teams_call_luna.c, h264_rtp.c,
-# voipkit_none.c, teams_video_relay.cpp). The upstream Makefile does not list them; building them
-# needs -DTEAMS_WEBOS_CALL, ${CONNECTORS_DIR}/im/_core/include for webos-ls2-compat.h,
-# luna-service2, and the separate teams_media engine at runtime. Without TEAMS_WEBOS_CALL the
-# calling hooks compile out and the plug-in shows upstream's "Incoming call" message instead.
+# TEAMS_WEBOS_CALL builds 0012's calling bridge (teams_calling.c, teams_call_luna.c) into
+# libteams-personal.so only, so one plug-in registers com.palm.teams.call; it links luna-service2.
+# Each call's audio runs in teams_media (teams-media_git.bb), which the plug-in spawns from
+# TEAMS_MEDIA_BIN.
 EXTRA_OEMAKE = " \
     CC='${CC}' \
     PKG_CONFIG='${STAGING_BINDIR_NATIVE}/pkg-config' \
+    TEAMS_WEBOS_CALL=1 \
+    TEAMS_MEDIA_BIN=${libexecdir}/teams_media \
 "
+
+RDEPENDS:${PN} += "teams-media"
 
 do_compile() {
     oe_runmake
@@ -66,4 +73,16 @@ do_install() {
     # Validator app named by the template's validator.customUI.appId.
     install -d ${D}${webos_applicationsdir}
     cp -rf ${CONNECTORS_DIR}/im/teams/apps/com.palm.app.teams ${D}${webos_applicationsdir}/
+
+    # The teams call service (0012's teams_call_luna.c): its bus name is listed, never activated --
+    # imlibpurpleservice, which loads this plug-in, registers com.palm.teams.call itself, so the
+    # .service file is Type=static -- and the Phone app is granted imlibpurple-call.operation to
+    # call it. The role letting imlibpurpleservice own the name, and the api-permissions/groups
+    # behind that group, ship with imlibpurpleservice. webos_configure_manifest lists both files
+    # in this package's manifest.
+    install -d ${D}${webos_sysbus_servicedir} ${D}${webos_sysbus_permissionsdir}
+    install -m 0644 ${CONNECTORS_DIR}/im/teams/files/sysbus/com.palm.teams.call.service \
+        ${D}${webos_sysbus_servicedir}/
+    install -m 0644 ${CONNECTORS_DIR}/im/teams/files/sysbus/com.palm.teams.call.perm.json \
+        ${D}${webos_sysbus_permissionsdir}/
 }
