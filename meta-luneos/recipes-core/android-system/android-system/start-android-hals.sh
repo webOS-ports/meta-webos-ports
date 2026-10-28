@@ -329,17 +329,129 @@ for e in $(all_rc_files | xargs -r awk '/^service /{print $2 "=" $3}' 2>/dev/nul
     done
 done
 
+# Disabled services that only a property trigger turns on.
+#
+# Force-starting "disabled" services is right for the ones whose trigger sits
+# behind a gate init never passes, but some are disabled because the vendor
+# picks ONE of several alternatives at runtime and enables only that one. The
+# Xperia XA2 (pioneer) ships two fingerprint HALs, one per sensor vendor:
+#
+#     service ets_hal .../fingerprint@2.1-service_et512     disabled
+#     on property:vendor.hw.fingerprint=et516    enable ets_hal
+#     service fps_hal .../fingerprint@2.1-service_fpc       disabled
+#     on property:vendor.hw.fingerprint=fpc1035  enable fps_hal
+#
+# with vendor.hw.fingerprint read from the board (/proc/cei_fp_id) by cei_sh.
+# Starting both broke fingerprint outright, not just wasted a process: the
+# Egistec HAL loads its TrustZone app (egisap32) first, finds no Egistec sensor
+# and keeps it loaded, and with that TA resident QSEE refuses the FPC app -
+#
+#     scm_call failed: func id 0x72000101, ret: -2
+#     fpc_tac_open start_app failed: -1
+#
+# - forever. Stopping ets_hal (which unloads egisap32) let fpctzapp load at once
+# and the FPC HAL registered (28 Oct 2026).
+#
+# So a disabled service whose only enablers are "on property:" blocks is
+# started only if one of those blocks holds. If the properties are not set yet
+# (cei_sh is itself one of the services started here, so it races the loop),
+# wait for them in the background - up to ANDROID_GATED_WAIT half-seconds - so
+# boot is never held up; still unset after that, start the service as before.
+# Services that some event block also starts (on boot, on late-init, ...) are
+# not gated: init never gets there, which is what this script exists for.
+gated_info=$(all_rc_files | xargs -r awk '
+    /^service / { svc = $2; blk = ""; next }
+    /^on /      { svc = ""; blk = $0; sub(/^on[ \t]+/, "", blk); gsub(/[ \t]+/, "", blk); gsub(/&&/, ",", blk); next }
+    svc != "" && $1 == "disabled" { print "D " svc; next }
+    blk != "" && ($1 == "enable" || $1 == "start") && NF >= 2 { print "T " $2 " " blk }
+' 2>/dev/null | awk '
+    $1 == "D" { dis[$2] = 1; next }
+    $1 == "T" {
+        n = split($3, w, ","); prop_only = 1
+        for (i = 1; i <= n; i++) if (w[i] !~ /^property:/) prop_only = 0
+        if (prop_only) blks[$2] = blks[$2] " " $3; else ungated[$2] = 1
+    }
+    END { for (s in blks) if (dis[s] && !(s in ungated)) print s blks[s] }
+')
+
+# The trigger blocks (property:a=b,property:c=d) of a gated service.
+gated_triggers() {
+    printf '%s\n' "$gated_info" | awk -v s="$1" '$1 == s { $1 = ""; print; exit }'
+}
+
+# 0: one of the service's triggers holds now. 1: none can (each names a property
+# that is set to another value). 2: undecided (a property is still unset).
+gated_state() {
+    _res=1
+    for _blk in $(gated_triggers "$1"); do
+        _b=0
+        _oifs=$IFS; IFS=,
+        for _t in $_blk; do
+            _t=${_t#property:}
+            _want=${_t#*=}
+            _have=$(getprop "${_t%%=*}")
+            if [ -z "$_have" ]; then
+                [ -n "$_want" ] && [ "$_b" = 0 ] && _b=2
+            elif [ "$_want" != "*" ] && [ "$_have" != "$_want" ]; then
+                # init.svc.* is a service state that moves on (restarting ->
+                # running), not a decision: never read a mismatch there as "no".
+                case "${_t%%=*}" in
+                    init.svc.*) [ "$_b" = 0 ] && _b=2; continue ;;
+                esac
+                _b=1
+                break
+            fi
+        done
+        IFS=$_oifs
+        [ "$_b" = 0 ] && return 0
+        [ "$_b" = 2 ] && _res=2
+    done
+    return $_res
+}
+
+gated_names=" $(printf '%s\n' "$gated_info" | awk '{ print $1 }' | tr '\n' ' ') "
+gated_svcs=
+
 started=0
 for s in $svcs; do
     case " $SKIP_SERVICES " in *" $s "*) continue ;; esac
     case " $conflict_svcs " in *" $s "*) continue ;; esac
     case " $LATE_SERVICES " in *" $s "*) continue ;; esac
     [ "$(getprop init.svc.$s)" = "running" ] && continue
+    case "$gated_names" in *" $s "*) gated_svcs="$gated_svcs $s"; continue ;; esac
     setprop ctl.start "$s"
     started=$((started + 1))
 done
 
 echo "requested start of $started Android service(s) init skipped"
+
+if [ -n "$gated_svcs" ]; then
+    echo "deciding on property-gated service(s):$gated_svcs"
+    (
+        i=0
+        while :; do
+            undecided=
+            for s in $gated_svcs; do
+                gated_state "$s"
+                [ $? = 2 ] && undecided="$undecided $s"
+            done
+            [ -n "$undecided" ] && [ $i -lt "${ANDROID_GATED_WAIT:-10}" ] || break
+            i=$((i + 1))
+            sleep 0.5
+        done
+        for s in $gated_svcs; do
+            [ "$(getprop init.svc.$s)" = "running" ] && continue
+            gated_state "$s"
+            case $? in
+                0) echo "starting $s: its trigger holds" ;;
+                1) echo "not starting $s: none of its triggers holds ($(gated_triggers "$s" | sed 's/^ *//'))"
+                   continue ;;
+                *) echo "starting $s: its trigger property is still unset after $((i / 2))s" ;;
+            esac
+            setprop ctl.start "$s"
+        done
+    ) &
+fi
 
 # Now the late set, once what it depends on is up. Bounded, and it starts them
 # anyway on timeout: a device without these prerequisites should not lose its
