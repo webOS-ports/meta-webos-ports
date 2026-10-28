@@ -47,9 +47,12 @@ DEPENDS = "pidgin glib-2.0 zlib openssl fmt tdlib libtgvoip libopus alsa-lib lun
 
 S = "${UNPACKDIR}/tdlib-purple"
 
-# S is only the plug-in checkout, so OE's automatic ${S} prefix-map misses the
-# luneos-synergy-connectors header call-luna.cpp includes, whose path would survive into the
-# debug info and trip buildpaths QA. Map the whole unpack directory.
+# libtgvoip's PulseAudio backend, which call audio goes through, dlopen()s libpulse.so.0, so
+# packaging cannot see the dependency.
+RDEPENDS:${PN} += "libpulse"
+
+# Map the whole unpack directory, not only ${S}, so nothing compiled from outside the plug-in
+# checkout leaves a TMPDIR path in the debug info (buildpaths QA).
 DEBUG_PREFIX_MAP:append = " -ffile-prefix-map=${UNPACKDIR}=/usr/src/debug/${PN}/${PV}"
 
 inherit cmake pkgconfig
@@ -70,13 +73,9 @@ inherit cmake pkgconfig
 # libtgvoip_git.bb about keeping both sides of TGVOIP_NO_DSP in agreement.
 #
 # lunaservice_* both need overriding. The defaults are the legacy webOS ones (liblunaservice.so);
-# LuneOS ships libluna-service2.so. The include list carries luneos-synergy-connectors'
-# im/_core/include for webos-ls2-compat.h, which call-luna.cpp uses to map the legacy split-bus
-# API onto luna-service2's single bus. The luna-service2 subdirectory is explicit because the
-# header is included bare as <lunaservice.h> while the .pc offers only -I${includedir}.
+# LuneOS ships libluna-service2.so.
 #
-# Video calling stays off: its only backend is legacy webOS's SkypeKit library, which LuneOS does
-# not have, so SkypeKitFwRootfs is left unset and the bridge builds against the null backend.
+# Calls are voice only (0015): there is no video path for libtgvoip on LuneOS.
 #
 # The semicolons must stay quoted: cmake_do_configure expands EXTRA_OECMAKE unquoted into a shell
 # command, which would otherwise split the line at each one.
@@ -86,7 +85,7 @@ EXTRA_OECMAKE = " \
     -DNoTranslations=ON \
     -Dtgvoip_INCLUDE_DIRS=${STAGING_INCDIR}/tgvoip \
     -Dtgvoip_LIBRARIES='tgvoip;opus;asound;crypto' \
-    -Dlunaservice_INCLUDE_DIRS='${STAGING_INCDIR}/luna-service2;${CONNECTORS_DIR}/im/_core/include' \
+    -Dlunaservice_INCLUDE_DIRS=${STAGING_INCDIR}/luna-service2 \
     -Dlunaservice_LIBRARIES=luna-service2 \
 "
 

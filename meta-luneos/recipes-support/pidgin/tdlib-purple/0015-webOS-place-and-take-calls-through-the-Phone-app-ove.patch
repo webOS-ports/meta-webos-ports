@@ -6,9 +6,9 @@ Subject: [PATCH] webOS: place and take calls through the Phone app over LS2
 tdlib-purple already does the whole call - TDLib signalling and libtgvoip
 media - but its UI is Pidgin's: a purple_request_action() accept dialog, a
 "/hangup" command, and a gate on the front-end's PurpleMedia capabilities.
-webOS has none of that. What it has is the stock Phone app, which drives
-calls of other services through an LS2 contract (CallSynergizer), as it
-does for the WhatsApp connector.
+webOS has none of that. What it has is the Phone app, which drives calls
+of other services through an LS2 contract, as it does for the WhatsApp
+connector.
 
 call-luna.{h,cpp} serves that contract as com.palm.telegram.call,
 registered when the account connects, on libpurple's own GLib main loop:
@@ -17,10 +17,18 @@ reach TDLib through three bridge functions in call.cpp (callBridgeDial/
 Answer/Hangup), and updateCall() pushes every state change - incoming,
 dialing, active, disconnected with a cause (normal, rejected, missed,
 error) - instead of writing to the conversation or opening a dialog. The
-media-caps gate is bypassed, and the call's audio route is switched by
-setting audiod's phone scenario while a call is active.
-The accept/cancel dialog's callbacks (acceptCallCb, discardCallCb) have no
-caller left and are removed; answering goes through acceptCurrentCall().
+media-caps gate is bypassed. The accept/cancel dialog's callbacks
+(acceptCallCb, discardCallCb) have no caller left and are removed;
+answering goes through acceptCurrentCall().
+
+Call audio: libtgvoip plays to the PulseAudio sink "voipcall" and records
+from the source "webcall", the call devices module-palm-policy routes to
+the earpiece, speaker or headset and the matching microphone. While the
+call is active the bridge reports it to audiod
+(com.palm.audio/phone/CallStatusUpdate, transport com.palm.telegram), and
+clears it on hangup, from the service's own handle. No audio scenario is
+forced, so a call starts on the earpiece (or a connected headset) and the
+Phone app's speaker button moves it.
 
 Dialing is made to cope with how the Phone app dials:
 
@@ -38,86 +46,50 @@ Dialing is made to cope with how the Phone app dials:
   so the plugin's card merges with the dialer's instead of leaving a
   second one stuck on "Connecting".
 
-Video is plumbed through as far as the platform allows: a video call is
-requested with createCall.is_video_, reported to the Phone app as such,
-and on activation a clonk (webOS media server) video session is opened and
-libtgvoip is given a VideoSource/VideoRenderer (voipkit-tgvoip.{h,cpp}) that
-exchange H.264 access units with it. The bridge to the media server's RTP
-sockets is behind voipkit.h; here it is voipkit_none.c, a null backend
-that logs once and lets the call carry on as voice only, which is all
-LuneOS can do (the legacy webOS backend is a separate patch). The
-initial libtgvoip SetVideoSource() is retried for a few seconds, because
-libtgvoip only creates its outgoing video stream once the peer's first
-PKT_INIT has arrived.
+Calls are voice only: there is no video path for libtgvoip on LuneOS, so a
+video request is placed as a voice call and video is never reported.
 
 callProtocol.library_versions_ is left empty on purpose: declaring "2.7.7"
 makes current clients move to a newer signalling path the bundled
 VoIPController cannot speak, and audio breaks with it.
 
-Building needs luna-service2 (lunaservice_INCLUDE_DIRS/_LIBRARIES; the
-include list must also carry webos-ls2-compat.h, which maps the legacy
-split-bus API onto luna-service2 3.x) and C, for voipkit_none.c.
--Dtgvoip_NO_DSP=ON matches a libtgvoip built with --disable-dsp.
+Building needs luna-service2 (lunaservice_INCLUDE_DIRS/_LIBRARIES).
+-Dtgvoip_NO_DSP=ON matches a libtgvoip built with --disable-dsp. The call
+life cycle goes to libpurple's debug log.
 
-call-luna.cpp and call.cpp log the call life cycle to
-/media/internal/tgcall.log, and libtgvoip is told to write its log and
-stats to /media/internal/tgvoip.log and tgvoip-stats.log; purple_debug
-output does not reach the system log on webOS.
-
-Not for upstream: the LS2 service, the Phone app contract and the media
-server are webOS only.
+Not for upstream: the LS2 service, the Phone app contract and audiod are
+webOS only.
 
 Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
 Upstream-Status: Inappropriate [webOS specific]
 ---
- CMakeLists.txt     |  20 +-
- account-data.cpp   |   3 +
- account-data.h     |  17 ++
- call-luna.cpp      | 445 +++++++++++++++++++++++++++++++++++++++++++++
- call-luna.h        |  56 ++++++
- call.cpp           | 231 +++++++++++++++++------
- call.h             |   3 +-
- td-client.cpp      |  75 +++++++-
- td-client.h        |  10 +-
- tdlib-purple.cpp   |   4 +-
- voipkit-tgvoip.cpp |  63 +++++++
- voipkit-tgvoip.h   |  63 +++++++
- voipkit.h          |  61 +++++++
- voipkit_none.c     |  82 +++++++++
- 14 files changed, 1070 insertions(+), 63 deletions(-)
+ CMakeLists.txt   |  16 +++
+ account-data.cpp |   3 +
+ account-data.h   |  17 ++++
+ call-luna.cpp    | 253 +++++++++++++++++++++++++++++++++++++++++++++++
+ call-luna.h      |  43 ++++++++
+ call.cpp         | 171 +++++++++++++++++++++-----------
+ call.h           |   3 +-
+ td-client.cpp    |  75 +++++++++++++-
+ td-client.h      |  10 +-
+ tdlib-purple.cpp |   4 +-
+ 10 files changed, 533 insertions(+), 62 deletions(-)
  create mode 100644 call-luna.cpp
  create mode 100644 call-luna.h
- create mode 100644 voipkit-tgvoip.cpp
- create mode 100644 voipkit-tgvoip.h
- create mode 100644 voipkit.h
- create mode 100644 voipkit_none.c
 
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 6aedf76..23582e7 100644
+index 6aedf76..77d977d 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.10)
- # the oldest CMake 4 accepts without a deprecation warning
- 
- set(VERSION 0.9.3)
--project(tdlib-purple VERSION ${VERSION} LANGUAGES CXX)
-+project(tdlib-purple VERSION ${VERSION} LANGUAGES C CXX)
- 
- set(NoPkgConfig FALSE CACHE BOOL "Do not use pkg-config")
- 
-@@ -73,8 +73,11 @@ add_library(telegram-tdlib SHARED
+@@ -73,6 +73,7 @@ add_library(telegram-tdlib SHARED
      media-variants.cpp
      file-transfer.cpp
      call.cpp
 +    call-luna.cpp
      identifiers.cpp
      secret-chat.cpp
-+    voipkit_none.c
-+    voipkit-tgvoip.cpp
  )
- 
- #target_compile_options(telegram-tdlib PRIVATE -Wmissing-declarations)
-@@ -99,8 +102,23 @@ set(BUILD_SHARED_LIBS OFF)
+@@ -99,8 +100,23 @@ set(BUILD_SHARED_LIBS OFF)
  if (NOT tgvoip_INCLUDE_DIRS STREQUAL "")
      target_include_directories(telegram-tdlib SYSTEM PRIVATE ${tgvoip_INCLUDE_DIRS})
  endif (NOT tgvoip_INCLUDE_DIRS STREQUAL "")
@@ -199,10 +171,10 @@ index 2756891..33af929 100644
      void                            saveTempFileUploads();
 diff --git a/call-luna.cpp b/call-luna.cpp
 new file mode 100644
-index 0000000..74af908
+index 0000000..c2c10ad
 --- /dev/null
 +++ b/call-luna.cpp
-@@ -0,0 +1,445 @@
+@@ -0,0 +1,253 @@
 +/* webOS Synergy Revival - Telegram calling M2 (Path C): the LS2 call service.
 + * See call-luna.h. Serves com.palm.telegram.call to the stock Phone app (CallSynergizer),
 + * mirroring the com.palm.whatsapp / wacallm contract:
@@ -216,12 +188,10 @@ index 0000000..74af908
 +
 +#include "call-luna.h"
 +#include "config.h"
-+#include "voipkit.h"
-+#include "webos-ls2-compat.h"   /* legacy split-bus API on either luna-service2 */
++#include <luna-service2/lunaservice.h>
 +#include <glib.h>
 +#include <string>
-+#include <cstdio>
-+#include <ctime>
++#include <cstring>
 +#include <cstdarg>
 +
 +/* Implemented in call.cpp - drive the active account's TDLib call via the existing prpl logic. */
@@ -229,36 +199,25 @@ index 0000000..74af908
 +extern void callBridgeAnswer(PurpleAccount *account);
 +extern void callBridgeHangup(PurpleAccount *account);
 +
-+/* On-device lifecycle trace (purple_debug never reaches /var/log/messages on webOS). Tail
-+ * /media/internal/tgcall.log to see exactly when/if the call service registers + dials. */
++/* Call life-cycle trace, through libpurple's debug log like the rest of the plug-in. */
 +void tgcLog(const char *fmt, ...)
 +{
-+    FILE *f = fopen("/media/internal/tgcall.log", "a");
-+    if (!f) return;
-+    time_t t = time(NULL);
-+    char ts[32]; struct tm tmv; localtime_r(&t, &tmv);
-+    strftime(ts, sizeof ts, "%H:%M:%S", &tmv);
-+    fprintf(f, "%s ", ts);
-+    va_list ap; va_start(ap, fmt); vfprintf(f, fmt, ap); va_end(ap);
-+    fputc('\n', f);
-+    fclose(f);
++    va_list ap;
++    va_start(ap, fmt);
++    char *msg = g_strdup_vprintf(fmt, ap);
++    va_end(ap);
++    purple_debug_info(config::pluginId, "call: %s\n", msg);
++    g_free(msg);
 +}
 +
 +namespace {
 +
-+LSPalmService *g_service  = NULL;   // pub+priv registration
-+LSHandle      *g_pub      = NULL;   // public connection (untrusted apps talk here)
-+LSHandle      *g_prv      = NULL;   // private connection (trusted Palm apps, incl. com.palm.app.phone, talk here)
++LSHandle      *g_sh       = NULL;   // com.palm.telegram.call on the (single) bus
 +PurpleAccount *g_account  = NULL;   // the bound Telegram account
-+GMainLoop     *g_loopRef  = NULL;   // wraps the default context libpurple runs
 +
 +// Last state we pushed, so a late subscriber gets the current picture immediately.
 +std::string    g_state, g_peerAddr, g_peerName, g_cause;
 +bool           g_outgoing = false;
-+bool           g_videoActive = false; // clonk session open + skypekit bridge running
-+bool           g_callIsVideo = false; // this call negotiated video (TDLib call.is_video_), known
-+                                       // from ring/dial time -- distinct from g_videoActive above
-+std::string    g_clonkUri;            // the open clonk session's palm:// LS2 URI, if any
 +
 +const char *SUBKEY = "callState";
 +
@@ -278,40 +237,21 @@ index 0000000..74af908
 +    return o;
 +}
 +
-+// Build the CallSynergizer callStateQuery payload. Dispatch is on the LINE-level "state"
-+// (handleIncoming/handleActive/handleDisconnected); an empty state => idle (no lines).
++// Build the callStateQuery payload the Phone app's SynergyTransport reads: one line with a
++// line-level "state" (incoming/dialing/active/disconnected), or no lines when idle. Video is never
++// reported: there is no video path on LuneOS (see call.cpp), so a call is always voice.
 +std::string buildPayload()
 +{
-+    // ActiveCall.js reads outgoingVideo/incomingVideo/incomingVideoState directly off the LINE
-+    // object (activeLines[0].outgoingVideo etc.), NOT off calls[] -- confirmed against the
-+    // WhatsApp mediator (call.go:190-192), which is the one known to actually drive the Phone
-+    // app's video UI. incomingVideoState is CallSynergizer's tri-state:
-+    // "unavailable" (not a video call) / "available" (video call, not yet streaming, e.g. still
-+    // ringing/dialing) / "streaming" (the native clonk/skypekit bridge is actually up). A plain
-+    // per-call "video" bool (this file's original approach) is simply never read by the UI.
-+    const char *videoState = g_videoActive ? "streaming" : (g_callIsVideo ? "available" : "unavailable");
-+    const char *videoBool  = g_videoActive ? "true" : "false";
-+
-+    std::string p = std::string("{\"returnValue\":true,\"allowVideoCalls\":true,\"videoURI\":\"") +
-+                     jsonEscape(g_clonkUri.c_str()) + "\",\"lines\":[";
++    std::string p = "{\"returnValue\":true,\"lines\":[";
 +    if (!g_state.empty()) {
 +        p += "{\"state\":\"" + jsonEscape(g_state.c_str()) + "\",";
 +        if (g_state == "disconnected")
 +            p += "\"disconnectDetails\":{\"cause\":\"" + jsonEscape(g_cause.c_str()) + "\"},";
-+        p += std::string("\"incomingVideo\":") + videoBool + ",\"outgoingVideo\":" + videoBool +
-+             ",\"incomingVideoState\":\"" + videoState + "\",";
-+        // CallSynergizer reads call.address / call.displayName DIRECTLY off each call
-+        // (new CallSynergyContact({address: call.address, displayName: call.displayName})), and
-+        // CallSynergyContact.create() does enyo.require(address != undefined) which THROWS if
-+        // address is missing - aborting the whole callStateQuery handler before the call card is
-+        // shown. So the fields MUST be flat (like wacallm/TIL), not nested under "contact".
-+        // transport = this mediator's own PHONE account templateId. Without it CallSynergyContact
-+        // defaults the call to cellular ("MOBILE" + the id formatted as a phone number); with it the
-+        // Phone app's (service-agnostic) _isImTransport()/callNetworkName treat it as the IM it is
-+        // and show the id/@handle verbatim under the network's name.
++        p += "\"incomingVideo\":false,\"outgoingVideo\":false,";
++        // address and displayName sit flat on each call, as the WhatsApp connector sends them.
++        // transport is this connector's own PHONE account template id: without it the call is
++        // taken for a cellular one and the id is shown formatted as a phone number.
 +        p += "\"calls\":[{\"id\":\"tg\",\"origin\":\"" + std::string(g_outgoing ? "outgoing" : "incoming") + "\","
-+             "\"incomingVideo\":" + videoBool + ",\"outgoingVideo\":" + videoBool + ","
-+             "\"incomingVideoState\":\"" + videoState + "\","
 +             "\"transport\":\"com.palm.telegram\","
 +             "\"address\":\"" + jsonEscape(g_peerAddr.c_str()) + "\","
 +             "\"displayName\":\"" + jsonEscape(g_peerName.empty() ? g_peerAddr.c_str() : g_peerName.c_str()) + "\"}]}";
@@ -348,27 +288,14 @@ index 0000000..74af908
 +    return e ? std::string(c, e - c) : "";
 +}
 +
-+// tiny extractor for a top-level boolean field (mirrors the WhatsApp plugin's json_true())
-+bool getBoolField(const char *json, const char *key)
-+{
-+    if (!json) return false;
-+    std::string needle = std::string("\"") + key + "\"";
-+    const char *k = strstr(json, needle.c_str());
-+    if (!k) return false;
-+    const char *c = strchr(k + needle.size(), ':');
-+    if (!c) return false;
-+    while (*++c == ' ') ;
-+    return strncmp(c, "true", 4) == 0;
-+}
-+
 +bool cbDial(LSHandle *sh, LSMessage *msg, void *)
 +{
 +    LSError err; LSErrorInit(&err);
 +    const char *payload = LSMessageGetPayload(msg);
 +    std::string addr = getField(payload, "address");
-+    bool video = getBoolField(payload, "video");
-+    bool ok = g_account && !addr.empty() && callBridgeDial(g_account, addr.c_str(), video);
-+    tgcLog("cbDial addr=%s video=%d g_account=%p ok=%d", addr.c_str(), (int)video, (void*)g_account, ok);
++    // A video request is placed as a voice call: there is no video path on LuneOS.
++    bool ok = g_account && !addr.empty() && callBridgeDial(g_account, addr.c_str(), false);
++    tgcLog("dial %s: %s", addr.c_str(), ok ? "placed" : "failed");
 +    LSMessageReply(sh, msg, ok ? "{\"returnValue\":true}" : "{\"returnValue\":false}", &err);
 +    if (LSErrorIsSet(&err)) LSErrorFree(&err);
 +    return true;
@@ -403,53 +330,46 @@ index 0000000..74af908
 +}
 +
 +LSMethod g_methods[] = {
-+    { "callStateQuery", cbCallStateQuery },
-+    { "dial",           cbDial           },
-+    { "answer",         cbAnswer         },
-+    { "disconnect",     cbDisconnect     },
-+    { "hangupAll",      cbDisconnect     },
-+    { "hangupAllActive",cbDisconnect     },
-+    { "hold",           cbNoop           },
-+    { "swap",           cbNoop           },
-+    { "merge",          cbNoop           },
-+    { "extract",        cbNoop           },
-+    { "dtmf",           cbNoop           },
-+    { "dtmfEnd",        cbNoop           },
-+    { "changeMedia",    cbNoop           },
-+    { NULL, NULL }
++    { "callStateQuery", cbCallStateQuery, LUNA_METHOD_FLAGS_NONE },
++    { "dial",           cbDial,           LUNA_METHOD_FLAGS_NONE },
++    { "answer",         cbAnswer,         LUNA_METHOD_FLAGS_NONE },
++    { "disconnect",     cbDisconnect,     LUNA_METHOD_FLAGS_NONE },
++    { "hangupAll",      cbDisconnect,     LUNA_METHOD_FLAGS_NONE },
++    { "hangupAllActive",cbDisconnect,     LUNA_METHOD_FLAGS_NONE },
++    { "hold",           cbNoop,           LUNA_METHOD_FLAGS_NONE },
++    { "swap",           cbNoop,           LUNA_METHOD_FLAGS_NONE },
++    { "merge",          cbNoop,           LUNA_METHOD_FLAGS_NONE },
++    { "extract",        cbNoop,           LUNA_METHOD_FLAGS_NONE },
++    { "dtmf",           cbNoop,           LUNA_METHOD_FLAGS_NONE },
++    { "dtmfEnd",        cbNoop,           LUNA_METHOD_FLAGS_NONE },
++    { "changeMedia",    cbNoop,           LUNA_METHOD_FLAGS_NONE },
++    { NULL, NULL, LUNA_METHOD_FLAGS_NONE }
 +};
 +
 +} // namespace
 +
 +bool callLunaInit(PurpleAccount *account)
 +{
-+    tgcLog("callLunaInit ENTER account=%s g_service=%p",
-+           account ? purple_account_get_username(account) : "(null)", (void*)g_service);
 +    g_account = account;
-+    if (g_service) return true;   // already registered (one service, whichever account connects first)
++    if (g_sh) return true;   // already registered (one service, whichever account connects first)
 +
 +    LSError err; LSErrorInit(&err);
-+    if (!LSRegisterPalmService("com.palm.telegram.call", &g_service, &err)) {
-+        purple_debug_error(config::pluginId, "LSRegisterPalmService: %s\n", err.message);
-+        tgcLog("callLunaInit FAIL LSRegisterPalmService: %s", err.message);
++    if (!LSRegister("com.palm.telegram.call", &g_sh, &err)) {
++        purple_debug_error(config::pluginId, "LSRegister com.palm.telegram.call: %s\n", err.message);
 +        LSErrorFree(&err); return false;
 +    }
-+    if (!LSPalmServiceRegisterCategory(g_service, "/", g_methods, g_methods, NULL, NULL, &err)) {
-+        purple_debug_error(config::pluginId, "RegisterCategory: %s\n", err.message);
-+        tgcLog("callLunaInit FAIL RegisterCategory: %s", err.message);
-+        LSErrorFree(&err); return false;
++    // libpurple runs the default main context, so the service is attached to that.
++    if (!LSRegisterCategory(g_sh, "/", g_methods, NULL, NULL, &err) ||
++        !LSGmainContextAttach(g_sh, g_main_context_default(), &err)) {
++        purple_debug_error(config::pluginId, "com.palm.telegram.call: %s\n", err.message);
++        LSErrorFree(&err);
++        LSErrorInit(&err);
++        if (!LSUnregister(g_sh, &err))
++            LSErrorFree(&err);
++        g_sh = NULL;
++        return false;
 +    }
-+    // Attach to the context libpurple already services (its glib eventloop runs the default context).
-+    g_loopRef = g_main_loop_new(g_main_context_default(), FALSE);
-+    if (!LSGmainAttachPalmService(g_service, g_loopRef, &err)) {
-+        purple_debug_error(config::pluginId, "GmainAttach: %s\n", err.message);
-+        tgcLog("callLunaInit FAIL GmainAttach: %s", err.message);
-+        LSErrorFree(&err); return false;
-+    }
-+    g_pub = LSPalmServiceGetPublicConnection(g_service);
-+    g_prv = LSPalmServiceGetPrivateConnection(g_service);
 +    purple_debug_info(config::pluginId, "com.palm.telegram.call registered\n");
-+    tgcLog("callLunaInit OK - com.palm.telegram.call REGISTERED, g_pub=%p", (void*)g_pub);
 +    return true;
 +}
 +
@@ -467,193 +387,53 @@ index 0000000..74af908
 +    g_peerName = peerName     ? peerName    : "";
 +    g_cause    = cause        ? cause       : "";
 +    g_outgoing = isOutgoing;
-+    g_callIsVideo = isVideo;
-+    tgcLog("pushState state=%s addr=%s g_pub=%p g_prv=%p", g_state.c_str(), g_peerAddr.c_str(), (void*)g_pub, (void*)g_prv);
-+    if (!g_pub && !g_prv) return;
++    (void)isVideo;
++    tgcLog("state %s, peer %s", g_state.empty() ? "idle" : g_state.c_str(), g_peerAddr.c_str());
++    if (!g_sh) return;
 +    std::string payload = buildPayload();
-+    // A subscriber's subscription lives on whichever connection it arrived on: untrusted apps come
-+    // in on the public connection, trusted Palm apps (the stock Phone app / CallSynergizer) on the
-+    // private one. LSSubscriptionReply only walks the list of the handle it's given, so push on BOTH
-+    // - otherwise the Phone app gets only the initial reply and never the live dialing/active pushes.
-+    if (g_pub) {
-+        LSError err; LSErrorInit(&err);
-+        LSSubscriptionReply(g_pub, SUBKEY, payload.c_str(), &err);
-+        if (LSErrorIsSet(&err)) { purple_debug_warning(config::pluginId, "pushState pub: %s\n", err.message); LSErrorFree(&err); }
-+    }
-+    if (g_prv) {
-+        LSError err; LSErrorInit(&err);
-+        LSSubscriptionReply(g_prv, SUBKEY, payload.c_str(), &err);
-+        if (LSErrorIsSet(&err)) { purple_debug_warning(config::pluginId, "pushState prv: %s\n", err.message); LSErrorFree(&err); }
-+    }
-+}
-+
-+// --- clonk: the native SkypeKit video bridge --------------------------------------------------
-+// See messaging/whatsapp/calling/WHATSAPP_VIDEO_STATUS.md (Parts 1-21) for the full
-+// reverse-engineering trail this is built against, and glue/call.c in the WhatsApp plugin
-+// (messaging/facebook-e2ee/plugin/purple-combined) for the exact pattern this mirrors -- same
-+// LS2 sequence, same Part 16 field-shift-compensated videoCaptureStart args, same Part 17
-+// ordering constraint (voipkit_video_start() must run before videoPlayerStart's LS2 call).
-+
-+bool clonkOpenReplyCb(LSHandle *sh, LSMessage *msg, void *ctx);
-+bool clonkCaptureStartReplyCb(LSHandle *sh, LSMessage *msg, void *ctx);
-+bool clonkPlayerStartReplyCb(LSHandle *sh, LSMessage *msg, void *ctx);
-+bool clonkStopReplyCb(LSHandle *sh, LSMessage *msg, void *ctx);
-+
-+void clonkUriCall(const char *method, const char *jsonPayload, LSFilterFunc cb, void *ctx)
-+{
-+    if (!g_prv || g_clonkUri.empty()) return;
-+    std::string uri = g_clonkUri + method;
 +    LSError err; LSErrorInit(&err);
-+    LSMessageToken tok;
-+    if (!LSCallOneReply(g_prv, uri.c_str(), jsonPayload, cb, ctx, &tok, &err)) {
-+        tgcLog("clonk %s call failed: %s", method, err.message);
++    if (!LSSubscriptionReply(g_sh, SUBKEY, payload.c_str(), &err)) {
++        purple_debug_warning(config::pluginId, "callStateQuery push: %s\n", err.message);
 +        LSErrorFree(&err);
 +    }
 +}
 +
-+bool clonkCaptureStartReplyCb(LSHandle *sh, LSMessage *msg, void *ctx)
-+{
-+    (void)sh; (void)ctx;
-+    tgcLog("clonk videoCaptureStart: %s", LSMessageGetPayload(msg));
-+    // Thread A (capture->peer) must be bound+listening before videoPlayerStart triggers
-+    // mediaserver's RunVideoHost() -- WHATSAPP_VIDEO_STATUS.md Part 17.
-+    voipkit_video_start();
-+    // Block for a real "Thread B connected" signal before firing videoPlayerStart, rather than
-+    // relying on voipkit_video_start()'s own short margin (which only proves Thread A's
-+    // near-instant bind+listen happened, not that Thread B's own connect-retry loop -- up to
-+    // 500ms per attempt -- has actually succeeded). Ported from WhatsApp's identical bridge
-+    // (glue/call.c's clonk_video_capture_start_reply): firing too early there made the peer-video
-+    // playback pipeline fail its READY->PAUSED state change and tear itself down within ~300ms,
-+    // every time, including on the very first videoPlayerStart of a call.
-+    if (!voipkit_video_wait_thread_b(3000)) {
-+        tgcLog("skypekit thread B did not connect within 3s, firing videoPlayerStart anyway");
-+    }
-+    clonkUriCall("videoPlayerStart", "{\"args\":[320,240]}", clonkPlayerStartReplyCb, NULL);
-+    return true;
-+}
-+bool clonkPlayerStartReplyCb(LSHandle *sh, LSMessage *msg, void *ctx)
-+{
-+    (void)sh; (void)ctx;
-+    tgcLog("clonk videoPlayerStart: %s", LSMessageGetPayload(msg));
-+    return true;
-+}
-+
-+bool clonkOpenReplyCb(LSHandle *sh, LSMessage *msg, void *ctx)
-+{
-+    (void)sh; (void)ctx;
-+    const char *p = LSMessageGetPayload(msg);
-+    std::string uri = getField(p, "location");
-+    if (!uri.empty()) {
-+        g_clonkUri = uri;
-+        tgcLog("clonk session open: %s", g_clonkUri.c_str());
-+        // videoCaptureStart args are (w,h,fps,bitrate) on the wire, but ClonkPipeline::
-+        // setCamCapsFilter() reads the wrong VideoSettings offsets (+4/+8 instead of +0/+4) --
-+        // a real firmware bug (WHATSAPP_VIDEO_STATUS.md Part 16). Putting the intended width in
-+        // the h slot and the intended height in the fps slot lands the correct width/height in
-+        // the actual applied caps once that bug reads them one field over.
-+        clonkUriCall("videoCaptureStart", "{\"args\":[320,320,240,400000]}", clonkCaptureStartReplyCb, NULL);
-+    } else {
-+        tgcLog("clonk session open failed: %s", p ? p : "(no payload)");
-+    }
-+    return true;
-+}
-+
-+// Opens a clonk session and drives it through videoCaptureStart -> voipkit_video_start() ->
-+// videoPlayerStart. Call once per video call, from activateCall() when call.is_video_.
-+void callLunaOpenClonk()
-+{
-+    if (!g_clonkUri.empty() || !g_prv) return;
-+    g_videoActive = true;
-+    LSError err; LSErrorInit(&err);
-+    LSMessageToken tok;
-+    if (!LSCallOneReply(g_prv, "palm://com.palm.mediad/service/clonk", "{}", clonkOpenReplyCb, NULL, &tok, &err)) {
-+        tgcLog("clonk open call failed: %s", err.message);
-+        LSErrorFree(&err);
-+    }
-+}
-+
-+bool clonkStopReplyCb(LSHandle *sh, LSMessage *msg, void *ctx)
-+{
-+    (void)sh;
-+    tgcLog("clonk %s: %s", (const char *)ctx, LSMessageGetPayload(msg));
-+    return true;
-+}
-+
-+// Tears down the skypekit bridge + clonk session. No confirmed explicit session-teardown method
-+// (mediaserver tears a session down when its creating client's LS2 connection drops, shared with
-+// the rest of this long-lived process) -- a fresh session is opened next time video starts.
-+void callLunaCloseClonk()
-+{
-+    if (g_clonkUri.empty()) { g_videoActive = false; return; }
-+    voipkit_video_stop(); // stop our own socket threads before telling mediaserver to stop
-+    clonkUriCall("videoPlayerStop", "{\"args\":[]}", clonkStopReplyCb, (void*)"videoPlayerStop");
-+    clonkUriCall("videoCaptureStop", "{\"args\":[]}", clonkStopReplyCb, (void*)"videoCaptureStop");
-+    g_clonkUri.clear();
-+    g_videoActive = false;
-+}
-+
-+bool clonkKeyframeStartReplyCb(LSHandle *sh, LSMessage *msg, void *ctx)
-+{
-+    (void)sh; (void)ctx;
-+    tgcLog("clonk keyframe-restart videoCaptureStart: %s", LSMessageGetPayload(msg));
-+    return true;
-+}
-+bool clonkKeyframeStopReplyCb(LSHandle *sh, LSMessage *msg, void *ctx)
-+{
-+    (void)sh; (void)ctx;
-+    tgcLog("clonk keyframe-restart videoCaptureStop: %s", LSMessageGetPayload(msg));
-+    // Thread A/B and the clonk session itself stay up throughout -- only the capture pipeline
-+    // restarts, so no voipkit_video_start()/videoPlayerStart() here.
-+    clonkUriCall("videoCaptureStart", "{\"args\":[320,320,240,400000]}", clonkKeyframeStartReplyCb, NULL);
-+    return true;
-+}
-+
-+// Called from VoipKitVideoSource::RequestKeyFrame() (VoIPController's real PLI-equivalent
-+// signal). No LS2-exposed keyframe trigger exists on the clonk surface, so this restarts
-+// capture instead -- every capture start emits a real SPS/PPS/IDR opening sequence.
-+void callLunaRequestKeyframe()
-+{
-+    if (g_clonkUri.empty()) return;
-+    tgcLog("keyframe requested, restarting capture");
-+    clonkUriCall("videoCaptureStop", "{\"args\":[]}", clonkKeyframeStopReplyCb, NULL);
-+}
-+
-+// --- webOS call-audio routing (mirrors the working wacallm path) --------------------------------
-+// libtgvoip captures/plays via the PulseAudio "voipsource"/"voip" PCMs, but those only carry the
-+// real mic/loudspeaker when audiod has the PHONE scenario active. Tell audiod a voip call is up on
-+// connect (route to loudspeaker; it auto-switches to headset/BT), and clear it on hangup.
++// --- call audio -------------------------------------------------------------------------------
++// audiod has to be told a VoIP call is up: only then does it put the call devices -- the voipcall
++// sink and webcall source libtgvoip plays to and records from (call.cpp) -- on the earpiece or
++// the headset and the microphone. The transport names this connector and must not be
++// com.palm.telephony, which would make audiod switch the modem's voice-call path on. audiod keeps
++// the calls of each sender apart, so the update goes out on this service's own handle, and the
++// empty list on hangup only clears our own call. No scenario is forced: the call starts wherever
++// audiod routes calls (earpiece, or a connected headset), and the Phone app's speaker button
++// moves it.
 +static bool audiodReply(LSHandle *sh, LSMessage *m, void *ctx) { (void)sh; (void)m; (void)ctx; return true; }
 +static void audiodSend(const char *uri, const char *payload)
 +{
-+    if (!g_prv) return;
++    if (!g_sh) return;
 +    LSError err; LSErrorInit(&err);
 +    LSMessageToken tok;
-+    if (!LSCallOneReply(g_prv, uri, payload, audiodReply, NULL, &tok, &err)) {
++    if (!LSCallOneReply(g_sh, uri, payload, audiodReply, NULL, &tok, &err)) {
 +        purple_debug_warning(config::pluginId, "audiod %s: %s\n", uri, err.message);
 +        LSErrorFree(&err);
 +    }
 +}
 +void callLunaSetCallAudio(bool active)
 +{
-+    tgcLog("callLunaSetCallAudio active=%d g_prv=%p", (int)active, (void*)g_prv);
-+    if (active) {
-+        // NB: "id" MUST be a STRING (not int): PmBtEngine's HFG reads the call id as a string; an int makes
-+        // it log "Failed to find call ID" and drop the call, so BT call audio never sets up. See the WhatsApp
-+        // plugin (glue/call.c) + the bluetooth-call-audio-sco note. "transport" stays com.palm.telegram (a
-+        // 1-byte PmBtEngine patch accepts non-skype transports).
++    tgcLog("call audio %s", active ? "on" : "off");
++    if (active)
 +        audiodSend("palm://com.palm.audio/phone/CallStatusUpdate",
-+                   "{\"lines\":[{\"state\":\"active\",\"calls\":[{\"id\":\"1\",\"address\":\"telegram\",\"origin\":\"outgoing\",\"video\":false,\"transport\":\"com.palm.telegram\"}]}]}");
-+        audiodSend("palm://com.palm.audio/phone/setCurrentScenario", "{\"scenario\":\"phone_back_speaker\"}");
-+    } else {
++                   "{\"lines\":[{\"state\":\"active\",\"calls\":[{\"id\":\"tg\",\"video\":false,"
++                   "\"transport\":\"com.palm.telegram\"}]}]}");
++    else
 +        audiodSend("palm://com.palm.audio/phone/CallStatusUpdate", "{\"lines\":[]}");
-+    }
 +}
 diff --git a/call-luna.h b/call-luna.h
 new file mode 100644
-index 0000000..4433b87
+index 0000000..373a9a7
 --- /dev/null
 +++ b/call-luna.h
-@@ -0,0 +1,56 @@
+@@ -0,0 +1,43 @@
 +#ifndef _CALL_LUNA_H
 +#define _CALL_LUNA_H
 +
@@ -679,53 +459,39 @@ index 0000000..4433b87
 +/* Tear down the service (account disconnect / plugin unload). */
 +void callLunaShutdown(PurpleAccount *account);
 +
-+/* On-device trace to /media/internal/tgcall.log (purple_debug doesn't reach the system log on webOS).
-+ * printf-style; usable from call.cpp too (e.g. to trace the libtgvoip activateCall setup). */
++/* Call life-cycle trace into libpurple's debug log. printf-style; used from call.cpp too. */
 +void tgcLog(const char *fmt, ...);
 +
-+/* Drive audiod's phone scenario so the libtgvoip "voip"/"voipsource" PCMs carry real loudspeaker/mic
-+ * audio. Call with true when the call becomes active, false on hangup. Mirrors wacallm. */
++/* Tell audiod a VoIP call is active (true) or over (false), so it routes the voipcall sink and
++ * webcall source libtgvoip uses. Call when the call becomes active and on hangup. */
 +void callLunaSetCallAudio(bool active);
-+
-+/* Native SkypeKit video bridge (see skypekit.h and WHATSAPP_VIDEO_STATUS.md). Call
-+ * callLunaOpenClonk() from activateCall() when call.is_video_, callLunaCloseClonk() from
-+ * deactivateCall() if video was active. callLunaRequestKeyframe() is wired to
-+ * VoipKitVideoSource::RequestKeyFrame() (call.cpp). */
-+void callLunaOpenClonk();
-+void callLunaCloseClonk();
-+void callLunaRequestKeyframe();
 +
 +/* Push the current call state to Phone-app callStateQuery subscribers. Called from call.cpp's
 + * updateCall(). state is one of: "incoming", "dialing", "active", "disconnected", "" (idle).
 + * NOTE: these strings must match the stock Phone app CallSynergizer STATES enum exactly
 + * (incoming/dialing/active/disconnected) or the call card won't render the state.
 + * peerAddress = the Telegram user's +E.164 / id; peerName = resolved display name (may be NULL).
-+ * isVideo = call.is_video_ from TDLib -- whether THIS call was negotiated as video, known from the
-+ * moment it starts ringing/dialing. Distinct from the clonk/skypekit bridge's own streaming-active
-+ * state (callLunaOpenClonk()'s internal flag), which only flips true once the call is answered and
-+ * the native video pipeline actually starts -- using that for the pushed "video" field left the
-+ * Phone app never seeing a video marker while incoming/dialing (only after answer).
++ * isVideo = call.is_video_ from TDLib. Not reported: calls are voice only on LuneOS.
 + * cause is only meaningful for "disconnected" (e.g. "rejected", "normal", "missed"). */
 +void callLunaPushState(const char *state, const char *peerAddress, const char *peerName,
 +                       bool isOutgoing, const char *cause, bool isVideo);
 +
 +#endif
 diff --git a/call.cpp b/call.cpp
-index 76259b5..86ac7f1 100644
+index 76259b5..89acf54 100644
 --- a/call.cpp
 +++ b/call.cpp
-@@ -5,6 +5,10 @@
+@@ -5,6 +5,9 @@
  #include "buildopt.h"
  #include "format.h"
  #include "purple-info.h"
 +#include "td-client.h"
 +#include "call-luna.h"
-+#include "voipkit-tgvoip.h"
 +#include <glib.h>
  
  static td::td_api::object_ptr<td::td_api::callProtocol> getCallProtocol()
  {
-@@ -13,22 +17,48 @@ static td::td_api::object_ptr<td::td_api::callProtocol> getCallProtocol()
+@@ -13,22 +16,48 @@ static td::td_api::object_ptr<td::td_api::callProtocol> getCallProtocol()
      protocol->udp_reflector_ = true;
      protocol->min_layer_     = 65;
      protocol->max_layer_     = 92;
@@ -781,7 +547,7 @@ index 76259b5..86ac7f1 100644
  #endif
  
      return false;
-@@ -44,29 +74,6 @@ static void discardCall(int32_t callId, TdTransceiver &transceiver)
+@@ -44,29 +73,6 @@ static void discardCall(int32_t callId, TdTransceiver &transceiver)
      transceiver.sendQuery(std::move(discardReq), nullptr);
  }
  
@@ -811,89 +577,25 @@ index 76259b5..86ac7f1 100644
  static std::string getPurpleUserName(UserId userId, TdAccountData &account)
  {
      const td::td_api::user *user = account.getUser(userId);
-@@ -80,6 +87,10 @@ static std::string getPurpleUserName(UserId userId, TdAccountData &account)
-         return std::string();
- }
- 
-+// Guards the SetVideoSource() retry timer below; file-scope so deactivateCall() can cancel it
-+// on hangup (a static local inside activateCall would be unreachable from there).
-+static guint g_videoSourceRetryId = 0;
-+
- static bool activateCall(const td::td_api::call &call, const std::string &buddyName,
-                          TdAccountData &account, TdTransceiver &transceiver)
- {
-@@ -105,11 +116,70 @@ static bool activateCall(const td::td_api::call &call, const std::string &buddyN
-         return false;
- 
-     static tgvoip::VoIPController::Config config;
-+    // Two-way audio is confirmed (voice gets through the analog IN1L route), so re-enable libtgvoip's
-+    // in-engine WebRTC DSP -- it's already compiled in (Makefile.am builds webrtc_dsp with -DWEBRTC_NS_FLOAT).
-+    // NS suppresses the analog-mic background-noise floor (the webOS capture path applies no audiod DSP on
-+    // the voip source, unlike the recording path voice notes use); AGC normalizes the quiet/uneven level.
-+    // AEC ON: the TouchPad has no earpiece so calls run on the loudspeaker and the mic re-captures the
-+    // far-end (the peer hears themselves). libtgvoip's AEC3 owns BOTH the render and capture streams
-+    // inside the VoIPController, so it gets the speaker reference natively (no manual wiring/delay hint,
-+    // unlike the WhatsApp AECM path). NS suppresses the analog-mic noise floor (safe here: Opus is a
-+    // waveform codec, so NS helps it, unlike WhatsApp's parametric MLow); AGC normalizes the level.
+@@ -108,8 +114,17 @@ static bool activateCall(const td::td_api::call &call, const std::string &buddyN
      config.enableAEC = true;
      config.enableNS  = true;
      config.enableAGC = true;
-+    // Native SkypeKit/clonk video bridge (WHATSAPP_VIDEO_STATUS.md) -- see the
-+    // VoipKitVideoSource/VoipKitVideoRenderer wiring below, right after SetConfig.
-+    config.enableVideoSend    = call.is_video_;
-+    config.enableVideoReceive = call.is_video_;
-+    // DIAG: libtgvoip writes NOTHING to the system log, so an unestablished media path (peer stuck on
-+    // "Connecting") is invisible. Point it at a file to see the reflector connection + audio init.
-+    config.logFilePath       = "/media/internal/tgvoip.log";
-+    config.statsDumpFilePath = "/media/internal/tgvoip-stats.log";
++    // Voice only: LuneOS has no video path for libtgvoip, so a video call carries its audio.
++    config.enableVideoSend    = false;
++    config.enableVideoReceive = false;
      voip->SetConfig(config);
  
-+    // Video: open the clonk session BEFORE attaching source/renderer -- callLunaOpenClonk()
-+    // drives videoCaptureStart -> voipkit_video_start() -> videoPlayerStart synchronously
-+    // enough (fire-and-forget over LS2, but the ordering within it is what matters -- see
-+    // skypekit.h) that by the time real frames need to flow, both sockets are ready.
-+    // Static: only one call is ever active at a time (same assumption as the rest of this
-+    // file); the objects are cheap and simply reused/reattached across calls.
-+    static VoipKitVideoSource *videoSource = nullptr;
-+    static VoipKitVideoRenderer *videoRenderer = nullptr;
-+    if (g_videoSourceRetryId) {
-+        g_source_remove(g_videoSourceRetryId);
-+        g_videoSourceRetryId = 0;
-+    }
-+    if (call.is_video_) {
-+        callLunaOpenClonk();
-+        if (!videoSource) videoSource = new VoipKitVideoSource(callLunaRequestKeyframe);
-+        if (!videoRenderer) videoRenderer = new VoipKitVideoRenderer();
-+        voip->SetVideoRenderer(videoRenderer);
-+        // VoIPController::SetVideoSource() requires its own outgoing video Stream object to
-+        // already exist, but that object is only created reactively -- deep inside
-+        // VoIPController's packet thread, when the peer's first PKT_INIT arrives over the
-+        // just-established UDP media channel (VoIPController.cpp's PKT_INIT handler calling
-+        // SetupOutgoingVideoStream()). Calling it here, synchronously right after SetConfig(),
-+        // is always too early (no UDP round-trip has happened yet) and always logged "Can't set
-+        // video source when there is no outgoing video stream" while silently leaving the camera
-+        // never attached. SetVideoSource() is cheap/idempotent to call repeatedly, so retry on a
-+        // short timer (bounded) until libtgvoip has had time to complete that exchange.
-+        voip->SetVideoSource(videoSource); // first attempt, expected to still be too early
-+        struct RetryCtx { tgvoip::VoIPController *voip; int triesLeft; };
-+        auto *ctx = new RetryCtx{voip, 10}; // ~3s at 300ms, bounded so a dead call can't retry forever
-+        g_videoSourceRetryId = g_timeout_add_full(G_PRIORITY_DEFAULT, 300,
-+            +[](gpointer data) -> gboolean {
-+                auto *c = static_cast<RetryCtx *>(data);
-+                c->voip->SetVideoSource(videoSource);
-+                if (--c->triesLeft <= 0) {
-+                    g_videoSourceRetryId = 0;
-+                    return G_SOURCE_REMOVE;
-+                }
-+                return G_SOURCE_CONTINUE;
-+            }, ctx,
-+            +[](gpointer data) { delete static_cast<RetryCtx *>(data); });
-+    }
++    // The PulseAudio call devices: module-palm-policy puts the voipcall sink on the earpiece,
++    // speaker or headset and the webcall source on the matching microphone, the way audiod routes
++    // calls. A stream that names them is routed by the device, not by its media.role.
++    voip->SetCurrentAudioOutput("voipcall");
++    voip->SetCurrentAudioInput("webcall");
 +
      std::vector<tgvoip::Endpoint> endpoints;
      for (const auto &pServer: state.servers_)
          if (pServer && pServer->type_ && (pServer->type_->get_id() == td::td_api::callServerTypeTelegramReflector::ID)) {
-@@ -129,8 +199,12 @@ static bool activateCall(const td::td_api::call &call, const std::string &buddyN
+@@ -129,8 +144,12 @@ static bool activateCall(const td::td_api::call &call, const std::string &buddyN
      std::vector<char> key(state.encryption_key_.length()+1);
      memmove(key.data(), state.encryption_key_.c_str(), key.size());
      voip->SetEncryptionKey(key.data(), call.is_outgoing_);
@@ -902,24 +604,19 @@ index 76259b5..86ac7f1 100644
 +           (int)state.protocol_->max_layer_, state.encryption_key_.length(), (int)call.is_outgoing_);
      voip->Start();
      voip->Connect();
-+    callLunaSetCallAudio(true);   // enable audiod phone scenario -> voip/voipsource carry real audio
++    callLunaSetCallAudio(true);   // tell audiod a VoIP call is up, so it routes the call devices
  
      if (!buddyName.empty()) {
          // For an outgoing call, "type /hangup to terminate" has already been shown when the call
-@@ -150,6 +224,12 @@ static bool activateCall(const td::td_api::call &call, const std::string &buddyN
+@@ -150,6 +169,7 @@ static bool activateCall(const td::td_api::call &call, const std::string &buddyN
  static void deactivateCall(TdAccountData &account)
  {
  #ifndef NoVoip
-+    if (g_videoSourceRetryId) {
-+        g_source_remove(g_videoSourceRetryId);
-+        g_videoSourceRetryId = 0;
-+    }
-+    callLunaSetCallAudio(false);   // clear audiod phone scenario on hangup
-+    callLunaCloseClonk();          // no-op if video was never active (checks internally)
++    callLunaSetCallAudio(false);   // and that it is over
      tgvoip::VoIPController *voip = account.getCallData();
      if (voip)
          voip->Stop();
-@@ -176,13 +256,17 @@ static void notifyCallError(const td::td_api::callStateError &error, const std::
+@@ -176,13 +196,17 @@ static void notifyCallError(const td::td_api::callStateError &error, const std::
  void updateCall(const td::td_api::call &call, TdAccountData &account, TdTransceiver &transceiver)
  {
      std::string buddyName = getPurpleUserName(getUserId(call), account);
@@ -942,7 +639,7 @@ index 76259b5..86ac7f1 100644
  #else
      if (true) {
  #endif
-@@ -204,22 +288,11 @@ void updateCall(const td::td_api::call &call, TdAccountData &account, TdTranscei
+@@ -204,22 +228,11 @@ void updateCall(const td::td_api::call &call, TdAccountData &account, TdTranscei
      if (!call.is_outgoing_ && (call.state_->get_id() == td::td_api::callStatePending::ID)) {
          if (!account.hasActiveCall()) {
              account.setActiveCall(call.id_);
@@ -970,7 +667,7 @@ index 76259b5..86ac7f1 100644
          } else if (call.id_ != account.getActiveCallId()) {
              if (!buddyName.empty())
                  showMessageTextIm(account, buddyName.c_str(), NULL,
-@@ -232,11 +305,12 @@ void updateCall(const td::td_api::call &call, TdAccountData &account, TdTranscei
+@@ -232,11 +245,12 @@ void updateCall(const td::td_api::call &call, TdAccountData &account, TdTranscei
      } else if (call.is_outgoing_ && (call.state_->get_id() == td::td_api::callStatePending::ID)) {
          if (!account.hasActiveCall()) {
              account.setActiveCall(call.id_);
@@ -988,7 +685,7 @@ index 76259b5..86ac7f1 100644
          } else if (call.id_ != account.getActiveCallId()) {
              // This would happen if there was no active call when sending createCall, but there is one
              // a millisecond later when asynchronous response is received. Possible if two calls are
-@@ -247,6 +321,10 @@ void updateCall(const td::td_api::call &call, TdAccountData &account, TdTranscei
+@@ -247,6 +261,10 @@ void updateCall(const td::td_api::call &call, TdAccountData &account, TdTranscei
          if (! activateCall(call, buddyName, account, transceiver)) {
              discardCall(call.id_, transceiver);
              account.removeActiveCall();
@@ -999,7 +696,7 @@ index 76259b5..86ac7f1 100644
          }
      }
      else if ( ((call.state_->get_id() == td::td_api::callStateHangingUp::ID) ||
-@@ -254,6 +332,19 @@ void updateCall(const td::td_api::call &call, TdAccountData &account, TdTranscei
+@@ -254,6 +272,19 @@ void updateCall(const td::td_api::call &call, TdAccountData &account, TdTranscei
                 (call.state_->get_id() == td::td_api::callStateError::ID)) &&
                account.hasActiveCall() && account.getActiveCallId() == call.id_)
      {
@@ -1019,7 +716,7 @@ index 76259b5..86ac7f1 100644
          if (call.state_->get_id() == td::td_api::callStateError::ID) {
              const td::td_api::callStateError &error = static_cast<const td::td_api::callStateError &>(*call.state_);
              notifyCallError(error, buddyName, account);
-@@ -269,6 +360,34 @@ void discardCurrentCall(TdAccountData &account, TdTransceiver &transceiver)
+@@ -269,6 +300,34 @@ void discardCurrentCall(TdAccountData &account, TdTransceiver &transceiver)
          discardCall(account.getActiveCallId(), transceiver);
  }
  
@@ -1236,296 +933,3 @@ index 6a8370a..bdd8196 100644
      else
          return FALSE;
  #else
-diff --git a/voipkit-tgvoip.cpp b/voipkit-tgvoip.cpp
-new file mode 100644
-index 0000000..3046534
---- /dev/null
-+++ b/voipkit-tgvoip.cpp
-@@ -0,0 +1,63 @@
-+#include "voipkit-tgvoip.h"
-+#include "voipkit.h"
-+
-+// voipkit.cpp's frame-out callback is a plain C function pointer (no captured state, since
-+// Thread A calls it from a raw pthread with no C++ closure context) — route it through a
-+// single static instance pointer. Only one call (and therefore one VoipKitVideoSource) is
-+// ever active at a time in this plugin, matching the rest of its calling code's assumptions.
-+static VoipKitVideoSource *g_active_source = nullptr;
-+
-+static void on_frame_out(const unsigned char *data, unsigned int len) {
-+	if (!g_active_source) return;
-+	g_active_source->DeliverFrame(data, len);
-+}
-+
-+void VoipKitVideoSource::DeliverFrame(const unsigned char *data, unsigned int len) {
-+	tgvoip::Buffer buf(len);
-+	if (len > 0) buf.CopyFrom(data, 0, len);
-+	// flags=0, rotation=0: mediaserver's own camera source has a fixed physical mounting
-+	// orientation (its own caps already report angle=270 internally) and this bridge doesn't
-+	// currently track live device rotation — matches WhatsApp's SetVideoOrientation deferral.
-+	if (callback) callback(buf, 0, 0);
-+}
-+
-+VoipKitVideoSource::VoipKitVideoSource(std::function<void()> requestKeyframeCb)
-+    : requestKeyframeCb_(std::move(requestKeyframeCb)) {
-+	g_active_source = this;
-+	voipkit_set_frame_out_callback(on_frame_out);
-+}
-+
-+VoipKitVideoSource::~VoipKitVideoSource() {
-+	if (g_active_source == this) g_active_source = nullptr;
-+}
-+
-+// Thread lifecycle is owned by callLunaOpenClonk()/callLunaCloseClonk() (see skypekit-tgvoip.h)
-+// -- VoIPController calls Start()/Stop() at a time that doesn't line up with the clonk LS2
-+// sequencing this bridge needs, so these are deliberately no-ops.
-+void VoipKitVideoSource::Start() {}
-+void VoipKitVideoSource::Stop() {}
-+
-+void VoipKitVideoSource::Reset(uint32_t, int) {}
-+
-+void VoipKitVideoSource::RequestKeyFrame() {
-+	if (requestKeyframeCb_) requestKeyframeCb_();
-+}
-+
-+void VoipKitVideoSource::SetBitrate(uint32_t) {
-+	// Not wired: the clonk capture pipeline is started with a fixed bitrate (see
-+	// callLunaOpenClonk's videoCaptureStart args). Revisit if VoIPController's own bandwidth
-+	// estimation needs to actually throttle the native encoder mid-call.
-+}
-+
-+VoipKitVideoRenderer::VoipKitVideoRenderer() {}
-+VoipKitVideoRenderer::~VoipKitVideoRenderer() {}
-+
-+void VoipKitVideoRenderer::Reset(uint32_t, unsigned int, unsigned int, std::vector<tgvoip::Buffer> &) {}
-+
-+void VoipKitVideoRenderer::DecodeAndDisplay(tgvoip::Buffer frame, uint32_t) {
-+	voipkit_video_receive_frame(*frame, (unsigned int)frame.Length());
-+}
-+
-+void VoipKitVideoRenderer::SetStreamEnabled(bool) {}
-+void VoipKitVideoRenderer::SetRotation(uint16_t) {}
-+void VoipKitVideoRenderer::SetStreamPaused(bool) {}
-diff --git a/voipkit-tgvoip.h b/voipkit-tgvoip.h
-new file mode 100644
-index 0000000..dcd65ca
---- /dev/null
-+++ b/voipkit-tgvoip.h
-@@ -0,0 +1,63 @@
-+// skypekit-tgvoip.h — thin adapter wiring voipkit.cpp's native SkypeKit/clonk video bridge
-+// into libtgvoip's VoIPController via its own video::VideoSource/video::VideoRenderer
-+// interfaces. See skypekit.h for the underlying bridge and
-+// messaging/whatsapp/calling/WHATSAPP_VIDEO_STATUS.md for the full reverse-engineering trail.
-+//
-+// Ownership/lifecycle note: voipkit_video_start()/_stop() (the actual thread lifecycle) are
-+// NOT tied to these classes' Start()/Stop() — VoIPController calls those at a time we don't
-+// control, but our bridge has a hard ordering requirement (voipkit_video_start() must run
-+// BEFORE videoPlayerStart's LS2 call, WHATSAPP_VIDEO_STATUS.md Part 17) that only the
-+// call-luna.cpp clonk-open/close sequence can satisfy. So Start()/Stop() here are no-ops; the
-+// real lifecycle is driven directly by callLunaOpenClonk()/callLunaCloseClonk() in call.cpp.
-+#ifndef SKYPEKIT_TGVOIP_H
-+#define SKYPEKIT_TGVOIP_H
-+
-+#include <functional>
-+#include <video/VideoSource.h>
-+#include <video/VideoRenderer.h>
-+
-+// VoipKitVideoSource — the capture->peer direction. Registers itself with voipkit.cpp so
-+// Thread A's decoded access units (mediaserver's own camera encoder output) reach
-+// VoIPController via the inherited `callback` member, exactly the shape VideoSource expects.
-+class VoipKitVideoSource : public tgvoip::video::VideoSource {
-+public:
-+	// requestKeyframeCb: invoked from RequestKeyFrame() (VoIPController's real PLI-equivalent
-+	// signal) — wired to callLunaRequestKeyframe() in call.cpp, which restarts capture to force
-+	// a fresh IDR (no direct native keyframe trigger exists on the clonk LS2 surface, same
-+	// workaround as WhatsApp's Call.OnVideoKeyframeRequest handling).
-+	explicit VoipKitVideoSource(std::function<void()> requestKeyframeCb);
-+	~VoipKitVideoSource() override;
-+
-+	void Start() override;
-+	void Stop() override;
-+	void Reset(uint32_t codec, int maxResolution) override;
-+	void RequestKeyFrame() override;
-+	void SetBitrate(uint32_t bitrate) override;
-+
-+	// Invokes the inherited (protected) `callback` member with one access unit — `callback`
-+	// isn't reachable from the free function voipkit_set_frame_out_callback() registers
-+	// (voipkit-tgvoip.cpp), so that function calls this public wrapper instead.
-+	void DeliverFrame(const unsigned char *data, unsigned int len);
-+
-+private:
-+	std::function<void()> requestKeyframeCb_;
-+};
-+
-+// VoipKitVideoRenderer — the peer->display direction. DecodeAndDisplay is VoIPController's
-+// call whenever it has a fully-reassembled peer access unit ready; forwards it straight to
-+// Thread B via voipkit_video_receive_frame for RTP-packetizing and delivery to mediaserver's
-+// native player.
-+class VoipKitVideoRenderer : public tgvoip::video::VideoRenderer {
-+public:
-+	VoipKitVideoRenderer();
-+	~VoipKitVideoRenderer() override;
-+
-+	void Reset(uint32_t codec, unsigned int width, unsigned int height,
-+	           std::vector<tgvoip::Buffer> &csd) override;
-+	void DecodeAndDisplay(tgvoip::Buffer frame, uint32_t pts) override;
-+	void SetStreamEnabled(bool enabled) override;
-+	void SetRotation(uint16_t rotation) override;
-+	void SetStreamPaused(bool paused) override;
-+};
-+
-+#endif
-diff --git a/voipkit.h b/voipkit.h
-new file mode 100644
-index 0000000..25abccf
---- /dev/null
-+++ b/voipkit.h
-@@ -0,0 +1,61 @@
-+// voipkit.h — C entry points for the native SkypeKit video bridge (voipkit.cpp).
-+//
-+// Bridges mediaserver's local SkypeKit RTP sockets (the /tmp/vidrtp_{to,from}_skypekit_key
-+// abstract Unix sockets — see messaging/whatsapp/calling/WHATSAPP_VIDEO_STATUS.md Parts 10-18)
-+// to libtgvoip's VoIPController, via the VoipKitVideoSource/VoipKitVideoRenderer adapters in
-+// voipkit-tgvoip.cpp. Called from call-luna.cpp's callLunaOpenClonk/callLunaCloseClonk (see
-+// that file for the LS2 videoCaptureStart/videoPlayerStart sequencing this depends on).
-+//
-+// Adapted from messaging/facebook-e2ee/plugin/purple-combined/glue/voipkit.h — the only
-+// difference from that version is that Thread A's decoded access units are delivered via a
-+// settable callback here instead of a hardcoded Go export (this plugin is pure C++, no cgo).
-+#ifndef VOIPKIT_H
-+#define VOIPKIT_H
-+
-+#ifdef __cplusplus
-+extern "C" {
-+#endif
-+
-+// Registers the callback Thread A calls with each complete access unit it reassembles from
-+// mediaserver's own camera capture pipeline (Annex-B H.264, one call per frame). Must be set
-+// before voipkit_video_start() — typically once, from VoipKitVideoSource's constructor.
-+// The passed pointer is only valid for the duration of the call; the callee must copy if it
-+// needs to retain the data.
-+void voipkit_set_frame_out_callback(void (*cb)(const unsigned char *access_unit, unsigned int len));
-+
-+// Starts the bridge for the current call: binds+listens the capture->peer socket
-+// (/tmp/vidrtp_to_skypekit_key) and blocks until that's confirmed listening, then starts the
-+// peer->display socket's connect-retry loop (/tmp/vidrtp_from_skypekit_key). Idempotent — a
-+// second call while already running is a no-op.
-+//
-+// MUST be called after videoCaptureStart and BEFORE videoPlayerStart (WHATSAPP_VIDEO_STATUS.md
-+// Part 17: mediaserver's RunVideoHost() won't dial the outbound socket until something has
-+// already connected to the inbound one, and won't even attempt the outbound dial until AFTER
-+// the inbound accept succeeds — the capture->peer listener must be up first so that dial lands).
-+void voipkit_video_start(void);
-+
-+// Blocks until Thread B's own connect to mediaserver's /tmp/vidrtp_from_skypekit_key actually
-+// succeeds, up to timeoutMs. Returns nonzero if connected, zero on timeout (caller should log and
-+// proceed anyway rather than hanging the mainloop indefinitely -- best-effort ordering guarantee,
-+// not a hard requirement). Call this AFTER voipkit_video_start() and BEFORE videoPlayerStart:
-+// unlike Thread A's near-instant bind+listen, Thread B must wait for Thread A to already be
-+// listening and then complete its own connect-retry loop (up to 500ms per attempt), which
-+// voipkit_video_start()'s own fixed short margin cannot reliably outlast.
-+int voipkit_video_wait_thread_b(int timeoutMs);
-+
-+// Signals both bridge threads to stop and joins them. Idempotent; safe to call even if
-+// voipkit_video_start was never called or already stopped.
-+void voipkit_video_stop(void);
-+
-+// Called with one decoded peer access unit (complete Annex-B H.264, as libtgvoip's
-+// VideoRenderer::DecodeAndDisplay delivers it via VoipKitVideoRenderer). Copies the bytes (the
-+// pointer is only valid for the duration of this call) and hands them to the peer->display
-+// thread; overwrites any not-yet-sent previous frame rather than queueing (live video wants the
-+// latest frame, not a backlog). No-op if the bridge isn't running.
-+void voipkit_video_receive_frame(const unsigned char *access_unit, unsigned int len);
-+
-+#ifdef __cplusplus
-+}
-+#endif
-+
-+#endif
-diff --git a/voipkit_none.c b/voipkit_none.c
-new file mode 100644
-index 0000000..9931608
---- /dev/null
-+++ b/voipkit_none.c
-@@ -0,0 +1,82 @@
-+// voipkit_none.c -- stand-in for voipkit.cpp on targets without libpalmgstskype.so.
-+//
-+// The real bridge (voipkit.cpp) binds directly to libpalmgstskype.so, SkypeKit's native RTP
-+// transport, which ships as a gstreamer-0.10 plugin in the legacy webOS 3.0.5 firmware. LuneOS
-+// has neither gstreamer-0.10 nor that library, so there is nothing to bind to there.
-+//
-+// Rather than thread #ifdefs through call-luna.cpp's call sequencing, the whole video bridge
-+// is swapped out at link time: CMakeLists.txt compiles this file instead of voipkit.cpp when
-+// SkypeKitFwRootfs is unset, and drops -lpalmgstskype. Everything else in the plugin --
-+// messaging, contacts, login, secret chats, and voice calling -- is unaffected, so what is lost
-+// is video only.
-+//
-+// This is the same seam purple-combined (WA_VOIPKIT=0) and purple-teams (TEAMS_VOIPKIT=0)
-+// already use; tdlib-purple was the only one of the three still compiling voipkit.cpp
-+// unconditionally. That left its SkypeKit references undefined in the finished plugin, and two
-+// of them are data rather than functions:
-+//
-+//   U _ZN3Sid5Field31M_SkypeVideoRTPInterface_fieldsE
-+//   U _ZN3Sid5Field33M_SkypeVideoRTPInterfaceCb_fieldsE
-+//
-+// GModule opens plugins with RTLD_NOW, and the dynamic linker cannot defer a data symbol in any
-+// case, so libpurple refused to load the plugin at all. Measured on a MindPhone:
-+//
-+//   plugins: /usr/lib/purple-2/libtelegram-tdlib.so is not loadable:
-+//            undefined symbol: _ZN3Sid5Field31M_SkypeVideoRTPInterface_fieldsE
-+//
-+// With no prpl registered, purple_find_prpl("prpl-telegram") returned NULL and the transport
-+// failed every Telegram login before it began ("createPurpleAccount threw ... prpl NOT
-+// registered"), which reached the account UI as AcctMgr_Generic_Error. So this file is what
-+// makes Telegram work at all on LuneOS, not merely what disables its video.
-+//
-+// These are deliberately not silent. A call that reaches voipkit_video_start() on a build with
-+// no bridge is a wiring mistake worth seeing in the log, not something to swallow.
-+#include <stdio.h>
-+
-+#include "voipkit.h"
-+
-+static int s_warned = 0;
-+
-+static void warn_once(const char *fn)
-+{
-+	if (s_warned)
-+		return;
-+	s_warned = 1;
-+	fprintf(stderr, "telegram: %s called, but this build has no SkypeKit video bridge "
-+	                "(libpalmgstskype.so is legacy webOS only). Video is unavailable; "
-+	                "voice calling is not affected.\n", fn);
-+}
-+
-+void voipkit_set_frame_out_callback(void (*cb)(const unsigned char *access_unit, unsigned int len))
-+{
-+	(void) cb;   /* nothing will ever produce frames in this build */
-+}
-+
-+void voipkit_video_start(void)
-+{
-+	warn_once("voipkit_video_start");
-+}
-+
-+/*
-+ * The real implementation returns non-zero once Thread B is up. Returning 0 (timed out) is the
-+ * honest answer here and is the value call-luna.cpp already handles: it logs and carries on
-+ * without video rather than failing the call.
-+ */
-+int voipkit_video_wait_thread_b(int timeoutMs)
-+{
-+	(void) timeoutMs;
-+	warn_once("voipkit_video_wait_thread_b");
-+	return 0;
-+}
-+
-+void voipkit_video_stop(void)
-+{
-+	/* Called unconditionally on teardown, including when start never ran -- stay quiet. */
-+}
-+
-+void voipkit_video_receive_frame(const unsigned char *access_unit, unsigned int len)
-+{
-+	(void) access_unit;
-+	(void) len;
-+	/* Inbound frames are dropped: there is no renderer without the bridge. */
-+}
