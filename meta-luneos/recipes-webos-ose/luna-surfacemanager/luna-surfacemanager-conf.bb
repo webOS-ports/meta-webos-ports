@@ -12,6 +12,7 @@ S = "${UNPACKDIR}"
 
 SRC_URI = " \
     file://surface-manager.env \
+    file://surface-manager-daemon-after-dbus-session.conf \
 "
 SRC_URI:append:qemuall = "file://99-virtualbox-mouse.rules"
 SRC_URI:append:halium = " file://surface-manager-daemon-after-android.conf"
@@ -22,6 +23,10 @@ SRC_URI:append:armv7a:halium = " file://surface-manager-daemon-timeout.conf"
 do_install() {
     install -d ${D}${sysconfdir}/surface-manager.d
     install -m 0644 ${UNPACKDIR}/surface-manager.env ${D}${sysconfdir}/surface-manager.d/
+
+    install -d ${D}${systemd_unitdir}/system/surface-manager-daemon.service.d
+    install -m 0644 ${UNPACKDIR}/surface-manager-daemon-after-dbus-session.conf \
+        ${D}${systemd_unitdir}/system/surface-manager-daemon.service.d/
 }
 
 do_install:append:qemuall() {
@@ -30,7 +35,6 @@ do_install:append:qemuall() {
 }
 
 do_install:append:halium() {
-    install -d ${D}${systemd_unitdir}/system/surface-manager-daemon.service.d
     install -v -m 0644 ${UNPACKDIR}/surface-manager-daemon-after-android.conf \
         ${D}${systemd_unitdir}/system/surface-manager-daemon.service.d/
 }
@@ -42,7 +46,7 @@ do_install:append:armv7a:halium() {
 
 FILES:${PN} += " \
     ${sysconfdir}/surface-manager.d \
+    ${systemd_unitdir}/system/surface-manager-daemon.service.d \
 "
 
 FILES:${PN}:append:qemuall = "${sysconfdir}/udev/rules.d"
-FILES:${PN}:append:halium = " ${systemd_unitdir}/system/surface-manager-daemon.service.d"
