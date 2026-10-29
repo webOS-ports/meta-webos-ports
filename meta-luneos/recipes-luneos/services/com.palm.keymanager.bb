@@ -1,7 +1,11 @@
 SUMMARY = "Keymanager implementation for webOS ports"
 SECTION = "webos/services"
-LICENSE = "Apache-2.0"
-LIC_FILES_CHKSUM = "file://LICENSE;md5=6c4db32a2fa8717faffa1d4f10136f47"
+# The Node 22 rewrite is GPL-3.0-or-later (LICENSE); the parts derived from the
+# old service and files/sysbus stay Apache-2.0 (LICENSE.Apache-2.0).
+LICENSE = "GPL-3.0-or-later & Apache-2.0"
+LIC_FILES_CHKSUM = "file://LICENSE;md5=1ebbd3e34237af26da5dc08a4e440464 \
+                    file://LICENSE.Apache-2.0;md5=6c4db32a2fa8717faffa1d4f10136f47 \
+"
 
 #Disabled until we have node-sqlite3 working again. 
 #RDEPENDS:${PN} = "node-sqlite3"

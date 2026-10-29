@@ -1,7 +1,11 @@
 SUMMARY = "Node.js service to ask for permission to media indexer database."
 SECTION = "webos/services"
-LICENSE = "GPL-3.0-only"
-LIC_FILES_CHKSUM = "file://LICENSE.txt;md5=d32239bcb673463ab874e80d47fae504"
+# The Node 22 rewrite is GPL-3.0-or-later (LICENSE.txt); what it takes from
+# mojoservice and Foundations stays Apache-2.0 (LICENSE.Apache-2.0).
+LICENSE = "GPL-3.0-or-later & Apache-2.0"
+LIC_FILES_CHKSUM = "file://LICENSE.txt;md5=1ebbd3e34237af26da5dc08a4e440464 \
+                    file://LICENSE.Apache-2.0;md5=3b83ef96387f14655fc854ddc3c6bd57 \
+"
 
 inherit webos_ports_repo
 inherit webos_system_bus
@@ -45,8 +49,8 @@ do_install:append() {
 
     # The service itself, which run-js-service starts from here
     install -d ${D}${webos_servicesdir}/${SERVICE_NAME}
-    install -v -m 0644 ${S}/service/services.json ${S}/service/sources.json ${D}${webos_servicesdir}/${SERVICE_NAME}/
-    cp -vr ${S}/service/javascript ${D}${webos_servicesdir}/${SERVICE_NAME}/
+    install -v -m 0644 ${S}/service/package.json ${S}/service/service.js ${D}${webos_servicesdir}/${SERVICE_NAME}/
+    cp -vr ${S}/service/lib ${D}${webos_servicesdir}/${SERVICE_NAME}/
 }
 
 FILES:${PN} += "${webos_servicesdir}"

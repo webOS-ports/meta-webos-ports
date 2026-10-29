@@ -1,7 +1,7 @@
 SUMMARY = "webOS Ports Developer mode management service"
 SECTION = "webos/services"
-LICENSE = "GPL-2.0-only"
-LIC_FILES_CHKSUM = "file://COPYING;md5=eb723b61539feef013de476e68b5c50a"
+LICENSE = "GPL-3.0-or-later"
+LIC_FILES_CHKSUM = "file://COPYING;md5=1ebbd3e34237af26da5dc08a4e440464"
 
 inherit webos_ports_repo
 inherit allarch
@@ -21,6 +21,7 @@ do_install() {
     install -d ${D}${webos_servicesdir}/${PN}
     cp -rv ${S}/* ${D}${webos_servicesdir}/${PN}
     rm -rf ${D}${webos_servicesdir}/${PN}/files
+    rm -rf ${D}${webos_servicesdir}/${PN}/tests
     
     # Install the ACG configuration
     install -d ${D}${webos_sysbus_servicedir}
