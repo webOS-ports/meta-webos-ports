@@ -60,7 +60,10 @@ do_install:append() {
         mkdir -p ${D}/${libdir}
         mv ${D}/${base_libdir}/pkgconfig ${D}/${libdir}
     fi
-    chmod 4755 ${D}${base_sbindir}/mount.ecryptfs_private
+    # Not setuid: it only lets unprivileged users mount their own ~/Private,
+    # and LuneOS does not use ecryptfs (ecryptfs.service is disabled). Root
+    # can still run it.
+    chmod 0755 ${D}${base_sbindir}/mount.ecryptfs_private
     sed -i -e 's:-I${STAGING_INCDIR}::' \
            -e 's:-L${STAGING_LIBDIR}::' ${D}/${libdir}/pkgconfig/libecryptfs.pc
     sed -i -e "s: ${base_sbindir}/cryptsetup: ${sbindir}/cryptsetup:" ${D}${bindir}/ecryptfs-setup-swap
