@@ -90,7 +90,11 @@ PREFERRED_PROVIDER_virtual/docker = "docker-moby"
 # Make wam preferred provider for webappmanager-webos
 PREFERRED_PROVIDER_virtual/webappmanager-webos ?= "wam${WEBRUNTIME_TOOLCHAIN}"
 
-VIRTUAL-RUNTIME_ntp = "ntp sntp"
+# Only the sntp client: luna-sysservice (NTPClock.cpp) spawns sntp, and
+# connman syncs the clock itself (FallbackTimeservers in connman-conf).
+# ntpd was pulled in with it and listened on UDP 123 on every interface
+# while disciplining the clock only against itself (server 127.127.1.0).
+VIRTUAL-RUNTIME_ntp = "sntp"
 
 # Options: luna-surface-manager, auto-luna-surface-manager
 VIRTUAL-RUNTIME_surface-manager = "luna-surfacemanager-base"
