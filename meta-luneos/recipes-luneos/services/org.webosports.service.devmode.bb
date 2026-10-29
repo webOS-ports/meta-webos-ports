@@ -34,6 +34,11 @@ do_install() {
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.role.json ${D}${webos_sysbus_rolesdir}/${BPN}.role.json
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.api.json ${D}${webos_sysbus_apipermissionsdir}/${BPN}.api.json
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.groups.json ${D}${webos_sysbus_groupsdir}/${BPN}.groups.json
+    # The shell's group for the adb key questions (devmode-service.shell); in the
+    # service from herrie/security-WP1b-devmode-access on.
+    if [ -e ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}-shell.perm.json ]; then
+        install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}-shell.perm.json ${D}${webos_sysbus_permissionsdir}/${BPN}-shell.perm.json
+    fi
 }
 
 FILES:${PN} += "${webos_servicesdir}/${PN}"
