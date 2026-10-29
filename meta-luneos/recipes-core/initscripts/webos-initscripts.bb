@@ -46,3 +46,17 @@ do_install:append() {
           ${D}${systemd_system_unitdir}/multi-user.target.wants/backup-log.service \
           ${D}${systemd_system_unitdir}/scripts/save-journald-logs.py
 }
+
+# 31-var.conf has "d /var/preferences 777 root -": world-writable without the
+# sticky bit, and as a "d" line it resets the mode of the existing directory at
+# every boot. Root daemons (sam, configd, sleepd, batteryd, luna-prefs-service,
+# LunaBackupAgent and others) read and write their configuration there, and
+# SAM rewrites sam-conf.json through any symlink planted in its place. Nothing
+# that writes there runs as another user, so make it 0755 root:root.
+do_install:append() {
+    sed -i -E 's|^(d[[:space:]]+/var/preferences[[:space:]]+)777([[:space:]]+)root([[:space:]]+)-|\10755\2root\3root|' \
+        ${D}${sysconfdir}/tmpfiles.d/31-var.conf
+    grep -Eq '^d[[:space:]]+/var/preferences[[:space:]]+0755[[:space:]]+root[[:space:]]+root' \
+        ${D}${sysconfdir}/tmpfiles.d/31-var.conf \
+        || bbfatal "31-var.conf: could not make /var/preferences 0755 root:root"
+}
