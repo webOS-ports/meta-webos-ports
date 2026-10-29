@@ -5,10 +5,9 @@ inherit clang_cmake
 
 require g-media-pipeline.bb
 
-FILESEXTRAPATHS:prepend := "${THISDIR}/g-media-pipeline:"
 WEBOS_REPO_NAME = "g-media-pipeline"
 
-PR = "r5"
+PR = "r6"
 
 PACKAGECONFIG += "${@bb.utils.contains('USE_WEBRUNTIME_LIBCXX', '1', 'webruntime-libcxx', 'system-libcxx', d)}"
 PACKAGECONFIG[webruntime-libcxx] = ",,chromium-toolchain-native chromium-stdlib"

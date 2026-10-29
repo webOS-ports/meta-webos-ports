@@ -12,8 +12,7 @@ LIC_FILES_CHKSUM = " \
 
 inherit webos_cmake
 inherit webos_system_bus
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_ose_repo
 inherit webos_machine_dep
 inherit pkgconfig
 
@@ -27,17 +26,17 @@ inherit pkgconfig
 #In LuneOS we want this for all machines
 #COMPATIBLE_MACHINE = "^qemux86$|^qemux86-64$|^raspberrypi3$|^raspberrypi3-64$|^raspberrypi4$|^raspberrypi4-64$"
 
-PR = "r19"
+PR = "r20"
 DEPENDS = "boost gstreamer1.0 gstreamer1.0-plugins-base gstreamer1.0-plugins-bad umediaserver media-resource-calculator webos-wayland-extensions"
 RDEPENDS:${PN} = "gstreamer1.0-plugins-webosrs"
 DEPENDS:append:rpi = " virtual/libomxil"
 
-WEBOS_VERSION = "1.0.0-gav.59_a3765932446632e60cf8491019629de7400adbae"
+# Built from the webOS-ports fork rather than webosose/g-media-pipeline. Its
+# webOS-ports/webOS-OSE branch starts from submissions/gav.59 and carries the
+# three patches this recipe used to apply as commits.
+PV = "1.0.0-gav.59+git"
+SRCREV = "7c64b4f4536393c53e2d03c6880209e01d5ababa"
 
-WEBOS_GIT_PARAM_BRANCH = "@gav"
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE}\ 
-    file://0001-Add-generic-config.patch \
-    file://0001-CMakeLists-pass-library-dirs-to-link_directories.patch \
-    file://0001-PlayerFactory.cpp-fix-build-with-newer-libc.patch \
-"
+WEBOS_REPO_NAME = "g-media-pipeline"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
