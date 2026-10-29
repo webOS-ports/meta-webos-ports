@@ -9,9 +9,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-3.0-only;md5=c79ff39f19dfec
 PV = "1.0.0+git"
 
 # Pinned, never AUTOREV: see org.webosports.service.torch.bb.
-SRCREV = "889097443061676cbfc2dc54a3db7791c6f935a6"
-# 88909744 is on herrie/lc-shared-parts (org.webosports.app.remote PR #3), not yet merged into master; back to that branch once it is.
-WEBOS_GIT_PARAM_BRANCH = "herrie/lc-shared-parts"
+SRCREV = "c17ae7a02f668afac6cec5a38e168984ccf3d0c3"
 # Flipper-IRDB, converted into the app's JSON at build time by the app's
 # tools/build-irdb.py; bump this to pick up newer codes.
 SRCREV_irdb = "d126fb1b6f1e114c52b4a8c19839ea65e3a9c24d"
