@@ -26,7 +26,19 @@ VENDOR=/android/vendor
 command -v binder-ping >/dev/null 2>&1 || exit 0
 
 # No fingerprint HAL shipped at all: nothing to wait for.
-if ! ls $VENDOR/etc/init/*fingerprint*.rc $VENDOR/etc/init/*biometrics*.rc >/dev/null 2>&1; then
+#
+# Look for the HAL binary, and for any rc file that names one, not only for an
+# rc file named after it: the Xperia XA2 (pioneer) declares both of its
+# fingerprint HALs (fps_hal, ets_hal) in hw/init.qcom.rc, so a filename match
+# found nothing, biomd started before fps_hal registered, and fingerprint was
+# dead for the boot (28 Oct 2026).
+has_hal=
+for d in $VENDOR /android/odm; do
+    ls $d/bin/hw/*biometrics.fingerprint* >/dev/null 2>&1 && has_hal=1
+    ls $d/etc/init/*fingerprint*.rc $d/etc/init/*biometrics*.rc >/dev/null 2>&1 && has_hal=1
+    grep -qs biometrics.fingerprint $d/etc/init/*.rc $d/etc/init/hw/*.rc && has_hal=1
+done
+if [ -z "$has_hal" ]; then
     echo "biomd-hal-wait: the vendor ships no fingerprint HAL, not waiting"
     exit 0
 fi

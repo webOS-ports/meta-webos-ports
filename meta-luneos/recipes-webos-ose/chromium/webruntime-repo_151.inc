@@ -154,3 +154,64 @@ SRC_URI:append:halium = " \
 SRC_URI:append:halium = " \
     file://0002-Halium-let-a-device-opt-out-of-the-low-4GB-reservation.patch \
 "
+
+# Non-x86_64 (aarch64) build hosts
+# ---------------------------------------------------------------------------
+# The repo carries several host tools only as x86_64 binaries. On an aarch64
+# build host each one fails with "Exec format error" (the rollup addon with
+# "Cannot find module @rollup/rollup-linux-arm64-gnu"), each at a different
+# point in the build:
+#
+#   x86_64 binary in the tree                       first run in   replaced by
+#   src/buildtools/linux64/gn (CIPD linux-amd64)    do_configure   gn-webruntime-native
+#   src/third_party/ninja/ninja                     do_compile     ninja-native
+#   src/third_party/gperf/cipd/bin/gperf (Blink)    do_compile     gperf-native
+#   src/buildtools/third_party/mold/cipd/mold       first link     lld (use_mold=false)
+#   devtools-frontend third_party/esbuild/esbuild   do_compile     @esbuild/linux-arm64
+#   devtools-frontend @rollup/rollup-linux-x64-gnu  do_compile     @rollup/rollup-linux-arm64-gnu
+#
+# depot_tools/{gn,ninja} are symlinks to the first two, so replacing the
+# targets covers both. use_mold defaults to true for a non-official clang
+# Linux build (build/config/compiler/compiler.gni) and points --ld-path at
+# the CIPD mold; lld-native is already a dependency, so fall back to lld.
+# The devtools pair is reached from //third_party/blink/public through
+# devtools_inspector_resources_grit -> inspector_overlay: its ts_library runs
+# esbuild (devtools_skip_typecheck is on for non-official builds) and
+# build_inspector_overlay runs rollup 4, whose native.js loads the addon by
+# platform name. esbuild's JS API rejects a binary whose version differs from
+# node_modules/esbuild, so the two versions below must match the tree:
+# esbuild 0.25.1, rollup 4.60.4. Re-check both whenever SRCREV moves. Both
+# tarballs were checked against the npm registry's dist.integrity.
+#
+# An x86_64 host keeps using every binary exactly as shipped.
+DEPENDS += "${@'' if d.getVar('BUILD_ARCH') == 'x86_64' else 'gn-webruntime-native ninja-native'}"
+GN_ARGS += "${@'' if d.getVar('BUILD_ARCH') == 'x86_64' else 'use_mold=false'}"
+
+# 0003: build/toolchain/cros pins the V8 snapshot toolchain to x64 for every
+# 64-bit target, which on an aarch64 host builds mksnapshot/torque as x86_64
+# binaries it cannot run. See the patch.
+WEBRUNTIME_AARCH64_HOST_SRC_URI = " \
+    https://registry.npmjs.org/@esbuild/linux-arm64/-/linux-arm64-0.25.1.tgz;name=esbuild-arm64;subdir=esbuild-arm64;downloadfilename=esbuild-linux-arm64-0.25.1.tgz \
+    https://registry.npmjs.org/@rollup/rollup-linux-arm64-gnu/-/rollup-linux-arm64-gnu-4.60.4.tgz;name=rollup-arm64;subdir=rollup-arm64;downloadfilename=rollup-linux-arm64-gnu-4.60.4.tgz \
+    file://0003-aarch64-host-build-the-V8-snapshot-tools-for-the-host.patch \
+"
+SRC_URI:append = "${@' ${WEBRUNTIME_AARCH64_HOST_SRC_URI}' if d.getVar('BUILD_ARCH') == 'aarch64' else ''}"
+SRC_URI[esbuild-arm64.sha256sum] = "70771c9212585cfd1b190465f92dae98d1d3fc4a4fab5cacbef71457ee08e254"
+SRC_URI[rollup-arm64.sha256sum] = "7b98541552d3d679d4a92a04d590b34d1b44a6ec582483be9a66e8bdc31a06f6"
+
+webruntime_replace_x86_host_tools() {
+    cd ${S}/src
+    ln -sfn ${STAGING_BINDIR_NATIVE}/gn-webruntime buildtools/linux64/gn
+    ln -sfn ${STAGING_BINDIR_NATIVE}/ninja third_party/ninja/ninja
+    ln -sfn ${STAGING_BINDIR_NATIVE}/gperf third_party/gperf/cipd/bin/gperf
+
+    if [ "${BUILD_ARCH}" = "aarch64" ]; then
+        devtools=third_party/devtools-frontend/src
+        install -m 0755 ${UNPACKDIR}/esbuild-arm64/package/bin/esbuild \
+            $devtools/third_party/esbuild/esbuild
+        rm -rf $devtools/node_modules/@rollup/rollup-linux-arm64-gnu
+        cp -R ${UNPACKDIR}/rollup-arm64/package \
+            $devtools/node_modules/@rollup/rollup-linux-arm64-gnu
+    fi
+}
+do_configure[prefuncs] += "${@'' if d.getVar('BUILD_ARCH') == 'x86_64' else 'webruntime_replace_x86_host_tools'}"

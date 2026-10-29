@@ -22,6 +22,7 @@ WEBOS_GIT_PARAM_BRANCH = "qml-based"
 WEBOS_REPO_NAME = "org.webosports.app.settings"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI += "file://0001-WiFi-connect-to-the-network-a-launch-names.patch"
 
 # We don't provide android-property-service on non-Android devices, so remove it in these cases to avoid LS2 warnings/errors
 

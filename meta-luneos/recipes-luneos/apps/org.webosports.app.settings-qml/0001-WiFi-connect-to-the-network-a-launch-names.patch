@@ -1,0 +1,113 @@
+From: LuneOS pioneer UI agent
+Subject: [PATCH] WiFi: connect to the network a launch names
+
+The status bar's Wi-Fi menu launches this app with
+{"target": {"servicePath": ...}} when a network wants a passphrase, and
+now hands connman's request back instead of holding it (luna-next-cardshell).
+Act on the target: GenericCategoryWindow forwards launch parameters to a
+page that implements handleLaunchParams(), and WiFiPage connects to that
+service once it is listed and idle, so connman asks this app's UserAgent and
+the passphrase popup comes up.
+
+Upstream-Status: Pending
+---
+diff -ruN a/src/qml/Connectivity/WiFiPage.qml b/src/qml/Connectivity/WiFiPage.qml
+--- a/src/qml/Connectivity/WiFiPage.qml	2026-10-28 08:21:45
++++ b/src/qml/Connectivity/WiFiPage.qml	2026-10-28 08:21:45
+@@ -274,4 +274,51 @@
+     function retrieveProperties() {
+         // nothing special to retrieve here
+     }
++
++    /*
++     * Launched for one network: the status bar's Wi-Fi menu was tapped on a
++     * network that needs a passphrase. The menu has already handed connman's
++     * request back (see WiFiElement.qml in luna-next-cardshell), so connect
++     * from here: connman then asks this page's UserAgent, and the passphrase
++     * popup comes up.
++     */
++    property string _joinServicePath: ""
++    property int _joinAttempts: 0
++
++    function handleLaunchParams(params) {
++        var target = params.target || (params.params ? params.params.target : undefined);
++        if (!target || !target.servicePath)
++            return;
++        _joinServicePath = target.servicePath;
++        _joinAttempts = 0;
++        joinTimer.restart();
++    }
++
++    Timer {
++        id: joinTimer
++        // Retried rather than done once: a first launch has no list yet, and
++        // connman can still be unwinding the request the menu gave back. Ten
++        // seconds is plenty for both; after that the user can tap the row.
++        interval: 250
++        repeat: true
++        onTriggered: {
++            if (++wifiPageId._joinAttempts > 40) {
++                stop();
++                wifiPageId._joinServicePath = "";
++                return;
++            }
++            for (var i = 0; i < wifiModel.count; ++i) {
++                var service = wifiModel.get(i);
++                if (!service || service.path !== wifiPageId._joinServicePath)
++                    continue;
++                if (service.connecting)
++                    return;
++                stop();
++                wifiPageId._joinServicePath = "";
++                if (!service.connected)
++                    service.requestConnect();
++                return;
++            }
++        }
++    }
+ }
+diff -ruN a/src/qml/GenericCategoryWindow.qml b/src/qml/GenericCategoryWindow.qml
+--- a/src/qml/GenericCategoryWindow.qml	2026-10-28 08:21:45
++++ b/src/qml/GenericCategoryWindow.qml	2026-10-28 08:21:45
+@@ -20,6 +20,7 @@
+ import LunaNext.Common 0.1
+ import Eos.Window 0.1
+ import LuneOS.Forms 1.0
++import LuneOS.System 1.0
+ 
+ WebOSWindow {
+     id: settingsCategoryAppWindow
+@@ -234,5 +235,33 @@
+ 
+         property alias actionHeaderComponent: categoryHeader.actionComponent
+         onActionHeaderComponentChanged: console.log("actionHeaderComponent="+actionHeaderComponent);
++
++        onLoaded: settingsCategoryAppWindow._deliverLaunchParams()
++    }
++
++    /*
++     * A launch can carry something for the page to act on: the status bar's
++     * Wi-Fi menu sends {"target": {"servicePath": ...}} for a network that
++     * wants a passphrase. A page that cares implements
++     * handleLaunchParams(params); the parameters wait here until the page has
++     * loaded, since a first launch delivers them before it has.
++     */
++    property var _pendingLaunchParams: null
++
++    function _deliverLaunchParams() {
++        var page = categoryLoader.item;
++        if (!_pendingLaunchParams || !page || typeof page.handleLaunchParams !== "function")
++            return;
++        var params = _pendingLaunchParams;
++        _pendingLaunchParams = null;
++        page.handleLaunchParams(params);
++    }
++
++    LaunchParams {
++        window: settingsCategoryAppWindow
++        onLaunched: function(params) {
++            settingsCategoryAppWindow._pendingLaunchParams = params;
++            settingsCategoryAppWindow._deliverLaunchParams();
++        }
+     }
+ }

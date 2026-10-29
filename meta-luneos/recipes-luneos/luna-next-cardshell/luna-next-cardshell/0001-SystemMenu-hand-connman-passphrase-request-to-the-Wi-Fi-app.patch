@@ -1,0 +1,64 @@
+From: LuneOS pioneer UI agent
+Subject: [PATCH] SystemMenu: hand connman's passphrase request to the Wi-Fi app
+
+Tapping a secured network in the status bar's Wi-Fi menu makes the
+compositor the client that called Connect, so connman sends RequestInput to
+the compositor's UserAgent. The menu only launched the Wi-Fi app with the
+service as its target and never answered, so connman sat waiting on an
+agent that would not reply. The app had no passphrase prompt to show, and a
+tap on the row in the app got "in progress" and no prompt either. The user
+saw no password field and so no keyboard ("cannot type a Wi-Fi password").
+
+Cancel the request at once (an empty sendUserReply() is
+net.connman.Agent.Error.Canceled) and let the app connect again itself
+(org.webosports.app.settings handles the "target" launch parameter), so the
+prompt goes to the app's own agent.
+
+Also gives the handlers explicit parameters: Qt 6 warns that injecting
+"servicePath" into a signal handler is deprecated.
+
+Upstream-Status: Pending
+---
+diff -ruN a/qml/StatusBar/SystemMenu/NewDeviceMenu.qml b/qml/StatusBar/SystemMenu/NewDeviceMenu.qml
+--- a/qml/StatusBar/SystemMenu/NewDeviceMenu.qml	2026-10-28 08:21:45
++++ b/qml/StatusBar/SystemMenu/NewDeviceMenu.qml	2026-10-28 08:21:45
+@@ -155,7 +155,16 @@
+ 
+     UserAgent {
+         id: connmanUserAgent
+-        onUserInputRequested: {
++        onUserInputRequested: function(servicePath, fields) {
++            // connman sends RequestInput to the agent of whoever asked for the
++            // connection - here that is this menu, which has no passphrase field.
++            // Hand the request back at once (an empty reply is
++            // net.connman.Agent.Error.Canceled) instead of leaving connman
++            // waiting on an agent that never answers: while it waits the
++            // service stays mid-connect, so a tap in the Wi-Fi app gets "in
++            // progress" and no prompt either. The app, given the service as its
++            // target, connects again itself, and the prompt goes to its agent.
++            connmanUserAgent.sendUserReply({});
+             // Delegate password entry etc. to the wifi prefs app
+             var target = {};
+             target["servicePath"] = servicePath;
+diff -ruN a/qml/StatusBar/SystemMenu/WiFiElement.qml b/qml/StatusBar/SystemMenu/WiFiElement.qml
+--- a/qml/StatusBar/SystemMenu/WiFiElement.qml	2026-10-28 08:21:45
++++ b/qml/StatusBar/SystemMenu/WiFiElement.qml	2026-10-28 08:21:45
+@@ -37,8 +37,16 @@
+ 
+     UserAgent {
+         id: connmanUserAgent
+-        onUserInputRequested: //(string servicePath, variant /*QVariantMap*/ fields);
+-        {
++        onUserInputRequested: function(servicePath, fields) {
++            // connman sends RequestInput to the agent of whoever asked for the
++            // connection - here that is this menu, which has no passphrase field.
++            // Hand the request back at once (an empty reply is
++            // net.connman.Agent.Error.Canceled) instead of leaving connman
++            // waiting on an agent that never answers: while it waits the
++            // service stays mid-connect, so a tap in the Wi-Fi app gets "in
++            // progress" and no prompt either. The app, given the service as its
++            // target, connects again itself, and the prompt goes to its agent.
++            connmanUserAgent.sendUserReply({});
+             // No need to continue with system menu, delegate this to the wifi prefs app
+             wifiMenu.userInputRequested(servicePath);
+         }

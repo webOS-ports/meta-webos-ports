@@ -1,0 +1,303 @@
+From: LuneOS pioneer key-actions agent
+Subject: [PATCH] Optionally open the notification panel with a fingerprint-sensor tap
+
+A touch on the fingerprint sensor of an unlocked, lit phone opens the
+notification panel, or closes it again, the way a tap on the minimised
+notification icons does. Off by default behind a new tweak, "Fingerprint tap
+opens notifications", and only with a finger enrolled.
+
+Most fingerprint sensors have no navigation mode a shell could listen to:
+the FPC1020 on the Xperia XA2 has none, and its interrupt only fires while
+the HAL has armed it. So the touch is heard through an identify session with
+com.webos.service.fingerprint, and any capture it reports, matched or not,
+is a tap.
+
+That session is the lock screen's own, extended to run while unlocked
+(fingerprintListening = fingerprintActive || fingerprintTapActive), rather
+than a second client: biomd refuses a second identify ("Another fingerprint
+operation is in progress") and an abort from either client ends whichever session is running, so two
+sessions racing each other on every lock and unlock would sooner or later
+leave the lock screen deaf. With one session, locking simply makes the
+session that was listening for taps mean "unlock". Unlocked captures never
+count towards the lock screen's failed-attempt lockout, and for 1.5 s after
+an unlock (and 0.8 s after each tap) captures are ignored, so the finger
+that unlocked the phone does not also open the panel.
+
+Two robustness fixes the tap mode needs, which also help unlock:
+ - an identify the service refuses (returnValue false) is retried after 5 s
+   instead of being ignored, which left the session dead;
+ - a session that ends without a reply (another client's abort, or Settings
+   enrolling a finger, pre-empts it silently) is noticed from getStatus
+   going back to FPSTATE_IDLE and re-armed. While another client holds the
+   sensor, tap mode waits for that rather than taking it back.
+
+Tap mode is also off while Settings > Fingerprint is in front: biomd refuses
+an enroll while an identify is pending ("Cannot perform this operation
+while identification is in progress"), which is how enrolling first failed
+while testing this on pioneer.
+
+Costs: while the tweak is on the sensor stays armed whenever the screen is on
+and unlocked, and a touch by an unenrolled finger is a failed match as far
+as the HAL is concerned.
+
+NotificationArea gains openNotificationArea() (what the tap on the icons
+did) and toggleNotificationArea() for the new caller.
+
+Upstream-Status: Pending
+---
+--- a/files/tweaks/luna-next-cardshell.json	2026-10-28 13:52:54
++++ b/files/tweaks/luna-next-cardshell.json	2026-10-28 13:52:54
+@@ -55,6 +55,15 @@
+ 				]
+             },
+ 			{
++                "group": "ui",
++                "restart": "none",
++                "label": "Fingerprint tap opens notifications",
++                "help": "Touching the fingerprint sensor while unlocked opens or closes the notification panel. Needs an enrolled finger. Keeps the sensor armed while the screen is on, and a finger that is not enrolled counts as a failed match.",
++                "key": "fingerprintTapNotifications",
++                "type": "ToggleButton",
++                "value": false
++            },
++			{
+                 "group": "launcher",
+                 "restart": "none",
+                 "label": "Tab title case",
+--- a/qml/AppTweaks/AppTweaks.qml	2026-10-28 13:52:54
++++ b/qml/AppTweaks/AppTweaks.qml	2026-10-28 13:52:54
+@@ -42,6 +42,7 @@
+     property alias newDeviceMenuTweakValue: newDeviceMenuTweak.value
+     property alias disableAnimationsTweakValue: disableAnimationsTweak.value
+     property alias hardwareNavigationKeysTweakValue: hardwareNavigationKeysTweak.value
++    property alias fingerprintTapNotificationsTweakValue: fingerprintTapNotificationsTweak.value
+ 
+     // Set by CardShell when org.webosports.service.eink reports an E Ink
+     // panel. Such a panel flashes for every large greyscale update, and a
+@@ -69,6 +70,15 @@
+         serviceName: appTweaks.serviceName
+         key: "hardwareNavigationKeys"
+         defaultValue: "auto"
++    }
++    // Off by default: it keeps the fingerprint sensor armed while the screen is
++    // on and unlocked, and an unrecognised touch counts as a failed match.
++    Tweak {
++        id: fingerprintTapNotificationsTweak
++        owner: appTweaks.owner
++        serviceName: appTweaks.serviceName
++        key: "fingerprintTapNotifications"
++        defaultValue: false
+     }
+     Tweak {
+         id: showTapRippleTweak
+--- a/qml/CardsArea.qml	2026-10-28 13:52:54
++++ b/qml/CardsArea.qml	2026-10-28 13:52:54
+@@ -508,6 +508,21 @@
+ 
+         windowManagerInstance: windowManager
+ 
++        // A touch on the fingerprint sensor while unlocked opens or closes the
++        // notification panel. Opt-in: it keeps the sensor armed while the
++        // screen is on (see LockScreen.fingerprintTapActive).
++        // Not while Settings enrolls a finger: biomd refuses an enroll while an
++        // identify is pending ("Cannot perform this operation while
++        // identification is in progress"), seen on pioneer.
++        fingerprintTapEnabled: AppTweaks.fingerprintTapNotificationsTweakValue === true &&
++                               !(windowManager.foregroundWindow &&
++                                 windowManager.foregroundWindow.appId === "org.webosports.app.settings.fingerprint")
++        onFingerprintTapped: {
++            if (notificationAreaInstance.item &&
++                    typeof notificationAreaInstance.item.toggleNotificationArea === "function")
++                notificationAreaInstance.item.toggleNotificationArea();
++        }
++
+         isFirstUse: false
+ 
+         anchors.top: statusBarInstance.bottom
+--- a/qml/LockScreen/LockScreen.qml	2026-10-28 13:52:54
++++ b/qml/LockScreen/LockScreen.qml	2026-10-28 13:52:54
+@@ -77,9 +77,30 @@
+                                               fingerprintCount > 0 &&
+                                               fingerprintFailedAttempts < maxFingerprintAttempts
+     property var _identifyCall: null
++    property double _identifyArmedAt: 0
++    // getStatus's "state", so a session that ended without telling us (another
++    // client's abort, or Settings enrolling) is noticed and re-armed.
++    property string _fingerprintState: ""
+ 
+-    onFingerprintActiveChanged: {
+-        if (fingerprintActive)
++    // Optional (the shell's "Fingerprint tap opens notifications" tweak): while
++    // unlocked and lit, a touch on the sensor is a tap rather than an unlock,
++    // and fingerprintTapped() is emitted for it. The sensor has no navigation
++    // mode, so an identify session is the only way to hear a touch - and it is
++    // this same session, so tap and unlock never fight over the sensor: on
++    // locking, the session that was listening for taps starts meaning unlock.
++    property bool fingerprintTapEnabled: false
++    signal fingerprintTapped()
++    readonly property bool fingerprintTapActive: !locked && displayOn &&
++                                                 fingerprintTapEnabled &&
++                                                 fingerprintAvailable &&
++                                                 fingerprintCount > 0
++    readonly property bool fingerprintListening: fingerprintActive || fingerprintTapActive
++    // No tap until this time: one press gives several captures, and the finger
++    // that just unlocked the device is still on the sensor when it re-arms.
++    property double _fingerprintQuietUntil: 0
++
++    onFingerprintListeningChanged: {
++        if (fingerprintListening)
+             startFingerprintIdentify();
+         else
+             stopFingerprintIdentify();
+@@ -88,6 +109,11 @@
+     function startFingerprintIdentify() {
+         if (_identifyCall)
+             return;
++        // For taps, wait while someone else has the sensor (Settings enrolling):
++        // getStatus going back to idle re-arms. Unlock keeps its old behaviour.
++        if (!locked && _fingerprintState !== "" && _fingerprintState !== "FPSTATE_IDLE")
++            return;
++        _identifyArmedAt = Date.now();
+         _identifyCall = service.subscribe("luna://com.webos.service.fingerprint/identify",
+                                           "{\"subscribe\":true}",
+                                           handleFingerprintIdentify, handleFingerprintError);
+@@ -95,6 +121,7 @@
+ 
+     function stopFingerprintIdentify() {
+         identifyRestartTimer.stop();
++        identifyRetryTimer.stop();
+         if (_identifyCall) {
+             _identifyCall.cancel();
+             _identifyCall = null;
+@@ -114,6 +141,18 @@
+ 
+     function handleFingerprintIdentify(message) {
+         var response = JSON.parse(message.payload);
++        if (response.returnValue === false) {
++            // Refused - "Another fingerprint operation is in progress" - which
++            // is not a read. Ask again later; getStatus going idle is sooner.
++            _endIdentify();
++            if (fingerprintListening)
++                identifyRetryTimer.restart();
++            return;
++        }
++        if (!locked) {
++            handleFingerprintTap(response);
++            return;
++        }
+         if (response.identified === true) {
+             _endIdentify();
+             fingerprintFailedAttempts = 0;
+@@ -138,15 +177,33 @@
+             // Terminal end (cancel / 30s timeout, errorText "Aborted"): not a
+             // failed read, just re-arm if we are still meant to be listening.
+             _endIdentify();
+-            if (fingerprintActive)
++            if (fingerprintListening)
+                 identifyRestartTimer.restart();
+         }
+     }
+ 
++    // Unlocked: any capture, matched or not, is a tap.
++    function handleFingerprintTap(response) {
++        var capture = response.identified === true ||
++                      (response.identified === false && response.finished === false);
++        if (capture) {
++            var now = Date.now();
++            if (now >= _fingerprintQuietUntil)
++                fingerprintTapped();
++            _fingerprintQuietUntil = Math.max(_fingerprintQuietUntil, now + 800);
++        }
++        // A match, a timeout and an abort all end the session.
++        if (response.identified === true || (response.identified === false && response.finished !== false)) {
++            _endIdentify();
++            if (fingerprintListening)
++                identifyRestartTimer.restart();
++        }
++    }
++
+     function handleFingerprintError(message) {
+         console.log("Fingerprint identify error: " + message.payload);
+         _endIdentify();
+-        if (fingerprintActive)
++        if (fingerprintListening)
+             identifyRestartTimer.restart();
+     }
+ 
+@@ -343,11 +400,23 @@
+         id: identifyRestartTimer
+         interval: 500
+         repeat: false
+-        onTriggered: if (lockScreen.fingerprintActive) lockScreen.startFingerprintIdentify();
++        onTriggered: if (lockScreen.fingerprintListening) lockScreen.startFingerprintIdentify();
+     }
+ 
++    Timer {
++        id: identifyRetryTimer
++        interval: 5000
++        repeat: false
++        onTriggered: if (lockScreen.fingerprintListening) lockScreen.startFingerprintIdentify();
++    }
++
+     onLockedChanged: {
+         if(!locked) {
++            // A fingerprint unlock ended its session; listen for taps again,
++            // but not to the finger that is still on the sensor.
++            _fingerprintQuietUntil = Date.now() + 1500;
++            if (fingerprintListening)
++                identifyRestartTimer.restart();
+             if( _stateBeforeLock === "dockmode" ) windowManagerInstance.switchToDockMode();
+             else if( _stateBeforeLock === "minimize" ) windowManagerInstance.switchToMaximize(null);
+             else if( _stateBeforeLock === "fullscreen" ) windowManagerInstance.switchToFullscreen(null);
+@@ -544,6 +613,18 @@
+             lockScreen.fingerprintStatusRetries = 0;
+             lockScreen.fingerprintAvailable = (response.available === true);
+             lockScreen.fingerprintCount = response.fingerprints ? response.fingerprints.length : 0;
++            lockScreen._fingerprintState = response.state || "";
++
++            if (lockScreen._fingerprintState === "FPSTATE_IDLE" && lockScreen.fingerprintListening) {
++                // Idle while we think we are listening: the session ended without
++                // a word to us - another client's abort, or an enroll pre-empting
++                // it. Drop it and listen again. Not straight after arming, when
++                // this can still be the state from before our request.
++                if (lockScreen._identifyCall && Date.now() - lockScreen._identifyArmedAt > 1500)
++                    lockScreen._endIdentify();
++                if (!lockScreen._identifyCall)
++                    identifyRestartTimer.restart();
++            }
+         }
+ 
+         function handleFingerprintStatusError(message) {
+--- a/qml/Notifications/NotificationArea.qml	2026-10-28 13:52:54
++++ b/qml/Notifications/NotificationArea.qml	2026-10-28 13:52:54
+@@ -115,14 +115,26 @@
+             notificationArea.state = "minimized";
+     }
+ 
++    function openNotificationArea() {
++        bannerItemsPopups.popupModel.clear();
++        notificationArea.state = "open";
++        windowManagerInstance.addTapAction("minimizeNotificationArea", minimizeNotificationArea, null)
++    }
++
++    //! Open the panel, or close it again if it is open, for a trigger other
++    //! than a tap on it (the fingerprint sensor). With no notifications it is
++    //! hidden and there is nothing to open.
++    function toggleNotificationArea() {
++        if (notificationArea.state === "open")
++            minimizeNotificationArea();
++        else if (notificationArea.state !== "hidden")
++            openNotificationArea();
++    }
++
+     MouseArea {
+         anchors.fill: minimizedListView
+         enabled: minimizedListView.visible
+-        onClicked: {
+-            bannerItemsPopups.popupModel.clear();
+-            notificationArea.state = "open";
+-            windowManagerInstance.addTapAction("minimizeNotificationArea", minimizeNotificationArea, null)
+-        }
++        onClicked: openNotificationArea()
+     }
+ 
+     ListView {

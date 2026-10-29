@@ -3,8 +3,13 @@
 # U+1FAE0 (Unicode 14) did not. One current font makes emoji simply text for
 # Chromium apps, QML apps, the shell and the keyboard alike.
 #
-# The modern repository keeps its fonts in git-LFS, so the build host needs
-# git-lfs; without it the fetch fails rather than leaving a pointer file.
+# The modern repository keeps some fonts in git-LFS, but only 3D/fonts/*.ttf
+# (see its .gitattributes); 2D/fonts/NotoColorEmoji.ttf, the one file
+# installed below, is ordinary git content. Without lfs=0 the fetcher refuses
+# the whole repository on a build host without git-lfs ("Repository ... has
+# LFS content, install git-lfs on host"), which is how the aarch64 build VM
+# failed. lfs=0 also skips downloading the unused 3D fonts.
+SRC_URI = "git://github.com/googlefonts/noto-emoji;branch=main;protocol=https;lfs=0"
 SRCREV = "e20cbc2bbec1926686be9f9bee7d1d2cfa1fea0e"
 PV = "2026-09-24-unicode18.0"
 
