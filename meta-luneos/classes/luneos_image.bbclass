@@ -118,6 +118,7 @@ ROOTFS_POSTPROCESS_COMMAND += "luneos_ssh_modes_qa;"
 USE_DEVFS = "1"
 
 inherit webos_image
+inherit luneos-image-qa
 inherit ${@bb.utils.contains('DISTRO_FEATURES', 'smack', 'webos_smack_labeling', '', d)}
 
 PR:append = "${@bb.utils.contains('DISTRO_FEATURES', 'smack', 'smack1', '', d)}"
