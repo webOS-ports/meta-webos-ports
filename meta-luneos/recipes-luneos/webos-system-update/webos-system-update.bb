@@ -21,10 +21,10 @@ SYSTEMD_SERVICE:${PN} = "webos-system-update.service"
 
 do_install() {
     install -d ${D}${sbindir}
-    install -m 0777 ${B}/webos-system-update ${D}${sbindir}
+    install -m 0755 ${B}/webos-system-update ${D}${sbindir}
 
     install -d ${D}${bindir}
-    install -m 0777 ${S}/files/scripts/run-update.sh ${D}${bindir}
+    install -m 0755 ${S}/files/scripts/run-update.sh ${D}${bindir}
 
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${S}/files/systemd/webos-system-update.service ${D}${systemd_unitdir}/system/
