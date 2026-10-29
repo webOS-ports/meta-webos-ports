@@ -69,3 +69,18 @@ DISTRO_FEATURES += "adb"
 
 # Use vc4graphics for all raspberrypi MACHINEs
 MACHINE_FEATURES:append:rpi = " vc4graphics"
+
+# Debug access for a local developer build: "1" in local.conf, never for an
+# image that is published or handed to anyone. It brings back what every image
+# used to have:
+#   - root with an empty password, accepted by sshd and the console
+#     (luneos_image.bbclass);
+#   - SSH on every interface, not only on the USB gadget (luneos_image.bbclass,
+#     iptables_%.bbappend), still only while developer mode is on;
+#   - the serial console login on machines that have one (e.g. the PinePhone's
+#     ttyS0, meta-pine64-luneos);
+#   - the unauthenticated debug shells of the initramfs, and busybox telnetd
+#     (meta-smartphone, INITRAMFS_DEBUG_SHELL; a LUNEOS_ENABLE_ADB = "1" debug
+#     boot image of the Halium kernel recipes turns those on as well).
+LUNEOS_DEBUG_ACCESS ??= "0"
+INITRAMFS_DEBUG_SHELL ?= "${@'1' if '1' in (d.getVar('LUNEOS_DEBUG_ACCESS'), d.getVar('LUNEOS_ENABLE_ADB')) else '0'}"

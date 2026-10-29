@@ -1,7 +1,22 @@
 FEATURE_PACKAGES_luneos-extended = "packagegroup-luneos-extended"
 FEATURE_PACKAGES_luneos-development = "packagegroup-luneos-development"
 
-LUNEOS_IMAGE_DEFAULT_FEATURES = "allow-empty-password empty-root-password allow-root-login post-install-logging ssh-server-openssh package-management luneos-extended"
+# No passwordless root by default. Every image used to get
+# allow-empty-password, empty-root-password and allow-root-login, so root had
+# an empty password and sshd accepted it on every interface, in the release
+# image as well as the developer one. Without them oe-core locks root
+# (zap_empty_root_password) and sshd_config keeps PermitRootLogin
+# prohibit-password and PermitEmptyPasswords no (openssh_%.bbappend): SSH, once
+# developer mode starts it, takes a key or the password set in Settings.
+#
+# LUNEOS_DEBUG_ACCESS = "1" in local.conf puts the old behaviour back for a
+# local developer build (see luneos-features.inc for all it changes). Never set
+# it for an image that leaves your desk.
+LUNEOS_DEBUG_ACCESS_FEATURES = "allow-empty-password empty-root-password allow-root-login"
+
+LUNEOS_IMAGE_DEFAULT_FEATURES = "post-install-logging ssh-server-openssh package-management luneos-extended \
+    ${@oe.utils.conditional('LUNEOS_DEBUG_ACCESS', '1', d.getVar('LUNEOS_DEBUG_ACCESS_FEATURES'), '', d)} \
+"
 
 # We're using devtmpfs so are not required to have a minimal populated /dev in our images
 USE_DEVFS = "1"
