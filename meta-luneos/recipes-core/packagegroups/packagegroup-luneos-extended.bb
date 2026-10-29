@@ -83,7 +83,6 @@ RDEPENDS:${PN} = " \
   org.webosports.app.calculator \
   org.webosports.app.contacts \
   org.webosports.app.documents \
-  org.webosports.app.filemanager \
   org.webosports.app.firstuse \
   org.webosports.app.maps \
   org.webosports.app.memos \
