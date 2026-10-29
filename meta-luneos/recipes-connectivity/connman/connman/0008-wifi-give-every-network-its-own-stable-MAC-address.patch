@@ -1,0 +1,1600 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 29 Oct 2026 16:56:34 +0100
+Subject: [PATCH] wifi: give every network its own stable MAC address
+
+ConnMan associates with every WiFi network using the hardware MAC
+address and lets wpa_supplicant scan with it too, so any network, and
+anyone listening to probe requests, can follow a device from place to
+place and link its visits to different networks.
+
+Add a [General] WiFiMACRandomization option, off by default. When it is
+on:
+
+ * Each network gets an address of its own: HMAC-SHA256 over the SSID
+   and the security type, keyed with 32 random bytes made on first use
+   in STORAGEDIR/wifi-mac.secret, truncated to six bytes and made
+   locally administered unicast. The same network sees the same address
+   on every connection and after every reboot, so captive portals and
+   DHCP reservations keep working, while two networks cannot tell they
+   saw the same device. wpa_supplicant applies it through its per-network
+   mac_addr=3 / mac_value policy.
+
+ * Scans and probe requests come from random addresses, through
+   wpa_supplicant's MACAddressRandomizationMask property, for each of
+   scan, sched_scan and pno that the driver supports.
+
+ * A network can opt out with the new UseDeviceMACAddress service
+   property, stored with the service and reset by Remove(); it is then
+   joined with the hardware address (mac_addr=0).
+
+The secret file is opened relative to the storage directory with
+O_NOFOLLOW and only trusted as a regular, private, singly linked file of
+the right size owned by connmand. Anything else is replaced by a new
+secret written to a temporary file and renamed over it, so a symlink is
+never followed for reading or writing.
+
+wpa_supplicant gives up on an association silently when the driver
+refuses the address, which would leave the connection hanging. Many
+vendor drivers do refuse. So before wpa_supplicant takes the interface,
+connmand tries the same down/SIOCSIFHWADDR/up sequence once with a
+throw-away address and puts the hardware address back. If it fails, it
+logs once and joins every network with the hardware address; nothing is
+sent to wpa_supplicant in that case, nor when its interface uses a
+driver other than nl80211, the only one that can set the address. The
+answer and the hardware address are kept in STATEDIR for the rest of the
+boot. That record also lets a
+restarted connmand put the hardware address back before rtnl creates the
+device: the device ident, and with it every saved WiFi service, is named
+after the address the interface has when connmand starts.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ Makefile.am               |   2 +-
+ doc/connman.conf.5.in     |   9 +
+ doc/service-api.txt       |  16 +
+ gsupplicant/gsupplicant.h |  22 ++
+ gsupplicant/supplicant.c  | 149 +++++++++
+ plugins/wifi.c            | 175 ++++++++++
+ src/main.c                |  21 ++
+ src/main.conf             |  10 +
+ src/service.c             |  60 ++++
+ src/wifi-mac.c            | 688 ++++++++++++++++++++++++++++++++++++++
+ src/wifi-mac.h            | 106 ++++++
+ 11 files changed, 1257 insertions(+), 1 deletion(-)
+ create mode 100644 src/wifi-mac.c
+ create mode 100644 src/wifi-mac.h
+
+diff --git a/Makefile.am b/Makefile.am
+index f5366ad..203b251 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -129,7 +129,7 @@ src_connmand_SOURCES = $(gdhcp_sources) $(gweb_sources) $(stats_sources) \
+ 			src/6to4.c src/ippool.c src/bridge.c src/nat.c \
+ 			src/ipaddress.c src/inotify.c src/ipv6pd.c src/peer.c \
+ 			src/peer_service.c src/machine.c src/util.c \
+-			src/acd.c
++			src/acd.c src/wifi-mac.c src/wifi-mac.h
+ 
+ if INTERNAL_DNS_BACKEND
+ src_connmand_SOURCES += src/dnsproxy.c
+diff --git a/doc/connman.conf.5.in b/doc/connman.conf.5.in
+index 396f0a8..ad5eeb3 100644
+--- a/doc/connman.conf.5.in
++++ b/doc/connman.conf.5.in
+@@ -52,6 +52,15 @@ When BackgroundScanning is false, ConnMan will not perform any scan
+ regardless of wifi is connected or not, unless it is requested by
+ the user through a D-Bus call.
+ .TP
++.BI WiFiMACRandomization=true\ \fR|\fB\ false
++Connect to each WiFi network with a MAC address of its own instead of
++the hardware address, and scan from random addresses. The address of a
++network is locally administered and derived from a secret kept in the
++storage directory, so it stays the same for that network across
++connections and reboots. A network can opt out through its
++UseDeviceMACAddress service property. Where the driver cannot change
++the address, the hardware address is used. Default is false.
++.TP
+ .BI UseGatewaysAsTimeservers=true \fR|\fB\ false
+ Assume that service gateways also function as timeservers.
+ Default is false.
+diff --git a/doc/service-api.txt b/doc/service-api.txt
+index 550f2a0..15319ad 100644
+--- a/doc/service-api.txt
++++ b/doc/service-api.txt
+@@ -238,6 +238,22 @@ Properties	string State [readonly]
+ 
+ 			WiFi only, same availability as BSSID.
+ 
++		boolean UseDeviceMACAddress [readwrite]
++
++			When true, connect to this network with the
++			hardware MAC address of the device. When false,
++			the default, and WiFiMACRandomization is enabled
++			in main.conf, the network gets an address of its
++			own: locally administered, derived from a device
++			secret and the network's SSID and security, and
++			the same on every connection to it.
++
++			A change takes effect from the next connection.
++			Remove() resets it to false.
++
++			WiFi only, and only present while
++			WiFiMACRandomization is enabled.
++
+ 		boolean Favorite [readonly]
+ 
+ 			Will be true if a cable is plugged in or the user
+diff --git a/gsupplicant/gsupplicant.h b/gsupplicant/gsupplicant.h
+index ff765df..a99c628 100644
+--- a/gsupplicant/gsupplicant.h
++++ b/gsupplicant/gsupplicant.h
+@@ -164,8 +164,19 @@ struct _GSupplicantSSID {
+ 	const char *bgscan;
+ 	unsigned int keymgmt;
+ 	GSupplicantMfpOptions ieee80211w;
++	/*
++	 * When mac_addr_set, sent as wpa_supplicant's per-network mac_addr
++	 * policy: G_SUPPLICANT_MAC_ADDR_PERMANENT for the hardware address,
++	 * G_SUPPLICANT_MAC_ADDR_DEDICATED for mac_value.
++	 */
++	dbus_bool_t mac_addr_set;
++	unsigned int mac_addr;
++	unsigned char mac_value[6];
+ };
+ 
++#define G_SUPPLICANT_MAC_ADDR_PERMANENT	0
++#define G_SUPPLICANT_MAC_ADDR_DEDICATED	3
++
+ typedef struct _GSupplicantSSID GSupplicantSSID;
+ 
+ struct scan_ssid {
+@@ -280,6 +291,17 @@ int g_supplicant_interface_disconnect(GSupplicantInterface *interface,
+ 					GSupplicantInterfaceCallback callback,
+ 							void *user_data);
+ 
++typedef void (*GSupplicantMacRandCallback) (int result, const char *ifname);
++
++/*
++ * Have wpa_supplicant send scans and probe requests from random addresses
++ * (MACAddressRandomizationMask) for every scan type the driver supports.
++ * callback, if given, gets 0 or a negative errno once it is known.
++ */
++int g_supplicant_interface_set_scan_mac_randomization(
++					GSupplicantInterface *interface,
++					GSupplicantMacRandCallback callback);
++
+ int g_supplicant_interface_set_bss_expiration_age(GSupplicantInterface *interface,
+ 					unsigned int bss_expiration_age);
+ 
+diff --git a/gsupplicant/supplicant.c b/gsupplicant/supplicant.c
+index 8f52c82..9d9c99e 100644
+--- a/gsupplicant/supplicant.c
++++ b/gsupplicant/supplicant.c
+@@ -1018,6 +1018,131 @@ static void set_bss_expiration_age(DBusMessageIter *iter, void *user_data)
+ 				&bss_expiration_age);
+ }
+ 
++/*
++ * wpa_supplicant turns randomisation on for the scan types it is given and
++ * off for the rest, and refuses the whole set if the driver lacks one of
++ * them, so try the widest set first and narrow it down.
++ */
++static const char *const scan_mac_rand_types[][4] = {
++	{ "scan", "sched_scan", "pno", NULL },
++	{ "scan", "sched_scan", NULL },
++	{ "scan", NULL },
++};
++
++struct scan_mac_rand_data {
++	char *path;
++	char *ifname;
++	unsigned int attempt;
++	GSupplicantMacRandCallback callback;
++};
++
++static void scan_mac_rand_data_free(struct scan_mac_rand_data *data)
++{
++	g_free(data->path);
++	g_free(data->ifname);
++	g_free(data);
++}
++
++static void set_scan_mac_rand_params(DBusMessageIter *iter, void *user_data)
++{
++	struct scan_mac_rand_data *data = user_data;
++	const char *const *type = scan_mac_rand_types[data->attempt];
++	/*
++	 * wpa_supplicant combines the mask with the permanent address: bits
++	 * set are kept. Only keep the multicast bit, which the kernel
++	 * requires, so the other 47 bits are new for every scan.
++	 */
++	static const unsigned char mask[6] = { 0x01, 0, 0, 0, 0, 0 };
++	const unsigned char *mask_ptr = mask;
++	DBusMessageIter dict, entry, array;
++
++	dbus_message_iter_open_container(iter, DBUS_TYPE_ARRAY,
++			DBUS_DICT_ENTRY_BEGIN_CHAR_AS_STRING
++			DBUS_TYPE_STRING_AS_STRING
++			DBUS_TYPE_ARRAY_AS_STRING DBUS_TYPE_BYTE_AS_STRING
++			DBUS_DICT_ENTRY_END_CHAR_AS_STRING, &dict);
++
++	for (; *type; type++) {
++		dbus_message_iter_open_container(&dict, DBUS_TYPE_DICT_ENTRY,
++							NULL, &entry);
++		dbus_message_iter_append_basic(&entry, DBUS_TYPE_STRING, type);
++		dbus_message_iter_open_container(&entry, DBUS_TYPE_ARRAY,
++					DBUS_TYPE_BYTE_AS_STRING, &array);
++		dbus_message_iter_append_fixed_array(&array, DBUS_TYPE_BYTE,
++						&mask_ptr, sizeof(mask));
++		dbus_message_iter_close_container(&entry, &array);
++		dbus_message_iter_close_container(&dict, &entry);
++	}
++
++	dbus_message_iter_close_container(iter, &dict);
++}
++
++static int scan_mac_rand_send(struct scan_mac_rand_data *data);
++
++static void set_scan_mac_rand_result(const char *error,
++				DBusMessageIter *iter, void *user_data)
++{
++	struct scan_mac_rand_data *data = user_data;
++	int err = 0;
++
++	if (error) {
++		SUPPLICANT_DBG("%s: scan MAC randomisation set %u refused: %s",
++					data->ifname, data->attempt, error);
++		data->attempt++;
++		if (data->attempt < G_N_ELEMENTS(scan_mac_rand_types)) {
++			err = scan_mac_rand_send(data);
++			if (err == 0)
++				return;
++		} else {
++			err = -EOPNOTSUPP;
++		}
++	}
++
++	if (data->callback)
++		data->callback(err, data->ifname);
++
++	scan_mac_rand_data_free(data);
++}
++
++static int scan_mac_rand_send(struct scan_mac_rand_data *data)
++{
++	/*
++	 * No caller: the reply is always delivered, so data is always
++	 * freed, and only the copied path and name are used, never the
++	 * interface, which may be gone by then.
++	 */
++	return supplicant_dbus_property_set(data->path,
++				SUPPLICANT_INTERFACE ".Interface",
++				"MACAddressRandomizationMask", "a{say}",
++				set_scan_mac_rand_params,
++				set_scan_mac_rand_result, data, NULL);
++}
++
++int g_supplicant_interface_set_scan_mac_randomization(
++					GSupplicantInterface *interface,
++					GSupplicantMacRandCallback callback)
++{
++	struct scan_mac_rand_data *data;
++	int err;
++
++	if (!interface || !interface->path)
++		return -EINVAL;
++
++	data = g_try_new0(struct scan_mac_rand_data, 1);
++	if (!data)
++		return -ENOMEM;
++
++	data->path = g_strdup(interface->path);
++	data->ifname = g_strdup(interface->ifname);
++	data->callback = callback;
++
++	err = scan_mac_rand_send(data);
++	if (err < 0)
++		scan_mac_rand_data_free(data);
++
++	return err;
++}
++
+ int g_supplicant_interface_set_bss_expiration_age(GSupplicantInterface *interface,
+ 					unsigned int bss_expiration_age)
+ {
+@@ -5068,6 +5193,28 @@ static void add_network_mode(DBusMessageIter *dict, GSupplicantSSID *ssid)
+ 				DBUS_TYPE_UINT32, &mode);
+ }
+ 
++static void add_network_mac_addr(DBusMessageIter *dict, GSupplicantSSID *ssid)
++{
++	char value[18];
++	const char *str = value;
++	const unsigned char *a = ssid->mac_value;
++
++	if (!ssid->mac_addr_set)
++		return;
++
++	supplicant_dbus_dict_append_basic(dict, "mac_addr",
++					DBUS_TYPE_UINT32, &ssid->mac_addr);
++
++	if (ssid->mac_addr != G_SUPPLICANT_MAC_ADDR_DEDICATED)
++		return;
++
++	/* wpa_supplicant takes mac_value unquoted, colon separated. */
++	snprintf(value, sizeof(value), "%02x:%02x:%02x:%02x:%02x:%02x",
++					a[0], a[1], a[2], a[3], a[4], a[5]);
++	supplicant_dbus_dict_append_basic(dict, "mac_value",
++					DBUS_TYPE_STRING, &str);
++}
++
+ static void interface_add_network_params(DBusMessageIter *iter, void *user_data)
+ {
+ 	DBusMessageIter dict;
+@@ -5090,6 +5237,8 @@ static void interface_add_network_params(DBusMessageIter *iter, void *user_data)
+ 
+ 	add_network_mode(&dict, ssid);
+ 
++	add_network_mac_addr(&dict, ssid);
++
+ 	add_network_security(&dict, ssid);
+ 
+ 	supplicant_dbus_dict_append_fixed_array(&dict, "ssid",
+diff --git a/plugins/wifi.c b/plugins/wifi.c
+index b57d792..cc329b9 100644
+--- a/plugins/wifi.c
++++ b/plugins/wifi.c
+@@ -60,6 +60,7 @@
+ #include <gsupplicant/gsupplicant.h>
+ 
+ #include "src/shared/util.h"
++#include "src/wifi-mac.h"
+ 
+ #define CLEANUP_TIMEOUT   8	/* in seconds */
+ #define INACTIVE_TIMEOUT  12	/* in seconds */
+@@ -172,6 +173,8 @@ struct wifi_data {
+ 	bool wps_start_deferred;
+ 	char *wps_pin;
+ 	guint wps_timeout;
++	/* The driver lets wpa_supplicant set a per-network address. */
++	bool mac_rand;
+ };
+ 
+ static void clear_wps_state(struct wifi_data *wifi);
+@@ -1553,6 +1556,172 @@ static void finalize_interface_creation(struct wifi_data *wifi)
+ 	start_autoscan(wifi->device);
+ }
+ 
++#define CONF_WIFI_MAC_RANDOMIZATION "WiFiMACRandomization"
++
++static unsigned char mac_secret[WIFI_MAC_SECRET_LEN];
++static bool mac_secret_loaded;
++
++static void mac_secret_clear(void)
++{
++	volatile unsigned char *p = mac_secret;
++	size_t i;
++
++	for (i = 0; i < sizeof(mac_secret); i++)
++		p[i] = 0;
++	mac_secret_loaded = false;
++}
++
++/*
++ * Find out, once per interface and boot, whether its address can be
++ * changed. Done before wpa_supplicant takes the interface, because the
++ * check takes it down for a moment; afterwards the answer stored under
++ * STATEDIR is used, also after connmand restarts.
++ */
++static void wifi_mac_prepare(struct wifi_data *wifi, const char *ifname)
++{
++	unsigned char hwaddr[WIFI_MAC_ADDR_LEN];
++	bool changeable;
++	int err;
++
++	wifi->mac_rand = false;
++
++	if (!connman_setting_get_bool(CONF_WIFI_MAC_RANDOMIZATION) || !ifname)
++		return;
++
++	if (__connman_wifi_mac_hwaddr_load(STATEDIR, ifname, hwaddr,
++						&changeable) == 0) {
++		wifi->mac_rand = changeable;
++		return;
++	}
++
++	err = __connman_wifi_mac_get_hwaddr(ifname, hwaddr);
++	if (err < 0) {
++		connman_warn("%s: cannot read the MAC address (%s), "
++				"using the hardware address", ifname,
++				strerror(-err));
++		return;
++	}
++
++	err = __connman_wifi_mac_probe(ifname);
++	changeable = err == 0;
++	if (!changeable)
++		connman_warn("%s: the driver does not let the MAC address be "
++				"changed (%s), connecting with the hardware "
++				"address", ifname, strerror(-err));
++
++	err = __connman_wifi_mac_hwaddr_save(STATEDIR, ifname, hwaddr,
++							changeable);
++	if (err < 0)
++		connman_warn("%s: cannot store the hardware address: %s",
++						ifname, strerror(-err));
++
++	wifi->mac_rand = changeable;
++}
++
++static void scan_mac_rand_result(int result, const char *ifname)
++{
++	if (result < 0)
++		connman_warn("%s: the driver cannot scan from random "
++				"addresses (%s), scanning with the "
++				"hardware address", ifname ? ifname : "wifi",
++				strerror(-result));
++	else
++		DBG("%s: scanning from random addresses", ifname);
++}
++
++static void wifi_mac_scan_randomization(GSupplicantInterface *interface)
++{
++	int err;
++
++	if (!connman_setting_get_bool(CONF_WIFI_MAC_RANDOMIZATION))
++		return;
++
++	err = g_supplicant_interface_set_scan_mac_randomization(interface,
++							scan_mac_rand_result);
++	if (err < 0)
++		connman_warn("Cannot ask for random scan addresses: %s",
++							strerror(-err));
++}
++
++static const char *mac_security_name(GSupplicantSecurity security)
++{
++	switch (security) {
++	case G_SUPPLICANT_SECURITY_NONE:
++		return "none";
++	case G_SUPPLICANT_SECURITY_WEP:
++		return "wep";
++	case G_SUPPLICANT_SECURITY_PSK:
++		return "psk";
++	case G_SUPPLICANT_SECURITY_IEEE8021X:
++		return "ieee8021x";
++	case G_SUPPLICANT_SECURITY_UNKNOWN:
++		break;
++	}
++
++	return NULL;
++}
++
++/*
++ * Pick the address wpa_supplicant associates with: the network's own one,
++ * or the hardware one if the network opted out. Whenever randomisation
++ * cannot be done, nothing is sent and wpa_supplicant keeps the address it
++ * has, so a connection never fails because of it.
++ */
++static void ssid_init_mac_addr(struct wifi_data *wifi, GSupplicantSSID *ssid,
++					struct connman_network *network)
++{
++	const char *driver, *security;
++	int err;
++
++	ssid->mac_addr_set = FALSE;
++
++	if (!connman_setting_get_bool(CONF_WIFI_MAC_RANDOMIZATION))
++		return;
++
++	if (connman_network_get_bool(network, "WiFi.UseDeviceMAC")) {
++		ssid->mac_addr_set = TRUE;
++		ssid->mac_addr = G_SUPPLICANT_MAC_ADDR_PERMANENT;
++		return;
++	}
++
++	if (!wifi->mac_rand)
++		return;
++
++	/* Only wpa_supplicant's nl80211 driver can change the address. */
++	driver = g_supplicant_interface_get_driver(wifi->interface);
++	if (driver && g_strcmp0(driver, "nl80211") != 0) {
++		connman_warn_once("wpa_supplicant driver %s cannot change "
++				"the MAC address, using the hardware address",
++				driver);
++		return;
++	}
++
++	security = mac_security_name(ssid->security);
++	if (!security || !ssid->ssid || ssid->ssid_len == 0)
++		return;
++
++	if (!mac_secret_loaded) {
++		err = __connman_wifi_mac_secret_get(STORAGEDIR, mac_secret,
++							sizeof(mac_secret));
++		if (err < 0) {
++			connman_warn_once("Cannot read or create %s/%s (%s), "
++					"using the hardware MAC address",
++					STORAGEDIR, WIFI_MAC_SECRET_FILE,
++					strerror(-err));
++			return;
++		}
++		mac_secret_loaded = true;
++	}
++
++	if (__connman_wifi_mac_derive(mac_secret, sizeof(mac_secret),
++					ssid->ssid, ssid->ssid_len, security,
++					ssid->mac_value) < 0)
++		return;
++
++	ssid->mac_addr_set = TRUE;
++	ssid->mac_addr = G_SUPPLICANT_MAC_ADDR_DEDICATED;
++}
++
+ static void interface_create_callback(int result,
+ 					GSupplicantInterface *interface,
+ 							void *user_data)
+@@ -1571,6 +1740,8 @@ static void interface_create_callback(int result,
+ 	wifi->interface = interface;
+ 	g_supplicant_interface_set_data(interface, wifi);
+ 
++	wifi_mac_scan_randomization(interface);
++
+ 	if (g_supplicant_interface_get_ready(interface)) {
+ 		wifi->interface_ready = true;
+ 		finalize_interface_creation(wifi);
+@@ -1613,6 +1784,7 @@ static int wifi_enable(struct connman_device *device)
+ 		return -EINPROGRESS;
+ 
+ 	interface = connman_inet_ifname(index);
++	wifi_mac_prepare(wifi, interface);
+ 	ret = g_supplicant_interface_create(interface, driver, NULL,
+ 						interface_create_callback,
+ 							wifi);
+@@ -2520,6 +2692,7 @@ static int network_connect(struct connman_network *network)
+ 		g_free(ssid);
+ 	} else {
+ 		ssid_init(ssid, network);
++		ssid_init_mac_addr(wifi, ssid, network);
+ 
+ 		wifi->network = connman_network_ref(network);
+ 		wifi->retries = 0;
+@@ -3998,6 +4171,8 @@ static void wifi_exit(void)
+ 	g_supplicant_unregister(&callbacks);
+ 
+ 	connman_network_driver_unregister(&network_driver);
++
++	mac_secret_clear();
+ }
+ 
+ CONNMAN_PLUGIN_DEFINE(wifi, "WiFi interface plugin", VERSION,
+diff --git a/src/main.c b/src/main.c
+index 136202e..5e2eb47 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -38,6 +38,7 @@
+ #include <gdbus.h>
+ 
+ #include "connman.h"
++#include "wifi-mac.h"
+ 
+ #define CONF_ARRAY_SIZE(x) (sizeof(x)/sizeof(x[0]) - 1)
+ 
+@@ -102,6 +103,7 @@ static char *default_blacklist[] = {
+ 
+ static struct {
+ 	bool bg_scan;
++	bool wifi_mac_randomization;
+ 	char **pref_timeservers;
+ 	unsigned int *auto_connect;
+ 	unsigned int *enabled_techs;
+@@ -139,6 +141,7 @@ static struct {
+ 	char *resolv_conf;
+ } connman_settings  = {
+ 	.bg_scan = true,
++	.wifi_mac_randomization = false,
+ 	.pref_timeservers = NULL,
+ 	.auto_connect = NULL,
+ 	.enabled_techs = NULL,
+@@ -178,6 +181,7 @@ static struct {
+ };
+ 
+ #define CONF_BG_SCAN                    "BackgroundScanning"
++#define CONF_WIFI_MAC_RANDOMIZATION     "WiFiMACRandomization"
+ #define CONF_PREF_TIMESERVERS           "FallbackTimeservers"
+ #define CONF_AUTO_CONNECT_TECHS         "DefaultAutoConnectTechnologies"
+ #define CONF_ENABLED_TECHS              "DefaultEnabledTechnologies"
+@@ -216,6 +220,7 @@ static struct {
+ 
+ static const char *supported_options[] = {
+ 	CONF_BG_SCAN,
++	CONF_WIFI_MAC_RANDOMIZATION,
+ 	CONF_PREF_TIMESERVERS,
+ 	CONF_AUTO_CONNECT_TECHS,
+ 	CONF_ENABLED_TECHS,
+@@ -476,6 +481,13 @@ static void parse_config(GKeyFile *config, const char *file)
+ 
+ 	g_clear_error(&error);
+ 
++	boolean = __connman_config_get_bool(config, GENERAL_GROUP,
++					CONF_WIFI_MAC_RANDOMIZATION, &error);
++	if (!error)
++		connman_settings.wifi_mac_randomization = boolean;
++
++	g_clear_error(&error);
++
+ 	timeservers = __connman_config_get_string_list(config, GENERAL_GROUP,
+ 					CONF_PREF_TIMESERVERS, NULL, &error);
+ 	if (!error)
+@@ -1073,6 +1085,9 @@ bool connman_setting_get_bool(const char *key)
+ 	if (g_str_equal(key, CONF_BG_SCAN))
+ 		return connman_settings.bg_scan;
+ 
++	if (g_str_equal(key, CONF_WIFI_MAC_RANDOMIZATION))
++		return connman_settings.wifi_mac_randomization;
++
+ 	if (g_str_equal(key, CONF_ALLOW_HOSTNAME_UPDATES))
+ 		return connman_settings.allow_hostname_updates;
+ 
+@@ -1272,6 +1287,12 @@ int main(int argc, char *argv[])
+ 	__connman_clock_init();
+ 
+ 	__connman_ipconfig_init();
++	/*
++	 * Before rtnl sees the links: a Wi-Fi interface still carrying a
++	 * per-network address from before a restart must not have its
++	 * device, and so its saved services, named after that address.
++	 */
++	__connman_wifi_mac_restore_all(STATEDIR);
+ 	__connman_rtnl_init();
+ 	__connman_task_init();
+ 	__connman_proxy_init();
+diff --git a/src/main.conf b/src/main.conf
+index 3685954..72bba4e 100644
+--- a/src/main.conf
++++ b/src/main.conf
+@@ -25,6 +25,16 @@
+ # the user through a D-Bus call.
+ # BackgroundScanning = true
+ 
++# Connect to each WiFi network with a MAC address of its own instead of
++# the hardware address, and scan from random addresses. The address of a
++# network is locally administered and derived from a secret kept in the
++# storage directory, so it stays the same for that network across
++# connections and reboots. A network can opt out through its
++# UseDeviceMACAddress service property. Where the driver cannot change
++# the address, the hardware address is used.
++# Default value is false.
++# WiFiMACRandomization = false
++
+ # Assume that service gateways also function as timeservers.
+ # UseGatewaysAsTimeservers = false
+ 
+diff --git a/src/service.c b/src/service.c
+index 9ae4a68..41f2a2e 100644
+--- a/src/service.c
++++ b/src/service.c
+@@ -227,6 +227,8 @@ struct connman_service {
+ 	bool do_split_routing;
+ 	bool new_service;
+ 	bool hidden_service;
++	/* WiFi: connect with the hardware MAC, not the network's own one. */
++	bool use_device_mac;
+ 	char *config_file;
+ 	char *config_entry;
+ };
+@@ -825,6 +827,10 @@ static int service_load(struct connman_service *service)
+ 	service->hidden_service = g_key_file_get_boolean(keyfile,
+ 					service->identifier, "Hidden", NULL);
+ 
++	if (service->type == CONNMAN_SERVICE_TYPE_WIFI)
++		service->use_device_mac = g_key_file_get_boolean(keyfile,
++				service->identifier, "UseDeviceMACAddress", NULL);
++
+ done:
+ 	g_key_file_free(keyfile);
+ 
+@@ -996,6 +1002,11 @@ static int service_save(struct connman_service *service)
+ 		g_key_file_set_boolean(keyfile, service->identifier,
+ 				"Hidden", TRUE);
+ 
++	if (service->type == CONNMAN_SERVICE_TYPE_WIFI &&
++			service->use_device_mac)
++		g_key_file_set_boolean(keyfile, service->identifier,
++				"UseDeviceMACAddress", TRUE);
++
+ 	if (service->config_file && strlen(service->config_file) > 0)
+ 		g_key_file_set_string(keyfile, service->identifier,
+ 				"Config.file", service->config_file);
+@@ -4989,6 +5000,18 @@ static void mdns_changed(struct connman_service *service)
+ 			&mdns);
+ }
+ 
++static void use_device_mac_changed(struct connman_service *service)
++{
++	dbus_bool_t val = service->use_device_mac;
++
++	if (!allow_property_changed(service))
++		return;
++
++	connman_dbus_property_changed_basic(service->path,
++			CONNMAN_SERVICE_INTERFACE, "UseDeviceMACAddress",
++			DBUS_TYPE_BOOLEAN, &val);
++}
++
+ static void mdns_configuration_changed(struct connman_service *service)
+ {
+ 	dbus_bool_t mdns_config = service->mdns_config;
+@@ -5332,6 +5355,17 @@ static void append_properties(DBusMessageIter *dict, dbus_bool_t limited,
+ 		if (service->enc_mode)
+ 			connman_dbus_dict_append_basic(dict, "EncryptionMode",
+ 					DBUS_TYPE_STRING, &service->enc_mode);
++
++		/*
++		 * Only offered while networks get their own address, so a
++		 * client can tell whether the choice means anything.
++		 */
++		if (connman_setting_get_bool("WiFiMACRandomization")) {
++			val = service->use_device_mac;
++			connman_dbus_dict_append_basic(dict,
++					"UseDeviceMACAddress",
++					DBUS_TYPE_BOOLEAN, &val);
++		}
+ 	}
+ 
+ 	val = service->favorite;
+@@ -6650,6 +6684,23 @@ static DBusMessage *set_property(DBusConnection *conn,
+ 
+ 		__connman_notifier_proxy_changed(service);
+ 
++		service_save(service);
++	} else if (g_str_equal(name, "UseDeviceMACAddress")) {
++		dbus_bool_t val;
++
++		if (service->type != CONNMAN_SERVICE_TYPE_WIFI)
++			return __connman_error_invalid_property(msg);
++
++		if (type != DBUS_TYPE_BOOLEAN)
++			return __connman_error_invalid_arguments(msg);
++
++		dbus_message_iter_get_basic(&value, &val);
++		if (service->use_device_mac == !!val)
++			return g_dbus_create_reply(msg, DBUS_TYPE_INVALID);
++
++		/* Takes effect from the next connection. */
++		service->use_device_mac = val;
++		use_device_mac_changed(service);
+ 		service_save(service);
+ 	} else if (g_str_equal(name, "mDNS.Configuration")) {
+ 		dbus_bool_t val;
+@@ -7498,6 +7549,12 @@ bool __connman_service_remove(struct connman_service *service)
+ 
+ 	__connman_service_set_favorite(service, false);
+ 
++	/* A forgotten network is a new one: back to its own address. */
++	if (service->use_device_mac) {
++		service->use_device_mac = false;
++		use_device_mac_changed(service);
++	}
++
+ 	__connman_ipconfig_ipv6_reset_privacy(service->ipconfig_ipv6);
+ 
+ 	service_save(service);
+@@ -9763,6 +9820,9 @@ static bool prepare_network(struct connman_service *service)
+ 		if (service->passphrase)
+ 			connman_network_set_string(service->network,
+ 				"WiFi.Passphrase", service->passphrase);
++
++		connman_network_set_bool(service->network, "WiFi.UseDeviceMAC",
++						service->use_device_mac);
+ 		break;
+ 	case CONNMAN_NETWORK_TYPE_ETHERNET:
+ 	case CONNMAN_NETWORK_TYPE_GADGET:
+diff --git a/src/wifi-mac.c b/src/wifi-mac.c
+new file mode 100644
+index 0000000..dce9c5a
+--- /dev/null
++++ b/src/wifi-mac.c
+@@ -0,0 +1,688 @@
++/*
++ *
++ *  Connection Manager
++ *
++ *  Copyright (C) 2026  Herman van Hazendonk <github.com@herrie.org>
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU General Public License version 2 as
++ *  published by the Free Software Foundation.
++ *
++ *  This program is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ *  GNU General Public License for more details.
++ *
++ */
++
++#ifdef HAVE_CONFIG_H
++#include <config.h>
++#endif
++
++#include <errno.h>
++#include <fcntl.h>
++#include <stdio.h>
++#include <string.h>
++#include <unistd.h>
++#include <dirent.h>
++#include <sys/ioctl.h>
++#include <sys/random.h>
++#include <sys/socket.h>
++#include <sys/stat.h>
++#include <net/if.h>
++#include <net/if_arp.h>
++
++#include <glib.h>
++
++#include <connman/log.h>
++
++#include "wifi-mac.h"
++
++/* Domain separation, so the secret cannot be reused for another purpose. */
++static const char derive_label[] = "connman-wifi-mac-v1";
++
++#define HWADDR_FILE_MAX	64
++
++static void secure_zero(void *p, size_t len)
++{
++	volatile unsigned char *v = p;
++
++	while (len--)
++		*v++ = 0;
++}
++
++void __connman_wifi_mac_set_local_unicast(unsigned char *addr)
++{
++	addr[0] = (unsigned char) ((addr[0] | 0x02) & ~0x01);
++}
++
++bool __connman_wifi_mac_is_local_unicast(const unsigned char *addr)
++{
++	return (addr[0] & 0x03) == 0x02;
++}
++
++int __connman_wifi_mac_derive(const unsigned char *secret, size_t secret_len,
++				const unsigned char *ssid, size_t ssid_len,
++				const char *security, unsigned char *addr)
++{
++	unsigned char digest[32];
++	gsize digest_len = sizeof(digest);
++	unsigned char len_byte;
++	GHmac *hmac;
++
++	if (!secret || secret_len == 0 || !ssid || ssid_len == 0 ||
++			ssid_len > 32 || !security || !addr)
++		return -EINVAL;
++
++	hmac = g_hmac_new(G_CHECKSUM_SHA256, secret, secret_len);
++	if (!hmac)
++		return -ENOMEM;
++
++	/*
++	 * label NUL | ssid length | ssid | security: the length byte keeps
++	 * an SSID that ends in a security name from colliding with another.
++	 */
++	g_hmac_update(hmac, (const guchar *) derive_label,
++						sizeof(derive_label));
++	len_byte = (unsigned char) ssid_len;
++	g_hmac_update(hmac, &len_byte, 1);
++	g_hmac_update(hmac, ssid, (gssize) ssid_len);
++	g_hmac_update(hmac, (const guchar *) security,
++						(gssize) strlen(security));
++	g_hmac_get_digest(hmac, digest, &digest_len);
++	g_hmac_unref(hmac);
++
++	memcpy(addr, digest, WIFI_MAC_ADDR_LEN);
++	secure_zero(digest, sizeof(digest));
++
++	__connman_wifi_mac_set_local_unicast(addr);
++
++	return 0;
++}
++
++static int read_full(int fd, unsigned char *buf, size_t len)
++{
++	size_t done = 0;
++
++	while (done < len) {
++		ssize_t n = read(fd, buf + done, len - done);
++
++		if (n < 0) {
++			if (errno == EINTR)
++				continue;
++			return -errno;
++		}
++		if (n == 0)
++			return -EINVAL;
++		done += (size_t) n;
++	}
++
++	return 0;
++}
++
++static int write_full(int fd, const unsigned char *buf, size_t len)
++{
++	size_t done = 0;
++
++	while (done < len) {
++		ssize_t n = write(fd, buf + done, len - done);
++
++		if (n < 0) {
++			if (errno == EINTR)
++				continue;
++			return -errno;
++		}
++		done += (size_t) n;
++	}
++
++	return 0;
++}
++
++/* 0, -ENOENT, or -EINVAL for a file that must not be trusted. */
++static int secret_read(int dfd, unsigned char *secret, size_t len)
++{
++	struct stat st;
++	unsigned char extra;
++	int fd, err;
++
++	fd = openat(dfd, WIFI_MAC_SECRET_FILE,
++			O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
++	if (fd < 0) {
++		if (errno == ENOENT)
++			return -ENOENT;
++		/* ELOOP for a symlink, anything else is no better. */
++		return -EINVAL;
++	}
++
++	if (fstat(fd, &st) < 0 || !S_ISREG(st.st_mode) ||
++			st.st_uid != geteuid() || st.st_nlink != 1 ||
++			(st.st_mode & 0077) != 0 ||
++			st.st_size != (off_t) len) {
++		close(fd);
++		return -EINVAL;
++	}
++
++	err = read_full(fd, secret, len);
++	/* Must be exactly len bytes, even if it grew after the fstat. */
++	if (err == 0 && read(fd, &extra, 1) != 0)
++		err = -EINVAL;
++	close(fd);
++
++	if (err < 0) {
++		secure_zero(secret, len);
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
++static int secret_create(int dfd, unsigned char *secret, size_t len)
++{
++	static const char tmp_name[] = WIFI_MAC_SECRET_FILE ".tmp";
++	size_t done = 0;
++	int fd, err;
++
++	while (done < len) {
++		ssize_t n = getrandom(secret + done, len - done, 0);
++
++		if (n < 0) {
++			if (errno == EINTR)
++				continue;
++			err = -errno;
++			goto fail;
++		}
++		done += (size_t) n;
++	}
++
++	fd = openat(dfd, tmp_name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW |
++						O_CLOEXEC, S_IRUSR | S_IWUSR);
++	if (fd < 0 && errno == EEXIST) {
++		/* Left over from an interrupted attempt. */
++		if (unlinkat(dfd, tmp_name, 0) < 0 && errno != ENOENT) {
++			err = -errno;
++			goto fail;
++		}
++		fd = openat(dfd, tmp_name, O_WRONLY | O_CREAT | O_EXCL |
++				O_NOFOLLOW | O_CLOEXEC, S_IRUSR | S_IWUSR);
++	}
++	if (fd < 0) {
++		err = -errno;
++		goto fail;
++	}
++
++	err = write_full(fd, secret, len);
++	if (err == 0 && fsync(fd) < 0)
++		err = -errno;
++	if (close(fd) < 0 && err == 0)
++		err = -errno;
++	if (err < 0) {
++		unlinkat(dfd, tmp_name, 0);
++		goto fail;
++	}
++
++	/* Replaces a bad file or a symlink itself, never a symlink target. */
++	if (renameat(dfd, tmp_name, dfd, WIFI_MAC_SECRET_FILE) < 0) {
++		err = -errno;
++		unlinkat(dfd, tmp_name, 0);
++		goto fail;
++	}
++
++	if (fsync(dfd) < 0)
++		connman_warn("Cannot sync the directory of %s: %s",
++				WIFI_MAC_SECRET_FILE, g_strerror(errno));
++
++	return 0;
++
++fail:
++	secure_zero(secret, len);
++	return err;
++}
++
++int __connman_wifi_mac_secret_get(const char *dir, unsigned char *secret,
++							size_t secret_len)
++{
++	int dfd, err;
++
++	if (!dir || !secret || secret_len == 0)
++		return -EINVAL;
++
++	dfd = open(dir, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
++	if (dfd < 0) {
++		err = -errno;
++		secure_zero(secret, secret_len);
++		return err;
++	}
++
++	err = secret_read(dfd, secret, secret_len);
++	if (err == -EINVAL)
++		connman_warn("%s/%s is not a private %zu byte file, "
++				"making a new one", dir, WIFI_MAC_SECRET_FILE,
++				secret_len);
++	if (err < 0)
++		err = secret_create(dfd, secret, secret_len);
++
++	close(dfd);
++
++	return err;
++}
++
++static int iface_ioctl(int sk, unsigned long req, struct ifreq *ifr)
++{
++	if (ioctl(sk, req, ifr) < 0)
++		return -errno;
++	return 0;
++}
++
++static int ifreq_init(struct ifreq *ifr, const char *ifname)
++{
++	size_t len;
++
++	if (!ifname)
++		return -EINVAL;
++
++	len = strlen(ifname);
++	if (len == 0 || len >= sizeof(ifr->ifr_name))
++		return -EINVAL;
++
++	memset(ifr, 0, sizeof(*ifr));
++	memcpy(ifr->ifr_name, ifname, len);
++
++	return 0;
++}
++
++static int get_hwaddr(int sk, const char *ifname, unsigned char *addr)
++{
++	struct ifreq ifr;
++	int err;
++
++	err = ifreq_init(&ifr, ifname);
++	if (err < 0)
++		return err;
++
++	err = iface_ioctl(sk, SIOCGIFHWADDR, &ifr);
++	if (err < 0)
++		return err;
++
++	if (ifr.ifr_hwaddr.sa_family != ARPHRD_ETHER)
++		return -EOPNOTSUPP;
++
++	memcpy(addr, ifr.ifr_hwaddr.sa_data, WIFI_MAC_ADDR_LEN);
++
++	return 0;
++}
++
++static int set_hwaddr(int sk, const char *ifname, const unsigned char *addr)
++{
++	struct ifreq ifr;
++	int err;
++
++	err = ifreq_init(&ifr, ifname);
++	if (err < 0)
++		return err;
++
++	ifr.ifr_hwaddr.sa_family = ARPHRD_ETHER;
++	memcpy(ifr.ifr_hwaddr.sa_data, addr, WIFI_MAC_ADDR_LEN);
++
++	return iface_ioctl(sk, SIOCSIFHWADDR, &ifr);
++}
++
++static int get_flags(int sk, const char *ifname, short *flags)
++{
++	struct ifreq ifr;
++	int err;
++
++	err = ifreq_init(&ifr, ifname);
++	if (err < 0)
++		return err;
++
++	err = iface_ioctl(sk, SIOCGIFFLAGS, &ifr);
++	if (err < 0)
++		return err;
++
++	*flags = ifr.ifr_flags;
++
++	return 0;
++}
++
++static int set_flags(int sk, const char *ifname, short flags)
++{
++	struct ifreq ifr;
++	int err;
++
++	err = ifreq_init(&ifr, ifname);
++	if (err < 0)
++		return err;
++
++	ifr.ifr_flags = flags;
++
++	return iface_ioctl(sk, SIOCSIFFLAGS, &ifr);
++}
++
++static int open_ioctl_socket(void)
++{
++	int sk = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
++
++	if (sk < 0)
++		return -errno;
++	return sk;
++}
++
++int __connman_wifi_mac_get_hwaddr(const char *ifname, unsigned char *addr)
++{
++	int sk, err;
++
++	sk = open_ioctl_socket();
++	if (sk < 0)
++		return sk;
++
++	err = get_hwaddr(sk, ifname, addr);
++	close(sk);
++
++	return err;
++}
++
++/* Down, set, back up if it was: what wpa_supplicant's nl80211 driver does. */
++static int change_hwaddr(int sk, const char *ifname,
++					const unsigned char *addr)
++{
++	short flags;
++	int err, up_err = 0;
++
++	err = get_flags(sk, ifname, &flags);
++	if (err < 0)
++		return err;
++
++	if (flags & IFF_UP) {
++		err = set_flags(sk, ifname, (short) (flags & ~IFF_UP));
++		if (err < 0)
++			return err;
++	}
++
++	err = set_hwaddr(sk, ifname, addr);
++
++	if (flags & IFF_UP)
++		up_err = set_flags(sk, ifname, flags);
++
++	return err < 0 ? err : up_err;
++}
++
++int __connman_wifi_mac_set_hwaddr(const char *ifname,
++					const unsigned char *addr)
++{
++	int sk, err;
++
++	sk = open_ioctl_socket();
++	if (sk < 0)
++		return sk;
++
++	err = change_hwaddr(sk, ifname, addr);
++	close(sk);
++
++	return err;
++}
++
++int __connman_wifi_mac_probe(const char *ifname)
++{
++	unsigned char orig[WIFI_MAC_ADDR_LEN], test[WIFI_MAC_ADDR_LEN];
++	short flags;
++	int sk, err, restore_err, up_err = 0;
++
++	sk = open_ioctl_socket();
++	if (sk < 0)
++		return sk;
++
++	err = get_hwaddr(sk, ifname, orig);
++	if (err < 0)
++		goto out;
++
++	if (getrandom(test, sizeof(test), 0) != (ssize_t) sizeof(test)) {
++		err = -EIO;
++		goto out;
++	}
++	__connman_wifi_mac_set_local_unicast(test);
++	if (memcmp(test, orig, sizeof(test)) == 0)
++		test[5] ^= 0x01;
++
++	err = get_flags(sk, ifname, &flags);
++	if (err < 0)
++		goto out;
++
++	if (flags & IFF_UP) {
++		err = set_flags(sk, ifname, (short) (flags & ~IFF_UP));
++		if (err < 0)
++			goto out;
++	}
++
++	err = set_hwaddr(sk, ifname, test);
++	if (err == 0) {
++		restore_err = set_hwaddr(sk, ifname, orig);
++		if (restore_err < 0) {
++			connman_error("Cannot put the address of %s back: %s",
++					ifname, g_strerror(-restore_err));
++			err = restore_err;
++		}
++	}
++
++	if (flags & IFF_UP)
++		up_err = set_flags(sk, ifname, flags);
++	if (up_err < 0)
++		connman_warn("Cannot bring %s back up: %s", ifname,
++						g_strerror(-up_err));
++
++out:
++	close(sk);
++	return err;
++}
++
++static bool valid_ifname(const char *ifname)
++{
++	size_t len;
++
++	if (!ifname)
++		return false;
++
++	len = strlen(ifname);
++	if (len == 0 || len >= IFNAMSIZ)
++		return false;
++
++	if (strchr(ifname, '/') || g_str_equal(ifname, ".") ||
++			g_str_equal(ifname, ".."))
++		return false;
++
++	return true;
++}
++
++int __connman_wifi_mac_hwaddr_save(const char *dir, const char *ifname,
++				const unsigned char *hwaddr, bool changeable)
++{
++	char name[sizeof(WIFI_MAC_HWADDR_PREFIX) + IFNAMSIZ];
++	char tmp[sizeof(name) + 4];
++	char line[HWADDR_FILE_MAX];
++	int dfd, fd, len, err;
++
++	if (!dir || !valid_ifname(ifname) || !hwaddr)
++		return -EINVAL;
++
++	/* Cannot truncate: ifname is shorter than IFNAMSIZ. */
++	if (snprintf(name, sizeof(name), "%s%s", WIFI_MAC_HWADDR_PREFIX,
++					ifname) >= (int) sizeof(name) ||
++			snprintf(tmp, sizeof(tmp), "%s.tmp", name) >=
++							(int) sizeof(tmp))
++		return -EINVAL;
++
++	len = snprintf(line, sizeof(line),
++			"%02x:%02x:%02x:%02x:%02x:%02x %d\n",
++			hwaddr[0], hwaddr[1], hwaddr[2],
++			hwaddr[3], hwaddr[4], hwaddr[5], changeable ? 1 : 0);
++	if (len < 0 || (size_t) len >= sizeof(line))
++		return -EINVAL;
++
++	dfd = open(dir, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
++	if (dfd < 0 && errno == ENOENT && mkdir(dir, S_IRWXU |
++				S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH) == 0)
++		dfd = open(dir, O_RDONLY | O_DIRECTORY | O_NOFOLLOW |
++								O_CLOEXEC);
++	if (dfd < 0)
++		return -errno;
++
++	unlinkat(dfd, tmp, 0);
++	fd = openat(dfd, tmp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW |
++				O_CLOEXEC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
++	if (fd < 0) {
++		err = -errno;
++		goto out;
++	}
++
++	err = write_full(fd, (const unsigned char *) line, (size_t) len);
++	if (close(fd) < 0 && err == 0)
++		err = -errno;
++
++	if (err == 0 && renameat(dfd, tmp, dfd, name) < 0)
++		err = -errno;
++	if (err < 0)
++		unlinkat(dfd, tmp, 0);
++
++out:
++	close(dfd);
++	return err;
++}
++
++static int parse_hwaddr_line(const char *line, unsigned char *hwaddr,
++							bool *changeable)
++{
++	unsigned int b[WIFI_MAC_ADDR_LEN], flag;
++	char end;
++	int i;
++
++	if (sscanf(line, "%2x:%2x:%2x:%2x:%2x:%2x %1u%c",
++			&b[0], &b[1], &b[2], &b[3], &b[4], &b[5],
++			&flag, &end) != 8 || end != '\n' || flag > 1)
++		return -EINVAL;
++
++	for (i = 0; i < WIFI_MAC_ADDR_LEN; i++)
++		hwaddr[i] = (unsigned char) b[i];
++	*changeable = flag == 1;
++
++	return 0;
++}
++
++static int hwaddr_load_at(int dfd, const char *name, unsigned char *hwaddr,
++							bool *changeable)
++{
++	char line[HWADDR_FILE_MAX];
++	struct stat st;
++	ssize_t n;
++	int fd;
++
++	fd = openat(dfd, name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
++	if (fd < 0)
++		return errno == ENOENT ? -ENOENT : -EINVAL;
++
++	if (fstat(fd, &st) < 0 || !S_ISREG(st.st_mode) ||
++			st.st_uid != geteuid() || (st.st_mode & 0022) != 0) {
++		close(fd);
++		return -EINVAL;
++	}
++
++	n = read(fd, line, sizeof(line) - 1);
++	close(fd);
++	if (n <= 0)
++		return -EINVAL;
++	line[n] = '\0';
++
++	return parse_hwaddr_line(line, hwaddr, changeable);
++}
++
++int __connman_wifi_mac_hwaddr_load(const char *dir, const char *ifname,
++				unsigned char *hwaddr, bool *changeable)
++{
++	char name[sizeof(WIFI_MAC_HWADDR_PREFIX) + IFNAMSIZ];
++	int dfd, err;
++
++	if (!dir || !valid_ifname(ifname) || !hwaddr || !changeable)
++		return -EINVAL;
++
++	if (snprintf(name, sizeof(name), "%s%s", WIFI_MAC_HWADDR_PREFIX,
++					ifname) >= (int) sizeof(name))
++		return -EINVAL;
++
++	dfd = open(dir, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
++	if (dfd < 0)
++		return errno == ENOENT ? -ENOENT : -errno;
++
++	err = hwaddr_load_at(dfd, name, hwaddr, changeable);
++	close(dfd);
++
++	return err;
++}
++
++int __connman_wifi_mac_restore_all(const char *dir)
++{
++	const size_t prefix_len = strlen(WIFI_MAC_HWADDR_PREFIX);
++	struct dirent *d;
++	DIR *dirp;
++	int dfd, restored = 0;
++
++	if (!dir)
++		return 0;
++
++	dfd = open(dir, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
++	if (dfd < 0)
++		return 0;
++
++	dirp = fdopendir(dfd);
++	if (!dirp) {
++		close(dfd);
++		return 0;
++	}
++	/* Owned by dirp from here on. */
++	dfd = dirfd(dirp);
++	if (dfd < 0) {
++		closedir(dirp);
++		return 0;
++	}
++
++	while ((d = readdir(dirp))) {
++		unsigned char hwaddr[WIFI_MAC_ADDR_LEN], cur[WIFI_MAC_ADDR_LEN];
++		const char *ifname;
++		bool changeable;
++		int err;
++
++		if (strncmp(d->d_name, WIFI_MAC_HWADDR_PREFIX, prefix_len) != 0)
++			continue;
++
++		ifname = d->d_name + prefix_len;
++		if (!valid_ifname(ifname) || g_str_has_suffix(ifname, ".tmp"))
++			continue;
++
++		if (hwaddr_load_at(dfd, d->d_name, hwaddr,
++							&changeable) < 0)
++			continue;
++
++		/* Gone, or not ours to touch. */
++		if (__connman_wifi_mac_get_hwaddr(ifname, cur) < 0)
++			continue;
++
++		/*
++		 * Only an address of the kind we set is put back: anything
++		 * else changed it after we looked, and knows better.
++		 */
++		if (!changeable || memcmp(cur, hwaddr, sizeof(cur)) == 0 ||
++				!__connman_wifi_mac_is_local_unicast(cur))
++			continue;
++
++		err = __connman_wifi_mac_set_hwaddr(ifname, hwaddr);
++		if (err < 0) {
++			connman_warn("Cannot restore the address of %s: %s",
++						ifname, g_strerror(-err));
++			continue;
++		}
++
++		connman_info("Restored the hardware address of %s", ifname);
++		restored++;
++	}
++
++	closedir(dirp);
++
++	return restored;
++}
+diff --git a/src/wifi-mac.h b/src/wifi-mac.h
+new file mode 100644
+index 0000000..29c7119
+--- /dev/null
++++ b/src/wifi-mac.h
+@@ -0,0 +1,106 @@
++/*
++ *
++ *  Connection Manager
++ *
++ *  Copyright (C) 2026  Herman van Hazendonk <github.com@herrie.org>
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU General Public License version 2 as
++ *  published by the Free Software Foundation.
++ *
++ *  This program is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ *  GNU General Public License for more details.
++ *
++ */
++
++#ifndef __CONNMAN_WIFI_MAC_H
++#define __CONNMAN_WIFI_MAC_H
++
++#include <stdbool.h>
++#include <stddef.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/*
++ * Per-network Wi-Fi MAC addresses.
++ *
++ * Every network gets its own locally administered unicast address,
++ * HMAC-SHA256(device secret, network) truncated to six bytes. The secret
++ * is 32 random bytes made on first use and kept in the storage directory,
++ * so a network sees the same address on every connection and after every
++ * reboot, while two networks cannot link the device by its address.
++ */
++
++#define WIFI_MAC_ADDR_LEN	6
++#define WIFI_MAC_SECRET_LEN	32
++#define WIFI_MAC_SECRET_FILE	"wifi-mac.secret"
++#define WIFI_MAC_HWADDR_PREFIX	"wifi-hwaddr-"
++
++/* Make addr a locally administered (0x02 set) unicast (0x01 clear) one. */
++void __connman_wifi_mac_set_local_unicast(unsigned char *addr);
++bool __connman_wifi_mac_is_local_unicast(const unsigned char *addr);
++
++/*
++ * Derive the address for one network. security is the canonical
++ * connman name ("none", "wep", "psk", "ieee8021x"), so WPA and WPA2/WPA3
++ * variants of the same network keep one address.
++ * Returns 0, or -EINVAL on bad arguments.
++ */
++int __connman_wifi_mac_derive(const unsigned char *secret, size_t secret_len,
++				const unsigned char *ssid, size_t ssid_len,
++				const char *security, unsigned char *addr);
++
++/*
++ * Load the device secret from dir/WIFI_MAC_SECRET_FILE, creating it when
++ * it is missing. A file that is not a regular 0600 file of the right size
++ * owned by us (or is a symlink) is replaced, never followed or trusted.
++ * Returns 0, or a negative errno; on failure secret is zeroed.
++ */
++int __connman_wifi_mac_secret_get(const char *dir, unsigned char *secret,
++							size_t secret_len);
++
++/*
++ * Check whether the driver lets us change the address of ifname, the
++ * way wpa_supplicant does it (interface down, SIOCSIFHWADDR, up), by
++ * setting a throw-away address and putting the old one back.
++ * Returns 0 when it can, a negative errno otherwise.
++ */
++int __connman_wifi_mac_probe(const char *ifname);
++
++/*
++ * Remember the address ifname has now, before any randomisation, and
++ * whether it can be changed. Kept under dir (a tmpfs, so per boot).
++ */
++int __connman_wifi_mac_hwaddr_save(const char *dir, const char *ifname,
++				const unsigned char *hwaddr, bool changeable);
++
++/*
++ * Read back what __connman_wifi_mac_hwaddr_save() stored for ifname.
++ * Returns 0, -ENOENT when nothing is stored, or another negative errno.
++ */
++int __connman_wifi_mac_hwaddr_load(const char *dir, const char *ifname,
++				unsigned char *hwaddr, bool *changeable);
++
++/*
++ * Put the remembered hardware address back on every interface that still
++ * carries a randomised one, which only happens when connmand restarts
++ * while wpa_supplicant keeps the interface. Call it before rtnl starts,
++ * so that the device and its services keep their hardware identity.
++ * Returns the number of interfaces restored.
++ */
++int __connman_wifi_mac_restore_all(const char *dir);
++
++/* Read and set the current address of ifname. */
++int __connman_wifi_mac_get_hwaddr(const char *ifname, unsigned char *addr);
++int __connman_wifi_mac_set_hwaddr(const char *ifname,
++					const unsigned char *addr);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* __CONNMAN_WIFI_MAC_H */

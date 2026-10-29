@@ -21,6 +21,12 @@ SRC_URI += "file://0006-service-expose-the-access-point-behind-a-WiFi-service.pa
 # instead of the machine name.
 SRC_URI += "file://0007-dhcp-add-DHCPHostname-to-send-a-generic-host-name.patch"
 
+# WiFiMACRandomization in main.conf (connman-conf): join each Wi-Fi network
+# with a stable address of its own, scan from random ones, fall back to the
+# hardware address where the driver refuses. UseDeviceMACAddress per service
+# opts a network out.
+SRC_URI += "file://0008-wifi-give-every-network-its-own-stable-MAC-address.patch"
+
 # See connman-vpn.service.d/luneos-caps.conf for why: upstream's
 # CapabilityBoundingSet on connman-vpn.service is missing CAP_SYS_ADMIN and
 # CAP_DAC_OVERRIDE, which the l2tp plugin's client-side pppd needs to open
