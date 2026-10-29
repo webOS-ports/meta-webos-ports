@@ -25,6 +25,7 @@ SRC_URI:append = " \
   file://ofono.service \
   file://ofono-halium.service \
   file://70-ofono-modem.rules \
+  file://ofono.service.d/luneos-hardening.conf \
 "
 
 # Series that lets out-of-tree plugins supply atom drivers again, and that
@@ -95,6 +96,10 @@ do_install:append() {
         install -d ${D}${sbindir}
         install -m 0755 ${UNPACKDIR}/ofono-binder-wait.sh ${D}${sbindir}/ofono-binder-wait.sh
     fi
+
+    # Sandbox for both units; see the file for what ofonod still needs.
+    install -D -m 0644 ${UNPACKDIR}/ofono.service.d/luneos-hardening.conf \
+        ${D}${systemd_unitdir}/system/ofono.service.d/luneos-hardening.conf
 
     if [ -e ${UNPACKDIR}/70-ofono-modem.rules ]; then
         # Install udev rule for mainline modem
