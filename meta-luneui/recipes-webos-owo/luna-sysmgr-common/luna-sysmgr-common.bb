@@ -10,7 +10,7 @@ DEPENDS += "qtbase"
 
 PV = "3.0.0-4+git"
 
-SRCREV = "3e18f062b06bc598ed0942404b8f0b8a14bfdb75"
+SRCREV = "f90277381c1257df3b8d5182831c884404683e4c"
 
 # PV carries no SRCREV, so a revision bump alone leaves PKGV untouched and opkg
 # sees no upgrade on the device. Bump PR on every SRCREV move.

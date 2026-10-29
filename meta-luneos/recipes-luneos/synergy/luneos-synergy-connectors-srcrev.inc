@@ -11,7 +11,5 @@
 # branch only while LuneOS needs that pull request before it is merged. Set it back to main, with
 # LSC_SRCREV on the merge, once it is in.
 #
-# Now: webOS-ports/luneos-synergy-connectors#10 (herrie/voip-calls), the Teams and Signal call
-# media engines that teams-media and signal-call-media build.
-LSC_BRANCH = "herrie/voip-calls"
-LSC_SRCREV = "b6c0050ff9741058ae29c86b1a2fd1f51b161cc5"
+LSC_BRANCH = "main"
+LSC_SRCREV = "5b7468e3e86123eff18a97af3b4afd89c7010a5c"

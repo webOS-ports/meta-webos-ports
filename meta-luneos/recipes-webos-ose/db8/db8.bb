@@ -22,7 +22,7 @@ VIRTUAL-RUNTIME_bash ?= "bash"
 RDEPENDS:${PN}:append:class-target = " ${VIRTUAL-RUNTIME_stat} ${VIRTUAL-RUNTIME_bash}"
 RDEPENDS:${PN}-tests:append:class-target = " ${VIRTUAL-RUNTIME_bash}"
 
-SRCREV = "7207ed5e3656cad0c1888ec2ae6957db84648a97"
+SRCREV = "4fa43ebe507e3ceaf08a1056dd0d6d08ec023c6f"
 
 PV = "3.2.0-33"
 
