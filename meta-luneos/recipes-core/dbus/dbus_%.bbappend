@@ -37,3 +37,12 @@ do_install:append() {
 }
 
 FILES:${PN} += "${bindir} ${systemd_unitdir}"
+
+# oe-core installs the system bus activation helper 4755 root:messagebus.
+# Upstream dbus asks for 4750 (meson_post_install.py), so that only the bus
+# daemon (group messagebus) can execute it, not every local user.
+do_install:append() {
+    if [ -e ${D}${libexecdir}/dbus-daemon-launch-helper ]; then
+        chmod 4750 ${D}${libexecdir}/dbus-daemon-launch-helper
+    fi
+}
