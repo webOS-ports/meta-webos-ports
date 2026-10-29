@@ -19,9 +19,15 @@ dirs755 += " \
     ${webos_preferencesdir} \
 "
 
-# webOS expects this directory to be writeable by all (because it's typically
-# been mounted on a VFAT partition, which doesn't enforce permissions).
-dirs777 = " \
+# The user data directory. webOS shipped it 0777 because it used to be a VFAT
+# partition, which does not enforce permissions; on LuneOS it is ext4 (Halium
+# bind-mounts $datadir/userdata here) or simply part of /. Its writers are root
+# (umtprd, obexd, LunaDownloadMgr, SAM-launched apps) plus the "media" group
+# (wam, mediaindexer), so it is 0775 root:media - set at boot by
+# luneos-media-internal.conf below, because the group is not known to pseudo
+# here. "Other" keeps read access: audiod runs as "audio" and plays .wav files
+# that callers name by path, so 0770 would break custom sounds kept there.
+dirs775 = " \
     ${webos_mountablestoragedir} \
 "
 
@@ -30,8 +36,8 @@ do_install:prepend() {
     for d in ${dirs700}; do
         install -v -m 0700 -d ${D}$d
     done
-    for d in ${dirs777}; do
-        install -v -m 0777 -d ${D}$d
+    for d in ${dirs775}; do
+        install -v -m 0775 -d ${D}$d
     done
 }
 
@@ -43,6 +49,13 @@ do_install:append() {
     touch ${D}/opt/.keep
 
     generate_fstab_entries >> ${D}${sysconfdir}/fstab
+
+    # tmpfiles "d" also fixes the mode and owner of an existing directory, so
+    # devices that ran a 0777 image, and the Halium bind mount, get it too.
+    install -d ${D}${nonarch_libdir}/tmpfiles.d
+    for d in ${dirs775}; do
+        echo "d $d 0775 root media -"
+    done > ${D}${nonarch_libdir}/tmpfiles.d/luneos-media-internal.conf
 
     bbnote "Ensuring that fstab has exactly one record per mount-point"
     local collisions
