@@ -9,7 +9,9 @@ inherit webos_filesystem_paths
 inherit webos_system_bus
 
 PV = "0.1.0+git"
-SRCREV = "65588c2d9c74a89d794fb7b3ea2d8da5df1b9921"
+SRCREV = "64a95af9429589ef6e206634415a9e7c7036e808"
+# 64a95af9 is on herrie/devmode-node (org.webosports.service.devmode PR #6), not yet merged into master; back to that branch once it is.
+WEBOS_GIT_PARAM_BRANCH = "herrie/devmode-node"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 

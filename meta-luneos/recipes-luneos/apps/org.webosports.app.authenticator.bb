@@ -4,7 +4,9 @@ LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=db37b6ead2dec60580595736ff983452"
 
 PV = "1.0.0+git"
-SRCREV = "b696445e9d80d01d59518a45b09f722a8ef51f28"
+SRCREV = "b85bb2959ef22aa8fc6d50e63d230ab9c55d4edc"
+# b85bb295 is on herrie/lc-shared-parts (org.webosports.app.authenticator PR #3), not yet merged into master; back to that branch once it is.
+WEBOS_GIT_PARAM_BRANCH = "herrie/lc-shared-parts"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 

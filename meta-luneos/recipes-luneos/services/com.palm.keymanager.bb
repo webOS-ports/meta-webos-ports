@@ -12,7 +12,9 @@ inherit webos_filesystem_paths
 inherit webos_system_bus
 
 PV = "0.1.0+git"
-SRCREV = "98f27e9714a7fbcd422a22569d57cd767079f2c4"
+SRCREV = "a6f1137cef7b6583e8dd174bdd4a1f31620efd50"
+# a6f1137c is on herrie/keymanager-node (keymanager PR #17), not yet merged into master; back to that branch once it is.
+WEBOS_GIT_PARAM_BRANCH = "herrie/keymanager-node"
 
 WEBOS_REPO_NAME = "keymanager"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"

@@ -10,7 +10,9 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=db37b6ead2dec60580595736ff983452 \
 "
 
 PV = "0.1.0+git"
-SRCREV = "e96defe59f6a925d74184a9987e5cda5933a0505"
+SRCREV = "349e5cbd87f3c4ce33a26213785e7e4a18744501"
+# 349e5cbd is on herrie/documents-list (org.webosports.app.documents PR #6), not yet merged into master; back to that branch once it is.
+WEBOS_GIT_PARAM_BRANCH = "herrie/documents-list"
 
 SERVICE_NAME = "org.webosports.app.documents.service"
 
