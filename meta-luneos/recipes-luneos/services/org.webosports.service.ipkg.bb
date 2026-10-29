@@ -3,7 +3,7 @@ SECTION = "webos/services"
 LICENSE = "GPL-2.0-or-later"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=eb723b61539feef013de476e68b5c50a"
 
-DEPENDS = "luna-service2 glib-2.0 json-c"
+DEPENDS = "luna-service2 glib-2.0 json-c zlib"
 
 PV = "2.0.0-3+git"
 SRCREV = "074b3ad798e4ce9a3738bfb370180a4faa57f572"
@@ -35,8 +35,13 @@ pkg_postinst:${PN}() {
     # Remove all list database cache files
     rm -f $D$APPS/${localstatedir}/lib/opkg/lists/*
 
-    # Install webosports all-arch feeds
-    echo "src/gz webosports http://feeds.webos-ports.org/webos-ports/all" > $D$APPS/${sysconfdir}/opkg/webos-ports.conf
+    # The webosports all-arch feed. It was fetched over plain HTTP and opkg
+    # does not check feed signatures (see LUNEOS_FEED_SIGNED in the opkg
+    # bbappend), so anyone on the path could hand the device packages. Its
+    # host feeds.webos-ports.org has no DNS record at the moment, so it is
+    # shipped disabled, with an https URL for when the host comes back.
+    rm -f $D$APPS/${sysconfdir}/opkg/webos-ports.conf
+    echo "src/gz webosports https://feeds.webos-ports.org/webos-ports/all" > $D$APPS/${sysconfdir}/opkg/webos-ports.conf.disabled
 
     # Add additional feeds which are disabled by default and NOT SUPPORTED by webOS-ports
     # ports / LuneOS. The user has to turn them on manually to use them.
