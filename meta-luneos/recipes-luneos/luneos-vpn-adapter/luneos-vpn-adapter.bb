@@ -16,11 +16,12 @@ RDEPENDS:${PN} += "connman-vpn"
 # technologies, so recommend the full set rather than letting the image decide
 # silently. They are RRECOMMENDS on connman as well; listing them here means
 # removing this service does not quietly take the plugins with it.
+# connman-plugin-vpn-vpnc (IKEv1 only) and -pptp are left out on purpose: they
+# are in the feed, and the service offers them once someone installs them.
 RRECOMMENDS:${PN} += " \
     connman-plugin-vpn-wireguard \
     connman-plugin-vpn-openvpn \
     connman-plugin-vpn-openconnect \
-    connman-plugin-vpn-vpnc \
     connman-plugin-vpn-l2tp \
 "
 
