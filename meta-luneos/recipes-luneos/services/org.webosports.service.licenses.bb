@@ -1,7 +1,7 @@
 SUMMARY = "License management service for the webOS ports project"
 SECTION = "webos/services"
-LICENSE = "GPL-2.0-or-later"
-LIC_FILES_CHKSUM = "file://COPYING;md5=eb723b61539feef013de476e68b5c50a"
+LICENSE = "GPL-3.0-or-later"
+LIC_FILES_CHKSUM = "file://COPYING;md5=1ebbd3e34237af26da5dc08a4e440464"
 
 inherit webos_ports_repo
 inherit webos_system_bus
@@ -21,7 +21,9 @@ do_install() {
 
     SERVICE_DIR="${PN}"
     install -d ${D}${PALM_DIR}/services/$SERVICE_DIR/
-    cp -vf ${S}/*.js* ${D}${PALM_DIR}/services/$SERVICE_DIR/
+    # The Node 22 service, which run-js-service starts from its package.json
+    cp -vf ${S}/package.json ${S}/service.js ${D}${PALM_DIR}/services/$SERVICE_DIR/
+    cp -vr ${S}/lib ${D}${PALM_DIR}/services/$SERVICE_DIR/
     
     # Install the ACG configuration
     install -d ${D}${webos_sysbus_servicedir}
