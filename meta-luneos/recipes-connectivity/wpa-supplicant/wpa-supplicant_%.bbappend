@@ -22,22 +22,6 @@ do_configure:append() {
     echo "CONFIG_DEBUG_SYSLOG=y" >> ${B}/wpa_supplicant/.config
     echo "CONFIG_DEBUG_SYSLOG_FACILITY=LOG_DAEMON" >> ${B}/wpa_supplicant/.config
 
-    # P2P config.
-    #
-    # UNPACKDIR, not WORKDIR: oe-core installs ${UNPACKDIR}/wpa_supplicant.conf-sane
-    # as /etc/wpa_supplicant.conf, and SRC_URI files stopped landing in WORKDIR. So
-    # these appends were creating a second file that nothing installs, and every one
-    # of these settings has been silently missing from the image - the device gets
-    # the stock oe-core config with no bss_max_count, no manufacturer, no P2P
-    # identity at all.
-    echo "bss_max_count=400" >> ${UNPACKDIR}/wpa_supplicant.conf-sane
-    echo "max_num_sta=2" >> ${UNPACKDIR}/wpa_supplicant.conf-sane
-    echo "manufacturer=LGE" >> ${UNPACKDIR}/wpa_supplicant.conf-sane
-    echo "model_name=webOS" >> ${UNPACKDIR}/wpa_supplicant.conf-sane
-    echo "model_number=webOS" >> ${UNPACKDIR}/wpa_supplicant.conf-sane
-    echo "device_name=webOS" >> ${UNPACKDIR}/wpa_supplicant.conf-sane
-    echo "serial_number=webOS" >> ${UNPACKDIR}/wpa_supplicant.conf-sane
-
     # Enable P2P (aka WiFi direct) support
     echo "CONFIG_P2P=y" >> ${B}/wpa_supplicant/.config
     echo "CONFIG_AP=y" >> ${B}/wpa_supplicant/.config
@@ -52,6 +36,26 @@ do_configure:append() {
 }
 
 do_install:append() {
+    # P2P/WPS settings, added to the /etc/wpa_supplicant.conf oe-core installs
+    # from wpa_supplicant.conf-sane. Done here rather than by appending to the
+    # unpacked file in do_configure, which added another copy of every line
+    # each time do_configure ran again. The WPS identity says LuneOS rather
+    # than pretending to be an LGE webOS device.
+    #
+    # Also drop oe-core's catch-all "network={ key_mgmt=NONE }" block: with no
+    # ssid it matches every open network, so wpa_supplicant would join any
+    # rogue open access point if this file were ever loaded. connman runs
+    # wpa_supplicant without -c and creates its interfaces over D-Bus without
+    # a ConfigFile, so the file is dormant today, but it must not be a trap.
+    conf=${D}${sysconfdir}/wpa_supplicant.conf
+    sed -i '/^network={/,/^}/d' $conf
+    if grep -q '^network=' $conf; then
+        bbfatal "wpa_supplicant.conf: could not remove the open network block"
+    fi
+    printf '%s\n' bss_max_count=400 max_num_sta=2 manufacturer=LuneOS \
+        model_name=LuneOS model_number=LuneOS device_name=LuneOS \
+        serial_number=LuneOS >> $conf
+
     # Remove the wpa_supplicant.service from upstream, but be aware that we're still
     # keeping upstream wpa_supplicant-nl80211@.service wpa_supplicant@.service  wpa_supplicant-wired@.service
     rm -vf ${D}${systemd_unitdir}/system/wpa_supplicant.service
