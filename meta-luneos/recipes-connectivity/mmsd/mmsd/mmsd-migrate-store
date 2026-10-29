@@ -1,0 +1,118 @@
+#!/bin/sh
+# Move the message store that mmsd kept while it ran as root into the home
+# of the mmsd user. Runs as root from mmsd.service (ExecStartPre=+) before
+# every start, so it has to be idempotent: once the old store is gone it
+# does nothing.
+#
+# mmsd keeps its store in $HOME/.mms. As User=root, systemd gave it
+# HOME=/root; builds from before systemd synthesised the root user used the
+# passwd entry, /home/root. Now HOME is /var/lib/mmsd.
+#
+# Data is never removed before the copy is complete: the store is copied to
+# a staging directory next to the target, compared, chowned and renamed into
+# place, and only then is the old store removed. Any failure leaves the old
+# store as it was, and mmsd starts with an empty store; the next start tries
+# again. Symlinks are refused at the source, the target and the state
+# directory, and a source tree that holds anything but regular files and
+# directories is left alone.
+#
+# MMSD_MIGRATE_ROOT (a prefix for every path) and MMSD_USER exist for the
+# test script.
+
+set -u
+
+root=${MMSD_MIGRATE_ROOT:-}
+user=${MMSD_USER:-mmsd}
+state="$root/var/lib/mmsd"
+target="$state/.mms"
+staging="$state/.mms.migrating"
+
+# stdout: mmsd.service sends stderr to /dev/null.
+log() {
+    echo "mmsd-migrate-store: $*"
+}
+
+# Remove our own partial copy; it is only ever a copy of a store that is
+# still in place.
+drop_staging() {
+    if [ -L "$staging" ]; then
+        log "$staging is a symlink, not removing it"
+        return 1
+    fi
+    rm -rf -- "$staging"
+}
+
+migrate() {
+    src=$1
+
+    if [ -L "$src" ]; then
+        log "$src is a symlink, not migrating it"
+        return 1
+    fi
+    [ -d "$src" ] || return 0
+
+    if [ -L "$state" ] || [ -L "$target" ]; then
+        log "$state or $target is a symlink, not migrating $src"
+        return 1
+    fi
+
+    odd=$(find "$src" ! -type f ! -type d -print 2>/dev/null | head -n 1)
+    if [ -n "$odd" ]; then
+        log "$src holds $odd, which is not a regular file or directory; not migrating it"
+        return 1
+    fi
+
+    if [ -e "$target" ]; then
+        if [ -d "$target" ] && rmdir -- "$target" 2>/dev/null; then
+            : # an empty store from a first start without migration
+        else
+            log "$target already holds a store; leaving $src in place"
+            return 1
+        fi
+    fi
+
+    if [ ! -d "$state" ]; then
+        if ! { mkdir -p -- "$state" && chown -- "$user:$user" "$state" && chmod 0700 "$state"; }; then
+            log "cannot create $state"
+            return 1
+        fi
+    fi
+
+    if [ -e "$staging" ] || [ -L "$staging" ]; then
+        drop_staging || return 1
+    fi
+
+    if ! cp -a -- "$src" "$staging"; then
+        log "copying $src failed; it is left in place"
+        drop_staging
+        return 1
+    fi
+    if ! diff -r -- "$src" "$staging" >/dev/null; then
+        log "the copy of $src differs from it; it is left in place"
+        drop_staging
+        return 1
+    fi
+    if ! chown -hR -- "$user:$user" "$staging" || ! chmod 0700 "$staging"; then
+        log "cannot give the copy of $src to $user; it is left in place"
+        drop_staging
+        return 1
+    fi
+    if ! mv -T -- "$staging" "$target"; then
+        log "cannot move the copy of $src to $target; it is left in place"
+        drop_staging
+        return 1
+    fi
+
+    if ! rm -rf -- "$src"; then
+        log "migrated $src to $target, but could not remove $src"
+        return 1
+    fi
+    log "migrated $src to $target"
+    return 0
+}
+
+migrate "$root/root/.mms"
+migrate "$root/home/root/.mms"
+
+# mmsd must start even if the old store could not be moved.
+exit 0
