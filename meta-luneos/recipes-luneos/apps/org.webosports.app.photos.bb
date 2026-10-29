@@ -10,6 +10,8 @@ inherit webos_filesystem_paths
 inherit webos_application
 
 PV = "0.0.1+git"
-SRCREV = "0ab334990fa043d5bac36ea6e271549050a802b8"
+SRCREV = "58edaee3195cb4f974a2e914f39c86cde8d48f83"
+# 58edaee3 is on herrie/photos-qml (org.webosports.app.photos PR #5), not yet merged into master; back to that branch once it is.
+WEBOS_GIT_PARAM_BRANCH = "herrie/photos-qml"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
