@@ -4,6 +4,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 SRC_URI += "file://shutdown-timeouts.conf"
 SRC_URI += "file://logind.conf"
 SRC_URI += "file://journald-size.conf"
+SRC_URI += "file://luneos-hardening.conf"
 
 do_install:append() {
     install -D -m0644 ${S}/shutdown-timeouts.conf \
@@ -15,6 +16,10 @@ do_install:append() {
     # Cap the journal; see the file for the measurements behind it.
     install -D -m0644 ${S}/journald-size.conf \
         ${D}${systemd_unitdir}/journald.conf.d/10-luneos-journal-size.conf
+
+    # Kernel hardening sysctls; see the file for what was checked.
+    install -D -m0644 ${S}/luneos-hardening.conf \
+        ${D}${nonarch_libdir}/sysctl.d/50-luneos-hardening.conf
 }
 
 # Halium: keep PIDs within 32-bit bionic's limit; see the file.
@@ -25,8 +30,8 @@ do_install:append:halium() {
         ${D}${nonarch_libdir}/sysctl.d/60-luneos-halium-pid-max.conf
 }
 
-FILES:${PN}:append:halium = " ${nonarch_libdir}/sysctl.d/"
+FILES:${PN} += "${nonarch_libdir}/sysctl.d/"
 
 # Bumped when the drop-ins shipped from here change, so installed images pick
 # them up on upgrade: the base recipe's revision does not move for it.
-PR = "r2"
+PR = "r3"
