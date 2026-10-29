@@ -8,9 +8,7 @@ inherit webos_system_bus
 inherit allarch
 
 PV = "0.1.0+git"
-SRCREV = "9b2912a874be2df0fe92ed3437b4b1c6f576e823"
-# 9b2912a8 is on herrie/licenses-node (org.webosports.service.licenses PR #8), not yet merged into master; back to that branch once it is.
-WEBOS_GIT_PARAM_BRANCH = "herrie/licenses-node"
+SRCREV = "2cfb8eeb2f457b073bb411afdcc9a59d2d7dc111"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 

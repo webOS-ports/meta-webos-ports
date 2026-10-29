@@ -10,9 +10,7 @@ inherit webos_filesystem_paths
 
 PV = "0.1.0+git"
 PR = "r1"
-SRCREV = "35941bb3231bb6aa3aeb84b11652d2b3cfa7b5d5"
-# 35941bb3 is on herrie/mediapermissions-node (media-permission-service PR #7), not yet merged into master; back to that branch once it is.
-WEBOS_GIT_PARAM_BRANCH = "herrie/mediapermissions-node"
+SRCREV = "f19c88723ae1e8ee11b5a487b29787e4d32d6234"
 SERVICE_NAME = "com.palm.mediapermissions"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"

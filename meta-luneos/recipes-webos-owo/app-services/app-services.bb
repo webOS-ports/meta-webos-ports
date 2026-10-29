@@ -17,10 +17,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 "
 
 PV = "3.0.1-5+git"
-SRCREV = "0275f7495a809d869afd9f88256656c45cc1d968"
-# 0275f749 is on herrie/all-node-services: webOS-ports/webOS-OSE 3e60c21 with app-services PRs #29-#33 merged
-# (contacts.linker, accounts, getAccountInfo, calendar.reminders, contacts); back to webOS-ports/webOS-OSE once they are.
-WEBOS_GIT_PARAM_BRANCH = "herrie/all-node-services"
+SRCREV = "d5f7dce1a04b4011800f66a892fd2bcb9663de1f"
 
 inherit webos_ports_ose_repo
 inherit webos_filesystem_paths
