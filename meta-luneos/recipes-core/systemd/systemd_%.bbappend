@@ -3,7 +3,6 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 SRC_URI += " \
     file://0001-rules-consider-MMC-device-partitions-with-partition-.patch \
     file://0002-fd_fdinfo_mnt_id-disable-fdinfo-stat.patch \
-    file://0003-Disable-ProtectHome-and-ProtectSystem-for-old-kernel.patch \
     file://0001-systemd-oomd-depend-on-swap-on.patch \
     file://0002-Add-webos-interface.patch \
     file://0003-systemd-oomd-modify-oomd.conf.patch \
@@ -32,6 +31,14 @@ SRC_URI:append:halium = " file://0008-namespace-do-not-pass-textual-hidepid-with
 # 226/NAMESPACE). Every unit with a mount namespace hits that. Switch root with
 # MS_MOVE and chroot() there; newer kernels keep pivot_root().
 SRC_URI:append:halium = " file://0009-mount-util-switch-root-with-MS_MOVE-before-Linux-3.15.patch"
+
+# ProtectHome=yes and ProtectSystem=yes used to be turned off on every machine
+# for the old Halium kernels. Only the Halium machines run a kernel older than
+# 3.15 (3.4: mako, flo, hammerhead, tenderloin, onyx, sm-t520; 3.10: bullhead,
+# a3-2015, angler, athene, goyavewifi), but each Halium feed also carries newer
+# kernels, so the patch decides on the running kernel: "yes" is off before 3.15
+# only. Mainline machines take systemd's behaviour unchanged.
+SRC_URI:append:halium = " file://0010-namespace-honour-ProtectHome-yes-and-ProtectSystem-yes-from-Linux-3.15.patch"
 
 RDEPENDS:${PN}:remove = "update-rc.d"
 
