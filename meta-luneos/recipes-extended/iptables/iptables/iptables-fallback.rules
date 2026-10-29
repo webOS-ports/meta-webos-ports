@@ -1,0 +1,71 @@
+# LuneOS IPv4 host firewall, stateless fallback.
+#
+# luneos-devmode-firewall ("load 4", run by iptables.service) loads this
+# only when iptables.rules cannot be loaded, which in practice means the
+# kernel has no connection tracking (nf_conntrack/xt_conntrack missing or
+# blacklisted): iptables-restore then rejects iptables.rules as a whole.
+# Before this file existed that left every policy at ACCEPT. This file
+# uses no conntrack match, so it still fails closed.
+#
+# It admits the same new connections as iptables.rules: loopback, the USB
+# gadget's DHCP, SSH and adb, DHCP and DNS on connman's "tether" bridge,
+# mDNS, ping, and SSH on Wi-Fi when developer mode puts it in
+# LUNEOS-DEVMODE.
+#
+# Replies to the device's own connections cannot be told apart from new
+# packets without conntrack, so they are let in by shape instead:
+# - TCP: every segment without SYN alone (`! --syn`). An outside host can
+#   still send ACK/FIN/RST segments to any port, which allows ACK scans and
+#   a little fingerprinting, but it cannot open a connection: that needs a
+#   bare SYN, which is dropped unless a rule above lets it in.
+# - UDP: only DNS (source port 53) and NTP (source port 123) answers, to
+#   unprivileged ports (and 123 to 123). A sender can fake those source
+#   ports, so any UDP service on a port >= 1024 is reachable from port 53
+#   or 123. Other UDP replies (QUIC/HTTP3, STUN, VoIP/SIP, VPNs) are
+#   dropped; those applications fall back to TCP or fail.
+# - Tethering does not work: connman's NAT needs conntrack anyway, so
+#   FORWARD drops everything here.
+*filter
+:INPUT DROP [0:0]
+:FORWARD DROP [0:0]
+:OUTPUT ACCEPT [0:0]
+:LUNEOS-DEVMODE - [0:0]
+
+-A INPUT -i lo -j ACCEPT
+
+# Replies, stateless (see above).
+-A INPUT -p tcp ! --syn -j ACCEPT
+-A INPUT -p udp --sport 53 --dport 1024:65535 -j ACCEPT
+-A INPUT -p udp --sport 123 --dport 1024:65535 -j ACCEPT
+-A INPUT -p udp --sport 123 --dport 123 -j ACCEPT
+
+# ICMP: ping both ways and the errors path MTU discovery needs.
+-A INPUT -p icmp --icmp-type echo-request -j ACCEPT
+-A INPUT -p icmp --icmp-type echo-reply -j ACCEPT
+-A INPUT -p icmp --icmp-type destination-unreachable -j ACCEPT
+-A INPUT -p icmp --icmp-type time-exceeded -j ACCEPT
+-A INPUT -p icmp --icmp-type parameter-problem -j ACCEPT
+
+# DHCP client (connman).
+-A INPUT -p udp --sport 67 --dport 68 -j ACCEPT
+
+# mDNS (avahi-daemon).
+-A INPUT -p udp --dport 5353 -j ACCEPT
+
+# USB gadget network, as in iptables.rules.
+-A INPUT -i usb+ -p udp --dport 67 -j ACCEPT
+-A INPUT -i rndis+ -p udp --dport 67 -j ACCEPT
+-A INPUT -i usb+ -p tcp --dport 22 -j ACCEPT
+-A INPUT -i rndis+ -p tcp --dport 22 -j ACCEPT
+-A INPUT -i usb+ -p tcp --dport 5555 -j ACCEPT
+-A INPUT -i rndis+ -p tcp --dport 5555 -j ACCEPT
+
+# connman tethering: DHCP and DNS for the clients on "tether" (they get no
+# further than the device itself; see above).
+-A INPUT -i tether -p udp --dport 67 -j ACCEPT
+-A INPUT -i tether -p udp --dport 53 -j ACCEPT
+-A INPUT -i tether -p tcp --dport 53 -j ACCEPT
+
+# Developer mode's own rules (luneos-devmode-firewall).
+-A INPUT -j LUNEOS-DEVMODE
+COMMIT

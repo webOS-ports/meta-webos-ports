@@ -5,6 +5,20 @@
 #   luneos-devmode-firewall ssh-wifi off   USB gadget only again (the default)
 #   luneos-devmode-firewall restore [4|6]  put the rule back after a (re)load
 #   luneos-devmode-firewall status         print "ssh-wifi on" or "ssh-wifi off"
+#   luneos-devmode-firewall load 4|6       load the rules, failing closed
+#   luneos-devmode-firewall mode           print "ipv4 full|fallback|none", "ipv6 ..."
+#
+# "load" is iptables.service's and ip6tables.service's ExecStart (drop-ins).
+# It sets the INPUT and FORWARD policies to DROP first, then loads
+# iptables.rules (ip6tables.rules). iptables-restore rejects a rules file as
+# a whole when one match is missing from the kernel - conntrack, in
+# practice - and that used to leave the policies at ACCEPT. "load" then
+# loads iptables-fallback.rules, which needs no conntrack and lets replies
+# in by their shape (TCP without SYN, DNS and NTP answers; see that file),
+# and records which file it loaded in $RUNDIR, which "mode" reports. Should that be refused
+# too, INPUT and FORWARD are left to drop all but loopback and SSH on the
+# USB gadget, and "load" fails. The LUNEOS-DEVMODE chain exists in both
+# files, so "ssh-wifi" and "restore" work the same either way.
 #
 # iptables.rules and ip6tables.rules open TCP 22 on the USB gadget and keep an
 # empty LUNEOS-DEVMODE chain that INPUT jumps to before its default DROP. This
@@ -27,13 +41,15 @@ set -u
 STATE=/var/luna/ssh-wifi-enabled
 DEVMODE=/var/luna/dev-mode-enabled
 CHAIN=LUNEOS-DEVMODE
+RULESDIR=@RULESDIR@
+RUNDIR=/run/luneos-firewall
 
 # Cellular data interfaces: Qualcomm (rmnet, rmnet_data, rev_rmnet), MediaTek
 # (ccmni), Unisoc (seth_lte), generic modems (wwan, ppp).
 CELLULAR="rmnet+ rev_rmnet+ ccmni+ seth_lte+ wwan+ ppp+"
 
 usage() {
-    echo "usage: ${0##*/} ssh-wifi on|off | restore [4|6] | status" >&2
+    echo "usage: ${0##*/} ssh-wifi on|off | restore [4|6] | status | load 4|6 | mode" >&2
     exit 2
 }
 
@@ -69,6 +85,38 @@ apply() {
         "$_t" -w -A "$CHAIN" -i "$_if" -j RETURN || return 1
     done
     "$_t" -w -A "$CHAIN" -p tcp --dport 22 -j ACCEPT || return 1
+}
+
+# $1: 4 or 6. Fails closed: the policies are DROP before anything is loaded.
+load() {
+    case "$1" in
+        4) _t=iptables ;;
+        6) _t=ip6tables ;;
+    esac
+    mkdir -p "$RUNDIR" 2>/dev/null
+    echo loading > "$RUNDIR/ipv$1" 2>/dev/null
+    # Should anything below fail, nothing gets in but what is accepted.
+    "$_t" -w -P INPUT DROP
+    "$_t" -w -P FORWARD DROP
+    if "$_t-restore" -w -- "$RULESDIR/$_t.rules"; then
+        echo full > "$RUNDIR/ipv$1" 2>/dev/null
+        return 0
+    fi
+    echo "${0##*/}: $RULESDIR/$_t.rules refused (no conntrack in the kernel?), loading $_t-fallback.rules" >&2
+    if "$_t-restore" -w -- "$RULESDIR/$_t-fallback.rules"; then
+        echo fallback > "$RUNDIR/ipv$1" 2>/dev/null
+        return 0
+    fi
+    echo "${0##*/}: $_t-fallback.rules refused too: dropping all inbound but loopback and SSH on the USB gadget" >&2
+    echo none > "$RUNDIR/ipv$1" 2>/dev/null
+    "$_t" -w -P INPUT DROP
+    "$_t" -w -P FORWARD DROP
+    "$_t" -w -F INPUT
+    "$_t" -w -F FORWARD
+    "$_t" -w -A INPUT -i lo -j ACCEPT
+    "$_t" -w -A INPUT -i usb+ -p tcp --dport 22 -j ACCEPT
+    "$_t" -w -A INPUT -i rndis+ -p tcp --dport 22 -j ACCEPT
+    return 1
 }
 
 set_all() {
@@ -114,6 +162,21 @@ case "$1" in
             apply "$t" "$mode" || rc=1
         done
         exit $rc
+        ;;
+    load)
+        [ $# -eq 2 ] || usage
+        case "$2" in 4|6) ;; *) usage ;; esac
+        load "$2" || exit 1
+        ;;
+    mode)
+        [ $# -eq 1 ] || usage
+        # full, fallback, none (loopback and USB SSH only), loading, or
+        # "not-loaded" when the service never ran "load".
+        for fam in 4 6; do
+            m=not-loaded
+            [ -r "$RUNDIR/ipv$fam" ] && read -r m < "$RUNDIR/ipv$fam"
+            echo "ipv$fam $m"
+        done
         ;;
     status)
         [ $# -eq 1 ] || usage

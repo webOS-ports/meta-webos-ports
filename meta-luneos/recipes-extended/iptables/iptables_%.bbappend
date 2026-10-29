@@ -5,6 +5,8 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 
 SRC_URI += " \
+    file://iptables-fallback.rules \
+    file://ip6tables-fallback.rules \
     file://luneos-devmode-firewall \
     file://iptables-devmode.conf \
     file://ip6tables-devmode.conf \
@@ -15,12 +17,22 @@ do_install:append() {
     grep -q '^:INPUT DROP' ${D}${IPTABLES_RULES_DIR}/iptables.rules || \
         bbfatal "iptables.rules is not LuneOS's - check FILESEXTRAPATHS"
 
+    # Loaded instead when the rules above are refused (no conntrack), so
+    # the firewall fails closed; see luneos-devmode-firewall "load".
+    install -m 0644 ${UNPACKDIR}/iptables-fallback.rules ${D}${IPTABLES_RULES_DIR}
     install -D -m 0755 ${UNPACKDIR}/luneos-devmode-firewall ${D}${sbindir}/luneos-devmode-firewall
     install -D -m 0644 ${UNPACKDIR}/iptables-devmode.conf \
         ${D}${systemd_system_unitdir}/iptables.service.d/luneos-devmode.conf
     if ${@bb.utils.contains('PACKAGECONFIG', 'ipv6', 'true', 'false', d)}; then
+        install -m 0644 ${UNPACKDIR}/ip6tables-fallback.rules ${D}${IPTABLES_RULES_DIR}
         install -D -m 0644 ${UNPACKDIR}/ip6tables-devmode.conf \
             ${D}${systemd_system_unitdir}/ip6tables.service.d/luneos-devmode.conf
+    fi
+    sed -i -e 's,@SBINDIR@,${sbindir},g' -e 's,@RULESDIR@,${IPTABLES_RULES_DIR},g' \
+        ${D}${sbindir}/luneos-devmode-firewall \
+        ${D}${systemd_system_unitdir}/ip*tables.service.d/luneos-devmode.conf
+    if grep -q @ ${D}${sbindir}/luneos-devmode-firewall ${D}${systemd_system_unitdir}/ip*tables.service.d/luneos-devmode.conf; then
+        bbfatal "luneos-devmode-firewall or its drop-ins still have an @VAR@"
     fi
 }
 
@@ -31,8 +43,8 @@ FILES:${PN} += " \
 "
 
 # The matches the rules use. iptables only RRECOMMENDS its modules, and
-# without one of them iptables-restore refuses the whole table, leaving it
-# wide open.
+# without one of them iptables-restore refuses the whole table (and the
+# fallback without conntrack needs tcp, udp and icmp too).
 RDEPENDS:${PN} += " \
     ${PN}-module-xt-conntrack \
     ${PN}-module-xt-tcp \
