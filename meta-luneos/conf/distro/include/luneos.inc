@@ -35,7 +35,13 @@ WEBOS_DISTRO_RELEASE_CODENAME ?= "${WEBOS_DISTRO_PLATFORM_CODENAME}${@oe.utils.c
 # override this based on their codename schemes.
 WEBOS_DISTRO_BUILD_CODENAME ?= "${WEBOS_DISTRO_TOPDIR_BRANCH}"
 
-WEBOS_DISTRO_PRERELEASE ?= "devel"
+# "devel" builds luna-service2, pmloglib and nyx-modules with their development
+# options (for luna-service2: asserts, and validation of replies and of its
+# configuration files). A release build turns them off by setting LUNEOS_RELEASE_BUILD = "1" (or
+# WEBOS_DISTRO_PRERELEASE = "" directly) in local.conf. Packages are shared by
+# every image of a build, so this is per build, not per image.
+LUNEOS_RELEASE_BUILD ??= "0"
+WEBOS_DISTRO_PRERELEASE ?= "${@'' if d.getVar('LUNEOS_RELEASE_BUILD') == '1' else 'devel'}"
 
 #
 # All of the types of official build jobs should override WEBOS_DISTRO_BUILD_ID
