@@ -2,11 +2,25 @@
 
 SUMMARY = "JavaScript services for apps"
 SECTION = "webos/services"
-LICENSE = "Apache-2.0"
-LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
+# The contacts, contacts.linker, accounts and calendar.reminders services are
+# GPL-3.0-or-later, each with its own COPYING; the files kept from the old
+# services stay Apache-2.0, DateJS (calendar.reminders) and the JSON schema
+# validator (accounts) MIT.
+LICENSE = "Apache-2.0 & GPL-3.0-or-later & MIT"
+LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10 \
+                    file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302 \
+                    file://com.palm.service.contacts.linker/COPYING;md5=1ebbd3e34237af26da5dc08a4e440464 \
+                    file://com.palm.service.contacts/COPYING;md5=1ebbd3e34237af26da5dc08a4e440464 \
+                    file://com.palm.service.accounts/COPYING;md5=1ebbd3e34237af26da5dc08a4e440464 \
+                    file://com.palm.service.calendar.reminders/COPYING;md5=1ebbd3e34237af26da5dc08a4e440464 \
+                    file://com.palm.service.calendar.reminders/NOTICE;md5=3d5ed1f34a3903962a2a026c72e86f28 \
+"
 
 PV = "3.0.1-5+git"
-SRCREV = "3e60c21f52bfde5f014a246f5b0465c69f8f488f"
+SRCREV = "0275f7495a809d869afd9f88256656c45cc1d968"
+# 0275f749 is on herrie/all-node-services: webOS-ports/webOS-OSE 3e60c21 with app-services PRs #29-#33 merged
+# (contacts.linker, accounts, getAccountInfo, calendar.reminders, contacts); back to webOS-ports/webOS-OSE once they are.
+WEBOS_GIT_PARAM_BRANCH = "herrie/all-node-services"
 
 inherit webos_ports_ose_repo
 inherit webos_filesystem_paths
@@ -47,9 +61,6 @@ do_install() {
         cp -vrf $SERVICE/files/sysbus/*.service ${D}${webos_sysbus_servicedir} 2> /dev/null || true
         cp -vrf $SERVICE/files/sysbus/*.groups.json ${D}${webos_sysbus_groupsdir} 2> /dev/null || true
     done
-
-# install account service desktop credentials db kind 
-    cp -vrf ${S}/com.palm.service.accounts/desktop/com.palm.account.credentails ${D}${webos_sysconfdir}/db/kinds 2> /dev/null || true
 
 # install account templates.
     install -d ${D}${webos_accttemplatesdir} 2> /dev/null || true
