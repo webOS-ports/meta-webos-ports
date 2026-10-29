@@ -31,7 +31,7 @@ do_install:append() {
     sed -i -e 's,@SBINDIR@,${sbindir},g' -e 's,@RULESDIR@,${IPTABLES_RULES_DIR},g' \
         ${D}${sbindir}/luneos-devmode-firewall \
         ${D}${systemd_system_unitdir}/ip*tables.service.d/luneos-devmode.conf
-    if grep -q @ ${D}${sbindir}/luneos-devmode-firewall ${D}${systemd_system_unitdir}/ip*tables.service.d/luneos-devmode.conf; then
+    if grep -q "@[A-Z]*@" ${D}${sbindir}/luneos-devmode-firewall ${D}${systemd_system_unitdir}/ip*tables.service.d/luneos-devmode.conf; then
         bbfatal "luneos-devmode-firewall or its drop-ins still have an @VAR@"
     fi
 }
