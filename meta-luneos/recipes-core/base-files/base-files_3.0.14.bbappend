@@ -71,7 +71,8 @@ do_install:append() {
 
 generate_fstab_entries() {
     echo "# additional in-memory storage for db8"
-    echo "tmpfs ${webos_db8datadir}/temp tmpfs size=80M,mode=0700 0 0"
+    # db8's scratch space: data only, nothing is executed from it
+    echo "tmpfs ${webos_db8datadir}/temp tmpfs size=80M,mode=0700,nosuid,nodev,noexec 0 0"
 }
 
 PR:append = "${@bb.utils.contains('DISTRO_FEATURES', 'smack', 'smack1', '', d)}"
