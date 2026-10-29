@@ -13,7 +13,11 @@ SRC_URI  = " \
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE:${PN} = "${PN}.service"
 
-inherit autotools-brokensep systemd
+inherit autotools-brokensep systemd useradd
+
+# mmsd.service runs the daemon as this user; see the unit.
+USERADD_PACKAGES = "${PN}"
+USERADD_PARAM:${PN} = "--system --user-group --home-dir ${localstatedir}/lib/mmsd --no-create-home --shell /usr/sbin/nologin mmsd"
 
 do_configure:prepend () {
   ${S}/bootstrap
