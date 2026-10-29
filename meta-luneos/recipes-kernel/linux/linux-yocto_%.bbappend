@@ -4,6 +4,7 @@ SRC_URI += "file://squashfs.cfg \
     file://virtio.cfg \
     file://crypto.cfg \
     file://waydroid-anbox.cfg \
+    file://yama.cfg \
 "
 
 # For the qemu images: testing the Bluetooth stack without a radio.
