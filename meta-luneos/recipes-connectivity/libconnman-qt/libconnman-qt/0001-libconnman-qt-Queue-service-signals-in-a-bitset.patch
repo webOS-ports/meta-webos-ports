@@ -1,0 +1,104 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 29 Oct 2026 17:27:31 +0100
+Subject: [PATCH] [libconnman-qt] Queue service signals in a bitset, not a
+ quint64
+
+NetworkService::Private keeps the signals it still has to emit as bits
+in a quint64, one per Signal. NETWORK_SERVICE_PROPERTIES has grown to 67
+of them, so queueSignal() and emitQueuedSignals() compute
+Q_UINT64_C(1) << sig for sig 64..66 (WPA3SAECheckMFP, WPA3SAEPWE and
+Supported). That is undefined behaviour. On x86-64 and AArch64 the shift
+count is taken modulo 64, so changing one of those properties queues
+the signal for Path, Connected or ServiceState instead, and the real one
+is never emitted.
+
+Use a std::bitset<SignalCount>, which has room for every signal however
+many are added.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ libconnman-qt/networkservice.cpp | 26 ++++++++++++++------------
+ 1 file changed, 14 insertions(+), 12 deletions(-)
+
+diff --git a/libconnman-qt/networkservice.cpp b/libconnman-qt/networkservice.cpp
+index 9bcd32f..7e4f781 100644
+--- a/libconnman-qt/networkservice.cpp
++++ b/libconnman-qt/networkservice.cpp
+@@ -13,6 +13,8 @@
+ #include "commondbustypes.h"
+ #include "logging.h"
+ 
++#include <bitset>
++
+ static QString ConnmanErrorInProgress = QStringLiteral("net.connman.Error.InProgress");
+ 
+ #define COUNT(a) ((uint)(sizeof(a)/sizeof(a[0])))
+@@ -260,7 +262,10 @@ public:
+     bool m_emitting = false;
+ 
+ private:
+-    quint64 m_queuedSignals;
++    // One bit per Signal. There are more than 64 of them, so this cannot
++    // be a quint64: shifting 1 by 64 or more is undefined, and on x86 and
++    // ARM it wraps round and queues the wrong signal.
++    std::bitset<SignalCount> m_queuedSignals;
+     int m_firstQueuedSignal;
+ };
+ 
+@@ -459,7 +464,7 @@ NetworkService::Private::Private(const QString &path, const QVariantMap &props,
+     , m_callFlags(CallAll)
+     , m_managed(false)
+     , m_peapVersion(-1)
+-    , m_queuedSignals(0)
++    , m_queuedSignals()
+     , m_firstQueuedSignal(0)
+ {
+ }
+@@ -513,7 +518,7 @@ void NetworkService::Private::init()
+     qCDebug(lcConnman) << m_path << "managed:" << m_managed;
+ 
+     // Reset the signal mask (the above calls may have set some bits)
+-    m_queuedSignals = 0;
++    m_queuedSignals.reset();
+ }
+ 
+ bool NetworkService::Private::managed()
+@@ -525,16 +530,14 @@ bool NetworkService::Private::managed()
+ inline void NetworkService::Private::queueSignal(Signal sig)
+ {
+     if (sig > NoSignal && sig < SignalCount) {
+-        const quint64 signalBit = (Q_UINT64_C(1) << sig);
+-        if (m_queuedSignals) {
+-            m_queuedSignals |= signalBit;
++        if (m_queuedSignals.any()) {
+             if (m_firstQueuedSignal > sig) {
+                 m_firstQueuedSignal = sig;
+             }
+         } else {
+-            m_queuedSignals = signalBit;
+             m_firstQueuedSignal = sig;
+         }
++        m_queuedSignals.set(sig);
+     }
+ }
+ 
+@@ -547,13 +550,12 @@ void NetworkService::Private::emitQueuedSignals()
+     };
+ 
+     Q_STATIC_ASSERT(COUNT(emitSignal) == SignalCount);
+-    if (m_queuedSignals) {
++    if (m_queuedSignals.any()) {
+         NetworkService *obj = service();
+         m_emitting = true;
+-        for (int i = m_firstQueuedSignal; i < SignalCount && m_queuedSignals; i++) {
+-            const quint64 signalBit = (Q_UINT64_C(1) << i);
+-            if (m_queuedSignals & signalBit) {
+-                m_queuedSignals &= ~signalBit;
++        for (int i = m_firstQueuedSignal; i < SignalCount && m_queuedSignals.any(); i++) {
++            if (m_queuedSignals.test(i)) {
++                m_queuedSignals.reset(i);
+                 Q_EMIT (this->*(emitSignal[i]))(obj);
+             }
+         }

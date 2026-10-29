@@ -1,0 +1,168 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 29 Oct 2026 17:50:45 +0100
+Subject: [PATCH] [libconnman-qt] Add NetworkService.useDeviceMACAddress
+
+A connman that gives every Wi-Fi network its own stable MAC address
+publishes the service property UseDeviceMACAddress, and accepts it in
+SetProperty, so that a network which needs the hardware address (MAC
+filtering, a captive portal bound to it) can opt out of that.
+
+Expose it next to autoConnect: read from GetProperties, updated on
+PropertyChanged, written with SetProperty. connman only publishes the
+property while it randomises addresses, so useDeviceMACAddressAvailable
+says whether it is there at all, letting a settings page hide the
+switch instead of showing one that does nothing. Both share the
+useDeviceMACAddressChanged signal, which is also emitted when a path
+change drops the property.
+
+This adds a signal to NETWORK_SERVICE_PROPERTIES, so it needs the
+previous change that stops queued signals overflowing a quint64.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ libconnman-qt/networkservice.cpp | 24 ++++++++++++++++++++++++
+ libconnman-qt/networkservice.h   |  9 +++++++++
+ plugin/plugins.qmltypes          | 10 ++++++++++
+ 3 files changed, 43 insertions(+)
+
+diff --git a/libconnman-qt/networkservice.cpp b/libconnman-qt/networkservice.cpp
+index 7e4f781..2348f93 100644
+--- a/libconnman-qt/networkservice.cpp
++++ b/libconnman-qt/networkservice.cpp
+@@ -49,6 +49,7 @@ static QString ConnmanErrorInProgress = QStringLiteral("net.connman.Error.InProg
+     ConnmanArg("Strength",Strength,strength) \
+     ConnmanArg("Favorite",Favorite,favorite) \
+     ConnmanArg("AutoConnect",AutoConnect,autoConnect) \
++    ConnmanArg("UseDeviceMACAddress",UseDeviceMACAddress,useDeviceMACAddress) \
+     ConnmanArg("IPv4",Ipv4,ipv4) \
+     ConnmanArg("IPv4.Configuration",Ipv4Config,ipv4Config) \
+     ConnmanArg("IPv6",Ipv6,ipv6) \
+@@ -1060,6 +1061,9 @@ void NetworkService::Private::resetProperties()
+             if (value.toBool()) {
+                 queueSignal(SignalAutoConnectChanged);
+             }
++        } else if (key == UseDeviceMACAddress) {
++            // Always: useDeviceMACAddressAvailable goes false too.
++            queueSignal(SignalUseDeviceMACAddressChanged);
+         } else if (key == Ipv4) {
+             queueSignal(SignalIpv4Changed);
+         } else if (key == Ipv4Config) {
+@@ -1196,6 +1200,8 @@ void NetworkService::Private::updatePropertyCache(const QString &name, const QVa
+         queueSignal(SignalFavoriteChanged);
+     } else if (name == AutoConnect) {
+         queueSignal(SignalAutoConnectChanged);
++    } else if (name == UseDeviceMACAddress) {
++        queueSignal(SignalUseDeviceMACAddressChanged);
+     } else if (name == Ipv4) {
+         queueSignal(SignalIpv4Changed);
+     } else if (name == Ipv4Config) {
+@@ -1443,6 +1449,16 @@ bool NetworkService::autoConnect() const
+     return m_priv->boolValue(Private::AutoConnect);
+ }
+ 
++bool NetworkService::useDeviceMACAddress() const
++{
++    return m_priv->boolValue(Private::UseDeviceMACAddress);
++}
++
++bool NetworkService::useDeviceMACAddressAvailable() const
++{
++    return m_priv->m_propertiesCache.contains(Private::UseDeviceMACAddress);
++}
++
+ QString NetworkService::path() const
+ {
+     return m_priv->m_path;
+@@ -1565,6 +1581,14 @@ void NetworkService::setAutoConnect(bool autoConnected)
+     }
+ }
+ 
++void NetworkService::setUseDeviceMACAddress(bool useDeviceMACAddress)
++{
++    Private::InterfaceProxy *service = m_priv->m_proxy;
++    if (service) {
++        service->SetProperty(Private::UseDeviceMACAddress, useDeviceMACAddress);
++    }
++}
++
+ void NetworkService::setIpv4Config(const QVariantMap &ipv4)
+ {
+     m_priv->setProperty(Private::Ipv4Config, ipv4);
+diff --git a/libconnman-qt/networkservice.h b/libconnman-qt/networkservice.h
+index 4c74b54..1a21f79 100644
+--- a/libconnman-qt/networkservice.h
++++ b/libconnman-qt/networkservice.h
+@@ -33,6 +33,11 @@ class NetworkService : public QObject
+     Q_PROPERTY(uint strength READ strength NOTIFY strengthChanged)
+     Q_PROPERTY(bool favorite READ favorite NOTIFY favoriteChanged)
+     Q_PROPERTY(bool autoConnect READ autoConnect WRITE setAutoConnect NOTIFY autoConnectChanged)
++    // WiFi: connect with the hardware MAC address instead of the network's own
++    // one. Only published by a connman that gives networks their own address,
++    // which useDeviceMACAddressAvailable tells.
++    Q_PROPERTY(bool useDeviceMACAddress READ useDeviceMACAddress WRITE setUseDeviceMACAddress NOTIFY useDeviceMACAddressChanged)
++    Q_PROPERTY(bool useDeviceMACAddressAvailable READ useDeviceMACAddressAvailable NOTIFY useDeviceMACAddressChanged)
+     Q_PROPERTY(QString path READ path WRITE setPath NOTIFY pathChanged)
+     Q_PROPERTY(QVariantMap ipv4 READ ipv4 NOTIFY ipv4Changed)
+     Q_PROPERTY(QVariantMap ipv4Config READ ipv4Config WRITE setIpv4Config NOTIFY ipv4ConfigChanged)
+@@ -136,6 +141,8 @@ public:
+     QStringList security() const;
+     SecurityType securityType() const;
+     bool autoConnect() const;
++    bool useDeviceMACAddress() const;
++    bool useDeviceMACAddressAvailable() const;
+     uint strength() const;
+     bool favorite() const;
+     QString path() const;
+@@ -233,6 +240,7 @@ Q_SIGNALS:
+     void strengthChanged(uint strength);
+     void favoriteChanged(bool favorite);
+     void autoConnectChanged(bool autoconnect);
++    void useDeviceMACAddressChanged(bool useDeviceMACAddress);
+     void pathChanged(const QString &path);
+     void ipv4Changed(const QVariantMap &ipv4);
+     void ipv4ConfigChanged(const QVariantMap &ipv4);
+@@ -306,6 +314,7 @@ public Q_SLOTS:
+     void remove();
+ 
+     void setAutoConnect(bool autoconnect);
++    void setUseDeviceMACAddress(bool useDeviceMACAddress);
+     void setIpv4Config(const QVariantMap &ipv4);
+     void setIpv6Config(const QVariantMap &ipv6);
+     void setNameserversConfig(const QStringList &nameservers);
+diff --git a/plugin/plugins.qmltypes b/plugin/plugins.qmltypes
+index 8ce3064..987c588 100644
+--- a/plugin/plugins.qmltypes
++++ b/plugin/plugins.qmltypes
+@@ -369,6 +369,8 @@ Module {
+         Property { name: "strength"; type: "uint"; isReadonly: true }
+         Property { name: "favorite"; type: "bool"; isReadonly: true }
+         Property { name: "autoConnect"; type: "bool" }
++        Property { name: "useDeviceMACAddress"; type: "bool" }
++        Property { name: "useDeviceMACAddressAvailable"; type: "bool"; isReadonly: true }
+         Property { name: "path"; type: "string" }
+         Property { name: "ipv4"; type: "QVariantMap"; isReadonly: true }
+         Property { name: "ipv4Config"; type: "QVariantMap" }
+@@ -457,6 +459,10 @@ Module {
+             name: "autoConnectChanged"
+             Parameter { name: "autoconnect"; type: "bool" }
+         }
++        Signal {
++            name: "useDeviceMACAddressChanged"
++            Parameter { name: "useDeviceMACAddress"; type: "bool" }
++        }
+         Signal {
+             name: "pathChanged"
+             Parameter { name: "path"; type: "string" }
+@@ -643,6 +649,10 @@ Module {
+             name: "setAutoConnect"
+             Parameter { name: "autoconnect"; type: "bool" }
+         }
++        Method {
++            name: "setUseDeviceMACAddress"
++            Parameter { name: "useDeviceMACAddress"; type: "bool" }
++        }
+         Method {
+             name: "setIpv4Config"
+             Parameter { name: "ipv4"; type: "QVariantMap" }
