@@ -226,6 +226,9 @@ PATCHRESOLVE = "noop"
 # save statistical info on images
 INHERIT += "buildhistory"
 
+# fail on private keys in SRC_URI and on unsigned out-of-tree kernel modules
+INHERIT += "luneos_signing_qa"
+
 # enable Hash Equivalence Server
 # read https://lwn.net/Articles/804640/ for details
 BB_SIGNATURE_HANDLER ?= "OEEquivHash"
