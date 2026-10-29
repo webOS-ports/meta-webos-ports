@@ -8,6 +8,7 @@ SRC_URI  = " \
     file://0001-Switch-to-dbus-system-bus.patch \
     file://mmsd.conf \
     file://mmsd.service \
+    file://mmsd-migrate-store \
 "
 
 SYSTEMD_PACKAGES = "${PN}"
@@ -29,4 +30,8 @@ do_install:append() {
 
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${UNPACKDIR}/${PN}.service ${D}${systemd_unitdir}/system/
+
+    # Run by mmsd.service before mmsd to move the store it kept as root.
+    install -d ${D}${libexecdir}
+    install -m 0755 ${UNPACKDIR}/mmsd-migrate-store ${D}${libexecdir}/
 }
