@@ -18,6 +18,16 @@ LUNEOS_IMAGE_DEFAULT_FEATURES = "post-install-logging ssh-server-openssh package
     ${@oe.utils.conditional('LUNEOS_DEBUG_ACCESS', '1', d.getVar('LUNEOS_DEBUG_ACCESS_FEATURES'), '', d)} \
 "
 
+# LUNEOS_DEBUG_ACCESS also lets SSH in on every interface, not only USB, as it
+# did before the firewall: the flag is what luneos-devmode-firewall ssh-wifi on
+# leaves behind (iptables_%.bbappend). It still needs developer mode, which
+# luneos-dev-image turns on.
+luneos_debug_access_ssh_wifi() {
+    install -d ${IMAGE_ROOTFS}${localstatedir}/luna
+    touch ${IMAGE_ROOTFS}${localstatedir}/luna/ssh-wifi-enabled
+}
+ROOTFS_POSTPROCESS_COMMAND += "${@oe.utils.conditional('LUNEOS_DEBUG_ACCESS', '1', 'luneos_debug_access_ssh_wifi;', '', d)}"
+
 # We're using devtmpfs so are not required to have a minimal populated /dev in our images
 USE_DEVFS = "1"
 

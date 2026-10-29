@@ -1,0 +1,124 @@
+#!/bin/sh
+# Developer mode's part of the LuneOS host firewall.
+#
+#   luneos-devmode-firewall ssh-wifi on    let SSH in beyond the USB gadget
+#   luneos-devmode-firewall ssh-wifi off   USB gadget only again (the default)
+#   luneos-devmode-firewall restore [4|6]  put the rule back after a (re)load
+#   luneos-devmode-firewall status         print "ssh-wifi on" or "ssh-wifi off"
+#
+# iptables.rules and ip6tables.rules open TCP 22 on the USB gadget and keep an
+# empty LUNEOS-DEVMODE chain that INPUT jumps to before its default DROP. This
+# script owns that chain: "on" fills it with one ACCEPT for TCP 22, "off"
+# empties it. It is never flushed by anything else except a reload of the
+# rules, which runs "restore" afterwards (iptables.service drop-ins).
+#
+# The choice is kept in $STATE so it survives a reboot. "restore" applies it
+# only while developer mode is on as well; sshd does not run otherwise anyway.
+#
+# "Beyond the USB gadget" is every interface except the cellular ones: SSH on a
+# carrier network, often with a routable IPv6 address, is not something to
+# switch on with a Wi-Fi toggle.
+#
+# org.webosports.service.devmode calls "ssh-wifi on|off". Exit status: 0 done,
+# 1 a rule could not be changed (iptables error is on stderr), 2 usage.
+
+set -u
+
+STATE=/var/luna/ssh-wifi-enabled
+DEVMODE=/var/luna/dev-mode-enabled
+CHAIN=LUNEOS-DEVMODE
+
+# Cellular data interfaces: Qualcomm (rmnet, rmnet_data, rev_rmnet), MediaTek
+# (ccmni), Unisoc (seth_lte), generic modems (wwan, ppp).
+CELLULAR="rmnet+ rev_rmnet+ ccmni+ seth_lte+ wwan+ ppp+"
+
+usage() {
+    echo "usage: ${0##*/} ssh-wifi on|off | restore [4|6] | status" >&2
+    exit 2
+}
+
+# The tools for each family that is there; ip6tables is optional (ipv6
+# PACKAGECONFIG of iptables).
+tools() {
+    case "${1:-all}" in
+        4) set -- iptables ;;
+        6) set -- ip6tables ;;
+        all) set -- iptables ip6tables ;;
+        *) return 1 ;;
+    esac
+    for t in "$@"; do
+        command -v "$t" >/dev/null 2>&1 && echo "$t"
+    done
+}
+
+# $1: iptables or ip6tables. Empties the chain and, unless $2 is "off", adds
+# the SSH rule. Done as a flush and a rebuild so it is idempotent: "on" twice
+# leaves one rule, not two.
+apply() {
+    _t=$1
+    _mode=$2
+    # The chain is in the rules files; create it if someone loaded others.
+    if ! "$_t" -w -n -L "$CHAIN" >/dev/null 2>&1; then
+        "$_t" -w -N "$CHAIN" || return 1
+        "$_t" -w -C INPUT -j "$CHAIN" 2>/dev/null ||
+            "$_t" -w -I INPUT -j "$CHAIN" || return 1
+    fi
+    "$_t" -w -F "$CHAIN" || return 1
+    [ "$_mode" = off ] && return 0
+    for _if in $CELLULAR; do
+        "$_t" -w -A "$CHAIN" -i "$_if" -j RETURN || return 1
+    done
+    "$_t" -w -A "$CHAIN" -p tcp --dport 22 -j ACCEPT || return 1
+}
+
+set_all() {
+    _rc=0
+    for _t in $(tools all); do
+        apply "$_t" "$1" || _rc=1
+    done
+    return $_rc
+}
+
+[ $# -ge 1 ] || usage
+
+case "$1" in
+    ssh-wifi)
+        [ $# -eq 2 ] || usage
+        case "$2" in
+            on)
+                if ! mkdir -p "${STATE%/*}" || ! touch "$STATE"; then
+                    exit 1
+                fi
+                set_all on || exit 1
+                ;;
+            off)
+                # Forget the choice first: should a rule refuse to go, the
+                # next reload or boot still leaves it out.
+                rm -f "$STATE" || exit 1
+                set_all off || exit 1
+                ;;
+            *) usage ;;
+        esac
+        ;;
+    restore)
+        [ $# -le 2 ] || usage
+        fam=${2:-all}
+        case "$fam" in 4|6|all) ;; *) usage ;; esac
+        if [ -e "$STATE" ] && [ -e "$DEVMODE" ]; then
+            mode=on
+        else
+            mode=off
+        fi
+        rc=0
+        for t in $(tools "$fam"); do
+            apply "$t" "$mode" || rc=1
+        done
+        exit $rc
+        ;;
+    status)
+        [ $# -eq 1 ] || usage
+        if [ -e "$STATE" ]; then echo "ssh-wifi on"; else echo "ssh-wifi off"; fi
+        ;;
+    *) usage ;;
+esac
+exit 0

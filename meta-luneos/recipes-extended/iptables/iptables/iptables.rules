@@ -1,0 +1,66 @@
+# LuneOS IPv4 host firewall, loaded by iptables.service (iptables-restore).
+#
+# Inbound is denied unless listed here; outbound is open. Replies to the
+# device's own connections come back through the conntrack rule.
+#
+# SSH (and adb over TCP, if it is ever used) are open on the USB gadget only.
+# sshd itself runs only while developer mode is on (sshd.socket drop-in), so
+# the rule here opens nothing until then. To let SSH in on Wi-Fi as well,
+# developer mode runs "luneos-devmode-firewall ssh-wifi on", which fills the
+# LUNEOS-DEVMODE chain; iptables.service puts its rule back after every
+# load or reload.
+#
+# Waydroid (waydroid-net.sh) and connman (tethering NAT) insert their own
+# rules into INPUT, FORWARD and nat at run time; only what they need is
+# assumed here. Reloading iptables.service drops whatever they inserted, as
+# it always has.
+#
+# If the kernel lacks a match used here (conntrack), iptables-restore
+# rejects the whole table and the policies stay ACCEPT: it fails open, it
+# never locks the device off the network.
+*filter
+:INPUT DROP [0:0]
+:FORWARD DROP [0:0]
+:OUTPUT ACCEPT [0:0]
+:LUNEOS-DEVMODE - [0:0]
+
+-A INPUT -i lo -j ACCEPT
+-A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+-A INPUT -m conntrack --ctstate INVALID -j DROP
+
+# ICMP: ping and the errors path MTU discovery needs.
+-A INPUT -p icmp --icmp-type echo-request -j ACCEPT
+-A INPUT -p icmp --icmp-type destination-unreachable -j ACCEPT
+-A INPUT -p icmp --icmp-type time-exceeded -j ACCEPT
+-A INPUT -p icmp --icmp-type parameter-problem -j ACCEPT
+
+# DHCP client (connman): server replies, including broadcast ones that
+# conntrack does not relate to the request.
+-A INPUT -p udp --sport 67 --dport 68 -j ACCEPT
+
+# mDNS (avahi-daemon): printer discovery and the device's own name.
+-A INPUT -p udp --dport 5353 -j ACCEPT
+
+# USB gadget network: usb0/usb1 (android-gadget-setup, luneos-usb-gadget,
+# g_ether) or rndis0 (radon). udhcpd hands the host its address on it.
+-A INPUT -i usb+ -p udp --dport 67 -j ACCEPT
+-A INPUT -i rndis+ -p udp --dport 67 -j ACCEPT
+-A INPUT -i usb+ -p tcp --dport 22 -j ACCEPT
+-A INPUT -i rndis+ -p tcp --dport 22 -j ACCEPT
+-A INPUT -i usb+ -p tcp --dport 5555 -j ACCEPT
+-A INPUT -i rndis+ -p tcp --dport 5555 -j ACCEPT
+
+# connman tethering (Wi-Fi hotspot, Bluetooth PAN): its bridge is "tether",
+# and connman serves DHCP and DNS on it to the clients.
+-A INPUT -i tether -p udp --dport 67 -j ACCEPT
+-A INPUT -i tether -p udp --dport 53 -j ACCEPT
+-A INPUT -i tether -p tcp --dport 53 -j ACCEPT
+
+# Developer mode's own rules (luneos-devmode-firewall).
+-A INPUT -j LUNEOS-DEVMODE
+
+# Forwarding: tethering clients out, and their replies back. connman adds
+# the MASQUERADE. Waydroid inserts the rules for its waydroid0 bridge itself.
+-A FORWARD -i tether -j ACCEPT
+-A FORWARD -o tether -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+COMMIT

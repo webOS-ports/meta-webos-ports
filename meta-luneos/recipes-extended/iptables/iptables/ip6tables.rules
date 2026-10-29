@@ -1,0 +1,65 @@
+# LuneOS IPv6 host firewall, loaded by ip6tables.service (ip6tables-restore).
+#
+# The same policy as iptables.rules: inbound denied unless listed, outbound
+# open, SSH on the USB gadget only unless developer mode opens it on Wi-Fi
+# (LUNEOS-DEVMODE, filled by luneos-devmode-firewall). IPv6 matters most here:
+# a cellular or Wi-Fi network can hand the device a routable address.
+#
+# If the kernel lacks a match used here, ip6tables-restore rejects the whole
+# table and the policies stay ACCEPT (fails open).
+*filter
+:INPUT DROP [0:0]
+:FORWARD DROP [0:0]
+:OUTPUT ACCEPT [0:0]
+:LUNEOS-DEVMODE - [0:0]
+
+-A INPUT -i lo -j ACCEPT
+
+# ICMPv6 before the conntrack rules: neighbour discovery is not tracked and
+# would otherwise count as INVALID. Without it IPv6 does not work at all.
+# Errors (incl. packet too big, which path MTU discovery needs) and ping:
+-A INPUT -p ipv6-icmp --icmpv6-type destination-unreachable -j ACCEPT
+-A INPUT -p ipv6-icmp --icmpv6-type packet-too-big -j ACCEPT
+-A INPUT -p ipv6-icmp --icmpv6-type time-exceeded -j ACCEPT
+-A INPUT -p ipv6-icmp --icmpv6-type parameter-problem -j ACCEPT
+-A INPUT -p ipv6-icmp --icmpv6-type echo-request -j ACCEPT
+# Router and neighbour discovery, only from the link itself (hop limit 255).
+# No redirects.
+-A INPUT -p ipv6-icmp --icmpv6-type router-solicitation -m hl --hl-eq 255 -j ACCEPT
+-A INPUT -p ipv6-icmp --icmpv6-type router-advertisement -m hl --hl-eq 255 -j ACCEPT
+-A INPUT -p ipv6-icmp --icmpv6-type neighbour-solicitation -m hl --hl-eq 255 -j ACCEPT
+-A INPUT -p ipv6-icmp --icmpv6-type neighbour-advertisement -m hl --hl-eq 255 -j ACCEPT
+# Multicast listener discovery (MLD v1 query/report/done, MLDv2 report), from
+# link-local addresses only.
+-A INPUT -s fe80::/10 -p ipv6-icmp --icmpv6-type 130 -j ACCEPT
+-A INPUT -s fe80::/10 -p ipv6-icmp --icmpv6-type 131 -j ACCEPT
+-A INPUT -s fe80::/10 -p ipv6-icmp --icmpv6-type 132 -j ACCEPT
+-A INPUT -s fe80::/10 -p ipv6-icmp --icmpv6-type 143 -j ACCEPT
+
+-A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+-A INPUT -m conntrack --ctstate INVALID -j DROP
+
+# DHCPv6 client (connman): server replies come from a link-local address.
+-A INPUT -s fe80::/10 -p udp --sport 547 --dport 546 -j ACCEPT
+
+# mDNS (avahi-daemon).
+-A INPUT -p udp --dport 5353 -j ACCEPT
+
+# USB gadget network (see iptables.rules for the names).
+-A INPUT -i usb+ -p tcp --dport 22 -j ACCEPT
+-A INPUT -i rndis+ -p tcp --dport 22 -j ACCEPT
+-A INPUT -i usb+ -p tcp --dport 5555 -j ACCEPT
+-A INPUT -i rndis+ -p tcp --dport 5555 -j ACCEPT
+
+# connman tethering: DNS for the clients on its "tether" bridge.
+-A INPUT -i tether -p udp --dport 53 -j ACCEPT
+-A INPUT -i tether -p tcp --dport 53 -j ACCEPT
+
+# Developer mode's own rules (luneos-devmode-firewall).
+-A INPUT -j LUNEOS-DEVMODE
+
+# Forwarding: tethering clients out, replies back. Waydroid runs IPv4 only
+# (waydroid-net.sh leaves LXC_IPV6_ADDR empty), so it needs nothing here.
+-A FORWARD -i tether -j ACCEPT
+-A FORWARD -o tether -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+COMMIT
