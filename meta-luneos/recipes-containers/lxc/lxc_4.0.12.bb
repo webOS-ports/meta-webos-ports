@@ -173,8 +173,8 @@ do_install:append() {
 	# lxcbr0 will be fully configured.
 	install -m 644 ${UNPACKDIR}/lxc-net ${D}${sysconfdir}/default/
 
-	# Force the main dnsmasq instance to bind only to specified interfaces and
-	# to not bind to virbr0. Libvirt will run its own instance on this interface.
+	# Keep the system dnsmasq instance, if it is ever started, on loopback
+	# only; lxc-net and waydroid-net.sh run their own instances on the bridges.
 	install -d ${D}/${sysconfdir}/dnsmasq.d
 	install -m 644 ${UNPACKDIR}/dnsmasq.conf ${D}/${sysconfdir}/dnsmasq.d/lxc
 
