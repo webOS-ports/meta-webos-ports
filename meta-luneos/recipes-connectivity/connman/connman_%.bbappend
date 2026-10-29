@@ -32,7 +32,15 @@ do_install:append() {
 
 # neard is not listed here: PACKAGECONFIG[nfc] below already pulls it in as a
 # hard RDEPENDS, so recommending it separately would be redundant.
-RRECOMMENDS:${PN} += "connman-vpn connman-plugin-vpn-openvpn connman-plugin-vpn-vpnc connman-plugin-vpn-openconnect connman-plugin-vpn-l2tp connman-plugin-vpn-pptp connman-plugin-vpn-wireguard connman-tests connman-tools connman-wait-online"
+#
+# The pptp and vpnc plugins are built (PACKAGECONFIG below) but not
+# recommended: PPTP's MS-CHAPv2 is broken, and vpnc only speaks IKEv1,
+# whose aggressive-mode PSK can be cracked offline. They stay in the feed
+# for whoever needs to reach such a server and installs them on purpose;
+# luneos-vpn-adapter only offers the plugins that are installed.
+RRECOMMENDS:${PN} += "connman-vpn connman-plugin-vpn-openvpn connman-plugin-vpn-openconnect connman-plugin-vpn-l2tp connman-plugin-vpn-wireguard connman-tests connman-tools connman-wait-online"
+# connman_2.0.bb recommends every plugin its PACKAGECONFIG builds.
+RRECOMMENDS:${PN}:remove = "${PN}-plugin-vpn-vpnc ${PN}-plugin-vpn-pptp"
 
 # needed for VPN support in ConnMan. wireguard is the one modern transport
 # upstream supports and it only needs libmnl, so there is no reason to ship

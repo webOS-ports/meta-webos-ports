@@ -28,3 +28,15 @@ do_install:append() {
 
 # Avoid putting a dependency on modemmanager
 PACKAGECONFIG = "nmea lib"
+
+# The nmea PACKAGECONFIG builds the network-nmea source, which takes
+# positions from any host on the local network that advertises
+# _nmea-0183._tcp over mDNS, so anyone on the same Wi-Fi could feed the
+# phone a false location. LuneOS has no such receiver; switch it off in
+# geoclue.conf. It stays built, so it can be turned back on there.
+do_install:append() {
+    conf=${D}${sysconfdir}/geoclue/geoclue.conf
+    sed -i '/^\[network-nmea\]/,/^\[/ s/^enable=true$/enable=false/' $conf
+    sed -n '/^\[network-nmea\]/,/^\[/p' $conf | grep -qx 'enable=false' || \
+        bbfatal "geoclue.conf: could not disable the network-nmea source"
+}
