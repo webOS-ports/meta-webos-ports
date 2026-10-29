@@ -1,0 +1,103 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 29 Oct 2026 16:18:32 +0100
+Subject: [PATCH] PmsLogging: keep the message inside the buffer when the
+ prefix is truncated
+
+snprintf() returns the length the "class::function " prefix would have
+had, not what it wrote. A prefix longer than STR_LEN therefore made
+&buffer[len] point past the end of the 512-byte stack buffer, and
+sizeof(buffer) - len wrapped around to a huge size_t, so the following
+vsnprintf() wrote the message beyond the buffer. A negative return
+(encoding error) did the same in the other direction.
+
+Clamp the offset to the last byte of the buffer, and start from an empty
+string when snprintf() fails. The log line is then truncated instead.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ include/public/pmscore/PmsLogging.h | 35 ++++++++++++++++++++---------
+ 1 file changed, 25 insertions(+), 10 deletions(-)
+
+diff --git a/include/public/pmscore/PmsLogging.h b/include/public/pmscore/PmsLogging.h
+index 8ed3371..3074e9a 100644
+--- a/include/public/pmscore/PmsLogging.h
++++ b/include/public/pmscore/PmsLogging.h
+@@ -37,6 +37,21 @@ private:
+     ~PmsLog() { };
+ 
+ public:
++    // snprintf() returns the length the prefix would have had, which is more
++    // than the buffer holds when it is truncated, or a negative value on error.
++    // Return where the message can be appended without leaving the buffer.
++    static size_t PmsPrefixEnd(char *buffer, size_t size, int len)
++    {
++        if (len < 0)
++        {
++            buffer[0] = '\0';
++            return 0;
++        }
++        if ((size_t)len >= size)
++            return size - 1;
++        return (size_t)len;
++    }
++
+     static void log_context_init()
+     {
+         if (pmloglib_ctx == NULL || pmloglib_ctx == kPmLogGlobalContext)
+@@ -57,8 +72,8 @@ public:
+             va_start (args, format);
+ 
+             char buffer[STR_LEN]={0};
+-            int len = snprintf(buffer, sizeof(buffer), "%s::%s ", PmsClass, PmsFunc);
+-            len = vsnprintf(&buffer[len], sizeof(buffer) - len, format, args);
++            size_t len = PmsPrefixEnd(buffer, sizeof(buffer), snprintf(buffer, sizeof(buffer), "%s::%s ", PmsClass, PmsFunc));
++            (void)vsnprintf(&buffer[len], sizeof(buffer) - len, format, args);
+ 
+             pLogger->Debug("%s", buffer);
+ 
+@@ -73,8 +88,8 @@ public:
+             va_list args;
+             va_start (args, format);
+             char buffer[STR_LEN] = {0};
+-            int len = snprintf(buffer, sizeof(buffer), "%s::%s ", PmsClass, PmsFunc);
+-            len = vsnprintf(&buffer[len], sizeof(buffer) - len, format, args);
++            size_t len = PmsPrefixEnd(buffer, sizeof(buffer), snprintf(buffer, sizeof(buffer), "%s::%s ", PmsClass, PmsFunc));
++            (void)vsnprintf(&buffer[len], sizeof(buffer) - len, format, args);
+ 
+             pLogger->Notice("%s", buffer);
+ 
+@@ -89,8 +104,8 @@ public:
+             va_list ar;
+             va_start (ar, format);
+             char buffer[STR_LEN] = {0};
+-            int len = snprintf(buffer, sizeof(buffer), "%s::%s ", PmsClass, PmsFunc);
+-            len = vsnprintf(&buffer[len], sizeof(buffer)-len, format, ar);
++            size_t len = PmsPrefixEnd(buffer, sizeof(buffer), snprintf(buffer, sizeof(buffer), "%s::%s ", PmsClass, PmsFunc));
++            (void)vsnprintf(&buffer[len], sizeof(buffer) - len, format, ar);
+ 
+             pLogger->Info("%s", buffer);
+ 
+@@ -105,8 +120,8 @@ public:
+             va_list ar;
+             va_start (ar, format);
+             char buffer[STR_LEN] = {0};
+-            int len = snprintf(buffer, sizeof(buffer), "%s::%s ", PmsClass, PmsFunc);
+-            len = vsnprintf(&buffer[len], sizeof(buffer)-len, format, ar);
++            size_t len = PmsPrefixEnd(buffer, sizeof(buffer), snprintf(buffer, sizeof(buffer), "%s::%s ", PmsClass, PmsFunc));
++            (void)vsnprintf(&buffer[len], sizeof(buffer) - len, format, ar);
+ 
+             pLogger->Warning("%s", buffer);
+ 
+@@ -122,8 +137,8 @@ public:
+             va_list ar;
+             va_start (ar, format);
+             char buffer[STR_LEN] = {0};
+-            int len = snprintf(buffer, sizeof(buffer), "%s::%s Error=%s(%d) ", PmsClass, PmsFunc, errString, err);
+-            len = vsnprintf(&buffer[len], sizeof(buffer)-len, format, ar);
++            size_t len = PmsPrefixEnd(buffer, sizeof(buffer), snprintf(buffer, sizeof(buffer), "%s::%s Error=%s(%d) ", PmsClass, PmsFunc, errString, err));
++            (void)vsnprintf(&buffer[len], sizeof(buffer) - len, format, ar);
+ 
+             pLogger->Error("%s", buffer);
+ 
