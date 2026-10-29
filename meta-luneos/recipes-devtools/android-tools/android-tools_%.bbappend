@@ -16,8 +16,8 @@ CC:append:class-native = " -std=gnu17"
 CC:append:class-nativesdk = " -std=gnu17"
 
 # adbd starts only while USB debugging and developer mode are both on; see the
-# drop-in. adbd still runs as root with no key authorisation (meta-oe patches
-# 0008, 0011): this gates it, it does not authenticate it.
+# drop-in. Each host also has to be allowed by the user (key authorisation,
+# android-tools_5.1%.bbappend); adbd still runs as root (meta-oe patch 0008).
 FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 SRC_URI += "file://adbd-devmode.conf"
 
