@@ -8,7 +8,9 @@ inherit webos_filesystem_paths
 inherit webos_system_bus
 
 PV = "0.1.0+git"
-SRCREV = "fd7174e8741686a1fbbd4bf730e311db1d965d19"
+SRCREV = "c5a13eeb266679f1284135c6a4827227bdfe0141"
+# c5a13eeb is on herrie/update-node (org.webosports.update PR #25), not yet merged into webOS-ports/webOS-OSE; back to that branch once it is.
+WEBOS_GIT_PARAM_BRANCH = "herrie/update-node"
 
 WEBOS_REPO_NAME = "org.webosports.update"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
