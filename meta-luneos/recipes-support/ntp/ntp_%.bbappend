@@ -7,4 +7,6 @@ do_install:append() {
     chmod 666 ${D}/${localstatedir}/db/ntp-kod
 }
 
-FILES:${PN} += "${localstatedir}/db/ntp-kod"
+# sntp reads the KoD file too, and ntpd itself is no longer installed
+# (VIRTUAL-RUNTIME_ntp), so ship it with sntp.
+FILES:sntp += "${localstatedir}/db/ntp-kod"
