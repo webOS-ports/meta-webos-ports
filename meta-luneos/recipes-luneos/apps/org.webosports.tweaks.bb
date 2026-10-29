@@ -10,9 +10,7 @@ inherit webos_system_bus
 inherit webos_app
 
 PV = "3.0.3+git"
-SRCREV = "da9216c8a190d6ef6a4ddb366ab7301789b7a4a6"
-# da9216c8 is on herrie/tweaks-node (tweaks PR #16), not yet merged into master; back to that branch once it is.
-WEBOS_GIT_PARAM_BRANCH = "herrie/tweaks-node"
+SRCREV = "496207667753479dc1e7efe27f8425562e6ad729"
 
 SERVICE_NAME = "org.webosports.service.tweaks.prefs"
 APP_NAME = "org.webosports.app.tweaks"

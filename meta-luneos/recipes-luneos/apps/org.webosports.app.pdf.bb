@@ -5,9 +5,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=db37b6ead2dec60580595736ff983452"
 
 PV = "2.0.0+git"
 PR = "r1"
-SRCREV = "275a83dc410a5e70cad6d8ca015614d88ea7fc3f"
-# 275a83dc is on herrie/lc-shared-parts (org.webosports.app.pdf PR #23), not yet merged into master; back to that branch once it is.
-WEBOS_GIT_PARAM_BRANCH = "herrie/lc-shared-parts"
+SRCREV = "768915a0cba9e2d45c3a55473d50aaa997127685"
 
 DEPENDS = "qtbase qtdeclarative qtdeclarative-native poppler"
 

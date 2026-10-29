@@ -4,9 +4,7 @@ LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 PV = "1.0.0+git"
-SRCREV = "6d972ade05cb818aff5f6f9b2b091a0492b1264d"
-# 6d972ade is on herrie/lc-shared-parts (org.webosports.app.soundrecorder PR #3), not yet merged into master; back to that branch once it is.
-WEBOS_GIT_PARAM_BRANCH = "herrie/lc-shared-parts"
+SRCREV = "91cf81f51634cfe453ee3516863984d8a60516ed"
 
 DEPENDS = "qtbase qtdeclarative qtdeclarative-native qtmultimedia"
 
