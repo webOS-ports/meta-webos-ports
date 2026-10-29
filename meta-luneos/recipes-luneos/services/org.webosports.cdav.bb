@@ -66,4 +66,35 @@ do_install:append() {
     cp -v ${S}/service/javascript/urlschemes.js ${D}${webos_applicationsdir}/org.webosports.app.cdav/CrossAppTarget/
 }
 
+# Google OAuth client for the Google C+DAV account type. None is committed
+# anywhere: the account app carries "PLACEHOLDER_GOOGLE_CDAV_CLIENT_ID" and
+# "PLACEHOLDER_GOOGLE_CDAV_CLIENT_SECRET" (the client it once had is public and
+# is to be replaced), filled in here from the builder's own values - in
+# local.conf, or a file it includes that no repository holds (luneos-secrets'
+# secrets.conf). Unset, the Google sign-in page says sign-in is not available.
+# The values become part of do_install's task hash, so an sstate cache built
+# with them is as private as they are.
+#
+# Needs a SRCREV with the placeholders (org.webosports.service.contacts.carddav
+# branch herrie/security-WP4-no-oauth-secret); until then the build warns.
+GOOGLE_CDAV_CLIENT_ID ?= ""
+GOOGLE_CDAV_CLIENT_SECRET ?= ""
+
+do_install:append() {
+    js=${D}${webos_applicationsdir}/org.webosports.app.cdav/GoogleOauth/CrossAppTarget.js
+    fill_google_client() {
+        if ! grep -q "\"PLACEHOLDER_$1\"" "$js"; then
+            bbwarn "${PN}: GoogleOauth/CrossAppTarget.js has no PLACEHOLDER_$1; $1 is not used"
+            return 0
+        fi
+        [ -n "$2" ] || return 0
+        case "$2" in
+            *[!A-Za-z0-9._~-]*) bbfatal "$1 holds characters a client id or secret does not" ;;
+        esac
+        sed -i "s|\"PLACEHOLDER_$1\"|\"$2\"|" "$js"
+    }
+    fill_google_client GOOGLE_CDAV_CLIENT_ID "${GOOGLE_CDAV_CLIENT_ID}"
+    fill_google_client GOOGLE_CDAV_CLIENT_SECRET "${GOOGLE_CDAV_CLIENT_SECRET}"
+}
+
 FILES:${PN} += "${webos_applicationsdir} ${webos_servicesdir} ${webos_accttemplatesdir}"
