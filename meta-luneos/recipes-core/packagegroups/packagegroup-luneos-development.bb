@@ -6,23 +6,17 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 inherit packagegroup
 
-VALGRIND = "valgrind"
-# only armv7a is supported
-VALGRIND:arm = ""
-VALGRIND:armv7a = "valgrind"
+# gdb, gdbserver and valgrind are in packagegroup-luneos-development-debug.
 
 RDEPENDS:${PN} = " \
   mingetty \
   serial-forward \
-  gdb \
-  gdbserver \
   powerstat \
   screen \
   evtest \
   strace \
   opkg-utils \
   bc \
-  ${VALGRIND} \
   smemstat \
   binutils \
   \

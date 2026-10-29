@@ -29,3 +29,7 @@ ROOTFS_POSTPROCESS_COMMAND += "\
 # "inherit_defer ${IMGCLASSES}", resolved at the end of parsing) so that our
 # systemd_handle_machine_id override actually wins. See the class for why.
 IMGCLASSES += "luneos_rootfs_postcommands"
+
+# Debuggers, valgrind and the Qt/libdrm example binaries are opt-in for any image:
+# EXTRA_IMAGE_FEATURES += "luneos-development-debug"
+FEATURE_PACKAGES_luneos-development-debug = "packagegroup-luneos-development-debug"

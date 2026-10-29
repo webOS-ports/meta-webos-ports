@@ -58,9 +58,9 @@ MESA_PKGS = " \
     libgles1-mesa \
 "
 
+# libdrm-tests and qtbase-examples, like gdb and valgrind, are in the
+# luneos-development-debug image feature (packagegroup-luneos-development-debug).
 IMAGE_INSTALL:append = " \
-    libdrm-tests \
-    qtbase-examples \
     qtbase-plugins \
     glmark2 \
     kernel-modules \
