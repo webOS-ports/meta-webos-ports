@@ -46,11 +46,15 @@ SRC_URI += " \
     file://main.conf \
     file://brcm43438.service \
     file://bluetooth.service.d/luneos-uinput.conf \
+    file://obex.service.d/luneos-hardening.conf \
 "
 
 # See bluetooth.service.d/luneos-uinput.conf: bluetoothd needs the
 # bluetooth group to open /dev/uinput, or headset buttons never become keys.
 FILES:${PN} += "${systemd_system_unitdir}/bluetooth.service.d/luneos-uinput.conf"
+
+# Sandbox for obexd; see the file.
+FILES:${PN}-obex += "${systemd_system_unitdir}/obex.service.d/luneos-hardening.conf"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "obex.service"
@@ -72,6 +76,8 @@ do_install:append () {
     install -d ${D}${systemd_system_unitdir}/bluetooth.service.d
     install -m 0644 ${UNPACKDIR}/bluetooth.service.d/luneos-uinput.conf \
         ${D}${systemd_system_unitdir}/bluetooth.service.d/luneos-uinput.conf
+    install -D -m 0644 ${UNPACKDIR}/obex.service.d/luneos-hardening.conf \
+        ${D}${systemd_system_unitdir}/obex.service.d/luneos-hardening.conf
 }
 
 do_install:append:raspberrypi4 () {
