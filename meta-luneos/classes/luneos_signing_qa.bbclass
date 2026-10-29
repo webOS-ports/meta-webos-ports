@@ -62,6 +62,10 @@ python luneos_check_srcuri_private_keys() {
     oe.qa.exit_if_errors(d)
 }
 do_unpack[prefuncs] += "luneos_check_srcuri_private_keys"
+# A check, not part of what do_unpack produces: keep it out of the task hash,
+# or adding (or changing) this class changes the signature of every recipe's
+# do_unpack and so rebuilds the whole world, sstate included.
+do_unpack[vardepsexclude] += "luneos_check_srcuri_private_keys"
 
 python luneos_check_modules_signed() {
     if luneos_qa_skipped('unsigned-module', d):
