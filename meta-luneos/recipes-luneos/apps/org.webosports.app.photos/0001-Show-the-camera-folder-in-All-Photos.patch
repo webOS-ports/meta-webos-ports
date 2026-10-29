@@ -1,0 +1,225 @@
+Subject: [PATCH] Show the camera folder in All Photos
+
+The app was the Enyo template: the photo grid only added placeholder text, so
+no photo ever showed. Ask for read access to images, list the DCIM folder through
+the file manager service, show the camera thumbnails, open a photo full size on
+tap, and let "All Photos & Videos" open the grid.
+
+Upstream-Status: Pending
+---
+diff --git a/source/data/data.js b/source/data/data.js
+index f660502..22d089b 100644
+--- a/source/data/data.js
++++ b/source/data/data.js
+@@ -1,5 +1,99 @@
+ /**
+-	For simple applications, you might define all of your models, collections,
+-	and sources in this file.  For more complex applications, you might choose to separate
+-	these kind definitions into multiple files under this folder.
+-*/
+\ No newline at end of file
++	The photo library: the camera's DCIM folder, listed through the file manager service.
++	The camera writes a thumbnail for each photo to .thumbnails, named after the MD5 of the
++	photo's path, so the grid can show small images instead of decoding full-size ones.
++*/
++
++var photoLibrary = {
++	dir: "/media/internal/DCIM",
++	thumbDir: "/media/internal/.thumbnails",
++
++	// Asks the user to let the app read photos; passes true when allowed to callback.
++	askAccess: function(callback) {
++		this.call("luna://com.palm.mediapermissions/request", {rights: {read: ["com.palm.media.image.file:1"]}}, function(reply) {
++			callback(reply.returnValue === true && reply.isAllowed === true);
++		});
++	},
++
++	// Passes the photos in the camera folder, newest first, to callback.
++	list: function(callback) {
++		this.call("luna://org.webosports.service.filemanager/GetDirectories", {dir: this.dir}, function(reply) {
++			var names = reply.returnValue && reply.files ? reply.files.split(",") : [];
++			var photos = names.filter(function(name) {
++				return /\.(jpe?g|png)$/i.test(name);
++			}).sort().reverse();
++			callback(photos.map(function(name) {
++				var path = photoLibrary.dir + "/" + name;
++				return {path: path, thumb: photoLibrary.thumbDir + "/" + md5(path) + ".jpg"};
++			}));
++		});
++	},
++
++	// Calls a luna service through the webOS bridge and passes the parsed reply to callback.
++	call: function(uri, params, callback) {
++		var bridge = new PalmServiceBridge();
++		bridge.onservicecallback = function(msg) {
++			callback(JSON.parse(msg));
++		};
++		bridge.call(uri, JSON.stringify(params));
++	}
++};
++
++// MD5 (RFC 1321) of a string, as lowercase hex.
++function md5(str) {
++	var bytes = unescape(encodeURIComponent(str));
++	var words = [], i, j;
++	for (i = 0; i < bytes.length; i++) {
++		words[i >> 2] = (words[i >> 2] || 0) | (bytes.charCodeAt(i) << ((i % 4) * 8));
++	}
++	words[bytes.length >> 2] = (words[bytes.length >> 2] || 0) | (0x80 << ((bytes.length % 4) * 8));
++	while (words.length % 16 !== 14) {
++		words.push(0);
++	}
++	words.push(bytes.length * 8, 0);
++
++	var K = [], S = [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21];
++	for (i = 0; i < 64; i++) {
++		K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 4294967296) | 0;
++	}
++
++	var a = 0x67452301, b = 0xefcdab89 | 0, c = 0x98badcfe | 0, d = 0x10325476;
++	for (i = 0; i < words.length; i += 16) {
++		var oa = a, ob = b, oc = c, od = d;
++		for (j = 0; j < 64; j++) {
++			var f, g;
++			if (j < 16) {
++				f = (b & c) | (~b & d);
++				g = j;
++			} else if (j < 32) {
++				f = (d & b) | (~d & c);
++				g = (5 * j + 1) % 16;
++			} else if (j < 48) {
++				f = b ^ c ^ d;
++				g = (3 * j + 5) % 16;
++			} else {
++				f = c ^ (b | ~d);
++				g = (7 * j) % 16;
++			}
++			var s = S[Math.floor(j / 16) * 4 + (j % 4)];
++			var x = (a + f + K[j] + words[i + g]) | 0;
++			a = d;
++			d = c;
++			c = b;
++			b = (b + ((x << s) | (x >>> (32 - s)))) | 0;
++		}
++		a = (a + oa) | 0;
++		b = (b + ob) | 0;
++		c = (c + oc) | 0;
++		d = (d + od) | 0;
++	}
++
++	function hex(n) {
++		var h = "";
++		for (var k = 0; k < 4; k++) {
++			h += ("0" + ((n >> (k * 8)) & 0xff).toString(16)).slice(-2);
++		}
++		return h;
++	}
++	return hex(a) + hex(b) + hex(c) + hex(d);
++}
+diff --git a/source/views/librarypanel.js b/source/views/librarypanel.js
+index 48afaf8..5eaa271 100644
+--- a/source/views/librarypanel.js
++++ b/source/views/librarypanel.js
+@@ -15,7 +15,7 @@ enyo.kind({
+ 				]},
+ 				{name: "expandCollapseButton", kind: "enyo.Image", src: "assets/expanded.png"}
+ 			]},
+-			{kind: "LibraryItem", imageSource: "assets/allphotos.png", title: "All Photos & Videos"},
++			{kind: "LibraryItem", imageSource: "assets/allphotos.png", title: "All Photos & Videos", ontap: "showAllPhotos"},
+ 			{kind: "LibraryItem", imageSource: "assets/luneos-logo.png", title: "My LuneOS Device", lastItem: true},
+ 			{kind: "enyo.FittableColumns", style: "margin: 10px 0 25px 15px;", components:[
+ 				{style: "color: white; font-size: 16px; margin-right: 5px; text-transform: uppercase;", content: "All Albums"},
+@@ -32,4 +32,9 @@ enyo.kind({
+ 	helloWorldTap: function(inSender, inEvent) {
+ 		this.$.main.addContent("The button was tapped.<br/>");
+ 	},
++
++	// The photo grid is the second panel, beside the libraries
++	showAllPhotos: function(inSender, inEvent) {
++		this.parent.setIndex(1);
++	},
+ });
+\ No newline at end of file
+diff --git a/source/views/thumbnailpanel.js b/source/views/thumbnailpanel.js
+index 650c725..8ded5a7 100644
+--- a/source/views/thumbnailpanel.js
++++ b/source/views/thumbnailpanel.js
+@@ -11,15 +11,67 @@ enyo.kind({
+ 	components:[
+ 		{kind: "onyx.Toolbar", style: "text-align: center; font-size: 16px; line-height: 26px;", content: "All Photos & Videos"},
+ 		{kind: "enyo.Scroller", style: "background-image: url('assets/bg.png'); border-left: 1px solid #3A3A3A;", fit: true, components: [
+-			{name: "main", classes: "nice-padding", allowHtml: true}
++			{name: "grid", style: "display: flex; flex-wrap: wrap; padding: 4px;"}
+ 		]},
+ 		{kind: "onyx.Toolbar", components: [
+ 			{kind: 'onyx.Grabber', ondragstart: 'grabberDragStart', ondragfinish: 'grabberDragFinish'}
++		]},
++		{name: "viewer", kind: "onyx.Popup", modal: true, floating: true, centered: true, style: "padding: 0; width: 100%; height: 100%; background: black;", ontap: "hideViewer", components: [
++			{name: "photo", kind: "enyo.Image", sizing: "constrain", style: "width: 100%; height: 100%;"}
+ 		]}
+ 	],
+-	
+-	helloWorldTap: function(inSender, inEvent) {
+-		this.$.main.addContent("The button was tapped.<br/>");
++
++	create: function() {
++		this.inherited(arguments);
++		var self = this;
++		photoLibrary.askAccess(function(allowed) {
++			if (!allowed) {
++				self.addMessage("Photo access is off. Allow it when asked to see your photos.");
++				return;
++			}
++			self.loadPhotos();
++		});
++	},
++
++	addMessage: function(text) {
++		this.$.grid.createComponent({content: text, style: "color: lightgrey; padding: 10px;"}, {owner: this});
++		this.$.grid.render();
++	},
++
++	loadPhotos: function() {
++		var self = this;
++		photoLibrary.list(function(photos) {
++			if (photos.length === 0) {
++				self.addMessage("No photos in " + photoLibrary.dir);
++			}
++			photos.forEach(function(photo) {
++				self.$.grid.createComponent({
++					kind: "enyo.Image",
++					src: photo.thumb,
++					photoPath: photo.path,
++					style: "width: 110px; height: 110px; object-fit: cover; margin: 4px;",
++					onerror: "thumbFailed",
++					ontap: "showPhoto"
++				}, {owner: self});
++			});
++			self.$.grid.render();
++		});
++	},
++
++	// Photos without a camera thumbnail show a generic icon instead of decoding the original.
++	thumbFailed: function(inSender, inEvent) {
++		inSender.setSrc("assets/allphotos.png");
++	},
++
++	showPhoto: function(inSender, inEvent) {
++		this.$.photo.setSrc(inSender.photoPath);
++		this.$.viewer.show();
++		return true;
++	},
++
++	hideViewer: function(inSender, inEvent) {
++		this.$.viewer.hide();
++		this.$.photo.setSrc("");
+ 	},
+ 
+ 	grabberDragStart: function(inSender, inEvent) {
+@@ -29,4 +81,4 @@ enyo.kind({
+ 	grabberDragFinish: function(inSender, inEvent) {
+ 		this.doGrabberDragFinish();
+ 	},
+-});
+\ No newline at end of file
++});
