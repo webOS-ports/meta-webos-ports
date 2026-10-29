@@ -9,7 +9,7 @@ RDEPENDS:${PN} += "shared-mime-info"
 
 PV = "0.1.0-14+git"
 SRCREV = "b38cf0420b29dd1407b86129a2c973308e1404f8"
-PR = "r2"
+PR = "r3"
 
 inherit webos_ports_repo
 inherit webos_system_bus
@@ -21,15 +21,22 @@ inherit pkgconfig
 
 LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = " \
+    ${WEBOS_PORTS_GIT_REPO_COMPLETE} \
+    file://mediaindexer.service.d/luneos-hardening.conf \
+"
 
 do_install:append() {
     install -d ${D}${webos_sysconfdir}/db/kinds
     cp -rv ${S}/files/db8/kinds/* ${D}${webos_sysconfdir}/db/kinds
     install -d ${D}${webos_sysconfdir}/db/permissions
     cp -rv ${S}/files/db8/permissions/* ${D}${webos_sysconfdir}/db/permissions
+
+    # Sandbox for the indexer; see the file.
+    install -D -m 0644 ${UNPACKDIR}/mediaindexer.service.d/luneos-hardening.conf \
+        ${D}${systemd_system_unitdir}/mediaindexer.service.d/luneos-hardening.conf
 }
 
-FILES:${PN} += "${webos_sysconfdir}/db/kinds"
+FILES:${PN} += "${webos_sysconfdir}/db/kinds ${systemd_system_unitdir}/mediaindexer.service.d"
 
 CXXFLAGS += "-fpermissive"
