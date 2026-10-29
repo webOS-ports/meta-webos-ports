@@ -6,6 +6,7 @@ require conf/distro/include/luneos-preferred-versions.inc
 require conf/distro/include/luneos-features.inc
 require conf/distro/include/luneos-toolchain.inc
 require conf/distro/include/luneos-sdk.inc
+require conf/distro/include/luneos-sbom.inc
 
 #
 # Form the codename of a release (WEBOS_DISTRO_RELEASE_CODENAME) from a codename
@@ -147,7 +148,7 @@ MACHINEOVERRIDES =. "${WEBOS_EXTRA_MACHINEOVERRIDES}"
 MACHINEOVERRIDES[vardepsexclude] += "WEBOS_EXTRA_MACHINEOVERRIDES"
 OVERRIDES[vardepsexclude] += "WEBOS_EXTRA_MACHINEOVERRIDES"
 
-INHERIT_DISTRO ?= "debian devshell sstate license remove-libtool uninative buildstats buildstats-summary image-buildinfo"
+INHERIT_DISTRO ?= "debian devshell sstate license remove-libtool create-spdx uninative buildstats buildstats-summary image-buildinfo"
 
 SOURCE_MIRROR_URL = "http://sources.webos-ports.org/"
 
