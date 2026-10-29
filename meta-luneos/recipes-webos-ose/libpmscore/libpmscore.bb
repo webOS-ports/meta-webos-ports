@@ -13,7 +13,7 @@ LIC_FILES_CHKSUM = " \
 DEPENDS = "luna-service2 glib-2.0 pmloglib libpbnjson nyx-lib"
 
 WEBOS_VERSION = "1.0.0-11_f7dd5e7ec8cb39154634aab0d70667c29253e0be"
-PR = "r2"
+PR = "r3"
 
 inherit webos_component
 inherit webos_enhanced_submissions
@@ -32,3 +32,11 @@ SRC_URI += "file://0001-CMakeLists-use-CMake-variable-syntax-instead-of-VAR.patc
 # The Pms*Log() helpers passed the formatted message as the format string,
 # which is why the recipe used to build with SECURITY_STRINGFORMAT = "".
 SRC_URI += "file://0002-PmsLogging-pass-the-formatted-message-as-an-argument.patch"
+
+# snprintf() returns the untruncated length, so a long "class::function "
+# prefix moved the message past the end of the stack buffer.
+SRC_URI += "file://0003-PmsLogging-keep-the-message-inside-the-buffer-when-t.patch"
+
+# PmsLogNonClass() (the MSG_*2() macros) also used the formatted message as
+# a format string.
+SRC_URI += "file://0004-PmsLogging-PmsLogNonClass-must-not-format-the-messag.patch"
