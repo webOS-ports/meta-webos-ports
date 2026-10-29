@@ -17,6 +17,12 @@ afterwards grants exactly what the app appears to use.
 
 Applications that already declare "requiredPermissions" are left alone unless
 --force is given.
+
+Whatever the scan finds, only groups listed in the third-party allowlist
+(/usr/share/luna-service2/third-party-grantable.json) are written, and never one
+matching ALWAYS_DENIED: the same rule appinstalld applies when it reads the
+result (PermissionFilter in appinstalld2).  If the allowlist cannot be read,
+nothing is granted.
 """
 
 import argparse
@@ -30,6 +36,23 @@ import tempfile
 
 DEFAULT_CONFIG_PATH = "/etc/palm/luneos-app-permissions.json"
 
+# Groups no installed application may hold, whatever the configuration says.
+# Kept in sync with PermissionFilter::isAlwaysDenied() in appinstalld2.
+ALWAYS_DENIED = (
+    "all",
+    "private",
+    "*.management",
+    "*.devmode",
+    "*.devutility",
+    "*.debug",
+    "*.internal",
+    "*.profiling",
+    "auth.*",
+    "devmode*",
+    "applicationinstall.*",
+    "arescli.*",
+)
+
 DEFAULT_CONFIG = {
     # Directories holding <service>.api.json files that declare which ACG each
     # service method belongs to.  Missing directories are ignored.
@@ -39,6 +62,10 @@ DEFAULT_CONFIG = {
         "/var/luna-service2-dev/api-permissions.d",
     ],
 
+    # The groups an installed application may be given at all
+    # ({"grantable": [...]}).  appinstalld reads the same file.
+    "thirdPartyGrantable": "/usr/share/luna-service2/third-party-grantable.json",
+
     # Granted to every app we touch, on top of whatever the scan finds.  These
     # are the groups a legacy webOS app needs just to be an app: talk to the
     # application manager, run activities, read the system settings.
@@ -46,7 +73,6 @@ DEFAULT_CONFIG = {
         "activity.operation",
         "application.launcher",
         "application.operation",
-        "appmanager.management",
         "settings.query",
         "systemsettings.query",
         "time.query",
@@ -58,12 +84,10 @@ DEFAULT_CONFIG = {
         "activity.operation",
         "application.launcher",
         "application.operation",
-        "appmanager.management",
         "database.operation",
         "download.operation",
         "filecache.operation",
         "notification.operation",
-        "preferences.applicationpropertyquery",
         "preferences.operation",
         "preferences.systempropertyquery",
         "settings.query",
@@ -196,6 +220,29 @@ class AcgIndex(object):
 
 def matches_any(name, patterns):
     return any(fnmatch.fnmatchcase(name, p) for p in patterns)
+
+
+def load_grantable(path):
+    """The allowlist as a set, or None when it cannot be read."""
+    try:
+        with open(path, "r") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError) as exc:
+        log("cannot read allowlist %s: %s" % (path, exc))
+        return None
+    grantable = data.get("grantable") if isinstance(data, dict) else None
+    if not isinstance(grantable, list) or not all(isinstance(g, str) for g in grantable):
+        log("malformed allowlist %s" % path)
+        return None
+    return set(grantable)
+
+
+def grantable_only(groups, grantable):
+    """Keep the groups an installed application may hold."""
+    if grantable is None:
+        return set()
+    return set(g for g in groups
+               if g in grantable and not matches_any(g, ALWAYS_DENIED))
 
 
 def strip_json_comments(text):
@@ -353,7 +400,7 @@ def has_permissions(app_info):
     )
 
 
-def process_app(app_dir, config, index, args):
+def process_app(app_dir, config, index, args, grantable):
     app_info_path = os.path.join(app_dir, "appinfo.json")
     try:
         app_info = read_json_relaxed(app_info_path)
@@ -381,15 +428,17 @@ def process_app(app_dir, config, index, args):
         log("%s: no service calls recognised, applying fallback profile" % app_id)
 
     groups |= set(config["baseline"])
-    result = sorted(
-        g for g in groups if not matches_any(g, config["excludeAlways"])
-    )
+    groups = set(g for g in groups if not matches_any(g, config["excludeAlways"]))
+    withheld = groups - grantable_only(groups, grantable)
+    result = sorted(groups - withheld)
 
     if args.verbose:
         for service in sorted(uris):
             log("%s: uses %s" % (app_id, service))
         for service in sorted(unresolved):
             log("%s: no ACG declares %s, ignored" % (app_id, service))
+    for group in sorted(withheld):
+        log("%s: %s is not grantable to an installed app, left out" % (app_id, group))
 
     log(
         "%s: requiredPermissions (%s) -> %s"
@@ -461,9 +510,11 @@ def main(argv):
     if index.empty:
         log("no api-permissions.d content found, cannot map service calls")
 
+    grantable = load_grantable(config["thirdPartyGrantable"])
+
     report = {}
     for app_dir in iter_app_dirs(args):
-        result = process_app(app_dir, config, index, args)
+        result = process_app(app_dir, config, index, args, grantable)
         if result is not None:
             report[app_dir] = result
 
