@@ -8,9 +8,7 @@ DEPENDS += "db8 glib-2.0 luna-service2 sqlite3 taglib qtbase luna-sysmgr-common"
 RDEPENDS:${PN} += "shared-mime-info"
 
 PV = "0.1.0-14+git"
-SRCREV = "7a9c3656328d25540a851eab7b46f3194f84c60d"
-# 7a9c3656 is on herrie/photos-read-grant (mediaindexer PR #25), not yet merged into master; back to that branch once it is.
-WEBOS_GIT_PARAM_BRANCH = "herrie/photos-read-grant"
+SRCREV = "b38cf0420b29dd1407b86129a2c973308e1404f8"
 PR = "r2"
 
 inherit webos_ports_repo
