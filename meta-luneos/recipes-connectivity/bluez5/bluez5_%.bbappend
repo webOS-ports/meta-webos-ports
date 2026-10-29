@@ -13,6 +13,14 @@ SRC_URI += " \
 "
 
 # Patches coming from webOS OSE
+#
+# 0014 makes bluetoothd ignore the IO capability the SIL registers and pair
+# everything as NoInputNoOutput (Just Works, no MITM protection). It stays
+# until the UI has a pairing agent that shows numeric comparison and passkey
+# prompts and that path has been tested end to end; dropping it earlier
+# risks pairing requests nobody can confirm. main.conf sets
+# JustWorksRepairing = never so a spoofed bonded device cannot silently
+# replace its link key in the meantime.
 SRC_URI += " \
     file://0001-Fix-advertise-time-out-when-default-is-set-to-zero.patch \
     file://0002-Send-disconnect-signal-on-remote-device-disconnect.patch \
