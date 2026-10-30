@@ -1,0 +1,345 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 30 Oct 2026 17:35:10 +0100
+Subject: [PATCH] webOS: ring an incoming WhatsApp call without taking the call
+ audio
+
+An incoming call opened the ALSA voip streams and reported an active
+call to audiod as soon as the offer arrived, when meowcaller sends the
+preaccept, so audiod paused the music and switched to the call route
+while the phone was still ringing. A call nobody answered or one that
+was rejected went through the same, and closing the audio when it
+ended also closed it under any other call still in progress.
+
+The call audio path is now taken by an outgoing call when it is
+placed, as before, and by an incoming call only when it is answered,
+just before Answer starts the media so the microphone is already
+capturing. callaudio.Path counts the calls that hold the path: it is
+opened by the first and closed with the last, and ending a call that
+never held it, such as a rejected or missed one, leaves it alone. If
+Answer fails, the call lets go of the path again.
+
+callaudio is plain Go without cgo, so its tests run on their own:
+  go test ./callaudio
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ call.go                     |  59 ++++++++++++++----
+ callaudio/callaudio.go      |  64 ++++++++++++++++++++
+ callaudio/callaudio_test.go | 117 ++++++++++++++++++++++++++++++++++++
+ 3 files changed, 229 insertions(+), 11 deletions(-)
+ create mode 100644 callaudio/callaudio.go
+ create mode 100644 callaudio/callaudio_test.go
+
+diff --git a/call.go b/call.go
+index 0155a12..54c03cc 100644
+--- a/call.go
++++ b/call.go
+@@ -48,6 +48,7 @@ import (
+ 	"time"
+ 	"unsafe"
+ 
++	"github.com/hoehermann/purple-gowhatsapp/callaudio"
+ 	"github.com/purpshell/meowcaller"
+ 	"github.com/purpshell/meowcaller/diag"
+ 	"github.com/rs/zerolog"
+@@ -94,7 +95,11 @@ var (
+ 	calls   = map[string]*callInfo{} // id -> call
+ 	dialing bool                     // an outgoing dial is in flight (guards double-dial)
+ 
+-	callPrevGCPercent = 100 // GC threshold saved on call start, restored on disconnect
++	callPrevGCPercent = 100 // GC threshold saved when the audio path opens, restored when it closes
++
++	// The device's call audio path (ALSA + the active call reported to audiod), held by the
++	// calls in progress. See openCallAudio.
++	callAudio callaudio.Path
+ 
+ 	// Same *diag.Recorder handed to meowcaller.WithDiagnostics below, kept here too so
+ 	// call.go's own events (which meowcaller's engine never sees, e.g. OnVideoState) can be
+@@ -350,8 +355,7 @@ func setCallState(id, state, cause string) {
+ 			if ci.mic != nil {
+ 				ci.mic.Close()
+ 			}
+-			C.gowhatsapp_call_audio_active(C.int(0)) // close ALSA playback + stop mic capture
+-			debug.SetGCPercent(callPrevGCPercent)   // restore normal GC pacing after the call
++			closeCallAudio(id)
+ 			// keep the disconnected call briefly so CallSynergizer logs it, then drop
+ 			go func(delID string) { time.Sleep(1500 * time.Millisecond); dropCall(delID) }(id)
+ 		}
+@@ -400,15 +404,9 @@ func callBubbleText(id string, missed bool) string {
+ 	}
+ }
+ 
+-// attachMedia connects a call's mic source and speaker sink, and opens the ALSA
+-// playback+capture path so the call is audible on the loudspeaker.
++// attachMedia connects a call's mic source and speaker sink. It does not open the audio
++// path; see openCallAudio for when that happens.
+ func attachMedia(ci *callInfo) {
+-	// The MLow encoder runs on a tight 60ms budget; a mid-call GC stop-the-world can stall the send
+-	// loop and drop a frame. Raise the GC threshold for the call's duration (fewer, and with
+-	// GOMAXPROCS>=2 concurrent, collections), then restore it on disconnect. Scoped to calls so the
+-	// transport's steady-state memory is unaffected.
+-	callPrevGCPercent = debug.SetGCPercent(400)
+-	C.gowhatsapp_call_audio_active(C.int(1)) // open playback + start mic capture -> read_mic
+ 	ci.c.Play(ci.mic)
+ 	ci.c.Receive(meowcaller.SinkFunc(func(frame []float32) {
+ 		if len(frame) == 0 {
+@@ -428,9 +426,41 @@ func attachMedia(ci *callInfo) {
+ 	}))
+ }
+ 
++// openCallAudio opens the ALSA playback+capture path so the call is audible, and with it the
++// active call glue/call.c reports to audiod, which pauses the music and routes to the earpiece.
++// An outgoing call does this when it is placed, an incoming one only once it is answered: while
++// it rings it is not a call in progress yet (callaudio.TakesPathAtStart). Opening it at the
++// offer, as before, told audiod a call was active the moment WhatsApp preaccepted, and the
++// music stopped under the ringtone.
++func openCallAudio(ci *callInfo) {
++	if !callAudio.Take(ci.id) {
++		return // already open, for this call or another one in progress
++	}
++	// The MLow encoder runs on a tight 60ms budget; a mid-call GC stop-the-world can stall the send
++	// loop and drop a frame. Raise the GC threshold for the call's duration (fewer, and with
++	// GOMAXPROCS>=2 concurrent, collections), then restore it on disconnect. Scoped to calls so the
++	// transport's steady-state memory is unaffected.
++	callPrevGCPercent = debug.SetGCPercent(400)
++	C.gowhatsapp_call_audio_active(C.int(1)) // open playback + start mic capture -> read_mic
++}
++
++// closeCallAudio drops call id's hold on the audio path and closes the path when it was the last
++// one. A ringing call that is rejected or missed never took it, so ending it cannot cut off the
++// audio of another call in progress.
++func closeCallAudio(id string) {
++	if !callAudio.Release(id) {
++		return
++	}
++	C.gowhatsapp_call_audio_active(C.int(0)) // close ALSA playback + stop mic capture
++	debug.SetGCPercent(callPrevGCPercent)    // restore normal GC pacing after the call
++}
++
+ func handleIncoming(mcCall *meowcaller.Call) {
+ 	ci := wireCall(mcCall, "incoming", "")
+ 	attachMedia(ci)
++	if callaudio.TakesPathAtStart(ci.origin) {
++		openCallAudio(ci)
++	}
+ 	emitCallState() // ring the UI
+ }
+ 
+@@ -525,6 +555,9 @@ func gowhatsapp_go_call_dial(cAddr *C.char, video C.int) *C.char {
+ 		ci := wireCall(mcCall, "outgoing", addr)
+ 		ci.outgoingVid = v
+ 		attachMedia(ci)
++		if callaudio.TakesPathAtStart(ci.origin) {
++			openCallAudio(ci)
++		}
+ 		if v {
+ 			// NOT mcCall.StartVideo(): that sends a VideoStateUpgradeRequestV2 stanza,
+ 			// meant for upgrading an already-connected audio call to video mid-call. Our
+@@ -614,8 +647,12 @@ func gowhatsapp_go_call_answer(cID *C.char, video C.int) C.int {
+ 		if ci == nil {
+ 			return
+ 		}
++		// Before Answer, which starts the media: the mic has to be capturing by the time the
++		// engine pulls its first frame.
++		openCallAudio(ci)
+ 		if err := ci.c.Answer(); err != nil {
+ 			fmt.Fprintln(os.Stderr, "wacall: answer error:", err)
++			closeCallAudio(id)
+ 			return
+ 		}
+ 		if v {
+diff --git a/callaudio/callaudio.go b/callaudio/callaudio.go
+new file mode 100644
+index 0000000..9d8634c
+--- /dev/null
++++ b/callaudio/callaudio.go
+@@ -0,0 +1,64 @@
++// Package callaudio decides when a WhatsApp call holds the device's call audio
++// path: the ALSA "voip"/"voipsource" streams glue/call.c opens, and the active
++// call it reports to audiod with phone/CallStatusUpdate. audiod pauses the music
++// and routes to the earpiece for an active call, so the path must only be taken
++// by a call that is really in progress.
++//
++// It is plain Go, without cgo, so that it can be tested on its own; call.go
++// does the C calls the answers here ask for.
++package callaudio
++
++import "sync"
++
++// TakesPathAtStart reports whether a call holds the audio path from the moment
++// it is set up. An outgoing call does: the user started it and expects the
++// ringback on the earpiece. An incoming call does not until it is answered:
++// while it rings, the device sounds the ringtone and the music keeps playing.
++func TakesPathAtStart(origin string) bool {
++	return origin != "incoming"
++}
++
++// Path is the call audio path, shared by every call. It is open while at least
++// one call holds it. The zero value is a closed path, ready to use.
++type Path struct {
++	mu      sync.Mutex
++	holders map[string]struct{}
++}
++
++// Take records that call id holds the path. It reports whether the path was
++// closed until now, that is, whether the caller must open it. Taking it again
++// for the same call changes nothing.
++func (p *Path) Take(id string) bool {
++	p.mu.Lock()
++	defer p.mu.Unlock()
++	if p.holders == nil {
++		p.holders = make(map[string]struct{})
++	}
++	if _, ok := p.holders[id]; ok {
++		return false
++	}
++	p.holders[id] = struct{}{}
++	return len(p.holders) == 1
++}
++
++// Release drops call id's hold. It reports whether that was the last hold, that
++// is, whether the caller must close the path. Releasing a call that never took
++// the path, such as a ringing call that was rejected or missed, changes nothing,
++// so it cannot cut off the audio of another call in progress.
++func (p *Path) Release(id string) bool {
++	p.mu.Lock()
++	defer p.mu.Unlock()
++	if _, ok := p.holders[id]; !ok {
++		return false
++	}
++	delete(p.holders, id)
++	return len(p.holders) == 0
++}
++
++// Held reports whether call id holds the path.
++func (p *Path) Held(id string) bool {
++	p.mu.Lock()
++	defer p.mu.Unlock()
++	_, ok := p.holders[id]
++	return ok
++}
+diff --git a/callaudio/callaudio_test.go b/callaudio/callaudio_test.go
+new file mode 100644
+index 0000000..dfc3684
+--- /dev/null
++++ b/callaudio/callaudio_test.go
+@@ -0,0 +1,117 @@
++package callaudio
++
++import (
++	"fmt"
++	"sync"
++	"testing"
++)
++
++func TestTakesPathAtStart(t *testing.T) {
++	if TakesPathAtStart("incoming") {
++		t.Error("a ringing incoming call takes the audio path, so the music stops before it is answered")
++	}
++	if !TakesPathAtStart("outgoing") {
++		t.Error("an outgoing call does not take the audio path when it is placed")
++	}
++}
++
++// The 30 October fault: the music paused while a WhatsApp call was still
++// ringing. Ringing must not touch the path; answering opens it.
++func TestRingingThenAnswered(t *testing.T) {
++	var p Path
++	if p.Held("A") {
++		t.Fatal("a new path is held")
++	}
++	if !p.Take("A") {
++		t.Fatal("answering the call did not open the path")
++	}
++	if !p.Held("A") {
++		t.Fatal("the answered call does not hold the path")
++	}
++	if !p.Release("A") {
++		t.Fatal("hanging up the only call did not close the path")
++	}
++	if p.Held("A") {
++		t.Fatal("the call still holds the path after hanging up")
++	}
++}
++
++func TestRejectedRingingCallLeavesThePathAlone(t *testing.T) {
++	var p Path
++	if p.Release("ringing") {
++		t.Fatal("rejecting a call that never took the path asks to close it")
++	}
++	// With another call in progress, the rejected one must not end its audio.
++	p.Take("active")
++	if p.Release("ringing") {
++		t.Fatal("rejecting a second, ringing call closes the path of the call in progress")
++	}
++	if !p.Held("active") {
++		t.Fatal("the call in progress lost the path")
++	}
++}
++
++func TestTakeTwiceOpensOnce(t *testing.T) {
++	var p Path
++	if !p.Take("A") {
++		t.Fatal("the first take did not open the path")
++	}
++	if p.Take("A") {
++		t.Fatal("taking the path again for the same call asks to open it again")
++	}
++	if !p.Release("A") {
++		t.Fatal("one release after two takes does not close the path")
++	}
++	if p.Release("A") {
++		t.Fatal("a second release asks to close the path again")
++	}
++}
++
++func TestPathStaysOpenUntilTheLastCallEnds(t *testing.T) {
++	var p Path
++	if !p.Take("A") {
++		t.Fatal("the first call did not open the path")
++	}
++	if p.Take("B") {
++		t.Fatal("a second call asks to open a path that is already open")
++	}
++	if p.Release("A") {
++		t.Fatal("ending the first call closes the path the second still holds")
++	}
++	if !p.Release("B") {
++		t.Fatal("ending the last call does not close the path")
++	}
++	if !p.Take("C") {
++		t.Fatal("a call after the path closed does not open it again")
++	}
++}
++
++func TestConcurrentCalls(t *testing.T) {
++	var p Path
++	var wg sync.WaitGroup
++	var mu sync.Mutex
++	opened, closed := 0, 0
++	for i := range 64 {
++		wg.Add(1)
++		go func(id string) {
++			defer wg.Done()
++			o := p.Take(id)
++			c := p.Release(id)
++			mu.Lock()
++			if o {
++				opened++
++			}
++			if c {
++				closed++
++			}
++			mu.Unlock()
++		}(fmt.Sprint(i))
++	}
++	wg.Wait()
++	if opened != closed {
++		t.Fatalf("the path was opened %d times and closed %d times", opened, closed)
++	}
++	if opened == 0 {
++		t.Fatal("the path was never opened")
++	}
++}

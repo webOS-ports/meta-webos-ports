@@ -1,0 +1,288 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 30 Oct 2026 17:34:57 +0100
+Subject: [PATCH] engine: allocate on the caller's FNA relay for inbound calls
+
+Backport of upstream 8e4008f ("fix(engine): allocate on the caller's
+FNA relay for inbound calls (#9)"):
+
+  An inbound call's uplink RTP lands on the relay the caller marked
+  is_fna=1 in the offer. getMediaRelayEndpoint always picked a non-FNA
+  endpoint, so for inbound calls we allocated on a relay the peer never
+  feeds: the call connects but no inbound RTP is ever bridged and the
+  callee hears nothing.
+
+  Prefer the is_fna=1 endpoint when the call is inbound, threading an
+  `inbound` flag from maybeStartMedia (m.direction ==
+  CallDirectionIncoming) through runMedia and connectAndAllocate into
+  getMediaRelayEndpoint. Outbound behaviour is unchanged.
+
+Adapted to this tree: connectAndAllocate keeps the peerSubscriptions
+argument the video media path patch added, and the relay diagnostics
+in onRelay pick the endpoint the same way the media path does.
+
+The "connecting media transport to relay" log line now also says
+whether the endpoint is FNA, whether the call is inbound and how many
+endpoints the relay offered, so a device log shows the choice without
+the diagnostics recorder.
+
+relay_endpoint_test.go pins the choice, including an offer shaped like
+the one an Android caller sent on 30 October 2026, which marks no
+relay is_fna: for that offer the choice does not change. The two
+newMediaSrtcpSender calls in engine_media_test.go get the RTCP CNAME
+argument the video media path patch added, so the package's tests
+compile again.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Backport [https://github.com/purpshell/meowcaller/commit/8e4008f12884cf15dc487f1d4afc83055275f966]
+---
+ engine.go              |  16 ++++--
+ engine_media.go        |  15 +++---
+ engine_media_test.go   |   4 +-
+ relay_endpoint_test.go | 115 +++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 139 insertions(+), 11 deletions(-)
+ create mode 100644 third_party/meowcaller/relay_endpoint_test.go
+
+diff --git a/engine.go b/engine.go
+index cc3668f..5ce1283 100644
+--- a/engine.go
++++ b/engine.go
+@@ -643,6 +643,7 @@ func (e *engine) onRelay(callID string, data *waBinary.Node) {
+ 	}
+ 	rd := parseRelayData(r)
+ 	m.relay = rd
++	inbound := m.direction == CallDirectionIncoming
+ 	e.mu.Unlock()
+ 	// Durable diag: every endpoint this relay block offered, which one
+ 	// getMediaRelayEndpoint() will pick, and the raw address bytes of the FIRST te2 in
+@@ -663,7 +664,7 @@ func (e *engine) onRelay(callID string, data *waBinary.Node) {
+ 				"auth_token_id": ep.authTokenID, "is_fna": ep.isFNA, "addr": addr,
+ 			})
+ 		}
+-		selected := getMediaRelayEndpoint(rd)
++		selected := getMediaRelayEndpoint(rd, inbound)
+ 		selectedAddr := ""
+ 		if selected != nil && len(selected.addresses) > 0 {
+ 			selectedAddr = fmt.Sprintf("%s:%d", selected.addresses[0].ipv4, selected.addresses[0].port)
+@@ -1443,8 +1444,17 @@ func parseRelayData(node *waBinary.Node) *relayData {
+ }
+ 
+ // getMediaRelayEndpoint prefers an outbound (non-FNA, auth_token_id≠0) endpoint, else
+-// any non-FNA, else the first.
+-func getMediaRelayEndpoint(rd *relayData) *relayEndpoint {
++// any non-FNA, else the first. For an inbound call the caller's uplink RTP lands on their
++// FNA-marked relay, so we must allocate on that same relay or the relay never bridges the
++// peer's media (the callee connects but hears nothing).
++func getMediaRelayEndpoint(rd *relayData, inbound bool) *relayEndpoint {
++	if inbound {
++		for i := range rd.endpoints {
++			if e := &rd.endpoints[i]; e.isFNA {
++				return e
++			}
++		}
++	}
+ 	for i := range rd.endpoints {
+ 		if e := &rd.endpoints[i]; !e.isFNA && e.authTokenID != 0 {
+ 			return e
+diff --git a/engine_media.go b/engine_media.go
+index 406eb6a..b4141f6 100644
+--- a/engine_media.go
++++ b/engine_media.go
+@@ -40,6 +40,7 @@ func (e *engine) maybeStartMedia(callID string) {
+ 	m.cancel = cancel
+ 	call := m.call
+ 	callKey, selfLID, peerLID, rd := m.callKey, m.selfLID, m.peerLID, m.relay
++	inbound := m.direction == CallDirectionIncoming
+ 	e.mu.Unlock()
+ 
+ 	if call != nil {
+@@ -47,7 +48,7 @@ func (e *engine) maybeStartMedia(callID string) {
+ 	}
+ 	e.c.log.Info().Str("call_id", callID).Msg("starting media")
+ 	go func() {
+-		if err := e.runMedia(mctx, callID, call, callKey, selfLID, peerLID, rd); err != nil {
++		if err := e.runMedia(mctx, callID, call, callKey, selfLID, peerLID, rd, inbound); err != nil {
+ 			e.c.log.Warn().Err(err).Str("call_id", callID).Msg("media ended")
+ 		}
+ 	}()
+@@ -57,14 +58,16 @@ func (e *engine) maybeStartMedia(callID string) {
+ // the channel and the allocate bytes (re-sent by the keepalive).
+ //
+ // NOT VALIDATED: live-relay only.
+-func (e *engine) connectAndAllocate(ctx context.Context, rd *relayData, streamSsrcs [9]uint32, peerSubscriptions [][]byte) (*relay.RelayMediaChannel, []byte, error) {
++func (e *engine) connectAndAllocate(ctx context.Context, rd *relayData, streamSsrcs [9]uint32, peerSubscriptions [][]byte, inbound bool) (*relay.RelayMediaChannel, []byte, error) {
+ 	log := e.c.log
+-	ep := getMediaRelayEndpoint(rd)
++	ep := getMediaRelayEndpoint(rd, inbound)
+ 	if ep == nil || len(ep.addresses) == 0 {
+ 		return nil, nil, fmt.Errorf("relay has no usable endpoint")
+ 	}
+ 	addr := &net.UDPAddr{IP: net.ParseIP(ep.addresses[0].ipv4), Port: int(ep.addresses[0].port)}
+-	log.Info().Str("relay_name", ep.relayName).Str("addr", addr.String()).Msg("connecting media transport to relay")
++	log.Info().Str("relay_name", ep.relayName).Str("addr", addr.String()).
++		Bool("is_fna", ep.isFNA).Bool("inbound", inbound).Int("endpoint_count", len(rd.endpoints)).
++		Msg("connecting media transport to relay")
+ 	e.c.diag.Emit("relay", map[string]any{
+ 		"event": "endpoint", "relay_name": ep.relayName,
+ 		"ipv4": ep.addresses[0].ipv4, "port": ep.addresses[0].port, "token_id": ep.tokenID,
+@@ -150,7 +153,7 @@ func (e *engine) connectAndAllocate(ctx context.Context, rd *relayData, streamSs
+ // out with the allocate at t+0, BEFORE any RTP; no STUN binding-requests are ever sent.
+ //
+ // NOT VALIDATED: live-relay only.
+-func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKey []byte, selfLID, peerLID string, rd *relayData) error {
++func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKey []byte, selfLID, peerLID string, rd *relayData, inbound bool) error {
+ 	log := e.c.log
+ 	selfParticipantID := rtp.FormatE2ESrtpParticipantID(selfLID)
+ 	ssrc, err := rtp.DeriveWasmParticipantSsrc(callID, selfParticipantID, 0, log)
+@@ -189,7 +192,7 @@ func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKe
+ 	// rejected allocate (no ALLOCATE-SUCCESS at all) is strictly worse than the current
+ 	// baseline (ALLOCATE-SUCCESS + consent PONG, just no peer media bridged). Whatever the
+ 	// real mechanism for requesting the peer's streams is, it is not this attribute.
+-	ch, allocate, err := e.connectAndAllocate(ctx, rd, streamSsrcs, nil)
++	ch, allocate, err := e.connectAndAllocate(ctx, rd, streamSsrcs, nil, inbound)
+ 	if err != nil {
+ 		return err
+ 	}
+diff --git a/engine_media_test.go b/engine_media_test.go
+index 6aa8b9b..44618f2 100644
+--- a/engine_media_test.go
++++ b/engine_media_test.go
+@@ -99,7 +99,7 @@ func TestVideoSenderGatesUpgradeUntilPeerAcceptance(t *testing.T) {
+ }
+ 
+ func TestMediaSrtcpSenderProtectsVideoReport(t *testing.T) {
+-	sender, err := newMediaSrtcpSender(iota32(), "111111111111111:0@lid", 0x55667788, true)
++	sender, err := newMediaSrtcpSender(iota32(), "111111111111111:0@lid", 0x55667788, true, rtp.BuildWhatsappRtcpCname([12]byte{}))
+ 	if err != nil {
+ 		t.Fatalf("sender: %v", err)
+ 	}
+@@ -126,7 +126,7 @@ func TestMediaSrtcpReceiverRekeysForAnsweringDevice(t *testing.T) {
+ 	if err != nil {
+ 		t.Fatalf("receiver: %v", err)
+ 	}
+-	sender, err := newMediaSrtcpSender(callKey, "222222222222222:7@lid", ssrc, true)
++	sender, err := newMediaSrtcpSender(callKey, "222222222222222:7@lid", ssrc, true, rtp.BuildWhatsappRtcpCname([12]byte{}))
+ 	if err != nil {
+ 		t.Fatalf("sender: %v", err)
+ 	}
+diff --git a/relay_endpoint_test.go b/relay_endpoint_test.go
+new file mode 100644
+index 0000000..453d08d
+--- /dev/null
++++ b/relay_endpoint_test.go
+@@ -0,0 +1,115 @@
++package meowcaller
++
++import (
++	"testing"
++
++	waBinary "go.mau.fi/whatsmeow/binary"
++)
++
++func te2(relayID, tokenID, authTokenID, isFNA, name string, addr []byte) waBinary.Node {
++	attrs := waBinary.Attrs{
++		"relay_id": relayID, "relay_name": name, "token_id": tokenID,
++		"auth_token_id": authTokenID,
++	}
++	if isFNA != "" {
++		attrs["is_fna"] = isFNA
++	}
++	return waBinary.Node{Tag: "te2", Attrs: attrs, Content: addr}
++}
++
++func relayNode(endpoints ...waBinary.Node) *waBinary.Node {
++	return &waBinary.Node{Tag: "relay", Content: endpoints}
++}
++
++// TestGetMediaRelayEndpoint pins which relay a call allocates on. The caller's
++// uplink lands on the relay it marked is_fna=1, so an inbound call has to
++// allocate there, or the relay never bridges the caller's media and the callee
++// hears nothing. Outbound calls keep the non-FNA preference.
++func TestGetMediaRelayEndpoint(t *testing.T) {
++	ams := []byte{57, 144, 223, 57, 0x0d, 0x96}
++	dus := []byte{157, 240, 27, 129, 0x0d, 0x96}
++	fra := []byte{157, 240, 1, 1, 0x0d, 0x96}
++	cases := []struct {
++		name    string
++		relay   *waBinary.Node
++		inbound bool
++		want    string
++	}{
++		{
++			name: "inbound picks the caller's FNA relay",
++			relay: relayNode(
++				te2("0", "1", "1", "", "ams2c01", ams),
++				te2("1", "0", "0", "1", "dus1c01", dus),
++			),
++			inbound: true,
++			want:    "dus1c01",
++		},
++		{
++			name: "outbound keeps the authenticated non-FNA relay",
++			relay: relayNode(
++				te2("0", "1", "1", "", "ams2c01", ams),
++				te2("1", "0", "0", "1", "dus1c01", dus),
++			),
++			inbound: false,
++			want:    "ams2c01",
++		},
++		{
++			name: "outbound falls back to any non-FNA relay",
++			relay: relayNode(
++				te2("0", "0", "0", "1", "dus1c01", dus),
++				te2("1", "1", "0", "", "fra3c01", fra),
++			),
++			inbound: false,
++			want:    "fra3c01",
++		},
++		{
++			name: "inbound takes the first FNA relay when there are several",
++			relay: relayNode(
++				te2("0", "1", "1", "", "ams2c01", ams),
++				te2("1", "0", "0", "1", "dus1c01", dus),
++				te2("2", "0", "0", "1", "fra3c01", fra),
++			),
++			inbound: true,
++			want:    "dus1c01",
++		},
++		{
++			// The incoming offer of 30 October 2026 (call 001C6133...) marks no relay
++			// is_fna and gives none an auth token: both directions take the first.
++			name: "inbound without an FNA relay takes the first non-FNA one",
++			relay: relayNode(
++				te2("0", "1", "0", "", "ams2c01", ams),
++				te2("1", "0", "0", "", "dus1c01", dus),
++			),
++			inbound: true,
++			want:    "ams2c01",
++		},
++		{
++			name: "is_fna other than 1 is not FNA",
++			relay: relayNode(
++				te2("0", "1", "0", "0", "ams2c01", ams),
++				te2("1", "0", "0", "", "dus1c01", dus),
++			),
++			inbound: true,
++			want:    "ams2c01",
++		},
++	}
++	for _, c := range cases {
++		rd := parseRelayData(c.relay)
++		ep := getMediaRelayEndpoint(rd, c.inbound)
++		if ep == nil {
++			t.Errorf("%s: no endpoint picked", c.name)
++			continue
++		}
++		if ep.relayName != c.want {
++			t.Errorf("%s: picked %s, want %s", c.name, ep.relayName, c.want)
++		}
++	}
++}
++
++func TestGetMediaRelayEndpointEmpty(t *testing.T) {
++	for _, inbound := range []bool{false, true} {
++		if ep := getMediaRelayEndpoint(&relayData{}, inbound); ep != nil {
++			t.Errorf("inbound=%v: picked %s from a relay with no endpoints", inbound, ep.relayName)
++		}
++	}
++}
