@@ -1,6 +1,7 @@
 # adbd 5.1.1's key authorisation (audit C2), in a bbappend of its own because
-# the patches are against 5.1.1's sources (meta-oe's dynamic-layers selinux
-# recipe, 29.0.6, is a different adbd).
+# the patches are against 5.1.1's sources. LuneOS builds 35.0.2 now
+# (luneos-preferred-versions.inc, android-tools_35%.bbappend); this keeps
+# 5.1.1 safe should PREFERRED_VERSION_android-tools be set back to it.
 #
 # 0001: every host has to be allowed by the user, as with ro.adb.secure=1.
 #       adbd asks on /run/adbd/auth, root's only, where
@@ -21,9 +22,20 @@ SRC_URI += " \
     file://0003-adb-check-saved-keys-with-OpenSSL-skip-a-damaged-adb_keys-line.patch;patchdir=system/core \
 "
 
-# The keys' directory: root's alone. devmode writes adb_keys in it (0600).
-do_install:append:class-target() {
-    install -d -m 0700 ${D}${localstatedir}/lib/adbd
-}
-
-FILES:${PN}-adbd += "${localstatedir}/lib/adbd"
+# android-tools 5.1.1 is 2015 AOSP source and does not compile with a C23 host
+# compiler. Ubuntu 26.04's GCC 15.2 defaults to -std=gnu23, where an empty
+# parameter list means "takes no arguments" rather than "unspecified":
+#
+#   ext4_utils/allocate.h:61: u32 allocate_inode();
+#   ext4_utils/contents.c:115: error: too many arguments to function
+#                              'allocate_inode'; expected 0, have 1
+#
+# -native and -nativesdk builds use the host compiler, so they are the ones that
+# break; the target build uses OE's own toolchain and is unaffected. The recipe
+# already appends to CC for these classes, so do the same rather than fighting
+# CFLAGS, which its makefiles handle inconsistently. (35.0.2 sets -std=gnu2x
+# itself and needs none of this.)
+#
+# Not a LuneOS-specific problem - this belongs upstream in meta-oe.
+CC:append:class-native = " -std=gnu17"
+CC:append:class-nativesdk = " -std=gnu17"
