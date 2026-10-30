@@ -35,6 +35,10 @@ SRC_URI += "file://0009-service-answer-a-held-Connect-when-the-retry-after-in.pa
 # it, so a network joined with its own address showed the hardware one.
 SRC_URI += "file://0010-ipconfig-follow-the-MAC-address-of-the-link.patch"
 
+# A saved service's "Modified" time could load an hour off: mktime() was
+# given an uninitialised tm_isdst.
+SRC_URI += "file://0011-util-let-mktime-work-out-DST-in-util_iso8601_to_time.patch"
+
 # See connman-vpn.service.d/luneos-caps.conf for why: upstream's
 # CapabilityBoundingSet on connman-vpn.service is missing CAP_SYS_ADMIN and
 # CAP_DAC_OVERRIDE, which the l2tp plugin's client-side pppd needs to open
