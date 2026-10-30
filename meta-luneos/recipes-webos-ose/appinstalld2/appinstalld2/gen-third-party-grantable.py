@@ -57,7 +57,7 @@ ALWAYS_DENIED = [
 GRANT = {
     "public": "Default for an appinfo.json without requiredPermissions; maps to no method.",
     "application.operation": "registerApp/registerNativeApp, own app info and life cycle; appinstalld adds it to every QML app.",
-    "application.launcher": "launch/open other apps (links, share). REVIEW: also close/closeByAppId/lockApp/pause of any app.",
+    "application.launcher": "launch/open other apps (links, share); com.palm.applicationManager/launch and open (luna-appmanager 9ad535e; a2810d2 stops open from installing a downloaded ipk for an app). REVIEW: also close/closeByAppId/lockApp/pause of any app.",
     "notification.operation": "createToast/createAlert/createNotification.",
     "activity.operation": "Activity manager: schedule and adopt the app's own activities.",
     "activity.query": "Read-only activity status.",
@@ -97,8 +97,25 @@ GRANT = {
 
 # Groups not granted, with the reason; only used for the report.  Patterns in
 # ALWAYS_DENIED need no entry here.
+#
+# Three *.management groups were checked for methods apps need (WP7 follow-up),
+# against the callers in a qemux86-64 image and the app sources; none needs a
+# grantable sibling:
+#   image.management      com.webos.service.image convert/resize/imageInfo:
+#                         LunaSysService runs as root and writes "dest" where
+#                         the caller says.  Called only by the contacts
+#                         service, its linker and the contacts framework
+#                         (none of which holds it, so those calls are refused
+#                         today); only the browser holds it.
+#   batteryd.management   batteryd's status queries sit next to
+#                         setFakeBatteryMode and batterySaverOnOff.  Called
+#                         only by the compositor, settings, sysmonitor, backup,
+#                         sleepd/alarm/power; legacy apps ask com.palm.power,
+#                         which nothing registers.
+#   telephony.management  already has a read-only sibling, telephony.query
+#                         (denied below: subscriberIdQuery).
 DENY = {
-    "appmanager.management": "Contains com.palm.appinstaller/install and installNoVerify. FOLLOW-UP: move com.palm.applicationManager/open and the getHandlerFor*/listAllHandlers* lookups to application.launcher, or legacy apps cannot open links.",
+    "appmanager.management": "Contains com.palm.appinstaller/install and installNoVerify. com.palm.applicationManager/open is also in application.launcher (luna-appmanager 9ad535e). The getHandlerFor*/listAllHandlers* lookups stay here: only system apps call them.",
     "accountsservice.operation": "readCredentials/writeCredentials of accounts.",
     "keymanager-service.operation": "Key store (export/fetchKey/import).",
     "keymanager-service.backup": "Key store backup.",
