@@ -26,6 +26,7 @@ SRC_URI = " \
     file://0002-Include-the-fixed-width-integer-headers-where-they-a.patch \
     file://0003-NetworkSocketPosix-fall-back-to-IPv4-when-the-kernel.patch \
     file://0004-AudioPulse-open-the-capture-stream-on-the-input-devi.patch \
+    file://0005-AudioPulse-terminate-the-executable-path-before-taki.patch \
 "
 SRCREV = "6c82c9de85cca69ea099a738fcbd2ab2de4f839d"
 
