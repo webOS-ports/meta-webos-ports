@@ -11,7 +11,7 @@ CLOUD_AUTH_APP = "com.palm.app.webdav-auth"
 
 # Not merged into luneos-synergy-connectors main yet (pull request #15), so the pin in
 # luneos-synergy-connectors-srcrev.inc has no cloud/webdav. Until it does, this recipe alone
-# builds from that pull request's branch; cloud/_core there is the same as at the pin. Drop
+# builds from that pull request's branch (rebased on main: its cloud/_core/service is the pin's; only cloud/<x> is packaged here). Drop
 # these two lines when the pull request is merged and LSC_SRCREV is bumped past it.
 LSC_BRANCH = "herrie/webdav"
-LSC_SRCREV = "d0e309b38ab8d4ba7856a5296de6a546017b5698"
+LSC_SRCREV = "867ec909a0c53320aa91625f38032d13e2758648"

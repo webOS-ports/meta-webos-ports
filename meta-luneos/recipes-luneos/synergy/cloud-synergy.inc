@@ -1,7 +1,7 @@
 # Shared bits for the cloud/file Synergy connectors that live in luneos-synergy-connectors (cloud/).
 #
 # These are the DOCUMENTS / PHOTO.UPLOAD account types (Dropbox, Box, OneDrive, Google Drive,
-# pCloud, Yandex Disk, kDrive, MEGA, Koofr, HiDrive, S3, Flickr, SmugMug, Immich, WebDAV). Each one
+# pCloud, Yandex Disk, kDrive, MEGA, Koofr, HiDrive, S3, Flickr, SmugMug, Immich, WebDAV, PhotoPrism). Each one
 # is a node service (com.palm.service.<x>, a package.json run-js-service require()s), an account template
 # (com.palm.<x>) and, for the ones that do not sign in through the shared OAuth page, a dedicated
 # validator app. Every service requires the shared runtime as ../_cloudcore/node, so

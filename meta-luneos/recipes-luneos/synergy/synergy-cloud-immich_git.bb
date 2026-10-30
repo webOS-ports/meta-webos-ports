@@ -11,7 +11,7 @@ CLOUD_AUTH_APP = "com.palm.app.immich-auth"
 
 # Not merged into luneos-synergy-connectors main yet (pull request #13), so the pin in
 # luneos-synergy-connectors-srcrev.inc has no cloud/immich. Until it does, this recipe alone
-# builds from that pull request's branch; cloud/_core there is the same as at the pin. Drop
+# builds from that pull request's branch (rebased on main: its cloud/_core/service is the pin's; only cloud/<x> is packaged here). Drop
 # these two lines when the pull request is merged and LSC_SRCREV is bumped past it.
 LSC_BRANCH = "herrie/immich"
-LSC_SRCREV = "b6d252cedc91c25a7127ddd61e3d4f00ea25fe1f"
+LSC_SRCREV = "618952b762b3c14c971e6418f43aacb5368c6fb3"
