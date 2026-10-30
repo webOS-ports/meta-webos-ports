@@ -15,7 +15,9 @@ LIC_FILES_CHKSUM = " \
 # qtbase-native, gated on the wayland DISTRO_FEATURE which LuneOS sets.
 DEPENDS = "qtdeclarative wayland-native qtwayland qtbase-native qt-features-webos pmloglib webos-wayland-extensions glib-2.0 qtwayland-webos"
 
-SRCREV = "3162fe99388b9015a2754dcdc5c6911e6295120a"
+SRCREV = "46c1d6039547f5aa0fc26746db2aade6ac0dc098"
+# 46c1d603 is on herrie/headset-media-keys (luna-surfacemanager PR #17), not yet merged into webOS-ports/webOS-OSE; back to that branch once it is.
+WEBOS_GIT_PARAM_BRANCH = "herrie/headset-media-keys"
 
 PV = "2.0.0-424"
 

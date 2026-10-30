@@ -12,7 +12,9 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "glib-2.0 luna-service2 libpbnjson pmloglib"
 
-SRCREV = "23947e3f9c7d3b05548baa2247ce021f0986393d"
+SRCREV = "f6da50b302fe4663f0720fd510d389a76847acf0"
+# f6da50b3 is on herrie/headset-media-keys (com.webos.service.mediacontroller PR #2), not yet merged into webOS-ports/webOS-OSE; back to that branch once it is.
+WEBOS_GIT_PARAM_BRANCH = "herrie/headset-media-keys"
 
 PV = "1.0.0-41"
 

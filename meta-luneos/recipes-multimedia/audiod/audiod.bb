@@ -41,7 +41,9 @@ RDEPENDS:${PN} += "pulseaudio-module-remap-sink pulseaudio-module-remap-source"
 # branch, which also starts from the submission below.
 #WEBOS_VERSION = "1.0.0-78_127c6cd6c9247979b4ead42d9b8fc8b5c48b47a2"
 PV = "1.0.0-79+git"
-SRCREV = "98e96d94c5c5fc4daf5a0ecc244dce6d714e9a9e"
+SRCREV = "608cc5bb102bb9312b812023dfae756446ed2b17"
+# 608cc5bb is on herrie/unplug-keeps-bluetooth (audiod-pro PR #9), not yet merged into webOS-ports/webOS-OSE; back to that branch once it is.
+WEBOS_GIT_PARAM_BRANCH = "herrie/unplug-keeps-bluetooth"
 PR = "r38"
 
 inherit webos_component

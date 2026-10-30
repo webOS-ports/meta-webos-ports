@@ -24,7 +24,9 @@ RDEPENDS:${PN} += "maliit-framework-webos qtsvg-plugins qtmultimedia-qmlplugins"
 RRECOMMENDS:${PN} += "hunspell-dictionaries"
 
 
-SRCREV = "f8453b96e552c1e8cde94407468268acdb7a03f5"
+SRCREV = "d87beb99d89ab5b5d39741c52704f0104883ef00"
+# d87beb99 is on herrie/osk-stuck-repeat (webos-keyboard PR #117), not yet merged into master; back to that branch once it is.
+WEBOS_GIT_PARAM_BRANCH = "herrie/osk-stuck-repeat"
 PV = "0.99.2+git"
 PR = "r33"
 
@@ -32,7 +34,7 @@ PR = "r33"
 # as patches carried here - unlike presage or imemanager, which are genuinely
 # upstream/third-party. 0001-0003 (hunspell API compat, hardware keyboard
 # input, Qt6Core5Compat linking) and the db8-backed user dictionary are all
-# real commits on herrie/dict-backup now; this SRCREV is the tip of that.
+# real commits now (herrie/dict-backup, merged into master).
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 # a lot of cases like:

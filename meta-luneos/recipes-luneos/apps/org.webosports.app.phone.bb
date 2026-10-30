@@ -16,7 +16,9 @@ inherit webos_app
 
 PV = "0.1.1-0+git"
 
-SRCREV = "49927a5ba9b74806ca26bd7d9867f6ea74726e74"
+SRCREV = "3651daab82a1efc872329fb42751c68cd38b06d6"
+# 3651daab is on herrie/incoming-call (org.webosports.app.phone PR #77), not yet merged into master; back to that branch once it is.
+WEBOS_GIT_PARAM_BRANCH = "herrie/incoming-call"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 

@@ -14,10 +14,11 @@ inherit webos_app
 inherit pkgconfig
 
 PV = "0.4.0-1+git"
-SRCREV = "2bd1413be3345a3d0f54362a3d898b0d404fb35b"
+SRCREV = "521b5c87b6184484dbf56f736914523cd0cc9a73"
 
 # This app is developed on qml-based, not master.
-WEBOS_GIT_PARAM_BRANCH = "qml-based"
+# 521b5c87 is on herrie/bt-discovery-trust (org.webosports.app.settings PR #152), not yet merged into qml-based; back to that branch once it is.
+WEBOS_GIT_PARAM_BRANCH = "herrie/bt-discovery-trust"
 
 WEBOS_REPO_NAME = "org.webosports.app.settings"
 
