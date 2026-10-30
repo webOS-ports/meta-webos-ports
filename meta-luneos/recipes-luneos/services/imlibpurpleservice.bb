@@ -42,6 +42,7 @@ RRECOMMENDS:${PN} += " \
     purple-googlechat \
     purple-teams \
     purple-combined \
+    purple-presage \
     tdlib-purple \
     funyahoo-plusplus \
     icyque \
@@ -65,7 +66,7 @@ RRECOMMENDS:${PN} += " \
     libpurple-protocol-zephyr \
 "
 
-# All six recipes-support/pidgin plug-ins are enabled. purple-combined provides TWO prpls from one
+# All seven recipes-support/pidgin plug-ins are enabled. purple-combined provides TWO prpls from one
 # shared object -- prpl-hehoe-whatsmeow (WhatsApp) and prpl-gometa (Facebook Messenger) -- because
 # they share a Go runtime.
 #
@@ -76,11 +77,10 @@ RRECOMMENDS:${PN} += " \
 #                    constrained builder (its recipe caps PARALLEL_MAKE at 2 for that reason).
 #   purple-combined  needs network access in do_compile to fetch Go modules through GOPROXY,
 #                    the same way influxdb and etcd do in this layer set.
-#
-# purple-presage (Signal) is NOT listed: it cannot build on scarthgap at all. Its Cargo.lock is
-# lockfile version 4 (cargo 1.78+) and its graph needs rust 1.86 via icu_* 2.2.0, against the
-# 1.75 this layer set provides. The recipe is complete and waiting for a newer toolchain -- see
-# purple-presage_git.bb. Signal also does not work on webOS at runtime regardless.
+#   purple-presage   (Signal) a cargo build of about 400 crates, with SQLCipher and ring
+#                    compiled through cc-rs. It was left out while the layer set only had rust
+#                    1.75; the rust 1.94 of wrynose builds it (see purple-presage_git.bb). It
+#                    brings signal-call-media, the engine for com.palm.signal.call.
 
 do_install:append() {
     cp -R --no-dereference --preserve=mode,links -v ${S}/files/etc ${D}
