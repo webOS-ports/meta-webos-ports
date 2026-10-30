@@ -27,6 +27,11 @@ SRC_URI += "file://0007-dhcp-add-DHCPHostname-to-send-a-generic-host-name.patch"
 # opts a network out.
 SRC_URI += "file://0008-wifi-give-every-network-its-own-stable-MAC-address.patch"
 
+# A user Connect held while the agent asks for a passphrase was never
+# answered when the retry failed at once, so every later Connect on that
+# network got InProgress until connmand restarted.
+SRC_URI += "file://0009-service-answer-a-held-Connect-when-the-retry-after-in.patch"
+
 # See connman-vpn.service.d/luneos-caps.conf for why: upstream's
 # CapabilityBoundingSet on connman-vpn.service is missing CAP_SYS_ADMIN and
 # CAP_DAC_OVERRIDE, which the l2tp plugin's client-side pppd needs to open

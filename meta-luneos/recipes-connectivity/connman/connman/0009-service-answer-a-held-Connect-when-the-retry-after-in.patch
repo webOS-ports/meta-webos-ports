@@ -1,0 +1,70 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 30 Oct 2026 18:39:40 +0100
+Subject: [PATCH] service: answer a held Connect when the retry after input
+ fails
+
+A user Connect on a WiFi network without a stored passphrase is held in
+service->pending while the agent is asked for one. When the agent
+answers, request_input_cb() starts the connection again with
+__connman_service_connect() and drops what it returns. If that call
+fails at once - the service is already connecting or connected, IPv4
+and IPv6 are both switched off, the agent has to be asked again and
+none is left, and so on - nothing answers the held Connect: no attempt
+is running, so neither a state change nor the connect timeout comes,
+and Disconnect finds nothing to disconnect. Every later Connect on the
+service is then refused with InProgress until connmand restarts.
+report_error_cb() drops the result of an agent-requested retry in the
+same way.
+
+Answer the held Connect with the error in both places, as
+connect_service() already does for the first attempt.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/service.c | 21 +++++++++++++++++----
+ 1 file changed, 17 insertions(+), 4 deletions(-)
+
+diff --git a/src/service.c b/src/service.c
+index 41f2a2e..617653d 100644
+--- a/src/service.c
++++ b/src/service.c
+@@ -9042,10 +9042,14 @@ static void report_error_cb(void *user_context, bool retry,
+ {
+ 	struct connman_service *service = user_context;
+ 
+-	if (retry)
+-		__connman_service_connect(service,
++	if (retry) {
++		int err = __connman_service_connect(service,
+ 					CONNMAN_SERVICE_CONNECT_REASON_USER);
+-	else {
++
++		/* See request_input_cb(): answer a retry that did not start. */
++		if (err != -EINPROGRESS)
++			reply_pending(service, -err);
++	} else {
+ 		/* It is not relevant to stay on Failure state
+ 		 * when failing is due to wrong user input */
+ 		__connman_service_clear_error(service);
+@@ -9169,9 +9173,18 @@ static void request_input_cb(struct connman_service *service,
+ 		/* We forget any previous error. */
+ 		clear_error(service);
+ 
+-		__connman_service_connect(service,
++		err = __connman_service_connect(service,
+ 					CONNMAN_SERVICE_CONNECT_REASON_USER);
+ 
++		/*
++		 * The Connect that asked for the input is still waiting. If
++		 * the attempt did not start, answer it now, as
++		 * connect_service() does: nothing else will, and until it is
++		 * answered every Connect on this service gets InProgress.
++		 */
++		if (err != -EINPROGRESS)
++			reply_pending(service, -err);
++
+ 	} else if (err == -ENOKEY) {
+ 		__connman_service_indicate_error(service,
+ 					CONNMAN_SERVICE_ERROR_INVALID_KEY);
