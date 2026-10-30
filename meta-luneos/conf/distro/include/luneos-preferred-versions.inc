@@ -27,6 +27,24 @@ PREFERRED_VERSION_go-cross-${TUNE_PKGARCH} = "${GOVERSION}"
 PREFERRED_VERSION_go-crosssdk-${SDK_SYS} = "${GOVERSION}"
 PREFERRED_VERSION_go-cross-canadian-${TRANSLATED_TARGET_ARCH} = "${GOVERSION}"
 
+# android-tools 35.0.2 rather than wrynose's 5.1.1. The recipes (and
+# android-libboringssl, which they link) are carried in
+# meta-luneos-backports-6.1/recipes-devtools, from meta-openembedded blacksail;
+# drop them and this block when the layer moves to a release that has them.
+# LuneOS's adbd changes are in meta-luneos android-tools_35%.bbappend.
+PREFERRED_VERSION_android-tools = "35.0.2"
+PREFERRED_VERSION_android-tools-native = "35.0.2"
+# blacksail has one android-tools-conf, the configfs one, which also PROVIDES
+# and RPROVIDES android-tools-conf-configfs (what android-tools 35.0.2
+# RDEPENDS on). wrynose still has its own android-tools-conf-configfs recipe
+# too, and two providers of one package must not both reach an image (the
+# blacksail one RCONFLICTS with it), so name blacksail's for both names. A
+# local.conf that sets PREFERRED_RPROVIDER_android-tools-conf to
+# "android-tools-conf-configfs" has to drop that line.
+PREFERRED_PROVIDER_android-tools-conf ?= "android-tools-conf"
+PREFERRED_PROVIDER_android-tools-conf-configfs ?= "android-tools-conf"
+PREFERRED_RPROVIDER_android-tools-conf-configfs ?= "android-tools-conf"
+
 # Per-app V8 snapshots stay off under M151.
 # ----------------------------------------
 # webos_enactjs_app.bbclass defaults WEBOS_ENACTJS_PACK_OPTS to include
