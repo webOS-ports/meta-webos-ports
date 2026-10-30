@@ -36,10 +36,6 @@ FILES:${PN} += " \
     ${systemd_system_unitdir}/serial-getty@.service.d/ \
 "
 
-# serial-uart-present is a /bin/sh script
-VIRTUAL-RUNTIME_bash ?= "bash"
-RDEPENDS:${PN}:append:class-target = " ${VIRTUAL-RUNTIME_bash}"
-
 # Halium: keep PIDs within 32-bit bionic's limit; see the file.
 SRC_URI:append:halium = " file://halium-pid-max.conf"
 
