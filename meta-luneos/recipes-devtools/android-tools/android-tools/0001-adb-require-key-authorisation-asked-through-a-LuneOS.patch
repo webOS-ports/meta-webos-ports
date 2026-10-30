@@ -1,0 +1,345 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 29 Oct 2026 15:55:40 +0100
+Subject: [PATCH] adb: require key authorisation, asked through a LuneOS socket
+
+adbd let every host in: meta-oe's build has no Android properties, so
+ro.adb.secure read as its default, "0". On x86 it was worse than a
+default: linux-x86's AndroidConfig.h defines HAVE_SYSTEM_PROPERTY_SERVER,
+and property_get() then asks whatever listens on /tmp/android-sysprop,
+which any local user can create.
+
+Authorisation is now always on, as with ro.adb.secure=1, and the property
+is not asked. A host whose key is not in /var/lib/adbd/adb_keys is put to
+the user: adbd sends "PK<key>" on its control socket and lets the host in
+on "OK". LuneOS has no Android init to pass that socket in, so when
+ANDROID_SOCKET_adbd is not set adbd makes it itself, as /run/adbd/auth
+(0600) in a directory only root may enter (0700, checked and mended
+through one O_NOFOLLOW fd). Connections from anyone but root are closed
+(SO_PEERCRED). LuneOS' developer mode service answers there, after asking
+the user in the shell.
+
+Fixed in the code that talks to that socket, which nothing used before:
+- an empty key packet made adb_auth_confirm_key() read key[-1];
+- the socket's fd was installed in the transport's auth_fde again for
+  every key the host sent, and stayed in fdevent's table after the
+  transport was freed on disconnect. It has its own fdevent now;
+- an "OK" was taken at any time, also one sent before a key was asked
+  about or after the host that was asked about went away; only the answer
+  to the question open counts now, and "NO" ends it;
+- a framework that reconnected was never read again: the newest
+  connection now replaces the old one, which is closed.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [LuneOS-specific: socket path, no Android init or properties]
+---
+ adb/adb.c             |  14 +++-
+ adb/adb_auth_client.c | 175 +++++++++++++++++++++++++++++++++++++-----
+ 2 files changed, 164 insertions(+), 25 deletions(-)
+
+diff --git a/adb/adb.c b/adb/adb.c
+index aaefd9b401..0cfc982136 100644
+--- a/adb/adb.c
++++ b/adb/adb.c
+@@ -1335,10 +1335,16 @@ int adb_main(int is_daemon, int server_port)
+         exit(1);
+     }
+ #else
+-    property_get("ro.adb.secure", value, "0");
+-    auth_enabled = !strcmp(value, "1");
+-    if (auth_enabled)
+-        adb_auth_init();
++    /*
++     * LuneOS: always as with ro.adb.secure=1; a host has to be allowed by the
++     * user. The property is not asked: there are no Android properties here,
++     * and what libcutils' property_get() falls back to is not trustworthy.
++     * On x86 (linux-x86's AndroidConfig.h, HAVE_SYSTEM_PROPERTY_SERVER) it
++     * asks whatever listens on /tmp/android-sysprop, which any local user can
++     * create; elsewhere it reads PROP_* environment variables.
++     */
++    auth_enabled = 1;
++    adb_auth_init();
+ 
+     // Our external storage path may be different than apps, since
+     // we aren't able to bind mount after dropping root.
+diff --git a/adb/adb_auth_client.c b/adb/adb_auth_client.c
+index 06289364da..ba6aeb58d8 100644
+--- a/adb/adb_auth_client.c
++++ b/adb/adb_auth_client.c
+@@ -14,9 +14,15 @@
+  * limitations under the License.
+  */
+ 
++#include <errno.h>
++#include <fcntl.h>
+ #include <stdio.h>
+ #include <string.h>
+ #include <resolv.h>
++#include <sys/socket.h>
++#include <sys/stat.h>
++#include <sys/un.h>
++#include <unistd.h>
+ #include <cutils/list.h>
+ #include <cutils/sockets.h>
+ 
+@@ -36,14 +42,41 @@ struct adb_public_key {
+     RSAPublicKey key;
+ };
+ 
+-static char *key_paths[] = {
+-    "/adb_keys",
+-    "/data/misc/adb/adb_keys",
+-    NULL
++/*
++ * LuneOS: the keys the user allowed "always" are kept in /var/lib/adbd, which
++ * only root can read or write; the developer mode service
++ * (org.webosports.service.devmode) adds to it. There is no /adb_keys or /data
++ * on LuneOS.
++ */
++#ifndef ADBD_KEYS_PATH
++#define ADBD_KEYS_PATH "/var/lib/adbd/adb_keys"
++#endif
++static const char *const key_paths[] = {
++    ADBD_KEYS_PATH,
+ };
+ 
++/*
++ * LuneOS has no Android init to hand adbd its "adbd" control socket, so when
++ * none is passed in (ANDROID_SOCKET_adbd) adbd makes it itself, in a directory
++ * only root may enter. The developer mode service connects to it, is sent
++ * "PK<key>" for a key that is not allowed yet, and answers "OK" or "NO" once
++ * the user has.
++ */
++#ifndef ADBD_AUTH_SOCKET_DIR
++#define ADBD_AUTH_SOCKET_DIR "/run/adbd"
++#endif
++#define ADBD_AUTH_SOCKET_PATH ADBD_AUTH_SOCKET_DIR "/auth"
++/* Who may answer; another uid only in the tests. */
++#ifndef ADBD_AUTH_PEER_UID
++#define ADBD_AUTH_PEER_UID 0
++#endif
++
+ static fdevent listener_fde;
++static fdevent framework_fde;
+ static int framework_fd = -1;
++/* A "PK" was sent and not answered yet: an "OK" that comes at any other time
++ * is not taken as one. */
++static bool confirm_pending = false;
+ 
+ static void usb_disconnected(void* unused, atransport* t);
+ static struct adisconnect usb_disconnect = { usb_disconnected, 0, 0, 0 };
+@@ -108,16 +141,15 @@ static void free_keys(struct listnode *list)
+ 
+ static void load_keys(struct listnode *list)
+ {
+-    char *path;
+-    char **paths = key_paths;
+     struct stat buf;
++    size_t i;
+ 
+     list_init(list);
+ 
+-    while ((path = *paths++)) {
+-        if (!stat(path, &buf)) {
+-            D("Loading keys from '%s'\n", path);
+-            read_keys(path, list);
++    for (i = 0; i < sizeof(key_paths) / sizeof(key_paths[0]); i++) {
++        if (!stat(key_paths[i], &buf)) {
++            D("Loading keys from '%s'\n", key_paths[i]);
++            read_keys(key_paths[i], list);
+         }
+     }
+ }
+@@ -167,6 +199,23 @@ static void usb_disconnected(void* unused, atransport* t)
+     remove_transport_disconnect(usb_transport, &usb_disconnect);
+     usb_transport = NULL;
+     needs_retry = false;
++    confirm_pending = false;
++}
++
++/*
++ * The framework's socket has its own fdevent. It used to be installed in the
++ * transport's auth_fde for each key sent, which installed the same fd again
++ * for every "PK" (the host sends its key once per connection attempt), and
++ * left fd_table pointing into a transport that was freed on disconnect.
++ */
++static void framework_disconnected(void)
++{
++    D("Framework disconnect\n");
++    if (framework_fd >= 0) {
++        fdevent_remove(&framework_fde); /* closes framework_fd */
++    }
++    framework_fd = -1;
++    confirm_pending = false;
+ }
+ 
+ static void adb_auth_event(int fd, unsigned events, void *data)
+@@ -174,17 +223,22 @@ static void adb_auth_event(int fd, unsigned events, void *data)
+     char response[2];
+     int ret;
+ 
++    (void)data;
+     if (events & FDE_READ) {
+         ret = unix_read(fd, response, sizeof(response));
+         if (ret <= 0) {
+-            D("Framework disconnect\n");
+-            if (usb_transport)
+-                fdevent_remove(&usb_transport->auth_fde);
+-            framework_fd = -1;
++            framework_disconnected();
+         }
+         else if (ret == 2 && response[0] == 'O' && response[1] == 'K') {
+-            if (usb_transport)
++            if (confirm_pending && usb_transport) {
++                confirm_pending = false;
+                 adb_auth_verified(usb_transport);
++            } else {
++                D("Unasked-for OK ignored\n");
++            }
++        }
++        else if (ret == 2 && response[0] == 'N' && response[1] == 'O') {
++            confirm_pending = false;
+         }
+     }
+ }
+@@ -205,7 +259,7 @@ void adb_auth_confirm_key(unsigned char *key, size_t len, atransport *t)
+         return;
+     }
+ 
+-    if (key[len - 1] != '\0') {
++    if (len == 0 || key[len - 1] != '\0') {
+         D("Key must be a null-terminated string\n");
+         return;
+     }
+@@ -222,17 +276,18 @@ void adb_auth_confirm_key(unsigned char *key, size_t len, atransport *t)
+         D("Failed to write PK, errno=%d\n", errno);
+         return;
+     }
+-
+-    fdevent_install(&t->auth_fde, framework_fd, adb_auth_event, t);
+-    fdevent_add(&t->auth_fde, FDE_READ);
++    confirm_pending = true;
+ }
+ 
+ static void adb_auth_listener(int fd, unsigned events, void *data)
+ {
+     struct sockaddr addr;
+-    socklen_t alen;
++    struct ucred cred;
++    socklen_t alen, clen;
+     int s;
+ 
++    (void)events;
++    (void)data;
+     alen = sizeof(addr);
+ 
+     s = adb_socket_accept(fd, &addr, &alen);
+@@ -241,12 +296,87 @@ static void adb_auth_listener(int fd, unsigned events, void *data)
+         return;
+     }
+ 
++    /* Only root answers for the user; the directory keeps everyone else out
++     * already, this keeps them out should it ever be opened up. */
++    clen = sizeof(cred);
++    if (getsockopt(s, SOL_SOCKET, SO_PEERCRED, &cred, &clen) != 0 ||
++        clen != sizeof(cred) || cred.uid != ADBD_AUTH_PEER_UID) {
++        D("Refused a framework connection that is not root's\n");
++        adb_close(s);
++        return;
++    }
++    fcntl(s, F_SETFD, FD_CLOEXEC);
++
++    /* The newest connection is the framework: one that restarted is let back
++     * in, and the one it left behind is closed. */
++    if (framework_fd >= 0)
++        framework_disconnected();
++
+     framework_fd = s;
++    fdevent_install(&framework_fde, framework_fd, adb_auth_event, NULL);
++    fdevent_add(&framework_fde, FDE_READ);
+ 
+     if (needs_retry) {
+         needs_retry = false;
+-        send_auth_request(usb_transport);
++        if (usb_transport)
++            send_auth_request(usb_transport);
++    }
++}
++
++/*
++ * The listening socket at ADBD_AUTH_SOCKET_PATH, in a directory of root's
++ * that only root may enter (adbd runs with umask 0). -1 when it cannot be
++ * made, and then no key can be allowed that is not in adb_keys already.
++ */
++static int adb_auth_socket_create(void)
++{
++    struct sockaddr_un addr;
++    struct stat st;
++    mode_t old_umask;
++    int dfd, fd, ret;
++
++    if (adb_mkdir(ADBD_AUTH_SOCKET_DIR, 0700) != 0 && errno != EEXIST) {
++        D("Cannot make %s: errno=%d\n", ADBD_AUTH_SOCKET_DIR, errno);
++        return -1;
++    }
++    /* Not a directory of root's, or a link to one: someone else's. Looked
++     * at and mended through the one fd, so it is the same directory. */
++    dfd = unix_open(ADBD_AUTH_SOCKET_DIR, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
++    if (dfd < 0 || fstat(dfd, &st) != 0 || !S_ISDIR(st.st_mode) || st.st_uid != geteuid() ||
++        ((st.st_mode & 07777) != 0700 && fchmod(dfd, 0700) != 0)) {
++        D("%s is not a directory only root can enter\n", ADBD_AUTH_SOCKET_DIR);
++        if (dfd >= 0)
++            adb_close(dfd);
++        return -1;
++    }
++    adb_close(dfd);
++
++    fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
++    if (fd < 0) {
++        D("Cannot make the auth socket: errno=%d\n", errno);
++        return -1;
++    }
++
++    memset(&addr, 0, sizeof(addr));
++    addr.sun_family = AF_UNIX;
++    memcpy(addr.sun_path, ADBD_AUTH_SOCKET_PATH, sizeof(ADBD_AUTH_SOCKET_PATH));
++
++    /* One left from an adbd that did not exit cleanly. */
++    if (adb_unlink(ADBD_AUTH_SOCKET_PATH) != 0 && errno != ENOENT) {
++        D("Cannot remove the old %s: errno=%d\n", ADBD_AUTH_SOCKET_PATH, errno);
++        adb_close(fd);
++        return -1;
++    }
++    /* Made 0600 rather than chmod()ed to it afterwards. */
++    old_umask = umask(0177);
++    ret = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
++    umask(old_umask);
++    if (ret != 0) {
++        D("Cannot bind %s: errno=%d\n", ADBD_AUTH_SOCKET_PATH, errno);
++        adb_close(fd);
++        return -1;
+     }
++    return fd;
+ }
+ 
+ void adb_auth_init(void)
+@@ -254,6 +384,8 @@ void adb_auth_init(void)
+     int fd, ret;
+ 
+     fd = android_get_control_socket("adbd");
++    if (fd < 0)
++        fd = adb_auth_socket_create();
+     if (fd < 0) {
+         D("Failed to get adbd socket\n");
+         return;
+@@ -263,6 +395,7 @@ void adb_auth_init(void)
+     ret = listen(fd, 4);
+     if (ret < 0) {
+         D("Failed to listen on '%d'\n", fd);
++        adb_close(fd);
+         return;
+     }
+ 
+-- 
+2.53.0
+

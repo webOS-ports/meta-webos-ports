@@ -14,3 +14,16 @@
 # Not a LuneOS-specific problem - this belongs upstream in meta-oe.
 CC:append:class-native = " -std=gnu17"
 CC:append:class-nativesdk = " -std=gnu17"
+
+# adbd starts only while USB debugging and developer mode are both on; see the
+# drop-in. Each host also has to be allowed by the user (key authorisation,
+# android-tools_5.1%.bbappend); adbd still runs as root (meta-oe patch 0008).
+FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
+SRC_URI += "file://adbd-devmode.conf"
+
+do_install:append:class-target() {
+    install -D -m 0644 ${UNPACKDIR}/adbd-devmode.conf \
+        ${D}${systemd_system_unitdir}/android-tools-adbd.service.d/05-devmode.conf
+}
+
+FILES:${PN}-adbd += "${systemd_system_unitdir}/android-tools-adbd.service.d/05-devmode.conf"
