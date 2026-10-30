@@ -1,0 +1,85 @@
+From b4f16cf84648a6021752ee5cad9c5c3688cd102c Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 29 Oct 2026 17:29:30 +0100
+Subject: [PATCH] mmsutil: Accept an Encoded-string-value with an empty
+ Value-length
+
+An Encoded-string-value header such as Subject with a Value-length of 0
+went to decode_encoded_string_with_mib_enum() with no octets, which read
+the Char-set from the octet after the value. mmsd-tng decodes such a
+header as an empty string; do the same.
+
+Backported from mmsd-tng commit 5e20632950b6 ("Fix issue if there is an
+empty string in encoded text") by Chris T <chris@talbothome.com>. The
+DBG() call is dropped because mmsutil.c does not use the log functions.
+Add a unit test.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Backport [https://gitlab.com/kop316/mmsd/-/commit/5e20632950b6e886297446e548717e334c7ee115]
+---
+ src/mmsutil.c       |  6 ++++++
+ unit/test-mmsutil.c | 24 ++++++++++++++++++++++++
+ 2 files changed, 30 insertions(+)
+
+diff --git a/src/mmsutil.c b/src/mmsutil.c
+index 0d45078..dcd6e99 100644
+--- a/src/mmsutil.c
++++ b/src/mmsutil.c
+@@ -253,6 +253,12 @@ static gboolean extract_encoded_text(struct wsp_header_iter *iter, void *user)
+ 	p = wsp_header_iter_get_val(iter);
+ 	l = wsp_header_iter_get_val_len(iter);
+ 
++	/* An empty Value-length: there is no Char-set to read */
++	if (l == 0) {
++		*out = g_strdup("");
++		return TRUE;
++	}
++
+ 	switch (wsp_header_iter_get_val_type(iter)) {
+ 	case WSP_VALUE_TYPE_TEXT:
+ 		/* Text-string */
+diff --git a/unit/test-mmsutil.c b/unit/test-mmsutil.c
+index 235cbeb..c659ab7 100644
+--- a/unit/test-mmsutil.c
++++ b/unit/test-mmsutil.c
+@@ -1031,6 +1031,27 @@ static void test_decode_empty_from(void)
+ 	mms_message_free(msg);
+ }
+ 
++/* M-Notification.ind with a Subject whose Value-length is 0 */
++static const unsigned char mms_m_notify_ind_empty_subject[] = {
++				0x8C, 0x82, 0x98, 0x4F, 0x67, 0x00, 0x8D, 0x90,
++				0x96, 0x00, 0x8A, 0x80, 0x8E, 0x02, 0x40, 0x00,
++				0x88, 0x05, 0x81, 0x03, 0x03, 0xF4, 0x80, 0x83,
++				0x68, 0x74, 0x74, 0x70, 0x3A, 0x2F, 0x2F, 0x61,
++				0x00
++};
++
++static void test_decode_empty_subject(void)
++{
++	struct mms_message *msg = g_new0(struct mms_message, 1);
++
++	g_assert(decode_exact(mms_m_notify_ind_empty_subject,
++				sizeof(mms_m_notify_ind_empty_subject),
++				msg) == TRUE);
++	g_assert_cmpstr(msg->ni.subject, ==, "");
++
++	mms_message_free(msg);
++}
++
+ int main(int argc, char **argv)
+ {
+ 	g_test_init(&argc, &argv, NULL);
+@@ -1094,5 +1115,8 @@ int main(int argc, char **argv)
+ 	g_test_add_func("/mmsutil/Decode empty From",
+ 				test_decode_empty_from);
+ 
++	g_test_add_func("/mmsutil/Decode empty Subject",
++				test_decode_empty_subject);
++
+ 	return g_test_run();
+ }
+-- 
+2.53.0
+

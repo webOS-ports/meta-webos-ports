@@ -1,0 +1,73 @@
+From 9d88b73b3bad9217bd7959646a0b6088c986083f Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 29 Oct 2026 17:28:29 +0100
+Subject: [PATCH] push: Check the push PDU lengths
+
+mms_push_notify() gets the PDU straight from the oFono push agent. It
+read pdu[1] without checking that the PDU has two octets, decoded the
+HeadersLen uintvar with the length of the whole PDU although it starts
+at offset 2, and then used HeadersLen as the Content-Type and header
+limit without checking that the PDU is that long. A short or lying push
+made it read past the end of the PDU, and the offset it returns could
+point past the end as well; service.c stores and decodes the PDU from
+that offset.
+
+Check each length against what is left of the PDU.
+
+The fuzz harness for this path is not part of the mmsd tree; the
+reproducers are kept with it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/push.c | 13 ++++++++++++-
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/src/push.c b/src/push.c
+index 6a54907..ed83964 100644
+--- a/src/push.c
++++ b/src/push.c
+@@ -344,6 +344,10 @@ gboolean mms_push_notify(unsigned char *pdu, unsigned int len,
+ 
+ 	g_string_free(hex, TRUE);
+ 
++	/* TID, Type and at least one octet of HeadersLen */
++	if (len < 3)
++		return FALSE;
++
+ 	/* PUSH pdu ? */
+ 	if (pdu[1] != 0x06)
+ 		return FALSE;
+@@ -351,13 +355,17 @@ gboolean mms_push_notify(unsigned char *pdu, unsigned int len,
+ 	/* Consume TID and Type */
+ 	nread = 2;
+ 
+-	if (wsp_decode_uintvar(pdu + nread, len,
++	if (wsp_decode_uintvar(pdu + nread, len - nread,
+ 					&headerslen, &consumed) == FALSE)
+ 		return FALSE;
+ 
+ 	/* Consume uintvar bytes */
+ 	nread += consumed;
+ 
++	/* Content-Type and headers must fit in the PDU */
++	if (headerslen > len - nread)
++		return FALSE;
++
+ 	/* Try to decode content-type */
+ 	if (wsp_decode_content_type(pdu + nread, headerslen, &ct,
+ 			&consumed, &param_len) == FALSE)
+@@ -368,6 +376,9 @@ gboolean mms_push_notify(unsigned char *pdu, unsigned int len,
+ 
+ 	/* Consume Content Type bytes, including parameters */
+ 	consumed += param_len;
++	if (consumed > headerslen)
++		return FALSE;
++
+ 	nread += consumed;
+ 
+ 	/* Parse header to decode application_id */
+-- 
+2.53.0
+
