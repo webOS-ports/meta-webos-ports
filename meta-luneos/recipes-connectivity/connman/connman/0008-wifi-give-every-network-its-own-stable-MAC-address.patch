@@ -57,22 +57,31 @@ root-owned regular file, at most 0644, of exactly 20 bytes,
 "xx:xx:xx:xx:xx:xx F\n" with lower-case hex and F the 0/1 changeable
 flag, replaced atomically.
 
+A WiFi service's Ethernet.Address shows the address in use while it is
+connecting or connected. The interface keeps the address of the network
+joined last, also after leaving it, so a WiFi service that is not
+connecting or connected shows the device's own address instead of
+another network's. Its Ethernet dict is signalled when it starts or
+stops holding the link.
+
 Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
 Upstream-Status: Pending
 ---
  Makefile.am               |   2 +-
  doc/connman.conf.5.in     |   9 +
- doc/service-api.txt       |  16 +
+ doc/service-api.txt       |  23 ++
  gsupplicant/gsupplicant.h |  22 ++
  gsupplicant/supplicant.c  | 149 +++++++++
  plugins/wifi.c            | 175 ++++++++++
+ src/connman.h             |   3 +-
+ src/ipconfig.c            |  14 +-
  src/main.c                |  21 ++
  src/main.conf             |  10 +
  src/network.c             |   6 +
- src/service.c             |  60 ++++
+ src/service.c             |  98 +++++-
  src/wifi-mac.c            | 688 ++++++++++++++++++++++++++++++++++++++
  src/wifi-mac.h            | 125 +++++++
- 12 files changed, 1282 insertions(+), 1 deletion(-)
+ 14 files changed, 1338 insertions(+), 7 deletions(-)
  create mode 100644 src/wifi-mac.c
  create mode 100644 src/wifi-mac.h
 
@@ -110,10 +119,10 @@ index 396f0a8..ad5eeb3 100644
  Assume that service gateways also function as timeservers.
  Default is false.
 diff --git a/doc/service-api.txt b/doc/service-api.txt
-index 550f2a0..15319ad 100644
+index 550f2a0..8b0c788 100644
 --- a/doc/service-api.txt
 +++ b/doc/service-api.txt
-@@ -238,6 +238,22 @@ Properties	string State [readonly]
+@@ -238,6 +238,29 @@ Properties	string State [readonly]
  
  			WiFi only, same availability as BSSID.
  
@@ -129,6 +138,13 @@ index 550f2a0..15319ad 100644
 +
 +			A change takes effect from the next connection.
 +			Remove() resets it to false.
++
++			Ethernet.Address shows the address in use while
++			the service is connecting or connected. The
++			interface keeps the address of the network joined
++			last, so while WiFiMACRandomization is enabled a
++			WiFi service that is not connecting or connected
++			shows the device's own address instead.
 +
 +			WiFi only, and only present while
 +			WiFiMACRandomization is enabled.
@@ -580,6 +596,54 @@ index b57d792..cc329b9 100644
  }
  
  CONNMAN_PLUGIN_DEFINE(wifi, "WiFi interface plugin", VERSION,
+diff --git a/src/connman.h b/src/connman.h
+index e3355b5..ca77627 100644
+--- a/src/connman.h
++++ b/src/connman.h
+@@ -427,7 +427,8 @@ void __connman_ipconfig_append_ipv6config(struct connman_ipconfig *ipconfig,
+ int __connman_ipconfig_set_config(struct connman_ipconfig *ipconfig,
+ 							DBusMessageIter *array);
+ void __connman_ipconfig_append_ethernet(struct connman_ipconfig *ipconfig,
+-							DBusMessageIter *iter);
++					DBusMessageIter *iter,
++					const char *address);
+ enum connman_ipconfig_method __connman_ipconfig_get_method(
+ 				struct connman_ipconfig *ipconfig);
+ 
+diff --git a/src/ipconfig.c b/src/ipconfig.c
+index c2d7d2b..cf46fea 100644
+--- a/src/ipconfig.c
++++ b/src/ipconfig.c
+@@ -2467,8 +2467,13 @@ int __connman_ipconfig_set_config(struct connman_ipconfig *ipconfig,
+ 	return 0;
+ }
+ 
++/*
++ * address: what to report as "Address" instead of the address the link has
++ * now, or NULL for the link's.
++ */
+ void __connman_ipconfig_append_ethernet(struct connman_ipconfig *ipconfig,
+-							DBusMessageIter *iter)
++					DBusMessageIter *iter,
++					const char *address)
+ {
+ 	struct connman_ipdevice *ipdevice;
+ 	const char *method = "auto";
+@@ -2490,9 +2495,12 @@ void __connman_ipconfig_append_ethernet(struct connman_ipconfig *ipconfig,
+ 		}
+ 	}
+ 
+-	if (ipdevice->address)
++	if (!address)
++		address = ipdevice->address;
++
++	if (address)
+ 		connman_dbus_dict_append_basic(iter, "Address",
+-					DBUS_TYPE_STRING, &ipdevice->address);
++					DBUS_TYPE_STRING, &address);
+ 
+ 	if (ipdevice->mtu > 0)
+ 		connman_dbus_dict_append_basic(iter, "MTU",
 diff --git a/src/main.c b/src/main.c
 index 136202e..5e2eb47 100644
 --- a/src/main.c
@@ -714,7 +778,7 @@ index b2820ab..927efbf 100644
  	return false;
  }
 diff --git a/src/service.c b/src/service.c
-index 9ae4a68..41f2a2e 100644
+index 9ae4a68..03d6336 100644
 --- a/src/service.c
 +++ b/src/service.c
 @@ -227,6 +227,8 @@ struct connman_service {
@@ -749,7 +813,55 @@ index 9ae4a68..41f2a2e 100644
  	if (service->config_file && strlen(service->config_file) > 0)
  		g_key_file_set_string(keyfile, service->identifier,
  				"Config.file", service->config_file);
-@@ -4989,6 +5000,18 @@ static void mdns_changed(struct connman_service *service)
+@@ -4557,16 +4568,45 @@ static void security_changed(struct connman_service *service)
+ 				DBUS_TYPE_STRING, append_security, service);
+ }
+ 
++static bool holds_link(enum connman_service_state state)
++{
++	return is_connecting(state) || is_connected(state);
++}
++
++/*
++ * With WiFiMACRandomization the interface keeps the address of the network
++ * joined last, also after it has been left. A WiFi service that is not
++ * connecting or connected reports the device's own address instead, never
++ * one that belongs to another network. NULL: report the link's address.
++ */
++static const char *ethernet_address(struct connman_service *service)
++{
++	struct connman_device *device;
++
++	if (service->type != CONNMAN_SERVICE_TYPE_WIFI ||
++			holds_link(service->state) ||
++			!service->network ||
++			!connman_setting_get_bool("WiFiMACRandomization"))
++		return NULL;
++
++	device = connman_network_get_device(service->network);
++	if (!device)
++		return NULL;
++
++	return connman_device_get_string(device, "Address");
++}
++
+ static void append_ethernet(DBusMessageIter *iter, void *user_data)
+ {
+ 	struct connman_service *service = user_data;
++	const char *address = ethernet_address(service);
+ 
+ 	if (service->ipconfig_ipv4)
+ 		__connman_ipconfig_append_ethernet(service->ipconfig_ipv4,
+-									iter);
++							iter, address);
+ 	else if (service->ipconfig_ipv6)
+ 		__connman_ipconfig_append_ethernet(service->ipconfig_ipv6,
+-									iter);
++							iter, address);
+ }
+ 
+ static void append_ipv4(DBusMessageIter *iter, void *user_data)
+@@ -4989,6 +5029,18 @@ static void mdns_changed(struct connman_service *service)
  			&mdns);
  }
  
@@ -768,7 +880,7 @@ index 9ae4a68..41f2a2e 100644
  static void mdns_configuration_changed(struct connman_service *service)
  {
  	dbus_bool_t mdns_config = service->mdns_config;
-@@ -5332,6 +5355,17 @@ static void append_properties(DBusMessageIter *dict, dbus_bool_t limited,
+@@ -5332,6 +5384,17 @@ static void append_properties(DBusMessageIter *dict, dbus_bool_t limited,
  		if (service->enc_mode)
  			connman_dbus_dict_append_basic(dict, "EncryptionMode",
  					DBUS_TYPE_STRING, &service->enc_mode);
@@ -786,7 +898,7 @@ index 9ae4a68..41f2a2e 100644
  	}
  
  	val = service->favorite;
-@@ -6650,6 +6684,23 @@ static DBusMessage *set_property(DBusConnection *conn,
+@@ -6650,6 +6713,23 @@ static DBusMessage *set_property(DBusConnection *conn,
  
  		__connman_notifier_proxy_changed(service);
  
@@ -810,7 +922,7 @@ index 9ae4a68..41f2a2e 100644
  		service_save(service);
  	} else if (g_str_equal(name, "mDNS.Configuration")) {
  		dbus_bool_t val;
-@@ -7498,6 +7549,12 @@ bool __connman_service_remove(struct connman_service *service)
+@@ -7498,6 +7578,12 @@ bool __connman_service_remove(struct connman_service *service)
  
  	__connman_service_set_favorite(service, false);
  
@@ -823,7 +935,19 @@ index 9ae4a68..41f2a2e 100644
  	__connman_ipconfig_ipv6_reset_privacy(service->ipconfig_ipv6);
  
  	service_save(service);
-@@ -9763,6 +9820,9 @@ static bool prepare_network(struct connman_service *service)
+@@ -9304,6 +9390,11 @@ static int service_indicate_state(struct connman_service *service)
+ 	service->state = new_state;
+ 	state_changed(service);
+ 
++	if (service->type == CONNMAN_SERVICE_TYPE_WIFI &&
++			holds_link(old_state) != holds_link(new_state) &&
++			connman_setting_get_bool("WiFiMACRandomization"))
++		link_changed(service);
++
+ 	if (!is_connected(old_state) && is_connected(new_state))
+ 		searchdomain_add_all(service);
+ 
+@@ -9763,6 +9854,9 @@ static bool prepare_network(struct connman_service *service)
  		if (service->passphrase)
  			connman_network_set_string(service->network,
  				"WiFi.Passphrase", service->passphrase);
