@@ -17,8 +17,9 @@ PE = "1"
 #   purple-gowhatsapp   the WhatsApp prpl. 0001-0005 are generic fixes meant for upstream, 0006-0007
 #                       the webOS Messaging and calling integration, 0008 adds prpl-gometa (Facebook
 #                       Messenger on mautrix-meta's messagix), which is LuneOS work and not part of
-#                       purple-gowhatsapp, and 0009 keeps a ringing call off the call audio. It has to live in this .so: two Go c-archives cannot
-#                       share one process.
+#                       purple-gowhatsapp, 0009 keeps a ringing call off the call audio and 0010
+#                       keeps the call's playback stream fed between packets. It has to live in
+#                       this .so: two Go c-archives cannot share one process.
 #   meowcaller          WhatsApp calling, which go.mod replaces with ./third_party/meowcaller.
 #                       Kept at 9769d5a: later main moved to a whatsmeow fork and reworked video,
 #                       which our meowcaller/0002 conflicts with. meowcaller/0003 backports the
@@ -42,6 +43,7 @@ SRC_URI += " \
     file://0007-webOS-WhatsApp-voice-and-video-calls-through-the-Pho.patch \
     file://0008-webOS-add-a-Facebook-Messenger-protocol-prpl-gometa-.patch \
     file://0009-webOS-ring-an-incoming-WhatsApp-call-without-taking-.patch \
+    file://0010-webOS-keep-the-WhatsApp-call-playback-stream-fed-bet.patch \
     file://meowcaller/0001-mlow-speed-up-the-encoder-for-32-bit-ARM.patch;patchdir=third_party/meowcaller \
     file://meowcaller/0002-Fix-the-video-call-media-path-against-live-WhatsApp-.patch;patchdir=third_party/meowcaller \
     file://meowcaller/0003-engine-allocate-on-the-caller-s-FNA-relay-for-inboun.patch;patchdir=third_party/meowcaller \
@@ -143,11 +145,11 @@ do_compile() {
              -I${S}/glue -I${S} -I${B} \
              $(pkg-config --cflags purple glib-2.0 opus opusfile ogg alsa luna-service2)"
 
-    # 2. the C glue, including the webOS files 0006-0007 add.
+    # 2. the C glue, including the webOS files 0006-0007 and 0010 add.
     OBJS=""
     for s in init login qrcode bridge process_message display_message groups blist \
              send_message handle_attachment send_file presence options receipt pixbuf commands \
-             call denoise aec h264_rtp gometa_init ${VOIPKIT_GLUE}; do
+             call playout denoise aec h264_rtp gometa_init ${VOIPKIT_GLUE}; do
         ${CC} ${GCFLAGS} -I${WEBRTC_DSP} -c ${S}/glue/$s.c -o ${B}/glue_$s.o
         OBJS="$OBJS ${B}/glue_$s.o"
     done
