@@ -34,6 +34,8 @@ SRC_URI = "git://github.com/droidian/pulseaudio-modules-droid-modern.git;branch=
     file://0005-droid-extevdev-a-microphone-switch-alone-is-a-headset.patch \
     file://0006-card-notify-audio-HAL-about-headphone-headset-connec.patch \
     file://0007-module-droid-card-announce-a-plugged-in-jack-at-start-up.patch \
+    file://0008-droid-util-pick-a-mix-port-for-the-in-call-input-nev.patch \
+    file://0009-module-droid-card-never-start-in-a-virtual-profile.patch \
 "
 
 inherit meson pkgconfig

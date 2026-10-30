@@ -1,0 +1,68 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 30 Oct 2026 14:34:16 +0100
+Subject: [PATCH] droid-util: pick a mix port for the in-call input, never
+ a device port
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Backport of mer-hybris/pulseaudio-modules-droid commit df044b0e2450
+("common: Be more strict about input mix port selection", Enni
+Hämäläinen), which the Droidian fork this recipe builds does not have.
+
+In call mode stream_select_mix_port() takes the sink of the first route
+that has the Telephony Rx device among its sources. The MT6739 policy
+configuration routes "Voice Call In" straight to output devices as well
+(Earpiece, Speaker, Wired Headset, ... - the "Audio patch from 'Voice
+Call In' to 'Earpiece' not implemented" lines at start-up), so the
+first such route's sink is the Earpiece device port. Reopening the
+primary input stream in the voicecall profile - which is what a source
+port change does, for instance audiod setting input-builtin_mic when the
+speaker is switched on during a call with a capture stream open - then
+hands that device port to stream_config_fill() as the mix port, and
+PulseAudio aborts:
+
+  Assertion 'mix_port->port_type == DM_CONFIG_TYPE_MIX_PORT' failed at
+  src/common/droid-util.c:1337, function stream_config_fill()
+
+Only accept a route whose sink is a mix port, and only device ports as
+its sources; the VoIP branch likewise only takes mix ports.
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Backport [https://github.com/mer-hybris/pulseaudio-modules-droid/commit/df044b0e245008b69b11b72b2b4f2886f593322f]
+---
+ src/common/droid-util.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/src/common/droid-util.c b/src/common/droid-util.c
+index 38ac019..2dcab87 100644
+--- a/src/common/droid-util.c
++++ b/src/common/droid-util.c
+@@ -1444,6 +1444,9 @@ static dm_config_port *stream_select_mix_port(pa_droid_stream *stream) {
+             if (port->role != DM_CONFIG_ROLE_SINK)
+                 continue;
+ 
++            if (port->port_type != DM_CONFIG_TYPE_MIX_PORT)
++                continue;
++
+             if (port->flags & AUDIO_INPUT_FLAG_VOIP_TX) {
+                 selected_port = port;
+                 goto done;
+@@ -1461,7 +1464,14 @@ static dm_config_port *stream_select_mix_port(pa_droid_stream *stream) {
+                 if (port->role != DM_CONFIG_ROLE_SOURCE)
+                     continue;
+ 
++                if (port->port_type != DM_CONFIG_TYPE_DEVICE_PORT)
++                    continue;
++
+                 if (port->type == AUDIO_DEVICE_IN_TELEPHONY_RX) {
++                    if (route->sink->port_type != DM_CONFIG_TYPE_MIX_PORT) {
++                        pa_log_debug("Input device in odd place.");
++                        continue;
++                    }
+                     selected_port = route->sink;
+                     goto done;
+                 }
+-- 
+2.53.0
+
