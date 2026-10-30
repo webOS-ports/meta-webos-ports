@@ -7,6 +7,10 @@
 #       org.webosports.service.devmode answers once the user has, in the
 #       shell. Hosts allowed "always" are kept in /var/lib/adbd/adb_keys.
 # 0002: USB only; no TCP 5555 when there is no USB gadget.
+# 0003: saved keys are checked with OpenSSL. adbd.mk builds no mincrypt and
+#       links -lcrypto, so mincrypt's RSA_verify() call went to OpenSSL's
+#       function of that name and adbd crashed once adb_keys held a key. A
+#       damaged adb_keys line is skipped with a line in the journal.
 #
 # They go on top of meta-oe's patches, so patch 0011 (no Android properties)
 # is in already: adbd no longer asks properties whether to authenticate.
@@ -14,6 +18,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${BPN}:"
 SRC_URI += " \
     file://0001-adb-require-key-authorisation-asked-through-a-LuneOS.patch;patchdir=system/core \
     file://0002-adb-listen-on-USB-only.patch;patchdir=system/core \
+    file://0003-adb-check-saved-keys-with-OpenSSL-skip-a-damaged-adb_keys-line.patch;patchdir=system/core \
 "
 
 # The keys' directory: root's alone. devmode writes adb_keys in it (0600).
