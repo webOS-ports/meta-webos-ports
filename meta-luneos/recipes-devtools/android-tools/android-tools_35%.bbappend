@@ -15,6 +15,9 @@
 # 0004: a key packet with no payload no longer stops adbd, and one without
 #       its NUL is not read past its end (upstream bug, before any host is
 #       let in).
+# 0005: after a USB disconnect adbd waits for its worker thread with
+#       pthread_kill(t, 0) == ESRCH, which glibc 2.34+ never returns for an
+#       unjoined thread, so adbd hung for good; it now waits for a flag.
 #
 # 5.1.1's patch 0003 (mincrypt RSA_verify() going to OpenSSL's) has no
 # counterpart: adbd 35 checks signatures with BoringSSL itself.
@@ -26,4 +29,5 @@ SRC_URI += " \
     file://0002-adbd-serve-USB-only-TCP-only-when-ADBD_PORT-asks-for.patch \
     file://0003-adbd-keep-running-as-root.patch \
     file://0004-adb-read-a-host-s-key-no-further-than-its-packet.patch \
+    file://0005-adbd-notice-that-the-USB-worker-has-exited-on-glibc.patch \
 "
