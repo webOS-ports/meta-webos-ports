@@ -418,6 +418,7 @@ RDEPENDS:${PN}:append:a3-2015 = " alsa-utils-systemd mesa-megadriver rmtfs qrtr 
 
 RDEPENDS:${PN}:append:tissot = " wcnss-filter-fixup"
 RDEPENDS:${PN}:append:tissot-halium = " wcnss-filter-fixup"
+RDEPENDS:${PN}:append:vince-halium = " wcnss-filter-fixup"
 
 # Hardware-gated stacks, driven by MACHINE_FEATURES.
 #

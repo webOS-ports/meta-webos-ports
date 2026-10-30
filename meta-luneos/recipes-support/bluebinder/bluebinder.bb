@@ -24,6 +24,7 @@ SRC_URI = "git://github.com/mer-hybris/bluebinder.git;branch=master;protocol=htt
            file://0004-bluebinder_post-read-the-address-file-through-the-co.patch \
 "
 SRC_URI:append:tissot-halium = " file://0002-service-load-after-wifi-module-load.patch"
+SRC_URI:append:vince-halium = " file://0002-service-load-after-wifi-module-load.patch"
 
 PV = "1.0.20"
 SRCREV = "c3e1b155e308f6df9c9a02dbd909a44e7319ab7d"
