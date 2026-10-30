@@ -1,0 +1,115 @@
+From 1555f227c5a55a3c00d38f45d0547ea34b179709 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 30 Oct 2026 08:24:34 +0100
+Subject: [PATCH] mmsutil: End the va_list on mms_encode_headers() early
+ returns
+
+mms_encode_headers() returned FALSE from inside its loop when a header
+had no encoder or its encoder failed, without calling va_end(). C
+requires every va_start() to be matched by va_end() in the same
+function; on the glibc ABIs mmsd runs on it has no visible effect, but
+gcc -fanalyzer reports it (-Wanalyzer-va-list-leak) and other ABIs may
+need the cleanup.
+
+Leave the loop with the result instead, and end the list in one place.
+Add a unit test that takes the early return: a Send.req whose
+Content-Type is not a "Content-Type:" text header.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/mmsutil.c       | 15 ++++++++++-----
+ unit/test-mmsutil.c | 30 ++++++++++++++++++++++++++++++
+ 2 files changed, 40 insertions(+), 5 deletions(-)
+
+diff --git a/src/mmsutil.c b/src/mmsutil.c
+index 7a09361..b33e7c3 100644
+--- a/src/mmsutil.c
++++ b/src/mmsutil.c
+@@ -1588,6 +1588,7 @@ static gboolean mms_encode_headers(struct file_buffer *fb,
+ 	void *data;
+ 	enum mms_header header;
+ 	header_encoder encoder;
++	gboolean ret = TRUE;
+ 
+ 	va_start(args, orig_header);
+ 	header = orig_header;
+@@ -1596,18 +1597,22 @@ static gboolean mms_encode_headers(struct file_buffer *fb,
+ 		data = va_arg(args, void *);
+ 
+ 		encoder = encoder_for_type(header);
+-		if (encoder == NULL)
+-			return FALSE;
++		if (encoder == NULL) {
++			ret = FALSE;
++			break;
++		}
+ 
+-		if (data && encoder(fb, header, data) == FALSE)
+-			return FALSE;
++		if (data && encoder(fb, header, data) == FALSE) {
++			ret = FALSE;
++			break;
++		}
+ 
+ 		header = va_arg(args, enum mms_header);
+ 	}
+ 
+ 	va_end(args);
+ 
+-	return TRUE;
++	return ret;
+ }
+ 
+ static gboolean mms_encode_notify_resp_ind(struct mms_message *msg,
+diff --git a/unit/test-mmsutil.c b/unit/test-mmsutil.c
+index ea64774..5d896ba 100644
+--- a/unit/test-mmsutil.c
++++ b/unit/test-mmsutil.c
+@@ -1082,6 +1082,33 @@ static void test_decode_two_content_ids(void)
+ 	mms_message_free(msg);
+ }
+ 
++/*
++ * A Send.req whose Content-Type is not a "Content-Type:" text header
++ * makes the Content-Type encoder fail, so mms_encode_headers() leaves
++ * its loop early.  It must still end its va_list there (gcc
++ * -fanalyzer reports -Wanalyzer-va-list-leak otherwise) and report
++ * the failure.
++ */
++static void test_encode_bad_content_type(void)
++{
++	struct mms_message msg;
++	int fd;
++
++	memset(&msg, 0, sizeof(msg));
++	msg.type = MMS_MESSAGE_TYPE_SEND_REQ;
++	msg.transaction_id = (char *) "0123456789abcdef_sr2";
++	msg.version = MMS_MESSAGE_VERSION_1_2;
++	msg.sr.to = (char *) "0123456789";
++	msg.sr.content_type = (char *) "text/plain";
++
++	fd = open("/dev/null", O_WRONLY);
++	g_assert(fd >= 0);
++
++	g_assert(mms_message_encode(&msg, fd) == FALSE);
++
++	close(fd);
++}
++
+ int main(int argc, char **argv)
+ {
+ 	g_test_init(&argc, &argv, NULL);
+@@ -1151,5 +1178,8 @@ int main(int argc, char **argv)
+ 	g_test_add_func("/mmsutil/Decode two Content-IDs",
+ 				test_decode_two_content_ids);
+ 
++	g_test_add_func("/mmsutil/Encode bad Content-Type",
++				test_encode_bad_content_type);
++
+ 	return g_test_run();
+ }
+-- 
+2.53.0
+

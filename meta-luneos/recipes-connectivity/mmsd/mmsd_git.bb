@@ -19,6 +19,11 @@ SRC_URI  = " \
     file://0012-gresolv-Do-not-sort-an-empty-result-list.patch \
     file://0013-mmsutil-Do-not-leak-a-repeated-Content-ID.patch \
     file://0014-service-Do-not-use-the-request-after-destroying-it-i.patch \
+    file://0015-mmsutil-End-the-va_list-on-mms_encode_headers-early-.patch \
+    file://0016-gweb-Do-not-append-NULL-body-to-send-buffer.patch \
+    file://0017-gweb-Look-for-the-proxy-scheme-in-the-copy-of-the-pr.patch \
+    file://0018-gresolv-Return-0-when-g_resolv_lookup_hostname-canno.patch \
+    file://0019-push-Only-build-the-PDU-hex-dump-when-debugging-is-e.patch \
     file://mmsd.conf \
     file://mmsd.service \
     file://mmsd-migrate-store \
