@@ -14,4 +14,4 @@ CLOUD_AUTH_APP = "com.palm.app.photoprism-auth"
 # builds from that pull request's branch (rebased on main: its cloud/_core/service is the pin's; only cloud/<x> is packaged here). Drop
 # these two lines when the pull request is merged and LSC_SRCREV is bumped past it.
 LSC_BRANCH = "herrie/photoprism"
-LSC_SRCREV = "51b5320d9c4a584b16440776ef3e418c1babdfed"
+LSC_SRCREV = "fdd41d05d340d3de799923fe26ecdc8fbcf0438f"
