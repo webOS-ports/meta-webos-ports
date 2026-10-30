@@ -7,7 +7,10 @@ LIC_FILES_CHKSUM = "file://UNLICENSE;md5=1d267ceb3a8d8f75f1be3011ee4cbf53"
 
 # Both audio backends are built. AudioIO tries PulseAudio first, which is what calls use on
 # LuneOS: tdlib-purple names the call devices (the voipcall sink and the webcall source) as the
-# PulseAudio device ids. ALSA stays as the fallback when no PulseAudio server answers.
+# PulseAudio device ids. ALSA stays as the fallback when no PulseAudio server answers -- or when
+# either PulseAudio stream fails to connect, which is why 0004 matters: without it the capture
+# stream was opened on the playback device's name, failed, and every call fell back to ALSA's
+# default device instead of the call devices.
 # pulseaudio is only for configure's libpulse check and the headers: libtgvoip dlopen()s
 # libpulse.so.0 at run time, so nothing links it -- tdlib-purple RDEPENDS on it instead.
 # openssl is for the call crypto, libopus for the codec; both are linked by tdlib-purple too,
@@ -22,6 +25,7 @@ SRC_URI = " \
     file://0001-Build-VideoPacketSender.cpp-and-VideoFEC.cpp-with-au.patch \
     file://0002-Include-the-fixed-width-integer-headers-where-they-a.patch \
     file://0003-NetworkSocketPosix-fall-back-to-IPv4-when-the-kernel.patch \
+    file://0004-AudioPulse-open-the-capture-stream-on-the-input-devi.patch \
 "
 SRCREV = "6c82c9de85cca69ea099a738fcbd2ab2de4f839d"
 
