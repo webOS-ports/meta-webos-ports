@@ -35,6 +35,10 @@ RDEPENDS:${PN} = "\
 # aliases them to the pcm_output and pcm_input names audiod routes by, which
 # needs these modules present.
 RDEPENDS:${PN} += "pulseaudio-module-remap-sink pulseaudio-module-remap-source"
+# With a USB headset in, ringtones and alerts also play on the loudspeaker, as
+# they did with a wired headset on legacy webOS: audiod loads a combined sink of
+# pcm_output and the USB sink for them while the headset is in.
+RDEPENDS:${PN} += "pulseaudio-module-combine-sink"
 
 # Built from the webOS-ports fork rather than webosose/audiod-pro: the fifteen
 # patches this recipe used to carry are commits on its webOS-ports/webOS-OSE
@@ -42,7 +46,7 @@ RDEPENDS:${PN} += "pulseaudio-module-remap-sink pulseaudio-module-remap-source"
 #WEBOS_VERSION = "1.0.0-78_127c6cd6c9247979b4ead42d9b8fc8b5c48b47a2"
 PV = "1.0.0-79+git"
 SRCREV = "e0dcd9d2ab5c22582031cecbc3e9a0794f068eda"
-PR = "r38"
+PR = "r39"
 
 inherit webos_component
 inherit webos_cmake
