@@ -1,0 +1,120 @@
+From 8458aff4158954d010fce771b971f6c6d2f832f6 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 29 Oct 2026 17:23:36 +0100
+Subject: [PATCH] wsputil: Check multipart part lengths separately
+
+wsp_multipart_iter_next() checked a part with
+"pdu + headers_len + body_len > end". Both lengths are uintvars from the
+PDU, and on a 32-bit system a large DataLen wraps the pointer, so a part
+far longer than the PDU was accepted. mmsutil.c turns the part into an
+attachment with that offset and length, and service.c reads that range
+of the stored message, for example in append_smil().
+
+The part's Content-Type was decoded with the rest of the PDU as its
+limit instead of HeadersLen. A Content-Type longer than HeadersLen made
+"headers_len - consumed" wrap, and the part's header iterator then ran
+past the end of the PDU.
+
+Check HeadersLen and DataLen against the octets that are left, one at a
+time, and decode the Content-Type inside HeadersLen. Add unit tests.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/wsputil.c       | 10 ++++++---
+ unit/test-wsputil.c | 49 +++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 56 insertions(+), 3 deletions(-)
+
+diff --git a/src/wsputil.c b/src/wsputil.c
+index c4e5f06..d19725d 100644
+--- a/src/wsputil.c
++++ b/src/wsputil.c
+@@ -857,11 +857,15 @@ gboolean wsp_multipart_iter_next(struct wsp_multipart_iter *mi)
+ 
+ 	pdu += consumed;
+ 
+-	if (pdu + headers_len + body_len > end)
++	/* Check each length on its own so that the sum cannot wrap */
++	if (headers_len > (unsigned int) (end - pdu))
+ 		return FALSE;
+ 
+-	/* Consume the Content-Type value */
+-	if (wsp_decode_field(pdu, end - pdu,
++	if (body_len > (unsigned int) (end - pdu) - headers_len)
++		return FALSE;
++
++	/* Consume the Content-Type value, which is part of the headers */
++	if (wsp_decode_field(pdu, headers_len,
+ 				NULL, NULL, NULL, &consumed) == FALSE)
+ 		return FALSE;
+ 
+diff --git a/unit/test-wsputil.c b/unit/test-wsputil.c
+index b861fe4..54d269a 100644
+--- a/unit/test-wsputil.c
++++ b/unit/test-wsputil.c
+@@ -490,6 +490,52 @@ static void test_decode_content_type_bounds(void)
+ 	g_free(p);
+ }
+ 
++static gboolean multipart_first_part(const unsigned char *data,
++							unsigned int len)
++{
++	struct wsp_header_iter hi;
++	struct wsp_multipart_iter mi;
++	unsigned char *p = dup_exact(data, len);
++	gboolean r;
++
++	wsp_header_iter_init(&hi, p, len,
++				WSP_HEADER_ITER_FLAG_DETECT_MMS_MULTIPART);
++	g_assert(wsp_header_iter_next(&hi) == FALSE);
++	g_assert(wsp_header_iter_is_multipart(&hi) == TRUE);
++	g_assert(wsp_multipart_iter_init(&mi, &hi, NULL, NULL) == TRUE);
++
++	r = wsp_multipart_iter_next(&mi);
++	if (r == TRUE) {
++		/* whatever was accepted must lie inside the buffer */
++		g_assert(mi.headers_len <= len);
++		g_assert(mi.body_len <= len);
++	}
++
++	g_free(p);
++
++	return r;
++}
++
++static void test_multipart_iter_bounds(void)
++{
++	/*
++	 * Content-Type multipart/mixed, 1 part, HeadersLen 1 and
++	 * DataLen 0xffffffff: the sum wraps to 0.
++	 */
++	static const unsigned char wrap[] = {
++		0x84, 0xa3, 0x01, 0x01, 0x8f, 0xff, 0xff, 0xff, 0x7f, 0x83 };
++	/* HeadersLen 1, but the part's Content-Type is 3 octets long */
++	static const unsigned char ct_overrun[] = {
++		0x84, 0xa3, 0x01, 0x01, 0x00, 'a', 'b', 0x00 };
++	/* A well-formed part: text/plain, body "hi" */
++	static const unsigned char good[] = {
++		0x84, 0xa3, 0x01, 0x01, 0x02, 0x83, 'h', 'i' };
++
++	g_assert(multipart_first_part(wrap, sizeof(wrap)) == FALSE);
++	g_assert(multipart_first_part(ct_overrun, sizeof(ct_overrun)) == FALSE);
++	g_assert(multipart_first_part(good, sizeof(good)) == TRUE);
++}
++
+ int main(int argc, char **argv)
+ {
+ 	g_test_init(&argc, &argv, NULL);
+@@ -517,5 +563,8 @@ int main(int argc, char **argv)
+ 	g_test_add_func("/wsputil/Decode Content-Type bounds",
+ 				test_decode_content_type_bounds);
+ 
++	g_test_add_func("/wsputil/Multipart iter bounds",
++				test_multipart_iter_bounds);
++
+ 	return g_test_run();
+ }
+-- 
+2.53.0
+

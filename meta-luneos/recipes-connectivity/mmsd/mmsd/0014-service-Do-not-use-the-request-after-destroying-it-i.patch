@@ -1,0 +1,53 @@
+From bebb3564a282fd2b7f4ee6ff2954d93b4830ecef Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 29 Oct 2026 17:51:45 +0100
+Subject: [PATCH] service: Do not use the request after destroying it in
+ web_get_cb()
+
+When a GET or POST completes, web_get_cb() may free the request with
+mms_request_destroy() and then read request->service to reset
+current_request_id and to run the queue again. That is a heap
+use-after-free on every finished transfer whose result callback
+returns TRUE, and on every failed transfer that is not requeued.
+
+Keep the service pointer in a local before the request can be freed.
+
+This is the same fix as mmsd-tng commit c862f771e110 ("Fix Heap use
+after free bug.") by Chris Talbot <chris@talbothome.com>, which
+applies it to the libsoup on_message_done() that replaced
+web_get_cb() there; it is rewritten for the gweb code.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Backport [https://gitlab.com/kop316/mmsd/-/commit/c862f771e110aeec4fdedcafaa87700b77fe7d50, rewritten for gweb]
+---
+ src/service.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/service.c b/src/service.c
+index b3ecc1e..bb73641 100644
+--- a/src/service.c
++++ b/src/service.c
+@@ -2180,6 +2180,7 @@ static gboolean web_get_cb(GWebResult *result, gpointer user_data)
+ 	gsize written;
+ 	gsize chunk_size;
+ 	struct mms_request *request = user_data;
++	struct mms_service *service = request->service;
+ 	const guint8 *chunk;
+ 
+ 	if (g_web_result_get_chunk(result, &chunk, &chunk_size) == FALSE) {
+@@ -2223,9 +2224,9 @@ complete:
+ 		}
+ 	}
+ 
+-	request->service->current_request_id = 0;
++	service->current_request_id = 0;
+ 
+-	process_request_queue(request->service);
++	process_request_queue(service);
+ 
+ 	return FALSE;
+ }
+-- 
+2.53.0
+

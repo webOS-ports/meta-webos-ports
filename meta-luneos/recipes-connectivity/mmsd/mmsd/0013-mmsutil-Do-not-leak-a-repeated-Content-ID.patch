@@ -1,0 +1,89 @@
+From 2918b765762665d9cf82d20fd80f5cfac7d85b88 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 29 Oct 2026 17:39:37 +0100
+Subject: [PATCH] mmsutil: Do not leak a repeated Content-ID
+
+attachment_parse_headers() stored every Content-ID header of a part in
+the same pointer, so each one after the first leaked the string before
+it. mmsd leaks memory for every such message it decodes. Found by
+fuzzing mms_message_decode().
+
+Keep the first Content-ID, as mms_parse_headers() keeps the first of a
+repeated message header. Add a unit test.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/mmsutil.c       |  4 ++++
+ unit/test-mmsutil.c | 33 +++++++++++++++++++++++++++++++++
+ 2 files changed, 37 insertions(+)
+
+diff --git a/src/mmsutil.c b/src/mmsutil.c
+index dcd6e99..7a09361 100644
+--- a/src/mmsutil.c
++++ b/src/mmsutil.c
+@@ -800,6 +800,10 @@ static gboolean attachment_parse_headers(struct wsp_header_iter *iter,
+ 
+ 		switch (h) {
+ 		case MMS_PART_HEADER_CONTENT_ID:
++			/* Keep the first one, as mms_parse_headers() does */
++			if (part->content_id != NULL)
++				break;
++
+ 			if (extract_content_id(iter, &part->content_id)
+ 								== FALSE)
+ 				return FALSE;
+diff --git a/unit/test-mmsutil.c b/unit/test-mmsutil.c
+index c659ab7..ea64774 100644
+--- a/unit/test-mmsutil.c
++++ b/unit/test-mmsutil.c
+@@ -1052,6 +1052,36 @@ static void test_decode_empty_subject(void)
+ 	mms_message_free(msg);
+ }
+ 
++/*
++ * M-Retrieve.conf with one text/plain part that carries two Content-ID
++ * headers: <a> and <b>.
++ */
++static const unsigned char mms_m_retrieve_conf_two_cids[] = {
++				0x8C, 0x84, 0x98, 0x31, 0x00, 0x8D, 0x90, 0x85,
++				0x01, 0x01, 0x84, 0xA3, 0x01, 0x0D, 0x02, 0x83,
++				0xC0, 0x22, 0x3C, 0x61, 0x3E, 0x00, 0xC0, 0x22,
++				0x3C, 0x62, 0x3E, 0x00, 0x68, 0x69
++};
++
++static void test_decode_two_content_ids(void)
++{
++	struct mms_message *msg = g_new0(struct mms_message, 1);
++	struct mms_attachment *part;
++
++	g_assert(decode_exact(mms_m_retrieve_conf_two_cids,
++				sizeof(mms_m_retrieve_conf_two_cids),
++				msg) == TRUE);
++	g_assert(msg->attachments != NULL);
++
++	part = msg->attachments->data;
++	g_assert_cmpstr(part->content_type, ==, "text/plain");
++	g_assert_cmpstr(part->content_id, ==, "<a>");
++	g_assert_cmpuint(part->length, ==, 2);
++
++	/* ASan's leak checker reports the second Content-ID if it leaks */
++	mms_message_free(msg);
++}
++
+ int main(int argc, char **argv)
+ {
+ 	g_test_init(&argc, &argv, NULL);
+@@ -1118,5 +1148,8 @@ int main(int argc, char **argv)
+ 	g_test_add_func("/mmsutil/Decode empty Subject",
+ 				test_decode_empty_subject);
+ 
++	g_test_add_func("/mmsutil/Decode two Content-IDs",
++				test_decode_two_content_ids);
++
+ 	return g_test_run();
+ }
+-- 
+2.53.0
+

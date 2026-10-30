@@ -1,0 +1,46 @@
+From a3af62a7ebd6a9dae2c89abf65a890d2c9f91b79 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 29 Oct 2026 17:33:33 +0100
+Subject: [PATCH] gweb: Fix OOB write in received_data()
+
+received_data() splits the HTTP response headers at '\n' with memchr()
+but measured each line with strlen(). A header line with a NUL octet in
+it made the two disagree, so bytes_read stayed larger than the data left
+in the receive buffer. The next memchr() then read past the buffer and
+the '\0' written at the line end went past it too. The MMSC, or anyone
+who can answer in its place on the bearer, controls this data.
+
+Backported from ConnMan commit d1a5ede5d255 ("gweb: Fix OOB write in
+received_data()") by Nathan Crandall <ncrandall@tesla.com>, which fixes
+CVE-2022-32292. mmsd's gweb/ is a copy of ConnMan's from 2012 and never
+got it. Upstream message:
+
+  There is a mismatch of handling binary vs. C-string data with memchr
+  and strlen, resulting in pos, count, and bytes_read to become out of
+  sync and result in a heap overflow.  Instead, do not treat the buffer
+  as an ASCII C-string. We calculate the count based on the return value
+  of memchr, instead of strlen.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Backport [https://git.kernel.org/pub/scm/network/connman/connman.git/commit/?id=d1a5ede5d255bde8ef707f8441b997563b9312bd]
+---
+ gweb/gweb.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gweb/gweb.c b/gweb/gweb.c
+index 4c2f95c..d434b1b 100644
+--- a/gweb/gweb.c
++++ b/gweb/gweb.c
+@@ -902,7 +902,7 @@ static gboolean received_data(GIOChannel *channel, GIOCondition cond,
+ 		}
+ 
+ 		*pos = '\0';
+-		count = strlen((char *) ptr);
++		count = pos - ptr;
+ 		if (count > 0 && ptr[count - 1] == '\r') {
+ 			ptr[--count] = '\0';
+ 			bytes_read--;
+-- 
+2.53.0
+
