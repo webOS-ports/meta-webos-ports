@@ -31,6 +31,9 @@ SRC_URI += "file://0008-wifi-give-every-network-its-own-stable-MAC-address.patch
 # answered when the retry failed at once, so every later Connect on that
 # network got InProgress until connmand restarted.
 SRC_URI += "file://0009-service-answer-a-held-Connect-when-the-retry-after-in.patch"
+# Ethernet.Address kept the address the link had when connmand first saw
+# it, so a network joined with its own address showed the hardware one.
+SRC_URI += "file://0010-ipconfig-follow-the-MAC-address-of-the-link.patch"
 
 # See connman-vpn.service.d/luneos-caps.conf for why: upstream's
 # CapabilityBoundingSet on connman-vpn.service is missing CAP_SYS_ADMIN and

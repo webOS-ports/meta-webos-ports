@@ -1,0 +1,108 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 30 Oct 2026 18:43:50 +0100
+Subject: [PATCH] ipconfig: follow the MAC address of the link
+
+A service's Ethernet dict reports the address ipconfig stored from the
+first RTM_NEWLINK it saw for the link, and it is never updated. When the
+address changes later, as it does when wpa_supplicant joins a network
+with an address of its own (mac_addr in the network block) or after
+"ip link set address", Ethernet.Address keeps showing the old one.
+
+Take the address from every RTM_NEWLINK, and when it has changed send
+PropertyChanged for Ethernet on the services of that link. A message
+without an address (all zeroes) does not replace a known one.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ doc/service-api.txt |  6 +++++-
+ src/connman.h       |  1 +
+ src/ipconfig.c      | 13 +++++++++++++
+ src/service.c       | 20 ++++++++++++++++++++
+ 4 files changed, 39 insertions(+), 1 deletion(-)
+
+diff --git a/doc/service-api.txt b/doc/service-api.txt
+index 8b0c788..2d55a32 100644
+--- a/doc/service-api.txt
++++ b/doc/service-api.txt
+@@ -542,7 +542,11 @@ Properties	string State [readonly]
+ 
+ 			string Address [readonly]
+ 
+-				Ethernet device address (MAC address).
++				Ethernet device address (MAC address)
++				the interface has now. It follows
++				changes, for instance when a WiFi
++				network is joined with an address of
++				its own.
+ 
+ 			uint16 MTU [readonly]
+ 
+diff --git a/src/connman.h b/src/connman.h
+index ca77627..ce0de1f 100644
+--- a/src/connman.h
++++ b/src/connman.h
+@@ -731,6 +731,7 @@ int __connman_service_compare(const struct connman_service *a,
+ 					const struct connman_service *b);
+ 
+ struct connman_service *__connman_service_lookup_from_index(int index);
++void __connman_service_link_address_changed(int index);
+ struct connman_service *__connman_service_create_from_network(struct connman_network *network);
+ struct connman_service *__connman_service_create_from_provider(struct connman_provider *provider);
+ bool __connman_service_index_is_default(int index);
+diff --git a/src/ipconfig.c b/src/ipconfig.c
+index cf46fea..c1a7201 100644
+--- a/src/ipconfig.c
++++ b/src/ipconfig.c
+@@ -750,6 +750,19 @@ update:
+ 
+ 	update_stats(ipdevice, ifname, stats);
+ 
++	/*
++	 * The address can change after the link was first seen, for
++	 * instance when wpa_supplicant joins a network with an address of
++	 * its own. A message without one (all zeroes) changes nothing.
++	 */
++	if (address && strcmp(address, "00:00:00:00:00:00") != 0 &&
++			g_strcmp0(ipdevice->address, address) != 0) {
++		g_free(ipdevice->address);
++		ipdevice->address = g_strdup(address);
++
++		__connman_service_link_address_changed(index);
++	}
++
+ 	if (flags == ipdevice->flags)
+ 		goto out;
+ 
+diff --git a/src/service.c b/src/service.c
+index 03d6336..288d33e 100644
+--- a/src/service.c
++++ b/src/service.c
+@@ -10620,6 +10620,26 @@ struct connman_service *__connman_service_lookup_from_index(int index)
+ 	return NULL;
+ }
+ 
++/*
++ * The MAC address of link index changed: every service on that link
++ * reports it in its Ethernet dict.
++ */
++void __connman_service_link_address_changed(int index)
++{
++	GList *list;
++
++	for (list = service_list; list; list = list->next) {
++		struct connman_service *service = list->data;
++
++		if (__connman_ipconfig_get_index(service->ipconfig_ipv4)
++							== index ||
++				__connman_ipconfig_get_index(
++						service->ipconfig_ipv6)
++							== index)
++			link_changed(service);
++	}
++}
++
+ const char *connman_service_get_identifier(const struct connman_service *service)
+ {
+ 	return service ? service->identifier : "<null>";
