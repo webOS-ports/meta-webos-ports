@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 30 Oct 2026 09:42:11 +0100
+Subject: [PATCH] adb: read a host's key no further than its packet
+
+A host sends its public key (A_AUTH, ADB_AUTH_RSAPUBLICKEY) before it
+is let in. adbd read it with std::string(p->payload.data()):
+
+- a packet with no payload has a null data(), and std::string throws:
+  adbd aborts, so anyone at the other end of the cable can stop it;
+- a key without its terminating NUL is read past the end of the
+  payload, into the heap.
+
+Read at most the payload, up to its first NUL.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ packages/modules/adb/adb.cpp | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/packages/modules/adb/adb.cpp b/packages/modules/adb/adb.cpp
+index 78bbfb6..38df2d9 100644
+--- a/packages/modules/adb/adb.cpp
++++ b/packages/modules/adb/adb.cpp
+@@ -456,7 +456,15 @@ void handle_packet(apacket *p, atransport *t)
+             }
+ 
+             case ADB_AUTH_RSAPUBLICKEY:
+-                t->auth_key = std::string(p->payload.data());
++                // The host sends its key as a C string, but nothing makes it
++                // end the payload with the NUL, or send a payload at all
++                // (then data() is null): read no further than the payload.
++                if (p->payload.empty()) {
++                    t->auth_key.clear();
++                } else {
++                    t->auth_key.assign(p->payload.data(),
++                                       strnlen(p->payload.data(), p->payload.size()));
++                }
+                 adbd_auth_confirm_key(t);
+                 break;
+ #endif
