@@ -1,0 +1,244 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] binder_voicecall: do not poll calls during a call control
+ request
+
+Swapping two calls on the Mindphone (MT6739, MTK RIL) sometimes hangs up
+both of them. The RIL says that the call list has changed as soon as
+the first call is on hold, while the switch request is still pending,
+and the plugin asks for the call list right away. If that happens
+before the other call starts coming out of hold, both calls are shown
+as held:
+
+  15:06:54.842 AT+CHLD=2
+  15:06:55.232 +ECPI: 2, 131    call 2 held, CALL_STATE_CHANGED
+  15:06:55.234 AT+CLCC          the poll
+  15:06:55.237 +CLCCS: both calls in the held state
+  15:06:55.238 RtcCC: Hangup all calls due to abnormal held call exists
+  15:06:55.351 OK
+  15:06:55.352 AT+CHLD=6        RFX_MSG_REQUEST_HANGUP_ALL
+
+RtcCallController::parsePreciseCallState() in libmtk-ril.so does that
+to every getCurrentCalls response: more than one held call, or one held
+call next to a held conference, and it sends HANGUP_ALL. It doesn't look
+at what else is pending. Whether it happens depends on timing: the same
+swap 28 seconds later got the poll in just after the other call had left
+that state.
+
+Android doesn't run into this because it doesn't poll at such a time.
+GsmCdmaCallTracker counts each call control request in
+mPendingOperations, pollCallsWhenSafe() only sets mNeedsPoll while
+that's not zero, and operationComplete() polls when it gets to zero.
+Starting an operation also makes any poll that's already out irrelevant
+(mLastRelevantPoll = null).
+
+Do the same here for the requests that complete through
+binder_voicecall_cbd_complete: switch, hangup, accept, reject,
+conference, separate and transfer. Android counts dial as well, but it
+is left alone here: oFono refuses to dial with both an active and a held
+call, so a dial can't leave two calls on hold, and the call that it
+creates is found by a poll. DTMF isn't call control and isn't affected
+either.
+
+A poll that's asked for in the meantime is sent when the last response
+arrives, whether that's a success, an error or a failed transaction, and
+that's what binder_voicecall_cbd_complete has always done anyway. In the
+log, none of the polls that followed the OK of the five AT+CHLD=2 found
+two calls on hold, even the one sent 3ms later.
+
+Android waits for as long as it takes. Here a request that doesn't get
+answered would take away notifications of incoming calls for 30 seconds
+which is how long libgbinder-radio waits for the response. Give up on
+holding the polls after 5 seconds. The longest swap in the log took
+0.81 seconds. A poll that's outstanding when a request is submitted is
+dropped and replaced, because it may be waiting to retry, which could
+otherwise fire at the worst possible moment.
+
+On the same device hangup took 0.13-0.16s and accept 0.22-0.24s, and no
+poll landed in any of those, so they are not delayed in practice.
+Incoming calls with no request outstanding are not delayed at all.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/binder_voicecall.c | 93 ++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 89 insertions(+), 4 deletions(-)
+
+diff --git a/src/binder_voicecall.c b/src/binder_voicecall.c
+index 51fb5b5..25d4052 100644
+--- a/src/binder_voicecall.c
++++ b/src/binder_voicecall.c
+@@ -40,11 +40,20 @@
+ #include <gutil_intarray.h>
+ #include <gutil_ints.h>
+ #include <gutil_macros.h>
++#include <gutil_misc.h>
+ #include <gutil_ring.h>
+ #include <gutil_strv.h>
+ 
+ #define VOICECALL_BLOCK_TIMEOUT_MS (5*1000)
+ 
++/*
++ * The longest that a call list poll waits for a call control response. A swap
++ * normally takes under a second, and a late poll is only harmful while one is
++ * still in progress. The radio's own request timeout is far too long for this
++ * since nothing would notice an incoming call in the meantime.
++ */
++#define VOICECALL_CLCC_DEFER_TIMEOUT_MS (5*1000)
++
+ enum binder_voicecall_events {
+     VOICECALL_EVENT_CALL_STATE_CHANGED,
+     VOICECALL_EVENT_SUPP_SVC_NOTIFICATION,
+@@ -80,6 +89,9 @@ typedef struct binder_voicecall {
+     GUtilInts* remote_hangup_reasons;
+     RadioRequest* send_dtmf_req;
+     RadioRequest* clcc_poll_req;
++    guint clcc_ops;      /* Number of outstanding call control requests */
++    guint clcc_defer_id; /* Timeout, non-zero while polls are being held */
++    gboolean clcc_wanted; /* A poll was held and is yet to be sent */
+     guint ext_send_dtmf_id;
+     guint ext_req_id;
+     gulong ext_event[VOICECALL_EXT_EVENT_COUNT];
+@@ -828,7 +840,10 @@ void
+ binder_voicecall_clcc_poll(
+     BinderVoiceCall* self)
+ {
+-    if (!self->clcc_poll_req) {
++    if (self->clcc_defer_id) {
++        DBG_(self, "holding the poll, %u request(s) pending", self->clcc_ops);
++        self->clcc_wanted = TRUE;
++    } else if (!self->clcc_poll_req) {
+         /* getCurrentCalls(int32 serial); */
+         guint32 code = self->interface_aidl == RADIO_VOICE_INTERFACE ?
+             RADIO_VOICE_REQ_GET_CURRENT_CALLS :
+@@ -839,6 +854,7 @@ binder_voicecall_clcc_poll(
+ 
+         radio_request_set_retry(req, BINDER_RETRY_MS, -1);
+         radio_request_set_retry_func(req, binder_voicecall_clcc_retry);
++        self->clcc_wanted = FALSE;
+         if (radio_request_submit(req)) {
+             self->clcc_poll_req = req;
+         } else {
+@@ -847,6 +863,63 @@ binder_voicecall_clcc_poll(
+     }
+ }
+ 
++static
++gboolean
++binder_voicecall_clcc_defer_timeout(
++    gpointer user_data)
++{
++    BinderVoiceCall* self = user_data;
++
++    ofono_warn("%u call control request(s) unanswered, polling calls anyway",
++        self->clcc_ops);
++    self->clcc_defer_id = 0;
++    if (self->clcc_wanted) {
++        binder_voicecall_clcc_poll(self);
++    }
++    return G_SOURCE_REMOVE;
++}
++
++/*
++ * Don't ask for the call list while a call is changing state on our request,
++ * same as Android's CallTracker.pollCallsWhenSafe(). The list may catch the
++ * calls half way through the change. During a swap both are held for a moment,
++ * and the MTK RIL hangs up all calls when it finds that in a getCurrentCalls
++ * response. A poll that's needed in the meantime waits for the response.
++ */
++static
++void
++binder_voicecall_clcc_defer_begin(
++    BinderVoiceCall* self)
++{
++    self->clcc_ops++;
++    gutil_source_remove(self->clcc_defer_id);
++    self->clcc_defer_id = g_timeout_add(VOICECALL_CLCC_DEFER_TIMEOUT_MS,
++        binder_voicecall_clcc_defer_timeout, self);
++
++    /*
++     * A poll that's still there may be waiting to retry, in which case it
++     * would go out in the middle of the operation. And if it isn't, then its
++     * result is about to become obsolete. Replace it with a new one.
++     */
++    if (self->clcc_poll_req) {
++        radio_request_drop(self->clcc_poll_req);
++        self->clcc_poll_req = NULL;
++        self->clcc_wanted = TRUE;
++    }
++}
++
++static
++void
++binder_voicecall_clcc_defer_end(
++    BinderVoiceCall* self)
++{
++    GASSERT(self->clcc_ops > 0);
++    if (!--self->clcc_ops) {
++        gutil_source_remove(self->clcc_defer_id);
++        self->clcc_defer_id = 0;
++    }
++}
++
+ static
+ void
+ binder_voicecall_cbd_destroy(
+@@ -864,6 +937,15 @@ binder_voicecall_request_submitted(
+     cbd->pending_call_count++;
+ }
+ 
++static
++void
++binder_voicecall_radio_request_submitted(
++    BinderVoiceCallCbData* cbd)
++{
++    binder_voicecall_request_submitted(cbd);
++    binder_voicecall_clcc_defer_begin(cbd->self);
++}
++
+ static
+ void
+ binder_voicecall_request_completed(
+@@ -908,6 +990,8 @@ binder_voicecall_cbd_complete(
+ {
+     BinderVoiceCallCbData* data = user_data;
+ 
++    /* This is also where a failed or timed out request ends up */
++    binder_voicecall_clcc_defer_end(data->self);
+     binder_voicecall_clcc_poll(data->self);
+     binder_voicecall_request_completed(data, status == RADIO_TX_STATUS_OK &&
+         error == RADIO_ERROR_NONE);
+@@ -940,7 +1024,7 @@ binder_voicecall_request_submit(
+ 
+     /* Request data will be unref'ed when the request is done */
+     if (radio_request_submit(req)) {
+-        binder_voicecall_request_submitted(cbd);
++        binder_voicecall_radio_request_submitted(cbd);
+     }
+     radio_request_unref(req);
+ }
+@@ -1175,7 +1259,7 @@ binder_voicecall_submit_hangup_req(
+ 
+     /* Request data will be unref'ed when the request is done */
+     if (radio_request_submit(req)) {
+-        binder_voicecall_request_submitted(cbd);
++        binder_voicecall_radio_request_submitted(cbd);
+     }
+     radio_request_unref(req);
+ }
+@@ -1777,7 +1861,7 @@ binder_voicecall_private_chat(
+     DBG_(self, "Private chat with id %d", cid);
+     gbinder_writer_append_int32(&writer, cid);
+     if (radio_request_submit(req)) {
+-        binder_voicecall_request_submitted(cbd);
++        binder_voicecall_radio_request_submitted(cbd);
+     }
+     radio_request_unref(req);
+ }
+@@ -2277,6 +2361,7 @@ binder_voicecall_remove(
+     DBG_(self, "");
+     g_slist_free_full(self->calls, binder_voicecall_info_free);
+ 
++    gutil_source_remove(self->clcc_defer_id);
+     radio_request_drop(self->send_dtmf_req);
+     radio_request_drop(self->clcc_poll_req);
+     radio_client_remove_all_handlers(self->g->client, self->radio_event);
