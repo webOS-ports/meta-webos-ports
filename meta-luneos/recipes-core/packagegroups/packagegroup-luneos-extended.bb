@@ -454,6 +454,7 @@ RDEPENDS:${PN}:append:tissot-halium = " wcnss-filter-fixup"
 # to packages. nfc is the standard OE feature; fingerprint, esim, faceunlock,
 # ir-blaster, fm-radio, keyboard-touch and trackpad are LuneOS-specific.
 RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'fingerprint', ' ${FINGERPRINT_RDEPENDS}', '', d)}"
+RDEPENDS:${PN}:append:vince-halium = " wcnss-filter-fixup"
 RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'nfc',         ' ${NFC_RDEPENDS}',         '', d)}"
 RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'esim',        ' ${ESIM_RDEPENDS}',        '', d)}"
 RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'ir-blaster',  ' ${IR_BLASTER_RDEPENDS}',  '', d)}"
