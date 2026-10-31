@@ -1,6 +1,13 @@
 SUMMARY = "LuneUI example image"
 
-IMAGE_FEATURES += "package-management allow-empty-password empty-root-password allow-root-login post-install-logging ssh-server-openssh"
+# No passwordless root by default, as in luneos_image.bbclass: without
+# allow-empty-password, empty-root-password and allow-root-login oe-core locks
+# root and sshd keeps PermitRootLogin prohibit-password. LUNEOS_DEBUG_ACCESS =
+# "1" in local.conf (luneos-features.inc) brings them back for a local
+# developer build.
+IMAGE_FEATURES += "package-management post-install-logging ssh-server-openssh \
+    ${@oe.utils.conditional('LUNEOS_DEBUG_ACCESS', '1', 'allow-empty-password empty-root-password allow-root-login', '', d)} \
+"
 
 inherit core-image
 
