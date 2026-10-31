@@ -15,7 +15,9 @@ inherit webos_systemd
 
 LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
+    file://0001-role-take-calls-from-luna-send-only.patch \
+"
 
 WEBOS_REPO_NAME = "lumberjack"
 SRCREV = "8af6f257319133c4bbee63c5f8aa168e9018136a"
