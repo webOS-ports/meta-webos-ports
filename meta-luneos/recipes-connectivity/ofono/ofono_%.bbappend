@@ -64,6 +64,7 @@ SRC_URI:append = " \
   file://0125-emulator-accept-AT-BAC-with-CVSD-anywhere-in-the-lis.patch \
   file://0126-unit-test-one-HFP-emulator-serving-the-calls-of-two.patch \
   file://0127-unit-test-that-each-headset-gets-every-voice-capable.patch \
+  file://0128-emulator-do-not-write-to-a-headset-whose-link-has-gone.patch \
 "
 
 # On Halium the modem is driven by ofono-binder-plugin. The in-tree ril
