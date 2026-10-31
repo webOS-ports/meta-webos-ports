@@ -3,6 +3,10 @@ PACKAGECONFIG:append = " libv4l2"
 
 SRC_URI += "file://0001-gst_v4l2_fill_lists-abort-if-type-is-invalid.patch"
 
+# A sink opened after PulseAudio was restarted must not be handed the context
+# to the old daemon that a paused player in the same process still holds.
+SRC_URI += "file://0002-pulsesink-do-not-hand-out-a-shared-context-whose-server-went-away.patch"
+
 
 # Halium devices capture and decode through gst-droid (droidcamsrc, droidvdec/venc); nothing there
 # uses the v4l2 plugin - luneos-rtc-engine already drops its v4l2 recommends on halium. Built with

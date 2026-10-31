@@ -1,0 +1,110 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] pulsesink: do not hand out a shared context whose server went
+ away
+
+All pulsesinks of a process with the same client name share one
+pa_context, kept in gst_pulse_shared_contexts until the last ring buffer
+on it lets go. When PulseAudio is restarted, that context fails, but it
+stays in the table for as long as any sink still holds it - a paused
+player does, indefinitely. Every sink opened after the restart is then
+handed the dead context and fails in gst_pulseringbuffer_open_device()
+with "Failed to connect: Connection terminated", although the new
+daemon is up.
+
+Reproduced on x86-64 with the LuneOS builds of GStreamer 1.28.2 and
+PulseAudio 17 (a private daemon, kill -9 and start again):
+- a pipeline in READY holding the context, a second one set to NULL and
+  PLAYING after the restart: fails, "Failed to connect: Connection
+  terminated";
+- a GstPlay left paused, a second GstPlay played after the restart (what
+  QtMultimedia's QGstreamerMediaPlayer does): fails with a resource
+  error;
+- nothing else holding the context: plays.
+
+A context that is no longer good is now taken out of the table when a
+ring buffer opens, and the ring buffer connects a new one. The ring
+buffers still on the old context keep it: each ring buffer now records
+the context it is on instead of looking it up again by name, and the
+last one to let go of a retired context frees it without removing the
+new context's entry. With the change both cases above play, and once
+the old holder lets go a third sink shares the new context (one client
+of the process on the daemon).
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+
+diff --git a/ext/pulse/pulsesink.c b/ext/pulse/pulsesink.c
+index a141e80..4c4efe7 100644
+--- a/ext/pulse/pulsesink.c
++++ b/ext/pulse/pulsesink.c
+@@ -162,6 +162,10 @@ struct _GstPulseRingBuffer
+   GstAudioRingBuffer object;
+ 
+   gchar *context_name;
++  /* The shared context this ring buffer is on. Not looked up again by
++   * context_name: a context whose daemon went away is taken out of
++   * gst_pulse_shared_contexts while ring buffers still hold it. */
++  GstPulseContext *shared;
+   gchar *stream_name;
+ 
+   pa_context *context;
+@@ -348,9 +352,9 @@ gst_pulsering_destroy_context (GstPulseRingBuffer * pbuf)
+   }
+ 
+   if (pbuf->context_name) {
+-    GstPulseContext *pctx;
++    GstPulseContext *pctx = pbuf->shared;
+ 
+-    pctx = g_hash_table_lookup (gst_pulse_shared_contexts, pbuf->context_name);
++    pbuf->shared = NULL;
+ 
+     GST_DEBUG_OBJECT (pbuf, "releasing context with name %s, pbuf=%p, pctx=%p",
+         pbuf->context_name, pbuf, pctx);
+@@ -368,7 +372,10 @@ gst_pulsering_destroy_context (GstPulseRingBuffer * pbuf)
+         pa_context_set_state_callback (pctx->context, NULL, NULL);
+         pa_context_set_subscribe_callback (pctx->context, NULL, NULL);
+ 
+-        g_hash_table_remove (gst_pulse_shared_contexts, pbuf->context_name);
++        /* Not there any more if it was retired for a new context. */
++        if (g_hash_table_lookup (gst_pulse_shared_contexts,
++                pbuf->context_name) == pctx)
++          g_hash_table_remove (gst_pulse_shared_contexts, pbuf->context_name);
+ 
+         pa_context_unref (pctx->context);
+         g_free (pctx);
+@@ -527,6 +534,19 @@ gst_pulseringbuffer_open_device (GstAudioRingBuffer * buf)
+   need_unlock_shared = TRUE;
+ 
+   pctx = g_hash_table_lookup (gst_pulse_shared_contexts, pbuf->context_name);
++  if (pctx != NULL && !CONTEXT_OK (pctx->context)) {
++    /* The server this context was connected to went away (PulseAudio was
++     * restarted, or killed). Every ring buffer still on it fails on its own;
++     * handing it to this one as well would fail this one with "Failed to
++     * connect" until the last of them lets go - a paused player elsewhere in
++     * the process can hold it for ever. Leave it to the ones that have it and
++     * connect afresh. */
++    GST_INFO_OBJECT (psink,
++        "shared context with name %s is dead (%s), connecting a new one",
++        pbuf->context_name, pa_strerror (pa_context_errno (pctx->context)));
++    g_hash_table_remove (gst_pulse_shared_contexts, pbuf->context_name);
++    pctx = NULL;
++  }
+   if (pctx == NULL) {
+     pctx = g_new0 (GstPulseContext, 1);
+ 
+@@ -538,6 +558,7 @@ gst_pulseringbuffer_open_device (GstAudioRingBuffer * buf)
+       goto create_failed;
+ 
+     pctx->ring_buffers = g_slist_prepend (pctx->ring_buffers, pbuf);
++    pbuf->shared = pctx;
+     g_hash_table_insert (gst_pulse_shared_contexts,
+         g_strdup (pbuf->context_name), (gpointer) pctx);
+     /* register some essential callbacks */
+@@ -558,6 +579,7 @@ gst_pulseringbuffer_open_device (GstAudioRingBuffer * buf)
+         "reusing shared context with name %s, pbuf=%p, pctx=%p",
+         pbuf->context_name, pbuf, pctx);
+     pctx->ring_buffers = g_slist_prepend (pctx->ring_buffers, pbuf);
++    pbuf->shared = pctx;
+   }
+ 
+   g_mutex_unlock (&pa_shared_resource_mutex);
