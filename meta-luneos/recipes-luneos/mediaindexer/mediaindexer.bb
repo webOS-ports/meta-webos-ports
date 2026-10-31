@@ -9,7 +9,7 @@ RDEPENDS:${PN} += "shared-mime-info"
 
 PV = "0.1.0-14+git"
 SRCREV = "b38cf0420b29dd1407b86129a2c973308e1404f8"
-PR = "r4"
+PR = "r5"
 
 inherit webos_ports_repo
 inherit webos_system_bus
@@ -39,15 +39,27 @@ do_install:append() {
 
 FILES:${PN} += "${webos_sysconfdir}/db/kinds ${systemd_system_unitdir}/mediaindexer.service.d"
 
-# tenderloin: /media/internal is webOS's FAT partition; see the file.
-SRC_URI:append:tenderloin-halium = " file://tenderloin-root.conf"
+# tenderloin: /media/internal is webOS's FAT partition; see the .mount file.
+SRC_URI:append:tenderloin-halium = " \
+    file://tenderloin-thumbnails.mount \
+    file://tenderloin-thumbnails.conf \
+    file://tenderloin-thumbnails-tmpfiles.conf \
+"
 PACKAGE_ARCH:tenderloin-halium = "${MACHINE_ARCH}"
 
 do_install:append:tenderloin-halium() {
-    install -D -m 0644 ${UNPACKDIR}/tenderloin-root.conf \
-        ${D}${systemd_system_unitdir}/mediaindexer.service.d/50-tenderloin-root.conf
+    install -D -m 0644 ${UNPACKDIR}/tenderloin-thumbnails.mount \
+        ${D}${systemd_system_unitdir}/media-internal-.thumbnails.mount
+    install -D -m 0644 ${UNPACKDIR}/tenderloin-thumbnails.conf \
+        ${D}${systemd_system_unitdir}/mediaindexer.service.d/50-tenderloin-thumbnails.conf
+    install -D -m 0644 ${UNPACKDIR}/tenderloin-thumbnails-tmpfiles.conf \
+        ${D}${nonarch_libdir}/tmpfiles.d/mediaindexer-tenderloin.conf
 }
 
-FILES:${PN}:append:tenderloin-halium = " ${systemd_system_unitdir}/mediaindexer.service.d"
+FILES:${PN}:append:tenderloin-halium = " \
+    ${systemd_system_unitdir}/mediaindexer.service.d \
+    ${systemd_system_unitdir}/media-internal-.thumbnails.mount \
+    ${nonarch_libdir}/tmpfiles.d/mediaindexer-tenderloin.conf \
+"
 
 CXXFLAGS += "-fpermissive"
