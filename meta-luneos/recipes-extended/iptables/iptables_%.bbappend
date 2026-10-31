@@ -52,3 +52,8 @@ RDEPENDS:${PN} += " \
     ${PN}-module-ipt-icmp \
     ${@bb.utils.contains('PACKAGECONFIG', 'ipv6', '${PN}-module-ip6t-icmp6 ${PN}-module-ip6t-hl', '', d)} \
 "
+
+# Bumped when the rules or scripts shipped from here change, so installed
+# images pick them up on upgrade: the base recipe's revision does not move
+# for it.
+PR = "r1"
