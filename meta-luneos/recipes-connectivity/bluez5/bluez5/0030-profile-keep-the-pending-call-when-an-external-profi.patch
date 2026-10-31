@@ -1,0 +1,66 @@
+From e558e764f4bde4a895fe384232d36dcec889fec1 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sat, 31 Oct 2026 05:31:57 +0100
+Subject: [PATCH] profile: keep the pending call when an external profile's
+ socket closes
+
+0002-Send-disconnect-signal-on-remote-device-disconnect.patch makes
+ext_io_disconnected() call send_disconn_req(), which stores a new
+RequestDisconnection call in conn->pending. When the socket closes
+while a call to the profile owner is still pending, that call is
+replaced, ext_io_destroy() cancels only the new one and frees conn,
+and the reply to the first call later runs disconn_reply() (or
+new_conn_reply()) on the freed conn.
+
+That is what happens on an HFP disconnect on a LuneOS phone. The
+SIL's DisconnectProfile on the headset's hands-free UUID, or a device
+Disconnect, reaches ext_disconnect_dev(), which sends
+RequestDisconnection to oFono's hfp_ag profile and sets conn->pending.
+oFono's handler calls shutdown(fd, SHUT_RDWR) on the RFCOMM socket
+before it replies, so bluetoothd sees the hangup first:
+ext_io_disconnected() replaces conn->pending and frees conn, and
+oFono's reply then crashes bluetoothd with SIGSEGV in disconn_reply().
+On a mindphone with a Nuraphone connected over A2DP and HFP, an
+hfp/disconnect through com.webos.service.bluetooth2 killed bluetoothd,
+and so did a disconnect from Settings; the restarted bluetoothd also
+lost oFono's audio gateway registration.
+Disconnects with HFP down did not crash.
+
+Only tell the owner when it accepted the connection and no call to it
+is pending. A pending RequestDisconnection means the owner is already
+dropping the connection, and ext_io_destroy() cancels that call so its
+reply no longer reaches the freed conn. A pending NewConnection, or a
+connection still authorizing or resolving, was never the owner's.
+
+Upstream BlueZ does not call send_disconn_req() from
+ext_io_disconnected(), so it does not have this bug.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ src/profile.c | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/src/profile.c b/src/profile.c
+index 120b1d2..8da2ad1 100644
+--- a/src/profile.c
++++ b/src/profile.c
+@@ -908,7 +908,17 @@ drop:
+ 			btd_service_disconnecting_complete(conn->service, 0);
+ 	}
+ 
+-	send_disconn_req(ext, conn);
++	/*
++	 * Tell the owner its connection is gone, unless a call to the owner
++	 * is still pending for it. That call's reply handler takes conn as
++	 * user data, and conn is freed below: ext_io_destroy() cancels only
++	 * the call conn->pending points at, so it must stay that call. A
++	 * pending RequestDisconnection means the owner is already dropping
++	 * the connection; a pending NewConnection means the owner never
++	 * took it, and neither did one not yet connected.
++	 */
++	if (conn->connected && !conn->pending)
++		send_disconn_req(ext, conn);
+ 
+ 	ext->conns = g_slist_remove(ext->conns, conn);
+ 	ext_io_destroy(conn);
