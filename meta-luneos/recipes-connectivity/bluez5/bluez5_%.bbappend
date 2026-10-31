@@ -13,6 +13,14 @@ SRC_URI += " \
 "
 
 # Patches coming from webOS OSE
+#
+# 0014 makes bluetoothd ignore the IO capability the SIL registers and pair
+# everything as NoInputNoOutput (Just Works, no MITM protection). It stays
+# until the UI has a pairing agent that shows numeric comparison and passkey
+# prompts and that path has been tested end to end; dropping it earlier
+# risks pairing requests nobody can confirm. main.conf sets
+# JustWorksRepairing = never so a spoofed bonded device cannot silently
+# replace its link key in the meantime.
 SRC_URI += " \
     file://0001-Fix-advertise-time-out-when-default-is-set-to-zero.patch \
     file://0002-Send-disconnect-signal-on-remote-device-disconnect.patch \
@@ -43,14 +51,19 @@ SRC_URI += " \
     file://0027-Sync-Add-support-for-meshd-to-use-RAW-channel-with-b.patch \
     file://0028-obexd-remove-the-part-of-a-push-the-sender-disconnec.patch \
     file://0029-gobex-retry-a-write-the-socket-cannot-take-yet.patch \
+    file://0030-profile-keep-the-pending-call-when-an-external-profi.patch \
     file://main.conf \
     file://brcm43438.service \
     file://bluetooth.service.d/luneos-uinput.conf \
+    file://obex.service.d/luneos-hardening.conf \
 "
 
 # See bluetooth.service.d/luneos-uinput.conf: bluetoothd needs the
 # bluetooth group to open /dev/uinput, or headset buttons never become keys.
 FILES:${PN} += "${systemd_system_unitdir}/bluetooth.service.d/luneos-uinput.conf"
+
+# Sandbox for obexd; see the file.
+FILES:${PN}-obex += "${systemd_system_unitdir}/obex.service.d/luneos-hardening.conf"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "obex.service"
@@ -72,6 +85,8 @@ do_install:append () {
     install -d ${D}${systemd_system_unitdir}/bluetooth.service.d
     install -m 0644 ${UNPACKDIR}/bluetooth.service.d/luneos-uinput.conf \
         ${D}${systemd_system_unitdir}/bluetooth.service.d/luneos-uinput.conf
+    install -D -m 0644 ${UNPACKDIR}/obex.service.d/luneos-hardening.conf \
+        ${D}${systemd_system_unitdir}/obex.service.d/luneos-hardening.conf
 }
 
 do_install:append:raspberrypi4 () {
