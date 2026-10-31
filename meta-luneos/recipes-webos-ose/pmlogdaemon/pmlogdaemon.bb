@@ -16,7 +16,7 @@ DEPENDS = "pmloglib zlib glib-2.0 libpbnjson pmloglib-private luna-service2"
 RDEPENDS:${PN} = "busybox"
 
 WEBOS_VERSION = "3.1.0-19_bbaf3b110429a8eaa6ba747019253bf4957a455f"
-PR = "r15"
+PR = "r16"
 
 inherit webos_component
 inherit webos_public_repo
@@ -34,6 +34,8 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     ${@bb.utils.contains('PACKAGECONFIG', 'whitelist', 'file://whitelist.txt', '', d)} \
     file://0002-Create-the-log-files-0640-group-adm.patch \
     file://pmlogdaemon-logs.conf \
+    file://luneos-purge-old-logs \
+    file://luneos-purge-old-logs.service \
 "
 
 do_install:append() {
@@ -42,8 +44,17 @@ do_install:append() {
     fi
     install -d ${D}${libdir}/tmpfiles.d
     install -m 0644 ${UNPACKDIR}/pmlogdaemon-logs.conf ${D}${libdir}/tmpfiles.d/
+
+    # Logs from older images can hold secrets; see the script. Comes with the
+    # package, so a device upgrades into it as well.
+    install -d ${D}${libexecdir}
+    install -m 0755 ${UNPACKDIR}/luneos-purge-old-logs ${D}${libexecdir}/
+    install -d ${D}${systemd_system_unitdir}/sysinit.target.wants
+    install -m 0644 ${UNPACKDIR}/luneos-purge-old-logs.service ${D}${systemd_system_unitdir}/
+    ln -sf ../luneos-purge-old-logs.service \
+        ${D}${systemd_system_unitdir}/sysinit.target.wants/luneos-purge-old-logs.service
 }
-FILES:${PN} += "${datadir}/PmLogDaemon ${libdir}/tmpfiles.d"
+FILES:${PN} += "${datadir}/PmLogDaemon ${libdir}/tmpfiles.d ${systemd_system_unitdir}"
 
 # CMake 4: @VAR@ is no longer expanded in unquoted arguments (CMP0053),
 # which broke the install() DESTINATIONs in this component.
