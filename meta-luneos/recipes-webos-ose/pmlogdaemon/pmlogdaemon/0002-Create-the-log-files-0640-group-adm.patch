@@ -1,0 +1,116 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 29 Oct 2026 15:32:22 +0100
+Subject: [PATCH] Create the log files 0640, group adm
+
+/var/log/messages, /var/log/legacy-log and their rotations are created
+0644, so every user and every app can read them, and the logs carry
+whatever any process sends to syslog - including, on older images,
+passwords and tokens that services logged.
+
+Create them 0640 instead and make the daemon's group adm, so new files
+are root:adm 0640, as systemd does for the journal. The umask the
+rotation path set back to 0022 is 0027 now as well, so the temporary
+and compressed copies stay 0640 too. The daemon still runs as root; the
+gid only decides the group of the files it creates. Without an adm
+group the files stay root:root 0640.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/main.c | 48 ++++++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 46 insertions(+), 2 deletions(-)
+
+diff --git a/src/main.c b/src/main.c
+index c0ce23a..9e0a4d7 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -52,6 +52,8 @@
+ #include <sys/syslog.h>
+ #include <sys/time.h>
+ #include <sys/un.h>
++#include <sys/stat.h>
++#include <grp.h>
+ 
+ #include <zlib.h>
+ #include <glib.h>
+@@ -64,6 +66,15 @@
+ #include "print.h"
+ #include "heavy_operation_routine.h"
+ 
++/*
++ * The logs carry whatever any process sends to syslog, so they are not for
++ * every user to read: create them 0640, group "adm" (as systemd does for the
++ * journal), and keep the rotated and compressed copies the same way.
++ */
++#define LOG_FILE_MODE  0640
++#define LOG_FILE_UMASK 0027
++#define LOG_FILE_GROUP "adm"
++
+ /***********************************************************************
+  * status codes
+  ***********************************************************************/
+@@ -561,7 +572,7 @@ static int DoRotateLogFile(PmLogFile_t *logFileP, bool startTaskInNewThread)
+ 	else
+ 	{
+ 		snprintf(newPath, sizeof(newPath), "%s.XXXXXX", logFileP->path);
+-                umask(0022);
++                umask(LOG_FILE_UMASK);
+ 
+ 		int tmp_fd = mkstemp(newPath);
+ 		if (tmp_fd == -1)
+@@ -684,7 +695,7 @@ static int WriteToLogFile(PmLogFile_t *logFileP, const char *p, size_t n)
+ Retry:
+ 
+ 	fd = open(logFileP->path, O_WRONLY | O_CREAT | O_NOCTTY |
+-	          O_APPEND | O_NONBLOCK, 0644);
++	          O_APPEND | O_NONBLOCK, LOG_FILE_MODE);
+ 
+ 	if (fd < 0)
+ 	{
+@@ -2860,12 +2871,45 @@ static gboolean LoadWhitelist(const char *filename, GError **error)
+  *
+  * @return
+  */
++/*
++ * Make the files this daemon creates belong to group adm. The daemon runs as
++ * root, so the gid only decides the group of new files; it does not take any
++ * privilege away. Without an adm group the files stay root:root 0640.
++ */
++static void UseLogFileGroup(void)
++{
++	struct group *gr;
++
++	(void)umask(LOG_FILE_UMASK);
++
++	errno = 0;
++	gr = getgrnam(LOG_FILE_GROUP);
++	if (gr == NULL)
++	{
++		PmLogWarning(g_context, "LOG_FILE_GROUP", 2,
++		             PMLOGKS("Group", LOG_FILE_GROUP),
++		             PMLOGKS("ErrorText", errno ? strerror(errno) : "no such group"),
++		             "log files stay in group root");
++		return;
++	}
++
++	if (setgid(gr->gr_gid) != 0)
++	{
++		PmLogWarning(g_context, "LOG_FILE_GROUP", 2,
++		             PMLOGKS("Group", LOG_FILE_GROUP),
++		             PMLOGKS("ErrorText", strerror(errno)),
++		             "setgid failed, log files stay in group root");
++	}
++}
++
+ int main(int argc, char *argv[])
+ {
+ 	int           result;
+ 
+ 	PmLogGetContext(PMLODAEMON_CONTEXT, &g_context);
+ 
++	UseLogFileGroup();
++
+ 	InitSettings();
+ 
+ 	result = ParseParams(argc, argv);
