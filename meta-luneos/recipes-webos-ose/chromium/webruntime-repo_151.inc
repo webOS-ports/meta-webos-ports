@@ -81,8 +81,8 @@ WEBRUNTIME_REPO_VERSION = "151"
 # checkout"), which are non-fatal per task but still make bitbake exit non-zero.
 # With the name present it emits a single webos-enh-sub-warning instead, which
 # ERROR_QA:remove below drops - same approach as mksnapshot-cross_151.bb.
-SRC_URI = "git://github.com/webos-ports/chromium151.git;protocol=https;branch=main;name=chromium"
-SRCREV = "30383bc93972a871593951026b11be5d838228dd"
+SRC_URI = "git://github.com/webos-ports/chromium151.git;protocol=https;branch=herrie/security-WP2-devtools;name=chromium"
+SRCREV = "2ab64978b64d3e72310568d205e714f06bbf1464"
 
 ERROR_QA:remove = "webos-enh-sub-warning"
 WARN_QA:remove = "webos-enh-sub-warning"
