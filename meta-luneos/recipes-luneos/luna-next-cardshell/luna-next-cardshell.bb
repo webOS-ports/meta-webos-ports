@@ -14,6 +14,7 @@ RDEPENDS:${PN} += " \
     luna-surfacemanager-base \
 "
 
+PE = "1"
 PV = "0.6-0+git"
 
 SRCREV = "3ce1504fc52b3b2e8eed591bef161fcbe464f3a0"
