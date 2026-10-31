@@ -24,7 +24,7 @@ RDEPENDS:${PN} = " \
 SRCREV = "bf3e1bc0b82ab250d1345b36c4ab18b9d9aac03c"
 
 PV = "1.0.0-49"
-PR = "r10"
+PR = "r11"
 
 inherit webos_component
 inherit webos_cmake
@@ -35,6 +35,7 @@ inherit webos_system_bus
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
     file://luneos-app-permissions \
     file://luneos-app-permissions.json \
+    file://third-party-grantable.json \
 "
 
 # Legacy ipks have no "requiredPermissions" in their appinfo.json, which leaves
@@ -47,7 +48,16 @@ do_install:append() {
 
     install -d ${D}${sysconfdir}/palm
     install -m 0644 ${UNPACKDIR}/luneos-app-permissions.json ${D}${sysconfdir}/palm/luneos-app-permissions.json
+
+    # The ACGs an installed app may be given; appinstalld and
+    # luneos-app-permissions drop every other group an app asks for.
+    # Regenerate with gen-third-party-grantable.py (next to it) when the
+    # policy or the image's ACG data changes.
+    install -d ${D}${webos_sysbus_datadir}
+    install -m 0644 ${UNPACKDIR}/third-party-grantable.json ${D}${webos_sysbus_datadir}/third-party-grantable.json
 }
+
+FILES:${PN} += "${webos_sysbus_datadir}/third-party-grantable.json"
 
 inherit webos_systemd
 WEBOS_SYSTEMD_SERVICE = "appinstalld.service"
