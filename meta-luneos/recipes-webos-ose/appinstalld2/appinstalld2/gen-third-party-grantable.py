@@ -103,10 +103,9 @@ GRANT = {
 # grantable sibling:
 #   image.management      com.webos.service.image convert/resize/imageInfo:
 #                         LunaSysService runs as root and writes "dest" where
-#                         the caller says.  Called only by the contacts
-#                         service, its linker and the contacts framework
-#                         (none of which holds it, so those calls are refused
-#                         today); only the browser holds it.
+#                         the caller says.  The contacts service and its
+#                         linker hold image.convert and image.ezresize, one
+#                         method each, and not this.
 #   batteryd.management   batteryd's status queries sit next to
 #                         setFakeBatteryMode and batterySaverOnOff.  Called
 #                         only by the compositor, settings, sysmonitor, backup,
@@ -129,6 +128,8 @@ DENY = {
     "backup-service.operation": "Backup of all app data.",
     "backupagent.operation": "Backup agent.",
     "filemanager-service.operation": "File manager service, whole-filesystem access.",
+    "image.convert": "com.webos.service.image/convert: LunaSysService runs as root and writes dest where the caller says.",
+    "image.ezresize": "com.webos.service.image/ezResize: as image.convert.",
     "license-service.operation": "Not needed by apps.",
     "storaged.operation": "erase/EraseAll, Wipe, enterMSM.",
     "display.operation": "setLockStatus/setState/setProperty.",
