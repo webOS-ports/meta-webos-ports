@@ -15,7 +15,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-DIR="/tmp"
+DIR="/run/sam"
 if [ -e $DIR/sam-respawned ] ; then
     KEY="\"\@system_native_app\""
     echo `pgrep -lf $KEY -P 1`
