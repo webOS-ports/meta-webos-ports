@@ -1,0 +1,187 @@
+#!/bin/sh
+# Developer mode's part of the LuneOS host firewall.
+#
+#   luneos-devmode-firewall ssh-wifi on    let SSH in beyond the USB gadget
+#   luneos-devmode-firewall ssh-wifi off   USB gadget only again (the default)
+#   luneos-devmode-firewall restore [4|6]  put the rule back after a (re)load
+#   luneos-devmode-firewall status         print "ssh-wifi on" or "ssh-wifi off"
+#   luneos-devmode-firewall load 4|6       load the rules, failing closed
+#   luneos-devmode-firewall mode           print "ipv4 full|fallback|none", "ipv6 ..."
+#
+# "load" is iptables.service's and ip6tables.service's ExecStart (drop-ins).
+# It sets the INPUT and FORWARD policies to DROP first, then loads
+# iptables.rules (ip6tables.rules). iptables-restore rejects a rules file as
+# a whole when one match is missing from the kernel - conntrack, in
+# practice - and that used to leave the policies at ACCEPT. "load" then
+# loads iptables-fallback.rules, which needs no conntrack and lets replies
+# in by their shape (TCP without SYN, DNS and NTP answers; see that file),
+# and records which file it loaded in $RUNDIR, which "mode" reports. Should that be refused
+# too, INPUT and FORWARD are left to drop all but loopback and SSH on the
+# USB gadget, and "load" fails. The LUNEOS-DEVMODE chain exists in both
+# files, so "ssh-wifi" and "restore" work the same either way.
+#
+# iptables.rules and ip6tables.rules open TCP 22 on the USB gadget and keep an
+# empty LUNEOS-DEVMODE chain that INPUT jumps to before its default DROP. This
+# script owns that chain: "on" fills it with one ACCEPT for TCP 22, "off"
+# empties it. It is never flushed by anything else except a reload of the
+# rules, which runs "restore" afterwards (iptables.service drop-ins).
+#
+# The choice is kept in $STATE so it survives a reboot. "restore" applies it
+# only while developer mode is on as well; sshd does not run otherwise anyway.
+#
+# "Beyond the USB gadget" is every interface except the cellular ones: SSH on a
+# carrier network, often with a routable IPv6 address, is not something to
+# switch on with a Wi-Fi toggle.
+#
+# org.webosports.service.devmode calls "ssh-wifi on|off". Exit status: 0 done,
+# 1 a rule could not be changed (iptables error is on stderr), 2 usage.
+
+set -u
+
+STATE=/var/luna/ssh-wifi-enabled
+DEVMODE=/var/luna/dev-mode-enabled
+CHAIN=LUNEOS-DEVMODE
+RULESDIR=@RULESDIR@
+RUNDIR=/run/luneos-firewall
+
+# Cellular data interfaces: Qualcomm (rmnet, rmnet_data, rev_rmnet), MediaTek
+# (ccmni), Unisoc (seth_lte), generic modems (wwan, ppp).
+CELLULAR="rmnet+ rev_rmnet+ ccmni+ seth_lte+ wwan+ ppp+"
+
+usage() {
+    echo "usage: ${0##*/} ssh-wifi on|off | restore [4|6] | status | load 4|6 | mode" >&2
+    exit 2
+}
+
+# The tools for each family that is there; ip6tables is optional (ipv6
+# PACKAGECONFIG of iptables).
+tools() {
+    case "${1:-all}" in
+        4) set -- iptables ;;
+        6) set -- ip6tables ;;
+        all) set -- iptables ip6tables ;;
+        *) return 1 ;;
+    esac
+    for t in "$@"; do
+        command -v "$t" >/dev/null 2>&1 && echo "$t"
+    done
+}
+
+# $1: iptables or ip6tables. Empties the chain and, unless $2 is "off", adds
+# the SSH rule. Done as a flush and a rebuild so it is idempotent: "on" twice
+# leaves one rule, not two.
+apply() {
+    _t=$1
+    _mode=$2
+    # The chain is in the rules files; create it if someone loaded others.
+    if ! "$_t" -w -n -L "$CHAIN" >/dev/null 2>&1; then
+        "$_t" -w -N "$CHAIN" || return 1
+        "$_t" -w -C INPUT -j "$CHAIN" 2>/dev/null ||
+            "$_t" -w -I INPUT -j "$CHAIN" || return 1
+    fi
+    "$_t" -w -F "$CHAIN" || return 1
+    [ "$_mode" = off ] && return 0
+    for _if in $CELLULAR; do
+        "$_t" -w -A "$CHAIN" -i "$_if" -j RETURN || return 1
+    done
+    "$_t" -w -A "$CHAIN" -p tcp --dport 22 -j ACCEPT || return 1
+}
+
+# $1: 4 or 6. Fails closed: the policies are DROP before anything is loaded.
+load() {
+    case "$1" in
+        4) _t=iptables ;;
+        6) _t=ip6tables ;;
+    esac
+    mkdir -p "$RUNDIR" 2>/dev/null
+    echo loading > "$RUNDIR/ipv$1" 2>/dev/null
+    # Should anything below fail, nothing gets in but what is accepted.
+    "$_t" -w -P INPUT DROP
+    "$_t" -w -P FORWARD DROP
+    if "$_t-restore" -w -- "$RULESDIR/$_t.rules"; then
+        echo full > "$RUNDIR/ipv$1" 2>/dev/null
+        return 0
+    fi
+    echo "${0##*/}: $RULESDIR/$_t.rules refused (no conntrack in the kernel?), loading $_t-fallback.rules" >&2
+    if "$_t-restore" -w -- "$RULESDIR/$_t-fallback.rules"; then
+        echo fallback > "$RUNDIR/ipv$1" 2>/dev/null
+        return 0
+    fi
+    echo "${0##*/}: $_t-fallback.rules refused too: dropping all inbound but loopback and SSH on the USB gadget" >&2
+    echo none > "$RUNDIR/ipv$1" 2>/dev/null
+    "$_t" -w -P INPUT DROP
+    "$_t" -w -P FORWARD DROP
+    "$_t" -w -F INPUT
+    "$_t" -w -F FORWARD
+    "$_t" -w -A INPUT -i lo -j ACCEPT
+    "$_t" -w -A INPUT -i usb+ -p tcp --dport 22 -j ACCEPT
+    "$_t" -w -A INPUT -i rndis+ -p tcp --dport 22 -j ACCEPT
+    return 1
+}
+
+set_all() {
+    _rc=0
+    for _t in $(tools all); do
+        apply "$_t" "$1" || _rc=1
+    done
+    return $_rc
+}
+
+[ $# -ge 1 ] || usage
+
+case "$1" in
+    ssh-wifi)
+        [ $# -eq 2 ] || usage
+        case "$2" in
+            on)
+                if ! mkdir -p "${STATE%/*}" || ! touch "$STATE"; then
+                    exit 1
+                fi
+                set_all on || exit 1
+                ;;
+            off)
+                # Forget the choice first: should a rule refuse to go, the
+                # next reload or boot still leaves it out.
+                rm -f "$STATE" || exit 1
+                set_all off || exit 1
+                ;;
+            *) usage ;;
+        esac
+        ;;
+    restore)
+        [ $# -le 2 ] || usage
+        fam=${2:-all}
+        case "$fam" in 4|6|all) ;; *) usage ;; esac
+        if [ -e "$STATE" ] && [ -e "$DEVMODE" ]; then
+            mode=on
+        else
+            mode=off
+        fi
+        rc=0
+        for t in $(tools "$fam"); do
+            apply "$t" "$mode" || rc=1
+        done
+        exit $rc
+        ;;
+    load)
+        [ $# -eq 2 ] || usage
+        case "$2" in 4|6) ;; *) usage ;; esac
+        load "$2" || exit 1
+        ;;
+    mode)
+        [ $# -eq 1 ] || usage
+        # full, fallback, none (loopback and USB SSH only), loading, or
+        # "not-loaded" when the service never ran "load".
+        for fam in 4 6; do
+            m=not-loaded
+            [ -r "$RUNDIR/ipv$fam" ] && read -r m < "$RUNDIR/ipv$fam"
+            echo "ipv$fam $m"
+        done
+        ;;
+    status)
+        [ $# -eq 1 ] || usage
+        if [ -e "$STATE" ]; then echo "ssh-wifi on"; else echo "ssh-wifi off"; fi
+        ;;
+    *) usage ;;
+esac
+exit 0
