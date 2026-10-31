@@ -1,0 +1,175 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 28 Oct 2026 19:14:36 +0100
+Subject: [PATCH] droid-util: speaker and wired at once, for ringing with
+ headphones in
+
+Android rings on the loudspeaker and the headphones together, so a call is
+heard with the headphones out of the ears. The audio policy configuration has
+no such device, so make one: for every output mapping that reaches both the
+speaker and a wired headphone or headset, add an
+output-speaker+wired_headphone / output-speaker+wired_headset port whose
+device is the two ORed together, the way Android's legacy audio policy
+routed ringtones with a headset in.
+
+The ports sit below the wired ports in priority, so plugging in still
+switches to the headphones alone; they are used only when asked for by name.
+droid-extevdev already set the availability of the headphone one, and now
+does the same for the headset one; droid-extcon (the h2w switch) now sets
+both, the same as the wired port each goes with. module-droid-card does not
+tell the HAL about them connecting: they are no device of their own, and the
+wired port next to them already does.
+
+Tested on a MediaTek MT6739 (audio patch API): the HAL gets
+createAudioPatch Mixer->0x0000000a and turns on its headphoneSpeaker_output
+and ext_speaker_output paths; the ring is heard from both. Splitting the
+device into two patch sinks instead made that HAL route the first one only.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/common/droid-util.c               | 43 +++++++++++++++++++++++++++
+ src/common/include/droid/droid-util.h |  3 ++
+ src/droid/droid-extcon.c              |  6 ++--
+ src/droid/droid-extevdev.c            |  1 +
+ src/droid/module-droid-card.c         |  5 ++++
+ 5 files changed, 56 insertions(+), 2 deletions(-)
+
+diff --git a/src/common/droid-util.c b/src/common/droid-util.c
+index 2dcab87..501fff0 100644
+--- a/src/common/droid-util.c
++++ b/src/common/droid-util.c
+@@ -132,6 +132,7 @@ static int input_stream_set_route(pa_droid_stream *stream, const dm_config_port
+ static int droid_set_parameters(pa_droid_hw_module *hw, const char *parameters);
+ static bool droid_set_audio_source(pa_droid_stream *stream, audio_source_t audio_source);
+ static void add_output_ports(pa_droid_mapping *droid_mapping, dm_config_port *device_port);
++static void add_combined_output_port(pa_droid_mapping *droid_mapping, audio_devices_t wired, const char *name);
+ static void add_input_ports(pa_droid_mapping *droid_mapping, dm_config_port *device_port);
+ static void audio_patch_release(pa_droid_stream *stream);
+ 
+@@ -374,6 +375,10 @@ void pa_droid_profile_free(pa_droid_profile *ap) {
+ static void droid_port_free(pa_droid_port *p) {
+     pa_assert(p);
+ 
++    if (p->own_device_port) {
++        pa_xfree(p->own_device_port->name);
++        pa_xfree(p->own_device_port);
++    }
+     pa_xfree(p->name);
+     pa_xfree(p->description);
+     pa_xfree(p);
+@@ -440,6 +445,41 @@ static pa_droid_port *create_output_port(pa_droid_mapping *am,
+     return p;
+ }
+ 
++/* The loudspeaker and the jack at once, as Android rings with headphones in:
++ * the configuration has no such device port, so one is made from the two.
++ * Its priority is below the wired port's, so plugging in still switches to
++ * the headphones alone; it is only used when asked for by name. */
++static void add_combined_output_port(pa_droid_mapping *droid_mapping, audio_devices_t wired, const char *name) {
++    dm_config_port *device_port, *speaker = NULL, *jack = NULL, *combined;
++    pa_droid_port *port;
++    void *state;
++
++    DM_LIST_FOREACH_DATA(device_port, droid_mapping->device_ports, state) {
++        if (device_port->type == AUDIO_DEVICE_OUT_SPEAKER)
++            speaker = device_port;
++        else if (device_port->type == wired)
++            jack = device_port;
++    }
++
++    if (!speaker || !jack)
++        return;
++
++    if (!(port = pa_hashmap_get(droid_mapping->profile_set->all_ports, name))) {
++        combined = pa_xnew0(dm_config_port, 1);
++        *combined = *jack;
++        combined->name = pa_sprintf_malloc("%s+%s", speaker->name, jack->name);
++        combined->type = speaker->type | jack->type;
++
++        port = create_output_port(droid_mapping, combined, name, NULL);
++        port->own_device_port = combined;
++        port->priority = DEFAULT_PRIORITY / 2 + DEFAULT_PRIORITY / 4;
++        pa_hashmap_put(droid_mapping->profile_set->all_ports, port->name, port);
++        pa_log_debug("  Mapping %s add new output port %s", droid_mapping->name, name);
++    }
++
++    pa_idxset_put(droid_mapping->ports, port, NULL);
++}
++
+ static void add_output_ports(pa_droid_mapping *droid_mapping, dm_config_port *device_port) {
+     pa_droid_port *port;
+     const char *name;
+@@ -476,6 +516,9 @@ static void add_output_ports(pa_droid_mapping *droid_mapping, dm_config_port *de
+         pa_log_debug("  Mapping %s add output port %s from cache", droid_mapping->name, name);
+ 
+     pa_idxset_put(droid_mapping->ports, port, NULL);
++
++    add_combined_output_port(droid_mapping, AUDIO_DEVICE_OUT_WIRED_HEADPHONE, "output-speaker+wired_headphone");
++    add_combined_output_port(droid_mapping, AUDIO_DEVICE_OUT_WIRED_HEADSET, "output-speaker+wired_headset");
+ }
+ 
+ static pa_droid_port *create_input_port(pa_droid_mapping *am,
+diff --git a/src/common/include/droid/droid-util.h b/src/common/include/droid/droid-util.h
+index 83a1ee8..15c1fc2 100644
+--- a/src/common/include/droid/droid-util.h
++++ b/src/common/include/droid/droid-util.h
+@@ -180,6 +180,9 @@ typedef struct pa_droid_port {
+     char *name;
+     char *description;
+     unsigned priority;
++    /* Set for a port made up here rather than read from the configuration
++     * (speaker and wired at once): its device_port belongs to the port. */
++    dm_config_port *own_device_port;
+ } pa_droid_port;
+ 
+ struct pa_droid_mapping {
+diff --git a/src/droid/droid-extcon.c b/src/droid/droid-extcon.c
+index 697957d..6b995eb 100644
+--- a/src/droid/droid-extcon.c
++++ b/src/droid/droid-extcon.c
+@@ -123,9 +123,11 @@ static void notify_ports(pa_droid_extcon *u, struct droid_switch *as) {
+ 
+     PA_HASHMAP_FOREACH(p, u->card->ports, state) {
+         if (p->direction == PA_DIRECTION_OUTPUT) {
+-            if (!strcmp(p->name, "output-wired_headset"))
++            if (!strcmp(p->name, "output-wired_headset") ||
++                !strcmp(p->name, "output-speaker+wired_headset"))
+                 pa_device_port_set_available(p, hsmic_avail(as->current_value));
+-            if (!strcmp(p->name, "output-wired_headphone"))
++            if (!strcmp(p->name, "output-wired_headphone") ||
++                !strcmp(p->name, "output-speaker+wired_headphone"))
+                 pa_device_port_set_available(p, hponly_avail(as->current_value));
+         }
+         if (p->direction == PA_DIRECTION_INPUT) {
+diff --git a/src/droid/droid-extevdev.c b/src/droid/droid-extevdev.c
+index b05ebf5..bf632cb 100644
+--- a/src/droid/droid-extevdev.c
++++ b/src/droid/droid-extevdev.c
+@@ -118,6 +118,7 @@ static const char *headphone_ports[] = {
+ };
+ 
+ static const char *headset_ports[] = {
++    "output-speaker+wired_headset",
+     "output-wired_headset",
+     "input-wired_headset",
+ };
+diff --git a/src/droid/module-droid-card.c b/src/droid/module-droid-card.c
+index e23cf46..fba32a5 100644
+--- a/src/droid/module-droid-card.c
++++ b/src/droid/module-droid-card.c
+@@ -854,6 +854,11 @@ static pa_hook_result_t port_availability_changed_hook_callback(void *hook_data,
+     if (port->available == PA_AVAILABLE_UNKNOWN)
+         return PA_HOOK_OK;
+ 
++    /* Speaker and wired at once is no device of its own: the wired port
++     * next to it tells Android about the plug. */
++    if (pa_startswith(port->name, "output-speaker+"))
++        return PA_HOOK_OK;
++
+     const char * verb = port->available == PA_AVAILABLE_YES
+         ? AUDIO_PARAMETER_DEVICE_CONNECT
+         : AUDIO_PARAMETER_DEVICE_DISCONNECT;
+-- 
+2.53.0
+
