@@ -21,6 +21,7 @@ DESCRIPTION = "TensorFlow Lite CPP "
 LICENSE = "Apache-2.0"
 
 LIC_FILES_CHKSUM = "file://LICENSE;md5=4158a261ca7f2525513e31ba9c50ae98"
+PR = "r1"
 # Compute branch info from ${PV} as Base PV...
 BPV = "${@'.'.join(d.getVar('PV').split('.')[0:2])}"
 DPV = "${@'.'.join(d.getVar('PV').split('.')[0:3])}"
@@ -77,6 +78,13 @@ EXTRA_OECMAKE:append = " \
     -DFETCHCONTENT_FULLY_DISCONNECTED=OFF \
     -DTENSORFLOW_TARGET_ARCH=${TENSORFLOW_TARGET_ARCH} \
 "
+
+# do_install copies the libraries out of ${B}, so they keep the RUNPATH CMake
+# gave them for the build tree: $ORIGIN paths that do not exist on the target,
+# and on libfft2d_fftsg2d and libXNNPACK a trailing ":", an empty entry, which
+# ld.so reads as the current directory. All of them install to ${libdir}, which
+# is on the default search path, so they need no RUNPATH at all.
+EXTRA_OECMAKE:append = " -DCMAKE_SKIP_BUILD_RPATH=ON"
 
 # Note:
 # XNNPack is valid only on aarch64 and RISC-V .
