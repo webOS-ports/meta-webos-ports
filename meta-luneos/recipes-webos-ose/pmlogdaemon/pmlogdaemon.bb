@@ -62,3 +62,4 @@ SRC_URI += "file://0001-CMakeLists-use-CMake-variable-syntax-instead-of-VAR.patc
 
 # Off by default: -DPMLOGDAEMON_BUILD_TESTS=ON. Comes after the patch above.
 SRC_URI += "file://0003-Add-unit-tests-for-the-log-file-modes-and-group.patch"
+SRC_URI += "file://0004-Do-not-unref-the-worker-thread-after-joining-it.patch"
