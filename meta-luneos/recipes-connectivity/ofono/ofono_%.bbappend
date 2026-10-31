@@ -53,6 +53,8 @@ SRC_URI:append = " \
   file://0114-radio-settings-never-report-a-technology-preference-.patch \
   file://0115-ussd-accept-pre-decoded-UTF-8-from-drivers.patch \
   file://0116-sim-do-not-walk-a-freed-watch-list-in-open_channel_cb.patch \
+  file://0117-hfp_ag_bluez5-register-the-profile-again-when-BlueZ-r.patch \
+  file://0118-unit-test-that-the-HFP-AG-profile-follows-BlueZ.patch \
 "
 
 # On Halium the modem is driven by ofono-binder-plugin. The in-tree ril

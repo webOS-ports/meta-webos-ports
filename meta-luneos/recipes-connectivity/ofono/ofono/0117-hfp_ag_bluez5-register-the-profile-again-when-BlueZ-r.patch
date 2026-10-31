@@ -1,0 +1,134 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] hfp_ag_bluez5: register the profile again when BlueZ returns
+
+The plugin registers the HFP AG profile with org.bluez.ProfileManager1
+once, when the first voicecall-capable modem with a ready SIM shows up,
+and remembers that in profile_registered. Nothing watches BlueZ itself.
+When bluetoothd exits or crashes, BlueZ forgets every profile its
+clients registered, but profile_registered stays true, so the new
+bluetoothd never gets RegisterProfile again: the adapter stops
+advertising 0000111f (Handsfree Audio Gateway) and headsets connect
+A2DP only until ofonod is restarted.
+
+The same flag also loses the first registration when the modem is ready
+before bluetoothd is on the bus: if that RegisterProfile fails, it is
+never retried.
+
+And registration only happened on the transition to exactly one active
+modem (n_active == 1). With two SIMs both ready, re-evaluating the state
+after a BlueZ restart would still not register.
+
+Watch org.bluez with g_dbus_add_service_watch(). Register only while
+BlueZ is present and at least one modem is active; when BlueZ goes away,
+clear profile_registered without sending UnregisterProfile, so the next
+BlueZ gets the profile as soon as it appears. hfp_hf_bluez5 already
+follows BlueZ this way through its GDBusClient connect watch; Sailfish
+OS oFono did the same for hfp_ag_bluez5 in 7af95f6db538 ("Follow BlueZ
+in system bus. JB#42087").
+
+Seen on a mindphone (MT6739, dual SIM): after bluetoothd crashed and
+systemd restarted it, the Nuraphone came back with A2DP only and HFP
+stayed down until ofonod was restarted.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+
+diff --git a/plugins/hfp_ag_bluez5.c b/plugins/hfp_ag_bluez5.c
+index d8f8be3..ccc60c5 100644
+--- a/plugins/hfp_ag_bluez5.c
++++ b/plugins/hfp_ag_bluez5.c
+@@ -44,6 +44,8 @@ static unsigned int modemwatch_id;
+ struct l_queue *modem_infos;
+ static GHashTable *connection_hash;
+ static bool profile_registered;
++static unsigned int bluez_watch_id;
++static bool bluez_present;
+ 
+ struct modem_info {
+ 	struct ofono_modem *modem;
+@@ -392,18 +394,42 @@ static const GDBusMethodTable profile_methods[] = {
+ static void update_profile_registration(void)
+ {
+ 	DBusConnection *conn = ofono_dbus_get_connection();
+-	unsigned int n_active = num_active(NULL);
++	bool wanted = bluez_present && num_active(NULL) > 0;
+ 
+-	if (!n_active && profile_registered) {
+-		DBG("Unregistering HFP AG profile");
+-		bt_unregister_profile(conn, HFP_AG_EXT_PROFILE_PATH);
+-		profile_registered = false;
+-	} else if (n_active == 1 && !profile_registered) {
++	if (wanted == profile_registered)
++		return;
++
++	if (wanted) {
+ 		DBG("Registering HFP AG profile");
+ 		bt_register_profile(conn, HFP_AG_UUID, HFP_VERSION_1_7, "hfp_ag",
+ 					HFP_AG_EXT_PROFILE_PATH, NULL, 0);
+-		profile_registered = true;
++	} else {
++		DBG("Unregistering HFP AG profile");
++		bt_unregister_profile(conn, HFP_AG_EXT_PROFILE_PATH);
+ 	}
++
++	profile_registered = wanted;
++}
++
++static void bluez_connect(DBusConnection *conn, void *user_data)
++{
++	DBG("");
++
++	bluez_present = true;
++	update_profile_registration();
++}
++
++static void bluez_disconnect(DBusConnection *conn, void *user_data)
++{
++	DBG("");
++
++	/*
++	 * BlueZ drops the registrations of a client when it exits, so there
++	 * is nothing left to unregister. Forget ours, so that the profile is
++	 * registered again as soon as BlueZ is back.
++	 */
++	bluez_present = false;
++	profile_registered = false;
+ }
+ 
+ static void sim_state_watch_destroy(void *data)
+@@ -532,6 +558,20 @@ static int hfp_ag_init(void)
+ 	connection_hash = g_hash_table_new_full(g_str_hash, g_str_equal,
+ 					g_free, connection_destroy);
+ 
++	/*
++	 * Follow BlueZ on the bus: register the profile whenever it appears,
++	 * including the first time if it is already running.
++	 */
++	bluez_watch_id = g_dbus_add_service_watch(conn, BLUEZ_SERVICE,
++						bluez_connect,
++						bluez_disconnect,
++						NULL, NULL);
++	if (!bluez_watch_id) {
++		/* Behave as before: assume BlueZ is there */
++		ofono_error("Failed to watch %s", BLUEZ_SERVICE);
++		bluez_present = true;
++	}
++
+ 	ofono_handsfree_audio_ref();
+ 
+ 	return 0;
+@@ -543,6 +583,14 @@ static void hfp_ag_exit(void)
+ 
+ 	DBG("");
+ 
++	if (bluez_watch_id) {
++		g_dbus_remove_watch(conn, bluez_watch_id);
++		bluez_watch_id = 0;
++	}
++
++	bluez_present = false;
++	profile_registered = false;
++
+ 	__ofono_modemwatch_remove(modemwatch_id);
+ 	g_dbus_unregister_interface(conn, HFP_AG_EXT_PROFILE_PATH,
+ 						BLUEZ_PROFILE_INTERFACE);
