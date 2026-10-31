@@ -16,7 +16,7 @@ DEPENDS = "pmloglib zlib glib-2.0 libpbnjson pmloglib-private luna-service2"
 RDEPENDS:${PN} = "busybox"
 
 WEBOS_VERSION = "3.1.0-19_bbaf3b110429a8eaa6ba747019253bf4957a455f"
-PR = "r14"
+PR = "r16"
 
 inherit webos_component
 inherit webos_public_repo
@@ -32,15 +32,34 @@ PACKAGECONFIG[whitelist] = "-DENABLE_WHITELIST:BOOL=TRUE, -DENABLE_WHITELIST:BOO
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-Make-PmLogDaemon-compatible-with-systemd.patch \
     ${@bb.utils.contains('PACKAGECONFIG', 'whitelist', 'file://whitelist.txt', '', d)} \
+    file://0002-Create-the-log-files-0640-group-adm.patch \
+    file://pmlogdaemon-logs.conf \
+    file://luneos-purge-old-logs \
+    file://luneos-purge-old-logs.service \
 "
 
 do_install:append() {
     if ${@bb.utils.contains('PACKAGECONFIG', 'whitelist', 'true', 'false', d)} ; then
         install -m 644 ${UNPACKDIR}/whitelist.txt ${D}${sysconfdir}/PmLogDaemon
     fi
+    install -d ${D}${libdir}/tmpfiles.d
+    install -m 0644 ${UNPACKDIR}/pmlogdaemon-logs.conf ${D}${libdir}/tmpfiles.d/
+
+    # Logs from older images can hold secrets; see the script. Comes with the
+    # package, so a device upgrades into it as well.
+    install -d ${D}${libexecdir}
+    install -m 0755 ${UNPACKDIR}/luneos-purge-old-logs ${D}${libexecdir}/
+    install -d ${D}${systemd_system_unitdir}/sysinit.target.wants
+    install -m 0644 ${UNPACKDIR}/luneos-purge-old-logs.service ${D}${systemd_system_unitdir}/
+    ln -sf ../luneos-purge-old-logs.service \
+        ${D}${systemd_system_unitdir}/sysinit.target.wants/luneos-purge-old-logs.service
 }
-FILES:${PN} += "${datadir}/PmLogDaemon"
+FILES:${PN} += "${datadir}/PmLogDaemon ${libdir}/tmpfiles.d ${systemd_system_unitdir}"
 
 # CMake 4: @VAR@ is no longer expanded in unquoted arguments (CMP0053),
 # which broke the install() DESTINATIONs in this component.
 SRC_URI += "file://0001-CMakeLists-use-CMake-variable-syntax-instead-of-VAR.patch"
+
+# Off by default: -DPMLOGDAEMON_BUILD_TESTS=ON. Comes after the patch above.
+SRC_URI += "file://0003-Add-unit-tests-for-the-log-file-modes-and-group.patch"
+SRC_URI += "file://0004-Do-not-unref-the-worker-thread-after-joining-it.patch"
