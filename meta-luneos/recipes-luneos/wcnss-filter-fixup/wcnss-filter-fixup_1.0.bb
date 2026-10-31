@@ -3,7 +3,7 @@ LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 SECTION = "base"
 
-COMPATIBLE_MACHINE = "^(tissot|tissot-halium)$"
+COMPATIBLE_MACHINE = "^(tissot|tissot-halium|vince-halium)$"
 
 # The unit and script name the machine, and the guard is only correct on a
 # device whose BT HAL owns the SMD channels itself.
