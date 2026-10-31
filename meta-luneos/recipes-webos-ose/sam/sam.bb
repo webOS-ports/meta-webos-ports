@@ -20,7 +20,7 @@ SRCREV = "06758d82dc8c6cb473f13093719e00f9c6547681"
 
 PV = "2.0.0-81"
 
-PR = "r42"
+PR = "r43"
 
 inherit webos_component
 inherit webos_cmake
