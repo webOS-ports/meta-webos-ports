@@ -53,6 +53,18 @@ SRC_URI:append = " \
   file://0114-radio-settings-never-report-a-technology-preference-.patch \
   file://0115-ussd-accept-pre-decoded-UTF-8-from-drivers.patch \
   file://0116-sim-do-not-walk-a-freed-watch-list-in-open_channel_cb.patch \
+  file://0117-hfp_ag_bluez5-register-the-profile-again-when-BlueZ-r.patch \
+  file://0118-unit-test-that-the-HFP-AG-profile-follows-BlueZ.patch \
+  file://0119-emulator-let-one-emulator-serve-several-modems.patch \
+  file://0120-emulator-keep-the-command-handlers-of-each-modem-apa.patch \
+  file://0121-emulator-merge-the-call-indicators-of-all-modems.patch \
+  file://0122-voicecall-answer-headset-commands-on-the-modem-that.patch \
+  file://0123-hfp_ag_bluez5-serve-every-voice-capable-modem-from-o.patch \
+  file://0124-hfp_ag_bluez5-remove-the-HUP-watch-together-with-its.patch \
+  file://0125-emulator-accept-AT-BAC-with-CVSD-anywhere-in-the-lis.patch \
+  file://0126-unit-test-one-HFP-emulator-serving-the-calls-of-two.patch \
+  file://0127-unit-test-that-each-headset-gets-every-voice-capable.patch \
+  file://0128-emulator-do-not-write-to-a-headset-whose-link-has-gone.patch \
 "
 
 # On Halium the modem is driven by ofono-binder-plugin. The in-tree ril

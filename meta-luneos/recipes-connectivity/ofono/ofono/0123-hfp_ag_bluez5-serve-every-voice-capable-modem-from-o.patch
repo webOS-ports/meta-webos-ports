@@ -1,0 +1,212 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] hfp_ag_bluez5: serve every voice capable modem from one emulator
+
+Port Sailfish OS oFono 9f7a1ffe ("[bluez5] Use updated emulator. Fixes
+JB#42297", Juho Hämäläinen) to the plugin as it is after 0117.
+
+NewConnection made the emulator for the first modem with a ready SIM
+and a voicecall atom. It now creates the emulator and adds every such
+modem, in the order the plugin saw them. A modem that becomes active
+later (its SIM gets ready, or its voicecall atom appears) joins the
+headsets already connected. The plugin keeps a list of connected
+emulators for that, and drops an emulator from it when its handsfree
+card is removed.
+
+The profile is still registered while at least one modem is active,
+and 0117's BlueZ watch is unchanged.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+
+diff --git a/plugins/hfp_ag_bluez5.c b/plugins/hfp_ag_bluez5.c
+index 4a1dfaa..e6016dc 100644
+--- a/plugins/hfp_ag_bluez5.c
++++ b/plugins/hfp_ag_bluez5.c
+@@ -46,6 +46,7 @@ static GHashTable *connection_hash;
+ static bool profile_registered;
+ static unsigned int bluez_watch_id;
+ static bool bluez_present;
++static struct l_queue *emulators;	/* one per connected headset */
+ 
+ struct modem_info {
+ 	struct ofono_modem *modem;
+@@ -80,34 +81,58 @@ static bool modem_matches(const void *data, const void *user_data)
+ 	return info->modem == user_data;
+ }
+ 
+-static unsigned int num_active(struct ofono_modem **first_active)
++/* A modem the AG offers: SIM ready and able to make voice calls */
++static bool modem_active(const struct modem_info *info)
++{
++	if (!info->sim)
++		return false;
++
++	if (ofono_sim_get_state(info->sim) != OFONO_SIM_STATE_READY)
++		return false;
++
++	return __ofono_modem_find_atom(info->modem,
++					OFONO_ATOM_TYPE_VOICECALL) != NULL;
++}
++
++static unsigned int num_active(void)
+ {
+ 	const struct l_queue_entry *entry;
+ 	unsigned int n_active = 0;
+ 
+ 	for (entry = l_queue_get_entries(modem_infos);
+ 						entry; entry = entry->next) {
+-		struct modem_info *info = entry->data;
+-
+-		if (!info->sim)
+-			continue;
++		if (modem_active(entry->data))
++			n_active += 1;
++	}
+ 
+-		if (ofono_sim_get_state(info->sim) != OFONO_SIM_STATE_READY)
+-			continue;
++	return n_active;
++}
+ 
+-		if (!__ofono_modem_find_atom(info->modem,
+-						OFONO_ATOM_TYPE_VOICECALL))
+-			continue;
++/* Offer every active modem to an emulator, in the order they appeared */
++static void emulator_add_active_modems(struct ofono_emulator *em)
++{
++	const struct l_queue_entry *entry;
+ 
+-		n_active += 1;
++	for (entry = l_queue_get_entries(modem_infos);
++						entry; entry = entry->next) {
++		struct modem_info *info = entry->data;
+ 
+-		if (first_active) {
+-			*first_active = info->modem;
+-			first_active = NULL;
+-		}
++		if (modem_active(info))
++			ofono_emulator_add_modem(em, info->modem);
+ 	}
++}
+ 
+-	return n_active;
++/* A modem that becomes active joins the headsets already connected */
++static void modem_info_check_active(struct modem_info *info)
++{
++	const struct l_queue_entry *entry;
++
++	if (!modem_active(info))
++		return;
++
++	for (entry = l_queue_get_entries(emulators);
++						entry; entry = entry->next)
++		ofono_emulator_add_modem(entry->data, info->modem);
+ }
+ 
+ static int hfp_card_probe(struct ofono_handsfree_card *card,
+@@ -120,7 +145,12 @@ static int hfp_card_probe(struct ofono_handsfree_card *card,
+ 
+ static void hfp_card_remove(struct ofono_handsfree_card *card)
+ {
++	struct ofono_emulator *em = ofono_handsfree_card_get_data(card);
++
+ 	DBG("");
++
++	/* The card goes with its emulator, as the headset disconnects */
++	l_queue_remove(emulators, em);
+ }
+ 
+ static void codec_negotiation_done_cb(int err, void *data)
+@@ -221,7 +251,6 @@ static DBusMessage *profile_new_connection(DBusConnection *conn,
+ 	struct sockaddr_rc saddr;
+ 	socklen_t optlen;
+ 	struct ofono_emulator *em;
+-	struct ofono_modem *modem;
+ 	char local[BT_ADDR_SIZE], remote[BT_ADDR_SIZE];
+ 	struct ofono_handsfree_card *card;
+ 	int err;
+@@ -251,15 +280,14 @@ static DBusMessage *profile_new_connection(DBusConnection *conn,
+ 		goto invalid;
+ 	}
+ 
+-	/* Pick the first voicecall capable modem */
+-	if (!num_active(&modem)) {
++	if (!num_active()) {
+ 		close(fd);
+ 		return g_dbus_create_error(msg, BLUEZ_ERROR_INTERFACE
+ 						".Rejected",
+ 						"No voice call capable modem");
+ 	}
+ 
+-	DBG("Picked modem %p for emulator", modem);
++	DBG("Using all %u voice call capable modems", num_active());
+ 
+ 	memset(&saddr, 0, sizeof(saddr));
+ 	optlen = sizeof(saddr);
+@@ -295,7 +323,8 @@ static DBusMessage *profile_new_connection(DBusConnection *conn,
+ 						"Not enough resources");
+ 	}
+ 
+-	ofono_emulator_add_modem(em, modem);
++	/* One emulator for every modem, so calls on any SIM reach the HF */
++	emulator_add_active_modems(em);
+ 	ofono_emulator_register(em, fd);
+ 
+ 	fd_dup = dup(fd);
+@@ -314,6 +343,7 @@ static DBusMessage *profile_new_connection(DBusConnection *conn,
+ 	ofono_handsfree_card_set_remote(card, remote);
+ 
+ 	ofono_emulator_set_handsfree_card(em, card);
++	l_queue_push_tail(emulators, em);
+ 
+ 	g_hash_table_insert(connection_hash, g_strdup(device),
+ 						GINT_TO_POINTER(fd_dup));
+@@ -395,7 +425,7 @@ static const GDBusMethodTable profile_methods[] = {
+ static void update_profile_registration(void)
+ {
+ 	DBusConnection *conn = ofono_dbus_get_connection();
+-	bool wanted = bluez_present && num_active(NULL) > 0;
++	bool wanted = bluez_present && num_active() > 0;
+ 
+ 	if (wanted == profile_registered)
+ 		return;
+@@ -443,6 +473,7 @@ static void sim_state_watch_destroy(void *data)
+ 
+ static void sim_state_watch(enum ofono_sim_state new_state, void *data)
+ {
++	modem_info_check_active(data);
+ 	update_profile_registration();
+ }
+ 
+@@ -487,6 +518,10 @@ static void voicecall_watch(struct ofono_atom *atom,
+ 				void *data)
+ {
+ 	DBG("");
++
++	if (cond == OFONO_ATOM_WATCH_CONDITION_REGISTERED)
++		modem_info_check_active(data);
++
+ 	update_profile_registration();
+ }
+ 
+@@ -552,6 +587,7 @@ static int hfp_ag_init(void)
+ 	}
+ 
+ 	modem_infos = l_queue_new();
++	emulators = l_queue_new();
+ 
+ 	modemwatch_id = __ofono_modemwatch_add(modem_watch, NULL, NULL);
+ 	__ofono_modem_foreach(call_modemwatch, NULL);
+@@ -601,6 +637,11 @@ static void hfp_ag_exit(void)
+ 	g_hash_table_destroy(connection_hash);
+ 
+ 	l_queue_destroy(modem_infos, (l_queue_destroy_func_t) modem_info_free);
++	modem_infos = NULL;
++
++	/* The emulators are owned by their connections, not by this list */
++	l_queue_destroy(emulators, NULL);
++	emulators = NULL;
+ 
+ 	ofono_handsfree_audio_unref();
+ }
