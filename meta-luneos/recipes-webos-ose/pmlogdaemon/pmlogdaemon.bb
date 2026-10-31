@@ -59,3 +59,6 @@ FILES:${PN} += "${datadir}/PmLogDaemon ${libdir}/tmpfiles.d ${systemd_system_uni
 # CMake 4: @VAR@ is no longer expanded in unquoted arguments (CMP0053),
 # which broke the install() DESTINATIONs in this component.
 SRC_URI += "file://0001-CMakeLists-use-CMake-variable-syntax-instead-of-VAR.patch"
+
+# Off by default: -DPMLOGDAEMON_BUILD_TESTS=ON. Comes after the patch above.
+SRC_URI += "file://0003-Add-unit-tests-for-the-log-file-modes-and-group.patch"
