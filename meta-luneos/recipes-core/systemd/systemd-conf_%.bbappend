@@ -34,4 +34,4 @@ FILES:${PN} += "${nonarch_libdir}/sysctl.d/"
 
 # Bumped when the drop-ins shipped from here change, so installed images pick
 # them up on upgrade: the base recipe's revision does not move for it.
-PR = "r3"
+PR = "r4"
