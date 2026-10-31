@@ -1,0 +1,1194 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] unit: test one HFP emulator serving the calls of two modems
+
+Build the emulator, voicecall, GAtServer and D-Bus helpers into a test,
+with a small model of the modem and atom layer (atoms prepended,
+watches told before an atom's unregister runs, a modem going away
+unregistering and freeing its atoms in list order), a ready SIM and a
+scripted voicecall driver on each of two modems. The headset is the
+other end of a socketpair and sets up the service level connection with
+AT+BRSF, AT+CIND, AT+CMER and AT+CLIP.
+
+It checks that:
+- a call ringing on the second modem gives the headset +CIEV callsetup,
+  RING and +CLIP with its number;
+- ATA and AT+CHUP for that call reach the second modem's driver, and
+  AT+CLCC lists the call;
+- the same works for a call on the first modem;
+- a call that comes and goes on one modem, or that modem going away,
+  does not end the headset's view of an active call on the other;
+- ATD dials on the first modem when idle, and on the modem that has a
+  call when one exists;
+- the first modem going away leaves the second one answering;
+- a handler only one modem has is freed when that modem goes, and its
+  command then answers ERROR;
+- a modem added to a live link is served;
+- AT+BAC is accepted with CVSD second and rejected without CVSD.
+
+voicecall registers a D-Bus interface, so the test needs a bus; like
+test-hfp-ag-bluez5 it skips itself without one. The asserts stay on in
+a build with NDEBUG.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+
+diff --git a/Makefile.am b/Makefile.am
+index 4579189..2c6b70a 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -967,6 +967,15 @@ unit_test_provision_DEPENDENCIES = $(ell_dependencies) \
+ 					unit/test-provision.db
+ unit_objects += $(unit_test_provision_OBJECTS)
+ 
++unit_tests += unit/test-emulator-multimodem
++
++unit_test_emulator_multimodem_SOURCES = unit/test-emulator-multimodem.c \
++				src/emulator.c src/voicecall.c src/dbus.c \
++				src/common.c src/util.c $(gatchat_sources)
++unit_test_emulator_multimodem_LDADD = gdbus/libgdbus-internal.la \
++				@GLIB_LIBS@ @DBUS_LIBS@ $(ell_ldadd)
++unit_objects += $(unit_test_emulator_multimodem_OBJECTS)
++
+ if BLUETOOTH
+ unit_tests += unit/test-hfp-ag-bluez5
+ 
+diff --git a/unit/test-emulator-multimodem.c b/unit/test-emulator-multimodem.c
+new file mode 100644
+index 0000000..dec4c8e
+--- /dev/null
++++ b/unit/test-emulator-multimodem.c
+@@ -0,0 +1,1134 @@
++/*
++ * oFono - Open Source Telephony
++ *
++ * One HFP emulator in front of two modems, as on a dual-SIM phone: the
++ * headset has to see the calls of both, and its commands have to reach the
++ * modem the call is on.
++ *
++ * The real emulator, voicecall atom, GAtServer and D-Bus helpers are built
++ * into this test. The modem and atom layer is a small model of src/modem.c
++ * (atoms prepended, watches told before an atom's unregister runs, a modem
++ * going away unregistering and then freeing its atoms in list order). Each
++ * modem gets a scripted voicecall driver. The headset is the other end of a
++ * socketpair, speaking AT.
++ *
++ * voicecall registers its D-Bus interface, so this needs a bus: run it under
++ * dbus-run-session. Without one the test reports itself skipped.
++ *
++ * SPDX-License-Identifier: GPL-2.0-only
++ */
++
++#ifdef HAVE_CONFIG_H
++#include <config.h>
++#endif
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <stdarg.h>
++#include <errno.h>
++#include <fcntl.h>
++#include <unistd.h>
++/* The checks are asserts, some with side effects: keep them in any build */
++#undef NDEBUG
++#include <assert.h>
++#include <sys/socket.h>
++
++#include <glib.h>
++#include <gdbus.h>
++
++#include <ofono/handsfree-audio.h>
++
++#include "ofono.h"
++#include "common.h"
++#include "smsutil.h"
++#include "storage.h"
++
++/* ---- logging ------------------------------------------------------------ */
++
++static void vlog(const char *format, va_list ap)
++{
++	if (!getenv("TEST_VERBOSE"))
++		return;
++
++	vfprintf(stderr, format, ap);
++	fputc('\n', stderr);
++}
++
++void ofono_debug(const char *format, ...)
++{
++	va_list ap;
++
++	va_start(ap, format);
++	vlog(format, ap);
++	va_end(ap);
++}
++
++void ofono_info(const char *format, ...)
++{
++	va_list ap;
++
++	va_start(ap, format);
++	vlog(format, ap);
++	va_end(ap);
++}
++
++void ofono_warn(const char *format, ...)
++{
++	va_list ap;
++
++	va_start(ap, format);
++	vlog(format, ap);
++	va_end(ap);
++}
++
++void ofono_error(const char *format, ...)
++{
++	va_list ap;
++
++	va_start(ap, format);
++	vfprintf(stderr, format, ap);
++	va_end(ap);
++	fputc('\n', stderr);
++}
++
++/* ---- a model of the modem and atom layer --------------------------------- */
++
++struct ofono_modem {
++	char path[16];
++	GSList *atoms;
++	GSList *watches;
++	unsigned int next_watch;
++	unsigned int callids;
++};
++
++struct ofono_atom {
++	enum ofono_atom_type type;
++	void (*destruct)(struct ofono_atom *atom);
++	void (*unregister)(struct ofono_atom *atom);
++	void *data;
++	struct ofono_modem *modem;
++};
++
++struct atom_watch {
++	unsigned int id;
++	enum ofono_atom_type type;
++	ofono_atom_watch_func notify;
++	void *data;
++	ofono_destroy_func destroy;
++};
++
++struct ofono_atom *__ofono_modem_add_atom(struct ofono_modem *modem,
++					enum ofono_atom_type type,
++					void (*destruct)(struct ofono_atom *),
++					void *data)
++{
++	struct ofono_atom *atom = g_new0(struct ofono_atom, 1);
++
++	atom->type = type;
++	atom->destruct = destruct;
++	atom->data = data;
++	atom->modem = modem;
++	modem->atoms = g_slist_prepend(modem->atoms, atom);
++
++	return atom;
++}
++
++struct ofono_atom *__ofono_modem_add_atom_offline(struct ofono_modem *modem,
++					enum ofono_atom_type type,
++					void (*destruct)(struct ofono_atom *),
++					void *data)
++{
++	return __ofono_modem_add_atom(modem, type, destruct, data);
++}
++
++void *__ofono_atom_get_data(struct ofono_atom *atom)
++{
++	return atom->data;
++}
++
++const char *__ofono_atom_get_path(struct ofono_atom *atom)
++{
++	return atom->modem->path;
++}
++
++struct ofono_modem *__ofono_atom_get_modem(struct ofono_atom *atom)
++{
++	return atom->modem;
++}
++
++gboolean __ofono_atom_get_registered(struct ofono_atom *atom)
++{
++	return atom->unregister ? TRUE : FALSE;
++}
++
++static void call_watches(struct ofono_atom *atom,
++				enum ofono_atom_watch_condition cond)
++{
++	GSList *copy = g_slist_copy(atom->modem->watches);
++	GSList *l;
++
++	for (l = copy; l; l = l->next) {
++		struct atom_watch *w = l->data;
++
++		/* skip watches removed by an earlier one in this round */
++		if (!g_slist_find(atom->modem->watches, w))
++			continue;
++
++		if (w->type == atom->type)
++			w->notify(atom, cond, w->data);
++	}
++
++	g_slist_free(copy);
++}
++
++void __ofono_atom_register(struct ofono_atom *atom,
++				void (*unregister)(struct ofono_atom *))
++{
++	if (unregister == NULL)
++		return;
++
++	atom->unregister = unregister;
++	call_watches(atom, OFONO_ATOM_WATCH_CONDITION_REGISTERED);
++}
++
++static void atom_unregister(struct ofono_atom *atom)
++{
++	if (atom->unregister == NULL)
++		return;
++
++	call_watches(atom, OFONO_ATOM_WATCH_CONDITION_UNREGISTERED);
++	atom->unregister(atom);
++	atom->unregister = NULL;
++}
++
++void __ofono_atom_free(struct ofono_atom *atom)
++{
++	struct ofono_modem *modem = atom->modem;
++
++	modem->atoms = g_slist_remove(modem->atoms, atom);
++	atom_unregister(atom);
++
++	if (atom->destruct)
++		atom->destruct(atom);
++
++	g_free(atom);
++}
++
++unsigned int __ofono_modem_add_atom_watch(struct ofono_modem *modem,
++					enum ofono_atom_type type,
++					ofono_atom_watch_func notify,
++					void *data, ofono_destroy_func destroy)
++{
++	struct atom_watch *w = g_new0(struct atom_watch, 1);
++	GSList *l;
++
++	w->id = ++modem->next_watch;
++	w->type = type;
++	w->notify = notify;
++	w->data = data;
++	w->destroy = destroy;
++	modem->watches = g_slist_append(modem->watches, w);
++
++	for (l = modem->atoms; l; l = l->next) {
++		struct ofono_atom *atom = l->data;
++
++		if (atom->type == type && atom->unregister)
++			notify(atom, OFONO_ATOM_WATCH_CONDITION_REGISTERED,
++				data);
++	}
++
++	return w->id;
++}
++
++gboolean __ofono_modem_remove_atom_watch(struct ofono_modem *modem,
++						unsigned int id)
++{
++	GSList *l;
++
++	for (l = modem->watches; l; l = l->next) {
++		struct atom_watch *w = l->data;
++
++		if (w->id != id)
++			continue;
++
++		modem->watches = g_slist_delete_link(modem->watches, l);
++
++		if (w->destroy)
++			w->destroy(w->data);
++
++		g_free(w);
++		return TRUE;
++	}
++
++	return FALSE;
++}
++
++struct ofono_atom *__ofono_modem_find_atom(struct ofono_modem *modem,
++						enum ofono_atom_type type)
++{
++	GSList *l;
++
++	for (l = modem->atoms; l; l = l->next) {
++		struct ofono_atom *atom = l->data;
++
++		if (atom->type == type && atom->unregister)
++			return atom;
++	}
++
++	return NULL;
++}
++
++void __ofono_modem_foreach_registered_atom(struct ofono_modem *modem,
++						enum ofono_atom_type type,
++						ofono_atom_func callback,
++						void *data)
++{
++	GSList *l;
++
++	for (l = modem->atoms; l; l = l->next) {
++		struct ofono_atom *atom = l->data;
++
++		if (atom->type == type && atom->unregister)
++			callback(atom, data);
++	}
++}
++
++/* As flush_atoms() on power down: unregister, then free, in list order */
++static void modem_flush(struct ofono_modem *modem)
++{
++	while (modem->atoms) {
++		struct ofono_atom *atom = modem->atoms->data;
++
++		modem->atoms = g_slist_delete_link(modem->atoms,
++							modem->atoms);
++		atom_unregister(atom);
++
++		if (atom->destruct)
++			atom->destruct(atom);
++
++		g_free(atom);
++	}
++}
++
++unsigned int __ofono_modem_callid_next(struct ofono_modem *modem)
++{
++	unsigned int i;
++
++	for (i = 1; i < 32; i++)
++		if (!(modem->callids & (1u << i)))
++			return i;
++
++	return 0;
++}
++
++void __ofono_modem_callid_hold(struct ofono_modem *modem, int id)
++{
++	modem->callids |= 1u << id;
++}
++
++void __ofono_modem_callid_release(struct ofono_modem *modem, int id)
++{
++	modem->callids &= ~(1u << id);
++}
++
++void __ofono_modem_inc_emergency_mode(struct ofono_modem *modem)
++{
++}
++
++void __ofono_modem_dec_emergency_mode(struct ofono_modem *modem)
++{
++}
++
++ofono_bool_t ofono_modem_get_online(struct ofono_modem *modem)
++{
++	return TRUE;
++}
++
++void ofono_modem_add_interface(struct ofono_modem *modem,
++				const char *interface)
++{
++}
++
++void ofono_modem_remove_interface(struct ofono_modem *modem,
++				const char *interface)
++{
++}
++
++/* ---- the rest of the core that voicecall and the emulator touch --------- */
++
++/* Settings live in memory, one key file per SIM, gone with the SIM */
++GKeyFile *storage_open(const char *imsi, const char *store)
++{
++	return g_key_file_new();
++}
++
++void storage_sync(const char *imsi, const char *store, GKeyFile *keyfile)
++{
++}
++
++void storage_close(const char *imsi, const char *store, GKeyFile *keyfile,
++			gboolean save)
++{
++	g_key_file_free(keyfile);
++}
++
++void __ofono_history_call_ended(struct ofono_modem *modem,
++				const struct ofono_call *call,
++				time_t start, time_t end)
++{
++}
++
++void __ofono_history_call_missed(struct ofono_modem *modem,
++				const struct ofono_call *call, time_t when)
++{
++}
++
++const struct ofono_phone_number *__ofono_message_waiting_get_mbdn(
++					struct ofono_message_waiting *mw,
++					unsigned int index)
++{
++	return NULL;
++}
++
++void __ofono_private_network_release(int id)
++{
++}
++
++ofono_bool_t __ofono_private_network_request(ofono_private_network_cb_t cb,
++						int *id, void *data)
++{
++	return FALSE;
++}
++
++/*
++ * Each modem has a SIM that is ready from the start, with no EF_ECC to read,
++ * so voicecall keeps its settings (the last dialled number) as on a phone.
++ */
++struct ofono_sim {
++	char imsi[16];
++};
++
++struct ofono_sim_context {
++	struct ofono_sim *sim;
++};
++
++unsigned int ofono_sim_add_state_watch(struct ofono_sim *sim,
++					ofono_sim_state_event_cb_t cb,
++					void *data, ofono_destroy_func destroy)
++{
++	return 1;
++}
++
++void ofono_sim_remove_state_watch(struct ofono_sim *sim, unsigned int id)
++{
++}
++
++enum ofono_sim_state ofono_sim_get_state(struct ofono_sim *sim)
++{
++	return OFONO_SIM_STATE_READY;
++}
++
++const char *ofono_sim_get_imsi(struct ofono_sim *sim)
++{
++	return sim->imsi;
++}
++
++struct ofono_sim_context *ofono_sim_context_create(struct ofono_sim *sim)
++{
++	struct ofono_sim_context *context = g_new0(struct ofono_sim_context, 1);
++
++	context->sim = sim;
++	return context;
++}
++
++void ofono_sim_context_free(struct ofono_sim_context *context)
++{
++	g_free(context);
++}
++
++int ofono_sim_read(struct ofono_sim_context *context, int id,
++			enum ofono_sim_file_structure expected,
++			ofono_sim_file_read_cb_t cb, void *data)
++{
++	return -ENOENT;
++}
++
++unsigned int ofono_sim_add_file_watch(struct ofono_sim_context *context,
++					int id, ofono_sim_file_changed_cb_t cb,
++					void *userdata,
++					ofono_destroy_func destroy)
++{
++	return 1;
++}
++
++void ofono_sim_remove_file_watch(struct ofono_sim_context *context,
++					unsigned int id)
++{
++}
++
++/* Only reached when an EF_ECC is read, which never happens here */
++void extract_bcd_number(const unsigned char *buf, size_t len, char *out)
++{
++	abort();
++}
++
++int ofono_handsfree_card_register(struct ofono_handsfree_card *card)
++{
++	return 0;
++}
++
++void ofono_handsfree_card_remove(struct ofono_handsfree_card *card)
++{
++}
++
++ofono_bool_t ofono_handsfree_card_set_codec(struct ofono_handsfree_card *card,
++					unsigned char codec)
++{
++	return TRUE;
++}
++
++ofono_bool_t ofono_handsfree_audio_has_wideband(void)
++{
++	return FALSE;
++}
++
++int ofono_handsfree_card_connect_sco(struct ofono_handsfree_card *card)
++{
++	return 0;
++}
++
++/* ---- a scripted voicecall driver ----------------------------------------- */
++
++struct ofono_driver_desc __start___voicecall[1];
++struct ofono_driver_desc __stop___voicecall[1];
++
++struct fake_vc {
++	struct ofono_voicecall *vc;
++	unsigned int answered;
++	unsigned int hung_up;
++	unsigned int dialled;
++	char dialled_number[OFONO_MAX_PHONE_NUMBER_LENGTH + 1];
++};
++
++static void reply_ok(ofono_voicecall_cb_t cb, void *data)
++{
++	struct ofono_error e = { .type = OFONO_ERROR_TYPE_NO_ERROR };
++
++	cb(&e, data);
++}
++
++static int fake_probe(struct ofono_voicecall *vc, unsigned int vendor,
++			void *data)
++{
++	ofono_voicecall_set_data(vc, data);
++	return 0;
++}
++
++static void fake_remove(struct ofono_voicecall *vc)
++{
++}
++
++static void fake_dial(struct ofono_voicecall *vc,
++			const struct ofono_phone_number *ph,
++			enum ofono_clir_option clir, ofono_voicecall_cb_t cb,
++			void *data)
++{
++	struct fake_vc *f = ofono_voicecall_get_data(vc);
++
++	f->dialled++;
++	g_strlcpy(f->dialled_number, ph->number, sizeof(f->dialled_number));
++	reply_ok(cb, data);
++}
++
++static void fake_answer(struct ofono_voicecall *vc, ofono_voicecall_cb_t cb,
++			void *data)
++{
++	struct fake_vc *f = ofono_voicecall_get_data(vc);
++
++	f->answered++;
++	reply_ok(cb, data);
++}
++
++static void fake_hangup_active(struct ofono_voicecall *vc,
++				ofono_voicecall_cb_t cb, void *data)
++{
++	struct fake_vc *f = ofono_voicecall_get_data(vc);
++
++	f->hung_up++;
++	reply_ok(cb, data);
++}
++
++static void fake_generic(struct ofono_voicecall *vc, ofono_voicecall_cb_t cb,
++				void *data)
++{
++	reply_ok(cb, data);
++}
++
++static void fake_release_specific(struct ofono_voicecall *vc, int id,
++				ofono_voicecall_cb_t cb, void *data)
++{
++	reply_ok(cb, data);
++}
++
++static void fake_send_tones(struct ofono_voicecall *vc, const char *tones,
++				ofono_voicecall_cb_t cb, void *data)
++{
++	reply_ok(cb, data);
++}
++
++static const struct ofono_voicecall_driver fake_driver = {
++	.name			= "fake",
++	.probe			= fake_probe,
++	.remove			= fake_remove,
++	.dial			= fake_dial,
++	.answer			= fake_answer,
++	.hangup_active		= fake_hangup_active,
++	.hold_all_active	= fake_generic,
++	.release_all_held	= fake_generic,
++	.set_udub		= fake_generic,
++	.release_all_active	= fake_generic,
++	.release_specific	= fake_release_specific,
++	.send_tones		= fake_send_tones,
++};
++
++int __ofono_driver_register(const char *type, const char *name,
++				const void *driver)
++{
++	return 0;
++}
++
++void __ofono_driver_unregister(const char *type, const void *driver)
++{
++}
++
++const void *__ofono_driver_find(const char *type, const char *name,
++				const struct ofono_driver_desc *start,
++				const struct ofono_driver_desc *stop)
++{
++	if (!strcmp(type, "voicecall") && !strcmp(name, "fake"))
++		return &fake_driver;
++
++	return NULL;
++}
++
++/* ---- the headset end ----------------------------------------------------- */
++
++struct hf {
++	int fd;
++	GString *in;
++};
++
++static gboolean quit_cb(gpointer data)
++{
++	*(bool *) data = true;
++	return G_SOURCE_REMOVE;
++}
++
++/* Run the main loop for a while, collecting what the AG sends */
++static void spin(struct hf *hf, unsigned int ms)
++{
++	bool done = false;
++	char buf[512];
++	ssize_t n;
++
++	g_timeout_add(ms, quit_cb, &done);
++
++	while (!done) {
++		g_main_context_iteration(NULL, FALSE);
++
++		while (hf && (n = read(hf->fd, buf, sizeof(buf))) > 0)
++			g_string_append_len(hf->in, buf, n);
++
++		g_usleep(1000);
++	}
++}
++
++static void hf_send(struct hf *hf, const char *cmd)
++{
++	size_t len = strlen(cmd);
++
++	if (getenv("TEST_VERBOSE"))
++		fprintf(stderr, "HF > %s\n", cmd);
++
++	assert(write(hf->fd, cmd, len) == (ssize_t) len);
++	assert(write(hf->fd, "\r", 1) == 1);
++}
++
++/* Wait for a line from the AG, consuming everything up to and including it */
++static bool hf_expect(struct hf *hf, const char *line)
++{
++	unsigned int waited = 0;
++	char *pat = g_strdup_printf("\r\n%s\r\n", line);
++	bool found = false;
++
++	while (waited < 1000) {
++		const char *p = strstr(hf->in->str, pat);
++
++		if (p) {
++			g_string_erase(hf->in, 0, p - hf->in->str +
++						strlen(pat));
++			found = true;
++			break;
++		}
++
++		spin(hf, 10);
++		waited += 10;
++	}
++
++	if (!found)
++		fprintf(stderr, "expected \"%s\", have \"%s\"\n", line,
++			g_strescape(hf->in->str, NULL));
++
++	g_free(pat);
++	return found;
++}
++
++/* No such line within a short while */
++static bool hf_absent(struct hf *hf, const char *line)
++{
++	char *pat = g_strdup_printf("\r\n%s\r\n", line);
++	bool absent;
++
++	spin(hf, 100);
++	absent = strstr(hf->in->str, pat) == NULL;
++
++	if (!absent)
++		fprintf(stderr, "did not expect \"%s\" in \"%s\"\n", line,
++			g_strescape(hf->in->str, NULL));
++
++	g_free(pat);
++	return absent;
++}
++
++static void hf_flush(struct hf *hf)
++{
++	spin(hf, 50);
++	g_string_truncate(hf->in, 0);
++}
++
++/* ---- fixtures ------------------------------------------------------------ */
++
++static DBusConnection *conn;
++
++struct phone {
++	struct ofono_modem *modem[2];
++	struct ofono_sim *sim[2];
++	struct fake_vc fvc[2];
++	struct ofono_emulator *em;
++	struct hf hf;
++};
++
++static void sim_unregister(struct ofono_atom *atom)
++{
++}
++
++static void sim_destruct(struct ofono_atom *atom)
++{
++	g_free(__ofono_atom_get_data(atom));
++}
++
++static void modem_init(struct phone *p, int i)
++{
++	struct ofono_modem *modem = g_new0(struct ofono_modem, 1);
++	struct ofono_atom *sim_atom;
++
++	snprintf(modem->path, sizeof(modem->path), "/ril_%d", i);
++	p->modem[i] = modem;
++
++	p->sim[i] = g_new0(struct ofono_sim, 1);
++	snprintf(p->sim[i]->imsi, sizeof(p->sim[i]->imsi),
++			"20404000000000%d", i);
++	sim_atom = __ofono_modem_add_atom(modem, OFONO_ATOM_TYPE_SIM,
++						sim_destruct, p->sim[i]);
++	__ofono_atom_register(sim_atom, sim_unregister);
++
++	p->fvc[i].vc = ofono_voicecall_create(modem, 0, "fake", &p->fvc[i]);
++	assert(p->fvc[i].vc);
++	ofono_voicecall_register(p->fvc[i].vc);
++}
++
++static void phone_connect(struct phone *p, int n_modems)
++{
++	int sv[2];
++	int i;
++
++	assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
++
++	p->em = ofono_emulator_create(OFONO_EMULATOR_TYPE_HFP);
++	assert(p->em);
++
++	for (i = 0; i < n_modems; i++)
++		ofono_emulator_add_modem(p->em, p->modem[i]);
++
++	ofono_emulator_register(p->em, sv[0]);
++
++	p->hf.fd = sv[1];
++	p->hf.in = g_string_new(NULL);
++	assert(fcntl(p->hf.fd, F_SETFL, O_NONBLOCK) == 0);
++
++	/* SLC: no three-way calling and no HF indicators, so CMER ends it */
++	hf_send(&p->hf, "AT+BRSF=0");
++	assert(hf_expect(&p->hf, "OK"));
++	hf_send(&p->hf, "AT+CIND=?");
++	assert(hf_expect(&p->hf, "OK"));
++	hf_send(&p->hf, "AT+CIND?");
++	assert(hf_expect(&p->hf, "OK"));
++	hf_send(&p->hf, "AT+CMER=3,0,0,1");
++	assert(hf_expect(&p->hf, "OK"));
++	hf_send(&p->hf, "AT+CLIP=1");
++	assert(hf_expect(&p->hf, "OK"));
++	hf_flush(&p->hf);
++}
++
++static struct phone *phone_new(int n_modems_connected)
++{
++	struct phone *p = g_new0(struct phone, 1);
++
++	modem_init(p, 0);
++	modem_init(p, 1);
++	phone_connect(p, n_modems_connected);
++
++	return p;
++}
++
++static void phone_free(struct phone *p)
++{
++	int i;
++
++	/* The headset hangs up: the emulator goes with its last atom */
++	close(p->hf.fd);
++	spin(NULL, 50);
++
++	for (i = 0; i < 2; i++) {
++		if (p->modem[i] == NULL)
++			continue;
++
++		modem_flush(p->modem[i]);
++		assert(p->modem[i]->watches == NULL);
++		g_free(p->modem[i]);
++	}
++
++	g_string_free(p->hf.in, TRUE);
++	g_free(p);
++}
++
++static void call_notify(struct phone *p, int modem, int id, int status,
++			int direction, const char *number)
++{
++	struct ofono_call call;
++
++	ofono_call_init(&call);
++	call.id = id;
++	call.status = status;
++	call.direction = direction;
++	g_strlcpy(call.phone_number.number, number,
++			sizeof(call.phone_number.number));
++	call.phone_number.type = 145;
++	call.clip_validity = CLIP_VALIDITY_VALID;
++
++	ofono_voicecall_notify(p->fvc[modem].vc, &call);
++}
++
++static void call_gone(struct phone *p, int modem, int id)
++{
++	ofono_voicecall_disconnected(p->fvc[modem].vc, id,
++				OFONO_DISCONNECT_REASON_REMOTE_HANGUP, NULL);
++}
++
++/* ---- tests ------------------------------------------------------------- */
++
++/* A call on the second modem rings, with its number, and the first is idle */
++static void test_ring_second_modem(void)
++{
++	struct phone *p = phone_new(2);
++
++	call_notify(p, 1, 1, CALL_STATUS_INCOMING,
++			CALL_DIRECTION_MOBILE_TERMINATED, "+31612345678");
++	assert(hf_expect(&p->hf, "+CIEV: 3,1"));
++	assert(hf_expect(&p->hf, "RING"));
++	assert(hf_expect(&p->hf, "+CLIP: \"+31612345678\",145"));
++
++	call_gone(p, 1, 1);
++	assert(hf_expect(&p->hf, "+CIEV: 3,0"));
++
++	phone_free(p);
++}
++
++/* ATA and AT+CHUP for a call on the second modem go to that modem */
++static void test_answer_hangup_routed(void)
++{
++	struct phone *p = phone_new(2);
++
++	call_notify(p, 1, 1, CALL_STATUS_INCOMING,
++			CALL_DIRECTION_MOBILE_TERMINATED, "+31612345678");
++	assert(hf_expect(&p->hf, "+CIEV: 3,1"));
++
++	hf_send(&p->hf, "ATA");
++	assert(hf_expect(&p->hf, "OK"));
++	assert(p->fvc[1].answered == 1);
++	assert(p->fvc[0].answered == 0);
++
++	call_notify(p, 1, 1, CALL_STATUS_ACTIVE,
++			CALL_DIRECTION_MOBILE_TERMINATED, "+31612345678");
++	assert(hf_expect(&p->hf, "+CIEV: 2,1"));
++	assert(hf_expect(&p->hf, "+CIEV: 3,0"));
++
++	hf_send(&p->hf, "AT+CLCC");
++	assert(hf_expect(&p->hf, "+CLCC: 1,1,0,0,0,\"+31612345678\",145"));
++	assert(hf_expect(&p->hf, "OK"));
++
++	hf_send(&p->hf, "AT+CHUP");
++	assert(hf_expect(&p->hf, "OK"));
++	assert(p->fvc[1].hung_up == 1);
++	assert(p->fvc[0].hung_up == 0);
++
++	call_gone(p, 1, 1);
++	assert(hf_expect(&p->hf, "+CIEV: 2,0"));
++
++	phone_free(p);
++}
++
++/* The same on the first modem, so neither is special */
++static void test_answer_first_modem(void)
++{
++	struct phone *p = phone_new(2);
++
++	call_notify(p, 0, 1, CALL_STATUS_INCOMING,
++			CALL_DIRECTION_MOBILE_TERMINATED, "+31600000001");
++	assert(hf_expect(&p->hf, "RING"));
++	assert(hf_expect(&p->hf, "+CLIP: \"+31600000001\",145"));
++
++	hf_send(&p->hf, "ATA");
++	assert(hf_expect(&p->hf, "OK"));
++	assert(p->fvc[0].answered == 1);
++	assert(p->fvc[1].answered == 0);
++
++	call_gone(p, 0, 1);
++	phone_free(p);
++}
++
++/*
++ * Indicators are merged: the idle modem reporting its state does not hide
++ * the other modem's active call.
++ */
++static void test_indicators_merged(void)
++{
++	struct phone *p = phone_new(2);
++
++	call_notify(p, 0, 1, CALL_STATUS_ACTIVE,
++			CALL_DIRECTION_MOBILE_ORIGINATED, "+31600000001");
++	assert(hf_expect(&p->hf, "+CIEV: 2,1"));
++
++	/* A short call comes and goes on the other modem */
++	call_notify(p, 1, 1, CALL_STATUS_ALERTING,
++			CALL_DIRECTION_MOBILE_ORIGINATED, "+31600000002");
++	call_notify(p, 1, 1, CALL_STATUS_ACTIVE,
++			CALL_DIRECTION_MOBILE_ORIGINATED, "+31600000002");
++	call_gone(p, 1, 1);
++	assert(hf_absent(&p->hf, "+CIEV: 2,0"));
++
++	/* The second modem going away entirely does not end it either */
++	modem_flush(p->modem[1]);
++	g_free(p->modem[1]);
++	p->modem[1] = NULL;
++	assert(hf_absent(&p->hf, "+CIEV: 2,0"));
++
++	call_gone(p, 0, 1);
++	assert(hf_expect(&p->hf, "+CIEV: 2,0"));
++
++	phone_free(p);
++}
++
++/* ATD dials on the first modem when idle, and next to an existing call */
++static void test_dial_choice(void)
++{
++	struct phone *p = phone_new(2);
++
++	hf_send(&p->hf, "ATD+31600000003;");
++	assert(hf_expect(&p->hf, "OK"));
++	assert(p->fvc[0].dialled == 1);
++	assert(p->fvc[1].dialled == 0);
++	/* the driver gets the digits, the "+" goes into the type */
++	assert(!strcmp(p->fvc[0].dialled_number, "31600000003"));
++
++	/* The dial result has no call yet; the driver reports it */
++	call_notify(p, 0, 1, CALL_STATUS_DIALING,
++			CALL_DIRECTION_MOBILE_ORIGINATED, "+31600000003");
++	call_gone(p, 0, 1);
++	hf_flush(&p->hf);
++
++	call_notify(p, 1, 1, CALL_STATUS_ACTIVE,
++			CALL_DIRECTION_MOBILE_TERMINATED, "+31600000004");
++	hf_flush(&p->hf);
++
++	hf_send(&p->hf, "ATD+31600000005;");
++	assert(hf_expect(&p->hf, "OK"));
++	assert(p->fvc[1].dialled == 1);
++	assert(p->fvc[0].dialled == 1);
++
++	call_gone(p, 1, 1);
++	phone_free(p);
++}
++
++/*
++ * The modem whose handlers answer goes away while the headset stays: the
++ * other modem's handlers take over, and nothing is left pointing at the
++ * departed one (run under ASan or valgrind to see the difference).
++ */
++static void test_first_modem_leaves(void)
++{
++	struct phone *p = phone_new(2);
++
++	modem_flush(p->modem[0]);
++	g_free(p->modem[0]);
++	p->modem[0] = NULL;
++	hf_flush(&p->hf);
++
++	call_notify(p, 1, 1, CALL_STATUS_INCOMING,
++			CALL_DIRECTION_MOBILE_TERMINATED, "+31612345678");
++	assert(hf_expect(&p->hf, "RING"));
++
++	hf_send(&p->hf, "ATA");
++	assert(hf_expect(&p->hf, "OK"));
++	assert(p->fvc[1].answered == 1);
++
++	hf_send(&p->hf, "AT+CLCC");
++	assert(hf_expect(&p->hf, "OK"));
++
++	call_gone(p, 1, 1);
++	phone_free(p);
++}
++
++static unsigned int xtest_calls;
++static unsigned int xtest_destroyed;
++
++static void xtest_cb(struct ofono_emulator *em,
++			struct ofono_emulator_request *req, void *userdata)
++{
++	struct ofono_error ok = { .type = OFONO_ERROR_TYPE_NO_ERROR };
++
++	xtest_calls++;
++	ofono_emulator_send_final(em, &ok);
++}
++
++static void xtest_destroy(void *data)
++{
++	xtest_destroyed++;
++}
++
++/*
++ * A command only one modem answers goes with that modem: its handler is
++ * released when the modem leaves, not kept until the headset goes, and
++ * the command is no longer accepted.
++ */
++static void test_leaving_modem_takes_its_handlers(void)
++{
++	struct phone *p = phone_new(2);
++	struct ofono_atom *atom;
++
++	atom = __ofono_modem_find_atom(p->modem[0],
++					OFONO_ATOM_TYPE_EMULATOR_HFP);
++	assert(atom);
++	xtest_calls = xtest_destroyed = 0;
++	assert(__ofono_emulator_add_atom_handler(atom, "+XTEST", xtest_cb,
++						NULL, xtest_destroy));
++
++	hf_send(&p->hf, "AT+XTEST");
++	assert(hf_expect(&p->hf, "OK"));
++	assert(xtest_calls == 1);
++
++	modem_flush(p->modem[0]);
++	g_free(p->modem[0]);
++	p->modem[0] = NULL;
++	assert(xtest_destroyed == 1);
++
++	hf_flush(&p->hf);
++	hf_send(&p->hf, "AT+XTEST");
++	assert(hf_expect(&p->hf, "ERROR"));
++	assert(xtest_calls == 1);
++
++	phone_free(p);
++	assert(xtest_destroyed == 1);
++}
++
++/* A modem added to a live link is served from then on */
++static void test_modem_joins_later(void)
++{
++	struct phone *p = phone_new(1);
++
++	ofono_emulator_add_modem(p->em, p->modem[1]);
++	/* adding twice is harmless */
++	ofono_emulator_add_modem(p->em, p->modem[1]);
++	hf_flush(&p->hf);
++
++	call_notify(p, 1, 1, CALL_STATUS_INCOMING,
++			CALL_DIRECTION_MOBILE_TERMINATED, "+31612345678");
++	assert(hf_expect(&p->hf, "+CIEV: 3,1"));
++	assert(hf_expect(&p->hf, "+CLIP: \"+31612345678\",145"));
++
++	hf_send(&p->hf, "ATA");
++	assert(hf_expect(&p->hf, "OK"));
++	assert(p->fvc[1].answered == 1);
++
++	call_gone(p, 1, 1);
++	phone_free(p);
++}
++
++/* AT+BAC: CVSD need not be first, but has to be there */
++static void test_bac_order(void)
++{
++	struct phone *p = phone_new(2);
++
++	hf_send(&p->hf, "AT+BAC=2,1");
++	assert(hf_expect(&p->hf, "OK"));
++	hf_send(&p->hf, "AT+BAC=1,2");
++	assert(hf_expect(&p->hf, "OK"));
++	hf_send(&p->hf, "AT+BAC=2");
++	assert(hf_expect(&p->hf, "ERROR"));
++
++	phone_free(p);
++}
++
++int main(int argc, char **argv)
++{
++	DBusError err;
++	int r;
++
++	if (!getenv("DBUS_SESSION_BUS_ADDRESS")) {
++		printf("1..0 # SKIP needs a D-Bus bus, run under dbus-run-session\n");
++		return 0;
++	}
++
++	g_test_init(&argc, &argv, NULL);
++
++	dbus_error_init(&err);
++	conn = g_dbus_setup_private(DBUS_BUS_SESSION, NULL, &err);
++	assert(conn);
++	__ofono_dbus_init(conn);
++
++	g_test_add_func("/emulator-multimodem/ring-second-modem",
++				test_ring_second_modem);
++	g_test_add_func("/emulator-multimodem/answer-hangup-routed",
++				test_answer_hangup_routed);
++	g_test_add_func("/emulator-multimodem/answer-first-modem",
++				test_answer_first_modem);
++	g_test_add_func("/emulator-multimodem/indicators-merged",
++				test_indicators_merged);
++	g_test_add_func("/emulator-multimodem/dial-choice", test_dial_choice);
++	g_test_add_func("/emulator-multimodem/first-modem-leaves",
++				test_first_modem_leaves);
++	g_test_add_func("/emulator-multimodem/leaving-modem-takes-its-handlers",
++				test_leaving_modem_takes_its_handlers);
++	g_test_add_func("/emulator-multimodem/modem-joins-later",
++				test_modem_joins_later);
++	g_test_add_func("/emulator-multimodem/bac-order", test_bac_order);
++
++	r = g_test_run();
++
++	__ofono_dbus_cleanup();
++	dbus_connection_close(conn);
++	dbus_connection_unref(conn);
++
++	return r;
++}

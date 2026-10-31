@@ -1,0 +1,248 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] emulator: merge the call indicators of all modems
+
+Each modem's voicecall sets call, callsetup and callheld on the
+emulator as its own calls change. With two modems on one emulator the
+last writer wins: the idle modem reporting call=0 ends the headset's
+view of an active call on the other one. Sailfish d9c68c4f does not
+merge them.
+
+Keep call, callsetup and callheld for each modem, and send the headset
+the merged value:
+
+  call       1 if a call is active on any modem
+  callsetup  that of the modem that just changed if it is setting up a
+             call, otherwise the first modem that is
+  callheld   2 if any modem has calls both active and held, or one
+             modem has a held call while another has an active one;
+             1 if calls are only held; 0 otherwise
+
+A modem that goes away drops out of the merge, and the headset gets the
+indicators of the modems left.
+
+__ofono_emulator_set_atom_indicator() sets an indicator for the modem
+of the emulator atom passed in, and voicecall uses it. Other indicators (service, signal,
+roam, battchg) and the DUN emulator go straight through as before.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+
+diff --git a/src/emulator.c b/src/emulator.c
+index f62687c..13621fa 100644
+--- a/src/emulator.c
++++ b/src/emulator.c
+@@ -39,6 +39,10 @@ struct hfp_codec_info {
+ /* One modem the emulator serves, through that modem's emulator atom */
+ struct emulator_modem {
+ 	struct ofono_atom *atom;
++	/* This modem's own call indicators; the headset sees them merged */
++	int call;
++	int callsetup;
++	int callheld;
+ };
+ 
+ struct ofono_emulator {
+@@ -1215,6 +1219,8 @@ static bool other_modem_registered(struct ofono_emulator *em,
+ }
+ 
+ static void handlers_free(struct ofono_emulator *em);
++static void call_indicators_drop_modem(struct ofono_emulator *em,
++					struct emulator_modem *m);
+ static void handlers_drop_owner(struct ofono_emulator *em,
+ 					struct ofono_atom *owner);
+ 
+@@ -1271,6 +1277,7 @@ static void emulator_unregister(struct ofono_atom *atom)
+ 	if (other_modem_registered(em, atom)) {
+ 		/* Whatever this modem answered, another one answers now */
+ 		handlers_drop_owner(em, atom);
++		call_indicators_drop_modem(em, find_modem_by_atom(em, atom));
+ 		return;
+ 	}
+ 
+@@ -1969,6 +1976,132 @@ start_ring:
+ 							notify_ring, em);
+ }
+ 
++/*
++ * With several modems behind one emulator each modem reports its own calls,
++ * and the headset has to see one AG. The call indicator is active if any
++ * modem has a call, callsetup is the reporting modem's if it is setting one
++ * up and otherwise any other modem's, and callheld says "held and active"
++ * when a modem holds a call while any modem has one active.
++ */
++static int merged_call(struct ofono_emulator *em)
++{
++	GSList *l;
++
++	for (l = em->modems; l; l = l->next) {
++		struct emulator_modem *m = l->data;
++
++		if (__ofono_atom_get_registered(m->atom) &&
++				m->call != OFONO_EMULATOR_CALL_INACTIVE)
++			return OFONO_EMULATOR_CALL_ACTIVE;
++	}
++
++	return OFONO_EMULATOR_CALL_INACTIVE;
++}
++
++static int merged_callsetup(struct ofono_emulator *em,
++				struct emulator_modem *prefer)
++{
++	GSList *l;
++
++	if (prefer && prefer->callsetup != OFONO_EMULATOR_CALLSETUP_INACTIVE)
++		return prefer->callsetup;
++
++	for (l = em->modems; l; l = l->next) {
++		struct emulator_modem *m = l->data;
++
++		if (__ofono_atom_get_registered(m->atom) &&
++			m->callsetup != OFONO_EMULATOR_CALLSETUP_INACTIVE)
++			return m->callsetup;
++	}
++
++	return OFONO_EMULATOR_CALLSETUP_INACTIVE;
++}
++
++static int merged_callheld(struct ofono_emulator *em)
++{
++	bool held = false;
++	GSList *l;
++
++	for (l = em->modems; l; l = l->next) {
++		struct emulator_modem *m = l->data;
++
++		if (!__ofono_atom_get_registered(m->atom))
++			continue;
++
++		if (m->callheld == OFONO_EMULATOR_CALLHELD_MULTIPLE)
++			return OFONO_EMULATOR_CALLHELD_MULTIPLE;
++
++		if (m->callheld == OFONO_EMULATOR_CALLHELD_ON_HOLD)
++			held = true;
++	}
++
++	if (!held)
++		return OFONO_EMULATOR_CALLHELD_NONE;
++
++	/* Held on one modem while another has a call active */
++	if (merged_call(em) == OFONO_EMULATOR_CALL_ACTIVE)
++		return OFONO_EMULATOR_CALLHELD_MULTIPLE;
++
++	return OFONO_EMULATOR_CALLHELD_ON_HOLD;
++}
++
++static void call_indicators_update(struct ofono_emulator *em,
++					struct emulator_modem *prefer,
++					bool call, bool callsetup,
++					bool callheld)
++{
++	if (call)
++		ofono_emulator_set_indicator(em, OFONO_EMULATOR_IND_CALL,
++						merged_call(em));
++
++	if (callsetup)
++		ofono_emulator_set_indicator(em, OFONO_EMULATOR_IND_CALLSETUP,
++						merged_callsetup(em, prefer));
++
++	if (callheld)
++		ofono_emulator_set_indicator(em, OFONO_EMULATOR_IND_CALLHELD,
++						merged_callheld(em));
++}
++
++static void call_indicators_drop_modem(struct ofono_emulator *em,
++					struct emulator_modem *m)
++{
++	if (m == NULL)
++		return;
++
++	m->call = OFONO_EMULATOR_CALL_INACTIVE;
++	m->callsetup = OFONO_EMULATOR_CALLSETUP_INACTIVE;
++	m->callheld = OFONO_EMULATOR_CALLHELD_NONE;
++
++	if (em->server)
++		call_indicators_update(em, NULL, true, true, true);
++}
++
++void __ofono_emulator_set_atom_indicator(struct ofono_atom *atom,
++						const char *name, int value)
++{
++	struct ofono_emulator *em = __ofono_atom_get_data(atom);
++	struct emulator_modem *m = find_modem_by_atom(em, atom);
++
++	if (m == NULL || em->type != OFONO_EMULATOR_TYPE_HFP) {
++		ofono_emulator_set_indicator(em, name, value);
++		return;
++	}
++
++	if (g_str_equal(name, OFONO_EMULATOR_IND_CALL)) {
++		m->call = value;
++		/* callheld depends on whether any call is active */
++		call_indicators_update(em, m, true, false, true);
++	} else if (g_str_equal(name, OFONO_EMULATOR_IND_CALLSETUP)) {
++		m->callsetup = value;
++		call_indicators_update(em, m, false, true, false);
++	} else if (g_str_equal(name, OFONO_EMULATOR_IND_CALLHELD)) {
++		m->callheld = value;
++		call_indicators_update(em, m, false, false, true);
++	} else
++		ofono_emulator_set_indicator(em, name, value);
++}
++
+ void __ofono_emulator_set_indicator_forced(struct ofono_emulator *em,
+ 						const char *name, int value)
+ {
+diff --git a/src/ofono.h b/src/ofono.h
+index 7432ba0..0442ca2 100644
+--- a/src/ofono.h
++++ b/src/ofono.h
+@@ -655,6 +655,10 @@ ofono_bool_t __ofono_emulator_add_atom_handler(struct ofono_atom *atom,
+ void __ofono_emulator_remove_atom_handler(struct ofono_atom *atom,
+ 						const char *prefix);
+ 
++/* One modem's call indicator; merged with the other modems' for the HF */
++void __ofono_emulator_set_atom_indicator(struct ofono_atom *atom,
++						const char *name, int value);
++
+ void __ofono_emulator_slc_condition(struct ofono_emulator *em,
+ 					enum ofono_emulator_slc_condition cond);
+ 
+diff --git a/src/voicecall.c b/src/voicecall.c
+index 1932c5b..cb0535b 100644
+--- a/src/voicecall.c
++++ b/src/voicecall.c
+@@ -722,28 +722,26 @@ static void emulator_set_indicator_forced(struct ofono_voicecall *vc,
+ 
+ static void emulator_call_status_cb(struct ofono_atom *atom, void *data)
+ {
+-	struct ofono_emulator *em = __ofono_atom_get_data(atom);
+ 	struct emulator_status *s = data;
+ 
+-	ofono_emulator_set_indicator(em, OFONO_EMULATOR_IND_CALL, s->status);
++	__ofono_emulator_set_atom_indicator(atom, OFONO_EMULATOR_IND_CALL,
++						s->status);
+ }
+ 
+ static void emulator_callsetup_status_cb(struct ofono_atom *atom, void *data)
+ {
+-	struct ofono_emulator *em = __ofono_atom_get_data(atom);
+ 	struct emulator_status *s = data;
+ 
+-	ofono_emulator_set_indicator(em, OFONO_EMULATOR_IND_CALLSETUP,
+-					s->status);
++	__ofono_emulator_set_atom_indicator(atom, OFONO_EMULATOR_IND_CALLSETUP,
++						s->status);
+ }
+ 
+ static void emulator_callheld_status_cb(struct ofono_atom *atom, void *data)
+ {
+-	struct ofono_emulator *em = __ofono_atom_get_data(atom);
+ 	struct emulator_status *s = data;
+ 
+-	ofono_emulator_set_indicator(em, OFONO_EMULATOR_IND_CALLHELD,
+-					s->status);
++	__ofono_emulator_set_atom_indicator(atom, OFONO_EMULATOR_IND_CALLHELD,
++						s->status);
+ }
+ 
+ static void notify_emulator_call_status(struct ofono_voicecall *vc)

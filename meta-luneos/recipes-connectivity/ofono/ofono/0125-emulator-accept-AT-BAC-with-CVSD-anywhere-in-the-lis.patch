@@ -1,0 +1,76 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] emulator: accept AT+BAC with CVSD anywhere in the list
+
+Port Sailfish OS oFono 4208b6d9 ("[bluetooth] Be less pedantic about
+ordering of speech codecs. Fixes JB#55276", Juho Hämäläinen).
+
+bac_cb answers ERROR unless CVSD is the first codec in AT+BAC, and the
+service level connection then fails. Some headsets list mSBC first.
+CVSD is mandatory, so accept the list if it has CVSD anywhere and
+reject it only if CVSD is missing. Sailfish also accepts a list without
+CVSD; this keeps that one an error.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+
+diff --git a/src/emulator.c b/src/emulator.c
+index 24e3451..2eb2d39 100644
+--- a/src/emulator.c
++++ b/src/emulator.c
+@@ -1009,6 +1009,8 @@ static void bac_cb(GAtServer *server, GAtServerRequestType type,
+ {
+ 	struct ofono_emulator *em = user_data;
+ 	GAtResultIter iter;
++	bool cvsd = false;
++	bool msbc = false;
+ 	int val;
+ 
+ 	DBG("");
+@@ -1021,22 +1023,17 @@ static void bac_cb(GAtServer *server, GAtServerRequestType type,
+ 			goto fail;
+ 
+ 		/*
+-		 * CVSD codec is mandatory and must come first.
+-		 * See HFP v1.6 4.34.1
++		 * CVSD codec is mandatory, and HFP v1.6 4.34.1 has it listed
++		 * first. Some headsets list mSBC first and otherwise work, so
++		 * only insist that CVSD is there.
+ 		 */
+-		if (g_at_result_iter_next_number(&iter, &val) == FALSE ||
+-				val != HFP_CODEC_CVSD)
+-			goto fail;
+-
+-		em->bac_received = TRUE;
+-
+-		em->negotiated_codec = 0;
+-		em->r_codecs[CVSD_OFFSET].supported = TRUE;
+-
+ 		while (g_at_result_iter_next_number(&iter, &val)) {
+ 			switch (val) {
++			case HFP_CODEC_CVSD:
++				cvsd = true;
++				break;
+ 			case HFP_CODEC_MSBC:
+-				em->r_codecs[MSBC_OFFSET].supported = TRUE;
++				msbc = true;
+ 				break;
+ 			default:
+ 				DBG("Unsupported HFP codec %d", val);
+@@ -1044,6 +1041,17 @@ static void bac_cb(GAtServer *server, GAtServerRequestType type,
+ 			}
+ 		}
+ 
++		if (!cvsd)
++			goto fail;
++
++		em->bac_received = TRUE;
++
++		em->negotiated_codec = 0;
++		em->r_codecs[CVSD_OFFSET].supported = TRUE;
++
++		if (msbc)
++			em->r_codecs[MSBC_OFFSET].supported = TRUE;
++
+ 		g_at_server_send_final(server, G_AT_SERVER_RESULT_OK);
+ 
+ 		/*
