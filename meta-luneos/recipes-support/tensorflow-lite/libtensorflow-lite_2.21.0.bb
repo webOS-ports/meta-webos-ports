@@ -21,6 +21,7 @@ DESCRIPTION = "TensorFlow Lite CPP "
 LICENSE = "Apache-2.0"
 
 LIC_FILES_CHKSUM = "file://LICENSE;md5=4158a261ca7f2525513e31ba9c50ae98"
+PR = "r1"
 # Compute branch info from ${PV} as Base PV...
 BPV = "${@'.'.join(d.getVar('PV').split('.')[0:2])}"
 DPV = "${@'.'.join(d.getVar('PV').split('.')[0:3])}"
@@ -58,6 +59,14 @@ DEPENDS = " \
 TF_CXX_FLAGS = "-DTF_MAJOR_VERSION=${TF_MAJOR} -DTF_MINOR_VERSION=${TF_MINOR} -DTF_PATCH_VERSION=${TF_PATCH} -DTF_VERSION_SUFFIX=''"
 OECMAKE_SOURCEPATH = "${S}/tensorflow/lite"
 
+# Add the version defines to oe's flags rather than replacing them with
+# -DCMAKE_C_FLAGS: oe-core's security flags (stack protector, FORTIFY, PIE,
+# format checks) and --sysroot come in through HOST_CC_ARCH and
+# TOOLCHAIN_OPTIONS in OECMAKE_C_FLAGS, not through CFLAGS, so replacing the
+# flags with CFLAGS and TUNE_CCARGS built the library without them.
+OECMAKE_C_FLAGS:append = " ${TF_CXX_FLAGS}"
+OECMAKE_CXX_FLAGS:append = " ${TF_CXX_FLAGS}"
+
 # Note:
 # Download the submodule using FetchContent_Populate.
 # Therefore, turn off FETCHCONTENT_FULLY_DISCONNECTED.
@@ -65,12 +74,17 @@ EXTRA_OECMAKE:append = " \
     -DBUILD_SHARED_LIBS=ON \
     -DTFLITE_ENABLE_XNNPACK=OFF \
     -DTFLITE_HOST_TOOLS_DIR=${WORKDIR}/recipe-sysroot-native/usr/bin/ \
-    -DCMAKE_C_FLAGS='${CFLAGS} ${TUNE_CCARGS} ${TF_CXX_FLAGS}' \
-    -DCMAKE_CXX_FLAGS='${CXXFLAGS} ${TUNE_CCARGS} ${TF_CXX_FLAGS}' \
     -DTENSORFLOW_SOURCE_DIR=${S} \
     -DFETCHCONTENT_FULLY_DISCONNECTED=OFF \
     -DTENSORFLOW_TARGET_ARCH=${TENSORFLOW_TARGET_ARCH} \
 "
+
+# do_install copies the libraries out of ${B}, so they keep the RUNPATH CMake
+# gave them for the build tree: $ORIGIN paths that do not exist on the target,
+# and on libfft2d_fftsg2d and libXNNPACK a trailing ":", an empty entry, which
+# ld.so reads as the current directory. All of them install to ${libdir}, which
+# is on the default search path, so they need no RUNPATH at all.
+EXTRA_OECMAKE:append = " -DCMAKE_SKIP_BUILD_RPATH=ON"
 
 # Note:
 # XNNPack is valid only on aarch64 and RISC-V .
