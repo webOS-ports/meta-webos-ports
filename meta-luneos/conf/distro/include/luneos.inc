@@ -291,3 +291,29 @@ WEBOS_LS2_CONF_VALIDATE_SKIP_GROUP = " \
     media.displayInfo \
     session.management \
 "
+
+# Groups whose service LuneOS has, but not on every image. The grant is right
+# and takes effect where the service is installed; it grants nothing elsewhere.
+# This is what is left after every name was checked against its provider, so a
+# name that appears here is not a misspelling:
+#   eink.operation                org.webosports.service.eink (mp01)
+#   faceunlock.identify, .query   luneos-faced (front-facing camera)
+#   filemanager-service.operation org.webosports.app.filemanager (no image): the
+#                                 fallback of a Documents ipk without its service
+#   fingerprint.identify          webos-fingerprint-adapter (MACHINE_FEATURES
+#                                 fingerprint), once herrie/identify-group is in
+#   fingerprint.operation         webos-fingerprint-adapter, as above
+#   killswitch.query              org.webosports.service.killswitch
+#                                 (MACHINE_FEATURES killswitch)
+#   office.operation              org.webosports.service.office (no image yet):
+#                                 Documents uses LibreOffice when it is installed
+WEBOS_LS2_CONF_VALIDATE_SKIP_GROUP += " \
+    eink.operation \
+    faceunlock.identify \
+    faceunlock.query \
+    filemanager-service.operation \
+    fingerprint.identify \
+    fingerprint.operation \
+    killswitch.query \
+    office.operation \
+"
