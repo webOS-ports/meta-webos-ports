@@ -1,0 +1,191 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sat, 31 Oct 2026 16:30:37 +0100
+Subject: [PATCH] ofono: merge calls and split them from a conference
+
+OfonoVoiceCallHandler::merge() and split() were empty (JB#35997), so a
+client's request to merge went through voicecall-manager's D-Bus adapter,
+which answered true, and stopped there: the LuneOS phone app's merge arrow
+did nothing, with two real calls up and no AT+CHLD=3 in the radio log.
+
+merge() is oFono's CreateMultiparty and split() its PrivateChat. oFono has
+no call to merge two given calls: CreateMultiparty joins whatever is active
+with whatever is held on the modem. So the handle only names the pair the
+client means, and merge() checks that it is that pair, on this modem,
+rather than let another modem's call or a call in another state go through
+as a merge of something else.
+
+The D-Bus method has already returned by the time oFono answers, and a
+network may refuse a conference. So OfonoVoiceCallProvider reports a failure
+on error(), which reaches clients through the manager, starting with the
+oFono method (what QOfonoVoiceCallManager::errorMessage() already does).
+Nothing changes on a failure: the calls stay as they were.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending [written against 8e6ec88, intended for sailfishos/voicecall]
+---
+ .../ofono/src/ofonovoicecallhandler.cpp       | 67 +++++++++++++++++++
+ .../ofono/src/ofonovoicecallhandler.h         |  6 +-
+ .../ofono/src/ofonovoicecallprovider.cpp      | 21 ++++++
+ .../ofono/src/ofonovoicecallprovider.h        |  4 ++
+ 4 files changed, 94 insertions(+), 4 deletions(-)
+
+diff --git a/plugins/providers/ofono/src/ofonovoicecallhandler.cpp b/plugins/providers/ofono/src/ofonovoicecallhandler.cpp
+index b974dc7..2a23aea 100644
+--- a/plugins/providers/ofono/src/ofonovoicecallhandler.cpp
++++ b/plugins/providers/ofono/src/ofonovoicecallhandler.cpp
+@@ -276,6 +276,73 @@ void OfonoVoiceCallHandler::filter(VoiceCallFilterAction action)
+     emit statusChanged(status());
+ }
+ 
++/*
++ * oFono has no call to merge one call into another: CreateMultiparty (AT+CHLD=3)
++ * joins whatever is active with whatever is held on the modem. So callHandle
++ * only says which two calls the caller means, and they have to be those two.
++ * Either may already be a conference; the other one then joins it.
++ *
++ * Nothing changes on a failure, here or if oFono refuses it later: both calls
++ * stay as they are and the provider reports the error.
++ */
++void OfonoVoiceCallHandler::merge(const QString &callHandle)
++{
++    TRACE
++    Q_D(OfonoVoiceCallHandler);
++
++    if (!d->ofonoVoiceCallManager->isValid()) {
++        d->provider->reportCallControlError(QStringLiteral("CreateMultiparty: no connection to the modem"));
++        return;
++    }
++
++    const auto calls = d->provider->voiceCalls();
++    const AbstractVoiceCallHandler *other = nullptr;
++    for (AbstractVoiceCallHandler *call : calls) {
++        if (call->handlerId() == callHandle) {
++            other = call;
++            break;
++        }
++    }
++
++    if (!other) {
++        d->provider->reportCallControlError(
++                    QStringLiteral("CreateMultiparty: no call %1 on this modem").arg(callHandle));
++        return;
++    }
++
++    const VoiceCallStatus mine = status();
++    const VoiceCallStatus theirs = other->status();
++    if (!((mine == STATUS_ACTIVE && theirs == STATUS_HELD) || (mine == STATUS_HELD && theirs == STATUS_ACTIVE))) {
++        d->provider->reportCallControlError(QStringLiteral("CreateMultiparty: need one active and one held call"));
++        return;
++    }
++
++    d->ofonoVoiceCallManager->createMultiparty();
++}
++
++/*
++ * PrivateChat (AT+CHLD=2X): this call stays active, the rest of the conference
++ * goes on hold. oFono refuses it with a call on hold, which includes the
++ * conference itself being held.
++ */
++void OfonoVoiceCallHandler::split()
++{
++    TRACE
++    Q_D(OfonoVoiceCallHandler);
++
++    if (!d->ofonoVoiceCallManager->isValid()) {
++        d->provider->reportCallControlError(QStringLiteral("PrivateChat: no connection to the modem"));
++        return;
++    }
++
++    if (!isMultiparty()) {
++        d->provider->reportCallControlError(QStringLiteral("PrivateChat: the call is not in a conference"));
++        return;
++    }
++
++    d->ofonoVoiceCallManager->privateChat(path());
++}
++
+ void OfonoVoiceCallHandler::timerEvent(QTimerEvent *event)
+ {
+     TRACE
+diff --git a/plugins/providers/ofono/src/ofonovoicecallhandler.h b/plugins/providers/ofono/src/ofonovoicecallhandler.h
+index 97a2758..9844338 100644
+--- a/plugins/providers/ofono/src/ofonovoicecallhandler.h
++++ b/plugins/providers/ofono/src/ofonovoicecallhandler.h
+@@ -68,10 +68,8 @@ public Q_SLOTS:
+     void deflect(const QString &target);
+     void sendDtmf(const QString &tones);
+     void filter(VoiceCallFilterAction action);
+-
+-    // TODO: unimplemented - JB#35997
+-    void merge(const QString &) {}
+-    void split() {}
++    void merge(const QString &callHandle) override;
++    void split() override;
+ 
+ protected Q_SLOTS:
+     void onStatusChanged();
+diff --git a/plugins/providers/ofono/src/ofonovoicecallprovider.cpp b/plugins/providers/ofono/src/ofonovoicecallprovider.cpp
+index 5e946b2..a4db2c8 100644
+--- a/plugins/providers/ofono/src/ofonovoicecallprovider.cpp
++++ b/plugins/providers/ofono/src/ofonovoicecallprovider.cpp
+@@ -81,6 +81,10 @@ void OfonoVoiceCallProvider::initialize()
+ 
+     QObject::connect(d->ofonoManager, SIGNAL(callAdded(QString)), SLOT(onCallAdded(QString)));
+     QObject::connect(d->ofonoManager, SIGNAL(callRemoved(QString)), SLOT(onCallRemoved(QString)));
++    QObject::connect(d->ofonoManager, SIGNAL(createMultipartyComplete(bool,QStringList)),
++                     SLOT(onCallControlComplete(bool)));
++    QObject::connect(d->ofonoManager, SIGNAL(privateChatComplete(bool,QStringList)),
++                     SLOT(onCallControlComplete(bool)));
+ 
+     foreach (const QString &call, d->ofonoManager->getCalls())
+         onCallAdded(call);
+@@ -158,6 +162,23 @@ void OfonoVoiceCallProvider::onDialComplete(const bool status)
+         d->setError(d->ofonoManager->errorMessage());
+ }
+ 
++void OfonoVoiceCallProvider::reportCallControlError(const QString &message)
++{
++    TRACE
++    Q_D(OfonoVoiceCallProvider);
++    d->setError(message);
++    emit error(message);
++}
++
++// errorMessage() starts with the oFono method, which is how clients tell them apart.
++void OfonoVoiceCallProvider::onCallControlComplete(bool status)
++{
++    TRACE
++    Q_D(OfonoVoiceCallProvider);
++    if (!status && d->ofonoManager)
++        reportCallControlError(d->ofonoManager->errorMessage());
++}
++
+ void OfonoVoiceCallProvider::interfacesChanged(const QStringList &interfaces)
+ {
+     TRACE
+diff --git a/plugins/providers/ofono/src/ofonovoicecallprovider.h b/plugins/providers/ofono/src/ofonovoicecallprovider.h
+index 711a11f..0cdc57e 100644
+--- a/plugins/providers/ofono/src/ofonovoicecallprovider.h
++++ b/plugins/providers/ofono/src/ofonovoicecallprovider.h
+@@ -43,6 +43,9 @@ public:
+ 
+     QOfonoModem* modem() const;
+ 
++    /// A merge or split did not happen: says why on error().
++    void reportCallControlError(const QString &message);
++
+ public Q_SLOTS:
+     bool dial(const QString &msisdn);
+ 
+@@ -52,6 +55,7 @@ protected Q_SLOTS:
+     void onCallRemoved(const QString &call);
+ 
+     void onDialComplete(const bool status);
++    void onCallControlComplete(bool status);
+ 
+     void onVoiceCallHandlerValidChanged(bool isValid);
+ 
+-- 
+2.53.0
+
