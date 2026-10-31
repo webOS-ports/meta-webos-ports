@@ -11,10 +11,16 @@ PACKAGECONFIG[system-libcxx] = ",,libcxx"
 WEBOS_REPO_NAME = "umediaserver"
 FILESEXTRAPATHS:prepend := "${THISDIR}/umediaserver:"
 
-PR = "${INC_PR}.7"
+PR = "${INC_PR}.8"
 
 OECMAKE_CXX_FLAGS += "-Wno-c++11-narrowing"
 OECMAKE_TARGET_COMPILE = "umedia_api resource_mgr_client resource_mgr_client_c"
+
+# do_install below copies the libraries out of ${B}, so they keep the RUNPATH
+# CMake gave them for the build tree instead of the one "cmake --install" would
+# rewrite. That RUNPATH ends in ":", an empty entry, which ld.so reads as the
+# current directory. /usr/lib/cbe comes from the toolchain flags and stays.
+EXTRA_OECMAKE += "-DCMAKE_SKIP_BUILD_RPATH=ON"
 
 PKGCONFIG_DIR = "${datadir}/pkgconfig"
 
