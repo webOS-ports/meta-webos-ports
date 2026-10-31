@@ -9,11 +9,13 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 # master volume at startup, sound/bluetoothHeadsetTakesCall and
 # sound/bluetoothAlertsOnSpeaker for Bluetooth Settings' "Headset takes calls"
 # and "Alerts on phone speaker", sound/ringtoneVolume and sound/ringtoneMuted
-# for the ringtone volume, and event-monitor needs localeInfo.
+# for the ringtone volume, sound/callVolumeEarpiece, callVolumeSpeaker,
+# callVolumeWired and callVolumeBluetooth for the in-call volume of each route,
+# and event-monitor needs localeInfo.
 SRC_URI += "file://settingsservice.allow"
 
 # for the added allow file
-PR = "r5"
+PR = "r6"
 
 do_install:append() {
     install -d ${D}${webos_sysconfdir}
