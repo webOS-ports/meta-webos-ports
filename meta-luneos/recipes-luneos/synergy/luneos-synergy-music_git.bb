@@ -108,7 +108,11 @@ do_install() {
     # The daemon reads and writes provider credentials in the Accounts service with
     #     luna-send -n 1 -a org.webosports.app.music.service palm://com.palm.service.accounts/...
     # (creds.go), i.e. luna-send acting for that id; the templates name it in their read and
-    # write permissions. Give that id the Accounts group it needs.
+    # write permissions. Give that id the Accounts group it needs, and mediacontroller's
+    # session calls: from connectors commit c99129b on, the daemon holds a media session of
+    # com.webos.service.mediacontroller for librespot (registerMediaSession and the set*
+    # calls, music/_core/service/mediasession.go), so that it is paused when another player
+    # starts or a call comes in, and takes the headset's keys.
     #
     # Deliberately no role for that id: it would have to claim exeName /usr/bin/luna-send, which
     # the stock luna-send role owns already, and two roles on one exeName once broke every
@@ -117,7 +121,7 @@ do_install() {
     install -d ${D}${webos_sysbus_permissionsdir}
     sed 's/^    //' > ${D}${webos_sysbus_permissionsdir}/org.webosports.app.music.service.perm.json <<EOF
     {
-        "org.webosports.app.music.service": ["accountsservice.operation"]
+        "org.webosports.app.music.service": ["accountsservice.operation", "mediacontroller.query"]
     }
 EOF
 }
