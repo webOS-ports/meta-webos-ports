@@ -6,11 +6,16 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 # ships no allow file - which leaves every system service with "Access denied".
 #
 # audiod needs sound/soundOutputList and sound/soundInputList to restore the
-# master volume at startup, and event-monitor needs localeInfo.
+# master volume at startup, sound/bluetoothHeadsetTakesCall and
+# sound/bluetoothAlertsOnSpeaker for Bluetooth Settings' "Headset takes calls"
+# and "Alerts on phone speaker", sound/ringtoneVolume and sound/ringtoneMuted
+# for the ringtone volume, sound/callVolumeEarpiece, callVolumeSpeaker,
+# callVolumeWired and callVolumeBluetooth for the in-call volume of each route,
+# and event-monitor needs localeInfo.
 SRC_URI += "file://settingsservice.allow"
 
 # for the added allow file
-PR = "r3"
+PR = "r6"
 
 do_install:append() {
     install -d ${D}${webos_sysconfdir}
