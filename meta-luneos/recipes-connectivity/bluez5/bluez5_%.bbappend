@@ -51,6 +51,7 @@ SRC_URI += " \
     file://0027-Sync-Add-support-for-meshd-to-use-RAW-channel-with-b.patch \
     file://0028-obexd-remove-the-part-of-a-push-the-sender-disconnec.patch \
     file://0029-gobex-retry-a-write-the-socket-cannot-take-yet.patch \
+    file://0030-profile-keep-the-pending-call-when-an-external-profi.patch \
     file://main.conf \
     file://brcm43438.service \
     file://bluetooth.service.d/luneos-uinput.conf \
