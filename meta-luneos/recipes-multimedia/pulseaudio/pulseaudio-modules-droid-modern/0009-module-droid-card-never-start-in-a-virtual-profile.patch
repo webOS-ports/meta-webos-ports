@@ -1,0 +1,104 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 30 Oct 2026 14:45:31 +0100
+Subject: [PATCH] module-droid-card: never start in a virtual profile
+
+module-card-restore saves the card profile whenever it changes, so a
+PulseAudio that goes down during a call - an abort, a restart, the
+device losing power - comes back with the virtual "voicecall" profile
+saved, and restores it while the card is being created. Before the card
+is linked pa_card_set_profile() only sets active_profile, so
+card_set_profile() never runs, u->real_profile stays NULL, and
+init_profile() then reads the virtual profile's mapping sets, which do
+not exist - add_virtual_profile() allocates the droid profile with
+pa_xnew0() and never creates them:
+
+  Assertion 's' failed at src/pulsecore/idxset.c:572,
+  function pa_idxset_size(). Aborting.
+
+The abort happens before card-restore can save anything else, so every
+restart aborts the same way until the card database is removed by hand.
+
+A virtual profile is only meaningful on top of the real profile it was
+entered from. If the initial profile is a virtual one, start in the real
+profile PulseAudio would have chosen instead - the same pick as
+pa_card_choose_initial_profile() - and leave the call mode to whoever
+runs the call, which sets it again.
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/droid/module-droid-card.c | 51 +++++++++++++++++++++++++++++++++++
+ 1 file changed, 51 insertions(+)
+
+diff --git a/src/droid/module-droid-card.c b/src/droid/module-droid-card.c
+index addebf4..e23cf46 100644
+--- a/src/droid/module-droid-card.c
++++ b/src/droid/module-droid-card.c
+@@ -401,6 +401,56 @@ static void add_profiles(struct userdata *u, pa_hashmap *h, pa_hashmap *ports) {
+     }
+ }
+ 
++static bool profile_is_virtual(pa_card_profile *cp) {
++    const struct profile_data *d = PA_CARD_PROFILE_DATA(cp);
++
++    return d->virtual_profile;
++}
++
++/* module-card-restore brings back the profile saved last, and that can be a
++ * virtual one: a call that was up when PulseAudio went down. A virtual profile
++ * only exists on top of the real profile it was entered from - it has no
++ * mappings of its own and u->real_profile is not set - so starting in one
++ * leaves the card without sinks and sources, and init_profile() aborts on the
++ * missing mapping sets. Start in the real profile PulseAudio would have picked
++ * instead, the way pa_card_choose_initial_profile() picks one; whoever runs
++ * the call sets the call mode again. */
++static void choose_real_initial_profile(struct userdata *u) {
++    pa_card_profile *cp, *best = NULL;
++    void *state;
++
++    pa_assert(u);
++
++    if (!profile_is_virtual(u->card->active_profile))
++        return;
++
++    PA_HASHMAP_FOREACH(cp, u->card->profiles, state) {
++        if (profile_is_virtual(cp) || cp->available == PA_AVAILABLE_NO)
++            continue;
++
++        if (!best || cp->priority > best->priority)
++            best = cp;
++    }
++
++    if (!best) {
++        PA_HASHMAP_FOREACH(cp, u->card->profiles, state) {
++            if (profile_is_virtual(cp))
++                continue;
++
++            if (!best || cp->priority > best->priority)
++                best = cp;
++        }
++    }
++
++    pa_assert(best);
++
++    pa_log_info("Not starting in virtual profile %s, using %s.", u->card->active_profile->name, best->name);
++
++    u->card->active_profile = best;
++    u->card->save_profile = false;
++    u->card->profile_is_sticky = false;
++}
++
+ static void init_profile(struct userdata *u) {
+     pa_droid_mapping *am;
+     struct profile_data *d;
+@@ -943,6 +993,7 @@ int pa__init(pa_module *m) {
+     u->module = m;
+ 
+     pa_card_choose_initial_profile(u->card);
++    choose_real_initial_profile(u);
+     init_profile(u);
+     u->extcon = pa_droid_extcon_new(m->core, u->card);
+ 
+-- 
+2.53.0
+
