@@ -19,6 +19,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 SRC_URI = "git://github.com/WireGuard/wireguard-linux-compat.git;branch=master;protocol=https;destsuffix=${BP} \
            file://0001-compat-let-the-build-say-the-kernel-already-has-skb_m.patch \
+           file://0002-compat-let-the-build-say-the-kernel-already-has-tota.patch \
 "
 SRCREV = "18fbcd68a35a892527345dc5679d0b2d860ee004"
 
@@ -62,6 +63,11 @@ do_configure:append() {
     if grep -q 'skb_mark_not_on_list' ${STAGING_KERNEL_DIR}/include/linux/skbuff.h; then
         bbnote "kernel already has skb_mark_not_on_list; disabling the compat definition"
         echo 'ccflags-y += -DCOMPAT_HAVE_SKB_MARK_NOT_ON_LIST' >> ${S}/Kbuild
+    fi
+    # The same trap: vince's 4.9.251 has the 5.0 totalram_pages() function.
+    if grep -q 'unsigned long totalram_pages(void)' ${STAGING_KERNEL_DIR}/include/linux/mm.h; then
+        bbnote "kernel already has totalram_pages(); disabling the compat definition"
+        echo 'ccflags-y += -DCOMPAT_HAVE_TOTALRAM_PAGES_FUNC' >> ${S}/Kbuild
     fi
 }
 
