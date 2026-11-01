@@ -134,6 +134,20 @@ LATE_PREREQS="vendor.rmt_storage vendor.per_mgr vendor.qseecomd"
 #     a cable attached is a charger-mode boot and this fires every time.
 DISPLAY_CONFLICT_MATCH="bootanimation surfaceflinger /system/bin/charger"
 
+# The camera stack, on a device whose adaptation says it has none to use
+# (deviceinfo_has_camera="false", see 37-camera-available). Binaries rather than
+# service names, for the same reason as above: the HAL is named by the vendor,
+# camerahalserver on MediaTek and vendor.camera-provider-2-4 elsewhere, and
+# camera_service comes from /system, which the start scan never sees. init
+# starts that one itself with class main, so skipping it is not enough and these
+# go through the same stop as the display conflicts.
+#
+# In stop order, clients first. ctl.stop leaves a service disabled, so a class_start
+# that comes later does not bring it back, but a client asking hwservicemanager for
+# the provider would, through ctl.interface_start: stop the HAL under a live client
+# and the client can start it again.
+NO_CAMERA_MATCH="/system/bin/camera_service /system/bin/cameraserver camerahalserver android.hardware.camera.provider"
+
 command -v setprop >/dev/null 2>&1 || { echo "setprop not available, skipping"; exit 0; }
 
 # Includes the hw/ subdirectory. init.<board>.rc lives there and declares the
@@ -319,13 +333,19 @@ echo "adaptation: ${_di:-none} (codename $(luneos-adaptation --codename 2>/dev/n
 [ -n "${deviceinfo_android_skip_services:-}" ] &&
     SKIP_SERVICES="$SKIP_SERVICES $deviceinfo_android_skip_services"
 
-# Resolve the display-conflict matches to service names up front, so the start
-# loop below can skip them instead of starting them only for us to stop them
-# again a moment later.
+conflict_match=$DISPLAY_CONFLICT_MATCH
+[ "${deviceinfo_has_camera:-}" = false ] &&
+    conflict_match="$conflict_match $NO_CAMERA_MATCH"
+
+# Resolve the conflict matches to service names up front, so the start loop
+# below can skip them instead of starting them only for us to stop them again a
+# moment later. Walking the matches on the outside keeps them in their listed
+# order, which NO_CAMERA_MATCH relies on; sort's order depends on the locale.
+rc_svcs=$(all_rc_files | xargs -r awk '/^service /{print $2 "=" $3}' 2>/dev/null | sort -u)
 conflict_svcs=""
-for e in $(all_rc_files | xargs -r awk '/^service /{print $2 "=" $3}' 2>/dev/null | sort -u); do
-    for m in $DISPLAY_CONFLICT_MATCH; do
-        case "${e#*=}" in *"$m"*) conflict_svcs="$conflict_svcs ${e%%=*}"; break ;; esac
+for m in $conflict_match; do
+    for e in $rc_svcs; do
+        case "${e#*=}" in *"$m"*) conflict_svcs="$conflict_svcs ${e%%=*}" ;; esac
     done
 done
 
@@ -373,7 +393,7 @@ for s in $conflict_svcs; do
     setprop ctl.stop "$s"
     stopped=$((stopped + 1))
 done
-echo "requested stop of $stopped display-conflicting Android service(s)"
+echo "requested stop of $stopped conflicting Android service(s)"
 
 # Replay the permission setup from the triggers init never reaches.
 #

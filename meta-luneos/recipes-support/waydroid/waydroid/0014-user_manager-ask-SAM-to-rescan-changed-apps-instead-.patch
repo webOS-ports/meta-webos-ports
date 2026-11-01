@@ -1,0 +1,115 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 30 Oct 2026 10:08:44 +0100
+Subject: [PATCH] user_manager: ask SAM to rescan changed apps instead of
+ restarting it
+
+When the set of Android apps changed, user_manager restarted sam.service
+so that SAM would pick up the webOS application directories it had
+written or removed. Restarting SAM ends every application it runs, and
+the launch-at-boot ones are not launched again. On the Mindphone that
+took the Phone app down a minute after boot: incoming calls then rang
+with no call screen, and audiod never learned of them.
+
+SAM now has scanApp, which scans the given ids as it scans an
+appinstalld install or removal: an id whose folder is there is added or
+updated, one whose folder is gone is removed. Collect the ids that
+changed and hand them to it. A SAM without scanApp is still restarted,
+with a warning, so the apps show up either way.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [LuneOS specific]
+---
+ tools/services/user_manager.py | 37 ++++++++++++++++++++++------------
+ 1 file changed, 24 insertions(+), 13 deletions(-)
+
+diff --git a/tools/services/user_manager.py b/tools/services/user_manager.py
+index de51969..76bed6f 100644
+--- a/tools/services/user_manager.py
++++ b/tools/services/user_manager.py
+@@ -7,6 +7,7 @@ import shutil
+ import subprocess
+ import threading
+ import tools.config
++import tools.helpers.luna
+ import tools.helpers.net
+ from pathlib import Path
+ from contextlib import suppress
+@@ -109,12 +110,14 @@ def start(args, session, unlocked_cb=None):
+     # instead of an anonymous card, and what lets SAM launch, track and close
+     # it.
+     #
+-    # SAM builds its application list once, at startup, and offers no rescan -
+-    # com.palm.applicationManager/rescan belongs to the legacy manager and does
+-    # not reach it. So a set that has actually changed needs sam.service
+-    # restarted; at boot the directories are already on disk from the previous
+-    # session and nothing needs restarting. Kept behind changed-set tracking so
+-    # that stays rare.
++    # SAM builds its application list at startup, and later learns of an app
++    # only when appinstalld reports it installed or removed - which it never
++    # does for these directories. com.palm.applicationManager/rescan belongs
++    # to the legacy manager and does not reach it. So the ids that changed are
++    # handed to SAM's scanApp, which adds, updates or removes each one. A SAM
++    # without scanApp is restarted instead, which also ends every app it runs,
++    # the Phone app included; changed-set tracking keeps either rare, and at
++    # boot the directories are already on disk and nothing is sent.
+     #
+     # Note this deliberately does not honour system_apps above. Upstream hides
+     # those because a desktop already has a calculator, a clock and a browser;
+@@ -190,8 +193,16 @@ def start(args, session, unlocked_cb=None):
+             return True
+         return False
+ 
+-    def refreshLuneosApps():
+-        logging.info("Android app set changed, restarting SAM to pick it up")
++    def refreshLuneosApps(appIds):
++        appIds = sorted(appIds)
++        reply = tools.helpers.luna.call(
++            "luna://com.webos.service.applicationmanager/scanApp",
++            {"appIds": appIds}, timeout=30)
++        if reply and reply.get("returnValue"):
++            logging.info("Android app set changed, SAM rescanned {}".format(", ".join(appIds)))
++            return
++        logging.warning("SAM did not rescan the changed Android apps ({}), restarting it".format(
++            reply.get("errorText") if reply else "no reply"))
+         with suppress(OSError, subprocess.SubprocessError):
+             subprocess.run(["systemctl", "restart", "sam.service"], timeout=60)
+ 
+@@ -254,11 +265,11 @@ def start(args, session, unlocked_cb=None):
+                     existing.unlink()
+ 
+             if luneosEnabled():
+-                changed = False
++                changed = set()
+                 wanted = set()
+                 for app in appsList:
+                     if makeLuneosApp(app):
+-                        changed = True
++                        changed.add("waydroid." + app["packageName"])
+                     wanted.add("waydroid." + app["packageName"])
+                 # Packages uninstalled while the session was down leave their
+                 # directory behind, and a stale tile launches nothing.
+@@ -266,9 +277,9 @@ def start(args, session, unlocked_cb=None):
+                     for name in os.listdir(luneos_apps_dir):
+                         if name.startswith("waydroid.") and name not in wanted:
+                             if removeLuneosApp(name[len("waydroid."):]):
+-                                changed = True
++                                changed.add(name)
+                 if changed:
+-                    refreshLuneosApps()
++                    refreshLuneosApps(changed)
+         if unlocked_cb:
+             unlocked_cb()
+ 
+@@ -285,7 +296,7 @@ def start(args, session, unlocked_cb=None):
+                 updateDesktopFile(appInfo)
+                 changed = makeLuneosApp(appInfo)
+             if changed and luneosEnabled():
+-                refreshLuneosApps()
++                refreshLuneosApps({"waydroid." + packageName})
+ 
+     def service_thread():
+         while not stopping:
+-- 
+2.53.0
+
