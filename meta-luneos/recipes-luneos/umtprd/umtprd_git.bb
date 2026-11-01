@@ -10,11 +10,15 @@ DEPENDS = "systemd"
 
 # master past umtprd-1.8.1: MTP I/O thread hang fix and path sanitizing
 PV = "1.8.1+git"
+PR = "r1"
 SRCREV = "153f76d65608c184a972ad7d0b4ae605e56c0972"
 
 SRC_URI = " \
     git://github.com/viveris/uMTP-Responder.git;protocol=https;branch=master \
+    file://0001-Add-a-backend-for-the-Android-f_mtp-gadget-function.patch \
+    file://0002-inotify-Don-t-lose-the-shutdown-signal.patch \
     file://umtprd.conf \
+    file://umtprd-f_mtp.conf \
     file://luneos-mtp-gadget \
     file://umtprd.service \
 "
@@ -41,6 +45,7 @@ do_install() {
     install -D -m 0755 ${S}/umtprd ${D}${bindir}/umtprd
     install -D -m 0755 ${UNPACKDIR}/luneos-mtp-gadget ${D}${bindir}/luneos-mtp-gadget
     install -D -m 0644 ${UNPACKDIR}/umtprd.conf ${D}${sysconfdir}/umtprd/umtprd.conf
+    install -D -m 0644 ${UNPACKDIR}/umtprd-f_mtp.conf ${D}${sysconfdir}/umtprd/umtprd-f_mtp.conf
     install -D -m 0644 ${UNPACKDIR}/umtprd.service ${D}${systemd_system_unitdir}/umtprd.service
 }
 
