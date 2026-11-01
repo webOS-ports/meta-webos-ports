@@ -13,6 +13,12 @@ SRC_URI = "git://github.com/mer-hybris/ofono-binder-plugin.git;branch=master;pro
            file://0001-binder_connman-do-not-read-non-basic-property-varian.patch \
            file://0002-binder_sim-fix-logical-access-and-add-slot-switching.patch \
            file://0100-adapt-to-ofono-2.x-atom-create-signatures.patch \
+           file://0101-binder_voicecall-do-not-poll-calls-during-a-call-con.patch \
+           file://0102-unit-test-when-binder_voicecall-asks-for-the-call-li.patch \
+           file://0103-binder_call_settings-take-the-MTK-RIL-s-getCallWaiti.patch \
+           file://0104-binder-give-supplementary-service-requests-5-minutes.patch \
+           file://0105-binder_call_barring-don-t-keep-asking-a-modem-which-.patch \
+           file://0106-unit-test-the-call-settings-requests.patch \
 "
 
 PV = "1.1.28"

@@ -1,0 +1,155 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] binder: give supplementary service requests 5 minutes
+
+The RIL of the Mindphone (MT6739) runs one supplementary service
+request at a time and queues the rest, for both SIMs. In one log of
+1 Nov, 8 of them took more than the 30 seconds that a request gets by
+default, the slowest 52.8 seconds. The plugin gives up on those: the
+late response is dropped, nothing is logged, and oFono remembers the
+gap, because it caches the settings once CLIR has been read, whatever
+happened to the rest (cs_clir_callback).
+
+Give these requests the 5 minutes they have upstream since 0fe249d
+(BINDER_SS_TIMEOUT_MS). Unlike upstream, don't make them blocking. A
+blocking request stops the client until it's done, and call settings
+and call forwarding share voice_client with call control, so a slow SS
+query would hold up hanging up a call.
+
+setBarringPassword didn't go through a request group, so the request
+outlived the atom and its completion used the freed atom. Waiting for 5
+minutes rather than 30 seconds makes that easier to hit, so give it a
+group, which goes away with the atom.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/binder_call_barring.c    | 9 ++++++++-
+ src/binder_call_forwarding.c | 1 +
+ src/binder_call_settings.c   | 4 ++++
+ src/binder_types.h           | 3 +++
+ 4 files changed, 16 insertions(+), 1 deletion(-)
+
+diff --git a/src/binder_call_barring.c b/src/binder_call_barring.c
+index d6a15cc..c74bbc2 100644
+--- a/src/binder_call_barring.c
++++ b/src/binder_call_barring.c
+@@ -36,6 +36,7 @@ typedef struct binder_call_barring {
+     BinderSimCard* card;
+     RadioClient* network_client;
+     RadioRequestGroup* g;
++    RadioRequestGroup* network_g;
+     RADIO_AIDL_INTERFACE interface_aidl;
+     char* log_prefix;
+     guint register_id;
+@@ -178,6 +179,7 @@ binder_call_barring_query(
+         gbinder_writer_append_string16(&writer,
+             binder_sim_card_app_aid(self->card));       /* appId */
+     }
++    radio_request_set_timeout(req, BINDER_SS_TIMEOUT_MS);
+     radio_request_submit(req);
+     radio_request_unref(req);
+ }
+@@ -263,6 +265,7 @@ binder_call_barring_set(
+         gbinder_writer_append_string16(&writer,
+             binder_sim_card_app_aid(self->card));        /* appId */
+     }
++    radio_request_set_timeout(req, BINDER_SS_TIMEOUT_MS);
+     radio_request_submit(req);
+     radio_request_unref(req);
+ }
+@@ -324,7 +327,7 @@ binder_call_barring_set_passwd(
+         RADIO_NETWORK_REQ_SET_BARRING_PASSWORD :
+         RADIO_REQ_SET_BARRING_PASSWORD;
+ 
+-    RadioRequest* req = radio_request_new(self->network_client,
++    RadioRequest* req = radio_request_new2(self->network_g,
+         code, &writer,
+         binder_call_barring_set_passwd_cb,
+         binder_call_barring_callback_data_free,
+@@ -341,6 +344,7 @@ binder_call_barring_set_passwd(
+         gbinder_writer_append_string16(&writer, new_passwd);   /* newPassword */
+     }
+ 
++    radio_request_set_timeout(req, BINDER_SS_TIMEOUT_MS);
+     radio_request_submit(req);
+     radio_request_unref(req);
+ }
+@@ -374,6 +378,7 @@ binder_call_barring_probe(
+     self->interface_aidl = radio_client_aidl_interface(modem->sim_client);
+     self->log_prefix = binder_dup_prefix(modem->log_prefix);
+     self->network_client = radio_client_ref(modem->network_client);
++    self->network_g = radio_request_group_new(self->network_client);
+     self->register_id = g_idle_add(binder_call_barring_register, self);
+ 
+     DBG_(self, "");
+@@ -395,6 +400,8 @@ binder_call_barring_remove(
+     binder_sim_card_unref(self->card);
+     radio_request_group_cancel(self->g);
+     radio_request_group_unref(self->g);
++    radio_request_group_cancel(self->network_g);
++    radio_request_group_unref(self->network_g);
+     radio_client_unref(self->network_client);
+     g_free(self->log_prefix);
+     g_free(self);
+diff --git a/src/binder_call_forwarding.c b/src/binder_call_forwarding.c
+index 604e30c..db99673 100644
+--- a/src/binder_call_forwarding.c
++++ b/src/binder_call_forwarding.c
+@@ -144,6 +144,7 @@ binder_call_forwarding_call(
+             gbinder_writer_bytes_written(&writer) - initial_size);
+     }
+ 
++    radio_request_set_timeout(req, BINDER_SS_TIMEOUT_MS);
+     radio_request_submit(req);
+     radio_request_unref(req);
+ }
+diff --git a/src/binder_call_settings.c b/src/binder_call_settings.c
+index 0c73bcf..09b09f8 100644
+--- a/src/binder_call_settings.c
++++ b/src/binder_call_settings.c
+@@ -90,6 +90,7 @@ binder_call_settings_call(
+         binder_call_settings_callback_data_free,
+         binder_call_settings_callback_data_new(self, cb, data));
+ 
++    radio_request_set_timeout(req, BINDER_SS_TIMEOUT_MS);
+     radio_request_submit(req);
+     radio_request_unref(req);
+ }
+@@ -147,6 +148,7 @@ binder_call_settings_cw_set(
+         binder_call_settings_callback_data_free,
+         binder_call_settings_callback_data_new(self, BINDER_CB(cb), data));
+ 
++    radio_request_set_timeout(req, BINDER_SS_TIMEOUT_MS);
+     gbinder_writer_append_bool(&writer, mode);  /* enable */
+     gbinder_writer_append_int32(&writer, cls);  /* serviceClass */
+ 
+@@ -262,6 +264,7 @@ void binder_call_settings_cw_query(
+         binder_call_settings_callback_data_free,
+         binder_call_settings_callback_data_new(self, BINDER_CB(cb), data));
+ 
++    radio_request_set_timeout(req, BINDER_SS_TIMEOUT_MS);
+     gbinder_writer_append_int32(&writer, cls);  /* serviceClass */
+ 
+     radio_request_submit(req);
+@@ -424,6 +427,7 @@ binder_call_settings_clir_set(
+         binder_call_settings_callback_data_free,
+         binder_call_settings_callback_data_new(self, BINDER_CB(cb), data));
+ 
++    radio_request_set_timeout(req, BINDER_SS_TIMEOUT_MS);
+     DBG_(self, "%d", mode);
+     gbinder_writer_append_int32(&writer, mode);  /* status */
+ 
+diff --git a/src/binder_types.h b/src/binder_types.h
+index e7756fb..31e9d48 100644
+--- a/src/binder_types.h
++++ b/src/binder_types.h
+@@ -86,6 +86,9 @@ typedef struct binder_slot_config {
+ #define BINDER_RETRY_SECS (2)
+ #define BINDER_RETRY_MS   (BINDER_RETRY_SECS * 1000)
+ 
++/* Supplementary service requests can queue for a long time in the RIL */
++#define BINDER_SS_TIMEOUT_MS (5*60*1000)
++
+ typedef void (*BinderCallback)(void);
+ #define BINDER_CB(f) ((BinderCallback)(f))
+ 

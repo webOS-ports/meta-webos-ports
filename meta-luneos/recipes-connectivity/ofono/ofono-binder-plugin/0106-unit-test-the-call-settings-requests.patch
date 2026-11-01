@@ -1,0 +1,1342 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] unit: test the call settings requests
+
+Run the real binder_call_settings.c, binder_call_forwarding.c and
+binder_call_barring.c against an imitation of the radio service.
+
+getCallWaiting is answered the way the MTK RIL does it and the way the
+interface says, with errors, with a short response, with something
+else altogether and over AIDL. Every supplementary service request is
+checked for its timeout and for not being blocking. For barring, the
+tests go through the sequence of queries of oFono's GetProperties: the
+modem refuses, one request gets to the radio and no more after that
+until the SIM, the radio state or a set changes that. What must not be
+taken for a refusal (timeout, failed transaction, other errors, a
+modem which has answered) leads to all the queries being sent again.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ unit/Makefile                                |    1 +
+ unit/unit_call_settings/Makefile             |    6 +
+ unit/unit_call_settings/unit_call_settings.c | 1286 ++++++++++++++++++
+ 3 files changed, 1293 insertions(+)
+ create mode 100644 unit/unit_call_settings/Makefile
+ create mode 100644 unit/unit_call_settings/unit_call_settings.c
+
+diff --git a/unit/Makefile b/unit/Makefile
+index ae1348d..49eae48 100644
+--- a/unit/Makefile
++++ b/unit/Makefile
+@@ -5,6 +5,7 @@
+ all:
+ %:
+ 	@$(MAKE) -C unit_base $*
++	@$(MAKE) -C unit_call_settings $*
+ 	@$(MAKE) -C unit_ext_ims $*
+ 	@$(MAKE) -C unit_ext_plugin $*
+ 	@$(MAKE) -C unit_ext_slot $*
+diff --git a/unit/unit_call_settings/Makefile b/unit/unit_call_settings/Makefile
+new file mode 100644
+index 0000000..ee04940
+--- /dev/null
++++ b/unit/unit_call_settings/Makefile
+@@ -0,0 +1,6 @@
++# -*- Mode: makefile-gmake -*-
++
++EXE = unit_call_settings
++PKGS += ofono
++
++include ../common/Makefile
+diff --git a/unit/unit_call_settings/unit_call_settings.c b/unit/unit_call_settings/unit_call_settings.c
+new file mode 100644
+index 0000000..c6e48e5
+--- /dev/null
++++ b/unit/unit_call_settings/unit_call_settings.c
+@@ -0,0 +1,1286 @@
++/*
++ *  oFono - Open Source Telephony - binder based adaptation
++ *
++ *  Copyright (C) 2026 Herman van Hazendonk <github.com@herrie.org>
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU General Public License version 2 as
++ *  published by the Free Software Foundation.
++ *
++ *  This program is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ *  GNU General Public License for more details.
++ */
++
++/*
++ * Runs the real binder_call_settings.c, binder_call_forwarding.c and
++ * binder_call_barring.c against a small imitation of the radio service.
++ * There's no binder here, no ofonod and no modem.
++ */
++
++#include "binder_call_settings.c"
++#include "binder_call_forwarding.c"
++#include "binder_call_barring.c"
++
++#include <gutil_log.h>
++
++GLOG_MODULE_DEFINE("unit_call_settings");
++
++#define TEST_MAX_WRITTEN 8
++#define TEST_RIL_DEFAULT_TIMEOUT_MS (30*1000)
++
++/* cb_locks[] in oFono's call-barring.c, in the order it queries them */
++static const char* const test_locks[] = { "AO", "OI", "OX", "AI", "IR" };
++
++/*==========================================================================*
++ * The imitation of the radio service
++ *==========================================================================*/
++
++struct radio_request {
++    int refcount;
++    guint32 code;
++    RadioRequestGroup* group;
++    RadioRequestCompleteFunc complete;
++    GDestroyNotify destroy;
++    gpointer user_data;
++    guint timeout_ms;
++    gboolean blocking;
++};
++
++struct radio_client {
++    int refcount;
++    RADIO_AIDL_INTERFACE aidl;
++    RadioRequestGroup group;
++};
++
++typedef struct test_context {
++    const struct ofono_call_settings_driver* cs_driver;
++    const struct ofono_call_forwarding_driver* cf_driver;
++    const struct ofono_call_barring_driver* cb_driver;
++    gpointer cs_data;
++    gpointer cf_data;
++    gpointer cb_data;
++    struct ofono_modem* ofono;
++    BinderModem modem;
++    RadioClient voice;
++    RadioClient sim;
++    RadioClient network;
++    BinderSimCard card;
++    BinderRadio radio;
++    BinderSimCardFunc card_app_changed;
++    gpointer card_app_changed_data;
++    BinderRadioPropertyFunc radio_state_changed;
++    gpointer radio_state_changed_data;
++    gulong radio_handlers_added;
++    gulong card_handlers_added;
++    GSList* pending;     /* RadioRequest*, oldest first */
++    GSList* allocs;
++
++    /* What the last request was given */
++    gint32 written[TEST_MAX_WRITTEN];
++    guint written_count;
++
++    /* What the response carries */
++    gint32 reply[2];
++    guint reply_count;
++    guint reply_read;
++
++    /* What happened */
++    guint requests;      /* Requests that reached the radio */
++    guint timeout_ms;    /* Of the last request */
++    gboolean blocking;   /* Of the last request */
++    guint cb_ok;
++    guint cb_failed;
++    int cb_value;
++    guint errors_logged;
++
++    /* The GetProperties in progress, if any */
++    guint lock;
++} TestContext;
++
++static TestContext test;
++
++static
++void
++test_request_unref(
++    RadioRequest* req)
++{
++    if (!--req->refcount) {
++        if (req->destroy) {
++            req->destroy(req->user_data);
++        }
++        g_free(req);
++    }
++}
++
++RadioRequest*
++radio_request_new2(
++    RadioRequestGroup* group,
++    RADIO_REQ code,
++    GBinderWriter* args,
++    RadioRequestCompleteFunc complete,
++    GDestroyNotify destroy,
++    void* user_data)
++{
++    RadioRequest* req = g_new0(RadioRequest, 1);
++
++    req->refcount = 1;
++    req->code = code;
++    req->group = group;
++    req->complete = complete;
++    req->destroy = destroy;
++    req->user_data = user_data;
++    test.written_count = 0;
++    return req;
++}
++
++gboolean
++radio_request_submit(
++    RadioRequest* req)
++{
++    test.requests++;
++    test.timeout_ms = req->timeout_ms;
++    test.blocking = req->blocking;
++    req->refcount++;
++    test.pending = g_slist_append(test.pending, req);
++    return TRUE;
++}
++
++void
++radio_request_unref(
++    RadioRequest* req)
++{
++    if (req) {
++        test_request_unref(req);
++    }
++}
++
++void
++radio_request_set_blocking(
++    RadioRequest* req,
++    gboolean blocking)
++{
++    req->blocking = blocking;
++}
++
++void
++radio_request_set_timeout(
++    RadioRequest* req,
++    guint ms)
++{
++    req->timeout_ms = ms;
++}
++
++RadioRequestGroup*
++radio_request_group_new(
++    RadioClient* client)
++{
++    client->group.client = client;
++    return &client->group;
++}
++
++void
++radio_request_group_unref(
++    RadioRequestGroup* group)
++{
++}
++
++void
++radio_request_group_cancel(
++    RadioRequestGroup* group)
++{
++    GSList* l = test.pending;
++
++    while (l) {
++        GSList* next = l->next;
++        RadioRequest* req = l->data;
++
++        if (req->group == group) {
++            test.pending = g_slist_delete_link(test.pending, l);
++            test_request_unref(req);
++        }
++        l = next;
++    }
++}
++
++RadioClient*
++radio_client_ref(
++    RadioClient* client)
++{
++    client->refcount++;
++    return client;
++}
++
++void
++radio_client_unref(
++    RadioClient* client)
++{
++    client->refcount--;
++}
++
++RADIO_AIDL_INTERFACE
++radio_client_aidl_interface(
++    RadioClient* client)
++{
++    return client->aidl;
++}
++
++/*==========================================================================*
++ * gbinder and the rest of the plugin
++ *==========================================================================*/
++
++void
++gbinder_reader_copy(
++    GBinderReader* dest,
++    const GBinderReader* src)
++{
++    test.reply_read = 0;
++}
++
++gboolean
++gbinder_reader_read_int32(
++    GBinderReader* reader,
++    gint32* value)
++{
++    if (test.reply_read < test.reply_count) {
++        const gint32 v = test.reply[test.reply_read++];
++
++        if (value) {
++            *value = v;
++        }
++        return TRUE;
++    }
++    return FALSE;
++}
++
++/* What the real one does: a byte, padded to 4 */
++gboolean
++gbinder_reader_read_bool(
++    GBinderReader* reader,
++    gboolean* value)
++{
++    gint32 v;
++
++    if (gbinder_reader_read_int32(reader, &v)) {
++        *value = ((guint8)v) != 0;
++        return TRUE;
++    }
++    return FALSE;
++}
++
++gboolean
++gbinder_reader_read_uint32(
++    GBinderReader* reader,
++    guint32* value)
++{
++    return gbinder_reader_read_int32(reader, (gint32*)value);
++}
++
++char*
++gbinder_reader_read_string16(
++    GBinderReader* reader)
++{
++    return NULL;
++}
++
++const void*
++gbinder_reader_read_hidl_vec1(
++    GBinderReader* reader,
++    gsize* count,
++    guint expected_elemsize)
++{
++    *count = 0;
++    return NULL;
++}
++
++void
++gbinder_writer_append_int32(
++    GBinderWriter* writer,
++    guint32 value)
++{
++    g_assert_cmpuint(test.written_count, < , TEST_MAX_WRITTEN);
++    test.written[test.written_count++] = value;
++}
++
++void
++gbinder_writer_append_bool(
++    GBinderWriter* writer,
++    gboolean value)
++{
++    gbinder_writer_append_int32(writer, value);
++}
++
++void
++gbinder_writer_append_string16(
++    GBinderWriter* writer,
++    const char* utf8)
++{
++}
++
++gsize
++gbinder_writer_bytes_written(
++    GBinderWriter* writer)
++{
++    return 0;
++}
++
++void
++gbinder_writer_overwrite_int32(
++    GBinderWriter* writer,
++    gsize offset,
++    gint32 value)
++{
++}
++
++void*
++gbinder_writer_malloc0(
++    GBinderWriter* writer,
++    gsize size)
++{
++    void* ptr = g_malloc0(size);
++
++    test.allocs = g_slist_append(test.allocs, ptr);
++    return ptr;
++}
++
++guint
++gbinder_writer_append_buffer_object(
++    GBinderWriter* writer,
++    const void* buf,
++    gsize len)
++{
++    return 0;
++}
++
++guint
++gbinder_writer_append_buffer_object_with_parent(
++    GBinderWriter* writer,
++    const void* buf,
++    gsize len,
++    const GBinderParent* parent)
++{
++    return 0;
++}
++
++void
++gbinder_writer_append_hidl_string_copy(
++    GBinderWriter* writer,
++    const char* str)
++{
++}
++
++void
++binder_copy_hidl_string(
++    GBinderWriter* writer,
++    GBinderHidlString* dest,
++    const char* src)
++{
++}
++
++void
++binder_append_hidl_string_with_parent(
++    GBinderWriter* writer,
++    const GBinderHidlString* str,
++    guint32 index,
++    guint32 offset)
++{
++}
++
++BinderSimCard*
++binder_sim_card_ref(
++    BinderSimCard* card)
++{
++    return card;
++}
++
++void
++binder_sim_card_unref(
++    BinderSimCard* card)
++{
++}
++
++gulong
++binder_sim_card_add_app_changed_handler(
++    BinderSimCard* card,
++    BinderSimCardFunc fn,
++    void* user_data)
++{
++    test.card_app_changed = fn;
++    test.card_app_changed_data = user_data;
++    return ++test.card_handlers_added;
++}
++
++void
++binder_sim_card_remove_handler(
++    BinderSimCard* card,
++    gulong id)
++{
++    g_assert_cmpuint(id, == , test.card_handlers_added);
++    test.card_app_changed = NULL;
++}
++
++BinderRadio*
++binder_radio_ref(
++    BinderRadio* radio)
++{
++    return radio;
++}
++
++void
++binder_radio_unref(
++    BinderRadio* radio)
++{
++}
++
++gulong
++binder_radio_add_property_handler(
++    BinderRadio* radio,
++    BINDER_RADIO_PROPERTY property,
++    BinderRadioPropertyFunc fn,
++    void* user_data)
++{
++    g_assert_cmpint(property, == , BINDER_RADIO_PROPERTY_STATE);
++    test.radio_state_changed = fn;
++    test.radio_state_changed_data = user_data;
++    return ++test.radio_handlers_added;
++}
++
++void
++binder_radio_remove_handler(
++    BinderRadio* radio,
++    gulong id)
++{
++    g_assert_cmpuint(id, == , test.radio_handlers_added);
++    test.radio_state_changed = NULL;
++}
++
++/*==========================================================================*
++ * oFono
++ *==========================================================================*/
++
++void
++ofono_debug(
++    const char* format,
++    ...)
++{
++}
++
++void
++ofono_info(
++    const char* format,
++    ...)
++{
++}
++
++void
++ofono_warn(
++    const char* format,
++    ...)
++{
++    test.errors_logged++;
++}
++
++void
++ofono_error(
++    const char* format,
++    ...)
++{
++    test.errors_logged++;
++}
++
++void*
++ofono_modem_get_data(
++    struct ofono_modem* modem)
++{
++    return &test.modem;
++}
++
++int
++ofono_call_settings_driver_register(
++    const struct ofono_call_settings_driver* driver)
++{
++    test.cs_driver = driver;
++    return 0;
++}
++
++void
++ofono_call_settings_driver_unregister(
++    const struct ofono_call_settings_driver* driver)
++{
++    test.cs_driver = NULL;
++}
++
++void
++ofono_call_settings_register(
++    struct ofono_call_settings* s)
++{
++}
++
++void
++ofono_call_settings_set_data(
++    struct ofono_call_settings* s,
++    void* data)
++{
++    test.cs_data = data;
++}
++
++void*
++ofono_call_settings_get_data(
++    struct ofono_call_settings* s)
++{
++    return test.cs_data;
++}
++
++int
++ofono_call_forwarding_driver_register(
++    const struct ofono_call_forwarding_driver* driver)
++{
++    test.cf_driver = driver;
++    return 0;
++}
++
++void
++ofono_call_forwarding_driver_unregister(
++    const struct ofono_call_forwarding_driver* driver)
++{
++    test.cf_driver = NULL;
++}
++
++void
++ofono_call_forwarding_register(
++    struct ofono_call_forwarding* f)
++{
++}
++
++void
++ofono_call_forwarding_set_data(
++    struct ofono_call_forwarding* f,
++    void* data)
++{
++    test.cf_data = data;
++}
++
++void*
++ofono_call_forwarding_get_data(
++    struct ofono_call_forwarding* f)
++{
++    return test.cf_data;
++}
++
++int
++ofono_call_barring_driver_register(
++    const struct ofono_call_barring_driver* driver)
++{
++    test.cb_driver = driver;
++    return 0;
++}
++
++void
++ofono_call_barring_driver_unregister(
++    const struct ofono_call_barring_driver* driver)
++{
++    test.cb_driver = NULL;
++}
++
++void
++ofono_call_barring_register(
++    struct ofono_call_barring* b)
++{
++}
++
++void
++ofono_call_barring_set_data(
++    struct ofono_call_barring* b,
++    void* data)
++{
++    test.cb_data = data;
++}
++
++void*
++ofono_call_barring_get_data(
++    struct ofono_call_barring* b)
++{
++    return test.cb_data;
++}
++
++/*==========================================================================*
++ * Common test steps
++ *==========================================================================*/
++
++#define TEST_S ((struct ofono_call_settings*) &test)
++#define TEST_F ((struct ofono_call_forwarding*) &test)
++#define TEST_B ((struct ofono_call_barring*) &test)
++
++static
++void
++test_start(
++    RADIO_AIDL_INTERFACE voice_aidl,
++    RADIO_AIDL_INTERFACE sim_aidl)
++{
++    memset(&test, 0, sizeof(test));
++    test.ofono = (struct ofono_modem*) &test;
++    test.voice.aidl = voice_aidl;
++    test.sim.aidl = sim_aidl;
++    test.modem.voice_client = &test.voice;
++    test.modem.sim_client = &test.sim;
++    test.modem.network_client = &test.network;
++    test.modem.sim_card = &test.card;
++    test.modem.radio = &test.radio;
++    test.modem.log_prefix = "";
++    binder_call_settings_init();
++    binder_call_forwarding_init();
++    binder_call_barring_init();
++    g_assert_cmpint(test.cs_driver->probe(TEST_S, 0, test.ofono), == , 0);
++    g_assert_cmpint(test.cf_driver->probe(TEST_F, 0, test.ofono), == , 0);
++    g_assert_cmpint(test.cb_driver->probe(TEST_B, 0, test.ofono), == , 0);
++    while (g_main_context_iteration(NULL, FALSE));
++}
++
++static
++void
++test_start_hidl(
++    void)
++{
++    test_start(RADIO_AIDL_INTERFACE_NONE, RADIO_AIDL_INTERFACE_NONE);
++}
++
++static
++void
++test_finish(
++    void)
++{
++    test.cb_driver->remove(TEST_B);
++    test.cf_driver->remove(TEST_F);
++    test.cs_driver->remove(TEST_S);
++
++    /* Whatever the test was doing, nothing is left behind */
++    g_assert(!test.pending);
++    g_assert(!test.cs_data);
++    g_assert(!test.cf_data);
++    g_assert(!test.cb_data);
++    g_assert(!test.card_app_changed);
++    g_assert(!test.radio_state_changed);
++    g_assert_cmpint(test.network.refcount, == , 0);
++    binder_call_barring_cleanup();
++    binder_call_forwarding_cleanup();
++    binder_call_settings_cleanup();
++    g_slist_free_full(test.allocs, g_free);
++}
++
++static
++void
++test_status_cb(
++    const struct ofono_error* error,
++    int status,
++    void* data)
++{
++    test.cb_value = status;
++    if (error->type == OFONO_ERROR_TYPE_NO_ERROR) {
++        test.cb_ok++;
++    } else {
++        test.cb_failed++;
++    }
++}
++
++static
++void
++test_clir_cb(
++    const struct ofono_error* error,
++    int local,
++    int remote,
++    void* data)
++{
++    test_status_cb(error, local, data);
++}
++
++static
++void
++test_set_cb(
++    const struct ofono_error* error,
++    void* data)
++{
++    test_status_cb(error, 0, data);
++}
++
++static
++void
++test_cf_query_cb(
++    const struct ofono_error* error,
++    int total,
++    const struct ofono_call_forwarding_condition* list,
++    void* data)
++{
++    test_status_cb(error, total, data);
++}
++
++/* Completes the oldest pending request */
++static
++void
++test_respond(
++    RADIO_TX_STATUS status,
++    guint32 resp,
++    RADIO_ERROR error,
++    guint count,
++    gint32 v1,
++    gint32 v2)
++{
++    RadioRequest* req;
++
++    g_assert(test.pending);
++    req = test.pending->data;
++    test.pending = g_slist_remove(test.pending, req);
++    test.reply[0] = v1;
++    test.reply[1] = v2;
++    test.reply_count = count;
++    req->complete(req, status, (RADIO_RESP) resp, error, NULL, req->user_data);
++    test_request_unref(req);
++}
++
++/*
++ * What get_query_lock_callback() in oFono's call-barring.c does: a query that
++ * failed is forgotten about and the next lock is queried, from the callback.
++ */
++static
++void
++test_barring_next_lock(
++    void);
++
++static
++void
++test_barring_lock_cb(
++    const struct ofono_error* error,
++    int status,
++    void* data)
++{
++    test_status_cb(error, status, data);
++    if (test.lock + 1 < G_N_ELEMENTS(test_locks)) {
++        test.lock++;
++        test_barring_next_lock();
++    }
++}
++
++static
++void
++test_barring_next_lock(
++    void)
++{
++    test.cb_driver->query(TEST_B, test_locks[test.lock], BEARER_CLASS_DEFAULT,
++        test_barring_lock_cb, &test);
++}
++
++/* The GetProperties method call, as far as the driver can tell */
++static
++void
++test_barring_get_properties(
++    void)
++{
++    test.lock = 0;
++    test.cb_ok = test.cb_failed = 0;
++    test.requests = 0;
++    test_barring_next_lock();
++}
++
++static
++void
++test_barring_answer(
++    RADIO_TX_STATUS status,
++    guint32 resp,
++    RADIO_ERROR error)
++{
++    test_respond(status, resp, error, 1, 0, 0);
++}
++
++static
++void
++test_barring_refused(
++    void)
++{
++    test_barring_answer(RADIO_TX_STATUS_OK,
++        RADIO_RESP_GET_FACILITY_LOCK_FOR_APP,
++        RADIO_ERROR_REQUEST_NOT_SUPPORTED);
++}
++
++/* The modem refuses everything: one request, and all five locks fail */
++static
++void
++test_barring_make_not_supported(
++    void)
++{
++    test_barring_get_properties();
++    g_assert_cmpuint(test.requests, == , 1);
++    test_barring_refused();
++    g_assert_cmpuint(test.requests, == , 1);
++    g_assert_cmpuint(test.cb_failed, == , G_N_ELEMENTS(test_locks));
++    g_assert(!test.pending);
++}
++
++/* A pass in which the radio isn't asked */
++static
++void
++test_barring_assert_not_asked(
++    void)
++{
++    test_barring_get_properties();
++    g_assert_cmpuint(test.requests, == , 0);
++    g_assert_cmpuint(test.cb_failed, == , G_N_ELEMENTS(test_locks));
++    g_assert_cmpuint(test.cb_ok, == , 0);
++    g_assert_cmpint(test.lock, == , G_N_ELEMENTS(test_locks) - 1);
++}
++
++/* The radio is asked again, the modem answers, all the way through */
++static
++void
++test_barring_assert_asked(
++    void)
++{
++    guint i;
++
++    test_barring_get_properties();
++    for (i = 0; i < G_N_ELEMENTS(test_locks); i++) {
++        g_assert_cmpuint(test.requests, == , i + 1);
++        test_barring_answer(RADIO_TX_STATUS_OK,
++            RADIO_RESP_GET_FACILITY_LOCK_FOR_APP, RADIO_ERROR_NONE);
++    }
++    g_assert_cmpuint(test.cb_ok, == , G_N_ELEMENTS(test_locks));
++    g_assert_cmpuint(test.cb_failed, == , 0);
++}
++
++/*==========================================================================*
++ * Call waiting
++ *==========================================================================*/
++
++typedef struct test_cw_case {
++    const char* name;
++    RADIO_RESP resp;
++    RADIO_ERROR error;
++    guint count;
++    gint32 enable;
++    gint32 cls;
++    int expect_failed;
++    int expect_value;
++} TestCwCase;
++
++static const TestCwCase test_cw_cases[] = {
++    /* The MTK RIL, in the two forms seen on the Mindphone */
++    { "mtk_enabled", RADIO_RESP_GET_CLIR, RADIO_ERROR_NONE, 2, 1, 1, 0, 1 },
++    { "mtk_disabled", RADIO_RESP_GET_CLIR, RADIO_ERROR_NONE, 2, 0, -1, 0, 0 },
++
++    /* As the interface says */
++    { "enabled", RADIO_RESP_GET_CALL_WAITING, RADIO_ERROR_NONE, 2, 1, 1, 0, 1 },
++    { "disabled", RADIO_RESP_GET_CALL_WAITING, RADIO_ERROR_NONE, 2, 0, -1,
++      0, 0 },
++
++    /* Errors stay errors, whatever method they come through */
++    { "mtk_error", RADIO_RESP_GET_CLIR, RADIO_ERROR_GENERIC_FAILURE, 2, 1, 1,
++      1, -1 },
++    { "error", RADIO_RESP_GET_CALL_WAITING, RADIO_ERROR_GENERIC_FAILURE, 2,
++      1, 1, 1, -1 },
++    { "mtk_short", RADIO_RESP_GET_CLIR, RADIO_ERROR_NONE, 1, 1, 0, 1, -1 },
++
++    /* Nothing else is taken for an answer */
++    { "other_resp", RADIO_RESP_GET_CLIP, RADIO_ERROR_NONE, 2, 1, 1, 1, -1 }
++};
++
++static
++void
++test_cw(
++    gconstpointer data)
++{
++    const TestCwCase* c = data;
++
++    test_start_hidl();
++    test.cs_driver->cw_query(TEST_S, BEARER_CLASS_VOICE, test_status_cb, &test);
++    g_assert_cmpuint(test.requests, == , 1);
++    test_respond(RADIO_TX_STATUS_OK, c->resp, c->error, c->count,
++        c->enable, c->cls);
++    g_assert_cmpuint(test.cb_failed, == , c->expect_failed);
++    g_assert_cmpuint(test.cb_ok, == , !c->expect_failed);
++    g_assert_cmpint(test.cb_value, == , c->expect_value);
++    test_finish();
++}
++
++static
++void
++test_cw_tx(
++    gconstpointer data)
++{
++    test_start_hidl();
++    test.cs_driver->cw_query(TEST_S, BEARER_CLASS_VOICE, test_status_cb, &test);
++    test_respond(GPOINTER_TO_INT(data), RADIO_RESP_GET_CLIR, RADIO_ERROR_NONE,
++        2, 1, 1);
++    g_assert_cmpuint(test.cb_failed, == , 1);
++    g_assert_cmpint(test.cb_value, == , -1);
++    test_finish();
++}
++
++static
++void
++test_cw_aidl(
++    void)
++{
++    test_start(RADIO_VOICE_INTERFACE, RADIO_AIDL_INTERFACE_NONE);
++    test.cs_driver->cw_query(TEST_S, BEARER_CLASS_VOICE, test_status_cb, &test);
++    test_respond(RADIO_TX_STATUS_OK, RADIO_VOICE_RESP_GET_CALL_WAITING,
++        RADIO_ERROR_NONE, 2, 1, 1);
++    g_assert_cmpuint(test.cb_ok, == , 1);
++    g_assert_cmpint(test.cb_value, == , 1);
++
++    /* The workaround is for the HIDL response code */
++    test.cs_driver->cw_query(TEST_S, BEARER_CLASS_VOICE, test_status_cb, &test);
++    test_respond(RADIO_TX_STATUS_OK, RADIO_RESP_GET_CLIR, RADIO_ERROR_NONE,
++        2, 1, 1);
++    g_assert_cmpuint(test.cb_failed, == , 1);
++    test_finish();
++}
++
++/* The getClir check isn't relaxed along with the getCallWaiting one */
++static
++void
++test_clir_resp(
++    void)
++{
++    test_start_hidl();
++    test.cs_driver->clir_query(TEST_S, test_clir_cb, &test);
++    test_respond(RADIO_TX_STATUS_OK, RADIO_RESP_GET_CLIR, RADIO_ERROR_NONE,
++        2, 1, 2);
++    g_assert_cmpuint(test.cb_ok, == , 1);
++    g_assert_cmpint(test.cb_value, == , 1);
++    test.cs_driver->clir_query(TEST_S, test_clir_cb, &test);
++    test_respond(RADIO_TX_STATUS_OK, RADIO_RESP_GET_CALL_WAITING,
++        RADIO_ERROR_NONE, 2, 1, 2);
++    g_assert_cmpuint(test.cb_failed, == , 1);
++    test_finish();
++}
++
++/*==========================================================================*
++ * Timeouts
++ *==========================================================================*/
++
++static void test_op_clip_query(void)
++    { test.cs_driver->clip_query(TEST_S, test_status_cb, &test); }
++static void test_op_clir_query(void)
++    { test.cs_driver->clir_query(TEST_S, test_clir_cb, &test); }
++static void test_op_clir_set(void)
++    { test.cs_driver->clir_set(TEST_S, 1, test_set_cb, &test); }
++static void test_op_cw_query(void)
++    { test.cs_driver->cw_query(TEST_S, 1, test_status_cb, &test); }
++static void test_op_cw_set(void)
++    { test.cs_driver->cw_set(TEST_S, 1, 1, test_set_cb, &test); }
++static void test_op_cf_query(void)
++    { test.cf_driver->query(TEST_F, 0, 1, test_cf_query_cb, &test); }
++static void test_op_cf_activate(void)
++    { test.cf_driver->activation(TEST_F, 0, 1, test_set_cb, &test); }
++static void test_op_cf_deactivate(void)
++    { test.cf_driver->deactivation(TEST_F, 0, 1, test_set_cb, &test); }
++static void test_op_cf_erase(void)
++    { test.cf_driver->erasure(TEST_F, 0, 1, test_set_cb, &test); }
++static void test_op_cf_register(void)
++{
++    static const struct ofono_phone_number number = { "0", 129 };
++
++    test.cf_driver->registration(TEST_F, 0, 1, &number, 20, test_set_cb, &test);
++}
++static void test_op_cb_query(void)
++    { test.cb_driver->query(TEST_B, "AO", 1, test_status_cb, &test); }
++static void test_op_cb_set(void)
++    { test.cb_driver->set(TEST_B, "AO", 1, "0000", 1, test_set_cb, &test); }
++static void test_op_cb_set_passwd(void)
++    { test.cb_driver->set_passwd(TEST_B, "AB", "0", "1", test_set_cb, &test); }
++
++static const struct test_op {
++    const char* name;
++    void (*op)(void);
++} test_ops[] = {
++    { "clip_query", test_op_clip_query },
++    { "clir_query", test_op_clir_query },
++    { "clir_set", test_op_clir_set },
++    { "cw_query", test_op_cw_query },
++    { "cw_set", test_op_cw_set },
++    { "cf_query", test_op_cf_query },
++    { "cf_activate", test_op_cf_activate },
++    { "cf_deactivate", test_op_cf_deactivate },
++    { "cf_erase", test_op_cf_erase },
++    { "cf_register", test_op_cf_register },
++    { "cb_query", test_op_cb_query },
++    { "cb_set", test_op_cb_set },
++    { "cb_set_passwd", test_op_cb_set_passwd }
++};
++
++/*
++ * These sit in the SS queue of the RIL, which both SIMs share. 52.8 s has
++ * been seen. Blocking would hold back call control, which uses voice_client.
++ * Whatever is left pending goes away with the atoms in test_finish().
++ */
++static
++void
++test_timeout(
++    gconstpointer data)
++{
++    const struct test_op* t = data;
++
++    test_start_hidl();
++    t->op();
++    g_assert_cmpuint(test.requests, == , 1);
++    g_assert_cmpuint(test.timeout_ms, == , 5*60*1000);
++    g_assert_cmpuint(test.timeout_ms, > , TEST_RIL_DEFAULT_TIMEOUT_MS);
++    g_assert(!test.blocking);
++    test_finish();
++}
++
++/*==========================================================================*
++ * Call barring
++ *==========================================================================*/
++
++static
++void
++test_cb_not_supported(
++    void)
++{
++    guint pass;
++
++    test_start_hidl();
++    test_barring_make_not_supported();
++    for (pass = 0; pass < 3; pass++) {
++        test_barring_assert_not_asked();
++    }
++
++    /* The journal gets one line, not a line per query */
++    g_assert_cmpuint(test.errors_logged, == , 1);
++    test_finish();
++}
++
++/* Any of these says nothing about what the modem supports */
++static
++void
++test_cb_not_remembered(
++    gconstpointer data)
++{
++    const RADIO_TX_STATUS tx = ((const gint*)data)[0];
++    const RADIO_RESP resp = ((const gint*)data)[1];
++    const RADIO_ERROR err = ((const gint*)data)[2];
++    guint i;
++
++    test_start_hidl();
++    test_barring_get_properties();
++    for (i = 0; i < G_N_ELEMENTS(test_locks); i++) {
++        g_assert_cmpuint(test.requests, == , i + 1);
++        test_barring_answer(tx, resp, err);
++    }
++    g_assert_cmpuint(test.cb_failed, == , G_N_ELEMENTS(test_locks));
++    test_barring_assert_asked();
++    test_finish();
++}
++
++static const gint test_cb_timeout[] = {
++    RADIO_TX_STATUS_TIMEOUT, RADIO_RESP_GET_FACILITY_LOCK_FOR_APP,
++    RADIO_ERROR_REQUEST_NOT_SUPPORTED
++};
++static const gint test_cb_tx_failed[] = {
++    RADIO_TX_STATUS_FAILED, RADIO_RESP_GET_FACILITY_LOCK_FOR_APP,
++    RADIO_ERROR_REQUEST_NOT_SUPPORTED
++};
++static const gint test_cb_error[] = {
++    RADIO_TX_STATUS_OK, RADIO_RESP_GET_FACILITY_LOCK_FOR_APP,
++    RADIO_ERROR_GENERIC_FAILURE
++};
++static const gint test_cb_wrong_resp[] = {
++    RADIO_TX_STATUS_OK, RADIO_RESP_GET_CLIR, RADIO_ERROR_REQUEST_NOT_SUPPORTED
++};
++
++/* Some facilities work and some don't, so the service isn't "not supported" */
++static
++void
++test_cb_answered_first(
++    void)
++{
++    guint i;
++
++    test_start_hidl();
++    test_barring_get_properties();
++    test_barring_answer(RADIO_TX_STATUS_OK,
++        RADIO_RESP_GET_FACILITY_LOCK_FOR_APP, RADIO_ERROR_NONE);
++    for (i = 1; i < G_N_ELEMENTS(test_locks); i++) {
++        test_barring_refused();
++    }
++    g_assert_cmpuint(test.requests, == , G_N_ELEMENTS(test_locks));
++    test_barring_assert_asked();
++    test_finish();
++}
++
++static
++void
++test_cb_sim_changed(
++    void)
++{
++    test_start_hidl();
++    test_barring_make_not_supported();
++    test.card_app_changed(&test.card, test.card_app_changed_data);
++    test_barring_assert_asked();
++
++    /* A refusal after the change doesn't remember what the old SIM did */
++    test.card_app_changed(&test.card, test.card_app_changed_data);
++    test_barring_make_not_supported();
++    test_finish();
++}
++
++static
++void
++test_cb_radio_state_changed(
++    void)
++{
++    test_start_hidl();
++    test_barring_make_not_supported();
++    test.radio_state_changed(&test.radio, BINDER_RADIO_PROPERTY_STATE,
++        test.radio_state_changed_data);
++    test_barring_assert_asked();
++    test_finish();
++}
++
++/* A set that worked is read back, and that must reach the modem */
++static
++void
++test_cb_set_done(
++    void)
++{
++    test_start_hidl();
++    test_barring_make_not_supported();
++    test.cb_driver->set(TEST_B, "AO", 1, "0000", BEARER_CLASS_VOICE,
++        test_set_cb, &test);
++    g_assert(test.pending);
++    test_respond(RADIO_TX_STATUS_OK, RADIO_RESP_SET_FACILITY_LOCK_FOR_APP,
++        RADIO_ERROR_NONE, 1, -1, 0);
++    test_barring_assert_asked();
++    test_finish();
++}
++
++/* A set is always sent, but one that fails changes nothing */
++static
++void
++test_cb_set_failed(
++    void)
++{
++    test_start_hidl();
++    test_barring_make_not_supported();
++    test.cb_driver->set(TEST_B, "AO", 1, "0000", BEARER_CLASS_VOICE,
++        test_set_cb, &test);
++    g_assert(test.pending);
++    test_respond(RADIO_TX_STATUS_OK, RADIO_RESP_SET_FACILITY_LOCK_FOR_APP,
++        RADIO_ERROR_REQUEST_NOT_SUPPORTED, 1, -1, 0);
++    test_barring_assert_not_asked();
++    test_finish();
++}
++
++static
++void
++test_cb_class(
++    void)
++{
++    test_start_hidl();
++
++    /* serviceClass is the only int32 of getFacilityLockForApp */
++    test.cb_driver->query(TEST_B, "AO", BEARER_CLASS_DEFAULT, test_status_cb,
++        &test);
++    g_assert_cmpuint(test.written_count, == , 1);
++    g_assert_cmpint(test.written[0], == , RADIO_SERVICE_CLASS_NONE);
++    test.cb_driver->query(TEST_B, "AO", BEARER_CLASS_VOICE, test_status_cb,
++        &test);
++    g_assert_cmpuint(test.written_count, == , 1);
++    g_assert_cmpint(test.written[0], == , BEARER_CLASS_VOICE);
++    test_finish();
++}
++
++static
++void
++test_cb_class_aidl(
++    void)
++{
++    test_start(RADIO_AIDL_INTERFACE_NONE, RADIO_SIM_INTERFACE);
++    test.cb_driver->query(TEST_B, "AO", BEARER_CLASS_DEFAULT, test_status_cb,
++        &test);
++    g_assert_cmpuint(test.written_count, == , 1);
++    g_assert_cmpint(test.written[0], == , RADIO_SERVICE_CLASS_NONE);
++
++    /* And not supported is the same thing there */
++    test_barring_answer(RADIO_TX_STATUS_OK,
++        RADIO_SIM_RESP_GET_FACILITY_LOCK_FOR_APP,
++        RADIO_ERROR_REQUEST_NOT_SUPPORTED);
++    g_assert_cmpuint(test.cb_failed, == , 1);
++    test_barring_assert_not_asked();
++    test_finish();
++}
++
++/* Setting the password goes to another client, nothing outlives the atom */
++static
++void
++test_cb_remove_pending(
++    void)
++{
++    test_start_hidl();
++    test_op_cb_set_passwd();
++    test_op_cb_query();
++    g_assert_cmpuint(g_slist_length(test.pending), == , 2);
++    test_finish();
++    g_assert_cmpuint(test.cb_ok + test.cb_failed, == , 0);
++}
++
++/*==========================================================================*
++ * Common
++ *==========================================================================*/
++
++#define TEST_(name) "/call_settings/" name
++
++int main(int argc, char* argv[])
++{
++    const gsize n = G_N_ELEMENTS(test_cw_cases) + G_N_ELEMENTS(test_ops);
++    char** paths = g_new0(char*, n + 1);
++    gsize i, k = 0;
++    int ret;
++
++    g_test_init(&argc, &argv, NULL);
++    gutil_log_default.level = g_test_verbose() ?
++        GLOG_LEVEL_VERBOSE : GLOG_LEVEL_NONE;
++
++    for (i = 0; i < G_N_ELEMENTS(test_cw_cases); i++) {
++        paths[k] = g_strconcat(TEST_("cw/"), test_cw_cases[i].name, NULL);
++        g_test_add_data_func(paths[k++], test_cw_cases + i, test_cw);
++    }
++    g_test_add_data_func(TEST_("cw/tx_failed"),
++        GINT_TO_POINTER(RADIO_TX_STATUS_FAILED), test_cw_tx);
++    g_test_add_data_func(TEST_("cw/tx_timeout"),
++        GINT_TO_POINTER(RADIO_TX_STATUS_TIMEOUT), test_cw_tx);
++    g_test_add_func(TEST_("cw/aidl"), test_cw_aidl);
++    g_test_add_func(TEST_("clir_resp"), test_clir_resp);
++    for (i = 0; i < G_N_ELEMENTS(test_ops); i++) {
++        paths[k] = g_strconcat(TEST_("timeout/"), test_ops[i].name, NULL);
++        g_test_add_data_func(paths[k++], test_ops + i, test_timeout);
++    }
++    g_test_add_func(TEST_("barring/not_supported"), test_cb_not_supported);
++    g_test_add_data_func(TEST_("barring/timeout"), test_cb_timeout,
++        test_cb_not_remembered);
++    g_test_add_data_func(TEST_("barring/tx_failed"), test_cb_tx_failed,
++        test_cb_not_remembered);
++    g_test_add_data_func(TEST_("barring/error"), test_cb_error,
++        test_cb_not_remembered);
++    g_test_add_data_func(TEST_("barring/wrong_resp"), test_cb_wrong_resp,
++        test_cb_not_remembered);
++    g_test_add_func(TEST_("barring/answered_first"), test_cb_answered_first);
++    g_test_add_func(TEST_("barring/sim_changed"), test_cb_sim_changed);
++    g_test_add_func(TEST_("barring/radio_state"), test_cb_radio_state_changed);
++    g_test_add_func(TEST_("barring/set_done"), test_cb_set_done);
++    g_test_add_func(TEST_("barring/set_failed"), test_cb_set_failed);
++    g_test_add_func(TEST_("barring/class"), test_cb_class);
++    g_test_add_func(TEST_("barring/class_aidl"), test_cb_class_aidl);
++    g_test_add_func(TEST_("barring/remove_pending"), test_cb_remove_pending);
++    ret = g_test_run();
++    g_strfreev(paths);
++    return ret;
++}
++
++/*
++ * Local Variables:
++ * mode: C
++ * c-basic-offset: 4
++ * indent-tabs-mode: nil
++ * End:
++ */

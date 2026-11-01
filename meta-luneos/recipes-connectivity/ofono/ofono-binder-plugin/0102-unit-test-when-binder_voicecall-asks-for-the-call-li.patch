@@ -1,0 +1,1675 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] unit: test when binder_voicecall asks for the call list
+
+There was no test for binder_voicecall.c. Run the real thing against
+an imitation of the radio service which behaves the way libmtk-ril.so
+does: if a getCurrentCalls request finds two held calls, or a held
+call and a held conference, the test fails the way the calls did.
+
+The swap is played back in the order seen on the Mindphone. The other
+tests cover the ways it can end (error, failed transaction, no response
+at all, a late response), the other call control requests, and what must
+stay as it was: incoming calls, dial and DTMF don't wait for anything.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ unit/Makefile                        |    1 +
+ unit/unit_voicecall/Makefile         |    6 +
+ unit/unit_voicecall/unit_voicecall.c | 1622 ++++++++++++++++++++++++++
+ 3 files changed, 1629 insertions(+)
+ create mode 100644 unit/unit_voicecall/Makefile
+ create mode 100644 unit/unit_voicecall/unit_voicecall.c
+
+diff --git a/unit/Makefile b/unit/Makefile
+index 2731067..ae1348d 100644
+--- a/unit/Makefile
++++ b/unit/Makefile
+@@ -9,6 +9,7 @@ all:
+ 	@$(MAKE) -C unit_ext_plugin $*
+ 	@$(MAKE) -C unit_ext_slot $*
+ 	@$(MAKE) -C unit_sim_settings $*
++	@$(MAKE) -C unit_voicecall $*
+ 
+ clean: unitclean
+ 	rm -f coverage/*.gcov
+diff --git a/unit/unit_voicecall/Makefile b/unit/unit_voicecall/Makefile
+new file mode 100644
+index 0000000..b77ef45
+--- /dev/null
++++ b/unit/unit_voicecall/Makefile
+@@ -0,0 +1,6 @@
++# -*- Mode: makefile-gmake -*-
++
++EXE = unit_voicecall
++PKGS += ofono
++
++include ../common/Makefile
+diff --git a/unit/unit_voicecall/unit_voicecall.c b/unit/unit_voicecall/unit_voicecall.c
+new file mode 100644
+index 0000000..e5f9432
+--- /dev/null
++++ b/unit/unit_voicecall/unit_voicecall.c
+@@ -0,0 +1,1622 @@
++/*
++ *  oFono - Open Source Telephony - binder based adaptation
++ *
++ *  Copyright (C) 2026 Herman van Hazendonk <github.com@herrie.org>
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU General Public License version 2 as
++ *  published by the Free Software Foundation.
++ *
++ *  This program is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ *  GNU General Public License for more details.
++ */
++
++/*
++ * Runs the real binder_voicecall.c against a small imitation of the radio
++ * service. There's no binder here, no ofonod and no modem. The timeouts are
++ * fired by the tests, so nothing depends on how fast the test machine is.
++ */
++
++#include <glib.h>
++#include <gutil_misc.h>
++
++guint test_timeout_add(guint interval, GSourceFunc func, gpointer data);
++gboolean test_source_remove(guint id);
++
++#define g_timeout_add test_timeout_add
++#define gutil_source_remove test_source_remove
++
++#include "binder_voicecall.c"
++
++#include <radio_client.h>
++
++GLOG_MODULE_DEFINE("unit_voicecall");
++
++/*==========================================================================*
++ * The imitation of the modem and the radio service
++ *==========================================================================*/
++
++#define TEST_MAX_CALLS 3
++
++struct radio_request {
++    int refcount;
++    guint32 code;
++    RadioRequestCompleteFunc complete;
++    GDestroyNotify destroy;
++    gpointer user_data;
++};
++
++struct radio_client {
++    int refcount;
++};
++
++typedef struct test_timer {
++    guint id;
++    guint interval;
++    GSourceFunc func;
++    gpointer data;
++} TestTimer;
++
++typedef struct test_context {
++    const struct ofono_voicecall_driver* driver;
++    struct ofono_voicecall* vc;
++    gpointer vc_data;
++    struct ofono_modem* ofono;
++    BinderModem modem;
++    RadioClient client;
++    RadioInstance instance;
++    RadioRequestGroup group;
++    RadioClientIndicationFunc state_changed;
++    gpointer state_changed_data;
++    GSList* pending;     /* RadioRequest*, oldest first */
++    GSList* timers;      /* TestTimer* */
++    GSList* allocs;
++    guint last_timer_id;
++    gboolean submit_fails;
++
++    /* What the modem thinks */
++    RadioCall calls[TEST_MAX_CALLS];
++    guint call_count;
++
++    /* What happened */
++    guint polls;         /* getCurrentCalls requests that reached the radio */
++    guint polls_in_op;   /* Those sent during a call control request */
++    guint hangup_all;    /* Times the RIL killed all calls */
++    guint notified;      /* ofono_voicecall_notify calls */
++    guint disconnected;  /* ofono_voicecall_disconnected calls */
++    guint cb_ok;
++    guint cb_failed;
++    guint last_id;       /* In ofono_voicecall_notify */
++    int last_status;
++} TestContext;
++
++static TestContext test;
++
++static
++gboolean
++test_is_call_control(
++    guint32 code)
++{
++    switch (code) {
++    case RADIO_REQ_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE:
++    case RADIO_REQ_HANGUP:
++    case RADIO_REQ_HANGUP_WAITING_OR_BACKGROUND:
++    case RADIO_REQ_HANGUP_FOREGROUND_RESUME_BACKGROUND:
++    case RADIO_REQ_ACCEPT_CALL:
++    case RADIO_REQ_CONFERENCE:
++    case RADIO_REQ_SEPARATE_CONNECTION:
++    case RADIO_REQ_EXPLICIT_CALL_TRANSFER:
++    case RADIO_REQ_REJECT_CALL:
++        return TRUE;
++    default:
++        return FALSE;
++    }
++}
++
++static
++RadioRequest*
++test_find_pending(
++    guint32 code)
++{
++    GSList* l;
++
++    for (l = test.pending; l; l = l->next) {
++        RadioRequest* req = l->data;
++
++        if (req->code == code) {
++            return req;
++        }
++    }
++    return NULL;
++}
++
++static
++guint
++test_call_control_pending(
++    void)
++{
++    guint n = 0;
++    GSList* l;
++
++    for (l = test.pending; l; l = l->next) {
++        n += test_is_call_control(((RadioRequest*)l->data)->code);
++    }
++    return n;
++}
++
++/*
++ * What libmtk-ril.so does in RtcCallController::parsePreciseCallState() to
++ * each getCurrentCalls response, whatever else is going on at the time:
++ *
++ *   if (nonMpty >= 2 || (nonMpty == 1 && mpty >= 2)) "Hangup all calls"
++ */
++static
++void
++test_rtc_check_calls(
++    void)
++{
++    guint non_mpty = 0, mpty = 0, i;
++
++    for (i = 0; i < test.call_count; i++) {
++        if (test.calls[i].state == RADIO_CALL_HOLDING) {
++            if (test.calls[i].isMpty) {
++                mpty++;
++            } else {
++                non_mpty++;
++            }
++        }
++    }
++    if (non_mpty >= 2 || (non_mpty == 1 && mpty >= 2)) {
++        test.hangup_all++;
++    }
++}
++
++static
++void
++test_set_call(
++    guint i,
++    guint id,
++    RADIO_CALL_STATE state)
++{
++    RadioCall* call = test.calls + i;
++
++    memset(call, 0, sizeof(*call));
++    call->index = id;
++    call->state = state;
++    call->isVoice = TRUE;
++    if (test.call_count <= i) {
++        test.call_count = i + 1;
++    }
++}
++
++static
++void
++test_set_state(
++    guint i,
++    RADIO_CALL_STATE state)
++{
++    test.calls[i].state = state;
++}
++
++static
++void
++test_request_unref(
++    RadioRequest* req)
++{
++    if (!--req->refcount) {
++        if (req->destroy) {
++            req->destroy(req->user_data);
++        }
++        g_free(req);
++    }
++}
++
++RadioRequest*
++radio_request_new2(
++    RadioRequestGroup* group,
++    RADIO_REQ code,
++    GBinderWriter* args,
++    RadioRequestCompleteFunc complete,
++    GDestroyNotify destroy,
++    void* user_data)
++{
++    RadioRequest* req = g_new0(RadioRequest, 1);
++
++    req->refcount = 1;
++    req->code = code;
++    req->complete = complete;
++    req->destroy = destroy;
++    req->user_data = user_data;
++    return req;
++}
++
++RadioRequest*
++radio_request_new(
++    RadioClient* client,
++    RADIO_REQ code,
++    GBinderWriter* args,
++    RadioRequestCompleteFunc complete,
++    GDestroyNotify destroy,
++    void* user_data)
++{
++    return radio_request_new2(&test.group, code, args, complete, destroy,
++        user_data);
++}
++
++gboolean
++radio_request_submit(
++    RadioRequest* req)
++{
++    if (test.submit_fails) {
++        /*
++         * The real thing calls destroy for such a request too, which is one
++         * unref too many for BinderVoiceCallCbData. That's a separate problem
++         * from what's being tested here, so don't trip over it.
++         */
++        req->destroy = NULL;
++        return FALSE;
++    }
++    if (req->code == RADIO_REQ_GET_CURRENT_CALLS) {
++        test.polls++;
++        if (test_call_control_pending()) {
++            test.polls_in_op++;
++        }
++        test_rtc_check_calls();
++    }
++    if (req->complete) {
++        req->refcount++;
++        test.pending = g_slist_append(test.pending, req);
++    }
++    return TRUE;
++}
++
++void
++radio_request_unref(
++    RadioRequest* req)
++{
++    if (req) {
++        test_request_unref(req);
++    }
++}
++
++void
++radio_request_drop(
++    RadioRequest* req)
++{
++    if (req) {
++        GSList* l = g_slist_find(test.pending, req);
++
++        req->complete = NULL;
++        if (l) {
++            test.pending = g_slist_delete_link(test.pending, l);
++            test_request_unref(req);
++        }
++        test_request_unref(req);
++    }
++}
++
++void
++radio_request_set_blocking(
++    RadioRequest* req,
++    gboolean blocking)
++{
++}
++
++void
++radio_request_set_timeout(
++    RadioRequest* req,
++    guint ms)
++{
++}
++
++void
++radio_request_set_retry(
++    RadioRequest* req,
++    guint delay_ms,
++    int max_count)
++{
++}
++
++void
++radio_request_set_retry_func(
++    RadioRequest* req,
++    RadioRequestRetryFunc retry)
++{
++}
++
++RadioRequestGroup*
++radio_request_group_new(
++    RadioClient* client)
++{
++    test.group.client = client;
++    return &test.group;
++}
++
++void
++radio_request_group_unref(
++    RadioRequestGroup* group)
++{
++}
++
++void
++radio_request_group_cancel(
++    RadioRequestGroup* group)
++{
++    while (test.pending) {
++        RadioRequest* req = test.pending->data;
++
++        req->complete = NULL;
++        test.pending = g_slist_delete_link(test.pending, test.pending);
++        test_request_unref(req);
++    }
++}
++
++RadioClient*
++radio_client_ref(
++    RadioClient* client)
++{
++    return client;
++}
++
++void
++radio_client_unref(
++    RadioClient* client)
++{
++}
++
++RADIO_AIDL_INTERFACE
++radio_client_aidl_interface(
++    RadioClient* client)
++{
++    return RADIO_AIDL_INTERFACE_NONE;
++}
++
++gulong
++radio_client_add_indication_handler(
++    RadioClient* client,
++    RADIO_IND code,
++    RadioClientIndicationFunc func,
++    gpointer user_data)
++{
++    if (code == RADIO_IND_CALL_STATE_CHANGED) {
++        test.state_changed = func;
++        test.state_changed_data = user_data;
++    }
++    return code + 1;
++}
++
++void
++radio_client_remove_handler(
++    RadioClient* client,
++    gulong id)
++{
++}
++
++void
++radio_client_remove_handlers(
++    RadioClient* client,
++    gulong* ids,
++    int count)
++{
++    test.state_changed = NULL;
++}
++
++RadioInstance*
++radio_instance_ref(
++    RadioInstance* instance)
++{
++    return instance;
++}
++
++void
++radio_instance_unref(
++    RadioInstance* instance)
++{
++}
++
++const char*
++radio_req_name2(
++    RadioInstance* instance,
++    RADIO_REQ req)
++{
++    return "REQ";
++}
++
++/*==========================================================================*
++ * gbinder and the rest of the plugin
++ *==========================================================================*/
++
++void
++gbinder_reader_copy(
++    GBinderReader* dest,
++    const GBinderReader* src)
++{
++}
++
++gboolean
++gbinder_reader_read_bool(
++    GBinderReader* reader,
++    gboolean* value)
++{
++    return FALSE;
++}
++
++gboolean
++gbinder_reader_read_int32(
++    GBinderReader* reader,
++    gint32* value)
++{
++    return FALSE;
++}
++
++gboolean
++gbinder_reader_read_uint32(
++    GBinderReader* reader,
++    guint32* value)
++{
++    return FALSE;
++}
++
++char*
++gbinder_reader_read_string16(
++    GBinderReader* reader)
++{
++    return NULL;
++}
++
++gboolean
++gbinder_reader_skip_string16(
++    GBinderReader* reader)
++{
++    return FALSE;
++}
++
++gsize
++gbinder_reader_bytes_read(
++    const GBinderReader* reader)
++{
++    return 0;
++}
++
++const void*
++gbinder_reader_read_hidl_struct1(
++    GBinderReader* reader,
++    gsize size)
++{
++    return NULL;
++}
++
++const void*
++gbinder_reader_read_hidl_vec1(
++    GBinderReader* reader,
++    gsize* count,
++    guint expected_elemsize)
++{
++    /* Only getCurrentCalls gets here */
++    g_assert_cmpuint(expected_elemsize, == , sizeof(RadioCall));
++    *count = test.call_count;
++    return test.calls;
++}
++
++void
++gbinder_writer_append_int32(
++    GBinderWriter* writer,
++    guint32 value)
++{
++}
++
++void
++gbinder_writer_append_bool(
++    GBinderWriter* writer,
++    gboolean value)
++{
++}
++
++void
++gbinder_writer_append_string16(
++    GBinderWriter* writer,
++    const char* utf8)
++{
++}
++
++void
++gbinder_writer_append_hidl_string_copy(
++    GBinderWriter* writer,
++    const char* str)
++{
++}
++
++gsize
++gbinder_writer_bytes_written(
++    GBinderWriter* writer)
++{
++    return 0;
++}
++
++void
++gbinder_writer_overwrite_int32(
++    GBinderWriter* writer,
++    gsize offset,
++    gint32 value)
++{
++}
++
++void*
++gbinder_writer_malloc0(
++    GBinderWriter* writer,
++    gsize size)
++{
++    void* ptr = g_malloc0(size);
++
++    test.allocs = g_slist_prepend(test.allocs, ptr);
++    return ptr;
++}
++
++guint
++gbinder_writer_append_buffer_object(
++    GBinderWriter* writer,
++    const void* buf,
++    gsize len)
++{
++    return 0;
++}
++
++guint
++gbinder_writer_append_buffer_object_with_parent(
++    GBinderWriter* writer,
++    const void* buf,
++    gsize len,
++    const GBinderParent* parent)
++{
++    return 0;
++}
++
++void
++binder_copy_hidl_string(
++    GBinderWriter* writer,
++    GBinderHidlString* dest,
++    const char* src)
++{
++}
++
++void
++binder_append_hidl_string_with_parent(
++    GBinderWriter* writer,
++    const GBinderHidlString* str,
++    guint32 index,
++    guint32 offset)
++{
++}
++
++gsize
++binder_read_parcelable_size(
++    GBinderReader* reader)
++{
++    return 0;
++}
++
++const char*
++binder_radio_error_string(
++    RADIO_ERROR error)
++{
++    return "error";
++}
++
++BinderImsReg*
++binder_ims_reg_ref(
++    BinderImsReg* reg)
++{
++    return reg;
++}
++
++void
++binder_ims_reg_unref(
++    BinderImsReg* reg)
++{
++}
++
++/*==========================================================================*
++ * oFono
++ *==========================================================================*/
++
++void
++ofono_debug(
++    const char* format,
++    ...)
++{
++}
++
++void
++ofono_info(
++    const char* format,
++    ...)
++{
++}
++
++void
++ofono_warn(
++    const char* format,
++    ...)
++{
++}
++
++void
++ofono_error(
++    const char* format,
++    ...)
++{
++}
++
++void*
++ofono_modem_get_data(
++    struct ofono_modem* modem)
++{
++    return &test.modem;
++}
++
++void
++ofono_call_init(
++    struct ofono_call* call)
++{
++    memset(call, 0, sizeof(*call));
++}
++
++const char*
++ofono_phone_number_to_string(
++    const struct ofono_phone_number* ph,
++    char buffer[])
++{
++    buffer[0] = 0;
++    return buffer;
++}
++
++int
++ofono_voicecall_driver_register(
++    const struct ofono_voicecall_driver* driver)
++{
++    test.driver = driver;
++    return 0;
++}
++
++void
++ofono_voicecall_driver_unregister(
++    const struct ofono_voicecall_driver* driver)
++{
++    test.driver = NULL;
++}
++
++void
++ofono_voicecall_register(
++    struct ofono_voicecall* vc)
++{
++}
++
++void
++ofono_voicecall_set_data(
++    struct ofono_voicecall* vc,
++    void* data)
++{
++    test.vc_data = data;
++}
++
++void*
++ofono_voicecall_get_data(
++    struct ofono_voicecall* vc)
++{
++    return test.vc_data;
++}
++
++void
++ofono_voicecall_notify(
++    struct ofono_voicecall* vc,
++    const struct ofono_call* call)
++{
++    test.notified++;
++    test.last_id = call->id;
++    test.last_status = call->status;
++}
++
++void
++ofono_voicecall_disconnected(
++    struct ofono_voicecall* vc,
++    int id,
++    enum ofono_disconnect_reason reason,
++    const struct ofono_error* error)
++{
++    test.disconnected++;
++}
++
++void
++ofono_voicecall_ssn_mo_notify(
++    struct ofono_voicecall* vc,
++    unsigned int id,
++    int code,
++    int index)
++{
++}
++
++void
++ofono_voicecall_ssn_mt_notify(
++    struct ofono_voicecall* vc,
++    unsigned int id,
++    int code,
++    int index,
++    const struct ofono_phone_number* ph)
++{
++}
++
++void
++ofono_voicecall_ringback_tone_notify(
++    struct ofono_voicecall* vc,
++    const ofono_bool_t play_tone)
++{
++}
++
++void
++ofono_voicecall_en_list_notify(
++    struct ofono_voicecall* vc,
++    char** nw_en_list)
++{
++}
++
++/*==========================================================================*
++ * Timers. Only the ones that binder_voicecall.c starts.
++ *==========================================================================*/
++
++guint
++test_timeout_add(
++    guint interval,
++    GSourceFunc func,
++    gpointer data)
++{
++    TestTimer* timer = g_new0(TestTimer, 1);
++
++    timer->id = ++test.last_timer_id;
++    timer->interval = interval;
++    timer->func = func;
++    timer->data = data;
++    test.timers = g_slist_append(test.timers, timer);
++    return timer->id;
++}
++
++gboolean
++test_source_remove(
++    guint id)
++{
++    GSList* l;
++
++    for (l = test.timers; l; l = l->next) {
++        TestTimer* timer = l->data;
++
++        if (timer->id == id) {
++            g_free(timer);
++            test.timers = g_slist_delete_link(test.timers, l);
++            return TRUE;
++        }
++    }
++    /* Zero is fine, anything else would be a timer that's gone already */
++    g_assert_cmpuint(id, == , 0);
++    return FALSE;
++}
++
++static
++void
++test_fire_timer(
++    void)
++{
++    TestTimer* timer;
++    GSourceFunc func;
++    gpointer data;
++
++    g_assert_cmpuint(g_slist_length(test.timers), == , 1);
++    timer = test.timers->data;
++    func = timer->func;
++    data = timer->data;
++    g_free(timer);
++    test.timers = g_slist_delete_link(test.timers, test.timers);
++    g_assert(func(data) == G_SOURCE_REMOVE);
++}
++
++/*==========================================================================*
++ * Common test steps
++ *==========================================================================*/
++
++static
++void
++test_cb(
++    const struct ofono_error* error,
++    void* data)
++{
++    if (error->type == OFONO_ERROR_TYPE_NO_ERROR) {
++        test.cb_ok++;
++    } else {
++        test.cb_failed++;
++    }
++}
++
++static
++void
++test_respond(
++    RadioRequest* req,
++    RADIO_TX_STATUS status,
++    RADIO_RESP resp,
++    RADIO_ERROR error)
++{
++    RadioRequestCompleteFunc complete = req->complete;
++
++    g_assert(g_slist_find(test.pending, req));
++    test.pending = g_slist_remove(test.pending, req);
++    if (complete) {
++        complete(req, status, resp, error, NULL, req->user_data);
++    }
++    test_request_unref(req);
++}
++
++/* The response to a request which is known to be pending */
++static
++void
++test_respond_ok(
++    guint32 code)
++{
++    RadioRequest* req = test_find_pending(code);
++    RADIO_RESP resp = RADIO_RESP_NONE; /* The driver only looks at these: */
++
++    g_assert(req);
++    switch (code) {
++    case RADIO_REQ_GET_CURRENT_CALLS:
++        resp = RADIO_RESP_GET_CURRENT_CALLS;
++        break;
++    case RADIO_REQ_DIAL:
++        resp = RADIO_RESP_DIAL;
++        break;
++    case RADIO_REQ_SEND_DTMF:
++        resp = RADIO_RESP_SEND_DTMF;
++        break;
++    default:
++        break;
++    }
++    test_respond(req, RADIO_TX_STATUS_OK, resp, RADIO_ERROR_NONE);
++}
++
++static
++void
++test_answer_poll(
++    void)
++{
++    test_respond_ok(RADIO_REQ_GET_CURRENT_CALLS);
++}
++
++/* Failing the cause lookup is the shortest way to finish a disconnect */
++static
++void
++test_fail_last_cause(
++    void)
++{
++    RadioRequest* req = test_find_pending(RADIO_REQ_GET_LAST_CALL_FAIL_CAUSE);
++
++    if (req) {
++        test_respond(req, RADIO_TX_STATUS_FAILED, RADIO_RESP_NONE,
++            RADIO_ERROR_NONE);
++    }
++}
++
++static
++void
++test_state_changed(
++    void)
++{
++    test.state_changed(&test.client, RADIO_IND_CALL_STATE_CHANGED, NULL,
++        test.state_changed_data);
++}
++
++static
++void
++test_start(
++    void)
++{
++    memset(&test, 0, sizeof(test));
++    test.vc = (struct ofono_voicecall*) &test;
++    test.ofono = (struct ofono_modem*) &test;
++    test.modem.instance = &test.instance;
++    test.modem.voice_client = &test.client;
++    test.modem.network_client = &test.client;
++    test.modem.log_prefix = "";
++    binder_voicecall_init();
++    g_assert(test.driver);
++    g_assert_cmpint(test.driver->probe(test.vc, 0, test.ofono), == , 0);
++    while (g_main_context_iteration(NULL, FALSE));
++    g_assert(test.state_changed);
++
++    /* The driver asks for the call list when it starts */
++    g_assert_cmpuint(test.polls, == , 1);
++    test_answer_poll();
++    test.polls = 0;
++}
++
++static
++void
++test_finish(
++    void)
++{
++    test.driver->remove(test.vc);
++
++    /* Whatever the test was doing, nothing is left behind */
++    g_assert(!test.pending);
++    g_assert(!test.timers);
++    g_assert(!test.vc_data);
++    g_assert_cmpuint(test.hangup_all, == , 0);
++    binder_voicecall_cleanup();
++    g_slist_free_full(test.allocs, g_free);
++}
++
++/* Call 1 is active, call 2 is held, and oFono knows it */
++static
++void
++test_start_two_calls(
++    void)
++{
++    test_start();
++    test_set_call(0, 1, RADIO_CALL_ACTIVE);
++    test_set_call(1, 2, RADIO_CALL_HOLDING);
++    test_state_changed();
++    test_answer_poll();
++    g_assert_cmpuint(test.notified, == , 2);
++    test.polls = test.notified = 0;
++    g_assert(!test.pending);
++    g_assert(!test.timers);
++}
++
++/*
++ * The swap as it happened at 15:06:54 on 2026-10-31. Call 1 is put on hold
++ * first, the RIL says that the calls have changed, and it takes a moment
++ * for the other call to come out of hold.
++ */
++static
++void
++test_swap_half_way(
++    void)
++{
++    test.driver->swap_without_accept(test.vc, test_cb, NULL);
++    g_assert(test_find_pending(RADIO_REQ_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE));
++    test_set_state(0, RADIO_CALL_HOLDING);
++    test_state_changed();
++}
++
++static
++void
++test_swap_done(
++    void)
++{
++    test_set_state(1, RADIO_CALL_ACTIVE);
++}
++
++/*==========================================================================*
++ * swap: the poll waits for the response
++ *==========================================================================*/
++
++static
++void
++test_swap(
++    void)
++{
++    test_start_two_calls();
++    test_swap_half_way();
++
++    /* Asking now would get both calls killed. Not asking does no harm. */
++    g_assert_cmpuint(test.polls_in_op, == , 0);
++    g_assert_cmpuint(test.hangup_all, == , 0);
++    g_assert_cmpuint(test.polls, == , 0);
++    g_assert(test.timers);
++
++    /* The second call comes back, and another notification comes with it */
++    test_swap_done();
++    test_state_changed();
++    g_assert_cmpuint(test.polls, == , 0);
++
++    /* Then one poll and only one, and before the core hears about it */
++    test_respond_ok(RADIO_REQ_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE);
++    g_assert_cmpuint(test.polls, == , 1);
++    g_assert_cmpuint(test.cb_ok, == , 1);
++    g_assert(!test.timers);
++
++    test_answer_poll();
++    g_assert_cmpuint(test.hangup_all, == , 0);
++    g_assert_cmpuint(test.notified, == , 2);
++    g_assert_cmpuint(test.polls, == , 1);
++    test_finish();
++}
++
++/*==========================================================================*
++ * swap_failed: a RIL error ends the wait just the same
++ *==========================================================================*/
++
++static
++void
++test_swap_failed(
++    void)
++{
++    RadioRequest* req;
++
++    test_start_two_calls();
++    test_swap_half_way();
++    req = test_find_pending(RADIO_REQ_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE);
++    g_assert(req);
++
++    /* It didn't work, the first call goes back to where it was */
++    test_set_state(0, RADIO_CALL_ACTIVE);
++    test_respond(req, RADIO_TX_STATUS_OK, RADIO_RESP_NONE,
++        RADIO_ERROR_GENERIC_FAILURE);
++    g_assert_cmpuint(test.cb_failed, == , 1);
++    g_assert_cmpuint(test.polls, == , 1);
++    g_assert(!test.timers);
++
++    test_answer_poll();
++    test_state_changed();
++    g_assert_cmpuint(test.polls, == , 2);
++    test_answer_poll();
++    test_finish();
++}
++
++/*==========================================================================*
++ * swap_tx_failed: so does a failed transaction or the radio's own timeout
++ *==========================================================================*/
++
++static
++void
++test_swap_tx_status(
++    gconstpointer data)
++{
++    RadioRequest* req;
++
++    test_start_two_calls();
++    test_swap_half_way();
++    test_swap_done();
++    req = test_find_pending(RADIO_REQ_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE);
++    g_assert(req);
++
++    /* A dead radio fails the requests that it still has this way */
++    test_respond(req, GPOINTER_TO_INT(data), RADIO_RESP_NONE, RADIO_ERROR_NONE);
++    g_assert_cmpuint(test.cb_failed, == , 1);
++    g_assert_cmpuint(test.polls, == , 1);
++    g_assert(!test.timers);
++
++    test_answer_poll();
++    test_finish();
++}
++
++/*==========================================================================*
++ * swap_no_answer: polling can't stall
++ *==========================================================================*/
++
++static
++void
++test_swap_no_answer(
++    void)
++{
++    test_start_two_calls();
++    test_swap_done();                  /* The modem isn't half way here */
++    test.driver->swap_without_accept(test.vc, test_cb, NULL);
++    test_state_changed();
++    g_assert_cmpuint(test.polls, == , 0);
++
++    /* A ring shouldn't wait forever, and much less than the radio's 30s */
++    g_assert_cmpuint(g_slist_length(test.timers), == , 1);
++    g_assert_cmpuint(((TestTimer*)test.timers->data)->interval, <= , 5000);
++    test_fire_timer();
++    g_assert_cmpuint(test.polls, == , 1);
++    test_answer_poll();
++
++    /* From now on notifications work as usual */
++    test_state_changed();
++    g_assert_cmpuint(test.polls, == , 2);
++    test_answer_poll();
++
++    /* The late response is still welcome */
++    test_respond_ok(RADIO_REQ_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE);
++    g_assert_cmpuint(test.cb_ok, == , 1);
++    g_assert_cmpuint(test.polls, == , 3);
++    test_answer_poll();
++    test_finish();
++}
++
++/*==========================================================================*
++ * swap_no_answer_quiet: nobody wanted a poll, so none goes out on timeout
++ *==========================================================================*/
++
++static
++void
++test_swap_no_answer_quiet(
++    void)
++{
++    test_start_two_calls();
++    test.driver->swap_without_accept(test.vc, test_cb, NULL);
++
++    /* Could be a slow network and the modem may be half way by now */
++    test_fire_timer();
++    g_assert_cmpuint(test.polls, == , 0);
++
++    test_respond_ok(RADIO_REQ_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE);
++    g_assert_cmpuint(test.polls, == , 1);
++    test_answer_poll();
++    test_finish();
++}
++
++/*==========================================================================*
++ * late_response: one that timed out doesn't cut the next one short
++ *==========================================================================*/
++
++static
++void
++test_late_response(
++    void)
++{
++    RadioRequest* first;
++
++    test_start_two_calls();
++    test.driver->swap_without_accept(test.vc, test_cb, NULL);
++    first = test_find_pending(RADIO_REQ_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE);
++    test_fire_timer();
++
++    /* The next swap is under way when the first one finally gets through */
++    test_swap_half_way();
++    test_respond(first, RADIO_TX_STATUS_OK, RADIO_RESP_NONE, RADIO_ERROR_NONE);
++    g_assert_cmpuint(test.cb_ok, == , 1);
++    test_state_changed();
++    g_assert_cmpuint(test.polls, == , 0);
++    g_assert_cmpuint(test.hangup_all, == , 0);
++
++    test_swap_done();
++    test_respond_ok(RADIO_REQ_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE);
++    g_assert_cmpuint(test.cb_ok, == , 2);
++    g_assert_cmpuint(test.polls, == , 1);
++    test_answer_poll();
++    test_finish();
++}
++
++/*==========================================================================*
++ * mpty: the RIL treats a held conference and a held call the same way
++ *==========================================================================*/
++
++static
++void
++test_mpty(
++    void)
++{
++    test_start();
++    test_set_call(0, 1, RADIO_CALL_HOLDING);
++    test.calls[0].isMpty = TRUE;
++    test_set_call(1, 2, RADIO_CALL_HOLDING);
++    test.calls[1].isMpty = TRUE;
++    test_set_call(2, 3, RADIO_CALL_ACTIVE);
++    test_state_changed();
++    test_answer_poll();
++    test.polls = 0;
++
++    test.driver->swap_without_accept(test.vc, test_cb, NULL);
++    test_set_state(2, RADIO_CALL_HOLDING);
++    test_state_changed();
++    g_assert_cmpuint(test.polls, == , 0);
++    test_set_state(0, RADIO_CALL_ACTIVE);
++    test_set_state(1, RADIO_CALL_ACTIVE);
++    test_respond_ok(RADIO_REQ_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE);
++    g_assert_cmpuint(test.polls, == , 1);
++    test_answer_poll();
++    test_finish();
++}
++
++/*==========================================================================*
++ * poll_in_flight: a poll sent just before the operation is replaced
++ *==========================================================================*/
++
++static
++void
++test_poll_in_flight(
++    void)
++{
++    test_start_two_calls();
++    test_state_changed();
++    g_assert_cmpuint(test.polls, == , 1);
++    g_assert(test_find_pending(RADIO_REQ_GET_CURRENT_CALLS));
++
++    /* It may be waiting to retry, and that could happen at any time */
++    test_swap_half_way();
++    g_assert(!test_find_pending(RADIO_REQ_GET_CURRENT_CALLS));
++
++    test_swap_done();
++    test_respond_ok(RADIO_REQ_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE);
++    g_assert_cmpuint(test.polls, == , 2);
++    test_answer_poll();
++    g_assert_cmpuint(test.notified, == , 2);
++    test_finish();
++}
++
++/*==========================================================================*
++ * submit_failed: nothing to wait for
++ *==========================================================================*/
++
++static
++void
++test_submit_failed(
++    void)
++{
++    test_start_two_calls();
++    test.submit_fails = TRUE;
++    test.driver->swap_without_accept(test.vc, test_cb, NULL);
++    test.submit_fails = FALSE;
++    g_assert(!test.timers);
++
++    test_state_changed();
++    g_assert_cmpuint(test.polls, == , 1);
++    test_answer_poll();
++    test_finish();
++}
++
++/*==========================================================================*
++ * hangup_all: several requests for one operation
++ *==========================================================================*/
++
++static
++void
++test_hangup_all(
++    void)
++{
++    RadioRequest* first;
++    RadioRequest* second;
++
++    test_start_two_calls();
++    test.driver->hangup_all(test.vc, test_cb, NULL);
++    first = test_find_pending(RADIO_REQ_HANGUP);
++    g_assert(first);
++    second = g_slist_last(test.pending)->data;
++    g_assert(first != second);
++    g_assert_cmpuint(second->code, == , RADIO_REQ_HANGUP);
++
++    test_state_changed();
++    test_respond(first, RADIO_TX_STATUS_OK, RADIO_RESP_NONE, RADIO_ERROR_NONE);
++    g_assert_cmpuint(test.polls, == , 0);
++    g_assert(test.timers);
++    g_assert_cmpuint(test.cb_ok, == , 0);
++
++    test.call_count = 0;
++    test_respond(second, RADIO_TX_STATUS_OK, RADIO_RESP_NONE, RADIO_ERROR_NONE);
++    g_assert_cmpuint(test.polls, == , 1);
++    g_assert_cmpuint(test.cb_ok, == , 1);
++    g_assert(!test.timers);
++
++    test_answer_poll();
++    g_assert_cmpuint(test.disconnected, == , 2);
++    g_assert(!test_find_pending(RADIO_REQ_GET_LAST_CALL_FAIL_CAUSE));
++    test_finish();
++}
++
++/*==========================================================================*
++ * hangup_all_slow: each new request gets the whole timeout
++ *==========================================================================*/
++
++static
++void
++test_hangup_all_slow(
++    void)
++{
++    guint first_id;
++
++    test_start_two_calls();
++    test.driver->hangup_all(test.vc, test_cb, NULL);
++
++    /* Two hangups, one timer, the one started by the last of them */
++    g_assert_cmpuint(g_slist_length(test.timers), == , 1);
++    first_id = ((TestTimer*)test.timers->data)->id;
++    g_assert_cmpuint(first_id, == , test.last_timer_id);
++    g_assert_cmpuint(first_id, > , 1);
++
++    test_respond_ok(RADIO_REQ_HANGUP);
++    test.call_count = 0;
++    test_respond_ok(RADIO_REQ_HANGUP);
++    test_answer_poll();
++    test_finish();
++}
++
++/*==========================================================================*
++ * Each of the other operations holds the polls until its response
++ *==========================================================================*/
++
++typedef struct test_op {
++    const char* name;
++    void (*start)(void);
++    guint32 code;
++} TestOp;
++
++static void test_op_answer(void)
++    { test.driver->answer(test.vc, test_cb, NULL); }
++static void test_op_hangup_active(void)
++    { test.driver->hangup_active(test.vc, test_cb, NULL); }
++static void test_op_hold(void)
++    { test.driver->hold_all_active(test.vc, test_cb, NULL); }
++static void test_op_release_held(void)
++    { test.driver->release_all_held(test.vc, test_cb, NULL); }
++static void test_op_udub(void)
++    { test.driver->set_udub(test.vc, test_cb, NULL); }
++static void test_op_release_active(void)
++    { test.driver->release_all_active(test.vc, test_cb, NULL); }
++static void test_op_release_specific(void)
++    { test.driver->release_specific(test.vc, 1, test_cb, NULL); }
++static void test_op_private_chat(void)
++    { test.driver->private_chat(test.vc, 1, test_cb, NULL); }
++static void test_op_conference(void)
++    { test.driver->create_multiparty(test.vc, test_cb, NULL); }
++static void test_op_transfer(void)
++    { test.driver->transfer(test.vc, test_cb, NULL); }
++
++static const TestOp test_ops[] = {
++    { "answer", test_op_answer, RADIO_REQ_ACCEPT_CALL },
++    { "hangup_active", test_op_hangup_active, RADIO_REQ_HANGUP },
++    { "hold", test_op_hold, RADIO_REQ_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE },
++    { "release_held", test_op_release_held,
++        RADIO_REQ_HANGUP_WAITING_OR_BACKGROUND },
++    { "udub", test_op_udub, RADIO_REQ_REJECT_CALL },
++    { "release_active", test_op_release_active,
++        RADIO_REQ_HANGUP_FOREGROUND_RESUME_BACKGROUND },
++    { "release_specific", test_op_release_specific, RADIO_REQ_HANGUP },
++    { "private_chat", test_op_private_chat, RADIO_REQ_SEPARATE_CONNECTION },
++    { "conference", test_op_conference, RADIO_REQ_CONFERENCE },
++    { "transfer", test_op_transfer, RADIO_REQ_EXPLICIT_CALL_TRANSFER }
++};
++
++static
++void
++test_op(
++    gconstpointer data)
++{
++    const TestOp* op = data;
++
++    test_start_two_calls();
++    op->start();
++    g_assert(test_find_pending(op->code));
++    test_state_changed();
++    g_assert_cmpuint(test.polls, == , 0);
++    test_respond_ok(op->code);
++    g_assert_cmpuint(test.polls, == , 1);
++    g_assert(!test.timers);
++    test_answer_poll();
++    test_finish();
++}
++
++/*==========================================================================*
++ * incoming: rings as soon as the RIL says so
++ *==========================================================================*/
++
++static
++void
++test_incoming(
++    void)
++{
++    test_start();
++    test_set_call(0, 1, RADIO_CALL_INCOMING);
++    test_state_changed();
++    g_assert_cmpuint(test.polls, == , 1);
++    g_assert(!test.timers);
++    test_answer_poll();
++    g_assert_cmpuint(test.notified, == , 1);
++    g_assert_cmpuint(test.last_status, == , OFONO_CALL_STATUS_INCOMING);
++    test_finish();
++}
++
++/*==========================================================================*
++ * incoming_during_swap: waits for the swap, no longer
++ *==========================================================================*/
++
++static
++void
++test_incoming_during_swap(
++    void)
++{
++    test_start_two_calls();
++    test_swap_half_way();
++    test_set_call(2, 3, RADIO_CALL_WAITING);
++    test_state_changed();
++    g_assert_cmpuint(test.polls, == , 0);
++
++    test_swap_done();
++    test_respond_ok(RADIO_REQ_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE);
++    g_assert_cmpuint(test.polls, == , 1);
++    test_answer_poll();
++    g_assert_cmpuint(test.last_id, == , 3);
++    g_assert_cmpuint(test.last_status, == , OFONO_CALL_STATUS_WAITING);
++    test_finish();
++}
++
++/*==========================================================================*
++ * incoming_no_answer: and if the swap never ends, for as long as the timeout
++ *==========================================================================*/
++
++static
++void
++test_incoming_no_answer(
++    void)
++{
++    test_start_two_calls();
++    test.driver->swap_without_accept(test.vc, test_cb, NULL);
++    test_set_call(2, 3, RADIO_CALL_WAITING);
++    test_state_changed();
++    test_fire_timer();
++    g_assert_cmpuint(test.polls, == , 1);
++    test_answer_poll();
++    g_assert_cmpuint(test.last_id, == , 3);
++
++    /* The request is still pending and the driver just goes away */
++    test_finish();
++    g_assert_cmpuint(test.cb_ok + test.cb_failed, == , 0);
++}
++
++/*==========================================================================*
++ * dial: not an operation that polls have to wait for
++ *==========================================================================*/
++
++static
++void
++test_dial(
++    void)
++{
++    struct ofono_phone_number ph;
++
++    memset(&ph, 0, sizeof(ph));
++    test_start();
++    test.driver->dial(test.vc, &ph, OFONO_CLIR_OPTION_DEFAULT, test_cb, NULL);
++    g_assert(test_find_pending(RADIO_REQ_DIAL));
++    g_assert(!test.timers);
++
++    /* The call shows up before the response, the same as without this */
++    test_set_call(0, 1, RADIO_CALL_DIALING);
++    test_state_changed();
++    g_assert_cmpuint(test.polls, == , 1);
++    test_answer_poll();
++    g_assert_cmpuint(test.cb_ok, == , 1);
++    g_assert_cmpuint(test.last_status, == , OFONO_CALL_STATUS_DIALING);
++
++    test_respond_ok(RADIO_REQ_DIAL);
++    test_finish();
++}
++
++/*==========================================================================*
++ * dial_response_first: the response is what finds the call
++ *==========================================================================*/
++
++static
++void
++test_dial_response_first(
++    void)
++{
++    struct ofono_phone_number ph;
++
++    memset(&ph, 0, sizeof(ph));
++    test_start();
++    test.driver->dial(test.vc, &ph, OFONO_CLIR_OPTION_DEFAULT, test_cb, NULL);
++    test_set_call(0, 1, RADIO_CALL_DIALING);
++    test_respond_ok(RADIO_REQ_DIAL);
++    g_assert_cmpuint(test.polls, == , 1);
++    test_answer_poll();
++    g_assert_cmpuint(test.cb_ok, == , 1);
++    test_finish();
++}
++
++/*==========================================================================*
++ * dtmf: doesn't hold anything back, and isn't held back itself
++ *==========================================================================*/
++
++static
++void
++test_dtmf(
++    void)
++{
++    test_start_two_calls();
++    test.driver->send_tones(test.vc, "12", test_cb, NULL);
++    g_assert_cmpuint(test.cb_ok, == , 1);
++    g_assert(test_find_pending(RADIO_REQ_SEND_DTMF));
++    g_assert(!test.timers);
++
++    test_state_changed();
++    g_assert_cmpuint(test.polls, == , 1);
++    test_answer_poll();
++
++    /* A swap doesn't get in the way of the next tone */
++    test_swap_half_way();
++    test_respond_ok(RADIO_REQ_SEND_DTMF);
++    g_assert(test_find_pending(RADIO_REQ_SEND_DTMF));
++    test_respond_ok(RADIO_REQ_SEND_DTMF);
++    test_swap_done();
++    test_respond_ok(RADIO_REQ_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE);
++    test_answer_poll();
++    test_finish();
++}
++
++/*==========================================================================*
++ * remove_pending: the driver goes away with everything still going on
++ *==========================================================================*/
++
++static
++void
++test_remove_pending(
++    void)
++{
++    test_start_two_calls();
++    test_swap_half_way();
++    g_assert(test.timers);
++    test_set_state(0, RADIO_CALL_ACTIVE);
++    test_finish();
++}
++
++/*==========================================================================*
++ * Remote hangup: the disconnect still gets its cause
++ *==========================================================================*/
++
++static
++void
++test_remote_hangup(
++    void)
++{
++    test_start_two_calls();
++    test.call_count = 1;
++    test_state_changed();
++    test_answer_poll();
++    g_assert(test_find_pending(RADIO_REQ_GET_LAST_CALL_FAIL_CAUSE));
++    test_fail_last_cause();
++    g_assert_cmpuint(test.disconnected, == , 1);
++    test_finish();
++}
++
++/*==========================================================================*
++ * Common
++ *==========================================================================*/
++
++#define TEST_(name) "/voicecall/" name
++
++int main(int argc, char* argv[])
++{
++    char** paths = g_new0(char*, G_N_ELEMENTS(test_ops) + 1);
++    gsize i;
++    int ret;
++
++    g_test_init(&argc, &argv, NULL);
++    gutil_log_default.level = g_test_verbose() ?
++        GLOG_LEVEL_VERBOSE : GLOG_LEVEL_NONE;
++
++    g_test_add_func(TEST_("swap"), test_swap);
++    g_test_add_func(TEST_("swap_failed"), test_swap_failed);
++    g_test_add_data_func(TEST_("swap_tx_failed"),
++        GINT_TO_POINTER(RADIO_TX_STATUS_FAILED), test_swap_tx_status);
++    g_test_add_data_func(TEST_("swap_tx_timeout"),
++        GINT_TO_POINTER(RADIO_TX_STATUS_TIMEOUT), test_swap_tx_status);
++    g_test_add_func(TEST_("swap_no_answer"), test_swap_no_answer);
++    g_test_add_func(TEST_("swap_no_answer_quiet"), test_swap_no_answer_quiet);
++    g_test_add_func(TEST_("late_response"), test_late_response);
++    g_test_add_func(TEST_("mpty"), test_mpty);
++    g_test_add_func(TEST_("poll_in_flight"), test_poll_in_flight);
++    g_test_add_func(TEST_("submit_failed"), test_submit_failed);
++    g_test_add_func(TEST_("hangup_all"), test_hangup_all);
++    g_test_add_func(TEST_("hangup_all_slow"), test_hangup_all_slow);
++    for (i = 0; i < G_N_ELEMENTS(test_ops); i++) {
++        paths[i] = g_strconcat(TEST_("op/"), test_ops[i].name, NULL);
++        g_test_add_data_func(paths[i], test_ops + i, test_op);
++    }
++    g_test_add_func(TEST_("incoming"), test_incoming);
++    g_test_add_func(TEST_("incoming_during_swap"), test_incoming_during_swap);
++    g_test_add_func(TEST_("incoming_no_answer"), test_incoming_no_answer);
++    g_test_add_func(TEST_("dial"), test_dial);
++    g_test_add_func(TEST_("dial_response_first"), test_dial_response_first);
++    g_test_add_func(TEST_("dtmf"), test_dtmf);
++    g_test_add_func(TEST_("remove_pending"), test_remove_pending);
++    g_test_add_func(TEST_("remote_hangup"), test_remote_hangup);
++    ret = g_test_run();
++    g_strfreev(paths);
++    return ret;
++}
++
++/*
++ * Local Variables:
++ * mode: C
++ * c-basic-offset: 4
++ * indent-tabs-mode: nil
++ * End:
++ */
