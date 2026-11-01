@@ -9,7 +9,7 @@ RDEPENDS:${PN} += "sleepd com.webos.service.battery luna-authmanager"
 PV = "1.0.0+git"
 PR = "r12"
 
-SRCREV = "0ee6c66211a691db149065f627b8a0e1dc7a9050"
+SRCREV = "8ea461d026f217329a7fc306cd849b944efe41f2"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 

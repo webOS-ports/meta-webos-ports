@@ -35,9 +35,7 @@ DEPENDS:append:rpi = " virtual/libomxil"
 # webOS-ports/webOS-OSE branch starts from submissions/gav.59 and carries the
 # three patches this recipe used to apply as commits.
 PV = "1.0.0-gav.59+git"
-SRCREV = "2c77c01d4bcc7694a7043fcb6520606d10757727"
-# 2c77c01d is on herrie/uri-video-info (g-media-pipeline PR #2), not yet merged into webOS-ports/webOS-OSE; back to that branch once it is.
-WEBOS_GIT_PARAM_BRANCH = "herrie/uri-video-info"
+SRCREV = "bcae0c0be1646d42574670f1d42846b1358856d1"
 
 WEBOS_REPO_NAME = "g-media-pipeline"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"

@@ -24,9 +24,7 @@ RDEPENDS:${PN} += "maliit-framework-webos qtsvg-plugins qtmultimedia-qmlplugins"
 RRECOMMENDS:${PN} += "hunspell-dictionaries"
 
 
-SRCREV = "d87beb99d89ab5b5d39741c52704f0104883ef00"
-# d87beb99 is on herrie/osk-stuck-repeat (webos-keyboard PR #117), not yet merged into master; back to that branch once it is.
-WEBOS_GIT_PARAM_BRANCH = "herrie/osk-stuck-repeat"
+SRCREV = "6167ba1e435abacc39b3a6cf22cccb78e13e5cc1"
 PV = "0.99.2+git"
 PR = "r33"
 

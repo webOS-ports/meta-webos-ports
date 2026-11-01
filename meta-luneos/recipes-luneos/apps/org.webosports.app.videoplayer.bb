@@ -4,9 +4,7 @@ LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=db37b6ead2dec60580595736ff983452"
 
 PV = "1.0.0+git"
-SRCREV = "25bca8f850dd23e52ed366abf6ea24895ae1b511"
-# 25bca8f8 is on herrie/media-session (org.webosports.app.videoplayer PR #5), not yet merged into master; back to that branch once it is.
-WEBOS_GIT_PARAM_BRANCH = "herrie/media-session"
+SRCREV = "913e64a5126cb222090bacfaf9913dfafd78d190"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
