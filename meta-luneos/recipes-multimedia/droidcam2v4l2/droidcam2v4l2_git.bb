@@ -22,6 +22,7 @@ SRC_URI = "git://github.com/FuriLabs/droidcam2v4l2.git;branch=forky;protocol=htt
 "
 SRCREV = "6e7970d83efe290565dc6cd91fb2224d56998291"
 PV = "0.0+git"
+PR = "r1"
 
 DEPENDS = "glib-2.0 droidmedia libhybris libyuv"
 
