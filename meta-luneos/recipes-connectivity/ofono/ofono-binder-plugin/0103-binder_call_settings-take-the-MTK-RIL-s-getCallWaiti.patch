@@ -1,0 +1,66 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] binder_call_settings: take the MTK RIL's getCallWaiting
+ response
+
+VoiceCallWaiting never gets the real value on the Mindphone (MT6739), and
+every query logs:
+
+  Unexpected getCallWaiting response 31
+
+radio::getCallWaitingResponse() in the vendor's librilfusion.so calls
+vtable slot 0xac, which is getClirResponse, instead of 0xbc. The serial
+and the error are right, and the two arguments are still the (enable,
+serviceClass) that were meant for getCallWaitingResponse, so the
+response is good as it is. The radio_client matches responses by serial,
+so it can't be the reply to something else.
+
+Take that response as well, for the HIDL interface, the only one which
+the workaround is known to be needed for. Upstream dropped the check
+altogether in aeb396b, which would hide other mixups here. Anything else
+is still reported, and what comes with an error is still an error.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [works around a vendor RIL bug, upstream no longer checks the response code]
+---
+ src/binder_call_settings.c | 21 ++++++++++++++++++---
+ 1 file changed, 18 insertions(+), 3 deletions(-)
+
+diff --git a/src/binder_call_settings.c b/src/binder_call_settings.c
+index 4011ba0..0c73bcf 100644
+--- a/src/binder_call_settings.c
++++ b/src/binder_call_settings.c
+@@ -186,6 +186,23 @@ binder_call_settings_cw_query_ok(
+     return FALSE;
+ }
+ 
++/*
++ * radio::getCallWaitingResponse() in librilfusion.so (MTK) calls the wrong
++ * vtable slot, so the result of getCallWaiting arrives as getClirResponse.
++ * The serial is the right one and the two arguments are the (enable,
++ * serviceClass) of getCallWaitingResponse, so it's what was asked for.
++ */
++static
++gboolean
++binder_call_settings_cw_resp_ok(
++    const BinderCallSettings* self,
++    guint32 resp)
++{
++    return (self->interface_aidl == RADIO_VOICE_INTERFACE) ?
++        (resp == RADIO_VOICE_RESP_GET_CALL_WAITING) :
++        (resp == RADIO_RESP_GET_CALL_WAITING || resp == RADIO_RESP_GET_CLIR);
++}
++
+ static
+ void
+ binder_call_settings_cw_query_cb(
+@@ -200,9 +217,7 @@ binder_call_settings_cw_query_cb(
+     const BinderCallSettingsCbData* cbd = user_data;
+ 
+     if (status == RADIO_TX_STATUS_OK) {
+-        guint32 code = cbd->self->interface_aidl == RADIO_VOICE_INTERFACE ?
+-            RADIO_VOICE_RESP_GET_CALL_WAITING : RADIO_RESP_GET_CALL_WAITING;
+-        if (resp == code) {
++        if (binder_call_settings_cw_resp_ok(cbd->self, resp)) {
+             if (error == RADIO_ERROR_NONE) {
+                 if (binder_call_settings_cw_query_ok(cbd, args)) {
+                     return;
