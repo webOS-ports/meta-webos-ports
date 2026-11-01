@@ -332,16 +332,23 @@ disable_external_camera() {
 # loop is back. So the new definition has no interface line, no class and is
 # disabled.
 #
-# It must say "override" and it must be this path. /system/etc/init/init.waydroid.rc
-# declares the service too, and /vendor/etc/init is parsed after /system/etc/init:
-# the journal shows the stock vendor file being refused with "ignored duplicate
-# definition of service". Shadowing it through the overlay turns that into a
-# replacement, and leaves the system image alone.
+# It must say "override" and it must live in /system/etc/init, after
+# init.waydroid.rc, which declares the service too. /vendor/etc/init is no use:
+# it is parsed later, but init then logs "overrides another service across the
+# treble boundary" and the system definition stays, so the service keeps
+# restarting. A system file does not cross that boundary, and sorting after
+# init.waydroid.rc is what the "zz" in the name is for. The stock vendor file
+# stays as it is, and init refuses it as a duplicate. The overlay only adds a
+# file, so the system image is left alone.
 #
 # The flag is read every boot and the file taken away again without it, so
 # dropping the deviceinfo key is all it takes to undo this.
 disable_camera_provider() {
-    out=/var/lib/waydroid/overlay/vendor/etc/init/android.hardware.camera.provider@2.4-service.rc
+    out=/var/lib/waydroid/overlay/system/etc/init/zz-luneos-no-camera.rc
+    old=/var/lib/waydroid/overlay/vendor/etc/init/android.hardware.camera.provider@2.4-service.rc
+
+    # Earlier versions of this function put the mask there.
+    rm -f "$old" || return 1
 
     if [ ! -e /run/luneos-device/no-camera ]; then
         [ -e "$out" ] || return 0
