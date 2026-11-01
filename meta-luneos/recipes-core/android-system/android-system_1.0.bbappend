@@ -1,5 +1,8 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
+# start-android-hals.sh is ours, on top of the recipe's PR.
+PR:append = ".1"
+
 SRC_URI += " \
     file://change-before-dependencies.conf \
 "
