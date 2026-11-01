@@ -7,7 +7,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 PE = "1"
 PV = "2.0.1-2+git"
-SRCREV = "60e003a785950346baf08552a74d4f5fb3879c3b"
+SRCREV = "1b9563e3daf0a6df383d3d25f29ebf59e90f9a43"
 WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
 PR = "r2"
 

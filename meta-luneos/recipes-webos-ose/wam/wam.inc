@@ -18,7 +18,8 @@ RDEPENDS:${PN} += "util-linux"
 VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_cpushareholder}"
 
-SRCREV = "f73d1cfb0fc9d16434d4f18f7fa6eaf585b9649a"
+SRCREV = "2ded0003e323bc5da91f2339e6b300e6e5d44691"
+WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
 
 PV = "1.0.2-100"
 

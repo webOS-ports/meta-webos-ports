@@ -17,7 +17,7 @@ RDEPENDS:${PN} += " \
 PE = "1"
 PV = "0.6-0+git"
 
-SRCREV = "ba05312e494529d97285bb9c94ea443594274400"
+SRCREV = "a8f6da84c2c6ed0cd9c6067a1d149274f8449fc7"
 WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
 PR = "r1"
 
