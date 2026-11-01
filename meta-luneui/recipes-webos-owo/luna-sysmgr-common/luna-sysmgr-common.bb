@@ -8,6 +8,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "glib-2.0 luna-prefs luna-service2 json-c nyx-lib libpbnjson sqlite3 pmloglib librolegen serviceinstaller"
 DEPENDS += "qtbase"
 
+PE = "1"
 PV = "3.0.0-4+git"
 
 SRCREV = "b243b5c244c053dfab9fbb86efffa9bf7663dbd5"

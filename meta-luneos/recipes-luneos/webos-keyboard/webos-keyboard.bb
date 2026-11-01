@@ -25,6 +25,7 @@ RRECOMMENDS:${PN} += "hunspell-dictionaries"
 
 
 SRCREV = "6167ba1e435abacc39b3a6cf22cccb78e13e5cc1"
+PE = "1"
 PV = "0.99.2+git"
 PR = "r33"
 

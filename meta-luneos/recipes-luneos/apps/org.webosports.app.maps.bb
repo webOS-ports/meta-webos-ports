@@ -10,6 +10,7 @@ inherit webos_filesystem_paths
 inherit webos_application
 inherit webos_app
 
+PE = "1"
 PV = "0.0.1+git"
 SRCREV = "3d1eec2d5ddc4620c57d2472c01827440dcc3e92"
 

@@ -13,6 +13,7 @@ inherit webos_cmake
 inherit webos_app
 inherit pkgconfig
 
+PE = "1"
 PV = "0.4.0-1+git"
 SRCREV = "27e436c947918e2b4334d33f10304acb10a3d457"
 

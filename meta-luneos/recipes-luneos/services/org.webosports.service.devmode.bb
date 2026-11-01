@@ -8,6 +8,7 @@ inherit allarch
 inherit webos_filesystem_paths
 inherit webos_system_bus
 
+PE = "1"
 PV = "0.1.0+git"
 SRCREV = "1b8bb6fc1ce53cada4c87a640712d3264313f877"
 

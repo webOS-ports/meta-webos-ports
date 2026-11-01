@@ -14,6 +14,7 @@ inherit webos_application
 inherit webos_tweaks
 inherit webos_app
 
+PE = "1"
 PV = "0.1.1-0+git"
 
 SRCREV = "2bc5bca8fae9941afe81172bdb1833a51bead0b1"
