@@ -67,6 +67,7 @@ SRC_URI:append = " \
   file://0128-emulator-do-not-write-to-a-headset-whose-link-has-gone.patch \
   file://0129-smsutil-take-cell-broadcast-topics-up-to-9999.patch \
   file://0130-cbs-a-public-warning-is-not-a-base-station-id.patch \
+  file://0131-unit-decode-the-pages-of-a-real-NL-Alert.patch \
 "
 
 # On Halium the modem is driven by ofono-binder-plugin. The in-tree ril
