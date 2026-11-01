@@ -310,6 +310,67 @@ disable_external_camera() {
     log "no external camera (ignoring the host's V4L2 nodes)"
 }
 
+# ------------------------------------------------------- no camera provider
+#
+# Ignoring the nodes above answers the external provider. The mindphone's
+# HALIUM_11 vendor image has the other one, android.hardware.camera.provider@2.4-service
+# with its legacy/0 instance, and with no camera HAL module in the image to load
+#
+#   CamPrvdr@2.4-legacy: Could not load camera HAL module: -2
+#
+# that exits with status 1 about 130 ms after every start. init restarts it every
+# 5 s for as long as the container runs, some 17,000 times a day, each one with
+# its share of cgroup and task-profile errors in the journal. Waydroid's
+# cameraserver has never had a provider to talk to there, so nothing is lost by
+# not starting it.
+#
+# So where the adaptation says deviceinfo_has_camera="false", replace the service
+# with one that cannot start. It has to be a redefinition. "stop" in an rc file,
+# or ctl.stop, does not hold: cameraserver asking for the provider makes
+# hwservicemanager send ctl.interface_start, init finds the service by its
+# "interface" line, and Service::Start clears the disabled flag - and with it the
+# loop is back. So the new definition has no interface line, no class and is
+# disabled.
+#
+# It must say "override" and it must be this path. /system/etc/init/init.waydroid.rc
+# declares the service too, and /vendor/etc/init is parsed after /system/etc/init:
+# the journal shows the stock vendor file being refused with "ignored duplicate
+# definition of service". Shadowing it through the overlay turns that into a
+# replacement, and leaves the system image alone.
+#
+# The flag is read every boot and the file taken away again without it, so
+# dropping the deviceinfo key is all it takes to undo this.
+disable_camera_provider() {
+    out=/var/lib/waydroid/overlay/vendor/etc/init/android.hardware.camera.provider@2.4-service.rc
+
+    if [ ! -e /run/luneos-device/no-camera ]; then
+        [ -e "$out" ] || return 0
+        rm -f "$out" || return 1
+        log "camera provider no longer masked"
+        return 0
+    fi
+
+    mkdir -p "${out%/*}" || return 1
+    tmp=$out.new
+    {
+        echo '# Written by waydroid-luneos-prepare. This device has no camera to use;'
+        echo '# see disable_camera_provider() there for why the service looks like this.'
+        echo 'service vendor.camera-provider-2-4 /vendor/bin/hw/android.hardware.camera.provider@2.4-service'
+        echo '    override'
+        echo '    disabled'
+        echo '    oneshot'
+        echo '    user cameraserver'
+        echo '    group camera'
+    } > "$tmp" || return 1
+
+    if [ -f "$out" ] && cmp -s "$tmp" "$out"; then
+        rm -f "$tmp"
+        return 0
+    fi
+    mv -f "$tmp" "$out" || return 1
+    log "no camera on this device, masking Android's camera provider"
+}
+
 # ------------------------------------------- SurfaceFlinger configstore props
 #
 # The container runs its own SurfaceFlinger, and SurfaceFlingerProperties falls
@@ -496,6 +557,7 @@ alloc_binder_nodes  || rc=1
 bind_images         || rc=1
 copy_host_hal_libs  || rc=1
 disable_external_camera || rc=1
+disable_camera_provider || rc=1
 
 # refresh_container_config runs "waydroid upgrade -o", which regenerates
 # waydroid_base.prop from scratch. Every append below therefore has to happen
