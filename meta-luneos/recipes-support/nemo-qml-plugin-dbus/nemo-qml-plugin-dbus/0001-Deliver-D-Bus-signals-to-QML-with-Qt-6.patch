@@ -1,0 +1,76 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] Deliver D-Bus signals to QML with Qt 6
+
+Two things stop a signal reaching a function in a DBusInterface on Qt 6. No
+QML installed on LuneOS listened to a signal until now, so neither showed.
+
+signalHandler() passes each argument as its own type. An untyped parameter
+of a QML function is a QVariant, and QMetaMethod::invoke() will not convert:
+"cannot convert formal parameter 0 from QString", and nothing is called.
+Qt 5 passed QVariant for all of them. Pass QVariant where the function
+declares that, and the value itself where it has typed the parameter. To
+know which, the method is looked up first.
+
+demarshallDBusArgument() tested "userType() == typeId()" for "already a
+built-in type". On Qt 5 that compared with type(), which is UserType for
+anything else. On Qt 6 both are the same number, so everything looks built in,
+and a dict arrives in QML as an opaque QDBusArgument with nothing in it.
+
+Checked with the plugin on a private bus against a service emitting (ssa{sv}):
+without the first change the function is not called, without the second
+it gets an empty object, with both it gets the strings and a plain object.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+
+diff --git a/src/nemo-dbus/dbus.cpp b/src/nemo-dbus/dbus.cpp
+index 6d9e255..30414a7 100644
+--- a/src/nemo-dbus/dbus.cpp
++++ b/src/nemo-dbus/dbus.cpp
+@@ -102,7 +102,7 @@ QVariant demarshallDBusArgument(const QVariant &val, int depth)
+             lst << QVariant::fromValue(static_cast<quint8>(arr[i]));
+         res = QVariant::fromValue(lst);
+ #if (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
+-    } else if (type == val.typeId()) {
++    } else if (type < QMetaType::User) {
+ #else
+     } else if (type == val.type()) {
+ #endif
+diff --git a/src/plugin/declarativedbusinterface.cpp b/src/plugin/declarativedbusinterface.cpp
+index 7cc6a80..17b42d5 100644
+--- a/src/plugin/declarativedbusinterface.cpp
++++ b/src/plugin/declarativedbusinterface.cpp
+@@ -935,6 +935,10 @@ void DeclarativeDBusInterface::signalHandler(const QDBusMessage &message)
+ 
+     QGenericArgument args[10];
+ 
++    QMetaMethod method = m_signals.value(message.member());
++    if (!method.isValid())
++        return;
++
+     for (int i = 0; i < qMin(arguments.length(), 10); ++i) {
+         const QVariant &tmp = arguments.at(i);
+         normalized.append(NemoDBus::demarshallDBusArgument(tmp));
+@@ -943,16 +947,17 @@ void DeclarativeDBusInterface::signalHandler(const QDBusMessage &message)
+     for (int i = 0; i < normalized.count(); ++i) {
+         const QVariant &arg = normalized.at(i);
+ #if (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
+-        args[i] = QGenericArgument(QMetaType(arg.metaType()).name(), arg.data());
++        // An untyped parameter of a QML function is a QVariant, and invoke()
++        // does not unwrap one for it: only a typed parameter takes the value.
++        if (method.parameterMetaType(i) == QMetaType::fromType<QVariant>())
++            args[i] = QGenericArgument("QVariant", &arg);
++        else
++            args[i] = QGenericArgument(QMetaType(arg.metaType()).name(), arg.data());
+ #else
+         args[i] = Q_ARG(QVariant, arg);
+ #endif
+     }
+ 
+-    QMetaMethod method = m_signals.value(message.member());
+-    if (!method.isValid())
+-        return;
+-
+     method.invoke(this, args[0], args[1], args[2], args[3], args[4],
+                   args[5], args[6], args[7], args[8], args[9]);
+ }
