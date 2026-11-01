@@ -4,13 +4,13 @@ LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 PV = "1.0.0+git"
-SRCREV = "b7ebae5fc029021ddaf02684703faea6c2d2035c"
+SRCREV = "c8fbc9a00d5390416c36d544cae4e7dc1b50adb0"
 
 # The QML plugin (MusicApp) links TagLib for tags and covers.
 DEPENDS = "qtbase qtdeclarative qtdeclarative-native taglib"
 
 inherit webos_ports_repo
-WEBOS_GIT_PARAM_BRANCH = "main"
+WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 inherit webos_application

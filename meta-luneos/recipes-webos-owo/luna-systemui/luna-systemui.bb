@@ -7,7 +7,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 PE = "1"
 PV = "2.0.1-2+git"
-SRCREV = "7144d2791d1e1aab7d21d70c8e9acbbd454ffd94"
+SRCREV = "94eb8c1a9895717da84dc0b90da5ea3b47dd65ed"
+WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
 PR = "r2"
 
 inherit allarch

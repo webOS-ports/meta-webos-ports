@@ -32,7 +32,8 @@ COMPATIBLE_MACHINE = "^halium$"
 
 PV = "0.1.0-2+git"
 PR = "r17"
-SRCREV = "d01ea62554e388d480cf182116350195217448fd"
+SRCREV = "d4495c0d04e4b03df00f763fc88b6b11de86dad7"
+WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
 
 inherit webos_ports_repo
 inherit webos_cmake

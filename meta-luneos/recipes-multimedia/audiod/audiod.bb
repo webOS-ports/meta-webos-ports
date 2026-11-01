@@ -45,7 +45,8 @@ RDEPENDS:${PN} += "pulseaudio-module-combine-sink"
 # branch, which also starts from the submission below.
 #WEBOS_VERSION = "1.0.0-78_127c6cd6c9247979b4ead42d9b8fc8b5c48b47a2"
 PV = "1.0.0-79+git"
-SRCREV = "e0dcd9d2ab5c22582031cecbc3e9a0794f068eda"
+SRCREV = "f43056c37f048748eb70202b61c1e8b77454a498"
+WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
 PR = "r39"
 
 inherit webos_component

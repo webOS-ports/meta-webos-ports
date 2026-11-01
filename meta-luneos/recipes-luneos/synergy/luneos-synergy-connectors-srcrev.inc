@@ -11,5 +11,5 @@
 # branch only while LuneOS needs that pull request before it is merged. Set it back to main, with
 # LSC_SRCREV on the merge, once it is in.
 #
-LSC_BRANCH = "main"
-LSC_SRCREV = "5b7468e3e86123eff18a97af3b4afd89c7010a5c"
+LSC_BRANCH = "herrie/integration-testing"
+LSC_SRCREV = "8aebf9169f70e76cf7326ea88170ffa61a0e99df"

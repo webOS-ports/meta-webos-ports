@@ -12,7 +12,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 # Keep PV/SRCREV in lockstep with enyo-1.0.bb -- same repo, same revision.
 PV = "1.0-128.2+git"
-SRCREV = "9a2b4ff6cc6c9bbbdc3d6b13b2b94f48ac5a57d6"
+SRCREV = "7d9919c0523b7e456b33ef86dd03a31e9c5f0c3e"
+WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
 
 # The tool ships inside the enyo-1.0 repo, not one named after this recipe, so the
 # repo name has to be overridden -- WEBOS_REPO_NAME otherwise defaults to ${BPN}.

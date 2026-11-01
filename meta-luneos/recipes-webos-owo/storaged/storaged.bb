@@ -23,4 +23,5 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 PV = "2.1.0-5+git"
 PR = "r1"
-SRCREV = "9edd214f97684ca94fec86420b4ef51bcf9d59d5"
+SRCREV = "2e2e9b66bb3f4bf400e67083b8070555b4fc886a"
+WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"

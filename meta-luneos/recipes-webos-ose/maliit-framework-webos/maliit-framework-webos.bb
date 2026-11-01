@@ -19,7 +19,8 @@ RCONFLICTS:${PN} += "imemanager"
 
 PACKAGECONFIG[libim] = "CONFIG+=enable-libim,CONFIG-=enable-libim,libim"
 
-SRCREV = "a4d44f3e94184707d35e5e55883b9837a47368cc"
+SRCREV = "3a57b0f7e270b6b585b558f9c2b74df65ea2b319"
+WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
 
 PV = "0.99.0+20-1040"
 

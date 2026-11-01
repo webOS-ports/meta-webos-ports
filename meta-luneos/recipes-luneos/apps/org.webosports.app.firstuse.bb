@@ -4,7 +4,8 @@ LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-3.0-only;md5=c79ff39f19dfec6d293b95dea7b07891"
 
 PV = "0.3.0-7+git"
-SRCREV = "e61a296631c00e4c785e333987a031fe5c19d3ed"
+SRCREV = "c36a3d15563a105936737c8353b7c68837b8f84f"
+WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
 
 DEPENDS += "qtbase qtdeclarative qtdeclarative-native"
 

@@ -21,7 +21,8 @@ RDEPENDS:${PN} = " \
     python3-json \
 "
 
-SRCREV = "bf3e1bc0b82ab250d1345b36c4ab18b9d9aac03c"
+SRCREV = "ceb24a4e5e9342c082c7bca6b9161da428186ef4"
+WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
 
 PV = "1.0.0-49"
 PR = "r11"

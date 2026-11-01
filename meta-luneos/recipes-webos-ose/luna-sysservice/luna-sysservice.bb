@@ -16,7 +16,8 @@ DEPENDS = "luna-service2 libpbnjson uriparser libxml2 sqlite3 pmloglib nyx-lib l
 
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_ntp} tzcode luna-init"
 
-SRCREV = "73073b9a3e2c5ff7731b9cec7cb82bb9cc98eac9"
+SRCREV = "4e7b6e263d4c48f1097f80bf98be02bbd3fd7522"
+WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
 
 PV = "4.4.0-32"
 

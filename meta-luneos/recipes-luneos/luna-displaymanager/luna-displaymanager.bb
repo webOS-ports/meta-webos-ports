@@ -9,7 +9,8 @@ RDEPENDS:${PN} += "sleepd com.webos.service.battery luna-authmanager"
 PV = "1.0.0+git"
 PR = "r12"
 
-SRCREV = "8ea461d026f217329a7fc306cd849b944efe41f2"
+SRCREV = "51624da5842b38443f879dcc4d5ab7c431faa2e7"
+WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 

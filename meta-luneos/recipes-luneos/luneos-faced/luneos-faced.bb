@@ -24,10 +24,10 @@ RRECOMMENDS:${PN} += "com.webos.service.camera"
 
 PV = "0.1.0-1+git"
 
-SRCREV = "45b4dea077acb59e1c86314586b5a8c540c7bc88"
+SRCREV = "e1059b58b3d692b565d80470145b6167a2a9111e"
 
 inherit webos_ports_repo
-WEBOS_GIT_PARAM_BRANCH = "master"
+WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
 WEBOS_REPO_NAME = "luneos-faced"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
