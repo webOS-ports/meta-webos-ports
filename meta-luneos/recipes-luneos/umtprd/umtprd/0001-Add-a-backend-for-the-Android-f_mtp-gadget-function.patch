@@ -1,0 +1,830 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sun, 1 Nov 2026 10:29:20 +0100
+Subject: [PATCH] Add a backend for the Android f_mtp gadget function
+
+Kernels with the android_usb gadget driver, such as the 3.4 kernels still
+on phones and tablets, have neither configfs nor a FunctionFS MTP
+function: MTP is the driver's own f_mtp, reached through /dev/mtp_usb.
+Enable it with usb_f_mtp_mode 1 and point usb_dev_path at the node.
+
+The driver owns the descriptors, the endpoints and the class requests, and
+it differs from FunctionFS in ways the MTP code cannot see past:
+
+- Each write() ends a USB transfer, with a ZLP when it was packet aligned.
+  A data container written in pieces is therefore gathered and written
+  once, and the MTP code's own ZLP is dropped.
+- Object data goes through MTP_SEND_FILE_WITH_HEADER and MTP_RECEIVE_FILE,
+  the only way to keep one transfer open across the driver's buffers.
+- A host Cancel surfaces as ECANCELED, not as a setup request.
+- Only one ioctl may run at a time, others fail with EBUSY, and events are
+  sent from the inotify thread. Serialize them, or a file transfer loses
+  that race and the rest of its data is parsed as MTP commands.
+- The driver holds one event and waits a second for the host to read it.
+  Many hosts leave the interrupt endpoint unread, so each event would
+  stall the next transfer for that second. After a timeout events are
+  dropped for 30 s.
+- MTP_RECEIVE_FILE cannot recover from a failed file write: it leaves a
+  read queued while the host keeps sending, and the rest of the file is
+  then parsed as commands. Uploads that will not fit are read and dropped
+  instead, and answered with Store Full. If a write fails anyway, umtprd
+  exits with an error, since only a new USB session gets the host back in
+  step; a service manager can restart it.
+
+The driver's container header has a 32-bit length it does not clamp, so
+objects of 4 GB or more cannot be sent to the host.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Upstream-Status: Pending
+---
+ inc/mtp.h                              |   1 +
+ inc/usb_f_mtp.h                        |  61 ++++
+ inc/usb_gadget.h                       |  11 +
+ src/mtp_cfg.c                          |  12 +-
+ src/mtp_operations/mtp_op_sendobject.c |  74 +++++
+ src/mtp_operations/mtp_ops_helpers.c   |  14 +
+ src/umtprd.c                           |  14 +-
+ src/usb_f_mtp.c                        | 386 +++++++++++++++++++++++++
+ src/usb_gadget.c                       |  18 ++
+ 9 files changed, 589 insertions(+), 2 deletions(-)
+ create mode 100644 inc/usb_f_mtp.h
+ create mode 100644 src/usb_f_mtp.c
+
+diff --git a/inc/mtp.h b/inc/mtp.h
+index d814942..b2dac3d 100644
+--- a/inc/mtp.h
++++ b/inc/mtp.h
+@@ -57,6 +57,7 @@ typedef struct mtp_usb_cfg_
+ 	uint16_t usb_dev_version;
+ 	uint16_t usb_max_packet_size;
+ 	uint8_t  usb_functionfs_mode;
++	uint8_t  usb_f_mtp_mode;
+ 
+ 	char usb_device_path[MAX_CFG_STRING_SIZE + 1];
+ 	char usb_endpoint_in[MAX_CFG_STRING_SIZE + 1];
+diff --git a/inc/usb_f_mtp.h b/inc/usb_f_mtp.h
+new file mode 100644
+index 0000000..f3b0491
+--- /dev/null
++++ b/inc/usb_f_mtp.h
+@@ -0,0 +1,61 @@
++/*
++ * uMTP Responder
++ * Android f_mtp (/dev/mtp_usb) USB backend, for kernels with the android_usb
++ * gadget driver and no configfs or FunctionFS MTP function.
++ *
++ * uMTP Responder is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public
++ * License as published by the Free Software Foundation; either
++ * version 3.0 of the License, or (at your option) any later version.
++ *
++ * uMTP Responder is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
++ * General Public License version 3 for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with uMTP Responder; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
++ */
++
++#ifndef _INC_USB_F_MTP_H_
++#define _INC_USB_F_MTP_H_
++
++#include <stdint.h>
++
++#include "usb_gadget.h"
++
++// Largest read() the driver accepts (MTP_BULK_BUFFER_SIZE).
++#define F_MTP_MAX_READ_SIZE 16384
++
++// Largest data container built in memory. Only containers written in several
++// pieces are buffered, which leaves object handle lists: 4 bytes per object.
++#define F_MTP_MAX_CONTAINER_SIZE (16 * 1024 * 1024)
++
++// The driver's container header holds a 32-bit length it does not clamp, so
++// it cannot send an object of 4 GB or more.
++#define F_MTP_MAX_SEND_SIZE (0xFFFFFFFFULL - 12)
++
++// How long events are dropped after the host left one unread.
++#define F_MTP_EVENT_BACKOFF_MS 30000
++
++// Length that tells MTP_RECEIVE_FILE to read up to the first short packet.
++#define F_MTP_UNKNOWN_LENGTH 0xFFFFFFFF
++
++int f_mtp_open(usb_gadget * ctx, const char * path);
++void f_mtp_close(usb_gadget * ctx);
++
++int f_mtp_read(usb_gadget * ctx, unsigned char * buffer, int maxsize);
++int f_mtp_write(usb_gadget * ctx, int channel, unsigned char * buffer, int size);
++
++// Both return 0 when done, -2 when the host cancelled and -1 on failure.
++int f_mtp_send_file(usb_gadget * ctx, int fd, int64_t offset, int64_t length, uint16_t command, uint32_t tx_id);
++int f_mtp_receive_file(usb_gadget * ctx, int fd, int64_t offset, int64_t length);
++// 1 if the filesystem holding fd can take needed more bytes.
++int f_mtp_has_room(int fd, uint64_t needed);
++// Reads and drops the rest of a data phase. 0, -2 if cancelled, -1 on error.
++int f_mtp_discard(usb_gadget * ctx, int64_t length);
++
++int handle_f_mtp(usb_gadget * ctx);
++
++#endif
+diff --git a/inc/usb_gadget.h b/inc/usb_gadget.h
+index a8082be..566bd99 100644
+--- a/inc/usb_gadget.h
++++ b/inc/usb_gadget.h
+@@ -26,6 +26,8 @@
+ #ifndef _INC_USB_GADGET_H_
+ #define _INC_USB_GADGET_H_
+ 
++#include <pthread.h>
++
+ #include <linux/usb/ch9.h>
+ #include <linux/usb/gadgetfs.h>
+ #include <linux/usb/functionfs.h>
+@@ -180,6 +182,15 @@ typedef struct _usb_gadget
+ 	pthread_t thread;
+ 	int thread_not_started;
+ 
++	// Android f_mtp backend: usb_device is /dev/mtp_usb, ep_handles stay unused.
++	int f_mtp;
++	pthread_mutex_t f_mtp_ioctl_mutex;
++	unsigned char * f_mtp_pending;
++	int f_mtp_pending_size;
++	int f_mtp_pending_fill;
++	int64_t f_mtp_events_resume_ms;
++	int f_mtp_lost;
++
+ }usb_gadget;
+ 
+ #endif
+diff --git a/src/mtp_cfg.c b/src/mtp_cfg.c
+index be19111..0e514e3 100644
+--- a/src/mtp_cfg.c
++++ b/src/mtp_cfg.c
+@@ -56,6 +56,7 @@ enum
+ 	USBDEVVERSION_CMD,
+ 	USBMAXPACKETSIZE_CMD,
+ 	USBFUNCTIONFSMODE_CMD,
++	USBFMTPMODE_CMD,
+ 	USBMAXRDBUFFERSIZE_CMD,
+ 	USBMAXWRBUFFERSIZE_CMD,
+ 	READBUFFERSIZE_CMD,
+@@ -466,6 +467,10 @@ static int get_hex_param(mtp_ctx * context, char * line,int cmd)
+ 					context->usb_cfg.usb_functionfs_mode = 0;
+ 			break;
+ 
++			case USBFMTPMODE_CMD:
++				context->usb_cfg.usb_f_mtp_mode = param_value ? 1 : 0;
++			break;
++
+ 			case WAIT_CONNECTION:
+ 				context->usb_cfg.wait_connection = param_value;
+ 			break;
+@@ -607,6 +612,7 @@ kw_list kwlist[] =
+ 	{"read_buffer_cache_size", get_hex_param,   READBUFFERSIZE_CMD},
+ 
+ 	{"usb_functionfs_mode",    get_hex_param,   USBFUNCTIONFSMODE_CMD},
++	{"usb_f_mtp_mode",         get_hex_param,   USBFMTPMODE_CMD},
+ 
+ 	{"usb_dev_path",           get_str_param,   USB_DEV_PATH_CMD},
+ 	{"usb_epin_path",          get_str_param,   USB_EPIN_PATH_CMD},
+@@ -763,7 +769,11 @@ int mtp_load_config_file(mtp_ctx * context, const char * conffile)
+ 	PRINT_MSG("USB Protocol ID : 0x%.2X",context->usb_cfg.usb_protocol);
+ 	PRINT_MSG("USB Device version : 0x%.4X",context->usb_cfg.usb_dev_version);
+ 
+-	if(context->usb_cfg.usb_functionfs_mode)
++	if(context->usb_cfg.usb_f_mtp_mode)
++	{
++		PRINT_MSG("USB Android f_mtp Mode");
++	}
++	else if(context->usb_cfg.usb_functionfs_mode)
+ 	{
+ 		PRINT_MSG("USB FunctionFS Mode");
+ 	}
+diff --git a/src/mtp_operations/mtp_op_sendobject.c b/src/mtp_operations/mtp_op_sendobject.c
+index 08f6848..192d6f4 100644
+--- a/src/mtp_operations/mtp_op_sendobject.c
++++ b/src/mtp_operations/mtp_op_sendobject.c
+@@ -41,6 +41,53 @@
+ #include "mtp_operations.h"
+ 
+ #include "usb_gadget_fct.h"
++#include "usb_f_mtp.h"
++
++// The rest of the data phase, after the part that came with the header.
++static uint32_t receive_f_mtp_data(mtp_ctx * ctx, MTP_PACKET_HEADER * hdr, int file, int first_size, int first_written)
++{
++	int64_t remaining;
++	int64_t expected;
++	off64_t offset;
++
++	if( first_size < 0 )
++		first_size = 0;
++
++	if( hdr->length == F_MTP_UNKNOWN_LENGTH )
++		remaining = F_MTP_UNKNOWN_LENGTH;
++	else
++		remaining = (int64_t)hdr->length - (int64_t)sizeof(MTP_PACKET_HEADER) - first_size;
++
++	// Hosts send objects of 4 GB and up with an unknown length.
++	expected = ( hdr->length == F_MTP_UNKNOWN_LENGTH ) ? (int64_t)ctx->SendObjInfoSize : remaining;
++
++	if( !first_written || ( expected > 0 && !f_mtp_has_room(file, expected) ) )
++	{
++		PRINT_WARN("SEND_OBJECT : no room for this object, discarding the data");
++
++		if( expected > 0 && f_mtp_discard(ctx->usb_ctx, expected) == -2 )
++			return MTP_RESPONSE_NO_RESPONSE;
++
++		return MTP_RESPONSE_STORAGE_FULL;
++	}
++
++	if( remaining <= 0 )
++		return MTP_RESPONSE_OK;
++
++	offset = lseek64(file, 0, SEEK_CUR);
++	if( offset < 0 )
++		return MTP_RESPONSE_GENERAL_ERROR;
++
++	switch( f_mtp_receive_file(ctx->usb_ctx, file, offset, remaining) )
++	{
++		case 0:
++			return MTP_RESPONSE_OK;
++		case -2:
++			return MTP_RESPONSE_NO_RESPONSE;
++		default:
++			return MTP_RESPONSE_INCOMPLETE_TRANSFER;
++	}
++}
+ 
+ uint32_t mtp_op_SendObject(mtp_ctx * ctx,MTP_PACKET_HEADER * mtp_packet_hdr, int * size,uint32_t * ret_params, int * ret_params_size)
+ {
+@@ -49,6 +96,7 @@ uint32_t mtp_op_SendObject(mtp_ctx * ctx,MTP_PACKET_HEADER * mtp_packet_hdr, int
+ 	unsigned char * tmp_ptr;
+ 	int file;
+ 	int flags;
++	int first_written;
+ 	mode_t mode;
+ 	int sz;
+ 
+@@ -107,16 +155,42 @@ uint32_t mtp_op_SendObject(mtp_ctx * ctx,MTP_PACKET_HEADER * mtp_packet_hdr, int
+ 						tmp_ptr = ((unsigned char*)mtp_packet_hdr) ;
+ 						tmp_ptr += sizeof(MTP_PACKET_HEADER);
+ 
++						first_written = 1;
++
+ 						if(sz > 0)
+ 						{
+ 							if( write(file, tmp_ptr, sz) != sz)
+ 							{
+ 								// TODO : Handle this error case properly
++								first_written = 0;
+ 							}
+ 
+ 							ctx->SendObjInfoSize -= sz;
+ 						}
+ 
++						if( ((usb_gadget *)ctx->usb_ctx)->f_mtp )
++						{
++							response_code = receive_f_mtp_data(ctx, mtp_packet_hdr, file, sz, first_written);
++
++							if( response_code == MTP_RESPONSE_STORAGE_FULL &&
++								mtp_packet_hdr->code != MTP_OPERATION_SEND_PARTIAL_OBJECT &&
++								ftruncate(file, 0) != 0 )
++							{
++								PRINT_WARN("SEND_OBJECT : can't empty the partial file");
++							}
++
++							entry->size = lseek64(file, 0, SEEK_END);
++
++							ctx->transferring_file_data = 0;
++
++							if( mtp_packet_hdr->code != MTP_OPERATION_SEND_PARTIAL_OBJECT )
++								entry_close(ctx->fs_db, entry);
++
++							pthread_mutex_unlock( &ctx->inotify_mutex );
++
++							return response_code;
++						}
++
+ 						tmp_ptr = ctx->rdbuffer2;
+ 						if( sz == ( ctx->usb_rd_buffer_max_size - sizeof(MTP_PACKET_HEADER) ) )
+ 						{
+diff --git a/src/mtp_operations/mtp_ops_helpers.c b/src/mtp_operations/mtp_ops_helpers.c
+index 5ba6e2e..93764bd 100644
+--- a/src/mtp_operations/mtp_ops_helpers.c
++++ b/src/mtp_operations/mtp_ops_helpers.c
+@@ -37,6 +37,7 @@
+ #include "mtp_constant.h"
+ #include "mtp_operations.h"
+ #include "usb_gadget_fct.h"
++#include "usb_f_mtp.h"
+ #include "inotify.h"
+ 
+ #include "logs_out.h"
+@@ -95,6 +96,19 @@ mtp_size send_file_data( mtp_ctx * ctx, fs_entry * entry,mtp_offset offset, mtp_
+ 	{
+ 		ctx->transferring_file_data = 1;
+ 
++		if( ((usb_gadget *)ctx->usb_ctx)->f_mtp )
++		{
++			// The driver builds the header from these two fields.
++			int ret = f_mtp_send_file(ctx->usb_ctx, file, offset, actualsize,
++						  peek(ctx->wrbuffer, 6, 2), peek(ctx->wrbuffer, 8, 4));
++
++			ctx->transferring_file_data = 0;
++
++			entry_close( ctx->fs_db, entry );
++
++			return ret ? (mtp_size)ret : actualsize;
++		}
++
+ 		j = 0;
+ 		do
+ 		{
+diff --git a/src/umtprd.c b/src/umtprd.c
+index 93fb167..dc805ac 100644
+--- a/src/umtprd.c
++++ b/src/umtprd.c
+@@ -43,6 +43,7 @@
+ 
+ #include "usb_gadget.h"
+ #include "usb_gadget_fct.h"
++#include "usb_f_mtp.h"
+ 
+ #include "logs_out.h"
+ 
+@@ -109,7 +110,18 @@ static int main_thread(const char *conffile)
+ 			sd_notify(0, "READY=1");
+ #endif
+ 
+-			if( mtp_context->usb_cfg.usb_functionfs_mode )
++			if( usb_ctx->f_mtp )
++			{
++				PRINT_DEBUG("uMTP Responder : f_mtp Mode - entering handle_f_mtp");
++				if( handle_f_mtp(usb_ctx) < 0 )
++				{
++					// Only a new USB session gets the host back in step.
++					PRINT_ERROR("f_mtp : session lost, exiting");
++					retcode = -3;
++					loop_continue = 0;
++				}
++			}
++			else if( mtp_context->usb_cfg.usb_functionfs_mode )
+ 			{
+ 				PRINT_DEBUG("uMTP Responder : FunctionFS Mode - entering handle_ffs_ep0");
+ 				handle_ffs_ep0(usb_ctx);
+diff --git a/src/usb_f_mtp.c b/src/usb_f_mtp.c
+new file mode 100644
+index 0000000..cd8240b
+--- /dev/null
++++ b/src/usb_f_mtp.c
+@@ -0,0 +1,386 @@
++/*
++ * uMTP Responder
++ * Android f_mtp (/dev/mtp_usb) USB backend, for kernels with the android_usb
++ * gadget driver and no configfs or FunctionFS MTP function.
++ *
++ * uMTP Responder is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public
++ * License as published by the Free Software Foundation; either
++ * version 3.0 of the License, or (at your option) any later version.
++ *
++ * uMTP Responder is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
++ * General Public License version 3 for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with uMTP Responder; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
++ */
++
++/*
++ * The driver owns the USB function: descriptors, endpoints and the class
++ * requests, including Cancel. It differs from the FunctionFS endpoints in
++ * ways the MTP layer has to be shielded from:
++ *
++ * - One device node stands for all three endpoints.
++ * - A write() whose size is a multiple of the packet size is followed by a
++ *   ZLP, so each write() ends a USB transfer. A container has to go out in
++ *   one write(), and the MTP layer's own ZLP must not go out at all.
++ * - A received ZLP never reaches read().
++ * - A host Cancel surfaces as ECANCELED, not as a setup packet.
++ * - File data has to go through ioctls: only they keep one transfer open
++ *   across the driver's buffers.
++ * - The driver takes one ioctl at a time and fails any other with EBUSY, and
++ *   events come from the inotify thread, so ioctls are serialized here. An
++ *   event raised during a file transfer waits for the end of the transfer.
++ * - The driver has room for one event and waits 1 s for the host to read it.
++ *   Many hosts never read the interrupt endpoint, and each further event
++ *   would then hold up the next transfer for that second, so sending stops
++ *   for a while after a timeout.
++ * - MTP_RECEIVE_FILE cannot recover from a failed file write: it leaves a read
++ *   queued and the host still sending, so the rest of the file would be taken
++ *   for commands. Uploads that will not fit are discarded with read() instead,
++ *   and if a write fails anyway the only way back is a new USB session.
++ */
++
++#include "buildconf.h"
++
++#include <errno.h>
++#include <fcntl.h>
++#include <pthread.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++
++#include <sys/ioctl.h>
++#include <sys/statvfs.h>
++#include <time.h>
++
++#include "mtp.h"
++
++#include "usb_f_mtp.h"
++#include "usb_gadget_fct.h"
++
++#include "logs_out.h"
++
++// From the kernel's include/linux/usb/f_mtp.h, which is not exported to
++// userspace on the kernels this backend is for.
++struct mtp_file_range {
++	int fd;
++	int64_t offset;
++	int64_t length;
++	uint16_t command;
++	uint32_t transaction_id;
++};
++
++struct mtp_event {
++	size_t length;
++	void * data;
++};
++
++#define MTP_RECEIVE_FILE          _IOW('M', 1, struct mtp_file_range)
++#define MTP_SEND_EVENT            _IOW('M', 3, struct mtp_event)
++#define MTP_SEND_FILE_WITH_HEADER _IOW('M', 4, struct mtp_file_range)
++
++extern void* io_thread(void* arg);
++
++static void drop_pending(usb_gadget * ctx)
++{
++	free(ctx->f_mtp_pending);
++	ctx->f_mtp_pending = NULL;
++	ctx->f_mtp_pending_size = 0;
++	ctx->f_mtp_pending_fill = 0;
++}
++
++int f_mtp_open(usb_gadget * ctx, const char * path)
++{
++	ctx->usb_device = open(path, O_RDWR);
++	if (ctx->usb_device < 0)
++	{
++		PRINT_ERROR("f_mtp : Can't open %s : %s", path, strerror(errno));
++		return -1;
++	}
++
++	pthread_mutex_init(&ctx->f_mtp_ioctl_mutex, NULL);
++	ctx->f_mtp = 1;
++
++	return 0;
++}
++
++void f_mtp_close(usb_gadget * ctx)
++{
++	drop_pending(ctx);
++	pthread_mutex_destroy(&ctx->f_mtp_ioctl_mutex);
++}
++
++int f_mtp_read(usb_gadget * ctx, unsigned char * buffer, int maxsize)
++{
++	int ret;
++
++	if (!buffer || maxsize <= 0)
++		return -1;
++
++	if (maxsize > F_MTP_MAX_READ_SIZE)
++		maxsize = F_MTP_MAX_READ_SIZE;
++
++	// The previous operation is over if the host is sending again.
++	if (ctx->f_mtp_pending)
++	{
++		PRINT_WARN("f_mtp : dropping a partial container (%d of %d bytes)",
++			ctx->f_mtp_pending_fill, ctx->f_mtp_pending_size);
++		drop_pending(ctx);
++	}
++
++	ret = read(ctx->usb_device, buffer, maxsize);
++	if (ret < 0)
++	{
++		// Same as a ZLP for the callers: nothing to do, read again.
++		if (errno == ECANCELED || errno == EINTR)
++			return 0;
++
++		PRINT_DEBUG("f_mtp : read failed : %s", strerror(errno));
++	}
++
++	return ret;
++}
++
++static int send_container(usb_gadget * ctx, unsigned char * buffer, int size)
++{
++	int ret;
++
++	ret = write(ctx->usb_device, buffer, size);
++	if (ret < 0 && errno != ECANCELED)
++	{
++		PRINT_DEBUG("f_mtp : write failed : %s", strerror(errno));
++	}
++
++	return ret;
++}
++
++static int queue_container(usb_gadget * ctx, unsigned char * buffer, int size)
++{
++	uint32_t length;
++
++	if (!ctx->f_mtp_pending)
++	{
++		if (size < 4)
++			return send_container(ctx, buffer, size);
++
++		length = (uint32_t)buffer[0] |
++			 ((uint32_t)buffer[1] << 8) |
++			 ((uint32_t)buffer[2] << 16) |
++			 ((uint32_t)buffer[3] << 24);
++
++		if (length <= (uint32_t)size || length == 0xFFFFFFFF)
++			return send_container(ctx, buffer, size);
++
++		if (length > F_MTP_MAX_CONTAINER_SIZE)
++		{
++			PRINT_ERROR("f_mtp : %u byte container is too large", length);
++			return -1;
++		}
++
++		ctx->f_mtp_pending = malloc(length);
++		if (!ctx->f_mtp_pending)
++			return -1;
++
++		ctx->f_mtp_pending_size = length;
++		ctx->f_mtp_pending_fill = 0;
++	}
++
++	if (size > ctx->f_mtp_pending_size - ctx->f_mtp_pending_fill)
++	{
++		PRINT_ERROR("f_mtp : data past the end of the container");
++		drop_pending(ctx);
++		return -1;
++	}
++
++	memcpy(ctx->f_mtp_pending + ctx->f_mtp_pending_fill, buffer, size);
++	ctx->f_mtp_pending_fill += size;
++
++	if (ctx->f_mtp_pending_fill == ctx->f_mtp_pending_size)
++	{
++		int ret;
++
++		ret = send_container(ctx, ctx->f_mtp_pending, ctx->f_mtp_pending_size);
++		drop_pending(ctx);
++
++		return ret < 0 ? ret : size;
++	}
++
++	return size;
++}
++
++static int64_t now_ms(void)
++{
++	struct timespec ts;
++
++	clock_gettime(CLOCK_MONOTONIC, &ts);
++
++	return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
++}
++
++int f_mtp_write(usb_gadget * ctx, int channel, unsigned char * buffer, int size)
++{
++	struct mtp_event event;
++	int ret;
++	int err;
++
++	if (!buffer || size < 0)
++		return -1;
++
++	if (channel == EP_DESCRIPTOR_INT_IN)
++	{
++		event.length = size;
++		event.data = buffer;
++
++		pthread_mutex_lock(&ctx->f_mtp_ioctl_mutex);
++		if (now_ms() < ctx->f_mtp_events_resume_ms)
++		{
++			pthread_mutex_unlock(&ctx->f_mtp_ioctl_mutex);
++			return -1;
++		}
++
++		ret = ioctl(ctx->usb_device, MTP_SEND_EVENT, &event);
++		err = errno;
++		if (ret < 0 && err == ETIME)
++			ctx->f_mtp_events_resume_ms = now_ms() + F_MTP_EVENT_BACKOFF_MS;
++		pthread_mutex_unlock(&ctx->f_mtp_ioctl_mutex);
++
++		if (ret < 0)
++		{
++			PRINT_DEBUG("f_mtp : event not sent : %s", strerror(err));
++		}
++
++		return ret < 0 ? -1 : size;
++	}
++
++	if (channel != EP_DESCRIPTOR_IN)
++		return -1;
++
++	// The driver has sent any ZLP this transfer needed.
++	if (!size)
++		return 0;
++
++	return queue_container(ctx, buffer, size);
++}
++
++static int file_ioctl(usb_gadget * ctx, unsigned long request, struct mtp_file_range * range)
++{
++	int ret;
++	int err;
++
++	pthread_mutex_lock(&ctx->f_mtp_ioctl_mutex);
++	ret = ioctl(ctx->usb_device, request, range);
++	err = errno;
++	pthread_mutex_unlock(&ctx->f_mtp_ioctl_mutex);
++
++	if (ret == 0)
++		return 0;
++
++	if (err == ECANCELED)
++		return -2;
++
++	PRINT_ERROR("f_mtp : file transfer failed : %s", strerror(err));
++
++	errno = err;
++
++	return -1;
++}
++
++int f_mtp_send_file(usb_gadget * ctx, int fd, int64_t offset, int64_t length, uint16_t command, uint32_t tx_id)
++{
++	struct mtp_file_range range;
++
++	if (length < 0 || (uint64_t)length > F_MTP_MAX_SEND_SIZE)
++	{
++		PRINT_ERROR("f_mtp : can't send %lld bytes", (long long)length);
++		return -1;
++	}
++
++	memset(&range, 0, sizeof(range));
++	range.fd = fd;
++	range.offset = offset;
++	range.length = length;
++	range.command = command;
++	range.transaction_id = tx_id;
++
++	return file_ioctl(ctx, MTP_SEND_FILE_WITH_HEADER, &range);
++}
++
++int f_mtp_receive_file(usb_gadget * ctx, int fd, int64_t offset, int64_t length)
++{
++	struct mtp_file_range range;
++	int ret;
++
++	memset(&range, 0, sizeof(range));
++	range.fd = fd;
++	range.offset = offset;
++	range.length = length;
++
++	ret = file_ioctl(ctx, MTP_RECEIVE_FILE, &range);
++	if (ret == -1 && errno == EIO)
++	{
++		ctx->f_mtp_lost = 1;
++		ctx->stop = 1;
++	}
++
++	return ret;
++}
++
++int f_mtp_has_room(int fd, uint64_t needed)
++{
++	struct statvfs st;
++
++	// Say yes if the question can't be answered: the transfer may still work.
++	if (fstatvfs(fd, &st) != 0)
++		return 1;
++
++	return (uint64_t)st.f_bavail * st.f_frsize >= needed;
++}
++
++int f_mtp_discard(usb_gadget * ctx, int64_t length)
++{
++	unsigned char buffer[F_MTP_MAX_READ_SIZE];
++	int ret;
++
++	while (length > 0)
++	{
++		ret = read(ctx->usb_device, buffer, sizeof(buffer));
++		if (ret < 0)
++		{
++			if (errno == ECANCELED || errno == EINTR)
++				return -2;
++
++			return -1;
++		}
++
++		length -= ret;
++
++		// A short packet ends the data phase whatever the length said.
++		if (ret < (int)sizeof(buffer))
++			break;
++	}
++
++	return 0;
++}
++
++int handle_f_mtp(usb_gadget * ctx)
++{
++	ctx->stop = 0;
++
++	ctx->thread_not_started = pthread_create(&ctx->thread, NULL, io_thread, ctx);
++	if (ctx->thread_not_started)
++	{
++		PRINT_ERROR("f_mtp : Can't start the I/O thread");
++		return -1;
++	}
++
++	while (!ctx->stop && !shutdown_requested)
++		usleep(100 * 1000);
++
++	return ctx->f_mtp_lost ? -1 : 0;
++}
+diff --git a/src/usb_gadget.c b/src/usb_gadget.c
+index 74d9d2a..baaad30 100644
+--- a/src/usb_gadget.c
++++ b/src/usb_gadget.c
+@@ -57,6 +57,7 @@
+ #include "usb_gadget.h"
+ 
+ #include "usb_gadget_fct.h"
++#include "usb_f_mtp.h"
+ 
+ #include "logs_out.h"
+ 
+@@ -79,6 +80,9 @@ int read_usb(usb_gadget * ctx, unsigned char * buffer, int maxsize)
+ {
+ 	int ret;
+ 
++	if(ctx->f_mtp)
++		return f_mtp_read(ctx, buffer, maxsize);
++
+ 	ret = -1;
+ 	if(ctx->ep_handles[EP_DESCRIPTOR_OUT] >= 0 && maxsize && buffer)
+ 	{
+@@ -95,6 +99,9 @@ int write_usb(usb_gadget * ctx, int channel, unsigned char * buffer, int size)
+ 	struct pollfd pfd;
+ #endif
+ 
++	if(ctx->f_mtp)
++		return f_mtp_write(ctx, channel, buffer, size);
++
+ 	ret = -1;
+ 	if ( channel < EP_NB_OF_DESCRIPTORS )
+ 	{
+@@ -980,6 +987,14 @@ usb_gadget * init_usb_mtp_gadget(mtp_ctx * ctx)
+ 			i++;
+ 		}
+ 
++		if( ctx->usb_cfg.usb_f_mtp_mode )
++		{
++			if( f_mtp_open(usbctx, ctx->usb_cfg.usb_device_path) )
++				goto init_error;
++
++			return usbctx;
++		}
++
+ 		add_usb_string(usbctx, STRINGID_MANUFACTURER, ctx->usb_cfg.usb_string_manufacturer);
+ 		add_usb_string(usbctx, STRINGID_PRODUCT,      ctx->usb_cfg.usb_string_product);
+ 		add_usb_string(usbctx, STRINGID_SERIAL,       ctx->usb_cfg.usb_string_serial);
+@@ -1199,6 +1214,9 @@ void deinit_usb_mtp_gadget(usb_gadget * usbctx)
+ 			usbctx->thread_not_started = 1;
+ 		}
+ 
++		if(usbctx->f_mtp)
++			f_mtp_close(usbctx);
++
+ 		if(usbctx->usb_config)
+ 		{
+ 			free(usbctx->usb_config);
+-- 
+2.53.0
+
