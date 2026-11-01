@@ -18,7 +18,7 @@ RPROVIDES:${PN}-examples = " \
     eos.widgetgallery \
 "
 
-SRCREV = "bfeb43a377d2f7ad0660281bb787876110d552bf"
+SRCREV = "8487cb17abaec0523f466c37a952d37e44a9fb09"
 
 PV = "1.0.0-172"
 

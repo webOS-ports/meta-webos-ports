@@ -12,4 +12,4 @@
 # LSC_SRCREV on the merge, once it is in.
 #
 LSC_BRANCH = "herrie/integration-testing"
-LSC_SRCREV = "8aebf9169f70e76cf7326ea88170ffa61a0e99df"
+LSC_SRCREV = "0b00ac880a74302eb3bfcaaf8ce80bb2fc970789"
