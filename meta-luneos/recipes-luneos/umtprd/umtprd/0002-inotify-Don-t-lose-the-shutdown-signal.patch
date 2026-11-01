@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sun, 1 Nov 2026 10:29:20 +0100
+Subject: [PATCH] inotify : Don't lose the shutdown signal
+
+inotify_handler_deinit() sends SIGUSR1 once and joins the thread. The
+signal only ends a blocked read(), and closing a session removes every
+watch, so the thread is often busy with the resulting events when it
+lands. It then goes back to read() for good and the join never returns:
+the process hangs on SIGTERM whenever a host is attached, until a service
+manager kills it.
+
+Send the signal until the thread has exited.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Upstream-Status: Pending
+---
+ src/inotify.c | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/src/inotify.c b/src/inotify.c
+index 8f56637..5143068 100644
+--- a/src/inotify.c
++++ b/src/inotify.c
+@@ -23,8 +23,10 @@
+  * @author Jean-François DEL NERO <Jean-Francois.DELNERO@viveris.fr>
+  */
+ 
++#define _GNU_SOURCE
+ #include "buildconf.h"
+ 
++#include <errno.h>
+ #include <inttypes.h>
+ #include <stdio.h>
+ #include <pthread.h>
+@@ -356,8 +358,14 @@ int inotify_handler_deinit( mtp_ctx * ctx )
+ 	{
+ 		if( ctx->inotify_fd != -1 )
+ 		{
+-			pthread_kill( ctx->inotify_thread, SIGUSR1);
+-			pthread_join( ctx->inotify_thread, &ret);
++			// A signal only ends a blocked read(). Closing a session removes every
++			// watch, so the thread may be busy with the resulting events when the
++			// signal lands, and it would then go back to read() for good.
++			do
++			{
++				pthread_kill( ctx->inotify_thread, SIGUSR1);
++				usleep(10 * 1000);
++			}while( pthread_tryjoin_np( ctx->inotify_thread, &ret ) == EBUSY );
+ 			close( ctx->inotify_fd );
+ 			ctx->inotify_fd = -1;
+ 		}
+-- 
+2.53.0
+

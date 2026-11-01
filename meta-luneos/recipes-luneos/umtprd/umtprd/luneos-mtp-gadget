@@ -12,13 +12,21 @@
 #   cleanup - unlink the function, restore the gadget to its previous state,
 #             stop serving. Run after umtprd stops.
 #
-# Two device classes, detected at runtime:
+# Three device classes, detected at runtime:
 #   halium   - the Android side already owns a configfs gadget bound to a UDC
 #              (typically with ffs.adb). We add our OWN dedicated ffs instance
 #              (never the contended android 'mtp' instance) beside it and
 #              rebind; adb stays linked so it returns after the brief rebind.
 #   mainline - no gadget is bound. We create a standalone gadget with just the
 #              MTP function.
+#   android_usb - no configfs gadget at all (3.4 kernels): the kernel's own
+#              android_usb driver holds the function list, and its f_mtp
+#              function is served through /dev/mtp_usb, so umtprd runs with its
+#              own config (see umtprd.service) and there is no FunctionFS. MTP
+#              is added to the list in front of adb while umtprd runs. It must
+#              not be in the list otherwise: a host then finds an MTP interface
+#              nothing answers on, and resets the device trying to open it,
+#              which takes adb down with it.
 #
 # Proven on sargo (Pixel 3a, halium): umtprd serves MTP browsable from
 # kio-mtp/Dolphin with adb preserved.
@@ -30,6 +38,9 @@ FUNC=ffs.$INST                 # configfs function dir name
 FFS=/dev/ffs-$INST             # FunctionFS mount point
 STATE=/run/luneos-mtp
 OWN_GADGET=$GROOT/luneos       # gadget we create in mainline mode
+ANDROID_USB=/sys/class/android_usb/android0
+MTP_DEV=/dev/mtp_usb           # f_mtp's device node
+F_MTP_CONF=/etc/umtprd/umtprd-f_mtp.conf
 
 log(){ logger -t luneos-mtp-gadget "$@"; }
 die(){ log "$@"; exit 1; }
@@ -109,10 +120,66 @@ restore_ids(){   # $1=gadget dir; UDC must be unbound
     [ -s "$STATE/idProduct" ] && cat "$STATE/idProduct" > "$_g/idProduct"
 }
 
+# Without "mtp", which a crash can leave in the list. Sets adb_function to the
+# name the adb function goes by in that list, if it is there.
+android_functions_without_mtp(){
+    adb_function=""
+    _list=""
+    _ifs=$IFS; IFS=,
+    for _f in $(cat "$ANDROID_USB/functions"); do
+        [ "$_f" = mtp ] && continue
+        case "$_f" in ffs|adb) adb_function=$_f ;; esac
+        _list="$_list${_list:+,}$_f"
+    done
+    IFS=$_ifs
+    echo "$_list"
+}
+
+android_prepare(){
+    android_functions_without_mtp > "$STATE/functions"
+    cat "$ANDROID_USB/idProduct" > "$STATE/idProduct"
+    cat "$ANDROID_USB/enable" > "$STATE/enable"
+    echo "UMTPRD_ARGS=-conf $F_MTP_CONF" > "$STATE/umtprd.env"
+    echo android_usb > "$STATE/mode"
+    log "prepared f_mtp on android_usb"
+}
+
+android_bind(){
+    android_functions_without_mtp > /dev/null
+    _list=$(cat "$STATE/functions")
+    _pid=4EE1
+    [ -n "$adb_function" ] && _pid=4EE2
+
+    hold_marker
+    echo 0 > "$ANDROID_USB/enable"
+    echo "$_pid" > "$ANDROID_USB/idProduct"
+    # MTP on interface 0, as described in set_mtp_ids above.
+    echo "mtp${_list:+,}$_list" > "$ANDROID_USB/functions"
+    echo 1 > "$ANDROID_USB/enable"
+    release_marker_later
+    log "bound f_mtp on android_usb, presenting 0x18d1:0x$_pid"
+}
+
+android_cleanup(){
+    hold_marker
+    echo 0 > "$ANDROID_USB/enable"
+    cat "$STATE/idProduct" > "$ANDROID_USB/idProduct"
+    cat "$STATE/functions" > "$ANDROID_USB/functions"
+    cat "$STATE/enable" > "$ANDROID_USB/enable"
+    rm -f "$STATE/mode" "$STATE/functions" "$STATE/idProduct" "$STATE/enable" \
+          "$STATE/umtprd.env"
+    release_marker_later
+    log "cleaned up f_mtp on android_usb"
+}
+
 do_prepare(){
     mkdir -p "$STATE"
     [ -d "$GROOT" ] || modprobe libcomposite 2>/dev/null
     mountpoint -q "$CONFIGFS" 2>/dev/null || mount -t configfs none "$CONFIGFS" 2>/dev/null
+    if [ ! -d "$GROOT" ] && [ -c "$MTP_DEV" ] && [ -e "$ANDROID_USB/functions" ]; then
+        android_prepare
+        return
+    fi
     [ -d "$GROOT" ] || die "no usb_gadget support"
 
     gadget=$(find_bound_gadget)
@@ -153,6 +220,10 @@ do_prepare(){
 }
 
 do_bind(){
+    if [ "$(cat "$STATE/mode" 2>/dev/null)" = android_usb ]; then
+        android_bind
+        return
+    fi
     gadget=$(cat "$STATE/gadget" 2>/dev/null); config=$(cat "$STATE/config" 2>/dev/null)
     udc=$(cat "$STATE/udc" 2>/dev/null)
     [ -d "$gadget" ] || die "no prepared gadget"
@@ -192,6 +263,10 @@ do_bind(){
 }
 
 do_cleanup(){
+    if [ "$(cat "$STATE/mode" 2>/dev/null)" = android_usb ]; then
+        android_cleanup
+        return
+    fi
     gadget=$(cat "$STATE/gadget" 2>/dev/null); config=$(cat "$STATE/config" 2>/dev/null)
     udc=$(cat "$STATE/udc" 2>/dev/null); mode=$(cat "$STATE/mode" 2>/dev/null)
     [ -d "$gadget" ] || { rm -rf "$STATE"; exit 0; }
