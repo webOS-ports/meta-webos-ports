@@ -1,5 +1,5 @@
 DESCRIPTION = "Derive device configuration at runtime so one rootfs boots on any device"
-PR = "r14"
+PR = "r15"
 
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
@@ -11,8 +11,9 @@ SECTION = "base"
 # hundred KB.
 PACKAGE_ARCH = "${TUNE_PKGARCH}"
 
-# udevadm for input capability queries, and the container's getprop.
-RDEPENDS:${PN} = "udev"
+# udevadm for input capability queries, and the container's getprop. kmod for
+# the modules a boot image stages.
+RDEPENDS:${PN} = "udev kmod"
 
 inherit systemd
 
