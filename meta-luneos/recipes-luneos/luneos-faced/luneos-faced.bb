@@ -24,7 +24,7 @@ RRECOMMENDS:${PN} += "com.webos.service.camera"
 
 PV = "0.1.0-1+git"
 
-SRCREV = "e1059b58b3d692b565d80470145b6167a2a9111e"
+SRCREV = "307769a7caba13a7e55df7087f2ec2d9b2d12215"
 
 inherit webos_ports_repo
 WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
