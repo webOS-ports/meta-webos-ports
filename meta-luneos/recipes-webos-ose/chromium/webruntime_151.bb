@@ -125,6 +125,13 @@ GN_ARGS:append = " use_vaapi=false"
 # cdm::AddContentDecryptionModules() call on USE_NEVA_CDM to match.
 GN_ARGS:append = " use_neva_cdm=false"
 
+# Widevine, aarch64 only. This builds the host side alone: LuneOS still ships no
+# CDM, and Google's licence rules out putting one in an image or a feed. WAM and
+# browser_shell use the module if it is unpacked in
+# /var/lib/widevine/WidevineCdm, and behave as before if it is not. There is
+# no usable armv7 module, so the other architectures stay off.
+GN_ARGS:append:aarch64 = " enable_widevine=true"
+
 # V8 thread-local storage model.
 # ------------------------------
 # M151's V8 declares g_current_isolate_ and LocalHeap::current_local_heap_ as
