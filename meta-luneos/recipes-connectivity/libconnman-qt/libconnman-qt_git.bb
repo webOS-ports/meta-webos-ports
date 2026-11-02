@@ -15,8 +15,8 @@ SRC_URI = "git://github.com/sailfishos/libconnman-qt.git;protocol=https;branch=m
 # 0001 fixes queued signals overflowing a quint64 (67 signals); 0002 needs it
 # and adds NetworkService.useDeviceMACAddress for connman's per-network MAC
 # address opt-out (connman 0008). 0003 answers connman's RequestBrowser, which
-# otherwise holds up the agent's other requests. All are to be offered to
-# sailfishos.
+# otherwise holds up the agent's other requests. 0001 is sailfishos PR #56. 0002
+# stays here: their connman has no per-network MAC address for it to control.
 SRC_URI += " \
     file://0001-libconnman-qt-Queue-service-signals-in-a-bitset.patch \
     file://0002-libconnman-qt-Add-NetworkService.useDeviceMACAddress.patch \
