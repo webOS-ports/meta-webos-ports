@@ -1,0 +1,128 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Mon, 2 Nov 2026 22:01:17 +0100
+Subject: [PATCH] webOS: let the receiver ask the peer for a keyframe
+
+A decoder that joins a video call mid-stream has nothing to decode until
+the next IDR, and WhatsApp's encoders send IDRs on request rather than
+on a short fixed cadence. The engine already sends PLI and FIR, but only
+from its own ticker, and nothing outside the package can ask for one.
+
+Add Call.RequestPeerKeyframe(). It posts to a one-slot channel, so
+requests coalesce. The RTCP ticker goroutine serves each request with
+the same PLI+FIR pair it already sends. The PLI/FIR send is factored
+into one helper for both paths, so the FIR sequence number stays
+consistent. A request made before the relay allocation is served right
+after it.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ engine_media.go | 37 ++++++++++++++++++++++++-------------
+ livecall.go     | 22 ++++++++++++++++++++++
+ 2 files changed, 46 insertions(+), 13 deletions(-)
+
+diff --git a/engine_media.go b/engine_media.go
+index b4141f6..5ce3cf5 100644
+--- a/engine_media.go
++++ b/engine_media.go
+@@ -557,6 +557,23 @@ func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKe
+ 		const pliGraceTicks = 2
+ 		var firstVideoTick uint64
+ 		var haveFirstVideo bool
++		// PLI then FIR at the peer's video SSRC; reports which of the two could be built.
++		sendKeyframeRequest := func(inGrace bool) (pliOK, firOK bool) {
++			pliPacket, err := videoRtcp.pli(peerVideoSsrc)
++			if err == nil {
++				_, _ = ch.Send(pliPacket)
++				e.c.diag.Emit("rtcp", map[string]any{
++					"event": "pli_sent", "peer_video_ssrc": peerVideoSsrc, "in_grace": inGrace,
++				})
++			}
++			firSeqNr++
++			firPacket, ferr := videoRtcp.fir(peerVideoSsrc, firSeqNr)
++			if ferr == nil {
++				_, _ = ch.Send(firPacket)
++			}
++			return err == nil, ferr == nil
++		}
++		keyframeRequests := call.peerKeyframeRequests()
+ 		doTick := func(now time.Time) bool {
+ 			audioPacket, err := audioRtcp.senderReport(txPipe.SenderStats(), uint64(now.UnixMilli()))
+ 			if err != nil {
+@@ -584,21 +601,10 @@ func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKe
+ 			// survive the clonk-display-startup drop window (see the pliGraceTicks comment above).
+ 			inGraceWindow := haveFirstVideo && sent < firstVideoTick+pliGraceTicks
+ 			if !gv || inGraceWindow {
+-				pliPacket, err := videoRtcp.pli(peerVideoSsrc)
+-				if err == nil {
+-					_, _ = ch.Send(pliPacket)
+-					e.c.diag.Emit("rtcp", map[string]any{
+-						"event": "pli_sent", "peer_video_ssrc": peerVideoSsrc, "in_grace": inGraceWindow,
+-					})
+-				}
+-				firSeqNr++
+-				firPacket, ferr := videoRtcp.fir(peerVideoSsrc, firSeqNr)
+-				if ferr == nil {
+-					_, _ = ch.Send(firPacket)
+-				}
++				pliOK, firOK := sendKeyframeRequest(inGraceWindow)
+ 				if sent%4 == 0 || inGraceWindow {
+ 					log.Info().Uint32("peer_video_ssrc", peerVideoSsrc).Uint8("fir_seq", firSeqNr).
+-						Bool("pli_ok", err == nil).Bool("fir_ok", ferr == nil).Bool("post_video_grace", inGraceWindow).
++						Bool("pli_ok", pliOK).Bool("fir_ok", firOK).Bool("post_video_grace", inGraceWindow).
+ 						Msg("sent PLI+FIR keyframe request")
+ 				}
+ 			}
+@@ -633,6 +639,11 @@ func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKe
+ 				if !doTick(now) {
+ 					return
+ 				}
++			case <-keyframeRequests:
++				pliOK, firOK := sendKeyframeRequest(false)
++				log.Info().Uint32("peer_video_ssrc", peerVideoSsrc).Uint8("fir_seq", firSeqNr).
++					Bool("pli_ok", pliOK).Bool("fir_ok", firOK).
++					Msg("sent requested PLI+FIR keyframe request")
+ 			}
+ 		}
+ 	}()
+diff --git a/livecall.go b/livecall.go
+index c5f85f8..84f6f9d 100644
+--- a/livecall.go
++++ b/livecall.go
+@@ -32,6 +32,7 @@ type Call struct {
+ 	onVideoState           func(VideoState)
+ 	onVideoKeyframeRequest func()
+ 	onReaction             func(CallReaction)
++	peerKeyframeReq        chan struct{}
+ }
+ 
+ // CallReaction is a transient emoji reaction received over the call's RTC app-data stream.
+@@ -199,6 +200,27 @@ func (c *Call) requestVideoKeyframe() {
+ 	}
+ }
+ 
++// RequestPeerKeyframe asks the peer's encoder for a fresh IDR by sending an RTCP PLI and
++// FIR at the peer's video SSRC. A receiver that starts decoding mid-stream (a renderer
++// attached after the call's first keyframe went past) needs this: WhatsApp encoders send
++// IDRs on request, not on a short fixed cadence. Requests coalesce; one is served per
++// media-loop wakeup, and a request made before the relay allocation is served right after it.
++func (c *Call) RequestPeerKeyframe() {
++	select {
++	case c.peerKeyframeRequests() <- struct{}{}:
++	default: // one is already pending
++	}
++}
++
++func (c *Call) peerKeyframeRequests() chan struct{} {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	if c.peerKeyframeReq == nil {
++		c.peerKeyframeReq = make(chan struct{}, 1)
++	}
++	return c.peerKeyframeReq
++}
++
+ // onVideoStateFn returns the Call's video-state callback under its lock.
+ func (c *Call) onVideoStateFn() func(VideoState) {
+ 	c.mu.Lock()

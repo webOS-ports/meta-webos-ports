@@ -44,10 +44,12 @@ SRC_URI += " \
     file://0008-webOS-add-a-Facebook-Messenger-protocol-prpl-gometa-.patch \
     file://0009-webOS-ring-an-incoming-WhatsApp-call-without-taking-.patch \
     file://0010-webOS-keep-the-WhatsApp-call-playback-stream-fed-bet.patch \
+    file://0011-webOS-decode-WhatsApp-video-through-luneos-rtc-engin.patch \
     file://meowcaller/0001-mlow-speed-up-the-encoder-for-32-bit-ARM.patch;patchdir=third_party/meowcaller \
     file://meowcaller/0002-Fix-the-video-call-media-path-against-live-WhatsApp-.patch;patchdir=third_party/meowcaller \
     file://meowcaller/0003-engine-allocate-on-the-caller-s-FNA-relay-for-inboun.patch;patchdir=third_party/meowcaller \
     file://meowcaller/0004-webOS-mlow-adapt-encoder-complexity-to-the-frame-tim.patch;patchdir=third_party/meowcaller \
+    file://meowcaller/0005-webOS-let-the-receiver-ask-the-peer-for-a-keyframe.patch;patchdir=third_party/meowcaller \
     file://0002-Include-the-fixed-width-integer-headers-where-they-a.patch;patchdir=../libtgvoip \
 "
 SRCREV_upstream = "1078b14c6dcdd862f374a1b2c812d7f0cc4016cb"
@@ -97,11 +99,12 @@ do_compile[cleandirs] += "${B}/.mod"
 export GOPROXY = "https://proxy.golang.org,direct"
 do_compile[network] = "1"
 
-# The video bridge is the NULL backend. glue/voipkit.cpp binds libpalmgstskype.so, a
-# gstreamer-0.10 plugin that exists only in legacy webOS firmware; glue/voipkit_none.c stands in
-# so the plugin links without it. Messaging and voice calling are unaffected -- video is what is
-# missing, and a LuneOS video backend still has to be written.
-VOIPKIT_GLUE = "voipkit_none"
+# The video bridge. glue/voipkit.cpp binds libpalmgstskype.so, a gstreamer-0.10 plugin that
+# exists only in legacy webOS firmware, and glue/voipkit_none.c is a NULL backend. 0011 adds
+# glue/voipkit_rtcengine.c, which hands the call's H.264 to luneos-rtc-engine
+# (packagegroup-luneos-extended) to decode and, where there is a camera and an encoder, encode.
+# Without the engine on the device a video call stays voice-only.
+VOIPKIT_GLUE = "voipkit_rtcengine"
 
 do_compile() {
     cd ${S}
