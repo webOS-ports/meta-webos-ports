@@ -226,6 +226,12 @@ do_install() {
 
     if ${DEPLOY_BROWSERSHELL}; then
         install_ls2_roles_acg ${BROWSERSHELL_APPLICATION}
+        # browser_shell runs as an app container and registers its app's
+        # name. Nothing registers or calls "browser-shell", which its role
+        # rightly does not allow, so leave that service file out and let
+        # do_configure_manifest list none.
+        rm ${D}${webos_sysbus_servicedir}/${BROWSERSHELL_APPLICATION}.service
+        rmdir ${D}${webos_sysbus_servicedir}
     else
         install_ls2_roles_acg ${APP_SHELL_RUNTIME}
     fi
