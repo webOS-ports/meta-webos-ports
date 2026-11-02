@@ -1,0 +1,304 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] sensormanager: never block the main thread on a full pipe
+
+SensorManager hands samples to the sockets through a pipe. Only the main
+thread reads it, one sample per wakeup, and the hybris adaptor writes to it
+from the main thread too, once per sample for every session. When the pipe
+fills, the write blocks with its only reader underneath it and sensorfwd
+stops for good.
+
+Everything behind it then backs up: the event pipe, the HAL and the kernel,
+which logs "<sensor_event> input buffull" without end. Clients are hit too,
+because sensorfwd no longer answers D-Bus. On the mindphone a QProximitySensor
+start() held LunaDisplayManager's main thread for 49 seconds in a call, so
+the power key seemed dead and the proximity sensor did nothing. A stack of
+sensorfwd showed the main thread in SensorManager::write(), writing to the pipe
+it holds the read end of, and systemd had to kill it to restart it.
+
+Make the pipe non-blocking. When it is full, the main thread empties it itself
+and tries again; any other thread waits for room as it did. A wakeup now passes
+on everything queued, up to a pipe's worth, not one sample. A failed write
+frees its buffer, and a failed read no longer uses an uninitialised PipeData.
+
+tests/sensormanagerpipe covers it. Back on a blocking pipe, the first test hangs
+until its alarm, the same way the device did.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+--- a/core/sensormanager.cpp
++++ b/core/sensormanager.cpp
+@@ -41,8 +41,11 @@
+ #include "lsclient.h"
+ #endif // SENSORFW_LUNA_SERVICE_CLIENT
+ #include <QSocketNotifier>
++#include <QThread>
+ #include <errno.h>
++#include <fcntl.h>
+ #include <functional>
++#include <poll.h>
+ #include "sockethandler.h"
+ #include <sys/stat.h>
+ #include <sys/types.h>
+@@ -58,6 +61,9 @@ typedef struct {
+     void* buffer;
+ } PipeData;
+ 
++/* Samples passed to the sockets in one go, a full pipe's worth at 64 KiB. */
++static const int maxPipeDrain = 65536 / sizeof(PipeData);
++
+ const int SensorManager::SOCKET_CONNECTION_TIMEOUT_MS = 10000;
+ 
+ SensorManager* SensorManager::instance_ = NULL;
+@@ -181,7 +187,7 @@ SensorManager::SensorManager()
+ 
+     Q_ASSERT(socketHandler_->listen(SOCKET_NAME));
+ 
+-    if (pipe(pipefds_) == -1) {
++    if (pipe2(pipefds_, O_NONBLOCK) == -1) {
+         qCCritical(lcSensorFw) << "Failed to create pipe: " << strerror(errno);
+         pipefds_[0] = pipefds_[1] = 0;
+     } else {
+@@ -698,23 +704,58 @@ bool SensorManager::write(int id, const void* source, int size)
+ 
+     memcpy(buffer, source, size);
+ 
+-    if (::write(pipefds_[1], &pipeData, sizeof(pipeData)) < (int)sizeof(pipeData)) {
++    for (;;) {
++        ssize_t written = ::write(pipefds_[1], &pipeData, sizeof(pipeData));
++        if (written == (ssize_t)sizeof(pipeData))
++            return true;
++        if (written < 0 && errno == EINTR)
++            continue;
++        if (written < 0 && errno == EAGAIN) {
++            /* The pipe is full. The hybris adaptor delivers samples on the
++             * main thread, the same thread that empties the pipe, so waiting
++             * for room here would never end. Empty it now instead. */
++            if (QThread::currentThread() == thread()) {
++                drainPipe();
++            } else {
++                struct pollfd pfd = { pipefds_[1], POLLOUT, 0 };
++                poll(&pfd, 1, -1);
++            }
++            continue;
++        }
+         qCWarning(lcSensorFw) << "Failed to write all data to pipe.";
++        free(buffer);
+         return false;
+     }
+-    return true;
+ }
+ 
+ void SensorManager::sensorDataHandler(int)
+ {
+-    PipeData pipeData;
+-    ssize_t bytesRead = read(pipefds_[0], &pipeData, sizeof(pipeData));
++    drainPipe();
++}
+ 
+-    if (!bytesRead || !socketHandler_->write(pipeData.id, pipeData.buffer, pipeData.size)) {
+-        qCWarning(lcSensorFw) << "Failed to write data to socket.";
+-    }
++void SensorManager::drainPipe()
++{
++    /* One sample per wakeup can not keep up: each sensor event fans out to
++     * every session. Bounded, so that a thread writing as fast as this reads
++     * can not hold up the main loop; the notifier fires again for the rest. */
++    for (int i = 0; i < maxPipeDrain; ++i) {
++        PipeData pipeData;
++        ssize_t bytesRead = read(pipefds_[0], &pipeData, sizeof(pipeData));
+ 
+-    free(pipeData.buffer);
++        if (bytesRead < 0 && errno == EINTR)
++            continue;
++        if (bytesRead < 0 && errno == EAGAIN)
++            return;
++        if (bytesRead != (ssize_t)sizeof(pipeData)) {
++            qCWarning(lcSensorFw) << "Failed to read data from pipe.";
++            return;
++        }
++
++        if (!socketHandler_->write(pipeData.id, pipeData.buffer, pipeData.size))
++            qCWarning(lcSensorFw) << "Failed to write data to socket.";
++
++        free(pipeData.buffer);
++    }
+ }
+ 
+ void SensorManager::lostClient(int sessionId)
+--- a/core/sensormanager.h
++++ b/core/sensormanager.h
+@@ -466,6 +466,12 @@ Q_SIGNALS:
+     void displayOn();
+ 
+ private:
++    /**
++     * Pass the samples queued in the pipe on to the sockets. Runs on the main
++     * thread, from sensorDataHandler() and from write() when the pipe is full.
++     */
++    void drainPipe();
++
+     /**
+      * Constructor.
+      */
+--- /dev/null
++++ b/tests/sensormanagerpipe/sensormanagerpipe.pro
+@@ -0,0 +1,8 @@
++TEMPLATE = app
++TARGET = sensormanagerpipe-test
++QT += testlib network dbus
++QT -= gui
++CONFIG += c++17 debug
++INCLUDEPATH += ../.. ../../include ../../core ../../filters ../../datatypes
++SOURCES += sensormanagerpipetest.cpp
++LIBS += -L$$SENSORFW_CORE -lsensorfw-qt6 -L$$SENSORFW_DT -lsensordatatypes-qt6
+--- /dev/null
++++ b/tests/sensormanagerpipe/sensormanagerpipetest.cpp
+@@ -0,0 +1,148 @@
++/*
++ * SensorManager passes samples through a pipe that its own main thread reads.
++ * The hybris adaptor writes to that pipe from the main thread too, so a full
++ * pipe must never block the writer. Each test runs under an alarm: blocking
++ * ends the run with SIGALRM rather than hanging it.
++ *
++ * Build against a built core and datatypes:
++ *   qmake6 SENSORFW_CORE=<dir> SENSORFW_DT=<dir> sensormanagerpipe.pro
++ */
++#include <QByteArray>
++#include <QElapsedTimer>
++#include <QLocalSocket>
++#include <QTemporaryDir>
++#include <QThread>
++#include <QtTest>
++
++#include <unistd.h>
++
++#include "sensormanager.h"
++
++/* Far more than the 5461 entries of a 64 KiB pipe. */
++static const int overPipeCapacity = 20000;
++static const int sessionId = 7;
++
++class SensorManagerPipeTest : public QObject
++{
++    Q_OBJECT
++
++private:
++    QTemporaryDir dir;
++
++    /* Reads whole {count, sample} packets, returns the samples in order. */
++    static bool readSamples(QLocalSocket &client, QList<int> &seen, int wanted)
++    {
++        QByteArray data;
++        QElapsedTimer timer;
++        timer.start();
++        while (seen.size() < wanted && timer.elapsed() < 8000) {
++            QCoreApplication::processEvents();
++            client.waitForReadyRead(20);
++            data += client.readAll();
++            while (data.size() >= int(sizeof(unsigned) + sizeof(int))) {
++                int value;
++                memcpy(&value, data.constData() + sizeof(unsigned), sizeof(value));
++                seen.append(value);
++                data.remove(0, sizeof(unsigned) + sizeof(int));
++            }
++        }
++        return seen.size() == wanted;
++    }
++
++    bool connectSession(QLocalSocket &client, int id)
++    {
++        client.connectToServer(dir.path() + "/run/sensord.sock");
++        if (!client.waitForConnected(2000))
++            return false;
++        QCoreApplication::processEvents();
++        if (!client.waitForReadyRead(2000))
++            return false;
++        client.readAll(); /* the "\n" greeting */
++        client.write(reinterpret_cast<const char *>(&id), sizeof(id));
++        client.flush();
++        for (int i = 0; i < 20; ++i) {
++            QCoreApplication::processEvents();
++            QThread::msleep(5);
++        }
++        return true;
++    }
++
++private Q_SLOTS:
++    void initTestCase()
++    {
++        QVERIFY(dir.isValid());
++        QVERIFY(QDir().mkpath(dir.path() + "/run"));
++        qputenv("SENSORFW_SOCKET_PATH", dir.path().toUtf8());
++        SensorManager::instance();
++    }
++
++    void init() { alarm(20); }
++    void cleanup() { alarm(0); }
++
++    void fullPipeOnTheMainThreadDoesNotBlock()
++    {
++        const int sample = 1;
++        for (int i = 0; i < overPipeCapacity; ++i)
++            QVERIFY(SensorManager::instance().write(9999, &sample, sizeof(sample)));
++    }
++
++    void noSampleIsLostWhenThePipeFills()
++    {
++        QLocalSocket client;
++        QVERIFY(connectSession(client, sessionId));
++
++        for (int i = 0; i < overPipeCapacity; ++i)
++            QVERIFY(SensorManager::instance().write(sessionId, &i, sizeof(i)));
++
++        QList<int> seen;
++        QVERIFY(readSamples(client, seen, overPipeCapacity));
++        for (int i = 0; i < overPipeCapacity; ++i)
++            QCOMPARE(seen.at(i), i);
++    }
++
++    void aWriterOnAnotherThreadWaitsForRoom()
++    {
++        QLocalSocket client;
++        QVERIFY(connectSession(client, sessionId + 1));
++
++        const int id = sessionId + 1;
++        QThread *writer = QThread::create([id] {
++            for (int i = 0; i < overPipeCapacity; ++i)
++                SensorManager::instance().write(id, &i, sizeof(i));
++        });
++        writer->start();
++
++        QList<int> seen;
++        QVERIFY(readSamples(client, seen, overPipeCapacity));
++        QVERIFY(writer->wait(5000));
++        delete writer;
++        for (int i = 0; i < overPipeCapacity; ++i)
++            QCOMPARE(seen.at(i), i);
++    }
++
++    void aClientLeavingDuringADrainIsHarmless()
++    {
++        auto *client = new QLocalSocket;
++        QVERIFY(connectSession(*client, sessionId + 2));
++        delete client; /* gone before the event loop has noticed */
++
++        for (int i = 0; i < overPipeCapacity; ++i)
++            QVERIFY(SensorManager::instance().write(sessionId + 2, &i, sizeof(i)));
++        for (int i = 0; i < 50; ++i)
++            QCoreApplication::processEvents();
++    }
++
++    void anEmptyPipeWakeupReturns()
++    {
++        /* Everything drained: the notifier's later wakeup finds nothing. */
++        for (int i = 0; i < 10; ++i)
++            QCoreApplication::processEvents();
++        const int sample = 1;
++        QVERIFY(SensorManager::instance().write(9999, &sample, sizeof(sample)));
++        QCoreApplication::processEvents();
++        QCoreApplication::processEvents();
++    }
++};
++
++QTEST_GUILESS_MAIN(SensorManagerPipeTest)
++#include "sensormanagerpipetest.moc"
