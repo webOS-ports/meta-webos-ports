@@ -15,7 +15,7 @@ inherit pkgconfig
 
 PE = "1"
 PV = "0.4.0-1+git"
-SRCREV = "b5d8ff440677bb9bd80e18a9065029e57c5c6397"
+SRCREV = "f66555a0a8c8a53f8c2df4864e21d5a6616f77ae"
 
 # This app is developed on qml-based, not master.
 WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
