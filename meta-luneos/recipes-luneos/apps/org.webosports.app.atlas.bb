@@ -14,9 +14,9 @@ inherit webos_filesystem_paths
 inherit webos_app
 
 PV = "0.9.10+git"
-PR = "r2"
+PR = "r3"
 
-SRCREV = "805524e371df238c9e3c71f3da2f7b6d2a78b3bf"
+SRCREV = "90502ec98cad4fcd92571794514dd18b8fe2d83f"
 WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
