@@ -188,9 +188,11 @@ LIBHYBRIS_RDEPENDS = " \
 # ordinary Linux V4L2 consumers (browsers/WebRTC, video-call apps) see the
 # cameras; LuneOS's own camera app still uses gst-droid. Generic to every
 # Halium device, hence here rather than per-machine. Its kernel half,
-# v4l2loopback, is an out-of-tree module and so is named per-machine in
-# MACHINE_EXTRA_RDEPENDS (like wireguard-module); where it is absent the
-# droidcam2v4l2 service is a clean no-op (ConditionPathExists=/dev/v4l2loopback).
+# v4l2loopback, is an out-of-tree module, so it is named per-machine: in
+# MACHINE_EXTRA_RDEPENDS where the machine builds its own rootfs, and in
+# ANDROID_EXTRA_INITRAMFS_IMAGE_INSTALL where it boots the generic one. Where it
+# is absent the droidcam2v4l2 service is a clean no-op
+# (ConditionPathExists=/dev/v4l2loopback).
 
 # Fingerprint stack: biomd talks to the Android biometrics HAL over binder
 # through libgbinder, webos-fingerprint-adapter bridges its D-Bus API onto the

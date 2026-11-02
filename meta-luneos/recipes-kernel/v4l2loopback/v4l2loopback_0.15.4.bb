@@ -4,8 +4,9 @@ userspace producer can write frames into and any V4L2 consumer can read. On \
 Halium it is the kernel half of droidcam2v4l2, which pumps the Android camera \
 (droidmedia) into a /dev/video node so ordinary V4L2 apps (browsers, video \
 calls) see the camera. Like any out-of-tree module it builds against whatever \
-kernel MACHINE resolves to, so it is named per-machine in MACHINE_EXTRA_RDEPENDS \
-(as wireguard-module is), only on devices that build their own kernel."
+kernel MACHINE resolves to, so it is named per-machine, only on devices that \
+build their own kernel: in MACHINE_EXTRA_RDEPENDS (as wireguard-module is), or in \
+ANDROID_EXTRA_INITRAMFS_IMAGE_INSTALL on a device booting the generic rootfs."
 HOMEPAGE = "https://github.com/umlaeute/v4l2loopback"
 SECTION = "kernel/modules"
 LICENSE = "GPL-2.0-only"
