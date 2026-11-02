@@ -1,0 +1,128 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sat, 31 Oct 2026 20:38:23 +0100
+Subject: [PATCH] [libconnman-qt] Answer RequestBrowser
+
+RequestBrowser takes a delayed reply and nothing ever sent it. connman sends
+an agent one request at a time, so while a captive-portal request is open
+that agent gets no other request until BrowserLaunchTimeout, 300 seconds by
+default, passphrase prompts included.
+
+UserAgent now answers it. Without a listener on browserRequested there is
+nobody to open a browser, and connman gets net.connman.Agent.Error.Canceled at
+once: it gives up on the portal and leaves the connection as it is. With one,
+the request is held until the new sendBrowserReply(done): true when the login
+is over, so that connman checks the connection again, false when it was given
+up. A newer request or the agent going away ends a held one as canceled, and
+Cancel from connman forgets it.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Submitted [https://github.com/sailfishos/libconnman-qt/pull/57]
+---
+ libconnman-qt/useragent.cpp | 33 ++++++++++++++++++++++++++++++++-
+ libconnman-qt/useragent.h   |  4 ++++
+ plugin/plugins.qmltypes     |  4 ++++
+ 3 files changed, 40 insertions(+), 1 deletion(-)
+
+diff --git a/libconnman-qt/useragent.cpp b/libconnman-qt/useragent.cpp
+index b020a5a..aee7858 100644
+--- a/libconnman-qt/useragent.cpp
++++ b/libconnman-qt/useragent.cpp
+@@ -7,6 +7,8 @@
+  *
+  */
+ 
++#include <QMetaMethod>
++
+ #include "useragent.h"
+ #include "networkmanager.h"
+ 
+@@ -56,6 +58,7 @@ public:
+     QString agentPath;
+     QTimer requestTimer;
+     QDBusMessage requestMessage;
++    QDBusMessage browserRequest;
+ };
+ 
+ UserAgentPrivate::UserAgentPrivate()
+@@ -81,6 +84,7 @@ UserAgent::UserAgent(QObject* parent)
+ 
+ UserAgent::~UserAgent()
+ {
++    sendBrowserReply(false);
+     d_ptr->m_manager->unregisterAgent(QString(d_ptr->agentPath));
+ 
+     delete d_ptr->m_req_data;
+@@ -101,6 +105,8 @@ void UserAgent::cancelUserInput()
+ {
+     delete d_ptr->m_req_data;
+     d_ptr->m_req_data = nullptr;
++    // Cancel ends the request in connman, whichever kind it was.
++    d_ptr->browserRequest = QDBusMessage();
+     Q_EMIT userInputCanceled();
+ }
+ 
+@@ -224,7 +230,32 @@ void UserAgent::requestBrowser(const QString &servicePath, const QString &url,
+                                const QDBusMessage &message)
+ {
+     qDebug() << message.arguments();
+-    Q_EMIT browserRequested(servicePath, url);
++    sendBrowserReply(false);
++    d_ptr->browserRequest = message;
++
++    // connman sends an agent one request at a time, so an unanswered one holds
++    // up the agent's passphrase prompts until BrowserLaunchTimeout.
++    if (isSignalConnected(QMetaMethod::fromSignal(&UserAgent::browserRequested))) {
++        Q_EMIT browserRequested(servicePath, url);
++    } else {
++        sendBrowserReply(false);
++    }
++}
++
++void UserAgent::sendBrowserReply(bool done)
++{
++    const QDBusMessage &request = d_ptr->browserRequest;
++    if (request.type() == QDBusMessage::InvalidMessage)
++        return;
++
++    const QDBusMessage reply = done
++        ? request.createReply()
++        : request.createErrorReply(QString("net.connman.Agent.Error.Canceled"),
++                                   QString("canceled by user"));
++    if (!QDBusConnection::systemBus().send(reply))
++        qWarning() << "Could not queue message";
++
++    d_ptr->browserRequest = QDBusMessage();
+ }
+ 
+ ////////////////////
+diff --git a/libconnman-qt/useragent.h b/libconnman-qt/useragent.h
+index e0aabe1..ff6b750 100644
+--- a/libconnman-qt/useragent.h
++++ b/libconnman-qt/useragent.h
+@@ -46,6 +46,10 @@ public Q_SLOTS:
+     void sendUserReply(const QVariantMap &input);
+ 
+     void sendConnectReply(const QString &replyMessage, int timeout = 120);
++    // Answers browserRequested: done means the login in the browser is over,
++    // and connman checks the connection again; false means it was given up.
++    // Whoever connects to browserRequested has to call this.
++    void sendBrowserReply(bool done);
+     void setConnectionRequestType(const QString &type);
+     void setAgentPath(const QString &path);
+ 
+diff --git a/plugin/plugins.qmltypes b/plugin/plugins.qmltypes
+index 987c588..cb1a9bb 100644
+--- a/plugin/plugins.qmltypes
++++ b/plugin/plugins.qmltypes
+@@ -958,6 +958,10 @@ Module {
+             name: "sendConnectReply"
+             Parameter { name: "replyMessage"; type: "string" }
+         }
++        Method {
++            name: "sendBrowserReply"
++            Parameter { name: "done"; type: "bool" }
++        }
+         Method {
+             name: "setConnectionRequestType"
+             Parameter { name: "type"; type: "string" }
