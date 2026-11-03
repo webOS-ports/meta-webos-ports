@@ -16,7 +16,7 @@ DEPENDS = "luna-service2 libpbnjson uriparser libxml2 sqlite3 pmloglib nyx-lib l
 
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_ntp} tzcode luna-init"
 
-SRCREV = "73073b9a3e2c5ff7731b9cec7cb82bb9cc98eac9"
+SRCREV = "9dfc1546ff9bf1df2fec6af852d2c6ca37696487"
 
 PV = "4.4.0-32"
 

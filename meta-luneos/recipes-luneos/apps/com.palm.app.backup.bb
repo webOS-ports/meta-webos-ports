@@ -12,13 +12,13 @@ inherit webos_filesystem_paths
 inherit webos_system_bus
 
 PV = "3.1.1+git"
-SRCREV = "417e6b03f43c13ed19faa3f6234afed13e0021af"
+SRCREV = "e146532f533feb09d27e4bf4044bbdd389ddd3a6"
 
 # Not webos_ports_repo: the app is not under github.com/webOS-ports. Split into
 # variables so retargeting it - to an upstream fork, or once it moves into the
 # organisation - is a one-line change rather than an edit to SRC_URI.
 WOCE_GIT_REPO   ?= "github.com/Herrie82/woce-backup"
-WOCE_GIT_BRANCH ?= "herrie/LuneOS"
+WOCE_GIT_BRANCH ?= "herrie/security-backup-hardening"
 
 SRC_URI = "git://${WOCE_GIT_REPO};protocol=https;branch=${WOCE_GIT_BRANCH}"
 

@@ -10,7 +10,7 @@ inherit webos_system_bus
 inherit webos_app
 
 PV = "0.3.34+git"
-SRCREV = "191071e6d87602af81aceb68ed07622bb1c222b5"
+SRCREV = "2f86432ad628d7490a867ead468843ef34de2e31"
 
 SERVICE_NAME = "org.webosports.service.cdav"
 WEBOS_REPO_NAME = "org.webosports.service.contacts.carddav"

@@ -16,7 +16,7 @@ RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_webos-customization}"
 
 VIRTUAL-RUNTIME_webos-customization ?= ""
 
-SRCREV = "06758d82dc8c6cb473f13093719e00f9c6547681"
+SRCREV = "49f23e1d9c673c724bb020163ec486a7c1db82d2"
 
 PV = "2.0.0-81"
 

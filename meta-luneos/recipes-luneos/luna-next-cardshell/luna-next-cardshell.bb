@@ -14,9 +14,11 @@ RDEPENDS:${PN} += " \
     luna-surfacemanager-base \
 "
 
+PE = "1"
 PV = "0.6-0+git"
 
-SRCREV = "b965f251db77db39e59dea2dbcc89a7986447b9e"
+SRCREV = "64b13105b5dc4e9788df0ba3169cbd4c9a6c3954"
+PR = "r1"
 
 inherit webos_ports_repo
 inherit webos_cmake
