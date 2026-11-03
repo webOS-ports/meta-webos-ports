@@ -12,3 +12,10 @@
 SKIP_RECIPE[vboxguestdrivers] = "vboxguest is also in the kernel and we don't really need vboxsf"
 SKIP_RECIPE[qtwebengine] = "qtwebengine is now replaced by WebOS OSE webruntime"
 SKIP_RECIPE[qtwebview] = "depends on blacklisted qtwebengine"
+SKIP_RECIPE[qtwebengine-examples] = "depends on blacklisted qtwebengine"
+SKIP_RECIPE[qtwebview-examples] = "depends on blacklisted qtwebview"
+
+# And tell meta-qt6 the same, so packagegroup-qt6-addons and -examples stop
+# pulling the skipped recipes in. :luneos, because meta-qt6 sets
+# QTWEBENGINE_SUPPORTED:aarch64 and a plain assignment would lose to it there.
+QTWEBENGINE_SUPPORTED:luneos = "0"
