@@ -22,7 +22,7 @@ SRCREV = "1cd9e2e3367d211fceefc3cc1d78306ac35084c4"
 
 PV = "1.0.2-100"
 
-INC_PR = "r93"
+INC_PR = "r94"
 
 WAM_BUILD_SYSTEM ?= "webos_cmake"
 WAM_BUILD_DEFAULT_PLUGIN ?= "1"
@@ -43,6 +43,9 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 # Restarts WebAppMgr together with the compositor; see the file.
 SRC_URI += "file://webapp-mgr-compositor.conf"
+
+# Picks GPU or CPU raster from the device; sourced by webapp-mgr.sh.
+SRC_URI += "file://raster-profile.sh"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 
@@ -87,6 +90,9 @@ do_install:append() {
     install -d ${D}${systemd_system_unitdir}/webapp-mgr.service.d
     install -v -m 0644 ${UNPACKDIR}/webapp-mgr-compositor.conf \
         ${D}${systemd_system_unitdir}/webapp-mgr.service.d/
+
+    install -d ${D}${datadir}/webappmanager
+    install -v -m 0644 ${UNPACKDIR}/raster-profile.sh ${D}${datadir}/webappmanager/
 }
 
 WEBOS_SYSTEMD_SERVICE = "webapp-mgr.service"
@@ -160,6 +166,7 @@ FILES:${PN} += " \
     ${sysconfdir}/wam \
     ${libdir}/webappmanager/plugins/*.so \
     ${datadir}/localization/${BPN} \
+    ${datadir}/webappmanager \
 "
 
 # LuneOS added here to work around outdated group.master from OSE
