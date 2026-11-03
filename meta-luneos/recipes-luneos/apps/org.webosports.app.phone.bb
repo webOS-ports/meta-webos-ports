@@ -18,7 +18,7 @@ PE = "1"
 PV = "0.1.1-0+git"
 
 # master with pull requests #91 (post-dial pause) and #92 (video calls) merged.
-SRCREV = "d02bb20fb12460e5e7c191ed576533aee1934277"
+SRCREV = "6d4da3d16d8e98ebe230e8755d97eb12e0dc14a7"
 WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
