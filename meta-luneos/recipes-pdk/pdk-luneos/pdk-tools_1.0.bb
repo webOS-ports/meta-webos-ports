@@ -49,6 +49,14 @@ FILES:${PN} = "${PDK_PREFIX} ${sysconfdir}/profile.d/pdk.sh"
 
 RDEPENDS:${PN} = "pdk-sysroot"
 
+# pdk-sysroot skips itself when there is no PDK userland to install, so this
+# has to as well, or it RDEPENDS on a recipe that does not exist.
+python () {
+    if not d.getVar('PDK_SYSROOT_TARBALL') and \
+            'pdk-armel' not in (d.getVar('BBMULTICONFIG') or '').split():
+        raise bb.parse.SkipRecipe('needs BBMULTICONFIG = "pdk-armel" or PDK_SYSROOT_TARBALL')
+}
+
 # The qemu-user-arm dependency lives in packagegroup-luneos-pdk, not here.
 # allarch.bbclass sets TARGET_ARCH = "allarch", so TRANSLATED_TARGET_ARCH is
 # "allarch" too and architecture overrides (:x86-64, :aarch64) silently never
