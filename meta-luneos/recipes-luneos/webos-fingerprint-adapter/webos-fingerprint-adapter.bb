@@ -13,8 +13,7 @@ RRECOMMENDS:${PN} += "biomd"
 
 PV = "0.1.0-1+git"
 PR = "r1"
-SRCREV = "5eca4cdc8164e6253afcf69c4dbb0ea1d5bdd01c"
-WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
+SRCREV = "ac6829fbba1c2a9e49744447593a3ea0df4bb4bc"
 
 inherit webos_ports_repo
 inherit webos_filesystem_paths

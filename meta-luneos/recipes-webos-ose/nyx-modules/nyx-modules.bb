@@ -22,8 +22,7 @@ RDEPENDS:${PN} += "nyx-conf"
 # merged as commits) rather than webosose plus a patch stack. Pinned with a
 # plain SRCREV: submission tags are a webosose convention and this branch
 # carries none.
-SRCREV = "b877b618a49e739a02193f6c59457b0685eb8210"
-WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
+SRCREV = "1946ba47cab379825059349b60026b9cc2c146d3"
 
 PR = "r59"
 

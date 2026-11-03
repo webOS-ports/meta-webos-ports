@@ -22,8 +22,7 @@ VIRTUAL-RUNTIME_bash ?= "bash"
 RDEPENDS:${PN}:append:class-target = " ${VIRTUAL-RUNTIME_stat} ${VIRTUAL-RUNTIME_bash}"
 RDEPENDS:${PN}-tests:append:class-target = " ${VIRTUAL-RUNTIME_bash}"
 
-SRCREV = "e4d99872dfe54198e35453110129199c5f366725"
-WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
+SRCREV = "2c062bb0656b5302c06b3deb16109495b51786b1"
 
 PV = "3.2.0-33"
 

@@ -20,8 +20,7 @@ RDEPENDS:${PN} += "${@ bb.utils.contains('WEBOS_BLUETOOTH_ENABLED_SERVICE_CLASSE
 # Built from the webOS-ports fork: webosose submissions/87 with the LuneOS
 # changes as commits. Plain SRCREV: submission tags are a webosose convention.
 PV = "0.1.0-87+git"
-SRCREV = "db2bb02f45d13b9fb254592fabc7105cd4f487f6"
-WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
+SRCREV = "5a7500136995866a1043c23d04b1ef72500678f8"
 PR = "r14"
 
 inherit webos_component

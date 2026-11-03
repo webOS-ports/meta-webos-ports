@@ -18,9 +18,9 @@ DEPENDS = "pulseaudio pulseaudio-pulsecore-private-headers alsa-lib"
 RDEPENDS:${PN} = "pulseaudio-server"
 
 PV = "15.0+git"
-SRCREV = "b0d4e4335c592c8ee89e7a6aea6cafb4c15bc009"
+SRCREV = "fbd786bfceccaa15196a73ceaca0cff7847b9532"
 
-SRC_URI = "git://github.com/webOS-ports/pulseaudio-webos.git;branch=herrie/integration-testing;protocol=https \
+SRC_URI = "git://github.com/webOS-ports/pulseaudio-webos.git;branch=webOS-ports/webOS-OSE;protocol=https \
     file://Makefile \
 "
 

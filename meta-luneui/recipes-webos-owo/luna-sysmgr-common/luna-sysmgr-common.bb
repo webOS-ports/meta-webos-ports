@@ -11,8 +11,7 @@ DEPENDS += "qtbase"
 PE = "1"
 PV = "3.0.0-4+git"
 
-SRCREV = "e06ec351537f432929ad115993a082019ed9db74"
-WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
+SRCREV = "5636004c36a7ff1f3cc039ac414504cff9527eee"
 
 # PV carries no SRCREV, so a revision bump alone leaves PKGV untouched and opkg
 # sees no upgrade on the device. Bump PR on every SRCREV move.

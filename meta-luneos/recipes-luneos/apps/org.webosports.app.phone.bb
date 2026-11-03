@@ -17,7 +17,8 @@ inherit webos_app
 PE = "1"
 PV = "0.1.1-0+git"
 
-SRCREV = "92c94eb71b65d8ee364417dcba02b602c7d13282"
+# master with pull requests #91 (post-dial pause) and #92 (video calls) merged.
+SRCREV = "d02bb20fb12460e5e7c191ed576533aee1934277"
 WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"

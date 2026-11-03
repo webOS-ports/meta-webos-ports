@@ -17,8 +17,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 "
 
 PV = "3.0.1-5+git"
-SRCREV = "281555145d012bcb724cf0ae1085a977c28c33f6"
-WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
+SRCREV = "1a674a91e776d7bbf69507def85d72d37c4d095c"
 
 inherit webos_ports_ose_repo
 inherit webos_filesystem_paths

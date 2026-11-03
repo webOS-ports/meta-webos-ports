@@ -16,8 +16,7 @@ RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_webos-customization}"
 
 VIRTUAL-RUNTIME_webos-customization ?= ""
 
-SRCREV = "c66b0a1e0667385832c235577f1f1cb5d1a0127e"
-WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
+SRCREV = "49f23e1d9c673c724bb020163ec486a7c1db82d2"
 
 PV = "2.0.0-81"
 

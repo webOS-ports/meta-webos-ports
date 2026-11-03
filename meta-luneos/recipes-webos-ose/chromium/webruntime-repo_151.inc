@@ -81,8 +81,10 @@ WEBRUNTIME_REPO_VERSION = "151"
 # checkout"), which are non-fatal per task but still make bitbake exit non-zero.
 # With the name present it emits a single webos-enh-sub-warning instead, which
 # ERROR_QA:remove below drops - same approach as mksnapshot-cross_151.bb.
-SRC_URI = "git://github.com/webos-ports/chromium151.git;protocol=https;branch=herrie/browser-shell-video-state;name=chromium"
-SRCREV = "080dbd814887f7b1bb7ed4de52365ce382f8ddf4"
+# Pull request #21 (the Widevine bridge's media changes), which is main plus
+# those commits; main has #20 (herrie/browser-shell-video-state).
+SRC_URI = "git://github.com/webos-ports/chromium151.git;protocol=https;branch=herrie/widevine-bridge-media;name=chromium"
+SRCREV = "62578112f5d383f41a516eb70d76a7fbb9dd23f3"
 
 ERROR_QA:remove = "webos-enh-sub-warning"
 WARN_QA:remove = "webos-enh-sub-warning"

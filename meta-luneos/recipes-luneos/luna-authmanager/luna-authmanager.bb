@@ -6,8 +6,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "glib-2.0 luna-service2 json-c qtbase libxcrypt"
 
 PV = "1.0.0+git"
-SRCREV = "e92f74038a3299bef6a1bfab357f9bd0c75d9941"
-WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
+SRCREV = "db33e93501dd6448aa2045d2450b276c93cd8db0"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 

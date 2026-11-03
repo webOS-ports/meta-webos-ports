@@ -16,8 +16,9 @@ inherit webos_app
 PV = "0.9.10+git"
 PR = "r3"
 
-SRCREV = "90502ec98cad4fcd92571794514dd18b8fe2d83f"
-WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
+# Pull request #14 (lock in landscape), which is master plus that change.
+SRCREV = "e71fea8107620bee06d0b1031f2899f669e65b0c"
+WEBOS_GIT_PARAM_BRANCH = "herrie/atlas-lock-landscape"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 

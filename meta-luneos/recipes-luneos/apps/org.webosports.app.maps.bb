@@ -12,8 +12,7 @@ inherit webos_app
 
 PE = "1"
 PV = "0.0.1+git"
-SRCREV = "3c598e634062a1b8846bd19375b5e32084683ff1"
-WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
+SRCREV = "a5ac5a7ed7679bd07f3e0405b46a30b1a1b19725"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 

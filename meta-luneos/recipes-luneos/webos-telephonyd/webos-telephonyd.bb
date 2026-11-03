@@ -7,8 +7,7 @@ DEPENDS = "luna-service2 json-c glib-2.0 luna-prefs glib-2.0-native python3-pack
 RRECOMMENDS:${PN} += "${VIRTUAL-RUNTIME_ofono} mmsd"
 
 PV = "0.1.0-1+git"
-SRCREV = "34d9f0e195146d2f61798171be971f6b274cace2"
-WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
+SRCREV = "e85591791ccc470eb1c2175bcbf77dfcd07e7d89"
 
 inherit webos_ports_ose_repo
 inherit webos_filesystem_paths
