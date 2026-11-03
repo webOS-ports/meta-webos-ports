@@ -22,7 +22,7 @@ SRCREV = "1cd9e2e3367d211fceefc3cc1d78306ac35084c4"
 
 PV = "1.0.2-100"
 
-INC_PR = "r94"
+INC_PR = "r95"
 
 WAM_BUILD_SYSTEM ?= "webos_cmake"
 WAM_BUILD_DEFAULT_PLUGIN ?= "1"
@@ -46,6 +46,8 @@ SRC_URI += "file://webapp-mgr-compositor.conf"
 
 # Picks GPU or CPU raster from the device; sourced by webapp-mgr.sh.
 SRC_URI += "file://raster-profile.sh"
+# Devices where the automatic choice is wrong, by nyx device_name.
+SRC_URI += "file://devices/mindset.conf"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 
@@ -93,6 +95,8 @@ do_install:append() {
 
     install -d ${D}${datadir}/webappmanager
     install -v -m 0644 ${UNPACKDIR}/raster-profile.sh ${D}${datadir}/webappmanager/
+    install -d ${D}${sysconfdir}/wam/devices
+    install -v -m 0644 ${UNPACKDIR}/devices/*.conf ${D}${sysconfdir}/wam/devices/
 }
 
 WEBOS_SYSTEMD_SERVICE = "webapp-mgr.service"
