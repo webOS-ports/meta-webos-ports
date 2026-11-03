@@ -17,8 +17,9 @@ DEPENDS = "ofono glib-2.0 dbus libglibutil"
 # reworked only in their #include lines. See src/ofono-ext-compat.h for
 # every assumption this package makes about oFono's internals.
 PV = "1.0-1+git"
-SRCREV = "46066d533bd8473f6191d1854f54ebe9caa18c5a"
-WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
+# herrie/slot-manager-exit-order, pull request #1.
+SRCREV = "b6c42b9c3cbd765672ff8a3b3011f32ad3be3cfe"
+WEBOS_GIT_PARAM_BRANCH = "herrie/slot-manager-exit-order"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
