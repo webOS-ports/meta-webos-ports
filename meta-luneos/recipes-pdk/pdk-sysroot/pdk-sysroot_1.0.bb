@@ -45,6 +45,16 @@ PDK_SYSROOT_TARBALL_SHA256 ?= ""
 # build and requiring the multiconfig would be a hard error for no reason.
 do_install[mcdepends] = "${@'mc::pdk-armel:pdk-sysroot-image:do_image_complete' if not d.getVar('PDK_SYSROOT_TARBALL') else ''}"
 
+# Without the pdk-armel multiconfig there is nothing to install unless a tarball
+# was given, and the mcdepends above is a hard error: "Multiconfig dependency
+# mc::pdk-armel:... depends on nonexistent multiconfig configuration". Skip
+# instead, so world and every build that does not ask for PDK support still work.
+python () {
+    if not d.getVar('PDK_SYSROOT_TARBALL') and \
+            'pdk-armel' not in (d.getVar('BBMULTICONFIG') or '').split():
+        raise bb.parse.SkipRecipe('needs BBMULTICONFIG = "pdk-armel" or PDK_SYSROOT_TARBALL')
+}
+
 S = "${UNPACKDIR}"
 
 do_install() {
