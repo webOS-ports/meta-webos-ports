@@ -1,0 +1,522 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 3 Nov 2026 16:07:15 +0100
+Subject: [PATCH] webOS: WhatsApp video calls on the phone: orientation, front
+ camera, camera off, preview
+
+Fixes from live video calls between LuneOS phones and Android on
+2026-11-03.
+
+- Orientation: the plugin tells the peer which way our picture is up
+  (gowhatsapp_go_call_set_video_orientation) once the camera is sent,
+  and passes the peer's orientation to the Phone app as
+  incomingVideoOrientation. Only a state with the peer's camera on
+  carries it: the upgrade handshake (states 4, 6, 11) says 0 and
+  turned the picture.
+- Camera: a video call opens the front camera where there are two.
+  Camera off sends <video state=6> (StopVideo), as WhatsApp's own
+  clients do.
+- An OnVideoState for a call already gone from the table no longer
+  closes video: its OnEnd does, and closing here shut the engine
+  under a call that was still up.
+- The engine decodes what it encodes into a 320x240 preview for the
+  Phone app's self-view, turned like the sent picture and mirrored for
+  the front camera.
+- Sending at 1.2 Mbit/s (500 kbit/s looked heavily compressed at
+  640x480) and passing peer keyframe requests to the encoder at most
+  once a second.
+- Messaging: a 1:1 call rings in the Phone app only; it no longer
+  also posts "Incoming call" in the chat, which made Messaging alert a
+  second time. An unanswered one is posted as "Missed call".
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ call.go                         | 80 ++++++++++++++++++++++++++++-----
+ glue/call.c                     | 58 +++++++++++++++++++++---
+ glue/tests/call_video_test.cpp  | 54 ++++++++++++++++++++++
+ glue/tests/fakes.c              |  6 +++
+ glue/tests/fakes.h              |  1 +
+ glue/tests/fakes/libwhatsmeow.h |  1 +
+ handler.go                      | 36 +++++++--------
+ 7 files changed, 201 insertions(+), 35 deletions(-)
+
+diff --git a/call.go b/call.go
+index 4a3b674..0873831 100644
+--- a/call.go
++++ b/call.go
+@@ -75,8 +75,11 @@ type callInfo struct {
+ 	// streaming), "streaming" (peer video actively flowing). Driven by
+ 	// meowcaller's OnVideoState callback, see wireCall.
+ 	incomingVideoState string
+-	cause              string
+-	mic                *micSource
++	// incomingVideoOrientation is the peer's device orientation from its <video> stanzas,
++	// in quarter turns (0..3), as meowcaller's VideoState.Orientation reports it.
++	incomingVideoOrientation int
++	cause                    string
++	mic                      *micSource
+ 	// everActive latches true the first time this call reaches "active" (peer accepted) and is
+ 	// never cleared — state itself gets overwritten to "disconnected" on end (see setCallState),
+ 	// so callWasAnswered needs this separately to tell "answered then hung up" apart from "never
+@@ -176,6 +179,9 @@ func emitCallState() {
+ 		IncomingVideo      bool   `json:"incomingVideo"`
+ 		OutgoingVideo      bool   `json:"outgoingVideo"`
+ 		IncomingVideoState string `json:"incomingVideoState"`
++		// The peer's device orientation in quarter turns (0..3); the Phone app turns the
++		// picture by it.
++		IncomingVideoOrientation int `json:"incomingVideoOrientation"`
+ 	}
+ 	callMu.Lock()
+ 	var cjs []callJSON
+@@ -184,6 +190,7 @@ func emitCallState() {
+ 	lineIncomingVid := false
+ 	lineOutgoingVid := false
+ 	lineIVS := "unavailable"
++	lineOrientation := 0
+ 	for _, ci := range calls {
+ 		lineState = ci.state // single call per line: the line state IS the call state
+ 		cause = ci.cause
+@@ -195,7 +202,7 @@ func emitCallState() {
+ 			ID: ci.id, Address: ci.address, DisplayName: ci.displayName,
+ 			Origin: ci.origin, OnHold: ci.state == "onHold",
+ 			IncomingVideo: ci.incomingVid, OutgoingVideo: ci.outgoingVid,
+-			IncomingVideoState: ivs,
++			IncomingVideoState: ivs, IncomingVideoOrientation: ci.incomingVideoOrientation,
+ 		})
+ 		// ActiveCall.js reads outgoingVideo/incomingVideo/incomingVideoState directly on
+ 		// the LINE object (activeLines[0].outgoingVideo etc.), not nested under calls[] -
+@@ -203,6 +210,7 @@ func emitCallState() {
+ 		lineIncomingVid = ci.incomingVid
+ 		lineOutgoingVid = ci.outgoingVid
+ 		lineIVS = ivs
++		lineOrientation = ci.incomingVideoOrientation
+ 	}
+ 	callMu.Unlock()
+ 
+@@ -213,7 +221,7 @@ func emitCallState() {
+ 		line := map[string]any{
+ 			"state": lineState, "calls": cjs,
+ 			"incomingVideo": lineIncomingVid, "outgoingVideo": lineOutgoingVid,
+-			"incomingVideoState": lineIVS,
++			"incomingVideoState": lineIVS, "incomingVideoOrientation": lineOrientation,
+ 		}
+ 		if lineState == "disconnected" {
+ 			line["disconnectDetails"] = map[string]any{"cause": cause}
+@@ -286,9 +294,15 @@ func wireCall(mcCall *meowcaller.Call, origin string, address string) *callInfo
+ 	// camera/rendering, not the WhatsApp-level signaling this reflects).
+ 	mcCall.OnVideoState(func(vs meowcaller.VideoState) {
+ 		callMu.Lock()
+-		var anyVideo bool
++		var anyVideo, known, outVid, inVid, mcVideo bool
+ 		if c, ok := calls[ci.id]; ok {
++			known = true
+ 			c.incomingVid = vs.Active
++			// Only a state with the peer's camera on carries its orientation; the
++			// upgrade handshake (state 4, 6, 11) says 0 and would turn the picture.
++			if vs.Active {
++				c.incomingVideoOrientation = vs.Orientation & 3
++			}
+ 			switch {
+ 			case vs.Active:
+ 				c.incomingVideoState = "streaming"
+@@ -297,9 +311,16 @@ func wireCall(mcCall *meowcaller.Call, origin string, address string) *callInfo
+ 			default:
+ 				c.incomingVideoState = "unavailable"
+ 			}
+-			anyVideo = c.outgoingVid || c.incomingVid || c.c.IsVideo()
++			outVid, inVid, mcVideo = c.outgoingVid, c.incomingVid, c.c.IsVideo()
++			anyVideo = outVid || inVid || mcVideo
+ 		}
+ 		callMu.Unlock()
++		if !known {
++			// The call is gone from the table: its OnEnd closes video. Turning
++			// video off here would close it under a call that is still up.
++			fmt.Fprintln(os.Stderr, "wacall: OnVideoState for an unknown call", ci.id, "state", vs.Raw)
++			return
++		}
+ 		// Same fix as gowhatsapp_go_call_dial/answer: the peer's video turning on (or
+ 		// being active from the initial offer, before changeMedia is ever called) must
+ 		// also open the local clonk session, or voipkit_video_receive_frame silently
+@@ -313,8 +334,8 @@ func wireCall(mcCall *meowcaller.Call, origin string, address string) *callInfo
+ 		// tear down/rebuild the local clonk pipeline via gowhatsapp_call_video_active, which
+ 		// would visually look exactly like the reported flicker) in lockstep with the
+ 		// measured frame-arrival stalls, or whether it fires once and stays put.
+-		fmt.Fprintln(os.Stderr, "wacall: OnVideoState id=", ci.id, "active=", vs.Active,
+-			"anyVideo=", anyVideo, "ts_ms=", time.Now().UnixMilli())
++		fmt.Fprintln(os.Stderr, "wacall: OnVideoState id=", ci.id, "state=", vs.Raw, "active=", vs.Active,
++			"anyVideo=", anyVideo, "out=", outVid, "in=", inVid, "mc=", mcVideo, "ts_ms=", time.Now().UnixMilli())
+ 		if diagRec != nil {
+ 			diagRec.Emit("clonk", map[string]any{
+ 				"event": "on_video_state", "call_id": ci.id, "peer_active": vs.Active,
+@@ -382,6 +403,16 @@ func callWasAnswered(id string) bool {
+ 	return ok && ci.everActive
+ }
+ 
++// callWasIncoming reports whether call.go tracked this call as one rung in from the peer --
++// a 1:1 call the Phone app showed, which therefore has no chat message yet. Like
++// callWasAnswered it relies on the entry outliving the end of the call by a moment.
++func callWasIncoming(id string) bool {
++	callMu.Lock()
++	defer callMu.Unlock()
++	ci, ok := calls[id]
++	return ok && ci.origin == "incoming"
++}
++
+ // callBubbleText returns the "call log" style chat bubble text for a call, keyed by whether
+ // call.go has this call tracked as a video call (see callInfo.c.IsVideo()). Defaults to the
+ // audio phrasing when the call isn't tracked here at all (e.g. a group-call notice).
+@@ -748,11 +779,15 @@ func gowhatsapp_go_call_changemedia(cID *C.char, hasOutgoing, outgoing, hasIncom
+ 				err = ci.c.SetVideoEnabled(true)
+ 			case want:
+ 				err = ci.c.StartVideo()
+-			case ci.c.IsVideo():
+-				err = ci.c.SetVideoEnabled(false)
++			case ci.c.IsSendingVideo():
++				// Camera off is <video state=6>, as WhatsApp's own clients send it;
++				// state 0 made the far side drop its video as well.
++				err = ci.c.StopVideo()
+ 			}
+ 			if err != nil {
+ 				fmt.Fprintln(os.Stderr, "wacall: changeMedia outgoingVideo error:", err)
++			} else {
++				fmt.Fprintln(os.Stderr, "wacall: changeMedia outgoingVideo", want)
+ 			}
+ 			ci.outgoingVid = want
+ 		}
+@@ -790,6 +825,31 @@ func gowhatsapp_go_call_request_peer_keyframe() {
+ 	}
+ }
+ 
++// gowhatsapp_go_call_set_video_orientation tells the peer of every live call which way our
++// camera's picture is up, in quarter turns (0..3) as <video device_orientation> carries it.
++// glue/call.c calls it once our camera is being sent. The stanza goes out off the C
++// mainloop.
++//
++//export gowhatsapp_go_call_set_video_orientation
++func gowhatsapp_go_call_set_video_orientation(orientation C.int) {
++	o := int(orientation) & 3
++	callMu.Lock()
++	var live []*callInfo
++	for _, c := range calls {
++		if c.c != nil && c.state != "disconnected" {
++			live = append(live, c)
++		}
++	}
++	callMu.Unlock()
++	for _, ci := range live {
++		go func(ci *callInfo) {
++			if err := ci.c.SetVideoOrientation(o); err != nil {
++				fmt.Fprintln(os.Stderr, "wacall: SetVideoOrientation failed:", err)
++			}
++		}(ci)
++	}
++}
++
+ //export gowhatsapp_go_call_hangup
+ func gowhatsapp_go_call_hangup(cID *C.char) C.int {
+ 	id := C.GoString(cID)
+diff --git a/glue/call.c b/glue/call.c
+index c0d09f0..0398f8c 100644
+--- a/glue/call.c
++++ b/glue/call.c
+@@ -85,6 +85,21 @@ static gboolean json_true(const char *json, const char *key) {
+ 	return strncmp(c, "true", 4) == 0;
+ }
+ 
++// A non-negative integer value, or -1 when the key is missing or not a number.
++static long json_uint(const char *json, const char *key) {
++	char pat[64];
++	snprintf(pat, sizeof pat, "\"%s\"", key);
++	const char *k = strstr(json, pat);
++	if (!k) return -1;
++	const char *c = strchr(k + strlen(pat), ':');
++	if (!c) return -1;
++	for (c++; *c == ' ' || *c == '\t'; c++) {}
++	if (*c < '0' || *c > '9') return -1;
++	long v = 0;
++	for (; *c >= '0' && *c <= '9' && v < 100000; c++) v = v * 10 + (*c - '0');
++	return v;
++}
++
+ static void reply(LSHandle *sh, LSMessage *msg, const char *payload) {
+ 	LSError e;
+ 	LSErrorInit(&e);
+@@ -112,15 +127,27 @@ static void reply(LSHandle *sh, LSMessage *msg, const char *payload) {
+ #define RTC_RX_SOCKET "/tmp/wa-rtc-rx.sock"
+ #define RTC_TX_SOCKET "/tmp/wa-rtc-tx.sock"
+ #define RTC_SHM_PATH "/tmp/wa-rtc-video"
++// Our own camera's picture for the Phone app's inset, while we send (the engine decodes
++// what it encodes); a quarter of the sent frame.
++#define RTC_PREVIEW_PATH "/tmp/wa-rtc-preview"
++#define RTC_PREVIEW_W 320
++#define RTC_PREVIEW_H 240
+ // The frame size the engine renders to (and encodes at, with a camera). Receive-only is
+ // portrait, as phones send; the engine letterboxes other shapes.
+ #define RTC_RX_ONLY_W 480
+ #define RTC_RX_ONLY_H 640
+ #define RTC_TX_W 640
+ #define RTC_TX_H 480
+-#define RTC_TX_BITRATE 500000
+-// Peer keyframe requests (PLI/FIR) are passed to the encoder at most this often.
+-#define RTC_KEYFRAME_MIN_INTERVAL_US (500 * 1000)
++// 500 kbit/s looked heavily compressed on the far side at 640x480 (sargo, 3 Nov).
++#define RTC_TX_BITRATE 1200000
++// Peer keyframe requests (PLI/FIR) are passed to the encoder at most this often. Every IDR
++// costs the frames after it their share of the bitrate; at 500 ms a lossy link kept the
++// encoder making one every two seconds.
++#define RTC_KEYFRAME_MIN_INTERVAL_US (1000 * 1000)
++// Our camera's picture, in the quarter turns WhatsApp's <video device_orientation> carries:
++// the phone is held upright, which callers announce as 1, and the receiver turns the
++// picture by it.
++#define RTC_TX_ORIENTATION 1
+ 
+ typedef enum { VID_IDLE, VID_PROBING, VID_STARTING, VID_RUNNING } vid_state_t;
+ static vid_state_t g_vid_state = VID_IDLE;
+@@ -129,6 +156,7 @@ static int g_vid_view;      // the user asked to see it (Phone app)
+ static int g_vid_failed;    // start failed; no retry until the wish changes
+ static int g_vid_retried;   // one stop-and-retry after "already running"
+ static int g_vid_tx;        // the running session encodes our camera
++static int g_vid_camera;    // the camera it opens: the front one where there are two
+ static int g_vid_w, g_vid_h;
+ static unsigned g_vid_gen;  // bumped on every close
+ static gint64 g_last_keyframe_us;
+@@ -233,6 +261,7 @@ static bool rtc_start_reply(LSHandle *sh, LSMessage *msg, void *ctx) {
+ 	        g_vid_tx ? "on" : "off");
+ 	// The renderer joins mid-stream: ask the peer for an IDR to start decoding from.
+ 	gowhatsapp_go_call_request_peer_keyframe();
++	if (g_vid_tx) gowhatsapp_go_call_set_video_orientation(RTC_TX_ORIENTATION);
+ 	video_changed();
+ 	if (g_test_inject_mode) test_inject_begin();
+ 	return true;
+@@ -245,9 +274,11 @@ static void video_start_session(int tx) {
+ 	g_vid_h = tx ? RTC_TX_H : RTC_RX_ONLY_H;
+ 	snprintf(payload, sizeof payload,
+ 	         "{\"rxSocket\":\"%s\",\"txSocket\":\"%s\",\"rxEnabled\":true,\"txEnabled\":%s,"
+-	         "\"shmPath\":\"%s\",\"width\":%d,\"height\":%d,\"bitrate\":%d}",
++	         "\"shmPath\":\"%s\",\"width\":%d,\"height\":%d,\"bitrate\":%d,\"camera\":%d,"
++	         "\"previewShmPath\":\"%s\",\"previewWidth\":%d,\"previewHeight\":%d}",
+ 	         RTC_RX_SOCKET, RTC_TX_SOCKET, tx ? "true" : "false", RTC_SHM_PATH, g_vid_w,
+-	         g_vid_h, RTC_TX_BITRATE);
++	         g_vid_h, RTC_TX_BITRATE, g_vid_camera, tx ? RTC_PREVIEW_PATH : "", RTC_PREVIEW_W,
++	         RTC_PREVIEW_H);
+ 	g_vid_state = VID_STARTING;
+ 	if (!rtc_call("start", payload, rtc_start_reply, GUINT_TO_POINTER(g_vid_gen))) {
+ 		g_vid_state = VID_IDLE;
+@@ -267,6 +298,10 @@ static bool rtc_caps_reply(LSHandle *sh, LSMessage *msg, void *ctx) {
+ 	}
+ 	// videoCallCapable honours the device's own policy (deviceinfo_video_call): a device
+ 	// without a usable camera still shows the peer, it just sends no video.
++	// A video call shows the user's face: with two cameras take the front one. Android's
++	// HAL numbers the main back camera 0 and the front camera 1, and the engine's droid
++	// backend passes the index to droidcamsrc as that HAL id.
++	g_vid_camera = json_uint(p, "cameraCount") >= 2 ? 1 : 0;
+ 	video_start_session(json_true(p, "videoCallCapable"));
+ 	return true;
+ }
+@@ -334,8 +369,17 @@ static char *inject_video_uri(const char *json) {
+ 	static const char needle[] = "\"videoURI\":\"\"";
+ 	const char *pos = strstr(json, needle);
+ 	if (!pos || !video_shown()) return g_strdup(json);
+-	return g_strdup_printf("%.*s\"videoURI\":\"%s\",\"videoWidth\":%d,\"videoHeight\":%d%s",
+-	                       (int)(pos - json), json, RTC_SHM_PATH, g_vid_w, g_vid_h,
++	// While we send, our own picture too: turned like the sent one, mirrored for the front
++	// camera as a mirror shows the user.
++	char preview[192] = "";
++	if (g_vid_tx)
++		snprintf(preview, sizeof preview,
++		         ",\"videoPreviewURI\":\"%s\",\"videoPreviewWidth\":%d,\"videoPreviewHeight\":%d,"
++		         "\"videoPreviewOrientation\":%d,\"videoPreviewMirrored\":%s",
++		         RTC_PREVIEW_PATH, RTC_PREVIEW_W, RTC_PREVIEW_H, RTC_TX_ORIENTATION,
++		         g_vid_camera == 1 ? "true" : "false");
++	return g_strdup_printf("%.*s\"videoURI\":\"%s\",\"videoWidth\":%d,\"videoHeight\":%d%s%s",
++	                       (int)(pos - json), json, RTC_SHM_PATH, g_vid_w, g_vid_h, preview,
+ 	                       pos + sizeof(needle) - 1);
+ }
+ 
+diff --git a/glue/tests/call_video_test.cpp b/glue/tests/call_video_test.cpp
+index 75f4af6..4f6856d 100644
+--- a/glue/tests/call_video_test.cpp
++++ b/glue/tests/call_video_test.cpp
+@@ -129,6 +129,9 @@ TEST_F(CallVideo, SendsTooWithACamera) {
+ 	EXPECT_TRUE(has(p, "\"width\":640")) << p;
+ 	EXPECT_TRUE(has(p, "\"height\":480")) << p;
+ 	EXPECT_STREQ(fake.tx_socket, "/tmp/wa-rtc-tx.sock");
++	EXPECT_TRUE(has(p, "\"bitrate\":1200000")) << p;
++	EXPECT_EQ(fake.video_orientation_sets, 1) << "the peer learns which way our picture is up";
++	EXPECT_EQ(fake.video_orientation, 1);
+ }
+ 
+ TEST_F(CallVideo, ThePhoneAppLearnsWhereThePictureIs) {
+@@ -144,6 +147,31 @@ TEST_F(CallVideo, ThePhoneAppLearnsWhereThePictureIs) {
+ 	EXPECT_FALSE(has(r, "videoWidth")) << r;
+ }
+ 
++// While we send, the Phone app also learns where our own picture is, and how to show it.
++TEST_F(CallVideo, ThePhoneAppLearnsWhereOurOwnPictureIs) {
++	want_video();
++	fake_reply(find_engine_call("capabilities"),
++	           "{\"returnValue\":true,\"videoCallCapable\":true,\"cameraCount\":2}");
++	int start = find_engine_call("start");
++	ASSERT_GE(start, 0);
++	EXPECT_TRUE(has(payload_of(start), "\"previewShmPath\":\"/tmp/wa-rtc-preview\"")) << payload_of(start);
++	fake_reply(start, "{\"returnValue\":true,\"txSocket\":\"/tmp/wa-rtc-tx.sock\","
++	                  "\"rxSocket\":\"/tmp/wa-rtc-rx.sock\"}");
++	pump();
++	std::string r = fake.last_subscription_reply;
++	EXPECT_TRUE(has(r, "\"videoPreviewURI\":\"/tmp/wa-rtc-preview\",\"videoPreviewWidth\":320,"
++	                   "\"videoPreviewHeight\":240,\"videoPreviewOrientation\":1,"
++	                   "\"videoPreviewMirrored\":true"))
++		<< r;
++}
++
++TEST_F(CallVideo, NoOwnPictureWhenReceivingOnly) {
++	want_video();
++	int start = bring_up(false);
++	EXPECT_TRUE(has(payload_of(start), "\"previewShmPath\":\"\"")) << payload_of(start);
++	EXPECT_FALSE(has(fake.last_subscription_reply, "videoPreviewURI")) << fake.last_subscription_reply;
++}
++
+ TEST_F(CallVideo, TurningTheViewOffStopsTheEngine) {
+ 	want_video();
+ 	bring_up(false);
+@@ -206,6 +234,27 @@ TEST_F(CallVideo, AnOldStartAnswerIsNotTakenForTheNewSession) {
+ 	EXPECT_EQ(fake.video_starts, 1) << "the new session still comes up";
+ }
+ 
++// A video call shows the user's face: with a front and a back camera the front one
++// (HAL id 1) is opened, with a single camera that one.
++TEST_F(CallVideo, TheFrontCameraIsUsedWhereThereAreTwo) {
++	want_video();
++	fake_reply(find_engine_call("capabilities"),
++	           "{\"returnValue\":true,\"videoCallCapable\":true,\"cameraCount\":2}");
++	int start = find_engine_call("start");
++	ASSERT_GE(start, 0);
++	EXPECT_TRUE(has(payload_of(start), "\"camera\":1")) << payload_of(start);
++	fake_invoke("changeMedia", "{\"id\":\"A1\",\"incomingVideo\":false}");
++	pump();
++	fake_invoke("changeMedia", "{\"id\":\"A1\",\"incomingVideo\":true}");
++	pump();
++	int caps = find_engine_call("capabilities", start + 1);
++	ASSERT_GE(caps, 0);
++	fake_reply(caps, "{\"returnValue\":true,\"videoCallCapable\":true,\"cameraCount\":1}");
++	int again = find_engine_call("start", start + 1);
++	ASSERT_GE(again, 0);
++	EXPECT_TRUE(has(payload_of(again), "\"camera\":0")) << payload_of(again);
++}
++
+ TEST_F(CallVideo, ALateCapabilitiesAnswerStartsNothing) {
+ 	want_video();
+ 	int caps = find_engine_call("capabilities");
+@@ -277,12 +326,17 @@ TEST_F(CallVideo, PeerKeyframeRequestsReachTheEncoderRateLimited) {
+ 	g_usleep(550 * 1000);
+ 	gowhatsapp_call_request_keyframe();
+ 	pump();
++	EXPECT_EQ(count_engine_calls("requestKeyframe"), 1) << "at most one a second";
++	g_usleep(500 * 1000);
++	gowhatsapp_call_request_keyframe();
++	pump();
+ 	EXPECT_EQ(count_engine_calls("requestKeyframe"), 2);
+ }
+ 
+ TEST_F(CallVideo, NoKeyframeRequestsWithoutAnEncoder) {
+ 	want_video();
+ 	bring_up(false);
++	EXPECT_EQ(fake.video_orientation_sets, 0) << "nothing of ours to turn";
+ 	g_usleep(550 * 1000);
+ 	gowhatsapp_call_request_keyframe();
+ 	pump();
+diff --git a/glue/tests/fakes.c b/glue/tests/fakes.c
+index 9c832f2..7c9fccf 100644
+--- a/glue/tests/fakes.c
++++ b/glue/tests/fakes.c
+@@ -131,6 +131,12 @@ int gowhatsapp_go_call_changemedia(char *cID, int a, int b, int c, int d) {
+ 	return 0;
+ }
+ int gowhatsapp_go_call_hangup(char *cID) { (void)cID; return 0; }
++void gowhatsapp_go_call_set_video_orientation(int orientation) {
++	fake_lock();
++	fake.video_orientation = orientation;
++	fake.video_orientation_sets++;
++	fake_unlock();
++}
+ void gowhatsapp_go_call_request_peer_keyframe(void) {
+ 	fake_lock();
+ 	fake.peer_keyframe_requests++;
+diff --git a/glue/tests/fakes.h b/glue/tests/fakes.h
+index e4f0769..caa67fd 100644
+--- a/glue/tests/fakes.h
++++ b/glue/tests/fakes.h
+@@ -21,6 +21,7 @@ struct fake_state {
+ 
+ 	// The video bridge and the Go export it uses (call_video_test).
+ 	int video_starts, video_stops, peer_keyframe_requests;
++	int video_orientation, video_orientation_sets; /* gowhatsapp_go_call_set_video_orientation */
+ 	char tx_socket[128], rx_socket[128];
+ 	int set_sockets_ok;     // what voipkit_rtcengine_set_sockets answers (reset: 1)
+ 
+diff --git a/glue/tests/fakes/libwhatsmeow.h b/glue/tests/fakes/libwhatsmeow.h
+index 661b4c7..2f4f8c9 100644
+--- a/glue/tests/fakes/libwhatsmeow.h
++++ b/glue/tests/fakes/libwhatsmeow.h
+@@ -8,4 +8,5 @@ extern int gowhatsapp_go_call_hangup_all(void);
+ extern int gowhatsapp_go_call_changemedia(char *cID, int hasOutgoing, int outgoing, int hasIncoming, int incoming);
+ extern int gowhatsapp_go_call_hangup(char *cID);
+ extern void gowhatsapp_go_call_request_peer_keyframe(void);
++extern void gowhatsapp_go_call_set_video_orientation(int orientation);
+ #endif
+diff --git a/handler.go b/handler.go
+index 4404cf0..97d6786 100644
+--- a/handler.go
++++ b/handler.go
+@@ -143,17 +143,10 @@ func (handler *Handler) eventHandler(rawEvt interface{}) {
+ 			handler.prune_devices(*cli.Store.ID)
+ 		}
+ 	case *events.CallOffer:
+-		// webOS: post a "call log" style bubble (📞/📹 Incoming call) instead of the old
+-		// "WhatsApp Web does not support calls" caveat text — real calls are already handled
+-		// in-plugin via meowcaller/the Phone app (see call.go). Use the WhatsApp CallID as the
+-		// message id so CallTerminate below can flip this same bubble to "Missed call" via the
+-		// existing edit-in-place mechanism (purple_handle_message_edit) if it never answers.
+-		bcm := evt.BasicCallMeta
+-		chat := handler.lidToPn(bcm.From, "handling call offer")
+-		sender := handler.lidToPn(bcm.CallCreator, "handling call offer")
+-		text := callBubbleText(bcm.CallID, false)
+-		id := bcm.CallID
+-		purple_display_text_message(handler.account, chat.ToNonAD().String(), false, false, sender.ToNonAD().String(), nil, bcm.Timestamp, text, &id, "", "", "")
++		// webOS: a 1:1 call rings in the Phone app (see call.go), so nothing goes into the
++		// chat while it rings -- an "Incoming call" message here made Messaging alert about
++		// the same call a second time. If it goes unanswered, CallTerminate below posts
++		// "Missed call" instead.
+ 	case *events.CallOfferNotice:
+ 		// same as CallOffer, but is a group
+ 		bcm := evt.BasicCallMeta
+@@ -168,14 +161,21 @@ func (handler *Handler) eventHandler(rawEvt interface{}) {
+ 	case *events.CallRelayLatency:
+ 		// related to calls. ignore silently.
+ 	case *events.CallTerminate:
+-		// webOS: if the call never reached "active" (answered) before it ended, flip the
+-		// "Incoming call" bubble posted above to "Missed call" — mirrors what the real WhatsApp
+-		// app shows in the chat. calls/callMu are call.go's shared meowcaller call-state map,
+-		// keyed by the same WhatsApp CallID. Defaults to "missed" (answered=false) when the
+-		// call was never tracked there at all — correct for group-call notices, which this
+-		// plugin can't answer regardless.
++		// webOS: a call that never reached "active" (answered) is a missed call, as the real
++		// WhatsApp app shows it in the chat. A 1:1 call (tracked in call.go's calls map) had
++		// no chat message while it rang, so the missed call is posted now, under the call's
++		// id; a group-call notice already has its "Incoming call" message, which is edited in
++		// place. The peer is the call's creator for an incoming call.
+ 		if !callWasAnswered(evt.CallID) {
+-			purple_handle_message_edit(handler.account, evt.CallID, callBubbleText(evt.CallID, true))
++			text := callBubbleText(evt.CallID, true)
++			if callWasIncoming(evt.CallID) {
++				bcm := evt.BasicCallMeta
++				peer := handler.lidToPn(bcm.CallCreator, "handling missed call")
++				id := evt.CallID
++				purple_display_text_message(handler.account, peer.ToNonAD().String(), false, false, peer.ToNonAD().String(), nil, bcm.Timestamp, text, &id, "", "", "")
++			} else {
++				purple_handle_message_edit(handler.account, evt.CallID, text)
++			}
+ 		}
+ 	//case *events.JoinedGroup:
+ 	// TODO
