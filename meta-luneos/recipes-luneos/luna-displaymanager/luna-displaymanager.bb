@@ -9,10 +9,9 @@ RDEPENDS:${PN} += "sleepd com.webos.service.battery luna-authmanager"
 PV = "1.0.0+git"
 PR = "r12"
 
-# Pull request #14 (unlock over the bus only with authmanager's token), which
-# is master plus that change.
-SRCREV = "a2f0cfccb8470318fedfdd2e13c95931a5acd202"
-WEBOS_GIT_PARAM_BRANCH = "herrie/security-WP5-unlock-token-rebased"
+# master, which has pull request #14 (unlock over the bus only with
+# authmanager's token).
+SRCREV = "fec7d019b83905904b32955a5b26a63efc8410ad"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 
