@@ -11,8 +11,7 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "glib-2.0 libpbnjson libxml2 pmloglib luna-service2 luna-prefs loc-utils boost"
 
-SRCREV = "deccedfdc84b1e7c59eafc7f10aa3afc5eeb74ad"
-WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
+SRCREV = "3e39265827ab2605534b0569e840bae8d874cb9c"
 
 PV = "1.0.0-109"
 PR = "r4"

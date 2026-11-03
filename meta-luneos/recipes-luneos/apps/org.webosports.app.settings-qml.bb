@@ -15,10 +15,10 @@ inherit pkgconfig
 
 PE = "1"
 PV = "0.4.0-1+git"
-SRCREV = "f66555a0a8c8a53f8c2df4864e21d5a6616f77ae"
+SRCREV = "e686e7d842c2a1a291990f4ae01be56efd45d75f"
 
 # This app is developed on qml-based, not master.
-WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
+WEBOS_GIT_PARAM_BRANCH = "qml-based"
 
 WEBOS_REPO_NAME = "org.webosports.app.settings"
 

@@ -13,4 +13,4 @@ CLOUD_AUTH_APP = "com.palm.app.webdav-auth"
 # luneos-synergy-connectors-srcrev.inc, so this recipe alone builds from main at the merged
 # commit. Drop these two lines when LSC_SRCREV is bumped past it.
 LSC_BRANCH = "main"
-LSC_SRCREV = "867ec909a0c53320aa91625f38032d13e2758648"
+LSC_SRCREV = "75cd556f9af1a1588120b9980bba0ede9b53db32"

@@ -14,8 +14,7 @@ DEPENDS = "nyx-lib luna-service2 json-c libxml2 sqlite3 glib-2.0"
 #Added for LuneOS
 RDEPENDS:${PN} += "com.webos.service.battery"
 
-SRCREV = "6daef91f0b341eb6a2ab6bb5aeefd5624934fd69"
-WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
+SRCREV = "1723828a4c546f61e3dc1b5a586ff32aa1bf600f"
 
 PV = "2.0.0-20"
 

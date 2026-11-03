@@ -17,8 +17,7 @@ RDEPENDS:${PN} += " \
 PE = "1"
 PV = "0.6-0+git"
 
-SRCREV = "101c520b230e5f72a8538e0829218897da463267"
-WEBOS_GIT_PARAM_BRANCH = "herrie/integration-testing"
+SRCREV = "64b13105b5dc4e9788df0ba3169cbd4c9a6c3954"
 PR = "r1"
 
 inherit webos_ports_repo
