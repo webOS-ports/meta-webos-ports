@@ -13,6 +13,14 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 inherit packagegroup
 
+# pdk-sysroot skips itself when there is no PDK userland to install, so this
+# has to as well, or it RDEPENDS on a recipe that does not exist.
+python () {
+    if not d.getVar('PDK_SYSROOT_TARBALL') and \
+            'pdk-armel' not in (d.getVar('BBMULTICONFIG') or '').split():
+        raise bb.parse.SkipRecipe('needs BBMULTICONFIG = "pdk-armel" or PDK_SYSROOT_TARBALL')
+}
+
 RDEPENDS:${PN} = " \
     pdk-sysroot \
     pdk-tools \
