@@ -1,0 +1,471 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 3 Nov 2026 05:45:38 +0100
+Subject: [PATCH] hwcomposer: v20: a protected video plane under the UI
+
+The LuneOS Widevine bridge decodes protected video on the device's secure
+decoder, inside the Android container. Those buffers can't be read or drawn
+by the GPU, so the only way to show them is as a hardware composer layer of
+their own. This adds that layer to the v20 backend.
+
+With QPA_HWC_VIDEO_SOCK set, the backend listens on that unix socket for one
+sender at a time. Each message carries a decoder buffer's description and its
+file descriptors, plus an optional fence. Each buffer becomes the content of a
+DEVICE layer below the UI layer, and the UI layer is blended premultiplied so
+the compositor's punch-through hole shows the video. hwc2_compat has no call
+for the layer order, so android::HWC2::impl::Layer::setZOrder is looked up in
+libhwc2_compat_layer.so.
+
+The compositor tells the plugin where the hole is through the
+"videoplanegeometry" native resource: x, y, width, height and rotation, with
+width -1 hiding the plane. The picture is fitted into that rect with its
+aspect kept, clipped at the panel edges, and rotated by the HWC transform in
+landscape. A worker thread applies it, so the GUI thread never waits for a
+present. Without QPA_HWC_VIDEO_SOCK the resource is null and nothing changes.
+
+The video layer is set to DEVICE before every validate: a frame placed at a
+bad rect falls back to CLIENT, and once accepted that sticks, leaving a black
+hole. The sender is another process, so every message is checked (size, fd
+count, handle size) and a malformed one is dropped with its descriptors
+closed.
+
+The socket is created mode 0666, because the sender runs in the Android
+container. Any local process can therefore hand the compositor buffers.
+
+Tested on a Pixel 3a (sargo) with the bridge in Atlas: NPO, Prime Video and
+Angel One played on the plane, which followed card moves and rotation.
+Malformed messages sent to the running compositor were dropped, with no
+crash and no leaked descriptor. The new code builds without warnings for
+armv7 and aarch64, and the analysers' findings in it are fixed.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [LuneOS-specific: the frame protocol and the compositor resource are the Widevine bridge's]
+---
+ hwcomposer_backend.h       |   4 +
+ hwcomposer_backend_v20.cpp | 314 ++++++++++++++++++++++++++++++++++++-
+ hwcomposer_backend_v20.h   |   1 +
+ hwcomposer_context.cpp     |   5 +
+ hwcomposer_context.h       |   1 +
+ qeglfsintegration.cpp      |   2 +
+ 6 files changed, 326 insertions(+), 1 deletion(-)
+
+diff --git a/hwcomposer_backend.h b/hwcomposer_backend.h
+index d318124..7c3ded7 100644
+--- a/hwcomposer_backend.h
++++ b/hwcomposer_backend.h
+@@ -116,6 +116,10 @@ public:
+ 
+     virtual bool requestUpdate(QEglFSWindow *) { return false; }
+ 
++    // Where the protected video plane goes: void (*)(x, y, w, h, rotation), or
++    // null without one. A width of -1 hides the plane.
++    virtual void *videoPlaneGeometryFunc() { return nullptr; }
++
+ protected:
+     HwComposerBackend(hw_module_t *hwc_module, void *libmsf);
+     virtual ~HwComposerBackend();
+diff --git a/hwcomposer_backend_v20.cpp b/hwcomposer_backend_v20.cpp
+index 94c3ac1..a64b1ee 100644
+--- a/hwcomposer_backend_v20.cpp
++++ b/hwcomposer_backend_v20.cpp
+@@ -111,6 +111,311 @@ void hwc2_callback_refresh(HWC2EventListener* /*listener*/, int32_t /*sequenceId
+ {
+ }
+ 
++// A protected video plane, under the UI layer, fed with decoder buffers over a
++// socket by a separate process. Off unless QPA_HWC_VIDEO_SOCK is set.
++#include <dlfcn.h>
++#include <fcntl.h>
++#include <condition_variable>
++#include <mutex>
++#include <sys/socket.h>
++#include <sys/stat.h>
++#include <sys/un.h>
++#include <thread>
++#include <unistd.h>
++#include <cutils/native_handle.h>
++extern "C" {
++void *android_dlopen(const char *filename, int flag);
++void *android_dlsym(void *handle, const char *symbol);
++}
++
++namespace {
++struct VideoFrame {
++    uint32_t width, height, stride, format;
++    uint64_t usage;
++    int32_t numFds, numInts, hasFence, cropW, cropH;
++    int32_t ints[96];
++};
++std::mutex g_hwc;
++hwc2_compat_display_t *g_display = nullptr;
++HWComposerNativeWindowBuffer *g_target = nullptr;
++int g_slot = 0;
++hwc2_compat_layer_t *g_video = nullptr;
++hwc2_compat_layer_t *g_primary = nullptr;
++int (*g_zorder)(void *, uint32_t) = nullptr;
++int g_cropW = 0, g_cropH = 0, g_panelW = 0, g_panelH = 0;
++struct { int x, y, w, h; } g_rect = {0, 0, 0, 0};
++int g_rotation = 0;
++// The GUI thread must not wait for a present, so its latest value waits here.
++std::mutex g_placeLock;
++std::condition_variable g_placeWake;
++int g_place[5];
++bool g_placePending = false;
++bool g_videoStarted = false;
++
++void video_set_geometry(int x, int y, int w, int h, int rotation)
++{
++    {
++        std::lock_guard<std::mutex> lock(g_placeLock);
++        g_place[0] = x;
++        g_place[1] = y;
++        g_place[2] = w;
++        g_place[3] = h;
++        g_place[4] = rotation;
++        g_placePending = true;
++    }
++    g_placeWake.notify_one();
++}
++
++// Fits the source into the rectangle the compositor punched, or a centred band
++// until it has told us one. Called with g_hwc held.
++void video_place()
++{
++    if (!g_video || !g_cropW || !g_cropH)
++        return;
++    int rx = g_rect.x, ry = g_rect.y, rw = g_rect.w, rh = g_rect.h;
++    const bool hidden = rw < 0;
++    hwc2_compat_layer_set_plane_alpha(g_video, hidden ? 0.0f : 1.0f);
++    if (hidden)
++        return;
++    if (rw == 0 || rh <= 0) {
++        rx = 0;
++        rw = g_panelW;
++        rh = g_panelW * g_cropH / g_cropW;
++        ry = (g_panelH - rh) / 2;
++    }
++    const bool sideways = g_rotation == 90 || g_rotation == 270;
++    const int aw = sideways ? g_cropH : g_cropW, ah = sideways ? g_cropW : g_cropH;
++    int w = rw, h = rw * ah / aw;
++    if (h > rh) {
++        h = rh;
++        w = rh * aw / ah;
++    }
++    int x = rx + (rw - w) / 2, y = ry + (rh - h) / 2;
++    // A card dragged past the edge must keep the same picture, not squeeze it.
++    const int l = x < 0 ? 0 : x, t = y < 0 ? 0 : y;
++    const int r = x + w > g_panelW ? g_panelW : x + w, b = y + h > g_panelH ? g_panelH : y + h;
++    if (r <= l || b <= t) {
++        hwc2_compat_layer_set_plane_alpha(g_video, 0.0f);
++        return;
++    }
++    // Share cut from each panel side, then which side of the source that is.
++    const float cl = (float)(l - x) / w, cr = (float)(x + w - r) / w;
++    const float ct = (float)(t - y) / h, cb = (float)(y + h - b) / h;
++    float sl = cl, sr = cr, st = ct, sb = cb;
++    int transform = 0;
++    if (g_rotation == 90) {
++        sb = cl; st = cr; sl = ct; sr = cb;
++        transform = HWC_TRANSFORM_ROT_90;
++    } else if (g_rotation == 180) {
++        sl = cr; sr = cl; st = cb; sb = ct;
++        transform = HWC_TRANSFORM_ROT_180;
++    } else if (g_rotation == 270) {
++        st = cl; sb = cr; sr = ct; sl = cb;
++        transform = HWC_TRANSFORM_ROT_270;
++    }
++    hwc2_compat_layer_set_transform(g_video, transform);
++    hwc2_compat_layer_set_source_crop(g_video, sl * g_cropW, st * g_cropH, (1 - sr) * g_cropW, (1 - sb) * g_cropH);
++    hwc2_compat_layer_set_display_frame(g_video, l, t, r, b);
++    hwc2_compat_layer_set_visible_region(g_video, l, t, r, b);
++    static int placed;
++    if (placed++ < 12 || placed % 60 == 0)
++        fprintf(stderr, "video-plane: %dx%d placed at %d,%d %dx%d\n", g_cropW, g_cropH, x, y, w, h);
++}
++
++void video_present()
++{
++    // A frame placed off screen falls back to CLIENT, and accepting that sticks
++    // until the type is asked for again. Nothing draws this layer on the GPU.
++    if (g_video)
++        hwc2_compat_layer_set_composition_type(g_video, HWC2_COMPOSITION_DEVICE);
++    uint32_t types = 0, requests = 0;
++    int e = hwc2_compat_display_validate(g_display, &types, &requests);
++    static int warned;
++    if ((types || requests || (e != HWC2_ERROR_NONE && e != HWC2_ERROR_HAS_CHANGES)) && warned++ < 3)
++        fprintf(stderr, "video-plane: validate %d types %u requests %u\n", e, types, requests);
++    if (types || requests)
++        hwc2_compat_display_accept_changes(g_display);
++    if (g_target)
++        hwc2_compat_display_set_client_target(g_display, g_slot, g_target, -1, HAL_DATASPACE_UNKNOWN);
++    int fence = -1;
++    int p = hwc2_compat_display_present(g_display, &fence);
++    if (p != HWC2_ERROR_NONE && warned++ < 6)
++        fprintf(stderr, "video-plane: present %d\n", p);
++    if (fence >= 0)
++        close(fence);
++}
++
++void video_create_layer(const VideoFrame &f, int panelW, int panelH)
++{
++    void *lib = android_dlopen("libhwc2_compat_layer.so", RTLD_LAZY);
++    *(void **)&g_zorder = lib ? android_dlsym(lib, "_ZN7android4HWC24impl5Layer9setZOrderEj") : nullptr;
++    g_video = hwc2_compat_display_create_layer(g_display);
++    hwc2_compat_layer_set_composition_type(g_video, HWC2_COMPOSITION_DEVICE);
++    hwc2_compat_layer_set_blend_mode(g_video, HWC2_BLEND_MODE_NONE);
++    g_panelW = panelW;
++    g_panelH = panelH;
++    g_cropW = f.cropW;
++    g_cropH = f.cropH;
++    video_place();
++    // Video below, the GPU's UI above it and blended, so a hole shows the video.
++    int z = g_zorder ? g_zorder(*(void **)g_video, 0) : -1;
++    int zp = g_zorder ? g_zorder(*(void **)g_primary, 1) : -1;
++    int bl = hwc2_compat_layer_set_blend_mode(g_primary, HWC2_BLEND_MODE_PREMULTIPLIED);
++    fprintf(stderr, "video-plane: primary z result %d blend %d\n", zp, bl);
++    fprintf(stderr, "video-plane: layer %ux%u on panel %dx%d, z result %d\n", f.width, f.height, panelW, panelH, z);
++}
++
++void video_client(int c, int panelW, int panelH)
++{
++    native_handle_t *held[4] = {};
++    long frames = 0;
++    for (;;) {
++        VideoFrame f = {};
++        char control[CMSG_SPACE(sizeof(int) * 32)];
++        struct iovec io = {&f, sizeof(f)};
++        struct msghdr m = {};
++        m.msg_iov = &io;
++        m.msg_iovlen = 1;
++        m.msg_control = control;
++        m.msg_controllen = sizeof(control);
++        ssize_t n = recvmsg(c, &m, MSG_CMSG_CLOEXEC);
++        if (n <= 0)
++            break;
++        int fds[32], nfds = 0;
++        for (cmsghdr *h = CMSG_FIRSTHDR(&m); h; h = CMSG_NXTHDR(&m, h))
++            if (h->cmsg_level == SOL_SOCKET && h->cmsg_type == SCM_RIGHTS) {
++                const int more = (int)((h->cmsg_len - CMSG_LEN(0)) / sizeof(int));
++                const int take = more < 32 - nfds ? more : 32 - nfds;
++                memcpy(fds + nfds, CMSG_DATA(h), sizeof(int) * take);
++                nfds += take;
++            }
++        // The sender is another process: take nothing it says on trust.
++        const bool valid = n == (ssize_t)sizeof(f) && !(m.msg_flags & (MSG_TRUNC | MSG_CTRUNC))
++            && f.numFds >= 0 && f.numInts >= 0 && f.numInts <= (int32_t)(sizeof(f.ints) / sizeof(f.ints[0]))
++            && (f.hasFence == 0 || f.hasFence == 1) && f.numFds + f.hasFence == nfds
++            && f.cropW > 0 && f.cropH > 0;
++        native_handle_t *handle = valid
++            ? (native_handle_t *)malloc(sizeof(native_handle_t) + sizeof(int) * (f.numFds + f.numInts))
++            : nullptr;
++        if (!handle) {
++            static int dropped;
++            if (dropped++ < 3)
++                fprintf(stderr, "video-plane: dropped a frame: %s\n", valid ? "out of memory" : "malformed");
++            for (int i = 0; i < nfds; i++)
++                close(fds[i]);
++            continue;
++        }
++        // valid: nfds == numFds + hasFence, so a fence is the last descriptor.
++        int fence = f.hasFence && nfds > 0 ? fds[nfds - 1] : -1;
++        handle->version = sizeof(native_handle_t);
++        handle->numFds = f.numFds;
++        handle->numInts = f.numInts;
++        memcpy(handle->data, fds, sizeof(int) * f.numFds);
++        memcpy(handle->data + f.numFds, f.ints, sizeof(int) * f.numInts);
++        ANativeWindowBuffer b;
++        // Zero every field; the ones the HWC reads are set below.
++        memset(static_cast<void *>(&b), 0, sizeof(b));
++        b.width = f.width;
++        b.height = f.height;
++        b.stride = f.stride;
++        b.format = f.format;
++        b.usage = f.usage;
++        b.layerCount = 1;
++        b.handle = handle;
++        {
++            std::lock_guard<std::mutex> lock(g_hwc);
++            if (!g_video)
++                video_create_layer(f, panelW, panelH);
++            if (f.cropW != g_cropW || f.cropH != g_cropH) {
++                g_cropW = f.cropW;
++                g_cropH = f.cropH;
++                video_place();
++            }
++            hwc2_compat_layer_set_buffer(g_video, 0, &b, fence);
++            video_present();
++        }
++        if (held[3]) {
++            for (int i = 0; i < held[3]->numFds; i++)
++                close(held[3]->data[i]);
++            free(held[3]);
++        }
++        memmove(held + 1, held, sizeof(held) - sizeof(held[0]));
++        held[0] = handle;
++        if (++frames % 240 == 0)
++            fprintf(stderr, "video-plane: %ld frames\n", frames);
++    }
++    fprintf(stderr, "video-plane: client gone after %ld frames\n", frames);
++    close(c);
++    std::lock_guard<std::mutex> lock(g_hwc);
++    if (g_video) {
++        hwc2_compat_display_destroy_layer(g_display, g_video);
++        g_video = nullptr;
++        hwc2_compat_layer_set_blend_mode(g_primary, HWC2_BLEND_MODE_NONE);
++        video_present();
++    }
++    for (native_handle_t *h : held)
++        if (h) {
++            for (int i = 0; i < h->numFds; i++)
++                close(h->data[i]);
++            free(h);
++        }
++}
++
++void video_start(int panelW, int panelH)
++{
++    QByteArray path = qgetenv("QPA_HWC_VIDEO_SOCK");
++    if (path.isEmpty())
++        return;
++    g_videoStarted = true;
++    std::thread([] {
++        for (;;) {
++            int r[5];
++            {
++                std::unique_lock<std::mutex> lock(g_placeLock);
++                g_placeWake.wait(lock, [] { return g_placePending; });
++                memcpy(r, g_place, sizeof(r));
++                g_placePending = false;
++            }
++            std::lock_guard<std::mutex> lock(g_hwc);
++            g_rect = {r[0], r[1], r[2], r[3]};
++            g_rotation = r[4];
++            if (g_video) {
++                video_place();
++                video_present();
++            }
++        }
++    }).detach();
++    std::thread([path, panelW, panelH] {
++        int s = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
++        if (s < 0) {
++            perror("video-plane: socket");
++            return;
++        }
++        struct sockaddr_un a = {};
++        a.sun_family = AF_UNIX;
++        strncpy(a.sun_path, path.constData(), sizeof(a.sun_path) - 1);
++        unlink(a.sun_path);
++        if (bind(s, reinterpret_cast<struct sockaddr *>(&a), sizeof(a)) || listen(s, 1)) {
++            perror("video-plane: socket");
++            close(s);
++            return;
++        }
++        chmod(a.sun_path, 0666);
++        fprintf(stderr, "video-plane: listening on %s\n", a.sun_path);
++        for (;;) {
++            int c = accept4(s, nullptr, nullptr, SOCK_CLOEXEC);
++            if (c >= 0)
++                video_client(c, panelW, panelH);
++        }
++    }).detach();
++}
++}  // namespace
++
++void *HwComposerBackend_v20::videoPlaneGeometryFunc()
++{
++    return g_videoStarted ? reinterpret_cast<void *>(&video_set_geometry) : nullptr;
++}
++
+ class HWC2Window : public HWComposerNativeWindow
+ {
+     private:
+@@ -167,6 +472,7 @@ void HWC2Window::present(HWComposerNativeWindowBuffer *buffer)
+     hwc2_error_t error = HWC2_ERROR_NONE;
+ 
+     QSystraceEvent trace("graphics", "QPA::present");
++    std::lock_guard<std::mutex> videoLock(g_hwc);
+ 
+     QPA_HWC_TIMING_SAMPLE(presentTime);
+ 
+@@ -185,7 +491,7 @@ void HWC2Window::present(HWComposerNativeWindowBuffer *buffer)
+         return;
+     }
+ 
+-    if (numTypes || numRequests) {
++    if ((numTypes || numRequests) && !g_video) {
+         qDebug("prepare: validate required changes for display %d: %d",
+                displayId, error);
+         return;
+@@ -222,6 +528,8 @@ void HWC2Window::present(HWComposerNativeWindowBuffer *buffer)
+     hwc2_compat_display_set_client_target(hwcDisplay, slot, target,
+                                           acquireFenceFd,
+                                           HAL_DATASPACE_UNKNOWN);
++    g_target = target;
++    g_slot = slot;
+ 
+     QSystrace::end("graphics", "QPA::set_client_target", "");
+ 
+@@ -328,6 +636,10 @@ HwComposerBackend_v20::createWindow(int width, int height)
+     hwc2_compat_layer_set_display_frame(layer, 0, 0, width, height);
+     hwc2_compat_layer_set_visible_region(layer, 0, 0, width, height);
+ 
++    g_display = hwc2_primary_display;
++    g_primary = layer;
++    video_start(width, height);
++
+     HWC2Window *hwc_win = new HWC2Window(width, height,
+                                          HAL_PIXEL_FORMAT_RGBA_8888,
+                                          hwc2_primary_display, layer);
+diff --git a/hwcomposer_backend_v20.h b/hwcomposer_backend_v20.h
+index f4798f4..9d15595 100644
+--- a/hwcomposer_backend_v20.h
++++ b/hwcomposer_backend_v20.h
+@@ -70,6 +70,7 @@ public:
+     virtual bool getScreenSizes(int *width, int *height, float *physical_width, float *physical_height);
+ 
+     virtual bool requestUpdate(QEglFSWindow *window) Q_DECL_OVERRIDE;
++    virtual void *videoPlaneGeometryFunc() Q_DECL_OVERRIDE;
+ 
+     void timerEvent(QTimerEvent *) Q_DECL_OVERRIDE;
+     void handleVSyncEvent();
+diff --git a/hwcomposer_context.cpp b/hwcomposer_context.cpp
+index f18f9d6..14cfd7d 100644
+--- a/hwcomposer_context.cpp
++++ b/hwcomposer_context.cpp
+@@ -157,6 +157,11 @@ void HwComposerContext::swapToWindow(QEglFSContext *context, QPlatformSurface *s
+     return backend->swap(egl_display, egl_surface);
+ }
+ 
++void *HwComposerContext::videoPlaneGeometryFunc()
++{
++    return backend->videoPlaneGeometryFunc();
++}
++
+ void HwComposerContext::sleepDisplay(bool sleep)
+ {
+     if (sleep) {
+diff --git a/hwcomposer_context.h b/hwcomposer_context.h
+index 68934a4..92ef80f 100644
+--- a/hwcomposer_context.h
++++ b/hwcomposer_context.h
+@@ -89,6 +89,7 @@ public:
+     void swapToWindow(QEglFSContext *context, QPlatformSurface *surface);
+ 
+     void sleepDisplay(bool sleep);
++    void *videoPlaneGeometryFunc();
+     qreal refreshRate() const;
+ 
+     bool requestUpdate(QEglFSWindow *window);
+diff --git a/qeglfsintegration.cpp b/qeglfsintegration.cpp
+index 26d5acc..01c2c9c 100644
+--- a/qeglfsintegration.cpp
++++ b/qeglfsintegration.cpp
+@@ -223,6 +223,8 @@ void *QEglFSIntegration::nativeResourceForIntegration(const QByteArray &resource
+ 
+     if (lowerCaseResource == "egldisplay") {
+         return static_cast<QEglFSScreen *>(mScreen)->display();
++    } else if (lowerCaseResource == "videoplanegeometry") {
++        return mHwc->videoPlaneGeometryFunc();
+     } else if (lowerCaseResource == "displayoff") {
+         // Called from old versions of lipstick to turn off the display
+         qWarning("\"DisplayOff\" resource is deprecated, use QPlatformScreen::setPowerState() instead");
