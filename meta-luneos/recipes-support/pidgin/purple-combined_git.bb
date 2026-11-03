@@ -17,11 +17,16 @@ PE = "1"
 #   purple-gowhatsapp   the WhatsApp prpl. 0001-0005 are generic fixes meant for upstream, 0006-0007
 #                       the webOS Messaging and calling integration, 0008 adds prpl-gometa (Facebook
 #                       Messenger on mautrix-meta's messagix), which is LuneOS work and not part of
-#                       purple-gowhatsapp. It has to live in this .so: two Go c-archives cannot
-#                       share one process.
+#                       purple-gowhatsapp, 0009 keeps a ringing call off the call audio and 0010
+#                       keeps the call's playback stream fed between packets. 0012 is the video
+#                       call side (orientation, front camera, camera off, self-view). It has to
+#                       live in this .so: two Go c-archives cannot share one process.
 #   meowcaller          WhatsApp calling, which go.mod replaces with ./third_party/meowcaller.
 #                       Kept at 9769d5a: later main moved to a whatsmeow fork and reworked video,
-#                       which our meowcaller/0002 conflicts with.
+#                       which our meowcaller/0002 conflicts with. meowcaller/0003 backports the
+#                       inbound relay choice from upstream 8e4008f. meowcaller/0006 fixes
+#                       multi-device calls, relay election, video orientation, camera off and
+#                       video RTP that arrives out of order.
 #   libtgvoip           only for its webrtc_dsp sources (noise suppression and AECM, see
 #                       WEBRTC_DSP below), with the same GCC 15 <stdint.h> fix libtgvoip_git.bb uses.
 #
@@ -40,9 +45,16 @@ SRC_URI += " \
     file://0006-webOS-integrate-with-the-LuneOS-Messaging-app.patch \
     file://0007-webOS-WhatsApp-voice-and-video-calls-through-the-Pho.patch \
     file://0008-webOS-add-a-Facebook-Messenger-protocol-prpl-gometa-.patch \
+    file://0009-webOS-ring-an-incoming-WhatsApp-call-without-taking-.patch \
+    file://0010-webOS-keep-the-WhatsApp-call-playback-stream-fed-bet.patch \
+    file://0011-webOS-decode-WhatsApp-video-through-luneos-rtc-engin.patch \
+    file://0012-webOS-WhatsApp-video-calls-on-the-phone-orientation-.patch \
     file://meowcaller/0001-mlow-speed-up-the-encoder-for-32-bit-ARM.patch;patchdir=third_party/meowcaller \
     file://meowcaller/0002-Fix-the-video-call-media-path-against-live-WhatsApp-.patch;patchdir=third_party/meowcaller \
-    file://meowcaller/0003-webOS-mlow-adapt-encoder-complexity-to-the-frame-tim.patch;patchdir=third_party/meowcaller \
+    file://meowcaller/0003-engine-allocate-on-the-caller-s-FNA-relay-for-inboun.patch;patchdir=third_party/meowcaller \
+    file://meowcaller/0004-webOS-mlow-adapt-encoder-complexity-to-the-frame-tim.patch;patchdir=third_party/meowcaller \
+    file://meowcaller/0005-webOS-let-the-receiver-ask-the-peer-for-a-keyframe.patch;patchdir=third_party/meowcaller \
+    file://meowcaller/0006-webOS-fix-multi-device-calls-relay-election-video-or.patch;patchdir=third_party/meowcaller \
     file://0002-Include-the-fixed-width-integer-headers-where-they-a.patch;patchdir=../libtgvoip \
 "
 SRCREV_upstream = "1078b14c6dcdd862f374a1b2c812d7f0cc4016cb"
@@ -92,11 +104,12 @@ do_compile[cleandirs] += "${B}/.mod"
 export GOPROXY = "https://proxy.golang.org,direct"
 do_compile[network] = "1"
 
-# The video bridge is the NULL backend. glue/voipkit.cpp binds libpalmgstskype.so, a
-# gstreamer-0.10 plugin that exists only in legacy webOS firmware; glue/voipkit_none.c stands in
-# so the plugin links without it. Messaging and voice calling are unaffected -- video is what is
-# missing, and a LuneOS video backend still has to be written.
-VOIPKIT_GLUE = "voipkit_none"
+# The video bridge. glue/voipkit.cpp binds libpalmgstskype.so, a gstreamer-0.10 plugin that
+# exists only in legacy webOS firmware, and glue/voipkit_none.c is a NULL backend. 0011 adds
+# glue/voipkit_rtcengine.c, which hands the call's H.264 to luneos-rtc-engine
+# (packagegroup-luneos-extended) to decode and, where there is a camera and an encoder, encode.
+# Without the engine on the device a video call stays voice-only.
+VOIPKIT_GLUE = "voipkit_rtcengine"
 
 do_compile() {
     cd ${S}
@@ -140,11 +153,11 @@ do_compile() {
              -I${S}/glue -I${S} -I${B} \
              $(pkg-config --cflags purple glib-2.0 opus opusfile ogg alsa luna-service2)"
 
-    # 2. the C glue, including the webOS files 0006-0007 add.
+    # 2. the C glue, including the webOS files 0006-0007 and 0010 add.
     OBJS=""
     for s in init login qrcode bridge process_message display_message groups blist \
              send_message handle_attachment send_file presence options receipt pixbuf commands \
-             call denoise aec h264_rtp gometa_init ${VOIPKIT_GLUE}; do
+             call playout denoise aec h264_rtp gometa_init ${VOIPKIT_GLUE}; do
         ${CC} ${GCFLAGS} -I${WEBRTC_DSP} -c ${S}/glue/$s.c -o ${B}/glue_$s.o
         OBJS="$OBJS ${B}/glue_$s.o"
     done

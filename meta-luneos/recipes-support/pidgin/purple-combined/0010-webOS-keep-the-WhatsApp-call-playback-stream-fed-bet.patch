@@ -1,0 +1,1076 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 30 Oct 2026 20:12:55 +0100
+Subject: [PATCH] webOS: keep the WhatsApp call playback stream fed between
+ packets
+
+Incoming call audio was written to the ALSA "voip" device only when a
+decoded packet arrived. Packets do not arrive at a steady pace: the
+relay delivers them in bursts and the peer sends nothing while it is
+silent (DTX). Any gap longer than the 120 ms playback buffer ran the
+pulse plug-in's stream dry. The next write then failed with -EPIPE and
+snd_pcm_recover() prepared the PCM. The pulse plug-in prepares by
+disconnecting its PulseAudio stream and connecting a new one, so every
+gap meant a new sink-input for palm-policy to route and audiod to set
+up. After that nothing played until the buffer had filled to its start
+threshold again, and the frame whose write failed was lost.
+
+On the mindphone this showed as the "ALSA plug-in [imlibpurpleservice]"
+sink-input on voipcall being closed and reopened about once a second.
+It was opened 19 times in one call and 31 times in the next. Replaying
+the packet arrival times meowcaller recorded for those two calls through
+a model of the old write path gives 18 and 28 underruns, against the 18
+and 30 reopenings. The audio was choppy in the first call and missing
+in the second.
+
+The decoder now only queues its frames in a playout ring (glue/
+playout.c). A playback thread opens the device once per call and writes
+20 ms chunks from the ring at the device's pace, blocking in
+snd_pcm_writei, with silence for whatever the ring cannot supply. The
+stream therefore runs from the moment the call audio opens until it
+closes. After the ring has run dry, the thread first collects 120 ms
+again, or waits that long, before playing on, which absorbs the relay's
+jitter. A burst beyond 360 ms drops its oldest samples, so a network
+stall cannot leave the call delayed for its remaining length.
+
+AECM's far-end reference is now fed from the playback thread with each
+chunk once it has been written, silence included. The reference used to
+be what had arrived, not what had been played, and stopped in every
+gap.
+
+An underrun can still happen if the thread is kept off the CPU for
+longer than the buffer. It is then recovered as before, logged, and
+counted in the "playback done" line printed when the call ends. That
+line also gives the samples played, the silence written, the samples
+dropped and the ring underflows.
+
+The playback device is now owned by the thread that writes it. Before,
+the speaker callback ran on a Go thread and wrote g_play, which the call
+teardown could close at the same time. g_audio_on is atomic because it
+is read on all of these threads.
+
+The tests in glue/tests run playout.c on its own, and run call.c's
+playback path against a fake ALSA device:
+  make -C glue/tests check
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ glue/call.c                       | 130 ++++++++++++++----
+ glue/playout.c                    |  98 ++++++++++++++
+ glue/playout.h                    |  52 ++++++++
+ glue/tests/Makefile               |  39 ++++++
+ glue/tests/call_playback_test.cpp | 142 ++++++++++++++++++++
+ glue/tests/fakes.c                | 156 ++++++++++++++++++++++
+ glue/tests/fakes.h                |  34 +++++
+ glue/tests/fakes/libwhatsmeow.h   |  10 ++
+ glue/tests/playout_test.cpp       | 215 ++++++++++++++++++++++++++++++
+ 9 files changed, 851 insertions(+), 25 deletions(-)
+ create mode 100644 glue/playout.c
+ create mode 100644 glue/playout.h
+ create mode 100644 glue/tests/Makefile
+ create mode 100644 glue/tests/call_playback_test.cpp
+ create mode 100644 glue/tests/fakes.c
+ create mode 100644 glue/tests/fakes.h
+ create mode 100644 glue/tests/fakes/libwhatsmeow.h
+ create mode 100644 glue/tests/playout_test.cpp
+
+diff --git a/glue/call.c b/glue/call.c
+index 50e447f..0045739 100644
+--- a/glue/call.c
++++ b/glue/call.c
+@@ -11,7 +11,7 @@
+ //
+ // Go -> C callbacks (called from call.go):
+ //   gowhatsapp_call_on_state(json)      -> push to callStateQuery subscribers (mainloop-safe)
+-//   gowhatsapp_call_on_speaker(pcm, n)  -> received PCM -> ALSA playback
++//   gowhatsapp_call_on_speaker(pcm, n)  -> received PCM -> playout ring -> ALSA playback thread
+ //   gowhatsapp_call_audio_active(on)    -> open/close the ALSA playback+capture path
+ //   gowhatsapp_call_read_mic(out, n)    -> Go PULLS mic PCM from the C ring
+ // C -> Go exports (from libwhatsmeow.h): gowhatsapp_go_call_dial/_answer/_hangup/_hangup_all
+@@ -23,6 +23,8 @@
+ #include <unistd.h>
+ #include <stdio.h>
+ #include <stdarg.h>
++#include <stdatomic.h>
++#include <errno.h>
+ #include <stdlib.h>
+ #include <string.h>
+ #include <math.h>
+@@ -34,6 +36,7 @@
+ #endif
+ #include "denoise.h"
+ #include "aec.h"
++#include "playout.h"
+ 
+ // Acoustic-echo-cancellation delay hint (render -> mic echo). MEASURED on-device by cross-correlating
+ // the played far-end against the raw mic echo (AEC_CALIB build + scratchpad/echo_delay.py): 179ms,
+@@ -149,7 +152,7 @@ static void clonk_close(void);
+ // rest of the ALSA/audiod bridge) but clonk_video_player_start_reply above needs to
+ // re-assert the audiod phone scenario once clonk's video pipeline is up.
+ static gboolean audiod_status_idle(gpointer d);
+-static volatile int g_audio_on;
++static _Atomic int g_audio_on;
+ 
+ // clonk_uri_call — fires "<g_clonk_uri><method>" with the given JSON payload. Every clonk
+ // action method needs the {"args":[...]} wrapper even for zero-arg calls (see
+@@ -630,10 +633,33 @@ void gowhatsapp_call_on_state(const char *json) {
+  * the real call mic confirmed unity is best (1.0x: 0% clip, 3.93; 1.5x: 0.9% clip, 3.78). Leave at 1.0
+  * unless a future mic route actually captures quiet. */
+ #define MIC_GAIN 1.0f
+-static snd_pcm_t *g_play = NULL; // peer -> speaker (written from the sink callback)
+ static snd_pcm_t *g_cap = NULL;  // mic (read by the capture thread into the ring)
+ static pthread_t g_cap_thread;
+-static volatile int g_audio_on = 0;
++static pthread_t g_play_thread;  // peer -> speaker, see playback_thread
++static int g_play_thread_started = 0;
++// Atomic: the Go threads, the capture and playback threads and the mainloop all read it.
++static _Atomic int g_audio_on = 0;
++
++/* Playback. The peer's audio is not written to ALSA as it arrives: packets come in bursts and
++ * stop altogether while the peer is silent (DTX), and every time the pulse plug-in's stream ran
++ * dry it reported an underrun, snd_pcm_recover's prepare disconnected the stream and connected a
++ * new one (a new sink-input for palm-policy to route and audiod to set up), and nothing played
++ * until the buffer had filled again. Observed on the mindphone as the voipcall sink-input being
++ * closed and reopened about once a second through a call, with choppy or no incoming audio.
++ * Instead gowhatsapp_call_on_speaker queues the decoded frames in g_playout and playback_thread
++ * writes to the device at its own pace, with silence wherever the ring cannot supply audio, so
++ * the one stream opened for the call keeps running until the call ends. */
++#define WA_PLAY_LATENCY_US 120000 /* ALSA buffer; WA_AEC_DELAY_MS was measured with this size */
++#define WA_PLAY_CHUNK 320         /* 20ms per write; a multiple of AECM's 160-sample block */
++#define WA_PLAY_PREFILL 1920      /* 120ms (two MLow frames) collected before playing after the
++                                   * ring ran dry: absorbs the relay's arrival jitter */
++#define WA_PLAY_MAX_FILL 5760     /* 360ms: a burst beyond this drops its oldest samples, so a
++                                   * network stall cannot leave the call permanently delayed */
++static wa_playout g_playout;
++static pthread_once_t g_playout_once = PTHREAD_ONCE_INIT;
++static void playout_init_once(void) {
++	wa_playout_init(&g_playout, WA_PLAY_PREFILL, WA_PLAY_MAX_FILL);
++}
+ 
+ /* ---- CALL_DUMP: ground-truth capture of the LIVE call audio (the call-scenario mic differs from a
+  * standalone arecord — audiod switches routing/DSP when a call is active, which the offline PESQ test
+@@ -708,15 +734,60 @@ static snd_pcm_t *pcm_open(const char *dev, snd_pcm_stream_t dir, unsigned int l
+ 	return h;
+ }
+ 
+-// Capture thread: pure C. Opens both ALSA devices (off the mainloop — snd_pcm_open
+-// on the pulse plugin can block) then reads mic -> ring buffer. Never calls into Go.
++// Playback thread: pure C. Opens the ALSA playback device (off the mainloop: snd_pcm_open on
++// the pulse plug-in can block) and keeps it fed for the whole call, pulling a chunk from the
++// playout ring per write and blocking in snd_pcm_writei until the device has room for it. What
++// was written is handed to AECM as the echo reference, silence included, so the reference
++// follows the loudspeaker's clock rather than packet arrival. Never calls into Go.
++static void *playback_thread(void *arg) {
++	(void)arg;
++	snd_pcm_t *h = pcm_open("voip", SND_PCM_STREAM_PLAYBACK, WA_PLAY_LATENCY_US);
++	fprintf(stderr, "wa-call: audio %s\n", h ? "playback-ok" : "playback-FAIL");
++	if (!h) return NULL;
++	short buf[WA_PLAY_CHUNK];
++	unsigned long recovers = 0;
++	while (g_audio_on) {
++		wa_playout_pull(&g_playout, buf, WA_PLAY_CHUNK);
++		int off = 0;
++		while (off < WA_PLAY_CHUNK && g_audio_on) {
++			snd_pcm_sframes_t w = snd_pcm_writei(h, buf + off, (snd_pcm_uframes_t)(WA_PLAY_CHUNK - off));
++			if (w > 0) {
++				off += (int)w;
++				continue;
++			}
++			if (w == 0 || w == -EAGAIN) { // no room yet (not expected in blocking mode)
++				snd_pcm_wait(h, 100);
++				continue;
++			}
++			// Only reached if this thread was kept off the CPU for longer than the buffer: the
++			// recovery prepares the stream, which the pulse plug-in does by recreating it.
++			recovers++;
++			int err = snd_pcm_recover(h, (int)w, 1);
++			fprintf(stderr, "wa-call: playback write failed (%s), recover %s (stream recreated %lu times)\n",
++			        snd_strerror((int)w), err < 0 ? snd_strerror(err) : "ok", recovers);
++			if (err < 0) g_usleep(20000); // do not spin on a dead device; retried until the call ends
++		}
++		if (off == WA_PLAY_CHUNK) {
++			wa_aec_farend(buf, WA_PLAY_CHUNK); // exactly what the loudspeaker gets -> AECM's echo reference
++			if (AEC_CALIB) far_push(buf, WA_PLAY_CHUNK); // calibration: mirror it into the ring for the aligned dump
++		}
++	}
++	snd_pcm_drop(h);
++	snd_pcm_close(h);
++	pthread_mutex_lock(&g_playout.mx);
++	fprintf(stderr, "wa-call: playback done: %llu samples played, %llu silence, %llu dropped, "
++	        "%lu ring underflows, %lu stream recoveries\n",
++	        g_playout.played, g_playout.silence, g_playout.dropped, g_playout.underflows, recovers);
++	pthread_mutex_unlock(&g_playout.mx);
++	return NULL;
++}
++
++// Capture thread: pure C. Opens the ALSA capture device (off the mainloop) then reads
++// mic -> ring buffer. Never calls into Go.
+ static void *audio_thread(void *arg) {
+ 	(void)arg;
+-	g_play = pcm_open("voip", SND_PCM_STREAM_PLAYBACK, 120000);   // keep playback headroom (60ms Opus frames) -> no underrun/choppy
+ 	g_cap = pcm_open("voipsource", SND_PCM_STREAM_CAPTURE, 96000); // 96ms: keep most of the latency win over the old 120ms, but enough slack above the 20ms reads that scheduling jitter doesn't xrun (40ms garbled the mic)
+-	fprintf(stderr, "wa-call: audio %s / %s\n",
+-	        g_play ? "playback-ok" : "playback-FAIL",
+-	        g_cap ? "capture-ok" : "capture-FAIL");
++	fprintf(stderr, "wa-call: audio %s\n", g_cap ? "capture-ok" : "capture-FAIL");
+ 	// Optional outbound-mic NS (default OFF — objectively hurts the MLow codec, see denoise.c). When
+ 	// disabled these are no-ops: wa_ns_start creates no handle so wa_ns_process passes the mic through.
+ 	wa_ns_start(WA_RATE);
+@@ -784,21 +855,24 @@ int gowhatsapp_call_read_mic(float *out, int n) {
+ 	return n;
+ }
+ 
++// gowhatsapp_call_on_speaker — called from Go (meowcaller's receive loop) with each decoded
++// frame. Only queues it: playback_thread does the writing, at the device's pace.
+ void gowhatsapp_call_on_speaker(const float *frame, int n) {
+-	snd_pcm_t *h = g_play;
+-	if (!h || n <= 0) return;
++	if (!g_audio_on || !frame || n <= 0) return;
++	pthread_once(&g_playout_once, playout_init_once);
+ 	short buf[2048];
+-	if (n > 2048) n = 2048;
+-	for (int i = 0; i < n; i++) {
+-		float f = frame[i];
+-		if (f > 1.0f) f = 1.0f;
+-		if (f < -1.0f) f = -1.0f;
+-		buf[i] = (short)(f * 32767.0f);
++	while (n > 0) {
++		int m = n > 2048 ? 2048 : n;
++		for (int i = 0; i < m; i++) {
++			float f = frame[i];
++			if (f > 1.0f) f = 1.0f;
++			if (f < -1.0f) f = -1.0f;
++			buf[i] = (short)(f * 32767.0f);
++		}
++		wa_playout_push(&g_playout, buf, m);
++		frame += m;
++		n -= m;
+ 	}
+-	wa_aec_farend(buf, n); // this is exactly what hits the loudspeaker -> AECM's echo reference
+-	if (AEC_CALIB) far_push(buf, n); // calibration: mirror it into the ring for the aligned dump
+-	snd_pcm_sframes_t w = snd_pcm_writei(h, buf, n);
+-	if (w < 0) snd_pcm_recover(h, (int)w, 1);
+ }
+ 
+ // Tell audiod there's an active voip call so it enables the phone scenario.
+@@ -871,6 +945,10 @@ void gowhatsapp_call_audio_active(int on) {
+ 			fprintf(stderr, "wa-call: AEC_CALIB mic=%p farend=%p\n", (void*)g_dump_capraw, (void*)g_dump_farend);
+ 		}
+ 		g_idle_add(audiod_status_idle, GINT_TO_POINTER(1));
++		pthread_once(&g_playout_once, playout_init_once);
++		wa_playout_reset(&g_playout); // nothing left over from a previous call
++		g_play_thread_started = pthread_create(&g_play_thread, NULL, playback_thread, NULL) == 0;
++		if (!g_play_thread_started) fprintf(stderr, "wa-call: cannot start the playback thread\n");
+ 		pthread_create(&g_cap_thread, NULL, audio_thread, NULL);
+ 	} else if (!on && g_audio_on) {
+ 		g_idle_add(audiod_status_idle, GINT_TO_POINTER(0));
+@@ -884,9 +962,11 @@ void gowhatsapp_call_audio_active(int on) {
+ 			snd_pcm_close(g_cap);
+ 			g_cap = NULL;
+ 		}
+-		snd_pcm_t *p = g_play;
+-		g_play = NULL;
+-		if (p) snd_pcm_close(p);
++		// Returns within one write; the thread closes its own playback device.
++		if (g_play_thread_started) {
++			pthread_join(g_play_thread, NULL);
++			g_play_thread_started = 0;
++		}
+ 		// capture thread joined + Go has stopped pulling: safe to close the dump files
+ 		if (g_dump_capraw) { fclose(g_dump_capraw); g_dump_capraw = NULL; }
+ 		if (g_dump_send)   { fclose(g_dump_send);   g_dump_send = NULL; }
+diff --git a/glue/playout.c b/glue/playout.c
+new file mode 100644
+index 0000000..7522de4
+--- /dev/null
++++ b/glue/playout.c
+@@ -0,0 +1,98 @@
++#include "playout.h"
++#include <string.h>
++
++static int clamp_samples(int v) {
++	if (v < 0) return 0;
++	if (v > WA_PLAYOUT_CAP) return WA_PLAYOUT_CAP;
++	return v;
++}
++
++static void reset_locked(wa_playout *p) {
++	p->head = 0;
++	p->fill = 0;
++	p->buffering = 1;
++	p->waited = 0;
++	p->pushed = p->played = p->silence = p->dropped = 0;
++	p->underflows = 0;
++}
++
++void wa_playout_init(wa_playout *p, int prefill, int max_fill) {
++	memset(p->buf, 0, sizeof p->buf);
++	pthread_mutex_init(&p->mx, NULL);
++	p->prefill = clamp_samples(prefill);
++	p->max_fill = clamp_samples(max_fill);
++	if (p->max_fill < p->prefill) p->max_fill = p->prefill;
++	reset_locked(p);
++}
++
++void wa_playout_destroy(wa_playout *p) {
++	pthread_mutex_destroy(&p->mx);
++}
++
++void wa_playout_reset(wa_playout *p) {
++	pthread_mutex_lock(&p->mx);
++	reset_locked(p);
++	pthread_mutex_unlock(&p->mx);
++}
++
++void wa_playout_push(wa_playout *p, const short *s, int n) {
++	if (n <= 0) return;
++	pthread_mutex_lock(&p->mx);
++	p->pushed += (unsigned long long)n;
++	// Of a push larger than the ring itself only the newest samples can be kept.
++	if (n > WA_PLAYOUT_CAP) {
++		p->dropped += (unsigned long long)(n - WA_PLAYOUT_CAP);
++		s += n - WA_PLAYOUT_CAP;
++		n = WA_PLAYOUT_CAP;
++	}
++	// Make room: drop the oldest queued samples so that at most max_fill remain after the push
++	// (and never more than the ring holds).
++	int limit = p->max_fill > n ? p->max_fill : n;
++	int over = p->fill + n - limit;
++	if (over > 0) {
++		if (over > p->fill) over = p->fill;
++		p->head = (p->head + over) % WA_PLAYOUT_CAP;
++		p->fill -= over;
++		p->dropped += (unsigned long long)over;
++	}
++	int tail = (p->head + p->fill) % WA_PLAYOUT_CAP;
++	int first = WA_PLAYOUT_CAP - tail;
++	if (first > n) first = n;
++	memcpy(p->buf + tail, s, (size_t)first * sizeof *s);
++	memcpy(p->buf, s + first, (size_t)(n - first) * sizeof *s);
++	p->fill += n;
++	pthread_mutex_unlock(&p->mx);
++}
++
++int wa_playout_pull(wa_playout *p, short *out, int n) {
++	if (n <= 0) return 0;
++	int got = 0;
++	pthread_mutex_lock(&p->mx);
++	// Play on once the prefill is queued, or once queued audio has waited as long as the prefill
++	// would take to arrive: a lone frame at the end of a talkspurt is not held back until the
++	// next one comes in.
++	if (p->buffering && p->fill > 0 && (p->fill >= p->prefill || p->waited >= p->prefill)) {
++		p->buffering = 0;
++		p->waited = 0;
++	}
++	if (!p->buffering) {
++		got = p->fill < n ? p->fill : n;
++		int first = WA_PLAYOUT_CAP - p->head;
++		if (first > got) first = got;
++		memcpy(out, p->buf + p->head, (size_t)first * sizeof *out);
++		memcpy(out + first, p->buf, (size_t)(got - first) * sizeof *out);
++		p->head = (p->head + got) % WA_PLAYOUT_CAP;
++		p->fill -= got;
++		p->played += (unsigned long long)got;
++		if (got < n) { // ran dry: collect the prefill again before playing on
++			p->buffering = 1;
++			p->underflows++;
++		}
++	} else if (p->fill > 0) {
++		p->waited += n;
++	}
++	p->silence += (unsigned long long)(n - got);
++	pthread_mutex_unlock(&p->mx);
++	memset(out + got, 0, (size_t)(n - got) * sizeof *out);
++	return got;
++}
+diff --git a/glue/playout.h b/glue/playout.h
+new file mode 100644
+index 0000000..ea4db6c
+--- /dev/null
++++ b/glue/playout.h
+@@ -0,0 +1,52 @@
++#ifndef WA_PLAYOUT_H
++#define WA_PLAYOUT_H
++// webOS WhatsApp calling: the playout buffer between the decoder and the loudspeaker.
++//
++// meowcaller hands over a decoded frame (60 ms) whenever a packet arrives, which is irregular:
++// the relay delivers in bursts, and the peer sends nothing at all while it is silent (DTX).
++// The ALSA playback device, on the other hand, has to be written at its own pace: once the
++// pulse plug-in's stream runs dry it reports an underrun, and recovering from that recreates
++// the PulseAudio stream (a new sink-input, re-routed by palm-policy) and waits for the buffer to
++// fill again before anything is heard.
++//
++// The decoder pushes into this ring; the playback thread pulls fixed chunks from it at device
++// pace and gets silence for whatever the ring cannot supply. After the ring has run dry it
++// first collects `prefill` samples again, or waits as long as those would take, so arrival
++// jitter of up to that much does not chop every frame. `max_fill` bounds the delay a burst can
++// build up: older samples beyond it are dropped.
++//
++// Push and pull may run on different threads; the ring has its own lock.
++#include <pthread.h>
++
++#define WA_PLAYOUT_CAP 16000 // 1 s of 16 kHz mono
++
++typedef struct {
++	short buf[WA_PLAYOUT_CAP];
++	int head;      // next sample to play
++	int fill;      // samples queued
++	int prefill;   // samples to collect before playing again after running dry
++	int max_fill;  // queued samples beyond this are dropped, oldest first
++	int buffering; // 1 while collecting the prefill
++	int waited;    // silence pulled while buffering with audio queued
++	// Counters, for the end-of-call log line and the tests.
++	unsigned long long pushed;      // samples handed to push
++	unsigned long long played;      // queued samples pull returned
++	unsigned long long silence;     // samples pull filled with zeros
++	unsigned long long dropped;     // samples discarded to stay within max_fill
++	unsigned long underflows;       // times the ring ran dry while playing
++	pthread_mutex_t mx;
++} wa_playout;
++
++// Sets up an empty ring. prefill and max_fill are clamped to 0..WA_PLAYOUT_CAP, and max_fill
++// to at least prefill.
++void wa_playout_init(wa_playout *p, int prefill, int max_fill);
++void wa_playout_destroy(wa_playout *p);
++// Empties the ring and zeroes the counters, keeping prefill and max_fill.
++void wa_playout_reset(wa_playout *p);
++// Queues n samples.
++void wa_playout_push(wa_playout *p, const short *s, int n);
++// Writes exactly n samples to out: queued audio first, zeros for the rest. Returns how many
++// of them were queued audio.
++int wa_playout_pull(wa_playout *p, short *out, int n);
++
++#endif
+diff --git a/glue/tests/Makefile b/glue/tests/Makefile
+new file mode 100644
+index 0000000..cb9bfe0
+--- /dev/null
++++ b/glue/tests/Makefile
+@@ -0,0 +1,39 @@
++# Unit tests for the call audio playout (glue/playout.c) and glue/call.c's playback thread,
++# which runs against fakes.c's ALSA device instead of a real one. Needs gtest, and the glib,
++# luna-service2 and alsa-lib headers (luna-service2 and ALSA are not linked: fakes.c replaces
++# what call.c uses of them). Point CPPFLAGS/LDFLAGS at a sysroot when the host lacks them:
++#   make CPPFLAGS="-I$SYSROOT/usr/include -I$SYSROOT/usr/include/glib-2.0 \
++#                  -I$SYSROOT/usr/lib/glib-2.0/include" LDFLAGS="-L$SYSROOT/usr/lib"
++#   make check
++# SAN="-fsanitize=address,undefined" or SAN=-fsanitize=thread builds them sanitized.
++CC ?= cc
++CXX ?= c++
++GLUE := ..
++CFLAGS ?= -O1 -g -Wall -Wextra
++CXXFLAGS ?= -O1 -g -Wall -Wextra
++SAN ?=
++INC := -I$(GLUE) -I. -Ifakes
++LIBS := -lgtest -lgtest_main -lglib-2.0 -lpthread -lm
++
++all: playout_test call_playback_test
++
++playout_test: playout_test.cpp $(GLUE)/playout.c $(GLUE)/playout.h
++	$(CC) $(CPPFLAGS) $(CFLAGS) $(SAN) $(INC) -c $(GLUE)/playout.c -o playout.o
++	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(SAN) $(INC) playout_test.cpp playout.o -o $@ $(LDFLAGS) $(LIBS)
++
++# PLUGIN_VERSION only matters to init.c; call.c is compiled as the recipe does otherwise.
++call_playback_test: call_playback_test.cpp fakes.c fakes.h $(GLUE)/call.c $(GLUE)/playout.c
++	$(CC) $(CPPFLAGS) $(CFLAGS) $(SAN) $(INC) -c $(GLUE)/playout.c -o playout.o
++	$(CC) $(CPPFLAGS) $(CFLAGS) $(SAN) $(INC) -c $(GLUE)/call.c -o call.o
++	$(CC) $(CPPFLAGS) $(CFLAGS) $(SAN) $(INC) -c fakes.c -o fakes.o
++	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(SAN) $(INC) call_playback_test.cpp call.o playout.o fakes.o \
++		-o $@ $(LDFLAGS) $(LIBS)
++
++check: all
++	./playout_test
++	./call_playback_test
++
++clean:
++	rm -f *.o playout_test call_playback_test
++
++.PHONY: all check clean
+diff --git a/glue/tests/call_playback_test.cpp b/glue/tests/call_playback_test.cpp
+new file mode 100644
+index 0000000..7c0a567
+--- /dev/null
++++ b/glue/tests/call_playback_test.cpp
+@@ -0,0 +1,142 @@
++// Tests glue/call.c's playback path against a fake ALSA device (tests/fakes.c): the device is
++// written continuously from the moment the call audio opens, whatever the packet arrival, the
++// stream is opened once, and AECM's far-end reference is exactly what was written.
++#include <gtest/gtest.h>
++#include <chrono>
++#include <cstring>
++#include <thread>
++#include <vector>
++
++#include "fakes.h"
++
++namespace {
++
++using namespace std::chrono;
++
++// Real-time milliseconds scaled to the fake device's pace.
++void wait_ms(int ms) { std::this_thread::sleep_for(milliseconds(ms / FAKE_SPEEDUP)); }
++
++// One decoded 60 ms frame with recognisable non-zero samples.
++std::vector<float> frame(int seq) {
++	std::vector<float> f(960);
++	for (int i = 0; i < 960; i++) f[i] = static_cast<float>(1 + (seq * 960 + i) % 20000) / 32767.0f;
++	return f;
++}
++short as_written(float f) { return static_cast<short>(f * 32767.0f); }
++
++long written_n() {
++	fake_lock();
++	long n = fake.written_n;
++	fake_unlock();
++	return n;
++}
++
++class CallPlayback : public ::testing::Test {
++protected:
++	void SetUp() override { fake_reset(); }
++	void TearDown() override { gowhatsapp_call_audio_active(0); }
++};
++
++TEST_F(CallPlayback, SilenceKeepsTheDeviceRunning) {
++	gowhatsapp_call_audio_active(1);
++	wait_ms(400); // no packets at all, like a peer in DTX
++	long mid = written_n();
++	wait_ms(400);
++	gowhatsapp_call_audio_active(0);
++	EXPECT_GT(mid, 16000 * 200 / 1000) << "the device must be written while nothing arrives";
++	EXPECT_GT(fake.written_n, mid);
++	for (long i = 0; i < fake.written_n; i++) ASSERT_EQ(fake.written[i], 0);
++	EXPECT_EQ(fake.playback_opens, 1);
++	EXPECT_EQ(fake.recovers, 0);
++}
++
++TEST_F(CallPlayback, GappedArrivalPlaysEverythingInOrderWithOneStream) {
++	gowhatsapp_call_audio_active(1);
++	std::vector<short> sent;
++	int seq = 0;
++	// Bursts of 1-3 frames separated by 150-500 ms gaps (relay jitter, DTX).
++	const int bursts[][2] = {{2, 150}, {1, 300}, {3, 500}, {1, 200}, {2, 450}, {3, 250}, {1, 400}};
++	for (auto &b : bursts) {
++		for (int k = 0; k < b[0]; k++, seq++) {
++			auto f = frame(seq);
++			gowhatsapp_call_on_speaker(f.data(), static_cast<int>(f.size()));
++			for (float v : f) sent.push_back(as_written(v));
++		}
++		wait_ms(b[1]);
++	}
++	wait_ms(600); // let the ring drain
++	gowhatsapp_call_audio_active(0);
++
++	EXPECT_EQ(fake.playback_opens, 1);
++	EXPECT_EQ(fake.closes, 2) << "playback and capture, once each, at the end";
++	EXPECT_EQ(fake.recovers, 0) << "no underrun, so the stream was never recreated";
++	// Every decoded sample reaches the device, in order, with only silence in between.
++	std::vector<short> played;
++	for (long i = 0; i < fake.written_n; i++)
++		if (fake.written[i] != 0) played.push_back(fake.written[i]);
++	EXPECT_EQ(played, sent);
++	// The device ran for the whole call, not just while packets came in.
++	EXPECT_GT(fake.written_n, static_cast<long>(sent.size()) + 16000);
++}
++
++TEST_F(CallPlayback, FarEndReferenceIsExactlyWhatWasWritten) {
++	gowhatsapp_call_audio_active(1);
++	for (int s = 0; s < 6; s++) {
++		auto f = frame(s);
++		gowhatsapp_call_on_speaker(f.data(), static_cast<int>(f.size()));
++		wait_ms(s % 2 ? 250 : 60);
++	}
++	wait_ms(400);
++	gowhatsapp_call_audio_active(0);
++	ASSERT_GT(fake.written_n, 0);
++	EXPECT_EQ(fake.farend_bad_len, 0);
++	ASSERT_EQ(fake.farend_n, fake.written_n);
++	EXPECT_EQ(0, memcmp(fake.farend, fake.written, sizeof(short) * fake.written_n));
++}
++
++TEST_F(CallPlayback, UnderrunIsRecoveredAndPlaybackContinues) {
++	gowhatsapp_call_audio_active(1);
++	wait_ms(100);
++	fake_lock();
++	fake.inject_epipe = 1;
++	fake_unlock();
++	auto f = frame(7);
++	gowhatsapp_call_on_speaker(f.data(), 960);
++	gowhatsapp_call_on_speaker(f.data(), 960);
++	wait_ms(500);
++	long mid = written_n();
++	wait_ms(200);
++	gowhatsapp_call_audio_active(0);
++	EXPECT_EQ(fake.recovers, 1);
++	EXPECT_EQ(fake.playback_opens, 1);
++	EXPECT_GT(fake.written_n, mid);
++	ASSERT_EQ(fake.farend_n, fake.written_n) << "the failed chunk is rewritten, then referenced once";
++	EXPECT_EQ(0, memcmp(fake.farend, fake.written, sizeof(short) * fake.written_n));
++	long nonzero = 0;
++	for (long i = 0; i < fake.written_n; i++) nonzero += fake.written[i] != 0;
++	EXPECT_EQ(nonzero, 2 * 960);
++}
++
++TEST_F(CallPlayback, FramesOutsideACallAreNotQueued) {
++	auto f = frame(1);
++	gowhatsapp_call_on_speaker(f.data(), 960); // ringing: audio path not open
++	gowhatsapp_call_audio_active(1);
++	wait_ms(400);
++	gowhatsapp_call_audio_active(0);
++	for (long i = 0; i < fake.written_n; i++) ASSERT_EQ(fake.written[i], 0);
++}
++
++TEST_F(CallPlayback, SecondCallStartsFromAnEmptyRing) {
++	gowhatsapp_call_audio_active(1);
++	auto f = frame(3);
++	for (int i = 0; i < 4; i++) gowhatsapp_call_on_speaker(f.data(), 960);
++	gowhatsapp_call_audio_active(0); // ends at once, audio still queued
++	fake_reset();
++	gowhatsapp_call_audio_active(1);
++	wait_ms(400);
++	gowhatsapp_call_audio_active(0);
++	for (long i = 0; i < fake.written_n; i++) ASSERT_EQ(fake.written[i], 0);
++	EXPECT_EQ(fake.playback_opens, 1);
++}
++
++} // namespace
+diff --git a/glue/tests/fakes.c b/glue/tests/fakes.c
+new file mode 100644
+index 0000000..5cebe7f
+--- /dev/null
++++ b/glue/tests/fakes.c
+@@ -0,0 +1,156 @@
++#include "fakes.h"
++#include <alsa/asoundlib.h>
++#include <luna-service2/lunaservice.h>
++#include <errno.h>
++#include <pthread.h>
++#include <string.h>
++#include <time.h>
++#include "libwhatsmeow.h"
++#include "voipkit.h"
++#include "aec.h"
++#include "denoise.h"
++
++struct fake_state fake;
++static pthread_mutex_t fake_mx = PTHREAD_MUTEX_INITIALIZER;
++void fake_lock(void) { pthread_mutex_lock(&fake_mx); }
++void fake_unlock(void) { pthread_mutex_unlock(&fake_mx); }
++void fake_reset(void) {
++	fake_lock();
++	memset(&fake, 0, sizeof fake);
++	fake_unlock();
++}
++
++static void sleep_frames(long frames) {
++	long us = frames * 1000000L / 16000 / FAKE_SPEEDUP;
++	struct timespec ts = { us / 1000000L, (us % 1000000L) * 1000L };
++	nanosleep(&ts, NULL);
++}
++
++/* ---- ALSA ---- */
++static int dev_play, dev_cap; // distinct addresses stand in for the handles
++int snd_pcm_open(snd_pcm_t **pcm, const char *name, snd_pcm_stream_t stream, int mode) {
++	(void)name; (void)mode;
++	fake_lock();
++	if (stream == SND_PCM_STREAM_PLAYBACK) {
++		fake.playback_opens++;
++		*pcm = (snd_pcm_t *)&dev_play;
++	} else {
++		fake.capture_opens++;
++		*pcm = (snd_pcm_t *)&dev_cap;
++	}
++	fake_unlock();
++	return 0;
++}
++int snd_pcm_set_params(snd_pcm_t *pcm, snd_pcm_format_t format, snd_pcm_access_t access,
++                       unsigned int channels, unsigned int rate, int soft_resample,
++                       unsigned int latency) {
++	(void)pcm; (void)format; (void)access; (void)channels; (void)rate; (void)soft_resample;
++	(void)latency;
++	return 0;
++}
++snd_pcm_sframes_t snd_pcm_writei(snd_pcm_t *pcm, const void *buffer, snd_pcm_uframes_t size) {
++	if (pcm != (snd_pcm_t *)&dev_play) return -EBADFD;
++	fake_lock();
++	if (fake.inject_epipe > 0) {
++		fake.inject_epipe--;
++		fake_unlock();
++		return -EPIPE;
++	}
++	// Accept at most one 20 ms period per call, as a device with little room would.
++	long n = (long)size > 320 ? 320 : (long)size;
++	if (fake.written_n + n <= FAKE_MAX_SAMPLES) {
++		memcpy(fake.written + fake.written_n, buffer, (size_t)n * sizeof(short));
++		fake.written_n += n;
++	}
++	fake_unlock();
++	sleep_frames(n); // blocking write: returns once the device has played that much
++	return n;
++}
++snd_pcm_sframes_t snd_pcm_readi(snd_pcm_t *pcm, void *buffer, snd_pcm_uframes_t size) {
++	(void)pcm;
++	memset(buffer, 0, size * sizeof(short));
++	sleep_frames((long)size);
++	return (snd_pcm_sframes_t)size;
++}
++int snd_pcm_recover(snd_pcm_t *pcm, int err, int silent) {
++	(void)pcm; (void)silent;
++	fake_lock();
++	fake.recovers++;
++	fake_unlock();
++	return err == -EPIPE ? 0 : err;
++}
++int snd_pcm_wait(snd_pcm_t *pcm, int timeout) { (void)pcm; (void)timeout; return 1; }
++int snd_pcm_drop(snd_pcm_t *pcm) { (void)pcm; fake_lock(); fake.drops++; fake_unlock(); return 0; }
++int snd_pcm_close(snd_pcm_t *pcm) { (void)pcm; fake_lock(); fake.closes++; fake_unlock(); return 0; }
++const char *snd_strerror(int errnum) { (void)errnum; return "fake error"; }
++
++/* ---- AECM / NS ---- */
++void wa_aec_start(int fs, int delay_ms) { (void)fs; (void)delay_ms; }
++void wa_aec_farend(const short *f, int n) {
++	fake_lock();
++	if (n % 160) fake.farend_bad_len++;
++	if (fake.farend_n + n <= FAKE_MAX_SAMPLES) {
++		memcpy(fake.farend + fake.farend_n, f, (size_t)n * sizeof(short));
++		fake.farend_n += n;
++	}
++	fake_unlock();
++}
++void wa_aec_process(short *mic, int n) { (void)mic; (void)n; }
++void wa_aec_stop(void) {}
++void wa_ns_start(int fs) { (void)fs; }
++void wa_ns_process(short *buf, int n) { (void)buf; (void)n; }
++void wa_ns_stop(void) {}
++
++/* ---- voipkit ---- */
++void voipkit_video_start(void) {}
++int voipkit_video_wait_thread_b(int timeoutMs) { (void)timeoutMs; return 1; }
++void voipkit_video_stop(void) {}
++void voipkit_video_receive_frame(const unsigned char *access_unit, unsigned int len) {
++	(void)access_unit; (void)len;
++}
++
++/* ---- Go exports ---- */
++char *gowhatsapp_go_call_dial(char *cAddr, int video) { (void)cAddr; (void)video; return NULL; }
++int gowhatsapp_go_call_answer(char *cID, int video) { (void)cID; (void)video; return 0; }
++int gowhatsapp_go_call_hangup_all(void) { return 0; }
++int gowhatsapp_go_call_changemedia(char *cID, int a, int b, int c, int d) {
++	(void)cID; (void)a; (void)b; (void)c; (void)d;
++	return 0;
++}
++int gowhatsapp_go_call_hangup(char *cID) { (void)cID; return 0; }
++
++/* ---- luna-service2: calls only get as far as these and fail quietly ---- */
++bool LSErrorInit(LSError *e) { memset(e, 0, sizeof *e); return true; }
++void LSErrorFree(LSError *e) { (void)e; }
++bool LSMessageReply(LSHandle *sh, LSMessage *msg, const char *payload, LSError *e) {
++	(void)sh; (void)msg; (void)payload; (void)e;
++	return true;
++}
++const char *LSMessageGetPayload(LSMessage *msg) { (void)msg; return "{}"; }
++bool LSCallOneReply(LSHandle *sh, const char *uri, const char *payload, LSFilterFunc cb,
++                    void *ctx, LSMessageToken *t, LSError *e) {
++	(void)sh; (void)uri; (void)payload; (void)cb; (void)ctx; (void)t; (void)e;
++	return true;
++}
++bool LSSubscriptionReply(LSHandle *sh, const char *key, const char *payload, LSError *e) {
++	(void)sh; (void)key; (void)payload; (void)e;
++	return true;
++}
++bool LSSubscriptionAdd(LSHandle *sh, const char *key, LSMessage *msg, LSError *e) {
++	(void)sh; (void)key; (void)msg; (void)e;
++	return true;
++}
++bool LSRegister(const char *name, LSHandle **sh, LSError *e) {
++	(void)name; (void)sh; (void)e;
++	return false;
++}
++bool LSRegisterCategory(LSHandle *sh, const char *category, LSMethod *methods,
++                        LSSignal *signals, LSProperty *props, LSError *e) {
++	(void)sh; (void)category; (void)methods; (void)signals; (void)props; (void)e;
++	return false;
++}
++bool LSGmainContextAttach(LSHandle *sh, GMainContext *ctx, LSError *e) {
++	(void)sh; (void)ctx; (void)e;
++	return false;
++}
++bool LSUnregister(LSHandle *sh, LSError *e) { (void)sh; (void)e; return true; }
+diff --git a/glue/tests/fakes.h b/glue/tests/fakes.h
+new file mode 100644
+index 0000000..a81a4c5
+--- /dev/null
++++ b/glue/tests/fakes.h
+@@ -0,0 +1,34 @@
++// Fakes glue/call.c is linked against in call_playback_test: a fake ALSA device that records what
++// is written to it at a scaled device pace, AECM that records its far-end reference, and no-op
++// luna-service2, voipkit and Go exports.
++#ifndef WA_TEST_FAKES_H
++#define WA_TEST_FAKES_H
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#define FAKE_MAX_SAMPLES (16000 * 60) /* one minute at 16 kHz */
++#define FAKE_SPEEDUP 4                /* the fake device consumes 4x faster than real time */
++
++struct fake_state {
++	int playback_opens, capture_opens, closes, drops, recovers;
++	int inject_epipe;       // next N playback writes fail with -EPIPE
++	long written_n;         // samples accepted by the playback device
++	short written[FAKE_MAX_SAMPLES];
++	long farend_n;          // samples handed to wa_aec_farend
++	short farend[FAKE_MAX_SAMPLES];
++	int farend_bad_len;     // farend calls whose length was not a multiple of 160
++};
++extern struct fake_state fake;
++void fake_reset(void);
++void fake_lock(void);
++void fake_unlock(void);
++
++// glue/call.c's entry points the tests drive.
++void gowhatsapp_call_audio_active(int on);
++void gowhatsapp_call_on_speaker(const float *frame, int n);
++
++#ifdef __cplusplus
++}
++#endif
++#endif
+diff --git a/glue/tests/fakes/libwhatsmeow.h b/glue/tests/fakes/libwhatsmeow.h
+new file mode 100644
+index 0000000..0943a7d
+--- /dev/null
++++ b/glue/tests/fakes/libwhatsmeow.h
+@@ -0,0 +1,10 @@
++// Test stand-in for the header `go build -buildmode=c-archive` generates: only the Go exports
++// glue/call.c calls, with the generated prototypes. tests/fakes.c defines them.
++#ifndef WA_TEST_LIBWHATSMEOW_H
++#define WA_TEST_LIBWHATSMEOW_H
++extern char *gowhatsapp_go_call_dial(char *cAddr, int video);
++extern int gowhatsapp_go_call_answer(char *cID, int video);
++extern int gowhatsapp_go_call_hangup_all(void);
++extern int gowhatsapp_go_call_changemedia(char *cID, int hasOutgoing, int outgoing, int hasIncoming, int incoming);
++extern int gowhatsapp_go_call_hangup(char *cID);
++#endif
+diff --git a/glue/tests/playout_test.cpp b/glue/tests/playout_test.cpp
+new file mode 100644
+index 0000000..51f8601
+--- /dev/null
++++ b/glue/tests/playout_test.cpp
+@@ -0,0 +1,215 @@
++// Unit tests for glue/playout.c, the playout ring between the call decoder and the playback thread.
++#include <gtest/gtest.h>
++#include <atomic>
++#include <thread>
++#include <vector>
++
++extern "C" {
++#include "playout.h"
++}
++
++namespace {
++
++std::vector<short> ramp(int n, short start) {
++	std::vector<short> v(n);
++	for (int i = 0; i < n; i++) v[i] = static_cast<short>(start + i);
++	return v;
++}
++
++class Playout : public ::testing::Test {
++protected:
++	void SetUp() override { wa_playout_init(&p, 100, 300); }
++	void TearDown() override { wa_playout_destroy(&p); }
++	std::vector<short> pull(int n, int *got = nullptr) {
++		std::vector<short> out(n, 0x5555);
++		int g = wa_playout_pull(&p, out.data(), n);
++		if (got) *got = g;
++		return out;
++	}
++	wa_playout p;
++};
++
++TEST_F(Playout, EmptyRingGivesSilence) {
++	int got = -1;
++	auto out = pull(50, &got);
++	EXPECT_EQ(got, 0);
++	for (short s : out) EXPECT_EQ(s, 0);
++	EXPECT_EQ(p.silence, 50u);
++	EXPECT_EQ(p.underflows, 0u); // never started playing, so it did not run dry
++}
++
++TEST_F(Playout, HoldsBackUntilPrefillIsQueued) {
++	auto a = ramp(60, 1);
++	wa_playout_push(&p, a.data(), 60);
++	int got = -1;
++	pull(20, &got);
++	EXPECT_EQ(got, 0) << "60 < prefill 100: still collecting";
++	auto b = ramp(40, 61);
++	wa_playout_push(&p, b.data(), 40);
++	auto out = pull(30, &got);
++	EXPECT_EQ(got, 30);
++	for (int i = 0; i < 30; i++) EXPECT_EQ(out[i], 1 + i);
++}
++
++TEST_F(Playout, PlaysInOrderAcrossTheRingEnd) {
++	// Walk head close to the end of the buffer, then push across it.
++	std::vector<short> big = ramp(250, 0);
++	int got;
++	for (int round = 0; round < 64; round++) {
++		wa_playout_push(&p, big.data(), 250);
++		auto out = pull(250, &got);
++		ASSERT_EQ(got, 250);
++		for (int i = 0; i < 250; i++) ASSERT_EQ(out[i], i) << "round " << round;
++		pull(1, &got); // ran dry -> rebuffers, keeps the ring index moving
++	}
++	EXPECT_EQ(p.dropped, 0u);
++}
++
++TEST_F(Playout, QueuedAudioShortOfThePrefillPlaysAfterWaitingThatLong) {
++	auto a = ramp(40, 1); // a lone tail, less than the prefill of 100
++	wa_playout_push(&p, a.data(), 40);
++	int got;
++	pull(60, &got);
++	EXPECT_EQ(got, 0);
++	pull(30, &got);
++	EXPECT_EQ(got, 0) << "waited 60 of 100";
++	auto out = pull(30, &got); // waited 90: still short
++	EXPECT_EQ(got, 0);
++	out = pull(30, &got); // waited 120 >= 100: plays what there is
++	EXPECT_EQ(got, 30);
++	EXPECT_EQ(out[0], 1);
++	pull(30, &got);
++	EXPECT_EQ(got, 10);
++	EXPECT_EQ(p.underflows, 1u);
++	EXPECT_EQ(p.fill, 0);
++}
++
++TEST_F(Playout, WaitingOnlyCountsWhileAudioIsQueued) {
++	int got;
++	pull(500, &got); // a long silence with nothing queued
++	auto a = ramp(40, 1);
++	wa_playout_push(&p, a.data(), 40);
++	pull(20, &got);
++	EXPECT_EQ(got, 0) << "the empty wait before the push does not count";
++}
++
++TEST_F(Playout, ShortfallIsZeroFilledAndRebuffers) {
++	auto a = ramp(120, 1);
++	wa_playout_push(&p, a.data(), 120);
++	int got;
++	auto out = pull(200, &got);
++	EXPECT_EQ(got, 120);
++	for (int i = 0; i < 120; i++) EXPECT_EQ(out[i], 1 + i);
++	for (int i = 120; i < 200; i++) EXPECT_EQ(out[i], 0);
++	EXPECT_EQ(p.underflows, 1u);
++	// After running dry it waits for the prefill again rather than playing a sliver.
++	auto b = ramp(50, 500);
++	wa_playout_push(&p, b.data(), 50);
++	pull(10, &got);
++	EXPECT_EQ(got, 0);
++	wa_playout_push(&p, b.data(), 50);
++	pull(10, &got);
++	EXPECT_EQ(got, 10);
++}
++
++TEST_F(Playout, BurstBeyondMaxFillDropsTheOldest) {
++	auto a = ramp(250, 0);
++	wa_playout_push(&p, a.data(), 250);
++	auto b = ramp(100, 1000);
++	wa_playout_push(&p, b.data(), 100); // 350 > max_fill 300: 50 oldest go
++	EXPECT_EQ(p.dropped, 50u);
++	EXPECT_EQ(p.fill, 300);
++	int got;
++	auto out = pull(300, &got);
++	EXPECT_EQ(got, 300);
++	EXPECT_EQ(out[0], 50);
++	EXPECT_EQ(out[199], 249);
++	EXPECT_EQ(out[200], 1000);
++	EXPECT_EQ(out[299], 1099);
++}
++
++TEST_F(Playout, PushLargerThanTheRingKeepsTheNewest) {
++	std::vector<short> huge(WA_PLAYOUT_CAP + 500);
++	for (size_t i = 0; i < huge.size(); i++) huge[i] = static_cast<short>(i & 0x7fff);
++	wa_playout_push(&p, huge.data(), static_cast<int>(huge.size()));
++	EXPECT_EQ(p.fill, WA_PLAYOUT_CAP) << "max_fill is raised to what a single push needs";
++	EXPECT_EQ(p.dropped, 500u);
++	int got;
++	auto out = pull(1, &got);
++	EXPECT_EQ(out[0], 500);
++}
++
++TEST_F(Playout, CountersAddUp) {
++	int got;
++	for (int i = 0; i < 40; i++) {
++		auto a = ramp(37 * (i % 5), 0);
++		wa_playout_push(&p, a.data(), static_cast<int>(a.size()));
++		pull(29, &got);
++	}
++	EXPECT_EQ(p.played + p.silence, 40u * 29u);
++	EXPECT_EQ(p.pushed, p.played + p.dropped + static_cast<unsigned long long>(p.fill));
++}
++
++TEST_F(Playout, ResetEmptiesAndRestartsBuffering) {
++	auto a = ramp(200, 1);
++	wa_playout_push(&p, a.data(), 200);
++	int got;
++	pull(10, &got);
++	ASSERT_EQ(got, 10);
++	wa_playout_reset(&p);
++	EXPECT_EQ(p.fill, 0);
++	EXPECT_EQ(p.pushed, 0u);
++	pull(10, &got);
++	EXPECT_EQ(got, 0);
++}
++
++TEST(PlayoutInit, ClampsLimits) {
++	wa_playout q;
++	wa_playout_init(&q, -5, WA_PLAYOUT_CAP * 2);
++	EXPECT_EQ(q.prefill, 0);
++	EXPECT_EQ(q.max_fill, WA_PLAYOUT_CAP);
++	wa_playout_destroy(&q);
++	wa_playout_init(&q, 200, 100);
++	EXPECT_EQ(q.max_fill, 200);
++	wa_playout_destroy(&q);
++}
++
++// Producer and consumer on two threads, as in a call: samples come out in order (TSan target).
++TEST(PlayoutThreads, ConcurrentPushPullKeepsOrder) {
++	static wa_playout q;
++	wa_playout_init(&q, 64, WA_PLAYOUT_CAP);
++	std::atomic<bool> done{false};
++	const int total = 200000;
++	std::thread prod([&] {
++		short buf[96];
++		int next = 1;
++		while (next <= total) {
++			int n = 0;
++			for (; n < 96 && next <= total; n++) buf[n] = static_cast<short>(next++ % 30000 + 1);
++			for (;;) { // back-pressure, so the test checks ordering rather than max_fill drops
++				pthread_mutex_lock(&q.mx);
++				int fill = q.fill;
++				pthread_mutex_unlock(&q.mx);
++				if (fill < WA_PLAYOUT_CAP / 2) break;
++				std::this_thread::yield();
++			}
++			wa_playout_push(&q, buf, n);
++		}
++		done = true;
++	});
++	int expect = 1, seen = 0;
++	short out[50];
++	while (seen < total) {
++		int got = wa_playout_pull(&q, out, 50);
++		for (int i = 0; i < got; i++) {
++			ASSERT_EQ(out[i], static_cast<short>(expect % 30000 + 1));
++			expect++;
++		}
++		seen += got;
++	}
++	prod.join();
++	EXPECT_EQ(q.dropped, 0u);
++	wa_playout_destroy(&q);
++}
++
++} // namespace
