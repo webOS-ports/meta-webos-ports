@@ -32,21 +32,21 @@ The socket is created mode 0666, because the sender runs in the Android
 container. Any local process can therefore hand the compositor buffers.
 
 Tested on a Pixel 3a (sargo) with the bridge in Atlas: NPO, Prime Video and
-Angel One played on the plane, which followed card moves and rotation. The
-message checks were added afterwards, then the plugin was rebuilt and run
-again: valid frames are accepted and placed. aarch64 GCC only; no analyser
-or sanitiser has run on it.
+Angel One played on the plane, which followed card moves and rotation.
+Malformed messages sent to the running compositor were dropped, with no
+crash and no leaked descriptor. The new code builds without warnings for
+armv7 and aarch64, and the analysers' findings in it are fixed.
 
 Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
 Upstream-Status: Inappropriate [LuneOS-specific: the frame protocol and the compositor resource are the Widevine bridge's]
 ---
  hwcomposer_backend.h       |   4 +
- hwcomposer_backend_v20.cpp | 308 ++++++++++++++++++++++++++++++++++++-
+ hwcomposer_backend_v20.cpp | 314 ++++++++++++++++++++++++++++++++++++-
  hwcomposer_backend_v20.h   |   1 +
  hwcomposer_context.cpp     |   5 +
  hwcomposer_context.h       |   1 +
  qeglfsintegration.cpp      |   2 +
- 6 files changed, 320 insertions(+), 1 deletion(-)
+ 6 files changed, 326 insertions(+), 1 deletion(-)
 
 diff --git a/hwcomposer_backend.h b/hwcomposer_backend.h
 index d318124..7c3ded7 100644
@@ -64,10 +64,10 @@ index d318124..7c3ded7 100644
      HwComposerBackend(hw_module_t *hwc_module, void *libmsf);
      virtual ~HwComposerBackend();
 diff --git a/hwcomposer_backend_v20.cpp b/hwcomposer_backend_v20.cpp
-index 94c3ac1..b7b558e 100644
+index 94c3ac1..a64b1ee 100644
 --- a/hwcomposer_backend_v20.cpp
 +++ b/hwcomposer_backend_v20.cpp
-@@ -111,6 +111,305 @@ void hwc2_callback_refresh(HWC2EventListener* /*listener*/, int32_t /*sequenceId
+@@ -111,6 +111,311 @@ void hwc2_callback_refresh(HWC2EventListener* /*listener*/, int32_t /*sequenceId
  {
  }
  
@@ -222,7 +222,7 @@ index 94c3ac1..b7b558e 100644
 +    int zp = g_zorder ? g_zorder(*(void **)g_primary, 1) : -1;
 +    int bl = hwc2_compat_layer_set_blend_mode(g_primary, HWC2_BLEND_MODE_PREMULTIPLIED);
 +    fprintf(stderr, "video-plane: primary z result %d blend %d\n", zp, bl);
-+    fprintf(stderr, "video-plane: layer %dx%d on panel %dx%d, z result %d\n", f.width, f.height, panelW, panelH, z);
++    fprintf(stderr, "video-plane: layer %ux%u on panel %dx%d, z result %d\n", f.width, f.height, panelW, panelH, z);
 +}
 +
 +void video_client(int c, int panelW, int panelH)
@@ -230,7 +230,7 @@ index 94c3ac1..b7b558e 100644
 +    native_handle_t *held[4] = {};
 +    long frames = 0;
 +    for (;;) {
-+        VideoFrame f;
++        VideoFrame f = {};
 +        char control[CMSG_SPACE(sizeof(int) * 32)];
 +        struct iovec io = {&f, sizeof(f)};
 +        struct msghdr m = {};
@@ -265,7 +265,8 @@ index 94c3ac1..b7b558e 100644
 +                close(fds[i]);
 +            continue;
 +        }
-+        int fence = f.hasFence ? fds[nfds - 1] : -1;
++        // valid: nfds == numFds + hasFence, so a fence is the last descriptor.
++        int fence = f.hasFence && nfds > 0 ? fds[nfds - 1] : -1;
 +        handle->version = sizeof(native_handle_t);
 +        handle->numFds = f.numFds;
 +        handle->numInts = f.numInts;
@@ -346,12 +347,17 @@ index 94c3ac1..b7b558e 100644
 +    }).detach();
 +    std::thread([path, panelW, panelH] {
 +        int s = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
++        if (s < 0) {
++            perror("video-plane: socket");
++            return;
++        }
 +        struct sockaddr_un a = {};
 +        a.sun_family = AF_UNIX;
 +        strncpy(a.sun_path, path.constData(), sizeof(a.sun_path) - 1);
 +        unlink(a.sun_path);
-+        if (bind(s, (struct sockaddr *)&a, sizeof(a)) || listen(s, 1)) {
++        if (bind(s, reinterpret_cast<struct sockaddr *>(&a), sizeof(a)) || listen(s, 1)) {
 +            perror("video-plane: socket");
++            close(s);
 +            return;
 +        }
 +        chmod(a.sun_path, 0666);
@@ -373,7 +379,7 @@ index 94c3ac1..b7b558e 100644
  class HWC2Window : public HWComposerNativeWindow
  {
      private:
-@@ -167,6 +466,7 @@ void HWC2Window::present(HWComposerNativeWindowBuffer *buffer)
+@@ -167,6 +472,7 @@ void HWC2Window::present(HWComposerNativeWindowBuffer *buffer)
      hwc2_error_t error = HWC2_ERROR_NONE;
  
      QSystraceEvent trace("graphics", "QPA::present");
@@ -381,7 +387,7 @@ index 94c3ac1..b7b558e 100644
  
      QPA_HWC_TIMING_SAMPLE(presentTime);
  
-@@ -185,7 +485,7 @@ void HWC2Window::present(HWComposerNativeWindowBuffer *buffer)
+@@ -185,7 +491,7 @@ void HWC2Window::present(HWComposerNativeWindowBuffer *buffer)
          return;
      }
  
@@ -390,7 +396,7 @@ index 94c3ac1..b7b558e 100644
          qDebug("prepare: validate required changes for display %d: %d",
                 displayId, error);
          return;
-@@ -222,6 +522,8 @@ void HWC2Window::present(HWComposerNativeWindowBuffer *buffer)
+@@ -222,6 +528,8 @@ void HWC2Window::present(HWComposerNativeWindowBuffer *buffer)
      hwc2_compat_display_set_client_target(hwcDisplay, slot, target,
                                            acquireFenceFd,
                                            HAL_DATASPACE_UNKNOWN);
@@ -399,7 +405,7 @@ index 94c3ac1..b7b558e 100644
  
      QSystrace::end("graphics", "QPA::set_client_target", "");
  
-@@ -328,6 +630,10 @@ HwComposerBackend_v20::createWindow(int width, int height)
+@@ -328,6 +636,10 @@ HwComposerBackend_v20::createWindow(int width, int height)
      hwc2_compat_layer_set_display_frame(layer, 0, 0, width, height);
      hwc2_compat_layer_set_visible_region(layer, 0, 0, width, height);
  
