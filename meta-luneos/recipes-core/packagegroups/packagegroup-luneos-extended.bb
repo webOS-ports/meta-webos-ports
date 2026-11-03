@@ -311,8 +311,8 @@ PRINT_RDEPENDS = " \
 "
 
 # Synergy account types beyond messaging: the cloud/file connectors from luneos-synergy-connectors
-# (each needs synergy-cloudcore, which they pull in themselves). Music is listed with the
-# other apps above.
+# and the video servers for Videos (each needs synergy-cloudcore, which they pull in
+# themselves). Music is listed with the other apps above.
 SYNERGY_RDEPENDS = " \
     synergy-cloud-box \
     synergy-cloud-dropbox \
@@ -326,6 +326,7 @@ SYNERGY_RDEPENDS = " \
     synergy-cloud-pcloud \
     synergy-cloud-s3 \
     synergy-cloud-yandex \
+    synergy-video \
 "
 
 VPN_RDEPENDS = " \

@@ -41,3 +41,15 @@ RDEPENDS:${PN} = " \
     qml-webos-framework \
     luneos-components \
 "
+
+# Streams from servers (playStream, and the libraries of synergy-video):
+# souphttpsrc over http(s), with glib-networking for TLS, and HLS through
+# hlsdemux2 (adaptivedemux2) or the older hlsdemux.
+RDEPENDS:${PN} += " \
+    gstreamer1.0-plugins-good-soup \
+    gstreamer1.0-plugins-good-adaptivedemux2 \
+    gstreamer1.0-plugins-bad-hls \
+    glib-networking \
+"
+# The video servers of the accounts; Videos works without them.
+RRECOMMENDS:${PN} = "synergy-video"
