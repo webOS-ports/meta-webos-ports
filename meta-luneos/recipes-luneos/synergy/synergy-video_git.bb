@@ -1,4 +1,4 @@
-SUMMARY = "Video servers for Videos: Jellyfin, Plex, PeerTube and UPnP/DLNA media servers"
+SUMMARY = "Video servers for Videos: Jellyfin, Plex, PeerTube, UPnP/DLNA media servers and M3U playlists"
 DESCRIPTION = "org.webosports.service.videos, the node service that gives Videos the video \
 servers of the accounts (capability Video, subtype STREAMING): Jellyfin, PeerTube instances and \
 the UPnP/DLNA media servers on the network. With its account templates and the shared sign-in \
@@ -13,7 +13,7 @@ require cloud-synergy.inc
 require synergy-accounts-reload.inc
 
 VIDEO_SERVICE = "org.webosports.service.videos"
-VIDEO_PROVIDERS = "jellyfin peertube plex upnp"
+VIDEO_PROVIDERS = "jellyfin m3u peertube plex upnp"
 
 do_install() {
     src=${S}/video
