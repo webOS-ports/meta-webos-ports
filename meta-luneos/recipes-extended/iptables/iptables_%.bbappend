@@ -56,4 +56,4 @@ RDEPENDS:${PN} += " \
 # Bumped when the rules or scripts shipped from here change, so installed
 # images pick them up on upgrade: the base recipe's revision does not move
 # for it.
-PR = "r1"
+PR = "r2"
