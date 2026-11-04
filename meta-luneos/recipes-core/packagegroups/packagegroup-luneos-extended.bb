@@ -26,6 +26,13 @@ VIRTUAL-RUNTIME_speech_synthesis ?= "speech-dispatcher"
 # U+FFFF, so every emoji was a tofu box. 9.5MB, and it serves Chromium apps, QML
 # apps, the shell and the keyboard at once. Chromium reads the font list once at
 # start, so a hand-install needs webapp-mgr restarted to take effect.
+#
+# CJK: nothing in the image had Chinese, Japanese or Korean glyphs either, so a
+# photo album, a contact or a song named in them was a row of tofu boxes. The
+# free fonts meta-oe has: VLGothic (Japanese), WenQuanYi Zen Hei (Chinese) and
+# Droid Sans Fallback (Chinese, Japanese and Korean, Hangul included).
+# fontconfig picks among them for each character. 27.5MB installed: VLGothic
+# 7.9MB, WenQuanYi 16MB, Droid Sans Fallback 3.6MB.
 RDEPENDS:${PN} = " \
   ${DISTRO_EXTRA_RDEPENDS} \
   \
@@ -33,6 +40,9 @@ RDEPENDS:${PN} = " \
   luneos-kernel-log-quirks \
   \
   ttf-noto-emoji-color \
+  ttf-vlgothic \
+  ttf-wqy-zenhei \
+  ttf-droid-sans-fallback \
   \
   powertop \
   luneos-power-report \
