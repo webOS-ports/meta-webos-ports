@@ -6,10 +6,13 @@ DEPENDS += "db8 glib-2.0 luna-service2 sqlite3 taglib qtbase luna-sysmgr-common"
 
 # We need this in order to have the mime based media detection working
 RDEPENDS:${PN} += "shared-mime-info"
+# Qt reads an image's width and height through its plugins: qtbase has no
+# TIFF or WebP one
+RDEPENDS:${PN} += "qtimageformats-plugins"
 
 PV = "0.1.0-14+git"
 SRCREV = "32dcf2722822b679a1ce8311908865cdd829fffe"
-PR = "r5"
+PR = "r6"
 
 inherit webos_ports_repo
 inherit webos_system_bus
