@@ -123,7 +123,9 @@ RDEPENDS:${PN} = " \
   org.webosports.service.licenses \
   org.webosports.service.lumberjack \
   org.webosports.service.messaging \
+  org.webosports.service.office \
   org.webosports.service.update \
+  distro-feed-configs \
   \
   \
   ca-certificates \
@@ -141,10 +143,8 @@ RDEPENDS:${PN} = " \
   qtsensors-sensorfw-plugin \
   \
   sensorfw \
-  org.webosports.service.office \
   \
   luna-appmanager \
-  distro-feed-configs \
   luna-authmanager \
   luna-backupagent \
   luna-displaymanager \
@@ -299,9 +299,6 @@ IR_BLASTER_RDEPENDS = " \
     org.webosports.app.remote \
 "
 
-# Printing. luneos-print-adapter serves the webOS print API (com.palm.printmgr,
-# what the enyo print dialog in Atlas and Email call) and the flatter
-# org.webosports.service.print the Settings Print Manager page calls, both on
 # FM radio: fmradiod turns the receiver on and tunes it (MediaTek /dev/fm,
 # Qualcomm radio-iris /dev/radio0), and the Music app plays it. Only for
 # machines that declare the "fm-radio" feature: the receiver needs the wired
@@ -310,6 +307,9 @@ FM_RADIO_RDEPENDS = " \
     org.webosports.service.fmradio \
 "
 
+# Printing. luneos-print-adapter serves the webOS print API (com.palm.printmgr,
+# what the enyo print dialog in Atlas and Email call) and the flatter
+# org.webosports.service.print the Settings Print Manager page calls, both on
 # top of CUPS. Not gated on a machine: anything with a network can print, and
 # discovery is mDNS, so there is no hardware to be present or absent.
 #
@@ -328,8 +328,8 @@ PRINT_RDEPENDS = " \
 "
 
 # Synergy account types beyond messaging: the cloud/file connectors from luneos-synergy-connectors
-# (each needs synergy-cloudcore, which they pull in themselves). Music is listed with the
-# other apps above.
+# and the video servers for Videos (each needs synergy-cloudcore, which they pull in
+# themselves). Music is listed with the other apps above.
 SYNERGY_RDEPENDS = " \
     synergy-cloud-box \
     synergy-cloud-dropbox \
@@ -348,6 +348,7 @@ SYNERGY_RDEPENDS = " \
     synergy-cloud-smugmug \
     synergy-cloud-webdav \
     synergy-cloud-yandex \
+    synergy-video \
 "
 
 VPN_RDEPENDS = " \
@@ -453,6 +454,7 @@ RDEPENDS:${PN}:append:a3-2015 = " alsa-utils-systemd mesa-megadriver rmtfs qrtr 
 
 RDEPENDS:${PN}:append:tissot = " wcnss-filter-fixup"
 RDEPENDS:${PN}:append:tissot-halium = " wcnss-filter-fixup"
+RDEPENDS:${PN}:append:vince-halium = " wcnss-filter-fixup"
 
 # Hardware-gated stacks, driven by MACHINE_FEATURES.
 #
@@ -462,10 +464,10 @@ RDEPENDS:${PN}:append:tissot-halium = " wcnss-filter-fixup"
 # to packages. nfc is the standard OE feature; fingerprint, esim, faceunlock,
 # ir-blaster, fm-radio, keyboard-touch and trackpad are LuneOS-specific.
 RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'fingerprint', ' ${FINGERPRINT_RDEPENDS}', '', d)}"
-RDEPENDS:${PN}:append:vince-halium = " wcnss-filter-fixup"
 RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'nfc',         ' ${NFC_RDEPENDS}',         '', d)}"
 RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'esim',        ' ${ESIM_RDEPENDS}',        '', d)}"
 RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'ir-blaster',  ' ${IR_BLASTER_RDEPENDS}',  '', d)}"
+RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'fm-radio',    ' ${FM_RADIO_RDEPENDS}',    '', d)}"
 # These settings pages need a modem; the machine says so with "phone".
 RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'phone',       ' ${MODEM_SETTINGS_RDEPENDS}', '', d)}"
 RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'wifi',        ' ${WIRELESS_REGDB_RDEPENDS}', '', d)}"
@@ -476,7 +478,6 @@ RDEPENDS:${PN}:append = "${@bb.utils.contains_any('MACHINE_FEATURES', 'keyboard-
 # neither builds a rootfs of its own - they build a boot image and run
 # halium-arm64's - so the line above evaluates against halium-arm64's
 # MACHINE_FEATURES, which has neither, and kbdscroll never reached either
-RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'fm-radio',    ' ${FM_RADIO_RDEPENDS}',    '', d)}"
 # device. Same shape as 70-q25.rules and the luneos-device-config adaptations:
 # ship it on the generic image and let the runtime decide.
 #
