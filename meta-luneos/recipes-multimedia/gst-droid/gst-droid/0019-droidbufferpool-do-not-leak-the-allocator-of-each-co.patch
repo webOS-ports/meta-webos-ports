@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 4 Nov 2026 17:41:35 +0100
+Subject: [PATCH 19/20] droidbufferpool: do not leak the allocator of each
+ configuration
+
+set_config() made a new allocator for the pool and took a second
+reference to it with gst_object_ref(). A new allocator is a GstObject
+with a floating reference, so it then had two, and finalize let go of
+only one: every pool configuration leaked an allocator. A pool that is
+configured again also overwrote the allocator of its last configuration
+without letting go of it.
+
+Sink the new allocator's floating reference instead, and let go of the
+earlier one when the pool is configured again; memory made by it holds a
+reference of its own.
+
+Found with LeakSanitizer, by the buffer pool unit tests.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ gst-libs/gst/droid/gstdroidbufferpool.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/gst-libs/gst/droid/gstdroidbufferpool.c b/gst-libs/gst/droid/gstdroidbufferpool.c
+index c66761c..97fa90b 100644
+--- a/gst-libs/gst/droid/gstdroidbufferpool.c
++++ b/gst-libs/gst/droid/gstdroidbufferpool.c
+@@ -63,8 +63,11 @@ gst_droid_buffer_pool_set_config (GstBufferPool * bpool, GstStructure * config)
+         (features, GST_CAPS_FEATURE_MEMORY_DROID_MEDIA_QUEUE_BUFFER);
+ 
+     GST_DEBUG_OBJECT (pool, "Configured pool. caps: %" GST_PTR_FORMAT, caps);
+-    pool->allocator = gst_droid_media_buffer_allocator_new ();
+-    gst_object_ref (pool->allocator);
++    /* (the allocator of an earlier configuration stays with its memory) */
++    if (pool->allocator)
++      gst_object_unref (pool->allocator);
++    /* new, it is floating: the pool takes that reference, and frees it */
++    pool->allocator = gst_object_ref_sink (gst_droid_media_buffer_allocator_new ());
+     gst_buffer_pool_config_set_allocator (config,
+         (GstAllocator *) pool->allocator, &params);
+     GST_OBJECT_UNLOCK (pool);

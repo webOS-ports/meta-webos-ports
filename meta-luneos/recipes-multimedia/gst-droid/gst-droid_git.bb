@@ -29,7 +29,7 @@ COMPATIBLE_MACHINE = "^halium$"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 PV = "0.20260508+git"
-PR = "r1"
+PR = "r2"
 SRCREV = "e5152aee90dbb9b81c6bc45073b1fa86fc0c4194"
 SRC_URI = "git://github.com/sailfishos/gst-droid.git;branch=master;protocol=https \
     file://0001-droidcamsrc-allow-recorder-video-in-raw-preview.patch \
@@ -39,6 +39,19 @@ SRC_URI = "git://github.com/sailfishos/gst-droid.git;branch=master;protocol=http
     file://0005-droidcamsrc-send-the-zoom-index-and-int-jpeg-quality.patch \
     file://0006-droidvdec-do-not-take-the-stream-lock-again-in-drain.patch \
     file://0007-droidvdec-add-the-crop-and-video-metas-only-to-a-writable-buffer.patch \
+    file://0008-droidvdec-stop-the-codec-and-its-task-before-freeing.patch \
+    file://0009-droidcodec-check-the-size-of-codec_data-and-ADTS-fra.patch \
+    file://0010-droidmediabuffer-do-not-read-past-the-format-table-a.patch \
+    file://0011-droidcamsrc-build-the-video-caps-without-a-nested-fu.patch \
+    file://0012-droidcodec-check-output-buffer-allocations-and-buffe.patch \
+    file://0013-droid-free-buffer-pool-configs-and-skip-allocation-e.patch \
+    file://0014-droidcamsrcexif-call-the-glib-allocators-through-wra.patch \
+    file://0015-wrappedmemory-return-NULL-from-wrap-for-another-allo.patch \
+    file://0016-droidvdec-check-the-decoded-frame-before-converting-.patch \
+    file://0017-tests-add-unit-tests-for-the-codec-parsers-and-the-m.patch \
+    file://0018-droidcamsrc-report-the-latency-in-nanoseconds.patch \
+    file://0019-droidbufferpool-do-not-leak-the-allocator-of-each-co.patch \
+    file://0020-droidbufferpool-move-a-queue-buffer-s-memory-to-a-ne.patch \
     file://gst-droid-gate.sh \
     file://gst-droid-gate.service \
     file://camera-droid-heal.sh \

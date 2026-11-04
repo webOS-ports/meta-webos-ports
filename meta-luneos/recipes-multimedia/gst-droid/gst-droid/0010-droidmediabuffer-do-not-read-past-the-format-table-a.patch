@@ -1,0 +1,92 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 4 Nov 2026 17:01:52 +0100
+Subject: [PATCH 10/20] droidmediabuffer: do not read past the format table,
+ and fill it once
+
+gst_droid_media_buffer_allocator_alloc() is given the table size as
+the index for a HAL format it does not know, which the decoders hand it
+for vendor formats on every frame. It took GST_VIDEO_FORMAT_ENCODED for
+those, but then went on to check whether the format was YV12 with that
+index, one entry past the end of the table. Remember whether it is
+YV12 while the index is known to be valid instead.
+
+The table was also filled again on every lookup: the "initialized" flag
+was never set. Each decoder thread rewrote it for every frame while the
+others read it, a data race even with the same values. Fill it once,
+with g_once_init_enter().
+
+Also hold the format in a GstVideoFormat, not a GstFormat, and log the
+format of a new buffer at DEBUG, not WARNING.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ gst-libs/gst/droid/gstdroidmediabuffer.c | 18 ++++++++++++------
+ 1 file changed, 12 insertions(+), 6 deletions(-)
+
+diff --git a/gst-libs/gst/droid/gstdroidmediabuffer.c b/gst-libs/gst/droid/gstdroidmediabuffer.c
+index 50ee096..55a7c19 100644
+--- a/gst-libs/gst/droid/gstdroidmediabuffer.c
++++ b/gst-libs/gst/droid/gstdroidmediabuffer.c
+@@ -100,9 +100,11 @@ static void
+ gst_droid_media_buffer_initialize_format_map ()
+ {
+   DroidMediaPixelFormatConstants constants;
+-  static gboolean initialized = FALSE;
++  static gsize initialized = 0;
+ 
+-  if (!initialized) {
++  /* Every decoder thread looks formats up for every frame: fill the table
++   * once, and make that visible to the threads that only read it. */
++  if (g_once_init_enter (&initialized)) {
+     droid_media_pixel_format_constants_init (&constants);
+ 
+     gst_droid_media_buffer_formats[0].hal_format =
+@@ -181,6 +183,8 @@ gst_droid_media_buffer_initialize_format_map ()
+     gst_droid_media_buffer_formats[10].bytes_per_pixel = 0;
+     gst_droid_media_buffer_formats[10].h_align = 0;
+     gst_droid_media_buffer_formats[10].v_align = 0;
++
++    g_once_init_leave (&initialized, 1);
+   }
+ }
+ 
+@@ -263,7 +267,8 @@ gst_droid_media_buffer_allocator_alloc (GstAllocator * allocator,
+     gsize stride, gsize size)
+ {
+   GstDroidMediaBufferMemory *mem = g_slice_new0 (GstDroidMediaBufferMemory);
+-  GstFormat format;
++  GstVideoFormat format;
++  gboolean yv12 = FALSE;
+   gsize padded_width = width;
+   gsize padded_height = height;
+ 
+@@ -276,6 +281,7 @@ gst_droid_media_buffer_allocator_alloc (GstAllocator * allocator,
+     format = GST_VIDEO_FORMAT_ENCODED;
+   } else {
+     format = gst_droid_media_buffer_formats[format_index].gst_format;
++    yv12 = format == GST_VIDEO_FORMAT_YV12;
+     if (gst_droid_media_buffer_formats[format_index].bytes_per_pixel != 0) {
+       stride =
+           stride * gst_droid_media_buffer_formats[format_index].bytes_per_pixel;
+@@ -297,8 +303,8 @@ gst_droid_media_buffer_allocator_alloc (GstAllocator * allocator,
+ 
+   // Android YV12 requires alignment of the UV stride too.
+   // So we need to reset the gst UV strides and offsets.
+-  if (gst_droid_media_buffer_formats[format_index].gst_format ==
+-      GST_VIDEO_FORMAT_YV12) {
++  /* (not for an unknown HAL format: format_index is then past the table) */
++  if (yv12) {
+     gsize uvStride = ALIGN_SIZE (stride / 2,
+         gst_droid_media_buffer_formats[format_index].h_align);
+     mem->video_info.stride[1] = uvStride;
+@@ -364,7 +370,7 @@ gst_droid_media_buffer_allocator_alloc_new (GstAllocator * allocator,
+         gst_video_format_to_string (info->finfo->format));
+     return NULL;
+   }
+-  GST_WARNING_OBJECT (allocator,
++  GST_DEBUG_OBJECT (allocator,
+       "GStreamer format %s", gst_video_format_to_string (info->finfo->format));
+   dbuf =
+       droid_media_buffer_create (info->width, info->height,
