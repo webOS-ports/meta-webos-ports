@@ -21,7 +21,6 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 RRECOMMENDS:${PN} += " \
     pidgin-sipe \
-    purple-matrix \
     purple-discord \
     purple-googlechat \
     synergy-im-irc \

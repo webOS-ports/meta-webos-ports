@@ -1,7 +1,8 @@
-SUMMARY = "WhatsApp and Facebook (Messenger E2EE) protocol plug-ins for libpurple"
-DESCRIPTION = "One shared object hosting two prpls: prpl-hehoe-whatsmeow (WhatsApp, via \
-whatsmeow) and prpl-gometa (Facebook Messenger, via messagix). They share a single Go runtime, \
-which is why they are built together rather than as two plugins."
+SUMMARY = "WhatsApp, Facebook (Messenger E2EE) and Matrix protocol plug-ins for libpurple"
+DESCRIPTION = "One shared object hosting three prpls: prpl-hehoe-whatsmeow (WhatsApp, via \
+whatsmeow), prpl-gometa (Facebook Messenger, via messagix) and prpl-matrix (Matrix, via \
+mautrix-go). They share a single Go runtime, which is why they are built together rather than \
+as separate plugins."
 LICENSE = "GPL-3.0-or-later"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=5b4473596678d62d9d83096273422c8c"
 
@@ -21,7 +22,9 @@ PE = "1"
 #                       keeps a ringing call off the call audio and 0037 keeps the call's playback
 #                       stream fed between packets. 0039 is the video call side (orientation, front
 #                       camera, camera off, self-view). It has to live in this .so: two Go
-#                       c-archives cannot share one process.
+#                       c-archives cannot share one process. 0042 adds prpl-matrix (Matrix on
+#                       mautrix-go, with end-to-end encryption), LuneOS work like 0035 and in this
+#                       .so for the same reason.
 #   meowcaller          WhatsApp calling, which go.mod replaces with ./third_party/meowcaller.
 #                       Kept at 9769d5a: later main moved to a whatsmeow fork and reworked video,
 #                       which our meowcaller/0002 conflicts with. meowcaller/0003 backports the
@@ -79,6 +82,7 @@ SRC_URI += " \
     file://0039-webOS-WhatsApp-video-calls-on-the-phone-orientation-.patch \
     file://0040-webOS-keep-a-Facebook-login-failure-from-taking-the-.patch \
     file://0041-webOS-a-WhatsApp-call-answered-on-another-device-is-.patch \
+    file://0042-webOS-add-a-Matrix-protocol-prpl-matrix-to-the-plugi.patch \
     file://meowcaller/0001-mlow-speed-up-the-encoder-for-32-bit-ARM.patch;patchdir=third_party/meowcaller \
     file://meowcaller/0002-Fix-the-video-call-media-path-against-live-WhatsApp-.patch;patchdir=third_party/meowcaller \
     file://meowcaller/0003-engine-allocate-on-the-caller-s-FNA-relay-for-inboun.patch;patchdir=third_party/meowcaller \
@@ -169,7 +173,11 @@ do_compile() {
     # of that applies to -buildmode=c-archive, where the C toolchain does the final link. The
     # cross settings that DO matter -- CC, CGO_ENABLED, CGO_CFLAGS, GOARCH -- come from the
     # environment the class exports, not from these flags.
-    ${GO} build -trimpath -modcacherw -buildmode=c-archive -o ${B}/libwhatsmeow.a .
+    #
+    # -tags goolm: Matrix's end-to-end encryption (0042) uses mautrix-go's pure-Go Olm. Without
+    # the tag mautrix/crypto binds libolm through cgo instead, which is deprecated upstream and not
+    # in this layer set.
+    ${GO} build -tags goolm -trimpath -modcacherw -buildmode=c-archive -o ${B}/libwhatsmeow.a .
 
     # -DPURPLE_PLUGINS is belt-and-braces rather than required:
     # plugin.h does switch PURPLE_INIT_PLUGIN on it (unset selects the static-prpl entry point
@@ -187,11 +195,11 @@ do_compile() {
     OBJS=""
     for s in init login qrcode bridge process_message display_message groups blist \
              send_message handle_attachment send_file presence options receipt pixbuf commands \
-             call playout denoise aec h264_rtp gometa_init ${VOIPKIT_GLUE}; do
+             call playout denoise aec h264_rtp gometa_init matrix_init ${VOIPKIT_GLUE}; do
         ${CC} ${GCFLAGS} -I${WEBRTC_DSP} -c ${S}/glue/$s.c -o ${B}/glue_$s.o
         OBJS="$OBJS ${B}/glue_$s.o"
     done
-    for s in bridge constants gometabridge; do
+    for s in bridge constants gometabridge matrixbridge; do
         ${CC} ${GCFLAGS} -c ${S}/$s.c -o ${B}/root_$s.o
         OBJS="$OBJS ${B}/root_$s.o"
     done
@@ -235,7 +243,7 @@ do_compile() {
     if ! ${NM} -D --defined-only ${B}/libwhatsmeow.so | grep -q ' purple_init_plugin$'; then
         bbfatal "libwhatsmeow.so exports no purple_init_plugin; libpurple would reject it at runtime"
     fi
-    for id in prpl-hehoe-whatsmeow prpl-gometa; do
+    for id in prpl-hehoe-whatsmeow prpl-gometa prpl-matrix; do
         grep -q "$id" ${B}/libwhatsmeow.so || bbfatal "libwhatsmeow.so is missing prpl id $id"
     done
 }
@@ -304,18 +312,20 @@ do_install() {
     install -d ${D}${libdir}/purple-2
     install -m 0755 ${B}/libwhatsmeow.so ${D}${libdir}/purple-2/libwhatsmeow.so
 
-    # Two account templates, because this one .so registers two prpls: com.palm.whatsapp for
-    # prpl-hehoe-whatsmeow and com.palm.gometa for prpl-gometa. Without them the protocols are
-    # loaded but cannot be added as accounts.
+    # Three account templates, because this one .so registers three prpls: com.palm.whatsapp for
+    # prpl-hehoe-whatsmeow, com.palm.gometa for prpl-gometa and com.palm.matrix for prpl-matrix.
+    # Without them the protocols are loaded but cannot be added as accounts.
     install -d ${D}${webos_accttemplatesdir}
     cp -rf ${CONNECTORS_DIR}/im/whatsapp/account/com.palm.whatsapp ${D}${webos_accttemplatesdir}/
     cp -rf ${CONNECTORS_DIR}/im/facebook/account/com.palm.gometa ${D}${webos_accttemplatesdir}/
+    cp -rf ${CONNECTORS_DIR}/im/matrix/account/com.palm.matrix ${D}${webos_accttemplatesdir}/
 
     # ...and the validator apps those templates name in validator.customUI.appId. Without them the
     # account type appears but selecting it finds no validator.html.
     install -d ${D}${webos_applicationsdir}
     cp -rf ${CONNECTORS_DIR}/im/whatsapp/apps/com.palm.app.whatsapp ${D}${webos_applicationsdir}/
     cp -rf ${CONNECTORS_DIR}/im/facebook/apps/com.palm.app.gometa ${D}${webos_applicationsdir}/
+    cp -rf ${CONNECTORS_DIR}/im/matrix/apps/com.palm.app.matrix ${D}${webos_applicationsdir}/
 
     # The whatsapp call service (glue/call.c builds it): its bus name is listed, never activated --
     # imlibpurpleservice, which loads this plug-in, registers com.palm.whatsapp.call itself, so the
@@ -329,3 +339,9 @@ do_install() {
     install -m 0644 ${CONNECTORS_DIR}/im/whatsapp/files/sysbus/com.palm.whatsapp.call.perm.json \
         ${D}${webos_sysbus_permissionsdir}/
 }
+
+# prpl-matrix replaces matrix-org's purple-matrix (no end-to-end encryption, unmaintained), which
+# registered the same protocol id: libpurple keeps whichever of the two loads first, so they
+# cannot be installed together.
+RREPLACES:${PN} += "purple-matrix"
+RCONFLICTS:${PN} += "purple-matrix"

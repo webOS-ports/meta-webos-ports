@@ -53,7 +53,6 @@ RDEPENDS:${PN} += " \
 "
 RRECOMMENDS:${PN} += " \
     pidgin-sipe \
-    purple-matrix \
     purple-discord \
     purple-googlechat \
     synergy-im-irc \
