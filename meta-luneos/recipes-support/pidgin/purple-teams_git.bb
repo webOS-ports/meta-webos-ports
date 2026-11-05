@@ -38,6 +38,8 @@ SRC_URI += " \
     file://0025-webOS-Answer-a-Teams-call-as-the-participant-it-names.patch \
     file://0026-webOS-Show-and-send-video-in-1-1-Teams-calls.patch \
     file://0027-webOS-Offer-video-when-placing-a-Teams-video-call.patch \
+    file://0028-webOS-Acknowledge-the-answer-to-a-Teams-call-we-place.patch \
+    file://0029-webOS-Acknowledge-the-acceptance-of-a-Teams-call-we-place.patch \
 "
 SRCREV_upstream = "f7eb519b9968ed7844ff59319bff5c1859c46851"
 

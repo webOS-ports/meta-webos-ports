@@ -1,0 +1,78 @@
+From 9c2def2d77afeb5c5fb900ff9773bf9c8017fca5 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 4 Nov 2026 22:06:19 +0100
+Subject: [PATCH] webOS: Acknowledge the answer to a Teams call we place
+
+A video call placed from the device was answered (mediaAnswer, then
+acceptance), but ICE never connected and the call controller ended it
+30 s later: "Call Controller timed out while waiting for
+acknowledgement" (408). The controller acknowledges our answers on the
+mediaAcknowledgement link we give; as the offerer we did not do the same
+for the answer we received.
+
+POST a mediaAcknowledgement, in the shape the controller sends us, to
+the link the mediaAnswer frame gives. Log the member names (not the
+values) of the mediaAnswer and acceptance frames, whose shape for the
+caller is not known yet.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ teams_calling.c | 34 ++++++++++++++++++++++++++++++++++
+ 1 file changed, 34 insertions(+)
+
+diff --git a/teams_calling.c b/teams_calling.c
+index 056134c..590098d 100644
+--- a/teams_calling.c
++++ b/teams_calling.c
+@@ -1867,6 +1867,29 @@ teams_calling_handle_media_answer(TeamsAccount *sa, JsonObject *body_obj)
+ 		               ruf != NULL, rpw != NULL, rxkey != NULL);
+ 		g_free(ruf); g_free(rpw); g_free(rxkey); return;
+ 	}
++	/* The call controller waits for us, the offerer, to acknowledge the answer on the link it
++	 * gives, as it acknowledges our answers on ours (/mediaAcknowledgement, below); without it the
++	 * call ended after 30 s, "Call Controller timed out while waiting for acknowledgement" (408). */
++	{
++		JsonObject *links = oget(body_obj, "links");
++		const gchar *ack_url;
++		log_member_names("mediaAnswer frame", body_obj);
++		if (!links && (sub = oget(body_obj, "mediaAnswer"))) {
++			log_member_names("mediaAnswer frame mediaAnswer", sub);
++			links = oget(sub, "links");
++		}
++		if (links) log_member_names("mediaAnswer frame links", links);
++		ack_url = links ? sget(links, "mediaAcknowledgement") : NULL;
++		if (ack_url && *ack_url) {
++			gchar *url = teams_calling_via_flightproxy(ack_url), *host = url_host_for_log(url);
++			teams_call_log("mediaAnswer: acknowledging to %s", host ? host : "?");
++			flightproxy_post_cb(sa, url, "{\"mediaAcknowledgement\":{\"code\":0,\"subCode\":0,"
++			                    "\"reason\":\"noError\",\"phrase\":\"Success\"}}", flightproxy_resp_cb, NULL);
++			g_free(url); g_free(host);
++		} else {
++			teams_call_log("mediaAnswer: no mediaAcknowledgement link in the frame");
++		}
++	}
+ 	teams_call_log("mediaAnswer: applying peer answer -> ANSWER + RCAND to caller engine");
+ 	if (media_send(mp, "ANSWER %s %s %s\n", rxkey, ruf, rpw))
+ 		media_send_candidates(mp, blob);
+@@ -1979,6 +2002,17 @@ teams_calling_handle_trouter(TeamsAccount *sa, JsonObject *body_obj, const gchar
+ 		}
+ 	}
+ 
++	/* Outgoing call: the callee accepted. Only logged (names, not values) - what it carries for
++	 * the caller is not known yet. */
++	if (request_url && strstr(request_url, "/call/acceptance")) {
++		JsonObject *acc = oget(body_obj, "callAcceptance");
++		log_member_names("outgoing: acceptance frame", body_obj);
++		if (acc) {
++			log_member_names("outgoing: acceptance frame callAcceptance", acc);
++			if (oget(acc, "links")) log_member_names("outgoing: acceptance frame links", oget(acc, "links"));
++		}
++		return;
++	}
+ 	/* Outgoing call: callee is ringing (progress) or has answered (mediaAnswer). */
+ 	if (request_url && (strstr(request_url, "/mediaAnswer") || strstr(request_url, "/mediaanswer"))) {
+ 		teams_call_log("outgoing: MEDIA ANSWER frame received");
+-- 
+2.53.0
+

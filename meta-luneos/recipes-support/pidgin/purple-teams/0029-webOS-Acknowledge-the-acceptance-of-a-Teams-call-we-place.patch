@@ -1,0 +1,135 @@
+From 8f76e46be0938fef709194f8f44c8c2f1ed1b93a Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 4 Nov 2026 22:38:43 +0100
+Subject: [PATCH] webOS: Acknowledge the acceptance of a Teams call we place
+
+With the media answer acknowledged, a call placed from the device still
+ended 30 s after the callee's acceptance with "Call Controller timed
+out while waiting for acknowledgement" (408): like SIP's ACK to a 200
+OK, the controller waits for the caller on the acceptance's
+links.acknowledgement.
+
+POST {"callAcceptanceAcknowledgement":{"links":{...}}} to that link,
+with the call links a callee gives in its callAcceptance (media
+renegotiation, transfer, replacement, balance update, retarget
+completion, video streaming control, media descriptions): the
+invitation only carried the links a caller needs before the answer.
+An empty {} was refused with 400 "The CallAcceptanceAcknowledgement
+field is required.", one without links with "The Links field is
+required." The controller's verdict is logged. Also log, without
+values, whether the acceptance's SDP is the answer we applied and
+whether the callee we dialled accepted.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ teams_calling.c | 67 +++++++++++++++++++++++++++++++++++++++++++------
+ 1 file changed, 59 insertions(+), 8 deletions(-)
+
+diff --git a/teams_calling.c b/teams_calling.c
+index 590098d..a585053 100644
+--- a/teams_calling.c
++++ b/teams_calling.c
+@@ -127,6 +127,7 @@ typedef struct {
+ 	GIOChannel  *out_ch;       /* <- child stdout */
+ 	guint        out_watch;
+ 	gchar       *our_ufrag, *our_pwd, *our_txkey;
++	gchar       *answer_ufrag; /* outgoing: the ICE ufrag of the answer we applied */
+ 	guint32      our_ssrc;     /* the engine's audio RTP SSRC (its SSRC line); 0 = not known */
+ 	guint32      our_vssrc;    /* its video SSRC (VSSRC line); 0 = the engine has no video */
+ 	const char  *video_offer;  /* the last offer's m=video direction (teams_sdp_video_direction) */
+@@ -1381,7 +1382,7 @@ teams_media_stop(void)
+ 		mp->reaper->kill_timer = g_timeout_add_seconds(5, media_kill_cb, mp->reaper);
+ 	g_string_free(mp->our_cands, TRUE);
+ 	if (mp->our_txkey) explicit_bzero(mp->our_txkey, strlen(mp->our_txkey));
+-	g_free(mp->our_ufrag); g_free(mp->our_pwd); g_free(mp->our_txkey);
++	g_free(mp->our_ufrag); g_free(mp->our_pwd); g_free(mp->our_txkey); g_free(mp->answer_ufrag);
+ 	g_free(mp->pending_reneg_answer_link);
+ 	g_free(mp->last_restarted_ufrag);
+ 	g_free(mp->declined_mlines);
+@@ -1891,6 +1892,8 @@ teams_calling_handle_media_answer(TeamsAccount *sa, JsonObject *body_obj)
+ 		}
+ 	}
+ 	teams_call_log("mediaAnswer: applying peer answer -> ANSWER + RCAND to caller engine");
++	g_free(mp->answer_ufrag);
++	mp->answer_ufrag = g_strdup(ruf);
+ 	if (media_send(mp, "ANSWER %s %s %s\n", rxkey, ruf, rpw))
+ 		media_send_candidates(mp, blob);
+ 	explicit_bzero(rxkey, strlen(rxkey));
+@@ -1986,6 +1989,31 @@ teams_calling_handle_renegotiation(TeamsAccount *sa, JsonObject *body_obj)
+ 	send_reneg_answer(mp, answer_link);
+ }
+ 
++/* The acknowledgement of a callee's acceptance. Our invitation only gave the controller the
++ * links a caller needs before the answer (progress, mediaAnswer, acceptance, redirection, end);
++ * the call-level links the callee gives in its callAcceptance (renegotiation, transfer, ...) the
++ * caller gives here: {} was refused with 400 "The CallAcceptanceAcknowledgement field is
++ * required.", {"callAcceptanceAcknowledgement":{}} with "The Links field is required.". The
++ * same set our own callAcceptance sends. g_free() it. */
++static gchar *
++acceptance_ack_body(TeamsCall *call)
++{
++	static const char *const names[] = {
++		"mediaRenegotiation", "transfer", "replacement", "balanceUpdate", "retargetCompletion",
++		"controlVideoStreaming", "updateMediaDescriptions",
++	};
++	GString *body = g_string_new("{\"callAcceptanceAcknowledgement\":{\"links\":{");
++	gsize i;
++
++	for (i = 0; call && call->callagent_id && i < G_N_ELEMENTS(names); i++) {
++		gchar *p = callagent_path(call, call->callagent_id, "call", names[i]);
++		g_string_append_printf(body, "%s\"%s\":\"%s\"", i ? "," : "", names[i], p);
++		g_free(p);
++	}
++	g_string_append(body, "}}}");
++	return g_string_free(body, FALSE);
++}
++
+ void
+ teams_calling_handle_trouter(TeamsAccount *sa, JsonObject *body_obj, const gchar *request_url)
+ {
+@@ -2002,14 +2030,37 @@ teams_calling_handle_trouter(TeamsAccount *sa, JsonObject *body_obj, const gchar
+ 		}
+ 	}
+ 
+-	/* Outgoing call: the callee accepted. Only logged (names, not values) - what it carries for
+-	 * the caller is not known yet. */
++	/* Outgoing call: the callee accepted. Like SIP's ACK to a 200 OK, the call controller waits
++	 * for us to acknowledge the acceptance on its links.acknowledgement: without it the call
++	 * ended 30 s later, "Call Controller timed out while waiting for acknowledgement" (408). The
++	 * body is {"callAcceptanceAcknowledgement":{"links":{...}}} with our call links (see
++	 * acceptance_ack_body); the controller's verdict is logged.
++	 * Also logged, without values: whether the acceptance's SDP
++	 * is the answer we applied and whether it came from the callee we dialled. */
+ 	if (request_url && strstr(request_url, "/call/acceptance")) {
+-		JsonObject *acc = oget(body_obj, "callAcceptance");
+-		log_member_names("outgoing: acceptance frame", body_obj);
+-		if (acc) {
+-			log_member_names("outgoing: acceptance frame callAcceptance", acc);
+-			if (oget(acc, "links")) log_member_names("outgoing: acceptance frame links", oget(acc, "links"));
++		JsonObject *acc = oget(body_obj, "callAcceptance"), *links = acc ? oget(acc, "links") : NULL;
++		JsonObject *by = acc ? oget(acc, "acceptedBy") : NULL, *mc = acc ? oget(acc, "mediaContent") : NULL;
++		TeamsCall *cur = teams_calling_current(sa);
++		const gchar *ack_url = links ? sget(links, "acknowledgement") : NULL;
++		const gchar *blob = mc ? sget(mc, "blob") : NULL;
++		log_member_names("outgoing: acceptance frame callAcceptance", acc);
++		if (links) log_member_names("outgoing: acceptance frame links", links);
++		if (blob) {
++			gchar *uf = sdp_line_val(blob, "a=ice-ufrag:");
++			teams_call_log("outgoing: acceptance SDP %s the answer we applied (%s)",
++			               g_mproc && g_mproc->answer_ufrag && uf && !strcmp(uf, g_mproc->answer_ufrag)
++			               ? "is" : "is NOT", teams_sdp_video_direction(blob) ? teams_sdp_video_direction(blob) : "no video");
++			g_free(uf);
++		}
++		teams_call_log("outgoing: accepted by the callee we dialled: %s",
++		               by && cur && cur->peer_mri && sget(by, "id") && !strcmp(sget(by, "id"), cur->peer_mri)
++		               ? "yes" : "no");
++		if (ack_url && *ack_url) {
++			gchar *url = teams_calling_via_flightproxy(ack_url), *host = url_host_for_log(url);
++			teams_call_log("outgoing: acknowledging the acceptance to %s", host ? host : "?");
++			gchar *ack = acceptance_ack_body(cur);
++			flightproxy_post_cb(sa, url, ack, flightproxy_resp_cb, NULL);
++			g_free(ack); g_free(url); g_free(host);
+ 		}
+ 		return;
+ 	}
