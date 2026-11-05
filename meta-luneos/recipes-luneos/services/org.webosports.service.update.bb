@@ -13,7 +13,7 @@ inherit webos_filesystem_paths
 inherit webos_system_bus
 
 PV = "0.1.0+git"
-SRCREV = "96e4919aa1f5be31bb93d871de53f74ea3b504fc"
+SRCREV = "55ffed8a6a3d565ada2289ae48388669f86114a8"
 # Testing only: the HTTPS feed on feeds.luneos.org, the toast opening the QML
 # System Updates page and the boot check are on herrie/feeds-https, not yet in
 # webOS-ports/webOS-OSE; back to that branch once they are.
