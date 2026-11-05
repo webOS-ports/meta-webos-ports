@@ -40,6 +40,7 @@ RRECOMMENDS:${PN} += " \
     purple-matrix \
     purple-discord \
     purple-googlechat \
+    synergy-im-irc \
     purple-teams \
     purple-combined \
     tdlib-purple \
