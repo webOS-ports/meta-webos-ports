@@ -1,0 +1,77 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 5 Nov 2026 11:47:26 +0100
+Subject: [PATCH] droidvenc: encode raw NV12 frames from system memory
+
+droidvenc only took the camera's buffers, handed to the codec as
+metadata, so a picture could only be encoded as the camera gave it. A
+call that has to send the picture upright (Teams has no rotation field
+in its RTP, so the frames themselves must be turned) could not use the
+hardware encoder.
+
+Accept NV12 in system memory as well. Such frames are copied into the
+codec's input buffers (droidmedia's encoder without meta_data), as
+OMX_COLOR_FormatYUV420SemiPlanar; the camera's buffers still go as
+metadata.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ gst/droidcodec/gstdroidvenc.c | 23 +++++++++++++++++++++--
+ 1 file changed, 21 insertions(+), 2 deletions(-)
+
+diff --git a/gst/droidcodec/gstdroidvenc.c b/gst/droidcodec/gstdroidvenc.c
+index 8cb98c1..4775cd4 100644
+--- a/gst/droidcodec/gstdroidvenc.c
++++ b/gst/droidcodec/gstdroidvenc.c
+@@ -28,6 +28,7 @@
+ #include "gst/droid/gstdroidquery.h"
+ #include "plugin.h"
+ #include <string.h>
++#include "droidmediaconstants.h"
+ 
+ #define gst_droidvenc_parent_class parent_class
+ G_DEFINE_TYPE (GstDroidVEnc, gst_droidvenc, GST_TYPE_VIDEO_ENCODER);
+@@ -42,7 +43,8 @@ GST_STATIC_PAD_TEMPLATE (GST_VIDEO_ENCODER_SINK_NAME,
+     GST_PAD_SINK,
+     GST_PAD_ALWAYS,
+     GST_STATIC_CAPS (GST_VIDEO_CAPS_MAKE_WITH_FEATURES
+-        (GST_CAPS_FEATURE_MEMORY_DROID_VIDEO_META_DATA, "{YV12}")));
++        (GST_CAPS_FEATURE_MEMORY_DROID_VIDEO_META_DATA, "{YV12}") ";"
++        GST_VIDEO_CAPS_MAKE ("NV12")));
+ 
+ enum
+ {
+@@ -141,7 +143,23 @@ gst_droidvenc_create_codec (GstDroidVEnc * enc)
+   md.stride = enc->in_state->info.width;
+   md.slice_height = enc->in_state->info.height;
+ 
+-  /* TODO: get this from caps */
++  /* Frames in system memory (NV12, for instance a camera picture turned before
++   * encoding) are copied into the codec's own input buffers; the camera's buffers
++   * are handed over as metadata. */
++  {
++    GstCapsFeatures *features = gst_caps_get_features (enc->in_state->caps, 0);
++    if (!features || !gst_caps_features_contains (features,
++            GST_CAPS_FEATURE_MEMORY_DROID_VIDEO_META_DATA)) {
++      DroidMediaColourFormatConstants constants;
++
++      droid_media_colour_format_constants_init (&constants);
++      md.meta_data = false;
++      md.color_format = constants.OMX_COLOR_FormatYUV420SemiPlanar;
++      GST_INFO_OBJECT (enc, "raw NV12 input, colour format 0x%x", md.color_format);
++      goto create;
++    }
++  }
++
+   md.meta_data = true;
+ 
+   query = gst_droid_query_new_video_color_format ();
+@@ -162,6 +180,7 @@ gst_droidvenc_create_codec (GstDroidVEnc * enc)
+ 
+   gst_query_unref (query);
+ 
++create:
+   enc->codec = droid_media_codec_create_encoder (&md);
+ 
+   if (!enc->codec) {

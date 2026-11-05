@@ -29,7 +29,7 @@ COMPATIBLE_MACHINE = "^halium$"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 PV = "0.20260508+git"
-PR = "r2"
+PR = "r3"
 SRCREV = "e5152aee90dbb9b81c6bc45073b1fa86fc0c4194"
 SRC_URI = "git://github.com/sailfishos/gst-droid.git;branch=master;protocol=https \
     file://0001-droidcamsrc-allow-recorder-video-in-raw-preview.patch \
@@ -52,6 +52,10 @@ SRC_URI = "git://github.com/sailfishos/gst-droid.git;branch=master;protocol=http
     file://0018-droidcamsrc-report-the-latency-in-nanoseconds.patch \
     file://0019-droidbufferpool-do-not-leak-the-allocator-of-each-co.patch \
     file://0020-droidbufferpool-move-a-queue-buffer-s-memory-to-a-ne.patch \
+    file://0021-droidvenc-do-not-leave-the-codec-callbacks-uninitial.patch \
+    file://0022-droidvenc-encode-raw-NV12-frames-from-system-memory.patch \
+    file://0023-droidvenc-read-codec-config-and-key-frames-from-the-.patch \
+    file://0024-droidvenc-copy-raw-frames-into-the-layout-the-hardwa.patch \
     file://gst-droid-gate.sh \
     file://gst-droid-gate.service \
     file://camera-droid-heal.sh \

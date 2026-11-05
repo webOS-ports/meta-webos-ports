@@ -1,0 +1,190 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 5 Nov 2026 13:04:18 +0100
+Subject: [PATCH] droidvenc: copy raw frames into the layout the hardware reads
+
+Raw NV12 frames 480 pixels wide came out of sargo's encoder
+(c2.qti.avc.encoder) green and striped. It reads its input with rows of
+a multiple of 128 bytes and the chroma after a luma plane of a multiple
+of 32 rows, whatever stride it is told: test bars at 512x640 and 384x512
+decoded within a few levels of the source, at 480, 448, 416 and 496
+wide they did not.
+
+Copy each raw frame into that layout, zero padded, and pass that stride
+and plane height on as well. The frame handed over ends with its last
+chroma row, as the codec's input buffers do (480x640: 491488 bytes, 32
+less than the padded planes); a longer one is refused ("buffer offset
+and size goes beyond the capacity") and the pipeline stalls. The
+camera's buffers still go as metadata, untouched.
+
+Tested on sargo with test bars encoded and decoded again: 480x640,
+144x176, 512x640 and 640x480 all within 5 levels of the source.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ gst/droidcodec/gstdroidvenc.c | 100 +++++++++++++++++++++++++++++++---
+ gst/droidcodec/gstdroidvenc.h |   2 +
+ 2 files changed, 93 insertions(+), 9 deletions(-)
+
+diff --git a/gst/droidcodec/gstdroidvenc.c b/gst/droidcodec/gstdroidvenc.c
+index 574b967..caa4d95 100644
+--- a/gst/droidcodec/gstdroidvenc.c
++++ b/gst/droidcodec/gstdroidvenc.c
+@@ -58,6 +58,7 @@ typedef struct
+ {
+   GstMapInfo info;
+   GstVideoCodecFrame *frame;
++  guint8 *copy;               /* raw input: the padded copy queued instead of the buffer */
+ } GstDroidVEncFrameReleaseData;
+ 
+ static GstVideoCodecState *gst_droidvenc_configure_state (GstDroidVEnc * enc,
+@@ -74,7 +75,10 @@ gst_droidvenc_release_input_frame (void *data)
+   GstDroidVEncFrameReleaseData *release_data =
+       (GstDroidVEncFrameReleaseData *) data;
+ 
+-  gst_buffer_unmap (release_data->frame->input_buffer, &release_data->info);
++  if (release_data->copy)
++    g_free (release_data->copy);
++  else
++    gst_buffer_unmap (release_data->frame->input_buffer, &release_data->info);
+ 
+   /* We need to release the input buffer */
+   gst_buffer_unref (release_data->frame->input_buffer);
+@@ -85,6 +89,61 @@ gst_droidvenc_release_input_frame (void *data)
+   g_slice_free (GstDroidVEncFrameReleaseData, release_data);
+ }
+ 
++/* The bytes of a raw frame in that layout, up to the end of its last chroma
++ * row: the codec's input buffers end there (sargo, 480x640: 491488 bytes, 32
++ * less than the padded planes), and a frame any longer is refused. */
++static gsize
++gst_droidvenc_raw_size (GstDroidVEnc * enc)
++{
++  gsize width = (gsize) GST_VIDEO_INFO_WIDTH (&enc->in_state->info);
++  gsize height = (gsize) GST_VIDEO_INFO_HEIGHT (&enc->in_state->info);
++
++  return enc->raw_stride * (enc->raw_slice_height + (height + 1) / 2 - 1)
++      + GST_ROUND_UP_2 (width);
++}
++
++/* Copies an NV12 frame into the layout the hardware reads (raw_stride bytes a
++ * row, the chroma after raw_slice_height rows of luma), zero padded. */
++static gboolean
++gst_droidvenc_copy_raw (GstDroidVEnc * enc, GstBuffer * buffer,
++    GstDroidVEncFrameReleaseData * release_data)
++{
++  GstVideoFrame vf;
++  const GstVideoInfo *vinfo = &enc->in_state->info;
++  gsize width = (gsize) GST_VIDEO_INFO_WIDTH (vinfo);
++  gsize height = (gsize) GST_VIDEO_INFO_HEIGHT (vinfo);
++  gsize stride = enc->raw_stride, plane = enc->raw_slice_height;
++  guint8 *dst;
++  gsize y;
++
++  if (GST_VIDEO_INFO_FORMAT (vinfo) != GST_VIDEO_FORMAT_NV12 || width > stride
++      || height > plane) {
++    GST_ERROR_OBJECT (enc, "raw input is not NV12 within %" G_GSIZE_FORMAT "x%"
++        G_GSIZE_FORMAT, stride, plane);
++    return FALSE;
++  }
++
++  if (!gst_video_frame_map (&vf, vinfo, buffer, GST_MAP_READ)) {
++    GST_ERROR_OBJECT (enc, "failed to map the input frame");
++    return FALSE;
++  }
++
++  dst = g_malloc0 (stride * plane * 3 / 2);
++  for (y = 0; y < height; y++) {
++    memcpy (dst + y * stride, (const guint8 *) GST_VIDEO_FRAME_PLANE_DATA (&vf, 0)
++        + y * (gsize) GST_VIDEO_FRAME_PLANE_STRIDE (&vf, 0), width);
++  }
++  for (y = 0; y < (height + 1) / 2; y++) {
++    memcpy (dst + stride * plane + y * stride,
++        (const guint8 *) GST_VIDEO_FRAME_PLANE_DATA (&vf, 1)
++        + y * (gsize) GST_VIDEO_FRAME_PLANE_STRIDE (&vf, 1), GST_ROUND_UP_2 (width));
++  }
++  gst_video_frame_unmap (&vf);
++
++  release_data->copy = dst;
++  return TRUE;
++}
++
+ static gboolean
+ gst_droidvenc_negotiate_src_caps (GstDroidVEnc * enc)
+ {
+@@ -155,12 +214,24 @@ gst_droidvenc_create_codec (GstDroidVEnc * enc)
+       droid_media_colour_format_constants_init (&constants);
+       md.meta_data = false;
+       md.color_format = constants.OMX_COLOR_FormatYUV420SemiPlanar;
+-      GST_INFO_OBJECT (enc, "raw NV12 input, colour format 0x%x", md.color_format);
++      /* The hardware reads its input with rows of a multiple of 128 bytes and
++       * the chroma after a luma plane of a multiple of 32 rows, whatever stride
++       * it is given (sargo's c2.qti.avc.encoder: 512 and 384 wide encode, 480,
++       * 448, 416 and 496 come out green and striped): frames are copied into
++       * that layout, and the stride and plane height are passed on as well. */
++      enc->raw_stride = GST_ROUND_UP_N ((gsize) enc->in_state->info.width, 128);
++      enc->raw_slice_height = GST_ROUND_UP_N ((gsize) enc->in_state->info.height, 32);
++      md.stride = (int32_t) enc->raw_stride;
++      md.slice_height = (int32_t) enc->raw_slice_height;
++      GST_INFO_OBJECT (enc, "raw NV12 input, colour format 0x%x, stride %d, plane height %d",
++          md.color_format, md.stride, md.slice_height);
+       goto create;
+     }
+   }
+ 
+   md.meta_data = true;
++  enc->raw_stride = 0;
++  enc->raw_slice_height = 0;
+ 
+   query = gst_droid_query_new_video_color_format ();
+   if (!gst_pad_peer_query (GST_VIDEO_ENCODER_SINK_PAD (GST_VIDEO_ENCODER (enc)),
+@@ -640,17 +711,28 @@ gst_droidvenc_handle_frame (GstVideoEncoder * encoder,
+     enc->dirty = FALSE;
+   }
+ 
+-  if (!gst_buffer_map (frame->input_buffer, &info, GST_MAP_READ)) {
+-    GST_ERROR_OBJECT (enc, "failed to map the input frame");
+-    goto error;
++  release_data = g_slice_new0 (GstDroidVEncFrameReleaseData);
++
++  if (enc->raw_stride) {
++    if (!gst_droidvenc_copy_raw (enc, frame->input_buffer, release_data)) {
++      g_slice_free (GstDroidVEncFrameReleaseData, release_data);
++      goto error;
++    }
++    data.data.size = (ssize_t) gst_droidvenc_raw_size (enc);
++    data.data.data = release_data->copy;
++  } else {
++    if (!gst_buffer_map (frame->input_buffer, &info, GST_MAP_READ)) {
++      GST_ERROR_OBJECT (enc, "failed to map the input frame");
++      g_slice_free (GstDroidVEncFrameReleaseData, release_data);
++      goto error;
++    }
++    data.data.size = info.size;
++    data.data.data = info.data;
++    release_data->info = info;
+   }
+-  data.data.size = info.size;
+-  data.data.data = info.data;
+   data.sync = false;
+   data.ts = GST_TIME_AS_USECONDS (frame->pts);
+ 
+-  release_data = g_slice_new (GstDroidVEncFrameReleaseData);
+-  release_data->info = info;
+   release_data->frame = gst_video_codec_frame_ref (frame);
+ 
+   cb.unref = gst_droidvenc_release_input_frame;
+diff --git a/gst/droidcodec/gstdroidvenc.h b/gst/droidcodec/gstdroidvenc.h
+index c7c44e9..508d618 100644
+--- a/gst/droidcodec/gstdroidvenc.h
++++ b/gst/droidcodec/gstdroidvenc.h
+@@ -60,6 +60,8 @@ struct _GstDroidVEnc
+   /* protected by decoder stream lock */
+   GstFlowReturn downstream_flow_ret;
+   gboolean dirty;
++  /* raw input: the row stride and plane height the frames are copied to; 0 for the camera's metadata */
++  gsize raw_stride, raw_slice_height;
+ };
+ 
+ struct _GstDroidVEncClass

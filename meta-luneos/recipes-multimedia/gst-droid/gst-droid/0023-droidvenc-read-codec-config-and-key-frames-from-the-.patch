@@ -1,0 +1,178 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 5 Nov 2026 11:56:29 +0100
+Subject: [PATCH] droidvenc: read codec config and key frames from the H.264
+ stream
+
+The Codec2 encoder fed raw frames (c2.qti.avc.encoder on sargo) gives
+Annex B output without the flags droidmedia passes on: its first buffer
+holds only SPS and PPS but is not marked as codec config, and each IDR
+comes as SPS, PPS and the slice in one buffer, not marked as a sync
+point. droidvenc then sent the SPS/PPS as a frame, never set
+codec_data, so h264parse refused the avc caps, and only the first start
+code of a buffer was turned into a NAL size, which left the IDR slice
+hidden inside the SPS unit.
+
+For H.264, take a buffer with an SPS and no slice as the codec config,
+and a buffer with an IDR slice as a sync point, when droidmedia did not
+say so. Turn every start code of an Annex B buffer into the size of the
+unit that follows it.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ gst-libs/gst/droid/gstdroidcodec.c | 78 ++++++++++++++++++++++++------
+ gst/droidcodec/gstdroidvenc.c      | 35 ++++++++++++++
+ 2 files changed, 98 insertions(+), 15 deletions(-)
+
+diff --git a/gst-libs/gst/droid/gstdroidcodec.c b/gst-libs/gst/droid/gstdroidcodec.c
+index dbf41be..04ca5e7 100644
+--- a/gst-libs/gst/droid/gstdroidcodec.c
++++ b/gst-libs/gst/droid/gstdroidcodec.c
+@@ -1107,30 +1107,78 @@ process_aacdec_data (GstDroidCodec * codec, GstBuffer * buffer,
+   return TRUE;
+ }
+ 
++/* The offset of the next Annex B start code (00 00 01) at or after from, or size if none. */
++static gsize
++h264enc_find_start_code (const guint8 * d, gsize size, gsize from)
++{
++  gsize i;
++
++  for (i = from; i + 3 <= size; i++) {
++    if (d[i] == 0 && d[i + 1] == 0 && d[i + 2] == 1) {
++      return i;
++    }
++  }
++
++  return size;
++}
++
+ static gboolean
+ process_h264enc_data (DroidMediaData * in, DroidMediaData * out)
+ {
+-  guint32 size;
+-  guint8 *data;
++  const guint8 *d = in->data;
++  gsize size, sc, i;
++  GByteArray *avc;
+ 
+-  if (in->size >= 4 && memcmp (in->data, "\x00\x00\x00\x01", 4) == 0) {
+-    /* We will replace the first 4 bytes with the NAL size */
+-    out->size = in->size;
+-    data = in->data + 4;
+-  } else {
++  /* the sizes below go into guint32 NAL sizes and a GByteArray */
++  if (in->size < 0 || (guint64) in->size > G_MAXUINT32 - 20u) {
++    return FALSE;
++  }
++  size = (gsize) in->size;
++  sc = h264enc_find_start_code (d, size, 0);
++
++  for (i = 0; i < sc && sc < size; i++) {
++    if (d[i] != 0) {
++      sc = size;
++    }
++  }
++
++  if (sc >= size) {
+     /* We don't have the NAL prefix so we add 4 bytes for the NAL size */
+-    out->size = in->size + 4;
+-    data = in->data;
++    guint32 nal_size = GUINT32_TO_BE ((guint32) size);
++
++    out->size = (ssize_t) (size + 4);
++    out->data = g_malloc (size + 4);
++    memcpy (out->data, &nal_size, sizeof (nal_size));
++    memcpy ((guint8 *) out->data + 4, d, size);
++    return TRUE;
+   }
+ 
+-  size = GUINT32_TO_BE (out->size - 4);
+-  out->data = g_malloc (out->size);
+-  if (!out->data) {
+-    return FALSE;
++  /* Annex B, maybe several NAL units (some encoders put SPS and PPS in front
++   * of each IDR): each start code becomes the size of the unit that follows */
++  avc = g_byte_array_sized_new ((guint) size + 16u);
++  while (sc < size) {
++    gsize start = sc + 3;
++    gsize next = h264enc_find_start_code (d, size, start);
++    gsize end = next;
++
++    /* the zero byte of a 4-byte start code, or trailing_zero_8bits */
++    while (end > start && d[end - 1] == 0) {
++      end--;
++    }
++
++    if (end > start) {
++      guint32 nal_size;
++
++      nal_size = GUINT32_TO_BE ((guint32) (end - start));
++      g_byte_array_append (avc, (const guint8 *) &nal_size, sizeof (nal_size));
++      g_byte_array_append (avc, d + start, (guint) (end - start));
++    }
++
++    sc = next;
+   }
+ 
+-  memcpy (out->data, &size, sizeof (size));
+-  memcpy (out->data + 4, data, out->size - 4);
++  out->size = (ssize_t) avc->len;
++  out->data = g_byte_array_free (avc, FALSE);
+ 
+   return TRUE;
+ }
+diff --git a/gst/droidcodec/gstdroidvenc.c b/gst/droidcodec/gstdroidvenc.c
+index 4775cd4..574b967 100644
+--- a/gst/droidcodec/gstdroidvenc.c
++++ b/gst/droidcodec/gstdroidvenc.c
+@@ -257,6 +257,23 @@ out:
+   g_mutex_unlock (&enc->eos_lock);
+ }
+ 
++/* The NAL unit types (bit n set for type n) in an Annex B H.264 buffer. */
++static guint32
++gst_droidvenc_h264_nal_types (const guint8 * d, gsize size)
++{
++  guint32 types = 0;
++  gsize i;
++
++  for (i = 0; i + 3 < size; i++) {
++    if (d[i] == 0 && d[i + 1] == 0 && d[i + 2] == 1) {
++      types |= 1u << (d[i + 3] & 0x1f);
++      i += 2;
++    }
++  }
++
++  return types;
++}
++
+ static void
+ gst_droidvenc_data_available (void *data, DroidMediaCodecData * encoded)
+ {
+@@ -269,6 +286,24 @@ gst_droidvenc_data_available (void *data, DroidMediaCodecData * encoded)
+ 
+   GST_VIDEO_ENCODER_STREAM_LOCK (encoder);
+ 
++  if (!g_strcmp0 (gst_droid_codec_get_droid_type (enc->codec_type), "video/avc")) {
++    /* The Codec2 encoder fed raw frames (sargo) marks neither its SPS/PPS
++     * buffer as codec config nor its IDR frames as sync points: read both
++     * from the stream */
++    guint32 types = encoded->data.size > 0 ?
++        gst_droidvenc_h264_nal_types (encoded->data.data,
++        (gsize) encoded->data.size) : 0;
++    const guint32 slices = (1u << 1) | (1u << 2) | (1u << 3) | (1u << 4) |
++        (1u << 5);
++
++    if (!encoded->codec_config && (types & (1u << 7)) && !(types & slices)) {
++      encoded->codec_config = true;
++    }
++    if (types & (1u << 5)) {
++      encoded->sync = true;
++    }
++  }
++
+   if (encoded->codec_config) {
+     GstBuffer *codec_data = NULL;
+ 
