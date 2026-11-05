@@ -36,6 +36,8 @@ SRC_URI += " \
     file://0023-webOS-Unzip-trouter-frames-whatever-the-case-of-the.patch \
     file://0024-webOS-Read-204-and-304-responses-as-having-no-body.patch \
     file://0025-webOS-Answer-a-Teams-call-as-the-participant-it-names.patch \
+    file://0026-webOS-Show-and-send-video-in-1-1-Teams-calls.patch \
+    file://0027-webOS-Offer-video-when-placing-a-Teams-video-call.patch \
 "
 SRCREV_upstream = "f7eb519b9968ed7844ff59319bff5c1859c46851"
 

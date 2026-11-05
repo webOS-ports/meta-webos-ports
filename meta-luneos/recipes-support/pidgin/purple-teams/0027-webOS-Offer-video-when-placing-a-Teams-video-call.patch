@@ -1,0 +1,334 @@
+From 598870cba9ce739f457d581124acad50864ec380 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 4 Nov 2026 22:00:12 +0100
+Subject: [PATCH] webOS: Offer video when placing a Teams video call
+
+The Phone app dials a video call with {"address", "video": true}, but
+the call went out voice only: our offer had no video m-line and the
+invitation named ["Audio"] alone.
+
+For a video call, when the engine has video, offer a bundled H264
+m-line sendrecv with our video SSRC and invite with ["Audio",
+"Video"]. The far side's answer then decides the camera: its
+direction, mirrored, says whether we send, and its fmtp how large. The
+video m-line is now built by one function for our answers and offers.
+
+Answering a call, name "Video" in the acceptance and renegotiation
+answers too when that answer sends our video. With ["Audio"] the
+Teams Android app offered its own video sendonly and never took ours.
+A voice call is unchanged.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ teams_call_luna.c       |   9 ++--
+ teams_call_video.c      |  10 ++++
+ teams_call_video.h      |   4 ++
+ teams_calling.c         | 104 +++++++++++++++++++++++++++-------------
+ teams_calling.h         |   3 +-
+ tests/test_call_video.c |   7 +++
+ 6 files changed, 99 insertions(+), 38 deletions(-)
+
+diff --git a/teams_call_luna.c b/teams_call_luna.c
+index 55e8c22..b32aec2 100644
+--- a/teams_call_luna.c
++++ b/teams_call_luna.c
+@@ -124,14 +124,15 @@ cb_call_state_query(LSHandle *sh, LSMessage *msg, void *ctx)
+ static bool
+ cb_dial(LSHandle *sh, LSMessage *msg, void *ctx)
+ {
+-	LSError err; gchar *addr; gboolean ok;
++	LSError err; gchar *addr; gboolean ok, video;
+ 	const char *payload = LSMessageGetPayload(msg);
+ 	(void) ctx;
+ 	LSErrorInit(&err);
+ 	addr = get_field(payload, "address");
+-	/* A video request is placed as a voice call: our offer has no video m-line (yet). */
+-	ok = g_sa && addr && *addr && teams_calling_dial(g_sa, addr);
+-	teams_call_log("dial %s: %s", addr ? addr : "(null)", ok ? "placed" : "failed");
++	/* {"address", "video": bool} as the Phone app sends it: a video call offers video too. */
++	video = teams_call_video_json_bool(payload, "video") == 1;
++	ok = g_sa && addr && *addr && teams_calling_dial(g_sa, addr, video);
++	teams_call_log("dial %s%s: %s", addr ? addr : "(null)", video ? " (video)" : "", ok ? "placed" : "failed");
+ 	LSMessageReply(sh, msg, ok ? "{\"returnValue\":true}" : "{\"returnValue\":false}", &err);
+ 	g_free(addr);
+ 	if (LSErrorIsSet(&err)) LSErrorFree(&err);
+diff --git a/teams_call_video.c b/teams_call_video.c
+index 2d5b77f..ebfa70b 100644
+--- a/teams_call_video.c
++++ b/teams_call_video.c
+@@ -253,6 +253,16 @@ teams_video_answer_direction(const char *offer_dir, gboolean engine_video, gbool
+ 	return "inactive";
+ }
+ 
++const char *
++teams_video_our_direction(const char *answer_dir)
++{
++	if (!answer_dir) return "inactive";
++	if (!strcmp(answer_dir, "sendrecv")) return "sendrecv";
++	if (!strcmp(answer_dir, "recvonly")) return "sendonly";
++	if (!strcmp(answer_dir, "sendonly")) return "recvonly";
++	return "inactive";
++}
++
+ gboolean
+ teams_video_dir_we_send(const char *answer_dir)
+ {
+diff --git a/teams_call_video.h b/teams_call_video.h
+index 0f5dee1..b682082 100644
+--- a/teams_call_video.h
++++ b/teams_call_video.h
+@@ -57,6 +57,10 @@ const char *teams_video_answer_direction(const char *offer_dir, gboolean engine_
+  * Android app offers max-fs=240;max-mbps=3600;max-br=208: 176x144 at 208 kbit/s. */
+ void teams_video_send_params(const char *sdp, int *w, int *h, int *kbps);
+ 
++/* Our direction once the far side answered our sendrecv video offer: the mirror of its answer's
++ * direction (its recvonly means we only send), "inactive" for none or a declined m-line. */
++const char *teams_video_our_direction(const char *answer_dir);
++
+ /* Whether a direction of ours lets us send / lets the far side send to us. */
+ gboolean teams_video_dir_we_send(const char *answer_dir);
+ gboolean teams_video_dir_peer_sends(const char *offer_dir);
+diff --git a/teams_calling.c b/teams_calling.c
+index 6f2ea2a..056134c 100644
+--- a/teams_calling.c
++++ b/teams_calling.c
+@@ -787,6 +787,36 @@ teams_calling_set_camera(TeamsAccount *sa, gboolean on)
+  * (media_send_answer, below) and any later mid-call renegotiation
+  * (teams_calling_handle_renegotiation) - both reuse the SAME bundled ICE/crypto. Caller owns the
+  * returned GString. */
++/* Our m=video section (in our answer, and in our offer for a video call): H264 PT 107 with rtx
++ * PT 99, direction dir, our video SSRC declared when we send, bundled on the audio's ICE and
++ * SDES key. */
++static void
++append_video_mline(GString *a, TeamsMediaProc *mp, int port, const char *ip, const char *mid,
++                   const char *dir)
++{
++	g_string_append_printf(a, "m=video %d RTP/SAVP 107 99\r\n", port);
++	g_string_append_printf(a, "c=IN IP4 %s\r\n", ip);
++	g_string_append(a, "a=rtpmap:107 H264/90000\r\n");
++	g_string_append(a, "a=rtpmap:99 rtx/90000\r\n");
++	g_string_append(a, "a=fmtp:107 level-asymmetry-allowed=1;packetization-mode=1;"
++	                    "profile-level-id=42e01f;max-fs=8160;max-mbps=244800;max-fps=3000\r\n");
++	g_string_append(a, "a=fmtp:99 apt=107\r\n");
++	g_string_append(a, "a=rtcp-fb:107 goog-remb\r\n");
++	g_string_append(a, "a=rtcp-fb:107 transport-cc\r\n");
++	g_string_append(a, "a=rtcp-fb:107 nack\r\n");
++	g_string_append(a, "a=rtcp-fb:107 nack pli\r\n");
++	g_string_append_printf(a, "a=mid:%s\r\n", mid);
++	g_string_append_printf(a, "a=%s\r\n", dir);
++	if (mp->our_vssrc && teams_video_dir_we_send(dir))
++		g_string_append_printf(a, "a=x-ssrc-range:%u-%u\r\n", mp->our_vssrc, mp->our_vssrc);
++	g_string_append_printf(a, "a=ice-ufrag:%s\r\n", mp->our_ufrag);
++	g_string_append_printf(a, "a=ice-pwd:%s\r\n", mp->our_pwd);
++	g_string_append_printf(a, "a=crypto:4 AEAD_AES_256_GCM inline:%s|2^31\r\n", mp->our_txkey);
++	g_string_append(a, "a=rtcp-mux\r\n");
++	g_string_append(a, "a=rtcp-rsize\r\n");
++	g_string_append(a, "a=label:main-video\r\n");
++}
++
+ static GString *
+ build_answer_sdp(TeamsMediaProc *mp)
+ {
+@@ -827,30 +857,8 @@ build_answer_sdp(TeamsMediaProc *mp)
+ 	g_string_append(a, "a=rtcp-mux\r\n");
+ 	g_string_append(a, "a=label:main-audio\r\n");
+ 
+-	g_string_append_printf(a, "m=video %d RTP/SAVP 107 99\r\n", our_port);
+-	g_string_append_printf(a, "c=IN IP4 %s\r\n", our_ip ? our_ip : "127.0.0.1");
+-	g_string_append(a, "a=rtpmap:107 H264/90000\r\n");
+-	g_string_append(a, "a=rtpmap:99 rtx/90000\r\n");
+-	g_string_append(a, "a=fmtp:107 level-asymmetry-allowed=1;packetization-mode=1;"
+-	                    "profile-level-id=42e01f;max-fs=8160;max-mbps=244800;max-fps=3000\r\n");
+-	g_string_append(a, "a=fmtp:99 apt=107\r\n");
+-	g_string_append(a, "a=rtcp-fb:107 goog-remb\r\n");
+-	g_string_append(a, "a=rtcp-fb:107 transport-cc\r\n");
+-	g_string_append(a, "a=rtcp-fb:107 nack\r\n");
+-	g_string_append(a, "a=rtcp-fb:107 nack pli\r\n");
+-	g_string_append(a, "a=mid:video_1\r\n");
+-	{
+-		const char *vdir = media_video_answer(mp);   /* see this function's header comment */
+-		g_string_append_printf(a, "a=%s\r\n", vdir);
+-		if (mp->our_vssrc && teams_video_dir_we_send(vdir))
+-			g_string_append_printf(a, "a=x-ssrc-range:%u-%u\r\n", mp->our_vssrc, mp->our_vssrc);
+-	}
+-	g_string_append_printf(a, "a=ice-ufrag:%s\r\n", mp->our_ufrag);
+-	g_string_append_printf(a, "a=ice-pwd:%s\r\n", mp->our_pwd);
+-	g_string_append_printf(a, "a=crypto:4 AEAD_AES_256_GCM inline:%s|2^31\r\n", mp->our_txkey);
+-	g_string_append(a, "a=rtcp-mux\r\n");
+-	g_string_append(a, "a=rtcp-rsize\r\n");
+-	g_string_append(a, "a=label:main-video\r\n");
++	append_video_mline(a, mp, our_port, our_ip ? our_ip : "127.0.0.1", "video_1",
++	                   media_video_answer(mp));   /* see this function's header comment */
+ 	/* A declined m-line is left out of the BUNDLE group above (RFC 8843). */
+ 	if (mp->declined_mlines) g_string_append(a, mp->declined_mlines);
+ 
+@@ -944,11 +952,14 @@ media_send_offer(TeamsMediaProc *mp)
+ 	gchar *offer_q, *legid, *from_id, *from_q, *name_q, *epid_q, *to_q, *loc_q, *lang_q, *pid, *to_pid;
+ 	gchar *our_ip;
+ 	int our_port, i;
++	gboolean video;
+ 	if (mp->answered || !mp->our_ufrag || !mp->our_pwd || !mp->our_txkey) return;
+ 	mp->answered = TRUE;
+ 
+ 	our_ip = our_host_address(mp, &our_port);
+-	sdp = g_string_new("v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nb=CT:4000\r\nt=0 0\r\na=group:BUNDLE 0\r\n");
++	video = mp->camera_wanted && mp->our_vssrc;   /* a video call, and the engine has video */
++	sdp = g_string_new("v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nb=CT:4000\r\nt=0 0\r\n");
++	g_string_append(sdp, video ? "a=group:BUNDLE 0 1\r\n" : "a=group:BUNDLE 0\r\n");
+ 	g_string_append_printf(sdp, "m=audio %d RTP/SAVP 102 9 0 8\r\n", our_port);
+ 	g_string_append_printf(sdp, "c=IN IP4 %s\r\n", our_ip ? our_ip : "0.0.0.0");
+ 	g_string_append(sdp, "a=rtpmap:102 opus/48000/2\r\na=rtpmap:9 G722/8000\r\na=rtpmap:0 PCMU/8000\r\na=rtpmap:8 PCMA/8000\r\n");
+@@ -961,6 +972,9 @@ media_send_offer(TeamsMediaProc *mp)
+ 		for (i = 0; cl[i]; i++) if (cl[i][0] && strstr(cl[i], " UDP ")) g_string_append_printf(sdp, "a=%s\r\n", cl[i]);
+ 		g_strfreev(cl); }
+ 	g_string_append(sdp, "a=ice-options:trickle\r\n");
++	if (video)
++		append_video_mline(sdp, mp, our_port, our_ip ? our_ip : "0.0.0.0", "1", "sendrecv");
++	teams_call_log("video: offering %s", video ? "sendrecv" : "no video");
+ 	g_free(our_ip);
+ 
+ 	offer_q = teams_call_json_quote(sdp->str);
+@@ -1013,7 +1027,9 @@ media_send_offer(TeamsMediaProc *mp)
+ 		"\"groupContext\":null,\"groupChat\":null,\"meetingInfo\":null,\"meetingData\":null,"
+ 		"\"endpointState\":{\"endpointStateSequenceNumber\":2,\"endpointProperties\":"
+ 		"{\"additionalEndpointProperties\":{\"infoShownInReportMode\":\"FullInformation\"}}},");
+-	g_string_append(body, "\"callInvitation\":{\"callModalities\":[\"Audio\"],\"replaces\":null,"
++	g_string_append_printf(body, "\"callInvitation\":{\"callModalities\":%s,\"replaces\":null,",
++		video ? "[\"Audio\",\"Video\"]" : "[\"Audio\"]");
++	g_string_append(body,
+ 		"\"transferor\":null,\"clientTransferContext\":null,\"customContext\":null,\"links\":{");
+ 	AGL("call", "progress"); AGL("call", "mediaAnswer"); AGL("call", "acceptance");
+ 	AGL("call", "redirection"); AGL("call", "end");
+@@ -1097,6 +1113,17 @@ media_send_stun(TeamsMediaProc *mp)
+  * whether it took the answer), the media-controller links of its accept, and the offer's mediaLegId
+  * and our clientLocation with the SDP. Ours had the SDP only; no mediaAcknowledgement ever came and
+  * the same offer was pushed again and again. g_free() it. */
++/* The modalities our acceptance and answers name: video too when the answer SDP just built sends
++ * our video, so the two agree (declaring "Video" with an SDP that did not was answered 408, see
++ * teams_calling_post_accept). A voice call stays ["Audio"], as the web client sends it. */
++static const char *
++call_modalities(TeamsCall *call)
++{
++	TeamsMediaProc *mp = g_mproc;
++	return mp && mp->call == call && mp->our_vssrc && teams_video_dir_we_send(mp->video_answer)
++	       ? "[\"Audio\",\"Video\"]" : "[\"Audio\"]";
++}
++
+ static gchar *
+ reneg_answer_body(TeamsCall *call, const gchar *sdp, const gchar *leg_id)
+ {
+@@ -1112,13 +1139,13 @@ reneg_answer_body(TeamsCall *call, const gchar *sdp, const gchar *leg_id)
+ 	gchar *cc_ctlvid = callagent_path(call, agent, "call", "controlVideoStreaming");
+ 	gchar *cc_csrc = callagent_path(call, agent, "call", "csrcInfo");
+ 	gchar *body = g_strdup_printf(
+-	    "{\"mediaAnswer\":{\"callModalities\":[\"Audio\"],"
++	    "{\"mediaAnswer\":{\"callModalities\":%s,"
+ 	      "\"sender\":{\"id\":%s,\"displayName\":%s,\"endpointId\":%s,\"participantId\":%s,\"languageId\":%s},"
+ 	      "\"links\":{\"mediaAcknowledgement\":\"%s\"},"
+ 	      "\"clientContentForMediaController\":{\"controlVideoStreaming\":\"%s\",\"csrcInfo\":\"%s\"},"
+ 	      "\"mediaContent\":{\"blob\":%s,\"contentType\":\"application/sdp-ngc-1.0\","
+ 	        "\"clientLocation\":%s%s%s}}}",
+-	    from_q, name_q, epid_q, pid_q, lang_q, l_ack, cc_ctlvid, cc_csrc, blob_q, loc_q,
++	    call_modalities(call), from_q, name_q, epid_q, pid_q, lang_q, l_ack, cc_ctlvid, cc_csrc, blob_q, loc_q,
+ 	    leg_id ? ",\"mediaLegId\":" : "", leg_id ? leg_q : "");
+ 	g_free(from_id); g_free(from_q); g_free(name_q); g_free(epid_q); g_free(pid_q);
+ 	g_free(lang); g_free(lang_q); g_free(loc); g_free(loc_q); g_free(blob_q); g_free(leg_q);
+@@ -1365,8 +1392,8 @@ teams_media_stop(void)
+ 
+ /* Step 2: POST the accept (with our SDP answer) to the acceptance link parsed from the attach
+  * response. Body = callAcceptance{acceptedBy, acceptedCallModalities, caps, mediaContent{blob,...}}.
+- * Calls are voice only, so acceptedCallModalities is ["Audio"]; that has been accepted live with
+- * the answer's sendrecv video m-line. (Declaring "Video" while the SDP said otherwise was answered
++ * acceptedCallModalities is ["Audio"] unless our answer sends video (call_modalities); ["Audio"]
++ * has been accepted live with the answer's sendrecv video m-line. (Declaring "Video" while the SDP said otherwise was answered
+  * with 408 "Call Controller timed out while waiting for acknowledgement".) */
+ static void
+ teams_calling_post_accept(TeamsCall *call, const gchar *acceptance_url)
+@@ -1400,7 +1427,7 @@ teams_calling_post_accept(TeamsCall *call, const gchar *acceptance_url)
+ 		"{\"callAcceptance\":{"
+ 		  "\"acceptedBy\":{\"id\":%s,\"displayName\":%s,\"endpointId\":%s,"
+ 		    "\"participantId\":%s,\"languageId\":%s},"
+-		  "\"acceptedCallModalities\":[\"Audio\"],"
++		  "\"acceptedCallModalities\":%s,"
+ 		  "\"capabilities\":null,\"endpointCapabilities\":73463,\"clientEndpointCapabilities\":42876960,"
+ 		  "\"links\":{\"mediaRenegotiation\":\"%s\",\"transfer\":\"%s\",\"replacement\":\"%s\","
+ 		    "\"balanceUpdate\":\"%s\",\"retargetCompletion\":\"%s\",\"controlVideoStreaming\":\"%s\","
+@@ -1412,7 +1439,7 @@ teams_calling_post_accept(TeamsCall *call, const gchar *acceptance_url)
+ 		    "\"publicApiCall\":false},"
+ 		  "\"callKeepAliveInterval\":null,"
+ 		  "\"applicationType\":\"TFL\"}}",
+-		from_q, name_q, epid_q, pid_q, lang_q,
++		from_q, name_q, epid_q, pid_q, lang_q, call_modalities(call),
+ 		l_reneg, l_xfer, l_repl, l_bal, l_retgt, l_ctlvid, l_updmd, cc_ctlvid, cc_csrc,
+ 		blob_q, loc_q, legid);
+ 	teams_call_log("accept -> POST %d-byte body to acceptance link", (int) strlen(body));
+@@ -1847,6 +1874,16 @@ teams_calling_handle_media_answer(TeamsAccount *sa, JsonObject *body_obj)
+ 	g_free(ruf); g_free(rpw); g_free(rxkey);
+ 	call->state = TEAMS_CALL_ACTIVE;
+ 	push_state(call, NULL);
++	if (mp->camera_wanted && mp->our_vssrc) {
++		/* Our offer had video: the answer says what each side sends, and its fmtp how much. */
++		const char *peer = teams_sdp_video_direction(blob);
++		mp->video_offer = NULL;
++		mp->video_answer = teams_video_our_direction(peer);
++		teams_video_send_params(blob, &mp->vsend_w, &mp->vsend_h, &mp->vsend_kbps);
++		teams_call_log("video: answer %s, so we %s", peer ? peer : "none", mp->video_answer);
++		video_event(mp, teams_video_dir_peer_sends(peer) ? "OFFERED 1" : "OFFERED 0");
++		media_video_apply(mp);
++	}
+ }
+ 
+ /* Peer pushed a mid-call renegotiation offer, delivered via the mediaRenegotiation link we
+@@ -2110,7 +2147,7 @@ teams_calling_hangup(TeamsAccount *sa)
+ }
+ 
+ gboolean
+-teams_calling_dial(TeamsAccount *sa, const gchar *peer_mri)
++teams_calling_dial(TeamsAccount *sa, const gchar *peer_mri, gboolean video)
+ {
+ 	/* Outgoing (caller): spawn teams_media --caller to gather our ICE + generate the offer's SRTP
+ 	 * key, then media_send_offer() builds the SDP offer and POSTs the cpconv create request (which
+@@ -2130,6 +2167,7 @@ teams_calling_dial(TeamsAccount *sa, const gchar *peer_mri)
+ 	set_current(sa, call);
+ 
+ 	mp = media_spawn(call, TRUE);
++	if (mp) mp->camera_wanted = video;   /* the offer carries video; the answer decides the camera */
+ 	if (mp) media_send_stun(mp);
+ 	/* CALLER START: no rx key (we produce the offer). pt=102 for opus. */
+ 	if (!mp || !media_send(mp, "START 102\n")) {
+diff --git a/teams_calling.h b/teams_calling.h
+index 83638ec..8171dbd 100644
+--- a/teams_calling.h
++++ b/teams_calling.h
+@@ -96,7 +96,8 @@ gboolean teams_calling_set_camera(TeamsAccount *sa, gboolean on);
+ gboolean teams_calling_answer(TeamsAccount *sa);
+ gboolean teams_calling_reject(TeamsAccount *sa);
+ gboolean teams_calling_hangup(TeamsAccount *sa);
+-gboolean teams_calling_dial(TeamsAccount *sa, const gchar *peer_mri);
++/* video: offer video too and send our camera when the far side's answer lets us. */
++gboolean teams_calling_dial(TeamsAccount *sa, const gchar *peer_mri, gboolean video);
+ 
+ /* The account is going away (teams_close): end its call, if any, locally and stop the media
+  * engine, so nothing is left pointing at the freed account. */
+diff --git a/tests/test_call_video.c b/tests/test_call_video.c
+index f298f0d..227d68b 100644
+--- a/tests/test_call_video.c
++++ b/tests/test_call_video.c
+@@ -166,6 +166,13 @@ static void test_answer_direction(void)
+ 	CHECK(!teams_video_dir_we_send("recvonly") && !teams_video_dir_we_send("inactive") && !teams_video_dir_we_send(NULL));
+ 	CHECK(teams_video_dir_peer_sends("sendrecv") && teams_video_dir_peer_sends("sendonly"));
+ 	CHECK(!teams_video_dir_peer_sends("recvonly") && !teams_video_dir_peer_sends("inactive") && !teams_video_dir_peer_sends(NULL));
++
++	/* our sendrecv offer answered: the mirror of the answer */
++	CHECK(!strcmp(teams_video_our_direction("sendrecv"), "sendrecv"));
++	CHECK(!strcmp(teams_video_our_direction("recvonly"), "sendonly"));
++	CHECK(!strcmp(teams_video_our_direction("sendonly"), "recvonly"));
++	CHECK(!strcmp(teams_video_our_direction("inactive"), "inactive"));
++	CHECK(!strcmp(teams_video_our_direction(NULL), "inactive"));
+ }
+ 
+ static void test_send_params(void)
+-- 
+2.53.0
+

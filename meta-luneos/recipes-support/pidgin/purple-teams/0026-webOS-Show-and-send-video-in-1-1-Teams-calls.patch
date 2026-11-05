@@ -1,0 +1,1117 @@
+From 0e3a091e2a98945a5c1990e3e572793b64c6b837 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 4 Nov 2026 21:34:21 +0100
+Subject: [PATCH] webOS: Show and send video in 1:1 Teams calls
+
+teams_media now receives the far side's H264 into a gst-shm socket and
+sends our camera (luneos-synergy-connectors herrie/teams-video). Wire
+it to the Phone app the way the Signal connector does:
+
+- The engine's video lines (VSHM, VPREVIEW, VTX, PEERVIDEO, VIDEOERR)
+  go to the LS2 bridge, which keeps the call's video state
+  (teams_call_video.c) and adds incomingVideo/outgoingVideo,
+  incomingVideoState and videoURI/videoPreviewURI to callStateQuery.
+  audiod is told "video":true while the call has video.
+- changeMedia: outgoingVideo turns our camera on or off,
+  incomingVideo shows or hides the far side's picture.
+- The m=video answer follows the offer (RFC 3264): recvonly when the
+  far side sends and our camera is off, sendrecv/sendonly with our
+  video SSRC in a=x-ssrc-range when it is on. The offers of a voice
+  call (the Android app's first offer has video a=recvonly, its
+  renegotiations a=inactive) are still answered a=inactive, as the web
+  client does. The engine is told VIDEO 1 once an answer lets us send,
+  with the size and bitrate the offer's a=fmtp:107 max-fs/max-mbps/
+  max-br allow: the Android app's offers allow 176x144 at 208 kbit/s.
+
+Turning the camera on mid-call takes effect with the next offer that
+lets us send: we make no offers of our own in a call, and how the
+Teams clients ask each other for video in a 1:1 call is not known yet
+(no capture of a video call). Calls we place stay voice only.
+
+tests/test_call_video.c covers the state, the engine lines, the JSON
+and the SDP direction rules (GLib only).
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+
+---
+ Makefile                |   2 +-
+ teams_call_luna.c       | 104 +++++++++++--
+ teams_call_video.c      | 316 ++++++++++++++++++++++++++++++++++++++++
+ teams_call_video.h      |  64 ++++++++
+ teams_calling.c         | 120 +++++++++++++--
+ teams_calling.h         |  10 ++
+ tests/test_call_video.c | 216 +++++++++++++++++++++++++++
+ 7 files changed, 811 insertions(+), 21 deletions(-)
+ create mode 100644 teams_call_video.c
+ create mode 100644 teams_call_video.h
+ create mode 100644 tests/test_call_video.c
+
+diff --git a/Makefile b/Makefile
+index 8fdb7d1..3b2c204 100644
+--- a/Makefile
++++ b/Makefile
+@@ -89,7 +89,7 @@ PURPLE_C_FILES := libteams.c $(C_FILES)
+ # TEAMS_MEDIA_BIN=<path of the teams_media engine>. Needs luna-service2.
+ ifdef TEAMS_WEBOS_CALL
+ TEAMS_MEDIA_BIN ?= /usr/libexec/teams_media
+-TEAMS_CALL_FILES = teams_calling.c teams_call_luna.c
++TEAMS_CALL_FILES = teams_calling.c teams_call_luna.c teams_call_video.c
+ TEAMS_CALL_FLAGS = -DTEAMS_WEBOS_CALL -DTEAMS_MEDIA_BIN='"$(TEAMS_MEDIA_BIN)"' `$(PKG_CONFIG) luna-service2 --cflags --libs`
+ endif
+ 
+diff --git a/teams_call_luna.c b/teams_call_luna.c
+index 049bf7a..55e8c22 100644
+--- a/teams_call_luna.c
++++ b/teams_call_luna.c
+@@ -5,6 +5,7 @@
+ 
+ #include "teams_call_luna.h"
+ #include "teams_calling.h"
++#include "teams_call_video.h"
+ 
+ #include <luna-service2/lunaservice.h>
+ #include <glib.h>
+@@ -29,6 +30,11 @@ static gint64   g_cardId   = 0;
+ /* Whether audiod has been told about an active call, so it is told once each way. */
+ static gboolean g_audioOn  = FALSE;
+ 
++/* The call's video as the Phone app sees it (teams_call_video.c), from the engine's video lines. */
++static TeamsCallVideo g_video = { .show_incoming = TRUE };
++
++static void audiod_report_active(void);
++
+ #define SUBKEY "callState"
+ 
+ static void
+@@ -41,8 +47,8 @@ setstr(gchar **slot, const char *v)
+ /* Build the CallSynergizer callStateQuery payload. Fields MUST be flat (address/displayName
+  * directly on each call - CallSynergyContact.create() throws if address is missing) and carry
+  * transport = this mediator's PHONE account templateId ("com.palm.teams") so the Phone app
+- * treats it as the IM call it is, not a cellular number. Mirrors the Telegram mediator; calls
+- * are voice only, so both video flags on the line are false. */
++ * treats it as the IM call it is, not a cellular number. Mirrors the Telegram mediator; the
++ * video fields are the ones the Signal connector sends (teams_call_video.c). */
+ static gchar *
+ build_payload(void)
+ {
+@@ -56,14 +62,24 @@ build_payload(void)
+ 		g_string_append_printf(p, "{\"state\":%s,", state);
+ 		if (g_strcmp0(g_state, "disconnected") == 0)
+ 			g_string_append_printf(p, "\"disconnectDetails\":{\"cause\":%s},", cause);
+-		g_string_append(p, "\"incomingVideo\":false,\"outgoingVideo\":false,");
++		{
++			gchar *vf = teams_call_video_line_fields(&g_video);
++			g_string_append_printf(p, "%s,", vf);
++			g_free(vf);
++		}
+ 		g_string_append_printf(p,
+ 			"\"calls\":[{\"id\":\"teams-%" G_GINT64_FORMAT "\",\"origin\":\"%s\","
+ 			"\"transport\":\"com.palm.teams\",\"address\":%s,\"displayName\":%s}]}",
+ 			g_cardId, g_outgoing ? "outgoing" : "incoming", addr, name);
+ 		g_free(state); g_free(addr); g_free(name); g_free(cause);
+ 	}
+-	g_string_append(p, "]}");
++	g_string_append(p, "]");
++	if (g_state && *g_state) {
++		gchar *pf = teams_call_video_payload_fields(&g_video);
++		g_string_append(p, pf);
++		g_free(pf);
++	}
++	g_string_append(p, "}");
+ 	return g_string_free(p, FALSE);
+ }
+ 
+@@ -113,7 +129,7 @@ cb_dial(LSHandle *sh, LSMessage *msg, void *ctx)
+ 	(void) ctx;
+ 	LSErrorInit(&err);
+ 	addr = get_field(payload, "address");
+-	/* A video request is placed as a voice call: there is no video path. */
++	/* A video request is placed as a voice call: our offer has no video m-line (yet). */
+ 	ok = g_sa && addr && *addr && teams_calling_dial(g_sa, addr);
+ 	teams_call_log("dial %s: %s", addr ? addr : "(null)", ok ? "placed" : "failed");
+ 	LSMessageReply(sh, msg, ok ? "{\"returnValue\":true}" : "{\"returnValue\":false}", &err);
+@@ -144,6 +160,37 @@ cb_disconnect(LSHandle *sh, LSMessage *msg, void *ctx)
+ 	return TRUE;
+ }
+ 
++static void push_payload(void);
++
++/* changeMedia {"outgoingVideo":bool, "incomingVideo":bool}, as the Phone app sends it; each field
++ * optional. outgoingVideo turns our camera on or off (sent once our answer lets us send video);
++ * incomingVideo shows or hides the far side's picture, which keeps arriving. */
++static bool
++cb_change_media(LSHandle *sh, LSMessage *msg, void *ctx)
++{
++	LSError err; int out, in; gboolean ok = TRUE;
++	const char *payload = LSMessageGetPayload(msg);
++	(void) ctx;
++	LSErrorInit(&err);
++	if (!g_sa || !g_state || !*g_state) {
++		LSMessageReply(sh, msg, "{\"returnValue\":false,\"errorText\":\"no Teams call\"}", &err);
++		if (LSErrorIsSet(&err)) LSErrorFree(&err);
++		return TRUE;
++	}
++	out = teams_call_video_json_bool(payload, "outgoingVideo");
++	in = teams_call_video_json_bool(payload, "incomingVideo");
++	if (out >= 0) ok = teams_calling_set_camera(g_sa, out == 1);
++	teams_call_log("changeMedia outgoing %d incoming %d%s", out, in, ok ? "" : " (camera unavailable)");
++	if (in >= 0 && g_video.show_incoming != (in == 1)) {
++		g_video.show_incoming = in == 1;
++		push_payload();
++	}
++	LSMessageReply(sh, msg, ok ? "{\"returnValue\":true}" :
++	               "{\"returnValue\":false,\"errorText\":\"no camera for this call\"}", &err);
++	if (LSErrorIsSet(&err)) LSErrorFree(&err);
++	return TRUE;
++}
++
+ static bool
+ cb_noop(LSHandle *sh, LSMessage *msg, void *ctx)
+ {
+@@ -167,7 +214,7 @@ static LSMethod g_methods[] = {
+ 	{ "extract",         cb_noop,             LUNA_METHOD_FLAGS_NONE },
+ 	{ "dtmf",            cb_noop,             LUNA_METHOD_FLAGS_NONE },
+ 	{ "dtmfEnd",         cb_noop,             LUNA_METHOD_FLAGS_NONE },
+-	{ "changeMedia",     cb_noop,             LUNA_METHOD_FLAGS_NONE },
++	{ "changeMedia",     cb_change_media,     LUNA_METHOD_FLAGS_NONE },
+ 	{ NULL, NULL, LUNA_METHOD_FLAGS_NONE }
+ };
+ 
+@@ -212,8 +259,10 @@ on_call_state(TeamsAccount *sa, const char *state, const char *peerAddress,
+ {
+ 	(void) sa;
+ 	/* Every call starts from idle: the state is cleared as soon as one ends. */
+-	if ((!g_state || !*g_state) && state && *state)
++	if ((!g_state || !*g_state) && state && *state) {
+ 		g_cardId = g_get_real_time();
++		teams_call_video_reset(&g_video);
++	}
+ 	setstr(&g_state, state);
+ 	setstr(&g_peerAddr, peerAddress);
+ 	setstr(&g_peerName, peerName);
+@@ -233,11 +282,36 @@ on_call_state(TeamsAccount *sa, const char *state, const char *peerAddress,
+ 		setstr(&g_peerAddr, NULL);
+ 		setstr(&g_peerName, NULL);
+ 		setstr(&g_cause, NULL);
++		teams_call_video_reset(&g_video);
+ 		if (!g_idlePush)
+ 			g_idlePush = g_timeout_add(ENDED_CALL_HOLD_MS, push_idle, NULL);
+ 	}
+ }
+ 
++/* teams_calling video callback: the engine's video lines and the offers' video direction. */
++static void
++on_call_video(TeamsAccount *sa, const char *line)
++{
++	gboolean was_video = teams_call_video_active(&g_video), changed;
++	(void) sa;
++	if (!line || !*line) {
++		/* The engine stopped: no picture any more, the user's choice to show it stays. */
++		gboolean show = g_video.show_incoming;
++		changed = was_video || g_video.uri || g_video.preview;
++		teams_call_video_reset(&g_video);
++		g_video.show_incoming = show;
++	} else if (g_str_has_prefix(line, "OFFERED ")) {
++		changed = teams_call_video_set_offered(&g_video, !strcmp(line + 8, "1"));
++	} else {
++		changed = teams_call_video_engine_line(&g_video, line, NULL);
++	}
++	if (!changed || !g_state || !*g_state) return;
++	push_payload();
++	/* A voice call that turned into a video call (or back): tell audiod again. */
++	if (g_audioOn && was_video != teams_call_video_active(&g_video))
++		audiod_report_active();
++}
++
+ /* --------------------------------------------------------------- init/shutdown */
+ 
+ gboolean
+@@ -246,6 +320,7 @@ teams_call_luna_init(TeamsAccount *sa)
+ 	LSError err;
+ 	if (sa) g_sa = sa;
+ 	teams_calling_set_state_cb(on_call_state);
++	teams_calling_set_video_cb(on_call_video);
+ 	if (g_sh) return TRUE;   /* already registered */
+ 
+ 	LSErrorInit(&err);
+@@ -291,6 +366,17 @@ audiod_send(const char *uri, const char *payload)
+ 	}
+ }
+ 
++/* The active call, as audiod is told it: "video" says whether the call has video. */
++static void
++audiod_report_active(void)
++{
++	gchar *p = g_strdup_printf("{\"lines\":[{\"state\":\"active\",\"calls\":[{\"id\":\"teams\","
++	                           "\"video\":%s,\"transport\":\"com.palm.teams\"}]}]}",
++	                           teams_call_video_active(&g_video) ? "true" : "false");
++	audiod_send("palm://com.palm.audio/phone/CallStatusUpdate", p);
++	g_free(p);
++}
++
+ /* audiod keeps the active calls per sender; with one, it routes the call devices (the
+  * PulseAudio voipcall sink and webcall source the media engine uses) to the call's output, the
+  * earpiece unless the user picks another. The transport is this connector's own: a
+@@ -302,9 +388,7 @@ teams_call_luna_set_audio(gboolean active)
+ 	g_audioOn = active;
+ 	teams_call_log("call audio %s", active ? "on" : "off");
+ 	if (active)
+-		audiod_send("palm://com.palm.audio/phone/CallStatusUpdate",
+-		            "{\"lines\":[{\"state\":\"active\",\"calls\":[{\"id\":\"teams\",\"video\":false,"
+-		            "\"transport\":\"com.palm.teams\"}]}]}");
++		audiod_report_active();
+ 	else
+ 		audiod_send("palm://com.palm.audio/phone/CallStatusUpdate", "{\"lines\":[]}");
+ }
+diff --git a/teams_call_video.c b/teams_call_video.c
+new file mode 100644
+index 0000000..2d5b77f
+--- /dev/null
++++ b/teams_call_video.c
+@@ -0,0 +1,316 @@
++/* Video in a 1:1 Teams call, as the Phone app sees it (see teams_call_video.h).
++ *
++ * The Phone app (SynergyTransport._applyVideo) reads, per line, incomingVideo, outgoingVideo,
++ * incomingVideoState ("unavailable", "available" or "streaming") and incomingVideoOrientation
++ * (quarter turns counter-clockwise), and from the payload videoURI with its size (the gst-shm
++ * socket its RemoteVideo reads) and the self-view's videoPreviewURI, size, orientation and
++ * mirroring. The preview is only read when there is a videoURI.
++ *
++ * Teams sends no "camera on" message in a 1:1 call that we know of: the far side's camera counts
++ * as on while its video arrives (the engine's PEERVIDEO), and the call as a video call when its
++ * offer has the far side sending on the m=video line. */
++
++#include "teams_call_video.h"
++#include <stdlib.h>
++#include <string.h>
++
++void
++teams_call_video_reset(TeamsCallVideo *v)
++{
++	g_free(v->uri);
++	g_free(v->preview);
++	memset(v, 0, sizeof *v);
++	v->show_incoming = TRUE;
++}
++
++/* Socket paths go into JSON unescaped: only absolute paths without quotes, backslashes or control
++ * characters are taken (the engine sends /tmp/teams-video and /tmp/teams-preview). */
++static gboolean
++path_ok(const char *p)
++{
++	const char *c;
++	if (!p || p[0] != '/' || strlen(p) >= 108)
++		return FALSE;
++	for (c = p; *c; c++)
++		if (*c == '"' || *c == '\\' || (unsigned char) *c < 0x20)
++			return FALSE;
++	return TRUE;
++}
++
++static gboolean
++dims_ok(long w, long h)
++{
++	return w > 0 && w <= 4096 && h > 0 && h <= 4096;
++}
++
++static gboolean
++set_flag(gboolean *slot, gboolean on)
++{
++	on = on != 0;
++	if (*slot == on)
++		return FALSE;
++	*slot = on;
++	return TRUE;
++}
++
++gboolean
++teams_call_video_set_offered(TeamsCallVideo *v, gboolean offered)
++{
++	return set_flag(&v->offered, offered);
++}
++
++/* "<word> <long>..." after the line's keyword: up to max numbers, returns how many were read. */
++static int
++numbers(const char *s, long *out, int max)
++{
++	int n = 0;
++	while (n < max && s && *s) {
++		char *end;
++		long val;
++		while (*s == ' ') s++;
++		if (!*s) break;
++		val = strtol(s, &end, 10);
++		if (end == s || (*end && *end != ' ')) return -1;
++		out[n++] = val;
++		s = end;
++	}
++	return n;
++}
++
++/* "VSHM <path> <w> <h>" / "VPREVIEW <path> <w> <h> <q> <m>": the path, then the numbers. */
++static gboolean
++path_and_numbers(const char *rest, gchar **path, long *out, int want)
++{
++	const char *sp = strchr(rest, ' ');
++	if (!sp || numbers(sp + 1, out, want) != want)
++		return FALSE;
++	*path = g_strndup(rest, (gsize) (sp - rest));
++	return TRUE;
++}
++
++gboolean
++teams_call_video_engine_line(TeamsCallVideo *v, const char *line, gboolean *known)
++{
++	long n[5];
++	gchar *path = NULL;
++	gboolean changed = FALSE;
++
++	if (known) *known = TRUE;
++	if (!line) {
++		if (known) *known = FALSE;
++		return FALSE;
++	}
++	if (g_str_has_prefix(line, "VSHM ")) {
++		if (path_and_numbers(line + 5, &path, n, 2) && path_ok(path) && dims_ok(n[0], n[1]) &&
++		    (g_strcmp0(v->uri, path) || v->width != n[0] || v->height != n[1])) {
++			g_free(v->uri);
++			v->uri = path;
++			path = NULL;
++			v->width = (int) n[0];
++			v->height = (int) n[1];
++			changed = TRUE;
++		}
++	} else if (g_str_has_prefix(line, "VPREVIEW ")) {
++		if (path_and_numbers(line + 9, &path, n, 4) && path_ok(path) && dims_ok(n[0], n[1]) &&
++		    n[2] >= 0 && n[2] <= 3) {
++			g_free(v->preview);
++			v->preview = path;
++			path = NULL;
++			v->preview_width = (int) n[0];
++			v->preview_height = (int) n[1];
++			v->preview_turns = (int) n[2];
++			v->preview_mirrored = n[3] != 0;
++			changed = TRUE;
++		}
++	} else if (g_str_has_prefix(line, "VTX ")) {
++		if (numbers(line + 4, n, 1) == 1)
++			changed = set_flag(&v->sending, n[0] != 0);
++	} else if (g_str_has_prefix(line, "PEERVIDEO ")) {
++		if (numbers(line + 10, n, 1) == 1)
++			changed = set_flag(&v->peer_camera, n[0] != 0);
++	} else if (!g_str_has_prefix(line, "VIDEOERR ")) {
++		if (known) *known = FALSE;
++	}
++	g_free(path);
++	return changed;
++}
++
++gboolean
++teams_call_video_active(const TeamsCallVideo *v)
++{
++	return v->offered || v->peer_camera || v->sending;
++}
++
++static const char *
++incoming_state(const TeamsCallVideo *v)
++{
++	if (v->show_incoming && v->peer_camera && v->uri)
++		return "streaming";
++	if (v->offered || v->peer_camera)
++		return "available";
++	return "unavailable";
++}
++
++gchar *
++teams_call_video_line_fields(const TeamsCallVideo *v)
++{
++	return g_strdup_printf("\"incomingVideo\":%s,\"outgoingVideo\":%s,"
++	                       "\"incomingVideoState\":\"%s\",\"incomingVideoOrientation\":0",
++	                       v->show_incoming && v->peer_camera ? "true" : "false",
++	                       v->sending ? "true" : "false", incoming_state(v));
++}
++
++gchar *
++teams_call_video_payload_fields(const TeamsCallVideo *v)
++{
++	GString *s;
++	if (!v->uri || !v->show_incoming)
++		return g_strdup("");
++	s = g_string_new(NULL);
++	g_string_append_printf(s, ",\"videoURI\":\"%s\",\"videoWidth\":%d,\"videoHeight\":%d",
++	                       v->uri, v->width, v->height);
++	if (v->preview && v->sending)
++		g_string_append_printf(s, ",\"videoPreviewURI\":\"%s\",\"videoPreviewWidth\":%d,"
++		                          "\"videoPreviewHeight\":%d,\"videoPreviewOrientation\":%d,"
++		                          "\"videoPreviewMirrored\":%s",
++		                       v->preview, v->preview_width, v->preview_height, v->preview_turns,
++		                       v->preview_mirrored ? "true" : "false");
++	return g_string_free(s, FALSE);
++}
++
++int
++teams_call_video_json_bool(const char *payload, const char *key)
++{
++	gchar *needle;
++	const char *k, *c;
++	gsize nl;
++	if (!payload || !key)
++		return -1;
++	needle = g_strdup_printf("\"%s\"", key);
++	k = strstr(payload, needle);
++	nl = strlen(needle);
++	g_free(needle);
++	if (!k)
++		return -1;
++	c = k + nl;
++	while (*c == ' ' || *c == '\t' || *c == '\n' || *c == '\r') c++;
++	if (*c != ':')
++		return -1;
++	c++;
++	while (*c == ' ' || *c == '\t' || *c == '\n' || *c == '\r') c++;
++	if (!strncmp(c, "true", 4))
++		return 1;
++	if (!strncmp(c, "false", 5))
++		return 0;
++	return -1;
++}
++
++const char *
++teams_sdp_video_direction(const char *sdp)
++{
++	gchar **lines;
++	const char *dir = NULL;
++	gboolean in_video = FALSE, found = FALSE;
++	int i;
++	if (!sdp)
++		return NULL;
++	lines = g_strsplit(sdp, "\n", -1);
++	for (i = 0; lines[i]; i++) {
++		gchar *l = g_strstrip(lines[i]);
++		if (g_str_has_prefix(l, "m=")) {
++			if (found)
++				break;                      /* the first video section only */
++			in_video = g_str_has_prefix(l, "m=video ");
++			if (in_video) {
++				found = TRUE;
++				if (g_str_has_prefix(l, "m=video 0 "))
++					break;                  /* declined: dir stays NULL */
++				dir = "sendrecv";
++			}
++		} else if (in_video) {
++			if (!strcmp(l, "a=sendrecv")) dir = "sendrecv";
++			else if (!strcmp(l, "a=sendonly")) dir = "sendonly";
++			else if (!strcmp(l, "a=recvonly")) dir = "recvonly";
++			else if (!strcmp(l, "a=inactive")) dir = "inactive";
++		}
++	}
++	g_strfreev(lines);
++	return dir;
++}
++
++const char *
++teams_video_answer_direction(const char *offer_dir, gboolean engine_video, gboolean camera)
++{
++	gboolean peer_sends, peer_receives;
++	if (!offer_dir || !engine_video)
++		return "inactive";
++	peer_sends = !strcmp(offer_dir, "sendrecv") || !strcmp(offer_dir, "sendonly");
++	peer_receives = !strcmp(offer_dir, "sendrecv") || !strcmp(offer_dir, "recvonly");
++	camera = camera && peer_receives;
++	if (peer_sends && camera) return "sendrecv";
++	if (peer_sends) return "recvonly";
++	if (camera) return "sendonly";
++	return "inactive";
++}
++
++gboolean
++teams_video_dir_we_send(const char *answer_dir)
++{
++	return answer_dir && (!strcmp(answer_dir, "sendrecv") || !strcmp(answer_dir, "sendonly"));
++}
++
++gboolean
++teams_video_dir_peer_sends(const char *offer_dir)
++{
++	return offer_dir && (!strcmp(offer_dir, "sendrecv") || !strcmp(offer_dir, "sendonly"));
++}
++
++/* A numeric "name=value" parameter of an fmtp line, or -1. */
++static long
++fmtp_param(const char *fmtp, const char *name)
++{
++	gsize nl = strlen(name);
++	const char *p = fmtp;
++	while (p && *p) {
++		while (*p == ' ' || *p == ';') p++;
++		if (!g_ascii_strncasecmp(p, name, nl) && p[nl] == '=') {
++			char *end;
++			long v = strtol(p + nl + 1, &end, 10);
++			return end != p + nl + 1 && v >= 0 ? v : -1;
++		}
++		p = strchr(p, ';');
++	}
++	return -1;
++}
++
++void
++teams_video_send_params(const char *sdp, int *w, int *h, int *kbps)
++{
++	static const int sizes[][2] = { { 640, 480 }, { 352, 288 }, { 320, 240 }, { 176, 144 } };
++	long max_fs = -1, max_mbps = -1, max_br = -1;
++	gchar **lines = sdp ? g_strsplit(sdp, "\n", -1) : NULL;
++	gboolean in_video = FALSE, seen_video = FALSE;
++	gsize i;
++	for (i = 0; lines && lines[i]; i++) {
++		gchar *l = g_strstrip(lines[i]);
++		if (g_str_has_prefix(l, "m=")) {
++			if (seen_video) break;
++			in_video = seen_video = g_str_has_prefix(l, "m=video ");
++		} else if (in_video && g_str_has_prefix(l, "a=fmtp:107 ")) {
++			max_fs = fmtp_param(l + 11, "max-fs");
++			max_mbps = fmtp_param(l + 11, "max-mbps");
++			max_br = fmtp_param(l + 11, "max-br");
++		}
++	}
++	g_strfreev(lines);
++	*w = 176; *h = 144;
++	for (i = 0; i < G_N_ELEMENTS(sizes); i++) {
++		long fs = (long) ((sizes[i][0] + 15) / 16) * ((sizes[i][1] + 15) / 16);
++		if ((max_fs < 0 || fs <= max_fs) && (max_mbps < 0 || fs * 30 <= max_mbps)) {
++			*w = sizes[i][0]; *h = sizes[i][1];
++			break;
++		}
++	}
++	*kbps = 800;
++	if (max_br >= 32 && max_br < *kbps) *kbps = (int) max_br;
++}
+diff --git a/teams_call_video.h b/teams_call_video.h
+new file mode 100644
+index 0000000..0f5dee1
+--- /dev/null
++++ b/teams_call_video.h
+@@ -0,0 +1,64 @@
++/* Video in a 1:1 Teams call, as the Phone app sees it: the state teams_call_luna.c keeps from the
++ * teams_media engine's video lines and the JSON fields it adds to callStateQuery, and the SDP
++ * direction rules teams_calling.c answers with. GLib only, so tests/test_call_video.c runs it on
++ * its own. (The Phone app side is the one the Signal connector's call_video.c feeds.) */
++#ifndef TEAMS_CALL_VIDEO_H
++#define TEAMS_CALL_VIDEO_H
++
++#include <glib.h>
++
++typedef struct {
++	gboolean offered;        /* the far side offers to send video (its SDP's m=video) */
++	gboolean show_incoming;  /* the user wants the far side's picture (changeMedia incomingVideo) */
++	gboolean peer_camera;    /* the far side's video is arriving (engine: PEERVIDEO 1) */
++	gboolean sending;        /* our camera is sending (engine: VTX 1) */
++	gchar   *uri;            /* the far side's picture: gst-shm socket path, or NULL */
++	int      width, height;
++	gchar   *preview;        /* our camera's self-view socket, or NULL */
++	int      preview_width, preview_height, preview_turns;
++	gboolean preview_mirrored;
++} TeamsCallVideo;
++
++/* Back to a voice call with nothing known (frees the strings). */
++void teams_call_video_reset(TeamsCallVideo *v);
++
++/* Mark the call as one the far side offers video in (or not). Returns TRUE if that changed. */
++gboolean teams_call_video_set_offered(TeamsCallVideo *v, gboolean offered);
++
++/* Apply one of the engine's video lines (VSHM, VPREVIEW, VTX, PEERVIDEO, VIDEOERR). Returns TRUE
++ * if what the Phone app sees changed; *known (if not NULL) says whether it was a video line. */
++gboolean teams_call_video_engine_line(TeamsCallVideo *v, const char *line, gboolean *known);
++
++/* True if the call is a video call in either direction (for audiod's "video"). */
++gboolean teams_call_video_active(const TeamsCallVideo *v);
++
++/* The line's fields, without braces: "incomingVideo":..,"outgoingVideo":..,
++ * "incomingVideoState":"..","incomingVideoOrientation":0 */
++gchar *teams_call_video_line_fields(const TeamsCallVideo *v);
++
++/* The payload's fields, each preceded by a comma, or "" when there is no picture to show. */
++gchar *teams_call_video_payload_fields(const TeamsCallVideo *v);
++
++/* A boolean field of a flat JSON object: 1 true, 0 false, -1 absent or not a boolean. */
++int teams_call_video_json_bool(const char *payload, const char *key);
++
++/* The direction of an SDP's first m=video section ("sendrecv", "sendonly", "recvonly" or
++ * "inactive"; sendrecv when it names none), or NULL if it has none or that m-line is declined
++ * (port 0). */
++const char *teams_sdp_video_direction(const char *sdp);
++
++/* Our answer's direction for the video m-line (RFC 3264 6.1), from the offer's direction, whether
++ * the engine has video at all and whether our camera is to send. */
++const char *teams_video_answer_direction(const char *offer_dir, gboolean engine_video, gboolean camera);
++
++/* The size and bitrate our camera may send on H264 PT 107: the largest standard camcorder size
++ * (640x480, 352x288, 320x240, 176x144, at the camera's 30 fps) within the first m=video
++ * section's a=fmtp:107 max-fs and max-mbps, and 800 kbit/s or its max-br if lower. The Teams
++ * Android app offers max-fs=240;max-mbps=3600;max-br=208: 176x144 at 208 kbit/s. */
++void teams_video_send_params(const char *sdp, int *w, int *h, int *kbps);
++
++/* Whether a direction of ours lets us send / lets the far side send to us. */
++gboolean teams_video_dir_we_send(const char *answer_dir);
++gboolean teams_video_dir_peer_sends(const char *offer_dir);
++
++#endif
+diff --git a/teams_calling.c b/teams_calling.c
+index 63078a5..6f2ea2a 100644
+--- a/teams_calling.c
++++ b/teams_calling.c
+@@ -14,6 +14,7 @@
+  */
+ 
+ #include "teams_calling.h"
++#include "teams_call_video.h"
+ #include "teams_connection.h"
+ #include "teams_util.h"
+ 
+@@ -89,6 +90,7 @@ oget(JsonObject *o, const gchar *k)
+ /* --------------------------------------------------------- state / media hooks */
+ 
+ static TeamsCallStateCb g_state_cb = NULL;
++static TeamsCallVideoCb g_video_cb = NULL;
+ 
+ void
+ teams_calling_set_state_cb(TeamsCallStateCb cb)
+@@ -96,6 +98,12 @@ teams_calling_set_state_cb(TeamsCallStateCb cb)
+ 	g_state_cb = cb;
+ }
+ 
++void
++teams_calling_set_video_cb(TeamsCallVideoCb cb)
++{
++	g_video_cb = cb;
++}
++
+ /* ---- media engine integration (teams_media, out-of-process) -----------------------------
+  * On answer we: parse the offer SDP (peer ice-ufrag/pwd, a=crypto GCM key, opus PT, candidates),
+  * spawn `teams_media --answer`, feed it START + the peer candidates, read back OUR ice creds +
+@@ -120,6 +128,12 @@ typedef struct {
+ 	guint        out_watch;
+ 	gchar       *our_ufrag, *our_pwd, *our_txkey;
+ 	guint32      our_ssrc;     /* the engine's audio RTP SSRC (its SSRC line); 0 = not known */
++	guint32      our_vssrc;    /* its video SSRC (VSSRC line); 0 = the engine has no video */
++	const char  *video_offer;  /* the last offer's m=video direction (teams_sdp_video_direction) */
++	const char  *video_answer; /* our last answer's m=video direction */
++	gboolean     camera_wanted;  /* the user has our camera on (teams_calling_set_camera) */
++	gboolean     camera_sent;    /* the engine has been told VIDEO 1 */
++	int          vsend_w, vsend_h, vsend_kbps;  /* what the last offer lets us send */
+ 	GString     *our_cands;    /* accumulated "candidate:..." lines, one per line */
+ 	gboolean     answered;
+ 	guint        answer_timer;
+@@ -691,17 +705,83 @@ sdp_declined_mlines(const gchar *offer)
+ 	return g_string_free(out, FALSE);
+ }
+ 
++/* ---- video ------------------------------------------------------------------------------
++ * The engine always receives video when it has the elements for it (it says so with VSSRC), and
++ * sends our camera after VIDEO 1. The m=video answer follows the offer (RFC 3264): we receive
++ * when the far side sends, and send when our camera is on and the far side receives. A voice-only
++ * offer - the Android app's first offer has video a=recvonly, its renegotiations a=inactive - is
++ * answered a=inactive as before (see build_answer_sdp). Turning our camera on mid-call takes
++ * effect with the next answer that lets us send: we do not make offers of our own in a call. */
++
++static void
++video_event(TeamsMediaProc *mp, const char *line)
++{
++	if (g_video_cb && mp->call) g_video_cb(mp->call->sa, line);
++}
++
++/* An offer (initial or renegotiation) arrived: remember its video direction for the answer. */
++static void
++media_video_offer(TeamsMediaProc *mp, const char *sdp)
++{
++	mp->video_offer = teams_sdp_video_direction(sdp);
++	teams_video_send_params(sdp, &mp->vsend_w, &mp->vsend_h, &mp->vsend_kbps);
++	teams_call_log("video: offer %s, engine %s, camera %s", mp->video_offer ? mp->video_offer : "none",
++	               mp->our_vssrc ? "has video" : "voice only", mp->camera_wanted ? "on" : "off");
++	video_event(mp, teams_video_dir_peer_sends(mp->video_offer) ? "OFFERED 1" : "OFFERED 0");
++}
++
++/* Our m=video direction for the answer being built. */
++static const char *
++media_video_answer(TeamsMediaProc *mp)
++{
++	mp->video_answer = teams_video_answer_direction(mp->video_offer, mp->our_vssrc != 0, mp->camera_wanted);
++	return mp->video_answer;
++}
++
++/* After an answer went out: the engine's camera follows what it lets us do. */
++static void
++media_video_apply(TeamsMediaProc *mp)
++{
++	gboolean send = mp->camera_wanted && teams_video_dir_we_send(mp->video_answer);
++	if (send == mp->camera_sent) return;
++	if (send ? media_send(mp, "VIDEO 1 %d %d %d\n", mp->vsend_w, mp->vsend_h, mp->vsend_kbps)
++	         : media_send(mp, "VIDEO 0\n")) {
++		mp->camera_sent = send;
++		if (send)
++			teams_call_log("video: camera sending %dx%d at %d kbit/s", mp->vsend_w, mp->vsend_h, mp->vsend_kbps);
++		else
++			teams_call_log("video: camera stopped");
++	}
++}
++
++gboolean
++teams_calling_set_camera(TeamsAccount *sa, gboolean on)
++{
++	TeamsMediaProc *mp = g_mproc;
++	if (!mp || !mp->call || mp->call->sa != sa) return FALSE;
++	mp->camera_wanted = on;
++	if (on && !mp->our_vssrc) {
++		video_event(mp, "VIDEOERR unavailable");
++		return FALSE;
++	}
++	if (on && mp->video_answer && !teams_video_dir_we_send(mp->video_answer))
++		teams_call_log("video: camera on, waiting for an offer that lets us send (answered %s)", mp->video_answer);
++	if (mp->video_answer) media_video_apply(mp);   /* no answer yet: the first one carries it */
++	return TRUE;
++}
++
+ /* Build the SDP answer from our media params + the offer (SDES-GCM path; the offer supports both
+  * SDES a=crypto and DTLS, and our engine keys via SDES). Shape mirrors the web client's accepted
+  * answer: BUNDLE + mid:audio_0/video_1 + rtcp-mux + label, a=crypto instead of DTLS fingerprint.
+- * Calls are voice only, but the video m-line still has to be there: the offer/answer m-line
+- * mirroring requirement means leaving it out makes the peer reject the whole answer
+- * (FinalAnswerError 406/4122). Its direction is a=inactive: CAPTURED (teams.live.com answering a
+- * call from the Teams Android app, 2026-11-04) the web client's accept and every renegotiation
+- * answer have video a=inactive, and with a=sendrecv the Android app shows that we are trying to
+- * send video. (An rtcstats_dump of 2026-08-01 had a=sendrecv in a real client's answers.) We send
+- * no video RTP. Our audio SSRC is declared with a=x-ssrc-range, as the web client declares the
+- * SSRC of each stream it sends (its data stream in that capture).
++ * The video m-line always has to be there: the offer/answer m-line mirroring requirement means
++ * leaving it out makes the peer reject the whole answer (FinalAnswerError 406/4122). Its direction
++ * comes from media_video_answer() (above): a=inactive for a voice call. CAPTURED (teams.live.com
++ * answering a call from the Teams Android app, 2026-11-04) the web client's accept and every
++ * renegotiation answer have video a=inactive for that call's recvonly/inactive offers, and with
++ * a=sendrecv the Android app shows that we are trying to send video. (An rtcstats_dump of
++ * 2026-08-01 had a=sendrecv in a real client's answers.) Our audio SSRC, and our video SSRC when
++ * we send video, are declared with a=x-ssrc-range, as the web client declares the SSRC of each
++ * stream it sends (its data stream in that capture).
+  * Codec/fmtp/rtcp-fb values are the real ones from a captured live Teams video call (H264/90000
+  * PT 107, rtx PT 99, packetization-mode=1, profile-level-id=42e01f). Shared by the initial answer
+  * (media_send_answer, below) and any later mid-call renegotiation
+@@ -759,7 +839,12 @@ build_answer_sdp(TeamsMediaProc *mp)
+ 	g_string_append(a, "a=rtcp-fb:107 nack\r\n");
+ 	g_string_append(a, "a=rtcp-fb:107 nack pli\r\n");
+ 	g_string_append(a, "a=mid:video_1\r\n");
+-	g_string_append(a, "a=inactive\r\n");   /* see this function's header comment */
++	{
++		const char *vdir = media_video_answer(mp);   /* see this function's header comment */
++		g_string_append_printf(a, "a=%s\r\n", vdir);
++		if (mp->our_vssrc && teams_video_dir_we_send(vdir))
++			g_string_append_printf(a, "a=x-ssrc-range:%u-%u\r\n", mp->our_vssrc, mp->our_vssrc);
++	}
+ 	g_string_append_printf(a, "a=ice-ufrag:%s\r\n", mp->our_ufrag);
+ 	g_string_append_printf(a, "a=ice-pwd:%s\r\n", mp->our_pwd);
+ 	g_string_append_printf(a, "a=crypto:4 AEAD_AES_256_GCM inline:%s|2^31\r\n", mp->our_txkey);
+@@ -786,6 +871,7 @@ media_send_answer(TeamsMediaProc *mp)
+ 
+ 	g_free(mp->declined_mlines);
+ 	mp->declined_mlines = sdp_declined_mlines(call->sdp_offer);
++	media_video_offer(mp, call->sdp_offer);
+ 	a = build_answer_sdp(mp);
+ 	g_free(call->our_answer_sdp);
+ 	call->our_answer_sdp = g_string_free(a, FALSE);
+@@ -793,6 +879,7 @@ media_send_answer(TeamsMediaProc *mp)
+ 	teams_call_log("ANSWER SDP built (%d bytes) - starting attach->accept handshake",
+ 	               (int) strlen(call->our_answer_sdp));
+ 	teams_calling_post_answer(call);
++	media_video_apply(mp);
+ }
+ 
+ /* The cpconv response (201) is the new conversation; CAPTURED (teams.live.com-outgoing.har, 2026-07-29):
+@@ -1050,9 +1137,11 @@ send_reneg_answer(TeamsMediaProc *mp, const gchar *answer_link)
+ 	teams_call_log("renegotiate: POSTing updated answer (%d bytes) to %s", (int) strlen(body), answer_link);
+ 	flightproxy_post_cb(call->sa, answer_link, body, flightproxy_resp_cb, NULL);
+ 	g_free(body); g_string_free(a, TRUE);
++	media_video_apply(mp);
+ }
+ 
+-/* read UFRAG/PWD/TXKEY/SSRC/CAND/READY/ANSWERED/RESTARTED/AUDIOD/ERR from teams_media's stdout */
++/* read UFRAG/PWD/TXKEY/SSRC/VSSRC/CAND/READY/ANSWERED/RESTARTED/AUDIOD/ERR and the video lines
++ * (VSHM/VPREVIEW/VTX/PEERVIDEO/VIDEOERR, passed to the bridge) from teams_media's stdout */
+ static gboolean
+ media_on_output(GIOChannel *ch, GIOCondition cond, gpointer user)
+ {
+@@ -1069,6 +1158,15 @@ media_on_output(GIOChannel *ch, GIOCondition cond, gpointer user)
+ 			explicit_bzero(line, strlen(line));
+ 		}
+ 		else if (g_str_has_prefix(line, "SSRC ")) mp->our_ssrc = (guint32) g_ascii_strtoull(line + 5, NULL, 10);
++		else if (g_str_has_prefix(line, "VSSRC ")) mp->our_vssrc = (guint32) g_ascii_strtoull(line + 6, NULL, 10);
++		else if (g_str_has_prefix(line, "VSHM ") || g_str_has_prefix(line, "VPREVIEW ") ||
++		         g_str_has_prefix(line, "VTX ") || g_str_has_prefix(line, "PEERVIDEO ") ||
++		         g_str_has_prefix(line, "VIDEOERR ")) {
++			teams_call_log("media %s", line);
++			if (g_str_has_prefix(line, "VIDEOERR tx")) mp->camera_sent = FALSE;   /* the engine stopped it */
++			if (!strcmp(line, "VIDEOERR build")) mp->our_vssrc = 0;        /* the call stays voice only */
++			video_event(mp, line);
++		}
+ 		else if (g_str_has_prefix(line, "CAND ")) g_string_append_printf(mp->our_cands, "%s\n", line + 5);
+ 		else if (!strcmp(line, "RESTARTED")) {
+ 			/* The RESTART's fresh UFRAG/PWD lines are always emitted BEFORE this marker (see
+@@ -1246,6 +1344,7 @@ teams_media_stop(void)
+ {
+ 	TeamsMediaProc *mp = g_mproc;
+ 	if (!mp) return;
++	video_event(mp, "");   /* the call's video is over */
+ 	g_mproc = NULL;
+ 	if (mp->answer_timer) g_source_remove(mp->answer_timer);
+ 	if (mp->in_fd >= 0) { media_send(mp, "STOP\n"); close(mp->in_fd); }
+@@ -1775,6 +1874,7 @@ teams_calling_handle_renegotiation(TeamsAccount *sa, JsonObject *body_obj)
+ 	sdp_log_shape("renegotiation offer", blob);
+ 	g_free(mp->declined_mlines);
+ 	mp->declined_mlines = sdp_declined_mlines(blob);
++	media_video_offer(mp, blob);
+ 
+ 	/* CAPTURED LIVE (2026-08-01): a renegotiation push commonly swaps the peer to a brand-new
+ 	 * media leg - fresh ice-ufrag/pwd (and sometimes a whole new a=crypto key/mediaLegId/relay),
+diff --git a/teams_calling.h b/teams_calling.h
+index 5a63e07..83638ec 100644
+--- a/teams_calling.h
++++ b/teams_calling.h
+@@ -81,6 +81,16 @@ typedef void (*TeamsCallStateCb)(TeamsAccount *sa, const char *state, const char
+                                  const char *peerName, gboolean isOutgoing, const char *cause);
+ void teams_calling_set_state_cb(TeamsCallStateCb cb);
+ 
++/* The LS2 bridge registers this for the call's video: the engine's video lines (VSHM, VPREVIEW,
++ * VTX, PEERVIDEO, VIDEOERR; see teams_media.c) as they come, and "OFFERED 0|1" when an offer has
++ * the far side sending video or not. "" (empty) means the call's video is over. */
++typedef void (*TeamsCallVideoCb)(TeamsAccount *sa, const char *line);
++void teams_calling_set_video_cb(TeamsCallVideoCb cb);
++
++/* Our camera on or off in the current call (changeMedia outgoingVideo). It is sent once our
++ * answer lets us send video; until then it is kept for the next answer. FALSE: no call. */
++gboolean teams_calling_set_camera(TeamsAccount *sa, gboolean on);
++
+ /* Phone-app-facing actions (called by the LS2 bridge). Return FALSE if no such call / not
+  * possible. answer/dial spin up the media engine; reject/hangup tear down + POST control. */
+ gboolean teams_calling_answer(TeamsAccount *sa);
+diff --git a/tests/test_call_video.c b/tests/test_call_video.c
+new file mode 100644
+index 0000000..f298f0d
+--- /dev/null
++++ b/tests/test_call_video.c
+@@ -0,0 +1,216 @@
++/* Unit test for teams_call_video.c: GLib only, e.g.
++ *   cc -I.. test_call_video.c ../teams_call_video.c $(pkg-config --cflags --libs glib-2.0) */
++#include "teams_call_video.h"
++#include <stdio.h>
++#include <string.h>
++
++static int failures;
++#define CHECK(c) do { if (!(c)) { failures++; fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); } } while (0)
++
++static gboolean has(const gchar *s, const char *sub) { return s && strstr(s, sub) != NULL; }
++
++static void test_voice_call(void)
++{
++	TeamsCallVideo v = {0};
++	gchar *l, *p;
++	teams_call_video_reset(&v);
++	CHECK(!teams_call_video_active(&v));
++	l = teams_call_video_line_fields(&v);
++	p = teams_call_video_payload_fields(&v);
++	CHECK(!strcmp(l, "\"incomingVideo\":false,\"outgoingVideo\":false,"
++	                 "\"incomingVideoState\":\"unavailable\",\"incomingVideoOrientation\":0"));
++	CHECK(!strcmp(p, ""));
++	g_free(l); g_free(p);
++	teams_call_video_reset(&v);
++}
++
++static void test_engine_lines(void)
++{
++	TeamsCallVideo v = {0};
++	gboolean known;
++	gchar *l, *p;
++	teams_call_video_reset(&v);
++
++	CHECK(teams_call_video_set_offered(&v, TRUE));
++	CHECK(!teams_call_video_set_offered(&v, TRUE));
++	l = teams_call_video_line_fields(&v);
++	CHECK(has(l, "\"incomingVideoState\":\"available\""));
++	g_free(l);
++
++	CHECK(teams_call_video_engine_line(&v, "VSHM /tmp/teams-video 640 480", &known) && known);
++	CHECK(!teams_call_video_engine_line(&v, "VSHM /tmp/teams-video 640 480", &known) && known);
++	CHECK(!strcmp(v.uri, "/tmp/teams-video") && v.width == 640 && v.height == 480);
++	/* not shown before the far side's video arrives */
++	l = teams_call_video_line_fields(&v);
++	CHECK(has(l, "\"incomingVideo\":false") && has(l, "\"available\""));
++	g_free(l);
++
++	CHECK(teams_call_video_engine_line(&v, "PEERVIDEO 1", &known) && known);
++	l = teams_call_video_line_fields(&v);
++	p = teams_call_video_payload_fields(&v);
++	CHECK(has(l, "\"incomingVideo\":true") && has(l, "\"streaming\""));
++	CHECK(!strcmp(p, ",\"videoURI\":\"/tmp/teams-video\",\"videoWidth\":640,\"videoHeight\":480"));
++	g_free(l); g_free(p);
++
++	CHECK(teams_call_video_engine_line(&v, "VPREVIEW /tmp/teams-preview 320 240 3 1", &known));
++	CHECK(v.preview_turns == 3 && v.preview_mirrored);
++	p = teams_call_video_payload_fields(&v);
++	CHECK(!has(p, "videoPreviewURI"));               /* only while our camera sends */
++	g_free(p);
++	CHECK(teams_call_video_engine_line(&v, "VTX 1", &known));
++	CHECK(!teams_call_video_engine_line(&v, "VTX 1", &known));
++	p = teams_call_video_payload_fields(&v);
++	CHECK(has(p, ",\"videoPreviewURI\":\"/tmp/teams-preview\",\"videoPreviewWidth\":320,"
++	             "\"videoPreviewHeight\":240,\"videoPreviewOrientation\":3,\"videoPreviewMirrored\":true"));
++	g_free(p);
++	l = teams_call_video_line_fields(&v);
++	CHECK(has(l, "\"outgoingVideo\":true"));
++	g_free(l);
++
++	/* the user hides the far side's picture */
++	v.show_incoming = FALSE;
++	p = teams_call_video_payload_fields(&v);
++	CHECK(!strcmp(p, ""));
++	g_free(p);
++	v.show_incoming = TRUE;
++
++	CHECK(teams_call_video_engine_line(&v, "PEERVIDEO 0", &known));
++	CHECK(teams_call_video_engine_line(&v, "VTX 0", &known));
++	CHECK(teams_call_video_active(&v));             /* still offered */
++
++	/* VIDEOERR is a video line that changes nothing; others are not video lines */
++	CHECK(!teams_call_video_engine_line(&v, "VIDEOERR tx-camera", &known) && known);
++	CHECK(!teams_call_video_engine_line(&v, "SSRC 1234", &known) && !known);
++	CHECK(!teams_call_video_engine_line(&v, NULL, &known) && !known);
++	teams_call_video_reset(&v);
++	CHECK(!v.uri && !v.preview && !teams_call_video_active(&v) && v.show_incoming);
++}
++
++static void test_bad_lines(void)
++{
++	TeamsCallVideo v = {0};
++	teams_call_video_reset(&v);
++	CHECK(!teams_call_video_engine_line(&v, "VSHM relative 640 480", NULL));
++	CHECK(!teams_call_video_engine_line(&v, "VSHM /tmp/a\"b 640 480", NULL));
++	CHECK(!teams_call_video_engine_line(&v, "VSHM /tmp/a 0 480", NULL));
++	CHECK(!teams_call_video_engine_line(&v, "VSHM /tmp/a 640", NULL));
++	CHECK(!teams_call_video_engine_line(&v, "VSHM /tmp/a 640x 480", NULL));
++	CHECK(!teams_call_video_engine_line(&v, "VSHM /tmp/a 99999 480", NULL));
++	CHECK(!teams_call_video_engine_line(&v, "VPREVIEW /tmp/p 320 240 4 0", NULL));
++	CHECK(!teams_call_video_engine_line(&v, "VPREVIEW /tmp/p 320 240 1", NULL));
++	CHECK(!teams_call_video_engine_line(&v, "VTX x", NULL));
++	CHECK(!teams_call_video_engine_line(&v, "VTX 1x", NULL));
++	CHECK(!teams_call_video_engine_line(&v, "PEERVIDEO ", NULL));
++	CHECK(!v.uri && !v.preview && !v.sending && !v.peer_camera);
++	teams_call_video_reset(&v);
++}
++
++static void test_json_bool(void)
++{
++	CHECK(teams_call_video_json_bool("{\"outgoingVideo\": true}", "outgoingVideo") == 1);
++	CHECK(teams_call_video_json_bool("{\"outgoingVideo\":false,\"incomingVideo\":true}", "outgoingVideo") == 0);
++	CHECK(teams_call_video_json_bool("{\"outgoingVideo\":false,\"incomingVideo\":true}", "incomingVideo") == 1);
++	CHECK(teams_call_video_json_bool("{\"outgoingVideo\":\"yes\"}", "outgoingVideo") == -1);
++	CHECK(teams_call_video_json_bool("{}", "outgoingVideo") == -1);
++	CHECK(teams_call_video_json_bool(NULL, "outgoingVideo") == -1);
++}
++
++/* The m=video shapes of the captured Teams offers (masked: ports, keys and SSRCs made up). */
++static const char *OFFER_ANDROID =
++	"v=0\r\nm=audio 50000 RTP/SAVP 102 101\r\na=sendrecv\r\na=mid:1\r\n"
++	"m=video 50001 RTP/SAVP 119 100 122 125 107 99 114 115 123\r\na=x-ssrc-range:1-100\r\n"
++	"a=recvonly\r\na=mid:2\r\nm=application 50002 RTP/SAVP 127\r\na=sendrecv\r\n";
++static const char *OFFER_RENEG =
++	"v=0\r\nm=audio 1 RTP/SAVP 102\r\na=sendrecv\r\nm=video 1 RTP/SAVP 107 99\r\na=inactive\r\n";
++static const char *OFFER_VIDEO =
++	"v=0\r\nm=audio 1 RTP/SAVP 102\r\na=recvonly\r\nm=video 1 RTP/SAVP 107 99\r\na=label:main-video\r\n";
++static const char *OFFER_SENDONLY =
++	"v=0\r\nm=audio 1 RTP/SAVP 102\r\nm=video 1 RTP/SAVP 107\r\na=sendonly\r\n";
++static const char *OFFER_DECLINED =
++	"v=0\r\nm=audio 1 RTP/SAVP 102\r\nm=video 0 RTP/SAVP 107\r\na=sendrecv\r\n";
++/* a second video section (screen sharing) does not count for the main video */
++static const char *OFFER_TWO_VIDEO =
++	"v=0\r\nm=audio 1 RTP/SAVP 102\r\nm=video 1 RTP/SAVP 107\r\na=inactive\r\na=label:main-video\r\n"
++	"m=video 1 RTP/SAVP 107\r\na=sendrecv\r\na=label:applicationsharing-video\r\n";
++static const char *OFFER_AUDIO = "v=0\r\nm=audio 1 RTP/SAVP 102\r\na=sendonly\r\n";
++
++static void test_sdp_direction(void)
++{
++	CHECK(!g_strcmp0(teams_sdp_video_direction(OFFER_ANDROID), "recvonly"));
++	CHECK(!g_strcmp0(teams_sdp_video_direction(OFFER_RENEG), "inactive"));
++	CHECK(!g_strcmp0(teams_sdp_video_direction(OFFER_VIDEO), "sendrecv"));   /* none named */
++	CHECK(!g_strcmp0(teams_sdp_video_direction(OFFER_SENDONLY), "sendonly"));
++	CHECK(teams_sdp_video_direction(OFFER_DECLINED) == NULL);
++	CHECK(teams_sdp_video_direction(OFFER_AUDIO) == NULL);
++	CHECK(!g_strcmp0(teams_sdp_video_direction(OFFER_TWO_VIDEO), "inactive"));
++	CHECK(teams_sdp_video_direction(NULL) == NULL);
++}
++
++static void test_answer_direction(void)
++{
++	/* camera off: receive what the far side sends, else inactive (what 0019 always answered) */
++	CHECK(!strcmp(teams_video_answer_direction("recvonly", TRUE, FALSE), "inactive"));
++	CHECK(!strcmp(teams_video_answer_direction("inactive", TRUE, FALSE), "inactive"));
++	CHECK(!strcmp(teams_video_answer_direction("sendrecv", TRUE, FALSE), "recvonly"));
++	CHECK(!strcmp(teams_video_answer_direction("sendonly", TRUE, FALSE), "recvonly"));
++	/* camera on */
++	CHECK(!strcmp(teams_video_answer_direction("sendrecv", TRUE, TRUE), "sendrecv"));
++	CHECK(!strcmp(teams_video_answer_direction("recvonly", TRUE, TRUE), "sendonly"));
++	CHECK(!strcmp(teams_video_answer_direction("sendonly", TRUE, TRUE), "recvonly"));
++	CHECK(!strcmp(teams_video_answer_direction("inactive", TRUE, TRUE), "inactive"));
++	/* an engine without video, or no video m-line: inactive */
++	CHECK(!strcmp(teams_video_answer_direction("sendrecv", FALSE, TRUE), "inactive"));
++	CHECK(!strcmp(teams_video_answer_direction(NULL, TRUE, TRUE), "inactive"));
++
++	CHECK(teams_video_dir_we_send("sendrecv") && teams_video_dir_we_send("sendonly"));
++	CHECK(!teams_video_dir_we_send("recvonly") && !teams_video_dir_we_send("inactive") && !teams_video_dir_we_send(NULL));
++	CHECK(teams_video_dir_peer_sends("sendrecv") && teams_video_dir_peer_sends("sendonly"));
++	CHECK(!teams_video_dir_peer_sends("recvonly") && !teams_video_dir_peer_sends("inactive") && !teams_video_dir_peer_sends(NULL));
++}
++
++static void test_send_params(void)
++{
++	int w, h, k;
++	static const char *ANDROID =
++		"v=0\r\nm=audio 1 RTP/SAVP 102\r\na=fmtp:107 max-fs=1\r\nm=video 1 RTP/SAVP 107 99\r\n"
++		"a=fmtp:107 profile-level-id=42C02A;packetization-mode=1;max-mbps=3600;max-fs=240;max-br=208;max-fps=1500\r\n";
++	static const char *WEB =
++		"v=0\r\nm=video 1 RTP/SAVP 107\r\na=fmtp:107 level-asymmetry-allowed=1;packetization-mode=1;"
++		"profile-level-id=42e01f;max-fs=8160;max-mbps=244800;max-fps=3000\r\n";
++	static const char *CIF = "v=0\r\nm=video 1 RTP/SAVP 107\r\na=fmtp:107 max-fs=396;max-br=500\r\n";
++	static const char *QVGA = "v=0\r\nm=video 1 RTP/SAVP 107\r\na=fmtp:107 max-fs=1200;max-mbps=9000\r\n";
++	static const char *TOO_SMALL = "v=0\r\nm=video 1 RTP/SAVP 107\r\na=fmtp:107 max-fs=10;max-br=8\r\n";
++	/* only the first video section's fmtp counts */
++	static const char *TWO = "v=0\r\nm=video 1 RTP/SAVP 107\r\nm=video 1 RTP/SAVP 107\r\na=fmtp:107 max-fs=99\r\n";
++	teams_video_send_params(ANDROID, &w, &h, &k);
++	CHECK(w == 176 && h == 144 && k == 208);
++	teams_video_send_params(WEB, &w, &h, &k);
++	CHECK(w == 640 && h == 480 && k == 800);
++	teams_video_send_params(CIF, &w, &h, &k);
++	CHECK(w == 352 && h == 288 && k == 500);
++	teams_video_send_params(QVGA, &w, &h, &k);     /* 640x480 fits the size, not the rate */
++	CHECK(w == 320 && h == 240 && k == 800);
++	teams_video_send_params(TOO_SMALL, &w, &h, &k);
++	CHECK(w == 176 && h == 144 && k == 800);
++	teams_video_send_params(TWO, &w, &h, &k);
++	CHECK(w == 640 && h == 480);
++	teams_video_send_params(NULL, &w, &h, &k);
++	CHECK(w == 640 && h == 480 && k == 800);
++}
++
++int main(void)
++{
++	test_send_params();
++	test_voice_call();
++	test_engine_lines();
++	test_bad_lines();
++	test_json_bool();
++	test_sdp_direction();
++	test_answer_direction();
++	if (failures) {
++		fprintf(stderr, "%d failure(s)\n", failures);
++		return 1;
++	}
++	printf("PASS test_call_video\n");
++	return 0;
++}
+-- 
+2.53.0
+
