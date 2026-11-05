@@ -13,11 +13,18 @@
 #
 #   deviceinfo_key_actions="Key_HomePage=call.hangup;Key_Menu=shell.launcher"
 #
+# A key can also carry an action for holding it and a label, separated by '|'
+# after its press action. A label offers the key in Settings > Buttons, where the
+# user picks both actions; without one the key is fixed to what is written here.
+#
+#   deviceinfo_key_actions="Key_Launch2=none|hold=none|label=Assistant button"
+#
 # Names are Qt key names and actions are the shell's action names, both validated
 # there rather than here - this only has to produce the JSON, and a typo it
 # cannot see is better reported by the side that knows the whole vocabulary.
 SRC=/etc/luneos/hardware-keys.json
 spec=${deviceinfo_key_actions:-}
+labelled=
 
 if [ -n "$spec" ] && [ -f "$SRC" ]; then
     out=$GEN/files${SRC}
@@ -41,12 +48,60 @@ if [ -n "$spec" ] && [ -f "$SRC" ]; then
                     echo "luneos-device-config: WARNING: key action '$_item' has no '=', ignoring" >&2
                     continue ;;
             esac
+            _name=${_item%%=*}
+            _value=${_item#*=}
+            case "$_item" in
+                *\"*|*\\*)
+                    echo "luneos-device-config: WARNING: key action '$_item' has a quote or backslash, ignoring" >&2
+                    continue ;;
+            esac
             [ "$_first" -eq 1 ] || printf ','
             _first=0
-            printf '"%s":"%s"' "${_item%%=*}" "${_item#*=}"
+            case "$_value" in
+                *"|"*)
+                    # press|hold=x|label=y: an object, with the press action
+                    # first and only the attributes given.
+                    printf '"%s":{"press":"%s"' "$_name" "${_value%%|*}"
+                    _attrs=${_value#*|}
+                    while [ -n "$_attrs" ]; do
+                        _attr=${_attrs%%|*}
+                        if [ "$_attr" = "$_attrs" ]; then
+                            _attrs=
+                        else
+                            _attrs=${_attrs#*|}
+                        fi
+                        case "$_attr" in
+                            label=?*)
+                                labelled=1
+                                printf ',"%s":"%s"' "${_attr%%=*}" "${_attr#*=}" ;;
+                            hold=*)
+                                printf ',"%s":"%s"' "${_attr%%=*}" "${_attr#*=}" ;;
+                            *)
+                                echo "luneos-device-config: WARNING: key attribute '$_attr' of $_name is not hold= or label=, ignoring" >&2 ;;
+                        esac
+                    done
+                    printf '}' ;;
+                *)
+                    printf '"%s":"%s"' "$_name" "$_value" ;;
+            esac
         done
         printf '}\n'
     } > "$out"
 
     echo "luneos-device-config: hardware key actions: $spec"
+fi
+
+# Settings > Buttons lists the keys given a label above, and nothing else, so on
+# a device with none it would be an empty page: hide its launcher icon there,
+# the way 35-torch-app hides the Torch app.
+PANEL=/usr/palm/applications/org.webosports.app.settings.buttons/appinfo.json
+if [ -z "$labelled" ] && [ -f "$PANEL" ]; then
+    out=$GEN/files$PANEL
+    mkdir -p "$(dirname "$out")"
+    if grep -q '"visible"[[:space:]]*:' "$PANEL"; then
+        sed 's/"visible"[[:space:]]*:[[:space:]]*[a-z"]*/"visible": false/' "$PANEL" > "$out"
+    else
+        awk '!done && sub(/\{/, "{\n    \"visible\": false,") { done = 1 } { print }' "$PANEL" > "$out"
+    fi
+    echo "luneos-device-config: no configurable keys, hiding Settings > Buttons"
 fi
