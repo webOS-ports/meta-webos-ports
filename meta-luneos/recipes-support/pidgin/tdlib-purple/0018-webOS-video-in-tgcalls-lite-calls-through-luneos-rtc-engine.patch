@@ -1,0 +1,1797 @@
+From c2c7598a41a4955ec041858c1a78bba513abc63a Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 4 Nov 2026 19:27:24 +0100
+Subject: [PATCH] webOS: video in tgcalls-lite calls through luneos-rtc-engine
+
+Telegram calls carried by tgcalls-lite get video the way WhatsApp calls
+do: org.webosports.rtcengine owns the camera, the H.264 encoder and
+decoder and the shared-memory frames the Phone app shows; this side
+decides when an engine session runs and moves access units between the
+engine's two SOCK_SEQPACKET sockets and the call engine.
+
+tgcalls-video.{h,cpp} hold that logic with no TDLib or luna-service2
+dependency, so test/tgcalls-video-test.cpp exercises it on its own:
+- AuBridge passes the peer's units to the engine without ever
+  blocking libpurple's loop, holds them back until an IDR after a drop
+  or a (re)connect, and reads our encoded camera on a thread of its own.
+- Controller asks for capabilities, starts a session (with TX when our
+  camera is wanted and the device can encode, receive-only when the user
+  only watches the peer), restarts it when the camera is toggled, stops
+  it when the call ends, ignores replies to sessions it already closed,
+  and passes the peer's keyframe requests to the encoder at most once a
+  second.
+
+The Phone app talks to com.palm.telegram.call as it does to the
+WhatsApp connector: dial takes "video", the new changeMedia method takes
+incomingVideo/outgoingVideo, and the call state carries incomingVideo,
+outgoingVideo, incomingVideoState, incomingVideoOrientation and the
+frame/preview paths. A wish made before the engine runs is kept and
+applied when it does. audiod is told the call carries video.
+
+Our picture is sent rotated by 90 degrees (the CVO extension); that
+value has not been checked against a live call yet.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ CMakeLists.txt              |   1 +
+ call-luna.cpp               | 133 +++++++-
+ call-luna.h                 |  20 +-
+ call.cpp                    |  10 +
+ test/tgcalls-video-test.cpp | 481 +++++++++++++++++++++++++++++
+ tgcalls-call.cpp            | 111 ++++++-
+ tgcalls-call.h              |  10 +-
+ tgcalls-video.cpp           | 584 ++++++++++++++++++++++++++++++++++++
+ tgcalls-video.h             | 172 +++++++++++
+ 9 files changed, 1500 insertions(+), 22 deletions(-)
+ create mode 100644 test/tgcalls-video-test.cpp
+ create mode 100644 tgcalls-video.cpp
+ create mode 100644 tgcalls-video.h
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index e300b8a..6243b9b 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -75,6 +75,7 @@ add_library(telegram-tdlib SHARED
+     call.cpp
+     call-luna.cpp
+     tgcalls-call.cpp
++    tgcalls-video.cpp
+     identifiers.cpp
+     secret-chat.cpp
+ )
+diff --git a/call-luna.cpp b/call-luna.cpp
+index 94e3464..66b43cb 100644
+--- a/call-luna.cpp
++++ b/call-luna.cpp
+@@ -16,11 +16,13 @@
+ #include <string>
+ #include <cstring>
+ #include <cstdarg>
++#include <memory>
+ 
+ /* Implemented in call.cpp - drive the active account's TDLib call via the existing prpl logic. */
+ extern bool callBridgeDial(PurpleAccount *account, const char *who, bool video);
+ extern void callBridgeAnswer(PurpleAccount *account);
+ extern void callBridgeHangup(PurpleAccount *account);
++extern void callBridgeChangeMedia(PurpleAccount *account, bool hasView, bool view, bool hasCamera, bool camera);
+ 
+ /* Call life-cycle trace, through libpurple's debug log like the rest of the plug-in. */
+ void tgcLog(const char *fmt, ...)
+@@ -45,6 +47,9 @@ bool           g_outgoing = false;
+ // later "disconnected" for it, so each call needs an id of its own, or the card of every call after
+ // the first stays up. From the clock, so a restarted service does not hand out an old one again.
+ std::string    g_cardId;
++bool           g_isVideo = false;   // call.is_video_
++// The video members while the call has a video session (tgcalls-call.cpp), else empty.
++std::string    g_videoLine, g_videoPayload;
+ 
+ const char *SUBKEY = "callState";
+ 
+@@ -65,16 +70,24 @@ std::string jsonEscape(const char *s)
+ }
+ 
+ // Build the callStateQuery payload the Phone app's SynergyTransport reads: one line with a
+-// line-level "state" (incoming/dialing/active/disconnected), or no lines when idle. Video is never
+-// reported: there is no video path on LuneOS (see call.cpp), so a call is always voice.
++// line-level "state" (incoming/dialing/active/disconnected), or no lines when idle, and the
++// video members the WhatsApp connector sends too (line: incomingVideo, outgoingVideo,
++// incomingVideoState; top level: videoURI and the preview).
+ std::string buildPayload()
+ {
+-    std::string p = "{\"returnValue\":true,\"lines\":[";
++    std::string p = "{\"returnValue\":true";
++    p += g_videoPayload.empty() ? std::string(",\"allowVideoCalls\":true,\"videoURI\":\"\"") : g_videoPayload;
++    p += ",\"lines\":[";
+     if (!g_state.empty()) {
+         p += "{\"state\":\"" + jsonEscape(g_state.c_str()) + "\",";
+         if (g_state == "disconnected")
+             p += "\"disconnectDetails\":{\"cause\":\"" + jsonEscape(g_cause.c_str()) + "\"},";
+-        p += "\"incomingVideo\":false,\"outgoingVideo\":false,";
++        // lineFields() start with ','; without a session, a video call still shows as one.
++        std::string video = g_videoLine.empty()
++            ? std::string(",\"incomingVideo\":false,\"outgoingVideo\":false,\"incomingVideoState\":\"") +
++                  (g_isVideo && g_state != "disconnected" ? "available" : "unavailable") + "\""
++            : g_videoLine;
++        p += video.substr(1) + ",";
+         // address and displayName sit flat on each call, as the WhatsApp connector sends them.
+         // transport is this connector's own PHONE account template id: without it the call is
+         // taken for a cellular one and the id is shown formatted as a phone number.
+@@ -100,6 +113,21 @@ bool cbCallStateQuery(LSHandle *sh, LSMessage *msg, void *)
+     return true;
+ }
+ 
++// tiny extractor for a top-level boolean: 1 true, 0 false, -1 absent or not a boolean
++int getBool(const char *json, const char *key)
++{
++    if (!json) return -1;
++    std::string needle = std::string("\"") + key + "\"";
++    const char *k = strstr(json, needle.c_str());
++    if (!k) return -1;
++    const char *c = strchr(k + needle.size(), ':');
++    if (!c) return -1;
++    while (*++c == ' ') ;
++    if (!strncmp(c, "true", 4)) return 1;
++    if (!strncmp(c, "false", 5)) return 0;
++    return -1;
++}
++
+ // tiny extractor for a top-level string field (avoids pulling a JSON lib into the prpl)
+ std::string getField(const char *json, const char *key)
+ {
+@@ -120,9 +148,10 @@ bool cbDial(LSHandle *sh, LSMessage *msg, void *)
+     LSError err; LSErrorInit(&err);
+     const char *payload = LSMessageGetPayload(msg);
+     std::string addr = getField(payload, "address");
+-    // A video request is placed as a voice call: there is no video path on LuneOS.
+-    bool ok = g_account && !addr.empty() && callBridgeDial(g_account, addr.c_str(), false);
+-    tgcLog("dial %s: %s", addr.c_str(), ok ? "placed" : "failed");
++    // A video call, when the peer speaks tgcalls V2 (tgcalls-lite); libtgvoip carries its audio.
++    bool video = getBool(payload, "video") == 1;
++    bool ok = g_account && !addr.empty() && callBridgeDial(g_account, addr.c_str(), video);
++    tgcLog("dial %s%s: %s", addr.c_str(), video ? " (video)" : "", ok ? "placed" : "failed");
+     LSMessageReply(sh, msg, ok ? "{\"returnValue\":true}" : "{\"returnValue\":false}", &err);
+     if (LSErrorIsSet(&err)) LSErrorFree(&err);
+     return true;
+@@ -146,6 +175,23 @@ bool cbDisconnect(LSHandle *sh, LSMessage *msg, void *)
+     return true;
+ }
+ 
++// changeMedia {id, incomingVideo?, outgoingVideo?} - the Phone app's video toggles (legacy
++// VideoCall.js/AbstractCall.js). A member left out leaves that direction as it is. incomingVideo:
++// the user wants to see the peer's video; outgoingVideo: our camera. The state change comes back
++// through callStateQuery.
++bool cbChangeMedia(LSHandle *sh, LSMessage *msg, void *)
++{
++    LSError err; LSErrorInit(&err);
++    const char *payload = LSMessageGetPayload(msg);
++    int in = getBool(payload, "incomingVideo"), out = getBool(payload, "outgoingVideo");
++    tgcLog("changeMedia incoming=%d outgoing=%d", in, out);
++    if (g_account)
++        callBridgeChangeMedia(g_account, in >= 0, in == 1, out >= 0, out == 1);
++    LSMessageReply(sh, msg, "{\"returnValue\":true}", &err);
++    if (LSErrorIsSet(&err)) LSErrorFree(&err);
++    return true;
++}
++
+ // The Phone app's manual-dial call contract methods (spec Part 3). We implement the ones a 1:1
+ // VoIP call needs; the rest ack so CallSynergizer doesn't error.
+ bool cbNoop(LSHandle *sh, LSMessage *msg, void *)
+@@ -169,7 +215,7 @@ LSMethod g_methods[] = {
+     { "extract",        cbNoop,           LUNA_METHOD_FLAGS_NONE },
+     { "dtmf",           cbNoop,           LUNA_METHOD_FLAGS_NONE },
+     { "dtmfEnd",        cbNoop,           LUNA_METHOD_FLAGS_NONE },
+-    { "changeMedia",    cbNoop,           LUNA_METHOD_FLAGS_NONE },
++    { "changeMedia",    cbChangeMedia,    LUNA_METHOD_FLAGS_NONE },
+     { NULL, NULL, LUNA_METHOD_FLAGS_NONE }
+ };
+ 
+@@ -241,7 +287,7 @@ void callLunaPushState(const char *state, const char *peerAddress, const char *p
+     g_peerName = peerName     ? peerName    : "";
+     g_cause    = cause        ? cause       : "";
+     g_outgoing = isOutgoing;
+-    (void)isVideo;
++    g_isVideo  = isVideo;
+     tgcLog("state %s, peer %s", g_state.empty() ? "idle" : g_state.c_str(), g_peerAddr.c_str());
+     if (!g_sh) return;
+     std::string payload = buildPayload();
+@@ -262,6 +308,7 @@ void callLunaPushState(const char *state, const char *peerAddress, const char *p
+ // audiod routes calls (earpiece, or a connected headset), and the Phone app's speaker button
+ // moves it.
+ static bool audiodReply(LSHandle *sh, LSMessage *m, void *ctx) { (void)sh; (void)m; (void)ctx; return true; }
++static bool g_audioOn = false, g_audioVideo = false;
+ static void audiodSend(const char *uri, const char *payload)
+ {
+     if (!g_sh) return;
+@@ -275,10 +322,74 @@ static void audiodSend(const char *uri, const char *payload)
+ void callLunaSetCallAudio(bool active)
+ {
+     tgcLog("call audio %s", active ? "on" : "off");
++    g_audioOn = active;
++    if (!active)
++        g_audioVideo = false;
+     if (active)
+         audiodSend("palm://com.palm.audio/phone/CallStatusUpdate",
+-                   "{\"lines\":[{\"state\":\"active\",\"calls\":[{\"id\":\"tg\",\"video\":false,"
+-                   "\"transport\":\"com.palm.telegram\"}]}]}");
++                   g_audioVideo ? "{\"lines\":[{\"state\":\"active\",\"calls\":[{\"id\":\"tg\",\"video\":true,"
++                                  "\"transport\":\"com.palm.telegram\"}]}]}"
++                                : "{\"lines\":[{\"state\":\"active\",\"calls\":[{\"id\":\"tg\",\"video\":false,"
++                                  "\"transport\":\"com.palm.telegram\"}]}]}");
+     else
+         audiodSend("palm://com.palm.audio/phone/CallStatusUpdate", "{\"lines\":[]}");
+ }
++
++void callLunaSetCallVideo(bool video)
++{
++    if (video == g_audioVideo)
++        return;
++    g_audioVideo = video;
++    if (g_audioOn)
++        callLunaSetCallAudio(true);
++}
++
++// --- video: org.webosports.rtcengine ------------------------------------------------------------
++namespace {
++using RtcReply = std::function<void(const std::string &)>;
++
++bool rtcReply(LSHandle *, LSMessage *msg, void *ctx)
++{
++    std::unique_ptr<RtcReply> cb(static_cast<RtcReply *>(ctx));
++    const char *payload = LSMessageGetPayload(msg);
++    if (*cb)
++        (*cb)(payload ? payload : "");
++    return true;
++}
++} // namespace
++
++bool callLunaRtcCall(const std::string &method, const std::string &payload, std::function<void(const std::string &reply)> onReply)
++{
++    if (!g_sh) return false;
++    const std::string uri = "luna://org.webosports.rtcengine/" + method;
++    // One reply: the callback object is freed in rtcReply. Replies without a callback are logged.
++    if (!onReply)
++        onReply = [method](const std::string &reply) {
++            tgcLog("rtcengine %s: %s", method.c_str(), reply.c_str());
++        };
++    RtcReply *ctx = new RtcReply(std::move(onReply));
++    LSError err; LSErrorInit(&err);
++    LSMessageToken tok;
++    if (!LSCallOneReply(g_sh, uri.c_str(), payload.c_str(), rtcReply, ctx, &tok, &err)) {
++        purple_debug_warning(config::pluginId, "rtcengine %s: %s\n", method.c_str(), err.message);
++        LSErrorFree(&err);
++        delete ctx;
++        return false;
++    }
++    return true;
++}
++
++void callLunaSetVideo(const std::string &lineFields, const std::string &payloadFields)
++{
++    if (lineFields == g_videoLine && payloadFields == g_videoPayload)
++        return;
++    g_videoLine = lineFields;
++    g_videoPayload = payloadFields;
++    if (!g_sh || g_state.empty()) return;
++    std::string payload = buildPayload();
++    LSError err; LSErrorInit(&err);
++    if (!LSSubscriptionReply(g_sh, SUBKEY, payload.c_str(), &err)) {
++        purple_debug_warning(config::pluginId, "callStateQuery push: %s\n", err.message);
++        LSErrorFree(&err);
++    }
++}
+diff --git a/call-luna.h b/call-luna.h
+index 373a9a7..a91c9aa 100644
+--- a/call-luna.h
++++ b/call-luna.h
+@@ -16,6 +16,9 @@
+ 
+ #include <purple.h>
+ 
++#include <functional>
++#include <string>
++
+ /* Register the com.palm.telegram.call service (idempotent) and bind it to this Telegram account.
+  * Call when the account connects. Returns false (and logs) if LS2 registration fails. */
+ bool callLunaInit(PurpleAccount *account);
+@@ -30,12 +33,27 @@ void tgcLog(const char *fmt, ...);
+  * webcall source libtgvoip uses. Call when the call becomes active and on hangup. */
+ void callLunaSetCallAudio(bool active);
+ 
++/* Calls method of org.webosports.rtcengine (luneos-rtc-engine) on this service's handle; onReply,
++ * if set, gets the reply payload on the main loop. False if the call could not be sent. This
++ * service's client permissions must include the rtc.operation group. */
++bool callLunaRtcCall(const std::string &method, const std::string &payload,
++                     std::function<void(const std::string &reply)> onReply);
++
++/* The video members of the call state (see tgvideo::Controller::lineFields/payloadFields), or
++ * both empty when the call has no video session; republishes the state. */
++void callLunaSetVideo(const std::string &lineFields, const std::string &payloadFields);
++
++/* Tell audiod whether the active call shows video: a video call plays on the speaker, unless a
++ * headset or Bluetooth is connected (audiod's own policy). */
++void callLunaSetCallVideo(bool video);
++
+ /* Push the current call state to Phone-app callStateQuery subscribers. Called from call.cpp's
+  * updateCall(). state is one of: "incoming", "dialing", "active", "disconnected", "" (idle).
+  * NOTE: these strings must match the stock Phone app CallSynergizer STATES enum exactly
+  * (incoming/dialing/active/disconnected) or the call card won't render the state.
+  * peerAddress = the Telegram user's +E.164 / id; peerName = resolved display name (may be NULL).
+- * isVideo = call.is_video_ from TDLib. Not reported: calls are voice only on LuneOS.
++ * isVideo = call.is_video_ from TDLib: until the call has a video session (callLunaSetVideo) it
++ * makes the line say the peer's video is available, so the Phone app shows a video call.
+  * cause is only meaningful for "disconnected" (e.g. "rejected", "normal", "missed"). */
+ void callLunaPushState(const char *state, const char *peerAddress, const char *peerName,
+                        bool isOutgoing, const char *cause, bool isVideo);
+diff --git a/call.cpp b/call.cpp
+index 405c4a0..9840b1a 100644
+--- a/call.cpp
++++ b/call.cpp
+@@ -359,6 +359,16 @@ void callBridgeHangup(PurpleAccount *account)
+     if (client) client->hangupVoiceCall();
+ }
+ 
++void callBridgeChangeMedia(PurpleAccount *account, bool hasView, bool view, bool hasCamera, bool camera)
++{
++    (void)account; // one call at a time (call-luna.cpp)
++#ifdef HAVE_TGCALLS_LITE
++    tgcallsLiteChangeMedia(hasView, view, hasCamera, camera);
++#else
++    (void)hasView; (void)view; (void)hasCamera; (void)camera;
++#endif
++}
++
+ void showCallMessage(const td::td_api::chat &chat, const TgMessageInfo &message,
+                      const td::td_api::messageCall &callEnded, TdAccountData &account)
+ {
+diff --git a/test/tgcalls-video-test.cpp b/test/tgcalls-video-test.cpp
+new file mode 100644
+index 0000000..f2a0d23
+--- /dev/null
++++ b/test/tgcalls-video-test.cpp
+@@ -0,0 +1,481 @@
++// Host test of tgcalls-video.cpp: the AU bridge over real AF_UNIX SOCK_SEQPACKET sockets standing
++// in for luneos-rtc-engine's, and the session controller against a fake org.webosports.rtcengine.
++// Standalone (no TDLib, no libpurple, no luna-service2):
++//   c++ -std=c++14 -DHAVE_TGCALLS_LITE -o tgcalls-video-test tgcalls-video-test.cpp
++//       ../tgcalls-video.cpp $(pkg-config --cflags --libs glib-2.0 json-glib-1.0) -pthread
++// Run it with a scratch directory for the sockets as the only argument.
++#include "../tgcalls-video.h"
++
++#include <glib.h>
++
++#include <cerrno>
++#include <cstdio>
++#include <cstring>
++#include <mutex>
++#include <string>
++#include <vector>
++
++#include <poll.h>
++#include <sys/socket.h>
++#include <sys/un.h>
++#include <unistd.h>
++
++using namespace tgvideo;
++
++static int failures;
++#define CHECK(c, ...) do { if (!(c)) { failures++; fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__); \
++    fprintf(stderr, __VA_ARGS__); fprintf(stderr, "\n"); } } while (0)
++
++static std::vector<uint8_t> au(uint8_t type, size_t size, uint8_t fill)
++{
++    std::vector<uint8_t> v = {0, 0, 0, 1, (uint8_t)(0x60 | type)};
++    for (size_t i = 0; i < size; i++)
++        v.push_back((uint8_t)(fill + i));
++    return v;
++}
++
++// A listening engine socket.
++struct Server {
++    std::string path;
++    int fd = -1, peer = -1;
++    explicit Server(const std::string &p) : path(p)
++    {
++        unlink(path.c_str());
++        fd = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
++        struct sockaddr_un sa;
++        memset(&sa, 0, sizeof sa);
++        sa.sun_family = AF_UNIX;
++        memcpy(sa.sun_path, path.c_str(), path.size() + 1);
++        if (bind(fd, (struct sockaddr *)&sa, sizeof sa) < 0 || listen(fd, 1) < 0)
++            fprintf(stderr, "server %s: %s\n", path.c_str(), strerror(errno));
++    }
++    ~Server()
++    {
++        if (peer >= 0)
++            close(peer);
++        if (fd >= 0)
++            close(fd);
++        unlink(path.c_str());
++    }
++    bool accept(int timeoutMs = 2000)
++    {
++        struct pollfd p = {fd, POLLIN, 0};
++        if (poll(&p, 1, timeoutMs) <= 0)
++            return false;
++        peer = ::accept(fd, nullptr, nullptr);
++        return peer >= 0;
++    }
++    std::vector<uint8_t> recvOne(int timeoutMs = 2000)
++    {
++        struct pollfd p = {peer, POLLIN, 0};
++        std::vector<uint8_t> buf(2 * 1024 * 1024);
++        if (poll(&p, 1, timeoutMs) <= 0)
++            return {};
++        ssize_t n = recv(peer, buf.data(), buf.size(), 0);
++        buf.resize(n > 0 ? (size_t)n : 0);
++        return buf;
++    }
++    void closePeer()
++    {
++        if (peer >= 0)
++            close(peer);
++        peer = -1;
++    }
++};
++
++static void test_bridge_rx(const std::string &dir)
++{
++    AuBridge b;
++    CHECK(!b.setSockets("", std::string(200, 'x')), "a path longer than sun_path is refused");
++    Server rx(dir + "/rx.sock");
++    CHECK(b.setSockets("", rx.path), "paths set");
++    b.start(nullptr);
++    CHECK(b.running(), "running");
++    CHECK(!b.setSockets("", rx.path), "no new paths while running");
++    CHECK(rx.accept(), "the bridge connected at start");
++
++    const auto p = au(1, 100, 1), idr = au(5, 3000, 2);
++    CHECK(b.receive(p.data(), p.size()), "a P frame before any IDR: held back, keyframe wanted");
++    CHECK(!b.receive(idr.data(), idr.size()), "the IDR goes out");
++    CHECK(rx.recvOne() == idr, "the engine got the IDR whole");
++    CHECK(!b.receive(p.data(), p.size()), "then P");
++    CHECK(rx.recvOne() == p, "the engine got P");
++    CHECK(b.stats().rxSent == 2 && b.stats().rxDropped == 1, "counters");
++
++    // The engine stops reading: once the socket is full, units are dropped without blocking,
++    // and after that only an IDR gets through.
++    const auto big = au(1, 200 * 1024, 3);
++    int sends = 0;
++    bool dropped = false;
++    while (sends < 200 && !dropped) {
++        dropped = b.receive(big.data(), big.size());
++        sends++;
++    }
++    CHECK(dropped, "a full socket drops (after %d units)", sends);
++    while (!rx.recvOne(100).empty()) {
++    }
++    CHECK(b.receive(p.data(), p.size()), "after a drop P is held back");
++    CHECK(!b.receive(idr.data(), idr.size()) && rx.recvOne() == idr, "and the next IDR goes out");
++
++    // The engine goes away: the bridge connects again (not more often than every 200 ms) and
++    // starts again at an IDR.
++    rx.closePeer();
++    bool lost = false;
++    for (int i = 0; i < 5 && !lost; i++)
++        lost = b.receive(p.data(), p.size());
++    CHECK(lost, "a closed socket is noticed");
++    g_usleep(250 * 1000);
++    b.receive(p.data(), p.size());
++    CHECK(rx.accept(), "connected again");
++    CHECK(b.receive(p.data(), p.size()), "P held back after reconnecting");
++    CHECK(!b.receive(idr.data(), idr.size()) && rx.recvOne() == idr, "IDR after reconnecting");
++
++    b.stop();
++    CHECK(!b.running() && !b.receive(idr.data(), idr.size()), "stopped: nothing passed");
++    b.stop();
++
++    // The engine is not listening yet when the bridge starts: it tries again at most every
++    // 200 ms, not on every unit.
++    {
++        AuBridge late;
++        const std::string path = dir + "/late-rx.sock";
++        unlink(path.c_str());
++        CHECK(late.setSockets("", path), "late path");
++        late.start(AuBridge::TxSink());
++        Server srv(path);
++        late.receive(idr.data(), idr.size());
++        CHECK(!srv.accept(50), "no reconnect within 200 ms of the failed try");
++        g_usleep(250 * 1000);
++        late.receive(idr.data(), idr.size());
++        CHECK(srv.accept(), "reconnected after 200 ms");
++        late.stop();
++    }
++}
++
++static void test_bridge_tx(const std::string &dir)
++{
++    Server tx(dir + "/tx.sock");
++    AuBridge b;
++    CHECK(b.setSockets(tx.path, ""), "tx path only");
++    std::vector<std::vector<uint8_t>> got;
++    // std::mutex, not GMutex: ThreadSanitizer sees only the former.
++    std::mutex mx;
++    b.start([&](const uint8_t *p, size_t n) {
++        std::lock_guard<std::mutex> lock(mx);
++        got.emplace_back(p, p + n);
++    });
++    CHECK(tx.accept(), "the TX thread connected");
++    const auto a = au(5, 70000, 1), c = au(1, 10, 2), d = au(1, 500, 3);
++    for (const auto *u : {&a, &c, &d})
++        CHECK(send(tx.peer, u->data(), u->size(), 0) == (ssize_t)u->size(), "sent");
++    for (int i = 0; i < 200; i++) {
++        size_t n;
++        {
++            std::lock_guard<std::mutex> lock(mx);
++            n = got.size();
++        }
++        if (n >= 3)
++            break;
++        g_usleep(10 * 1000);
++    }
++    {
++        std::lock_guard<std::mutex> lock(mx);
++        CHECK(got.size() == 3 && got[0] == a && got[1] == c && got[2] == d, "units in order, whole (%zu)", got.size());
++    }
++    // The engine restarts: the thread connects again.
++    tx.closePeer();
++    CHECK(tx.accept(), "the TX thread connected again");
++    b.stop();
++    CHECK(b.stats().txUnits == 3, "tx counter");
++}
++
++// A fake org.webosports.rtcengine.
++struct FakeRtc {
++    struct Call {
++        std::string method, payload;
++        std::function<void(const std::string &)> reply;
++    };
++    std::vector<Call> calls;
++    bool fail = false;
++    Controller::RtcCall fn()
++    {
++        return [this](const std::string &m, const std::string &p, std::function<void(const std::string &)> r) {
++            if (fail)
++                return false;
++            calls.push_back({m, p, r});
++            return true;
++        };
++    }
++    size_t count(const std::string &m) const
++    {
++        size_t n = 0;
++        for (const auto &c : calls)
++            n += c.method == m;
++        return n;
++    }
++    // Answers the latest call of method.
++    bool reply(const std::string &m, const std::string &payload)
++    {
++        for (size_t i = calls.size(); i-- > 0;) {
++            if (calls[i].method != m)
++                continue;
++            auto r = calls[i].reply;
++            calls[i].reply = nullptr;
++            if (!r)
++                return false;
++            r(payload);
++            return true;
++        }
++        return false;
++    }
++    std::string last(const std::string &m) const
++    {
++        for (size_t i = calls.size(); i-- > 0;)
++            if (calls[i].method == m)
++                return calls[i].payload;
++        return "";
++    }
++};
++
++static const char *kCaps2 = "{\"returnValue\":true,\"cameraCount\":2,\"videoCallCapable\":true}";
++static const char *kStarted = "{\"returnValue\":true,\"txSocket\":\"/nonexistent/tx\",\"rxSocket\":\"/nonexistent/rx\"}";
++
++static bool has(const std::string &s, const char *needle)
++{
++    return s.find(needle) != std::string::npos;
++}
++
++static void test_controller()
++{
++    FakeRtc rtc;
++    std::vector<bool> sending;
++    int changes = 0, keyframes = 0;
++    Controller c(rtc.fn());
++    c.onSendingChanged = [&](bool on) { sending.push_back(on); };
++    c.onChanged = [&]() { changes++; };
++    c.onPeerKeyframeWanted = [&]() { keyframes++; };
++
++    CHECK(has(c.lineFields(), "\"incomingVideoState\":\"unavailable\"") && has(c.lineFields(), "\"outgoingVideo\":false"),
++          "idle line: %s", c.lineFields().c_str());
++    CHECK(c.payloadFields() == ",\"allowVideoCalls\":true,\"videoURI\":\"\"", "idle payload: %s", c.payloadFields().c_str());
++
++    c.setOurCamera(true);
++    CHECK(rtc.calls.empty(), "no session before the call is up");
++    c.setCallActive(true);
++    CHECK(rtc.count("capabilities") == 1, "capabilities asked");
++    CHECK(rtc.reply("capabilities", kCaps2), "caps answered");
++    CHECK(rtc.count("start") == 1, "start asked");
++    const std::string start = rtc.last("start");
++    CHECK(has(start, "\"txEnabled\":true") && has(start, "\"camera\":1") && has(start, "\"width\":640") &&
++          has(start, "\"previewShmPath\":\"/tmp/tg-rtc-preview\"") && has(start, "\"rxSocket\":\"/tmp/tg-rtc-rx.sock\""),
++          "start payload: %s", start.c_str());
++    CHECK(rtc.reply("start", kStarted), "start answered");
++    CHECK(c.running() && c.sending() && c.bridge().running(), "running and sending");
++    CHECK(sending.size() == 1 && sending[0], "the call engine was told to send");
++    CHECK(keyframes == 1, "the peer is asked for an IDR when decoding starts");
++    const std::string pf = c.payloadFields();
++    CHECK(has(pf, "\"videoURI\":\"/tmp/tg-rtc-video\"") && has(pf, "\"videoWidth\":640") &&
++          has(pf, "\"videoPreviewURI\":\"/tmp/tg-rtc-preview\"") && has(pf, "\"videoPreviewMirrored\":true") &&
++          has(pf, "\"videoPreviewOrientation\":1"), "running payload: %s", pf.c_str());
++    CHECK(has(c.lineFields(), "\"outgoingVideo\":true"), "line says we send");
++
++    // Keyframes to our encoder, at most once a second.
++    c.requestKeyframe(10 * G_USEC_PER_SEC);
++    c.requestKeyframe(10 * G_USEC_PER_SEC + 500000);
++    CHECK(rtc.count("requestKeyframe") == 1, "one keyframe request in half a second");
++    c.requestKeyframe(11 * G_USEC_PER_SEC + 100000);
++    CHECK(rtc.count("requestKeyframe") == 2, "the next after a second");
++
++    // The peer's camera: available, then streaming while frames come, then available again.
++    c.setPeerVideo(true);
++    CHECK(has(c.lineFields(), "\"incomingVideo\":true") && has(c.lineFields(), "\"incomingVideoState\":\"available\""),
++          "peer video available: %s", c.lineFields().c_str());
++    c.noteFrame(20 * G_USEC_PER_SEC);
++    const int ch0 = changes;
++    CHECK(c.tick(20 * G_USEC_PER_SEC + 100) && has(c.lineFields(), "\"streaming\""), "streaming");
++    CHECK(!c.tick(21 * G_USEC_PER_SEC), "no change while frames are recent");
++    CHECK(c.tick(22 * G_USEC_PER_SEC + 1) && has(c.lineFields(), "\"available\""), "frames stopped");
++    CHECK(changes == ch0 + 2, "each flip told");
++
++    // Camera off, peer's video not chosen: the session stops.
++    c.setOurCamera(false);
++    CHECK(rtc.count("stop") == 1 && !c.running(), "stopped");
++    CHECK(sending.size() == 2 && !sending[1], "the call engine was told to stop sending");
++    CHECK(c.payloadFields() == ",\"allowVideoCalls\":true,\"videoURI\":\"\"", "no picture now");
++    CHECK(!c.bridge().running(), "bridge stopped");
++
++    // The user chooses to see the peer: a receive-only session.
++    c.setView(true);
++    CHECK(rtc.reply("capabilities", kCaps2), "caps again");
++    const std::string rxOnly = rtc.last("start");
++    CHECK(has(rxOnly, "\"txEnabled\":false") && has(rxOnly, "\"width\":480") && has(rxOnly, "\"previewShmPath\":\"\""),
++          "receive-only start: %s", rxOnly.c_str());
++    CHECK(rtc.reply("start", kStarted) && c.running() && !c.sending(), "running, receive only");
++    CHECK(sending.size() == 2, "sending not announced for receive only");
++    CHECK(!has(c.payloadFields(), "videoPreviewURI"), "no preview without our camera");
++    c.requestKeyframe(40 * G_USEC_PER_SEC);
++    CHECK(rtc.count("requestKeyframe") == 2, "no keyframe request without TX");
++
++    // Camera on while receiving: restarted with TX.
++    const size_t stops = rtc.count("stop");
++    c.setOurCamera(true);
++    CHECK(rtc.count("stop") == stops + 1, "the receive-only session stops");
++    CHECK(rtc.reply("capabilities", kCaps2) && has(rtc.last("start"), "\"txEnabled\":true"), "restarted with TX");
++    CHECK(rtc.reply("start", kStarted) && c.sending(), "sending");
++
++    // The call ends: stopped, and the next call asks to see the peer again.
++    c.setCallActive(false);
++    CHECK(!c.running() && rtc.count("stop") == stops + 2, "call over: stopped");
++    c.setOurCamera(false);
++    c.setCallActive(true);
++    CHECK(!c.running() && rtc.count("capabilities") == 3, "peer video alone does not start without the user");
++}
++
++static void test_controller_failures()
++{
++    // A start reply after the session was closed: what it started is stopped.
++    {
++        FakeRtc rtc;
++        Controller c(rtc.fn());
++        c.setCallActive(true);
++        c.setOurCamera(true);
++        rtc.reply("capabilities", kCaps2);
++        c.setOurCamera(false);
++        CHECK(rtc.count("stop") == 0, "nothing to stop yet");
++        rtc.reply("start", kStarted);
++        CHECK(rtc.count("stop") == 1 && !c.running(), "late start stopped");
++        // A caps reply after the wish went away does nothing.
++        c.setOurCamera(true);
++        c.setOurCamera(false);
++        rtc.reply("capabilities", kCaps2);
++        CHECK(rtc.count("start") == 1, "late caps start nothing");
++    }
++    // "already running": stopped and retried once.
++    {
++        FakeRtc rtc;
++        Controller c(rtc.fn());
++        c.setCallActive(true);
++        c.setOurCamera(true);
++        rtc.reply("capabilities", kCaps2);
++        rtc.reply("start", "{\"returnValue\":false,\"errorText\":\"already running\"}");
++        CHECK(rtc.count("stop") == 1 && rtc.count("capabilities") == 2, "stop and retry");
++        rtc.reply("capabilities", kCaps2);
++        rtc.reply("start", "{\"returnValue\":false,\"errorText\":\"already running\"}");
++        CHECK(rtc.count("stop") == 1 && rtc.count("capabilities") == 2, "only one retry");
++        CHECK(!c.running(), "given up");
++        // A new wish tries again.
++        c.setOurCamera(false);
++        c.setOurCamera(true);
++        CHECK(rtc.count("capabilities") == 3, "new wish, new try");
++    }
++    // Gave up while the user also watches the peer: switching our camera off is a new wish that
++    // keeps the session wanted, and is tried (receive only).
++    {
++        FakeRtc rtc;
++        Controller c(rtc.fn());
++        c.setCallActive(true);
++        c.setPeerVideo(true);
++        c.setView(true);
++        c.setOurCamera(true);
++        for (int i = 0; i < 2; i++) {
++            rtc.reply("capabilities", kCaps2);
++            rtc.reply("start", "{\"returnValue\":false,\"errorText\":\"already running\"}");
++        }
++        const size_t caps = rtc.count("capabilities");
++        CHECK(!c.running(), "given up");
++        c.setOurCamera(false);
++        CHECK(rtc.count("capabilities") == caps + 1, "camera off while watching: tried again");
++        rtc.reply("capabilities", kCaps2);
++        CHECK(has(rtc.last("start"), "\"txEnabled\":false"), "receive only");
++    }
++    // No encoder: the camera cannot be sent; receive only if the user wants to see the peer.
++    {
++        FakeRtc rtc;
++        int changes = 0;
++        Controller c(rtc.fn());
++        c.onChanged = [&]() { changes++; };
++        c.setCallActive(true);
++        c.setOurCamera(true);
++        rtc.reply("capabilities", kCaps2);
++        const int ch0 = changes;
++        rtc.reply("start", "{\"returnValue\":false,\"errorText\":\"tx start failed\"}");
++        CHECK(!c.running() && rtc.count("capabilities") == 1, "camera only: nothing more");
++        CHECK(changes > ch0, "told");
++        c.setPeerVideo(true);
++        c.setView(true);
++        CHECK(rtc.reply("capabilities", kCaps2), "probing for receive only");
++        CHECK(has(rtc.last("start"), "\"txEnabled\":false"), "receive only, the capable reply notwithstanding");
++        rtc.reply("start", kStarted);
++        CHECK(c.running() && !c.sending() && has(c.lineFields(), "\"outgoingVideo\":false"), "showing the peer");
++    }
++    // A device without a usable camera: our camera alone starts nothing.
++    {
++        FakeRtc rtc;
++        Controller c(rtc.fn());
++        c.setCallActive(true);
++        c.setOurCamera(true);
++        rtc.reply("capabilities", "{\"returnValue\":true,\"cameraCount\":0,\"videoCallCapable\":false}");
++        CHECK(rtc.count("start") == 0, "no camera, no session");
++        c.setPeerVideo(true);
++        c.setView(true);
++        rtc.reply("capabilities", "{\"returnValue\":true,\"cameraCount\":0,\"videoCallCapable\":false}");
++        CHECK(has(rtc.last("start"), "\"txEnabled\":false") && has(rtc.last("start"), "\"camera\":0"), "receive only");
++    }
++    // The service cannot be called / says no.
++    {
++        FakeRtc rtc;
++        rtc.fail = true;
++        Controller c(rtc.fn());
++        c.setCallActive(true);
++        c.setOurCamera(true);
++        CHECK(!c.running(), "no service");
++        rtc.fail = false;
++        c.setView(true); // no peer video: no change of wish that matters, but failed is reset
++        CHECK(rtc.count("capabilities") == 1, "tried again on a new wish");
++        rtc.reply("capabilities", "{\"returnValue\":false}");
++        CHECK(rtc.count("start") == 0, "caps failure: no start");
++        rtc.reply("start", kStarted);
++        CHECK(!c.running(), "a stray reply does nothing");
++    }
++    // Unusable socket paths in the start reply.
++    {
++        FakeRtc rtc;
++        Controller c(rtc.fn());
++        c.setCallActive(true);
++        c.setOurCamera(true);
++        rtc.reply("capabilities", kCaps2);
++        rtc.reply("start", ("{\"returnValue\":true,\"txSocket\":\"" + std::string(150, 'a') + "\",\"rxSocket\":\"/x\"}").c_str());
++        CHECK(!c.running() && rtc.count("stop") == 1, "refused and stopped");
++    }
++}
++
++static void test_json()
++{
++    CHECK(jsonBool("{\"a\":true}", "a") && !jsonBool("{\"a\":false}", "a") && !jsonBool("{\"a\":1}", "a"), "bool");
++    CHECK(!jsonBool("not json", "a") && !jsonBool("[true]", "a") && !jsonBool("{}", "a"), "bool fallbacks");
++    CHECK(jsonString("{\"s\":\"x\\\"y\"}", "s") == "x\"y" && jsonString("{\"s\":3}", "s").empty(), "string");
++    CHECK(jsonInt("{\"n\":2}", "n", -1) == 2 && jsonInt("{\"n\":2.0}", "n", -1) == 2 && jsonInt("{\"n\":\"2\"}", "n", -1) == -1 &&
++          jsonInt("{}", "n", 7) == 7, "int");
++    const uint8_t three[] = {0, 0, 1, 0x65};
++    CHECK(auHasIdr(three, 4) && !auHasIdr(three, 3) && !auHasIdr(nullptr, 4), "auHasIdr");
++}
++
++int main(int argc, char **argv)
++{
++    if (argc != 2) {
++        fprintf(stderr, "usage: %s <directory for the test sockets>\n", argv[0]);
++        return 2;
++    }
++    const std::string dir = argv[1];
++    test_json();
++    test_bridge_rx(dir);
++    test_bridge_tx(dir);
++    test_controller();
++    test_controller_failures();
++    if (failures) {
++        fprintf(stderr, "%d failure(s)\n", failures);
++        return 1;
++    }
++    fprintf(stderr, "ALL OK -- tgcalls-video\n");
++    return 0;
++}
+diff --git a/tgcalls-call.cpp b/tgcalls-call.cpp
+index 723ed50..8c31190 100644
+--- a/tgcalls-call.cpp
++++ b/tgcalls-call.cpp
+@@ -4,6 +4,7 @@
+ 
+ #include "call-luna.h"
+ #include "config.h"
++#include "tgcalls-video.h"
+ #include "transceiver.h"
+ 
+ #include <call_engine.h>
+@@ -22,24 +23,95 @@ constexpr char kVersion[] = "7.0.0";
+ constexpr size_t kKeySize = 256;
+ constexpr guint kTickMs = 500;
+ 
+-// One running call: the engine and the timer that drives its DTLS retransmissions.
++// One running call: the engine, its video (luneos-rtc-engine session, tgcalls-video.h) and the
++// timer that drives the engine's DTLS retransmissions.
+ struct LiteCall {
+     std::unique_ptr<tgcalls_lite::CallEngine> engine;
++    // After engine: destroyed first, which joins the thread that feeds the engine our camera.
++    std::unique_ptr<tgvideo::Controller> video;
+     guint tickSource = 0;
+ 
+-    ~LiteCall()
+-    {
+-        if (tickSource)
+-            g_source_remove(tickSource);
+-    }
++    ~LiteCall();
+ };
+ 
++// The call in progress, for the Phone app's changeMedia; one call at a time, as in call-luna.cpp.
++LiteCall *g_current = nullptr;
++
++// What the Phone app asked for before the engine started (while ringing).
++struct MediaWish {
++    bool haveView = false, view = false, haveCamera = false, camera = false;
++} g_wish;
++
++LiteCall::~LiteCall()
++{
++    if (tickSource)
++        g_source_remove(tickSource);
++    if (g_current == this)
++        g_current = nullptr;
++    video.reset();
++    callLunaSetVideo(std::string(), std::string());
++}
++
+ gboolean tick(gpointer data)
+ {
+-    static_cast<LiteCall *>(data)->engine->tick();
++    LiteCall *lite = static_cast<LiteCall *>(data);
++    lite->engine->tick();
++    if (lite->video)
++        lite->video->tick(g_get_monotonic_time());
+     return G_SOURCE_CONTINUE;
+ }
+ 
++void publishVideo(LiteCall &lite)
++{
++    callLunaSetVideo(lite.video->lineFields(), lite.video->payloadFields());
++    callLunaSetCallVideo(lite.video->running());
++}
++
++// Video through luneos-rtc-engine: the session follows our camera wish, the peer's camera and
++// whether the user chose to see it; the engine sends what the session encodes and the session
++// decodes what the engine receives.
++void wireVideo(LiteCall &lite, bool isVideoCall)
++{
++    lite.video.reset(new tgvideo::Controller(callLunaRtcCall));
++    tgvideo::Controller &video = *lite.video;
++    tgcalls_lite::CallEngine *engine = lite.engine.get();
++    LiteCall *call = &lite;
++
++    video.txSink = [engine](const uint8_t *au, size_t len) { engine->postVideoAccessUnit(au, len); };
++    video.onSendingChanged = [engine](bool on) {
++        if (on)
++            engine->setVideoRotation(tgvideo::Controller::txRotationDegrees());
++        engine->setVideoSending(on);
++    };
++    video.onChanged = [call]() { publishVideo(*call); };
++    video.onPeerKeyframeWanted = [engine]() { engine->requestPeerKeyframe(); };
++
++    engine->onVideoAccessUnit = [call, engine](const uint8_t *au, unsigned int len) {
++        if (!call->video)
++            return;
++        call->video->noteFrame(g_get_monotonic_time());
++        if (call->video->bridge().receive(au, len))
++            engine->requestPeerKeyframe();
++    };
++    engine->onKeyframeRequested = [call]() {
++        if (call->video)
++            call->video->requestKeyframe(g_get_monotonic_time());
++    };
++    engine->onIncomingVideoChanged = [call](bool on) {
++        tgcLog("tgcalls-lite: peer camera %s", on ? "on" : "off");
++        if (call->video)
++            call->video->setPeerVideo(on);
++    };
++
++    // A video call starts with our camera on; the Phone app may have said otherwise meanwhile.
++    video.setOurCamera(g_wish.haveCamera ? g_wish.camera : isVideoCall);
++    if (g_wish.haveView)
++        video.setView(g_wish.view);
++    g_wish = MediaWish();
++    video.setCallActive(true);
++    publishVideo(lite);
++}
++
+ LiteCall *liteCall(TdAccountData &account)
+ {
+     return static_cast<LiteCall *>(account.getCallEngine());
+@@ -117,7 +189,7 @@ bool tgcallsLiteStart(const td::td_api::call &call, const td::td_api::callStateR
+     }
+ 
+     auto lite = std::make_shared<LiteCall>();
+-    // Voice only for now: there is no video source or sink wired to the engine yet.
++    // Our camera joins once its session runs (wireVideo): the engine starts without video.
+     lite->engine = std::make_unique<tgcalls_lite::CallEngine>(
+         g_main_context_default(), reinterpret_cast<const uint8_t *>(state.encryption_key_.data()),
+         call.is_outgoing_, false);
+@@ -140,6 +212,8 @@ bool tgcallsLiteStart(const td::td_api::call &call, const td::td_api::callStateR
+     };
+ 
+     lite->tickSource = g_timeout_add(kTickMs, tick, lite.get());
++    g_current = lite.get();
++    wireVideo(*lite, call.is_video_);
+     account.setCallEngine(lite);
+ 
+     // audiod routes the voipcall sink and webcall source once it knows a VoIP call is up.
+@@ -164,8 +238,29 @@ void tgcallsLiteSignalingData(int32_t callId, const std::string &data, TdAccount
+         account.addPendingCallSignaling(data);
+ }
+ 
++void tgcallsLiteChangeMedia(bool hasView, bool view, bool hasCamera, bool camera)
++{
++    if (!g_current || !g_current->video) {
++        // Not started yet (ringing): applied when it starts.
++        if (hasView) {
++            g_wish.haveView = true;
++            g_wish.view = view;
++        }
++        if (hasCamera) {
++            g_wish.haveCamera = true;
++            g_wish.camera = camera;
++        }
++        return;
++    }
++    if (hasView)
++        g_current->video->setView(view);
++    if (hasCamera)
++        g_current->video->setOurCamera(camera);
++}
++
+ void tgcallsLiteStop(TdAccountData &account)
+ {
++    g_wish = MediaWish();
+     if (!liteCall(account))
+         return;
+     tgcLog("tgcalls-lite: call %d stopped", (int)account.getActiveCallId());
+diff --git a/tgcalls-call.h b/tgcalls-call.h
+index 58c4b14..aacf30a 100644
+--- a/tgcalls-call.h
++++ b/tgcalls-call.h
+@@ -2,7 +2,8 @@
+ #define _TGCALLS_CALL_H
+ 
+ // Telegram calls through tgcalls-lite: tgcalls V2 with signalling version 7.0.0 (raw encrypted
+-// signalling packets relayed by TDLib, ICE through libnice, DTLS-SRTP, Opus). Current clients
++// signalling packets relayed by TDLib, ICE through libnice, DTLS-SRTP, Opus, H.264 video through
++// luneos-rtc-engine, see tgcalls-video.h). Current clients
+ // register that version (tgcalls InstanceV2Impl); libtgvoip carries a call only when the peer
+ // agrees on no version at all.
+ 
+@@ -28,9 +29,14 @@ bool tgcallsLiteStart(const td::td_api::call &call, const td::td_api::callStateR
+ // updateNewCallSignalingData for the active call. Kept until the engine starts if it is early.
+ void tgcallsLiteSignalingData(int32_t callId, const std::string &data, TdAccountData &account);
+ 
+-// Stops the engine and its audio, if one is running.
++// Stops the engine and its audio and video, if one is running.
+ void tgcallsLiteStop(TdAccountData &account);
+ 
++// The Phone app's changeMedia: whether the user wants to see the peer's video (view) and to send
++// our camera. A field the Phone app left out is not changed. Before the call's engine starts, the
++// wish is kept for it.
++void tgcallsLiteChangeMedia(bool hasView, bool view, bool hasCamera, bool camera);
++
+ #endif
+ 
+ #endif
+diff --git a/tgcalls-video.cpp b/tgcalls-video.cpp
+new file mode 100644
+index 0000000..209accb
+--- /dev/null
++++ b/tgcalls-video.cpp
+@@ -0,0 +1,584 @@
++#include "tgcalls-video.h"
++
++#ifdef HAVE_TGCALLS_LITE
++
++#include <glib.h>
++#include <json-glib/json-glib.h>
++
++#include <cerrno>
++#include <cstdio>
++#include <cstring>
++#include <memory>
++#include <vector>
++
++#include <poll.h>
++#include <sys/socket.h>
++#include <sys/un.h>
++#include <unistd.h>
++
++namespace tgvideo {
++
++namespace {
++
++// Largest access unit read from the TX socket: keyframes at 640x480 are tens of KB, at 1280x720
++// hundreds (luneos-rtc-engine docs/API.md). A larger datagram is truncated by recv() and dropped.
++constexpr size_t kTxAuMax = 1024 * 1024;
++// Send buffer asked for on the RX socket: a SOCK_SEQPACKET datagram must fit whole, so this
++// bounds the largest peer keyframe passed on.
++constexpr int kRxSndBuf = 1024 * 1024;
++constexpr int kReconnectIntervalMs = 200;
++constexpr int64_t kKeyframeMinIntervalUs = G_USEC_PER_SEC;
++// The peer's video counts as streaming while a frame came within this.
++constexpr int64_t kStreamingTimeoutUs = 2 * G_USEC_PER_SEC;
++
++// Sizes, as for WhatsApp (glue/call.c of purple-combined): what the engine renders to (and
++// encodes at, with a camera). Receive-only is portrait, as phones send; the engine letterboxes
++// other shapes.
++constexpr int kTxWidth = 640, kTxHeight = 480;
++constexpr int kRxOnlyWidth = 480, kRxOnlyHeight = 640;
++constexpr int kTxBitrate = 1200000;
++constexpr int kPreviewWidth = 320, kPreviewHeight = 240;
++// How far the far side turns our camera's picture clockwise. WhatsApp's receivers needed one
++// quarter turn for sargo's camera held upright; that Telegram's needs the same is a guess until
++// a call shows it.
++constexpr int kTxRotationDegrees = 90;
++
++int connectSeqpacket(const std::string &path)
++{
++    struct sockaddr_un sa;
++    memset(&sa, 0, sizeof sa);
++    sa.sun_family = AF_UNIX;
++    if (path.size() >= sizeof sa.sun_path)
++        return -1;
++    memcpy(sa.sun_path, path.c_str(), path.size() + 1);
++    int fd = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
++    if (fd < 0)
++        return -1;
++    if (connect(fd, reinterpret_cast<struct sockaddr *>(&sa), sizeof sa) < 0) {
++        close(fd);
++        return -1;
++    }
++    return fd;
++}
++
++bool fitsSunPath(const std::string &path)
++{
++    return path.size() < sizeof(sockaddr_un::sun_path);
++}
++
++std::string jsonQuote(const std::string &s)
++{
++    std::string o = "\"";
++    for (char c : s) {
++        if (c == '"' || c == '\\') {
++            o += '\\';
++            o += c;
++        } else if ((unsigned char)c < 0x20) {
++            char buf[8];
++            snprintf(buf, sizeof buf, "\\u%04x", (unsigned)(unsigned char)c);
++            o += buf;
++        } else {
++            o += c;
++        }
++    }
++    return o + "\"";
++}
++
++// The reply's root object, or nullptr; unref the parser.
++JsonObject *parseObject(const std::string &json, JsonParser **parser)
++{
++    *parser = json_parser_new();
++    if (!json_parser_load_from_data(*parser, json.c_str(), (gssize)json.size(), nullptr))
++        return nullptr;
++    JsonNode *root = json_parser_get_root(*parser);
++    return root && JSON_NODE_HOLDS_OBJECT(root) ? json_node_get_object(root) : nullptr;
++}
++
++JsonNode *member(JsonObject *obj, const char *key)
++{
++    return obj && json_object_has_member(obj, key) ? json_object_get_member(obj, key) : nullptr;
++}
++
++} // namespace
++
++bool jsonBool(const std::string &json, const char *key)
++{
++    JsonParser *parser;
++    JsonNode *n = member(parseObject(json, &parser), key);
++    bool v = n && JSON_NODE_HOLDS_VALUE(n) && json_node_get_value_type(n) == G_TYPE_BOOLEAN &&
++             json_node_get_boolean(n);
++    g_object_unref(parser);
++    return v;
++}
++
++std::string jsonString(const std::string &json, const char *key)
++{
++    JsonParser *parser;
++    JsonNode *n = member(parseObject(json, &parser), key);
++    std::string v;
++    if (n && JSON_NODE_HOLDS_VALUE(n) && json_node_get_value_type(n) == G_TYPE_STRING)
++        v = json_node_get_string(n);
++    g_object_unref(parser);
++    return v;
++}
++
++long jsonInt(const std::string &json, const char *key, long fallback)
++{
++    JsonParser *parser;
++    JsonNode *n = member(parseObject(json, &parser), key);
++    long v = fallback;
++    if (n && JSON_NODE_HOLDS_VALUE(n)) {
++        GType t = json_node_get_value_type(n);
++        if (t == G_TYPE_INT64)
++            v = (long)json_node_get_int(n);
++        else if (t == G_TYPE_DOUBLE)
++            v = (long)json_node_get_double(n);
++    }
++    g_object_unref(parser);
++    return v;
++}
++
++bool auHasIdr(const uint8_t *au, size_t len)
++{
++    if (!au)
++        return false;
++    // NAL units follow 00 00 01 (a 4-byte start code ends the same way); the NAL type is the
++    // low five bits of the byte after it.
++    for (size_t i = 0; i + 3 < len; i++) {
++        if (au[i] == 0 && au[i + 1] == 0 && au[i + 2] == 1) {
++            if ((au[i + 3] & 0x1f) == 5)
++                return true;
++            i += 2;
++        }
++    }
++    return false;
++}
++
++// --- AuBridge ---------------------------------------------------------------------------------
++
++bool AuBridge::setSockets(const std::string &txPath, const std::string &rxPath)
++{
++    if (m_running)
++        return false; // the running bridge keeps its paths
++    if (!fitsSunPath(txPath) || !fitsSunPath(rxPath)) {
++        m_txPath.clear();
++        m_rxPath.clear();
++        return false;
++    }
++    m_txPath = txPath;
++    m_rxPath = rxPath;
++    return true;
++}
++
++void AuBridge::start(TxSink sink)
++{
++    if (m_running)
++        return;
++    m_running = true;
++    m_rxWaitIdr = true;
++    m_rxSent = m_rxDropped = 0;
++    m_txUnits = 0;
++    m_rxLastConnectUs = 0;
++    rxConnect();
++    if (!m_txPath.empty() && sink) {
++        m_txStop = false;
++        m_txThread = std::thread(&AuBridge::txMain, this, m_txPath, std::move(sink));
++    }
++}
++
++void AuBridge::stop()
++{
++    if (m_running)
++        fprintf(stderr, "tg-video: bridge stopped (rx sent %llu, dropped %llu, tx %llu)\n", m_rxSent,
++                m_rxDropped, (unsigned long long)m_txUnits);
++    m_running = false;
++    if (m_rxFd >= 0) {
++        close(m_rxFd);
++        m_rxFd = -1;
++    }
++    m_txStop = true;
++    if (m_txThread.joinable())
++        m_txThread.join();
++}
++
++AuBridge::Stats AuBridge::stats() const
++{
++    Stats s;
++    s.rxSent = m_rxSent;
++    s.rxDropped = m_rxDropped;
++    s.txUnits = m_txUnits;
++    return s;
++}
++
++void AuBridge::rxConnect()
++{
++    const int64_t now = g_get_monotonic_time();
++    if (m_rxFd >= 0 || m_rxPath.empty() ||
++        (m_rxLastConnectUs && now - m_rxLastConnectUs < kReconnectIntervalMs * 1000))
++        return;
++    m_rxLastConnectUs = now;
++    int fd = connectSeqpacket(m_rxPath);
++    if (fd < 0)
++        return;
++    int size = kRxSndBuf;
++    // SO_SNDBUFFORCE passes net.core.wmem_max when we may (the service runs as root).
++    if (setsockopt(fd, SOL_SOCKET, SO_SNDBUFFORCE, &size, sizeof size) < 0 &&
++        setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &size, sizeof size) < 0)
++        fprintf(stderr, "tg-video: rx send buffer stays at the default\n");
++    m_rxFd = fd;
++    m_rxWaitIdr = true; // joining mid-stream
++    fprintf(stderr, "tg-video: rx connected\n");
++}
++
++bool AuBridge::receive(const uint8_t *au, size_t len)
++{
++    if (!m_running || !au || len == 0)
++        return false;
++    rxConnect();
++    if (m_rxFd < 0)
++        return false;
++    if (m_rxWaitIdr) {
++        if (!auHasIdr(au, len)) {
++            m_rxDropped++;
++            return true;
++        }
++        m_rxWaitIdr = false;
++    }
++    ssize_t n = send(m_rxFd, au, len, MSG_DONTWAIT | MSG_NOSIGNAL);
++    if (n == (ssize_t)len) {
++        m_rxSent++;
++        return false;
++    }
++    int err = n < 0 ? errno : EMSGSIZE;
++    m_rxDropped++;
++    m_rxWaitIdr = true;
++    if (err != EAGAIN && err != EWOULDBLOCK && err != EMSGSIZE && err != ENOBUFS) {
++        // The engine went away (session stopped or restarted): connect again later.
++        close(m_rxFd);
++        m_rxFd = -1;
++    }
++    return true;
++}
++
++void AuBridge::txMain(std::string path, TxSink sink)
++{
++    std::unique_ptr<uint8_t[]> buf(new (std::nothrow) uint8_t[kTxAuMax]);
++    if (!buf)
++        return;
++    int fd = -1;
++    while (!m_txStop) {
++        if (fd < 0) {
++            fd = connectSeqpacket(path);
++            if (fd < 0) {
++                poll(nullptr, 0, kReconnectIntervalMs);
++                continue;
++            }
++            fprintf(stderr, "tg-video: tx connected\n");
++        }
++        struct pollfd p;
++        p.fd = fd;
++        p.events = POLLIN;
++        p.revents = 0;
++        int r = poll(&p, 1, kReconnectIntervalMs);
++        if (r < 0 && errno != EINTR)
++            break;
++        if (r <= 0)
++            continue;
++        ssize_t n = recv(fd, buf.get(), kTxAuMax, MSG_TRUNC);
++        if (n <= 0) {
++            // 0: the engine closed the socket. Connect again; the session may be restarting.
++            close(fd);
++            fd = -1;
++            continue;
++        }
++        if ((size_t)n > kTxAuMax) {
++            fprintf(stderr, "tg-video: tx access unit of %zd bytes dropped\n", n);
++            continue;
++        }
++        m_txUnits++;
++        sink(buf.get(), (size_t)n);
++    }
++    if (fd >= 0)
++        close(fd);
++}
++
++// --- Controller -------------------------------------------------------------------------------
++
++Controller::Controller(RtcCall rtc, EnginePaths paths) : m_rtc(std::move(rtc)), m_paths(std::move(paths)) {}
++
++Controller::~Controller()
++{
++    // No callbacks into a call that is going away.
++    onSendingChanged = nullptr;
++    onChanged = nullptr;
++    onPeerKeyframeWanted = nullptr;
++    close();
++    txSink = nullptr;
++}
++
++int Controller::txRotationDegrees()
++{
++    return kTxRotationDegrees;
++}
++
++bool Controller::wanted() const
++{
++    return m_callActive && (wantTx() || (m_peerVideo && m_view));
++}
++
++bool Controller::wantTx() const
++{
++    return m_ourCamera && m_canSend;
++}
++
++void Controller::changed()
++{
++    if (onChanged)
++        onChanged();
++}
++
++void Controller::setCallActive(bool on)
++{
++    if (on == m_callActive)
++        return;
++    m_callActive = on;
++    if (!on)
++        m_view = false; // a new call asks again
++    reconcile();
++}
++
++void Controller::setOurCamera(bool on)
++{
++    if (on == m_ourCamera)
++        return;
++    m_ourCamera = on;
++    m_failed = false; // a new wish may start what failed before
++    reconcile();
++    changed();
++}
++
++void Controller::setPeerVideo(bool on)
++{
++    if (on == m_peerVideo)
++        return;
++    m_peerVideo = on;
++    if (!on)
++        m_streaming = false;
++    reconcile();
++    changed();
++}
++
++void Controller::setView(bool on)
++{
++    if (on == m_view)
++        return;
++    m_view = on;
++    m_failed = false;
++    reconcile();
++}
++
++void Controller::reconcile()
++{
++    if (!wanted()) {
++        m_failed = false;
++        m_retried = false;
++        close();
++        return;
++    }
++    if (m_state == State::Running && m_tx != wantTx()) {
++        // Camera on or off: the engine takes the TX chain only at start.
++        close();
++    }
++    if (m_state != State::Idle || m_failed)
++        return; // a reply on its way reconciles again
++    m_state = State::Probing;
++    const unsigned gen = m_gen;
++    if (!m_rtc("capabilities", "{}", [this, gen](const std::string &reply) { onCaps(gen, reply); })) {
++        m_state = State::Idle;
++        m_failed = true;
++    }
++}
++
++void Controller::onCaps(unsigned gen, const std::string &reply)
++{
++    if (gen != m_gen || m_state != State::Probing)
++        return;
++    if (!jsonBool(reply, "returnValue")) {
++        fprintf(stderr, "tg-video: engine capabilities failed\n");
++        m_state = State::Idle;
++        m_failed = true;
++        return;
++    }
++    // videoCallCapable honours the device's own policy (deviceinfo_video_call): a device without a
++    // usable camera still shows the peer, it just sends nothing. With two cameras take the front
++    // one: the droid backend passes the index to droidcamsrc as the HAL id, front = 1.
++    // Only ever lowered: a TX start that failed outweighs a later "capable".
++    m_canSend = m_canSend && jsonBool(reply, "videoCallCapable");
++    m_camera = jsonInt(reply, "cameraCount", 0) >= 2 ? 1 : 0;
++    m_state = State::Idle;
++    if (!wanted()) {
++        changed(); // our camera cannot be sent after all
++        return;
++    }
++    startSession(wantTx());
++}
++
++void Controller::startSession(bool tx)
++{
++    m_tx = tx;
++    m_width = tx ? kTxWidth : kRxOnlyWidth;
++    m_height = tx ? kTxHeight : kRxOnlyHeight;
++    char payload[640];
++    snprintf(payload, sizeof payload,
++             "{\"rxSocket\":%s,\"txSocket\":%s,\"rxEnabled\":true,\"txEnabled\":%s,\"shmPath\":%s,"
++             "\"width\":%d,\"height\":%d,\"bitrate\":%d,\"camera\":%d,\"previewShmPath\":%s,"
++             "\"previewWidth\":%d,\"previewHeight\":%d}",
++             jsonQuote(m_paths.rxSocket).c_str(), jsonQuote(m_paths.txSocket).c_str(), tx ? "true" : "false",
++             jsonQuote(m_paths.shm).c_str(), m_width, m_height, kTxBitrate, m_camera,
++             jsonQuote(tx ? m_paths.preview : std::string()).c_str(), kPreviewWidth, kPreviewHeight);
++    m_state = State::Starting;
++    const unsigned gen = m_gen;
++    if (!m_rtc("start", payload, [this, gen](const std::string &reply) { onStart(gen, reply); })) {
++        m_state = State::Idle;
++        m_failed = true;
++    }
++}
++
++void Controller::onStart(unsigned gen, const std::string &reply)
++{
++    const bool ok = jsonBool(reply, "returnValue");
++    if (gen != m_gen || m_state != State::Starting) {
++        // Closed while starting: stop what this start brought up.
++        if (ok)
++            m_rtc("stop", "{}", nullptr);
++        return;
++    }
++    if (!ok) {
++        const std::string err = jsonString(reply, "errorText");
++        m_state = State::Idle;
++        if (!m_retried && err == "already running") {
++            // A session we lost track of (the service restarted during a call): stop it, start ours.
++            fprintf(stderr, "tg-video: engine already running, stopping it and retrying\n");
++            m_retried = true;
++            m_rtc("stop", "{}", nullptr);
++            reconcile();
++            return;
++        }
++        if (m_tx && err == "tx start failed") {
++            // No usable camera or encoder after all: still show the peer.
++            fprintf(stderr, "tg-video: engine cannot send video, receiving only\n");
++            m_canSend = false;
++            changed();
++            reconcile(); // receive only, if the user wants to see the peer
++            return;
++        }
++        fprintf(stderr, "tg-video: engine start failed: %s\n", err.c_str());
++        m_failed = true;
++        return;
++    }
++    std::string rx = jsonString(reply, "rxSocket"), tx = jsonString(reply, "txSocket");
++    if (rx.empty())
++        rx = m_paths.rxSocket;
++    if (tx.empty())
++        tx = m_paths.txSocket;
++    if (!m_bridge.setSockets(m_tx ? tx : std::string(), rx)) {
++        fprintf(stderr, "tg-video: unusable engine socket paths\n");
++        m_rtc("stop", "{}", nullptr);
++        m_state = State::Idle;
++        m_failed = true;
++        return;
++    }
++    m_bridge.start(m_tx ? txSink : AuBridge::TxSink());
++    m_state = State::Running;
++    m_keyframeAsked = false;
++    fprintf(stderr, "tg-video: engine running (%dx%d, tx %s)\n", m_width, m_height, m_tx ? "on" : "off");
++    if (m_tx && onSendingChanged)
++        onSendingChanged(true);
++    // The decoder joins mid-stream: it needs an IDR to start from.
++    if (onPeerKeyframeWanted)
++        onPeerKeyframeWanted();
++    changed();
++    // The wish may have changed while starting.
++    if (!wanted() || m_tx != wantTx())
++        reconcile();
++}
++
++void Controller::close()
++{
++    const State was = m_state;
++    m_gen++;
++    m_state = State::Idle;
++    if (was == State::Idle || was == State::Probing)
++        return;
++    // Starting: onStart sees the old generation and stops what it started.
++    if (was == State::Running) {
++        m_bridge.stop();
++        m_rtc("stop", "{}", nullptr);
++        if (m_tx && onSendingChanged)
++            onSendingChanged(false);
++        fprintf(stderr, "tg-video: engine session closed\n");
++        changed();
++    }
++}
++
++void Controller::requestKeyframe(int64_t nowUs)
++{
++    if (!sending())
++        return;
++    if (m_keyframeAsked && nowUs - m_lastKeyframeUs < kKeyframeMinIntervalUs)
++        return;
++    m_keyframeAsked = true;
++    m_lastKeyframeUs = nowUs;
++    m_rtc("requestKeyframe", "{}", nullptr);
++}
++
++bool Controller::tick(int64_t nowUs)
++{
++    const bool frames = m_peerVideo && m_lastFrameUs && nowUs - m_lastFrameUs < kStreamingTimeoutUs;
++    if (frames == m_streaming)
++        return false;
++    m_streaming = frames;
++    changed();
++    return true;
++}
++
++std::string Controller::lineFields() const
++{
++    const char *ivs = !m_peerVideo ? "unavailable" : m_streaming ? "streaming" : "available";
++    std::string s = ",\"incomingVideo\":";
++    s += m_peerVideo ? "true" : "false";
++    s += ",\"outgoingVideo\":";
++    s += sending() ? "true" : "false";
++    s += ",\"incomingVideoState\":\"";
++    s += ivs;
++    // A WebRTC sender turns its frames upright itself when, as here, the orientation
++    // extension is not negotiated.
++    s += "\",\"incomingVideoOrientation\":0";
++    return s;
++}
++
++std::string Controller::payloadFields() const
++{
++    std::string s = ",\"allowVideoCalls\":true,\"videoURI\":";
++    if (!running())
++        return s + "\"\"";
++    char buf[96];
++    s += jsonQuote(m_paths.shm);
++    snprintf(buf, sizeof buf, ",\"videoWidth\":%d,\"videoHeight\":%d", m_width, m_height);
++    s += buf;
++    if (m_tx) {
++        // Our own picture for the inset: turned like the sent one, mirrored for the front camera
++        // as a mirror shows the user.
++        s += ",\"videoPreviewURI\":" + jsonQuote(m_paths.preview);
++        snprintf(buf, sizeof buf, ",\"videoPreviewWidth\":%d,\"videoPreviewHeight\":%d,\"videoPreviewOrientation\":%d",
++                 kPreviewWidth, kPreviewHeight, kTxRotationDegrees / 90);
++        s += buf;
++        s += ",\"videoPreviewMirrored\":";
++        s += m_camera == 1 ? "true" : "false";
++    }
++    return s;
++}
++
++} // namespace tgvideo
++
++#endif
+diff --git a/tgcalls-video.h b/tgcalls-video.h
+new file mode 100644
+index 0000000..9bdba1e
+--- /dev/null
++++ b/tgcalls-video.h
+@@ -0,0 +1,172 @@
++#ifndef _TGCALLS_VIDEO_H
++#define _TGCALLS_VIDEO_H
++
++// Telegram video for tgcalls-lite calls, through luneos-rtc-engine (org.webosports.rtcengine),
++// which WhatsApp calls use too: the engine owns the camera, the H.264 encoder and decoder and the
++// gst-shm frames the Phone app shows. This file only decides when an engine session runs, moves
++// access units over the engine's two sockets, and describes the video to the Phone app. Nothing
++// here depends on TDLib or luna-service2 (the LS2 calls are a function the caller passes in), so
++// it is tested on its own (test/tgcalls-video-test.cpp).
++//
++// Everything except the TX socket reader runs on libpurple's main loop, like the call engine.
++
++#include <atomic>
++#include <cstddef>
++#include <cstdint>
++#include <functional>
++#include <mutex>
++#include <string>
++#include <thread>
++
++namespace tgvideo {
++
++// The engine's AU sockets (luneos-rtc-engine docs/API.md, "AU socket wire contract"): AF_UNIX
++// SOCK_SEQPACKET, one Annex-B access unit per datagram, the engine listening on both.
++//   RX: we send the peer's access units; the engine decodes them for the Phone app.
++//   TX: the engine sends our encoded camera; a thread reads it and hands each unit to a sink.
++class AuBridge {
++public:
++    // Called on the TX thread with each encoded camera access unit.
++    using TxSink = std::function<void(const uint8_t *au, size_t len)>;
++
++    AuBridge() = default;
++    ~AuBridge() { stop(); }
++    AuBridge(const AuBridge &) = delete;
++    AuBridge &operator=(const AuBridge &) = delete;
++
++    // The paths the engine's start reply named; "" for none (no TX: no camera). False if the
++    // bridge is running (its paths stay), or, with both cleared, if a path does not fit a
++    // sockaddr_un.
++    bool setSockets(const std::string &txPath, const std::string &rxPath);
++    // Starts passing units (and the TX thread if there is a TX path). Idempotent.
++    void start(TxSink sink);
++    // Stops the TX thread (joined) and closes the RX socket. Idempotent.
++    void stop();
++    bool running() const { return m_running; }
++
++    // One of the peer's access units, as the call engine delivers them. Never blocks: a unit the
++    // socket has no room for is dropped. After a drop, and when the socket (re)connects, units
++    // are held back until the next IDR. Returns true when the peer should be asked for one.
++    bool receive(const uint8_t *au, size_t len);
++
++    struct Stats {
++        unsigned long long rxSent = 0, rxDropped = 0, txUnits = 0;
++    };
++    Stats stats() const;
++
++private:
++    void rxConnect();
++    void txMain(std::string path, TxSink sink);
++
++    std::string m_txPath, m_rxPath;
++    bool m_running = false;
++    int m_rxFd = -1;
++    bool m_rxWaitIdr = true;
++    int64_t m_rxLastConnectUs = 0;
++    unsigned long long m_rxSent = 0, m_rxDropped = 0;
++    std::atomic<unsigned long long> m_txUnits{0};
++    std::thread m_txThread;
++    std::atomic<bool> m_txStop{false};
++};
++
++// True if the Annex-B access unit holds an IDR slice (NAL type 5).
++bool auHasIdr(const uint8_t *au, size_t len);
++
++// Engine paths on the device. The engine binds them, like its own defaults, in /tmp.
++struct EnginePaths {
++    std::string rxSocket = "/tmp/tg-rtc-rx.sock";
++    std::string txSocket = "/tmp/tg-rtc-tx.sock";
++    std::string shm = "/tmp/tg-rtc-video";
++    std::string preview = "/tmp/tg-rtc-preview";
++};
++
++// When the engine session runs, and what the Phone app is told. Inputs come from the Phone app
++// (changeMedia), the call engine (the peer's camera, frames) and the call (active or not).
++//
++// A session runs while the call is up and either our camera should be on and the device can send
++// (the engine's capabilities, and no failed TX start), or the peer sends video and the user chose
++// to see it. It encodes our camera when that should be on and can be; otherwise it only decodes.
++class Controller {
++public:
++    // Calls method of org.webosports.rtcengine with payload. onReply (may be empty) gets the
++    // reply payload on the main loop. Returns false if the call could not be sent.
++    using RtcCall = std::function<bool(const std::string &method, const std::string &payload,
++                                       std::function<void(const std::string &reply)> onReply)>;
++
++    explicit Controller(RtcCall rtc, EnginePaths paths = EnginePaths());
++    ~Controller();
++    Controller(const Controller &) = delete;
++    Controller &operator=(const Controller &) = delete;
++
++    void setCallActive(bool on);
++    void setOurCamera(bool on);   // what the user wants: our camera on or off
++    void setPeerVideo(bool on);   // the peer's offer has video
++    void setView(bool on);        // the user chose to see the peer's video
++
++    // The peer asked for a keyframe of our video: passed to the encoder at most once a second.
++    void requestKeyframe(int64_t nowUs);
++    // One of the peer's access units arrived (for incomingVideoState "streaming").
++    void noteFrame(int64_t nowUs) { m_lastFrameUs = nowUs; }
++    // Call about once a second: notices the peer's frames stopping or starting. Returns true
++    // (and fires onChanged) when what the Phone app is told changed.
++    bool tick(int64_t nowUs);
++
++    // Where our encoded camera goes (called on the TX thread): the call engine's
++    // postVideoAccessUnit(). Set before the session starts.
++    AuBridge::TxSink txSink;
++    // Our camera's picture is sent: the call engine should offer video.
++    std::function<void(bool sending)> onSendingChanged;
++    // What the Phone app is told changed (republish the call state, tell audiod).
++    std::function<void()> onChanged;
++    // A session started decoding mid-stream: ask the peer for an IDR.
++    std::function<void()> onPeerKeyframeWanted;
++
++    AuBridge &bridge() { return m_bridge; }
++    bool running() const { return m_state == State::Running; }
++    bool sending() const { return running() && m_tx; }
++    bool streaming() const { return m_streaming; }
++
++    // JSON members (each starting with ',') for the call state the Phone app reads.
++    std::string lineFields() const;     // on the line
++    std::string payloadFields() const;  // at the top level
++
++    // The quarter turns our sent picture needs on the far side, as the call engine tells it.
++    static int txRotationDegrees();
++
++private:
++    enum class State { Idle, Probing, Starting, Running };
++    void reconcile();
++    void close();
++    void startSession(bool tx);
++    void onCaps(unsigned gen, const std::string &reply);
++    void onStart(unsigned gen, const std::string &reply);
++    bool wanted() const;
++    bool wantTx() const;
++    void changed();
++
++    RtcCall m_rtc;
++    EnginePaths m_paths;
++    AuBridge m_bridge;
++    State m_state = State::Idle;
++    unsigned m_gen = 0;         // bumped on every close: replies of an older session are ignored
++    bool m_callActive = false, m_ourCamera = false, m_peerVideo = false, m_view = false;
++    bool m_failed = false;      // a start failed: no retry until the wish changes
++    bool m_retried = false;     // one stop-and-retry after "already running"
++    bool m_canSend = true;      // capabilities: videoCallCapable
++    bool m_tx = false;          // the running (or starting) session encodes our camera
++    int m_camera = 0;
++    int m_width = 0, m_height = 0;
++    int64_t m_lastKeyframeUs = 0;
++    bool m_keyframeAsked = false;
++    int64_t m_lastFrameUs = 0;
++    bool m_streaming = false;
++};
++
++// Tiny readers for the engine's flat JSON replies.
++bool jsonBool(const std::string &json, const char *key);
++std::string jsonString(const std::string &json, const char *key);
++long jsonInt(const std::string &json, const char *key, long fallback);
++
++} // namespace tgvideo
++
++#endif
+-- 
+2.53.0
+

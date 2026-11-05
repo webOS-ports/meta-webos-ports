@@ -1,0 +1,125 @@
+From ca64cdb8b402d1d17d79d9d47942a5c8be32efa9 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 4 Nov 2026 05:43:48 +0100
+Subject: [PATCH] webOS: clear ended calls from the Phone app, show the peer's
+ number
+
+The Phone app removes a call card only when a callStateQuery push no
+longer lists the call. com.palm.telegram.call kept reporting the ended
+call as "disconnected" for good, so its "Ended" card stayed on screen
+and kept the Phone app open after the next call. Push the empty line
+list 1.5 s after "disconnected", as the WhatsApp connector does; any
+newer push cancels it.
+
+Incoming call cards showed the "id<n>" buddy name, so the Phone app
+found no contact and offered to add one. When Telegram shares the
+peer's phone number, the card shows it in E.164 form instead. An
+outgoing call keeps the address that was dialled, which the Phone app
+keyed its card to.
+
+Every call went out as call id "tg". The Phone app remembers the ids of
+the calls it has seen end and ignores a later "disconnected" for one of
+them, so only the first call after the Phone app started closed its
+card; every later one stayed up. Each call now gets an id of its own,
+taken from the clock when it starts, so a restarted service does not
+reuse one either. audiod still gets "tg": it keeps one call per sender.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ call-luna.cpp | 33 ++++++++++++++++++++++++++++++++-
+ call.cpp      | 10 +++++++++-
+ 2 files changed, 41 insertions(+), 2 deletions(-)
+
+diff --git a/call-luna.cpp b/call-luna.cpp
+index c2c10ad..94e3464 100644
+--- a/call-luna.cpp
++++ b/call-luna.cpp
+@@ -41,6 +41,10 @@ PurpleAccount *g_account  = NULL;   // the bound Telegram account
+ // Last state we pushed, so a late subscriber gets the current picture immediately.
+ std::string    g_state, g_peerAddr, g_peerName, g_cause;
+ bool           g_outgoing = false;
++// The call's id on the card. The Phone app remembers every call id it has seen end and ignores a
++// later "disconnected" for it, so each call needs an id of its own, or the card of every call after
++// the first stays up. From the clock, so a restarted service does not hand out an old one again.
++std::string    g_cardId;
+ 
+ const char *SUBKEY = "callState";
+ 
+@@ -74,7 +78,7 @@ std::string buildPayload()
+         // address and displayName sit flat on each call, as the WhatsApp connector sends them.
+         // transport is this connector's own PHONE account template id: without it the call is
+         // taken for a cellular one and the id is shown formatted as a phone number.
+-        p += "\"calls\":[{\"id\":\"tg\",\"origin\":\"" + std::string(g_outgoing ? "outgoing" : "incoming") + "\","
++        p += "\"calls\":[{\"id\":\"" + g_cardId + "\",\"origin\":\"" + std::string(g_outgoing ? "outgoing" : "incoming") + "\","
+              "\"transport\":\"com.palm.telegram\","
+              "\"address\":\"" + jsonEscape(g_peerAddr.c_str()) + "\","
+              "\"displayName\":\"" + jsonEscape(g_peerName.empty() ? g_peerAddr.c_str() : g_peerName.c_str()) + "\"}]}";
+@@ -202,9 +206,36 @@ void callLunaShutdown(PurpleAccount *account)
+     // Keep the service registered for the process lifetime (cheap, and other accounts may use it).
+ }
+ 
++// The Phone app drops a call card only when a push stops listing that call. So an ended call is
++// shown as "disconnected" for a moment and then the empty line list follows, as the WhatsApp
++// connector does. Any newer push cancels the pending one.
++constexpr guint kEndedCallHoldMs = 1500;
++static guint g_idlePush = 0;
++
++static gboolean pushIdle(gpointer)
++{
++    g_idlePush = 0;
++    callLunaPushState(NULL, NULL, NULL, false, NULL, false);
++    return G_SOURCE_REMOVE;
++}
++
+ void callLunaPushState(const char *state, const char *peerAddress, const char *peerName,
+                        bool isOutgoing, const char *cause, bool isVideo)
+ {
++    if (g_idlePush) {
++        g_source_remove(g_idlePush);
++        g_idlePush = 0;
++    }
++    if (state && !strcmp(state, "disconnected"))
++        g_idlePush = g_timeout_add(kEndedCallHoldMs, pushIdle, NULL);
++
++    // A call starts when a line appears where there was none, or replaces an ended one. A repeated
++    // "disconnected" still belongs to the call that ended.
++    bool newCall = state && *state &&
++                   (g_state.empty() || (g_state == "disconnected" && strcmp(state, "disconnected") != 0));
++    if (newCall)
++        g_cardId = "tg-" + std::to_string(g_get_real_time());
++
+     g_state    = state       ? state       : "";
+     g_peerAddr = peerAddress  ? peerAddress : "";
+     g_peerName = peerName     ? peerName    : "";
+diff --git a/call.cpp b/call.cpp
+index 3d5e3bd..405c4a0 100644
+--- a/call.cpp
++++ b/call.cpp
+@@ -214,6 +214,14 @@ void updateCall(const td::td_api::call &call, TdAccountData &account, TdTranscei
+     // buddyName would split from the dialer's "+E.164" card and leave a phantom "Connecting" one.
+     const std::string &dialedAddr = account.getCallDialedAddress();
+     std::string peerAddr = (call.is_outgoing_ && !dialedAddr.empty()) ? dialedAddr : buddyName;
++    // Otherwise show the peer's phone number when Telegram shares it, so the Phone app matches the
++    // address book entry instead of offering to add "id<n>" as a new contact. TDLib gives the
++    // number without the leading '+'.
++    if (!(call.is_outgoing_ && !dialedAddr.empty())) {
++        const td::td_api::user *user = account.getUser(getUserId(call));
++        if (user && !user->phone_number_.empty())
++            peerAddr = std::string("+") + getCanonicalPhoneNumber(user->phone_number_.c_str());
++    }
+ 
+ #ifndef NoVoip
+     // webOS (Path C): the call UI + audio is the stock Phone app via com.palm.telegram.call (see
+@@ -243,7 +251,7 @@ void updateCall(const td::td_api::call &call, TdAccountData &account, TdTranscei
+             account.setActiveCall(call.id_);
+             // webOS: ring the stock Phone app instead of a pidgin accept/reject dialog. The user
+             // answers via com.palm.telegram.call/answer -> callBridgeAnswer -> acceptCurrentCall.
+-            callLunaPushState("incoming", buddyName.c_str(),
++            callLunaPushState("incoming", peerAddr.c_str(),
+                               account.getDisplayName(getUserId(call)).c_str(), false, NULL,
+                               call.is_video_);
+         } else if (call.id_ != account.getActiveCallId()) {
+-- 
+2.53.0
+
