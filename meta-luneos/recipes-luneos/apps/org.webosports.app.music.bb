@@ -4,7 +4,8 @@ LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 PV = "1.0.0+git"
-SRCREV = "8beeb73c4a8cff4c26abbaa460a16388977e7c7e"
+PE = "1"
+SRCREV = "1bd230f49ba03f9b94f5cb82a9ad41efecd9e67e"
 
 # The QML plugin (MusicApp) links TagLib for tags and covers.
 DEPENDS = "qtbase qtdeclarative qtdeclarative-native taglib"

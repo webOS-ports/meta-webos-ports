@@ -13,6 +13,7 @@ LIC_FILES_CHKSUM = " \
 DEPENDS = "glib-2.0 db8 pidgin luna-service2 tidy-html5 libopus libogg"
 
 PV = "3.0.5+git"
+PE = "1"
 
 inherit webos_ports_ose_repo
 inherit webos_cmake
@@ -24,7 +25,7 @@ inherit webos_systemd
 
 LUNEOS_SYSTEMD_SERVICE = "imlibpurpleservice.service"
 
-SRCREV = "8f5d50c504a0e87e6d7d65ebefbe581c5c2fad17"
+SRCREV = "313431ad0527f7d6b059c061e25e3b8c248aed42"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 

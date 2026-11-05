@@ -11,7 +11,7 @@ RDEPENDS:${PN} += "shared-mime-info"
 RDEPENDS:${PN} += "qtimageformats-plugins"
 
 PV = "0.1.0-14+git"
-SRCREV = "32dcf2722822b679a1ce8311908865cdd829fffe"
+SRCREV = "7909b927445c5b36abbee36de0b4eb8ff60e0776"
 PR = "r6"
 
 inherit webos_ports_repo

@@ -19,6 +19,7 @@ SRC_URI += "file://spotify-webos-service.service"
 # 0.9.2 is musicauth's appinfo.json version at that SRCREV. The player is its own recipe
 # from its own repository now (org.webosports.app.music, 1.0.0+git).
 PV = "0.9.2+git"
+PE = "1"
 
 S = "${LSC_SRCDIR}"
 

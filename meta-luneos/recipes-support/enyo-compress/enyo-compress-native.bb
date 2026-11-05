@@ -12,7 +12,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 # Keep PV/SRCREV in lockstep with enyo-1.0.bb -- same repo, same revision.
 PV = "1.0-128.2+git"
-SRCREV = "f62a860d65a7ce44fe318f117c17e026610b87a0"
+SRCREV = "32ec32e10d4104bbf5f34d9af13435c9125e4ce7"
 
 # The tool ships inside the enyo-1.0 repo, not one named after this recipe, so the
 # repo name has to be overridden -- WEBOS_REPO_NAME otherwise defaults to ${BPN}.
