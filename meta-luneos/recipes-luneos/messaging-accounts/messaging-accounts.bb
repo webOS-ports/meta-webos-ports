@@ -8,7 +8,7 @@ inherit allarch
 inherit webos_filesystem_paths
 inherit webos_app
 
-SRCREV = "01a418e0c580f56ab9693f1b9b2f6e31d2f52300"
+SRCREV = "93c482177d915059e49ed6d25e234df54418c74d"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
@@ -16,10 +16,6 @@ do_install() {
     # account templates
     install -d ${D}${webos_accttemplatesdir}/
     cp -vrf ${S}/accounts/* ${D}${webos_accttemplatesdir}/
-    # Matrix is com.palm.matrix from purple-combined (prpl-matrix, with browser sign-in and
-    # encryption). This generic one maps to the same type_matrix and would be listed as a second
-    # "Matrix" in Add Account, with a sign-in that requires a password matrix.org no longer takes.
-    rm -rf ${D}${webos_accttemplatesdir}/org.webosports.messaging.matrix
 
     # account creation application
     install -d ${D}${webos_applicationsdir}/org.webosports.app.imvalidator
