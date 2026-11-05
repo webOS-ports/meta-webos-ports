@@ -115,6 +115,7 @@ RDEPENDS:${PN} = " \
   org.webosports.service.licenses \
   org.webosports.service.lumberjack \
   org.webosports.service.messaging \
+  org.webosports.service.office \
   org.webosports.service.update \
   \
   \
