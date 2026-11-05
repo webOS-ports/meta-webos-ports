@@ -12,4 +12,4 @@
 # LSC_SRCREV on the merge, once it is in.
 #
 LSC_BRANCH = "main"
-LSC_SRCREV = "90de99f658b7676afbc04c511153275d9efeb2d4"
+LSC_SRCREV = "5946998e5c2e49c99682c9a1a0568ea576bfcbda"
