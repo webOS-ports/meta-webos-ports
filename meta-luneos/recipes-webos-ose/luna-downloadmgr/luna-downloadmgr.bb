@@ -17,7 +17,12 @@ RDEPENDS:${PN} = "applicationinstallerutility"
 # commits - so the four patches this recipe used to apply are history there.
 # Plain SRCREV: submission tags are a webosose convention, absent on this branch.
 PV = "4.0.0-15+git"
-SRCREV = "14c2f2a2978239711fd820f880c8882041037ed5"
+SRCREV = "8ae20a4aa0586c407b3efc43076b2ea735042dfb"
+# Testing only: returnValue on every subscription message, the
+# O_NOFOLLOW/O_CLOEXEC file opens, SIGTERM through the main loop and the
+# static-analysis cleanup are on herrie/downloadmgr-hardening, not yet in
+# webOS-ports/webOS-OSE; back to that branch once they are.
+WEBOS_GIT_PARAM_BRANCH = "herrie/downloadmgr-hardening"
 PR = "r15"
 
 inherit webos_component
