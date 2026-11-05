@@ -1,0 +1,461 @@
+From 2bca2126768a95dd2b42ad6cba896bbf40840823 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 5 Nov 2026 14:24:12 +0100
+Subject: [PATCH] webOS: Offer our camera in a call that started without it
+
+In a call that started as a voice call, the camera button did nothing:
+our answers had said we would not send video, and the plug-in only
+waited for the far side to offer again.
+
+Do what teams.live.com does when its camera is turned on mid-call
+(captured 2026-11-05): POST an offer of our own, video sendrecv on the
+call's media with the same ICE credentials and key, to the far side's
+mediaRenegotiation link. That link comes from the callee's acceptance
+in a call we placed, and from the acknowledgement of our accept in a
+call we answered. The offer names the call's media leg and a
+negotiationTag of our participant id and a counter, as the web client's
+does. The far side's answer comes as a mediaAnswer frame; it is
+acknowledged and its direction starts our camera. An offer with no
+answer is given up after 15 s, so the button can try again.
+
+test_needs_offer covers when an offer is made and the tag's shape.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ teams_call_video.c      |  14 +++
+ teams_call_video.h      |  12 +++
+ teams_calling.c         | 214 ++++++++++++++++++++++++++++++++++++++--
+ teams_calling.h         |   3 +
+ tests/test_call_video.c |  26 +++++
+ 5 files changed, 260 insertions(+), 9 deletions(-)
+
+diff --git a/teams_call_video.c b/teams_call_video.c
+index c520837..c751098 100644
+--- a/teams_call_video.c
++++ b/teams_call_video.c
+@@ -324,3 +324,17 @@ teams_video_send_params(const char *sdp, int *w, int *h, int *kbps)
+ 	*kbps = 800;
+ 	if (max_br >= 32 && max_br < *kbps) *kbps = (int) max_br;
+ }
++
++gboolean
++teams_video_needs_offer(gboolean camera, gboolean engine_video, gboolean negotiated,
++                        const char *our_dir, gboolean offer_pending)
++{
++	return camera && engine_video && negotiated && !teams_video_dir_we_send(our_dir) && !offer_pending;
++}
++
++gchar *
++teams_negotiation_tag(const char *participant_id, guint n)
++{
++	if (!participant_id || !*participant_id || !n) return NULL;
++	return g_strdup_printf("%s;v_%u", participant_id, n);
++}
+diff --git a/teams_call_video.h b/teams_call_video.h
+index b682082..1c9485d 100644
+--- a/teams_call_video.h
++++ b/teams_call_video.h
+@@ -65,4 +65,16 @@ const char *teams_video_our_direction(const char *answer_dir);
+ gboolean teams_video_dir_we_send(const char *answer_dir);
+ gboolean teams_video_dir_peer_sends(const char *offer_dir);
+ 
++/* Whether turning our camera on needs an offer of our own (the web client's mid-call
++ * .../renegotiate): the camera is wanted, the engine has video, the call's media is negotiated,
++ * our current direction does not let us send, and no offer of ours is waiting for its answer. */
++gboolean teams_video_needs_offer(gboolean camera, gboolean engine_video, gboolean negotiated,
++                                 const char *our_dir, gboolean offer_pending);
++
++/* The negotiationTag of our n-th renegotiation offer in a call: "<participantId>;v_<n>". CAPTURED
++ * (teams.live.com turning its camera on mid-call, 2026-11-05): the uuid is the participantId of the
++ * cpconv that placed the call, and the first offer of each call is v_1. g_free() it; NULL without
++ * a participant id or for n 0. */
++gchar *teams_negotiation_tag(const char *participant_id, guint n);
++
+ #endif
+diff --git a/teams_calling.c b/teams_calling.c
+index ce7164f..5be0e1f 100644
+--- a/teams_calling.c
++++ b/teams_calling.c
+@@ -162,6 +162,10 @@ typedef struct {
+ 	gchar       *declined_mlines;
+ 	/* The last renegotiation offer's mediaContent.mediaLegId, which our answer names; NULL: none. */
+ 	gchar       *reneg_leg_id;
++	/* An offer of ours (send_reneg_offer) is waiting for its answer, which comes as a mediaAnswer
++	 * frame; the timer gives up on it so that the camera button can try again. */
++	gboolean     reneg_offer_pending;
++	guint        reneg_offer_timer;
+ } TeamsMediaProc;
+ 
+ static TeamsMediaProc *g_mproc;
+@@ -647,6 +651,7 @@ media_send_candidates(TeamsMediaProc *mp, const char *sdp)
+ }
+ 
+ static void teams_calling_post_answer(TeamsCall *call);
++static gboolean send_reneg_offer(TeamsMediaProc *mp);
+ static void call_http_post(TeamsAccount *sa, const gchar *full_url, const gchar *body);
+ 
+ /* Our own connection address for c=/m=, from the first UDP host candidate (NOT the offerer's relay
+@@ -711,8 +716,8 @@ sdp_declined_mlines(const gchar *offer)
+  * sends our camera after VIDEO 1. The m=video answer follows the offer (RFC 3264): we receive
+  * when the far side sends, and send when our camera is on and the far side receives. A voice-only
+  * offer - the Android app's first offer has video a=recvonly, its renegotiations a=inactive - is
+- * answered a=inactive as before (see build_answer_sdp). Turning our camera on mid-call takes
+- * effect with the next answer that lets us send: we do not make offers of our own in a call. */
++ * answered a=inactive as before (see build_answer_sdp). Turning our camera on mid-call when our
++ * answer so far does not let us send makes an offer of our own (send_reneg_offer). */
+ 
+ static void
+ video_event(TeamsMediaProc *mp, const char *line)
+@@ -765,9 +770,19 @@ teams_calling_set_camera(TeamsAccount *sa, gboolean on)
+ 		video_event(mp, "VIDEOERR unavailable");
+ 		return FALSE;
+ 	}
+-	if (on && mp->video_answer && !teams_video_dir_we_send(mp->video_answer))
+-		teams_call_log("video: camera on, waiting for an offer that lets us send (answered %s)", mp->video_answer);
+-	if (mp->video_answer) media_video_apply(mp);   /* no answer yet: the first one carries it */
++	{
++		/* The call's media is negotiated once our answer went out, or, in a call we placed, the
++		 * far side's answer is applied; before that the first answer carries the camera. */
++		gboolean negotiated = mp->video_answer || (mp->is_caller && mp->call->answer_applied);
++		if (teams_video_needs_offer(on, mp->our_vssrc != 0, negotiated, mp->video_answer, mp->reneg_offer_pending)) {
++			if (!send_reneg_offer(mp))
++				teams_call_log("video: camera on, waiting for an offer that lets us send (answered %s)",
++				               mp->video_answer ? mp->video_answer : "no video");
++		} else if (on && mp->reneg_offer_pending) {
++			teams_call_log("video: camera on, our offer is waiting for its answer");
++		}
++	}
++	if (mp->video_answer) media_video_apply(mp);
+ 	return TRUE;
+ }
+ 
+@@ -818,8 +833,12 @@ append_video_mline(GString *a, TeamsMediaProc *mp, int port, const char *ip, con
+ 	g_string_append(a, "a=label:main-video\r\n");
+ }
+ 
++/* Our SDP for the call's media: the answer's shape, with video direction vdir. Our own
++ * renegotiation offer (send_reneg_offer) is the same session with video sendrecv: the same
++ * m-lines, ICE credentials and key (CAPTURED, teams.live.com 2026-11-05: its renegotiate kept the
++ * cpconv's ufrag and fingerprint, and the answers kept theirs). */
+ static GString *
+-build_answer_sdp(TeamsMediaProc *mp)
++build_sdp(TeamsMediaProc *mp, const char *vdir)
+ {
+ 	GString *a;
+ 	int our_port;
+@@ -858,8 +877,7 @@ build_answer_sdp(TeamsMediaProc *mp)
+ 	g_string_append(a, "a=rtcp-mux\r\n");
+ 	g_string_append(a, "a=label:main-audio\r\n");
+ 
+-	append_video_mline(a, mp, our_port, our_ip ? our_ip : "127.0.0.1", "video_1",
+-	                   media_video_answer(mp));   /* see this function's header comment */
++	append_video_mline(a, mp, our_port, our_ip ? our_ip : "127.0.0.1", "video_1", vdir);
+ 	/* A declined m-line is left out of the BUNDLE group above (RFC 8843). */
+ 	if (mp->declined_mlines) g_string_append(a, mp->declined_mlines);
+ 
+@@ -867,6 +885,12 @@ build_answer_sdp(TeamsMediaProc *mp)
+ 	return a;
+ }
+ 
++static GString *
++build_answer_sdp(TeamsMediaProc *mp)
++{
++	return build_sdp(mp, media_video_answer(mp));   /* see the header comment above append_video_mline */
++}
++
+ /* Kicks off the two-step media-controller handshake (attach -> parse acceptance link -> accept
+  * w/ SDP) using build_answer_sdp() above. */
+ static void
+@@ -980,6 +1004,10 @@ media_send_offer(TeamsMediaProc *mp)
+ 
+ 	offer_q = teams_call_json_quote(sdp->str);
+ 	legid = g_strdup_printf("%08X%08X%08X%08X", g_random_int(), g_random_int(), g_random_int(), g_random_int());
++	/* The call's media leg: our own renegotiation offers name it again (CAPTURED, teams.live.com
++	 * 2026-11-05: the renegotiate's mediaLegId is the cpconv's). */
++	g_free(call->media_leg_id);
++	call->media_leg_id = g_strdup(legid);
+ 	from_id = g_strconcat("8:", call->sa->username ? call->sa->username : "", NULL);
+ 	from_q = teams_call_json_quote(from_id);
+ 	name_q = teams_call_json_quote(self_display_name(call->sa));
+@@ -1168,6 +1196,140 @@ send_reneg_answer(TeamsMediaProc *mp, const gchar *answer_link)
+ 	media_video_apply(mp);
+ }
+ 
++/* ---- our own renegotiation offer ----------------------------------------------------------
++ * Turning our camera on in a call whose answer so far does not let us send. CAPTURED
++ * (teams.live.com turning its camera on mid-call, 2026-11-05): the web client POSTs
++ * {"mediaNegotiation":{callModalities, sender, links{mediaAnswer, rejection}, mediaContent{blob,
++ * contentType, requiredFeatures, clientLocation, negotiationTag, mediaLegId}}} to the far side's
++ * mediaRenegotiation link (202); the answer comes as a mediaAnswer frame on the link given, the
++ * web client acknowledges it on that frame's mediaAcknowledgement link, and the far side then
++ * sends offers of its own, answered as before. */
++#define RENEG_OFFER_WAIT_S 15
++
++static gchar *
++reneg_offer_body(TeamsCall *call, const gchar *sdp, const gchar *leg_id, const gchar *tag)
++{
++	TeamsAccount *sa = call->sa;
++	const char *agent = call->callagent_id;
++	gchar *sender = participant_from_json(sa, call->our_endpoint_id, call->our_participant_id);
++	gchar *loc = client_location(), *loc_q = teams_call_json_quote(loc);
++	gchar *blob_q = teams_call_json_quote(sdp), *leg_q = teams_call_json_quote(leg_id ? leg_id : "");
++	gchar *tag_q = teams_call_json_quote(tag ? tag : "");
++	gchar *l_ans = callagent_path(call, agent, "call", "mediaAnswer");
++	gchar *l_rej = callagent_path(call, agent, "call", "rejection");
++	gchar *body = g_strdup_printf(
++	    "{\"mediaNegotiation\":{\"callModalities\":[\"Audio\",\"Video\"],\"sender\":%s,"
++	      "\"links\":{\"mediaAnswer\":\"%s\",\"rejection\":\"%s\"},"
++	      "\"mediaContent\":{\"blob\":%s,\"contentType\":\"application/sdp-ngc-1.0\","
++	        "\"requiredFeatures\":\"nonByPass\",\"clientLocation\":%s,\"negotiationTag\":%s,"
++	        "\"mediaLegId\":%s}}}",
++	    sender, l_ans, l_rej, blob_q, loc_q, tag_q, leg_q);
++	g_free(sender); g_free(loc); g_free(loc_q); g_free(blob_q); g_free(leg_q); g_free(tag_q);
++	g_free(l_ans); g_free(l_rej);
++	return body;
++}
++
++static void
++reneg_offer_done(TeamsMediaProc *mp)
++{
++	mp->reneg_offer_pending = FALSE;
++	if (mp->reneg_offer_timer) g_source_remove(mp->reneg_offer_timer);
++	mp->reneg_offer_timer = 0;
++}
++
++static gboolean
++reneg_offer_timeout(gpointer u)
++{
++	TeamsMediaProc *mp = u;
++	mp->reneg_offer_timer = 0;
++	mp->reneg_offer_pending = FALSE;
++	teams_call_log("renegotiate: no answer to our offer after %d s", RENEG_OFFER_WAIT_S);
++	return G_SOURCE_REMOVE;
++}
++
++static void
++reneg_offer_resp_cb(PurpleHttpConnection *hc, PurpleHttpResponse *resp, gpointer u)
++{
++	CallRef *ref = u;
++	TeamsCall *call = call_ref_resolve(ref);
++	int code = purple_http_response_get_code(resp);
++	g_free(ref);
++	flightproxy_resp_cb(hc, resp, NULL);
++	teams_call_log("renegotiate: our offer answered %d", code);
++	if (call && g_mproc && g_mproc->call == call && (code < 200 || code >= 300))
++		reneg_offer_done(g_mproc);
++}
++
++/* POST our offer: video sendrecv on the call's media. FALSE if it could not be sent. */
++static gboolean
++send_reneg_offer(TeamsMediaProc *mp)
++{
++	TeamsCall *call = mp->call;
++	GString *sdp;
++	gchar *tag, *body, *url, *host;
++	const gchar *leg = call->media_leg_id ? call->media_leg_id : mp->reneg_leg_id;
++	if (!call->link_peer_reneg || !mp->our_ufrag || !mp->our_pwd || !mp->our_txkey || !call->our_participant_id) {
++		teams_call_log("renegotiate: cannot offer video (link=%d uf=%d pw=%d key=%d pid=%d)",
++		               call->link_peer_reneg != NULL, mp->our_ufrag != NULL, mp->our_pwd != NULL,
++		               mp->our_txkey != NULL, call->our_participant_id != NULL);
++		return FALSE;
++	}
++	tag = teams_negotiation_tag(call->our_participant_id, call->reneg_offers + 1);
++	if (!tag) return FALSE;
++	call->reneg_offers++;
++	sdp = build_sdp(mp, "sendrecv");
++	sdp_log_shape("renegotiation offer of ours", sdp->str);
++	body = reneg_offer_body(call, sdp->str, leg, tag);
++	url = teams_calling_via_flightproxy(call->link_peer_reneg);
++	host = url_host_for_log(url);
++	teams_call_log("renegotiate: offering video sendrecv, v_%u (%d bytes) to %s", call->reneg_offers,
++	               (int) strlen(body), host ? host : "?");
++	mp->reneg_offer_pending = TRUE;
++	if (mp->reneg_offer_timer) g_source_remove(mp->reneg_offer_timer);
++	mp->reneg_offer_timer = g_timeout_add_seconds(RENEG_OFFER_WAIT_S, reneg_offer_timeout, mp);
++	flightproxy_post_cb(call->sa, url, body, reneg_offer_resp_cb, call_ref_new(call));
++	g_free(host); g_free(url); g_free(body); g_free(tag); g_string_free(sdp, TRUE);
++	return TRUE;
++}
++
++/* The far side's answer to our offer (a mediaAnswer frame while one is waiting): acknowledge it
++ * and send our camera if it lets us. The credentials stay the call's (see build_sdp); an answer
++ * that changes them is logged, not applied. */
++static void
++handle_reneg_offer_answer(TeamsAccount *sa, TeamsCall *call, TeamsMediaProc *mp, JsonObject *body_obj)
++{
++	JsonObject *ma = oget(body_obj, "mediaAnswer"), *mc = ma ? oget(ma, "mediaContent") : NULL;
++	JsonObject *links = ma ? oget(ma, "links") : NULL;
++	const gchar *blob = mc ? sget(mc, "blob") : NULL;
++	const gchar *ack_url = links ? sget(links, "mediaAcknowledgement") : NULL;
++	const char *peer;
++	reneg_offer_done(mp);
++	if (ack_url && *ack_url) {
++		gchar *url = teams_calling_via_flightproxy(ack_url);
++		flightproxy_post_cb(sa, url, "{\"mediaAcknowledgement\":{\"code\":0,\"subCode\":0,"
++		                    "\"reason\":\"noError\",\"phrase\":\"Success\"}}", flightproxy_resp_cb, NULL);
++		g_free(url);
++	}
++	if (!blob) { teams_call_log("renegotiate: answer to our offer without SDP"); return; }
++	{
++		gchar *uf = sdp_line_val(blob, "a=ice-ufrag:");
++		gchar *cur = mp->last_restarted_ufrag ? g_strdup(mp->last_restarted_ufrag)
++		           : mp->answer_ufrag ? g_strdup(mp->answer_ufrag)
++		           : call->sdp_offer ? sdp_line_val(call->sdp_offer, "a=ice-ufrag:") : NULL;
++		teams_call_log("renegotiate: answer to our offer, ICE %s, acknowledged %s",
++		               uf && cur && !strcmp(uf, cur) ? "unchanged" : "CHANGED (not applied)",
++		               ack_url && *ack_url ? "yes" : "no (no link)");
++		g_free(uf); g_free(cur);
++	}
++	peer = teams_sdp_video_direction(blob);
++	mp->video_offer = NULL;
++	mp->video_answer = teams_video_our_direction(peer);
++	teams_video_send_params(blob, &mp->vsend_w, &mp->vsend_h, &mp->vsend_kbps);
++	teams_call_log("video: answer to our offer %s, so we %s", peer ? peer : "none", mp->video_answer);
++	video_event(mp, teams_video_dir_peer_sends(peer) ? "OFFERED 1" : "OFFERED 0");
++	media_video_apply(mp);
++}
++
+ /* read UFRAG/PWD/TXKEY/SSRC/VSSRC/CAND/READY/ANSWERED/RESTARTED/AUDIOD/ERR and the video lines
+  * (VSHM/VPREVIEW/VTX/PEERVIDEO/VIDEOERR, passed to the bridge) from teams_media's stdout */
+ static gboolean
+@@ -1375,6 +1537,7 @@ teams_media_stop(void)
+ 	video_event(mp, "");   /* the call's video is over */
+ 	g_mproc = NULL;
+ 	if (mp->answer_timer) g_source_remove(mp->answer_timer);
++	if (mp->reneg_offer_timer) g_source_remove(mp->reneg_offer_timer);
+ 	if (mp->in_fd >= 0) { media_send(mp, "STOP\n"); close(mp->in_fd); }
+ 	if (mp->out_watch) g_source_remove(mp->out_watch);
+ 	if (mp->out_ch) g_io_channel_unref(mp->out_ch);
+@@ -1486,8 +1649,24 @@ accept_resp_cb(PurpleHttpConnection *hc, PurpleHttpResponse *resp, gpointer u)
+ 	int code = purple_http_response_get_code(resp);
+ 	g_free(ref);
+ 	flightproxy_resp_cb(hc, resp, NULL);
+-	if (call && code >= 200 && code < 300)
++	if (call && code >= 200 && code < 300) {
++		/* Where our own renegotiation offers go in a call we answered. CAPTURED (teams.live.com
++		 * answering the Teams Android app, 2026-11-04): the accept's response is a
++		 * callAcceptanceAcknowledgement whose links name a mediaRenegotiation. */
++		size_t len = 0;
++		const gchar *data = purple_http_response_get_data(resp, &len);
++		JsonObject *root = data && len && len <= G_MAXSSIZE ? json_decode_object(data, (gssize) len) : NULL;
++		JsonObject *ack = root ? oget(root, "callAcceptanceAcknowledgement") : NULL;
++		JsonObject *links = ack ? oget(ack, "links") : NULL;
++		const gchar *reneg = links ? sget(links, "mediaRenegotiation") : NULL;
++		if (reneg && *reneg) {
++			g_free(call->link_peer_reneg);
++			call->link_peer_reneg = g_strdup(reneg);
++		}
++		teams_call_log("accept: %s renegotiation link for our own offers", reneg && *reneg ? "a" : "no");
++		if (root) json_object_unref(root);
+ 		put_endpoint_metadata(call);
++	}
+ }
+ 
+ static void post_ringing(TeamsCall *call);
+@@ -1761,6 +1940,7 @@ teams_call_free(TeamsCall *call)
+ 	g_free(call->link_leave);
+ 	g_free(call->link_endpoint_state);
+ 	g_free(call->link_endpoint_metadata);
++	g_free(call->link_peer_reneg);
+ 	g_free(call->our_answer_sdp);
+ 	g_free(call->our_endpoint_id);
+ 	g_free(call->our_participant_id);
+@@ -1920,6 +2100,10 @@ teams_calling_handle_media_answer(TeamsAccount *sa, JsonObject *body_obj)
+ 	const gchar *blob = NULL;
+ 	gchar *ruf, *rpw, *rxkey;
+ 
++	if (call && mp && mp->call == call && mp->reneg_offer_pending) {
++		handle_reneg_offer_answer(sa, call, mp, body_obj);
++		return;
++	}
+ 	if (!call || !mp || mp->call != call || !mp->is_caller) {
+ 		teams_call_log("mediaAnswer: no outgoing caller engine to apply it to"); return;
+ 	}
+@@ -2118,6 +2302,12 @@ teams_calling_handle_trouter(TeamsAccount *sa, JsonObject *body_obj, const gchar
+ 		const gchar *blob = mc ? sget(mc, "blob") : NULL;
+ 		log_member_names("outgoing: acceptance frame callAcceptance", acc);
+ 		if (links) log_member_names("outgoing: acceptance frame links", links);
++		/* Where our own renegotiation offers go. CAPTURED (teams.live.com turning its camera on
++		 * in a call it placed, 2026-11-05): it POSTs them to this link. */
++		if (cur && links && sget(links, "mediaRenegotiation") && *sget(links, "mediaRenegotiation")) {
++			g_free(cur->link_peer_reneg);
++			cur->link_peer_reneg = g_strdup(sget(links, "mediaRenegotiation"));
++		}
+ 		if (blob) {
+ 			gchar *uf = sdp_line_val(blob, "a=ice-ufrag:");
+ 			teams_call_log("outgoing: acceptance SDP %s the answer we applied (%s)",
+@@ -2153,6 +2343,12 @@ teams_calling_handle_trouter(TeamsAccount *sa, JsonObject *body_obj, const gchar
+ 		teams_calling_handle_media_answer(sa, body_obj);
+ 		return;
+ 	}
++	/* The far side turned our renegotiation offer down (the rejection link reneg_offer_body gave). */
++	if (request_url && strstr(request_url, "/call/rejection")) {
++		log_member_names("renegotiate: our offer rejected", body_obj);
++		if (g_mproc && cur && g_mproc->call == cur) reneg_offer_done(g_mproc);
++		return;
++	}
+ 	/* The call controller's verdict on a renegotiation answer, on the link reneg_answer_body gave. */
+ 	if (request_url && strstr(request_url, "/mediaAcknowledgement")) {
+ 		JsonObject *ack = oget(body_obj, "mediaAcknowledgement");
+diff --git a/teams_calling.h b/teams_calling.h
+index 16a837e..a7bdafc 100644
+--- a/teams_calling.h
++++ b/teams_calling.h
+@@ -57,6 +57,9 @@ typedef struct _TeamsCall {
+ 	gchar *link_leave;         /* the conversation's links.leave: where a hang-up is POSTed */
+ 	gchar *link_endpoint_state;    /* <conversation>/updateEndpointState, after the join */
+ 	gchar *link_endpoint_metadata; /* <conversation>/updateEndpointMetadata, after the accept */
++	gchar *link_peer_reneg;    /* where our own renegotiation offers go: the far side's mediaRenegotiation
++	                            * link (the callee's callAcceptance, or the acknowledgement of ours) */
++	guint reneg_offers;        /* our renegotiation offers so far (their negotiationTag's v_<n>) */
+ 
+ 	/* --- answer flow (incoming): the media controller answer is a two-step handshake -
+ 	 * POST attach (offer's link_attach) -> parse callInvitation.links.acceptance from the
+diff --git a/tests/test_call_video.c b/tests/test_call_video.c
+index 7b3b883..b8695cd 100644
+--- a/tests/test_call_video.c
++++ b/tests/test_call_video.c
+@@ -203,6 +203,31 @@ static void test_answer_direction(void)
+ 	CHECK(!strcmp(teams_video_our_direction(NULL), "inactive"));
+ }
+ 
++/* Our own offer when the camera comes on mid-call, and its negotiationTag. */
++static void test_needs_offer(void)
++{
++	gchar *t;
++	CHECK(teams_video_needs_offer(TRUE, TRUE, TRUE, "recvonly", FALSE));
++	CHECK(teams_video_needs_offer(TRUE, TRUE, TRUE, "inactive", FALSE));
++	CHECK(teams_video_needs_offer(TRUE, TRUE, TRUE, NULL, FALSE));      /* a voice call we placed */
++	CHECK(!teams_video_needs_offer(TRUE, TRUE, TRUE, "sendrecv", FALSE)); /* already sending */
++	CHECK(!teams_video_needs_offer(TRUE, TRUE, TRUE, "sendonly", FALSE));
++	CHECK(!teams_video_needs_offer(FALSE, TRUE, TRUE, "recvonly", FALSE)); /* camera off */
++	CHECK(!teams_video_needs_offer(TRUE, FALSE, TRUE, "recvonly", FALSE)); /* engine without video */
++	CHECK(!teams_video_needs_offer(TRUE, TRUE, FALSE, "recvonly", FALSE)); /* the first answer carries it */
++	CHECK(!teams_video_needs_offer(TRUE, TRUE, TRUE, "recvonly", TRUE));   /* one already waiting */
++
++	t = teams_negotiation_tag("0b1c2d3e-0000-4000-8000-000000000001", 1);
++	CHECK(t && !strcmp(t, "0b1c2d3e-0000-4000-8000-000000000001;v_1"));
++	g_free(t);
++	t = teams_negotiation_tag("p", 12);
++	CHECK(t && !strcmp(t, "p;v_12"));
++	g_free(t);
++	CHECK(!teams_negotiation_tag(NULL, 1));
++	CHECK(!teams_negotiation_tag("", 1));
++	CHECK(!teams_negotiation_tag("p", 0));
++}
++
+ static void test_send_params(void)
+ {
+ 	int w, h, k;
+@@ -243,6 +268,7 @@ int main(void)
+ 	test_json_bool();
+ 	test_sdp_direction();
+ 	test_answer_direction();
++	test_needs_offer();
+ 	if (failures) {
+ 		fprintf(stderr, "%d failure(s)\n", failures);
+ 		return 1;
+-- 
+2.53.0
+
