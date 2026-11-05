@@ -1,0 +1,125 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 5 Nov 2026 06:52:58 +0100
+Subject: [PATCH] webOS: a WhatsApp call answered on another device is not
+ missed
+
+An incoming call that the user took on another of their devices (the
+phone, WhatsApp Web or Desktop) ended here with meowcaller's end reason
+"accepted_elsewhere" passed on as the Phone app's cause, which it does
+not know, and the chat got a "Missed call" bubble because the call never
+went active here.
+
+Tell the Phone app "answeredElsewhere", which it counts as answered (no
+"Missed call" alert, filed as incoming), and post no missed call bubble
+for such a terminate. Every other reason is passed on as before. The
+reason is the token a caller sends the devices that did not take the
+call (meowcaller signaling.TerminateReasonAcceptedElsewhere).
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ call.go          |  2 +-
+ call_end.go      | 29 +++++++++++++++++++++++++++++
+ call_end_test.go | 23 +++++++++++++++++++++++
+ handler.go       |  5 +++--
+ 4 files changed, 56 insertions(+), 3 deletions(-)
+ create mode 100644 call_end.go
+ create mode 100644 call_end_test.go
+
+diff --git a/call.go b/call.go
+index 0873831..2e9fa09 100644
+--- a/call.go
++++ b/call.go
+@@ -287,7 +287,7 @@ func wireCall(mcCall *meowcaller.Call, origin string, address string) *callInfo
+ 			diagRec.Emit("clonk", map[string]any{"event": "on_end", "call_id": ci.id, "reason": reason})
+ 		}
+ 		C.gowhatsapp_call_video_active(C.int(0))
+-		setCallState(ci.id, "disconnected", reason)
++		setCallState(ci.id, "disconnected", phoneEndCause(reason))
+ 	})
+ 	// Tracks the PEER's video on/off -- independent of whether OUR OWN capture/render
+ 	// pipeline works (see WHATSAPP_VIDEO_STATUS.md: the native clonk bug blocks local
+diff --git a/call_end.go b/call_end.go
+new file mode 100644
+index 0000000..6dee0ea
+--- /dev/null
++++ b/call_end.go
+@@ -0,0 +1,29 @@
++package main
++
++// webOS: what the Phone app is told about the end of a WhatsApp call.
++//
++// WhatsApp ends a call that rang on several of the user's devices with a terminate
++// whose reason says where it went (meowcaller signaling.TerminateReasonAcceptedElsewhere
++// and TerminateReasonRejectedElsewhere, "tokens a caller sends the callee devices that
++// did not take the call"). The Phone app reads cause "answeredElsewhere" as answered:
++// no "Missed call" alert, and the call log files it as incoming.
++
++const (
++	terminateAcceptedElsewhere  = "accepted_elsewhere"
++	phoneCauseAnsweredElsewhere = "answeredElsewhere"
++)
++
++// phoneEndCause maps meowcaller's end reason to the cause the Phone app is given in
++// disconnectDetails.cause. Every other reason is passed on as it is.
++func phoneEndCause(reason string) string {
++	if reason == terminateAcceptedElsewhere {
++		return phoneCauseAnsweredElsewhere
++	}
++	return reason
++}
++
++// endedAnsweredElsewhere reports whether a call terminate says the call was taken on
++// another of the user's devices: it was answered, so it is no missed call.
++func endedAnsweredElsewhere(reason string) bool {
++	return reason == terminateAcceptedElsewhere
++}
+diff --git a/call_end_test.go b/call_end_test.go
+new file mode 100644
+index 0000000..4641b02
+--- /dev/null
++++ b/call_end_test.go
+@@ -0,0 +1,23 @@
++package main
++
++import "testing"
++
++func TestAnsweredElsewhereTellsThePhoneAppSo(t *testing.T) {
++	if got := phoneEndCause("accepted_elsewhere"); got != "answeredElsewhere" {
++		t.Fatalf("accepted_elsewhere: cause %q, want answeredElsewhere", got)
++	}
++	if !endedAnsweredElsewhere("accepted_elsewhere") {
++		t.Fatal("accepted_elsewhere is no missed call")
++	}
++}
++
++func TestOtherEndsArePassedOn(t *testing.T) {
++	for _, r := range []string{"", "timeout", "rejected_elsewhere", "group_call_ended", "normal", "Accepted_Elsewhere"} {
++		if got := phoneEndCause(r); got != r {
++			t.Errorf("%q: cause %q, want it passed on", r, got)
++		}
++		if endedAnsweredElsewhere(r) {
++			t.Errorf("%q taken for answered elsewhere", r)
++		}
++	}
++}
+diff --git a/handler.go b/handler.go
+index 97d6786..ef5a23a 100644
+--- a/handler.go
++++ b/handler.go
+@@ -165,8 +165,9 @@ func (handler *Handler) eventHandler(rawEvt interface{}) {
+ 		// WhatsApp app shows it in the chat. A 1:1 call (tracked in call.go's calls map) had
+ 		// no chat message while it rang, so the missed call is posted now, under the call's
+ 		// id; a group-call notice already has its "Incoming call" message, which is edited in
+-		// place. The peer is the call's creator for an incoming call.
+-		if !callWasAnswered(evt.CallID) {
++		// place. The peer is the call's creator for an incoming call. One taken on another of
++		// the user's devices was answered, so it is no missed call (call_end.go).
++		if !callWasAnswered(evt.CallID) && !endedAnsweredElsewhere(evt.Reason) {
+ 			text := callBubbleText(evt.CallID, true)
+ 			if callWasIncoming(evt.CallID) {
+ 				bcm := evt.BasicCallMeta
+-- 
+2.53.0
+
