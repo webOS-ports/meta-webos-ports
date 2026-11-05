@@ -1,0 +1,210 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 5 Nov 2026 06:13:19 +0100
+Subject: [PATCH] webOS: Attach to an incoming Teams call while it rings
+
+An incoming call went on ringing on the device after it was answered
+on another device (here: teams.live.com), until it was hung up by
+hand. Nothing about the call reached the device after the call
+notification: the call controller had no link to tell it, because our
+attach, which names our call/end link, was only sent once the call was
+answered here.
+
+The web client attaches 0.1-0.3 s after the call notification, while it
+rings, and then POSTs callProgress {sender, status "ringing"} to the
+notification's progress link (both captured on teams.live.com,
+4 and 5 Nov 2026). Do the same: attach (with the conversation join) as
+the call starts to ring, answer progress "ringing" once the attach is
+answered, and keep the attach response's acceptance link. Answering
+then posts our endpoint state and the accept as before, at once if the
+attach response is in, or as soon as it comes. The accept is posted
+once per call. A call/end that arrives while it rings ends the call
+through the handler that already ends answered calls.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ teams_calling.c | 100 +++++++++++++++++++++++++++++++++++++++++-------
+ teams_calling.h |   8 ++++
+ 2 files changed, 94 insertions(+), 14 deletions(-)
+
+diff --git a/teams_calling.c b/teams_calling.c
+index a585053..0cf1cc7 100644
+--- a/teams_calling.c
++++ b/teams_calling.c
+@@ -1490,8 +1490,24 @@ accept_resp_cb(PurpleHttpConnection *hc, PurpleHttpResponse *resp, gpointer u)
+ 		put_endpoint_metadata(call);
+ }
+ 
+-/* Step 1 response handler: parse callInvitation.links.acceptance from the attach response, then
+- * POST the accept (our SDP answer). u is a CallRef; the call may have ended meanwhile. */
++static void post_ringing(TeamsCall *call);
++
++/* The answer's part once both the attach response and our SDP answer are there: our endpoint
++ * state to the conversation (the web client sends it between attach and accept), then the
++ * accept. Runs once per call. */
++static void
++post_accept_now(TeamsCall *call)
++{
++	if (call->accept_sent || !call->link_acceptance || !call->our_answer_sdp) return;
++	call->accept_wanted = FALSE;
++	call->accept_sent = TRUE;
++	if (call->link_leave) post_endpoint_state(call);
++	teams_calling_post_accept(call, call->link_acceptance);
++}
++
++/* Step 1 response handler: keep callInvitation.links.acceptance from the attach response (and the
++ * join's leave link), and POST the accept if the call was answered meanwhile. u is a CallRef; the
++ * call may have ended meanwhile. */
+ static void
+ attach_resp_cb(PurpleHttpConnection *hc, PurpleHttpResponse *resp, gpointer u)
+ {
+@@ -1544,14 +1560,18 @@ attach_resp_cb(PurpleHttpConnection *hc, PurpleHttpResponse *resp, gpointer u)
+ 			call->link_endpoint_state = teams_calling_conv_link(call->conversation_controller, "updateEndpointState");
+ 		if (!call->link_endpoint_metadata)
+ 			call->link_endpoint_metadata = teams_calling_conv_link(call->conversation_controller, "updateEndpointMetadata");
+-		post_endpoint_state(call);
+ 	}
+-	if (acc) {
+-		teams_call_log("attach OK -> acceptance link acquired, posting accept");
+-		teams_calling_post_accept(call, acc);
+-	} else {
++	set_link(&call->link_acceptance, acc);
++	if (!acc)
+ 		teams_call_log("attach OK but no callInvitation.links.acceptance in response");
+-	}
++	else if (call->accept_wanted)
++		teams_call_log("attach OK -> acceptance link acquired, answered already: posting accept");
++	else
++		teams_call_log("attach OK -> acceptance link acquired, ringing until answered");
++	if (call->accept_wanted)
++		post_accept_now(call);
++	else if (call->state == TEAMS_CALL_INCOMING)
++		post_ringing(call);
+ 	if (root) json_object_unref(root);
+ }
+ 
+@@ -1605,14 +1625,20 @@ attach_join_action(TeamsCall *call)
+ 	return ret;
+ }
+ 
+-/* Incoming answer = two-step media-controller handshake (see media_send_answer). Step 1 here:
+- * POST attach to the offer's link_attach; the response yields the acceptance link (step 2). */
++/* Incoming call, step 1 of the media-controller handshake: POST attach to the offer's link_attach;
++ * the response yields the acceptance link (step 2, the accept). CAPTURED (teams.live.com,
++ * 2026-11-04 and 2026-11-05): the web client attaches 0.1-0.3 s after the call notification,
++ * while it rings, and answers progress "ringing" right after. The attach names our call/end
++ * link: without it the call controller cannot tell this phone that the call was answered on
++ * another device, and it went on ringing. Sent once per call. */
+ static void
+-teams_calling_post_answer(TeamsCall *call)
++teams_calling_ring_attach(TeamsCall *call)
+ {
+ 	gchar *end_link, *join;
+ 	GString *body;
+-	if (!call->link_attach) { teams_call_log("post_answer: no attach link"); return; }
++	if (call->attach_sent) return;
++	if (!call->link_attach) { teams_call_log("attach: no attach link"); return; }
++	call->attach_sent = TRUE;
+ 
+ 	/* generate our endpoint/participant/callAgent identity for this call (reused in accept) */
+ 	if (!call->our_endpoint_id)    call->our_endpoint_id = g_strdup(call->sa->endpoint ? call->sa->endpoint : "");
+@@ -1633,12 +1659,56 @@ teams_calling_post_answer(TeamsCall *call)
+ 		g_free(join);
+ 	}
+ 	g_string_append(body, "}");
+-	teams_call_log("post_answer: attach (step 1/2)%s -> %d-byte body",
++	teams_call_log("attach (step 1/2)%s -> %d-byte body",
+ 	               call->conversation_controller ? " with join" : "", (int) body->len);
+ 	flightproxy_post_cb(call->sa, call->link_attach, body->str, attach_resp_cb, call_ref_new(call));
+ 	g_free(end_link); g_string_free(body, TRUE);
+ }
+ 
++/* Tell the caller's side that we ring, as the web client does right after its attach. CAPTURED
++ * (teams.live.com, 2026-11-04): POST callNotification.links.progress
++ * {"callProgress":{"sender":{id,displayName,endpointId,participantId,languageId},
++ * "status":"ringing","phrase":"ringing"}} -> 202. */
++static void
++post_ringing(TeamsCall *call)
++{
++	gchar *from_id, *from_q, *name_q, *epid_q, *pid_q, *lang, *lang_q, *body;
++	if (!call->link_progress || !call->our_endpoint_id || !call->our_participant_id) return;
++	from_id = g_strconcat("8:", call->sa->username ? call->sa->username : "", NULL);
++	from_q = teams_call_json_quote(from_id);
++	name_q = teams_call_json_quote(self_display_name(call->sa));
++	epid_q = teams_call_json_quote(call->our_endpoint_id);
++	pid_q = teams_call_json_quote(call->our_participant_id);
++	lang = language_id();
++	lang_q = teams_call_json_quote(lang);
++	body = g_strdup_printf(
++		"{\"callProgress\":{\"sender\":{\"id\":%s,\"displayName\":%s,\"endpointId\":%s,"
++		  "\"participantId\":%s,\"languageId\":%s},\"status\":\"ringing\",\"phrase\":\"ringing\"}}",
++		from_q, name_q, epid_q, pid_q, lang_q);
++	teams_call_log("progress: ringing");
++	flightproxy_post_cb(call->sa, call->link_progress, body, flightproxy_resp_cb, NULL);
++	g_free(from_id); g_free(from_q); g_free(name_q); g_free(epid_q); g_free(pid_q);
++	g_free(lang); g_free(lang_q); g_free(body);
++}
++
++/* The incoming call was answered and our SDP answer is built (media_send_answer): accept now if
++ * the attach response is in, else as soon as it comes (attach_resp_cb). An attach that was never
++ * sent (no attach link while ringing) is sent now. */
++static void
++teams_calling_post_answer(TeamsCall *call)
++{
++	if (call->accept_sent) return;
++	call->accept_wanted = TRUE;
++	if (call->link_acceptance) {
++		teams_call_log("answer: acceptance link from the attach while ringing, posting accept");
++		post_accept_now(call);
++	} else if (call->attach_sent) {
++		teams_call_log("answer: attach response not in yet, accept follows it");
++	} else {
++		teams_calling_ring_attach(call);
++	}
++}
++
+ /* ------------------------------------------------------------------ TeamsCall */
+ 
+ static const char *
+@@ -1695,6 +1765,7 @@ teams_call_free(TeamsCall *call)
+ 	g_free(call->our_endpoint_id);
+ 	g_free(call->our_participant_id);
+ 	g_free(call->callagent_id);
++	g_free(call->link_acceptance);
+ 	g_free(call);
+ }
+ 
+@@ -2179,8 +2250,9 @@ teams_calling_handle_trouter(TeamsAccount *sa, JsonObject *body_obj, const gchar
+ 		               call->link_reject ? "yes" : "no");
+ 		sdp_log_shape("incoming offer", call->sdp_offer);
+ 
+-		/* Ring the Phone app. */
++		/* Ring the Phone app, and attach while it rings (teams_calling_ring_attach). */
+ 		push_state(call, NULL);
++		teams_calling_ring_attach(call);
+ 		return;
+ 	}
+ }
+diff --git a/teams_calling.h b/teams_calling.h
+index 8171dbd..a12f0eb 100644
+--- a/teams_calling.h
++++ b/teams_calling.h
+@@ -65,6 +65,14 @@ typedef struct _TeamsCall {
+ 	gchar *our_endpoint_id;    /* our calling endpoint id (= sa->endpoint), used in acceptedBy */
+ 	gchar *our_participant_id; /* our participantId (generated), reused in attach join + acceptedBy */
+ 	gchar *callagent_id;       /* generated callAgent id for our control paths (end link, etc.) */
++
++	/* --- attach while ringing: the web client attaches as soon as the call rings, which gives
++	 * the call controller our end link, so the call stops ringing here when it is answered on
++	 * another device or the caller gives up. The answer then only posts the accept. --- */
++	gchar *link_acceptance;    /* callInvitation.links.acceptance from the attach response */
++	gboolean attach_sent;      /* the attach is posted (its response may still be in flight) */
++	gboolean accept_wanted;    /* answered: post the accept as soon as the acceptance link is there */
++	gboolean accept_sent;      /* the accept is posted: never a second one */
+ } TeamsCall;
+ 
+ /* Called from teams_trouter.c's /NGCallManagerWin handler with the decoded callNotification
+-- 
+2.53.0
+

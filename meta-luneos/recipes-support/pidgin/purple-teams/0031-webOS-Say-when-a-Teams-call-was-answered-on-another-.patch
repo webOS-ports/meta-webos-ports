@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 5 Nov 2026 06:30:40 +0100
+Subject: [PATCH] webOS: Say when a Teams call was answered on another device
+
+With the attach while ringing, a call answered on another device stops
+ringing here, but the call controller's call/end for it (reason
+clientError, code 487, "Call cancelled as it was accepted by another
+fork.") was mapped to cause "error", and the Phone app showed a missed
+call.
+
+Send cause "answeredElsewhere" for that end while the call rings here,
+which the Phone app counts as answered. The phrase decides, not 487
+alone, which is SIP's "request terminated" and may come for a caller
+giving up as well. The member names of every callEnd are now logged
+(never values), to see whether a sturdier field than the phrase exists.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ teams_calling.c | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/teams_calling.c b/teams_calling.c
+index 0cf1cc7..04be09b 100644
+--- a/teams_calling.c
++++ b/teams_calling.c
+@@ -2177,7 +2177,15 @@ teams_calling_handle_trouter(TeamsAccount *sa, JsonObject *body_obj, const gchar
+ 			 * causes: "normal"/"rejected"/"missed"/"busy"/"error". A normal hang-up (either side) or a
+ 			 * successfully-connected call that ended = "normal"; declines/timeouts map accordingly. */
+ 			const gchar *cause = "normal";
+-			if (phrase && (strstr(phrase, "Decline") || strstr(phrase, "Reject")))      cause = "rejected";
++			log_member_names("call ended: callEnd", ce);
++			/* Taken on another of the user's devices while it rang here. CAPTURED (sargo, 5 Nov
++			 * 2026, answered on teams.live.com): reason clientError, code 487, phrase "Call
++			 * cancelled as it was accepted by another fork." 487 alone is SIP's "request
++			 * terminated", which a caller giving up may get too, so the phrase decides.
++			 * "answeredElsewhere" makes the Phone app count the call as answered, not missed. */
++			if (cur->state == TEAMS_CALL_INCOMING && phrase && strstr(phrase, "accepted by another fork"))
++				cause = "answeredElsewhere";
++			else if (phrase && (strstr(phrase, "Decline") || strstr(phrase, "Reject")))      cause = "rejected";
+ 			else if (phrase && (strstr(phrase, "Unanswer") || strstr(phrase, "Timeout") ||
+ 			                    strstr(phrase, "NoAnswer") || strstr(phrase, "Ring")))   cause = "missed";
+ 			else if (phrase && strstr(phrase, "Busy"))                                   cause = "busy";
+-- 
+2.53.0
+
