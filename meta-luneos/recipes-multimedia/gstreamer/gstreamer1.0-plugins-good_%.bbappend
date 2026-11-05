@@ -1,6 +1,9 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 PACKAGECONFIG:append = " libv4l2"
 
+# vp8enc and vp8dec (libvpx), for the video of Signal calls: RingRTC offers only VP8 in 1:1 calls.
+PACKAGECONFIG:append = " vpx"
+
 SRC_URI += "file://0001-gst_v4l2_fill_lists-abort-if-type-is-invalid.patch"
 
 # A sink opened after PulseAudio was restarted must not be handed the context

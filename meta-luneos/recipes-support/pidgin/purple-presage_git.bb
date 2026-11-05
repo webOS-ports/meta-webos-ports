@@ -40,6 +40,10 @@ SRC_URI += " \
     file://0008-webOS-show-Signal-replies-as-inline-quote-cards.patch \
     file://0009-webOS-report-delivery-and-read-receipts-to-the-trans.patch \
     file://0010-webOS-add-1-1-Signal-voice-calls-through-the-Phone-a.patch \
+    file://0011-webOS-clear-ended-calls-from-the-Phone-app-show-the-.patch \
+    file://0012-webOS-send-recorded-voice-messages-as-audio-voice-no.patch \
+    file://0013-webOS-add-video-to-1-1-Signal-calls.patch \
+    file://0014-webOS-a-Signal-call-answered-on-another-device-is-no.patch \
     file://presage/0001-manager-make-the-identified-push-service-public.patch;patchdir=${UNPACKDIR}/git-deps/presage \
 "
 SRCREV_upstream = "235edc846d4f28f306ddfe40dc187ef42face79f"
