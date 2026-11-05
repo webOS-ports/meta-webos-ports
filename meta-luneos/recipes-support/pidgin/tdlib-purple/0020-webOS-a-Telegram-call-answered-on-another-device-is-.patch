@@ -1,0 +1,210 @@
+From 1a5678f023271e429b785e5b78ff5e6a0bc54b3e Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 5 Nov 2026 07:30:43 +0100
+Subject: [PATCH] webOS: a Telegram call answered on another device is not
+ missed
+
+When another device of the same account takes an incoming call, the
+server discards it here with no reason (callDiscardReasonEmpty); a
+caller who gives up while it rings gives callDiscardReasonMissed.
+Both were pushed to the Phone app as an end it had not acted on, so
+it showed a missed call.
+
+Tell the Phone app "answeredElsewhere" for an incoming call that was
+not answered here (no accept sent, never ready) and ended with no
+reason. Declined and missed keep their causes; anything else stays
+"normal". The rule lives in call-end.h with a standalone host test.
+
+Seen on sargo: answered on another device gave reason=empty, a call
+the caller cancelled gave reason=missed (logged by 0019).
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ call-end.h             | 27 +++++++++++++++++++++++
+ call.cpp               | 46 +++++++++++++++++++++++++++-----------
+ test/call-end-test.cpp | 50 ++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 110 insertions(+), 13 deletions(-)
+ create mode 100644 call-end.h
+ create mode 100644 test/call-end-test.cpp
+
+diff --git a/call-end.h b/call-end.h
+new file mode 100644
+index 0000000..9f9c52e
+--- /dev/null
++++ b/call-end.h
+@@ -0,0 +1,27 @@
++#ifndef _CALL_END_H
++#define _CALL_END_H
++
++// Which cause the Phone app is told when TDLib discards a call. Kept free of TDLib types so the
++// rule can be tested on its own (test/call-end-test.cpp).
++
++enum class CallEndReason { None, Empty, Missed, Declined, Disconnected, HungUp, UpgradeToGroupCall, Other };
++
++// answeredHere: the call was accepted on this device (the user tapped answer, or it became ready).
++//
++// Answered elsewhere: when another device of the same account takes an incoming call, the server
++// discards it here with no reason (TDLib callDiscardReasonEmpty), seen on sargo 2026-11-05. A caller
++// who gives up while it rings gives "missed" instead, and our own decline gives "declined".
++inline const char *callEndCause(CallEndReason reason, bool outgoing, bool answeredHere)
++{
++    switch (reason) {
++    case CallEndReason::Declined: return "rejected";
++    case CallEndReason::Missed:   return "missed";
++    case CallEndReason::None:
++    case CallEndReason::Empty:
++        if (!outgoing && !answeredHere) return "answeredElsewhere";
++        return "normal";
++    default:                      return "normal";
++    }
++}
++
++#endif
+diff --git a/call.cpp b/call.cpp
+index 08e849f..b97104f 100644
+--- a/call.cpp
++++ b/call.cpp
+@@ -8,6 +8,7 @@
+ #include "td-client.h"
+ #include "call-luna.h"
+ #include "tgcalls-call.h"
++#include "call-end.h"
+ #include <glib.h>
+ 
+ static td::td_api::object_ptr<td::td_api::callProtocol> getCallProtocol()
+@@ -206,18 +207,37 @@ static void notifyCallError(const td::td_api::callStateError &error, const std::
+                           time(NULL), PURPLE_MESSAGE_SYSTEM);
+ }
+ 
+-static const char *discardReasonName(const td::td_api::CallDiscardReason *reason)
++// The incoming call answered on this device (accept sent, or it became ready); 0 for none. TDLib
++// call ids are unique within a session, so a stale value never matches a later call.
++static int32_t g_answeredCallId = 0;
++
++static CallEndReason toCallEndReason(const td::td_api::CallDiscardReason *reason)
+ {
+-    if (!reason) return "none";
++    if (!reason) return CallEndReason::None;
+     switch (reason->get_id()) {
+-    case td::td_api::callDiscardReasonEmpty::ID:              return "empty";
+-    case td::td_api::callDiscardReasonMissed::ID:             return "missed";
+-    case td::td_api::callDiscardReasonDeclined::ID:           return "declined";
+-    case td::td_api::callDiscardReasonDisconnected::ID:       return "disconnected";
+-    case td::td_api::callDiscardReasonHungUp::ID:             return "hungUp";
+-    case td::td_api::callDiscardReasonUpgradeToGroupCall::ID: return "upgradeToGroupCall";
+-    default:                                                  return "unknown";
++    case td::td_api::callDiscardReasonEmpty::ID:              return CallEndReason::Empty;
++    case td::td_api::callDiscardReasonMissed::ID:             return CallEndReason::Missed;
++    case td::td_api::callDiscardReasonDeclined::ID:           return CallEndReason::Declined;
++    case td::td_api::callDiscardReasonDisconnected::ID:       return CallEndReason::Disconnected;
++    case td::td_api::callDiscardReasonHungUp::ID:             return CallEndReason::HungUp;
++    case td::td_api::callDiscardReasonUpgradeToGroupCall::ID: return CallEndReason::UpgradeToGroupCall;
++    default:                                                  return CallEndReason::Other;
++    }
++}
++
++static const char *discardReasonName(const td::td_api::CallDiscardReason *reason)
++{
++    switch (toCallEndReason(reason)) {
++    case CallEndReason::None:               return "none";
++    case CallEndReason::Empty:              return "empty";
++    case CallEndReason::Missed:             return "missed";
++    case CallEndReason::Declined:           return "declined";
++    case CallEndReason::Disconnected:       return "disconnected";
++    case CallEndReason::HungUp:             return "hungUp";
++    case CallEndReason::UpgradeToGroupCall: return "upgradeToGroupCall";
++    case CallEndReason::Other:              break;
+     }
++    return "unknown";
+ }
+ 
+ // One journal line per ending call update: which state, TDLib's discard reason, and whether this
+@@ -317,6 +337,7 @@ void updateCall(const td::td_api::call &call, TdAccountData &account, TdTranscei
+             discardCall(call.id_, transceiver);
+         }
+     } else if (call.state_->get_id() == td::td_api::callStateReady::ID) {
++        g_answeredCallId = call.id_;
+         if (! activateCall(call, buddyName, account, transceiver)) {
+             discardCall(call.id_, transceiver);
+             deactivateCall(account);   // Stop() before the VoIPController is deleted, or libtgvoip aborts
+@@ -335,10 +356,8 @@ void updateCall(const td::td_api::call &call, TdAccountData &account, TdTranscei
+         const char *cause = "normal";
+         if (call.state_->get_id() == td::td_api::callStateDiscarded::ID) {
+             const td::td_api::callStateDiscarded &d = static_cast<const td::td_api::callStateDiscarded &>(*call.state_);
+-            if (d.reason_) {
+-                if (d.reason_->get_id() == td::td_api::callDiscardReasonDeclined::ID) cause = "rejected";
+-                else if (d.reason_->get_id() == td::td_api::callDiscardReasonMissed::ID) cause = "missed";
+-            }
++            cause = callEndCause(toCallEndReason(d.reason_.get()), call.is_outgoing_,
++                                 g_answeredCallId == call.id_);
+         } else if (call.state_->get_id() == td::td_api::callStateError::ID) {
+             cause = "error";
+         }
+@@ -372,6 +391,7 @@ void discardCurrentCall(TdAccountData &account, TdTransceiver &transceiver)
+ void acceptCurrentCall(TdAccountData &account, TdTransceiver &transceiver)
+ {
+     if (!account.hasActiveCall()) return;
++    g_answeredCallId = account.getActiveCallId();
+     td::td_api::object_ptr<td::td_api::acceptCall> acceptReq = td::td_api::make_object<td::td_api::acceptCall>();
+     acceptReq->call_id_ = account.getActiveCallId();
+     acceptReq->protocol_ = getCallProtocol();
+diff --git a/test/call-end-test.cpp b/test/call-end-test.cpp
+new file mode 100644
+index 0000000..5ab12cd
+--- /dev/null
++++ b/test/call-end-test.cpp
+@@ -0,0 +1,50 @@
++// Host test of call-end.h: the cause the Phone app is told when TDLib discards a call.
++// Standalone (no TDLib, no libpurple):
++//   c++ -std=c++14 -Wall -Wextra -o call-end-test call-end-test.cpp && ./call-end-test
++#include "../call-end.h"
++
++#include <cstdio>
++#include <cstring>
++
++static int failures = 0;
++
++static void expect(const char *what, const char *got, const char *want)
++{
++    if (std::strcmp(got, want) != 0) {
++        std::printf("FAIL %s: got %s, want %s\n", what, got, want);
++        failures++;
++    }
++}
++
++int main()
++{
++    // Taken on another device: the server discards it here with no reason.
++    expect("incoming, empty, not answered here",
++           callEndCause(CallEndReason::Empty, false, false), "answeredElsewhere");
++    expect("incoming, no reason, not answered here",
++           callEndCause(CallEndReason::None, false, false), "answeredElsewhere");
++
++    // The caller gave up while it rang: still a missed call.
++    expect("incoming, missed", callEndCause(CallEndReason::Missed, false, false), "missed");
++    // Declined (here, or by the peer): rejected.
++    expect("incoming, declined", callEndCause(CallEndReason::Declined, false, false), "rejected");
++    expect("outgoing, declined", callEndCause(CallEndReason::Declined, true, false), "rejected");
++
++    // An empty reason on a call taken here, or on our own outgoing call, is a normal end.
++    expect("incoming, empty, answered here",
++           callEndCause(CallEndReason::Empty, false, true), "normal");
++    expect("outgoing, empty", callEndCause(CallEndReason::Empty, true, false), "normal");
++    expect("outgoing, no reason", callEndCause(CallEndReason::None, true, false), "normal");
++
++    // Every other reason is a normal end, whoever answered.
++    expect("incoming, hung up", callEndCause(CallEndReason::HungUp, false, true), "normal");
++    expect("incoming, hung up, not answered here",
++           callEndCause(CallEndReason::HungUp, false, false), "normal");
++    expect("incoming, disconnected", callEndCause(CallEndReason::Disconnected, false, false), "normal");
++    expect("incoming, upgrade", callEndCause(CallEndReason::UpgradeToGroupCall, false, false), "normal");
++    expect("incoming, other", callEndCause(CallEndReason::Other, false, false), "normal");
++
++    if (failures) return 1;
++    std::printf("call-end-test: all passed\n");
++    return 0;
++}
+-- 
+2.53.0
+

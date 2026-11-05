@@ -30,6 +30,8 @@ SRC_URI += " \
     file://0016-webOS-carry-calls-with-tgcalls-lite-when-the-peer-sp.patch \
     file://0017-webOS-clear-ended-calls-from-the-Phone-app-show-the-.patch \
     file://0018-webOS-video-in-tgcalls-lite-calls-through-luneos-rtc-engine.patch \
+    file://0019-webOS-log-why-TDLib-ended-a-call.patch \
+    file://0020-webOS-a-Telegram-call-answered-on-another-device-is-.patch \
 "
 SRCREV_upstream = "c83e3778bea79ec87b8ce447da3214c91cd58f4e"
 

@@ -1,0 +1,77 @@
+From 210e86fe408670f9fb66310774a774f55f03decf Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 5 Nov 2026 07:24:47 +0100
+Subject: [PATCH] webOS: log why TDLib ended a call
+
+When a Telegram call is answered on another device, sargo showed it
+as missed. TDLib's log is capped at warnings (0009), so nothing
+recorded which discard reason the server sent. Log one line per
+ending call update: the state, TDLib's discard reason, whether the
+call is outgoing and whether it is the one the Phone app shows. No
+peer data is logged.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ call.cpp | 38 ++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 38 insertions(+)
+
+diff --git a/call.cpp b/call.cpp
+index 9840b1a..08e849f 100644
+--- a/call.cpp
++++ b/call.cpp
+@@ -206,6 +206,42 @@ static void notifyCallError(const td::td_api::callStateError &error, const std::
+                           time(NULL), PURPLE_MESSAGE_SYSTEM);
+ }
+ 
++static const char *discardReasonName(const td::td_api::CallDiscardReason *reason)
++{
++    if (!reason) return "none";
++    switch (reason->get_id()) {
++    case td::td_api::callDiscardReasonEmpty::ID:              return "empty";
++    case td::td_api::callDiscardReasonMissed::ID:             return "missed";
++    case td::td_api::callDiscardReasonDeclined::ID:           return "declined";
++    case td::td_api::callDiscardReasonDisconnected::ID:       return "disconnected";
++    case td::td_api::callDiscardReasonHungUp::ID:             return "hungUp";
++    case td::td_api::callDiscardReasonUpgradeToGroupCall::ID: return "upgradeToGroupCall";
++    default:                                                  return "unknown";
++    }
++}
++
++// One journal line per ending call update: which state, TDLib's discard reason, and whether this
++// call is the one the Phone app shows. No peer data. The only way to see what the server sends
++// when the call is taken on another device (TDLib's own log is capped at warnings, 0009).
++static void logCallEnd(const td::td_api::call &call, TdAccountData &account)
++{
++    const int32_t id = call.state_->get_id();
++    const char *state = (id == td::td_api::callStateHangingUp::ID) ? "hangingUp"
++                      : (id == td::td_api::callStateDiscarded::ID) ? "discarded"
++                      : (id == td::td_api::callStateError::ID)     ? "error"
++                      : nullptr;
++    if (!state) return;
++    const bool shown = account.hasActiveCall() && account.getActiveCallId() == call.id_;
++    if (id == td::td_api::callStateDiscarded::ID) {
++        const auto &d = static_cast<const td::td_api::callStateDiscarded &>(*call.state_);
++        g_printerr("tg-call: %s reason=%s outgoing=%d shown=%d need_rating=%d need_debug=%d\n", state,
++                   discardReasonName(d.reason_.get()), call.is_outgoing_ ? 1 : 0, shown ? 1 : 0,
++                   d.need_rating_ ? 1 : 0, d.need_debug_information_ ? 1 : 0);
++    } else {
++        g_printerr("tg-call: %s outgoing=%d shown=%d\n", state, call.is_outgoing_ ? 1 : 0, shown ? 1 : 0);
++    }
++}
++
+ void updateCall(const td::td_api::call &call, TdAccountData &account, TdTransceiver &transceiver)
+ {
+     std::string buddyName = getPurpleUserName(getUserId(call), account);
+@@ -246,6 +282,8 @@ void updateCall(const td::td_api::call &call, TdAccountData &account, TdTranscei
+ 
+     if (!call.state_) return; // just in case
+ 
++    logCallEnd(call, account);
++
+     if (!call.is_outgoing_ && (call.state_->get_id() == td::td_api::callStatePending::ID)) {
+         if (!account.hasActiveCall()) {
+             account.setActiveCall(call.id_);
+-- 
+2.53.0
+
