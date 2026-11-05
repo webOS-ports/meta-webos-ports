@@ -17,7 +17,7 @@ PV = "0.9.10+git"
 PR = "r3"
 
 # master, which has pull request #14 (lock in landscape).
-SRCREV = "f40036ad727b7a33708b7855d14b2e8ae4194687"
+SRCREV = "74d4fd13de6778782d4030a4ce87f6c3a7124a0f"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 

@@ -11,5 +11,5 @@
 # branch only while LuneOS needs that pull request before it is merged. Set it back to main, with
 # LSC_SRCREV on the merge, once it is in.
 #
-LSC_BRANCH = "herrie/calls-video"
-LSC_SRCREV = "a756cb294583aa935a6305b14a82db0bf5050d74"
+LSC_BRANCH = "main"
+LSC_SRCREV = "90de99f658b7676afbc04c511153275d9efeb2d4"
