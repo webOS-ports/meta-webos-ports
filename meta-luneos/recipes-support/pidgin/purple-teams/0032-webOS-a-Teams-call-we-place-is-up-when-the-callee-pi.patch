@@ -1,0 +1,83 @@
+From 1bfb272e7128a2d6edc4ab3d997d50b9a6bb5fb0 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 5 Nov 2026 08:24:04 +0100
+Subject: [PATCH] webOS: a Teams call we place is up when the callee picks up
+
+The callee's client answers the media while the call still rings
+(early media): in a call teams.live.com placed, the mediaAnswer came
+3.5 s after the call was placed and the callAcceptance 2.1 s later.
+We marked the call active on the mediaAnswer, so the Phone app showed
+it connected and started its timer while the other phone still rang.
+
+Apply the media answer when it comes, as before, so audio can start,
+but keep the call dialing until the callAcceptance. An acceptance
+with no media answer before it applies its own SDP. A repeated media
+answer is still ignored.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ teams_calling.c | 20 ++++++++++++++++----
+ teams_calling.h |  1 +
+ 2 files changed, 17 insertions(+), 4 deletions(-)
+
+diff --git a/teams_calling.c b/teams_calling.c
+index 04be09b..ce7164f 100644
+--- a/teams_calling.c
++++ b/teams_calling.c
+@@ -1923,8 +1923,8 @@ teams_calling_handle_media_answer(TeamsAccount *sa, JsonObject *body_obj)
+ 	if (!call || !mp || mp->call != call || !mp->is_caller) {
+ 		teams_call_log("mediaAnswer: no outgoing caller engine to apply it to"); return;
+ 	}
+-	if (call->state == TEAMS_CALL_ACTIVE) {
+-		teams_call_log("mediaAnswer: call already active - repeat ignored"); return;
++	if (call->answer_applied) {
++		teams_call_log("mediaAnswer: answer already applied - repeat ignored"); return;
+ 	}
+ 	if ((mc = oget(body_obj, "mediaContent")))            blob = sget(mc, "blob");
+ 	if (!blob && (sub = oget(body_obj, "mediaAnswer")) && (mc = oget(sub, "mediaContent"))) blob = sget(mc, "blob");
+@@ -1969,8 +1969,10 @@ teams_calling_handle_media_answer(TeamsAccount *sa, JsonObject *body_obj)
+ 		media_send_candidates(mp, blob);
+ 	explicit_bzero(rxkey, strlen(rxkey));
+ 	g_free(ruf); g_free(rpw); g_free(rxkey);
+-	call->state = TEAMS_CALL_ACTIVE;
+-	push_state(call, NULL);
++	/* Not "active" yet: the callee's client answers the media while it still rings (early media;
++	 * CAPTURED, teams.live.com placing a call 2026-11-05: mediaAnswer 3.5 s after the call was
++	 * placed, callAcceptance 2.1 s later). The call is up on the acceptance. */
++	call->answer_applied = TRUE;
+ 	if (mp->camera_wanted && mp->our_vssrc) {
+ 		/* Our offer had video: the answer says what each side sends, and its fmtp how much. */
+ 		const char *peer = teams_sdp_video_direction(blob);
+@@ -2126,6 +2128,16 @@ teams_calling_handle_trouter(TeamsAccount *sa, JsonObject *body_obj, const gchar
+ 		teams_call_log("outgoing: accepted by the callee we dialled: %s",
+ 		               by && cur && cur->peer_mri && sget(by, "id") && !strcmp(sget(by, "id"), cur->peer_mri)
+ 		               ? "yes" : "no");
++		/* The callee picked up: the call is up now, not on the earlier media answer. An
++		 * acceptance with no media answer before it carries the answer itself. */
++		if (cur && cur->is_outgoing && cur->state == TEAMS_CALL_DIALING) {
++			if (!cur->answer_applied && blob) {
++				teams_call_log("outgoing: no media answer before the acceptance - applying its SDP");
++				teams_calling_handle_media_answer(sa, acc);
++			}
++			cur->state = TEAMS_CALL_ACTIVE;
++			push_state(cur, NULL);
++		}
+ 		if (ack_url && *ack_url) {
+ 			gchar *url = teams_calling_via_flightproxy(ack_url), *host = url_host_for_log(url);
+ 			teams_call_log("outgoing: acknowledging the acceptance to %s", host ? host : "?");
+diff --git a/teams_calling.h b/teams_calling.h
+index a12f0eb..16a837e 100644
+--- a/teams_calling.h
++++ b/teams_calling.h
+@@ -73,6 +73,7 @@ typedef struct _TeamsCall {
+ 	gboolean attach_sent;      /* the attach is posted (its response may still be in flight) */
+ 	gboolean accept_wanted;    /* answered: post the accept as soon as the acceptance link is there */
+ 	gboolean accept_sent;      /* the accept is posted: never a second one */
++	gboolean answer_applied;   /* outgoing: the callee's media answer is applied (it may come before the pickup) */
+ } TeamsCall;
+ 
+ /* Called from teams_trouter.c's /NGCallManagerWin handler with the decoded callNotification
+-- 
+2.53.0
+
