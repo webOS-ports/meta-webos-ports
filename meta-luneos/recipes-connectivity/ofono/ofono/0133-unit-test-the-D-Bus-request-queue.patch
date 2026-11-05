@@ -1,0 +1,1032 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] unit: test the D-Bus request queue
+
+Sailfish's unit/test-dbus-queue.c and unit/test-dbus.[ch] as of
+c89e8678 in https://github.com/sailfishos/ofono (added in
+e170b6df4ca0bd8138b1a8a571c59ee9f759161d, extended in
+6448c0c270d2d2f12cc5777f74e2bdc69e045926), on a private bus: run under
+dbus-run-session, the test reports itself skipped without one.
+
+One test is new: two requests that complete synchronously wait behind one
+that does not, and answering the first has to run both, not only the next.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+
+diff --git a/Makefile.am b/Makefile.am
+index b64e121..10f591d 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -988,6 +988,15 @@ unit_test_hfp_ag_bluez5_LDADD = gdbus/libgdbus-internal.la @GLIB_LIBS@ \
+ unit_objects += $(unit_test_hfp_ag_bluez5_OBJECTS)
+ endif
+ 
++unit_tests += unit/test-dbus-queue
++
++unit_test_dbus_queue_SOURCES = unit/test-dbus-queue.c unit/test-dbus.c \
++				unit/test-dbus.h src/dbus-queue.c src/dbus.c \
++				src/log.c
++unit_test_dbus_queue_LDADD = gdbus/libgdbus-internal.la @GLIB_LIBS@ \
++				@DBUS_LIBS@ $(ell_ldadd) -ldl
++unit_objects += $(unit_test_dbus_queue_OBJECTS)
++
+ LOG_DRIVER = env AM_TAP_AWK='$(AWK)' $(SHELL) \
+ 			$(top_srcdir)/build-aux/tap-driver.sh
+ 
+diff --git a/unit/test-dbus-queue.c b/unit/test-dbus-queue.c
+new file mode 100644
+index 0000000..a4f0e4a
+--- /dev/null
++++ b/unit/test-dbus-queue.c
+@@ -0,0 +1,806 @@
++/*
++ * oFono - Open Source Telephony
++ *
++ * The D-Bus request queue, from Sailfish oFono's unit/test-dbus-queue.c.
++ * It talks over a private bus here: run it under dbus-run-session. Without a
++ * bus the test reports itself skipped.
++ *
++ * Copyright (C) 2018-2019 Jolla Ltd.
++ *
++ * SPDX-License-Identifier: GPL-2.0-only
++ */
++
++#ifdef HAVE_CONFIG_H
++#include <config.h>
++#endif
++
++#include <string.h>
++#include <errno.h>
++#include <stddef.h>
++
++#include "test-dbus.h"
++
++#include <ofono/dbus.h>
++
++#include "ofono.h"
++#include "dbus-queue.h"
++
++#define TEST_TIMEOUT                    (10)   /* seconds */
++#define TEST_DBUS_INTERFACE            "test.interface"
++#define TEST_DBUS_METHOD               "Test"
++#define TEST_DBUS_PATH                 "/"
++
++#define TEST_ERROR_CANCELED            "org.ofono.Error.Canceled"
++#define TEST_ERROR_FAILED              "org.ofono.Error.Failed"
++#define TEST_ERROR_NOT_SUPPORTED       "org.ofono.Error.NotSupported"
++
++#define G_CAST(address, type, field) \
++	((type *)(void *)((char *)(address) - offsetof(type, field)))
++
++#define GDBUS_TEST_METHOD(fn) GDBUS_ASYNC_METHOD(TEST_DBUS_METHOD, \
++				GDBUS_ARGS( { "arg", "i" }), NULL, fn)
++
++static gboolean test_debug;
++
++/* ==== common ==== */
++
++static gboolean test_timeout(gpointer param)
++{
++	g_assert(!"TIMEOUT");
++	return G_SOURCE_REMOVE;
++}
++
++static guint test_setup_timeout(void)
++{
++	if (test_debug) {
++		return 0;
++	} else {
++		return g_timeout_add_seconds(TEST_TIMEOUT, test_timeout, NULL);
++	}
++}
++
++#define test_register_interface(methods,data) \
++	g_assert(g_dbus_register_interface(ofono_dbus_get_connection(), \
++				TEST_DBUS_PATH, TEST_DBUS_INTERFACE, \
++				methods, NULL, NULL, data, NULL))
++
++static void test_shutdown(struct test_dbus_context *dbus)
++{
++	g_dbus_unregister_interface(dbus->server_connection, TEST_DBUS_PATH,
++							TEST_DBUS_INTERFACE);
++	test_dbus_shutdown(dbus);
++}
++
++static void test_client_call(struct test_dbus_context *dbus, dbus_int32_t arg,
++					DBusPendingCallNotifyFunction fn)
++{
++	DBusMessage *msg = test_dbus_new_call(dbus, TEST_DBUS_PATH,
++					TEST_DBUS_INTERFACE, TEST_DBUS_METHOD);
++
++	dbus_message_append_args(msg, DBUS_TYPE_INT32, &arg, DBUS_TYPE_INVALID);
++	test_dbus_send(dbus, msg, fn, dbus);
++}
++
++static void test_expect_canceled(DBusPendingCall *call, void *unused)
++{
++	DBG("");
++	test_dbus_check_error_reply(call, TEST_ERROR_CANCELED);
++}
++
++static void test_expect_failed(DBusPendingCall *call, void *unused)
++{
++	DBG("");
++	test_dbus_check_error_reply(call, TEST_ERROR_FAILED);
++}
++
++static void test_expect_not_supported(DBusPendingCall *call, void *unused)
++{
++	DBG("");
++	test_dbus_check_error_reply(call, TEST_ERROR_NOT_SUPPORTED);
++}
++
++/* ==== basic ==== */
++
++static void test_basic(void)
++{
++	__ofono_dbus_queue_free(__ofono_dbus_queue_new());
++
++	/* These are NULL tolerant: */
++	__ofono_dbus_queue_free(NULL);
++	__ofono_dbus_queue_reply_ok(NULL);
++	__ofono_dbus_queue_reply_failed(NULL);
++	__ofono_dbus_queue_reply_all_ok(NULL);
++	__ofono_dbus_queue_reply_all_failed(NULL);
++	__ofono_dbus_queue_reply_all_error(NULL, NULL);
++	__ofono_dbus_queue_reply_msg(NULL, NULL);
++	g_assert(!__ofono_dbus_queue_pending(NULL));
++	g_assert(!__ofono_dbus_queue_set_pending(NULL, NULL));
++}
++
++/* ==== free ==== */
++
++struct test_free_data {
++	struct test_dbus_context dbus;
++	struct ofono_dbus_queue *queue;
++};
++
++static DBusMessage *test_free_cb(DBusMessage *msg, void *data)
++{
++	DBG("");
++	return NULL;
++}
++
++static void test_free_reply(DBusPendingCall *call, void *dbus)
++{
++	struct test_free_data *test = G_CAST(dbus, struct test_free_data, dbus);
++
++	DBG("");
++	test_dbus_check_error_reply(call, TEST_ERROR_CANCELED);
++	g_main_loop_quit(test->dbus.loop);
++}
++
++static DBusMessage *test_free_handler(DBusConnection *conn,
++						DBusMessage *msg, void *data)
++{
++	struct test_free_data *test = data;
++
++	DBG("");
++
++	/* test_free_cb queues the message */
++	__ofono_dbus_queue_request(test->queue, test_free_cb, msg, test);
++
++	/* And this cancels it: */
++	__ofono_dbus_queue_free(test->queue);
++	test->queue = NULL;
++	return NULL;
++}
++
++static const GDBusMethodTable test_free_methods[] = {
++	{ GDBUS_TEST_METHOD(test_free_handler) },
++	{ }
++};
++
++static void test_free_start(struct test_dbus_context *dbus)
++{
++	struct test_free_data *test = G_CAST(dbus, struct test_free_data, dbus);
++
++	test_register_interface(test_free_methods, test);
++	test_client_call(dbus, 0, test_free_reply);
++}
++
++static void test_free(void)
++{
++	struct test_free_data test;
++	guint timeout = test_setup_timeout();
++
++	memset(&test, 0, sizeof(test));
++	test_dbus_setup(&test.dbus);
++	test.dbus.start = test_free_start;
++	test.queue = __ofono_dbus_queue_new();
++
++	g_main_loop_run(test.dbus.loop);
++
++	g_assert(!test.queue); /* Freed by test_free_handler */
++	test_shutdown(&test.dbus);
++	if (timeout) {
++		g_source_remove(timeout);
++	}
++}
++
++/* ==== cancel ==== */
++
++struct test_cancel_data {
++	struct test_dbus_context dbus;
++	struct ofono_dbus_queue *queue;
++};
++
++static gboolean test_cancel_msg(void *data)
++{
++	struct test_cancel_data *test = data;
++
++	/* This is will cancel the message: */
++	__ofono_dbus_queue_reply_msg(test->queue, NULL);
++	return G_SOURCE_REMOVE;
++}
++
++static DBusMessage *test_cancel_cb(DBusMessage *msg, void *data)
++{
++	DBG("");
++	g_idle_add(test_cancel_msg, data);
++	return NULL;
++}
++
++static void test_cancel_reply(DBusPendingCall *call, void *dbus)
++{
++	struct test_cancel_data *test =
++		G_CAST(dbus, struct test_cancel_data, dbus);
++
++	DBG("");
++	test_dbus_check_error_reply(call, TEST_ERROR_CANCELED);
++	g_main_loop_quit(test->dbus.loop);
++}
++
++static DBusMessage *test_cancel_handler(DBusConnection *conn,
++						DBusMessage *msg, void *data)
++{
++	struct test_cancel_data *test = data;
++
++	DBG("");
++
++	__ofono_dbus_queue_request(test->queue, test_cancel_cb, msg, test);
++	return NULL;
++}
++
++static const GDBusMethodTable test_cancel_methods[] = {
++	{ GDBUS_TEST_METHOD(test_cancel_handler) },
++	{ }
++};
++
++static void test_cancel_start(struct test_dbus_context *dbus)
++{
++	struct test_cancel_data *test =
++		G_CAST(dbus, struct test_cancel_data, dbus);
++
++	test_register_interface(test_cancel_methods, test);
++	test_client_call(dbus, 0, test_cancel_reply);
++}
++
++static void test_cancel(void)
++{
++	struct test_cancel_data test;
++	guint timeout = test_setup_timeout();
++
++	memset(&test, 0, sizeof(test));
++	test_dbus_setup(&test.dbus);
++	test.dbus.start = test_cancel_start;
++	test.queue = __ofono_dbus_queue_new();
++
++	g_main_loop_run(test.dbus.loop);
++
++	__ofono_dbus_queue_free(test.queue);
++	test_shutdown(&test.dbus);
++	if (timeout) {
++		g_source_remove(timeout);
++	}
++}
++
++/* ==== async ==== */
++
++struct test_async_data {
++	struct test_dbus_context dbus;
++	struct ofono_dbus_queue *queue;
++};
++
++static gboolean test_async_complete(void *data)
++{
++	struct test_async_data *test = data;
++
++	__ofono_dbus_queue_reply_fn(test->queue,
++				dbus_message_new_method_return);
++	return G_SOURCE_REMOVE;
++}
++
++static DBusMessage *test_async_cb(DBusMessage *msg, void *data)
++{
++	DBG("");
++	g_idle_add(test_async_complete, data);
++	return NULL;
++}
++
++static void test_async_last_reply(DBusPendingCall *call, void *dbus)
++{
++	struct test_async_data *test =
++		G_CAST(dbus, struct test_async_data, dbus);
++
++	DBG("");
++	test_dbus_check_empty_reply(call, NULL);
++	g_main_loop_quit(test->dbus.loop);
++}
++
++static DBusMessage *test_async_handler(DBusConnection *conn,
++						DBusMessage *msg, void *data)
++{
++	struct test_async_data *test = data;
++
++	DBG("");
++	__ofono_dbus_queue_request(test->queue, test_async_cb, msg, data);
++	return NULL;
++}
++
++static const GDBusMethodTable test_async_methods[] = {
++	{ GDBUS_TEST_METHOD(test_async_handler) },
++	{ }
++};
++
++static void test_async_start(struct test_dbus_context *dbus)
++{
++	struct test_async_data *test =
++		G_CAST(dbus, struct test_async_data, dbus);
++
++	test_register_interface(test_async_methods, test);
++	test_client_call(dbus, 0, test_dbus_check_empty_reply);
++	test_client_call(dbus, 1, test_dbus_check_empty_reply);
++	test_client_call(dbus, 2, test_dbus_check_empty_reply);
++	test_client_call(dbus, 3, test_async_last_reply);
++}
++
++static void test_async(void)
++{
++	struct test_async_data test;
++	guint timeout = test_setup_timeout();
++
++	memset(&test, 0, sizeof(test));
++	test_dbus_setup(&test.dbus);
++	test.dbus.start = test_async_start;
++	test.queue = __ofono_dbus_queue_new();
++
++	g_main_loop_run(test.dbus.loop);
++
++	__ofono_dbus_queue_free(test.queue);
++	test_shutdown(&test.dbus);
++	if (timeout) {
++		g_source_remove(timeout);
++	}
++}
++
++/* ==== sync ==== */
++
++struct test_sync_data {
++	struct test_dbus_context dbus;
++	struct ofono_dbus_queue *queue;
++};
++
++static DBusMessage *test_sync_cb(DBusMessage *msg, void *data)
++{
++	DBG("");
++	return dbus_message_new_method_return(msg);
++}
++
++static void test_sync_reply(DBusPendingCall *call, void *dbus)
++{
++	struct test_sync_data *test = G_CAST(dbus, struct test_sync_data, dbus);
++
++	DBG("");
++	test_dbus_check_empty_reply(call, NULL);
++	g_main_loop_quit(test->dbus.loop);
++}
++
++static DBusMessage *test_sync_handler(DBusConnection *conn,
++						DBusMessage *msg, void *data)
++{
++	struct test_sync_data *test = data;
++
++	DBG("");
++
++	/* test_sync_cb immediately completes it */
++	__ofono_dbus_queue_request(test->queue, test_sync_cb, msg, test);
++	return NULL;
++}
++
++static const GDBusMethodTable test_sync_methods[] = {
++	{ GDBUS_TEST_METHOD(test_sync_handler) },
++	{ }
++};
++
++static void test_sync_start(struct test_dbus_context *dbus)
++{
++	struct test_sync_data *test = G_CAST(dbus, struct test_sync_data, dbus);
++
++	test_register_interface(test_sync_methods, test);
++	test_client_call(dbus, 0, test_sync_reply);
++}
++
++static void test_sync(void)
++{
++	struct test_sync_data test;
++	guint timeout = test_setup_timeout();
++
++	memset(&test, 0, sizeof(test));
++	test_dbus_setup(&test.dbus);
++	test.dbus.start = test_sync_start;
++	test.queue = __ofono_dbus_queue_new();
++
++	g_main_loop_run(test.dbus.loop);
++
++	__ofono_dbus_queue_free(test.queue);
++	test_shutdown(&test.dbus);
++	if (timeout) {
++		g_source_remove(timeout);
++	}
++}
++
++/* ==== reply ==== */
++
++struct test_reply_data {
++	struct test_dbus_context dbus;
++	struct ofono_dbus_queue *queue;
++};
++
++static void test_reply_last_reply(DBusPendingCall *call, void *dbus)
++{
++	struct test_reply_data *test =
++		G_CAST(dbus, struct test_reply_data, dbus);
++
++	DBG("");
++	test_dbus_check_empty_reply(call, NULL);
++	g_main_loop_quit(test->dbus.loop);
++}
++
++static DBusMessage *test_reply_1(DBusMessage *msg, void *data)
++{
++	DBG("");
++	return NULL;
++}
++
++static DBusMessage *test_reply_2(DBusMessage *msg, void *data)
++{
++	DBG("");
++	return NULL;
++}
++
++static DBusMessage *test_reply_3(DBusMessage *msg, void *data)
++{
++	DBG("");
++	return NULL;
++}
++
++static DBusMessage *test_reply_4(DBusMessage *msg, void *data)
++{
++	DBG("");
++	return NULL;
++}
++
++static DBusMessage *test_reply_5(DBusMessage *msg, void *data)
++{
++	DBG("");
++	return dbus_message_new_method_return(msg);
++}
++
++static DBusMessage *test_reply_handler(DBusConnection *conn,
++						DBusMessage *msg, void *data)
++{
++	struct test_reply_data *test = data;
++	struct ofono_error error;
++	dbus_int32_t arg;
++
++	g_assert(dbus_message_get_args(msg, NULL, DBUS_TYPE_INT32, &arg,
++							DBUS_TYPE_INVALID));
++
++	DBG("%d", arg);
++	switch (arg) {
++	case 0:
++		/* Queue is empty, we can use __ofono_dbus_queue_set_pending */
++		g_assert(__ofono_dbus_queue_set_pending(test->queue, msg));
++		break;
++	case 1:
++	case 4:
++		/* Queue is not empty anymore */
++		g_assert(__ofono_dbus_queue_pending(test->queue));
++		g_assert(!__ofono_dbus_queue_set_pending(test->queue, msg));
++		__ofono_dbus_queue_request(test->queue, test_reply_1,
++								msg, NULL);
++		break;
++	case 2:
++		/* Same callback, different data */
++		__ofono_dbus_queue_request(test->queue, test_reply_1,
++								msg, test);
++		break;
++	case 3:
++		__ofono_dbus_queue_request(test->queue, test_reply_2,
++								msg, NULL);
++		break;
++	case 5:
++		__ofono_dbus_queue_request(test->queue, test_reply_3,
++								msg, NULL);
++		break;
++	case 6:
++		__ofono_dbus_queue_request(test->queue, test_reply_4,
++								msg, NULL);
++		break;
++	case 7:
++		/* Call the same method again */
++		__ofono_dbus_queue_request(test->queue, test_reply_4,
++								msg, NULL);
++		break;
++	case 8:
++		/* Call the last one */
++		__ofono_dbus_queue_request(test->queue, test_reply_5,
++								msg, NULL);
++
++		/* This completes the first one, with NULL handler */
++		__ofono_dbus_queue_reply_all_fn_param(test->queue, NULL, NULL);
++		g_assert(__ofono_dbus_queue_pending(test->queue));
++
++		/* And this one completes 2 others with test_reply_1 */
++		__ofono_dbus_queue_reply_all_fn(test->queue,
++					dbus_message_new_method_return);
++		g_assert(__ofono_dbus_queue_pending(test->queue));
++
++		/* This one test_reply_1 with different data */
++		__ofono_dbus_queue_reply_all_fn(test->queue,
++						__ofono_error_canceled);
++
++		/* And this one fails 2 others with test_reply_2 */
++		__ofono_dbus_queue_reply_all_fn(test->queue, NULL);
++
++		/* This one test_reply_3 with Failed */
++		__ofono_dbus_queue_reply_all_error(test->queue, NULL);
++
++		/* This one completes all test_reply_4 with NotSupported */
++		error.type = OFONO_ERROR_TYPE_ERRNO;
++		error.error = -EOPNOTSUPP;
++		__ofono_dbus_queue_reply_all_error(test->queue, &error);
++
++		/* test_reply_5 must be already completed */
++		g_assert(!__ofono_dbus_queue_pending(test->queue));
++
++		/* And this one does nothing */
++		__ofono_dbus_queue_reply_all_fn(test->queue,
++					dbus_message_new_method_return);
++		break;
++	}
++
++	return NULL;
++}
++
++static const GDBusMethodTable test_reply_methods[] = {
++	{ GDBUS_TEST_METHOD(test_reply_handler) },
++	{ }
++};
++
++static void test_reply_start(struct test_dbus_context *dbus)
++{
++	struct test_reply_data *test =
++		G_CAST(dbus, struct test_reply_data, dbus);
++
++	test_register_interface(test_reply_methods, test);
++	test_client_call(dbus, 0, test_expect_failed);
++	test_client_call(dbus, 1, test_dbus_check_empty_reply);
++	test_client_call(dbus, 2, test_expect_canceled);
++	test_client_call(dbus, 3, test_expect_failed);
++	test_client_call(dbus, 4, test_dbus_check_empty_reply);
++	test_client_call(dbus, 5, test_expect_failed);
++	test_client_call(dbus, 6, test_expect_not_supported);
++	test_client_call(dbus, 7, test_expect_not_supported);
++	test_client_call(dbus, 8, test_reply_last_reply);
++}
++
++static void test_reply(void)
++{
++	struct test_reply_data test;
++	guint timeout = test_setup_timeout();
++
++	memset(&test, 0, sizeof(test));
++	test_dbus_setup(&test.dbus);
++	test.dbus.start = test_reply_start;
++	test.queue = __ofono_dbus_queue_new();
++
++	g_main_loop_run(test.dbus.loop);
++
++	__ofono_dbus_queue_free(test.queue);
++	test_shutdown(&test.dbus);
++	if (timeout) {
++		g_source_remove(timeout);
++	}
++}
++
++/* ==== ok ==== */
++
++struct test_ok_data {
++	struct test_dbus_context dbus;
++	struct ofono_dbus_queue *queue;
++};
++
++static DBusMessage *test_ok_1(DBusMessage *msg, void *data)
++{
++	DBG("");
++	return NULL;
++}
++
++static DBusMessage *test_ok_2(DBusMessage *msg, void *data)
++{
++	DBG("");
++	return dbus_message_new_method_return(msg);
++}
++
++static void test_ok_last_reply(DBusPendingCall *call, void *dbus)
++{
++	struct test_ok_data *test = G_CAST(dbus, struct test_ok_data, dbus);
++
++	DBG("");
++	test_dbus_check_empty_reply(call, NULL);
++	g_main_loop_quit(test->dbus.loop);
++}
++
++static DBusMessage *test_ok_handler(DBusConnection *conn,
++						DBusMessage *msg, void *data)
++{
++	struct test_ok_data *test = data;
++	dbus_int32_t arg;
++
++	g_assert(dbus_message_get_args(msg, NULL, DBUS_TYPE_INT32, &arg,
++							DBUS_TYPE_INVALID));
++
++	DBG("%d", arg);
++	if (arg == 0) {
++		/* This is the first call, it blocks the queue */
++		__ofono_dbus_queue_request(test->queue, test_ok_1, msg, test);
++	} else {
++		g_assert(__ofono_dbus_queue_pending(test->queue));
++		__ofono_dbus_queue_request(test->queue, test_ok_2, msg, test);
++		/* This is the second call, complete the first one.
++		 * That unblocks the seconds one. */
++		__ofono_dbus_queue_reply_ok(test->queue);
++
++		/* This call has no effect, it's actually an error (the
++		 * message has already been replied to) but such situation
++		 * is handled by __ofono_dbus_queue_reply_msg */
++		__ofono_dbus_queue_reply_msg(test->queue,
++					dbus_message_new_method_return(msg));
++
++		/* This one does nothing too */
++		__ofono_dbus_queue_reply_fn(test->queue, NULL);
++	}
++
++	return NULL;
++}
++
++static const GDBusMethodTable test_ok_methods[] = {
++	{ GDBUS_TEST_METHOD(test_ok_handler) },
++	{ }
++};
++
++static void test_ok_start(struct test_dbus_context *dbus)
++{
++	struct test_ok_data *test = G_CAST(dbus, struct test_ok_data, dbus);
++
++	test_register_interface(test_ok_methods, test);
++	test_client_call(dbus, 0, test_dbus_check_empty_reply);
++	test_client_call(dbus, 1, test_ok_last_reply);
++}
++
++static void test_ok(void)
++{
++	struct test_ok_data test;
++	guint timeout = test_setup_timeout();
++
++	memset(&test, 0, sizeof(test));
++	test_dbus_setup(&test.dbus);
++	test.dbus.start = test_ok_start;
++	test.queue = __ofono_dbus_queue_new();
++
++	g_main_loop_run(test.dbus.loop);
++
++	__ofono_dbus_queue_free(test.queue);
++	test_shutdown(&test.dbus);
++	if (timeout) {
++		g_source_remove(timeout);
++	}
++}
++
++/* ==== sync_chain ==== */
++
++/*
++ * Two requests that complete synchronously wait behind one that does
++ * not. Answering the first must run both of them, not only the next one.
++ */
++
++struct test_sync_chain_data {
++	struct test_dbus_context dbus;
++	struct ofono_dbus_queue *queue;
++};
++
++static DBusMessage *test_sync_chain_block(DBusMessage *msg, void *data)
++{
++	DBG("");
++	return NULL;
++}
++
++static DBusMessage *test_sync_chain_done(DBusMessage *msg, void *data)
++{
++	DBG("");
++	return dbus_message_new_method_return(msg);
++}
++
++static void test_sync_chain_last_reply(DBusPendingCall *call, void *dbus)
++{
++	struct test_sync_chain_data *test =
++		G_CAST(dbus, struct test_sync_chain_data, dbus);
++
++	DBG("");
++	test_dbus_check_empty_reply(call, NULL);
++	g_main_loop_quit(test->dbus.loop);
++}
++
++static DBusMessage *test_sync_chain_handler(DBusConnection *conn,
++						DBusMessage *msg, void *data)
++{
++	struct test_sync_chain_data *test = data;
++	dbus_int32_t arg;
++
++	g_assert(dbus_message_get_args(msg, NULL, DBUS_TYPE_INT32, &arg,
++							DBUS_TYPE_INVALID));
++
++	DBG("%d", arg);
++	if (arg == 0) {
++		/* Blocks the queue */
++		__ofono_dbus_queue_request(test->queue, test_sync_chain_block,
++								msg, test);
++	} else {
++		g_assert(__ofono_dbus_queue_pending(test->queue));
++		__ofono_dbus_queue_request(test->queue, test_sync_chain_done,
++								msg, test);
++		/* Both synchronous requests are queued: unblock them */
++		if (arg == 2)
++			__ofono_dbus_queue_reply_ok(test->queue);
++	}
++
++	return NULL;
++}
++
++static const GDBusMethodTable test_sync_chain_methods[] = {
++	{ GDBUS_TEST_METHOD(test_sync_chain_handler) },
++	{ }
++};
++
++static void test_sync_chain_start(struct test_dbus_context *dbus)
++{
++	struct test_sync_chain_data *test =
++		G_CAST(dbus, struct test_sync_chain_data, dbus);
++
++	test_register_interface(test_sync_chain_methods, test);
++	test_client_call(dbus, 0, test_dbus_check_empty_reply);
++	test_client_call(dbus, 1, test_dbus_check_empty_reply);
++	test_client_call(dbus, 2, test_sync_chain_last_reply);
++}
++
++static void test_sync_chain(void)
++{
++	struct test_sync_chain_data test;
++	guint timeout = test_setup_timeout();
++
++	memset(&test, 0, sizeof(test));
++	test_dbus_setup(&test.dbus);
++	test.dbus.start = test_sync_chain_start;
++	test.queue = __ofono_dbus_queue_new();
++
++	g_main_loop_run(test.dbus.loop);
++
++	g_assert(!__ofono_dbus_queue_pending(test.queue));
++	__ofono_dbus_queue_free(test.queue);
++	test_shutdown(&test.dbus);
++	if (timeout) {
++		g_source_remove(timeout);
++	}
++}
++
++#define TEST_(name) "/dbus-queue/" name
++
++int main(int argc, char *argv[])
++{
++	int i;
++
++	test_dbus_require_bus();
++
++	g_test_init(&argc, &argv, NULL);
++	for (i = 1; i < argc; i++) {
++		const char *arg = argv[i];
++
++		if (!strcmp(arg, "-d") || !strcmp(arg, "--debug"))
++			test_debug = TRUE;
++	}
++
++	__ofono_log_init("test-dbus-queue",
++				g_test_verbose() ? "*" : NULL, FALSE);
++
++	g_test_add_func(TEST_("basic"), test_basic);
++	g_test_add_func(TEST_("free"), test_free);
++	g_test_add_func(TEST_("cancel"), test_cancel);
++	g_test_add_func(TEST_("async"), test_async);
++	g_test_add_func(TEST_("sync"), test_sync);
++	g_test_add_func(TEST_("reply"), test_reply);
++	g_test_add_func(TEST_("ok"), test_ok);
++	g_test_add_func(TEST_("sync_chain"), test_sync_chain);
++
++	return g_test_run();
++}
+diff --git a/unit/test-dbus.c b/unit/test-dbus.c
+new file mode 100644
+index 0000000..c0081bc
+--- /dev/null
++++ b/unit/test-dbus.c
+@@ -0,0 +1,127 @@
++/*
++ * oFono - Open Source Telephony
++ *
++ * Taken from Sailfish oFono's unit/test-dbus.c; see test-dbus.h.
++ *
++ * Copyright (C) 2018-2021 Jolla Ltd.
++ *
++ * SPDX-License-Identifier: GPL-2.0-only
++ */
++
++#ifdef HAVE_CONFIG_H
++#include <config.h>
++#endif
++
++#include <stdio.h>
++#include <stdlib.h>
++
++#include "test-dbus.h"
++#include "ofono.h"
++
++void test_dbus_require_bus(void)
++{
++	if (getenv("DBUS_SESSION_BUS_ADDRESS"))
++		return;
++
++	printf("1..0 # SKIP needs a D-Bus bus, run under dbus-run-session\n");
++	exit(0);
++}
++
++void test_dbus_check_empty_reply(DBusPendingCall *call, void *unused)
++{
++	DBusMessage *reply = dbus_pending_call_steal_reply(call);
++	DBusMessageIter it;
++
++	g_assert(dbus_message_get_type(reply) ==
++					DBUS_MESSAGE_TYPE_METHOD_RETURN);
++
++	dbus_message_iter_init(reply, &it);
++	g_assert(dbus_message_iter_get_arg_type(&it) == DBUS_TYPE_INVALID);
++
++	dbus_message_unref(reply);
++	dbus_pending_call_unref(call);
++}
++
++void test_dbus_check_error_reply(DBusPendingCall *call, const char *error)
++{
++	DBusMessage *msg = dbus_pending_call_steal_reply(call);
++	const char *name;
++
++	g_assert(dbus_message_get_type(msg) == DBUS_MESSAGE_TYPE_ERROR);
++	name = dbus_message_get_error_name(msg);
++	g_assert_cmpstr(name, ==, error);
++	dbus_message_unref(msg);
++	dbus_pending_call_unref(call);
++}
++
++DBusMessage *test_dbus_new_call(struct test_dbus_context *test,
++				const char *path, const char *iface,
++				const char *method)
++{
++	const char *dest = dbus_bus_get_unique_name(test->server_connection);
++	DBusMessage *msg = dbus_message_new_method_call(dest, path, iface,
++								method);
++
++	g_assert(msg);
++	return msg;
++}
++
++void test_dbus_send(struct test_dbus_context *test, DBusMessage *msg,
++			DBusPendingCallNotifyFunction fn, void *data)
++{
++	DBusPendingCall *call;
++
++	g_assert(dbus_connection_send_with_reply(test->client_connection, msg,
++						&call, DBUS_TIMEOUT_INFINITE));
++	g_assert(call);
++	dbus_pending_call_set_notify(call, fn, data, NULL);
++	dbus_message_unref(msg);
++}
++
++static gboolean test_dbus_start(gpointer data)
++{
++	struct test_dbus_context *test = data;
++
++	test->start_id = 0;
++	test->start(test);
++	return G_SOURCE_REMOVE;
++}
++
++void test_dbus_setup(struct test_dbus_context *test)
++{
++	DBusError err;
++
++	test->loop = g_main_loop_new(NULL, FALSE);
++
++	dbus_error_init(&err);
++	test->server_connection = g_dbus_setup_private(DBUS_BUS_SESSION, NULL,
++									&err);
++	g_assert(test->server_connection);
++	test->client_connection = g_dbus_setup_private(DBUS_BUS_SESSION, NULL,
++									&err);
++	g_assert(test->client_connection);
++
++	__ofono_dbus_init(test->server_connection);
++
++	test->start_id = g_idle_add(test_dbus_start, test);
++}
++
++static void test_dbus_close(DBusConnection *conn)
++{
++	dbus_connection_flush(conn);
++	dbus_connection_close(conn);
++	dbus_connection_unref(conn);
++}
++
++void test_dbus_shutdown(struct test_dbus_context *test)
++{
++	__ofono_dbus_cleanup();
++	test_dbus_close(test->client_connection);
++	test_dbus_close(test->server_connection);
++
++	/* Let the connections' sources go */
++	while (g_main_context_iteration(NULL, FALSE))
++		;
++
++	g_main_loop_unref(test->loop);
++}
+diff --git a/unit/test-dbus.h b/unit/test-dbus.h
+new file mode 100644
+index 0000000..331b42f
+--- /dev/null
++++ b/unit/test-dbus.h
+@@ -0,0 +1,46 @@
++/*
++ * oFono - Open Source Telephony
++ *
++ * Client and server ends of a D-Bus test. Taken from Sailfish oFono's
++ * unit/test-dbus.h; the ends are two connections to a private bus here, as
++ * in unit/test-emulator-multimodem.c, instead of a peer connection set up
++ * with dbus-glib.
++ *
++ * Copyright (C) 2018-2021 Jolla Ltd.
++ *
++ * SPDX-License-Identifier: GPL-2.0-only
++ */
++
++#ifndef TEST_DBUS_H
++#define TEST_DBUS_H
++
++#include <glib.h>
++#include <gdbus.h>
++
++struct test_dbus_context {
++	GMainLoop *loop;
++	DBusConnection *server_connection;
++	DBusConnection *client_connection;
++	void (*start)(struct test_dbus_context *test);
++	guint start_id;
++};
++
++/* Reports the test binary skipped when there is no bus to use */
++void test_dbus_require_bus(void);
++
++void test_dbus_setup(struct test_dbus_context *context);
++void test_dbus_shutdown(struct test_dbus_context *context);
++
++/* A method call from the client end to the server end */
++DBusMessage *test_dbus_new_call(struct test_dbus_context *context,
++				const char *path, const char *iface,
++				const char *method);
++
++/* Sends and unrefs msg. There is no timeout, the test's own timer is the limit */
++void test_dbus_send(struct test_dbus_context *context, DBusMessage *msg,
++			DBusPendingCallNotifyFunction fn, void *data);
++
++void test_dbus_check_error_reply(DBusPendingCall *call, const char *error);
++void test_dbus_check_empty_reply(DBusPendingCall *call, void *unused);
++
++#endif /* TEST_DBUS_H */

@@ -68,6 +68,13 @@ SRC_URI:append = " \
   file://0129-smsutil-take-cell-broadcast-topics-up-to-9999.patch \
   file://0130-cbs-a-public-warning-is-not-a-base-station-id.patch \
   file://0131-unit-decode-the-pages-of-a-real-NL-Alert.patch \
+  file://0132-core-add-a-queue-for-D-Bus-requests.patch \
+  file://0133-unit-test-the-D-Bus-request-queue.patch \
+  file://0134-network-queue-Scan-and-Register-requests.patch \
+  file://0135-radio-settings-queue-requests.patch \
+  file://0136-sms-queue-GetProperties-requests-while-waiting-for-s.patch \
+  file://0137-call-forwarding-allow-multiple-pending-GetProperties.patch \
+  file://0138-unit-test-the-atoms-that-queue-D-Bus-requests.patch \
 "
 
 # On Halium the modem is driven by ofono-binder-plugin. The in-tree ril
