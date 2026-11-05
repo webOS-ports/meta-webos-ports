@@ -10,9 +10,15 @@ LIC_FILES_CHKSUM = " \
 # CMakeLists.txt neither looks for them nor links them -- only the device build compensates, with a
 # hand-written "-lopus -logg" in build.sh -- so the flags have to come from EXTRA_OECMAKE below.
 # Worth fixing upstream with a pkg_check_modules(OPUS REQUIRED opus ogg) instead.
-DEPENDS = "glib-2.0 db8 pidgin luna-service2 tidy-html5 libopus libogg"
+#
+# GStreamer is for src/VoiceNote.cpp, which decodes the Messaging app's M4A voice recordings before
+# they are encoded to Ogg/Opus: CMakeLists.txt requires gstreamer-1.0 and gstreamer-app-1.0 (the
+# latter from gstreamer1.0-plugins-base). Its pipeline is built at run time, so the elements it
+# names are listed in RDEPENDS below.
+DEPENDS = "glib-2.0 db8 pidgin luna-service2 tidy-html5 libopus libogg gstreamer1.0 gstreamer1.0-plugins-base"
 
 PV = "3.0.5+git"
+PE = "3"
 
 inherit webos_ports_ose_repo
 inherit webos_cmake
@@ -24,7 +30,7 @@ inherit webos_systemd
 
 LUNEOS_SYSTEMD_SERVICE = "imlibpurpleservice.service"
 
-SRCREV = "55c27726357ca2e83bb687fbd5cd135932ca8f6d"
+SRCREV = "752adbb4d7c4593ca3fe137e51a7824b5d082e29"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
@@ -35,13 +41,24 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 # the object files, where --as-needed drops both libraries again because nothing has referenced
 # them yet. Standard libraries go last, after the objects that need them.
 EXTRA_OECMAKE += "-DCMAKE_CXX_STANDARD_LIBRARIES='-lopus -logg'"
+# The voice-note pipeline: filesrc ! qtdemux ! aacparse ! avdec_aac ! audioconvert ! audioresample
+# ! capsfilter ! appsink.
+RDEPENDS:${PN} += " \
+    gstreamer1.0-libav \
+    gstreamer1.0-plugins-base-app \
+    gstreamer1.0-plugins-base-audioconvert \
+    gstreamer1.0-plugins-base-audioresample \
+    gstreamer1.0-plugins-good-audioparsers \
+    gstreamer1.0-plugins-good-isomp4 \
+"
 RRECOMMENDS:${PN} += " \
     pidgin-sipe \
-    purple-matrix \
     purple-discord \
     purple-googlechat \
+    synergy-im-irc \
     purple-teams \
     purple-combined \
+    purple-presage \
     tdlib-purple \
     funyahoo-plusplus \
     icyque \
@@ -65,7 +82,7 @@ RRECOMMENDS:${PN} += " \
     libpurple-protocol-zephyr \
 "
 
-# All six recipes-support/pidgin plug-ins are enabled. purple-combined provides TWO prpls from one
+# All seven recipes-support/pidgin plug-ins are enabled. purple-combined provides TWO prpls from one
 # shared object -- prpl-hehoe-whatsmeow (WhatsApp) and prpl-gometa (Facebook Messenger) -- because
 # they share a Go runtime.
 #
@@ -76,11 +93,10 @@ RRECOMMENDS:${PN} += " \
 #                    constrained builder (its recipe caps PARALLEL_MAKE at 2 for that reason).
 #   purple-combined  needs network access in do_compile to fetch Go modules through GOPROXY,
 #                    the same way influxdb and etcd do in this layer set.
-#
-# purple-presage (Signal) is NOT listed: it cannot build on scarthgap at all. Its Cargo.lock is
-# lockfile version 4 (cargo 1.78+) and its graph needs rust 1.86 via icu_* 2.2.0, against the
-# 1.75 this layer set provides. The recipe is complete and waiting for a newer toolchain -- see
-# purple-presage_git.bb. Signal also does not work on webOS at runtime regardless.
+#   purple-presage   (Signal) a cargo build of about 400 crates, with SQLCipher and ring
+#                    compiled through cc-rs. It was left out while the layer set only had rust
+#                    1.75; the rust 1.94 of wrynose builds it (see purple-presage_git.bb). It
+#                    brings signal-call-media, the engine for com.palm.signal.call.
 
 do_install:append() {
     cp -R --no-dereference --preserve=mode,links -v ${S}/files/etc ${D}
