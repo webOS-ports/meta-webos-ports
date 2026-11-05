@@ -9,12 +9,10 @@ HOMEPAGE = "https://github.com/sailfishos/cell-broadcast-provider-info"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=e98a055826fc65091d1e31bc3c808f9a"
 
-PV = "20260511+git"
-# c0fc49a left master when upstream rewrote its history and is now reachable
-# only through refs/pull/1/head, so a fetch without our mirror fails with
-# "Unable to find revision ... in branch master". cc5e80c (tag 0.9.0, on
-# master) has the identical tree (e359f6133b77), so the content is unchanged.
-SRCREV = "cc5e80c21fcc10511dde53ae520c9b3ec64370e3"
+PV = "20260930+git"
+# Tag 0.9.1. It also adds AusAlert and FI-Alert policy overrides, which upstream
+# ships as optional subpackages; only the base catalog is installed here.
+SRCREV = "abaf61e159eb41b05218a624deec3b32eef5cf9e"
 
 SRC_URI = "git://github.com/sailfishos/cell-broadcast-provider-info.git;protocol=https;branch=master"
 
