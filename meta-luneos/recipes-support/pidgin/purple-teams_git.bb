@@ -43,6 +43,7 @@ SRC_URI += " \
     file://0030-webOS-Attach-to-an-incoming-Teams-call-while-it-ring.patch \
     file://0031-webOS-Say-when-a-Teams-call-was-answered-on-another-.patch \
     file://0032-webOS-a-Teams-call-we-place-is-up-when-the-callee-pi.patch \
+    file://0033-webOS-Show-our-own-camera-before-the-far-side-s-pict.patch \
 "
 SRCREV_upstream = "f7eb519b9968ed7844ff59319bff5c1859c46851"
 
