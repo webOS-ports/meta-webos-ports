@@ -50,8 +50,10 @@ do_install() {
 #   shmsink                        gstreamer1.0-plugins-bad-shm (the pictures the Phone app shows)
 #   appsrc                         gstreamer1.0-plugins-base-app
 #   videoconvert, videoscale       gstreamer1.0-plugins-base-videoconvertscale
-#   droidcamsrc                    gst-droid, the camera and its H.264 encoder; halium only, so
-#                                  elsewhere a video call only receives
+#   videoflip                      gstreamer1.0-plugins-good-videofilter (the picture is turned
+#                                  upright before droidvenc: Teams carries no rotation)
+#   droidcamsrc, droidvenc         gst-droid, the camera and the hardware H.264 encoder; halium
+#                                  only, so elsewhere a video call only receives
 RDEPENDS:${PN} = " \
     gstreamer1.0 \
     gstreamer1.0-libav \
@@ -66,6 +68,7 @@ RDEPENDS:${PN} = " \
     gstreamer1.0-plugins-good-pulseaudio \
     gstreamer1.0-plugins-good-rtp \
     gstreamer1.0-plugins-good-rtpmanager \
+    gstreamer1.0-plugins-good-videofilter \
     libnice \
 "
 RDEPENDS:${PN}:append:halium = " gst-droid"
