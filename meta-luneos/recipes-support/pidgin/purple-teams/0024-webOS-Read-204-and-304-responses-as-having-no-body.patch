@@ -1,0 +1,46 @@
+From 4d2d8869d1cb1f053fc54c7766bdef130f18ead2 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 4 Nov 2026 19:31:13 +0100
+Subject: [PATCH] webOS: Read 204 and 304 responses as having no body
+
+A response without Content-Length that is not chunked was read until
+the server closed the connection. A 204 or 304 never has a body (RFC
+9112 6.3), and on a kept-alive connection the server does not close it,
+so the answer was only reported when the request timed out. The Teams
+leave is answered 204 (teams.live.com, 2026-11-04): on sargo every
+leave was reported as "no answer" after 30 s, later 120 s, and the
+retry then got 404 because the leave had in fact gone through.
+
+1xx responses are left as they were: a 100 Continue is not the final
+answer, and none of our requests ask for one.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+
+---
+ purple2compat/http.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/purple2compat/http.c b/purple2compat/http.c
+index 2316126..21d0fcb 100644
+--- a/purple2compat/http.c
++++ b/purple2compat/http.c
+@@ -1175,6 +1175,15 @@ static gboolean _purple_http_recv_loopbody(PurpleHttpConnection *hc, gint fd)
+ 			if (!purple_http_headers_get_int(hc->response->headers,
+ 				"Content-Length", &hc->length_expected))
+ 				hc->length_expected = -1;
++			/* webOS: 204 and 304 responses never have a body
++			 * (RFC 9112 6.3), whatever their headers say. Without a
++			 * Content-Length the response was otherwise read until the
++			 * server closed the connection, which on a kept-alive one it
++			 * does not: a 204 (the Teams leave's answer) then went
++			 * unreported until the request timed out. (1xx is left
++			 * alone: a 100 Continue is not the final answer.) */
++			if (hc->response->code == 204 || hc->response->code == 304)
++				hc->length_expected = 0;
+ 			hc->is_chunked = (purple_http_headers_match(
+ 				hc->response->headers,
+ 				"Transfer-Encoding", "chunked"));
+-- 
+2.53.0
+

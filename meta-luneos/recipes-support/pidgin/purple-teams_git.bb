@@ -24,6 +24,18 @@ SRC_URI += " \
     file://0011-webOS-Show-received-media-inline-and-send-voice-note.patch \
     file://0012-webOS-Add-Teams-voice-calling-for-the-webOS-Phone-ap.patch \
     file://0013-webOS-Always-report-the-account-as-active-and-Availa.patch \
+    file://0014-webOS-Get-Teams-call-audio-through-NAT-clear-ended-c.patch \
+    file://0015-webOS-Log-Teams-call-steps-to-stderr-when-TEAMS_CALL.patch \
+    file://0016-webOS-Hang-up-a-Teams-call-by-leaving-its-conversati.patch \
+    file://0017-webOS-Register-the-personal-Teams-calling-endpoint-a.patch \
+    file://0018-webOS-Teams-calls-answer-every-offered-stream-retry-.patch \
+    file://0019-webOS-Teams-calls-video-inactive-declare-our-audio-S.patch \
+    file://0020-webOS-Answer-trouter-requests-with-the-headers-the-w.patch \
+    file://0021-webOS-Answer-a-Teams-renegotiation-as-the-web-client.patch \
+    file://0022-webOS-Tell-the-Teams-conversation-our-endpoint-state.patch \
+    file://0023-webOS-Unzip-trouter-frames-whatever-the-case-of-the.patch \
+    file://0024-webOS-Read-204-and-304-responses-as-having-no-body.patch \
+    file://0025-webOS-Answer-a-Teams-call-as-the-participant-it-names.patch \
 "
 SRCREV_upstream = "f7eb519b9968ed7844ff59319bff5c1859c46851"
 

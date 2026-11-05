@@ -1,0 +1,49 @@
+From 26d4653a1bf3820816027a37c0a451f6b8290603 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 4 Nov 2026 19:43:30 +0100
+Subject: [PATCH] webOS: Answer a Teams call as the participant it names
+
+An incoming call's notification names us: callNotification.to.
+participantId (also debugContent.participantId). The web client
+attaches, accepts, renegotiates and leaves as that participant, and the
+call/end it gets 240 ms after its leave names it (teams.live.com,
+2026-11-04). Sargo made up a participant id of its own: its leave was
+answered at once, but the call stayed up until the call controller
+timed it out about 16 s later, the caller "reconnecting" meanwhile.
+
+Take our participant id from the notification, falling back to our own
+only when it names none.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+
+---
+ teams_calling.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/teams_calling.c b/teams_calling.c
+index 499eed8..63078a5 100644
+--- a/teams_calling.c
++++ b/teams_calling.c
+@@ -1617,9 +1617,18 @@ parse_call_notification(TeamsAccount *sa, JsonObject *body_obj)
+ 		call->peer_mri  = g_strdup(toId);
+ 		call->peer_name = g_strdup(to ? sget(to, "displayName") : NULL);
+ 	} else {
++		const gchar *our_pid = to ? sget(to, "participantId") : NULL;
+ 		call->is_outgoing = FALSE;
+ 		call->peer_mri  = g_strdup(fromId);
+ 		call->peer_name = g_strdup(from ? sget(from, "displayName") : NULL);
++		/* We are a participant the call controller already named. CAPTURED (teams.live.com,
++		 * 2026-11-04): the web client answers, accepts, renegotiates and leaves as
++		 * callNotification.to.participantId (= debugContent.participantId), and the call/end it
++		 * then gets names it. With an id of our own (what this did before) the leave was
++		 * answered at once but the call stayed up until the call controller timed it out,
++		 * ~16 s, the caller meanwhile "reconnecting". */
++		if (!our_pid || !*our_pid) our_pid = debug ? sget(debug, "participantId") : NULL;
++		if (our_pid && *our_pid) call->our_participant_id = g_strdup(our_pid);
+ 	}
+ 
+ 	if (debug)  call->call_id = g_strdup(sget(debug, "callId"));
+-- 
+2.53.0
+

@@ -1,0 +1,110 @@
+From 6f3e0e043ff5305e8d033da7991e7b1016ac53c7 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 4 Nov 2026 08:37:31 +0100
+Subject: [PATCH] webOS: Log Teams call steps to stderr when TEAMS_CALL_DEBUG
+ is set
+
+The purple debug log is all protocols or none, and with every account
+signed in it outruns journald's rate limit, so the call lines that
+explain a failed call get dropped. TEAMS_CALL_DEBUG sends just those to
+stderr. The offer, answer and renegotiation SDP are logged by shape:
+media lines, codecs, crypto suite and tag, direction and Teams' x-
+attributes, never a key, password or candidate.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ teams_calling.c | 42 ++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 40 insertions(+), 2 deletions(-)
+
+diff --git a/teams_calling.c b/teams_calling.c
+index 07d3fc2..70b821a 100644
+--- a/teams_calling.c
++++ b/teams_calling.c
+@@ -41,6 +41,11 @@ teams_call_log(const char *fmt, ...)
+ 	s = g_strdup_vprintf(fmt, ap);
+ 	va_end(ap);
+ 	purple_debug_info("teams", "call: %s\n", s);
++	/* The purple debug log is all protocols or none, and with every account signed in it
++	 * outruns journald's rate limit, so call lines get dropped. TEAMS_CALL_DEBUG sends just
++	 * these to stderr. */
++	if (g_getenv("TEAMS_CALL_DEBUG"))
++		g_printerr("teams call: %s\n", s);
+ 	g_free(s);
+ }
+ 
+@@ -315,6 +320,33 @@ sdp_line_val(const char *sdp, const char *prefix)
+ 	return ret;
+ }
+ 
++/* Log the lines that say how media is set up (m=, codecs, crypto suite and tag, direction, mid,
++ * Teams' x- attributes) and nothing that is a secret: a=crypto stops before its key, ICE
++ * passwords and candidates are left out. For working out why one direction carries no audio. */
++static void
++sdp_log_shape(const char *what, const char *sdp)
++{
++	gchar **lines;
++	int i;
++	if (!sdp) return;
++	lines = g_strsplit(sdp, "\n", -1);
++	for (i = 0; lines[i]; i++) {
++		gchar *l = g_strstrip(lines[i]);
++		if (g_str_has_prefix(l, "a=crypto:")) {
++			const char *in = strstr(l, " inline:");
++			teams_call_log("%s sdp: %.*s", what, in ? (int) (in - l) : (int) strlen(l), l);
++		} else if (g_str_has_prefix(l, "m=") || g_str_has_prefix(l, "a=rtpmap:") ||
++		           g_str_has_prefix(l, "a=mid:") || g_str_has_prefix(l, "a=group:") ||
++		           g_str_has_prefix(l, "a=x-") || g_str_has_prefix(l, "a=label:") ||
++		           g_str_has_prefix(l, "a=ssrc") || g_str_has_prefix(l, "a=rtcp") ||
++		           !strcmp(l, "a=sendrecv") || !strcmp(l, "a=sendonly") ||
++		           !strcmp(l, "a=recvonly") || !strcmp(l, "a=inactive")) {
++			teams_call_log("%s sdp: %s", what, l);
++		}
++	}
++	g_strfreev(lines);
++}
++
+ /* the AEAD_AES_256_GCM inline key (base64, up to the '|') from the offer's a=crypto lines */
+ static gchar *
+ sdp_gcm_key(const char *sdp)
+@@ -519,6 +551,7 @@ media_send_answer(TeamsMediaProc *mp)
+ 	a = build_answer_sdp(mp);
+ 	g_free(call->our_answer_sdp);
+ 	call->our_answer_sdp = g_string_free(a, FALSE);
++	sdp_log_shape("answer", call->our_answer_sdp);
+ 	teams_call_log("ANSWER SDP built (%d bytes) - starting attach->accept handshake",
+ 	               (int) strlen(call->our_answer_sdp));
+ 	teams_calling_post_answer(call);
+@@ -713,8 +746,11 @@ send_reneg_answer(TeamsMediaProc *mp, const gchar *answer_link)
+ {
+ 	TeamsCall *call = mp->call;
+ 	GString *a = build_answer_sdp(mp);
+-	gchar *blob_q = teams_call_json_quote(a->str);
+-	gchar *body = g_strdup_printf(
++	gchar *blob_q;
++	gchar *body;
++	sdp_log_shape("renegotiation answer", a->str);
++	blob_q = teams_call_json_quote(a->str);
++	body = g_strdup_printf(
+ 	    "{\"mediaAnswer\":{\"callModalities\":[\"Audio\"],"
+ 	      "\"mediaContent\":{\"blob\":%s,\"contentType\":\"application/sdp-ngc-1.0\"}}}", blob_q);
+ 	teams_call_log("renegotiate: POSTing updated answer (%d bytes) to %s", (int) strlen(body), answer_link);
+@@ -1293,6 +1329,7 @@ teams_calling_handle_renegotiation(TeamsAccount *sa, JsonObject *body_obj)
+ 	if ((mc = oget(mn, "mediaContent"))) blob = sget(mc, "blob");
+ 	if ((links = oget(mn, "links")))     answer_link = sget(links, "mediaAnswer");
+ 	if (!blob) { teams_call_log("renegotiate: no SDP blob in mediaNegotiation"); return; }
++	sdp_log_shape("renegotiation offer", blob);
+ 
+ 	/* CAPTURED LIVE (2026-08-01): a renegotiation push commonly swaps the peer to a brand-new
+ 	 * media leg - fresh ice-ufrag/pwd (and sometimes a whole new a=crypto key/mediaLegId/relay),
+@@ -1454,6 +1491,7 @@ teams_calling_handle_trouter(TeamsAccount *sa, JsonObject *body_obj, const gchar
+ 		               call->sdp_offer ? (int) strlen(call->sdp_offer) : 0,
+ 		               call->udp_transport ? call->udp_transport : "?",
+ 		               call->link_reject ? "yes" : "no");
++		sdp_log_shape("incoming offer", call->sdp_offer);
+ 
+ 		/* Ring the Phone app. */
+ 		push_state(call, NULL);
+-- 
+2.53.0
+
