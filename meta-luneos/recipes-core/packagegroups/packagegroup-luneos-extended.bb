@@ -123,6 +123,7 @@ RDEPENDS:${PN} = " \
   qtsensors-sensorfw-plugin \
   \
   sensorfw \
+  org.webosports.service.office \
   \
   luna-appmanager \
   distro-feed-configs \
