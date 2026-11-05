@@ -49,6 +49,7 @@ SRC_URI += " \
     file://0010-webOS-keep-the-WhatsApp-call-playback-stream-fed-bet.patch \
     file://0011-webOS-decode-WhatsApp-video-through-luneos-rtc-engin.patch \
     file://0012-webOS-WhatsApp-video-calls-on-the-phone-orientation-.patch \
+    file://0013-webOS-keep-a-Facebook-login-failure-from-taking-the-.patch \
     file://meowcaller/0001-mlow-speed-up-the-encoder-for-32-bit-ARM.patch;patchdir=third_party/meowcaller \
     file://meowcaller/0002-Fix-the-video-call-media-path-against-live-WhatsApp-.patch;patchdir=third_party/meowcaller \
     file://meowcaller/0003-engine-allocate-on-the-caller-s-FNA-relay-for-inboun.patch;patchdir=third_party/meowcaller \
