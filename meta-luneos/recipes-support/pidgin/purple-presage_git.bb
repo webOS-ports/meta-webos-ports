@@ -13,8 +13,9 @@ PE = "1"
 require purple-presage-crates.inc
 require purple-presage-git-deps.inc
 
-# 0001-0005 are generic fixes meant for upstream; the webOS: ones from 0006 adapt the plug-in to
-# imlibpurpletransport and the webOS Messaging app.
+# 0001-0005 are generic fixes, submitted upstream as hoehermann/purple-presage #55-#59 (#58 and #59
+# build on #55); the webOS: ones from 0006 adapt the plug-in to imlibpurpletransport and the webOS
+# Messaging app.
 #
 # 0010 adds 1:1 voice calls through the Phone app: call.c registers com.palm.signal.call (one
 # luna-service2 handle) and reports active calls to audiod; the Rust half does the RingRTC
@@ -25,6 +26,8 @@ require purple-presage-git-deps.inc
 #
 # presage/0001 is for presage itself (the git-deps checkout, hence its patchdir): it makes
 # Manager::identified_push_service() public, which 0010 uses to fetch the TURN relays.
+# The same change is open upstream as whisperfish/presage#485; presage's calling_relays() (#474,
+# newer than the presage this plug-in pins) would let 0010 drop it.
 SRC_URI += " \
     git://github.com/hoehermann/purple-presage.git;branch=master;protocol=https;name=upstream;destsuffix=purple-presage \
     file://0001-Keep-the-connection-up-on-receive-and-command-errors.patch \
@@ -39,7 +42,7 @@ SRC_URI += " \
     file://0010-webOS-add-1-1-Signal-voice-calls-through-the-Phone-a.patch \
     file://presage/0001-manager-make-the-identified-push-service-public.patch;patchdir=${UNPACKDIR}/git-deps/presage \
 "
-SRCREV_upstream = "c4c9b8d8e1a822f973520e8870aba1d2347b18c6"
+SRCREV_upstream = "235edc846d4f28f306ddfe40dc187ef42face79f"
 
 # gdk-pixbuf is only asked which image types it can load (pixbuf.c); without it the plug-in
 # assumes JPEG and PNG. protobuf-native supplies protoc for the prost-build scripts of

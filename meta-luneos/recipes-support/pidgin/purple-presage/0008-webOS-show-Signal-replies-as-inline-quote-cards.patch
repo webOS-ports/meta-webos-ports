@@ -24,23 +24,23 @@ Upstream-Status: Inappropriate [webOS specific]
  src/rust/src/contacts.rs        | 36 +++++++++++++++++++++++++++
  src/rust/src/core.rs            |  3 ++-
  src/rust/src/receive.rs         | 21 ++++++++++++++--
- src/rust/src/send.rs            | 32 ++++++++++++++++++++++++
+ src/rust/src/send.rs            | 33 +++++++++++++++++++++++++
  src/rust/src/structs.rs         |  3 +++
- 10 files changed, 157 insertions(+), 9 deletions(-)
+ 10 files changed, 158 insertions(+), 9 deletions(-)
 
 diff --git a/src/c/presage.h b/src/c/presage.h
-index 8d60066..1018a24 100755
+index 9d1f7e1..f7c2744 100755
 --- a/src/c/presage.h
 +++ b/src/c/presage.h
-@@ -29,7 +29,7 @@ void presage_rust_main(PurpleAccount *, RustRuntimePtr, char *);
+@@ -29,7 +29,7 @@ void presage_rust_main(PurpleAccount *, RustRuntimePtr, char *, int32_t startup_
  void presage_rust_destroy(RustRuntimePtr);
- void presage_rust_whoami(PurpleAccount *, RustRuntimePtr, RustChannelPtr);
- void presage_rust_exit(PurpleAccount *, RustRuntimePtr, RustChannelPtr);
--void presage_rust_send(PurpleAccount *, RustRuntimePtr, RustChannelPtr, const char *, const char *, PurpleXfer *);
-+void presage_rust_send(PurpleAccount *, RustRuntimePtr, RustChannelPtr, const char *, const char *, PurpleXfer *, uint64_t reply_to_ts);
- void presage_rust_get_attachment(PurpleAccount *, RustRuntimePtr, RustChannelPtr, RustAttachmentPtr, PurpleXfer *);
+ void presage_rust_whoami(PurpleAccount *, RustChannelPtr);
+ void presage_rust_exit(PurpleAccount *, RustChannelPtr);
+-void presage_rust_send(PurpleAccount *, RustChannelPtr, const char *, const char *, PurpleXfer *);
++void presage_rust_send(PurpleAccount *, RustChannelPtr, const char *, const char *, PurpleXfer *, uint64_t reply_to_ts);
+ void presage_rust_get_attachment(PurpleAccount *, RustChannelPtr, RustAttachmentPtr, PurpleXfer *);
  void presage_rust_drop_attachment(RustAttachmentPtr);
- void presage_rust_get_group_members(PurpleAccount *, RustRuntimePtr, RustChannelPtr, const char *);
+ void presage_rust_get_group_members(PurpleAccount *, RustChannelPtr, const char *);
 diff --git a/src/c/receive_text.c b/src/c/receive_text.c
 index 358824c..f7a4cb5 100755
 --- a/src/c/receive_text.c
@@ -125,20 +125,20 @@ index 358824c..f7a4cb5 100755
 +    g_free(text); g_free(q_id); g_free(q_from); g_free(q_text);
  }
 diff --git a/src/c/send_file.c b/src/c/send_file.c
-index 7a0e11e..23f4486 100755
+index 26afada..2eaf044 100755
 --- a/src/c/send_file.c
 +++ b/src/c/send_file.c
 @@ -18,7 +18,7 @@ static void presage_xfer_send_init(PurpleXfer *xfer) {
      PurpleAccount *account = purple_xfer_get_account(xfer);
      PurpleConnection *connection = purple_account_get_connection(account);
      Presage *presage = purple_connection_get_protocol_data(connection);
--    presage_rust_send(account, rust_runtime, presage->tx_ptr, xfer->who, NULL, xfer);
-+    presage_rust_send(account, rust_runtime, presage->tx_ptr, xfer->who, NULL, xfer, 0); // file send is never a reply
+-    presage_rust_send(account, presage->tx_ptr, xfer->who, NULL, xfer);
++    presage_rust_send(account, presage->tx_ptr, xfer->who, NULL, xfer, 0); // file send is never a reply
  }
  
  void xfer_new(PurpleConnection *connection, const char *destination, intptr_t destination_type, const char *filename) {
 diff --git a/src/c/send_text.c b/src/c/send_text.c
-index eddf5c1..ab6a3e0 100755
+index c35fb2b..037cf88 100755
 --- a/src/c/send_text.c
 +++ b/src/c/send_text.c
 @@ -1,11 +1,26 @@
@@ -162,10 +162,10 @@ index eddf5c1..ab6a3e0 100755
      char *msg = purple_markup_strip_html(message); // NOTE: This turns newlines into spaces and <br> tags into newlines
      PurpleAccount *account = purple_connection_get_account(connection);
      Presage *presage = purple_connection_get_protocol_data(connection);
--    presage_rust_send(account, rust_runtime, presage->tx_ptr, who, msg, NULL);
+-    presage_rust_send(account, presage->tx_ptr, who, msg, NULL);
 +    PurpleConversation *conv = purple_find_conversation_with_account(PURPLE_CONV_TYPE_IM, who, account);
 +    uint64_t reply_to_ts = presage_take_reply_to(conv);
-+    presage_rust_send(account, rust_runtime, presage->tx_ptr, who, msg, NULL, reply_to_ts);
++    presage_rust_send(account, presage->tx_ptr, who, msg, NULL, reply_to_ts);
      g_free(msg);
      return 0; // do not report an error here; also no local echo since the rust part is expected inject the message
  }
@@ -173,14 +173,14 @@ index eddf5c1..ab6a3e0 100755
          if (group != NULL) {
              // strip HTML similar to these reasons: https://github.com/majn/telegram-purple/issues/12 and https://github.com/majn/telegram-purple/commit/fffe751
              char *msg = purple_markup_strip_html(message); // NOTE: This turns newlines into spaces and <br> tags into newlines
--            presage_rust_send(account, rust_runtime, presage->tx_ptr, group, msg, NULL);
+-            presage_rust_send(account, presage->tx_ptr, group, msg, NULL);
 +            uint64_t reply_to_ts = presage_take_reply_to(conv);
-+            presage_rust_send(account, rust_runtime, presage->tx_ptr, group, msg, NULL, reply_to_ts);
++            presage_rust_send(account, presage->tx_ptr, group, msg, NULL, reply_to_ts);
              g_free(msg);
          }
      }
 diff --git a/src/rust/src/bridge_commands.rs b/src/rust/src/bridge_commands.rs
-index baf41e0..0dcc5a7 100755
+index 71139dd..1d453d1 100755
 --- a/src/rust/src/bridge_commands.rs
 +++ b/src/rust/src/bridge_commands.rs
 @@ -113,6 +113,7 @@ pub unsafe extern "C" fn presage_rust_send(
@@ -198,7 +198,7 @@ index baf41e0..0dcc5a7 100755
 +                // webOS replies: the reply target's serviceMessageId (sent timestamp, ms); 0 == none.
 +                reply_to_ts: reply_to_ts,
              };
-             send_cmd(account, rt, tx, cmd);
+             send_cmd(account, tx, cmd);
          }
 diff --git a/src/rust/src/contacts.rs b/src/rust/src/contacts.rs
 index e46a28f..8f734e0 100755
@@ -266,10 +266,10 @@ index c8d293b..d1854ac 100755
                      // NOTE: for Spectrum, send-acknowledgements should be PURPLE_MESSAGE_SEND only (without PURPLE_MESSAGE_REMOTE_SEND)
                      msg.flags = crate::bridge_structs::PurpleMessageFlags::PURPLE_MESSAGE_SEND;
 diff --git a/src/rust/src/receive.rs b/src/rust/src/receive.rs
-index 110507d..c069d0f 100755
+index a6c5281..16fbabb 100755
 --- a/src/rust/src/receive.rs
 +++ b/src/rust/src/receive.rs
-@@ -59,6 +59,8 @@ async fn format_data_message<C: presage::store::Store>(
+@@ -60,6 +60,8 @@ async fn format_data_message<C: presage::store::Store>(
          presage::libsignal_service::content::DataMessage {
              quote:
                  Some(presage::proto::data_message::Quote {
@@ -278,7 +278,7 @@ index 110507d..c069d0f 100755
                      text: Some(quoted_text),
                      body_ranges: quoted_text_ranges,
                      ..
-@@ -69,9 +71,16 @@ async fn format_data_message<C: presage::store::Store>(
+@@ -70,9 +72,16 @@ async fn format_data_message<C: presage::store::Store>(
          } => {
              let quote = pidgin_flavoured_html_from_body_with_ranges(quoted_text.to_owned(), quoted_text_ranges, get_alias);
              let firstline = quote.split("\n").next().unwrap_or("<message body missing>");
@@ -297,7 +297,7 @@ index 110507d..c069d0f 100755
          }
          // Reaction
          presage::libsignal_service::content::DataMessage {
-@@ -529,6 +538,14 @@ pub async fn handle_received<S: presage::store::Store + Clone + 'static>(
+@@ -530,6 +539,14 @@ pub async fn handle_received<S: presage::store::Store + Clone + 'static>(
              }
              *first_connect = false;
  
@@ -313,10 +313,10 @@ index 110507d..c069d0f 100755
              // see https://github.com/whisperfish/presage/blob/3f55d5f/presage/src/manager/registered.rs#L574 which says:
              // „As a client, it is heavily recommended to process incoming messages and wait for the Received::QueueEmpty messages before giving the ability for users to send messages.“
 diff --git a/src/rust/src/send.rs b/src/rust/src/send.rs
-index 91d6c32..1de1b78 100755
+index 80035d2..4aadd6a 100755
 --- a/src/rust/src/send.rs
 +++ b/src/rust/src/send.rs
-@@ -60,6 +60,7 @@ pub async fn send<C: presage::store::Store + 'static>(
+@@ -61,6 +61,7 @@ pub async fn send<C: presage::store::Store + 'static>(
      recipient: crate::structs::Recipient,
      body: Option<String>,
      xfer: *const crate::bridge_structs::PurpleXfer,
@@ -324,7 +324,7 @@ index 91d6c32..1de1b78 100755
  ) -> Result<u64, anyhow::Error> {
      // Returns the message's sent timestamp (its serviceMessageId, in ms). The caller emits this back
      // to the transport via "webos-im-outbox-id" so a later reaction can target the user's own message.
-@@ -108,6 +109,37 @@ pub async fn send<C: presage::store::Store + 'static>(
+@@ -107,6 +108,38 @@ pub async fn send<C: presage::store::Store + 'static>(
          body
      };
  
@@ -341,9 +341,10 @@ index 91d6c32..1de1b78 100755
 +        if let Ok(Some(quoted_message)) = manager.store().message(&thread, reply_to_ts).await {
 +            let quoted_body = match &quoted_message.body {
 +                presage::libsignal_service::content::ContentBody::DataMessage(dm) => dm.body.clone(),
-+                presage::libsignal_service::content::ContentBody::SynchronizeMessage(sm) => {
-+                    sm.sent.as_ref().and_then(|sent| sent.message.as_ref().and_then(|dm| dm.body.clone()))
-+                }
++                presage::libsignal_service::content::ContentBody::SynchronizeMessage(sm) => match &sm.content {
++                    Some(presage::proto::sync_message::Content::Sent(sent)) => sent.message.as_ref().and_then(|dm| dm.body.clone()),
++                    _ => None,
++                },
 +                _ => None,
 +            };
 +            let author = quoted_message.metadata.sender.raw_uuid();

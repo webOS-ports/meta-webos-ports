@@ -2,7 +2,7 @@
 # Regenerate with:  bitbake -c update_crates purple-presage
 # (the class writes this file only; purple-presage-git-deps.inc is kept in step by hand.)
 #
-# 397 crates.io crates. The 15 git-sourced ones are in purple-presage-git-deps.inc:
+# 394 crates.io crates. The 15 git-sourced ones are in purple-presage-git-deps.inc:
 # crate:// only serves the registry.
 
 # from src/rust/Cargo.lock
@@ -252,7 +252,6 @@ SRC_URI += " \
     crate://crates.io/regex-cache/0.2.1 \
     crate://crates.io/regex-syntax/0.6.29 \
     crate://crates.io/regex-syntax/0.8.11 \
-    crate://crates.io/reqwest/0.12.28 \
     crate://crates.io/reqwest/0.13.4 \
     crate://crates.io/reqwest-websocket/0.6.0 \
     crate://crates.io/ring/0.17.14 \
@@ -267,7 +266,6 @@ SRC_URI += " \
     crate://crates.io/rustls-platform-verifier-android/0.1.1 \
     crate://crates.io/rustls-webpki/0.103.13 \
     crate://crates.io/rustversion/1.0.23 \
-    crate://crates.io/ryu/1.0.23 \
     crate://crates.io/same-file/1.0.6 \
     crate://crates.io/schannel/0.1.29 \
     crate://crates.io/scopeguard/1.2.0 \
@@ -278,7 +276,6 @@ SRC_URI += " \
     crate://crates.io/serde_core/1.0.228 \
     crate://crates.io/serde_derive/1.0.228 \
     crate://crates.io/serde_json/1.0.150 \
-    crate://crates.io/serde_urlencoded/0.7.1 \
     crate://crates.io/sha1/0.10.6 \
     crate://crates.io/sha1/0.11.0 \
     crate://crates.io/sha2/0.10.9 \
@@ -651,7 +648,6 @@ SRC_URI[regex-automata-0.4.15.sha256sum] = "1f388202e4b80542a0921078cc23b6333bcf
 SRC_URI[regex-cache-0.2.1.sha256sum] = "2f7b62d69743b8b94f353b6b7c3deb4c5582828328bcb8d5fedf214373808793"
 SRC_URI[regex-syntax-0.6.29.sha256sum] = "f162c6dd7b008981e4d40210aca20b4bd0f9b60ca9271061b07f78537722f2e1"
 SRC_URI[regex-syntax-0.8.11.sha256sum] = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
-SRC_URI[reqwest-0.12.28.sha256sum] = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
 SRC_URI[reqwest-0.13.4.sha256sum] = "219c5811de6525e5416c7d5d53bb656d3afdbc6c5af816e0802bcfa42dbdc1c3"
 SRC_URI[reqwest-websocket-0.6.0.sha256sum] = "7705b649c3b66b85c4e9c304a6898b1ae3eecb880c474720ebf925e4a932ae02"
 SRC_URI[ring-0.17.14.sha256sum] = "a4689e6c2294d81e88dc6261c768b63bc4fcdb852be6d1352498b114f61383b7"
@@ -666,7 +662,6 @@ SRC_URI[rustls-platform-verifier-0.7.0.sha256sum] = "26d1e2536ce4f35f4846aa13bff
 SRC_URI[rustls-platform-verifier-android-0.1.1.sha256sum] = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
 SRC_URI[rustls-webpki-0.103.13.sha256sum] = "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e"
 SRC_URI[rustversion-1.0.23.sha256sum] = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
-SRC_URI[ryu-1.0.23.sha256sum] = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 SRC_URI[same-file-1.0.6.sha256sum] = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 SRC_URI[schannel-0.1.29.sha256sum] = "91c1b7e4904c873ef0710c1f407dde2e6287de2bebc1bbbf7d430bb7cbffd939"
 SRC_URI[scopeguard-1.2.0.sha256sum] = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
@@ -677,7 +672,6 @@ SRC_URI[serde-1.0.228.sha256sum] = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472
 SRC_URI[serde_core-1.0.228.sha256sum] = "41d385c7d4ca58e59fc732af25c3983b67ac852c1a25000afe1175de458b67ad"
 SRC_URI[serde_derive-1.0.228.sha256sum] = "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79"
 SRC_URI[serde_json-1.0.150.sha256sum] = "e8014e44b4736ed0538adeecded0fce2a272f22dc9578a7eb6b2d9993c74cfb9"
-SRC_URI[serde_urlencoded-0.7.1.sha256sum] = "d3491c14715ca2294c4d6a88f15e84739788c1d030eed8c110436aafdaa2f3fd"
 SRC_URI[sha1-0.10.6.sha256sum] = "e3bf829a2d51ab4a5ddf1352d8470c140cadc8301b2ae1789db023f01cedd6ba"
 SRC_URI[sha1-0.11.0.sha256sum] = "aacc4cc499359472b4abe1bf11d0b12e688af9a805fa5e3016f9a386dc2d0214"
 SRC_URI[sha2-0.10.9.sha256sum] = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"

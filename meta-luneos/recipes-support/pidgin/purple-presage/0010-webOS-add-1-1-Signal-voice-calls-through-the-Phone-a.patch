@@ -73,7 +73,7 @@ Upstream-Status: Inappropriate [webOS specific]
  src/rust/Cargo.lock             |   2 +
  src/rust/Cargo.toml             |   4 +-
  src/rust/src/bridge.rs          |  39 +++
- src/rust/src/bridge_commands.rs |  51 +++
+ src/rust/src/bridge_commands.rs |  48 +++
  src/rust/src/call_bridge.rs     | 533 ++++++++++++++++++++++++++++++++
  src/rust/src/call_media.rs      | 201 ++++++++++++
  src/rust/src/core.rs            | 236 +++++++++++++-
@@ -81,17 +81,17 @@ Upstream-Status: Inappropriate [webOS specific]
  src/rust/src/lib.rs             |   3 +
  src/rust/src/receive.rs         | 160 +++++++++-
  src/rust/src/structs.rs         |  46 +++
- 16 files changed, 1896 insertions(+), 3 deletions(-)
+ 16 files changed, 1893 insertions(+), 3 deletions(-)
  create mode 100644 src/c/call.c
  create mode 100644 src/rust/src/call_bridge.rs
  create mode 100644 src/rust/src/call_media.rs
  create mode 100644 src/rust/src/ice.rs
 
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 8bd77f2..4058d23 100755
+index e48c5de..14d5129 100755
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -36,6 +36,8 @@ find_package(PkgConfig QUIET)
+@@ -22,6 +22,8 @@ find_package(PkgConfig QUIET)
  if (${PKG_CONFIG_FOUND})
      pkg_check_modules(PIXBUF gdk-pixbuf-2.0)
  endif()
@@ -100,7 +100,7 @@ index 8bd77f2..4058d23 100755
  
  include(FetchContent)
  FetchContent_Declare(Corrosion GIT_REPOSITORY https://github.com/corrosion-rs/corrosion.git)
-@@ -86,6 +88,7 @@ add_library(${TARGET_NAME} SHARED
+@@ -72,6 +74,7 @@ add_library(${TARGET_NAME} SHARED
      "src/c/attachment_common.c"
      "src/c/init.c"
      "src/c/pixbuf.c"
@@ -108,7 +108,7 @@ index 8bd77f2..4058d23 100755
  )
  target_compile_definitions(${TARGET_NAME} PRIVATE PLUGIN_VERSION=${PLUGIN_VERSION})
  # depend on the rust part
-@@ -96,6 +99,9 @@ target_link_libraries(${TARGET_NAME} PRIVATE ${PURPLE_LIBRARIES})
+@@ -82,6 +85,9 @@ target_link_libraries(${TARGET_NAME} PRIVATE ${PURPLE_LIBRARIES})
  # depend on pixbuf (technically optiona, but does not hurt)
  target_include_directories(${TARGET_NAME} PRIVATE ${PIXBUF_INCLUDE_DIRS})
  target_link_libraries(${TARGET_NAME} PRIVATE ${PIXBUF_LIBRARIES})
@@ -120,7 +120,7 @@ index 8bd77f2..4058d23 100755
  target_link_libraries(${TARGET_NAME} PRIVATE ${QRENCODE_LIBRARIES})
 diff --git a/src/c/call.c b/src/c/call.c
 new file mode 100644
-index 0000000..7c06048
+index 0000000..1117d7c
 --- /dev/null
 +++ b/src/c/call.c
 @@ -0,0 +1,394 @@
@@ -288,7 +288,7 @@ index 0000000..7c06048
 +        reply(sh, msg, "{\"returnValue\":false,\"errorText\":\"Signal account not connected\"}");
 +    } else {
 +        purple_debug_info(PLUGIN_NAME, "call: dialling\n");
-+        presage_rust_place_call(g_account, rust_runtime, presage->tx_ptr, addr);
++        presage_rust_place_call(g_account, presage->tx_ptr, addr);
 +        reply(sh, msg, "{\"returnValue\":true}");
 +    }
 +    g_free(addr);
@@ -304,7 +304,7 @@ index 0000000..7c06048
 +    (void)ctx;
 +    Presage *presage = bound_presage();
 +    if (presage && g_call_id && g_strcmp0(g_state, "incoming") == 0) {
-+        presage_rust_accept_call(g_account, rust_runtime, presage->tx_ptr, g_call_id);
++        presage_rust_accept_call(g_account, presage->tx_ptr, g_call_id);
 +        presage_handle_call_state(g_account, g_addr, g_name, SIG_CALL_ANSWERED, g_call_id);
 +        reply(sh, msg, "{\"returnValue\":true}");
 +    } else {
@@ -320,7 +320,7 @@ index 0000000..7c06048
 +    (void)ctx;
 +    Presage *presage = bound_presage();
 +    if (presage && g_addr && *g_addr && g_call_id)
-+        presage_rust_hangup_call(g_account, rust_runtime, presage->tx_ptr, g_addr, g_call_id);
++        presage_rust_hangup_call(g_account, presage->tx_ptr, g_addr, g_call_id);
 +    if (g_state)
 +        presage_handle_call_state(g_account, g_addr, g_name, SIG_CALL_DECLINED, g_call_id);
 +    reply(sh, msg, "{\"returnValue\":true}");
@@ -384,7 +384,7 @@ index 0000000..7c06048
 +    if (!account || g_account != account) return;
 +    Presage *presage = bound_presage();
 +    if (presage && g_addr && *g_addr && g_call_id)
-+        presage_rust_hangup_call(account, rust_runtime, presage->tx_ptr, g_addr, g_call_id);
++        presage_rust_hangup_call(account, presage->tx_ptr, g_addr, g_call_id);
 +    if (g_state)
 +        presage_handle_call_state(account, g_addr, g_name, SIG_CALL_ENDED, g_call_id);
 +    g_account = NULL;
@@ -519,10 +519,10 @@ index 0000000..7c06048
 +    purple_timeout_add(0, call_state_apply, e);   /* thread-safe; runs on the main thread */
 +}
 diff --git a/src/c/connection.c b/src/c/connection.c
-index 326b7a5..841913f 100755
+index c4fa7ac..87751db 100755
 --- a/src/c/connection.c
 +++ b/src/c/connection.c
-@@ -76,6 +76,9 @@ void presage_login(PurpleAccount *account) {
+@@ -61,6 +61,9 @@ void presage_login(PurpleAccount *account) {
      pc_flags |= PURPLE_CONNECTION_FLAG_NO_BGCOLOR;
      purple_connection_set_flags(connection, pc_flags);
      purple_connection_set_state(connection, PURPLE_CONNECTION_STATE_CONNECTING);
@@ -532,12 +532,12 @@ index 326b7a5..841913f 100755
      // webOS reactions (SEND): connect ONCE to the transport's "webos-im-send-reaction" signal so a
      // reaction the user places from the app is transmitted over Signal. The signal is registered by the
      // transport on the conversations handle; connect with a static guard so reconnects/multiple accounts
-@@ -114,6 +117,7 @@ void presage_login(PurpleAccount *account) {
+@@ -84,6 +87,7 @@ void presage_login(PurpleAccount *account) {
  void presage_close(PurpleConnection *connection) {
      PurpleAccount *account = purple_connection_get_account(connection);
      Presage *presage = purple_connection_get_protocol_data(connection);
 +    callLunaShutdown(account);
-     presage_rust_exit(account, rust_runtime, presage->tx_ptr);
+     presage_rust_exit(account, presage->tx_ptr);
      presage->tx_ptr = NULL; // presage_rust_exit drops tx, we must no longer use it
  }
 diff --git a/src/c/init.c b/src/c/init.c
@@ -564,20 +564,20 @@ index 05348dc..8574bce 100644
  }
  
 diff --git a/src/c/presage.h b/src/c/presage.h
-index c956fa9..83a55b8 100755
+index b63f1a5..44c7a69 100755
 --- a/src/c/presage.h
 +++ b/src/c/presage.h
 @@ -35,6 +35,9 @@ void presage_rust_drop_attachment(RustAttachmentPtr);
- void presage_rust_get_group_members(PurpleAccount *, RustRuntimePtr, RustChannelPtr, const char *);
- void presage_rust_get_profile(PurpleAccount *, RustRuntimePtr, RustChannelPtr, const char *);
- void presage_rust_list_groups(PurpleAccount *, RustRuntimePtr, RustChannelPtr);
-+void presage_rust_place_call(PurpleAccount *, RustRuntimePtr, RustChannelPtr, const char *); /* outgoing call: callee address */
-+void presage_rust_hangup_call(PurpleAccount *, RustRuntimePtr, RustChannelPtr, const char *, uint64_t); /* hang up: callee address + call_id */
-+void presage_rust_accept_call(PurpleAccount *, RustRuntimePtr, RustChannelPtr, uint64_t); /* accept incoming: call_id -> engine sends rtp-data Accepted */
+ void presage_rust_get_group_members(PurpleAccount *, RustChannelPtr, const char *);
+ void presage_rust_get_profile(PurpleAccount *, RustChannelPtr, const char *);
+ void presage_rust_list_groups(PurpleAccount *, RustChannelPtr);
++void presage_rust_place_call(PurpleAccount *, RustChannelPtr, const char *); /* outgoing call: callee address */
++void presage_rust_hangup_call(PurpleAccount *, RustChannelPtr, const char *, uint64_t); /* hang up: callee address + call_id */
++void presage_rust_accept_call(PurpleAccount *, RustChannelPtr, uint64_t); /* accept incoming: call_id -> engine sends rtp-data Accepted */
  // webOS reactions (SEND): transmit a reaction the user placed from the app. (peer, target sent timestamp, emoji, remove flag)
- void presage_rust_send_reaction(PurpleAccount *, RustRuntimePtr, RustChannelPtr, const char *peer, uint64_t target_ts, const char *emoji, int remove);
+ void presage_rust_send_reaction(PurpleAccount *, RustChannelPtr, const char *peer, uint64_t target_ts, const char *emoji, int remove);
  
-@@ -42,6 +45,12 @@ void presage_rust_send_reaction(PurpleAccount *, RustRuntimePtr, RustChannelPtr,
+@@ -42,6 +45,12 @@ void presage_rust_send_reaction(PurpleAccount *, RustChannelPtr, const char *pee
  // load; deletes <purple_user_dir()>/presage/<username>.db3 (+ sqlite sidecars) for the removed account.
  void presage_account_removed_cb(PurpleAccount *account, void *unused);
  
@@ -591,31 +591,31 @@ index c956fa9..83a55b8 100755
  
  // structures for receiving messages from rust
 diff --git a/src/rust/Cargo.lock b/src/rust/Cargo.lock
-index 8fbef92..52b88c0 100644
+index e73580f..29d9670 100644
 --- a/src/rust/Cargo.lock
 +++ b/src/rust/Cargo.lock
 @@ -2414,6 +2414,8 @@ dependencies = [
   "presage",
   "presage-store-sqlite",
-  "reqwest 0.12.28",
+  "reqwest",
 + "serde",
 + "serde_json",
   "tokio",
   "tracing",
   "tracing-core",
 diff --git a/src/rust/Cargo.toml b/src/rust/Cargo.toml
-index f63f809..e3797a8 100755
+index f0e123c..345b64f 100755
 --- a/src/rust/Cargo.toml
 +++ b/src/rust/Cargo.toml
 @@ -22,6 +22,8 @@ chrono = { version = "0.4", default-features = false, features = ["serde", "cloc
  #stdint = "0.2" # TODO: find out how to use this for more reliable type widths
- # these are mentioned in https://github.com/whisperfish/presage/blob/f74b96e/Cargo.lock
- reqwest = { version = "0.12.28", default-features = false, features = [] }
+ # these are mentioned in https://github.com/whisperfish/presage/blob/07815e7e2f649396f2fdd8f44c722688b612c854/Cargo.lock
+ reqwest = { version = "0.13", default-features = false, features = [] }
 +serde = { version = "1", features = ["derive"] }
 +serde_json = "1"
  hyper-util = "0.1.20"
  itertools = "*"
- # these version numbers are taken from https://github.com/whisperfish/presage/blob/f74b96e/presage-cli/Cargo.toml
+ # these version numbers are taken from https://github.com/whisperfish/presage/blob/07815e7e2f649396f2fdd8f44c722688b612c854/presage-cli/Cargo.toml
 @@ -30,7 +32,7 @@ tracing-core = "0.1"
  tracing-subscriber = { version = "0.3", features = ["env-filter"] }
  futures = "0.3"
@@ -626,7 +626,7 @@ index f63f809..e3797a8 100755
  # https://github.com/johnthagen/min-sized-rust
  [profile.release]
 diff --git a/src/rust/src/bridge.rs b/src/rust/src/bridge.rs
-index 24edc1a..4d365cf 100755
+index c9330ee..d2ab942 100755
 --- a/src/rust/src/bridge.rs
 +++ b/src/rust/src/bridge.rs
 @@ -112,6 +112,15 @@ extern "C" {
@@ -679,22 +679,22 @@ index 24edc1a..4d365cf 100755
  // webOS reactions: forward a Signal reaction to the transport via the "webos-im-reaction" signal.
  // target_id is the reacted-to message's sent timestamp (its serviceMessageId); sender is the reactor's
  // UUID; an empty emoji ("") means the reaction was removed.
-@@ -389,6 +425,9 @@ pub unsafe extern "C" fn presage_rust_main(
+@@ -400,6 +436,9 @@ pub unsafe extern "C" fn presage_rust_main(
  
-     // create a channel for asynchronous communication of commands c → rust
-     let (tx, rx) = tokio::sync::mpsc::channel(32);
-+    // give the call media bridge a clone so its per-call reader thread can enqueue outgoing
-+    // CallMessage Answer/IceUpdate for the command loop (which owns the Manager) to send.
-+    crate::call_bridge::set_command_sender(tx.clone());
-     // put the sender into a box so it can live in the C part
-     let tx_box = Box::new(tx);
-     append_message(Message {
+         // create a channel for asynchronous communication of commands c → rust
+         let (tx, rx) = tokio::sync::mpsc::channel(32);
++        // give the call media bridge a clone so its per-call reader thread can enqueue outgoing
++        // CallMessage Answer/IceUpdate for the command loop (which owns the Manager) to send.
++        crate::call_bridge::set_command_sender(tx.clone());
+         // put the sender into a box so it can live in the C part
+         let tx_box = Box::new(tx);
+         append_message(Message {
 diff --git a/src/rust/src/bridge_commands.rs b/src/rust/src/bridge_commands.rs
-index 0dcc5a7..b764731 100755
+index 1d453d1..1a33b3a 100755
 --- a/src/rust/src/bridge_commands.rs
 +++ b/src/rust/src/bridge_commands.rs
-@@ -55,6 +55,57 @@ pub unsafe extern "C" fn presage_rust_whoami(
-     send_cmd(account, rt, tx, cmd);
+@@ -58,6 +58,54 @@ pub unsafe extern "C" fn presage_rust_whoami(
+     send_cmd(account, tx, cmd);
  }
  
 +/// Place an OUTGOING Signal call to `c_callee` (the dialer's address, i.e. the Signal UUID). The
@@ -703,7 +703,6 @@ index 0dcc5a7..b764731 100755
 +#[no_mangle]
 +pub unsafe extern "C" fn presage_rust_place_call(
 +    account: *mut crate::bridge_structs::PurpleAccount,
-+    rt: *mut tokio::runtime::Runtime,
 +    tx: *mut tokio::sync::mpsc::Sender<crate::structs::Cmd>,
 +    c_callee: *const std::os::raw::c_char,
 +) {
@@ -712,7 +711,7 @@ index 0dcc5a7..b764731 100755
 +        Err(_) => return,
 +    };
 +    let cmd = crate::structs::Cmd::PlaceCall { callee };
-+    send_cmd(account, rt, tx, cmd);
++    send_cmd(account, tx, cmd);
 +}
 +
 +/// The user tapped Answer on an incoming call: tell the media engine to emit the RingRTC rtp-data
@@ -720,12 +719,11 @@ index 0dcc5a7..b764731 100755
 +#[no_mangle]
 +pub unsafe extern "C" fn presage_rust_accept_call(
 +    account: *mut crate::bridge_structs::PurpleAccount,
-+    rt: *mut tokio::runtime::Runtime,
 +    tx: *mut tokio::sync::mpsc::Sender<crate::structs::Cmd>,
 +    call_id: u64,
 +) {
 +    let cmd = crate::structs::Cmd::AcceptCall { call_id };
-+    send_cmd(account, rt, tx, cmd);
++    send_cmd(account, tx, cmd);
 +}
 +
 +/// The user hung up: send the peer a Hangup for `call_id` and tear down our media engine. `c_callee`
@@ -733,7 +731,6 @@ index 0dcc5a7..b764731 100755
 +#[no_mangle]
 +pub unsafe extern "C" fn presage_rust_hangup_call(
 +    account: *mut crate::bridge_structs::PurpleAccount,
-+    rt: *mut tokio::runtime::Runtime,
 +    tx: *mut tokio::sync::mpsc::Sender<crate::structs::Cmd>,
 +    c_callee: *const std::os::raw::c_char,
 +    call_id: u64,
@@ -745,7 +742,7 @@ index 0dcc5a7..b764731 100755
 +    // Pass the raw address through - it may be a UUID or (for an outgoing call reported under the dialed
 +    // number) an E.164. The command handler resolves it, so hangup works either way.
 +    let cmd = crate::structs::Cmd::HangupCall { callee, call_id };
-+    send_cmd(account, rt, tx, cmd);
++    send_cmd(account, tx, cmd);
 +}
 +
  // TODO: wire this up completely
@@ -1971,10 +1968,10 @@ index 7091708..dfbad8a 100755
  mod contacts;
  mod core;
 diff --git a/src/rust/src/receive.rs b/src/rust/src/receive.rs
-index beb568f..f1b6ce6 100755
+index 92a62c6..1120b73 100755
 --- a/src/rust/src/receive.rs
 +++ b/src/rust/src/receive.rs
-@@ -411,7 +411,165 @@ async fn process_received_message<C: presage::store::Store>(
+@@ -412,7 +412,165 @@ async fn process_received_message<C: presage::store::Store>(
              );
              None
          }
