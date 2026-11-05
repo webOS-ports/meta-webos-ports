@@ -16,6 +16,10 @@ do_install() {
     # account templates
     install -d ${D}${webos_accttemplatesdir}/
     cp -vrf ${S}/accounts/* ${D}${webos_accttemplatesdir}/
+    # Matrix is com.palm.matrix from purple-combined (prpl-matrix, with browser sign-in and
+    # encryption). This generic one maps to the same type_matrix and would be listed as a second
+    # "Matrix" in Add Account, with a sign-in that requires a password matrix.org no longer takes.
+    rm -rf ${D}${webos_accttemplatesdir}/org.webosports.messaging.matrix
 
     # account creation application
     install -d ${D}${webos_applicationsdir}/org.webosports.app.imvalidator
