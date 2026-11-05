@@ -125,6 +125,7 @@ RDEPENDS:${PN} = " \
   sensorfw \
   \
   luna-appmanager \
+  distro-feed-configs \
   luna-authmanager \
   luna-backupagent \
   luna-displaymanager \
