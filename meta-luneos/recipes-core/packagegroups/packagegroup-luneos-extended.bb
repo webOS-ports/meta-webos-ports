@@ -117,6 +117,7 @@ RDEPENDS:${PN} = " \
   org.webosports.service.messaging \
   org.webosports.service.office \
   org.webosports.service.update \
+  distro-feed-configs \
   \
   \
   ca-certificates \
