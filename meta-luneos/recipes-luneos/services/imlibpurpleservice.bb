@@ -10,7 +10,12 @@ LIC_FILES_CHKSUM = " \
 # CMakeLists.txt neither looks for them nor links them -- only the device build compensates, with a
 # hand-written "-lopus -logg" in build.sh -- so the flags have to come from EXTRA_OECMAKE below.
 # Worth fixing upstream with a pkg_check_modules(OPUS REQUIRED opus ogg) instead.
-DEPENDS = "glib-2.0 db8 pidgin luna-service2 tidy-html5 libopus libogg"
+#
+# GStreamer is for src/VoiceNote.cpp, which decodes the Messaging app's M4A voice recordings before
+# they are encoded to Ogg/Opus: CMakeLists.txt requires gstreamer-1.0 and gstreamer-app-1.0 (the
+# latter from gstreamer1.0-plugins-base). Its pipeline is built at run time, so the elements it
+# names are listed in RDEPENDS below.
+DEPENDS = "glib-2.0 db8 pidgin luna-service2 tidy-html5 libopus libogg gstreamer1.0 gstreamer1.0-plugins-base"
 
 PV = "3.0.5+git"
 PE = "1"
@@ -36,6 +41,16 @@ SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 # the object files, where --as-needed drops both libraries again because nothing has referenced
 # them yet. Standard libraries go last, after the objects that need them.
 EXTRA_OECMAKE += "-DCMAKE_CXX_STANDARD_LIBRARIES='-lopus -logg'"
+# The voice-note pipeline: filesrc ! qtdemux ! aacparse ! avdec_aac ! audioconvert ! audioresample
+# ! capsfilter ! appsink.
+RDEPENDS:${PN} += " \
+    gstreamer1.0-libav \
+    gstreamer1.0-plugins-base-app \
+    gstreamer1.0-plugins-base-audioconvert \
+    gstreamer1.0-plugins-base-audioresample \
+    gstreamer1.0-plugins-good-audioparsers \
+    gstreamer1.0-plugins-good-isomp4 \
+"
 RRECOMMENDS:${PN} += " \
     pidgin-sipe \
     purple-matrix \
