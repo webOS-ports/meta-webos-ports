@@ -16,8 +16,9 @@ RDEPENDS:${PN} = "applicationinstallerutility"
 # Built from the webOS-ports fork - webosose master with the LuneOS changes as
 # commits - so the four patches this recipe used to apply are history there.
 # Plain SRCREV: submission tags are a webosose convention, absent on this branch.
+PE = "1"
 PV = "4.0.0-15+git"
-SRCREV = "14c2f2a2978239711fd820f880c8882041037ed5"
+SRCREV = "4ab58db737a7b636d8e2dc2c75f6e1c87c749206"
 PR = "r15"
 
 inherit webos_component
