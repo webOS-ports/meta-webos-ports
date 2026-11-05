@@ -15,10 +15,12 @@ inherit pkgconfig
 
 PE = "2"
 PV = "0.4.0-1+git"
-SRCREV = "035bfb74b6f8e183f8e0ed0e5221bbf953df2f92"
+SRCREV = "7b697c5a4664bc493058fcb5ee766ecc03c334b0"
 
 # This app is developed on qml-based, not master.
-WEBOS_GIT_PARAM_BRANCH = "qml-based"
+# Testing only: the System Updates page is on herrie/system-updates, not yet in
+# qml-based; back to qml-based once it is.
+WEBOS_GIT_PARAM_BRANCH = "herrie/system-updates"
 
 WEBOS_REPO_NAME = "org.webosports.app.settings"
 
