@@ -57,6 +57,7 @@ FILES:${PN} += "${webos_sysconfdir}/db \
                 ${webos_applicationsdir}/org.webosports.app.settings.backup \
                 ${webos_applicationsdir}/org.webosports.app.settings.battery \
                 ${webos_applicationsdir}/org.webosports.app.settings.bluetooth \
+                ${webos_applicationsdir}/org.webosports.app.settings.buttons \
                 ${webos_applicationsdir}/org.webosports.app.settings.certificate \
                 ${webos_applicationsdir}/org.webosports.app.settings.dateandtime \
                 ${webos_applicationsdir}/org.webosports.app.settings.deviceinfo \
