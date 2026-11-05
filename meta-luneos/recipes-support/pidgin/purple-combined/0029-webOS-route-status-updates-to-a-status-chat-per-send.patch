@@ -1,0 +1,85 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:29:05 +0200
+Subject: [PATCH] webOS: route status updates to a status chat per sender
+
+A status update goes to "<phone>@broadcast" instead of the sender's 1:1
+chat, named after the sender, so the transport can file it apart from
+the conversations. The "[STATUS] " prefix is dropped.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ handle_message.go | 48 +++++++++++++++++++++++++++++++++++++++++++----
+ 1 file changed, 44 insertions(+), 4 deletions(-)
+
+diff --git a/handle_message.go b/handle_message.go
+index 25965fb..1c54a24 100644
+--- a/handle_message.go
++++ b/handle_message.go
+@@ -38,6 +38,17 @@ func GetAnyPollCreationMessage(message *waE2E.Message) *waE2E.PollCreationMessag
+ 	return nil
+ }
+ 
++// messageHasAttachment reports whether message carries a media payload that handle_attachment will
++// turn into its own bubble - used to skip the redundant "[STATUS] " placeholder text for a status
++// update that already has a picture/video/etc, so it doesn't show up as two separate messages.
++func messageHasAttachment(message *waE2E.Message) bool {
++	return message.GetImageMessage() != nil ||
++		message.GetVideoMessage() != nil ||
++		message.GetAudioMessage() != nil ||
++		message.GetDocumentMessage() != nil ||
++		message.GetStickerMessage() != nil
++}
++
+ // write_link_preview_thumbnail persists an ExtendedTextMessage's inline link-preview JPEG thumbnail
+ // to the account's attachment directory and returns a file:// URL for it (or "" on failure / when the
+ // attachment path isn't configured). The directory is the static prefix of the account's
+@@ -317,11 +328,40 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 			handler.log.Warnf("Ignoring status broadcast.")
+ 			return
+ 		} else {
+-			// the protocol implements status broadcasts in the form of a group
+-			// we just treat those messages as if they were direct messages
+-			info.MessageSource.Chat = info.MessageSource.Sender
++			// webOS: route status updates into the Servers tab (like followed WhatsApp Channels)
++			// instead of masquerading as an ordinary 1:1 chat from the sender - collapsing Chat to
++			// Sender made every status update show up as a random new chat (e.g. "+15555550102").
++			// Use a synthetic "<phone>@broadcast" JID (types.BroadcastServer) so LibpurpleAdapter's
++			// incoming_message_cb can recognize + bucket it (isWhatsAppStatus), the same way
++			// "<id>@newsletter" is recognized for followed Channels.
++			statusJid := types.JID{User: info.MessageSource.Sender.User, Server: types.BroadcastServer}
++			// PushName is frequently absent on a status-broadcast event even for a contact with a
++			// perfectly well-known name (unlike a regular 1:1/group message) - fall back to the local
++			// WhatsApp contact-sync store (address-book match, populated independently of any message
++			// ever having a PushName) before resorting to purple_get_alias, which - if this contact
++			// has ALSO never been messaged 1:1 (status-only sender) - has nothing to fall back to
++			// itself and returns the raw JID string, which is what was showing up as the channel name.
++			name := info.PushName
++			if name == "" {
++				if contactInfo, err := handler.client.Store.Contacts.GetContact(context.TODO(), info.MessageSource.Sender); err == nil {
++					name = contactInfo.FullName
++					if name == "" {
++						name = contactInfo.FirstName
++					}
++					if name == "" {
++						name = contactInfo.BusinessName
++					}
++				}
++			}
++			if name == "" {
++				name = purple_get_alias(handler.account, info.MessageSource.Sender.ToNonAD().String())
++			}
++			if name != "" {
++				// creates/aliases the synthetic status buddy, same sink fetch_newsletter_names uses
++				purple_update_name(handler.account, statusJid.String(), name)
++			}
++			info.MessageSource.Chat = statusJid
+ 			info.MessageSource.IsGroup = false
+-			text = "[STATUS] "
+ 		}
+ 	}
+ 	info.MessageSource.Chat = handler.lidToPn(info.MessageSource.Chat, "handling message chat")
+-- 
+2.53.0
+

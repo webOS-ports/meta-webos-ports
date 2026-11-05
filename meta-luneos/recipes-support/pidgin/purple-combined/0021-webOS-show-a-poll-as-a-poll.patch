@@ -1,0 +1,89 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:29:05 +0200
+Subject: [PATCH] webOS: show a poll as a poll
+
+A poll is rendered as a "poll:<base64 JSON>" token (question, options,
+how many may be chosen) instead of a numbered text list, so the app can
+draw the options. The option hashes are still filled in for matching
+votes.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ handle_message.go | 46 +++++++++++++++++++++++++++++++++-------------
+ 1 file changed, 33 insertions(+), 13 deletions(-)
+
+diff --git a/handle_message.go b/handle_message.go
+index 6378821..ea2ac70 100644
+--- a/handle_message.go
++++ b/handle_message.go
+@@ -200,6 +200,36 @@ func (handler *Handler) formatContactsArrayMessage(displayName string, contacts
+ 	return fileURL + "?name=" + url.QueryEscape(label)
+ }
+ 
++// pollPayload is the compact JSON shape ConversationItem.extractPolls decodes back out of a
++// "poll:<base64>" token to render a real (read-only) radio-button/checkbox list instead of a
++// "1: Option" text dump. Max mirrors PollCreationMessage.SelectableOptionsCount: 1 = single-select
++// (radio), 0 or >1 = multi-select (checkbox). There is no vote-SENDING backend yet (whatsmeow
++// BuildPollVote isn't wired up), so the rendered inputs are inert/disabled - this only upgrades the
++// display, it doesn't make polls interactive.
++type pollPayload struct {
++	Name    string   `json:"name"`
++	Options []string `json:"options"`
++	Max     int      `json:"max"`
++}
++
++// formatPollMessage renders a poll as just a "poll:<base64-json>" token (like formatEventMessage) -
++// ConversationItem.buildPollBlock parses it into the radio/checkbox list. The caller must already
++// have filled in each option's OptionHash (needed later for matching an incoming vote) before
++// calling this; that side effect is independent of the returned text.
++func formatPollMessage(pcm *waE2E.PollCreationMessage) string {
++	opts := pcm.GetOptions()
++	names := make([]string, 0, len(opts))
++	for _, option := range opts {
++		names = append(names, option.GetOptionName())
++	}
++	payload := pollPayload{Name: pcm.GetName(), Options: names, Max: int(pcm.GetSelectableOptionsCount())}
++	data, err := json.Marshal(payload)
++	if err != nil {
++		return "Poll: " + pcm.GetName()
++	}
++	return "poll:" + base64.RawURLEncoding.EncodeToString(data)
++}
++
+ // eventPayload is the compact JSON shape ConversationItem.extractEvents decodes back out of an
+ // "event:<base64>" token to build the Calendar app's documented "New Calendar Event" launch params
+ // (newEvent: {subject, location, note, dtstart, dtend} - all field names/ms timestamps match what
+@@ -375,25 +405,15 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 		pcm := GetAnyPollCreationMessage(message)
+ 		if pcm != nil {
+ 			//handler.log.Infof("message poll creation: %#v", pcm)
+-			text = fmt.Sprintf("[POLL] %s\n", pcm.GetName())
+-			for i, option := range pcm.GetOptions() {
++			for _, option := range pcm.GetOptions() {
+ 				if option.OptionHash == nil {
+ 					// taken from whatsmeow.HashPollOptions()
+ 					hash := fmt.Sprintf("%X", sha256.Sum256([]byte(option.GetOptionName())))
+ 					option.OptionHash = &hash
+ 				}
+-				text += fmt.Sprintf("%d: %s\n", i+1, option.GetOptionName())
+-				//handler.log.Infof("message poll creation option #%d: %#v", i, option)
+-			}
+-			selectable_options := pcm.GetSelectableOptionsCount()
+-			switch selectable_options {
+-			case 0:
+-				text += "One may chose multiple answers."
+-			case 1:
+-				text += "One may chose one answer."
+-			default:
+-				text += fmt.Sprintf("One may chose up to %d answers.", selectable_options)
++				//handler.log.Infof("message poll creation option: %#v", option)
+ 			}
++			text = formatPollMessage(pcm)
+ 		}
+ 	}
+ 	{
+-- 
+2.53.0
+

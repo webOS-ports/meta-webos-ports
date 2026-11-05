@@ -14,13 +14,14 @@ PE = "1"
 
 # Three upstreams, unpacked side by side:
 #
-#   purple-gowhatsapp   the WhatsApp prpl. 0001-0005 are generic fixes meant for upstream, 0006-0007
-#                       the webOS Messaging and calling integration, 0008 adds prpl-gometa (Facebook
-#                       Messenger on mautrix-meta's messagix), which is LuneOS work and not part of
-#                       purple-gowhatsapp, 0009 keeps a ringing call off the call audio and 0010
-#                       keeps the call's playback stream fed between packets. 0012 is the video
-#                       call side (orientation, front camera, camera off, self-view). It has to
-#                       live in this .so: two Go c-archives cannot share one process.
+#   purple-gowhatsapp   the WhatsApp prpl. 0001-0014 are generic fixes meant for upstream, 0015-0033
+#                       the webOS Messaging integration (one feature per patch), 0034 the calling
+#                       integration, 0035 adds prpl-gometa (Facebook Messenger on mautrix-meta's
+#                       messagix), which is LuneOS work and not part of purple-gowhatsapp, 0036
+#                       keeps a ringing call off the call audio and 0037 keeps the call's playback
+#                       stream fed between packets. 0039 is the video call side (orientation, front
+#                       camera, camera off, self-view). It has to live in this .so: two Go
+#                       c-archives cannot share one process.
 #   meowcaller          WhatsApp calling, which go.mod replaces with ./third_party/meowcaller.
 #                       Kept at 9769d5a: later main moved to a whatsmeow fork and reworked video,
 #                       which our meowcaller/0002 conflicts with. meowcaller/0003 backports the
@@ -42,15 +43,42 @@ SRC_URI += " \
     file://0003-Keep-the-plugin-module-resident.patch \
     file://0004-Set-the-group-subject-when-group-info-loads-on-the-f.patch \
     file://0005-Download-attachments-into-memory-with-a-timeout.patch \
-    file://0006-webOS-integrate-with-the-LuneOS-Messaging-app.patch \
-    file://0007-webOS-WhatsApp-voice-and-video-calls-through-the-Pho.patch \
-    file://0008-webOS-add-a-Facebook-Messenger-protocol-prpl-gometa-.patch \
-    file://0009-webOS-ring-an-incoming-WhatsApp-call-without-taking-.patch \
-    file://0010-webOS-keep-the-WhatsApp-call-playback-stream-fed-bet.patch \
-    file://0011-webOS-decode-WhatsApp-video-through-luneos-rtc-engin.patch \
-    file://0012-webOS-WhatsApp-video-calls-on-the-phone-orientation-.patch \
-    file://0013-webOS-keep-a-Facebook-login-failure-from-taking-the-.patch \
-    file://0014-webOS-a-WhatsApp-call-answered-on-another-device-is-.patch \
+    file://0006-Escape-the-captions-of-media-messages.patch \
+    file://0007-Keep-a-document-s-file-name-within-one-path-componen.patch \
+    file://0008-Show-the-quote-when-the-quoted-message-is-an-extende.patch \
+    file://0009-Do-not-dereference-a-missing-device-ID-when-pruning-.patch \
+    file://0010-Drop-profile-picture-requests-while-disconnected.patch \
+    file://0011-Do-not-leak-the-system-sender-name.patch \
+    file://0012-Use-a-new-temporary-file-when-downloading-an-image-f.patch \
+    file://0013-Make-create_symlinks-void.patch \
+    file://0014-Print-the-message-timestamp-with-a-64-bit-format.patch \
+    file://0015-webOS-show-reactions-on-the-message-they-react-to.patch \
+    file://0016-webOS-report-the-server-id-of-messages-sent-from-the.patch \
+    file://0017-webOS-forward-delivery-and-read-receipts.patch \
+    file://0018-webOS-update-edited-and-deleted-messages-in-place.patch \
+    file://0019-webOS-carry-replies-as-structured-quotes.patch \
+    file://0020-webOS-show-locations-contact-cards-and-events.patch \
+    file://0021-webOS-show-a-poll-as-a-poll.patch \
+    file://0022-webOS-vote-on-polls-from-the-app.patch \
+    file://0023-webOS-show-link-previews.patch \
+    file://0024-webOS-transcode-stickers-to-PNG-and-send-WebP-files-.patch \
+    file://0025-webOS-name-received-documents-by-their-file-name.patch \
+    file://0026-webOS-store-a-video-s-thumbnail-as-its-poster.patch \
+    file://0027-webOS-deliver-a-picture-and-its-caption-as-one-messa.patch \
+    file://0028-webOS-show-WhatsApp-Channels.patch \
+    file://0029-webOS-route-status-updates-to-a-status-chat-per-send.patch \
+    file://0030-webOS-remove-only-the-deleted-account-s-device-from-.patch \
+    file://0031-webOS-keep-a-message-cache-by-default.patch \
+    file://0032-webOS-fetch-profile-pictures-by-default-and-restore-.patch \
+    file://0033-webOS-fetch-group-names-on-connect.patch \
+    file://0034-webOS-WhatsApp-voice-and-video-calls-through-the-Pho.patch \
+    file://0035-webOS-add-a-Facebook-Messenger-protocol-prpl-gometa-.patch \
+    file://0036-webOS-ring-an-incoming-WhatsApp-call-without-taking-.patch \
+    file://0037-webOS-keep-the-WhatsApp-call-playback-stream-fed-bet.patch \
+    file://0038-webOS-decode-WhatsApp-video-through-luneos-rtc-engin.patch \
+    file://0039-webOS-WhatsApp-video-calls-on-the-phone-orientation-.patch \
+    file://0040-webOS-keep-a-Facebook-login-failure-from-taking-the-.patch \
+    file://0041-webOS-a-WhatsApp-call-answered-on-another-device-is-.patch \
     file://meowcaller/0001-mlow-speed-up-the-encoder-for-32-bit-ARM.patch;patchdir=third_party/meowcaller \
     file://meowcaller/0002-Fix-the-video-call-media-path-against-live-WhatsApp-.patch;patchdir=third_party/meowcaller \
     file://meowcaller/0003-engine-allocate-on-the-caller-s-FNA-relay-for-inboun.patch;patchdir=third_party/meowcaller \
@@ -107,7 +135,7 @@ export GOPROXY = "https://proxy.golang.org,direct"
 do_compile[network] = "1"
 
 # The video bridge. glue/voipkit.cpp binds libpalmgstskype.so, a gstreamer-0.10 plugin that
-# exists only in legacy webOS firmware, and glue/voipkit_none.c is a NULL backend. 0011 adds
+# exists only in legacy webOS firmware, and glue/voipkit_none.c is a NULL backend. 0038 adds
 # glue/voipkit_rtcengine.c, which hands the call's H.264 to luneos-rtc-engine
 # (packagegroup-luneos-extended) to decode and, where there is a camera and an encoder, encode.
 # Without the engine on the device a video call stays voice-only.
@@ -155,7 +183,7 @@ do_compile() {
              -I${S}/glue -I${S} -I${B} \
              $(pkg-config --cflags purple glib-2.0 opus opusfile ogg alsa luna-service2)"
 
-    # 2. the C glue, including the webOS files 0006-0007 and 0010 add.
+    # 2. the C glue, including the webOS files 0034, 0035, 0037 and 0038 add.
     OBJS=""
     for s in init login qrcode bridge process_message display_message groups blist \
              send_message handle_attachment send_file presence options receipt pixbuf commands \

@@ -1,0 +1,293 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:29:05 +0200
+Subject: [PATCH] webOS: show locations, contact cards and events
+
+These messages carry no text and were dropped. A location or the first
+position of a live location is shown as a summary with a "geo:lat,lng"
+URI, which the app turns into a map chip. A contact card (or several)
+is written as a .vcf file into the attachment directory and shown as a
+file:// link that opens the Contacts import. An event is shown as a
+summary with an "event:<base64 JSON>" token the app turns into an "Add
+to Calendar" chip.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ handle_message.go | 245 ++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 245 insertions(+)
+
+diff --git a/handle_message.go b/handle_message.go
+index 7146312..6378821 100644
+--- a/handle_message.go
++++ b/handle_message.go
+@@ -8,7 +8,12 @@ import "C"
+ import (
+ 	"context"
+ 	"crypto/sha256"
++	"encoding/base64"
++	"encoding/json"
+ 	"fmt"
++	"net/url"
++	"os"
++	"path/filepath"
+ 	"strings"
+ 
+ 	"go.mau.fi/whatsmeow/proto/waE2E"
+@@ -33,6 +38,219 @@ func GetAnyPollCreationMessage(message *waE2E.Message) *waE2E.PollCreationMessag
+ 	return nil
+ }
+ 
++// attachment_dir resolves the account's attachment directory (the static prefix of its
++// attachment-path-template, before the first "$" placeholder) - the same dir real downloaded
++// attachments land in - creating it if needed. Returns "" if unconfigured/relative.
++func (handler *Handler) attachment_dir() string {
++	tmpl := purple_get_string(handler.account, C.GOWHATSAPP_ATTACHMENT_PATH_TEMPLATE_OPTION, C.GOWHATSAPP_ATTACHMENT_PATH_TEMPLATE_DEFAULT)
++	prefix := strings.SplitN(tmpl, "$", 2)[0]
++	if prefix == "" {
++		return "" // no attachment path configured (or template starts with a placeholder) - skip
++	}
++	dir := filepath.Dir(prefix + "x") // keep the full directory even when the prefix ends in "/"
++	if !filepath.IsAbs(dir) {
++		return ""
++	}
++	if err := os.MkdirAll(dir, 0o755); err != nil {
++		return ""
++	}
++	return dir
++}
++
++// write_vcard_attachment persists a shared ContactMessage's vcard (or, for a multi-contact share,
++// several vcards concatenated - still a valid .vcf) to the account's attachment directory and
++// returns a file:// URL for it, so the Messaging app can offer it as a tappable ".vcf" chip
++// (ConversationItem's document-chip path, extended with a "contact" kind) that launches the
++// Contacts app's existing vCard import flow (com.palm.service.contacts countVCardContacts/
++// readVCard, wired in ContactsApp.handleVCardLaunch) instead of just a name/phone-number text line.
++func (handler *Handler) write_vcard_attachment(vcard string) string {
++	dir := handler.attachment_dir()
++	if dir == "" {
++		return ""
++	}
++	sum := sha256.Sum256([]byte(vcard))
++	local := filepath.Join(dir, fmt.Sprintf("contact_%x.vcf", sum[:16]))
++	if err := os.WriteFile(local, []byte(vcard), 0o644); err != nil {
++		return ""
++	}
++	return "file://" + local
++}
++
++// formatLocationMessage renders a shared pin (or the initial snapshot of a live-location share) as
++// a text summary plus a "geo:lat,lng" URI. There is no dedicated map-bubble UI, so the webOS
++// Messaging app (ConversationItem.extractLocations/buildLocationChip) parses that URI back out and
++// shows a tappable pin chip that opens the coordinates in the Maps app, instead of displaying the
++// raw URI as text. webOS also has no way to render the periodic position updates that follow a live
++// share, so a live share is shown once, as a snapshot, not a running track.
++func formatLocationMessage(lat, lon float64, name, address, locationURL string, isLive bool) string {
++	var b strings.Builder
++	if isLive {
++		b.WriteString("Live location")
++	} else {
++		b.WriteString("Location")
++	}
++	if name != "" {
++		b.WriteString(" " + name)
++	}
++	b.WriteString("\n")
++	if address != "" {
++		b.WriteString(address + "\n")
++	}
++	if locationURL != "" {
++		b.WriteString(locationURL + "\n")
++	}
++	if lat != 0 || lon != 0 {
++		b.WriteString(fmt.Sprintf("geo:%f,%f", lat, lon))
++	}
++	return strings.TrimRight(b.String(), "\n")
++}
++
++// vcardFieldValue returns the value of the first "<FIELD>[;params]:value" line in a vcard (one
++// field per line, CRLF or LF separated - the shape WhatsApp's ContactMessage.Vcard uses; this does
++// not attempt to handle folded/multi-line vcard values).
++func vcardFieldValue(vcard, field string) string {
++	for _, line := range strings.Split(strings.ReplaceAll(vcard, "\r\n", "\n"), "\n") {
++		i := strings.IndexByte(line, ':')
++		if i < 0 {
++			continue
++		}
++		key := strings.SplitN(line[:i], ";", 2)[0]
++		if strings.EqualFold(key, field) {
++			return strings.TrimSpace(line[i+1:])
++		}
++	}
++	return ""
++}
++
++// vcardPhoneNumbers returns every "TEL[;params]:value" line's value, in the order they appear.
++func vcardPhoneNumbers(vcard string) []string {
++	var phones []string
++	for _, line := range strings.Split(strings.ReplaceAll(vcard, "\r\n", "\n"), "\n") {
++		i := strings.IndexByte(line, ':')
++		if i < 0 {
++			continue
++		}
++		key := strings.SplitN(line[:i], ";", 2)[0]
++		if strings.EqualFold(key, "TEL") {
++			if v := strings.TrimSpace(line[i+1:]); v != "" {
++				phones = append(phones, v)
++			}
++		}
++	}
++	return phones
++}
++
++// formatContactMessage renders a shared contact card as just a tappable chip - no separate "name +
++// phone number" caption text, since the chip itself (ConversationItem's buildAttachmentChip, kind
++// "contact") shows the contact's name as its label. write_vcard_attachment persists the vcard to
++// the account's attachment dir (it's inline in the message, not a downloadable attachment, so it
++// can't ride the existing file-transfer path) and the name rides along as a "?name=" query param on
++// the returned file:// URL so the frontend can label the chip without parsing the vcard itself.
++// Tapping the chip opens Contacts' existing vCard import flow. Falls back to a plain text summary
++// if the attachment dir isn't configured (write_vcard_attachment returned "").
++func (handler *Handler) formatContactMessage(displayName, vcard string) string {
++	name := displayName
++	if name == "" {
++		name = vcardFieldValue(vcard, "FN")
++	}
++	if name == "" {
++		name = "(unnamed contact)"
++	}
++	fileURL := handler.write_vcard_attachment(vcard)
++	if fileURL == "" {
++		text := "Contact: " + name
++		if phones := vcardPhoneNumbers(vcard); len(phones) > 0 {
++			text += "\n" + strings.Join(phones, "\n")
++		}
++		return text
++	}
++	return fileURL + "?name=" + url.QueryEscape(name)
++}
++
++// formatContactsArrayMessage is formatContactMessage's multi-contact counterpart: a single chip
++// (labelled with the share's display name, or "N contacts") linking to all the vcards concatenated
++// into one .vcf - Contacts' existing multi-contact import flow (countVCardContacts -> "Would you
++// like to import N contacts?") takes it from there.
++func (handler *Handler) formatContactsArrayMessage(displayName string, contacts []*waE2E.ContactMessage) string {
++	var vcards strings.Builder
++	n := 0
++	for _, c := range contacts {
++		if c == nil {
++			continue
++		}
++		n++
++		if vc := c.GetVcard(); vc != "" {
++			vcards.WriteString(vc)
++			if !strings.HasSuffix(vc, "\n") {
++				vcards.WriteString("\n")
++			}
++		}
++	}
++	label := displayName
++	if label == "" {
++		label = fmt.Sprintf("%d contacts", n)
++	}
++	if vcards.Len() == 0 {
++		return "Contacts: " + label
++	}
++	fileURL := handler.write_vcard_attachment(vcards.String())
++	if fileURL == "" {
++		return "Contacts: " + label
++	}
++	return fileURL + "?name=" + url.QueryEscape(label)
++}
++
++// eventPayload is the compact JSON shape ConversationItem.extractEvents decodes back out of an
++// "event:<base64>" token to build the Calendar app's documented "New Calendar Event" launch params
++// (newEvent: {subject, location, note, dtstart, dtend} - all field names/ms timestamps match what
++// AppView.js/DetailView.js already expect). RawURLEncoding (no +, /, = or padding) keeps the token
++// safe to embed directly in message text with no escaping.
++type eventPayload struct {
++	Name     string `json:"name"`
++	Location string `json:"location"`
++	Note     string `json:"note"`
++	Start    int64  `json:"start"` // ms epoch, 0 = unknown
++	End      int64  `json:"end"`   // ms epoch, 0 = unknown
++}
++
++// formatEventMessage renders a shared WhatsApp Event as a text summary plus an "event:<base64-json>"
++// token - there is no dedicated event bubble UI, so the Messaging app
++// (ConversationItem.extractEvents/buildEventChip) parses the token back out and shows a tappable
++// "Add to Calendar" chip that launches the stock Calendar app's own event-creation flow directly
++// (pre-filled, one tap to confirm/save) - no ICS file or import feature needed, since webOS's
++// Calendar app has no ICS import at all but DOES have this documented cross-app launch spec.
++func formatEventMessage(em *waE2E.EventMessage) string {
++	name := em.GetName()
++	if name == "" {
++		name = "(untitled event)"
++	}
++	locText := ""
++	if loc := em.GetLocation(); loc != nil {
++		locText = loc.GetName()
++		if a := loc.GetAddress(); a != "" {
++			if locText != "" {
++				locText += ", "
++			}
++			locText += a
++		}
++	}
++	payload := eventPayload{Name: name, Location: locText, Note: em.GetDescription()}
++	if st := em.GetStartTime(); st > 0 {
++		payload.Start = st * 1000
++	}
++	if et := em.GetEndTime(); et > 0 {
++		payload.End = et * 1000
++	}
++	text := name
++	if locText != "" {
++		text += "\n" + locText
++	}
++	if data, err := json.Marshal(payload); err == nil {
++		text += "\nevent:" + base64.RawURLEncoding.EncodeToString(data)
++	}
++	return text
++}
++
+ func (handler *Handler) handle_message(message *waE2E.Message, info types.MessageInfo, evt *events.Message) {
+ 	//handler.log.Infof("message: %#v", message)
+ 	if info.MessageSource.Chat.Server == types.NewsletterServer {
+@@ -178,6 +396,33 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 			}
+ 		}
+ 	}
++	{
++		// webOS: a shared pin drops silently without this - LocationMessage/LiveLocationMessage carry
++		// no Conversation/ExtendedTextMessage text, so nothing rendered at all. Summarize as text (a
++		// Maps link) rather than a real map bubble - no attachment involved, same text-summary
++		// approach as the poll display below.
++		if lm := message.GetLocationMessage(); lm != nil {
++			text = formatLocationMessage(lm.GetDegreesLatitude(), lm.GetDegreesLongitude(), lm.GetName(), lm.GetAddress(), lm.GetURL(), lm.GetIsLive())
++		} else if llm := message.GetLiveLocationMessage(); llm != nil {
++			text = formatLocationMessage(llm.GetDegreesLatitude(), llm.GetDegreesLongitude(), "", "", "", true)
++		}
++	}
++	{
++		// webOS: a shared contact card likewise carries no plain text - ContactMessage/
++		// ContactsArrayMessage drop silently without this. Summarize as text (name + phone numbers
++		// parsed out of the vcard) rather than a real contact-card bubble.
++		if cm := message.GetContactMessage(); cm != nil {
++			text = handler.formatContactMessage(cm.GetDisplayName(), cm.GetVcard())
++		} else if cam := message.GetContactsArrayMessage(); cam != nil {
++			text = handler.formatContactsArrayMessage(cam.GetDisplayName(), cam.GetContacts())
++		}
++	}
++	{
++		// webOS: a shared Event likewise carries no plain text - drops silently without this.
++		if em := message.GetEventMessage(); em != nil {
++			text = formatEventMessage(em)
++		}
++	}
+ 	{
+ 		pum := message.GetPollUpdateMessage()
+ 		if pum != nil {
+-- 
+2.53.0
+

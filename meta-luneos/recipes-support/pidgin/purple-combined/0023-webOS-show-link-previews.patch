@@ -1,0 +1,90 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:29:05 +0200
+Subject: [PATCH] webOS: show link previews
+
+A message with a link preview carries a JPEG thumbnail, a title and a
+description. The thumbnail is written into the attachment directory
+and put, with the title and description, above the text, so the app
+shows a preview card.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ handle_message.go | 46 ++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 46 insertions(+)
+
+diff --git a/handle_message.go b/handle_message.go
+index ae4cf43..f5aa9e1 100644
+--- a/handle_message.go
++++ b/handle_message.go
+@@ -38,6 +38,12 @@ func GetAnyPollCreationMessage(message *waE2E.Message) *waE2E.PollCreationMessag
+ 	return nil
+ }
+ 
++// write_link_preview_thumbnail persists an ExtendedTextMessage's inline link-preview JPEG thumbnail
++// to the account's attachment directory and returns a file:// URL for it (or "" on failure / when the
++// attachment path isn't configured). The directory is the static prefix of the account's
++// attachment-path-template (everything before the first "$" placeholder) - the same dir real
++// downloaded attachments land in - so the Messaging app can load it as an inline <img>. The file is
++// named by a content hash so an identical thumbnail is written once and re-render is idempotent.
+ // attachment_dir resolves the account's attachment directory (the static prefix of its
+ // attachment-path-template, before the first "$" placeholder) - the same dir real downloaded
+ // attachments land in - creating it if needed. Returns "" if unconfigured/relative.
+@@ -57,6 +63,19 @@ func (handler *Handler) attachment_dir() string {
+ 	return dir
+ }
+ 
++func (handler *Handler) write_link_preview_thumbnail(data []byte) string {
++	dir := handler.attachment_dir()
++	if dir == "" {
++		return ""
++	}
++	sum := sha256.Sum256(data)
++	local := filepath.Join(dir, fmt.Sprintf("linkpreview_%x.jpg", sum[:16]))
++	if err := os.WriteFile(local, data, 0o644); err != nil {
++		return ""
++	}
++	return "file://" + local
++}
++
+ // write_vcard_attachment persists a shared ContactMessage's vcard (or, for a multi-contact share,
+ // several vcards concatenated - still a valid .vcf) to the account's attachment directory and
+ // returns a file:// URL for it, so the Messaging app can offer it as a tappable ".vcf" chip
+@@ -385,6 +404,33 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 				}
+ 				text += etmText
+ 			}
++			// webOS: WhatsApp link-preview posts (news channels like BBC News / Dumpert) arrive as an
++			// ExtendedTextMessage with a URL preview - an inline JPEG thumbnail + a title - NOT an image
++			// attachment, so previously only the raw body text showed. Prepend the preview card: the
++			// thumbnail (written to the attachment dir, referenced as a file:// URL the app renders
++			// inline) then the title, above the body. GetJPEGThumbnail/GetTitle are empty for
++			// plain/quoted ExtendedTextMessages, so this only fires for actual link previews.
++			{
++				preview := ""
++				if thumb := etm.GetJPEGThumbnail(); len(thumb) > 0 {
++					preview = handler.write_link_preview_thumbnail(thumb)
++				}
++				if title := etm.GetTitle(); title != "" {
++					if preview != "" {
++						preview += "\n"
++					}
++					preview += title
++				}
++				if desc := etm.GetDescription(); desc != "" {
++					if preview != "" {
++						preview += "\n"
++					}
++					preview += desc
++				}
++				if preview != "" {
++					text = preview + "\n" + text
++				}
++			}
+ 		}
+ 
+ 	}
+-- 
+2.53.0
+

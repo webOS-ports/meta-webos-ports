@@ -1,0 +1,174 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:29:05 +0200
+Subject: [PATCH] webOS: update edited and deleted messages in place
+
+An edit is emitted as "webos-im-edit" (account, id of the original
+message, new body, HTML-escaped like any incoming text) and a "delete
+for everyone" as "webos-im-delete" (account, id), so the transport
+updates the original bubble instead of showing an "[EDIT]" message. An
+edit without a target id is still shown as before.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ bridge.go              | 31 +++++++++++++++++++++++++++++++
+ bridge.h               |  2 ++
+ glue/process_message.c | 26 ++++++++++++++++++++++++++
+ handle_message.go      | 35 +++++++++++++++++++++++++++++------
+ 4 files changed, 88 insertions(+), 6 deletions(-)
+
+diff --git a/bridge.go b/bridge.go
+index d7b9d26..6b14be0 100644
+--- a/bridge.go
++++ b/bridge.go
+@@ -573,6 +573,37 @@ func purple_handle_receipt(account *PurpleAccount, id string, status string) {
+ // to a timestamp. scope is the transport match rule ("ts:<threadKey>"), watermark the boundary (ms
+ // decimal), status "delivered" or "read". Forwarded to the transport's "webos-im-receipt-hwm" signal
+ // (scope in remoteJid, watermark in messageId, status in text).
++// purple_handle_message_edit: the sender edited a previously-sent message (targetId = that message's
++// server id == serviceMessageId); newText is the new body. The transport finds the stored bubble by
++// serviceMessageId and updates its text in place (rather than showing a separate "[EDIT]" message).
++func purple_handle_message_edit(account *PurpleAccount, targetId string, newText string) {
++	if targetId == "" {
++		return
++	}
++	cmessage := C.struct_gowhatsapp_message{
++		account:   account,
++		msgtype:   C.char(C.gowhatsapp_message_type_edit),
++		messageId: C.CString(targetId),
++		text:      C.CString(newText),
++	}
++	C.gowhatsapp_process_message_bridge(cmessage)
++}
++// purple_handle_message_delete: the sender deleted a previously-sent message "for everyone"
++// (targetId = that message's server id == serviceMessageId). The transport finds the stored bubble
++// by serviceMessageId and replaces its text with a "This message was deleted." placeholder in
++// place - the same find-by-serviceMessageId + merge-messageText mechanism as an edit, just with a
++// canned body instead of a new one (see gowhatsapp_message_type_delete in glue/process_message.c).
++func purple_handle_message_delete(account *PurpleAccount, targetId string) {
++	if targetId == "" {
++		return
++	}
++	cmessage := C.struct_gowhatsapp_message{
++		account:   account,
++		msgtype:   C.char(C.gowhatsapp_message_type_delete),
++		messageId: C.CString(targetId),
++	}
++	C.gowhatsapp_process_message_bridge(cmessage)
++}
+ func purple_handle_receipt_watermark(account *PurpleAccount, scope string, watermark string, status string) {
+ 	if scope == "" || watermark == "" {
+ 		return
+diff --git a/bridge.h b/bridge.h
+index c382789..6c07fa3 100644
+--- a/bridge.h
++++ b/bridge.h
+@@ -28,6 +28,8 @@
+     MESSAGE_TYPE(outbox_id) \
+     MESSAGE_TYPE(receipt) \
+     MESSAGE_TYPE(receipt_hwm) \
++    MESSAGE_TYPE(edit) \
++    MESSAGE_TYPE(delete) \
+     MESSAGE_TYPE(profile_picture) \
+     MESSAGE_TYPE(group) \
+     MESSAGE_TYPE(max) \
+diff --git a/glue/process_message.c b/glue/process_message.c
+index 2a0c555..d0b279c 100644
+--- a/glue/process_message.c
++++ b/glue/process_message.c
+@@ -173,6 +173,32 @@ gowhatsapp_process_message(gowhatsapp_message_t *gwamsg)
+                     gwamsg->messageId ? gwamsg->messageId : "",
+                     gwamsg->text ? gwamsg->text : "");
+             break;
++        case gowhatsapp_message_type_edit:
++            // webOS message edit-in-place: the sender edited a previously-sent message. messageId = that
++            // message's server id (== serviceMessageId), text = the new body. HTML-escape it exactly like a
++            // normal incoming message (gowhatsapp_display_message, glue/display_message.c) so the stored text
++            // stays consistent (the conversation view renders bodies as HTML), then forward to the transport's
++            // "webos-im-edit" signal, which merges it onto the original bubble. Runs on the libpurple main thread.
++            {
++                const char *raw = gwamsg->text ? gwamsg->text : "";
++                gchar *html = purple_markup_escape_text(raw, -1);
++                gchar *escaped = purple_strdup_withhtml(html);
++                purple_signal_emit(purple_conversations_get_handle(), "webos-im-edit",
++                        gwamsg->account, gwamsg->messageId ? gwamsg->messageId : "",
++                        escaped ? escaped : "");
++                g_free(escaped);
++                g_free(html);
++            }
++            break;
++        case gowhatsapp_message_type_delete:
++            // webOS "delete for everyone": the sender revoked a previously-sent message. messageId =
++            // that message's server id (== serviceMessageId). Forward to the transport's
++            // "webos-im-delete" signal, which replaces the stored bubble's text with a placeholder
++            // in place (same find-by-serviceMessageId + merge mechanism as webos-im-edit above, just
++            // with a canned body instead of a new one). Runs on the libpurple main thread.
++            purple_signal_emit(purple_conversations_get_handle(), "webos-im-delete",
++                    gwamsg->account, gwamsg->messageId ? gwamsg->messageId : "");
++            break;
+         case gowhatsapp_message_type_profile_picture:
+             gowhatsapp_handle_profile_picture(gwamsg);
+             break;
+diff --git a/handle_message.go b/handle_message.go
+index d6f9699..e03e1d5 100644
+--- a/handle_message.go
++++ b/handle_message.go
+@@ -75,11 +75,27 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 		return
+ 	}
+ 	isEdit := false
++	editTargetId := ""
+ 	{
+ 		if pm := message.GetProtocolMessage(); pm != nil {
+ 			if em := pm.GetEditedMessage(); em != nil {
+ 				message = em
+ 				isEdit = true
++				// pm.Key points at the ORIGINAL message being edited; its id is the serviceMessageId under
++				// which we stored that message, so the transport can find & update that bubble in place.
++				editTargetId = pm.GetKey().GetID()
++			} else if pm.Type != nil && pm.GetType() == waE2E.ProtocolMessage_REVOKE {
++				// webOS "delete for everyone": the sender revoked a previously-sent message. Checking
++				// pm.Type != nil (not just GetType()==REVOKE) matters since REVOKE is protobuf enum
++				// value 0, the same zero-value GetType() returns for an unset Type field - only a
++				// genuine revoke has Type explicitly set. pm.Key points at the ORIGINAL message; its id
++				// is the serviceMessageId we stored it under, so the transport can find & blank that
++				// bubble in place. There is nothing else to display, so return immediately (same as the
++				// reaction handling above).
++				if targetId := pm.GetKey().GetID(); targetId != "" {
++					purple_handle_message_delete(handler.account, targetId)
++				}
++				return
+ 			}
+ 		}
+ 	}
+@@ -203,13 +219,20 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 		}
+ 	}
+ 	if text != "" {
+-		if isEdit {
+-			text = "[EDIT] " + text
++		if isEdit && editTargetId != "" {
++			// webOS edit-in-place: update the ORIGINAL bubble's text (found by editTargetId ==
++			// serviceMessageId) instead of posting a separate "[EDIT] ..." message. If we somehow lack the
++			// target id we fall through below to a normal display so the edit isn't silently lost.
++			purple_handle_message_edit(handler.account, editTargetId, text)
++		} else {
++			if isEdit {
++				text = "[EDIT] " + text
++			}
++			// WhatsApp is a plain-text protocol (allowing < and >), but Pidgin expects HTML (demanding br and swallowing things which are looking like tags)
++			text := strings.ReplaceAll(html.EscapeString(text), "\n", "<br>")
++			// note: info.PushName always denotes the sender (not the chat)
++			purple_display_text_message(handler.account, info.MessageSource.Chat.ToNonAD().String(), info.MessageSource.IsGroup, false, info.MessageSource.Sender.ToNonAD().String(), &info.PushName, info.Timestamp, text, &info.ID)
+ 		}
+-		// WhatsApp is a plain-text protocol (allowing < and >), but Pidgin expects HTML (demanding br and swallowing things which are looking like tags)
+-		text := strings.ReplaceAll(html.EscapeString(text), "\n", "<br>")
+-		// note: info.PushName always denotes the sender (not the chat)
+-		purple_display_text_message(handler.account, info.MessageSource.Chat.ToNonAD().String(), info.MessageSource.IsGroup, false, info.MessageSource.Sender.ToNonAD().String(), &info.PushName, info.Timestamp, text, &info.ID)
+ 	}
+ 	if !isEdit { // edited messages contain the changed texts, but attachments are absent since they cannot be changed
+ 		handler.handle_attachment(message, info.ID, info.MessageSource, info.Timestamp)
+-- 
+2.53.0
+

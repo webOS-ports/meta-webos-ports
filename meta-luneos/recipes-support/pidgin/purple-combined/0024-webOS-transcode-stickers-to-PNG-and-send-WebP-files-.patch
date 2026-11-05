@@ -1,0 +1,158 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:29:05 +0200
+Subject: [PATCH] webOS: transcode stickers to PNG and send WebP files as
+ stickers
+
+The webOS WebKit has no WebP decoder, so a received sticker is decoded
+with golang.org/x/image/webp and written as PNG (animated stickers
+show their first frame). A .webp file sent from the app goes out as a
+sticker, as WhatsApp clients do.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ go.mod               |  1 +
+ go.sum               |  2 ++
+ handle_attachment.go | 30 ++++++++++++++++++++++++++++--
+ send_file.go         | 28 ++++++++++++++++++++++++++++
+ 4 files changed, 59 insertions(+), 2 deletions(-)
+
+diff --git a/go.mod b/go.mod
+index bc1660c..8207d22 100644
+--- a/go.mod
++++ b/go.mod
+@@ -8,6 +8,7 @@ require (
+ 	github.com/mdp/qrterminal/v3 v3.0.0
+ 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
+ 	go.mau.fi/whatsmeow v0.0.0-20261017175727-b2b1e71d45e2
++	golang.org/x/image v0.44.0
+ 	golang.org/x/net v0.61.0
+ 	google.golang.org/protobuf v1.36.12
+ 	modernc.org/sqlite v1.34.5
+diff --git a/go.sum b/go.sum
+index 49be264..7c780a8 100644
+--- a/go.sum
++++ b/go.sum
+@@ -61,6 +61,8 @@ golang.org/x/crypto v0.58.0 h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=
+ golang.org/x/crypto v0.58.0/go.mod h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w=
+ golang.org/x/exp v0.0.0-20261014143641-f0251eb4aa3e h1:HgI6W1OolKK6tcV74is+rl9SMT0njsHlp0TbQiGXI/A=
+ golang.org/x/exp v0.0.0-20261014143641-f0251eb4aa3e/go.mod h1:DBoxwWhjaW8DJJw/YeM4zpeOKMC1FMXSblsYy+1mFSw=
++golang.org/x/image v0.44.0 h1:+tDekMZED9+LrtB3G5xzRggpVh9CARjZqROla3R3R+I=
++golang.org/x/image v0.44.0/go.mod h1:V8K3KE9KKKE+pLpQDOeN18w9oacNSvy1tDOirTu4xtY=
+ golang.org/x/mod v0.42.0 h1:ICeL3t2L30ljSPHHxDnR4fqVcBt/zR2zJAb9juavmQg=
+ golang.org/x/mod v0.42.0/go.mod h1:u5fzIrRInkL8MaO1cbRkUHT64v303YIT5KEqpNr7jRs=
+ golang.org/x/net v0.61.0 h1:RR+6j/BTBCrggOLugxa+66R8FvoN6MHlzDlZIbN9YFw=
+diff --git a/handle_attachment.go b/handle_attachment.go
+index 1556a42..601a92e 100644
+--- a/handle_attachment.go
++++ b/handle_attachment.go
+@@ -6,15 +6,20 @@ package main
+ import "C"
+ 
+ import (
++	"bytes"
+ 	"context"
+ 	"encoding/hex"
++	"fmt"
+ 	"html"
++	"image/png"
+ 	"mime"
+ 	"os"
+ 	"path/filepath"
+ 	"strings"
+ 	"time"
+ 
++	"golang.org/x/image/webp"
++
+ 	"go.mau.fi/whatsmeow"
+ 	"go.mau.fi/whatsmeow/proto/waE2E"
+ 	"go.mau.fi/whatsmeow/types"
+@@ -124,9 +129,15 @@ func (handler *Handler) handle_attachment(message *waE2E.Message, id string, sou
+ 		if sm != nil {
+ 			downloadable = sm
+ 			hash = hex.EncodeToString(sm.GetFileSHA256())
+-			extension = extension_from_mimetype(sm.Mimetype)
++			// webOS: a sticker is WhatsApp's own .webp - this device's WebKit predates WebP (2010) and
++			// has no decoder for it, and the fallback pixbuf-mimetype gate (pixbuf.c, built without GDK
++			// pixbuf loader detection) only allow-lists jpeg/png, so a sticker attachment posted no
++			// message body at all ("stickers don't display"). download_attachment transcodes the
++			// downloaded bytes to PNG (golang.org/x/image/webp decode -> image/png encode) before
++			// writing the file, so always claim PNG here regardless of the source's real mimetype.
++			extension = ".png"
+ 			data_type = C.gowhatsapp_attachment_type_sticker
+-			mimetype = sm.GetMimetype()
++			mimetype = "image/png"
+ 			length = sm.GetFileLength()
+ 		}
+ 	}
+@@ -178,5 +189,20 @@ func (handler *Handler) download_attachment(local_file_path string, message what
+ 	if err != nil {
+ 		return err
+ 	}
++	// webOS stickers: this device's WebKit has no WebP decoder, so transcode a sticker's native .webp
++	// to PNG before writing (see the extension=".png"/mimetype="image/png" override in the caller's
++	// StickerMessage branch, which already chose a .png local_file_path to match). x/image/webp only
++	// decodes the first frame of an animated sticker - animated stickers show as a static image.
++	if _, isSticker := message.(*waE2E.StickerMessage); isSticker {
++		img, decErr := webp.Decode(bytes.NewReader(data))
++		if decErr != nil {
++			return fmt.Errorf("sticker webp decode failed: %v", decErr)
++		}
++		var pngBuf bytes.Buffer
++		if encErr := png.Encode(&pngBuf, img); encErr != nil {
++			return fmt.Errorf("sticker png encode failed: %v", encErr)
++		}
++		data = pngBuf.Bytes()
++	}
+ 	return os.WriteFile(local_file_path, data, 0o644)
+ }
+diff --git a/send_file.go b/send_file.go
+index 399e65e..76df4be 100644
+--- a/send_file.go
++++ b/send_file.go
+@@ -53,6 +53,10 @@ func (handler *Handler) send_file_bytes(recipient types.JID, isGroup bool, data
+ 	switch mimetype {
+ 	case "image/jpeg", "image/png":
+ 		msg, err = handler.send_file_image(data, mimetype)
++	case "image/webp":
++		// A .webp picked from the compose attachment picker is a sticker in WhatsApp's world (not a
++		// regular Image message) - the same distinction real WhatsApp clients make purely by format.
++		msg, err = handler.send_file_sticker(data, mimetype)
+ 	case "application/ogg", "audio/ogg":
+ 		cdata := C.CBytes(data)
+ 		opusfile_info := C.opusfile_get_info(cdata, C.size_t(len(data)))
+@@ -113,6 +117,30 @@ func (handler *Handler) send_file_image(data []byte, mimetype string) (*waE2E.Me
+ 	return msg, nil
+ }
+ 
++// send_file_sticker uploads a .webp as a sticker (the "WhatsApp Image Keys" media bucket - whatsmeow
++// has no separate media type for a single sticker send, only for sticker PACKS). Width/Height are
++// hardcoded to WhatsApp's standard 512x512 sticker canvas rather than parsed from the webp, which
++// is good enough for the server/receiving clients to render it - stock clients always send square
++// stickers on that canvas anyway.
++func (handler *Handler) send_file_sticker(data []byte, mimetype string) (*waE2E.Message, error) {
++	uploaded, err := handler.client.Upload(context.Background(), data, whatsmeow.MediaImage)
++	if err != nil {
++		return nil, err
++	}
++	msg := &waE2E.Message{StickerMessage: &waE2E.StickerMessage{
++		URL:           proto.String(uploaded.URL),
++		DirectPath:    proto.String(uploaded.DirectPath),
++		MediaKey:      uploaded.MediaKey,
++		Mimetype:      proto.String(mimetype),
++		FileEncSHA256: uploaded.FileEncSHA256,
++		FileSHA256:    uploaded.FileSHA256,
++		FileLength:    proto.Uint64(uint64(len(data))),
++		Width:         proto.Uint32(512),
++		Height:        proto.Uint32(512),
++	}}
++	return msg, nil
++}
++
+ func (handler *Handler) send_file_audio(data []byte, mimetype string, seconds uint32, c_waveform [C.WAVEFORM_SAMPLES_COUNT]C.char) (*waE2E.Message, error) {
+ 	uploaded, err := handler.client.Upload(context.Background(), data, whatsmeow.MediaAudio)
+ 	if err != nil {
+-- 
+2.53.0
+

@@ -1,0 +1,135 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:29:05 +0200
+Subject: [PATCH] webOS: report the server id of messages sent from the app
+
+The server id of every text, file or forwarded link sent from the app
+is emitted as "webos-im-outbox-id" (account, id, body), so the
+transport can store it on the Outbox row and the user can react to
+their own messages.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ bridge.go              | 20 ++++++++++++++++++++
+ bridge.h               |  1 +
+ glue/process_message.c | 10 ++++++++++
+ send_file.go           |  4 +++-
+ send_message.go        |  7 ++++++-
+ 5 files changed, 40 insertions(+), 2 deletions(-)
+
+diff --git a/bridge.go b/bridge.go
+index 14811c9..9bcf381 100644
+--- a/bridge.go
++++ b/bridge.go
+@@ -533,6 +533,26 @@ func purple_handle_reaction(account *PurpleAccount, remoteJid string, targetId s
+ 	C.gowhatsapp_process_message_bridge(cmessage)
+ }
+ 
++/*
++ * webOS outbox-id: forward the server-assigned id of a message the app just sent to the transport's
++ * cross-prpl "webos-im-outbox-id" signal (emitted C-side in process_message on the libpurple main
++ * thread). The transport attaches the id to the Outbox row so the user can react to their own sent
++ * message. id = the message's service id, text = the message body (correlation hint). Account-agnostic:
++ * used by all three send paths (WhatsApp, FB plaintext, FB E2EE). The message bridge frees the CStrings.
++ */
++func purple_handle_outbox_id(account *PurpleAccount, id string, text string) {
++	if id == "" {
++		return
++	}
++	cmessage := C.struct_gowhatsapp_message{
++		account:   account,
++		msgtype:   C.char(C.gowhatsapp_message_type_outbox_id),
++		messageId: C.CString(id),
++		text:      C.CString(text),
++	}
++	C.gowhatsapp_process_message_bridge(cmessage)
++}
++
+ /*
+  * This will inform purple that the remote user started typing.
+  */
+diff --git a/bridge.h b/bridge.h
+index d893187..b10e0d8 100644
+--- a/bridge.h
++++ b/bridge.h
+@@ -25,6 +25,7 @@
+     MESSAGE_TYPE(text) \
+     MESSAGE_TYPE(attachment) \
+     MESSAGE_TYPE(reaction) \
++    MESSAGE_TYPE(outbox_id) \
+     MESSAGE_TYPE(profile_picture) \
+     MESSAGE_TYPE(group) \
+     MESSAGE_TYPE(max) \
+diff --git a/glue/process_message.c b/glue/process_message.c
+index 5901339..fb3206b 100644
+--- a/glue/process_message.c
++++ b/glue/process_message.c
+@@ -145,6 +145,16 @@ gowhatsapp_process_message(gowhatsapp_message_t *gwamsg)
+                     gwamsg->text ? gwamsg->text : "",
+                     gwamsg->senderJid ? gwamsg->senderJid : "");
+             break;
++        case gowhatsapp_message_type_outbox_id:
++            // webOS outbox-id: an app-sent message just got its server id. Forward it to the
++            // transport's cross-prpl "webos-im-outbox-id" signal so the Outbox row gets the id
++            // (making the user's own sent message reactable). messageId = the server id, text =
++            // the message body (correlation hint). Runs on the libpurple main thread (message
++            // bridge), so emitting the signal here is safe.
++            purple_signal_emit(purple_conversations_get_handle(), "webos-im-outbox-id",
++                    gwamsg->account, gwamsg->messageId ? gwamsg->messageId : "",
++                    gwamsg->text ? gwamsg->text : "");
++            break;
+         case gowhatsapp_message_type_profile_picture:
+             gowhatsapp_handle_profile_picture(gwamsg);
+             break;
+diff --git a/send_file.go b/send_file.go
+index 0fa03f1..f086d94 100644
+--- a/send_file.go
++++ b/send_file.go
+@@ -30,10 +30,12 @@ func (handler *Handler) send_file(who string, filename string) string {
+ 	if err != nil {
+ 		return fmt.Sprintf("Failed to open %s: %v", filename, err)
+ 	}
+-	_, err = handler.send_file_bytes(recipient, isGroup, data, filepath.Base(filename), true)
++	send_response, err := handler.send_file_bytes(recipient, isGroup, data, filepath.Base(filename), true)
+ 	if err != nil {
+ 		return err.Error()
+ 	}
++	// webOS outbox-id: make this app-sent file reactable (react-to-your-own-message).
++	purple_handle_outbox_id(handler.account, send_response.ID, filepath.Base(filename))
+ 	return ""
+ }
+ 
+diff --git a/send_message.go b/send_message.go
+index a7b2efe..e2fac10 100644
+--- a/send_message.go
++++ b/send_message.go
+@@ -146,6 +146,9 @@ func (handler *Handler) send_text_message(recipient types.JID, isGroup bool, mes
+ 			purple_display_text_message(handler.account, recipientJid, isGroup, true, ownJid, nil, send_response.Timestamp, message, &msgID)
+ 		}
+ 		handler.add_to_cache(msg, send_response.ID, recipient, send_response.Sender, send_response.Timestamp)
++		// webOS outbox-id: hand the server id of this app-sent message to the transport so its Outbox
++		// row becomes reactable (react-to-your-own-message).
++		purple_handle_outbox_id(handler.account, send_response.ID, stripped_message)
+ 		return true
+ 	}
+ }
+@@ -306,12 +309,14 @@ func (handler *Handler) send_link_message(recipient types.JID, isGroup bool, lin
+ 	}
+ 	data := b.Bytes()
+ 	filename := filepath.Base(resp.Request.URL.Path)
+-	_, err = handler.send_file_bytes(recipient, isGroup, data, filename, handler.check_url_trust(link))
++	send_response, err := handler.send_file_bytes(recipient, isGroup, data, filename, handler.check_url_trust(link))
+ 	if err != nil {
+ 		handler.log.Infof("Error while sending file: %s", err)
+ 		return false
+ 	} else {
+ 		purple_display_system_message(handler.account, recipient.ToNonAD().String(), isGroup, fmt.Sprintf("%s has been forwarded.", link)) // TODO: specify whether image, video, audio or document message has been chosen
++		// webOS outbox-id: make this app-sent media message reactable (react-to-your-own-message).
++		purple_handle_outbox_id(handler.account, send_response.ID, link)
+ 		return true
+ 	}
+ }
+-- 
+2.53.0
+
