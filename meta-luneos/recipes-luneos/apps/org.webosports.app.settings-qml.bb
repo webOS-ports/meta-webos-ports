@@ -13,8 +13,9 @@ inherit webos_cmake
 inherit webos_app
 inherit pkgconfig
 
+PE = "2"
 PV = "0.4.0-1+git"
-SRCREV = "2bd1413be3345a3d0f54362a3d898b0d404fb35b"
+SRCREV = "6ab1c3e1b2e39d1712bb29f23e30f4e387855c34"
 
 # This app is developed on qml-based, not master.
 WEBOS_GIT_PARAM_BRANCH = "qml-based"
@@ -56,6 +57,7 @@ FILES:${PN} += "${webos_sysconfdir}/db \
                 ${webos_applicationsdir}/org.webosports.app.settings.backup \
                 ${webos_applicationsdir}/org.webosports.app.settings.battery \
                 ${webos_applicationsdir}/org.webosports.app.settings.bluetooth \
+                ${webos_applicationsdir}/org.webosports.app.settings.buttons \
                 ${webos_applicationsdir}/org.webosports.app.settings.certificate \
                 ${webos_applicationsdir}/org.webosports.app.settings.dateandtime \
                 ${webos_applicationsdir}/org.webosports.app.settings.deviceinfo \
