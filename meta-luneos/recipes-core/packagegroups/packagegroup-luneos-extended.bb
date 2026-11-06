@@ -320,13 +320,17 @@ SYNERGY_RDEPENDS = " \
     synergy-cloud-flickr \
     synergy-cloud-gdrive \
     synergy-cloud-hidrive \
+    synergy-cloud-immich \
     synergy-cloud-kdrive \
     synergy-cloud-koofr \
     synergy-cloud-mega \
     synergy-cloud-onedrive \
     synergy-cloud-pcloud \
+    synergy-cloud-photoprism \
     synergy-cloud-pigallery2 \
     synergy-cloud-s3 \
+    synergy-cloud-smugmug \
+    synergy-cloud-webdav \
     synergy-cloud-yandex \
     synergy-video \
 "
