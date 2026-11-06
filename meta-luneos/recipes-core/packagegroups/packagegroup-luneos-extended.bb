@@ -291,6 +291,14 @@ IR_BLASTER_RDEPENDS = " \
     org.webosports.app.remote \
 "
 
+# FM radio: fmradiod turns the receiver on and tunes it (MediaTek /dev/fm,
+# Qualcomm radio-iris /dev/radio0), and the Music app plays it. Only for
+# machines that declare the "fm-radio" feature: the receiver needs the wired
+# headphones as antenna and an audio HAL that module-droid-fm can drive.
+FM_RADIO_RDEPENDS = " \
+    org.webosports.service.fmradio \
+"
+
 # Printing. luneos-print-adapter serves the webOS print API (com.palm.printmgr,
 # what the enyo print dialog in Atlas and Email call) and the flatter
 # org.webosports.service.print the Settings Print Manager page calls, both on
@@ -446,11 +454,12 @@ RDEPENDS:${PN}:append:vince-halium = " wcnss-filter-fixup"
 # in the wrong place and got it wrong - radon shipped nfcd and biomd for hardware
 # the FLX1s has no HAL for. The machine declares what it has; this only maps that
 # to packages. nfc is the standard OE feature; fingerprint, esim, faceunlock,
-# ir-blaster, keyboard-touch and trackpad are LuneOS-specific.
+# ir-blaster, fm-radio, keyboard-touch and trackpad are LuneOS-specific.
 RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'fingerprint', ' ${FINGERPRINT_RDEPENDS}', '', d)}"
 RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'nfc',         ' ${NFC_RDEPENDS}',         '', d)}"
 RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'esim',        ' ${ESIM_RDEPENDS}',        '', d)}"
 RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'ir-blaster',  ' ${IR_BLASTER_RDEPENDS}',  '', d)}"
+RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'fm-radio',    ' ${FM_RADIO_RDEPENDS}',    '', d)}"
 # These settings pages need a modem; the machine says so with "phone".
 RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'phone',       ' ${MODEM_SETTINGS_RDEPENDS}', '', d)}"
 RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'wifi',        ' ${WIRELESS_REGDB_RDEPENDS}', '', d)}"
