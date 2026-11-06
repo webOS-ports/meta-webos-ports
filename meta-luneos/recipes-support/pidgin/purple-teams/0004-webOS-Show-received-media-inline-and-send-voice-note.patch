@@ -14,6 +14,9 @@ Received:
   named by SHA-1 with an extension from the magic bytes, and put a
   file:// URL in the message instead of an imgstore image and a "Click
   here to view full version" link. Accept */* so audio comes through.
+  Pictures that upstream fetches as protected images keep its checks
+  (image/* only, at most 20 MiB, image magic bytes) and its fallback
+  to the picture's link when the download fails.
 - Download audio, video and animation media cards to such a file bubble,
   and remove the empty InputExtension placeholder span so a voice note is
   not followed by a blank message.
@@ -40,13 +43,13 @@ handling.
 Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
 Upstream-Status: Inappropriate [webOS specific]
 ---
- teams_contacts.c | 427 ++++++++++++++++++++++++++++++++++++++++++-----
+ teams_contacts.c | 426 +++++++++++++++++++++++++++++++++++++++++++----
  teams_messages.c | 280 +++++++++++++++++++++++++++++--
  teams_messages.h |   6 +-
- 3 files changed, 659 insertions(+), 54 deletions(-)
+ 3 files changed, 659 insertions(+), 53 deletions(-)
 
 diff --git a/teams_contacts.c b/teams_contacts.c
-index 0d6dfd2..0a3b3c4 100644
+index 15434a0..637fd0b 100644
 --- a/teams_contacts.c
 +++ b/teams_contacts.c
 @@ -28,6 +28,9 @@
@@ -62,7 +65,7 @@ index 0d6dfd2..0a3b3c4 100644
 @@ -82,6 +85,10 @@ typedef struct {
  	gchar *id;
  	TeamsAccount *sa;
- 	gboolean is_image; // webOS: send as an inline AMSImage picture, not a File.1 attachment
+ 	gboolean is_image; // send as an inline AMSImage picture, not a File.1 attachment
 +	gboolean is_audio; // webOS: send as a Teams voice note (audio card), not a File.1 attachment
 +	gboolean is_video; // webOS: send as a Teams video clip (inline AMSVideo), not a File.1 attachment
 +	guint duration_secs; // webOS: voice-note / video length in seconds (captured before upload)
@@ -70,9 +73,9 @@ index 0d6dfd2..0a3b3c4 100644
  } TeamsFileTransfer;
  
  static guint active_icon_downloads = 0;
-@@ -300,56 +307,145 @@ typedef struct SkypeImgMsgContext_ {
- 	gchar* from;
- } SkypeImgMsgContext;
+@@ -314,37 +321,84 @@ teams_is_supported_image(const gchar *data, gsize len)
+ 	       (len >= 12 && memcmp(p, "RIFF", 4) == 0 && memcmp(p + 8, "WEBP", 4) == 0);
+ }
  
 +/* webOS: transcode a downloaded audio file to WAV for in-app playback. Teams voice notes are AAC in
 + * MP4 (.m4a); the WebKit <audio> gate accepts "audio/aac" but the media server then "Failed to get a
@@ -143,7 +146,9 @@ index 0d6dfd2..0a3b3c4 100644
 +
  	time_t ts = ctx->composetimestamp;
  	gchar* ctx_from = ctx->from;
+ 	gchar *fallback_url = ctx->fallback_url;
  	ctx->from = NULL;
+ 	ctx->fallback_url = NULL;
  	g_free(ctx);
 -	
 -	// Conversation could have been closed before we retrieved the image
@@ -152,6 +157,7 @@ index 0d6dfd2..0a3b3c4 100644
 +	// Bail if the account was freed by a re-login flap, or the conversation was closed, before this
 +	// (authenticated) media download returned. teams_account_is_live is a pointer check (no deref).
 +	if (!teams_account_is_live(sa) || !purple_conversation_is_valid(conv)) {
+ 		g_free(fallback_url);
  		g_free(ctx_from);
  		return;
  	}
@@ -160,13 +166,10 @@ index 0d6dfd2..0a3b3c4 100644
  	url_text = purple_http_response_get_data(response, &len);
 -	
 +
- 	if (!url_text || !len || url_text[0] == '{' || url_text[0] == '<') {
- 		g_free(ctx_from);
- 		return;
- 	}
--	
-+
- 	if (!purple_http_response_is_successful(response)) {
+ 	if (!url_text || !len || url_text[0] == '{' || url_text[0] == '<' ||
+ 		!purple_http_response_is_successful(response) ||
+ 		(fallback_url != NULL && (len >= TEAMS_PROTECTED_IMAGE_MAX_SIZE ||
+@@ -355,19 +409,62 @@ teams_got_imagemessage(PurpleHttpConnection *http_conn, PurpleHttpResponse *resp
  		g_free(ctx_from);
  		return;
  	}
@@ -201,6 +204,7 @@ index 0d6dfd2..0a3b3c4 100644
 +	FILE *f = fopen(path, "wb");
 +	if (f == NULL) {
 +		purple_debug_error("teams", "failed to save received media to %s\n", path);
++		g_free(fallback_url);
 +		g_free(path);
 +		g_free(ctx_from);
 +		return;
@@ -233,9 +237,9 @@ index 0d6dfd2..0a3b3c4 100644
 -	
 +
  	g_free(msg_tmp);
+ 	g_free(fallback_url);
  	g_free(ctx_from);
- }
-@@ -391,25 +487,20 @@ teams_download_uri_to_conv(TeamsAccount *sa, const gchar *uri, PurpleConversatio
+@@ -483,7 +580,7 @@ teams_download_uri_to_conv(TeamsAccount *sa, const gchar *uri, PurpleConversatio
  		purple_http_request_header_set_printf(request, "Cookie", "skypetoken_asm=%s", sa->skype_token);
  	}
  	
@@ -244,7 +248,8 @@ index 0d6dfd2..0a3b3c4 100644
  	SkypeImgMsgContext *ctx = g_new(SkypeImgMsgContext, 1);
  	ctx->composetimestamp = ts;
  	ctx->conv = conv;
- 	ctx->from = g_strdup(from);
+@@ -491,18 +588,13 @@ teams_download_uri_to_conv(TeamsAccount *sa, const gchar *uri, PurpleConversatio
+ 	ctx->fallback_url = NULL;
  	purple_http_request(sa->pc, request, teams_got_imagemessage, ctx);
  	purple_http_request_unref(request);
 -	
@@ -264,10 +269,10 @@ index 0d6dfd2..0a3b3c4 100644
 +	(void) flags;
  	g_free(url);
 -	g_free(text);
+ 	return TRUE;
  }
  
- void
-@@ -832,6 +923,115 @@ teams_xfer_send_contents_reader(PurpleHttpConnection *con, gchar *buf, size_t of
+@@ -927,6 +1019,115 @@ teams_xfer_send_contents_reader(PurpleHttpConnection *con, gchar *buf, size_t of
  	cb(con, TRUE, read != len, read);
  }
  
@@ -383,7 +388,7 @@ index 0d6dfd2..0a3b3c4 100644
  static void
  teams_xfer_send_done(PurpleHttpConnection *conn, PurpleHttpResponse *resp, gpointer user_data)
  {
-@@ -871,6 +1071,35 @@ teams_xfer_send_done(PurpleHttpConnection *conn, PurpleHttpResponse *resp, gpoin
+@@ -966,6 +1167,35 @@ teams_xfer_send_done(PurpleHttpConnection *conn, PurpleHttpResponse *resp, gpoin
  		return;
  	}
  
@@ -419,11 +424,11 @@ index 0d6dfd2..0a3b3c4 100644
  	g_timeout_add_seconds(1, poll_file_send_progress, user_data);
  }
  
-@@ -892,12 +1121,13 @@ teams_xfer_send_begin(gpointer user_data)
+@@ -987,12 +1217,13 @@ teams_xfer_send_begin(gpointer user_data)
  
  	PurpleHttpRequest *request = purple_http_request_new("");
  	purple_http_request_set_keepalive_pool(request, sa->keepalive_pool);
--	// webOS: images upload to the image content view (imgpsh) as octet-stream; generic files to the
+-	// images upload to the image content view (imgpsh) as octet-stream; generic files to the
 -	// original view as multipart/form-data (the recipient renders the former inline, see is_image).
 -	purple_http_request_set_url_printf(request, "https://%s/v1/objects/%s/content/%s", TEAMS_XFER_HOST, purple_url_encode(swft->id), swft->is_image ? "imgpsh" : "original");
 +	// webOS: images upload to the image content view (imgpsh) and audio to the audio view, both as
@@ -437,7 +442,7 @@ index 0d6dfd2..0a3b3c4 100644
  	purple_http_request_header_set_printf(request, "Content-Length", "%" G_GSIZE_FORMAT, (gsize) purple_xfer_get_size(xfer));
  	purple_http_request_header_set_printf(request, "Authorization", "skype_token %s", sa->skype_token);
  	purple_http_request_set_contents_reader(request, teams_xfer_send_contents_reader, purple_xfer_get_size(xfer), user_data);
-@@ -950,12 +1180,111 @@ teams_got_object_for_file(PurpleHttpConnection *http_conn, PurpleHttpResponse *r
+@@ -1045,12 +1276,111 @@ teams_got_object_for_file(PurpleHttpConnection *http_conn, PurpleHttpResponse *r
  	
  }
  
@@ -550,7 +555,7 @@ index 0d6dfd2..0a3b3c4 100644
  	gchar *id, *post;
  	TeamsFileTransfer *swft = purple_xfer_get_protocol_data(xfer);
  	JsonObject *obj = json_object_new();
-@@ -975,9 +1304,31 @@ teams_xfer_send_init(PurpleXfer *xfer)
+@@ -1070,9 +1400,31 @@ teams_xfer_send_init(PurpleXfer *xfer)
  			g_ascii_strcasecmp(dot, ".png")  == 0 || g_ascii_strcasecmp(dot, ".jpg") == 0 ||
  			g_ascii_strcasecmp(dot, ".jpeg") == 0 || g_ascii_strcasecmp(dot, ".gif") == 0 ||
  			g_ascii_strcasecmp(dot, ".webp") == 0 || g_ascii_strcasecmp(dot, ".bmp") == 0);
@@ -586,7 +591,7 @@ index 0d6dfd2..0a3b3c4 100644
  	if (swft->is_image) {
  		json_object_set_string_member(obj, "sharingMode", "Inline");
 diff --git a/teams_messages.c b/teams_messages.c
-index b90a07b..bd7de9d 100644
+index f1e8236..5beacb8 100644
 --- a/teams_messages.c
 +++ b/teams_messages.c
 @@ -27,6 +27,7 @@
@@ -597,7 +602,7 @@ index b90a07b..bd7de9d 100644
  static GString* make_last_timestamp_setting(const gchar *convname) {
  	GString *rv = g_string_new(NULL);
  	g_string_printf(rv, "%s_last_message_timestamp", convname);
-@@ -157,19 +158,41 @@ teams_process_files_in_properties(JsonObject *properties, gchar **html)
+@@ -220,19 +221,41 @@ teams_process_files_in_properties(JsonObject *properties, gchar **html)
  		GString *files_string = g_string_new(NULL);
  		guint i, len = json_array_get_length(files);
  
@@ -650,7 +655,7 @@ index b90a07b..bd7de9d 100644
  			//Potentially use the preview image in  file.filePreview.previewUrl
  		}
  
-@@ -186,7 +209,8 @@ teams_process_files_in_properties(JsonObject *properties, gchar **html)
+@@ -249,7 +272,8 @@ teams_process_files_in_properties(JsonObject *properties, gchar **html)
  }
  
  static gchar *
@@ -660,7 +665,7 @@ index b90a07b..bd7de9d 100644
  {
  	if (html == NULL) {
  		return NULL;
-@@ -198,11 +222,72 @@ teams_process_cards_in_properties(JsonObject *properties, gchar **html)
+@@ -261,11 +285,72 @@ teams_process_cards_in_properties(JsonObject *properties, gchar **html)
  		GString *cards_string = g_string_new(NULL);
  		guint i, len = json_array_get_length(cards);
  
@@ -733,7 +738,7 @@ index b90a07b..bd7de9d 100644
  			gchar *card_html = teams_convert_card_to_html(content, contentType);
  			if (card_html == NULL) {
  				// Couldn't process or unknown content type, dump the raw data
-@@ -732,7 +817,7 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+@@ -795,7 +880,7 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
  	gboolean is_whisper = FALSE;
  	
  	g_return_if_fail(messagetype != NULL);
@@ -742,7 +747,7 @@ index b90a07b..bd7de9d 100644
  	messagetype_parts = g_strsplit(messagetype, "/", -1);
  	
  	if (json_object_has_member(resource, "clientmessageid"))
-@@ -1126,7 +1211,7 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+@@ -1189,7 +1274,7 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
  
  				} else {
  					html = teams_process_files_in_properties(properties, &html);
@@ -751,7 +756,7 @@ index b90a07b..bd7de9d 100644
  
  				}
  			}
-@@ -1463,7 +1548,7 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+@@ -1526,7 +1611,7 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
  
  				} else {
  					html = teams_process_files_in_properties(properties, &html);
@@ -760,7 +765,7 @@ index b90a07b..bd7de9d 100644
  					
  				}
  			}
-@@ -3283,6 +3368,171 @@ teams_send_message(TeamsAccount *sa, const gchar *convname, const gchar *message
+@@ -3415,6 +3500,171 @@ teams_send_message(TeamsAccount *sa, const gchar *convname, const gchar *message
  	g_hash_table_insert(sa->sent_messages_hash, clientmessageid_str, clientmessageid_str);
  }
  
@@ -933,7 +938,7 @@ index b90a07b..bd7de9d 100644
  /* ------------------------------------------------------------------------------------
   * webOS reactions (SEND): handle the transport's "webos-im-send-reaction" signal.
 diff --git a/teams_messages.h b/teams_messages.h
-index e3d37cd..c691ab8 100644
+index 714f03f..2ca78c6 100644
 --- a/teams_messages.h
 +++ b/teams_messages.h
 @@ -30,7 +30,11 @@ gint teams_send_im(PurpleConnection *pc,
