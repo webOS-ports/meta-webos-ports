@@ -25,8 +25,8 @@ PE = "1"
 #                       c-archives cannot share one process. 0042 adds prpl-matrix (Matrix on
 #                       mautrix-go, with end-to-end encryption), LuneOS work like 0035 and in this
 #                       .so for the same reason.
-#                       0043 is another generic fix meant for upstream: sent documents carry
-#                       their file name.
+#                       0043 is another generic fix, sent upstream as pull request 310: sent
+#                       documents carry their file name.
 #   meowcaller          WhatsApp calling, which go.mod replaces with ./third_party/meowcaller.
 #                       Kept at 9769d5a: later main moved to a whatsmeow fork and reworked video,
 #                       which our meowcaller/0002 conflicts with. meowcaller/0003 backports the
