@@ -37,6 +37,7 @@ SRC_URI = "git://github.com/droidian/pulseaudio-modules-droid-modern.git;branch=
     file://0008-droid-util-pick-a-mix-port-for-the-in-call-input-nev.patch \
     file://0009-module-droid-card-never-start-in-a-virtual-profile.patch \
     file://0010-droid-util-speaker-and-wired-at-once-for-ringing-wit.patch \
+    file://0011-module-droid-fm-play-the-FM-tuner-through-a-direct-a.patch \
 "
 
 inherit meson pkgconfig
