@@ -10,8 +10,9 @@ RDEPENDS:${PN} += "shared-mime-info"
 # TIFF or WebP one
 RDEPENDS:${PN} += "qtimageformats-plugins"
 
+PE = "1"
 PV = "0.1.0-14+git"
-SRCREV = "7909b927445c5b36abbee36de0b4eb8ff60e0776"
+SRCREV = "2a8b87f95e5f15a36f14b68d4a800d85573176a4"
 PR = "r6"
 
 inherit webos_ports_repo
