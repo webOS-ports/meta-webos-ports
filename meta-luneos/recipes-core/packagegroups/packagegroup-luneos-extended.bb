@@ -325,6 +325,7 @@ SYNERGY_RDEPENDS = " \
     synergy-cloud-mega \
     synergy-cloud-onedrive \
     synergy-cloud-pcloud \
+    synergy-cloud-pigallery2 \
     synergy-cloud-s3 \
     synergy-cloud-yandex \
     synergy-video \
