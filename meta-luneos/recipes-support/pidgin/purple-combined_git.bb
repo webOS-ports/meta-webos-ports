@@ -25,6 +25,8 @@ PE = "1"
 #                       c-archives cannot share one process. 0042 adds prpl-matrix (Matrix on
 #                       mautrix-go, with end-to-end encryption), LuneOS work like 0035 and in this
 #                       .so for the same reason.
+#                       0043 is another generic fix meant for upstream: sent documents carry
+#                       their file name.
 #   meowcaller          WhatsApp calling, which go.mod replaces with ./third_party/meowcaller.
 #                       Kept at 9769d5a: later main moved to a whatsmeow fork and reworked video,
 #                       which our meowcaller/0002 conflicts with. meowcaller/0003 backports the
@@ -83,6 +85,7 @@ SRC_URI += " \
     file://0040-webOS-keep-a-Facebook-login-failure-from-taking-the-.patch \
     file://0041-webOS-a-WhatsApp-call-answered-on-another-device-is-.patch \
     file://0042-webOS-add-a-Matrix-protocol-prpl-matrix-to-the-plugi.patch \
+    file://0043-Give-sent-documents-a-file-name.patch \
     file://meowcaller/0001-mlow-speed-up-the-encoder-for-32-bit-ARM.patch;patchdir=third_party/meowcaller \
     file://meowcaller/0002-Fix-the-video-call-media-path-against-live-WhatsApp-.patch;patchdir=third_party/meowcaller \
     file://meowcaller/0003-engine-allocate-on-the-caller-s-FNA-relay-for-inboun.patch;patchdir=third_party/meowcaller \
