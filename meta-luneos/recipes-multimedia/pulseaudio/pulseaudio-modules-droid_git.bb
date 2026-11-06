@@ -22,6 +22,7 @@ SRC_URI = "git://github.com/droidian/pulseaudio-modules-droid.git;branch=bookwor
     file://0001-conversion-split-XML-list-values-on-spaces-as-well-a.patch \
     file://0001-droid-util-convert-audio-source-through-a-uint32_t-te.patch \
     file://0002-module-droid-card-guard-park_profile-against-a-null.patch \
+    file://0003-module-droid-fm-play-the-FM-tuner-through-the-audio-.patch \
 "
 
 EXTRA_OECONF = "--with-module-dir=${libdir}/pulseaudio/modules"
