@@ -54,8 +54,8 @@ Upstream-Status: Inappropriate [LuneOS addition, not part of purple-gowhatsapp]
  gometa_video.go      |  92 +++++
  gometabridge.c       | 210 +++++++++++
  gometabridge.h       |  54 +++
- handle_attachment.go | 158 ++++++++-
- 13 files changed, 2405 insertions(+), 13 deletions(-)
+ handle_attachment.go | 192 +++++++++-
+ 13 files changed, 2430 insertions(+), 22 deletions(-)
  create mode 100644 glue/gometa_init.c
  create mode 100644 gometa.go
  create mode 100644 gometa_e2ee.go
@@ -2541,10 +2541,10 @@ index 0000000..9e2e780
 +// double connect is harmless).
 +extern void webos_connect_send_reaction_once(void);
 diff --git a/handle_attachment.go b/handle_attachment.go
-index c77afb0..9feb7f9 100644
+index d832d1d..062de4f 100644
 --- a/handle_attachment.go
 +++ b/handle_attachment.go
-@@ -15,14 +15,18 @@ import (
+@@ -16,6 +16,7 @@ import (
  	"mime"
  	"os"
  	"path/filepath"
@@ -2552,8 +2552,9 @@ index c77afb0..9feb7f9 100644
  	"strings"
  	"time"
  
- 	"golang.org/x/image/webp"
+@@ -23,8 +24,11 @@ import (
  
+ 	"go.mau.fi/util/fallocate"
  	"go.mau.fi/whatsmeow"
 +	"go.mau.fi/whatsmeow/proto/waConsumerApplication"
  	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -2563,8 +2564,8 @@ index c77afb0..9feb7f9 100644
  )
  
  func extension_from_mimetype(mimeType *string) string {
-@@ -190,7 +194,18 @@ func sanitize_attachment_name(name string) string {
- 	}, name)
+@@ -208,21 +212,60 @@ func fallocate_supported(file *os.File) bool {
+ 	return !errors.Is(err, errors.ErrUnsupported)
  }
  
 -func (handler *Handler) download_attachment(local_file_path string, message whatsmeow.DownloadableMessage) error {
@@ -2581,16 +2582,19 @@ index c77afb0..9feb7f9 100644
 +		}
 +	}()
  	os.MkdirAll(filepath.Dir(local_file_path), 0o755)
- 	// Download to memory then write the file ourselves. whatsmeow's DownloadToFile streams to an
- 	// *os.File and unconditionally calls fallocate(2), which some filesystems (tmpfs/vfat) reject
-@@ -205,7 +220,29 @@ func (handler *Handler) download_attachment(local_file_path string, message what
- 	// error instead.
- 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
- 	defer cancel()
--	data, err := handler.client.Download(ctx, message)
++	fb, isFacebook := message.(*fbDownloadable)
++	_, isSticker := message.(*waE2E.StickerMessage)
++	if !isFacebook && !isSticker {
++		return handler.stream_attachment(local_file_path, message)
++	}
++	// Facebook media and stickers are fetched into memory: DownloadFB returns the media as bytes, and
++	// a sticker is transcoded before it is written. The download blocks the caller (a cgo call on the
++	// event goroutine), so bound it in time.
++	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
++	defer cancel()
 +	var data []byte
 +	var err error
-+	if fb, ok := message.(*fbDownloadable); ok {
++	if isFacebook {
 +		// Facebook E2EE (armadillo) media: download via the FB e2ee whatsmeow client with the explicit
 +		// media type (a different client + endpoint than WhatsApp's handler.client).
 +		g, gok := gometaHandlers[handler.account]
@@ -2611,18 +2615,55 @@ index c77afb0..9feb7f9 100644
 +	} else {
 +		data, err = handler.client.Download(ctx, message)
 +	}
- 	if err != nil {
- 		return err
- 	}
-@@ -227,6 +264,7 @@ func (handler *Handler) download_attachment(local_file_path string, message what
- 	if err := os.WriteFile(local_file_path, data, 0o644); err != nil {
- 		return err
++	if err != nil {
++		return err
++	}
+ 	// webOS stickers: this device's WebKit has no WebP decoder, so transcode a sticker's native .webp
+ 	// to PNG before writing (see the extension=".png"/mimetype="image/png" override in the caller's
+ 	// StickerMessage branch, which already chose a .png local_file_path to match). x/image/webp only
+ 	// decodes the first frame of an animated sticker - animated stickers show as a static image.
+-	// Stickers are small, so they are fetched into memory for this, bounded in time because the
+-	// download blocks the caller.
+-	if _, isSticker := message.(*waE2E.StickerMessage); isSticker {
+-		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+-		defer cancel()
+-		data, err := handler.client.Download(ctx, message)
+-		if err != nil {
+-			return err
+-		}
++	if isSticker {
+ 		img, decErr := webp.Decode(bytes.NewReader(data))
+ 		if decErr != nil {
+ 			return fmt.Errorf("sticker webp decode failed: %v", decErr)
+@@ -231,8 +274,18 @@ func (handler *Handler) download_attachment(local_file_path string, message what
+ 		if encErr := png.Encode(&pngBuf, img); encErr != nil {
+ 			return fmt.Errorf("sticker png encode failed: %v", encErr)
+ 		}
+-		return os.WriteFile(local_file_path, pngBuf.Bytes(), 0o644)
++		data = pngBuf.Bytes()
++	}
++	if err := os.WriteFile(local_file_path, data, 0o644); err != nil {
++		return err
  	}
 +	purple_debug(2, fmt.Sprintf("gometa: wrote attachment %d bytes -> %s", len(data), local_file_path))
++	return nil
++}
++
++// stream_attachment downloads WhatsApp media straight into the file, so memory use does not grow
++// with the attachment's size (up to 2 GB).
++func (handler *Handler) stream_attachment(local_file_path string, message whatsmeow.DownloadableMessage) error {
+ 	file, err := os.Create(local_file_path)
+ 	if err != nil {
+ 		return err
+@@ -249,6 +302,7 @@ func (handler *Handler) download_attachment(local_file_path string, message what
+ 	if close_err != nil {
+ 		return close_err
+ 	}
++	purple_debug(2, fmt.Sprintf("download_attachment: streamed -> %s", local_file_path))
  	// For videos, also drop the sender's embedded JPEG thumbnail next to the file as "<base>.jpg".
  	// The Messaging app uses it as a <video poster> — a first-view preview that loads as a plain
  	// image (independent of the clip's own data), which lets the player stay preload="none". The old
-@@ -240,3 +278,119 @@ func (handler *Handler) download_attachment(local_file_path string, message what
+@@ -262,3 +316,119 @@ func (handler *Handler) download_attachment(local_file_path string, message what
  	}
  	return nil
  }

@@ -14,9 +14,9 @@ Upstream-Status: Inappropriate [webOS specific]
 ---
  go.mod               |  1 +
  go.sum               |  2 ++
- handle_attachment.go | 30 ++++++++++++++++++++++++++++--
+ handle_attachment.go | 38 ++++++++++++++++++++++++++++++++++++--
  send_file.go         | 28 ++++++++++++++++++++++++++++
- 4 files changed, 59 insertions(+), 2 deletions(-)
+ 4 files changed, 67 insertions(+), 2 deletions(-)
 
 diff --git a/go.mod b/go.mod
 index bc1660c..8207d22 100644
@@ -44,16 +44,17 @@ index 49be264..7c780a8 100644
  golang.org/x/mod v0.42.0/go.mod h1:u5fzIrRInkL8MaO1cbRkUHT64v303YIT5KEqpNr7jRs=
  golang.org/x/net v0.61.0 h1:RR+6j/BTBCrggOLugxa+66R8FvoN6MHlzDlZIbN9YFw=
 diff --git a/handle_attachment.go b/handle_attachment.go
-index 1556a42..601a92e 100644
+index 1a691b4..baf8906 100644
 --- a/handle_attachment.go
 +++ b/handle_attachment.go
-@@ -6,15 +6,20 @@ package main
+@@ -6,16 +6,21 @@ package main
  import "C"
  
  import (
 +	"bytes"
  	"context"
  	"encoding/hex"
+ 	"errors"
 +	"fmt"
  	"html"
 +	"image/png"
@@ -65,10 +66,10 @@ index 1556a42..601a92e 100644
  
 +	"golang.org/x/image/webp"
 +
+ 	"go.mau.fi/util/fallocate"
  	"go.mau.fi/whatsmeow"
  	"go.mau.fi/whatsmeow/proto/waE2E"
- 	"go.mau.fi/whatsmeow/types"
-@@ -124,9 +129,15 @@ func (handler *Handler) handle_attachment(message *waE2E.Message, id string, sou
+@@ -126,9 +131,15 @@ func (handler *Handler) handle_attachment(message *waE2E.Message, id string, sou
  		if sm != nil {
  			downloadable = sm
  			hash = hex.EncodeToString(sm.GetFileSHA256())
@@ -86,15 +87,23 @@ index 1556a42..601a92e 100644
  			length = sm.GetFileLength()
  		}
  	}
-@@ -178,5 +189,20 @@ func (handler *Handler) download_attachment(local_file_path string, message what
- 	if err != nil {
- 		return err
- 	}
+@@ -179,6 +190,29 @@ func fallocate_supported(file *os.File) bool {
+ 
+ func (handler *Handler) download_attachment(local_file_path string, message whatsmeow.DownloadableMessage) error {
+ 	os.MkdirAll(filepath.Dir(local_file_path), 0o755)
 +	// webOS stickers: this device's WebKit has no WebP decoder, so transcode a sticker's native .webp
 +	// to PNG before writing (see the extension=".png"/mimetype="image/png" override in the caller's
 +	// StickerMessage branch, which already chose a .png local_file_path to match). x/image/webp only
 +	// decodes the first frame of an animated sticker - animated stickers show as a static image.
++	// Stickers are small, so they are fetched into memory for this, bounded in time because the
++	// download blocks the caller.
 +	if _, isSticker := message.(*waE2E.StickerMessage); isSticker {
++		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
++		defer cancel()
++		data, err := handler.client.Download(ctx, message)
++		if err != nil {
++			return err
++		}
 +		img, decErr := webp.Decode(bytes.NewReader(data))
 +		if decErr != nil {
 +			return fmt.Errorf("sticker webp decode failed: %v", decErr)
@@ -103,10 +112,11 @@ index 1556a42..601a92e 100644
 +		if encErr := png.Encode(&pngBuf, img); encErr != nil {
 +			return fmt.Errorf("sticker png encode failed: %v", encErr)
 +		}
-+		data = pngBuf.Bytes()
++		return os.WriteFile(local_file_path, pngBuf.Bytes(), 0o644)
 +	}
- 	return os.WriteFile(local_file_path, data, 0o644)
- }
+ 	file, err := os.Create(local_file_path)
+ 	if err != nil {
+ 		return err
 diff --git a/send_file.go b/send_file.go
 index 399e65e..76df4be 100644
 --- a/send_file.go

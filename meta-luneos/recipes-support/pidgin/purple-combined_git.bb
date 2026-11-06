@@ -45,7 +45,7 @@ SRC_URI += " \
     file://0002-Guard-attachment-path-templating-against-NULL-values.patch \
     file://0003-Keep-the-plugin-module-resident.patch \
     file://0004-Set-the-group-subject-when-group-info-loads-on-the-f.patch \
-    file://0005-Download-attachments-into-memory-with-a-timeout.patch \
+    file://0005-Download-attachments-where-fallocate-is-not-supporte.patch \
     file://0006-Escape-the-captions-of-media-messages.patch \
     file://0007-Keep-a-document-s-file-name-within-one-path-componen.patch \
     file://0008-Show-the-quote-when-the-quoted-message-is-an-extende.patch \

@@ -1,0 +1,88 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 6 Nov 2026 05:51:42 +0100
+Subject: [PATCH 05/42] Download attachments where fallocate is not supported
+
+download_attachment() hands an *os.File to whatsmeow's DownloadToFile(),
+which preallocates it with fallocate(2) before writing. On a file system
+without fallocate support (vfat, older tmpfs, ramfs) that fails with
+EOPNOTSUPP. whatsmeow does not treat this as final, so it tries every
+media host in turn, each fails the same way, and the attachment is lost.
+The file created for it is also never closed.
+
+whatsmeow preallocates the destination only when it is an *os.File.
+Probe the new file with the same fallocate.Fallocate() call; if the file
+system reports it as unsupported, hand whatsmeow the file wrapped in a
+struct, which skips the preallocation and streams to disk as before.
+Where fallocate works, nothing changes. Close the file after the
+download.
+
+The earlier version of this patch read the whole attachment into
+memory. Upstream turned that down because attachments can be up to 2 GB.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Submitted [https://github.com/hoehermann/purple-gowhatsapp/pull/294]
+---
+ handle_attachment.go | 29 ++++++++++++++++++++++++++++-
+ 1 file changed, 28 insertions(+), 1 deletion(-)
+
+diff --git a/handle_attachment.go b/handle_attachment.go
+index b462d0f..451cc8a 100644
+--- a/handle_attachment.go
++++ b/handle_attachment.go
+@@ -8,12 +8,14 @@ import "C"
+ import (
+ 	"context"
+ 	"encoding/hex"
++	"errors"
+ 	"mime"
+ 	"os"
+ 	"path/filepath"
+ 	"strings"
+ 	"time"
+ 
++	"go.mau.fi/util/fallocate"
+ 	"go.mau.fi/whatsmeow"
+ 	"go.mau.fi/whatsmeow/proto/waE2E"
+ 	"go.mau.fi/whatsmeow/types"
+@@ -137,11 +139,36 @@ func (handler *Handler) handle_attachment(message *waE2E.Message, id string, sou
+ 	}
+ }
+ 
++// unpreallocated_file hides the *os.File from whatsmeow, so DownloadToFile does not try to
++// preallocate it. The media is still written to disk as it arrives.
++type unpreallocated_file struct {
++	*os.File
++}
++
++// fallocate_supported tells whether the file system holding file can preallocate space.
++// whatsmeow's DownloadToFile preallocates an *os.File with fallocate(2) and gives up on the
++// media host if that fails, which it does on every host where the file system lacks it
++// (tmpfs and vfat on older Linux kernels, for example).
++func fallocate_supported(file *os.File) bool {
++	// the same call whatsmeow makes; on Linux it keeps the file size, so the empty file stays empty
++	err := fallocate.Fallocate(file, 1)
++	return !errors.Is(err, errors.ErrUnsupported)
++}
++
+ func (handler *Handler) download_attachment(local_file_path string, message whatsmeow.DownloadableMessage) error {
+ 	os.MkdirAll(filepath.Dir(local_file_path), 0o755)
+ 	file, err := os.Create(local_file_path)
+ 	if err != nil {
+ 		return err
+ 	}
+-	return handler.client.DownloadToFile(context.TODO(), message, file)
++	var destination whatsmeow.File = file
++	if !fallocate_supported(file) {
++		destination = unpreallocated_file{file}
++	}
++	err = handler.client.DownloadToFile(context.TODO(), message, destination)
++	close_err := file.Close()
++	if err != nil {
++		return err
++	}
++	return close_err
+ }
+-- 
+2.53.0
+
