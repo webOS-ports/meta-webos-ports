@@ -1,4 +1,4 @@
-From 96f1e19901b206e75a4e33fbee9d96ba405d8664 Mon Sep 17 00:00:00 2001
+From 2916c5f13c2586d58342688fdd6122a460dcd5a4 Mon Sep 17 00:00:00 2001
 From: Herman van Hazendonk <github.com@herrie.org>
 Date: Fri, 6 Nov 2026 17:48:51 +0100
 Subject: [PATCH] module-droid-fm: play the FM tuner through the audio HAL
@@ -53,10 +53,10 @@ patch mode. patch stays the default.
 
 Tested on a Xiaomi Mi A1 (msm8953, Android 9 vendor HAL) with
 mode=parameters and wired headphones: the HAL gets handle_fm=1048584
-(0x100008), applies its play-fm path and sets fm_volume=0.3945; the
-radio is heard (the board receives only noise) and the volume keys
-change fm_volume. Patch mode was tested on a MediaTek MT6739 with the
--modern tree.
+(0x100008), applies its play-fm path and sets fm_volume=0.3945;
+indoors, 95.0 MHz is heard through noise, and the volume keys change
+fm_volume. Patch mode was tested on a MediaTek MT6739 with the -modern
+tree.
 
 Built warning-free in its own lines with GCC 15 and Clang for armv7,
 aarch64 and x86-64; the only warnings come from version.h (QCOM_HARDWARE
@@ -66,8 +66,8 @@ Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
 Upstream-Status: Pending
 ---
  src/droid/Makefile.am       |   8 +-
- src/droid/module-droid-fm.c | 707 ++++++++++++++++++++++++++++++++++++
- 2 files changed, 714 insertions(+), 1 deletion(-)
+ src/droid/module-droid-fm.c | 714 ++++++++++++++++++++++++++++++++++++
+ 2 files changed, 721 insertions(+), 1 deletion(-)
  create mode 100644 src/droid/module-droid-fm.c
 
 diff --git a/src/droid/Makefile.am b/src/droid/Makefile.am
@@ -95,10 +95,10 @@ index 526b0f3..f86a8dd 100644
 +module_droid_fm_la_CFLAGS = $(AM_CFLAGS) -DPA_MODULE_NAME=module_droid_fm -DPULSEAUDIO_PACKAGE_VERSION=\"@PA_MAJORMINOR@\"
 diff --git a/src/droid/module-droid-fm.c b/src/droid/module-droid-fm.c
 new file mode 100644
-index 0000000..9db0bf5
+index 0000000..20b7395
 --- /dev/null
 +++ b/src/droid/module-droid-fm.c
-@@ -0,0 +1,707 @@
+@@ -0,0 +1,714 @@
 +/*
 + * Copyright (C) 2026 Herman van Hazendonk <github.com@herrie.org>
 + *
@@ -207,6 +207,8 @@ index 0000000..9db0bf5
 +#define MAX_STEP_DB             20
 +/* Quieter than this is silence: no patch at all. */
 +#define SILENT_DB               (-90.0)
++/* mode=parameters sends fm_volume with four decimals. */
++#define FM_LEVEL_SCALE          10000
 +
 +static const char* const valid_modargs[] = {
 +    "sink",
@@ -226,9 +228,10 @@ index 0000000..9db0bf5
 +    uint32_t max_step;
 +    uint32_t step_db;
 +
-+    /* mode=parameters: on and off with handle_fm, the volume in level. */
++    /* mode=parameters: on and off with handle_fm; level is the fm_volume
++     * last sent, in 1/FM_LEVEL_SCALE, -1 for none. */
 +    bool use_parameters;
-+    float level;
++    int32_t level;
 +
 +    bool have_patch;
 +    audio_patch_handle_t patch;
@@ -416,7 +419,7 @@ index 0000000..9db0bf5
 +        if (set_parameter(u, "handle_fm=%u", (unsigned) u->patch_device) >= 0)
 +            pa_log_info("FM path off");
 +        u->have_patch = false;
-+        u->level = -1.0f;
++        u->level = -1;
 +        return;
 +    }
 +
@@ -446,7 +449,7 @@ index 0000000..9db0bf5
 +        pa_log_info("FM path on: FM tuner -> %#x", (unsigned) device);
 +        u->have_patch = true;
 +        u->patch_device = device;
-+        u->level = -1.0f;
++        u->level = -1;
 +        return true;
 +    }
 +
@@ -520,7 +523,7 @@ index 0000000..9db0bf5
 +
 +    if (u->use_parameters) {
 +        pa_volume_t v = audible_volume(u);
-+        float level;
++        int32_t level;
 +
 +        if (v <= PA_VOLUME_MUTED) {
 +            patch_release(u);
@@ -533,9 +536,13 @@ index 0000000..9db0bf5
 +        if (!u->have_patch && !patch_create(u, device))
 +            return;
 +
-+        /* fm_volume is a linear gain, 0..1. */
-+        level = (float) pa_sw_volume_to_linear(v);
-+        if (level != u->level && set_parameter(u, "fm_volume=%.4f", (double) level) >= 0)
++        /* fm_volume is a linear gain, 0..1; audible_volume() is at most
++         * PA_VOLUME_NORM. Kept in fixed point, so that an unchanged volume is
++         * an exact match and is not sent again. */
++        level = (int32_t) (pa_sw_volume_to_linear(v) * FM_LEVEL_SCALE + 0.5);
++        if (level != u->level &&
++            set_parameter(u, "fm_volume=%d.%04d", (int) (level / FM_LEVEL_SCALE),
++                          (int) (level % FM_LEVEL_SCALE)) >= 0)
 +            u->level = level;
 +        return;
 +    }
@@ -698,7 +705,7 @@ index 0000000..9db0bf5
 +    u->step_db = step_db;
 +    u->patch = AUDIO_PATCH_HANDLE_NONE;
 +    u->use_parameters = pa_streq(mode, "parameters");
-+    u->level = -1.0f;
++    u->level = -1;
 +    m->userdata = u;
 +
 +    if (!(u->hw = pa_droid_hw_module_get(m->core, NULL, PA_DROID_PRIMARY_DEVICE))) {
