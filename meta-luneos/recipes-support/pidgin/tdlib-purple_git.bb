@@ -38,7 +38,7 @@ SRCREV_upstream = "c83e3778bea79ec87b8ce447da3214c91cd58f4e"
 PV = "0.9.3+git"
 # The recipe used to be versioned 1.0+git while it built the monorepo copy; upstream's real version
 # is lower, so bump the epoch to keep package feeds moving forward.
-PE = "2"
+PE = "3"
 
 # tdlib is the expensive part of a Telegram build: TDLib compiles a very large set of generated C++
 # sources.

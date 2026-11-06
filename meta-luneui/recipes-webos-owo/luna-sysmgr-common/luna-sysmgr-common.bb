@@ -8,10 +8,10 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 DEPENDS = "glib-2.0 luna-prefs luna-service2 json-c nyx-lib libpbnjson sqlite3 pmloglib librolegen serviceinstaller"
 DEPENDS += "qtbase"
 
-PE = "1"
+PE = "2"
 PV = "3.0.0-4+git"
 
-SRCREV = "5636004c36a7ff1f3cc039ac414504cff9527eee"
+SRCREV = "57d3f074fc809ab985b79bbefaded289123d0457"
 
 # PV carries no SRCREV, so a revision bump alone leaves PKGV untouched and opkg
 # sees no upgrade on the device. Bump PR on every SRCREV move.

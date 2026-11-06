@@ -11,7 +11,7 @@ require purple-connectors.inc
 # Built from luneos-synergy-connectors, the version ended in its commit alone (1.0+git0+d22c6be58f).
 # With the upstream commit now in front it can sort lower, so bump the epoch to keep package feeds
 # moving forward.
-PE = "1"
+PE = "2"
 
 # Three upstreams, unpacked side by side:
 #

@@ -21,6 +21,7 @@ SRC_URI += " \
     file://0005-webOS-Always-report-the-account-as-active-and-Availa.patch \
     file://0006-webOS-Ring-and-drive-Teams-calls-from-the-webOS-Phon.patch \
 "
+PE = "1"
 SRCREV_upstream = "68511d353cc3a7198b41a02ebe0da60380d717f3"
 
 DEPENDS = "pidgin json-glib glib-2.0 zlib luna-service2"

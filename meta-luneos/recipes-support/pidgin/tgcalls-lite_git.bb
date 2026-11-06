@@ -13,6 +13,7 @@ LICENSE = "GPL-3.0-or-later & LGPL-3.0-only"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=1ebbd3e34237af26da5dc08a4e440464 \
                     file://im/telegram/plugin/tgcalls-lite/COPYING.LGPL3;md5=e6a600fd5e1d9cbde2d983680233ad02"
 
+PE = "1"
 PV = "0.1+git"
 
 S = "${LSC_SRCDIR}"
