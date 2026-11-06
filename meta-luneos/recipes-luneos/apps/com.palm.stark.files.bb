@@ -7,11 +7,14 @@ LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=5b4473596678d62d9d83096273422c8c"
 
 PV = "0.3.1+git"
-SRCREV = "d92a7e98611faee8bb114e760e69d262b2d71395"
+# herrie/open-archives in Herrie82's fork (archives registered as Explorer's,
+# so applicationManager/open hands them over), not yet in Starkka15's main;
+# back to Starkka15's main once it is.
+SRCREV = "f8ae0629ffe30dea865c1f22512f4dd3033dcf2e"
 
 SERVICE_NAME = "com.palm.stark.files.service"
 
-SRC_URI = "git://github.com/Starkka15/topaz-explorer-webos.git;protocol=https;branch=main"
+SRC_URI = "git://github.com/Herrie82/topaz-explorer-webos.git;protocol=https;branch=herrie/open-archives"
 
 inherit allarch
 inherit webos_system_bus
