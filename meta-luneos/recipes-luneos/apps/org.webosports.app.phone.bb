@@ -18,7 +18,7 @@ PE = "2"
 PV = "0.1.1-0+git"
 
 # master, which has pull requests #91 (post-dial pause) and #92 (video calls).
-SRCREV = "2350415e0df83cf81419a9137cec2253af358f5b"
+SRCREV = "f25eb72b5464d2bf0bedc607db5929e7c96090a4"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
