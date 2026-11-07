@@ -75,6 +75,9 @@ do_install() {
     mkdir -p ${D}${sysconfdir}/palm/contact_linker_plugins
 }
 
+# com.palm.service.photos turns HEIC photos into JPEG with heif-dec
+RDEPENDS:${PN} += "libheif"
+
 FILES:${PN} += "${webos_servicesdir} ${webos_sysconfdir} ${sysconfdir}"
 FILES:${PN} += "${webos_accttemplatesdir}"
 FILES:${PN} += "${webos_sysbus_apipermissionsdir} ${webos_sysbus_manifestsdir} ${webos_sysbus_permissionsdir} ${webos_sysbus_rolesdir} ${webos_sysbus_servicedir} ${webos_sysbus_groupsdir}"
