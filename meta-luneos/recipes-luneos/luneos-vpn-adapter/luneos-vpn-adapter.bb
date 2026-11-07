@@ -25,8 +25,9 @@ RRECOMMENDS:${PN} += " \
     connman-plugin-vpn-l2tp \
 "
 
+PE = "1"
 PV = "0.1.0-1+git"
-SRCREV = "15639aea43cca8458c71f07b816f6aa2cb7ede8d"
+SRCREV = "12c053fcbe3948f2263c107f4532cad0fd37845b"
 
 inherit webos_ports_repo
 inherit webos_filesystem_paths

@@ -44,8 +44,9 @@ RDEPENDS:${PN} += "pulseaudio-module-combine-sink"
 # patches this recipe used to carry are commits on its webOS-ports/webOS-OSE
 # branch, which also starts from the submission below.
 #WEBOS_VERSION = "1.0.0-78_127c6cd6c9247979b4ead42d9b8fc8b5c48b47a2"
+PE = "1"
 PV = "1.0.0-79+git"
-SRCREV = "82ceb1d5b9468ef283002f1e3de436b6092c5f37"
+SRCREV = "53b0d434cabc02825cda8e1e35186ddcf210e462"
 PR = "r39"
 
 inherit webos_component

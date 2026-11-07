@@ -16,8 +16,9 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
                     file://com.palm.service.calendar.reminders/NOTICE;md5=3d5ed1f34a3903962a2a026c72e86f28 \
 "
 
+PE = "1"
 PV = "3.0.1-5+git"
-SRCREV = "e96bea4307b51941951532f56f6ab778a5fc58af"
+SRCREV = "781fa672c3e22ab0b045992302b9ba6dca3135ad"
 
 inherit webos_ports_ose_repo
 inherit webos_filesystem_paths

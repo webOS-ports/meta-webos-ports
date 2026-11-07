@@ -5,8 +5,9 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS = "glib-2.0 luna-service2 json-c qtbase libxcrypt"
 
+PE = "1"
 PV = "1.0.0+git"
-SRCREV = "db33e93501dd6448aa2045d2450b276c93cd8db0"
+SRCREV = "0ac7a76365b3f56f6fc60b5ac5090db64eab8217"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 
