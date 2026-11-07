@@ -29,7 +29,7 @@ COMPATIBLE_MACHINE = "^halium$"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 PV = "0.20260508+git"
-PR = "r3"
+PR = "r4"
 SRCREV = "e5152aee90dbb9b81c6bc45073b1fa86fc0c4194"
 SRC_URI = "git://github.com/sailfishos/gst-droid.git;branch=master;protocol=https \
     file://0001-droidcamsrc-allow-recorder-video-in-raw-preview.patch \
@@ -56,6 +56,10 @@ SRC_URI = "git://github.com/sailfishos/gst-droid.git;branch=master;protocol=http
     file://0022-droidvenc-encode-raw-NV12-frames-from-system-memory.patch \
     file://0023-droidvenc-read-codec-config-and-key-frames-from-the-.patch \
     file://0024-droidvenc-copy-raw-frames-into-the-layout-the-hardwa.patch \
+    file://0025-droidcamsrc-finish-a-capture-before-the-picture-goes.patch \
+    file://0026-droidcamsrc-close-the-camera-outside-the-device-lock.patch \
+    file://0027-droidcamsrc-do-not-wait-without-limit-when-stopping-.patch \
+    file://0028-droidcamsrc-stop-a-running-recording-before-the-came.patch \
     file://gst-droid-gate.sh \
     file://gst-droid-gate.service \
     file://camera-droid-heal.sh \

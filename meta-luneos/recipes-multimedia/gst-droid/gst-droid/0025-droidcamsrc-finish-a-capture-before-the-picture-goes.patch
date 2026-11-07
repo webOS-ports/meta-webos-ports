@@ -1,0 +1,129 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sat, 7 Nov 2026 08:53:25 +0100
+Subject: [PATCH] droidcamsrc: finish a capture before the picture goes
+ out
+
+The compressed image callback queued the JPEG on imgsrc first and only
+then restarted the preview and took the capture off the count. A client
+that takes the next picture as soon as it has this one - a quick second
+shutter press - got its start-capture refused, with only a bus warning,
+because the first capture was still counted; it then waited for a picture
+that never came.
+
+Restart the preview and finish the capture before the buffer is queued,
+under the capture lock, so that once the picture is out the source is
+ready for the next one.
+
+A JPEG that comes in after the capture was given up (the source stopped,
+which resets the count) no longer restarts the preview or takes the count
+below zero. The count is now reset under its lock, and before the camera
+is stopped rather than after, so such a JPEG cannot slip in between.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+
+---
+ gst/droidcamsrc/gstdroidcamsrc.c    |  9 ++++++-
+ gst/droidcamsrc/gstdroidcamsrcdev.c | 41 ++++++++++++++++++-----------
+ 2 files changed, 34 insertions(+), 16 deletions(-)
+
+diff --git a/gst/droidcamsrc/gstdroidcamsrc.c b/gst/droidcamsrc/gstdroidcamsrc.c
+index 609d142..3d99557 100644
+--- a/gst/droidcamsrc/gstdroidcamsrc.c
++++ b/gst/droidcamsrc/gstdroidcamsrc.c
+@@ -753,7 +753,9 @@ gst_droidcamsrc_change_state (GstElement * element, GstStateChange transition)
+         gst_droidcamsrc_update_max_zoom (src);
+       }
+ 
++      g_mutex_lock (&src->capture_lock);
+       src->captures = 0;
++      g_mutex_unlock (&src->capture_lock);
+       g_object_notify (G_OBJECT (src), "ready-for-capture");
+ 
+       break;
+@@ -785,9 +787,14 @@ gst_droidcamsrc_change_state (GstElement * element, GstStateChange transition)
+       gst_pad_push_event (src->vfsrc->pad, gst_event_new_flush_start ());
+       g_mutex_unlock (&src->vfsrc->lock);
+ 
++      /* Give up a pending capture before stopping, so that a JPEG which
++       * comes in while the camera stops does not start the preview again. */
++      g_mutex_lock (&src->capture_lock);
++      src->captures = 0;
++      g_mutex_unlock (&src->capture_lock);
++
+       /* TODO: stop recording if we are recording */
+       gst_droidcamsrc_dev_stop (src->dev);
+-      src->captures = 0;
+ 
+       /* deactivate mode */
+       if (src->active_mode) {
+diff --git a/gst/droidcamsrc/gstdroidcamsrcdev.c b/gst/droidcamsrc/gstdroidcamsrcdev.c
+index 96a5c45..66cb70c 100644
+--- a/gst/droidcamsrc/gstdroidcamsrcdev.c
++++ b/gst/droidcamsrc/gstdroidcamsrcdev.c
+@@ -206,6 +206,7 @@ gst_droidcamsrc_dev_compressed_image_callback (void *user, DroidMediaData * mem)
+   GstTagList *tags;
+   GstEvent *event = NULL;
+   void *d;
++  gboolean captured;
+ 
+   GST_DEBUG_OBJECT (src, "dev compressed image callback");
+ 
+@@ -233,6 +234,29 @@ gst_droidcamsrc_dev_compressed_image_callback (void *user, DroidMediaData * mem)
+     event = gst_event_new_tag (tags);
+   }
+ 
++  /* Finish the capture before the picture goes out. A client that takes
++   * the next picture as soon as it has this one would otherwise find the
++   * capture still counted, and its start-capture would be refused.
++   *
++   * A JPEG that comes in after the capture was given up (the camera was
++   * stopped or the mode changed, which reset the count) must not restart
++   * the preview or take the count below zero. */
++  g_mutex_lock (&src->capture_lock);
++  captured = src->captures > 0;
++  if (captured)
++    --src->captures;
++
++  /* we need to restart the preview but only if we are not in ZSL mode.
++   * android demands this but GStreamer does not know about it.
++   */
++  if (captured && !(src->image_mode & GST_DROIDCAMSRC_IMAGE_MODE_ZSL)) {
++    g_rec_mutex_lock (dev->lock);
++    dev->running = FALSE;
++    g_rec_mutex_unlock (dev->lock);
++    gst_droidcamsrc_dev_start (dev, TRUE);
++  }
++  g_mutex_unlock (&src->capture_lock);
++
+   g_mutex_lock (&dev->imgsrc->lock);
+ 
+   // TODO: get the correct lock
+@@ -245,21 +269,8 @@ gst_droidcamsrc_dev_compressed_image_callback (void *user, DroidMediaData * mem)
+   g_cond_signal (&dev->imgsrc->cond);
+   g_mutex_unlock (&dev->imgsrc->lock);
+ 
+-  /* we need to restart the preview but only if we are not in ZSL mode.
+-   * android demands this but GStreamer does not know about it.
+-   */
+-  if (!(src->image_mode & GST_DROIDCAMSRC_IMAGE_MODE_ZSL)) {
+-    g_rec_mutex_lock (dev->lock);
+-    dev->running = FALSE;
+-    g_rec_mutex_unlock (dev->lock);
+-    gst_droidcamsrc_dev_start (dev, TRUE);
+-  }
+-
+-  g_mutex_lock (&src->capture_lock);
+-  --src->captures;
+-  g_mutex_unlock (&src->capture_lock);
+-
+-  g_object_notify (G_OBJECT (src), "ready-for-capture");
++  if (captured)
++    g_object_notify (G_OBJECT (src), "ready-for-capture");
+ }
+ 
+ static void
+-- 
+2.53.0
+
