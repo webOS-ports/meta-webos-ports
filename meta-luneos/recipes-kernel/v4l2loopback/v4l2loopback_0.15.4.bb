@@ -14,6 +14,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263"
 
 SRC_URI = "git://github.com/umlaeute/v4l2loopback.git;branch=main;protocol=https \
            file://0001-build-on-forward-ported-pre-4.0-kernels.patch \
+           file://0002-avoid-mixed-declaration-and-code-in-v4l2_loopback_mmap.patch \
 "
 # v0.15.4, the single v4l2loopback recipe for every device. The patch only
 # relaxes the module's hard pre-4.0 #error and, below 4.0.0, maps the modern
@@ -22,6 +23,9 @@ SRC_URI = "git://github.com/umlaeute/v4l2loopback.git;branch=main;protocol=https
 # kernels are unaffected. The pre-4.0 devices (tenderloin, hammerhead, mako,
 # sm-t520, bullhead, a002, goyavewifi, a3-2015, flo-halium) each carry the V4L2-core
 # forward-port the patch header describes in their shr-distribution/linux branch.
+# 0002 drops a C99-style mid-block declaration that pre-5.18 kernels (gnu89,
+# -Wdeclaration-after-statement) reject when built with CONFIG_CC_WERROR=y
+# (athena's 4.19 tree).
 SRCREV = "0f9ee86760b7f2bea174b7e3e7a1d38845da0ab4"
 PV = "0.15.4"
 
