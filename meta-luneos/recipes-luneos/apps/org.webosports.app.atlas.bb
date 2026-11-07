@@ -13,11 +13,13 @@ inherit webos_system_bus
 inherit webos_filesystem_paths
 inherit webos_app
 
+PE = "1"
 PV = "0.9.10+git"
 PR = "r3"
 
-# master, which has pull request #14 (lock in landscape).
-SRCREV = "74d4fd13de6778782d4030a4ce87f6c3a7124a0f"
+# master, which has pull requests #14 (lock in landscape), #16 (its own page on a
+# load error), #17 (leave address editing on blur) and #18 (help.luneos.org).
+SRCREV = "5d09328613f033e78b5806dcf3d1295a04578b49"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 

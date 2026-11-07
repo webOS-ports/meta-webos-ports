@@ -3,9 +3,9 @@ SECTION = "webos/apps"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-PE = "1"
+PE = "2"
 PV = "0.0.1-2+git"
-SRCREV = "6238bfe0f94494eba0dc857989372e933395aef9"
+SRCREV = "5a42d1094ef77f5d42ca9b02e3fb59a4bdfb690a"
 
 inherit webos_ports_repo
 inherit webos_filesystem_paths
