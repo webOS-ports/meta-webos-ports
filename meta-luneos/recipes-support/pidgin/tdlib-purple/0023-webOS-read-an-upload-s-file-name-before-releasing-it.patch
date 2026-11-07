@@ -1,0 +1,46 @@
+From 30c8119e37ea2e991f1264cec29b7e0deb7b98e8 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sat, 7 Nov 2026 06:30:07 +0100
+Subject: [PATCH] webOS: read an upload's file name before releasing it
+
+At the end of an upload, "Send voice recordings and videos as such,
+not as documents" reads the transfer's local file name, to tell
+whether to send a voice note, a video or a document. It reads the
+name after purple_xfer_end() and purple_xfer_unref(), which can free
+the transfer. AddressSanitizer reports a heap-use-after-free in
+GroupChatTest.SendFile.
+
+Copy the name before the transfer is ended.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ file-transfer.cpp | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/file-transfer.cpp b/file-transfer.cpp
+index 5321389..a1bd850 100644
+--- a/file-transfer.cpp
++++ b/file-transfer.cpp
+@@ -147,13 +147,17 @@ static void updateDocumentUploadProgress(const td::td_api::file &file, PurpleXfe
+             purple_xfer_update_progress(upload);
+         } else if (file.local_ && (file.remote_->uploaded_size_ == file.local_->downloaded_size_)) {
+             purple_debug_misc(config::pluginId, "Finishing uploading %s\n", purple_xfer_get_local_filename(upload));
++            // The name says what to send the file as; it is read now, because ending the transfer
++            // and dropping our reference to it can free it.
++            const char *xferName = purple_xfer_get_local_filename(upload);
++            const std::string localNameCopy = xferName ? xferName : "";
+             purple_xfer_set_bytes_sent(upload, fileSize);
+             purple_xfer_set_completed(upload, TRUE);
+             purple_xfer_end(upload);
+             purple_xfer_unref(upload);
+             account.removeFileTransfer(file.id_);
+             auto sendMessageRequest = td::td_api::make_object<td::td_api::sendMessage>();
+-            const char *localName = purple_xfer_get_local_filename(upload);
++            const char *localName = xferName ? localNameCopy.c_str() : nullptr;
+             size_t nameLen = localName ? strlen(localName) : 0;
+             if (nameLen > 4 && g_ascii_strcasecmp(localName + nameLen - 4, ".ogg") == 0) {
+                 // An Ogg/Opus recording: send it as a Telegram VOICE NOTE (not a document). Duration
+-- 
+2.53.0
+

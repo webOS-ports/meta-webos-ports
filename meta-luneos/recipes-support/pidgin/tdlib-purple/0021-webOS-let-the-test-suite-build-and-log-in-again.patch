@@ -1,0 +1,396 @@
+From 14799c779c9ff767e99ebfaebd9af87b05b74882 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sat, 7 Nov 2026 05:46:42 +0100
+Subject: [PATCH] webOS: let the test suite build and log in again
+
+The tests had fallen behind the plug-in, and `tests` no longer linked.
+
+The webOS patches call libpurple functions the test mock does not
+have (purple_signal_emit, purple_timeout_add,
+purple_blist_node_set_bool, purple_get_core,
+purple_accounts_get_handle). They also call the webOS call service in
+call-luna.cpp, which the tests do not build. Add the functions to the
+mock. Stub the call service, which needs a bus the tests do not have.
+purple_timeout_add runs its function once, at once, so the delayed
+receipt frees what it holds.
+
+Every test also starts with a login that no longer matched the
+plug-in. TDLib's database is now in
+/media/cryptofs/.purple-tdlib-db/<number>, not under
+purple_user_dir(). Since "Honour "Keep inline downloads" again,
+through use_storage_optimizer", a setOption request follows
+setTdlibParameters. Expect both, with the option off when
+keep-inline-downloads is set.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ test/CMakeLists.txt       |  1 +
+ test/call-luna-stub.cpp   | 24 +++++++++++++++++
+ test/fixture.cpp          |  7 ++---
+ test/group-chat-test.cpp  |  7 ++---
+ test/libpurple-mock.cpp   | 29 +++++++++++++++++++++
+ test/login-test.cpp       | 55 ++++++++++++++++++++-------------------
+ test/secret-chat-test.cpp |  7 ++---
+ test/test-transceiver.cpp | 20 ++++++++++++++
+ test/test-transceiver.h   |  1 +
+ 9 files changed, 115 insertions(+), 36 deletions(-)
+ create mode 100644 test/call-luna-stub.cpp
+
+diff --git a/test/CMakeLists.txt b/test/CMakeLists.txt
+index 259057e..e7d15da 100644
+--- a/test/CMakeLists.txt
++++ b/test/CMakeLists.txt
+@@ -26,6 +26,7 @@ add_executable(tests EXCLUDE_FROM_ALL
+     printout.cpp
+     purple-events.cpp
+     fixture.cpp
++    call-luna-stub.cpp
+ 
+     ../tdlib-purple.cpp
+     ../td-client.cpp
+diff --git a/test/call-luna-stub.cpp b/test/call-luna-stub.cpp
+new file mode 100644
+index 0000000..e6016ea
+--- /dev/null
++++ b/test/call-luna-stub.cpp
+@@ -0,0 +1,24 @@
++// The webOS call service (call-luna.cpp) registers com.palm.telegram.call on the bus and talks to
++// the Phone app. The tests have no bus, so the plug-in's calls into it do nothing here.
++#include "call-luna.h"
++
++bool callLunaInit(PurpleAccount *)
++{
++    return true;
++}
++
++void callLunaShutdown(PurpleAccount *)
++{
++}
++
++void tgcLog(const char *, ...)
++{
++}
++
++void callLunaSetCallAudio(bool)
++{
++}
++
++void callLunaPushState(const char *, const char *, const char *, bool, const char *, bool)
++{
++}
+diff --git a/test/fixture.cpp b/test/fixture.cpp
+index daca96c..6c7992f 100644
+--- a/test/fixture.cpp
++++ b/test/fixture.cpp
+@@ -1,4 +1,5 @@
+ #include "fixture.h"
++#include "td-client.h"
+ #include "sticker.h"
+ #include "client-utils.h"
+ #include "tdlib-purple.h"
+@@ -86,10 +87,10 @@ void CommTest::login(std::initializer_list<object_ptr<Object>> extraUpdates, obj
+         make_object<disableProxy>(),
+         make_object<getProxies>(),
+         makeTdlibParameters(
+-            std::string(purple_user_dir()) + G_DIR_SEPARATOR_S +
+-            "tdlib" + G_DIR_SEPARATOR_S + "+" + selfPhoneNumber,
++            PurpleTdClient::getDatabaseDir(("+" + selfPhoneNumber).c_str()),
+             true // use secret chats
+-        )
++        ),
++        makeStorageOptimizerOption()
+     });
+     tgl.reply(make_object<ok>());
+ 
+diff --git a/test/group-chat-test.cpp b/test/group-chat-test.cpp
+index e3b33ad..9a18df2 100644
+--- a/test/group-chat-test.cpp
++++ b/test/group-chat-test.cpp
+@@ -1,4 +1,5 @@
+ #include "fixture.h"
++#include "td-client.h"
+ #include "libpurple-mock.h"
+ #include <glib/gstrfuncs.h>
+ #include <fmt/format.h>
+@@ -1293,10 +1294,10 @@ TEST_F(GroupChatTest, Roomlist)
+         make_object<disableProxy>(),
+         make_object<getProxies>(),
+         makeTdlibParameters(
+-            std::string(purple_user_dir()) + G_DIR_SEPARATOR_S +
+-            "tdlib" + G_DIR_SEPARATOR_S + "+" + selfPhoneNumber,
++            PurpleTdClient::getDatabaseDir(("+" + selfPhoneNumber).c_str()),
+             true // use secret chats
+-        )
++        ),
++        makeStorageOptimizerOption()
+     });
+     tgl.reply(make_object<ok>());
+ 
+diff --git a/test/libpurple-mock.cpp b/test/libpurple-mock.cpp
+index 014b142..6ff2d09 100644
+--- a/test/libpurple-mock.cpp
++++ b/test/libpurple-mock.cpp
+@@ -1320,6 +1320,12 @@ const char *purple_blist_node_get_string(PurpleBlistNode *node, const char *key)
+     return static_cast<const char *>(g_hash_table_lookup(node->settings, key));
+ }
+ 
++// The webOS "muted" and "archived" flags; nothing in the tests reads them back.
++void purple_blist_node_set_bool(PurpleBlistNode *node, const char *key, gboolean value)
++{
++    g_hash_table_insert(node->settings, const_cast<char *>(key), g_strdup(value ? "1" : "0"));
++}
++
+ void purple_blist_node_remove_setting(PurpleBlistNode *node, const char *key)
+ {
+     g_hash_table_remove(node->settings, key);
+@@ -1765,6 +1771,29 @@ gulong purple_signal_connect(void *instance, const char *signal,
+     return 0;
+ }
+ 
++// The webOS signals (webos-im-outbox-id, webos-im-receipt-hwm, webos-im-send-reaction) go to
++// imlibpurpleservice; nothing listens to them here.
++void purple_signal_emit(void *, const char *, ...)
++{
++}
++
++void *purple_accounts_get_handle()
++{
++    return NULL;
++}
++
++PurpleCore *purple_get_core()
++{
++    return NULL;
++}
++
++// Runs the function once, at once, so what it frees is freed (webos_tg_receipt_emit).
++guint purple_timeout_add(guint, GSourceFunc function, gpointer data)
++{
++    function(data);
++    return 0;
++}
++
+ // As libpurple's, which Pidgin calls whenever it updates a tab
+ void purple_conversation_autoset_title(PurpleConversation *conv)
+ {
+diff --git a/test/login-test.cpp b/test/login-test.cpp
+index 4995abf..82c3627 100644
+--- a/test/login-test.cpp
++++ b/test/login-test.cpp
+@@ -1,4 +1,5 @@
+ #include "fixture.h"
++#include "td-client.h"
+ 
+ class LoginTest: public CommTest {};
+ 
+@@ -20,10 +21,10 @@ TEST_F(LoginTest, ConnectionReadyBeforeAuthReady)
+         make_object<disableProxy>(),
+         make_object<getProxies>(),
+         makeTdlibParameters(
+-            std::string(purple_user_dir()) + G_DIR_SEPARATOR_S +
+-            "tdlib" + G_DIR_SEPARATOR_S + "+" + selfPhoneNumber,
++            PurpleTdClient::getDatabaseDir(("+" + selfPhoneNumber).c_str()),
+             true // use secret chats
+-        )
++        ),
++        makeStorageOptimizerOption()
+     });
+     tgl.reply(make_object<ok>());
+ 
+@@ -74,10 +75,10 @@ TEST_F(LoginTest, RegisterNewAccount_WithAlias_ConnectionReadyBeforeAuthReady)
+         make_object<disableProxy>(),
+         make_object<getProxies>(),
+         makeTdlibParameters(
+-            std::string(purple_user_dir()) + G_DIR_SEPARATOR_S +
+-            "tdlib" + G_DIR_SEPARATOR_S + "+" + selfPhoneNumber,
++            PurpleTdClient::getDatabaseDir(("+" + selfPhoneNumber).c_str()),
+             true // use secret chats
+-        )
++        ),
++        makeStorageOptimizerOption()
+     });
+     tgl.reply(make_object<ok>());
+ 
+@@ -156,10 +157,10 @@ TEST_F(LoginTest, RegisterNewAccount_NoAlias)
+         make_object<disableProxy>(),
+         make_object<getProxies>(),
+         makeTdlibParameters(
+-            std::string(purple_user_dir()) + G_DIR_SEPARATOR_S +
+-            "tdlib" + G_DIR_SEPARATOR_S + "+" + selfPhoneNumber,
++            PurpleTdClient::getDatabaseDir(("+" + selfPhoneNumber).c_str()),
+             true // use secret chats
+-        )
++        ),
++        makeStorageOptimizerOption()
+     });
+     tgl.reply(make_object<ok>());
+ 
+@@ -223,10 +224,10 @@ TEST_F(LoginTest, TwoFactorAuthentication)
+         make_object<disableProxy>(),
+         make_object<getProxies>(),
+         makeTdlibParameters(
+-            std::string(purple_user_dir()) + G_DIR_SEPARATOR_S +
+-            "tdlib" + G_DIR_SEPARATOR_S + "+" + selfPhoneNumber,
++            PurpleTdClient::getDatabaseDir(("+" + selfPhoneNumber).c_str()),
+             true // use secret chats
+-        )
++        ),
++        makeStorageOptimizerOption()
+     });
+     tgl.reply(make_object<ok>());
+ 
+@@ -345,10 +346,10 @@ TEST_F(LoginTest, AddedProxyCofiguration)
+         makeAddProxy(host, port, make_object<proxyTypeSocks5>(username, password)),
+         make_object<getProxies>(),
+         makeTdlibParameters(
+-            std::string(purple_user_dir()) + G_DIR_SEPARATOR_S +
+-            "tdlib" + G_DIR_SEPARATOR_S + "+" + selfPhoneNumber,
++            PurpleTdClient::getDatabaseDir(("+" + selfPhoneNumber).c_str()),
+             true // use secret chats
+-        )
++        ),
++        makeStorageOptimizerOption()
+     });
+ 
+     tgl.reply(make_object<ok>()); // reply to disableProxy
+@@ -383,10 +384,10 @@ TEST_F(LoginTest, ChangedProxyCofiguration)
+         makeAddProxy(host, port, make_object<proxyTypeSocks5>(username, password)),
+         make_object<getProxies>(),
+         makeTdlibParameters(
+-            std::string(purple_user_dir()) + G_DIR_SEPARATOR_S +
+-            "tdlib" + G_DIR_SEPARATOR_S + "+" + selfPhoneNumber,
++            PurpleTdClient::getDatabaseDir(("+" + selfPhoneNumber).c_str()),
+             true // use secret chats
+-        )
++        ),
++        makeStorageOptimizerOption()
+     });
+ 
+     tgl.reply(make_object<ok>()); // reply to disableProxy
+@@ -410,10 +411,10 @@ TEST_F(LoginTest, RemovedProxyCofiguration)
+         make_object<disableProxy>(),
+         make_object<getProxies>(),
+         makeTdlibParameters(
+-            std::string(purple_user_dir()) + G_DIR_SEPARATOR_S +
+-            "tdlib" + G_DIR_SEPARATOR_S + "+" + selfPhoneNumber,
++            PurpleTdClient::getDatabaseDir(("+" + selfPhoneNumber).c_str()),
+             true // use secret chats
+-        )
++        ),
++        makeStorageOptimizerOption()
+     });
+ 
+     tgl.reply(make_object<ok>()); // reply to disableProxy
+@@ -436,10 +437,10 @@ TEST_F(LoginTest, getChatsSequence)
+         make_object<disableProxy>(),
+         make_object<getProxies>(),
+         makeTdlibParameters(
+-            std::string(purple_user_dir()) + G_DIR_SEPARATOR_S +
+-            "tdlib" + G_DIR_SEPARATOR_S + "+" + selfPhoneNumber,
++            PurpleTdClient::getDatabaseDir(("+" + selfPhoneNumber).c_str()),
+             true // use secret chats
+-        )
++        ),
++        makeStorageOptimizerOption()
+     });
+     tgl.reply(make_object<ok>());
+ 
+@@ -517,10 +518,10 @@ TEST_F(LoginTest, KeepInlineDownloads)
+         make_object<disableProxy>(),
+         make_object<getProxies>(),
+         makeTdlibParameters(
+-            std::string(purple_user_dir()) + G_DIR_SEPARATOR_S +
+-            "tdlib" + G_DIR_SEPARATOR_S + "+" + selfPhoneNumber,
++            PurpleTdClient::getDatabaseDir(("+" + selfPhoneNumber).c_str()),
+             true // use secret chats
+-        )
++        ),
++        makeStorageOptimizerOption(false) // keep-inline-downloads
+     });
+ }
+ 
+diff --git a/test/secret-chat-test.cpp b/test/secret-chat-test.cpp
+index c2cd3fa..b3832f1 100644
+--- a/test/secret-chat-test.cpp
++++ b/test/secret-chat-test.cpp
+@@ -1,4 +1,5 @@
+ #include "fixture.h"
++#include "td-client.h"
+ 
+ class SecretChatTest: public CommTest {
+ protected:
+@@ -117,10 +118,10 @@ TEST_F(SecretChatTest, SecretChatsDisabled)
+         make_object<disableProxy>(),
+         make_object<getProxies>(),
+         makeTdlibParameters(
+-            std::string(purple_user_dir()) + G_DIR_SEPARATOR_S +
+-            "tdlib" + G_DIR_SEPARATOR_S + "+" + selfPhoneNumber,
++            PurpleTdClient::getDatabaseDir(("+" + selfPhoneNumber).c_str()),
+             false // this test turns secret chats off
+-        )
++        ),
++        makeStorageOptimizerOption()
+     });
+ }
+ 
+diff --git a/test/test-transceiver.cpp b/test/test-transceiver.cpp
+index 67b2add..b3e30cb 100644
+--- a/test/test-transceiver.cpp
++++ b/test/test-transceiver.cpp
+@@ -110,6 +110,18 @@ static void compare(const setTdlibParameters &actual, const setTdlibParameters &
+     COMPARE(use_secret_chats_);
+ }
+ 
++static void compare(const setOption &actual, const setOption &expected)
++{
++    COMPARE(name_);
++    ASSERT_EQ(expected.value_ != nullptr, actual.value_ != nullptr);
++    if (expected.value_) {
++        ASSERT_EQ(expected.value_->get_id(), actual.value_->get_id());
++        if (expected.value_->get_id() == optionValueBoolean::ID)
++            ASSERT_EQ(static_cast<const optionValueBoolean &>(*expected.value_).value_,
++                      static_cast<const optionValueBoolean &>(*actual.value_).value_);
++    }
++}
++
+ static void compare(const setAuthenticationPhoneNumber &actual, const setAuthenticationPhoneNumber &expected)
+ {
+     COMPARE(phone_number_);
+@@ -573,6 +585,7 @@ static void compareRequests(const Function &actual, const Function &expected,
+     switch (actual.get_id()) {
+         C(setTdlibParameters)
+         C(setAuthenticationPhoneNumber)
++        C(setOption)
+         case getContacts::ID: break;
+         C(getChats)
+         C(loadChats)
+@@ -784,6 +797,13 @@ object_ptr<setTdlibParameters> makeTdlibParameters(const std::string &databaseDi
+     return result;
+ }
+ 
++// Sent after setTdlibParameters at every login: the storage optimizer is on unless "Keep inline
++// downloads" is set (it is not, by default).
++object_ptr<setOption> makeStorageOptimizerOption(bool useStorageOptimizer)
++{
++    return make_object<setOption>("use_storage_optimizer", make_object<optionValueBoolean>(useStorageOptimizer));
++}
++
+ object_ptr<Object> getChatsNoChatsResponse()
+ {
+     return make_object<error>(404, "No more chats");
+diff --git a/test/test-transceiver.h b/test/test-transceiver.h
+index d14199c..1df1fcd 100644
+--- a/test/test-transceiver.h
++++ b/test/test-transceiver.h
+@@ -71,6 +71,7 @@ object_ptr<updateChatPosition> makeUpdateRemoveFromChatList(int64_t chatId, obje
+ object_ptr<loadChats> getChatsRequest();
+ object_ptr<setTdlibParameters> makeTdlibParameters(const std::string &databaseDirectory,
+                                                    bool useSecretChats);
++object_ptr<setOption> makeStorageOptimizerOption(bool useStorageOptimizer = true);
+ object_ptr<MessageReplyTo> makeReplyTo(std::int64_t message_id_);
+ object_ptr<photoSize> makePhotoSize(object_ptr<file> &&photo, unsigned width, unsigned height);
+ object_ptr<sticker> makeSticker(std::int32_t width_, std::int32_t height_,
+-- 
+2.53.0
+

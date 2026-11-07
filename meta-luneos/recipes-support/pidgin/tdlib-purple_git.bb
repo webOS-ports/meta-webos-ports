@@ -32,6 +32,9 @@ SRC_URI += " \
     file://0018-webOS-video-in-tgcalls-lite-calls-through-luneos-rtc-engine.patch \
     file://0019-webOS-log-why-TDLib-ended-a-call.patch \
     file://0020-webOS-a-Telegram-call-answered-on-another-device-is-.patch \
+    file://0021-webOS-let-the-test-suite-build-and-log-in-again.patch \
+    file://0022-webOS-name-the-sender-of-a-deleted-group-message.patch \
+    file://0023-webOS-read-an-upload-s-file-name-before-releasing-it.patch \
 "
 SRCREV_upstream = "c83e3778bea79ec87b8ce447da3214c91cd58f4e"
 

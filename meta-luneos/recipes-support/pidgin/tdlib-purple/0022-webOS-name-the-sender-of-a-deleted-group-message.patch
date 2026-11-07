@@ -1,0 +1,162 @@
+From 7ffa1bd9e31672d487196eef05046c74103b5d8e Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sat, 7 Nov 2026 05:41:21 +0100
+Subject: [PATCH] webOS: name the sender of a deleted group message
+
+When several members of a group send a message in the same second
+and the messages are deleted, each deletion was reported in the same
+words: "Message from 04:44:12 has been deleted". Seen on a Pixel 3a,
+2026-11-07: three spam accounts posted at 04:44:12 and were removed,
+and the chat got three identical notices.
+
+Keep the sender's name with a group message as it is shown, carry it
+through an edit, and name it in the notice: "The message <name> sent
+at 04:44:12 has been deleted". Telegram still does not say who deleted
+it, so the notice does not say that either. Private chats, which have
+one sender, and unsigned channel posts keep the old notice.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ account-data.h           |  1 +
+ receiving.cpp            | 30 ++++++++++++++++++++----
+ test/group-chat-test.cpp | 49 ++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 75 insertions(+), 5 deletions(-)
+
+diff --git a/account-data.h b/account-data.h
+index 0e2e492..921647d 100644
+--- a/account-data.h
++++ b/account-data.h
+@@ -329,6 +329,7 @@ struct ShownMessage {
+     std::string content;   // what is shown of it besides: its text, caption or description
+     bool        quotable = false; // content is the text or caption, as written
+     std::string kind;      // what the message is, to name it by where there is no text to quote
++    std::string sender;    // who sent it, as the conversation names them; empty if not known
+     time_t      timestamp;
+     // Who gave which reaction, as far as anyone has been named, and whether it was us
+     std::map<std::string, bool> reactions;
+diff --git a/receiving.cpp b/receiving.cpp
+index 41de83e..0f6c76a 100644
+--- a/receiving.cpp
++++ b/receiving.cpp
+@@ -2245,9 +2245,19 @@ void handleIncomingMessage(TdAccountData &account, const td::td_api::chat &chat,
+         account.addShownMessage(chatId, getId(*message), std::move(shownMessage));
+     }
+ 
++    MessageId messageId = getId(*message);
+     IncomingMessage fullMessage;
+     makeFullMessage(chat, std::move(message), fullMessage, account);
+     fullMessage.messageInfo.fromHistory = (action == PendingMessageQueue::Prepend);
++    // Who sent it in a group, for a notice about it later: several members' messages sent in the
++    // same second are otherwise reported deleted in the same words. A private chat has only the
++    // one sender, and a channel post signed by nobody has no one to name.
++    if (!fullMessage.messageInfo.outgoing && !fullMessage.messageInfo.anonymousChannelPost &&
++        (getBasicGroupId(chat).valid() || getSupergroupId(chat).valid())) {
++        ShownMessage *shownMessage = account.findShownMessage(chatId, messageId);
++        if (shownMessage)
++            shownMessage->sender = getSenderDisplayName(chat, fullMessage.messageInfo, account.purpleAccount);
++    }
+     queueMessage(account, chat, std::move(fullMessage), action);
+ }
+ 
+@@ -2343,6 +2353,7 @@ void updateMessageContent(TdAccountData &account, ChatId chatId, MessageId messa
+     edit.captionOnly = !editedMessage.file.empty() && (editedMessage.file == shownMessage->file);
+     edit.previous    = *shownMessage;
+     editedMessage.timestamp = shownMessage->timestamp;
++    editedMessage.sender    = shownMessage->sender;
+     // Edits leave reactions be
+     editedMessage.reactions = shownMessage->reactions;
+     edit.installed   = editedMessage;
+@@ -2378,7 +2389,8 @@ void deleteMessages(TdAccountData &account, const td::td_api::updateDeleteMessag
+         ShownMessage *shownMessage = account.findShownMessage(chatId, messageId);
+         if (!shownMessage)
+             continue;
+-        time_t messageTime = shownMessage->timestamp;
++        time_t      messageTime = shownMessage->timestamp;
++        std::string sender      = shownMessage->sender;
+         account.removeShownMessage(chatId, messageId);
+ 
+         PendingEdit edit;
+@@ -2389,10 +2401,18 @@ void deleteMessages(TdAccountData &account, const td::td_api::updateDeleteMessag
+         if (pendingMessage)
+             pendingMessage->deleted = true;
+         if ((!pendingMessage || pendingMessage->editedMessageTime) && chat) {
+-            // Telegram does not say who deleted it, so the notice cannot either.
+-            std::string notice = formatMessage(
+-                // TRANSLATOR: In-chat notification. Argument is the time (or date and time) the message was sent at, as the conversation window shows it.
+-                _("Message from {} has been deleted"), formatMessageTime(messageTime));
++            // Telegram does not say who deleted it, so the notice cannot either; in a group it
++            // names who sent it, which tells apart messages several members sent at once.
++            std::string notice;
++            if (!sender.empty())
++                notice = formatMessage(
++                    // TRANSLATOR: In-chat notification. Arguments are a username and the time (or date and time) the message was sent at, as the conversation window shows it.
++                    _("The message {0} sent at {1} has been deleted"),
++                    {escapeForDisplay(sender), formatMessageTime(messageTime)});
++            else
++                notice = formatMessage(
++                    // TRANSLATOR: In-chat notification. Argument is the time (or date and time) the message was sent at, as the conversation window shows it.
++                    _("Message from {} has been deleted"), formatMessageTime(messageTime));
+             showChatNotification(account, *chat, notice.c_str());
+         }
+     }
+diff --git a/test/group-chat-test.cpp b/test/group-chat-test.cpp
+index 9a18df2..ddab151 100644
+--- a/test/group-chat-test.cpp
++++ b/test/group-chat-test.cpp
+@@ -1596,3 +1596,52 @@ TEST_F(GroupChatTest, RejoinAtStartupBeforeUpdateNewChat_ChatListNullFirst)
+ }
+ 
+ // TODO: test non-user member
++
++// The time a message was sent at, as a notice about it shows it (formatMessageTime)
++static std::string messageTime(time_t timestamp)
++{
++    char buf[80];
++    strftime(buf, sizeof(buf), "%x %X", localtime(&timestamp));
++    return buf;
++}
++
++// Two members' messages sent in the same second, then deleted: each notice names whose message it
++// was. Without the sender the two notices were the same words, and the same banner twice.
++TEST_F(GroupChatTest, MessagesSentTogetherDeleted)
++{
++    constexpr int32_t date         = 12345;
++    constexpr int64_t messageId[]  = {10000, 10001};
++    constexpr int     purpleChatId = 1;
++    loginWithBasicGroup();
++
++    tgl.update(standardUpdateUserNoPhone(0));
++    tgl.update(standardUpdateUserNoPhone(1));
++    tgl.update(make_object<updateNewMessage>(
++        makeMessage(messageId[0], userIds[0], groupChatId, false, date, makeTextMessage("Same"))
++    ));
++    tgl.verifyRequest(viewMessages(groupChatId, {messageId[0]}, nullptr, true));
++    prpl.verifyEvents(
++        ServGotJoinedChatEvent(connection, purpleChatId, groupChatPurpleName, groupChatTitle),
++        ServGotChatEvent(connection, purpleChatId,
++                         "id" + std::to_string(userIds[0]) + "\x1f" + userFirstNames[0] + " " + userLastNames[0],
++                         "Same", PURPLE_MESSAGE_RECV, date)
++    );
++    tgl.update(make_object<updateNewMessage>(
++        makeMessage(messageId[1], userIds[1], groupChatId, false, date, makeTextMessage("Same"))
++    ));
++    tgl.verifyRequest(viewMessages(groupChatId, {messageId[1]}, nullptr, true));
++    prpl.verifyEvents(
++        ServGotChatEvent(connection, purpleChatId,
++                         "id" + std::to_string(userIds[1]) + "\x1f" + userFirstNames[1] + " " + userLastNames[1],
++                         "Same", PURPLE_MESSAGE_RECV, date)
++    );
++
++    tgl.update(makeUpdateDeleteMessages(groupChatId, messageId[0], true, false));
++    prpl.verifyEvents(ConversationWriteEvent(groupChatPurpleName, NotificationWho,
++        "The message " + userFirstNames[0] + " " + userLastNames[0] + " sent at " + messageTime(date) +
++        " has been deleted", PURPLE_MESSAGE_SYSTEM, 0));
++    tgl.update(makeUpdateDeleteMessages(groupChatId, messageId[1], true, false));
++    prpl.verifyEvents(ConversationWriteEvent(groupChatPurpleName, NotificationWho,
++        "The message " + userFirstNames[1] + " " + userLastNames[1] + " sent at " + messageTime(date) +
++        " has been deleted", PURPLE_MESSAGE_SYSTEM, 0));
++}
+-- 
+2.53.0
+
