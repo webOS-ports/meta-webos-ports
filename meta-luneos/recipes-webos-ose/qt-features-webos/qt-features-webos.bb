@@ -24,6 +24,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0003-webos-service-match-LS2-filenames-by-suffix.patch \
     file://0004-generate_qmap-add-the-phone-toolbelt-keys.patch \
     file://0005-generate_qmap-add-the-emoji-picker-key.patch \
+    file://0006-generate_qmap-add-the-camera-and-programmable-keys.patch \
 "
 
 FILES:${PN}-dev += "${OE_QMAKE_PATH_QT_ARCHDATA}/mkspecs"

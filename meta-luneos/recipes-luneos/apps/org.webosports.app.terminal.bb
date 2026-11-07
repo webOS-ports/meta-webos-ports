@@ -3,7 +3,7 @@ LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=b234ee4d69f5fce4486a80fdaf4a4263"
 
 PV = "0.1+git"
-SRCREV = "c71ced73877f69b98d378f113f03c845e9e38dde"
+SRCREV = "e194858c25929d5b3ac07a239bf2faad4be6075f"
 
 DEPENDS = "qtbase qtdeclarative qtdeclarative-native"
 RDEPENDS:${PN} = "qmltermwidget luneos-components"

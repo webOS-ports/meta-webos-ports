@@ -18,6 +18,7 @@ SRC_URI = " \
     file://0004-qt-api-do-not-marshal-invalid-QVariant-arguments.patch \
     file://0005-compasschain-link-the-sibling-libraries-it-calls.patch \
     file://0006-lunaservice-drop-the-LunaSysMgrIpcMessages-pkgconfig.patch \
+    file://0007-sensormanager-never-block-the-main-thread-on-a-full-.patch \
 "
 
 do_configure:prepend() {

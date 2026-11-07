@@ -16,8 +16,9 @@ RDEPENDS:${PN} += "lpac gstreamer1.0-plugins-bad-zbar gstreamer1.0-plugins-good 
 # recipes-connectivity/ofono. It is a runtime relationship, not a build one.
 RRECOMMENDS:${PN} += "ofono"
 
+PE = "1"
 PV = "0.1.0-1+git"
-SRCREV = "ab8bfd3ded6c484bbb381c50505433f9e7cabe57"
+SRCREV = "05766a154695e58d0ca7b2f6a5e9626bd8deddb9"
 
 inherit webos_ports_repo
 inherit webos_filesystem_paths

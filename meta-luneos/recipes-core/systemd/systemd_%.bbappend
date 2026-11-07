@@ -3,7 +3,6 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 SRC_URI += " \
     file://0001-rules-consider-MMC-device-partitions-with-partition-.patch \
     file://0002-fd_fdinfo_mnt_id-disable-fdinfo-stat.patch \
-    file://0003-Disable-ProtectHome-and-ProtectSystem-for-old-kernel.patch \
     file://0001-systemd-oomd-depend-on-swap-on.patch \
     file://0002-Add-webos-interface.patch \
     file://0003-systemd-oomd-modify-oomd.conf.patch \

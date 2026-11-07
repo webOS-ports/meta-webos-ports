@@ -27,13 +27,21 @@ SRC_URI += " \
     file://0013-webOS-reactions-sent-message-ids-and-delivery-read-t.patch \
     file://0014-webOS-replies-as-quote-cards-and-real-replies-when-s.patch \
     file://0015-webOS-place-and-take-calls-through-the-Phone-app-ove.patch \
+    file://0016-webOS-carry-calls-with-tgcalls-lite-when-the-peer-sp.patch \
+    file://0017-webOS-clear-ended-calls-from-the-Phone-app-show-the-.patch \
+    file://0018-webOS-video-in-tgcalls-lite-calls-through-luneos-rtc-engine.patch \
+    file://0019-webOS-log-why-TDLib-ended-a-call.patch \
+    file://0020-webOS-a-Telegram-call-answered-on-another-device-is-.patch \
+    file://0021-webOS-let-the-test-suite-build-and-log-in-again.patch \
+    file://0022-webOS-name-the-sender-of-a-deleted-group-message.patch \
+    file://0023-webOS-read-an-upload-s-file-name-before-releasing-it.patch \
 "
 SRCREV_upstream = "c83e3778bea79ec87b8ce447da3214c91cd58f4e"
 
 PV = "0.9.3+git"
 # The recipe used to be versioned 1.0+git while it built the monorepo copy; upstream's real version
 # is lower, so bump the epoch to keep package feeds moving forward.
-PE = "1"
+PE = "3"
 
 # tdlib is the expensive part of a Telegram build: TDLib compiles a very large set of generated C++
 # sources.
@@ -43,7 +51,12 @@ PE = "1"
 # libtgvoip is a STATIC archive whose opus, ALSA and libcrypto references are resolved at this link.
 #
 # fmt: the fork takes it from the system (pkg-config fmt) rather than bundling it.
-DEPENDS = "pidgin glib-2.0 zlib openssl fmt tdlib libtgvoip libopus alsa-lib luna-service2"
+#
+# tgcalls-lite (0016) carries the calls of current Telegram clients, which speak tgcalls V2 rather
+# than libtgvoip's protocol: a static library, whose libnice, libsrtp2, json-glib and PulseAudio
+# references are resolved at this link.
+DEPENDS = "pidgin glib-2.0 zlib openssl fmt tdlib libtgvoip libopus alsa-lib luna-service2 \
+           tgcalls-lite libnice libsrtp json-glib pulseaudio"
 
 S = "${UNPACKDIR}/tdlib-purple"
 
@@ -75,7 +88,10 @@ inherit cmake pkgconfig
 # lunaservice_* both need overriding. The defaults are the legacy webOS ones (liblunaservice.so);
 # LuneOS ships libluna-service2.so.
 #
-# Calls are voice only (0015): there is no video path for libtgvoip on LuneOS.
+# Calls with a peer that speaks tgcalls V2 go through tgcalls-lite (0016), the others through
+# libtgvoip, which is voice only. tgcalls-lite's video (0018) has luneos-rtc-engine
+# (packagegroup-luneos-extended) decode and, where there is a camera and an encoder, encode the
+# H.264; without the engine on the device a video call stays voice-only.
 #
 # The semicolons must stay quoted: cmake_do_configure expands EXTRA_OECMAKE unquoted into a shell
 # command, which would otherwise split the line at each one.
@@ -87,6 +103,8 @@ EXTRA_OECMAKE = " \
     -Dtgvoip_LIBRARIES='tgvoip;opus;asound;crypto' \
     -Dlunaservice_INCLUDE_DIRS=${STAGING_INCDIR}/luna-service2 \
     -Dlunaservice_LIBRARIES=luna-service2 \
+    -Dtgcalls_lite_INCLUDE_DIRS=${STAGING_INCDIR}/tgcalls-lite \
+    -Dtgcalls_lite_LIBRARIES=${STAGING_LIBDIR}/libtgcalls-lite.a \
 "
 
 # CMakeLists installs two things webOS has no use for, so they are removed after `make install`:

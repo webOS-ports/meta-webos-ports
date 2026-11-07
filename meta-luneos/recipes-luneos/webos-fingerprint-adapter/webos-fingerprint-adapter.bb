@@ -13,7 +13,7 @@ RRECOMMENDS:${PN} += "biomd"
 
 PV = "0.1.0-1+git"
 PR = "r1"
-SRCREV = "e01795a31bd5b4a5986c78b8cda54837418951b4"
+SRCREV = "ac6829fbba1c2a9e49744447593a3ea0df4bb4bc"
 
 inherit webos_ports_repo
 inherit webos_filesystem_paths

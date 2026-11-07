@@ -31,10 +31,18 @@ def webos_app_generate_security_files_write_permission_file(d, app_info):
     if "requiredPermissions" in app_info:
         permission[key] = app_info["requiredPermissions"]
         
-        # START Hack for legacy com.palm apps to fix issues with proxied LS2 calls, we want to make sure to allow the "app_id*" and "app_id-*"
-        if type == "web" and "com.palm." in app_id:
+        # A call the hub makes on an app's behalf - an activity callback,
+        # which activitymanager sends through LSCallProxy as the app that
+        # created the activity - is checked against the groups held by the
+        # bare app id when the app is not running (ls-hubd's
+        # _LSHubGetRequiredGroupsByName gets the creator's appId, which
+        # "app_id-*" does not match). Without this key such a callback is
+        # refused ("Service security groups don't allow method call"); it
+        # was first added for the legacy com.palm web apps, and is needed
+        # just as much by the qml ones (org.webosports.app.tutorial's
+        # reminder relaunches the app through SAM this way).
+        if type != "native":
             permission[app_id] = app_info["requiredPermissions"]
-        # END Hack for legacy com.palm apps to fix issues with proxied LS2 calls, we want to make sure to allow the "app_id*" and "app_id-*"
 
     else:
         # We really shouldn't use pub and priv here anymore, so lets comment it out because it will give warnings in LS2 validation

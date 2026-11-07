@@ -1,0 +1,64 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] wayland: leave a lost compositor to the client
+
+check_fatal_error() aborted on any display error, including the compositor
+going away or restarting. That is not a bug in the client, and the toolkit
+sees the same error on the connection. browser_shell left a core dump for
+every compositor restart, from readQueue() under eglSwapBuffers().
+
+Abort on a protocol error only, which is a real client bug. Otherwise hand the
+failure to the caller. dequeueBuffer() has to take it now: it looped on
+readQueue(true) until a buffer came free, which would never end with the
+connection gone.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+--- a/egl/platforms/wayland/wayland_window.cpp
++++ b/egl/platforms/wayland/wayland_window.cpp
+@@ -80,7 +80,12 @@ int WaylandNativeWindow::dequeueBuffer(BaseNativeWindowBuffer **buffer, int *fen
+ 
+     while (m_freeBufs==0) {
+         HYBRIS_TRACE_COUNTER("wayland-platform", "m_freeBufs", "%i", m_freeBufs);
+-        readQueue(true);
++        if (readQueue(true) < 0) {
++            HYBRIS_TRACE_END("wayland-platform", "dequeueBuffer_wait_for_buffer", "");
++            HYBRIS_TRACE_END("wayland-platform", "dequeueBuffer", "");
++            unlock();
++            return -1;
++        }
+     }
+ 
+     std::list<WaylandNativeWindowBuffer *>::iterator it = m_bufList.begin();
+--- a/platforms/wayland/wayland_window_common.cpp
++++ b/platforms/wayland/wayland_window_common.cpp
+@@ -149,6 +149,13 @@ static void check_fatal_error(struct wl_display *display)
+     if (error == 0)
+         return;
+ 
++    /* The compositor went away, or restarted. That is no bug in this client and
++     * not this library's call: the toolkit sees the same error on the connection
++     * and can shut down in order, keeping its data. Say so to the caller instead,
++     * which has nothing left to draw to. */
++    if (error != EPROTO)
++        return;
++
+     fprintf(stderr, "Wayland display got fatal error %i: %s\n", error, strerror(error));
+ 
+     if (errno != 0)
+--- a/vulkan/platforms/wayland/wayland_window.cpp
++++ b/vulkan/platforms/wayland/wayland_window.cpp
+@@ -86,7 +86,12 @@ int WaylandNativeWindow::dequeueBuffer(BaseNativeWindowBuffer **buffer, int *fen
+ 
+     while (m_freeBufs==0) {
+         HYBRIS_TRACE_COUNTER("wayland-platform", "m_freeBufs", "%i", m_freeBufs);
+-        readQueue(true);
++        if (readQueue(true) < 0) {
++            HYBRIS_TRACE_END("wayland-platform", "dequeueBuffer_wait_for_buffer", "");
++            HYBRIS_TRACE_END("wayland-platform", "dequeueBuffer", "");
++            unlock();
++            return -1;
++        }
+     }
+ 
+     std::list<WaylandNativeWindowBuffer *>::iterator it = m_bufList.begin();

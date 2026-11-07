@@ -1,0 +1,186 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 5 Nov 2026 06:56:14 +0100
+Subject: [PATCH] webOS: a Signal call answered on another device is not
+ missed
+
+When the user took an incoming call on their phone, the caller's Hangup
+of type ACCEPTED (RingRTC's AcceptedOnAnotherDevice) reached this linked
+device as well. It stopped ringing, without a "Missed voice call" line,
+but the Phone app was told cause "normal" and showed a missed call.
+
+Report such a call as answered elsewhere: a new state from the receive
+loop (7), which call.c ends with cause "answeredElsewhere", counted by
+the Phone app as answered (no "Missed call", filed as incoming). The
+decision is in call_end.rs: only an incoming call that rang here, was
+not answered here and was not answered Busy; the echo of our own
+acceptance is filtered out before, as it was.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ src/c/call.c             |  9 +++++-
+ src/rust/src/bridge.rs   |  2 ++
+ src/rust/src/call_end.rs | 59 ++++++++++++++++++++++++++++++++++++++++
+ src/rust/src/lib.rs      |  1 +
+ src/rust/src/receive.rs  | 22 ++++++++++-----
+ 5 files changed, 85 insertions(+), 8 deletions(-)
+ create mode 100644 src/rust/src/call_end.rs
+
+diff --git a/src/c/call.c b/src/c/call.c
+index 9d173e1..7ea4792 100644
+--- a/src/c/call.c
++++ b/src/c/call.c
+@@ -28,6 +28,8 @@
+ #define SIG_CALL_ANSWERED 6u   /* LOCAL-only: user tapped Answer on an INCOMING call (cb_answer);
+                                 * flip the line to active, keep origin=incoming. Not sent from
+                                 * Rust, so it need not match a bridge.rs constant. */
++#define SIG_CALL_ELSEWHERE 7u  /* an incoming call taken on another of the user's devices
++                                * (bridge.rs CALL_STATE_ANSWERED_ELSEWHERE) */
+ 
+ static LSHandle      *g_sh      = NULL;   /* com.palm.signal.call                     */
+ static PurpleAccount *g_account = NULL;   /* the bound Signal account                  */
+@@ -391,7 +393,8 @@ static gboolean call_state_apply(gpointer data)
+      * overwrite it, and the end of a call that is no longer on the card (the peer's hangup after we
+      * declined) must not push a second "disconnected". call_id 0 is a call that never got one (a
+      * dial that could not be placed), which is still reported. */
+-    bool is_end = e->state == SIG_CALL_ENDED || e->state == SIG_CALL_DECLINED || e->state == SIG_CALL_BUSY;
++    bool is_end = e->state == SIG_CALL_ENDED || e->state == SIG_CALL_DECLINED || e->state == SIG_CALL_BUSY ||
++                  e->state == SIG_CALL_ELSEWHERE;
+     bool other_call = (g_state && e->call_id && g_call_id && e->call_id != g_call_id) ||
+                       (!g_state && e->call_id && is_end);
+     if (other_call) {
+@@ -437,6 +440,10 @@ static gboolean call_state_apply(gpointer data)
+         case SIG_CALL_BUSY:
+             set_str(&g_state, "disconnected"); set_str(&g_cause, "busy");
+             break;
++        case SIG_CALL_ELSEWHERE:
++            /* The Phone app counts it as answered: no "Missed call", filed as incoming. */
++            set_str(&g_state, "disconnected"); set_str(&g_cause, "answeredElsewhere");
++            break;
+         case SIG_CALL_ENDED:
+         default:
+             /* A dial that could not be placed has no card of its own yet: report it under the
+diff --git a/src/rust/src/bridge.rs b/src/rust/src/bridge.rs
+index ed63ce1..3af3a98 100755
+--- a/src/rust/src/bridge.rs
++++ b/src/rust/src/bridge.rs
+@@ -166,6 +166,8 @@ pub const CALL_STATE_DECLINED: u32 = 2;
+ pub const CALL_STATE_BUSY: u32 = 3;
+ pub const CALL_STATE_ACTIVE: u32 = 4; // peer answered OUR outgoing call -> connected
+ pub const CALL_STATE_DIALING: u32 = 5; // we placed an outgoing call (Offer sent) -> ringing peer
++// 6 is call.c's local SIG_CALL_ANSWERED.
++pub const CALL_STATE_ANSWERED_ELSEWHERE: u32 = 7; // an incoming call taken on another of our devices
+ 
+ // Push a Signal call's state to the Phone app through call.c (thread-safe: call.c hops to the
+ // main thread).
+diff --git a/src/rust/src/call_end.rs b/src/rust/src/call_end.rs
+new file mode 100644
+index 0000000..5aab09c
+--- /dev/null
++++ b/src/rust/src/call_end.rs
+@@ -0,0 +1,59 @@
++// webOS: how a Signal call's Hangup ends it here.
++//
++// RingRTC hangup types (SignalService.proto CallMessage.Hangup.Type): 0 NORMAL, 1 ACCEPTED,
++// 2 DECLINED, 3 BUSY. When one of the callee's devices answers, the caller sends Hangup
++// ACCEPTED (RingRTC Hangup::AcceptedOnAnotherDevice) to all the callee's other devices; this
++// linked device gets it for a call it rang for. The same message also reaches the device that
++// accepted (that is this one when the user answered here), which is no end at all and is
++// filtered out before this is asked.
++
++/// What a Hangup for a call means here.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum HangupEnd {
++    /// An incoming call taken on another of the user's devices: answered, not missed.
++    AnsweredElsewhere,
++    /// The call ended; `missed` when it was an incoming call nobody answered.
++    Ended { missed: bool },
++}
++
++/// `busy_replied`: we answered the call Busy (already reported as missed); `outgoing`: we
++/// placed it; `accepted_here`: the user answered it here; `hangup_type`: the Hangup's type.
++pub fn hangup_end(busy_replied: bool, outgoing: bool, accepted_here: bool, hangup_type: Option<i32>) -> HangupEnd {
++    let rang_here_untaken = !busy_replied && !outgoing && !accepted_here;
++    if rang_here_untaken && hangup_type == Some(1) {
++        return HangupEnd::AnsweredElsewhere;
++    }
++    // Declined on another device (2) is the user's own choice, not a missed call either.
++    HangupEnd::Ended { missed: rang_here_untaken && hangup_type != Some(1) && hangup_type != Some(2) }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn accepted_on_another_device_is_answered_elsewhere() {
++        assert_eq!(hangup_end(false, false, false, Some(1)), HangupEnd::AnsweredElsewhere);
++    }
++
++    #[test]
++    fn an_incoming_call_hung_up_unanswered_is_missed() {
++        assert_eq!(hangup_end(false, false, false, Some(0)), HangupEnd::Ended { missed: true });
++        assert_eq!(hangup_end(false, false, false, None), HangupEnd::Ended { missed: true });
++        assert_eq!(hangup_end(false, false, false, Some(3)), HangupEnd::Ended { missed: true });
++    }
++
++    #[test]
++    fn declined_on_another_device_is_neither() {
++        assert_eq!(hangup_end(false, false, false, Some(2)), HangupEnd::Ended { missed: false });
++    }
++
++    #[test]
++    fn calls_not_ringing_here_untaken_are_not_answered_elsewhere() {
++        for t in [Some(0), Some(1), Some(2), None] {
++            assert_eq!(hangup_end(false, true, false, t), HangupEnd::Ended { missed: false }, "outgoing {t:?}");
++            assert_eq!(hangup_end(false, false, true, t), HangupEnd::Ended { missed: false }, "answered here {t:?}");
++            assert_eq!(hangup_end(true, false, false, t), HangupEnd::Ended { missed: false }, "busy {t:?}");
++        }
++    }
++}
+diff --git a/src/rust/src/lib.rs b/src/rust/src/lib.rs
+index 29de8a8..2ae1c97 100755
+--- a/src/rust/src/lib.rs
++++ b/src/rust/src/lib.rs
+@@ -3,6 +3,7 @@
+ mod attachment;
+ mod bridge;
+ mod call_bridge;
++mod call_end;
+ mod call_media;
+ mod call_video;
+ mod ice;
+diff --git a/src/rust/src/receive.rs b/src/rust/src/receive.rs
+index e7c84cc..2947bdc 100755
+--- a/src/rust/src/receive.rs
++++ b/src/rust/src/receive.rs
+@@ -453,13 +453,21 @@ async fn process_received_message<C: presage::store::Store>(
+             } else if call_message.hangup.is_some() {
+                 // Only an incoming call nobody answered is missed: not one we placed, not one the user
+                 // accepted here, not one accepted or declined on another of their devices, and not
+-                // one already reported when we answered it Busy.
+-                let missed = !crate::call_bridge::take_busy_replied(call_id)
+-                    && !crate::call_bridge::is_outgoing_call(call_id)
+-                    && !crate::call_bridge::was_accepted(call_id)
+-                    && hangup_type != Some(1)
+-                    && hangup_type != Some(2);
+-                (crate::bridge::CALL_STATE_ENDED, missed.then(|| "Missed voice call".to_string()))
++                // one already reported when we answered it Busy. One accepted on another device is
++                // told to the Phone app as such, which counts it as answered (call_end.rs).
++                match crate::call_end::hangup_end(
++                    crate::call_bridge::take_busy_replied(call_id),
++                    crate::call_bridge::is_outgoing_call(call_id),
++                    crate::call_bridge::was_accepted(call_id),
++                    hangup_type,
++                ) {
++                    crate::call_end::HangupEnd::AnsweredElsewhere => {
++                        (crate::bridge::CALL_STATE_ANSWERED_ELSEWHERE, None)
++                    }
++                    crate::call_end::HangupEnd::Ended { missed } => {
++                        (crate::bridge::CALL_STATE_ENDED, missed.then(|| "Missed voice call".to_string()))
++                    }
++                }
+             } else {
+                 (u32::MAX, None)
+             };

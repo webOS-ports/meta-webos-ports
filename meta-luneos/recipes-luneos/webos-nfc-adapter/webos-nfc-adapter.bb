@@ -12,8 +12,9 @@ DEPENDS = "luna-service2 libpbnjson glib-2.0 glib-2.0-native openssl openjpeg"
 # but there is no point shipping it on its own.
 RRECOMMENDS:${PN} += "nfcd"
 
+PE = "1"
 PV = "0.1.0-1+git"
-SRCREV = "9c361faf357ae380a130379bbcd1bcd451a1190a"
+SRCREV = "7d8a1bb8df903cada062167c6f9de735d6f02742"
 
 inherit webos_ports_repo
 inherit webos_filesystem_paths

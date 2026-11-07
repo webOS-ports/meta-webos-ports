@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 30 Oct 2026 20:30:00 +0100
+Subject: [PATCH] AudioPulse: terminate the executable path before taking
+ its basename
+
+readlink() does not write a terminating NUL, and AudioPulse's
+constructor handed the buffer straight to basename() and strcpy(). What
+follows the path in exePath is uninitialised stack, so the PulseAudio
+client name could pick up garbage, and with no zero byte before the end
+of the buffer both calls would read past it and strcpy() would write
+past exeName. valgrind reports it on every AudioPulse construction:
+
+  Conditional jump or move depends on uninitialised value(s)
+     at rindex / basename
+     by tgvoip::audio::AudioPulse::AudioPulse(...)
+
+Read at most sizeof(exePath)-1 bytes, terminate the result, and copy the
+basename with snprintf() bounded by exeName.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ os/linux/AudioPulse.cpp | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/os/linux/AudioPulse.cpp b/os/linux/AudioPulse.cpp
+index f02ece8..0ba4084 100644
+--- a/os/linux/AudioPulse.cpp
++++ b/os/linux/AudioPulse.cpp
+@@ -144,13 +144,15 @@ AudioPulse::AudioPulse(std::string inputDevice, std::string outputDevice){
+ #else
+ 	char exePath[MAXPATHLEN];
+ 	char exeName[MAXPATHLEN];
+-	ssize_t lres=readlink("/proc/self/exe", exePath, sizeof(exePath));
++	// readlink() does not terminate what it returns; leave room for the terminator.
++	ssize_t lres=readlink("/proc/self/exe", exePath, sizeof(exePath)-1);
+ 	if(lres==-1)
+-		lres=readlink("/proc/curproc/file", exePath, sizeof(exePath));
++		lres=readlink("/proc/curproc/file", exePath, sizeof(exePath)-1);
+ 	if(lres==-1)
+-		lres=readlink("/proc/curproc/exe", exePath, sizeof(exePath));
++		lres=readlink("/proc/curproc/exe", exePath, sizeof(exePath)-1);
+ 	if(lres>0){
+-		strcpy(exeName, basename(exePath));
++		exePath[lres]=0;
++		snprintf(exeName, sizeof(exeName), "%s", basename(exePath));
+ 	}else
+ #endif
+ 	{

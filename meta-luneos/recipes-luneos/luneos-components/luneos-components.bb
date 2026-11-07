@@ -3,8 +3,9 @@ LICENSE = "LGPL-2.1-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 PV = "0.5+git"
+PE = "3"
 
-SRCREV = "d0556d944acc6e4970cd9e7cd62d152ceb179c39"
+SRCREV = "d806666c19be8f8fad604270c338713630a1bd5c"
 
 PR = "r4"
 

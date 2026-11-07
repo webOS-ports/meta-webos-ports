@@ -10,7 +10,7 @@ inherit webos_enyojs_application
 inherit webos_app
 
 PV = "2.1.3+git"
-SRCREV = "074b3ad798e4ce9a3738bfb370180a4faa57f572"
+SRCREV = "d72b6132e68a984e98685af78fc6dd7038b051e1"
 
 # Recipe name is the app id, because webos_application derives
 # WEBOS_APPLICATION_NAME from PN and installs into

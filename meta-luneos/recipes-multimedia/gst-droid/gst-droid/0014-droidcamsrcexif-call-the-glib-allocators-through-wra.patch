@@ -1,0 +1,96 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 4 Nov 2026 17:04:00 +0100
+Subject: [PATCH 14/20] droidcamsrcexif: call the glib allocators through
+ wrappers, and check what is read
+
+- libexif calls its allocators with an ExifLong (a 32-bit size).
+  g_malloc0() and g_realloc() take a gsize, and calling them through
+  libexif's function types is undefined. On aarch64 and x86-64 the upper
+  half of the size register is then not set by the caller. Wrap them.
+
+- The saved EXIF data was freed only once it was longer than 6 bytes,
+  and leaked otherwise.
+
+- gst_tag_list_from_exif_buffer_with_tiff_header() can fail; the NULL it
+  returns was then used as a tag list.
+
+- The ISO speed was read as a short from an entry of any format and
+  size. Read it only from a SHORT entry of at least 2 bytes.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Submitted [https://github.com/sailfishos/gst-droid/pull/91]
+---
+ gst/droidcamsrc/gstdroidcamsrcexif.c | 27 +++++++++++++++++++++++----
+ 1 file changed, 23 insertions(+), 4 deletions(-)
+
+diff --git a/gst/droidcamsrc/gstdroidcamsrcexif.c b/gst/droidcamsrc/gstdroidcamsrcexif.c
+index f76889b..e804eea 100644
+--- a/gst/droidcamsrc/gstdroidcamsrcexif.c
++++ b/gst/droidcamsrc/gstdroidcamsrcexif.c
+@@ -102,11 +102,27 @@ out:
+ }
+ #endif
+ 
++/* libexif passes sizes as an ExifLong (32 bits): calling g_malloc0() and
++ * g_realloc(), which take a gsize, through its function types is undefined,
++ * and on 64-bit targets the upper half of the size is then not set */
++static void *
++gst_droidcamsrc_exif_alloc (ExifLong size)
++{
++  return g_malloc0 (size);
++}
++
++static void *
++gst_droidcamsrc_exif_realloc (void *p, ExifLong size)
++{
++  return g_realloc (p, size);
++}
++
+ GstTagList *
+ gst_droidcamsrc_exif_tags_from_jpeg_data (void *data, size_t size)
+ {
+   GstTagList *tags = NULL;
+-  ExifMem *mem = exif_mem_new ((ExifMemAllocFunc)g_malloc0, (ExifMemReallocFunc)g_realloc, g_free);
++  ExifMem *mem = exif_mem_new (gst_droidcamsrc_exif_alloc,
++      gst_droidcamsrc_exif_realloc, g_free);
+   ExifData *exif = exif_data_new_mem (mem);
+   unsigned char *exif_data = NULL;
+   void *_exif_data = NULL;
+@@ -119,6 +135,8 @@ gst_droidcamsrc_exif_tags_from_jpeg_data (void *data, size_t size)
+   exif_data_set_data_type (exif, EXIF_DATA_TYPE_COMPRESSED);
+ 
+   exif_data_save_data (exif, &exif_data, &exif_data_size);
++  /* freed at out:, also when it is too short to use */
++  _exif_data = exif_data;
+   if (!exif_data_size) {
+     goto out;
+   }
+@@ -140,8 +158,6 @@ gst_droidcamsrc_exif_tags_from_jpeg_data (void *data, size_t size)
+     }
+   }
+ 
+-  _exif_data = exif_data;
+-
+   exif_data += 6;
+   exif_data_size -= 6;
+ 
+@@ -149,6 +165,9 @@ gst_droidcamsrc_exif_tags_from_jpeg_data (void *data, size_t size)
+       exif_data, exif_data_size, 0, exif_data_size, NULL, NULL);
+   tags = gst_tag_list_from_exif_buffer_with_tiff_header (buffer);
+   gst_buffer_unref (buffer);
++  if (!tags) {
++    goto out;
++  }
+ 
+   /* We don't want these tags */
+   gst_tag_list_remove_tag (tags, GST_TAG_DEVICE_MANUFACTURER);
+@@ -160,7 +179,7 @@ gst_droidcamsrc_exif_tags_from_jpeg_data (void *data, size_t size)
+   iso = exif_content_get_entry (exif->ifd[EXIF_IFD_EXIF],
+       EXIF_TAG_ISO_SPEED_RATINGS);
+ 
+-  if (iso) {
++  if (iso && iso->format == EXIF_FORMAT_SHORT && iso->size >= 2) {
+     guint16 val = exif_get_short (iso->data, exif_data_get_byte_order(exif));
+     gst_tag_list_add (tags, GST_TAG_MERGE_REPLACE,
+         GST_TAG_CAPTURING_ISO_SPEED, val, NULL);

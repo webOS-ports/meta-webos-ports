@@ -1,0 +1,177 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] emulator: do not write to a headset whose link has gone
+
+When the headset's RFCOMM link drops by itself, for example because it
+is switched off, GAtServer's io_disconnect() first frees its write queue
+and IO (g_at_server_cleanup) and then calls emulator_disconnect().
+ofono_emulator_remove() frees the emulator's atoms in order. While a
+later modem is still registered, emulator_unregister() for an earlier
+one resets that modem's call indicators (0121). If that modem had a
+call, the merged call or callsetup indicator changes, and
+ofono_emulator_set_indicator() sends +CIEV (or RING) on the server
+whose write queue is gone. send_common() reads the freed GQueue and
+ring buffer. On the mindphone, ofonod crashed with SIGSEGV as the
+Nuraphone disconnected during a call on /ril_0, and the call went down
+with ofonod.
+
+Only a call on a modem that is not the last one the emulator serves
+triggers it. A single-modem emulator is torn down with its only atom
+and sends nothing, as upstream does.
+
+Release the AT server in emulator_disconnect() before the atoms are
+freed. call_indicators_drop_modem() already skips the update when there
+is no server. ofono_emulator_set_indicator() and
+__ofono_emulator_set_indicator_forced() now return after storing the
+value when there is no server, so nothing else can write to it during
+the teardown either.
+
+The call stays up on the phone. Nothing in the disconnect path hangs
+it up, and the new tests check that the voicecall driver is not asked
+to.
+
+The tests in unit/test-emulator-multimodem.c close the headset end
+during a call on the first modem, and during a call on the second modem
+with another one ringing on the first. Without the fix both crash under
+ASan and valgrind with an invalid read in g_queue_peek_tail() from
+send_common().
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+
+diff --git a/src/emulator.c b/src/emulator.c
+index 2eb2d39..7159444 100644
+--- a/src/emulator.c
++++ b/src/emulator.c
+@@ -96,6 +96,15 @@ static void emulator_disconnect(gpointer user_data)
+ 
+ 	DBG("%p", em);
+ 
++	/*
++	 * The AT server calls this once it has freed its write queue and IO,
++	 * so nothing may be sent to the headset from here on. Let go of it
++	 * before the atoms go: a modem that leaves ahead of the last one would
++	 * otherwise send the headset the change in its call indicators.
++	 */
++	g_at_server_unref(em->server);
++	em->server = NULL;
++
+ 	ofono_emulator_remove(em);
+ }
+ 
+@@ -1925,6 +1934,10 @@ void ofono_emulator_set_indicator(struct ofono_emulator *em,
+ 
+ 	ind->value = value;
+ 
++	/* The link is going down: there is no headset left to tell */
++	if (em->server == NULL)
++		return;
++
+ 	call_ind = find_indicator(em, OFONO_EMULATOR_IND_CALL, NULL);
+ 	cs_ind = find_indicator(em, OFONO_EMULATOR_IND_CALLSETUP, NULL);
+ 
+@@ -2138,6 +2151,9 @@ void __ofono_emulator_set_indicator_forced(struct ofono_emulator *em,
+ 
+ 	ind->value = value;
+ 
++	if (em->server == NULL)
++		return;
++
+ 	if (em->events_mode == 3 && em->events_ind && em->slc && ind->active) {
+ 		if (!g_at_server_command_pending(em->server)) {
+ 			sprintf(buf, "+CIEV: %d,%d", i, ind->value);
+diff --git a/unit/test-emulator-multimodem.c b/unit/test-emulator-multimodem.c
+index dec4c8e..fe2ba2d 100644
+--- a/unit/test-emulator-multimodem.c
++++ b/unit/test-emulator-multimodem.c
+@@ -797,7 +797,9 @@ static void phone_free(struct phone *p)
+ 	int i;
+ 
+ 	/* The headset hangs up: the emulator goes with its last atom */
+-	close(p->hf.fd);
++	if (p->hf.fd >= 0)
++		close(p->hf.fd);
++
+ 	spin(NULL, 50);
+ 
+ 	for (i = 0; i < 2; i++) {
+@@ -1090,6 +1092,69 @@ static void test_bac_order(void)
+ 	phone_free(p);
+ }
+ 
++/* The headset's link drops by itself, as when it is switched off */
++static void hf_link_lost(struct phone *p)
++{
++	close(p->hf.fd);
++	p->hf.fd = -1;
++	spin(NULL, 50);
++}
++
++static void call_still_up(struct phone *p, int modem)
++{
++	assert(p->fvc[modem].hung_up == 0);
++	assert(__ofono_voicecall_find_call_with_status(p->fvc[modem].vc,
++						CALL_STATUS_ACTIVE) != NULL);
++}
++
++/*
++ * The headset goes away during a call on the first modem. The AT server has
++ * already dropped its write queue when the emulator hears of it, so dropping
++ * the first modem's call indicators must not try to tell the headset (this
++ * crashed ofonod, run under ASan or valgrind to see it). The call stays up on
++ * the phone, as the headset only carried its audio.
++ */
++static void test_link_lost_call_first_modem(void)
++{
++	struct phone *p = phone_new(2);
++
++	call_notify(p, 0, 1, CALL_STATUS_ACTIVE,
++			CALL_DIRECTION_MOBILE_TERMINATED, "+31600000001");
++	assert(hf_expect(&p->hf, "+CIEV: 2,1"));
++
++	hf_link_lost(p);
++	call_still_up(p, 0);
++	assert(p->fvc[1].hung_up == 0);
++
++	call_gone(p, 0, 1);
++	phone_free(p);
++}
++
++/* The same with the call on the second modem, and one ringing on the first */
++static void test_link_lost_call_both_modems(void)
++{
++	struct phone *p = phone_new(2);
++
++	call_notify(p, 1, 1, CALL_STATUS_ACTIVE,
++			CALL_DIRECTION_MOBILE_ORIGINATED, "+31600000002");
++	assert(hf_expect(&p->hf, "+CIEV: 2,1"));
++	call_notify(p, 0, 1, CALL_STATUS_INCOMING,
++			CALL_DIRECTION_MOBILE_TERMINATED, "+31600000001");
++	assert(hf_expect(&p->hf, "+CIEV: 3,1"));
++
++	hf_link_lost(p);
++	call_still_up(p, 1);
++	assert(p->fvc[0].hung_up == 0);
++	assert(__ofono_voicecall_find_call_with_status(p->fvc[0].vc,
++						CALL_STATUS_INCOMING) != NULL);
++
++	/* The calls go on without a headset, ringing included */
++	spin(NULL, 50);
++	call_gone(p, 0, 1);
++	call_gone(p, 1, 1);
++	phone_free(p);
++}
++
+ int main(int argc, char **argv)
+ {
+ 	DBusError err;
+@@ -1123,6 +1188,10 @@ int main(int argc, char **argv)
+ 	g_test_add_func("/emulator-multimodem/modem-joins-later",
+ 				test_modem_joins_later);
+ 	g_test_add_func("/emulator-multimodem/bac-order", test_bac_order);
++	g_test_add_func("/emulator-multimodem/link-lost-call-first-modem",
++				test_link_lost_call_first_modem);
++	g_test_add_func("/emulator-multimodem/link-lost-call-both-modems",
++				test_link_lost_call_both_modems);
+ 
+ 	r = g_test_run();
+ 

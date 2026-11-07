@@ -24,7 +24,8 @@ RDEPENDS:${PN} += "maliit-framework-webos qtsvg-plugins qtmultimedia-qmlplugins"
 RRECOMMENDS:${PN} += "hunspell-dictionaries"
 
 
-SRCREV = "f8453b96e552c1e8cde94407468268acdb7a03f5"
+SRCREV = "a895b1eeaab92f3c72ea057b7dae993d8add8454"
+PE = "1"
 PV = "0.99.2+git"
 PR = "r33"
 
@@ -32,7 +33,7 @@ PR = "r33"
 # as patches carried here - unlike presage or imemanager, which are genuinely
 # upstream/third-party. 0001-0003 (hunspell API compat, hardware keyboard
 # input, Qt6Core5Compat linking) and the db8-backed user dictionary are all
-# real commits on herrie/dict-backup now; this SRCREV is the tip of that.
+# real commits now (herrie/dict-backup, merged into master).
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 # a lot of cases like:

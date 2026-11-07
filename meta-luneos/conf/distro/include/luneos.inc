@@ -6,6 +6,7 @@ require conf/distro/include/luneos-preferred-versions.inc
 require conf/distro/include/luneos-features.inc
 require conf/distro/include/luneos-toolchain.inc
 require conf/distro/include/luneos-sdk.inc
+require conf/distro/include/luneos-sbom.inc
 
 #
 # Form the codename of a release (WEBOS_DISTRO_RELEASE_CODENAME) from a codename
@@ -34,7 +35,13 @@ WEBOS_DISTRO_RELEASE_CODENAME ?= "${WEBOS_DISTRO_PLATFORM_CODENAME}${@oe.utils.c
 # override this based on their codename schemes.
 WEBOS_DISTRO_BUILD_CODENAME ?= "${WEBOS_DISTRO_TOPDIR_BRANCH}"
 
-WEBOS_DISTRO_PRERELEASE ?= "devel"
+# "devel" builds luna-service2, pmloglib and nyx-modules with their development
+# options (for luna-service2: asserts, and validation of replies and of its
+# configuration files). A release build turns them off by setting LUNEOS_RELEASE_BUILD = "1" (or
+# WEBOS_DISTRO_PRERELEASE = "" directly) in local.conf. Packages are shared by
+# every image of a build, so this is per build, not per image.
+LUNEOS_RELEASE_BUILD ??= "0"
+WEBOS_DISTRO_PRERELEASE ?= "${@'' if d.getVar('LUNEOS_RELEASE_BUILD') == '1' else 'devel'}"
 
 #
 # All of the types of official build jobs should override WEBOS_DISTRO_BUILD_ID
@@ -147,7 +154,7 @@ MACHINEOVERRIDES =. "${WEBOS_EXTRA_MACHINEOVERRIDES}"
 MACHINEOVERRIDES[vardepsexclude] += "WEBOS_EXTRA_MACHINEOVERRIDES"
 OVERRIDES[vardepsexclude] += "WEBOS_EXTRA_MACHINEOVERRIDES"
 
-INHERIT_DISTRO ?= "debian devshell sstate license remove-libtool uninative buildstats buildstats-summary image-buildinfo"
+INHERIT_DISTRO ?= "debian devshell sstate license remove-libtool create-spdx uninative buildstats buildstats-summary image-buildinfo"
 
 SOURCE_MIRROR_URL = "http://sources.webos-ports.org/"
 
@@ -219,6 +226,9 @@ PATCHRESOLVE = "noop"
 # save statistical info on images
 INHERIT += "buildhistory"
 
+# fail on private keys in SRC_URI and on unsigned out-of-tree kernel modules
+INHERIT += "luneos_signing_qa"
+
 # enable Hash Equivalence Server
 # read https://lwn.net/Articles/804640/ for details
 BB_SIGNATURE_HANDLER ?= "OEEquivHash"
@@ -280,4 +290,30 @@ WEBOS_LS2_CONF_VALIDATE_SKIP_GROUP = " \
     media.displayControl \
     media.displayInfo \
     session.management \
+"
+
+# Groups whose service LuneOS has, but not on every image. The grant is right
+# and takes effect where the service is installed; it grants nothing elsewhere.
+# This is what is left after every name was checked against its provider, so a
+# name that appears here is not a misspelling:
+#   eink.operation                org.webosports.service.eink (mp01)
+#   faceunlock.identify, .query   luneos-faced (front-facing camera)
+#   filemanager-service.operation org.webosports.app.filemanager (no image): the
+#                                 fallback of a Documents ipk without its service
+#   fingerprint.identify          webos-fingerprint-adapter (MACHINE_FEATURES
+#                                 fingerprint), once herrie/identify-group is in
+#   fingerprint.operation         webos-fingerprint-adapter, as above
+#   killswitch.query              org.webosports.service.killswitch
+#                                 (MACHINE_FEATURES killswitch)
+#   office.operation              org.webosports.service.office (no image yet):
+#                                 Documents uses LibreOffice when it is installed
+WEBOS_LS2_CONF_VALIDATE_SKIP_GROUP += " \
+    eink.operation \
+    faceunlock.identify \
+    faceunlock.query \
+    filemanager-service.operation \
+    fingerprint.identify \
+    fingerprint.operation \
+    killswitch.query \
+    office.operation \
 "

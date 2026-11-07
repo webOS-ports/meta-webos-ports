@@ -1,0 +1,370 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:29:05 +0200
+Subject: [PATCH] webOS: show reactions on the message they react to
+
+The LuneOS IM transport (imlibpurpletransport) drives libpurple headless
+for the webOS Messaging app, which shows a reaction on the bubble it
+belongs to. A received reaction is emitted as the process-wide signal
+"webos-im-reaction" (account, target message id, emoji or "" when it
+was removed, sender) instead of a "reacted with X" message.
+
+To let the transport find the target later, the WhatsApp id of each
+received message, and in a 1:1 chat of our own messages sent from
+another device, is stashed on the conversation as "webos-msg-id" right before
+serv_got_im/serv_got_chat_in.
+
+Reactions from the app arrive through "webos-im-send-reaction" and go
+out through BuildReaction(). The original sender of the target message
+comes from the message cache or, failing that, from the transport
+("webos-reaction-target-sender" on the account).
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ bridge.go              | 33 +++++++++++++++++++++++
+ bridge.h               |  1 +
+ glue/display_message.c | 23 +++++++++++++++-
+ glue/login.c           | 46 ++++++++++++++++++++++++++++++--
+ glue/process_message.c | 10 +++++++
+ handle_message.go      | 51 ++++++-----------------------------
+ send_message.go        | 60 ++++++++++++++++++++++++++++++++++++++++++
+ 7 files changed, 178 insertions(+), 46 deletions(-)
+
+diff --git a/bridge.go b/bridge.go
+index 4e88676..14811c9 100644
+--- a/bridge.go
++++ b/bridge.go
+@@ -119,6 +119,21 @@ func gowhatsapp_go_send_message(account *PurpleAccount, who *C.char, message *C.
+ 	return -107 // ENOTCONN, see libpurple/prpl.h
+ }
+ 
++//export gowhatsapp_go_send_reaction
++// webOS reactions (SEND): react to a WhatsApp message. targetId = the bare whatsmeow message id
++// (info.ID, no chat prefix); emoji = the reaction (ignored when removeFlag=="1"); peer = the chat JID
++// the transport uses; targetSender = the reacted-to message's ORIGINAL sender (db8 fallback so we can
++// build the reaction without a message-cache entry; "" if unknown); removeFlag "1" removes my reaction.
++// Runs the actual send on a goroutine.
++func gowhatsapp_go_send_reaction(account *PurpleAccount, targetId *C.char, emoji *C.char, peer *C.char, targetSender *C.char, removeFlag *C.char) {
++	handler, ok := handlers[account]
++	if !ok {
++		return
++	}
++	remove := C.GoString(removeFlag) == "1"
++	go handler.send_reaction(C.GoString(peer), C.GoString(targetId), C.GoString(emoji), C.GoString(targetSender), remove)
++}
++
+ //export gowhatsapp_go_send_file
+ func gowhatsapp_go_send_file(account *PurpleAccount, who *C.char, filename *C.char) *C.char {
+ 	err := "Not connected."
+@@ -500,6 +515,24 @@ func purple_set_profile_picture(account *PurpleAccount, who string, data []byte,
+ 	C.gowhatsapp_process_message_bridge(cmessage)
+ }
+ 
++/*
++ * webOS reactions: forward a reaction to the transport's cross-prpl "webos-im-reaction" signal
++ * (emitted C-side in process_message on the libpurple main thread) instead of posting a "reacted
++ * with X" message. targetId = the reacted-to message id, emoji = "" means the reaction was removed,
++ * sender = who reacted. The message bridge frees the CStrings.
++ */
++func purple_handle_reaction(account *PurpleAccount, remoteJid string, targetId string, emoji string, sender string) {
++	cmessage := C.struct_gowhatsapp_message{
++		account:   account,
++		msgtype:   C.char(C.gowhatsapp_message_type_reaction),
++		remoteJid: C.CString(remoteJid),
++		senderJid: C.CString(sender),
++		messageId: C.CString(targetId),
++		text:      C.CString(emoji),
++	}
++	C.gowhatsapp_process_message_bridge(cmessage)
++}
++
+ /*
+  * This will inform purple that the remote user started typing.
+  */
+diff --git a/bridge.h b/bridge.h
+index ec97e45..d893187 100644
+--- a/bridge.h
++++ b/bridge.h
+@@ -24,6 +24,7 @@
+     MESSAGE_TYPE(typing_stopped) \
+     MESSAGE_TYPE(text) \
+     MESSAGE_TYPE(attachment) \
++    MESSAGE_TYPE(reaction) \
+     MESSAGE_TYPE(profile_picture) \
+     MESSAGE_TYPE(group) \
+     MESSAGE_TYPE(max) \
+diff --git a/glue/display_message.c b/glue/display_message.c
+index 3953224..ea53f6e 100644
+--- a/glue/display_message.c
++++ b/glue/display_message.c
+@@ -53,8 +53,15 @@ void gowhatsapp_display_text_message(
+         text_with_id = g_strdup(text); // MEMCHECK: released here (see below)
+     }
+     
++    // webOS reactions: stash this message's WhatsApp id on the conversation right before serv_got_*
++    // (which synchronously drives the transport's incoming_message_cb). The transport reads it as
++    // "webos-msg-id" and stores it as serviceMessageId so a later reaction can target this message.
++    // Only for RECV messages - the transport ignores our own echoes.
+     if (isGroup) {
+-        gowhatsapp_enter_group_chat(connection, remoteJid, NULL);
++        PurpleConversation *gconv = gowhatsapp_enter_group_chat(connection, remoteJid, NULL);
++        if (gconv != NULL && (flags & PURPLE_MESSAGE_RECV) && messageId != NULL && *messageId != '\0') {
++            purple_conversation_set_data(gconv, "webos-msg-id", g_strdup(messageId));
++        }
+         purple_serv_got_chat_in(connection, g_str_hash(remoteJid), senderJid, flags, text_with_id, timestamp);
+     } else {
+         if (flags & PURPLE_MESSAGE_SEND) {
+@@ -64,11 +71,25 @@ void gowhatsapp_display_text_message(
+             if (conv == NULL) {
+                 conv = purple_conversation_new(PURPLE_CONV_TYPE_IM, account, remoteJid); // MEMCHECK: caller takes ownership
+             }
++            // webOS reactions/carbons: a message we sent from ANOTHER device carries REMOTE_SEND and the
++            // transport stores it as an Outbox row - stash its id as the serviceMessageId so a later
++            // reaction can attach to our own message. A plain local echo (SEND without REMOTE_SEND) is
++            // left to the app's own send path, so don't stash for it.
++            if ((flags & PURPLE_MESSAGE_REMOTE_SEND) && messageId != NULL && *messageId != '\0') {
++                purple_conversation_set_data(conv, "webos-msg-id", g_strdup(messageId));
++            }
+             purple_conv_im_write(purple_conversation_get_im_data(conv), remoteJid, text_with_id, flags, timestamp);
+         } else {
+             if (purple_account_get_bool(account, GOWHATSAPP_UPDATE_BUDDY_ON_MESSAGE_OPTION, TRUE)) {
+                 gowhatsapp_ensure_buddy_in_blist(account, remoteJid, name);
+             }
++            PurpleConversation *conv = purple_find_conversation_with_account(PURPLE_CONV_TYPE_IM, remoteJid, account);
++            if (conv == NULL) {
++                conv = purple_conversation_new(PURPLE_CONV_TYPE_IM, account, remoteJid);
++            }
++            if (messageId != NULL && *messageId != '\0') {
++                purple_conversation_set_data(conv, "webos-msg-id", g_strdup(messageId));
++            }
+             purple_serv_got_im(connection, remoteJid, text_with_id, flags, timestamp);
+         }
+     }
+diff --git a/glue/login.c b/glue/login.c
+index 3f82f44..3e6a2dc 100644
+--- a/glue/login.c
++++ b/glue/login.c
+@@ -1,5 +1,46 @@
+ #include "gowhatsapp.h"
+-#include "libwhatsmeow.h" // for gowhatsapp_go_login
++#include "libwhatsmeow.h" // for gowhatsapp_go_login / gowhatsapp_go_send_reaction
++
++// webOS reactions (SEND): the transport emits "webos-im-send-reaction" (registered process-wide) when
++// the user reacts from the TouchPad. It fires for EVERY account, so we filter by protocol id and route
++// to the matching Go send-reaction handler. Params (5): account, targetServiceMessageId, emoji (already
++// decoded UTF-8, always supplied even on removal), peer (the thread/chat id the transport uses),
++// removeFlag ("1" = remove my reaction, else add). This one .so hosts BOTH prpls (WhatsApp + gometa),
++// so the same callback covers both.
++static void webos_send_reaction_cb(PurpleAccount *account, const char *targetId, const char *emoji,
++                                   const char *peer, const char *removeFlag, void *data)
++{
++    (void)data;
++    if (!account || !targetId || !*targetId) {
++        return;
++    }
++    const char *proto = purple_account_get_protocol_id(account);
++    if (g_strcmp0(proto, GOWHATSAPP_PRPL_ID) == 0) {
++        // db8 fallback: the transport stashed the reacted-to message's ORIGINAL sender on the account
++        // right before this (synchronous) emit, so whatsmeow can set FromMe/Participant on BuildReaction
++        // without a live message-cache entry (survives transport restart / very old messages). "" if unknown.
++        const char *targetSender = purple_account_get_string(account, "webos-reaction-target-sender", "");
++        gowhatsapp_go_send_reaction(account, (char *)targetId, (char *)(emoji ? emoji : ""),
++                                    (char *)(peer ? peer : ""), (char *)(targetSender ? targetSender : ""),
++                                    (char *)(removeFlag ? removeFlag : ""));
++    }
++}
++
++// Connect once (process-wide) to the transport's send-reaction signal. The signal lives on
++// purple_conversations_get_handle(), so a single connect covers every account of both prpls in this
++// process. Called from BOTH login paths (gowhatsapp_login here and gometa_login) so it fires whether
++// the user has a WhatsApp account, a Facebook account, or both; the static guard prevents a double
++// connect. The transport registers the signal at init, before any account logs in.
++void webos_connect_send_reaction_once(void)
++{
++    static gboolean s_connected = FALSE;
++    if (s_connected) {
++        return;
++    }
++    s_connected = TRUE;
++    purple_signal_connect(purple_conversations_get_handle(), "webos-im-send-reaction",
++                          purple_get_core(), PURPLE_CALLBACK(webos_send_reaction_cb), NULL);
++}
+ 
+ void
+ gowhatsapp_login(PurpleAccount *account)
+@@ -62,8 +103,9 @@ gowhatsapp_login(PurpleAccount *account)
+     char *user_dir = (char *)purple_user_dir(); // cgo does not suport const
+     gowhatsapp_go_login(account, user_dir, username, (char *)credentials, proxy_address); // cgo does not suport const
+     g_free(proxy_address);
+-    
++
+     gowhatsapp_receipts_init(pc);
++    webos_connect_send_reaction_once();
+ }
+ 
+ void
+diff --git a/glue/process_message.c b/glue/process_message.c
+index be20534..5901339 100644
+--- a/glue/process_message.c
++++ b/glue/process_message.c
+@@ -135,6 +135,16 @@ gowhatsapp_process_message(gowhatsapp_message_t *gwamsg)
+                 gowhatsapp_handle_attachment(gwamsg);
+             }
+             break;
++        case gowhatsapp_message_type_reaction:
++            // webOS reactions: forward to the transport's cross-prpl "webos-im-reaction" signal
++            // (registered by imlibpurpletransport) instead of showing a "reacted with X" message.
++            // messageId = the reacted-to message's id, text = emoji ("" = removed), senderJid = reactor.
++            // Runs on the libpurple main thread (message bridge), so emitting the signal here is safe.
++            purple_signal_emit(purple_conversations_get_handle(), "webos-im-reaction",
++                    gwamsg->account, gwamsg->messageId,
++                    gwamsg->text ? gwamsg->text : "",
++                    gwamsg->senderJid ? gwamsg->senderJid : "");
++            break;
+         case gowhatsapp_message_type_profile_picture:
+             gowhatsapp_handle_profile_picture(gwamsg);
+             break;
+diff --git a/handle_message.go b/handle_message.go
+index cbcd0c8..d6f9699 100644
+--- a/handle_message.go
++++ b/handle_message.go
+@@ -10,7 +10,6 @@ import (
+ 	"crypto/sha256"
+ 	"fmt"
+ 	"strings"
+-	"time"
+ 
+ 	"go.mau.fi/whatsmeow/proto/waE2E"
+ 	"go.mau.fi/whatsmeow/types"
+@@ -122,48 +121,14 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 	{
+ 		rm := message.GetReactionMessage()
+ 		if rm != nil && rm.Text != nil && rm.Key != nil && rm.Key.ID != nil {
+-			quote := fmt.Sprintf("unknown message with ID %s", rm.Key.GetID())
+-			cached_message := handler.lookup_cached_message_by_id(rm.Key.GetID())
+-			if cached_message != nil {
+-				//handler.log.Infof("Lookup yielded message: %#v", &cached_message.Message)
+-				text := cached_message.Message.GetConversation()
+-				if cached_message.Message.ExtendedTextMessage != nil {
+-					text = cached_message.Message.ExtendedTextMessage.GetText()
+-				}
+-				if text != "" {
+-					ellipsis := ""
+-					if len(text) > 50 {
+-						ellipsis = "…" // add elipis to indicate message body truncation
+-					}
+-					quote = fmt.Sprintf("message „%.50s%s“", text, ellipsis)
+-				} else {
+-					message_type := "message of unknown type"
+-					if cached_message.Message.ImageMessage != nil {
+-						message_type = "image"
+-					}
+-					if cached_message.Message.VideoMessage != nil {
+-						message_type = "video"
+-					}
+-					if cached_message.Message.PtvMessage != nil {
+-						message_type = "voice message"
+-					}
+-					if cached_message.Message.AudioMessage != nil {
+-						message_type = "audio message"
+-					}
+-					if cached_message.Message.StickerMessage != nil {
+-						message_type = "sticker"
+-					}
+-					if cached_message.Message.DocumentMessage != nil {
+-						message_type = "document"
+-					}
+-					quote = fmt.Sprintf("%s from %s", message_type, cached_message.Timestamp.Format(time.RFC822))
+-				}
+-			}
+-			if *rm.Text == "" {
+-				text += fmt.Sprintf("removed their reaction to %s.", quote)
+-			} else {
+-				text += fmt.Sprintf("reacted with %s to %s.", *rm.Text, quote)
+-			}
++			// webOS reactions: attach to the target message via the transport's reaction signal
++			// instead of posting a "reacted with X" message. rm.Key.ID = the reacted-to message id,
++			// rm.Text = the emoji ("" means the reaction was removed), Sender = who reacted. Return
++			// early: a ReactionMessage carries nothing else to display.
++			chat := info.MessageSource.Chat.ToNonAD().String()
++			sender := info.MessageSource.Sender.ToNonAD().String()
++			purple_handle_reaction(handler.account, chat, rm.Key.GetID(), rm.GetText(), sender)
++			return
+ 		}
+ 	}
+ 	{
+diff --git a/send_message.go b/send_message.go
+index db465c4..a7b2efe 100644
+--- a/send_message.go
++++ b/send_message.go
+@@ -150,6 +150,66 @@ func (handler *Handler) send_text_message(recipient types.JID, isGroup bool, mes
+ 	}
+ }
+ 
++/*
++ * webOS reactions (SEND): send (or remove) a reaction to a WhatsApp message.
++ *
++ *   peer     = the chat JID the transport uses (parsed like a send recipient)
++ *   targetId = the bare whatsmeow message id of the message being reacted to
++ *   emoji    = the reaction emoji (ignored when remove is true)
++ *   remove   = true removes my previous reaction (sends an empty reaction)
++ *
++ * whatsmeow's BuildReaction/BuildMessageKey needs the ORIGINAL message's sender to set FromMe: for a
++ * message I sent, FromMe must be true; for one I received, FromMe is false (and, in a group, Participant
++ * is the sender). We recover the sender from the local message cache (populated on both send and
++ * receive). targetSender is the db8 FALLBACK: the transport supplies the reacted-to message's original
++ * sender (from the app's message row), so a reaction still builds correctly when the cache has no entry
++ * for the target - after a transport restart/crash, or for a message older than the cache. Only if BOTH
++ * miss do we guess (1:1 -> received from peer; group -> own message).
++ */
++func (handler *Handler) send_reaction(peer string, targetId string, emoji string, targetSender string, remove bool) {
++	chat, err := parseJID(peer)
++	if err != nil {
++		purple_display_system_message(handler.account, peer, false, fmt.Sprintf("Cannot react: invalid recipient: %v", err))
++		return
++	}
++	reaction := emoji
++	if remove {
++		reaction = ""
++	}
++	// Recover the reacted-to message's sender so FromMe/Participant are correct.
++	var sender types.JID
++	resolved := false
++	if cached := handler.lookup_cached_message_by_id(targetId); cached != nil {
++		sender = cached.Sender.ToNonAD()
++		resolved = true
++	} else if targetSender != "" {
++		// db8 fallback: transport supplied the original sender (the app's from.addr). Works for any
++		// message regardless of cache state; whatsmeow derives FromMe from this JID vs our own.
++		if sj, perr := parseJID(targetSender); perr == nil {
++			sender = sj.ToNonAD()
++			resolved = true
++		} else {
++			handler.log.Warnf("send_reaction: unparseable targetSender %q: %v", targetSender, perr)
++		}
++	}
++	if !resolved {
++		// Neither cache nor a usable supplied sender - last-resort heuristic.
++		if chat.Server == types.DefaultUserServer || chat.Server == types.HiddenUserServer {
++			// 1:1: assume a received message (sender = peer, FromMe=false), the common case.
++			sender = chat.ToNonAD()
++		} else {
++			// Group: assume it's our own message (empty sender => FromMe=true).
++			sender = types.EmptyJID
++		}
++	}
++	msg := handler.client.BuildReaction(chat, sender, types.MessageID(targetId), reaction)
++	_, err = handler.client.SendMessage(context.Background(), chat, msg)
++	if err != nil {
++		handler.log.Warnf("Failed to send reaction to %s (target %s): %v", chat.String(), targetId, err)
++		purple_display_system_message(handler.account, chat.ToNonAD().String(), false, fmt.Sprintf("Failed to send reaction: %v", err))
++	}
++}
++
+ /*
+  * Send a message to a contact.
+  *
+-- 
+2.53.0
+

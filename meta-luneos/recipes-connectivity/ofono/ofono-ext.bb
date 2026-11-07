@@ -17,7 +17,8 @@ DEPENDS = "ofono glib-2.0 dbus libglibutil"
 # reworked only in their #include lines. See src/ofono-ext-compat.h for
 # every assumption this package makes about oFono's internals.
 PV = "1.0-1+git"
-SRCREV = "aed882f36c62bf5d868f22c7e809240db958b5ad"
+PE = "1"
+SRCREV = "b24fecb5a6205bb0e21fb5a62c47f83d5dbce627"
 WEBOS_GIT_PARAM_BRANCH = "master"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"

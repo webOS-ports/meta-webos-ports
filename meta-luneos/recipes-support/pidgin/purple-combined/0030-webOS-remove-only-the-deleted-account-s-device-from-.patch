@@ -1,0 +1,244 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:29:05 +0200
+Subject: [PATCH] webOS: remove only the deleted account's device from the
+ store
+
+All WhatsApp accounts share whatsmeow.db. When an account is deleted
+("account-removed"), its device is logged out if a client is still
+connected, otherwise its row is deleted from the store by the device
+JID in its credentials. The other accounts stay linked.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ bridge.go   |   9 ++++
+ glue/init.c |  43 ++++++++++++++++++-
+ login.go    | 116 ++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 167 insertions(+), 1 deletion(-)
+
+diff --git a/bridge.go b/bridge.go
+index 36e12e0..ba717ce 100644
+--- a/bridge.go
++++ b/bridge.go
+@@ -92,6 +92,15 @@ func gowhatsapp_go_send_typing(account *PurpleAccount, who *C.char, typing C.int
+ 	}
+ }
+ 
++//export gowhatsapp_go_account_removed
++// Fired from the libpurple "account-removed" signal (see glue/init.c) when a WhatsApp account is
++// DELETED on webOS. Unlinks this device server-side (if a live client exists) and removes ONLY this
++// account's row from the SHARED whatsmeow.db — never the whole file. credentials = the account's
++// "credentials" setting ("deviceJID|registrationId"), used to find the exact device to delete.
++func gowhatsapp_go_account_removed(account *PurpleAccount, purple_user_dir *C.char, username *C.char, credentials *C.char) {
++	whatsapp_account_removed(account, C.GoString(purple_user_dir), C.GoString(username), C.GoString(credentials))
++}
++
+ //export gowhatsapp_go_send_message
+ func gowhatsapp_go_send_message(account *PurpleAccount, who *C.char, message *C.char, is_group C.int, reply_to *C.char) int {
+ 	handler, ok := handlers[account]
+diff --git a/glue/init.c b/glue/init.c
+index 5621bde..246feb9 100644
+--- a/glue/init.c
++++ b/glue/init.c
+@@ -22,7 +22,8 @@
+   */
+ 
+ #include "gowhatsapp.h"
+-#include "libwhatsmeow.h" // for gowhatsapp_go_init
++#include "constants.h"       // GOWHATSAPP_CREDENTIALS_KEY (for locating the device to unlink on delete)
++#include "libwhatsmeow.h" // for gowhatsapp_go_init + gowhatsapp_go_account_removed
+ #include <gmodule.h>      // g_module_make_resident - pin the Go .so so libpurple can't dlclose/unmap it
+ 
+ #ifndef PLUGIN_VERSION
+@@ -138,6 +139,44 @@ static PurplePluginProtocolInfo prpl_info = {
+     #endif
+ };
+ 
++// Per-account store teardown on account deletion. libpurple's purple_accounts_delete() emits
++// "account-removed" (on purple_accounts_get_handle()) for the account being deleted, then destroys
++// it synchronously. We filter by protocol id and hand off to the Go export. Everything must complete
++// synchronously here — the account pointer is freed the moment this returns, so the Go side must not
++// defer any work that dereferences it.
++static void
++webos_account_removed_cb(PurpleAccount *account, gpointer data)
++{
++    (void)data;
++    if (account == NULL) {
++        return;
++    }
++    const char *proto = purple_account_get_protocol_id(account);
++    char *user_dir = (char *)purple_user_dir();                    // cgo does not support const
++    char *username = (char *)purple_account_get_username(account); // cgo does not support const
++    if (g_strcmp0(proto, GOWHATSAPP_PRPL_ID) == 0) {
++        // Match login.c: the device JID lives in the "credentials" setting (bitlbee falls back to
++        // the password field). Go uses it to delete ONLY this account's row from the shared store.
++        const char *credentials = purple_account_get_string(account, GOWHATSAPP_CREDENTIALS_KEY, NULL);
++        if (credentials == NULL) {
++            credentials = purple_account_get_password(account);
++        }
++        gowhatsapp_go_account_removed(account, user_dir, username, (char *)(credentials ? credentials : ""));
++    }
++}
++
++// Connect the "account-removed" handler once, using `plugin` as the signal handle so
++// libpurple2_plugin_unload's purple_signals_disconnect_by_handle(plugin) cleans it up. Called from
++// plugin_init (the module is pinned resident, so the callback can never be unmapped). The accounts
++// subsystem and its "account-removed" signal are registered by purple_core_init well before any
++// plugin is probed, so the handle is always valid here.
++static void
++webos_connect_account_removed(PurplePlugin *plugin)
++{
++    purple_signal_connect(purple_accounts_get_handle(), "account-removed",
++                          plugin, PURPLE_CALLBACK(webos_account_removed_cb), NULL);
++}
++
+ static void plugin_init(PurplePlugin *plugin) {
+     // The Go runtime (cgo c-archive) cannot survive g_module_close(): libpurple dlcloses plugins
+     // during its startup plugin probe, which unmaps code the Go scheduler threads are still executing
+@@ -147,6 +186,8 @@ static void plugin_init(PurplePlugin *plugin) {
+         g_module_make_resident((GModule *) plugin->handle);
+     }
+     prpl_info.protocol_options = gowhatsapp_add_account_options(prpl_info.protocol_options);
++    // Clean up the per-JID device row in the shared whatsmeow.db when an account is deleted.
++    webos_connect_account_removed(plugin);
+ }
+ 
+ static PurplePluginInfo info = {
+diff --git a/login.go b/login.go
+index 3b5251a..005c782 100644
+--- a/login.go
++++ b/login.go
+@@ -12,6 +12,7 @@ import (
+ 	"path/filepath"
+ 	"strconv"
+ 	"strings"
++	"time"
+ 
+ 	_ "github.com/lib/pq"
+ 	"github.com/mdp/qrterminal/v3"
+@@ -252,6 +253,121 @@ func (handler *Handler) prune_devices(deviceJid types.JID) {
+ 	}
+ }
+ 
++/*
++ * whatsapp_account_removed is invoked from the libpurple "account-removed" signal (fired by
++ * purple_accounts_delete) when the user DELETES a WhatsApp account on webOS. Its job is to unlink
++ * this device server-side and remove ONLY this account's row from the SHARED whatsmeow.db.
++ *
++ * The whatsmeow store (default file:$purple_user_dir/whatsmeow.db) is shared by every WhatsApp
++ * account in this transport — the default DB address has no $username in it. So we must NEVER delete
++ * the whole file (that would orphan every other WhatsApp account and log them all out). Instead we
++ * key strictly on THIS account's device JID and delete just that one device's rows.
++ *
++ * Per-account isolation:
++ *   - Preferred path: if a live, connected client for this account still exists, client.Logout()
++ *     sends a "remove-companion-device" IQ (unlinks server-side, clearing the "ghost linked device")
++ *     and then deletes only its own device from the store.
++ *   - Fallback (the usual case — libpurple disables + disconnects, and thus tears down the handler,
++ *     BEFORE emitting account-removed): open the shared store, look up this account's stored device
++ *     JID (from the "credentials" setting = "deviceJID|registrationId") and delete only that device's
++ *     rows via whatsmeow's store (Container.DeleteDevice, per-JID). A fresh pairing QR then works on
++ *     re-add. NOTE: while disconnected we cannot unlink server-side, so a stale linked device may
++ *     linger on the phone until the user removes it there — hooking a connected teardown would
++ *     require an earlier signal, but "account-disabled" also fires for a plain disable, which must
++ *     NOT wipe the store.
++ */
++func whatsapp_account_removed(account *PurpleAccount, purple_user_dir string, username string, credentials string) {
++	log := PurpleLogger(account, "AccountRemoved")
++
++	// Preferred: a live, connected client can Logout() (unlink server-side + delete its own row).
++	if handler, ok := handlers[account]; ok {
++		if handler.client != nil && handler.client.Store != nil && handler.client.Store.ID != nil {
++			deviceJid := *handler.client.Store.ID
++			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
++			defer cancel()
++			if err := handler.client.Logout(ctx); err != nil {
++				// e.g. not actually connected: fall back to deleting just this device's row via the
++				// container the handler already holds (still strictly per-JID).
++				log.Warnf("Logout failed (%v); deleting device %s from shared store", err, deviceJid.String())
++				whatsapp_delete_device(handler.container, deviceJid)
++			} else {
++				log.Infof("Logged out and removed device %s from shared whatsmeow store", deviceJid.String())
++			}
++		}
++		return
++	}
++
++	// Usual case: no live handler. Look up THIS account's stored device JID and delete only it.
++	creds := strings.Split(credentials, "|")
++	if len(creds) < 1 || creds[0] == "" {
++		log.Infof("No stored WhatsApp credentials for removed account; nothing to clean up.")
++		return
++	}
++	deviceJid, err := parseJID(creds[0])
++	if err != nil {
++		log.Warnf("Stored device JID %q is not valid; skipping store cleanup: %v", creds[0], err)
++		return
++	}
++	container, db, err := whatsapp_open_container(account, purple_user_dir, username)
++	if err != nil {
++		log.Warnf("Cannot open whatsmeow store to remove device %s: %v", deviceJid.String(), err)
++		return
++	}
++	defer db.Close()
++	whatsapp_delete_device(container, deviceJid)
++	log.Infof("Removed device %s from shared whatsmeow store (server-side unlink not possible while disconnected).", deviceJid.String())
++}
++
++/*
++ * whatsapp_delete_device removes exactly one device's rows (keyed by JID) from the shared store.
++ * This is the per-JID delete that keeps other WhatsApp accounts in the same whatsmeow.db intact.
++ */
++func whatsapp_delete_device(container *sqlstore.Container, deviceJid types.JID) {
++	if container == nil {
++		return
++	}
++	ctx := context.TODO()
++	device, err := container.GetDevice(ctx, deviceJid)
++	if err != nil || device == nil {
++		// no such device (already gone / never paired) — nothing to delete
++		return
++	}
++	_ = device.Delete(ctx) // Device.Delete -> Container.DeleteDevice(device): removes only this JID
++}
++
++/*
++ * whatsapp_open_container opens the SHARED whatsmeow store using the exact same address resolution
++ * as login() (the "database-address" account option, $purple_user_dir/$username substitution and the
++ * legacy _foreign_keys=on rewrite). Caller owns the returned *sql.DB and must Close() it.
++ */
++func whatsapp_open_container(account *PurpleAccount, purple_user_dir string, username string) (*sqlstore.Container, *sql.DB, error) {
++	dbLog := PurpleLogger(account, "Database")
++	address := purple_get_string(account, C.GOWHATSAPP_DATABASE_ADDRESS_OPTION, C.GOWHATSAPP_DATABASE_ADDRESS_DEFAULT)
++	address = strings.Replace(address, "$purple_user_dir", purple_user_dir, -1)
++	address = strings.Replace(address, "$username", username, -1)
++	address = strings.Replace(address, "_foreign_keys=on", "_pragma=foreign_keys(1)", -1)
++	dialect := "sqlite"
++	maxOpenConns := 1
++	if strings.HasPrefix(address, "postgres:") {
++		dialect = "postgres"
++		maxOpenConns = 0
++		address = strings.Replace(address, "postgres:", "", -1)
++	}
++	db, err := sql.Open(dialect, address)
++	if err != nil {
++		return nil, nil, err
++	}
++	if maxOpenConns > 0 {
++		db.SetMaxOpenConns(maxOpenConns)
++	}
++	container := sqlstore.NewWithDB(db, dialect, dbLog)
++	if err := container.Upgrade(context.TODO()); err != nil {
++		db.Close()
++		return nil, nil, err
++	}
++	return container, db, nil
++}
++
+ /*
+  * This is the go part of purple's close() function.
+  */
+-- 
+2.53.0
+

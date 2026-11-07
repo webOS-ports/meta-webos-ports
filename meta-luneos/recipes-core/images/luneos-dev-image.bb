@@ -10,7 +10,10 @@ webos_enable_devmode() {
     touch ${IMAGE_ROOTFS}/var/luna/dev-mode-enabled
     touch ${IMAGE_ROOTFS}/var/luna/preferences/devmode_enabled
     touch ${IMAGE_ROOTFS}/var/luna/preferences/debug_system_apps
-    touch ${IMAGE_ROOTFS}/etc/usb-debugging-enabled
+    # USB debugging on as well. Its flag is in /var, where
+    # org.webosports.service.devmode keeps it; adbd needs both flags
+    # (android-tools_%.bbappend), so turning either off in Settings sticks.
+    touch ${IMAGE_ROOTFS}/var/usb-debugging-enabled
     touch ${IMAGE_ROOTFS}/.writable_image
 }
 
@@ -58,9 +61,9 @@ MESA_PKGS = " \
     libgles1-mesa \
 "
 
+# libdrm-tests and qtbase-examples, like gdb and valgrind, are in the
+# luneos-development-debug image feature (packagegroup-luneos-development-debug).
 IMAGE_INSTALL:append = " \
-    libdrm-tests \
-    qtbase-examples \
     qtbase-plugins \
     glmark2 \
     kernel-modules \

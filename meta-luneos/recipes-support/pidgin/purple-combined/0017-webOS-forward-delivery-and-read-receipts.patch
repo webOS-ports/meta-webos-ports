@@ -1,0 +1,135 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:29:05 +0200
+Subject: [PATCH] webOS: forward delivery and read receipts
+
+Receipts for our messages are emitted as "webos-im-receipt" (account,
+message id, "delivered" or "read"), so the app can show the ticks.
+"webos-im-receipt-hwm" carries watermark receipts (everything in a
+thread up to a time), which the Facebook protocol uses.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ bridge.go              | 34 ++++++++++++++++++++++++++++++++++
+ bridge.h               |  2 ++
+ glue/process_message.c | 18 ++++++++++++++++++
+ handler.go             | 11 +++++++++++
+ 4 files changed, 65 insertions(+)
+
+diff --git a/bridge.go b/bridge.go
+index 9bcf381..d7b9d26 100644
+--- a/bridge.go
++++ b/bridge.go
+@@ -553,6 +553,40 @@ func purple_handle_outbox_id(account *PurpleAccount, id string, text string) {
+ 	C.gowhatsapp_process_message_bridge(cmessage)
+ }
+ 
++// webOS delivery/read receipts: the recipient delivered/read one of our outgoing messages. id is the
++// message's server id (== its serviceMessageId); status is "delivered" or "read". Forwarded to the
++// transport's "webos-im-receipt" signal (status carried in the text field).
++func purple_handle_receipt(account *PurpleAccount, id string, status string) {
++	if id == "" {
++		return
++	}
++	cmessage := C.struct_gowhatsapp_message{
++		account:   account,
++		msgtype:   C.char(C.gowhatsapp_message_type_receipt),
++		messageId: C.CString(id),
++		text:      C.CString(status),
++	}
++	C.gowhatsapp_process_message_bridge(cmessage)
++}
++
++// webOS delivery/read receipts (WATERMARK, Facebook): the peer delivered/read everything in a thread up
++// to a timestamp. scope is the transport match rule ("ts:<threadKey>"), watermark the boundary (ms
++// decimal), status "delivered" or "read". Forwarded to the transport's "webos-im-receipt-hwm" signal
++// (scope in remoteJid, watermark in messageId, status in text).
++func purple_handle_receipt_watermark(account *PurpleAccount, scope string, watermark string, status string) {
++	if scope == "" || watermark == "" {
++		return
++	}
++	cmessage := C.struct_gowhatsapp_message{
++		account:   account,
++		msgtype:   C.char(C.gowhatsapp_message_type_receipt_hwm),
++		remoteJid: C.CString(scope),
++		messageId: C.CString(watermark),
++		text:      C.CString(status),
++	}
++	C.gowhatsapp_process_message_bridge(cmessage)
++}
++
+ /*
+  * This will inform purple that the remote user started typing.
+  */
+diff --git a/bridge.h b/bridge.h
+index b10e0d8..c382789 100644
+--- a/bridge.h
++++ b/bridge.h
+@@ -26,6 +26,8 @@
+     MESSAGE_TYPE(attachment) \
+     MESSAGE_TYPE(reaction) \
+     MESSAGE_TYPE(outbox_id) \
++    MESSAGE_TYPE(receipt) \
++    MESSAGE_TYPE(receipt_hwm) \
+     MESSAGE_TYPE(profile_picture) \
+     MESSAGE_TYPE(group) \
+     MESSAGE_TYPE(max) \
+diff --git a/glue/process_message.c b/glue/process_message.c
+index fb3206b..2a0c555 100644
+--- a/glue/process_message.c
++++ b/glue/process_message.c
+@@ -155,6 +155,24 @@ gowhatsapp_process_message(gowhatsapp_message_t *gwamsg)
+                     gwamsg->account, gwamsg->messageId ? gwamsg->messageId : "",
+                     gwamsg->text ? gwamsg->text : "");
+             break;
++        case gowhatsapp_message_type_receipt:
++            // webOS delivery/read receipt: the recipient delivered/read our outgoing message.
++            // messageId = the message's server id (== serviceMessageId), text = status
++            // ("delivered"/"read"). Forward to the transport's cross-prpl "webos-im-receipt" signal
++            // (by-id), which upgrades the Outbox row's deliveryStatus. Runs on the libpurple main thread.
++            purple_signal_emit(purple_conversations_get_handle(), "webos-im-receipt",
++                    gwamsg->account, gwamsg->messageId ? gwamsg->messageId : "",
++                    gwamsg->text ? gwamsg->text : "");
++            break;
++        case gowhatsapp_message_type_receipt_hwm:
++            // webOS delivery/read receipt (watermark, Facebook): everything in a thread up to a
++            // timestamp was delivered/read. remoteJid = scope ("ts:<threadKey>"), messageId = watermark
++            // (ms), text = status. Forward to the transport's "webos-im-receipt-hwm" signal.
++            purple_signal_emit(purple_conversations_get_handle(), "webos-im-receipt-hwm",
++                    gwamsg->account, gwamsg->remoteJid ? gwamsg->remoteJid : "",
++                    gwamsg->messageId ? gwamsg->messageId : "",
++                    gwamsg->text ? gwamsg->text : "");
++            break;
+         case gowhatsapp_message_type_profile_picture:
+             gowhatsapp_handle_profile_picture(gwamsg);
+             break;
+diff --git a/handler.go b/handler.go
+index 3c421b5..2694649 100644
+--- a/handler.go
++++ b/handler.go
+@@ -85,10 +85,21 @@ func (handler *Handler) eventHandler(rawEvt interface{}) {
+ 	case *events.Message:
+ 		handler.handle_message(evt.Message, evt.Info, evt)
+ 	case *events.Receipt:
++		// webOS delivery/read receipts: the recipient delivered/read messages WE sent. evt.MessageIDs
++		// are the ids we surfaced via purple_handle_outbox_id (== serviceMessageId). "read"/"read-self"
++		// -> double tick; "delivered" -> single tick. (Sender/played/etc are ignored.)
++		var receiptStatus string
+ 		if evt.Type == types.ReceiptTypeRead || evt.Type == types.ReceiptTypeReadSelf {
+ 			log.Infof("%v was read by %s at %s", evt.MessageIDs, evt.SourceString(), evt.Timestamp)
++			receiptStatus = "read"
+ 		} else if evt.Type == types.ReceiptTypeDelivered {
+ 			log.Infof("%s was delivered to %s at %s", evt.MessageIDs[0], evt.SourceString(), evt.Timestamp)
++			receiptStatus = "delivered"
++		}
++		if receiptStatus != "" {
++			for _, mid := range evt.MessageIDs {
++				purple_handle_receipt(handler.account, string(mid), receiptStatus)
++			}
+ 		}
+ 	case *events.Presence:
+ 		handler.handle_presence(evt)
+-- 
+2.53.0
+

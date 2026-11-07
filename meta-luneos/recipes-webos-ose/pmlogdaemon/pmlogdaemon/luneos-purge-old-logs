@@ -1,0 +1,69 @@
+#!/bin/sh
+# Remove the logs older images left behind. They can hold passwords, tokens and
+# the backup passphrase in plain text: keymanager, the backup service and cdav
+# logged them, and the fixes do nothing for what is already on disk.
+#
+# Runs as root once at early boot from luneos-purge-old-logs.service, before
+# journald moves to /var/log/journal and before any service has started, so
+# everything named here is left from earlier boots. A first boot after a
+# package upgrade removes it; on a freshly flashed device there is nothing to
+# remove. The stamp keeps later boots from clearing that device's own history.
+#
+# Without the stamp it is still safe at any time, and leaves what is in use:
+# the journal if journald already writes there, and the files PmLogDaemon has
+# open if it runs. The stamp is written only when nothing was left for those
+# reasons, so a run that came too late is repeated at the next boot.
+#
+# Rotated copies are named by PmLogDaemon's "%s.%d" and "%s.%d.gz". journald-*
+# and previous_boot_logs.tar.gz came from backup-log.service, which images no
+# longer ship; its text dump is the journal in plain text.
+#
+# LUNEOS_PURGE_ROOT (a prefix for every path) exists for the test script.
+
+set -u
+
+root=${LUNEOS_PURGE_ROOT:-}
+stamp="$root/var/lib/luneos/old-logs-purged-1"
+complete=1
+
+[ -e "$stamp" ] && exit 0
+
+# Fixed names and globs under root-owned directories, plus dotfiles in
+# /media/internal: rm does not follow a symlink, and leaves a directory alone.
+rm -f -- \
+    "$root"/var/log/messages.* \
+    "$root"/var/log/legacy-log.* \
+    "$root"/media/developer/log/devlog.* \
+    "$root"/var/log/journald-*.log \
+    "$root"/var/log/previous_boot_logs.tar.gz \
+    "$root"/var/spool/rdxd/previous_boot_logs.tar.gz \
+    "$root"/media/internal/.org.webosports.service.cdav.log \
+    "$root"/media/internal/.org.webosports.cdav.service.log \
+    "$root"/media/internal/.org.webosports.service.cdav.keystore-debug \
+    2>/dev/null
+
+if grep -qsx PmLogDaemon "$root"/proc/[0-9]*/comm; then
+    complete=0
+else
+    rm -f -- \
+        "$root"/var/log/messages \
+        "$root"/var/log/legacy-log \
+        "$root"/media/developer/log/devlog \
+        2>/dev/null
+fi
+
+if [ -e "$root/run/systemd/journal/flushed" ]; then
+    complete=0
+else
+    rm -f -- \
+        "$root"/var/log/journal/*/*.journal \
+        "$root"/var/log/journal/*/*.journal~ \
+        2>/dev/null
+fi
+
+if [ "$complete" = 1 ]; then
+    mkdir -p "${stamp%/*}" && : > "$stamp"
+fi
+
+# Never hold up boot over this.
+exit 0

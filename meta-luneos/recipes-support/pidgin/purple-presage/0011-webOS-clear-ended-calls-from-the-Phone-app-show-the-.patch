@@ -1,0 +1,172 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 4 Nov 2026 05:43:39 +0100
+Subject: [PATCH] webOS: clear ended calls from the Phone app, show the
+ caller's number
+
+The Phone app removes a call card only when a callStateQuery push no
+longer lists the call. call.c pushed "disconnected" and then went idle
+without telling anyone, so the ended card stayed and the Phone app did
+not close after the call. Push the empty line list 1.5 s after the
+"disconnected" one, as the WhatsApp connector does, unless a new call has
+replaced the line by then.
+
+An incoming call card showed the caller's Signal UUID, so the Phone app
+found no contact and offered to add one. When the contact's phone number
+is known (the buddy's "phone_number", which the contact sync sets), the
+card shows that number instead. The UUID is still what hanging up uses,
+and an outgoing call keeps the address that was dialled, which the Phone
+app keyed its card to.
+
+Every call went out as call id "sig". The Phone app remembers the ids
+of the calls it has seen end and ignores a later "disconnected" for one
+of them, so only the first call after the Phone app started closed its
+card; every later one stayed up. Each call now gets an id of its own,
+taken from the clock when it starts, so a restarted service does not
+reuse one either. audiod still gets "sig": it keeps one call per sender.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ src/c/call.c | 74 +++++++++++++++++++++++++++++++++++++++++++---------
+ 1 file changed, 61 insertions(+), 13 deletions(-)
+
+diff --git a/src/c/call.c b/src/c/call.c
+index 1117d7c..56569a7 100644
+--- a/src/c/call.c
++++ b/src/c/call.c
+@@ -38,6 +38,10 @@ static char *g_addr     = NULL;
+ static char *g_name     = NULL;
+ static uint64_t g_call_id = 0;
+ static bool g_outgoing = false;   /* true while an OUTGOING call is up (origin=outgoing in the card) */
++/* The call's id on the card. The Phone app remembers every call id it has seen end and ignores a
++ * later "disconnected" for it, so each call needs an id of its own, or the card of every call after
++ * the first stays up. From the clock, so a restarted service does not hand out an old one again. */
++static gint64 g_card_id = 0;
+ 
+ static const char *SUBKEY = "callState";
+ 
+@@ -64,6 +68,22 @@ static gchar *json_escape(const char *s)
+     return g_string_free(o, FALSE);
+ }
+ 
++/* The address the call card shows. An incoming call arrives keyed by the caller's Signal UUID; when
++ * the contact's phone number is known (blist.c keeps it as the buddy's "phone_number"), show that
++ * instead, so the Phone app matches the address book entry rather than offering to add the UUID as
++ * a new contact. An outgoing call keeps the address the user dialled, which the Phone app keyed its
++ * card to. g_addr itself stays the UUID, which hanging up needs. */
++static const char *card_address(void)
++{
++    if (!g_outgoing && g_account && g_addr && *g_addr) {
++        PurpleBuddy *buddy = purple_find_buddy(g_account, g_addr);
++        const char *phone = buddy ? purple_blist_node_get_string(&buddy->node, "phone_number") : NULL;
++        if (phone && *phone)
++            return phone;
++    }
++    return g_addr;
++}
++
+ /* Build the CallSynergizer callStateQuery payload. Dispatch is on the LINE-level "state"; an empty
+  * state => idle (no lines). Voice only: the line reports no video either way. */
+ static gchar *build_payload(void)
+@@ -72,7 +92,7 @@ static gchar *build_payload(void)
+         return g_strdup("{\"returnValue\":true,\"lines\":[]}");
+     }
+     gchar *st   = json_escape(g_state);
+-    gchar *addr = json_escape(g_addr);
++    gchar *addr = json_escape(card_address());
+     gchar *nm   = json_escape((g_name && *g_name) ? g_name : g_addr);
+     gchar *disc = g_strcmp0(g_state, "disconnected") == 0
+         ? g_strdup_printf("\"disconnectDetails\":{\"cause\":\"%s\"},", g_cause ? g_cause : "normal")
+@@ -85,9 +105,9 @@ static gchar *build_payload(void)
+     gchar *p = g_strdup_printf(
+         "{\"returnValue\":true,\"lines\":["
+         "{\"state\":\"%s\",%s\"incomingVideo\":false,\"outgoingVideo\":false,"
+-        "\"calls\":[{\"id\":\"sig\",\"origin\":\"%s\",\"transport\":\"com.palm.signal\","
++        "\"calls\":[{\"id\":\"sig-%" G_GINT64_FORMAT "\",\"origin\":\"%s\",\"transport\":\"com.palm.signal\","
+         "\"address\":\"%s\",\"displayName\":\"%s\"}]}]}",
+-        st, disc, g_outgoing ? "outgoing" : "incoming", addr, nm);
++        st, disc, g_card_id, g_outgoing ? "outgoing" : "incoming", addr, nm);
+     g_free(st); g_free(addr); g_free(nm); g_free(disc);
+     return p;
+ }
+@@ -289,6 +309,35 @@ typedef struct {
+     char    *name;
+ } CallEvt;
+ 
++static void push_state(void)
++{
++    if (!g_sh)
++        return;
++    gchar *payload = build_payload();
++    LSError err; LSErrorInit(&err);
++    if (!LSSubscriptionReply(g_sh, SUBKEY, payload, &err)) {
++        purple_debug_warning(PLUGIN_NAME, "call pushState: %s\n", err.message);
++        LSErrorFree(&err);
++    }
++    g_free(payload);
++}
++
++/* The Phone app drops a call card only when a push stops listing that call. So an ended call is
++ * shown as "disconnected" for a moment and then the empty line list follows, as the WhatsApp
++ * connector does. A call that starts in the meantime has already replaced the line, so the empty
++ * list is then not sent. */
++#define ENDED_CALL_HOLD_MS 1500
++static guint g_idle_push = 0;
++
++static gboolean push_idle(gpointer data)
++{
++    (void)data;
++    g_idle_push = 0;
++    if (!g_state)
++        push_state();
++    return G_SOURCE_REMOVE;
++}
++
+ /* runs on the MAIN thread: apply the new state and push it to callStateQuery subscribers */
+ static gboolean call_state_apply(gpointer data)
+ {
+@@ -308,6 +357,10 @@ static gboolean call_state_apply(gpointer data)
+         return FALSE;
+     }
+ 
++    /* Every call starts from idle: the state is reset as soon as one ends. */
++    if (!g_state)
++        g_card_id = g_get_real_time();
++
+     switch (e->state) {
+         case SIG_CALL_INCOMING:
+             g_outgoing = false;
+@@ -348,15 +401,7 @@ static gboolean call_state_apply(gpointer data)
+             break;
+     }
+ 
+-    if (g_sh) {
+-        gchar *payload = build_payload();
+-        LSError err; LSErrorInit(&err);
+-        if (!LSSubscriptionReply(g_sh, SUBKEY, payload, &err)) {
+-            purple_debug_warning(PLUGIN_NAME, "call pushState: %s\n", err.message);
+-            LSErrorFree(&err);
+-        }
+-        g_free(payload);
+-    }
++    push_state();
+ 
+     /* audiod: report the active call once, and clear it when a call that was active ends. Must run
+      * before the idle reset below (which clears g_state). */
+@@ -368,11 +413,14 @@ static gboolean call_state_apply(gpointer data)
+         audiod_send("palm://com.palm.audio/phone/CallStatusUpdate", "{\"lines\":[]}");
+     }
+ 
+-    /* after a terminal state, return to idle so the next call starts clean */
++    /* after a terminal state, return to idle so the next call starts clean, and clear the card once
++     * the Phone app has shown it as ended */
+     if (g_strcmp0(g_state, "disconnected") == 0) {
+         set_str(&g_state, NULL); set_str(&g_cause, NULL);
+         set_str(&g_addr, NULL);  set_str(&g_name, NULL); g_call_id = 0;
+         g_outgoing = false;
++        if (!g_idle_push)
++            g_idle_push = g_timeout_add(ENDED_CALL_HOLD_MS, push_idle, NULL);
+     }
+ 
+     g_free(e->who); g_free(e->name); g_free(e);

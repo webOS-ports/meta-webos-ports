@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=db37b6ead2dec60580595736ff983452"
 
 PV = "2.0.0+git"
 PR = "r1"
-SRCREV = "768915a0cba9e2d45c3a55473d50aaa997127685"
+SRCREV = "e46746bb45cd9622d0d2ac5c2783058968623dee"
 
 DEPENDS = "qtbase qtdeclarative qtdeclarative-native poppler"
 

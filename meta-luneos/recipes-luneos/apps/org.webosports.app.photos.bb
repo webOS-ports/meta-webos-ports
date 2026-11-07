@@ -4,7 +4,12 @@ LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=db37b6ead2dec60580595736ff983452"
 
 PV = "1.0.0+git"
-SRCREV = "773ff0059bd27e260868d1ceb40d18603c6f7355"
+PE = "4"
+
+# Pull request #12 (tofe/flow-layout), open: the grid laid out by a ListView
+# over a precomputed model, with its tests. Back to master once it merges.
+WEBOS_GIT_PARAM_BRANCH = "tofe/flow-layout"
+SRCREV = "31b4d4d4f756ed89b4662bb1d21dcd346a1dc421"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 

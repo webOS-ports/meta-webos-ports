@@ -26,6 +26,13 @@ VIRTUAL-RUNTIME_speech_synthesis ?= "speech-dispatcher"
 # U+FFFF, so every emoji was a tofu box. 9.5MB, and it serves Chromium apps, QML
 # apps, the shell and the keyboard at once. Chromium reads the font list once at
 # start, so a hand-install needs webapp-mgr restarted to take effect.
+#
+# CJK: nothing in the image had Chinese, Japanese or Korean glyphs either, so a
+# photo album, a contact or a song named in them was a row of tofu boxes. The
+# free fonts meta-oe has: VLGothic (Japanese), WenQuanYi Zen Hei (Chinese) and
+# Droid Sans Fallback (Chinese, Japanese and Korean, Hangul included).
+# fontconfig picks among them for each character. 27.5MB installed: VLGothic
+# 7.9MB, WenQuanYi 16MB, Droid Sans Fallback 3.6MB.
 RDEPENDS:${PN} = " \
   ${DISTRO_EXTRA_RDEPENDS} \
   \
@@ -33,6 +40,9 @@ RDEPENDS:${PN} = " \
   luneos-kernel-log-quirks \
   \
   ttf-noto-emoji-color \
+  ttf-vlgothic \
+  ttf-wqy-zenhei \
+  ttf-droid-sans-fallback \
   \
   powertop \
   luneos-power-report \
@@ -105,7 +115,9 @@ RDEPENDS:${PN} = " \
   org.webosports.service.licenses \
   org.webosports.service.lumberjack \
   org.webosports.service.messaging \
+  org.webosports.service.office \
   org.webosports.service.update \
+  distro-feed-configs \
   \
   \
   ca-certificates \
@@ -188,9 +200,11 @@ LIBHYBRIS_RDEPENDS = " \
 # ordinary Linux V4L2 consumers (browsers/WebRTC, video-call apps) see the
 # cameras; LuneOS's own camera app still uses gst-droid. Generic to every
 # Halium device, hence here rather than per-machine. Its kernel half,
-# v4l2loopback, is an out-of-tree module and so is named per-machine in
-# MACHINE_EXTRA_RDEPENDS (like wireguard-module); where it is absent the
-# droidcam2v4l2 service is a clean no-op (ConditionPathExists=/dev/v4l2loopback).
+# v4l2loopback, is an out-of-tree module, so it is named per-machine: in
+# MACHINE_EXTRA_RDEPENDS where the machine builds its own rootfs, and in
+# ANDROID_EXTRA_INITRAMFS_IMAGE_INSTALL where it boots the generic one. Where it
+# is absent the droidcam2v4l2 service is a clean no-op
+# (ConditionPathExists=/dev/v4l2loopback).
 
 # Fingerprint stack: biomd talks to the Android biometrics HAL over binder
 # through libgbinder, webos-fingerprint-adapter bridges its D-Bus API onto the
@@ -277,6 +291,14 @@ IR_BLASTER_RDEPENDS = " \
     org.webosports.app.remote \
 "
 
+# FM radio: fmradiod turns the receiver on and tunes it (MediaTek /dev/fm,
+# Qualcomm radio-iris /dev/radio0), and the Music app plays it. Only for
+# machines that declare the "fm-radio" feature: the receiver needs the wired
+# headphones as antenna and an audio HAL that module-droid-fm can drive.
+FM_RADIO_RDEPENDS = " \
+    org.webosports.service.fmradio \
+"
+
 # Printing. luneos-print-adapter serves the webOS print API (com.palm.printmgr,
 # what the enyo print dialog in Atlas and Email call) and the flatter
 # org.webosports.service.print the Settings Print Manager page calls, both on
@@ -298,21 +320,27 @@ PRINT_RDEPENDS = " \
 "
 
 # Synergy account types beyond messaging: the cloud/file connectors from luneos-synergy-connectors
-# (each needs synergy-cloudcore, which they pull in themselves). Music is listed with the
-# other apps above.
+# and the video servers for Videos (each needs synergy-cloudcore, which they pull in
+# themselves). Music is listed with the other apps above.
 SYNERGY_RDEPENDS = " \
     synergy-cloud-box \
     synergy-cloud-dropbox \
     synergy-cloud-flickr \
     synergy-cloud-gdrive \
     synergy-cloud-hidrive \
+    synergy-cloud-immich \
     synergy-cloud-kdrive \
     synergy-cloud-koofr \
     synergy-cloud-mega \
     synergy-cloud-onedrive \
     synergy-cloud-pcloud \
+    synergy-cloud-photoprism \
+    synergy-cloud-pigallery2 \
     synergy-cloud-s3 \
+    synergy-cloud-smugmug \
+    synergy-cloud-webdav \
     synergy-cloud-yandex \
+    synergy-video \
 "
 
 VPN_RDEPENDS = " \
@@ -418,6 +446,7 @@ RDEPENDS:${PN}:append:a3-2015 = " alsa-utils-systemd mesa-megadriver rmtfs qrtr 
 
 RDEPENDS:${PN}:append:tissot = " wcnss-filter-fixup"
 RDEPENDS:${PN}:append:tissot-halium = " wcnss-filter-fixup"
+RDEPENDS:${PN}:append:vince-halium = " wcnss-filter-fixup"
 
 # Hardware-gated stacks, driven by MACHINE_FEATURES.
 #
@@ -425,11 +454,12 @@ RDEPENDS:${PN}:append:tissot-halium = " wcnss-filter-fixup"
 # in the wrong place and got it wrong - radon shipped nfcd and biomd for hardware
 # the FLX1s has no HAL for. The machine declares what it has; this only maps that
 # to packages. nfc is the standard OE feature; fingerprint, esim, faceunlock,
-# ir-blaster, keyboard-touch and trackpad are LuneOS-specific.
+# ir-blaster, fm-radio, keyboard-touch and trackpad are LuneOS-specific.
 RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'fingerprint', ' ${FINGERPRINT_RDEPENDS}', '', d)}"
 RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'nfc',         ' ${NFC_RDEPENDS}',         '', d)}"
 RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'esim',        ' ${ESIM_RDEPENDS}',        '', d)}"
 RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'ir-blaster',  ' ${IR_BLASTER_RDEPENDS}',  '', d)}"
+RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'fm-radio',    ' ${FM_RADIO_RDEPENDS}',    '', d)}"
 # These settings pages need a modem; the machine says so with "phone".
 RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'phone',       ' ${MODEM_SETTINGS_RDEPENDS}', '', d)}"
 RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'wifi',        ' ${WIRELESS_REGDB_RDEPENDS}', '', d)}"

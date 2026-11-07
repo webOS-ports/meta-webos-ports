@@ -1,0 +1,67 @@
+From f03a1196f8de67f71cbacc6a0bf8491cddacec99 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 30 Oct 2026 08:29:22 +0100
+Subject: [PATCH] push: Only build the PDU hex dump when debugging is
+ enabled
+
+mms_push_notify() turned the whole push PDU into a hex string, one
+g_string_append_printf() per octet, on every call and then passed it to
+DBG(), which drops it unless debugging is enabled for push.c. The PDU
+comes from the network through oFono, so every WAP push cost a buffer
+of twice its size and a printf per octet for nothing.
+
+Give the dump its own debug descriptor in the __debug section, which
+"mmsd -d" enables together with the file's other DBG() lines, and build
+the string only when it is set. Also print len, an unsigned int, with
+%u.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/push.c | 23 +++++++++++++++--------
+ 1 file changed, 15 insertions(+), 8 deletions(-)
+
+diff --git a/src/push.c b/src/push.c
+index ed83964..efbe16c 100644
+--- a/src/push.c
++++ b/src/push.c
+@@ -329,20 +329,27 @@ gboolean mms_push_notify(unsigned char *pdu, unsigned int len,
+ 	unsigned int nread;
+ 	unsigned int consumed;
+ 	struct push_consumer *hdlr;
+-	unsigned int i;
+ 	GSList *elt;
+-	GString *hex;
++	/* Enabled together with this file's DBG() lines */
++	static struct mms_debug_desc hexdump_desc
++	__attribute__((used, section("__debug"), aligned(8))) = {
++		.file = __FILE__, .flags = MMS_DEBUG_FLAG_DEFAULT,
++	};
+ 
+-	DBG("pdu %p len %d", pdu, len);
++	DBG("pdu %p len %u", pdu, len);
+ 
+-	hex = g_string_sized_new(len * 2);
++	/* The hex dump costs two octets and a printf per PDU octet */
++	if (hexdump_desc.flags & MMS_DEBUG_FLAG_PRINT) {
++		GString *hex = g_string_sized_new(len * 2);
++		unsigned int i;
+ 
+-	for (i = 0; i < len; i++)
+-		g_string_append_printf(hex, "%02X", pdu[i]);
++		for (i = 0; i < len; i++)
++			g_string_append_printf(hex, "%02X", pdu[i]);
+ 
+-	DBG("%s", hex->str);
++		DBG("%s", hex->str);
+ 
+-	g_string_free(hex, TRUE);
++		g_string_free(hex, TRUE);
++	}
+ 
+ 	/* TID, Type and at least one octet of HeadersLen */
+ 	if (len < 3)
+-- 
+2.53.0
+

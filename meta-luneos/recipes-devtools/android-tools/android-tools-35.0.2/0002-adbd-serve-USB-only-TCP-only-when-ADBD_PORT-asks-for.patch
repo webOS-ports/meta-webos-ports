@@ -1,0 +1,105 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 30 Oct 2026 09:42:11 +0100
+Subject: [PATCH] adbd: serve USB only, TCP only when ADBD_PORT asks for it
+
+On Linux adbd listened on TCP port 5555 and vsock, on every interface,
+whenever it found no USB gadget. With key authorisation on a host still
+has to be allowed, but there is no reason to offer it to the network.
+
+adbd now serves USB only. The service.adb.* and persist.adb.*
+properties are not asked: LuneOS has no Android properties, and the
+ones libbase keeps in adbd's own memory are what "adb tcpip" sets. Only
+ADBD_PORT in adbd's environment (its systemd unit, root's to change)
+opens a TCP port, for development, with a warning in the journal. "adb
+tcpip" is answered with "adb over TCP is not offered on LuneOS" rather
+than a restart that did not happen. Android builds are unchanged.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [LuneOS-specific: adb over USB only]
+---
+ packages/modules/adb/daemon/main.cpp          | 24 +++++++++++++++++++
+ .../modules/adb/daemon/restart_service.cpp    |  7 ++++++
+ 2 files changed, 31 insertions(+)
+
+diff --git a/packages/modules/adb/daemon/main.cpp b/packages/modules/adb/daemon/main.cpp
+index ef5ec4f..a7a5bea 100644
+--- a/packages/modules/adb/daemon/main.cpp
++++ b/packages/modules/adb/daemon/main.cpp
+@@ -36,6 +36,7 @@
+ 
+ #include <android-base/logging.h>
+ #include <android-base/macros.h>
++#include <android-base/parseint.h>
+ #include <android-base/properties.h>
+ #include <android-base/stringprintf.h>
+ #include <android-base/strings.h>
+@@ -323,6 +324,7 @@ int adbd_main(int server_port) {
+     }
+ #endif
+ 
++#if defined(__ANDROID__)
+     // If one of these properties is set, also listen on that port.
+     // If one of the properties isn't set and we couldn't listen on usb, listen
+     // on the default port.
+@@ -359,6 +361,28 @@ int adbd_main(int server_port) {
+         addrs = android::base::Split(prop_addr, ",");
+         setup_adb(addrs);
+     }
++#else
++    // LuneOS: adb over USB only. adbd used to listen on TCP port 5555 and
++    // vsock, on every interface, whenever it found no USB gadget. The
++    // service.adb.* and persist.adb.* properties are not asked: LuneOS has
++    // no Android properties, and the ones libbase keeps in adbd's own memory
++    // are set by "adb tcpip". Only ADBD_PORT in adbd's own environment (its
++    // systemd unit, which only root can change) opens a TCP port, for
++    // development; the host still has to be allowed.
++    std::vector<std::string> addrs;
++    const char* env_port = getenv("ADBD_PORT");
++    int port = 0;
++    if (env_port != nullptr && android::base::ParseInt(env_port, &port, 1, 65535)) {
++        LOG(WARNING) << "ADBD_PORT is set: adbd also listens on TCP port " << port;
++        addrs.push_back(android::base::StringPrintf("tcp:%d", port));
++        setup_adb(addrs);
++    } else if (env_port != nullptr) {
++        LOG(ERROR) << "ADBD_PORT is not a port number; not listening on TCP";
++    }
++    if (!is_usb && addrs.empty()) {
++        LOG(WARNING) << "no USB gadget (" << USB_FFS_ADB_EP0 << "): adbd has nothing to serve";
++    }
++#endif
+ 
+     LOG(INFO) << "adbd started";
+ 
+diff --git a/packages/modules/adb/daemon/restart_service.cpp b/packages/modules/adb/daemon/restart_service.cpp
+index 8aee1af..adacb36 100644
+--- a/packages/modules/adb/daemon/restart_service.cpp
++++ b/packages/modules/adb/daemon/restart_service.cpp
+@@ -24,6 +24,7 @@
+ #include <unistd.h>
+ 
+ #include <android-base/logging.h>
++#include <android-base/macros.h>
+ #include <android-base/properties.h>
+ #include <android-base/stringprintf.h>
+ #include <log/log_properties.h>
+@@ -87,6 +88,7 @@ void restart_unroot_service(unique_fd fd) {
+ }
+ 
+ void restart_tcp_service(unique_fd fd, int port) {
++#if defined(__ANDROID__)
+     if (port <= 0) {
+         WriteFdFmt(fd.get(), "invalid port %d\n", port);
+         return;
+@@ -95,6 +97,11 @@ void restart_tcp_service(unique_fd fd, int port) {
+     LOG(INFO) << "adbd restarting in TCP mode (port = " << port << ")";
+     android::base::SetProperty("service.adb.tcp.port", android::base::StringPrintf("%d", port));
+     WriteFdFmt(fd.get(), "restarting in TCP mode port: %d\n", port);
++#else
++    // LuneOS: adb is served over USB only (see adbd_main()).
++    UNUSED(port);
++    WriteFdExactly(fd.get(), "adb over TCP is not offered on LuneOS\n");
++#endif
+ }
+ 
+ void restart_usb_service(unique_fd fd) {

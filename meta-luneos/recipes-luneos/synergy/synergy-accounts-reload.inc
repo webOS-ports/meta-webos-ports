@@ -26,8 +26,10 @@ def synergy_accounts_reload_script():
         "    if command -v ls-control > /dev/null 2>&1; then",
         "        ls-control scan-services || true",
         "    fi",
-        "    # run-js-service puts the service directory last on node's command line.",
-        "    pkill -f '/usr/palm/services/com\\.palm\\.service\\.accounts( |$)' || true",
+        "    # run-js-service starts it as node with the service directory last on its command line,",
+        "    # then the service sets process.title, which replaces the whole command line with",
+        "    # \"com.palm.service.accounts\". Match either, so it is caught at any point.",
+        "    pkill -f '^com\\.palm\\.service\\.accounts( |$)|/usr/palm/services/com\\.palm\\.service\\.accounts( |$)' || true",
         "fi",
         "",
     ])

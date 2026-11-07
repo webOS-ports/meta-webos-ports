@@ -25,19 +25,19 @@ Upstream-Status: Inappropriate [webOS specific]
  src/c/presage.h                 |   7 +++
  src/c/receive_text.c            |  82 +++++++++++++++++++++++++
  src/rust/src/bridge.rs          |  58 ++++++++++++++++++
- src/rust/src/bridge_commands.rs |  76 +++++++++++++++++++-----
+ src/rust/src/bridge_commands.rs |  75 ++++++++++++++++++-----
  src/rust/src/core.rs            |  42 ++++++++++++-
  src/rust/src/receive.rs         |  12 ++++
  src/rust/src/send.rs            | 102 +++++++++++++++++++++++++++++++-
  src/rust/src/structs.rs         |  10 ++++
- 9 files changed, 414 insertions(+), 17 deletions(-)
+ 9 files changed, 413 insertions(+), 17 deletions(-)
 
 diff --git a/src/c/connection.c b/src/c/connection.c
-index c3b9ee4..326b7a5 100755
+index 3a19e34..c4fa7ac 100755
 --- a/src/c/connection.c
 +++ b/src/c/connection.c
-@@ -32,6 +32,38 @@ rust_main(void* account) {
-     return 0;
+@@ -17,6 +17,38 @@ void presage_handle_rust_main_finished(PurpleAccount *account) {
+     }
  }
  
 +/* webOS reactions (SEND): the transport emits "webos-im-send-reaction" when the user places a reaction
@@ -69,13 +69,13 @@ index c3b9ee4..326b7a5 100755
 +        return;
 +    }
 +    int remove = (remove_flag != NULL && remove_flag[0] == '1' && remove_flag[1] == '\0') ? 1 : 0;
-+    presage_rust_send_reaction(account, rust_runtime, presage->tx_ptr, peer, target_ts, emoji, remove);
++    presage_rust_send_reaction(account, presage->tx_ptr, peer, target_ts, emoji, remove);
 +}
 +
  void presage_login(PurpleAccount *account) {
      purple_debug_info(PLUGIN_NAME, "login for account: %p\n", account);
      g_return_if_fail(rust_runtime != NULL);
-@@ -44,6 +76,16 @@ void presage_login(PurpleAccount *account) {
+@@ -29,6 +61,16 @@ void presage_login(PurpleAccount *account) {
      pc_flags |= PURPLE_CONNECTION_FLAG_NO_BGCOLOR;
      purple_connection_set_flags(connection, pc_flags);
      purple_connection_set_state(connection, PURPLE_CONNECTION_STATE_CONNECTING);
@@ -91,21 +91,21 @@ index c3b9ee4..326b7a5 100755
 +    }
      Presage *presage = g_new0(Presage, 1);
      purple_connection_set_protocol_data(connection, presage);
-     #ifdef WIN32
+     const char *user_dir = purple_user_dir();
 diff --git a/src/c/presage.h b/src/c/presage.h
-index 1f1dd32..8d60066 100755
+index 24429ab..9d1f7e1 100755
 --- a/src/c/presage.h
 +++ b/src/c/presage.h
 @@ -35,6 +35,8 @@ void presage_rust_drop_attachment(RustAttachmentPtr);
- void presage_rust_get_group_members(PurpleAccount *, RustRuntimePtr, RustChannelPtr, const char *);
- void presage_rust_get_profile(PurpleAccount *, RustRuntimePtr, RustChannelPtr, const char *);
- void presage_rust_list_groups(PurpleAccount *, RustRuntimePtr, RustChannelPtr);
+ void presage_rust_get_group_members(PurpleAccount *, RustChannelPtr, const char *);
+ void presage_rust_get_profile(PurpleAccount *, RustChannelPtr, const char *);
+ void presage_rust_list_groups(PurpleAccount *, RustChannelPtr);
 +// webOS reactions (SEND): transmit a reaction the user placed from the app. (peer, target sent timestamp, emoji, remove flag)
-+void presage_rust_send_reaction(PurpleAccount *, RustRuntimePtr, RustChannelPtr, const char *peer, uint64_t target_ts, const char *emoji, int remove);
++void presage_rust_send_reaction(PurpleAccount *, RustChannelPtr, const char *peer, uint64_t target_ts, const char *emoji, int remove);
  
  // connection.c - per-account store teardown: hooked to libpurple's "account-removed" signal at plugin
  // load; deletes <purple_user_dir()>/presage/<username>.db3 (+ sqlite sidecars) for the removed account.
-@@ -102,6 +104,11 @@ void presage_handle_uuid(PurpleConnection *connection, const char *uuid);
+@@ -103,6 +105,11 @@ void presage_handle_uuid(PurpleConnection *connection, const char *uuid);
  
  // text messages
  void presage_handle_text(PurpleConnection *connection, const char *who, const char *name, const char *group, PurpleMessageFlags sent, time_t timestamp_seconds, uint64_t timestamp_ms, const char *body);
@@ -226,7 +226,7 @@ index 22254c1..358824c 100755
      }
  }
 diff --git a/src/rust/src/bridge.rs b/src/rust/src/bridge.rs
-index a6a769d..61aa140 100755
+index 5e5fe03..fe0c450 100755
 --- a/src/rust/src/bridge.rs
 +++ b/src/rust/src/bridge.rs
 @@ -111,6 +111,64 @@ extern "C" {
@@ -295,10 +295,10 @@ index a6a769d..61aa140 100755
  
  // I want to forward a Vec of groups to the C part, but the rust-allocated C-compatible CStrings must live somewhere, so we have this intermediate type
 diff --git a/src/rust/src/bridge_commands.rs b/src/rust/src/bridge_commands.rs
-index 646313a..baf41e0 100755
+index f41886a..71139dd 100755
 --- a/src/rust/src/bridge_commands.rs
 +++ b/src/rust/src/bridge_commands.rs
-@@ -88,6 +88,23 @@ pub unsafe extern "C" fn presage_rust_get_group_members(
+@@ -89,6 +89,23 @@ pub unsafe extern "C" fn presage_rust_get_group_members(
      }
  }
  
@@ -344,7 +344,7 @@ index 646313a..baf41e0 100755
      match recipient {
          Ok(recipient) => {
              let cmd = crate::structs::Cmd::Send {
-@@ -138,6 +142,50 @@ pub unsafe extern "C" fn presage_rust_send(
+@@ -138,6 +142,49 @@ pub unsafe extern "C" fn presage_rust_send(
      }
  }
  
@@ -356,7 +356,6 @@ index 646313a..baf41e0 100755
 +#[no_mangle]
 +pub unsafe extern "C" fn presage_rust_send_reaction(
 +    account: *mut crate::bridge_structs::PurpleAccount,
-+    rt: *mut tokio::runtime::Runtime,
 +    tx: *mut tokio::sync::mpsc::Sender<crate::structs::Cmd>,
 +    c_peer: *const std::os::raw::c_char,
 +    target_ts: u64,
@@ -380,7 +379,7 @@ index 646313a..baf41e0 100755
 +                emoji,
 +                remove: remove != 0,
 +            };
-+            send_cmd(account, rt, tx, cmd);
++            send_cmd(account, tx, cmd);
 +        }
 +        Err(err) => {
 +            crate::bridge::purple_debug(
@@ -461,10 +460,10 @@ index 28d7dd9..c8d293b 100755
              crate::contacts::forward_groups(account, &mut manager).await;
              Ok(true)
 diff --git a/src/rust/src/receive.rs b/src/rust/src/receive.rs
-index 5765b37..110507d 100755
+index f9ffd71..a6c5281 100755
 --- a/src/rust/src/receive.rs
 +++ b/src/rust/src/receive.rs
-@@ -321,6 +321,18 @@ async fn process_data_message<C: presage::store::Store>(
+@@ -322,6 +322,18 @@ async fn process_data_message<C: presage::store::Store>(
      message: crate::bridge::Message,
      data_message: &presage::proto::DataMessage,
  ) -> Option<String> {
@@ -484,10 +483,10 @@ index 5765b37..110507d 100755
      if let Some(sticker) = &data_message.sticker {
          if let Some(attachment) = &sticker.data {
 diff --git a/src/rust/src/send.rs b/src/rust/src/send.rs
-index 0f7af9b..91d6c32 100755
+index 71e6bbd..80035d2 100755
 --- a/src/rust/src/send.rs
 +++ b/src/rust/src/send.rs
-@@ -60,8 +60,9 @@ pub async fn send<C: presage::store::Store + 'static>(
+@@ -61,8 +61,9 @@ pub async fn send<C: presage::store::Store + 'static>(
      recipient: crate::structs::Recipient,
      body: Option<String>,
      xfer: *const crate::bridge_structs::PurpleXfer,
@@ -499,7 +498,7 @@ index 0f7af9b..91d6c32 100755
      if let Some(body) = body.as_ref() {
          if body.len() > 2048 {
              // until https://github.com/whisperfish/presage/pull/384 is merged
-@@ -141,6 +142,103 @@ pub async fn send<C: presage::store::Store + 'static>(
+@@ -140,6 +141,103 @@ pub async fn send<C: presage::store::Store + 'static>(
          }
      }
  

@@ -4,7 +4,8 @@ LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=db37b6ead2dec60580595736ff983452"
 
 PV = "1.0.0+git"
-SRCREV = "2a00b53e81105f562f4a94db851526c86698379a"
+PE = "1"
+SRCREV = "0adad517de870d3702223f350b58d3de601fb280"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
@@ -40,3 +41,15 @@ RDEPENDS:${PN} = " \
     qml-webos-framework \
     luneos-components \
 "
+
+# Streams from servers (playStream, and the libraries of synergy-video):
+# souphttpsrc over http(s), with glib-networking for TLS, and HLS through
+# hlsdemux2 (adaptivedemux2) or the older hlsdemux.
+RDEPENDS:${PN} += " \
+    gstreamer1.0-plugins-good-soup \
+    gstreamer1.0-plugins-good-adaptivedemux2 \
+    gstreamer1.0-plugins-bad-hls \
+    glib-networking \
+"
+# The video servers of the accounts; Videos works without them.
+RRECOMMENDS:${PN} = "synergy-video"

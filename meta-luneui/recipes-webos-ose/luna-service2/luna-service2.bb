@@ -18,11 +18,19 @@ RDEPENDS:${PN} = "luna-service2-security-conf ${VIRTUAL-RUNTIME_cpushareholder} 
 SRCREV = "77eeb2cf5bfc5e0ed9779bd2064b2b79a8acd49e"
 
 PV = "3.21.2-48"
-PR = "r1"
+PR = "r2"
 
 EXTRA_OECMAKE += "${@ '-DWEBOS_DISTRO_PRERELEASE:STRING="devel"' \
                   if d.getVar('WEBOS_DISTRO_PRERELEASE') != '' else ''} \
                   -DWEBOS_TARGET_MACHINE_IMPL=hardware"
+
+# A pre-release build defaults SECURITY_HACKS_ENABLED to ON, which lets any
+# client register a name starting with "com.service.trusted." without a role
+# file and then call, and be called by, every service with no permission check
+# (hub.cpp, security.cpp). Nothing in LuneOS uses such a name, and dev images
+# reach users too, so it is off in every build; the other pre-release checks
+# stay.
+EXTRA_OECMAKE += "-DSECURITY_HACKS_ENABLED:BOOL=OFF"
 
 inherit webos_component
 inherit webos_ports_ose_repo

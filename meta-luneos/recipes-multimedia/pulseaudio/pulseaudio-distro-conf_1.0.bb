@@ -32,6 +32,16 @@ WEBOS_PCM_OUTPUT_MASTER ?= "sink.primary_output"
 # And the source webos-system.pa remaps pcm_input onto.
 WEBOS_PCM_INPUT_MASTER ?= "source.primary_input"
 
+# Arguments for module-bluetooth-discover. Elsewhere PulseAudio's defaults
+# (headset=native, which registers HSP and the HFP audio gateway itself).
+# On Halium a call reaches a hands-free headset through oFono's hfp_ag_bluez5,
+# audiod (its audio agent, holding the SCO link) and the Android HAL (which
+# moves the audio), so PulseAudio must leave HFP alone: no native HFP or HSP
+# gateway, and not oFono's agent either. enable_native_hsp_hs has to be given:
+# it defaults to the opposite of enable_native_hfp_hf. A2DP is not affected.
+WEBOS_PA_BLUETOOTH_DISCOVER_ARGS ?= ""
+WEBOS_PA_BLUETOOTH_DISCOVER_ARGS:halium ?= "headset=native enable_native_hfp_hf=false enable_native_hsp_hs=false"
+
 do_install() {
     install -d ${D}${sysconfdir}/pulse
     install -m 0644 ${UNPACKDIR}/webos-system.pa ${D}${sysconfdir}/pulse/
@@ -39,6 +49,7 @@ do_install() {
 
     sed -i -e 's|@PCM_OUTPUT_MASTER@|${WEBOS_PCM_OUTPUT_MASTER}|g' \
            -e 's|@PCM_INPUT_MASTER@|${WEBOS_PCM_INPUT_MASTER}|g' \
+           -e 's|@BLUETOOTH_DISCOVER_ARGS@|${WEBOS_PA_BLUETOOTH_DISCOVER_ARGS}|g' \
         ${D}${sysconfdir}/pulse/webos-system.pa
 
     # The ALSA names the messaging connectors' VoIP calls play to and record

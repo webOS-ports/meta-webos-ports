@@ -1,0 +1,508 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 4 Nov 2026 01:31:10 +0100
+Subject: [PATCH] webOS: carry calls with tgcalls-lite when the peer speaks
+ tgcalls V2
+
+Current Telegram clients run calls on tgcalls. The versions they register
+are 2.7.7 and 5.0.0 (InstanceImpl) and 7.0.0 to 13.0.0 (InstanceV2Impl).
+None of them is libtgvoip, so with library_versions left empty a call has
+no engine both ends share.
+
+tgcalls-lite (luneos-synergy-connectors, im/telegram/plugin/tgcalls-lite)
+implements tgcalls V2 with signalling version 7.0.0:
+- signalling packets encrypted as tgcalls' EncryptedConnection does and
+  relayed by TDLib;
+- ICE through libnice, using the STUN/TURN servers TDLib hands over;
+- DTLS-SRTP and Opus;
+- audio on the PulseAudio call devices libtgvoip already uses
+  ("voipcall" and "webcall").
+
+When it is built in (tgcalls_lite_INCLUDE_DIRS/_LIBRARIES):
+
+- callProtocol.library_versions is ["7.0.0"];
+- if the agreed protocol in callStateReady names 7.0.0, the call runs
+  on tgcalls-lite. Its signalling goes out through sendCallSignalingData
+  and comes in through updateNewCallSignalingData. Signalling that
+  arrives before callStateReady is kept until the engine starts;
+- otherwise the call stays on libtgvoip as before;
+- LUNEOS_TELEGRAM_CALL_ENGINE=tgvoip in the service's environment turns
+  tgcalls-lite off, for comparison.
+
+Telegram's own reflectors (callServerTypeTelegramReflector) speak tgcalls'
+ReflectorPort protocol, not TURN, so tgcalls-lite only uses the WebRTC
+STUN/TURN servers. Calls are voice only: no video source or sink is wired
+to the engine yet. The plug-in is built as C++17 when tgcalls-lite is
+in, because its headers need it.
+
+Also fixed: when a call could not be activated, the VoIPController was
+deleted without Stop(), and libtgvoip aborts the process in that case.
+It is now stopped first.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ CMakeLists.txt      |  14 ++++
+ account-data.cpp    |  17 +++++
+ account-data.h      |   9 +++
+ call.cpp            |  51 +++++++++----
+ call.h              |   2 +
+ td-client.cpp       |   6 ++
+ test/CMakeLists.txt |   1 +
+ tgcalls-call.cpp    | 175 ++++++++++++++++++++++++++++++++++++++++++++
+ tgcalls-call.h      |  36 +++++++++
+ 9 files changed, 297 insertions(+), 14 deletions(-)
+ create mode 100644 tgcalls-call.cpp
+ create mode 100644 tgcalls-call.h
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 77d977d..e300b8a 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -74,6 +74,7 @@ add_library(telegram-tdlib SHARED
+     file-transfer.cpp
+     call.cpp
+     call-luna.cpp
++    tgcalls-call.cpp
+     identifiers.cpp
+     secret-chat.cpp
+ )
+@@ -119,6 +120,19 @@ if (NOT NoVoip)
+     endif (tgvoip_NO_DSP)
+ endif (NOT NoVoip)
+ 
++# tgcalls-lite (luneos-synergy-connectors, im/telegram/plugin/tgcalls-lite): calls with the tgcalls
++# V2 protocol current clients speak, next to libtgvoip. Its headers need C++17.
++set(tgcalls_lite_INCLUDE_DIRS "" CACHE STRING "tgcalls-lite headers; empty builds without it")
++set(tgcalls_lite_LIBRARIES "" CACHE STRING "tgcalls-lite library (libtgcalls-lite.a)")
++if (NOT NoVoip AND NOT tgcalls_lite_INCLUDE_DIRS STREQUAL "")
++    pkg_check_modules(tgcalls_lite_deps REQUIRED glib-2.0 nice libsrtp2 openssl json-glib-1.0 opus libpulse-simple)
++    target_compile_definitions(telegram-tdlib PRIVATE HAVE_TGCALLS_LITE)
++    target_include_directories(telegram-tdlib SYSTEM PRIVATE ${tgcalls_lite_INCLUDE_DIRS} ${tgcalls_lite_deps_INCLUDE_DIRS})
++    target_link_libraries(telegram-tdlib PRIVATE ${tgcalls_lite_LIBRARIES} ${tgcalls_lite_deps_LIBRARIES})
++    set_property(TARGET telegram-tdlib PROPERTY CXX_STANDARD 17)
++    message(STATUS "tgcalls-lite: enabled")
++endif ()
++
+ if (DEFINED STANDARD_LIBRARIES_EXTRA)
+     set (CMAKE_CXX_STANDARD_LIBRARIES "${CMAKE_CXX_STANDARD_LIBRARIES} ${STANDARD_LIBRARIES_EXTRA}")
+ endif (DEFINED STANDARD_LIBRARIES_EXTRA)
+diff --git a/account-data.cpp b/account-data.cpp
+index ab8d9f3..85463a7 100644
+--- a/account-data.cpp
++++ b/account-data.cpp
+@@ -1102,8 +1102,25 @@ tgvoip::VoIPController *TdAccountData::getCallData()
+     return m_callData.get();
+ }
+ 
++void TdAccountData::addPendingCallSignaling(const std::string &data)
++{
++    // Only the first few messages can arrive before the engine starts; a peer flooding us is
++    // not worth queueing.
++    if (m_pendingCallSignaling.size() < 64)
++        m_pendingCallSignaling.push_back(data);
++}
++
++std::vector<std::string> TdAccountData::takePendingCallSignaling()
++{
++    std::vector<std::string> result;
++    result.swap(m_pendingCallSignaling);
++    return result;
++}
++
+ void TdAccountData::removeActiveCall()
+ {
++    m_callEngine.reset();
++    m_pendingCallSignaling.clear();
+     m_callData.reset();
+     m_callId = 0;
+     m_callInitiating = false;   // failed/ended: allow a fresh dial
+diff --git a/account-data.h b/account-data.h
+index 33af929..0e2e492 100644
+--- a/account-data.h
++++ b/account-data.h
+@@ -478,6 +478,13 @@ public:
+     int32_t                    getActiveCallId() const { return m_callId; }
+     tgvoip::VoIPController    *getCallData();
+     void                       removeActiveCall();
++    // The tgcalls-lite engine of the active call (tgcalls-call.cpp), type-erased so this header
++    // needs none of its headers; empty for a libtgvoip call. Dropped with the call.
++    void                      *getCallEngine() const { return m_callEngine.get(); }
++    void                       setCallEngine(std::shared_ptr<void> engine) { m_callEngine = std::move(engine); }
++    // Call signalling that arrived before the engine started.
++    void                       addPendingCallSignaling(const std::string &data);
++    std::vector<std::string>   takePendingCallSignaling();
+     // createCall is async: hasActiveCall() only turns true once callStatePending arrives, so two
+     // dials fired in the same tick (e.g. the dialer sending both a resolved "id<n>" and the raw
+     // phone number for the same contact) both pass the guard and start two calls. This flag is set
+@@ -575,6 +582,8 @@ private:
+ 
+     // Voice call data
+     std::unique_ptr<tgvoip::VoIPController> m_callData;
++    std::shared_ptr<void>                   m_callEngine;
++    std::vector<std::string>                m_pendingCallSignaling;
+     int32_t                                 m_callId;
+     bool                                    m_callInitiating = false;
+     std::string                             m_callDialedAddress;
+diff --git a/call.cpp b/call.cpp
+index 89acf54..3d5e3bd 100644
+--- a/call.cpp
++++ b/call.cpp
+@@ -7,6 +7,7 @@
+ #include "purple-info.h"
+ #include "td-client.h"
+ #include "call-luna.h"
++#include "tgcalls-call.h"
+ #include <glib.h>
+ 
+ static td::td_api::object_ptr<td::td_api::callProtocol> getCallProtocol()
+@@ -16,20 +17,14 @@ static td::td_api::object_ptr<td::td_api::callProtocol> getCallProtocol()
+     protocol->udp_reflector_ = true;
+     protocol->min_layer_     = 65;
+     protocol->max_layer_     = 92;
+-    // library_versions_ deliberately left empty. Two things tried and REVERTED here, both worse
+-    // than empty:
+-    //  - Our vendored libtgvoip's own "2.5" string: peer's real client rejected the call outright
+-    //    as outdated ("please update Telegram") -- not a real libtgvoip release.
+-    //  - "2.7.7" (a real, confirmed-embedded-in-current-official-APK version string, the last
+-    //    public grishka/libtgvoip release): the call no longer gets rejected, but the peer never
+-    //    sends us a single PKT_INIT at all (confirmed via VoIPController.cpp's DIAG logging --
+-    //    zero "recv" lines for two full test calls, versus reliably receiving flags=0x0 PKT_INITs
+-    //    with this field empty). Declaring a real version apparently steers the peer's client onto
+-    //    a different call-setup path (likely newer tgcalls V2/WebRTC-style signaling) that this
+-    //    legacy VoIPController can't speak at all -- worse than the video-only gap empty leaves us
+-    //    with, since it silently breaks audio too (peer's own UI hangs on "Exchanging encryption
+-    //    keys" waiting for a media connection that never arrives). Left empty: audio negotiates
+-    //    reliably; video remains unavailable pending a real fix for this call-path steering.
++    // library_versions_: with tgcalls-lite built in, "7.0.0", the tgcalls V2 version it speaks,
++    // which current clients register (InstanceV2Impl). Otherwise empty, for libtgvoip: libtgvoip
++    // has no version a current client still registers, and "2.7.7" or libtgvoip's own "2.5" made
++    // peers reject the call or never start it.
++#ifdef HAVE_TGCALLS_LITE
++    if (tgcallsLiteEnabled())
++        protocol->library_versions_.push_back(tgcallsLiteVersion());
++#endif
+     return protocol;
+ }
+ 
+@@ -106,6 +101,19 @@ static bool activateCall(const td::td_api::call &call, const std::string &buddyN
+         return false;
+     }
+ 
++#ifdef HAVE_TGCALLS_LITE
++    // The peer agreed on tgcalls-lite's version: tgcalls V2 media, not libtgvoip's.
++    if (tgcallsLiteEnabled() && tgcallsLiteAgreed(state)) {
++        if (!tgcallsLiteStart(call, state, account, transceiver))
++            return false;
++        if (!buddyName.empty())
++            showMessageTextIm(account, buddyName.c_str(), NULL,
++                              call.is_outgoing_ ? _("Call active") : _("Call active, type /hangup to terminate"),
++                              time(NULL), PURPLE_MESSAGE_SYSTEM);
++        return true;
++    }
++#endif
++
+     tgvoip::VoIPController *voip = account.getCallData();
+     if (!voip)
+         return false;
+@@ -170,6 +178,11 @@ static void deactivateCall(TdAccountData &account)
+ {
+ #ifndef NoVoip
+     callLunaSetCallAudio(false);   // and that it is over
++#ifdef HAVE_TGCALLS_LITE
++    tgcallsLiteStop(account);
++#endif
++    // Also for a tgcalls-lite call or one that never started: libtgvoip aborts when a
++    // VoIPController is deleted without Stop(), and Stop() on an idle one does nothing harmful.
+     tgvoip::VoIPController *voip = account.getCallData();
+     if (voip)
+         voip->Stop();
+@@ -260,6 +273,7 @@ void updateCall(const td::td_api::call &call, TdAccountData &account, TdTranscei
+     } else if (call.state_->get_id() == td::td_api::callStateReady::ID) {
+         if (! activateCall(call, buddyName, account, transceiver)) {
+             discardCall(call.id_, transceiver);
++            deactivateCall(account);   // Stop() before the VoIPController is deleted, or libtgvoip aborts
+             account.removeActiveCall();
+         } else {
+             callLunaPushState("active", peerAddr.c_str(),
+@@ -294,6 +308,15 @@ void updateCall(const td::td_api::call &call, TdAccountData &account, TdTranscei
+     }
+ }
+ 
++void handleCallSignalingData(int32_t callId, const std::string &data, TdAccountData &account)
++{
++#ifdef HAVE_TGCALLS_LITE
++    tgcallsLiteSignalingData(callId, data, account);
++#else
++    (void)callId; (void)data; (void)account;
++#endif
++}
++
+ void discardCurrentCall(TdAccountData &account, TdTransceiver &transceiver)
+ {
+     if (account.hasActiveCall())
+diff --git a/call.h b/call.h
+index 68ecb23..25fe34d 100644
+--- a/call.h
++++ b/call.h
+@@ -5,6 +5,8 @@
+ 
+ bool initiateCall(int64_t userId, bool video, TdAccountData &account, TdTransceiver &transceiver);
+ void updateCall(const td::td_api::call &call, TdAccountData &account, TdTransceiver &transceiver);
++// updateNewCallSignalingData: signalling from the peer's tgcalls, for tgcalls-lite.
++void handleCallSignalingData(int32_t callId, const std::string &data, TdAccountData &account);
+ void discardCurrentCall(TdAccountData &account, TdTransceiver &transceiver);
+ void acceptCurrentCall(TdAccountData &account, TdTransceiver &transceiver);
+ void showCallMessage(const td::td_api::chat &chat, const TgMessageInfo &message,
+diff --git a/td-client.cpp b/td-client.cpp
+index d418317..9494d7c 100644
+--- a/td-client.cpp
++++ b/td-client.cpp
+@@ -342,6 +342,12 @@ void PurpleTdClient::processUpdate(td::td_api::Object &update)
+         break;
+     };
+ 
++    case td::td_api::updateNewCallSignalingData::ID: {
++        auto &signaling = static_cast<const td::td_api::updateNewCallSignalingData &>(update);
++        handleCallSignalingData(signaling.call_id_, signaling.data_, m_data);
++        break;
++    };
++
+     case td::td_api::updateChatReadOutbox::ID: {
+         // webOS read ticks (double tick): the recipient has READ all our outgoing messages in this chat
+         // up to last_read_outbox_message_id_. Emit a "read" watermark scoped to the chat; the transport
+diff --git a/test/CMakeLists.txt b/test/CMakeLists.txt
+index e3ef31e..259057e 100644
+--- a/test/CMakeLists.txt
++++ b/test/CMakeLists.txt
+@@ -41,6 +41,7 @@ add_executable(tests EXCLUDE_FROM_ALL
+     ../media-variants.cpp
+     ../file-transfer.cpp
+     ../call.cpp
++    ../tgcalls-call.cpp
+     ../identifiers.cpp
+     ../secret-chat.cpp
+ )
+diff --git a/tgcalls-call.cpp b/tgcalls-call.cpp
+new file mode 100644
+index 0000000..723ed50
+--- /dev/null
++++ b/tgcalls-call.cpp
+@@ -0,0 +1,175 @@
++#include "tgcalls-call.h"
++
++#ifdef HAVE_TGCALLS_LITE
++
++#include "call-luna.h"
++#include "config.h"
++#include "transceiver.h"
++
++#include <call_engine.h>
++
++#include <glib.h>
++#include <purple.h>
++
++#include <cstdlib>
++#include <cstring>
++#include <memory>
++#include <vector>
++
++namespace {
++
++constexpr char kVersion[] = "7.0.0";
++constexpr size_t kKeySize = 256;
++constexpr guint kTickMs = 500;
++
++// One running call: the engine and the timer that drives its DTLS retransmissions.
++struct LiteCall {
++    std::unique_ptr<tgcalls_lite::CallEngine> engine;
++    guint tickSource = 0;
++
++    ~LiteCall()
++    {
++        if (tickSource)
++            g_source_remove(tickSource);
++    }
++};
++
++gboolean tick(gpointer data)
++{
++    static_cast<LiteCall *>(data)->engine->tick();
++    return G_SOURCE_CONTINUE;
++}
++
++LiteCall *liteCall(TdAccountData &account)
++{
++    return static_cast<LiteCall *>(account.getCallEngine());
++}
++
++void addServer(std::vector<tgcalls_lite::RtcServer> &list, const std::string &host, int32_t port,
++               const td::td_api::callServerTypeWebrtc &webrtc, bool turn)
++{
++    if (host.empty() || port <= 0 || port > 65535)
++        return;
++    tgcalls_lite::RtcServer server;
++    server.host = host;
++    server.port = (uint16_t)port;
++    server.isTurn = turn;
++    if (turn) {
++        server.login = webrtc.username_;
++        server.password = webrtc.password_;
++    }
++    list.push_back(std::move(server));
++}
++
++// STUN and TURN from callServerTypeWebrtc, both address families, as tdesktop's AppendServer()
++// does. Telegram reflectors (callServerTypeTelegramReflector) speak tgcalls' own ReflectorPort
++// protocol, which tgcalls-lite does not implement.
++std::vector<tgcalls_lite::RtcServer> rtcServers(const td::td_api::callStateReady &state)
++{
++    std::vector<tgcalls_lite::RtcServer> list;
++    for (const auto &server : state.servers_) {
++        if (!server || !server->type_ || server->type_->get_id() != td::td_api::callServerTypeWebrtc::ID)
++            continue;
++        const auto &webrtc = static_cast<const td::td_api::callServerTypeWebrtc &>(*server->type_);
++        if (webrtc.supports_stun_) {
++            addServer(list, server->ip_address_, server->port_, webrtc, false);
++            addServer(list, server->ipv6_address_, server->port_, webrtc, false);
++        }
++        if (webrtc.supports_turn_ && !webrtc.username_.empty() && !webrtc.password_.empty()) {
++            addServer(list, server->ip_address_, server->port_, webrtc, true);
++            addServer(list, server->ipv6_address_, server->port_, webrtc, true);
++        }
++    }
++    return list;
++}
++
++} // namespace
++
++const char *tgcallsLiteVersion()
++{
++    return kVersion;
++}
++
++bool tgcallsLiteEnabled()
++{
++    const char *engine = getenv("LUNEOS_TELEGRAM_CALL_ENGINE");
++    return !(engine && strcmp(engine, "tgvoip") == 0);
++}
++
++bool tgcallsLiteAgreed(const td::td_api::callStateReady &state)
++{
++    if (!state.protocol_)
++        return false;
++    for (const auto &version : state.protocol_->library_versions_)
++        if (version == kVersion)
++            return true;
++    return false;
++}
++
++bool tgcallsLiteStart(const td::td_api::call &call, const td::td_api::callStateReady &state,
++                      TdAccountData &account, TdTransceiver &transceiver)
++{
++    if (liteCall(account))
++        return true;
++    if (state.encryption_key_.size() != kKeySize) {
++        tgcLog("tgcalls-lite: encryption key is %zu bytes, not %zu", state.encryption_key_.size(), kKeySize);
++        return false;
++    }
++
++    auto lite = std::make_shared<LiteCall>();
++    // Voice only for now: there is no video source or sink wired to the engine yet.
++    lite->engine = std::make_unique<tgcalls_lite::CallEngine>(
++        g_main_context_default(), reinterpret_cast<const uint8_t *>(state.encryption_key_.data()),
++        call.is_outgoing_, false);
++    tgcalls_lite::CallEngine &engine = *lite->engine;
++
++    const auto servers = rtcServers(state);
++    const size_t applied = engine.setServers(servers);
++    tgcLog("tgcalls-lite: call %d, outgoing=%d, %zu of %zu STUN/TURN servers applied, p2p=%d",
++           (int)call.id_, (int)call.is_outgoing_, applied, servers.size(), (int)state.allow_p2p_);
++
++    const int32_t callId = call.id_;
++    engine.onOutgoingSignalingData = [callId, &transceiver](const std::vector<uint8_t> &data) {
++        auto request = td::td_api::make_object<td::td_api::sendCallSignalingData>();
++        request->call_id_ = callId;
++        request->data_.assign(reinterpret_cast<const char *>(data.data()), data.size());
++        transceiver.sendQuery(std::move(request), nullptr);
++    };
++    engine.onMediaReady = [callId]() {
++        tgcLog("tgcalls-lite: call %d media connected", (int)callId);
++    };
++
++    lite->tickSource = g_timeout_add(kTickMs, tick, lite.get());
++    account.setCallEngine(lite);
++
++    // audiod routes the voipcall sink and webcall source once it knows a VoIP call is up.
++    callLunaSetCallAudio(true);
++    if (!engine.startAudio("voipcall", "webcall"))
++        tgcLog("tgcalls-lite: call %d has no audio", (int)callId);
++    engine.start();
++
++    // Signalling that arrived before callStateReady.
++    for (const std::string &data : account.takePendingCallSignaling())
++        engine.handleIncomingSignalingData(std::vector<uint8_t>(data.begin(), data.end()));
++    return true;
++}
++
++void tgcallsLiteSignalingData(int32_t callId, const std::string &data, TdAccountData &account)
++{
++    if (!account.hasActiveCall() || account.getActiveCallId() != callId)
++        return;
++    if (LiteCall *lite = liteCall(account))
++        lite->engine->handleIncomingSignalingData(std::vector<uint8_t>(data.begin(), data.end()));
++    else
++        account.addPendingCallSignaling(data);
++}
++
++void tgcallsLiteStop(TdAccountData &account)
++{
++    if (!liteCall(account))
++        return;
++    tgcLog("tgcalls-lite: call %d stopped", (int)account.getActiveCallId());
++    account.setCallEngine(nullptr);
++}
++
++#endif
+diff --git a/tgcalls-call.h b/tgcalls-call.h
+new file mode 100644
+index 0000000..58c4b14
+--- /dev/null
++++ b/tgcalls-call.h
+@@ -0,0 +1,36 @@
++#ifndef _TGCALLS_CALL_H
++#define _TGCALLS_CALL_H
++
++// Telegram calls through tgcalls-lite: tgcalls V2 with signalling version 7.0.0 (raw encrypted
++// signalling packets relayed by TDLib, ICE through libnice, DTLS-SRTP, Opus). Current clients
++// register that version (tgcalls InstanceV2Impl); libtgvoip carries a call only when the peer
++// agrees on no version at all.
++
++#include "account-data.h"
++#include <string>
++
++#ifdef HAVE_TGCALLS_LITE
++
++// The library version tgcalls-lite speaks, for callProtocol.library_versions.
++const char *tgcallsLiteVersion();
++
++// False when LUNEOS_TELEGRAM_CALL_ENGINE=tgvoip is set, to fall back to libtgvoip for testing.
++bool tgcallsLiteEnabled();
++
++// True if the agreed protocol in callStateReady names tgcallsLiteVersion().
++bool tgcallsLiteAgreed(const td::td_api::callStateReady &state);
++
++// Starts the engine for a call that reached callStateReady. Returns false if it could not start
++// (bad key, engine error); the caller then discards the call.
++bool tgcallsLiteStart(const td::td_api::call &call, const td::td_api::callStateReady &state,
++                      TdAccountData &account, TdTransceiver &transceiver);
++
++// updateNewCallSignalingData for the active call. Kept until the engine starts if it is early.
++void tgcallsLiteSignalingData(int32_t callId, const std::string &data, TdAccountData &account);
++
++// Stops the engine and its audio, if one is running.
++void tgcallsLiteStop(TdAccountData &account);
++
++#endif
++
++#endif

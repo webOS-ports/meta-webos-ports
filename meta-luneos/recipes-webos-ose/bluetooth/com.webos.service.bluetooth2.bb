@@ -52,7 +52,7 @@ WEBOS_BLUETOOTH_PAIRING_IO_CAPABILITY ??= "NoInputNoOutput"
 # changes as commits, the two patches this recipe used to apply among them.
 # Plain SRCREV: submission tags are a webosose convention.
 PV = "1.0.0-79+git"
-SRCREV = "f0babdaba5e45458688429646f5da1e369c0c9de"
+SRCREV = "22b3e6f0ab86aa2795685f68457bb58c4079c22c"
 PR = "r13"
 
 inherit webos_component

@@ -1,0 +1,271 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] voicecall: answer headset commands on the modem that has the call
+
+voicecall registers its headset commands on every emulator atom of its
+modem, and with one emulator for both SIMs the command may arrive at the
+voicecall of the modem without the call: ATA for a call ringing on the
+second SIM then answers ERROR, and AT+CHUP hangs up nothing.
+
+Pick the voicecall for each command among all modems the emulator
+serves:
+
+  ATA                   the modem with an incoming call
+  AT+CHUP, AT+CHLD,     the modem with a call or a dial in progress
+  ATD, AT+BLDN
+  AT+VTS                the modem with a call that can send DTMF
+
+and fall back to the voicecall that owns the handler when no modem
+matches. AT+CLCC lists the calls of every modem.
+__ofono_emulator_foreach_modem() walks the modems an emulator serves,
+in the order they were added.
+
+ATD with no call anywhere dials on the first modem the emulator serves,
+which is the first modem hfp_ag_bluez5 saw become ready. Sailfish dials
+on the modem whose voicecall registered the "D" handler last. Neither
+asks the default voice modem setting, which lives outside the core.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+
+diff --git a/src/emulator.c b/src/emulator.c
+index 13621fa..24e3451 100644
+--- a/src/emulator.c
++++ b/src/emulator.c
+@@ -2077,6 +2077,20 @@ static void call_indicators_drop_modem(struct ofono_emulator *em,
+ 		call_indicators_update(em, NULL, true, true, true);
+ }
+ 
++void __ofono_emulator_foreach_modem(struct ofono_emulator *em,
++					ofono_modem_foreach_func cb,
++					void *data)
++{
++	GSList *l;
++
++	for (l = em->modems; l; l = l->next) {
++		struct emulator_modem *m = l->data;
++
++		if (__ofono_atom_get_registered(m->atom))
++			cb(__ofono_atom_get_modem(m->atom), data);
++	}
++}
++
+ void __ofono_emulator_set_atom_indicator(struct ofono_atom *atom,
+ 						const char *name, int value)
+ {
+diff --git a/src/ofono.h b/src/ofono.h
+index 0442ca2..ddfdc72 100644
+--- a/src/ofono.h
++++ b/src/ofono.h
+@@ -655,6 +655,11 @@ ofono_bool_t __ofono_emulator_add_atom_handler(struct ofono_atom *atom,
+ void __ofono_emulator_remove_atom_handler(struct ofono_atom *atom,
+ 						const char *prefix);
+ 
++/* The modems an emulator serves, in the order they were added */
++void __ofono_emulator_foreach_modem(struct ofono_emulator *em,
++					ofono_modem_foreach_func cb,
++					void *data);
++
+ /* One modem's call indicator; merged with the other modems' for the HF */
+ void __ofono_emulator_set_atom_indicator(struct ofono_atom *atom,
+ 						const char *name, int value);
+diff --git a/src/voicecall.c b/src/voicecall.c
+index cb0535b..c1feeb9 100644
+--- a/src/voicecall.c
++++ b/src/voicecall.c
+@@ -3063,6 +3063,44 @@ static void emulator_mpty_private_chat_cb(const struct ofono_error *error,
+ 	g_slist_free(old);
+ }
+ 
++/*
++ * An emulator can serve several modems, and the handlers it calls belong to
++ * the first of them. Commands about a call go to the modem that has it.
++ */
++struct emulator_vc_search {
++	gboolean (*match)(struct ofono_voicecall *vc);
++	struct ofono_voicecall *found;
++};
++
++static void emulator_vc_search_cb(struct ofono_modem *modem, void *data)
++{
++	struct emulator_vc_search *s = data;
++	struct ofono_voicecall *vc;
++
++	if (s->found)
++		return;
++
++	vc = __ofono_atom_find(OFONO_ATOM_TYPE_VOICECALL, modem);
++	if (vc && s->match(vc))
++		s->found = vc;
++}
++
++static struct ofono_voicecall *emulator_target_vc(struct ofono_emulator *em,
++				struct ofono_voicecall *fallback,
++				gboolean (*match)(struct ofono_voicecall *vc))
++{
++	struct emulator_vc_search s = { .match = match, .found = NULL };
++
++	__ofono_emulator_foreach_modem(em, emulator_vc_search_cb, &s);
++
++	return s.found ? s.found : fallback;
++}
++
++static gboolean voicecalls_have_any(struct ofono_voicecall *vc)
++{
++	return vc->call_list != NULL || vc->dial_req != NULL;
++}
++
+ #define CHECK_BUSY(vc, em, result)				\
+ 	if (vc->pending || vc->dial_req || vc->pending_em) {	\
+ 		result.error = 126;				\
+@@ -3074,7 +3112,8 @@ static void emulator_ata_cb(struct ofono_emulator *em,
+ 				struct ofono_emulator_request *req,
+ 				void *userdata)
+ {
+-	struct ofono_voicecall *vc = userdata;
++	struct ofono_voicecall *vc = emulator_target_vc(em, userdata,
++						voicecalls_have_incoming);
+ 	struct ofono_error result;
+ 
+ 	result.error = 0;
+@@ -3103,7 +3142,8 @@ fail:
+ static void emulator_chup_cb(struct ofono_emulator *em,
+ 			struct ofono_emulator_request *req, void *userdata)
+ {
+-	struct ofono_voicecall *vc = userdata;
++	struct ofono_voicecall *vc = emulator_target_vc(em, userdata,
++							voicecalls_have_any);
+ 	struct ofono_error result;
+ 
+ 	result.error = 0;
+@@ -3145,11 +3185,22 @@ fail:
+ 	}
+ }
+ 
++static void emulator_clcc_collect_cb(struct ofono_modem *modem, void *data)
++{
++	GSList **vcs = data;
++	struct ofono_voicecall *vc;
++
++	vc = __ofono_atom_find(OFONO_ATOM_TYPE_VOICECALL, modem);
++	if (vc && vc->call_list)
++		*vcs = g_slist_append(*vcs, vc);
++}
++
+ static void emulator_clcc_cb(struct ofono_emulator *em,
+ 			struct ofono_emulator_request *req, void *userdata)
+ {
+-	struct ofono_voicecall *vc = userdata;
+ 	struct ofono_error result;
++	GSList *vcs = NULL;
++	GSList *m;
+ 	GSList *l;
+ 	/*
+ 	 *          idx   dir  stat  mode  mpty
+@@ -3162,31 +3213,43 @@ static void emulator_clcc_cb(struct ofono_emulator *em,
+ 
+ 	switch (ofono_emulator_request_get_type(req)) {
+ 	case OFONO_EMULATOR_REQUEST_TYPE_COMMAND_ONLY:
+-		for (l = vc->call_list; l; l = l->next) {
+-			struct voicecall *v = l->data;
+-			const char *number = "";
+-			int type = 128;
+-			gboolean mpty;
++		/* The calls of every modem the emulator serves */
++		__ofono_emulator_foreach_modem(em, emulator_clcc_collect_cb,
++						&vcs);
+ 
+-			if (g_slist_find_custom(vc->multiparty_list,
++		for (m = vcs; m; m = m->next) {
++			struct ofono_voicecall *vc = m->data;
++
++			for (l = vc->call_list; l; l = l->next) {
++				struct voicecall *v = l->data;
++				const char *number = "";
++				int type = 128;
++				gboolean mpty;
++
++				if (g_slist_find_custom(vc->multiparty_list,
+ 						GINT_TO_POINTER(v->call->id),
+ 						call_compare_by_id))
+-				mpty = TRUE;
+-			else
+-				mpty = FALSE;
++					mpty = TRUE;
++				else
++					mpty = FALSE;
+ 
+-			if (v->call->clip_validity == CLIP_VALIDITY_VALID) {
+-				number = v->call->phone_number.number;
+-				type = v->call->phone_number.type;
+-			}
++				if (v->call->clip_validity ==
++						CLIP_VALIDITY_VALID) {
++					number = v->call->phone_number.number;
++					type = v->call->phone_number.type;
++				}
+ 
+-			sprintf(buf, "+CLCC: %d,%d,%d,0,%d,\"%s\",%d",
++				sprintf(buf, "+CLCC: %d,%d,%d,0,%d,\"%s\",%d",
+ 					v->call->id, v->call->direction,
+ 					v->call->status, mpty, number, type);
+-			ofono_emulator_send_info(em, buf, l->next == NULL ?
+-							TRUE : FALSE);
++				ofono_emulator_send_info(em, buf,
++						l->next == NULL &&
++						m->next == NULL);
++			}
+ 		}
+ 
++		g_slist_free(vcs);
++
+ 		result.type = OFONO_ERROR_TYPE_NO_ERROR;
+ 		break;
+ 
+@@ -3211,7 +3274,8 @@ static void emulator_clcc_cb(struct ofono_emulator *em,
+ static void emulator_chld_cb(struct ofono_emulator *em,
+ 			struct ofono_emulator_request *req, void *userdata)
+ {
+-	struct ofono_voicecall *vc = userdata;
++	struct ofono_voicecall *vc = emulator_target_vc(em, userdata,
++							voicecalls_have_any);
+ 	struct ofono_error result;
+ 	char buf[64];
+ 	char *info;
+@@ -3378,7 +3442,8 @@ static void vts_tone_cb(int error, void *data)
+ static void emulator_vts_cb(struct ofono_emulator *em,
+ 			struct ofono_emulator_request *req, void *userdata)
+ {
+-	struct ofono_voicecall *vc = userdata;
++	struct ofono_voicecall *vc = emulator_target_vc(em, userdata,
++							voicecalls_can_dtmf);
+ 	struct ofono_error result;
+ 	const char *str;
+ 
+@@ -3477,10 +3542,16 @@ send:
+ 	ofono_emulator_send_final(em, &result);
+ }
+ 
++/*
++ * Dialling from the headset: on the modem that already has a call, as a
++ * second call cannot go out on another one, and otherwise on the modem whose
++ * handler this is, the first one the emulator serves.
++ */
+ static void emulator_atd_cb(struct ofono_emulator *em,
+ 			struct ofono_emulator_request *req, void *userdata)
+ {
+-	struct ofono_voicecall *vc = userdata;
++	struct ofono_voicecall *vc = emulator_target_vc(em, userdata,
++							voicecalls_have_any);
+ 	struct ofono_modem *modem = __ofono_atom_get_modem(vc->atom);
+ 	const char *str;
+ 	size_t len;
+@@ -3538,7 +3609,8 @@ fail:
+ static void emulator_bldn_cb(struct ofono_emulator *em,
+ 			struct ofono_emulator_request *req, void *userdata)
+ {
+-	struct ofono_voicecall *vc = userdata;
++	struct ofono_voicecall *vc = emulator_target_vc(em, userdata,
++							voicecalls_have_any);
+ 	char *number = NULL;
+ 	struct ofono_error result;
+ 

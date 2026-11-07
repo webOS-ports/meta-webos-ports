@@ -21,7 +21,7 @@
 # A new patch goes in the half it belongs to. When a generic patch is sent or merged, update its
 # Upstream-Status; when it is merged, drop it with the SRCREV bump that brings it in.
 #
-# SRCREVs are pinned deliberately, like purple-matrix_git.bb. Bump them when you want the new
+# SRCREVs are pinned deliberately. Bump them when you want the new
 # work; AUTOREV would make every LuneOS build depend on whatever the branch happened to be that day.
 # The connectors commit is the one luneos-synergy-connectors-srcrev.inc pins for the cloud and
 # music recipes too.

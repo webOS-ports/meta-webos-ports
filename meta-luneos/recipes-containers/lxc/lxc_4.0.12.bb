@@ -173,10 +173,16 @@ do_install:append() {
 	# lxcbr0 will be fully configured.
 	install -m 644 ${UNPACKDIR}/lxc-net ${D}${sysconfdir}/default/
 
-	# Force the main dnsmasq instance to bind only to specified interfaces and
-	# to not bind to virbr0. Libvirt will run its own instance on this interface.
+	# Keep the system dnsmasq instance, if it is ever started, on loopback
+	# only; lxc-net and waydroid-net.sh run their own instances on the bridges.
 	install -d ${D}/${sysconfdir}/dnsmasq.d
 	install -m 644 ${UNPACKDIR}/dnsmasq.conf ${D}/${sysconfdir}/dnsmasq.d/lxc
+
+	# lxc-user-nic is setuid root only so that unprivileged users can give
+	# their containers a veth on a host bridge. LuneOS runs its one container,
+	# Waydroid, as root, so the bit is only attack surface (CVE-2026-39402,
+	# patched above, was in this helper). Root can still run it.
+	chmod u-s ${D}${libexecdir}/lxc/lxc-user-nic
 }
 
 EXTRA_OEMAKE += "TEST_DIR=${D}${PTEST_PATH}/src/tests"

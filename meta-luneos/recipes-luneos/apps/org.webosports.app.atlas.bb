@@ -13,10 +13,13 @@ inherit webos_system_bus
 inherit webos_filesystem_paths
 inherit webos_app
 
+PE = "1"
 PV = "0.9.10+git"
-PR = "r2"
+PR = "r3"
 
-SRCREV = "e6cc6872f749daa957796304532150b15d7e2ef2"
+# master, which has pull requests #14 (lock in landscape), #16 (its own page on a
+# load error), #17 (leave address editing on blur) and #18 (help.luneos.org).
+SRCREV = "5d09328613f033e78b5806dcf3d1295a04578b49"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
@@ -54,9 +57,11 @@ do_compile[noexec] = "1"
 #                  does not exist here and db8 will not register a kind for an unknown owner — the
 #                  configurator reports success and nothing appears — so ownership moves to the app.
 #
-#   db8 caller     the permissions name the app exactly, but the hub gives a browsershell app an
-#                  instance-suffixed name (org.webosports.app.atlas-1) that an exact caller never
-#                  matches. Wildcard callers are the norm on this platform.
+#   db8 caller     the permissions name the app exactly, and are installed as they are. db8 takes
+#                  the caller from the message's application id, which is org.webosports.app.atlas,
+#                  not the instance-suffixed bus name (org.webosports.app.atlas-<pid>). db8 accepts a
+#                  '*' only straight after a '.', so 'org.webosports.app.atlas*' failed to install
+#                  ("invalid wildcard", MojErr -3989).
 ADAPTED = "${WORKDIR}/luneos-adapted"
 
 python do_luneos_adapt() {
@@ -102,21 +107,6 @@ python do_luneos_adapt() {
             with open(path, 'w') as f:
                 json.dump(kind, f, indent=4)
             bb.note('kind %s owner -> %s' % (name, app_id))
-
-    perms = os.path.join(out, 'db', 'permissions')
-    for name in sorted(os.listdir(perms)):
-        path = os.path.join(perms, name)
-        with open(path) as f:
-            entries = json.load(f)
-        changed = False
-        for entry in entries:
-            if entry.get('caller') == app_id:
-                entry['caller'] = app_id + '*'
-                changed = True
-        if changed:
-            with open(path, 'w') as f:
-                json.dump(entries, f, indent=4)
-            bb.note('permission %s caller -> %s*' % (name, app_id))
 }
 addtask luneos_adapt after do_patch before do_install
 

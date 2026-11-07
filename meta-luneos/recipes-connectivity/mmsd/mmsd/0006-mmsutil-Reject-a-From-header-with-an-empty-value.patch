@@ -1,0 +1,109 @@
+From e79bce435384cd8cc7c021df52d8c7ff5e800cde Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 29 Oct 2026 17:29:04 +0100
+Subject: [PATCH] mmsutil: Reject a From header with an empty value
+
+extract_from() read the Address-present-token from the first octet of
+the value without checking that the value has one. With a Value-length
+of 0 it read the octet after the value, which is past the end of the PDU
+when From is the last header, and then passed "l - 1", which wraps, to
+wsp_decode_text(), so memchr() scanned beyond the PDU.
+
+Return FALSE for an empty value. Add a unit test that decodes such an
+M-Notification.ind from a buffer of exact size.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/mmsutil.c       |  4 ++++
+ unit/test-mmsutil.c | 52 +++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 56 insertions(+)
+
+diff --git a/src/mmsutil.c b/src/mmsutil.c
+index a9a12eb..0d45078 100644
+--- a/src/mmsutil.c
++++ b/src/mmsutil.c
+@@ -368,6 +368,10 @@ static gboolean extract_from(struct wsp_header_iter *iter, void *user)
+ 	p = wsp_header_iter_get_val(iter);
+ 	l = wsp_header_iter_get_val_len(iter);
+ 
++	/* The Address-present-token or Insert-address-token is required */
++	if (l == 0)
++		return FALSE;
++
+ 	if (p[0] != 128 && p[0] != 129)
+ 		return FALSE;
+ 
+diff --git a/unit/test-mmsutil.c b/unit/test-mmsutil.c
+index 4efbbcc..235cbeb 100644
+--- a/unit/test-mmsutil.c
++++ b/unit/test-mmsutil.c
+@@ -982,6 +982,55 @@ static void test_encode_mms(gconstpointer data)
+ 	g_assert(ret == TRUE);
+ }
+ 
++/*
++ * Decode a PDU from a buffer of exactly its length, so that a read past
++ * the end is caught by ASan or valgrind.
++ */
++static gboolean decode_exact(const unsigned char *pdu, unsigned int len,
++						struct mms_message *msg)
++{
++	unsigned char *p = g_malloc(len);
++	gboolean r;
++
++	memcpy(p, pdu, len);
++	r = mms_message_decode(p, len, msg);
++	g_free(p);
++
++	return r;
++}
++
++/* M-Notification.ind whose last header is a From with Value-length 0 */
++static const unsigned char mms_m_notify_ind_empty_from[] = {
++				0x8C, 0x82, 0x98, 0x4F, 0x67, 0x00, 0x8D, 0x90,
++				0x8A, 0x80, 0x8E, 0x02, 0x40, 0x00, 0x88, 0x05,
++				0x81, 0x03, 0x03, 0xF4, 0x80, 0x83, 0x68, 0x74,
++				0x74, 0x70, 0x3A, 0x2F, 0x2F, 0x61, 0x00, 0x89,
++				0x00
++};
++
++static void test_decode_empty_from(void)
++{
++	unsigned char pdu[sizeof(mms_m_notify_ind_empty_from) + 1];
++	struct mms_message *msg = g_new0(struct mms_message, 1);
++
++	g_assert(decode_exact(mms_m_notify_ind_empty_from,
++				sizeof(mms_m_notify_ind_empty_from),
++				msg) == FALSE);
++
++	mms_message_free(msg);
++
++	/* The same PDU with From: Insert-address-token decodes */
++	memcpy(pdu, mms_m_notify_ind_empty_from, sizeof(pdu) - 1);
++	pdu[sizeof(pdu) - 2] = 0x01;
++	pdu[sizeof(pdu) - 1] = 0x81;
++
++	msg = g_new0(struct mms_message, 1);
++	g_assert(decode_exact(pdu, sizeof(pdu), msg) == TRUE);
++	g_assert(msg->ni.from == NULL);
++	g_assert_cmpstr(msg->ni.location, ==, "http://a");
++	mms_message_free(msg);
++}
++
+ int main(int argc, char **argv)
+ {
+ 	g_test_init(&argc, &argv, NULL);
+@@ -1042,5 +1091,8 @@ int main(int argc, char **argv)
+ 	g_test_add_data_func("/mmsutil/Encode MMS M-SendReq 1",
+ 				&mms_m_send_req_test_1, test_encode_mms);
+ 
++	g_test_add_func("/mmsutil/Decode empty From",
++				test_decode_empty_from);
++
+ 	return g_test_run();
+ }
+-- 
+2.53.0
+
