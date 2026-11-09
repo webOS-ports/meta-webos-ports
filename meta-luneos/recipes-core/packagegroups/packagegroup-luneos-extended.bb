@@ -116,6 +116,7 @@ RDEPENDS:${PN} = " \
   ${VIRTUAL-RUNTIME_settingsapp} \
   \
   org.webosports.cdav \
+  org.webosports.service.communityaccount \
   org.webosports.tweaks \
   \
   org.webosports.service.devmode \
