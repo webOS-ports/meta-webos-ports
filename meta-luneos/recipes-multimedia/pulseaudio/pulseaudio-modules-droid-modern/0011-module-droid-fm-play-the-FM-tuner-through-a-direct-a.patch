@@ -1,0 +1,822 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 6 Nov 2026 09:06:30 +0100
+Subject: [PATCH] module-droid-fm: play the FM tuner through a direct audio HAL
+ patch
+
+Android plays FM radio without copying a sample: AudioFlinger asks the
+audio HAL for a device-to-device patch, AUDIO_DEVICE_IN_FM_TUNER -> the
+output device, and the codec routes the tuner straight to the DAC.
+Opening the FM input as a source and looping it back, which is what
+UBports, Volla and Sailfish do, records the built-in microphone on a
+MediaTek MT6739 (the HAL opens input_device 0x80000004, not 0x80002000),
+and switching the source's port to the tuner with a capture open aborts
+PulseAudio.
+
+module-droid-fm makes that patch on the HAL module-droid-card already has
+open, and stands for the radio inside PulseAudio as an ordinary playback
+stream, by default on the "fm" sink:
+
+ - The stream plays silence, so its sink stays running and the HAL never
+   puts the playback path to standby under the radio.
+ - The active port of the droid sink the stream ends up on (through any
+   filter sinks) is the patch's output device; a port change or a move
+   re-creates the patch. A combined port such as
+   output-speaker+wired_headphone, which alerts switch to, keeps the
+   patch on the wired device, so a notification does not cut the radio.
+ - The stream's volume and mute, and those of its sink, become the HAL's
+   FM volume, so the policy's class volume, the master volume and a
+   policy duck all apply. Corked, muted or silent, the patch is released.
+
+The MT6739 HAL takes the FM volume as the gain of the patch's sink port
+(set_audio_port_config), not from set_parameters, and reads gain.values[0]
+as an unchecked index into its 16-step table, not as millibels: on
+headphones -64 dB, then -42..0 dB in 3 dB steps. The stream's volume is
+matched to that table in dB (step_db=, default 3; max_step=, default 15),
+so the radio moves 4 dB per volume key like any other stream and a -20 dB
+duck is heard as one. The patch also needs a primary output stream open,
+or the HAL fails it with -ENOSYS; the droid primary sink keeps one.
+
+The tuner itself (power, frequency) is left to the FM service, which
+loads this module while the radio is on.
+
+HALs without the patch API get mode=parameters. The Qualcomm msm8953
+HAL of an Android 9 vendor image returns -ENOSYS from
+create_audio_patch and set_audio_port_config; it starts FM with
+set_parameters("handle_fm=<output device | AUDIO_DEVICE_OUT_FM>"), stops
+it with "handle_fm=<output device>" and takes "fm_volume=<0..1>" as a
+linear gain. In that mode the module sends those instead, the stream's
+audible volume as the linear fm_volume, and leaves everything else as in
+patch mode. patch stays the default.
+
+Tested on a MediaTek MT6739 (Android 11 HAL) with the tuner on 95.0 MHz
+and wired headphones: the HAL gets createAudioPatch device
+0x80002000->0x00000008 and the radio is heard; the volume keys step it
+from silent to full; an alert switches the sink to speaker+headphones
+without releasing the patch, and with audiod giving alerts priority over
+FM, ducks the radio from step 6 to 1 and back. Again on the MT6739 with
+mode= added, patch mode, on the speaker: raising the volume from
+audiod's 0 creates 0x80002000->0x00000002 and steps the HAL's fm_volume
+0.063 -> 0.355 -> 1.0; mute and volume 0 release the patch, unmute
+creates it again; switching the port to the earpiece releases it and
+asks for 0x80002000->0x00000001, which this HAL refuses, and switching
+back to the speaker creates it again.
+
+Tested on a Xiaomi Mi A1 (msm8953) with mode=parameters and wired
+headphones: the HAL gets handle_fm=1048584 (0x100008), applies its
+play-fm path and sets fm_volume=0.3945; indoors, 95.0 MHz is heard
+through noise, and the volume keys change fm_volume.
+
+Built warning-free in its own lines with GCC 15 and Clang for armv7,
+aarch64 and x86-64; the only warnings are version.h's #warning about the
+audio device API version.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Submitted [https://github.com/droidian/pulseaudio-modules-droid-modern/pull/6]
+---
+ src/droid/meson.build       |  10 +
+ src/droid/module-droid-fm.c | 714 ++++++++++++++++++++++++++++++++++++
+ 2 files changed, 724 insertions(+)
+ create mode 100644 src/droid/module-droid-fm.c
+
+diff --git a/src/droid/meson.build b/src/droid/meson.build
+index 1dce18a..4017204 100644
+--- a/src/droid/meson.build
++++ b/src/droid/meson.build
+@@ -60,3 +60,13 @@ module_sink = shared_module('module-droid-card',
+   install_dir : modlibexecdir,
+   install_rpath : rpath_dirs,
+ )
++
++module_fm = shared_module('module-droid-fm',
++  'module-droid-fm.c',
++  name_prefix : '',
++  c_args : '-DPA_MODULE_NAME=module_droid_fm',
++  dependencies : [libdroid_util_dep],
++  install : true,
++  install_dir : modlibexecdir,
++  install_rpath : rpath_dirs,
++)
+diff --git a/src/droid/module-droid-fm.c b/src/droid/module-droid-fm.c
+new file mode 100644
+index 0000000..20b7395
+--- /dev/null
++++ b/src/droid/module-droid-fm.c
+@@ -0,0 +1,714 @@
++/*
++ * Copyright (C) 2026 Herman van Hazendonk <github.com@herrie.org>
++ *
++ * These PulseAudio Modules are free software; you can redistribute
++ * it and/or modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation
++ * version 2.1 of the License.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301
++ * USA.
++ */
++
++/*
++ * module-droid-fm: play the FM tuner through a direct audio HAL patch.
++ *
++ * Android plays FM radio without copying samples: AudioFlinger asks the
++ * audio HAL for a device-to-device patch, AUDIO_DEVICE_IN_FM_TUNER -> the
++ * output device, and the codec routes the tuner's I2S input straight to the
++ * DAC. This module does the same on the HAL that module-droid-card already
++ * has open, and represents the radio inside PulseAudio as an ordinary
++ * playback stream, so the rest of the system treats it like any other:
++ *
++ *  - The stream is opened on a sink chosen by the caller (default "fm", the
++ *    webOS virtual sink for FM radio), so the policy routes it, gives it the
++ *    FM volume, mutes, corks and moves it like any stream of that class.
++ *  - The stream plays silence. That keeps the output it lands on running, so
++ *    the HAL never puts the playback path to standby under the radio.
++ *  - Where the stream ends up decides the patch: its sink (through any filter
++ *    sinks) must be a droid sink, and the active port of that sink is the
++ *    patch's output device. A port change or a move re-creates the patch.
++ *  - The stream's volume and mute become the HAL's FM volume. Corked, muted
++ *    or at zero volume, the patch is released, so the radio is really silent.
++ *
++ * The tuner itself (power, frequency) is not this module's business; the FM
++ * service drives the receiver and loads this module while the radio is on.
++ *
++ * mode=parameters is for HALs without the patch API, such as the Qualcomm
++ * msm8953 HAL of an Android 9 vendor image, whose create_audio_patch
++ * returns -ENOSYS: there the FM path is turned on
++ * and off with set_parameters("handle_fm=<output device | AUDIO_DEVICE_OUT_FM>")
++ * and set_parameters("handle_fm=<output device>"), and its volume is
++ * set_parameters("fm_volume=<0..1>"), a linear gain. Everything else - the
++ * stream, the routing, when it is on - is the same.
++ *
++ * HAL notes, from the MediaTek mt6739 HAL (Android 11) this was written on:
++ *  - The FM patch is implemented as routing on the primary output stream and
++ *    fails with -ENOSYS if no primary output is open; the droid primary sink
++ *    keeps one open.
++ *  - The FM volume is not taken from set_parameters; it is the gain of the
++ *    patch's sink port, set with set_audio_port_config. gain.values[0] is used
++ *    as a volume index into the HAL's gain table (0..15), not as millibels,
++ *    and is not bounds-checked by the HAL: never pass more than max_step.
++ */
++
++#ifdef HAVE_CONFIG_H
++#include <config.h>
++#endif
++
++#include <stdarg.h>
++#include <string.h>
++
++#include <pulse/volume.h>
++#include <pulse/xmalloc.h>
++
++#include <pulsecore/core.h>
++#include <pulsecore/core-util.h>
++#include <pulsecore/i18n.h>
++#include <pulsecore/log.h>
++#include <pulsecore/macro.h>
++#include <pulsecore/modargs.h>
++#include <pulsecore/module.h>
++#include <pulsecore/namereg.h>
++#include <pulsecore/sample-util.h>
++#include <pulsecore/shared.h>
++#include <pulsecore/sink-input.h>
++#include <pulsecore/sink.h>
++
++#include <droid/conversion.h>
++#include <droid/droid-util.h>
++
++PA_MODULE_AUTHOR("Herman van Hazendonk");
++PA_MODULE_DESCRIPTION("Droid FM radio through the audio HAL");
++PA_MODULE_VERSION(PULSEAUDIO_PACKAGE_VERSION);
++PA_MODULE_LOAD_ONCE(true);
++PA_MODULE_USAGE(
++        "sink=<sink the FM stream is opened on, default fm> "
++        "mode=<patch: an audio patch, the default; parameters: handle_fm and fm_volume> "
++        "max_step=<highest HAL FM volume index, 1..15, default 15> "
++        "step_db=<dB between HAL FM volume steps, 1..20, default 3>");
++
++#define DEFAULT_SINK            "fm"
++/* What droid-util publishes the primary HAL under for other modules
++ * (droid-util.c, DROID_HW_HANDLE_V1); only defined there. */
++#define DROID_HW_HANDLE_V1      "droid.handle.v1"
++#define DEFAULT_MAX_STEP        15
++/* The gain table of the HAL this was written on has 16 indices per device. */
++#define HAL_MAX_STEP            15
++#define DEFAULT_STEP_DB         3
++#define MAX_STEP_DB             20
++/* Quieter than this is silence: no patch at all. */
++#define SILENT_DB               (-90.0)
++/* mode=parameters sends fm_volume with four decimals. */
++#define FM_LEVEL_SCALE          10000
++
++static const char* const valid_modargs[] = {
++    "sink",
++    "mode",
++    "max_step",
++    "step_db",
++    NULL,
++};
++
++struct userdata {
++    pa_core *core;
++    pa_module *module;
++
++    pa_droid_hw_module *hw;
++    pa_sink_input *input;
++
++    uint32_t max_step;
++    uint32_t step_db;
++
++    /* mode=parameters: on and off with handle_fm; level is the fm_volume
++     * last sent, in 1/FM_LEVEL_SCALE, -1 for none. */
++    bool use_parameters;
++    int32_t level;
++
++    bool have_patch;
++    audio_patch_handle_t patch;
++    audio_devices_t patch_device;
++    uint32_t patch_step;
++
++    pa_hook_slot *sink_port_changed_slot;
++    pa_hook_slot *sink_volume_changed_slot;
++    pa_hook_slot *sink_mute_changed_slot;
++    pa_hook_slot *move_finish_slot;
++    pa_hook_slot *state_changed_slot;
++};
++
++static void fill_device_port(struct audio_port_config *pc, audio_port_role_t role, audio_devices_t device) {
++    memset(pc, 0, sizeof(*pc));
++    pc->id = AUDIO_PORT_HANDLE_NONE;
++    pc->role = role;
++    pc->type = AUDIO_PORT_TYPE_DEVICE;
++    pc->ext.device.type = device;
++}
++
++/* The output device of a droid port name ("output-wired_headphone"): the
++ * name droid-util gives each single device, looked up the other way. */
++static bool port_device(const char *name, audio_devices_t *device) {
++    for (unsigned bit = 0; bit < 31; bit++) {
++        audio_devices_t d = (audio_devices_t) (1u << bit);
++        const char *s;
++
++        if (pa_droid_output_port_name(d, &s) && pa_streq(s, name)) {
++            *device = d;
++            return true;
++        }
++    }
++
++    return false;
++}
++
++/* Follow filter sinks (remap, echo cancel, ...) down to the sink that owns the
++ * hardware. */
++static pa_sink *hardware_sink(pa_sink *s) {
++    while (s && s->input_to_master && s->input_to_master->sink)
++        s = s->input_to_master->sink;
++    return s;
++}
++
++/* A port droid-card made up for two devices at once, "output-speaker+wired_headphone":
++ * alerts and ringtones switch to it while they play over headphones. The FM
++ * stays on the non-speaker device - the headphone cable is the antenna, and
++ * moving the patch would cut the radio for the length of every notification.
++ * Each "+"-joined part is looked up as "output-<part>". */
++static bool combined_port_device(const char *port, audio_devices_t *device) {
++    static const char prefix[] = "output-";
++    const char *state = NULL;
++    const char *names;
++    char *part;
++    bool found = false;
++
++    if (!pa_startswith(port, prefix) || !strchr(port, '+'))
++        return false;
++
++    names = port + strlen(prefix);
++    while (!found && (part = pa_split(names, "+", &state))) {
++        char *name = pa_sprintf_malloc("%s%s", prefix, part);
++        audio_devices_t d;
++
++        if (port_device(name, &d) && d != AUDIO_DEVICE_OUT_SPEAKER) {
++            *device = d;
++            found = true;
++        }
++
++        pa_xfree(name);
++        pa_xfree(part);
++    }
++
++    return found;
++}
++
++static bool sink_output_device(pa_sink *s, audio_devices_t *device) {
++    const char *port;
++
++    s = hardware_sink(s);
++    if (!s || !s->module || !pa_streq(s->module->name, "module-droid-card"))
++        return false;
++
++    if (!s->active_port)
++        return false;
++
++    port = s->active_port->name;
++    if (port_device(port, device))
++        return true;
++
++    if (combined_port_device(port, device))
++        return true;
++
++    pa_log_debug("port %s of %s maps to no output device", port, s->name);
++    return false;
++}
++
++/* The stream's audible volume: PA_VOLUME_MUTED when muted, at zero
++ * volume or quieter than SILENT_DB. */
++static pa_volume_t audible_volume(struct userdata *u) {
++    pa_sink_input *i = u->input;
++    pa_cvolume v;
++    pa_volume_t max;
++
++    if (i->muted || i->sink->muted)
++        return PA_VOLUME_MUTED;
++
++    /* With flat volumes the input's volume is already absolute; otherwise it
++     * is relative to its sink, whose volume is the master volume audiod sets.
++     * reference_volume, not real_volume: SINK_VOLUME_CHANGED fires before a
++     * hardware-volume sink has its real volume updated, and reading that gave
++     * the previous key press's volume. Filter sinks below are taken as unity. */
++    v = i->volume;
++    if (!pa_sink_flat_volume_enabled(i->sink))
++        pa_sw_cvolume_multiply(&v, &v, &i->sink->reference_volume);
++
++    max = pa_cvolume_max(&v);
++    /* audiod's volume 0 is one raw unit (-200 dB), not PA_VOLUME_MUTED. */
++    if (max <= PA_VOLUME_MUTED || (max < PA_VOLUME_NORM && pa_sw_volume_to_dB(max) <= SILENT_DB))
++        return PA_VOLUME_MUTED;
++
++    return max > PA_VOLUME_NORM ? PA_VOLUME_NORM : max;
++}
++
++/* The audible volume mapped onto the HAL's FM volume index (mode=patch).
++ * 0 means silent. */
++static uint32_t volume_step(struct userdata *u) {
++    pa_volume_t max = audible_volume(u);
++    double db, down;
++    uint32_t step;
++
++    if (max <= PA_VOLUME_MUTED)
++        return 0;
++    if (max >= PA_VOLUME_NORM)
++        return u->max_step;
++
++    /* The HAL's FM steps are a dB table, max_step at full scale and step_db
++     * apart below it (mt6739 headphones: -42..0 dB in 3 dB steps, step 0
++     * -64 dB). Match the stream's volume in dB, so that the radio follows the
++     * keys the way any other stream does (audiod's master volume is itself
++     * 4 dB per key step) and a policy duck of -20 dB lowers it by 20 dB.
++     * Mapping the 0..1 volume linearly onto the steps instead squeezed the
++     * bottom half of the keys into three steps and made the top ones jump.
++     * Anything audible but below the table stays at step 1, the quietest
++     * step that still sounds: 0 releases the patch. */
++    db = pa_sw_volume_to_dB(max);
++    down = (-db) / (double) u->step_db + 0.5;
++    if (down >= (double) u->max_step)
++        return 1;
++
++    step = u->max_step - (uint32_t) down;
++    return step < 1 ? 1 : step;
++}
++
++static int set_parameter(struct userdata *u, const char *fmt, ...) PA_GCC_PRINTF_ATTR(2, 3);
++
++static int set_parameter(struct userdata *u, const char *fmt, ...) {
++    va_list ap;
++    char *kv;
++    int ret;
++
++    va_start(ap, fmt);
++    kv = pa_vsprintf_malloc(fmt, ap);
++    va_end(ap);
++
++    ret = pa_droid_set_parameters(u->hw, kv);
++    if (ret < 0)
++        pa_log_warn("set_parameters(%s) failed: %d", kv, ret);
++    else
++        pa_log_debug("set_parameters(%s)", kv);
++
++    pa_xfree(kv);
++    return ret;
++}
++
++static void patch_release(struct userdata *u) {
++    int ret;
++
++    if (!u->have_patch)
++        return;
++
++    if (u->use_parameters) {
++        /* The device without the FM bit stops it; 0 would be ignored. */
++        if (set_parameter(u, "handle_fm=%u", (unsigned) u->patch_device) >= 0)
++            pa_log_info("FM path off");
++        u->have_patch = false;
++        u->level = -1;
++        return;
++    }
++
++    pa_droid_hw_module_lock(u->hw);
++    ret = u->hw->device->release_audio_patch(u->hw->device, u->patch);
++    pa_droid_hw_module_unlock(u->hw);
++
++    if (ret < 0)
++        pa_log_warn("release_audio_patch(%d) failed: %d", (int) u->patch, ret);
++    else
++        pa_log_info("FM patch released");
++
++    u->have_patch = false;
++    u->patch = AUDIO_PATCH_HANDLE_NONE;
++    u->patch_step = 0;
++}
++
++static bool patch_create(struct userdata *u, audio_devices_t device) {
++    struct audio_port_config source, sink;
++    audio_patch_handle_t handle = AUDIO_PATCH_HANDLE_NONE;
++    int ret;
++
++    if (u->use_parameters) {
++        if (set_parameter(u, "handle_fm=%u", (unsigned) (device | AUDIO_DEVICE_OUT_FM)) < 0)
++            return false;
++
++        pa_log_info("FM path on: FM tuner -> %#x", (unsigned) device);
++        u->have_patch = true;
++        u->patch_device = device;
++        u->level = -1;
++        return true;
++    }
++
++    fill_device_port(&source, AUDIO_PORT_ROLE_SOURCE, AUDIO_DEVICE_IN_FM_TUNER);
++    fill_device_port(&sink, AUDIO_PORT_ROLE_SINK, device);
++
++    pa_droid_hw_module_lock(u->hw);
++    ret = u->hw->device->create_audio_patch(u->hw->device, 1, &source, 1, &sink, &handle);
++    pa_droid_hw_module_unlock(u->hw);
++
++    if (ret < 0) {
++        pa_log_warn("create_audio_patch(FM tuner -> %#x) failed: %d", (unsigned) device, ret);
++        return false;
++    }
++
++    pa_log_info("FM patch %d: FM tuner -> %#x", (int) handle, (unsigned) device);
++    u->have_patch = true;
++    u->patch = handle;
++    u->patch_device = device;
++    u->patch_step = 0;
++    return true;
++}
++
++static void patch_set_step(struct userdata *u, uint32_t step) {
++    struct audio_port_config cfg;
++    int ret;
++
++    pa_assert(step <= HAL_MAX_STEP);
++
++    if (!u->hw->device->set_audio_port_config) {
++        pa_log_warn("HAL has no set_audio_port_config; FM volume cannot be set");
++        return;
++    }
++
++    fill_device_port(&cfg, AUDIO_PORT_ROLE_SINK, u->patch_device);
++    cfg.config_mask = AUDIO_PORT_CONFIG_GAIN;
++    cfg.gain.index = 0;
++    cfg.gain.mode = AUDIO_GAIN_MODE_JOINT;
++    cfg.gain.values[0] = (int) step;
++
++    pa_droid_hw_module_lock(u->hw);
++    ret = u->hw->device->set_audio_port_config(u->hw->device, &cfg);
++    pa_droid_hw_module_unlock(u->hw);
++
++    if (ret < 0)
++        pa_log_warn("set_audio_port_config(FM volume %u) failed: %d", step, ret);
++    else {
++        pa_log_debug("FM volume index %u", step);
++        u->patch_step = step;
++    }
++}
++
++/* Bring the patch in line with the stream: present, on the right device and
++ * at the right volume while the stream is playing on a droid output; absent
++ * otherwise. Main thread only. */
++static void update(struct userdata *u) {
++    pa_sink_input *i = u->input;
++    audio_devices_t device;
++    uint32_t step;
++
++    if (!i || i->state != PA_SINK_INPUT_RUNNING || !i->sink) {
++        patch_release(u);
++        return;
++    }
++
++    if (!sink_output_device(i->sink, &device)) {
++        pa_log_debug("FM stream is on %s, which is no droid output; no patch", i->sink->name);
++        patch_release(u);
++        return;
++    }
++
++    if (u->use_parameters) {
++        pa_volume_t v = audible_volume(u);
++        int32_t level;
++
++        if (v <= PA_VOLUME_MUTED) {
++            patch_release(u);
++            return;
++        }
++
++        if (u->have_patch && u->patch_device != device)
++            patch_release(u);
++
++        if (!u->have_patch && !patch_create(u, device))
++            return;
++
++        /* fm_volume is a linear gain, 0..1; audible_volume() is at most
++         * PA_VOLUME_NORM. Kept in fixed point, so that an unchanged volume is
++         * an exact match and is not sent again. */
++        level = (int32_t) (pa_sw_volume_to_linear(v) * FM_LEVEL_SCALE + 0.5);
++        if (level != u->level &&
++            set_parameter(u, "fm_volume=%d.%04d", (int) (level / FM_LEVEL_SCALE),
++                          (int) (level % FM_LEVEL_SCALE)) >= 0)
++            u->level = level;
++        return;
++    }
++
++    if ((step = volume_step(u)) == 0) {
++        patch_release(u);
++        return;
++    }
++
++    if (u->have_patch && u->patch_device != device)
++        patch_release(u);
++
++    if (!u->have_patch && !patch_create(u, device))
++        return;
++
++    if (step != u->patch_step)
++        patch_set_step(u, step);
++}
++
++/* Called from the IO thread: the stream only exists to keep its output
++ * running, so it plays silence. */
++static int sink_input_pop_cb(pa_sink_input *i, size_t nbytes, pa_memchunk *chunk) {
++    pa_sink_input_assert_ref(i);
++    pa_assert(chunk);
++
++    pa_silence_memchunk_get(&i->core->silence_cache, i->core->mempool, chunk, &i->sample_spec, nbytes);
++    return 0;
++}
++
++/* Called from the IO thread. Silence needs no rewinding. */
++static void sink_input_process_rewind_cb(pa_sink_input *i, size_t nbytes) {
++    pa_sink_input_assert_ref(i);
++}
++
++static void sink_input_kill_cb(pa_sink_input *i) {
++    struct userdata *u;
++
++    pa_sink_input_assert_ref(i);
++    pa_assert_se(u = i->userdata);
++
++    patch_release(u);
++    pa_sink_input_unlink(u->input);
++    pa_sink_input_unref(u->input);
++    u->input = NULL;
++    pa_module_unload_request(u->module, true);
++}
++
++static void sink_input_moving_cb(pa_sink_input *i, pa_sink *dest) {
++    struct userdata *u;
++
++    pa_sink_input_assert_ref(i);
++    pa_assert_se(u = i->userdata);
++
++    /* Released here, re-created once the move has finished. */
++    patch_release(u);
++}
++
++static void sink_input_volume_changed_cb(pa_sink_input *i) {
++    pa_sink_input_assert_ref(i);
++    update(i->userdata);
++}
++
++static void sink_input_mute_changed_cb(pa_sink_input *i) {
++    pa_sink_input_assert_ref(i);
++    update(i->userdata);
++}
++
++static bool affects_us(struct userdata *u, const pa_sink *s) {
++    return u->input && u->input->sink &&
++           (u->input->sink == s || hardware_sink(u->input->sink) == s);
++}
++
++static pa_hook_result_t sink_port_changed_cb(pa_core *c, pa_sink *s, struct userdata *u) {
++    if (affects_us(u, s))
++        update(u);
++    return PA_HOOK_OK;
++}
++
++static pa_hook_result_t sink_volume_changed_cb(pa_core *c, pa_sink *s, struct userdata *u) {
++    if (affects_us(u, s))
++        update(u);
++    return PA_HOOK_OK;
++}
++
++static pa_hook_result_t sink_mute_changed_cb(pa_core *c, pa_sink *s, struct userdata *u) {
++    if (affects_us(u, s))
++        update(u);
++    return PA_HOOK_OK;
++}
++
++static pa_hook_result_t move_finish_cb(pa_core *c, pa_sink_input *i, struct userdata *u) {
++    if (i == u->input)
++        update(u);
++    return PA_HOOK_OK;
++}
++
++/* Corked and uncorked (by the policy: ducking, calls). The hook, not the
++ * stream's state_change callback: that one runs in the IO thread, and the
++ * HAL calls and the patch bookkeeping here belong to the main thread. */
++static pa_hook_result_t state_changed_cb(pa_core *c, pa_sink_input *i, struct userdata *u) {
++    if (i == u->input)
++        update(u);
++    return PA_HOOK_OK;
++}
++
++int pa__init(pa_module *m) {
++    struct userdata *u = NULL;
++    pa_modargs *ma = NULL;
++    pa_sink *sink;
++    pa_sink_input_new_data data;
++    pa_sample_spec ss;
++    pa_channel_map map;
++    const char *sink_name;
++    const char *mode;
++    uint32_t max_step = DEFAULT_MAX_STEP;
++    uint32_t step_db = DEFAULT_STEP_DB;
++
++    pa_assert(m);
++
++    if (!(ma = pa_modargs_new(m->argument, valid_modargs))) {
++        pa_log("Failed to parse module arguments.");
++        goto fail;
++    }
++
++    if (pa_modargs_get_value_u32(ma, "max_step", &max_step) < 0 ||
++        max_step < 1 || max_step > HAL_MAX_STEP) {
++        pa_log("max_step must be 1..%d", HAL_MAX_STEP);
++        goto fail;
++    }
++
++    if (pa_modargs_get_value_u32(ma, "step_db", &step_db) < 0 ||
++        step_db < 1 || step_db > MAX_STEP_DB) {
++        pa_log("step_db must be 1..%d", MAX_STEP_DB);
++        goto fail;
++    }
++
++    mode = pa_modargs_get_value(ma, "mode", "patch");
++    if (!pa_streq(mode, "patch") && !pa_streq(mode, "parameters")) {
++        pa_log("mode must be patch or parameters");
++        goto fail;
++    }
++
++    sink_name = pa_modargs_get_value(ma, "sink", DEFAULT_SINK);
++    if (!(sink = pa_namereg_get(m->core, sink_name, PA_NAMEREG_SINK))) {
++        pa_log("No sink %s.", sink_name);
++        goto fail;
++    }
++
++    /* Only the HAL module-droid-card opened: a second instance of the HAL
++     * would fight it for the hardware. */
++    if (!pa_shared_get(m->core, DROID_HW_HANDLE_V1)) {
++        pa_log("No droid audio HAL open; load module-droid-card first.");
++        goto fail;
++    }
++
++    u = pa_xnew0(struct userdata, 1);
++    u->core = m->core;
++    u->module = m;
++    u->max_step = max_step;
++    u->step_db = step_db;
++    u->patch = AUDIO_PATCH_HANDLE_NONE;
++    u->use_parameters = pa_streq(mode, "parameters");
++    u->level = -1;
++    m->userdata = u;
++
++    if (!(u->hw = pa_droid_hw_module_get(m->core, NULL, PA_DROID_PRIMARY_DEVICE))) {
++        pa_log("Could not get the primary droid HAL module.");
++        goto fail;
++    }
++
++    if (!u->use_parameters &&
++        (u->hw->device->common.version < AUDIO_DEVICE_API_VERSION_3_0 ||
++         !u->hw->device->create_audio_patch || !u->hw->device->release_audio_patch)) {
++        pa_log("The audio HAL has no audio patch API; FM cannot be patched.");
++        goto fail;
++    }
++
++    ss.format = PA_SAMPLE_S16LE;
++    ss.rate = 48000;
++    ss.channels = 2;
++    pa_channel_map_init_stereo(&map);
++
++    pa_sink_input_new_data_init(&data);
++    data.driver = __FILE__;
++    data.module = m;
++    pa_sink_input_new_data_set_sink(&data, sink, false, true);
++    pa_sink_input_new_data_set_sample_spec(&data, &ss);
++    pa_sink_input_new_data_set_channel_map(&data, &map);
++    pa_proplist_sets(data.proplist, PA_PROP_MEDIA_NAME, "FM radio");
++    pa_proplist_sets(data.proplist, PA_PROP_MEDIA_ROLE, "music");
++    pa_proplist_sets(data.proplist, PA_PROP_APPLICATION_NAME, "FM radio");
++    pa_proplist_sets(data.proplist, PA_PROP_APPLICATION_ID, "org.pulseaudio.droid.fm");
++
++    pa_sink_input_new(&u->input, m->core, &data);
++    pa_sink_input_new_data_done(&data);
++
++    if (!u->input) {
++        pa_log("Failed to create the FM stream.");
++        goto fail;
++    }
++
++    u->input->userdata = u;
++    u->input->pop = sink_input_pop_cb;
++    u->input->process_rewind = sink_input_process_rewind_cb;
++    u->input->kill = sink_input_kill_cb;
++    u->input->moving = sink_input_moving_cb;
++    u->input->volume_changed = sink_input_volume_changed_cb;
++    u->input->mute_changed = sink_input_mute_changed_cb;
++
++    /* After module-droid-card has acted on the same events. */
++    u->sink_port_changed_slot = pa_hook_connect(&m->core->hooks[PA_CORE_HOOK_SINK_PORT_CHANGED],
++                                                PA_HOOK_LATE, (pa_hook_cb_t) sink_port_changed_cb, u);
++    u->sink_volume_changed_slot = pa_hook_connect(&m->core->hooks[PA_CORE_HOOK_SINK_VOLUME_CHANGED],
++                                                  PA_HOOK_LATE, (pa_hook_cb_t) sink_volume_changed_cb, u);
++    u->sink_mute_changed_slot = pa_hook_connect(&m->core->hooks[PA_CORE_HOOK_SINK_MUTE_CHANGED],
++                                                PA_HOOK_LATE, (pa_hook_cb_t) sink_mute_changed_cb, u);
++    u->move_finish_slot = pa_hook_connect(&m->core->hooks[PA_CORE_HOOK_SINK_INPUT_MOVE_FINISH],
++                                          PA_HOOK_LATE, (pa_hook_cb_t) move_finish_cb, u);
++    u->state_changed_slot = pa_hook_connect(&m->core->hooks[PA_CORE_HOOK_SINK_INPUT_STATE_CHANGED],
++                                            PA_HOOK_LATE, (pa_hook_cb_t) state_changed_cb, u);
++
++    pa_sink_input_put(u->input);
++
++    pa_log_info("FM stream on %s, routed to %s", sink_name, u->input->sink ? u->input->sink->name : "(none)");
++    update(u);
++
++    pa_modargs_free(ma);
++    return 0;
++
++fail:
++    if (ma)
++        pa_modargs_free(ma);
++
++    pa__done(m);
++    return -1;
++}
++
++void pa__done(pa_module *m) {
++    struct userdata *u;
++
++    pa_assert(m);
++
++    if (!(u = m->userdata))
++        return;
++
++    if (u->hw)
++        patch_release(u);
++
++    if (u->sink_port_changed_slot)
++        pa_hook_slot_free(u->sink_port_changed_slot);
++    if (u->sink_volume_changed_slot)
++        pa_hook_slot_free(u->sink_volume_changed_slot);
++    if (u->sink_mute_changed_slot)
++        pa_hook_slot_free(u->sink_mute_changed_slot);
++    if (u->move_finish_slot)
++        pa_hook_slot_free(u->move_finish_slot);
++    if (u->state_changed_slot)
++        pa_hook_slot_free(u->state_changed_slot);
++
++    if (u->input) {
++        pa_sink_input_unlink(u->input);
++        pa_sink_input_unref(u->input);
++    }
++
++    if (u->hw)
++        pa_droid_hw_module_unref(u->hw);
++
++    pa_xfree(u);
++    m->userdata = NULL;
++}
+-- 
+2.53.0
+
