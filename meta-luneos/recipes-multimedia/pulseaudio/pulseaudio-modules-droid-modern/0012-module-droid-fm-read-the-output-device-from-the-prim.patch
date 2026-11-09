@@ -1,0 +1,225 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sun, 8 Nov 2026 20:14:50 +0100
+Subject: [PATCH] module-droid-fm: read the output device from the primary
+ output's sink
+
+module-droid-fm took the FM's output device from the active port of the
+droid sink its stream ends up on. Only the primary output's sink switches
+ports, though: droid-sink installs set_port on the primary alone, so a
+deep_buffer or low-latency sink keeps the port it was created with
+whatever is plugged in. LuneOS plays through deep_buffer on the BlackBerry
+KEY2 (its pcm_output is remapped onto sink.deep_buffer, which avoids
+crackling), so there the FM would follow that sink's stale port rather
+than the headphones the primary sink is on.
+
+On the KEY2 the audio HAL got no handle_fm at all, with the headphones in
+and the primary sink on output-wired_headset. The stale port alone does
+not explain that (by droid-util's port priorities deep_buffer starts on the
+speaker, which would still have sent handle_fm), and the
+reason update() gave up was only logged at debug level.
+
+The device now comes from the primary output's sink of the same HAL, and
+a port change on that sink updates the path too. Each reason for having
+no FM path (stream not playing, on no droid output, no port, a port that
+is no output device, muted or silent) is logged once, at notice level,
+with the stream's sink and the primary output's port; until now these
+were debug lines, so a silent radio left nothing in the default log. The
+path coming on is logged at notice level as well.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Submitted [https://github.com/droidian/pulseaudio-modules-droid-modern/pull/6]
+---
+ src/droid/module-droid-fm.c | 90 +++++++++++++++++++++++++++++--------
+ 1 file changed, 71 insertions(+), 19 deletions(-)
+
+diff --git a/src/droid/module-droid-fm.c b/src/droid/module-droid-fm.c
+index 20b7395..4bb7688 100644
+--- a/src/droid/module-droid-fm.c
++++ b/src/droid/module-droid-fm.c
+@@ -132,6 +132,9 @@ struct userdata {
+     bool use_parameters;
+     int32_t level;
+ 
++    /* Why there is no FM path, as last logged; NULL while there is one. */
++    const char *why_off;
++
+     bool have_patch;
+     audio_patch_handle_t patch;
+     audio_devices_t patch_device;
+@@ -208,25 +211,50 @@ static bool combined_port_device(const char *port, audio_devices_t *device) {
+     return found;
+ }
+ 
+-static bool sink_output_device(pa_sink *s, audio_devices_t *device) {
++/* The sink of the HAL's primary output, if module-droid-card made one. */
++static pa_sink *primary_sink(struct userdata *u) {
++    pa_droid_stream *stream;
++    pa_sink *s;
++    uint32_t idx;
++
++    PA_IDXSET_FOREACH(stream, u->hw->outputs, idx) {
++        if (stream->output && pa_droid_stream_is_primary(stream) &&
++            (s = pa_droid_stream_get_data(stream)))
++            return s;
++    }
++
++    return NULL;
++}
++
++/* The output device the FM goes to while the stream plays on s, or why there
++ * is none: NULL on success.
++ *
++ * The device is read from the port of the primary output's sink, whichever
++ * droid sink the stream is on. Only that sink switches ports - droid-sink sets
++ * set_port on the primary alone - so a deep_buffer or low-latency sink keeps
++ * the port it was created with, the speaker, when the headphones go in. A
++ * distribution that plays through deep_buffer (pcm_output remapped onto it,
++ * as LuneOS does on the BlackBerry KEY2) would otherwise send FM to that
++ * stale port, or to none. */
++static const char *sink_output_device(struct userdata *u, pa_sink *s, audio_devices_t *device) {
++    pa_sink *primary;
+     const char *port;
+ 
+     s = hardware_sink(s);
+     if (!s || !s->module || !pa_streq(s->module->name, "module-droid-card"))
+-        return false;
++        return "the stream is on no droid output";
++
++    if ((primary = primary_sink(u)))
++        s = primary;
+ 
+     if (!s->active_port)
+-        return false;
++        return "the droid output has no active port";
+ 
+     port = s->active_port->name;
+-    if (port_device(port, device))
+-        return true;
++    if (port_device(port, device) || combined_port_device(port, device))
++        return NULL;
+ 
+-    if (combined_port_device(port, device))
+-        return true;
+-
+-    pa_log_debug("port %s of %s maps to no output device", port, s->name);
+-    return false;
++    return "the droid output's port maps to no output device";
+ }
+ 
+ /* The stream's audible volume: PA_VOLUME_MUTED when muted, at zero
+@@ -307,6 +335,24 @@ static int set_parameter(struct userdata *u, const char *fmt, ...) {
+     return ret;
+ }
+ 
++static void patch_release(struct userdata *u);
++
++/* No FM path, and why: said once each time the reason changes, at a level
++ * the default log shows, since a silent radio otherwise leaves no trace. */
++static void path_off(struct userdata *u, const char *why) {
++    pa_sink *s = u->input ? u->input->sink : NULL;
++    pa_sink *primary = primary_sink(u);
++
++    if (why != u->why_off) {
++        pa_log_notice("No FM path: %s (stream on %s, primary output %s, port %s)", why,
++                      s ? s->name : "none", primary ? primary->name : "none",
++                      primary && primary->active_port ? primary->active_port->name : "none");
++        u->why_off = why;
++    }
++
++    patch_release(u);
++}
++
+ static void patch_release(struct userdata *u) {
+     int ret;
+ 
+@@ -345,7 +391,7 @@ static bool patch_create(struct userdata *u, audio_devices_t device) {
+         if (set_parameter(u, "handle_fm=%u", (unsigned) (device | AUDIO_DEVICE_OUT_FM)) < 0)
+             return false;
+ 
+-        pa_log_info("FM path on: FM tuner -> %#x", (unsigned) device);
++        pa_log_notice("FM path on: FM tuner -> %#x", (unsigned) device);
+         u->have_patch = true;
+         u->patch_device = device;
+         u->level = -1;
+@@ -364,7 +410,7 @@ static bool patch_create(struct userdata *u, audio_devices_t device) {
+         return false;
+     }
+ 
+-    pa_log_info("FM patch %d: FM tuner -> %#x", (int) handle, (unsigned) device);
++    pa_log_notice("FM patch %d: FM tuner -> %#x", (int) handle, (unsigned) device);
+     u->have_patch = true;
+     u->patch = handle;
+     u->patch_device = device;
+@@ -407,16 +453,16 @@ static void patch_set_step(struct userdata *u, uint32_t step) {
+ static void update(struct userdata *u) {
+     pa_sink_input *i = u->input;
+     audio_devices_t device;
++    const char *why;
+     uint32_t step;
+ 
+     if (!i || i->state != PA_SINK_INPUT_RUNNING || !i->sink) {
+-        patch_release(u);
++        path_off(u, "the stream is not playing");
+         return;
+     }
+ 
+-    if (!sink_output_device(i->sink, &device)) {
+-        pa_log_debug("FM stream is on %s, which is no droid output; no patch", i->sink->name);
+-        patch_release(u);
++    if ((why = sink_output_device(u, i->sink, &device))) {
++        path_off(u, why);
+         return;
+     }
+ 
+@@ -425,7 +471,7 @@ static void update(struct userdata *u) {
+         int32_t level;
+ 
+         if (v <= PA_VOLUME_MUTED) {
+-            patch_release(u);
++            path_off(u, "the stream is muted or silent");
+             return;
+         }
+ 
+@@ -435,6 +481,8 @@ static void update(struct userdata *u) {
+         if (!u->have_patch && !patch_create(u, device))
+             return;
+ 
++        u->why_off = NULL;
++
+         /* fm_volume is a linear gain, 0..1; audible_volume() is at most
+          * PA_VOLUME_NORM. Kept in fixed point, so that an unchanged volume is
+          * an exact match and is not sent again. */
+@@ -447,7 +495,7 @@ static void update(struct userdata *u) {
+     }
+ 
+     if ((step = volume_step(u)) == 0) {
+-        patch_release(u);
++        path_off(u, "the stream is muted or silent");
+         return;
+     }
+ 
+@@ -457,6 +505,8 @@ static void update(struct userdata *u) {
+     if (!u->have_patch && !patch_create(u, device))
+         return;
+ 
++    u->why_off = NULL;
++
+     if (step != u->patch_step)
+         patch_set_step(u, step);
+ }
+@@ -514,8 +564,10 @@ static bool affects_us(struct userdata *u, const pa_sink *s) {
+            (u->input->sink == s || hardware_sink(u->input->sink) == s);
+ }
+ 
++/* The primary output's port too: that is where the device is read from
++ * (sink_output_device), whatever sink the stream plays on. */
+ static pa_hook_result_t sink_port_changed_cb(pa_core *c, pa_sink *s, struct userdata *u) {
+-    if (affects_us(u, s))
++    if (affects_us(u, s) || s == primary_sink(u))
+         update(u);
+     return PA_HOOK_OK;
+ }
+-- 
+2.53.0
+
