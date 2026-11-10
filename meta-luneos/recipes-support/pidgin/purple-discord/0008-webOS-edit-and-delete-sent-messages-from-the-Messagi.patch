@@ -1,0 +1,549 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sat, 7 Nov 2026 17:24:43 +0100
+Subject: [PATCH] webOS: edit and delete sent messages from the Messaging app
+
+* Edit sent messages from the Messaging app
+
+The Messaging app can now edit a message the user sent. The transport
+emits "webos-im-send-edit" with the account, the chat (a buddy name for
+a DM, the channel id for a group DM or server channel), the message's
+serviceMessageId and the new text. For Discord that id is the message
+snowflake that "webos-im-outbox-id" reported from the gateway echo of
+the send.
+
+The handler PATCHes /channels/{channel}/messages/{id} with the new
+content and returns TRUE once the request is on its way, FALSE for an
+account that is not Discord's or a message whose channel it cannot
+find. The channel comes from the message itself where the plug-in has
+seen it (msgid_to_channel), otherwise from the chat, the same way the
+reaction handler finds it; that lookup moves to a function both use.
+The text arrives in the form send_im gets, so it goes through the same
+markdown conversion a send does, now a function of its own, and the
+same 1..2000 byte bound.
+
+The URL is built by a new webos_helpers.c, which takes no connection
+and only accepts a message id made of digits, so nothing else can end
+up in the path. tests/ has a unit test for it ("make -C tests check").
+
+* Delete messages from the Messaging app
+
+The Messaging app can now delete a message for everyone. The transport
+emits "webos-im-send-delete" with the account, the chat and the
+message's serviceMessageId, the Discord message snowflake.
+
+The handler finds the channel as the edit handler does and sends
+DELETE /channels/{channel}/messages/{id}. It returns TRUE once the
+request is on its way, FALSE for an account that is not Discord's or a
+message whose channel it cannot find. Discord itself decides whether
+the user may delete the message: their own always, someone else's only
+in a server channel where they may manage messages.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ Makefile                   |   2 +-
+ libdiscord.c               | 188 +++++++++++++++++++++++++++++--------
+ tests/Makefile             |  21 +++++
+ tests/test_webos_helpers.c |  81 ++++++++++++++++
+ webos_helpers.c            |  52 ++++++++++
+ webos_helpers.h            |  38 ++++++++
+ 6 files changed, 344 insertions(+), 38 deletions(-)
+ create mode 100644 tests/Makefile
+ create mode 100644 tests/test_webos_helpers.c
+ create mode 100644 webos_helpers.c
+ create mode 100644 webos_helpers.h
+
+diff --git a/Makefile b/Makefile
+index 07ad4f0..564d1f1 100644
+--- a/Makefile
++++ b/Makefile
+@@ -120,7 +120,7 @@ endif
+ 
+ CFLAGS += -DLOCALEDIR=\"$(LOCALEDIR)\"
+ 
+-C_FILES := markdown.c discord_lottie.c
++C_FILES := markdown.c discord_lottie.c webos_helpers.c
+ PURPLE_COMPAT_FILES := purple2compat/*.c
+ PURPLE_C_FILES := libdiscord.c $(C_FILES)
+ 
+diff --git a/libdiscord.c b/libdiscord.c
+index e173623..cf4af1c 100644
+--- a/libdiscord.c
++++ b/libdiscord.c
+@@ -53,6 +53,7 @@
+ 
+ #include "markdown.h"
+ #include "discord_lottie.h"
++#include "webos_helpers.h"
+ 
+ // Prevent segfault in libpurple ssl plugins
+ #define purple_ssl_read(a, b, c)  ((a) && (a)->private_data ? purple_ssl_read((a), (b), (c)) : 0)
+@@ -110,6 +111,9 @@
+ 
+ #endif /* DISCORD_PLUGIN_OVERRIDE */
+ 
++/* Base of every REST endpoint, for the webOS helpers that build URLs (webos_helpers.c). */
++#define DISCORD_API_BASE "https://" DISCORD_API_SERVER "/api/" DISCORD_API_VERSION
++
+ #define DISCORD_EPOCH_MS 1420070400000
+ 
+ #define DISCORD_MAX_LARGE_THRESHOLD 250
+@@ -7021,6 +7025,54 @@ discord_got_login_fingerprint(DiscordAccount *da, JsonNode *node, gpointer user_
+ 	discord_send_login(da);
+ }
+ 
++static gchar *discord_outgoing_content(const gchar *message);
++
++/* webOS: the DiscordAccount behind a PurpleAccount the transport names in one of its process-wide
++ * signals, or NULL when the account is not one of ours or is not connected. The signals fire for
++ * every account of every prpl. */
++static DiscordAccount *
++discord_webos_account(PurpleAccount *account)
++{
++	if (account == NULL || !purple_strequal(purple_account_get_protocol_id(account), DISCORD_PLUGIN_ID))
++		return NULL;
++
++	PurpleConnection *pc = purple_account_get_connection(account);
++	if (pc == NULL)
++		return NULL;
++
++	return purple_connection_get_protocol_data(pc);
++}
++
++/* webOS: the channel snowflake for a chat the transport names (its "peer": a buddy name for a 1:1 DM,
++ * the channel snowflake for a group DM or guild channel), or 0. When msg_id is given, the channel
++ * that message was delivered to (msgid_to_channel) wins: it is always right, while the app's peer can
++ * be the sender's username or the channel's display name. */
++static guint64
++discord_webos_channel_for(DiscordAccount *da, const gchar *peer, const gchar *msg_id)
++{
++	const gchar *bymsg = (msg_id != NULL && da->msgid_to_channel != NULL) ?
++			g_hash_table_lookup(da->msgid_to_channel, msg_id) : NULL;
++
++	if (bymsg != NULL)
++		return to_int(bymsg);                    /* the message's real channel - always correct */
++
++	if (peer == NULL || *peer == '\0')
++		return 0;
++
++	const gchar *dm = g_hash_table_lookup(da->one_to_ones_rev, peer);
++	if (dm != NULL)
++		return to_int(dm);                       /* DM buddy tracked in one_to_ones_rev */
++
++	if (*peer >= '0' && *peer <= '9')
++		return to_int(peer);                     /* peer is already a channel snowflake */
++
++	PurpleIMConversation *im = purple_conversations_find_im_with_account(peer, da->account);
++	if (im != NULL)
++		return discord_get_channel_id_from_conv(da, PURPLE_CONVERSATION(im));
++
++	return 0;
++}
++
+ /* webOS reactions (SEND): the transport emits "webos-im-send-reaction" (registered process-wide) when
+  * the user reacts, or removes a reaction, from the TouchPad. It fires for EVERY account, so we filter
+  * by protocol id and route to Discord's reactions REST endpoint. Params (5): account,
+@@ -7033,37 +7085,14 @@ discord_webos_send_reaction_cb(PurpleAccount *account, const char *targetId, con
+ 		const char *peer, const char *removeFlag, void *data)
+ {
+ 	(void) data;
+-	if (account == NULL || targetId == NULL || *targetId == '\0' || peer == NULL)
+-		return;
+-	if (!purple_strequal(purple_account_get_protocol_id(account), DISCORD_PLUGIN_ID))
++	if (targetId == NULL || *targetId == '\0' || peer == NULL)
+ 		return;
+ 
+-	PurpleConnection *pc = purple_account_get_connection(account);
+-	if (pc == NULL)
+-		return;
+-	DiscordAccount *da = purple_connection_get_protocol_data(pc);
++	DiscordAccount *da = discord_webos_account(account);
+ 	if (da == NULL)
+ 		return;
+ 
+-	/* Resolve the channel snowflake: a 1:1 DM peer is a buddy name mapped in one_to_ones_rev; a guild
+-	 * channel peer is already the channel snowflake (the same value the transport stored as channelName). */
+-	/* Resolve the channel the reaction must go to. AUTHORITATIVE source: the channel this exact message
+-	 * was delivered to (msgid_to_channel). The app's `peer` is unreliable (it can be the sender's
+-	 * username or the channel display name), so only fall back to it when we have no record of the msg. */
+-	guint64 channel_id = 0;
+-	const gchar *bymsg = da->msgid_to_channel ? g_hash_table_lookup(da->msgid_to_channel, targetId) : NULL;
+-	const gchar *dm = g_hash_table_lookup(da->one_to_ones_rev, peer);
+-	if (bymsg != NULL) {
+-		channel_id = to_int(bymsg);              /* the message's real channel - always correct */
+-	} else if (dm != NULL) {
+-		channel_id = to_int(dm);                 /* DM buddy tracked in one_to_ones_rev */
+-	} else if (*peer >= '0' && *peer <= '9') {
+-		channel_id = to_int(peer);               /* peer is already a channel snowflake */
+-	} else {
+-		PurpleIMConversation *im = purple_conversations_find_im_with_account(peer, da->account);
+-		if (im != NULL)
+-			channel_id = discord_get_channel_id_from_conv(da, PURPLE_CONVERSATION(im));
+-	}
++	guint64 channel_id = discord_webos_channel_for(da, peer, targetId);
+ 	if (channel_id == 0)
+ 		return;
+ 
+@@ -7078,6 +7107,75 @@ discord_webos_send_reaction_cb(PurpleAccount *account, const char *targetId, con
+ 	g_free(url);
+ }
+ 
++/* webOS edit (SEND): "webos-im-send-edit" (account, chat, serviceMessageId, text) - the user edited
++ * one of their own messages in the Messaging app. serviceMessageId is the message snowflake (what
++ * "webos-im-outbox-id" reported from the gateway echo of our send). text is the new body, in the form
++ * a send hands send_im/chat_send, so it gets the same markdown conversion. PATCH replaces the
++ * message's content; Discord only lets the author do that. Returns TRUE when the request went out. */
++static gboolean
++discord_webos_send_edit_cb(PurpleAccount *account, const char *chat, const char *msg_id,
++		const char *text, void *data)
++{
++	(void) data;
++	DiscordAccount *da = discord_webos_account(account);
++	if (da == NULL || text == NULL)
++		return FALSE;
++
++	gchar *url = discord_webos_message_url(DISCORD_API_BASE, discord_webos_channel_for(da, chat, msg_id), msg_id);
++	if (url == NULL) {
++		purple_debug_warning("discord", "webos edit: no channel for message %s in %s\n",
++				msg_id ? msg_id : "(null)", chat ? chat : "(null)");
++		return FALSE;
++	}
++
++	gchar *content = discord_outgoing_content(text);
++	gsize content_len = strlen(content);
++	gboolean sent = FALSE;
++
++	/* The same bounds discord_conversation_send_message applies to a new message. */
++	if (content_len > 0 && content_len <= 2000) {
++		JsonObject *body = json_object_new();
++		json_object_set_string_member(body, "content", content);
++		gchar *postdata = json_object_to_string(body);
++
++		discord_fetch_url_with_method(da, "PATCH", url, postdata, NULL, NULL);
++		sent = TRUE;
++
++		g_free(postdata);
++		json_object_unref(body);
++	} else {
++		purple_debug_warning("discord", "webos edit: content of %" G_GSIZE_FORMAT " bytes not sent\n", content_len);
++	}
++
++	g_free(content);
++	g_free(url);
++	return sent;
++}
++
++/* webOS delete (SEND): "webos-im-send-delete" (account, chat, serviceMessageId) - the user deleted a
++ * message in the Messaging app. DELETE removes it for everyone; Discord allows that for the author's
++ * own messages, and for others' in a server channel where the user may manage messages. Returns TRUE
++ * when the request went out. */
++static gboolean
++discord_webos_send_delete_cb(PurpleAccount *account, const char *chat, const char *msg_id, void *data)
++{
++	(void) data;
++	DiscordAccount *da = discord_webos_account(account);
++	if (da == NULL)
++		return FALSE;
++
++	gchar *url = discord_webos_message_url(DISCORD_API_BASE, discord_webos_channel_for(da, chat, msg_id), msg_id);
++	if (url == NULL) {
++		purple_debug_warning("discord", "webos delete: no channel for message %s in %s\n",
++				msg_id ? msg_id : "(null)", chat ? chat : "(null)");
++		return FALSE;
++	}
++
++	discord_fetch_url_with_method(da, "DELETE", url, NULL, NULL, NULL);
++	g_free(url);
++	return TRUE;
++}
++
+ /* Connect once (process-wide) to the transport's send-reaction signal. The signal lives on
+  * purple_conversations_get_handle(), so a single connect covers every Discord account in this process.
+  * Guarded so repeated logins don't double-connect. */
+@@ -7090,6 +7188,10 @@ discord_connect_send_reaction_once(void)
+ 	s_connected = TRUE;
+ 	purple_signal_connect(purple_conversations_get_handle(), "webos-im-send-reaction",
+ 			purple_get_core(), PURPLE_CALLBACK(discord_webos_send_reaction_cb), NULL);
++	purple_signal_connect(purple_conversations_get_handle(), "webos-im-send-edit",
++			purple_get_core(), PURPLE_CALLBACK(discord_webos_send_edit_cb), NULL);
++	purple_signal_connect(purple_conversations_get_handle(), "webos-im-send-delete",
++			purple_get_core(), PURPLE_CALLBACK(discord_webos_send_delete_cb), NULL);
+ }
+ 
+ void
+@@ -9765,19 +9867,14 @@ discord_conversation_check_message_for_images(DiscordAccount *da, guint64 room_i
+ 	}
+ }
+ 
+-static gint
+-discord_conversation_send_message(DiscordAccount *da, guint64 room_id, const gchar *message, const gchar *ref_id)
++/* The content Discord gets for an outgoing (HTML) message: Discord-flavour markdown, with /me
++ * actions in italics. Shared by sending and by editing a sent message. */
++static gchar *
++discord_outgoing_content(const gchar *message)
+ {
+-	JsonObject *data = json_object_new();
+-	gchar *nonce;
+ 	gchar *marked;
+ 	gchar *stripped;
+ 	gchar *final;
+-	gint final_len;
+-
+-	discord_conversation_check_message_for_images(da, room_id, message);
+-
+-	nonce = g_strdup_printf("%" G_GUINT32_FORMAT, g_random_int());
+ 
+ 	/* Convert to Discord-flavour markdown */
+ 	marked = markdown_html_to_markdown(markdown_escape_md(message, TRUE));
+@@ -9790,6 +9887,25 @@ discord_conversation_send_message(DiscordAccount *da, guint64 room_id, const gch
+ 		final = g_strdup(stripped);
+ 	}
+ 
++	g_free(marked);
++	g_free(stripped);
++	return final;
++}
++
++static gint
++discord_conversation_send_message(DiscordAccount *da, guint64 room_id, const gchar *message, const gchar *ref_id)
++{
++	JsonObject *data = json_object_new();
++	gchar *nonce;
++	gchar *final;
++	gint final_len;
++
++	discord_conversation_check_message_for_images(da, room_id, message);
++
++	nonce = g_strdup_printf("%" G_GUINT32_FORMAT, g_random_int());
++
++	final = discord_outgoing_content(message);
++
+ 	final_len = strlen(final);
+ 	if (final_len <= 2000 && final_len > 0) {
+ 		gchar *url;
+@@ -9815,8 +9931,6 @@ discord_conversation_send_message(DiscordAccount *da, guint64 room_id, const gch
+ 		g_free(url);
+ 	}
+ 
+-	g_free(marked);
+-	g_free(stripped);
+ 	g_free(final);
+ 	json_object_unref(data);
+ 
+diff --git a/tests/Makefile b/tests/Makefile
+new file mode 100644
+index 0000000..55cadee
+--- /dev/null
++++ b/tests/Makefile
+@@ -0,0 +1,21 @@
++# Unit tests for the pure webOS helpers (webos_helpers.c). They need GLib only, no libpurple:
++#   make -C tests check
++# Cross builds pass CC, PKG_CONFIG and a sysroot the usual way; extra flags go in CFLAGS (for
++# example -fsanitize=address,undefined).
++CC ?= cc
++PKG_CONFIG ?= pkg-config
++CFLAGS ?= -O2 -g
++CFLAGS += -std=c99 -Wall -Wextra
++GLIB_CFLAGS := $(shell $(PKG_CONFIG) --cflags glib-2.0)
++GLIB_LIBS := $(shell $(PKG_CONFIG) --libs glib-2.0)
++
++test_webos_helpers: test_webos_helpers.c ../webos_helpers.c ../webos_helpers.h
++	$(CC) $(CFLAGS) -I.. $(GLIB_CFLAGS) -o $@ test_webos_helpers.c ../webos_helpers.c $(LDFLAGS) $(GLIB_LIBS)
++
++check: test_webos_helpers
++	./test_webos_helpers
++
++clean:
++	rm -f test_webos_helpers
++
++.PHONY: check clean
+diff --git a/tests/test_webos_helpers.c b/tests/test_webos_helpers.c
+new file mode 100644
+index 0000000..656fd8e
+--- /dev/null
++++ b/tests/test_webos_helpers.c
+@@ -0,0 +1,81 @@
++/*
++ *   Unit tests for webos_helpers.c
++ *
++ *   This program is free software: you can redistribute it and/or modify
++ *   it under the terms of the GNU General Public License as published by
++ *   the Free Software Foundation, either version 3 of the License, or
++ *   (at your option) any later version.
++ */
++
++#include <stdio.h>
++#include <string.h>
++
++#include "webos_helpers.h"
++
++static int failures;
++
++#define CHECK(cond) do { \
++	if (!(cond)) { \
++		fprintf(stderr, "%s:%d: CHECK failed: %s\n", __FILE__, __LINE__, #cond); \
++		failures++; \
++	} \
++} while (0)
++
++/* Compares and frees got; expected NULL means got must be NULL. */
++static void
++check_str(const char *file, int line, gchar *got, const gchar *expected)
++{
++	if (g_strcmp0(got, expected) != 0) {
++		fprintf(stderr, "%s:%d: got \"%s\", expected \"%s\"\n", file, line,
++				got ? got : "(null)", expected ? expected : "(null)");
++		failures++;
++	}
++	g_free(got);
++}
++#define CHECK_STR(got, expected) check_str(__FILE__, __LINE__, (got), (expected))
++
++#define BASE "https://discord.com/api/v10"
++
++static void
++test_snowflake(void)
++{
++	CHECK(discord_webos_is_snowflake("1"));
++	CHECK(discord_webos_is_snowflake("1234567890123456789"));
++	CHECK(discord_webos_is_snowflake("18446744073709551615"));     /* 20 digits, G_MAXUINT64 */
++	CHECK(!discord_webos_is_snowflake("123456789012345678901"));  /* 21 digits */
++	CHECK(!discord_webos_is_snowflake(NULL));
++	CHECK(!discord_webos_is_snowflake(""));
++	CHECK(!discord_webos_is_snowflake("12a"));
++	CHECK(!discord_webos_is_snowflake("12/../34"));
++	CHECK(!discord_webos_is_snowflake(" 12"));
++	CHECK(!discord_webos_is_snowflake("-12"));
++}
++
++static void
++test_urls(void)
++{
++	CHECK_STR(discord_webos_channel_url(BASE, 42), BASE "/channels/42");
++	CHECK_STR(discord_webos_channel_url(BASE, G_MAXUINT64), BASE "/channels/18446744073709551615");
++	CHECK_STR(discord_webos_channel_url(BASE, 0), NULL);
++	CHECK_STR(discord_webos_channel_url(NULL, 42), NULL);
++
++	CHECK_STR(discord_webos_message_url(BASE, 42, "1234"), BASE "/channels/42/messages/1234");
++	CHECK_STR(discord_webos_message_url(BASE, 0, "1234"), NULL);
++	CHECK_STR(discord_webos_message_url(BASE, 42, NULL), NULL);
++	CHECK_STR(discord_webos_message_url(BASE, 42, ""), NULL);
++	CHECK_STR(discord_webos_message_url(BASE, 42, "12/reactions"), NULL);
++}
++
++int
++main(void)
++{
++	test_snowflake();
++	test_urls();
++
++	if (failures) {
++		fprintf(stderr, "%d check(s) failed\n", failures);
++		return 1;
++	}
++	printf("all webos_helpers tests passed\n");
++	return 0;
++}
+diff --git a/webos_helpers.c b/webos_helpers.c
+new file mode 100644
+index 0000000..f14a51b
+--- /dev/null
++++ b/webos_helpers.c
+@@ -0,0 +1,52 @@
++/*
++ *   webOS helpers for purple-discord
++ *
++ *   This program is free software: you can redistribute it and/or modify
++ *   it under the terms of the GNU General Public License as published by
++ *   the Free Software Foundation, either version 3 of the License, or
++ *   (at your option) any later version.
++ *
++ *   This program is distributed in the hope that it will be useful,
++ *   but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ *   GNU General Public License for more details.
++ *
++ *   You should have received a copy of the GNU General Public License
++ *   along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ */
++
++#include "webos_helpers.h"
++
++gboolean
++discord_webos_is_snowflake(const gchar *s)
++{
++	gsize n = 0;
++
++	if (s == NULL || *s == '\0')
++		return FALSE;
++
++	for (; s[n] != '\0'; n++) {
++		if (!g_ascii_isdigit(s[n]) || n >= 20)
++			return FALSE;
++	}
++
++	return TRUE;
++}
++
++gchar *
++discord_webos_channel_url(const gchar *api_base, guint64 channel_id)
++{
++	if (api_base == NULL || channel_id == 0)
++		return NULL;
++
++	return g_strdup_printf("%s/channels/%" G_GUINT64_FORMAT, api_base, channel_id);
++}
++
++gchar *
++discord_webos_message_url(const gchar *api_base, guint64 channel_id, const gchar *message_id)
++{
++	if (api_base == NULL || channel_id == 0 || !discord_webos_is_snowflake(message_id))
++		return NULL;
++
++	return g_strdup_printf("%s/channels/%" G_GUINT64_FORMAT "/messages/%s", api_base, channel_id, message_id);
++}
+diff --git a/webos_helpers.h b/webos_helpers.h
+new file mode 100644
+index 0000000..8c60757
+--- /dev/null
++++ b/webos_helpers.h
+@@ -0,0 +1,38 @@
++/*
++ *   webOS helpers for purple-discord
++ *
++ *   This program is free software: you can redistribute it and/or modify
++ *   it under the terms of the GNU General Public License as published by
++ *   the Free Software Foundation, either version 3 of the License, or
++ *   (at your option) any later version.
++ *
++ *   This program is distributed in the hope that it will be useful,
++ *   but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ *   GNU General Public License for more details.
++ *
++ *   You should have received a copy of the GNU General Public License
++ *   along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ */
++
++/* Pure helpers for the webOS Messaging bridge: they only use GLib, take no
++ * connection, and are unit tested in tests/. */
++
++#ifndef DISCORD_WEBOS_HELPERS_H
++#define DISCORD_WEBOS_HELPERS_H
++
++#include <glib.h>
++
++/* TRUE if s is a non-empty string of at most 20 ASCII digits, the form of a
++ * Discord snowflake. */
++gboolean discord_webos_is_snowflake(const gchar *s);
++
++/* <api_base>/channels/<channel_id>, or NULL for channel 0. */
++gchar *discord_webos_channel_url(const gchar *api_base, guint64 channel_id);
++
++/* <api_base>/channels/<channel_id>/messages/<message_id>, or NULL for channel
++ * 0 or a message_id that is not a snowflake (so nothing else can end up in the
++ * path). */
++gchar *discord_webos_message_url(const gchar *api_base, guint64 channel_id, const gchar *message_id);
++
++#endif /* DISCORD_WEBOS_HELPERS_H */
