@@ -4,34 +4,33 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=30441c91ba0022ea994b5dae832bd063"
 
 require purple-connectors.inc
 
-# 0001-0002 are upstream PR #85 (personal/consumer accounts), 0003-0008 generic fixes meant for
-# upstream; the webOS: ones from 0009 adapt the plug-in to imlibpurpletransport and the webOS
-# Messaging app.
-# Upstream's teams_messages.c has CRLF line endings and so do the patches against it: keep the
-# .patch files byte-exact.
+# The source is the fork branch behind upstream PR #99 (https://github.com/EionRobb/purple-teams/pull/99):
+# #99's head (3905f49: #85 personal/consumer accounts, the fix PRs #92-#97 and the opt-in calling
+# framework, TEAMS_CALLING, with its PurpleMedia engine) with EionRobb's master (76d8b3a, which
+# has #98's bodyless-response fix as #101) merged in. Go back to EionRobb's master once those are
+# merged. One feature per patch: 0001 is the history dedup meant for upstream; 0002-0005 adapt the
+# plug-in to imlibpurpletransport, the webOS Messaging app and, through #99's
+# teams_calling_set_*_cb hooks, the webOS Phone app; 0006 keeps the picture we send in a video call
+# upright as the phone turns (TURN to the media engine, teams-media from luneos-synergy-connectors).
+# Upstream's .c files and Makefile have CRLF line endings and so do the patches against them: keep
+# the .patch files byte-exact.
 SRC_URI += " \
-    git://github.com/EionRobb/purple-teams.git;branch=master;protocol=https;name=upstream;destsuffix=purple-teams \
-    file://0001-Add-personal-consumer-Teams-for-Life-account-support.patch \
-    file://0002-Drop-history-re-delivered-across-logins-behind-TEAMS.patch \
-    file://0003-Reconnect-Trouter-with-a-backoff-and-survive-empty-r.patch \
-    file://0004-Fix-two-crashes-when-sending-or-echoing-an-image.patch \
-    file://0005-Ignore-async-callbacks-that-arrive-after-the-account.patch \
-    file://0006-Send-the-skype-token-to-regional-.asm.skype.com-medi.patch \
-    file://0007-Send-image-attachments-as-inline-AMSImage-pictures.patch \
-    file://0008-Report-a-rejected-sign-in-code-as-an-authentication-.patch \
-    file://0009-webOS-Send-and-receive-message-reactions-through-tra.patch \
-    file://0010-webOS-Show-replies-as-quote-cards-and-send-replies-w.patch \
-    file://0011-webOS-Show-received-media-inline-and-send-voice-note.patch \
-    file://0012-webOS-Add-Teams-voice-calling-for-the-webOS-Phone-ap.patch \
-    file://0013-webOS-Always-report-the-account-as-active-and-Availa.patch \
+    git://github.com/Herrie82/purple-teams.git;branch=herrie/teams-calling;protocol=https;name=upstream;destsuffix=purple-teams \
+    file://0001-Drop-history-re-delivered-across-logins-behind-TEAMS.patch \
+    file://0002-webOS-reactions-and-replies-through-the-transport.patch \
+    file://0003-webOS-Show-received-media-inline-and-send-voice-note.patch \
+    file://0004-webOS-Always-report-the-account-as-active-and-Availa.patch \
+    file://0005-webOS-Ring-and-drive-Teams-calls-from-the-webOS-Phon.patch \
+    file://0006-webOS-Keep-the-picture-we-send-upright-as-the-phone-.patch \
 "
-SRCREV_upstream = "f7eb519b9968ed7844ff59319bff5c1859c46851"
+PE = "3"
+SRCREV_upstream = "6948ed6842457a441a516e0a1d3754ee2b8acea0"
 
 DEPENDS = "pidgin json-glib glib-2.0 zlib luna-service2"
 
 S = "${UNPACKDIR}/purple-teams"
 
-# TEAMS_WEBOS turns on 0002's dedup of history that Teams re-delivers across logins; the webOS
+# TEAMS_WEBOS turns on 0001's dedup of history that Teams re-delivers across logins; the webOS
 # Messaging app would otherwise show it twice.
 CFLAGS:append = " -DTEAMS_WEBOS"
 
@@ -42,14 +41,20 @@ CFLAGS:append = " -fvisibility=hidden"
 # The default target builds both variants: libteams.so (commercial) and libteams-personal.so
 # (consumer). webOS uses the consumer one; both are installed, as upstream does.
 #
-# TEAMS_WEBOS_CALL builds 0012's calling bridge (teams_calling.c, teams_call_luna.c) into
-# libteams-personal.so only, so one plug-in registers com.palm.teams.call; it links luna-service2.
-# Each call's audio runs in teams_media (teams-media_git.bb), which the plug-in spawns from
-# TEAMS_MEDIA_BIN.
+# TEAMS_CALLING builds #99's calling framework (teams_calling.c) and, with 0005, the webOS front
+# end on its hooks (teams_call_luna.c, teams_call_video.c), into libteams-personal.so only, so one
+# plug-in registers com.palm.teams.call; it links luna-service2. Each call's audio and video run in
+# teams_media (teams-media_git.bb), which the plug-in spawns from TEAMS_MEDIA_BIN.
+#
+# TEAMS_PURPLEMEDIA=0 leaves out the in-process engine on libpurple's PurpleMedia (Farstream),
+# which the fork branch's Makefile builds by default from 7dee381 on: in-process, a stuck camera or
+# a crashing codec would take imlibpurpleservice, and every IM account with it, down. teams_media
+# keeps that in its own process. pidgin is built with --disable-vv here anyway.
 EXTRA_OEMAKE = " \
     CC='${CC}' \
     PKG_CONFIG='${STAGING_BINDIR_NATIVE}/pkg-config' \
-    TEAMS_WEBOS_CALL=1 \
+    TEAMS_CALLING=1 \
+    TEAMS_PURPLEMEDIA=0 \
     TEAMS_MEDIA_BIN=${libexecdir}/teams_media \
 "
 
@@ -74,7 +79,7 @@ do_install() {
     install -d ${D}${webos_applicationsdir}
     cp -rf ${CONNECTORS_DIR}/im/teams/apps/com.palm.app.teams ${D}${webos_applicationsdir}/
 
-    # The teams call service (0012's teams_call_luna.c): its bus name is listed, never activated --
+    # The teams call service (0005's teams_call_luna.c): its bus name is listed, never activated --
     # imlibpurpleservice, which loads this plug-in, registers com.palm.teams.call itself, so the
     # .service file is Type=static -- and the Phone app is granted imlibpurple-call.operation to
     # call it. The role letting imlibpurpleservice own the name, and the api-permissions/groups
