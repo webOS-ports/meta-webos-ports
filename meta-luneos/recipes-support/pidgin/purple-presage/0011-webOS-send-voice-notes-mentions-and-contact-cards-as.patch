@@ -1,0 +1,805 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 4 Nov 2026 08:20:29 +0100
+Subject: [PATCH] webOS: send voice notes, mentions and contact cards as
+ Signal's own
+
+* Send recorded voice messages as audio voice notes
+
+The Messaging app records a voice message with
+com.webos.service.mediarecorder, which writes an M4A (AAC in an MP4
+container) into /media/internal/.im-attachments/. The attachment's
+content type came from sniffing the bytes, which calls any MP4
+container video/mp4, so the recipient saw a video.
+
+An .m4a now goes out as audio/mp4, and one recorded straight in that
+folder also carries the voice-note flag, so it shows as a voice
+message. imlibpurpleservice leaves these M4A files as they are for
+Signal (it converts them to Ogg/Opus for the other services).
+
+* Send @-mentions from the app as Signal mentions
+
+A message the user writes in the Messaging app can mention people. The
+transport sets the conversation data "webos-send-mentions" around
+serv_send_im and serv_chat_send: records "<id>\x1f<name>" joined by
+"\x1e", where id is the contact's buddy name here (the ACI, or a phone
+number) and the text holds "@<name>" for each. The transport frees it
+right after the send returns, so presage_rust_send copies it before it
+returns; a file send passes none.
+
+Signal sends a mention as U+FFFC in the body with a BodyRange over it,
+start and length in UTF-16 code units, naming the ACI. mentions.rs does
+the replacement: each mention takes one "@<name>" of its own, longer
+names first, so that "@Anna" stays Anna's when Ann is mentioned as
+well. A phone-number id is resolved to the contact as a recipient is;
+an id that is no contact, or a name not found in the text, is left as
+the "@<name>" text it was. The mentions are placed before the "@needle:"
+reply form is looked for, so a text starting with a mention is not
+mistaken for that form.
+
+What the app shows for the sent message, and the text handed back with
+"webos-im-outbox-id", stay the plain text. mentions.rs has its own
+tests (rustc --test mentions.rs).
+
+* Send a shared contact card as a Signal contact
+
+The Messaging app can share a contact card. The transport sets the
+card, a vCard 3.0 with FN and TEL lines, as the conversation data
+"webos-send-contact" around serv_send_im and serv_chat_send and sends
+its plain-text form (the name and the numbers) as the message text.
+send_im and chat_send hand it to presage_rust_send, which copies it
+before it returns, as it does the mentions.
+
+Signal has its own form for this, the DataMessage contact field, which
+its clients show as a contact card. vcard.rs reads the name and the
+numbers from the card: lines unfolded, escapes undone, the first card
+only, TEL kinds from TYPE=cell/home/work or the bare vCard 2.1 forms,
+another type kept as a custom label and a number without one taken for
+a mobile number. The FN goes into the contact's givenName, as the card
+has no parts for it. Such a message goes as the contact alone, as
+Signal clients send one, without the text, which would only repeat it.
+A card that cannot be read is sent as that text.
+
+The location the app can attach ("webos-send-location") has no Signal
+form of its own, so it still goes as the text the transport made of
+it. vcard.rs has its own tests (rustc --test vcard.rs).
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ src/c/presage.h                 |   4 +-
+ src/c/send_file.c               |   2 +-
+ src/c/send_text.c               |  13 ++-
+ src/rust/src/bridge_commands.rs |  18 ++-
+ src/rust/src/core.rs            |  17 ++-
+ src/rust/src/lib.rs             |   3 +
+ src/rust/src/mentions.rs        | 151 ++++++++++++++++++++++++
+ src/rust/src/send.rs            |  74 +++++++++++-
+ src/rust/src/structs.rs         |   5 +
+ src/rust/src/vcard.rs           | 197 ++++++++++++++++++++++++++++++++
+ src/rust/src/voice_note.rs      |  60 ++++++++++
+ 11 files changed, 536 insertions(+), 8 deletions(-)
+ create mode 100644 src/rust/src/mentions.rs
+ create mode 100644 src/rust/src/vcard.rs
+ create mode 100644 src/rust/src/voice_note.rs
+
+diff --git a/src/c/presage.h b/src/c/presage.h
+index 0ea1d28..10d2717 100755
+--- a/src/c/presage.h
++++ b/src/c/presage.h
+@@ -29,7 +29,9 @@ void presage_rust_main(PurpleAccount *, RustRuntimePtr, char *, int32_t startup_
+ void presage_rust_destroy(RustRuntimePtr);
+ void presage_rust_whoami(PurpleAccount *, RustChannelPtr);
+ void presage_rust_exit(PurpleAccount *, RustChannelPtr);
+-void presage_rust_send(PurpleAccount *, RustChannelPtr, const char *, const char *, PurpleXfer *, uint64_t reply_to_ts);
++// mentions, contact: the conversation's "webos-send-mentions" / "webos-send-contact" values or NULL; read
++// (copied) before this returns.
++void presage_rust_send(PurpleAccount *, RustChannelPtr, const char *, const char *, PurpleXfer *, uint64_t reply_to_ts, const char *mentions, const char *contact);
+ void presage_rust_get_attachment(PurpleAccount *, RustChannelPtr, RustAttachmentPtr, PurpleXfer *);
+ void presage_rust_drop_attachment(RustAttachmentPtr);
+ void presage_rust_get_group_members(PurpleAccount *, RustChannelPtr, const char *);
+diff --git a/src/c/send_file.c b/src/c/send_file.c
+index 2eaf044..3882bda 100755
+--- a/src/c/send_file.c
++++ b/src/c/send_file.c
+@@ -18,7 +18,7 @@ static void presage_xfer_send_init(PurpleXfer *xfer) {
+     PurpleAccount *account = purple_xfer_get_account(xfer);
+     PurpleConnection *connection = purple_account_get_connection(account);
+     Presage *presage = purple_connection_get_protocol_data(connection);
+-    presage_rust_send(account, presage->tx_ptr, xfer->who, NULL, xfer, 0); // file send is never a reply
++    presage_rust_send(account, presage->tx_ptr, xfer->who, NULL, xfer, 0, NULL, NULL); // file send is never a reply
+ }
+ 
+ void xfer_new(PurpleConnection *connection, const char *destination, intptr_t destination_type, const char *filename) {
+diff --git a/src/c/send_text.c b/src/c/send_text.c
+index 037cf88..f1fc3e1 100755
+--- a/src/c/send_text.c
++++ b/src/c/send_text.c
+@@ -13,6 +13,13 @@ static uint64_t presage_take_reply_to(PurpleConversation *conv) {
+     return ts;
+ }
+ 
++// webOS send extras: the transport sets "webos-send-mentions" and "webos-send-contact" on the
++// conversation around serv_send_im / serv_chat_send and frees them itself right after;
++// presage_rust_send copies them before it returns.
++static const char *presage_send_extra(PurpleConversation *conv, const char *key) {
++    return conv != NULL ? (const char *)purple_conversation_get_data(conv, key) : NULL;
++}
++
+ int presage_send_im(PurpleConnection *connection, const char *who, const char *message, PurpleMessageFlags flags) {
+     // strip HTML similar to these reasons: https://github.com/majn/telegram-purple/issues/12 and https://github.com/majn/telegram-purple/commit/fffe751
+     char *msg = purple_markup_strip_html(message); // NOTE: This turns newlines into spaces and <br> tags into newlines
+@@ -20,7 +27,8 @@ int presage_send_im(PurpleConnection *connection, const char *who, const char *m
+     Presage *presage = purple_connection_get_protocol_data(connection);
+     PurpleConversation *conv = purple_find_conversation_with_account(PURPLE_CONV_TYPE_IM, who, account);
+     uint64_t reply_to_ts = presage_take_reply_to(conv);
+-    presage_rust_send(account, presage->tx_ptr, who, msg, NULL, reply_to_ts);
++    presage_rust_send(account, presage->tx_ptr, who, msg, NULL, reply_to_ts,
++                presage_send_extra(conv, "webos-send-mentions"), presage_send_extra(conv, "webos-send-contact"));
+     g_free(msg);
+     return 0; // do not report an error here; also no local echo since the rust part is expected inject the message
+ }
+@@ -35,7 +43,8 @@ int presage_send_chat(PurpleConnection *connection, int id, const gchar *message
+             // strip HTML similar to these reasons: https://github.com/majn/telegram-purple/issues/12 and https://github.com/majn/telegram-purple/commit/fffe751
+             char *msg = purple_markup_strip_html(message); // NOTE: This turns newlines into spaces and <br> tags into newlines
+             uint64_t reply_to_ts = presage_take_reply_to(conv);
+-            presage_rust_send(account, presage->tx_ptr, group, msg, NULL, reply_to_ts);
++            presage_rust_send(account, presage->tx_ptr, group, msg, NULL, reply_to_ts,
++                presage_send_extra(conv, "webos-send-mentions"), presage_send_extra(conv, "webos-send-contact"));
+             g_free(msg);
+         }
+     }
+diff --git a/src/rust/src/bridge_commands.rs b/src/rust/src/bridge_commands.rs
+index ea2aeab..a341d87 100755
+--- a/src/rust/src/bridge_commands.rs
++++ b/src/rust/src/bridge_commands.rs
+@@ -157,7 +157,7 @@ pub unsafe extern "C" fn presage_rust_get_group_members(
+ // 36-char dashed string is a contact UUID, a "+<digits>" string is an E.164 phone (resolved to a
+ // UUID in the command loop), anything else is a hex group master key. Shared by the send + reaction
+ // FFI entry points so both classify peers identically.
+-fn classify_recipient(destination: &str) -> Result<crate::structs::Recipient, anyhow::Error> {
++pub(crate) fn classify_recipient(destination: &str) -> Result<crate::structs::Recipient, anyhow::Error> {
+     let d = destination.as_bytes();
+     if d.len() == 36 && d[8] == b'-' && d[13] == b'-' && d[18] == b'-' && d[23] == b'-' {
+         presage::libsignal_service::prelude::Uuid::parse_str(destination)
+@@ -178,7 +178,21 @@ pub unsafe extern "C" fn presage_rust_send(
+     c_message: *const std::os::raw::c_char,
+     xfer: *const crate::bridge_structs::PurpleXfer,
+     reply_to_ts: u64,
++    c_mentions: *const std::os::raw::c_char,
++    c_contact: *const std::os::raw::c_char,
+ ) {
++    // webOS mentions: copied here, while the conversation data is still there (send_im time)
++    let mentions = if c_mentions.is_null() {
++        Vec::new()
++    } else {
++        crate::mentions::parse(&std::ffi::CStr::from_ptr(c_mentions).to_string_lossy())
++    };
++    // webOS contact card: copied here as well
++    let contact = if c_contact.is_null() {
++        None
++    } else {
++        Some(std::ffi::CStr::from_ptr(c_contact).to_string_lossy().into_owned())
++    };
+     let destination = std::ffi::CStr::from_ptr(c_destination).to_str().unwrap();
+     let recipient = classify_recipient(destination);
+     match recipient {
+@@ -193,6 +207,8 @@ pub unsafe extern "C" fn presage_rust_send(
+                 xfer: xfer,
+                 // webOS replies: the reply target's serviceMessageId (sent timestamp, ms); 0 == none.
+                 reply_to_ts: reply_to_ts,
++                mentions,
++                contact,
+             };
+             send_cmd(account, tx, cmd);
+         }
+diff --git a/src/rust/src/core.rs b/src/rust/src/core.rs
+index 0f4b944..26d273a 100755
+--- a/src/rust/src/core.rs
++++ b/src/rust/src/core.rs
+@@ -70,6 +70,8 @@ async fn run<C: presage::store::Store + 'static>(
+             message,
+             xfer,
+             reply_to_ts,
++            mentions,
++            contact,
+         } => {
+             // Resolve a phone-number recipient to the contact's UUID (see resolve_phone_to_uuid). If
+             // there is no matching Signal contact, report it in the conversation and keep the loop
+@@ -94,6 +96,19 @@ async fn run<C: presage::store::Store + 'static>(
+                 }
+                 other => other,
+             };
++            // webOS mentions: Signal names a mentioned contact by ACI; a phone-number id is resolved
++            // like a recipient, and one without a stored contact stays plain "@name" text.
++            let mut mentions_aci = Vec::with_capacity(mentions.len());
++            for (id, name) in mentions {
++                match crate::bridge_commands::classify_recipient(&id) {
++                    Ok(crate::structs::Recipient::Contact(uuid)) => mentions_aci.push((uuid.to_string(), name)),
++                    Ok(crate::structs::Recipient::ContactByPhone(phone)) => match resolve_phone_to_uuid(&mut manager, &phone).await {
++                        Some(uuid) => mentions_aci.push((uuid.to_string(), name)),
++                        None => crate::bridge::purple_debug(account, crate::bridge_structs::PURPLE_DEBUG_WARNING, format!("mention of {phone}: no Signal contact, sent as text\n")),
++                    },
++                    _ => crate::bridge::purple_debug(account, crate::bridge_structs::PURPLE_DEBUG_WARNING, format!("mention of \"{id}\" is no contact, sent as text\n")),
++                }
++            }
+             // prepare a PurplePresage message for providing feed-back (send success or error)
+             let mut msg = crate::bridge::Message {
+                 account: account,
+@@ -112,7 +127,7 @@ async fn run<C: presage::store::Store + 'static>(
+                 }
+             }
+             // now do the actual sending and error-handling
+-            match crate::send::send(&mut manager, recipient, message.clone(), xfer, reply_to_ts).await {
++            match crate::send::send(&mut manager, recipient, message.clone(), xfer, reply_to_ts, &mentions_aci, contact.as_deref()).await {
+                 Ok(sent_ts) => {
+                     // NOTE: for Spectrum, send-acknowledgements should be PURPLE_MESSAGE_SEND only (without PURPLE_MESSAGE_REMOTE_SEND)
+                     msg.flags = crate::bridge_structs::PurpleMessageFlags::PURPLE_MESSAGE_SEND;
+diff --git a/src/rust/src/lib.rs b/src/rust/src/lib.rs
+index b674c37..75db100 100755
+--- a/src/rust/src/lib.rs
++++ b/src/rust/src/lib.rs
+@@ -11,10 +11,13 @@ mod ice;
+ mod bridge_commands;
+ mod contacts;
+ mod core;
++mod mentions;
+ mod debug;
+ mod receive;
+ mod send;
+ mod structs;
++mod vcard;
++mod voice_note;
+ 
+ // bridge_structs generated by this call to bindgen:
+ // bindgen src/c/presage.h --allowlist-type Message --allowlist-type Group --opaque-type PurpleAccount --opaque-type RustChannelPtr --opaque-type PurpleXfer --opaque-type PurpleRoomlist --no-layout-tests --no-doc-comments --constified-enum PurpleDebugLevel --constified-enum PurpleConnectionError --bitfield-enum PurpleMessageFlags --raw-line '#![allow(dead_code, non_camel_case_types)]' -- $(pkg-config -cflags glib-2.0 purple) | sed 's/\(PurpleConnectionError_\)\|\(PurpleDebugLevel_\)//g' | sed 's/*mut/*const/g' > src/rust/src/bridge_structs.rs
+diff --git a/src/rust/src/mentions.rs b/src/rust/src/mentions.rs
+new file mode 100644
+index 0000000..3d373a1
+--- /dev/null
++++ b/src/rust/src/mentions.rs
+@@ -0,0 +1,151 @@
++// webOS: @-mentions in a message the user sends from the Messaging app.
++//
++// The transport hands them over as the conversation data "webos-send-mentions": records
++// "<id>\x1f<name>" joined by "\x1e", where id is the mentioned contact's buddy name here (the ACI
++// UUID, or an E.164 number from cross-service contact linking) and the text holds "@<name>" for
++// each. Signal sends a mention as U+FFFC in the body and a BodyRange over it (start and length in
++// UTF-16 code units) naming the ACI. Depends on std only: `rustc --test mentions.rs` runs the tests.
++
++/// The placeholder Signal puts in the body where a mention goes.
++pub const MENTION_PLACEHOLDER: char = '\u{FFFC}';
++
++/// A mention in the sent body: the placeholder at `start`, `length` long (both UTF-16 code units),
++/// naming `aci`.
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub struct MentionRange {
++    pub start: u32,
++    pub length: u32,
++    pub aci: String,
++}
++
++/// The (id, name) records of a "webos-send-mentions" value. Records with an empty id or name are
++/// left out.
++pub fn parse(raw: &str) -> Vec<(String, String)> {
++    raw.split('\x1e')
++        .filter_map(|record| {
++            let (id, name) = record.split_once('\x1f')?;
++            let (id, name) = (id.trim(), name);
++            if id.is_empty() || name.is_empty() {
++                None
++            } else {
++                Some((id.to_owned(), name.to_owned()))
++            }
++        })
++        .collect()
++}
++
++/// `text` with "@<name>" of each (aci, name) mention replaced by the placeholder, and the ranges
++/// over them, in body order.
++///
++/// Each mention takes one "@<name>" of its own. Longer names take theirs first, so "@Anna" stays
++/// Anna's when Ann is mentioned too; among equally long names the earlier record goes first and
++/// takes the earliest free occurrence. A mention whose "@<name>" is not (or no more) in the text
++/// is left out and the text keeps it as written.
++pub fn apply(text: &str, mentions: &[(String, String)]) -> (String, Vec<MentionRange>) {
++    let mut order: Vec<usize> = (0..mentions.len()).filter(|&i| !mentions[i].1.is_empty()).collect();
++    order.sort_by(|&a, &b| mentions[b].1.len().cmp(&mentions[a].1.len()));
++
++    // byte spans of the text, each with its mention
++    let mut taken: Vec<(usize, usize, usize)> = Vec::new();
++    for i in order {
++        let needle = format!("@{}", mentions[i].1);
++        let mut from = 0;
++        while let Some(found) = text[from..].find(&needle) {
++            let start = from + found;
++            let end = start + needle.len();
++            if taken.iter().all(|&(s, e, _)| end <= s || start >= e) {
++                taken.push((start, end, i));
++                break;
++            }
++            // '@' is one byte, so the next byte starts a character
++            from = start + 1;
++        }
++    }
++    taken.sort_unstable();
++
++    let mut body = String::with_capacity(text.len());
++    let mut ranges = Vec::with_capacity(taken.len());
++    let mut units: usize = 0; // UTF-16 length of `body`
++    let mut last = 0;
++    for (start, end, i) in taken {
++        let before = &text[last..start];
++        units += before.encode_utf16().count();
++        body.push_str(before);
++        ranges.push(MentionRange {
++            start: u32::try_from(units).unwrap_or(u32::MAX),
++            length: MENTION_PLACEHOLDER.len_utf16() as u32,
++            aci: mentions[i].0.clone(),
++        });
++        body.push(MENTION_PLACEHOLDER);
++        units += MENTION_PLACEHOLDER.len_utf16();
++        last = end;
++    }
++    body.push_str(&text[last..]);
++    (body, ranges)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn m(list: &[(&str, &str)]) -> Vec<(String, String)> {
++        list.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect()
++    }
++
++    fn r(start: u32, aci: &str) -> MentionRange {
++        MentionRange { start, length: 1, aci: aci.to_string() }
++    }
++
++    #[test]
++    fn parses_records() {
++        assert_eq!(parse("u1\x1fAnn\x1eu2\x1fBob Smith"), m(&[("u1", "Ann"), ("u2", "Bob Smith")]));
++        assert_eq!(parse(""), m(&[]));
++        assert_eq!(parse("u1\x1f\x1e\x1fBob\x1enoseparator\x1eu3\x1fCy"), m(&[("u3", "Cy")]));
++    }
++
++    #[test]
++    fn replaces_one_mention() {
++        let (body, ranges) = apply("hi @Ann!", &m(&[("u1", "Ann")]));
++        assert_eq!(body, "hi \u{FFFC}!");
++        assert_eq!(ranges, vec![r(3, "u1")]);
++    }
++
++    #[test]
++    fn offsets_count_utf16_units() {
++        // "é" is one UTF-16 unit (two UTF-8 bytes), "😀" two units (four bytes)
++        let (body, ranges) = apply("é😀 @Ann and @Bob", &m(&[("u2", "Bob"), ("u1", "Ann")]));
++        assert_eq!(body, "é😀 \u{FFFC} and \u{FFFC}");
++        assert_eq!(ranges, vec![r(4, "u1"), r(10, "u2")]);
++    }
++
++    #[test]
++    fn the_longer_name_keeps_its_own() {
++        let (body, ranges) = apply("@Anna and @Ann", &m(&[("u1", "Ann"), ("u2", "Anna")]));
++        assert_eq!(body, "\u{FFFC} and \u{FFFC}");
++        assert_eq!(ranges, vec![r(0, "u2"), r(6, "u1")]);
++    }
++
++    #[test]
++    fn the_same_name_twice_takes_two_places() {
++        let (body, ranges) = apply("@Ann @Ann", &m(&[("u1", "Ann"), ("u1", "Ann")]));
++        assert_eq!(body, "\u{FFFC} \u{FFFC}");
++        assert_eq!(ranges, vec![r(0, "u1"), r(2, "u1")]);
++    }
++
++    #[test]
++    fn a_name_not_in_the_text_is_left_out() {
++        let (body, ranges) = apply("hello @Ann", &m(&[("u9", "Zed"), ("u1", "Ann")]));
++        assert_eq!(body, "hello \u{FFFC}");
++        assert_eq!(ranges, vec![r(6, "u1")]);
++        let (body, ranges) = apply("plain", &m(&[]));
++        assert_eq!(body, "plain");
++        assert!(ranges.is_empty());
++    }
++
++    #[test]
++    fn names_with_multibyte_characters() {
++        let (body, ranges) = apply("😀@Zoë 😀 @Łukasz", &m(&[("u1", "Zoë"), ("u2", "Łukasz")]));
++        assert_eq!(body, "😀\u{FFFC} 😀 \u{FFFC}");
++        assert_eq!(ranges, vec![r(2, "u1"), r(7, "u2")]);
++    }
++}
+diff --git a/src/rust/src/send.rs b/src/rust/src/send.rs
+index d18156a..80fa5bb 100755
+--- a/src/rust/src/send.rs
++++ b/src/rust/src/send.rs
+@@ -62,9 +62,31 @@ pub async fn send<C: presage::store::Store + 'static>(
+     body: Option<String>,
+     xfer: *const crate::bridge_structs::PurpleXfer,
+     reply_to_ts: u64,
++    mentions: &[(String, String)],
++    contact: Option<&str>,
+ ) -> Result<u64, anyhow::Error> {
+     // Returns the message's sent timestamp (its serviceMessageId, in ms). The caller emits this back
+     // to the transport via "webos-im-outbox-id" so a later reaction can target the user's own message.
++
++    // webOS mentions (ACI, name): each "@name" becomes Signal's placeholder with a BodyRange. Done
++    // first, so that a text starting with a mention ("@Ann: ...") is not taken for the "@needle:"
++    // reply form below.
++    let mut body_ranges = Vec::new();
++    let body = match body {
++        Some(text) if !mentions.is_empty() => {
++            let (text, ranges) = crate::mentions::apply(&text, mentions);
++            body_ranges = ranges
++                .into_iter()
++                .map(|range| presage::proto::BodyRange {
++                    start: Some(range.start),
++                    length: Some(range.length),
++                    associated_value: Some(presage::proto::body_range::AssociatedValue::MentionAci(range.aci)),
++                })
++                .collect();
++            Some(text)
++        }
++        other => other,
++    };
+     if let Some(body) = body.as_ref() {
+         if body.len() > 2048 {
+             // until https://github.com/whisperfish/presage/pull/384 is merged
+@@ -143,14 +165,28 @@ pub async fn send<C: presage::store::Store + 'static>(
+     if xfer != std::ptr::null_mut() {
+         let path = crate::bridge::xfer_get_local_filename(xfer);
+         let blob = std::fs::read(path.clone())?;
+-        let content_type = mime_sniffer::MimeTypeSniffer::sniff_mime_type(&blob).unwrap_or("*/*"); // NOTE: I saw this being used in Signal over application/octet-stream
+-        let attachment = make_attachment(blob.clone(), content_type.to_string(), std::path::PathBuf::from(path));
++        let sniffed = mime_sniffer::MimeTypeSniffer::sniff_mime_type(&blob).unwrap_or("*/*"); // NOTE: I saw this being used in Signal over application/octet-stream
++        let content_type = crate::voice_note::content_type(&path, sniffed);
++        let voice_note = crate::voice_note::is_recorded(&path);
++        let mut attachment = make_attachment(blob.clone(), content_type.to_string(), std::path::PathBuf::from(path));
++        if voice_note {
++            attachment.0.voice_note = Some(true);
++        }
+         let upload_attachments_result = manager.upload_attachments(vec![attachment]).await?;
+         let pointer = upload_attachments_result.into_iter().next().ok_or(anyhow::anyhow!("Not a single attachment upload succeeded."))??;
+         data_message.attachments.push(pointer.clone());
+     }
+ 
+     data_message.body = body;
++    data_message.body_ranges = body_ranges;
++    // webOS contact card: sent as Signal sends a shared contact, the card alone; the text the app
++    // sent along is its plain-text form, which would only repeat it. A card that cannot be read
++    // goes as that text.
++    if let Some(card) = contact.and_then(crate::vcard::parse) {
++        data_message.contact = vec![shared_contact(card)];
++        data_message.body = None;
++        data_message.body_ranges = Vec::new();
++    }
+     match recipient {
+         crate::structs::Recipient::Contact(uuid) => {
+             manager
+@@ -274,6 +310,40 @@ pub async fn send_reaction<C: presage::store::Store + 'static>(
+     Ok(())
+ }
+ 
++// A Signal shared contact (DataMessage.contact) with the name and numbers of a vCard. The whole FN
++// goes into givenName, as the card has no parts for it.
++fn shared_contact(card: crate::vcard::Card) -> presage::proto::data_message::Contact {
++    use presage::proto::data_message::contact;
++    presage::proto::data_message::Contact {
++        name: if card.name.is_empty() {
++            None
++        } else {
++            Some(contact::Name {
++                given_name: Some(card.name),
++                ..Default::default()
++            })
++        },
++        number: card
++            .phones
++            .into_iter()
++            .map(|phone| {
++                let (r#type, label) = match phone.kind {
++                    crate::vcard::PhoneKind::Home => (contact::phone::Type::Home, None),
++                    crate::vcard::PhoneKind::Mobile => (contact::phone::Type::Mobile, None),
++                    crate::vcard::PhoneKind::Work => (contact::phone::Type::Work, None),
++                    crate::vcard::PhoneKind::Custom(label) => (contact::phone::Type::Custom, Some(label)),
++                };
++                contact::Phone {
++                    value: Some(phone.value),
++                    r#type: Some(r#type as i32),
++                    label,
++                }
++            })
++            .collect(),
++        ..Default::default()
++    }
++}
++
+ // The store thread of a resolved recipient (a phone recipient is resolved before any send).
+ fn thread_of(recipient: &crate::structs::Recipient) -> presage::store::Thread {
+     match recipient {
+diff --git a/src/rust/src/structs.rs b/src/rust/src/structs.rs
+index 363f1f4..fb6352d 100755
+--- a/src/rust/src/structs.rs
++++ b/src/rust/src/structs.rs
+@@ -12,6 +12,11 @@ pub enum Cmd {
+         // webOS replies: the reply target's serviceMessageId (its sent timestamp, in ms); 0 == not a
+         // reply. send() looks the quoted message up by this timestamp to build the Signal Quote.
+         reply_to_ts: u64,
++        // webOS mentions: the (id, name) records of "webos-send-mentions" (see mentions.rs); the
++        // command loop resolves phone-number ids to UUIDs before send() places them.
++        mentions: Vec<(String, String)>,
++        // webOS contact card: the vCard of "webos-send-contact", sent as a Signal shared contact.
++        contact: Option<String>,
+     },
+     // webOS reactions (SEND): transmit a reaction the user placed from the app. `recipient` is the
+     // conversation peer (contact UUID / phone / group key); `target_ts` is the reacted-to message's
+diff --git a/src/rust/src/vcard.rs b/src/rust/src/vcard.rs
+new file mode 100644
+index 0000000..631ea49
+--- /dev/null
++++ b/src/rust/src/vcard.rs
+@@ -0,0 +1,197 @@
++// webOS: a contact card the user shares from the Messaging app.
++//
++// The transport hands it over as the conversation data "webos-send-contact": a vCard 3.0 with FN
++// and TEL lines. This reads the name and the numbers out of it, for a Signal shared contact
++// (DataMessage.contact). Depends on std only: `rustc --test vcard.rs` runs the tests.
++
++/// The kind of a number, as Signal's Contact.Phone.Type has them.
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub enum PhoneKind {
++    Home,
++    Mobile,
++    Work,
++    /// Any other TYPE, with that type as the label.
++    Custom(String),
++}
++
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub struct Phone {
++    pub value: String,
++    pub kind: PhoneKind,
++}
++
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub struct Card {
++    /// FN; empty when the card has none.
++    pub name: String,
++    pub phones: Vec<Phone>,
++}
++
++// The logical lines of a vCard: a line starting with a space or a tab continues the one before
++// (RFC 6350 3.2 / RFC 2425 5.8.1), and both CRLF and LF end a line.
++fn unfold(text: &str) -> Vec<String> {
++    let mut lines: Vec<String> = Vec::new();
++    for raw in text.split('\n') {
++        let raw = raw.strip_suffix('\r').unwrap_or(raw);
++        if let Some(rest) = raw.strip_prefix(' ').or_else(|| raw.strip_prefix('\t')) {
++            if let Some(last) = lines.last_mut() {
++                last.push_str(rest);
++                continue;
++            }
++        }
++        lines.push(raw.to_owned());
++    }
++    lines
++}
++
++// A text value with its backslash escapes undone (\\, \, \; \n \N).
++fn unescape(value: &str) -> String {
++    let mut out = String::with_capacity(value.len());
++    let mut chars = value.chars();
++    while let Some(c) = chars.next() {
++        if c != '\\' {
++            out.push(c);
++            continue;
++        }
++        match chars.next() {
++            Some('n') | Some('N') => out.push('\n'),
++            Some(other) => out.push(other),
++            None => out.push('\\'),
++        }
++    }
++    out
++}
++
++// The kind of a TEL line from its parameters: TYPE=cell,voice, TYPE=cell;TYPE=voice, or the bare
++// "CELL" of vCard 2.1. "pref", "voice" and the like say nothing about the kind.
++fn phone_kind(params: &[&str]) -> PhoneKind {
++    let mut other: Option<String> = None;
++    for param in params {
++        let types = match param.split_once('=') {
++            Some((key, value)) if key.trim().eq_ignore_ascii_case("type") => value,
++            Some(_) => continue,
++            None => param,
++        };
++        for t in types.split(',') {
++            let t = t.trim().trim_matches('"');
++            match t.to_ascii_lowercase().as_str() {
++                "cell" | "mobile" | "iphone" => return PhoneKind::Mobile,
++                "home" => return PhoneKind::Home,
++                "work" => return PhoneKind::Work,
++                "" | "pref" | "voice" | "msg" | "text" | "internet" => {}
++                _ => {
++                    if other.is_none() {
++                        other = Some(t.to_owned());
++                    }
++                }
++            }
++        }
++    }
++    // a number without a kind is taken for a mobile one
++    other.map_or(PhoneKind::Mobile, PhoneKind::Custom)
++}
++
++/// The name and numbers of a vCard; None when it is none (no BEGIN:VCARD) or holds neither.
++pub fn parse(text: &str) -> Option<Card> {
++    let mut in_card = false;
++    let mut name = String::new();
++    let mut phones = Vec::new();
++    for line in unfold(text) {
++        let Some((head, value)) = line.split_once(':') else { continue };
++        let mut parts = head.split(';');
++        let property = parts.next().unwrap_or("").trim();
++        // "item1.TEL": a group prefix
++        let property = property.rsplit('.').next().unwrap_or(property);
++        let params: Vec<&str> = parts.collect();
++        if property.eq_ignore_ascii_case("begin") && value.trim().eq_ignore_ascii_case("vcard") {
++            in_card = true;
++        } else if property.eq_ignore_ascii_case("end") && value.trim().eq_ignore_ascii_case("vcard") {
++            break;
++        } else if !in_card {
++            continue;
++        } else if property.eq_ignore_ascii_case("fn") && name.is_empty() {
++            name = unescape(value).trim().to_owned();
++        } else if property.eq_ignore_ascii_case("tel") {
++            let number = value.trim();
++            // vCard 4 writes the number as a tel: URI
++            let number = number.strip_prefix("tel:").or_else(|| number.strip_prefix("TEL:")).unwrap_or(number);
++            let number = unescape(number).trim().to_owned();
++            if !number.is_empty() {
++                phones.push(Phone { value: number, kind: phone_kind(&params) });
++            }
++        }
++    }
++    if !in_card || (name.is_empty() && phones.is_empty()) {
++        return None;
++    }
++    Some(Card { name, phones })
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn phone(value: &str, kind: PhoneKind) -> Phone {
++        Phone { value: value.to_owned(), kind }
++    }
++
++    #[test]
++    fn reads_name_and_numbers() {
++        let card = parse("BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Ann Example\r\nN:Example;Ann;;;\r\nTEL;TYPE=CELL:+31 6 1234 5678\r\nTEL;TYPE=HOME,VOICE:020 123 4567\r\nTEL;TYPE=work:+1-555-0100\r\nEND:VCARD\r\n").unwrap();
++        assert_eq!(card.name, "Ann Example");
++        assert_eq!(
++            card.phones,
++            vec![
++                phone("+31 6 1234 5678", PhoneKind::Mobile),
++                phone("020 123 4567", PhoneKind::Home),
++                phone("+1-555-0100", PhoneKind::Work),
++            ]
++        );
++    }
++
++    #[test]
++    fn kinds_from_other_forms() {
++        let card = parse("BEGIN:VCARD\nFN:B\nTEL;CELL:1\nTEL;TYPE=voice;TYPE=home:2\nTEL:3\nTEL;TYPE=fax:4\nTEL;TYPE=pref:5\nitem1.TEL;type=WORK:6\nTEL;HOME:7\nEND:VCARD").unwrap();
++        assert_eq!(
++            card.phones,
++            vec![
++                phone("1", PhoneKind::Mobile),
++                phone("2", PhoneKind::Home),
++                phone("3", PhoneKind::Mobile),
++                phone("4", PhoneKind::Custom("fax".to_owned())),
++                phone("5", PhoneKind::Mobile),
++                phone("6", PhoneKind::Work),
++                phone("7", PhoneKind::Home),
++            ]
++        );
++    }
++
++    #[test]
++    fn folded_and_escaped_values() {
++        let card = parse("BEGIN:VCARD\r\nFN:Smith\\, John\r\n  Jr.\r\nTEL;VALUE=uri;TYPE=cell:tel:+15550100\r\nEND:VCARD").unwrap();
++        assert_eq!(card.name, "Smith, John Jr.");
++        assert_eq!(card.phones, vec![phone("+15550100", PhoneKind::Mobile)]);
++    }
++
++    #[test]
++    fn only_the_first_card_and_only_inside_it() {
++        let card = parse("FN:Outside\nBEGIN:VCARD\nFN:Inside\nFN:Second name\nEND:VCARD\nBEGIN:VCARD\nTEL:9\nEND:VCARD").unwrap();
++        assert_eq!(card.name, "Inside");
++        assert!(card.phones.is_empty());
++    }
++
++    #[test]
++    fn no_card() {
++        assert_eq!(parse(""), None);
++        assert_eq!(parse("FN:Ann\nTEL:1"), None);
++        assert_eq!(parse("BEGIN:VCARD\nVERSION:3.0\nEND:VCARD"), None);
++        assert_eq!(parse("BEGIN:VCARD\nTEL:   \nEND:VCARD"), None);
++    }
++
++    #[test]
++    fn a_card_with_numbers_but_no_name() {
++        let card = parse("BEGIN:VCARD\nTEL:+15550100\nEND:VCARD").unwrap();
++        assert_eq!(card.name, "");
++        assert_eq!(card.phones, vec![phone("+15550100", PhoneKind::Mobile)]);
++    }
++}
+diff --git a/src/rust/src/voice_note.rs b/src/rust/src/voice_note.rs
+new file mode 100644
+index 0000000..2c338c4
+--- /dev/null
++++ b/src/rust/src/voice_note.rs
+@@ -0,0 +1,60 @@
++/*
++ * webOS voice messages.
++ *
++ * The Messaging app records a voice message with com.webos.service.mediarecorder, which writes an
++ * M4A (AAC in an MP4 container) into the app's attachment folder. Sniffing the bytes calls any
++ * MP4 container video/mp4, so Signal showed these as videos. A recording goes out as audio/mp4
++ * with the voice-note flag; any other .m4a as audio/mp4.
++ */
++
++/// The folder the Messaging app records voice messages into (VOICENOTE_RECORDING_DIR in
++/// imlibpurpleservice).
++const RECORDING_DIR: &str = "/media/internal/.im-attachments/";
++
++fn is_m4a(name: &str) -> bool {
++    name.len() > 4 && name.to_ascii_lowercase().ends_with(".m4a")
++}
++
++/// A voice message the Messaging app recorded: an .m4a straight in its recording folder. Files the
++/// transports saved there sit in subfolders, and a song picked to send comes from elsewhere.
++pub fn is_recorded(path: &str) -> bool {
++    path.strip_prefix(RECORDING_DIR)
++        .map_or(false, |name| !name.contains('/') && is_m4a(name))
++}
++
++/// The content type to send a file as: audio/mp4 for an .m4a, otherwise what the bytes say.
++pub fn content_type<'a>(path: &str, sniffed: &'a str) -> &'a str {
++    let name = path.rsplit('/').next().unwrap_or(path);
++    if is_m4a(name) { "audio/mp4" } else { sniffed }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn a_recording_is_an_m4a_straight_in_the_folder() {
++        assert!(is_recorded("/media/internal/.im-attachments/Audio04112026-07285605.m4a"));
++        assert!(is_recorded("/media/internal/.im-attachments/Audio.M4A"));
++    }
++
++    #[test]
++    fn everything_else_is_not_a_recording() {
++        assert!(!is_recorded("/media/internal/music/song.m4a"));
++        assert!(!is_recorded("/media/internal/.im-attachments/signal/in.m4a"));
++        assert!(!is_recorded("/media/internal/.im-attachments/../music/song.m4a"));
++        assert!(!is_recorded("/media/internal/.im-attachments/Audio.ogg"));
++        assert!(!is_recorded("/media/internal/.im-attachments/.m4a"));
++        assert!(!is_recorded("/media/internal/.im-attachments/"));
++        assert!(!is_recorded(""));
++    }
++
++    #[test]
++    fn an_m4a_goes_as_audio_and_the_rest_as_sniffed() {
++        assert_eq!(content_type("/media/internal/.im-attachments/Audio.m4a", "video/mp4"), "audio/mp4");
++        assert_eq!(content_type("/media/internal/music/song.M4A", "video/mp4"), "audio/mp4");
++        assert_eq!(content_type("/media/internal/DCIM/clip.mp4", "video/mp4"), "video/mp4");
++        assert_eq!(content_type("/media/internal/a.m4a/clip.mp4", "video/mp4"), "video/mp4");
++        assert_eq!(content_type("/media/internal/pic.jpg", "image/jpeg"), "image/jpeg");
++    }
++}
