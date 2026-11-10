@@ -1,0 +1,318 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sat, 7 Nov 2026 17:42:52 +0100
+Subject: [PATCH] webOS: send read receipts once a chat is read
+
+No read receipt was ever sent. mark_read_defer() keeps what a receipt
+needs - the message id, the chat and the sender - for receipt.c to send
+when the conversation is read, but nothing called it: the store stayed
+empty, so reading a chat sent nothing, whatever the setting.
+
+Keep each received message in the store, and send them when the chat is
+read. The Messaging app reads a chat through the transport, which raises
+the "unseen" update Pidgin raises, so make "when interacting with the
+conversation" the default (it is the first choice of the option now) in
+place of "when sending a reply".
+
+The store is filled on whatsmeow's event goroutine and emptied on
+libpurple's main loop, so it is locked now (deferred_receipts.go, with
+tests), and a chat's receipts are taken out as they are sent: a receipt
+goes once, not again each time the chat is looked at. Sending them is a
+round trip to the server per sender, so it no longer runs on the main
+loop.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ deferred_receipts.go      | 45 +++++++++++++++++++++++
+ deferred_receipts_test.go | 77 +++++++++++++++++++++++++++++++++++++++
+ glue/options.c            |  4 +-
+ handle_message.go         |  9 +++++
+ handler.go                |  2 +-
+ login.go                  |  1 -
+ mark_read.go              | 52 +++++++++++---------------
+ 7 files changed, 156 insertions(+), 34 deletions(-)
+ create mode 100644 deferred_receipts.go
+ create mode 100644 deferred_receipts_test.go
+
+diff --git a/deferred_receipts.go b/deferred_receipts.go
+new file mode 100644
+index 0000000..838af1b
+--- /dev/null
++++ b/deferred_receipts.go
+@@ -0,0 +1,45 @@
++package main
++
++import (
++	"sync"
++
++	"go.mau.fi/whatsmeow/types"
++)
++
++/*
++ * webOS: the read receipts still to send, per chat and per sender. Received messages are added
++ * on whatsmeow's event goroutine and a chat's receipts are taken on libpurple's main loop when the
++ * chat is read (glue/receipt.c), so the store is locked. Taking a chat's receipts removes them: a
++ * receipt goes once, not again each time the chat is looked at. The zero value is ready to use.
++ */
++type deferredReceiptStore struct {
++	mutex   sync.Mutex
++	pending map[types.JID]map[types.JID][]types.MessageID
++}
++
++// Keep the receipt for message id from sender in chat.
++func (store *deferredReceiptStore) add(chat types.JID, sender types.JID, id types.MessageID) {
++	store.mutex.Lock()
++	defer store.mutex.Unlock()
++	if store.pending == nil {
++		store.pending = make(map[types.JID]map[types.JID][]types.MessageID)
++	}
++	senders, ok := store.pending[chat]
++	if !ok {
++		senders = make(map[types.JID][]types.MessageID)
++		store.pending[chat] = senders
++	}
++	senders[sender] = append(senders[sender], id)
++}
++
++// The receipts kept for chat, by sender, and forget them. nil when there are none.
++func (store *deferredReceiptStore) take(chat types.JID) map[types.JID][]types.MessageID {
++	store.mutex.Lock()
++	defer store.mutex.Unlock()
++	senders, ok := store.pending[chat]
++	if !ok {
++		return nil
++	}
++	delete(store.pending, chat)
++	return senders
++}
+diff --git a/deferred_receipts_test.go b/deferred_receipts_test.go
+new file mode 100644
+index 0000000..c51b642
+--- /dev/null
++++ b/deferred_receipts_test.go
+@@ -0,0 +1,77 @@
++package main
++
++import (
++	"sync"
++	"testing"
++
++	"go.mau.fi/whatsmeow/types"
++)
++
++var (
++	anna  = types.NewJID("31611111111", types.DefaultUserServer)
++	ben   = types.NewJID("31622222222", types.DefaultUserServer)
++	group = types.NewJID("120363000000000000", types.GroupServer)
++)
++
++func TestReceiptsAreKeptPerChatAndSender(t *testing.T) {
++	var store deferredReceiptStore
++	store.add(anna, anna, "A1")
++	store.add(group, anna, "G1")
++	store.add(group, ben, "G2")
++	store.add(group, anna, "G3")
++
++	got := store.take(group)
++	if len(got) != 2 || len(got[anna]) != 2 || got[anna][0] != "G1" || got[anna][1] != "G3" || len(got[ben]) != 1 || got[ben][0] != "G2" {
++		t.Fatalf("group receipts: %v", got)
++	}
++	if a := store.take(anna); len(a) != 1 || len(a[anna]) != 1 || a[anna][0] != "A1" {
++		t.Fatalf("anna's chat is its own: %v", a)
++	}
++}
++
++func TestAReceiptGoesOnce(t *testing.T) {
++	var store deferredReceiptStore
++	store.add(anna, anna, "A1")
++	if store.take(anna) == nil {
++		t.Fatal("nothing kept")
++	}
++	if again := store.take(anna); again != nil {
++		t.Fatalf("taken twice: %v", again)
++	}
++	store.add(anna, anna, "A2")
++	if got := store.take(anna); len(got[anna]) != 1 || got[anna][0] != "A2" {
++		t.Fatalf("only what came after: %v", got)
++	}
++}
++
++func TestNothingKeptIsNil(t *testing.T) {
++	var store deferredReceiptStore
++	if got := store.take(anna); got != nil {
++		t.Fatalf("an empty store: %v", got)
++	}
++}
++
++// Received messages are added on whatsmeow's goroutine while the main loop takes a read chat's:
++// nothing may be lost or sent twice. Run with -race.
++func TestAddingAndTakingAtOnce(t *testing.T) {
++	var store deferredReceiptStore
++	const n = 2000
++	var wg sync.WaitGroup
++	wg.Add(1)
++	go func() {
++		defer wg.Done()
++		for i := 0; i < n; i++ {
++			store.add(anna, anna, types.MessageID(rune('a'+i%26))+types.MessageID(string(rune('0'+i/26%10))))
++		}
++	}()
++	taken := 0
++	for taken < n {
++		for _, ids := range store.take(anna) {
++			taken += len(ids)
++		}
++	}
++	wg.Wait()
++	if taken != n || store.take(anna) != nil {
++		t.Fatalf("took %d of %d", taken, n)
++	}
++}
+diff --git a/glue/options.c b/glue/options.c
+index 6969c36..eb5c352 100644
+--- a/glue/options.c
++++ b/glue/options.c
+@@ -33,8 +33,10 @@ gowhatsapp_add_account_options(GList *account_options)
+     
+     {
+         GList *choices = NULL;
+-        choices = add_choice(choices, "Immediately", GOWHATSAPP_SEND_RECEIPT_CHOICE_IMMEDIATELY);
++        // webOS: the default first, as a list option's default is its first choice
++        // (mark_read.go receipt_setting).
+         choices = add_choice(choices, "When interacting with conversation", GOWHATSAPP_SEND_RECEIPT_CHOICE_ON_INTERACT);
++        choices = add_choice(choices, "Immediately", GOWHATSAPP_SEND_RECEIPT_CHOICE_IMMEDIATELY);
+         choices = add_choice(choices, "When sending a reply", GOWHATSAPP_SEND_RECEIPT_CHOICE_ON_ANSWER);
+         choices = add_choice(choices, "Never", GOWHATSAPP_SEND_RECEIPT_CHOICE_NEVER);
+         option = purple_account_option_list_new( // MEMCHECK: account_options takes ownership
+diff --git a/handle_message.go b/handle_message.go
+index 4649629..5a88e31 100644
+--- a/handle_message.go
++++ b/handle_message.go
+@@ -609,6 +609,15 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 	}
+ 	// evt.Info still holds the chat and sender as received, before the conversions above
+ 	handler.add_to_cache(message, info.ID, info.MessageSource.Chat, info.MessageSource.Sender, evt.Info.MessageSource, info.Timestamp)
++	// webOS: keep what a read receipt needs for each message received, under the chat's name as
++	// the conversation has it (as purple_display_text_message gives it above). Nothing ever did,
++	// so no read receipt was sent at all. Sent when the chat is read (glue/receipt.c), or at once with
++	// the "immediately" setting.
++	if !info.MessageSource.IsFromMe && !isEdit {
++		chat := info.MessageSource.Chat.ToNonAD()
++		handler.mark_read_defer(info.ID, chat, info.MessageSource.Sender)
++		handler.mark_read_if_on_receival(chat)
++	}
+ }
+ 
+ /*
+diff --git a/handler.go b/handler.go
+index 16a7800..6169591 100644
+--- a/handler.go
++++ b/handler.go
+@@ -26,7 +26,7 @@ type Handler struct {
+ 	log              waLog.Logger
+ 	container        *sqlstore.Container
+ 	client           *whatsmeow.Client
+-	deferredReceipts map[types.JID]map[types.JID][]types.MessageID // holds ID and sender of a received message so the receipt can be sent later.
++	deferredReceipts deferredReceiptStore                          // holds ID and sender of a received message so the receipt can be sent later (webOS: locked).
+ 	cachedMessages   []CachedMessage                               // for looking up reactions and quotes
+ 	newsletterSeen      map[types.MessageID]bool // dedup WhatsApp Channel posts (live delivery vs history replay)
+ 	newsletterSeenOrder []types.MessageID        // FIFO order for bounding newsletterSeen
+diff --git a/login.go b/login.go
+index 149254f..52f6674 100644
+--- a/login.go
++++ b/login.go
+@@ -174,7 +174,6 @@ func login(account *PurpleAccount, purple_user_dir string, username string, cred
+ 		container:        container,
+ 		log:              log,
+ 		client:           whatsmeow.NewClient(device, PurpleLogger(account, "Client")),
+-		deferredReceipts: make(map[types.JID]map[types.JID][]types.MessageID),
+ 		pictureRequests:  make(chan ProfilePictureRequest, 1000), // I hope that no user has more than 1000 contacts
+ 	}
+ 	handlers[account] = &handler
+diff --git a/mark_read.go b/mark_read.go
+index 8c73e79..ff5231d 100644
+--- a/mark_read.go
++++ b/mark_read.go
+@@ -12,39 +12,26 @@ import (
+ 	"go.mau.fi/whatsmeow/types"
+ )
+ 
++/*
++ * webOS: the receipt setting when the account has none. Upstream's is "when sending a reply"; here
++ * it is "when interacting with the conversation", which the transport raises when the Messaging
++ * app shows the chat (imlibpurpleservice markRead), so a message is marked read once it is read.
++ */
++func receipt_setting(handler *Handler) string {
++	return purple_get_string(handler.account, C.GOWHATSAPP_SEND_RECEIPT_OPTION, C.GOWHATSAPP_SEND_RECEIPT_CHOICE_ON_INTERACT)
++}
++
+ /*
+  * Puts ID and sender of a received message in the store.
+  *
+  * Except if the purple setting is "never send receipts". Then it does nothing.
+  */
+ func (handler *Handler) mark_read_defer(id types.MessageID, chat types.JID, sender types.JID) {
+-	default_setting := C.GOWHATSAPP_SEND_RECEIPT_CHOICE_ON_ANSWER
+ 	never := C.GoString(C.GOWHATSAPP_SEND_RECEIPT_CHOICE_NEVER)
+-	setting := purple_get_string(handler.account, C.GOWHATSAPP_SEND_RECEIPT_OPTION, default_setting)
+-	if never == setting {
++	if never == receipt_setting(handler) {
+ 		return
+ 	}
+-
+-	// append to map of map of ids
+-	// I really could go for a python defaultdict here
+-	senders, ok := handler.deferredReceipts[chat]
+-	if !ok {
+-		// first sender in this chat
+-		senders = make(map[types.JID][]types.MessageID)
+-		ids := []types.MessageID{id}
+-		senders[sender] = ids
+-	} else {
+-		// chat already has senders
+-		ids, ok := senders[sender]
+-		if !ok {
+-			// first id for this sender
+-			ids = []types.MessageID{id}
+-		} else {
+-			ids = append(ids, id)
+-		}
+-		senders[sender] = ids
+-	}
+-	handler.deferredReceipts[chat] = senders
++	handler.deferredReceipts.add(chat, sender, id)
+ }
+ 
+ /*
+@@ -53,8 +40,7 @@ func (handler *Handler) mark_read_defer(id types.MessageID, chat types.JID, send
+  * mark_read_defer(…) should have been called before.
+  */
+ func (handler *Handler) mark_read_if(chat types.JID, choice *C.char) {
+-	default_setting := C.GOWHATSAPP_SEND_RECEIPT_CHOICE_ON_ANSWER
+-	setting := purple_get_string(handler.account, C.GOWHATSAPP_SEND_RECEIPT_OPTION, default_setting)
++	setting := receipt_setting(handler)
+ 	if C.GoString(choice) == setting {
+ 		handler.log.Infof("Sending read receipt due to setting %s...", C.GoString(choice))
+ 		handler.mark_read_unconditionally(chat)
+@@ -94,11 +80,15 @@ func (handler *Handler) mark_read_conversation(chat string) {
+  * mark_read_defer(…) should have been called before.
+  */
+ func (handler *Handler) mark_read_unconditionally(chat types.JID) {
+-	senders, ok := handler.deferredReceipts[chat]
+-	if ok {
+-		for sender, ids := range senders {
+-			handler.mark_read(ids, chat, sender)
+-		}
++	senders := handler.deferredReceipts.take(chat)
++	if senders != nil {
++		// webOS: off the caller's goroutine, which for the chat being read is libpurple's main
++		// loop: each receipt is a round trip to the server.
++		go func() {
++			for sender, ids := range senders {
++				handler.mark_read(ids, chat, sender)
++			}
++		}()
+ 	}
+ }
+ 

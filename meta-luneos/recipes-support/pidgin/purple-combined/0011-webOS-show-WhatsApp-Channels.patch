@@ -1,0 +1,556 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:29:05 +0200
+Subject: [PATCH] webOS: show WhatsApp Channels
+
+* Show WhatsApp Channels
+
+The names and icons of followed Channels (newsletters) are fetched on
+connect, which also creates their buddies. Joining a channel fetches
+its last 50 posts. Posts that arrive twice (offline sync and history)
+are dropped by id; the seen ids are kept next to the message cache.
+The "ignore-newsletters" option therefore defaults to off.
+
+* Route status updates to a status chat per sender
+
+A status update goes to "<phone>@broadcast" instead of the sender's 1:1
+chat, named after the sender, so the transport can file it apart from
+the conversations. The "[STATUS] " prefix is dropped.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ bridge.go            |   9 +++
+ glue/groups.c        |  11 +++
+ glue/options.c       |   2 +-
+ handle_message.go    | 165 ++++++++++++++++++++++++++++---------------
+ handle_newsletter.go | 143 +++++++++++++++++++++++++++++++++++++
+ handler.go           |   5 ++
+ login.go             |   2 +
+ newsletter_seen.go   |  65 +++++++++++++++++
+ 8 files changed, 343 insertions(+), 59 deletions(-)
+ create mode 100644 handle_newsletter.go
+ create mode 100644 newsletter_seen.go
+
+diff --git a/bridge.go b/bridge.go
+index 4ab1aab..0451231 100644
+--- a/bridge.go
++++ b/bridge.go
+@@ -285,6 +285,15 @@ func gowhatsapp_go_query_groups(account *PurpleAccount) {
+ 	}
+ }
+ 
++//export gowhatsapp_go_fetch_newsletter_history
++func gowhatsapp_go_fetch_newsletter_history(account *PurpleAccount, jidStr *C.char) {
++	handler, ok := handlers[account]
++	if !ok || jidStr == nil {
++		return
++	}
++	go handler.fetch_newsletter_history(C.GoString(jidStr))
++}
++
+ //export gowhatsapp_go_get_contacts
+ func gowhatsapp_go_get_contacts(account *PurpleAccount, flush C.int) {
+ 	handler, ok := handlers[account]
+diff --git a/glue/groups.c b/glue/groups.c
+index 0336962..5cfed3c 100644
+--- a/glue/groups.c
++++ b/glue/groups.c
+@@ -76,9 +76,20 @@ GHashTable * gowhatsapp_chat_info_defaults(PurpleConnection *pc, const char *cha
+  */
+ void gowhatsapp_join_chat(PurpleConnection *pc, GHashTable *data) {
+     const char *remoteJid = g_hash_table_lookup(data, "name");
++    if (remoteJid == NULL) {
++        // webOS: the transport keys channel joins (openChannel -> serv_join_chat) by "id", not "name".
++        remoteJid = g_hash_table_lookup(data, "id");
++    }
+     if (remoteJid != NULL) {
+         // add chat to buddy list (optional)
+         PurpleAccount *account = purple_connection_get_account(pc);
++        // webOS: a WhatsApp Channel (newsletter) has no MUC to enter - fetch its recent history on
++        // demand instead. The replayed posts route back through the normal message path into the
++        // "WhatsApp Channels" server thread (see handle_newsletter.go / LibpurpleAdapter routing).
++        if (g_str_has_suffix(remoteJid, "@newsletter")) {
++            gowhatsapp_go_fetch_newsletter_history(account, (char *)remoteJid);
++            return;
++        }
+         const char *topic = g_hash_table_lookup(data, "topic");
+         if (purple_account_get_bool(account, GOWHATSAPP_UPDATE_BUDDY_ON_MESSAGE_OPTION, TRUE)) {
+             gowhatsapp_ensure_group_chat_in_blist(account, remoteJid, topic);
+diff --git a/glue/options.c b/glue/options.c
+index 500368b..7f21c89 100644
+--- a/glue/options.c
++++ b/glue/options.c
+@@ -202,7 +202,7 @@ gowhatsapp_add_account_options(GList *account_options)
+     option = purple_account_option_bool_new( // MEMCHECK: account_options takes ownership
+         "Ignore channel (newsletter) messages",
+         GOWHATSAPP_IGNORE_NEWSLETTERS_OPTION,
+-        TRUE
++        FALSE // webOS: followed Channels are shown in the Messaging app's Servers tab (see handle_newsletter.go)
+         );
+     account_options = g_list_append(account_options, option);
+ 
+diff --git a/handle_message.go b/handle_message.go
+index 9b0ecea..4649629 100644
+--- a/handle_message.go
++++ b/handle_message.go
+@@ -38,59 +38,15 @@ func GetAnyPollCreationMessage(message *waE2E.Message) *waE2E.PollCreationMessag
+ 	return nil
+ }
+ 
+-/*
+- * Describes a shared location as text with a link to a map.
+- */
+-func format_location(lm *waE2E.LocationMessage) string {
+-	text := "[LOCATION]"
+-	if name := lm.GetName(); name != "" {
+-		text += " " + name
+-	}
+-	if address := lm.GetAddress(); address != "" {
+-		text += "\n" + address
+-	}
+-	lat, lon := lm.GetDegreesLatitude(), lm.GetDegreesLongitude()
+-	text += fmt.Sprintf("\n%f, %f\nhttps://www.openstreetmap.org/?mlat=%f&mlon=%f", lat, lon, lat, lon)
+-	if url := lm.GetURL(); url != "" {
+-		text += "\n" + url
+-	}
+-	if comment := lm.GetComment(); comment != "" {
+-		text += "\n" + comment
+-	}
+-	return text
+-}
+-
+-/*
+- * Describes a shared contact card as its name and phone numbers.
+- * The vCard is expected to have one property per line, as WhatsApp sends it.
+- */
+-func format_contact(display_name string, vcard string) string {
+-	name := display_name
+-	var phones []string
+-	for _, line := range strings.Split(strings.ReplaceAll(vcard, "\r\n", "\n"), "\n") {
+-		key, value, found := strings.Cut(line, ":")
+-		if !found {
+-			continue
+-		}
+-		key = strings.ToUpper(strings.SplitN(key, ";", 2)[0])
+-		if dot := strings.LastIndexByte(key, '.'); dot >= 0 {
+-			key = key[dot+1:] // a grouped property such as item1.TEL
+-		}
+-		value = strings.TrimSpace(value)
+-		if key == "FN" && name == "" {
+-			name = value
+-		} else if key == "TEL" && value != "" {
+-			phones = append(phones, value)
+-		}
+-	}
+-	if name == "" {
+-		name = "unnamed contact"
+-	}
+-	text := "[CONTACT] " + name
+-	for _, phone := range phones {
+-		text += "\n" + phone
+-	}
+-	return text
++// messageHasAttachment reports whether message carries a media payload that handle_attachment will
++// turn into its own bubble - used to skip the redundant "[STATUS] " placeholder text for a status
++// update that already has a picture/video/etc, so it doesn't show up as two separate messages.
++func messageHasAttachment(message *waE2E.Message) bool {
++	return message.GetImageMessage() != nil ||
++		message.GetVideoMessage() != nil ||
++		message.GetAudioMessage() != nil ||
++		message.GetDocumentMessage() != nil ||
++		message.GetStickerMessage() != nil
+ }
+ 
+ // write_link_preview_thumbnail persists an ExtendedTextMessage's inline link-preview JPEG thumbnail
+@@ -364,7 +320,8 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 	//handler.log.Infof("message: %#v", message)
+ 	if info.MessageSource.Chat.Server == types.NewsletterServer {
+ 		// Channel (newsletter) posts would show up as chats with a raw JID.
+-		if purple_get_bool(handler.account, C.GOWHATSAPP_IGNORE_NEWSLETTERS_OPTION, true) {
++		// webOS: default off, followed Channels are shown (see glue/options.c and handle_newsletter.go)
++		if purple_get_bool(handler.account, C.GOWHATSAPP_IGNORE_NEWSLETTERS_OPTION, false) {
+ 			handler.log.Infof("Ignoring channel (newsletter) message.")
+ 			return
+ 		}
+@@ -376,11 +333,40 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 			handler.log.Warnf("Ignoring status broadcast.")
+ 			return
+ 		} else {
+-			// the protocol implements status broadcasts in the form of a group
+-			// we just treat those messages as if they were direct messages
+-			info.MessageSource.Chat = info.MessageSource.Sender
++			// webOS: route status updates into the Servers tab (like followed WhatsApp Channels)
++			// instead of masquerading as an ordinary 1:1 chat from the sender - collapsing Chat to
++			// Sender made every status update show up as a random new chat (e.g. "+15555550102").
++			// Use a synthetic "<phone>@broadcast" JID (types.BroadcastServer) so LibpurpleAdapter's
++			// incoming_message_cb can recognize + bucket it (isWhatsAppStatus), the same way
++			// "<id>@newsletter" is recognized for followed Channels.
++			statusJid := types.JID{User: info.MessageSource.Sender.User, Server: types.BroadcastServer}
++			// PushName is frequently absent on a status-broadcast event even for a contact with a
++			// perfectly well-known name (unlike a regular 1:1/group message) - fall back to the local
++			// WhatsApp contact-sync store (address-book match, populated independently of any message
++			// ever having a PushName) before resorting to purple_get_alias, which - if this contact
++			// has ALSO never been messaged 1:1 (status-only sender) - has nothing to fall back to
++			// itself and returns the raw JID string, which is what was showing up as the channel name.
++			name := info.PushName
++			if name == "" {
++				if contactInfo, err := handler.client.Store.Contacts.GetContact(context.TODO(), info.MessageSource.Sender); err == nil {
++					name = contactInfo.FullName
++					if name == "" {
++						name = contactInfo.FirstName
++					}
++					if name == "" {
++						name = contactInfo.BusinessName
++					}
++				}
++			}
++			if name == "" {
++				name = purple_get_alias(handler.account, info.MessageSource.Sender.ToNonAD().String())
++			}
++			if name != "" {
++				// creates/aliases the synthetic status buddy, same sink fetch_newsletter_names uses
++				purple_update_name(handler.account, statusJid.String(), name)
++			}
++			info.MessageSource.Chat = statusJid
+ 			info.MessageSource.IsGroup = false
+-			text = "[STATUS] "
+ 		}
+ 	}
+ 	info.MessageSource.Chat = handler.lidToPn(info.MessageSource.Chat, "handling message chat")
+@@ -401,6 +387,14 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 		handler.log.Infof("Ignoring SenderKeyDistributionMessage.")
+ 		return
+ 	}
++	// Dedup WhatsApp Channel (newsletter) posts: they reach us TWICE - whatsmeow offline-syncs recent
++	// posts as live messages on connect, AND fetch_newsletter_history replays the last 50 when the
++	// channel is opened in the Servers tab. The WhatsApp message id is stable across both paths, so
++	// skip a post we've already delivered (otherwise every channel post shows up doubled). The seen set
++	// is loaded at login and saved on close (newsletter_seen.go), so a reopen next session won't re-dup.
++	if info.MessageSource.Chat.Server == types.NewsletterServer && handler.newsletterAlreadySeen(info.ID) {
++		return
++	}
+ 	isEdit := false
+ 	editTargetId := ""
+ 	{
+@@ -616,3 +610,58 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 	// evt.Info still holds the chat and sender as received, before the conversions above
+ 	handler.add_to_cache(message, info.ID, info.MessageSource.Chat, info.MessageSource.Sender, evt.Info.MessageSource, info.Timestamp)
+ }
++
++/*
++ * Describes a shared location as text with a link to a map.
++ */
++func format_location(lm *waE2E.LocationMessage) string {
++	text := "[LOCATION]"
++	if name := lm.GetName(); name != "" {
++		text += " " + name
++	}
++	if address := lm.GetAddress(); address != "" {
++		text += "\n" + address
++	}
++	lat, lon := lm.GetDegreesLatitude(), lm.GetDegreesLongitude()
++	text += fmt.Sprintf("\n%f, %f\nhttps://www.openstreetmap.org/?mlat=%f&mlon=%f", lat, lon, lat, lon)
++	if url := lm.GetURL(); url != "" {
++		text += "\n" + url
++	}
++	if comment := lm.GetComment(); comment != "" {
++		text += "\n" + comment
++	}
++	return text
++}
++
++/*
++ * Describes a shared contact card as its name and phone numbers.
++ * The vCard is expected to have one property per line, as WhatsApp sends it.
++ */
++func format_contact(display_name string, vcard string) string {
++	name := display_name
++	var phones []string
++	for _, line := range strings.Split(strings.ReplaceAll(vcard, "\r\n", "\n"), "\n") {
++		key, value, found := strings.Cut(line, ":")
++		if !found {
++			continue
++		}
++		key = strings.ToUpper(strings.SplitN(key, ";", 2)[0])
++		if dot := strings.LastIndexByte(key, '.'); dot >= 0 {
++			key = key[dot+1:] // a grouped property such as item1.TEL
++		}
++		value = strings.TrimSpace(value)
++		if key == "FN" && name == "" {
++			name = value
++		} else if key == "TEL" && value != "" {
++			phones = append(phones, value)
++		}
++	}
++	if name == "" {
++		name = "unnamed contact"
++	}
++	text := "[CONTACT] " + name
++	for _, phone := range phones {
++		text += "\n" + phone
++	}
++	return text
++}
+diff --git a/handle_newsletter.go b/handle_newsletter.go
+new file mode 100644
+index 0000000..a273c29
+--- /dev/null
++++ b/handle_newsletter.go
+@@ -0,0 +1,143 @@
++package main
++
++import (
++	"context"
++	"io"
++	"net/http"
++
++	"go.mau.fi/whatsmeow"
++	"go.mau.fi/whatsmeow/types"
++	"go.mau.fi/whatsmeow/types/events"
++)
++
++/*
++ * WhatsApp Channels (newsletters) support.
++ *
++ * whatsmeow delivers a followed Channel as a 1:1 message whose peer JID is "<id>@newsletter", and it
++ * carries no channel name - the only name on a message is the SENDER push-name, which is empty for a
++ * channel. So without help the buddy is created showing the raw "<id>@newsletter" JID.
++ *
++ * The readable title lives in the newsletter metadata, reachable only via an explicit query. Fetch the
++ * account's subscribed channels once on connect and push each real name through purple_update_name -
++ * the same sink used for contact push-names. That both CREATES the newsletter buddy (so followed but
++ * quiet channels still show up) and ALIASES it with its real title, which the webOS transport then
++ * files under the "WhatsApp Channels" server.
++ */
++func (handler *Handler) fetch_newsletter_names() {
++	cli := handler.client
++	if cli == nil {
++		return
++	}
++	metas, err := cli.GetSubscribedNewsletters(context.TODO())
++	if err != nil {
++		handler.log.Warnf("GetSubscribedNewsletters failed: %#v", err)
++		return
++	}
++	handler.log.Infof("Fetched %d subscribed WhatsApp Channels.", len(metas))
++	for _, meta := range metas {
++		if meta == nil {
++			continue
++		}
++		name := meta.ThreadMeta.Name.Text
++		if name != "" {
++			// meta.ID is the "<id>@newsletter" JID; purple_update_name creates/aliases the buddy under it.
++			purple_update_name(handler.account, meta.ID.String(), name)
++		}
++		// webOS: also set the channel ICON. Newsletters aren't regular contacts, so the contact
++		// avatar path (events.Picture -> GetProfilePictureInfo) never fires for them - but the picture
++		// URL is right here in the metadata. Set it so BBC/Dumpert/etc. show their logo.
++		handler.set_newsletter_icon(meta)
++	}
++}
++
++// set_newsletter_icon downloads a subscribed Channel's icon from its metadata and pushes it through
++// purple_set_profile_picture (the same sink contact avatars use). Prefers the small preview (matches
++// the default PREVIEW icon setting), falling back to the full picture; both carry a directly
++// downloadable URL. Best-effort: a missing/failed icon just leaves the channel iconless.
++func (handler *Handler) set_newsletter_icon(meta *types.NewsletterMetadata) {
++	// The subscribed-channels LIST query does NOT fetch the picture (it sends no fetch_full_image), so
++	// meta's Preview/Picture URLs are empty. Re-query THIS channel with GetNewsletterInfo, which sets
++	// fetch_full_image=true and returns a populated, directly-downloadable picture URL.
++	full, err := handler.client.GetNewsletterInfo(context.TODO(), meta.ID)
++	if err != nil || full == nil {
++		handler.log.Warnf("newsletter icon: GetNewsletterInfo(%s) failed: %#v", meta.ID.String(), err)
++		return
++	}
++	// The metadata's picture URL is empty; only a signed direct_path is provided. Prefer the small
++	// preview (192x192, ideal for an icon), fall back to the full picture. If a URL is ever present,
++	// HTTP GET it; otherwise download by direct_path via the media connection - profile pictures are
++	// unencrypted, so DownloadMediaWithOnlyPath needs no keys.
++	url := full.ThreadMeta.Preview.URL
++	dp := full.ThreadMeta.Preview.DirectPath
++	id := full.ThreadMeta.Preview.ID
++	if url == "" && dp == "" && full.ThreadMeta.Picture != nil {
++		url = full.ThreadMeta.Picture.URL
++		dp = full.ThreadMeta.Picture.DirectPath
++		id = full.ThreadMeta.Picture.ID
++	}
++	var data []byte
++	if url != "" {
++		resp, gerr := http.Get(url)
++		if gerr != nil {
++			return
++		}
++		defer resp.Body.Close()
++		if resp.StatusCode != http.StatusOK {
++			return
++		}
++		data, _ = io.ReadAll(resp.Body)
++	} else if dp != "" {
++		data, err = handler.client.DownloadMediaWithOnlyPath(context.TODO(), dp)
++		if err != nil {
++			handler.log.Warnf("newsletter icon: download for %s failed: %#v", meta.ID.String(), err)
++			return
++		}
++	}
++	if len(data) == 0 {
++		return
++	}
++	handler.log.Infof("Set WhatsApp Channel icon for %s, %d bytes.", full.ThreadMeta.Name.Text, len(data))
++	purple_set_profile_picture(handler.account, meta.ID.String(), data, "", id)
++}
++
++/*
++ * Fetch a WhatsApp Channel's recent history on demand. Called when the user opens the channel in the
++ * Servers tab: the transport's openChannel -> serv_join_chat -> gowhatsapp_join_chat routes a
++ * "<id>@newsletter" join here (a newsletter has no MUC to enter). We pull the last 50 posts via
++ * whatsmeow and replay each through the normal handle_message path, so text/media extraction and the
++ * newsletter->"WhatsApp Channels" routing (LibpurpleAdapter incoming_message_cb) are all reused.
++ */
++func (handler *Handler) fetch_newsletter_history(jidStr string) {
++	cli := handler.client
++	if cli == nil {
++		return
++	}
++	jid, err := parseJID(jidStr)
++	if err != nil {
++		handler.log.Warnf("newsletter history: invalid jid %s: %#v", jidStr, err)
++		return
++	}
++	msgs, err := cli.GetNewsletterMessages(context.TODO(), jid, &whatsmeow.GetNewsletterMessagesParams{Count: 50})
++	if err != nil {
++		handler.log.Warnf("GetNewsletterMessages(%s) failed: %#v", jidStr, err)
++		return
++	}
++	handler.log.Infof("Fetched %d history messages for WhatsApp Channel %s.", len(msgs), jidStr)
++	// Replay oldest-first so posts thread in chronological order.
++	for i := len(msgs) - 1; i >= 0; i-- {
++		nm := msgs[i]
++		if nm == nil || nm.Message == nil {
++			continue
++		}
++		info := types.MessageInfo{
++			MessageSource: types.MessageSource{
++				Chat:    jid,
++				Sender:  jid,
++				IsGroup: false,
++			},
++			ID:        nm.MessageID,
++			Timestamp: nm.Timestamp,
++		}
++		handler.handle_message(nm.Message, info, &events.Message{Info: info, Message: nm.Message})
++	}
++}
+diff --git a/handler.go b/handler.go
+index ebe5faa..e46ebe5 100644
+--- a/handler.go
++++ b/handler.go
+@@ -28,6 +28,8 @@ type Handler struct {
+ 	client           *whatsmeow.Client
+ 	deferredReceipts map[types.JID]map[types.JID][]types.MessageID // holds ID and sender of a received message so the receipt can be sent later.
+ 	cachedMessages   []CachedMessage                               // for looking up reactions and quotes
++	newsletterSeen      map[types.MessageID]bool // dedup WhatsApp Channel posts (live delivery vs history replay)
++	newsletterSeenOrder []types.MessageID        // FIFO order for bounding newsletterSeen
+ 	pictureRequests  chan ProfilePictureRequest
+ 	httpClient       *http.Client // for executing picture requests
+ }
+@@ -68,6 +70,9 @@ func (handler *Handler) eventHandler(rawEvt interface{}) {
+ 	case *events.Connected:
+ 		// connected – start downloading profile pictures now.
+ 		go handler.profile_picture_downloader()
++		// webOS: fetch the real names of followed WhatsApp Channels (newsletters) so they show a title
++		// instead of the raw "<id>@newsletter" JID. Also creates their buddies so quiet channels appear.
++		go handler.fetch_newsletter_names()
+ 		handler.handle_connected()
+ 	case *events.Disconnected:
+ 		// TODO: Find out if it would be more sensible to handle this as a non-error disconnect.
+diff --git a/login.go b/login.go
+index 69d6a84..3b5251a 100644
+--- a/login.go
++++ b/login.go
+@@ -162,6 +162,7 @@ func login(account *PurpleAccount, purple_user_dir string, username string, cred
+ 	}
+ 	handlers[account] = &handler
+ 	handler.LoadCachedMessages(filepath.Join(purple_user_dir, username+".json"))
++	handler.LoadNewsletterSeen(filepath.Join(purple_user_dir, username+".nlseen.json"))
+ 	handler.client.AddEventHandler(handler.eventHandler)
+ 
+ 	if proxy_address != "" {
+@@ -266,5 +267,6 @@ func (handler *Handler) close(account *PurpleAccount, purple_user_dir string, us
+ 	}
+ 	handler.client.Disconnect()
+ 	handler.SaveCachedMessages(filepath.Join(purple_user_dir, username+".json"))
++	handler.SaveNewsletterSeen(filepath.Join(purple_user_dir, username+".nlseen.json"))
+ 	delete(handlers, account)
+ }
+diff --git a/newsletter_seen.go b/newsletter_seen.go
+new file mode 100644
+index 0000000..3abb07a
+--- /dev/null
++++ b/newsletter_seen.go
+@@ -0,0 +1,65 @@
++package main
++
++// Dedup for WhatsApp Channel (newsletter) posts.
++//
++// A followed Channel's posts reach us TWICE: whatsmeow offline-syncs recent posts as live messages on
++// connect, AND fetch_newsletter_history replays the last 50 when the channel is opened in the Servers
++// tab. Without dedup each post is stored twice (the user sees every post doubled). We remember the
++// WhatsApp message IDs we've already delivered (the id is stable between the live and history paths) and
++// skip repeats. The set is bounded (FIFO) and persisted next to the message cache, so a reopen in a later
++// session doesn't re-duplicate posts already written to db8.
++
++import (
++	"encoding/json"
++	"os"
++
++	"go.mau.fi/whatsmeow/types"
++)
++
++const newsletterSeenMax = 4000
++
++// newsletterAlreadySeen reports whether this Channel post was already delivered, recording it if not.
++func (handler *Handler) newsletterAlreadySeen(id types.MessageID) bool {
++	if id == "" {
++		return false
++	}
++	if handler.newsletterSeen == nil {
++		handler.newsletterSeen = make(map[types.MessageID]bool)
++	}
++	if handler.newsletterSeen[id] {
++		return true
++	}
++	handler.newsletterSeen[id] = true
++	handler.newsletterSeenOrder = append(handler.newsletterSeenOrder, id)
++	if len(handler.newsletterSeenOrder) > newsletterSeenMax {
++		drop := handler.newsletterSeenOrder[0]
++		handler.newsletterSeenOrder = handler.newsletterSeenOrder[1:]
++		delete(handler.newsletterSeen, drop)
++	}
++	return false
++}
++
++func (handler *Handler) LoadNewsletterSeen(filePath string) {
++	data, err := os.ReadFile(filePath)
++	if err != nil {
++		return // no file yet — fine on first run
++	}
++	var ids []types.MessageID
++	if json.Unmarshal(data, &ids) != nil {
++		return
++	}
++	handler.newsletterSeen = make(map[types.MessageID]bool, len(ids))
++	for _, id := range ids {
++		handler.newsletterSeen[id] = true
++	}
++	handler.newsletterSeenOrder = ids
++	handler.log.Infof("Loaded %d seen WhatsApp Channel post ids.", len(ids))
++}
++
++func (handler *Handler) SaveNewsletterSeen(filePath string) {
++	data, err := json.Marshal(handler.newsletterSeenOrder)
++	if err != nil {
++		return
++	}
++	_ = os.WriteFile(filePath, data, 0600)
++}

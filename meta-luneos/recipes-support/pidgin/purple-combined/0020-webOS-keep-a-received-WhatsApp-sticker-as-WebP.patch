@@ -1,0 +1,162 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Mon, 9 Nov 2026 07:25:25 +0100
+Subject: [PATCH] webOS: keep a received WhatsApp sticker as WebP
+
+A sticker received on WhatsApp could not be sent back as a sticker.
+The plugin turned it into a PNG on download, because the old WebKit
+could not draw WebP, and the Messaging app offers only a .webp as a
+sticker; a PNG would go out as a picture. It also kept only the first
+frame of an animated sticker.
+
+Keep the sticker as it came, as <hash>.webp with image/webp: WAM's
+Chromium draws WebP, animated too. It is now streamed into its file
+like other WhatsApp media rather than fetched into memory, which was
+only needed for the transcoding. A Lottie sticker, which is no WebP,
+keeps the type it came with.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ go.mod               |  1 -
+ go.sum               |  4 ----
+ handle_attachment.go | 19 +++++++++++++++--
+ sticker_test.go      | 50 ++++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 67 insertions(+), 7 deletions(-)
+ create mode 100644 sticker_test.go
+
+diff --git a/go.mod b/go.mod
+index 46783d0..22a7139 100644
+--- a/go.mod
++++ b/go.mod
+@@ -13,7 +13,6 @@ require (
+ 	go.mau.fi/mautrix-meta v0.2610.0
+ 	go.mau.fi/util v0.11.0
+ 	go.mau.fi/whatsmeow v0.0.0-20261102152715-54038813c47f
+-	golang.org/x/image v0.47.0
+ 	golang.org/x/net v0.61.0
+ 	google.golang.org/protobuf v1.36.12
+ 	maunium.net/go/mautrix v0.32.0
+diff --git a/go.sum b/go.sum
+index fe4e7d5..74a9c5c 100644
+--- a/go.sum
++++ b/go.sum
+@@ -147,8 +147,6 @@ go.mau.fi/util v0.11.0 h1:JNEpkVRxfTdJUC0DIGKiRlLKzl4G/qLX/eVzoP7QuwY=
+ go.mau.fi/util v0.11.0/go.mod h1:04AEFVsc4zNdIkDC1gkdqbg/nZFolHY50pyXh2DSy7s=
+ go.mau.fi/whatsmeow v0.0.0-20261102152715-54038813c47f h1:UFm189GiALMSjhuywDHDQhRdhH6y8AD+eaGn5C75B1w=
+ go.mau.fi/whatsmeow v0.0.0-20261102152715-54038813c47f/go.mod h1:iY4lm61nTLWsNiIE1EmHUZwhKGBeoV4dhnVE2uMtNoQ=
+-go.mau.fi/whatsmeow v0.0.0-20261017175727-b2b1e71d45e2 h1:/2ifXqR9Ls19CcIJ6ukwF8wpS7DJjhviJ3YJzwKa9+o=
+-go.mau.fi/whatsmeow v0.0.0-20261017175727-b2b1e71d45e2/go.mod h1:iY4lm61nTLWsNiIE1EmHUZwhKGBeoV4dhnVE2uMtNoQ=
+ go.mau.fi/zeroconfig v0.2.0 h1:e/OGEERqVRRKlgaro7E6bh8xXiKFSXB3eNNIud7FUjU=
+ go.mau.fi/zeroconfig v0.2.0/go.mod h1:J0Vn0prHNOm493oZoQ84kq83ZaNCYZnq+noI1b1eN8w=
+ go.uber.org/mock v0.6.0 h1:hyF9dfmbgIX5EfOdasqLsWD6xqpNZlXblLB/Dbnwv3Y=
+@@ -161,8 +159,6 @@ golang.org/x/crypto v0.58.0 h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=
+ golang.org/x/crypto v0.58.0/go.mod h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w=
+ golang.org/x/exp v0.0.0-20261014143641-f0251eb4aa3e h1:HgI6W1OolKK6tcV74is+rl9SMT0njsHlp0TbQiGXI/A=
+ golang.org/x/exp v0.0.0-20261014143641-f0251eb4aa3e/go.mod h1:DBoxwWhjaW8DJJw/YeM4zpeOKMC1FMXSblsYy+1mFSw=
+-golang.org/x/image v0.47.0 h1:za/8gVz++PPZqmZJBNSISICN5Rrj5zixP/8K++fgmqo=
+-golang.org/x/image v0.47.0/go.mod h1:IkN5o4A7vq55vXN8FWjjnhg9Rs2GOtffqsSi9mWAKYE=
+ golang.org/x/mod v0.42.0 h1:ICeL3t2L30ljSPHHxDnR4fqVcBt/zR2zJAb9juavmQg=
+ golang.org/x/mod v0.42.0/go.mod h1:u5fzIrRInkL8MaO1cbRkUHT64v303YIT5KEqpNr7jRs=
+ golang.org/x/net v0.0.0-20190404232315-eb5bcb51f2a3/go.mod h1:t9HGtf8HONx5eT2rtn7q6eTqICYqUVnKs3thJo3Qplg=
+diff --git a/handle_attachment.go b/handle_attachment.go
+index 95d273a..5c852bc 100644
+--- a/handle_attachment.go
++++ b/handle_attachment.go
+@@ -9,6 +9,7 @@ import (
+ 	"context"
+ 	"encoding/hex"
+ 	"errors"
++	"fmt"
+ 	"mime"
+ 	"os"
+ 	"path/filepath"
+@@ -47,6 +48,21 @@ func extension_from_mimetype(mimeType *string) string {
+ 	return extension
+ }
+ 
++// sticker_file_type is the extension and mime type a received sticker is kept under. webOS: a
++// sticker is WhatsApp's own WebP, still or animated, and is kept as it came, as a .webp: WAM's
++// Chromium draws WebP, animated too, and the Messaging app offers a .webp to send back as a
++// sticker (send_file.go sends WebP bytes as a StickerMessage). It used to be turned into a PNG
++// for the old WebKit, which could not draw WebP; that PNG went back out as a picture, and kept
++// only the first frame of an animated sticker. A Lottie sticker is no WebP (an animation in a
++// zip archive), so it keeps the type it came with.
++func sticker_file_type(sm *waE2E.StickerMessage) (extension string, mimetype string) {
++	mimetype = sm.GetMimetype()
++	if sm.GetIsLottie() || (mimetype != "" && mimetype != "image/webp") {
++		return extension_from_mimetype(&mimetype), mimetype
++	}
++	return ".webp", "image/webp"
++}
++
+ /*
+  * The file name of a document is chosen by the sender.
+  * Make it a single path component so it cannot point outside the attachment directory
+@@ -131,9 +147,8 @@ func (handler *Handler) handle_attachment(message *waE2E.Message, id string, sou
+ 		if sm != nil {
+ 			downloadable = sm
+ 			hash = hex.EncodeToString(sm.GetFileSHA256())
+-			extension = extension_from_mimetype(sm.Mimetype)
++			extension, mimetype = sticker_file_type(sm)
+ 			data_type = C.gowhatsapp_attachment_type_sticker
+-			mimetype = sm.GetMimetype()
+ 			length = sm.GetFileLength()
+ 		}
+ 	}
+diff --git a/sticker_test.go b/sticker_test.go
+new file mode 100644
+index 0000000..ca68793
+--- /dev/null
++++ b/sticker_test.go
+@@ -0,0 +1,50 @@
++package main
++
++import (
++	"testing"
++
++	"go.mau.fi/whatsmeow/proto/waE2E"
++	"google.golang.org/protobuf/proto"
++)
++
++// A sticker, still or animated, is kept as the WebP it is, so the Messaging app can send it back
++// as a sticker.
++func TestAStickerIsKeptAsWebP(t *testing.T) {
++	for name, sm := range map[string]*waE2E.StickerMessage{
++		"still":       {Mimetype: proto.String("image/webp")},
++		"animated":    {Mimetype: proto.String("image/webp"), IsAnimated: proto.Bool(true)},
++		"no mimetype": {},
++	} {
++		extension, mimetype := sticker_file_type(sm)
++		if extension != ".webp" || mimetype != "image/webp" {
++			t.Errorf("%s: got %q %q, want .webp image/webp", name, extension, mimetype)
++		}
++	}
++}
++
++// A Lottie sticker is no WebP, so it is not named as one.
++func TestALottieStickerIsNoWebP(t *testing.T) {
++	sm := &waE2E.StickerMessage{Mimetype: proto.String("application/was"), IsLottie: proto.Bool(true)}
++	extension, mimetype := sticker_file_type(sm)
++	if extension == ".webp" || mimetype != "application/was" {
++		t.Errorf("got %q %q, want its own type", extension, mimetype)
++	}
++	sm = &waE2E.StickerMessage{IsLottie: proto.Bool(true)}
++	if extension, _ := sticker_file_type(sm); extension == ".webp" {
++		t.Errorf("a Lottie sticker without a mimetype: got %q", extension)
++	}
++}
++
++// A sticker is written as it came, streamed like other WhatsApp media: only Facebook media is
++// fetched into memory first.
++func TestAStickerIsStreamedAsItCame(t *testing.T) {
++	if fetched_into_memory(&waE2E.StickerMessage{}) {
++		t.Errorf("a sticker is fetched into memory")
++	}
++	if fetched_into_memory(&waE2E.ImageMessage{}) {
++		t.Errorf("a picture is fetched into memory")
++	}
++	if !fetched_into_memory(&fbDownloadable{}) {
++		t.Errorf("Facebook media is not fetched into memory")
++	}
++}

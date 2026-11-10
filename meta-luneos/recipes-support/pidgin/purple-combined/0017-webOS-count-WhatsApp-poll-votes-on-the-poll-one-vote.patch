@@ -1,0 +1,961 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sat, 7 Nov 2026 23:12:16 +0100
+Subject: [PATCH] webOS: count WhatsApp poll votes on the poll, one vote per
+ voter
+
+* Count WhatsApp poll votes on the poll itself
+
+A vote on a WhatsApp poll came in as a message of its own under the
+poll ("voted in poll ... for ..."). Keep each voter's latest choice per
+poll in <username>.polls.json, the oldest polls dropped beyond 500, and
+rewrite the poll message in place (webos-im-edit) with a "votes" count
+for each option in its poll: token. Our own vote is counted when it is
+sent, since WhatsApp does not send it back. A vote on a poll that is not
+cached is still shown as before.
+
+* Count every WhatsApp poll vote on its poll, by one voter each
+
+A vote on a poll this plug-in had seen could still come as the line
+"voted in a poll, but this plug-in failed to keep track of the poll."
+The poll was looked up only in the message cache, which is written at
+a clean log-out alone and holds the last 500 messages of all kinds,
+votes among them: after the transport was stopped any other way, or
+after enough other messages, the poll was gone.
+
+Each poll seen (one made on our phone as much as anyone's) is now also
+kept with the tally in <username>.polls.json, written at every change,
+with its question, options and how many may be chosen, and forgotten
+with its votes after the 500 newest polls. A vote finds its poll in the
+cache or there, and is counted on it. Only a vote on a poll never seen
+(from before the device was linked) is still a line, and it is from
+whoever voted. A vote is no longer kept in the message cache, where it
+held nothing and took the place of a message that can be quoted.
+
+A voter is one identity in the tally: the phone-number JID without a
+device. A vote from our own devices is us by our own JID, however it
+was addressed, as our vote from this device is (send_poll_vote), so our
+vote from the phone and from here no longer count as two voters. Anyone
+else's LID is resolved through whatsmeow's LID map, or else by the
+phone number the message carried beside it (SenderAlt).
+
+The options a vote chose are matched by the SHA-256 of their names,
+which is what a vote carries (whatsmeow HashPollOptions), not by the
+poll's OptionHash, an optional field holding whatever the poll's sender
+put there.
+
+Our vote from this device is counted on a poll the cache no longer has,
+too.
+
+* Vote on a WhatsApp poll as whoever its key is kept under
+
+A vote made on LuneOS was counted on LuneOS but never reached anyone.
+For a poll the cache no longer has, the key is looked up by the
+poll's sender, and in a group addressed by LID it is found under the
+LID also when asked by the number. The vote was still made as the
+number, so whatsmeow's EncryptPollVote voted as our number on a key
+kept under our LID, and no one could decrypt it. Vote as the sender
+the key is kept under (pollKeySender).
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ handle_message.go       | 227 +++++++++++++++++++++-------
+ handler.go              |   1 +
+ login.go                |   1 +
+ message_cache.go        |   4 +-
+ poll_key_sender_test.go |  23 +++
+ poll_tally.go           | 144 ++++++++++++++++++
+ poll_tally_test.go      | 319 ++++++++++++++++++++++++++++++++++++++++
+ send_message.go         |  25 +++-
+ 8 files changed, 686 insertions(+), 58 deletions(-)
+ create mode 100644 poll_key_sender_test.go
+ create mode 100644 poll_tally.go
+ create mode 100644 poll_tally_test.go
+
+diff --git a/handle_message.go b/handle_message.go
+index 5a88e31..336eabf 100644
+--- a/handle_message.go
++++ b/handle_message.go
+@@ -6,6 +6,7 @@ package main
+ import "C"
+ 
+ import (
++	"bytes"
+ 	"context"
+ 	"crypto/sha256"
+ 	"encoding/base64"
+@@ -240,6 +241,25 @@ type pollPayload struct {
+ 	Name    string   `json:"name"`
+ 	Options []string `json:"options"`
+ 	Max     int      `json:"max"`
++	Votes   []int    `json:"votes,omitempty"` // webOS: how many chose each option (poll_tally.go)
++}
++
++// pollToken is the "poll:" token for a poll, with the counts of its votes where there are any.
++func pollToken(name string, options []string, max int, votes []int) string {
++	data, err := json.Marshal(pollPayload{Name: name, Options: options, Max: max, Votes: votes})
++	if err != nil {
++		return "Poll: " + name
++	}
++	return "poll:" + base64.RawURLEncoding.EncodeToString(data)
++}
++
++func pollOptionNames(pcm *waE2E.PollCreationMessage) []string {
++	opts := pcm.GetOptions()
++	names := make([]string, 0, len(opts))
++	for _, option := range opts {
++		names = append(names, option.GetOptionName())
++	}
++	return names
+ }
+ 
+ // formatPollMessage renders a poll as just a "poll:<base64-json>" token (like formatEventMessage) -
+@@ -247,17 +267,136 @@ type pollPayload struct {
+ // have filled in each option's OptionHash (needed later for matching an incoming vote) before
+ // calling this; that side effect is independent of the returned text.
+ func formatPollMessage(pcm *waE2E.PollCreationMessage) string {
+-	opts := pcm.GetOptions()
+-	names := make([]string, 0, len(opts))
+-	for _, option := range opts {
+-		names = append(names, option.GetOptionName())
++	return pollToken(pcm.GetName(), pollOptionNames(pcm), int(pcm.GetSelectableOptionsCount()), nil)
++}
++
++// pollDefOf is what a poll creation message asks.
++func pollDefOf(pcm *waE2E.PollCreationMessage) pollDef {
++	return pollDef{Name: pcm.GetName(), Options: pollOptionNames(pcm), Max: int(pcm.GetSelectableOptionsCount())}
++}
++
++// pollUntracked is said for a vote on a poll this plug-in never saw (it came before the device was
++// linked, or was let go of long ago).
++const pollUntracked = "voted in a poll, but this plug-in failed to keep track of the poll."
++
++// pollChoice is what a vote chose, by the options' names, and how many of its choices are no option
++// of the poll. A vote carries the SHA-256 of each chosen option's name (whatsmeow HashPollOptions,
++// msgsecret.go:369). The hash is worked out here from the name, not taken from the poll's own
++// OptionHash: that field is optional (WAWebProtobufsE2E.pb.go:24384) and holds whatever the poll's
++// sender put there, which for a poll made on the user's phone this plug-in has never seen filled in.
++func pollChoice(options []string, selected [][]byte) (chosen []string, unknown int) {
++	chosen = []string{}
++	for _, hash := range selected {
++		found := false
++		for _, option := range options {
++			sum := sha256.Sum256([]byte(option))
++			if bytes.Equal(sum[:], hash) {
++				chosen = append(chosen, option)
++				found = true
++				break
++			}
++		}
++		if !found {
++			unknown++
++		}
+ 	}
+-	payload := pollPayload{Name: pcm.GetName(), Options: names, Max: int(pcm.GetSelectableOptionsCount())}
+-	data, err := json.Marshal(payload)
+-	if err != nil {
+-		return "Poll: " + pcm.GetName()
++	return chosen, unknown
++}
++
++// pollVoteLine tells a vote as a line of its own, for when there is no tally to count it in.
++func pollVoteLine(name string, chosen []string, unknown int) string {
++	parts := make([]string, 0, len(chosen)+unknown)
++	for _, c := range chosen {
++		parts = append(parts, fmt.Sprintf("„%s“", c))
++	}
++	for i := 0; i < unknown; i++ {
++		parts = append(parts, "an unknown option")
++	}
++	text := fmt.Sprintf("voted in poll „%s“ for", name)
++	switch len(parts) {
++	case 0:
++		text += " nothing (removed vote)"
++	case 1:
++		text += " " + parts[0]
++	default:
++		text += " " + strings.Join(parts[:len(parts)-1], ", ") + " and " + parts[len(parts)-1]
++	}
++	return text + "."
++}
++
++// poll_voter is who cast a vote, as one identity however WhatsApp addressed them, so that one person
++// is one voter in the tally: the phone-number JID without device, the form the account's username,
++// lidToPn and the Messaging app's addresses use. A vote from one of our own devices is us by our own
++// JID (Store.ID, what send_app_poll_vote counts our vote from this device under), whether it came as
++// our phone number or our LID. Anyone else's LID is resolved through whatsmeow's LID map, and where
++// the map has no number for it yet, by the phone number the stanza carried beside it (SenderAlt,
++// whatsmeow message.go:106-109); only a LID neither knows stays a LID.
++func poll_voter(source types.MessageSource, own types.JID, lidToPn func(types.JID) types.JID) types.JID {
++	if source.IsFromMe && !own.IsEmpty() {
++		return own.ToNonAD()
++	}
++	voter := source.Sender
++	if lidToPn != nil {
++		voter = lidToPn(voter)
++	}
++	if voter.Server == types.HiddenUserServer && source.SenderAlt.Server == types.DefaultUserServer {
++		voter = source.SenderAlt
++	}
++	return voter.ToNonAD()
++}
++
++// own_jid is the JID this device is logged in as, or none before it is.
++func (handler *Handler) own_jid() types.JID {
++	if handler.client == nil || handler.client.Store == nil || handler.client.Store.ID == nil {
++		return types.EmptyJID
+ 	}
+-	return "poll:" + base64.RawURLEncoding.EncodeToString(data)
++	return *handler.client.Store.ID
++}
++
++// poll_definition is what the poll with this id asks: from the message cache, or else from the polls
++// kept with the tally (poll_tally.go), which outlive the cache.
++func (handler *Handler) poll_definition(pollID string) (pollDef, bool) {
++	if cached := handler.lookup_cached_message_by_id(pollID); cached != nil {
++		if pcm := GetAnyPollCreationMessage(&cached.Message); pcm != nil {
++			return pollDefOf(pcm), true
++		}
++	}
++	if handler.pollTally != nil {
++		return handler.pollTally.poll(pollID)
++	}
++	return pollDef{}, false
++}
++
++// show_poll is the text for a poll, kept with the tally under the poll's message id for its votes:
++// any poll, ours (made on this device's phone, IsFromMe) as much as anyone's.
++func (handler *Handler) show_poll(pollID string, pcm *waE2E.PollCreationMessage) string {
++	for _, option := range pcm.GetOptions() {
++		if option.OptionHash == nil {
++			// taken from whatsmeow.HashPollOptions()
++			hash := fmt.Sprintf("%X", sha256.Sum256([]byte(option.GetOptionName())))
++			option.OptionHash = &hash
++		}
++	}
++	if handler.pollTally != nil {
++		handler.pollTally.remember(pollID, pollDefOf(pcm))
++	}
++	return formatPollMessage(pcm)
++}
++
++// webOS: what a voter's whole choice in a poll (the options' SHA-256 hashes) does. On a poll that is
++// known it is counted, and token is the poll's new text, with the counts, to rewrite the poll message
++// with in place ("webos-im-edit"). Only when there is nothing to count it on is it a line of its own.
++func (handler *Handler) poll_vote_outcome(pollID string, voter string, selected [][]byte) (token string, line string) {
++	poll, known := handler.poll_definition(pollID)
++	if !known || pollID == "" {
++		return "", pollUntracked
++	}
++	chosen, unknown := pollChoice(poll.Options, selected)
++	if handler.pollTally == nil {
++		return "", pollVoteLine(poll.Name, chosen, unknown)
++	}
++	counts := handler.pollTally.vote(pollID, voter, chosen, poll.Options)
++	return pollToken(poll.Name, poll.Options, poll.Max, counts), ""
+ }
+ 
+ // eventPayload is the compact JSON shape ConversationItem.extractEvents decodes back out of an
+@@ -421,6 +560,8 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 		}
+ 	}
+ 	text += message.GetConversation()
++	// who the message is from, as the conversation shows it
++	senderJid := info.MessageSource.Sender.ToNonAD().String()
+ 	var quotedText, quotedFrom, quotedId string
+ 	{
+ 		etm := message.ExtendedTextMessage
+@@ -505,15 +646,11 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 		pcm := GetAnyPollCreationMessage(message)
+ 		if pcm != nil {
+ 			//handler.log.Infof("message poll creation: %#v", pcm)
+-			for _, option := range pcm.GetOptions() {
+-				if option.OptionHash == nil {
+-					// taken from whatsmeow.HashPollOptions()
+-					hash := fmt.Sprintf("%X", sha256.Sum256([]byte(option.GetOptionName())))
+-					option.OptionHash = &hash
+-				}
+-				//handler.log.Infof("message poll creation option: %#v", option)
++			pollID := info.ID
++			if isEdit && editTargetId != "" {
++				pollID = editTargetId
+ 			}
+-			text = formatPollMessage(pcm)
++			text = handler.show_poll(pollID, pcm)
+ 		}
+ 	}
+ 	{
+@@ -546,46 +683,24 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 	{
+ 		pum := message.GetPollUpdateMessage()
+ 		if pum != nil {
+-			cached_message := handler.lookup_cached_message_by_id(pum.GetPollCreationMessageKey().GetID())
+-			if cached_message == nil {
+-				text = "voted in a poll, but this plug-in failed to keep track of the poll."
++			// webOS: a vote is counted on its poll, not told as a message of its own. The voter is one
++			// identity, the same for a vote from our phone as for one from this device, and is also who
++			// the line is from when there is no poll to count it on (poll_voter).
++			pollID := pum.GetPollCreationMessageKey().GetID()
++			voter := poll_voter(evt.Info.MessageSource, handler.own_jid(), func(jid types.JID) types.JID {
++				return handler.lidToPn(jid, "resolving poll voter")
++			})
++			senderJid = voter.String()
++			if _, known := handler.poll_definition(pollID); !known {
++				text = pollUntracked
++			} else if decrypted, err := handler.client.DecryptPollVote(context.TODO(), evt); err != nil {
++				handler.log.Warnf("Failed to decrypt poll vote: %v", err)
+ 			} else {
+-				decrypted, err := handler.client.DecryptPollVote(context.TODO(), evt)
+-				if err != nil {
+-					handler.log.Warnf("Failed to decrypt poll vote: %v", err)
+-				} else {
+-					pcm := GetAnyPollCreationMessage(&cached_message.Message)
+-					text = fmt.Sprintf("voted in poll „%s“ for", pcm.GetName())
+-					if len(decrypted.SelectedOptions) == 0 {
+-						text += " nothing (removed vote)"
+-					} else {
+-						for index, option_hash := range decrypted.SelectedOptions {
+-							hash := fmt.Sprintf("%X", option_hash)
+-							var option_name *string = nil
+-							for _, option := range pcm.Options {
+-								if option.GetOptionHash() == hash {
+-									option_name = option.OptionName
+-								}
+-							}
+-							if option_name == nil {
+-								handler.log.Warnf("Failed look-up poll vote option %s in %#v", hash, &cached_message.Message)
+-								text += " an unknown option"
+-							} else {
+-								separator := ""
+-								if len(decrypted.SelectedOptions) > 1 {
+-									if index > 0 {
+-										separator = ","
+-									}
+-									if index == len(decrypted.SelectedOptions)-1 {
+-										separator = " and"
+-									}
+-								}
+-								text += fmt.Sprintf("%s „%s“", separator, *option_name)
+-							}
+-						}
+-					}
+-					text += "."
++				token, line := handler.poll_vote_outcome(pollID, senderJid, decrypted.GetSelectedOptions())
++				if token != "" {
++					purple_handle_message_edit(handler.account, pollID, token)
+ 				}
++				text = line
+ 			}
+ 		}
+ 	}
+@@ -601,7 +716,7 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 			}
+ 			text := escape_text(text)
+ 			// note: info.PushName always denotes the sender (not the chat)
+-			purple_display_text_message(handler.account, info.MessageSource.Chat.ToNonAD().String(), info.MessageSource.IsGroup, false, info.MessageSource.Sender.ToNonAD().String(), &info.PushName, info.Timestamp, text, &info.ID, quotedText, quotedFrom, quotedId)
++			purple_display_text_message(handler.account, info.MessageSource.Chat.ToNonAD().String(), info.MessageSource.IsGroup, false, senderJid, &info.PushName, info.Timestamp, text, &info.ID, quotedText, quotedFrom, quotedId)
+ 		}
+ 	}
+ 	if !isEdit { // edited messages contain the changed texts, but attachments are absent since they cannot be changed
+diff --git a/handler.go b/handler.go
+index 6169591..6e37610 100644
+--- a/handler.go
++++ b/handler.go
+@@ -30,6 +30,7 @@ type Handler struct {
+ 	cachedMessages   []CachedMessage                               // for looking up reactions and quotes
+ 	newsletterSeen      map[types.MessageID]bool // dedup WhatsApp Channel posts (live delivery vs history replay)
+ 	newsletterSeenOrder []types.MessageID        // FIFO order for bounding newsletterSeen
++	pollTally           *pollTally               // webOS: the votes on each poll (poll_tally.go)
+ 	pictureRequests  chan ProfilePictureRequest
+ 	httpClient       *http.Client // for executing picture requests
+ }
+diff --git a/login.go b/login.go
+index 52f6674..39ee696 100644
+--- a/login.go
++++ b/login.go
+@@ -179,6 +179,7 @@ func login(account *PurpleAccount, purple_user_dir string, username string, cred
+ 	handlers[account] = &handler
+ 	handler.LoadCachedMessages(filepath.Join(purple_user_dir, username+".json"))
+ 	handler.LoadNewsletterSeen(filepath.Join(purple_user_dir, username+".nlseen.json"))
++	handler.pollTally = loadPollTally(filepath.Join(purple_user_dir, username+".polls.json"))
+ 	handler.client.AddEventHandler(handler.eventHandler)
+ 
+ 	// webOS: attach the WhatsApp-calling engine (meowcaller) to THIS shared session so the
+diff --git a/message_cache.go b/message_cache.go
+index 735f2f3..a6d99a6 100644
+--- a/message_cache.go
++++ b/message_cache.go
+@@ -35,8 +35,10 @@ type CachedMessage struct {
+  * Useful for replying to a specific message and for displaying relevant information when dealing with reactions.
+  */
+ func (handler *Handler) add_to_cache(message *waE2E.Message, id types.MessageID, chat types.JID, sender types.JID, source types.MessageSource, timestamp time.Time) {
+-	if message.GetReactionMessage() != nil {
++	if message.GetReactionMessage() != nil || message.GetPollUpdateMessage() != nil {
+ 		// ReactionMessage cannot be referred to, do not cache
++		// webOS: nor can a vote (PollUpdateMessage), which kept none of its fields here and only took
++		// the place of a message that can, the poll itself among them
+ 		return
+ 	}
+ 	//handler.log.Infof("add_to_cache: %s %#v", id, message)
+diff --git a/poll_key_sender_test.go b/poll_key_sender_test.go
+new file mode 100644
+index 0000000..cd3e547
+--- /dev/null
++++ b/poll_key_sender_test.go
+@@ -0,0 +1,23 @@
++package main
++
++import (
++	"testing"
++
++	"go.mau.fi/whatsmeow/types"
++)
++
++// A key found under the LID, asked by the number: the vote is made as the LID, which is how
++// whatsmeow picks our own LID to vote as.
++func TestPollKeySenderIsWhereTheKeyIs(t *testing.T) {
++	pn := types.NewJID("31600000001", types.DefaultUserServer)
++	lid := types.NewJID("123456789012345", types.HiddenUserServer)
++	if got := pollKeySender(pn, lid); got != lid {
++		t.Fatalf("asked by the number, kept under the LID: got %s, want %s", got, lid)
++	}
++	if got := pollKeySender(pn, pn); got != pn {
++		t.Fatalf("kept under the number: got %s, want %s", got, pn)
++	}
++	if got := pollKeySender(pn, types.EmptyJID); got != pn {
++		t.Fatalf("no stored sender: got %s, want what was asked, %s", got, pn)
++	}
++}
+diff --git a/poll_tally.go b/poll_tally.go
+new file mode 100644
+index 0000000..4692e70
+--- /dev/null
++++ b/poll_tally.go
+@@ -0,0 +1,144 @@
++package main
++
++// webOS: the votes on a poll, shown on the poll itself.
++//
++// A vote came in as a message of its own, "voted in poll „Lunch?“ for „Pizza“", under the poll.
++// Now each voter's latest choice is kept per poll, and the poll message is rewritten in place
++// ("webos-im-edit") with the count for each option, which the Messaging app draws next to it.
++// WhatsApp sends a voter's whole choice each time, so a vote replaces that voter's last one, and
++// an empty one takes it back. Kept in <purple user dir>/<username>.polls.json, so a restart does
++// not start the counts again from nothing.
++//
++// Each poll seen is kept there too (its question, options and how many may be chosen), so a vote
++// still finds its poll when the message cache no longer has it: the cache is only written at a clean
++// log-out (login.go, close) and holds the last 500 messages of all kinds, while this file is written
++// at every change.
++
++import (
++	"encoding/json"
++	"os"
++	"slices"
++	"sync"
++)
++
++// The polls kept; the oldest go first beyond this
++const pollTallyMax = 500
++
++type pollTally struct {
++	mu    sync.Mutex
++	path  string
++	Polls map[string]map[string][]string `json:"polls"`          // poll message id -> voter -> option names
++	Defs  map[string]pollDef             `json:"defs,omitempty"` // poll message id -> the poll
++	Order []string                       `json:"order"`          // poll message ids, oldest first
++}
++
++// pollDef is what a poll asks: its question, its options in their order, and how many may be chosen
++// (PollCreationMessage.SelectableOptionsCount: 1 one, 0 any number).
++type pollDef struct {
++	Name    string   `json:"name"`
++	Options []string `json:"options"`
++	Max     int      `json:"max"`
++}
++
++// loadPollTally reads the votes kept at path ("" keeps them in memory only).
++func loadPollTally(path string) *pollTally {
++	t := &pollTally{path: path}
++	if path != "" {
++		if data, err := os.ReadFile(path); err == nil {
++			_ = json.Unmarshal(data, t)
++		}
++	}
++	if t.Polls == nil {
++		t.Polls = make(map[string]map[string][]string)
++	}
++	if t.Defs == nil {
++		t.Defs = make(map[string]pollDef)
++	}
++	return t
++}
++
++// keepLocked puts a poll among those kept, if it is not already; the oldest go beyond pollTallyMax.
++func (t *pollTally) keepLocked(pollID string) {
++	_, counted := t.Polls[pollID]
++	_, defined := t.Defs[pollID]
++	if counted || defined {
++		return
++	}
++	t.Order = append(t.Order, pollID)
++	for len(t.Order) > pollTallyMax {
++		delete(t.Polls, t.Order[0])
++		delete(t.Defs, t.Order[0])
++		t.Order = t.Order[1:]
++	}
++}
++
++// remember keeps what a poll asks, for its votes to be counted on.
++func (t *pollTally) remember(pollID string, def pollDef) {
++	if pollID == "" {
++		return
++	}
++	t.mu.Lock()
++	defer t.mu.Unlock()
++	if old, known := t.Defs[pollID]; known && old.Name == def.Name && old.Max == def.Max && slices.Equal(old.Options, def.Options) {
++		return
++	}
++	t.keepLocked(pollID)
++	def.Options = append([]string(nil), def.Options...)
++	t.Defs[pollID] = def
++	t.saveLocked()
++}
++
++// poll is what a poll kept asks.
++func (t *pollTally) poll(pollID string) (pollDef, bool) {
++	t.mu.Lock()
++	defer t.mu.Unlock()
++	def, known := t.Defs[pollID]
++	if known {
++		def.Options = append([]string(nil), def.Options...)
++	}
++	return def, known
++}
++
++// vote records a voter's whole choice in a poll, none taking their vote back, and returns how many
++// voters chose each of options, in their order.
++func (t *pollTally) vote(pollID, voter string, chosen []string, options []string) []int {
++	t.mu.Lock()
++	defer t.mu.Unlock()
++	voters, known := t.Polls[pollID]
++	if !known {
++		t.keepLocked(pollID)
++		voters = make(map[string][]string)
++		t.Polls[pollID] = voters
++	}
++	if len(chosen) == 0 {
++		delete(voters, voter)
++	} else {
++		voters[voter] = append([]string(nil), chosen...)
++	}
++	t.saveLocked()
++	return countVotes(voters, options)
++}
++
++func countVotes(voters map[string][]string, options []string) []int {
++	counts := make([]int, len(options))
++	for _, chosen := range voters {
++		for i, option := range options {
++			for _, c := range chosen {
++				if c == option {
++					counts[i]++
++					break
++				}
++			}
++		}
++	}
++	return counts
++}
++
++func (t *pollTally) saveLocked() {
++	if t.path == "" {
++		return
++	}
++	if data, err := json.Marshal(t); err == nil {
++		_ = os.WriteFile(t.path, data, 0600)
++	}
++}
+diff --git a/poll_tally_test.go b/poll_tally_test.go
+new file mode 100644
+index 0000000..7a1771b
+--- /dev/null
++++ b/poll_tally_test.go
+@@ -0,0 +1,319 @@
++package main
++
++import (
++	"encoding/base64"
++	"fmt"
++	"path/filepath"
++	"reflect"
++	"strings"
++	"testing"
++
++	"go.mau.fi/whatsmeow"
++	"go.mau.fi/whatsmeow/proto/waE2E"
++	"go.mau.fi/whatsmeow/types"
++	"google.golang.org/protobuf/proto"
++)
++
++var lunch = []string{"Pizza", "Soup", "Pasta"}
++
++func TestPollTallyCountsEachVotersLatestChoice(t *testing.T) {
++	tally := loadPollTally("")
++	if got := tally.vote("P1", "anna", []string{"Pizza"}, lunch); !reflect.DeepEqual(got, []int{1, 0, 0}) {
++		t.Fatalf("got %v", got)
++	}
++	if got := tally.vote("P1", "bert", []string{"Pizza", "Pasta"}, lunch); !reflect.DeepEqual(got, []int{2, 0, 1}) {
++		t.Fatalf("got %v", got)
++	}
++	// A new choice replaces the last; the same option twice counts once
++	if got := tally.vote("P1", "anna", []string{"Soup", "Soup"}, lunch); !reflect.DeepEqual(got, []int{1, 1, 1}) {
++		t.Fatalf("got %v", got)
++	}
++	// None takes the vote back
++	if got := tally.vote("P1", "bert", nil, lunch); !reflect.DeepEqual(got, []int{0, 1, 0}) {
++		t.Fatalf("got %v", got)
++	}
++	// Another poll is counted apart; an option the poll has not counts nowhere
++	if got := tally.vote("P2", "anna", []string{"Salad"}, lunch); !reflect.DeepEqual(got, []int{0, 0, 0}) {
++		t.Fatalf("got %v", got)
++	}
++}
++
++func TestPollTallyKeptAcrossRestart(t *testing.T) {
++	path := filepath.Join(t.TempDir(), "me.polls.json")
++	tally := loadPollTally(path)
++	tally.vote("P1", "anna", []string{"Pizza"}, lunch)
++	tally.vote("P1", "bert", []string{"Soup"}, lunch)
++
++	again := loadPollTally(path)
++	if got := again.vote("P1", "carl", []string{"Pizza"}, lunch); !reflect.DeepEqual(got, []int{2, 1, 0}) {
++		t.Fatalf("got %v after reload", got)
++	}
++	// A file that is not ours is no votes, and no crash
++	if bad := loadPollTally(filepath.Join(t.TempDir(), "missing.json")); len(bad.Polls) != 0 {
++		t.Fatalf("votes from nowhere: %v", bad.Polls)
++	}
++}
++
++func TestPollTallyForgetsTheOldestPolls(t *testing.T) {
++	tally := loadPollTally("")
++	for i := 0; i <= pollTallyMax; i++ {
++		tally.vote(string(rune('A'+i%26))+string(rune(i)), "anna", []string{"Pizza"}, lunch)
++	}
++	if len(tally.Polls) != pollTallyMax || len(tally.Order) != pollTallyMax {
++		t.Fatalf("%d polls, %d in order; want %d", len(tally.Polls), len(tally.Order), pollTallyMax)
++	}
++	if _, kept := tally.Polls[string(rune('A'))+string(rune(0))]; kept {
++		t.Fatal("the oldest poll was kept")
++	}
++}
++
++func TestPollTokenCarriesVotes(t *testing.T) {
++	plain := pollToken("Lunch?", lunch, 1, nil)
++	counted := pollToken("Lunch?", lunch, 1, []int{2, 0, 1})
++	if got := decodePollToken(t, plain); got != `{"name":"Lunch?","options":["Pizza","Soup","Pasta"],"max":1}` {
++		t.Fatalf("got %s", got)
++	}
++	if got := decodePollToken(t, counted); got != `{"name":"Lunch?","options":["Pizza","Soup","Pasta"],"max":1,"votes":[2,0,1]}` {
++		t.Fatalf("got %s", got)
++	}
++}
++
++func decodePollToken(t *testing.T, token string) string {
++	t.Helper()
++	if !strings.HasPrefix(token, "poll:") {
++		t.Fatalf("not a poll token: %q", token)
++	}
++	data, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(token, "poll:"))
++	if err != nil {
++		t.Fatalf("token %q: %v", token, err)
++	}
++	return string(data)
++}
++
++// Votes come from the event handler and from send_app_poll_vote's goroutine at once.
++func TestPollTallyVotesFromManyGoroutines(t *testing.T) {
++	tally := loadPollTally(filepath.Join(t.TempDir(), "polls.json"))
++	options := []string{"Pizza", "Soup"}
++	done := make(chan []int)
++	for i := 0; i < 8; i++ {
++		go func(i int) {
++			var counts []int
++			for j := 0; j < 20; j++ {
++				counts = tally.vote("poll"+string(rune('A'+j%3)), "voter"+string(rune('a'+i)), []string{options[(i+j)%2]}, options)
++			}
++			done <- counts
++		}(i)
++	}
++	for i := 0; i < 8; i++ {
++		<-done
++	}
++	got := tally.vote("pollA", "late", []string{"Pizza", "Soup"}, options)
++	if got[0]+got[1] != 8+2 {
++		t.Fatalf("pollA counts %v: want 9 voters, 10 choices", got)
++	}
++}
++
++// The people and the group of the vote tests: we are 31600000001, by LID 900000000000001.
++var (
++	pollGroup = types.NewJID("120363000000000001", types.GroupServer)
++	usPN      = types.JID{User: "31600000001", Server: types.DefaultUserServer, Device: 12}
++	usLID     = types.JID{User: "900000000000001", Server: types.HiddenUserServer, Device: 3}
++	annaPN    = types.NewJID("31600000002", types.DefaultUserServer)
++	annaLID   = types.JID{User: "900000000000002", Server: types.HiddenUserServer, Device: 7}
++	annaPhone = types.JID{User: "31600000002", Server: types.DefaultUserServer, Device: 4} // her phone, as a device
++)
++
++// voteLidMap stands in for whatsmeow's LID map: what lidToPn makes of a JID with the map as given.
++func voteLidMap(known map[string]types.JID) func(types.JID) types.JID {
++	return func(jid types.JID) types.JID {
++		if pn, ok := known[jid.User]; ok && jid.Server == types.HiddenUserServer {
++			pn.Device = jid.Device
++			return pn
++		}
++		return jid
++	}
++}
++
++func pollCreation(name string, options ...string) *waE2E.PollCreationMessage {
++	pcm := &waE2E.PollCreationMessage{Name: proto.String(name), SelectableOptionsCount: proto.Uint32(1)}
++	for _, option := range options {
++		pcm.Options = append(pcm.Options, &waE2E.PollCreationMessage_Option{OptionName: proto.String(option)})
++	}
++	return pcm
++}
++
++// A vote is the SHA-256 of each chosen option's name, as whatsmeow.HashPollOptions makes it.
++func ballot(options ...string) [][]byte {
++	return whatsmeow.HashPollOptions(options)
++}
++
++func TestAVoterIsOnePersonHoweverAddressed(t *testing.T) {
++	known := voteLidMap(map[string]types.JID{annaLID.User: annaPN, usLID.User: usPN.ToNonAD()})
++	unknown := voteLidMap(nil)
++	for _, c := range []struct {
++		what   string
++		source types.MessageSource
++		lids   func(types.JID) types.JID
++		want   types.JID
++	}{
++		{"anna by number", types.MessageSource{Chat: pollGroup, IsGroup: true, Sender: annaPhone}, unknown, annaPN},
++		{"anna by LID, LID known", types.MessageSource{Chat: pollGroup, IsGroup: true, Sender: annaLID}, known, annaPN},
++		{"anna by LID, number beside it", types.MessageSource{Chat: pollGroup, IsGroup: true, Sender: annaLID, SenderAlt: annaPN}, unknown, annaPN},
++		{"anna by LID, nothing known", types.MessageSource{Chat: pollGroup, IsGroup: true, Sender: annaLID}, unknown, annaLID.ToNonAD()},
++		{"us from our phone by number", types.MessageSource{Chat: pollGroup, IsGroup: true, Sender: usPN, IsFromMe: true}, unknown, usPN.ToNonAD()},
++		{"us from our phone by LID", types.MessageSource{Chat: pollGroup, IsGroup: true, Sender: usLID, IsFromMe: true}, unknown, usPN.ToNonAD()},
++	} {
++		if got := poll_voter(c.source, usPN, c.lids); got != c.want {
++			t.Errorf("%s: voter %s, want %s", c.what, got, c.want)
++		}
++	}
++	// What send_app_poll_vote counts our vote from this device as is the same voter
++	if got := poll_voter(types.MessageSource{Sender: usPN, IsFromMe: true}, usPN, nil); got != usPN.ToNonAD() {
++		t.Errorf("our own vote: %s", got)
++	}
++}
++
++// Our vote from the phone, by LID, and the same vote again from this device count once.
++func TestOurVoteFromThePhoneAndFromHereCountsOnce(t *testing.T) {
++	handler := &Handler{pollTally: loadPollTally("")}
++	handler.show_poll("P1", pollCreation("Lunch?", lunch...))
++	fromPhone := poll_voter(types.MessageSource{Chat: pollGroup, IsGroup: true, Sender: usLID, IsFromMe: true}, usPN, voteLidMap(nil))
++	handler.poll_vote_outcome("P1", fromPhone.String(), ballot("Soup"))
++	fromHere := poll_voter(types.MessageSource{Sender: usPN, IsFromMe: true}, usPN, nil)
++	token, _ := handler.poll_vote_outcome("P1", fromHere.String(), ballot("Pizza"))
++	if got := decodePollToken(t, token); !strings.Contains(got, `"votes":[1,0,0]`) {
++		t.Fatalf("our two votes counted as two voters: %s", got)
++	}
++}
++
++// A poll we made on the phone comes to us as ours (IsFromMe); it is kept, and kept past a restart
++// that the message cache does not survive, so that its votes are counted.
++func TestAPollFromOurPhoneIsKeptForItsVotes(t *testing.T) {
++	path := filepath.Join(t.TempDir(), "me.polls.json")
++	before := &Handler{pollTally: loadPollTally(path)}
++	if text := before.show_poll("OURPOLL", pollCreation("Lunch?", lunch...)); !strings.HasPrefix(text, "poll:") {
++		t.Fatalf("poll shown as %q", text)
++	}
++	// The restart: the cache is empty (it was never written, the transport did not log out)
++	after := &Handler{pollTally: loadPollTally(path)}
++	poll, known := after.poll_definition("OURPOLL")
++	if !known || poll.Name != "Lunch?" || !reflect.DeepEqual(poll.Options, lunch) || poll.Max != 1 {
++		t.Fatalf("poll after restart: %+v, %v", poll, known)
++	}
++	token, line := after.poll_vote_outcome("OURPOLL", annaPN.String(), ballot("Pasta"))
++	if line != "" || !strings.Contains(decodePollToken(t, token), `"votes":[0,0,1]`) {
++		t.Fatalf("vote after restart: token %q, line %q", token, line)
++	}
++}
++
++// A poll the cache has is found there, whoever made it.
++func TestAPollInTheCacheIsFound(t *testing.T) {
++	handler := &Handler{cachedMessages: []CachedMessage{{
++		ID: "CACHED", Chat: pollGroup, Sender: usPN.ToNonAD(),
++		Source: types.MessageSource{Chat: pollGroup, Sender: usPN.ToNonAD(), IsFromMe: true, IsGroup: true},
++		Message: waE2E.Message{PollCreationMessageV3: pollCreation("Lunch?", lunch...)},
++	}}, pollTally: loadPollTally("")}
++	token, line := handler.poll_vote_outcome("CACHED", annaPN.String(), ballot("Soup"))
++	if line != "" || !strings.Contains(decodePollToken(t, token), `"votes":[0,1,0]`) {
++		t.Fatalf("token %q, line %q", token, line)
++	}
++}
++
++// A vote on a poll we have is counted on it, never a line of its own; only one on a poll we never
++// saw is a line, and it is from whoever voted.
++func TestAVoteIsCountedNotShown(t *testing.T) {
++	handler := &Handler{pollTally: loadPollTally("")}
++	handler.show_poll("P1", pollCreation("Lunch?", lunch...))
++	token, line := handler.poll_vote_outcome("P1", annaPN.String(), ballot("Pizza", "Pasta"))
++	if line != "" || token == "" {
++		t.Fatalf("token %q, line %q", token, line)
++	}
++	// Taking the vote back is counted too
++	if token, line = handler.poll_vote_outcome("P1", annaPN.String(), nil); line != "" || !strings.Contains(decodePollToken(t, token), `"votes":[0,0,0]`) {
++		t.Fatalf("taken back: token %q, line %q", token, line)
++	}
++	if token, line = handler.poll_vote_outcome("NEVERSEEN", annaPN.String(), ballot("Pizza")); token != "" || line != pollUntracked {
++		t.Fatalf("unknown poll: token %q, line %q", token, line)
++	}
++	// Without a tally (before log-in) the vote is told, by the options' names
++	bare := &Handler{cachedMessages: []CachedMessage{{ID: "P2", Message: waE2E.Message{PollCreationMessage: pollCreation("Lunch?", lunch...)}}}}
++	if _, line = bare.poll_vote_outcome("P2", annaPN.String(), ballot("Soup", "Pasta")); line != "voted in poll „Lunch?“ for „Soup“ and „Pasta“." {
++		t.Fatalf("told as %q", line)
++	}
++}
++
++// An option is matched by the hash of its name, whatever the poll carries as OptionHash.
++func TestAVoteMatchesTheOptionsByTheirNames(t *testing.T) {
++	pcm := pollCreation("Lunch?", lunch...)
++	pcm.Options[1].OptionHash = proto.String("not-a-hash-of-soup")
++	handler := &Handler{pollTally: loadPollTally("")}
++	handler.show_poll("P1", pcm)
++	token, _ := handler.poll_vote_outcome("P1", annaPN.String(), append(ballot("Soup"), []byte("garbage")))
++	if got := decodePollToken(t, token); !strings.Contains(got, `"votes":[0,1,0]`) {
++		t.Fatalf("got %s", got)
++	}
++	if chosen, unknown := pollChoice(lunch, append(ballot("Pasta"), []byte("garbage"))); !reflect.DeepEqual(chosen, []string{"Pasta"}) || unknown != 1 {
++		t.Fatalf("chosen %v, unknown %d", chosen, unknown)
++	}
++}
++
++// Another member's vote on a poll that is ours (we made it on our phone: its key has FromMe) is
++// that member's: received, from them, never ours. The poll's FromMe has no part in who voted.
++func TestAnotherMembersVoteOnOurPollIsTheirs(t *testing.T) {
++	for _, source := range []types.MessageSource{
++		{Chat: pollGroup, IsGroup: true, Sender: annaPhone},
++		{Chat: pollGroup, IsGroup: true, Sender: annaLID, SenderAlt: annaPN, AddressingMode: types.AddressingModeLID},
++	} {
++		voter := poll_voter(source, usPN, voteLidMap(map[string]types.JID{annaLID.User: annaPN}))
++		if voter != annaPN || voter.String() == usPN.ToNonAD().String() {
++			t.Fatalf("anna's vote (%s) is from %s", source.Sender, voter)
++		}
++	}
++	// Even with nothing known of her LID, it is not us
++	if voter := poll_voter(types.MessageSource{Chat: pollGroup, IsGroup: true, Sender: annaLID}, usPN, voteLidMap(nil)); voter.String() == usPN.ToNonAD().String() {
++		t.Fatalf("anna's vote is ours")
++	}
++}
++
++// The polls kept go with the oldest votes, and a poll kept is not kept twice.
++func TestThePollsKeptAreForgottenWithTheirVotes(t *testing.T) {
++	tally := loadPollTally("")
++	tally.remember("FIRST", pollDef{Name: "Lunch?", Options: lunch, Max: 1})
++	tally.vote("FIRST", "anna", []string{"Pizza"}, lunch)
++	tally.remember("FIRST", pollDef{Name: "Lunch?", Options: lunch, Max: 1})
++	if len(tally.Order) != 1 {
++		t.Fatalf("order %v", tally.Order)
++	}
++	for i := 0; i < pollTallyMax; i++ {
++		tally.remember(fmt.Sprintf("P%d", i), pollDef{Name: "Lunch?", Options: lunch, Max: 1})
++	}
++	if _, kept := tally.poll("FIRST"); kept || tally.Polls["FIRST"] != nil || len(tally.Defs) != pollTallyMax || len(tally.Order) != pollTallyMax {
++		t.Fatalf("FIRST kept %v; %d defs, %d in order", kept, len(tally.Defs), len(tally.Order))
++	}
++}
++
++// Polls are kept from the event handler while votes are counted and polls looked up at once.
++func TestPollTallyKeepsPollsFromManyGoroutines(t *testing.T) {
++	tally := loadPollTally(filepath.Join(t.TempDir(), "polls.json"))
++	done := make(chan bool)
++	for i := 0; i < 8; i++ {
++		go func(i int) {
++			for j := 0; j < 20; j++ {
++				id := fmt.Sprintf("poll%d", j%5)
++				// (a poll edited: kept again, so it is written while others read it)
++				tally.remember(id, pollDef{Name: "Lunch?", Options: lunch, Max: (i + j) % 2})
++				tally.vote(id, fmt.Sprintf("voter%d", i), []string{lunch[j%3]}, lunch)
++				if def, known := tally.poll(id); !known || def.Name != "Lunch?" {
++					t.Errorf("%s: %+v %v", id, def, known)
++				}
++			}
++			done <- true
++		}(i)
++	}
++	for i := 0; i < 8; i++ {
++		<-done
++	}
++	if len(tally.Order) != 5 || len(tally.Defs) != 5 {
++		t.Fatalf("%d in order, %d polls", len(tally.Order), len(tally.Defs))
++	}
++}
+diff --git a/send_message.go b/send_message.go
+index f6df5ab..22fabd7 100644
+--- a/send_message.go
++++ b/send_message.go
+@@ -19,6 +19,7 @@ import (
+ 	"strings"
+ 	"time"
+ 
++	"go.mau.fi/whatsmeow"
+ 	"go.mau.fi/whatsmeow/proto/waE2E"
+ 	"go.mau.fi/whatsmeow/types"
+ 	"golang.org/x/net/html"
+@@ -341,6 +342,19 @@ func (handler *Handler) pollVoteSenderCandidates(ctx context.Context, sender typ
+ 	return candidates
+ }
+ 
++
++// pollKeySender is who a poll's key is kept under, to vote as. GetMessageSecret answers with the
++// sender it really found the key under: in a group addressed by LID it is the LID, also when asked
++// by the phone number. whatsmeow's EncryptPollVote takes our own LID or our number by that sender's
++// server (msgsecret.go EncryptPollVote), so a vote made by the number on a key kept under the LID
++// mixes the two, and no one can decrypt it: WhatsApp drops it without a word.
++func pollKeySender(asked, stored types.JID) types.JID {
++	if stored.IsEmpty() {
++		return asked
++	}
++	return stored
++}
++
+ // send_app_poll_vote sends (or replaces) the user's vote on a poll they received. optionNames is the
+ // FULL current selection (not a delta) - whatsmeow's BuildPollVote/PollVoteMessage always carries
+ // the complete set of selected options, same as a real WhatsApp client re-sending the whole
+@@ -399,7 +413,7 @@ func (handler *Handler) send_app_poll_vote(peer string, pollMessageID string, op
+ 			fmt.Fprintf(os.Stderr, "wa-poll: secret probe chat=%s cand=%s -> found=%v realSender=%s err=%v\n",
+ 				chat, cand, len(secret) > 0, realSender, serr)
+ 			if serr == nil && len(secret) > 0 {
+-				resolved = cand
++				resolved = pollKeySender(cand, realSender)
+ 				found = true
+ 				break
+ 			}
+@@ -443,6 +457,15 @@ func (handler *Handler) send_app_poll_vote(peer string, pollMessageID string, op
+ 		return
+ 	}
+ 	fmt.Fprintf(os.Stderr, "wa-poll: SENT poll=%s vote OK server_id=%s ts=%s\n", pollMessageID, resp.ID, resp.Timestamp)
++	// webOS: our own vote counts on the poll too; WhatsApp does not send it back to us. It is counted
++	// under the same voter as our vote from the phone (poll_voter), on the poll as the cache or the
++	// tally has it.
++	if own := handler.own_jid(); !own.IsEmpty() {
++		voter := poll_voter(types.MessageSource{Sender: own, IsFromMe: true}, own, nil)
++		if token, _ := handler.poll_vote_outcome(pollMessageID, voter.String(), whatsmeow.HashPollOptions(optionNames)); token != "" {
++			purple_handle_message_edit(handler.account, pollMessageID, token)
++		}
++	}
+ }
+ 
+ /*
