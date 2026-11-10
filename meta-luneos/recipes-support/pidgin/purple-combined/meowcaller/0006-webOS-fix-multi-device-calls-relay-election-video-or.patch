@@ -1,0 +1,2586 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 3 Nov 2026 16:06:47 +0100
+Subject: [PATCH] webOS: fix multi-device calls, relay election, video
+ orientation and reordered video
+
+Found in live WhatsApp video calls between LuneOS phones and Android on
+2026-11-03.
+
+- Multi-device callee: the caller now sends each other rung device its
+  own <terminate reason=accepted_elsewhere|rejected_elsewhere>, so the
+  other devices stop ringing.
+- A meowcaller callee sends <accept> only on the caller's first
+  <mute_v2> after its user answered. Android callers send one, a
+  meowcaller caller never did: the call stayed on the relay and the
+  caller kept ringing. The caller now announces mute_v2 state 0 to the
+  preaccepted devices every 1.5 s until answered, and the callee
+  accepts anyway 3 s after its user answered.
+- Relay election: the 1:1 relay is elected from both sides'
+  <relaylatency>. Echoing the caller's numbers endorsed the caller's
+  local relay, often one outside our relay block. An inbound call now
+  steers to the is_fna relay, else the closest probed relay of our
+  block we hold a token for, and reports that one near and all others
+  far.
+- RTCP: the reception report's WhatsApp extension carries the bytes
+  received and the receive rate, as whatsapp-rust's native 1:1 compound
+  packet does; left zero, a native sender lowers its video.
+- Orientation: WhatsApp clients rotate by the low 2 bits of
+  MediaFrameInfo in each video RTP packet. We stamp ours on every video
+  packet, report the peer's (first frame and later changes) through
+  OnVideoState and prefer them to the stanza's device_orientation.
+  Every state=1 and state=6 we send carries the current orientation,
+  also one set while the camera was off.
+- Reordered video: the relay delivers video RTP out of order (seen up
+  to 22 places late, none lost). The access unit assembler took every
+  gap for a loss and withheld frames until an IDR, so the picture froze
+  for the rest of the call. H264ReorderingAssembler puts packets back in
+  order within a 32-packet window, per participant, and while frames
+  are withheld the engine asks the peer for a keyframe every second.
+
+Upstream's reception statistics (4603cff) and RTP orientation tracking
+(2ca8d7d) are used where this patch used to carry its own.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ engine.go                 | 476 +++++++++++++++++++++++++++++++----
+ engine_lifecycle_test.go  | 511 ++++++++++++++++++++++++++++++++++++++
+ engine_media.go           | 154 ++++++++++--
+ engine_media_test.go      |  36 +++
+ relay_election_test.go    | 342 +++++++++++++++++++++++++
+ rtp/h264_reorder.go       | 103 ++++++++
+ rtp/h264_reorder_test.go  | 167 +++++++++++++
+ rtp/rtcp.go               |  42 +++-
+ rtp/rtcp_reception_set.go |  11 +
+ rtp/rtp_test.go           |  83 +++++++
+ rtp_orientation_test.go   |  36 +++
+ signaling/stanza.go       |  22 ++
+ 12 files changed, 1915 insertions(+), 68 deletions(-)
+ create mode 100644 relay_election_test.go
+ create mode 100644 rtp/h264_reorder.go
+ create mode 100644 rtp/h264_reorder_test.go
+ create mode 100644 rtp_orientation_test.go
+
+diff --git a/engine.go b/engine.go
+index 9081b83..1816def 100644
+--- a/engine.go
++++ b/engine.go
+@@ -37,8 +37,25 @@ type engine struct {
+ 	sendCallNode    func(context.Context, waBinary.Node) error
+ 	requestCallNode func(context.Context, waBinary.Node, string) (*waBinary.Node, error)
+ 	rawCallHookErr  error
++
++	// acceptFallback is how long an answered incoming call waits for the caller's
++	// <mute_v2> before accepting without it. Android callers send one within about
++	// two seconds of the answer; another meowcaller never does.
++	acceptFallback time.Duration
++	// ringAnnounceInterval is how often an outgoing call that is still ringing tells
++	// the callee devices that preaccepted its microphone state (<mute_v2>), as an
++	// Android caller does; a meowcaller callee accepts on it.
++	ringAnnounceInterval time.Duration
+ }
+ 
++const (
++	defaultAcceptFallback       = 3 * time.Second
++	defaultRingAnnounceInterval = 1500 * time.Millisecond
++	// ringAnnounceLimit caps the announcements for one call (about a minute and a
++	// half at the default interval), in case nothing ever answers or ends it.
++	ringAnnounceLimit = 60
++)
++
+ // engineCall is the engine's per-call state: the public Call handle plus the inputs
+ // needed to bring media up (the decrypted callKey and the relay endpoint, both of
+ // which can arrive separately), the media goroutine cancel handle, and the deferred
+@@ -53,13 +70,19 @@ type engineCall struct {
+ 	creator types.JID // call-creator JID (for accept/relaylatency)
+ 	from    types.JID // the <call> "from" — where stanzas are addressed
+ 
+-	direction         CallDirection
+-	codec             AudioCodec   // audio codec for this call, selected from voip_settings (MLow default)
+-	localVideo        bool         // this client is sending, or has requested to send, video
+-	remoteVideo       bool         // the peer is sending video to this client
+-	videoGate         bool         // outbound upgrade is waiting for peer acceptance
+-	peerVideoUpgrade  bool         // the peer's inbound upgrade is waiting for local acceptance
+-	videoTx           *videoSender // video send pipeline, live while media runs
++	direction        CallDirection
++	codec            AudioCodec   // audio codec for this call, selected from voip_settings (MLow default)
++	localVideo       bool         // this client is sending, or has requested to send, video
++	remoteVideo      bool         // the peer is sending video to this client
++	videoGate        bool         // outbound upgrade is waiting for peer acceptance
++	peerVideoUpgrade bool         // the peer's inbound upgrade is waiting for local acceptance
++	videoTx          *videoSender // video send pipeline, live while media runs
++	txOrient         uint8        // our device orientation (0..3), carried in every video RTP packet
++	// rxOrient is the orientation the peer stamps on its video packets, once any
++	// arrived (rxOrientKnown). WhatsApp clients rotate by those bits; a <video
++	// state=1> may say 0 for a camera turned back on, so the bits win.
++	rxOrient          int
++	rxOrientKnown     bool
+ 	appDataTx         *appDataSender
+ 	rekeyPeer         func(string) error
+ 	group             bool
+@@ -76,11 +99,34 @@ type engineCall struct {
+ 
+ 	// The callee <accept> is deferred until the caller's <mute_v2> arrives.
+ 	acceptPending bool
++
++	// ringDevices are the callee devices an outgoing offer rang. When one of them
++	// answers or declines, the caller tells the others (accepted_elsewhere /
++	// rejected_elsewhere) so they stop ringing: WhatsApp leaves that to the caller.
++	// Cleared once they have been told.
++	ringDevices []types.JID
++
++	// preaccepted are the callee devices that preaccepted an outgoing call; while it
++	// rings they get our <mute_v2> every ringAnnounceInterval. answered stops that.
++	preaccepted []types.JID
++	announcing  bool
++	answered    bool
++
++	// electedRelay is the relay this call's media runs on, and the relay the 1:1 relay
++	// election is steered to (see onRelayLatency). Inbound: the offer's is_fna relay, else
++	// the first relay of our relay block the caller's probes name, else the one
++	// getMediaRelayEndpoint picks at media start. Outbound: the relay allocated on at
++	// media start.
++	electedRelay string
+ }
+ 
+ // newEngine creates the engine for a Client.
+ func newEngine(c *Client) *engine {
+-	e := &engine{c: c, calls: map[string]*engineCall{}}
++	e := &engine{
++		c: c, calls: map[string]*engineCall{},
++		acceptFallback:       defaultAcceptFallback,
++		ringAnnounceInterval: defaultRingAnnounceInterval,
++	}
+ 	if c != nil && c.wa != nil {
+ 		e.sendCallNode = func(ctx context.Context, node waBinary.Node) error {
+ 			return c.wa.DangerousInternals().SendNode(ctx, node)
+@@ -264,6 +310,7 @@ func (e *engine) transitionVideo(callID string, transition int) error {
+ 	}
+ 	to, creator, sender := m.from, m.creator, m.videoTx
+ 	localVideoActive := m.localVideo
++	txOrient := int(m.txOrient)
+ 	switch transition {
+ 	case signaling.VideoStateUpgradeRequestV2:
+ 		m.localVideo = true
+@@ -307,15 +354,14 @@ func (e *engine) transitionVideo(callID string, transition int) error {
+ 		err = send(transition, signaling.VideoDecRequest, &orientation)
+ 	case signaling.VideoStateUpgradeAccept:
+ 		if !localVideoActive {
+-			orientation := 0
+-			err = send(signaling.VideoStateStopped, "", &orientation)
++			err = send(signaling.VideoStateStopped, "", &txOrient)
+ 		}
+ 		if err == nil {
+ 			err = send(transition, signaling.VideoDecAccept, nil)
+ 		}
+ 	case signaling.VideoStateStopped:
+-		orientation := 0
+-		err = send(transition, "", &orientation)
++		// WhatsApp's clients keep their orientation on a camera-off stanza.
++		err = send(transition, "", &txOrient)
+ 	}
+ 	if err == nil || transition == signaling.VideoStateStopped {
+ 		return err
+@@ -349,6 +395,7 @@ func (e *engine) setVideoEnabled(callID string, enabled bool) error {
+ 	m.localVideo = enabled
+ 	m.videoGate = false
+ 	to, creator, sender := m.from, m.creator, m.videoTx
++	txOrient := int(m.txOrient)
+ 	e.mu.Unlock()
+ 
+ 	if sender != nil {
+@@ -359,14 +406,24 @@ func (e *engine) setVideoEnabled(callID string, enabled bool) error {
+ 		}
+ 	}
+ 	state, dec := signaling.VideoStateDisabled, ""
++	var orientation *int
+ 	if enabled {
+-		state, dec = signaling.VideoStateEnabled, signaling.VideoStateDecH264
++		// With our orientation: a peer that takes it from this stanza would
++		// otherwise turn the picture back to 0 when the camera comes back on.
++		state, dec, orientation = signaling.VideoStateEnabled, signaling.VideoStateDecH264, &txOrient
+ 	}
+ 	node := signaling.BuildVideoStateWithParams(signaling.VideoStateParams{
+ 		CallID: callID, To: to, CallCreator: creator, WrapperID: e.nextCallNodeID(),
+-		State: state, Dec: dec,
++		State: state, Dec: dec, DeviceOrientation: orientation,
+ 	})
+ 	err := e.transmitCallNode(context.Background(), node)
++	if err == nil && enabled {
++		// The sender restarts at a keyframe (enable marks it required), so ask the
++		// source for one now, as accepting an upgrade does: otherwise the peer gets
++		// frames that refer to a keyframe it never saw and shows nothing until the
++		// encoder's next periodic one.
++		m.call.requestVideoKeyframe()
++	}
+ 	if err == nil || !enabled {
+ 		return err
+ 	}
+@@ -388,12 +445,26 @@ func (e *engine) setVideoOrientation(callID string, orientation int) error {
+ 	}
+ 	e.mu.Lock()
+ 	m := e.calls[callID]
+-	if m == nil || m.call == nil || m.call.State() == CallPhaseEnded || !m.localVideo {
++	if m == nil || m.call == nil || m.call.State() == CallPhaseEnded {
+ 		e.mu.Unlock()
+-		return errors.New("meowcaller: call has no active video media")
++		return errors.New("meowcaller: call is not active")
++	}
++	if !m.localVideo {
++		// Remembered for when the camera comes (back) on: the enable announces it.
++		m.txOrient = uint8(orientation)
++		e.mu.Unlock()
++		return nil
+ 	}
+ 	to, creator := m.from, m.creator
++	// WhatsApp clients rotate by the orientation in the video RTP frame metadata (the
++	// low two bits of MediaFrameInfo); the <video> stanza alone leaves the picture as
++	// sent. Keep both in step.
++	m.txOrient = uint8(orientation)
++	sender := m.videoTx
+ 	e.mu.Unlock()
++	if sender != nil {
++		sender.setOrientation(uint8(orientation))
++	}
+ 	node := signaling.BuildVideoStateWithParams(signaling.VideoStateParams{
+ 		CallID: callID, To: to, CallCreator: creator, WrapperID: e.nextCallNodeID(),
+ 		State: signaling.VideoStateEnabled, DeviceOrientation: &orientation,
+@@ -487,6 +558,7 @@ func (e *engine) placeCall(ctx context.Context, target string, opts CallOptions)
+ 		JID: self, CapabilityVersion: 1,
+ 		Capability: append([]byte(nil), signaling.CapabilityOffer...),
+ 	}
++	m.ringDevices = append([]types.JID(nil), devices...)
+ 	e.mu.Unlock()
+ 
+ 	e.c.diag.Emit("keying", map[string]any{
+@@ -683,13 +755,34 @@ func (e *engine) answer(c *Call) error {
+ 	}
+ 	e.mu.Lock()
+ 	m.acceptPending = true
++	fallback := e.acceptFallback
+ 	e.mu.Unlock()
+ 
+ 	c.setPhase(CallPhaseConnecting)
+ 	e.maybeStartMedia(c.id)
++	// A caller that never sends <mute_v2> (another meowcaller) would otherwise never
++	// get our <accept>: the call would run on the relay while its other devices
++	// kept ringing, and end when they gave up.
++	callID := c.id
++	time.AfterFunc(fallback, func() { e.acceptWithoutMute(callID) })
+ 	return nil
+ }
+ 
++// acceptWithoutMute sends the deferred <accept> when the caller's <mute_v2> has not
++// come by acceptFallback after the answer. sendAccept sends it once either way.
++func (e *engine) acceptWithoutMute(callID string) {
++	e.mu.Lock()
++	m := e.calls[callID]
++	if m == nil || !m.acceptPending {
++		e.mu.Unlock()
++		return
++	}
++	to, creator := m.from, m.creator
++	e.mu.Unlock()
++	e.c.log.Info().Str("call_id", callID).Msg("no mute_v2 from the caller; accepting without it")
++	e.sendAccept(callID, to, creator)
++}
++
+ // sendAccept sends the deferred callee <accept> (once), in the WA-Web format (metadata +
+ // single rate — the peer keeps the call alive with this; capability+both-rates fails).
+ func (e *engine) sendAccept(callID string, to, creator types.JID) {
+@@ -709,12 +802,16 @@ func (e *engine) sendAccept(callID string, to, creator types.JID) {
+ 		Metadata:   waBinary.Attrs{"peer_abtest_bucket_id_list": "125208,94276"},
+ 		Video:      isVideo,
+ 	})
+-	accept.Attrs["id"] = e.c.wa.DangerousInternals().GenerateRequestID()
+-	if err := e.c.wa.DangerousInternals().SendNode(context.Background(), accept); err != nil {
++	if e.c != nil && e.c.wa != nil {
++		accept.Attrs["id"] = e.c.wa.DangerousInternals().GenerateRequestID()
++	} else {
++		accept.Attrs["id"] = e.nextCallNodeID()
++	}
++	if err := e.transmitCallNode(context.Background(), accept); err != nil {
+ 		e.c.log.Error().Err(err).Str("call_id", callID).Msg("send accept failed")
+ 		return
+ 	}
+-	e.c.log.Info().Str("call_id", callID).Bool("video", isVideo).Msg("accepted (after mute_v2)")
++	e.c.log.Info().Str("call_id", callID).Bool("video", isVideo).Msg("accepted")
+ }
+ 
+ // reject declines an inbound call.
+@@ -798,28 +895,23 @@ func (e *engine) onRelay(callID string, data *waBinary.Node) {
+ // calculated from "are we the callee"), so there's no protocol reason to gate it by
+ // direction at all. It does NOT send the accept when we're the callee — that is still
+ // deferred until <mute_v2>, unaffected by this change.
++//
++// What is reported is not an echo of the peer's numbers: the 1:1 relay is elected from
++// both sides' <relaylatency>, and echoing tells the election that the peer's own nearby
++// relay is just as close to us. That relay is often not in our relay block at all (an
++// Android caller probed fgrq1c02, which our offer never listed, at the same latency as
++// ams4c01), so the peer sends its media to a relay we never allocate on: the call
++// connects, our audio reaches the peer, and not one RTP packet comes back. The answers are
++// steered instead (see relayLatencyReplies).
+ func (e *engine) onRelayLatency(ev *events.CallRelayLatency) {
+ 	m := e.lookup(ev.CallID)
+ 	if m == nil {
+ 		return
+ 	}
+-	rl := findChild(ev.Data, "relaylatency")
+-	if rl == nil {
++	probes := parseRelayLatencyProbes(ev.Data)
++	if probes == nil {
+ 		return
+ 	}
+-	var probes []rlProbe
+-	for i := range rl.GetChildren() {
+-		te := &rl.GetChildren()[i]
+-		if te.Tag != "te" {
+-			continue
+-		}
+-		ag := te.AttrGetter()
+-		probes = append(probes, rlProbe{
+-			latency:   decodeLatency(ag.String("latency")),
+-			relayName: ag.String("relay_name"),
+-			addr:      nodeBytes(te),
+-		})
+-	}
+ 	{
+ 		var probeLog []map[string]any
+ 		for _, p := range probes {
+@@ -832,17 +924,26 @@ func (e *engine) onRelayLatency(ev *events.CallRelayLatency) {
+ 			"probe_count": len(probes), "probes": probeLog,
+ 		})
+ 	}
+-	for _, p := range probes {
++	target, reported, ok := e.relayLatencyReplies(ev.CallID, probes)
++	if !ok {
++		e.c.log.Debug().Str("call_id", ev.CallID).Int("probe_count", len(probes)).
++			Msg("relaylatency probes left unanswered: outbound media has not picked a relay yet")
++		return
++	}
++	for i, p := range probes {
++		e.c.log.Info().Str("call_id", ev.CallID).Str("relay_name", p.relayName).
++			Uint32("peer_latency_ms", p.latency).Uint32("reported_latency_ms", reported[i]).
++			Str("target", target).Msg("answering relaylatency probe")
+ 		resp := signaling.BuildRelayLatency(&signaling.RelayLatencyParams{
+ 			CallID:       ev.CallID,
+ 			To:           ev.From,
+ 			CallCreator:  ev.CallCreator,
+-			LatencyMs:    p.latency,
++			LatencyMs:    reported[i],
+ 			RelayName:    p.relayName,
+ 			AddressBytes: p.addr,
+ 		})
+-		resp.Attrs["id"] = e.c.wa.GenerateMessageID()
+-		if err := e.c.wa.DangerousInternals().SendNode(context.Background(), resp); err != nil {
++		resp.Attrs["id"] = e.nextCallNodeID()
++		if err := e.transmitCallNode(context.Background(), resp); err != nil {
+ 			e.c.log.Error().Err(err).Str("call_id", ev.CallID).Msg("send relaylatency failed")
+ 			e.c.diag.Emit("relaylatency", map[string]any{
+ 				"event": "probe_response_failed", "call_id": ev.CallID, "relay_name": p.relayName,
+@@ -853,8 +954,107 @@ func (e *engine) onRelayLatency(ev *events.CallRelayLatency) {
+ 		e.c.diag.Emit("relaylatency", map[string]any{
+ 			"event": "probe_answered", "call_id": ev.CallID, "ts_ms": time.Now().UnixMilli(),
+ 			"relay_name": p.relayName, "latency_ms": p.latency, "addr_hex": hex.EncodeToString(p.addr),
++			"reported_latency_ms": reported[i], "target": target,
++		})
++	}
++}
++
++// parseRelayLatencyProbes reads the <te> children of the <relaylatency> under data, nil
++// when there is no <relaylatency>.
++func parseRelayLatencyProbes(data *waBinary.Node) []rlProbe {
++	rl := findChild(data, "relaylatency")
++	if rl == nil {
++		return nil
++	}
++	probes := []rlProbe{}
++	kids := rl.GetChildren()
++	for i := range kids {
++		te := &kids[i]
++		if te.Tag != "te" {
++			continue
++		}
++		ag := te.AttrGetter()
++		probes = append(probes, rlProbe{
++			latency:   decodeLatency(ag.String("latency")),
++			relayName: ag.String("relay_name"),
++			addr:      nodeBytes(te),
+ 		})
+ 	}
++	return probes
++}
++
++// Latencies reported to steer the 1:1 relay election (see onRelayLatency): the relay our
++// media runs on is near, every other relay far.
++const (
++	steeredLatency uint32 = 20
++	avoidedLatency uint32 = 1500
++)
++
++// relayLatencyReplies decides the latency to report for each probe, settling the call's
++// electedRelay on the way. ok is false when nothing should be sent: an outbound call
++// whose media has not chosen a relay yet.
++//
++// Inbound, the target is the offer's is_fna relay, else the relay of our relay block (one
++// we hold a token for) that the caller measured closest in the first stanza naming one.
++// Android sends one <te> per <relaylatency> stanza, so in practice that is the first such
++// relay in arrival order. Until a target is known a
++// relay outside our relay block is reported far, never echoed: echoing is what endorsed
++// the caller's local relay. A relay of our block probed before the target is settled
++// cannot happen, since such a probe settles it.
++func (e *engine) relayLatencyReplies(callID string, probes []rlProbe) (target string, reported []uint32, ok bool) {
++	e.mu.Lock()
++	m := e.calls[callID]
++	if m == nil {
++		e.mu.Unlock()
++		return "", nil, false
++	}
++	outbound := m.direction != CallDirectionIncoming
++	if !outbound && m.electedRelay == "" && m.relay != nil {
++		m.electedRelay = steerInboundRelay(m.relay, probes)
++	}
++	target = m.electedRelay
++	e.mu.Unlock()
++	if outbound && target == "" {
++		return "", nil, false
++	}
++	reported = make([]uint32, len(probes))
++	for i, p := range probes {
++		if p.relayName == target {
++			reported[i] = steeredLatency
++		} else {
++			reported[i] = avoidedLatency
++		}
++	}
++	return target, reported, true
++}
++
++// steerInboundRelay picks the relay an inbound call should run on from the offer's relay
++// block and the caller's probes: the is_fna relay, else, among the probed relays that are
++// in our relay block and have a token, the one with the lowest measured latency (the
++// first of them if none carries a latency). Empty when the probes name none of our relays.
++func steerInboundRelay(rd *relayData, probes []rlProbe) string {
++	offered := map[string]bool{}
++	for _, ep := range rd.endpoints {
++		if ep.isFNA {
++			return ep.relayName
++		}
++		if int(ep.tokenID) < len(rd.relayTokens) && len(rd.relayTokens[ep.tokenID]) > 0 {
++			offered[ep.relayName] = true
++		}
++	}
++	best, bestLatency := "", uint32(0)
++	for _, p := range probes {
++		if !offered[p.relayName] {
++			continue
++		}
++		switch {
++		case best == "":
++			best, bestLatency = p.relayName, p.latency
++		case p.latency != 0 && (bestLatency == 0 || p.latency < bestLatency):
++			best, bestLatency = p.relayName, p.latency
++		}
++	}
++	return best
+ }
+ 
+ // onPreAccept records that the peer's device received and started preparing an outgoing call.
+@@ -873,6 +1073,7 @@ func (e *engine) onPreAccept(ev *events.CallPreAccept) {
+ 		}
+ 		e.mu.Unlock()
+ 	}
++	e.notePreaccept(ev.CallID, ev.From)
+ 	e.c.log.Info().
+ 		Str("call_id", ev.CallID).
+ 		Str("from", ev.From.String()).
+@@ -884,6 +1085,67 @@ func (e *engine) onPreAccept(ev *events.CallPreAccept) {
+ 	})
+ }
+ 
++// notePreaccept remembers a callee device that preaccepted an outgoing call and starts
++// telling the preaccepted devices our microphone state while the call rings.
++func (e *engine) notePreaccept(callID string, device types.JID) {
++	if device.IsEmpty() {
++		return
++	}
++	e.mu.Lock()
++	m := e.calls[callID]
++	if m == nil || m.direction != CallDirectionOutgoing || m.answered {
++		e.mu.Unlock()
++		return
++	}
++	known := false
++	for _, d := range m.preaccepted {
++		if sameDevice(d, device) {
++			known = true
++			break
++		}
++	}
++	if !known {
++		m.preaccepted = append(m.preaccepted, device)
++	}
++	start := !m.announcing
++	m.announcing = true
++	interval := e.ringAnnounceInterval
++	e.mu.Unlock()
++	if start {
++		go e.announceWhileRinging(callID, interval)
++	}
++}
++
++// announceWhileRinging sends <mute_v2 mute-state="0"> to every device that preaccepted
++// an outgoing call, every interval, until the call is answered or gone. An Android
++// caller does the same; a meowcaller callee sends its <accept> only on the first
++// <mute_v2> after its user answered, so without this a call from here to a LuneOS
++// device never got accepted.
++func (e *engine) announceWhileRinging(callID string, interval time.Duration) {
++	ticker := time.NewTicker(interval)
++	defer ticker.Stop()
++	for i := 0; i < ringAnnounceLimit; i++ {
++		<-ticker.C
++		e.mu.Lock()
++		m := e.calls[callID]
++		if m == nil || m.answered {
++			e.mu.Unlock()
++			return
++		}
++		devices := append([]types.JID(nil), m.preaccepted...)
++		creator := m.creator
++		e.mu.Unlock()
++		for _, device := range devices {
++			node := signaling.BuildMuteV2(callID, device, creator, "0")
++			node.Attrs["id"] = e.nextCallNodeID()
++			if err := e.transmitCallNode(context.Background(), node); err != nil {
++				e.c.log.Warn().Err(err).Str("call_id", callID).Str("device", device.String()).
++					Msg("could not send mute_v2 to a ringing device")
++			}
++		}
++	}
++}
++
+ // onAccept records that the peer answered an outgoing call. Media may already be running
+ // from relay allocation, but inbound RTP is still what marks the call ready/active.
+ func (e *engine) onAccept(ev *events.CallAccept) {
+@@ -913,6 +1175,7 @@ func (e *engine) onAccept(ev *events.CallAccept) {
+ 		if device, ok := inviteDeviceCapability(ev.From, ev.Data); ok {
+ 			current.invitePeerDevice = device
+ 		}
++		current.answered = true
+ 		e.applyVoipSettingsCodec(current, ev.Data, ev.CallID)
+ 		if !ev.From.IsEmpty() {
+ 			current.from = ev.From
+@@ -931,6 +1194,7 @@ func (e *engine) onAccept(ev *events.CallAccept) {
+ 			e.c.log.Info().Str("call_id", ev.CallID).Str("peer_lid", answeringPeer).Msg("rekeyed media to answering device")
+ 		}
+ 	}
++	e.dismissOtherDevices(ev.CallID, ev.From, signaling.TerminateReasonAcceptedElsewhere)
+ 	if m.call != nil && m.call.State() < CallPhaseConnecting {
+ 		m.call.setPhase(CallPhaseConnecting)
+ 	}
+@@ -994,16 +1258,105 @@ func (e *engine) onReject(ev *events.CallReject) {
+ 	if m == nil {
+ 		return
+ 	}
++	reason := ""
++	if ev.Data != nil {
++		reason = ev.Data.AttrGetter().OptionalString("reason")
++	}
+ 	e.c.log.Info().
+ 		Str("call_id", ev.CallID).
+ 		Str("from", ev.From.String()).
++		Str("reason", reason).
+ 		Msg("peer rejected call")
+ 	e.c.diag.Emit("meta", map[string]any{
+-		"event": "peer_reject", "call_id": ev.CallID, "from": ev.From.String(),
++		"event": "peer_reject", "call_id": ev.CallID, "from": ev.From.String(), "reason": reason,
+ 	})
++	// "busy" (already in a call) and "enc" (could not decrypt the offer) speak for
++	// the one device that sent them: the callee's other devices keep ringing
++	// (whatsapp-rust busy_reject_keeps_the_call_and_the_rung_set). The call ends
++	// only once no rung device is left.
++	if reason == signaling.RejectReasonBusy || reason == signaling.RejectReasonEnc {
++		if e.dropRingDevice(ev.CallID, ev.From) {
++			e.c.log.Info().Str("call_id", ev.CallID).Str("from", ev.From.String()).
++				Msg("one callee device cannot take the call; still ringing the others")
++			return
++		}
++		e.finishCall(ev.CallID, "rejected")
++		return
++	}
++	e.dismissOtherDevices(ev.CallID, ev.From, signaling.TerminateReasonRejectedElsewhere)
+ 	e.finishCall(ev.CallID, "rejected")
+ }
+ 
++// sameDevice reports whether two JIDs name the same device of the same account.
++func sameDevice(a, b types.JID) bool {
++	return a.User == b.User && a.Server == b.Server && a.Device == b.Device
++}
++
++// dropRingDevice removes a device that cannot take an outgoing call from its rung
++// set, and reports whether another rung device is still ringing.
++func (e *engine) dropRingDevice(callID string, device types.JID) bool {
++	e.mu.Lock()
++	defer e.mu.Unlock()
++	m := e.calls[callID]
++	if m == nil || m.direction != CallDirectionOutgoing {
++		return false
++	}
++	kept := m.ringDevices[:0]
++	for _, d := range m.ringDevices {
++		if !sameDevice(d, device) {
++			kept = append(kept, d)
++		}
++	}
++	m.ringDevices = kept
++	return len(kept) > 0
++}
++
++// dismissOtherDevices tells every device an outgoing call rang, except the one
++// that answered or declined it, that the call was taken care of elsewhere: one
++// <call to=DEVICE id=…><terminate reason=…/></call> per device, without a
++// <destination> block (whatsapp-rust accept_dismisses_other_callee_device). It
++// runs once per call. Without it a callee with WhatsApp on two devices kept
++// ringing on the one that was not used (sargo, 2026-11-03). Nothing is sent when
++// the answering device is not one the offer rang, so a terminate can never reach
++// the device that took the call.
++func (e *engine) dismissOtherDevices(callID string, answerer types.JID, reason string) {
++	e.mu.Lock()
++	m := e.calls[callID]
++	if m == nil || m.direction != CallDirectionOutgoing || len(m.ringDevices) == 0 {
++		e.mu.Unlock()
++		return
++	}
++	known := false
++	targets := make([]types.JID, 0, len(m.ringDevices))
++	for _, d := range m.ringDevices {
++		if sameDevice(d, answerer) {
++			known = true
++			continue
++		}
++		targets = append(targets, d)
++	}
++	creator := m.creator
++	if known {
++		m.ringDevices = nil
++	}
++	e.mu.Unlock()
++	if !known {
++		e.c.log.Warn().Str("call_id", callID).Str("from", answerer.String()).
++			Msg("answering device is not one the offer rang; not dismissing the others")
++		return
++	}
++	for _, device := range targets {
++		node := signaling.BuildDeviceTerminate(callID, device, e.nextCallNodeID(), creator, reason)
++		if err := e.transmitCallNode(context.Background(), node); err != nil {
++			e.c.log.Warn().Err(err).Str("call_id", callID).Str("device", device.String()).
++				Str("reason", reason).Msg("could not dismiss a callee device")
++			continue
++		}
++		e.c.log.Info().Str("call_id", callID).Str("device", device.String()).
++			Str("reason", reason).Msg("dismissed a callee device that did not take the call")
++	}
++}
++
+ // rlProbe is one relay candidate from a relaylatency probe.
+ type rlProbe struct {
+ 	latency   uint32
+@@ -1185,6 +1538,10 @@ func (e *engine) onVideoStanza(v *waBinary.Node) {
+ 	sender := m.videoTx
+ 	call := m.call
+ 	to, creator := m.from, m.creator
++	txOrient := int(m.txOrient)
++	if m.rxOrientKnown {
++		orientation = m.rxOrient
++	}
+ 	requestKeyframe := false
+ 	disableSender := false
+ 	enableSender := false
+@@ -1215,10 +1572,9 @@ func (e *engine) onVideoStanza(v *waBinary.Node) {
+ 	}
+ 	e.mu.Unlock()
+ 	if announceEnabled {
+-		orientation := 0
+ 		node := signaling.BuildVideoStateWithParams(signaling.VideoStateParams{
+ 			CallID: callID, To: to, CallCreator: creator, WrapperID: e.nextCallNodeID(),
+-			State: signaling.VideoStateEnabled, DeviceOrientation: &orientation,
++			State: signaling.VideoStateEnabled, DeviceOrientation: &txOrient,
+ 		})
+ 		if err := e.transmitCallNode(context.Background(), node); err != nil {
+ 			e.mu.Lock()
+@@ -1535,6 +1891,7 @@ type relayEndpoint struct {
+ 	tokenID     uint32
+ 	authTokenID uint32
+ 	isFNA       bool
++	c2rRTT      uint32 // <te2 c2r_rtt>: our measured round trip to this relay, 0 if absent
+ 	addresses   []relayAddress
+ }
+ 
+@@ -1543,6 +1900,9 @@ type relayData struct {
+ 	relayTokens   [][]byte // indexed <token id=…>
+ 	endpoints     []relayEndpoint
+ 	peerJID       types.JID
++	// electedRelay is the relay the 1:1 election is steered to (engineCall.electedRelay),
++	// set on the copy maybeStartMedia hands to the media loop.
++	electedRelay string
+ }
+ 
+ func nodeBytes(n *waBinary.Node) []byte {
+@@ -1600,13 +1960,15 @@ func findChild(n *waBinary.Node, tag string) *waBinary.Node {
+ 	return nil
+ }
+ 
+-// decodeLatency reverses the relay-latency wire encoding (0x2000000 + rttMs).
++// decodeLatency reads a <te latency>: milliseconds in the low 24 bits under a tag byte
++// (0x02 from Android and WA Web, 0x06 reported from iPhones: 0x0600007F is 127 ms, which
++// subtracting 0x02000000 turned into 67 million).
+ func decodeLatency(enc string) uint32 {
+ 	v, err := strconv.ParseUint(enc, 10, 32)
+-	if err != nil || v < 0x0200_0000 {
++	if err != nil || v < 0x0100_0000 {
+ 		return 0
+ 	}
+-	return uint32(v) - 0x0200_0000
++	return uint32(v) & 0x00FF_FFFF
+ }
+ 
+ func attrUint(n *waBinary.Node, key string) uint32 {
+@@ -1674,6 +2036,7 @@ func parseRelayData(node *waBinary.Node) *relayData {
+ 			tokenID:     attrUint(child, "token_id"),
+ 			authTokenID: attrUint(child, "auth_token_id"),
+ 			isFNA:       child.AttrGetter().String("is_fna") == "1",
++			c2rRTT:      attrUint(child, "c2r_rtt"),
+ 			addresses: []relayAddress{{
+ 				ipv4: fmt.Sprintf("%d.%d.%d.%d", ab[0], ab[1], ab[2], ab[3]),
+ 				port: binary.BigEndian.Uint16(ab[4:6]),
+@@ -1687,7 +2050,10 @@ func parseRelayData(node *waBinary.Node) *relayData {
+ // getMediaRelayEndpoint prefers an outbound (non-FNA, auth_token_id≠0) endpoint, else
+ // any non-FNA, else the first. For an inbound call the caller's uplink RTP lands on their
+ // FNA-marked relay, so we must allocate on that same relay or the relay never bridges the
+-// peer's media (the callee connects but hears nothing).
++// peer's media (the callee connects but hears nothing). With no FNA relay in the offer,
++// an inbound call allocates on the relay the election was steered to (rd.electedRelay,
++// see onRelayLatency), else on the foreign (auth_token_id=0) relay with the lowest
++// c2r_rtt.
+ func getMediaRelayEndpoint(rd *relayData, inbound bool) *relayEndpoint {
+ 	if inbound {
+ 		for i := range rd.endpoints {
+@@ -1695,6 +2061,26 @@ func getMediaRelayEndpoint(rd *relayData, inbound bool) *relayEndpoint {
+ 				return e
+ 			}
+ 		}
++		if rd.electedRelay != "" {
++			for i := range rd.endpoints {
++				if e := &rd.endpoints[i]; e.relayName == rd.electedRelay {
++					return e
++				}
++			}
++		}
++		var best *relayEndpoint
++		for i := range rd.endpoints {
++			e := &rd.endpoints[i]
++			if e.authTokenID != 0 || e.c2rRTT == 0 {
++				continue
++			}
++			if best == nil || e.c2rRTT < best.c2rRTT {
++				best = e
++			}
++		}
++		if best != nil {
++			return best
++		}
+ 	}
+ 	for i := range rd.endpoints {
+ 		if e := &rd.endpoints[i]; !e.isFNA && e.authTokenID != 0 {
+diff --git a/engine_lifecycle_test.go b/engine_lifecycle_test.go
+index 3aa113b..e439e45 100644
+--- a/engine_lifecycle_test.go
++++ b/engine_lifecycle_test.go
+@@ -4,7 +4,9 @@ import (
+ 	"context"
+ 	"errors"
+ 	"strconv"
++	"sync"
+ 	"testing"
++	"time"
+ 
+ 	"github.com/purpshell/meowcaller/signaling"
+ 	waBinary "go.mau.fi/whatsmeow/binary"
+@@ -262,6 +264,9 @@ func TestInboundVideoEnabledAcceptsPendingLocalUpgrade(t *testing.T) {
+ 	}
+ }
+ 
++// The peer's upgrade request is accepted for receiving at once (a real WhatsApp
++// client gives up on an unanswered request after ~5 s), but our own camera stays
++// off until this side explicitly turns video on.
+ func TestInboundVideoUpgradeWaitsForExplicitAcceptance(t *testing.T) {
+ 	eng, call := testEngineWithOutgoingCall()
+ 	m := eng.calls[call.ID()]
+@@ -291,6 +296,34 @@ func TestInboundVideoUpgradeWaitsForExplicitAcceptance(t *testing.T) {
+ 	}
+ }
+ 
++// The app accepts a peer's upgrade with AcceptVideo: our camera stays off (state 6,
++// with our orientation), then the accept (state 4).
++func TestAcceptedInboundUpgradeKeepsOurVideoOff(t *testing.T) {
++	eng, call := testEngineWithOutgoingCall()
++	m := eng.calls[call.ID()]
++	m.localVideo = false
++	m.videoTx = &videoSender{}
++	m.txOrient = 3
++	sent := recordNodes(eng)
++	eng.onVideoStanza(videoStateNode(signaling.VideoStateUpgradeRequestV2))
++	if err := call.AcceptVideo(); err != nil {
++		t.Fatal(err)
++	}
++	var states []int
++	for _, node := range *sent {
++		states = append(states, node.GetChildren()[0].AttrGetter().Int("state"))
++	}
++	if len(states) != 2 || states[0] != signaling.VideoStateStopped || states[1] != signaling.VideoStateUpgradeAccept {
++		t.Fatalf("accepting the upgrade sent states %v, want [%d %d]", states, signaling.VideoStateStopped, signaling.VideoStateUpgradeAccept)
++	}
++	if got := (*sent)[0].GetChildren()[0].AttrGetter().Int("device_orientation"); got != 3 {
++		t.Fatalf("camera-off stanza orientation = %d, want 3", got)
++	}
++	if active, _ := senderVideoState(m.videoTx); active || call.IsSendingVideo() {
++		t.Fatal("accepting the upgrade turned our own video on")
++	}
++}
++
+ func TestVideoAcceptanceRequestsSourceKeyframe(t *testing.T) {
+ 	eng, call := testEngineWithOutgoingCall()
+ 	eng.calls[call.ID()].videoTx = &videoSender{}
+@@ -305,6 +338,31 @@ func TestVideoAcceptanceRequestsSourceKeyframe(t *testing.T) {
+ 	}
+ }
+ 
++// Turning our camera back on mid-call must restart the peer's picture at once.
++func TestVideoReenableRequestsSourceKeyframe(t *testing.T) {
++	eng, call := testEngineWithOutgoingCall()
++	eng.calls[call.ID()].videoTx = &videoSender{}
++	eng.sendCallNode = func(context.Context, waBinary.Node) error { return nil }
++	var requests int
++	call.OnVideoKeyframeRequest(func() { requests++ })
++
++	if err := call.SetVideoEnabled(false); err != nil {
++		t.Fatalf("SetVideoEnabled(false): %v", err)
++	}
++	if requests != 0 {
++		t.Fatalf("turning video off asked for %d keyframes", requests)
++	}
++	if err := call.SetVideoEnabled(true); err != nil {
++		t.Fatalf("SetVideoEnabled(true): %v", err)
++	}
++	if requests != 1 {
++		t.Fatalf("keyframe requests after re-enable = %d, want 1", requests)
++	}
++	if active, _ := senderVideoState(eng.calls[call.ID()].videoTx); !active {
++		t.Fatal("re-enabled sender is not active")
++	}
++}
++
+ func TestCallSetsVideoOrientation(t *testing.T) {
+ 	eng, call := testEngineWithOutgoingCall()
+ 	var sent waBinary.Node
+@@ -583,3 +641,456 @@ func TestFinishCallClosesAttachedAudioDevices(t *testing.T) {
+ 		t.Fatalf("audio sink close count = %d, want 1", sink.closeCount)
+ 	}
+ }
++
++// A callee with WhatsApp on two devices: the outgoing offer rang both.
++func testEngineRingingTwoDevices() (*engine, *Call, types.JID, types.JID, *[]waBinary.Node) {
++	eng, call := testEngineWithOutgoingCall()
++	primary := peerJID()
++	companion := peerJID()
++	companion.Device = 61
++	eng.calls[call.ID()].ringDevices = []types.JID{primary, companion}
++	sent := &[]waBinary.Node{}
++	eng.sendCallNode = func(_ context.Context, node waBinary.Node) error {
++		*sent = append(*sent, node)
++		return nil
++	}
++	return eng, call, primary, companion, sent
++}
++
++func checkDismiss(t *testing.T, sent []waBinary.Node, to types.JID, reason string) {
++	t.Helper()
++	if len(sent) != 1 {
++		t.Fatalf("sent %d stanzas, want one dismiss: %#v", len(sent), sent)
++	}
++	ag := sent[0].AttrGetter()
++	if got := ag.JID("to"); got != to {
++		t.Fatalf("dismiss addressed to %s, want the other device %s", got, to)
++	}
++	if ag.OptionalString("id") == "" {
++		t.Fatal("dismiss wrapper has no id")
++	}
++	kids := sent[0].GetChildren()
++	if len(kids) != 1 || kids[0].Tag != "terminate" {
++		t.Fatalf("dismiss content = %#v, want one <terminate>", kids)
++	}
++	tg := kids[0].AttrGetter()
++	if tg.OptionalString("reason") != reason || tg.String("call-id") != "CID" {
++		t.Fatalf("terminate attrs = %v, want call-id CID reason %s", kids[0].Attrs, reason)
++	}
++	if len(kids[0].GetChildren()) != 0 {
++		t.Fatal("dismiss must not carry a <destination> block")
++	}
++}
++
++func TestAcceptOnOneDeviceDismissesTheOther(t *testing.T) {
++	eng, call, primary, companion, sent := testEngineRingingTwoDevices()
++	eng.onAccept(&events.CallAccept{
++		BasicCallMeta: types.BasicCallMeta{CallID: call.ID(), From: primary},
++		Data:          &waBinary.Node{Tag: "accept"},
++	})
++	checkDismiss(t, *sent, companion, signaling.TerminateReasonAcceptedElsewhere)
++
++	// The other way round: the companion answers, the primary phone stops ringing.
++	eng, call, primary, companion, sent = testEngineRingingTwoDevices()
++	eng.onAccept(&events.CallAccept{
++		BasicCallMeta: types.BasicCallMeta{CallID: call.ID(), From: companion},
++		Data:          &waBinary.Node{Tag: "accept"},
++	})
++	checkDismiss(t, *sent, primary, signaling.TerminateReasonAcceptedElsewhere)
++}
++
++func TestDismissIsSentOnce(t *testing.T) {
++	eng, call, primary, _, sent := testEngineRingingTwoDevices()
++	accept := &events.CallAccept{
++		BasicCallMeta: types.BasicCallMeta{CallID: call.ID(), From: primary},
++		Data:          &waBinary.Node{Tag: "accept"},
++	}
++	eng.onAccept(accept)
++	eng.onAccept(accept)
++	if len(*sent) != 1 {
++		t.Fatalf("sent %d dismisses for a repeated accept, want 1", len(*sent))
++	}
++}
++
++func TestAcceptFromAnUnknownDeviceDismissesNobody(t *testing.T) {
++	eng, call, _, _, sent := testEngineRingingTwoDevices()
++	stranger := peerJID()
++	stranger.Device = 9
++	eng.onAccept(&events.CallAccept{
++		BasicCallMeta: types.BasicCallMeta{CallID: call.ID(), From: stranger},
++		Data:          &waBinary.Node{Tag: "accept"},
++	})
++	if len(*sent) != 0 {
++		t.Fatalf("dismissed %#v though the answering device was never rung", *sent)
++	}
++}
++
++func TestDeclineOnOneDeviceDismissesTheOtherAndEnds(t *testing.T) {
++	eng, call, primary, companion, sent := testEngineRingingTwoDevices()
++	eng.onReject(&events.CallReject{
++		BasicCallMeta: types.BasicCallMeta{CallID: call.ID(), From: companion},
++		Data:          &waBinary.Node{Tag: "reject"},
++	})
++	checkDismiss(t, *sent, primary, signaling.TerminateReasonRejectedElsewhere)
++	if got := call.State(); got != CallPhaseEnded {
++		t.Fatalf("phase = %d, want Ended", got)
++	}
++}
++
++func TestBusyDeviceLeavesTheOtherRinging(t *testing.T) {
++	for _, reason := range []string{signaling.RejectReasonBusy, signaling.RejectReasonEnc} {
++		eng, call, primary, companion, sent := testEngineRingingTwoDevices()
++		eng.onReject(&events.CallReject{
++			BasicCallMeta: types.BasicCallMeta{CallID: call.ID(), From: companion},
++			Data:          &waBinary.Node{Tag: "reject", Attrs: waBinary.Attrs{"reason": reason}},
++		})
++		if got := call.State(); got == CallPhaseEnded {
++			t.Fatalf("%s reject from one device ended the call", reason)
++		}
++		if len(*sent) != 0 {
++			t.Fatalf("%s reject sent %#v", reason, *sent)
++		}
++		// The primary still answers, and the busy device is not dismissed again.
++		eng.onAccept(&events.CallAccept{
++			BasicCallMeta: types.BasicCallMeta{CallID: call.ID(), From: primary},
++			Data:          &waBinary.Node{Tag: "accept"},
++		})
++		if len(*sent) != 0 {
++			t.Fatalf("after %s: dismissed %#v, want nothing left to dismiss", reason, *sent)
++		}
++		// Busy on the last ringing device ends the call.
++		eng2, call2, primary2, companion2, _ := testEngineRingingTwoDevices()
++		for _, d := range []types.JID{companion2, primary2} {
++			eng2.onReject(&events.CallReject{
++				BasicCallMeta: types.BasicCallMeta{CallID: call2.ID(), From: d},
++				Data:          &waBinary.Node{Tag: "reject", Attrs: waBinary.Attrs{"reason": reason}},
++			})
++		}
++		if got := call2.State(); got != CallPhaseEnded {
++			t.Fatalf("%s from every device left the call in phase %d", reason, got)
++		}
++	}
++}
++
++// nodeLog records the call nodes the engine sends, from any goroutine.
++type nodeLog struct {
++	mu    sync.Mutex
++	nodes []waBinary.Node
++}
++
++func (l *nodeLog) send(_ context.Context, node waBinary.Node) error {
++	l.mu.Lock()
++	defer l.mu.Unlock()
++	l.nodes = append(l.nodes, node)
++	return nil
++}
++
++// tagged returns the sent nodes whose action is tag.
++func (l *nodeLog) tagged(tag string) []waBinary.Node {
++	l.mu.Lock()
++	defer l.mu.Unlock()
++	var out []waBinary.Node
++	for _, n := range l.nodes {
++		if kids := n.GetChildren(); len(kids) == 1 && kids[0].Tag == tag {
++			out = append(out, n)
++		}
++	}
++	return out
++}
++
++// waitFor polls until cond holds or a second has gone by.
++func waitFor(t *testing.T, what string, cond func() bool) {
++	t.Helper()
++	deadline := time.Now().Add(time.Second)
++	for !cond() {
++		if time.Now().After(deadline) {
++			t.Fatalf("timed out waiting for %s", what)
++		}
++		time.Sleep(2 * time.Millisecond)
++	}
++}
++
++func sentTo(nodes []waBinary.Node, to types.JID) int {
++	n := 0
++	for _, node := range nodes {
++		if node.AttrGetter().JID("to") == to {
++			n++
++		}
++	}
++	return n
++}
++
++func preaccept(eng *engine, from types.JID) {
++	eng.onPreAccept(&events.CallPreAccept{
++		BasicCallMeta: types.BasicCallMeta{CallID: "CID", From: from},
++		Data:          &waBinary.Node{Tag: "preaccept"},
++	})
++}
++
++// A LuneOS callee accepts only on the caller's <mute_v2>, which an Android caller sends
++// and this one did not: the call ran on the relay while the other devices kept ringing.
++func TestRingingCallTellsPreacceptedDevicesItsMuteState(t *testing.T) {
++	eng, _, primary, companion, _ := testEngineRingingTwoDevices()
++	sent := &nodeLog{}
++	eng.sendCallNode = sent.send
++	eng.ringAnnounceInterval = 5 * time.Millisecond
++	preaccept(eng, companion)
++	waitFor(t, "a mute_v2 to the device that preaccepted", func() bool {
++		return sentTo(sent.tagged("mute_v2"), companion) > 0
++	})
++	m := sent.tagged("mute_v2")[0]
++	ag := m.AttrGetter()
++	if ag.OptionalString("id") == "" {
++		t.Fatal("mute_v2 wrapper has no id")
++	}
++	mv := m.GetChildren()[0].AttrGetter()
++	if mv.String("call-id") != "CID" || mv.String("mute-state") != "0" || mv.JID("call-creator") != creatorJID() {
++		t.Fatalf("mute_v2 attrs = %v", m.GetChildren()[0].Attrs)
++	}
++	if n := sentTo(sent.tagged("mute_v2"), primary); n != 0 {
++		t.Fatalf("sent %d mute_v2 to a device that never preaccepted", n)
++	}
++}
++
++func TestRingingCallKeepsAnnouncingUntilAnswered(t *testing.T) {
++	eng, call, _, companion, _ := testEngineRingingTwoDevices()
++	sent := &nodeLog{}
++	eng.sendCallNode = sent.send
++	eng.ringAnnounceInterval = 5 * time.Millisecond
++	preaccept(eng, companion)
++	preaccept(eng, companion) // a repeated preaccept adds no second target
++	// The callee's user answers some time after its preaccept: it needs a mute_v2
++	// that arrives after that, not only the first one.
++	waitFor(t, "repeated mute_v2", func() bool { return len(sent.tagged("mute_v2")) >= 3 })
++	for _, n := range sent.tagged("mute_v2") {
++		if n.AttrGetter().JID("to") != companion {
++			t.Fatalf("mute_v2 to %s, want only the preaccepted device", n.AttrGetter().JID("to"))
++		}
++	}
++	eng.onAccept(&events.CallAccept{
++		BasicCallMeta: types.BasicCallMeta{CallID: call.ID(), From: companion},
++		Data:          &waBinary.Node{Tag: "accept"},
++	})
++	time.Sleep(15 * time.Millisecond) // a tick already under way may still send
++	before := len(sent.tagged("mute_v2"))
++	time.Sleep(30 * time.Millisecond)
++	if after := len(sent.tagged("mute_v2")); after != before {
++		t.Fatalf("still announcing after the answer: %d -> %d", before, after)
++	}
++}
++
++func TestRingingCallStopsAnnouncingWhenItEnds(t *testing.T) {
++	eng, _, _, companion, _ := testEngineRingingTwoDevices()
++	sent := &nodeLog{}
++	eng.sendCallNode = sent.send
++	eng.ringAnnounceInterval = 5 * time.Millisecond
++	preaccept(eng, companion)
++	waitFor(t, "a mute_v2", func() bool { return len(sent.tagged("mute_v2")) > 0 })
++	eng.finishCall("CID", "timeout")
++	time.Sleep(15 * time.Millisecond)
++	before := len(sent.tagged("mute_v2"))
++	time.Sleep(30 * time.Millisecond)
++	if after := len(sent.tagged("mute_v2")); after != before {
++		t.Fatalf("still announcing after the call ended: %d -> %d", before, after)
++	}
++}
++
++// testEngineAnswering is an incoming call from a caller device, with sent nodes recorded.
++func testEngineAnswering(fallback time.Duration) (*engine, *Call, types.JID, *nodeLog) {
++	c := &Client{}
++	c.eng = newEngine(c)
++	caller := creatorJID()
++	call := &Call{eng: c.eng, id: "CID", peer: caller, phase: CallPhaseRinging}
++	c.eng.calls["CID"] = &engineCall{call: call, direction: CallDirectionIncoming, from: caller, creator: caller}
++	sent := &nodeLog{}
++	c.eng.sendCallNode = sent.send
++	c.eng.acceptFallback = fallback
++	return c.eng, call, caller, sent
++}
++
++func muteV2Node(caller types.JID) *waBinary.Node {
++	return &waBinary.Node{Tag: "call", Attrs: waBinary.Attrs{"from": caller}, Content: []waBinary.Node{{
++		Tag: "mute_v2", Attrs: waBinary.Attrs{"call-id": "CID", "call-creator": caller, "mute-state": "0"},
++	}}}
++}
++
++// A caller that never sends <mute_v2> (another meowcaller) still gets the accept.
++func TestAnswerAcceptsWithoutTheCallersMuteState(t *testing.T) {
++	eng, call, caller, sent := testEngineAnswering(10 * time.Millisecond)
++	if err := eng.answer(call); err != nil {
++		t.Fatal(err)
++	}
++	if n := len(sent.tagged("accept")); n != 0 {
++		t.Fatalf("accepted at once (%d), the fallback should wait for a mute_v2 first", n)
++	}
++	waitFor(t, "the accept", func() bool { return len(sent.tagged("accept")) == 1 })
++	a := sent.tagged("accept")[0]
++	if a.AttrGetter().JID("to") != caller || a.AttrGetter().OptionalString("id") == "" {
++		t.Fatalf("accept wrapper attrs = %v", a.Attrs)
++	}
++	if got := a.GetChildren()[0].AttrGetter().String("call-id"); got != "CID" {
++		t.Fatalf("accept call-id = %q", got)
++	}
++}
++
++// An Android caller's <mute_v2> still triggers the accept, and only one is sent.
++func TestAnswerAcceptsOnceWhenTheCallerSendsItsMuteState(t *testing.T) {
++	eng, call, caller, sent := testEngineAnswering(20 * time.Millisecond)
++	if err := eng.answer(call); err != nil {
++		t.Fatal(err)
++	}
++	eng.onCallRaw(muteV2Node(caller))
++	if n := len(sent.tagged("accept")); n != 1 {
++		t.Fatalf("sent %d accepts on the mute_v2, want 1", n)
++	}
++	time.Sleep(60 * time.Millisecond)
++	if n := len(sent.tagged("accept")); n != 1 {
++		t.Fatalf("the fallback sent a second accept: %d", n)
++	}
++}
++
++// Without an answer there is nothing to accept, however long the call rings.
++func TestNoAcceptWithoutAnAnswer(t *testing.T) {
++	eng, _, caller, sent := testEngineAnswering(5 * time.Millisecond)
++	eng.onCallRaw(muteV2Node(caller))
++	time.Sleep(30 * time.Millisecond)
++	if n := len(sent.tagged("accept")); n != 0 {
++		t.Fatalf("accepted a call nobody answered: %d", n)
++	}
++}
++
++// enabledOrientation returns the device_orientation of the last state=1 stanza sent,
++// or -1 when that stanza has none.
++func enabledOrientation(t *testing.T, sent []waBinary.Node) int {
++	t.Helper()
++	for i := len(sent) - 1; i >= 0; i-- {
++		kids := sent[i].GetChildren()
++		if len(kids) == 1 && kids[0].Tag == "video" && kids[0].AttrGetter().Int("state") == signaling.VideoStateEnabled {
++			v, ok := kids[0].Attrs["device_orientation"]
++			if !ok {
++				return -1
++			}
++			n, err := strconv.Atoi(v.(string))
++			if err != nil {
++				t.Fatalf("device_orientation %v", v)
++			}
++			return n
++		}
++	}
++	t.Fatalf("no state=1 stanza in %#v", sent)
++	return -1
++}
++
++func recordNodes(eng *engine) *[]waBinary.Node {
++	sent := &[]waBinary.Node{}
++	eng.sendCallNode = func(_ context.Context, node waBinary.Node) error {
++		*sent = append(*sent, node)
++		return nil
++	}
++	return sent
++}
++
++// Turning the camera back on announced orientation 0, and a peer that takes it from
++// the stanza showed the picture on its side.
++func TestCameraBackOnAnnouncesItsOrientation(t *testing.T) {
++	eng, call := testEngineWithOutgoingCall()
++	eng.calls[call.ID()].videoTx = &videoSender{}
++	sent := recordNodes(eng)
++	if err := call.SetVideoOrientation(1); err != nil {
++		t.Fatal(err)
++	}
++	if err := call.SetVideoEnabled(false); err != nil {
++		t.Fatal(err)
++	}
++	if err := call.SetVideoEnabled(true); err != nil {
++		t.Fatal(err)
++	}
++	if got := enabledOrientation(t, *sent); got != 1 {
++		t.Fatalf("camera back on announced orientation %d, want 1", got)
++	}
++}
++
++// The plugin sets the orientation when the engine starts, which can be while our
++// camera is off; it must still be what the camera announces when it comes on.
++func TestOrientationSetWithTheCameraOffIsUsedWhenItComesOn(t *testing.T) {
++	eng, call := testEngineWithOutgoingCall()
++	m := eng.calls[call.ID()]
++	m.videoTx = &videoSender{}
++	m.localVideo = false
++	sent := recordNodes(eng)
++	if err := call.SetVideoOrientation(3); err != nil {
++		t.Fatalf("SetVideoOrientation with the camera off: %v", err)
++	}
++	if len(*sent) != 0 {
++		t.Fatalf("announced an orientation for a camera that is off: %#v", *sent)
++	}
++	if err := call.SetVideoEnabled(true); err != nil {
++		t.Fatal(err)
++	}
++	if got := enabledOrientation(t, *sent); got != 3 {
++		t.Fatalf("camera on announced orientation %d, want 3", got)
++	}
++}
++
++func TestUpgradeAnnouncementsCarryTheOrientation(t *testing.T) {
++	// We asked; the peer accepted (state 4) and we announce state 1.
++	eng, call := testEngineWithOutgoingCall()
++	m := eng.calls[call.ID()]
++	m.videoTx = &videoSender{}
++	m.localVideo = false
++	m.txOrient = 1
++	sent := recordNodes(eng)
++	if err := call.StartVideo(); err != nil {
++		t.Fatal(err)
++	}
++	eng.onVideoStanza(videoStateNode(signaling.VideoStateUpgradeAccept))
++	if got := enabledOrientation(t, *sent); got != 1 {
++		t.Fatalf("state 1 after the peer's accept says %d, want 1", got)
++	}
++}
++
++// The peer's packets say how to turn its picture; a camera-on stanza saying 0 must
++// not override them.
++func TestPacketOrientationWinsOverTheStanza(t *testing.T) {
++	eng, call := testEngineWithOutgoingCall()
++	eng.calls[call.ID()].rxOrient, eng.calls[call.ID()].rxOrientKnown = 1, true
++	recordNodes(eng)
++	var got VideoState
++	call.OnVideoState(func(state VideoState) { got = state })
++	eng.onVideoStanza(videoStateNode(signaling.VideoStateEnabled)) // no device_orientation: 0
++	if !got.Active || got.Orientation != 1 {
++		t.Fatalf("video state = %+v, want active with the packets' orientation 1", got)
++	}
++}
++
++// Before any packet, the stanza's orientation is all there is.
++func TestStanzaOrientationBeforeAnyPacket(t *testing.T) {
++	eng, call := testEngineWithOutgoingCall()
++	recordNodes(eng)
++	var got VideoState
++	call.OnVideoState(func(state VideoState) { got = state })
++	node := videoStateNode(signaling.VideoStateEnabled)
++	node.Attrs["device_orientation"] = "1"
++	eng.onVideoStanza(node)
++	if got.Orientation != 1 {
++		t.Fatalf("video state = %+v, want the stanza's orientation 1", got)
++	}
++}
++
++// Camera off is state 6 with our orientation, as WhatsApp's clients send it.
++func TestCameraOffKeepsTheOrientation(t *testing.T) {
++	eng, call := testEngineWithOutgoingCall()
++	eng.calls[call.ID()].videoTx = &videoSender{}
++	eng.calls[call.ID()].txOrient = 1
++	sent := recordNodes(eng)
++	if err := call.StopVideo(); err != nil {
++		t.Fatal(err)
++	}
++	if len(*sent) != 1 {
++		t.Fatalf("sent %d stanzas, want one", len(*sent))
++	}
++	v := (*sent)[0].GetChildren()[0].AttrGetter()
++	if v.Int("state") != signaling.VideoStateStopped || v.OptionalString("device_orientation") != "1" {
++		t.Fatalf("camera off = %v, want state 6 with orientation 1", (*sent)[0].GetChildren()[0].Attrs)
++	}
++}
+diff --git a/engine_media.go b/engine_media.go
+index 99866ae..f39c519 100644
+--- a/engine_media.go
++++ b/engine_media.go
+@@ -9,7 +9,6 @@ import (
+ 	"io"
+ 	"math"
+ 	"net"
+-	"strings"
+ 	"sync"
+ 	"sync/atomic"
+ 	"time"
+@@ -35,8 +34,14 @@ const (
+ )
+ 
+ type videoReceiveState struct {
+-	assembler   rtp.H264AccessUnitAssembler
++	// The relay delivers video RTP out of order (seen up to 22 places late, none
++	// lost); the reordering assembler puts it back in order before taking a gap
++	// for a loss.
++	assembler   rtp.H264ReorderingAssembler
+ 	orientation int
++	// lastKeyframeAsk is when the peer was last asked for a keyframe because
++	// frames were being withheld.
++	lastKeyframeAsk time.Time
+ }
+ 
+ // maybeStartMedia launches the media loop for callID once both the callKey and the relay
+@@ -94,6 +99,9 @@ func (e *engine) maybeStartMedia(callID string) {
+ 	}
+ 	selfLID, peerLID := m.selfLID, m.peerLID
+ 	inbound := m.direction == CallDirectionIncoming
++	if !m.group {
++		rd = settleMediaRelay(m)
++	}
+ 	e.mu.Unlock()
+ 
+ 	if call != nil {
+@@ -108,6 +116,31 @@ func (e *engine) maybeStartMedia(callID string) {
+ 	}()
+ }
+ 
++// settleMediaRelay fixes the relay a call's media runs on and returns the relay data the
++// media loop allocates with. Call with e.mu held. The relay is recorded as m.electedRelay
++// so that relaylatency probes arriving later are steered to it as well (see
++// onRelayLatency). Inbound, a relay the caller's probes already settled is kept; without
++// one, the is_fna relay or else getMediaRelayEndpoint's pick is taken. Outbound, it is the
++// relay getMediaRelayEndpoint picks, as before. The returned copy carries electedRelay,
++// so getMediaRelayEndpoint picks the same relay again in connectAndAllocate.
++func settleMediaRelay(m *engineCall) *relayData {
++	rd := m.relay
++	inbound := m.direction == CallDirectionIncoming
++	if m.electedRelay == "" {
++		if inbound {
++			m.electedRelay = steerInboundRelay(rd, nil)
++		}
++		if m.electedRelay == "" {
++			if ep := getMediaRelayEndpoint(rd, inbound); ep != nil {
++				m.electedRelay = ep.relayName
++			}
++		}
++	}
++	withElected := *rd
++	withElected.electedRelay = m.electedRelay
++	return &withElected
++}
++
+ // connectAndAllocate opens the relay DataChannel and sends the STUN allocate, returning
+ // the channel and the allocate bytes (re-sent by the keepalive).
+ //
+@@ -119,7 +152,19 @@ func (e *engine) connectAndAllocate(ctx context.Context, rd *relayData, streamSs
+ 		return nil, nil, fmt.Errorf("relay has no usable endpoint")
+ 	}
+ 	addr := &net.UDPAddr{IP: net.ParseIP(ep.addresses[0].ipv4), Port: int(ep.addresses[0].port)}
+-	log.Info().Str("relay_name", ep.relayName).Str("addr", addr.String()).Msg("connecting media transport to relay")
++	for _, cand := range rd.endpoints {
++		candAddr := ""
++		if len(cand.addresses) > 0 {
++			candAddr = fmt.Sprintf("%s:%d", cand.addresses[0].ipv4, cand.addresses[0].port)
++		}
++		log.Debug().Str("relay_name", cand.relayName).Str("addr", candAddr).Uint32("token_id", cand.tokenID).
++			Uint32("auth_token_id", cand.authTokenID).Bool("is_fna", cand.isFNA).Uint32("c2r_rtt", cand.c2rRTT).
++			Msg("relay candidate")
++	}
++	log.Info().Str("relay_name", ep.relayName).Str("addr", addr.String()).
++		Bool("is_fna", ep.isFNA).Bool("inbound", inbound).Int("endpoint_count", len(rd.endpoints)).
++		Str("elected_relay", rd.electedRelay).
++		Msg("connecting media transport to relay")
+ 	e.c.diag.Emit("relay", map[string]any{
+ 		"event": "endpoint", "relay_name": ep.relayName,
+ 		"ipv4": ep.addresses[0].ipv4, "port": ep.addresses[0].port, "token_id": ep.tokenID,
+@@ -748,6 +793,7 @@ func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKe
+ 	if m := e.calls[callID]; m != nil {
+ 		vsender.active = m.localVideo
+ 		vsender.sendGated = m.videoGate
++		vsender.orientation = m.txOrient
+ 		m.videoTx = vsender
+ 		m.appDataTx = appSender
+ 	}
+@@ -963,6 +1009,7 @@ func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKe
+ 
+ 	buf := make([]byte, 1500)
+ 	var rtpIn, rtpSeen, unprotectFail, rtpInspect, vidIn, appDataIn, appDataUnprotectFail, videoUnprotectFail, videoFrameIn, videoSinkMissing, rtcpIn, rtcpAuthFail, groupForwardingInvalid, allocOK, allocErr, pongIn uint64
++	var peerOrient rtpOrientation
+ 	for {
+ 		if ctx.Err() != nil {
+ 			return ctx.Err()
+@@ -977,7 +1024,7 @@ func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKe
+ 				if _, active := activeReceivers[receiver]; active {
+ 					continue
+ 				}
+-				state.assembler = rtp.H264AccessUnitAssembler{}
++				state.assembler = rtp.H264ReorderingAssembler{}
+ 				delete(lastVideoPLI, receiver.videoSSRC)
+ 				delete(videoReceiveStates, receiver)
+ 			}
+@@ -1095,6 +1142,24 @@ func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKe
+ 			log.Info().Int("bytes", n).Msg("first RTP-classified packet from relay, relay is bridging the peer's media")
+ 		}
+ 		vh, vok := rtp.ParseRtpHeader(pkt)
++		if vok && vh.VideoExtension != nil {
++			bits := int(vh.VideoExtension.MediaFrameInfo & 0x03)
++			if st, changed, announce := peerOrient.packet(bits); changed {
++				e.mu.Lock()
++				if current := e.calls[callID]; current != nil {
++					current.rxOrient, current.rxOrientKnown = bits, true
++				}
++				e.mu.Unlock()
++				log.Debug().Int("frame_info_orientation", bits).
++					Uint8("media_frame_info", vh.VideoExtension.MediaFrameInfo).
++					Msg("peer video RTP orientation bits changed")
++				if announce && call != nil {
++					if fn := call.onVideoStateFn(); fn != nil {
++						fn(st)
++					}
++				}
++			}
++		}
+ 		if vok {
+ 			if rtpInspect < 20 || vh.PayloadType == rtp.RtpPayloadTypeH264 || vh.PayloadType == rtp.RtpPayloadTypeAppData {
+ 				log.Debug().
+@@ -1171,6 +1236,7 @@ func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKe
+ 				videoReceiveStates[media.receiver] = videoState
+ 			}
+ 			videoReception.Observe(vh.Ssrc, vh.SequenceNumber, vh.Timestamp, uint64(time.Now().UnixMilli()), 90000)
++			videoReception.CountPayload(vh.Ssrc, len(media.Payload))
+ 			if vh.VideoExtension != nil {
+ 				orientation := vh.VideoExtension.DisplayOrientation()
+ 				if orientation != videoState.orientation {
+@@ -1202,11 +1268,15 @@ func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKe
+ 				})
+ 			}
+ 			videoWirePacket++
+-			frame, complete, recoveryNeeded := videoState.assembler.Push(
++			frames, recoveryNeeded := videoState.assembler.Push(
+ 				vh.SequenceNumber,
+ 				vh.Marker,
+ 				media.Payload,
+ 			)
++			if recoveryNeeded {
++				log.Info().Uint32("ssrc", vh.Ssrc).Uint16("seq", vh.SequenceNumber).
++					Msg("peer video lost a packet; withholding frames until an IDR")
++			}
+ 			if recoveryNeeded && shouldSendVideoPLI(lastVideoPLI, vh.Ssrc, time.Now()) {
+ 				packet, feedbackErr := videoRtcp.pictureLossIndication(vh.Ssrc)
+ 				if feedbackErr == nil {
+@@ -1216,7 +1286,14 @@ func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKe
+ 					log.Warn().Err(feedbackErr).Uint32("ssrc", vh.Ssrc).Msg("failed to request video keyframe after RTP loss")
+ 				}
+ 			}
+-			if complete {
++			// WhatsApp encoders send an IDR on request only. Without asking again, a
++			// stream that broke and whose first request was lost stays frozen for the
++			// rest of the call (2026-11-03): ask each second while frames are withheld.
++			if videoState.assembler.KeyframeNeeded() && call != nil && time.Since(videoState.lastKeyframeAsk) >= time.Second {
++				videoState.lastKeyframeAsk = time.Now()
++				call.RequestPeerKeyframe()
++			}
++			for _, frame := range frames {
+ 				if videoWireFrame < videoWireFrameLimit {
+ 					e.c.diag.Emit("video_wire", map[string]any{
+ 						"event": "access_unit", "direction": "in", "call_id": callID,
+@@ -1268,7 +1345,7 @@ func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKe
+ 				// substitute signal for "the peer's video is live" than that stanza is.
+ 				if call != nil {
+ 					if fn := call.onVideoStateFn(); fn != nil {
+-						fn(VideoState{Active: true, Raw: 1})
++						fn(peerOrient.firstFrame())
+ 					}
+ 				}
+ 			}
+@@ -1291,6 +1368,11 @@ func (e *engine) runMedia(ctx context.Context, callID string, call *Call, callKe
+ 			continue
+ 		}
+ 		audioReception.Observe(audio.SSRC, vh.SequenceNumber, audio.Timestamp, uint64(time.Now().UnixMilli()), SampleRate)
++		// The decoder keeps the plaintext to itself; the protected payload is within an
++		// authentication tag of it, near enough for the receive rate.
++		if headerLen, ok := rtp.RtpHeaderByteLength(pkt); ok && n > headerLen {
++			audioReception.CountPayload(audio.SSRC, n-headerLen)
++		}
+ 		e.c.diag.Emit("rtp", map[string]any{
+ 			"event": "in", "ssrc": audio.SSRC, "seq": vh.SequenceNumber,
+ 			"ts": audio.Timestamp, "pt": vh.PayloadType, "marker": vh.Marker,
+@@ -1494,6 +1576,7 @@ type videoSender struct {
+ 	active           bool
+ 	sendGated        bool
+ 	keyframeRequired bool
++	orientation      uint8 // device orientation 0..3 for the MediaFrameInfo low bits
+ 	log              zerolog.Logger
+ 	diag             *diag.Recorder
+ }
+@@ -1637,6 +1720,12 @@ func (s *mediaSrtcpSender) fir(mediaSsrc uint32, seqNr uint8) ([]byte, error) {
+ 	return packet, err
+ }
+ 
++func (vs *videoSender) setOrientation(orientation uint8) {
++	vs.mu.Lock()
++	vs.orientation = orientation & 0x03
++	vs.mu.Unlock()
++}
++
+ func (vs *videoSender) protectAccessUnit(au []byte, duration time.Duration) [][]byte {
+ 	vs.mu.Lock()
+ 	defer vs.mu.Unlock()
+@@ -1691,6 +1780,7 @@ func (vs *videoSender) protectAccessUnitLocked(au []byte, duration time.Duration
+ 	if idr {
+ 		mediaFrameInfo = rtp.VideoMediaFrameInfoIDR
+ 	}
++	mediaFrameInfo |= vs.orientation & 0x03
+ 	packets := make([][]byte, 0, len(payloads))
+ 	for i, payload := range payloads {
+ 		header := vs.stream.NextPacket(i == len(payloads)-1, mediaFrameInfo)
+@@ -1786,21 +1876,6 @@ func (vs *videoSender) send(au []byte, duration time.Duration) {
+ 	}
+ }
+ 
+-// h264NalTypes lists each NAL unit's type byte (Annex-B, per SplitAnnexB) in an access
+-// unit, e.g. "7,8,5" for SPS,PPS,IDR -- lets a diagnostic reader spot a malformed
+-// reassembly (missing SPS/PPS before an IDR, an unexpected type) without decoding hex.
+-func h264NalTypes(au []byte) string {
+-	nalus := rtp.SplitAnnexB(au)
+-	types := make([]string, 0, len(nalus))
+-	for _, n := range nalus {
+-		if len(n) == 0 {
+-			continue
+-		}
+-		types = append(types, fmt.Sprintf("%d", n[0]&0x1f))
+-	}
+-	return strings.Join(types, ",")
+-}
+-
+ // rmsFloat32 returns the root-mean-square level of a PCM frame, a cheap loudness
+ // metric for the media diagnostic streams (avoids inlining raw float32 PCM).
+ func rmsFloat32(f []float32) float64 {
+@@ -1813,3 +1888,38 @@ func rmsFloat32(f []float32) float64 {
+ 	}
+ 	return math.Sqrt(sum / float64(len(f)))
+ }
++
++// rtpOrientation follows the orientation the peer stamps on its video packets (the
++// low two bits of MediaFrameInfo), which is what WhatsApp clients rotate by.
++//
++// The "video is live" state announced on the first video frame carries it: that
++// state used to say orientation 0, and after a mid-call upgrade it arrives after
++// the peer's <video state=1 device_orientation=1>, so it turned the picture back
++// on its side. Once video is live, a change of the bits (the peer turning its
++// phone) is announced as well.
++type rtpOrientation struct {
++	bits int // the last video packet's, valid once seen
++	live bool
++	seen bool
++}
++
++// packet records one video packet's bits. changed: they differ from the last
++// packet's; announce: video is live, so the change should be reported as st.
++func (o *rtpOrientation) packet(bits int) (st VideoState, changed, announce bool) {
++	if o.seen && bits == o.bits {
++		return VideoState{}, false, false
++	}
++	o.seen = true
++	o.bits = bits
++	return VideoState{Active: true, Raw: 1, Orientation: bits}, true, o.live
++}
++
++// firstFrame marks video live and returns the state to announce for it.
++func (o *rtpOrientation) firstFrame() VideoState {
++	o.live = true
++	bits := 0
++	if o.seen {
++		bits = o.bits
++	}
++	return VideoState{Active: true, Raw: 1, Orientation: bits}
++}
+diff --git a/engine_media_test.go b/engine_media_test.go
+index 33bf040..e008eb9 100644
+--- a/engine_media_test.go
++++ b/engine_media_test.go
+@@ -232,3 +232,39 @@ func TestMediaSrtcpReceiverRekeysForAnsweringDevice(t *testing.T) {
+ 
+ // testRtcpCname is the one CNAME a call's audio and video RTCP senders share.
+ var testRtcpCname = rtp.BuildWhatsappRtcpCname([12]byte{})
++
++func TestVideoSenderCarriesDeviceOrientationInFrameInfo(t *testing.T) {
++	pipe, err := NewMediaPipeline(iota32(), "111111111111111:0@lid", "222222222222222:0@lid", 0x55667788, FrameSamples)
++	if err != nil {
++		t.Fatalf("pipe: %v", err)
++	}
++	sender := &videoSender{pipe: pipe, stream: rtp.NewVideoRtpStream(0x55667788, 4500), active: true}
++	idr := []byte{0, 0, 0, 1, 0x65, 1, 2, 3}
++	delta := []byte{0, 0, 0, 1, 0x41, 1, 2, 3}
++	frameInfo := func(au []byte) uint8 {
++		t.Helper()
++		packets := sender.protectAccessUnit(au, 50*time.Millisecond)
++		if len(packets) == 0 {
++			t.Fatal("no packets")
++		}
++		header, ok := rtp.ParseRtpHeader(packets[0])
++		if !ok || header.VideoExtension == nil {
++			t.Fatal("no video extension")
++		}
++		return header.VideoExtension.MediaFrameInfo
++	}
++	if got := frameInfo(idr); got != rtp.VideoMediaFrameInfoIDR {
++		t.Fatalf("upright IDR frame info = %#x", got)
++	}
++	sender.setOrientation(1)
++	if got := frameInfo(idr); got != rtp.VideoMediaFrameInfoIDR|1 {
++		t.Fatalf("IDR frame info = %#x, want %#x", got, rtp.VideoMediaFrameInfoIDR|1)
++	}
++	if got := frameInfo(delta); got != rtp.VideoMediaFrameInfoDelta|1 {
++		t.Fatalf("delta frame info = %#x, want %#x", got, rtp.VideoMediaFrameInfoDelta|1)
++	}
++	sender.setOrientation(7)
++	if got := frameInfo(delta); got != rtp.VideoMediaFrameInfoDelta|3 {
++		t.Fatalf("out-of-range orientation leaked into frame info: %#x", got)
++	}
++}
+diff --git a/relay_election_test.go b/relay_election_test.go
+new file mode 100644
+index 0000000..3430d4d
+--- /dev/null
++++ b/relay_election_test.go
+@@ -0,0 +1,342 @@
++package meowcaller
++
++import (
++	"bytes"
++	"context"
++	"encoding/hex"
++	"testing"
++
++	waBinary "go.mau.fi/whatsmeow/binary"
++	"go.mau.fi/whatsmeow/types"
++	"go.mau.fi/whatsmeow/types/events"
++)
++
++func mustHex(t *testing.T, s string) []byte {
++	t.Helper()
++	b, err := hex.DecodeString(s)
++	if err != nil {
++		t.Fatalf("bad hex %q: %v", s, err)
++	}
++	return b
++}
++
++// capturedRelay rebuilds the <relay> block of an offer received on mindphone on
++// 30 October 2026 (imlibpurpleservice TRC log). Attributes and addresses are copied from
++// the log; the log prints only the length of the two relay tokens, so they are stand-ins
++// of that length. IPv6 <te2> entries are kept: parseRelayData has to skip them.
++func capturedRelay(t *testing.T, first, firstV4, firstV6 string) *waBinary.Node {
++	t.Helper()
++	te := func(relayID, tokenID, rtt, name, addr string) waBinary.Node {
++		return waBinary.Node{Tag: "te2", Attrs: waBinary.Attrs{
++			"auth_token_id": "0", "c2r_rtt": rtt, "relay_id": relayID, "relay_name": name, "token_id": tokenID,
++		}, Content: mustHex(t, addr)}
++	}
++	return &waBinary.Node{
++		Tag:   "relay",
++		Attrs: waBinary.Attrs{"attribute_padding": "1", "peer_pid": "1", "self_pid": "3"},
++		Content: []waBinary.Node{
++			{Tag: "participant", Attrs: waBinary.Attrs{"jid": "100000000000001@lid", "pid": "1"}},
++			{Tag: "token", Attrs: waBinary.Attrs{"id": "0"}, Content: bytes.Repeat([]byte{0xa0}, 192)},
++			{Tag: "token", Attrs: waBinary.Attrs{"id": "1"}, Content: bytes.Repeat([]byte{0xa1}, 192)},
++			{Tag: "key", Content: []byte("X9YKry03PTPMA66iSsj68w==")},
++			te("0", "0", "10", first, firstV4),
++			te("0", "0", "10", first, firstV6),
++			te("1", "1", "13", "dus1c01", "9df01b810d96"),
++			te("1", "1", "13", "dus1c01", "2a032880f23f00dbfaceb00c000067490d96"),
++		},
++	}
++}
++
++// relayLatencyStanza is one <call><relaylatency> as the caller sends it: one <te> each.
++func relayLatencyStanza(t *testing.T, latency, name, addr string) *waBinary.Node {
++	t.Helper()
++	return &waBinary.Node{Tag: "call", Content: []waBinary.Node{{
++		Tag: "relaylatency",
++		Attrs: waBinary.Attrs{
++			"call-creator": "100000000000001@lid", "call-id": "CID",
++		},
++		Content: []waBinary.Node{{
++			Tag:     "te",
++			Attrs:   waBinary.Attrs{"latency": latency, "relay_name": name},
++			Content: mustHex(t, addr),
++		}},
++	}}}
++}
++
++func testEngineWithIncomingCall(rd *relayData) (*engine, *engineCall) {
++	c := &Client{}
++	c.eng = newEngine(c)
++	m := &engineCall{direction: CallDirectionIncoming, relay: rd}
++	c.eng.calls["CID"] = m
++	return c.eng, m
++}
++
++type probeStep struct {
++	latency, name, addr string
++	wantReported        uint32
++	wantElected         string
++}
++
++func runProbeSteps(t *testing.T, eng *engine, steps []probeStep) {
++	t.Helper()
++	for i, s := range steps {
++		probes := parseRelayLatencyProbes(relayLatencyStanza(t, s.latency, s.name, s.addr))
++		if len(probes) != 1 || probes[0].relayName != s.name {
++			t.Fatalf("step %d: parsed %+v", i, probes)
++		}
++		target, reported, ok := eng.relayLatencyReplies("CID", probes)
++		if !ok {
++			t.Fatalf("step %d (%s): probe left unanswered", i, s.name)
++		}
++		if reported[0] != s.wantReported {
++			t.Errorf("step %d (%s, peer %d ms): reported %d ms, want %d", i, s.name, probes[0].latency, reported[0], s.wantReported)
++		}
++		if target != s.wantElected {
++			t.Errorf("step %d (%s): target %q, want %q", i, s.name, target, s.wantElected)
++		}
++	}
++}
++
++// TestRelayElectionIncomingCall1 replays call 00D7D841... (19:16:54): the caller probed its
++// own fgrq1c02 (not in our relay block) at the same 33 ms as ams4c01. The old code echoed
++// 33 ms for both. Now fgrq1c02 is reported far, ams4c01 near, and media allocates there.
++func TestRelayElectionIncomingCall1(t *testing.T) {
++	rd := parseRelayData(capturedRelay(t, "ams4c01", "399105390d96", "2a032880f3820139faceb00c000067490d96"))
++	eng, m := testEngineWithIncomingCall(rd)
++	runProbeSteps(t, eng, []probeStep{
++		// Arrival order as logged; latencies 0x2000021 = 33 ms etc.
++		{"33554465", "fgrq1c02", "258f51e10d96", avoidedLatency, ""},
++		{"33554465", "ams4c01", "399105360d96", steeredLatency, "ams4c01"},
++		{"33554475", "dus1c01", "9df01b340d96", avoidedLatency, "ams4c01"},
++		// Second round, after the accept.
++		{"33554440", "fgrq1c02", "258f51e10d96", avoidedLatency, "ams4c01"},
++		{"33554439", "ams4c01", "399105360d96", steeredLatency, "ams4c01"},
++		{"33554442", "dus1c01", "9df01b340d96", avoidedLatency, "ams4c01"},
++	})
++	eng.mu.Lock()
++	mrd := settleMediaRelay(m)
++	eng.mu.Unlock()
++	ep := getMediaRelayEndpoint(mrd, true)
++	if ep == nil || ep.relayName != "ams4c01" || ep.addresses[0].ipv4 != "57.145.5.57" || ep.addresses[0].port != 3478 {
++		t.Fatalf("media endpoint = %+v, want ams4c01 57.145.5.57:3478", ep)
++	}
++}
++
++// TestRelayElectionIncomingCall2 replays call 00E7EF5C... (19:18:28). The caller measured
++// dus1c01 at 11 ms and ams2c01 at 18 ms; the old code allocated on ams2c01, the first
++// relay of the block, whatever the caller measured. Now both sides go to dus1c01.
++func TestRelayElectionIncomingCall2(t *testing.T) {
++	rd := parseRelayData(capturedRelay(t, "ams2c01", "3990df390d96", "2a032880f36f0139faceb00c000067490d96"))
++	if old := getMediaRelayEndpoint(rd, true); old == nil || old.relayName != "ams2c01" {
++		t.Fatalf("without an elected relay the pick is %+v, want ams2c01 (lowest c2r_rtt)", old)
++	}
++	eng, m := testEngineWithIncomingCall(rd)
++	runProbeSteps(t, eng, []probeStep{
++		{"33554443", "dus1c01", "9df01b340d96", steeredLatency, "dus1c01"},
++		{"33554450", "ams2c01", "3990df360d96", avoidedLatency, "dus1c01"},
++		{"33554450", "fgrq1c02", "258f51e10d96", avoidedLatency, "dus1c01"},
++	})
++	eng.mu.Lock()
++	mrd := settleMediaRelay(m)
++	eng.mu.Unlock()
++	ep := getMediaRelayEndpoint(mrd, true)
++	if ep == nil || ep.relayName != "dus1c01" || ep.addresses[0].ipv4 != "157.240.27.129" {
++		t.Fatalf("media endpoint = %+v, want dus1c01 157.240.27.129:3478", ep)
++	}
++	if m.electedRelay != "dus1c01" {
++		t.Fatalf("electedRelay = %q, want dus1c01", m.electedRelay)
++	}
++}
++
++// TestRelayElectionAnswerBeforeProbes: media that starts before any probe settles the
++// relay from the offer, and later probes are steered to that relay.
++func TestRelayElectionAnswerBeforeProbes(t *testing.T) {
++	rd := parseRelayData(capturedRelay(t, "ams2c01", "3990df390d96", "2a032880f36f0139faceb00c000067490d96"))
++	eng, m := testEngineWithIncomingCall(rd)
++	eng.mu.Lock()
++	mrd := settleMediaRelay(m)
++	eng.mu.Unlock()
++	if mrd.electedRelay != "ams2c01" || m.electedRelay != "ams2c01" {
++		t.Fatalf("settled %q/%q, want ams2c01", mrd.electedRelay, m.electedRelay)
++	}
++	if rd.electedRelay != "" {
++		t.Fatalf("settleMediaRelay changed the call's relay data in place")
++	}
++	runProbeSteps(t, eng, []probeStep{
++		{"33554443", "dus1c01", "9df01b340d96", avoidedLatency, "ams2c01"},
++		{"33554450", "ams2c01", "3990df360d96", steeredLatency, "ams2c01"},
++	})
++}
++
++// TestRelayElectionOutbound: outbound probes are not answered before media has picked a
++// relay, and are steered to that relay afterwards.
++func TestRelayElectionOutbound(t *testing.T) {
++	eng, call := testEngineWithOutgoingCall()
++	m := eng.calls[call.ID()]
++	m.relay = &relayData{
++		relayTokens: [][]byte{{1}, {2}},
++		endpoints: []relayEndpoint{
++			{relayName: "ams2c01", tokenID: 0, authTokenID: 1, addresses: []relayAddress{{ipv4: "1.1.1.1", port: 3478}}},
++			{relayName: "dus1c01", tokenID: 1, authTokenID: 0, addresses: []relayAddress{{ipv4: "2.2.2.2", port: 3478}}},
++		},
++	}
++	probes := []rlProbe{{relayName: "dus1c01", latency: 5}, {relayName: "ams2c01", latency: 9}}
++	if _, _, ok := eng.relayLatencyReplies(call.ID(), probes); ok {
++		t.Fatalf("outbound probes answered before media picked a relay")
++	}
++	eng.mu.Lock()
++	settleMediaRelay(m)
++	eng.mu.Unlock()
++	target, reported, ok := eng.relayLatencyReplies(call.ID(), probes)
++	if !ok || target != "ams2c01" || reported[0] != avoidedLatency || reported[1] != steeredLatency {
++		t.Fatalf("outbound replies = %q %v %v, want ams2c01 [%d %d]", target, reported, ok, avoidedLatency, steeredLatency)
++	}
++}
++
++func TestRelayElectionUnknownCall(t *testing.T) {
++	eng, _ := testEngineWithIncomingCall(&relayData{})
++	if _, _, ok := eng.relayLatencyReplies("OTHER", []rlProbe{{relayName: "x"}}); ok {
++		t.Fatalf("answered probes for an unknown call")
++	}
++}
++
++func TestSteerInboundRelay(t *testing.T) {
++	rd := &relayData{
++		relayTokens: [][]byte{{1}, {2}},
++		endpoints: []relayEndpoint{
++			{relayName: "waw2c02", tokenID: 1},
++			{relayName: "hel3c01", tokenID: 0},
++		},
++	}
++	probes := []rlProbe{{relayName: "fala3c03", latency: 5}, {relayName: "hel3c01", latency: 83}, {relayName: "waw2c02", latency: 75}}
++	if got := steerInboundRelay(rd, probes); got != "waw2c02" {
++		t.Fatalf("steer = %q, want waw2c02 (closest relay of our block)", got)
++	}
++	rd.relayTokens[1] = nil
++	if got := steerInboundRelay(rd, probes); got != "hel3c01" {
++		t.Fatalf("steer without a waw2c02 token = %q, want hel3c01", got)
++	}
++	rd.relayTokens[1] = []byte{2}
++	if got := steerInboundRelay(rd, []rlProbe{{relayName: "hel3c01"}, {relayName: "waw2c02"}}); got != "hel3c01" {
++		t.Fatalf("steer without latencies = %q, want the first, hel3c01", got)
++	}
++	if got := steerInboundRelay(rd, []rlProbe{{relayName: "fala3c03", latency: 5}}); got != "" {
++		t.Fatalf("steer = %q, want none for probes naming no relay of ours", got)
++	}
++	rd.endpoints = append(rd.endpoints, relayEndpoint{relayName: "fna1", isFNA: true})
++	if got := steerInboundRelay(rd, probes); got != "fna1" {
++		t.Fatalf("steer with an is_fna relay = %q, want fna1", got)
++	}
++	if got := steerInboundRelay(rd, nil); got != "fna1" {
++		t.Fatalf("steer without probes = %q, want fna1", got)
++	}
++}
++
++// TestInboundMediaRelaySelection covers getMediaRelayEndpoint's inbound order:
++// is_fna, then the elected relay, then the foreign relay with the lowest c2r_rtt.
++func TestInboundMediaRelaySelection(t *testing.T) {
++	rd := &relayData{endpoints: []relayEndpoint{
++		{relayName: "own", authTokenID: 1, c2rRTT: 5, addresses: []relayAddress{{ipv4: "1.1.1.1", port: 3478}}},
++		{relayName: "far", authTokenID: 0, c2rRTT: 150, addresses: []relayAddress{{ipv4: "2.2.2.2", port: 3478}}},
++		{relayName: "near", authTokenID: 0, c2rRTT: 40, addresses: []relayAddress{{ipv4: "3.3.3.3", port: 3478}}},
++	}}
++	if got := getMediaRelayEndpoint(rd, true).relayName; got != "near" {
++		t.Fatalf("inbound without is_fna or election: got %s, want near", got)
++	}
++	rd.electedRelay = "far"
++	if got := getMediaRelayEndpoint(rd, true).relayName; got != "far" {
++		t.Fatalf("inbound with far elected: got %s, want far", got)
++	}
++	rd.electedRelay = "gone"
++	if got := getMediaRelayEndpoint(rd, true).relayName; got != "near" {
++		t.Fatalf("inbound with an elected relay not in the block: got %s, want near", got)
++	}
++	rd.endpoints[1].isFNA = true
++	if got := getMediaRelayEndpoint(rd, true).relayName; got != "far" {
++		t.Fatalf("inbound with is_fna: got %s, want far", got)
++	}
++	if got := getMediaRelayEndpoint(rd, false).relayName; got != "own" {
++		t.Fatalf("outbound: got %s, want own", got)
++	}
++}
++
++func TestParseRelayDataC2rRTT(t *testing.T) {
++	rd := parseRelayData(capturedRelay(t, "ams4c01", "399105390d96", "2a032880f3820139faceb00c000067490d96"))
++	if len(rd.endpoints) != 2 {
++		t.Fatalf("parsed %d IPv4 endpoints, want 2", len(rd.endpoints))
++	}
++	if rd.endpoints[0].c2rRTT != 10 || rd.endpoints[1].c2rRTT != 13 {
++		t.Fatalf("c2r_rtt = %d/%d, want 10/13", rd.endpoints[0].c2rRTT, rd.endpoints[1].c2rRTT)
++	}
++}
++
++func TestParseRelayLatencyProbes(t *testing.T) {
++	if p := parseRelayLatencyProbes(&waBinary.Node{Tag: "call"}); p != nil {
++		t.Fatalf("probes from a stanza without <relaylatency>: %+v", p)
++	}
++	p := parseRelayLatencyProbes(relayLatencyStanza(t, "33554465", "fgrq1c02", "258f51e10d96"))
++	if len(p) != 1 || p[0].latency != 33 || p[0].relayName != "fgrq1c02" || hex.EncodeToString(p[0].addr) != "258f51e10d96" {
++		t.Fatalf("parsed %+v", p)
++	}
++}
++
++func TestDecodeLatencyTags(t *testing.T) {
++	cases := map[string]uint32{
++		"33554465":  33,  // Android, call 00D7D841
++		"33554439":  7,   // Android, call 00D7D841, second round
++		"100663423": 127, // 0x0600007F, the iPhone tag
++		"12":        0,
++		"x":         0,
++		"":          0,
++	}
++	for in, want := range cases {
++		if got := decodeLatency(in); got != want {
++			t.Errorf("decodeLatency(%q) = %d, want %d", in, got, want)
++		}
++	}
++}
++
++// TestOnRelayLatencySendsSteeredLatency drives onRelayLatency end to end with the first
++// probes of call 00D7D841 and checks the <te latency> that goes out.
++func TestOnRelayLatencySendsSteeredLatency(t *testing.T) {
++	rd := parseRelayData(capturedRelay(t, "ams4c01", "399105390d96", "2a032880f3820139faceb00c000067490d96"))
++	eng, _ := testEngineWithIncomingCall(rd)
++	var sent []waBinary.Node
++	eng.sendCallNode = func(_ context.Context, node waBinary.Node) error {
++		sent = append(sent, node)
++		return nil
++	}
++	for _, p := range []struct{ latency, name, addr string }{
++		{"33554465", "fgrq1c02", "258f51e10d96"},
++		{"33554465", "ams4c01", "399105360d96"},
++	} {
++		eng.onRelayLatency(&events.CallRelayLatency{
++			BasicCallMeta: types.BasicCallMeta{CallID: "CID", From: peerJID(), CallCreator: creatorJID()},
++			Data:          relayLatencyStanza(t, p.latency, p.name, p.addr),
++		})
++	}
++	if len(sent) != 2 {
++		t.Fatalf("sent %d stanzas, want 2", len(sent))
++	}
++	want := []struct {
++		name    string
++		latency uint32
++		addr    string
++	}{{"fgrq1c02", avoidedLatency, "258f51e10d96"}, {"ams4c01", steeredLatency, "399105360d96"}}
++	for i, node := range sent {
++		te := findChild(&node, "te")
++		if te == nil {
++			t.Fatalf("stanza %d has no <te>: %s", i, node.String())
++		}
++		ag := te.AttrGetter()
++		if got := ag.String("relay_name"); got != want[i].name {
++			t.Errorf("stanza %d relay_name = %s, want %s", i, got, want[i].name)
++		}
++		if got := decodeLatency(ag.String("latency")); got != want[i].latency {
++			t.Errorf("stanza %d (%s) latency = %d ms, want %d", i, want[i].name, got, want[i].latency)
++		}
++		if got := hex.EncodeToString(nodeBytes(te)); got != want[i].addr {
++			t.Errorf("stanza %d address = %s, want %s (the caller's own, echoed)", i, got, want[i].addr)
++		}
++	}
++}
+diff --git a/rtp/h264_reorder.go b/rtp/h264_reorder.go
+new file mode 100644
+index 0000000..7ffdeae
+--- /dev/null
++++ b/rtp/h264_reorder.go
+@@ -0,0 +1,103 @@
++package rtp
++
++// H264ReorderWindow is how many packets the reordering assembler holds back behind a
++// missing one before it calls that packet lost. Live WhatsApp video over the relay
++// (2026-11-03) arrived with single packets up to 22 places late and nothing lost; the
++// plain assembler took each of those for a loss and froze the picture until the next IDR.
++const H264ReorderWindow = 32
++
++// h264SequenceJump is a forward jump past which the stream is treated as restarted
++// rather than reordered: whatever is held back is dropped and the new sequence taken.
++const h264SequenceJump = 1024
++
++type heldPacket struct {
++	marker  bool
++	payload []byte
++}
++
++// H264ReorderingAssembler puts video RTP packets back in sequence order before handing
++// them to an H264AccessUnitAssembler, so reordering on the path is not mistaken for loss.
++// A packet that is still missing once H264ReorderWindow later packets are held is given
++// up on; the inner assembler then sees the gap and waits for an IDR as before.
++type H264ReorderingAssembler struct {
++	inner   H264AccessUnitAssembler
++	next    uint16
++	started bool
++	held    map[uint16]heldPacket
++}
++
++// Push takes one RTP packet in arrival order. It returns every access unit completed by
++// it (none while a gap is being waited out, several when a late packet fills one), and
++// whether the stream broke so that the decoder needs an IDR.
++func (r *H264ReorderingAssembler) Push(sequence uint16, marker bool, payload []byte) ([][]byte, bool) {
++	if !r.started {
++		r.started = true
++		r.next = sequence
++	}
++	ahead := sequence - r.next
++	if ahead >= 0x8000 {
++		return nil, false // older than what was already handed on: a duplicate or given up on
++	}
++	if ahead >= h264SequenceJump {
++		r.held = nil
++		r.next = sequence
++		ahead = 0
++	}
++	if ahead == 0 {
++		var frames [][]byte
++		recovery := r.feed(sequence, marker, payload, &frames)
++		r.next++
++		return frames, r.drain(&frames) || recovery
++	}
++	if r.held == nil {
++		r.held = make(map[uint16]heldPacket)
++	}
++	if _, dup := r.held[sequence]; !dup {
++		r.held[sequence] = heldPacket{marker: marker, payload: append([]byte(nil), payload...)}
++	}
++	var frames [][]byte
++	recovery := false
++	for len(r.held) >= H264ReorderWindow {
++		r.next = r.oldestHeld() // give up on everything before it
++		recovery = r.drain(&frames) || recovery
++	}
++	return frames, recovery
++}
++
++// KeyframeNeeded reports whether frames are being withheld until the next IDR.
++func (r *H264ReorderingAssembler) KeyframeNeeded() bool {
++	return r.inner.keyframeNeeded
++}
++
++func (r *H264ReorderingAssembler) feed(sequence uint16, marker bool, payload []byte, frames *[][]byte) bool {
++	frame, complete, recovery := r.inner.Push(sequence, marker, payload)
++	if complete && len(frame) > 0 {
++		*frames = append(*frames, frame)
++	}
++	return recovery
++}
++
++// drain hands on held packets for as long as they continue the sequence.
++func (r *H264ReorderingAssembler) drain(frames *[][]byte) bool {
++	recovery := false
++	for {
++		p, ok := r.held[r.next]
++		if !ok {
++			return recovery
++		}
++		delete(r.held, r.next)
++		recovery = r.feed(r.next, p.marker, p.payload, frames) || recovery
++		r.next++
++	}
++}
++
++func (r *H264ReorderingAssembler) oldestHeld() uint16 {
++	first := true
++	var oldest, best uint16
++	for s := range r.held {
++		if d := s - r.next; first || d < best {
++			first, oldest, best = false, s, d
++		}
++	}
++	return oldest
++}
+diff --git a/rtp/h264_reorder_test.go b/rtp/h264_reorder_test.go
+new file mode 100644
+index 0000000..320bffe
+--- /dev/null
++++ b/rtp/h264_reorder_test.go
+@@ -0,0 +1,167 @@
++package rtp
++
++import "testing"
++
++// One single-NAL frame per packet: an IDR (type 5) or a P slice (type 1), tagged so a
++// frame can be told apart after reassembly.
++func idrPacket(tag byte) []byte { return []byte{0x65, tag} }
++func pPacket(tag byte) []byte   { return []byte{0x41, tag} }
++
++func frameTag(t *testing.T, au []byte) byte {
++	t.Helper()
++	if len(au) < 6 {
++		t.Fatalf("access unit too short: %x", au)
++	}
++	return au[len(au)-1]
++}
++
++type reorderPkt struct {
++	seq     uint16
++	payload []byte
++}
++
++func pushAll(t *testing.T, r *H264ReorderingAssembler, pkts []reorderPkt) (tags []byte, recovery bool) {
++	t.Helper()
++	for _, p := range pkts {
++		frames, rec := r.Push(p.seq, true, p.payload)
++		recovery = recovery || rec
++		for _, f := range frames {
++			tags = append(tags, frameTag(t, f))
++		}
++	}
++	return tags, recovery
++}
++
++func TestReorderedPacketsAreNotALoss(t *testing.T) {
++	var r H264ReorderingAssembler
++	// Seen live: 250, 252, 251, 253 -- nothing missing, one packet late.
++	tags, recovery := pushAll(t, &r, []reorderPkt{
++		{250, idrPacket(0)}, {252, pPacket(2)}, {251, pPacket(1)}, {253, pPacket(3)},
++	})
++	if recovery || r.KeyframeNeeded() {
++		t.Fatalf("a late packet was taken for a loss (recovery=%v, keyframeNeeded=%v)", recovery, r.KeyframeNeeded())
++	}
++	if string(tags) != string([]byte{0, 1, 2, 3}) {
++		t.Fatalf("frames %v, want 0 1 2 3 in order", tags)
++	}
++}
++
++func TestAPacketLateByMostOfTheWindowStillFits(t *testing.T) {
++	var r H264ReorderingAssembler
++	pkts := []reorderPkt{{100, idrPacket(0)}}
++	for i := 2; i < H264ReorderWindow; i++ { // 101 missing; 102.. held
++		pkts = append(pkts, reorderPkt{uint16(100 + i), pPacket(byte(i))})
++	}
++	pkts = append(pkts, reorderPkt{101, pPacket(1)})
++	tags, recovery := pushAll(t, &r, pkts)
++	if recovery || len(tags) != H264ReorderWindow {
++		t.Fatalf("got %d frames (recovery=%v), want all %d", len(tags), recovery, H264ReorderWindow)
++	}
++	for i, tag := range tags {
++		if int(tag) != i {
++			t.Fatalf("frame %d has tag %d: out of order", i, tag)
++		}
++	}
++}
++
++func TestARealLossWaitsForAnIDR(t *testing.T) {
++	var r H264ReorderingAssembler
++	pkts := []reorderPkt{{10, idrPacket(0)}}
++	for i := 0; i < H264ReorderWindow; i++ { // 11 never comes
++		pkts = append(pkts, reorderPkt{uint16(12 + i), pPacket(byte(i + 1))})
++	}
++	tags, recovery := pushAll(t, &r, pkts)
++	if !recovery || !r.KeyframeNeeded() {
++		t.Fatalf("a lost packet was not reported (recovery=%v, keyframeNeeded=%v)", recovery, r.KeyframeNeeded())
++	}
++	if len(tags) != 1 {
++		t.Fatalf("P frames after the loss reached the decoder: %v", tags)
++	}
++	frames, _ := r.Push(uint16(12+H264ReorderWindow), true, pPacket(0x70))
++	if len(frames) != 0 {
++		t.Fatal("a P frame got through while waiting for the IDR")
++	}
++	frames, _ = r.Push(uint16(13+H264ReorderWindow), true, idrPacket(0x71))
++	if len(frames) != 1 || frameTag(t, frames[0]) != 0x71 || r.KeyframeNeeded() {
++		t.Fatalf("the IDR did not restart the picture: %d frames, keyframeNeeded=%v", len(frames), r.KeyframeNeeded())
++	}
++}
++
++func TestAfterALossEverythingHeldFromTheNextIDROnIsKept(t *testing.T) {
++	var r H264ReorderingAssembler
++	// 11 is lost; 12 is an IDR (the peer answering a keyframe request) and is followed by P frames.
++	pkts := []reorderPkt{{10, idrPacket(0)}, {12, idrPacket(1)}}
++	for i := 1; i < H264ReorderWindow; i++ {
++		pkts = append(pkts, reorderPkt{uint16(12 + i), pPacket(byte(1 + i))})
++	}
++	tags, _ := pushAll(t, &r, pkts)
++	if len(tags) != H264ReorderWindow+1 || tags[1] != 1 || tags[len(tags)-1] != byte(H264ReorderWindow) {
++		t.Fatalf("frames after the loss were thrown away: got %v", tags)
++	}
++}
++
++func TestDuplicatesAndStragglersAreIgnored(t *testing.T) {
++	var r H264ReorderingAssembler
++	tags, recovery := pushAll(t, &r, []reorderPkt{
++		{500, idrPacket(0)}, {501, pPacket(1)}, {501, pPacket(1)}, {500, idrPacket(0)},
++		{503, pPacket(3)}, {503, pPacket(3)}, {502, pPacket(2)},
++	})
++	if recovery || string(tags) != string([]byte{0, 1, 2, 3}) {
++		t.Fatalf("frames %v recovery=%v, want 0 1 2 3 once each", tags, recovery)
++	}
++}
++
++func TestSequenceWrapsAround(t *testing.T) {
++	var r H264ReorderingAssembler
++	tags, recovery := pushAll(t, &r, []reorderPkt{
++		{65534, idrPacket(0)}, {0, pPacket(2)}, {65535, pPacket(1)}, {1, pPacket(3)},
++	})
++	if recovery || string(tags) != string([]byte{0, 1, 2, 3}) {
++		t.Fatalf("frames %v recovery=%v across the wrap", tags, recovery)
++	}
++}
++
++func TestARestartedSequenceIsTakenAsNew(t *testing.T) {
++	var r H264ReorderingAssembler
++	tags, _ := pushAll(t, &r, []reorderPkt{{100, idrPacket(0)}, {30000, idrPacket(1)}, {30001, pPacket(2)}})
++	if string(tags) != string([]byte{0, 1, 2}) {
++		t.Fatalf("frames %v after a sequence restart, want 0 1 2", tags)
++	}
++}
++
++func TestHeldPayloadIsCopied(t *testing.T) {
++	var r H264ReorderingAssembler
++	r.Push(1, true, idrPacket(0))
++	buf := pPacket(3)
++	r.Push(3, true, buf)
++	buf[1] = 0xEE // the receive loop reuses its buffer
++	frames, _ := r.Push(2, true, pPacket(2))
++	if len(frames) != 2 || frameTag(t, frames[1]) != 3 {
++		t.Fatalf("held packet changed with the caller's buffer: %d frames", len(frames))
++	}
++}
++
++func TestFragmentedFramesSurviveReordering(t *testing.T) {
++	var r H264ReorderingAssembler
++	// One P frame in three FU-A fragments, the middle one late.
++	start := []byte{0x5C, 0x81, 0xA0} // FU indicator (type 28), start bit, type 1
++	mid := []byte{0x5C, 0x01, 0xA1}
++	end := []byte{0x5C, 0x41, 0xA2} // end bit
++	if f, _ := r.Push(1, true, idrPacket(0)); len(f) != 1 {
++		t.Fatal("IDR not passed")
++	}
++	if f, _ := r.Push(2, false, start); len(f) != 0 {
++		t.Fatal("frame closed early")
++	}
++	if f, _ := r.Push(4, true, end); len(f) != 0 {
++		t.Fatal("frame closed with a fragment missing")
++	}
++	f, rec := r.Push(3, false, mid)
++	if rec || len(f) != 1 {
++		t.Fatalf("late middle fragment: %d frames, recovery=%v", len(f), rec)
++	}
++	want := []byte{0, 0, 0, 1, 0x41, 0xA0, 0xA1, 0xA2}
++	if string(f[0]) != string(want) {
++		t.Fatalf("reassembled %x, want %x", f[0], want)
++	}
++}
+diff --git a/rtp/rtcp.go b/rtp/rtcp.go
+index 8038435..5a810c1 100644
+--- a/rtp/rtcp.go
++++ b/rtp/rtcp.go
+@@ -74,6 +74,14 @@ type RtcpReceptionReport struct {
+ 	Jitter                     uint32
+ 	LastSenderReport           uint32
+ 	DelaySinceLastSenderReport uint32
++	// Payload bytes received on the stream so far, modulo 2^32: the first
++	// word of WhatsApp's 24-byte extension.
++	BytesReceived uint32
++	// The receive rate since the previous report in bit/s: the extension's
++	// sixth word. Left zero, a native sender has no statement of what reached
++	// us and lowers its video.
++	// Source: https://github.com/oxidezap/whatsapp-rust/blob/5aab55d8/wacore/src/voip/rtcp.rs (encode_whatsapp_reception_report)
++	ReceiveRateBps uint32
+ }
+ 
+ // RTCPGroupReportExtension is the opaque eight-byte suffix on one native group
+@@ -101,6 +109,20 @@ type RtcpReceptionStats struct {
+ 	lastSenderReport     uint32
+ 	lastSenderReportAtMs uint64
+ 	hasSenderReport      bool
++	payloadBytes         uint64
++	payloadBytesPrior    uint64
++	reportedAtMs         uint64
++	hasReported          bool
++}
++
++// CountPayload adds the payload of a packet of the current stream, which
++// Observe has just seen. Another stream's bytes are not counted.
++func (s *RtcpReceptionStats) CountPayload(ssrc uint32, bytes int) {
++	s.mu.Lock()
++	defer s.mu.Unlock()
++	if s.hasSsrc && s.ssrc == ssrc && bytes > 0 {
++		s.payloadBytes += uint64(bytes)
++	}
+ }
+ 
+ // Observe records one authenticated inbound RTP packet.
+@@ -115,6 +137,9 @@ func (s *RtcpReceptionStats) Observe(ssrc uint32, sequence uint16, rtpTimestamp
+ 		s.jitterQ4 = 0
+ 		s.lastSenderReport = 0
+ 		s.hasSenderReport = false
++		s.payloadBytes = 0
++		s.payloadBytesPrior = 0
++		s.hasReported = false
+ 		s.ssrc = ssrc
+ 		s.hasSsrc = true
+ 		s.baseSequence = sequence
+@@ -203,6 +228,16 @@ func (s *RtcpReceptionStats) Report(nowMs uint64) *RtcpReceptionReport {
+ 		}
+ 		dlsr = uint32(value)
+ 	}
++	var rate uint64
++	if s.hasReported && nowMs > s.reportedAtMs {
++		rate = (s.payloadBytes - s.payloadBytesPrior) * 8 * 1000 / (nowMs - s.reportedAtMs)
++		if rate > uint64(^uint32(0)) {
++			rate = uint64(^uint32(0))
++		}
++	}
++	s.payloadBytesPrior = s.payloadBytes
++	s.reportedAtMs = nowMs
++	s.hasReported = true
+ 	jitter := s.jitterQ4 >> 4
+ 	if jitter > uint64(^uint32(0)) {
+ 		jitter = uint64(^uint32(0))
+@@ -212,6 +247,7 @@ func (s *RtcpReceptionStats) Report(nowMs uint64) *RtcpReceptionReport {
+ 		ExtendedHighestSequence: s.sequenceCycles | uint32(s.maxSequence),
+ 		Jitter:                  uint32(jitter),
+ 		LastSenderReport:        s.lastSenderReport, DelaySinceLastSenderReport: dlsr,
++		BytesReceived: uint32(s.payloadBytes), ReceiveRateBps: uint32(rate),
+ 	}
+ }
+ 
+@@ -340,7 +376,11 @@ func BuildSenderReportWithSdesAndReception(localSsrc uint32, stats *RtcpSenderSt
+ 	if report != nil {
+ 		out[0] |= 1
+ 		out = appendReceptionReport(out, report)
+-		out = append(out, make([]byte, 24)...)
++		// WhatsApp's extension: bytes received, four words not understood
++		// (zero, the native "unavailable"), then the receive rate.
++		out = binary.BigEndian.AppendUint32(out, report.BytesReceived)
++		out = append(out, make([]byte, 16)...)
++		out = binary.BigEndian.AppendUint32(out, report.ReceiveRateBps)
+ 		binary.BigEndian.PutUint16(out[2:4], uint16(len(out)/4-1))
+ 	}
+ 	out = append(out, sdes[:]...)
+diff --git a/rtp/rtcp_reception_set.go b/rtp/rtcp_reception_set.go
+index 22abbdd..21cf079 100644
+--- a/rtp/rtcp_reception_set.go
++++ b/rtp/rtcp_reception_set.go
+@@ -43,6 +43,17 @@ func (s *RtcpReceptionStatsSet) Observe(
+ 	stream.Observe(ssrc, sequence, rtpTimestamp, arrivalMs, clockRate)
+ }
+ 
++// CountPayload adds an authenticated packet's payload bytes to its stream,
++// once Observe has seen that stream.
++func (s *RtcpReceptionStatsSet) CountPayload(ssrc uint32, bytes int) {
++	s.mu.Lock()
++	stream := s.streams[ssrc]
++	s.mu.Unlock()
++	if stream != nil {
++		stream.CountPayload(ssrc, bytes)
++	}
++}
++
+ // ObserveSenderReport records sender timing in the matching SSRC-specific state.
+ func (s *RtcpReceptionStatsSet) ObserveSenderReport(
+ 	senderSSRC uint32,
+diff --git a/rtp/rtp_test.go b/rtp/rtp_test.go
+index ecc0ee5..c29069c 100644
+--- a/rtp/rtp_test.go
++++ b/rtp/rtp_test.go
+@@ -435,3 +435,86 @@ func TestRtcpClassification(t *testing.T) {
+ 		t.Error("marker-set H.264 RTP must not classify as RTCP")
+ 	}
+ }
++
++// The loss fraction is per interval, in 256ths (RFC 3550 6.4.1): one of four
++// packets lost is 64, and the next interval with no loss reports 0 again.
++func TestRtcpReceptionStatsIntervalLossFraction(t *testing.T) {
++	var reception RtcpReceptionStats
++	for _, seq := range []uint16{10, 11, 13} {
++		reception.Observe(0x0badcafe, seq, uint32(seq)*3000, uint64(seq)*33, 90000)
++	}
++	reception.Observe(0x0badcafe, 13, 13*3000, 13*33, 90000) // a duplicate
++	first := reception.Report(1000)
++	if first == nil {
++		t.Fatal("missing reception report")
++	}
++	// Expected 10..13 = 4, received 4 counting the duplicate: no loss shows.
++	if first.FractionLost != 0 || first.CumulativeLost != 0 {
++		t.Fatalf("with a duplicate: fraction/cumulative = (%d, %d), want (0, 0)", first.FractionLost, first.CumulativeLost)
++	}
++	reception.Observe(0x0badcafe, 14, 14*3000, 14*33, 90000)
++	reception.Observe(0x0badcafe, 17, 17*3000, 17*33, 90000)
++	second := reception.Report(2000)
++	// Expected 14..17 = 4, received 2: half lost.
++	if second.FractionLost != 128 || second.CumulativeLost != 2 {
++		t.Fatalf("interval loss: fraction/cumulative = (%d, %d), want (128, 2)", second.FractionLost, second.CumulativeLost)
++	}
++	reception.Observe(0x0badcafe, 18, 18*3000, 18*33, 90000)
++	reception.Observe(0x0badcafe, 19, 19*3000, 19*33, 90000)
++	reception.Observe(0x0badcafe, 21, 21*3000, 21*33, 90000)
++	reception.Observe(0x0badcafe, 22, 22*3000, 22*33, 90000)
++	reception.Observe(0x0badcafe, 23, 23*3000, 23*33, 90000)
++	reception.Observe(0x0badcafe, 24, 24*3000, 24*33, 90000)
++	reception.Observe(0x0badcafe, 25, 25*3000, 25*33, 90000)
++	third := reception.Report(3000)
++	// Expected 18..25 = 8, received 7: one in eight is 32.
++	if third.FractionLost != 32 || third.CumulativeLost != 3 {
++		t.Fatalf("one in eight: fraction/cumulative = (%d, %d), want (32, 3)", third.FractionLost, third.CumulativeLost)
++	}
++}
++
++// Ported from whatsapp-rust's
++// reception_stats_report_the_bytes_received_and_the_rate_since_the_last_report
++// and native_video_sender_report_matches_profile_structure.
++func TestRtcpReceptionStatsReportBytesAndRate(t *testing.T) {
++	var reception RtcpReceptionStats
++	reception.CountPayload(0x1111, 500) // before the stream is known: not counted
++	reception.Observe(0x1111, 1, 0, 1000, 90000)
++	reception.CountPayload(0x1111, 800)
++	first := reception.Report(1000)
++	if first.BytesReceived != 800 || first.ReceiveRateBps != 0 {
++		t.Fatalf("first report bytes/rate = (%d, %d), want (800, 0): no interval yet", first.BytesReceived, first.ReceiveRateBps)
++	}
++	for seq := uint16(2); seq <= 101; seq++ {
++		reception.Observe(0x1111, seq, 0, 1000, 90000)
++		reception.CountPayload(0x1111, 1000)
++	}
++	reception.CountPayload(0x2222, 50000) // another stream's packets are not this one's
++	second := reception.Report(2000)
++	if second.BytesReceived != 100800 || second.ReceiveRateBps != 800000 {
++		t.Fatalf("second report bytes/rate = (%d, %d), want (100800, 800000)", second.BytesReceived, second.ReceiveRateBps)
++	}
++	// A new stream starts its counts afresh.
++	reception.Observe(0x3333, 7, 0, 2500, 90000)
++	reception.CountPayload(0x3333, 10)
++	third := reception.Report(3000)
++	if third.Ssrc != 0x3333 || third.BytesReceived != 10 || third.ReceiveRateBps != 0 {
++		t.Fatalf("new stream report = (%#x, %d, %d), want (0x3333, 10, 0)", third.Ssrc, third.BytesReceived, third.ReceiveRateBps)
++	}
++}
++
++func TestWhatsappSenderReportCarriesBytesAndRate(t *testing.T) {
++	cname := BuildWhatsappRtcpCname([12]byte{})
++	stats := RtcpSenderStats{PacketsSent: 3, OctetsSent: 400, RtpTimestamp: 90000}
++	report := &RtcpReceptionReport{Ssrc: 0x33334444, BytesReceived: 0x00081549, ReceiveRateBps: 758055}
++	compound := BuildSenderReportWithSdesAndReception(0x11112222, &stats, 1700000000000, &cname, report, true)
++	want := make([]byte, 24)
++	binary.BigEndian.PutUint32(want[0:4], 0x00081549)
++	binary.BigEndian.PutUint32(want[20:24], 758055)
++	if !bytes.Equal(compound[52:76], want) {
++		t.Fatalf("report extension = %x, want %x", compound[52:76], want)
++	}
++	if len(compound) != 108 {
++		t.Fatalf("compound length = %d, want 108", len(compound))
++	}
++}
+diff --git a/rtp_orientation_test.go b/rtp_orientation_test.go
+new file mode 100644
+index 0000000..36b04bc
+--- /dev/null
++++ b/rtp_orientation_test.go
+@@ -0,0 +1,36 @@
++package meowcaller
++
++import "testing"
++
++// After a mid-call upgrade the peer's <video state=1 device_orientation=1> comes
++// before its first video packet; the "video is live" state announced on that
++// packet must not turn the picture back to 0.
++func TestFirstFrameCarriesThePacketOrientation(t *testing.T) {
++	var o rtpOrientation
++	if _, changed, announce := o.packet(1); !changed || announce {
++		t.Fatalf("first packet: changed=%v announce=%v, want a change not yet announced", changed, announce)
++	}
++	if st := o.firstFrame(); st != (VideoState{Active: true, Raw: 1, Orientation: 1}) {
++		t.Fatalf("first frame state = %+v, want active with orientation 1", st)
++	}
++}
++
++func TestOrientationChangeIsAnnouncedOnceVideoIsLive(t *testing.T) {
++	var o rtpOrientation
++	o.packet(1)
++	o.firstFrame()
++	if _, changed, _ := o.packet(1); changed {
++		t.Fatal("the same bits again reported as a change")
++	}
++	st, changed, announce := o.packet(2)
++	if !changed || !announce || st != (VideoState{Active: true, Raw: 1, Orientation: 2}) {
++		t.Fatalf("turned phone: %+v changed=%v announce=%v", st, changed, announce)
++	}
++}
++
++func TestFirstFrameWithoutOrientationBitsIsUpright(t *testing.T) {
++	var o rtpOrientation
++	if st := o.firstFrame(); st.Orientation != 0 || !st.Active {
++		t.Fatalf("state = %+v", st)
++	}
++}
+diff --git a/signaling/stanza.go b/signaling/stanza.go
+index 6df74e4..9f3a002 100644
+--- a/signaling/stanza.go
++++ b/signaling/stanza.go
+@@ -331,6 +331,28 @@ func BuildTerminate(p *TerminateParams, log ...zerolog.Logger) waBinary.Node {
+ 	return callWrap(p.To, nil, waBinary.Node{Tag: "terminate", Attrs: attrs, Content: content})
+ }
+ 
++// <terminate reason> tokens a caller sends the callee devices that did not take
++// the call, and <reject reason> tokens that speak for one callee device only.
++const (
++	TerminateReasonAcceptedElsewhere = "accepted_elsewhere"
++	TerminateReasonRejectedElsewhere = "rejected_elsewhere"
++	RejectReasonBusy                 = "busy"
++	RejectReasonEnc                  = "enc"
++)
++
++// BuildDeviceTerminate builds the caller's per-device dismiss:
++// <call to=DEVICE id=ID><terminate call-id call-creator reason/></call>.
++// WhatsApp routes call signaling per device, so each device gets its own
++// stanza, with no <destination> block, and the wrapper needs an id.
++// Source: whatsapp-rust wacore/src/stanza/call.rs build_terminate and
++// src/handlers/call.rs accept_dismisses_other_callee_device.
++func BuildDeviceTerminate(callID string, device types.JID, id string, callCreator types.JID, reason string) waBinary.Node {
++	action := waBinary.Node{Tag: "terminate", Attrs: waBinary.Attrs{
++		"call-id": callID, "call-creator": callCreator, "reason": reason,
++	}}
++	return callWrap(device, &id, action)
++}
++
+ // BuildMuteV2 builds <mute_v2 call-id call-creator mute-state>.
+ func BuildMuteV2(callID string, to, callCreator types.JID, muteState string, log ...zerolog.Logger) waBinary.Node {
+ 	// Source of truth: https://github.com/oxidezap/whatsapp-rust/blob/41095d4e6ba4610e054e9ede3af1d5e88a83faee/wacore/src/voip/stanza.rs#L297-L305

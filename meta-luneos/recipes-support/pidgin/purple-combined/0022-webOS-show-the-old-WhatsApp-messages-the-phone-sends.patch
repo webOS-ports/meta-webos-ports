@@ -1,0 +1,1281 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Mon, 9 Nov 2026 14:15:54 +0100
+Subject: [PATCH] webOS: show the old WhatsApp messages the phone sends
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+* Show the old WhatsApp messages the phone sends
+
+The phone sends a newly linked device its recent messages (a
+HistorySync of type INITIAL_BOOTSTRAP, then RECENT and perhaps FULL),
+and sends more whenever the device asks for the messages before one it
+has (ON_DEMAND). Only the names in it were read, so a newly linked
+device showed no chat until someone wrote, and nothing older than that.
+
+Each old message now goes the way a live one does, with its own id,
+time, sender and direction, so the transport keeps it under its id and
+stores one it has already only once (its serviceMessageId dedup). It
+is marked as history: the glue gives it even with "discard old
+messages" on, and sets "webos-msg-history" on its conversation for
+just as long as libpurple hands it on, which the transport takes to
+store it as read and without a banner. Its picture, video, voice
+note, sticker or document is named in words ("📷 Photo" and the
+caption, "📄 Q3.pdf"), not downloaded: a sync can name thousands, the
+phone keeps old media only so long, and the download would hold up the
+main loop. A vote and a shared history are left out, and old messages
+stay out of the message cache, which holds the recent ones a reply or
+reaction looks up, and wait for no read receipt.
+
+How much: from a sync the phone sends by itself, each chat's newest
+messages up to the new account option "history-messages-per-chat"
+(default 50, 0 for none), none older than 90 days. Channels and status
+updates are left alone. What the device asked for comes as asked, up
+to 200 of a chat.
+
+The device asks when the transport emits "webos-im-load-history"
+(account, chat, the id of the oldest message it has, that message's
+time in seconds or milliseconds, "1" when we sent it): the plugin
+sends the phone a history request for the 50 messages before it,
+under the chat's phone number and, when the store knows it, its LID,
+as which of the two the phone keeps the chat under is not known here.
+
+glue/tests/display_message_test checks that the mark is there while
+the transport takes the message, received or ours, in a chat or a
+group, and gone at once after. history_sync_test checks which
+messages are given, how many, and how media is named.
+
+* Say when WhatsApp disappearing messages change, and what a view-once message is
+
+Turning disappearing messages on or off, or changing their timer, said
+nothing. In a chat it comes as a ProtocolMessage of type
+EPHEMERAL_SETTING with no text, which handle_message dropped; in a
+group as a group change (events.GroupInfo.Ephemeral), which
+group_event_notices did not tell. Both are now a notice line with the
+time of the change, in the WhatsApp app's words: "Ann turned on
+disappearing messages. New messages will disappear from this chat 7
+days after they're sent.", "You turned off disappearing messages."
+The messages themselves are kept here as any other: this device does
+not delete them when their time is up.
+
+A view-once photo, video or voice message is not given to a linked
+device. It gets an "unavailable" message of type view_once instead,
+which read "sent an undecryptable view_once message. Check the message
+on your main device.", under the chat's LID when WhatsApp addressed it
+so, which is not the conversation the contact's messages are in. It now reads "View once
+message. Open it on your phone.", in the chat as the conversation
+knows it, by phone number. Should a view-once message come with its
+media all the same (an older sender's ViewOnceMessage), the media is
+neither downloaded nor kept: the message says "📷 View once photo.
+Open it on your phone." (video, voice message).
+
+disappearing_test checks the words, which messages set the timer (a
+revoke, protocol type 0, does not), a group's change on and off, and
+which messages count as view-once.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ bridge.go                           |  10 ++
+ bridge.h                            |   1 +
+ constants.h                         |   1 +
+ disappearing.go                     | 131 ++++++++++++++
+ disappearing_test.go                | 139 +++++++++++++++
+ glue/display_message.c              |  19 ++
+ glue/login.c                        |  14 ++
+ glue/options.c                      |  10 ++
+ glue/process_message.c              |   7 +-
+ glue/tests/display_message_test.cpp |  44 ++++-
+ glue/tests/login_gate_stubs.c       |   1 +
+ go.mod                              |   2 +-
+ group_events.go                     |   9 +
+ handle_message.go                   |  53 +++++-
+ handler.go                          |  29 +---
+ history_sync.go                     | 258 ++++++++++++++++++++++++++++
+ history_sync_test.go                | 167 ++++++++++++++++++
+ 17 files changed, 868 insertions(+), 27 deletions(-)
+ create mode 100644 disappearing.go
+ create mode 100644 disappearing_test.go
+ create mode 100644 history_sync.go
+ create mode 100644 history_sync_test.go
+
+diff --git a/bridge.go b/bridge.go
+index 5d9a427..b6aeafa 100644
+--- a/bridge.go
++++ b/bridge.go
+@@ -498,6 +498,15 @@ func purple_disconnected(account *PurpleAccount) {
+  * Single participants and group chats.
+  */
+ func purple_display_text_message(account *PurpleAccount, remoteJid string, isGroup bool, isOutgoing bool, senderJid string, pushName *string, timestamp time.Time, text string, id *string, quotedText string, quotedFrom string, quotedId string) {
++	purple_display_text_message_from(account, remoteJid, isGroup, isOutgoing, senderJid, pushName, timestamp, text, id, quotedText, quotedFrom, quotedId, false)
++}
++
++/*
++ * webOS: as purple_display_text_message; history is a message from the history the phone sent
++ * (history_sync.go), which the glue gives even when "discard old messages" is on and marks for the
++ * transport to store as read and without a banner.
++ */
++func purple_display_text_message_from(account *PurpleAccount, remoteJid string, isGroup bool, isOutgoing bool, senderJid string, pushName *string, timestamp time.Time, text string, id *string, quotedText string, quotedFrom string, quotedId string, history bool) {
+ 	cmessage := C.struct_gowhatsapp_message{
+ 		account:    account,
+ 		msgtype:    C.char(C.gowhatsapp_message_type_text),
+@@ -507,6 +516,7 @@ func purple_display_text_message(account *PurpleAccount, remoteJid string, isGro
+ 		text:       C.CString(text),
+ 		isGroup:    bool_to_Cchar(isGroup),
+ 		isOutgoing: bool_to_Cchar(isOutgoing),
++		isHistory:  bool_to_Cchar(history),
+ 	}
+ 	if pushName != nil {
+ 		cmessage.name = C.CString(*pushName)
+diff --git a/bridge.h b/bridge.h
+index 27a7e84..1c11d74 100644
+--- a/bridge.h
++++ b/bridge.h
+@@ -80,6 +80,7 @@ struct gowhatsapp_message {
+     char subtype; /// loglevel, error severity, attachment type or online-state
+     char isGroup; /// this is a group chat message
+     char isOutgoing; /// this is an outgoing message (echo sent from this instance, indicating success on sending – this is *not* ifFromMe)
++    char isHistory; /// webOS: an old message from the history the phone sent (text messages only)
+     // everything related to attachments:
+     char *filename;
+     char *extension; /// including the dot
+diff --git a/constants.h b/constants.h
+index bf60767..4d8ddb9 100644
+--- a/constants.h
++++ b/constants.h
+@@ -31,6 +31,7 @@ CHARCONSTANT(GOWHATSAPP_BRIDGE_COMPATIBILITY_OPTION, "bridge-compatibility");
+ CHARCONSTANT(GOWHATSAPP_DISPLAY_MESSAGE_ID_OPTION, "display-message-id");
+ CHARCONSTANT(GOWHATSAPP_ECHO_OPTION, "echo-sent-messages");
+ CHARCONSTANT(GOWHATSAPP_MESSAGE_CACHE_SIZE_OPTION, "message-cache-size");
++CHARCONSTANT(GOWHATSAPP_HISTORY_MESSAGES_OPTION, "history-messages-per-chat");
+ CHARCONSTANT(GOWHATSAPP_IGNORE_STATUS_BROADCAST_OPTION, "ignore-status-broadcast");
+ CHARCONSTANT(GOWHATSAPP_IGNORE_NEWSLETTERS_OPTION, "ignore-newsletters");
+ CHARCONSTANT(GOWHATSAPP_DISCARD_OLD_MESSAGES_OPTION, "discard-old-messages");
+diff --git a/disappearing.go b/disappearing.go
+new file mode 100644
+index 0000000..03d76d0
+--- /dev/null
++++ b/disappearing.go
+@@ -0,0 +1,131 @@
++package main
++
++import (
++	"fmt"
++
++	"go.mau.fi/whatsmeow/proto/waE2E"
++	"go.mau.fi/whatsmeow/types"
++	"go.mau.fi/whatsmeow/types/events"
++)
++
++/*
++ * webOS: disappearing messages and view-once media.
++ *
++ * Turning disappearing messages on or off, or changing their timer, said nothing: in a chat it
++ * comes as a ProtocolMessage (EPHEMERAL_SETTING) with no text, which handle_message dropped, and in a
++ * group as a group change (events.GroupInfo.Ephemeral) group_event_notices did not tell. It is now
++ * a notice line, in the WhatsApp app's words: "Ann turned on disappearing messages. New messages
++ * will disappear from this chat 7 days after they're sent." / "You turned off disappearing
++ * messages." The messages themselves are kept here as any other: this device does not delete them
++ * when their time is up.
++ *
++ * A view-once photo, video or voice message is not given to a linked device: the phone keeps it,
++ * and this device gets an "unavailable" message of type view_once (events.UndecryptableMessage),
++ * which used to read "sent an undecryptable view_once message". Should one come with its media all
++ * the same (an older sender's ViewOnceMessage, or our own phone's copy), it is not downloaded and
++ * kept either. Both are now said as what they are, under the message's id: "📷 View once photo.
++ * Open it on your phone."
++ */
++
++/*
++ * The line for a disappearing-messages timer set to seconds (0: off), by who (people.subject:
++ * "You" for us); without a who, "Disappearing messages were turned on ...".
++ */
++func disappearing_text(seconds uint32, who types.JID, hasWho bool, people groupPeople) string {
++	if seconds == 0 {
++		if !hasWho {
++			return "Disappearing messages were turned off."
++		}
++		return people.subject(who) + " turned off disappearing messages."
++	}
++	rest := fmt.Sprintf("New messages will disappear from this chat %s after they're sent.", timer_duration(seconds))
++	if !hasWho {
++		return "Disappearing messages were turned on. " + rest
++	}
++	return people.subject(who) + " turned on disappearing messages. " + rest
++}
++
++// "24 hours", "7 days", "90 days", "1 hour", "5 minutes", "30 seconds": the largest whole unit.
++func timer_duration(seconds uint32) string {
++	units := []struct {
++		size uint32
++		name string
++	}{{86400, "day"}, {3600, "hour"}, {60, "minute"}, {1, "second"}}
++	for _, unit := range units {
++		if seconds%unit.size == 0 {
++			n := seconds / unit.size
++			if unit.size == 86400 && n == 1 {
++				return "24 hours" // as WhatsApp says its shortest timer
++			}
++			if n == 1 {
++				return "1 " + unit.name
++			}
++			return fmt.Sprintf("%d %ss", n, unit.name)
++		}
++	}
++	return fmt.Sprintf("%d seconds", seconds) // not reached: every number is whole seconds
++}
++
++// The new timer a ProtocolMessage sets, and whether it is such a message.
++func disappearing_setting(message *waE2E.Message) (uint32, bool) {
++	pm := message.GetProtocolMessage()
++	if pm == nil || pm.Type == nil || pm.GetType() != waE2E.ProtocolMessage_EPHEMERAL_SETTING {
++		return 0, false
++	}
++	return pm.GetEphemeralExpiration(), true
++}
++
++/*
++ * What a view-once message is said as: "📷 View once photo. Open it on your phone." (video, voice
++ * message; "View once message" when what it is is not known). "" when message is not view-once.
++ * evt may be nil.
++ */
++func view_once_text(message *waE2E.Message, evt *events.Message) string {
++	kind := ""
++	switch {
++	case message.GetImageMessage() != nil:
++		if message.GetImageMessage().GetViewOnce() {
++			kind = "📷 View once photo"
++		}
++	case message.GetVideoMessage() != nil:
++		if message.GetVideoMessage().GetViewOnce() {
++			kind = "🎥 View once video"
++		}
++	case message.GetAudioMessage() != nil:
++		if message.GetAudioMessage().GetViewOnce() {
++			kind = "🎤 View once voice message"
++		}
++	}
++	if kind == "" && evt != nil && evt.IsViewOnce {
++		switch {
++		case message.GetImageMessage() != nil:
++			kind = "📷 View once photo"
++		case message.GetVideoMessage() != nil:
++			kind = "🎥 View once video"
++		case message.GetAudioMessage() != nil:
++			kind = "🎤 View once voice message"
++		default:
++			kind = "View once message"
++		}
++	}
++	if kind == "" {
++		return ""
++	}
++	return kind + ". Open it on your phone."
++}
++
++// What an unavailable message (events.UndecryptableMessage) is said as.
++func undecryptable_text(evt *events.UndecryptableMessage) string {
++	if evt.IsUnavailable && evt.UnavailableType == events.UnavailableTypeViewOnce {
++		return "View once message. Open it on your phone."
++	}
++	// Otherwise as upstream says it.
++	if evt.UnavailableType == "sender_drop" {
++		return "sent a message which was not available when requested. Wake up your main device, then the message will be displayed here. Probably."
++	}
++	unavailable_type := ""
++	if evt.UnavailableType != "" {
++		unavailable_type = fmt.Sprintf(" %s", evt.UnavailableType)
++	}
++	return fmt.Sprintf("sent an undecryptable%s message. The message might arrive here later.", unavailable_type)
++}
+diff --git a/disappearing_test.go b/disappearing_test.go
+new file mode 100644
+index 0000000..915b348
+--- /dev/null
++++ b/disappearing_test.go
+@@ -0,0 +1,139 @@
++package main
++
++import (
++	"testing"
++
++	"go.mau.fi/whatsmeow/proto/waE2E"
++	"go.mau.fi/whatsmeow/types"
++	"go.mau.fi/whatsmeow/types/events"
++	"google.golang.org/protobuf/proto"
++)
++
++func TestTimerDuration(t *testing.T) {
++	cases := map[uint32]string{
++		86400:   "24 hours",
++		604800:  "7 days",
++		7776000: "90 days",
++		3600:    "1 hour",
++		7200:    "2 hours",
++		300:     "5 minutes",
++		60:      "1 minute",
++		30:      "30 seconds",
++		1:       "1 second",
++		90061:   "90061 seconds",
++	}
++	for seconds, want := range cases {
++		if got := timer_duration(seconds); got != want {
++			t.Errorf("%d: got %q, want %q", seconds, got, want)
++		}
++	}
++}
++
++// In WhatsApp's words, by who turned it on or off: us, someone, or nobody named.
++func TestDisappearingText(t *testing.T) {
++	people := testGroupPeople()
++	cases := []struct {
++		seconds uint32
++		who     types.JID
++		hasWho  bool
++		want    string
++	}{
++		{604800, gAnn, true, "Ann turned on disappearing messages. New messages will disappear from this chat 7 days after they're sent."},
++		{86400, gMe, true, "You turned on disappearing messages. New messages will disappear from this chat 24 hours after they're sent."},
++		{86400, gMeLid, true, "You turned on disappearing messages. New messages will disappear from this chat 24 hours after they're sent."},
++		{0, gBen, true, "Ben turned off disappearing messages."},
++		{0, gMe, true, "You turned off disappearing messages."},
++		{7776000, types.EmptyJID, false, "Disappearing messages were turned on. New messages will disappear from this chat 90 days after they're sent."},
++		{0, types.EmptyJID, false, "Disappearing messages were turned off."},
++	}
++	for _, c := range cases {
++		if got := disappearing_text(c.seconds, c.who, c.hasWho, people); got != c.want {
++			t.Errorf("got %q, want %q", got, c.want)
++		}
++	}
++}
++
++// Only a ProtocolMessage of type EPHEMERAL_SETTING sets the timer; a revoke (type 0, the zero
++// value) and a message without a protocol part do not.
++func TestDisappearingSetting(t *testing.T) {
++	set := &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{
++		Type: waE2E.ProtocolMessage_EPHEMERAL_SETTING.Enum(), EphemeralExpiration: proto.Uint32(604800)}}
++	if seconds, ok := disappearing_setting(set); !ok || seconds != 604800 {
++		t.Errorf("setting: got %d %v", seconds, ok)
++	}
++	off := &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{Type: waE2E.ProtocolMessage_EPHEMERAL_SETTING.Enum()}}
++	if seconds, ok := disappearing_setting(off); !ok || seconds != 0 {
++		t.Errorf("off: got %d %v", seconds, ok)
++	}
++	for _, m := range []*waE2E.Message{
++		{ProtocolMessage: &waE2E.ProtocolMessage{Type: waE2E.ProtocolMessage_REVOKE.Enum()}},
++		{ProtocolMessage: &waE2E.ProtocolMessage{EphemeralExpiration: proto.Uint32(86400)}},
++		{Conversation: proto.String("hi")},
++	} {
++		if _, ok := disappearing_setting(m); ok {
++			t.Errorf("%v taken as a timer setting", m)
++		}
++	}
++}
++
++// A group's timer change is told among its news.
++func TestGroupDisappearingNotices(t *testing.T) {
++	notices(t, events.GroupInfo{Sender: &gAnn, Ephemeral: &types.GroupEphemeral{IsEphemeral: true, DisappearingTimer: 86400}},
++		"Ann turned on disappearing messages. New messages will disappear from this chat 24 hours after they're sent.")
++	notices(t, events.GroupInfo{Sender: &gMe, Ephemeral: &types.GroupEphemeral{IsEphemeral: false}},
++		"You turned off disappearing messages.")
++	notices(t, events.GroupInfo{Sender: &gBen, Ephemeral: &types.GroupEphemeral{IsEphemeral: false, DisappearingTimer: 86400}},
++		"Ben turned off disappearing messages.")
++	notices(t, events.GroupInfo{Ephemeral: &types.GroupEphemeral{IsEphemeral: true, DisappearingTimer: 0}},
++		"Disappearing messages were turned off.")
++	notices(t, events.GroupInfo{Ephemeral: &types.GroupEphemeral{IsEphemeral: true, DisappearingTimer: 604800}},
++		"Disappearing messages were turned on. New messages will disappear from this chat 7 days after they're sent.")
++}
++
++// A view-once photo, video or voice message is said as one, whether it is marked view-once
++// itself or came out of a ViewOnceMessage; anything else is not.
++func TestViewOnceText(t *testing.T) {
++	cases := []struct {
++		message  *waE2E.Message
++		viewOnce bool // came out of a ViewOnceMessage
++		want     string
++	}{
++		{&waE2E.Message{ImageMessage: &waE2E.ImageMessage{ViewOnce: proto.Bool(true)}}, false, "📷 View once photo. Open it on your phone."},
++		{&waE2E.Message{VideoMessage: &waE2E.VideoMessage{ViewOnce: proto.Bool(true)}}, false, "🎥 View once video. Open it on your phone."},
++		{&waE2E.Message{AudioMessage: &waE2E.AudioMessage{ViewOnce: proto.Bool(true)}}, false, "🎤 View once voice message. Open it on your phone."},
++		{&waE2E.Message{ImageMessage: &waE2E.ImageMessage{}}, true, "📷 View once photo. Open it on your phone."},
++		{&waE2E.Message{VideoMessage: &waE2E.VideoMessage{}}, true, "🎥 View once video. Open it on your phone."},
++		{&waE2E.Message{AudioMessage: &waE2E.AudioMessage{}}, true, "🎤 View once voice message. Open it on your phone."},
++		{&waE2E.Message{Conversation: proto.String("hi")}, true, "View once message. Open it on your phone."},
++		{&waE2E.Message{ImageMessage: &waE2E.ImageMessage{}}, false, ""},
++		{&waE2E.Message{Conversation: proto.String("hi")}, false, ""},
++	}
++	for i, c := range cases {
++		if got := view_once_text(c.message, &events.Message{IsViewOnce: c.viewOnce}); got != c.want {
++			t.Errorf("%d: got %q, want %q", i, got, c.want)
++		}
++	}
++	if got := view_once_text(&waE2E.Message{ImageMessage: &waE2E.ImageMessage{}}, nil); got != "" {
++		t.Errorf("without an event: got %q", got)
++	}
++}
++
++// The view-once stand-in a linked device gets reads as what it is; other unavailable messages as
++// before, without an empty type.
++func TestUndecryptableText(t *testing.T) {
++	cases := []struct {
++		evt  events.UndecryptableMessage
++		want string
++	}{
++		{events.UndecryptableMessage{IsUnavailable: true, UnavailableType: events.UnavailableTypeViewOnce}, "View once message. Open it on your phone."},
++		{events.UndecryptableMessage{IsUnavailable: true}, "sent an undecryptable message. The message might arrive here later."},
++		{events.UndecryptableMessage{}, "sent an undecryptable message. The message might arrive here later."},
++		{events.UndecryptableMessage{UnavailableType: "hosted_unavailable_fanout"}, "sent an undecryptable hosted_unavailable_fanout message. The message might arrive here later."},
++		{events.UndecryptableMessage{UnavailableType: "sender_drop"}, "sent a message which was not available when requested. Wake up your main device, then the message will be displayed here. Probably."},
++	}
++	for _, c := range cases {
++		if got := undecryptable_text(&c.evt); got != c.want {
++			t.Errorf("got %q, want %q", got, c.want)
++		}
++	}
++}
+diff --git a/glue/display_message.c b/glue/display_message.c
+index b6d6403..d9a878d 100644
+--- a/glue/display_message.c
++++ b/glue/display_message.c
+@@ -17,6 +17,19 @@ static void gowhatsapp_stash_webos_quote(PurpleConversation *conv, const gchar *
+     }
+ }
+ 
++/* webOS: a message from the history the phone sent (flags has PURPLE_MESSAGE_DELAYED) is marked on
++ * its conversation for just as long as libpurple hands it on: "webos-msg-history" is set right before
++ * serv_got_* and cleared right after it, so it cannot stick to a later message. The transport
++ * (imlibpurpleservice incoming_message_cb) reads it and stores the message as read and without a
++ * banner. A pointer that owns nothing: there is nothing to free. */
++#define WEBOS_HISTORY_KEY "webos-msg-history"
++
++static void gowhatsapp_mark_webos_history(PurpleConversation *conv, PurpleMessageFlags flags, gboolean on) {
++    if (conv != NULL && (flags & PURPLE_MESSAGE_DELAYED)) {
++        purple_conversation_set_data(conv, WEBOS_HISTORY_KEY, on ? GINT_TO_POINTER(1) : NULL);
++    }
++}
++
+ void gowhatsapp_display_text_message(
+     PurpleAccount *account,
+     const gchar * senderJid,
+@@ -89,7 +102,9 @@ void gowhatsapp_display_text_message(
+         if (stash) {
+             gowhatsapp_stash_webos_quote(gconv, quotedText, quotedFrom, quotedId);
+         }
++        gowhatsapp_mark_webos_history(gconv, flags, TRUE);
+         purple_serv_got_chat_in(connection, g_str_hash(remoteJid), senderJid, flags, text_with_id, timestamp);
++        gowhatsapp_mark_webos_history(gconv, flags, FALSE);
+     } else {
+         if (flags & PURPLE_MESSAGE_SEND) {
+             // display message sent from own account (other device as well as local echo)
+@@ -106,7 +121,9 @@ void gowhatsapp_display_text_message(
+                 purple_conversation_set_data(conv, "webos-msg-id", g_strdup(messageId));
+             }
+             gowhatsapp_stash_webos_quote(conv, quotedText, quotedFrom, quotedId);
++            gowhatsapp_mark_webos_history(conv, flags, TRUE);
+             purple_conv_im_write(purple_conversation_get_im_data(conv), remoteJid, text_with_id, flags, timestamp);
++            gowhatsapp_mark_webos_history(conv, flags, FALSE);
+         } else {
+             if (purple_account_get_bool(account, GOWHATSAPP_UPDATE_BUDDY_ON_MESSAGE_OPTION, TRUE)) {
+                 gowhatsapp_ensure_buddy_in_blist(account, remoteJid, name);
+@@ -119,7 +136,9 @@ void gowhatsapp_display_text_message(
+                 purple_conversation_set_data(conv, "webos-msg-id", g_strdup(messageId));
+             }
+             gowhatsapp_stash_webos_quote(conv, quotedText, quotedFrom, quotedId);
++            gowhatsapp_mark_webos_history(conv, flags, TRUE);
+             purple_serv_got_im(connection, remoteJid, text_with_id, flags, timestamp);
++            gowhatsapp_mark_webos_history(conv, flags, FALSE);
+         }
+     }
+     
+diff --git a/glue/login.c b/glue/login.c
+index 057536f..963233b 100644
+--- a/glue/login.c
++++ b/glue/login.c
+@@ -162,6 +162,19 @@ static gboolean webos_group_rename_cb(PurpleAccount *account, const char *chat,
+     return gowhatsapp_go_group_rename(account, (char *)chat, (char *)name) != 0;
+ }
+ 
++// webOS: the Messaging app asks for the messages of a chat before the oldest it has (imlibpurpleservice
++// "webos-im-load-history": chat, that message's id, its time in seconds or milliseconds since 1970,
++// "1" when we sent it). FALSE for another prpl's account or one not connected here; the phone's
++// answer comes as old messages (history_sync.go).
++static gboolean webos_load_history_cb(PurpleAccount *account, const char *chat, const char *id,
++                                      const char *timestamp, const char *fromMe, void *data) {
++    (void)data;
++    if (!webos_is_whatsapp(account) || !chat || !*chat || !id || !*id || !timestamp || !fromMe) {
++        return FALSE;
++    }
++    return gowhatsapp_go_request_history(account, (char *)chat, (char *)id, (char *)timestamp, (char *)fromMe) != 0;
++}
++
+ static gboolean webos_group_leave_cb(PurpleAccount *account, const char *chat, void *data) {
+     (void)data;
+     if (!chat) {
+@@ -205,6 +218,7 @@ void webos_connect_send_reaction_once(void)
+     purple_signal_connect(conversations, "webos-im-group-remove", purple_get_core(), PURPLE_CALLBACK(webos_group_remove_cb), NULL);
+     purple_signal_connect(conversations, "webos-im-group-rename", purple_get_core(), PURPLE_CALLBACK(webos_group_rename_cb), NULL);
+     purple_signal_connect(conversations, "webos-im-group-leave", purple_get_core(), PURPLE_CALLBACK(webos_group_leave_cb), NULL);
++    purple_signal_connect(conversations, "webos-im-load-history", purple_get_core(), PURPLE_CALLBACK(webos_load_history_cb), NULL);
+ }
+ 
+ void
+diff --git a/glue/options.c b/glue/options.c
+index eb5c352..79b4fd6 100644
+--- a/glue/options.c
++++ b/glue/options.c
+@@ -174,6 +174,16 @@ gowhatsapp_add_account_options(GList *account_options)
+         TRUE
+         );
+     account_options = g_list_append(account_options, option);
++
++    // webOS: how many of each chat's newest messages to show from the history the main device
++    // sends once after linking (history_sync.go); 0 for none. Older messages asked for from the
++    // Messaging app come as asked.
++    option = purple_account_option_int_new( // MEMCHECK: account_options takes ownership
++        "Old messages per chat to show after linking",
++        GOWHATSAPP_HISTORY_MESSAGES_OPTION,
++        50
++        );
++    account_options = g_list_append(account_options, option);
+     
+     option = purple_account_option_bool_new( // MEMCHECK: account_options takes ownership
+         "Update contacts every time after login",
+diff --git a/glue/process_message.c b/glue/process_message.c
+index 19ce7ad..9120c6c 100644
+--- a/glue/process_message.c
++++ b/glue/process_message.c
+@@ -120,7 +120,12 @@ gowhatsapp_process_message(gowhatsapp_message_t *gwamsg)
+             gowhatsapp_close_qrcode(gwamsg->account);
+             break;
+         case gowhatsapp_message_type_text:
+-            if (!gowhatsapp_message_is_old(gwamsg)) {
++            // webOS: a message from the history the phone sent is old by its nature, and is given
++            // even when old messages are discarded; PURPLE_MESSAGE_DELAYED marks it as history for
++            // the transport (gowhatsapp_display_text_message).
++            if (gwamsg->isHistory) {
++                gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid, gwamsg->text, gwamsg->timestamp, gwamsg->isGroup, gwamsg->isOutgoing, gwamsg->name, PURPLE_MESSAGE_DELAYED, gwamsg->messageId, gwamsg->quotedText, gwamsg->quotedFrom, gwamsg->quotedId);
++            } else if (!gowhatsapp_message_is_old(gwamsg)) {
+                 gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid, gwamsg->text, gwamsg->timestamp, gwamsg->isGroup, gwamsg->isOutgoing, gwamsg->name, 0, gwamsg->messageId, gwamsg->quotedText, gwamsg->quotedFrom, gwamsg->quotedId);
+             }
+             break;
+diff --git a/glue/tests/display_message_test.cpp b/glue/tests/display_message_test.cpp
+index 7d24bd0..5c623e5 100644
+--- a/glue/tests/display_message_test.cpp
++++ b/glue/tests/display_message_test.cpp
+@@ -31,6 +31,7 @@ PurpleConnection *const connection = reinterpret_cast<PurpleConnection *>(&accou
+ struct Conv {
+ 	PurpleConversation conv;
+ 	std::map<std::string, char *> data;
++	gpointer history = nullptr; // "webos-msg-history": a marker that owns nothing, so never freed
+ };
+ std::map<std::string, Conv *> convs; // by "chat:"/"im:" and name
+ 
+@@ -40,6 +41,7 @@ struct Written {
+ 	std::string who;
+ 	PurpleMessageFlags flags; // as the transport sees them
+ 	std::string id, quotedId, quotedText, quotedFrom;
++	bool history; // "webos-msg-history" was on the conversation as it was handed on
+ };
+ std::vector<Written> written;
+ 
+@@ -63,7 +65,7 @@ std::string take(Conv *c, const char *key) {
+ // The transport (incoming_message_cb): a local echo (SEND without REMOTE_SEND) is ignored and its
+ // stash left alone; anything else is stored with the stash, which is then cleared.
+ void transport(Conv *c, bool chat, const char *who, PurpleMessageFlags flags) {
+-	Written w{chat, who ? who : "", flags, "", "", "", ""};
++	Written w{chat, who ? who : "", flags, "", "", "", "", c->history != nullptr};
+ 	if ((flags & PURPLE_MESSAGE_RECV) || (flags & PURPLE_MESSAGE_REMOTE_SEND)) {
+ 		w.id = take(c, "webos-msg-id");
+ 		w.quotedId = take(c, "webos-quoted-id");
+@@ -106,6 +108,14 @@ void show(const char *sender, const char *chat, bool isGroup, bool isOutgoing, c
+ 	                                (PurpleMessageFlags)0, id, quotedText, quotedFrom, quotedId);
+ }
+ 
++// A message from the history the phone sent, as process_message.c gives it.
++void show_history(const char *sender, const char *chat, bool isGroup, const char *id) {
++	gowhatsapp_display_text_message(&account, sender, chat, "old text", 1600000000, isGroup, false, "Name",
++	                                PURPLE_MESSAGE_DELAYED, id, nullptr, nullptr, nullptr);
++}
++
++bool history_marked(bool chat, const char *name) { return find_or_new(chat, name)->history != nullptr; }
++
+ } // namespace
+ 
+ extern "C" {
+@@ -116,6 +126,10 @@ gboolean purple_account_get_bool(const PurpleAccount *, const char *, gboolean d
+ gboolean purple_strequal(const gchar *left, const gchar *right) { return g_strcmp0(left, right) == 0; }
+ void purple_conversation_set_data(PurpleConversation *conv, const char *key, gpointer data) {
+ 	Conv *c = conv_of(conv);
++	if (g_strcmp0(key, "webos-msg-history") == 0) {
++		c->history = data;
++		return;
++	}
+ 	auto it = c->data.find(key);
+ 	if (it != c->data.end())
+ 		g_free(it->second); // libpurple's table frees nothing; freeing here keeps ASan's leak report about the test, not the fake
+@@ -211,3 +225,31 @@ TEST(DisplayMessage, OneToOneIdsAsBefore) {
+ 	EXPECT_EQ(stashed(false, kAnna, "webos-msg-id"), "");
+ 	reset();
+ }
++
++// A message from the phone's history is marked as such on its conversation while the transport
++// takes it, received or ours, in a 1:1 chat or a group, and the mark is gone at once after: the
++// next message, a live one, is not taken as history.
++TEST(DisplayMessage, HistoryIsMarkedOnlyWhileHandedOn) {
++	reset();
++	show_history(kAnna, kAnna, false, "OLDANNA");
++	EXPECT_FALSE(history_marked(false, kAnna));
++	show(kAnna, kAnna, false, false, "NEWANNA");
++	show_history(kUs, kAnna, false, "OLDOURS");
++	show_history(kAnna, kGroup, true, "OLDGROUP");
++	EXPECT_FALSE(history_marked(true, kGroup));
++	show(kAnna, kGroup, true, false, "NEWGROUP");
++	ASSERT_EQ(written.size(), 5u);
++	EXPECT_TRUE(written[0].history);
++	EXPECT_TRUE(written[0].flags & PURPLE_MESSAGE_RECV);
++	EXPECT_EQ(written[0].id, "OLDANNA");
++	EXPECT_FALSE(written[1].history);
++	EXPECT_EQ(written[1].id, "NEWANNA");
++	EXPECT_TRUE(written[2].history);
++	EXPECT_TRUE(written[2].flags & PURPLE_MESSAGE_REMOTE_SEND);
++	EXPECT_EQ(written[2].id, "OLDOURS");
++	EXPECT_TRUE(written[3].history);
++	EXPECT_EQ(written[3].id, "OLDGROUP");
++	EXPECT_FALSE(written[4].history);
++	EXPECT_FALSE(history_marked(false, kAnna));
++	reset();
++}
+diff --git a/glue/tests/login_gate_stubs.c b/glue/tests/login_gate_stubs.c
+index 54bd820..e87dd92 100644
+--- a/glue/tests/login_gate_stubs.c
++++ b/glue/tests/login_gate_stubs.c
+@@ -5,6 +5,7 @@
+ STUB(gometa_go_send_reaction)
+ STUB(gowhatsapp_go_close)
+ STUB(gowhatsapp_go_login)
++STUB(gowhatsapp_go_request_history)
+ STUB(gowhatsapp_go_send_poll_vote)
+ STUB(gowhatsapp_go_send_reaction)
+ STUB(gowhatsapp_receipts_init)
+diff --git a/go.mod b/go.mod
+index 22a7139..6ccdc3a 100644
+--- a/go.mod
++++ b/go.mod
+@@ -1,6 +1,6 @@
+ module github.com/hoehermann/purple-gowhatsapp
+ 
+-go 1.27.2
++go 1.26.0
+ 
+ require (
+ 	github.com/alfg/mp4 v0.0.0-20210728035756-55ea58c08aeb
+diff --git a/group_events.go b/group_events.go
+index 125b083..171ae1f 100644
+--- a/group_events.go
++++ b/group_events.go
+@@ -205,6 +205,15 @@ func group_event_notices(evt *events.GroupInfo, people groupPeople) []string {
+ 	if len(evt.Demote) > 0 {
+ 		lines = append(lines, fmt.Sprintf("%s %s no longer %s", people.list(evt.Demote), people.be(evt.Demote), admins(len(evt.Demote))))
+ 	}
++
++	// webOS: disappearing messages turned on, off or changed (disappearing.go)
++	if evt.Ephemeral != nil {
++		seconds := evt.Ephemeral.DisappearingTimer
++		if !evt.Ephemeral.IsEphemeral {
++			seconds = 0
++		}
++		lines = append(lines, disappearing_text(seconds, sender, hasSender, people))
++	}
+ 	return lines
+ }
+ 
+diff --git a/handle_message.go b/handle_message.go
+index e020aaf..c3c62f3 100644
+--- a/handle_message.go
++++ b/handle_message.go
+@@ -456,6 +456,18 @@ func escape_text(text string) string {
+ }
+ 
+ func (handler *Handler) handle_message(message *waE2E.Message, info types.MessageInfo, evt *events.Message) {
++	handler.handle_message_from(message, info, evt, false)
++}
++
++/*
++ * webOS: a message as it came (history false), or from the history the phone sent (history true,
++ * history_sync.go). An old one is given as a live one is, marked as history, except: its media is
++ * named rather than downloaded (history_media_text), a vote or a shared history is left out, as is
++ * a disappearing-timer line (one without an id, which would come again with each sync), and it
++ * neither goes into the message cache, which holds the recent messages a reply or reaction looks
++ * up, nor waits for a read receipt.
++ */
++func (handler *Handler) handle_message_from(message *waE2E.Message, info types.MessageInfo, evt *events.Message, history bool) {
+ 	//handler.log.Infof("message: %#v", message)
+ 	if info.MessageSource.Chat.Server == types.NewsletterServer {
+ 		// Channel (newsletter) posts would show up as chats with a raw JID.
+@@ -520,8 +532,12 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 		}
+ 	}
+ 	// webOS: recent messages shared with new group members: a notice line, and the bundle dropped
+-	// (history_notice.go)
+-	if handler.handle_history_share(message, info) {
++	// (history_notice.go). Not again from history.
++	if history {
++		if message.GetMessageHistoryNotice() != nil || message.GetMessageHistoryBundle() != nil {
++			return
++		}
++	} else if handler.handle_history_share(message, info) {
+ 		return
+ 	}
+ 	if message.SenderKeyDistributionMessage != nil {
+@@ -561,6 +577,14 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 					purple_handle_message_delete(handler.account, targetId)
+ 				}
+ 				return
++			} else if seconds, ok := disappearing_setting(message); ok {
++				// webOS: disappearing messages turned on, off or changed in a chat (disappearing.go).
++				// A group's comes as a group change (group_event_notices) and is told there.
++				if !history && !info.MessageSource.IsGroup {
++					line := disappearing_text(seconds, info.MessageSource.Sender, true, handler.group_people())
++					purple_display_system_message_at(handler.account, info.MessageSource.Chat.ToNonAD().String(), false, line, info.Timestamp)
++				}
++				return
+ 			}
+ 		}
+ 	}
+@@ -686,6 +710,10 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 	}
+ 	{
+ 		pum := message.GetPollUpdateMessage()
++		if pum != nil && history {
++			// an old vote: the poll, if it is among the history, shows the votes it has
++			return
++		}
+ 		if pum != nil {
+ 			// webOS: a vote is counted on its poll, not told as a message of its own. The voter is one
+ 			// identity, the same for a vote from our phone as for one from this device, and is also who
+@@ -708,6 +736,20 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 			}
+ 		}
+ 	}
++	// webOS: a view-once photo, video or voice message is said as such and never downloaded
++	// (disappearing.go)
++	viewOnce := view_once_text(message, evt)
++	if viewOnce != "" {
++		text = viewOnce
++	} else if history && !isEdit {
++		// webOS: an old message's media is named, not downloaded (history_sync.go)
++		if media := history_media_text(message); media != "" {
++			if text != "" {
++				text += "\n"
++			}
++			text += media
++		}
++	}
+ 	if text != "" {
+ 		if isEdit && editTargetId != "" {
+ 			// webOS edit-in-place: update the ORIGINAL bubble's text (found by editTargetId ==
+@@ -720,12 +762,15 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 			}
+ 			text := mention_marks_to_html(escape_text(text))
+ 			// note: info.PushName always denotes the sender (not the chat)
+-			purple_display_text_message(handler.account, info.MessageSource.Chat.ToNonAD().String(), info.MessageSource.IsGroup, false, senderJid, &info.PushName, info.Timestamp, text, &info.ID, quotedText, quotedFrom, quotedId)
++			purple_display_text_message_from(handler.account, info.MessageSource.Chat.ToNonAD().String(), info.MessageSource.IsGroup, false, senderJid, &info.PushName, info.Timestamp, text, &info.ID, quotedText, quotedFrom, quotedId, history)
+ 		}
+ 	}
+-	if !isEdit { // edited messages contain the changed texts, but attachments are absent since they cannot be changed
++	if !isEdit && !history && viewOnce == "" { // edited messages contain the changed texts, but attachments are absent since they cannot be changed
+ 		handler.handle_attachment(message, info.ID, info.MessageSource, info.Timestamp)
+ 	}
++	if history {
++		return
++	}
+ 	// evt.Info still holds the chat and sender as received, before the conversions above
+ 	handler.add_to_cache(message, info.ID, info.MessageSource.Chat, info.MessageSource.Sender, evt.Info.MessageSource, info.Timestamp)
+ 	// webOS: keep what a read receipt needs for each message received, under the chat's name as
+diff --git a/handler.go b/handler.go
+index 3020be3..ecca21e 100644
+--- a/handler.go
++++ b/handler.go
+@@ -117,17 +117,9 @@ func (handler *Handler) eventHandler(rawEvt interface{}) {
+ 	case *events.Picture:
+ 		handler.request_profile_picture(evt.JID, "", evt.PictureID)
+ 	case *events.HistorySync:
+-		// this happens after initial logon via QR code (after AppStateSyncComplete)
+-		if purple_get_bool(handler.account, C.GOWHATSAPP_FETCH_CONTACTS_AFTER_LINKING_OPTION, true) {
+-			pushnames := evt.Data.GetPushnames()
+-			for _, p := range pushnames {
+-				if p.ID != nil && p.Pushname != nil {
+-					handler.log.Infof("HistorySync Pushname: %#v", p)
+-					purple_update_name(handler.account, *p.ID, *p.Pushname)
+-				}
+-			}
+-		}
+-		// TODO: handle historical conversations obtained by evt.Data.GetConversations() utilising client.ParseWebMessage
++		// this happens after initial logon via QR code (after AppStateSyncComplete), and as the
++		// answer to request_history. webOS: names and old messages (history_sync.go)
++		handler.handle_history_sync(evt)
+ 	case *events.AppState:
+ 		log.Debugf("App state event: %+v / %+v", evt.Index, evt.SyncActionValue)
+ 	case *events.LoggedOut:
+@@ -199,17 +191,14 @@ func (handler *Handler) eventHandler(rawEvt interface{}) {
+ 	// TODO
+ 	// &events.Blocklist{Action:"", DHash:"REDACTED", PrevDHash:"REDACTED", Changes:[]events.BlocklistChange{events.BlocklistChange{JID:types.JID{User:"REDACTED", RawAgent:0x0, Device:0x0, Integrator:0x0, Server:"s.whatsapp.net"}, Action:"block"}}}
+ 	case *events.UndecryptableMessage:
++		// webOS: a view-once message is said as one (disappearing.go), in the chat as the
++		// conversation knows it: by phone number, not by LID, as handle_message gives a message.
+ 		info := evt.Info
+ 		source := info.MessageSource
+-		unavailable_type := ""
+-		if evt.UnavailableType != "" {
+-			unavailable_type = fmt.Sprintf(" %s", evt.UnavailableType)
+-		}
+-		text := fmt.Sprintf("sent an undecryptable%s message. The message might arrive here later.", unavailable_type)
+-		if evt.UnavailableType == "sender_drop" {
+-			text = "sent a message which was not available when requested. Wake up your main device, then the message will be displayed here. Probably."
+-		}
+-		purple_display_text_message(handler.account, source.Chat.ToNonAD().String(), source.IsGroup, false, source.Sender.ToNonAD().String(), &info.PushName, info.Timestamp, text, &info.ID, "", "", "")
++		text := undecryptable_text(evt)
++		chat := handler.lidToPn(source.Chat, "handling undecryptable message chat")
++		sender := handler.lidToPn(source.Sender, "handling undecryptable message sender")
++		purple_display_text_message(handler.account, chat.ToNonAD().String(), source.IsGroup, false, sender.ToNonAD().String(), &info.PushName, info.Timestamp, text, &info.ID, "", "", "")
+ 	default:
+ 		log.Warnf("Event type not handled: %#v", rawEvt)
+ 	}
+diff --git a/history_sync.go b/history_sync.go
+new file mode 100644
+index 0000000..c12206b
+--- /dev/null
++++ b/history_sync.go
+@@ -0,0 +1,258 @@
++package main
++
++/*
++#include "constants.h"
++*/
++import "C"
++
++import (
++	"context"
++	"fmt"
++	"sort"
++	"strconv"
++	"time"
++
++	"go.mau.fi/whatsmeow/proto/waE2E"
++	"go.mau.fi/whatsmeow/proto/waHistorySync"
++	"go.mau.fi/whatsmeow/types"
++	"go.mau.fi/whatsmeow/types/events"
++)
++
++/*
++ * webOS: old messages, as the phone sends them to this device. It does so on its own once, right
++ * after linking (INITIAL_BOOTSTRAP, then RECENT and perhaps FULL), and again whenever this device
++ * asks it for the messages before one it has (ON_DEMAND, request_history below). Only the names in
++ * it were read before, so a newly linked device showed no chat until someone wrote, and nothing
++ * older than that.
++ *
++ * Each message goes the way a live one does (handle_message_from), with its own id, time, sender
++ * and direction, so the transport keeps it under its id: one it has already is not stored again
++ * (IncomingIMHandler's serviceMessageId dedup). It is marked as history (purple_display_text_message
++ * with history), which the transport stores as read and without a banner. Its picture, video,
++ * voice note, sticker or document is named in words, not downloaded: a sync can name thousands, the
++ * phone keeps old media only so long, and the download would hold up the libpurple main loop.
++ *
++ * How much: from a sync the phone sends by itself, at most "history-messages-per-chat" (default
++ * 50, 0 for none) of each chat's newest messages that are less than historyMaxAge old. What this
++ * device asked for comes as asked (request_history asks for historyRequestCount), up to
++ * historyOnDemandMax. The channels (newsletters) and status updates in a sync are left alone: the
++ * channels have their own history (fetch_newsletter_history) and status updates last a day.
++ */
++
++// Messages older than this are left out of a sync the phone sends by itself.
++const historyMaxAge = 90 * 24 * time.Hour
++
++// Each chat's newest messages taken from a sync the phone sends by itself, unless the account says.
++const historyDefaultPerChat = 50
++
++// How many messages request_history asks for (whatsmeow recommends 50 at a time).
++const historyRequestCount = 50
++
++// At most this many of a chat's messages are taken from an answer to request_history.
++const historyOnDemandMax = 200
++
++func (handler *Handler) handle_history_sync(evt *events.HistorySync) {
++	data := evt.Data
++	if purple_get_bool(handler.account, C.GOWHATSAPP_FETCH_CONTACTS_AFTER_LINKING_OPTION, true) {
++		for _, p := range data.GetPushnames() {
++			if p.ID != nil && p.Pushname != nil {
++				handler.log.Debugf("HistorySync push name for %s", p.GetID())
++				purple_update_name(handler.account, p.GetID(), p.GetPushname())
++			}
++		}
++	}
++	perChat, ok := history_bound(data.GetSyncType(), purple_get_int(handler.account, C.GOWHATSAPP_HISTORY_MESSAGES_OPTION, historyDefaultPerChat))
++	handler.log.Infof("HistorySync %s chunk %d: %d chats, taking up to %d messages of each",
++		data.GetSyncType(), data.GetChunkOrder(), len(data.GetConversations()), perChat)
++	if !ok {
++		return
++	}
++	since := time.Time{}
++	if data.GetSyncType() != waHistorySync.HistorySync_ON_DEMAND {
++		since = time.Now().Add(-historyMaxAge)
++	}
++	shown := 0
++	for _, conv := range data.GetConversations() {
++		chat, err := types.ParseJID(conv.GetID())
++		if err != nil || !history_chat_wanted(chat) {
++			continue
++		}
++		var parsed []*events.Message
++		for _, hm := range conv.GetMessages() {
++			msg, err := handler.client.ParseWebMessage(chat, hm.GetMessage())
++			if err != nil {
++				handler.log.Debugf("HistorySync: a message in %s could not be read: %v", chat, err)
++				continue
++			}
++			parsed = append(parsed, msg)
++		}
++		for _, msg := range history_pick(parsed, perChat, since) {
++			handler.handle_message_from(msg.Message, msg.Info, msg, true)
++			shown++
++		}
++	}
++	handler.log.Infof("HistorySync %s chunk %d: gave %d messages", data.GetSyncType(), data.GetChunkOrder(), shown)
++}
++
++/*
++ * How many of each chat's messages a sync of this type gives (perChat is the account's
++ * "history-messages-per-chat"), and whether it gives any: none from the syncs that carry no
++ * messages (names, status), and none when the account says 0, but an answer to request_history is
++ * given whatever the account says, up to historyOnDemandMax.
++ */
++func history_bound(syncType waHistorySync.HistorySync_HistorySyncType, perChat int) (int, bool) {
++	switch syncType {
++	case waHistorySync.HistorySync_ON_DEMAND:
++		return historyOnDemandMax, true
++	case waHistorySync.HistorySync_INITIAL_BOOTSTRAP, waHistorySync.HistorySync_RECENT, waHistorySync.HistorySync_FULL:
++		if perChat <= 0 {
++			return 0, false
++		}
++		return perChat, true
++	}
++	return 0, false
++}
++
++// Whether a chat's history is given: not a channel's, nor status updates or another broadcast.
++func history_chat_wanted(chat types.JID) bool {
++	switch chat.Server {
++	case types.DefaultUserServer, types.HiddenUserServer, types.GroupServer:
++		return chat.User != ""
++	}
++	return false
++}
++
++/*
++ * The messages of one chat to give, oldest first: those with something in them, at least as new
++ * as since (when set), the newest perChat of them.
++ */
++func history_pick(msgs []*events.Message, perChat int, since time.Time) []*events.Message {
++	var picked []*events.Message
++	for _, msg := range msgs {
++		if msg == nil || msg.Message == nil || msg.Info.ID == "" {
++			continue // a stub: "missed call", "security code changed", a group change
++		}
++		if !since.IsZero() && msg.Info.Timestamp.Before(since) {
++			continue
++		}
++		picked = append(picked, msg)
++	}
++	sort.SliceStable(picked, func(i, j int) bool {
++		return picked[i].Info.Timestamp.Before(picked[j].Info.Timestamp)
++	})
++	if perChat > 0 && len(picked) > perChat {
++		picked = picked[len(picked)-perChat:]
++	}
++	return picked
++}
++
++/*
++ * What an old message's picture, video, voice note, sticker or document is said as, since it is
++ * not downloaded: "📷 Photo", "🎥 Video", "🎤 Voice message", "🎵 Audio", "Sticker", "📄 name.pdf",
++ * with its caption on the next line. "" when it has none of these.
++ */
++func history_media_text(message *waE2E.Message) string {
++	label, caption := "", ""
++	switch {
++	case message.GetImageMessage() != nil:
++		label, caption = "📷 Photo", message.GetImageMessage().GetCaption()
++	case message.GetVideoMessage() != nil:
++		label, caption = "🎥 Video", message.GetVideoMessage().GetCaption()
++		if message.GetVideoMessage().GetGifPlayback() {
++			label = "GIF"
++		}
++	case message.GetPtvMessage() != nil:
++		label, caption = "🎥 Video message", message.GetPtvMessage().GetCaption()
++	case message.GetAudioMessage() != nil:
++		label = "🎵 Audio"
++		if message.GetAudioMessage().GetPTT() {
++			label = "🎤 Voice message"
++		}
++	case message.GetStickerMessage() != nil:
++		label = "Sticker"
++	case message.GetDocumentMessage() != nil:
++		dm := message.GetDocumentMessage()
++		name := dm.GetFileName()
++		if name == "" {
++			name = dm.GetTitle()
++		}
++		if name == "" {
++			name = "Document"
++		}
++		label, caption = "📄 "+name, dm.GetCaption()
++	default:
++		return ""
++	}
++	if caption != "" {
++		return label + "\n" + caption
++	}
++	return label
++}
++
++/*
++ * Ask the phone for the historyRequestCount messages of chat before the one this device has as the
++ * oldest: its id, whether we sent it, and its time. The answer comes as a HistorySync of type
++ * ON_DEMAND (handle_history_sync). The phone must be online. It is asked for the chat by its
++ * phone number and, when the store knows the LID it is addressed by, by that too: which of the two
++ * the phone keeps the chat under is not known here, and the one it does not know it does not answer.
++ * What it sends twice is stored once (by its id).
++ */
++func (handler *Handler) request_history(chat string, oldestID string, fromMe bool, oldest time.Time) {
++	jid, isGroup, err := handler.webos_chat(chat)
++	if err != nil || oldestID == "" || oldest.IsZero() {
++		handler.log.Warnf("request_history: %s / %s at %v: %v", chat, oldestID, oldest, err)
++		return
++	}
++	jids := []types.JID{jid}
++	if lid := handler.pnToLid(jid); lid != jid {
++		jids = append(jids, lid)
++	}
++	for _, chatJID := range jids {
++		info := &types.MessageInfo{
++			MessageSource: types.MessageSource{Chat: chatJID, IsFromMe: fromMe, IsGroup: isGroup},
++			ID:            types.MessageID(oldestID),
++			Timestamp:     oldest,
++		}
++		request := handler.client.BuildHistorySyncRequest(info, historyRequestCount)
++		if _, err := handler.client.SendPeerMessage(context.Background(), request); err != nil {
++			purple_display_system_message(handler.account, jid.String(), isGroup, fmt.Sprintf("Could not ask the phone for older messages: %v", err))
++			return
++		}
++		handler.log.Infof("Asked the phone for %d messages of %s before %s", historyRequestCount, chatJID, oldestID)
++	}
++}
++
++/*
++ * webOS: the transport's "webos-im-load-history" (glue/login.c): the Messaging app wants the
++ * messages of chat before the oldest it has, id, sent by us when fromMe is "1", at timestamp
++ * (seconds since 1970, decimal). Says whether this account is connected here; the request goes out
++ * on a goroutine.
++ */
++//export gowhatsapp_go_request_history
++func gowhatsapp_go_request_history(account *PurpleAccount, chat *C.char, id *C.char, timestamp *C.char, fromMe *C.char) C.int {
++	handler, ok := webos_handler(account)
++	if !ok {
++		return 0
++	}
++	at, ok := history_anchor_time(C.GoString(timestamp))
++	if !ok {
++		return 0
++	}
++	go handler.request_history(C.GoString(chat), C.GoString(id), C.GoString(fromMe) == "1", at)
++	return 1
++}
++
++/*
++ * The time of the message history is asked before, as the transport gives it: seconds since 1970,
++ * or milliseconds (a number too large to be seconds), as db8 keeps a message's time.
++ */
++func history_anchor_time(s string) (time.Time, bool) {
++	n, err := strconv.ParseInt(s, 10, 64)
++	if err != nil || n <= 0 {
++		return time.Time{}, false
++	}
++	if n > 100000000000 { // later than 5138 in seconds: this is milliseconds
++		return time.UnixMilli(n), true
++	}
++	return time.Unix(n, 0), true
++}
+diff --git a/history_sync_test.go b/history_sync_test.go
+new file mode 100644
+index 0000000..a31f6b8
+--- /dev/null
++++ b/history_sync_test.go
+@@ -0,0 +1,167 @@
++package main
++
++import (
++	"testing"
++	"time"
++
++	"go.mau.fi/whatsmeow/proto/waE2E"
++	"go.mau.fi/whatsmeow/proto/waHistorySync"
++	"go.mau.fi/whatsmeow/types"
++	"go.mau.fi/whatsmeow/types/events"
++	"google.golang.org/protobuf/proto"
++)
++
++func historyMsg(id string, at int64, text string) *events.Message {
++	msg := &events.Message{Info: types.MessageInfo{ID: types.MessageID(id), Timestamp: time.Unix(at, 0)}}
++	if text != "" {
++		msg.Message = &waE2E.Message{Conversation: proto.String(text)}
++	}
++	return msg
++}
++
++func pickedIDs(msgs []*events.Message) []string {
++	var ids []string
++	for _, msg := range msgs {
++		ids = append(ids, string(msg.Info.ID))
++	}
++	return ids
++}
++
++// A chat's messages come newest first; they are given oldest first, the newest perChat of them,
++// without the stubs (no message), the ones without an id, and those older than since.
++func TestHistoryPick(t *testing.T) {
++	msgs := []*events.Message{
++		historyMsg("E", 500, "e"),
++		historyMsg("STUB", 450, ""),
++		historyMsg("D", 400, "d"),
++		historyMsg("", 350, "no id"),
++		historyMsg("C", 300, "c"),
++		nil,
++		historyMsg("B", 200, "b"),
++		historyMsg("A", 100, "a"),
++	}
++	cases := []struct {
++		perChat int
++		since   int64
++		want    []string
++	}{
++		{0, 0, []string{"A", "B", "C", "D", "E"}},
++		{3, 0, []string{"C", "D", "E"}},
++		{50, 0, []string{"A", "B", "C", "D", "E"}},
++		{50, 250, []string{"C", "D", "E"}},
++		{2, 250, []string{"D", "E"}},
++		{1, 600, nil},
++	}
++	for _, c := range cases {
++		since := time.Time{}
++		if c.since > 0 {
++			since = time.Unix(c.since, 0)
++		}
++		got := pickedIDs(history_pick(msgs, c.perChat, since))
++		if len(got) != len(c.want) {
++			t.Errorf("perChat %d since %d: got %v, want %v", c.perChat, c.since, got, c.want)
++			continue
++		}
++		for i := range got {
++			if got[i] != c.want[i] {
++				t.Errorf("perChat %d since %d: got %v, want %v", c.perChat, c.since, got, c.want)
++				break
++			}
++		}
++	}
++}
++
++// The syncs the phone sends by itself take the account's number of messages (none for 0); an
++// answer to our own request takes up to historyOnDemandMax whatever the account says; a sync of
++// names or status carries no messages to give.
++func TestHistoryBound(t *testing.T) {
++	cases := []struct {
++		syncType waHistorySync.HistorySync_HistorySyncType
++		perChat  int
++		want     int
++		ok       bool
++	}{
++		{waHistorySync.HistorySync_INITIAL_BOOTSTRAP, 50, 50, true},
++		{waHistorySync.HistorySync_RECENT, 20, 20, true},
++		{waHistorySync.HistorySync_FULL, 50, 50, true},
++		{waHistorySync.HistorySync_INITIAL_BOOTSTRAP, 0, 0, false},
++		{waHistorySync.HistorySync_RECENT, -1, 0, false},
++		{waHistorySync.HistorySync_ON_DEMAND, 0, historyOnDemandMax, true},
++		{waHistorySync.HistorySync_ON_DEMAND, 50, historyOnDemandMax, true},
++		{waHistorySync.HistorySync_PUSH_NAME, 50, 0, false},
++		{waHistorySync.HistorySync_NON_BLOCKING_DATA, 50, 0, false},
++		{waHistorySync.HistorySync_INITIAL_STATUS_V3, 50, 0, false},
++	}
++	for _, c := range cases {
++		got, ok := history_bound(c.syncType, c.perChat)
++		if got != c.want || ok != c.ok {
++			t.Errorf("%s with %d: got %d %v, want %d %v", c.syncType, c.perChat, got, ok, c.want, c.ok)
++		}
++	}
++}
++
++// People's chats and groups have their history given; channels, status updates and other
++// broadcasts do not.
++func TestHistoryChatWanted(t *testing.T) {
++	cases := map[string]bool{
++		"31611111111@s.whatsapp.net":    true,
++		"900000000000011@lid":           true,
++		"120363000000000001@g.us":       true,
++		"120363000000000002@newsletter": false,
++		"status@broadcast":              false,
++		"1234567890@broadcast":          false,
++	}
++	for s, want := range cases {
++		jid, err := types.ParseJID(s)
++		if err != nil {
++			t.Fatalf("%s: %v", s, err)
++		}
++		if got := history_chat_wanted(jid); got != want {
++			t.Errorf("%s: got %v, want %v", s, got, want)
++		}
++	}
++	if history_chat_wanted(types.JID{Server: types.DefaultUserServer}) {
++		t.Errorf("a JID without a user is wanted")
++	}
++}
++
++// An old message's media is named, with its caption below it.
++func TestHistoryMediaText(t *testing.T) {
++	cases := []struct {
++		message *waE2E.Message
++		want    string
++	}{
++		{&waE2E.Message{ImageMessage: &waE2E.ImageMessage{}}, "📷 Photo"},
++		{&waE2E.Message{ImageMessage: &waE2E.ImageMessage{Caption: proto.String("At the beach")}}, "📷 Photo\nAt the beach"},
++		{&waE2E.Message{VideoMessage: &waE2E.VideoMessage{Caption: proto.String("Look")}}, "🎥 Video\nLook"},
++		{&waE2E.Message{VideoMessage: &waE2E.VideoMessage{GifPlayback: proto.Bool(true)}}, "GIF"},
++		{&waE2E.Message{PtvMessage: &waE2E.VideoMessage{}}, "🎥 Video message"},
++		{&waE2E.Message{AudioMessage: &waE2E.AudioMessage{PTT: proto.Bool(true)}}, "🎤 Voice message"},
++		{&waE2E.Message{AudioMessage: &waE2E.AudioMessage{}}, "🎵 Audio"},
++		{&waE2E.Message{StickerMessage: &waE2E.StickerMessage{}}, "Sticker"},
++		{&waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{FileName: proto.String("Q3.pdf"), Caption: proto.String("the report")}}, "📄 Q3.pdf\nthe report"},
++		{&waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{Title: proto.String("Old.doc")}}, "📄 Old.doc"},
++		{&waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{}}, "📄 Document"},
++		{&waE2E.Message{Conversation: proto.String("just text")}, ""},
++	}
++	for _, c := range cases {
++		if got := history_media_text(c.message); got != c.want {
++			t.Errorf("got %q, want %q", got, c.want)
++		}
++	}
++}
++
++// The time history is asked before: seconds, or milliseconds as db8 keeps it; nothing else.
++func TestHistoryAnchorTime(t *testing.T) {
++	if at, ok := history_anchor_time("1700000000"); !ok || at.Unix() != 1700000000 {
++		t.Errorf("seconds: got %v %v", at, ok)
++	}
++	if at, ok := history_anchor_time("1700000000123"); !ok || at.UnixMilli() != 1700000000123 {
++		t.Errorf("milliseconds: got %v %v", at, ok)
++	}
++	for _, bad := range []string{"", "0", "-5", "soon", "17e8"} {
++		if _, ok := history_anchor_time(bad); ok {
++			t.Errorf("%q taken as a time", bad)
++		}
++	}
++}

@@ -1,0 +1,85 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 10 Nov 2026 04:51:54 +0100
+Subject: [PATCH] rtp: accept MLOW on its separate payload type 122
+
+A peer that enables enable_mlow_separate_pt_tx moves its MLOW audio from
+payload type 120 to 122 ("mlow-1"). WhatsApp's own receiver registers
+122 beside 120 and 121, and a 1:1 video offer announces the capability
+(index 38), so an Android peer in a video call we placed sent all its
+audio there. classifyMediaPayload dropped every packet as an unknown
+payload, and the call had no sound from the peer.
+
+The frames are those of payload type 120, so 122 joins 120 and 121 as
+audio; the decoder tells plain frames from SplitRed by their first byte,
+not by the payload type. Source: whatsapp-rust wacore/src/voip/rtp.rs
+(is_whatsapp_opus_rtp_payload) and voip_control/audio_format.rs
+(RTP_PAYLOAD_TYPE_MLOW_SEPARATE = 122).
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ reaction_test.go | 10 ++++++++++
+ rtp/rtp.go       | 11 +++++++++--
+ rtp/rtp_test.go  |  3 ++-
+ 3 files changed, 21 insertions(+), 3 deletions(-)
+
+diff --git a/reaction_test.go b/reaction_test.go
+index b58ba6c..4322d8c 100644
+--- a/reaction_test.go
++++ b/reaction_test.go
+@@ -144,6 +144,16 @@ func TestMediaPayloadClassificationDoesNotTreatAppDataAsAudio(t *testing.T) {
+ 	}
+ }
+ 
++func TestMediaPayloadClassificationAcceptsMlowOnItsSeparatePayloadType(t *testing.T) {
++	// A peer that enables enable_mlow_separate_pt_tx (announced by a 1:1 video offer) sends its
++	// MLOW audio on 122; dropped as unknown, the call has no sound from that peer.
++	for _, pt := range []uint8{rtp.RtpPayloadTypeOpus, 121, rtp.RtpPayloadTypeMlowSeparate} {
++		if got := classifyMediaPayload(rtp.RtpHeader{PayloadType: pt}); got != mediaPayloadAudio {
++			t.Fatalf("PT%d classified as %v, want audio", pt, got)
++		}
++	}
++}
++
+ func TestCallSendsReactionThroughActiveAppDataStream(t *testing.T) {
+ 	eng, call := testEngineWithOutgoingCall()
+ 	pipe, err := NewMediaPipeline(iota32(), "111111111111111:0@lid", "222222222222222:0@lid", 1234, FrameSamples)
+diff --git a/rtp/rtp.go b/rtp/rtp.go
+index 29af618..7125d40 100644
+--- a/rtp/rtp.go
++++ b/rtp/rtp.go
+@@ -46,10 +46,17 @@ var OpusPrimingFrame1Wasm = [24]byte{
+ // OpusPrimingFrame2 is the second priming frame (5 bytes).
+ var OpusPrimingFrame2 = [5]byte{0x90, 0xb8, 0x14, 0x14, 0xc4}
+ 
++// RtpPayloadTypeMlowSeparate carries MLOW frames on a payload type of their own ("mlow-1").
++// A peer moves its MLOW audio here once the call enables enable_mlow_separate_pt_tx, which a
++// 1:1 video offer announces (capability index 38); the frames are those of payload type 120.
++const RtpPayloadTypeMlowSeparate uint8 = 122
++
+ // IsWhatsappOpusRtpPayload reports whether the payload type is WhatsApp Opus.
+ func IsWhatsappOpusRtpPayload(payloadType uint8) bool {
+-	// Source of truth: https://github.com/oxidezap/whatsapp-rust/blob/41095d4e6ba4610e054e9ede3af1d5e88a83faee/wacore/src/voip/rtp.rs#L28-L30
+-	return payloadType == RtpPayloadTypeOpus || payloadType == 121
++	// Source of truth: https://github.com/oxidezap/whatsapp-rust/blob/main/wacore/src/voip/rtp.rs
++	// (is_whatsapp_opus_rtp_payload) and wacore/src/voip_control/audio_format.rs
++	// (RTP_PAYLOAD_TYPE_MLOW_SEPARATE): 120 MLOW, 121 MLOW SplitRed, 122 MLOW on its own type.
++	return payloadType == RtpPayloadTypeOpus || payloadType == 121 || payloadType == RtpPayloadTypeMlowSeparate
+ }
+ 
+ // IsOpusDtxPayload reports DTX / comfort-noise frames (RFC 0x10, mlow 0x90, warmup).
+diff --git a/rtp/rtp_test.go b/rtp/rtp_test.go
+index c29069c..64832cd 100644
+--- a/rtp/rtp_test.go
++++ b/rtp/rtp_test.go
+@@ -235,7 +235,8 @@ func TestClassifiers(t *testing.T) {
+ 	if !IsOpusMlowSpeechPayload(bytes.Repeat([]byte{0x48}, 20)) || IsOpusMlowSpeechPayload(bytes.Repeat([]byte{0x48}, 4)) {
+ 		t.Error("mlow speech classification wrong")
+ 	}
+-	if !IsWhatsappOpusRtpPayload(120) || !IsWhatsappOpusRtpPayload(121) || IsWhatsappOpusRtpPayload(96) {
++	if !IsWhatsappOpusRtpPayload(120) || !IsWhatsappOpusRtpPayload(121) || !IsWhatsappOpusRtpPayload(122) ||
++		IsWhatsappOpusRtpPayload(96) || IsWhatsappOpusRtpPayload(123) {
+ 		t.Error("payload-type classification wrong")
+ 	}
+ }
