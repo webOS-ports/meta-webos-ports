@@ -1,7 +1,7 @@
-SUMMARY = "Media engine for 1:1 Signal voice calls"
+SUMMARY = "Media engine for 1:1 Signal voice and video calls"
 DESCRIPTION = "signal-call-media carries the audio of a Signal call: ICE with libnice, SRTP with \
 AEAD_AES_256_GCM keyed from the call's X25519 DH, and Opus over RTP, played to and captured from \
-the PulseAudio call sink and source. purple-presage starts one for each call and drives it over \
+the PulseAudio call sink and source, and VP8 video. purple-presage starts one for each call and drives it over \
 stdin/stdout."
 SECTION = "webos/services"
 
@@ -12,6 +12,7 @@ LICENSE = "GPL-3.0-or-later"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=1ebbd3e34237af26da5dc08a4e440464"
 
 PV = "1.0+git"
+PE = "4"
 
 S = "${LSC_SRCDIR}"
 MEDIA_DIR = "${S}/im/signal/calling/media"
@@ -53,3 +54,17 @@ RDEPENDS:${PN} += " \
     gstreamer1.0-plugins-good-rtpmanager \
     gstreamer1.0-plugins-good-pulseaudio \
 "
+
+# Video, built at run time so packaging does not see it: VP8 (RingRTC's only 1:1 video codec)
+# with vp8enc/vp8dec or avdec_vp8, rtpvp8pay/depay, the decoded picture and the self-view on
+# shmsink for the Phone app, videoconvert/videoscale/videorate. The camera and the hardware
+# VP8 decoder are gst-droid's (droidcamsrc, droidvdec) and only there on halium; elsewhere the
+# engine takes v4l2src.
+RDEPENDS:${PN} += " \
+    gstreamer1.0-libav \
+    gstreamer1.0-plugins-bad-shm \
+    gstreamer1.0-plugins-base-videoconvertscale \
+    gstreamer1.0-plugins-base-videorate \
+    gstreamer1.0-plugins-good-vpx \
+"
+RDEPENDS:${PN}:append:halium = " gst-droid"

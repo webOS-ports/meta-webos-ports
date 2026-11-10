@@ -1,7 +1,9 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Herman van Hazendonk <github.com@herrie.org>
 Date: Tue, 20 Oct 2026 16:26:28 +0200
-Subject: [PATCH] webOS: add 1:1 Signal voice calls through the Phone app
+Subject: [PATCH] webOS: 1:1 Signal voice and video calls through the Phone app
+
+* Add 1:1 Signal voice calls through the Phone app
 
 Registers the luna-service2 service com.palm.signal.call (call.c) when
 the plug-in loads, with one handle on LuneOS's single bus, so the stock
@@ -24,8 +26,8 @@ luneos-synergy-connectors im/signal/calling/media; its path comes from
 SIGNAL_MEDIA_ENGINE at build time (default
 /usr/libexec/signal-call-media). call_media.rs encodes and decodes the
 RingRTC opaque blobs, and ice.rs fetches the STUN/TURN relays from
-/v2/calling/relays through presage's Manager::identified_push_service(),
-which a separate presage patch makes public. They are fetched at login
+/v2/calling/relays through presage's Manager::calling_relays(). They
+are fetched at login
 and again when their credentials are due (half the ttl the server
 gives, or an hour), checked before an outgoing call and when an Offer
 arrives, after the phone has started ringing. A failed fetch keeps the
@@ -56,42 +58,114 @@ A dialled number is resolved through the stored contacts only. Calling
 a number that is no contact would need Contact Discovery, i.e.
 presage's "cdsi" feature, which pulls in BoringSSL; it is not enabled.
 
-serde and serde_json are added for the relays JSON (both already in
-Cargo.lock through presage, so only the root package's dependency list
-changes), and tokio's "time" feature for the relays timeout.
+tokio's "time" feature is added for the relays timeout.
 
 CMakeLists.txt builds call.c and links luna-service2.
+
+* Clear ended calls from the Phone app, show the caller's number
+
+The Phone app removes a call card only when a callStateQuery push no
+longer lists the call. call.c pushed "disconnected" and then went idle
+without telling anyone, so the ended card stayed and the Phone app did
+not close after the call. Push the empty line list 1.5 s after the
+"disconnected" one, as the WhatsApp connector does, unless a new call has
+replaced the line by then.
+
+An incoming call card showed the caller's Signal UUID, so the Phone app
+found no contact and offered to add one. When the contact's phone number
+is known (the buddy's "phone_number", which the contact sync sets), the
+card shows that number instead. The UUID is still what hanging up uses,
+and an outgoing call keeps the address that was dialled, which the Phone
+app keyed its card to.
+
+Every call went out as call id "sig". The Phone app remembers the ids
+of the calls it has seen end and ignores a later "disconnected" for one
+of them, so only the first call after the Phone app started closed its
+card; every later one stayed up. Each call now gets an id of its own,
+taken from the clock when it starts, so a restarted service does not
+reuse one either. audiod still gets "sig": it keeps one call per sender.
+
+* Add video to 1:1 Signal calls
+
+The media engine (signal-call-media) can now send and receive VP8
+video, so the Phone app can be given a video call.
+
+- A video call is placed with Offer type OFFER_VIDEO_CALL when the
+  dialer asks for one ("video": true). An incoming video Offer rings
+  as a video call (incomingVideoState "available").
+- changeMedia turns our camera on or off. It sends VIDEO to the
+  engine, which sends no video before the call is answered and tells
+  the far side in RingRTC's SenderStatus. An outgoing call gives the
+  engine its call id (CALLID) for that message. incomingVideo hides
+  or shows the far side's picture.
+- The engine's video lines are passed to call.c (call_video.rs parses
+  them; call_video.c keeps the state):
+  - VSHM: the decoded picture's gst-shm socket, the payload's
+    videoURI.
+  - VPREVIEW: the self-view.
+  - VTX: outgoingVideo.
+  - PEERVIDEO: incomingVideo and "streaming".
+  - PEERROT: incomingVideoOrientation.
+  - VIDEOERR: logged.
+- audiod is told "video": true for a call with video, again when a
+  voice call turns into one.
+
+call_video.rs and call_video.c have their own tests (rustc --test;
+src/c/tests/test_call_video.c with glib only).
+
+* A Signal call answered on another device is not missed
+
+When the user took an incoming call on their phone, the caller's Hangup
+of type ACCEPTED (RingRTC's AcceptedOnAnotherDevice) reached this linked
+device as well. It stopped ringing, without a "Missed voice call" line,
+but the Phone app was told cause "normal" and showed a missed call.
+
+Report such a call as answered elsewhere: a new state from the receive
+loop (7), which call.c ends with cause "answeredElsewhere", counted by
+the Phone app as answered (no "Missed call", filed as incoming). The
+decision is in call_end.rs: only an incoming call that rang here, was
+not answered here and was not answered Busy; the echo of our own
+acceptance is filtered out before, as it was.
 
 Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
 Upstream-Status: Inappropriate [webOS specific]
 ---
- CMakeLists.txt                  |   6 +
- src/c/call.c                    | 394 +++++++++++++++++++++++
+ CMakeLists.txt                  |   7 +
+ src/c/call.c                    | 536 +++++++++++++++++++++++++++++
+ src/c/call_video.c              | 148 ++++++++
+ src/c/call_video.h              |  51 +++
  src/c/connection.c              |   4 +
  src/c/init.c                    |  12 +
- src/c/presage.h                 |   9 +
- src/rust/Cargo.lock             |   2 +
- src/rust/Cargo.toml             |   4 +-
- src/rust/src/bridge.rs          |  39 +++
- src/rust/src/bridge_commands.rs |  51 +++
- src/rust/src/call_bridge.rs     | 533 ++++++++++++++++++++++++++++++++
- src/rust/src/call_media.rs      | 201 ++++++++++++
- src/rust/src/core.rs            | 236 +++++++++++++-
- src/rust/src/ice.rs             | 199 ++++++++++++
- src/rust/src/lib.rs             |   3 +
- src/rust/src/receive.rs         | 160 +++++++++-
- src/rust/src/structs.rs         |  46 +++
- 16 files changed, 1896 insertions(+), 3 deletions(-)
+ src/c/presage.h                 |  12 +
+ src/c/tests/test_call_video.c   | 129 +++++++
+ src/rust/Cargo.toml             |   2 +-
+ src/rust/src/bridge.rs          |  62 ++++
+ src/rust/src/bridge_commands.rs |  62 ++++
+ src/rust/src/call_bridge.rs     | 581 ++++++++++++++++++++++++++++++++
+ src/rust/src/call_end.rs        |  59 ++++
+ src/rust/src/call_media.rs      | 201 +++++++++++
+ src/rust/src/call_video.rs      | 227 +++++++++++++
+ src/rust/src/core.rs            | 243 ++++++++++++-
+ src/rust/src/ice.rs             | 150 +++++++++
+ src/rust/src/lib.rs             |   5 +
+ src/rust/src/receive.rs         | 176 +++++++++-
+ src/rust/src/structs.rs         |  53 +++
+ 20 files changed, 2717 insertions(+), 3 deletions(-)
  create mode 100644 src/c/call.c
+ create mode 100644 src/c/call_video.c
+ create mode 100644 src/c/call_video.h
+ create mode 100644 src/c/tests/test_call_video.c
  create mode 100644 src/rust/src/call_bridge.rs
+ create mode 100644 src/rust/src/call_end.rs
  create mode 100644 src/rust/src/call_media.rs
+ create mode 100644 src/rust/src/call_video.rs
  create mode 100644 src/rust/src/ice.rs
 
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 8bd77f2..4058d23 100755
+index e48c5de..b5d0845 100755
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -36,6 +36,8 @@ find_package(PkgConfig QUIET)
+@@ -22,6 +22,8 @@ find_package(PkgConfig QUIET)
  if (${PKG_CONFIG_FOUND})
      pkg_check_modules(PIXBUF gdk-pixbuf-2.0)
  endif()
@@ -100,15 +174,16 @@ index 8bd77f2..4058d23 100755
  
  include(FetchContent)
  FetchContent_Declare(Corrosion GIT_REPOSITORY https://github.com/corrosion-rs/corrosion.git)
-@@ -86,6 +88,7 @@ add_library(${TARGET_NAME} SHARED
+@@ -72,6 +74,8 @@ add_library(${TARGET_NAME} SHARED
      "src/c/attachment_common.c"
      "src/c/init.c"
      "src/c/pixbuf.c"
 +    "src/c/call.c"
++    "src/c/call_video.c"
  )
  target_compile_definitions(${TARGET_NAME} PRIVATE PLUGIN_VERSION=${PLUGIN_VERSION})
  # depend on the rust part
-@@ -96,6 +99,9 @@ target_link_libraries(${TARGET_NAME} PRIVATE ${PURPLE_LIBRARIES})
+@@ -82,6 +86,9 @@ target_link_libraries(${TARGET_NAME} PRIVATE ${PURPLE_LIBRARIES})
  # depend on pixbuf (technically optiona, but does not hurt)
  target_include_directories(${TARGET_NAME} PRIVATE ${PIXBUF_INCLUDE_DIRS})
  target_link_libraries(${TARGET_NAME} PRIVATE ${PIXBUF_LIBRARIES})
@@ -120,11 +195,11 @@ index 8bd77f2..4058d23 100755
  target_link_libraries(${TARGET_NAME} PRIVATE ${QRENCODE_LIBRARIES})
 diff --git a/src/c/call.c b/src/c/call.c
 new file mode 100644
-index 0000000..7c06048
+index 0000000..7ea4792
 --- /dev/null
 +++ b/src/c/call.c
-@@ -0,0 +1,394 @@
-+/* Signal 1:1 voice calls for the webOS Phone app.
+@@ -0,0 +1,536 @@
++/* Signal 1:1 voice and video calls for the webOS Phone app.
 + *
 + * The luna-service2 service com.palm.signal.call, which the Phone app's CallSynergizer talks to with
 + * the same contract as the Telegram and WhatsApp call services: callStateQuery (subscribable) for
@@ -137,6 +212,7 @@ index 0000000..7c06048
 + */
 +
 +#include "presage.h"
++#include "call_video.h"
 +#include <luna-service2/lunaservice.h>
 +#include <glib.h>
 +#include <string.h>
@@ -153,6 +229,8 @@ index 0000000..7c06048
 +#define SIG_CALL_ANSWERED 6u   /* LOCAL-only: user tapped Answer on an INCOMING call (cb_answer);
 +                                * flip the line to active, keep origin=incoming. Not sent from
 +                                * Rust, so it need not match a bridge.rs constant. */
++#define SIG_CALL_ELSEWHERE 7u  /* an incoming call taken on another of the user's devices
++                                * (bridge.rs CALL_STATE_ANSWERED_ELSEWHERE) */
 +
 +static LSHandle      *g_sh      = NULL;   /* com.palm.signal.call                     */
 +static PurpleAccount *g_account = NULL;   /* the bound Signal account                  */
@@ -164,8 +242,16 @@ index 0000000..7c06048
 +static char *g_name     = NULL;
 +static uint64_t g_call_id = 0;
 +static bool g_outgoing = false;   /* true while an OUTGOING call is up (origin=outgoing in the card) */
++/* The call's id on the card. The Phone app remembers every call id it has seen end and ignores a
++ * later "disconnected" for it, so each call needs an id of its own, or the card of every call after
++ * the first stays up. From the clock, so a restarted service does not hand out an old one again. */
++static gint64 g_card_id = 0;
++/* The call's video: what the media engine reported and what the user asked for (call_video.c). */
++static CallVideo g_video = { .show_incoming = TRUE };
 +
 +static const char *SUBKEY = "callState";
++
++static void push_state(void);
 +
 +static void set_str(char **slot, const char *v)
 +{
@@ -190,15 +276,31 @@ index 0000000..7c06048
 +    return g_string_free(o, FALSE);
 +}
 +
++/* The address the call card shows. An incoming call arrives keyed by the caller's Signal UUID; when
++ * the contact's phone number is known (blist.c keeps it as the buddy's "phone_number"), show that
++ * instead, so the Phone app matches the address book entry rather than offering to add the UUID as
++ * a new contact. An outgoing call keeps the address the user dialled, which the Phone app keyed its
++ * card to. g_addr itself stays the UUID, which hanging up needs. */
++static const char *card_address(void)
++{
++    if (!g_outgoing && g_account && g_addr && *g_addr) {
++        PurpleBuddy *buddy = purple_find_buddy(g_account, g_addr);
++        const char *phone = buddy ? purple_blist_node_get_string(&buddy->node, "phone_number") : NULL;
++        if (phone && *phone)
++            return phone;
++    }
++    return g_addr;
++}
++
 +/* Build the CallSynergizer callStateQuery payload. Dispatch is on the LINE-level "state"; an empty
-+ * state => idle (no lines). Voice only: the line reports no video either way. */
++ * state => idle (no lines). The line carries the video state, the payload the pictures' sockets. */
 +static gchar *build_payload(void)
 +{
 +    if (!g_state) {
 +        return g_strdup("{\"returnValue\":true,\"lines\":[]}");
 +    }
 +    gchar *st   = json_escape(g_state);
-+    gchar *addr = json_escape(g_addr);
++    gchar *addr = json_escape(card_address());
 +    gchar *nm   = json_escape((g_name && *g_name) ? g_name : g_addr);
 +    gchar *disc = g_strcmp0(g_state, "disconnected") == 0
 +        ? g_strdup_printf("\"disconnectDetails\":{\"cause\":\"%s\"},", g_cause ? g_cause : "normal")
@@ -208,13 +310,15 @@ index 0000000..7c06048
 +     * Telegram and WhatsApp services send them. transport is this connector's own PHONE account
 +     * template id: without it the call is taken for a cellular one and the Signal UUID is shown
 +     * formatted as a phone number. */
++    gchar *line_video = call_video_line_fields(&g_video);
++    gchar *payload_video = call_video_payload_fields(&g_video);
 +    gchar *p = g_strdup_printf(
 +        "{\"returnValue\":true,\"lines\":["
-+        "{\"state\":\"%s\",%s\"incomingVideo\":false,\"outgoingVideo\":false,"
-+        "\"calls\":[{\"id\":\"sig\",\"origin\":\"%s\",\"transport\":\"com.palm.signal\","
-+        "\"address\":\"%s\",\"displayName\":\"%s\"}]}]}",
-+        st, disc, g_outgoing ? "outgoing" : "incoming", addr, nm);
-+    g_free(st); g_free(addr); g_free(nm); g_free(disc);
++        "{\"state\":\"%s\",%s%s,"
++        "\"calls\":[{\"id\":\"sig-%" G_GINT64_FORMAT "\",\"origin\":\"%s\",\"transport\":\"com.palm.signal\","
++        "\"address\":\"%s\",\"displayName\":\"%s\"}]}]%s}",
++        st, disc, line_video, g_card_id, g_outgoing ? "outgoing" : "incoming", addr, nm, payload_video);
++    g_free(st); g_free(addr); g_free(nm); g_free(disc); g_free(line_video); g_free(payload_video);
 +    return p;
 +}
 +
@@ -270,7 +374,8 @@ index 0000000..7c06048
 +    return true;
 +}
 +
-+/* Place an OUTGOING Signal call. The dialer POSTs {"address":"<signal-uuid or +E.164>"}. The Rust
++/* Place an OUTGOING Signal call. The dialer POSTs {"address":"<signal-uuid or +E.164>"}, with
++ * "video":true for a video call. The Rust
 + * command loop resolves the address, generates our media keys and sends the RingRTC Offer; the
 + * peer's Answer then starts the media engine in caller role (call_bridge.rs on_answer). The card is
 + * driven by the real call events: "dialing" once the Offer is out, with the real call_id, then
@@ -287,8 +392,9 @@ index 0000000..7c06048
 +    } else if (!presage) {
 +        reply(sh, msg, "{\"returnValue\":false,\"errorText\":\"Signal account not connected\"}");
 +    } else {
-+        purple_debug_info(PLUGIN_NAME, "call: dialling\n");
-+        presage_rust_place_call(g_account, rust_runtime, presage->tx_ptr, addr);
++        int video = call_video_json_bool(LSMessageGetPayload(msg), "video") == 1;
++        purple_debug_info(PLUGIN_NAME, "call: dialling%s\n", video ? " (video)" : "");
++        presage_rust_place_call(g_account, presage->tx_ptr, addr, video);
 +        reply(sh, msg, "{\"returnValue\":true}");
 +    }
 +    g_free(addr);
@@ -304,7 +410,7 @@ index 0000000..7c06048
 +    (void)ctx;
 +    Presage *presage = bound_presage();
 +    if (presage && g_call_id && g_strcmp0(g_state, "incoming") == 0) {
-+        presage_rust_accept_call(g_account, rust_runtime, presage->tx_ptr, g_call_id);
++        presage_rust_accept_call(g_account, presage->tx_ptr, g_call_id);
 +        presage_handle_call_state(g_account, g_addr, g_name, SIG_CALL_ANSWERED, g_call_id);
 +        reply(sh, msg, "{\"returnValue\":true}");
 +    } else {
@@ -320,9 +426,33 @@ index 0000000..7c06048
 +    (void)ctx;
 +    Presage *presage = bound_presage();
 +    if (presage && g_addr && *g_addr && g_call_id)
-+        presage_rust_hangup_call(g_account, rust_runtime, presage->tx_ptr, g_addr, g_call_id);
++        presage_rust_hangup_call(g_account, presage->tx_ptr, g_addr, g_call_id);
 +    if (g_state)
 +        presage_handle_call_state(g_account, g_addr, g_name, SIG_CALL_DECLINED, g_call_id);
++    reply(sh, msg, "{\"returnValue\":true}");
++    return true;
++}
++
++/* The user turned video on or off: {"id":..,"incomingVideo":bool,"outgoingVideo":bool}, either
++ * field optional. outgoingVideo turns our camera on or off (the engine sends nothing before the
++ * call is answered); incomingVideo shows or hides the far side's picture, which keeps arriving. */
++static bool cb_change_media(LSHandle *sh, LSMessage *msg, void *ctx)
++{
++    (void)ctx;
++    const char *payload = LSMessageGetPayload(msg);
++    Presage *presage = bound_presage();
++    if (!g_state || !g_call_id) {
++        reply(sh, msg, "{\"returnValue\":false,\"errorText\":\"no Signal call\"}");
++        return true;
++    }
++    int out = call_video_json_bool(payload, "outgoingVideo");
++    int in = call_video_json_bool(payload, "incomingVideo");
++    if (out >= 0 && presage)
++        presage_rust_set_call_video(g_account, presage->tx_ptr, g_call_id, out);
++    if (in >= 0 && g_video.show_incoming != (in == 1)) {
++        g_video.show_incoming = in == 1;
++        push_state();
++    }
 +    reply(sh, msg, "{\"returnValue\":true}");
 +    return true;
 +}
@@ -347,7 +477,7 @@ index 0000000..7c06048
 +    { "extract",        cb_noop,             LUNA_METHOD_FLAGS_NONE },
 +    { "dtmf",           cb_noop,             LUNA_METHOD_FLAGS_NONE },
 +    { "dtmfEnd",        cb_noop,             LUNA_METHOD_FLAGS_NONE },
-+    { "changeMedia",    cb_noop,             LUNA_METHOD_FLAGS_NONE },
++    { "changeMedia",    cb_change_media,     LUNA_METHOD_FLAGS_NONE },
 +    { NULL, NULL, LUNA_METHOD_FLAGS_NONE }
 +};
 +
@@ -384,7 +514,7 @@ index 0000000..7c06048
 +    if (!account || g_account != account) return;
 +    Presage *presage = bound_presage();
 +    if (presage && g_addr && *g_addr && g_call_id)
-+        presage_rust_hangup_call(account, rust_runtime, presage->tx_ptr, g_addr, g_call_id);
++        presage_rust_hangup_call(account, presage->tx_ptr, g_addr, g_call_id);
 +    if (g_state)
 +        presage_handle_call_state(account, g_addr, g_name, SIG_CALL_ENDED, g_call_id);
 +    g_account = NULL;
@@ -406,6 +536,16 @@ index 0000000..7c06048
 +    }
 +}
 +
++/* The active call, as audiod is told it: "video" says whether the call has video. */
++static void audiod_report_active(void)
++{
++    gchar *p = g_strdup_printf("{\"lines\":[{\"state\":\"active\",\"calls\":[{\"id\":\"sig\",\"video\":%s,"
++                               "\"transport\":\"com.palm.signal\"}]}]}",
++                               call_video_active(&g_video) ? "true" : "false");
++    audiod_send("palm://com.palm.audio/phone/CallStatusUpdate", p);
++    g_free(p);
++}
++
 +/* heap-marshalled call event: the Rust receive loop runs on a worker pthread, so (like
 + * presage_append_message) we copy the data and hop to the main thread before touching LS2. */
 +typedef struct {
@@ -414,6 +554,35 @@ index 0000000..7c06048
 +    char    *who;
 +    char    *name;
 +} CallEvt;
++
++static void push_state(void)
++{
++    if (!g_sh)
++        return;
++    gchar *payload = build_payload();
++    LSError err; LSErrorInit(&err);
++    if (!LSSubscriptionReply(g_sh, SUBKEY, payload, &err)) {
++        purple_debug_warning(PLUGIN_NAME, "call pushState: %s\n", err.message);
++        LSErrorFree(&err);
++    }
++    g_free(payload);
++}
++
++/* The Phone app drops a call card only when a push stops listing that call. So an ended call is
++ * shown as "disconnected" for a moment and then the empty line list follows, as the WhatsApp
++ * connector does. A call that starts in the meantime has already replaced the line, so the empty
++ * list is then not sent. */
++#define ENDED_CALL_HOLD_MS 1500
++static guint g_idle_push = 0;
++
++static gboolean push_idle(gpointer data)
++{
++    (void)data;
++    g_idle_push = 0;
++    if (!g_state)
++        push_state();
++    return G_SOURCE_REMOVE;
++}
 +
 +/* runs on the MAIN thread: apply the new state and push it to callStateQuery subscribers */
 +static gboolean call_state_apply(gpointer data)
@@ -425,13 +594,20 @@ index 0000000..7c06048
 +     * overwrite it, and the end of a call that is no longer on the card (the peer's hangup after we
 +     * declined) must not push a second "disconnected". call_id 0 is a call that never got one (a
 +     * dial that could not be placed), which is still reported. */
-+    bool is_end = e->state == SIG_CALL_ENDED || e->state == SIG_CALL_DECLINED || e->state == SIG_CALL_BUSY;
++    bool is_end = e->state == SIG_CALL_ENDED || e->state == SIG_CALL_DECLINED || e->state == SIG_CALL_BUSY ||
++                  e->state == SIG_CALL_ELSEWHERE;
 +    bool other_call = (g_state && e->call_id && g_call_id && e->call_id != g_call_id) ||
 +                      (!g_state && e->call_id && is_end);
 +    if (other_call) {
 +        purple_debug_info(PLUGIN_NAME, "call: ignoring state %u of another call\n", e->state);
 +        g_free(e->who); g_free(e->name); g_free(e);
 +        return FALSE;
++    }
++
++    /* Every call starts from idle: the state is reset as soon as one ends. */
++    if (!g_state) {
++        g_card_id = g_get_real_time();
++        call_video_reset(&g_video);
 +    }
 +
 +    switch (e->state) {
@@ -465,6 +641,10 @@ index 0000000..7c06048
 +        case SIG_CALL_BUSY:
 +            set_str(&g_state, "disconnected"); set_str(&g_cause, "busy");
 +            break;
++        case SIG_CALL_ELSEWHERE:
++            /* The Phone app counts it as answered: no "Missed call", filed as incoming. */
++            set_str(&g_state, "disconnected"); set_str(&g_cause, "answeredElsewhere");
++            break;
 +        case SIG_CALL_ENDED:
 +        default:
 +            /* A dial that could not be placed has no card of its own yet: report it under the
@@ -474,31 +654,25 @@ index 0000000..7c06048
 +            break;
 +    }
 +
-+    if (g_sh) {
-+        gchar *payload = build_payload();
-+        LSError err; LSErrorInit(&err);
-+        if (!LSSubscriptionReply(g_sh, SUBKEY, payload, &err)) {
-+            purple_debug_warning(PLUGIN_NAME, "call pushState: %s\n", err.message);
-+            LSErrorFree(&err);
-+        }
-+        g_free(payload);
-+    }
++    push_state();
 +
 +    /* audiod: report the active call once, and clear it when a call that was active ends. Must run
 +     * before the idle reset below (which clears g_state). */
 +    if (!was_active && g_strcmp0(g_state, "active") == 0) {
-+        audiod_send("palm://com.palm.audio/phone/CallStatusUpdate",
-+                    "{\"lines\":[{\"state\":\"active\",\"calls\":[{\"id\":\"sig\",\"video\":false,"
-+                    "\"transport\":\"com.palm.signal\"}]}]}");
++        audiod_report_active();
 +    } else if (was_active && g_strcmp0(g_state, "disconnected") == 0) {
 +        audiod_send("palm://com.palm.audio/phone/CallStatusUpdate", "{\"lines\":[]}");
 +    }
 +
-+    /* after a terminal state, return to idle so the next call starts clean */
++    /* after a terminal state, return to idle so the next call starts clean, and clear the card once
++     * the Phone app has shown it as ended */
 +    if (g_strcmp0(g_state, "disconnected") == 0) {
 +        set_str(&g_state, NULL); set_str(&g_cause, NULL);
 +        set_str(&g_addr, NULL);  set_str(&g_name, NULL); g_call_id = 0;
 +        g_outgoing = false;
++        call_video_reset(&g_video);
++        if (!g_idle_push)
++            g_idle_push = g_timeout_add(ENDED_CALL_HOLD_MS, push_idle, NULL);
 +    }
 +
 +    g_free(e->who); g_free(e->name); g_free(e);
@@ -518,11 +692,265 @@ index 0000000..7c06048
 +    e->name = g_strdup(name);
 +    purple_timeout_add(0, call_state_apply, e);   /* thread-safe; runs on the main thread */
 +}
++
++/* heap-marshalled video event (see call_video.h for the kinds) */
++typedef struct {
++    uint64_t call_id;
++    guint    kind;
++    int      a, b, c, d;
++    char    *text;
++} VideoEvt;
++
++/* runs on the MAIN thread: apply a video event of the call on the card and push it */
++static gboolean call_video_event_apply(gpointer data)
++{
++    VideoEvt *e = (VideoEvt *)data;
++    if (!g_state || !e->call_id || e->call_id != g_call_id) {
++        purple_debug_info(PLUGIN_NAME, "call: ignoring video event %u of another call\n", e->kind);
++    } else if (e->kind == CALL_VIDEO_ERROR) {
++        purple_debug_warning(PLUGIN_NAME, "call: video: %s\n", e->text ? e->text : "error");
++    } else {
++        gboolean was_video = call_video_active(&g_video);
++        if (call_video_apply(&g_video, e->kind, e->a, e->b, e->c, e->d, e->text)) {
++            push_state();
++            /* A voice call that turned into a video call: tell audiod again. */
++            if (g_strcmp0(g_state, "active") == 0 && was_video != call_video_active(&g_video))
++                audiod_report_active();
++        }
++    }
++    g_free(e->text);
++    g_free(e);
++    return FALSE;
++}
++
++/* Called from the Rust side (the engine's reader threads, the receive and command loops) with the
++ * engine's video events. Marshals to the main thread like presage_handle_call_state. */
++void presage_handle_call_video(uint64_t call_id, uint32_t kind, int32_t a, int32_t b, int32_t c, int32_t d,
++                               const char *text)
++{
++    VideoEvt *e = g_new0(VideoEvt, 1);
++    e->call_id = call_id;
++    e->kind = kind;
++    e->a = a; e->b = b; e->c = c; e->d = d;
++    e->text = g_strdup(text);
++    purple_timeout_add(0, call_video_event_apply, e);
++}
+diff --git a/src/c/call_video.c b/src/c/call_video.c
+new file mode 100644
+index 0000000..4deec75
+--- /dev/null
++++ b/src/c/call_video.c
+@@ -0,0 +1,148 @@
++/* Video in a 1:1 Signal call, as the Phone app sees it (see call_video.h).
++ *
++ * The Phone app (SynergyTransport._applyVideo) reads, per line, incomingVideo, outgoingVideo,
++ * incomingVideoState ("unavailable", "available" or "streaming") and incomingVideoOrientation
++ * (quarter turns counter-clockwise), and from the payload videoURI with its size (the gst-shm
++ * socket its RemoteVideo reads) and the self-view's videoPreviewURI, size, orientation and
++ * mirroring. The preview is only read when there is a videoURI. */
++
++#include "call_video.h"
++#include <string.h>
++
++void call_video_reset(CallVideo *v)
++{
++    g_free(v->uri);
++    g_free(v->preview);
++    memset(v, 0, sizeof *v);
++    v->show_incoming = TRUE;
++}
++
++/* Socket paths go into JSON unescaped: the Rust side passes only absolute paths without quotes,
++ * backslashes or control characters; anything else is refused here too. */
++static gboolean path_ok(const char *p)
++{
++    if (!p || p[0] != '/' || strlen(p) >= 108)
++        return FALSE;
++    for (const char *c = p; *c; c++)
++        if (*c == '"' || *c == '\\' || (unsigned char)*c < 0x20)
++            return FALSE;
++    return TRUE;
++}
++
++static gboolean dims_ok(int w, int h)
++{
++    return w > 0 && w <= 4096 && h > 0 && h <= 4096;
++}
++
++static gboolean set_flag(gboolean *slot, int a)
++{
++    gboolean on = a != 0;
++    if (*slot == on)
++        return FALSE;
++    *slot = on;
++    return TRUE;
++}
++
++gboolean call_video_apply(CallVideo *v, guint kind, int a, int b, int c, int d, const char *text)
++{
++    switch (kind) {
++    case CALL_VIDEO_OFFERED:
++        return set_flag(&v->offered, 1);
++    case CALL_VIDEO_SHM:
++        if (!path_ok(text) || !dims_ok(a, b))
++            return FALSE;
++        if (!g_strcmp0(v->uri, text) && v->width == a && v->height == b)
++            return FALSE;
++        g_free(v->uri);
++        v->uri = g_strdup(text);
++        v->width = a;
++        v->height = b;
++        return TRUE;
++    case CALL_VIDEO_PREVIEW:
++        if (!path_ok(text) || !dims_ok(a, b) || c < 0 || c > 3)
++            return FALSE;
++        g_free(v->preview);
++        v->preview = g_strdup(text);
++        v->preview_width = a;
++        v->preview_height = b;
++        v->preview_turns = c;
++        v->preview_mirrored = d != 0;
++        return TRUE;
++    case CALL_VIDEO_SENDING:
++        return set_flag(&v->sending, a);
++    case CALL_VIDEO_PEER_CAMERA:
++        return set_flag(&v->peer_camera, a);
++    case CALL_VIDEO_PEER_ROTATION:
++        if (a < 0 || a > 3 || v->peer_rotation == a)
++            return FALSE;
++        v->peer_rotation = a;
++        return TRUE;
++    case CALL_VIDEO_ERROR:
++    default:
++        return FALSE;
++    }
++}
++
++gboolean call_video_active(const CallVideo *v)
++{
++    return v->offered || v->peer_camera || v->sending;
++}
++
++static const char *incoming_state(const CallVideo *v)
++{
++    if (v->show_incoming && v->peer_camera && v->uri)
++        return "streaming";
++    if (v->offered || v->peer_camera)
++        return "available";
++    return "unavailable";
++}
++
++gchar *call_video_line_fields(const CallVideo *v)
++{
++    return g_strdup_printf("\"incomingVideo\":%s,\"outgoingVideo\":%s,"
++                           "\"incomingVideoState\":\"%s\",\"incomingVideoOrientation\":%d",
++                           v->show_incoming && v->peer_camera ? "true" : "false",
++                           v->sending ? "true" : "false",
++                           incoming_state(v), v->peer_rotation);
++}
++
++gchar *call_video_payload_fields(const CallVideo *v)
++{
++    if (!v->uri || !v->show_incoming)
++        return g_strdup("");
++    GString *s = g_string_new(NULL);
++    g_string_append_printf(s, ",\"videoURI\":\"%s\",\"videoWidth\":%d,\"videoHeight\":%d",
++                           v->uri, v->width, v->height);
++    if (v->preview && v->sending)
++        g_string_append_printf(s, ",\"videoPreviewURI\":\"%s\",\"videoPreviewWidth\":%d,"
++                                  "\"videoPreviewHeight\":%d,\"videoPreviewOrientation\":%d,"
++                                  "\"videoPreviewMirrored\":%s",
++                               v->preview, v->preview_width, v->preview_height, v->preview_turns,
++                               v->preview_mirrored ? "true" : "false");
++    return g_string_free(s, FALSE);
++}
++
++int call_video_json_bool(const char *payload, const char *key)
++{
++    if (!payload || !key)
++        return -1;
++    gchar *needle = g_strdup_printf("\"%s\"", key);
++    const char *k = strstr(payload, needle);
++    gsize nl = strlen(needle);
++    g_free(needle);
++    if (!k)
++        return -1;
++    const char *c = k + nl;
++    while (*c == ' ' || *c == '\t' || *c == '\n' || *c == '\r')
++        c++;
++    if (*c != ':')
++        return -1;
++    c++;
++    while (*c == ' ' || *c == '\t' || *c == '\n' || *c == '\r')
++        c++;
++    if (!strncmp(c, "true", 4))
++        return 1;
++    if (!strncmp(c, "false", 5))
++        return 0;
++    return -1;
++}
+diff --git a/src/c/call_video.h b/src/c/call_video.h
+new file mode 100644
+index 0000000..c78ecbc
+--- /dev/null
++++ b/src/c/call_video.h
+@@ -0,0 +1,51 @@
++/* Video in a 1:1 Signal call, as the Phone app sees it: the state call.c keeps from the media
++ * engine's video lines (call_video.rs) and the JSON fields it adds to callStateQuery. GLib only, so
++ * tests/test_call_video.c runs it on its own. */
++#ifndef PRESAGE_CALL_VIDEO_H
++#define PRESAGE_CALL_VIDEO_H
++
++#include <glib.h>
++
++/* The kinds presage_handle_call_video takes (must match call_video.rs). */
++#define CALL_VIDEO_OFFERED        0u  /* an incoming Offer was a video call, or we dialled one */
++#define CALL_VIDEO_SHM            1u  /* a, b: size; text: the far side's picture socket */
++#define CALL_VIDEO_PREVIEW        2u  /* a, b: size; c: quarter turns; d: mirrored; text: socket */
++#define CALL_VIDEO_SENDING        3u  /* a: our camera sends (1) or stopped (0) */
++#define CALL_VIDEO_PEER_CAMERA    4u  /* a: the far side's camera on (1) or off (0) */
++#define CALL_VIDEO_PEER_ROTATION  5u  /* a: quarter turns for the far side's picture */
++#define CALL_VIDEO_ERROR          6u  /* text: what failed */
++
++typedef struct {
++    gboolean offered;        /* a video call from the start */
++    gboolean show_incoming;  /* the user wants the far side's picture (changeMedia incomingVideo) */
++    gboolean peer_camera;    /* the far side says its camera is on */
++    gboolean sending;        /* our camera is sending */
++    int      peer_rotation;  /* 0..3 */
++    gchar   *uri;            /* the far side's picture: gst-shm socket path, or NULL */
++    int      width, height;
++    gchar   *preview;        /* our camera's self-view socket, or NULL */
++    int      preview_width, preview_height, preview_turns;
++    gboolean preview_mirrored;
++} CallVideo;
++
++/* Back to a voice call with nothing known (frees the strings). */
++void call_video_reset(CallVideo *v);
++
++/* Apply one event. Returns TRUE if what the Phone app sees changed. */
++gboolean call_video_apply(CallVideo *v, guint kind, int a, int b, int c, int d, const char *text);
++
++/* True if the call is a video call in either direction (for audiod's "video"). */
++gboolean call_video_active(const CallVideo *v);
++
++/* The line's fields, without braces: "incomingVideo":..,"outgoingVideo":..,
++ * "incomingVideoState":"..","incomingVideoOrientation":n */
++gchar *call_video_line_fields(const CallVideo *v);
++
++/* The payload's fields, each preceded by a comma, or "" when there is no picture to show:
++ * ,"videoURI":"..","videoWidth":w,"videoHeight":h[,"videoPreviewURI":.. ...] */
++gchar *call_video_payload_fields(const CallVideo *v);
++
++/* A boolean field of a flat JSON object: 1 true, 0 false, -1 absent or not a boolean. */
++int call_video_json_bool(const char *payload, const char *key);
++
++#endif
 diff --git a/src/c/connection.c b/src/c/connection.c
-index 326b7a5..841913f 100755
+index c4fa7ac..87751db 100755
 --- a/src/c/connection.c
 +++ b/src/c/connection.c
-@@ -76,6 +76,9 @@ void presage_login(PurpleAccount *account) {
+@@ -61,6 +61,9 @@ void presage_login(PurpleAccount *account) {
      pc_flags |= PURPLE_CONNECTION_FLAG_NO_BGCOLOR;
      purple_connection_set_flags(connection, pc_flags);
      purple_connection_set_state(connection, PURPLE_CONNECTION_STATE_CONNECTING);
@@ -532,12 +960,12 @@ index 326b7a5..841913f 100755
      // webOS reactions (SEND): connect ONCE to the transport's "webos-im-send-reaction" signal so a
      // reaction the user places from the app is transmitted over Signal. The signal is registered by the
      // transport on the conversations handle; connect with a static guard so reconnects/multiple accounts
-@@ -114,6 +117,7 @@ void presage_login(PurpleAccount *account) {
+@@ -84,6 +87,7 @@ void presage_login(PurpleAccount *account) {
  void presage_close(PurpleConnection *connection) {
      PurpleAccount *account = purple_connection_get_account(connection);
      Presage *presage = purple_connection_get_protocol_data(connection);
 +    callLunaShutdown(account);
-     presage_rust_exit(account, rust_runtime, presage->tx_ptr);
+     presage_rust_exit(account, presage->tx_ptr);
      presage->tx_ptr = NULL; // presage_rust_exit drops tx, we must no longer use it
  }
 diff --git a/src/c/init.c b/src/c/init.c
@@ -564,20 +992,21 @@ index 05348dc..8574bce 100644
  }
  
 diff --git a/src/c/presage.h b/src/c/presage.h
-index c956fa9..83a55b8 100755
+index b63f1a5..010bd34 100755
 --- a/src/c/presage.h
 +++ b/src/c/presage.h
-@@ -35,6 +35,9 @@ void presage_rust_drop_attachment(RustAttachmentPtr);
- void presage_rust_get_group_members(PurpleAccount *, RustRuntimePtr, RustChannelPtr, const char *);
- void presage_rust_get_profile(PurpleAccount *, RustRuntimePtr, RustChannelPtr, const char *);
- void presage_rust_list_groups(PurpleAccount *, RustRuntimePtr, RustChannelPtr);
-+void presage_rust_place_call(PurpleAccount *, RustRuntimePtr, RustChannelPtr, const char *); /* outgoing call: callee address */
-+void presage_rust_hangup_call(PurpleAccount *, RustRuntimePtr, RustChannelPtr, const char *, uint64_t); /* hang up: callee address + call_id */
-+void presage_rust_accept_call(PurpleAccount *, RustRuntimePtr, RustChannelPtr, uint64_t); /* accept incoming: call_id -> engine sends rtp-data Accepted */
+@@ -35,6 +35,10 @@ void presage_rust_drop_attachment(RustAttachmentPtr);
+ void presage_rust_get_group_members(PurpleAccount *, RustChannelPtr, const char *);
+ void presage_rust_get_profile(PurpleAccount *, RustChannelPtr, const char *);
+ void presage_rust_list_groups(PurpleAccount *, RustChannelPtr);
++void presage_rust_place_call(PurpleAccount *, RustChannelPtr, const char *, int video); /* outgoing call: callee address, video 0/1 */
++void presage_rust_set_call_video(PurpleAccount *, RustChannelPtr, uint64_t, int on); /* our camera on/off in a call */
++void presage_rust_hangup_call(PurpleAccount *, RustChannelPtr, const char *, uint64_t); /* hang up: callee address + call_id */
++void presage_rust_accept_call(PurpleAccount *, RustChannelPtr, uint64_t); /* accept incoming: call_id -> engine sends rtp-data Accepted */
  // webOS reactions (SEND): transmit a reaction the user placed from the app. (peer, target sent timestamp, emoji, remove flag)
- void presage_rust_send_reaction(PurpleAccount *, RustRuntimePtr, RustChannelPtr, const char *peer, uint64_t target_ts, const char *emoji, int remove);
+ void presage_rust_send_reaction(PurpleAccount *, RustChannelPtr, const char *peer, uint64_t target_ts, const char *emoji, int remove);
  
-@@ -42,6 +45,12 @@ void presage_rust_send_reaction(PurpleAccount *, RustRuntimePtr, RustChannelPtr,
+@@ -42,6 +46,14 @@ void presage_rust_send_reaction(PurpleAccount *, RustChannelPtr, const char *pee
  // load; deletes <purple_user_dir()>/presage/<username>.db3 (+ sqlite sidecars) for the removed account.
  void presage_account_removed_cb(PurpleAccount *account, void *unused);
  
@@ -586,37 +1015,152 @@ index c956fa9..83a55b8 100755
 +void callLunaInit(PurpleAccount *account);
 +void callLunaShutdown(PurpleAccount *account);
 +void presage_handle_call_state(PurpleAccount *account, const char *who, const char *name, uint32_t state, uint64_t call_id);
++// presage_handle_call_video: the media engine's video events for a call (kinds in call_video.h).
++void presage_handle_call_video(uint64_t call_id, uint32_t kind, int32_t a, int32_t b, int32_t c, int32_t d, const char *text);
 +
  extern RustRuntimePtr rust_runtime;
  
  // structures for receiving messages from rust
-diff --git a/src/rust/Cargo.lock b/src/rust/Cargo.lock
-index 8fbef92..52b88c0 100644
---- a/src/rust/Cargo.lock
-+++ b/src/rust/Cargo.lock
-@@ -2414,6 +2414,8 @@ dependencies = [
-  "presage",
-  "presage-store-sqlite",
-  "reqwest 0.12.28",
-+ "serde",
-+ "serde_json",
-  "tokio",
-  "tracing",
-  "tracing-core",
+diff --git a/src/c/tests/test_call_video.c b/src/c/tests/test_call_video.c
+new file mode 100644
+index 0000000..40e7311
+--- /dev/null
++++ b/src/c/tests/test_call_video.c
+@@ -0,0 +1,129 @@
++/* Unit test for call_video.c: build with glib-2.0 only, e.g.
++ *   cc -I.. test_call_video.c ../call_video.c $(pkg-config --cflags --libs glib-2.0) */
++#include "call_video.h"
++#include <stdio.h>
++#include <string.h>
++
++static int failures;
++#define CHECK(c) do { if (!(c)) { failures++; fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); } } while (0)
++
++static gboolean has(const gchar *s, const char *sub) { return s && strstr(s, sub) != NULL; }
++
++static void test_voice_call(void)
++{
++    CallVideo v = {0};
++    call_video_reset(&v);
++    CHECK(!call_video_active(&v));
++    gchar *l = call_video_line_fields(&v), *p = call_video_payload_fields(&v);
++    CHECK(!strcmp(l, "\"incomingVideo\":false,\"outgoingVideo\":false,"
++                     "\"incomingVideoState\":\"unavailable\",\"incomingVideoOrientation\":0"));
++    CHECK(!strcmp(p, ""));
++    g_free(l); g_free(p);
++    call_video_reset(&v);
++}
++
++static void test_video_call(void)
++{
++    CallVideo v = {0};
++    call_video_reset(&v);
++    CHECK(call_video_apply(&v, CALL_VIDEO_OFFERED, 0, 0, 0, 0, NULL));
++    CHECK(!call_video_apply(&v, CALL_VIDEO_OFFERED, 0, 0, 0, 0, NULL));   /* no change */
++    CHECK(call_video_active(&v));
++    gchar *l = call_video_line_fields(&v);
++    CHECK(has(l, "\"incomingVideoState\":\"available\""));   /* rings as a video call */
++    CHECK(has(l, "\"incomingVideo\":false"));
++    g_free(l);
++
++    /* The picture's socket alone is not streaming: the far side has not said its camera is on. */
++    CHECK(call_video_apply(&v, CALL_VIDEO_SHM, 640, 480, 0, 0, "/tmp/signal-video"));
++    CHECK(!call_video_apply(&v, CALL_VIDEO_SHM, 640, 480, 0, 0, "/tmp/signal-video"));
++    l = call_video_line_fields(&v);
++    CHECK(has(l, "\"incomingVideoState\":\"available\""));
++    g_free(l);
++    CHECK(call_video_apply(&v, CALL_VIDEO_PEER_CAMERA, 1, 0, 0, 0, NULL));
++    CHECK(call_video_apply(&v, CALL_VIDEO_PEER_ROTATION, 3, 0, 0, 0, NULL));
++    CHECK(!call_video_apply(&v, CALL_VIDEO_PEER_ROTATION, 3, 0, 0, 0, NULL));
++    l = call_video_line_fields(&v);
++    CHECK(!strcmp(l, "\"incomingVideo\":true,\"outgoingVideo\":false,"
++                     "\"incomingVideoState\":\"streaming\",\"incomingVideoOrientation\":3"));
++    g_free(l);
++    gchar *p = call_video_payload_fields(&v);
++    CHECK(!strcmp(p, ",\"videoURI\":\"/tmp/signal-video\",\"videoWidth\":640,\"videoHeight\":480"));
++    g_free(p);
++
++    /* Our camera: the self-view only while it sends. */
++    CHECK(call_video_apply(&v, CALL_VIDEO_PREVIEW, 320, 240, 1, 1, "/tmp/signal-preview"));
++    p = call_video_payload_fields(&v);
++    CHECK(!has(p, "videoPreviewURI"));
++    g_free(p);
++    CHECK(call_video_apply(&v, CALL_VIDEO_SENDING, 1, 0, 0, 0, NULL));
++    l = call_video_line_fields(&v);
++    CHECK(has(l, "\"outgoingVideo\":true"));
++    g_free(l);
++    p = call_video_payload_fields(&v);
++    CHECK(has(p, ",\"videoPreviewURI\":\"/tmp/signal-preview\",\"videoPreviewWidth\":320,"
++                 "\"videoPreviewHeight\":240,\"videoPreviewOrientation\":1,\"videoPreviewMirrored\":true"));
++    g_free(p);
++
++    /* The user turns the far side's picture away: nothing to show, no streaming. */
++    v.show_incoming = FALSE;
++    l = call_video_line_fields(&v);
++    p = call_video_payload_fields(&v);
++    CHECK(has(l, "\"incomingVideo\":false") && has(l, "\"incomingVideoState\":\"available\""));
++    CHECK(!strcmp(p, ""));
++    g_free(l); g_free(p);
++    v.show_incoming = TRUE;
++
++    /* The far side turns its camera off. */
++    CHECK(call_video_apply(&v, CALL_VIDEO_PEER_CAMERA, 0, 0, 0, 0, NULL));
++    l = call_video_line_fields(&v);
++    CHECK(has(l, "\"incomingVideo\":false") && has(l, "\"incomingVideoState\":\"available\""));
++    g_free(l);
++
++    call_video_reset(&v);
++    CHECK(!v.uri && !v.preview && !v.offered && v.show_incoming);
++}
++
++static void test_bad_input(void)
++{
++    CallVideo v = {0};
++    call_video_reset(&v);
++    CHECK(!call_video_apply(&v, CALL_VIDEO_SHM, 640, 480, 0, 0, NULL));
++    CHECK(!call_video_apply(&v, CALL_VIDEO_SHM, 640, 480, 0, 0, "relative"));
++    CHECK(!call_video_apply(&v, CALL_VIDEO_SHM, 640, 480, 0, 0, "/tmp/a\"b"));
++    CHECK(!call_video_apply(&v, CALL_VIDEO_SHM, 640, 480, 0, 0, "/tmp/a\\b"));
++    CHECK(!call_video_apply(&v, CALL_VIDEO_SHM, 640, 480, 0, 0, "/tmp/a\nb"));
++    CHECK(!call_video_apply(&v, CALL_VIDEO_SHM, 0, 480, 0, 0, "/tmp/x"));
++    CHECK(!call_video_apply(&v, CALL_VIDEO_SHM, 640, 5000, 0, 0, "/tmp/x"));
++    char longp[120]; memset(longp, 'a', sizeof longp); longp[0] = '/'; longp[119] = 0;
++    CHECK(!call_video_apply(&v, CALL_VIDEO_SHM, 640, 480, 0, 0, longp));
++    CHECK(!call_video_apply(&v, CALL_VIDEO_PREVIEW, 320, 240, 4, 0, "/tmp/p"));
++    CHECK(!call_video_apply(&v, CALL_VIDEO_PEER_ROTATION, 4, 0, 0, 0, NULL));
++    CHECK(!call_video_apply(&v, CALL_VIDEO_PEER_ROTATION, -1, 0, 0, 0, NULL));
++    CHECK(!call_video_apply(&v, CALL_VIDEO_ERROR, 0, 0, 0, 0, "tx-encoder"));
++    CHECK(!call_video_apply(&v, 99, 0, 0, 0, 0, NULL));
++    CHECK(!v.uri && !v.preview && v.peer_rotation == 0);
++    call_video_reset(&v);
++}
++
++static void test_json_bool(void)
++{
++    CHECK(call_video_json_bool("{\"id\":\"sig-1\",\"outgoingVideo\":true}", "outgoingVideo") == 1);
++    CHECK(call_video_json_bool("{\"outgoingVideo\" : false}", "outgoingVideo") == 0);
++    CHECK(call_video_json_bool("{\"incomingVideo\":true}", "outgoingVideo") == -1);
++    CHECK(call_video_json_bool("{\"outgoingVideo\":\"true\"}", "outgoingVideo") == -1);
++    CHECK(call_video_json_bool("{\"video\":true,\"audio\":true}", "video") == 1);
++    CHECK(call_video_json_bool("{\"address\":\"x\"}", "video") == -1);
++    CHECK(call_video_json_bool(NULL, "video") == -1);
++}
++
++int main(void)
++{
++    test_voice_call();
++    test_video_call();
++    test_bad_input();
++    test_json_bool();
++    if (failures) { fprintf(stderr, "FAIL test_call_video (%d)\n", failures); return 1; }
++    printf("PASS test_call_video\n");
++    return 0;
++}
 diff --git a/src/rust/Cargo.toml b/src/rust/Cargo.toml
-index f63f809..e3797a8 100755
+index f47ceb3..fea0f62 100755
 --- a/src/rust/Cargo.toml
 +++ b/src/rust/Cargo.toml
-@@ -22,6 +22,8 @@ chrono = { version = "0.4", default-features = false, features = ["serde", "cloc
- #stdint = "0.2" # TODO: find out how to use this for more reliable type widths
- # these are mentioned in https://github.com/whisperfish/presage/blob/f74b96e/Cargo.lock
- reqwest = { version = "0.12.28", default-features = false, features = [] }
-+serde = { version = "1", features = ["derive"] }
-+serde_json = "1"
- hyper-util = "0.1.20"
- itertools = "*"
- # these version numbers are taken from https://github.com/whisperfish/presage/blob/f74b96e/presage-cli/Cargo.toml
-@@ -30,7 +32,7 @@ tracing-core = "0.1"
+@@ -30,7 +30,7 @@ tracing-core = "0.1"
  tracing-subscriber = { version = "0.3", features = ["env-filter"] }
  futures = "0.3"
  hex = "0.4"
@@ -626,10 +1170,10 @@ index f63f809..e3797a8 100755
  # https://github.com/johnthagen/min-sized-rust
  [profile.release]
 diff --git a/src/rust/src/bridge.rs b/src/rust/src/bridge.rs
-index 24edc1a..4d365cf 100755
+index c9330ee..3af3a98 100755
 --- a/src/rust/src/bridge.rs
 +++ b/src/rust/src/bridge.rs
-@@ -112,6 +112,15 @@ extern "C" {
+@@ -112,6 +112,26 @@ extern "C" {
          who: *const std::os::raw::c_char,
      ) -> *const std::os::raw::c_char;
  
@@ -642,10 +1186,21 @@ index 24edc1a..4d365cf 100755
 +        call_id: u64,
 +    );
 +
++    // implemented by call.c - a video event of a call (kinds in call_video.h / call_video.rs)
++    fn presage_handle_call_video(
++        call_id: u64,
++        kind: u32,
++        a: i32,
++        b: i32,
++        c: i32,
++        d: i32,
++        text: *const std::os::raw::c_char,
++    );
++
      // implemented by receive_text.c - emit the cross-prpl "webos-im-reaction" signal.
      fn presage_emit_reaction(
          account: *mut crate::bridge_structs::PurpleAccount,
-@@ -138,6 +147,33 @@ extern "C" {
+@@ -138,6 +158,45 @@ extern "C" {
      );
  }
  
@@ -657,6 +1212,8 @@ index 24edc1a..4d365cf 100755
 +pub const CALL_STATE_BUSY: u32 = 3;
 +pub const CALL_STATE_ACTIVE: u32 = 4; // peer answered OUR outgoing call -> connected
 +pub const CALL_STATE_DIALING: u32 = 5; // we placed an outgoing call (Offer sent) -> ringing peer
++// 6 is call.c's local SIG_CALL_ANSWERED.
++pub const CALL_STATE_ANSWERED_ELSEWHERE: u32 = 7; // an incoming call taken on another of our devices
 +
 +// Push a Signal call's state to the Phone app through call.c (thread-safe: call.c hops to the
 +// main thread).
@@ -676,43 +1233,66 @@ index 24edc1a..4d365cf 100755
 +    }
 +}
 +
++// Push a video event of call `call_id` to the Phone app through call.c (thread-safe: call.c hops
++// to the main thread).
++pub fn handle_call_video(call_id: u64, ev: &crate::call_video::VideoEvent) {
++    let (kind, a, b, c, d, text) = crate::call_video::ffi_args(ev);
++    let text = std::ffi::CString::new(text).unwrap_or_default();
++    unsafe {
++        presage_handle_call_video(call_id, kind, a, b, c, d, text.as_ptr());
++    }
++}
++
  // webOS reactions: forward a Signal reaction to the transport via the "webos-im-reaction" signal.
  // target_id is the reacted-to message's sent timestamp (its serviceMessageId); sender is the reactor's
  // UUID; an empty emoji ("") means the reaction was removed.
-@@ -389,6 +425,9 @@ pub unsafe extern "C" fn presage_rust_main(
+@@ -400,6 +459,9 @@ pub unsafe extern "C" fn presage_rust_main(
  
-     // create a channel for asynchronous communication of commands c → rust
-     let (tx, rx) = tokio::sync::mpsc::channel(32);
-+    // give the call media bridge a clone so its per-call reader thread can enqueue outgoing
-+    // CallMessage Answer/IceUpdate for the command loop (which owns the Manager) to send.
-+    crate::call_bridge::set_command_sender(tx.clone());
-     // put the sender into a box so it can live in the C part
-     let tx_box = Box::new(tx);
-     append_message(Message {
+         // create a channel for asynchronous communication of commands c → rust
+         let (tx, rx) = tokio::sync::mpsc::channel(32);
++        // give the call media bridge a clone so its per-call reader thread can enqueue outgoing
++        // CallMessage Answer/IceUpdate for the command loop (which owns the Manager) to send.
++        crate::call_bridge::set_command_sender(tx.clone());
+         // put the sender into a box so it can live in the C part
+         let tx_box = Box::new(tx);
+         append_message(Message {
 diff --git a/src/rust/src/bridge_commands.rs b/src/rust/src/bridge_commands.rs
-index 0dcc5a7..b764731 100755
+index 1d453d1..8065e6d 100755
 --- a/src/rust/src/bridge_commands.rs
 +++ b/src/rust/src/bridge_commands.rs
-@@ -55,6 +55,57 @@ pub unsafe extern "C" fn presage_rust_whoami(
-     send_cmd(account, rt, tx, cmd);
+@@ -58,6 +58,68 @@ pub unsafe extern "C" fn presage_rust_whoami(
+     send_cmd(account, tx, cmd);
  }
  
-+/// Place an OUTGOING Signal call to `c_callee` (the dialer's address, i.e. the Signal UUID). The
++/// Place an OUTGOING Signal call to `c_callee` (the dialer's address, i.e. the Signal UUID), with
++/// video if `video` is non-zero. The
 +/// command loop resolves the recipient + identity keys, has the call bridge generate our keypair,
 +/// and sends the RingRTC Offer. call.c invokes this from its LS2 `dial` handler.
 +#[no_mangle]
 +pub unsafe extern "C" fn presage_rust_place_call(
 +    account: *mut crate::bridge_structs::PurpleAccount,
-+    rt: *mut tokio::runtime::Runtime,
 +    tx: *mut tokio::sync::mpsc::Sender<crate::structs::Cmd>,
 +    c_callee: *const std::os::raw::c_char,
++    video: std::os::raw::c_int,
 +) {
 +    let callee = match std::ffi::CStr::from_ptr(c_callee).to_str() {
 +        Ok(s) => s.to_string(),
 +        Err(_) => return,
 +    };
-+    let cmd = crate::structs::Cmd::PlaceCall { callee };
-+    send_cmd(account, rt, tx, cmd);
++    let cmd = crate::structs::Cmd::PlaceCall { callee, video: video != 0 };
++    send_cmd(account, tx, cmd);
++}
++
++/// The user turned our camera on or off in call `call_id` (call.c's changeMedia handler).
++#[no_mangle]
++pub unsafe extern "C" fn presage_rust_set_call_video(
++    account: *mut crate::bridge_structs::PurpleAccount,
++    tx: *mut tokio::sync::mpsc::Sender<crate::structs::Cmd>,
++    call_id: u64,
++    on: std::os::raw::c_int,
++) {
++    let cmd = crate::structs::Cmd::SetCallVideo { call_id, on: on != 0 };
++    send_cmd(account, tx, cmd);
 +}
 +
 +/// The user tapped Answer on an incoming call: tell the media engine to emit the RingRTC rtp-data
@@ -720,12 +1300,11 @@ index 0dcc5a7..b764731 100755
 +#[no_mangle]
 +pub unsafe extern "C" fn presage_rust_accept_call(
 +    account: *mut crate::bridge_structs::PurpleAccount,
-+    rt: *mut tokio::runtime::Runtime,
 +    tx: *mut tokio::sync::mpsc::Sender<crate::structs::Cmd>,
 +    call_id: u64,
 +) {
 +    let cmd = crate::structs::Cmd::AcceptCall { call_id };
-+    send_cmd(account, rt, tx, cmd);
++    send_cmd(account, tx, cmd);
 +}
 +
 +/// The user hung up: send the peer a Hangup for `call_id` and tear down our media engine. `c_callee`
@@ -733,7 +1312,6 @@ index 0dcc5a7..b764731 100755
 +#[no_mangle]
 +pub unsafe extern "C" fn presage_rust_hangup_call(
 +    account: *mut crate::bridge_structs::PurpleAccount,
-+    rt: *mut tokio::runtime::Runtime,
 +    tx: *mut tokio::sync::mpsc::Sender<crate::structs::Cmd>,
 +    c_callee: *const std::os::raw::c_char,
 +    call_id: u64,
@@ -745,7 +1323,7 @@ index 0dcc5a7..b764731 100755
 +    // Pass the raw address through - it may be a UUID or (for an outgoing call reported under the dialed
 +    // number) an E.164. The command handler resolves it, so hangup works either way.
 +    let cmd = crate::structs::Cmd::HangupCall { callee, call_id };
-+    send_cmd(account, rt, tx, cmd);
++    send_cmd(account, tx, cmd);
 +}
 +
  // TODO: wire this up completely
@@ -753,10 +1331,10 @@ index 0dcc5a7..b764731 100755
  pub unsafe extern "C" fn presage_rust_list_groups(
 diff --git a/src/rust/src/call_bridge.rs b/src/rust/src/call_bridge.rs
 new file mode 100644
-index 0000000..cd32b77
+index 0000000..f6378e7
 --- /dev/null
 +++ b/src/rust/src/call_bridge.rs
-@@ -0,0 +1,533 @@
+@@ -0,0 +1,581 @@
 +//! Signal 1:1 call media bridge (presage side).
 +//!
 +//! Runs the signal-call-media engine (built and installed by its own recipe, from
@@ -772,6 +1350,8 @@ index 0000000..cd32b77
 +//!                        on_answer: spawn the engine with --caller, feed RELAY + START
 +//!   incoming IceUpdate --> decode_ice_opaque -> feed the engine "RCAND <candidate>"
 +//!   user answered    --> "ACCEPT <call_id>": the engine opens the mic and sends RingRTC's Accepted
++//!   camera on/off    --> "VIDEO <0|1>" (our outgoing call's id goes in as "CALLID <id>")
++//!   engine video lines (VSHM, VPREVIEW, VTX, PEERVIDEO, PEERROT, VIDEOERR) --> call.c (call_video.rs)
 +//!   hangup/busy      --> "STOP" and reap the engine
 +//!
 +//! The engine does the X25519 DH, the AEAD_AES_256_GCM SRTP keying, ICE, Opus and the PulseAudio
@@ -1041,6 +1621,8 @@ index 0000000..cd32b77
 +            } else if let Some(cand) = line.strip_prefix("CAND ") {
 +                let opaque = crate::call_media::encode_ice_opaque(cand.trim());
 +                enqueue(Cmd::SendCallIce { uuid: caller_uuid, call_id, opaque });
++            } else {
++                forward_video_line(call_id, &line);
 +            }
 +            // READY / AUDIOD / ERR are informational; call.c reports the call to audiod.
 +        }
@@ -1103,6 +1685,32 @@ index 0000000..cd32b77
 +    dialed().lock().unwrap().get(&call_id).cloned()
 +}
 +
++/// Whether the user wants our camera on, per call: set when a video call is placed or the Phone app
++/// asks (changeMedia), and handed to the engine when it starts.
++static VIDEO_WANTED: OnceLock<Mutex<HashMap<u64, bool>>> = OnceLock::new();
++fn video_wanted() -> &'static Mutex<HashMap<u64, bool>> {
++    VIDEO_WANTED.get_or_init(|| Mutex::new(HashMap::new()))
++}
++
++/// Report an engine line to call.c if it is about video.
++fn forward_video_line(call_id: u64, line: &str) {
++    if let Some(ev) = crate::call_video::parse_engine_line(line) {
++        crate::bridge::handle_call_video(call_id, &ev);
++    }
++}
++
++/// Turn our camera on or off in `call_id`. Before the engine runs (an outgoing call not yet
++/// answered) it is remembered and given to the engine when it starts. The engine itself sends no
++/// video before the call is answered.
++pub fn set_video(call_id: u64, on: bool) {
++    video_wanted().lock().unwrap().insert(call_id, on);
++    let mut guard = calls().lock().unwrap();
++    if let Some(cp) = guard.get_mut(&call_id) {
++        let _ = cp.stdin.write_all(crate::call_video::video_command(on).as_bytes());
++        let _ = cp.stdin.flush();
++    }
++}
++
 +/// call_ids the user has ACCEPTED on THIS (linked) device. LuneOS is a secondary Signal device; an
 +/// incoming call rings this device AND the user's primary phone. When we accept, the caller broadcasts
 +/// `Hangup{type=ACCEPTED, device_id=<us>}` to the account so the OTHER devices stop ringing - but Signal
@@ -1142,7 +1750,12 @@ index 0000000..cd32b77
 +/// Place an OUTGOING call. Generates our ephemeral keypair + ICE creds, stores pending state (so
 +/// on_answer can start media), and returns (call_id, offer_opaque) for the command loop to send as
 +/// a CallMessage Offer to `callee`.
-+pub fn place_call(callee: Uuid, caller_id: Vec<u8>, callee_id: Vec<u8>) -> Result<(u64, Vec<u8>), String> {
++pub fn place_call(
++    callee: Uuid,
++    caller_id: Vec<u8>,
++    callee_id: Vec<u8>,
++    video: bool,
++) -> Result<(u64, Vec<u8>), String> {
 +    let no_random = || "no random bytes".to_string();
 +    let priv32 = rand_bytes(32).ok_or_else(no_random)?;
 +    let pub32 = derive_pubkey(&priv32).ok_or_else(|| "could not derive our public key".to_string())?;
@@ -1169,6 +1782,9 @@ index 0000000..cd32b77
 +    );
 +    outgoing().lock().unwrap().insert(call_id);
 +    peers().lock().unwrap().insert(call_id, callee);
++    if video {
++        video_wanted().lock().unwrap().insert(call_id, true);
++    }
 +    Ok((call_id, opaque))
 +}
 +
@@ -1208,9 +1824,18 @@ index 0000000..cd32b77
 +            if let Some(cand) = line.strip_prefix("CAND ") {
 +                let opaque = crate::call_media::encode_ice_opaque(cand.trim());
 +                enqueue(Cmd::SendCallIce { uuid: callee, call_id, opaque });
++            } else {
++                forward_video_line(call_id, &line);
 +            }
 +        }
 +    });
++
++    // Our call's id goes into the SenderStatus the engine sends, and the camera starts if the user
++    // placed a video call (or turned it on while it rang).
++    let _ = stdin.write_all(crate::call_video::call_id_command(call_id).as_bytes());
++    if video_wanted().lock().unwrap().get(&call_id).copied().unwrap_or(false) {
++        let _ = stdin.write_all(crate::call_video::video_command(true).as_bytes());
++    }
 +
 +    // Flush any remote ICE that arrived between our Offer and this Answer.
 +    for op in &p.buffered_ice {
@@ -1267,6 +1892,7 @@ index 0000000..cd32b77
 +    pending().lock().unwrap().remove(&call_id);
 +    outgoing().lock().unwrap().remove(&call_id);
 +    accepted().lock().unwrap().remove(&call_id);
++    video_wanted().lock().unwrap().remove(&call_id);
 +    dialed().lock().unwrap().remove(&call_id);
 +    peers().lock().unwrap().remove(&call_id);
 +    let cp = calls().lock().unwrap().remove(&call_id);
@@ -1288,6 +1914,71 @@ index 0000000..cd32b77
 +    ids.extend(pending().lock().unwrap().keys().copied());
 +    for id in ids {
 +        stop(id);
++    }
++}
+diff --git a/src/rust/src/call_end.rs b/src/rust/src/call_end.rs
+new file mode 100644
+index 0000000..5aab09c
+--- /dev/null
++++ b/src/rust/src/call_end.rs
+@@ -0,0 +1,59 @@
++// webOS: how a Signal call's Hangup ends it here.
++//
++// RingRTC hangup types (SignalService.proto CallMessage.Hangup.Type): 0 NORMAL, 1 ACCEPTED,
++// 2 DECLINED, 3 BUSY. When one of the callee's devices answers, the caller sends Hangup
++// ACCEPTED (RingRTC Hangup::AcceptedOnAnotherDevice) to all the callee's other devices; this
++// linked device gets it for a call it rang for. The same message also reaches the device that
++// accepted (that is this one when the user answered here), which is no end at all and is
++// filtered out before this is asked.
++
++/// What a Hangup for a call means here.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum HangupEnd {
++    /// An incoming call taken on another of the user's devices: answered, not missed.
++    AnsweredElsewhere,
++    /// The call ended; `missed` when it was an incoming call nobody answered.
++    Ended { missed: bool },
++}
++
++/// `busy_replied`: we answered the call Busy (already reported as missed); `outgoing`: we
++/// placed it; `accepted_here`: the user answered it here; `hangup_type`: the Hangup's type.
++pub fn hangup_end(busy_replied: bool, outgoing: bool, accepted_here: bool, hangup_type: Option<i32>) -> HangupEnd {
++    let rang_here_untaken = !busy_replied && !outgoing && !accepted_here;
++    if rang_here_untaken && hangup_type == Some(1) {
++        return HangupEnd::AnsweredElsewhere;
++    }
++    // Declined on another device (2) is the user's own choice, not a missed call either.
++    HangupEnd::Ended { missed: rang_here_untaken && hangup_type != Some(1) && hangup_type != Some(2) }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn accepted_on_another_device_is_answered_elsewhere() {
++        assert_eq!(hangup_end(false, false, false, Some(1)), HangupEnd::AnsweredElsewhere);
++    }
++
++    #[test]
++    fn an_incoming_call_hung_up_unanswered_is_missed() {
++        assert_eq!(hangup_end(false, false, false, Some(0)), HangupEnd::Ended { missed: true });
++        assert_eq!(hangup_end(false, false, false, None), HangupEnd::Ended { missed: true });
++        assert_eq!(hangup_end(false, false, false, Some(3)), HangupEnd::Ended { missed: true });
++    }
++
++    #[test]
++    fn declined_on_another_device_is_neither() {
++        assert_eq!(hangup_end(false, false, false, Some(2)), HangupEnd::Ended { missed: false });
++    }
++
++    #[test]
++    fn calls_not_ringing_here_untaken_are_not_answered_elsewhere() {
++        for t in [Some(0), Some(1), Some(2), None] {
++            assert_eq!(hangup_end(false, true, false, t), HangupEnd::Ended { missed: false }, "outgoing {t:?}");
++            assert_eq!(hangup_end(false, false, true, t), HangupEnd::Ended { missed: false }, "answered here {t:?}");
++            assert_eq!(hangup_end(true, false, false, t), HangupEnd::Ended { missed: false }, "busy {t:?}");
++        }
 +    }
 +}
 diff --git a/src/rust/src/call_media.rs b/src/rust/src/call_media.rs
@@ -1497,11 +2188,244 @@ index 0000000..3cf69c2
 +        assert_eq!(encode_ice_opaque(&cand), ice);
 +    }
 +}
+diff --git a/src/rust/src/call_video.rs b/src/rust/src/call_video.rs
+new file mode 100644
+index 0000000..f45e5fa
+--- /dev/null
++++ b/src/rust/src/call_video.rs
+@@ -0,0 +1,227 @@
++//! Video in a 1:1 Signal call: what the media engine says about it, and the Offer's call type.
++//!
++//! The engine (luneos-synergy-connectors im/signal/calling/media) receives and sends the video
++//! itself; it reports on stdout where the pictures are and what each side's camera does:
++//!
++//!   VSHM <path> <w> <h>              the far side's decoded picture is on this gst-shm socket
++//!   VPREVIEW <path> <w> <h> <q> <m>  our camera's picture (q quarter turns, m mirrored 0/1)
++//!   VTX <0|1>                        our camera is sending / stopped
++//!   PEERVIDEO <0|1>                  the far side says its camera is on / off
++//!   PEERROT <q>                      the far side's picture needs q quarter turns
++//!   VIDEOERR <what>                  something could not be set up
++//!
++//! and it takes `VIDEO <0|1>` (our camera) and `CALLID <id>` (our outgoing call's id). call.c turns
++//! the events into the Phone app's line and payload video fields. No dependencies beyond std, so
++//! `rustc --test call_video.rs` runs these tests on their own.
++
++/// RingRTC's CallMessage.Offer.Type (SignalService.proto).
++pub const OFFER_AUDIO_CALL: i32 = 0;
++pub const OFFER_VIDEO_CALL: i32 = 1;
++
++/// The Offer type for a call placed with or without video.
++pub fn offer_type(video: bool) -> i32 {
++    if video { OFFER_VIDEO_CALL } else { OFFER_AUDIO_CALL }
++}
++
++/// True if an Offer of this type is a video call. A missing type is an audio call (the proto's
++/// default).
++pub fn offer_is_video(t: Option<i32>) -> bool {
++    t == Some(OFFER_VIDEO_CALL)
++}
++
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub enum VideoEvent {
++    /// An incoming Offer was a video call (from receive.rs, not the engine).
++    Offered,
++    Shm { path: String, width: u32, height: u32 },
++    Preview { path: String, width: u32, height: u32, quarter_turns: u8, mirrored: bool },
++    Sending(bool),
++    PeerCamera(bool),
++    PeerRotation(u8),
++    Error(String),
++}
++
++/// The kinds call.c's presage_handle_call_video takes (must match call_video.h).
++pub const KIND_OFFERED: u32 = 0;
++pub const KIND_SHM: u32 = 1;
++pub const KIND_PREVIEW: u32 = 2;
++pub const KIND_SENDING: u32 = 3;
++pub const KIND_PEER_CAMERA: u32 = 4;
++pub const KIND_PEER_ROTATION: u32 = 5;
++pub const KIND_ERROR: u32 = 6;
++
++/// The event as call.c's arguments: (kind, a, b, c, d, text). For Shm a/b are the size; for Preview
++/// a/b the size, c the quarter turns, d mirrored; for the on/off kinds a is 0 or 1; for
++/// PeerRotation a is the quarter turns. text is the path or the error, else empty.
++pub fn ffi_args(ev: &VideoEvent) -> (u32, i32, i32, i32, i32, String) {
++    match ev {
++        VideoEvent::Offered => (KIND_OFFERED, 0, 0, 0, 0, String::new()),
++        VideoEvent::Shm { path, width, height } => {
++            (KIND_SHM, *width as i32, *height as i32, 0, 0, path.clone())
++        }
++        VideoEvent::Preview { path, width, height, quarter_turns, mirrored } => (
++            KIND_PREVIEW,
++            *width as i32,
++            *height as i32,
++            *quarter_turns as i32,
++            *mirrored as i32,
++            path.clone(),
++        ),
++        VideoEvent::Sending(on) => (KIND_SENDING, *on as i32, 0, 0, 0, String::new()),
++        VideoEvent::PeerCamera(on) => (KIND_PEER_CAMERA, *on as i32, 0, 0, 0, String::new()),
++        VideoEvent::PeerRotation(q) => (KIND_PEER_ROTATION, *q as i32, 0, 0, 0, String::new()),
++        VideoEvent::Error(what) => (KIND_ERROR, 0, 0, 0, 0, what.clone()),
++    }
++}
++
++fn flag(s: &str) -> Option<bool> {
++    match s {
++        "0" => Some(false),
++        "1" => Some(true),
++        _ => None,
++    }
++}
++
++/// A picture size the Phone app can take: 1..=4096 each way.
++fn dim(s: &str) -> Option<u32> {
++    s.parse::<u32>().ok().filter(|v| (1..=4096).contains(v))
++}
++
++fn quarter(s: &str) -> Option<u8> {
++    s.parse::<u8>().ok().filter(|q| *q < 4)
++}
++
++/// A socket path the engine may name: absolute, no "..", no quote or backslash (it goes into
++/// JSON) and no control characters.
++fn shm_path(s: &str) -> Option<String> {
++    let ok = s.starts_with('/')
++        && s.len() < 108 // sun_path
++        && !s.split('/').any(|c| c == "..")
++        && !s.chars().any(|c| c == '"' || c == '\\' || c.is_control());
++    ok.then(|| s.to_string())
++}
++
++/// Parse one line of the engine's stdout. None for lines that are not about video, or are malformed.
++pub fn parse_engine_line(line: &str) -> Option<VideoEvent> {
++    let mut it = line.split_ascii_whitespace();
++    let word = it.next()?;
++    let rest: Vec<&str> = it.collect();
++    let ev = match (word, rest.as_slice()) {
++        ("VSHM", [p, w, h]) => VideoEvent::Shm { path: shm_path(p)?, width: dim(w)?, height: dim(h)? },
++        ("VPREVIEW", [p, w, h, q, m]) => VideoEvent::Preview {
++            path: shm_path(p)?,
++            width: dim(w)?,
++            height: dim(h)?,
++            quarter_turns: quarter(q)?,
++            mirrored: flag(m)?,
++        },
++        ("VTX", [v]) => VideoEvent::Sending(flag(v)?),
++        ("PEERVIDEO", [v]) => VideoEvent::PeerCamera(flag(v)?),
++        ("PEERROT", [q]) => VideoEvent::PeerRotation(quarter(q)?),
++        ("VIDEOERR", [what]) if what.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') => {
++            VideoEvent::Error(what.to_string())
++        }
++        _ => return None,
++    };
++    Some(ev)
++}
++
++/// The engine's command for our camera.
++pub fn video_command(on: bool) -> String {
++    format!("VIDEO {}\n", on as u8)
++}
++
++/// The engine's command naming our outgoing call (it goes into SenderStatus).
++pub fn call_id_command(call_id: u64) -> String {
++    format!("CALLID {call_id}\n")
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn offer_types() {
++        assert_eq!(offer_type(false), 0);
++        assert_eq!(offer_type(true), 1);
++        assert!(offer_is_video(Some(1)));
++        assert!(!offer_is_video(Some(0)));
++        assert!(!offer_is_video(None));
++        assert!(!offer_is_video(Some(2)));
++    }
++
++    #[test]
++    fn engine_lines() {
++        assert_eq!(
++            parse_engine_line("VSHM /tmp/signal-video 640 480"),
++            Some(VideoEvent::Shm { path: "/tmp/signal-video".into(), width: 640, height: 480 })
++        );
++        assert_eq!(
++            parse_engine_line("VPREVIEW /tmp/signal-preview 320 240 1 1"),
++            Some(VideoEvent::Preview {
++                path: "/tmp/signal-preview".into(),
++                width: 320,
++                height: 240,
++                quarter_turns: 1,
++                mirrored: true
++            })
++        );
++        assert_eq!(parse_engine_line("VTX 1"), Some(VideoEvent::Sending(true)));
++        assert_eq!(parse_engine_line("VTX 0"), Some(VideoEvent::Sending(false)));
++        assert_eq!(parse_engine_line("PEERVIDEO 0"), Some(VideoEvent::PeerCamera(false)));
++        assert_eq!(parse_engine_line("PEERVIDEO 1"), Some(VideoEvent::PeerCamera(true)));
++        assert_eq!(parse_engine_line("PEERROT 3"), Some(VideoEvent::PeerRotation(3)));
++        assert_eq!(parse_engine_line("VIDEOERR tx-encoder"), Some(VideoEvent::Error("tx-encoder".into())));
++    }
++
++    #[test]
++    fn other_and_bad_lines() {
++        for l in [
++            "",
++            "PUB 00",
++            "CAND candidate:1 1 udp 1 1.2.3.4 5 typ host",
++            "READY",
++            "VSHM /tmp/x 640",              // missing a field
++            "VSHM /tmp/x 640 480 1",        // one too many
++            "VSHM tmp/x 640 480",           // relative
++            "VSHM /tmp/../etc/x 640 480",   // ..
++            "VSHM /tmp/a\"b 640 480",       // a quote would break the JSON
++            "VSHM /tmp/x 0 480",
++            "VSHM /tmp/x 640 99999",
++            "VSHM /tmp/x -1 480",
++            "VPREVIEW /tmp/p 320 240 4 0",  // quarter turns 0..3
++            "VPREVIEW /tmp/p 320 240 1 2",
++            "VTX 2",
++            "VTX",
++            "PEERROT 4",
++            "PEERROT -1",
++            "VIDEOERR",
++            "VIDEOERR bad\"thing",
++            "vtx 1",
++        ] {
++            assert_eq!(parse_engine_line(l), None, "{l:?}");
++        }
++        let long = format!("VSHM /{} 640 480", "a".repeat(120));
++        assert_eq!(parse_engine_line(&long), None);
++    }
++
++    #[test]
++    fn ffi() {
++        let p = VideoEvent::Preview { path: "/p".into(), width: 320, height: 240, quarter_turns: 3, mirrored: true };
++        assert_eq!(ffi_args(&p), (KIND_PREVIEW, 320, 240, 3, 1, "/p".to_string()));
++        let s = VideoEvent::Shm { path: "/v".into(), width: 640, height: 480 };
++        assert_eq!(ffi_args(&s), (KIND_SHM, 640, 480, 0, 0, "/v".to_string()));
++        assert_eq!(ffi_args(&VideoEvent::PeerCamera(true)).1, 1);
++        assert_eq!(ffi_args(&VideoEvent::Sending(false)), (KIND_SENDING, 0, 0, 0, 0, String::new()));
++        assert_eq!(ffi_args(&VideoEvent::PeerRotation(2)).0, KIND_PEER_ROTATION);
++        assert_eq!(ffi_args(&VideoEvent::Offered).0, KIND_OFFERED);
++        assert_eq!(ffi_args(&VideoEvent::Error("x".into())), (KIND_ERROR, 0, 0, 0, 0, "x".to_string()));
++    }
++
++    #[test]
++    fn commands() {
++        assert_eq!(video_command(true), "VIDEO 1\n");
++        assert_eq!(video_command(false), "VIDEO 0\n");
++        assert_eq!(call_id_command(18446744073709551615), "CALLID 18446744073709551615\n");
++    }
++}
 diff --git a/src/rust/src/core.rs b/src/rust/src/core.rs
-index d1854ac..d72ec28 100755
+index d1854ac..659a222 100755
 --- a/src/rust/src/core.rs
 +++ b/src/rust/src/core.rs
-@@ -189,7 +189,233 @@ async fn run<C: presage::store::Store + 'static>(
+@@ -189,7 +189,240 @@ async fn run<C: presage::store::Store + 'static>(
              crate::attachment::get_attachment(account, manager, attachment_pointer, xfer).await;
              Ok(true)
          }
@@ -1588,7 +2512,11 @@ index d1854ac..d72ec28 100755
 +            }
 +            Ok(true)
 +        }
-+        crate::structs::Cmd::PlaceCall { callee } => {
++        crate::structs::Cmd::SetCallVideo { call_id, on } => {
++            crate::call_bridge::set_video(call_id, on);
++            Ok(true)
++        }
++        crate::structs::Cmd::PlaceCall { callee, video } => {
 +            // Resolve the callee to an ACI. The dialer usually passes the Signal UUID, but for a
 +            // cross-service-linked contact (a Signal thread keyed by a phone number) it passes an
 +            // E.164 number, which is looked up in the stored contacts like the phone-addressed send
@@ -1646,7 +2574,7 @@ index d1854ac..d72ec28 100755
 +            // the peer answers (on_answer). Without them ICE gathers host-only candidates -> no NAT
 +            // traversal -> the call hangs on "Connecting".
 +            crate::ice::refresh_ice_servers(&manager, account, std::time::Duration::from_secs(5), false).await;
-+            let (call_id, opaque) = match crate::call_bridge::place_call(uuid, caller_id, callee_id) {
++            let (call_id, opaque) = match crate::call_bridge::place_call(uuid, caller_id, callee_id, video) {
 +                Ok(c) => c,
 +                Err(e) => {
 +                    crate::bridge::purple_debug(
@@ -1667,7 +2595,7 @@ index d1854ac..d72ec28 100755
 +            let cm = presage::proto::CallMessage {
 +                offer: Some(presage::proto::call_message::Offer {
 +                    id: Some(call_id),
-+                    r#type: Some(presage::proto::call_message::offer::Type::OfferAudioCall as i32),
++                    r#type: Some(crate::call_video::offer_type(video)),
 +                    opaque: Some(opaque),
 +                    ..Default::default()
 +                }),
@@ -1689,6 +2617,9 @@ index d1854ac..d72ec28 100755
 +                crate::bridge::CALL_STATE_DIALING,
 +                call_id,
 +            );
++            if video {
++                crate::bridge::handle_call_video(call_id, &crate::call_video::VideoEvent::Offered);
++            }
 +            Ok(true)
 +        }
 +        crate::structs::Cmd::Exit {} => {
@@ -1736,7 +2667,7 @@ index d1854ac..d72ec28 100755
      }
  }
  
-@@ -396,6 +622,14 @@ async fn receive<S: presage::store::Store + Clone + 'static>(
+@@ -396,6 +629,14 @@ async fn receive<S: presage::store::Store + Clone + 'static>(
      // login failure (account stuck "signing in" then offline). Loop and re-open the stream on end;
      // only give up after several *consecutive* hard errors (which usually means the main device
      // unlinked us). Once catching-up finishes, handle_received() marks the account connected.
@@ -1753,10 +2684,10 @@ index d1854ac..d72ec28 100755
      // fresh Received::QueueEmpty. Reporting connected and priming phone numbers only need to happen
 diff --git a/src/rust/src/ice.rs b/src/rust/src/ice.rs
 new file mode 100644
-index 0000000..5973161
+index 0000000..70afa0b
 --- /dev/null
 +++ b/src/rust/src/ice.rs
-@@ -0,0 +1,199 @@
+@@ -0,0 +1,150 @@
 +//! Fetch Signal's calling ICE/TURN relays (`GET /v2/calling/relays`) and turn them into the STUN/TURN
 +//! servers the signal_media libnice agent needs.
 +//!
@@ -1766,8 +2697,6 @@ index 0000000..5973161
 +//! engine as `RELAY` lines ahead of `START` (see call_bridge.rs), and the engine wires them into the
 +//! nice agent via nice_agent_set_stun_server() / nice_agent_set_relay_info() (signal_media.c).
 +
-+use presage::libsignal_service::configuration::Endpoint;
-+use presage::libsignal_service::push_service::HttpAuthOverride;
 +use presage::manager::Registered;
 +use presage::store::Store;
 +use presage::Manager;
@@ -1789,27 +2718,6 @@ index 0000000..5973161
 +    pub transport: String, // "udp" | "tcp" | "tls"
 +    pub username: String,
 +    pub password: String,
-+}
-+
-+#[derive(serde::Deserialize)]
-+struct RelaysResponse {
-+    #[serde(default)]
-+    relays: Vec<Relay>,
-+}
-+
-+#[derive(serde::Deserialize)]
-+struct Relay {
-+    #[serde(default)]
-+    username: String,
-+    #[serde(default)]
-+    password: String,
-+    #[serde(default, rename = "urlsWithIps")]
-+    urls_with_ips: Vec<String>,
-+    #[serde(default)]
-+    urls: Vec<String>,
-+    /// How long the credentials are valid, in seconds, when the server says.
-+    #[serde(default)]
-+    ttl: Option<u64>,
 +}
 +
 +/// Parse a WebRTC ICE URL ("turn:1.2.3.4:80?transport=udp", "stun:1.2.3.4:3478") into an IceServer.
@@ -1877,38 +2785,19 @@ index 0000000..5973161
 +    }
 +}
 +
-+/// GET /v2/calling/relays with the account's identified credentials and flatten it to a STUN/TURN
-+/// list, with the shortest credential lifetime the server gave. None on any failure.
++/// GET /v2/calling/relays (presage's calling_relays()) and flatten it to a STUN/TURN list, with the
++/// shortest credential lifetime the server gave. None on any failure.
 +async fn fetch_ice_servers<C: Store>(
 +    manager: &Manager<C, Registered>,
 +    account: *mut PurpleAccount,
 +    timeout: std::time::Duration,
 +) -> Option<(Vec<IceServer>, Option<u64>)> {
 +    let warn = |msg: String| purple_debug(account, PURPLE_DEBUG_WARNING, format!("ice: {msg}\n"));
-+    let push = manager.identified_push_service();
-+    let builder = match push.request(
-+        reqwest::Method::GET,
-+        Endpoint::Service {
-+            path: "/v2/calling/relays".into(),
-+        },
-+        HttpAuthOverride::NoOverride,
-+    ) {
-+        Ok(b) => b,
-+        Err(e) => {
-+            warn(format!("could not build the /v2/calling/relays request: {e}"));
-+            return None;
-+        }
-+    };
 +    // Hard timeout on the whole request: this runs INSIDE presage's single command/receive loop, so a
 +    // hanging relays fetch would wedge all Signal traffic and the call would never even spawn the
 +    // engine.
-+    let fetch = async {
-+        let resp = builder.send().await.map_err(|e| format!("send: {e}"))?;
-+        let bytes = resp.bytes().await.map_err(|e| format!("body: {e}"))?;
-+        Ok::<_, String>(bytes)
-+    };
-+    let bytes = match tokio::time::timeout(timeout, fetch).await {
-+        Ok(Ok(b)) => b,
++    let relays = match tokio::time::timeout(timeout, manager.calling_relays()).await {
++        Ok(Ok(r)) => r,
 +        Ok(Err(e)) => {
 +            warn(format!("GET /v2/calling/relays failed: {e}"));
 +            return None;
@@ -1918,16 +2807,9 @@ index 0000000..5973161
 +            return None;
 +        }
 +    };
-+    let parsed: RelaysResponse = match serde_json::from_slice(&bytes) {
-+        Ok(p) => p,
-+        Err(e) => {
-+            warn(format!("parsing the relays failed: {e}"));
-+            return None;
-+        }
-+    };
 +
 +    let mut servers = Vec::new();
-+    for relay in &parsed.relays {
++    for relay in &relays {
 +        // Prefer urlsWithIps: libnice's set_relay_info/set_stun_server want an IP, not a hostname.
 +        let urls = if !relay.urls_with_ips.is_empty() {
 +            &relay.urls_with_ips
@@ -1951,30 +2833,32 @@ index 0000000..5973161
 +    purple_debug(
 +        account,
 +        PURPLE_DEBUG_INFO,
-+        format!("ice: {} STUN/TURN entries from {} relay(s)\n", servers.len(), parsed.relays.len()),
++        format!("ice: {} STUN/TURN entries from {} relay(s)\n", servers.len(), relays.len()),
 +    );
-+    let ttl = parsed.relays.iter().filter_map(|r| r.ttl).min();
++    let ttl = relays.iter().map(|r| r.ttl_seconds).min();
 +    Some((servers, ttl))
 +}
 diff --git a/src/rust/src/lib.rs b/src/rust/src/lib.rs
-index 7091708..dfbad8a 100755
+index 7091708..58d2d17 100755
 --- a/src/rust/src/lib.rs
 +++ b/src/rust/src/lib.rs
-@@ -2,6 +2,9 @@
+@@ -2,6 +2,11 @@
  
  mod attachment;
  mod bridge;
 +mod call_bridge;
++mod call_end;
 +mod call_media;
++mod call_video;
 +mod ice;
  mod bridge_commands;
  mod contacts;
  mod core;
 diff --git a/src/rust/src/receive.rs b/src/rust/src/receive.rs
-index beb568f..f1b6ce6 100755
+index 92a62c6..2947bdc 100755
 --- a/src/rust/src/receive.rs
 +++ b/src/rust/src/receive.rs
-@@ -411,7 +411,165 @@ async fn process_received_message<C: presage::store::Store>(
+@@ -412,7 +412,181 @@ async fn process_received_message<C: presage::store::Store>(
              );
              None
          }
@@ -2020,13 +2904,21 @@ index beb568f..f1b6ce6 100755
 +            } else if call_message.hangup.is_some() {
 +                // Only an incoming call nobody answered is missed: not one we placed, not one the user
 +                // accepted here, not one accepted or declined on another of their devices, and not
-+                // one already reported when we answered it Busy.
-+                let missed = !crate::call_bridge::take_busy_replied(call_id)
-+                    && !crate::call_bridge::is_outgoing_call(call_id)
-+                    && !crate::call_bridge::was_accepted(call_id)
-+                    && hangup_type != Some(1)
-+                    && hangup_type != Some(2);
-+                (crate::bridge::CALL_STATE_ENDED, missed.then(|| "Missed voice call".to_string()))
++                // one already reported when we answered it Busy. One accepted on another device is
++                // told to the Phone app as such, which counts it as answered (call_end.rs).
++                match crate::call_end::hangup_end(
++                    crate::call_bridge::take_busy_replied(call_id),
++                    crate::call_bridge::is_outgoing_call(call_id),
++                    crate::call_bridge::was_accepted(call_id),
++                    hangup_type,
++                ) {
++                    crate::call_end::HangupEnd::AnsweredElsewhere => {
++                        (crate::bridge::CALL_STATE_ANSWERED_ELSEWHERE, None)
++                    }
++                    crate::call_end::HangupEnd::Ended { missed } => {
++                        (crate::bridge::CALL_STATE_ENDED, missed.then(|| "Missed voice call".to_string()))
++                    }
++                }
 +            } else {
 +                (u32::MAX, None)
 +            };
@@ -2045,6 +2937,14 @@ index beb568f..f1b6ce6 100755
 +                // spawning a UUID-addressed second one (same reason as place_call). Incoming keeps who.
 +                let card_addr = crate::call_bridge::dialed_address(call_id).or_else(|| message.who.clone());
 +                crate::bridge::handle_call_state(message.account, card_addr, name, state, call_id);
++                // A video Offer rings as a video call (after the state above, which starts the card).
++                let video_offer = call_message
++                    .offer
++                    .as_ref()
++                    .is_some_and(|o| crate::call_video::offer_is_video(o.r#type));
++                if state == crate::bridge::CALL_STATE_INCOMING && video_offer {
++                    crate::bridge::handle_call_video(call_id, &crate::call_video::VideoEvent::Offered);
++                }
 +            }
 +
 +            // Media: offer -> start the engine (the user answers later); answer -> start it for our
@@ -2142,10 +3042,10 @@ index beb568f..f1b6ce6 100755
              data_message: Some(data_message),
              ..
 diff --git a/src/rust/src/structs.rs b/src/rust/src/structs.rs
-index 9c9cbbc..68c3ae4 100755
+index 9c9cbbc..e945513 100755
 --- a/src/rust/src/structs.rs
 +++ b/src/rust/src/structs.rs
-@@ -34,8 +34,54 @@ pub enum Cmd {
+@@ -34,8 +34,61 @@ pub enum Cmd {
          attachment_pointer: presage::proto::AttachmentPointer,
          xfer: *const crate::bridge_structs::PurpleXfer,
      },
@@ -2171,6 +3071,7 @@ index 9c9cbbc..68c3ae4 100755
 +    // recipient + identity keys, has call_bridge generate our keypair, and sends the Offer.
 +    PlaceCall {
 +        callee: String,
++        video: bool,
 +    },
 +    // End the current call locally (the user pressed hang up): send the peer a Hangup CallMessage so
 +    // their phone stops ringing / the call ends, and tear down our media engine. `callee` is the address
@@ -2186,6 +3087,12 @@ index 9c9cbbc..68c3ae4 100755
 +    AcceptCall {
 +        call_id: u64,
 +    },
++    // The user turned our camera on or off in a call (the Phone app's changeMedia outgoingVideo).
++    // Local only: the engine tells the far side in RingRTC's rtp-data SenderStatus.
++    SetCallVideo {
++        call_id: u64,
++        on: bool,
++    },
  }
  
 +// Cmd already crosses threads today: it is pushed onto a tokio mpsc from the C-invoked send_cmd
@@ -2200,6 +3107,3 @@ index 9c9cbbc..68c3ae4 100755
  #[derive(Debug, Clone)]
  pub enum Recipient {
      Contact(presage::libsignal_service::prelude::Uuid),
--- 
-2.53.0
-
