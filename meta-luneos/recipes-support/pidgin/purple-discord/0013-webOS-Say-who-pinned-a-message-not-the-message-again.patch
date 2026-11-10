@@ -1,0 +1,435 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Mon, 9 Nov 2026 14:07:16 +0100
+Subject: [PATCH] webOS: Say who pinned a message, not the message again
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A pin in Discord came to the Messaging app as the pinned message
+written again after a "📌", as a new message from its author, at the
+time of the pin: the gateway's MESSAGE_UPDATE with "pinned" true was
+taken as a pin and the whole message shown once more. An edit of a
+pinned message came the same way, as a new "📌" message instead of
+the edit.
+
+A MESSAGE_UPDATE is now only ever an edit, which changes the stored
+message in place as any other edit does, or nothing: a pin or an unpin
+changes no text. Who pinned what comes from Discord as its own message,
+MESSAGE_CHANNEL_PINNED_MESSAGE, with no content and the pinned message
+in message_reference. In a group DM or a server channel that is now a
+line, as a group DM's rename or someone added is: "ann pinned a
+message", or "You pinned a message", as tdlib-purple says a Telegram
+pin. The line has no sender, so the app draws it as the service's own
+and raises no notification, and it carries the pinned message as its
+quote, as a reply does, so the app shows which message it was and a
+tap on the quote goes to it. A server channel that is not open is not
+opened for it; the line is written from its history once it is.
+
+Discord itself says nothing of an unpin, and neither does this. A pin
+in a one-to-one DM is not written: the transport keeps no line without
+a sender there, as for Telegram's.
+
+tests/test_group_rename.c checks the pin line in a group and in a
+server channel (the server's name for who pinned), by the user, with a
+name to escape, the quoted message from message_reference or
+referenced_message, written once when replayed, a group not open
+opened for it, a server channel not open left alone and written later,
+nothing for a one-to-one DM, and that a reply quotes nothing.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ libdiscord.c              |  76 +++++++++++++-------
+ tests/test_group_rename.c | 143 +++++++++++++++++++++++++++++++++++---
+ 2 files changed, 182 insertions(+), 37 deletions(-)
+
+diff --git a/libdiscord.c b/libdiscord.c
+index 7268634..63df170 100644
+--- a/libdiscord.c
++++ b/libdiscord.c
+@@ -3379,22 +3379,40 @@ discord_webos_message_unsee(DiscordAccount *da, guint64 msg_id)
+ /* webOS: the line for a group DM's own event message, or NULL for any other message. Discord sends
+  * a rename as MESSAGE_CHANNEL_NAME_CHANGE, its content the new name, and someone added or removed
+  * as MESSAGE_RECIPIENT_ADD / _REMOVE, with no content and the person in mentions[0]; written as
+- * they come, a rename was a message saying only the new name and the others nothing at all. The
+- * line is HTML: the names in it are escaped. */
++ * they come, a rename was a message saying only the new name and the others nothing at all. A pin,
++ * in a group DM or a server channel, is MESSAGE_CHANNEL_PINNED_MESSAGE from who pinned, with no
++ * content and the pinned message in message_reference: "<who> pinned a message", as tdlib-purple
++ * says a Telegram pin. The line is HTML: the names in it are escaped. guild is the channel's server
++ * (NULL for a group DM), for the name someone has there. */
+ static gchar *
+-discord_webos_group_event_text(DiscordAccount *da, DiscordChannel *channel, guint64 msg_type, JsonObject *data)
++discord_webos_group_event_text(DiscordAccount *da, DiscordGuild *guild, DiscordChannel *channel, guint64 msg_type,
++		JsonObject *data)
+ {
+-	if (channel == NULL || channel->type != CHANNEL_GROUP_DM)
++	if (channel == NULL)
+ 		return NULL;
+-	if (msg_type != MESSAGE_CHANNEL_NAME_CHANGE && msg_type != MESSAGE_RECIPIENT_ADD &&
+-			msg_type != MESSAGE_RECIPIENT_REMOVE)
++	if (msg_type == MESSAGE_CHANNEL_PINNED_MESSAGE) {
++		if (channel->type == CHANNEL_DM)
++			return NULL;
++	} else if (channel->type != CHANNEL_GROUP_DM || (msg_type != MESSAGE_CHANNEL_NAME_CHANGE &&
++			msg_type != MESSAGE_RECIPIENT_ADD && msg_type != MESSAGE_RECIPIENT_REMOVE)) {
+ 		return NULL;
++	}
+ 
+ 	JsonObject *author_obj = json_object_get_object_member(data, "author");
+ 	guint64 author_id = author_obj ? to_int(json_object_get_string_member(author_obj, "id")) : 0;
+ 	gboolean by_us = author_id != 0 && author_id == da->self_user_id;
+ 	gchar *text = NULL;
+ 
++	if (msg_type == MESSAGE_CHANNEL_PINNED_MESSAGE) {
++		if (by_us)
++			return g_strdup(_("You pinned a message"));
++		gchar *author = discord_get_display_name_or_unk(da, guild, channel,
++				author_obj ? discord_upsert_user(da->new_users, author_obj) : NULL, author_obj);
++		text = g_strdup_printf(_("%s pinned a message"), author);
++		g_free(author);
++		return text;
++	}
++
+ 	if (msg_type == MESSAGE_CHANNEL_NAME_CHANGE) {
+ 		const gchar *content = json_object_get_string_member(data, "content");
+ 		gchar *name = purple_markup_escape_text(content ? content : "", -1);
+@@ -3448,24 +3466,26 @@ discord_webos_group_event_text(DiscordAccount *da, DiscordChannel *channel, guin
+ 	return text;
+ }
+ 
+-/* webOS: write a group DM's event message msg_id as a line in its conversation, conv (NULL when it
+- * is not open), when it is one (discord_webos_group_event_text). The line is a system line with no
+- * sender (" ", as tdlib-purple writes its chat notices), which imlibpurpleservice stores with no
+- * notification, and carries the message id, by which the transport keeps it once. A group that is
+- * not open is opened for its people alone (discord_webos_open_group_dm: no history, nothing acked)
+- * and the line written at once; only when libpurple makes no conversation is msg_id forgotten, so
+- * the channel's history writes it later. Returns TRUE when the message was such an event (written
+- * or not). */
++/* webOS: write a group DM's event message msg_id, or a pin in a group DM or server channel, as a
++ * line in its conversation, conv (NULL when it is not open), when it is one
++ * (discord_webos_group_event_text). The line is a system line with no sender (" ", as tdlib-purple
++ * writes its chat notices), which imlibpurpleservice stores with no notification, and carries the
++ * message id, by which the transport keeps it once. A pin's line also carries the pinned message as
++ * its quote (discord_stash_webos_quote, as a reply's), so the app shows which one it was. A group
++ * that is not open is opened for its people alone (discord_webos_open_group_dm: no history, nothing
++ * acked) and the line written at once; a server channel is not opened for it. When there is no
++ * conversation msg_id is forgotten, so the channel's history writes it later. Returns TRUE when the
++ * message was such an event (written or not). */
+ static gboolean
+-discord_webos_group_event(DiscordAccount *da, DiscordChannel *channel, PurpleConversation *conv,
++discord_webos_group_event(DiscordAccount *da, DiscordGuild *guild, DiscordChannel *channel, PurpleConversation *conv,
+ 		guint64 msg_type, guint64 msg_id, JsonObject *data, time_t timestamp)
+ {
+-	gchar *text = discord_webos_group_event_text(da, channel, msg_type, data);
++	gchar *text = discord_webos_group_event_text(da, guild, channel, msg_type, data);
+ 
+ 	if (text == NULL)
+ 		return FALSE;
+ 
+-	if (conv == NULL)
++	if (conv == NULL && channel->type == CHANNEL_GROUP_DM)
+ 		conv = PURPLE_CONVERSATION(discord_webos_open_group_dm(da, channel));
+ 
+ 	if (conv == NULL) {
+@@ -3473,6 +3493,8 @@ discord_webos_group_event(DiscordAccount *da, DiscordChannel *channel, PurpleCon
+ 			discord_webos_message_unsee(da, msg_id);
+ 	} else {
+ 		discord_stash_webos_msgid(conv, msg_id);
++		if (msg_type == MESSAGE_CHANNEL_PINNED_MESSAGE)
++			discord_stash_webos_quote(conv, da, guild, channel, data);
+ 		purple_serv_got_chat_in(da->pc, discord_chat_hash(channel->id), " ", PURPLE_MESSAGE_SYSTEM, text, timestamp);
+ 	}
+ 
+@@ -3663,7 +3685,8 @@ discord_process_message(DiscordAccount *da, JsonObject *data, unsigned special_t
+ 	/* webOS: an edit changes the stored message in place - "webos-im-edit" (account, id, text), the
+ 	 * transport finding it by serviceMessageId, the snowflake - rather than arriving as a new
+ 	 * "EDIT: ..." message. An update that is no edit of the text (an embed resolved, a flag
+-	 * changed) changes nothing. A pin keeps its "📌" row. */
++	 * changed) changes nothing, nor does a pin or an unpin: who pinned what comes as its own
++	 * message, MESSAGE_CHANNEL_PINNED_MESSAGE (discord_webos_group_event_text). */
+ 	if (edited) {
+ 		if (discord_webos_update_is_edit(TRUE, json_object_get_string_member(data, "edited_timestamp"), FALSE)) {
+ 			gchar *id_s = from_int(msg_id);
+@@ -4048,11 +4071,11 @@ discord_process_message(DiscordAccount *da, JsonObject *data, unsigned special_t
+ 		}
+ 
+ 	} else if (!nonce || !g_hash_table_remove(da->sent_message_ids, nonce)) {
+-		/* webOS: a group DM's rename, or someone added or removed, is a line, written at once. It is
++		/* webOS: a group DM's rename, or someone added or removed, or a pin, is a line, written at once. It is
+ 		 * taken before the buffer is opened below: discord_join_chat_by_id would fetch the group's
+ 		 * history and return, and the history's copy of this message, already marked written, would
+ 		 * then be skipped, so the line came late or never. */
+-		if (discord_webos_group_event(da, channel,
++		if (discord_webos_group_event(da, guild, channel,
+ 				conv ? conv : PURPLE_CONVERSATION(purple_conversations_find_chat(da->pc, discord_chat_hash(channel_id))),
+ 				msg_type, special_type == DISCORD_MESSAGE_NORMAL ? msg_id : 0, data, timestamp)) {
+ 			if (channel != NULL && msg_id > channel->last_message_id && !thread) {
+@@ -5043,13 +5066,12 @@ discord_process_dispatch(DiscordAccount *da, const gchar *type, JsonObject *data
+ 		unsigned msgtype = DISCORD_MESSAGE_NORMAL;
+ 
+ 		if (purple_strequal(type, "MESSAGE_UPDATE")) {
+-			/* An update could mean that we were edited or that we
+-			 * were pinned. If it's both, default to just showing
+-			 * pinned. */
+-
+-			gboolean is_pinned = json_object_get_boolean_member(data, "pinned");
+-
+-			msgtype = is_pinned ? DISCORD_MESSAGE_PINNED : DISCORD_MESSAGE_EDITED;
++			/* webOS: an update is an edit, or the message pinned or unpinned ("pinned" changed), or
++			 * an embed resolved. Only an edit changes the stored message (discord_process_message).
++			 * A pin was written as the whole message again, after a "📌", as if its author had sent
++			 * it anew, and an edit of a pinned message the same way; who pinned it comes as its own
++			 * MESSAGE_CHANNEL_PINNED_MESSAGE, written as a line. Discord says nothing of an unpin. */
++			msgtype = DISCORD_MESSAGE_EDITED;
+ 		}
+ 
+ 		discord_process_message(da, data, msgtype);
+diff --git a/tests/test_group_rename.c b/tests/test_group_rename.c
+index 37d1013..017289a 100644
+--- a/tests/test_group_rename.c
++++ b/tests/test_group_rename.c
+@@ -2,8 +2,8 @@
+  *   Unit tests for renaming a group DM from the Messaging app ("webos-im-group-rename"), for
+  *   taking people out of one ("webos-im-group-remove") and adding people to one
+  *   ("webos-im-group-invite"), and for opening one for its members
+- *   ("webos-im-chat-open"), and for the lines a group DM's rename and people added or removed
+- *   are written as: the parts of libdiscord.c between its BEGIN and END group rename, group
++ *   ("webos-im-chat-open"), and for the lines a group DM's rename and people added or removed,
++ *   and a pin in a group DM or a server channel, are written as: the parts of libdiscord.c between its BEGIN and END group rename, group
+  *   remove, group add, chat open and group event lines lines, which the Makefile copies into
+  *   group_rename.inc, group_remove.inc, group_add.inc, chat_open.inc and group_event_lines.inc. This file stands
+  *   in for libpurple and the rest of the plug-in around them and records the requests, notices,
+@@ -41,9 +41,9 @@ static const char *current_test = "";
+ #define PURPLE_MESSAGE_SYSTEM 0x0004
+ #define PURPLE_CHAT_USER_NONE 0
+ 
+-enum { CHANNEL_GUILD_TEXT = 0, CHANNEL_GROUP_DM = 3 };
++enum { CHANNEL_GUILD_TEXT = 0, CHANNEL_DM = 1, CHANNEL_GROUP_DM = 3 };
+ enum { MESSAGE_DEFAULT = 0, MESSAGE_RECIPIENT_ADD = 1, MESSAGE_RECIPIENT_REMOVE = 2, MESSAGE_CALL = 3,
+-	MESSAGE_CHANNEL_NAME_CHANGE = 4 };
++	MESSAGE_CHANNEL_NAME_CHANGE = 4, MESSAGE_CHANNEL_PINNED_MESSAGE = 6 };
+ #define PURPLE_CONVERSATION(c) ((PurpleConversation *) (c))
+ 
+ typedef struct { int connected; } PurpleAccount;
+@@ -65,7 +65,7 @@ typedef struct {
+ 	int type;
+ } DiscordChannel;
+ 
+-typedef struct { int unused; } DiscordGuild;
++typedef struct { const char *nick_prefix; } DiscordGuild;	/* what a server's names start with */
+ 
+ typedef struct {
+ 	guint64 id;
+@@ -88,6 +88,8 @@ static PurpleConnection connection;
+ static DiscordAccount account;
+ static DiscordChannel group = { .id = 1001, .type = CHANNEL_GROUP_DM };
+ static DiscordChannel server_channel = { .id = 3003, .type = CHANNEL_GUILD_TEXT };	/* 2002 stands for a server channel: not in group_dms */
++static DiscordGuild server = { "srv-" };	/* server_channel's */
++static DiscordChannel dm_channel = { .id = 4004, .type = CHANNEL_DM };
+ 
+ static GString *debug_log;
+ static GString *notices;	/* "<channel id>: <text>\n" per notice written */
+@@ -177,6 +179,31 @@ discord_open_chat(DiscordAccount *da, guint64 id, gboolean present)
+ }
+ 
+ static GString *stashed;	/* "<msg id>," per webos-msg-id stashed */
++static GString *quoted;	/* "<msg id>><pinned id>," per quote stashed, the message being the last stashed */
++
++/* as libdiscord.c's, of which only the quoted message's id is checked here: the referenced message's, else
++ * the message_reference's */
++static void
++discord_stash_webos_quote(PurpleConversation *conv, DiscordAccount *da, DiscordGuild *guild, DiscordChannel *channel,
++		JsonObject *data)
++{
++	CHECK(conv != NULL);
++	CHECK(da == &account);
++	CHECK(channel == &group ? guild == NULL : guild == &server);
++	JsonObject *ref = json_object_get_object_member(data, "referenced_message");
++	const gchar *id = ref ? json_object_get_string_member(ref, "id") : NULL;
++	if (id == NULL) {
++		ref = json_object_get_object_member(data, "message_reference");
++		id = ref ? json_object_get_string_member(ref, "message_id") : NULL;
++	}
++	if (id == NULL)
++		return;
++	const gchar *last = strrchr(stashed->str, ',');
++	const gchar *start = last;
++	while (start != NULL && start > stashed->str && start[-1] != ',')
++		start--;
++	g_string_append_printf(quoted, "%.*s>%s,", start ? (int) (last - start) : 0, start ? start : "", id);
++}
+ 
+ /* a line in a chat: "<channel id>: <text>\n" in notices */
+ static void
+@@ -302,10 +329,14 @@ discord_get_display_name_or_unk(DiscordAccount *da, DiscordGuild *guild, Discord
+ 		JsonObject *json)
+ {
+ 	(void) da;
+-	CHECK(guild == NULL);
+-	CHECK(channel == &group);
++	CHECK(channel == &group ? guild == NULL : (channel == &server_channel && guild == &server));
+ 	const gchar *name = user ? user->name : (json ? json_object_get_string_member(json, "username") : NULL);
+-	return name ? g_markup_escape_text(name, -1) : g_strdup("Unknown user");
++	if (name == NULL)
++		return g_strdup("Unknown user");
++	gchar *nick = g_strconcat(guild ? guild->nick_prefix : "", name, NULL);	/* a server has its own names */
++	gchar *escaped = g_markup_escape_text(nick, -1);
++	g_free(nick);
++	return escaped;
+ }
+ 
+ static const gchar *
+@@ -429,6 +460,7 @@ setup(const char *name)
+ 	refuse_join = 0;
+ 	group.recipients = NULL;
+ 	stashed = g_string_new(NULL);
++	quoted = g_string_new(NULL);
+ 	account.received_message_ids = NULL;
+ 	opened = 0;
+ 	memset(&fetch, 0, sizeof(fetch));
+@@ -461,6 +493,7 @@ teardown(void)
+ 	group.recipients = NULL;
+ 	g_ptr_array_free(made_users, TRUE);
+ 	g_string_free(stashed, TRUE);
++	g_string_free(quoted, TRUE);
+ 	if (account.received_message_ids != NULL)
+ 		g_hash_table_destroy(account.received_message_ids);
+ 	g_ptr_array_free(open_convs, TRUE);
+@@ -970,7 +1003,8 @@ deliver(DiscordChannel *channel, const gchar *json)
+ 	gboolean event = FALSE;
+ 
+ 	if (!discord_webos_message_seen(&account, msg_id))
+-		event = discord_webos_group_event(&account, channel, (PurpleConversation *) conv(channel->id),
++		event = discord_webos_group_event(&account, channel == &server_channel ? &server : NULL, channel,
++				(PurpleConversation *) conv(channel->id),
+ 				(guint64) json_object_get_int_member(data, "type"), msg_id, data, 1700000000);
+ 	g_object_unref(parser);
+ 	return event;
+@@ -986,6 +1020,9 @@ open_group(void)
+ #define BOB "{\"id\":\"12\",\"username\":\"bob\"}"
+ #define ME "{\"id\":\"99\",\"username\":\"me\"}"
+ #define MSG(id, type, author, rest) "{\"id\":\"" id "\",\"type\":" #type ",\"channel_id\":\"1001\",\"author\":" author rest "}"
++/* Discord's news of a pin: from who pinned, no content, the pinned message in message_reference */
++#define PIN(id, author, pinned) MSG(id, 6, author, ",\"content\":\"\",\"message_reference\":{\"channel_id\":\"1001\"," \
++		"\"message_id\":\"" pinned "\"}")
+ 
+ static void
+ test_event_rename(void)
+@@ -1095,6 +1132,88 @@ test_event_once(void)
+ 	teardown();
+ }
+ 
++static void
++open_server_channel(void)
++{
++	g_ptr_array_add(open_convs, g_memdup2(&(PurpleChatConversation) { .id = 3003 }, sizeof(PurpleChatConversation)));
++}
++
++static void
++test_event_pin(void)
++{
++	setup("pin: in a group");
++	open_group();
++	CHECK(deliver(&group, PIN("2701", ANN, "1900")));
++	CHECK(deliver(&group, PIN("2702", ME, "1901")));
++	CHECK(deliver(&group, PIN("2703", "{\"id\":\"13\",\"username\":\"<b>cat</b> & co\"}", "1902")));
++	/* the pinned message given whole: that is the one quoted */
++	CHECK(deliver(&group, MSG("2704", 6, BOB, ",\"content\":\"\",\"referenced_message\":{\"id\":\"1903\","
++			"\"content\":\"x\",\"author\":" ANN "}")));
++	CHECK(g_strcmp0(notices->str,
++			"1001: ann pinned a message\n"
++			"1001: You pinned a message\n"
++			"1001: &lt;b&gt;cat&lt;/b&gt; &amp; co pinned a message\n"
++			"1001: bob pinned a message\n") == 0);
++	CHECK(g_strcmp0(stashed->str, "2701,2702,2703,2704,") == 0);
++	/* each line quotes its pinned message, stashed with the line's own id */
++	CHECK(g_strcmp0(quoted->str, "2701>1900,2702>1901,2703>1902,2704>1903,") == 0);
++	teardown();
++
++	setup("pin: in a server channel");
++	open_server_channel();
++	CHECK(deliver(&server_channel, PIN("2711", ANN, "1910")));
++	CHECK(deliver(&server_channel, PIN("2712", ME, "1911")));
++	/* the server's name for them */
++	CHECK(g_strcmp0(notices->str, "3003: srv-ann pinned a message\n3003: You pinned a message\n") == 0);
++	CHECK(g_strcmp0(stashed->str, "2711,2712,") == 0);
++	CHECK(g_strcmp0(quoted->str, "2711>1910,2712>1911,") == 0);
++	teardown();
++
++	/* replayed by the history: once */
++	setup("pin: replayed");
++	open_group();
++	CHECK(deliver(&group, PIN("2721", ANN, "1920")));
++	CHECK(!deliver(&group, PIN("2721", ANN, "1920")));
++	CHECK(g_strcmp0(notices->str, "1001: ann pinned a message\n") == 0);
++	CHECK(g_strcmp0(quoted->str, "2721>1920,") == 0);
++	teardown();
++
++	/* a group not open is opened for it, as for its other news */
++	setup("pin: group not open");
++	group.recipients = ids(11, 12);
++	CHECK(deliver(&group, PIN("2731", ANN, "1930")));
++	CHECK(joined == 1);
++	CHECK(g_strcmp0(notices->str, "1001: ann pinned a message\n") == 0);
++	CHECK(g_strcmp0(quoted->str, "2731>1930,") == 0);
++	CHECK(fetch.count == 0);
++	teardown();
++
++	/* a server channel not open is not opened: nothing written, nothing marked, so its history writes
++	 * the line once the channel is open */
++	setup("pin: server channel not open");
++	CHECK(deliver(&server_channel, PIN("2741", ANN, "1940")));
++	CHECK(joined == 0);
++	CHECK(opened == 0);
++	CHECK(fetch.count == 0);
++	CHECK(notices->len == 0);
++	CHECK(stashed->len == 0);
++	CHECK(quoted->len == 0);
++	open_server_channel();
++	CHECK(deliver(&server_channel, PIN("2741", ANN, "1940")));
++	CHECK(g_strcmp0(notices->str, "3003: srv-ann pinned a message\n") == 0);
++	CHECK(g_strcmp0(quoted->str, "2741>1940,") == 0);
++	teardown();
++
++	/* a one-to-one DM's pin is not one of these lines */
++	setup("pin: not in a DM");
++	g_ptr_array_add(open_convs, g_memdup2(&(PurpleChatConversation) { .id = 4004 }, sizeof(PurpleChatConversation)));
++	CHECK(!deliver(&dm_channel, PIN("2751", ANN, "1950")));
++	CHECK(notices->len == 0);
++	CHECK(stashed->len == 0);
++	CHECK(quoted->len == 0);
++	teardown();
++}
++
+ static void
+ test_recipients_kept(void)
+ {
+@@ -1132,8 +1251,11 @@ test_event_not(void)
+ 	/* a message or a reply that mentions someone is no event */
+ 	CHECK(!deliver(&group, MSG("2607", 0, ANN, ",\"content\":\"hi <@12>\",\"mentions\":[" BOB "]")));
+ 	CHECK(!deliver(&group, MSG("2608", 19, ANN, ",\"content\":\"yes\",\"mentions\":[" BOB "]")));
++	/* a message that names another (a reply) quotes nothing */
++	CHECK(!deliver(&group, MSG("2609", 19, ANN, ",\"content\":\"yes\",\"message_reference\":{\"message_id\":\"1960\"}")));
+ 	CHECK(notices->len == 0);
+ 	CHECK(stashed->len == 0);
++	CHECK(quoted->len == 0);
+ 	teardown();
+ }
+ 
+@@ -1158,12 +1280,13 @@ main(void)
+ 	test_event_add_remove();
+ 	test_event_once();
+ 	test_event_not();
++	test_event_pin();
+ 	test_recipients_kept();
+ 
+ 	if (failures) {
+ 		fprintf(stderr, "%d failure(s)\n", failures);
+ 		return 1;
+ 	}
+-	printf("all group rename, remove, add, chat open and event line tests passed\n");
++	printf("all group rename, remove, add, chat open, event line and pin line tests passed\n");
+ 	return 0;
+ }

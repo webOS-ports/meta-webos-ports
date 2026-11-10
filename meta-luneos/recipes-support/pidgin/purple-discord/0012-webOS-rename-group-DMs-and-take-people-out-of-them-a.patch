@@ -1,0 +1,2726 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sun, 8 Nov 2026 15:53:21 +0100
+Subject: [PATCH] webOS: rename group DMs and take people out of them, and tell
+ group DM events
+
+* Rename a group DM from the Messaging app
+
+The Messaging app can now rename a group (imlibpurpleservice's
+renameGroup), which the transport hands to the prpl as the
+"webos-im-group-rename" signal (account, chat, name). Take it for a
+group DM the user is in and PATCH /channels/{id} with the new name, as
+a new group DM is named once it is made; return TRUE when the request
+went out. Return FALSE for another account, for a chat that is not a
+group DM (a server channel is the server's to name), and for a name
+that is empty once its white space is trimmed.
+
+Discord takes a group DM name of 1-100 characters (the Group DM params
+of Modify Channel in discord-api-docs). A longer one is not sent: the
+rename returns FALSE and says so in the group as a notice line. When
+Discord refuses a rename, its message ("Missing Access", ...) goes in
+the group as a notice and in the debug log, which never carries the
+name.
+
+Discord's answer is the renamed channel; its name is taken at once
+through discord_set_channel_name, as the gateway's CHANNEL_UPDATE echo
+does: the blist chat's "name" component and the conversation title
+change, and the transport reads the new name off the chat with the next
+line it stores for the group.
+
+tests/test_group_rename.c builds the rename part of libdiscord.c,
+marked by BEGIN and END lines, and checks what is sent, what is refused
+and the notices.
+
+* Take someone out of a group DM from the Messaging app
+
+The Messaging app can now remove people from a group
+(imlibpurpleservice's removeFromGroup), which the transport hands to
+the prpl as the "webos-im-group-remove" signal (account, chat,
+members), the members being buddy names joined by "\x1f" as for
+"webos-im-group-invite". Take it for a group DM the user is in and
+DELETE /channels/{id}/recipients/{user} for each member the plug-in
+knows, the reverse of the PUT discord_group_dm_add_recipient makes;
+return TRUE when at least one request went out. Return FALSE for
+another account, for a chat that is not a group DM (a server channel's
+members are the server's) and when no member is known. An unknown
+member is skipped, and so is the user: leaving a group is
+"webos-im-group-leave".
+
+Discord's documentation (Group DM Remove Recipient in
+discord-api-docs) says no more than "Removes a recipient from a Group
+DM", nothing about who may. When Discord refuses, its message
+("Missing Permissions", ...) goes in the group as a notice line and in
+the debug log. Done, Discord answers with no body and the gateway's
+CHANNEL_RECIPIENT_REMOVE takes the member off the group, as it does
+when someone else removes them.
+
+tests/test_group_rename.c also builds the new part of libdiscord.c,
+between its BEGIN and END group remove lines, and checks the requests
+made per member, what is not taken, and the notices.
+
+* Open a group DM for its members without its history
+
+imlibpurpleservice's getChatMembers (Group Info) reads a group's people
+off its libpurple conversation, and a group DM has one only once a
+message in it arrived after the transport started. Its join_chat cannot
+be used to open it: discord_join_chat fetches the channel's messages
+each time, sets "chan-backfilled-<id>" and can write a pins line.
+
+Take the transport's "webos-im-chat-open" signal (account, chat),
+which it emits for a chat with no conversation, for a group DM the
+user is in: open the conversation alone, as discord_open_chat makes it
+(the "id" data, the title), and put its people on it, the user as its
+nick, as discord_got_channel_info does. They come from the recipients
+READY gave; when one of them is not known, or none are kept, from GET
+/channels/{id}, of whose answer only "recipients" is taken. No message
+is fetched, nothing is acked or subscribed, no line is written and the
+backfilled marker is left alone, so opening the group in the app later
+still fetches its history. Return TRUE when the conversation is open
+(now or already), FALSE for another account or a chat that is not a
+group DM.
+
+tests/test_group_rename.c also builds the new part of libdiscord.c,
+between its BEGIN and END chat open lines, and checks what is opened,
+what is asked of Discord, and that nothing else is done.
+
+* Say in a group DM who renamed it, added or removed someone
+
+Discord sends a group DM's rename as a message of type
+MESSAGE_CHANNEL_NAME_CHANGE (4) whose content is the new name, and
+someone added or removed as MESSAGE_RECIPIENT_ADD (1) / _REMOVE (2)
+with no content and the person in mentions[0]. discord_process_message
+wrote the rename as an ordinary message saying only the new name (an
+outgoing one when the user renamed it) and skipped the other two, whose
+content is empty, so the Messaging app showed nothing for them.
+
+Write these three in a group DM as a system line with no sender
+instead, as tdlib-purple writes its chat notices
+(serv_got_chat_in with who " " and PURPLE_MESSAGE_SYSTEM), which
+imlibpurpleservice stores with no notification:
+  <name> changed the group name to "<new name>" / You changed ...
+  <name> added <name> / You added <name> / <name> added you
+  <name> removed <name> / You removed <name> / <name> removed you
+  <name> left the group / You left the group
+The names come from discord_get_display_name_or_unk, already escaped,
+and the new name is escaped with purple_markup_escape_text. The line
+carries its message id (webos-msg-id), so the transport keeps it once
+across restarts, and goes through the plug-in's dedup by message id
+first (now discord_webos_message_seen), so a history replay does not
+repeat it; with the group not open it is not written and its id is
+forgotten, as for any message, so the group's history writes it.
+
+The gateway's CHANNEL_RECIPIENT_ADD/REMOVE handling is left as it is:
+it updates the people on the conversation, and the "entered/left the
+room" lines libpurple writes for it are PURPLE_MESSAGE_SYSTEM without
+PURPLE_MESSAGE_RECV, which incoming_message_cb in imlibpurpleservice
+drops. The message is what is kept: it has an id, and history brings it
+for a change made while signed off.
+
+That drop also took the notices discord_webos_group_notice wrote with
+purple_conversation_write_system_message (a rename or a removal Discord
+refused): they are now written the same way as these lines.
+
+tests/test_group_rename.c also builds the new part of libdiscord.c,
+between its BEGIN and END group event lines lines, and checks a rename
+by someone else and by the user, adding, removing and leaving, a replay
+of the same message and a group that is not open.
+
+* Write a group DM's add, remove and rename lines at once
+
+On a Sargo the lines for someone added to or removed from a Discord
+group DM came late, or not at all. A message in a group DM with no
+conversation goes through discord_join_chat_by_id before it is
+written, which opens the conversation and fetches the group's history,
+and the message returns there when a fetch went out. Its id was already
+marked written, so the history's copy of it was skipped as a repeat and
+the line came only with a later fetch, if ever.
+
+Take a group DM's event message (MESSAGE_CHANNEL_NAME_CHANGE,
+MESSAGE_RECIPIENT_ADD/_REMOVE) before that: when the group has no
+conversation, open it for its people alone, the way "webos-im-chat-open"
+does (now discord_webos_open_group_dm: no history, nothing acked or
+subscribed, "chan-backfilled-<id>" untouched), and write the line at
+once. The id dedup stays, so the history's copy writes nothing more.
+Only when libpurple makes no conversation is the id forgotten, so the
+history writes it later.
+
+The gateway's CHANNEL_RECIPIENT_ADD/REMOVE now also keeps the group
+DM's recipients, which READY gave and nothing updated, so a group
+opened afterwards has the people in it now; it no longer hands libpurple
+a NULL conversation when the group is not open. It still writes no line
+the app keeps: who added or removed someone is only in Discord's
+message for it.
+
+tests/test_group_rename.c checks an event in a group that is not open
+(opened with its people, the line written at once, its replay not
+written), one with someone not known (only the channel asked of
+Discord), libpurple making no conversation, and the recipients kept.
+
+* Do not crash when someone is added to an open group DM
+
+Adding someone to a Discord group DM from the Messaging app crashed
+imlibpurpleservice when the group's conversation was open. Discord
+answers with a CHANNEL_RECIPIENT_ADD on the gateway, and its handler
+asks discord_get_user_flags for the new member's flags with the
+channel's guild. A group DM has no guild, so that is NULL, and
+discord_get_user_flags read guild->id before looking at it.
+
+A user's flags in a chat with no guild are now only the bot flag, which
+is what a group DM can show. Taking someone out goes through
+purple_chat_conversation_remove_user and never asked for flags.
+
+tests/test_user_flags.c checks a group DM (no guild) for a person and a
+bot, and a server's roles: none, kick or ban (half-op), admin (op), a
+role the server does not know, and a membership in another server.
+
+* Say in a group DM why someone could not be added
+
+Adding someone to a Discord group DM from the Messaging app could fail
+with nothing to show for it. Two paths were silent:
+
+- the person was not one the plug-in knows (a friend, or someone from a
+  shared server or chat): webos-im-group-invite and chat_invite only
+  wrote a debug line and went on;
+- Discord refused the PUT /channels/{id}/recipients/{user}: the request
+  had no callback, so its answer was dropped. Discord refuses anyone who
+  is not a friend with error 50007.
+
+Both now write a line in the group, as a rename or remove that fails
+does. One the plug-in does not know: "Could not add <who>: Discord does
+not know them here. Only your Discord friends can be added to a group."
+A refusal with 50007: "Could not add <who>: Discord lets you add only
+your friends to a group."; any other in Discord's own message, or with
+its code when it gave none. <who> is the person as the user picked them,
+HTML-escaped as the chat's lines are; the debug log has the code and
+message but not the person.
+
+Looking people up through the friends list as well would not help: the
+friends are already among the users the plug-in knows, under the same
+name as their buddy name, which is the app's address for them: the
+username, with a #discriminator only for an old-style name.
+
+tests/test_group_rename.c builds the new group add part and checks
+adding, an unknown person alone and among known ones, a 50007, another
+refusal, an escaped name and message, a code or a message alone, and a refusal
+after signing off.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ libdiscord.c               |  770 +++++++++++++++++++++---
+ tests/Makefile             |   39 +-
+ tests/test_group_rename.c  | 1169 ++++++++++++++++++++++++++++++++++++
+ tests/test_user_flags.c    |  250 ++++++++
+ tests/test_webos_helpers.c |   31 +
+ webos_helpers.c            |   24 +
+ webos_helpers.h            |    9 +
+ 7 files changed, 2215 insertions(+), 77 deletions(-)
+ create mode 100644 tests/test_group_rename.c
+ create mode 100644 tests/test_user_flags.c
+
+diff --git a/libdiscord.c b/libdiscord.c
+index 91186ff..7268634 100644
+--- a/libdiscord.c
++++ b/libdiscord.c
+@@ -1446,6 +1446,10 @@ discord_get_user_flags_from_permissions(DiscordUser *user, guint64 permissions)
+ 	return PURPLE_CHAT_USER_NONE;
+ }
+ 
++/* BEGIN user flags: tests/test_user_flags.c builds the code from here to the END line as well */
++
++/* A user's flags in a chat: VOICE for a bot, and OP or HALFOP from the user's roles in guild. A
++ * group DM has no guild (CHANNEL_RECIPIENT_ADD gives a NULL one), so only the bot flag applies. */
+ PurpleChatUserFlags
+ discord_get_user_flags(DiscordAccount *da, DiscordGuild *guild, DiscordUser *user)
+ {
+@@ -1453,9 +1457,14 @@ discord_get_user_flags(DiscordAccount *da, DiscordGuild *guild, DiscordUser *use
+ 		return PURPLE_CHAT_USER_NONE;
+ 	}
+ 
++	PurpleChatUserFlags best_flag = user->bot ? PURPLE_CHAT_USER_VOICE : PURPLE_CHAT_USER_NONE;
++
++	if (guild == NULL) {
++		return best_flag;
++	}
++
+ 	guint64 gid = guild->id;
+ 	DiscordGuildMembership *guild_membership = g_hash_table_lookup_int64(user->guild_memberships, gid);
+-	PurpleChatUserFlags best_flag = user->bot ? PURPLE_CHAT_USER_VOICE : PURPLE_CHAT_USER_NONE;
+ 
+ 	if (guild_membership == NULL) {
+ 		return best_flag;
+@@ -1482,6 +1491,8 @@ discord_get_user_flags(DiscordAccount *da, DiscordGuild *guild, DiscordUser *use
+ 	return best_flag;
+ }
+ 
++/* END user flags */
++
+ typedef void (*DiscordProxyCallbackFunc)(DiscordAccount *ya, JsonNode *node, gpointer user_data);
+ 
+ typedef struct {
+@@ -3324,6 +3335,153 @@ discord_stash_webos_quote(PurpleConversation *conv, DiscordAccount *da, DiscordG
+ 	purple_conversation_set_data(conv, "webos-quoted-id", g_strdup(quoted_id));
+ }
+ 
++static PurpleChatConversation *discord_webos_open_group_dm(DiscordAccount *da, DiscordChannel *channel);
++static void discord_webos_group_dm_recipient(DiscordChannel *channel, guint64 user_id, gboolean joining);
++
++/* BEGIN group event lines: tests/test_group_rename.c builds the code from here to the END line as well */
++
++/* webOS: whether the message msg_id was already written to a conversation this session, marking it
++ * written when it was not. Overlapping history fetches (the fast newest batch and the forward
++ * catch-up) and re-opened channels would otherwise write it twice. */
++static gboolean
++discord_webos_message_seen(DiscordAccount *da, guint64 msg_id)
++{
++	/* webOS: da->received_message_ids can be NULL here if discord_close() tore it down
++	 * while a backlog of queued/in-flight messages was still being delivered (seen live:
++	 * a burst of these calls with a NULL table froze the whole imtransport process, since
++	 * g_hash_table_contains/insert on NULL just logs a GLib-CRITICAL and returns without
++	 * ever making progress, spinning the caller). Lazily recreate it, matching the same
++	 * guard already used elsewhere in this file for the other da->*_ids tables. */
++	if (da->received_message_ids == NULL) {
++		da->received_message_ids = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
++	}
++	gchar *id_key = from_int(msg_id);
++	if (g_hash_table_contains(da->received_message_ids, id_key)) {
++		g_free(id_key);
++		return TRUE;
++	}
++	g_hash_table_insert(da->received_message_ids, id_key, id_key); /* table owns id_key */
++	return FALSE;
++}
++
++/* webOS: forget that msg_id was written, so a later delivery of it (the channel's history once it
++ * is opened) writes it. */
++static void
++discord_webos_message_unsee(DiscordAccount *da, guint64 msg_id)
++{
++	if (da->received_message_ids != NULL) {
++		gchar *unkey = from_int(msg_id);
++		g_hash_table_remove(da->received_message_ids, unkey);
++		g_free(unkey);
++	}
++}
++
++/* webOS: the line for a group DM's own event message, or NULL for any other message. Discord sends
++ * a rename as MESSAGE_CHANNEL_NAME_CHANGE, its content the new name, and someone added or removed
++ * as MESSAGE_RECIPIENT_ADD / _REMOVE, with no content and the person in mentions[0]; written as
++ * they come, a rename was a message saying only the new name and the others nothing at all. The
++ * line is HTML: the names in it are escaped. */
++static gchar *
++discord_webos_group_event_text(DiscordAccount *da, DiscordChannel *channel, guint64 msg_type, JsonObject *data)
++{
++	if (channel == NULL || channel->type != CHANNEL_GROUP_DM)
++		return NULL;
++	if (msg_type != MESSAGE_CHANNEL_NAME_CHANGE && msg_type != MESSAGE_RECIPIENT_ADD &&
++			msg_type != MESSAGE_RECIPIENT_REMOVE)
++		return NULL;
++
++	JsonObject *author_obj = json_object_get_object_member(data, "author");
++	guint64 author_id = author_obj ? to_int(json_object_get_string_member(author_obj, "id")) : 0;
++	gboolean by_us = author_id != 0 && author_id == da->self_user_id;
++	gchar *text = NULL;
++
++	if (msg_type == MESSAGE_CHANNEL_NAME_CHANGE) {
++		const gchar *content = json_object_get_string_member(data, "content");
++		gchar *name = purple_markup_escape_text(content ? content : "", -1);
++
++		if (by_us) {
++			text = g_strdup_printf(_("You changed the group name to \"%s\""), name);
++		} else {
++			gchar *author = discord_get_display_name_or_unk(da, NULL, channel,
++					author_obj ? discord_upsert_user(da->new_users, author_obj) : NULL, author_obj);
++			text = g_strdup_printf(_("%s changed the group name to \"%s\""), author, name);
++			g_free(author);
++		}
++		g_free(name);
++		return text;
++	}
++
++	JsonArray *mentions = json_object_get_array_member(data, "mentions");
++	JsonObject *whom_obj = (mentions != NULL && json_array_get_length(mentions) > 0) ?
++			json_array_get_object_element(mentions, 0) : NULL;
++	guint64 whom_id = whom_obj ? to_int(json_object_get_string_member(whom_obj, "id")) : 0;
++
++	if (whom_id == 0)
++		return NULL;
++
++	gboolean to_us = whom_id == da->self_user_id;
++	gchar *author = by_us ? NULL : discord_get_display_name_or_unk(da, NULL, channel,
++			author_obj ? discord_upsert_user(da->new_users, author_obj) : NULL, author_obj);
++	gchar *whom = to_us ? NULL : discord_get_display_name_or_unk(da, NULL, channel,
++			discord_upsert_user(da->new_users, whom_obj), whom_obj);
++
++	if (msg_type == MESSAGE_RECIPIENT_REMOVE && whom_id == author_id) {
++		text = by_us ? g_strdup(_("You left the group")) : g_strdup_printf(_("%s left the group"), whom);
++	} else if (msg_type == MESSAGE_RECIPIENT_ADD) {
++		if (by_us)
++			text = g_strdup_printf(_("You added %s"), whom);
++		else if (to_us)
++			text = g_strdup_printf(_("%s added you"), author);
++		else
++			text = g_strdup_printf(_("%s added %s"), author, whom);
++	} else {
++		if (by_us)
++			text = g_strdup_printf(_("You removed %s"), whom);
++		else if (to_us)
++			text = g_strdup_printf(_("%s removed you"), author);
++		else
++			text = g_strdup_printf(_("%s removed %s"), author, whom);
++	}
++
++	g_free(author);
++	g_free(whom);
++	return text;
++}
++
++/* webOS: write a group DM's event message msg_id as a line in its conversation, conv (NULL when it
++ * is not open), when it is one (discord_webos_group_event_text). The line is a system line with no
++ * sender (" ", as tdlib-purple writes its chat notices), which imlibpurpleservice stores with no
++ * notification, and carries the message id, by which the transport keeps it once. A group that is
++ * not open is opened for its people alone (discord_webos_open_group_dm: no history, nothing acked)
++ * and the line written at once; only when libpurple makes no conversation is msg_id forgotten, so
++ * the channel's history writes it later. Returns TRUE when the message was such an event (written
++ * or not). */
++static gboolean
++discord_webos_group_event(DiscordAccount *da, DiscordChannel *channel, PurpleConversation *conv,
++		guint64 msg_type, guint64 msg_id, JsonObject *data, time_t timestamp)
++{
++	gchar *text = discord_webos_group_event_text(da, channel, msg_type, data);
++
++	if (text == NULL)
++		return FALSE;
++
++	if (conv == NULL)
++		conv = PURPLE_CONVERSATION(discord_webos_open_group_dm(da, channel));
++
++	if (conv == NULL) {
++		if (msg_id != 0)
++			discord_webos_message_unsee(da, msg_id);
++	} else {
++		discord_stash_webos_msgid(conv, msg_id);
++		purple_serv_got_chat_in(da->pc, discord_chat_hash(channel->id), " ", PURPLE_MESSAGE_SYSTEM, text, timestamp);
++	}
++
++	g_free(text);
++	return TRUE;
++}
++
++/* END group event lines */
++
+ static guint64
+ discord_process_message(DiscordAccount *da, JsonObject *data, unsigned special_type)
+ {
+@@ -3337,22 +3495,8 @@ discord_process_message(DiscordAccount *da, JsonObject *data, unsigned special_t
+ 	 * fetches (the fast newest-batch vs the forward catch-up) and re-opened channels would otherwise
+ 	 * call discord_process_message twice for the same id and create a duplicate immessage in db8.
+ 	 * Edits/pins deliberately re-touch an existing id, so they are exempt. */
+-	if (special_type == DISCORD_MESSAGE_NORMAL && msg_id != 0) {
+-		/* webOS: da->received_message_ids can be NULL here if discord_close() tore it down
+-		 * while a backlog of queued/in-flight messages was still being delivered (seen live:
+-		 * a burst of these calls with a NULL table froze the whole imtransport process, since
+-		 * g_hash_table_contains/insert on NULL just logs a GLib-CRITICAL and returns without
+-		 * ever making progress, spinning the caller). Lazily recreate it, matching the same
+-		 * guard already used elsewhere in this file for the other da->*_ids tables. */
+-		if (da->received_message_ids == NULL) {
+-			da->received_message_ids = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+-		}
+-		gchar *id_key = from_int(msg_id);
+-		if (g_hash_table_contains(da->received_message_ids, id_key)) {
+-			g_free(id_key);
+-			return msg_id;
+-		}
+-		g_hash_table_insert(da->received_message_ids, id_key, id_key); /* table owns id_key */
++	if (special_type == DISCORD_MESSAGE_NORMAL && msg_id != 0 && discord_webos_message_seen(da, msg_id)) {
++		return msg_id;
+ 	}
+ 
+ 	if (!json_object_get_object_member(data, "author")) {
+@@ -3904,6 +4048,21 @@ discord_process_message(DiscordAccount *da, JsonObject *data, unsigned special_t
+ 		}
+ 
+ 	} else if (!nonce || !g_hash_table_remove(da->sent_message_ids, nonce)) {
++		/* webOS: a group DM's rename, or someone added or removed, is a line, written at once. It is
++		 * taken before the buffer is opened below: discord_join_chat_by_id would fetch the group's
++		 * history and return, and the history's copy of this message, already marked written, would
++		 * then be skipped, so the line came late or never. */
++		if (discord_webos_group_event(da, channel,
++				conv ? conv : PURPLE_CONVERSATION(purple_conversations_find_chat(da->pc, discord_chat_hash(channel_id))),
++				msg_type, special_type == DISCORD_MESSAGE_NORMAL ? msg_id : 0, data, timestamp)) {
++			if (channel != NULL && msg_id > channel->last_message_id && !thread) {
++				channel->last_message_id = msg_id;
++			}
++			g_free(escaped_content);
++			g_free(channel_id_s);
++			return msg_id;
++		}
++
+ 		/* Open the buffer if it's not already */
+ 		gboolean mentioned = flags & PURPLE_MESSAGE_NICK;
+ 
+@@ -5532,20 +5691,29 @@ discord_process_dispatch(DiscordAccount *da, const gchar *type, JsonObject *data
+ 
+ 			gboolean joining = purple_strequal(type, "CHANNEL_RECIPIENT_ADD");
+ 
+-			if (joining) {
++			/* webOS: only with the group open (libpurple takes no NULL conversation). The line saying
++			 * who was added or removed comes with the message Discord makes for it
++			 * (discord_webos_group_event); libpurple's "entered/left the room" here is written without
++			 * PURPLE_MESSAGE_RECV, which imlibpurpleservice does not store. */
++			if (chat != NULL && joining) {
+ 				if (user->id == da->self_user_id) {
+ 					purple_chat_conversation_set_nick(chat, name);
+ 				}
+ 				PurpleChatUserFlags cbflags = discord_get_user_flags(da, guild, user);
+ 				purple_chat_conversation_add_user(chat, name, NULL, cbflags, TRUE);
+-			} else {
++			} else if (chat != NULL) {
+ 				purple_chat_conversation_remove_user(chat, name, NULL);
+ 			}
+ 
+ 			/* We need to update the nicknames set for group DMs */
+ 
+-			if (channel->type == CHANNEL_GROUP_DM)
++			if (channel->type == CHANNEL_GROUP_DM) {
+ 				discord_got_group_dm_name(channel, user, joining);
++				/* webOS: and its people, for opening it (discord_webos_open_group_dm); the user is
++				 * not one of them */
++				if (user->id != da->self_user_id)
++					discord_webos_group_dm_recipient(channel, user->id, joining);
++			}
+ 
+ 			g_free(name);
+ 		}
+@@ -7029,27 +7197,6 @@ discord_got_login_fingerprint(DiscordAccount *da, JsonNode *node, gpointer user_
+ 
+ static gchar *discord_outgoing_content(const gchar *message);
+ 
+-/* Add a user to a group DM: PUT /channels/{id}/recipients/{user}. */
+-static void
+-discord_group_dm_add_recipient(DiscordAccount *da, guint64 room_id, guint64 user_id)
+-{
+-	gchar *url = discord_webos_recipient_url(DISCORD_API_BASE, room_id, user_id);
+-	if (url == NULL)
+-		return;
+-
+-	JsonObject *data = json_object_new();
+-	gchar *recipient = from_int(user_id);
+-	json_object_set_string_member(data, "recipient", recipient);
+-	g_free(recipient);
+-	gchar *postdata = json_object_to_string(data);
+-
+-	discord_fetch_url_with_method(da, "PUT", url, postdata, NULL, NULL);
+-
+-	g_free(postdata);
+-	json_object_unref(data);
+-	g_free(url);
+-}
+-
+ /* webOS: the DiscordAccount behind a PurpleAccount the transport names in one of its process-wide
+  * signals, or NULL when the account is not one of ours or is not connected. The signals fire for
+  * every account of every prpl. */
+@@ -7278,11 +7425,357 @@ discord_webos_group_create_cb(PurpleAccount *account, const char *name, const ch
+ 	return ok;
+ }
+ 
++/* webOS: Discord's answer to leaving a group DM: the channel. The plug-in has no CHANNEL_DELETE
++ * handling, so take the group off the buddy list here once Discord confirms. */
++static void
++discord_left_group_dm_cb(DiscordAccount *da, JsonNode *node, gpointer user_data)
++{
++	(void) user_data;
++	JsonObject *result = (node != NULL && JSON_NODE_HOLDS_OBJECT(node)) ? json_node_get_object(node) : NULL;
++	const gchar *channel_id = result ? json_object_get_string_member(result, "id") : NULL;
++
++	if (channel_id == NULL) {
++		const gchar *message = result ? json_object_get_string_member(result, "message") : NULL;
++		purple_debug_error("discord", "leaving group DM failed: %s\n", message ? message : "(no answer)");
++		return;
++	}
++
++	PurpleChat *chat = discord_find_chat(da->account, channel_id);
++	if (chat != NULL)
++		purple_blist_remove_chat(chat);
++}
++
++/* Leave a group DM: DELETE /channels/{id}. Returns FALSE, doing nothing, for any other channel - for a
++ * 1:1 DM that would only close it, and a server channel cannot be left at all. */
++static gboolean
++discord_leave_group_dm(DiscordAccount *da, guint64 room_id)
++{
++	if (room_id == 0 || !g_hash_table_contains_int64(da->group_dms, room_id))
++		return FALSE;
++
++	gchar *url = discord_webos_channel_url(DISCORD_API_BASE, room_id);
++	if (url == NULL)
++		return FALSE;
++
++	discord_fetch_url_with_method(da, "DELETE", url, NULL, discord_left_group_dm_cb, NULL);
++	g_free(url);
++	return TRUE;
++}
++
++/* webOS group leave (SEND): "webos-im-group-leave" (account, chat) - the user left a group in the
++ * Messaging app. For a group DM that is leaving it. A server channel returns FALSE: leaving the whole
++ * server is not what leaving a group means, and a channel alone cannot be left. */
++static gboolean
++discord_webos_group_leave_cb(PurpleAccount *account, const char *chat, void *data)
++{
++	(void) data;
++	DiscordAccount *da = discord_webos_account(account);
++	if (da == NULL)
++		return FALSE;
++
++	if (!discord_leave_group_dm(da, discord_webos_channel_for(da, chat, NULL))) {
++		purple_debug_warning("discord", "webos group leave: %s is not a group DM\n", chat ? chat : "(null)");
++		return FALSE;
++	}
++
++	return TRUE;
++}
++
++/* BEGIN group rename: tests/test_group_rename.c builds the code from here to the END line */
++
++/* webOS: a notice line in a group DM, which reaches the app as a system line in the group. The
++ * conversation is opened first if it is not, as a message arriving in the group would. */
++static void
++discord_webos_group_notice(DiscordAccount *da, guint64 room_id, const gchar *text)
++{
++	PurpleChatConversation *chatconv = purple_conversations_find_chat(da->pc, discord_chat_hash(room_id));
++
++	if (chatconv == NULL) {
++		discord_open_chat(da, room_id, FALSE);
++		chatconv = purple_conversations_find_chat(da->pc, discord_chat_hash(room_id));
++	}
++	if (chatconv != NULL) {
++		/* Not purple_conversation_write_system_message: imlibpurpleservice drops a line written
++		 * without PURPLE_MESSAGE_RECV, which a chat line from " " gets */
++		purple_serv_got_chat_in(da->pc, discord_chat_hash(room_id), " ", PURPLE_MESSAGE_SYSTEM, text, time(NULL));
++	}
++}
++
++/* webOS: Discord's answer to renaming a group DM: the channel. user_data is the channel id (owned
++ * here). The name is taken at once; the gateway's CHANNEL_UPDATE echo then finds it unchanged. */
++static void
++discord_webos_group_renamed_cb(DiscordAccount *da, JsonNode *node, gpointer user_data)
++{
++	guint64 room_id = *(guint64 *) user_data;
++	JsonObject *result = (node != NULL && JSON_NODE_HOLDS_OBJECT(node)) ? json_node_get_object(node) : NULL;
++	const gchar *channel_id = result ? json_object_get_string_member(result, "id") : NULL;
++
++	g_free(user_data);
++
++	if (channel_id == NULL) {
++		/* Discord's message says what was wrong ("Missing Access", "Invalid Form Body"), never the name */
++		const gchar *message = result ? json_object_get_string_member(result, "message") : NULL;
++
++		purple_debug_error("discord", "webos group rename of %" G_GUINT64_FORMAT " failed: %s\n",
++				room_id, message ? message : "(no answer)");
++		if (purple_account_is_connected(da->account)) {
++			gchar *notice = g_strdup_printf(_("The group could not be renamed: %s"),
++					message ? message : _("Discord did not answer"));
++			discord_webos_group_notice(da, room_id, notice);
++			g_free(notice);
++		}
++		return;
++	}
++
++	DiscordChannel *channel = g_hash_table_lookup_int64(da->group_dms, room_id);
++	const gchar *name = json_object_get_string_member(result, "name");
++
++	if (channel != NULL && name != NULL && *name != '\0') {
++		discord_set_channel_name(da, channel, name);
++	}
++}
++
++/* webOS group rename (SEND): "webos-im-group-rename" (account, chat, name) - the user renamed a
++ * group in the Messaging app. Only a group DM can be renamed here (a server channel is the server's
++ * to name): PATCH /channels/{id} {"name": name}, as discord_webos_group_created_cb names a new
++ * one. Returns TRUE when the request went out; FALSE for an account that is not Discord's, a chat
++ * that is not a group DM the user is in, or a name that is empty once trimmed or longer than
++ * Discord allows (which also says so in the group). */
++static gboolean
++discord_webos_group_rename_cb(PurpleAccount *account, const char *chat, const char *name, void *data)
++{
++	(void) data;
++	DiscordAccount *da = discord_webos_account(account);
++	if (da == NULL)
++		return FALSE;
++
++	guint64 room_id = discord_webos_channel_for(da, chat, NULL);
++	if (room_id == 0 || !g_hash_table_contains_int64(da->group_dms, room_id)) {
++		purple_debug_warning("discord", "webos group rename: %s is not a group DM\n", chat ? chat : "(null)");
++		return FALSE;
++	}
++
++	gboolean too_long = FALSE;
++	gchar *new_name = discord_webos_group_name(name, &too_long);
++	if (new_name == NULL) {
++		purple_debug_warning("discord", "webos group rename of %" G_GUINT64_FORMAT ": name %s\n",
++				room_id, too_long ? "too long" : "empty");
++		if (too_long) {
++			gchar *notice = g_strdup_printf(_("The group could not be renamed: a name can have at most %d characters."),
++					DISCORD_WEBOS_GROUP_NAME_MAX);
++			discord_webos_group_notice(da, room_id, notice);
++			g_free(notice);
++		}
++		return FALSE;
++	}
++
++	gchar *url = discord_webos_channel_url(DISCORD_API_BASE, room_id);
++	JsonObject *body = json_object_new();
++	json_object_set_string_member(body, "name", new_name);
++	gchar *postdata = json_object_to_string(body);
++
++	discord_fetch_url_with_method(da, "PATCH", url, postdata, discord_webos_group_renamed_cb,
++			g_memdup2(&room_id, sizeof(room_id)));
++
++	g_free(postdata);
++	json_object_unref(body);
++	g_free(url);
++	g_free(new_name);
++	return TRUE;
++}
++
++/* END group rename */
++
++/* BEGIN group remove: tests/test_group_rename.c builds the code from here to the END line as well */
++
++/* webOS: Discord's answer to taking someone out of a group DM. Done, it answers with nothing (204 No
++ * Content) and the gateway's CHANNEL_RECIPIENT_REMOVE takes them off the group; refused, it answers
++ * with its error, {"message": ..., "code": ...}, which goes in the group as a notice and in the debug
++ * log. user_data is the channel id (owned here). */
++static void
++discord_webos_group_member_removed_cb(DiscordAccount *da, JsonNode *node, gpointer user_data)
++{
++	guint64 room_id = *(guint64 *) user_data;
++	JsonObject *result = (node != NULL && JSON_NODE_HOLDS_OBJECT(node)) ? json_node_get_object(node) : NULL;
++	const gchar *message = result ? json_object_get_string_member(result, "message") : NULL;
++
++	g_free(user_data);
++
++	if (message == NULL)
++		return;
++
++	purple_debug_error("discord", "webos group remove from %" G_GUINT64_FORMAT " failed: %s\n", room_id, message);
++	if (purple_account_is_connected(da->account)) {
++		gchar *notice = g_strdup_printf(_("Someone could not be removed from the group: %s"), message);
++		discord_webos_group_notice(da, room_id, notice);
++		g_free(notice);
++	}
++}
++
++/* webOS group remove (SEND): "webos-im-group-remove" (account, chat, membersJoined) - the user took
++ * people out of a group in the Messaging app. Only a group DM has members to take out (a server
++ * channel's members are the server's): DELETE /channels/{id}/recipients/{user} for each, the reverse
++ * of discord_group_dm_add_recipient. Members are buddy names; one the plug-in does not know is
++ * skipped, and so is the user, who leaves a group with "webos-im-group-leave" instead. Returns TRUE
++ * when at least one request went out; FALSE for an account that is not Discord's, a chat that is not
++ * a group DM the user is in, or no member to take out. */
++static gboolean
++discord_webos_group_remove_cb(PurpleAccount *account, const char *chat, const char *members_joined, void *data)
++{
++	(void) data;
++	DiscordAccount *da = discord_webos_account(account);
++	if (da == NULL)
++		return FALSE;
++
++	guint64 room_id = discord_webos_channel_for(da, chat, NULL);
++	if (room_id == 0 || !g_hash_table_contains_int64(da->group_dms, room_id)) {
++		purple_debug_warning("discord", "webos group remove: %s is not a group DM\n", chat ? chat : "(null)");
++		return FALSE;
++	}
++
++	gchar **members = discord_webos_split_members(members_joined);
++	gboolean sent = FALSE;
++
++	for (gchar **m = members; *m != NULL; m++) {
++		DiscordUser *user = discord_get_user_fullname(da, *m);
++
++		if (user == NULL) {
++			purple_debug_warning("discord", "webos group remove: unknown member %s\n", *m);
++			continue;
++		}
++		if (user->id == da->self_user_id) {
++			purple_debug_warning("discord", "webos group remove: not removing the user from %" G_GUINT64_FORMAT "\n",
++					room_id);
++			continue;
++		}
++
++		gchar *url = discord_webos_recipient_url(DISCORD_API_BASE, room_id, user->id);
++		if (url == NULL)
++			continue;
++
++		discord_fetch_url_with_method(da, "DELETE", url, NULL, discord_webos_group_member_removed_cb,
++				g_memdup2(&room_id, sizeof(room_id)));
++		g_free(url);
++		sent = TRUE;
++	}
++
++	g_strfreev(members);
++	return sent;
++}
++
++/* END group remove */
++
++/* BEGIN group add: tests/test_group_rename.c builds the code from here to the END line as well */
++
++/* webOS: Discord's error code for adding someone to a group DM who is not one of the user's friends
++ * (its message says "Cannot send messages to this user"). */
++#define DISCORD_WEBOS_NOT_A_FRIEND 50007
++
++/* webOS: one person being added to a group DM, for discord_webos_group_member_added_cb: the group
++ * and the person as the user picked them. One allocation, freed with g_free. */
++typedef struct {
++	guint64 room_id;
++	gchar who[];
++} DiscordWebosGroupAdd;
++
++/* webOS: the line written in a group DM when who (as the user picked them) could not be added
++ * because the plug-in does not know them: Discord adds people by their id, and the plug-in knows
++ * the ids of its friends and of the people in its servers and chats only. HTML, as the chat's lines
++ * are. */
++static gchar *
++discord_webos_add_unknown_notice(const gchar *who)
++{
++	gchar *name = purple_markup_escape_text(who ? who : "", -1);
++	gchar *notice = g_strdup_printf(_("Could not add %s: Discord does not know them here. Only your Discord friends can be added to a group."), name);
++
++	g_free(name);
++	return notice;
++}
++
++/* webOS: the line written in a group DM when Discord refused to add who, from its answer's error
++ * code and message; NULL when the answer is no refusal (Discord adds with 204 No Content). 50007 is
++ * Discord's refusal for someone who is not a friend; any other is told in Discord's own words. HTML,
++ * as the chat's lines are. */
++static gchar *
++discord_webos_add_refused_notice(const gchar *who, gint64 code, const gchar *message)
++{
++	if (code == 0 && message == NULL)
++		return NULL;
++
++	gchar *name = purple_markup_escape_text(who ? who : "", -1);
++	gchar *notice;
++
++	if (code == DISCORD_WEBOS_NOT_A_FRIEND) {
++		notice = g_strdup_printf(_("Could not add %s: Discord lets you add only your friends to a group."), name);
++	} else if (message != NULL && *message != '\0') {
++		gchar *why = purple_markup_escape_text(message, -1);
++		notice = g_strdup_printf(_("Could not add %s: %s"), name, why);
++		g_free(why);
++	} else {
++		notice = g_strdup_printf(_("Could not add %s: Discord refused it (error %lld)."), name, (long long) code);
++	}
++
++	g_free(name);
++	return notice;
++}
++
++/* webOS: Discord's answer to adding someone to a group DM. Done, it answers with nothing (204 No
++ * Content) and the gateway's CHANNEL_RECIPIENT_ADD puts them in the group; refused, it answers with
++ * its error, {"message": ..., "code": ...}, which goes in the group as a notice and, without the
++ * person, in the debug log. user_data is a DiscordWebosGroupAdd (owned here). */
++static void
++discord_webos_group_member_added_cb(DiscordAccount *da, JsonNode *node, gpointer user_data)
++{
++	DiscordWebosGroupAdd *add = user_data;
++	JsonObject *result = (node != NULL && JSON_NODE_HOLDS_OBJECT(node)) ? json_node_get_object(node) : NULL;
++	const gchar *message = result ? json_object_get_string_member(result, "message") : NULL;
++	gint64 code = result ? json_object_get_int_member(result, "code") : 0;
++	gchar *notice = discord_webos_add_refused_notice(add->who, code, message);
++
++	if (notice != NULL) {
++		purple_debug_error("discord", "webos group add to %" G_GUINT64_FORMAT " refused: %lld %s\n",
++				add->room_id, (long long) code, message ? message : "(no message)");
++		if (purple_account_is_connected(da->account))
++			discord_webos_group_notice(da, add->room_id, notice);
++		g_free(notice);
++	}
++	g_free(add);
++}
++
++/* Add a user to a group DM: PUT /channels/{id}/recipients/{user}. who is the person as the user
++ * picked them, for the notice when Discord refuses. */
++static void
++discord_group_dm_add_recipient(DiscordAccount *da, guint64 room_id, guint64 user_id, const gchar *who)
++{
++	gchar *url = discord_webos_recipient_url(DISCORD_API_BASE, room_id, user_id);
++	if (url == NULL)
++		return;
++
++	JsonObject *data = json_object_new();
++	gchar *recipient = from_int(user_id);
++	json_object_set_string_member(data, "recipient", recipient);
++	g_free(recipient);
++	gchar *postdata = json_object_to_string(data);
++
++	if (who == NULL)
++		who = "";
++	gsize who_len = strlen(who);
++	DiscordWebosGroupAdd *add = g_malloc(sizeof(DiscordWebosGroupAdd) + who_len + 1);
++	add->room_id = room_id;
++	memcpy(add->who, who, who_len + 1);
++
++	discord_fetch_url_with_method(da, "PUT", url, postdata, discord_webos_group_member_added_cb, add);
++
++	g_free(postdata);
++	json_object_unref(data);
++	g_free(url);
++}
++
+ /* webOS group invite (SEND): "webos-im-group-invite" (account, chat, membersJoined) - the user added
+  * people to a group in the Messaging app. Only a group DM has members to add: a server channel's
+  * members are the server's, and a 1:1 DM cannot grow into a group, so both return FALSE. Members are
+- * buddy names; one the plug-in does not know is skipped. Returns TRUE when at least one request went
+- * out. */
++ * buddy names; one the plug-in does not know is skipped, and the group says so. Returns TRUE when at
++ * least one request went out. */
+ static gboolean
+ discord_webos_group_invite_cb(PurpleAccount *account, const char *chat, const char *members_joined, void *data)
+ {
+@@ -7305,10 +7798,13 @@ discord_webos_group_invite_cb(PurpleAccount *account, const char *chat, const ch
+ 
+ 		if (user == NULL) {
+ 			purple_debug_warning("discord", "webos group invite: unknown member %s\n", *m);
++			gchar *notice = discord_webos_add_unknown_notice(*m);
++			discord_webos_group_notice(da, room_id, notice);
++			g_free(notice);
+ 			continue;
+ 		}
+ 
+-		discord_group_dm_add_recipient(da, room_id, user->id);
++		discord_group_dm_add_recipient(da, room_id, user->id, *m);
+ 		sent = TRUE;
+ 	}
+ 
+@@ -7316,62 +7812,177 @@ discord_webos_group_invite_cb(PurpleAccount *account, const char *chat, const ch
+ 	return sent;
+ }
+ 
+-/* webOS: Discord's answer to leaving a group DM: the channel. The plug-in has no CHANNEL_DELETE
+- * handling, so take the group off the buddy list here once Discord confirms. */
++/* END group add */
++
++/* BEGIN chat open: tests/test_group_rename.c builds the code from here to the END line as well */
++
++/* webOS: put a group DM's people on its conversation, as discord_got_channel_info does: the user,
++ * as the conversation's nick, first, and each of people (DiscordUser *), in their order. */
+ static void
+-discord_left_group_dm_cb(DiscordAccount *da, JsonNode *node, gpointer user_data)
++discord_webos_chat_put_members(DiscordAccount *da, PurpleChatConversation *chatconv, DiscordChannel *channel,
++		GList *people)
+ {
+-	(void) user_data;
++	GList *users = NULL, *flags = NULL;
++
++	for (GList *l = people; l != NULL; l = l->next) {
++		gchar *name = discord_create_nickname(l->data, NULL, channel);
++
++		if (name != NULL) {
++			users = g_list_prepend(users, name);
++			flags = g_list_prepend(flags, GINT_TO_POINTER(PURPLE_CHAT_USER_NONE));
++		}
++	}
++	users = g_list_reverse(users);
++
++	DiscordUser *self = discord_get_user(da, da->self_user_id);
++	gchar *self_name = self ? discord_create_nickname(self, NULL, channel) : NULL;
++	if (self_name != NULL) {
++		users = g_list_prepend(users, self_name);
++		flags = g_list_prepend(flags, GINT_TO_POINTER(PURPLE_CHAT_USER_NONE));
++		purple_chat_conversation_set_nick(chatconv, self_name);
++	}
++
++	purple_chat_conversation_clear_users(chatconv);
++	purple_chat_conversation_add_users(chatconv, users, NULL, flags, FALSE);
++
++	g_list_free_full(users, g_free);
++	g_list_free(flags);
++}
++
++/* webOS: Discord's answer to GET /channels/{id} for a group DM opened by "webos-im-chat-open": the
++ * channel, whose "recipients" are its people but the user. Only they are taken: no title, topic or
++ * pins line, as discord_got_channel_info would write. user_data is the channel id (owned here). */
++static void
++discord_webos_chat_open_members_cb(DiscordAccount *da, JsonNode *node, gpointer user_data)
++{
++	guint64 room_id = *(guint64 *) user_data;
+ 	JsonObject *result = (node != NULL && JSON_NODE_HOLDS_OBJECT(node)) ? json_node_get_object(node) : NULL;
+-	const gchar *channel_id = result ? json_object_get_string_member(result, "id") : NULL;
++	JsonArray *recipients = result ? json_object_get_array_member(result, "recipients") : NULL;
+ 
+-	if (channel_id == NULL) {
++	g_free(user_data);
++
++	if (recipients == NULL) {
+ 		const gchar *message = result ? json_object_get_string_member(result, "message") : NULL;
+-		purple_debug_error("discord", "leaving group DM failed: %s\n", message ? message : "(no answer)");
++		purple_debug_warning("discord", "webos chat open: no members for %" G_GUINT64_FORMAT ": %s\n",
++				room_id, message ? message : "(no answer)");
+ 		return;
+ 	}
+ 
+-	PurpleChat *chat = discord_find_chat(da->account, channel_id);
+-	if (chat != NULL)
+-		purple_blist_remove_chat(chat);
++	PurpleChatConversation *chatconv = purple_conversations_find_chat(da->pc, discord_chat_hash(room_id));
++	DiscordChannel *channel = g_hash_table_lookup_int64(da->group_dms, room_id);
++	if (chatconv == NULL || channel == NULL)
++		return;
++
++	GList *people = NULL;
++	for (guint i = json_array_get_length(recipients); i > 0; i--) {
++		JsonObject *recipient = json_array_get_object_element(recipients, i - 1);
++
++		if (recipient != NULL && json_object_get_string_member(recipient, "id") != NULL)
++			people = g_list_prepend(people, discord_upsert_user(da->new_users, recipient));
++	}
++
++	discord_webos_chat_put_members(da, chatconv, channel, people);
++	g_list_free(people);
+ }
+ 
+-/* Leave a group DM: DELETE /channels/{id}. Returns FALSE, doing nothing, for any other channel - for a
+- * 1:1 DM that would only close it, and a server channel cannot be left at all. */
+-static gboolean
+-discord_leave_group_dm(DiscordAccount *da, guint64 room_id)
++/* webOS: a group DM's people as the gateway changes them (CHANNEL_RECIPIENT_ADD / _REMOVE), so
++ * the recipients READY gave stay right for discord_webos_open_group_dm. */
++static void
++discord_webos_group_dm_recipient(DiscordChannel *channel, guint64 user_id, gboolean joining)
+ {
+-	if (room_id == 0 || !g_hash_table_contains_int64(da->group_dms, room_id))
+-		return FALSE;
++	GList *l = channel->recipients;
+ 
+-	gchar *url = discord_webos_channel_url(DISCORD_API_BASE, room_id);
+-	if (url == NULL)
+-		return FALSE;
++	while (l != NULL && *(guint64 *) l->data != user_id)
++		l = l->next;
+ 
+-	discord_fetch_url_with_method(da, "DELETE", url, NULL, discord_left_group_dm_cb, NULL);
+-	g_free(url);
+-	return TRUE;
++	if (joining && l == NULL) {
++		channel->recipients = g_list_append(channel->recipients, g_memdup2(&user_id, sizeof(user_id)));
++	} else if (!joining && l != NULL) {
++		g_free(l->data);
++		channel->recipients = g_list_delete_link(channel->recipients, l);
++	}
+ }
+ 
+-/* webOS group leave (SEND): "webos-im-group-leave" (account, chat) - the user left a group in the
+- * Messaging app. For a group DM that is leaving it. A server channel returns FALSE: leaving the whole
+- * server is not what leaving a group means, and a channel alone cannot be left. */
++/* webOS: open a group DM's conversation for its people alone, or find it open: the conversation,
++ * as discord_open_chat makes it, with its people on it from the recipients READY gave (kept by
++ * discord_webos_group_dm_recipient), or, when one of them is not known, from GET /channels/{id}.
++ * discord_join_chat would fetch the channel's messages and mark it backfilled; here no message is
++ * fetched, nothing is acked or subscribed, no line is written and "chan-backfilled-<id>" is left
++ * alone, so opening the group later in the app still fetches its history. NULL when libpurple
++ * made none. */
++static PurpleChatConversation *
++discord_webos_open_group_dm(DiscordAccount *da, DiscordChannel *channel)
++{
++	guint64 room_id = channel->id;
++	PurpleChatConversation *chatconv = purple_conversations_find_chat(da->pc, discord_chat_hash(room_id));
++	if (chatconv != NULL && !purple_chat_conversation_has_left(chatconv))
++		return chatconv;
++
++	gchar *id_str = from_int(room_id);
++	chatconv = purple_serv_got_joined_chat(da->pc, discord_chat_hash(room_id), id_str);
++	g_free(id_str);
++	if (chatconv == NULL)
++		return NULL;
++
++	purple_conversation_set_data(PURPLE_CONVERSATION(chatconv), "id", g_memdup2(&room_id, sizeof(room_id)));
++	purple_conversation_set_data(PURPLE_CONVERSATION(chatconv), "msg_timestamp_map", (GList *) NULL);
++
++	const gchar *display_name = discord_get_chat_display_name(da, room_id);
++	purple_conversation_set_title(PURPLE_CONVERSATION(chatconv), display_name ? display_name : channel->name);
++
++	GList *people = NULL;
++	gboolean known = channel->recipients != NULL;
++
++	for (GList *l = channel->recipients; known && l != NULL; l = l->next) {
++		DiscordUser *user = discord_get_user(da, *(guint64 *) l->data);
++
++		if (user == NULL)
++			known = FALSE;
++		else
++			people = g_list_prepend(people, user);
++	}
++
++	if (known) {
++		people = g_list_reverse(people);
++		discord_webos_chat_put_members(da, chatconv, channel, people);
++	} else {
++		gchar *url = discord_webos_channel_url(DISCORD_API_BASE, room_id);
++
++		if (url != NULL) {
++			discord_fetch_url_with_method(da, "GET", url, NULL, discord_webos_chat_open_members_cb,
++					g_memdup2(&room_id, sizeof(room_id)));
++			g_free(url);
++		}
++	}
++
++	g_list_free(people);
++	return chatconv;
++}
++
++/* webOS chat open: "webos-im-chat-open" (account, chat) - imlibpurpleservice's getChatMembers asks
++ * for the people in a group that has no conversation yet (Group Info): a group DM is opened for
++ * them (discord_webos_open_group_dm). Returns TRUE when the conversation is open (now or
++ * already); FALSE for another account or a chat that is not a group DM the user is in. */
+ static gboolean
+-discord_webos_group_leave_cb(PurpleAccount *account, const char *chat, void *data)
++discord_webos_chat_open_cb(PurpleAccount *account, const char *chat, void *data)
+ {
+ 	(void) data;
+ 	DiscordAccount *da = discord_webos_account(account);
+ 	if (da == NULL)
+ 		return FALSE;
+ 
+-	if (!discord_leave_group_dm(da, discord_webos_channel_for(da, chat, NULL))) {
+-		purple_debug_warning("discord", "webos group leave: %s is not a group DM\n", chat ? chat : "(null)");
++	guint64 room_id = discord_webos_channel_for(da, chat, NULL);
++	DiscordChannel *channel = room_id ? g_hash_table_lookup_int64(da->group_dms, room_id) : NULL;
++	if (channel == NULL) {
++		purple_debug_warning("discord", "webos chat open: %s is not a group DM\n", chat ? chat : "(null)");
+ 		return FALSE;
+ 	}
+ 
+-	return TRUE;
++	return discord_webos_open_group_dm(da, channel) != NULL;
+ }
+ 
++/* END chat open */
++
+ /* Connect once (process-wide) to the transport's send-reaction signal. The signal lives on
+  * purple_conversations_get_handle(), so a single connect covers every Discord account in this process.
+  * Guarded so repeated logins don't double-connect. */
+@@ -7394,6 +8005,12 @@ discord_connect_send_reaction_once(void)
+ 			purple_get_core(), PURPLE_CALLBACK(discord_webos_group_invite_cb), NULL);
+ 	purple_signal_connect(purple_conversations_get_handle(), "webos-im-group-leave",
+ 			purple_get_core(), PURPLE_CALLBACK(discord_webos_group_leave_cb), NULL);
++	purple_signal_connect(purple_conversations_get_handle(), "webos-im-group-rename",
++			purple_get_core(), PURPLE_CALLBACK(discord_webos_group_rename_cb), NULL);
++	purple_signal_connect(purple_conversations_get_handle(), "webos-im-group-remove",
++			purple_get_core(), PURPLE_CALLBACK(discord_webos_group_remove_cb), NULL);
++	purple_signal_connect(purple_conversations_get_handle(), "webos-im-chat-open",
++			purple_get_core(), PURPLE_CALLBACK(discord_webos_chat_open_cb), NULL);
+ }
+ 
+ void
+@@ -8896,11 +9513,16 @@ discord_chat_invite(PurpleConnection *pc, int id, const char *message, const cha
+ 
+ 	if (!user) {
+ 		purple_debug_info("discord", "Missing user in invitation for %s\n", who);
++		if (g_hash_table_contains_int64(da->group_dms, room_id)) {
++			gchar *notice = discord_webos_add_unknown_notice(who);
++			discord_webos_group_notice(da, room_id, notice);
++			g_free(notice);
++		}
+ 		return;
+ 	}
+ 
+ 	if (g_hash_table_contains_int64(da->group_dms, room_id)) {
+-		discord_group_dm_add_recipient(da, room_id, user->id);
++		discord_group_dm_add_recipient(da, room_id, user->id, who);
+ 
+ 	} else {
+ 		//TODO /channels/{channel.id}/invites
+diff --git a/tests/Makefile b/tests/Makefile
+index 55cadee..3e1dbce 100644
+--- a/tests/Makefile
++++ b/tests/Makefile
+@@ -1,4 +1,5 @@
+-# Unit tests for the pure webOS helpers (webos_helpers.c). They need GLib only, no libpurple:
++# Unit tests for the pure webOS helpers (webos_helpers.c), and for the group DM and user flags
++# code in libdiscord.c. They need GLib, and json-glib for the group DM code, no libpurple:
+ #   make -C tests check
+ # Cross builds pass CC, PKG_CONFIG and a sysroot the usual way; extra flags go in CFLAGS (for
+ # example -fsanitize=address,undefined).
+@@ -8,14 +9,46 @@ CFLAGS ?= -O2 -g
+ CFLAGS += -std=c99 -Wall -Wextra
+ GLIB_CFLAGS := $(shell $(PKG_CONFIG) --cflags glib-2.0)
+ GLIB_LIBS := $(shell $(PKG_CONFIG) --libs glib-2.0)
++JSON_CFLAGS := $(shell $(PKG_CONFIG) --cflags json-glib-1.0)
++JSON_LIBS := $(shell $(PKG_CONFIG) --libs json-glib-1.0)
+ 
+ test_webos_helpers: test_webos_helpers.c ../webos_helpers.c ../webos_helpers.h
+ 	$(CC) $(CFLAGS) -I.. $(GLIB_CFLAGS) -o $@ test_webos_helpers.c ../webos_helpers.c $(LDFLAGS) $(GLIB_LIBS)
+ 
+-check: test_webos_helpers
++# The group rename, group remove, group add, chat open and group event lines parts of libdiscord.c
++group_rename.inc: ../libdiscord.c
++	sed -n '/^\/\* BEGIN group rename/,/^\/\* END group rename/p' ../libdiscord.c > $@
++
++group_remove.inc: ../libdiscord.c
++	sed -n '/^\/\* BEGIN group remove/,/^\/\* END group remove/p' ../libdiscord.c > $@
++
++chat_open.inc: ../libdiscord.c
++	sed -n '/^\/\* BEGIN chat open/,/^\/\* END chat open/p' ../libdiscord.c > $@
++
++group_add.inc: ../libdiscord.c
++	sed -n '/^\/\* BEGIN group add/,/^\/\* END group add/p' ../libdiscord.c > $@
++
++group_event_lines.inc: ../libdiscord.c
++	sed -n '/^\/\* BEGIN group event lines/,/^\/\* END group event lines/p' ../libdiscord.c > $@
++
++test_group_rename: test_group_rename.c group_rename.inc group_remove.inc group_add.inc chat_open.inc group_event_lines.inc ../webos_helpers.c ../webos_helpers.h ../json_compat.h
++	$(CC) $(CFLAGS) -I. -I.. $(JSON_CFLAGS) -o $@ test_group_rename.c ../webos_helpers.c $(LDFLAGS) $(JSON_LIBS)
++
++# A user's flags in a chat, between libdiscord.c's BEGIN and END user flags lines
++user_flags.inc: ../libdiscord.c
++	sed -n '/^\/\* BEGIN user flags/,/^\/\* END user flags/p' ../libdiscord.c > $@
++
++test_user_flags: test_user_flags.c user_flags.inc
++	$(CC) $(CFLAGS) -I. $(GLIB_CFLAGS) -o $@ test_user_flags.c $(LDFLAGS) $(GLIB_LIBS)
++
++check: test_webos_helpers test_group_rename test_user_flags
+ 	./test_webos_helpers
++	./test_group_rename
++	./test_user_flags
+ 
+ clean:
+-	rm -f test_webos_helpers
++	rm -f test_webos_helpers test_group_rename test_user_flags \
++		group_rename.inc group_remove.inc group_add.inc chat_open.inc \
++		group_event_lines.inc user_flags.inc
+ 
+ .PHONY: check clean
+diff --git a/tests/test_group_rename.c b/tests/test_group_rename.c
+new file mode 100644
+index 0000000..37d1013
+--- /dev/null
++++ b/tests/test_group_rename.c
+@@ -0,0 +1,1169 @@
++/*
++ *   Unit tests for renaming a group DM from the Messaging app ("webos-im-group-rename"), for
++ *   taking people out of one ("webos-im-group-remove") and adding people to one
++ *   ("webos-im-group-invite"), and for opening one for its members
++ *   ("webos-im-chat-open"), and for the lines a group DM's rename and people added or removed
++ *   are written as: the parts of libdiscord.c between its BEGIN and END group rename, group
++ *   remove, group add, chat open and group event lines lines, which the Makefile copies into
++ *   group_rename.inc, group_remove.inc, group_add.inc, chat_open.inc and group_event_lines.inc. This file stands
++ *   in for libpurple and the rest of the plug-in around them and records the requests, notices,
++ *   lines and debug lines they make.
++ *
++ *   This program is free software: you can redistribute it and/or modify
++ *   it under the terms of the GNU General Public License as published by
++ *   the Free Software Foundation, either version 3 of the License, or
++ *   (at your option) any later version.
++ */
++
++#include <stdarg.h>
++#include <stdio.h>
++#include <string.h>
++
++#include <glib.h>
++
++#include "json_compat.h"
++#include "webos_helpers.h"
++
++static int failures;
++static const char *current_test = "";
++
++#define CHECK(cond) do { \
++	if (!(cond)) { \
++		fprintf(stderr, "%s:%d: %s: CHECK failed: %s\n", __FILE__, __LINE__, current_test, #cond); \
++		failures++; \
++	} \
++} while (0)
++
++/* ---- what the group rename and remove parts need from libpurple and the rest of the plug-in ---- */
++
++#define _(s) (s)
++#define DISCORD_API_BASE "https://discord.com/api/v9"
++#define PURPLE_MESSAGE_SYSTEM 0x0004
++#define PURPLE_CHAT_USER_NONE 0
++
++enum { CHANNEL_GUILD_TEXT = 0, CHANNEL_GROUP_DM = 3 };
++enum { MESSAGE_DEFAULT = 0, MESSAGE_RECIPIENT_ADD = 1, MESSAGE_RECIPIENT_REMOVE = 2, MESSAGE_CALL = 3,
++	MESSAGE_CHANNEL_NAME_CHANGE = 4 };
++#define PURPLE_CONVERSATION(c) ((PurpleConversation *) (c))
++
++typedef struct { int connected; } PurpleAccount;
++typedef struct { int unused; } PurpleConnection;
++typedef struct {
++	guint64 id;
++	int left;
++	gchar *title, *nick;
++	GString *users;	/* "<name>," per user on it, in order */
++	guint64 *data_id;	/* the "id" data */
++	guint cleared;
++} PurpleChatConversation;
++typedef PurpleChatConversation PurpleConversation;
++
++typedef struct {
++	guint64 id;
++	gchar *name;
++	GList *recipients;	/* guint64 * each, the people but the user */
++	int type;
++} DiscordChannel;
++
++typedef struct { int unused; } DiscordGuild;
++
++typedef struct {
++	guint64 id;
++	gchar *name;
++} DiscordUser;
++
++typedef struct {
++	PurpleAccount *account;
++	PurpleConnection *pc;
++	GHashTable *group_dms;	/* id -> DiscordChannel, as libdiscord.c keeps them */
++	guint64 self_user_id;
++	GHashTable *new_users;
++	GHashTable *received_message_ids;
++} DiscordAccount;
++
++typedef void (*DiscordProxyCallbackFunc)(DiscordAccount *ya, JsonNode *node, gpointer user_data);
++
++static PurpleAccount ours = { 1 }, theirs = { 1 };
++static PurpleConnection connection;
++static DiscordAccount account;
++static DiscordChannel group = { .id = 1001, .type = CHANNEL_GROUP_DM };
++static DiscordChannel server_channel = { .id = 3003, .type = CHANNEL_GUILD_TEXT };	/* 2002 stands for a server channel: not in group_dms */
++
++static GString *debug_log;
++static GString *notices;	/* "<channel id>: <text>\n" per notice written */
++static GPtrArray *open_convs;	/* the chat conversations open, by id */
++static guint opened;	/* how often discord_open_chat opened one */
++
++static struct {
++	guint count;
++	gchar *method, *url, *postdata;
++	DiscordProxyCallbackFunc callback;
++	gpointer user_data;
++	GString *all;	/* "<method> <url>\n" per request, in order */
++	GPtrArray *pending;	/* the user_data of each request not answered yet */
++} fetch;
++
++/* the buddies the plug-in knows, by the name the app uses: "ann", "bob" and the user, "me" */
++static DiscordUser users[] = { { 11, "ann" }, { 12, "bob" }, { 99, "me" } };
++
++static gchar *renamed_to;	/* what discord_set_channel_name was given */
++
++#define DEBUG_STUB(name) \
++static void \
++name(const char *category, const char *format, ...) \
++{ \
++	va_list args; \
++	(void) category; \
++	va_start(args, format); \
++	gchar *line = g_strdup_vprintf(format, args); \
++	va_end(args); \
++	g_string_append(debug_log, line); \
++	g_free(line); \
++}
++DEBUG_STUB(purple_debug_warning)
++DEBUG_STUB(purple_debug_error)
++
++static DiscordAccount *
++discord_webos_account(PurpleAccount *a)
++{
++	return a == &ours ? &account : NULL;
++}
++
++/* chats are named by their channel id here */
++static guint64
++discord_webos_channel_for(DiscordAccount *da, const gchar *peer, const gchar *msg_id)
++{
++	(void) da;
++	(void) msg_id;
++	return (peer != NULL && discord_webos_is_snowflake(peer)) ? g_ascii_strtoull(peer, NULL, 10) : 0;
++}
++
++static gboolean
++purple_account_is_connected(PurpleAccount *a)
++{
++	return a->connected;
++}
++
++static int
++discord_chat_hash(guint64 id)
++{
++	return (int) (id & 0x7fffffff);
++}
++
++static PurpleChatConversation *
++purple_conversations_find_chat(PurpleConnection *pc, int hash)
++{
++	(void) pc;
++	for (guint i = 0; i < open_convs->len; i++) {
++		PurpleChatConversation *c = g_ptr_array_index(open_convs, i);
++
++		if (discord_chat_hash(c->id) == hash)
++			return c;
++	}
++	return NULL;
++}
++
++static DiscordChannel *
++discord_open_chat(DiscordAccount *da, guint64 id, gboolean present)
++{
++	(void) da;
++	(void) present;
++	PurpleChatConversation *c = g_new0(PurpleChatConversation, 1);
++
++	c->id = id;
++	g_ptr_array_add(open_convs, c);
++	opened++;
++	return NULL;
++}
++
++static GString *stashed;	/* "<msg id>," per webos-msg-id stashed */
++
++/* a line in a chat: "<channel id>: <text>\n" in notices */
++static void
++purple_serv_got_chat_in(PurpleConnection *pc, int hash, const gchar *who, int flags, const gchar *text, time_t when)
++{
++	CHECK(pc == &connection);
++	CHECK(g_strcmp0(who, " ") == 0);	/* no one's message */
++	CHECK(flags == PURPLE_MESSAGE_SYSTEM);
++	CHECK(when > 0);
++	PurpleChatConversation *conv = purple_conversations_find_chat(pc, hash);
++	CHECK(conv != NULL);	/* serv_got_chat_in writes only in an open conversation */
++	if (conv != NULL)
++		g_string_append_printf(notices, "%" G_GUINT64_FORMAT ": %s\n", conv->id, text);
++}
++
++static void
++discord_stash_webos_msgid(PurpleConversation *conv, guint64 msg_id)
++{
++	CHECK(conv != NULL);
++	if (msg_id != 0)
++		g_string_append_printf(stashed, "%" G_GUINT64_FORMAT ",", msg_id);
++}
++
++static guint64
++to_int(const gchar *s)
++{
++	return s ? g_ascii_strtoull(s, NULL, 10) : 0;
++}
++
++static gchar *
++purple_markup_escape_text(const gchar *text, gssize len)
++{
++	return g_markup_escape_text(text, len);
++}
++
++static void
++discord_fetch_url_with_method(DiscordAccount *da, const gchar *method, const gchar *url, const gchar *postdata,
++		DiscordProxyCallbackFunc callback, gpointer user_data)
++{
++	(void) da;
++	fetch.count++;
++	g_string_append_printf(fetch.all, "%s %s\n", method, url);
++	g_ptr_array_add(fetch.pending, user_data);
++	g_free(fetch.method);
++	g_free(fetch.url);
++	g_free(fetch.postdata);
++	fetch.method = g_strdup(method);
++	fetch.url = g_strdup(url);
++	fetch.postdata = g_strdup(postdata);
++	fetch.callback = callback;
++	fetch.user_data = user_data;
++}
++
++static void
++discord_set_channel_name(DiscordAccount *da, DiscordChannel *channel, const gchar *new_name)
++{
++	(void) da;
++	CHECK(channel == &group);
++	g_free(renamed_to);
++	renamed_to = g_strdup(new_name);
++}
++
++static GPtrArray *made_users;	/* what discord_upsert_user made */
++
++static DiscordUser *
++discord_get_user(DiscordAccount *da, guint64 id)
++{
++	(void) da;
++	for (guint i = 0; i < G_N_ELEMENTS(users); i++) {
++		if (users[i].id == id)
++			return &users[i];
++	}
++	for (guint i = 0; i < made_users->len; i++) {
++		DiscordUser *u = g_ptr_array_index(made_users, i);
++		if (u->id == id)
++			return u;
++	}
++	return NULL;
++}
++
++/* as libdiscord.c's: the known user with the JSON's id, else a new one from it */
++static DiscordUser *
++discord_upsert_user(GHashTable *table, JsonObject *json)
++{
++	CHECK(table == account.new_users);
++	guint64 id = g_ascii_strtoull(json_object_get_string_member(json, "id"), NULL, 10);
++	DiscordUser *user = discord_get_user(&account, id);
++
++	if (user == NULL) {
++		user = g_new0(DiscordUser, 1);
++		user->id = id;
++		user->name = g_strdup(json_object_get_string_member(json, "username"));
++		g_ptr_array_add(made_users, user);
++	}
++	return user;
++}
++
++static void
++free_made_user(gpointer p)
++{
++	DiscordUser *u = p;
++	g_free(u->name);
++	g_free(u);
++}
++
++static gchar *
++discord_create_nickname(DiscordUser *user, DiscordGuild *guild, DiscordChannel *channel)
++{
++	CHECK(guild == NULL);
++	CHECK(channel == &group);
++	return g_strdup(user->name);
++}
++
++static gchar *
++from_int(guint64 id)
++{
++	return g_strdup_printf("%" G_GUINT64_FORMAT, id);
++}
++
++/* as libdiscord.c's: the person's name, HTML-escaped, from the user or else the JSON */
++static gchar *
++discord_get_display_name_or_unk(DiscordAccount *da, DiscordGuild *guild, DiscordChannel *channel, DiscordUser *user,
++		JsonObject *json)
++{
++	(void) da;
++	CHECK(guild == NULL);
++	CHECK(channel == &group);
++	const gchar *name = user ? user->name : (json ? json_object_get_string_member(json, "username") : NULL);
++	return name ? g_markup_escape_text(name, -1) : g_strdup("Unknown user");
++}
++
++static const gchar *
++discord_get_chat_display_name(DiscordAccount *da, guint64 id)
++{
++	(void) da;
++	return id == 1001 ? "ann, bob" : NULL;
++}
++
++static int
++purple_chat_conversation_has_left(PurpleChatConversation *c)
++{
++	return c->left;
++}
++
++static guint joined;	/* how often purple_serv_got_joined_chat made a conversation */
++static int refuse_join;	/* purple_serv_got_joined_chat makes none */
++
++static PurpleChatConversation *
++purple_serv_got_joined_chat(PurpleConnection *pc, int hash, const gchar *name)
++{
++	CHECK(pc == &connection);
++	if (refuse_join)
++		return NULL;
++	PurpleChatConversation *c = g_new0(PurpleChatConversation, 1);
++
++	c->id = g_ascii_strtoull(name, NULL, 10);
++	CHECK(hash == (int) (c->id & 0x7fffffff));
++	g_ptr_array_add(open_convs, c);
++	joined++;
++	return c;
++}
++
++static void
++purple_conversation_set_data(PurpleConversation *c, const gchar *key, gpointer value)
++{
++	if (strcmp(key, "id") == 0) {
++		g_free(c->data_id);
++		c->data_id = value;
++	} else {
++		CHECK(strcmp(key, "msg_timestamp_map") == 0);
++		CHECK(value == NULL);
++	}
++}
++
++static void
++purple_conversation_set_title(PurpleConversation *c, const gchar *title)
++{
++	g_free(c->title);
++	c->title = g_strdup(title);
++}
++
++static void
++purple_chat_conversation_set_nick(PurpleChatConversation *c, const gchar *nick)
++{
++	g_free(c->nick);
++	c->nick = g_strdup(nick);
++}
++
++static void
++purple_chat_conversation_clear_users(PurpleChatConversation *c)
++{
++	c->cleared++;
++	if (c->users != NULL)
++		g_string_truncate(c->users, 0);
++}
++
++static void
++purple_chat_conversation_add_users(PurpleChatConversation *c, GList *names, GList *extra, GList *flags,
++		gboolean new_arrivals)
++{
++	CHECK(extra == NULL);
++	CHECK(!new_arrivals);
++	CHECK(g_list_length(names) == g_list_length(flags));
++	if (c->users == NULL)
++		c->users = g_string_new(NULL);
++	for (GList *l = names; l != NULL; l = l->next)
++		g_string_append_printf(c->users, "%s,", (const gchar *) l->data);
++}
++
++static void
++free_conv(gpointer p)
++{
++	PurpleChatConversation *c = p;
++	g_free(c->title);
++	g_free(c->nick);
++	g_free(c->data_id);
++	if (c->users != NULL)
++		g_string_free(c->users, TRUE);
++	g_free(c);
++}
++
++static DiscordUser *
++discord_get_user_fullname(DiscordAccount *da, const gchar *name)
++{
++	(void) da;
++	for (guint i = 0; i < G_N_ELEMENTS(users); i++) {
++		if (g_strcmp0(users[i].name, name) == 0)
++			return &users[i];
++	}
++	return NULL;
++}
++
++#include "group_rename.inc"
++#include "group_remove.inc"
++#include "group_add.inc"
++#include "chat_open.inc"
++#include "group_event_lines.inc"
++
++/* ---- running ---- */
++
++static void
++setup(const char *name)
++{
++	current_test = name;
++	debug_log = g_string_new(NULL);
++	notices = g_string_new(NULL);
++	open_convs = g_ptr_array_new_with_free_func(free_conv);
++	made_users = g_ptr_array_new_with_free_func(free_made_user);
++	joined = 0;
++	refuse_join = 0;
++	group.recipients = NULL;
++	stashed = g_string_new(NULL);
++	account.received_message_ids = NULL;
++	opened = 0;
++	memset(&fetch, 0, sizeof(fetch));
++	fetch.all = g_string_new(NULL);
++	fetch.pending = g_ptr_array_new();
++	renamed_to = NULL;
++	ours.connected = 1;
++	account.account = &ours;
++	account.pc = &connection;
++	account.group_dms = g_hash_table_new(g_int64_hash, g_int64_equal);
++	account.self_user_id = 99;
++	account.new_users = g_hash_table_new(g_int64_hash, g_int64_equal);
++	g_hash_table_insert(account.group_dms, &group.id, &group);
++}
++
++static void
++teardown(void)
++{
++	g_free(fetch.method);
++	g_free(fetch.url);
++	g_free(fetch.postdata);
++	/* what the test did not answer (the callbacks own what they were given) */
++	g_ptr_array_set_free_func(fetch.pending, g_free);
++	g_ptr_array_free(fetch.pending, TRUE);
++	g_string_free(fetch.all, TRUE);
++	g_free(renamed_to);
++	g_hash_table_destroy(account.group_dms);
++	g_hash_table_destroy(account.new_users);
++	g_list_free_full(group.recipients, g_free);
++	group.recipients = NULL;
++	g_ptr_array_free(made_users, TRUE);
++	g_string_free(stashed, TRUE);
++	if (account.received_message_ids != NULL)
++		g_hash_table_destroy(account.received_message_ids);
++	g_ptr_array_free(open_convs, TRUE);
++	g_string_free(debug_log, TRUE);
++	g_string_free(notices, TRUE);
++}
++
++/* Answers the request made, with a JSON body */
++static void
++answer(const gchar *json)
++{
++	JsonParser *parser = json_parser_new();
++	JsonNode *root = NULL;
++
++	if (json != NULL) {
++		g_assert(json_parser_load_from_data(parser, json, -1, NULL));
++		root = json_parser_get_root(parser);
++	}
++	g_assert(g_ptr_array_remove(fetch.pending, fetch.user_data));	/* the callback owns it */
++	fetch.callback(&account, root, fetch.user_data);
++	fetch.user_data = NULL;
++	g_object_unref(parser);
++}
++
++/* ---- the tests ---- */
++
++static void
++test_rename(void)
++{
++	setup("rename");
++	CHECK(discord_webos_group_rename_cb(&ours, "1001", "  Trip to Rome  ", NULL));
++	CHECK(fetch.count == 1);
++	CHECK(g_strcmp0(fetch.method, "PATCH") == 0);
++	CHECK(g_strcmp0(fetch.url, "https://discord.com/api/v9/channels/1001") == 0);
++	CHECK(g_strcmp0(fetch.postdata, "{\"name\":\"Trip to Rome\"}") == 0);
++	CHECK(notices->len == 0);
++
++	answer("{\"id\":\"1001\",\"type\":3,\"name\":\"Trip to Rome\"}");
++	CHECK(g_strcmp0(renamed_to, "Trip to Rome") == 0);
++	CHECK(notices->len == 0);
++	CHECK(strstr(debug_log->str, "Trip") == NULL);
++	teardown();
++
++	/* quotes and the like go out as JSON */
++	setup("rename with quotes");
++	CHECK(discord_webos_group_rename_cb(&ours, "1001", "\"Ann's\" \\ group", NULL));
++	CHECK(g_strcmp0(fetch.postdata, "{\"name\":\"\\\"Ann's\\\" \\\\ group\"}") == 0);
++	teardown();
++}
++
++static void
++test_not_taken(void)
++{
++	setup("not taken");
++	CHECK(!discord_webos_group_rename_cb(&theirs, "1001", "x", NULL));	/* not our account */
++	CHECK(!discord_webos_group_rename_cb(&ours, "2002", "x", NULL));	/* a server channel */
++	CHECK(!discord_webos_group_rename_cb(&ours, "not-a-chat", "x", NULL));
++	CHECK(!discord_webos_group_rename_cb(&ours, NULL, "x", NULL));
++	CHECK(!discord_webos_group_rename_cb(&ours, "1001", " \t ", NULL));	/* empty once trimmed */
++	CHECK(!discord_webos_group_rename_cb(&ours, "1001", "", NULL));
++	CHECK(!discord_webos_group_rename_cb(&ours, "1001", NULL, NULL));
++	CHECK(fetch.count == 0);
++	CHECK(notices->len == 0);
++	teardown();
++}
++
++static void
++test_too_long(void)
++{
++	gchar *name = g_strnfill(101, 'a');
++
++	setup("too long");
++	CHECK(!discord_webos_group_rename_cb(&ours, "1001", name, NULL));
++	CHECK(fetch.count == 0);
++	CHECK(opened == 1);	/* the group was not open: it is opened for the notice */
++	CHECK(strstr(notices->str, "1001: The group could not be renamed: a name can have at most 100 characters.") != NULL);
++	CHECK(strstr(debug_log->str, "aaaa") == NULL);
++	name[100] = '\0';
++	CHECK(discord_webos_group_rename_cb(&ours, "1001", name, NULL));
++	g_free(name);
++	teardown();
++}
++
++static void
++test_refused(void)
++{
++	setup("refused");
++	g_ptr_array_add(open_convs, g_memdup2(&(PurpleChatConversation) { .id = 1001 }, sizeof(PurpleChatConversation)));
++	CHECK(discord_webos_group_rename_cb(&ours, "1001", "Secret plans", NULL));
++	answer("{\"message\":\"Missing Access\",\"code\":50001}");
++	CHECK(renamed_to == NULL);
++	CHECK(opened == 0);	/* written where the group already was */
++	CHECK(strstr(notices->str, "1001: The group could not be renamed: Missing Access") != NULL);
++	CHECK(strstr(debug_log->str, "Missing Access") != NULL);
++	CHECK(strstr(debug_log->str, "Secret") == NULL);
++	CHECK(strstr(notices->str, "Secret") == NULL);
++	teardown();
++
++	setup("no answer");
++	CHECK(discord_webos_group_rename_cb(&ours, "1001", "Secret plans", NULL));
++	answer(NULL);
++	CHECK(strstr(notices->str, "1001: The group could not be renamed: Discord did not answer") != NULL);
++	CHECK(strstr(debug_log->str, "Secret") == NULL);
++	teardown();
++
++	/* signed off meanwhile: logged, nothing written */
++	setup("signed off");
++	CHECK(discord_webos_group_rename_cb(&ours, "1001", "Secret plans", NULL));
++	ours.connected = 0;
++	answer(NULL);
++	CHECK(notices->len == 0);
++	CHECK(opened == 0);
++	teardown();
++}
++
++/* Answers one of the requests made (its callback and user_data) with a JSON body, or with nothing
++ * (NULL) as Discord does with 204 No Content */
++static void
++answer_nth(const gchar *json, DiscordProxyCallbackFunc callback, gpointer user_data)
++{
++	JsonParser *parser = json_parser_new();
++	JsonNode *root = NULL;
++
++	if (json != NULL) {
++		g_assert(json_parser_load_from_data(parser, json, -1, NULL));
++		root = json_parser_get_root(parser);
++	}
++	g_assert(g_ptr_array_remove(fetch.pending, user_data));
++	callback(&account, root, user_data);
++	g_object_unref(parser);
++}
++
++static void
++test_remove(void)
++{
++	setup("remove");
++	CHECK(discord_webos_group_remove_cb(&ours, "1001", "ann\x1f" "bob", NULL));
++	CHECK(fetch.count == 2);
++	CHECK(g_strcmp0(fetch.all->str,
++			"DELETE https://discord.com/api/v9/channels/1001/recipients/11\n"
++			"DELETE https://discord.com/api/v9/channels/1001/recipients/12\n") == 0);
++	CHECK(fetch.postdata == NULL);
++	CHECK(fetch.callback == discord_webos_group_member_removed_cb);
++	CHECK(fetch.pending->len == 2);
++	for (guint i = 0; i < fetch.pending->len; i++)
++		CHECK(*(guint64 *) g_ptr_array_index(fetch.pending, i) == 1001);
++
++	/* done: Discord answers with nothing, and the gateway's CHANNEL_RECIPIENT_REMOVE follows */
++	answer(NULL);
++	CHECK(notices->len == 0);
++	CHECK(debug_log->len == 0);
++	teardown();
++
++	/* a member the plug-in does not know is skipped, the others are taken out */
++	setup("remove with an unknown member");
++	CHECK(discord_webos_group_remove_cb(&ours, "1001", "nobody\x1f" "\x1f" "bob", NULL));
++	CHECK(g_strcmp0(fetch.all->str, "DELETE https://discord.com/api/v9/channels/1001/recipients/12\n") == 0);
++	CHECK(strstr(debug_log->str, "unknown member nobody") != NULL);
++	teardown();
++
++	/* the user is not taken out: leaving is "webos-im-group-leave" */
++	setup("remove the user");
++	CHECK(!discord_webos_group_remove_cb(&ours, "1001", "me", NULL));
++	CHECK(discord_webos_group_remove_cb(&ours, "1001", "me\x1f" "ann", NULL));
++	CHECK(g_strcmp0(fetch.all->str, "DELETE https://discord.com/api/v9/channels/1001/recipients/11\n") == 0);
++	teardown();
++}
++
++static void
++test_remove_not_taken(void)
++{
++	setup("remove not taken");
++	CHECK(!discord_webos_group_remove_cb(&theirs, "1001", "ann", NULL));	/* not our account */
++	CHECK(!discord_webos_group_remove_cb(NULL, "1001", "ann", NULL));
++	CHECK(!discord_webos_group_remove_cb(&ours, "2002", "ann", NULL));	/* a server channel */
++	CHECK(!discord_webos_group_remove_cb(&ours, "not-a-chat", "ann", NULL));
++	CHECK(!discord_webos_group_remove_cb(&ours, NULL, "ann", NULL));
++	CHECK(!discord_webos_group_remove_cb(&ours, "1001", "nobody\x1f" "else", NULL));	/* nobody known */
++	CHECK(!discord_webos_group_remove_cb(&ours, "1001", "", NULL));
++	CHECK(!discord_webos_group_remove_cb(&ours, "1001", NULL, NULL));
++	CHECK(fetch.count == 0);
++	CHECK(notices->len == 0);
++	CHECK(strstr(debug_log->str, "2002 is not a group DM") != NULL);
++	teardown();
++}
++
++static void
++test_remove_refused(void)
++{
++	setup("remove refused");
++	g_ptr_array_add(open_convs, g_memdup2(&(PurpleChatConversation) { .id = 1001 }, sizeof(PurpleChatConversation)));
++	CHECK(discord_webos_group_remove_cb(&ours, "1001", "ann\x1f" "bob", NULL));
++	DiscordProxyCallbackFunc cb = fetch.callback;
++	gpointer first = g_ptr_array_index(fetch.pending, 0), second = g_ptr_array_index(fetch.pending, 1);
++
++	answer_nth(NULL, cb, first);	/* ann: done */
++	CHECK(notices->len == 0);
++	answer_nth("{\"message\":\"Missing Permissions\",\"code\":50013}", cb, second);	/* bob: refused */
++	CHECK(opened == 0);
++	CHECK(g_strcmp0(notices->str, "1001: Someone could not be removed from the group: Missing Permissions\n") == 0);
++	CHECK(strstr(debug_log->str, "webos group remove from 1001 failed: Missing Permissions") != NULL);
++	teardown();
++
++	/* the group not open: it is opened for the notice */
++	setup("remove refused, group closed");
++	CHECK(discord_webos_group_remove_cb(&ours, "1001", "ann", NULL));
++	answer("{\"message\":\"Missing Access\",\"code\":50001}");
++	CHECK(opened == 1);
++	CHECK(strstr(notices->str, "1001: Someone could not be removed from the group: Missing Access") != NULL);
++	teardown();
++
++	/* signed off meanwhile: logged, nothing written */
++	setup("remove refused, signed off");
++	CHECK(discord_webos_group_remove_cb(&ours, "1001", "ann", NULL));
++	ours.connected = 0;
++	answer("{\"message\":\"Missing Access\",\"code\":50001}");
++	CHECK(notices->len == 0);
++	CHECK(opened == 0);
++	CHECK(strstr(debug_log->str, "Missing Access") != NULL);
++	teardown();
++}
++
++static void
++test_add(void)
++{
++	setup("add");
++	CHECK(discord_webos_group_invite_cb(&ours, "1001", "ann\x1f" "bob", NULL));
++	CHECK(fetch.count == 2);
++	CHECK(g_strcmp0(fetch.all->str,
++			"PUT https://discord.com/api/v9/channels/1001/recipients/11\n"
++			"PUT https://discord.com/api/v9/channels/1001/recipients/12\n") == 0);
++	CHECK(g_strcmp0(fetch.postdata, "{\"recipient\":\"12\"}") == 0);
++	CHECK(fetch.callback == discord_webos_group_member_added_cb);
++	CHECK(fetch.pending->len == 2);
++
++	/* done: Discord answers with nothing, and the gateway's CHANNEL_RECIPIENT_ADD follows */
++	DiscordProxyCallbackFunc cb = fetch.callback;
++	answer_nth(NULL, cb, g_ptr_array_index(fetch.pending, 0));
++	answer_nth("{}", cb, g_ptr_array_index(fetch.pending, 0));
++	CHECK(notices->len == 0);
++	CHECK(debug_log->len == 0);
++	CHECK(opened == 0);
++	teardown();
++}
++
++static void
++test_add_unknown(void)
++{
++	/* nobody the plug-in knows: the group says so, and nothing goes to Discord */
++	setup("add unknown");
++	CHECK(!discord_webos_group_invite_cb(&ours, "1001", "nobody", NULL));
++	CHECK(fetch.count == 0);
++	CHECK(opened == 1);	/* the group was not open: it is opened for the notice */
++	CHECK(g_strcmp0(notices->str, "1001: Could not add nobody: Discord does not know them here. "
++			"Only your Discord friends can be added to a group.\n") == 0);
++	CHECK(strstr(debug_log->str, "unknown member nobody") != NULL);
++	teardown();
++
++	/* one unknown among known ones: a notice for that one, the others are added */
++	setup("add unknown and known");
++	g_ptr_array_add(open_convs, g_memdup2(&(PurpleChatConversation) { .id = 1001 }, sizeof(PurpleChatConversation)));
++	CHECK(discord_webos_group_invite_cb(&ours, "1001", "a<b>\x1f" "bob", NULL));
++	CHECK(g_strcmp0(fetch.all->str, "PUT https://discord.com/api/v9/channels/1001/recipients/12\n") == 0);
++	CHECK(opened == 0);
++	/* the name is HTML-escaped, as the chat's lines are */
++	CHECK(g_strcmp0(notices->str, "1001: Could not add a&lt;b&gt;: Discord does not know them here. "
++			"Only your Discord friends can be added to a group.\n") == 0);
++	teardown();
++
++	/* not a group DM: no notice, nothing sent */
++	setup("add not taken");
++	CHECK(!discord_webos_group_invite_cb(&theirs, "1001", "nobody", NULL));
++	CHECK(!discord_webos_group_invite_cb(&ours, "2002", "nobody", NULL));
++	CHECK(!discord_webos_group_invite_cb(&ours, NULL, "ann", NULL));
++	CHECK(!discord_webos_group_invite_cb(&ours, "1001", "", NULL));
++	CHECK(!discord_webos_group_invite_cb(&ours, "1001", NULL, NULL));
++	CHECK(fetch.count == 0);
++	CHECK(notices->len == 0);
++	CHECK(opened == 0);
++	teardown();
++}
++
++static void
++test_add_refused(void)
++{
++	/* not a friend: Discord's 50007 says so plainly */
++	setup("add refused, not a friend");
++	g_ptr_array_add(open_convs, g_memdup2(&(PurpleChatConversation) { .id = 1001 }, sizeof(PurpleChatConversation)));
++	CHECK(discord_webos_group_invite_cb(&ours, "1001", "ann\x1f" "bob", NULL));
++	DiscordProxyCallbackFunc cb = fetch.callback;
++	gpointer first = g_ptr_array_index(fetch.pending, 0), second = g_ptr_array_index(fetch.pending, 1);
++
++	answer_nth(NULL, cb, first);	/* ann: done */
++	CHECK(notices->len == 0);
++	answer_nth("{\"message\":\"Cannot send messages to this user\",\"code\":50007}", cb, second);	/* bob: refused */
++	CHECK(opened == 0);
++	CHECK(g_strcmp0(notices->str, "1001: Could not add bob: Discord lets you add only your friends to a group.\n") == 0);
++	CHECK(strstr(debug_log->str, "webos group add to 1001 refused: 50007 Cannot send messages to this user") != NULL);
++	CHECK(strstr(debug_log->str, "bob") == NULL);	/* the person is not logged */
++	teardown();
++
++	/* any other refusal in Discord's own words, the group opened for it */
++	setup("add refused, other");
++	CHECK(discord_webos_group_invite_cb(&ours, "1001", "ann", NULL));
++	answer("{\"message\":\"Maximum number of group DM recipients reached (10)\",\"code\":30018}");
++	CHECK(opened == 1);
++	CHECK(g_strcmp0(notices->str, "1001: Could not add ann: Maximum number of group DM recipients reached (10)\n") == 0);
++	teardown();
++
++	setup("add refused, message escaped");
++	CHECK(discord_webos_group_invite_cb(&ours, "1001", "ann", NULL));
++	answer("{\"message\":\"<b>No</b> & no\",\"code\":50001}");
++	CHECK(g_strcmp0(notices->str, "1001: Could not add ann: &lt;b&gt;No&lt;/b&gt; &amp; no\n") == 0);
++	teardown();
++
++	/* a code with no message, and a message with no code */
++	setup("add refused, code only");
++	CHECK(discord_webos_group_invite_cb(&ours, "1001", "ann", NULL));
++	answer("{\"code\":50013}");
++	CHECK(g_strcmp0(notices->str, "1001: Could not add ann: Discord refused it (error 50013).\n") == 0);
++	CHECK(strstr(debug_log->str, "refused: 50013 (no message)") != NULL);
++	teardown();
++
++	setup("add refused, message only");
++	CHECK(discord_webos_group_invite_cb(&ours, "1001", "ann", NULL));
++	answer("{\"message\":\"401: Unauthorized\"}");
++	CHECK(g_strcmp0(notices->str, "1001: Could not add ann: 401: Unauthorized\n") == 0);
++	teardown();
++
++	setup("add refused, empty message");
++	CHECK(discord_webos_group_invite_cb(&ours, "1001", "ann", NULL));
++	answer("{\"message\":\"\",\"code\":40001}");
++	CHECK(g_strcmp0(notices->str, "1001: Could not add ann: Discord refused it (error 40001).\n") == 0);
++	teardown();
++
++	/* signed off meanwhile: logged, nothing written */
++	setup("add refused, signed off");
++	CHECK(discord_webos_group_invite_cb(&ours, "1001", "ann", NULL));
++	ours.connected = 0;
++	answer("{\"message\":\"Cannot send messages to this user\",\"code\":50007}");
++	CHECK(notices->len == 0);
++	CHECK(opened == 0);
++	CHECK(strstr(debug_log->str, "refused: 50007") != NULL);
++	teardown();
++}
++
++static void
++test_add_notices(void)
++{
++	setup("add notices");
++	CHECK(discord_webos_add_refused_notice("ann", 0, NULL) == NULL);	/* no refusal */
++	gchar *n = discord_webos_add_refused_notice(NULL, 50007, NULL);
++	CHECK(g_strcmp0(n, "Could not add : Discord lets you add only your friends to a group.") == 0);
++	g_free(n);
++	n = discord_webos_add_refused_notice("ann", 50007, "Cannot send messages to this user");
++	CHECK(g_strcmp0(n, "Could not add ann: Discord lets you add only your friends to a group.") == 0);
++	g_free(n);
++	n = discord_webos_add_refused_notice("ann", 0, "Missing Access");
++	CHECK(g_strcmp0(n, "Could not add ann: Missing Access") == 0);
++	g_free(n);
++	n = discord_webos_add_refused_notice("a<b>", 50007, NULL);	/* the name is HTML-escaped */
++	CHECK(g_strcmp0(n, "Could not add a&lt;b&gt;: Discord lets you add only your friends to a group.") == 0);
++	g_free(n);
++	n = discord_webos_add_refused_notice("a&b", 0, "No");
++	CHECK(g_strcmp0(n, "Could not add a&amp;b: No") == 0);
++	g_free(n);
++	n = discord_webos_add_refused_notice("ann", -1, NULL);
++	CHECK(g_strcmp0(n, "Could not add ann: Discord refused it (error -1).") == 0);
++	g_free(n);
++	n = discord_webos_add_unknown_notice(NULL);
++	CHECK(n != NULL && g_str_has_prefix(n, "Could not add : Discord does not know them here."));
++	g_free(n);
++	teardown();
++}
++
++static GList *
++ids(guint64 a, guint64 b)
++{
++	GList *l = g_list_append(NULL, g_memdup2(&a, sizeof(a)));
++	return b ? g_list_append(l, g_memdup2(&b, sizeof(b))) : l;
++}
++
++static PurpleChatConversation *
++conv(guint64 id)
++{
++	for (guint i = 0; i < open_convs->len; i++) {
++		PurpleChatConversation *c = g_ptr_array_index(open_convs, i);
++		if (c->id == id)
++			return c;
++	}
++	return NULL;
++}
++
++/* nothing but the conversation: no request, no line, no log */
++#define CHECK_QUIET() do { \
++	CHECK(notices->len == 0); \
++	CHECK(opened == 0); \
++} while (0)
++
++static void
++test_chat_open_known(void)
++{
++	setup("chat open, people known");
++	group.recipients = ids(11, 12);
++	CHECK(discord_webos_chat_open_cb(&ours, "1001", NULL));
++	CHECK(joined == 1);
++	PurpleChatConversation *c = conv(1001);
++	CHECK(c != NULL);
++	CHECK(c != NULL && c->data_id != NULL && *c->data_id == 1001);
++	CHECK(c != NULL && g_strcmp0(c->title, "ann, bob") == 0);
++	CHECK(c != NULL && g_strcmp0(c->nick, "me") == 0);
++	CHECK(c != NULL && c->users != NULL && strcmp(c->users->str, "me,ann,bob,") == 0);
++	CHECK(fetch.count == 0);	/* no history, no channel info, nothing at all */
++	CHECK(debug_log->len == 0);
++	CHECK_QUIET();
++
++	/* asked again: it is open, so nothing more is done */
++	CHECK(discord_webos_chat_open_cb(&ours, "1001", NULL));
++	CHECK(joined == 1);
++	CHECK(c != NULL && c->cleared == 1);
++	CHECK(fetch.count == 0);
++	teardown();
++
++	/* left: opened again */
++	setup("chat open, left");
++	group.recipients = ids(11, 0);
++	g_ptr_array_add(open_convs, g_memdup2(&(PurpleChatConversation) { .id = 1001, .left = 1 }, sizeof(PurpleChatConversation)));
++	CHECK(discord_webos_chat_open_cb(&ours, "1001", NULL));
++	CHECK(joined == 1);
++	teardown();
++}
++
++static void
++test_chat_open_fetched(void)
++{
++	setup("chat open, someone not known");
++	group.recipients = ids(11, 55);	/* 55 is not known */
++	CHECK(discord_webos_chat_open_cb(&ours, "1001", NULL));
++	PurpleChatConversation *c = conv(1001);
++	CHECK(c != NULL && c->users == NULL);	/* no one put on it yet */
++	CHECK(fetch.count == 1);
++	CHECK(g_strcmp0(fetch.method, "GET") == 0);
++	CHECK(g_strcmp0(fetch.url, "https://discord.com/api/v9/channels/1001") == 0);
++	CHECK(fetch.postdata == NULL);
++	CHECK(fetch.callback == discord_webos_chat_open_members_cb);
++
++	answer("{\"id\":\"1001\",\"type\":3,\"last_pin_timestamp\":\"2030-01-01T00:00:00+00:00\",\"topic\":\"t\","
++			"\"recipients\":[{\"id\":\"11\",\"username\":\"ann\"},{\"id\":\"55\",\"username\":\"cat\"},{\"username\":\"noid\"}]}");
++	CHECK(c != NULL && c->users != NULL && strcmp(c->users->str, "me,ann,cat,") == 0);
++	CHECK(c != NULL && g_strcmp0(c->nick, "me") == 0);
++	CHECK(fetch.count == 1);
++	CHECK_QUIET();	/* no pins line, though the channel has pins newer than anything shown */
++	teardown();
++
++	/* nothing kept: asked of Discord too */
++	setup("chat open, no recipients kept");
++	CHECK(discord_webos_chat_open_cb(&ours, "1001", NULL));
++	CHECK(fetch.count == 1);
++	CHECK(g_strcmp0(fetch.url, "https://discord.com/api/v9/channels/1001") == 0);
++	teardown();
++
++	setup("chat open, refused");
++	CHECK(discord_webos_chat_open_cb(&ours, "1001", NULL));
++	answer("{\"message\":\"Missing Access\",\"code\":50001}");
++	CHECK(conv(1001) != NULL && conv(1001)->users == NULL);
++	CHECK(strstr(debug_log->str, "no members for 1001: Missing Access") != NULL);
++	CHECK_QUIET();
++	teardown();
++
++	/* the conversation went away before the answer: nothing to put them on */
++	setup("chat open, closed meanwhile");
++	CHECK(discord_webos_chat_open_cb(&ours, "1001", NULL));
++	g_ptr_array_set_size(open_convs, 0);
++	answer("{\"id\":\"1001\",\"recipients\":[{\"id\":\"55\",\"username\":\"cat\"}]}");
++	CHECK(open_convs->len == 0);
++	teardown();
++}
++
++static void
++test_chat_open_not_taken(void)
++{
++	setup("chat open not taken");
++	group.recipients = ids(11, 12);
++	CHECK(!discord_webos_chat_open_cb(&theirs, "1001", NULL));	/* not our account */
++	CHECK(!discord_webos_chat_open_cb(NULL, "1001", NULL));
++	CHECK(!discord_webos_chat_open_cb(&ours, "2002", NULL));	/* a server channel */
++	CHECK(!discord_webos_chat_open_cb(&ours, "not-a-chat", NULL));
++	CHECK(!discord_webos_chat_open_cb(&ours, NULL, NULL));
++	refuse_join = 1;	/* libpurple makes no conversation: not opened */
++	CHECK(!discord_webos_chat_open_cb(&ours, "1001", NULL));
++	refuse_join = 0;
++	CHECK(joined == 0);
++	CHECK(open_convs->len == 0);
++	CHECK(fetch.count == 0);
++	CHECK_QUIET();
++	teardown();
++}
++
++/* A message from Discord as discord_process_message takes it: dedup by id, then the event line */
++static gboolean
++deliver(DiscordChannel *channel, const gchar *json)
++{
++	JsonParser *parser = json_parser_new();
++	g_assert(json_parser_load_from_data(parser, json, -1, NULL));
++	JsonObject *data = json_node_get_object(json_parser_get_root(parser));
++	guint64 msg_id = to_int(json_object_get_string_member(data, "id"));
++	gboolean event = FALSE;
++
++	if (!discord_webos_message_seen(&account, msg_id))
++		event = discord_webos_group_event(&account, channel, (PurpleConversation *) conv(channel->id),
++				(guint64) json_object_get_int_member(data, "type"), msg_id, data, 1700000000);
++	g_object_unref(parser);
++	return event;
++}
++
++static void
++open_group(void)
++{
++	g_ptr_array_add(open_convs, g_memdup2(&(PurpleChatConversation) { .id = 1001 }, sizeof(PurpleChatConversation)));
++}
++
++#define ANN "{\"id\":\"11\",\"username\":\"ann\"}"
++#define BOB "{\"id\":\"12\",\"username\":\"bob\"}"
++#define ME "{\"id\":\"99\",\"username\":\"me\"}"
++#define MSG(id, type, author, rest) "{\"id\":\"" id "\",\"type\":" #type ",\"channel_id\":\"1001\",\"author\":" author rest "}"
++
++static void
++test_event_rename(void)
++{
++	setup("event: renamed by someone else");
++	open_group();
++	CHECK(deliver(&group, MSG("2001", 4, ANN, ",\"content\":\"Trip <to> Rome & co\"")));
++	CHECK(g_strcmp0(notices->str, "1001: ann changed the group name to \"Trip &lt;to&gt; Rome &amp; co\"\n") == 0);
++	CHECK(g_strcmp0(stashed->str, "2001,") == 0);
++	teardown();
++
++	setup("event: renamed by us");
++	open_group();
++	CHECK(deliver(&group, MSG("2002", 4, ME, ",\"content\":\"Trip\"")));
++	CHECK(g_strcmp0(notices->str, "1001: You changed the group name to \"Trip\"\n") == 0);
++	teardown();
++}
++
++static void
++test_event_add_remove(void)
++{
++	setup("event: added");
++	open_group();
++	CHECK(deliver(&group, MSG("2101", 1, ANN, ",\"content\":\"\",\"mentions\":[" BOB "]")));
++	CHECK(deliver(&group, MSG("2102", 1, ME, ",\"content\":\"\",\"mentions\":[" BOB "]")));
++	CHECK(deliver(&group, MSG("2103", 1, ANN, ",\"content\":\"\",\"mentions\":[" ME "]")));
++	CHECK(deliver(&group, MSG("2104", 1, ANN, ",\"mentions\":[{\"id\":\"13\",\"username\":\"<i>cat</i>\"}]")));
++	/* the one added is the first named */
++	CHECK(deliver(&group, MSG("2105", 1, ANN, ",\"mentions\":[" BOB "," ME "]")));
++	CHECK(g_strcmp0(notices->str,
++			"1001: ann added bob\n"
++			"1001: You added bob\n"
++			"1001: ann added you\n"
++			"1001: ann added &lt;i&gt;cat&lt;/i&gt;\n"
++			"1001: ann added bob\n") == 0);
++	CHECK(g_strcmp0(stashed->str, "2101,2102,2103,2104,2105,") == 0);
++	teardown();
++
++	setup("event: removed");
++	open_group();
++	CHECK(deliver(&group, MSG("2201", 2, ANN, ",\"content\":\"\",\"mentions\":[" BOB "]")));
++	CHECK(deliver(&group, MSG("2202", 2, ME, ",\"content\":\"\",\"mentions\":[" BOB "]")));
++	CHECK(deliver(&group, MSG("2203", 2, ANN, ",\"content\":\"\",\"mentions\":[" ME "]")));
++	CHECK(g_strcmp0(notices->str,
++			"1001: ann removed bob\n"
++			"1001: You removed bob\n"
++			"1001: ann removed you\n") == 0);
++	teardown();
++
++	setup("event: left");
++	open_group();
++	CHECK(deliver(&group, MSG("2301", 2, BOB, ",\"content\":\"\",\"mentions\":[" BOB "]")));
++	CHECK(deliver(&group, MSG("2302", 2, ME, ",\"content\":\"\",\"mentions\":[" ME "]")));
++	CHECK(g_strcmp0(notices->str, "1001: bob left the group\n1001: You left the group\n") == 0);
++	teardown();
++}
++
++static void
++test_event_once(void)
++{
++	/* history replayed: the same message again writes nothing */
++	setup("event: replayed");
++	open_group();
++	CHECK(deliver(&group, MSG("2401", 1, ANN, ",\"mentions\":[" BOB "]")));
++	CHECK(!deliver(&group, MSG("2401", 1, ANN, ",\"mentions\":[" BOB "]")));
++	CHECK(g_strcmp0(notices->str, "1001: ann added bob\n") == 0);
++	teardown();
++
++	/* the group not open: nothing written, and the message is not marked, so it is written when
++	 * the group's history brings it once it is open */
++	/* the group not open: opened for its people alone and the line written at once */
++	setup("event: group not open");
++	group.recipients = ids(11, 12);
++	CHECK(deliver(&group, MSG("2501", 1, ANN, ",\"mentions\":[" BOB "]")));
++	CHECK(joined == 1);
++	CHECK(conv(1001) != NULL && conv(1001)->users != NULL && strcmp(conv(1001)->users->str, "me,ann,bob,") == 0);
++	CHECK(g_strcmp0(notices->str, "1001: ann added bob\n") == 0);
++	CHECK(g_strcmp0(stashed->str, "2501,") == 0);
++	CHECK(fetch.count == 0);	/* no history, nothing asked of Discord */
++	CHECK(opened == 0);	/* not discord_open_chat */
++	/* the history's copy later writes nothing more, nor does a second event open it again */
++	CHECK(!deliver(&group, MSG("2501", 1, ANN, ",\"mentions\":[" BOB "]")));
++	CHECK(deliver(&group, MSG("2502", 2, ANN, ",\"mentions\":[" BOB "]")));
++	CHECK(joined == 1);
++	CHECK(g_strcmp0(notices->str, "1001: ann added bob\n1001: ann removed bob\n") == 0);
++	teardown();
++
++	/* someone not known: their names are asked of Discord (the channel, never its messages) */
++	setup("event: group not open, someone not known");
++	CHECK(deliver(&group, MSG("2511", 4, ANN, ",\"content\":\"Trip\"")));
++	CHECK(g_strcmp0(notices->str, "1001: ann changed the group name to \"Trip\"\n") == 0);
++	CHECK(fetch.count == 1);
++	CHECK(g_strcmp0(fetch.method, "GET") == 0);
++	CHECK(g_strcmp0(fetch.url, "https://discord.com/api/v9/channels/1001") == 0);
++	teardown();
++
++	/* libpurple made no conversation: not written, and not marked, so a later delivery writes it */
++	setup("event: no conversation made");
++	group.recipients = ids(11, 12);
++	refuse_join = 1;
++	CHECK(deliver(&group, MSG("2521", 4, ANN, ",\"content\":\"Trip\"")));
++	CHECK(notices->len == 0);
++	CHECK(stashed->len == 0);
++	refuse_join = 0;
++	CHECK(deliver(&group, MSG("2521", 4, ANN, ",\"content\":\"Trip\"")));
++	CHECK(g_strcmp0(notices->str, "1001: ann changed the group name to \"Trip\"\n") == 0);
++	teardown();
++}
++
++static void
++test_recipients_kept(void)
++{
++	setup("recipients kept");
++	group.recipients = ids(11, 0);
++	discord_webos_group_dm_recipient(&group, 12, TRUE);
++	discord_webos_group_dm_recipient(&group, 12, TRUE);	/* twice: once */
++	CHECK(g_list_length(group.recipients) == 2);
++	discord_webos_group_dm_recipient(&group, 11, FALSE);
++	discord_webos_group_dm_recipient(&group, 13, FALSE);	/* not there: nothing */
++	CHECK(g_list_length(group.recipients) == 1);
++	CHECK(group.recipients != NULL && *(guint64 *) group.recipients->data == 12);
++
++	/* the group opened afterwards has who is in it now */
++	CHECK(discord_webos_chat_open_cb(&ours, "1001", NULL));
++	CHECK(conv(1001) != NULL && conv(1001)->users != NULL && strcmp(conv(1001)->users->str, "me,bob,") == 0);
++	CHECK(fetch.count == 0);
++	discord_webos_group_dm_recipient(&group, 12, FALSE);
++	CHECK(group.recipients == NULL);
++	teardown();
++}
++
++static void
++test_event_not(void)
++{
++	setup("event: not one");
++	open_group();
++	g_ptr_array_add(open_convs, g_memdup2(&(PurpleChatConversation) { .id = 3003 }, sizeof(PurpleChatConversation)));
++	CHECK(!deliver(&group, MSG("2601", 0, ANN, ",\"content\":\"hello\"")));	/* a message */
++	CHECK(!deliver(&group, MSG("2602", 3, ANN, ",\"content\":\"\"")));	/* a call */
++	CHECK(!deliver(&server_channel, MSG("2603", 4, ANN, ",\"content\":\"general-2\"")));	/* a server channel */
++	CHECK(!deliver(&server_channel, MSG("2604", 1, ANN, ",\"mentions\":[" BOB "]")));
++	CHECK(!deliver(&group, MSG("2605", 1, ANN, ",\"mentions\":[]")));	/* no one named */
++	CHECK(!deliver(&group, MSG("2606", 2, ANN, "")));
++	/* a message or a reply that mentions someone is no event */
++	CHECK(!deliver(&group, MSG("2607", 0, ANN, ",\"content\":\"hi <@12>\",\"mentions\":[" BOB "]")));
++	CHECK(!deliver(&group, MSG("2608", 19, ANN, ",\"content\":\"yes\",\"mentions\":[" BOB "]")));
++	CHECK(notices->len == 0);
++	CHECK(stashed->len == 0);
++	teardown();
++}
++
++int
++main(void)
++{
++	test_rename();
++	test_not_taken();
++	test_too_long();
++	test_refused();
++	test_remove();
++	test_remove_not_taken();
++	test_remove_refused();
++	test_add();
++	test_add_unknown();
++	test_add_refused();
++	test_add_notices();
++	test_chat_open_known();
++	test_chat_open_fetched();
++	test_chat_open_not_taken();
++	test_event_rename();
++	test_event_add_remove();
++	test_event_once();
++	test_event_not();
++	test_recipients_kept();
++
++	if (failures) {
++		fprintf(stderr, "%d failure(s)\n", failures);
++		return 1;
++	}
++	printf("all group rename, remove, add, chat open and event line tests passed\n");
++	return 0;
++}
+diff --git a/tests/test_user_flags.c b/tests/test_user_flags.c
+new file mode 100644
+index 0000000..eb4d197
+--- /dev/null
++++ b/tests/test_user_flags.c
+@@ -0,0 +1,250 @@
++/*
++ *   Unit tests for a user's flags in a chat (discord_get_user_flags): the part of libdiscord.c
++ *   between its BEGIN and END user flags lines, which the Makefile copies into user_flags.inc.
++ *   This file stands in for the plug-in's types around it. A group DM has no guild, so someone
++ *   added to an open group DM (CHANNEL_RECIPIENT_ADD) is looked up with a NULL one.
++ *
++ *   This program is free software: you can redistribute it and/or modify
++ *   it under the terms of the GNU General Public License as published by
++ *   the Free Software Foundation, either version 3 of the License, or
++ *   (at your option) any later version.
++ */
++
++#include <stdio.h>
++
++#include <glib.h>
++
++static int failures;
++static const char *current_test = "";
++
++#define CHECK(cond) do { \
++	if (!(cond)) { \
++		fprintf(stderr, "%s:%d: %s: CHECK failed: %s\n", __FILE__, __LINE__, current_test, #cond); \
++		failures++; \
++	} \
++} while (0)
++
++/* ---- what the user flags part needs from libpurple and the rest of the plug-in ---- */
++
++typedef enum {
++	PURPLE_CHAT_USER_NONE = 0x0000,
++	PURPLE_CHAT_USER_VOICE = 0x0001,
++	PURPLE_CHAT_USER_HALFOP = 0x0002,
++	PURPLE_CHAT_USER_OP = 0x0004,
++} PurpleChatUserFlags;
++
++enum {
++	PERM_KICK_MEMBERS = 0x2,
++	PERM_BAN_MEMBERS = 0x4,
++	PERM_ADMINISTRATOR = 0x8,
++};
++
++/* as json_compat.h has them */
++#define g_hash_table_replace_int64(a, b, c) g_hash_table_replace((a), &(b), (c))
++#define g_hash_table_lookup_int64(a, b) g_hash_table_lookup((a), &(b))
++
++/* The fields of libdiscord.c's types that the part uses */
++typedef struct { int unused; } DiscordAccount;
++
++typedef struct {
++	guint64 id;
++	gint64 permissions;
++} DiscordGuildRole;
++
++typedef struct {
++	guint64 id;
++	GHashTable *roles;	/* id -> DiscordGuildRole */
++} DiscordGuild;
++
++typedef struct {
++	guint64 id;
++	GArray *roles;	/* guint64 role ids */
++} DiscordGuildMembership;
++
++typedef struct {
++	guint64 id;
++	GHashTable *guild_memberships;	/* guild id -> DiscordGuildMembership */
++	gboolean bot;
++} DiscordUser;
++
++PurpleChatUserFlags discord_get_user_flags(DiscordAccount *da, DiscordGuild *guild, DiscordUser *user);
++
++/* the part takes the account, as its callers pass it, and does not use it */
++#pragma GCC diagnostic push
++#pragma GCC diagnostic ignored "-Wunused-parameter"
++#include "user_flags.inc"
++#pragma GCC diagnostic pop
++
++/* ---- fixtures ---- */
++
++static DiscordAccount account;
++
++static void
++free_membership(gpointer p)
++{
++	DiscordGuildMembership *m = p;
++
++	g_array_unref(m->roles);
++	g_free(m);
++}
++
++static DiscordUser *
++user_new(guint64 id, gboolean bot)
++{
++	DiscordUser *user = g_new0(DiscordUser, 1);
++
++	user->id = id;
++	user->bot = bot;
++	user->guild_memberships = g_hash_table_new_full(g_int64_hash, g_int64_equal, NULL, free_membership);
++	return user;
++}
++
++static void
++user_free(DiscordUser *user)
++{
++	g_hash_table_unref(user->guild_memberships);
++	g_free(user);
++}
++
++static DiscordGuild *
++guild_new(guint64 id)
++{
++	DiscordGuild *guild = g_new0(DiscordGuild, 1);
++
++	guild->id = id;
++	guild->roles = g_hash_table_new_full(g_int64_hash, g_int64_equal, NULL, g_free);
++	return guild;
++}
++
++static void
++guild_free(DiscordGuild *guild)
++{
++	g_hash_table_unref(guild->roles);
++	g_free(guild);
++}
++
++static void
++guild_add_role(DiscordGuild *guild, guint64 id, gint64 permissions)
++{
++	DiscordGuildRole *role = g_new0(DiscordGuildRole, 1);
++
++	role->id = id;
++	role->permissions = permissions;
++	g_hash_table_replace_int64(guild->roles, role->id, role);
++}
++
++/* user is in guild with the given roles */
++static void
++user_join(DiscordUser *user, const DiscordGuild *guild, const guint64 *roles, guint n)
++{
++	DiscordGuildMembership *m = g_new0(DiscordGuildMembership, 1);
++
++	m->id = guild->id;
++	m->roles = g_array_new(TRUE, TRUE, sizeof(guint64));
++	g_array_append_vals(m->roles, roles, n);
++	g_hash_table_replace_int64(user->guild_memberships, m->id, m);
++}
++
++/* ---- tests ---- */
++
++/* someone added to an open group DM: CHANNEL_RECIPIENT_ADD has no guild for it */
++static void
++test_group_dm(void)
++{
++	current_test = "group DM";
++	DiscordUser *person = user_new(1001, FALSE);
++	DiscordUser *bot = user_new(1002, TRUE);
++
++	CHECK(discord_get_user_flags(&account, NULL, person) == PURPLE_CHAT_USER_NONE);
++	CHECK(discord_get_user_flags(&account, NULL, bot) == PURPLE_CHAT_USER_VOICE);
++
++	/* a user who is in a server still gets no role flags without one */
++	DiscordGuild *guild = guild_new(2001);
++	guild_add_role(guild, 3001, PERM_ADMINISTRATOR);
++	const guint64 admin[] = { 3001 };
++	user_join(person, guild, admin, G_N_ELEMENTS(admin));
++	CHECK(discord_get_user_flags(&account, NULL, person) == PURPLE_CHAT_USER_NONE);
++
++	guild_free(guild);
++	user_free(bot);
++	user_free(person);
++}
++
++static void
++test_no_user(void)
++{
++	current_test = "no user";
++	DiscordGuild *guild = guild_new(2001);
++
++	CHECK(discord_get_user_flags(&account, guild, NULL) == PURPLE_CHAT_USER_NONE);
++	CHECK(discord_get_user_flags(&account, NULL, NULL) == PURPLE_CHAT_USER_NONE);
++	guild_free(guild);
++}
++
++/* in a server, the best of the user's roles; a role the server does not know counts for nothing */
++static void
++test_guild_roles(void)
++{
++	current_test = "guild roles";
++	DiscordGuild *guild = guild_new(2001);
++	DiscordGuild *other = guild_new(2002);
++	guild_add_role(guild, 3001, PERM_ADMINISTRATOR);
++	guild_add_role(guild, 3002, PERM_KICK_MEMBERS);
++	guild_add_role(guild, 3003, PERM_BAN_MEMBERS);
++	guild_add_role(guild, 3004, 0x1);
++
++	DiscordUser *stranger = user_new(1001, FALSE);
++	DiscordUser *bot = user_new(1002, TRUE);
++	DiscordUser *member = user_new(1003, FALSE);
++	DiscordUser *kicker = user_new(1004, FALSE);
++	DiscordUser *banner = user_new(1005, FALSE);
++	DiscordUser *admin = user_new(1006, FALSE);
++	DiscordUser *bot_admin = user_new(1007, TRUE);
++
++	const guint64 plain[] = { 3004, 9999 };
++	const guint64 kick[] = { 3004, 3002 };
++	const guint64 ban[] = { 3003 };
++	const guint64 all[] = { 3002, 3001, 3003 };
++	const guint64 none[] = { 0 };
++
++	user_join(bot, guild, none, 0);
++	user_join(member, guild, plain, G_N_ELEMENTS(plain));
++	user_join(kicker, guild, kick, G_N_ELEMENTS(kick));
++	user_join(banner, guild, ban, G_N_ELEMENTS(ban));
++	user_join(admin, guild, all, G_N_ELEMENTS(all));
++	user_join(bot_admin, guild, all, G_N_ELEMENTS(all));
++	user_join(stranger, other, all, G_N_ELEMENTS(all));
++
++	CHECK(discord_get_user_flags(&account, guild, stranger) == PURPLE_CHAT_USER_NONE);
++	CHECK(discord_get_user_flags(&account, guild, bot) == PURPLE_CHAT_USER_VOICE);
++	CHECK(discord_get_user_flags(&account, guild, member) == PURPLE_CHAT_USER_NONE);
++	CHECK(discord_get_user_flags(&account, guild, kicker) == PURPLE_CHAT_USER_HALFOP);
++	CHECK(discord_get_user_flags(&account, guild, banner) == PURPLE_CHAT_USER_HALFOP);
++	CHECK(discord_get_user_flags(&account, guild, admin) == PURPLE_CHAT_USER_OP);
++	CHECK(discord_get_user_flags(&account, guild, bot_admin) == PURPLE_CHAT_USER_OP);
++
++	user_free(bot_admin);
++	user_free(admin);
++	user_free(banner);
++	user_free(kicker);
++	user_free(member);
++	user_free(bot);
++	user_free(stranger);
++	guild_free(other);
++	guild_free(guild);
++}
++
++int
++main(void)
++{
++	test_group_dm();
++	test_no_user();
++	test_guild_roles();
++
++	if (failures) {
++		fprintf(stderr, "%d failure(s)\n", failures);
++		return 1;
++	}
++	printf("all user flags tests passed\n");
++	return 0;
++}
+diff --git a/tests/test_webos_helpers.c b/tests/test_webos_helpers.c
+index 3fd58ac..e217ed2 100644
+--- a/tests/test_webos_helpers.c
++++ b/tests/test_webos_helpers.c
+@@ -222,6 +222,36 @@ test_deleted_ids(void)
+ 	g_strfreev(got);
+ }
+ 
++static void
++test_group_name(void)
++{
++	gboolean too_long = TRUE;
++
++	CHECK_STR(discord_webos_group_name("  Trip to Rome \t\n", &too_long), "Trip to Rome");
++	CHECK(!too_long);
++	CHECK(discord_webos_group_name(" \t ", &too_long) == NULL && !too_long);
++	CHECK(discord_webos_group_name("", &too_long) == NULL && !too_long);
++	CHECK(discord_webos_group_name(NULL, &too_long) == NULL && !too_long);
++	CHECK(discord_webos_group_name("bad \xff utf-8", &too_long) == NULL && !too_long);
++
++	/* 100 characters is the limit, counted in characters, not bytes */
++	GString *name = g_string_new(NULL);
++	for (int i = 0; i < 100; i++)
++		g_string_append(name, "\xc3\xa9");	/* é, two bytes */
++	CHECK_STR(discord_webos_group_name(name->str, &too_long), name->str);
++	CHECK(!too_long);
++	g_string_append_c(name, 'x');
++	CHECK(discord_webos_group_name(name->str, &too_long) == NULL && too_long);
++	/* white space around does not count */
++	g_string_truncate(name, 200);
++	g_string_prepend(name, "   ");
++	g_string_append(name, "   ");
++	gchar *got = discord_webos_group_name(name->str, NULL);
++	CHECK(got != NULL && g_utf8_strlen(got, -1) == 100);
++	g_free(got);
++	g_string_free(name, TRUE);
++}
++
+ int
+ main(void)
+ {
+@@ -232,6 +262,7 @@ main(void)
+ 	test_mentions();
+ 	test_update_is_edit();
+ 	test_deleted_ids();
++	test_group_name();
+ 
+ 	if (failures) {
+ 		fprintf(stderr, "%d check(s) failed\n", failures);
+diff --git a/webos_helpers.c b/webos_helpers.c
+index db71175..7394b37 100644
+--- a/webos_helpers.c
++++ b/webos_helpers.c
+@@ -256,3 +256,27 @@ discord_webos_deleted_ids(const gchar *id, const gchar *const *ids, gsize n_ids)
+ 	g_ptr_array_add(out, NULL);
+ 	return (gchar **) g_ptr_array_free(out, FALSE);
+ }
++
++gchar *
++discord_webos_group_name(const gchar *name, gboolean *too_long)
++{
++	if (too_long != NULL)
++		*too_long = FALSE;
++	if (name == NULL || !g_utf8_validate(name, -1, NULL))
++		return NULL;
++
++	gchar *trimmed = g_strstrip(g_strdup(name));
++
++	if (*trimmed == '\0') {
++		g_free(trimmed);
++		return NULL;
++	}
++	if (g_utf8_strlen(trimmed, -1) > DISCORD_WEBOS_GROUP_NAME_MAX) {
++		if (too_long != NULL)
++			*too_long = TRUE;
++		g_free(trimmed);
++		return NULL;
++	}
++
++	return trimmed;
++}
+diff --git a/webos_helpers.h b/webos_helpers.h
+index c7bcd84..210fae2 100644
+--- a/webos_helpers.h
++++ b/webos_helpers.h
+@@ -69,4 +69,13 @@ gboolean discord_webos_update_is_edit(gboolean has_author, const gchar *edited_t
+  * NULL-terminated vector (g_strfreev) of the snowflakes among them. Never NULL. */
+ gchar **discord_webos_deleted_ids(const gchar *id, const gchar *const *ids, gsize n_ids);
+ 
++/* The longest name a group DM can have, in characters: "1-100 character channel name" in the Modify
++ * Channel JSON params for a group DM (discord-api-docs, developers/resources/channel.mdx). */
++#define DISCORD_WEBOS_GROUP_NAME_MAX 100
++
++/* name with leading and trailing white space taken off, to rename a group DM to. NULL when that
++ * leaves nothing, when name is NULL or not UTF-8, or when it is longer than
++ * DISCORD_WEBOS_GROUP_NAME_MAX characters, which also sets *too_long (when not NULL). */
++gchar *discord_webos_group_name(const gchar *name, gboolean *too_long);
++
+ #endif /* DISCORD_WEBOS_HELPERS_H */

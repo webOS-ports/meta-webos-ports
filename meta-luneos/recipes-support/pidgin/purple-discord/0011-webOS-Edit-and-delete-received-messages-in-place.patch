@@ -1,0 +1,221 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sat, 7 Nov 2026 22:12:42 +0100
+Subject: [PATCH] webOS: Edit and delete received messages in place
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+An edit arrived as a new message, "EDIT: <text>", and a delete as a
+line saying a message at some time was deleted, so the original stayed
+as it was (Messaging tracker D3). An update that only resolved a link's
+embed was shown as an edit too.
+
+Tell the transport instead, as the WhatsApp plug-in does: an edit
+emits "webos-im-edit" (account, id, text), the text formatted as a
+received message's is, and the transport changes the stored message
+with that serviceMessageId in place; a delete, single or bulk, emits
+"webos-im-delete" (account, id) for each message, which the transport
+shows as deleted. An update with no edited_timestamp is no edit and
+changes nothing. A pin still shows as its "📌" message.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ libdiscord.c               | 71 ++++++++++++++++----------------------
+ tests/test_webos_helpers.c | 32 +++++++++++++++++
+ webos_helpers.c            | 23 ++++++++++++
+ webos_helpers.h            |  9 +++++
+ 4 files changed, 94 insertions(+), 41 deletions(-)
+
+diff --git a/libdiscord.c b/libdiscord.c
+index 5d7ee68..91186ff 100644
+--- a/libdiscord.c
++++ b/libdiscord.c
+@@ -3516,6 +3516,21 @@ discord_process_message(DiscordAccount *da, JsonObject *data, unsigned special_t
+ 	g_free(escaped_content);
+ 	escaped_content = tmp;
+ 
++	/* webOS: an edit changes the stored message in place - "webos-im-edit" (account, id, text), the
++	 * transport finding it by serviceMessageId, the snowflake - rather than arriving as a new
++	 * "EDIT: ..." message. An update that is no edit of the text (an embed resolved, a flag
++	 * changed) changes nothing. A pin keeps its "📌" row. */
++	if (edited) {
++		if (discord_webos_update_is_edit(TRUE, json_object_get_string_member(data, "edited_timestamp"), FALSE)) {
++			gchar *id_s = from_int(msg_id);
++			purple_signal_emit(purple_conversations_get_handle(), "webos-im-edit", da->account, id_s, escaped_content);
++			g_free(id_s);
++		}
++		g_free(escaped_content);
++		g_free(channel_id_s);
++		return msg_id;
++	}
++
+ 	/* Add prefix for edited/pinned messages */
+ 	if (edited || pinned) {
+ 		const gchar *prefix_fmt = pinned ? "📌 %s" : _("EDIT: %s");
+@@ -4923,50 +4938,24 @@ discord_process_dispatch(DiscordAccount *da, const gchar *type, JsonObject *data
+ 			return;
+ 		}
+ 
+-		gchar *msg_times;
+-		if (purple_strequal(type, "MESSAGE_DELETE_BULK")) {
+-			JsonArray *ids = json_object_get_array_member(data, "ids");
+-			guint num_msgs = json_array_get_length(ids);
+-			guint printed_msgs = 2;
+-			if (num_msgs > 10) {
+-				msg_times = g_strdup_printf(_("%u messages between "), num_msgs);
+-			} else {
+-				printed_msgs = num_msgs;
+-				msg_times = g_strdup_printf(_("%u messages at "), num_msgs);
+-			}
+-			const gchar *comma = printed_msgs > 2 ? ", " : " ";
+-
+-			for (guint n = 0; n < printed_msgs-1; n++) {
+-				const gchar *id = json_array_get_string_element(ids, n);
+-				gchar *timestring = discord_parse_timestamp(discord_time_from_snowflake(to_int(id)));
+-				gchar *tmp = g_strdup_printf("%s%s%s", msg_times, timestring, comma);
+-				g_free(timestring);
+-				g_free(msg_times);
+-				msg_times = tmp;
+-			}
+-			const gchar *id = json_array_get_string_element(ids, num_msgs-1);
+-			gchar *timestring = discord_parse_timestamp(discord_time_from_snowflake(to_int(id)));
+-			gchar *tmp = g_strdup_printf(_("%sand %s were deleted"), msg_times, timestring);
+-			g_free(timestring);
+-			g_free(msg_times);
+-			msg_times = tmp;
+-		} else {
+-			const gchar *id = json_object_get_string_member(data, "id");
+-			gchar *timestring = discord_parse_timestamp(discord_time_from_snowflake(to_int(id)));
+-			msg_times = g_strdup_printf(_("Message at %s was deleted"), timestring);
+-			g_free(timestring);
+-		}
++		/* webOS: a deleted message is shown deleted where it is - "webos-im-delete" (account, id)
++		 * for each one - instead of a line saying a message at some time was deleted. */
++		{
++			JsonArray *bulk = json_object_get_array_member(data, "ids");
++			guint n = json_array_get_length(bulk);
++			const gchar **list = g_new0(const gchar *, n + 1);
+ 
+-		PurpleConversation *conv;
+-		conv = discord_get_conv_from_channel_id(da, to_int(channel_id_s));
+-		if (conv == NULL) {
+-			g_free(msg_times);
+-			return;
++			for (guint i = 0; i < n; i++) {
++				list[i] = json_array_get_string_element(bulk, i);
++			}
++			gchar **gone = discord_webos_deleted_ids(json_object_get_string_member(data, "id"), list, n);
++			for (gchar **g = gone; *g != NULL; g++) {
++				purple_signal_emit(purple_conversations_get_handle(), "webos-im-delete", da->account, *g);
++			}
++			g_strfreev(gone);
++			g_free(list);
+ 		}
+ 
+-		purple_conversation_write_system_message(conv, msg_times, PURPLE_MESSAGE_SYSTEM);
+-		g_free(msg_times);
+-
+ 	} else if (purple_strequal(type, "TYPING_START")) {
+ 		const gchar *channel_id = json_object_get_string_member(data, "channel_id");
+ 		guint64 user_id = to_int(json_object_get_string_member(data, "user_id"));
+diff --git a/tests/test_webos_helpers.c b/tests/test_webos_helpers.c
+index 157e482..3fd58ac 100644
+--- a/tests/test_webos_helpers.c
++++ b/tests/test_webos_helpers.c
+@@ -192,6 +192,36 @@ test_mentions(void)
+ 	CHECK(resolve_calls == 3);
+ }
+ 
++static void
++test_update_is_edit(void)
++{
++	CHECK(discord_webos_update_is_edit(TRUE, "2026-11-07T22:01:02.000000+00:00", FALSE));
++	CHECK(!discord_webos_update_is_edit(TRUE, NULL, FALSE));        /* an embed came in */
++	CHECK(!discord_webos_update_is_edit(TRUE, "", FALSE));
++	CHECK(!discord_webos_update_is_edit(FALSE, "2026-11-07T22:01:02Z", FALSE)); /* no message */
++	CHECK(!discord_webos_update_is_edit(TRUE, "2026-11-07T22:01:02Z", TRUE));   /* a pin */
++}
++
++static void
++test_deleted_ids(void)
++{
++	const gchar *bulk[] = { "1100000000000000001", "not-an-id", "", "1100000000000000002" };
++	gchar **got;
++
++	got = discord_webos_deleted_ids("1100000000000000009", NULL, 0);
++	CHECK(g_strv_length(got) == 1 && g_strcmp0(got[0], "1100000000000000009") == 0);
++	g_strfreev(got);
++
++	got = discord_webos_deleted_ids(NULL, bulk, G_N_ELEMENTS(bulk));
++	CHECK(g_strv_length(got) == 2 && g_strcmp0(got[0], "1100000000000000001") == 0 &&
++			g_strcmp0(got[1], "1100000000000000002") == 0);
++	g_strfreev(got);
++
++	got = discord_webos_deleted_ids("x", NULL, 3);
++	CHECK(got != NULL && got[0] == NULL);
++	g_strfreev(got);
++}
++
+ int
+ main(void)
+ {
+@@ -200,6 +230,8 @@ main(void)
+ 	test_split_members();
+ 	test_group_create_body();
+ 	test_mentions();
++	test_update_is_edit();
++	test_deleted_ids();
+ 
+ 	if (failures) {
+ 		fprintf(stderr, "%d check(s) failed\n", failures);
+diff --git a/webos_helpers.c b/webos_helpers.c
+index 7720f4b..db71175 100644
+--- a/webos_helpers.c
++++ b/webos_helpers.c
+@@ -233,3 +233,26 @@ discord_webos_apply_mentions(const gchar *text, const gchar *records,
+ 	g_ptr_array_free(mentions, TRUE);
+ 	return g_string_free(out, FALSE);
+ }
++
++gboolean
++discord_webos_update_is_edit(gboolean has_author, const gchar *edited_timestamp, gboolean pinned)
++{
++	return has_author && !pinned && edited_timestamp != NULL && *edited_timestamp != '\0';
++}
++
++gchar **
++discord_webos_deleted_ids(const gchar *id, const gchar *const *ids, gsize n_ids)
++{
++	GPtrArray *out = g_ptr_array_new();
++
++	if (discord_webos_is_snowflake(id)) {
++		g_ptr_array_add(out, g_strdup(id));
++	}
++	for (gsize i = 0; ids != NULL && i < n_ids; i++) {
++		if (discord_webos_is_snowflake(ids[i])) {
++			g_ptr_array_add(out, g_strdup(ids[i]));
++		}
++	}
++	g_ptr_array_add(out, NULL);
++	return (gchar **) g_ptr_array_free(out, FALSE);
++}
+diff --git a/webos_helpers.h b/webos_helpers.h
+index efc00f8..c7bcd84 100644
+--- a/webos_helpers.h
++++ b/webos_helpers.h
+@@ -60,4 +60,13 @@ typedef guint64 (*DiscordWebosMentionResolver)(const gchar *id, const gchar *nam
+ gchar *discord_webos_apply_mentions(const gchar *text, const gchar *records,
+ 		DiscordWebosMentionResolver resolve, gpointer user_data);
+ 
++/* Whether a MESSAGE_UPDATE is an edit of the text, to be made in place: it carries the message
++ * (an author) and when it was edited. An update that only resolved an embed or changed a flag has
++ * no edited_timestamp; a pin is shown as the pin it is. */
++gboolean discord_webos_update_is_edit(gboolean has_author, const gchar *edited_timestamp, gboolean pinned);
++
++/* The ids a MESSAGE_DELETE (id) or MESSAGE_DELETE_BULK (ids, n_ids of them) took away, as a
++ * NULL-terminated vector (g_strfreev) of the snowflakes among them. Never NULL. */
++gchar **discord_webos_deleted_ids(const gchar *id, const gchar *const *ids, gsize n_ids);
++
+ #endif /* DISCORD_WEBOS_HELPERS_H */

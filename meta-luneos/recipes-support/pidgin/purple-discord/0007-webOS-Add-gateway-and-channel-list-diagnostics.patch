@@ -7,20 +7,20 @@ Debug logging used to chase missing real-time messages and missing
 channels on webOS:
 
 - log when the zlib stream fails to inflate and a gateway event is
-  dropped, and when a fragmented websocket frame is dropped;
+  dropped;
 - log which guild channels discord_buddy_guild hides and the totals.
 
 Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
 Upstream-Status: Inappropriate [webOS debugging aid]
 ---
- libdiscord.c | 31 +++++++++++++++++++++++++++++--
- 1 file changed, 29 insertions(+), 2 deletions(-)
+ libdiscord.c | 24 +++++++++++++++++++++++-
+ 1 file changed, 23 insertions(+), 1 deletion(-)
 
 diff --git a/libdiscord.c b/libdiscord.c
-index 0c347e0..4c2ef1f 100644
+index eee829f..e173623 100644
 --- a/libdiscord.c
 +++ b/libdiscord.c
-@@ -6200,11 +6200,18 @@ discord_buddy_guild(DiscordAccount *da, DiscordGuild *guild)
+@@ -6302,11 +6302,18 @@ discord_buddy_guild(DiscordAccount *da, DiscordGuild *guild)
  
  	g_hash_table_iter_init(&iter, guild->channels);
  
@@ -40,7 +40,7 @@ index 0c347e0..4c2ef1f 100644
  
  		/* Find/make a group */
  		gchar *category_id = from_int(channel->parent_id);
-@@ -6230,6 +6237,9 @@ discord_buddy_guild(DiscordAccount *da, DiscordGuild *guild)
+@@ -6332,6 +6339,9 @@ discord_buddy_guild(DiscordAccount *da, DiscordGuild *guild)
  
  		discord_add_channel_to_blist(da, channel, group);
  	}
@@ -50,49 +50,29 @@ index 0c347e0..4c2ef1f 100644
  }
  
  void discord_guild_member_screening(DiscordAccount *da, JsonNode *node, gpointer user_data);
-@@ -7624,6 +7634,12 @@ discord_inflate(DiscordAccount *da, gchar *frame, gsize frame_len)
+@@ -7834,6 +7844,12 @@ discord_inflate(DiscordAccount *da, gchar *frame, gsize frame_len)
  	}
  
  	if (gzres != Z_OK && gzres != Z_STREAM_END) {
 +		/* WEBOS-DIAG (issue #1): a persistent zlib-stream desync. Once this happens EVERY subsequent
 +		 * gateway frame fails to inflate, so real-time events are lost until a full reconnect resets
-+		 * the stream. Usual cause: a fragmented websocket payload whose continuation frames were dropped
-+		 * (see the "unknown websocket error" opcode 0/1/128 log below). */
++		 * the stream. Fragmented messages are reassembled and split frame headers are read in full, so
++		 * this now points at a real protocol error rather than at the frame reader. */
 +		purple_debug_error("discord", "WEBOS-DIAG inflate FAILED gzres=%d avail_in=%u frame_len=%" G_GSIZE_FORMAT " -- zlib-stream desynced; real-time events lost until reconnect\n",
 +			gzres, zs->avail_in, frame_len);
  		g_string_free(ret, TRUE);
  		return NULL;
  	}
-@@ -7732,7 +7748,11 @@ discord_socket_got_data(gpointer userdata, PurpleSslConnection *conn, PurpleInpu
- 					return;
- 				}
- 
--				purple_debug_error("discord", "unknown websocket error %d\n", ya->packet_code);
-+				/* WEBOS-DIAG (issue #1): opcodes 0 (continuation), 1 (non-FIN text) and 128 (FIN+continuation)
-+				 * land here and get DROPPED - this reader only reassembles single-frame 129/130 payloads.
-+				 * A dropped continuation frame feeds the persistent zlib-stream partial data -> desync ->
-+				 * every later real-time event is lost until reconnect (see the inflate-FAILED log). */
-+				purple_debug_error("discord", "WEBOS-DIAG DROPPING websocket frame opcode=%d (fragmented/continuation not reassembled -> desyncs zlib-stream)\n", ya->packet_code);
- 				return;
- 			}
- 
-@@ -7780,9 +7800,16 @@ discord_socket_got_data(gpointer userdata, PurpleSslConnection *conn, PurpleInpu
- 			gboolean success;
- 
- 			if (ya->compress) {
-+				guint64 pre_len = ya->frame_len;
- 				gchar *temp = discord_inflate(ya, ya->frame, ya->frame_len);
- 				g_free(ya->frame);
- 				ya->frame = temp;
-+				if (temp == NULL) {
-+					/* WEBOS-DIAG (issue #1): the inflate failed, so discord_process_frame is about to be
-+					 * handed NULL, fail to parse, and return TRUE (success) - the gateway event vanishes
-+					 * with no error and no reconnect. This is why new messages only show after re-login. */
-+					purple_debug_error("discord", "WEBOS-DIAG inflate returned NULL for a %" G_GUINT64_FORMAT "-byte compressed frame -> gateway event SILENTLY DROPPED (no reconnect)\n", pre_len);
-+				}
- 			}
+@@ -8018,6 +8034,12 @@ discord_socket_got_frame(DiscordAccount *ya, PurpleSslConnection *conn)
+ 		gchar *temp = discord_inflate(ya, message, message_len);
+ 		g_free(message);
+ 		message = temp;
++		if (temp == NULL) {
++			/* WEBOS-DIAG (issue #1): the inflate failed, so discord_process_frame is about to be
++			 * handed NULL, fail to parse, and return TRUE (success) - the gateway event vanishes
++			 * with no error and no reconnect. This is why new messages only show after re-login. */
++			purple_debug_error("discord", "WEBOS-DIAG inflate returned NULL for a %" G_GSIZE_FORMAT "-byte compressed frame -> gateway event SILENTLY DROPPED (no reconnect)\n", message_len);
++		}
+ 	}
  
  #ifdef USE_QRCODE_AUTH
--- 
-2.53.0
-
