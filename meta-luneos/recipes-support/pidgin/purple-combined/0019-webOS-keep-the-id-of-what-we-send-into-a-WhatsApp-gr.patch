@@ -1,0 +1,328 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sun, 8 Nov 2026 17:42:31 +0100
+Subject: [PATCH] webOS: keep the id of what we send into a WhatsApp group from
+ the phone
+
+A message we send into a group from another of our devices, the phone,
+comes back to us as ours (SEND|REMOTE_SEND), and the transport stores it
+as an Outbox row. It stores it with the message's WhatsApp id only when
+the id is stashed on the conversation ("webos-msg-id", beside the quote
+"webos-quoted-*"), and for a group the glue stashed it only for a
+message received: so every message we sent into a group from the phone
+had no id, and nothing could find it again. A poll made on the phone
+was never rewritten with its votes (the poll message is found by its
+id), and a reaction, an edit or a delete for such a message was lost.
+
+The id and the quote are now stashed for a group message received or
+sent from another device, as for a 1:1 chat already. Never for our
+plain local echo (SEND without REMOTE_SEND): the transport ignores it
+without reading the stash, which would then stay on the conversation
+and go with the next message.
+
+glue/tests has display_message_test (gtest), against fakes of the
+libpurple calls display_message.c makes: another member's message in a
+group is received from them, with its id; ours from the phone carries
+its id and quote; our local echo leaves nothing behind; the 1:1 chat is
+as before.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ glue/display_message.c              |  11 +-
+ glue/tests/Makefile                 |  18 ++-
+ glue/tests/display_message_test.cpp | 213 ++++++++++++++++++++++++++++
+ 3 files changed, 237 insertions(+), 5 deletions(-)
+ create mode 100644 glue/tests/display_message_test.cpp
+
+diff --git a/glue/display_message.c b/glue/display_message.c
+index 80c24a8..b6d6403 100644
+--- a/glue/display_message.c
++++ b/glue/display_message.c
+@@ -75,13 +75,18 @@ void gowhatsapp_display_text_message(
+     // webOS reactions: stash this message's WhatsApp id on the conversation right before serv_got_*
+     // (which synchronously drives the transport's incoming_message_cb). The transport reads it as
+     // "webos-msg-id" and stores it as serviceMessageId so a later reaction can target this message.
+-    // Only for RECV messages - the transport ignores our own echoes.
++    // For a message received, and for one we sent from another of our devices (REMOTE_SEND), which
++    // the transport stores as an Outbox row, reading the same stash for a group as for a 1:1 chat:
++    // without it nothing could find our own message in a group again - not a vote on our poll, nor
++    // a reaction, an edit or a delete. Never for a plain local echo (SEND without REMOTE_SEND): the
++    // transport ignores those without reading the stash, which would then stick to the next message.
+     if (isGroup) {
+         PurpleConversation *gconv = gowhatsapp_enter_group_chat(connection, remoteJid, NULL, NULL);
+-        if (gconv != NULL && (flags & PURPLE_MESSAGE_RECV) && messageId != NULL && *messageId != '\0') {
++        const gboolean stash = gconv != NULL && (flags & (PURPLE_MESSAGE_RECV | PURPLE_MESSAGE_REMOTE_SEND)) != 0;
++        if (stash && messageId != NULL && *messageId != '\0') {
+             purple_conversation_set_data(gconv, "webos-msg-id", g_strdup(messageId));
+         }
+-        if (gconv != NULL && (flags & PURPLE_MESSAGE_RECV)) {
++        if (stash) {
+             gowhatsapp_stash_webos_quote(gconv, quotedText, quotedFrom, quotedId);
+         }
+         purple_serv_got_chat_in(connection, g_str_hash(remoteJid), senderJid, flags, text_with_id, timestamp);
+diff --git a/glue/tests/Makefile b/glue/tests/Makefile
+index 8c47e95..dc5d4f4 100644
+--- a/glue/tests/Makefile
++++ b/glue/tests/Makefile
+@@ -1,3 +1,8 @@
++# display_message_test: glue/display_message.c's message direction and the id it hands the
++# transport, against fakes of what it calls of libpurple (in the test). Needs the libpurple
++# headers besides (PURPLE_CPPFLAGS, e.g. -I$SYSROOT/usr/include/libpurple), and the header cgo
++# generates for the Go half, libwhatsmeow.h (GOHDR: the directory it was built into).
++#
+ # Unit tests for the call audio playout (glue/playout.c), glue/call.c's playback thread, which
+ # runs against fakes.c's ALSA device instead of a real one, call.c's luneos-rtc-engine session
+ # (fakes.c records its LS2 calls), and the engine's socket bridge (glue/voipkit_rtcengine.c,
+@@ -17,7 +22,7 @@ SAN ?=
+ INC := -I$(GLUE) -I. -Ifakes
+ LIBS := -lgtest -lgtest_main -lglib-2.0 -lpthread -lm
+ 
+-all: playout_test call_playback_test call_video_test voipkit_rtcengine_test
++all: playout_test call_playback_test call_video_test voipkit_rtcengine_test display_message_test
+ 
+ playout_test: playout_test.cpp $(GLUE)/playout.c $(GLUE)/playout.h
+ 	$(CC) $(CPPFLAGS) $(CFLAGS) $(SAN) $(INC) -c $(GLUE)/playout.c -o playout.o
+@@ -43,13 +48,22 @@ voipkit_rtcengine_test: voipkit_rtcengine_test.cpp $(GLUE)/voipkit_rtcengine.c $
+ 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(SAN) $(INC) voipkit_rtcengine_test.cpp voipkit_rtcengine.o \
+ 		-o $@ $(LDFLAGS) $(LIBS)
+ 
++PURPLE_CPPFLAGS ?= -I/usr/include/libpurple
++GOHDR ?= .
++display_message_test: display_message_test.cpp $(GLUE)/display_message.c $(GLUE)/../constants.c
++	$(CC) $(CPPFLAGS) $(PURPLE_CPPFLAGS) -I$(GLUE)/.. -I$(GOHDR) -DPURPLE_PLUGINS -D_DEFAULT_SOURCE $(CFLAGS) $(SAN) $(INC) -c $(GLUE)/display_message.c -o display_message.o
++	$(CC) $(CPPFLAGS) $(PURPLE_CPPFLAGS) -I$(GLUE)/.. -DPURPLE_PLUGINS $(CFLAGS) $(SAN) $(INC) -c $(GLUE)/../constants.c -o constants.o
++	$(CXX) $(CPPFLAGS) $(PURPLE_CPPFLAGS) -I$(GLUE)/.. -I$(GOHDR) -DPURPLE_PLUGINS -D_DEFAULT_SOURCE $(CXXFLAGS) $(SAN) $(INC) display_message_test.cpp display_message.o constants.o \
++		-o $@ $(LDFLAGS) $(LIBS)
++
+ check: all
+ 	./playout_test
+ 	./call_playback_test
+ 	./call_video_test
+ 	./voipkit_rtcengine_test
++	./display_message_test
+ 
+ clean:
+-	rm -f *.o playout_test call_playback_test call_video_test voipkit_rtcengine_test
++	rm -f *.o playout_test call_playback_test call_video_test voipkit_rtcengine_test display_message_test
+ 
+ .PHONY: all check clean
+diff --git a/glue/tests/display_message_test.cpp b/glue/tests/display_message_test.cpp
+new file mode 100644
+index 0000000..7d24bd0
+--- /dev/null
++++ b/glue/tests/display_message_test.cpp
+@@ -0,0 +1,213 @@
++// Tests glue/display_message.c: which way a WhatsApp message goes (received, or sent by us from
++// another device, or our own local echo), and that its id - and the message it quotes - is handed
++// to the transport ("webos-msg-id", "webos-quoted-*" on the conversation) for every message the
++// transport stores: received ones, and ours from another device, in a group as in a 1:1 chat. A
++// plain local echo is ignored by the transport, so nothing may be left on the conversation for it.
++// libpurple is replaced below by what display_message.c calls of it; serv_got_chat_in decides the
++// direction as libpurple 2.14's does (server.c: SEND, and not RECV, when the sender is the chat's
++// nick, which glue/groups.c sets to the account's username), and then reads and clears the stash as
++// the transport's incoming_message_cb does.
++#include <gtest/gtest.h>
++#include <map>
++#include <string>
++#include <vector>
++
++extern "C" {
++#define template template_ // a parameter's name in gowhatsapp.h, a keyword in C++
++#include "gowhatsapp.h"
++#undef template
++#include "constants.h"
++}
++
++namespace {
++
++const char *const kUs = "31600000001@s.whatsapp.net";
++const char *const kAnna = "31600000002@s.whatsapp.net";
++const char *const kGroup = "120363000000000001@g.us";
++
++PurpleAccount account;
++PurpleConnection *const connection = reinterpret_cast<PurpleConnection *>(&account);
++
++struct Conv {
++	PurpleConversation conv;
++	std::map<std::string, char *> data;
++};
++std::map<std::string, Conv *> convs; // by "chat:"/"im:" and name
++
++// What reached the transport, with what was stashed on the conversation at that moment.
++struct Written {
++	bool chat;
++	std::string who;
++	PurpleMessageFlags flags; // as the transport sees them
++	std::string id, quotedId, quotedText, quotedFrom;
++};
++std::vector<Written> written;
++
++Conv *conv_of(PurpleConversation *conv) {
++	for (auto &c : convs)
++		if (&c.second->conv == conv)
++			return c.second;
++	return nullptr;
++}
++
++std::string take(Conv *c, const char *key) {
++	auto it = c->data.find(key);
++	if (it == c->data.end() || it->second == nullptr)
++		return "";
++	std::string value = it->second;
++	g_free(it->second);
++	c->data.erase(it);
++	return value;
++}
++
++// The transport (incoming_message_cb): a local echo (SEND without REMOTE_SEND) is ignored and its
++// stash left alone; anything else is stored with the stash, which is then cleared.
++void transport(Conv *c, bool chat, const char *who, PurpleMessageFlags flags) {
++	Written w{chat, who ? who : "", flags, "", "", "", ""};
++	if ((flags & PURPLE_MESSAGE_RECV) || (flags & PURPLE_MESSAGE_REMOTE_SEND)) {
++		w.id = take(c, "webos-msg-id");
++		w.quotedId = take(c, "webos-quoted-id");
++		w.quotedText = take(c, "webos-quoted-text");
++		w.quotedFrom = take(c, "webos-quoted-from");
++	}
++	written.push_back(w);
++}
++
++Conv *find_or_new(bool chat, const char *name) {
++	std::string key = std::string(chat ? "chat:" : "im:") + name;
++	auto it = convs.find(key);
++	if (it != convs.end())
++		return it->second;
++	Conv *c = new Conv();
++	convs[key] = c;
++	return c;
++}
++
++void reset() {
++	for (auto &c : convs) {
++		for (auto &d : c.second->data)
++			g_free(d.second);
++		delete c.second;
++	}
++	convs.clear();
++	written.clear();
++}
++
++std::string stashed(bool chat, const char *name, const char *key) {
++	Conv *c = find_or_new(chat, name);
++	auto it = c->data.find(key);
++	return it == c->data.end() || it->second == nullptr ? "" : it->second;
++}
++
++// gowhatsapp_display_text_message as glue/process_message.c calls it for a text message.
++void show(const char *sender, const char *chat, bool isGroup, bool isOutgoing, const char *id,
++          const char *quotedText = nullptr, const char *quotedFrom = nullptr, const char *quotedId = nullptr) {
++	gowhatsapp_display_text_message(&account, sender, chat, "text", 1700000000, isGroup, isOutgoing, "Name",
++	                                (PurpleMessageFlags)0, id, quotedText, quotedFrom, quotedId);
++}
++
++} // namespace
++
++extern "C" {
++// libpurple, as display_message.c uses it
++PurpleConnection *purple_account_get_connection(const PurpleAccount *) { return connection; }
++const char *purple_account_get_username(const PurpleAccount *) { return kUs; }
++gboolean purple_account_get_bool(const PurpleAccount *, const char *, gboolean default_value) { return default_value; }
++gboolean purple_strequal(const gchar *left, const gchar *right) { return g_strcmp0(left, right) == 0; }
++void purple_conversation_set_data(PurpleConversation *conv, const char *key, gpointer data) {
++	Conv *c = conv_of(conv);
++	auto it = c->data.find(key);
++	if (it != c->data.end())
++		g_free(it->second); // libpurple's table frees nothing; freeing here keeps ASan's leak report about the test, not the fake
++	c->data[key] = static_cast<char *>(data);
++}
++PurpleConversation *purple_find_conversation_with_account(PurpleConversationType type, const char *name, const PurpleAccount *) {
++	auto it = convs.find(std::string(type == PURPLE_CONV_TYPE_CHAT ? "chat:" : "im:") + name);
++	return it == convs.end() ? nullptr : &it->second->conv;
++}
++PurpleConversation *purple_conversation_new(PurpleConversationType type, PurpleAccount *, const char *name) {
++	return &find_or_new(type == PURPLE_CONV_TYPE_CHAT, name)->conv;
++}
++PurpleConvIm *purple_conversation_get_im_data(const PurpleConversation *conv) {
++	return reinterpret_cast<PurpleConvIm *>(const_cast<PurpleConversation *>(conv));
++}
++void purple_conv_im_write(PurpleConvIm *im, const char *who, const char *, PurpleMessageFlags flags, time_t) {
++	transport(conv_of(reinterpret_cast<PurpleConversation *>(im)), false, who, flags);
++}
++void serv_got_im(PurpleConnection *, const char *who, const char *, PurpleMessageFlags flags, time_t) {
++	transport(find_or_new(false, who), false, who, (PurpleMessageFlags)(flags | PURPLE_MESSAGE_RECV));
++}
++void serv_got_chat_in(PurpleConnection *, int id, const char *who, PurpleMessageFlags flags, const char *, time_t) {
++	EXPECT_EQ((guint)id, g_str_hash(kGroup));
++	if (g_strcmp0(who, kUs) == 0) { // the chat's nick
++		flags = (PurpleMessageFlags)((flags | PURPLE_MESSAGE_SEND) & ~PURPLE_MESSAGE_RECV);
++	} else {
++		flags = (PurpleMessageFlags)(flags | PURPLE_MESSAGE_RECV);
++	}
++	transport(find_or_new(true, kGroup), true, who, flags);
++}
++// the rest of the glue
++PurpleConversation *gowhatsapp_enter_group_chat(PurpleConnection *, const char *remoteJid, char **, char **) {
++	return &find_or_new(true, remoteJid)->conv;
++}
++PurpleBuddy *gowhatsapp_ensure_buddy_in_blist(PurpleAccount *, const char *, const char *) { return nullptr; }
++}
++
++// Another member's message in a group - a vote on our own poll among them - is received, from
++// them, with its id.
++TEST(DisplayMessage, AMembersGroupMessageIsReceivedFromThem) {
++	reset();
++	show(kAnna, kGroup, true, false, "ANNAVOTE");
++	ASSERT_EQ(written.size(), 1u);
++	EXPECT_TRUE(written[0].flags & PURPLE_MESSAGE_RECV);
++	EXPECT_FALSE(written[0].flags & PURPLE_MESSAGE_SEND);
++	EXPECT_FALSE(written[0].flags & PURPLE_MESSAGE_REMOTE_SEND);
++	EXPECT_EQ(written[0].who, kAnna);
++	EXPECT_EQ(written[0].id, "ANNAVOTE");
++}
++
++// Ours, sent from our phone into a group (a poll we made there), is stored with its id, so that
++// votes, reactions, edits and deletes find it.
++TEST(DisplayMessage, OurGroupMessageFromThePhoneKeepsItsId) {
++	reset();
++	show(kUs, kGroup, true, false, "OURPOLL", "the quoted text", "Anna", "QUOTED");
++	ASSERT_EQ(written.size(), 1u);
++	EXPECT_TRUE(written[0].flags & PURPLE_MESSAGE_SEND);
++	EXPECT_TRUE(written[0].flags & PURPLE_MESSAGE_REMOTE_SEND);
++	EXPECT_FALSE(written[0].flags & PURPLE_MESSAGE_RECV);
++	EXPECT_EQ(written[0].id, "OURPOLL");
++	EXPECT_EQ(written[0].quotedId, "QUOTED");
++	EXPECT_EQ(written[0].quotedText, "the quoted text");
++	EXPECT_EQ(written[0].quotedFrom, "Anna");
++}
++
++// Our local echo is the app's own row: nothing is left on the group for the next message to take.
++TEST(DisplayMessage, OurLocalEchoInAGroupLeavesNoId) {
++	reset();
++	show(kUs, kGroup, true, true, "ECHO", "the quoted text", "Anna", "QUOTED");
++	ASSERT_EQ(written.size(), 1u);
++	EXPECT_TRUE(written[0].flags & PURPLE_MESSAGE_SEND);
++	EXPECT_FALSE(written[0].flags & PURPLE_MESSAGE_REMOTE_SEND);
++	EXPECT_EQ(stashed(true, kGroup, "webos-msg-id"), "");
++	EXPECT_EQ(stashed(true, kGroup, "webos-quoted-id"), "");
++	show(kAnna, kGroup, true, false, "NEXT");
++	ASSERT_EQ(written.size(), 2u);
++	EXPECT_EQ(written[1].id, "NEXT");
++	EXPECT_EQ(written[1].quotedId, "");
++}
++
++// The 1:1 chat as it was: received and ours from the phone carry their id, the local echo none.
++TEST(DisplayMessage, OneToOneIdsAsBefore) {
++	reset();
++	show(kAnna, kAnna, false, false, "FROMANNA");
++	show(kUs, kAnna, false, false, "FROMPHONE");
++	show(kUs, kAnna, false, true, "ECHO");
++	ASSERT_EQ(written.size(), 3u);
++	EXPECT_TRUE(written[0].flags & PURPLE_MESSAGE_RECV);
++	EXPECT_EQ(written[0].id, "FROMANNA");
++	EXPECT_TRUE(written[1].flags & PURPLE_MESSAGE_REMOTE_SEND);
++	EXPECT_EQ(written[1].id, "FROMPHONE");
++	EXPECT_FALSE(written[2].flags & PURPLE_MESSAGE_REMOTE_SEND);
++	EXPECT_EQ(stashed(false, kAnna, "webos-msg-id"), "");
++	reset();
++}

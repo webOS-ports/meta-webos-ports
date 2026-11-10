@@ -1,0 +1,351 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:29:05 +0200
+Subject: [PATCH] webOS: show polls and vote on them from the app
+
+* Show a poll as a poll
+
+A poll is rendered as a "poll:<base64 JSON>" token (question, options,
+how many may be chosen) instead of a numbered text list, so the app can
+draw the options. The option hashes are still filled in for matching
+votes.
+
+* Vote on polls from the app
+
+Votes from the app arrive through "webos-im-send-poll-vote" (account,
+chat, poll id, the full selection separated by 0x1f) and are sent with
+BuildPollVote(). That needs the poll's original chat and sender exactly
+as whatsmeow stored its message secret, which the message cache keeps
+for the ?vote command. This is a separate function from ?vote's
+send_poll_vote, as the app names the poll by id and its options by name.
+
+When the poll is no longer cached, or was cached before the source was
+kept, the sender the transport stashes as
+"webos-pollvote-sender" is used, trying both its phone-number and LID
+forms against the message secret store.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ bridge.go         |  19 +++++++
+ glue/login.c      |  28 ++++++++++
+ handle_message.go |  46 ++++++++++++-----
+ message_cache.go  |   8 ++-
+ send_message.go   | 128 ++++++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 215 insertions(+), 14 deletions(-)
+
+diff --git a/bridge.go b/bridge.go
+index 1bdca33..4ab1aab 100644
+--- a/bridge.go
++++ b/bridge.go
+@@ -137,6 +137,25 @@ func gowhatsapp_go_send_reaction(account *PurpleAccount, targetId *C.char, emoji
+ 	go handler.send_reaction(C.GoString(peer), C.GoString(targetId), C.GoString(emoji), C.GoString(targetSender), remove)
+ }
+ 
++//export gowhatsapp_go_send_poll_vote
++// webOS polls (SEND): vote on a poll. pollMessageId = the poll creation message's server id; peer =
++// the chat JID; optionNamesJoined = the FULL current selection, "\x1f"-separated (empty string =
++// clear my vote); senderJid = the poll creation message's ORIGINAL sender (db8 fallback, same as
++// gowhatsapp_go_send_reaction's targetSender, so we can build the vote without a message-cache
++// entry; "" if unknown). Runs the actual send on a goroutine.
++func gowhatsapp_go_send_poll_vote(account *PurpleAccount, peer *C.char, pollMessageId *C.char, optionNamesJoined *C.char, senderJid *C.char) {
++	handler, ok := handlers[account]
++	if !ok {
++		return
++	}
++	joined := C.GoString(optionNamesJoined)
++	var optionNames []string
++	if joined != "" {
++		optionNames = strings.Split(joined, "\x1f")
++	}
++	go handler.send_app_poll_vote(C.GoString(peer), C.GoString(pollMessageId), optionNames, C.GoString(senderJid))
++}
++
+ //export gowhatsapp_go_send_file
+ func gowhatsapp_go_send_file(account *PurpleAccount, who *C.char, filename *C.char) *C.char {
+ 	err := "Not connected."
+diff --git a/glue/login.c b/glue/login.c
+index 3e6a2dc..bd314c5 100644
+--- a/glue/login.c
++++ b/glue/login.c
+@@ -26,6 +26,29 @@ static void webos_send_reaction_cb(PurpleAccount *account, const char *targetId,
+     }
+ }
+ 
++// webOS polls (SEND): the transport emits "webos-im-send-poll-vote" when the user taps a poll
++// option. Params (4): account, peer (chat id), pollMessageId, optionNamesJoined ("\x1f"-separated,
++// "" clears the vote). Polls are WhatsApp-only (gometa/Facebook has no polls), so only that prpl id
++// is handled here.
++static void webos_send_poll_vote_cb(PurpleAccount *account, const char *peer, const char *pollMessageId,
++                                    const char *optionNamesJoined, void *data)
++{
++    (void)data;
++    if (!account || !pollMessageId || !*pollMessageId) {
++        return;
++    }
++    const char *proto = purple_account_get_protocol_id(account);
++    if (g_strcmp0(proto, GOWHATSAPP_PRPL_ID) == 0) {
++        // db8 fallback: the transport stashed the poll's ORIGINAL sender on the account right before
++        // this (synchronous) emit, same as webos-reaction-target-sender - lets whatsmeow build+encrypt
++        // the vote without a live message-cache entry (survives transport restart / very old polls).
++        const char *senderJid = purple_account_get_string(account, "webos-pollvote-sender", "");
++        gowhatsapp_go_send_poll_vote(account, (char *)(peer ? peer : ""), (char *)pollMessageId,
++                                     (char *)(optionNamesJoined ? optionNamesJoined : ""),
++                                     (char *)(senderJid ? senderJid : ""));
++    }
++}
++
+ // Connect once (process-wide) to the transport's send-reaction signal. The signal lives on
+ // purple_conversations_get_handle(), so a single connect covers every account of both prpls in this
+ // process. Called from BOTH login paths (gowhatsapp_login here and gometa_login) so it fires whether
+@@ -40,6 +63,11 @@ void webos_connect_send_reaction_once(void)
+     s_connected = TRUE;
+     purple_signal_connect(purple_conversations_get_handle(), "webos-im-send-reaction",
+                           purple_get_core(), PURPLE_CALLBACK(webos_send_reaction_cb), NULL);
++    // Polls are WhatsApp-only, but connecting here (alongside reactions) means it's covered by the
++    // same idempotent guard and the same "called from both login paths" arrangement, so it's ready
++    // before an instant-reconnect (saved-session) WhatsApp login can race it.
++    purple_signal_connect(purple_conversations_get_handle(), "webos-im-send-poll-vote",
++                          purple_get_core(), PURPLE_CALLBACK(webos_send_poll_vote_cb), NULL);
+ }
+ 
+ void
+diff --git a/handle_message.go b/handle_message.go
+index c56a06e..9b0ecea 100644
+--- a/handle_message.go
++++ b/handle_message.go
+@@ -274,6 +274,36 @@ func (handler *Handler) formatContactsArrayMessage(displayName string, contacts
+ 	return fileURL + "?name=" + url.QueryEscape(label)
+ }
+ 
++// pollPayload is the compact JSON shape ConversationItem.extractPolls decodes back out of a
++// "poll:<base64>" token to render a real (read-only) radio-button/checkbox list instead of a
++// "1: Option" text dump. Max mirrors PollCreationMessage.SelectableOptionsCount: 1 = single-select
++// (radio), 0 or >1 = multi-select (checkbox). There is no vote-SENDING backend yet (whatsmeow
++// BuildPollVote isn't wired up), so the rendered inputs are inert/disabled - this only upgrades the
++// display, it doesn't make polls interactive.
++type pollPayload struct {
++	Name    string   `json:"name"`
++	Options []string `json:"options"`
++	Max     int      `json:"max"`
++}
++
++// formatPollMessage renders a poll as just a "poll:<base64-json>" token (like formatEventMessage) -
++// ConversationItem.buildPollBlock parses it into the radio/checkbox list. The caller must already
++// have filled in each option's OptionHash (needed later for matching an incoming vote) before
++// calling this; that side effect is independent of the returned text.
++func formatPollMessage(pcm *waE2E.PollCreationMessage) string {
++	opts := pcm.GetOptions()
++	names := make([]string, 0, len(opts))
++	for _, option := range opts {
++		names = append(names, option.GetOptionName())
++	}
++	payload := pollPayload{Name: pcm.GetName(), Options: names, Max: int(pcm.GetSelectableOptionsCount())}
++	data, err := json.Marshal(payload)
++	if err != nil {
++		return "Poll: " + pcm.GetName()
++	}
++	return "poll:" + base64.RawURLEncoding.EncodeToString(data)
++}
++
+ // eventPayload is the compact JSON shape ConversationItem.extractEvents decodes back out of an
+ // "event:<base64>" token to build the Calendar app's documented "New Calendar Event" launch params
+ // (newEvent: {subject, location, note, dtstart, dtend} - all field names/ms timestamps match what
+@@ -481,25 +511,15 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 		pcm := GetAnyPollCreationMessage(message)
+ 		if pcm != nil {
+ 			//handler.log.Infof("message poll creation: %#v", pcm)
+-			text = fmt.Sprintf("[POLL] %s\n", pcm.GetName())
+-			for i, option := range pcm.GetOptions() {
++			for _, option := range pcm.GetOptions() {
+ 				if option.OptionHash == nil {
+ 					// taken from whatsmeow.HashPollOptions()
+ 					hash := fmt.Sprintf("%X", sha256.Sum256([]byte(option.GetOptionName())))
+ 					option.OptionHash = &hash
+ 				}
+-				text += fmt.Sprintf("%d: %s\n", i+1, option.GetOptionName())
+-				//handler.log.Infof("message poll creation option #%d: %#v", i, option)
+-			}
+-			selectable_options := pcm.GetSelectableOptionsCount()
+-			switch selectable_options {
+-			case 0:
+-				text += "One may chose multiple answers."
+-			case 1:
+-				text += "One may chose one answer."
+-			default:
+-				text += fmt.Sprintf("One may chose up to %d answers.", selectable_options)
++				//handler.log.Infof("message poll creation option: %#v", option)
+ 			}
++			text = formatPollMessage(pcm)
+ 		}
+ 	}
+ 	{
+diff --git a/message_cache.go b/message_cache.go
+index 12e678c..ca3c786 100644
+--- a/message_cache.go
++++ b/message_cache.go
+@@ -16,7 +16,13 @@ import (
+ )
+ 
+ type CachedMessage struct {
+-	ID        types.MessageID
++	ID types.MessageID
++	// Sender is the LID-resolved (phone-number, display-friendly) form (see handler.lidToPn) used for
++	// reactions/quotes/UI. Source holds whatsmeow's own ORIGINAL chat and sender for this message
++	// (possibly a LID) - the poll votes use it, because whatsmeow.storeMessageSecret keys the per-message
++	// encryption secret it needs for BuildPollVote by the exact (chat, sender, id) it saw internally,
++	// with no LID/PN fallback (unlike e.g. GetPrivacyToken); voting with the resolved Sender would
++	// look up the wrong key and fail for a LID-identified contact whenever the two forms differ.
+ 	Chat      types.JID
+ 	Sender    types.JID
+ 	Source    types.MessageSource // chat and sender as whatsmeow knows them, needed for BuildPollVote
+diff --git a/send_message.go b/send_message.go
+index 47b8704..f6df5ab 100644
+--- a/send_message.go
++++ b/send_message.go
+@@ -12,10 +12,12 @@ import (
+ 	"fmt"
+ 	"io"
+ 	"net/http"
++	"os"
+ 	"path/filepath"
+ 	"regexp"
+ 	"strconv"
+ 	"strings"
++	"time"
+ 
+ 	"go.mau.fi/whatsmeow/proto/waE2E"
+ 	"go.mau.fi/whatsmeow/types"
+@@ -317,6 +319,132 @@ func (handler *Handler) send_reaction(peer string, targetId string, emoji string
+ 	}
+ }
+ 
++// pollVoteSenderCandidates returns the sender JIDs to try for a poll's message-secret lookup, most
++// likely first. The secret is keyed by the EXACT sender whatsmeow saw when the poll arrived, and
++// SQLStore.GetMessageSecret matches `sender.ToNonAD()` EXACTLY - unlike the privacy-token query
++// right beside it in that same file, it has NO LID<->PN fallback, and a miss returns
++// (nil, nil) rather than an error. So handing it the wrong form of the same person's JID fails
++// SILENTLY. db8 only ever stores the phone-number form (from.addr), so for a LID-identified
++// contact the PN we get back is the wrong key and voting on any non-cached poll dies here.
++func (handler *Handler) pollVoteSenderCandidates(ctx context.Context, sender types.JID) []types.JID {
++	candidates := []types.JID{sender}
++	var other types.JID
++	var err error
++	if sender.Server == types.HiddenUserServer {
++		other, err = handler.client.Store.LIDs.GetPNForLID(ctx, sender)
++	} else {
++		other, err = handler.client.Store.LIDs.GetLIDForPN(ctx, sender)
++	}
++	if err == nil && !other.IsEmpty() && other.ToNonAD() != sender.ToNonAD() {
++		candidates = append(candidates, other)
++	}
++	return candidates
++}
++
++// send_app_poll_vote sends (or replaces) the user's vote on a poll they received. optionNames is the
++// FULL current selection (not a delta) - whatsmeow's BuildPollVote/PollVoteMessage always carries
++// the complete set of selected options, same as a real WhatsApp client re-sending the whole
++// selection on every tap. peer = the chat the poll lives in; pollMessageID = the poll creation
++// message's serviceMessageId (== info.ID at receive time).
++//
++// Prefers the in-memory cache (it has the exact message source whatsmeow used); on a miss - i.e. any
++// poll from before the last transport restart - falls back to senderJid (db8's stored sender, the
++// same db8-fallback pattern send_reaction uses) and PROBES the message-secret store for each
++// plausible JID form before building, rather than assuming one. See pollVoteSenderCandidates.
++//
++// Logging goes to stderr, NOT handler.log: purple_debug output (which is what waLog/purpleLogger
++// funnels into) never reaches imstdout.log on this device - confirmed live, zero "[Handler]"/
++// "[Client]" lines and zero hits for known-firing Infof calls - so every diagnostic here was
++// invisible while this was being debugged. stderr is the channel the wa-call engine already uses
++// successfully.
++func (handler *Handler) send_app_poll_vote(peer string, pollMessageID string, optionNames []string, senderJid string) {
++	ctx := context.Background()
++	chat, err := parseJID(peer)
++	if err != nil {
++		fmt.Fprintf(os.Stderr, "wa-poll: invalid peer %q: %v\n", peer, err)
++		purple_display_system_message(handler.account, peer, false, fmt.Sprintf("Cannot vote: invalid recipient: %v", err))
++		return
++	}
++	var msgSource types.MessageSource
++	var timestamp time.Time
++	cached := handler.lookup_cached_message_by_id(pollMessageID)
++	if cached != nil && cached.Source.Chat.IsEmpty() {
++		// cached by a build that did not keep the source yet: find the key as for an uncached poll
++		if senderJid == "" {
++			senderJid = cached.Sender.String()
++		}
++		cached = nil
++	}
++	if cached != nil {
++		// Source (not the LID-resolved Sender): the per-message secret was stored under the
++		// EXACT chat and sender whatsmeow saw - see CachedMessage's comment.
++		msgSource = cached.Source
++		timestamp = cached.Timestamp
++	} else if senderJid != "" {
++		sender, perr := parseJID(senderJid)
++		if perr != nil {
++			fmt.Fprintf(os.Stderr, "wa-poll: unparseable senderJid %q: %v\n", senderJid, perr)
++			purple_display_system_message(handler.account, chat.ToNonAD().String(), false, "Cannot vote: poll not found (try reopening the conversation).")
++			return
++		}
++		isFromMe := handler.client.Store.ID != nil && sender.ToNonAD() == handler.client.Store.ID.ToNonAD()
++		isGroup := chat.Server == types.GroupServer
++		// Probe the secret store for each JID form and use whichever actually holds the secret -
++		// that is exactly what BuildPollVote will look up, so this turns a silent failure into a
++		// resolved sender (or an explicit, logged diagnosis).
++		resolved := sender
++		found := false
++		for _, cand := range handler.pollVoteSenderCandidates(ctx, sender) {
++			secret, realSender, serr := handler.client.Store.MsgSecrets.GetMessageSecret(ctx, chat, cand, pollMessageID)
++			fmt.Fprintf(os.Stderr, "wa-poll: secret probe chat=%s cand=%s -> found=%v realSender=%s err=%v\n",
++				chat, cand, len(secret) > 0, realSender, serr)
++			if serr == nil && len(secret) > 0 {
++				resolved = cand
++				found = true
++				break
++			}
++		}
++		if !found {
++			fmt.Fprintf(os.Stderr, "wa-poll: NO message secret for poll %s in chat %s (tried %v) - vote cannot be encrypted\n",
++				pollMessageID, chat, handler.pollVoteSenderCandidates(ctx, sender))
++			purple_display_system_message(handler.account, chat.ToNonAD().String(), false,
++				"Cannot vote: this poll's encryption key is not on this device (it arrived before this device was linked).")
++			return
++		}
++		msgSource = types.MessageSource{
++			Chat:     chat,
++			Sender:   resolved,
++			IsFromMe: isFromMe,
++			IsGroup:  isGroup,
++		}
++		timestamp = time.Now()
++	} else {
++		fmt.Fprintf(os.Stderr, "wa-poll: poll %s not cached and no senderJid supplied (%d cached)\n", pollMessageID, len(handler.cachedMessages))
++		purple_display_system_message(handler.account, chat.ToNonAD().String(), false, "Cannot vote: poll not found (try reopening the conversation).")
++		return
++	}
++	fmt.Fprintf(os.Stderr, "wa-poll: voting poll=%s cached=%v chat=%s sender=%s isFromMe=%v isGroup=%v options=%v\n",
++		pollMessageID, cached != nil, msgSource.Chat, msgSource.Sender, msgSource.IsFromMe, msgSource.IsGroup, optionNames)
++	pollInfo := types.MessageInfo{
++		ID:            types.MessageID(pollMessageID),
++		Timestamp:     timestamp,
++		MessageSource: msgSource,
++	}
++	voteMsg, err := handler.client.BuildPollVote(ctx, &pollInfo, optionNames)
++	if err != nil {
++		fmt.Fprintf(os.Stderr, "wa-poll: BuildPollVote FAILED for %s: %v\n", pollMessageID, err)
++		purple_display_system_message(handler.account, chat.ToNonAD().String(), false, fmt.Sprintf("Failed to vote: %v", err))
++		return
++	}
++	resp, err := handler.client.SendMessage(ctx, chat, voteMsg)
++	if err != nil {
++		fmt.Fprintf(os.Stderr, "wa-poll: SendMessage FAILED for %s: %v\n", pollMessageID, err)
++		purple_display_system_message(handler.account, chat.ToNonAD().String(), false, fmt.Sprintf("Failed to send vote: %v", err))
++		return
++	}
++	fmt.Fprintf(os.Stderr, "wa-poll: SENT poll=%s vote OK server_id=%s ts=%s\n", pollMessageID, resp.ID, resp.Timestamp)
++}
++
+ /*
+  * Send a message to a contact.
+  *

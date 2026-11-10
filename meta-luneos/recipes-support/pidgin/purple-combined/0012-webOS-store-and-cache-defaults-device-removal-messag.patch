@@ -1,0 +1,377 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:29:05 +0200
+Subject: [PATCH] webOS: store and cache defaults: device removal, message
+ cache, profile pictures, group names
+
+* Remove only the deleted account's device from the store
+
+All WhatsApp accounts share whatsmeow.db. When an account is deleted
+("account-removed"), its device is logged out if a client is still
+connected, otherwise its row is deleted from the store by the device
+JID in its credentials. The other accounts stay linked.
+
+* Keep a message cache by default
+
+Replies, reactions and poll votes look up their target in the message
+cache, which defaults to 0 messages (off). Default it to 500, and use
+500 when the stored setting is 0.
+
+* Fetch profile pictures by default and restore lost ones
+
+webOS shows contact pictures, so "preview" is the default (the first
+choice of the list option and the fallback when unset). When a buddy has
+no icon, its picture is requested without the stored picture id, so
+whatsmeow sends it again instead of answering that it is unchanged.
+
+* Fetch group names on connect
+
+Group info was only queried when the room list was opened, so group
+chats showed their raw JID. Query it on connect.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ bridge.go              |   9 ++++
+ glue/init.c            |  45 +++++++++++++++-
+ glue/options.c         |   6 ++-
+ glue/presence.c        |  19 ++++++-
+ glue/process_message.c |   6 +++
+ login.go               | 116 +++++++++++++++++++++++++++++++++++++++++
+ message_cache.go       |  10 +++-
+ profile.go             |   3 +-
+ 8 files changed, 207 insertions(+), 7 deletions(-)
+
+diff --git a/bridge.go b/bridge.go
+index 0451231..31046f9 100644
+--- a/bridge.go
++++ b/bridge.go
+@@ -92,6 +92,15 @@ func gowhatsapp_go_send_typing(account *PurpleAccount, who *C.char, typing C.int
+ 	}
+ }
+ 
++//export gowhatsapp_go_account_removed
++// Fired from the libpurple "account-removed" signal (see glue/init.c) when a WhatsApp account is
++// DELETED on webOS. Unlinks this device server-side (if a live client exists) and removes ONLY this
++// account's row from the SHARED whatsmeow.db — never the whole file. credentials = the account's
++// "credentials" setting ("deviceJID|registrationId"), used to find the exact device to delete.
++func gowhatsapp_go_account_removed(account *PurpleAccount, purple_user_dir *C.char, username *C.char, credentials *C.char) {
++	whatsapp_account_removed(account, C.GoString(purple_user_dir), C.GoString(username), C.GoString(credentials))
++}
++
+ //export gowhatsapp_go_send_message
+ func gowhatsapp_go_send_message(account *PurpleAccount, who *C.char, message *C.char, is_group C.int, reply_to *C.char) int {
+ 	handler, ok := handlers[account]
+diff --git a/glue/init.c b/glue/init.c
+index 294bf62..0583dd0 100644
+--- a/glue/init.c
++++ b/glue/init.c
+@@ -22,8 +22,9 @@
+   */
+ 
+ #include "gowhatsapp.h"
+-#include "libwhatsmeow.h" // for gowhatsapp_go_init
+-#include <gmodule.h>
++#include "constants.h"       // GOWHATSAPP_CREDENTIALS_KEY (for locating the device to unlink on delete)
++#include "libwhatsmeow.h" // for gowhatsapp_go_init + gowhatsapp_go_account_removed
++#include <gmodule.h>      // g_module_make_resident - pin the Go .so so libpurple can't dlclose/unmap it
+ 
+ #ifndef PLUGIN_VERSION
+ #error Must set PLUGIN_VERSION in build system
+@@ -138,6 +139,44 @@ static PurplePluginProtocolInfo prpl_info = {
+     #endif
+ };
+ 
++// Per-account store teardown on account deletion. libpurple's purple_accounts_delete() emits
++// "account-removed" (on purple_accounts_get_handle()) for the account being deleted, then destroys
++// it synchronously. We filter by protocol id and hand off to the Go export. Everything must complete
++// synchronously here — the account pointer is freed the moment this returns, so the Go side must not
++// defer any work that dereferences it.
++static void
++webos_account_removed_cb(PurpleAccount *account, gpointer data)
++{
++    (void)data;
++    if (account == NULL) {
++        return;
++    }
++    const char *proto = purple_account_get_protocol_id(account);
++    char *user_dir = (char *)purple_user_dir();                    // cgo does not support const
++    char *username = (char *)purple_account_get_username(account); // cgo does not support const
++    if (g_strcmp0(proto, GOWHATSAPP_PRPL_ID) == 0) {
++        // Match login.c: the device JID lives in the "credentials" setting (bitlbee falls back to
++        // the password field). Go uses it to delete ONLY this account's row from the shared store.
++        const char *credentials = purple_account_get_string(account, GOWHATSAPP_CREDENTIALS_KEY, NULL);
++        if (credentials == NULL) {
++            credentials = purple_account_get_password(account);
++        }
++        gowhatsapp_go_account_removed(account, user_dir, username, (char *)(credentials ? credentials : ""));
++    }
++}
++
++// Connect the "account-removed" handler once, using `plugin` as the signal handle so
++// libpurple2_plugin_unload's purple_signals_disconnect_by_handle(plugin) cleans it up. Called from
++// plugin_init (the module is pinned resident, so the callback can never be unmapped). The accounts
++// subsystem and its "account-removed" signal are registered by purple_core_init well before any
++// plugin is probed, so the handle is always valid here.
++static void
++webos_connect_account_removed(PurplePlugin *plugin)
++{
++    purple_signal_connect(purple_accounts_get_handle(), "account-removed",
++                          plugin, PURPLE_CALLBACK(webos_account_removed_cb), NULL);
++}
++
+ static void plugin_init(PurplePlugin *plugin) {
+     // The Go runtime starts when the library is loaded and its threads never stop, so the
+     // library must never be unloaded: make g_module_close() a no-op for it.
+@@ -145,6 +184,8 @@ static void plugin_init(PurplePlugin *plugin) {
+         g_module_make_resident((GModule *) plugin->handle);
+     }
+     prpl_info.protocol_options = gowhatsapp_add_account_options(prpl_info.protocol_options);
++    // Clean up the per-JID device row in the shared whatsmeow.db when an account is deleted.
++    webos_connect_account_removed(plugin);
+ }
+ 
+ static PurplePluginInfo info = {
+diff --git a/glue/options.c b/glue/options.c
+index 7f21c89..6969c36 100644
+--- a/glue/options.c
++++ b/glue/options.c
+@@ -69,7 +69,7 @@ gowhatsapp_add_account_options(GList *account_options)
+     option = purple_account_option_int_new(
+                 "Number of messages to cache",
+                 GOWHATSAPP_MESSAGE_CACHE_SIZE_OPTION,
+-                0
++                500 // webOS: non-zero so replies/reactions can resolve their target (see add_to_cache)
+                 );
+     account_options = g_list_append(account_options, option);
+ 
+@@ -119,8 +119,10 @@ gowhatsapp_add_account_options(GList *account_options)
+         
+     {
+         GList *choices = NULL;
+-        choices = add_choice(choices, "no", GOWHATSAPP_ICONS_CHOICE_NO);
++        // webOS: "preview" FIRST so it's the default (a purple list option defaults to the first choice) --
++        // avatars on by default, matching the platform + the code fallback in presence.c / profile.go.
+         choices = add_choice(choices, "preview", GOWHATSAPP_ICONS_CHOICE_PREVIEW);
++        choices = add_choice(choices, "no", GOWHATSAPP_ICONS_CHOICE_NO);
+         choices = add_choice(choices, "original", GOWHATSAPP_ICONS_CHOICE_ORIGINAL);
+         option = purple_account_option_list_new( // MEMCHECK: account_options takes ownership
+             "Download user profile pictures",
+diff --git a/glue/presence.c b/glue/presence.c
+index 4053713..559e110 100644
+--- a/glue/presence.c
++++ b/glue/presence.c
+@@ -141,9 +141,26 @@ gowhatsapp_subscribe_presence_updates(PurpleAccount *account, PurpleBuddy *buddy
+ void gowhatsapp_request_profile_picture(PurpleAccount *account, PurpleBuddy *buddy) {
+     g_return_if_fail(buddy != NULL);
+ 
+-    if (!purple_strequal(purple_account_get_string(account, GOWHATSAPP_ICONS_OPTION, GOWHATSAPP_ICONS_CHOICE_NO), GOWHATSAPP_ICONS_CHOICE_NO)) {
++    // webOS: default to PREVIEW (fetch avatars) when the setting is unset. The upstream default was "no"
++    // (avatars off, opt-in), so an account that never stored the option -- or lost it on a db8/accounts.xml
++    // re-provision -- silently stopped fetching avatars, and none ever came back. webOS shows contact
++    // avatars, so on-by-default matches the platform (and profile.go's downloader already defaults preview).
++    if (!purple_strequal(purple_account_get_string(account, GOWHATSAPP_ICONS_OPTION, GOWHATSAPP_ICONS_CHOICE_PREVIEW), GOWHATSAPP_ICONS_CHOICE_NO)) {
+         const char *picture_id = purple_blist_node_get_string(&buddy->node, "picture_id");
+         const char *picture_date = purple_blist_node_get_string(&buddy->node, "picture_date");
++        // webOS avatar RESTORE: if libpurple has NO icon for this buddy right now (its contact photo was
++        // wiped by a partial-roster consolidation and the icon didn't survive the reconnect), passing the
++        // stored picture_id makes whatsmeow answer "you already have that picture" (GetProfilePictureInfo
++        // returns nil for a matching ExistingID) and NOT re-send it -- so the avatar never comes back.
++        // Force a fresh download by requesting with an empty id/date, so whatsmeow re-delivers the image
++        // (-> gowhatsapp_handle_profile_picture -> purple_buddy_icons_set_for_user -> BuddyStatusHandler
++        // re-writes the contact photo). connection_set_online already calls this for every buddy on connect,
++        // so lost avatars come back on the next reconnect. When an icon IS present we keep the id so we only
++        // fetch on a genuine change.
++        if (purple_buddy_get_icon(buddy) == NULL) {
++            picture_id = "";
++            picture_date = "";
++        }
+         gowhatsapp_go_request_profile_picture(account, buddy->name, (char *)picture_date, (char *)picture_id); // cgo does not suport const
+     }
+ }
+diff --git a/glue/process_message.c b/glue/process_message.c
+index 000f721..f0e9ecb 100644
+--- a/glue/process_message.c
++++ b/glue/process_message.c
+@@ -35,6 +35,12 @@ static void gowhatsapp_connection_set_online(PurpleConnection *connection) {
+     gowhatsapp_set_presence(account, purple_account_get_active_status(account));
+ 
+     gowhatsapp_for_all_buddies(account, gowhatsapp_request_profile_picture);
++
++    // webOS: fetch every group's info on connect so its name/subject is set (each group flows through
++    // gowhatsapp_handle_group -> ensure_group_chat_in_blist, which aliases the chat). Without this,
++    // query_groups only ran when the room picker was opened, so group chats showed the raw JID
++    // ("<digits>-<digits>@g.us") in the conversation list instead of their name.
++    gowhatsapp_go_query_groups(account);
+ }
+ 
+ /*
+diff --git a/login.go b/login.go
+index 3b5251a..005c782 100644
+--- a/login.go
++++ b/login.go
+@@ -12,6 +12,7 @@ import (
+ 	"path/filepath"
+ 	"strconv"
+ 	"strings"
++	"time"
+ 
+ 	_ "github.com/lib/pq"
+ 	"github.com/mdp/qrterminal/v3"
+@@ -252,6 +253,121 @@ func (handler *Handler) prune_devices(deviceJid types.JID) {
+ 	}
+ }
+ 
++/*
++ * whatsapp_account_removed is invoked from the libpurple "account-removed" signal (fired by
++ * purple_accounts_delete) when the user DELETES a WhatsApp account on webOS. Its job is to unlink
++ * this device server-side and remove ONLY this account's row from the SHARED whatsmeow.db.
++ *
++ * The whatsmeow store (default file:$purple_user_dir/whatsmeow.db) is shared by every WhatsApp
++ * account in this transport — the default DB address has no $username in it. So we must NEVER delete
++ * the whole file (that would orphan every other WhatsApp account and log them all out). Instead we
++ * key strictly on THIS account's device JID and delete just that one device's rows.
++ *
++ * Per-account isolation:
++ *   - Preferred path: if a live, connected client for this account still exists, client.Logout()
++ *     sends a "remove-companion-device" IQ (unlinks server-side, clearing the "ghost linked device")
++ *     and then deletes only its own device from the store.
++ *   - Fallback (the usual case — libpurple disables + disconnects, and thus tears down the handler,
++ *     BEFORE emitting account-removed): open the shared store, look up this account's stored device
++ *     JID (from the "credentials" setting = "deviceJID|registrationId") and delete only that device's
++ *     rows via whatsmeow's store (Container.DeleteDevice, per-JID). A fresh pairing QR then works on
++ *     re-add. NOTE: while disconnected we cannot unlink server-side, so a stale linked device may
++ *     linger on the phone until the user removes it there — hooking a connected teardown would
++ *     require an earlier signal, but "account-disabled" also fires for a plain disable, which must
++ *     NOT wipe the store.
++ */
++func whatsapp_account_removed(account *PurpleAccount, purple_user_dir string, username string, credentials string) {
++	log := PurpleLogger(account, "AccountRemoved")
++
++	// Preferred: a live, connected client can Logout() (unlink server-side + delete its own row).
++	if handler, ok := handlers[account]; ok {
++		if handler.client != nil && handler.client.Store != nil && handler.client.Store.ID != nil {
++			deviceJid := *handler.client.Store.ID
++			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
++			defer cancel()
++			if err := handler.client.Logout(ctx); err != nil {
++				// e.g. not actually connected: fall back to deleting just this device's row via the
++				// container the handler already holds (still strictly per-JID).
++				log.Warnf("Logout failed (%v); deleting device %s from shared store", err, deviceJid.String())
++				whatsapp_delete_device(handler.container, deviceJid)
++			} else {
++				log.Infof("Logged out and removed device %s from shared whatsmeow store", deviceJid.String())
++			}
++		}
++		return
++	}
++
++	// Usual case: no live handler. Look up THIS account's stored device JID and delete only it.
++	creds := strings.Split(credentials, "|")
++	if len(creds) < 1 || creds[0] == "" {
++		log.Infof("No stored WhatsApp credentials for removed account; nothing to clean up.")
++		return
++	}
++	deviceJid, err := parseJID(creds[0])
++	if err != nil {
++		log.Warnf("Stored device JID %q is not valid; skipping store cleanup: %v", creds[0], err)
++		return
++	}
++	container, db, err := whatsapp_open_container(account, purple_user_dir, username)
++	if err != nil {
++		log.Warnf("Cannot open whatsmeow store to remove device %s: %v", deviceJid.String(), err)
++		return
++	}
++	defer db.Close()
++	whatsapp_delete_device(container, deviceJid)
++	log.Infof("Removed device %s from shared whatsmeow store (server-side unlink not possible while disconnected).", deviceJid.String())
++}
++
++/*
++ * whatsapp_delete_device removes exactly one device's rows (keyed by JID) from the shared store.
++ * This is the per-JID delete that keeps other WhatsApp accounts in the same whatsmeow.db intact.
++ */
++func whatsapp_delete_device(container *sqlstore.Container, deviceJid types.JID) {
++	if container == nil {
++		return
++	}
++	ctx := context.TODO()
++	device, err := container.GetDevice(ctx, deviceJid)
++	if err != nil || device == nil {
++		// no such device (already gone / never paired) — nothing to delete
++		return
++	}
++	_ = device.Delete(ctx) // Device.Delete -> Container.DeleteDevice(device): removes only this JID
++}
++
++/*
++ * whatsapp_open_container opens the SHARED whatsmeow store using the exact same address resolution
++ * as login() (the "database-address" account option, $purple_user_dir/$username substitution and the
++ * legacy _foreign_keys=on rewrite). Caller owns the returned *sql.DB and must Close() it.
++ */
++func whatsapp_open_container(account *PurpleAccount, purple_user_dir string, username string) (*sqlstore.Container, *sql.DB, error) {
++	dbLog := PurpleLogger(account, "Database")
++	address := purple_get_string(account, C.GOWHATSAPP_DATABASE_ADDRESS_OPTION, C.GOWHATSAPP_DATABASE_ADDRESS_DEFAULT)
++	address = strings.Replace(address, "$purple_user_dir", purple_user_dir, -1)
++	address = strings.Replace(address, "$username", username, -1)
++	address = strings.Replace(address, "_foreign_keys=on", "_pragma=foreign_keys(1)", -1)
++	dialect := "sqlite"
++	maxOpenConns := 1
++	if strings.HasPrefix(address, "postgres:") {
++		dialect = "postgres"
++		maxOpenConns = 0
++		address = strings.Replace(address, "postgres:", "", -1)
++	}
++	db, err := sql.Open(dialect, address)
++	if err != nil {
++		return nil, nil, err
++	}
++	if maxOpenConns > 0 {
++		db.SetMaxOpenConns(maxOpenConns)
++	}
++	container := sqlstore.NewWithDB(db, dialect, dbLog)
++	if err := container.Upgrade(context.TODO()); err != nil {
++		db.Close()
++		return nil, nil, err
++	}
++	return container, db, nil
++}
++
+ /*
+  * This is the go part of purple's close() function.
+  */
+diff --git a/message_cache.go b/message_cache.go
+index ca3c786..735f2f3 100644
+--- a/message_cache.go
++++ b/message_cache.go
+@@ -68,7 +68,15 @@ func (handler *Handler) add_to_cache(message *waE2E.Message, id types.MessageID,
+ 		Timestamp: timestamp,
+ 	})
+ 	// from https://www.delftstack.com/howto/go/queue-implementation-in-golang/
+-	if len(handler.cachedMessages) > purple_get_int(handler.account, C.GOWHATSAPP_MESSAGE_CACHE_SIZE_OPTION, 0) {
++	// webOS: the "message-cache-size" account option defaults to 0 (cache disabled) upstream, and it is
++	// never configured on-device — which silently broke replies (and weakened reaction sender lookup),
++	// since lookup_cached_message_by_id could never find the target. Floor it to a sane default so the
++	// cache actually holds recent messages that a reply/reaction can reference.
++	cacheSize := purple_get_int(handler.account, C.GOWHATSAPP_MESSAGE_CACHE_SIZE_OPTION, 0)
++	if cacheSize <= 0 {
++		cacheSize = 500
++	}
++	if len(handler.cachedMessages) > cacheSize {
+ 		handler.cachedMessages = handler.cachedMessages[1:]
+ 	}
+ }
+diff --git a/profile.go b/profile.go
+index 4a2672d..5bb3764 100644
+--- a/profile.go
++++ b/profile.go
+@@ -21,7 +21,8 @@ type ProfilePictureRequest struct {
+ }
+ 
+ func (handler *Handler) request_profile_picture(jid types.JID, picture_date string, picture_id string) {
+-	setting := purple_get_string(handler.account, C.GOWHATSAPP_ICONS_OPTION, C.GOWHATSAPP_ICONS_CHOICE_NO)
++	// webOS: default PREVIEW (fetch avatars) when unset -- see presence.c gowhatsapp_request_profile_picture.
++	setting := purple_get_string(handler.account, C.GOWHATSAPP_ICONS_OPTION, C.GOWHATSAPP_ICONS_CHOICE_PREVIEW)
+ 	if setting != C.GoString(C.GOWHATSAPP_ICONS_CHOICE_NO) {
+ 		select {
+ 		case handler.pictureRequests <- ProfilePictureRequest{jid: jid, picture_date: picture_date, picture_id: picture_id}:

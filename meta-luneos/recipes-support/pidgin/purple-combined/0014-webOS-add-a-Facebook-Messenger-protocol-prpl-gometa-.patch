@@ -4,6 +4,8 @@ Date: Tue, 20 Oct 2026 16:34:49 +0200
 Subject: [PATCH] webOS: add a Facebook Messenger protocol (prpl-gometa) to the
  plugin
 
+* Add a Facebook Messenger protocol (prpl-gometa) to the plugin
+
 Register a second prpl, prpl-gometa ("Facebook (E2EE)"), from the same
 shared object. It talks to Messenger through messagix
 (go.mau.fi/mautrix-meta/pkg/messagix) and handles end-to-end encrypted
@@ -39,33 +41,91 @@ and the beeper/req replace moves to v3.0.0-20260925135712-b49593750e56
 v0.2608.0 and later rename the messagix events and split
 types.MessengerLite, and are not used yet.
 
+* Keep a Facebook login failure from taking the service down
+
+Signing in to Facebook crashed imlibpurpleservice, and with it every
+other account, over and over until systemd gave up. mautrix-meta
+v0.2607.0 dereferences a nil literal in the bloks interpreter
+(bk.action.f32.Eq on a missing argument) during the login flow, and a
+panic in the login goroutine ends the whole process, since the Go
+runtime is shared with WhatsApp.
+
+Move to mautrix-meta v0.2610.0, which carries the upstream fix
+(bd10396, an absent argument evaluates to null) and port to its event
+API: ConnectedEvent, ReconnectedEvent, TransientDisconnectEvent,
+PermanentErrorEvent, and table updates delivered as *table.LSTable.
+MessengerLite is now MessengerLiteIOS.
+
+Run the login under a recover as well, so a failure we have not met
+yet signs that one account out with an error instead of killing the
+service.
+
+* Show received Facebook pictures, files, stickers and locations
+
+An encrypted Facebook chat showed pictures, videos, voice messages and
+files, but dropped a sticker, a location and a text with a link
+preview: only a plain text was read. A plain chat showed nothing but
+text: a message with no text of its own was dropped, so its picture,
+file, sticker or location never showed, and a picture's caption came
+without the picture.
+
+Encrypted chats: a sticker is downloaded like a picture and kept as
+<hash>.webp, as a received WhatsApp sticker is. A location, a live
+location and a location shared as "extended content" become the text
+WhatsApp posts for one, whose "geo:" line the Messaging app shows as
+its location chip. A text with a link preview shows the preview's
+title and description above the text. A picture keeps its caption.
+
+Plain chats: a message's blob, sticker and extended ("XMA")
+attachments are gathered by message id. A file is fetched from
+Facebook's CDN on its own goroutine and posted as WhatsApp's media is,
+one file:// URL per line under /media/internal/.im-attachments/facebook
+and the text after them; it is named after its fbid, so the same file
+in the next login's inbox is not fetched again. A location becomes the
+WhatsApp location text, another shared link its title and link, and
+the like sticker a thumbs-up, as mautrix-meta shows it.
+
+What the handler shows, and what it asks of the two clients, now goes
+through two small interfaces, so tests can stand in for libpurple and
+for Facebook.
+
 Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
 Upstream-Status: Inappropriate [LuneOS addition, not part of purple-gowhatsapp]
 ---
- bridge.go            |  11 +
- glue/gometa_init.c   | 205 +++++++++++
- glue/init.c          |  16 +-
- glue/login.c         |   6 +-
- go.mod               |  31 +-
- go.sum               |  68 +++-
- gometa.go            | 812 +++++++++++++++++++++++++++++++++++++++++++
- gometa_e2ee.go       | 303 ++++++++++++++++
- gometa_media.go      | 452 ++++++++++++++++++++++++
- gometa_video.go      |  92 +++++
- gometabridge.c       | 210 +++++++++++
- gometabridge.h       |  54 +++
- handle_attachment.go | 158 ++++++++-
- 13 files changed, 2405 insertions(+), 13 deletions(-)
+ bridge.go              |  11 +
+ glue/gometa_init.c     | 205 ++++++++++
+ glue/init.c            |  16 +-
+ glue/login.c           |   6 +-
+ go.mod                 |  40 +-
+ go.sum                 | 114 +++++-
+ gometa.go              | 852 +++++++++++++++++++++++++++++++++++++++++
+ gometa_e2ee.go         | 309 +++++++++++++++
+ gometa_media.go        | 452 ++++++++++++++++++++++
+ gometa_receive.go      | 399 +++++++++++++++++++
+ gometa_receive_test.go | 392 +++++++++++++++++++
+ gometa_safe.go         |  15 +
+ gometa_safe_test.go    |  43 +++
+ gometa_sink.go         | 155 ++++++++
+ gometa_video.go        |  92 +++++
+ gometabridge.c         | 210 ++++++++++
+ gometabridge.h         |  54 +++
+ handle_attachment.go   | 124 +++++-
+ 18 files changed, 3476 insertions(+), 13 deletions(-)
  create mode 100644 glue/gometa_init.c
  create mode 100644 gometa.go
  create mode 100644 gometa_e2ee.go
  create mode 100644 gometa_media.go
+ create mode 100644 gometa_receive.go
+ create mode 100644 gometa_receive_test.go
+ create mode 100644 gometa_safe.go
+ create mode 100644 gometa_safe_test.go
+ create mode 100644 gometa_sink.go
  create mode 100644 gometa_video.go
  create mode 100644 gometabridge.c
  create mode 100644 gometabridge.h
 
 diff --git a/bridge.go b/bridge.go
-index ba717ce..15ff8db 100644
+index 31046f9..eeb415b 100644
 --- a/bridge.go
 +++ b/bridge.go
 @@ -178,6 +178,17 @@ func gowhatsapp_go_send_file(account *PurpleAccount, who *C.char, filename *C.ch
@@ -298,7 +358,7 @@ index 0000000..9c9a6ca
 +    }
 +}
 diff --git a/glue/init.c b/glue/init.c
-index 9d8feba..11ac895 100644
+index 60b5dcf..0b3d349 100644
 --- a/glue/init.c
 +++ b/glue/init.c
 @@ -23,7 +23,8 @@
@@ -335,7 +395,7 @@ index 9d8feba..11ac895 100644
      }
  }
  
-@@ -200,7 +207,10 @@ static void plugin_init(PurplePlugin *plugin) {
+@@ -198,7 +205,10 @@ static void plugin_init(PurplePlugin *plugin) {
          g_module_make_resident((GModule *) plugin->handle);
      }
      prpl_info.protocol_options = gowhatsapp_add_account_options(prpl_info.protocol_options);
@@ -370,10 +430,10 @@ index bd314c5..8b191fd 100644
  }
  
 diff --git a/go.mod b/go.mod
-index ca39d3e..d9c400d 100644
+index f7801d4..46783d0 100644
 --- a/go.mod
 +++ b/go.mod
-@@ -4,27 +4,36 @@ go 1.27.2
+@@ -4,27 +4,43 @@ go 1.27.2
  
  require (
  	github.com/alfg/mp4 v0.0.0-20210728035756-55ea58c08aeb
@@ -381,12 +441,13 @@ index ca39d3e..d9c400d 100644
 +	github.com/google/uuid v1.6.0
 +	github.com/lib/pq v1.12.3
  	github.com/mdp/qrterminal/v3 v3.0.0
- 	github.com/purpshell/meowcaller v0.0.0-20260717112041-9769d5aaaeca
+ 	github.com/purpshell/meowcaller v0.0.0-20260906234207-c48c3e2a243c
  	github.com/rs/zerolog v1.35.1
  	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
-+	go.mau.fi/mautrix-meta v0.2607.0
- 	go.mau.fi/whatsmeow v0.0.0-20261017175727-b2b1e71d45e2
- 	golang.org/x/image v0.44.0
++	go.mau.fi/mautrix-meta v0.2610.0
+ 	go.mau.fi/util v0.11.0
+ 	go.mau.fi/whatsmeow v0.0.0-20261102152715-54038813c47f
++	golang.org/x/image v0.47.0
  	golang.org/x/net v0.61.0
  	google.golang.org/protobuf v1.36.12
 +	maunium.net/go/mautrix v0.32.0
@@ -396,14 +457,20 @@ index ca39d3e..d9c400d 100644
  require (
  	filippo.io/edwards25519 v1.2.0 // indirect
 +	github.com/andybalholm/brotli v1.2.4 // indirect
++	github.com/armfazh/h2c-go-ref v0.0.0-20210215173008-07e12a6f8e0d // indirect
++	github.com/armfazh/tozan-ecc v0.1.3 // indirect
  	github.com/beeper/argo-go v1.1.2 // indirect
 +	github.com/beeper/poly1305 v0.0.0-20250815183548-d4eede7bbf3c // indirect
++	github.com/bytemare/cryptotools v0.0.0-20210309005813-f9985b05742f // indirect
++	github.com/bytemare/opaque v0.0.0-20210310201842-16a10d180656 // indirect
++	github.com/bytemare/voprf v0.0.0-20210221170502-f0af88d24d16 // indirect
  	github.com/coder/websocket v1.8.15 // indirect
 +	github.com/coreos/go-systemd/v22 v22.7.0 // indirect
  	github.com/dustin/go-humanize v1.0.1 // indirect
  	github.com/elliotchance/orderedmap/v3 v3.1.0 // indirect
 -	github.com/google/uuid v1.6.0 // indirect
 +	github.com/google/go-querystring v1.2.0 // indirect
++	github.com/gtank/ristretto255 v0.2.0 // indirect
  	github.com/hajimehoshi/go-mp3 v0.3.4 // indirect
 -	github.com/mattn/go-colorable v0.1.14 // indirect
 +	github.com/icholy/digest v1.2.0 // indirect
@@ -413,7 +480,7 @@ index ca39d3e..d9c400d 100644
  	github.com/mattn/go-isatty v0.0.20 // indirect
  	github.com/ncruces/go-strftime v0.1.9 // indirect
  	github.com/petermattis/goid v0.0.0-20260918085751-abfca077860b // indirect
-@@ -35,21 +44,37 @@ require (
+@@ -35,20 +51,38 @@ require (
  	github.com/pion/randutil v0.1.0 // indirect
  	github.com/pion/sctp v1.9.4 // indirect
  	github.com/pion/transport/v4 v4.0.1 // indirect
@@ -427,9 +494,10 @@ index ca39d3e..d9c400d 100644
 +	github.com/tidwall/pretty v1.2.1 // indirect
 +	github.com/tidwall/sjson v1.2.5 // indirect
  	github.com/vektah/gqlparser/v2 v2.5.27 // indirect
++	github.com/vmihailenco/msgpack/v5 v5.2.0 // indirect
++	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 +	github.com/yuin/goldmark v1.8.6 // indirect
  	go.mau.fi/libsignal v0.2.2 // indirect
- 	go.mau.fi/util v0.11.0 // indirect
 +	go.mau.fi/zeroconfig v0.2.0 // indirect
  	golang.org/x/crypto v0.58.0 // indirect
  	golang.org/x/exp v0.0.0-20261014143641-f0251eb4aa3e // indirect
@@ -449,28 +517,41 @@ index ca39d3e..d9c400d 100644
 +replace github.com/imroc/req/v3 => github.com/beeper/req/v3 v3.0.0-20260925135712-b49593750e56
 +
  // meowcaller is built from a patched checkout of github.com/purpshell/meowcaller at
- // v0.0.0-20260717112041-9769d5aaaeca (see the LuneOS recipe), placed in third_party/meowcaller.
+ // v0.0.0-20260906234207-c48c3e2a243c (see the LuneOS recipe), placed in third_party/meowcaller.
  replace github.com/purpshell/meowcaller => ./third_party/meowcaller
 diff --git a/go.sum b/go.sum
-index 8b324c6..ccf0883 100644
+index dbbb5ab..2aed0eb 100644
 --- a/go.sum
 +++ b/go.sum
-@@ -8,16 +8,27 @@ github.com/alfg/mp4 v0.0.0-20210728035756-55ea58c08aeb h1:v8z8Yym2Z/NCYgXO/aFqmY
+@@ -8,28 +8,63 @@ github.com/alfg/mp4 v0.0.0-20210728035756-55ea58c08aeb h1:v8z8Yym2Z/NCYgXO/aFqmY
  github.com/alfg/mp4 v0.0.0-20210728035756-55ea58c08aeb/go.mod h1:RfuO8OqkqAcWXXkaS3MuymrBQJbKJWi04H/bs6vNvh0=
  github.com/andreyvit/diff v0.0.0-20170406064948-c7f18ee00883 h1:bvNMNQO63//z+xNgfBlViaCIJKLlCJ6/fmUseuG0wVQ=
  github.com/andreyvit/diff v0.0.0-20170406064948-c7f18ee00883/go.mod h1:rCTlJbsFo29Kk6CurOXKm700vrz8f0KW0JNfpkRJY/8=
 +github.com/andybalholm/brotli v1.2.4 h1:649LN6qF+/7JJYNN3Wdu4Dt5PS6eC/yP/Go3Bb0/AHI=
 +github.com/andybalholm/brotli v1.2.4/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
++github.com/armfazh/h2c-go-ref v0.0.0-20201127170158-0b2291cd2684/go.mod h1:8fwPDRbWg9lh+s+iVv/7yAthCGHoGLTpeXnHf/J5EXs=
++github.com/armfazh/h2c-go-ref v0.0.0-20210215173008-07e12a6f8e0d h1:0YBiQ+rXap26i6apP7AldB+h50fAP7XSzpbio4ElXQo=
++github.com/armfazh/h2c-go-ref v0.0.0-20210215173008-07e12a6f8e0d/go.mod h1:8fwPDRbWg9lh+s+iVv/7yAthCGHoGLTpeXnHf/J5EXs=
++github.com/armfazh/tozan-ecc v0.1.3 h1:g3OKE0KR4L/GZaoQYzsOUdg97Ey5lZRl1i1fD/QkUUw=
++github.com/armfazh/tozan-ecc v0.1.3/go.mod h1:u25eZC5Z8uJFQxJxGBz1Blfii/7m3DfmwX0vFnwtG9I=
  github.com/beeper/argo-go v1.1.2 h1:UQI2G8F+NLfGTOmTUI0254pGKx/HUU/etbUGTJv91Fs=
  github.com/beeper/argo-go v1.1.2/go.mod h1:M+LJAnyowKVQ6Rdj6XYGEn+qcVFkb3R/MUpqkGR0hM4=
 +github.com/beeper/poly1305 v0.0.0-20250815183548-d4eede7bbf3c h1:Axyrzr6L42CLNJIQq0S87UhgK0Hq+4hCed4rc6sDdao=
 +github.com/beeper/poly1305 v0.0.0-20250815183548-d4eede7bbf3c/go.mod h1:mo9x0FBxrMo75mAnk1ALdXrHfe8NG3C25CFDf4RSRpc=
 +github.com/beeper/req/v3 v3.0.0-20260925135712-b49593750e56 h1:VQTcNnqViZfzYJtDue7HUF9Y979KdafTdJkX/DPasSQ=
 +github.com/beeper/req/v3 v3.0.0-20260925135712-b49593750e56/go.mod h1:1nX+ECJqEyUXbQHlubo2nKckcfIF7L8+xrG4k4gx1F4=
++github.com/bytemare/cryptotools v0.0.0-20210220202506-7b38001c07b2/go.mod h1:CKpsDERRG5MbUDJUl6xUDAuL228QndGKNabkx/E+Qug=
++github.com/bytemare/cryptotools v0.0.0-20210309005813-f9985b05742f h1:CXLSVUN4laSSTqbZxZ2gCn5bqO+K8a4fhoru+92SQD0=
++github.com/bytemare/cryptotools v0.0.0-20210309005813-f9985b05742f/go.mod h1:CKpsDERRG5MbUDJUl6xUDAuL228QndGKNabkx/E+Qug=
++github.com/bytemare/opaque v0.0.0-20210310201842-16a10d180656 h1:zjeJZ8qK8Jzjx0Q4J51HoOpyuRcMxD3hZW5Ir4sV7y0=
++github.com/bytemare/opaque v0.0.0-20210310201842-16a10d180656/go.mod h1:lr90YcMQt/xuqitrydSFIQzk9aevYH8OKEuZ22Egcvk=
++github.com/bytemare/voprf v0.0.0-20210221170502-f0af88d24d16 h1:XRqQTKj1yBJZZ401bOiw/WDlF5BOfh+7OvPOXlfvfs4=
++github.com/bytemare/voprf v0.0.0-20210221170502-f0af88d24d16/go.mod h1:C8bP4LQYc0jWigSsSxX05ubllHP2hlflnY/OKbGJuM0=
  github.com/coder/websocket v1.8.15 h1:6B2JPeOGlpff2Uz6vOEH1Vzpi0iUz20A+lPVhPHtNUA=
  github.com/coder/websocket v1.8.15/go.mod h1:NX3SzP+inril6yawo5CQXx8+fk145lPDC6pumgx0mVg=
 +github.com/coreos/go-systemd/v22 v22.7.0 h1:LAEzFkke61DFROc7zNLX/WA2i5J8gYqe0rSj9KI28KA=
 +github.com/coreos/go-systemd/v22 v22.7.0/go.mod h1:xNUYtjHu2EDXbsxz1i41wouACIwT7Ybq9o0BQhMwD0w=
++github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
  github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=
  github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
  github.com/elliotchance/orderedmap/v3 v3.1.0 h1:j4DJ5ObEmMBt/lcwIecKcoRxIQUEnw0L804lXYDt/pg=
@@ -483,7 +564,10 @@ index 8b324c6..ccf0883 100644
  github.com/google/pprof v0.0.0-20240409012703-83162a5b38cd h1:gbpYu9NMq8jhDVbvlGkMFWCjLFlqqEZjEmObmhUy6Vo=
  github.com/google/pprof v0.0.0-20240409012703-83162a5b38cd/go.mod h1:kf6iHlnVGwgKolg33glAes7Yg/8iWP8ukqeldJSO7jw=
  github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
-@@ -25,11 +36,19 @@ github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+
+ github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
++github.com/gtank/ristretto255 v0.1.2/go.mod h1:Ph5OpO6c7xKUGROZfWVLiJf9icMDwUeIvY4OmlYW69o=
++github.com/gtank/ristretto255 v0.2.0 h1:LeOuWr6giplWkkMizx2emfG03SRPJqKt1nfIHLVHQ/0=
++github.com/gtank/ristretto255 v0.2.0/go.mod h1:OJ1ox/dWcp7sJ5grYDcZ+kkHYuj5nelW5aaL7ESVXBw=
  github.com/hajimehoshi/go-mp3 v0.3.4 h1:NUP7pBYH8OguP4diaTZ9wJbUbk3tC0KlfzsEpWmYj68=
  github.com/hajimehoshi/go-mp3 v0.3.4/go.mod h1:fRtZraRFcWb0pu7ok0LqyFhCUrPeMsGRSVop0eemFmo=
  github.com/hajimehoshi/oto/v2 v2.3.1/go.mod h1:seWLbgHH7AyUMYKfKYT9pg7PhUu9/SisyJvNTT+ASQo=
@@ -507,10 +591,11 @@ index 8b324c6..ccf0883 100644
  github.com/mattn/go-isatty v0.0.8/go.mod h1:Iq45c/XA43vh69/j3iqttzPXn0bhXyGjM0Hdxcsrc5s=
  github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWEY=
  github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
-@@ -56,8 +75,20 @@ github.com/pion/sctp v1.9.4 h1:cMxEu0F5tbP4qH07bKf1Zjf4rUih9LIo0qQt424e258=
+@@ -56,39 +91,100 @@ github.com/pion/sctp v1.9.4 h1:cMxEu0F5tbP4qH07bKf1Zjf4rUih9LIo0qQt424e258=
  github.com/pion/sctp v1.9.4/go.mod h1:N20Dq6LY+JvJDAh9VVh1JELngb2rQ8dPgds5yBWiPgw=
  github.com/pion/transport/v4 v4.0.1 h1:sdROELU6BZ63Ab7FrOLn13M6YdJLY20wldXW2Cu2k8o=
  github.com/pion/transport/v4 v4.0.1/go.mod h1:nEuEA4AD5lPdcIegQDpVLgNoDGreqM/YqmEx3ovP4jM=
++github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 +github.com/quic-go/go-ossfuzz-seeds v0.1.0 h1:APacT+iIaNF6fd8AGEiN3bT/Jtkd2jz4v4TzM7MFjy0=
 +github.com/quic-go/go-ossfuzz-seeds v0.1.0/go.mod h1:3IOHRbJIc+L6YKMwfDtJAM9Vj9k0YY4muhuyUYk5tbk=
 +github.com/quic-go/qpack v0.6.0 h1:g7W+BMYynC1LbYLSqRt8PBg5Tgwxn214ZZR34VIOjz8=
@@ -528,8 +613,12 @@ index 8b324c6..ccf0883 100644
  github.com/rs/zerolog v1.35.1 h1:m7xQeoiLIiV0BCEY4Hs+j2NG4Gp2o2KPKmhnnLiazKI=
  github.com/rs/zerolog v1.35.1/go.mod h1:EjML9kdfa/RMA7h/6z6pYmq1ykOuA8/mjWaEvGI+jcw=
  github.com/sergi/go-diff v1.3.1 h1:xkr+Oxo4BOQKmkn/B9eMK0g5Kg/983T9DqqPHwYqD+8=
-@@ -66,14 +97,34 @@ github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e h1:MRM5ITcdelLK2j1
+ github.com/sergi/go-diff v1.3.1/go.mod h1:aMJSSKb2lpPvRNec0+w3fl7LP9IOFzdc9Pa4NFbPK1I=
+ github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e h1:MRM5ITcdelLK2j1vwZ3Je0FKVCfqOLp5zO6trqMLYs0=
  github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e/go.mod h1:XV66xRDqSt+GTGFMVlhk3ULuV0y9ZmzeVGR4mloJI3M=
++github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
++github.com/stretchr/testify v1.6.1/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
++github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
  github.com/stretchr/testify v1.12.0 h1:K6Mr6jO9JICuend/5xzTM03ydSV3vdNRYAdPSukj8uI=
  github.com/stretchr/testify v1.12.0/go.mod h1:bOYBZb5qJ00vPzWfIqBUZPaxK8jWiXc6d3ErP4Ca9Gw=
 +github.com/tidwall/gjson v1.14.2/go.mod h1:/wbyibRr2FHMks5tjHJ5F8dMZh3AcwJEMf5vlfC0lxk=
@@ -544,6 +633,12 @@ index 8b324c6..ccf0883 100644
 +github.com/tidwall/sjson v1.2.5/go.mod h1:Fvgq9kS/6ociJEDnK0Fk1cpYF4FIW6ZF7LAe+6jwd28=
  github.com/vektah/gqlparser/v2 v2.5.27 h1:RHPD3JOplpk5mP5JGX8RKZkt2/Vwj/PZv0HxTdwFp0s=
  github.com/vektah/gqlparser/v2 v2.5.27/go.mod h1:D1/VCZtV3LPnQrcPBeR/q5jkSQIPti0uYCP/RI0gIeo=
++github.com/vmihailenco/msgpack/v5 v5.1.4/go.mod h1:C5gboKD0TJPqWDTVTtrQNfRbiBwHZGo8UTqP/9/XvLI=
++github.com/vmihailenco/msgpack/v5 v5.2.0 h1:ZhIAtVUP1mme8GIlpiAnmTzjSWMexA/uNF2We85DR0w=
++github.com/vmihailenco/msgpack/v5 v5.2.0/go.mod h1:fEM7KuHcnm0GvDCztRpw9hV0PuoO2ciTismP6vjggcM=
++github.com/vmihailenco/tagparser v0.1.2/go.mod h1:OeAg3pn3UbLjkWt+rN9oFYB6u/cQgqMEUPoW2WPyhdI=
++github.com/vmihailenco/tagparser/v2 v2.0.0 h1:y09buUbR+b5aycVFQs/g70pqKVZNBmxwAhO7/IwNM9g=
++github.com/vmihailenco/tagparser/v2 v2.0.0/go.mod h1:Wri+At7QHww0WTrCBeu4J6bNtoV6mEfg5OIWRZA9qds=
 +github.com/xyproto/randomstring v1.2.0 h1:y7PXAEBM3XlwJjPG2JQg4voxBYZ4+hPgRdGKCfU8wik=
 +github.com/xyproto/randomstring v1.2.0/go.mod h1:rgmS5DeNXLivK7YprL0pY+lTuhNQW3iGxZ18UQApw/E=
 +github.com/yuin/goldmark v1.8.6 h1:d0VcaP1sx9GkFVkoW+KtggpGi2KZ965i14b0+bDQST4=
@@ -552,18 +647,52 @@ index 8b324c6..ccf0883 100644
  go.mau.fi/libsignal v0.2.2/go.mod h1:CRlIQg2J8uYTfDFvNoO8/KcZjs5cey0vbc6oj/bssY0=
 +go.mau.fi/mautrix-meta v0.2607.0 h1:30RnRDgkARyifmsQHOPPIguZY+4PKGyOUb3R5/nlMF8=
 +go.mau.fi/mautrix-meta v0.2607.0/go.mod h1:yS5QKbkbHBRWF0J67qDTAYA1UEf7WlXIO2xkr1SF+lc=
++go.mau.fi/mautrix-meta v0.2610.0 h1:fmbylDCpTq240dAYutX8GRHyGlSmNM5Q2LehM8q7/vo=
++go.mau.fi/mautrix-meta v0.2610.0/go.mod h1:HuaOS23+rEw8Gi2XnYjo2MisKoCrWVBbUeuS4GcWNTw=
  go.mau.fi/util v0.11.0 h1:JNEpkVRxfTdJUC0DIGKiRlLKzl4G/qLX/eVzoP7QuwY=
  go.mau.fi/util v0.11.0/go.mod h1:04AEFVsc4zNdIkDC1gkdqbg/nZFolHY50pyXh2DSy7s=
- go.mau.fi/whatsmeow v0.0.0-20261017175727-b2b1e71d45e2 h1:/2ifXqR9Ls19CcIJ6ukwF8wpS7DJjhviJ3YJzwKa9+o=
- go.mau.fi/whatsmeow v0.0.0-20261017175727-b2b1e71d45e2/go.mod h1:iY4lm61nTLWsNiIE1EmHUZwhKGBeoV4dhnVE2uMtNoQ=
+ go.mau.fi/whatsmeow v0.0.0-20261102152715-54038813c47f h1:UFm189GiALMSjhuywDHDQhRdhH6y8AD+eaGn5C75B1w=
+ go.mau.fi/whatsmeow v0.0.0-20261102152715-54038813c47f/go.mod h1:iY4lm61nTLWsNiIE1EmHUZwhKGBeoV4dhnVE2uMtNoQ=
++go.mau.fi/whatsmeow v0.0.0-20261017175727-b2b1e71d45e2 h1:/2ifXqR9Ls19CcIJ6ukwF8wpS7DJjhviJ3YJzwKa9+o=
++go.mau.fi/whatsmeow v0.0.0-20261017175727-b2b1e71d45e2/go.mod h1:iY4lm61nTLWsNiIE1EmHUZwhKGBeoV4dhnVE2uMtNoQ=
 +go.mau.fi/zeroconfig v0.2.0 h1:e/OGEERqVRRKlgaro7E6bh8xXiKFSXB3eNNIud7FUjU=
 +go.mau.fi/zeroconfig v0.2.0/go.mod h1:J0Vn0prHNOm493oZoQ84kq83ZaNCYZnq+noI1b1eN8w=
 +go.uber.org/mock v0.6.0 h1:hyF9dfmbgIX5EfOdasqLsWD6xqpNZlXblLB/Dbnwv3Y=
 +go.uber.org/mock v0.6.0/go.mod h1:KiVJ4BqZJaMj4svdfmHM0AUx4NJYO8ZNpPnZn1Z+BBU=
++golang.org/x/crypto v0.0.0-20190308221718-c2843e01d9a2/go.mod h1:djNgcEr1/C05ACkg1iLfiJU5Ep61QUkGW8qpdssI0+w=
++golang.org/x/crypto v0.0.0-20201124201722-c8d3bf9c5392/go.mod h1:jdWPYTVW3xRLrWPugEBEK3UY2ZEsg3UU495nc5E+M+I=
++golang.org/x/crypto v0.0.0-20201221181555-eec23a3978ad/go.mod h1:jdWPYTVW3xRLrWPugEBEK3UY2ZEsg3UU495nc5E+M+I=
++golang.org/x/crypto v0.0.0-20210220033148-5ea612d1eb83/go.mod h1:jdWPYTVW3xRLrWPugEBEK3UY2ZEsg3UU495nc5E+M+I=
  golang.org/x/crypto v0.58.0 h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=
  golang.org/x/crypto v0.58.0/go.mod h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w=
  golang.org/x/exp v0.0.0-20261014143641-f0251eb4aa3e h1:HgI6W1OolKK6tcV74is+rl9SMT0njsHlp0TbQiGXI/A=
-@@ -99,8 +150,17 @@ golang.org/x/tools v0.52.0 h1:ryxg4U63oaUYk7uOLTF37n43f4qgtGvqV4Ioit1BaEs=
+ golang.org/x/exp v0.0.0-20261014143641-f0251eb4aa3e/go.mod h1:DBoxwWhjaW8DJJw/YeM4zpeOKMC1FMXSblsYy+1mFSw=
++golang.org/x/image v0.44.0 h1:+tDekMZED9+LrtB3G5xzRggpVh9CARjZqROla3R3R+I=
++golang.org/x/image v0.44.0/go.mod h1:V8K3KE9KKKE+pLpQDOeN18w9oacNSvy1tDOirTu4xtY=
++golang.org/x/image v0.47.0 h1:za/8gVz++PPZqmZJBNSISICN5Rrj5zixP/8K++fgmqo=
++golang.org/x/image v0.47.0/go.mod h1:IkN5o4A7vq55vXN8FWjjnhg9Rs2GOtffqsSi9mWAKYE=
+ golang.org/x/mod v0.42.0 h1:ICeL3t2L30ljSPHHxDnR4fqVcBt/zR2zJAb9juavmQg=
+ golang.org/x/mod v0.42.0/go.mod h1:u5fzIrRInkL8MaO1cbRkUHT64v303YIT5KEqpNr7jRs=
++golang.org/x/net v0.0.0-20190404232315-eb5bcb51f2a3/go.mod h1:t9HGtf8HONx5eT2rtn7q6eTqICYqUVnKs3thJo3Qplg=
+ golang.org/x/net v0.61.0 h1:RR+6j/BTBCrggOLugxa+66R8FvoN6MHlzDlZIbN9YFw=
+ golang.org/x/net v0.61.0/go.mod h1:WgDCOTH8iwtB66T4/GfI94AHo/hhdb7Hah9NDseQfiI=
+ golang.org/x/sync v0.24.0 h1:iqiDrGoDgyuvAKrhLQthUEzU/R378N78gXbBjxed7oA=
+ golang.org/x/sync v0.24.0/go.mod h1:sUUOizhqBxiL6pEWpqNLUiaJn1ShEbZ6BBqskPbjZm0=
++golang.org/x/sys v0.0.0-20190215142949-d0b11bdaac8a/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
+ golang.org/x/sys v0.0.0-20190222072716-a9d3bda3a223/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
++golang.org/x/sys v0.0.0-20191026070338-33540a1f6037/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
++golang.org/x/sys v0.0.0-20210216224549-f992740a1bac/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
++golang.org/x/sys v0.0.0-20210220050731-9a76102bfb43/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
+ golang.org/x/sys v0.0.0-20220712014510-0a85c31ab51e/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+ golang.org/x/sys v0.6.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+ golang.org/x/sys v0.49.0 h1:XbzkgYJHdqh/8m2Uu0W/dQv8nktxx4BFHp1M0gROTXA=
+ golang.org/x/sys v0.49.0/go.mod h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=
++golang.org/x/term v0.0.0-20201117132131-f5c789dd3221/go.mod h1:Nr5EML6q2oocZ2LXRh80K7BxOlk5/8JxuGnuhpl+muw=
++golang.org/x/text v0.3.0/go.mod h1:NqM8EUOU14njkJ3fqMW+pc6Ldnwhi/IjpwHt7yyuwOQ=
+ golang.org/x/text v0.43.0 h1:1QivrlhwAsnMOcqgOdl9my7s9OyZl8O5/UGUTJVXoWc=
+ golang.org/x/text v0.43.0/go.mod h1:hbSIYA/amXcRXTFSZqh8tWHEoqRvvbKPJ2uz/KU+a+s=
+ golang.org/x/time v0.10.0 h1:3usCWA8tQn0L8+hFJQNgzpWbd89begxN66o1Ojdn5L4=
+@@ -97,8 +193,18 @@ golang.org/x/tools v0.52.0 h1:ryxg4U63oaUYk7uOLTF37n43f4qgtGvqV4Ioit1BaEs=
  golang.org/x/tools v0.52.0/go.mod h1:ItcP5UNaVGG+Yc4eIYmaFLNJ4soEopkx5Y2d4lcEurs=
  google.golang.org/protobuf v1.36.12 h1:pJOKDDOyeXErUroCihFAd5LQuwXBSpVnKGrj5o/fwxc=
  google.golang.org/protobuf v1.36.12/go.mod h1:HTf+CrKn2C3g5S8VImy6tdcUvCska2kB7j23XfzDpco=
@@ -572,6 +701,7 @@ index 8b324c6..ccf0883 100644
 +gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c/go.mod h1:JHkPIbrfpd72SG/EVd6muEfDQjcINNoR0C8j2r3qZ4Q=
 +gopkg.in/natefinch/lumberjack.v2 v2.2.1 h1:bBRl1b0OH9s/DuPhuXpNl+VtCaJXFZ5/uEFST95x9zc=
 +gopkg.in/natefinch/lumberjack.v2 v2.2.1/go.mod h1:YD8tP3GAjkrDg1eZH7EGmyESg/lsYskCTPBJVb9jqSc=
++gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
  gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
  gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
 +gotest.tools/v3 v3.5.2 h1:7koQfIKdy+I8UTetycgUqXWSDwpgv193Ka+qRsmBY8Q=
@@ -583,10 +713,10 @@ index 8b324c6..ccf0883 100644
  modernc.org/ccgo/v4 v4.19.2 h1:lwQZgvboKD0jBwdaeVCTouxhxAyN6iawF3STraAal8Y=
 diff --git a/gometa.go b/gometa.go
 new file mode 100644
-index 0000000..cc2e60c
+index 0000000..29ff573
 --- /dev/null
 +++ b/gometa.go
-@@ -0,0 +1,812 @@
+@@ -0,0 +1,852 @@
 +// gometa.go — the Facebook (messagix) half of the combined plugin. Shares ONE Go runtime
 +// with the whatsmeow code (same package main). All package-level identifiers are gometa*-
 +// prefixed to avoid clashing with whatsmeow's login/handlers/Handler/reportError.
@@ -804,6 +934,11 @@ index 0000000..cc2e60c
 +	// reacting over E2EE (whatsmeow's ReactionMessage requires the original message's FromMe/sender,
 +	// which isn't otherwise recorded per-message). Populated on both send and receive of E2EE messages.
 +	e2eeMsgMeta map[string]e2eeMsgInfo
++
++	// webOS: what the handler hands to libpurple and asks of the two clients (gometa_sink.go);
++	// nil means the real ones. Tests set them.
++	sink gometaSink
++	wire gometaWire
 +}
 +
 +type e2eeMsgInfo struct {
@@ -814,17 +949,17 @@ index 0000000..cc2e60c
 +
 +func (h *gometaHandler) eventHandler(ctx context.Context, rawEvt any) {
 +	switch evt := rawEvt.(type) {
-+	case *messagix.Event_Ready:
-+		h.logger.Info().Bool("new_session", evt.IsNewSession).Msg("connected (CONNACK)")
++	case *messagix.ConnectedEvent:
++		h.logger.Info().Msg("connected (CONNACK)")
 +		h.notify(C.gometa_message_type_connected, "", "", 0)
-+	case *messagix.Event_Reconnected:
++	case *messagix.ReconnectedEvent:
 +		h.notify(C.gometa_message_type_connected, "", "", 0)
-+	case *messagix.Event_SocketError:
++	case *messagix.TransientDisconnectEvent:
 +		h.logger.Warn().Err(evt.Err).Int("attempts", evt.ConnectionAttempts).Msg("socket error")
-+	case *messagix.Event_PermanentError:
++	case *messagix.PermanentErrorEvent:
 +		h.notifyError(fmt.Sprintf("Facebook connection failed: %v", evt.Err), true)
-+	case *messagix.Event_PublishResponse:
-+		h.parseTable(evt.Table)
++	case *table.LSTable:
++		h.parseTable(evt)
 +	default:
 +		h.logger.Trace().Str("type", fmt.Sprintf("%T", rawEvt)).Msg("unhandled event")
 +	}
@@ -1071,11 +1206,14 @@ index 0000000..cc2e60c
 +		}
 +		h.notifyPresence(p.ContactId, p.Status != 0)
 +	}
++	// webOS: a message's pictures, files, stickers and shared locations or links come in their own
++	// tables, by message id; a message with no text of its own is one of those.
++	atts := gometaPlainAttachments(tbl)
 +	for _, m := range tbl.LSInsertMessage {
-+		h.handleMessage(m.ThreadKey, m.SenderId, m.Text, m.OfflineThreadingId, m.MessageId, m.TimestampMs)
++		h.handleMessage(m, atts[m.MessageId])
 +	}
 +	for _, m := range tbl.LSUpsertMessage {
-+		h.handleMessage(m.ThreadKey, m.SenderId, m.Text, m.OfflineThreadingId, m.MessageId, m.TimestampMs)
++		h.handleMessage(m.ToInsert(), atts[m.MessageId])
 +	}
 +	// webOS reactions: attach a reaction to its TARGET message (by MessageId) via the shared
 +	// "webos-im-reaction" signal instead of a separate message. Facebook sends these as both V1 and
@@ -1125,8 +1263,16 @@ index 0000000..cc2e60c
 +	h.notifyBuddy(id, name)
 +}
 +
-+func (h *gometaHandler) handleMessage(threadKey, senderID int64, text, offlineThreadingID, messageID string, tsMs int64) {
-+	if text == "" || threadKey == 0 {
++// gometaGo runs a plain message's attachment downloads (a variable so the tests can run them in line).
++var gometaGo = func(f func()) { go f() }
++
++func (h *gometaHandler) handleMessage(m *table.LSInsertMessage, atts []gometaFBAttachment) {
++	if m == nil || m.ThreadKey == 0 || m.IsUnsent {
++		return
++	}
++	threadKey, senderID, offlineThreadingID, messageID, tsMs := m.ThreadKey, m.SenderId, m.OfflineThreadingId, m.MessageId, m.TimestampMs
++	text, files := gometaPlainBody(m.Text, m.StickerId, atts)
++	if text == "" && len(files) == 0 {
 +		return
 +	}
 +	// Drop the server echo of a message we just sent from here (the transport already recorded it).
@@ -1151,8 +1297,13 @@ index 0000000..cc2e60c
 +	if !isGroup {
 +		h.addContact(threadKey, partnerName)
 +	}
-+	h.notifyMessage(strconv.FormatInt(threadKey, 10), strconv.FormatInt(senderID, 10),
-+		name, text, messageID, tsMs/1000, isGroup, senderID == h.selfID, "", "", "")
++	msg := gometaIncoming{conv: strconv.FormatInt(threadKey, 10), who: strconv.FormatInt(senderID, 10),
++		name: name, text: text, id: messageID, ts: tsMs / 1000, isGroup: isGroup, isOutgoing: senderID == h.selfID}
++	if len(files) > 0 {
++		gometaGo(func() { h.postPlainMedia(msg, files) })
++		return
++	}
++	h.out().message(msg)
 +}
 +
 +// webOS reactions: forward a Facebook reaction to the shared "webos-im-reaction" signal (via the
@@ -1166,7 +1317,11 @@ index 0000000..cc2e60c
 +}
 +
 +func (h *gometaHandler) notifyBuddy(id int64, name string) {
-+	msg := C.gometa_message_t{account: h.account, msgtype: C.char(C.gometa_message_type_buddy)}
++	h.out().buddy(id, name)
++}
++
++func gometaNotifyBuddy(account *PurpleAccount, id int64, name string) {
++	msg := C.gometa_message_t{account: account, msgtype: C.char(C.gometa_message_type_buddy)}
 +	msg.who = C.CString(strconv.FormatInt(id, 10))
 +	if name != "" {
 +		msg.name = C.CString(name)
@@ -1193,32 +1348,37 @@ index 0000000..cc2e60c
 +}
 +
 +func (h *gometaHandler) notifyMessage(conv, who, name, text, messageID string, ts int64, isGroup, isOutgoing bool, quotedText, quotedFrom, quotedId string) {
-+	msg := C.gometa_message_t{account: h.account, msgtype: C.char(C.gometa_message_type_text), timestamp: C.time_t(ts)}
-+	msg.conv = C.CString(conv)
-+	msg.who = C.CString(who)
-+	if name != "" {
-+		msg.name = C.CString(name)
++	h.out().message(gometaIncoming{conv: conv, who: who, name: name, text: text, id: messageID, ts: ts,
++		isGroup: isGroup, isOutgoing: isOutgoing, quotedText: quotedText, quotedFrom: quotedFrom, quotedID: quotedId})
++}
++
++func gometaNotifyMessage(account *PurpleAccount, m gometaIncoming) {
++	msg := C.gometa_message_t{account: account, msgtype: C.char(C.gometa_message_type_text), timestamp: C.time_t(m.ts)}
++	msg.conv = C.CString(m.conv)
++	msg.who = C.CString(m.who)
++	if m.name != "" {
++		msg.name = C.CString(m.name)
 +	}
-+	msg.text = C.CString(text)
++	msg.text = C.CString(m.text)
 +	// webOS reactions: carry the Facebook MessageId so the bridge can stash it on the conversation
 +	// -> stored as serviceMessageId, which a later reaction (LSUpsertReaction.MessageId) targets.
-+	if messageID != "" {
-+		msg.id = C.CString(messageID)
++	if m.id != "" {
++		msg.id = C.CString(m.id)
 +	}
 +	// webOS replies: carry the quoted-original (if this message is a reply) to the C stash.
-+	if quotedText != "" {
-+		msg.quotedText = C.CString(quotedText)
-+		if quotedFrom != "" {
-+			msg.quotedFrom = C.CString(quotedFrom)
++	if m.quotedText != "" {
++		msg.quotedText = C.CString(m.quotedText)
++		if m.quotedFrom != "" {
++			msg.quotedFrom = C.CString(m.quotedFrom)
 +		}
-+		if quotedId != "" {
-+			msg.quotedId = C.CString(quotedId)
++		if m.quotedID != "" {
++			msg.quotedId = C.CString(m.quotedID)
 +		}
 +	}
-+	if isGroup {
++	if m.isGroup {
 +		msg.isGroup = 1
 +	}
-+	if isOutgoing {
++	if m.isOutgoing {
 +		msg.isOutgoing = 1
 +	}
 +	C.gometa_process_message(msg)
@@ -1244,42 +1404,52 @@ index 0000000..cc2e60c
 +	}
 +	gometaHandlers[account] = h
 +
-+	go func() {
-+		ck, err := h.obtainCookies(email, password)
-+		if err != nil {
-+			h.notifyError(fmt.Sprintf("Facebook login failed: %v", err), true)
-+			return
-+		}
-+		h.selfID = ck.GetUserID()
-+		client := messagix.NewClient(ck, logger, &messagix.Config{})
-+		h.client = client
-+		client.SetEventHandler(h.eventHandler)
++	// A panic here, in messagix's login interpreter for one, would otherwise abort the whole
++	// messaging service (sargo, 2026-11-04: a nil *BloksScriptLiteral in bk.action.f32.Eq took
++	// imlibpurpleservice down on every start until systemd gave up). Fail the login instead.
++	go gometaRecovered(func() { h.login(email, password) }, func(r any, stack []byte) {
++		h.logger.Error().Interface("panic", r).Str("stack", string(stack)).Msg("Facebook login panicked")
++		h.notifyError(fmt.Sprintf("Facebook login failed: internal error (%v)", r), true)
++	})
++}
 +
-+		loadCtx, loadCancel := context.WithTimeout(ctx, 90*time.Second)
-+		user, tbl, err := client.LoadMessagesPage(loadCtx)
-+		loadCancel()
-+		if err != nil {
-+			// cached cookies may have expired — drop them so the next attempt re-does credentials
-+			gometaSetSetting(account, gometaSessionSetting, "")
-+			h.notifyError(fmt.Sprintf("Facebook load failed (session may have expired, try again): %v", err), true)
-+			return
-+		}
-+		h.logger.Info().Str("name", user.GetName()).Msg("authenticated")
-+		// Buddies come from the tables themselves (threads, participants, contact rows) — Messenger
-+		// does not hand over a bulk friend list on login (the search task 452 times out), so we
-+		// mirror mautrix-meta and create contacts lazily from every table we receive, here and in
-+		// the realtime publish stream (see parseTable + eventHandler).
-+		h.parseTable(tbl)
-+		if err := client.Connect(ctx); err != nil {
-+			h.notifyError(fmt.Sprintf("Facebook connect failed: %v", err), true)
-+			return
-+		}
-+		// Bring up the E2EE (whatsmeow) transport so encrypted threads can send/receive.
-+		// Non-fatal: plaintext threads keep working even if this fails.
-+		if err := h.connectE2EE(ck.GetUserID()); err != nil {
-+			h.logger.Warn().Err(err).Msg("E2EE setup failed (encrypted threads unavailable)")
-+		}
-+	}()
++// login signs in, loads the inbox and connects; it runs on its own goroutine.
++func (h *gometaHandler) login(email, password string) {
++	ctx, logger, account := h.ctx, h.logger, h.account
++	ck, err := h.obtainCookies(email, password)
++	if err != nil {
++		h.notifyError(fmt.Sprintf("Facebook login failed: %v", err), true)
++		return
++	}
++	h.selfID = ck.GetUserID()
++	client := messagix.NewClient(ck, logger, &messagix.Config{})
++	h.client = client
++	client.SetEventHandler(h.eventHandler)
++
++	loadCtx, loadCancel := context.WithTimeout(ctx, 90*time.Second)
++	user, tbl, err := client.LoadMessagesPage(loadCtx)
++	loadCancel()
++	if err != nil {
++		// cached cookies may have expired — drop them so the next attempt re-does credentials
++		gometaSetSetting(account, gometaSessionSetting, "")
++		h.notifyError(fmt.Sprintf("Facebook load failed (session may have expired, try again): %v", err), true)
++		return
++	}
++	h.logger.Info().Str("name", user.GetName()).Msg("authenticated")
++	// Buddies come from the tables themselves (threads, participants, contact rows) — Messenger
++	// does not hand over a bulk friend list on login (the search task 452 times out), so we
++	// mirror mautrix-meta and create contacts lazily from every table we receive, here and in
++	// the realtime publish stream (see parseTable + eventHandler).
++	h.parseTable(tbl)
++	if err := client.Connect(ctx); err != nil {
++		h.notifyError(fmt.Sprintf("Facebook connect failed: %v", err), true)
++		return
++	}
++	// Bring up the E2EE (whatsmeow) transport so encrypted threads can send/receive.
++	// Non-fatal: plaintext threads keep working even if this fails.
++	if err := h.connectE2EE(ck.GetUserID()); err != nil {
++		h.logger.Warn().Err(err).Msg("E2EE setup failed (encrypted threads unavailable)")
++	}
 +}
 +
 +// obtainCookies returns a usable messagix session: cached cookies if present, otherwise the
@@ -1303,7 +1473,7 @@ index 0000000..cc2e60c
 +	ctx, cancel := context.WithTimeout(h.ctx, 5*time.Minute)
 +	defer cancel()
 +
-+	loginClient := messagix.NewClient(&cookies.Cookies{Platform: types.MessengerLite}, h.logger, &messagix.Config{})
++	loginClient := messagix.NewClient(&cookies.Cookies{Platform: types.MessengerLiteIOS}, h.logger, &messagix.Config{})
 +	var userInput map[string]string
 +	credsSent := false
 +	for iter := 0; iter < 40; iter++ { // hard loop guard
@@ -1401,10 +1571,10 @@ index 0000000..cc2e60c
 +}
 diff --git a/gometa_e2ee.go b/gometa_e2ee.go
 new file mode 100644
-index 0000000..0a19a1a
+index 0000000..7a3917c
 --- /dev/null
 +++ b/gometa_e2ee.go
-@@ -0,0 +1,303 @@
+@@ -0,0 +1,309 @@
 +package main
 +
 +// Facebook Messenger E2EE (encrypted threads) support. Messenger's end-to-end encryption rides
@@ -1426,6 +1596,7 @@ index 0000000..0a19a1a
 +
 +	"github.com/google/uuid"
 +	"go.mau.fi/whatsmeow"
++	"go.mau.fi/whatsmeow/proto/waArmadilloApplication"
 +	"go.mau.fi/whatsmeow/proto/waCommon"
 +	"go.mau.fi/whatsmeow/proto/waConsumerApplication"
 +	"go.mau.fi/whatsmeow/proto/waMsgApplication"
@@ -1556,8 +1727,12 @@ index 0000000..0a19a1a
 +	}
 +
 +	var text string
-+	if consumer, ok := evt.Message.(*waConsumerApplication.ConsumerApplication); ok {
-+		content := consumer.GetPayload().GetContent()
++	switch msg := evt.Message.(type) {
++	case *waArmadilloApplication.Armadillo:
++		// webOS: a shared location or link comes as "extended content" (gometa_receive.go).
++		text = gometaArmadilloText(msg.GetPayload().GetContent().GetExtendedContentMessage())
++	case *waConsumerApplication.ConsumerApplication:
++		content := msg.GetPayload().GetContent()
 +		// webOS reactions: on an ENCRYPTED Messenger thread a reaction arrives HERE as a
 +		// ConsumerApplication carrying a ReactionMessage (over the whatsmeow socket) - NOT via the
 +		// messagix LSUpsertReaction table that plaintext threads use. Forward it to the shared
@@ -1579,7 +1754,8 @@ index 0000000..0a19a1a
 +		if h.handleE2EEMedia(content, evt, chatFbid, senderFbid, name) {
 +			return
 +		}
-+		text = content.GetMessageText().GetText()
++		// webOS: a text with a link preview, and a location, are texts too (gometa_receive.go).
++		text = gometaE2EEText(content)
 +	}
 +	if text == "" {
 +		return
@@ -2166,6 +2342,1040 @@ index 0000000..c3a7614
 +	}
 +	return cfg.Width, cfg.Height
 +}
+diff --git a/gometa_receive.go b/gometa_receive.go
+new file mode 100644
+index 0000000..e891e6e
+--- /dev/null
++++ b/gometa_receive.go
+@@ -0,0 +1,399 @@
++package main
++
++// webOS: what a received Facebook message shows besides plain text: pictures, files, stickers,
++// locations and link previews, in encrypted chats (the whatsmeow client) and plain ones (messagix
++// tables). Media is posted as WhatsApp and the encrypted path already did: the message body is a
++// file:// URL of the downloaded file under /media/internal/.im-attachments, which the Messaging
++// app shows inline, with the caption on the lines after it. A location is the text WhatsApp sends
++// (formatLocationMessage), whose "geo:lat,lng" line the app turns into its location chip.
++
++import (
++	"context"
++	"crypto/sha256"
++	"encoding/hex"
++	"net/url"
++	"os"
++	"path/filepath"
++	"strconv"
++	"strings"
++	"time"
++
++	"go.mau.fi/mautrix-meta/pkg/messagix/table"
++	"go.mau.fi/whatsmeow"
++	"go.mau.fi/whatsmeow/proto/waArmadilloXMA"
++	"go.mau.fi/whatsmeow/proto/waConsumerApplication"
++	"go.mau.fi/whatsmeow/proto/waMediaTransport"
++)
++
++// gometaAttachmentDir is where received Facebook media is kept (a variable for the tests).
++var gometaAttachmentDir = "/media/internal/.im-attachments/facebook"
++
++// ---- encrypted chats ----
++
++// gometaE2EEText is the text an encrypted message's content shows, "" for one with none (media,
++// reactions, edits). An ExtendedTextMessage is a text with a link preview: its title and
++// description go above the text, as WhatsApp's link previews do (handle_message.go).
++func gometaE2EEText(content *waConsumerApplication.ConsumerApplication_Content) string {
++	if mt := content.GetMessageText(); mt != nil {
++		return mt.GetText()
++	}
++	if etm := content.GetExtendedTextMessage(); etm != nil {
++		var lines []string
++		for _, s := range []string{etm.GetTitle(), etm.GetDescription(), etm.GetText().GetText()} {
++			if s = strings.TrimSpace(s); s != "" {
++				lines = append(lines, s)
++			}
++		}
++		return strings.Join(lines, "\n")
++	}
++	if lm := content.GetLocationMessage(); lm != nil {
++		loc := lm.GetLocation()
++		return formatLocationMessage(loc.GetDegreesLatitude(), loc.GetDegreesLongitude(), loc.GetName(), lm.GetAddress(), "", false)
++	}
++	if llm := content.GetLiveLocationMessage(); llm != nil {
++		loc := llm.GetLocation()
++		return formatLocationMessage(loc.GetDegreesLatitude(), loc.GetDegreesLongitude(), "", "", "", true)
++	}
++	return ""
++}
++
++// gometaArmadilloText is the text of an encrypted "extended content" message (Armadillo XMA): a
++// shared location (a "messenger://location_share?lat=..&long=.." call to action, which is how
++// mautrix-meta's msgconv reads one) or a shared link.
++func gometaArmadilloText(ecm *waArmadilloXMA.ExtendedContentMessage) string {
++	if ecm == nil {
++		return ""
++	}
++	body := strings.TrimSpace(ecm.GetMessageText())
++	for _, cta := range ecm.GetCtas() {
++		native := cta.GetNativeURL()
++		if lat, lon, ok := gometaGeo(native); ok {
++			return formatLocationMessage(lat, lon, ecm.GetTitleText(), ecm.GetSubtitleText(), "", false)
++		}
++		if strings.HasPrefix(native, "https://") && !strings.Contains(body, native) {
++			if body != "" {
++				body += "\n"
++			}
++			body += native
++		}
++	}
++	if body == "" {
++		body = strings.TrimSpace(ecm.GetTitleText())
++	}
++	return body
++}
++
++// gometaGeo reads a position from what Facebook names one with: "messenger://location_share?
++// lat=..&long=..", "geo:lat,lng", or a bare "lat,lng" (a live location's native URL, which
++// mautrix-meta turns into "geo:" + it).
++func gometaGeo(s string) (lat, lon float64, ok bool) {
++	s = strings.TrimSpace(s)
++	if u, err := url.Parse(s); err == nil && u.Scheme == "messenger" && u.Host == "location_share" {
++		return gometaLatLon(u.Query().Get("lat"), u.Query().Get("long"))
++	}
++	s = strings.TrimPrefix(s, "geo:")
++	if i := strings.IndexAny(s, ";?"); i >= 0 {
++		s = s[:i]
++	}
++	parts := strings.Split(s, ",")
++	if len(parts) != 2 {
++		return 0, 0, false
++	}
++	return gometaLatLon(parts[0], parts[1])
++}
++
++func gometaLatLon(a, b string) (float64, float64, bool) {
++	lat, err1 := strconv.ParseFloat(strings.TrimSpace(a), 64)
++	lon, err2 := strconv.ParseFloat(strings.TrimSpace(b), 64)
++	if err1 != nil || err2 != nil || lat < -90 || lat > 90 || lon < -180 || lon > 180 || (lat == 0 && lon == 0) {
++		return 0, 0, false
++	}
++	return lat, lon, true
++}
++
++// gometaE2EEMedia is an encrypted message's media, as far as it can be known before download.
++type gometaE2EEMedia struct {
++	transport *waMediaTransport.WAMediaTransport
++	mediaType whatsmeow.MediaType
++	mimetype  string
++	filename  string // a document's own name, without its extension
++	extension string
++	caption   string
++	sticker   bool
++}
++
++// gometaE2EEMediaOf finds the media in an encrypted message's content: a picture, video, voice
++// message, file or sticker. A sticker is fetched as an image, as mautrix-meta does, and kept as
++// .webp like a received WhatsApp sticker (sticker_file_type), unless it says it is something else.
++func gometaE2EEMediaOf(content *waConsumerApplication.ConsumerApplication_Content) (gometaE2EEMedia, bool) {
++	var m gometaE2EEMedia
++	if vm := content.GetVideoMessage(); vm != nil {
++		t, err := vm.Decode()
++		if err != nil {
++			return m, false
++		}
++		m.transport, m.mediaType = t.GetIntegral().GetTransport(), whatsmeow.MediaVideo
++		m.caption = vm.GetCaption().GetText()
++		if m.caption == "" {
++			m.caption = t.GetAncillary().GetCaption().GetText()
++		}
++	} else if im := content.GetImageMessage(); im != nil {
++		t, err := im.Decode()
++		if err != nil {
++			return m, false
++		}
++		m.transport, m.mediaType = t.GetIntegral().GetTransport(), whatsmeow.MediaImage
++		m.caption = im.GetCaption().GetText()
++	} else if am := content.GetAudioMessage(); am != nil {
++		t, err := am.Decode()
++		if err != nil {
++			return m, false
++		}
++		m.transport, m.mediaType = t.GetIntegral().GetTransport(), whatsmeow.MediaAudio
++	} else if dm := content.GetDocumentMessage(); dm != nil {
++		t, err := dm.Decode()
++		if err != nil {
++			return m, false
++		}
++		m.transport, m.mediaType = t.GetIntegral().GetTransport(), whatsmeow.MediaDocument
++		m.filename = dm.GetFileName()
++	} else if sm := content.GetStickerMessage(); sm != nil {
++		t, err := sm.Decode()
++		if err != nil {
++			return m, false
++		}
++		m.transport, m.mediaType, m.sticker = t.GetIntegral().GetTransport(), whatsmeow.MediaImage, true
++	} else {
++		return m, false
++	}
++	if m.transport.GetIntegral() == nil {
++		return m, false
++	}
++	m.mimetype = m.transport.GetAncillary().GetMimetype()
++	if m.filename != "" { // a document keeps its real name, shown on the chip
++		m.extension = filepath.Ext(m.filename)
++		m.filename = strings.TrimSuffix(m.filename, m.extension)
++	}
++	if m.sticker {
++		m.extension = gometaStickerExtension(m.mimetype)
++	} else if m.extension == "" {
++		m.extension = extension_from_mimetype(&m.mimetype)
++	}
++	return m, true
++}
++
++// gometaStickerExtension: a sticker is a WebP unless its type says otherwise.
++func gometaStickerExtension(mimetype string) string {
++	if mimetype == "" || mimetype == "image/webp" {
++		return ".webp"
++	}
++	return extension_from_mimetype(&mimetype)
++}
++
++// localPath is where this media is kept: named by its content hash, a document in a folder of that
++// name under its own (attachment_path_name).
++func (m gometaE2EEMedia) localPath() string {
++	name := hex.EncodeToString(m.transport.GetIntegral().GetFileSHA256())
++	if m.filename != "" {
++		if safe := sanitize_attachment_name(m.filename); safe != "" {
++			name = attachment_path_name(name, safe)
++		}
++	}
++	return filepath.Join(gometaAttachmentDir, name+m.extension)
++}
++
++// ---- plain chats ----
++
++// gometaFBAttachment is one attachment of a plain chat's message: a file to fetch from url, or
++// (url "") a text to show, for a shared location or link.
++type gometaFBAttachment struct {
++	url, mime, filename, fbid string
++	sticker                   bool
++	text                      string
++}
++
++// gometaPlainAttachments gathers a table's attachments by the message they belong to, as
++// table.WrapMessages does. WrapMessages itself is not used: it returns an upserted message only
++// when the table also has its thread's message range, and parseTable shows every upsert.
++func gometaPlainAttachments(tbl *table.LSTable) map[string][]gometaFBAttachment {
++	out := make(map[string][]gometaFBAttachment)
++	seen := make(map[string]bool)
++	add := func(msgID string, a gometaFBAttachment) {
++		if msgID == "" || (a.url == "" && a.text == "") {
++			return
++		}
++		// Facebook sometimes sends the same blob row twice (mautrix-meta dedupes by fbid too).
++		if a.fbid != "" {
++			if seen[msgID+"\x00"+a.fbid] {
++				return
++			}
++			seen[msgID+"\x00"+a.fbid] = true
++		}
++		out[msgID] = append(out[msgID], a)
++	}
++	media := func(playable, playableMime, attMime, preview, previewMime string) (string, string) {
++		if playable != "" {
++			if playableMime == "" {
++				playableMime = attMime
++			}
++			return playable, playableMime
++		}
++		return preview, previewMime
++	}
++	for _, b := range tbl.LSInsertBlobAttachment {
++		u, mt := media(b.PlayableUrl, b.PlayableUrlMimeType, b.AttachmentMimeType, b.PreviewUrl, b.PreviewUrlMimeType)
++		add(b.MessageId, gometaFBAttachment{url: u, mime: mt, filename: b.Filename, fbid: b.AttachmentFbid})
++	}
++	for _, a := range tbl.LSInsertAttachment {
++		u, mt := media(a.PlayableUrl, a.PlayableUrlMimeType, a.AttachmentMimeType, a.PreviewUrl, a.PreviewUrlMimeType)
++		add(a.MessageId, gometaFBAttachment{url: u, mime: mt, filename: a.Filename, fbid: a.AttachmentFbid})
++	}
++	for _, s := range tbl.LSInsertStickerAttachment {
++		u, mt := media(s.PlayableUrl, s.PlayableUrlMimeType, "", s.PreviewUrl, s.PreviewUrlMimeType)
++		add(s.MessageId, gometaFBAttachment{url: u, mime: mt, fbid: s.AttachmentFbid, sticker: true})
++	}
++	ctas := make(map[string]*table.LSInsertAttachmentCta, len(tbl.LSInsertAttachmentCta))
++	for _, c := range tbl.LSInsertAttachmentCta {
++		ctas[c.AttachmentFbid] = c
++	}
++	for _, x := range tbl.LSInsertXmaAttachment {
++		add(x.MessageId, gometaXMAAttachment(x, ctas[x.AttachmentFbid]))
++	}
++	return out
++}
++
++// gometaXMAAttachment reads an "extended" attachment: a location when its call to action names a
++// position (a live location's native URL is "lat,lng", as mautrix-meta reads it), else a shared
++// link or post, shown as its title and link.
++func gometaXMAAttachment(x *table.LSInsertXmaAttachment, cta *table.LSInsertAttachmentCta) gometaFBAttachment {
++	a := gometaFBAttachment{fbid: x.AttachmentFbid}
++	if cta != nil {
++		for _, u := range []string{cta.NativeUrl, cta.ActionUrl} {
++			if lat, lon, ok := gometaGeo(u); ok {
++				a.text = formatLocationMessage(lat, lon, x.TitleText, x.SubtitleText, "", strings.Contains(cta.Type_, "live_location"))
++				return a
++			}
++		}
++	}
++	link := x.ActionUrl
++	if cta != nil && cta.ActionUrl != "" {
++		link = cta.ActionUrl
++	}
++	link = gometaRemoveLPHP(link)
++	var lines []string
++	for _, s := range []string{x.TitleText, link} {
++		if s = strings.TrimSpace(s); s != "" {
++			lines = append(lines, s)
++		}
++	}
++	a.text = strings.Join(lines, "\n")
++	return a
++}
++
++// gometaRemoveLPHP unwraps Facebook's link redirector (l.php?u=...), as mautrix-meta does.
++func gometaRemoveLPHP(addr string) string {
++	if u, err := url.Parse(addr); err == nil && u.Path == "/l.php" && u.Query().Get("u") != "" {
++		return u.Query().Get("u")
++	}
++	return addr
++}
++
++// gometaThumbsUpStickers are Facebook's like button, which mautrix-meta shows as a 👍.
++var gometaThumbsUpStickers = map[int64]bool{369239263222822: true, 369239343222814: true, 369239383222810: true}
++
++// localPath is where a plain chat's attachment is kept: named by a hash of its fbid (or URL), so the
++// same attachment arriving again (each login's inbox table repeats the latest messages) is not
++// fetched twice, and so a sticker's name is the hex name the app takes for one.
++func (a gometaFBAttachment) localPath() string {
++	key := a.fbid
++	if key == "" {
++		key = a.url
++	}
++	sum := sha256.Sum256([]byte(key))
++	name := hex.EncodeToString(sum[:])
++	var ext string
++	if a.sticker {
++		ext = gometaStickerExtension(a.mime)
++	} else if a.filename != "" {
++		ext = filepath.Ext(a.filename)
++		if safe := sanitize_attachment_name(strings.TrimSuffix(a.filename, ext)); safe != "" {
++			name = attachment_path_name(name, safe)
++		}
++	}
++	if ext == "" {
++		mt := a.mime
++		ext = extension_from_mimetype(&mt)
++	}
++	return filepath.Join(gometaAttachmentDir, name+ext)
++}
++
++// gometaPlainBody is what a plain chat's message shows: the text of its location or link
++// attachments with the message's own text, and the attachments that are files to fetch.
++func gometaPlainBody(text string, stickerID int64, atts []gometaFBAttachment) (string, []gometaFBAttachment) {
++	var files []gometaFBAttachment
++	var lines []string
++	if gometaThumbsUpStickers[stickerID] && len(atts) == 1 && atts[0].sticker && text == "" {
++		return "\U0001F44D", nil
++	}
++	for _, a := range atts {
++		if a.url != "" {
++			files = append(files, a)
++		} else if a.text != "" && !strings.Contains(text, a.text) {
++			lines = append(lines, a.text)
++		}
++	}
++	if text != "" {
++		lines = append(lines, text)
++	}
++	return strings.Join(lines, "\n"), files
++}
++
++// gometaPlainDownloads bounds how many plain attachments are fetched at once (a login's inbox table
++// can name many).
++var gometaPlainDownloads = make(chan struct{}, 3)
++
++// postPlainMedia fetches a plain message's files and then shows it: one body with each file's
++// file:// URL on a line and the text after them. It runs on its own goroutine, so a slow fetch
++// does not hold up the table; a file already fetched is not fetched again. A file that cannot be
++// fetched is left out; when none can, the text alone is shown (if there is any).
++func (h *gometaHandler) postPlainMedia(m gometaIncoming, files []gometaFBAttachment) {
++	var urls []string
++	for _, a := range files {
++		path := a.localPath()
++		if st, err := os.Stat(path); err == nil && st.Size() > 0 {
++			urls = append(urls, "file://"+path)
++			continue
++		}
++		gometaPlainDownloads <- struct{}{}
++		ctx, cancel := context.WithTimeout(h.ctx, 3*time.Minute)
++		data, err := h.net().fetch(ctx, a.url, a.mime)
++		cancel()
++		<-gometaPlainDownloads
++		if err != nil {
++			h.logger.Warn().Err(err).Str("mime", a.mime).Msg("Facebook attachment download failed")
++			continue
++		}
++		if err := gometaWriteFile(path, data); err != nil {
++			h.logger.Warn().Err(err).Msg("Facebook attachment not written")
++			continue
++		}
++		urls = append(urls, "file://"+path)
++	}
++	if len(urls) > 0 {
++		if m.text != "" {
++			urls = append(urls, m.text)
++		}
++		m.text = strings.Join(urls, "\n")
++	}
++	if m.text == "" {
++		return
++	}
++	h.out().message(m)
++}
++
++func gometaWriteFile(path string, data []byte) error {
++	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
++		return err
++	}
++	return os.WriteFile(path, data, 0o644)
++}
+diff --git a/gometa_receive_test.go b/gometa_receive_test.go
+new file mode 100644
+index 0000000..b766512
+--- /dev/null
++++ b/gometa_receive_test.go
+@@ -0,0 +1,392 @@
++package main
++
++import (
++	"context"
++	"encoding/hex"
++	"errors"
++	"os"
++	"path/filepath"
++	"strconv"
++	"strings"
++	"sync"
++	"testing"
++	"time"
++
++	"github.com/rs/zerolog"
++	"go.mau.fi/mautrix-meta/pkg/messagix/socket"
++	"go.mau.fi/mautrix-meta/pkg/messagix/table"
++	"go.mau.fi/whatsmeow"
++	"go.mau.fi/whatsmeow/proto/waArmadilloApplication"
++	"go.mau.fi/whatsmeow/proto/waArmadilloXMA"
++	"go.mau.fi/whatsmeow/proto/waCommon"
++	"go.mau.fi/whatsmeow/proto/waConsumerApplication"
++	"go.mau.fi/whatsmeow/proto/waMediaTransport"
++	waTypes "go.mau.fi/whatsmeow/types"
++	"go.mau.fi/whatsmeow/types/events"
++	"google.golang.org/protobuf/proto"
++)
++
++// ---- a handler with a recording sink and a fake wire ----
++
++type gmEdit struct{ id, text string }
++type gmTyping struct {
++	who string
++	on  bool
++}
++type gmPresence struct {
++	to        waTypes.JID
++	composing bool
++}
++type gmMarkRead struct {
++	ids          []waTypes.MessageID
++	chat, sender waTypes.JID
++}
++type gmTask struct {
++	task      socket.Task
++	stateless bool
++}
++
++type gmRecorder struct {
++	mu       sync.Mutex
++	messages []gometaIncoming
++	edits    []gmEdit
++	removes  []string
++	typings  []gmTyping
++
++	presences []gmPresence
++	markReads []gmMarkRead
++	tasks     []gmTask
++	fetched   []string
++	media     map[string][]byte // what a download or fetch returns, by URL / direct path
++	failNext  error
++}
++
++func (r *gmRecorder) buddy(int64, string) {}
++func (r *gmRecorder) message(m gometaIncoming) {
++	r.mu.Lock()
++	r.messages = append(r.messages, m)
++	r.mu.Unlock()
++}
++func (r *gmRecorder) edit(id, text string) { r.edits = append(r.edits, gmEdit{id, text}) }
++func (r *gmRecorder) remove(id string)     { r.removes = append(r.removes, id) }
++func (r *gmRecorder) typing(who string, on bool) {
++	r.typings = append(r.typings, gmTyping{who, on})
++}
++
++func (r *gmRecorder) chatPresence(_ context.Context, to waTypes.JID, composing bool) error {
++	r.presences = append(r.presences, gmPresence{to, composing})
++	return nil
++}
++func (r *gmRecorder) markRead(_ context.Context, ids []waTypes.MessageID, _ time.Time, chat, sender waTypes.JID) error {
++	r.markReads = append(r.markReads, gmMarkRead{append([]waTypes.MessageID(nil), ids...), chat, sender})
++	return nil
++}
++func (r *gmRecorder) downloadFB(_ context.Context, integral *waMediaTransport.WAMediaTransport_Integral, _ whatsmeow.MediaType) ([]byte, error) {
++	return r.media[integral.GetDirectPath()], nil
++}
++func (r *gmRecorder) fbTask(_ context.Context, task socket.Task, stateless bool) error {
++	r.tasks = append(r.tasks, gmTask{task, stateless})
++	return nil
++}
++func (r *gmRecorder) fetch(_ context.Context, url, _ string) ([]byte, error) {
++	r.fetched = append(r.fetched, url)
++	if r.failNext != nil {
++		err := r.failNext
++		r.failNext = nil
++		return nil, err
++	}
++	return r.media[url], nil
++}
++
++const gmSelf, gmPeer, gmPeer2, gmGroup = int64(100000000000001), int64(100000000000002), int64(100000000000003), int64(900000000000009)
++
++func newTestGometa(t *testing.T) (*gometaHandler, *gmRecorder) {
++	t.Helper()
++	gometaAttachmentDir = t.TempDir()
++	prevGo := gometaGo
++	gometaGo = func(f func()) { f() }
++	t.Cleanup(func() { gometaGo = prevGo })
++	r := &gmRecorder{media: map[string][]byte{}}
++	h := &gometaHandler{
++		logger: zerolog.Nop(), ctx: context.Background(), selfID: gmSelf,
++		threadGroup: map[int64]bool{}, contactName: map[int64]string{}, sentOtids: map[int64]bool{},
++		e2eeContacts: map[int64]bool{}, e2eeMsgMeta: map[string]e2eeMsgInfo{},
++		sink: r, wire: r,
++	}
++	return h, r
++}
++
++func gmFBMessage(chat, sender waTypes.JID, id string, content *waConsumerApplication.ConsumerApplication_Content) *events.FBMessage {
++	return &events.FBMessage{
++		Info: waTypes.MessageInfo{
++			MessageSource: waTypes.MessageSource{Chat: chat, Sender: sender},
++			ID:            waTypes.MessageID(id), Timestamp: time.Unix(1700000000, 0),
++		},
++		Message: &waConsumerApplication.ConsumerApplication{Payload: &waConsumerApplication.ConsumerApplication_Payload{
++			Payload: &waConsumerApplication.ConsumerApplication_Payload_Content{Content: content},
++		}},
++	}
++}
++
++func gmJID(fbid int64) waTypes.JID {
++	return waTypes.JID{User: itoa(fbid), Server: waTypes.MessengerServer}
++}
++
++func itoa(i int64) string { return strconv.FormatInt(i, 10) }
++
++func gmTransport(directPath, mime string, sha []byte) *waMediaTransport.WAMediaTransport {
++	return &waMediaTransport.WAMediaTransport{
++		Integral: &waMediaTransport.WAMediaTransport_Integral{
++			FileSHA256: sha, MediaKey: []byte("k"), FileEncSHA256: []byte("e"), DirectPath: proto.String(directPath),
++		},
++		Ancillary: &waMediaTransport.WAMediaTransport_Ancillary{Mimetype: proto.String(mime), FileLength: proto.Uint64(4)},
++	}
++}
++
++func gmSticker(t *testing.T, directPath, mime string, sha []byte) *waConsumerApplication.ConsumerApplication_Content {
++	t.Helper()
++	sm := &waConsumerApplication.ConsumerApplication_StickerMessage{}
++	if err := sm.Set(&waMediaTransport.StickerTransport{Integral: &waMediaTransport.StickerTransport_Integral{Transport: gmTransport(directPath, mime, sha)}}); err != nil {
++		t.Fatal(err)
++	}
++	return &waConsumerApplication.ConsumerApplication_Content{Content: &waConsumerApplication.ConsumerApplication_Content_StickerMessage{StickerMessage: sm}}
++}
++
++func gmImage(t *testing.T, directPath string, sha []byte, caption string) *waConsumerApplication.ConsumerApplication_Content {
++	t.Helper()
++	im := &waConsumerApplication.ConsumerApplication_ImageMessage{}
++	if caption != "" {
++		im.Caption = &waCommon.MessageText{Text: proto.String(caption)}
++	}
++	if err := im.Set(&waMediaTransport.ImageTransport{Integral: &waMediaTransport.ImageTransport_Integral{Transport: gmTransport(directPath, "image/jpeg", sha)}}); err != nil {
++		t.Fatal(err)
++	}
++	return &waConsumerApplication.ConsumerApplication_Content{Content: &waConsumerApplication.ConsumerApplication_Content_ImageMessage{ImageMessage: im}}
++}
++
++func onlyMessage(t *testing.T, r *gmRecorder) gometaIncoming {
++	t.Helper()
++	if len(r.messages) != 1 {
++		t.Fatalf("got %d messages, want 1: %+v", len(r.messages), r.messages)
++	}
++	return r.messages[0]
++}
++
++// ---- encrypted chats ----
++
++func TestGometaE2EETextReadsAnExtendedText(t *testing.T) {
++	c := &waConsumerApplication.ConsumerApplication_Content{Content: &waConsumerApplication.ConsumerApplication_Content_ExtendedTextMessage{
++		ExtendedTextMessage: &waConsumerApplication.ConsumerApplication_ExtendedTextMessage{
++			Text:  &waCommon.MessageText{Text: proto.String("look https://example.org/a")},
++			Title: proto.String("Example"), Description: proto.String("A page"),
++		}}}
++	if got, want := gometaE2EEText(c), "Example\nA page\nlook https://example.org/a"; got != want {
++		t.Errorf("got %q, want %q", got, want)
++	}
++}
++
++func TestGometaE2EETextReadsALocation(t *testing.T) {
++	c := &waConsumerApplication.ConsumerApplication_Content{Content: &waConsumerApplication.ConsumerApplication_Content_LocationMessage{
++		LocationMessage: &waConsumerApplication.ConsumerApplication_LocationMessage{
++			Location: &waConsumerApplication.ConsumerApplication_Location{DegreesLatitude: proto.Float64(52.37), DegreesLongitude: proto.Float64(4.89), Name: proto.String("Dam")},
++			Address:  proto.String("Amsterdam"),
++		}}}
++	want := formatLocationMessage(52.37, 4.89, "Dam", "Amsterdam", "", false)
++	if got := gometaE2EEText(c); got != want || !strings.Contains(got, "geo:52.370000,4.890000") {
++		t.Errorf("got %q, want %q", got, want)
++	}
++	live := &waConsumerApplication.ConsumerApplication_Content{Content: &waConsumerApplication.ConsumerApplication_Content_LiveLocationMessage{
++		LiveLocationMessage: &waConsumerApplication.ConsumerApplication_LiveLocationMessage{
++			Location: &waConsumerApplication.ConsumerApplication_Location{DegreesLatitude: proto.Float64(1.5), DegreesLongitude: proto.Float64(2.5)},
++		}}}
++	if got := gometaE2EEText(live); !strings.HasPrefix(got, "Live location") || !strings.Contains(got, "geo:1.500000,2.500000") {
++		t.Errorf("live: got %q", got)
++	}
++}
++
++func TestGometaArmadilloLocationShare(t *testing.T) {
++	ecm := &waArmadilloXMA.ExtendedContentMessage{
++		TitleText: proto.String("Pinned location"), SubtitleText: proto.String("Main Street"),
++		Ctas: []*waArmadilloXMA.ExtendedContentMessage_CTA{{NativeURL: proto.String("messenger://location_share?lat=52.1&long=4.3")}},
++	}
++	if got, want := gometaArmadilloText(ecm), formatLocationMessage(52.1, 4.3, "Pinned location", "Main Street", "", false); got != want {
++		t.Errorf("got %q, want %q", got, want)
++	}
++	link := &waArmadilloXMA.ExtendedContentMessage{MessageText: proto.String("see this"),
++		Ctas: []*waArmadilloXMA.ExtendedContentMessage_CTA{{NativeURL: proto.String("https://example.org/p")}}}
++	if got := gometaArmadilloText(link); got != "see this\nhttps://example.org/p" {
++		t.Errorf("link: got %q", got)
++	}
++}
++
++func TestGometaGeo(t *testing.T) {
++	for in, ok := range map[string]bool{
++		"messenger://location_share?lat=52.1&long=4.3": true, "geo:52.1,4.3": true, "52.1,4.3": true,
++		"geo:0,0": false, "https://example.org/52.1,4.3": false, "91,4": false, "": false,
++	} {
++		if _, _, got := gometaGeo(in); got != ok {
++			t.Errorf("gometaGeo(%q) ok = %v, want %v", in, got, ok)
++		}
++	}
++}
++
++func TestGometaE2EEStickerIsKeptAsWebP(t *testing.T) {
++	sha := []byte{0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89}
++	m, ok := gometaE2EEMediaOf(gmSticker(t, "/s", "image/webp", sha))
++	if !ok || !m.sticker || m.mediaType != whatsmeow.MediaImage || m.extension != ".webp" {
++		t.Fatalf("got %+v ok=%v", m, ok)
++	}
++	if m2, _ := gometaE2EEMediaOf(gmSticker(t, "/s", "", sha)); m2.extension != ".webp" {
++		t.Errorf("a sticker with no type: extension %q, want .webp", m2.extension)
++	}
++}
++
++func TestGometaE2EEStickerIsPostedAsAFile(t *testing.T) {
++	h, r := newTestGometa(t)
++	sha := make([]byte, 32)
++	sha[0] = 0x5a
++	r.media["/sticker"] = []byte("RIFFxxxxWEBP")
++	h.handleE2EEMessage(gmFBMessage(gmJID(gmPeer), gmJID(gmPeer), "7001", gmSticker(t, "/sticker", "image/webp", sha)))
++	m := onlyMessage(t, r)
++	want := "file://" + filepath.Join(gometaAttachmentDir, hex.EncodeToString(sha)+".webp")
++	if m.text != want || m.id != "7001" || m.conv != itoa(gmPeer) {
++		t.Errorf("got %+v, want body %q", m, want)
++	}
++	if data, err := os.ReadFile(strings.TrimPrefix(want, "file://")); err != nil || string(data) != "RIFFxxxxWEBP" {
++		t.Errorf("file: %q %v", data, err)
++	}
++}
++
++func TestGometaE2EEPictureKeepsItsCaption(t *testing.T) {
++	h, r := newTestGometa(t)
++	sha := make([]byte, 32)
++	r.media["/img"] = []byte{0xff, 0xd8}
++	h.handleE2EEMessage(gmFBMessage(gmJID(gmPeer), gmJID(gmPeer), "7002", gmImage(t, "/img", sha, "at the beach")))
++	m := onlyMessage(t, r)
++	if !strings.HasPrefix(m.text, "file://") || !strings.HasSuffix(m.text, ".jpg\nat the beach") {
++		t.Errorf("got %q", m.text)
++	}
++}
++
++func TestGometaE2EEArmadilloLocationIsShown(t *testing.T) {
++	h, r := newTestGometa(t)
++	evt := gmFBMessage(gmJID(gmPeer), gmJID(gmPeer), "7003", nil)
++	evt.Message = &waArmadilloApplication.Armadillo{Payload: &waArmadilloApplication.Armadillo_Payload{
++		Payload: &waArmadilloApplication.Armadillo_Payload_Content{Content: &waArmadilloApplication.Armadillo_Content{
++			Content: &waArmadilloApplication.Armadillo_Content_ExtendedContentMessage{ExtendedContentMessage: &waArmadilloXMA.ExtendedContentMessage{
++				Ctas: []*waArmadilloXMA.ExtendedContentMessage_CTA{{NativeURL: proto.String("messenger://location_share?lat=10&long=20")}},
++			}},
++		}},
++	}}
++	h.handleE2EEMessage(evt)
++	if m := onlyMessage(t, r); !strings.Contains(m.text, "geo:10.000000,20.000000") || m.id != "7003" {
++		t.Errorf("got %+v", m)
++	}
++}
++
++// ---- plain chats ----
++
++func gmInsert(id, text string, sender int64) *table.LSInsertMessage {
++	return &table.LSInsertMessage{ThreadKey: gmPeer, SenderId: sender, Text: text, MessageId: id, TimestampMs: 1700000000000}
++}
++
++func TestGometaPlainStickerWithoutTextIsShown(t *testing.T) {
++	h, r := newTestGometa(t)
++	r.media["https://cdn/s.webp"] = []byte("RIFF")
++	h.parseTable(&table.LSTable{
++		LSInsertMessage:           []*table.LSInsertMessage{gmInsert("mid.1", "", gmPeer)},
++		LSInsertStickerAttachment: []*table.LSInsertStickerAttachment{{MessageId: "mid.1", AttachmentFbid: "55", PreviewUrl: "https://cdn/s.webp", PreviewUrlMimeType: "image/webp"}},
++	})
++	m := onlyMessage(t, r)
++	if !strings.HasPrefix(m.text, "file://"+gometaAttachmentDir+"/") || !strings.HasSuffix(m.text, ".webp") || m.id != "mid.1" {
++		t.Errorf("got %+v", m)
++	}
++	name := filepath.Base(strings.TrimPrefix(m.text, "file://"))
++	if len(strings.TrimSuffix(name, ".webp")) < 32 {
++		t.Errorf("sticker name %q is not the hex name the app takes for a sticker", name)
++	}
++}
++
++func TestGometaPlainPictureCarriesItsCaption(t *testing.T) {
++	h, r := newTestGometa(t)
++	r.media["https://cdn/p.jpg"] = []byte{0xff, 0xd8}
++	h.parseTable(&table.LSTable{
++		LSInsertMessage:        []*table.LSInsertMessage{gmInsert("mid.2", "hello", gmPeer)},
++		LSInsertBlobAttachment: []*table.LSInsertBlobAttachment{{MessageId: "mid.2", AttachmentFbid: "66", PreviewUrl: "https://cdn/p.jpg", PreviewUrlMimeType: "image/jpeg"}},
++	})
++	m := onlyMessage(t, r)
++	lines := strings.Split(m.text, "\n")
++	if len(lines) != 2 || !strings.HasSuffix(lines[0], ".jpg") || lines[1] != "hello" {
++		t.Errorf("got %q", m.text)
++	}
++	// The same attachment again (the next login's inbox) is not fetched again.
++	r.messages = nil
++	h.parseTable(&table.LSTable{
++		LSInsertMessage:        []*table.LSInsertMessage{gmInsert("mid.2", "hello", gmPeer)},
++		LSInsertBlobAttachment: []*table.LSInsertBlobAttachment{{MessageId: "mid.2", AttachmentFbid: "66", PreviewUrl: "https://cdn/p.jpg", PreviewUrlMimeType: "image/jpeg"}},
++	})
++	if len(r.fetched) != 1 {
++		t.Errorf("fetched %d times, want 1", len(r.fetched))
++	}
++}
++
++func TestGometaPlainFileKeepsItsName(t *testing.T) {
++	h, r := newTestGometa(t)
++	r.media["https://cdn/f"] = []byte("%PDF")
++	h.parseTable(&table.LSTable{
++		LSInsertMessage:        []*table.LSInsertMessage{gmInsert("mid.3", "", gmPeer)},
++		LSInsertBlobAttachment: []*table.LSInsertBlobAttachment{{MessageId: "mid.3", AttachmentFbid: "77", PlayableUrl: "https://cdn/f", AttachmentMimeType: "application/pdf", Filename: "Q3 Report.pdf"}},
++	})
++	if m := onlyMessage(t, r); !strings.HasSuffix(m.text, "/Q3_Report.pdf") {
++		t.Errorf("got %q", m.text)
++	}
++}
++
++func TestGometaPlainFailedDownloadStillShowsTheText(t *testing.T) {
++	h, r := newTestGometa(t)
++	r.failNext = errors.New("HTTP 403")
++	h.parseTable(&table.LSTable{
++		LSInsertMessage:        []*table.LSInsertMessage{gmInsert("mid.4", "caption", gmPeer)},
++		LSInsertBlobAttachment: []*table.LSInsertBlobAttachment{{MessageId: "mid.4", AttachmentFbid: "88", PreviewUrl: "https://cdn/x.jpg"}},
++	})
++	if m := onlyMessage(t, r); m.text != "caption" {
++		t.Errorf("got %q", m.text)
++	}
++}
++
++func TestGometaPlainLocationIsTheWhatsAppText(t *testing.T) {
++	h, r := newTestGometa(t)
++	h.parseTable(&table.LSTable{
++		LSInsertMessage:       []*table.LSInsertMessage{gmInsert("mid.5", "", gmPeer)},
++		LSInsertXmaAttachment: []*table.LSInsertXmaAttachment{{MessageId: "mid.5", AttachmentFbid: "99", TitleText: "Live location", SubtitleText: "Here"}},
++		LSInsertAttachmentCta: []*table.LSInsertAttachmentCta{{AttachmentFbid: "99", Type_: "xma_live_location_sharing", NativeUrl: "52.5,13.4"}},
++	})
++	m := onlyMessage(t, r)
++	if want := formatLocationMessage(52.5, 13.4, "Live location", "Here", "", true); m.text != want {
++		t.Errorf("got %q, want %q", m.text, want)
++	}
++	if len(r.fetched) != 0 {
++		t.Errorf("a location fetched %v", r.fetched)
++	}
++}
++
++func TestGometaPlainThumbsUpIsAnEmoji(t *testing.T) {
++	h, r := newTestGometa(t)
++	msg := gmInsert("mid.6", "", gmPeer)
++	msg.StickerId = 369239263222822
++	h.parseTable(&table.LSTable{
++		LSInsertMessage:           []*table.LSInsertMessage{msg},
++		LSInsertStickerAttachment: []*table.LSInsertStickerAttachment{{MessageId: "mid.6", AttachmentFbid: "1", PreviewUrl: "https://cdn/like.png"}},
++	})
++	if m := onlyMessage(t, r); m.text != "\U0001F44D" || len(r.fetched) != 0 {
++		t.Errorf("got %q, fetched %v", m.text, r.fetched)
++	}
++}
++
++func TestGometaPlainTextAloneIsUnchanged(t *testing.T) {
++	h, r := newTestGometa(t)
++	h.parseTable(&table.LSTable{LSInsertMessage: []*table.LSInsertMessage{gmInsert("mid.7", "hi", gmPeer), gmInsert("mid.8", "", gmPeer)}})
++	if m := onlyMessage(t, r); m.text != "hi" || m.id != "mid.7" {
++		t.Errorf("got %+v", m)
++	}
++}
+diff --git a/gometa_safe.go b/gometa_safe.go
+new file mode 100644
+index 0000000..1e4f239
+--- /dev/null
++++ b/gometa_safe.go
+@@ -0,0 +1,15 @@
++package main
++
++import "runtime/debug"
++
++// gometaRecovered runs f and, if it panics, hands the panic value and stack to onPanic instead of
++// letting it unwind further. Go code in this plugin runs on a Go runtime inside the messaging
++// service, so a panic in one of its own goroutines aborts the whole service, every account with it.
++func gometaRecovered(f func(), onPanic func(r any, stack []byte)) {
++	defer func() {
++		if r := recover(); r != nil {
++			onPanic(r, debug.Stack())
++		}
++	}()
++	f()
++}
+diff --git a/gometa_safe_test.go b/gometa_safe_test.go
+new file mode 100644
+index 0000000..d6bedfa
+--- /dev/null
++++ b/gometa_safe_test.go
+@@ -0,0 +1,43 @@
++package main
++
++import (
++	"strings"
++	"testing"
++)
++
++type bloksLiteral struct{ v any }
++
++func (l *bloksLiteral) value() any { return l.v }
++
++// What took the service down: a method called on a nil pointer deep inside the login.
++func TestGometaRecoveredCatchesANilDereference(t *testing.T) {
++	var got any
++	var stack []byte
++	gometaRecovered(func() {
++		var lit *bloksLiteral
++		_ = lit.value()
++	}, func(r any, s []byte) { got, stack = r, s })
++	if got == nil {
++		t.Fatal("the panic was not handed to onPanic")
++	}
++	if !strings.Contains(string(stack), "bloksLiteral") {
++		t.Errorf("stack does not show where it panicked:\n%s", stack)
++	}
++}
++
++func TestGometaRecoveredLeavesANormalRunAlone(t *testing.T) {
++	ran, panicked := false, false
++	gometaRecovered(func() { ran = true }, func(any, []byte) { panicked = true })
++	if !ran || panicked {
++		t.Fatalf("ran=%v panicked=%v", ran, panicked)
++	}
++}
++
++// The login runs on its own goroutine; the panic must be caught there too.
++func TestGometaRecoveredOnAGoroutine(t *testing.T) {
++	done := make(chan any, 1)
++	go gometaRecovered(func() { panic("bloks") }, func(r any, _ []byte) { done <- r })
++	if r := <-done; r != "bloks" {
++		t.Fatalf("got %v", r)
++	}
++}
+diff --git a/gometa_sink.go b/gometa_sink.go
+new file mode 100644
+index 0000000..01fa742
+--- /dev/null
++++ b/gometa_sink.go
+@@ -0,0 +1,155 @@
++package main
++
++// webOS: where the Facebook half hands what it received to libpurple and the Messaging transport
++// (gometaSink), and what it asks of the two Facebook connections besides sending a message
++// (gometaWire). The handler goes through these instead of calling the C bridge and the clients
++// directly, so a test can stand in for both and see what a table or an encrypted event leads to.
++
++import (
++	"context"
++	"fmt"
++	"io"
++	"net/http"
++	"strings"
++	"time"
++
++	"go.mau.fi/mautrix-meta/pkg/messagix/socket"
++	"go.mau.fi/mautrix-meta/pkg/messagix/useragent"
++	"go.mau.fi/whatsmeow"
++	"go.mau.fi/whatsmeow/proto/waMediaTransport"
++	waTypes "go.mau.fi/whatsmeow/types"
++)
++
++// gometaIncoming is one message to show: conv is the thread key, who the sender's fbid.
++type gometaIncoming struct {
++	conv, who, name, text, id        string
++	ts                               int64
++	isGroup, isOutgoing              bool
++	quotedText, quotedFrom, quotedID string
++}
++
++type gometaSink interface {
++	buddy(fbid int64, name string) // add or update a contact
++	message(m gometaIncoming)
++	edit(id, text string) // the message stored under id now reads text
++	remove(id string)     // the message stored under id was deleted for everyone
++	typing(who string, on bool)
++}
++
++// gometaPurpleSink is the real one: the gometa C bridge for messages, the shared bridge
++// (bridge.go) for the transport's edit and delete signals and for libpurple's typing state.
++type gometaPurpleSink struct{ account *PurpleAccount }
++
++func (s gometaPurpleSink) buddy(fbid int64, name string) { gometaNotifyBuddy(s.account, fbid, name) }
++func (s gometaPurpleSink) message(m gometaIncoming)      { gometaNotifyMessage(s.account, m) }
++func (s gometaPurpleSink) edit(id, text string)          { purple_handle_message_edit(s.account, id, text) }
++func (s gometaPurpleSink) remove(id string)              { purple_handle_message_delete(s.account, id) }
++func (s gometaPurpleSink) typing(who string, on bool) {
++	if on {
++		purple_composing(s.account, who)
++	} else {
++		purple_paused(s.account, who)
++	}
++}
++
++func (h *gometaHandler) out() gometaSink {
++	if h.sink != nil {
++		return h.sink
++	}
++	return gometaPurpleSink{h.account}
++}
++
++type gometaWire interface {
++	// encrypted chats (the whatsmeow client)
++	chatPresence(ctx context.Context, to waTypes.JID, composing bool) error
++	markRead(ctx context.Context, ids []waTypes.MessageID, ts time.Time, chat, sender waTypes.JID) error
++	downloadFB(ctx context.Context, integral *waMediaTransport.WAMediaTransport_Integral, mediaType whatsmeow.MediaType) ([]byte, error)
++	// plain chats (the messagix client)
++	fbTask(ctx context.Context, task socket.Task, stateless bool) error
++	fetch(ctx context.Context, url, mime string) ([]byte, error)
++}
++
++func (h *gometaHandler) net() gometaWire {
++	if h.wire != nil {
++		return h.wire
++	}
++	return gometaLiveWire{h}
++}
++
++type gometaLiveWire struct{ h *gometaHandler }
++
++var errGometaE2EEDown = fmt.Errorf("encrypted chats are not connected")
++
++func (w gometaLiveWire) chatPresence(ctx context.Context, to waTypes.JID, composing bool) error {
++	if w.h.e2ee == nil {
++		return errGometaE2EEDown
++	}
++	state := waTypes.ChatPresencePaused
++	if composing {
++		state = waTypes.ChatPresenceComposing
++	}
++	return w.h.e2ee.SendChatPresence(ctx, to, state, waTypes.ChatPresenceMediaText)
++}
++
++func (w gometaLiveWire) markRead(ctx context.Context, ids []waTypes.MessageID, ts time.Time, chat, sender waTypes.JID) error {
++	if w.h.e2ee == nil {
++		return errGometaE2EEDown
++	}
++	return w.h.e2ee.MarkRead(ctx, ids, ts, chat, sender)
++}
++
++func (w gometaLiveWire) downloadFB(ctx context.Context, integral *waMediaTransport.WAMediaTransport_Integral, mediaType whatsmeow.MediaType) ([]byte, error) {
++	if w.h.e2ee == nil {
++		return nil, errGometaE2EEDown
++	}
++	return w.h.e2ee.DownloadFB(ctx, integral, mediaType)
++}
++
++func (w gometaLiveWire) fbTask(ctx context.Context, task socket.Task, stateless bool) error {
++	if w.h.client == nil {
++		return fmt.Errorf("not connected to Facebook")
++	}
++	if stateless {
++		return w.h.client.ExecuteStatelessTask(ctx, task)
++	}
++	_, err := w.h.client.ExecuteTasks(ctx, task)
++	return err
++}
++
++// gometaMaxDownload bounds a plain chat's attachment, which is read into memory. Facebook's own
++// limit for a file sent in Messenger is stated as 100 MB (not verified here).
++const gometaMaxDownload = 100 << 20
++
++var gometaHTTP = &http.Client{Timeout: 3 * time.Minute}
++
++// fetch downloads a plain chat's attachment from Facebook's CDN. The URL is signed, so it needs
++// no cookies; the headers are those mautrix-meta's mediadl sends.
++func (gometaLiveWire) fetch(ctx context.Context, url, mime string) ([]byte, error) {
++	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
++	if err != nil {
++		return nil, err
++	}
++	req.Header.Set("Accept", "*/*")
++	if strings.HasPrefix(mime, "image/") {
++		req.Header.Set("Accept", "image/avif,image/webp,*/*")
++	}
++	req.Header.Set("Sec-Fetch-Mode", "no-cors")
++	req.Header.Set("Sec-Fetch-Site", "cross-site")
++	req.Header.Set("User-Agent", useragent.UserAgent)
++	resp, err := gometaHTTP.Do(req)
++	if err != nil {
++		return nil, err
++	}
++	defer resp.Body.Close()
++	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
++		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
++	}
++	data, err := io.ReadAll(io.LimitReader(resp.Body, gometaMaxDownload+1))
++	if err != nil {
++		return nil, err
++	}
++	if len(data) > gometaMaxDownload {
++		return nil, fmt.Errorf("larger than %d bytes", gometaMaxDownload)
++	}
++	return data, nil
++}
 diff --git a/gometa_video.go b/gometa_video.go
 new file mode 100644
 index 0000000..b3a595b
@@ -2541,10 +3751,10 @@ index 0000000..9e2e780
 +// double connect is harmless).
 +extern void webos_connect_send_reaction_once(void);
 diff --git a/handle_attachment.go b/handle_attachment.go
-index 9b7d125..5140b47 100644
+index fa21254..95d273a 100644
 --- a/handle_attachment.go
 +++ b/handle_attachment.go
-@@ -14,14 +14,18 @@ import (
+@@ -12,13 +12,17 @@ import (
  	"mime"
  	"os"
  	"path/filepath"
@@ -2552,8 +3762,7 @@ index 9b7d125..5140b47 100644
  	"strings"
  	"time"
  
- 	"golang.org/x/image/webp"
- 
+ 	"go.mau.fi/util/fallocate"
  	"go.mau.fi/whatsmeow"
 +	"go.mau.fi/whatsmeow/proto/waConsumerApplication"
  	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -2563,11 +3772,12 @@ index 9b7d125..5140b47 100644
  )
  
  func extension_from_mimetype(mimeType *string) string {
-@@ -168,7 +172,18 @@ func sanitize_attachment_name(name string) string {
- 	}, name)
+@@ -209,11 +213,63 @@ func fallocate_supported(file *os.File) bool {
+ 	return !errors.Is(err, errors.ErrUnsupported)
  }
  
 -func (handler *Handler) download_attachment(local_file_path string, message whatsmeow.DownloadableMessage) error {
+-	err := os.MkdirAll(filepath.Dir(local_file_path), 0o755)
 +func (handler *Handler) download_attachment(local_file_path string, message whatsmeow.DownloadableMessage) (retErr error) {
 +	// gometa: Facebook E2EE media receive used to crash the whole transport during the download.
 +	// This function is invoked across the cgo boundary (C download_to_templated_destination ->
@@ -2580,49 +3790,63 @@ index 9b7d125..5140b47 100644
 +			retErr = fmt.Errorf("download panic: %v", r)
 +		}
 +	}()
- 	os.MkdirAll(filepath.Dir(local_file_path), 0o755)
- 	// Download to memory then write the file ourselves. whatsmeow's DownloadToFile streams to an
- 	// *os.File and unconditionally calls fallocate(2), which some filesystems (tmpfs/vfat) reject
-@@ -183,7 +198,29 @@ func (handler *Handler) download_attachment(local_file_path string, message what
- 	// error instead.
- 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
- 	defer cancel()
--	data, err := handler.client.Download(ctx, message)
-+	var data []byte
-+	var err error
-+	if fb, ok := message.(*fbDownloadable); ok {
-+		// Facebook E2EE (armadillo) media: download via the FB e2ee whatsmeow client with the explicit
-+		// media type (a different client + endpoint than WhatsApp's handler.client).
-+		g, gok := gometaHandlers[handler.account]
-+		if !gok || g.e2ee == nil {
-+			return fmt.Errorf("facebook e2ee not connected")
-+		}
-+		purple_debug(2, fmt.Sprintf("gometa: DownloadFB start (type=%s directPathLen=%d)", fb.mediaType, len(fb.integral.GetDirectPath())))
-+		data, err = g.e2ee.DownloadFB(ctx, fb.integral, fb.mediaType)
-+		purple_debug(2, fmt.Sprintf("gometa: DownloadFB returned %d bytes err=%v", len(data), err))
-+		if err != nil {
-+			// Log (do NOT purple_error - that disconnects the account); the caller renders the failure
-+			// as a per-message error. directPath/key lengths help distinguish a bad-integral extraction
-+			// (wrong nesting) from a genuine network/HMAC failure.
-+			purple_debug(4, fmt.Sprintf("gometa: DownloadFB failed (type=%s directPathLen=%d keyLen=%d fileSHA=%d encSHA=%d): %v",
-+				fb.mediaType, len(fb.integral.GetDirectPath()), len(fb.integral.GetMediaKey()),
-+				len(fb.integral.GetFileSHA256()), len(fb.integral.GetFileEncSHA256()), err))
-+		}
-+	} else {
-+		data, err = handler.client.Download(ctx, message)
++	os.MkdirAll(filepath.Dir(local_file_path), 0o755)
++	if !fetched_into_memory(message) {
++		return handler.stream_attachment(local_file_path, message)
 +	}
++	fb := message.(*fbDownloadable)
++	// Facebook media is fetched into memory: DownloadFB returns the media as bytes. The download
++	// blocks the caller (a cgo call on the event goroutine), so bound it in time.
++	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
++	defer cancel()
++	// Facebook E2EE (armadillo) media: download via the FB e2ee whatsmeow client with the explicit
++	// media type (a different client + endpoint than WhatsApp's handler.client).
++	g, gok := gometaHandlers[handler.account]
++	if !gok || g.e2ee == nil {
++		return fmt.Errorf("facebook e2ee not connected")
++	}
++	purple_debug(2, fmt.Sprintf("gometa: DownloadFB start (type=%s directPathLen=%d)", fb.mediaType, len(fb.integral.GetDirectPath())))
++	data, err := g.e2ee.DownloadFB(ctx, fb.integral, fb.mediaType)
++	purple_debug(2, fmt.Sprintf("gometa: DownloadFB returned %d bytes err=%v", len(data), err))
  	if err != nil {
- 		return err
- 	}
-@@ -205,6 +242,7 @@ func (handler *Handler) download_attachment(local_file_path string, message what
- 	if err := os.WriteFile(local_file_path, data, 0o644); err != nil {
++		// Log (do NOT purple_error - that disconnects the account); the caller renders the failure
++		// as a per-message error. directPath/key lengths help distinguish a bad-integral extraction
++		// (wrong nesting) from a genuine network/HMAC failure.
++		purple_debug(4, fmt.Sprintf("gometa: DownloadFB failed (type=%s directPathLen=%d keyLen=%d fileSHA=%d encSHA=%d): %v",
++			fb.mediaType, len(fb.integral.GetDirectPath()), len(fb.integral.GetMediaKey()),
++			len(fb.integral.GetFileSHA256()), len(fb.integral.GetFileEncSHA256()), err))
++		return err
++	}
++	if err := os.WriteFile(local_file_path, data, 0o644); err != nil {
  		return err
  	}
 +	purple_debug(2, fmt.Sprintf("gometa: wrote attachment %d bytes -> %s", len(data), local_file_path))
++	return nil
++}
++
++// fetched_into_memory tells whether media is downloaded into memory before it is written: only
++// Facebook media, which DownloadFB returns as bytes. WhatsApp media, a sticker too, is streamed
++// into its file as it came.
++func fetched_into_memory(message whatsmeow.DownloadableMessage) bool {
++	_, isFacebook := message.(*fbDownloadable)
++	return isFacebook
++}
++
++// stream_attachment downloads WhatsApp media straight into the file, so memory use does not grow
++// with the attachment's size (up to 2 GB).
++func (handler *Handler) stream_attachment(local_file_path string, message whatsmeow.DownloadableMessage) error {
+ 	file, err := os.Create(local_file_path)
+ 	if err != nil {
+ 		return err
+@@ -230,6 +286,7 @@ func (handler *Handler) download_attachment(local_file_path string, message what
+ 	if close_err != nil {
+ 		return close_err
+ 	}
++	purple_debug(2, fmt.Sprintf("download_attachment: streamed -> %s", local_file_path))
  	// For videos, also drop the sender's embedded JPEG thumbnail next to the file as "<base>.jpg".
  	// The Messaging app uses it as a <video poster> — a first-view preview that loads as a plain
  	// image (independent of the clip's own data), which lets the player stay preload="none". The old
-@@ -218,3 +256,119 @@ func (handler *Handler) download_attachment(local_file_path string, message what
+@@ -243,3 +300,66 @@ func (handler *Handler) download_attachment(local_file_path string, message what
  	}
  	return nil
  }
@@ -2642,72 +3866,22 @@ index 9b7d125..5140b47 100644
 +func (f *fbDownloadable) GetFileEncSHA256() []byte { return f.integral.GetFileEncSHA256() }
 +
 +// handleE2EEMedia downloads + displays an incoming Facebook E2EE media message (image/video/audio/
-+// document) carried inside a ConsumerApplication. Returns true if the content WAS a media message (so
-+// the caller stops -- otherwise media was silently dropped, only text/reactions were handled). Mirrors
-+// the WhatsApp handle_attachment path.
++// document/sticker) carried inside a ConsumerApplication. Returns true if the content WAS a media
++// message (so the caller stops -- otherwise media was silently dropped, only text/reactions were
++// handled). Which media it is, and its name, is gometaE2EEMediaOf (gometa_receive.go).
 +func (h *gometaHandler) handleE2EEMedia(content *waConsumerApplication.ConsumerApplication_Content, evt *events.FBMessage, chatFbid, senderFbid int64, name string) bool {
-+	var (
-+		wa        *waMediaTransport.WAMediaTransport
-+		mediaType whatsmeow.MediaType
-+		dataType  C.int = C.gowhatsapp_attachment_type_none
-+		filename  string
-+		caption   string
-+	)
-+	if vm := content.GetVideoMessage(); vm != nil {
-+		if t, err := vm.Decode(); err == nil {
-+			wa = t.GetIntegral().GetTransport()
-+			caption = t.GetAncillary().GetCaption().GetText()
-+			mediaType, dataType = whatsmeow.MediaVideo, C.gowhatsapp_attachment_type_video
-+		} else {
-+			purple_debug(4, fmt.Sprintf("gometa: VideoMessage.Decode failed: %v", err))
-+		}
-+	} else if im := content.GetImageMessage(); im != nil {
-+		if t, err := im.Decode(); err == nil {
-+			wa = t.GetIntegral().GetTransport()
-+			mediaType, dataType = whatsmeow.MediaImage, C.gowhatsapp_attachment_type_image
-+		}
-+	} else if am := content.GetAudioMessage(); am != nil {
-+		if t, err := am.Decode(); err == nil {
-+			wa = t.GetIntegral().GetTransport()
-+			mediaType, dataType = whatsmeow.MediaAudio, C.gowhatsapp_attachment_type_audio
-+		}
-+	} else if dm := content.GetDocumentMessage(); dm != nil {
-+		if t, err := dm.Decode(); err == nil {
-+			wa = t.GetIntegral().GetTransport()
-+			filename = dm.GetFileName()
-+			mediaType, dataType = whatsmeow.MediaDocument, C.gowhatsapp_attachment_type_document
-+		}
-+	}
-+	if wa == nil || dataType == C.gowhatsapp_attachment_type_none {
++	media, ok := gometaE2EEMediaOf(content)
++	if !ok {
 +		return false
 +	}
-+	integral := wa.GetIntegral()
-+	if integral == nil {
-+		return false
-+	}
-+	purple_debug(2, fmt.Sprintf("gometa: E2EE media type=%s mime=%q len=%d directPathLen=%d keyLen=%d encSHA=%d -> queueing download",
-+		mediaType, wa.GetAncillary().GetMimetype(), wa.GetAncillary().GetFileLength(),
-+		len(integral.GetDirectPath()), len(integral.GetMediaKey()), len(integral.GetFileEncSHA256())))
-+	mimetype := wa.GetAncillary().GetMimetype()
-+	hash := hex.EncodeToString(integral.GetFileSHA256())
-+	extension := ""
-+	if filename != "" { // document: keep its real name (shown on the chip), split off the extension
-+		extension = filepath.Ext(filename)
-+		if extension != "" {
-+			filename = strings.TrimSuffix(filename, extension)
-+		}
-+		if safe := sanitize_attachment_name(filename); safe != "" {
-+			hash = safe
-+		}
-+	}
-+	if extension == "" {
-+		extension = extension_from_mimetype(&mimetype)
-+	}
++	integral := media.transport.GetIntegral()
++	h.logger.Debug().Str("type", string(media.mediaType)).Str("mime", media.mimetype).Bool("sticker", media.sticker).
++		Uint64("len", media.transport.GetAncillary().GetFileLength()).Msg("E2EE media, downloading")
 +	// Record who sent this (keyed by serviceMessageId) so a later reaction/reply over E2EE resolves.
 +	id := string(evt.Info.ID)
 +	if id != "" {
 +		h.mu.Lock()
-+		h.e2eeMsgMeta[id] = e2eeMsgInfo{fromMe: evt.Info.IsFromMe, sender: strconv.FormatInt(senderFbid, 10), text: caption}
++		h.e2eeMsgMeta[id] = e2eeMsgInfo{fromMe: evt.Info.IsFromMe, sender: strconv.FormatInt(senderFbid, 10), text: media.caption}
 +		h.mu.Unlock()
 +	}
 +	h.addContact(chatFbid, name)
@@ -2719,29 +3893,23 @@ index 9b7d125..5140b47 100644
 +	// download the media here and display it exactly like FB text: a message whose body is the file://
 +	// URL, which the Messaging app renders inline (the same media-URL bubble WhatsApp uses). Bounded
 +	// context so a stalled fetch can't wedge the read loop; notifyMessage itself is cheap.
-+	chatStr := strconv.FormatInt(chatFbid, 10)
-+	senderStr := strconv.FormatInt(senderFbid, 10)
-+	dir := "/media/internal/.im-attachments/facebook"
-+	os.MkdirAll(dir, 0o755)
-+	localPath := dir + "/" + hash + extension
++	localPath := media.localPath()
 +	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 +	defer cancel()
-+	data, derr := h.e2ee.DownloadFB(ctx, integral, mediaType)
++	data, derr := h.net().downloadFB(ctx, integral, media.mediaType)
 +	if derr != nil {
-+		purple_debug(4, fmt.Sprintf("gometa: DownloadFB failed (mime=%s): %v", mimetype, derr))
++		h.logger.Warn().Err(derr).Str("mime", media.mimetype).Msg("E2EE media download failed")
 +		return true
 +	}
-+	if werr := os.WriteFile(localPath, data, 0o644); werr != nil {
-+		purple_debug(4, fmt.Sprintf("gometa: write FB media failed: %v", werr))
++	if werr := gometaWriteFile(localPath, data); werr != nil {
++		h.logger.Warn().Err(werr).Msg("E2EE media not written")
 +		return true
 +	}
 +	body := "file://" + localPath
-+	if caption != "" {
-+		body = body + "\n" + caption
++	if media.caption != "" {
++		body = body + "\n" + media.caption
 +	}
-+	h.notifyMessage(chatStr, senderStr, name, body, id, evt.Info.Timestamp.Unix(), false, evt.Info.IsFromMe, "", "", "")
++	h.notifyMessage(strconv.FormatInt(chatFbid, 10), strconv.FormatInt(senderFbid, 10), name, body, id,
++		evt.Info.Timestamp.Unix(), false, evt.Info.IsFromMe, "", "", "")
 +	return true
 +}
--- 
-2.53.0
-
