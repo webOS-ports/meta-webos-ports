@@ -1,21 +1,21 @@
 DESCRIPTION = "Qt 6 bindings for the ofono dbus API for Jolla's oFono extensions"
 SECTION = "libs"
 LICENSE = "LGPL-2.1-or-later"
-LIC_FILES_CHKSUM = "file://LICENSE.LGPL;md5=05ec901d0fb5d274579e113de1fea001"
+LIC_FILES_CHKSUM = "file://LICENSE.LGPL;md5=04dbc25cd6d0917b5a8cffc60bf3af78"
 
 # extra-cmake-modules is a build-time requirement: upstream switched the .pc file
 # over to ECMGeneratePkgConfigFile in 92eb36d, and CMakeLists.txt does a hard
 # find_package(ECM REQUIRED NO_MODULE).
 DEPENDS += "qtbase qtdeclarative libqofono extra-cmake-modules"
 
-SRCREV = "402588d07d6084d077ad095d3f7fd70cf1d29907"
+SRCREV = "4049edd4d4b11f14d047b6a7b2a7c16b8b0c3476"
 SRC_URI = "git://github.com/sailfishos/libqofonoext.git;protocol=https;branch=master"
 
-PV = "1.0.35"
+PV = "1.2.0"
 
 # As for libqofono, upstream is CMake-only now (abf67a6/b43e54a). Both the Qt major
-# version and the project version are cache variables that default to Qt5 / 1.0.32,
-# so pass them explicitly. With QT_MAJOR_VERSION=6 upstream sets QTVERSION_SUFFIX
+# version and the project version are cache variables (defaulting to Qt5 and a version
+# that need not match the tag), so pass them explicitly. With QT_MAJOR_VERSION=6 upstream sets QTVERSION_SUFFIX
 # to "-qt6", giving libqofonoext-qt6.so, ${includedir}/qofonoext-qt6 and
 # qofonoext-qt6.pc, so the old qofono-qt5.pc sed fixup is gone.
 inherit qt6-cmake pkgconfig
