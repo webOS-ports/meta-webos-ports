@@ -5,13 +5,10 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=4fbd65380cdd255951079008b364516c"
 
 DEPENDS += "qtbase qtdeclarative"
 
-SRCREV = "c54ba898a2daca1b5884b59353d0d7922405a3e1"
-PV = "0.130"
+SRCREV = "591a6c424fa1dcec44d697c80b07a65cd8faee2f"
+PV = "0.133"
 
-SRC_URI = "git://github.com/sailfishos/libqofono.git;protocol=https;branch=master \
-    file://0001-src-do-not-bake-absolute-path-into-generated-headers.patch \
-    file://0002-src-generate-dbus-adaptors-with-relative-output-name.patch \
-"
+SRC_URI = "git://github.com/sailfishos/libqofono.git;protocol=https;branch=master"
 
 # Upstream dropped qmake in b43e54a and builds with CMake only, so this no longer
 # inherits qt6-qmake. QT_MAJOR_VERSION is a cache variable that still defaults to 5
