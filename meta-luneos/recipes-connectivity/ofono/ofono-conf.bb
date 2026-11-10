@@ -17,6 +17,7 @@ SRC_URI = " \
 
 SRC_URI:append:halium = "\ 
     file://binder.conf \
+    file://main.conf \
 "
 
 # We currently only need this for mido-halium and tissot-halium, not pretty but it works.
@@ -38,6 +39,9 @@ do_install() {
 
 do_install:append:halium() {
     install -m 0644 ${UNPACKDIR}/binder.conf ${D}${sysconfdir}/ofono/
+    # [ModemManager] AutoSelectDataSim for ofono-ext's slot manager: without
+    # it a dual-SIM phone gets no data SIM until one is chosen by hand.
+    install -m 0644 ${UNPACKDIR}/main.conf ${D}${sysconfdir}/ofono/
 }
 
 # We currently only need this for mido, not pretty but it works.
