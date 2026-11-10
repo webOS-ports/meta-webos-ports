@@ -1,0 +1,286 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 10 Nov 2026 08:41:46 +0100
+Subject: [PATCH] webOS: Pass how the phone is held on to the call engine
+
+The orientation sent with our picture in a Signal video call said the
+front camera's own turn only, so with the phone turned a quarter Android
+showed us lying on our side.
+
+The Phone app sends how the phone is held in changeMedia as
+deviceOrientation (the shell's quarter turns, 0 top up, 1 left edge up,
+2 upside down, 3 right edge up). call.c reads it (call_video_json_turns)
+and presage_rust_set_call_turn() passes it through the command channel
+(Cmd::SetCallTurn) to call_bridge::set_turn(), which writes "TURN <n>"
+to the call's engine, signal-call-media in luneos-synergy-connectors; it
+sends it from the next frame on. Given before the engine runs, it is
+kept for the call and handed over when the engine starts, as the camera
+is.
+
+call_video_json_turns() is tested in test_call_video, turn_command() in
+call_video.rs's tests.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ src/c/call.c                    | 11 ++++++++---
+ src/c/call_video.c              | 18 ++++++++++++++++++
+ src/c/call_video.h              |  4 ++++
+ src/c/presage.h                 |  1 +
+ src/c/tests/test_call_video.c   | 14 ++++++++++++++
+ src/rust/src/bridge_commands.rs | 16 ++++++++++++++++
+ src/rust/src/call_bridge.rs     | 22 ++++++++++++++++++++++
+ src/rust/src/call_video.rs      | 12 ++++++++++++
+ src/rust/src/core.rs            |  4 ++++
+ src/rust/src/structs.rs         |  6 ++++++
+ 10 files changed, 105 insertions(+), 3 deletions(-)
+
+diff --git a/src/c/call.c b/src/c/call.c
+index 7ea4792..f72a3a4 100644
+--- a/src/c/call.c
++++ b/src/c/call.c
+@@ -232,9 +232,11 @@ static bool cb_disconnect(LSHandle *sh, LSMessage *msg, void *ctx)
+     return true;
+ }
+ 
+-/* The user turned video on or off: {"id":..,"incomingVideo":bool,"outgoingVideo":bool}, either
+- * field optional. outgoingVideo turns our camera on or off (the engine sends nothing before the
+- * call is answered); incomingVideo shows or hides the far side's picture, which keeps arriving. */
++/* The user turned video on or off, or the phone: {"id":..,"incomingVideo":bool,
++ * "outgoingVideo":bool,"deviceOrientation":0..3}, each field optional. outgoingVideo turns our
++ * camera on or off (the engine sends nothing before the call is answered); incomingVideo shows or
++ * hides the far side's picture, which keeps arriving; deviceOrientation is how the phone is held,
++ * which the orientation sent with our picture follows. */
+ static bool cb_change_media(LSHandle *sh, LSMessage *msg, void *ctx)
+ {
+     (void)ctx;
+@@ -246,8 +248,11 @@ static bool cb_change_media(LSHandle *sh, LSMessage *msg, void *ctx)
+     }
+     int out = call_video_json_bool(payload, "outgoingVideo");
+     int in = call_video_json_bool(payload, "incomingVideo");
++    int turns = call_video_json_turns(payload);
+     if (out >= 0 && presage)
+         presage_rust_set_call_video(g_account, presage->tx_ptr, g_call_id, out);
++    if (turns >= 0 && presage)
++        presage_rust_set_call_turn(g_account, presage->tx_ptr, g_call_id, turns);
+     if (in >= 0 && g_video.show_incoming != (in == 1)) {
+         g_video.show_incoming = in == 1;
+         push_state();
+diff --git a/src/c/call_video.c b/src/c/call_video.c
+index 4deec75..393ff8e 100644
+--- a/src/c/call_video.c
++++ b/src/c/call_video.c
+@@ -146,3 +146,21 @@ int call_video_json_bool(const char *payload, const char *key)
+         return 0;
+     return -1;
+ }
++
++int call_video_json_turns(const char *payload)
++{
++    const char *k = payload ? strstr(payload, "\"deviceOrientation\"") : NULL;
++    if (!k)
++        return -1;
++    const char *c = k + strlen("\"deviceOrientation\"");
++    while (*c == ' ' || *c == '\t' || *c == '\n' || *c == '\r')
++        c++;
++    if (*c != ':')
++        return -1;
++    c++;
++    while (*c == ' ' || *c == '\t' || *c == '\n' || *c == '\r')
++        c++;
++    if (*c < '0' || *c > '3' || (c[1] >= '0' && c[1] <= '9') || c[1] == '.')
++        return -1;
++    return *c - '0';
++}
+diff --git a/src/c/call_video.h b/src/c/call_video.h
+index c78ecbc..904f6eb 100644
+--- a/src/c/call_video.h
++++ b/src/c/call_video.h
+@@ -48,4 +48,8 @@ gchar *call_video_payload_fields(const CallVideo *v);
+ /* A boolean field of a flat JSON object: 1 true, 0 false, -1 absent or not a boolean. */
+ int call_video_json_bool(const char *payload, const char *key);
+ 
++/* changeMedia's deviceOrientation: how the phone is held, in the shell's quarter turns (0 top up,
++ * 1 left edge up, 2 upside down, 3 right edge up), or -1 when absent or not 0..3. */
++int call_video_json_turns(const char *payload);
++
+ #endif
+diff --git a/src/c/presage.h b/src/c/presage.h
+index 10d2717..67e5c36 100755
+--- a/src/c/presage.h
++++ b/src/c/presage.h
+@@ -39,6 +39,7 @@ void presage_rust_get_profile(PurpleAccount *, RustChannelPtr, const char *);
+ void presage_rust_list_groups(PurpleAccount *, RustChannelPtr);
+ void presage_rust_place_call(PurpleAccount *, RustChannelPtr, const char *, int video); /* outgoing call: callee address, video 0/1 */
+ void presage_rust_set_call_video(PurpleAccount *, RustChannelPtr, uint64_t, int on); /* our camera on/off in a call */
++void presage_rust_set_call_turn(PurpleAccount *, RustChannelPtr, uint64_t, int turns); /* how the phone is held, 0..3 */
+ void presage_rust_hangup_call(PurpleAccount *, RustChannelPtr, const char *, uint64_t); /* hang up: callee address + call_id */
+ void presage_rust_accept_call(PurpleAccount *, RustChannelPtr, uint64_t); /* accept incoming: call_id -> engine sends rtp-data Accepted */
+ // webOS reactions (SEND): transmit a reaction the user placed from the app. (peer, target sent timestamp, emoji, remove flag)
+diff --git a/src/c/tests/test_call_video.c b/src/c/tests/test_call_video.c
+index 40e7311..bd8a872 100644
+--- a/src/c/tests/test_call_video.c
++++ b/src/c/tests/test_call_video.c
+@@ -117,12 +117,26 @@ static void test_json_bool(void)
+     CHECK(call_video_json_bool(NULL, "video") == -1);
+ }
+ 
++static void test_json_turns(void)
++{
++    CHECK(call_video_json_turns("{\"id\":\"sig-1\",\"deviceOrientation\":0}") == 0);
++    CHECK(call_video_json_turns("{\"deviceOrientation\" : 3}") == 3);
++    CHECK(call_video_json_turns("{\"deviceOrientation\":2,\"id\":\"sig-1\"}") == 2);
++    CHECK(call_video_json_turns("{\"deviceOrientation\":4}") == -1);
++    CHECK(call_video_json_turns("{\"deviceOrientation\":10}") == -1);
++    CHECK(call_video_json_turns("{\"deviceOrientation\":1.5}") == -1);
++    CHECK(call_video_json_turns("{\"deviceOrientation\":\"1\"}") == -1);
++    CHECK(call_video_json_turns("{\"outgoingVideo\":true}") == -1);
++    CHECK(call_video_json_turns(NULL) == -1);
++}
++
+ int main(void)
+ {
+     test_voice_call();
+     test_video_call();
+     test_bad_input();
+     test_json_bool();
++    test_json_turns();
+     if (failures) { fprintf(stderr, "FAIL test_call_video (%d)\n", failures); return 1; }
+     printf("PASS test_call_video\n");
+     return 0;
+diff --git a/src/rust/src/bridge_commands.rs b/src/rust/src/bridge_commands.rs
+index a341d87..0cd8da1 100755
+--- a/src/rust/src/bridge_commands.rs
++++ b/src/rust/src/bridge_commands.rs
+@@ -91,6 +91,22 @@ pub unsafe extern "C" fn presage_rust_set_call_video(
+     send_cmd(account, tx, cmd);
+ }
+ 
++/// How the phone is held in call `call_id` (call.c's changeMedia handler): the shell's quarter
++/// turns, 0..3; anything else is ignored.
++#[no_mangle]
++pub unsafe extern "C" fn presage_rust_set_call_turn(
++    account: *mut crate::bridge_structs::PurpleAccount,
++    tx: *mut tokio::sync::mpsc::Sender<crate::structs::Cmd>,
++    call_id: u64,
++    turns: std::os::raw::c_int,
++) {
++    if !(0..=3).contains(&turns) {
++        return;
++    }
++    let cmd = crate::structs::Cmd::SetCallTurn { call_id, turns: turns as u8 };
++    send_cmd(account, tx, cmd);
++}
++
+ /// The user tapped Answer on an incoming call: tell the media engine to emit the RingRTC rtp-data
+ /// `Accepted` so the caller connects (stops ringing + ungates audio). Local only, no callee needed.
+ #[no_mangle]
+diff --git a/src/rust/src/call_bridge.rs b/src/rust/src/call_bridge.rs
+index f6378e7..d8d14c9 100644
+--- a/src/rust/src/call_bridge.rs
++++ b/src/rust/src/call_bridge.rs
+@@ -374,6 +374,24 @@ pub fn set_video(call_id: u64, on: bool) {
+     }
+ }
+ 
++/// How the phone is held, per call (the shell's quarter turns): set when the Phone app says
++/// (changeMedia deviceOrientation), and handed to the engine when it starts.
++static TURNS: OnceLock<Mutex<HashMap<u64, u8>>> = OnceLock::new();
++fn turns() -> &'static Mutex<HashMap<u64, u8>> {
++    TURNS.get_or_init(|| Mutex::new(HashMap::new()))
++}
++
++/// The phone is held `n` quarter turns round in `call_id`: the engine sends that with our picture.
++/// Before the engine runs it is remembered and given to the engine when it starts.
++pub fn set_turn(call_id: u64, n: u8) {
++    turns().lock().unwrap().insert(call_id, n);
++    let mut guard = calls().lock().unwrap();
++    if let Some(cp) = guard.get_mut(&call_id) {
++        let _ = cp.stdin.write_all(crate::call_video::turn_command(n).as_bytes());
++        let _ = cp.stdin.flush();
++    }
++}
++
+ /// call_ids the user has ACCEPTED on THIS (linked) device. LuneOS is a secondary Signal device; an
+ /// incoming call rings this device AND the user's primary phone. When we accept, the caller broadcasts
+ /// `Hangup{type=ACCEPTED, device_id=<us>}` to the account so the OTHER devices stop ringing - but Signal
+@@ -499,6 +517,9 @@ pub fn on_answer(call_id: u64, answer_opaque: &[u8]) -> Result<bool, String> {
+     if video_wanted().lock().unwrap().get(&call_id).copied().unwrap_or(false) {
+         let _ = stdin.write_all(crate::call_video::video_command(true).as_bytes());
+     }
++    if let Some(n) = turns().lock().unwrap().get(&call_id).copied() {
++        let _ = stdin.write_all(crate::call_video::turn_command(n).as_bytes());
++    }
+ 
+     // Flush any remote ICE that arrived between our Offer and this Answer.
+     for op in &p.buffered_ice {
+@@ -556,6 +577,7 @@ pub fn stop(call_id: u64) {
+     outgoing().lock().unwrap().remove(&call_id);
+     accepted().lock().unwrap().remove(&call_id);
+     video_wanted().lock().unwrap().remove(&call_id);
++    turns().lock().unwrap().remove(&call_id);
+     dialed().lock().unwrap().remove(&call_id);
+     peers().lock().unwrap().remove(&call_id);
+     let cp = calls().lock().unwrap().remove(&call_id);
+diff --git a/src/rust/src/call_video.rs b/src/rust/src/call_video.rs
+index f45e5fa..7a090e9 100644
+--- a/src/rust/src/call_video.rs
++++ b/src/rust/src/call_video.rs
+@@ -131,6 +131,11 @@ pub fn video_command(on: bool) -> String {
+     format!("VIDEO {}\n", on as u8)
+ }
+ 
++/// The engine's command for how the phone is held (the shell's quarter turns, 0..3).
++pub fn turn_command(turns: u8) -> String {
++    format!("TURN {}\n", turns & 3)
++}
++
+ /// The engine's command naming our outgoing call (it goes into SenderStatus).
+ pub fn call_id_command(call_id: u64) -> String {
+     format!("CALLID {call_id}\n")
+@@ -140,6 +145,13 @@ pub fn call_id_command(call_id: u64) -> String {
+ mod tests {
+     use super::*;
+ 
++    #[test]
++    fn turn_commands() {
++        assert_eq!(turn_command(0), "TURN 0\n");
++        assert_eq!(turn_command(3), "TURN 3\n");
++        assert_eq!(turn_command(5), "TURN 1\n");
++    }
++
+     #[test]
+     fn offer_types() {
+         assert_eq!(offer_type(false), 0);
+diff --git a/src/rust/src/core.rs b/src/rust/src/core.rs
+index 26d273a..561a1a1 100755
+--- a/src/rust/src/core.rs
++++ b/src/rust/src/core.rs
+@@ -332,6 +332,10 @@ async fn run<C: presage::store::Store + 'static>(
+             crate::call_bridge::set_video(call_id, on);
+             Ok(true)
+         }
++        crate::structs::Cmd::SetCallTurn { call_id, turns } => {
++            crate::call_bridge::set_turn(call_id, turns);
++            Ok(true)
++        }
+         crate::structs::Cmd::PlaceCall { callee, video } => {
+             // Resolve the callee to an ACI. The dialer usually passes the Signal UUID, but for a
+             // cross-service-linked contact (a Signal thread keyed by a phone number) it passes an
+diff --git a/src/rust/src/structs.rs b/src/rust/src/structs.rs
+index fb6352d..ea76109 100755
+--- a/src/rust/src/structs.rs
++++ b/src/rust/src/structs.rs
+@@ -96,6 +96,12 @@ pub enum Cmd {
+         call_id: u64,
+         on: bool,
+     },
++    // How the phone is held (the Phone app's changeMedia deviceOrientation, the shell's quarter
++    // turns 0..3). Local only: the engine sends it with our picture as its orientation.
++    SetCallTurn {
++        call_id: u64,
++        turns: u8,
++    },
+ }
+ 
+ // Cmd already crosses threads today: it is pushed onto a tokio mpsc from the C-invoked send_cmd

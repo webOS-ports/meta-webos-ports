@@ -9,37 +9,47 @@ require purple-connectors.inc
 # Built from luneos-synergy-connectors, the version ended in its commit alone (1.0+git0+d22c6be58f).
 # With the upstream commit now in front it can sort lower, so bump the epoch to keep package feeds
 # moving forward.
-PE = "1"
+PE = "4"
 require purple-presage-crates.inc
 require purple-presage-git-deps.inc
 
-# 0001-0005 are generic fixes meant for upstream; the webOS: ones from 0006 adapt the plug-in to
-# imlibpurpletransport and the webOS Messaging app.
+# One feature per patch. 0001 moves to presage 4b81740 (Cargo.toml and Cargo.lock; SRCREV_presage
+# and SRCREV_libsignal-service-rs in purple-presage-git-deps.inc and the crates in
+# purple-presage-crates.inc follow it). That presage brings libsignal-service-rs 7a75267, which
+# sends uploadLength with an attachment upload form request: since early November 2026
+# Signal-Server refuses the form without it, so no attachment could be sent before. 0002-0006 are
+# generic fixes, submitted upstream as hoehermann/purple-presage #55-#59 (#58 and #59 build on
+# #55); the webOS: ones from 0007 adapt the plug-in to imlibpurpletransport and the webOS
+# Messaging app.
 #
-# 0010 adds 1:1 voice calls through the Phone app: call.c registers com.palm.signal.call (one
-# luna-service2 handle) and reports active calls to audiod; the Rust half does the RingRTC
-# signaling and runs the signal-call-media engine for each call. It changes Cargo.toml (serde,
-# serde_json, tokio "time") and the root package's entry in Cargo.lock; the crates were already in
-# the lock, so the crates and git-deps lists do not change. presage's "cdsi" feature, which calling
-# a number that is no stored contact would need, is not enabled: it pulls in BoringSSL.
+# 0009 adds 1:1 voice and video calls through the Phone app: call.c registers
+# com.palm.signal.call (one luna-service2 handle) and reports active calls to audiod; the Rust half
+# does the RingRTC signaling, fetches the TURN relays with presage's Manager::calling_relays(), and
+# runs the signal-call-media engine for each call. It adds tokio's "time" feature to Cargo.toml,
+# which leaves Cargo.lock as it is. presage's "cdsi" feature, which calling a number that is no
+# stored contact would need, is not enabled: it pulls in BoringSSL. 0012 passes how the phone is
+# held (the Phone app's deviceOrientation) on to signal-call-media, for the orientation it sends.
 #
-# presage/0001 is for presage itself (the git-deps checkout, hence its patchdir): it makes
-# Manager::identified_push_service() public, which 0010 uses to fetch the TURN relays.
+# presage/0001 is for presage itself (the git-deps checkout, hence its patchdir): presage since
+# #471 uses an `if let` match guard, which the Rust 1.94 of oe-core wrynose rejects as
+# experimental. Drop it once the Rust here accepts them.
 SRC_URI += " \
     git://github.com/hoehermann/purple-presage.git;branch=master;protocol=https;name=upstream;destsuffix=purple-presage \
-    file://0001-Keep-the-connection-up-on-receive-and-command-errors.patch \
-    file://0002-contacts-sync-names-from-the-primary-and-resolve-unk.patch \
-    file://0003-Pin-the-module-resident-and-delete-the-store-when-an.patch \
-    file://0004-bridge-carry-the-message-timestamp-in-milliseconds-a.patch \
-    file://0005-Announce-the-connection-only-once-per-receive-sessio.patch \
-    file://0006-webOS-hand-the-device-link-URI-to-the-UI-instead-of-.patch \
-    file://0007-webOS-map-Signal-reactions-to-and-from-the-transport.patch \
-    file://0008-webOS-show-Signal-replies-as-inline-quote-cards.patch \
-    file://0009-webOS-report-delivery-and-read-receipts-to-the-trans.patch \
-    file://0010-webOS-add-1-1-Signal-voice-calls-through-the-Phone-a.patch \
-    file://presage/0001-manager-make-the-identified-push-service-public.patch;patchdir=${UNPACKDIR}/git-deps/presage \
+    file://0001-Move-to-presage-4b81740.patch \
+    file://0002-Keep-the-connection-up-on-receive-and-command-errors.patch \
+    file://0003-contacts-sync-names-from-the-primary-and-resolve-unk.patch \
+    file://0004-Pin-the-module-resident-and-delete-the-store-when-an.patch \
+    file://0005-bridge-carry-the-message-timestamp-in-milliseconds-a.patch \
+    file://0006-Announce-the-connection-only-once-per-receive-sessio.patch \
+    file://0007-webOS-hand-the-device-link-URI-to-the-UI-instead-of-.patch \
+    file://0008-webOS-bridge-Signal-reactions-replies-and-receipts-t.patch \
+    file://0009-webOS-1-1-Signal-voice-and-video-calls-through-the-P.patch \
+    file://0010-webOS-edit-and-delete-Signal-messages-sent-and-recei.patch \
+    file://0011-webOS-send-voice-notes-mentions-and-contact-cards-as.patch \
+    file://0012-webOS-Pass-how-the-phone-is-held-on-to-the-call-engi.patch \
+    file://presage/0001-store-build-without-if-let-guards-for-Rust-1.94.patch;patchdir=${UNPACKDIR}/git-deps/presage \
 "
-SRCREV_upstream = "c4c9b8d8e1a822f973520e8870aba1d2347b18c6"
+SRCREV_upstream = "235edc846d4f28f306ddfe40dc187ef42face79f"
 
 # gdk-pixbuf is only asked which image types it can load (pixbuf.c); without it the plug-in
 # assumes JPEG and PNG. protobuf-native supplies protoc for the prost-build scripts of
@@ -47,7 +57,7 @@ SRCREV_upstream = "c4c9b8d8e1a822f973520e8870aba1d2347b18c6"
 # luna-service2 is for call.c.
 DEPENDS = "pidgin glib-2.0 gdk-pixbuf openssl protobuf-native luna-service2"
 
-# The call media engine 0010 runs for each call; call_bridge.rs takes its path from this at build
+# The call media engine 0009 runs for each call; call_bridge.rs takes its path from this at build
 # time.
 export SIGNAL_MEDIA_ENGINE = "${libexecdir}/signal-call-media"
 RDEPENDS:${PN} += "signal-call-media"
@@ -151,8 +161,8 @@ python cargo_common_do_patch_paths() {
 PRESAGE_PLUGIN_VERSION = "0.0.0_${@d.getVar('SRCREV_upstream')[:7]}_${@d.getVar('SRCREV_presage')[:7]}"
 
 # The libraries are the ones `cargo rustc -- --print native-static-libs` lists for the Rust half,
-# plus libcrypto for SQLCipher, gmodule-2.0 for g_module_make_resident() from 0003 and
-# luna-service2 for call.c from 0010.
+# plus libcrypto for SQLCipher, gmodule-2.0 for g_module_make_resident() from 0004 and
+# luna-service2 for call.c from 0009.
 # --no-undefined turns a symbol that would only be missed at dlopen time into a link error.
 #
 # The version script exports purple_init_plugin, the one symbol libpurple looks up, and nothing
@@ -190,7 +200,7 @@ do_install() {
     install -d ${D}${webos_applicationsdir}
     cp -rf ${CONNECTORS_DIR}/im/signal/apps/com.palm.app.signal ${D}${webos_applicationsdir}/
 
-    # The signal call service (call.c, from 0010): its bus name is listed, never activated --
+    # The signal call service (call.c, from 0009): its bus name is listed, never activated --
     # imlibpurpleservice, which loads this plug-in, registers com.palm.signal.call itself, so the
     # .service file is Type=static -- and the Phone app is granted imlibpurple-call.operation to
     # call it. The role letting imlibpurpleservice own the name, and the api-permissions/groups
