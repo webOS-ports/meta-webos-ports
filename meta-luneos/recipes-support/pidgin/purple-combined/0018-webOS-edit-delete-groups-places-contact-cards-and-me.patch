@@ -1,0 +1,3037 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sat, 7 Nov 2026 17:42:52 +0100
+Subject: [PATCH] webOS: edit, delete, groups, places, contact cards and
+ mentions from the app
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+* Edit, delete, groups, places, contact cards and mentions from the app
+
+The webOS Messaging app can now do what WhatsApp does besides sending a
+text. The transport (imlibpurpleservice) brings it in two ways.
+
+Edits, deletes and groups come as signals the transport emits for every
+account: webos-im-send-edit, webos-im-send-delete, webos-im-group-create,
+webos-im-group-invite and webos-im-group-leave. The handlers in
+glue/login.c take those for a WhatsApp account and return TRUE, which
+tells the transport the command was done; webos_actions.go sends them:
+an edit of our own message (BuildEdit), a delete for everyone
+(BuildRevoke), a new group (it is put on the buddy list and a line in it
+opens the chat), new members, and leaving. What fails is said in the
+chat.
+
+A place, a contact card and mentions come with an outgoing message, on
+the conversation for the length of the send (webos-send-location,
+-contact, -mentions); send_im and send_chat pass them on, and
+send_text_message sends a location pin or a contact card instead of the
+text, and turns each "@Name" the app wrote into WhatsApp's "@<number>"
+with the contact in MentionedJID. The text the app wrote is still what
+is echoed and reported as the outbox id, which the app matches on. The
+message context - its expiry, the quoted message, the mentions - now
+goes with whichever kind is sent. The parsing is in webos_send.go, with
+tests.
+
+* Answer a chat WhatsApp addresses by LID at its LID
+
+Neither our typing nor our read receipts showed on the other phone
+(a Pixel 3a, 2026-11-07). The chats come addressed by LID - typing
+arrives as <chatstate from="...@lid"> - and the plugin answered at the
+phone number: send_typing sent <chatstate to="...@s.whatsapp.net">, and
+a received message's read receipt was kept with its chat and sender
+after lidToPn, so it went to the phone number too.
+
+Send the typing state to the contact's LID when the store knows it
+(handler.pnToLid). Keep a read receipt under the chat's phone number,
+which is the conversation's name and so what reading the chat gives,
+but send it to the chat and sender as the message came.
+
+* Say why a group did not take someone
+
+Adding people to a group answered with WhatsApp's own codes, as in
+"Could not add 31611111111 to the group (error 409)". It came after
+leaving a group made here and then adding ourselves back
+(2026-11-07): once left, we are no member of it any more.
+
+Say what the codes mean, as other WhatsApp clients document them
+(Baileys: 409 already in the group, 403 their privacy settings, with
+an invite to send them when WhatsApp made one): "is already in the
+group", "can only be added by an invite", "their privacy settings do
+not allow it". A refusal of the whole change with 401 or 403
+(whatsmeow ErrIQNotAuthorized, ErrIQForbidden) says we are no longer
+in the group, or not one of its admins. Any other code is shown as
+before.
+
+* Show a mention by the name of who it mentions
+
+A mention someone else sends showed as "@31611111111": the plugin put
+the buddy alias in place of the number, and purple's alias for anyone
+not on the buddy list - most of a group's members - is the JID itself.
+
+Take the alias when there is a real one, else the names WhatsApp's
+contact store has for them (full, first, business, push name, as the
+display name takes them), and the number only when nobody knows it.
+Replace "@<number>" only, not the same digits elsewhere in the text or
+a longer number that starts with them.
+
+* Remove someone from a WhatsApp group
+
+The Messaging app can now remove people from a group, through the
+transport's webos-im-group-remove signal (account, group, members
+joined by "\x1f"), as it adds them with webos-im-group-invite. Each
+member is a phone JID, a LID or a +E.164 number, as the group's member
+list has them. group_remove asks WhatsApp to remove them
+(UpdateGroupParticipants, ParticipantChangeRemove) on a goroutine, and
+says in the group what failed: the whole change, when we are no longer
+in the group or not one of its admins (401/403), or one person, with
+the code WhatsApp gave for them. When anyone was removed the group's
+member list is read again, so the chat's people are current.
+
+group_change_failed now takes what was being done ("add to", "remove
+from"); what an invite says is unchanged.
+
+* Give a WhatsApp group member's phone number to the app
+
+Group Info showed a WhatsApp group's members only by their address,
+and a group WhatsApp addresses by LID gives every member as
+"<id>@lid": no number anywhere, and two members of the same name
+could not be told apart.
+
+Keep each member's phone number on their chat buddy, as the chat
+buddy attribute "phone" ("+<digits>"), for imlibpurpleservice's
+getChatMembers to give the app. The number is the member's own JID
+when they are given by number, else the one WhatsApp sent with the
+member (GroupParticipant.PhoneNumber), else what the store's LID map
+knows for their LID; a member whose number is not known has none.
+
+The numbers go to the C side next to the participants, in their
+order: in the group message (participant_phones) and from
+gowhatsapp_go_query_group_participants, which gives them through a
+new out parameter. gowhatsapp_chat_set_participants and
+gowhatsapp_enter_group_chat take them; purple_update_group takes the
+handler, to read the store.
+
+* Say in a WhatsApp group who joined, left or was removed
+
+A WhatsApp group's own news reached the plugin as events.GroupInfo, for
+which handler.go had no case, so nothing of it showed in the chat:
+someone removed from the group, here or on another phone, only left the
+member list.
+
+Each change is now a notice line in the group, as the WhatsApp app
+writes it: "You removed Ann", "Ann added Ben and you", "Ben left", "Ben
+joined", "Ben joined using this group's invite link", "Ann changed the
+group name to “X”", "Ann changed the group description" (or deleted
+it), "Ann made Ben an admin", "Ben is no longer an admin". We are "You"
+by our phone number or our LID. Others are named as a mention names
+them, the buddy alias or the names WhatsApp's contact store has, with a
+LID looked up as its number; else "+<digits>", and "Unknown user" for a
+LID whose number is not known, never the LID itself.
+
+The lines are system lines, as tdlib-purple writes a Telegram group's
+news, so the transport keeps them in the thread without a banner. They
+carry the time of the change (purple_display_system_message_at), and
+the glue treats them as it treats an old message: one from before we
+connected is dropped when "discard old messages" is on, else written
+with its own time. Other system lines have no time and are unchanged.
+
+When members, admins or the name changed, the group is read again
+(GetGroupInfo, purple_update_group) once, two seconds after the last
+change, so Group Info is current and a burst of changes on connecting
+does not read it once for each. Not when we are the one who left or
+was removed: the group no longer answers us.
+
+* Say in a WhatsApp group when someone shared recent messages
+
+A group member can share the group's recent messages with people newly
+added to it. The group then gets a MessageHistoryNotice, which the
+WhatsApp app shows to everyone, and the new members a
+MessageHistoryBundle holding the messages (as media). Neither carries
+text or an attachment handle_message knew, so nothing was shown for
+either: the message was only cached and its read receipt kept.
+
+The notice is now a notice line in the group, a system line with the
+message's time, as a group's own news is (group_events.go): "Ann shared
+12 recent messages with Ben and Cara", "You shared 1 recent message with
+Ben", "Ann shared recent messages with you" when no count is given, "Ann
+shared 5 recent messages" when no receivers are, and "Ann shared 9
+recent messages with Ben, Cara and 2 others" for more than three ("you,
+Ben and 2 others" when we are one of them). People are named as the
+group notices name them: "You"/"you" by our number or LID, else the
+buddy alias or WhatsApp's contact names, else "+<digits>", "Unknown
+user" for a LID whose number is not known.
+
+The bundle is dropped, with one debug line: the messages in it are not
+read, and there is nothing to show for it.
+
+* Rename a WhatsApp group from the Messaging app
+
+The Messaging app can now give a group a new name, through the
+transport's webos-im-group-rename signal (account, group, name), as it
+creates groups and adds and removes people. The signal is FALSE, so the
+transport says it failed, for another prpl's account, a chat this
+account does not know (not in the buddy list, not open here), a chat
+that is no group JID, or a name that is empty once trimmed.
+
+group_rename asks WhatsApp for it (SetGroupName) on a goroutine. The
+name goes as the app sent it, trimmed: it is not cut to a length.
+whatsmeow says group names are limited to 25 characters and a longer
+one is refused with 406 (ReqCreateGroup), but that is WhatsApp's to
+enforce, and a name cut here would be one nobody typed. What failed is
+said in the group: "you are no longer in it, or not one of its admins"
+for 401/403, "WhatsApp did not accept the name. It may be too long."
+for 406, else the error. The log names the group, never the name.
+
+When WhatsApp took it, the chat is named again here at once. WhatsApp's
+own news of the change (events.GroupInfo) brings the line "You changed
+the group name to “X”" (group_events.go), and now also names the chat
+before that line is written, so the line, and the app's thread with it,
+comes under the new name; a rename on another phone or by another
+member does the same.
+
+A group's new name reaches the glue as a group without members
+(purple_rename_group): the buddy list chat is aliased, the members,
+the room list and auto-join are left alone. Any group update now also
+sets an open conversation's title from the buddy list's name
+(purple_conversation_autoset_title), which libpurple does not do when
+a chat is aliased.
+
+* Show a received WhatsApp mention in bold
+
+Signal and Telegram show a mention of someone as a bold "@Name"; a
+WhatsApp one was plain. The text is plain until it is HTML-escaped
+just before it is shown, so replace_mention marks the "@Name" with
+two control characters that escaping leaves alone, and they become
+<b> and </b> after it. A sender's own marks are dropped first, and an
+edit, which is not shown as HTML, keeps the plain "@Name".
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ bridge.go                 |  71 ++++++++-
+ bridge.h                  |   1 +
+ deferred_receipts.go      |  40 +++--
+ deferred_receipts_test.go |  63 +++++---
+ glue/bridge.c             |   1 +
+ glue/commands.c           |   6 +-
+ glue/display_message.c    |   2 +-
+ glue/gowhatsapp.h         |   7 +-
+ glue/groups.c             |  49 ++++--
+ glue/login.c              |  81 ++++++++++
+ glue/process_message.c    |   6 +
+ glue/send_message.c       |  20 ++-
+ group_events.go           | 301 ++++++++++++++++++++++++++++++++++++
+ group_events_test.go      | 163 ++++++++++++++++++++
+ group_phone_test.go       |  94 ++++++++++++
+ groups.go                 |  67 +++++++-
+ handle_message.go         |  23 +--
+ handler.go                |   6 +
+ history_notice.go         | 108 +++++++++++++
+ history_notice_test.go    | 112 ++++++++++++++
+ mark_read.go              |   8 +-
+ mention_test.go           |  70 +++++++++
+ presence.go               |   3 +
+ profile.go                |  90 +++++++++++
+ send_message.go           |  93 +++++++-----
+ webos_actions.go          | 311 ++++++++++++++++++++++++++++++++++++++
+ webos_send.go             | 191 +++++++++++++++++++++++
+ webos_send_test.go        | 216 ++++++++++++++++++++++++++
+ 28 files changed, 2094 insertions(+), 109 deletions(-)
+ create mode 100644 group_events.go
+ create mode 100644 group_events_test.go
+ create mode 100644 group_phone_test.go
+ create mode 100644 history_notice.go
+ create mode 100644 history_notice_test.go
+ create mode 100644 mention_test.go
+ create mode 100644 webos_actions.go
+ create mode 100644 webos_send.go
+ create mode 100644 webos_send_test.go
+
+diff --git a/bridge.go b/bridge.go
+index eeb415b..5d9a427 100644
+--- a/bridge.go
++++ b/bridge.go
+@@ -102,23 +102,26 @@ func gowhatsapp_go_account_removed(account *PurpleAccount, purple_user_dir *C.ch
+ }
+ 
+ //export gowhatsapp_go_send_message
+-func gowhatsapp_go_send_message(account *PurpleAccount, who *C.char, message *C.char, is_group C.int, reply_to *C.char) int {
++// webOS: location, contact and mentions are what the message carries besides its text, as the
++// transport put them on the conversation ("" for none; webos_send.go).
++func gowhatsapp_go_send_message(account *PurpleAccount, who *C.char, message *C.char, is_group C.int, reply_to *C.char, location *C.char, contact *C.char, mentions *C.char) int {
+ 	handler, ok := handlers[account]
+ 	if ok {
++		extras := webosExtras{location: C.GoString(location), contact: C.GoString(contact), mentions: C.GoString(mentions)}
+ 		// webOS replies: reply_to = the serviceMessageId (whatsmeow StanzaID) of the message this one
+ 		// replies to, "" for a normal message. Resolved to a QuotedMessage in send_text_message.
+ 		replyTo := C.GoString(reply_to)
+ 		setting := purple_get_string(handler.account, C.GOWHATSAPP_ECHO_OPTION, C.GOWHATSAPP_ECHO_CHOICE_ON_SUCCESS)
+ 		if setting == C.GoString(C.GOWHATSAPP_ECHO_CHOICE_INTERNAL) {
+ 			// blocking mode
+-			if handler.send_message(C.GoString(who), C.GoString(message), Cint_to_bool(is_group), replyTo) {
++			if handler.send_message(C.GoString(who), C.GoString(message), Cint_to_bool(is_group), replyTo, extras) {
+ 				return 1 // indicate success for purple
+ 			} else {
+ 				return -1 // indicate error for purple
+ 			}
+ 		} else {
+ 			// non-blocking mode
+-			go handler.send_message(C.GoString(who), C.GoString(message), Cint_to_bool(is_group), replyTo)
++			go handler.send_message(C.GoString(who), C.GoString(message), Cint_to_bool(is_group), replyTo, extras)
+ 			if setting == C.GoString(C.GOWHATSAPP_ECHO_CHOICE_IMMEDIATELY) {
+ 				// indicate immediate success, message is echoed back into conversation by purple
+ 				return 1
+@@ -255,8 +258,26 @@ func participants_to_ntcstrarray(group_participants []types.GroupParticipant) **
+ 	return cparticipants
+ }
+ 
++// webOS: a NULL-terminated C array of strings, for the participants' phone numbers (one per
++// participant, "" for one whose number is not known), released with g_strfreev.
++func strings_to_ntcstrarray(strs []string) **C.char {
++	var carray **C.char = nil
++	carray = (**C.char)(C.calloc(C.size_t(len(strs)+1), C.size_t(unsafe.Sizeof(carray))))
++	view := unsafe.Slice((**C.char)(carray), len(strs))
++	for i, s := range strs {
++		view[i] = C.CString(s)
++	}
++	return carray
++}
++
++// webOS: phones, when not NULL, is given the participants' phone numbers, parallel to them
++// (participant_phones), or NULL; the caller releases it with g_strfreev.
++//
+ //export gowhatsapp_go_query_group_participants
+-func gowhatsapp_go_query_group_participants(account *PurpleAccount, groupid *C.char) **C.char {
++func gowhatsapp_go_query_group_participants(account *PurpleAccount, groupid *C.char, phones ***C.char) **C.char {
++	if phones != nil {
++		*phones = nil
++	}
+ 	handler, ok := handlers[account]
+ 	if ok {
+ 		if groupid != nil {
+@@ -269,6 +290,9 @@ func gowhatsapp_go_query_group_participants(account *PurpleAccount, groupid *C.c
+ 				} else {
+ 					participants := handler.query_group_participants_retry(jid, 1, 10, 0)
+ 					participants = handler.groupChatParticipantsLidToPn(participants, "group chat participants query")
++					if phones != nil {
++						*phones = strings_to_ntcstrarray(handler.participant_phones(participants))
++					}
+ 					return participants_to_ntcstrarray(participants)
+ 				}
+ 			} else {
+@@ -294,10 +318,10 @@ func gowhatsapp_go_query_groups(account *PurpleAccount) {
+ 			} else {
+ 				for _, group := range groups {
+ 					group.Participants = handler.groupChatParticipantsLidToPn(group.Participants, "group chat query")
+-					purple_update_group(account, group)
++					purple_update_group(handler, group)
+ 				}
+ 				// emit an empty group message to denote end of list
+-				purple_update_group(account, nil)
++				purple_update_group(handler, nil)
+ 			}
+ 		}()
+ 	} else {
+@@ -509,6 +533,14 @@ func purple_display_text_message(account *PurpleAccount, remoteJid string, isGro
+  * Single participants and group chats.
+  */
+ func purple_display_system_message(account *PurpleAccount, remoteJid string, isGroup bool, text string) {
++	purple_display_system_message_at(account, remoteJid, isGroup, text, time.Time{})
++}
++
++/*
++ * webOS: a system message with the time of what it tells (a group's news), so it sits in the
++ * thread where that happened. Without a time (the zero time) it is shown as of now.
++ */
++func purple_display_system_message_at(account *PurpleAccount, remoteJid string, isGroup bool, text string, timestamp time.Time) {
+ 	cmessage := C.struct_gowhatsapp_message{
+ 		account:   account,
+ 		msgtype:   C.char(C.gowhatsapp_message_type_system),
+@@ -516,6 +548,9 @@ func purple_display_system_message(account *PurpleAccount, remoteJid string, isG
+ 		text:      C.CString(text),
+ 		isGroup:   bool_to_Cchar(isGroup),
+ 	}
++	if !timestamp.IsZero() {
++		cmessage.timestamp = C.time_t(timestamp.Unix())
++	}
+ 	C.gowhatsapp_process_message_bridge(cmessage)
+ }
+ 
+@@ -818,8 +853,12 @@ func purple_set_credentials(account *PurpleAccount, credentials string) {
+ 
+ /*
+  * This will forward group information to purple.
++ *
++ * webOS: with each participant's phone number (participant_phones), so a group WhatsApp addresses
++ * by LID still shows its members' numbers.
+  */
+-func purple_update_group(account *PurpleAccount, group *types.GroupInfo) {
++func purple_update_group(handler *Handler, group *types.GroupInfo) {
++	account := handler.account
+ 	if group != nil {
+ 		cmessage := C.struct_gowhatsapp_message{
+ 			account:   account,
+@@ -828,6 +867,7 @@ func purple_update_group(account *PurpleAccount, group *types.GroupInfo) {
+ 			name:      C.CString(group.Name),
+ 		}
+ 		cmessage.participants = participants_to_ntcstrarray(group.Participants)
++		cmessage.participant_phones = strings_to_ntcstrarray(handler.participant_phones(group.Participants))
+ 		C.gowhatsapp_process_message_bridge(cmessage)
+ 	} else {
+ 		C.gowhatsapp_process_message_bridge(C.struct_gowhatsapp_message{
+@@ -837,6 +877,23 @@ func purple_update_group(account *PurpleAccount, group *types.GroupInfo) {
+ 	}
+ }
+ 
++/*
++ * webOS: a group's new name, without its members: the chat in the buddy list is named again
++ * (glue/groups.c leaves the members alone when there are none). In the order of the lines sent
++ * after it, so a line about the new name already comes under it.
++ */
++func purple_rename_group(handler *Handler, jid types.JID, name string) {
++	if name == "" {
++		return
++	}
++	C.gowhatsapp_process_message_bridge(C.struct_gowhatsapp_message{
++		account:   handler.account,
++		msgtype:   C.char(C.gowhatsapp_message_type_group),
++		remoteJid: C.CString(jid.ToNonAD().String()),
++		name:      C.CString(name),
++	})
++}
++
+ func purple_get_device_name(account *PurpleAccount) string {
+ 	c_device_name := C.CString(fmt.Sprintf("purple-whatsmeow on %s", C.GoString(C.g_get_host_name())))
+ 	defer C.free(unsafe.Pointer(c_device_name))
+diff --git a/bridge.h b/bridge.h
+index 82983ea..27a7e84 100644
+--- a/bridge.h
++++ b/bridge.h
+@@ -75,6 +75,7 @@ struct gowhatsapp_message {
+     size_t blobsize; /// size of binary payload in bytes
+     time_t timestamp; /// timestamp the message was sent(?)
+     char **participants; /// list of participants (for group chats)
++    char **participant_phones; /// webOS: each participant's phone number ("+<digits>", "" when not known), parallel to participants; may be NULL
+     char msgtype; /// message type – see above
+     char subtype; /// loglevel, error severity, attachment type or online-state
+     char isGroup; /// this is a group chat message
+diff --git a/deferred_receipts.go b/deferred_receipts.go
+index 838af1b..f1099ba 100644
+--- a/deferred_receipts.go
++++ b/deferred_receipts.go
+@@ -11,35 +11,47 @@ import (
+  * on whatsmeow's event goroutine and a chat's receipts are taken on libpurple's main loop when the
+  * chat is read (glue/receipt.c), so the store is locked. Taking a chat's receipts removes them: a
+  * receipt goes once, not again each time the chat is looked at. The zero value is ready to use.
++ *
++ * A chat is found by its name as the conversation has it (the phone-number JID, handler.lidToPn),
++ * since that is what reading it gives. The receipt itself goes to the chat and the senders as the
++ * messages came: a chat WhatsApp addresses by LID takes its receipts at the LID.
+  */
+ type deferredReceiptStore struct {
+ 	mutex   sync.Mutex
+-	pending map[types.JID]map[types.JID][]types.MessageID
++	pending map[types.JID]*deferredChat
+ }
+ 
+-// Keep the receipt for message id from sender in chat.
+-func (store *deferredReceiptStore) add(chat types.JID, sender types.JID, id types.MessageID) {
++// One chat's receipts: where they go, and the message ids by sender.
++type deferredChat struct {
++	chat    types.JID
++	senders map[types.JID][]types.MessageID
++}
++
++// Keep the receipt for message id from sender in chat, found later by key.
++func (store *deferredReceiptStore) add(key types.JID, chat types.JID, sender types.JID, id types.MessageID) {
+ 	store.mutex.Lock()
+ 	defer store.mutex.Unlock()
+ 	if store.pending == nil {
+-		store.pending = make(map[types.JID]map[types.JID][]types.MessageID)
++		store.pending = make(map[types.JID]*deferredChat)
+ 	}
+-	senders, ok := store.pending[chat]
++	kept, ok := store.pending[key]
+ 	if !ok {
+-		senders = make(map[types.JID][]types.MessageID)
+-		store.pending[chat] = senders
++		kept = &deferredChat{senders: make(map[types.JID][]types.MessageID)}
++		store.pending[key] = kept
+ 	}
+-	senders[sender] = append(senders[sender], id)
++	kept.chat = chat // the latest message's addressing: a chat moved to LID answers at the LID
++	kept.senders[sender] = append(kept.senders[sender], id)
+ }
+ 
+-// The receipts kept for chat, by sender, and forget them. nil when there are none.
+-func (store *deferredReceiptStore) take(chat types.JID) map[types.JID][]types.MessageID {
++// The chat and the receipts kept under key, by sender, and forget them; nil senders when there
++// are none.
++func (store *deferredReceiptStore) take(key types.JID) (types.JID, map[types.JID][]types.MessageID) {
+ 	store.mutex.Lock()
+ 	defer store.mutex.Unlock()
+-	senders, ok := store.pending[chat]
++	kept, ok := store.pending[key]
+ 	if !ok {
+-		return nil
++		return types.EmptyJID, nil
+ 	}
+-	delete(store.pending, chat)
+-	return senders
++	delete(store.pending, key)
++	return kept.chat, kept.senders
+ }
+diff --git a/deferred_receipts_test.go b/deferred_receipts_test.go
+index c51b642..3ad3495 100644
+--- a/deferred_receipts_test.go
++++ b/deferred_receipts_test.go
+@@ -8,46 +8,67 @@ import (
+ )
+ 
+ var (
+-	anna  = types.NewJID("31611111111", types.DefaultUserServer)
+-	ben   = types.NewJID("31622222222", types.DefaultUserServer)
+-	group = types.NewJID("120363000000000000", types.GroupServer)
++	anna    = types.NewJID("31611111111", types.DefaultUserServer)
++	annaLid = types.NewJID("231770000000001", types.HiddenUserServer)
++	ben     = types.NewJID("31622222222", types.DefaultUserServer)
++	group   = types.NewJID("120363000000000000", types.GroupServer)
+ )
+ 
++// take, with the chat it goes to dropped, for the tests that only count.
++func takeSenders(store *deferredReceiptStore, key types.JID) map[types.JID][]types.MessageID {
++	_, senders := store.take(key)
++	return senders
++}
++
+ func TestReceiptsAreKeptPerChatAndSender(t *testing.T) {
+ 	var store deferredReceiptStore
+-	store.add(anna, anna, "A1")
+-	store.add(group, anna, "G1")
+-	store.add(group, ben, "G2")
+-	store.add(group, anna, "G3")
++	store.add(anna, anna, anna, "A1")
++	store.add(group, group, anna, "G1")
++	store.add(group, group, ben, "G2")
++	store.add(group, group, anna, "G3")
+ 
+-	got := store.take(group)
+-	if len(got) != 2 || len(got[anna]) != 2 || got[anna][0] != "G1" || got[anna][1] != "G3" || len(got[ben]) != 1 || got[ben][0] != "G2" {
+-		t.Fatalf("group receipts: %v", got)
++	chat, got := store.take(group)
++	if chat != group || len(got) != 2 || len(got[anna]) != 2 || got[anna][0] != "G1" || got[anna][1] != "G3" || len(got[ben]) != 1 || got[ben][0] != "G2" {
++		t.Fatalf("group receipts: %v to %v", got, chat)
+ 	}
+-	if a := store.take(anna); len(a) != 1 || len(a[anna]) != 1 || a[anna][0] != "A1" {
++	if a := takeSenders(&store, anna); len(a) != 1 || len(a[anna]) != 1 || a[anna][0] != "A1" {
+ 		t.Fatalf("anna's chat is its own: %v", a)
+ 	}
+ }
+ 
++// A chat WhatsApp addresses by LID is read under its phone number, the conversation's name, and
++// its receipts go to the LID, from the LID sender, as the message came.
++func TestALidChatIsReadByItsNumberAndAnsweredAtItsLid(t *testing.T) {
++	var store deferredReceiptStore
++	store.add(anna, annaLid, annaLid, "L1")
++	if c, s := store.take(annaLid); s != nil {
++		t.Fatalf("found under the LID, which reading the chat never gives: %v %v", c, s)
++	}
++	chat, senders := store.take(anna)
++	if chat != annaLid || len(senders[annaLid]) != 1 || senders[annaLid][0] != "L1" {
++		t.Fatalf("to %v: %v", chat, senders)
++	}
++}
++
+ func TestAReceiptGoesOnce(t *testing.T) {
+ 	var store deferredReceiptStore
+-	store.add(anna, anna, "A1")
+-	if store.take(anna) == nil {
++	store.add(anna, anna, anna, "A1")
++	if takeSenders(&store, anna) == nil {
+ 		t.Fatal("nothing kept")
+ 	}
+-	if again := store.take(anna); again != nil {
++	if again := takeSenders(&store, anna); again != nil {
+ 		t.Fatalf("taken twice: %v", again)
+ 	}
+-	store.add(anna, anna, "A2")
+-	if got := store.take(anna); len(got[anna]) != 1 || got[anna][0] != "A2" {
++	store.add(anna, anna, anna, "A2")
++	if got := takeSenders(&store, anna); len(got[anna]) != 1 || got[anna][0] != "A2" {
+ 		t.Fatalf("only what came after: %v", got)
+ 	}
+ }
+ 
+ func TestNothingKeptIsNil(t *testing.T) {
+ 	var store deferredReceiptStore
+-	if got := store.take(anna); got != nil {
+-		t.Fatalf("an empty store: %v", got)
++	if chat, got := store.take(anna); got != nil || !chat.IsEmpty() {
++		t.Fatalf("an empty store: %v %v", chat, got)
+ 	}
+ }
+ 
+@@ -61,17 +82,17 @@ func TestAddingAndTakingAtOnce(t *testing.T) {
+ 	go func() {
+ 		defer wg.Done()
+ 		for i := 0; i < n; i++ {
+-			store.add(anna, anna, types.MessageID(rune('a'+i%26))+types.MessageID(string(rune('0'+i/26%10))))
++			store.add(anna, anna, anna, types.MessageID(rune('a'+i%26))+types.MessageID(string(rune('0'+i/26%10))))
+ 		}
+ 	}()
+ 	taken := 0
+ 	for taken < n {
+-		for _, ids := range store.take(anna) {
++		for _, ids := range takeSenders(&store, anna) {
+ 			taken += len(ids)
+ 		}
+ 	}
+ 	wg.Wait()
+-	if taken != n || store.take(anna) != nil {
++	if taken != n || takeSenders(&store, anna) != nil {
+ 		t.Fatalf("took %d of %d", taken, n)
+ 	}
+ }
+diff --git a/glue/bridge.c b/glue/bridge.c
+index 2bd640d..e15bb5d 100644
+--- a/glue/bridge.c
++++ b/glue/bridge.c
+@@ -72,5 +72,6 @@ void gowhatsapp_free_message(gowhatsapp_message_t *gwamsg) {
+     g_free(gwamsg->pairing_qrdata);
+     g_free(gwamsg->pairing_qrterminal);
+     g_strfreev(gwamsg->participants);
++    g_strfreev(gwamsg->participant_phones);
+     g_free(gwamsg);
+ }
+diff --git a/glue/commands.c b/glue/commands.c
+index 6e74a11..83663fc 100644
+--- a/glue/commands.c
++++ b/glue/commands.c
+@@ -38,9 +38,11 @@ static int execute_command_participants(PurpleAccount *account, const gchar *mes
+         purple_debug_warning(GOWHATSAPP_NAME, "Trying to execute command ?participants with incomplete data. who: %s, conv_chat: %p\n", who, conv_chat);
+         return -1;
+     } else {
+-        char **participants = gowhatsapp_go_query_group_participants(account, (char *)who);
+-        gowhatsapp_chat_set_participants(conv_chat, participants);
++        char **phones = NULL;
++        char **participants = gowhatsapp_go_query_group_participants(account, (char *)who, &phones);
++        gowhatsapp_chat_set_participants(conv_chat, participants, phones);
+         g_strfreev(participants);
++        g_strfreev(phones);
+         return 0;
+     }
+ }
+diff --git a/glue/display_message.c b/glue/display_message.c
+index 9e15f45..80c24a8 100644
+--- a/glue/display_message.c
++++ b/glue/display_message.c
+@@ -77,7 +77,7 @@ void gowhatsapp_display_text_message(
+     // "webos-msg-id" and stores it as serviceMessageId so a later reaction can target this message.
+     // Only for RECV messages - the transport ignores our own echoes.
+     if (isGroup) {
+-        PurpleConversation *gconv = gowhatsapp_enter_group_chat(connection, remoteJid, NULL);
++        PurpleConversation *gconv = gowhatsapp_enter_group_chat(connection, remoteJid, NULL, NULL);
+         if (gconv != NULL && (flags & PURPLE_MESSAGE_RECV) && messageId != NULL && *messageId != '\0') {
+             purple_conversation_set_data(gconv, "webos-msg-id", g_strdup(messageId));
+         }
+diff --git a/glue/gowhatsapp.h b/glue/gowhatsapp.h
+index df8fdb3..c252dfe 100644
+--- a/glue/gowhatsapp.h
++++ b/glue/gowhatsapp.h
+@@ -40,7 +40,7 @@ gboolean gowhatsapp_append_message_id_if_not_exists(PurpleAccount *account, char
+ gboolean gowhatsapp_message_is_new_enough(PurpleAccount *account, const time_t ts);
+ 
+ // groups
+-PurpleConversation *gowhatsapp_enter_group_chat(PurpleConnection *pc, const char *remoteJid, char **participants);
++PurpleConversation *gowhatsapp_enter_group_chat(PurpleConnection *pc, const char *remoteJid, char **participants, char **phones);
+ void gowhatsapp_join_chat(PurpleConnection *pc, GHashTable *data);
+ char *gowhatsapp_get_chat_name(GHashTable *components);
+ PurpleRoomlist *gowhatsapp_roomlist_get_list(PurpleConnection *pc);
+@@ -48,7 +48,10 @@ void gowhatsapp_set_chat_topic(PurpleConnection *pc, int id, const char *topic);
+ gchar *gowhatsapp_roomlist_serialize(PurpleRoomlistRoom *room);
+ GList * gowhatsapp_chat_info(PurpleConnection *pc);
+ GHashTable * gowhatsapp_chat_info_defaults(PurpleConnection *pc, const char *chat_name);
+-void gowhatsapp_chat_set_participants(PurpleConvChat *conv_chat, char **participants);
++// webOS: the chat buddy attribute a participant's phone number ("+<digits>") is kept in, for the
++// Messaging app's Group Info (imlibpurpleservice's getChatMembers reads it).
++#define GOWHATSAPP_CHAT_BUDDY_PHONE "phone"
++void gowhatsapp_chat_set_participants(PurpleConvChat *conv_chat, char **participants, char **phones);
+ void gowhatsapp_roomlist_add_room(PurpleConnection *pc, char *remoteJid, char *name);
+ void gowhatsapp_handle_group(PurpleConnection *pc, gowhatsapp_message_t *gwamsg);
+ void gowhatsapp_free_name(PurpleConversation *conv);
+diff --git a/glue/groups.c b/glue/groups.c
+index 5cfed3c..c737c01 100644
+--- a/glue/groups.c
++++ b/glue/groups.c
+@@ -95,7 +95,7 @@ void gowhatsapp_join_chat(PurpleConnection *pc, GHashTable *data) {
+             gowhatsapp_ensure_group_chat_in_blist(account, remoteJid, topic);
+         }
+         // create conversation (important)
+-        gowhatsapp_enter_group_chat(pc, remoteJid, NULL);
++        gowhatsapp_enter_group_chat(pc, remoteJid, NULL, NULL);
+     }
+ }
+ 
+@@ -168,8 +168,13 @@ gowhatsapp_roomlist_add_room(PurpleConnection *pc, char *remoteJid, char *name)
+  * NOTE: The roomlist is requested automatically when the local user status is set to "available".
+  */
+ void gowhatsapp_handle_group(PurpleConnection *pc, gowhatsapp_message_t *gwamsg) {
++    // webOS: a group with a name and no members is only its new name (purple_rename_group): it is
++    // named again, and its members, the room list and auto-join are left alone
++    const gboolean name_only = gwamsg->remoteJid != NULL && gwamsg->participants == NULL;
+     // list the group in the roomlist (if it is currently being queried)
+-    gowhatsapp_roomlist_add_room(pc, gwamsg->remoteJid, gwamsg->name);
++    if (!name_only) {
++        gowhatsapp_roomlist_add_room(pc, gwamsg->remoteJid, gwamsg->name);
++    }
+     // these all cannot handle the group list end marker
+     if (gwamsg->remoteJid != NULL) {
+         if (purple_account_get_bool(gwamsg->account, GOWHATSAPP_REQUEST_CONTACTS_AFTER_LOGIN_OPTION, TRUE)) {
+@@ -179,14 +184,19 @@ void gowhatsapp_handle_group(PurpleConnection *pc, gowhatsapp_message_t *gwamsg)
+         // this might be a delayed response to a query for participants of a currently active group chat
+         PurpleConversation *conv = purple_find_conversation_with_account(PURPLE_CONV_TYPE_CHAT, gwamsg->remoteJid, gwamsg->account);
+         if (conv != NULL) {
++            // webOS: the open chat's title is the buddy list's name for it, which may just have changed
++            purple_conversation_autoset_title(conv);
+             PurpleConvChat *conv_chat = purple_conversation_get_chat_data(conv);
+-            if (conv_chat != NULL) {
+-                gowhatsapp_chat_set_participants(conv_chat, gwamsg->participants);
++            if (conv_chat != NULL && !name_only) {
++                gowhatsapp_chat_set_participants(conv_chat, gwamsg->participants, gwamsg->participant_phones);
+             }
+         }
++        if (name_only) {
++            return;
++        }
+         // automatically join all chats (if user wants to)
+         if (purple_account_get_bool(gwamsg->account, GOWHATSAPP_AUTO_JOIN_CHAT_OPTION, FALSE)) {
+-            gowhatsapp_enter_group_chat(pc, gwamsg->remoteJid, gwamsg->participants); 
++            gowhatsapp_enter_group_chat(pc, gwamsg->remoteJid, gwamsg->participants, gwamsg->participant_phones);
+         }
+     }
+ }
+@@ -198,15 +208,32 @@ void gowhatsapp_handle_group(PurpleConnection *pc, gowhatsapp_message_t *gwamsg)
+  * 
+  * NOTE: We cannot selectively add missing users since it looks like on Spectrum 
+  * only a remove-readd-cycle will trigger the display name resolution.
++ *
++ * webOS: phones, when not NULL, has each participant's phone number at the same place ("" when it
++ * is not known); it is kept on the chat buddy as GOWHATSAPP_CHAT_BUDDY_PHONE. A shorter list
++ * leaves the rest without one.
+  */
+ void 
+-gowhatsapp_chat_set_participants(PurpleConvChat *conv_chat, char **participants) {
++gowhatsapp_chat_set_participants(PurpleConvChat *conv_chat, char **participants, char **phones) {
+     // remove all users
+     purple_conv_chat_clear_users(conv_chat);
+     // now add all current users
++    char **phone_ptr = phones;
+     for(char **participant_ptr = participants; participant_ptr != NULL && *participant_ptr != NULL; participant_ptr++) {
+         PurpleConvChatBuddyFlags flags = 0;
+         purple_conv_chat_add_user(conv_chat, *participant_ptr, NULL, flags, FALSE);
++        const char *phone = (phone_ptr != NULL) ? *phone_ptr : NULL;
++        if (phone != NULL) {
++            phone_ptr++;
++            if (*phone != '\0') {
++                PurpleConvChatBuddy *cb = purple_conv_chat_cb_find(conv_chat, *participant_ptr);
++                if (cb != NULL) {
++                    purple_conv_chat_cb_set_attribute(conv_chat, cb, GOWHATSAPP_CHAT_BUDDY_PHONE, phone);
++                }
++            }
++        } else {
++            phone_ptr = NULL; // the list ended
++        }
+     }
+ }
+ 
+@@ -222,7 +249,7 @@ gowhatsapp_chat_set_participants(PurpleConvChat *conv_chat, char **participants)
+  * be retrieved by get_chat_name (see below).
+  */
+ PurpleConversation *
+-gowhatsapp_enter_group_chat(PurpleConnection *pc, const char *remoteJid, char **participants) 
++gowhatsapp_enter_group_chat(PurpleConnection *pc, const char *remoteJid, char **participants, char **phones) 
+ {
+     PurpleAccount *account = purple_connection_get_account(pc);
+     PurpleConversation *conv = purple_find_conversation_with_account(PURPLE_CONV_TYPE_CHAT, remoteJid, account); // alternatively: purple_find_chat(pc, g_str_hash(remoteJid));
+@@ -241,12 +268,14 @@ gowhatsapp_enter_group_chat(PurpleConnection *pc, const char *remoteJid, char **
+             purple_conv_chat_set_nick(conv_chat, purple_account_get_username(account));
+             if (participants == NULL) {
+                 // list of participants is empty, request it explicitly and release it immediately
+-                char **participants = gowhatsapp_go_query_group_participants(account, (char *)remoteJid);
+-                gowhatsapp_chat_set_participants(conv_chat, participants);
++                char **queried_phones = NULL;
++                char **participants = gowhatsapp_go_query_group_participants(account, (char *)remoteJid, &queried_phones);
++                gowhatsapp_chat_set_participants(conv_chat, participants, queried_phones);
+                 g_strfreev(participants);
++                g_strfreev(queried_phones);
+             } else {
+                 // list of participants was given by caller, add particpants have caller release it later
+-                gowhatsapp_chat_set_participants(conv_chat, participants);
++                gowhatsapp_chat_set_participants(conv_chat, participants, phones);
+             }
+         }
+     }
+diff --git a/glue/login.c b/glue/login.c
+index daa8878..598fdd2 100644
+--- a/glue/login.c
++++ b/glue/login.c
+@@ -57,6 +57,77 @@ static void webos_send_poll_vote_cb(PurpleAccount *account, const char *peer, co
+     }
+ }
+ 
++// webOS edit, delete and groups (SEND, B3/B4): the transport emits these (imlibpurpleservice
++// WebosSendSignals.h) for every account and takes the first TRUE as "done by its prpl"; return
++// FALSE for an account that is not WhatsApp, or not connected here. chat is the chat's JID,
++// members "\x1f"-joined JIDs. Only WhatsApp in this .so does them.
++static gboolean webos_is_whatsapp(PurpleAccount *account) {
++    return account != NULL && g_strcmp0(purple_account_get_protocol_id(account), GOWHATSAPP_PRPL_ID) == 0;
++}
++
++static gboolean webos_send_edit_cb(PurpleAccount *account, const char *chat, const char *id, const char *text, void *data) {
++    (void)data;
++    if (!webos_is_whatsapp(account) || !chat || !id || !text) {
++        return FALSE;
++    }
++    return gowhatsapp_go_send_edit(account, (char *)chat, (char *)id, (char *)text) != 0;
++}
++
++static gboolean webos_send_delete_cb(PurpleAccount *account, const char *chat, const char *id, void *data) {
++    (void)data;
++    if (!webos_is_whatsapp(account) || !chat || !id) {
++        return FALSE;
++    }
++    return gowhatsapp_go_send_delete(account, (char *)chat, (char *)id) != 0;
++}
++
++static gboolean webos_group_create_cb(PurpleAccount *account, const char *name, const char *members, void *data) {
++    (void)data;
++    if (!webos_is_whatsapp(account) || !name || !members) {
++        return FALSE;
++    }
++    return gowhatsapp_go_group_create(account, (char *)name, (char *)members) != 0;
++}
++
++static gboolean webos_group_invite_cb(PurpleAccount *account, const char *chat, const char *members, void *data) {
++    (void)data;
++    if (!webos_is_whatsapp(account) || !chat || !members) {
++        return FALSE;
++    }
++    return gowhatsapp_go_group_invite(account, (char *)chat, (char *)members) != 0;
++}
++
++static gboolean webos_group_remove_cb(PurpleAccount *account, const char *chat, const char *members, void *data) {
++    (void)data;
++    if (!webos_is_whatsapp(account) || !chat || !members) {
++        return FALSE;
++    }
++    return gowhatsapp_go_group_remove(account, (char *)chat, (char *)members) != 0;
++}
++
++// webOS: rename a group. FALSE, so the transport says it failed, for another prpl's account, a chat
++// that is no group this account knows (in the buddy list or open here), or an empty name; the Go
++// half also says FALSE for a chat that is no group JID or a name that is only spaces.
++static gboolean webos_group_rename_cb(PurpleAccount *account, const char *chat, const char *name, void *data) {
++    (void)data;
++    if (!webos_is_whatsapp(account) || !chat || !*chat || !name || !*name) {
++        return FALSE;
++    }
++    if (gowhatsapp_find_blist_chat(account, chat) == NULL &&
++        purple_find_conversation_with_account(PURPLE_CONV_TYPE_CHAT, chat, account) == NULL) {
++        return FALSE;
++    }
++    return gowhatsapp_go_group_rename(account, (char *)chat, (char *)name) != 0;
++}
++
++static gboolean webos_group_leave_cb(PurpleAccount *account, const char *chat, void *data) {
++    (void)data;
++    if (!webos_is_whatsapp(account) || !chat) {
++        return FALSE;
++    }
++    return gowhatsapp_go_group_leave(account, (char *)chat) != 0;
++}
++
+ // Connect once (process-wide) to the transport's send-reaction signal. The signal lives on
+ // purple_conversations_get_handle(), so a single connect covers every account of both prpls in this
+ // process. Called from BOTH login paths (gowhatsapp_login here and gometa_login) so it fires whether
+@@ -76,6 +147,16 @@ void webos_connect_send_reaction_once(void)
+     // before an instant-reconnect (saved-session) WhatsApp login can race it.
+     purple_signal_connect(purple_conversations_get_handle(), "webos-im-send-poll-vote",
+                           purple_get_core(), PURPLE_CALLBACK(webos_send_poll_vote_cb), NULL);
++    // Edit, delete, groups: a transport without them has not registered these, and the connect
++    // then only warns and returns 0.
++    void *conversations = purple_conversations_get_handle();
++    purple_signal_connect(conversations, "webos-im-send-edit", purple_get_core(), PURPLE_CALLBACK(webos_send_edit_cb), NULL);
++    purple_signal_connect(conversations, "webos-im-send-delete", purple_get_core(), PURPLE_CALLBACK(webos_send_delete_cb), NULL);
++    purple_signal_connect(conversations, "webos-im-group-create", purple_get_core(), PURPLE_CALLBACK(webos_group_create_cb), NULL);
++    purple_signal_connect(conversations, "webos-im-group-invite", purple_get_core(), PURPLE_CALLBACK(webos_group_invite_cb), NULL);
++    purple_signal_connect(conversations, "webos-im-group-remove", purple_get_core(), PURPLE_CALLBACK(webos_group_remove_cb), NULL);
++    purple_signal_connect(conversations, "webos-im-group-rename", purple_get_core(), PURPLE_CALLBACK(webos_group_rename_cb), NULL);
++    purple_signal_connect(conversations, "webos-im-group-leave", purple_get_core(), PURPLE_CALLBACK(webos_group_leave_cb), NULL);
+ }
+ 
+ void
+diff --git a/glue/process_message.c b/glue/process_message.c
+index f0e9ecb..19ce7ad 100644
+--- a/glue/process_message.c
++++ b/glue/process_message.c
+@@ -125,6 +125,12 @@ gowhatsapp_process_message(gowhatsapp_message_t *gwamsg)
+             }
+             break;
+         case gowhatsapp_message_type_system:
++            // webOS: a group's news has the time it happened, and is old like a message when it
++            // happened before we connected. Other system lines have no time, were given "now"
++            // above, and so are never old.
++            if (gowhatsapp_message_is_old(gwamsg)) {
++                break;
++            }
+             gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid, gwamsg->text, gwamsg->timestamp, gwamsg->isGroup, gwamsg->isOutgoing, gwamsg->name, PURPLE_MESSAGE_SYSTEM, gwamsg->messageId, NULL, NULL, NULL);
+             break;
+         case gowhatsapp_message_type_typing:
+diff --git a/glue/send_message.c b/glue/send_message.c
+index 637b325..411324a 100644
+--- a/glue/send_message.c
++++ b/glue/send_message.c
+@@ -1,13 +1,25 @@
+ #include "gowhatsapp.h"
+ #include "libwhatsmeow.h"
+ 
++// webOS: what the message carries besides its text, which the transport puts on the conversation
++// for the length of serv_send_im/serv_chat_send and frees after (imlibpurpleservice SendExtras.h).
++// Read here, while the send is under way, never freed; "" for none. Go copies them.
++static const char *
++webos_send_extra(PurpleConversation *conv, const char *key) {
++    const char *value = conv ? (const char *)purple_conversation_get_data(conv, key) : NULL;
++    return value ? value : "";
++}
++
+ static int
+-send_message(PurpleConnection *pc, const gchar *who, const gchar *message, gboolean is_group, const gchar *reply_to) {
++send_message(PurpleConnection *pc, PurpleConversation *conv, const gchar *who, const gchar *message, gboolean is_group, const gchar *reply_to) {
+     PurpleAccount *account = purple_connection_get_account(pc);
+     char *w = (char *)who; // cgo does not suport const
+     char *m = (char *)message; // cgo does not suport const
+     char *r = (char *)(reply_to ? reply_to : ""); // webOS replies: "" == not a reply
+-    return gowhatsapp_go_send_message(account, w, m, is_group, r);
++    return gowhatsapp_go_send_message(account, w, m, is_group, r,
++        (char *)webos_send_extra(conv, "webos-send-location"),
++        (char *)webos_send_extra(conv, "webos-send-contact"),
++        (char *)webos_send_extra(conv, "webos-send-mentions"));
+ }
+ 
+ int
+@@ -19,7 +31,7 @@ gowhatsapp_send_im(PurpleConnection *pc, const gchar *who, const gchar *message,
+         // as "webos-reply-to" on the conversation before serv_send_im; read + clear it and pass it down.
+         PurpleConversation *conv = purple_find_conversation_with_account(PURPLE_CONV_TYPE_IM, who, purple_connection_get_account(pc));
+         gchar *reply_to = conv ? (gchar *)purple_conversation_get_data(conv, "webos-reply-to") : NULL;
+-        int ret = send_message(pc, who, message, FALSE, reply_to);
++        int ret = send_message(pc, conv, who, message, FALSE, reply_to);
+         if (reply_to != NULL) {
+             purple_conversation_set_data(conv, "webos-reply-to", NULL);
+             g_free(reply_to);
+@@ -41,7 +53,7 @@ gowhatsapp_send_chat(
+             } else {
+                 // webOS replies: read + clear the reply target the transport stashed on this chat conv.
+                 gchar *reply_to = (gchar *)purple_conversation_get_data(conv, "webos-reply-to");
+-                int ret = send_message(pc, who, message, TRUE, reply_to);
++                int ret = send_message(pc, conv, who, message, TRUE, reply_to);
+                 if (reply_to != NULL) {
+                     purple_conversation_set_data(conv, "webos-reply-to", NULL);
+                     g_free(reply_to);
+diff --git a/group_events.go b/group_events.go
+new file mode 100644
+index 0000000..125b083
+--- /dev/null
++++ b/group_events.go
+@@ -0,0 +1,301 @@
++package main
++
++import (
++	"context"
++	"fmt"
++	"strings"
++	"time"
++
++	"go.mau.fi/whatsmeow/types"
++	"go.mau.fi/whatsmeow/types/events"
++)
++
++/*
++ * webOS: a WhatsApp group's own news, as notice lines in its chat, the way the WhatsApp app tells
++ * it: "You removed Ann", "Ann added Ben", "Ben left", "Ann changed the group name to “X”", "Ann
++ * made Ben an admin", "Ben joined using this group's invite link". Nothing was said before, so a
++ * member removed from another phone, or from here, only left the member list.
++ *
++ * They are system lines (purple_display_system_message_at), as tdlib-purple writes a Telegram
++ * group's news, so the transport keeps them in the thread without a banner. Each has the time of
++ * the change: one made while we were offline comes on connecting and is an old message like any
++ * other (the glue drops it when "discard old messages" is on).
++ */
++func (handler *Handler) handle_group_info(evt *events.GroupInfo) {
++	chat := evt.JID.ToNonAD().String()
++	if evt.Name != nil {
++		// the chat has its new name before the line saying so (purple_rename_group), so the line,
++		// and the app's thread with it, comes under the new name
++		purple_rename_group(handler, evt.JID, evt.Name.Name)
++	}
++	for _, line := range group_event_notices(evt, handler.group_people()) {
++		purple_display_system_message_at(handler.account, chat, true, line, evt.Timestamp)
++	}
++	if group_members_changed(evt) && !handler.left_group(evt) {
++		handler.refresh_group_soon(evt.JID.ToNonAD())
++	}
++}
++
++// How group_event_notices names people: whether someone is us, their name, and the phone-number
++// JID a LID is known by (the JID itself otherwise). Functions, so the text is tested without a
++// connection.
++type groupPeople struct {
++	isSelf func(types.JID) bool
++	nameOf func(types.JID) string
++	pnOf   func(types.JID) types.JID
++}
++
++func (handler *Handler) group_people() groupPeople {
++	return groupPeople{
++		isSelf: handler.is_self,
++		nameOf: handler.member_name,
++		pnOf: func(jid types.JID) types.JID {
++			return handler.lidToPn(jid, "naming a group member")
++		},
++	}
++}
++
++// Whether jid is our own account, by its phone number or by its LID.
++func (handler *Handler) is_self(jid types.JID) bool {
++	if handler == nil || handler.client == nil || handler.client.Store == nil || jid.User == "" {
++		return false
++	}
++	store := handler.client.Store
++	if store.ID != nil && jid.ToNonAD() == store.ID.ToNonAD() {
++		return true
++	}
++	lid := store.GetLID()
++	return !lid.IsEmpty() && jid.ToNonAD() == lid.ToNonAD()
++}
++
++// The name a group notice gives a member: as a mention names them (the buddy alias, else the names
++// WhatsApp's contact store has), else their number. A LID says nothing of the number, so it is
++// looked up; who has none known is "Unknown user", never the LID.
++func (handler *Handler) member_name(jid types.JID) string {
++	pn := handler.lidToPn(jid, "naming a group member").ToNonAD()
++	alias := purple_get_alias(handler.account, pn.String())
++	var names []string
++	if handler.client.Store.Contacts != nil {
++		for _, who := range []types.JID{pn, jid.ToNonAD()} {
++			if info, err := handler.client.Store.Contacts.GetContact(context.TODO(), who); err == nil {
++				names = append(names, info.FullName, info.FirstName, info.BusinessName, info.PushName)
++			}
++		}
++	}
++	return pick_member_name(alias, pn, names...)
++}
++
++// pick_mention_name, with "+<digits>" for the number, and "Unknown user" for a LID with no number.
++func pick_member_name(alias string, pn types.JID, names ...string) string {
++	if name := pick_mention_name(alias, pn, names...); name != pn.User {
++		return name
++	}
++	if phone := phone_of(pn); phone != "" {
++		return phone
++	}
++	return "Unknown user"
++}
++
++// Whether the change touches who is in the group or what they may do (or its name), so the chat's
++// member list (Group Info) is read again.
++func group_members_changed(evt *events.GroupInfo) bool {
++	return len(evt.Join) > 0 || len(evt.Leave) > 0 || len(evt.Promote) > 0 || len(evt.Demote) > 0 || evt.Name != nil
++}
++
++// Whether we are among those who left or were removed: the group then no longer answers us.
++func (handler *Handler) left_group(evt *events.GroupInfo) bool {
++	for _, jid := range evt.Leave {
++		if handler.is_self(jid) || handler.is_self(handler.lidToPn(jid, "leaving a group")) {
++			return true
++		}
++	}
++	return false
++}
++
++// Changes come in bursts - several on connecting, after a time offline - so the member list is
++// read once a little after the last of them, not once for each.
++const groupRefreshDelay = 2 * time.Second
++
++func (handler *Handler) refresh_group_soon(jid types.JID) {
++	if _, pending := handler.groupRefreshes.LoadOrStore(jid, true); pending {
++		return
++	}
++	go func() {
++		time.Sleep(groupRefreshDelay)
++		handler.groupRefreshes.Delete(jid)
++		info, err := handler.client.GetGroupInfo(context.Background(), jid)
++		if err != nil || info == nil {
++			handler.log.Warnf("Could not read group %s again after a change: %v", jid, err)
++			return
++		}
++		purple_update_group(handler, info)
++	}()
++}
++
++/*
++ * The notices for one change, in the order the WhatsApp app shows them. Empty for a change no
++ * notice is made for (locking the group info, disappearing messages, ...).
++ */
++func group_event_notices(evt *events.GroupInfo, people groupPeople) []string {
++	var lines []string
++	sender, hasSender := first_jid(evt.SenderPN, evt.Sender)
++
++	if evt.Name != nil {
++		who, known := sender, hasSender
++		if !known {
++			who, known = first_jid(&evt.Name.NameSetByPN, &evt.Name.NameSetBy)
++		}
++		if known {
++			lines = append(lines, fmt.Sprintf("%s changed the group name to “%s”", people.subject(who), evt.Name.Name))
++		} else {
++			lines = append(lines, fmt.Sprintf("The group name was changed to “%s”", evt.Name.Name))
++		}
++	}
++
++	if evt.Topic != nil {
++		who, known := sender, hasSender
++		if !known {
++			who, known = first_jid(&evt.Topic.TopicSetByPN, &evt.Topic.TopicSetBy)
++		}
++		verb := "changed"
++		if evt.Topic.TopicDeleted {
++			verb = "deleted"
++		}
++		if known {
++			lines = append(lines, fmt.Sprintf("%s %s the group description", people.subject(who), verb))
++		} else {
++			lines = append(lines, fmt.Sprintf("The group description was %s", verb))
++		}
++	}
++
++	if len(evt.Join) > 0 {
++		added := people.without(evt.Join, sender, hasSender)
++		switch {
++		case evt.JoinReason == "invite":
++			lines = append(lines, people.list(evt.Join)+" joined using this group's invite link")
++		case !hasSender || len(added) == 0:
++			lines = append(lines, people.list(evt.Join)+" joined")
++		default:
++			lines = append(lines, fmt.Sprintf("%s added %s", people.subject(sender), people.objects(added)))
++		}
++	}
++
++	if len(evt.Leave) > 0 {
++		removed := people.without(evt.Leave, sender, hasSender)
++		if !hasSender {
++			lines = append(lines, people.list(evt.Leave)+" left")
++		} else {
++			if len(removed) < len(evt.Leave) {
++				lines = append(lines, people.subject(sender)+" left")
++			}
++			if len(removed) > 0 {
++				lines = append(lines, fmt.Sprintf("%s removed %s", people.subject(sender), people.objects(removed)))
++			}
++		}
++	}
++
++	if len(evt.Promote) > 0 {
++		if hasSender {
++			lines = append(lines, fmt.Sprintf("%s made %s %s", people.subject(sender), people.objects(evt.Promote), admins(len(evt.Promote))))
++		} else {
++			lines = append(lines, fmt.Sprintf("%s %s now %s", people.list(evt.Promote), people.be(evt.Promote), admins(len(evt.Promote))))
++		}
++	}
++
++	if len(evt.Demote) > 0 {
++		lines = append(lines, fmt.Sprintf("%s %s no longer %s", people.list(evt.Demote), people.be(evt.Demote), admins(len(evt.Demote))))
++	}
++	return lines
++}
++
++// The first of the JIDs that is set.
++func first_jid(jids ...*types.JID) (types.JID, bool) {
++	for _, jid := range jids {
++		if jid != nil && !jid.IsEmpty() {
++			return *jid, true
++		}
++	}
++	return types.EmptyJID, false
++}
++
++func admins(n int) string {
++	if n == 1 {
++		return "an admin"
++	}
++	return "admins"
++}
++
++func (people groupPeople) self(jid types.JID) bool {
++	return people.isSelf(jid) || people.isSelf(people.pnOf(jid))
++}
++
++// Whether a and b are the same person, one perhaps by LID and the other by number. We are known
++// by both, even before the store maps our LID.
++func (people groupPeople) same(a, b types.JID) bool {
++	return a.ToNonAD() == b.ToNonAD() || people.pnOf(a).ToNonAD() == people.pnOf(b).ToNonAD() ||
++		(people.self(a) && people.self(b))
++}
++
++// jids without who (when there is a who).
++func (people groupPeople) without(jids []types.JID, who types.JID, hasWho bool) []types.JID {
++	var rest []types.JID
++	for _, jid := range jids {
++		if !hasWho || !people.same(jid, who) {
++			rest = append(rest, jid)
++		}
++	}
++	return rest
++}
++
++// A name, or "You"/"you".
++func (people groupPeople) name(jid types.JID, you string) string {
++	if people.self(jid) {
++		return you
++	}
++	return people.nameOf(jid)
++}
++
++// Who did something, at the start of a line.
++func (people groupPeople) subject(jid types.JID) string {
++	return people.name(jid, "You")
++}
++
++// Who something was done to: "Ben", "Ben and you", "Ben, Cara and Dan".
++func (people groupPeople) objects(jids []types.JID) string {
++	names := make([]string, len(jids))
++	for i, jid := range jids {
++		names[i] = people.name(jid, "you")
++	}
++	return join_names(names)
++}
++
++// Several who did something, at the start of a line.
++func (people groupPeople) list(jids []types.JID) string {
++	names := make([]string, len(jids))
++	for i, jid := range jids {
++		you := "you"
++		if i == 0 {
++			you = "You"
++		}
++		names[i] = people.name(jid, you)
++	}
++	return join_names(names)
++}
++
++// "is", or "are" for more than one, and for "You" alone.
++func (people groupPeople) be(jids []types.JID) string {
++	if len(jids) == 1 && !people.self(jids[0]) {
++		return "is"
++	}
++	return "are"
++}
++
++func join_names(names []string) string {
++	switch len(names) {
++	case 0:
++		return ""
++	case 1:
++		return names[0]
++	}
++	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
++}
+diff --git a/group_events_test.go b/group_events_test.go
+new file mode 100644
+index 0000000..daf3f45
+--- /dev/null
++++ b/group_events_test.go
+@@ -0,0 +1,163 @@
++package main
++
++import (
++	"reflect"
++	"testing"
++	"time"
++
++	"go.mau.fi/whatsmeow/types"
++	"go.mau.fi/whatsmeow/types/events"
++)
++
++var (
++	gAnn    = types.NewJID("31611111111", types.DefaultUserServer)
++	gBen    = types.NewJID("31622222222", types.DefaultUserServer)
++	gCara   = types.NewJID("31633333333", types.DefaultUserServer)
++	gMe     = types.NewJID("31600000000", types.DefaultUserServer)
++	gMeLid  = types.NewJID("900000000000001", types.HiddenUserServer)
++	gAnnLid = types.NewJID("900000000000011", types.HiddenUserServer)
++	gMeLid2 = types.NewJID("900000000000002", types.HiddenUserServer) // ours by the store's LID map only
++	gGroup  = types.NewJID("120363000000000001", types.GroupServer)
++)
++
++// Ann, Ben and Cara by name, us by number or LID, Ann's LID known as her number.
++func testGroupPeople() groupPeople {
++	names := map[types.JID]string{gAnn: "Ann", gBen: "Ben", gCara: "Cara"}
++	pnOf := func(j types.JID) types.JID {
++		switch j {
++		case gAnnLid:
++			return gAnn
++		case gMeLid2:
++			return gMe
++		}
++		return j
++	}
++	return groupPeople{
++		isSelf: func(j types.JID) bool { return j == gMe || j == gMeLid },
++		// as member_name: by the number a LID is known by
++		nameOf: func(j types.JID) string {
++			pn := pnOf(j)
++			if n, ok := names[pn]; ok {
++				return n
++			}
++			return pick_member_name(pn.String(), pn)
++		},
++		pnOf: pnOf,
++	}
++}
++
++func jidp(j types.JID) *types.JID { return &j }
++
++func notices(t *testing.T, evt events.GroupInfo, want ...string) {
++	t.Helper()
++	evt.JID = gGroup
++	evt.Timestamp = time.Unix(1700000000, 0)
++	got := group_event_notices(&evt, testGroupPeople())
++	if len(want) == 0 {
++		want = nil
++	}
++	if !reflect.DeepEqual(got, want) {
++		t.Errorf("got %q, want %q", got, want)
++	}
++}
++
++func TestGroupRemovedByUs(t *testing.T) {
++	notices(t, events.GroupInfo{Sender: jidp(gMeLid), Leave: []types.JID{gAnn}}, "You removed Ann")
++	notices(t, events.GroupInfo{Sender: jidp(gMe), Leave: []types.JID{gAnn, gBen, gCara}}, "You removed Ann, Ben and Cara")
++}
++
++func TestGroupRemovedUs(t *testing.T) {
++	notices(t, events.GroupInfo{Sender: jidp(gAnn), Leave: []types.JID{gMeLid}}, "Ann removed you")
++	notices(t, events.GroupInfo{Sender: jidp(gAnn), Leave: []types.JID{gMeLid2}}, "Ann removed you")
++}
++
++func TestGroupSomeoneLeft(t *testing.T) {
++	notices(t, events.GroupInfo{Sender: jidp(gBen), Leave: []types.JID{gBen}}, "Ben left")
++	notices(t, events.GroupInfo{Leave: []types.JID{gBen, gCara}}, "Ben and Cara left")
++	notices(t, events.GroupInfo{Sender: jidp(gMe), Leave: []types.JID{gMeLid}}, "You left")
++	// The sender by LID, the leaver by number: the same person
++	notices(t, events.GroupInfo{Sender: jidp(gAnnLid), Leave: []types.JID{gAnn}}, "Ann left")
++}
++
++func TestGroupAdded(t *testing.T) {
++	notices(t, events.GroupInfo{Sender: jidp(gAnn), Join: []types.JID{gBen}}, "Ann added Ben")
++	notices(t, events.GroupInfo{Sender: jidp(gAnn), Join: []types.JID{gBen, gMe}}, "Ann added Ben and you")
++	// The sender's number goes before their LID
++	notices(t, events.GroupInfo{Sender: jidp(gMeLid), SenderPN: jidp(gAnn), Join: []types.JID{gBen}}, "Ann added Ben")
++	// Who adds themselves has joined
++	notices(t, events.GroupInfo{Sender: jidp(gAnnLid), Join: []types.JID{gAnn}}, "Ann joined")
++	notices(t, events.GroupInfo{Join: []types.JID{gBen}}, "Ben joined")
++}
++
++func TestGroupJoinedByInviteLink(t *testing.T) {
++	notices(t, events.GroupInfo{Sender: jidp(gBen), JoinReason: "invite", Join: []types.JID{gBen}},
++		"Ben joined using this group's invite link")
++	notices(t, events.GroupInfo{JoinReason: "invite", Join: []types.JID{gMe}},
++		"You joined using this group's invite link")
++}
++
++func TestGroupNameAndDescription(t *testing.T) {
++	notices(t, events.GroupInfo{Sender: jidp(gAnn), Name: &types.GroupName{Name: "Physics"}},
++		"Ann changed the group name to “Physics”")
++	notices(t, events.GroupInfo{Name: &types.GroupName{Name: "Physics", NameSetBy: gMeLid}},
++		"You changed the group name to “Physics”")
++	notices(t, events.GroupInfo{Name: &types.GroupName{Name: "Physics"}}, "The group name was changed to “Physics”")
++	notices(t, events.GroupInfo{Sender: jidp(gAnn), Topic: &types.GroupTopic{Topic: "Homework"}},
++		"Ann changed the group description")
++	notices(t, events.GroupInfo{Sender: jidp(gAnn), Topic: &types.GroupTopic{TopicDeleted: true}},
++		"Ann deleted the group description")
++	notices(t, events.GroupInfo{Topic: &types.GroupTopic{TopicSetBy: gBen}}, "Ben changed the group description")
++}
++
++func TestGroupAdmins(t *testing.T) {
++	notices(t, events.GroupInfo{Sender: jidp(gAnn), Promote: []types.JID{gBen}}, "Ann made Ben an admin")
++	notices(t, events.GroupInfo{Sender: jidp(gAnn), Promote: []types.JID{gBen, gMe}}, "Ann made Ben and you admins")
++	notices(t, events.GroupInfo{Promote: []types.JID{gBen}}, "Ben is now an admin")
++	notices(t, events.GroupInfo{Sender: jidp(gAnn), Demote: []types.JID{gBen}}, "Ben is no longer an admin")
++	notices(t, events.GroupInfo{Sender: jidp(gAnn), Demote: []types.JID{gMeLid}}, "You are no longer an admin")
++	notices(t, events.GroupInfo{Demote: []types.JID{gBen, gCara}}, "Ben and Cara are no longer admins")
++}
++
++func TestGroupSeveralChangesAtOnce(t *testing.T) {
++	notices(t, events.GroupInfo{Sender: jidp(gAnn), Name: &types.GroupName{Name: "X"}, Join: []types.JID{gBen}, Leave: []types.JID{gCara}},
++		"Ann changed the group name to “X”", "Ann added Ben", "Ann removed Cara")
++}
++
++func TestGroupChangesWithoutNotice(t *testing.T) {
++	notices(t, events.GroupInfo{Sender: jidp(gAnn), Locked: &types.GroupLocked{IsLocked: true}})
++}
++
++func TestGroupMemberNames(t *testing.T) {
++	// Nobody known: the number with its "+", never the LID
++	notices(t, events.GroupInfo{Sender: jidp(gAnn), Leave: []types.JID{types.NewJID("31644444444", types.DefaultUserServer)}},
++		"Ann removed +31644444444")
++	notices(t, events.GroupInfo{Leave: []types.JID{types.NewJID("900000000000099", types.HiddenUserServer)}}, "Unknown user left")
++	if got := pick_member_name("Anna", gAnn, "Anna K"); got != "Anna" {
++		t.Errorf("alias: %q", got)
++	}
++	if got := pick_member_name(gAnn.String(), gAnn, "", "Anna K"); got != "Anna K" {
++		t.Errorf("store: %q", got)
++	}
++}
++
++func TestGroupMembersChangedReadsTheGroupAgain(t *testing.T) {
++	for _, evt := range []events.GroupInfo{{Join: []types.JID{gBen}}, {Leave: []types.JID{gBen}},
++		{Promote: []types.JID{gBen}}, {Demote: []types.JID{gBen}}, {Name: &types.GroupName{Name: "X"}}} {
++		if !group_members_changed(&evt) {
++			t.Errorf("%+v: not read again", evt)
++		}
++	}
++	if group_members_changed(&events.GroupInfo{Topic: &types.GroupTopic{}}) {
++		t.Errorf("a description is no member change")
++	}
++}
++
++// Our own rename, from here or another phone, as WhatsApp tells it back
++func TestGroupOurOwnRenameComesBack(t *testing.T) {
++	notices(t, events.GroupInfo{Sender: jidp(gMeLid), SenderPN: jidp(gMe), Name: &types.GroupName{Name: "Physics", NameSetBy: gMeLid}},
++		"You changed the group name to “Physics”")
++	notices(t, events.GroupInfo{Sender: jidp(gMeLid2), Name: &types.GroupName{Name: "Physics"}}, "You changed the group name to “Physics”")
++	if !group_members_changed(&events.GroupInfo{Name: &types.GroupName{Name: "Physics"}}) {
++		t.Errorf("a new name does not read the group again")
++	}
++}
+diff --git a/group_phone_test.go b/group_phone_test.go
+new file mode 100644
+index 0000000..ea500e3
+--- /dev/null
++++ b/group_phone_test.go
+@@ -0,0 +1,94 @@
++package main
++
++import (
++	"testing"
++
++	"go.mau.fi/whatsmeow/types"
++)
++
++func lidMap(known map[string]string, asked *[]types.JID) func(types.JID) types.JID {
++	return func(lid types.JID) types.JID {
++		if asked != nil {
++			*asked = append(*asked, lid)
++		}
++		if pn, ok := known[lid.User]; ok {
++			return types.NewJID(pn, types.DefaultUserServer)
++		}
++		return types.EmptyJID
++	}
++}
++
++func TestAMemberByNumberIsThatNumber(t *testing.T) {
++	p := types.GroupParticipant{JID: types.NewJID("31611111111", types.DefaultUserServer)}
++	if got := participant_phone(p, nil); got != "+31611111111" {
++		t.Fatalf("got %q", got)
++	}
++}
++
++func TestALidMemberTakesTheNumberWhatsAppSent(t *testing.T) {
++	lid := types.NewJID("123456789012345", types.HiddenUserServer)
++	p := types.GroupParticipant{JID: lid, LID: lid, PhoneNumber: types.NewJID("46701234567", types.DefaultUserServer)}
++	var asked []types.JID
++	if got := participant_phone(p, lidMap(map[string]string{"123456789012345": "491701234567"}, &asked)); got != "+46701234567" {
++		t.Fatalf("got %q", got)
++	}
++	if len(asked) != 0 {
++		t.Errorf("the store was asked although the number came with the member: %v", asked)
++	}
++}
++
++func TestALidMemberTakesTheNumberTheStoreKnows(t *testing.T) {
++	lid := types.NewJID("123456789012345", types.HiddenUserServer)
++	var asked []types.JID
++	got := participant_phone(types.GroupParticipant{JID: lid, LID: lid}, lidMap(map[string]string{"123456789012345": "31622222222"}, &asked))
++	if got != "+31622222222" {
++		t.Fatalf("got %q", got)
++	}
++	if len(asked) != 1 || asked[0] != lid {
++		t.Errorf("asked %v, want the LID once", asked)
++	}
++	// Only the JID filled in (no LID field), as an older reply has it.
++	if got := participant_phone(types.GroupParticipant{JID: lid}, lidMap(map[string]string{"123456789012345": "31622222222"}, nil)); got != "+31622222222" {
++		t.Fatalf("by the JID: got %q", got)
++	}
++}
++
++func TestNoNumberForALidNobodyKnows(t *testing.T) {
++	lid := types.NewJID("123456789012345", types.HiddenUserServer)
++	p := types.GroupParticipant{JID: lid, LID: lid}
++	var asked []types.JID
++	if got := participant_phone(p, lidMap(nil, &asked)); got != "" {
++		t.Fatalf("got %q", got)
++	}
++	if len(asked) != 1 {
++		t.Errorf("asked %d times, want once", len(asked))
++	}
++	if got := participant_phone(p, nil); got != "" {
++		t.Fatalf("without a store: got %q", got)
++	}
++}
++
++func TestALidIsNeverTakenForANumber(t *testing.T) {
++	lid := types.NewJID("123456789012345", types.HiddenUserServer)
++	other := func(types.JID) types.JID { return types.NewJID("999", types.HiddenUserServer) }
++	if got := participant_phone(types.GroupParticipant{JID: lid, LID: lid}, other); got != "" {
++		t.Fatalf("got %q", got)
++	}
++	bad := types.GroupParticipant{JID: types.NewJID("31a6", types.DefaultUserServer)}
++	if got := participant_phone(bad, nil); got != "" {
++		t.Fatalf("not digits: got %q", got)
++	}
++}
++
++func TestPhonesAreInTheMembersOrder(t *testing.T) {
++	lid := types.NewJID("123456789012345", types.HiddenUserServer)
++	ps := []types.GroupParticipant{
++		{JID: lid, LID: lid},
++		{JID: types.NewJID("31611111111", types.DefaultUserServer)},
++	}
++	var handler *Handler // no client: no store to ask
++	got := handler.participant_phones(ps)
++	if len(got) != 2 || got[0] != "" || got[1] != "+31611111111" {
++		t.Fatalf("got %q", got)
++	}
++}
+diff --git a/groups.go b/groups.go
+index 08ae982..2d33117 100644
+--- a/groups.go
++++ b/groups.go
+@@ -16,7 +16,9 @@ import (
+ func (handler *Handler) query_group_participants_retry(group_jid types.JID, seconds_backoff int, max_retries int, retry_count int) []types.GroupParticipant {
+ 	group, err := handler.client.GetGroupInfo(context.TODO(), group_jid)
+ 	if err == nil && group != nil {
+-		purple_update_group(handler.account, group)
++		// Always push the group name/subject, not only on a delayed retry. Otherwise a group whose
++		// info loaded on the first try never gets its subject and the chat shows the raw JID.
++		purple_update_group(handler, group)
+ 		if retry_count == 0 {
+ 			return group.Participants
+ 		}
+@@ -33,3 +35,66 @@ func (handler *Handler) query_group_participants_retry(group_jid types.JID, seco
+ 	}
+ 	return []types.GroupParticipant{}
+ }
++
++/*
++ * webOS: the phone number of a group member, "+<digits>", or "" when it is not known; the
++ * Messaging app's Group Info shows it under the name. A group WhatsApp addresses by LID gives its
++ * members as LIDs ("<id>@lid"), which say nothing of the number: it is the member's phone-number
++ * JID when that is what they are given as, else the number WhatsApp sent with the member, else
++ * the one pnForLid (the store's LID map) knows for their LID.
++ */
++func participant_phone(participant types.GroupParticipant, pnForLid func(types.JID) types.JID) string {
++	for _, jid := range []types.JID{participant.JID, participant.PhoneNumber} {
++		if phone := phone_of(jid); phone != "" {
++			return phone
++		}
++	}
++	if pnForLid == nil {
++		return ""
++	}
++	for i, lid := range []types.JID{participant.LID, participant.JID} {
++		if i == 1 && lid == participant.LID {
++			break // looked up already
++		}
++		if lid.Server == types.HiddenUserServer && lid.User != "" {
++			if phone := phone_of(pnForLid(lid.ToNonAD())); phone != "" {
++				return phone
++			}
++		}
++	}
++	return ""
++}
++
++// "+<digits>" for a phone-number JID, else "".
++func phone_of(jid types.JID) string {
++	if jid.Server != types.DefaultUserServer || jid.User == "" {
++		return ""
++	}
++	for _, c := range jid.User {
++		if c < '0' || c > '9' {
++			return ""
++		}
++	}
++	return "+" + jid.User
++}
++
++// webOS: the phone numbers of participants, in their order ("" for one whose is not known).
++func (handler *Handler) participant_phones(participants []types.GroupParticipant) []string {
++	var pnForLid func(types.JID) types.JID
++	if handler != nil && handler.client != nil && handler.client.Store != nil && handler.client.Store.LIDs != nil {
++		lids := handler.client.Store.LIDs
++		pnForLid = func(lid types.JID) types.JID {
++			pn, err := lids.GetPNForLID(context.TODO(), lid)
++			if err != nil {
++				handler.log.Warnf("Error while looking up LID \"%s\" for a group member's number: %v", lid.String(), err)
++				return types.EmptyJID
++			}
++			return pn
++		}
++	}
++	phones := make([]string, len(participants))
++	for i, participant := range participants {
++		phones[i] = participant_phone(participant, pnForLid)
++	}
++	return phones
++}
+diff --git a/handle_message.go b/handle_message.go
+index 336eabf..e020aaf 100644
+--- a/handle_message.go
++++ b/handle_message.go
+@@ -519,6 +519,11 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 			message = decrypted_message
+ 		}
+ 	}
++	// webOS: recent messages shared with new group members: a notice line, and the bundle dropped
++	// (history_notice.go)
++	if handler.handle_history_share(message, info) {
++		return
++	}
+ 	if message.SenderKeyDistributionMessage != nil {
+ 		// Apparently, a SenderKeyDistributionMessage can share the a message ID with a conversation message which is to arrive later
+ 		// I do not need this message type in the front-end, so I rather drop it
+@@ -589,12 +594,11 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 				}
+ 			}
+ 			if etm.Text != nil {
+-				etmText := *etm.Text
++				etmText := strip_mention_marks(*etm.Text)
+ 				for _, mentioned := range etm.GetContextInfo().GetMentionedJID() {
+ 					mentionedJID, err := types.ParseJID(mentioned)
+ 					if err == nil {
+-						alias := purple_get_alias(handler.account, handler.lidToPn(mentionedJID, "resolving mention").ToNonAD().String())
+-						etmText = strings.ReplaceAll(etmText, mentionedJID.User, alias)
++						etmText = replace_mention(etmText, mentionedJID.User, handler.mention_name(mentionedJID))
+ 					}
+ 				}
+ 				text += etmText
+@@ -709,12 +713,12 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 			// webOS edit-in-place: update the ORIGINAL bubble's text (found by editTargetId ==
+ 			// serviceMessageId) instead of posting a separate "[EDIT] ..." message. If we somehow lack the
+ 			// target id we fall through below to a normal display so the edit isn't silently lost.
+-			purple_handle_message_edit(handler.account, editTargetId, text)
++			purple_handle_message_edit(handler.account, editTargetId, strip_mention_marks(text))
+ 		} else {
+ 			if isEdit {
+ 				text = "[EDIT] " + text
+ 			}
+-			text := escape_text(text)
++			text := mention_marks_to_html(escape_text(text))
+ 			// note: info.PushName always denotes the sender (not the chat)
+ 			purple_display_text_message(handler.account, info.MessageSource.Chat.ToNonAD().String(), info.MessageSource.IsGroup, false, senderJid, &info.PushName, info.Timestamp, text, &info.ID, quotedText, quotedFrom, quotedId)
+ 		}
+@@ -727,11 +731,12 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 	// webOS: keep what a read receipt needs for each message received, under the chat's name as
+ 	// the conversation has it (as purple_display_text_message gives it above). Nothing ever did,
+ 	// so no read receipt was sent at all. Sent when the chat is read (glue/receipt.c), or at once with
+-	// the "immediately" setting.
++	// the "immediately" setting. It goes to the chat and sender as the message came (evt.Info,
++	// before lidToPn): to a chat WhatsApp addresses by LID, at the LID.
+ 	if !info.MessageSource.IsFromMe && !isEdit {
+-		chat := info.MessageSource.Chat.ToNonAD()
+-		handler.mark_read_defer(info.ID, chat, info.MessageSource.Sender)
+-		handler.mark_read_if_on_receival(chat)
++		key := info.MessageSource.Chat.ToNonAD()
++		handler.mark_read_defer(info.ID, key, evt.Info.MessageSource.Chat.ToNonAD(), evt.Info.MessageSource.Sender)
++		handler.mark_read_if_on_receival(key)
+ 	}
+ }
+ 
+diff --git a/handler.go b/handler.go
+index 6e37610..3020be3 100644
+--- a/handler.go
++++ b/handler.go
+@@ -8,6 +8,7 @@ import "C"
+ import (
+ 	"fmt"
+ 	"net/http"
++	"sync"
+ 
+ 	"go.mau.fi/whatsmeow"
+ 	"go.mau.fi/whatsmeow/appstate"
+@@ -31,6 +32,7 @@ type Handler struct {
+ 	newsletterSeen      map[types.MessageID]bool // dedup WhatsApp Channel posts (live delivery vs history replay)
+ 	newsletterSeenOrder []types.MessageID        // FIFO order for bounding newsletterSeen
+ 	pollTally           *pollTally               // webOS: the votes on each poll (poll_tally.go)
++	groupRefreshes      sync.Map                 // webOS: groups whose member list is read again shortly (group_events.go)
+ 	pictureRequests  chan ProfilePictureRequest
+ 	httpClient       *http.Client // for executing picture requests
+ }
+@@ -180,6 +182,10 @@ func (handler *Handler) eventHandler(rawEvt interface{}) {
+ 				purple_handle_message_edit(handler.account, evt.CallID, text)
+ 			}
+ 		}
++	case *events.GroupInfo:
++		// webOS: someone joined, left, was added or removed, made an admin or no longer one, or
++		// the group's name or description changed: say so in the group (group_events.go).
++		handler.handle_group_info(evt)
+ 	//case *events.JoinedGroup:
+ 	// TODO
+ 	// received when being added to a group directly
+diff --git a/history_notice.go b/history_notice.go
+new file mode 100644
+index 0000000..f16ef54
+--- /dev/null
++++ b/history_notice.go
+@@ -0,0 +1,108 @@
++package main
++
++import (
++	"fmt"
++
++	"go.mau.fi/whatsmeow/proto/waE2E"
++	"go.mau.fi/whatsmeow/types"
++)
++
++/*
++ * webOS: a group member may share the group's recent messages with people newly added to it. The
++ * group then gets a MessageHistoryNotice, which the WhatsApp app shows to everyone, and the new
++ * members a MessageHistoryBundle with the messages themselves (as media). Neither carries any text,
++ * so handle_message showed nothing for either.
++ *
++ * The notice is now a notice line in the group, as a group's own news is (group_events.go): "Ann
++ * shared 12 recent messages with Ben and Cara". The bundle is dropped: the messages in it are not
++ * read, and there is nothing to show for it.
++ */
++func (handler *Handler) handle_history_share(message *waE2E.Message, info types.MessageInfo) bool {
++	line, handled := history_share(message, info.MessageSource.Sender, info.MessageSource.IsFromMe, handler.group_people())
++	if !handled {
++		return false
++	}
++	if line == "" {
++		handler.log.Debugf("Ignoring MessageHistoryBundle %s.", info.ID)
++		return true
++	}
++	purple_display_system_message_at(handler.account, info.MessageSource.Chat.ToNonAD().String(), info.MessageSource.IsGroup, line, info.Timestamp)
++	return true
++}
++
++/*
++ * Whether message is a shared message history (handled), and the notice line to show for it: none
++ * for the bundle, which is dropped.
++ */
++func history_share(message *waE2E.Message, sender types.JID, fromMe bool, people groupPeople) (line string, handled bool) {
++	if notice := message.GetMessageHistoryNotice(); notice != nil {
++		return history_notice_text(notice.GetMessageHistoryMetadata(), sender, fromMe, people), true
++	}
++	if message.GetMessageHistoryBundle() != nil {
++		return "", true
++	}
++	return "", false
++}
++
++// More receivers than this are told as the first two and "N others".
++const historyNoticeMaxNames = 3
++
++/*
++ * "Ann shared 12 recent messages with Ben and Cara", "You shared 1 recent message with Ben",
++ * "Ann shared recent messages with you" (no count), "Ann shared 5 recent messages" (no receivers),
++ * "Ann shared 5 recent messages with Ben, Cara and 2 others" ("you, Ben and 3 others" when we are
++ * one of them). Names as group_event_notices gives
++ * them; a receiver that is no JID is left out. Without a sender: "Recent messages were shared
++ * with Ben".
++ */
++func history_notice_text(meta *waE2E.MessageHistoryMetadata, sender types.JID, fromMe bool, people groupPeople) string {
++	var receivers []types.JID
++	for _, receiver := range meta.GetHistoryReceivers() {
++		jid, err := types.ParseJID(receiver)
++		if err != nil || jid.User == "" {
++			continue
++		}
++		if len(people.without(receivers, jid, true)) < len(receivers) {
++			continue // the same person twice, perhaps by number and by LID
++		}
++		receivers = append(receivers, jid)
++	}
++
++	what, were := "recent messages", " were shared"
++	if count := meta.GetMessageCount(); count == 1 {
++		what, were = "1 recent message", " was shared"
++	} else if count > 1 {
++		what = fmt.Sprintf("%d recent messages", count)
++	}
++
++	with := ""
++	if len(receivers) > historyNoticeMaxNames {
++		// We are among those named, not among the others
++		for i, jid := range receivers {
++			if people.self(jid) {
++				receivers = append([]types.JID{jid}, append(receivers[:i:i], receivers[i+1:]...)...)
++				break
++			}
++		}
++		with = " with " + join_names([]string{people.name(receivers[0], "you"), people.name(receivers[1], "you"),
++			fmt.Sprintf("%d others", len(receivers)-2)})
++	} else if len(receivers) > 0 {
++		with = " with " + people.objects(receivers)
++	}
++
++	switch {
++	case fromMe:
++		return "You shared " + what + with
++	case sender.User == "":
++		return upper_first(what) + were + with
++	}
++	return people.subject(sender) + " shared " + what + with
++}
++
++// s with its first letter upper case ("recent messages" -> "Recent messages"); s is ASCII here.
++func upper_first(s string) string {
++	if s == "" || s[0] < 'a' || s[0] > 'z' {
++		return s
++	}
++	return string(s[0]-'a'+'A') + s[1:]
++}
+diff --git a/history_notice_test.go b/history_notice_test.go
+new file mode 100644
+index 0000000..a8253c8
+--- /dev/null
++++ b/history_notice_test.go
+@@ -0,0 +1,112 @@
++package main
++
++import (
++	"testing"
++
++	"go.mau.fi/whatsmeow/proto/waE2E"
++	"go.mau.fi/whatsmeow/types"
++)
++
++var (
++	gDan = types.NewJID("31655555555", types.DefaultUserServer)
++	gEve = types.NewJID("31666666666", types.DefaultUserServer)
++)
++
++func historyMeta(count int64, receivers ...types.JID) *waE2E.MessageHistoryMetadata {
++	meta := &waE2E.MessageHistoryMetadata{}
++	if count >= 0 {
++		meta.MessageCount = &count
++	}
++	for _, r := range receivers {
++		meta.HistoryReceivers = append(meta.HistoryReceivers, r.String())
++	}
++	return meta
++}
++
++func historyNotice(t *testing.T, meta *waE2E.MessageHistoryMetadata, sender types.JID, fromMe bool, want string) {
++	t.Helper()
++	got, handled := history_share(&waE2E.Message{MessageHistoryNotice: &waE2E.MessageHistoryNotice{MessageHistoryMetadata: meta}},
++		sender, fromMe, testGroupPeople())
++	if !handled || got != want {
++		t.Errorf("got %q (handled %v), want %q", got, handled, want)
++	}
++}
++
++func TestHistoryNoticeSaysWhoSharedHowManyWithWhom(t *testing.T) {
++	historyNotice(t, historyMeta(12, gBen, gCara), gAnn, false, "Ann shared 12 recent messages with Ben and Cara")
++	historyNotice(t, historyMeta(1, gBen), gAnn, false, "Ann shared 1 recent message with Ben")
++	historyNotice(t, historyMeta(3, gBen, gCara, gDan), gAnn, false, "Ann shared 3 recent messages with Ben, Cara and +31655555555")
++	// The sender by LID, as the number it is known by
++	historyNotice(t, historyMeta(2, gBen), gAnnLid, false, "Ann shared 2 recent messages with Ben")
++}
++
++func TestHistoryNoticeWithoutReceivers(t *testing.T) {
++	historyNotice(t, historyMeta(5), gAnn, false, "Ann shared 5 recent messages")
++	historyNotice(t, &waE2E.MessageHistoryMetadata{HistoryReceivers: []string{}, MessageCount: new(int64(5))}, gAnn, false,
++		"Ann shared 5 recent messages")
++	// Receivers that are no JID are left out, not shown as they came
++	historyNotice(t, &waE2E.MessageHistoryMetadata{HistoryReceivers: []string{"", "@s.whatsapp.net"}, MessageCount: new(int64(5))}, gAnn, false,
++		"Ann shared 5 recent messages")
++}
++
++func TestHistoryNoticeWithoutCount(t *testing.T) {
++	historyNotice(t, historyMeta(-1, gBen), gAnn, false, "Ann shared recent messages with Ben")
++	historyNotice(t, historyMeta(0, gBen), gAnn, false, "Ann shared recent messages with Ben")
++	historyNotice(t, historyMeta(-1), gAnn, false, "Ann shared recent messages")
++	// No metadata at all
++	historyNotice(t, nil, gAnn, false, "Ann shared recent messages")
++}
++
++func TestHistoryNoticeManyReceivers(t *testing.T) {
++	historyNotice(t, historyMeta(9, gBen, gCara, gDan, gEve), gAnn, false, "Ann shared 9 recent messages with Ben, Cara and 2 others")
++	historyNotice(t, historyMeta(9, gBen, gCara, gDan, gEve, gAnn), gMe, true, "You shared 9 recent messages with Ben, Cara and 3 others")
++	// We are named, not one of the others
++	historyNotice(t, historyMeta(9, gBen, gCara, gDan, gMeLid), gAnn, false, "Ann shared 9 recent messages with you, Ben and 2 others")
++}
++
++func TestHistoryNoticeFromUs(t *testing.T) {
++	historyNotice(t, historyMeta(4, gBen), gMe, true, "You shared 4 recent messages with Ben")
++	// Our own other phone, by our LID, or by the store's map of it
++	historyNotice(t, historyMeta(4, gBen), gMeLid, false, "You shared 4 recent messages with Ben")
++	historyNotice(t, historyMeta(4, gBen), gMeLid2, false, "You shared 4 recent messages with Ben")
++	historyNotice(t, historyMeta(4, gBen), types.EmptyJID, true, "You shared 4 recent messages with Ben")
++}
++
++func TestHistoryNoticeToUs(t *testing.T) {
++	historyNotice(t, historyMeta(4, gMeLid), gAnn, false, "Ann shared 4 recent messages with you")
++	historyNotice(t, historyMeta(4, gBen, gMe), gAnn, false, "Ann shared 4 recent messages with Ben and you")
++}
++
++func TestHistoryNoticeNames(t *testing.T) {
++	// A LID with no number known is "Unknown user", never the LID
++	unknown := types.NewJID("900000000000099", types.HiddenUserServer)
++	historyNotice(t, historyMeta(2, unknown), gAnn, false, "Ann shared 2 recent messages with Unknown user")
++	historyNotice(t, historyMeta(2, gBen), unknown, false, "Unknown user shared 2 recent messages with Ben")
++	// Someone by LID and by number once
++	historyNotice(t, historyMeta(2, gAnnLid, gAnn, gBen), gCara, false, "Cara shared 2 recent messages with Ann and Ben")
++	// No sender known
++	historyNotice(t, historyMeta(2, gBen), types.EmptyJID, false, "2 recent messages were shared with Ben")
++	historyNotice(t, historyMeta(1, gBen), types.EmptyJID, false, "1 recent message was shared with Ben")
++	historyNotice(t, historyMeta(-1, gBen), types.EmptyJID, false, "Recent messages were shared with Ben")
++}
++
++func TestHistoryBundleIsDropped(t *testing.T) {
++	msg := &waE2E.Message{MessageHistoryBundle: &waE2E.MessageHistoryBundle{MessageHistoryMetadata: historyMeta(7, gBen)}}
++	if line, handled := history_share(msg, gAnn, false, testGroupPeople()); !handled || line != "" {
++		t.Errorf("bundle: %q, handled %v", line, handled)
++	}
++}
++
++func TestOtherMessagesAreNoHistoryShare(t *testing.T) {
++	for _, msg := range []*waE2E.Message{
++		{},
++		{Conversation: new("hello")},
++		{ExtendedTextMessage: &waE2E.ExtendedTextMessage{Text: new("hello")}},
++		{ImageMessage: &waE2E.ImageMessage{}},
++		{SenderKeyDistributionMessage: &waE2E.SenderKeyDistributionMessage{}},
++	} {
++		if line, handled := history_share(msg, gAnn, false, testGroupPeople()); handled || line != "" {
++			t.Errorf("%v: %q, handled %v", msg, line, handled)
++		}
++	}
++}
+diff --git a/mark_read.go b/mark_read.go
+index ff5231d..d9e7afa 100644
+--- a/mark_read.go
++++ b/mark_read.go
+@@ -26,12 +26,12 @@ func receipt_setting(handler *Handler) string {
+  *
+  * Except if the purple setting is "never send receipts". Then it does nothing.
+  */
+-func (handler *Handler) mark_read_defer(id types.MessageID, chat types.JID, sender types.JID) {
++func (handler *Handler) mark_read_defer(id types.MessageID, key types.JID, chat types.JID, sender types.JID) {
+ 	never := C.GoString(C.GOWHATSAPP_SEND_RECEIPT_CHOICE_NEVER)
+ 	if never == receipt_setting(handler) {
+ 		return
+ 	}
+-	handler.deferredReceipts.add(chat, sender, id)
++	handler.deferredReceipts.add(key, chat, sender, id)
+ }
+ 
+ /*
+@@ -79,8 +79,8 @@ func (handler *Handler) mark_read_conversation(chat string) {
+  * This unconditionally sends all receipts stored in regard to the given chat.
+  * mark_read_defer(…) should have been called before.
+  */
+-func (handler *Handler) mark_read_unconditionally(chat types.JID) {
+-	senders := handler.deferredReceipts.take(chat)
++func (handler *Handler) mark_read_unconditionally(key types.JID) {
++	chat, senders := handler.deferredReceipts.take(key)
+ 	if senders != nil {
+ 		// webOS: off the caller's goroutine, which for the chat being read is libpurple's main
+ 		// loop: each receipt is a round trip to the server.
+diff --git a/mention_test.go b/mention_test.go
+new file mode 100644
+index 0000000..30ae1d8
+--- /dev/null
++++ b/mention_test.go
+@@ -0,0 +1,70 @@
++package main
++
++import (
++	"html"
++	"testing"
++
++	"go.mau.fi/whatsmeow/types"
++)
++
++var mentioned = types.NewJID("31611111111", types.DefaultUserServer)
++
++func TestAMentionTakesTheBuddyAlias(t *testing.T) {
++	if got := pick_mention_name("Anna", mentioned, "Anna Kowalski"); got != "Anna" {
++		t.Errorf("got %q", got)
++	}
++}
++
++func TestAMentionOfNoBuddyTakesTheStoresName(t *testing.T) {
++	for _, alias := range []string{"", mentioned.String(), "31611111111", "+31611111111"} {
++		if got := pick_mention_name(alias, mentioned, "", "  ", "Anna K", "mentioned"); got != "Anna K" {
++			t.Errorf("alias %q: got %q", alias, got)
++		}
++	}
++}
++
++func TestAMentionNobodyKnowsIsTheNumber(t *testing.T) {
++	if got := pick_mention_name(mentioned.String(), mentioned); got != "31611111111" {
++		t.Errorf("got %q", got)
++	}
++}
++
++func TestOnlyTheMentionIsReplaced(t *testing.T) {
++	got := replace_mention("@31611111111 call 31611111111 or @316111111112", "31611111111", "Anna")
++	if got != "\x02@Anna\x03 call 31611111111 or @316111111112" {
++		t.Errorf("got %q", got)
++	}
++	if got := replace_mention("@31611111111, @31611111111.", "31611111111", "Anna"); got != "\x02@Anna\x03, \x02@Anna\x03." {
++		t.Errorf("twice: %q", got)
++	}
++	if got := replace_mention("@123 hi", "", "Anna"); got != "@123 hi" {
++		t.Errorf("no user: %q", got)
++	}
++	if got := replace_mention("@123 hi", "123", ""); got != "@123 hi" {
++		t.Errorf("no name: %q", got)
++	}
++}
++
++func TestAMentionIsShownBold(t *testing.T) {
++	text := replace_mention("hi @31611111111 <3 & bye", "31611111111", "A<n>a")
++	got := mention_marks_to_html(html.EscapeString(text))
++	if got != "hi <b>@A&lt;n&gt;a</b> &lt;3 &amp; bye" {
++		t.Errorf("got %q", got)
++	}
++}
++
++func TestASendersOwnMarksMakeNoTags(t *testing.T) {
++	text := strip_mention_marks("a\x02b\x03c")
++	if got := mention_marks_to_html(html.EscapeString(text)); got != "abc" {
++		t.Errorf("got %q", got)
++	}
++	if got := replace_mention("@1 x", "1", "A\x03\x02n"); got != "\x02@An\x03 x" {
++		t.Errorf("name: %q", got)
++	}
++}
++
++func TestAnEditKeepsThePlainMention(t *testing.T) {
++	if got := strip_mention_marks(replace_mention("@1 x", "1", "Anna")); got != "@Anna x" {
++		t.Errorf("got %q", got)
++	}
++}
+diff --git a/presence.go b/presence.go
+index 98da276..5c80324 100644
+--- a/presence.go
++++ b/presence.go
+@@ -82,6 +82,9 @@ func (handler *Handler) send_typing(who string, typing bool) {
+ 		handler.log.Warnf("send_typing: %v is not a valid JID: %v", who, err)
+ 		return
+ 	}
++	// webOS: a chat WhatsApp addresses by LID takes its typing state at the LID. Sent to the phone
++	// number it went out (<chatstate to="…@s.whatsapp.net">) and was not shown to the other side.
++	recipient = handler.pnToLid(recipient)
+ 	state := types.ChatPresencePaused
+ 	if typing {
+ 		state = types.ChatPresenceComposing
+diff --git a/profile.go b/profile.go
+index 5bb3764..d70fcbd 100644
+--- a/profile.go
++++ b/profile.go
+@@ -9,6 +9,7 @@ import (
+ 	"context"
+ 	"io"
+ 	"net/http"
++	"strings"
+ 
+ 	"go.mau.fi/whatsmeow"
+ 	"go.mau.fi/whatsmeow/types"
+@@ -121,6 +122,21 @@ func (handler *Handler) lidToPn(jid types.JID, application_context string) types
+ 	return jid
+ }
+ 
++/*
++ * webOS: the LID a phone-number JID is known by, for what WhatsApp addresses by LID (a typing
++ * state); the JID itself when the store has none or it is not a phone number.
++ */
++func (handler *Handler) pnToLid(jid types.JID) types.JID {
++	if jid.Server != types.DefaultUserServer || handler.client == nil || handler.client.Store == nil || handler.client.Store.LIDs == nil {
++		return jid
++	}
++	lid, err := handler.client.Store.LIDs.GetLIDForPN(context.TODO(), jid.ToNonAD())
++	if err != nil || lid.IsEmpty() {
++		return jid
++	}
++	return lid
++}
++
+ func (handler *Handler) groupChatParticipantsLidToPn(participants []types.GroupParticipant, application_context string) []types.GroupParticipant {
+ 	for pi, participant := range participants {
+ 		jid := handler.lidToPn(participant.JID, application_context)
+@@ -132,3 +148,77 @@ func (handler *Handler) groupChatParticipantsLidToPn(participants []types.GroupP
+ 	}
+ 	return participants
+ }
++
++// webOS: the name a mention of jid is shown with. The text says "@<number>" (or "@<LID>"), and the
++// buddy list only has an alias for a buddy, which most of a group's members are not: purple's
++// alias for anyone else is the JID itself, so a mention showed as a number (W4). Then the names
++// WhatsApp's contact store has for them, as the bridge's display name takes them; the number last.
++func (handler *Handler) mention_name(jid types.JID) string {
++	pn := handler.lidToPn(jid, "resolving mention").ToNonAD()
++	alias := purple_get_alias(handler.account, pn.String())
++	var names []string
++	for _, who := range []types.JID{pn, jid.ToNonAD()} {
++		if info, err := handler.client.Store.Contacts.GetContact(context.TODO(), who); err == nil {
++			names = append(names, info.FullName, info.FirstName, info.BusinessName, info.PushName)
++		}
++	}
++	return pick_mention_name(alias, pn, names...)
++}
++
++// The buddy alias when there is one (not the JID or number purple falls back to), else the first
++// name the store has, else the number.
++func pick_mention_name(alias string, pn types.JID, names ...string) string {
++	if alias != "" && alias != pn.String() && alias != pn.User && alias != "+"+pn.User {
++		return alias
++	}
++	for _, n := range names {
++		if n = strings.TrimSpace(n); n != "" {
++			return n
++		}
++	}
++	return pn.User
++}
++
++// text with each "@<user>" mention as "@<name>", between mentionOpen and mentionClose; the same
++// digits elsewhere in the text stay, and so does a longer number that starts with them.
++func replace_mention(text string, user string, name string) string {
++	if user == "" || name == "" {
++		return text
++	}
++	at := "@" + user
++	var out strings.Builder
++	for {
++		i := strings.Index(text, at)
++		if i < 0 {
++			out.WriteString(text)
++			return out.String()
++		}
++		end := i + len(at)
++		out.WriteString(text[:i])
++		if end < len(text) && text[end] >= '0' && text[end] <= '9' {
++			out.WriteString(at)
++		} else {
++			out.WriteString(mentionOpen + "@" + strip_mention_marks(name) + mentionClose)
++		}
++		text = text[end:]
++	}
++}
++
++// webOS: a mention is shown bold, as Signal and Telegram show theirs. The text is plain until it is
++// HTML-escaped just before it is shown, so a mention is marked with two control characters that
++// escaping leaves alone, and the marks become <b> and </b> after it (mention_marks_to_html).
++const (
++	mentionOpen  = "\x02"
++	mentionClose = "\x03"
++)
++
++// text without the marks, so that a sender's own control characters make no tags, and so that a
++// text not shown as HTML (an edit) keeps its plain "@<name>"
++func strip_mention_marks(text string) string {
++	return strings.NewReplacer(mentionOpen, "", mentionClose, "").Replace(text)
++}
++
++// an escaped text with each marked mention bold
++func mention_marks_to_html(escaped string) string {
++	return strings.NewReplacer(mentionOpen, "<b>", mentionClose, "</b>").Replace(escaped)
++}
+diff --git a/send_message.go b/send_message.go
+index 22fabd7..578c0d4 100644
+--- a/send_message.go
++++ b/send_message.go
+@@ -162,7 +162,7 @@ func (handler *Handler) send_poll_vote(recipient types.JID, isGroup bool, poll_r
+  *
+  * Returns true on success.
+  */
+-func (handler *Handler) send_text_message(recipient types.JID, isGroup bool, message string, replyTo string) bool {
++func (handler *Handler) send_text_message(recipient types.JID, isGroup bool, message string, replyTo string, extras webosExtras) bool {
+ 	stripped_message, image_ids := decompose_html(message)
+ 	handler.log.Infof("After decomposing, message is „%s“ with %d images.", stripped_message, len(image_ids))
+ 	if len(image_ids) > 1 {
+@@ -195,19 +195,8 @@ func (handler *Handler) send_text_message(recipient types.JID, isGroup bool, mes
+ 		}
+ 		return handler.send_poll_vote(recipient, isGroup, poll_reference, choices)
+ 	}
+-	msg := &waE2E.Message{Conversation: &stripped_message}
+ 	expiration_days := purple_get_int(handler.account, C.GOWHATSAPP_EXPIRATION_OPTION, 0)
+ 	expiration_seconds := uint32(expiration_days) * 24 * 60 * 60
+-	if expiration_seconds > 0 {
+-		msg = &waE2E.Message{
+-			ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+-				Text: &stripped_message,
+-				ContextInfo: &waE2E.ContextInfo{
+-					Expiration: proto.Uint32(expiration_seconds),
+-				},
+-			},
+-		}
+-	}
+ 	is_reply, cached_message, stripped_message := handler.prepare_reply(recipient, stripped_message)
+ 	// webOS replies: the Messaging app sends the reply target's serviceMessageId out-of-band
+ 	// (webos-reply-to) rather than the "?reply <id>" text command. Resolve it from the cache and quote it.
+@@ -217,26 +206,62 @@ func (handler *Handler) send_text_message(recipient types.JID, isGroup bool, mes
+ 			is_reply = true
+ 		}
+ 	}
++	if is_reply && cached_message == nil {
++		purple_display_system_message(handler.account, recipient.ToNonAD().String(), isGroup, "Unable to prepare reply: Quoted message not found in cache.")
++		return false
++	}
++	// webOS: the context of the message - its expiry, the message it quotes, who it mentions -
++	// goes with whichever kind is sent.
++	context_info := &waE2E.ContextInfo{}
++	has_context := false
++	if expiration_seconds > 0 {
++		context_info.Expiration = proto.Uint32(expiration_seconds)
++		has_context = true
++	}
+ 	if is_reply {
+-		if cached_message == nil {
+-			purple_display_system_message(handler.account, recipient.ToNonAD().String(), isGroup, "Unable to prepare reply: Quoted message not found in cache.")
+-			return false
+-		} else {
+-			participant := cached_message.Sender.ToNonAD().String()
+-			msg = &waE2E.Message{
+-				ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+-					Text: &stripped_message,
+-					ContextInfo: &waE2E.ContextInfo{
+-						StanzaID:      &cached_message.ID,
+-						Participant:   &participant,
+-						QuotedMessage: &cached_message.Message,
+-					},
+-				},
+-			}
+-			if expiration_seconds > 0 {
+-				msg.ExtendedTextMessage.ContextInfo.Expiration = proto.Uint32(expiration_seconds)
+-			}
++		participant := cached_message.Sender.ToNonAD().String()
++		context_info.StanzaID = &cached_message.ID
++		context_info.Participant = &participant
++		context_info.QuotedMessage = &cached_message.Message
++		has_context = true
++	}
++	// webOS mentions (B6): "@Name" in the text becomes WhatsApp's "@<number>" plus MentionedJID.
++	// The text as the app wrote it is kept for the echo and the outbox id, which the app matches.
++	wire_text, mentioned := apply_webos_mentions(stripped_message, parse_webos_mentions(extras.mentions))
++	if len(mentioned) > 0 {
++		context_info.MentionedJID = mentioned
++		has_context = true
++	}
++	if !has_context {
++		context_info = nil
++	}
++	var msg *waE2E.Message
++	if location, ok := parse_webos_location(extras.location); ok {
++		// webOS location (B5): a WhatsApp location pin instead of the text with the map link.
++		location_message := &waE2E.LocationMessage{
++			DegreesLatitude:  proto.Float64(location.latitude),
++			DegreesLongitude: proto.Float64(location.longitude),
++			ContextInfo:      context_info,
+ 		}
++		if location.name != "" {
++			location_message.Name = proto.String(location.name)
++		}
++		msg = &waE2E.Message{LocationMessage: location_message}
++	} else if extras.contact != "" {
++		// webOS contact (B5): a WhatsApp contact card instead of the name and numbers as text.
++		name := vcard_display_name(extras.contact)
++		if name == "" {
++			name = stripped_message
++		}
++		msg = &waE2E.Message{ContactMessage: &waE2E.ContactMessage{
++			DisplayName: proto.String(name),
++			Vcard:       proto.String(extras.contact),
++			ContextInfo: context_info,
++		}}
++	} else if context_info != nil {
++		msg = &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{Text: &wire_text, ContextInfo: context_info}}
++	} else {
++		msg = &waE2E.Message{Conversation: &wire_text}
+ 	}
+ 	send_response, err := handler.client.SendMessage(context.Background(), recipient, msg)
+ 	if err != nil {
+@@ -479,7 +504,7 @@ func (handler *Handler) send_app_poll_vote(peer string, pollMessageID string, op
+  *
+  * Returns true on success.
+  */
+-func (handler *Handler) send_message(who string, message string, isGroup bool, replyTo string) bool {
++func (handler *Handler) send_message(who string, message string, isGroup bool, replyTo string, extras webosExtras) bool {
+ 	recipient, err := parseJID(who)
+ 	if err != nil {
+ 		purple_error(handler.account, fmt.Sprintf("%#v", err), ERROR_FATAL)
+@@ -488,18 +513,18 @@ func (handler *Handler) send_message(who string, message string, isGroup bool, r
+ 		// I am interacting with this recipient. Mark all messages they have sent as "read".
+ 		handler.mark_read_if_on_answer(recipient)
+ 		// now do the actual sending
+-		if handler.is_link_only_message(message) && replyTo == "" {
++		if handler.is_link_only_message(message) && replyTo == "" && extras == (webosExtras{}) {
+ 			// this is a link-only message – try to send the linked file, if compatible
+ 			// (a reply must keep its quote metadata, so replies always go the text path)
+ 			if handler.send_link_message(recipient, isGroup, message) {
+ 				return true
+ 			} else {
+ 				// sending the link message failed. just send as a normal text message
+-				return handler.send_text_message(recipient, isGroup, message, replyTo)
++				return handler.send_text_message(recipient, isGroup, message, replyTo, extras)
+ 			}
+ 		} else {
+ 			// this is a normal message
+-			return handler.send_text_message(recipient, isGroup, message, replyTo)
++			return handler.send_text_message(recipient, isGroup, message, replyTo, extras)
+ 		}
+ 	}
+ }
+diff --git a/webos_actions.go b/webos_actions.go
+new file mode 100644
+index 0000000..964b104
+--- /dev/null
++++ b/webos_actions.go
+@@ -0,0 +1,311 @@
++package main
++
++/*
++#include "constants.h"
++*/
++import "C"
++
++import (
++	"context"
++	"errors"
++	"fmt"
++	"strings"
++
++	"go.mau.fi/whatsmeow"
++	"go.mau.fi/whatsmeow/proto/waE2E"
++	"go.mau.fi/whatsmeow/types"
++)
++
++/*
++ * webOS: what the Messaging app does to a message or a group besides sending to it, as the
++ * transport's webos-im-send-edit, -send-delete, -group-create, -group-invite, -group-remove,
++ * -group-rename and -group-leave signals bring it (glue/login.c). Each export says whether this account is connected here, which
++ * is what the signal returns to the transport, and does the network call on a goroutine, as the
++ * sends do, so the libpurple main loop is not held up. What fails is said in the chat as a system
++ * line.
++ */
++
++func webos_handler(account *PurpleAccount) (*Handler, bool) {
++	handler, ok := handlers[account]
++	return handler, ok && handler != nil && handler.client != nil
++}
++
++//export gowhatsapp_go_send_edit
++func gowhatsapp_go_send_edit(account *PurpleAccount, chat *C.char, id *C.char, text *C.char) C.int {
++	handler, ok := webos_handler(account)
++	if !ok {
++		return 0
++	}
++	go handler.send_edit(C.GoString(chat), C.GoString(id), C.GoString(text))
++	return 1
++}
++
++//export gowhatsapp_go_send_delete
++func gowhatsapp_go_send_delete(account *PurpleAccount, chat *C.char, id *C.char) C.int {
++	handler, ok := webos_handler(account)
++	if !ok {
++		return 0
++	}
++	go handler.send_delete(C.GoString(chat), C.GoString(id))
++	return 1
++}
++
++//export gowhatsapp_go_group_create
++func gowhatsapp_go_group_create(account *PurpleAccount, name *C.char, members *C.char) C.int {
++	handler, ok := webos_handler(account)
++	if !ok {
++		return 0
++	}
++	go handler.group_create(C.GoString(name), C.GoString(members))
++	return 1
++}
++
++//export gowhatsapp_go_group_invite
++func gowhatsapp_go_group_invite(account *PurpleAccount, chat *C.char, members *C.char) C.int {
++	handler, ok := webos_handler(account)
++	if !ok {
++		return 0
++	}
++	go handler.group_invite(C.GoString(chat), C.GoString(members))
++	return 1
++}
++
++//export gowhatsapp_go_group_remove
++func gowhatsapp_go_group_remove(account *PurpleAccount, chat *C.char, members *C.char) C.int {
++	handler, ok := webos_handler(account)
++	if !ok {
++		return 0
++	}
++	go handler.group_remove(C.GoString(chat), C.GoString(members))
++	return 1
++}
++
++// A rename the group could not take is FALSE at once: the transport then says it failed.
++//
++//export gowhatsapp_go_group_rename
++func gowhatsapp_go_group_rename(account *PurpleAccount, chat *C.char, name *C.char) C.int {
++	handler, ok := webos_handler(account)
++	if !ok {
++		return 0
++	}
++	jid, newName, ok := group_rename_request(C.GoString(chat), C.GoString(name))
++	if !ok {
++		// not the name: what the user typed stays out of the log
++		handler.log.Warnf("group_rename: %s is no group, or the name is empty", C.GoString(chat))
++		return 0
++	}
++	go handler.group_rename(jid, newName)
++	return 1
++}
++
++//export gowhatsapp_go_group_leave
++func gowhatsapp_go_group_leave(account *PurpleAccount, chat *C.char) C.int {
++	handler, ok := webos_handler(account)
++	if !ok {
++		return 0
++	}
++	go handler.group_leave(C.GoString(chat))
++	return 1
++}
++
++// A chat as the transport names it, and whether it is a group.
++func (handler *Handler) webos_chat(chat string) (types.JID, bool, error) {
++	jid, err := parseJID(chat)
++	if err != nil {
++		return types.EmptyJID, false, err
++	}
++	return jid.ToNonAD(), jid.Server == types.GroupServer, nil
++}
++
++// Edit a message we sent. text is as send_im gets it (HTML), and goes out as the send does.
++func (handler *Handler) send_edit(chat string, id string, text string) {
++	jid, isGroup, err := handler.webos_chat(chat)
++	if err != nil || id == "" {
++		handler.log.Warnf("send_edit: %s / %s: %v", chat, id, err)
++		return
++	}
++	plain, images := decompose_html(text)
++	if len(images) > 0 || plain == "" {
++		purple_display_system_message(handler.account, jid.String(), isGroup, "Only the text of a message can be edited.")
++		return
++	}
++	edit := handler.client.BuildEdit(jid, types.MessageID(id), &waE2E.Message{Conversation: &plain})
++	if _, err := handler.client.SendMessage(context.Background(), jid, edit); err != nil {
++		purple_display_system_message(handler.account, jid.String(), isGroup, fmt.Sprintf("Could not edit the message: %v", err))
++	}
++}
++
++// Delete a message we sent, for everyone.
++func (handler *Handler) send_delete(chat string, id string) {
++	jid, isGroup, err := handler.webos_chat(chat)
++	if err != nil || id == "" {
++		handler.log.Warnf("send_delete: %s / %s: %v", chat, id, err)
++		return
++	}
++	// An empty sender is our own message.
++	revoke := handler.client.BuildRevoke(jid, types.EmptyJID, types.MessageID(id))
++	if _, err := handler.client.SendMessage(context.Background(), jid, revoke); err != nil {
++		purple_display_system_message(handler.account, jid.String(), isGroup, fmt.Sprintf("Could not delete the message: %v", err))
++	}
++}
++
++// Create a group. It shows up as a chat with a line saying so, which gives the app its thread.
++func (handler *Handler) group_create(name string, members string) {
++	participants := parse_webos_members(members)
++	if name == "" || len(participants) == 0 {
++		handler.log.Warnf("group_create: no name or no members")
++		return
++	}
++	info, err := handler.client.CreateGroup(context.Background(), whatsmeow.ReqCreateGroup{Name: name, Participants: participants})
++	if err != nil {
++		handler.log.Warnf("group_create %q failed: %v", name, err)
++		purple_display_system_message(handler.account, handler.client.Store.ID.ToNonAD().String(), false,
++			fmt.Sprintf("Could not create the group %q: %v", name, err))
++		return
++	}
++	purple_update_group(handler, info)
++	purple_display_system_message(handler.account, info.JID.ToNonAD().String(), true, fmt.Sprintf("You created the group %q.", name))
++}
++
++// Add members to a group; who could not be added is said in it.
++func (handler *Handler) group_invite(chat string, members string) {
++	jid, isGroup, err := handler.webos_chat(chat)
++	participants := parse_webos_members(members)
++	if err != nil || !isGroup || len(participants) == 0 {
++		handler.log.Warnf("group_invite: %s is no group, or no members: %v", chat, err)
++		return
++	}
++	result, err := handler.client.UpdateGroupParticipants(context.Background(), jid, participants, whatsmeow.ParticipantChangeAdd)
++	if err != nil {
++		purple_display_system_message(handler.account, jid.String(), true, group_change_failed("add to", err))
++		return
++	}
++	for _, p := range result {
++		if p.Error != 0 {
++			purple_display_system_message(handler.account, jid.String(), true,
++				group_add_failed(p.JID.User, p.Error, p.AddRequest != nil))
++		}
++	}
++}
++
++// Remove members from a group: a JID ("<digits>@s.whatsapp.net", "<id>@lid") or a +E.164 number
++// each, as the group's member list gives them. Who could not be removed is said in it; when anyone
++// was, the chat's member list is read again, so Group Info no longer shows them.
++func (handler *Handler) group_remove(chat string, members string) {
++	jid, isGroup, err := handler.webos_chat(chat)
++	participants := parse_webos_members(members)
++	if err != nil || !isGroup || len(participants) == 0 {
++		handler.log.Warnf("group_remove: %s is no group, or no members: %v", chat, err)
++		return
++	}
++	result, err := handler.client.UpdateGroupParticipants(context.Background(), jid, participants, whatsmeow.ParticipantChangeRemove)
++	if err != nil {
++		purple_display_system_message(handler.account, jid.String(), true, group_change_failed("remove from", err))
++		return
++	}
++	removed := false
++	for _, p := range result {
++		if p.Error != 0 {
++			purple_display_system_message(handler.account, jid.String(), true, group_remove_failed(p.JID.User, p.Error))
++		} else {
++			removed = true
++		}
++	}
++	if removed {
++		if info, err := handler.client.GetGroupInfo(context.Background(), jid); err == nil && info != nil {
++			purple_update_group(handler, info)
++		} else {
++			handler.log.Warnf("group_remove: could not read %s again: %v", jid, err)
++		}
++	}
++}
++
++// The group and the name a rename asks for: the chat must be a group JID, the name not empty once
++// trimmed. The app sends it trimmed and with its spaces collapsed; it is trimmed here again, and
++// otherwise sent as it came. It is not cut to a length: see group_rename_failed.
++func group_rename_request(chat string, name string) (types.JID, string, bool) {
++	name = strings.TrimSpace(name)
++	if chat == "" || name == "" {
++		return types.EmptyJID, "", false
++	}
++	jid, err := parseJID(chat)
++	if err != nil || jid.Server != types.GroupServer {
++		return types.EmptyJID, "", false
++	}
++	return jid.ToNonAD(), name, true
++}
++
++// Rename a group. Once WhatsApp took it, the chat's name here is the new one at once (the app's
++// thread takes it with the next line in the chat), and WhatsApp's own news of the change brings the
++// line "You changed the group name to ..." (group_events.go). What failed is said in the group.
++func (handler *Handler) group_rename(jid types.JID, name string) {
++	if err := handler.client.SetGroupName(context.Background(), jid, name); err != nil {
++		handler.log.Warnf("group_rename: %s refused the new name: %v", jid, err)
++		purple_display_system_message(handler.account, jid.String(), true, group_rename_failed(err))
++		return
++	}
++	purple_rename_group(handler, jid, name)
++}
++
++/*
++ * What to say when the group did not take a new name. 401/403: we are not in the group or not one
++ * of its admins (who may edit its info, when the group allows only admins). 406 ("not
++ * acceptable", whatsmeow.ErrIQNotAcceptable, taken by its code whatever its text) is what WhatsApp
++ * answers a name it will not take; whatsmeow documents it for a name that is too long
++ * (ReqCreateGroup: "Group names are limited to 25 characters"). That limit is not enforced here:
++ * WhatsApp's own limit is what counts, and a name cut here would be one nobody typed.
++ */
++func group_rename_failed(err error) string {
++	var iqErr *whatsmeow.IQError
++	if errors.As(err, &iqErr) && iqErr.Code == 406 {
++		return "Could not rename the group: WhatsApp did not accept the name. It may be too long."
++	}
++	return group_change_failed("rename", err)
++}
++
++// What to say when the group refused the whole change ("add to", "remove from"). 401 and 403 are
++// WhatsApp's "not authorized" and "forbidden" (whatsmeow.ErrIQNotAuthorized, ErrIQForbidden): we
++// are no longer in the group - we left it, even one we made - or not one of its admins.
++func group_change_failed(change string, err error) string {
++	if errors.Is(err, whatsmeow.ErrIQForbidden) || errors.Is(err, whatsmeow.ErrIQNotAuthorized) {
++		return fmt.Sprintf("Could not %s the group: you are no longer in it, or not one of its admins.", change)
++	}
++	return fmt.Sprintf("Could not %s the group: %v", change, err)
++}
++
++// What to say for one person the group did not remove. WhatsApp gives a code per person, which
++// whatsmeow passes on as it comes. No meanings of these codes for a removal are known here, so the
++// code is shown as is.
++func group_remove_failed(who string, code int) string {
++	return fmt.Sprintf("Could not remove %s from the group (error %d).", who, code)
++}
++
++// What to say for one person the group did not take. WhatsApp gives a code per person, which
++// whatsmeow passes on as it comes; the meanings are those other WhatsApp clients document (Baileys:
++// 409 a conflict, already in the group; 403 their privacy settings, with an invite to send them
++// when WhatsApp made one - add_request, whatsmeow's AddRequest). Any other code is shown as is.
++func group_add_failed(who string, code int, invite bool) string {
++	switch {
++	case code == 409:
++		return fmt.Sprintf("%s is already in the group.", who)
++	case code == 403 && invite:
++		return fmt.Sprintf("%s can only be added by an invite, because of their privacy settings.", who)
++	case code == 403:
++		return fmt.Sprintf("%s cannot be added to the group: their privacy settings do not allow it.", who)
++	}
++	return fmt.Sprintf("Could not add %s to the group (error %d).", who, code)
++}
++
++// Leave a group.
++func (handler *Handler) group_leave(chat string) {
++	jid, isGroup, err := handler.webos_chat(chat)
++	if err != nil || !isGroup {
++		handler.log.Warnf("group_leave: %s is no group: %v", chat, err)
++		return
++	}
++	if err := handler.client.LeaveGroup(context.Background(), jid); err != nil {
++		purple_display_system_message(handler.account, jid.String(), true, fmt.Sprintf("Could not leave the group: %v", err))
++		return
++	}
++	purple_display_system_message(handler.account, jid.String(), true, "You left the group.")
++}
+diff --git a/webos_send.go b/webos_send.go
+new file mode 100644
+index 0000000..a7c5a05
+--- /dev/null
++++ b/webos_send.go
+@@ -0,0 +1,191 @@
++package main
++
++import (
++	"sort"
++	"strconv"
++	"strings"
++	"unicode"
++	"unicode/utf8"
++
++	"go.mau.fi/whatsmeow/types"
++)
++
++/*
++ * webOS: what an outgoing message carries besides its text, as the transport (imlibpurpleservice)
++ * puts it on the conversation for the length of the send (its SendExtras.h). Each is a string the
++ * C glue copies in send_im/send_chat; "" when the message has none.
++ *
++ *   location  "<lat>\x1f<lon>\x1f<name>"
++ *   contact   a vCard
++ *   mentions  "<id>\x1f<name>" records joined by "\x1e"; the text has "@<name>" for each
++ *
++ * The text is always a plain form of the same thing, so whatever cannot be sent natively is sent
++ * as the text.
++ */
++type webosExtras struct {
++	location string
++	contact  string
++	mentions string
++}
++
++type webosLocation struct {
++	latitude  float64
++	longitude float64
++	name      string
++}
++
++// The location of an extras string, or false when there is none or it is not one.
++func parse_webos_location(s string) (webosLocation, bool) {
++	parts := strings.Split(s, "\x1f")
++	if len(parts) != 3 {
++		return webosLocation{}, false
++	}
++	lat, err1 := strconv.ParseFloat(parts[0], 64)
++	lon, err2 := strconv.ParseFloat(parts[1], 64)
++	if err1 != nil || err2 != nil || lat < -90 || lat > 90 || lon < -180 || lon > 180 {
++		return webosLocation{}, false
++	}
++	return webosLocation{latitude: lat, longitude: lon, name: parts[2]}, true
++}
++
++// The name a vCard shows (its FN, else its N as "given family"), or "" when it has neither.
++func vcard_display_name(vcard string) string {
++	var n string
++	for _, line := range strings.Split(strings.ReplaceAll(vcard, "\r\n", "\n"), "\n") {
++		colon := strings.IndexByte(line, ':')
++		if colon < 0 {
++			continue
++		}
++		// "FN;CHARSET=UTF-8:Anna" names FN; parameters come after the first ';'.
++		property := strings.ToUpper(line[:colon])
++		if semi := strings.IndexByte(property, ';'); semi >= 0 {
++			property = property[:semi]
++		}
++		value := strings.TrimSpace(line[colon+1:])
++		switch property {
++		case "FN":
++			if value != "" {
++				return value
++			}
++		case "N":
++			// N:family;given;additional;prefix;suffix
++			fields := strings.Split(value, ";")
++			var given, family string
++			if len(fields) > 1 {
++				given = fields[1]
++			}
++			family = fields[0]
++			n = strings.TrimSpace(given + " " + family)
++		}
++	}
++	return n
++}
++
++type webosMention struct {
++	jid  types.JID
++	name string
++}
++
++/*
++ * A mention's or member's id as a JID. The app names a WhatsApp contact as the threads do: a JID
++ * ("<digits>@s.whatsapp.net", "<id>@lid") or the +E.164 number a group message's sender is written
++ * with ("+31611111111"). Anything else is not a WhatsApp user.
++ */
++func webos_jid(id string) (types.JID, bool) {
++	if !strings.ContainsRune(id, '@') {
++		digits := strings.TrimPrefix(id, "+")
++		if digits == "" || strings.TrimLeft(digits, "0123456789") != "" {
++			return types.EmptyJID, false
++		}
++	}
++	jid, err := parseJID(id)
++	if err != nil || jid.User == "" {
++		return types.EmptyJID, false
++	}
++	return jid.ToNonAD(), true
++}
++
++// The mentions of an extras string whose ids are WhatsApp users, longest name first (so
++// "@Annabel" is matched before "@Anna").
++func parse_webos_mentions(s string) []webosMention {
++	var out []webosMention
++	if s == "" {
++		return out
++	}
++	for _, record := range strings.Split(s, "\x1e") {
++		fields := strings.Split(record, "\x1f")
++		if len(fields) != 2 || fields[0] == "" || fields[1] == "" {
++			continue
++		}
++		jid, ok := webos_jid(fields[0])
++		if !ok {
++			continue
++		}
++		out = append(out, webosMention{jid: jid, name: fields[1]})
++	}
++	sort.SliceStable(out, func(i, j int) bool { return len(out[i].name) > len(out[j].name) })
++	return out
++}
++
++// Whether the text at i (after a mention) does not go on with the name: its end, or a rune that is
++// not a letter or digit.
++func mention_ends_at(text string, i int) bool {
++	if i >= len(text) {
++		return true
++	}
++	r, _ := utf8.DecodeRuneInString(text[i:])
++	return !unicode.IsLetter(r) && !unicode.IsDigit(r)
++}
++
++/*
++ * WhatsApp marks a mention as "@<the user part of the JID>" in the text, with the JID in
++ * ContextInfo.MentionedJID; its clients show the contact's name there. The app writes "@<name>".
++ * Rewrite each "@<name>" of the mentions to "@<user>", and return the JIDs mentioned, each once,
++ * in the order they first appear.
++ */
++func apply_webos_mentions(text string, mentions []webosMention) (string, []string) {
++	if len(mentions) == 0 {
++		return text, nil
++	}
++	var b strings.Builder
++	var jids []string
++	seen := map[string]bool{}
++	for i := 0; i < len(text); {
++		if text[i] == '@' {
++			matched := false
++			for _, m := range mentions {
++				end := i + 1 + len(m.name)
++				if strings.HasPrefix(text[i+1:], m.name) && mention_ends_at(text, end) {
++					b.WriteString("@" + m.jid.User)
++					if j := m.jid.String(); !seen[j] {
++						seen[j] = true
++						jids = append(jids, j)
++					}
++					i = end
++					matched = true
++					break
++				}
++			}
++			if matched {
++				continue
++			}
++		}
++		b.WriteByte(text[i])
++		i++
++	}
++	return b.String(), jids
++}
++
++// "\x1f"-joined members as JIDs, leaving out what is not a WhatsApp user.
++func parse_webos_members(joined string) []types.JID {
++	var out []types.JID
++	for _, member := range strings.Split(joined, "\x1f") {
++		if member == "" {
++			continue
++		}
++		if jid, ok := webos_jid(member); ok {
++			out = append(out, jid)
++		}
++	}
++	return out
++}
+diff --git a/webos_send_test.go b/webos_send_test.go
+new file mode 100644
+index 0000000..e1bf533
+--- /dev/null
++++ b/webos_send_test.go
+@@ -0,0 +1,216 @@
++package main
++
++import (
++	"errors"
++	"fmt"
++	"reflect"
++	"testing"
++
++	"go.mau.fi/whatsmeow"
++)
++
++func TestLocationIsLatitudeLongitudeAndName(t *testing.T) {
++	loc, ok := parse_webos_location("52.3731000\x1f4.8925000\x1fDam")
++	if !ok || loc.latitude != 52.3731 || loc.longitude != 4.8925 || loc.name != "Dam" {
++		t.Fatalf("got %+v %v", loc, ok)
++	}
++	if loc, ok := parse_webos_location("-33.8\x1f151.2\x1f"); !ok || loc.name != "" {
++		t.Fatalf("no name: %+v %v", loc, ok)
++	}
++}
++
++func TestNoLocationFromWhatIsNotOne(t *testing.T) {
++	for _, s := range []string{"", "52\x1f4", "a\x1f4\x1fx", "52\x1f4\x1fx\x1fy", "91\x1f0\x1fx", "0\x1f-181\x1fx"} {
++		if _, ok := parse_webos_location(s); ok {
++			t.Errorf("%q taken for a location", s)
++		}
++	}
++}
++
++func TestTheNameOfAVCard(t *testing.T) {
++	cases := map[string]string{
++		"BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Anna Kowalski\r\nTEL:+31611111111\r\nEND:VCARD\r\n": "Anna Kowalski",
++		"BEGIN:VCARD\nfn;CHARSET=UTF-8: Zoë \nEND:VCARD":                                      "Zoë",
++		"BEGIN:VCARD\nN:Kowalski;Anna;;;\nEND:VCARD":                                          "Anna Kowalski",
++		"BEGIN:VCARD\nN:Kowalski;Anna\nFN:\nEND:VCARD":                                        "Anna Kowalski",
++		"BEGIN:VCARD\nTEL:+316\nEND:VCARD":                                                    "",
++	}
++	for card, want := range cases {
++		if got := vcard_display_name(card); got != want {
++			t.Errorf("%q: %q, want %q", card, got, want)
++		}
++	}
++}
++
++func TestMentionsBecomeNumbersAndJIDs(t *testing.T) {
++	mentions := parse_webos_mentions("31611111111@s.whatsapp.net\x1fAnna\x1e31622222222@s.whatsapp.net\x1fAnnabel")
++	text, jids := apply_webos_mentions("@Anna and @Annabel, @Anna!", mentions)
++	if text != "@31611111111 and @31622222222, @31611111111!" {
++		t.Fatalf("text %q", text)
++	}
++	want := []string{"31611111111@s.whatsapp.net", "31622222222@s.whatsapp.net"}
++	if !reflect.DeepEqual(jids, want) {
++		t.Fatalf("jids %v, want %v (each once, in order)", jids, want)
++	}
++}
++
++func TestTheLongerNameWins(t *testing.T) {
++	// "Anna" followed by a space is a whole name too: the longer one that goes on must be tried first.
++	mentions := parse_webos_mentions("31611111111@s.whatsapp.net\x1fAnna\x1e31622222222@s.whatsapp.net\x1fAnna Kowalski")
++	text, jids := apply_webos_mentions("@Anna Kowalski, @Anna", mentions)
++	if text != "@31622222222, @31611111111" || len(jids) != 2 || jids[0] != "31622222222@s.whatsapp.net" {
++		t.Fatalf("text %q jids %v", text, jids)
++	}
++}
++
++func TestAMentionIsAWholeName(t *testing.T) {
++	mentions := parse_webos_mentions("31611111111@s.whatsapp.net\x1fAnna")
++	text, jids := apply_webos_mentions("mail anna@x.nl, @Annabel @Anna2 @Anna", mentions)
++	if text != "mail anna@x.nl, @Annabel @Anna2 @31611111111" || len(jids) != 1 {
++		t.Fatalf("text %q jids %v", text, jids)
++	}
++}
++
++func TestNoMentionsNoChange(t *testing.T) {
++	if text, jids := apply_webos_mentions("@Anna hi", nil); text != "@Anna hi" || jids != nil {
++		t.Fatalf("%q %v", text, jids)
++	}
++	if got := parse_webos_mentions("not a jid\x1f\x1e\x1fAnna\x1e31611111111@s.whatsapp.net\x1f"); len(got) != 0 {
++		t.Fatalf("broken records taken: %v", got)
++	}
++	// A mentioned name in multi-byte text.
++	mentions := parse_webos_mentions("31611111111@s.whatsapp.net\x1fZoë")
++	if text, _ := apply_webos_mentions("hé @Zoë ✓", mentions); text != "hé @31611111111 ✓" {
++		t.Fatalf("%q", text)
++	}
++}
++
++func TestANumberIsAUser(t *testing.T) {
++	// A group message's sender is written as +E.164; that is who the app mentions.
++	mentions := parse_webos_mentions("+31611111111\x1fMum\x1e31622222222@lid\x1fBen\x1eMum\x1fMum\x1e+31 6\x1fX")
++	if len(mentions) != 2 || mentions[0].jid.String() != "31611111111@s.whatsapp.net" || mentions[1].jid.String() != "31622222222@lid" {
++		t.Fatalf("got %v", mentions)
++	}
++	if got := parse_webos_members("+31611111111\x1fnobody"); len(got) != 1 || got[0].String() != "31611111111@s.whatsapp.net" {
++		t.Fatalf("members %v", got)
++	}
++}
++
++func TestMembersAreJIDs(t *testing.T) {
++	got := parse_webos_members("31611111111@s.whatsapp.net\x1f\x1f31622222222:3@s.whatsapp.net")
++	if len(got) != 2 || got[0].String() != "31611111111@s.whatsapp.net" || got[1].String() != "31622222222@s.whatsapp.net" {
++		t.Fatalf("got %v (device part dropped)", got)
++	}
++}
++
++func TestAGroupSaysWhyItDidNotTakeSomeone(t *testing.T) {
++	cases := []struct {
++		code   int
++		invite bool
++		want   string
++	}{
++		{409, false, "31611111111 is already in the group."},
++		{403, true, "31611111111 can only be added by an invite, because of their privacy settings."},
++		{403, false, "31611111111 cannot be added to the group: their privacy settings do not allow it."},
++		{408, false, "Could not add 31611111111 to the group (error 408)."},
++	}
++	for _, c := range cases {
++		if got := group_add_failed("31611111111", c.code, c.invite); got != c.want {
++			t.Errorf("code %d invite %v: %q, want %q", c.code, c.invite, got, c.want)
++		}
++	}
++}
++
++func TestAGroupWeAreNotInSaysSo(t *testing.T) {
++	left := "Could not add to the group: you are no longer in it, or not one of its admins."
++	if got := group_change_failed("add to", whatsmeow.ErrIQForbidden); got != left {
++		t.Errorf("forbidden: %q", got)
++	}
++	if got := group_change_failed("add to", fmt.Errorf("wrapped: %w", whatsmeow.ErrIQNotAuthorized)); got != left {
++		t.Errorf("not authorized: %q", got)
++	}
++	if got := group_change_failed("add to", errors.New("timed out")); got != "Could not add to the group: timed out" {
++		t.Errorf("other: %q", got)
++	}
++}
++
++func TestARemovalTheGroupRefusedSaysSo(t *testing.T) {
++	notAdmin := "Could not remove from the group: you are no longer in it, or not one of its admins."
++	if got := group_change_failed("remove from", whatsmeow.ErrIQForbidden); got != notAdmin {
++		t.Errorf("forbidden: %q", got)
++	}
++	if got := group_change_failed("remove from", fmt.Errorf("wrapped: %w", whatsmeow.ErrIQNotAuthorized)); got != notAdmin {
++		t.Errorf("not authorized: %q", got)
++	}
++	if got := group_change_failed("remove from", errors.New("timed out")); got != "Could not remove from the group: timed out" {
++		t.Errorf("other: %q", got)
++	}
++	if got := group_remove_failed("31611111111", 404); got != "Could not remove 31611111111 from the group (error 404)." {
++		t.Errorf("one person: %q", got)
++	}
++}
++
++func TestMembersToRemoveAreAnyFormTheMemberListGives(t *testing.T) {
++	// Group Info lists a member by what the plug-in put on the chat: a phone JID, a LID, or the
++	// +E.164 number (bare digits too, once the transport has made a JID of it or not).
++	got := parse_webos_members("+31611111111\x1f31622222222@s.whatsapp.net\x1f123456789012345@lid\x1f31633333333")
++	want := []string{"31611111111@s.whatsapp.net", "31622222222@s.whatsapp.net", "123456789012345@lid", "31633333333@s.whatsapp.net"}
++	if len(got) != len(want) {
++		t.Fatalf("got %v", got)
++	}
++	for i := range want {
++		if got[i].String() != want[i] {
++			t.Errorf("%d: %s, want %s", i, got[i], want[i])
++		}
++	}
++}
++
++func TestARenameIsAGroupAndAName(t *testing.T) {
++	jid, name, ok := group_rename_request("120363000000000001@g.us", "Physics")
++	if !ok || jid.String() != "120363000000000001@g.us" || name != "Physics" {
++		t.Fatalf("got %v %q %v", jid, name, ok)
++	}
++	// trimmed, and otherwise as it came: inner spaces, long names and all
++	long := "A name much longer than twenty-five characters, ünïcödé 🙂"
++	if _, name, ok := group_rename_request("120363000000000001@g.us", " \t"+long+"\n "); !ok || name != long {
++		t.Errorf("trimmed: %q %v", name, ok)
++	}
++}
++
++func TestARenameOfNoGroupOrToNoNameIsRefused(t *testing.T) {
++	for _, c := range []struct{ chat, name string }{
++		{"120363000000000001@g.us", ""},
++		{"120363000000000001@g.us", " \t\n "},
++		{"", "Physics"},
++		{"31611111111@s.whatsapp.net", "Physics"},
++		{"+31611111111", "Physics"},
++		{"900000000000011@lid", "Physics"},
++		{"120363000000000001@newsletter", "Physics"},
++		{"@g.us", "Physics"},
++	} {
++		if _, _, ok := group_rename_request(c.chat, c.name); ok {
++			t.Errorf("%q / %q taken", c.chat, c.name)
++		}
++	}
++}
++
++func TestARenameTheGroupRefusedSaysWhy(t *testing.T) {
++	notAdmin := "Could not rename the group: you are no longer in it, or not one of its admins."
++	if got := group_rename_failed(whatsmeow.ErrIQForbidden); got != notAdmin {
++		t.Errorf("forbidden: %q", got)
++	}
++	if got := group_rename_failed(fmt.Errorf("wrapped: %w", whatsmeow.ErrIQNotAuthorized)); got != notAdmin {
++		t.Errorf("not authorized: %q", got)
++	}
++	tooLong := "Could not rename the group: WhatsApp did not accept the name. It may be too long."
++	if got := group_rename_failed(whatsmeow.ErrIQNotAcceptable); got != tooLong {
++		t.Errorf("not acceptable: %q", got)
++	}
++	// 406 by its code, whatever text WhatsApp gives with it
++	if got := group_rename_failed(fmt.Errorf("x: %w", &whatsmeow.IQError{Code: 406, Text: "subject-too-long"})); got != tooLong {
++		t.Errorf("406 other text: %q", got)
++	}
++	if got := group_rename_failed(errors.New("timed out")); got != "Could not rename the group: timed out" {
++		t.Errorf("other: %q", got)
++	}
++}

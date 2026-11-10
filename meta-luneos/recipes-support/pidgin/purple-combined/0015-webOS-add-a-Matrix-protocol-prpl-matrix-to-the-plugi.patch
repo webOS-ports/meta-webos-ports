@@ -1,0 +1,3711 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 5 Nov 2026 12:47:29 +0100
+Subject: [PATCH] webOS: add a Matrix protocol (prpl-matrix) to the plugin
+
+* Add a Matrix protocol (prpl-matrix) to the plugin
+
+Register a third prpl, prpl-matrix ("Matrix"), from the same shared
+object, on mautrix-go (already in go.mod for mautrix-meta). It lives
+here for the same reason as prpl-gometa: two Go c-archives cannot
+share one process. All of its identifiers are prefixed matrix/mx.
+
+- login: the username is the Matrix ID. The account's validator app
+  (com.palm.app.matrix) normally signs in itself, in the Accounts app,
+  and stores the session as the password: "mxoauth:" + base64url(JSON)
+  with homeserver, device, tokens and OAuth client, and optionally the
+  recovery key (matrix_seed.go). A session the plugin has not taken yet
+  replaces its own; once that ends, the login fails with an
+  authentication error so Accounts asks to sign in again. Accounts
+  that store a plain password log in with it on servers that offer
+  m.login.password; the "browser-sign-in" marker uses the device
+  authorization grant on OAuth 2.0 servers (MAS, as on matrix.org):
+  the "Matrix" auth conversation shows a link and a code to approve
+  in any browser. Tokens, refresh token and device ID are kept in the
+  account, so a restart neither asks again nor makes a new device.
+- encryption: goolm (pure Go, build tag goolm) on a per-account
+  modernc SQLite store, matrix-<user id>.db, wired up without
+  mautrix's cryptohelper, which under cgo pulls in mattn/go-sqlite3
+  and a second, C, copy of SQLite.
+- verification: after the first sync the device's trust is checked.
+  An unverified device uses the recovery key from the sign-in once, if
+  one came with it, or else asks for the recovery key or passphrase (signs
+  the device from secret storage and restores the key backup), or
+  VERIFY for emoji verification with another of the user's own
+  sessions, after which the backup key is requested over secret
+  sharing. Keys received later are backed up every two minutes. A
+  message whose key never arrives is fetched from the backup, or
+  shown as undecryptable instead of being dropped.
+- messages: direct chats (m.direct) as 1:1 conversations, other rooms
+  as chats; text, emotes, replies with quotes, edits, deletions,
+  reactions both ways, typing, read receipts both ways, invitations to
+  direct chats accepted; pictures, video, voice notes and files both
+  ways, encrypted in encrypted rooms. Only messages newer than the
+  account's first login are shown, so history is not replayed.
+- the auth conversation is matched without regard to case: the
+  transport stores its address as "matrix".
+- glue/init.c and glue/login.c route account removal and webOS
+  reactions to it. Removing an account ends its session on the server
+  (revoked at the authorization server for an OAuth sign-in, logged out
+  otherwise), from the session saved in the account, as libpurple has
+  closed the connection by then, and deletes its store. A session
+  replaced by a new sign-in in Accounts is ended the same way.
+
+prpl-matrix is also the id of matrix-org's purple-matrix, which this
+replaces; only one of the two can register.
+
+* Let the Matrix test build on 32-bit
+
+The seed's expires_at_ms, 1793886454000, sits in a map[string]any as
+an untyped constant, which becomes an int: on armv7 that overflows, so
+go vet and go test did not build ("cannot use 1793886454000 (untyped
+int constant) as int value in map literal (overflows)"). It is an
+int64 now, as Session.ExpiryMs is; the JSON is the same.
+
+* Send Matrix read receipts when the Messaging app shows the chat
+
+A Matrix read receipt only went when the user answered in a room, so
+the other side never saw a message read that was not answered.
+
+imlibpurpleservice tells a plug-in that a chat was read as Pidgin
+does, an "unseen" conversation update that brings the unseen count
+down to 0 (purple-combined 0044 sends WhatsApp's receipts on it).
+matrix_init.c now listens for it too, for Matrix accounts only and
+with a previous count of its own, and matrix_go_mark_read sends the
+receipt for the last message received in the room, 1:1 or group.
+
+A receipt goes once per message (mxRoom.takeUnread): answering right
+after the chat was shown sends none again.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [LuneOS addition, not part of purple-gowhatsapp]
+---
+ glue/init.c            |    6 +
+ glue/login.c           |    4 +
+ glue/matrix_init.c     |  230 ++++++
+ go.sum                 |    4 -
+ matrix.go              | 1540 ++++++++++++++++++++++++++++++++++++++++
+ matrix_crypto.go       |  206 ++++++
+ matrix_e2ee.go         |  577 +++++++++++++++
+ matrix_media.go        |  200 ++++++
+ matrix_seed.go         |  126 ++++
+ matrix_session_test.go |  102 +++
+ matrix_test.go         |  228 ++++++
+ matrixbridge.c         |  198 ++++++
+ matrixbridge.h         |   55 ++
+ 13 files changed, 3472 insertions(+), 4 deletions(-)
+ create mode 100644 glue/matrix_init.c
+ create mode 100644 matrix.go
+ create mode 100644 matrix_crypto.go
+ create mode 100644 matrix_e2ee.go
+ create mode 100644 matrix_media.go
+ create mode 100644 matrix_seed.go
+ create mode 100644 matrix_session_test.go
+ create mode 100644 matrix_test.go
+ create mode 100644 matrixbridge.c
+ create mode 100644 matrixbridge.h
+
+diff --git a/glue/init.c b/glue/init.c
+index 0b3d349..143e2f5 100644
+--- a/glue/init.c
++++ b/glue/init.c
+@@ -24,6 +24,7 @@
+ #include "gowhatsapp.h"
+ #include "constants.h"       // GOWHATSAPP_CREDENTIALS_KEY (for locating the device to unlink on delete)
+ #include "../gometabridge.h" // GOMETA_PLUGIN_ID (branch account-removed by protocol id)
++#include "../matrixbridge.h" // MATRIX_PLUGIN_ID
+ #include "libwhatsmeow.h" // for gowhatsapp_go_init + gowhatsapp_go_account_removed / gometa_go_account_removed
+ #include "call.h"         // whatsapp_call_luna_init -- register at plugin load, not per-account login
+ #include <gmodule.h>      // g_module_make_resident - pin the Go .so so libpurple can't dlclose/unmap it
+@@ -156,6 +157,8 @@ static PurplePluginProtocolInfo prpl_info = {
+ 
+ // Registers the Facebook (messagix) protocol as a second prpl in this same .so.
+ extern void gometa_register_second_prpl(void);
++// ...and Matrix (mautrix-go) as a third.
++extern void matrix_register_prpl(void);
+ 
+ // Per-account store teardown on account deletion. libpurple's purple_accounts_delete() emits
+ // "account-removed" (on purple_accounts_get_handle()) for the account being deleted, then destroys
+@@ -183,6 +186,8 @@ webos_account_removed_cb(PurpleAccount *account, gpointer data)
+         gowhatsapp_go_account_removed(account, user_dir, username, (char *)(credentials ? credentials : ""));
+     } else if (g_strcmp0(proto, GOMETA_PLUGIN_ID) == 0) {
+         gometa_go_account_removed(account, user_dir, username);
++    } else if (g_strcmp0(proto, MATRIX_PLUGIN_ID) == 0) {
++        matrix_go_account_removed(account, user_dir, username);
+     }
+ }
+ 
+@@ -206,6 +211,7 @@ static void plugin_init(PurplePlugin *plugin) {
+     }
+     prpl_info.protocol_options = gowhatsapp_add_account_options(prpl_info.protocol_options);
+     gometa_register_second_prpl();
++    matrix_register_prpl();
+     // Clean up per-account backend stores when an account is deleted (WhatsApp: per-JID device row
+     // from the shared whatsmeow.db; Facebook-E2EE: the per-account gometa-e2ee-<user>.db). Covers both
+     // prpls in this .so via one handler.
+diff --git a/glue/login.c b/glue/login.c
+index 8b191fd..daa8878 100644
+--- a/glue/login.c
++++ b/glue/login.c
+@@ -1,6 +1,7 @@
+ #include "gowhatsapp.h"
+ #include "libwhatsmeow.h" // for gowhatsapp_go_login / gowhatsapp_go_send_reaction / gometa_go_send_reaction
+ #include "../gometabridge.h" // for GOMETA_PLUGIN_ID
++#include "../matrixbridge.h" // for MATRIX_PLUGIN_ID
+ 
+ // webOS reactions (SEND): the transport emits "webos-im-send-reaction" (registered process-wide) when
+ // the user reacts from the TouchPad. It fires for EVERY account, so we filter by protocol id and route
+@@ -27,6 +28,9 @@ static void webos_send_reaction_cb(PurpleAccount *account, const char *targetId,
+     } else if (g_strcmp0(proto, GOMETA_PLUGIN_ID) == 0) {
+         gometa_go_send_reaction(account, (char *)targetId, (char *)(emoji ? emoji : ""),
+                                 (char *)(peer ? peer : ""), (char *)(removeFlag ? removeFlag : ""));
++    } else if (g_strcmp0(proto, MATRIX_PLUGIN_ID) == 0) {
++        matrix_go_send_reaction(account, (char *)targetId, (char *)(emoji ? emoji : ""),
++                                (char *)(peer ? peer : ""), (char *)(removeFlag ? removeFlag : ""));
+     }
+ }
+ 
+diff --git a/glue/matrix_init.c b/glue/matrix_init.c
+new file mode 100644
+index 0000000..cfe0262
+--- /dev/null
++++ b/glue/matrix_init.c
+@@ -0,0 +1,230 @@
++// matrix_init.c - registers Matrix (mautrix-go) as a further prpl inside the combined whatsmeow
++// .so, next to WhatsApp and Facebook (one .so, one Go runtime). plugin_init() in init.c calls
++// matrix_register_prpl(). Same manual registration as gometa_init.c.
++#include <purple.h>
++#include <stdlib.h>
++#include <string.h>
++#include "../matrixbridge.h"
++#include "libwhatsmeow.h" // matrix_go_* (cgo exports)
++
++#ifndef PLUGIN_VERSION
++#define PLUGIN_VERSION 0.0.0
++#endif
++#define MX_STR(x) _MX_STR(x)
++#define _MX_STR(x) #x
++
++static const char *matrix_list_icon(PurpleAccount *account, PurpleBuddy *buddy) {
++    (void)account;
++    (void)buddy;
++    return "matrix";
++}
++
++static GList *matrix_status_types(PurpleAccount *account) {
++    (void)account;
++    GList *types = NULL;
++    types = g_list_append(types, purple_status_type_new_full(PURPLE_STATUS_AVAILABLE, NULL, NULL, TRUE, TRUE, FALSE));
++    types = g_list_append(types, purple_status_type_new_full(PURPLE_STATUS_OFFLINE, NULL, NULL, TRUE, TRUE, FALSE));
++    return types;
++}
++
++// webOS: the Messaging app shows a chat by clearing its unseen count, which libpurple tells as a
++// "conversation-updated" UNSEEN update, as Pidgin does (glue/receipt.c does the same for
++// WhatsApp, keeping its own previous count). Read receipts go then for a Matrix conversation.
++static void matrix_conversation_updated(PurpleConversation *conv, PurpleConvUpdateType type) {
++    if (type != PURPLE_CONV_UPDATE_UNSEEN) return;
++    PurpleAccount *account = purple_conversation_get_account(conv);
++    if (account == NULL || g_strcmp0(purple_account_get_protocol_id(account), MATRIX_PLUGIN_ID) != 0) return;
++    int unseen = GPOINTER_TO_INT(purple_conversation_get_data(conv, "unseen-count"));
++    int previous = GPOINTER_TO_INT(purple_conversation_get_data(conv, "matrix-previous-unseen-count"));
++    if (unseen == 0 && previous > 0) {
++        matrix_go_mark_read(account, (char *)purple_conversation_get_name(conv));
++    }
++    purple_conversation_set_data(conv, "matrix-previous-unseen-count", GINT_TO_POINTER(unseen));
++}
++
++static void matrix_connect_conversation_updated_once(PurpleConnection *pc) {
++    static gulong handler = 0;
++    if (handler == 0) {
++        handler = purple_signal_connect(purple_conversations_get_handle(), "conversation-updated",
++                purple_connection_get_prpl(pc), PURPLE_CALLBACK(matrix_conversation_updated), NULL);
++    }
++}
++
++static void matrix_login(PurpleAccount *account) {
++    PurpleConnection *pc = purple_account_get_connection(account);
++    purple_connection_set_state(pc, PURPLE_CONNECTING);
++    const char *password = purple_account_get_password(account);
++    matrix_go_login(account, (char *)purple_user_dir(), (char *)purple_account_get_username(account),
++            (char *)(password ? password : ""));
++    webos_connect_send_reaction_once();
++    matrix_connect_conversation_updated_once(pc);
++}
++
++static void matrix_close(PurpleConnection *pc) {
++    matrix_go_close(purple_connection_get_account(pc));
++}
++
++// webOS replies: the transport puts the reply target's serviceMessageId on the conversation as
++// "webos-reply-to" before serv_send_im. Read and clear it.
++static gchar *matrix_take_reply_to(PurpleConversation *conv) {
++    if (conv == NULL) return NULL;
++    gchar *reply_to = (gchar *)purple_conversation_get_data(conv, "webos-reply-to");
++    if (reply_to != NULL) purple_conversation_set_data(conv, "webos-reply-to", NULL);
++    return reply_to;
++}
++
++static int matrix_send_im(PurpleConnection *pc, const char *who, const char *message, PurpleMessageFlags flags) {
++    (void)flags;
++    PurpleAccount *account = purple_connection_get_account(pc);
++    PurpleConversation *conv = purple_find_conversation_with_account(PURPLE_CONV_TYPE_IM, who, account);
++    gchar *reply_to = matrix_take_reply_to(conv);
++    // The message arrives as HTML from the conversation view; Matrix gets the plain text.
++    gchar *plain = purple_markup_strip_html(message);
++    int ret = matrix_go_send_message(account, (char *)who, plain ? plain : (char *)"", 0,
++            reply_to ? reply_to : (char *)"");
++    g_free(plain);
++    g_free(reply_to);
++    return ret;
++}
++
++static GList *matrix_chat_info(PurpleConnection *pc) {
++    (void)pc;
++    struct proto_chat_entry *pce = g_new0(struct proto_chat_entry, 1);
++    pce->label = "Room ID";
++    pce->identifier = "id";
++    pce->required = TRUE;
++    return g_list_append(NULL, pce);
++}
++
++static GHashTable *matrix_chat_info_defaults(PurpleConnection *pc, const char *chat_name) {
++    (void)pc;
++    GHashTable *defaults = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, g_free);
++    if (chat_name) g_hash_table_insert(defaults, (gpointer)"id", g_strdup(chat_name));
++    return defaults;
++}
++
++static char *matrix_get_chat_name(GHashTable *components) {
++    const char *id = (const char *)g_hash_table_lookup(components, "id");
++    return g_strdup(id ? id : "");
++}
++
++static PurpleChat *matrix_find_chat_cb(PurpleAccount *account, const char *id) {
++    return matrix_find_blist_chat(account, id);
++}
++
++static void matrix_join_chat(PurpleConnection *pc, GHashTable *components) {
++    const char *id = (const char *)g_hash_table_lookup(components, "id");
++    if (!id || !*id) return;
++    int chat_id = (int)g_str_hash(id);
++    if (purple_find_chat(pc, chat_id) == NULL) {
++        serv_got_joined_chat(pc, chat_id, id);
++    }
++}
++
++// A room's conversation is named after its room ID (serv_got_joined_chat above), so the ID is
++// recovered from the conversation and the same send path as 1:1 is used.
++static int matrix_chat_send(PurpleConnection *pc, int id, const char *message, PurpleMessageFlags flags) {
++    (void)flags;
++    PurpleConversation *conv = purple_find_chat(pc, id);
++    if (conv == NULL) return -1;
++    const char *room_id = purple_conversation_get_name(conv);
++    if (room_id == NULL || *room_id == '\0') return -1;
++    gchar *reply_to = matrix_take_reply_to(conv);
++    gchar *plain = purple_markup_strip_html(message);
++    int ret = matrix_go_send_message(purple_connection_get_account(pc), (char *)room_id,
++            plain ? plain : (char *)"", 1, reply_to ? reply_to : (char *)"");
++    g_free(plain);
++    g_free(reply_to);
++    return ret > 0 ? 0 : -1;
++}
++
++static unsigned int matrix_send_typing(PurpleConnection *pc, const char *who, PurpleTypingState state) {
++    matrix_go_send_typing(purple_connection_get_account(pc), (char *)who, state == PURPLE_TYPING ? 1 : 0);
++    return 0;
++}
++
++static void matrix_xfer_send_init(PurpleXfer *xfer) {
++    PurpleAccount *account = purple_xfer_get_account(xfer);
++    const char *who = purple_xfer_get_remote_user(xfer);
++    const char *filename = purple_xfer_get_local_filename(xfer);
++    char *error = matrix_go_send_file(account, (char *)who, (char *)filename);
++    if (error && error[0]) {
++        purple_xfer_error(purple_xfer_get_type(xfer), account, who, error);
++        purple_xfer_cancel_local(xfer);
++    } else {
++        purple_xfer_set_bytes_sent(xfer, purple_xfer_get_size(xfer));
++        purple_xfer_set_completed(xfer, TRUE);
++    }
++    free(error);
++}
++
++static PurpleXfer *matrix_new_xfer(PurpleConnection *pc, const char *who) {
++    PurpleXfer *xfer = purple_xfer_new(purple_connection_get_account(pc), PURPLE_XFER_SEND, who);
++    purple_xfer_set_init_fnc(xfer, matrix_xfer_send_init);
++    return xfer;
++}
++
++static void matrix_send_file(PurpleConnection *pc, const char *who, const char *filename) {
++    PurpleXfer *xfer = matrix_new_xfer(pc, who);
++    if (filename && *filename) {
++        purple_xfer_request_accepted(xfer, filename);
++    } else {
++        purple_xfer_request(xfer);
++    }
++}
++
++// A room's file send: the conversation name is the room ID, which the Go side accepts as "who".
++static void matrix_chat_send_file(PurpleConnection *pc, int id, const char *filename) {
++    PurpleConversation *conv = purple_find_chat(pc, id);
++    if (conv == NULL) return;
++    const char *room_id = purple_conversation_get_name(conv);
++    if (room_id != NULL && *room_id) matrix_send_file(pc, room_id, filename);
++}
++
++static PurplePluginProtocolInfo matrix_prpl_info = {
++    .struct_size = sizeof(PurplePluginProtocolInfo),
++    .options = OPT_PROTO_IM_IMAGE | OPT_PROTO_PASSWORD_OPTIONAL,
++    .list_icon = matrix_list_icon,
++    .status_types = matrix_status_types,
++    .login = matrix_login,
++    .close = matrix_close,
++    .send_im = matrix_send_im,
++    .send_typing = matrix_send_typing,
++    .new_xfer = matrix_new_xfer,
++    .send_file = matrix_send_file,
++    .chat_send_file = matrix_chat_send_file,
++    .chat_info = matrix_chat_info,
++    .chat_info_defaults = matrix_chat_info_defaults,
++    .join_chat = matrix_join_chat,
++    .get_chat_name = matrix_get_chat_name,
++    .find_blist_chat = matrix_find_chat_cb,
++    .chat_send = matrix_chat_send,
++};
++
++static PurplePluginInfo matrix_info = {
++    .magic = PURPLE_PLUGIN_MAGIC,
++    .major_version = PURPLE_MAJOR_VERSION,
++    .minor_version = PURPLE_MINOR_VERSION,
++    .type = PURPLE_PLUGIN_PROTOCOL,
++    .priority = PURPLE_PRIORITY_DEFAULT,
++    .id = MATRIX_PLUGIN_ID,
++    .name = MATRIX_PLUGIN_NAME,
++    .version = MX_STR(PLUGIN_VERSION),
++    .summary = MATRIX_PLUGIN_SUMMARY,
++    .description = MATRIX_PLUGIN_SUMMARY,
++    .author = MATRIX_AUTHOR,
++    .homepage = "https://github.com/mautrix/go",
++    .extra_info = &matrix_prpl_info,
++};
++
++void matrix_register_prpl(void) {
++    PurplePlugin *p = purple_plugin_new(TRUE, NULL);
++    p->info = &matrix_info;
++    purple_plugin_load(p);
++    if (purple_plugin_register(p)) {
++        purple_debug_info("matrix", "registered prpl %s\n", MATRIX_PLUGIN_ID);
++    } else {
++        // purple-matrix (matrix-org) also registers prpl-matrix; whichever loads first wins.
++        purple_debug_error("matrix", "FAILED to register %s (is purple-matrix still installed?)\n", MATRIX_PLUGIN_ID);
++    }
++}
+diff --git a/go.sum b/go.sum
+index 2aed0eb..fe4e7d5 100644
+--- a/go.sum
++++ b/go.sum
+@@ -141,8 +141,6 @@ github.com/yuin/goldmark v1.8.6 h1:d0VcaP1sx9GkFVkoW+KtggpGi2KZ965i14b0+bDQST4=
+ github.com/yuin/goldmark v1.8.6/go.mod h1:ip/1k0VRfGynBgxOz0yCqHrbZXhcjxyuS66Brc7iBKg=
+ go.mau.fi/libsignal v0.2.2 h1:QV+XdzQkm3x3aSG7FcqfGSZuFXz83pRZPBFaPygHbOU=
+ go.mau.fi/libsignal v0.2.2/go.mod h1:CRlIQg2J8uYTfDFvNoO8/KcZjs5cey0vbc6oj/bssY0=
+-go.mau.fi/mautrix-meta v0.2607.0 h1:30RnRDgkARyifmsQHOPPIguZY+4PKGyOUb3R5/nlMF8=
+-go.mau.fi/mautrix-meta v0.2607.0/go.mod h1:yS5QKbkbHBRWF0J67qDTAYA1UEf7WlXIO2xkr1SF+lc=
+ go.mau.fi/mautrix-meta v0.2610.0 h1:fmbylDCpTq240dAYutX8GRHyGlSmNM5Q2LehM8q7/vo=
+ go.mau.fi/mautrix-meta v0.2610.0/go.mod h1:HuaOS23+rEw8Gi2XnYjo2MisKoCrWVBbUeuS4GcWNTw=
+ go.mau.fi/util v0.11.0 h1:JNEpkVRxfTdJUC0DIGKiRlLKzl4G/qLX/eVzoP7QuwY=
+@@ -163,8 +161,6 @@ golang.org/x/crypto v0.58.0 h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=
+ golang.org/x/crypto v0.58.0/go.mod h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w=
+ golang.org/x/exp v0.0.0-20261014143641-f0251eb4aa3e h1:HgI6W1OolKK6tcV74is+rl9SMT0njsHlp0TbQiGXI/A=
+ golang.org/x/exp v0.0.0-20261014143641-f0251eb4aa3e/go.mod h1:DBoxwWhjaW8DJJw/YeM4zpeOKMC1FMXSblsYy+1mFSw=
+-golang.org/x/image v0.44.0 h1:+tDekMZED9+LrtB3G5xzRggpVh9CARjZqROla3R3R+I=
+-golang.org/x/image v0.44.0/go.mod h1:V8K3KE9KKKE+pLpQDOeN18w9oacNSvy1tDOirTu4xtY=
+ golang.org/x/image v0.47.0 h1:za/8gVz++PPZqmZJBNSISICN5Rrj5zixP/8K++fgmqo=
+ golang.org/x/image v0.47.0/go.mod h1:IkN5o4A7vq55vXN8FWjjnhg9Rs2GOtffqsSi9mWAKYE=
+ golang.org/x/mod v0.42.0 h1:ICeL3t2L30ljSPHHxDnR4fqVcBt/zR2zJAb9juavmQg=
+diff --git a/matrix.go b/matrix.go
+new file mode 100644
+index 0000000..552c095
+--- /dev/null
++++ b/matrix.go
+@@ -0,0 +1,1540 @@
++// matrix.go - the Matrix part of the combined plugin, on mautrix-go. It shares the one Go runtime
++// with the WhatsApp and Facebook parts (same package main), so every package-level identifier is
++// prefixed mx/matrix.
++//
++// Login: the account username is the Matrix user ID (@user:server). With a password and a server
++// that accepts one, it logs in with m.login.password. Otherwise, on a server with OAuth 2.0 (MAS,
++// such as matrix.org), it uses the device authorization grant: the auth conversation "Matrix"
++// shows a link and a code to approve in any browser. The session (tokens, device ID) is kept in
++// the account settings, so later logins neither ask again nor create a new device.
++//
++// Encryption, verification and key backup are in matrix_e2ee.go, media in matrix_media.go.
++package main
++
++/*
++#include "matrixbridge.h"
++#include <stdlib.h>
++*/
++import "C"
++
++import (
++	"context"
++	"crypto/rand"
++	"encoding/json"
++	"errors"
++	"fmt"
++	"math/big"
++	"net/url"
++	"os"
++	"path/filepath"
++	"strings"
++	"sync"
++	"sync/atomic"
++	"time"
++	"unsafe"
++
++	"github.com/rs/zerolog"
++	"maunium.net/go/mautrix"
++	"maunium.net/go/mautrix/crypto/verificationhelper"
++	"maunium.net/go/mautrix/event"
++	"maunium.net/go/mautrix/id"
++	"maunium.net/go/mautrix/oauth"
++)
++
++const (
++	mxSessionSetting     = "matrix_session"      // JSON mxSession
++	mxOAuthClientSetting = "matrix_oauth_client" // JSON mxOAuthClient: client registration per issuer
++	mxSinceSetting       = "matrix_since_ms"     // only messages newer than this are shown (set at first login)
++	mxPickleKeySetting   = "matrix_pickle_key"   // key the crypto store encrypts its Olm pickles with
++
++	// What the validator app (com.palm.app.matrix) stores as the password when none was given:
++	// the transport refuses an empty one. It means "sign in through the browser".
++	mxBrowserSignIn = "browser-sign-in"
++
++	mxDeviceName = "LuneOS"
++	mxUserAgent  = "LuneOS-Synergy mautrix-go"
++	mxClientURI  = "https://github.com/webOS-ports/luneos-synergy-connectors"
++
++	// How many message bodies are remembered for reply quotes and reaction removals.
++	mxRecentLimit = 2000
++)
++
++type mxSession struct {
++	Homeserver   string      `json:"homeserver"`
++	UserID       id.UserID   `json:"user_id"`
++	DeviceID     id.DeviceID `json:"device_id"`
++	AccessToken  string      `json:"access_token"`
++	RefreshToken string      `json:"refresh_token,omitempty"`
++	ClientID     string      `json:"client_id,omitempty"`
++	ExpiryMs     int64       `json:"expiry_ms,omitempty"`
++}
++
++type mxOAuthClient struct {
++	Issuer   string `json:"issuer"`
++	ClientID string `json:"client_id"`
++}
++
++// What is known about a joined room.
++type mxRoom struct {
++	name      string // m.room.name, else the canonical alias, else heroes
++	alias     string // m.room.canonical_alias
++	heroes    []id.UserID
++	peer      id.UserID // set for a direct chat: the other user
++	lastRecv  id.EventID
++	lastRead  id.EventID // what a read receipt was last sent for
++	members   bool // the full member list has been fetched (needed before encrypting)
++	announced string
++	invited   bool // the invitation has been handled
++}
++
++type mxRecent struct {
++	sender id.UserID
++	body   string
++}
++
++type mxReaction struct {
++	target id.EventID
++	sender id.UserID
++	key    string
++}
++
++type mxHandler struct {
++	account  *PurpleAccount
++	username string
++	userID   id.UserID
++	userDir  string
++	password string
++	session  *mxSession
++	oauthReg *mxOAuthClient
++	sinceMs  int64
++	pickle   string
++	attach   string // the transport's attachment-path-template, see matrix_media.go
++
++	// A sign-in done in the Accounts app (matrix_seed.go), the device of the last one taken, and
++	// the recovery key that came with it, until it has been tried.
++	seed        *mxSeed
++	seedErr     error
++	seedDevice  id.DeviceID
++	recoveryKey string
++
++	client *mautrix.Client
++	crypto *mxCrypto
++	verify *verificationhelper.VerificationHelper
++	log    zerolog.Logger
++	ctx    context.Context
++	cancel context.CancelFunc
++
++	// ready is set once login and encryption setup are done; before that the exports leave
++	// client, crypto and verify alone (they are being assigned on the login goroutine).
++	ready atomic.Bool
++
++	mu           sync.Mutex
++	rooms        map[id.RoomID]*mxRoom
++	direct       map[id.UserID][]id.RoomID // m.direct as the server has it
++	sentTxn      map[string]struct{}
++	recent       map[id.EventID]mxRecent
++	reactions    map[id.EventID]mxReaction // reaction event -> what it reacted to
++	ownReactions map[string]id.EventID     // target + "\x00" + key -> our reaction event
++	e2ee         mxE2EEState
++}
++
++var (
++	mxHandlersMu sync.Mutex
++	mxHandlers   = make(map[*PurpleAccount]*mxHandler)
++)
++
++func mxGetHandler(account *PurpleAccount) *mxHandler {
++	mxHandlersMu.Lock()
++	defer mxHandlersMu.Unlock()
++	return mxHandlers[account]
++}
++
++// ---- exports, called from glue/matrix_init.c on the libpurple main thread ----
++
++//export matrix_go_login
++func matrix_go_login(account *PurpleAccount, purpleUserDir *C.char, username *C.char, password *C.char) {
++	h := &mxHandler{
++		account:      account,
++		username:     strings.TrimSpace(C.GoString(username)),
++		userDir:      C.GoString(purpleUserDir),
++		password:     mxLoginPassword(C.GoString(password)),
++		rooms:        make(map[id.RoomID]*mxRoom),
++		direct:       make(map[id.UserID][]id.RoomID),
++		sentTxn:      make(map[string]struct{}),
++		recent:       make(map[id.EventID]mxRecent),
++		reactions:    make(map[id.EventID]mxReaction),
++		ownReactions: make(map[string]id.EventID),
++	}
++	// Settings are read here, on the main thread; the goroutine below only writes them back
++	// through matrix_message_type_setting.
++	if raw := mxGetSetting(account, mxSessionSetting); raw != "" {
++		var s mxSession
++		if json.Unmarshal([]byte(raw), &s) == nil && s.AccessToken != "" {
++			h.session = &s
++		}
++	}
++	if raw := mxGetSetting(account, mxOAuthClientSetting); raw != "" {
++		var c mxOAuthClient
++		if json.Unmarshal([]byte(raw), &c) == nil && c.ClientID != "" {
++			h.oauthReg = &c
++		}
++	}
++	if stored := C.GoString(password); mxIsSeed(stored) {
++		h.seed, h.seedErr = mxParseSeed(stored)
++	}
++	h.seedDevice = id.DeviceID(mxGetSetting(account, mxSeedDeviceSetting))
++	fmt.Sscan(mxGetSetting(account, mxSinceSetting), &h.sinceMs)
++	h.pickle = mxGetSetting(account, mxPickleKeySetting)
++	h.attach = mxGetSetting(account, mxAttachTemplate)
++	h.log = zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.Kitchen}).
++		With().Timestamp().Str("prpl", "matrix").Logger().Level(zerolog.InfoLevel)
++	h.ctx, h.cancel = context.WithCancel(context.Background())
++
++	mxHandlersMu.Lock()
++	if old := mxHandlers[account]; old != nil {
++		old.cancel()
++	}
++	mxHandlers[account] = h
++	mxHandlersMu.Unlock()
++
++	go h.run()
++}
++
++//export matrix_go_close
++func matrix_go_close(account *PurpleAccount) {
++	mxHandlersMu.Lock()
++	h := mxHandlers[account]
++	delete(mxHandlers, account)
++	mxHandlersMu.Unlock()
++	if h != nil {
++		h.close()
++	}
++}
++
++// The account was deleted on webOS: stop it, end its session on the server and delete its crypto
++// store. Runs synchronously inside the "account-removed" signal, so nothing here may be routed
++// back through matrix_process_message (the account is gone when that would run).
++//
++// libpurple disables an account before removing it, and that closes the connection
++// (matrix_go_close), so the handler is usually gone by now. The session it saved is still in the
++// account's settings, which can be read until this returns.
++//
++//export matrix_go_account_removed
++func matrix_go_account_removed(account *PurpleAccount, purpleUserDir *C.char, username *C.char) {
++	mxHandlersMu.Lock()
++	h := mxHandlers[account]
++	delete(mxHandlers, account)
++	mxHandlersMu.Unlock()
++	var sess *mxSession
++	if h != nil {
++		h.close()
++		h.mu.Lock()
++		if h.session != nil {
++			c := *h.session
++			sess = &c
++		}
++		h.mu.Unlock()
++	}
++	if sess == nil {
++		sess = mxSavedSession(mxGetSetting(account, mxSessionSetting))
++	}
++	if sess != nil {
++		// The session does not refer to the account, so this may finish after it is gone.
++		go func() {
++			if err := mxEndSession(context.Background(), sess); err != nil {
++				fmt.Fprintf(os.Stderr, "matrix: ending the session of %s on account removal failed: %v\n", sess.DeviceID, err)
++			}
++		}()
++	}
++	if uid, err := mxParseUserID(C.GoString(username)); err == nil {
++		mxRemoveStore(C.GoString(purpleUserDir), uid)
++	}
++}
++
++// mxSavedSession reads the session setting; nil when there is none.
++func mxSavedSession(raw string) *mxSession {
++	if raw == "" {
++		return nil
++	}
++	var s mxSession
++	if json.Unmarshal([]byte(raw), &s) != nil || s.AccessToken == "" || s.Homeserver == "" {
++		return nil
++	}
++	return &s
++}
++
++// mxEndSession ends a session on the server, so a device this plugin gave up does not stay in the
++// user's session list. A session from OAuth sign-in is revoked at the authorization server (its
++// refresh token, or the access token when it has none); others log out. Best effort: the token
++// may be dead already.
++func mxEndSession(ctx context.Context, s *mxSession) error {
++	client, err := mautrix.NewClient(s.Homeserver, s.UserID, s.AccessToken)
++	if err != nil {
++		return err
++	}
++	client.UserAgent = mxUserAgent
++	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
++	defer cancel()
++	if s.ClientID != "" {
++		client.OAuthSetTokens(s.ClientID, s.RefreshToken, s.AccessToken, time.UnixMilli(s.ExpiryMs))
++		return client.OAuthRevokeToken(ctx)
++	}
++	_, err = client.Logout(ctx)
++	return err
++}
++
++// who is the other user's ID for a 1:1 chat, or the room ID when isGroup is set. Returns 1 when
++// the message was taken (it is sent asynchronously), 0 when not connected.
++//
++//export matrix_go_send_message
++func matrix_go_send_message(account *PurpleAccount, who *C.char, message *C.char, isGroup C.int, replyTo *C.char) C.int {
++	h := mxGetHandler(account)
++	if h == nil {
++		return 0
++	}
++	target := C.GoString(who)
++	text := C.GoString(message)
++	if mxIsAuthBuddy(target) {
++		h.authReply(strings.TrimSpace(text))
++		return 1
++	}
++	if !h.ready.Load() {
++		return 0
++	}
++	go h.sendText(target, isGroup != 0, text, id.EventID(C.GoString(replyTo)))
++	return 1
++}
++
++//export matrix_go_send_typing
++func matrix_go_send_typing(account *PurpleAccount, who *C.char, typing C.int) {
++	h := mxGetHandler(account)
++	if h == nil || !h.ready.Load() {
++		return
++	}
++	target := C.GoString(who)
++	if mxIsAuthBuddy(target) {
++		return
++	}
++	go func() {
++		roomID, err := h.roomFor(target, false, false)
++		if err == nil && roomID != "" {
++			_, _ = h.client.UserTyping(h.ctx, roomID, typing != 0, 20*time.Second)
++		}
++	}()
++}
++
++// webOS: the Messaging app has shown this conversation, a user or a room ID, so what came in it
++// has been read. Raised through libpurple's "conversation-updated" (glue/matrix_init.c).
++//
++//export matrix_go_mark_read
++func matrix_go_mark_read(account *PurpleAccount, who *C.char) {
++	h := mxGetHandler(account)
++	if h == nil || !h.ready.Load() {
++		return
++	}
++	target := C.GoString(who)
++	if mxIsAuthBuddy(target) {
++		return
++	}
++	go func() {
++		roomID, err := h.roomFor(target, false, false)
++		if err == nil && roomID != "" {
++			h.markReadOnSend(roomID)
++		}
++	}()
++}
++
++// webOS reactions (SEND). targetId is the event ID, peer the conversation (user or room ID),
++// removeFlag "1" removes our reaction with that emoji.
++//
++//export matrix_go_send_reaction
++func matrix_go_send_reaction(account *PurpleAccount, targetId *C.char, emoji *C.char, peer *C.char, removeFlag *C.char) {
++	h := mxGetHandler(account)
++	if h == nil || !h.ready.Load() {
++		return
++	}
++	target := id.EventID(C.GoString(targetId))
++	key := C.GoString(emoji)
++	conv := C.GoString(peer)
++	remove := C.GoString(removeFlag) == "1"
++	go h.sendReaction(conv, target, key, remove)
++}
++
++// ---- settings and C bridge helpers ----
++
++func mxGetSetting(account *PurpleAccount, key string) string {
++	cKey := C.CString(key)
++	defer C.free(unsafe.Pointer(cKey))
++	cVal := C.matrix_get_setting(account, cKey)
++	if cVal == nil {
++		return ""
++	}
++	defer C.free(unsafe.Pointer(cVal))
++	return C.GoString(cVal)
++}
++
++func cstrOrNil(s string) *C.char {
++	if s == "" {
++		return nil
++	}
++	return C.CString(s)
++}
++
++func (h *mxHandler) setSetting(key, value string) {
++	msg := C.matrix_message_t{account: h.account, msgtype: C.char(C.matrix_message_type_setting)}
++	msg.name = C.CString(key)
++	msg.text = C.CString(value)
++	C.matrix_process_message(msg)
++}
++
++func (h *mxHandler) prompt(text string) {
++	msg := C.matrix_message_t{account: h.account, msgtype: C.char(C.matrix_message_type_prompt)}
++	msg.text = C.CString(text)
++	C.matrix_process_message(msg)
++}
++
++// fatal: 0 = only logged, 1 = network error (libpurple reconnects), 2 = authentication (stays offline).
++func (h *mxHandler) reportError(text string, fatal int) {
++	h.log.Error().Int("fatal", fatal).Msg(text)
++	msg := C.matrix_message_t{account: h.account, msgtype: C.char(C.matrix_message_type_error), fatal: C.char(fatal)}
++	msg.text = C.CString(text)
++	C.matrix_process_message(msg)
++}
++
++func (h *mxHandler) notifyConnected() {
++	C.matrix_process_message(C.matrix_message_t{account: h.account, msgtype: C.char(C.matrix_message_type_connected)})
++}
++
++func (h *mxHandler) notifyBuddy(user id.UserID, name string) {
++	msg := C.matrix_message_t{account: h.account, msgtype: C.char(C.matrix_message_type_buddy)}
++	if name == "" {
++		// The transport leaves nameless buddies out of Contacts; someone with no display name is
++		// still a real contact, so show the localpart, as Matrix clients do.
++		name = user.Localpart()
++	}
++	msg.who = C.CString(string(user))
++	msg.name = cstrOrNil(name)
++	C.matrix_process_message(msg)
++}
++
++func (h *mxHandler) notifyChat(roomID id.RoomID, name string) {
++	msg := C.matrix_message_t{account: h.account, msgtype: C.char(C.matrix_message_type_chat)}
++	msg.conv = C.CString(string(roomID))
++	msg.name = cstrOrNil(name)
++	C.matrix_process_message(msg)
++}
++
++func (h *mxHandler) notifyTyping(user id.UserID, typing bool) {
++	msg := C.matrix_message_t{account: h.account, msgtype: C.char(C.matrix_message_type_typing)}
++	msg.who = C.CString(string(user))
++	if typing {
++		msg.isOutgoing = 1
++	}
++	C.matrix_process_message(msg)
++}
++
++type mxShown struct {
++	conv       string
++	isGroup    bool
++	sender     id.UserID
++	senderName string
++	text       string
++	isHtml     bool
++	eventID    id.EventID
++	ts         int64 // ms
++	outgoing   bool
++	quotedText string
++	quotedFrom string
++	quotedID   id.EventID
++}
++
++func (h *mxHandler) notifyMessage(m mxShown) {
++	msg := C.matrix_message_t{account: h.account, msgtype: C.char(C.matrix_message_type_text)}
++	msg.who = C.CString(string(m.sender))
++	msg.conv = C.CString(m.conv)
++	msg.name = cstrOrNil(m.senderName)
++	msg.text = C.CString(m.text)
++	msg.id = cstrOrNil(string(m.eventID))
++	msg.quotedText = cstrOrNil(m.quotedText)
++	msg.quotedFrom = cstrOrNil(m.quotedFrom)
++	msg.quotedId = cstrOrNil(string(m.quotedID))
++	msg.timestamp = C.time_t(m.ts / 1000)
++	if m.isGroup {
++		msg.isGroup = 1
++	}
++	if m.outgoing {
++		msg.isOutgoing = 1
++	}
++	if m.isHtml {
++		msg.isHtml = 1
++	}
++	C.matrix_process_message(msg)
++}
++
++// ---- login ----
++
++// mxIsAuthBuddy tells whether a message or typing notice is for the sign-in/verification chat.
++// The transport lowercases the address ("matrix"); Matrix user IDs start with '@' and room IDs
++// with '!', so no real contact can match.
++func mxIsAuthBuddy(who string) bool {
++	return strings.EqualFold(who, C.MATRIX_AUTH_BUDDY)
++}
++
++// mxLoginPassword is the password to log in with: none when the account was made for browser
++// sign-in, or signed in already in the Accounts app.
++func mxLoginPassword(stored string) string {
++	if stored == mxBrowserSignIn || mxIsSeed(stored) {
++		return ""
++	}
++	return stored
++}
++
++func mxParseUserID(raw string) (id.UserID, error) {
++	s := strings.TrimSpace(raw)
++	if s == "" {
++		return "", errors.New("no Matrix ID given")
++	}
++	if !strings.HasPrefix(s, "@") {
++		s = "@" + s
++	}
++	uid := id.UserID(s)
++	if _, _, err := uid.Parse(); err != nil {
++		return "", fmt.Errorf("%q is not a Matrix ID such as @alice:matrix.org", raw)
++	}
++	return uid, nil
++}
++
++func mxRandomDeviceID() id.DeviceID {
++	const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
++	b := make([]byte, 10)
++	for i := range b {
++		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(letters))))
++		if err != nil {
++			panic(err)
++		}
++		b[i] = letters[n.Int64()]
++	}
++	return id.DeviceID(b)
++}
++
++func (h *mxHandler) run() {
++	err := h.connect()
++	if err == nil {
++		return
++	}
++	if h.ctx.Err() != nil {
++		return // closed while connecting
++	}
++	var authErr *mxAuthError
++	if errors.As(err, &authErr) {
++		h.reportError(authErr.Error(), 2)
++	} else {
++		h.reportError(err.Error(), 1)
++	}
++}
++
++type mxAuthError struct{ msg string }
++
++func (e *mxAuthError) Error() string { return e.msg }
++
++func mxAuthErrorf(format string, args ...any) error {
++	return &mxAuthError{msg: fmt.Sprintf(format, args...)}
++}
++
++func (h *mxHandler) discoverHomeserver(server string) string {
++	ctx, cancel := context.WithTimeout(h.ctx, 20*time.Second)
++	defer cancel()
++	wk, err := mautrix.DiscoverClientAPI(ctx, server)
++	if err == nil && wk != nil && wk.Homeserver.BaseURL != "" {
++		return strings.TrimRight(wk.Homeserver.BaseURL, "/")
++	}
++	if err != nil {
++		h.log.Info().Err(err).Str("server", server).Msg("No usable .well-known, trying the server name directly")
++	}
++	return "https://" + server
++}
++
++func (h *mxHandler) connect() error {
++	uid, err := mxParseUserID(h.username)
++	if err != nil {
++		return &mxAuthError{msg: err.Error()}
++	}
++	h.userID = uid
++	_, server, _ := uid.Parse()
++	if h.seedErr != nil {
++		return mxAuthErrorf("%v; sign in again in Accounts", h.seedErr)
++	}
++	fresh := h.adoptSeed(uid)
++
++	hs := ""
++	if h.session != nil && h.session.UserID == uid && h.session.Homeserver != "" {
++		hs = h.session.Homeserver
++	} else {
++		h.session = nil
++		hs = h.discoverHomeserver(server)
++	}
++	client, err := mautrix.NewClient(hs, "", "")
++	if err != nil {
++		return mxAuthErrorf("bad homeserver address %s: %v", hs, err)
++	}
++	client.UserAgent = mxUserAgent
++	client.Log = h.log
++	client.SaveNewToken = func(ctx context.Context, refreshToken, accessToken string, expiry time.Time) error {
++		h.mu.Lock()
++		if h.session != nil {
++			h.session.AccessToken = accessToken
++			h.session.RefreshToken = refreshToken
++			h.session.ExpiryMs = expiry.UnixMilli()
++		}
++		h.mu.Unlock()
++		h.saveSession()
++		return nil
++	}
++	h.mu.Lock()
++	h.client = client
++	h.mu.Unlock()
++
++	if h.session != nil {
++		client.UserID = h.session.UserID
++		client.DeviceID = h.session.DeviceID
++		client.AccessToken = h.session.AccessToken
++		if h.session.RefreshToken != "" && h.session.ClientID != "" {
++			client.OAuthSetTokens(h.session.ClientID, h.session.RefreshToken, h.session.AccessToken,
++				time.UnixMilli(h.session.ExpiryMs))
++		}
++		if _, err = client.Whoami(h.ctx); err != nil {
++			if errors.Is(err, mautrix.MUnknownToken) {
++				h.log.Info().Msg("Stored session is no longer valid, logging in again")
++				h.clearSession()
++			} else {
++				return fmt.Errorf("could not reach %s: %w", hs, err)
++			}
++		}
++	}
++	if h.session == nil {
++		if err = h.freshLogin(); err != nil {
++			return err
++		}
++		fresh = true
++	}
++	if h.sinceMs == 0 {
++		// The first time this account connects: do not replay the whole history into Messaging.
++		h.sinceMs = time.Now().UnixMilli()
++		h.setSetting(mxSinceSetting, fmt.Sprint(h.sinceMs))
++	}
++
++	if err = h.setupSync(); err != nil {
++		return err
++	}
++	if err = h.setupCrypto(fresh); err != nil {
++		if errors.Is(err, errMxStoreMismatch) && !fresh {
++			// The device on the server no longer matches the local crypto store (for example the
++			// device was signed out elsewhere). Start over with a new device.
++			h.log.Warn().Err(err).Msg("Crypto store does not match the device, logging in again")
++			h.clearSession()
++			mxRemoveStore(h.userDir, h.userID)
++			if err = h.freshLogin(); err != nil {
++				return err
++			}
++			// A new syncer: the failed attempt already registered its handlers on the old one.
++			if err = h.setupSync(); err != nil {
++				return err
++			}
++			if err = h.setupCrypto(true); err != nil {
++				return fmt.Errorf("encryption setup failed: %w", err)
++			}
++		} else {
++			return fmt.Errorf("encryption setup failed: %w", err)
++		}
++	}
++
++	h.ready.Store(true)
++	h.notifyConnected()
++	return h.syncLoop()
++}
++
++func (h *mxHandler) freshLogin() error {
++	client := h.client
++	flows, err := client.GetLoginFlows(h.ctx)
++	if err != nil {
++		return fmt.Errorf("could not reach %s: %w", client.HomeserverURL, err)
++	}
++	hasPassword := flows.HasFlow(mautrix.AuthTypePassword)
++	meta, metaErr := client.OAuthGetServerMetadata(h.ctx)
++	canDeviceCode := metaErr == nil && meta != nil && meta.DeviceAuthorizationEndpoint != "" &&
++		mxHasGrant(meta.GrantTypesSupported, oauth.GrantTypeDeviceCode)
++
++	// Whatever the old store holds belongs to a device that is about to be replaced.
++	mxRemoveStore(h.userDir, h.userID)
++
++	switch {
++	case h.seed != nil:
++		// Signed in through the Accounts app, and that session is over (its tokens were used, or
++		// it was signed out elsewhere). Accounts asks the user to sign in again.
++		return mxAuthErrorf("the sign-in for %s has ended; sign in again in Accounts", h.userID)
++	case h.password != "" && hasPassword:
++		err = h.passwordLogin()
++	case canDeviceCode:
++		err = h.deviceCodeLogin(meta)
++	case hasPassword:
++		return mxAuthErrorf("%s needs a password: edit the account and enter it", client.HomeserverURL.Host)
++	default:
++		return mxAuthErrorf("%s only offers browser sign-in, which this device cannot do yet", client.HomeserverURL.Host)
++	}
++	if err != nil {
++		return err
++	}
++	h.saveSession()
++	return nil
++}
++
++func mxHasGrant(grants []oauth.GrantType, want oauth.GrantType) bool {
++	for _, g := range grants {
++		if g == want {
++			return true
++		}
++	}
++	return false
++}
++
++func (h *mxHandler) passwordLogin() error {
++	resp, err := h.client.Login(h.ctx, &mautrix.ReqLogin{
++		Type:                     mautrix.AuthTypePassword,
++		Identifier:               mautrix.UserIdentifier{Type: mautrix.IdentifierTypeUser, User: string(h.userID)},
++		Password:                 h.password,
++		InitialDeviceDisplayName: mxDeviceName,
++		StoreCredentials:         true,
++	})
++	if err != nil {
++		if errors.Is(err, mautrix.MForbidden) || errors.Is(err, mautrix.MUserDeactivated) {
++			return mxAuthErrorf("login refused: %v", err)
++		}
++		return fmt.Errorf("login failed: %w", err)
++	}
++	h.mu.Lock()
++	h.session = &mxSession{
++		Homeserver:  h.client.HomeserverURL.String(),
++		UserID:      resp.UserID,
++		DeviceID:    resp.DeviceID,
++		AccessToken: resp.AccessToken,
++	}
++	h.mu.Unlock()
++	if resp.UserID != h.userID {
++		return mxAuthErrorf("logged in as %s, but the account is %s", resp.UserID, h.userID)
++	}
++	return nil
++}
++
++func (h *mxHandler) oauthClientID(meta *oauth.ServerMetadata) (string, error) {
++	if h.oauthReg != nil && h.oauthReg.Issuer == meta.Issuer {
++		return h.oauthReg.ClientID, nil
++	}
++	resp, err := h.client.OAuthRegisterClient(h.ctx, &oauth.ClientMetadata{
++		ApplicationType:         oauth.ApplicationTypeNative,
++		ClientName:              "LuneOS Messaging",
++		ClientURI:               mxClientURI,
++		GrantTypes:              []oauth.GrantType{oauth.GrantTypeDeviceCode, oauth.GrantTypeRefreshToken},
++		TokenEndpointAuthMethod: oauth.AuthMethodNone,
++	})
++	if err != nil {
++		return "", fmt.Errorf("could not register with %s: %w", meta.Issuer, err)
++	}
++	h.oauthReg = &mxOAuthClient{Issuer: meta.Issuer, ClientID: resp.ClientID}
++	raw, _ := json.Marshal(h.oauthReg)
++	h.setSetting(mxOAuthClientSetting, string(raw))
++	return resp.ClientID, nil
++}
++
++func (h *mxHandler) deviceCodeLogin(meta *oauth.ServerMetadata) error {
++	clientID, err := h.oauthClientID(meta)
++	if err != nil {
++		return err
++	}
++	deviceID := mxRandomDeviceID()
++	code, err := h.client.OAuthGenerateDeviceCode(h.ctx, oauth.GenerateDeviceCodeParams{
++		Scopes:     oauth.ScopeList{oauth.ScopeClientAPI, oauth.ScopeDevice(deviceID)},
++		UserIDHint: h.userID,
++		ClientID:   clientID,
++	})
++	if err != nil {
++		return fmt.Errorf("could not start sign-in: %w", err)
++	}
++	link := code.VerificationURIComplete
++	if link == "" {
++		link = code.VerificationURI
++	}
++	h.prompt(fmt.Sprintf("To sign in to %s, open this link in a browser (on this or any other device) and approve the sign-in:\n%s\nIf it asks for a code, enter: %s",
++		h.userID, link, code.UserCode))
++
++	interval := code.Interval.Duration
++	if interval <= 0 {
++		interval = 5 * time.Second
++	}
++	deadline := time.Now().Add(code.ExpiresIn.Duration)
++	if code.ExpiresIn.Duration <= 0 {
++		deadline = time.Now().Add(10 * time.Minute)
++	}
++	for {
++		select {
++		case <-h.ctx.Done():
++			return h.ctx.Err()
++		case <-time.After(interval):
++		}
++		if time.Now().After(deadline) {
++			return mxAuthErrorf("the sign-in code expired before it was approved; reconnect the account to get a new one")
++		}
++		start := time.Now()
++		tok, err := h.client.OAuthPollDeviceCode(h.ctx, oauth.PollDeviceCodeParams{DeviceCode: code.DeviceCode, ClientID: clientID})
++		switch {
++		case err == nil:
++			expiry := start.Add(tok.ExpiresIn.Duration)
++			h.client.OAuthSetTokens(clientID, tok.RefreshToken, tok.AccessToken, expiry)
++			h.client.DeviceID = deviceID
++			who, werr := h.client.Whoami(h.ctx)
++			if werr != nil {
++				return fmt.Errorf("signed in, but the server did not say who we are: %w", werr)
++			}
++			if who.UserID != h.userID {
++				return mxAuthErrorf("signed in as %s, but the account is %s", who.UserID, h.userID)
++			}
++			h.client.UserID = who.UserID
++			h.mu.Lock()
++			h.session = &mxSession{
++				Homeserver:   h.client.HomeserverURL.String(),
++				UserID:       who.UserID,
++				DeviceID:     deviceID,
++				AccessToken:  tok.AccessToken,
++				RefreshToken: tok.RefreshToken,
++				ClientID:     clientID,
++				ExpiryMs:     expiry.UnixMilli(),
++			}
++			h.mu.Unlock()
++			h.prompt("Signed in.")
++			return nil
++		case errors.Is(err, mautrix.ErrOAuthAuthorizationPending):
++		case errors.Is(err, mautrix.ErrOAuthSlowDown):
++			interval += 5 * time.Second
++		case errors.Is(err, mautrix.ErrOAuthExpiredToken):
++			return mxAuthErrorf("the sign-in code expired before it was approved; reconnect the account to get a new one")
++		default:
++			var httpErr mautrix.HTTPError
++			if errors.As(err, &httpErr) && httpErr.RespError != nil && httpErr.RespError.ErrCode == "access_denied" {
++				return mxAuthErrorf("the sign-in was denied")
++			}
++			return fmt.Errorf("sign-in failed: %w", err)
++		}
++	}
++}
++
++func (h *mxHandler) saveSession() {
++	h.mu.Lock()
++	if h.session == nil {
++		h.mu.Unlock()
++		return
++	}
++	raw, _ := json.Marshal(h.session)
++	h.mu.Unlock()
++	h.setSetting(mxSessionSetting, string(raw))
++}
++
++func (h *mxHandler) clearSession() {
++	h.mu.Lock()
++	h.session = nil
++	h.mu.Unlock()
++	h.client.AccessToken = ""
++	h.client.DeviceID = ""
++	h.client.OAuthSetTokens("", "", "", time.Time{})
++	h.setSetting(mxSessionSetting, "")
++}
++
++func (h *mxHandler) close() {
++	h.cancel()
++	h.mu.Lock()
++	client, crypt := h.client, h.crypto
++	h.mu.Unlock()
++	if client != nil {
++		client.StopSync()
++	}
++	if crypt != nil {
++		_ = crypt.Close()
++	}
++}
++
++// ---- sync ----
++
++// mxSyncer keeps the default dispatching but stops on a revoked session instead of retrying it.
++type mxSyncer struct {
++	*mautrix.DefaultSyncer
++	h *mxHandler
++}
++
++// ProcessResponse dispatches a sync response as usual, then lets the handler look at the result
++// as a whole: rooms can only be named and classified once m.direct and the room state of the
++// same response have been handled.
++func (s *mxSyncer) ProcessResponse(ctx context.Context, res *mautrix.RespSync, since string) error {
++	err := s.DefaultSyncer.ProcessResponse(ctx, res, since)
++	s.h.afterSync(res)
++	return err
++}
++
++func (s *mxSyncer) OnFailedSync(res *mautrix.RespSync, err error) (time.Duration, error) {
++	if errors.Is(err, mautrix.MUnknownToken) {
++		return 0, err
++	}
++	s.h.log.Warn().Err(err).Msg("Sync failed, retrying")
++	return 10 * time.Second, nil
++}
++
++func (h *mxHandler) setupSync() error {
++	syncer := &mxSyncer{DefaultSyncer: mautrix.NewDefaultSyncer(), h: h}
++	syncer.FilterJSON = &mautrix.Filter{
++		Room: &mautrix.RoomFilter{
++			Timeline: &mautrix.FilterPart{Limit: 30, LazyLoadMembers: true},
++			State:    &mautrix.FilterPart{LazyLoadMembers: true},
++		},
++	}
++	syncer.OnEventType(event.AccountDataDirectChats, h.onDirectChats)
++	syncer.OnEventType(event.StateRoomName, h.onRoomState)
++	syncer.OnEventType(event.StateCanonicalAlias, h.onRoomState)
++	syncer.OnEventType(event.StateMember, h.onMember)
++	syncer.OnEventType(event.EventMessage, h.onMessage)
++	syncer.OnEventType(event.EventSticker, h.onMessage)
++	syncer.OnEventType(event.EventReaction, h.onReaction)
++	syncer.OnEventType(event.EventRedaction, h.onRedaction)
++	syncer.OnEventType(event.EphemeralEventTyping, h.onTyping)
++	syncer.OnEventType(event.EphemeralEventReceipt, h.onReceipt)
++	h.client.Syncer = syncer
++	return nil
++}
++
++func (h *mxHandler) syncLoop() error {
++	err := h.client.SyncWithContext(h.ctx)
++	if h.ctx.Err() != nil {
++		return nil
++	}
++	if errors.Is(err, mautrix.MUnknownToken) {
++		h.clearSession()
++		return mxAuthErrorf("this device was signed out of %s; reconnect the account to sign in again", h.userID)
++	}
++	if err != nil {
++		return fmt.Errorf("sync stopped: %w", err)
++	}
++	return errors.New("sync stopped")
++}
++
++// afterSync runs once a sync response has been dispatched. It keeps the room summaries (heroes,
++// used to name unnamed rooms), announces new or renamed rooms, and after the first sync checks
++// the encryption state.
++func (h *mxHandler) afterSync(resp *mautrix.RespSync) {
++	h.mu.Lock()
++	for roomID, data := range resp.Rooms.Join {
++		r := h.roomLocked(roomID)
++		if data.Summary.Heroes != nil {
++			r.heroes = data.Summary.Heroes
++		}
++	}
++	for roomID := range resp.Rooms.Leave {
++		delete(h.rooms, roomID)
++	}
++	first := !h.e2ee.firstSyncDone
++	h.e2ee.firstSyncDone = true
++	h.mu.Unlock()
++
++	h.announceRooms(resp)
++	if first {
++		go h.checkEncryption()
++	}
++}
++
++func (h *mxHandler) roomLocked(roomID id.RoomID) *mxRoom {
++	r := h.rooms[roomID]
++	if r == nil {
++		r = &mxRoom{}
++		h.rooms[roomID] = r
++	}
++	return r
++}
++
++// The display name of a user in a room, from the member state the crypto helper keeps.
++func (h *mxHandler) displayName(ctx context.Context, roomID id.RoomID, user id.UserID) string {
++	if h.client.StateStore != nil {
++		if member, err := h.client.StateStore.GetMember(ctx, roomID, user); err == nil && member != nil && member.Displayname != "" {
++			return member.Displayname
++		}
++	}
++	localpart, _, _ := user.Parse()
++	return localpart
++}
++
++func (h *mxHandler) roomName(ctx context.Context, roomID id.RoomID) string {
++	h.mu.Lock()
++	r := h.roomLocked(roomID)
++	name, alias, heroes := r.name, r.alias, append([]id.UserID(nil), r.heroes...)
++	h.mu.Unlock()
++	if name != "" {
++		return name
++	}
++	if alias != "" {
++		return alias
++	}
++	var names []string
++	for _, u := range heroes {
++		if u != h.userID {
++			names = append(names, h.displayName(ctx, roomID, u))
++		}
++		if len(names) == 3 {
++			break
++		}
++	}
++	if len(names) > 0 {
++		return strings.Join(names, ", ")
++	}
++	return string(roomID)
++}
++
++// announceRooms tells the buddy list about joined rooms: a direct chat becomes a buddy for the
++// other user, any other room a chat. A room is only announced again when its name changes.
++func (h *mxHandler) announceRooms(resp *mautrix.RespSync) {
++	for roomID := range resp.Rooms.Join {
++		peer := h.peerOf(roomID)
++		var name string
++		if peer != "" {
++			name = h.displayName(h.ctx, roomID, peer)
++		} else {
++			name = h.roomName(h.ctx, roomID)
++		}
++		h.mu.Lock()
++		r := h.roomLocked(roomID)
++		changed := r.announced != name
++		r.announced = name
++		h.mu.Unlock()
++		if !changed {
++			continue
++		}
++		if peer != "" {
++			h.notifyBuddy(peer, name)
++		} else {
++			h.notifyChat(roomID, name)
++		}
++	}
++}
++
++func (h *mxHandler) peerOf(roomID id.RoomID) id.UserID {
++	h.mu.Lock()
++	defer h.mu.Unlock()
++	if r := h.rooms[roomID]; r != nil {
++		return r.peer
++	}
++	return ""
++}
++
++func (h *mxHandler) onDirectChats(ctx context.Context, evt *event.Event) {
++	content := evt.Content.AsDirectChats()
++	if content == nil {
++		return
++	}
++	h.mu.Lock()
++	defer h.mu.Unlock()
++	h.direct = make(map[id.UserID][]id.RoomID, len(*content))
++	for _, r := range h.rooms {
++		r.peer = ""
++	}
++	for user, rooms := range *content {
++		h.direct[user] = rooms
++		for _, roomID := range rooms {
++			h.roomLocked(roomID).peer = user
++		}
++	}
++}
++
++func (h *mxHandler) onRoomState(ctx context.Context, evt *event.Event) {
++	h.mu.Lock()
++	defer h.mu.Unlock()
++	r := h.roomLocked(evt.RoomID)
++	switch evt.Type {
++	case event.StateRoomName:
++		if c := evt.Content.AsRoomName(); c != nil {
++			r.name = c.Name
++		}
++	case event.StateCanonicalAlias:
++		if c := evt.Content.AsCanonicalAlias(); c != nil {
++			r.alias = string(c.Alias)
++		}
++	}
++}
++
++// onMember accepts invitations to direct chats. Invitations to other rooms are not joined
++// automatically (anyone can invite anyone on Matrix); they are mentioned in the auth conversation.
++func (h *mxHandler) onMember(ctx context.Context, evt *event.Event) {
++	if evt.Mautrix.EventSource&event.SourceInvite == 0 || evt.StateKey == nil || id.UserID(*evt.StateKey) != h.userID {
++		return
++	}
++	content := evt.Content.AsMember()
++	if content == nil || content.Membership != event.MembershipInvite {
++		return
++	}
++	h.mu.Lock()
++	r := h.roomLocked(evt.RoomID)
++	handled := r.invited
++	r.invited = true
++	h.mu.Unlock()
++	if handled {
++		return
++	}
++	if content.IsDirect {
++		go func() {
++			if _, err := h.client.JoinRoomByID(h.ctx, evt.RoomID); err != nil {
++				h.log.Warn().Err(err).Stringer("room_id", evt.RoomID).Msg("Could not join direct chat")
++				return
++			}
++			h.markDirect(evt.Sender, evt.RoomID)
++		}()
++		return
++	}
++	h.prompt(fmt.Sprintf("%s invited you to a room (%s). Join it from another Matrix app to see it here.", evt.Sender, evt.RoomID))
++}
++
++// markDirect records roomID as a direct chat with user in m.direct, as other clients expect.
++func (h *mxHandler) markDirect(user id.UserID, roomID id.RoomID) {
++	h.mu.Lock()
++	for _, existing := range h.direct[user] {
++		if existing == roomID {
++			h.mu.Unlock()
++			return
++		}
++	}
++	h.direct[user] = append(h.direct[user], roomID)
++	h.roomLocked(roomID).peer = user
++	content := make(event.DirectChatsEventContent, len(h.direct))
++	for u, rooms := range h.direct {
++		content[u] = append([]id.RoomID(nil), rooms...)
++	}
++	h.mu.Unlock()
++	if err := h.client.SetAccountData(h.ctx, event.AccountDataDirectChats.Type, &content); err != nil {
++		h.log.Warn().Err(err).Msg("Could not update m.direct")
++	}
++}
++
++// conversation names the webOS conversation a room's events belong to.
++func (h *mxHandler) conversation(roomID id.RoomID) (conv string, isGroup bool) {
++	if peer := h.peerOf(roomID); peer != "" {
++		return string(peer), false
++	}
++	return string(roomID), true
++}
++
++func (h *mxHandler) remember(eventID id.EventID, sender id.UserID, body string) {
++	h.mu.Lock()
++	defer h.mu.Unlock()
++	if len(h.recent) >= mxRecentLimit {
++		for k := range h.recent {
++			delete(h.recent, k)
++			if len(h.recent) < mxRecentLimit*3/4 {
++				break
++			}
++		}
++	}
++	h.recent[eventID] = mxRecent{sender: sender, body: body}
++}
++
++// isOwnEcho reports whether an event is the echo of a message this device sent, which the
++// transport already stored when the app sent it.
++func (h *mxHandler) isOwnEcho(evt *event.Event) bool {
++	if evt.Sender != h.userID {
++		return false
++	}
++	txn := evt.Unsigned.TransactionID
++	if txn == "" {
++		return false
++	}
++	h.mu.Lock()
++	defer h.mu.Unlock()
++	if _, ok := h.sentTxn[txn]; ok {
++		delete(h.sentTxn, txn)
++		return true
++	}
++	// A transaction ID is only ever returned to the device that sent the event.
++	return true
++}
++
++func (h *mxHandler) tooOld(evt *event.Event) bool {
++	return evt.Timestamp != 0 && evt.Timestamp < h.sinceMs
++}
++
++func (h *mxHandler) onMessage(ctx context.Context, evt *event.Event) {
++	content := evt.Content.AsMessage()
++	if content == nil {
++		return
++	}
++	if evt.Type == event.EventSticker {
++		content.MsgType = event.MsgImage
++	}
++	if content.MsgType == event.MsgVerificationRequest {
++		return // handled by the verification helper
++	}
++	// Edits replace the original bubble's text.
++	if content.RelatesTo != nil && content.RelatesTo.Type == event.RelReplace && content.NewContent != nil {
++		target := content.RelatesTo.GetReplaceID()
++		if target != "" && !h.tooOld(evt) {
++			body := content.NewContent.Body
++			h.remember(target, evt.Sender, body)
++			purple_handle_message_edit(h.account, string(target), body)
++		}
++		return
++	}
++	content.RemoveReplyFallback()
++	h.remember(evt.ID, evt.Sender, content.Body)
++	h.mu.Lock()
++	if evt.Sender != h.userID {
++		h.roomLocked(evt.RoomID).lastRecv = evt.ID
++	}
++	h.mu.Unlock()
++	if h.tooOld(evt) || h.isOwnEcho(evt) {
++		return
++	}
++
++	conv, isGroup := h.conversation(evt.RoomID)
++	shown := mxShown{
++		conv:     conv,
++		isGroup:  isGroup,
++		sender:   evt.Sender,
++		eventID:  evt.ID,
++		ts:       evt.Timestamp,
++		outgoing: evt.Sender == h.userID,
++	}
++	if isGroup {
++		shown.senderName = h.displayName(ctx, evt.RoomID, evt.Sender)
++	}
++	if replyTo := content.GetReplyTo(); replyTo != "" {
++		h.mu.Lock()
++		orig, ok := h.recent[replyTo]
++		h.mu.Unlock()
++		if ok {
++			shown.quotedText = orig.body
++			shown.quotedFrom = h.displayName(ctx, evt.RoomID, orig.sender)
++			shown.quotedID = replyTo
++		}
++	}
++
++	switch content.MsgType {
++	case event.MsgImage, event.MsgVideo, event.MsgAudio, event.MsgFile:
++		go h.receiveMedia(evt.RoomID, content, shown)
++		return
++	case event.MsgEmote:
++		name := shown.senderName
++		if name == "" {
++			name = h.displayName(ctx, evt.RoomID, evt.Sender)
++		}
++		shown.text = "* " + name + " " + content.Body
++	case event.MsgLocation:
++		shown.text = content.Body
++		if content.GeoURI != "" {
++			shown.text += " (" + content.GeoURI + ")"
++		}
++	default:
++		shown.text = content.Body
++	}
++	if evt.Mautrix.WasEncrypted && evt.Mautrix.TrustState < id.TrustStateCrossSignedTOFU && evt.Mautrix.TrustState > id.TrustStateUnset {
++		h.log.Debug().Stringer("event_id", evt.ID).Int("trust", int(evt.Mautrix.TrustState)).Msg("Message from an unverified device")
++	}
++	h.notifyMessage(shown)
++}
++
++func (h *mxHandler) onReaction(ctx context.Context, evt *event.Event) {
++	content := evt.Content.AsReaction()
++	if content == nil || content.RelatesTo.Type != event.RelAnnotation {
++		return
++	}
++	target, key := content.RelatesTo.EventID, content.RelatesTo.Key
++	h.mu.Lock()
++	if len(h.reactions) >= mxRecentLimit {
++		for k := range h.reactions {
++			delete(h.reactions, k)
++			if len(h.reactions) < mxRecentLimit*3/4 {
++				break
++			}
++		}
++	}
++	h.reactions[evt.ID] = mxReaction{target: target, sender: evt.Sender, key: key}
++	if evt.Sender == h.userID {
++		h.ownReactions[string(target)+"\x00"+key] = evt.ID
++	}
++	h.mu.Unlock()
++	if h.tooOld(evt) || h.isOwnEcho(evt) {
++		return
++	}
++	conv, _ := h.conversation(evt.RoomID)
++	purple_handle_reaction(h.account, conv, string(target), key, string(evt.Sender))
++}
++
++func (h *mxHandler) onRedaction(ctx context.Context, evt *event.Event) {
++	redacts := evt.Redacts
++	if redacts == "" {
++		if c := evt.Content.AsRedaction(); c != nil {
++			redacts = c.Redacts
++		}
++	}
++	if redacts == "" || h.tooOld(evt) {
++		return
++	}
++	h.mu.Lock()
++	reaction, isReaction := h.reactions[redacts]
++	if isReaction {
++		delete(h.reactions, redacts)
++		if reaction.sender == h.userID {
++			delete(h.ownReactions, string(reaction.target)+"\x00"+reaction.key)
++		}
++	}
++	h.mu.Unlock()
++	if isReaction {
++		if h.isOwnEcho(evt) {
++			return
++		}
++		conv, _ := h.conversation(evt.RoomID)
++		purple_handle_reaction(h.account, conv, string(reaction.target), "", string(reaction.sender))
++		return
++	}
++	purple_handle_message_delete(h.account, string(redacts))
++}
++
++func (h *mxHandler) onTyping(ctx context.Context, evt *event.Event) {
++	peer := h.peerOf(evt.RoomID)
++	if peer == "" {
++		return // typing is only shown for 1:1 chats
++	}
++	content := evt.Content.AsTyping()
++	if content == nil {
++		return
++	}
++	typing := false
++	for _, u := range content.UserIDs {
++		if u == peer {
++			typing = true
++		}
++	}
++	h.notifyTyping(peer, typing)
++}
++
++// onReceipt marks our messages read when the other side of a 1:1 chat reads them. A read receipt
++// covers everything up to its event, so it is passed on as a watermark on the event's timestamp.
++func (h *mxHandler) onReceipt(ctx context.Context, evt *event.Event) {
++	peer := h.peerOf(evt.RoomID)
++	if peer == "" {
++		return
++	}
++	content := evt.Content.AsReceipt()
++	if content == nil {
++		return
++	}
++	for eventID, receipts := range *content {
++		for rtype, users := range receipts {
++			if rtype != event.ReceiptTypeRead && rtype != event.ReceiptTypeReadPrivate {
++				continue
++			}
++			r, ok := users[peer]
++			if !ok {
++				continue
++			}
++			purple_handle_receipt(h.account, string(eventID), "read")
++			if ts := r.Timestamp.UnixMilli(); ts > 0 {
++				purple_handle_receipt_watermark(h.account, "ts:"+string(peer), fmt.Sprint(ts), "read")
++			}
++		}
++	}
++}
++
++// ---- sending ----
++
++// roomFor finds the room for a webOS conversation: the room ID itself for a group, the direct
++// chat for a user. create makes a new encrypted direct chat when there is none yet.
++func (h *mxHandler) roomFor(target string, isGroup, create bool) (id.RoomID, error) {
++	if isGroup || strings.HasPrefix(target, "!") {
++		return id.RoomID(target), nil
++	}
++	user := id.UserID(target)
++	h.mu.Lock()
++	rooms := append([]id.RoomID(nil), h.direct[user]...)
++	h.mu.Unlock()
++	joined := map[id.RoomID]bool{}
++	if len(rooms) > 0 {
++		if resp, err := h.client.JoinedRooms(h.ctx); err == nil {
++			for _, r := range resp.JoinedRooms {
++				joined[r] = true
++			}
++		}
++	}
++	for i := len(rooms) - 1; i >= 0; i-- {
++		if joined[rooms[i]] {
++			return rooms[i], nil
++		}
++	}
++	if !create {
++		return "", nil
++	}
++	resp, err := h.client.CreateRoom(h.ctx, &mautrix.ReqCreateRoom{
++		Preset:   "trusted_private_chat",
++		IsDirect: true,
++		Invite:   []id.UserID{user},
++		InitialState: []*event.Event{{
++			Type:    event.StateEncryption,
++			Content: event.Content{Parsed: &event.EncryptionEventContent{Algorithm: id.AlgorithmMegolmV1}},
++		}},
++	})
++	if err != nil {
++		return "", fmt.Errorf("could not start a chat with %s: %w", user, err)
++	}
++	h.markDirect(user, resp.RoomID)
++	return resp.RoomID, nil
++}
++
++// prepareRoom fetches a room's full member list once: the sync is lazy-loaded, and encryption
++// needs every member's devices.
++func (h *mxHandler) prepareRoom(roomID id.RoomID) {
++	h.mu.Lock()
++	r := h.roomLocked(roomID)
++	done := r.members
++	r.members = true
++	h.mu.Unlock()
++	if done {
++		return
++	}
++	if _, err := h.client.Members(h.ctx, roomID); err != nil {
++		h.log.Warn().Err(err).Stringer("room_id", roomID).Msg("Could not fetch members")
++		h.mu.Lock()
++		r.members = false
++		h.mu.Unlock()
++	}
++}
++
++func (h *mxHandler) send(roomID id.RoomID, evtType event.Type, content any) (id.EventID, error) {
++	h.prepareRoom(roomID)
++	txn := h.client.TxnID()
++	h.mu.Lock()
++	h.sentTxn[txn] = struct{}{}
++	h.mu.Unlock()
++	encrypted := false
++	if evtType == event.EventReaction && h.client.Crypto != nil {
++		// SendMessageEvent leaves reactions unencrypted; in an encrypted room they are encrypted
++		// like any other event, as Element does.
++		if enc, err := h.client.StateStore.IsEncrypted(h.ctx, roomID); err == nil && enc {
++			encContent, err := h.client.Crypto.Encrypt(h.ctx, roomID, evtType, content)
++			if err != nil {
++				return "", err
++			}
++			content, evtType, encrypted = encContent, event.EventEncrypted, true
++		}
++	}
++	resp, err := h.client.SendMessageEvent(h.ctx, roomID, evtType, content,
++		mautrix.ReqSendEvent{TransactionID: txn, DontEncrypt: encrypted})
++	if err != nil {
++		h.mu.Lock()
++		delete(h.sentTxn, txn)
++		h.mu.Unlock()
++		return "", err
++	}
++	return resp.EventID, nil
++}
++
++// takeUnread is the last message received in the room if no read receipt has gone for it yet,
++// noting that one is going now; else "".
++func (r *mxRoom) takeUnread() id.EventID {
++	if r.lastRecv == r.lastRead {
++		return "" // also when nothing has come
++	}
++	r.lastRead = r.lastRecv
++	return r.lastRecv
++}
++
++// markReadOnSend sends a read receipt for the last message received in a room, when the user
++// answers in it or the Messaging app has shown the chat (matrix_go_mark_read). In a group the
++// receipt is the same one event, so it goes once for all its members.
++func (h *mxHandler) markReadOnSend(roomID id.RoomID) {
++	h.mu.Lock()
++	last := h.roomLocked(roomID).takeUnread()
++	h.mu.Unlock()
++	if last != "" {
++		if err := h.client.MarkRead(h.ctx, roomID, last); err != nil {
++			h.log.Debug().Err(err).Msg("Could not send read receipt")
++		}
++	}
++}
++
++func (h *mxHandler) sendText(target string, isGroup bool, text string, replyTo id.EventID) {
++	roomID, err := h.roomFor(target, isGroup, true)
++	if err != nil {
++		h.reportError(err.Error(), 0)
++		return
++	}
++	content := &event.MessageEventContent{MsgType: event.MsgText, Body: text}
++	if replyTo != "" {
++		content.RelatesTo = (&event.RelatesTo{}).SetReplyTo(replyTo)
++	}
++	eventID, err := h.send(roomID, event.EventMessage, content)
++	if err != nil {
++		h.reportError(fmt.Sprintf("Message to %s not sent: %v", target, err), 0)
++		return
++	}
++	h.remember(eventID, h.userID, text)
++	purple_handle_outbox_id(h.account, string(eventID), text)
++	h.markReadOnSend(roomID)
++}
++
++func (h *mxHandler) sendReaction(conv string, target id.EventID, key string, remove bool) {
++	roomID, err := h.roomFor(conv, false, false)
++	if err != nil || roomID == "" {
++		h.log.Warn().Str("conv", conv).Msg("No room for reaction")
++		return
++	}
++	h.mu.Lock()
++	k := string(target) + "\x00" + key
++	existing := h.ownReactions[k]
++	var others []id.EventID
++	if remove && key == "" {
++		// No emoji given: remove whatever we reacted to this message with.
++		for rk, ev := range h.ownReactions {
++			if strings.HasPrefix(rk, string(target)+"\x00") {
++				others = append(others, ev)
++			}
++		}
++	}
++	h.mu.Unlock()
++	if remove {
++		if existing != "" {
++			others = append(others, existing)
++		}
++		for _, ev := range others {
++			if _, err := h.client.RedactEvent(h.ctx, roomID, ev); err != nil {
++				h.log.Warn().Err(err).Msg("Could not remove reaction")
++			}
++		}
++		return
++	}
++	if existing != "" {
++		return
++	}
++	content := &event.ReactionEventContent{RelatesTo: event.RelatesTo{Type: event.RelAnnotation, EventID: target, Key: key}}
++	eventID, err := h.send(roomID, event.EventReaction, content)
++	if err != nil {
++		h.log.Warn().Err(err).Msg("Could not send reaction")
++		return
++	}
++	h.mu.Lock()
++	h.ownReactions[k] = eventID
++	h.reactions[eventID] = mxReaction{target: target, sender: h.userID, key: key}
++	h.mu.Unlock()
++}
++
++// mxStorePath is the per-account crypto store. The user ID is escaped, so one account's store can
++// never be another account's file.
++func mxStorePath(userDir string, user id.UserID) string {
++	return filepath.Join(userDir, "matrix-"+url.PathEscape(string(user))+".db")
++}
++
++func mxRemoveStore(userDir string, user id.UserID) {
++	p := mxStorePath(userDir, user)
++	for _, f := range []string{p, p + "-wal", p + "-shm"} {
++		if err := os.Remove(f); err != nil && !os.IsNotExist(err) {
++			fmt.Fprintf(os.Stderr, "matrix: could not remove %s: %v\n", f, err)
++		}
++	}
++}
+diff --git a/matrix_crypto.go b/matrix_crypto.go
+new file mode 100644
+index 0000000..07947bc
+--- /dev/null
++++ b/matrix_crypto.go
+@@ -0,0 +1,206 @@
++// matrix_crypto.go - connects mautrix-go's Olm machine to the client, in place of
++// mautrix/crypto/cryptohelper. cryptohelper imports go.mau.fi/util/dbutil/litestream, which under
++// cgo builds mattn/go-sqlite3 and so a second, C, copy of SQLite into this plugin, next to the
++// pure-Go modernc driver everything else here already uses. This does the same few steps on a
++// database opened with the modernc driver.
++package main
++
++import (
++	"context"
++	"database/sql"
++	"errors"
++	"fmt"
++	"sync"
++	"time"
++
++	"github.com/rs/zerolog"
++	"go.mau.fi/util/dbutil"
++	"maunium.net/go/mautrix"
++	"maunium.net/go/mautrix/crypto"
++	"maunium.net/go/mautrix/event"
++	"maunium.net/go/mautrix/id"
++	"maunium.net/go/mautrix/sqlstatestore"
++)
++
++const (
++	mxSessionWait       = 3 * time.Second
++	mxSessionWaitLonger = 22 * time.Second
++)
++
++// mxCrypto implements mautrix.CryptoHelper.
++type mxCrypto struct {
++	client  *mautrix.Client
++	mach    *crypto.OlmMachine
++	db      *sql.DB
++	log     zerolog.Logger
++	lock    sync.RWMutex
++	onError func(*event.Event, error) // a message whose key did not arrive in time
++}
++
++var _ mautrix.CryptoHelper = (*mxCrypto)(nil)
++
++// newMxCrypto opens the stores, loads (or creates) the Olm account, and makes sure the device's
++// keys on the server are this account's. The client must be logged in and its syncer set.
++func newMxCrypto(ctx context.Context, client *mautrix.Client, db *sql.DB, accountID string, pickleKey []byte,
++	log zerolog.Logger, onError func(*event.Event, error)) (*mxCrypto, error) {
++	dbu, err := dbutil.NewWithDB(db, "sqlite")
++	if err != nil {
++		return nil, err
++	}
++	stateStore := sqlstatestore.NewSQLStateStore(dbu, dbutil.ZeroLogger(log.With().Str("db_section", "matrix_state").Logger()), false)
++	if err = stateStore.Upgrade(ctx); err != nil {
++		return nil, fmt.Errorf("upgrade state store: %w", err)
++	}
++	cryptoStore := crypto.NewSQLCryptoStore(dbu, dbutil.ZeroLogger(log.With().Str("db_section", "crypto").Logger()),
++		accountID, client.DeviceID, pickleKey)
++	if err = cryptoStore.DB.Upgrade(ctx); err != nil {
++		return nil, fmt.Errorf("upgrade crypto store: %w", err)
++	}
++	storedDevice, err := cryptoStore.FindDeviceID(ctx)
++	if err != nil {
++		return nil, fmt.Errorf("find stored device: %w", err)
++	}
++	if storedDevice != "" && storedDevice != client.DeviceID {
++		return nil, fmt.Errorf("%w (store %s, session %s)", errMxStoreMismatch, storedDevice, client.DeviceID)
++	}
++	client.StateStore = stateStore
++	client.Store = cryptoStore // also keeps the sync token, so a restart resumes where it stopped
++
++	c := &mxCrypto{client: client, db: db, log: log, onError: onError}
++	c.mach = crypto.NewOlmMachine(client, &c.log, cryptoStore, stateStore)
++	if err = c.mach.Load(ctx); err != nil {
++		return nil, fmt.Errorf("load olm account: %w", err)
++	}
++	if err = c.checkDeviceKeys(ctx); err != nil {
++		return nil, err
++	}
++
++	syncer, ok := client.Syncer.(mautrix.ExtensibleSyncer)
++	if !ok {
++		return nil, errors.New("the syncer cannot take crypto handlers")
++	}
++	syncer.OnSync(c.mach.ProcessSyncResponse)
++	syncer.OnEventType(event.StateMember, c.mach.HandleMemberEvent)
++	syncer.OnEventType(event.StateHistoryVisibility, c.mach.HandleHistoryVisibility)
++	syncer.OnEventType(event.EventEncrypted, c.handleEncrypted)
++	syncer.OnEvent(client.StateStoreSyncHandler)
++	return c, nil
++}
++
++// checkDeviceKeys uploads the device keys of a new account, and refuses a store whose keys are not
++// the ones the server has for this device.
++func (c *mxCrypto) checkDeviceKeys(ctx context.Context) error {
++	resp, err := c.client.QueryKeys(ctx, &mautrix.ReqQueryKeys{
++		DeviceKeys: map[id.UserID]mautrix.DeviceIDList{c.client.UserID: {c.client.DeviceID}},
++	})
++	if err != nil {
++		return fmt.Errorf("query own device keys: %w", err)
++	}
++	shared := c.mach.GetAccount().Shared
++	device, ok := resp.DeviceKeys[c.client.UserID][c.client.DeviceID]
++	switch {
++	case !ok || len(device.Keys) == 0:
++		if shared {
++			return fmt.Errorf("%w: the device keys are gone from the server", errMxStoreMismatch)
++		}
++		if err = c.mach.ShareKeys(ctx, -1); err != nil {
++			return fmt.Errorf("upload device keys: %w", err)
++		}
++	case !shared:
++		return fmt.Errorf("%w: the server has keys for this device that this store did not upload", errMxStoreMismatch)
++	case device.Keys.GetEd25519(c.client.DeviceID) != c.mach.OwnIdentity().SigningKey:
++		return fmt.Errorf("%w: the device's signing key on the server is a different one", errMxStoreMismatch)
++	}
++	return nil
++}
++
++func (c *mxCrypto) Machine() *crypto.OlmMachine { return c.mach }
++
++func (c *mxCrypto) Close() error { return c.db.Close() }
++
++func (c *mxCrypto) Init(ctx context.Context) error { return nil }
++
++func (c *mxCrypto) Decrypt(ctx context.Context, evt *event.Event) (*event.Event, error) {
++	return c.mach.DecryptMegolmEvent(ctx, evt)
++}
++
++func (c *mxCrypto) WaitForSession(ctx context.Context, roomID id.RoomID, senderKey id.SenderKey, sessionID id.SessionID, timeout time.Duration) bool {
++	c.lock.RLock()
++	defer c.lock.RUnlock()
++	return c.mach.WaitForSession(ctx, roomID, senderKey, sessionID, timeout)
++}
++
++// RequestSession asks the sender's device, and all of our own devices, for a missing room key.
++func (c *mxCrypto) RequestSession(ctx context.Context, roomID id.RoomID, senderKey id.SenderKey, sessionID id.SessionID, userID id.UserID, deviceID id.DeviceID) {
++	if deviceID == "" {
++		deviceID = "*"
++	}
++	err := c.mach.SendRoomKeyRequest(ctx, roomID, senderKey, sessionID, "", map[id.UserID][]id.DeviceID{
++		userID:          {deviceID},
++		c.client.UserID: {"*"},
++	})
++	if err != nil {
++		c.log.Warn().Err(err).Stringer("session_id", sessionID).Msg("Could not send key request")
++	}
++}
++
++// Encrypt encrypts for a room, sharing a new group session with its members when there is none
++// (or it expired) and trying once more.
++func (c *mxCrypto) Encrypt(ctx context.Context, roomID id.RoomID, evtType event.Type, content any) (*event.EncryptedEventContent, error) {
++	c.lock.RLock()
++	defer c.lock.RUnlock()
++	encrypted, err := c.mach.EncryptMegolmEvent(ctx, roomID, evtType, content)
++	if err == nil {
++		return encrypted, nil
++	}
++	if !errors.Is(err, crypto.ErrSessionExpired) && !errors.Is(err, crypto.ErrNoGroupSession) && !errors.Is(err, crypto.ErrSessionNotShared) {
++		return nil, err
++	}
++	users, err := c.client.StateStore.GetRoomJoinedOrInvitedMembers(ctx, roomID)
++	if err != nil {
++		return nil, fmt.Errorf("room members: %w", err)
++	}
++	if err = c.mach.ShareGroupSession(ctx, roomID, users); err != nil {
++		return nil, fmt.Errorf("share group session: %w", err)
++	}
++	return c.mach.EncryptMegolmEvent(ctx, roomID, evtType, content)
++}
++
++func (c *mxCrypto) dispatch(ctx context.Context, decrypted *event.Event) {
++	decrypted.Mautrix.EventSource |= event.SourceDecrypted
++	c.client.Syncer.(mautrix.DispatchableSyncer).Dispatch(ctx, decrypted)
++}
++
++// handleEncrypted decrypts a synced event and dispatches the result. When its key has not arrived
++// yet it waits a little, then asks for the key and waits longer, before reporting the failure.
++func (c *mxCrypto) handleEncrypted(ctx context.Context, evt *event.Event) {
++	decrypted, err := c.Decrypt(ctx, evt)
++	if err == nil {
++		c.dispatch(ctx, decrypted)
++		return
++	}
++	if !errors.Is(err, crypto.ErrNoSessionFound) {
++		c.log.Warn().Err(err).Stringer("event_id", evt.ID).Msg("Could not decrypt event")
++		c.onError(evt, err)
++		return
++	}
++	go c.waitAndDecrypt(ctx, evt)
++}
++
++func (c *mxCrypto) waitAndDecrypt(ctx context.Context, evt *event.Event) {
++	content := evt.Content.AsEncrypted()
++	if !c.mach.WaitForSession(ctx, evt.RoomID, content.SenderKey, content.SessionID, mxSessionWait) {
++		go c.RequestSession(context.WithoutCancel(ctx), evt.RoomID, content.SenderKey, content.SessionID, evt.Sender, content.DeviceID)
++		if !c.mach.WaitForSession(ctx, evt.RoomID, content.SenderKey, content.SessionID, mxSessionWaitLonger) {
++			c.onError(evt, crypto.ErrNoSessionFound)
++			return
++		}
++	}
++	decrypted, err := c.Decrypt(ctx, evt)
++	if err != nil {
++		c.log.Warn().Err(err).Stringer("event_id", evt.ID).Msg("Could not decrypt event after the key arrived")
++		c.onError(evt, err)
++		return
++	}
++	c.dispatch(ctx, decrypted)
++}
+diff --git a/matrix_e2ee.go b/matrix_e2ee.go
+new file mode 100644
+index 0000000..add8f86
+--- /dev/null
++++ b/matrix_e2ee.go
+@@ -0,0 +1,577 @@
++// matrix_e2ee.go - end-to-end encryption for the Matrix part: the crypto store, verifying this
++// device (recovery key, or emoji with another of the user's sessions), and the server-side key
++// backup (restoring older message keys, and backing up the keys this device receives).
++//
++// All prompts and replies go through the auth conversation "Matrix" (see matrixbridge.c).
++package main
++
++import (
++	"context"
++	"crypto/rand"
++	"database/sql"
++	"encoding/base64"
++	"encoding/json"
++	"errors"
++	"fmt"
++	"strings"
++	"time"
++
++	"maunium.net/go/mautrix"
++	"maunium.net/go/mautrix/crypto"
++	"maunium.net/go/mautrix/crypto/backup"
++	"maunium.net/go/mautrix/crypto/verificationhelper"
++	"maunium.net/go/mautrix/event"
++	"maunium.net/go/mautrix/id"
++)
++
++const (
++	mxBackupInterval   = 2 * time.Minute
++	mxBackupBatchSize  = 100
++	mxSecretWait       = 60 * time.Second
++	mxVerifyHelpPrompt = "This device is not verified yet, so it cannot read encrypted messages sent before it signed in, " +
++		"and your contacts may see it as unverified.\n" +
++		"- Reply with your recovery key (Element calls it the security key), or your security passphrase, or\n" +
++		"- reply VERIFY to compare emoji with another of your Matrix sessions.\n" +
++		"New messages work either way."
++)
++
++var errMxStoreMismatch = errors.New("the encryption store does not belong to this device")
++
++type mxE2EEState struct {
++	firstSyncDone bool
++	verified      bool
++	backupKey     *backup.MegolmBackupKey
++	backupVersion id.KeyBackupVersion
++	backupRunning bool
++	sasTxn        id.VerificationTransactionID
++	sasShown      bool
++}
++
++func (h *mxHandler) setupCrypto(fresh bool) error {
++	if h.pickle == "" {
++		raw := make([]byte, 32)
++		if _, err := rand.Read(raw); err != nil {
++			return err
++		}
++		h.pickle = base64.RawStdEncoding.EncodeToString(raw)
++		h.setSetting(mxPickleKeySetting, h.pickle)
++	}
++	path := mxStorePath(h.userDir, h.userID)
++	// The modernc driver ("sqlite") is registered by login.go; WAL and an immediate transaction
++	// lock are what mautrix's own sqlite setup uses.
++	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_txlock=immediate")
++	if err != nil {
++		return fmt.Errorf("open %s: %w", path, err)
++	}
++	// One connection: SQLite serialises writers anyway, and the stores share transactions.
++	db.SetMaxOpenConns(1)
++	helper, err := newMxCrypto(h.ctx, h.client, db, string(h.userID), []byte(h.pickle), h.log, h.onDecryptError)
++	if err != nil {
++		_ = db.Close()
++		if fresh && errors.Is(err, errMxStoreMismatch) {
++			// A brand-new device cannot mismatch; report it as a plain failure, not a retry.
++			return fmt.Errorf("new device: %v", err)
++		}
++		return err
++	}
++	h.mu.Lock()
++	h.crypto = helper
++	h.mu.Unlock()
++	h.client.Crypto = helper
++
++	vh := verificationhelper.NewVerificationHelper(h.client, helper.Machine(),
++		verificationhelper.NewInMemoryVerificationStore(), &mxVerifyCallbacks{h: h}, false, false, true)
++	if err = vh.Init(h.ctx); err != nil {
++		return fmt.Errorf("verification setup: %w", err)
++	}
++	h.verify = vh
++	h.client.Verification = vh
++	return nil
++}
++
++// checkEncryption runs once after the first sync: it works out whether this device is verified,
++// loads the backup key it may already have, and tells the user what to do if anything is missing.
++func (h *mxHandler) checkEncryption() {
++	if h.crypto == nil {
++		return
++	}
++	ctx := h.ctx
++	mach := h.crypto.Machine()
++	if secret, err := mach.CryptoStore.GetSecret(ctx, id.SecretMegolmBackupV1); err == nil && secret != "" {
++		if err = h.useBackupSecret(secret, false); err != nil {
++			h.log.Warn().Err(err).Msg("Stored backup key no longer matches the server's backup")
++		}
++	}
++	if _, err := mach.FetchKeys(ctx, []id.UserID{h.userID}, true); err != nil {
++		h.log.Warn().Err(err).Msg("Could not fetch own device keys")
++	}
++	keys, err := mach.GetOwnCrossSigningPublicKeys(ctx)
++	if err != nil {
++		h.log.Warn().Err(err).Msg("Could not get own cross-signing keys")
++		return
++	}
++	if keys == nil {
++		h.prompt("Encryption works, but this account has no cross-signing set up, so devices cannot be verified. " +
++			"Set up secure backup or recovery in Element, then reply VERIFY here.")
++		return
++	}
++	trust, err := mach.ResolveTrustContext(ctx, mach.OwnIdentity())
++	if err != nil {
++		h.log.Warn().Err(err).Msg("Could not resolve own trust state")
++	}
++	if trust >= id.TrustStateCrossSignedVerified {
++		h.markVerified()
++		return
++	}
++	if key := h.takeRecoveryKey(); key != "" {
++		// Given when signing in in the Accounts app: verify with it, without asking.
++		h.useRecoveryKey(key)
++		return
++	}
++	h.prompt(mxVerifyHelpPrompt)
++}
++
++// takeRecoveryKey hands out the recovery key from the Accounts sign-in, once: a wrong key is
++// reported in the Matrix chat, not retried at every connect.
++func (h *mxHandler) takeRecoveryKey() string {
++	h.mu.Lock()
++	defer h.mu.Unlock()
++	key := h.recoveryKey
++	h.recoveryKey = ""
++	return key
++}
++
++func (h *mxHandler) markVerified() {
++	h.mu.Lock()
++	h.e2ee.verified = true
++	haveKey := h.e2ee.backupKey != nil
++	h.mu.Unlock()
++	if haveKey {
++		h.startBackupUpload()
++	} else {
++		go h.requestBackupKey()
++	}
++}
++
++// authReply handles what the user types into the "Matrix" auth conversation.
++func (h *mxHandler) authReply(text string) {
++	if text == "" {
++		return
++	}
++	if !h.ready.Load() {
++		h.prompt("Still connecting, try again in a moment.")
++		return
++	}
++	switch strings.ToLower(strings.Trim(text, " .!")) {
++	case "verify":
++		go h.startVerification()
++	case "match", "yes", "y":
++		go h.confirmSAS()
++	case "no", "n", "cancel", "stop":
++		go h.cancelVerification()
++	case "help", "?":
++		h.prompt(mxVerifyHelpPrompt)
++	case "status":
++		h.mu.Lock()
++		verified, backupVer := h.e2ee.verified, h.e2ee.backupVersion
++		h.mu.Unlock()
++		status := "not verified"
++		if verified {
++			status = "verified"
++		}
++		if backupVer != "" {
++			status += fmt.Sprintf(", key backup version %s in use", backupVer)
++		}
++		h.prompt(fmt.Sprintf("%s, device %s: %s.", h.userID, h.client.DeviceID, status))
++	default:
++		go h.useRecoveryKey(text)
++	}
++}
++
++// useRecoveryKey unlocks secret storage with a recovery key or passphrase, takes the
++// cross-signing keys from it to sign this device, and takes the backup key to restore history.
++func (h *mxHandler) useRecoveryKey(input string) {
++	ctx := h.ctx
++	mach := h.crypto.Machine()
++	keyID, keyData, err := mach.SSSS.GetDefaultKeyData(ctx)
++	if err != nil {
++		h.prompt("This account has no secret storage to unlock. Reply VERIFY to verify with another session instead.")
++		return
++	}
++	key, err := keyData.VerifyRecoveryKey(keyID, input)
++	if err != nil && keyData.Passphrase != nil {
++		key, err = keyData.VerifyPassphrase(keyID, input)
++	}
++	if err != nil {
++		h.prompt("That is not the recovery key or passphrase for this account. Check it and reply again, or reply VERIFY.")
++		return
++	}
++	if err = mach.FetchCrossSigningKeysFromSSSS(ctx, key); err != nil {
++		h.prompt(fmt.Sprintf("Could not read the cross-signing keys: %v", err))
++		return
++	}
++	if err = mach.SignOwnDevice(ctx, mach.OwnIdentity()); err != nil {
++		h.prompt(fmt.Sprintf("Could not sign this device: %v", err))
++		return
++	}
++	if err = mach.SignOwnMasterKey(ctx); err != nil {
++		h.log.Warn().Err(err).Msg("Could not sign own master key")
++	}
++	h.prompt("This device is now verified.")
++	backupKey, err := mach.SSSS.GetDecryptedAccountData(ctx, event.AccountDataMegolmBackupKey, key)
++	if err != nil {
++		h.log.Info().Err(err).Msg("No key backup key in secret storage")
++		h.markVerified()
++		return
++	}
++	if err = h.useBackupSecret(mxSecretString(backupKey), true); err != nil {
++		h.prompt(fmt.Sprintf("Could not use the key backup: %v", err))
++	}
++	h.markVerified()
++}
++
++// Secret storage hands back the decoded secret; secret sharing and the crypto store use the
++// base64 form.
++func mxSecretString(raw []byte) string {
++	return base64.RawStdEncoding.EncodeToString(raw)
++}
++
++func mxDecodeSecret(secret string) ([]byte, error) {
++	secret = strings.TrimRight(strings.TrimSpace(secret), "=")
++	return base64.RawStdEncoding.DecodeString(secret)
++}
++
++// useBackupSecret checks a backup key against the server's current backup, keeps it, and with
++// restore set downloads every key in the backup.
++func (h *mxHandler) useBackupSecret(secret string, restore bool) error {
++	raw, err := mxDecodeSecret(secret)
++	if err != nil {
++		return fmt.Errorf("backup key is not valid base64: %w", err)
++	}
++	key, err := backup.MegolmBackupKeyFromBytes(raw)
++	if err != nil {
++		return err
++	}
++	mach := h.crypto.Machine()
++	info, err := mach.GetAndVerifyLatestKeyBackupVersion(h.ctx, key)
++	if err != nil {
++		return err
++	}
++	if info == nil {
++		return errors.New("the account has no key backup")
++	}
++	if err = mach.CryptoStore.PutSecret(h.ctx, id.SecretMegolmBackupV1, secret); err != nil {
++		h.log.Warn().Err(err).Msg("Could not store backup key")
++	}
++	h.mu.Lock()
++	h.e2ee.backupKey = key
++	h.e2ee.backupVersion = info.Version
++	h.mu.Unlock()
++	if !restore {
++		return nil
++	}
++	h.prompt("Restoring message keys from the key backup...")
++	if _, err = mach.DownloadAndStoreLatestKeyBackup(h.ctx, key); err != nil {
++		return fmt.Errorf("restoring from the key backup failed: %w", err)
++	}
++	h.prompt("Message keys restored. Messages that arrive from now on can be read; older ones already shown as undecryptable stay that way.")
++	return nil
++}
++
++// requestBackupKey asks the user's other sessions for the backup key over secret sharing. Element
++// answers this for a device it considers verified, which is the case after emoji verification.
++func (h *mxHandler) requestBackupKey() {
++	mach := h.crypto.Machine()
++	err := mach.GetOrRequestSecret(h.ctx, id.SecretMegolmBackupV1, func(secret string) (bool, error) {
++		if err := h.useBackupSecret(secret, true); err != nil {
++			h.log.Warn().Err(err).Msg("Received backup key does not match the backup")
++			return false, nil
++		}
++		return true, nil
++	}, mxSecretWait)
++	if err != nil {
++		h.log.Info().Err(err).Msg("No backup key received from other sessions")
++		h.prompt("Verified, but no other session sent the key backup key. To read older messages, reply with your recovery key.")
++		return
++	}
++	h.startBackupUpload()
++}
++
++// onDecryptError: the key for this message did not arrive. Try the key backup, else show a note
++// in its place so the conversation does not silently skip a message.
++func (h *mxHandler) onDecryptError(evt *event.Event, decryptErr error) {
++	if h.tooOld(evt) {
++		return
++	}
++	if errors.Is(decryptErr, crypto.ErrNoSessionFound) && h.fetchFromBackup(evt) {
++		return
++	}
++	conv, isGroup := h.conversation(evt.RoomID)
++	shown := mxShown{
++		conv:     conv,
++		isGroup:  isGroup,
++		sender:   evt.Sender,
++		eventID:  evt.ID,
++		ts:       evt.Timestamp,
++		outgoing: evt.Sender == h.userID,
++		text:     "🔒 This message could not be decrypted on this device.",
++	}
++	if isGroup {
++		shown.senderName = h.displayName(h.ctx, evt.RoomID, evt.Sender)
++	}
++	h.notifyMessage(shown)
++}
++
++func (h *mxHandler) fetchFromBackup(evt *event.Event) bool {
++	h.mu.Lock()
++	key, version := h.e2ee.backupKey, h.e2ee.backupVersion
++	h.mu.Unlock()
++	content := evt.Content.AsEncrypted()
++	if key == nil || content == nil {
++		return false
++	}
++	mach := h.crypto.Machine()
++	data, err := h.client.GetKeyBackupForRoomAndSession(h.ctx, version, evt.RoomID, content.SessionID)
++	if err != nil {
++		h.log.Debug().Err(err).Msg("Session not in key backup")
++		return false
++	}
++	sessionData, err := data.SessionData.Decrypt(key)
++	if err != nil {
++		h.log.Warn().Err(err).Msg("Could not decrypt backed-up session")
++		return false
++	}
++	if _, err = mach.ImportRoomKeyFromBackup(h.ctx, version, evt.RoomID, content.SessionID, sessionData); err != nil {
++		h.log.Warn().Err(err).Msg("Could not import backed-up session")
++		return false
++	}
++	decrypted, err := h.crypto.Decrypt(h.ctx, evt)
++	if err != nil {
++		h.log.Warn().Err(err).Msg("Still cannot decrypt after restoring from backup")
++		return false
++	}
++	decrypted.Mautrix.EventSource |= event.SourceDecrypted
++	h.client.Syncer.(mautrix.DispatchableSyncer).Dispatch(h.ctx, decrypted)
++	return true
++}
++
++// ---- backing up the keys this device receives ----
++
++func (h *mxHandler) startBackupUpload() {
++	h.mu.Lock()
++	if h.e2ee.backupRunning || h.e2ee.backupKey == nil {
++		h.mu.Unlock()
++		return
++	}
++	h.e2ee.backupRunning = true
++	h.mu.Unlock()
++	go func() {
++		ticker := time.NewTicker(mxBackupInterval)
++		defer ticker.Stop()
++		for {
++			if err := h.uploadBackup(); err != nil {
++				h.log.Warn().Err(err).Msg("Key backup upload failed")
++			}
++			select {
++			case <-h.ctx.Done():
++				return
++			case <-ticker.C:
++			}
++		}
++	}()
++}
++
++func (h *mxHandler) uploadBackup() error {
++	h.mu.Lock()
++	key, version := h.e2ee.backupKey, h.e2ee.backupVersion
++	h.mu.Unlock()
++	if key == nil || version == "" {
++		return nil
++	}
++	store := h.crypto.Machine().CryptoStore
++	sessions, err := store.GetGroupSessionsWithoutKeyBackupVersion(h.ctx, version).AsList()
++	if err != nil {
++		return err
++	}
++	for start := 0; start < len(sessions); start += mxBackupBatchSize {
++		batch := sessions[start:min(start+mxBackupBatchSize, len(sessions))]
++		req := mautrix.ReqKeyBackup{Rooms: map[id.RoomID]mautrix.ReqRoomKeyBackup{}}
++		var done []*crypto.InboundGroupSession
++		for _, sess := range batch {
++			data, err := mxBackupData(key, sess)
++			if err != nil {
++				h.log.Warn().Err(err).Stringer("session_id", sess.ID()).Msg("Could not prepare session for backup")
++				continue
++			}
++			room, ok := req.Rooms[sess.RoomID]
++			if !ok {
++				room = mautrix.ReqRoomKeyBackup{Sessions: map[id.SessionID]mautrix.ReqKeyBackupData{}}
++				req.Rooms[sess.RoomID] = room
++			}
++			room.Sessions[sess.ID()] = *data
++			done = append(done, sess)
++		}
++		if len(done) == 0 {
++			continue
++		}
++		if _, err = h.client.PutKeysInBackup(h.ctx, version, &req); err != nil {
++			return err
++		}
++		for _, sess := range done {
++			sess.KeyBackupVersion = version
++			if err = store.PutGroupSession(h.ctx, sess); err != nil {
++				return err
++			}
++		}
++		h.log.Debug().Int("count", len(done)).Msg("Backed up room keys")
++	}
++	return nil
++}
++
++func mxBackupData(key *backup.MegolmBackupKey, sess *crypto.InboundGroupSession) (*mautrix.ReqKeyBackupData, error) {
++	first := sess.Internal.FirstKnownIndex()
++	exported, err := sess.Internal.Export(first)
++	if err != nil {
++		return nil, err
++	}
++	chain := sess.ForwardingChains
++	if chain == nil {
++		chain = []string{}
++	}
++	enc, err := backup.EncryptSessionData(key, backup.MegolmSessionData{
++		Algorithm:          id.AlgorithmMegolmV1,
++		ForwardingKeyChain: chain,
++		SenderClaimedKeys:  backup.SenderClaimedKeys{Ed25519: sess.SigningKey},
++		SenderKey:          sess.SenderKey,
++		SessionKey:         string(exported),
++		SharedHistory:      sess.SharedHistory,
++	})
++	if err != nil {
++		return nil, err
++	}
++	raw, err := json.Marshal(enc)
++	if err != nil {
++		return nil, err
++	}
++	return &mautrix.ReqKeyBackupData{
++		FirstMessageIndex: int(first),
++		ForwardedCount:    len(chain),
++		IsVerified:        false,
++		SessionData:       raw,
++	}, nil
++}
++
++// ---- interactive (emoji) verification with another of the user's own sessions ----
++
++type mxVerifyCallbacks struct{ h *mxHandler }
++
++func (h *mxHandler) startVerification() {
++	txn, err := h.verify.StartVerification(h.ctx, h.userID)
++	if err != nil {
++		h.prompt(fmt.Sprintf("Could not start verification: %v", err))
++		return
++	}
++	h.mu.Lock()
++	h.e2ee.sasTxn, h.e2ee.sasShown = txn, false
++	h.mu.Unlock()
++	h.prompt("Verification request sent. Accept it in another of your Matrix sessions (such as Element).")
++}
++
++func (h *mxHandler) confirmSAS() {
++	h.mu.Lock()
++	txn, shown := h.e2ee.sasTxn, h.e2ee.sasShown
++	h.mu.Unlock()
++	if txn == "" || !shown {
++		h.prompt("There are no emoji to confirm. Reply VERIFY to start.")
++		return
++	}
++	if err := h.verify.ConfirmSAS(h.ctx, txn); err != nil {
++		h.prompt(fmt.Sprintf("Verification failed: %v", err))
++	}
++}
++
++func (h *mxHandler) cancelVerification() {
++	h.mu.Lock()
++	txn := h.e2ee.sasTxn
++	h.e2ee.sasTxn, h.e2ee.sasShown = "", false
++	h.mu.Unlock()
++	if txn == "" {
++		return
++	}
++	if err := h.verify.CancelVerification(h.ctx, txn, event.VerificationCancelCodeUser, "The emoji did not match"); err != nil {
++		h.log.Warn().Err(err).Msg("Could not cancel verification")
++	}
++	h.prompt("Verification cancelled.")
++}
++
++func (c *mxVerifyCallbacks) VerificationRequested(ctx context.Context, txnID id.VerificationTransactionID, from id.UserID, fromDevice id.DeviceID) {
++	h := c.h
++	if from != h.userID {
++		// Verifying other people is not offered yet; let their client time out.
++		h.log.Info().Stringer("from", from).Msg("Ignoring verification request from another user")
++		return
++	}
++	h.mu.Lock()
++	h.e2ee.sasTxn, h.e2ee.sasShown = txnID, false
++	h.mu.Unlock()
++	if err := h.verify.AcceptVerification(ctx, txnID); err != nil {
++		h.prompt(fmt.Sprintf("Could not accept the verification request from %s: %v", fromDevice, err))
++		return
++	}
++	h.prompt(fmt.Sprintf("Your session %s wants to verify this device. Emoji follow once it starts.", fromDevice))
++}
++
++func (c *mxVerifyCallbacks) VerificationReady(ctx context.Context, txnID id.VerificationTransactionID, otherDeviceID id.DeviceID, supportsSAS, supportsScanQRCode bool, qrCode *verificationhelper.QRCode) {
++	h := c.h
++	if !supportsSAS {
++		h.prompt(fmt.Sprintf("Session %s cannot verify with emoji.", otherDeviceID))
++		return
++	}
++	if err := h.verify.StartSAS(ctx, txnID); err != nil {
++		h.log.Warn().Err(err).Msg("Could not start SAS")
++	}
++}
++
++func (c *mxVerifyCallbacks) ShowSAS(ctx context.Context, txnID id.VerificationTransactionID, emojis []rune, emojiDescriptions []string, decimals []int) {
++	h := c.h
++	var b strings.Builder
++	b.WriteString("Check that your other session shows these, in this order:\n")
++	if len(emojis) > 0 {
++		for i, e := range emojis {
++			desc := ""
++			if i < len(emojiDescriptions) {
++				desc = emojiDescriptions[i]
++			}
++			fmt.Fprintf(&b, "%c %s\n", e, desc)
++		}
++	} else {
++		for _, d := range decimals {
++			fmt.Fprintf(&b, "%d ", d)
++		}
++		b.WriteString("\n")
++	}
++	b.WriteString("Reply MATCH if they are the same, or NO if they are not.")
++	h.mu.Lock()
++	h.e2ee.sasTxn, h.e2ee.sasShown = txnID, true
++	h.mu.Unlock()
++	h.prompt(b.String())
++}
++
++func (c *mxVerifyCallbacks) VerificationCancelled(ctx context.Context, txnID id.VerificationTransactionID, code event.VerificationCancelCode, reason string) {
++	h := c.h
++	h.mu.Lock()
++	if h.e2ee.sasTxn == txnID {
++		h.e2ee.sasTxn, h.e2ee.sasShown = "", false
++	}
++	h.mu.Unlock()
++	h.prompt(fmt.Sprintf("Verification stopped: %s", reason))
++}
++
++func (c *mxVerifyCallbacks) VerificationDone(ctx context.Context, txnID id.VerificationTransactionID, method event.VerificationMethod) {
++	h := c.h
++	h.mu.Lock()
++	h.e2ee.sasTxn, h.e2ee.sasShown = "", false
++	h.mu.Unlock()
++	h.prompt("This device is now verified. Asking your other session for the key backup key...")
++	h.markVerified()
++}
+diff --git a/matrix_media.go b/matrix_media.go
+new file mode 100644
+index 0000000..d1e7aaa
+--- /dev/null
++++ b/matrix_media.go
+@@ -0,0 +1,200 @@
++// matrix_media.go - pictures, video, voice notes and files for the Matrix part.
++//
++// Incoming media is downloaded (and decrypted, in an encrypted room) into the directory the
++// transport configured as this account's attachment-path-template, then shown as a file:// link,
++// which the Messaging app renders inline, as it does for WhatsApp.
++package main
++
++/*
++#include "matrixbridge.h"
++#include <stdlib.h>
++*/
++import "C"
++
++import (
++	"crypto/sha256"
++	"encoding/hex"
++	"fmt"
++	"html"
++	"mime"
++	"net/http"
++	"net/url"
++	"os"
++	"path/filepath"
++	"strings"
++	"time"
++
++	"maunium.net/go/mautrix/crypto/attachment"
++	"maunium.net/go/mautrix/event"
++	"maunium.net/go/mautrix/id"
++)
++
++const (
++	mxMediaMaxBytes   = 100 << 20
++	mxAttachTemplate  = "attachment-path-template"
++	mxDefaultMediaDir = "matrix-media"
++)
++
++// mediaDir is where downloads go: the directory of the transport's attachment-path-template when
++// one is set (it is "/media/internal/.im-attachments/matrix/$hash$extension" on webOS), else a
++// folder in the libpurple user directory.
++func (h *mxHandler) mediaDir() string {
++	if t := h.attach; t != "" && strings.Contains(t, "$") {
++		return filepath.Dir(t)
++	}
++	return filepath.Join(h.userDir, mxDefaultMediaDir)
++}
++
++func mxExtension(name, mimetype string) string {
++	if ext := filepath.Ext(name); ext != "" && len(ext) <= 6 {
++		return strings.ToLower(ext)
++	}
++	if exts, _ := mime.ExtensionsByType(mimetype); len(exts) > 0 {
++		return exts[0]
++	}
++	return ".bin"
++}
++
++func (h *mxHandler) receiveMedia(roomID id.RoomID, content *event.MessageEventContent, shown mxShown) {
++	name := content.GetFileName()
++	mimetype := ""
++	if info := content.GetInfo(); info != nil {
++		mimetype = info.MimeType
++		if info.Size > mxMediaMaxBytes {
++			shown.text = fmt.Sprintf("[%s, %d MB: too large to download here]", name, info.Size>>20)
++			h.notifyMessage(shown)
++			return
++		}
++	}
++	var uri id.ContentURI
++	var err error
++	if content.File != nil {
++		uri, err = content.File.URL.Parse()
++	} else {
++		uri, err = content.URL.Parse()
++	}
++	if err != nil {
++		shown.text = fmt.Sprintf("[%s: no usable media link]", name)
++		h.notifyMessage(shown)
++		return
++	}
++	data, err := h.client.DownloadBytes(h.ctx, uri)
++	if err == nil && content.File != nil {
++		if err = content.File.PrepareForDecryption(); err == nil {
++			err = content.File.DecryptInPlace(data)
++		}
++	}
++	if err != nil {
++		h.log.Warn().Err(err).Stringer("event_id", shown.eventID).Msg("Media download failed")
++		shown.text = fmt.Sprintf("[%s could not be downloaded]", name)
++		h.notifyMessage(shown)
++		return
++	}
++	if mimetype == "" {
++		mimetype = http.DetectContentType(data)
++	}
++	sum := sha256.Sum256(data)
++	dir := h.mediaDir()
++	if err = os.MkdirAll(dir, 0o755); err != nil {
++		h.log.Warn().Err(err).Str("dir", dir).Msg("Could not create media directory")
++		return
++	}
++	path := filepath.Join(dir, hex.EncodeToString(sum[:16])+mxExtension(name, mimetype))
++	if err = os.WriteFile(path, data, 0o644); err != nil {
++		h.log.Warn().Err(err).Str("path", path).Msg("Could not save media")
++		return
++	}
++	link := (&url.URL{Scheme: "file", Path: path}).String()
++	text := link
++	if caption := content.GetCaption(); caption != "" {
++		text += "<br>" + strings.ReplaceAll(html.EscapeString(caption), "\n", "<br>")
++	}
++	shown.text = text
++	shown.isHtml = true
++	h.notifyMessage(shown)
++}
++
++// Send a local file to a user or room. The upload runs in the background; the return value is ""
++// when the file was taken, else an error (freed by the C caller).
++//
++//export matrix_go_send_file
++func matrix_go_send_file(account *PurpleAccount, who *C.char, filename *C.char) *C.char {
++	h := mxGetHandler(account)
++	if h == nil || !h.ready.Load() {
++		return C.CString("Matrix is not connected")
++	}
++	path := C.GoString(filename)
++	st, err := os.Stat(path)
++	if err != nil {
++		return C.CString(err.Error())
++	}
++	if st.Size() > mxMediaMaxBytes {
++		return C.CString(fmt.Sprintf("%s is larger than %d MB", filepath.Base(path), mxMediaMaxBytes>>20))
++	}
++	target := C.GoString(who)
++	go h.sendFile(target, path)
++	return C.CString("")
++}
++
++func (h *mxHandler) sendFile(target, path string) {
++	roomID, err := h.roomFor(target, false, true)
++	if err != nil {
++		h.reportError(err.Error(), 0)
++		return
++	}
++	data, err := os.ReadFile(path)
++	if err != nil {
++		h.reportError(err.Error(), 0)
++		return
++	}
++	name := filepath.Base(path)
++	mimetype := mime.TypeByExtension(filepath.Ext(name))
++	if mimetype == "" {
++		mimetype = http.DetectContentType(data)
++	}
++	content := &event.MessageEventContent{
++		Body: name,
++		Info: &event.FileInfo{MimeType: mimetype, Size: len(data)},
++	}
++	switch {
++	case strings.HasPrefix(mimetype, "image/"):
++		content.MsgType = event.MsgImage
++		content.Info.Width, content.Info.Height = imageDims(data)
++	case strings.HasPrefix(mimetype, "video/"):
++		content.MsgType = event.MsgVideo
++	case strings.HasPrefix(mimetype, "audio/"), mimetype == "application/ogg":
++		// The transport records voice notes; mark them so Matrix clients show a voice message.
++		content.MsgType = event.MsgAudio
++		content.MSC3245Voice = &event.MSC3245Voice{}
++	default:
++		content.MsgType = event.MsgFile
++	}
++
++	h.prepareRoom(roomID)
++	encrypted, _ := h.client.StateStore.IsEncrypted(h.ctx, roomID)
++	uploadType := mimetype
++	var file *attachment.EncryptedFile
++	if encrypted {
++		file = attachment.NewEncryptedFile()
++		file.EncryptInPlace(data)
++		uploadType = "application/octet-stream"
++	}
++	start := time.Now()
++	resp, err := h.client.UploadBytesWithName(h.ctx, data, uploadType, name)
++	if err != nil {
++		h.reportError(fmt.Sprintf("%s not sent: %v", name, err), 0)
++		return
++	}
++	if file != nil {
++		content.File = &event.EncryptedFileInfo{EncryptedFile: *file, URL: resp.ContentURI.CUString()}
++	} else {
++		content.URL = resp.ContentURI.CUString()
++	}
++	eventID, err := h.send(roomID, event.EventMessage, content)
++	if err != nil {
++		h.reportError(fmt.Sprintf("%s not sent: %v", name, err), 0)
++		return
++	}
++	h.log.Info().Str("name", name).Dur("took", time.Since(start)).Msg("File sent")
++	purple_handle_outbox_id(h.account, string(eventID), name)
++}
+diff --git a/matrix_seed.go b/matrix_seed.go
+new file mode 100644
+index 0000000..4f7ceca
+--- /dev/null
++++ b/matrix_seed.go
+@@ -0,0 +1,126 @@
++// matrix_seed.go - a sign-in done by the account's validator app.
++//
++// com.palm.app.matrix signs in inside the Accounts app: it opens the server's OAuth 2.0 sign-in
++// page in a WAM window (authorization code with PKCE), exchanges the code for tokens itself, and
++// stores the result as the account's password, as
++//
++//	"mxoauth:" + base64url(JSON mxSeed)
++//
++// The transport passes that to the login like any password. A seed this plugin has not used yet
++// replaces whatever session it had: the user just signed in again. Once used, the plugin keeps
++// its own session (whose refresh token rotates), so the seed's tokens go stale; when that session
++// ends, the login fails with an authentication error, and Accounts asks the user to sign in again.
++package main
++
++import (
++	"encoding/base64"
++	"encoding/json"
++	"errors"
++	"fmt"
++	"strings"
++
++	"maunium.net/go/mautrix/id"
++)
++
++const (
++	mxSeedPrefix = "mxoauth:"
++	// The device ID of the last seed taken; a seed with another device ID is a new sign-in.
++	mxSeedDeviceSetting = "matrix_seed_device"
++)
++
++type mxSeed struct {
++	Version      int         `json:"v"`
++	Homeserver   string      `json:"homeserver"`
++	Issuer       string      `json:"issuer"`
++	ClientID     string      `json:"client_id"`
++	UserID       id.UserID   `json:"user_id"`
++	DeviceID     id.DeviceID `json:"device_id"`
++	AccessToken  string      `json:"access_token"`
++	RefreshToken string      `json:"refresh_token,omitempty"`
++	ExpiresAtMs  int64       `json:"expires_at_ms,omitempty"`
++	RecoveryKey  string      `json:"recovery_key,omitempty"`
++}
++
++func mxIsSeed(stored string) bool {
++	return strings.HasPrefix(stored, mxSeedPrefix)
++}
++
++// mxParseSeed decodes a validator sign-in. Padding is optional, as base64url usually goes
++// without it.
++func mxParseSeed(stored string) (*mxSeed, error) {
++	if !mxIsSeed(stored) {
++		return nil, errors.New("not a sign-in from the Matrix app")
++	}
++	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(strings.TrimPrefix(stored, mxSeedPrefix), "="))
++	if err != nil {
++		return nil, fmt.Errorf("the stored sign-in is not readable: %w", err)
++	}
++	var s mxSeed
++	if err = json.Unmarshal(raw, &s); err != nil {
++		return nil, fmt.Errorf("the stored sign-in is not readable: %w", err)
++	}
++	switch {
++	case s.Version != 1:
++		return nil, fmt.Errorf("the stored sign-in has version %d, which this plugin does not know", s.Version)
++	case s.Homeserver == "" || s.UserID == "" || s.DeviceID == "" || s.AccessToken == "":
++		return nil, errors.New("the stored sign-in is incomplete")
++	case s.RefreshToken != "" && s.ClientID == "":
++		return nil, errors.New("the stored sign-in has a refresh token but no client")
++	}
++	if _, _, err = s.UserID.Parse(); err != nil {
++		return nil, fmt.Errorf("the stored sign-in has a bad user ID: %w", err)
++	}
++	return &s, nil
++}
++
++// session is what the plugin keeps of the seed.
++func (s *mxSeed) session() *mxSession {
++	return &mxSession{
++		Homeserver:   strings.TrimRight(s.Homeserver, "/"),
++		UserID:       s.UserID,
++		DeviceID:     s.DeviceID,
++		AccessToken:  s.AccessToken,
++		RefreshToken: s.RefreshToken,
++		ClientID:     s.ClientID,
++		ExpiryMs:     s.ExpiresAtMs,
++	}
++}
++
++// adoptSeed makes an unused seed for this account the session. It reports whether it did, which
++// means a new device: the crypto store is started over.
++func (h *mxHandler) adoptSeed(uid id.UserID) bool {
++	s := h.seed
++	if s == nil || s.DeviceID == h.seedDevice {
++		return false
++	}
++	if s.UserID != uid {
++		h.log.Warn().Stringer("seed_user", s.UserID).Stringer("account", uid).Msg("Ignoring a sign-in for another user")
++		return false
++	}
++	if old := h.session; old != nil && old.DeviceID != s.DeviceID && old.AccessToken != "" {
++		h.log.Info().Stringer("old_device", old.DeviceID).Msg("Signed in again in Accounts; replacing the old device")
++		go h.logoutOld(old)
++	}
++	mxRemoveStore(h.userDir, uid)
++	h.mu.Lock()
++	h.session = s.session()
++	h.mu.Unlock()
++	h.saveSession()
++	if s.ClientID != "" && s.Issuer != "" {
++		h.oauthReg = &mxOAuthClient{Issuer: s.Issuer, ClientID: s.ClientID}
++		raw, _ := json.Marshal(h.oauthReg)
++		h.setSetting(mxOAuthClientSetting, string(raw))
++	}
++	h.seedDevice = s.DeviceID
++	h.setSetting(mxSeedDeviceSetting, string(s.DeviceID))
++	h.recoveryKey = s.RecoveryKey
++	return true
++}
++
++// logoutOld ends the session a new sign-in replaced, so the old device does not linger in the
++// user's device list.
++func (h *mxHandler) logoutOld(old *mxSession) {
++	if err := mxEndSession(h.ctx, old); err != nil {
++		h.log.Info().Err(err).Stringer("old_device", old.DeviceID).Msg("Could not end the replaced device's session")
++	}
++}
+diff --git a/matrix_session_test.go b/matrix_session_test.go
+new file mode 100644
+index 0000000..db2e914
+--- /dev/null
++++ b/matrix_session_test.go
+@@ -0,0 +1,102 @@
++package main
++
++import (
++	"context"
++	"encoding/json"
++	"io"
++	"net/http"
++	"net/http/httptest"
++	"net/url"
++	"sync"
++	"testing"
++	"time"
++)
++
++// A homeserver with an authorization server next to it, recording what reaches it.
++type mxEndServer struct {
++	*httptest.Server
++	mu      sync.Mutex
++	revoked url.Values
++	logout  string // the bearer token of a /logout
++}
++
++func newMxEndServer(t *testing.T) *mxEndServer {
++	s := &mxEndServer{}
++	mux := http.NewServeMux()
++	mux.HandleFunc("GET /_matrix/client/v1/auth_metadata", func(w http.ResponseWriter, r *http.Request) {
++		_ = json.NewEncoder(w).Encode(map[string]string{
++			"issuer":                 s.URL + "/",
++			"authorization_endpoint": s.URL + "/authorize",
++			"token_endpoint":         s.URL + "/oauth2/token",
++			"revocation_endpoint":    s.URL + "/oauth2/revoke",
++		})
++	})
++	mux.HandleFunc("POST /oauth2/revoke", func(w http.ResponseWriter, r *http.Request) {
++		body, _ := io.ReadAll(r.Body)
++		v, _ := url.ParseQuery(string(body))
++		s.mu.Lock()
++		s.revoked = v
++		s.mu.Unlock()
++		w.WriteHeader(http.StatusOK)
++	})
++	mux.HandleFunc("POST /_matrix/client/v3/logout", func(w http.ResponseWriter, r *http.Request) {
++		s.mu.Lock()
++		s.logout = r.Header.Get("Authorization")
++		s.mu.Unlock()
++		_, _ = w.Write([]byte("{}"))
++	})
++	s.Server = httptest.NewServer(mux)
++	t.Cleanup(s.Close)
++	return s
++}
++
++// A session from OAuth sign-in is revoked at the authorization server, by its refresh token:
++// MAS ends the whole session for it. It is not logged out with the access token.
++func TestMatrixEndSessionRevokesOAuth(t *testing.T) {
++	srv := newMxEndServer(t)
++	s := &mxSession{Homeserver: srv.URL, UserID: "@a:example.org", DeviceID: "DEV", AccessToken: "mat_1",
++		RefreshToken: "mar_1", ClientID: "01CLIENT", ExpiryMs: time.Now().Add(time.Hour).UnixMilli()}
++	if err := mxEndSession(context.Background(), s); err != nil {
++		t.Fatal(err)
++	}
++	srv.mu.Lock()
++	defer srv.mu.Unlock()
++	if srv.revoked.Get("token") != "mar_1" || srv.revoked.Get("token_type_hint") != "refresh_token" ||
++		srv.revoked.Get("client_id") != "01CLIENT" {
++		t.Fatalf("revoked %v", srv.revoked)
++	}
++	if srv.logout != "" {
++		t.Fatalf("also logged out with %q", srv.logout)
++	}
++}
++
++// A session from a password has no client: it logs out.
++func TestMatrixEndSessionLogsOutPassword(t *testing.T) {
++	srv := newMxEndServer(t)
++	s := &mxSession{Homeserver: srv.URL, UserID: "@a:example.org", DeviceID: "DEV", AccessToken: "syt_1"}
++	if err := mxEndSession(context.Background(), s); err != nil {
++		t.Fatal(err)
++	}
++	srv.mu.Lock()
++	defer srv.mu.Unlock()
++	if srv.logout != "Bearer syt_1" {
++		t.Fatalf("logout with %q", srv.logout)
++	}
++	if srv.revoked != nil {
++		t.Fatalf("revoked %v", srv.revoked)
++	}
++}
++
++// The account's saved session is what account removal ends when the handler is gone.
++func TestMatrixSavedSession(t *testing.T) {
++	raw, _ := json.Marshal(&mxSession{Homeserver: "https://hs", UserID: "@a:b.c", DeviceID: "D", AccessToken: "t", ClientID: "C"})
++	s := mxSavedSession(string(raw))
++	if s == nil || s.AccessToken != "t" || s.ClientID != "C" || s.DeviceID != "D" {
++		t.Fatalf("got %+v", s)
++	}
++	for _, bad := range []string{"", "{", `{"homeserver":"https://hs"}`, `{"access_token":"t"}`} {
++		if mxSavedSession(bad) != nil {
++			t.Errorf("%q: got a session", bad)
++		}
++	}
++}
+diff --git a/matrix_test.go b/matrix_test.go
+new file mode 100644
+index 0000000..e29d768
+--- /dev/null
++++ b/matrix_test.go
+@@ -0,0 +1,228 @@
++package main
++
++import (
++	"bytes"
++	"encoding/base64"
++	"encoding/json"
++	"path/filepath"
++	"strings"
++	"testing"
++
++	"maunium.net/go/mautrix/id"
++)
++
++// The validator app stores "browser-sign-in" when no password was typed; that must never be sent
++// to the server as a password.
++func TestMatrixBrowserSignInIsNoPassword(t *testing.T) {
++	if got := mxLoginPassword(mxBrowserSignIn); got != "" {
++		t.Fatalf("browser sign-in gave password %q", got)
++	}
++	if got := mxLoginPassword("hunter2"); got != "hunter2" {
++		t.Fatalf("a real password became %q", got)
++	}
++	if got := mxLoginPassword(""); got != "" {
++		t.Fatalf("no password became %q", got)
++	}
++}
++
++func TestMatrixParseUserID(t *testing.T) {
++	for in, want := range map[string]id.UserID{
++		"@alice:matrix.org":        "@alice:matrix.org",
++		"alice:matrix.org":         "@alice:matrix.org",
++		"  @bob:example.com:8448 ": "@bob:example.com:8448",
++	} {
++		got, err := mxParseUserID(in)
++		if err != nil || got != want {
++			t.Errorf("mxParseUserID(%q) = %q, %v; want %q", in, got, err, want)
++		}
++	}
++	for _, in := range []string{"", "   ", "alice", "@alice"} {
++		if got, err := mxParseUserID(in); err == nil {
++			t.Errorf("mxParseUserID(%q) = %q, want an error", in, got)
++		}
++	}
++}
++
++// Each account's crypto store is a file directly in the user directory, whatever the user ID holds.
++func TestMatrixStorePathStaysInTheUserDir(t *testing.T) {
++	dir := "/home/u/.purple"
++	for _, u := range []id.UserID{"@alice:matrix.org", "@../../etc/passwd:x", "@a/b:c", `@a\b:c`} {
++		p := mxStorePath(dir, u)
++		if filepath.Dir(p) != dir {
++			t.Errorf("store for %q is %q, outside %q", u, p, dir)
++		}
++		if !strings.HasPrefix(filepath.Base(p), "matrix-") || !strings.HasSuffix(p, ".db") {
++			t.Errorf("store for %q is named %q", u, p)
++		}
++	}
++	if mxStorePath(dir, "@a:b") == mxStorePath(dir, "@a:c") {
++		t.Error("two accounts share a store")
++	}
++}
++
++// Secrets arrive with or without base64 padding, and with stray whitespace.
++func TestMatrixDecodeSecret(t *testing.T) {
++	raw := []byte{0, 1, 2, 250, 251, 252, 253, 254, 255, 9, 8}
++	enc := mxSecretString(raw)
++	for _, in := range []string{enc, enc + "=", " " + enc + "\n"} {
++		got, err := mxDecodeSecret(in)
++		if err != nil || !bytes.Equal(got, raw) {
++			t.Errorf("mxDecodeSecret(%q) = %v, %v", in, got, err)
++		}
++	}
++	if _, err := mxDecodeSecret("not base64!"); err == nil {
++		t.Error("garbage decoded")
++	}
++}
++
++func TestMatrixExtension(t *testing.T) {
++	cases := []struct{ name, mime, want string }{
++		{"Photo.JPG", "image/jpeg", ".jpg"},
++		{"voice", "audio/ogg", ".oga"},
++		{"weird.verylongext", "", ".bin"},
++		{"noext", "", ".bin"},
++	}
++	for _, c := range cases {
++		got := mxExtension(c.name, c.mime)
++		if c.want == ".oga" {
++			// The system mime table decides which of ogg's extensions comes first.
++			if !strings.HasPrefix(got, ".og") {
++				t.Errorf("mxExtension(%q, %q) = %q", c.name, c.mime, got)
++			}
++			continue
++		}
++		if got != c.want {
++			t.Errorf("mxExtension(%q, %q) = %q, want %q", c.name, c.mime, got, c.want)
++		}
++	}
++}
++
++// Downloads go next to the transport's attachment template, else into the user directory.
++func TestMatrixMediaDir(t *testing.T) {
++	h := &mxHandler{userDir: "/home/u/.purple", attach: "/media/internal/.im-attachments/matrix/$hash$extension"}
++	if got := h.mediaDir(); got != "/media/internal/.im-attachments/matrix" {
++		t.Errorf("with a template: %q", got)
++	}
++	h.attach = ""
++	if got := h.mediaDir(); got != "/home/u/.purple/matrix-media" {
++		t.Errorf("without a template: %q", got)
++	}
++	h.attach = "/no/placeholder"
++	if got := h.mediaDir(); got != "/home/u/.purple/matrix-media" {
++		t.Errorf("with a template that has no placeholder: %q", got)
++	}
++}
++
++// The Messaging app replies to the address the transport stored, which it lowercased.
++func TestMatrixAuthBuddyMatchesAnyCase(t *testing.T) {
++	for _, who := range []string{"Matrix", "matrix", "MATRIX"} {
++		if !mxIsAuthBuddy(who) {
++			t.Errorf("%q is not the auth chat", who)
++		}
++	}
++	for _, who := range []string{"@matrix:matrix.org", "!matrix:matrix.org", "matrixx", ""} {
++		if mxIsAuthBuddy(who) {
++			t.Errorf("%q taken for the auth chat", who)
++		}
++	}
++}
++
++func mxTestSeed(t *testing.T, s map[string]any) string {
++	t.Helper()
++	raw, err := json.Marshal(s)
++	if err != nil {
++		t.Fatal(err)
++	}
++	return mxSeedPrefix + base64.RawURLEncoding.EncodeToString(raw)
++}
++
++func mxGoodSeed() map[string]any {
++	return map[string]any{
++		"v": 1, "homeserver": "https://matrix-client.matrix.org/", "issuer": "https://account.matrix.org/",
++		"client_id": "01CLIENT", "user_id": "@alice:matrix.org", "device_id": "ABCDEFGHIJ",
++		"access_token": "mat_x", "refresh_token": "mar_y", "expires_at_ms": int64(1793886454000),
++		"recovery_key": "EsT1 abcd",
++	}
++}
++
++// What the validator app stores after signing in becomes the session, and is never a password.
++func TestMatrixSeedParses(t *testing.T) {
++	stored := mxTestSeed(t, mxGoodSeed())
++	if mxLoginPassword(stored) != "" {
++		t.Fatal("a sign-in from the app was taken for a password")
++	}
++	s, err := mxParseSeed(stored)
++	if err != nil {
++		t.Fatal(err)
++	}
++	sess := s.session()
++	if sess.Homeserver != "https://matrix-client.matrix.org" || sess.UserID != "@alice:matrix.org" ||
++		sess.DeviceID != "ABCDEFGHIJ" || sess.AccessToken != "mat_x" || sess.RefreshToken != "mar_y" ||
++		sess.ClientID != "01CLIENT" || sess.ExpiryMs != 1793886454000 {
++		t.Errorf("session = %+v", sess)
++	}
++	if s.RecoveryKey != "EsT1 abcd" {
++		t.Errorf("recovery key = %q", s.RecoveryKey)
++	}
++	// Padded base64 is accepted too.
++	if _, err = mxParseSeed(stored + "=="); err != nil {
++		t.Errorf("padded: %v", err)
++	}
++}
++
++func TestMatrixSeedRejectsBadOnes(t *testing.T) {
++	cases := map[string]func(map[string]any){
++		"no access token":   func(m map[string]any) { delete(m, "access_token") },
++		"no device":         func(m map[string]any) { delete(m, "device_id") },
++		"no homeserver":     func(m map[string]any) { delete(m, "homeserver") },
++		"bad user":          func(m map[string]any) { m["user_id"] = "alice" },
++		"unknown version":   func(m map[string]any) { m["v"] = 2 },
++		"refresh no client": func(m map[string]any) { delete(m, "client_id") },
++	}
++	for name, change := range cases {
++		m := mxGoodSeed()
++		change(m)
++		if _, err := mxParseSeed(mxTestSeed(t, m)); err == nil {
++			t.Errorf("%s: accepted", name)
++		}
++	}
++	for _, bad := range []string{"mxoauth:", "mxoauth:!!!", "mxoauth:" + base64.RawURLEncoding.EncodeToString([]byte("{")), "hunter2"} {
++		if _, err := mxParseSeed(bad); err == nil {
++			t.Errorf("%q: accepted", bad)
++		}
++	}
++}
++
++// The recovery key from the sign-in is tried once, not at every connect.
++func TestMatrixRecoveryKeyIsTakenOnce(t *testing.T) {
++	h := &mxHandler{recoveryKey: "EsT1"}
++	if got := h.takeRecoveryKey(); got != "EsT1" {
++		t.Fatalf("first take = %q", got)
++	}
++	if got := h.takeRecoveryKey(); got != "" {
++		t.Fatalf("second take = %q", got)
++	}
++}
++
++// A read receipt goes once for each message read: when the app shows the chat, and not again when
++// the user then answers, until another message has come.
++func TestMatrixReadReceiptOncePerMessage(t *testing.T) {
++	r := &mxRoom{}
++	if got := r.takeUnread(); got != "" {
++		t.Fatalf("nothing received, yet %q to mark read", got)
++	}
++	r.lastRecv = "$one"
++	if got := r.takeUnread(); got != "$one" {
++		t.Fatalf("got %q, want $one", got)
++	}
++	if got := r.takeUnread(); got != "" {
++		t.Fatalf("$one marked read twice (%q)", got)
++	}
++	r.lastRecv = "$two"
++	if got := r.takeUnread(); got != "$two" {
++		t.Fatalf("got %q, want $two", got)
++	}
++	if r.lastRead != "$two" {
++		t.Fatalf("lastRead %q, want $two", r.lastRead)
++	}
++}
+diff --git a/matrixbridge.c b/matrixbridge.c
+new file mode 100644
+index 0000000..3e96811
+--- /dev/null
++++ b/matrixbridge.c
+@@ -0,0 +1,198 @@
++// matrixbridge.c - the Go -> purple boundary for the Matrix part. Same pattern as gometabridge.c:
++// Go hands over a struct of malloc'd strings, it is copied to the heap and handled on the glib
++// main thread through purple_timeout_add, because libpurple is not thread safe.
++#include "matrixbridge.h"
++#include <stdlib.h>
++#include <string.h>
++#include <time.h>
++
++#if !GLIB_CHECK_VERSION(2, 68, 0)
++#define g_memdup2 g_memdup
++#endif
++
++char *matrix_get_setting(PurpleAccount *account, const char *key) {
++    const char *v = purple_account_get_string(account, key, NULL);
++    return (v && *v) ? strdup(v) : NULL;
++}
++
++static void matrix_free_strings(matrix_message_t *m) {
++    free(m->who);
++    free(m->conv);
++    free(m->name);
++    free(m->text);
++    free(m->id);
++    free(m->quotedText);
++    free(m->quotedFrom);
++    free(m->quotedId);
++}
++
++// The account may have been deleted between the Go call and this callback running, so look it up
++// in the live account list rather than trusting the pointer.
++static gboolean matrix_account_alive(PurpleAccount *account) {
++    for (GList *l = purple_accounts_get_all(); l != NULL; l = l->next) {
++        if (l->data == account) return TRUE;
++    }
++    return FALSE;
++}
++
++static PurpleGroup *matrix_blist_group(void) {
++    PurpleGroup *g = purple_find_group("Matrix");
++    if (!g) {
++        g = purple_group_new("Matrix");
++        purple_blist_add_group(g, NULL);
++    }
++    return g;
++}
++
++static void matrix_ensure_buddy(PurpleAccount *account, const char *who, const char *name) {
++    if (!who || !*who) return;
++    PurpleBuddy *b = purple_find_buddy(account, who);
++    if (!b) {
++        b = purple_buddy_new(account, who, name);
++        purple_blist_add_buddy(b, NULL, matrix_blist_group(), NULL);
++    }
++    if (name && *name) {
++        serv_got_alias(purple_account_get_connection(account), who, name);
++        purple_blist_node_set_string(&b->node, "server_alias", name);
++    }
++}
++
++// Find a room registered as a blist chat by its "id" component (the room ID).
++PurpleChat *matrix_find_blist_chat(PurpleAccount *account, const char *room_id) {
++    for (PurpleBlistNode *node = purple_blist_get_root(); node != NULL; node = purple_blist_node_next(node, TRUE)) {
++        if (!PURPLE_BLIST_NODE_IS_CHAT(node)) continue;
++        PurpleChat *chat = (PurpleChat *)node;
++        if (purple_chat_get_account(chat) != account) continue;
++        GHashTable *comp = purple_chat_get_components(chat);
++        const char *cid = comp ? (const char *)g_hash_table_lookup(comp, "id") : NULL;
++        if (cid && strcmp(cid, room_id) == 0) return chat;
++    }
++    return NULL;
++}
++
++static void matrix_ensure_chat(PurpleAccount *account, const char *room_id, const char *name) {
++    if (!room_id || !*room_id) return;
++    const char *alias = (name && *name) ? name : room_id;
++    PurpleChat *chat = matrix_find_blist_chat(account, room_id);
++    if (!chat) {
++        GHashTable *comp = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, g_free);
++        g_hash_table_insert(comp, (gpointer)"id", g_strdup(room_id));
++        chat = purple_chat_new(account, alias, comp);
++        purple_blist_add_chat(chat, matrix_blist_group(), NULL);
++    } else {
++        purple_blist_alias_chat(chat, alias);
++    }
++}
++
++// webOS replies: put the quoted original next to webos-msg-id, so the transport records an inline
++// quote card. The transport g_free's the values after reading them.
++static void matrix_stash_ids(PurpleConversation *conv, const matrix_message_t *m) {
++    if (!conv) return;
++    if (m->id && *m->id) purple_conversation_set_data(conv, "webos-msg-id", g_strdup(m->id));
++    if (m->quotedText && *m->quotedText) {
++        purple_conversation_set_data(conv, "webos-quoted-text", g_strdup(m->quotedText));
++        if (m->quotedFrom && *m->quotedFrom) purple_conversation_set_data(conv, "webos-quoted-from", g_strdup(m->quotedFrom));
++        if (m->quotedId && *m->quotedId) purple_conversation_set_data(conv, "webos-quoted-id", g_strdup(m->quotedId));
++    }
++}
++
++// Message bodies from Matrix are plain text here: escape them, and keep line breaks, as the
++// conversation view renders bodies as HTML.
++static gchar *matrix_body_html(const matrix_message_t *m) {
++    if (m->isHtml) return g_strdup(m->text);
++    gchar *escaped = purple_markup_escape_text(m->text, -1);
++    gchar *html = purple_strdup_withhtml(escaped);
++    g_free(escaped);
++    return html;
++}
++
++static void matrix_show_text(PurpleConnection *pc, const matrix_message_t *m, time_t ts) {
++    gchar *body = matrix_body_html(m);
++    if (m->isGroup) {
++        int chat_id = (int)g_str_hash(m->conv);
++        if (purple_find_chat(pc, chat_id) == NULL) {
++            serv_got_joined_chat(pc, chat_id, m->conv);
++        }
++        PurpleConversation *conv = purple_find_chat(pc, chat_id);
++        if (!m->isOutgoing) matrix_stash_ids(conv, m);
++        const char *from = (m->name && *m->name) ? m->name : (m->who ? m->who : "unknown");
++        serv_got_chat_in(pc, chat_id, from, m->isOutgoing ? PURPLE_MESSAGE_SEND : PURPLE_MESSAGE_RECV, body, ts);
++    } else {
++        PurpleConversation *conv = purple_find_conversation_with_account(PURPLE_CONV_TYPE_IM, m->conv, m->account);
++        if (!conv) conv = purple_conversation_new(PURPLE_CONV_TYPE_IM, m->account, m->conv);
++        matrix_stash_ids(conv, m);
++        if (m->isOutgoing) {
++            // Sent by us from another client: stored as an Outbox row, so it shows on our side of the
++            // thread and can be reacted to.
++            purple_conv_im_write(purple_conversation_get_im_data(conv), m->conv, body,
++                    (PurpleMessageFlags)(PURPLE_MESSAGE_SEND | PURPLE_MESSAGE_REMOTE_SEND), ts);
++        } else {
++            serv_got_im(pc, m->conv, body, PURPLE_MESSAGE_RECV, ts);
++        }
++    }
++    g_free(body);
++}
++
++static gboolean matrix_dispatch(gpointer data) {
++    matrix_message_t *m = (matrix_message_t *)data;
++    PurpleConnection *pc = matrix_account_alive(m->account) ? purple_account_get_connection(m->account) : NULL;
++    if (m->msgtype == matrix_message_type_setting && matrix_account_alive(m->account)) {
++        // Settings are written even while disconnected: a refreshed token must not be lost.
++        if (m->name) purple_account_set_string(m->account, m->name, m->text ? m->text : "");
++    } else if (pc != NULL) {
++        time_t ts = m->timestamp ? m->timestamp : time(NULL);
++        switch (m->msgtype) {
++            case matrix_message_type_connected:
++                purple_connection_set_state(pc, PURPLE_CONNECTED);
++                break;
++            case matrix_message_type_error:
++                if (m->fatal == 2) {
++                    // AUTHENTICATION_FAILED keeps the account offline: retrying a rejected login every
++                    // minute would not help, and the user re-enables the account after fixing it.
++                    purple_connection_error_reason(pc, PURPLE_CONNECTION_ERROR_AUTHENTICATION_FAILED,
++                            m->text ? m->text : "Login failed");
++                } else if (m->fatal == 1) {
++                    purple_connection_error_reason(pc, PURPLE_CONNECTION_ERROR_NETWORK_ERROR,
++                            m->text ? m->text : "Network error");
++                } else {
++                    purple_debug_error(MATRIX_PLUGIN_ID, "%s\n", m->text ? m->text : "error");
++                }
++                break;
++            case matrix_message_type_buddy:
++                matrix_ensure_buddy(m->account, m->who, m->name);
++                break;
++            case matrix_message_type_chat:
++                matrix_ensure_chat(m->account, m->conv, m->name);
++                break;
++            case matrix_message_type_prompt:
++                // imlibpurple has no request UI, so prompts go to an auth conversation, as the Telegram
++                // and Facebook logins do. The reply comes back through matrix_send_im.
++                // serv_got_im, not purple_serv_got_im: the device's libpurple 2.x only exports the former.
++                if (m->text) {
++                    gchar *body = matrix_body_html(m);
++                    serv_got_im(pc, MATRIX_AUTH_BUDDY, body, PURPLE_MESSAGE_RECV, ts);
++                    g_free(body);
++                }
++                break;
++            case matrix_message_type_typing:
++                if (m->who && *m->who) {
++                    if (m->isOutgoing) serv_got_typing(pc, m->who, 0, PURPLE_TYPING);
++                    else serv_got_typing_stopped(pc, m->who);
++                }
++                break;
++            case matrix_message_type_text:
++                if (m->text && m->conv) matrix_show_text(pc, m, ts);
++                break;
++            default:
++                break;
++        }
++    }
++    matrix_free_strings(m);
++    g_free(m);
++    return FALSE;
++}
++
++void matrix_process_message(matrix_message_t msg) {
++    matrix_message_t *heap = g_memdup2(&msg, sizeof msg);
++    purple_timeout_add(0, matrix_dispatch, heap);
++}
+diff --git a/matrixbridge.h b/matrixbridge.h
+new file mode 100644
+index 0000000..db3260f
+--- /dev/null
++++ b/matrixbridge.h
+@@ -0,0 +1,55 @@
++#pragma once
++// Matrix (mautrix-go) part of the combined plugin. All identifiers are matrix_-prefixed so they
++// stay clear of the whatsmeow (gowhatsapp_) and Facebook (gometa_) parts in the same .so.
++#include <purple.h>
++#include <time.h>
++
++#define MATRIX_PLUGIN_ID      "prpl-matrix"
++#define MATRIX_PLUGIN_NAME    "Matrix"
++#define MATRIX_PLUGIN_SUMMARY "Matrix via mautrix-go (with end-to-end encryption)"
++#define MATRIX_AUTHOR         "webOS Synergy Revival"
++
++// The conversation the plugin uses for login and encryption prompts. Matrix user IDs always start
++// with '@', so no real contact can have this name.
++#define MATRIX_AUTH_BUDDY     "Matrix"
++
++enum matrix_message_type {
++    matrix_message_type_error,        // text = error; fatal: 0 = log only, 1 = network (reconnect), 2 = auth (stay offline)
++    matrix_message_type_connected,
++    matrix_message_type_text,         // a message (see the fields below)
++    matrix_message_type_buddy,        // add/update a contact: who = user ID, name = display name
++    matrix_message_type_chat,         // register a group room: conv = room ID, name = room name
++    matrix_message_type_prompt,       // text = shown in the auth conversation
++    matrix_message_type_typing,       // who = user ID, isOutgoing = 1 typing, 0 stopped
++    matrix_message_type_setting,      // name = setting key, text = value (written on the main thread)
++};
++
++typedef struct matrix_message {
++    PurpleAccount *account;
++    char *who;        // text: sender user ID
++    char *conv;       // text: 1:1 = the other user's ID, group = room ID
++    char *name;       // display name (sender, contact or room)
++    char *text;       // body; plain text unless isHtml
++    char *id;         // event ID
++    char *quotedText; // webOS replies: the replied-to message's text (NULL if not a reply)
++    char *quotedFrom; // webOS replies: its author's display name
++    char *quotedId;   // webOS replies: its event ID
++    time_t timestamp;
++    char msgtype;
++    char isGroup;
++    char isOutgoing;  // text: sent by us from another client; typing: 1 = started
++    char isHtml;      // text is already HTML (media links); otherwise it is escaped here
++    char fatal;
++} matrix_message_t;
++
++// Go -> purple. The C side takes ownership of the strings (free()) and runs on the glib main thread.
++extern void matrix_process_message(matrix_message_t msg);
++// The buddy-list chat for a room, by its "id" component (the room ID); NULL when there is none.
++extern PurpleChat *matrix_find_blist_chat(PurpleAccount *account, const char *room_id);
++
++// Account settings. Reads are made from the main thread (login); writes go through
++// matrix_message_type_setting. The returned string is malloc'd; the Go caller frees it.
++extern char *matrix_get_setting(PurpleAccount *account, const char *key);
++
++// webOS reactions (SEND): defined in glue/login.c, connected once per process.
++extern void webos_connect_send_reaction_once(void);

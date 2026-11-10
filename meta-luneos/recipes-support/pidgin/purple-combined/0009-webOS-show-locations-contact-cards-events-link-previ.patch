@@ -1,0 +1,480 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:29:05 +0200
+Subject: [PATCH] webOS: show locations, contact cards, events, link previews
+ and media details
+
+* Show locations, contact cards and events
+
+These messages carry no text and were dropped. A location or the first
+position of a live location is shown as a summary with a "geo:lat,lng"
+URI, which the app turns into a map chip. A contact card (or several)
+is written as a .vcf file into the attachment directory and shown as a
+file:// link that opens the Contacts import. An event is shown as a
+summary with an "event:<base64 JSON>" token the app turns into an "Add
+to Calendar" chip.
+
+* Show link previews
+
+A message with a link preview carries a JPEG thumbnail, a title and a
+description. The thumbnail is written into the attachment directory
+and put, with the title and description, above the text, so the app
+shows a preview card.
+
+* Name received documents by their file name
+
+The webOS attachment path template names files by $hash. For a
+document, put its file name there, under a folder named after the
+content hash, so the app's attachment chip shows the real name. The
+folder keeps two different documents with the same name apart: without
+it the second one overwrote the first on disk, and the first message
+then showed the second file. The same document received twice still
+lands in one place.
+
+The name is reduced to characters that are safe in a path and in the
+app's media URL matching; the hash alone is kept when nothing is left.
+
+* Store a video's thumbnail as its poster
+
+The sender's JPEG thumbnail of a video is written next to it as
+<name>.jpg. The app uses it as the poster of the <video>, which the old
+WebKit cannot paint from an unplayed clip.
+
+* Deliver a picture and its caption as one message
+
+The media link and its caption are sent as one message ("url<br>
+caption") instead of two with the same id, so the app shows one bubble
+with the picture and its caption.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ glue/handle_attachment.c |  15 +-
+ handle_attachment.go     |  44 +++++-
+ handle_message.go        | 292 +++++++++++++++++++++++++++++++++++++--
+ 3 files changed, 340 insertions(+), 11 deletions(-)
+
+diff --git a/glue/handle_attachment.c b/glue/handle_attachment.c
+index 1285e1c..a6c0584 100644
+--- a/glue/handle_attachment.c
++++ b/glue/handle_attachment.c
+@@ -261,10 +261,21 @@ void download_to_templated_destination(gowhatsapp_message_t *gwamsg, const char
+         if (url_template && url_template[0]) {
+             url = gowhatsapp_attachment_fill_template(url_template, gwamsg->timestamp, gwamsg->hash_hex, gwamsg->filename, gwamsg->extension, gwamsg->remoteJid, gwamsg->senderJid, chat_alias, buddy_alias, gwamsg->messageId, flags);
+         }
+-        gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid, url, gwamsg->timestamp, gwamsg->isGroup, gwamsg->isOutgoing, gwamsg->name, 0, gwamsg->messageId, NULL, NULL, NULL);
++        // webOS: deliver the media URL and its caption as ONE message, not two. The Messaging app
++        // strips the media URL from the body, renders it inline as an image/chip, and shows the
++        // remaining caption text - so a "url<br>caption" body is a single picture+caption bubble.
++        // Upstream posts the caption as a separate message with the SAME messageId, which the app
++        // renders as a second stand-alone bubble. The caption arrives HTML-escaped from the Go side.
++        if (gwamsg->text && gwamsg->text[0]) {
++            char *combined = g_strdup_printf("%s<br>%s", url, gwamsg->text);
++            gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid, combined, gwamsg->timestamp, gwamsg->isGroup, gwamsg->isOutgoing, gwamsg->name, 0, gwamsg->messageId, NULL, NULL, NULL);
++            g_free(combined);
++        } else {
++            gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid, url, gwamsg->timestamp, gwamsg->isGroup, gwamsg->isOutgoing, gwamsg->name, 0, gwamsg->messageId, NULL, NULL, NULL);
++        }
+         g_free(url);
+         gowhatsapp_display_image_inline(gwamsg, local_path);
+-        gowhatsapp_display_caption(gwamsg);
++        // caption folded into the URL message above (was: gowhatsapp_display_caption(gwamsg))
+     }
+     g_free(error);
+     g_free(local_path);
+diff --git a/handle_attachment.go b/handle_attachment.go
+index dae2a8f..fa21254 100644
+--- a/handle_attachment.go
++++ b/handle_attachment.go
+@@ -155,6 +155,13 @@ func (handler *Handler) handle_attachment(message *waE2E.Message, id string, sou
+ 			mimetype = dm.GetMimetype()
+ 			length = dm.GetFileLength()
+ 			caption = dm.GetCaption()
++			// webOS: name the downloaded document by its real file name, so the Messaging app's
++			// attachment chip shows e.g. "Q3-Report.pdf". The path template uses $hash, so put
++			// "<content hash>/<name>" there: two different documents with the same name do not
++			// overwrite each other. Keep the hash alone when the document has no file name.
++			if safe := sanitize_attachment_name(filename); safe != "" {
++				hash = attachment_path_name(hash, safe)
++			}
+ 		}
+ 	}
+ 	if data_type != C.gowhatsapp_attachment_type_none {
+@@ -165,6 +172,27 @@ func (handler *Handler) handle_attachment(message *waE2E.Message, id string, sou
+ 	}
+ }
+ 
++// sanitize_attachment_name makes a document's real filename safe to use as a single path component AND
++// to survive the Messaging app's media-URL regex (which stops at whitespace): directory separators,
++// control chars, spaces and characters that break a URL/path all map to "_".
++func sanitize_attachment_name(name string) string {
++	name = strings.TrimSpace(name)
++	return strings.Map(func(r rune) rune {
++		if r <= 0x20 || strings.ContainsRune("/\\?#\"'<>|:*&", r) {
++			return '_'
++		}
++		return r
++	}, name)
++}
++
++// attachment_path_name puts a document's name in a folder named after its content hash.
++func attachment_path_name(hash string, name string) string {
++	if hash == "" {
++		return name
++	}
++	return hash + "/" + name
++}
++
+ // unpreallocated_file hides the *os.File from whatsmeow, so DownloadToFile does not try to
+ // preallocate it. The media is still written to disk as it arrives.
+ type unpreallocated_file struct {
+@@ -199,5 +227,19 @@ func (handler *Handler) download_attachment(local_file_path string, message what
+ 	if err != nil {
+ 		return err
+ 	}
+-	return close_err
++	if close_err != nil {
++		return close_err
++	}
++	// For videos, also drop the sender's embedded JPEG thumbnail next to the file as "<base>.jpg".
++	// The Messaging app uses it as a <video poster> — a first-view preview that loads as a plain
++	// image (independent of the clip's own data), which lets the player stay preload="none". The old
++	// webOS WebKit can't paint a poster frame from an unplayed <video> otherwise, so without this the
++	// preview box is black until the clip has been played once. Best-effort: a missing poster is fine.
++	if vm, ok := message.(*waE2E.VideoMessage); ok {
++		if thumb := vm.GetJPEGThumbnail(); len(thumb) > 0 {
++			poster := strings.TrimSuffix(local_file_path, filepath.Ext(local_file_path)) + ".jpg"
++			os.WriteFile(poster, thumb, 0o644)
++		}
++	}
++	return nil
+ }
+diff --git a/handle_message.go b/handle_message.go
+index 6eb4d88..c56a06e 100644
+--- a/handle_message.go
++++ b/handle_message.go
+@@ -8,7 +8,12 @@ import "C"
+ import (
+ 	"context"
+ 	"crypto/sha256"
++	"encoding/base64"
++	"encoding/json"
+ 	"fmt"
++	"net/url"
++	"os"
++	"path/filepath"
+ 	"strings"
+ 
+ 	"go.mau.fi/whatsmeow/proto/waE2E"
+@@ -88,6 +93,238 @@ func format_contact(display_name string, vcard string) string {
+ 	return text
+ }
+ 
++// write_link_preview_thumbnail persists an ExtendedTextMessage's inline link-preview JPEG thumbnail
++// to the account's attachment directory and returns a file:// URL for it (or "" on failure / when the
++// attachment path isn't configured). The directory is the static prefix of the account's
++// attachment-path-template (everything before the first "$" placeholder) - the same dir real
++// downloaded attachments land in - so the Messaging app can load it as an inline <img>. The file is
++// named by a content hash so an identical thumbnail is written once and re-render is idempotent.
++// attachment_dir resolves the account's attachment directory (the static prefix of its
++// attachment-path-template, before the first "$" placeholder) - the same dir real downloaded
++// attachments land in - creating it if needed. Returns "" if unconfigured/relative.
++func (handler *Handler) attachment_dir() string {
++	tmpl := purple_get_string(handler.account, C.GOWHATSAPP_ATTACHMENT_PATH_TEMPLATE_OPTION, C.GOWHATSAPP_ATTACHMENT_PATH_TEMPLATE_DEFAULT)
++	prefix := strings.SplitN(tmpl, "$", 2)[0]
++	if prefix == "" {
++		return "" // no attachment path configured (or template starts with a placeholder) - skip
++	}
++	dir := filepath.Dir(prefix + "x") // keep the full directory even when the prefix ends in "/"
++	if !filepath.IsAbs(dir) {
++		return ""
++	}
++	if err := os.MkdirAll(dir, 0o755); err != nil {
++		return ""
++	}
++	return dir
++}
++
++func (handler *Handler) write_link_preview_thumbnail(data []byte) string {
++	dir := handler.attachment_dir()
++	if dir == "" {
++		return ""
++	}
++	sum := sha256.Sum256(data)
++	local := filepath.Join(dir, fmt.Sprintf("linkpreview_%x.jpg", sum[:16]))
++	if err := os.WriteFile(local, data, 0o644); err != nil {
++		return ""
++	}
++	return "file://" + local
++}
++
++// write_vcard_attachment persists a shared ContactMessage's vcard (or, for a multi-contact share,
++// several vcards concatenated - still a valid .vcf) to the account's attachment directory and
++// returns a file:// URL for it, so the Messaging app can offer it as a tappable ".vcf" chip
++// (ConversationItem's document-chip path, extended with a "contact" kind) that launches the
++// Contacts app's existing vCard import flow (com.palm.service.contacts countVCardContacts/
++// readVCard, wired in ContactsApp.handleVCardLaunch) instead of just a name/phone-number text line.
++func (handler *Handler) write_vcard_attachment(vcard string) string {
++	dir := handler.attachment_dir()
++	if dir == "" {
++		return ""
++	}
++	sum := sha256.Sum256([]byte(vcard))
++	local := filepath.Join(dir, fmt.Sprintf("contact_%x.vcf", sum[:16]))
++	if err := os.WriteFile(local, []byte(vcard), 0o644); err != nil {
++		return ""
++	}
++	return "file://" + local
++}
++
++// formatLocationMessage renders a shared pin (or the initial snapshot of a live-location share) as
++// a text summary plus a "geo:lat,lng" URI. There is no dedicated map-bubble UI, so the webOS
++// Messaging app (ConversationItem.extractLocations/buildLocationChip) parses that URI back out and
++// shows a tappable pin chip that opens the coordinates in the Maps app, instead of displaying the
++// raw URI as text. webOS also has no way to render the periodic position updates that follow a live
++// share, so a live share is shown once, as a snapshot, not a running track.
++func formatLocationMessage(lat, lon float64, name, address, locationURL string, isLive bool) string {
++	var b strings.Builder
++	if isLive {
++		b.WriteString("Live location")
++	} else {
++		b.WriteString("Location")
++	}
++	if name != "" {
++		b.WriteString(" " + name)
++	}
++	b.WriteString("\n")
++	if address != "" {
++		b.WriteString(address + "\n")
++	}
++	if locationURL != "" {
++		b.WriteString(locationURL + "\n")
++	}
++	if lat != 0 || lon != 0 {
++		b.WriteString(fmt.Sprintf("geo:%f,%f", lat, lon))
++	}
++	return strings.TrimRight(b.String(), "\n")
++}
++
++// vcardFieldValue returns the value of the first "<FIELD>[;params]:value" line in a vcard (one
++// field per line, CRLF or LF separated - the shape WhatsApp's ContactMessage.Vcard uses; this does
++// not attempt to handle folded/multi-line vcard values).
++func vcardFieldValue(vcard, field string) string {
++	for _, line := range strings.Split(strings.ReplaceAll(vcard, "\r\n", "\n"), "\n") {
++		i := strings.IndexByte(line, ':')
++		if i < 0 {
++			continue
++		}
++		key := strings.SplitN(line[:i], ";", 2)[0]
++		if strings.EqualFold(key, field) {
++			return strings.TrimSpace(line[i+1:])
++		}
++	}
++	return ""
++}
++
++// vcardPhoneNumbers returns every "TEL[;params]:value" line's value, in the order they appear.
++func vcardPhoneNumbers(vcard string) []string {
++	var phones []string
++	for _, line := range strings.Split(strings.ReplaceAll(vcard, "\r\n", "\n"), "\n") {
++		i := strings.IndexByte(line, ':')
++		if i < 0 {
++			continue
++		}
++		key := strings.SplitN(line[:i], ";", 2)[0]
++		if strings.EqualFold(key, "TEL") {
++			if v := strings.TrimSpace(line[i+1:]); v != "" {
++				phones = append(phones, v)
++			}
++		}
++	}
++	return phones
++}
++
++// formatContactMessage renders a shared contact card as just a tappable chip - no separate "name +
++// phone number" caption text, since the chip itself (ConversationItem's buildAttachmentChip, kind
++// "contact") shows the contact's name as its label. write_vcard_attachment persists the vcard to
++// the account's attachment dir (it's inline in the message, not a downloadable attachment, so it
++// can't ride the existing file-transfer path) and the name rides along as a "?name=" query param on
++// the returned file:// URL so the frontend can label the chip without parsing the vcard itself.
++// Tapping the chip opens Contacts' existing vCard import flow. Falls back to a plain text summary
++// if the attachment dir isn't configured (write_vcard_attachment returned "").
++func (handler *Handler) formatContactMessage(displayName, vcard string) string {
++	name := displayName
++	if name == "" {
++		name = vcardFieldValue(vcard, "FN")
++	}
++	if name == "" {
++		name = "(unnamed contact)"
++	}
++	fileURL := handler.write_vcard_attachment(vcard)
++	if fileURL == "" {
++		text := "Contact: " + name
++		if phones := vcardPhoneNumbers(vcard); len(phones) > 0 {
++			text += "\n" + strings.Join(phones, "\n")
++		}
++		return text
++	}
++	return fileURL + "?name=" + url.QueryEscape(name)
++}
++
++// formatContactsArrayMessage is formatContactMessage's multi-contact counterpart: a single chip
++// (labelled with the share's display name, or "N contacts") linking to all the vcards concatenated
++// into one .vcf - Contacts' existing multi-contact import flow (countVCardContacts -> "Would you
++// like to import N contacts?") takes it from there.
++func (handler *Handler) formatContactsArrayMessage(displayName string, contacts []*waE2E.ContactMessage) string {
++	var vcards strings.Builder
++	n := 0
++	for _, c := range contacts {
++		if c == nil {
++			continue
++		}
++		n++
++		if vc := c.GetVcard(); vc != "" {
++			vcards.WriteString(vc)
++			if !strings.HasSuffix(vc, "\n") {
++				vcards.WriteString("\n")
++			}
++		}
++	}
++	label := displayName
++	if label == "" {
++		label = fmt.Sprintf("%d contacts", n)
++	}
++	if vcards.Len() == 0 {
++		return "Contacts: " + label
++	}
++	fileURL := handler.write_vcard_attachment(vcards.String())
++	if fileURL == "" {
++		return "Contacts: " + label
++	}
++	return fileURL + "?name=" + url.QueryEscape(label)
++}
++
++// eventPayload is the compact JSON shape ConversationItem.extractEvents decodes back out of an
++// "event:<base64>" token to build the Calendar app's documented "New Calendar Event" launch params
++// (newEvent: {subject, location, note, dtstart, dtend} - all field names/ms timestamps match what
++// AppView.js/DetailView.js already expect). RawURLEncoding (no +, /, = or padding) keeps the token
++// safe to embed directly in message text with no escaping.
++type eventPayload struct {
++	Name     string `json:"name"`
++	Location string `json:"location"`
++	Note     string `json:"note"`
++	Start    int64  `json:"start"` // ms epoch, 0 = unknown
++	End      int64  `json:"end"`   // ms epoch, 0 = unknown
++}
++
++// formatEventMessage renders a shared WhatsApp Event as a text summary plus an "event:<base64-json>"
++// token - there is no dedicated event bubble UI, so the Messaging app
++// (ConversationItem.extractEvents/buildEventChip) parses the token back out and shows a tappable
++// "Add to Calendar" chip that launches the stock Calendar app's own event-creation flow directly
++// (pre-filled, one tap to confirm/save) - no ICS file or import feature needed, since webOS's
++// Calendar app has no ICS import at all but DOES have this documented cross-app launch spec.
++func formatEventMessage(em *waE2E.EventMessage) string {
++	name := em.GetName()
++	if name == "" {
++		name = "(untitled event)"
++	}
++	locText := ""
++	if loc := em.GetLocation(); loc != nil {
++		locText = loc.GetName()
++		if a := loc.GetAddress(); a != "" {
++			if locText != "" {
++				locText += ", "
++			}
++			locText += a
++		}
++	}
++	payload := eventPayload{Name: name, Location: locText, Note: em.GetDescription()}
++	if st := em.GetStartTime(); st > 0 {
++		payload.Start = st * 1000
++	}
++	if et := em.GetEndTime(); et > 0 {
++		payload.End = et * 1000
++	}
++	text := name
++	if locText != "" {
++		text += "\n" + locText
++	}
++	if data, err := json.Marshal(payload); err == nil {
++		text += "\nevent:" + base64.RawURLEncoding.EncodeToString(data)
++	}
++	return text
++}
++
+ func escape_text(text string) string {
+ 	// WhatsApp is a plain-text protocol (allowing < and >), but Pidgin expects HTML (demanding br and swallowing things which are looking like tags)
+ 	return strings.ReplaceAll(html.EscapeString(text), "\n", "<br>")
+@@ -197,6 +434,33 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 				}
+ 				text += etmText
+ 			}
++			// webOS: WhatsApp link-preview posts (news channels like BBC News / Dumpert) arrive as an
++			// ExtendedTextMessage with a URL preview - an inline JPEG thumbnail + a title - NOT an image
++			// attachment, so previously only the raw body text showed. Prepend the preview card: the
++			// thumbnail (written to the attachment dir, referenced as a file:// URL the app renders
++			// inline) then the title, above the body. GetJPEGThumbnail/GetTitle are empty for
++			// plain/quoted ExtendedTextMessages, so this only fires for actual link previews.
++			{
++				preview := ""
++				if thumb := etm.GetJPEGThumbnail(); len(thumb) > 0 {
++					preview = handler.write_link_preview_thumbnail(thumb)
++				}
++				if title := etm.GetTitle(); title != "" {
++					if preview != "" {
++						preview += "\n"
++					}
++					preview += title
++				}
++				if desc := etm.GetDescription(); desc != "" {
++					if preview != "" {
++						preview += "\n"
++					}
++					preview += desc
++				}
++				if preview != "" {
++					text = preview + "\n" + text
++				}
++			}
+ 		}
+ 
+ 	}
+@@ -239,18 +503,30 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+ 		}
+ 	}
+ 	{
++		// webOS: a shared pin drops silently without this - LocationMessage/LiveLocationMessage carry
++		// no Conversation/ExtendedTextMessage text, so nothing rendered at all. Summarize as text (a
++		// Maps link) rather than a real map bubble - no attachment involved, same text-summary
++		// approach as the poll display below.
+ 		if lm := message.GetLocationMessage(); lm != nil {
+-			text = format_location(lm)
++			text = formatLocationMessage(lm.GetDegreesLatitude(), lm.GetDegreesLongitude(), lm.GetName(), lm.GetAddress(), lm.GetURL(), lm.GetIsLive())
++		} else if llm := message.GetLiveLocationMessage(); llm != nil {
++			text = formatLocationMessage(llm.GetDegreesLatitude(), llm.GetDegreesLongitude(), "", "", "", true)
+ 		}
++	}
++	{
++		// webOS: a shared contact card likewise carries no plain text - ContactMessage/
++		// ContactsArrayMessage drop silently without this. Summarize as text (name + phone numbers
++		// parsed out of the vcard) rather than a real contact-card bubble.
+ 		if cm := message.GetContactMessage(); cm != nil {
+-			text = format_contact(cm.GetDisplayName(), cm.GetVcard())
++			text = handler.formatContactMessage(cm.GetDisplayName(), cm.GetVcard())
++		} else if cam := message.GetContactsArrayMessage(); cam != nil {
++			text = handler.formatContactsArrayMessage(cam.GetDisplayName(), cam.GetContacts())
+ 		}
+-		if cam := message.GetContactsArrayMessage(); cam != nil {
+-			contacts := make([]string, 0, len(cam.GetContacts()))
+-			for _, cm := range cam.GetContacts() {
+-				contacts = append(contacts, format_contact(cm.GetDisplayName(), cm.GetVcard()))
+-			}
+-			text = strings.Join(contacts, "\n")
++	}
++	{
++		// webOS: a shared Event likewise carries no plain text - drops silently without this.
++		if em := message.GetEventMessage(); em != nil {
++			text = formatEventMessage(em)
+ 		}
+ 	}
+ 	{

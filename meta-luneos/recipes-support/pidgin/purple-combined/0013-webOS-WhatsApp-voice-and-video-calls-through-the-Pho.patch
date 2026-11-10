@@ -3,6 +3,8 @@ From: Herman van Hazendonk <github.com@herrie.org>
 Date: Tue, 20 Oct 2026 16:34:17 +0200
 Subject: [PATCH] webOS: WhatsApp voice and video calls through the Phone app
 
+* WhatsApp voice and video calls through the Phone app
+
 Attach meowcaller (github.com/purpshell/meowcaller, a pure-Go WhatsApp
 VoIP stack) to the plugin's own whatsmeow client, so the account that
 is paired for messaging can also place and receive calls, and expose it
@@ -20,9 +22,10 @@ the stock webOS Phone app drives.
   com.palm.whatsapp), and audiod picks the output device itself, the
   earpiece first. The service registers a single LS2 handle: LuneOS
   has one bus, so the public/private split of legacy webOS is not used
-- glue/denoise.c, glue/aec.c: WebRTC noise suppression and the mobile
-  echo canceller (AECM) for the microphone path; the WebRTC DSP sources
-  come from libtgvoip and are compiled by the build, not carried here
+- glue/denoise.c, glue/aec.cc: WebRTC noise suppression (compiled out,
+  see denoise.c) and the mobile echo canceller (AECM) for the
+  microphone path; the echo canceller is webrtc-audio-processing-1's
+  AudioProcessing in mobile mode, linked from the system library
 - glue/h264_rtp.c, glue/voipkit*: the video bridge. voipkit.cpp binds
   libpalmgstskype.so, which exists only in legacy webOS firmware;
   voipkit_none.c is the backend used where it is absent (LuneOS)
@@ -36,36 +39,245 @@ the stock webOS Phone app drives.
   info level
 
 meowcaller is not carried here. go.mod requires it at
-v0.0.0-20260717112041-9769d5aaaeca and replaces it with
+v0.0.0-20260906234207-c48c3e2a243c and replaces it with
 ./third_party/meowcaller, where the build places a checkout of that
-commit with the webOS patches applied (NEON kernels and encoder
-speed-ups for ARMv7, video path fixes).
+commit with the webOS patches applied (encoder speed-ups for ARMv7,
+video path fixes, multi-device calls and relay election).
+
+meowcaller leaves a peer's request to turn its video on to the
+application (Call.AcceptVideo), so OnVideoState accepts it when
+VideoState.Upgrade is set; our own camera stays as it is.
+
+* Ring an incoming WhatsApp call without taking the call audio
+
+An incoming call opened the ALSA voip streams and reported an active
+call to audiod as soon as the offer arrived, when meowcaller sends the
+preaccept, so audiod paused the music and switched to the call route
+while the phone was still ringing. A call nobody answered or one that
+was rejected went through the same, and closing the audio when it
+ended also closed it under any other call still in progress.
+
+The call audio path is now taken by an outgoing call when it is
+placed, as before, and by an incoming call only when it is answered,
+just before Answer starts the media so the microphone is already
+capturing. callaudio.Path counts the calls that hold the path: it is
+opened by the first and closed with the last, and ending a call that
+never held it, such as a rejected or missed one, leaves it alone. If
+Answer fails, the call lets go of the path again.
+
+callaudio is plain Go without cgo, so its tests run on their own:
+  go test ./callaudio
+
+* Keep the WhatsApp call playback stream fed between packets
+
+Incoming call audio was written to the ALSA "voip" device only when a
+decoded packet arrived. Packets do not arrive at a steady pace: the
+relay delivers them in bursts and the peer sends nothing while it is
+silent (DTX). Any gap longer than the 120 ms playback buffer ran the
+pulse plug-in's stream dry. The next write then failed with -EPIPE and
+snd_pcm_recover() prepared the PCM. The pulse plug-in prepares by
+disconnecting its PulseAudio stream and connecting a new one, so every
+gap meant a new sink-input for palm-policy to route and audiod to set
+up. After that nothing played until the buffer had filled to its start
+threshold again, and the frame whose write failed was lost.
+
+On the mindphone this showed as the "ALSA plug-in [imlibpurpleservice]"
+sink-input on voipcall being closed and reopened about once a second.
+It was opened 19 times in one call and 31 times in the next. Replaying
+the packet arrival times meowcaller recorded for those two calls through
+a model of the old write path gives 18 and 28 underruns, against the 18
+and 30 reopenings. The audio was choppy in the first call and missing
+in the second.
+
+The decoder now only queues its frames in a playout ring (glue/
+playout.c). A playback thread opens the device once per call and writes
+20 ms chunks from the ring at the device's pace, blocking in
+snd_pcm_writei, with silence for whatever the ring cannot supply. The
+stream therefore runs from the moment the call audio opens until it
+closes. After the ring has run dry, the thread first collects 120 ms
+again, or waits that long, before playing on, which absorbs the relay's
+jitter. A burst beyond 360 ms drops its oldest samples, so a network
+stall cannot leave the call delayed for its remaining length.
+
+AECM's far-end reference is now fed from the playback thread with each
+chunk once it has been written, silence included. The reference used to
+be what had arrived, not what had been played, and stopped in every
+gap.
+
+An underrun can still happen if the thread is kept off the CPU for
+longer than the buffer. It is then recovered as before, logged, and
+counted in the "playback done" line printed when the call ends. That
+line also gives the samples played, the silence written, the samples
+dropped and the ring underflows.
+
+The playback device is now owned by the thread that writes it. Before,
+the speaker callback ran on a Go thread and wrote g_play, which the call
+teardown could close at the same time. g_audio_on is atomic because it
+is read on all of these threads.
+
+The tests in glue/tests run playout.c on its own, and run call.c's
+playback path against a fake ALSA device:
+  make -C glue/tests check
+
+* Decode WhatsApp video through luneos-rtc-engine
+
+WhatsApp video calls had no picture. The video bridge was
+voipkit_none, and the earlier session code in glue/call.c asks
+palm://com.palm.mediad/service/clonk for a video session. That is a
+legacy webOS mediad service, and no LuneOS recipe provides it.
+
+The new backend, glue/voipkit_rtcengine.c, hands the access units to
+luneos-rtc-engine (org.webosports.rtcengine) over the engine's
+SOCK_SEQPACKET sockets, one Annex-B access unit per datagram:
+
+- Receive: units from meowcaller go to the engine's rx socket, which
+  decodes them into a gst-shm socket that the Phone app renders. Sends
+  never block the media loop. A full socket drops the unit, holds the
+  stream back until the next IDR and asks the peer for one (at most
+  once a second). The bridge also holds back until an IDR when it
+  first connects or reconnects after the engine went away.
+- Send: a thread reads the engine's encoded camera units from its tx
+  socket and passes them to meowcaller. Oversize units are dropped.
+
+glue/call.c replaces the clonk block with an engine session:
+
+- The session runs while the call carries video and the user accepted
+  it (changeMedia incomingVideo). It asks for capabilities, then
+  starts send+receive when the engine has a camera, receive-only
+  otherwise.
+- It falls back to receive-only when the engine has a camera but
+  cannot encode ("tx start failed", e.g. no h264 encoder on sargo).
+- It stops and retries once if the engine is left running from an
+  earlier process.
+- Answers that belong to a closed session are recognised by a
+  generation counter, and whatever they brought up is stopped.
+- While a session runs, the published callState carries
+  videoURI/videoWidth/videoHeight for the Phone app.
+- audiod gets the real call origin and incomingVideo/outgoingVideo,
+  so its video policy keeps the call off the earpiece.
+- Peer PLI/FIR become an engine requestKeyframe, rate-limited and
+  only while we send.
+- The TEST-ONLY injector (testInjectVideo) now drives the same
+  session. It refuses to run during a call, and refuses a second run
+  until testStopInjectVideo.
+
+The prototypes of the functions Go calls are declared in glue/call.h.
+call.go exports gowhatsapp_go_call_request_peer_keyframe() for the
+bridge.
+
+The recipe builds this backend instead of voipkit_none by setting
+VOIPKIT_GLUE. The call service also needs rtc.operation and the engine
+in its outbound list, which imlibpurpleservice provides.
+
+Tests: glue/tests/call_video_test (20 tests: session life cycle,
+fallbacks, stale answers, published state, audiod, injector) and
+voipkit_rtcengine_test (12 tests: IDR gate, whole and ordered units,
+full socket, reconnect, keyframe rate limit, send path), against a fake
+LS2 bus and real socketpairs:
+  make -C glue/tests check
+
+* WhatsApp video calls on the phone: orientation, front camera, camera off, preview
+
+Fixes from live video calls between LuneOS phones and Android on
+2026-11-03.
+
+- Orientation: the plugin tells the peer which way our picture is up
+  (gowhatsapp_go_call_set_video_orientation) once the camera is sent,
+  and passes the peer's orientation to the Phone app as
+  incomingVideoOrientation. Only a state with the peer's camera on
+  carries it: the upgrade handshake (states 4, 6, 11) says 0 and
+  turned the picture.
+- Camera: a video call opens the front camera where there are two.
+  Camera off sends <video state=6> (StopVideo), as WhatsApp's own
+  clients do.
+- An OnVideoState for a call already gone from the table no longer
+  closes video: its OnEnd does, and closing here shut the engine
+  under a call that was still up.
+- The engine decodes what it encodes into a 320x240 preview for the
+  Phone app's self-view, turned like the sent picture and mirrored for
+  the front camera.
+- Sending at 1.2 Mbit/s (500 kbit/s looked heavily compressed at
+  640x480) and passing peer keyframe requests to the encoder at most
+  once a second.
+- Messaging: a 1:1 call rings in the Phone app only; it no longer
+  also posts "Incoming call" in the chat, which made Messaging alert a
+  second time. An unanswered one is posted as "Missed call".
+
+* A WhatsApp call answered on another device is not missed
+
+An incoming call that the user took on another of their devices (the
+phone, WhatsApp Web or Desktop) ended here with meowcaller's end reason
+"accepted_elsewhere" passed on as the Phone app's cause, which it does
+not know, and the chat got a "Missed call" bubble because the call never
+went active here.
+
+Tell the Phone app "answeredElsewhere", which it counts as answered (no
+"Missed call" alert, filed as incoming), and post no missed call bubble
+for such a terminate. Every other reason is passed on as before. The
+reason is the token a caller sends the devices that did not take the
+call (meowcaller signaling.TerminateReasonAcceptedElsewhere).
+
+* Our camera again after audio only, and the phone's orientation
+
+Turning our camera on again in a call that had gone back to audio only
+now starts the engine session as well: the session is what encodes
+our picture, and the wish to see video had been forgotten with audio
+only, so the peer saw a frozen picture until it turned its own camera
+on.
+
+The orientation <video device_orientation> carries follows the phone.
+The Phone app sends changeMedia {deviceOrientation} (the shell's
+quarter turns: 0 top up, 1 left edge up, 2 upside down, 3 right edge
+up) while our camera is sent; the peer is told the upright turn (1)
+plus that for the front camera, minus it for the back one, at once. A
+changeMedia with only the orientation changes no video direction.
+Checked on sargo against Android, both ways sideways.
 
 Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
 Upstream-Status: Inappropriate [webOS specific]
 ---
- call.go                 |  759 ++++++
- glue/aec.c              |   67 +
- glue/aec.h              |   13 +
- glue/call.c             | 1037 ++++++++
- glue/call.h             |    9 +
- glue/denoise.c          |   94 +
- glue/denoise.h          |   11 +
- glue/h264_rtp.c         |  183 ++
- glue/h264_rtp.h         |   54 +
- glue/init.c             |   14 +
- glue/test_stream_data.h | 5310 +++++++++++++++++++++++++++++++++++++++
- glue/voipkit.cpp        |  555 ++++
- glue/voipkit.h          |   48 +
- glue/voipkit_none.c     |   63 +
- go.mod                  |   15 +-
- go.sum                  |   20 +
- handler.go              |   28 +-
- logger.go               |   32 +-
- login.go                |   21 +
- 19 files changed, 8326 insertions(+), 7 deletions(-)
+ call.go                               |  886 +++++
+ call_end.go                           |   29 +
+ call_end_test.go                      |   23 +
+ callaudio/callaudio.go                |   64 +
+ callaudio/callaudio_test.go           |  117 +
+ glue/aec.cc                           |   69 +
+ glue/aec.h                            |   13 +
+ glue/call.c                           | 1104 +++++
+ glue/call.h                           |   17 +
+ glue/denoise.c                        |  101 +
+ glue/denoise.h                        |   12 +
+ glue/h264_rtp.c                       |  183 +
+ glue/h264_rtp.h                       |   54 +
+ glue/init.c                           |   14 +
+ glue/playout.c                        |   98 +
+ glue/playout.h                        |   52 +
+ glue/test_stream_data.h               | 5310 +++++++++++++++++++++++++
+ glue/tests/Makefile                   |   55 +
+ glue/tests/call_playback_test.cpp     |  142 +
+ glue/tests/call_video_test.cpp        |  490 +++
+ glue/tests/fakes.c                    |  224 ++
+ glue/tests/fakes.h                    |   67 +
+ glue/tests/fakes/libwhatsmeow.h       |   12 +
+ glue/tests/playout_test.cpp           |  215 +
+ glue/tests/voipkit_rtcengine_test.cpp |  330 ++
+ glue/voipkit.cpp                      |  555 +++
+ glue/voipkit.h                        |   48 +
+ glue/voipkit_none.c                   |   63 +
+ glue/voipkit_rtcengine.c              |  322 ++
+ glue/voipkit_rtcengine.h              |   29 +
+ go.mod                                |   15 +-
+ go.sum                                |   20 +
+ handler.go                            |   35 +-
+ logger.go                             |   32 +-
+ login.go                              |   21 +
+ 35 files changed, 10811 insertions(+), 10 deletions(-)
  create mode 100644 call.go
- create mode 100644 glue/aec.c
+ create mode 100644 call_end.go
+ create mode 100644 call_end_test.go
+ create mode 100644 callaudio/callaudio.go
+ create mode 100644 callaudio/callaudio_test.go
+ create mode 100644 glue/aec.cc
  create mode 100644 glue/aec.h
  create mode 100644 glue/call.c
  create mode 100644 glue/call.h
@@ -73,17 +285,29 @@ Upstream-Status: Inappropriate [webOS specific]
  create mode 100644 glue/denoise.h
  create mode 100644 glue/h264_rtp.c
  create mode 100644 glue/h264_rtp.h
+ create mode 100644 glue/playout.c
+ create mode 100644 glue/playout.h
  create mode 100644 glue/test_stream_data.h
+ create mode 100644 glue/tests/Makefile
+ create mode 100644 glue/tests/call_playback_test.cpp
+ create mode 100644 glue/tests/call_video_test.cpp
+ create mode 100644 glue/tests/fakes.c
+ create mode 100644 glue/tests/fakes.h
+ create mode 100644 glue/tests/fakes/libwhatsmeow.h
+ create mode 100644 glue/tests/playout_test.cpp
+ create mode 100644 glue/tests/voipkit_rtcengine_test.cpp
  create mode 100644 glue/voipkit.cpp
  create mode 100644 glue/voipkit.h
  create mode 100644 glue/voipkit_none.c
+ create mode 100644 glue/voipkit_rtcengine.c
+ create mode 100644 glue/voipkit_rtcengine.h
 
 diff --git a/call.go b/call.go
 new file mode 100644
-index 0000000..0155a12
+index 0000000..3c08ad0
 --- /dev/null
 +++ b/call.go
-@@ -0,0 +1,759 @@
+@@ -0,0 +1,886 @@
 +package main
 +
 +// call.go — WhatsApp voice calling, unified into the messaging plugin.
@@ -115,9 +339,9 @@ index 0000000..0155a12
 +extern void gowhatsapp_call_on_speaker(const float *frame, int n); // received PCM -> speaker
 +extern void gowhatsapp_call_audio_active(int on);            // open/close ALSA playback+capture
 +extern int  gowhatsapp_call_read_mic(float *out, int n);    // Go pulls mic PCM from the C ring
-+extern void gowhatsapp_call_video_active(int on);            // open/note-close the clonk session (videoURI)
-+extern void gowhatsapp_call_request_keyframe(void);           // stop+restart capture -> fresh IDR
-+// Implemented in glue/voipkit.cpp:
++extern void gowhatsapp_call_video_active(int on);            // the call carries video: luneos-rtc-engine session
++extern void gowhatsapp_call_request_keyframe(void);           // peer PLI/FIR -> engine requestKeyframe
++// Implemented by the VOIPKIT_GLUE backend (glue/voipkit_rtcengine.c on LuneOS):
 +extern void voipkit_video_receive_frame(const unsigned char *access_unit, unsigned int len);
 +*/
 +import "C"
@@ -134,6 +358,7 @@ index 0000000..0155a12
 +	"time"
 +	"unsafe"
 +
++	"github.com/hoehermann/purple-gowhatsapp/callaudio"
 +	"github.com/purpshell/meowcaller"
 +	"github.com/purpshell/meowcaller/diag"
 +	"github.com/rs/zerolog"
@@ -160,8 +385,11 @@ index 0000000..0155a12
 +	// streaming), "streaming" (peer video actively flowing). Driven by
 +	// meowcaller's OnVideoState callback, see wireCall.
 +	incomingVideoState string
-+	cause              string
-+	mic                *micSource
++	// incomingVideoOrientation is the peer's device orientation from its <video> stanzas,
++	// in quarter turns (0..3), as meowcaller's VideoState.Orientation reports it.
++	incomingVideoOrientation int
++	cause                    string
++	mic                      *micSource
 +	// everActive latches true the first time this call reaches "active" (peer accepted) and is
 +	// never cleared — state itself gets overwritten to "disconnected" on end (see setCallState),
 +	// so callWasAnswered needs this separately to tell "answered then hung up" apart from "never
@@ -180,7 +408,11 @@ index 0000000..0155a12
 +	calls   = map[string]*callInfo{} // id -> call
 +	dialing bool                     // an outgoing dial is in flight (guards double-dial)
 +
-+	callPrevGCPercent = 100 // GC threshold saved on call start, restored on disconnect
++	callPrevGCPercent = 100 // GC threshold saved when the audio path opens, restored when it closes
++
++	// The device's call audio path (ALSA + the active call reported to audiod), held by the
++	// calls in progress. See openCallAudio.
++	callAudio callaudio.Path
 +
 +	// Same *diag.Recorder handed to meowcaller.WithDiagnostics below, kept here too so
 +	// call.go's own events (which meowcaller's engine never sees, e.g. OnVideoState) can be
@@ -257,6 +489,9 @@ index 0000000..0155a12
 +		IncomingVideo      bool   `json:"incomingVideo"`
 +		OutgoingVideo      bool   `json:"outgoingVideo"`
 +		IncomingVideoState string `json:"incomingVideoState"`
++		// The peer's device orientation in quarter turns (0..3); the Phone app turns the
++		// picture by it.
++		IncomingVideoOrientation int `json:"incomingVideoOrientation"`
 +	}
 +	callMu.Lock()
 +	var cjs []callJSON
@@ -265,6 +500,7 @@ index 0000000..0155a12
 +	lineIncomingVid := false
 +	lineOutgoingVid := false
 +	lineIVS := "unavailable"
++	lineOrientation := 0
 +	for _, ci := range calls {
 +		lineState = ci.state // single call per line: the line state IS the call state
 +		cause = ci.cause
@@ -276,7 +512,7 @@ index 0000000..0155a12
 +			ID: ci.id, Address: ci.address, DisplayName: ci.displayName,
 +			Origin: ci.origin, OnHold: ci.state == "onHold",
 +			IncomingVideo: ci.incomingVid, OutgoingVideo: ci.outgoingVid,
-+			IncomingVideoState: ivs,
++			IncomingVideoState: ivs, IncomingVideoOrientation: ci.incomingVideoOrientation,
 +		})
 +		// ActiveCall.js reads outgoingVideo/incomingVideo/incomingVideoState directly on
 +		// the LINE object (activeLines[0].outgoingVideo etc.), not nested under calls[] -
@@ -284,6 +520,7 @@ index 0000000..0155a12
 +		lineIncomingVid = ci.incomingVid
 +		lineOutgoingVid = ci.outgoingVid
 +		lineIVS = ivs
++		lineOrientation = ci.incomingVideoOrientation
 +	}
 +	callMu.Unlock()
 +
@@ -294,7 +531,7 @@ index 0000000..0155a12
 +		line := map[string]any{
 +			"state": lineState, "calls": cjs,
 +			"incomingVideo": lineIncomingVid, "outgoingVideo": lineOutgoingVid,
-+			"incomingVideoState": lineIVS,
++			"incomingVideoState": lineIVS, "incomingVideoOrientation": lineOrientation,
 +		}
 +		if lineState == "disconnected" {
 +			line["disconnectDetails"] = map[string]any{"cause": cause}
@@ -360,16 +597,33 @@ index 0000000..0155a12
 +			diagRec.Emit("clonk", map[string]any{"event": "on_end", "call_id": ci.id, "reason": reason})
 +		}
 +		C.gowhatsapp_call_video_active(C.int(0))
-+		setCallState(ci.id, "disconnected", reason)
++		setCallState(ci.id, "disconnected", phoneEndCause(reason))
 +	})
 +	// Tracks the PEER's video on/off -- independent of whether OUR OWN capture/render
 +	// pipeline works (see WHATSAPP_VIDEO_STATUS.md: the native clonk bug blocks local
 +	// camera/rendering, not the WhatsApp-level signaling this reflects).
 +	mcCall.OnVideoState(func(vs meowcaller.VideoState) {
++		if vs.Upgrade {
++			// The peer asks to turn its video on. meowcaller leaves the answer to us
++			// (Call.AcceptVideo: our camera stays as it is, the peer may send); the old
++			// patched meowcaller accepted on its own, so keep doing that. Accept from a
++			// goroutine: this callback runs on meowcaller's stanza path.
++			go func() {
++				if err := mcCall.AcceptVideo(); err != nil {
++					fmt.Fprintln(os.Stderr, "wacall: accept the peer's video upgrade:", err)
++				}
++			}()
++		}
 +		callMu.Lock()
-+		var anyVideo bool
++		var anyVideo, known, outVid, inVid, mcVideo bool
 +		if c, ok := calls[ci.id]; ok {
++			known = true
 +			c.incomingVid = vs.Active
++			// Only a state with the peer's camera on carries its orientation; the
++			// upgrade handshake (state 4, 6, 11) says 0 and would turn the picture.
++			if vs.Active {
++				c.incomingVideoOrientation = vs.Orientation & 3
++			}
 +			switch {
 +			case vs.Active:
 +				c.incomingVideoState = "streaming"
@@ -378,9 +632,16 @@ index 0000000..0155a12
 +			default:
 +				c.incomingVideoState = "unavailable"
 +			}
-+			anyVideo = c.outgoingVid || c.incomingVid || c.c.IsVideo()
++			outVid, inVid, mcVideo = c.outgoingVid, c.incomingVid, c.c.IsVideo()
++			anyVideo = outVid || inVid || mcVideo
 +		}
 +		callMu.Unlock()
++		if !known {
++			// The call is gone from the table: its OnEnd closes video. Turning
++			// video off here would close it under a call that is still up.
++			fmt.Fprintln(os.Stderr, "wacall: OnVideoState for an unknown call", ci.id, "state", vs.Raw)
++			return
++		}
 +		// Same fix as gowhatsapp_go_call_dial/answer: the peer's video turning on (or
 +		// being active from the initial offer, before changeMedia is ever called) must
 +		// also open the local clonk session, or voipkit_video_receive_frame silently
@@ -394,8 +655,8 @@ index 0000000..0155a12
 +		// tear down/rebuild the local clonk pipeline via gowhatsapp_call_video_active, which
 +		// would visually look exactly like the reported flicker) in lockstep with the
 +		// measured frame-arrival stalls, or whether it fires once and stays put.
-+		fmt.Fprintln(os.Stderr, "wacall: OnVideoState id=", ci.id, "active=", vs.Active,
-+			"anyVideo=", anyVideo, "ts_ms=", time.Now().UnixMilli())
++		fmt.Fprintln(os.Stderr, "wacall: OnVideoState id=", ci.id, "state=", vs.Raw, "active=", vs.Active,
++			"anyVideo=", anyVideo, "out=", outVid, "in=", inVid, "mc=", mcVideo, "ts_ms=", time.Now().UnixMilli())
 +		if diagRec != nil {
 +			diagRec.Emit("clonk", map[string]any{
 +				"event": "on_video_state", "call_id": ci.id, "peer_active": vs.Active,
@@ -436,8 +697,7 @@ index 0000000..0155a12
 +			if ci.mic != nil {
 +				ci.mic.Close()
 +			}
-+			C.gowhatsapp_call_audio_active(C.int(0)) // close ALSA playback + stop mic capture
-+			debug.SetGCPercent(callPrevGCPercent)   // restore normal GC pacing after the call
++			closeCallAudio(id)
 +			// keep the disconnected call briefly so CallSynergizer logs it, then drop
 +			go func(delID string) { time.Sleep(1500 * time.Millisecond); dropCall(delID) }(id)
 +		}
@@ -464,6 +724,16 @@ index 0000000..0155a12
 +	return ok && ci.everActive
 +}
 +
++// callWasIncoming reports whether call.go tracked this call as one rung in from the peer --
++// a 1:1 call the Phone app showed, which therefore has no chat message yet. Like
++// callWasAnswered it relies on the entry outliving the end of the call by a moment.
++func callWasIncoming(id string) bool {
++	callMu.Lock()
++	defer callMu.Unlock()
++	ci, ok := calls[id]
++	return ok && ci.origin == "incoming"
++}
++
 +// callBubbleText returns the "call log" style chat bubble text for a call, keyed by whether
 +// call.go has this call tracked as a video call (see callInfo.c.IsVideo()). Defaults to the
 +// audio phrasing when the call isn't tracked here at all (e.g. a group-call notice).
@@ -486,15 +756,9 @@ index 0000000..0155a12
 +	}
 +}
 +
-+// attachMedia connects a call's mic source and speaker sink, and opens the ALSA
-+// playback+capture path so the call is audible on the loudspeaker.
++// attachMedia connects a call's mic source and speaker sink. It does not open the audio
++// path; see openCallAudio for when that happens.
 +func attachMedia(ci *callInfo) {
-+	// The MLow encoder runs on a tight 60ms budget; a mid-call GC stop-the-world can stall the send
-+	// loop and drop a frame. Raise the GC threshold for the call's duration (fewer, and with
-+	// GOMAXPROCS>=2 concurrent, collections), then restore it on disconnect. Scoped to calls so the
-+	// transport's steady-state memory is unaffected.
-+	callPrevGCPercent = debug.SetGCPercent(400)
-+	C.gowhatsapp_call_audio_active(C.int(1)) // open playback + start mic capture -> read_mic
 +	ci.c.Play(ci.mic)
 +	ci.c.Receive(meowcaller.SinkFunc(func(frame []float32) {
 +		if len(frame) == 0 {
@@ -514,9 +778,41 @@ index 0000000..0155a12
 +	}))
 +}
 +
++// openCallAudio opens the ALSA playback+capture path so the call is audible, and with it the
++// active call glue/call.c reports to audiod, which pauses the music and routes to the earpiece.
++// An outgoing call does this when it is placed, an incoming one only once it is answered: while
++// it rings it is not a call in progress yet (callaudio.TakesPathAtStart). Opening it at the
++// offer, as before, told audiod a call was active the moment WhatsApp preaccepted, and the
++// music stopped under the ringtone.
++func openCallAudio(ci *callInfo) {
++	if !callAudio.Take(ci.id) {
++		return // already open, for this call or another one in progress
++	}
++	// The MLow encoder runs on a tight 60ms budget; a mid-call GC stop-the-world can stall the send
++	// loop and drop a frame. Raise the GC threshold for the call's duration (fewer, and with
++	// GOMAXPROCS>=2 concurrent, collections), then restore it on disconnect. Scoped to calls so the
++	// transport's steady-state memory is unaffected.
++	callPrevGCPercent = debug.SetGCPercent(400)
++	C.gowhatsapp_call_audio_active(C.int(1)) // open playback + start mic capture -> read_mic
++}
++
++// closeCallAudio drops call id's hold on the audio path and closes the path when it was the last
++// one. A ringing call that is rejected or missed never took it, so ending it cannot cut off the
++// audio of another call in progress.
++func closeCallAudio(id string) {
++	if !callAudio.Release(id) {
++		return
++	}
++	C.gowhatsapp_call_audio_active(C.int(0)) // close ALSA playback + stop mic capture
++	debug.SetGCPercent(callPrevGCPercent)    // restore normal GC pacing after the call
++}
++
 +func handleIncoming(mcCall *meowcaller.Call) {
 +	ci := wireCall(mcCall, "incoming", "")
 +	attachMedia(ci)
++	if callaudio.TakesPathAtStart(ci.origin) {
++		openCallAudio(ci)
++	}
 +	emitCallState() // ring the UI
 +}
 +
@@ -611,6 +907,9 @@ index 0000000..0155a12
 +		ci := wireCall(mcCall, "outgoing", addr)
 +		ci.outgoingVid = v
 +		attachMedia(ci)
++		if callaudio.TakesPathAtStart(ci.origin) {
++			openCallAudio(ci)
++		}
 +		if v {
 +			// NOT mcCall.StartVideo(): that sends a VideoStateUpgradeRequestV2 stanza,
 +			// meant for upgrading an already-connected audio call to video mid-call. Our
@@ -700,8 +999,12 @@ index 0000000..0155a12
 +		if ci == nil {
 +			return
 +		}
++		// Before Answer, which starts the media: the mic has to be capturing by the time the
++		// engine pulls its first frame.
++		openCallAudio(ci)
 +		if err := ci.c.Answer(); err != nil {
 +			fmt.Fprintln(os.Stderr, "wacall: answer error:", err)
++			closeCallAudio(id)
 +			return
 +		}
 +		if v {
@@ -729,7 +1032,7 @@ index 0000000..0155a12
 +	callMu.Lock()
 +	var live []*callInfo
 +	for _, c := range calls {
-+		if c.state != "disconnected" {
++		if c.c != nil && c.state != "disconnected" {
 +			live = append(live, c)
 +		}
 +	}
@@ -797,11 +1100,15 @@ index 0000000..0155a12
 +				err = ci.c.SetVideoEnabled(true)
 +			case want:
 +				err = ci.c.StartVideo()
-+			case ci.c.IsVideo():
-+				err = ci.c.SetVideoEnabled(false)
++			case ci.c.IsSendingVideo():
++				// Camera off is <video state=6>, as WhatsApp's own clients send it;
++				// state 0 made the far side drop its video as well.
++				err = ci.c.StopVideo()
 +			}
 +			if err != nil {
 +				fmt.Fprintln(os.Stderr, "wacall: changeMedia outgoingVideo error:", err)
++			} else {
++				fmt.Fprintln(os.Stderr, "wacall: changeMedia outgoingVideo", want)
 +			}
 +			ci.outgoingVid = want
 +		}
@@ -818,6 +1125,50 @@ index 0000000..0155a12
 +		emitCallState()
 +	}()
 +	return 0
++}
++
++// gowhatsapp_go_call_request_peer_keyframe asks the peer of every live call for an IDR.
++// glue/voipkit_rtcengine.c calls it when the decoder joins mid-stream or had to drop an
++// access unit, so it has a keyframe to (re)start from.
++//
++//export gowhatsapp_go_call_request_peer_keyframe
++func gowhatsapp_go_call_request_peer_keyframe() {
++	callMu.Lock()
++	var live []*callInfo
++	for _, c := range calls {
++		if c.state != "disconnected" {
++			live = append(live, c)
++		}
++	}
++	callMu.Unlock()
++	for _, ci := range live {
++		ci.c.RequestPeerKeyframe()
++	}
++}
++
++// gowhatsapp_go_call_set_video_orientation tells the peer of every live call which way our
++// camera's picture is up, in quarter turns (0..3) as <video device_orientation> carries it.
++// glue/call.c calls it once our camera is being sent. The stanza goes out off the C
++// mainloop.
++//
++//export gowhatsapp_go_call_set_video_orientation
++func gowhatsapp_go_call_set_video_orientation(orientation C.int) {
++	o := int(orientation) & 3
++	callMu.Lock()
++	var live []*callInfo
++	for _, c := range calls {
++		if c.c != nil && c.state != "disconnected" {
++			live = append(live, c)
++		}
++	}
++	callMu.Unlock()
++	for _, ci := range live {
++		go func(ci *callInfo) {
++			if err := ci.c.SetVideoOrientation(o); err != nil {
++				fmt.Fprintln(os.Stderr, "wacall: SetVideoOrientation failed:", err)
++			}
++		}(ci)
++	}
 +}
 +
 +//export gowhatsapp_go_call_hangup
@@ -843,82 +1194,341 @@ index 0000000..0155a12
 +	}()
 +	return 0
 +}
-diff --git a/glue/aec.c b/glue/aec.c
+diff --git a/call_end.go b/call_end.go
 new file mode 100644
-index 0000000..3cb0f8c
+index 0000000..6dee0ea
 --- /dev/null
-+++ b/glue/aec.c
-@@ -0,0 +1,67 @@
++++ b/call_end.go
+@@ -0,0 +1,29 @@
++package main
++
++// webOS: what the Phone app is told about the end of a WhatsApp call.
++//
++// WhatsApp ends a call that rang on several of the user's devices with a terminate
++// whose reason says where it went (meowcaller signaling.TerminateReasonAcceptedElsewhere
++// and TerminateReasonRejectedElsewhere, "tokens a caller sends the callee devices that
++// did not take the call"). The Phone app reads cause "answeredElsewhere" as answered:
++// no "Missed call" alert, and the call log files it as incoming.
++
++const (
++	terminateAcceptedElsewhere  = "accepted_elsewhere"
++	phoneCauseAnsweredElsewhere = "answeredElsewhere"
++)
++
++// phoneEndCause maps meowcaller's end reason to the cause the Phone app is given in
++// disconnectDetails.cause. Every other reason is passed on as it is.
++func phoneEndCause(reason string) string {
++	if reason == terminateAcceptedElsewhere {
++		return phoneCauseAnsweredElsewhere
++	}
++	return reason
++}
++
++// endedAnsweredElsewhere reports whether a call terminate says the call was taken on
++// another of the user's devices: it was answered, so it is no missed call.
++func endedAnsweredElsewhere(reason string) bool {
++	return reason == terminateAcceptedElsewhere
++}
+diff --git a/call_end_test.go b/call_end_test.go
+new file mode 100644
+index 0000000..4641b02
+--- /dev/null
++++ b/call_end_test.go
+@@ -0,0 +1,23 @@
++package main
++
++import "testing"
++
++func TestAnsweredElsewhereTellsThePhoneAppSo(t *testing.T) {
++	if got := phoneEndCause("accepted_elsewhere"); got != "answeredElsewhere" {
++		t.Fatalf("accepted_elsewhere: cause %q, want answeredElsewhere", got)
++	}
++	if !endedAnsweredElsewhere("accepted_elsewhere") {
++		t.Fatal("accepted_elsewhere is no missed call")
++	}
++}
++
++func TestOtherEndsArePassedOn(t *testing.T) {
++	for _, r := range []string{"", "timeout", "rejected_elsewhere", "group_call_ended", "normal", "Accepted_Elsewhere"} {
++		if got := phoneEndCause(r); got != r {
++			t.Errorf("%q: cause %q, want it passed on", r, got)
++		}
++		if endedAnsweredElsewhere(r) {
++			t.Errorf("%q taken for answered elsewhere", r)
++		}
++	}
++}
+diff --git a/callaudio/callaudio.go b/callaudio/callaudio.go
+new file mode 100644
+index 0000000..9d8634c
+--- /dev/null
++++ b/callaudio/callaudio.go
+@@ -0,0 +1,64 @@
++// Package callaudio decides when a WhatsApp call holds the device's call audio
++// path: the ALSA "voip"/"voipsource" streams glue/call.c opens, and the active
++// call it reports to audiod with phone/CallStatusUpdate. audiod pauses the music
++// and routes to the earpiece for an active call, so the path must only be taken
++// by a call that is really in progress.
++//
++// It is plain Go, without cgo, so that it can be tested on its own; call.go
++// does the C calls the answers here ask for.
++package callaudio
++
++import "sync"
++
++// TakesPathAtStart reports whether a call holds the audio path from the moment
++// it is set up. An outgoing call does: the user started it and expects the
++// ringback on the earpiece. An incoming call does not until it is answered:
++// while it rings, the device sounds the ringtone and the music keeps playing.
++func TakesPathAtStart(origin string) bool {
++	return origin != "incoming"
++}
++
++// Path is the call audio path, shared by every call. It is open while at least
++// one call holds it. The zero value is a closed path, ready to use.
++type Path struct {
++	mu      sync.Mutex
++	holders map[string]struct{}
++}
++
++// Take records that call id holds the path. It reports whether the path was
++// closed until now, that is, whether the caller must open it. Taking it again
++// for the same call changes nothing.
++func (p *Path) Take(id string) bool {
++	p.mu.Lock()
++	defer p.mu.Unlock()
++	if p.holders == nil {
++		p.holders = make(map[string]struct{})
++	}
++	if _, ok := p.holders[id]; ok {
++		return false
++	}
++	p.holders[id] = struct{}{}
++	return len(p.holders) == 1
++}
++
++// Release drops call id's hold. It reports whether that was the last hold, that
++// is, whether the caller must close the path. Releasing a call that never took
++// the path, such as a ringing call that was rejected or missed, changes nothing,
++// so it cannot cut off the audio of another call in progress.
++func (p *Path) Release(id string) bool {
++	p.mu.Lock()
++	defer p.mu.Unlock()
++	if _, ok := p.holders[id]; !ok {
++		return false
++	}
++	delete(p.holders, id)
++	return len(p.holders) == 0
++}
++
++// Held reports whether call id holds the path.
++func (p *Path) Held(id string) bool {
++	p.mu.Lock()
++	defer p.mu.Unlock()
++	_, ok := p.holders[id]
++	return ok
++}
+diff --git a/callaudio/callaudio_test.go b/callaudio/callaudio_test.go
+new file mode 100644
+index 0000000..dfc3684
+--- /dev/null
++++ b/callaudio/callaudio_test.go
+@@ -0,0 +1,117 @@
++package callaudio
++
++import (
++	"fmt"
++	"sync"
++	"testing"
++)
++
++func TestTakesPathAtStart(t *testing.T) {
++	if TakesPathAtStart("incoming") {
++		t.Error("a ringing incoming call takes the audio path, so the music stops before it is answered")
++	}
++	if !TakesPathAtStart("outgoing") {
++		t.Error("an outgoing call does not take the audio path when it is placed")
++	}
++}
++
++// The 30 October fault: the music paused while a WhatsApp call was still
++// ringing. Ringing must not touch the path; answering opens it.
++func TestRingingThenAnswered(t *testing.T) {
++	var p Path
++	if p.Held("A") {
++		t.Fatal("a new path is held")
++	}
++	if !p.Take("A") {
++		t.Fatal("answering the call did not open the path")
++	}
++	if !p.Held("A") {
++		t.Fatal("the answered call does not hold the path")
++	}
++	if !p.Release("A") {
++		t.Fatal("hanging up the only call did not close the path")
++	}
++	if p.Held("A") {
++		t.Fatal("the call still holds the path after hanging up")
++	}
++}
++
++func TestRejectedRingingCallLeavesThePathAlone(t *testing.T) {
++	var p Path
++	if p.Release("ringing") {
++		t.Fatal("rejecting a call that never took the path asks to close it")
++	}
++	// With another call in progress, the rejected one must not end its audio.
++	p.Take("active")
++	if p.Release("ringing") {
++		t.Fatal("rejecting a second, ringing call closes the path of the call in progress")
++	}
++	if !p.Held("active") {
++		t.Fatal("the call in progress lost the path")
++	}
++}
++
++func TestTakeTwiceOpensOnce(t *testing.T) {
++	var p Path
++	if !p.Take("A") {
++		t.Fatal("the first take did not open the path")
++	}
++	if p.Take("A") {
++		t.Fatal("taking the path again for the same call asks to open it again")
++	}
++	if !p.Release("A") {
++		t.Fatal("one release after two takes does not close the path")
++	}
++	if p.Release("A") {
++		t.Fatal("a second release asks to close the path again")
++	}
++}
++
++func TestPathStaysOpenUntilTheLastCallEnds(t *testing.T) {
++	var p Path
++	if !p.Take("A") {
++		t.Fatal("the first call did not open the path")
++	}
++	if p.Take("B") {
++		t.Fatal("a second call asks to open a path that is already open")
++	}
++	if p.Release("A") {
++		t.Fatal("ending the first call closes the path the second still holds")
++	}
++	if !p.Release("B") {
++		t.Fatal("ending the last call does not close the path")
++	}
++	if !p.Take("C") {
++		t.Fatal("a call after the path closed does not open it again")
++	}
++}
++
++func TestConcurrentCalls(t *testing.T) {
++	var p Path
++	var wg sync.WaitGroup
++	var mu sync.Mutex
++	opened, closed := 0, 0
++	for i := range 64 {
++		wg.Add(1)
++		go func(id string) {
++			defer wg.Done()
++			o := p.Take(id)
++			c := p.Release(id)
++			mu.Lock()
++			if o {
++				opened++
++			}
++			if c {
++				closed++
++			}
++			mu.Unlock()
++		}(fmt.Sprint(i))
++	}
++	wg.Wait()
++	if opened != closed {
++		t.Fatalf("the path was opened %d times and closed %d times", opened, closed)
++	}
++	if opened == 0 {
++		t.Fatal("the path was never opened")
++	}
++}
+diff --git a/glue/aec.cc b/glue/aec.cc
+new file mode 100644
+index 0000000..a4a3490
+--- /dev/null
++++ b/glue/aec.cc
+@@ -0,0 +1,69 @@
++// webOS WhatsApp calling: echo cancellation through webrtc-audio-processing's AudioProcessing in
++// mobile mode, which runs the same AECM (fixed point, speakerphone routing) the calls used before.
++// AudioProcessing takes 10 ms frames: 160 samples at 16 kHz. The render side (what we play) and the
++// capture side (the mic) run on different threads; AudioProcessing locks them internally, the mutex
++// here only guards the handle's lifetime against start/stop.
++extern "C" {
 +#include "aec.h"
-+#include "modules/audio_processing/aecm/echo_control_mobile.h"
-+#include <pthread.h>
-+#include <string.h>
++}
 +
-+// AECM processes fixed 10ms blocks: 160 samples at 16kHz. The mic frame (WA_FRAME=320) is 2 blocks;
-+// a played frame (960) is 6. farend()/process() are called from different threads, so one mutex
-+// guards the single AECM handle (WebRTC's AECM is not internally thread-safe across the two calls).
-+#define AEC_BLK 160
-+static void *g_aecm = NULL;
-+static int g_delay_ms = 0;
-+static pthread_mutex_t g_aec_mx = PTHREAD_MUTEX_INITIALIZER;
++#include <modules/audio_processing/include/audio_processing.h>
 +
-+void wa_aec_start(int fs, int delay_ms) {
++#include <mutex>
++
++namespace {
++constexpr int kBlockMs = 10;
++std::mutex g_mx;
++rtc::scoped_refptr<webrtc::AudioProcessing> g_apm;
++int g_rate = 0;
++int g_delay_ms = 0;
++} // namespace
++
++extern "C" void wa_aec_start(int fs, int delay_ms)
++{
 +	wa_aec_stop();
-+	if (fs != 16000 && fs != 8000) return;
-+	pthread_mutex_lock(&g_aec_mx);
-+	g_aecm = WebRtcAecm_Create();
-+	if (g_aecm) {
-+		if (WebRtcAecm_Init(g_aecm, fs) != 0) {
-+			WebRtcAecm_Free(g_aecm);
-+			g_aecm = NULL;
-+		} else {
-+			AecmConfig cfg;
-+			cfg.cngMode = AecmTrue; // comfort noise in the cancelled gaps
-+			cfg.echoMode = 3;       // 0..4; 3 = default aggressiveness, 4 = most
-+			WebRtcAecm_set_config(g_aecm, cfg);
-+			g_delay_ms = delay_ms;
-+		}
-+	}
-+	pthread_mutex_unlock(&g_aec_mx);
++	if (fs != 16000 && fs != 8000)
++		return;
++	std::lock_guard<std::mutex> lock(g_mx);
++	rtc::scoped_refptr<webrtc::AudioProcessing> apm = webrtc::AudioProcessingBuilder().Create();
++	if (!apm)
++		return;
++	webrtc::AudioProcessing::Config cfg;
++	cfg.echo_canceller.enabled = true;
++	cfg.echo_canceller.mobile_mode = true; // AECM, speakerphone routing (echoMode 3)
++	apm->ApplyConfig(cfg);
++	g_apm = apm;
++	g_rate = fs;
++	g_delay_ms = delay_ms;
 +}
 +
-+void wa_aec_farend(const short *f, int n) {
-+	pthread_mutex_lock(&g_aec_mx);
-+	if (g_aecm) {
-+		int off = 0;
-+		while (off + AEC_BLK <= n) {
-+			WebRtcAecm_BufferFarend(g_aecm, f + off, AEC_BLK);
-+			off += AEC_BLK;
-+		}
-+	}
-+	pthread_mutex_unlock(&g_aec_mx);
++extern "C" void wa_aec_farend(const short *f, int n)
++{
++	std::lock_guard<std::mutex> lock(g_mx);
++	if (!g_apm)
++		return;
++	const webrtc::StreamConfig sc(g_rate, 1);
++	const int blk = g_rate * kBlockMs / 1000;
++	short scratch[480];
++	for (int off = 0; off + blk <= n; off += blk)
++		g_apm->ProcessReverseStream(f + off, sc, sc, scratch);
 +}
 +
-+void wa_aec_process(short *mic, int n) {
-+	pthread_mutex_lock(&g_aec_mx);
-+	if (g_aecm) {
-+		short out[AEC_BLK];
-+		int off = 0;
-+		while (off + AEC_BLK <= n) {
-+			if (WebRtcAecm_Process(g_aecm, mic + off, NULL, out, AEC_BLK, (short)g_delay_ms) == 0)
-+				memcpy(mic + off, out, AEC_BLK * sizeof(short));
-+			off += AEC_BLK;
-+		}
++extern "C" void wa_aec_process(short *mic, int n)
++{
++	std::lock_guard<std::mutex> lock(g_mx);
++	if (!g_apm)
++		return;
++	const webrtc::StreamConfig sc(g_rate, 1);
++	const int blk = g_rate * kBlockMs / 1000;
++	for (int off = 0; off + blk <= n; off += blk) {
++		g_apm->set_stream_delay_ms(g_delay_ms);
++		g_apm->ProcessStream(mic + off, sc, sc, mic + off);
 +	}
-+	pthread_mutex_unlock(&g_aec_mx);
 +}
 +
-+void wa_aec_stop(void) {
-+	pthread_mutex_lock(&g_aec_mx);
-+	if (g_aecm) {
-+		WebRtcAecm_Free(g_aecm);
-+		g_aecm = NULL;
-+	}
-+	pthread_mutex_unlock(&g_aec_mx);
++extern "C" void wa_aec_stop(void)
++{
++	std::lock_guard<std::mutex> lock(g_mx);
++	g_apm = nullptr;
 +}
 diff --git a/glue/aec.h b/glue/aec.h
 new file mode 100644
-index 0000000..862583f
+index 0000000..6eccb33
 --- /dev/null
 +++ b/glue/aec.h
 @@ -0,0 +1,13 @@
@@ -927,9 +1537,9 @@ index 0000000..862583f
 +// webOS WhatsApp calling: acoustic echo cancellation for the speakerphone. The TouchPad has no
 +// earpiece, so a call runs on the loudspeaker; the mic then re-captures the far-end voice coming out
 +// of the speaker and we send it back, so the peer hears themselves. WebRTC's mobile AEC (AECM, fixed
-+// point) removes it: it needs the far-end (what we PLAY) as a reference, buffered before we process
-+// the matching near-end (mic) frame. farend() and process() run on different threads (playback vs
-+// capture) so the wrapper serializes the AECM handle internally.
++// point, through webrtc-audio-processing's AudioProcessing) removes it: it needs the far-end (what
++// we PLAY) as a reference, buffered before we process the matching near-end (mic) frame. farend()
++// and process() run on different threads (playback vs capture); see aec.cc for the locking.
 +void wa_aec_start(int fs, int delay_ms); // create + init AECM for the capture rate; delay_ms = render->capture echo delay hint
 +void wa_aec_farend(const short *f, int n); // buffer the played loudspeaker reference (int16, n a multiple of 160)
 +void wa_aec_process(short *mic, int n);    // cancel the echo from the mic IN PLACE
@@ -937,10 +1547,10 @@ index 0000000..862583f
 +#endif
 diff --git a/glue/call.c b/glue/call.c
 new file mode 100644
-index 0000000..50e447f
+index 0000000..4a4940b
 --- /dev/null
 +++ b/glue/call.c
-@@ -0,0 +1,1037 @@
+@@ -0,0 +1,1104 @@
 +// call.c — luna-service2 call service for WhatsApp calling, hosted INSIDE the
 +// messaging plugin (imlibpurpletransport) instead of a separate wacallm process.
 +//
@@ -954,9 +1564,11 @@ index 0000000..50e447f
 +//
 +// Go -> C callbacks (called from call.go):
 +//   gowhatsapp_call_on_state(json)      -> push to callStateQuery subscribers (mainloop-safe)
-+//   gowhatsapp_call_on_speaker(pcm, n)  -> received PCM -> ALSA playback
++//   gowhatsapp_call_on_speaker(pcm, n)  -> received PCM -> playout ring -> ALSA playback thread
 +//   gowhatsapp_call_audio_active(on)    -> open/close the ALSA playback+capture path
 +//   gowhatsapp_call_read_mic(out, n)    -> Go PULLS mic PCM from the C ring
++//   gowhatsapp_call_video_active(on)    -> the call carries video (engine session, see below)
++//   gowhatsapp_call_request_keyframe()  -> the peer wants an IDR from our encoder
 +// C -> Go exports (from libwhatsmeow.h): gowhatsapp_go_call_dial/_answer/_hangup/_hangup_all
 +
 +#include <glib.h>
@@ -966,6 +1578,8 @@ index 0000000..50e447f
 +#include <unistd.h>
 +#include <stdio.h>
 +#include <stdarg.h>
++#include <stdatomic.h>
++#include <errno.h>
 +#include <stdlib.h>
 +#include <string.h>
 +#include <math.h>
@@ -977,6 +1591,8 @@ index 0000000..50e447f
 +#endif
 +#include "denoise.h"
 +#include "aec.h"
++#include "playout.h"
++#include "call.h"
 +
 +// Acoustic-echo-cancellation delay hint (render -> mic echo). MEASURED on-device by cross-correlating
 +// the played far-end against the raw mic echo (AEC_CALIB build + scratchpad/echo_delay.py): 179ms,
@@ -985,10 +1601,10 @@ index 0000000..50e447f
 +#define WA_AEC_DELAY_MS 179
 +
 +#include "libwhatsmeow.h" // go-generated: gowhatsapp_go_call_dial/_answer/_hangup/_hangup_all
-+#include "voipkit.h"     // native SkypeKit RTP bridge (see WHATSAPP_VIDEO_STATUS.md "hook it
-+                          // up properly" plan) — capture/playback socket threads
++#include "voipkit.h"            // video bridge: access units to and from luneos-rtc-engine
++#include "voipkit_rtcengine.h"  // its socket set-up
 +
-+// LuneOS has one bus, so one handle serves the Phone app, audiod and mediad alike.
++// LuneOS has one bus, so one handle serves the Phone app, audiod and the rtc engine alike.
 +static LSHandle *g_sh = NULL;
 +static int g_registered = 0;
 +
@@ -1022,6 +1638,21 @@ index 0000000..50e447f
 +	return strncmp(c, "true", 4) == 0;
 +}
 +
++// A non-negative integer value, or -1 when the key is missing or not a number.
++static long json_uint(const char *json, const char *key) {
++	char pat[64];
++	snprintf(pat, sizeof pat, "\"%s\"", key);
++	const char *k = strstr(json, pat);
++	if (!k) return -1;
++	const char *c = strchr(k + strlen(pat), ':');
++	if (!c) return -1;
++	for (c++; *c == ' ' || *c == '\t'; c++) {}
++	if (*c < '0' || *c > '9') return -1;
++	long v = 0;
++	for (; *c >= '0' && *c <= '9' && v < 100000; c++) v = v * 10 + (*c - '0');
++	return v;
++}
++
 +static void reply(LSHandle *sh, LSMessage *msg, const char *payload) {
 +	LSError e;
 +	LSErrorInit(&e);
@@ -1031,195 +1662,312 @@ index 0000000..50e447f
 +	}
 +}
 +
-+/* ---------- clonk: the real-time video-call session backing "videoURI" ----------
-+ * See messaging/whatsapp/calling/WHATSAPP_VIDEO_STATUS.md (Parts 1-18) for the full
-+ * reverse-engineering writeup this is built against: the LS2 call sequence, the native
-+ * firmware caps-negotiation bug and its argument-shift workaround (Part 16), the SkypeKit
-+ * RTP socket ordering dependency (Part 17), and the wire format (Part 18) that glue/voipkit.cpp
-+ * implements. Session *creation* was always confirmed working; this deepens clonk_open/
-+ * clonk_close to actually bring up capture+playback and the voipkit.cpp socket bridge. */
-+static char g_clonk_uri[256] = {0};
-+// Set synchronously the moment clonk_open() issues its LSCallOneReply, cleared once the
-+// reply lands (clonk_open_reply, success or failure) or clonk_close() tears the session
-+// down. g_clonk_uri alone isn't enough to guard against a second clonk_open() call: it only
-+// gets populated inside the ASYNC reply, so two calls close together (confirmed live: the
-+// dial path's OnReady-triggered open and the incoming-video OnVideoState-triggered open
-+// firing near-simultaneously) can both see g_clonk_uri still empty and both fire a real
-+// LSCallOneReply -- observed live as the SAME session opened/started 3 times over, each
-+// with its own videoCaptureStart/videoPlayerStart. Whether or not mediaserver's own
-+// pipeline construction is safe against 3 overlapping start calls for one session was never
-+// verified and isn't worth relying on.
-+static volatile int g_clonk_opening = 0;
-+static char *g_last_callstate_json = NULL; // most recent raw JSON from Go, pre-URI-injection
-+// Keyframe-restart cooldown clock (see KEYFRAME_COOLDOWN_US / gowhatsapp_call_request_keyframe
-+// below). Declared here, not next to its main use, so clonk_video_capture_start_reply can seed
-+// it at call start -- that function runs earlier in this file than the keyframe-restart code.
-+static gint64 g_last_keyframe_restart_us = 0;
++/* ---------- video: a luneos-rtc-engine session behind the call's video ----------
++ * The engine (org.webosports.rtcengine; luneos-rtc-engine docs/API.md) decodes the peer's
++ * H.264 and publishes the frames on a gst-shm socket, which the Phone app renders with
++ * LuneOS.Foreign's RtcVideoFactory. On a device with a usable camera it also encodes ours.
++ * glue/voipkit_rtcengine.c moves the access units over the engine's sockets.
++ *
++ * The session runs while the call carries video (Go: gowhatsapp_call_video_active) AND the
++ * user asked to see it (the Phone app's changeMedia {incomingVideo:true} -- legacy webOS's
++ * "Switch to video?" accept). Until then nothing is decoded and audiod keeps treating the
++ * call as a voice call.
++ *
++ * Everything here runs on the GLib mainloop: LS2 calls are not made from Go's threads.
++ * Replies of a session that was closed in the meantime are recognised by g_vid_gen. */
++#define RTC_SERVICE "luna://org.webosports.rtcengine/"
++// Device-side paths the engine binds; its own defaults are in /tmp as well.
++#define RTC_RX_SOCKET "/tmp/wa-rtc-rx.sock"
++#define RTC_TX_SOCKET "/tmp/wa-rtc-tx.sock"
++#define RTC_SHM_PATH "/tmp/wa-rtc-video"
++// Our own camera's picture for the Phone app's inset, while we send (the engine decodes
++// what it encodes); a quarter of the sent frame.
++#define RTC_PREVIEW_PATH "/tmp/wa-rtc-preview"
++#define RTC_PREVIEW_W 320
++#define RTC_PREVIEW_H 240
++// The frame size the engine renders to (and encodes at, with a camera). Receive-only is
++// portrait, as phones send; the engine letterboxes other shapes.
++#define RTC_RX_ONLY_W 480
++#define RTC_RX_ONLY_H 640
++#define RTC_TX_W 640
++#define RTC_TX_H 480
++// 500 kbit/s looked heavily compressed on the far side at 640x480 (sargo, 3 Nov).
++#define RTC_TX_BITRATE 1200000
++// Peer keyframe requests (PLI/FIR) are passed to the encoder at most this often. Every IDR
++// costs the frames after it their share of the bitrate; at 500 ms a lossy link kept the
++// encoder making one every two seconds.
++#define RTC_KEYFRAME_MIN_INTERVAL_US (1000 * 1000)
++// Our camera's picture, in the quarter turns WhatsApp's <video device_orientation> carries:
++// the phone is held upright, which callers announce as 1, and the receiver turns the
++// picture by it.
++#define RTC_TX_ORIENTATION 1
 +
-+// Durable clonk-session-lifecycle log: every open/close/start/stop and every
-+// gowhatsapp_call_video_active() flip, timestamped, appended to a plain file under
-+// /media/internal. Needed because the fprintf(stderr,...) trail throughout this file only
-+// survives while something is actively tailing imwrap.sh's stdout live -- reconstructing
-+// what happened on a call after the fact (e.g. whether OnVideoState flapped and tore the
-+// clonk session down/up repeatedly, moments after the incoming-video "black screen"/
-+// instant-teardown symptom was captured) was otherwise impossible.
-+static void clonk_diag_log(const char *fmt, ...) {
-+	FILE *f = fopen("/media/internal/wacall_clonk.log", "a");
-+	if (!f) return;
-+	fprintf(f, "[%lld] ", (long long)(g_get_real_time() / 1000));
-+	va_list ap;
-+	va_start(ap, fmt);
-+	vfprintf(f, fmt, ap);
-+	va_end(ap);
-+	fprintf(f, "\n");
-+	fclose(f);
++// Which way the phone is held, from the Phone app's changeMedia {deviceOrientation}: quarter
++// turns in the shell's convention (0 top up, 1 left edge up, 2 upside down, 3 right edge up).
++static int g_device_turns;
++
++typedef enum { VID_IDLE, VID_PROBING, VID_STARTING, VID_RUNNING } vid_state_t;
++static vid_state_t g_vid_state = VID_IDLE;
++static int g_vid_call;      // the call carries video (Go)
++static int g_vid_view;      // the user asked to see it (Phone app)
++static int g_vid_failed;    // start failed; no retry until the wish changes
++static int g_vid_retried;   // one stop-and-retry after "already running"
++static int g_vid_tx;        // the running session encodes our camera
++static int g_vid_camera;    // the camera it opens: the front one where there are two
++static int g_vid_w, g_vid_h;
++
++// The turn the peer needs for our picture, as the phone is held now. The camera turns with the
++// phone, so its picture needs the turn for the phone held upright plus the phone's own turn
++// (sargo, 10 Nov: the other way round arrived upside down held sideways); the front camera
++// faces the user, so for the back one the phone's turn counts the other way.
++static int tx_orientation(void) {
++	int turns = g_vid_camera == 1 ? g_device_turns : -g_device_turns;
++	return (RTC_TX_ORIENTATION + turns + 4) & 3;
 +}
++static unsigned g_vid_gen;  // bumped on every close
++static gint64 g_last_keyframe_us;
++static char *g_last_callstate_json = NULL; // most recent raw JSON from Go
 +
-+static bool clonk_video_capture_start_reply(LSHandle *sh, LSMessage *msg, void *ctx);
-+static bool clonk_video_player_start_reply(LSHandle *sh, LSMessage *msg, void *ctx);
-+// TEST-ONLY harness (see its definition further down, after clonk_video_player_start_reply,
-+// for the full explanation): lets a debug LS2 call drive the clonk pipeline + inject a real
-+// captured H.264 access unit WITHOUT a live WhatsApp call, to iterate on the native
-+// clonk_video_play render bug without needing Android to answer each time.
-+static volatile int g_test_inject_mode;
++// TEST-ONLY harness (testInjectVideo, below): feeds a recorded WhatsApp stream to the engine
++// without a call.
++static int g_test_inject_mode;
 +static int g_test_inject_delay_ms;
 +static int g_test_inject_interval_ms;
 +static int g_test_inject_use_real_stream;
 +static gboolean test_inject_start_tick(gpointer data);
-+static void clonk_open(void);
-+static void clonk_close(void);
-+// Forward declarations: g_audio_on/audiod_status_idle are defined further down (near the
-+// rest of the ALSA/audiod bridge) but clonk_video_player_start_reply above needs to
-+// re-assert the audiod phone scenario once clonk's video pipeline is up.
++// Defined further down, with the rest of the ALSA/audiod bridge.
 +static gboolean audiod_status_idle(gpointer d);
-+static volatile int g_audio_on;
++static _Atomic int g_audio_on;
 +
-+// clonk_uri_call — fires "<g_clonk_uri><method>" with the given JSON payload. Every clonk
-+// action method needs the {"args":[...]} wrapper even for zero-arg calls (see
-+// LunaInterface::getArguments's dom["args"] requirement, WHATSAPP_VIDEO_STATUS.md Part 8) --
-+// callers always pass a literal "{\"args\":[...]}" string, never "{}".
-+static void clonk_uri_call_ctx(const char *method, const char *payload, LSFilterFunc cb,
-+                                void *ctx) {
-+	if (!g_sh || !g_clonk_uri[0]) return;
-+	char uri[320];
-+	snprintf(uri, sizeof uri, "%s%s", g_clonk_uri, method);
++static void video_reconcile(void);
++static void publish_callstate_locked(const char *json);
++
++static bool rtc_log_reply(LSHandle *sh, LSMessage *msg, void *ctx) {
++	(void)sh;
++	fprintf(stderr, "wa-video: rtcengine %s: %s\n", (const char *)ctx, LSMessageGetPayload(msg));
++	return true;
++}
++
++// ctx is passed to cb; with cb NULL the reply is logged and ctx must be the method name.
++static gboolean rtc_call(const char *method, const char *payload, LSFilterFunc cb, void *ctx) {
++	char uri[96];
++	LSError e;
++	LSMessageToken t;
++	if (!g_sh) return FALSE;
++	snprintf(uri, sizeof uri, "%s%s", RTC_SERVICE, method);
++	LSErrorInit(&e);
++	if (!LSCallOneReply(g_sh, uri, payload, cb ? cb : rtc_log_reply, cb ? ctx : (void *)method,
++	                    &t, &e)) {
++		fprintf(stderr, "wa-video: rtcengine %s call failed: %s\n", method, e.message);
++		LSErrorFree(&e);
++		return FALSE;
++	}
++	return TRUE;
++}
++
++static int video_shown(void) {
++	return g_vid_state == VID_RUNNING;
++}
++
++// Republish the call state (videoURI changed) and tell audiod (a video call leaves the
++// earpiece for the speaker -- audiod's own policy, unless a headset or BT is connected).
++static void video_changed(void) {
++	if (g_last_callstate_json) publish_callstate_locked(g_last_callstate_json);
++	if (g_audio_on) audiod_status_idle(GINT_TO_POINTER(1));
++}
++
++static void test_inject_begin(void);
++static void video_start_session(int tx);
++
++static bool rtc_start_reply(LSHandle *sh, LSMessage *msg, void *ctx) {
++	(void)sh;
++	const char *p = LSMessageGetPayload(msg);
++	gboolean ok = p && json_true(p, "returnValue");
++	char err[128] = "", rx[108] = RTC_RX_SOCKET, tx[108] = RTC_TX_SOCKET;
++	if (GPOINTER_TO_UINT(ctx) != g_vid_gen || g_vid_state != VID_STARTING) {
++		// Closed while starting: stop what this start brought up.
++		if (ok) rtc_call("stop", "{}", NULL, NULL);
++		return true;
++	}
++	if (!ok) {
++		if (p) json_str(p, "errorText", err, sizeof err);
++		g_vid_state = VID_IDLE;
++		if (!g_vid_retried && strcmp(err, "already running") == 0) {
++			// A session we lost track of (the service restarted during a call): stop it and
++			// start ours.
++			fprintf(stderr, "wa-video: engine already running, stopping it and retrying\n");
++			g_vid_retried = 1;
++			rtc_call("stop", "{}", NULL, NULL);
++			video_reconcile();
++			return true;
++		}
++		if (g_vid_tx && strcmp(err, "tx start failed") == 0) {
++			// No usable camera or encoder after all (capabilities counts cameras, not
++			// encoders): still show the peer.
++			fprintf(stderr, "wa-video: engine cannot send video, receiving only\n");
++			video_start_session(0);
++			return true;
++		}
++		fprintf(stderr, "wa-video: engine start failed: %s\n", err[0] ? err : (p ? p : "?"));
++		g_vid_failed = 1;
++		return true;
++	}
++	json_str(p, "rxSocket", rx, sizeof rx);
++	json_str(p, "txSocket", tx, sizeof tx);
++	if (!voipkit_rtcengine_set_sockets(g_vid_tx ? tx : NULL, rx)) {
++		fprintf(stderr, "wa-video: unusable socket paths in %s\n", p);
++		rtc_call("stop", "{}", NULL, NULL);
++		g_vid_state = VID_IDLE;
++		g_vid_failed = 1;
++		return true;
++	}
++	voipkit_video_start();
++	g_vid_state = VID_RUNNING;
++	fprintf(stderr, "wa-video: engine running (%dx%d, tx %s)\n", g_vid_w, g_vid_h,
++	        g_vid_tx ? "on" : "off");
++	// The renderer joins mid-stream: ask the peer for an IDR to start decoding from.
++	gowhatsapp_go_call_request_peer_keyframe();
++	if (g_vid_tx) gowhatsapp_go_call_set_video_orientation(tx_orientation());
++	video_changed();
++	if (g_test_inject_mode) test_inject_begin();
++	return true;
++}
++
++static void video_start_session(int tx) {
++	char payload[512];
++	g_vid_tx = tx;
++	g_vid_w = tx ? RTC_TX_W : RTC_RX_ONLY_W;
++	g_vid_h = tx ? RTC_TX_H : RTC_RX_ONLY_H;
++	snprintf(payload, sizeof payload,
++	         "{\"rxSocket\":\"%s\",\"txSocket\":\"%s\",\"rxEnabled\":true,\"txEnabled\":%s,"
++	         "\"shmPath\":\"%s\",\"width\":%d,\"height\":%d,\"bitrate\":%d,\"camera\":%d,"
++	         "\"previewShmPath\":\"%s\",\"previewWidth\":%d,\"previewHeight\":%d}",
++	         RTC_RX_SOCKET, RTC_TX_SOCKET, tx ? "true" : "false", RTC_SHM_PATH, g_vid_w,
++	         g_vid_h, RTC_TX_BITRATE, g_vid_camera, tx ? RTC_PREVIEW_PATH : "", RTC_PREVIEW_W,
++	         RTC_PREVIEW_H);
++	g_vid_state = VID_STARTING;
++	if (!rtc_call("start", payload, rtc_start_reply, GUINT_TO_POINTER(g_vid_gen))) {
++		g_vid_state = VID_IDLE;
++		g_vid_failed = 1;
++	}
++}
++
++static bool rtc_caps_reply(LSHandle *sh, LSMessage *msg, void *ctx) {
++	(void)sh;
++	const char *p = LSMessageGetPayload(msg);
++	if (GPOINTER_TO_UINT(ctx) != g_vid_gen || g_vid_state != VID_PROBING) return true;
++	if (!p || !json_true(p, "returnValue")) {
++		fprintf(stderr, "wa-video: engine capabilities failed: %s\n", p ? p : "?");
++		g_vid_state = VID_IDLE;
++		g_vid_failed = 1;
++		return true;
++	}
++	// videoCallCapable honours the device's own policy (deviceinfo_video_call): a device
++	// without a usable camera still shows the peer, it just sends no video.
++	// A video call shows the user's face: with two cameras take the front one. Android's
++	// HAL numbers the main back camera 0 and the front camera 1, and the engine's droid
++	// backend passes the index to droidcamsrc as that HAL id.
++	g_vid_camera = json_uint(p, "cameraCount") >= 2 ? 1 : 0;
++	video_start_session(json_true(p, "videoCallCapable"));
++	return true;
++}
++
++static void video_close(void) {
++	vid_state_t was = g_vid_state;
++	g_vid_gen++;
++	g_vid_state = VID_IDLE;
++	if (was == VID_IDLE) return;
++	voipkit_video_stop();
++	// STARTING: rtc_start_reply sees the old generation and stops what it started.
++	if (was == VID_RUNNING) rtc_call("stop", "{}", NULL, NULL);
++	fprintf(stderr, "wa-video: engine session closed\n");
++	video_changed();
++}
++
++static void video_reconcile(void) {
++	int want = g_vid_call && g_vid_view;
++	if (!want) {
++		g_vid_failed = 0;
++		g_vid_retried = 0;
++		video_close();
++		return;
++	}
++	if (g_vid_state != VID_IDLE || g_vid_failed) return;
++	g_vid_state = VID_PROBING;
++	if (!rtc_call("capabilities", "{}", rtc_caps_reply, GUINT_TO_POINTER(g_vid_gen))) {
++		g_vid_state = VID_IDLE;
++		g_vid_failed = 1;
++	}
++}
++
++static gboolean video_active_idle(gpointer d) {
++	g_vid_call = GPOINTER_TO_INT(d);
++	if (!g_vid_call && !g_test_inject_mode) g_vid_view = 0; // a new call asks again
++	video_reconcile();
++	return G_SOURCE_REMOVE;
++}
++
++// Called from Go (a goroutine) whenever the call's overall video state flips (see
++// gowhatsapp_go_call_changemedia, OnVideoState and OnEnd in call.go).
++void gowhatsapp_call_video_active(int on) {
++	g_idle_add(video_active_idle, GINT_TO_POINTER(on ? 1 : 0));
++}
++
++static gboolean keyframe_idle(gpointer d) {
++	(void)d;
++	gint64 now = g_get_monotonic_time();
++	if (g_vid_state != VID_RUNNING || !g_vid_tx) return G_SOURCE_REMOVE;
++	if (now - g_last_keyframe_us < RTC_KEYFRAME_MIN_INTERVAL_US) return G_SOURCE_REMOVE;
++	g_last_keyframe_us = now;
++	rtc_call("requestKeyframe", "{}", NULL, NULL);
++	return G_SOURCE_REMOVE;
++}
++
++// Called from Go (Call.OnVideoKeyframeRequest) when the peer sends PLI/FIR feedback: our
++// encoder should make its next access unit an IDR.
++void gowhatsapp_call_request_keyframe(void) {
++	g_idle_add(keyframe_idle, NULL);
++}
++
++// Fills Go's "videoURI":"" placeholder with the engine's shm socket and frame size while a
++// session runs. Caller g_free()s the result.
++static char *inject_video_uri(const char *json) {
++	static const char needle[] = "\"videoURI\":\"\"";
++	const char *pos = strstr(json, needle);
++	if (!pos || !video_shown()) return g_strdup(json);
++	// While we send, our own picture too: turned like the sent one, mirrored for the front
++	// camera as a mirror shows the user.
++	char preview[192] = "";
++	if (g_vid_tx)
++		snprintf(preview, sizeof preview,
++		         ",\"videoPreviewURI\":\"%s\",\"videoPreviewWidth\":%d,\"videoPreviewHeight\":%d,"
++		         "\"videoPreviewOrientation\":%d,\"videoPreviewMirrored\":%s",
++		         RTC_PREVIEW_PATH, RTC_PREVIEW_W, RTC_PREVIEW_H, RTC_TX_ORIENTATION,
++		         g_vid_camera == 1 ? "true" : "false");
++	return g_strdup_printf("%.*s\"videoURI\":\"%s\",\"videoWidth\":%d,\"videoHeight\":%d%s%s",
++	                       (int)(pos - json), json, RTC_SHM_PATH, g_vid_w, g_vid_h, preview,
++	                       pos + sizeof(needle) - 1);
++}
++
++static void publish_callstate_locked(const char *json) {
++	char *out = inject_video_uri(json);
 +	LSError e;
 +	LSErrorInit(&e);
-+	LSMessageToken t;
-+	if (!LSCallOneReply(g_sh, uri, payload, cb, ctx, &t, &e)) {
-+		fprintf(stderr, "wa-call: clonk %s call failed: %s\n", method, e.message);
++	if (g_sh && !LSSubscriptionReply(g_sh, "callState", out, &e))
 +		LSErrorFree(&e);
-+	}
-+}
-+static void clonk_uri_call(const char *method, const char *payload, LSFilterFunc cb) {
-+	clonk_uri_call_ctx(method, payload, cb, NULL);
++	g_free(out);
 +}
 +
-+// videoCaptureStart args are (w, h, fps, bitrate) on the wire, but ClonkPipeline::
-+// setCamCapsFilter() reads the *wrong* VideoSettings offsets when building camsrc's caps
-+// filter (+4/+8 instead of +0/+4) -- a real, shipped firmware bug (WHATSAPP_VIDEO_STATUS.md
-+// Part 16). Since VideoSettings is otherwise a plain unshifted copy of these same arguments,
-+// putting our intended width in the h slot and our intended height in the fps slot lands the
-+// CORRECT width/height in the actual applied caps once that bug reads them one field over.
-+// Confirmed live: camsrc reaches PLAYING with zero GStreamer errors using exactly this shape.
-+// Fires videoPlayerStart on the mainloop, once, a moment after videoCaptureStart's LS2
-+// reply arrived. See clonk_video_capture_start_reply's comment for why this delay exists.
-+static gboolean fire_video_player_start(gpointer data) {
-+	(void)data;
-+	clonk_diag_log("fire_video_player_start: issuing videoPlayerStart");
-+	clonk_uri_call("videoPlayerStart", "{\"args\":[320,240]}", clonk_video_player_start_reply);
-+	return FALSE; // one-shot
-+}
++// ---------- TEST-ONLY: feed recorded video to the engine without a call ----------
++//   luna-send -n 1 luna://com.palm.whatsapp.call/testInjectVideo '{"realStream":"1"}'
++//   luna-send -n 1 luna://com.palm.whatsapp.call/testStopInjectVideo '{}'
++// realStream "1" plays the 240 access units of test_stream_data.h (a real WhatsApp call,
++// with its timing); otherwise TEST_IDR_FRAME repeats every intervalMs (default 200).
++// delayMs waits that long after the engine is up before the first unit. Refused during a
++// call.
 +
-+static bool clonk_video_capture_start_reply(LSHandle *sh, LSMessage *msg, void *ctx) {
-+	(void)sh; (void)ctx;
-+	fprintf(stderr, "wa-call: clonk videoCaptureStart: %s\n", LSMessageGetPayload(msg));
-+	clonk_diag_log("clonk_video_capture_start_reply: %s", LSMessageGetPayload(msg));
-+	// Thread A (capture->peer) must be bound+listening before videoPlayerStart triggers
-+	// mediaserver's RunVideoHost() -- see WHATSAPP_VIDEO_STATUS.md Part 17 and skypekit.h.
-+	voipkit_video_start();
-+	// PREVIOUSLY just a blind 400ms g_timeout_add before firing videoPlayerStart, on the theory
-+	// that the "resolution not set on capsfilter" WARN was benign and only needed the capture
-+	// side's own state-change handling a moment to finish. Disproven by a real --gst-debug=6
-+	// capture (GST_DEBUG_FILE, targeted at just the palmvideosink/basesink/GST_PADS/clonk
-+	// categories to keep volume sane): the playback pipeline's palmvideosink genuinely FAILS its
-+	// own READY->PAUSED state change (`PmMediaGstVideoSinkLib.c:621 "State change of parent
-+	// element not a success"`) within ~100ms of entering PAUSED, and the whole clonk_video_play
-+	// bin gets torn down to NULL within ~300ms of being built -- every single time, including on
-+	// the very first videoPlayerStart of a call, with no restart/keyframe cycle involved at all.
-+	// clonkvhsrc's own gst_skype_video_src_change_state fires the same WARN in the same window.
-+	// Local camera preview (palmvideosink0/2/4, no network dependency) never fails this way; only
-+	// the peer-video playback sink (which needs data flowing over the SkypeKit socket) does --
-+	// pointing at Thread B specifically, not a fixed-delay-vs-capture-side race. Thread B must
-+	// wait for Thread A to already be listening, then complete its OWN connect-retry loop (up to
-+	// 500ms per attempt) before mediaserver's clonkvhsrc has anything to actually read -- a fixed
-+	// 400ms delay could not reliably outlast that. Block here for a real "Thread B connected"
-+	// signal instead of guessing a delay (see voipkit_video_wait_thread_b's own comment).
-+	if (!voipkit_video_wait_thread_b(3000)) {
-+		fprintf(stderr, "wa-call: skypekit thread B did not connect within 3s, "
-+		                "firing videoPlayerStart anyway\n");
-+	}
-+	fire_video_player_start(NULL);
-+	// Seed the keyframe-restart cooldown clock here, at call start, instead of leaving it at
-+	// its zero-value default. Without this, the FIRST-ever gowhatsapp_call_request_keyframe()
-+	// call always fires immediately regardless of KEYFRAME_COOLDOWN_US (now - 0 always exceeds
-+	// any real cooldown), tearing down this freshly-built playback pipeline before it has any
-+	// real chance to receive/decode/preroll a frame. Confirmed live: a real capture showed the
-+	// H.264 decoder reaching PAUSED_TO_PLAYING, then the whole pipeline getting flushed only
-+	// ~460ms later -- an early PLI from the peer (arriving within the first couple seconds,
-+	// before it has ever decoded anything from us) killing the pipeline almost as soon as it's
-+	// built, well before the 25s cooldown between LATER restarts ever gets a chance to help.
-+	g_last_keyframe_restart_us = g_get_monotonic_time();
-+	return true;
-+}
-+static bool clonk_video_player_start_reply(LSHandle *sh, LSMessage *msg, void *ctx) {
-+	(void)sh; (void)ctx;
-+	fprintf(stderr, "wa-call: clonk videoPlayerStart: %s\n", LSMessageGetPayload(msg));
-+	clonk_diag_log("clonk_video_player_start_reply: %s", LSMessageGetPayload(msg));
-+	// NOTE: a videoPlayerStop+videoPlayerStart retry workaround was tried here (theorized
-+	// from ClonkPipeline::initializeVPlayPipeline's "resolution not set on capsfilter"
-+	// ordering bug) but was never actually confirmed against a peer that was sending real
-+	// video, and reintroducing the pipeline teardown mid-call is a plausible way to disrupt
-+	// the skypekit socket bridge's own session state. Reverted to the simple single-call
-+	// flow, which is what was in place during the one confirmed live test where real
-+	// incoming H.264 RTP did arrive and reach skypekit's Thread B.
-+	//
-+	// Re-assert the audiod phone scenario here: video calls have never had working audio in
-+	// either direction, while audio-only calls (which never touch clonk at all) are fine.
-+	// mediaserver's clonk pipeline construction (confirmed via a --gst-debug=4 capture to
-+	// include its own skypeaudiosrc/skypeaudiosink elements, part of the same skypekit
-+	// plugin family as the video capture/sink) runs fully AFTER gowhatsapp_call_audio_active()
-+	// already set our own "voip"/"voipsource" ALSA route via audiod's phone scenario at call
-+	// start -- if clonk's own pipeline construction resets/steals that routing, re-sending the
-+	// SAME scenario call now (once clonk is fully up) should win it back without needing to
-+	// touch mediaserver/clonk itself.
-+	if (g_audio_on) g_idle_add(audiod_status_idle, GINT_TO_POINTER(1));
-+	if (g_test_inject_mode) {
-+		clonk_diag_log("TEST: videoPlayerStart replied, scheduling frame injection start in %dms", g_test_inject_delay_ms);
-+		g_timeout_add(g_test_inject_delay_ms > 0 ? g_test_inject_delay_ms : 1, test_inject_start_tick, NULL);
-+	}
-+	return true;
-+}
-+
-+// ---------- TEST-ONLY: inject a real captured H.264 IDR access unit into the clonk
-+// playback pipeline WITHOUT a real WhatsApp call, to iterate on the native
-+// clonk_video_play render bug (see WHATSAPP_VIDEO_STATUS.md and tonight's session) without
-+// needing Android to answer a call each time. Triggered via:
-+//   luna-send -n 1 palm://com.palm.whatsapp.call/testInjectVideo '{"delayMs":"500"}'
-+// delayMs (optional, default 0) is how long AFTER videoPlayerStart's own LS2 reply to wait
-+// before the first voipkit_video_receive_frame() call -- the whole point of this harness
-+// is to let that delay be swept without a rebuild, to test whether the native
-+// busMsg_STATE_CHANGED bug (tearing clonk_video_play down within ~1s of construction,
-+// before ClonkSession's internal "VPlay active" flag is set -- see tonight's disassembly)
-+// is sensitive to exactly when the first access unit lands relative to videoPlayerStart.
-+// ---------------------------------------------------------------------------------------
-+
-+// A real IDR access unit (SPS+PPS+IDR slice, Annex-B), captured verbatim from
-+// meowcaller_diag/video.jsonl during tonight's confirmed-working relay fix (call
-+// 8A9AF80DFD82D24BB4B13931E89DA473, nal_types "7,8,5" — a genuine keyframe, not the
-+// non-IDR "1"-only frames also present in that log). Repeating the SAME real IDR is fine
-+// for this test: the question is only whether the native FULL-type palmvideosink ever
-+// reaches PLAYING and renders anything at all, not video quality/continuity.
++// A real IDR access unit (SPS+PPS+IDR slice, Annex-B) from a WhatsApp call (NAL types
++// 7, 8, 5).
 +static const unsigned char TEST_IDR_FRAME[] = {
 +	0x00, 0x00, 0x00, 0x01, 0x67, 0x4d, 0x4c, 0x0c, 0x8c, 0x68, 0x14, 0x1d,
 +	0x79, 0xe0, 0x1e, 0x11, 0x08, 0xd4, 0x00, 0x00, 0x00, 0x01, 0x68, 0xee,
@@ -1269,61 +2017,65 @@ index 0000000..50e447f
 +	0x8b, 0x8e, 0x87, 0xac, 0x28, 0x9b, 0x48, 0x1b, 0xb5, 0xc1, 0x56, 0x8d,
 +	0x23, 0x4a, 0xf1, 0x67, 0x9d, 0x19, 0x29, 0x01, 0xe1, 0x70,
 +};
-+
-+// ---------- TEST-ONLY: real multi-frame stream injection (WHATSAPP_VIDEO_STATUS.md Part 27) ----
-+// The single-repeated-static-IDR harness above proved (Part 27, a 35s no-op-teardown capture)
-+// that clonk_vplay_h264dec NEVER outputs a single decoded frame given that unrealistic input --
-+// no advancing timestamps, no P-frames. This second harness cycles through a real, validated
-+// 240-frame captured stream (received.h264 + its per-frame size/timing metadata from a real
-+// meowcaller loopback test) to test whether the decoder can produce output at all given a
-+// realistic access unit sequence, without needing a real WhatsApp call to find out.
++// A real WhatsApp video call's first 240 access units with their timing (meowcaller
++// loopback capture).
 +#include "test_stream_data.h"
 +static int g_test_stream_frame_idx = 0;
-+// ---------- end real-stream data include ----------
 +
 +static gboolean test_inject_frame_tick(gpointer data) {
 +	(void)data;
++	if (!g_test_inject_mode) return G_SOURCE_REMOVE;
 +	voipkit_video_receive_frame(TEST_IDR_FRAME, sizeof(TEST_IDR_FRAME));
-+	return TRUE; // keep repeating every 200ms until the test session is closed
++	return G_SOURCE_CONTINUE;
 +}
 +
 +static gboolean test_inject_stream_tick(gpointer data) {
 +	(void)data;
-+	if (!g_test_inject_mode) return FALSE; // stopped
++	if (!g_test_inject_mode) return G_SOURCE_REMOVE;
 +	int idx = g_test_stream_frame_idx;
-+	const unsigned char *frame = TEST_STREAM_DATA + TEST_FRAME_OFFSETS[idx];
-+	unsigned int size = TEST_FRAME_SIZES[idx];
-+	voipkit_video_receive_frame(frame, size);
++	voipkit_video_receive_frame(TEST_STREAM_DATA + TEST_FRAME_OFFSETS[idx], TEST_FRAME_SIZES[idx]);
 +	g_test_stream_frame_idx = (idx + 1) % TEST_STREAM_NUM_FRAMES;
 +	unsigned int next_delta = TEST_FRAME_DELTA_MS[g_test_stream_frame_idx];
-+	if (next_delta < 1) next_delta = 1;
-+	g_timeout_add(next_delta, test_inject_stream_tick, NULL);
-+	return FALSE; // one-shot; reschedules itself with the next frame's real delta
++	g_timeout_add(next_delta ? next_delta : 1, test_inject_stream_tick, NULL);
++	return G_SOURCE_REMOVE; // rescheduled above with the next unit's own delay
 +}
 +
 +static gboolean test_inject_start_tick(gpointer data) {
 +	(void)data;
++	if (!g_test_inject_mode) return G_SOURCE_REMOVE;
 +	if (g_test_inject_use_real_stream) {
-+		fprintf(stderr, "wa-call: TEST starting REAL STREAM injection loop (%d frames, real timing)\n",
++		fprintf(stderr, "wa-video: TEST injecting the recorded stream (%d units)\n",
 +		        TEST_STREAM_NUM_FRAMES);
-+		clonk_diag_log("TEST: starting real-stream frame injection loop (%d frames)",
-+		               TEST_STREAM_NUM_FRAMES);
 +		g_test_stream_frame_idx = 0;
 +		test_inject_stream_tick(NULL);
-+		return FALSE;
++		return G_SOURCE_REMOVE;
 +	}
-+	fprintf(stderr, "wa-call: TEST starting frame injection loop (%zu bytes/frame, %dms interval)\n",
++	fprintf(stderr, "wa-video: TEST injecting one IDR (%zu bytes) every %d ms\n",
 +	        sizeof(TEST_IDR_FRAME), g_test_inject_interval_ms);
-+	clonk_diag_log("TEST: starting frame injection loop (%zu bytes/frame, %dms interval)",
-+	               sizeof(TEST_IDR_FRAME), g_test_inject_interval_ms);
 +	g_timeout_add(g_test_inject_interval_ms, test_inject_frame_tick, NULL);
-+	return FALSE; // one-shot (the repeat above is the real loop)
++	return G_SOURCE_REMOVE;
++}
++
++static void test_inject_begin(void) {
++	g_timeout_add(g_test_inject_delay_ms > 0 ? g_test_inject_delay_ms : 1, test_inject_start_tick,
++	              NULL);
 +}
 +
 +static bool m_test_inject_video(LSHandle *sh, LSMessage *msg, void *ctx) {
 +	(void)ctx;
 +	const char *p = LSMessageGetPayload(msg);
 +	char buf[32] = "";
++	if (g_test_inject_mode) {
++		/* Its ticks are still running; stop them before starting over. */
++		reply(sh, msg,
++		      "{\"returnValue\":false,\"errorText\":\"already injecting; call "
++		      "testStopInjectVideo first\"}");
++		return true;
++	}
++	if (g_audio_on || g_vid_call) {
++		reply(sh, msg, "{\"returnValue\":false,\"errorText\":\"a call is up\"}");
++		return true;
++	}
 +	g_test_inject_delay_ms = 0;
 +	g_test_inject_interval_ms = 200;
 +	g_test_inject_use_real_stream = 0;
@@ -1332,218 +2084,26 @@ index 0000000..50e447f
 +	if (p && json_str(p, "realStream", buf, sizeof buf)) g_test_inject_use_real_stream = atoi(buf);
 +	if (g_test_inject_interval_ms < 1) g_test_inject_interval_ms = 1;
 +	g_test_inject_mode = 1;
-+	fprintf(stderr, "wa-call: TEST testInjectVideo triggered, delayMs=%d intervalMs=%d realStream=%d\n",
++	g_vid_view = 1;
++	fprintf(stderr, "wa-video: TEST testInjectVideo delayMs=%d intervalMs=%d realStream=%d\n",
 +	        g_test_inject_delay_ms, g_test_inject_interval_ms, g_test_inject_use_real_stream);
-+	clonk_diag_log("TEST: testInjectVideo triggered, delayMs=%d intervalMs=%d realStream=%d",
-+	               g_test_inject_delay_ms, g_test_inject_interval_ms, g_test_inject_use_real_stream);
-+	clonk_open();
++	video_active_idle(GINT_TO_POINTER(1));
 +	reply(sh, msg, "{\"returnValue\":true}");
 +	return true;
 +}
 +
 +static bool m_test_stop_inject_video(LSHandle *sh, LSMessage *msg, void *ctx) {
 +	(void)ctx;
-+	fprintf(stderr, "wa-call: TEST testStopInjectVideo triggered\n");
-+	clonk_diag_log("TEST: testStopInjectVideo triggered");
-+	g_test_inject_mode = 0;
-+	clonk_close();
++	if (g_test_inject_mode) {
++		fprintf(stderr, "wa-video: TEST testStopInjectVideo\n");
++		g_test_inject_mode = 0;
++		g_vid_view = 0;
++		video_active_idle(GINT_TO_POINTER(0));
++	}
 +	reply(sh, msg, "{\"returnValue\":true}");
 +	return true;
 +}
 +// ---------- end TEST-ONLY harness ----------
-+
-+static bool clonk_keyframe_start_reply(LSHandle *sh, LSMessage *msg, void *ctx) {
-+	(void)sh; (void)ctx;
-+	fprintf(stderr, "wa-call: clonk keyframe-restart videoCaptureStart: %s\n", LSMessageGetPayload(msg));
-+	clonk_diag_log("clonk_keyframe_start_reply: %s", LSMessageGetPayload(msg));
-+	// PREVIOUSLY assumed (see clonk_keyframe_stop_reply's old comment) that videoCaptureStop
-+	// only tears down the capture pipeline, leaving playback untouched. Disproven live via a
-+	// real --gst-debug=4 capture of an actual call (GST_DEBUG_FILE, routed around the
-+	// per-session mediaserver child that the upstart job's own stdout redirect never
-+	// reached): the ENTIRE clonk_video_play bin -- palmvideosink1, video_decode_output_queue,
-+	// clonk_vplay_h264dec, clonkvhsrc -- gets removed and gst_element_finalize'd roughly a
-+	// second after the first videoPlayerStart, in lockstep with the first keyframe-restart
-+	// cycle a real peer PLI triggers early in the call. initializeVPlayPipeline never runs
-+	// again for the rest of the call. Since this handler previously only called
-+	// videoCaptureStart and never videoPlayerStart again, incoming video rendering died
-+	// permanently the moment the first real keyframe-restart happened -- exactly the reported
-+	// "incoming video flickers/doesn't display" symptom. Rebuild playback the same way the
-+	// first-time-open path does (clonk_video_capture_start_reply): give the capture side's own
-+	// state-change handling a moment to finish, then fire videoPlayerStart.
-+	//
-+	// Also mirror clonk_video_capture_start_reply's voipkit_video_start()/wait_thread_b() here.
-+	// Since videoCaptureStop/Start tears down and rebuilds mediaserver's WHOLE clonk session
-+	// (see above), the SkypeKit RTP sockets Thread A/B are bridging (/tmp/vidrtp_{to,from}_
-+	// skypekit_key) get replaced by a fresh pair too -- but voipkit_video_stop() in
-+	// clonk_keyframe_stop_reply already tore our OLD Thread A/B down, so this call is NOT a
-+	// no-op (g_running is false) and genuinely reconnects them to the NEW sockets. Without this,
-+	// Thread A/B stayed latched onto the now-dead old sockets, and Thread B's blocking native
-+	// send call (send_access_unit -> wr_call_lst) sat stuck for tens of seconds until some
-+	// underlying socket-level timeout eventually kicked it loose and its own reconnect loop
-+	// found the new listener -- exactly matching the observed "incoming video freezes for
-+	// ~30s, then recovers on its own" symptom on every keyframe-restart cycle after the first.
-+	voipkit_video_start();
-+	if (!voipkit_video_wait_thread_b(3000)) {
-+		fprintf(stderr, "wa-call: keyframe-restart: skypekit thread B did not reconnect within "
-+		                "3s, firing videoPlayerStart anyway\n");
-+	}
-+	g_timeout_add(400, fire_video_player_start, NULL);
-+	return true;
-+}
-+static bool clonk_keyframe_stop_reply(LSHandle *sh, LSMessage *msg, void *ctx) {
-+	(void)sh; (void)ctx;
-+	fprintf(stderr, "wa-call: clonk keyframe-restart videoCaptureStop: %s\n", LSMessageGetPayload(msg));
-+	clonk_diag_log("clonk_keyframe_stop_reply: %s", LSMessageGetPayload(msg));
-+	// Tear our own bridge threads down here, BEFORE requesting the new capture session -- see
-+	// clonk_keyframe_start_reply's comment for why they'd otherwise be left stuck on the old,
-+	// about-to-be-replaced RTP sockets.
-+	voipkit_video_stop();
-+	clonk_uri_call("videoCaptureStart", "{\"args\":[320,320,240,400000]}", clonk_keyframe_start_reply);
-+	return true;
-+}
-+
-+// Called from Go (Call.OnVideoKeyframeRequest) when the peer sends authenticated PLI/FIR
-+// feedback asking for a fresh keyframe. See the call.go comment for why this is a
-+// stop/restart rather than a direct request -- no LS2-exposed keyframe trigger exists.
-+//
-+// The stop/restart itself briefly interrupts the stream, which can make a struggling peer
-+// send ANOTHER PLI/FIR almost immediately -- a self-inflicted restart storm (confirmed live:
-+// several requests per second, each one killing/reopening capture, producing the "stalled
-+// after a few frames" symptom). Debounce: a restart already in flight, or one that completed
-+// within the last KEYFRAME_COOLDOWN_US, absorbs further requests instead of stacking more
-+// restarts on top - the fresh IDR from the most recent restart is still on its way regardless.
-+//
-+// Raised from 5s to 25s after a real --gst-debug=4 capture (GST_DEBUG_FILE, routed around the
-+// per-session mediaserver child) showed every restart cycle in every real call landing almost
-+// exactly 5-6s apart -- i.e. we were restarting the instant OUR OWN cooldown expired, not
-+// because the peer's actual PLI rate demanded it. Confirmed the real cost of this: each restart
-+// tears down BOTH pipelines the shared clonk session owns, not just capture (see
-+// clonk_keyframe_start_reply's comment) -- the local self-preview PIP re-renders almost
-+// instantly since it's fed straight from the camera, but the FULL-screen incoming-peer-video
-+// pipeline depends on network-delivered, decoded data and never got a long enough uninterrupted
-+// window to receive+decode+preroll a single frame before being torn down again for the next
-+// cycle -- confirmed via the sink's own preroll/render calls: the PIP sink rendered every
-+// cycle, the full-screen sink never once did, across an entire real call. A much longer cooldown
-+// gives it a real chance.
-+#define KEYFRAME_COOLDOWN_US (25000 * 1000)
-+void gowhatsapp_call_request_keyframe(void) {
-+	gint64 now;
-+	if (!g_clonk_uri[0]) return;
-+	now = g_get_monotonic_time();
-+	if (now - g_last_keyframe_restart_us < KEYFRAME_COOLDOWN_US) {
-+		fprintf(stderr, "wa-call: keyframe requested, within cooldown - absorbing\n");
-+		clonk_diag_log("gowhatsapp_call_request_keyframe: absorbed (within cooldown, %lld us since last)",
-+		               (long long)(now - g_last_keyframe_restart_us));
-+		return;
-+	}
-+	g_last_keyframe_restart_us = now;
-+	fprintf(stderr, "wa-call: keyframe requested, restarting capture\n");
-+	clonk_diag_log("gowhatsapp_call_request_keyframe: restarting capture");
-+	clonk_uri_call("videoCaptureStop", "{\"args\":[]}", clonk_keyframe_stop_reply);
-+}
-+
-+// Splices the real clonk videoURI into Go's callState JSON. Go always emits the
-+// literal placeholder "videoURI":"" (Go owns call-state structure/logic; C owns the
-+// clonk session and its URI -- this is where the two meet). Caller g_free()s the result.
-+static char *inject_video_uri(const char *json) {
-+	static const char needle[] = "\"videoURI\":\"\"";
-+	const char *pos = strstr(json, needle);
-+	if (!pos || !g_clonk_uri[0]) return g_strdup(json);
-+	GString *out = g_string_new(NULL);
-+	g_string_append_len(out, json, pos - json);
-+	g_string_append(out, "\"videoURI\":\"");
-+	g_string_append(out, g_clonk_uri); // a palm:// LS2 URI, no JSON-special characters
-+	g_string_append_c(out, '"');
-+	g_string_append(out, pos + sizeof(needle) - 1);
-+	return g_string_free(out, FALSE);
-+}
-+
-+static void publish_callstate_locked(const char *json) {
-+	char *out = inject_video_uri(json);
-+	LSError e;
-+	LSErrorInit(&e);
-+	if (g_sh && !LSSubscriptionReply(g_sh, "callState", out, &e))
-+		LSErrorFree(&e);
-+	g_free(out);
-+}
-+
-+static bool clonk_open_reply(LSHandle *sh, LSMessage *msg, void *ctx) {
-+	(void)sh; (void)ctx;
-+	g_clonk_opening = 0; // the open attempt this reply belongs to is no longer in flight
-+	const char *p = LSMessageGetPayload(msg);
-+	char uri[sizeof g_clonk_uri] = "";
-+	if (p && json_str(p, "location", uri, sizeof uri)) {
-+		strncpy(g_clonk_uri, uri, sizeof g_clonk_uri - 1);
-+		g_clonk_uri[sizeof g_clonk_uri - 1] = 0;
-+		fprintf(stderr, "wa-call: clonk session open: %s\n", g_clonk_uri);
-+		clonk_diag_log("clonk_open_reply: session open %s", g_clonk_uri);
-+		// Re-push immediately so subscribers get the real videoURI without waiting for
-+		// the next unrelated call-state change.
-+		if (g_last_callstate_json) publish_callstate_locked(g_last_callstate_json);
-+		// framerate MUST be 30 (camsrc's only supported rate) and the 2nd/3rd argument
-+		// slots are intentionally swapped -- see clonk_video_capture_start_reply's comment.
-+		clonk_uri_call("videoCaptureStart", "{\"args\":[320,320,240,400000]}",
-+		               clonk_video_capture_start_reply);
-+	} else {
-+		fprintf(stderr, "wa-call: clonk session open failed: %s\n", p ? p : "(no payload)");
-+	}
-+	return true;
-+}
-+
-+// Opens a clonk session for the current call if one isn't already open (or already being
-+// opened). Idempotent -- g_clonk_opening is set here, synchronously, BEFORE the async LS2
-+// call goes out, precisely so a second clonk_open() arriving before the first reply lands
-+// (confirmed live: the dial path's OnReady and the incoming-video-triggered OnVideoState
-+// path can both fire within the same moment) sees it and backs off, instead of both
-+// racing past a check that only g_clonk_uri (populated inside the reply) would satisfy.
-+static void clonk_open(void) {
-+	if (g_clonk_uri[0] || g_clonk_opening || !g_sh) {
-+		clonk_diag_log("clonk_open: skipped (uri=%s opening=%d)", g_clonk_uri, g_clonk_opening);
-+		return;
-+	}
-+	clonk_diag_log("clonk_open: issuing LSCallOneReply");
-+	g_clonk_opening = 1;
-+	LSError e;
-+	LSErrorInit(&e);
-+	LSMessageToken t;
-+	if (!LSCallOneReply(g_sh, "palm://com.palm.mediad/service/clonk", "{}",
-+	                    clonk_open_reply, NULL, &t, &e)) {
-+		fprintf(stderr, "wa-call: clonk open call failed: %s\n", e.message);
-+		LSErrorFree(&e);
-+		g_clonk_opening = 0; // no reply is coming to clear it for us
-+	}
-+}
-+
-+static bool clonk_stop_reply(LSHandle *sh, LSMessage *msg, void *ctx) {
-+	(void)sh; (void)ctx;
-+	fprintf(stderr, "wa-call: clonk %s: %s\n", (const char *)ctx, LSMessageGetPayload(msg));
-+	return true;
-+}
-+
-+// Drops our reference to the clonk session on call end / video fully off. No confirmed
-+// explicit session-teardown method (see WHATSAPP_VIDEO_STATUS.md Part 3/5) -- mediaserver
-+// tears a session down when its *creating* client's LS2 connection drops, which we share
-+// with the rest of this long-lived service, so we don't disconnect to force that. A fresh
-+// session is opened next time video starts.
-+static void clonk_close(void) {
-+	if (!g_clonk_uri[0]) {
-+		clonk_diag_log("clonk_close: no-op (no uri open)");
-+		return;
-+	}
-+	clonk_diag_log("clonk_close: tearing down session %s", g_clonk_uri);
-+	voipkit_video_stop(); // stop our own socket threads before telling mediaserver to stop
-+	clonk_uri_call_ctx("videoPlayerStop", "{\"args\":[]}", clonk_stop_reply, "videoPlayerStop");
-+	clonk_uri_call_ctx("videoCaptureStop", "{\"args\":[]}", clonk_stop_reply, "videoCaptureStop");
-+	g_clonk_uri[0] = 0;
-+	g_clonk_opening = 0;
-+}
-+
-+// Called from Go whenever this call's overall video state flips (see
-+// gowhatsapp_go_call_changemedia and OnEnd in call.go).
-+void gowhatsapp_call_video_active(int on) {
-+	clonk_diag_log("gowhatsapp_call_video_active(%d)", on);
-+	if (on) clonk_open(); else clonk_close();
-+}
 +
 +/* ---------- Go -> C: push callState to subscribers on the mainloop ---------- */
 +static gboolean push_callstate(gpointer data) {
@@ -1573,10 +2133,33 @@ index 0000000..50e447f
 + * the real call mic confirmed unity is best (1.0x: 0% clip, 3.93; 1.5x: 0.9% clip, 3.78). Leave at 1.0
 + * unless a future mic route actually captures quiet. */
 +#define MIC_GAIN 1.0f
-+static snd_pcm_t *g_play = NULL; // peer -> speaker (written from the sink callback)
 +static snd_pcm_t *g_cap = NULL;  // mic (read by the capture thread into the ring)
 +static pthread_t g_cap_thread;
-+static volatile int g_audio_on = 0;
++static pthread_t g_play_thread;  // peer -> speaker, see playback_thread
++static int g_play_thread_started = 0;
++// Atomic: the Go threads, the capture and playback threads and the mainloop all read it.
++static _Atomic int g_audio_on = 0;
++
++/* Playback. The peer's audio is not written to ALSA as it arrives: packets come in bursts and
++ * stop altogether while the peer is silent (DTX), and every time the pulse plug-in's stream ran
++ * dry it reported an underrun, snd_pcm_recover's prepare disconnected the stream and connected a
++ * new one (a new sink-input for palm-policy to route and audiod to set up), and nothing played
++ * until the buffer had filled again. Observed on the mindphone as the voipcall sink-input being
++ * closed and reopened about once a second through a call, with choppy or no incoming audio.
++ * Instead gowhatsapp_call_on_speaker queues the decoded frames in g_playout and playback_thread
++ * writes to the device at its own pace, with silence wherever the ring cannot supply audio, so
++ * the one stream opened for the call keeps running until the call ends. */
++#define WA_PLAY_LATENCY_US 120000 /* ALSA buffer; WA_AEC_DELAY_MS was measured with this size */
++#define WA_PLAY_CHUNK 320         /* 20ms per write; a multiple of AECM's 160-sample block */
++#define WA_PLAY_PREFILL 1920      /* 120ms (two MLow frames) collected before playing after the
++                                   * ring ran dry: absorbs the relay's arrival jitter */
++#define WA_PLAY_MAX_FILL 5760     /* 360ms: a burst beyond this drops its oldest samples, so a
++                                   * network stall cannot leave the call permanently delayed */
++static wa_playout g_playout;
++static pthread_once_t g_playout_once = PTHREAD_ONCE_INIT;
++static void playout_init_once(void) {
++	wa_playout_init(&g_playout, WA_PLAY_PREFILL, WA_PLAY_MAX_FILL);
++}
 +
 +/* ---- CALL_DUMP: ground-truth capture of the LIVE call audio (the call-scenario mic differs from a
 + * standalone arecord — audiod switches routing/DSP when a call is active, which the offline PESQ test
@@ -1651,15 +2234,60 @@ index 0000000..50e447f
 +	return h;
 +}
 +
-+// Capture thread: pure C. Opens both ALSA devices (off the mainloop — snd_pcm_open
-+// on the pulse plugin can block) then reads mic -> ring buffer. Never calls into Go.
++// Playback thread: pure C. Opens the ALSA playback device (off the mainloop: snd_pcm_open on
++// the pulse plug-in can block) and keeps it fed for the whole call, pulling a chunk from the
++// playout ring per write and blocking in snd_pcm_writei until the device has room for it. What
++// was written is handed to AECM as the echo reference, silence included, so the reference
++// follows the loudspeaker's clock rather than packet arrival. Never calls into Go.
++static void *playback_thread(void *arg) {
++	(void)arg;
++	snd_pcm_t *h = pcm_open("voip", SND_PCM_STREAM_PLAYBACK, WA_PLAY_LATENCY_US);
++	fprintf(stderr, "wa-call: audio %s\n", h ? "playback-ok" : "playback-FAIL");
++	if (!h) return NULL;
++	short buf[WA_PLAY_CHUNK];
++	unsigned long recovers = 0;
++	while (g_audio_on) {
++		wa_playout_pull(&g_playout, buf, WA_PLAY_CHUNK);
++		int off = 0;
++		while (off < WA_PLAY_CHUNK && g_audio_on) {
++			snd_pcm_sframes_t w = snd_pcm_writei(h, buf + off, (snd_pcm_uframes_t)(WA_PLAY_CHUNK - off));
++			if (w > 0) {
++				off += (int)w;
++				continue;
++			}
++			if (w == 0 || w == -EAGAIN) { // no room yet (not expected in blocking mode)
++				snd_pcm_wait(h, 100);
++				continue;
++			}
++			// Only reached if this thread was kept off the CPU for longer than the buffer: the
++			// recovery prepares the stream, which the pulse plug-in does by recreating it.
++			recovers++;
++			int err = snd_pcm_recover(h, (int)w, 1);
++			fprintf(stderr, "wa-call: playback write failed (%s), recover %s (stream recreated %lu times)\n",
++			        snd_strerror((int)w), err < 0 ? snd_strerror(err) : "ok", recovers);
++			if (err < 0) g_usleep(20000); // do not spin on a dead device; retried until the call ends
++		}
++		if (off == WA_PLAY_CHUNK) {
++			wa_aec_farend(buf, WA_PLAY_CHUNK); // exactly what the loudspeaker gets -> AECM's echo reference
++			if (AEC_CALIB) far_push(buf, WA_PLAY_CHUNK); // calibration: mirror it into the ring for the aligned dump
++		}
++	}
++	snd_pcm_drop(h);
++	snd_pcm_close(h);
++	pthread_mutex_lock(&g_playout.mx);
++	fprintf(stderr, "wa-call: playback done: %llu samples played, %llu silence, %llu dropped, "
++	        "%lu ring underflows, %lu stream recoveries\n",
++	        g_playout.played, g_playout.silence, g_playout.dropped, g_playout.underflows, recovers);
++	pthread_mutex_unlock(&g_playout.mx);
++	return NULL;
++}
++
++// Capture thread: pure C. Opens the ALSA capture device (off the mainloop) then reads
++// mic -> ring buffer. Never calls into Go.
 +static void *audio_thread(void *arg) {
 +	(void)arg;
-+	g_play = pcm_open("voip", SND_PCM_STREAM_PLAYBACK, 120000);   // keep playback headroom (60ms Opus frames) -> no underrun/choppy
 +	g_cap = pcm_open("voipsource", SND_PCM_STREAM_CAPTURE, 96000); // 96ms: keep most of the latency win over the old 120ms, but enough slack above the 20ms reads that scheduling jitter doesn't xrun (40ms garbled the mic)
-+	fprintf(stderr, "wa-call: audio %s / %s\n",
-+	        g_play ? "playback-ok" : "playback-FAIL",
-+	        g_cap ? "capture-ok" : "capture-FAIL");
++	fprintf(stderr, "wa-call: audio %s\n", g_cap ? "capture-ok" : "capture-FAIL");
 +	// Optional outbound-mic NS (default OFF — objectively hurts the MLow codec, see denoise.c). When
 +	// disabled these are no-ops: wa_ns_start creates no handle so wa_ns_process passes the mic through.
 +	wa_ns_start(WA_RATE);
@@ -1727,21 +2355,24 @@ index 0000000..50e447f
 +	return n;
 +}
 +
++// gowhatsapp_call_on_speaker — called from Go (meowcaller's receive loop) with each decoded
++// frame. Only queues it: playback_thread does the writing, at the device's pace.
 +void gowhatsapp_call_on_speaker(const float *frame, int n) {
-+	snd_pcm_t *h = g_play;
-+	if (!h || n <= 0) return;
++	if (!g_audio_on || !frame || n <= 0) return;
++	pthread_once(&g_playout_once, playout_init_once);
 +	short buf[2048];
-+	if (n > 2048) n = 2048;
-+	for (int i = 0; i < n; i++) {
-+		float f = frame[i];
-+		if (f > 1.0f) f = 1.0f;
-+		if (f < -1.0f) f = -1.0f;
-+		buf[i] = (short)(f * 32767.0f);
++	while (n > 0) {
++		int m = n > 2048 ? 2048 : n;
++		for (int i = 0; i < m; i++) {
++			float f = frame[i];
++			if (f > 1.0f) f = 1.0f;
++			if (f < -1.0f) f = -1.0f;
++			buf[i] = (short)(f * 32767.0f);
++		}
++		wa_playout_push(&g_playout, buf, m);
++		frame += m;
++		n -= m;
 +	}
-+	wa_aec_farend(buf, n); // this is exactly what hits the loudspeaker -> AECM's echo reference
-+	if (AEC_CALIB) far_push(buf, n); // calibration: mirror it into the ring for the aligned dump
-+	snd_pcm_sframes_t w = snd_pcm_writei(h, buf, n);
-+	if (w < 0) snd_pcm_recover(h, (int)w, 1);
 +}
 +
 +// Tell audiod there's an active voip call so it enables the phone scenario.
@@ -1765,9 +2396,25 @@ index 0000000..50e447f
 +		// PmBtCreateCallStatusMessage) reads the call "id" as a string via PmBtJsonGetData; an integer makes
 +		// it log "Failed to find call ID" and drop the call, so BT call audio never sets up. (Skype's call id
 +		// was a string.) "transport" stays our real service (a 1-byte PmBtEngine patch accepts non-skype).
-+		audiod_send("palm://com.palm.audio/phone/CallStatusUpdate",
-+		            "{\"lines\":[{\"state\":\"active\",\"calls\":[{\"id\":\"1\",\"address\":\"whatsapp\",\"origin\":\"outgoing\",\"video\":false,\"transport\":\"com.palm.whatsapp\"}]}]}");
-+		fprintf(stderr, "wa-call: audiod voip call ON\n");
++		// The real origin, from the call state Go last published (one call per line). The
++		// video flags are what is on screen and what is sent: audiod (legacy setCallWithVideo
++		// and LuneOS's video-call policy alike) reads incomingVideo/outgoingVideo on a VoIP
++		// line and moves a call that shows video off the earpiece.
++		char origin[16] = "outgoing";
++		char payload[384];
++		int shown = video_shown();
++		if (g_last_callstate_json)
++			json_str(g_last_callstate_json, "origin", origin, sizeof origin);
++		if (strcmp(origin, "incoming") != 0) snprintf(origin, sizeof origin, "%s", "outgoing");
++		snprintf(payload, sizeof payload,
++		         "{\"lines\":[{\"state\":\"active\",\"incomingVideo\":%s,\"outgoingVideo\":%s,"
++		         "\"calls\":[{\"id\":\"1\",\"address\":\"whatsapp\",\"origin\":\"%s\","
++		         "\"video\":%s,\"transport\":\"com.palm.whatsapp\"}]}]}",
++		         shown ? "true" : "false", shown && g_vid_tx ? "true" : "false", origin,
++		         shown ? "true" : "false");
++		audiod_send("palm://com.palm.audio/phone/CallStatusUpdate", payload);
++		fprintf(stderr, "wa-call: audiod voip call ON (%s, video %s)\n", origin,
++		        shown ? "shown" : "off");
 +	} else {
 +		audiod_send("palm://com.palm.audio/phone/CallStatusUpdate", "{\"lines\":[]}");
 +		fprintf(stderr, "wa-call: audiod voip call OFF\n");
@@ -1814,6 +2461,10 @@ index 0000000..50e447f
 +			fprintf(stderr, "wa-call: AEC_CALIB mic=%p farend=%p\n", (void*)g_dump_capraw, (void*)g_dump_farend);
 +		}
 +		g_idle_add(audiod_status_idle, GINT_TO_POINTER(1));
++		pthread_once(&g_playout_once, playout_init_once);
++		wa_playout_reset(&g_playout); // nothing left over from a previous call
++		g_play_thread_started = pthread_create(&g_play_thread, NULL, playback_thread, NULL) == 0;
++		if (!g_play_thread_started) fprintf(stderr, "wa-call: cannot start the playback thread\n");
 +		pthread_create(&g_cap_thread, NULL, audio_thread, NULL);
 +	} else if (!on && g_audio_on) {
 +		g_idle_add(audiod_status_idle, GINT_TO_POINTER(0));
@@ -1827,9 +2478,11 @@ index 0000000..50e447f
 +			snd_pcm_close(g_cap);
 +			g_cap = NULL;
 +		}
-+		snd_pcm_t *p = g_play;
-+		g_play = NULL;
-+		if (p) snd_pcm_close(p);
++		// Returns within one write; the thread closes its own playback device.
++		if (g_play_thread_started) {
++			pthread_join(g_play_thread, NULL);
++			g_play_thread_started = 0;
++		}
 +		// capture thread joined + Go has stopped pulling: safe to close the dump files
 +		if (g_dump_capraw) { fclose(g_dump_capraw); g_dump_capraw = NULL; }
 +		if (g_dump_send)   { fclose(g_dump_send);   g_dump_send = NULL; }
@@ -1925,6 +2578,30 @@ index 0000000..50e447f
 +	int has_in  = p && strstr(p, "\"incomingVideo\"") != NULL;
 +	int out_on  = has_out && json_true(p, "outgoingVideo");
 +	int in_on   = has_in && json_true(p, "incomingVideo");
++	long turns  = p ? json_uint(p, "deviceOrientation") : -1;
++	if (turns >= 0 && turns <= 3 && turns != g_device_turns) {
++		// The phone was turned: our picture's turn changes with it.
++		g_device_turns = (int)turns;
++		if (g_vid_state == VID_RUNNING && g_vid_tx)
++			gowhatsapp_go_call_set_video_orientation(tx_orientation());
++	}
++	if (!has_in && !has_out) {
++		// Only the phone's orientation: no video direction to change.
++		reply(sh, msg, "{\"returnValue\":true}");
++		return true;
++	}
++	if (has_in) {
++		// Whether the user wants to see the peer: starts or stops the engine session.
++		g_vid_view = in_on;
++		video_reconcile();
++	} else if (has_out && out_on && !g_vid_view) {
++		// Turning our own camera on is asking for video too: the engine session is what
++		// encodes it. Without this, a call that went back to audio only (which forgets the
++		// wish, see video_active_idle) sent nothing when we turned video on again, until
++		// the peer's video came back and the Phone app asked for incomingVideo.
++		g_vid_view = 1;
++		video_reconcile();
++	}
 +	gowhatsapp_go_call_changemedia(id, has_out, out_on, has_in, in_on);
 +	reply(sh, msg, "{\"returnValue\":true}");
 +	return true;
@@ -1980,10 +2657,10 @@ index 0000000..50e447f
 +}
 diff --git a/glue/call.h b/glue/call.h
 new file mode 100644
-index 0000000..9fa81f7
+index 0000000..71a8cce
 --- /dev/null
 +++ b/glue/call.h
-@@ -0,0 +1,9 @@
+@@ -0,0 +1,17 @@
 +#ifndef GOWHATSAPP_CALL_H
 +#define GOWHATSAPP_CALL_H
 +
@@ -1992,15 +2669,22 @@ index 0000000..9fa81f7
 +// the first call registers. Defined in glue/call.c.
 +void whatsapp_call_luna_init(void);
 +
++// Called from Go (call.go declares them in its cgo preamble).
++void gowhatsapp_call_on_state(const char *json);
++void gowhatsapp_call_on_speaker(const float *frame, int n);
++void gowhatsapp_call_audio_active(int on);
++int gowhatsapp_call_read_mic(float *out, int n);
++void gowhatsapp_call_video_active(int on);
++void gowhatsapp_call_request_keyframe(void);
++
 +#endif
 diff --git a/glue/denoise.c b/glue/denoise.c
 new file mode 100644
-index 0000000..ff1ce50
+index 0000000..7c17248
 --- /dev/null
 +++ b/glue/denoise.c
-@@ -0,0 +1,94 @@
+@@ -0,0 +1,101 @@
 +#include "denoise.h"
-+#include "modules/audio_processing/ns/noise_suppression.h"
 +#include <stddef.h>
 +#include <math.h>
 +#ifndef M_PI
@@ -2018,6 +2702,8 @@ index 0000000..ff1ce50
 +// mic straight to MLow, so we do too. Kept behind the flag for a future Opus path (Opus is waveform,
 +// not parametric, and may benefit from NS).
 +#define NS_ENABLE 0
++#if NS_ENABLE
++#include "modules/audio_processing/ns/noise_suppression.h"
 +static NsHandle *g_ns = NULL;
 +static int g_frame = 160; // fs/100
 +
@@ -2093,18 +2779,25 @@ index 0000000..ff1ce50
 +void wa_ns_stop(void) {
 +	if (g_ns) { WebRtcNs_Free(g_ns); g_ns = NULL; }
 +}
++#else
++// NS is off, so no WebRTC NS is linked: the mic passes through unchanged.
++void wa_ns_start(int fs) { (void)fs; }
++void wa_ns_process(short *buf, int n) { (void)buf; (void)n; }
++void wa_ns_stop(void) {}
++#endif
 diff --git a/glue/denoise.h b/glue/denoise.h
 new file mode 100644
-index 0000000..275d825
+index 0000000..fd6fa82
 --- /dev/null
 +++ b/glue/denoise.h
-@@ -0,0 +1,11 @@
+@@ -0,0 +1,12 @@
 +#ifndef WA_DENOISE_H
 +#define WA_DENOISE_H
 +// webOS WhatsApp calling: WebRTC noise-suppression on the outbound mic. The mic captures via the
 +// analog IN1L route with NO audiod DSP (the voip capture path applies none, unlike the recording
 +// path voice notes use), so the peer hears heavy background noise. Run the raw int16 mic frames
-+// through WebRTC's float NS (harvested from libtgvoip/webrtc_dsp) before they reach meowcaller.
++// through WebRTC's float NS before they reach meowcaller. Compiled out (NS_ENABLE 0 in denoise.c,
++// see there why): these then pass the mic through unchanged.
 +// Called only from the capture thread (single-threaded w.r.t. the NS handle).
 +void wa_ns_start(int fs);              // create + init the NS for the capture rate (16000)
 +void wa_ns_process(short *buf, int n); // denoise n int16 samples IN PLACE (processes floor(n/frame) 10ms frames)
@@ -2360,7 +3053,7 @@ index 0000000..fefa539
 +
 +#endif
 diff --git a/glue/init.c b/glue/init.c
-index 246feb9..9d8feba 100644
+index 0583dd0..60b5dcf 100644
 --- a/glue/init.c
 +++ b/glue/init.c
 @@ -24,6 +24,7 @@
@@ -2391,6 +3084,168 @@ index 246feb9..9d8feba 100644
      return TRUE;
  }
  
+diff --git a/glue/playout.c b/glue/playout.c
+new file mode 100644
+index 0000000..7522de4
+--- /dev/null
++++ b/glue/playout.c
+@@ -0,0 +1,98 @@
++#include "playout.h"
++#include <string.h>
++
++static int clamp_samples(int v) {
++	if (v < 0) return 0;
++	if (v > WA_PLAYOUT_CAP) return WA_PLAYOUT_CAP;
++	return v;
++}
++
++static void reset_locked(wa_playout *p) {
++	p->head = 0;
++	p->fill = 0;
++	p->buffering = 1;
++	p->waited = 0;
++	p->pushed = p->played = p->silence = p->dropped = 0;
++	p->underflows = 0;
++}
++
++void wa_playout_init(wa_playout *p, int prefill, int max_fill) {
++	memset(p->buf, 0, sizeof p->buf);
++	pthread_mutex_init(&p->mx, NULL);
++	p->prefill = clamp_samples(prefill);
++	p->max_fill = clamp_samples(max_fill);
++	if (p->max_fill < p->prefill) p->max_fill = p->prefill;
++	reset_locked(p);
++}
++
++void wa_playout_destroy(wa_playout *p) {
++	pthread_mutex_destroy(&p->mx);
++}
++
++void wa_playout_reset(wa_playout *p) {
++	pthread_mutex_lock(&p->mx);
++	reset_locked(p);
++	pthread_mutex_unlock(&p->mx);
++}
++
++void wa_playout_push(wa_playout *p, const short *s, int n) {
++	if (n <= 0) return;
++	pthread_mutex_lock(&p->mx);
++	p->pushed += (unsigned long long)n;
++	// Of a push larger than the ring itself only the newest samples can be kept.
++	if (n > WA_PLAYOUT_CAP) {
++		p->dropped += (unsigned long long)(n - WA_PLAYOUT_CAP);
++		s += n - WA_PLAYOUT_CAP;
++		n = WA_PLAYOUT_CAP;
++	}
++	// Make room: drop the oldest queued samples so that at most max_fill remain after the push
++	// (and never more than the ring holds).
++	int limit = p->max_fill > n ? p->max_fill : n;
++	int over = p->fill + n - limit;
++	if (over > 0) {
++		if (over > p->fill) over = p->fill;
++		p->head = (p->head + over) % WA_PLAYOUT_CAP;
++		p->fill -= over;
++		p->dropped += (unsigned long long)over;
++	}
++	int tail = (p->head + p->fill) % WA_PLAYOUT_CAP;
++	int first = WA_PLAYOUT_CAP - tail;
++	if (first > n) first = n;
++	memcpy(p->buf + tail, s, (size_t)first * sizeof *s);
++	memcpy(p->buf, s + first, (size_t)(n - first) * sizeof *s);
++	p->fill += n;
++	pthread_mutex_unlock(&p->mx);
++}
++
++int wa_playout_pull(wa_playout *p, short *out, int n) {
++	if (n <= 0) return 0;
++	int got = 0;
++	pthread_mutex_lock(&p->mx);
++	// Play on once the prefill is queued, or once queued audio has waited as long as the prefill
++	// would take to arrive: a lone frame at the end of a talkspurt is not held back until the
++	// next one comes in.
++	if (p->buffering && p->fill > 0 && (p->fill >= p->prefill || p->waited >= p->prefill)) {
++		p->buffering = 0;
++		p->waited = 0;
++	}
++	if (!p->buffering) {
++		got = p->fill < n ? p->fill : n;
++		int first = WA_PLAYOUT_CAP - p->head;
++		if (first > got) first = got;
++		memcpy(out, p->buf + p->head, (size_t)first * sizeof *out);
++		memcpy(out + first, p->buf, (size_t)(got - first) * sizeof *out);
++		p->head = (p->head + got) % WA_PLAYOUT_CAP;
++		p->fill -= got;
++		p->played += (unsigned long long)got;
++		if (got < n) { // ran dry: collect the prefill again before playing on
++			p->buffering = 1;
++			p->underflows++;
++		}
++	} else if (p->fill > 0) {
++		p->waited += n;
++	}
++	p->silence += (unsigned long long)(n - got);
++	pthread_mutex_unlock(&p->mx);
++	memset(out + got, 0, (size_t)(n - got) * sizeof *out);
++	return got;
++}
+diff --git a/glue/playout.h b/glue/playout.h
+new file mode 100644
+index 0000000..ea4db6c
+--- /dev/null
++++ b/glue/playout.h
+@@ -0,0 +1,52 @@
++#ifndef WA_PLAYOUT_H
++#define WA_PLAYOUT_H
++// webOS WhatsApp calling: the playout buffer between the decoder and the loudspeaker.
++//
++// meowcaller hands over a decoded frame (60 ms) whenever a packet arrives, which is irregular:
++// the relay delivers in bursts, and the peer sends nothing at all while it is silent (DTX).
++// The ALSA playback device, on the other hand, has to be written at its own pace: once the
++// pulse plug-in's stream runs dry it reports an underrun, and recovering from that recreates
++// the PulseAudio stream (a new sink-input, re-routed by palm-policy) and waits for the buffer to
++// fill again before anything is heard.
++//
++// The decoder pushes into this ring; the playback thread pulls fixed chunks from it at device
++// pace and gets silence for whatever the ring cannot supply. After the ring has run dry it
++// first collects `prefill` samples again, or waits as long as those would take, so arrival
++// jitter of up to that much does not chop every frame. `max_fill` bounds the delay a burst can
++// build up: older samples beyond it are dropped.
++//
++// Push and pull may run on different threads; the ring has its own lock.
++#include <pthread.h>
++
++#define WA_PLAYOUT_CAP 16000 // 1 s of 16 kHz mono
++
++typedef struct {
++	short buf[WA_PLAYOUT_CAP];
++	int head;      // next sample to play
++	int fill;      // samples queued
++	int prefill;   // samples to collect before playing again after running dry
++	int max_fill;  // queued samples beyond this are dropped, oldest first
++	int buffering; // 1 while collecting the prefill
++	int waited;    // silence pulled while buffering with audio queued
++	// Counters, for the end-of-call log line and the tests.
++	unsigned long long pushed;      // samples handed to push
++	unsigned long long played;      // queued samples pull returned
++	unsigned long long silence;     // samples pull filled with zeros
++	unsigned long long dropped;     // samples discarded to stay within max_fill
++	unsigned long underflows;       // times the ring ran dry while playing
++	pthread_mutex_t mx;
++} wa_playout;
++
++// Sets up an empty ring. prefill and max_fill are clamped to 0..WA_PLAYOUT_CAP, and max_fill
++// to at least prefill.
++void wa_playout_init(wa_playout *p, int prefill, int max_fill);
++void wa_playout_destroy(wa_playout *p);
++// Empties the ring and zeroes the counters, keeping prefill and max_fill.
++void wa_playout_reset(wa_playout *p);
++// Queues n samples.
++void wa_playout_push(wa_playout *p, const short *s, int n);
++// Writes exactly n samples to out: queued audio first, zeros for the rest. Returns how many
++// of them were queued audio.
++int wa_playout_pull(wa_playout *p, short *out, int n);
++
++#endif
 diff --git a/glue/test_stream_data.h b/glue/test_stream_data.h
 new file mode 100644
 index 0000000..df2a2cc
@@ -7707,6 +8562,1589 @@ index 0000000..df2a2cc
 +	33, 36, 32, 35, 31, 37, 32, 33, 34, 36, 31, 35,
 +	31, 34, 34, 36, 32, 34, 32, 35, 35, 34, 33, 33,
 +};
+diff --git a/glue/tests/Makefile b/glue/tests/Makefile
+new file mode 100644
+index 0000000..8c47e95
+--- /dev/null
++++ b/glue/tests/Makefile
+@@ -0,0 +1,55 @@
++# Unit tests for the call audio playout (glue/playout.c), glue/call.c's playback thread, which
++# runs against fakes.c's ALSA device instead of a real one, call.c's luneos-rtc-engine session
++# (fakes.c records its LS2 calls), and the engine's socket bridge (glue/voipkit_rtcengine.c,
++# against real unix sockets). Needs gtest, and the glib,
++# luna-service2 and alsa-lib headers (luna-service2 and ALSA are not linked: fakes.c replaces
++# what call.c uses of them). Point CPPFLAGS/LDFLAGS at a sysroot when the host lacks them:
++#   make CPPFLAGS="-I$SYSROOT/usr/include -I$SYSROOT/usr/include/glib-2.0 \
++#                  -I$SYSROOT/usr/lib/glib-2.0/include" LDFLAGS="-L$SYSROOT/usr/lib"
++#   make check
++# SAN="-fsanitize=address,undefined" or SAN=-fsanitize=thread builds them sanitized.
++CC ?= cc
++CXX ?= c++
++GLUE := ..
++CFLAGS ?= -O1 -g -Wall -Wextra
++CXXFLAGS ?= -O1 -g -Wall -Wextra
++SAN ?=
++INC := -I$(GLUE) -I. -Ifakes
++LIBS := -lgtest -lgtest_main -lglib-2.0 -lpthread -lm
++
++all: playout_test call_playback_test call_video_test voipkit_rtcengine_test
++
++playout_test: playout_test.cpp $(GLUE)/playout.c $(GLUE)/playout.h
++	$(CC) $(CPPFLAGS) $(CFLAGS) $(SAN) $(INC) -c $(GLUE)/playout.c -o playout.o
++	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(SAN) $(INC) playout_test.cpp playout.o -o $@ $(LDFLAGS) $(LIBS)
++
++# PLUGIN_VERSION only matters to init.c; call.c is compiled as the recipe does otherwise.
++call_playback_test: call_playback_test.cpp fakes.c fakes.h $(GLUE)/call.c $(GLUE)/playout.c
++	$(CC) $(CPPFLAGS) $(CFLAGS) $(SAN) $(INC) -c $(GLUE)/playout.c -o playout.o
++	$(CC) $(CPPFLAGS) $(CFLAGS) $(SAN) $(INC) -c $(GLUE)/call.c -o call.o
++	$(CC) $(CPPFLAGS) $(CFLAGS) $(SAN) $(INC) -c fakes.c -o fakes.o
++	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(SAN) $(INC) call_playback_test.cpp call.o playout.o fakes.o \
++		-o $@ $(LDFLAGS) $(LIBS)
++
++call_video_test: call_video_test.cpp fakes.c fakes.h $(GLUE)/call.c $(GLUE)/playout.c
++	$(CC) $(CPPFLAGS) $(CFLAGS) $(SAN) $(INC) -c $(GLUE)/playout.c -o playout.o
++	$(CC) $(CPPFLAGS) $(CFLAGS) $(SAN) $(INC) -c $(GLUE)/call.c -o call.o
++	$(CC) $(CPPFLAGS) $(CFLAGS) $(SAN) $(INC) -c fakes.c -o fakes.o
++	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(SAN) $(INC) call_video_test.cpp call.o playout.o fakes.o \
++		-o $@ $(LDFLAGS) $(LIBS)
++
++voipkit_rtcengine_test: voipkit_rtcengine_test.cpp $(GLUE)/voipkit_rtcengine.c $(GLUE)/voipkit_rtcengine.h
++	$(CC) $(CPPFLAGS) $(CFLAGS) $(SAN) $(INC) -c $(GLUE)/voipkit_rtcengine.c -o voipkit_rtcengine.o
++	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(SAN) $(INC) voipkit_rtcengine_test.cpp voipkit_rtcengine.o \
++		-o $@ $(LDFLAGS) $(LIBS)
++
++check: all
++	./playout_test
++	./call_playback_test
++	./call_video_test
++	./voipkit_rtcengine_test
++
++clean:
++	rm -f *.o playout_test call_playback_test call_video_test voipkit_rtcengine_test
++
++.PHONY: all check clean
+diff --git a/glue/tests/call_playback_test.cpp b/glue/tests/call_playback_test.cpp
+new file mode 100644
+index 0000000..7c0a567
+--- /dev/null
++++ b/glue/tests/call_playback_test.cpp
+@@ -0,0 +1,142 @@
++// Tests glue/call.c's playback path against a fake ALSA device (tests/fakes.c): the device is
++// written continuously from the moment the call audio opens, whatever the packet arrival, the
++// stream is opened once, and AECM's far-end reference is exactly what was written.
++#include <gtest/gtest.h>
++#include <chrono>
++#include <cstring>
++#include <thread>
++#include <vector>
++
++#include "fakes.h"
++
++namespace {
++
++using namespace std::chrono;
++
++// Real-time milliseconds scaled to the fake device's pace.
++void wait_ms(int ms) { std::this_thread::sleep_for(milliseconds(ms / FAKE_SPEEDUP)); }
++
++// One decoded 60 ms frame with recognisable non-zero samples.
++std::vector<float> frame(int seq) {
++	std::vector<float> f(960);
++	for (int i = 0; i < 960; i++) f[i] = static_cast<float>(1 + (seq * 960 + i) % 20000) / 32767.0f;
++	return f;
++}
++short as_written(float f) { return static_cast<short>(f * 32767.0f); }
++
++long written_n() {
++	fake_lock();
++	long n = fake.written_n;
++	fake_unlock();
++	return n;
++}
++
++class CallPlayback : public ::testing::Test {
++protected:
++	void SetUp() override { fake_reset(); }
++	void TearDown() override { gowhatsapp_call_audio_active(0); }
++};
++
++TEST_F(CallPlayback, SilenceKeepsTheDeviceRunning) {
++	gowhatsapp_call_audio_active(1);
++	wait_ms(400); // no packets at all, like a peer in DTX
++	long mid = written_n();
++	wait_ms(400);
++	gowhatsapp_call_audio_active(0);
++	EXPECT_GT(mid, 16000 * 200 / 1000) << "the device must be written while nothing arrives";
++	EXPECT_GT(fake.written_n, mid);
++	for (long i = 0; i < fake.written_n; i++) ASSERT_EQ(fake.written[i], 0);
++	EXPECT_EQ(fake.playback_opens, 1);
++	EXPECT_EQ(fake.recovers, 0);
++}
++
++TEST_F(CallPlayback, GappedArrivalPlaysEverythingInOrderWithOneStream) {
++	gowhatsapp_call_audio_active(1);
++	std::vector<short> sent;
++	int seq = 0;
++	// Bursts of 1-3 frames separated by 150-500 ms gaps (relay jitter, DTX).
++	const int bursts[][2] = {{2, 150}, {1, 300}, {3, 500}, {1, 200}, {2, 450}, {3, 250}, {1, 400}};
++	for (auto &b : bursts) {
++		for (int k = 0; k < b[0]; k++, seq++) {
++			auto f = frame(seq);
++			gowhatsapp_call_on_speaker(f.data(), static_cast<int>(f.size()));
++			for (float v : f) sent.push_back(as_written(v));
++		}
++		wait_ms(b[1]);
++	}
++	wait_ms(600); // let the ring drain
++	gowhatsapp_call_audio_active(0);
++
++	EXPECT_EQ(fake.playback_opens, 1);
++	EXPECT_EQ(fake.closes, 2) << "playback and capture, once each, at the end";
++	EXPECT_EQ(fake.recovers, 0) << "no underrun, so the stream was never recreated";
++	// Every decoded sample reaches the device, in order, with only silence in between.
++	std::vector<short> played;
++	for (long i = 0; i < fake.written_n; i++)
++		if (fake.written[i] != 0) played.push_back(fake.written[i]);
++	EXPECT_EQ(played, sent);
++	// The device ran for the whole call, not just while packets came in.
++	EXPECT_GT(fake.written_n, static_cast<long>(sent.size()) + 16000);
++}
++
++TEST_F(CallPlayback, FarEndReferenceIsExactlyWhatWasWritten) {
++	gowhatsapp_call_audio_active(1);
++	for (int s = 0; s < 6; s++) {
++		auto f = frame(s);
++		gowhatsapp_call_on_speaker(f.data(), static_cast<int>(f.size()));
++		wait_ms(s % 2 ? 250 : 60);
++	}
++	wait_ms(400);
++	gowhatsapp_call_audio_active(0);
++	ASSERT_GT(fake.written_n, 0);
++	EXPECT_EQ(fake.farend_bad_len, 0);
++	ASSERT_EQ(fake.farend_n, fake.written_n);
++	EXPECT_EQ(0, memcmp(fake.farend, fake.written, sizeof(short) * fake.written_n));
++}
++
++TEST_F(CallPlayback, UnderrunIsRecoveredAndPlaybackContinues) {
++	gowhatsapp_call_audio_active(1);
++	wait_ms(100);
++	fake_lock();
++	fake.inject_epipe = 1;
++	fake_unlock();
++	auto f = frame(7);
++	gowhatsapp_call_on_speaker(f.data(), 960);
++	gowhatsapp_call_on_speaker(f.data(), 960);
++	wait_ms(500);
++	long mid = written_n();
++	wait_ms(200);
++	gowhatsapp_call_audio_active(0);
++	EXPECT_EQ(fake.recovers, 1);
++	EXPECT_EQ(fake.playback_opens, 1);
++	EXPECT_GT(fake.written_n, mid);
++	ASSERT_EQ(fake.farend_n, fake.written_n) << "the failed chunk is rewritten, then referenced once";
++	EXPECT_EQ(0, memcmp(fake.farend, fake.written, sizeof(short) * fake.written_n));
++	long nonzero = 0;
++	for (long i = 0; i < fake.written_n; i++) nonzero += fake.written[i] != 0;
++	EXPECT_EQ(nonzero, 2 * 960);
++}
++
++TEST_F(CallPlayback, FramesOutsideACallAreNotQueued) {
++	auto f = frame(1);
++	gowhatsapp_call_on_speaker(f.data(), 960); // ringing: audio path not open
++	gowhatsapp_call_audio_active(1);
++	wait_ms(400);
++	gowhatsapp_call_audio_active(0);
++	for (long i = 0; i < fake.written_n; i++) ASSERT_EQ(fake.written[i], 0);
++}
++
++TEST_F(CallPlayback, SecondCallStartsFromAnEmptyRing) {
++	gowhatsapp_call_audio_active(1);
++	auto f = frame(3);
++	for (int i = 0; i < 4; i++) gowhatsapp_call_on_speaker(f.data(), 960);
++	gowhatsapp_call_audio_active(0); // ends at once, audio still queued
++	fake_reset();
++	gowhatsapp_call_audio_active(1);
++	wait_ms(400);
++	gowhatsapp_call_audio_active(0);
++	for (long i = 0; i < fake.written_n; i++) ASSERT_EQ(fake.written[i], 0);
++	EXPECT_EQ(fake.playback_opens, 1);
++}
++
++} // namespace
+diff --git a/glue/tests/call_video_test.cpp b/glue/tests/call_video_test.cpp
+new file mode 100644
+index 0000000..edcda3f
+--- /dev/null
++++ b/glue/tests/call_video_test.cpp
+@@ -0,0 +1,490 @@
++// Tests glue/call.c's luneos-rtc-engine session (tests/fakes.c records the LS2 calls and the
++// video bridge): the engine runs only while the call carries video and the user asked to see it,
++// it is asked what the device can send first, late replies of a closed session are cleaned up,
++// the Phone app learns where the picture is, and audiod hears of the video.
++#include <gtest/gtest.h>
++#include <glib.h>
++#include <cstring>
++#include <string>
++
++#include "fakes.h"
++
++namespace {
++
++const char *kCallState =
++	"{\"allowVideoCalls\":true,\"lines\":[{\"calls\":[{\"id\":\"A1\",\"address\":\"x\","
++	"\"origin\":\"incoming\"}],\"state\":\"active\"}],\"returnValue\":true,\"videoURI\":\"\"}";
++
++void pump() {
++	while (g_main_context_iteration(NULL, FALSE)) {
++	}
++}
++
++int ncalls() {
++	fake_lock();
++	int n = fake.ncalls;
++	fake_unlock();
++	return n;
++}
++
++std::string uri_of(int i) { return fake.calls[i].uri; }
++std::string payload_of(int i) { return fake.calls[i].payload; }
++
++// Index of the first call to `method` of the engine at or after `from`, or -1.
++int find_engine_call(const char *method, int from = 0) {
++	std::string want = std::string("luna://org.webosports.rtcengine/") + method;
++	for (int i = from; i < ncalls(); i++)
++		if (uri_of(i) == want) return i;
++	return -1;
++}
++int count_engine_calls(const char *method) {
++	int n = 0;
++	for (int i = find_engine_call(method); i >= 0; i = find_engine_call(method, i + 1)) n++;
++	return n;
++}
++int last_audiod_call() {
++	int found = -1;
++	for (int i = 0; i < ncalls(); i++)
++		if (uri_of(i) == "palm://com.palm.audio/phone/CallStatusUpdate") found = i;
++	return found;
++}
++
++bool has(const std::string &s, const char *needle) { return s.find(needle) != std::string::npos; }
++
++class CallVideo : public ::testing::Test {
++protected:
++	void SetUp() override {
++		fake_reset();
++		fake.ls_registered = 1;
++		whatsapp_call_luna_init();
++		gowhatsapp_call_on_state(kCallState);
++		pump();
++		fake_reset();
++	}
++	void TearDown() override {
++		fake_invoke("testStopInjectVideo", "{}");
++		fake_invoke("changeMedia", "{\"id\":\"A1\",\"deviceOrientation\":0}");
++		fake_invoke("changeMedia", "{\"id\":\"A1\",\"incomingVideo\":false}");
++		gowhatsapp_call_video_active(0);
++		pump();
++		gowhatsapp_call_audio_active(0);
++		pump();
++	}
++
++	// The call carries video and the user accepted it.
++	void want_video() {
++		gowhatsapp_call_video_active(1);
++		pump();
++		fake_invoke("changeMedia", "{\"id\":\"A1\",\"incomingVideo\":true}");
++		pump();
++	}
++
++	// Answers capabilities and start; returns the start call's index.
++	int bring_up(bool capable) {
++		int caps = find_engine_call("capabilities");
++		EXPECT_GE(caps, 0);
++		fake_reply(caps, capable ? "{\"returnValue\":true,\"videoCallCapable\":true}"
++		                         : "{\"returnValue\":true,\"videoCallCapable\":false}");
++		int start = find_engine_call("start");
++		EXPECT_GE(start, 0);
++		fake_reply(start, "{\"returnValue\":true,\"txSocket\":\"/tmp/wa-rtc-tx.sock\","
++		                  "\"rxSocket\":\"/tmp/wa-rtc-rx.sock\"}");
++		pump();
++		return start;
++	}
++};
++
++TEST_F(CallVideo, VideoOnTheCallAloneStartsNothing) {
++	gowhatsapp_call_video_active(1);
++	pump();
++	EXPECT_EQ(find_engine_call("capabilities"), -1) << "nothing is decoded before the user asks";
++	EXPECT_EQ(find_engine_call("start"), -1);
++}
++
++TEST_F(CallVideo, TheUsersWishAloneStartsNothing) {
++	fake_invoke("changeMedia", "{\"id\":\"A1\",\"incomingVideo\":true}");
++	pump();
++	EXPECT_EQ(find_engine_call("capabilities"), -1) << "no video on the call";
++}
++
++TEST_F(CallVideo, ReceiveOnlyWithoutACamera) {
++	want_video();
++	int start = bring_up(false);
++	std::string p = payload_of(start);
++	EXPECT_TRUE(has(p, "\"txEnabled\":false")) << p;
++	EXPECT_TRUE(has(p, "\"rxEnabled\":true")) << p;
++	EXPECT_TRUE(has(p, "\"shmPath\":\"/tmp/wa-rtc-video\"")) << p;
++	EXPECT_TRUE(has(p, "\"width\":480")) << p;
++	EXPECT_TRUE(has(p, "\"height\":640")) << p;
++	EXPECT_EQ(fake.video_starts, 1);
++	EXPECT_STREQ(fake.tx_socket, "") << "no TX thread without a camera";
++	EXPECT_STREQ(fake.rx_socket, "/tmp/wa-rtc-rx.sock");
++	EXPECT_EQ(fake.peer_keyframe_requests, 1) << "the decoder joins mid-stream";
++}
++
++TEST_F(CallVideo, SendsTooWithACamera) {
++	want_video();
++	int start = bring_up(true);
++	std::string p = payload_of(start);
++	EXPECT_TRUE(has(p, "\"txEnabled\":true")) << p;
++	EXPECT_TRUE(has(p, "\"width\":640")) << p;
++	EXPECT_TRUE(has(p, "\"height\":480")) << p;
++	EXPECT_STREQ(fake.tx_socket, "/tmp/wa-rtc-tx.sock");
++	EXPECT_TRUE(has(p, "\"bitrate\":1200000")) << p;
++	EXPECT_EQ(fake.video_orientation_sets, 1) << "the peer learns which way our picture is up";
++	EXPECT_EQ(fake.video_orientation, 1);
++}
++
++TEST_F(CallVideo, ThePhoneAppLearnsWhereThePictureIs) {
++	want_video();
++	bring_up(false);
++	std::string r = fake.last_subscription_reply;
++	EXPECT_TRUE(has(r, "\"videoURI\":\"/tmp/wa-rtc-video\",\"videoWidth\":480,\"videoHeight\":640"))
++		<< r;
++	fake_invoke("changeMedia", "{\"id\":\"A1\",\"incomingVideo\":false}");
++	pump();
++	r = fake.last_subscription_reply;
++	EXPECT_TRUE(has(r, "\"videoURI\":\"\"")) << r;
++	EXPECT_FALSE(has(r, "videoWidth")) << r;
++}
++
++// While we send, the Phone app also learns where our own picture is, and how to show it.
++TEST_F(CallVideo, ThePhoneAppLearnsWhereOurOwnPictureIs) {
++	want_video();
++	fake_reply(find_engine_call("capabilities"),
++	           "{\"returnValue\":true,\"videoCallCapable\":true,\"cameraCount\":2}");
++	int start = find_engine_call("start");
++	ASSERT_GE(start, 0);
++	EXPECT_TRUE(has(payload_of(start), "\"previewShmPath\":\"/tmp/wa-rtc-preview\"")) << payload_of(start);
++	fake_reply(start, "{\"returnValue\":true,\"txSocket\":\"/tmp/wa-rtc-tx.sock\","
++	                  "\"rxSocket\":\"/tmp/wa-rtc-rx.sock\"}");
++	pump();
++	std::string r = fake.last_subscription_reply;
++	EXPECT_TRUE(has(r, "\"videoPreviewURI\":\"/tmp/wa-rtc-preview\",\"videoPreviewWidth\":320,"
++	                   "\"videoPreviewHeight\":240,\"videoPreviewOrientation\":1,"
++	                   "\"videoPreviewMirrored\":true"))
++		<< r;
++}
++
++TEST_F(CallVideo, NoOwnPictureWhenReceivingOnly) {
++	want_video();
++	int start = bring_up(false);
++	EXPECT_TRUE(has(payload_of(start), "\"previewShmPath\":\"\"")) << payload_of(start);
++	EXPECT_FALSE(has(fake.last_subscription_reply, "videoPreviewURI")) << fake.last_subscription_reply;
++}
++
++TEST_F(CallVideo, TurningTheViewOffStopsTheEngine) {
++	want_video();
++	bring_up(false);
++	int before = ncalls();
++	fake_invoke("changeMedia", "{\"id\":\"A1\",\"incomingVideo\":false}");
++	pump();
++	EXPECT_EQ(fake.video_stops, 1);
++	EXPECT_GE(find_engine_call("stop", before), 0);
++}
++
++TEST_F(CallVideo, TheCallEndingStopsTheEngineAndForgetsTheWish) {
++	want_video();
++	bring_up(false);
++	gowhatsapp_call_video_active(0);
++	pump();
++	EXPECT_EQ(fake.video_stops, 1);
++	EXPECT_EQ(count_engine_calls("stop"), 1);
++	int before = ncalls();
++	gowhatsapp_call_video_active(1); // the next call
++	pump();
++	EXPECT_EQ(find_engine_call("capabilities", before), -1) << "a new call asks the user again";
++}
++
++TEST_F(CallVideo, OurCameraOnAgainAfterAudioOnlyStartsTheEngine) {
++	want_video();
++	bring_up(true);
++	gowhatsapp_call_video_active(0); // both sides turned video off: an audio-only stretch
++	pump();
++	EXPECT_EQ(count_engine_calls("stop"), 1);
++	int before = ncalls();
++	// The user turns the camera on again from the Phone app; only outgoingVideo is sent.
++	fake_invoke("changeMedia", "{\"id\":\"A1\",\"outgoingVideo\":true}");
++	gowhatsapp_call_video_active(1); // the call carries video again (our upgrade)
++	pump();
++	EXPECT_GE(find_engine_call("capabilities", before), 0) << "our camera needs the engine session";
++}
++
++TEST_F(CallVideo, OurCameraOffLeavesThePeersPictureAlone) {
++	want_video();
++	bring_up(true);
++	int before = ncalls();
++	fake_invoke("changeMedia", "{\"id\":\"A1\",\"outgoingVideo\":false}");
++	pump();
++	EXPECT_EQ(find_engine_call("stop", before), -1) << "only incomingVideo stops the view";
++}
++
++TEST_F(CallVideo, AStartThatAnswersAfterTheCloseIsStopped) {
++	want_video();
++	fake_reply(find_engine_call("capabilities"), "{\"returnValue\":true,\"videoCallCapable\":false}");
++	int start = find_engine_call("start");
++	ASSERT_GE(start, 0);
++	gowhatsapp_call_video_active(0); // closed while starting
++	pump();
++	EXPECT_EQ(count_engine_calls("stop"), 0) << "nothing to stop yet";
++	fake_reply(start, "{\"returnValue\":true,\"rxSocket\":\"/tmp/wa-rtc-rx.sock\"}");
++	pump();
++	EXPECT_EQ(count_engine_calls("stop"), 1) << "what the late start brought up is stopped";
++	EXPECT_EQ(fake.video_starts, 0);
++}
++
++// The view went off and on again before the first start answered: that answer belongs to
++// the closed session, not to the one now starting.
++TEST_F(CallVideo, AnOldStartAnswerIsNotTakenForTheNewSession) {
++	want_video();
++	fake_reply(find_engine_call("capabilities"), "{\"returnValue\":true,\"videoCallCapable\":false}");
++	int old_start = find_engine_call("start");
++	ASSERT_GE(old_start, 0);
++	fake_invoke("changeMedia", "{\"id\":\"A1\",\"incomingVideo\":false}");
++	pump();
++	fake_invoke("changeMedia", "{\"id\":\"A1\",\"incomingVideo\":true}");
++	pump();
++	int caps = find_engine_call("capabilities", old_start + 1);
++	ASSERT_GE(caps, 0);
++	fake_reply(caps, "{\"returnValue\":true,\"videoCallCapable\":false}");
++	int new_start = find_engine_call("start", old_start + 1);
++	ASSERT_GE(new_start, 0);
++	fake_reply(old_start, "{\"returnValue\":true,\"rxSocket\":\"/tmp/wa-rtc-rx.sock\"}");
++	pump();
++	EXPECT_EQ(fake.video_starts, 0) << "the old answer must not bring the bridge up";
++	EXPECT_EQ(count_engine_calls("stop"), 1) << "what the old start brought up is stopped";
++	fake_reply(new_start, "{\"returnValue\":true,\"rxSocket\":\"/tmp/wa-rtc-rx.sock\"}");
++	pump();
++	EXPECT_EQ(fake.video_starts, 1) << "the new session still comes up";
++}
++
++// A video call shows the user's face: with a front and a back camera the front one
++// (HAL id 1) is opened, with a single camera that one.
++TEST_F(CallVideo, TheFrontCameraIsUsedWhereThereAreTwo) {
++	want_video();
++	fake_reply(find_engine_call("capabilities"),
++	           "{\"returnValue\":true,\"videoCallCapable\":true,\"cameraCount\":2}");
++	int start = find_engine_call("start");
++	ASSERT_GE(start, 0);
++	EXPECT_TRUE(has(payload_of(start), "\"camera\":1")) << payload_of(start);
++	fake_invoke("changeMedia", "{\"id\":\"A1\",\"incomingVideo\":false}");
++	pump();
++	fake_invoke("changeMedia", "{\"id\":\"A1\",\"incomingVideo\":true}");
++	pump();
++	int caps = find_engine_call("capabilities", start + 1);
++	ASSERT_GE(caps, 0);
++	fake_reply(caps, "{\"returnValue\":true,\"videoCallCapable\":true,\"cameraCount\":1}");
++	int again = find_engine_call("start", start + 1);
++	ASSERT_GE(again, 0);
++	EXPECT_TRUE(has(payload_of(again), "\"camera\":0")) << payload_of(again);
++}
++
++// The Phone app says which way the phone is held (changeMedia {deviceOrientation}, the shell's
++// quarter turns). The front camera turns with the phone, so the peer's turn for our picture
++// goes up by as much; held upright it is the usual 1.
++TEST_F(CallVideo, TurningThePhoneTurnsThePictureThePeerGets) {
++	want_video();
++	fake_reply(find_engine_call("capabilities"),
++	           "{\"returnValue\":true,\"videoCallCapable\":true,\"cameraCount\":2}");
++	fake_reply(find_engine_call("start"), "{\"returnValue\":true,\"txSocket\":\"/tmp/wa-rtc-tx.sock\","
++	                                      "\"rxSocket\":\"/tmp/wa-rtc-rx.sock\"}");
++	pump();
++	ASSERT_EQ(fake.video_orientation_sets, 1);
++	EXPECT_EQ(fake.video_orientation, 1);
++	fake_invoke("changeMedia", "{\"id\":\"A1\",\"deviceOrientation\":1}");
++	EXPECT_EQ(fake.video_orientation_sets, 2) << "the peer hears of the turn at once";
++	EXPECT_EQ(fake.video_orientation, 2);
++	fake_invoke("changeMedia", "{\"id\":\"A1\",\"deviceOrientation\":3}");
++	EXPECT_EQ(fake.video_orientation, 0);
++	fake_invoke("changeMedia", "{\"id\":\"A1\",\"deviceOrientation\":3}");
++	EXPECT_EQ(fake.video_orientation_sets, 3) << "the same orientation again says nothing";
++}
++
++// The back camera looks away from the user: the phone's turn counts the other way.
++TEST_F(CallVideo, WithTheBackCameraThePhonesTurnCountsTheOtherWay) {
++	want_video();
++	bring_up(true);  // one camera: HAL id 0
++	fake_invoke("changeMedia", "{\"id\":\"A1\",\"deviceOrientation\":1}");
++	EXPECT_EQ(fake.video_orientation, 0);
++}
++
++// Held sideways before our camera starts: the first orientation the peer hears is that one.
++TEST_F(CallVideo, AnOrientationGivenBeforeTheCameraStartsIsUsedWhenItDoes) {
++	fake_invoke("changeMedia", "{\"id\":\"A1\",\"deviceOrientation\":1}");
++	EXPECT_EQ(fake.video_orientation_sets, 0) << "nothing of ours to turn yet";
++	want_video();
++	fake_reply(find_engine_call("capabilities"),
++	           "{\"returnValue\":true,\"videoCallCapable\":true,\"cameraCount\":2}");
++	fake_reply(find_engine_call("start"), "{\"returnValue\":true,\"txSocket\":\"/tmp/wa-rtc-tx.sock\","
++	                                      "\"rxSocket\":\"/tmp/wa-rtc-rx.sock\"}");
++	pump();
++	EXPECT_EQ(fake.video_orientation_sets, 1);
++	EXPECT_EQ(fake.video_orientation, 2);
++}
++
++// An orientation alone changes no video direction: WhatsApp hears nothing of it but the turn.
++TEST_F(CallVideo, AnOrientationAloneLeavesTheVideoDirectionsAlone) {
++	want_video();
++	bring_up(true);
++	int before = fake.changemedia_calls;
++	int starts = count_engine_calls("start");
++	fake_invoke("changeMedia", "{\"id\":\"A1\",\"deviceOrientation\":2}");
++	pump();
++	EXPECT_EQ(fake.changemedia_calls, before);
++	EXPECT_EQ(count_engine_calls("start"), starts);
++	EXPECT_EQ(find_engine_call("stop"), -1) << "the engine keeps running";
++}
++
++// Nonsense is ignored rather than taken as a turn.
++TEST_F(CallVideo, AnOrientationOutOfRangeIsIgnored) {
++	want_video();
++	bring_up(true);
++	fake_invoke("changeMedia", "{\"id\":\"A1\",\"deviceOrientation\":7}");
++	fake_invoke("changeMedia", "{\"id\":\"A1\",\"deviceOrientation\":-1}");
++	EXPECT_EQ(fake.video_orientation_sets, 1);
++	EXPECT_EQ(fake.video_orientation, 1);
++}
++
++TEST_F(CallVideo, ALateCapabilitiesAnswerStartsNothing) {
++	want_video();
++	int caps = find_engine_call("capabilities");
++	gowhatsapp_call_video_active(0);
++	pump();
++	fake_reply(caps, "{\"returnValue\":true,\"videoCallCapable\":true}");
++	EXPECT_EQ(find_engine_call("start"), -1);
++}
++
++TEST_F(CallVideo, AnEngineLeftRunningIsStoppedAndRetriedOnce) {
++	want_video();
++	fake_reply(find_engine_call("capabilities"), "{\"returnValue\":true,\"videoCallCapable\":false}");
++	fake_reply(find_engine_call("start"), "{\"returnValue\":false,\"errorText\":\"already running\"}");
++	EXPECT_EQ(count_engine_calls("stop"), 1);
++	int caps2 = find_engine_call("capabilities", find_engine_call("stop"));
++	ASSERT_GE(caps2, 0) << "retried";
++	fake_reply(caps2, "{\"returnValue\":true,\"videoCallCapable\":false}");
++	int start2 = find_engine_call("start", caps2);
++	ASSERT_GE(start2, 0);
++	fake_reply(start2, "{\"returnValue\":false,\"errorText\":\"already running\"}");
++	EXPECT_EQ(count_engine_calls("capabilities"), 2) << "once only";
++	EXPECT_EQ(fake.video_starts, 0);
++}
++
++TEST_F(CallVideo, AFailedStartIsNotRetriedUntilTheWishChanges) {
++	want_video();
++	fake_reply(find_engine_call("capabilities"), "{\"returnValue\":true,\"videoCallCapable\":false}");
++	fake_reply(find_engine_call("start"), "{\"returnValue\":false,\"errorText\":\"rx start failed\"}");
++	gowhatsapp_call_video_active(1); // Go repeats itself on every video state stanza
++	pump();
++	EXPECT_EQ(count_engine_calls("capabilities"), 1);
++	fake_invoke("changeMedia", "{\"id\":\"A1\",\"incomingVideo\":false}");
++	fake_invoke("changeMedia", "{\"id\":\"A1\",\"incomingVideo\":true}");
++	pump();
++	EXPECT_EQ(count_engine_calls("capabilities"), 2) << "the user asked again";
++}
++
++TEST_F(CallVideo, ACameraWithoutAnEncoderStillShowsThePeer) {
++	want_video();
++	fake_reply(find_engine_call("capabilities"), "{\"returnValue\":true,\"videoCallCapable\":true}");
++	int start = find_engine_call("start");
++	EXPECT_TRUE(has(payload_of(start), "\"txEnabled\":true"));
++	fake_reply(start, "{\"returnValue\":false,\"errorText\":\"tx start failed\"}");
++	int start2 = find_engine_call("start", start + 1);
++	ASSERT_GE(start2, 0) << "retried without sending";
++	EXPECT_TRUE(has(payload_of(start2), "\"txEnabled\":false")) << payload_of(start2);
++	fake_reply(start2, "{\"returnValue\":true,\"rxSocket\":\"/tmp/wa-rtc-rx.sock\"}");
++	pump();
++	EXPECT_EQ(fake.video_starts, 1);
++	EXPECT_STREQ(fake.tx_socket, "");
++	EXPECT_TRUE(has(fake.last_subscription_reply, "\"videoWidth\":480")) << "receive-only shape";
++}
++
++TEST_F(CallVideo, UnusableSocketPathsStopTheEngine) {
++	want_video();
++	fake.set_sockets_ok = 0;
++	bring_up(false);
++	EXPECT_EQ(fake.video_starts, 0);
++	EXPECT_EQ(count_engine_calls("stop"), 1);
++}
++
++TEST_F(CallVideo, PeerKeyframeRequestsReachTheEncoderRateLimited) {
++	want_video();
++	bring_up(true);
++	gowhatsapp_call_request_keyframe();
++	gowhatsapp_call_request_keyframe();
++	pump();
++	EXPECT_EQ(count_engine_calls("requestKeyframe"), 1);
++	g_usleep(550 * 1000);
++	gowhatsapp_call_request_keyframe();
++	pump();
++	EXPECT_EQ(count_engine_calls("requestKeyframe"), 1) << "at most one a second";
++	g_usleep(500 * 1000);
++	gowhatsapp_call_request_keyframe();
++	pump();
++	EXPECT_EQ(count_engine_calls("requestKeyframe"), 2);
++}
++
++TEST_F(CallVideo, NoKeyframeRequestsWithoutAnEncoder) {
++	want_video();
++	bring_up(false);
++	EXPECT_EQ(fake.video_orientation_sets, 0) << "nothing of ours to turn";
++	g_usleep(550 * 1000);
++	gowhatsapp_call_request_keyframe();
++	pump();
++	EXPECT_EQ(count_engine_calls("requestKeyframe"), 0);
++}
++
++TEST_F(CallVideo, AudiodHearsTheRealOriginAndTheVideo) {
++	gowhatsapp_call_audio_active(1);
++	pump();
++	int a = last_audiod_call();
++	ASSERT_GE(a, 0);
++	std::string p = payload_of(a);
++	EXPECT_TRUE(has(p, "\"origin\":\"incoming\"")) << p;
++	EXPECT_TRUE(has(p, "\"incomingVideo\":false")) << p;
++	EXPECT_TRUE(has(p, "\"video\":false")) << p;
++	want_video();
++	bring_up(false);
++	p = payload_of(last_audiod_call());
++	EXPECT_TRUE(has(p, "\"incomingVideo\":true")) << p;
++	EXPECT_TRUE(has(p, "\"outgoingVideo\":false")) << p << " (no camera)";
++	EXPECT_TRUE(has(p, "\"video\":true")) << p;
++	fake_invoke("changeMedia", "{\"id\":\"A1\",\"incomingVideo\":false}");
++	pump();
++	p = payload_of(last_audiod_call());
++	EXPECT_TRUE(has(p, "\"incomingVideo\":false")) << p;
++}
++
++TEST_F(CallVideo, TheTestInjectorIsRefusedDuringACall) {
++	gowhatsapp_call_video_active(1);
++	pump();
++	fake_invoke("testInjectVideo", "{}");
++	EXPECT_TRUE(has(fake.last_method_reply, "a call is up")) << fake.last_method_reply;
++	EXPECT_EQ(find_engine_call("capabilities"), -1);
++}
++
++TEST_F(CallVideo, TheTestInjectorBringsTheEngineUpAndDown) {
++	fake_invoke("testInjectVideo", "{\"realStream\":\"1\"}");
++	pump();
++	bring_up(false);
++	EXPECT_EQ(fake.video_starts, 1);
++	fake_invoke("testStopInjectVideo", "{}");
++	pump();
++	EXPECT_EQ(fake.video_stops, 1);
++	EXPECT_EQ(count_engine_calls("stop"), 1);
++}
++
++// A failed first run (e.g. the bus refused the engine) leaves the injector
++// on; a second inject must say so, not claim a real call is up.
++TEST_F(CallVideo, ASecondInjectAsksToStopTheFirst) {
++	fake_invoke("testInjectVideo", "{}");
++	pump();
++	fake_invoke("testInjectVideo", "{}");
++	EXPECT_TRUE(has(fake.last_method_reply, "already injecting")) << fake.last_method_reply;
++	EXPECT_EQ(count_engine_calls("capabilities"), 1);
++	fake_invoke("testStopInjectVideo", "{}");
++	pump();
++	fake_invoke("testInjectVideo", "{}");
++	EXPECT_TRUE(has(fake.last_method_reply, "\"returnValue\":true")) << fake.last_method_reply;
++}
++
++} // namespace
+diff --git a/glue/tests/fakes.c b/glue/tests/fakes.c
+new file mode 100644
+index 0000000..2657ce1
+--- /dev/null
++++ b/glue/tests/fakes.c
+@@ -0,0 +1,224 @@
++#include "fakes.h"
++#include <alsa/asoundlib.h>
++#include <luna-service2/lunaservice.h>
++#include <errno.h>
++#include <stdio.h>
++#include <pthread.h>
++#include <string.h>
++#include <time.h>
++#include "libwhatsmeow.h"
++#include "voipkit.h"
++#include "voipkit_rtcengine.h"
++#include "aec.h"
++#include "denoise.h"
++
++struct fake_state fake;
++static pthread_mutex_t fake_mx = PTHREAD_MUTEX_INITIALIZER;
++void fake_lock(void) { pthread_mutex_lock(&fake_mx); }
++void fake_unlock(void) { pthread_mutex_unlock(&fake_mx); }
++void fake_reset(void) {
++	fake_lock();
++	int registered = fake.ls_registered;
++	memset(&fake, 0, sizeof fake);
++	fake.ls_registered = registered; // call.c registers once per process
++	fake.set_sockets_ok = 1;
++	fake_unlock();
++}
++
++static void sleep_frames(long frames) {
++	long us = frames * 1000000L / 16000 / FAKE_SPEEDUP;
++	struct timespec ts = { us / 1000000L, (us % 1000000L) * 1000L };
++	nanosleep(&ts, NULL);
++}
++
++/* ---- ALSA ---- */
++static int dev_play, dev_cap; // distinct addresses stand in for the handles
++int snd_pcm_open(snd_pcm_t **pcm, const char *name, snd_pcm_stream_t stream, int mode) {
++	(void)name; (void)mode;
++	fake_lock();
++	if (stream == SND_PCM_STREAM_PLAYBACK) {
++		fake.playback_opens++;
++		*pcm = (snd_pcm_t *)&dev_play;
++	} else {
++		fake.capture_opens++;
++		*pcm = (snd_pcm_t *)&dev_cap;
++	}
++	fake_unlock();
++	return 0;
++}
++int snd_pcm_set_params(snd_pcm_t *pcm, snd_pcm_format_t format, snd_pcm_access_t access,
++                       unsigned int channels, unsigned int rate, int soft_resample,
++                       unsigned int latency) {
++	(void)pcm; (void)format; (void)access; (void)channels; (void)rate; (void)soft_resample;
++	(void)latency;
++	return 0;
++}
++snd_pcm_sframes_t snd_pcm_writei(snd_pcm_t *pcm, const void *buffer, snd_pcm_uframes_t size) {
++	if (pcm != (snd_pcm_t *)&dev_play) return -EBADFD;
++	fake_lock();
++	if (fake.inject_epipe > 0) {
++		fake.inject_epipe--;
++		fake_unlock();
++		return -EPIPE;
++	}
++	// Accept at most one 20 ms period per call, as a device with little room would.
++	long n = (long)size > 320 ? 320 : (long)size;
++	if (fake.written_n + n <= FAKE_MAX_SAMPLES) {
++		memcpy(fake.written + fake.written_n, buffer, (size_t)n * sizeof(short));
++		fake.written_n += n;
++	}
++	fake_unlock();
++	sleep_frames(n); // blocking write: returns once the device has played that much
++	return n;
++}
++snd_pcm_sframes_t snd_pcm_readi(snd_pcm_t *pcm, void *buffer, snd_pcm_uframes_t size) {
++	(void)pcm;
++	memset(buffer, 0, size * sizeof(short));
++	sleep_frames((long)size);
++	return (snd_pcm_sframes_t)size;
++}
++int snd_pcm_recover(snd_pcm_t *pcm, int err, int silent) {
++	(void)pcm; (void)silent;
++	fake_lock();
++	fake.recovers++;
++	fake_unlock();
++	return err == -EPIPE ? 0 : err;
++}
++int snd_pcm_wait(snd_pcm_t *pcm, int timeout) { (void)pcm; (void)timeout; return 1; }
++int snd_pcm_drop(snd_pcm_t *pcm) { (void)pcm; fake_lock(); fake.drops++; fake_unlock(); return 0; }
++int snd_pcm_close(snd_pcm_t *pcm) { (void)pcm; fake_lock(); fake.closes++; fake_unlock(); return 0; }
++const char *snd_strerror(int errnum) { (void)errnum; return "fake error"; }
++
++/* ---- AECM / NS ---- */
++void wa_aec_start(int fs, int delay_ms) { (void)fs; (void)delay_ms; }
++void wa_aec_farend(const short *f, int n) {
++	fake_lock();
++	if (n % 160) fake.farend_bad_len++;
++	if (fake.farend_n + n <= FAKE_MAX_SAMPLES) {
++		memcpy(fake.farend + fake.farend_n, f, (size_t)n * sizeof(short));
++		fake.farend_n += n;
++	}
++	fake_unlock();
++}
++void wa_aec_process(short *mic, int n) { (void)mic; (void)n; }
++void wa_aec_stop(void) {}
++void wa_ns_start(int fs) { (void)fs; }
++void wa_ns_process(short *buf, int n) { (void)buf; (void)n; }
++void wa_ns_stop(void) {}
++
++/* ---- voipkit ---- */
++void voipkit_video_start(void) { fake_lock(); fake.video_starts++; fake_unlock(); }
++int voipkit_video_wait_thread_b(int timeoutMs) { (void)timeoutMs; return 1; }
++void voipkit_video_stop(void) { fake_lock(); fake.video_stops++; fake_unlock(); }
++void voipkit_video_receive_frame(const unsigned char *access_unit, unsigned int len) {
++	(void)access_unit; (void)len;
++}
++int voipkit_rtcengine_set_sockets(const char *tx_path, const char *rx_path) {
++	fake_lock();
++	snprintf(fake.tx_socket, sizeof fake.tx_socket, "%s", tx_path ? tx_path : "");
++	snprintf(fake.rx_socket, sizeof fake.rx_socket, "%s", rx_path ? rx_path : "");
++	int ok = fake.set_sockets_ok;
++	fake_unlock();
++	return ok;
++}
++
++/* ---- Go exports ---- */
++char *gowhatsapp_go_call_dial(char *cAddr, int video) { (void)cAddr; (void)video; return NULL; }
++int gowhatsapp_go_call_answer(char *cID, int video) { (void)cID; (void)video; return 0; }
++int gowhatsapp_go_call_hangup_all(void) { return 0; }
++int gowhatsapp_go_call_changemedia(char *cID, int a, int b, int c, int d) {
++	(void)cID; (void)a; (void)b; (void)c; (void)d;
++	fake_lock();
++	fake.changemedia_calls++;
++	fake_unlock();
++	return 0;
++}
++int gowhatsapp_go_call_hangup(char *cID) { (void)cID; return 0; }
++void gowhatsapp_go_call_set_video_orientation(int orientation) {
++	fake_lock();
++	fake.video_orientation = orientation;
++	fake.video_orientation_sets++;
++	fake_unlock();
++}
++void gowhatsapp_go_call_request_peer_keyframe(void) {
++	fake_lock();
++	fake.peer_keyframe_requests++;
++	fake_unlock();
++}
++
++/* ---- luna-service2: calls are recorded; registration succeeds once a test asks for it ---- */
++static int fake_handle;
++bool LSErrorInit(LSError *e) { memset(e, 0, sizeof *e); return true; }
++void LSErrorFree(LSError *e) { (void)e; }
++bool LSMessageReply(LSHandle *sh, LSMessage *msg, const char *payload, LSError *e) {
++	(void)sh; (void)msg; (void)e;
++	fake_lock();
++	snprintf(fake.last_method_reply, sizeof fake.last_method_reply, "%s", payload);
++	fake_unlock();
++	return true;
++}
++const char *LSMessageGetPayload(LSMessage *msg) {
++	return msg ? ((struct fake_msg *)(void *)msg)->payload : "{}";
++}
++bool LSCallOneReply(LSHandle *sh, const char *uri, const char *payload, LSFilterFunc cb,
++                    void *ctx, LSMessageToken *t, LSError *e) {
++	(void)sh; (void)t; (void)e;
++	fake_lock();
++	if (fake.ncalls < (int)(sizeof fake.calls / sizeof fake.calls[0])) {
++		struct fake_ls_call *c = &fake.calls[fake.ncalls++];
++		snprintf(c->uri, sizeof c->uri, "%s", uri);
++		snprintf(c->payload, sizeof c->payload, "%s", payload);
++		c->cb = (void *)cb;
++		c->ctx = ctx;
++	}
++	fake_unlock();
++	return true;
++}
++void fake_reply(int index, const char *payload) {
++	fake_lock();
++	struct fake_ls_call c = fake.calls[index];
++	fake_unlock();
++	struct fake_msg m = { payload };
++	if (c.cb) ((LSFilterFunc)c.cb)(NULL, (LSMessage *)(void *)&m, c.ctx);
++}
++bool LSSubscriptionReply(LSHandle *sh, const char *key, const char *payload, LSError *e) {
++	(void)sh; (void)key; (void)e;
++	fake_lock();
++	fake.nsubscription_replies++;
++	snprintf(fake.last_subscription_reply, sizeof fake.last_subscription_reply, "%s", payload);
++	fake_unlock();
++	return true;
++}
++bool LSSubscriptionAdd(LSHandle *sh, const char *key, LSMessage *msg, LSError *e) {
++	(void)sh; (void)key; (void)msg; (void)e;
++	return true;
++}
++bool LSRegister(const char *name, LSHandle **sh, LSError *e) {
++	(void)name; (void)e;
++	if (!fake.ls_registered) return false;
++	*sh = (LSHandle *)(void *)&fake_handle;
++	return true;
++}
++static LSMethod *fake_methods;
++bool LSRegisterCategory(LSHandle *sh, const char *category, LSMethod *methods,
++                        LSSignal *signals, LSProperty *props, LSError *e) {
++	(void)sh; (void)category; (void)signals; (void)props; (void)e;
++	if (!fake.ls_registered) return false;
++	fake_methods = methods;
++	return true;
++}
++int fake_invoke(const char *method, const char *payload) {
++	for (LSMethod *m = fake_methods; m && m->name; m++) {
++		if (strcmp(m->name, method) == 0) {
++			struct fake_msg msg = { payload };
++			m->function((LSHandle *)(void *)&fake_handle, (LSMessage *)(void *)&msg, NULL);
++			return 1;
++		}
++	}
++	return 0;
++}
++bool LSGmainContextAttach(LSHandle *sh, GMainContext *ctx, LSError *e) {
++	(void)sh; (void)ctx; (void)e;
++	return fake.ls_registered != 0;
++}
++bool LSUnregister(LSHandle *sh, LSError *e) { (void)sh; (void)e; return true; }
+diff --git a/glue/tests/fakes.h b/glue/tests/fakes.h
+new file mode 100644
+index 0000000..653e26e
+--- /dev/null
++++ b/glue/tests/fakes.h
+@@ -0,0 +1,67 @@
++// Fakes glue/call.c is linked against in call_playback_test: a fake ALSA device that records what
++// is written to it at a scaled device pace, AECM that records its far-end reference, and no-op
++// luna-service2, voipkit and Go exports.
++#ifndef WA_TEST_FAKES_H
++#define WA_TEST_FAKES_H
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#define FAKE_MAX_SAMPLES (16000 * 60) /* one minute at 16 kHz */
++#define FAKE_SPEEDUP 4                /* the fake device consumes 4x faster than real time */
++
++struct fake_state {
++	int playback_opens, capture_opens, closes, drops, recovers;
++	int inject_epipe;       // next N playback writes fail with -EPIPE
++	long written_n;         // samples accepted by the playback device
++	short written[FAKE_MAX_SAMPLES];
++	long farend_n;          // samples handed to wa_aec_farend
++	short farend[FAKE_MAX_SAMPLES];
++	int farend_bad_len;     // farend calls whose length was not a multiple of 160
++
++	// The video bridge and the Go export it uses (call_video_test).
++	int video_starts, video_stops, peer_keyframe_requests;
++	int video_orientation, video_orientation_sets; /* gowhatsapp_go_call_set_video_orientation */
++	int changemedia_calls;                         /* gowhatsapp_go_call_changemedia */
++	char tx_socket[128], rx_socket[128];
++	int set_sockets_ok;     // what voipkit_rtcengine_set_sockets answers (reset: 1)
++
++	// luna-service2: LS2 calls made, in order, with what is needed to answer them.
++	int ls_registered;      // LSRegister & co. succeed when set
++	int ncalls;
++	struct fake_ls_call {
++		char uri[160];
++		char payload[1024];
++		void *cb;           // LSFilterFunc
++		void *ctx;
++	} calls[64];
++	int nsubscription_replies;
++	char last_subscription_reply[2048];
++	char last_method_reply[256];
++};
++
++// An LSMessage as the fakes hand it to reply callbacks: just its payload.
++struct fake_msg {
++	const char *payload;
++};
++// Answers LS2 call number `index` with `payload`.
++void fake_reply(int index, const char *payload);
++// Calls com.palm.whatsapp.call's `method` as a client would; 0 if call.c has no such method.
++int fake_invoke(const char *method, const char *payload);
++extern struct fake_state fake;
++void fake_reset(void);
++void fake_lock(void);
++void fake_unlock(void);
++
++// glue/call.c's entry points the tests drive.
++void gowhatsapp_call_audio_active(int on);
++void gowhatsapp_call_on_speaker(const float *frame, int n);
++void gowhatsapp_call_video_active(int on);
++void gowhatsapp_call_request_keyframe(void);
++void gowhatsapp_call_on_state(const char *json);
++void whatsapp_call_luna_init(void);
++
++#ifdef __cplusplus
++}
++#endif
++#endif
+diff --git a/glue/tests/fakes/libwhatsmeow.h b/glue/tests/fakes/libwhatsmeow.h
+new file mode 100644
+index 0000000..2f4f8c9
+--- /dev/null
++++ b/glue/tests/fakes/libwhatsmeow.h
+@@ -0,0 +1,12 @@
++// Test stand-in for the header `go build -buildmode=c-archive` generates: only the Go exports
++// glue/call.c calls, with the generated prototypes. tests/fakes.c defines them.
++#ifndef WA_TEST_LIBWHATSMEOW_H
++#define WA_TEST_LIBWHATSMEOW_H
++extern char *gowhatsapp_go_call_dial(char *cAddr, int video);
++extern int gowhatsapp_go_call_answer(char *cID, int video);
++extern int gowhatsapp_go_call_hangup_all(void);
++extern int gowhatsapp_go_call_changemedia(char *cID, int hasOutgoing, int outgoing, int hasIncoming, int incoming);
++extern int gowhatsapp_go_call_hangup(char *cID);
++extern void gowhatsapp_go_call_request_peer_keyframe(void);
++extern void gowhatsapp_go_call_set_video_orientation(int orientation);
++#endif
+diff --git a/glue/tests/playout_test.cpp b/glue/tests/playout_test.cpp
+new file mode 100644
+index 0000000..51f8601
+--- /dev/null
++++ b/glue/tests/playout_test.cpp
+@@ -0,0 +1,215 @@
++// Unit tests for glue/playout.c, the playout ring between the call decoder and the playback thread.
++#include <gtest/gtest.h>
++#include <atomic>
++#include <thread>
++#include <vector>
++
++extern "C" {
++#include "playout.h"
++}
++
++namespace {
++
++std::vector<short> ramp(int n, short start) {
++	std::vector<short> v(n);
++	for (int i = 0; i < n; i++) v[i] = static_cast<short>(start + i);
++	return v;
++}
++
++class Playout : public ::testing::Test {
++protected:
++	void SetUp() override { wa_playout_init(&p, 100, 300); }
++	void TearDown() override { wa_playout_destroy(&p); }
++	std::vector<short> pull(int n, int *got = nullptr) {
++		std::vector<short> out(n, 0x5555);
++		int g = wa_playout_pull(&p, out.data(), n);
++		if (got) *got = g;
++		return out;
++	}
++	wa_playout p;
++};
++
++TEST_F(Playout, EmptyRingGivesSilence) {
++	int got = -1;
++	auto out = pull(50, &got);
++	EXPECT_EQ(got, 0);
++	for (short s : out) EXPECT_EQ(s, 0);
++	EXPECT_EQ(p.silence, 50u);
++	EXPECT_EQ(p.underflows, 0u); // never started playing, so it did not run dry
++}
++
++TEST_F(Playout, HoldsBackUntilPrefillIsQueued) {
++	auto a = ramp(60, 1);
++	wa_playout_push(&p, a.data(), 60);
++	int got = -1;
++	pull(20, &got);
++	EXPECT_EQ(got, 0) << "60 < prefill 100: still collecting";
++	auto b = ramp(40, 61);
++	wa_playout_push(&p, b.data(), 40);
++	auto out = pull(30, &got);
++	EXPECT_EQ(got, 30);
++	for (int i = 0; i < 30; i++) EXPECT_EQ(out[i], 1 + i);
++}
++
++TEST_F(Playout, PlaysInOrderAcrossTheRingEnd) {
++	// Walk head close to the end of the buffer, then push across it.
++	std::vector<short> big = ramp(250, 0);
++	int got;
++	for (int round = 0; round < 64; round++) {
++		wa_playout_push(&p, big.data(), 250);
++		auto out = pull(250, &got);
++		ASSERT_EQ(got, 250);
++		for (int i = 0; i < 250; i++) ASSERT_EQ(out[i], i) << "round " << round;
++		pull(1, &got); // ran dry -> rebuffers, keeps the ring index moving
++	}
++	EXPECT_EQ(p.dropped, 0u);
++}
++
++TEST_F(Playout, QueuedAudioShortOfThePrefillPlaysAfterWaitingThatLong) {
++	auto a = ramp(40, 1); // a lone tail, less than the prefill of 100
++	wa_playout_push(&p, a.data(), 40);
++	int got;
++	pull(60, &got);
++	EXPECT_EQ(got, 0);
++	pull(30, &got);
++	EXPECT_EQ(got, 0) << "waited 60 of 100";
++	auto out = pull(30, &got); // waited 90: still short
++	EXPECT_EQ(got, 0);
++	out = pull(30, &got); // waited 120 >= 100: plays what there is
++	EXPECT_EQ(got, 30);
++	EXPECT_EQ(out[0], 1);
++	pull(30, &got);
++	EXPECT_EQ(got, 10);
++	EXPECT_EQ(p.underflows, 1u);
++	EXPECT_EQ(p.fill, 0);
++}
++
++TEST_F(Playout, WaitingOnlyCountsWhileAudioIsQueued) {
++	int got;
++	pull(500, &got); // a long silence with nothing queued
++	auto a = ramp(40, 1);
++	wa_playout_push(&p, a.data(), 40);
++	pull(20, &got);
++	EXPECT_EQ(got, 0) << "the empty wait before the push does not count";
++}
++
++TEST_F(Playout, ShortfallIsZeroFilledAndRebuffers) {
++	auto a = ramp(120, 1);
++	wa_playout_push(&p, a.data(), 120);
++	int got;
++	auto out = pull(200, &got);
++	EXPECT_EQ(got, 120);
++	for (int i = 0; i < 120; i++) EXPECT_EQ(out[i], 1 + i);
++	for (int i = 120; i < 200; i++) EXPECT_EQ(out[i], 0);
++	EXPECT_EQ(p.underflows, 1u);
++	// After running dry it waits for the prefill again rather than playing a sliver.
++	auto b = ramp(50, 500);
++	wa_playout_push(&p, b.data(), 50);
++	pull(10, &got);
++	EXPECT_EQ(got, 0);
++	wa_playout_push(&p, b.data(), 50);
++	pull(10, &got);
++	EXPECT_EQ(got, 10);
++}
++
++TEST_F(Playout, BurstBeyondMaxFillDropsTheOldest) {
++	auto a = ramp(250, 0);
++	wa_playout_push(&p, a.data(), 250);
++	auto b = ramp(100, 1000);
++	wa_playout_push(&p, b.data(), 100); // 350 > max_fill 300: 50 oldest go
++	EXPECT_EQ(p.dropped, 50u);
++	EXPECT_EQ(p.fill, 300);
++	int got;
++	auto out = pull(300, &got);
++	EXPECT_EQ(got, 300);
++	EXPECT_EQ(out[0], 50);
++	EXPECT_EQ(out[199], 249);
++	EXPECT_EQ(out[200], 1000);
++	EXPECT_EQ(out[299], 1099);
++}
++
++TEST_F(Playout, PushLargerThanTheRingKeepsTheNewest) {
++	std::vector<short> huge(WA_PLAYOUT_CAP + 500);
++	for (size_t i = 0; i < huge.size(); i++) huge[i] = static_cast<short>(i & 0x7fff);
++	wa_playout_push(&p, huge.data(), static_cast<int>(huge.size()));
++	EXPECT_EQ(p.fill, WA_PLAYOUT_CAP) << "max_fill is raised to what a single push needs";
++	EXPECT_EQ(p.dropped, 500u);
++	int got;
++	auto out = pull(1, &got);
++	EXPECT_EQ(out[0], 500);
++}
++
++TEST_F(Playout, CountersAddUp) {
++	int got;
++	for (int i = 0; i < 40; i++) {
++		auto a = ramp(37 * (i % 5), 0);
++		wa_playout_push(&p, a.data(), static_cast<int>(a.size()));
++		pull(29, &got);
++	}
++	EXPECT_EQ(p.played + p.silence, 40u * 29u);
++	EXPECT_EQ(p.pushed, p.played + p.dropped + static_cast<unsigned long long>(p.fill));
++}
++
++TEST_F(Playout, ResetEmptiesAndRestartsBuffering) {
++	auto a = ramp(200, 1);
++	wa_playout_push(&p, a.data(), 200);
++	int got;
++	pull(10, &got);
++	ASSERT_EQ(got, 10);
++	wa_playout_reset(&p);
++	EXPECT_EQ(p.fill, 0);
++	EXPECT_EQ(p.pushed, 0u);
++	pull(10, &got);
++	EXPECT_EQ(got, 0);
++}
++
++TEST(PlayoutInit, ClampsLimits) {
++	wa_playout q;
++	wa_playout_init(&q, -5, WA_PLAYOUT_CAP * 2);
++	EXPECT_EQ(q.prefill, 0);
++	EXPECT_EQ(q.max_fill, WA_PLAYOUT_CAP);
++	wa_playout_destroy(&q);
++	wa_playout_init(&q, 200, 100);
++	EXPECT_EQ(q.max_fill, 200);
++	wa_playout_destroy(&q);
++}
++
++// Producer and consumer on two threads, as in a call: samples come out in order (TSan target).
++TEST(PlayoutThreads, ConcurrentPushPullKeepsOrder) {
++	static wa_playout q;
++	wa_playout_init(&q, 64, WA_PLAYOUT_CAP);
++	std::atomic<bool> done{false};
++	const int total = 200000;
++	std::thread prod([&] {
++		short buf[96];
++		int next = 1;
++		while (next <= total) {
++			int n = 0;
++			for (; n < 96 && next <= total; n++) buf[n] = static_cast<short>(next++ % 30000 + 1);
++			for (;;) { // back-pressure, so the test checks ordering rather than max_fill drops
++				pthread_mutex_lock(&q.mx);
++				int fill = q.fill;
++				pthread_mutex_unlock(&q.mx);
++				if (fill < WA_PLAYOUT_CAP / 2) break;
++				std::this_thread::yield();
++			}
++			wa_playout_push(&q, buf, n);
++		}
++		done = true;
++	});
++	int expect = 1, seen = 0;
++	short out[50];
++	while (seen < total) {
++		int got = wa_playout_pull(&q, out, 50);
++		for (int i = 0; i < got; i++) {
++			ASSERT_EQ(out[i], static_cast<short>(expect % 30000 + 1));
++			expect++;
++		}
++		seen += got;
++	}
++	prod.join();
++	EXPECT_EQ(q.dropped, 0u);
++	wa_playout_destroy(&q);
++}
++
++} // namespace
+diff --git a/glue/tests/voipkit_rtcengine_test.cpp b/glue/tests/voipkit_rtcengine_test.cpp
+new file mode 100644
+index 0000000..d6df40f
+--- /dev/null
++++ b/glue/tests/voipkit_rtcengine_test.cpp
+@@ -0,0 +1,330 @@
++// Tests glue/voipkit_rtcengine.c against real AF_UNIX SOCK_SEQPACKET listeners standing in for
++// luneos-rtc-engine: whole access units in order, nothing passed on before an IDR, drops and
++// reconnects recover at the next IDR and ask the peer for one (rate-limited), the TX thread hands
++// every unit to Go and stops promptly, and the caller is never blocked.
++#include <gtest/gtest.h>
++#include <atomic>
++#include <chrono>
++#include <cstdio>
++#include <cstring>
++#include <mutex>
++#include <string>
++#include <thread>
++#include <vector>
++
++#include <poll.h>
++#include <sys/socket.h>
++#include <sys/un.h>
++#include <unistd.h>
++
++#include "voipkit.h"
++#include "voipkit_rtcengine.h"
++
++namespace {
++
++std::mutex g_mx;
++std::vector<std::vector<unsigned char>> g_out; // what reached Go from the TX socket
++std::atomic<int> g_keyframe_requests{0};
++
++} // namespace
++
++extern "C" void gowhatsapp_call_video_frame_out(char *data, int length) {
++	std::lock_guard<std::mutex> l(g_mx);
++	g_out.emplace_back(reinterpret_cast<unsigned char *>(data),
++	                   reinterpret_cast<unsigned char *>(data) + length);
++}
++extern "C" void gowhatsapp_go_call_request_peer_keyframe(void) { g_keyframe_requests++; }
++
++namespace {
++
++using namespace std::chrono;
++
++std::vector<unsigned char> au(int nal_type, int tag, size_t size = 64) {
++	std::vector<unsigned char> v(size, static_cast<unsigned char>(tag));
++	v[0] = 0; v[1] = 0; v[2] = 0; v[3] = 1;
++	v[4] = static_cast<unsigned char>(0x60 | nal_type);
++	return v;
++}
++std::vector<unsigned char> idr(int tag, size_t size = 64) {
++	// SPS, PPS, then the IDR slice, as an encoder's first unit.
++	std::vector<unsigned char> v = {0, 0, 0, 1, 0x67, 0x42, 0, 0, 1, 0x68, 0xce};
++	auto s = au(5, tag, size);
++	v.insert(v.end(), s.begin(), s.end());
++	return v;
++}
++std::vector<unsigned char> pframe(int tag, size_t size = 64) { return au(1, tag, size); }
++
++struct Listener {
++	std::string path;
++	int fd = -1;
++	explicit Listener(const std::string &p) : path(p) {
++		unlink(path.c_str());
++		fd = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
++		sockaddr_un sa{};
++		sa.sun_family = AF_UNIX;
++		std::snprintf(sa.sun_path, sizeof sa.sun_path, "%s", path.c_str());
++		EXPECT_EQ(bind(fd, reinterpret_cast<sockaddr *>(&sa), sizeof sa), 0);
++		EXPECT_EQ(listen(fd, 1), 0);
++	}
++	~Listener() {
++		if (fd >= 0) close(fd);
++		unlink(path.c_str());
++	}
++	int accept_within(int ms) {
++		pollfd p{fd, POLLIN, 0};
++		if (poll(&p, 1, ms) <= 0) return -1;
++		return accept4(fd, nullptr, nullptr, SOCK_CLOEXEC);
++	}
++};
++
++std::vector<unsigned char> recv_within(int fd, int ms) {
++	pollfd p{fd, POLLIN, 0};
++	if (poll(&p, 1, ms) <= 0) return {};
++	std::vector<unsigned char> buf(1 << 20);
++	ssize_t n = recv(fd, buf.data(), buf.size(), 0);
++	if (n <= 0) return {};
++	buf.resize(static_cast<size_t>(n));
++	return buf;
++}
++
++void send_au(const std::vector<unsigned char> &v) {
++	voipkit_video_receive_frame(v.data(), static_cast<unsigned int>(v.size()));
++}
++
++std::string tmpdir() {
++	char t[] = "/tmp/wa-rtc-test-XXXXXX"; // the test's own sockets; removed in TearDown
++	return mkdtemp(t);
++}
++
++class Bridge : public ::testing::Test {
++protected:
++	std::string dir;
++	void SetUp() override {
++		dir = tmpdir();
++		std::lock_guard<std::mutex> l(g_mx);
++		g_out.clear();
++		g_keyframe_requests = 0;
++	}
++	void TearDown() override {
++		voipkit_video_stop();
++		voipkit_rtcengine_set_sockets(nullptr, nullptr);
++		rmdir(dir.c_str());
++	}
++};
++
++TEST(BridgeIdr, FindsTheIdrSlice) {
++	auto a = idr(1);
++	EXPECT_TRUE(voipkit_rtcengine_au_has_idr(a.data(), a.size()));
++	auto p = pframe(1);
++	EXPECT_FALSE(voipkit_rtcengine_au_has_idr(p.data(), p.size()));
++	const unsigned char three[] = {0, 0, 1, 0x65, 0x88};
++	EXPECT_TRUE(voipkit_rtcengine_au_has_idr(three, sizeof three));
++	const unsigned char sps_pps[] = {0, 0, 0, 1, 0x67, 0x42, 0, 0, 1, 0x68, 0xce};
++	EXPECT_FALSE(voipkit_rtcengine_au_has_idr(sps_pps, sizeof sps_pps));
++	const unsigned char cut[] = {0, 0, 1};
++	EXPECT_FALSE(voipkit_rtcengine_au_has_idr(cut, sizeof cut));
++	EXPECT_FALSE(voipkit_rtcengine_au_has_idr(nullptr, 0));
++}
++
++TEST_F(Bridge, RejectsPathsThatDoNotFit) {
++	std::string longp(200, 'x');
++	EXPECT_FALSE(voipkit_rtcengine_set_sockets(nullptr, longp.c_str()));
++	EXPECT_TRUE(voipkit_rtcengine_set_sockets(nullptr, (dir + "/rx").c_str()));
++}
++
++TEST_F(Bridge, PathsCannotChangeWhileRunning) {
++	Listener rx(dir + "/rx");
++	ASSERT_TRUE(voipkit_rtcengine_set_sockets(nullptr, rx.path.c_str()));
++	voipkit_video_start();
++	EXPECT_FALSE(voipkit_rtcengine_set_sockets(nullptr, rx.path.c_str()));
++}
++
++TEST_F(Bridge, NothingPassesBeforeStart) {
++	Listener rx(dir + "/rx");
++	ASSERT_TRUE(voipkit_rtcengine_set_sockets(nullptr, rx.path.c_str()));
++	send_au(idr(1));
++	EXPECT_EQ(rx.accept_within(100), -1) << "not running: no connection made";
++}
++
++TEST_F(Bridge, StartsAtAnIdrAndKeepsUnitsWholeAndInOrder) {
++	Listener rx(dir + "/rx");
++	ASSERT_TRUE(voipkit_rtcengine_set_sockets(nullptr, rx.path.c_str()));
++	voipkit_video_start();
++	int c = rx.accept_within(1000);
++	ASSERT_GE(c, 0);
++	EXPECT_TRUE(voipkit_video_wait_thread_b(100));
++	send_au(pframe(1));
++	send_au(pframe(2));
++	EXPECT_EQ(g_keyframe_requests.load(), 1) << "asked once, rate-limited";
++	auto i = idr(3, 30000); // a keyframe-sized unit
++	send_au(i);
++	auto p = pframe(4, 900);
++	send_au(p);
++	EXPECT_EQ(recv_within(c, 500), i);
++	EXPECT_EQ(recv_within(c, 500), p);
++	EXPECT_TRUE(recv_within(c, 100).empty()) << "the P-frames before the IDR were held back";
++	unsigned long long sent = 0, dropped = 0;
++	voipkit_rtcengine_stats(&sent, &dropped);
++	EXPECT_EQ(sent, 2u);
++	EXPECT_EQ(dropped, 2u);
++	close(c);
++}
++
++TEST_F(Bridge, AFullSocketDropsWithoutBlockingAndRecoversAtTheNextIdr) {
++	Listener rx(dir + "/rx");
++	ASSERT_TRUE(voipkit_rtcengine_set_sockets(nullptr, rx.path.c_str()));
++	voipkit_video_start();
++	int c = rx.accept_within(1000);
++	ASSERT_GE(c, 0);
++	send_au(idr(1, 4000));
++	// The engine stops reading: keep sending until the socket is full.
++	auto t0 = steady_clock::now();
++	unsigned long long dropped = 0;
++	for (int k = 0; k < 5000 && dropped == 0; k++) {
++		send_au(pframe(2, 4000));
++		voipkit_rtcengine_stats(nullptr, &dropped);
++	}
++	EXPECT_LT(duration_cast<milliseconds>(steady_clock::now() - t0).count(), 2000)
++		<< "the caller is never blocked";
++	ASSERT_GT(dropped, 0u);
++	int asked = g_keyframe_requests.load();
++	EXPECT_GE(asked, 1);
++	// Drain everything that made it.
++	while (!recv_within(c, 50).empty()) {
++	}
++	send_au(pframe(3));
++	EXPECT_TRUE(recv_within(c, 100).empty()) << "after a drop, nothing until an IDR";
++	auto i = idr(4);
++	send_au(i);
++	EXPECT_EQ(recv_within(c, 500), i);
++	close(c);
++}
++
++TEST_F(Bridge, ReconnectsWhenTheEngineGoesAway) {
++	Listener rx(dir + "/rx");
++	ASSERT_TRUE(voipkit_rtcengine_set_sockets(nullptr, rx.path.c_str()));
++	voipkit_video_start();
++	int c = rx.accept_within(1000);
++	ASSERT_GE(c, 0);
++	send_au(idr(1));
++	ASSERT_FALSE(recv_within(c, 500).empty());
++	close(c); // the engine restarted its RX side
++	send_au(pframe(2)); // fails: the bridge lets go of the socket
++	std::this_thread::sleep_for(milliseconds(250)); // past the reconnect spacing
++	send_au(pframe(3));
++	int c2 = rx.accept_within(1000);
++	ASSERT_GE(c2, 0) << "reconnected";
++	send_au(pframe(4));
++	auto i = idr(5);
++	send_au(i);
++	EXPECT_EQ(recv_within(c2, 500), i) << "resumes at an IDR";
++	close(c2);
++}
++
++TEST_F(Bridge, KeyframeRequestsAreRateLimited) {
++	Listener rx(dir + "/rx");
++	ASSERT_TRUE(voipkit_rtcengine_set_sockets(nullptr, rx.path.c_str()));
++	voipkit_video_start();
++	int c = rx.accept_within(1000);
++	ASSERT_GE(c, 0);
++	for (int k = 0; k < 50; k++) send_au(pframe(k));
++	EXPECT_EQ(g_keyframe_requests.load(), 1);
++	std::this_thread::sleep_for(milliseconds(1050));
++	send_au(pframe(99));
++	EXPECT_EQ(g_keyframe_requests.load(), 2);
++	close(c);
++}
++
++TEST_F(Bridge, TxHandsEveryUnitToGoInOrder) {
++	Listener rx(dir + "/rx"), tx(dir + "/tx");
++	ASSERT_TRUE(voipkit_rtcengine_set_sockets(tx.path.c_str(), rx.path.c_str()));
++	voipkit_video_start();
++	int c = tx.accept_within(1000);
++	ASSERT_GE(c, 0);
++	std::vector<std::vector<unsigned char>> sent;
++	for (int k = 0; k < 20; k++) {
++		sent.push_back(k == 0 ? idr(k, 50000) : pframe(k, 100 + static_cast<size_t>(k)));
++		ASSERT_EQ(send(c, sent.back().data(), sent.back().size(), MSG_NOSIGNAL),
++		          static_cast<ssize_t>(sent.back().size()));
++	}
++	for (int w = 0; w < 100; w++) {
++		{
++			std::lock_guard<std::mutex> l(g_mx);
++			if (g_out.size() >= sent.size()) break;
++		}
++		std::this_thread::sleep_for(milliseconds(10));
++	}
++	std::lock_guard<std::mutex> l(g_mx);
++	EXPECT_EQ(g_out, sent);
++	close(c);
++	int r = rx.accept_within(10);
++	if (r >= 0) close(r);
++}
++
++TEST_F(Bridge, TxReconnectsAfterTheEngineCloses) {
++	Listener tx(dir + "/tx");
++	ASSERT_TRUE(voipkit_rtcengine_set_sockets(tx.path.c_str(), nullptr));
++	voipkit_video_start();
++	int c = tx.accept_within(1000);
++	ASSERT_GE(c, 0);
++	close(c);
++	int c2 = tx.accept_within(2000);
++	ASSERT_GE(c2, 0);
++	auto i = idr(7);
++	ASSERT_EQ(send(c2, i.data(), i.size(), MSG_NOSIGNAL), static_cast<ssize_t>(i.size()));
++	for (int w = 0; w < 100; w++) {
++		{
++			std::lock_guard<std::mutex> l(g_mx);
++			if (!g_out.empty()) break;
++		}
++		std::this_thread::sleep_for(milliseconds(10));
++	}
++	std::lock_guard<std::mutex> l(g_mx);
++	ASSERT_EQ(g_out.size(), 1u);
++	EXPECT_EQ(g_out[0], i);
++	close(c2);
++}
++
++TEST_F(Bridge, StopIsPromptAndIdempotentEvenWithNoEngine) {
++	ASSERT_TRUE(voipkit_rtcengine_set_sockets((dir + "/nobody-tx").c_str(),
++	                                          (dir + "/nobody-rx").c_str()));
++	voipkit_video_start();
++	voipkit_video_start(); // no second TX thread
++	send_au(idr(1));       // nothing listens: dropped quietly
++	EXPECT_FALSE(voipkit_video_wait_thread_b(100));
++	auto t0 = steady_clock::now();
++	voipkit_video_stop();
++	EXPECT_LT(duration_cast<milliseconds>(steady_clock::now() - t0).count(), 1000);
++	voipkit_video_stop();
++}
++
++TEST_F(Bridge, AnOversizedTxUnitIsDroppedNotTruncated) {
++	Listener tx(dir + "/tx");
++	ASSERT_TRUE(voipkit_rtcengine_set_sockets(tx.path.c_str(), nullptr));
++	voipkit_video_start();
++	int c = tx.accept_within(1000);
++	ASSERT_GE(c, 0);
++	int sz = 4 << 20;
++	setsockopt(c, SOL_SOCKET, SO_SNDBUFFORCE, &sz, sizeof sz);
++	setsockopt(c, SOL_SOCKET, SO_SNDBUF, &sz, sizeof sz);
++	auto big = idr(1, (1 << 20) + 100);
++	ssize_t n = send(c, big.data(), big.size(), MSG_NOSIGNAL);
++	auto small = pframe(2);
++	ASSERT_EQ(send(c, small.data(), small.size(), MSG_NOSIGNAL), static_cast<ssize_t>(small.size()));
++	for (int w = 0; w < 100; w++) {
++		{
++			std::lock_guard<std::mutex> l(g_mx);
++			if (!g_out.empty()) break;
++		}
++		std::this_thread::sleep_for(milliseconds(10));
++	}
++	std::lock_guard<std::mutex> l(g_mx);
++	ASSERT_FALSE(g_out.empty());
++	if (n == static_cast<ssize_t>(big.size())) {
++		EXPECT_EQ(g_out.size(), 1u) << "the oversized unit never reaches Go";
++	}
++	EXPECT_EQ(g_out.back(), small);
++	close(c);
++}
++
++} // namespace
 diff --git a/glue/voipkit.cpp b/glue/voipkit.cpp
 new file mode 100644
 index 0000000..085c258
@@ -8391,19 +10829,382 @@ index 0000000..fd69af8
 +	(void) len;
 +	/* Inbound frames are dropped: there is no renderer without the bridge. */
 +}
+diff --git a/glue/voipkit_rtcengine.c b/glue/voipkit_rtcengine.c
+new file mode 100644
+index 0000000..59667e0
+--- /dev/null
++++ b/glue/voipkit_rtcengine.c
+@@ -0,0 +1,322 @@
++// voipkit_rtcengine.c -- video bridge to luneos-rtc-engine (org.webosports.rtcengine).
++//
++// The engine owns the camera, the H.264 encoder and decoder, and the rendering. It binds two
++// AF_UNIX SOCK_SEQPACKET sockets and carries one complete Annex-B access unit per datagram
++// (luneos-rtc-engine docs/API.md, "AU socket wire contract"):
++//
++//   RX socket  connector -> engine   the peer's access units, as meowcaller's ReceiveVideo
++//                                    delivers them; the engine decodes and renders them.
++//   TX socket  engine -> connector   our encoded camera, handed to Call.SendVideo through
++//                                    gowhatsapp_call_video_frame_out.
++//
++// glue/call.c starts and stops the engine session over LS2 and tells this file the socket
++// paths (voipkit_rtcengine_set_sockets) before voipkit_video_start(). This file only moves
++// bytes; it never blocks the caller:
++//
++// - The RX side sends from the caller's thread (a Go goroutine) with MSG_DONTWAIT. A full
++//   socket drops the access unit instead of stalling meowcaller's receive loop. A dropped
++//   unit breaks the decoder's reference chain, so after any drop -- and when the bridge
++//   first connects, mid-stream -- units are held back until the next IDR, and the peer is
++//   asked for one (gowhatsapp_go_call_request_peer_keyframe, rate-limited).
++// - The TX side is one thread reading the TX socket and passing each unit to Go. Without a
++//   TX path (no usable camera on the device) the thread is not started.
++#include <errno.h>
++#include <poll.h>
++#include <pthread.h>
++#include <stdatomic.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/socket.h>
++#include <sys/un.h>
++#include <time.h>
++#include <unistd.h>
++
++#include "voipkit.h"
++#include "voipkit_rtcengine.h"
++
++// Exported by call.go (cgo //export); declared here rather than through the generated
++// header so this file builds without the Go half (the unit tests link stubs instead).
++extern void gowhatsapp_call_video_frame_out(char *data, int length);
++extern void gowhatsapp_go_call_request_peer_keyframe(void);
++
++// Largest access unit read from the TX socket. The engine's keyframes at 1280x720 are
++// hundreds of KB (docs/API.md); a larger datagram is truncated by recv() and dropped.
++#define TX_AU_MAX (1024 * 1024)
++// Receive-side socket buffer asked for. A SOCK_SEQPACKET datagram must fit in the send
++// buffer whole, so this bounds the largest peer keyframe the RX side can pass on.
++#define RX_SNDBUF (1024 * 1024)
++// Minimum spacing of reconnect attempts and of keyframe requests to the peer.
++#define RECONNECT_INTERVAL_MS 200
++#define KEYFRAME_REQUEST_INTERVAL_MS 1000
++
++static pthread_mutex_t s_mx = PTHREAD_MUTEX_INITIALIZER;
++static char s_rx_path[sizeof(((struct sockaddr_un *)0)->sun_path)];
++static char s_tx_path[sizeof(((struct sockaddr_un *)0)->sun_path)];
++static int s_running;            // between voipkit_video_start and voipkit_video_stop
++static int s_rx_fd = -1;
++static int s_rx_wait_idr = 1;    // hold units back until the next IDR
++static long long s_rx_last_connect_ms;
++static long long s_last_keyframe_req_ms = -KEYFRAME_REQUEST_INTERVAL_MS;
++static unsigned long long s_rx_sent, s_rx_dropped;
++
++static pthread_t s_tx_thread;
++static int s_tx_started;
++static atomic_int s_tx_stop;
++
++static long long now_ms(void)
++{
++	struct timespec ts;
++	clock_gettime(CLOCK_MONOTONIC, &ts);
++	return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
++}
++
++int voipkit_rtcengine_au_has_idr(const unsigned char *au, size_t len)
++{
++	// Annex-B: NAL units follow 00 00 01 (or 00 00 00 01) start codes; the NAL type is
++	// the low five bits of the byte after the start code. 5 = IDR slice.
++	for (size_t i = 0; i + 3 < len; i++) {
++		if (au[i] == 0 && au[i + 1] == 0 && au[i + 2] == 1) {
++			if ((au[i + 3] & 0x1f) == 5)
++				return 1;
++			i += 2;
++		}
++	}
++	return 0;
++}
++
++static int set_path(char *dst, size_t dstsz, const char *path)
++{
++	if (!path || !path[0]) {
++		dst[0] = 0;
++		return 1;
++	}
++	size_t n = strlen(path);
++	if (n >= dstsz)
++		return 0;
++	memcpy(dst, path, n + 1);
++	return 1;
++}
++
++int voipkit_rtcengine_set_sockets(const char *tx_path, const char *rx_path)
++{
++	pthread_mutex_lock(&s_mx);
++	int ok = !s_running && set_path(s_tx_path, sizeof s_tx_path, tx_path) &&
++	         set_path(s_rx_path, sizeof s_rx_path, rx_path);
++	if (!ok) {
++		s_tx_path[0] = 0;
++		s_rx_path[0] = 0;
++	}
++	pthread_mutex_unlock(&s_mx);
++	return ok;
++}
++
++static int connect_seqpacket(const char *path)
++{
++	struct sockaddr_un sa;
++	memset(&sa, 0, sizeof sa);
++	sa.sun_family = AF_UNIX;
++	memcpy(sa.sun_path, path, strlen(path) + 1);  // fits: checked in set_path
++	int fd = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
++	if (fd < 0)
++		return -1;
++	if (connect(fd, (struct sockaddr *)&sa, sizeof sa) < 0) {
++		close(fd);
++		return -1;
++	}
++	return fd;
++}
++
++// Called with s_mx held.
++static void rx_connect_locked(void)
++{
++	long long t = now_ms();
++	if (s_rx_fd >= 0 || !s_rx_path[0] || t - s_rx_last_connect_ms < RECONNECT_INTERVAL_MS)
++		return;
++	s_rx_last_connect_ms = t;
++	int fd = connect_seqpacket(s_rx_path);
++	if (fd < 0)
++		return;
++	int sz = RX_SNDBUF;
++	// SO_SNDBUFFORCE passes net.core.wmem_max when we may (the service runs as root).
++	if (setsockopt(fd, SOL_SOCKET, SO_SNDBUFFORCE, &sz, sizeof sz) < 0)
++		(void)setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sz, sizeof sz);
++	s_rx_fd = fd;
++	s_rx_wait_idr = 1;  // joining mid-stream
++	fprintf(stderr, "wa-video: rx connected to %s\n", s_rx_path);
++}
++
++// Called with s_mx held. Returns 1 when the caller should ask the peer for a keyframe.
++static int keyframe_due_locked(void)
++{
++	long long t = now_ms();
++	if (t - s_last_keyframe_req_ms < KEYFRAME_REQUEST_INTERVAL_MS)
++		return 0;
++	s_last_keyframe_req_ms = t;
++	return 1;
++}
++
++void voipkit_video_receive_frame(const unsigned char *access_unit, unsigned int len)
++{
++	int want_keyframe = 0;
++	if (!access_unit || len == 0)
++		return;
++	pthread_mutex_lock(&s_mx);
++	if (!s_running) {
++		pthread_mutex_unlock(&s_mx);
++		return;
++	}
++	rx_connect_locked();
++	if (s_rx_fd < 0) {
++		pthread_mutex_unlock(&s_mx);
++		return;
++	}
++	if (s_rx_wait_idr) {
++		if (!voipkit_rtcengine_au_has_idr(access_unit, len)) {
++			s_rx_dropped++;
++			want_keyframe = keyframe_due_locked();
++			pthread_mutex_unlock(&s_mx);
++			if (want_keyframe)
++				gowhatsapp_go_call_request_peer_keyframe();
++			return;
++		}
++		s_rx_wait_idr = 0;
++	}
++	ssize_t n = send(s_rx_fd, access_unit, len, MSG_DONTWAIT | MSG_NOSIGNAL);
++	if (n == (ssize_t)len) {
++		s_rx_sent++;
++	} else {
++		int err = n < 0 ? errno : EMSGSIZE;
++		s_rx_dropped++;
++		s_rx_wait_idr = 1;
++		if (err != EAGAIN && err != EWOULDBLOCK && err != EMSGSIZE && err != ENOBUFS) {
++			// The engine went away (session stopped or restarted): reconnect later.
++			close(s_rx_fd);
++			s_rx_fd = -1;
++		}
++		want_keyframe = keyframe_due_locked();
++	}
++	pthread_mutex_unlock(&s_mx);
++	if (want_keyframe)
++		gowhatsapp_go_call_request_peer_keyframe();
++}
++
++static void *tx_thread_main(void *arg)
++{
++	char path[sizeof s_tx_path];
++	memcpy(path, arg, sizeof path);
++	free(arg);
++	unsigned char *buf = malloc(TX_AU_MAX);
++	if (!buf)
++		return NULL;
++	int fd = -1;
++	while (!atomic_load(&s_tx_stop)) {
++		if (fd < 0) {
++			fd = connect_seqpacket(path);
++			if (fd < 0) {
++				poll(NULL, 0, RECONNECT_INTERVAL_MS);
++				continue;
++			}
++			fprintf(stderr, "wa-video: tx connected to %s\n", path);
++		}
++		struct pollfd p = {.fd = fd, .events = POLLIN};
++		int r = poll(&p, 1, RECONNECT_INTERVAL_MS);
++		if (r < 0 && errno != EINTR)
++			break;
++		if (r <= 0)
++			continue;
++		ssize_t n = recv(fd, buf, TX_AU_MAX, MSG_TRUNC);
++		if (n <= 0) {
++			// 0: the engine closed the socket. Reconnect; the session may be restarting.
++			close(fd);
++			fd = -1;
++			continue;
++		}
++		if (n > TX_AU_MAX) {
++			fprintf(stderr, "wa-video: tx access unit of %zd bytes dropped (max %d)\n", n,
++			        TX_AU_MAX);
++			continue;
++		}
++		gowhatsapp_call_video_frame_out((char *)buf, (int)n);
++	}
++	if (fd >= 0)
++		close(fd);
++	free(buf);
++	return NULL;
++}
++
++void voipkit_video_start(void)
++{
++	pthread_mutex_lock(&s_mx);
++	if (s_running) {
++		pthread_mutex_unlock(&s_mx);
++		return;
++	}
++	s_running = 1;
++	s_rx_wait_idr = 1;
++	s_rx_sent = s_rx_dropped = 0;
++	s_rx_last_connect_ms = -RECONNECT_INTERVAL_MS;
++	// A new session may ask the peer for a keyframe at once, however recently the last did.
++	s_last_keyframe_req_ms = now_ms() - KEYFRAME_REQUEST_INTERVAL_MS;
++	rx_connect_locked();
++	if (s_tx_path[0]) {
++		char *path = malloc(sizeof s_tx_path);
++		if (path) {
++			memcpy(path, s_tx_path, sizeof s_tx_path);
++			atomic_store(&s_tx_stop, 0);
++			if (pthread_create(&s_tx_thread, NULL, tx_thread_main, path) == 0) {
++				s_tx_started = 1;
++			} else {
++				free(path);
++				fprintf(stderr, "wa-video: could not start the tx thread\n");
++			}
++		}
++	}
++	pthread_mutex_unlock(&s_mx);
++}
++
++int voipkit_video_wait_thread_b(int timeoutMs)
++{
++	long long deadline = now_ms() + (timeoutMs > 0 ? timeoutMs : 0);
++	for (;;) {
++		pthread_mutex_lock(&s_mx);
++		if (s_running)
++			rx_connect_locked();
++		int connected = s_rx_fd >= 0;
++		int running = s_running;
++		pthread_mutex_unlock(&s_mx);
++		if (connected || !running || now_ms() >= deadline)
++			return connected;
++		poll(NULL, 0, RECONNECT_INTERVAL_MS / 4);
++	}
++}
++
++void voipkit_video_stop(void)
++{
++	pthread_mutex_lock(&s_mx);
++	int join = s_tx_started;
++	s_tx_started = 0;
++	if (s_running)
++		fprintf(stderr, "wa-video: bridge stopped (rx sent %llu, dropped %llu)\n", s_rx_sent,
++		        s_rx_dropped);
++	s_running = 0;
++	if (s_rx_fd >= 0) {
++		close(s_rx_fd);
++		s_rx_fd = -1;
++	}
++	atomic_store(&s_tx_stop, 1);
++	pthread_mutex_unlock(&s_mx);
++	// Join outside the lock: the tx thread never takes it, but Go's frame_out might be slow.
++	if (join)
++		pthread_join(s_tx_thread, NULL);
++}
++
++void voipkit_rtcengine_stats(unsigned long long *sent, unsigned long long *dropped)
++{
++	pthread_mutex_lock(&s_mx);
++	if (sent)
++		*sent = s_rx_sent;
++	if (dropped)
++		*dropped = s_rx_dropped;
++	pthread_mutex_unlock(&s_mx);
++}
+diff --git a/glue/voipkit_rtcengine.h b/glue/voipkit_rtcengine.h
+new file mode 100644
+index 0000000..e4a5579
+--- /dev/null
++++ b/glue/voipkit_rtcengine.h
+@@ -0,0 +1,29 @@
++// voipkit_rtcengine.h -- extra entry points of the luneos-rtc-engine video bridge
++// (glue/voipkit_rtcengine.c), on top of the backend-neutral ones in voipkit.h.
++#ifndef VOIPKIT_RTCENGINE_H
++#define VOIPKIT_RTCENGINE_H
++
++#include <stddef.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++// Sets the engine's socket paths, as its LS2 start reply returned them. tx_path NULL or ""
++// means no outgoing video (no TX thread); rx_path NULL or "" means the peer's video is not
++// passed on. Returns 0, leaving both cleared, when a path does not fit a sockaddr_un or the
++// bridge is running (call voipkit_video_stop first).
++int voipkit_rtcengine_set_sockets(const char *tx_path, const char *rx_path);
++
++// 1 when the Annex-B access unit holds an IDR slice (NAL type 5).
++int voipkit_rtcengine_au_has_idr(const unsigned char *au, size_t len);
++
++// Access units passed to the engine and dropped since the last voipkit_video_start.
++// Either pointer may be NULL.
++void voipkit_rtcengine_stats(unsigned long long *sent, unsigned long long *dropped);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif
 diff --git a/go.mod b/go.mod
-index 8207d22..ca39d3e 100644
+index 3d90d72..f7801d4 100644
 --- a/go.mod
 +++ b/go.mod
 @@ -6,6 +6,8 @@ require (
  	github.com/alfg/mp4 v0.0.0-20210728035756-55ea58c08aeb
  	github.com/lib/pq v1.10.4
  	github.com/mdp/qrterminal/v3 v3.0.0
-+	github.com/purpshell/meowcaller v0.0.0-20260717112041-9769d5aaaeca
++	github.com/purpshell/meowcaller v0.0.0-20260906234207-c48c3e2a243c
 +	github.com/rs/zerolog v1.35.1
  	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
- 	go.mau.fi/whatsmeow v0.0.0-20261017175727-b2b1e71d45e2
- 	golang.org/x/image v0.44.0
+ 	go.mau.fi/util v0.11.0
+ 	go.mau.fi/whatsmeow v0.0.0-20261102152715-54038813c47f
 @@ -21,12 +23,19 @@ require (
  	github.com/dustin/go-humanize v1.0.1 // indirect
  	github.com/elliotchance/orderedmap/v3 v3.1.0 // indirect
@@ -8424,17 +11225,17 @@ index 8207d22..ca39d3e 100644
 -	github.com/rs/zerolog v1.35.1 // indirect
  	github.com/vektah/gqlparser/v2 v2.5.27 // indirect
  	go.mau.fi/libsignal v0.2.2 // indirect
- 	go.mau.fi/util v0.11.0 // indirect
-@@ -40,3 +49,7 @@ require (
+ 	golang.org/x/crypto v0.58.0 // indirect
+@@ -39,3 +48,7 @@ require (
  	modernc.org/memory v1.8.0 // indirect
  	rsc.io/qr v0.2.0 // indirect
  )
 +
 +// meowcaller is built from a patched checkout of github.com/purpshell/meowcaller at
-+// v0.0.0-20260717112041-9769d5aaaeca (see the LuneOS recipe), placed in third_party/meowcaller.
++// v0.0.0-20260906234207-c48c3e2a243c (see the LuneOS recipe), placed in third_party/meowcaller.
 +replace github.com/purpshell/meowcaller => ./third_party/meowcaller
 diff --git a/go.sum b/go.sum
-index 7c780a8..8b324c6 100644
+index 8b7555e..dbbb5ab 100644
 --- a/go.sum
 +++ b/go.sum
 @@ -22,6 +22,9 @@ github.com/google/pprof v0.0.0-20240409012703-83162a5b38cd h1:gbpYu9NMq8jhDVbvlG
@@ -8468,7 +11269,7 @@ index 7c780a8..8b324c6 100644
  github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=
  github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
  github.com/rs/zerolog v1.35.1 h1:m7xQeoiLIiV0BCEY4Hs+j2NG4Gp2o2KPKmhnnLiazKI=
-@@ -70,11 +87,14 @@ golang.org/x/net v0.61.0/go.mod h1:WgDCOTH8iwtB66T4/GfI94AHo/hhdb7Hah9NDseQfiI=
+@@ -68,11 +85,14 @@ golang.org/x/net v0.61.0/go.mod h1:WgDCOTH8iwtB66T4/GfI94AHo/hhdb7Hah9NDseQfiI=
  golang.org/x/sync v0.24.0 h1:iqiDrGoDgyuvAKrhLQthUEzU/R378N78gXbBjxed7oA=
  golang.org/x/sync v0.24.0/go.mod h1:sUUOizhqBxiL6pEWpqNLUiaJn1ShEbZ6BBqskPbjZm0=
  golang.org/x/sys v0.0.0-20190222072716-a9d3bda3a223/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
@@ -8484,26 +11285,22 @@ index 7c780a8..8b324c6 100644
  golang.org/x/tools v0.52.0/go.mod h1:ItcP5UNaVGG+Yc4eIYmaFLNJ4soEopkx5Y2d4lcEurs=
  google.golang.org/protobuf v1.36.12 h1:pJOKDDOyeXErUroCihFAd5LQuwXBSpVnKGrj5o/fwxc=
 diff --git a/handler.go b/handler.go
-index c32e059..4404cf0 100644
+index e46ebe5..16a7800 100644
 --- a/handler.go
 +++ b/handler.go
-@@ -143,22 +143,40 @@ func (handler *Handler) eventHandler(rawEvt interface{}) {
+@@ -144,22 +144,41 @@ func (handler *Handler) eventHandler(rawEvt interface{}) {
  			handler.prune_devices(*cli.Store.ID)
  		}
  	case *events.CallOffer:
-+		// webOS: post a "call log" style bubble (📞/📹 Incoming call) instead of the old
-+		// "WhatsApp Web does not support calls" caveat text — real calls are already handled
-+		// in-plugin via meowcaller/the Phone app (see call.go). Use the WhatsApp CallID as the
-+		// message id so CallTerminate below can flip this same bubble to "Missed call" via the
-+		// existing edit-in-place mechanism (purple_handle_message_edit) if it never answers.
- 		bcm := evt.BasicCallMeta
- 		chat := handler.lidToPn(bcm.From, "handling call offer")
- 		sender := handler.lidToPn(bcm.CallCreator, "handling call offer")
+-		bcm := evt.BasicCallMeta
+-		chat := handler.lidToPn(bcm.From, "handling call offer")
+-		sender := handler.lidToPn(bcm.CallCreator, "handling call offer")
 -		text := "This contact is trying to call you, but whatsmeow does not support calls."
 -		purple_display_text_message(handler.account, chat.ToNonAD().String(), false, false, sender.ToNonAD().String(), nil, bcm.Timestamp, text, nil, "", "", "")
-+		text := callBubbleText(bcm.CallID, false)
-+		id := bcm.CallID
-+		purple_display_text_message(handler.account, chat.ToNonAD().String(), false, false, sender.ToNonAD().String(), nil, bcm.Timestamp, text, &id, "", "", "")
++		// webOS: a 1:1 call rings in the Phone app (see call.go), so nothing goes into the
++		// chat while it rings -- an "Incoming call" message here made Messaging alert about
++		// the same call a second time. If it goes unanswered, CallTerminate below posts
++		// "Missed call" instead.
  	case *events.CallOfferNotice:
  		// same as CallOffer, but is a group
  		bcm := evt.BasicCallMeta
@@ -8521,14 +11318,22 @@ index c32e059..4404cf0 100644
  		// related to calls. ignore silently.
  	case *events.CallTerminate:
 -		// related to calls. ignore silently.
-+		// webOS: if the call never reached "active" (answered) before it ended, flip the
-+		// "Incoming call" bubble posted above to "Missed call" — mirrors what the real WhatsApp
-+		// app shows in the chat. calls/callMu are call.go's shared meowcaller call-state map,
-+		// keyed by the same WhatsApp CallID. Defaults to "missed" (answered=false) when the
-+		// call was never tracked there at all — correct for group-call notices, which this
-+		// plugin can't answer regardless.
-+		if !callWasAnswered(evt.CallID) {
-+			purple_handle_message_edit(handler.account, evt.CallID, callBubbleText(evt.CallID, true))
++		// webOS: a call that never reached "active" (answered) is a missed call, as the real
++		// WhatsApp app shows it in the chat. A 1:1 call (tracked in call.go's calls map) had
++		// no chat message while it rang, so the missed call is posted now, under the call's
++		// id; a group-call notice already has its "Incoming call" message, which is edited in
++		// place. The peer is the call's creator for an incoming call. One taken on another of
++		// the user's devices was answered, so it is no missed call (call_end.go).
++		if !callWasAnswered(evt.CallID) && !endedAnsweredElsewhere(evt.Reason) {
++			text := callBubbleText(evt.CallID, true)
++			if callWasIncoming(evt.CallID) {
++				bcm := evt.BasicCallMeta
++				peer := handler.lidToPn(bcm.CallCreator, "handling missed call")
++				id := evt.CallID
++				purple_display_text_message(handler.account, peer.ToNonAD().String(), false, false, peer.ToNonAD().String(), nil, bcm.Timestamp, text, &id, "", "", "")
++			} else {
++				purple_handle_message_edit(handler.account, evt.CallID, text)
++			}
 +		}
  	//case *events.JoinedGroup:
  	// TODO
@@ -8587,7 +11392,7 @@ index 86c02f5..60e604b 100644
  func (l *purpleLogger) Infof(msg string, args ...interface{}) {
  	purple_debug(2, l.formatf(msg, args...))
 diff --git a/login.go b/login.go
-index 3a4b666..362cb3f 100644
+index 005c782..149254f 100644
 --- a/login.go
 +++ b/login.go
 @@ -86,6 +86,22 @@ func login(account *PurpleAccount, purple_user_dir string, username string, cred
@@ -8625,6 +11430,3 @@ index 3a4b666..362cb3f 100644
  	if proxy_address != "" {
  		handler.client.SetProxyAddress(proxy_address)
  	}
--- 
-2.53.0
-
