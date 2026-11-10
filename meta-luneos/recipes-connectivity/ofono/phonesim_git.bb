@@ -6,8 +6,8 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=eb723b61539feef013de476e68b5c50a"
 
 DEPENDS += "qtbase qtbase-native qtdeclarative qt5compat qtdeclarative-native"
 
-SRCREV = "a55ada223b31ce9a69d0d225ec2aa0b8f311e401"
-PV = "2.0+git"
+SRCREV = "5f128024cfd24dc2ebb26e984c3a5e046d8ceae5"
+PV = "2.1"
 
 SRC_URI = "git://git.kernel.org/pub/scm/network/ofono/phonesim.git;protocol=https;branch=master \
         file://phonesim.service \
