@@ -1,0 +1,478 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sat, 7 Nov 2026 17:30:30 +0100
+Subject: [PATCH] webOS: Send the mentions the Messaging app picked
+
+When the user picks people to mention, the transport puts them on the
+conversation as "webos-send-mentions" just before serv_send_im or
+serv_chat_send, as "<id>\x1f<name>" records joined by "\x1e", and the
+text has "@<name>" for each. It removes the value again when the call
+returns.
+
+send_im did nothing with mentions, so a DM went out with the bare
+"@name" text. chat_send only guessed at mentions from the text with
+discord_make_mentions, which cannot find a name with a space in it
+unless it is two words, nor one it does not know as a user name, alias
+or nickname.
+
+Both now turn each "@<name>" of a record into a Discord mention,
+"<@user id>", before anything else and before any asynchronous step,
+so a DM that still has to be created gets them too. The user is found
+by the record's id (the buddy name), then by the name the chat shows,
+the ways discord_make_mention looks up a typed "@name" (that lookup
+moves to a function both use), then by a group DM member's display
+name, and last by the id as a user snowflake. A record that resolves
+to nobody leaves its text alone. chat_send still runs its own guessing
+afterwards on whatever is left.
+
+The rewriting itself is discord_webos_apply_mentions in
+webos_helpers.c, with unit tests: the longest name wins and a name
+only counts as a whole word, so "@Ann" is not found in "@Anna" or
+"me@Ann.example", and a name is also found HTML-escaped.
+
+"webos-send-location" and "webos-send-contact" are left alone: Discord
+has no message form of its own for either, and the text the transport
+sends already carries them.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ libdiscord.c               | 105 +++++++++++++++++++++++++----
+ tests/test_webos_helpers.c |  80 ++++++++++++++++++++++
+ webos_helpers.c            | 133 +++++++++++++++++++++++++++++++++++++
+ webos_helpers.h            |  13 ++++
+ 4 files changed, 318 insertions(+), 13 deletions(-)
+
+diff --git a/libdiscord.c b/libdiscord.c
+index c51b3e0..5d7ee68 100644
+--- a/libdiscord.c
++++ b/libdiscord.c
+@@ -2455,15 +2455,13 @@ discord_find_channel_by_name(DiscordGuild *guild, gchar *name)
+ 	return 0;
+ }
+ 
+-static gboolean
+-discord_make_mention(const GMatchInfo *match, GString *result, gpointer user_data)
++/* The user a typed mention names: by user name (with or without discriminator), then by buddy alias,
++ * then by the guild's nickname. NULL if none. */
++static DiscordUser *
++discord_find_mention_user(DiscordAccount *da, DiscordGuild *guild, const gchar *identifier)
+ {
+-	DiscordAccountGuild *ag = user_data;
+-	DiscordAccount *da = ag->account;
+-	DiscordGuild *guild = ag->guild;
+-
+-	gchar *match_string = g_match_info_fetch(match, 0);
+-	gchar *identifier = g_match_info_fetch(match, 1);
++	if (da == NULL || identifier == NULL || *identifier == '\0')
++		return NULL;
+ 
+ 	/* Try to find user by discriminator */
+ 	DiscordUser *user = discord_get_user_fullname(da, identifier);
+@@ -2498,6 +2496,21 @@ discord_make_mention(const GMatchInfo *match, GString *result, gpointer user_dat
+ 		}
+ 	}
+ 
++	return user;
++}
++
++static gboolean
++discord_make_mention(const GMatchInfo *match, GString *result, gpointer user_data)
++{
++	DiscordAccountGuild *ag = user_data;
++	DiscordAccount *da = ag->account;
++	DiscordGuild *guild = ag->guild;
++
++	gchar *match_string = g_match_info_fetch(match, 0);
++	gchar *identifier = g_match_info_fetch(match, 1);
++
++	DiscordUser *user = discord_find_mention_user(da, guild, identifier);
++
+ 	if (user) {
+ 		g_string_append_printf(result, " &lt;@%" G_GUINT64_FORMAT "&gt; ", user->id);
+ 	} else if (guild != NULL) {
+@@ -10130,6 +10143,62 @@ discord_conversation_send_message(DiscordAccount *da, guint64 room_id, const gch
+ 	return 1;
+ }
+ 
++typedef struct {
++	DiscordAccount *da;
++	DiscordGuild *guild;
++	DiscordChannel *channel;
++} DiscordWebosMentionCtx;
++
++/* webOS: the user a "webos-send-mentions" record names. The id is the buddy name on the service, but
++ * in a chat the app knows people by the names the chat shows, which can be a guild nickname, a buddy
++ * alias or, in a group DM, a display name; so try the id and then the shown name each way
++ * discord_make_mention resolves a typed "@name", then a group DM member's display name, then the id
++ * as a user snowflake. */
++static guint64
++discord_webos_resolve_mention(const gchar *id, const gchar *name, gpointer user_data)
++{
++	DiscordWebosMentionCtx *ctx = user_data;
++	DiscordUser *user = discord_find_mention_user(ctx->da, ctx->guild, id);
++
++	if (user == NULL)
++		user = discord_find_mention_user(ctx->da, ctx->guild, name);
++
++	if (user == NULL && ctx->channel != NULL && ctx->channel->type == CHANNEL_GROUP_DM) {
++		for (GList *l = ctx->channel->recipients; l != NULL && user == NULL; l = l->next) {
++			DiscordUser *u = discord_get_user(ctx->da, *(guint64 *) l->data);
++
++			if (u != NULL && u->global_name != NULL &&
++					(purple_strequal(u->global_name, id) || purple_strequal(u->global_name, name)))
++				user = u;
++		}
++	}
++
++	if (user == NULL && discord_webos_is_snowflake(id))
++		user = discord_get_user(ctx->da, to_int(id));
++
++	return user ? user->id : 0;
++}
++
++/* webOS: message with the mentions the transport put on conv as "webos-send-mentions" made into
++ * Discord mentions (see discord_webos_apply_mentions). The value belongs to the transport, which
++ * removes it once send_im/chat_send returns: it is only read, here, before anything asynchronous.
++ * Returns a new string: a copy of message when there are none. */
++static gchar *
++discord_webos_send_mentions(DiscordAccount *da, PurpleConversation *conv, DiscordGuild *guild,
++		DiscordChannel *channel, const gchar *message)
++{
++	const gchar *records = conv ? purple_conversation_get_data(conv, "webos-send-mentions") : NULL;
++
++	if (message == NULL)
++		message = "";
++
++	if (records == NULL || *records == '\0')
++		return g_strdup(message);
++
++	DiscordWebosMentionCtx ctx = { .da = da, .guild = guild, .channel = channel };
++	return discord_webos_apply_mentions(message, records, discord_webos_resolve_mention, &ctx);
++}
++
+ static gint
+ discord_chat_send(PurpleConnection *pc, gint id,
+ #if PURPLE_VERSION_CHECK(3, 0, 0)
+@@ -10149,11 +10218,13 @@ discord_chat_send(PurpleConnection *pc, gint id,
+ 	chatconv = purple_conversations_find_chat(pc, id);
+ 	guint64 room_id = discord_get_channel_id_from_conv(da, PURPLE_CONVERSATION(chatconv));
+ 
+-	gchar *d_message = g_strdup(message);
+-
+ 	DiscordGuild *guild = NULL;
+ 	DiscordChannel *channel = discord_get_channel_global_int_guild(da, room_id, &guild);
+ 
++	/* webOS: the mentions the app picked first; the plug-in's own "@name" guessing then still runs
++	 * on what is left. */
++	gchar *d_message = discord_webos_send_mentions(da, PURPLE_CONVERSATION(chatconv), guild, channel, message);
++
+ 	d_message = discord_make_mentions(da, guild, d_message);
+ 
+ 	if(guild) {
+@@ -10262,12 +10333,20 @@ discord_send_im(PurpleConnection *pc,
+ 
+ 	DiscordAccount *da = purple_connection_get_protocol_data(pc);
+ 	gchar *room_id = g_hash_table_lookup(da->one_to_ones_rev, who);
++	PurpleConversation *imconv = PURPLE_CONVERSATION(purple_conversations_find_im_with_account(who, da->account));
++
++	/* webOS: the mentions the app picked, read now: the transport removes them when we return, before
++	 * a DM that has yet to be created sends. */
++	gchar *mentioned = discord_webos_send_mentions(da, imconv, NULL, NULL, message);
+ 
+ 	/* Create DM if there isn't one */
+ 	if (room_id == NULL) {
+ #if !PURPLE_VERSION_CHECK(3, 0, 0)
+-		PurpleMessage *msg = purple_message_new_outgoing(who, message, flags);
++		PurpleMessage *msg = purple_message_new_outgoing(who, mentioned, flags);
++#else
++		purple_message_set_contents(msg, mentioned);
+ #endif
++		g_free(mentioned);
+ 		DiscordUser *user = discord_get_user_fullname(da, who);
+ 
+ 		if (user) {
+@@ -10292,13 +10371,13 @@ discord_send_im(PurpleConnection *pc,
+ 
+ 	/* webOS replies: read the reply target the transport stashed on this DM conversation (see
+ 	 * discord_chat_send for the group case) and pass it as ref_id so the REST call threads the reply. */
+-	PurpleConversation *imconv = PURPLE_CONVERSATION(purple_conversations_find_im_with_account(who, da->account));
+ 	gchar *webos_reply_to = imconv ? (gchar *) purple_conversation_get_data(imconv, "webos-reply-to") : NULL;
+-	int im_ret = discord_conversation_send_message(da, to_int(room_id), message, (webos_reply_to && *webos_reply_to) ? webos_reply_to : NULL);
++	int im_ret = discord_conversation_send_message(da, to_int(room_id), mentioned, (webos_reply_to && *webos_reply_to) ? webos_reply_to : NULL);
+ 	if (webos_reply_to != NULL) {
+ 		purple_conversation_set_data(imconv, "webos-reply-to", NULL);
+ 		g_free(webos_reply_to);
+ 	}
++	g_free(mentioned);
+ 	return im_ret;
+ }
+ 
+diff --git a/tests/test_webos_helpers.c b/tests/test_webos_helpers.c
+index cb24c3f..157e482 100644
+--- a/tests/test_webos_helpers.c
++++ b/tests/test_webos_helpers.c
+@@ -113,6 +113,85 @@ test_group_create_body(void)
+ 	CHECK_STR(discord_webos_group_create_body(NULL, 1), NULL);
+ }
+ 
++/* Fake resolver: "alice" -> 1, "anna" -> 2, "ann" -> 3, "tom" -> 4, "ae" -> 5, "t" -> 6, "zero" -> 0
++ * (unknown); also counts its calls. */
++static int resolve_calls;
++
++static guint64
++fake_resolve(const gchar *id, const gchar *name, gpointer user_data)
++{
++	(void) name;
++	CHECK(user_data == &resolve_calls);
++	resolve_calls++;
++	if (g_strcmp0(id, "alice") == 0) return 1;
++	if (g_strcmp0(id, "anna") == 0) return 2;
++	if (g_strcmp0(id, "ann") == 0) return 3;
++	if (g_strcmp0(id, "tom") == 0) return 4;
++	if (g_strcmp0(id, "ae") == 0) return 5;
++	if (g_strcmp0(id, "t") == 0) return 6;
++	return 0;
++}
++
++#define M(text, records) discord_webos_apply_mentions((text), (records), fake_resolve, &resolve_calls)
++
++static void
++test_mentions(void)
++{
++	/* nothing to do */
++	CHECK_STR(M(NULL, "alice\x1f" "Alice"), NULL);
++	CHECK_STR(M("hi @Alice", NULL), "hi @Alice");
++	CHECK_STR(M("hi @Alice", ""), "hi @Alice");
++	CHECK_STR(discord_webos_apply_mentions("hi @Alice", "alice\x1f" "Alice", NULL, NULL), "hi @Alice");
++
++	/* one mention, at the start, middle and end, and repeated */
++	CHECK_STR(M("@Alice hi", "alice\x1f" "Alice"), "&lt;@1&gt; hi");
++	CHECK_STR(M("hi @Alice, how", "alice\x1f" "Alice"), "hi &lt;@1&gt;, how");
++	CHECK_STR(M("hi @Alice", "alice\x1f" "Alice"), "hi &lt;@1&gt;");
++	CHECK_STR(M("@Alice @Alice", "alice\x1f" "Alice"), "&lt;@1&gt; &lt;@1&gt;");
++
++	/* a name with spaces, and two records */
++	CHECK_STR(M("@Tom Riddle and @Alice", "tom\x1f" "Tom Riddle\x1e" "alice\x1f" "Alice"),
++			"&lt;@4&gt; and &lt;@1&gt;");
++
++	/* longest name first: "@Anna" is not "@Ann" + "a", whatever the record order */
++	CHECK_STR(M("@Ann @Anna", "ann\x1f" "Ann\x1e" "anna\x1f" "Anna"), "&lt;@3&gt; &lt;@2&gt;");
++	CHECK_STR(M("@Anna @Ann", "anna\x1f" "Anna\x1e" "ann\x1f" "Ann"), "&lt;@2&gt; &lt;@3&gt;");
++	/* ... also where the shorter name ends on a word boundary inside the longer one */
++	CHECK_STR(M("@Tom Riddle, @Tom", "t\x1f" "Tom\x1e" "tom\x1f" "Tom Riddle"), "&lt;@4&gt;, &lt;@6&gt;");
++
++	/* word boundaries */
++	CHECK_STR(M("@Annabel", "ann\x1f" "Ann"), "@Annabel");
++	CHECK_STR(M("@Ann_", "ann\x1f" "Ann"), "@Ann_");
++	CHECK_STR(M("me@Ann.example", "ann\x1f" "Ann"), "me@Ann.example");
++	CHECK_STR(M("\xc3\xa9@Ann", "ann\x1f" "Ann"), "\xc3\xa9@Ann");          /* "é@Ann" */
++	CHECK_STR(M("@Ann\xc3\xa9", "ann\x1f" "Ann"), "@Ann\xc3\xa9");          /* "@Anné" */
++	CHECK_STR(M("(@Ann)", "ann\x1f" "Ann"), "(&lt;@3&gt;)");
++	CHECK_STR(M("@Ann's", "ann\x1f" "Ann"), "&lt;@3&gt;'s");
++	CHECK_STR(M("@@Ann", "ann\x1f" "Ann"), "@&lt;@3&gt;");
++
++	/* a name the HTML of the text escaped */
++	CHECK_STR(M("hi @A&amp;E!", "ae\x1f" "A&E"), "hi &lt;@5&gt;!");
++	CHECK_STR(M("hi @A&E!", "ae\x1f" "A&E"), "hi &lt;@5&gt;!");
++
++	/* non-ASCII names */
++	CHECK_STR(M("hey @J\xc3\xbcrgen", "alice\x1f" "J\xc3\xbcrgen"), "hey &lt;@1&gt;");
++
++	/* records left alone: unknown, empty name, no name, empty records */
++	CHECK_STR(M("@Zero @Alice", "zero\x1f" "Zero\x1e" "alice\x1f" "Alice"), "@Zero &lt;@1&gt;");
++	CHECK_STR(M("@ hi", "alice\x1f"), "@ hi");
++	CHECK_STR(M("@Alice", "alice"), "@Alice");
++	CHECK_STR(M("@Alice", "\x1e\x1e" "alice\x1f" "Alice\x1e"), "&lt;@1&gt;");
++	CHECK_STR(M("@Alice", "\x1f" "Alice"), "@Alice");
++
++	/* a name not in the text */
++	CHECK_STR(M("hello", "alice\x1f" "Alice"), "hello");
++
++	/* the resolver sees each usable record once */
++	resolve_calls = 0;
++	g_free(M("@Alice @Tom Riddle", "alice\x1f" "Alice\x1e" "tom\x1f" "Tom Riddle\x1e\x1f" "x"));
++	CHECK(resolve_calls == 3);
++}
++
+ int
+ main(void)
+ {
+@@ -120,6 +199,7 @@ main(void)
+ 	test_urls();
+ 	test_split_members();
+ 	test_group_create_body();
++	test_mentions();
+ 
+ 	if (failures) {
+ 		fprintf(stderr, "%d check(s) failed\n", failures);
+diff --git a/webos_helpers.c b/webos_helpers.c
+index 49b2bd0..7720f4b 100644
+--- a/webos_helpers.c
++++ b/webos_helpers.c
+@@ -15,6 +15,8 @@
+  *   along with this program.  If not, see <https://www.gnu.org/licenses/>.
+  */
+ 
++#include <string.h>
++
+ #include "webos_helpers.h"
+ 
+ gboolean
+@@ -100,3 +102,134 @@ discord_webos_group_create_body(const guint64 *user_ids, gsize n_ids)
+ 	g_string_append(body, "]}");
+ 	return g_string_free(body, FALSE);
+ }
++
++typedef struct {
++	gchar *needle;          /* "@name", plain or HTML-escaped */
++	gsize len;
++	guint64 user_id;
++} DiscordWebosMention;
++
++static void
++discord_webos_mention_free(gpointer data)
++{
++	DiscordWebosMention *m = data;
++
++	g_free(m->needle);
++	g_free(m);
++}
++
++static gint
++discord_webos_mention_longest_first(gconstpointer a, gconstpointer b)
++{
++	const DiscordWebosMention *ma = *(const DiscordWebosMention * const *) a;
++	const DiscordWebosMention *mb = *(const DiscordWebosMention * const *) b;
++
++	return (ma->len < mb->len) - (ma->len > mb->len);
++}
++
++/* The characters the HTML of a message would have escaped in a name. */
++static gchar *
++discord_webos_html_escape(const gchar *s)
++{
++	GString *out = g_string_new(NULL);
++
++	for (; *s != '\0'; s++) {
++		switch (*s) {
++			case '&': g_string_append(out, "&amp;"); break;
++			case '<': g_string_append(out, "&lt;"); break;
++			case '>': g_string_append(out, "&gt;"); break;
++			case '"': g_string_append(out, "&quot;"); break;
++			default: g_string_append_c(out, *s); break;
++		}
++	}
++
++	return g_string_free(out, FALSE);
++}
++
++static void
++discord_webos_mention_add(GPtrArray *mentions, gchar *needle, guint64 user_id)
++{
++	DiscordWebosMention *m = g_new0(DiscordWebosMention, 1);
++
++	m->needle = needle;
++	m->len = strlen(needle);
++	m->user_id = user_id;
++	g_ptr_array_add(mentions, m);
++}
++
++/* TRUE if the character at p (inside a NUL-terminated string) is a letter, digit or '_'. */
++static gboolean
++discord_webos_is_word_char(const gchar *p)
++{
++	gunichar c = g_utf8_get_char_validated(p, -1);
++
++	if (c == (gunichar) -1 || c == (gunichar) -2)
++		return FALSE;
++
++	return c == '_' || g_unichar_isalnum(c);
++}
++
++gchar *
++discord_webos_apply_mentions(const gchar *text, const gchar *records,
++		DiscordWebosMentionResolver resolve, gpointer user_data)
++{
++	if (text == NULL)
++		return NULL;
++
++	if (records == NULL || *records == '\0' || resolve == NULL)
++		return g_strdup(text);
++
++	GPtrArray *mentions = g_ptr_array_new_with_free_func(discord_webos_mention_free);
++	gchar **recs = g_strsplit(records, "\x1e", -1);
++
++	for (gchar **r = recs; *r != NULL; r++) {
++		gchar **fields = g_strsplit(*r, "\x1f", 2);
++
++		if (fields[0] != NULL && fields[1] != NULL && *fields[1] != '\0') {
++			guint64 user_id = resolve(fields[0], fields[1], user_data);
++
++			if (user_id != 0) {
++				gchar *escaped = discord_webos_html_escape(fields[1]);
++
++				discord_webos_mention_add(mentions, g_strconcat("@", fields[1], NULL), user_id);
++				if (strcmp(escaped, fields[1]) != 0)
++					discord_webos_mention_add(mentions, g_strconcat("@", escaped, NULL), user_id);
++				g_free(escaped);
++			}
++		}
++
++		g_strfreev(fields);
++	}
++
++	g_strfreev(recs);
++	g_ptr_array_sort(mentions, discord_webos_mention_longest_first);
++
++	GString *out = g_string_sized_new(strlen(text));
++	const gchar *p = text;
++
++	while (*p != '\0') {
++		const DiscordWebosMention *hit = NULL;
++
++		if (*p == '@' && (p == text || !discord_webos_is_word_char(g_utf8_find_prev_char(text, p)))) {
++			for (guint i = 0; i < mentions->len; i++) {
++				const DiscordWebosMention *m = g_ptr_array_index(mentions, i);
++
++				if (strncmp(p, m->needle, m->len) == 0 && !discord_webos_is_word_char(p + m->len)) {
++					hit = m;
++					break;
++				}
++			}
++		}
++
++		if (hit != NULL) {
++			g_string_append_printf(out, "&lt;@%" G_GUINT64_FORMAT "&gt;", hit->user_id);
++			p += hit->len;
++		} else {
++			g_string_append_c(out, *p);
++			p++;
++		}
++	}
++
++	g_ptr_array_free(mentions, TRUE);
++	return g_string_free(out, FALSE);
++}
+diff --git a/webos_helpers.h b/webos_helpers.h
+index 547f007..efc00f8 100644
+--- a/webos_helpers.h
++++ b/webos_helpers.h
+@@ -47,4 +47,17 @@ gchar **discord_webos_split_members(const gchar *joined);
+  * id. */
+ gchar *discord_webos_group_create_body(const guint64 *user_ids, gsize n_ids);
+ 
++/* Maps a mention record (the id and name the app sent) to a Discord user id, 0 if unknown. */
++typedef guint64 (*DiscordWebosMentionResolver)(const gchar *id, const gchar *name, gpointer user_data);
++
++/* text with each "@<name>" of the mention records turned into a Discord user mention. records is
++ * the "webos-send-mentions" value: "<id>\x1f<name>" records joined by "\x1e". The text is HTML,
++ * as the plug-in's send path takes it, so the mention is written "&lt;@<user id>&gt;", and a name
++ * is also found in its HTML-escaped form. "@<name>" only counts with no letter or digit right
++ * before the "@" or right after the name, and the longest name wins, so "@Ann" is not taken out
++ * of "@Anna" or "me@Ann.example". A record that is malformed or that resolve maps to 0 leaves its
++ * text alone. Returns a new string, or NULL for NULL text. */
++gchar *discord_webos_apply_mentions(const gchar *text, const gchar *records,
++		DiscordWebosMentionResolver resolve, gpointer user_data);
++
+ #endif /* DISCORD_WEBOS_HELPERS_H */

@@ -7,38 +7,35 @@ require purple-connectors.inc
 # Built from luneos-synergy-connectors, the version ended in its commit alone (1.0+git0+d22c6be58f).
 # With the upstream commit now in front it can sort lower, so bump the epoch to keep package feeds
 # moving forward.
-PE = "1"
+PE = "5"
 
-# 0001-0010 are generic fixes meant for upstream; 0011 onwards adapt the plug-in to
-# imlibpurpletransport and the webOS Messaging app.
+# One feature per patch. 0001 is LuneOS-only: it lets the plugin id be set at build time, which
+# upstream declined (EionRobb/purple-discord#498). 0002 and 0003 are generic fixes submitted
+# upstream (#503 and #504); the rest adapt the plug-in to imlibpurpletransport and the webOS
+# Messaging app.
 SRC_URI += " \
     git://github.com/EionRobb/purple-discord.git;branch=master;protocol=https;name=upstream;destsuffix=purple-discord \
     file://0001-Allow-the-plugin-id-to-be-set-at-build-time.patch \
-    file://0002-Implement-the-OpenSSL-backend-for-QR-code-login.patch \
-    file://0003-Fix-crashes-and-a-leak-in-QR-code-login.patch \
-    file://0004-Only-require-an-email-address-for-password-login.patch \
-    file://0005-Create-a-channel-s-thread-table-before-using-it.patch \
-    file://0006-Ignore-gateway-dispatch-frames-whose-d-is-not-an-obj.patch \
-    file://0007-Reconnect-when-the-gateway-stops-acknowledging-heart.patch \
-    file://0008-Make-file-uploads-survive-a-briefly-unavailable-conn.patch \
-    file://0009-Send-Ogg-Opus-uploads-as-voice-messages.patch \
-    file://0010-Subscribe-to-a-guild-channel-when-it-is-opened.patch \
-    file://0011-webOS-Deduplicate-messages-and-store-own-channel-mes.patch \
-    file://0012-webOS-Bridge-message-ids-reactions-and-replies-to-th.patch \
-    file://0013-webOS-Add-DM-partners-to-the-buddy-list.patch \
-    file://0014-webOS-Backfill-DM-and-channel-history.patch \
-    file://0015-webOS-Sign-in-with-a-token-password-or-by-QR-code.patch \
-    file://0016-webOS-Hand-a-remote-auth-captcha-to-the-account-UI.patch \
-    file://0017-webOS-Reconnect-through-a-full-re-login.patch \
-    file://0018-webOS-Add-gateway-and-channel-list-diagnostics.patch \
+    file://0002-Make-file-uploads-survive-a-briefly-unavailable-conn.patch \
+    file://0003-Send-Ogg-Opus-uploads-as-voice-messages.patch \
+    file://0004-webOS-deduplicate-messages-and-bridge-message-ids-re.patch \
+    file://0005-webOS-add-DM-partners-to-the-buddy-list-and-backfill.patch \
+    file://0006-webOS-sign-in-with-a-token-password-or-QR-code-and-r.patch \
+    file://0007-webOS-Add-gateway-and-channel-list-diagnostics.patch \
+    file://0008-webOS-edit-and-delete-sent-messages-from-the-Messagi.patch \
+    file://0009-webOS-create-add-to-and-leave-group-DMs-from-the-Mes.patch \
+    file://0010-webOS-Send-the-mentions-the-Messaging-app-picked.patch \
+    file://0011-webOS-Edit-and-delete-received-messages-in-place.patch \
+    file://0012-webOS-rename-group-DMs-and-take-people-out-of-them-a.patch \
+    file://0013-webOS-Say-who-pinned-a-message-not-the-message-again.patch \
 "
-SRCREV_upstream = "b5cbd6221695b8a61a8529064a6b23d5812bf639"
+SRCREV_upstream = "33f21e5af74c1489f6c6e2db0b84b30d15783596"
 
 DEPENDS = "pidgin json-glib glib-2.0 zlib qrencode openssl"
 
 S = "${UNPACKDIR}/purple-discord"
 
-# QR remote-auth with the OpenSSL backend that 0002 adds; USE_OPENSSL_CRYPTO=1 makes the Makefile
+# QR remote-auth with upstream's OpenSSL backend; USE_OPENSSL_CRYPTO=1 makes the Makefile
 # take the RSA code from openssl rather than NSS, and pull in libqrencode, both via pkg-config.
 #
 # imlibpurpleservice and the account template know the protocol as "prpl-discord", not upstream's

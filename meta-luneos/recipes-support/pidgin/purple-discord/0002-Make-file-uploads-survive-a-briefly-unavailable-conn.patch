@@ -1,0 +1,274 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:22:50 +0200
+Subject: [PATCH] Make file uploads survive a briefly unavailable connection
+
+Three problems made attachments silently fail to send:
+
+- A pooled keep-alive connection that the server closed while it sat
+  idle was reused. Nothing watches an idle socket in the pool, and
+  purple_http only retries a reused socket when its first write fails
+  before any header bytes are sent, or when nothing at all comes back.
+  A small request gets that empty read and is retried; a large
+  upload's later writes fail with EPIPE or ECONNRESET, so the upload
+  failed with "Error writing to ...: Broken pipe". Before an idle
+  pooled socket is reused, check with a zero-timeout poll() (select()
+  on Windows) whether it is readable. An idle HTTP/1.1 connection has
+  nothing to read, so a readable one is closed and a fresh connection
+  is made.
+- If the account was reconnecting at the moment the transfer started,
+  discord_fetch_url bailed out and the transfer died. Retry up to 10
+  times, 1.5 s apart, before giving up with an error.
+- The failure notification passed a NULL primary text, which
+  purple_notify_message asserts on.
+
+A retry that is still waiting when the upload is cancelled is removed
+with the transfer data, so it cannot run on freed memory, and the
+Windows builds link ws2_32 for the select() call.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Submitted [https://github.com/EionRobb/purple-discord/pull/503]
+---
+ Makefile             |  2 +-
+ libdiscord.c         | 78 ++++++++++++++++++++++++++++++++++++++++----
+ purple2compat/http.c | 49 ++++++++++++++++++++++++++--
+ 3 files changed, 119 insertions(+), 10 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index b3543cb..07ad4f0 100644
+--- a/Makefile
++++ b/Makefile
+@@ -86,7 +86,7 @@ else
+ endif
+ 
+ WIN32_CFLAGS = -std=c99 -I$(WIN32_DEV_TOP)/glib-2.28.8/include -I$(WIN32_DEV_TOP)/glib-2.28.8/include/glib-2.0 -I$(WIN32_DEV_TOP)/glib-2.28.8/lib/glib-2.0/include -I$(WIN32_DEV_TOP)/json-glib-0.14/include/json-glib-1.0 -DENABLE_NLS -DDISCORD_PLUGIN_VERSION='"$(PLUGIN_VERSION)"' -DMARKDOWN_PIDGIN -Wall -Wextra -Werror -Wno-deprecated-declarations -Wno-unused-parameter -fno-strict-aliasing -Wformat
+-WIN32_LDFLAGS = -L$(WIN32_DEV_TOP)/glib-2.28.8/lib -L$(WIN32_DEV_TOP)/json-glib-0.14/lib -lpurple -lintl -lglib-2.0 -lgobject-2.0 -ljson-glib-1.0 -g -ggdb -static-libgcc -lz
++WIN32_LDFLAGS = -L$(WIN32_DEV_TOP)/glib-2.28.8/lib -L$(WIN32_DEV_TOP)/json-glib-0.14/lib -lpurple -lintl -lglib-2.0 -lgobject-2.0 -ljson-glib-1.0 -g -ggdb -static-libgcc -lz -lws2_32
+ WIN32_PIDGIN2_CFLAGS = -I$(PIDGIN_TREE_TOP)/libpurple -I$(PIDGIN_TREE_TOP) $(WIN32_CFLAGS)
+ WIN32_PIDGIN3_CFLAGS = -I$(PIDGIN3_TREE_TOP)/libpurple -I$(PIDGIN3_TREE_TOP) -I$(WIN32_DEV_TOP)/gplugin-dev/gplugin $(WIN32_CFLAGS)
+ WIN32_PIDGIN2_LDFLAGS = -L$(PIDGIN_TREE_TOP)/libpurple $(WIN32_LDFLAGS)
+diff --git a/libdiscord.c b/libdiscord.c
+index 89b431f..acc9d0f 100644
+--- a/libdiscord.c
++++ b/libdiscord.c
+@@ -490,8 +490,14 @@ typedef struct {
+ typedef struct {
+ 	guint64 room_id;
+ 	gboolean canceleable;
++	int send_retries; // webOS: file-upload retries while Discord's gateway is transiently reconnecting
++	guint retry_timeout; // the pending discord_xfer_send_init_retry_cb, which holds a reference
+ } DiscordTransfer;
+ 
++// webOS: how many times to re-try firing a file upload while the Discord connection is invalid
++// (its gateway flaps/reconnects roughly every few minutes). ~10 x 1.5s = up to ~15s of waiting.
++#define DISCORD_XFER_MAX_RETRIES 10
++
+ 
+ static guint64
+ to_int(const gchar *id)
+@@ -11135,14 +11141,27 @@ discord_cmd_join_server(PurpleConversation *conv, const gchar *cmd, gchar **args
+ static void
+ discord_xfer_free(PurpleXfer *xfer) {
+ 	// we only need to free the user data
+-	g_free(purple_xfer_get_protocol_data(xfer));
++	DiscordTransfer *dt = purple_xfer_get_protocol_data(xfer);
++	gboolean drop_retry_ref = FALSE;
++
++	// A retry still waiting must not run on the freed data; drop the reference it held.
++	if (dt != NULL && dt->retry_timeout != 0) {
++		purple_timeout_remove(dt->retry_timeout);
++		drop_retry_ref = TRUE;
++	}
++	purple_xfer_set_protocol_data(xfer, NULL);
++	g_free(dt);
+ 	purple_debug_info("discord", "ref count %d\n", xfer->ref);
++
++	if (drop_retry_ref) {
++		purple_xfer_unref(xfer);
++	}
+ }
+ 
+ static void
+ discord_xfer_cancel_send(PurpleXfer *xfer) {
+ 	DiscordTransfer *dt = purple_xfer_get_protocol_data(xfer);
+-	if (dt->canceleable) {
++	if (dt != NULL && dt->canceleable) {
+ 		// prevents segfault from freeing an xfer that is in use
+ 		purple_xfer_ref(xfer);
+ 		PurpleConnection *pc = purple_account_get_connection(purple_xfer_get_account(xfer));
+@@ -11169,7 +11188,8 @@ purple_xfer_update_cb(DiscordAccount *da, JsonNode *node, gpointer userdata) {
+ 	// The following may say the xfer is canceled when it isn't, but it's
+ 	// the best we can do
+ 	if (node == NULL) {
+-		purple_notify_error(pc, _("Connection Error"), NULL, xfer_info, purple_get_cpar_from_connection(pc));
++		// primary must be non-NULL (purple_notify_message asserts on it); use the title text.
++		purple_notify_error(pc, _("Connection Error"), _("Discord upload failed"), xfer_info, purple_get_cpar_from_connection(pc));
+ 
+ 		purple_xfer_unref(xfer);
+ 		dt->canceleable = TRUE;
+@@ -11305,6 +11325,8 @@ discord_guess_mimetype(const gchar *filename, const guchar *data, gsize data_len
+ 	return "application/octet-stream";
+ }
+ 
++static gboolean discord_xfer_send_init_retry_cb(gpointer data);
++
+ // TODO progress, true cancel
+ static void
+ discord_xfer_send_init(PurpleXfer *xfer)
+@@ -11316,13 +11338,34 @@ discord_xfer_send_init(PurpleXfer *xfer)
+ 	GMappedFile *file;
+ 	GString *postdata;
+ 
+-	purple_xfer_ref(xfer);
+-
+ 	PurpleAccount *acct = purple_xfer_get_account(xfer);
+ 	PurpleConnection *pc = purple_account_get_connection(acct);
+-	DiscordAccount *da = purple_connection_get_protocol_data(pc);
+ 	DiscordTransfer *dt = purple_xfer_get_protocol_data(xfer);
+ 
++	// webOS: Discord's user-account gateway flaps (it reconnects with a Network_Error every few
++	// minutes). If the HTTP connection is transiently invalid at THIS instant, discord_fetch_url would
++	// bail silently (callback(NULL)) and the upload would die with no retry -- the file just never
++	// sends. Wait for the connection to come back (a few short retries) before building + firing the
++	// multipart POST, instead of failing the whole transfer on one bad moment.
++	if (!PURPLE_CONNECTION_IS_VALID(pc) || purple_account_is_disconnected(acct)) {
++		if (dt != NULL && dt->send_retries < DISCORD_XFER_MAX_RETRIES) {
++			dt->send_retries++;
++			purple_debug_info("discord", "xfer: connection not ready, retry %d/%d in 1.5s\n",
++				dt->send_retries, DISCORD_XFER_MAX_RETRIES);
++			purple_xfer_ref(xfer); // held by the timeout; released in discord_xfer_send_init_retry_cb
++			dt->retry_timeout = purple_timeout_add(1500, discord_xfer_send_init_retry_cb, xfer);
++		} else {
++			purple_xfer_error(PURPLE_XFER_SEND, acct, purple_xfer_get_remote_user(xfer),
++				_("Discord connection not ready — please try again"));
++			purple_xfer_cancel_local(xfer);
++		}
++		return;
++	}
++
++	purple_xfer_ref(xfer);
++
++	DiscordAccount *da = purple_connection_get_protocol_data(pc);
++
+ 	const gchar* fullpath = purple_xfer_get_local_filename(xfer);
+ 
+ 	GError *load_error = NULL;
+@@ -11389,9 +11432,28 @@ discord_xfer_send_init(PurpleXfer *xfer)
+ 	g_string_free(postdata, TRUE);
+ }
+ 
++// webOS: re-enter discord_xfer_send_init after a short delay to re-check the connection and fire the
++// upload once Discord's gateway has reconnected. One-shot (returns FALSE); releases the ref that
++// discord_xfer_send_init took when it scheduled this retry.
++static gboolean
++discord_xfer_send_init_retry_cb(gpointer data)
++{
++	PurpleXfer *xfer = data;
++	DiscordTransfer *dt = purple_xfer_get_protocol_data(xfer);
++
++	if (dt != NULL) {
++		dt->retry_timeout = 0;
++	}
++	if (dt != NULL && !purple_xfer_is_canceled(xfer)) {
++		discord_xfer_send_init(xfer);
++	}
++	purple_xfer_unref(xfer);
++	return FALSE;
++}
++
+ // This is not hooked into 'new_xfer' like you may see in other prpl's
+ static PurpleXfer *
+-discord_create_xfer(PurpleConnection *pc, guint64 room_id, const gchar *receiver) 
++discord_create_xfer(PurpleConnection *pc, guint64 room_id, const gchar *receiver)
+ {
+ 	DiscordAccount *da = purple_connection_get_protocol_data(pc);
+ 	PurpleXfer *xfer;
+@@ -11401,6 +11463,8 @@ discord_create_xfer(PurpleConnection *pc, guint64 room_id, const gchar *receiver
+ 	DiscordTransfer *dt = g_new(DiscordTransfer, 1);
+ 	dt->room_id = room_id;
+ 	dt->canceleable = FALSE;
++	dt->send_retries = 0;
++	dt->retry_timeout = 0;
+ 	purple_xfer_set_protocol_data(xfer, dt);
+ 
+ 	purple_xfer_set_init_fnc(xfer, discord_xfer_send_init);
+diff --git a/purple2compat/http.c b/purple2compat/http.c
+index 4334dee..e4fdb4b 100644
+--- a/purple2compat/http.c
++++ b/purple2compat/http.c
+@@ -23,6 +23,7 @@
+ 
+ #ifndef _WIN32
+ #include <errno.h>
++#include <poll.h>
+ #include <unistd.h>
+ #endif
+ 
+@@ -2260,6 +2261,42 @@ _purple_http_keepalive_socket_connected(PurpleSocket *ps,
+ 	g_free(req);
+ }
+ 
++/* Whether an idle pooled socket was closed while it sat in the pool. Nothing watches an idle
++ * socket, so a server that closes it, or a network change under it, goes unnoticed, and the
++ * next request would be written into a dead connection. An idle HTTP/1.1 connection has nothing
++ * to read, so a readable one has been closed or reset, or holds an alert or other data no
++ * request asked for; either way it is not reused. */
++static gboolean
++purple_http_socket_is_stale(PurpleHttpSocket *hs)
++{
++	int fd = purple_socket_get_fd(hs->ps);
++
++	if (fd < 0)
++		return TRUE;
++
++#ifdef _WIN32
++	{
++		fd_set readable;
++		struct timeval no_wait = { 0, 0 };
++
++		FD_ZERO(&readable);
++		FD_SET(fd, &readable);
++		return select(fd + 1, &readable, NULL, NULL, &no_wait) != 0;
++	}
++#else
++	{
++		struct pollfd pfd = { fd, POLLIN, 0 };
++		int ret;
++
++		do {
++			ret = poll(&pfd, 1, 0);
++		} while (ret < 0 && errno == EINTR);
++
++		return ret != 0;
++	}
++#endif
++}
++
+ static gboolean
+ _purple_http_keepalive_host_process_queue_cb(gpointer _host)
+ {
+@@ -2281,14 +2318,22 @@ _purple_http_keepalive_host_process_queue_cb(gpointer _host)
+ 	while (it != NULL) {
+ 		PurpleHttpSocket *hs_current = it->data;
+ 
++		it = g_slist_next(it);
++
++		if (!hs_current->is_busy && purple_http_socket_is_stale(hs_current)) {
++			purple_debug_info("http", "Keep-alive connection "
++				"closed while idle, not reusing it\n");
++			host->sockets = g_slist_remove(host->sockets, hs_current);
++			purple_http_socket_close_free(hs_current);
++			continue;
++		}
++
+ 		sockets_count++;
+ 
+ 		if (!hs_current->is_busy) {
+ 			hs = hs_current;
+ 			break;
+ 		}
+-
+-		it = g_slist_next(it);
+ 	}
+ 
+ 	/* There are no free sockets and we cannot create another one. */
