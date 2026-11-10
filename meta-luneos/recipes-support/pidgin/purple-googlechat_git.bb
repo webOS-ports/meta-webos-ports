@@ -7,13 +7,12 @@ require purple-connectors.inc
 # Built from luneos-synergy-connectors, the version ended in its commit alone (1.0+git0+d22c6be58f).
 # With the upstream commit now in front it can sort lower, so bump the epoch to keep package feeds
 # moving forward.
-PE = "1"
+PE = "4"
 
 SRC_URI += " \
     git://github.com/EionRobb/purple-googlechat.git;branch=master;protocol=https;name=upstream;destsuffix=purple-googlechat \
-    file://0001-Makefile-Drop-the-hardcoded-I-usr-include-protobuf-c.patch \
 "
-SRCREV_upstream = "7bb81bc4c40a2da6069d897f2c24d272a08fcd43"
+SRCREV_upstream = "e268cb31cfe1ca1418eaa67030cb58a951365711"
 
 # protobuf-c comes from meta-openembedded. The -native side supplies protoc-c, which the Makefile
 # runs to regenerate the .pb-c.c sources.
@@ -21,9 +20,6 @@ DEPENDS = "pidgin json-glib glib-2.0 zlib protobuf-c protobuf-c-native"
 
 S = "${UNPACKDIR}/purple-googlechat"
 
-# Upstream's Makefile has CRLF line endings, and so does the patch against it. Keep the .patch
-# byte-exact; an editor that normalises line endings will make it stop applying.
-#
 # PROTOC_C is passed explicitly: upstream falls back to protoc when protoc-gen-c and protoc are
 # both on PATH, and the explicit path keeps the build predictable.
 EXTRA_OEMAKE = " \
