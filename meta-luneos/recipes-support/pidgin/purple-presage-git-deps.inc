@@ -25,8 +25,8 @@ SRC_URI += " \
 SRCREV_rust-mime-sniffer = "0053c4330ca159db118e57435ea781bdf46158ed"
 SRCREV_sparsepostquantumratchet = "fd320484dcec89004021e6fdc7481825f5f261fa"
 SRCREV_libsignal = "439f035d9cfd7efe5435cbea0294591c9ed17232"
-SRCREV_libsignal-service-rs = "bb43e8125e0c9e7a1ce20d57fb330f6fbd9257eb"
-SRCREV_presage = "f74b96e0fb9099ce8be2b28b7ca9d11f78a6faea"
+SRCREV_libsignal-service-rs = "7a7526741dfd9ad4c4894717f22651eb0506fb7e"
+SRCREV_presage = "4b81740610c301cbd54d95f4dbd4cadd692af95e"
 SRCREV_rusqlite = "2a42b3354c9194700d08aa070f70a131a470e7dc"
 
 SRCREV_FORMAT .= "_rust-mime-sniffer_sparsepostquantumratchet_libsignal_libsignal-service-rs_presage_rusqlite"
