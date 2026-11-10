@@ -1,8 +1,9 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Herman van Hazendonk <github.com@herrie.org>
 Date: Tue, 20 Oct 2026 16:20:25 +0200
-Subject: [PATCH] webOS: Send and receive message reactions through transport
- signals
+Subject: [PATCH] webOS: reactions and replies through the transport
+
+* Send and receive message reactions through transport signals
 
 The webOS Messaging app shows reactions as badges on a message, not as
 extra text lines. The webOS libpurple transport provides process-wide
@@ -26,21 +27,42 @@ and nothing is sent, but received reactions are then no longer shown as
 text. A version for upstream would need to keep that text when no
 listener is connected.
 
+* Show replies as quote cards and send replies with a quote
+
+Teams wraps a reply as an inline
+<blockquote itemtype="http://schema.skype.com/Reply" itemid=...> block in
+front of the reply body. The webOS Messaging app shows the quoted message
+as a card above the reply instead.
+
+- Received: take the leading reply blockquote off the body and stash the
+  quoted author, text and message id on the conversation as
+  "webos-quoted-from", "webos-quoted-text" and "webos-quoted-id", which
+  the webOS transport reads.
+- Cache author, time, conversation and plain text of received and own
+  messages by server id (at most 400 entries in quote_meta_hash).
+- Sent: when the transport stashed "webos-reply-to" on the conversation,
+  rebuild the reply blockquote from that cache and put it in front of the
+  outgoing message, so other Teams clients show it as a reply.
+
+The conversation data keys belong to the webOS transport, so this is
+webOS-only. Making received replies and sending replies work in Pidgin
+would need a different UI hook.
+
 Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
 Upstream-Status: Inappropriate [webOS specific]
 ---
- libteams.c         |  12 ++
- libteams.h         |   9 +
+ libteams.c         |  14 ++
+ libteams.h         |  12 +
  teams_connection.c |   4 +-
- teams_messages.c   | 407 +++++++++++++++++++++++++++++++++++++++------
+ teams_messages.c   | 605 ++++++++++++++++++++++++++++++++++++++++-----
  teams_messages.h   |   5 +
- 5 files changed, 382 insertions(+), 55 deletions(-)
+ 5 files changed, 578 insertions(+), 62 deletions(-)
 
 diff --git a/libteams.c b/libteams.c
-index f64a998..61f76b0 100644
+index 73613e7..e022cf4 100644
 --- a/libteams.c
 +++ b/libteams.c
-@@ -480,6 +480,7 @@ static gulong conversation_updated_signal = 0;
+@@ -492,6 +492,7 @@ static gulong conversation_updated_signal = 0;
  static gulong conversation_updated_title_signal = 0;
  static gulong chat_conversation_typing_signal = 0;
  static gulong im_conversation_created_signal = 0;
@@ -48,7 +70,15 @@ index f64a998..61f76b0 100644
  
  static void
  teams_conversation_updated_title(PurpleConversation *conv, PurpleConversationUpdateType type)
-@@ -731,6 +732,17 @@ teams_login(PurpleAccount *account)
+@@ -669,6 +670,7 @@ teams_login(PurpleAccount *account)
+ 	sa->cookie_jar = purple_http_cookie_jar_new();
+ 	sa->sent_messages_hash = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+ 	sa->received_messages_hash = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
++	sa->quote_meta_hash = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+ 	sa->buddy_to_chat_lookup = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+ 	sa->chat_to_buddy_lookup = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+ 	sa->calendar_reminder_timeouts = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+@@ -743,6 +745,17 @@ teams_login(PurpleAccount *account)
  	if (!im_conversation_created_signal) {
  		im_conversation_created_signal = purple_signal_connect(purple_conversations_get_handle(), "conversation-created", purple_connection_get_protocol(pc), PURPLE_CALLBACK(teams_im_conversation_created), NULL);
  	}
@@ -66,13 +96,21 @@ index f64a998..61f76b0 100644
  	// Setup callbacks for the preferences.
  	// handle = purple_proxy_get_handle();
  	// purple_prefs_connect_callback(handle, "/purple/proxy/type", proxy_pref_cb, NULL);
+@@ -836,6 +849,7 @@ teams_close(PurpleConnection *pc)
+ 	
+ 	g_hash_table_destroy(sa->sent_messages_hash);
+ 	g_hash_table_destroy(sa->received_messages_hash);
++	g_hash_table_destroy(sa->quote_meta_hash);
+ 	g_hash_table_destroy(sa->buddy_to_chat_lookup);
+ 	g_hash_table_destroy(sa->chat_to_buddy_lookup);
+ 	g_hash_table_destroy(sa->calendar_reminder_timeouts);
 diff --git a/libteams.h b/libteams.h
-index 0d62b9e..3a4e6dc 100644
+index fe64956..de675fe 100644
 --- a/libteams.h
 +++ b/libteams.h
-@@ -135,6 +135,15 @@
+@@ -142,6 +142,15 @@
+ 
  #define TEAMS_PERSONAL_PLUGIN_ID "prpl-eionrobb-msteams-personal"
- #endif
  
 +/* The protocol id THIS build registers (see teams_protocol_init / plugin init): the
 + * personal build overrides info->id to the personal id. Reaction signal handlers use this
@@ -86,6 +124,16 @@ index 0d62b9e..3a4e6dc 100644
  #define TEAMS_LOCKANDKEY_APPID "msmsgs@msnmsgr.com"
  #define TEAMS_LOCKANDKEY_SECRET "Q1P7W2E4J9R8U3S5"
  
+@@ -219,6 +228,9 @@ struct _TeamsAccount {
+ 	 * periodic poll / offline-history re-fetch never re-delivers an already-shown
+ 	 * message. See process_message_resource() and teams_poll_messages(). */
+ 	GHashTable *received_messages_hash;
++	/* webOS replies: message id -> "authorMRI\x1fauthorname\x1fcomposetime\x1fconversation\x1fplaintext",
++	 * so an outgoing reply can rebuild the full inline <quote> block Teams needs. Bounded by size. */
++	GHashTable *quote_meta_hash;
+ 	guint poll_timeout;
+ 	gboolean poll_in_flight; /* a poll's conversations fetch is outstanding; skip overlapping ticks */
+ 	guint watchdog_timeout;
 diff --git a/teams_connection.c b/teams_connection.c
 index 7be6ab3..5379260 100644
 --- a/teams_connection.c
@@ -102,10 +150,10 @@ index 7be6ab3..5379260 100644
  			purple_http_request_header_set(request, "Content-Type", "application/json"); // hax
  		} else {
 diff --git a/teams_messages.c b/teams_messages.c
-index 1551c94..88c1ba3 100644
+index e1a9e89..f1e8236 100644
 --- a/teams_messages.c
 +++ b/teams_messages.c
-@@ -400,6 +400,189 @@ teams_parse_media_call_recording_content(const gchar *content)
+@@ -463,6 +463,314 @@ teams_parse_media_call_recording_content(const gchar *content)
  	return html;
  }
  
@@ -205,6 +253,131 @@ index 1551c94..88c1ba3 100644
 +	}
 +}
 +
++/* webOS replies: Teams embeds a reply as an inline <quote author authorname timestamp messageid ...>
++ * block at the START of the message content/html. Extract the quoted original's author/text/id and stash
++ * them on the conversation (like webos-msg-id) so the transport renders an inline quote card, and strip
++ * the <quote>...</quote> block out of *html so only the reply body remains visible. No-op when there is
++ * no leading quote. messageid matches the webos-msg-id format (resource["id"]). */
++static void
++teams_stash_webos_quote(PurpleConversation *conv, gchar **html)
++{
++	if (conv == NULL || html == NULL || *html == NULL)
++		return;
++	/* Teams personal wraps a reply as: <blockquote itemscope itemtype="http://schema.skype.com/Reply"
++	 * itemid="<quoted msg id>"><strong itemprop="mri" itemid="<mri>">Author</strong>
++	 * <span itemprop="time" .../><p itemprop="preview">quoted text</p></blockquote><p>reply body</p> */
++	gchar *qstart = strstr(*html, "<blockquote");
++	if (qstart == NULL)
++		return;
++	gchar *qend = strstr(qstart, "</blockquote>");
++	if (qend == NULL)
++		return;
++
++	gsize quotelen = (qend - qstart) + strlen("</blockquote>");
++	gchar *quotexml = g_strndup(qstart, quotelen);
++	PurpleXmlNode *qnode = purple_xmlnode_from_str(quotexml, -1);
++	g_free(quotexml);
++	if (qnode != NULL) {
++		const gchar *itemid = purple_xmlnode_get_attrib(qnode, "itemid"); /* the quoted message's id */
++		PurpleXmlNode *strong = purple_xmlnode_get_child(qnode, "strong");
++		PurpleXmlNode *preview = purple_xmlnode_get_child(qnode, "p");
++		gchar *qfrom = strong ? purple_xmlnode_get_data(strong) : NULL;   /* author display name */
++		gchar *qtext = preview ? purple_xmlnode_get_data(preview) : NULL; /* quoted text */
++		if (qtext != NULL && *qtext != '\0') {
++			for (gchar *p = qtext; *p != '\0'; p++) {
++				if (*p == '\n' || *p == '\r')
++					*p = ' ';
++			}
++			purple_conversation_set_data(conv, "webos-quoted-text", g_strdup(qtext));
++			if (qfrom && *qfrom)
++				purple_conversation_set_data(conv, "webos-quoted-from", g_strdup(qfrom));
++			if (itemid && *itemid)
++				purple_conversation_set_data(conv, "webos-quoted-id", g_strdup(itemid));
++		}
++		g_free(qfrom);
++		g_free(qtext);
++		purple_xmlnode_free(qnode);
++	}
++
++	/* strip the quote block: keep only the reply body after </blockquote> */
++	gchar *body = g_strdup(qend + strlen("</blockquote>"));
++	g_strchug(body);
++	g_free(*html);
++	*html = body;
++}
++
++#define TEAMS_MAX_QUOTE_CACHE 400
++
++/* webOS replies: remember an incoming message's author/timestamp/conversation + plain text keyed by its
++ * id, so a later outgoing reply targeting that id can rebuild the full Teams <quote> block. */
++static void
++teams_cache_quote_meta(TeamsAccount *sa, JsonObject *resource, const gchar *plaintext)
++{
++	if (sa == NULL || sa->quote_meta_hash == NULL || resource == NULL || !json_object_has_member(resource, "id"))
++		return;
++	const gchar *id = json_object_get_string_member(resource, "id");
++	if (id == NULL || !*id)
++		return;
++	const gchar *from = json_object_has_member(resource, "from") ? json_object_get_string_member(resource, "from") : "";
++	const gchar *composetime = json_object_has_member(resource, "composetime") ? json_object_get_string_member(resource, "composetime") : "";
++	const gchar *conv = json_object_has_member(resource, "conversationLink") ? json_object_get_string_member(resource, "conversationLink") : "";
++	const gchar *authorname = json_object_has_member(resource, "imdisplayname") ? json_object_get_string_member(resource, "imdisplayname") : NULL;
++	if (authorname == NULL && json_object_has_member(resource, "imDisplayName"))
++		authorname = json_object_get_string_member(resource, "imDisplayName");
++	/* `from` is a URL like ".../contacts/8:orgid:GUID"; keep only the MRI tail (last path element). */
++	const gchar *frommri = from ? from : "";
++	if (from != NULL) {
++		const gchar *slash = strrchr(from, '/');
++		if (slash != NULL)
++			frommri = slash + 1;
++	}
++
++	gchar *plain = plaintext ? purple_markup_strip_html(plaintext) : g_strdup("");
++	if (plain == NULL)
++		plain = g_strdup("");
++	for (gchar *p = plain; *p != '\0'; p++) {
++		if (*p == '\n' || *p == '\r' || *p == '\x1f')
++			*p = ' ';
++	}
++	gchar *val = g_strdup_printf("%s\x1f%s\x1f%s\x1f%s\x1f%s", frommri, authorname ? authorname : "",
++			composetime ? composetime : "", conv ? conv : "", plain);
++	g_free(plain);
++
++	if (g_hash_table_size(sa->quote_meta_hash) >= TEAMS_MAX_QUOTE_CACHE)
++		g_hash_table_remove_all(sa->quote_meta_hash);
++	g_hash_table_insert(sa->quote_meta_hash, g_strdup(id), val);
++}
++
++/* webOS replies: build the inline <quote ...> block Teams expects for a reply to `target_id`, using the
++ * metadata cached by teams_cache_quote_meta. Returns a newly-allocated string, or NULL if the target
++ * isn't cached (then we just send a normal message). */
++static gchar *
++teams_build_quote_block(TeamsAccount *sa, const gchar *target_id)
++{
++	if (sa == NULL || sa->quote_meta_hash == NULL || target_id == NULL || !*target_id)
++		return NULL;
++	const gchar *meta = g_hash_table_lookup(sa->quote_meta_hash, target_id);
++	if (meta == NULL)
++		return NULL;
++	gchar **parts = g_strsplit(meta, "\x1f", 5); /* 0=authorMRI 1=authorname 2=composetime 3=conversation 4=plaintext */
++	gchar *mri_esc = g_markup_escape_text(parts[0] ? parts[0] : "", -1);
++	gchar *authorname_esc = g_markup_escape_text(parts[1] ? parts[1] : "", -1);
++	gchar *text_esc = g_markup_escape_text((parts[4]) ? parts[4] : "", -1);
++	/* Match the exact Teams-personal reply markup so the message threads on other clients. */
++	gchar *block = g_strdup_printf(
++		"<blockquote itemscope=\"\" itemtype=\"http://schema.skype.com/Reply\" itemid=\"%s\">"
++		"<strong itemprop=\"mri\" itemid=\"%s\">%s</strong>"
++		"<span itemprop=\"time\" itemid=\"%s\"></span>"
++		"<p itemprop=\"preview\">%s</p>"
++		"</blockquote>",
++		target_id, mri_esc, authorname_esc, target_id, text_esc);
++	g_free(mri_esc);
++	g_free(authorname_esc);
++	g_free(text_esc);
++	g_strfreev(parts);
++	return block;
++}
++
 +/* Turn a message's aggregated properties.emotions[] into the transport's
 + * "count<SP>emoji\n..." set and emit "webos-im-reaction-set" (an aggregated REPLACE keyed
 + * by the message's service id). An empty serialization clears all reactions (last one
@@ -295,7 +468,7 @@ index 1551c94..88c1ba3 100644
  static void
  process_message_resource(TeamsAccount *sa, JsonObject *resource)
  {
-@@ -431,7 +614,20 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+@@ -494,7 +802,24 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
  		clientmessageid = json_object_get_string_member(resource, "clientmessageid");
  	
  	if (clientmessageid && *clientmessageid && g_hash_table_remove(sa->sent_messages_hash, clientmessageid)) {
@@ -312,12 +485,16 @@ index 1551c94..88c1ba3 100644
 +			if (sent_id && *sent_id) {
 +				purple_signal_emit(purple_conversations_get_handle(), "webos-im-outbox-id",
 +					sa->account, sent_id, sent_text ? sent_text : "");
++				// webOS replies: cache our OWN app-sent message (keyed by its server id) so a later
++				// reply TO it can rebuild the <quote> block. This echo is deduped + returned below, so
++				// it never reaches the normal cache sites - cache it here.
++				teams_cache_quote_meta(sa, resource, sent_text);
 +			}
 +		}
  		g_strfreev(messagetype_parts);
  		return;
  	}
-@@ -484,6 +680,20 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+@@ -547,6 +872,20 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
  	}
  	if (json_object_has_member(resource, "properties")) {
  		properties = json_object_get_object_member(resource, "properties");
@@ -338,7 +515,7 @@ index 1551c94..88c1ba3 100644
  		if (json_object_has_member(properties, "edittime")) {
  			skypeeditedid = json_object_get_string_member(properties, "edittime");
  		}
-@@ -621,9 +831,14 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+@@ -684,9 +1023,14 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
  		GString *chat_last_timestamp = make_last_timestamp_setting(convname);
  		purple_account_set_int(sa->account, chat_last_timestamp->str, composetimestamp);
  		g_string_free(chat_last_timestamp, TRUE);
@@ -355,7 +532,7 @@ index 1551c94..88c1ba3 100644
  		if (g_str_equal(messagetype_parts[0], "Control") && (g_str_equal(messagetype_parts[1], "ClearTyping") || g_str_equal(messagetype_parts[1], "Typing"))) {
  			PurpleChatUserFlags cbflags;
  			PurpleChatUser *cb;
-@@ -770,29 +985,16 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+@@ -833,29 +1177,16 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
  				}
  				
  				if (json_object_has_member(properties, "emotions")) {
@@ -393,7 +570,19 @@ index 1551c94..88c1ba3 100644
  				} else {
  					html = teams_process_files_in_properties(properties, &html);
  					html = teams_process_cards_in_properties(properties, &html);
-@@ -1117,36 +1319,16 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+@@ -865,7 +1196,10 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+ 			
+ 			if (html != NULL && *html) {
+ 				teams_find_incoming_img(sa, conv, composetimestamp, from, &html);
+-				
++				// webOS replies: stash the inline <quote> on the chat conv (webos-msg-id was stashed on it
++				// above) and strip it from the visible body so only the reply text shows.
++				teams_stash_webos_quote(conv, &html);
++				teams_cache_quote_meta(sa, resource, html);
+ 				purple_serv_got_chat_in(sa->pc, g_str_hash(chatname), from, (teams_is_user_self(sa, from) ? PURPLE_MESSAGE_SEND : PURPLE_MESSAGE_RECV) | (is_whisper ? PURPLE_MESSAGE_WHISPER : 0), html, composetimestamp);
+ 				
+ 				g_free(html);
+@@ -1180,36 +1514,16 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
  				}
  				
  				if (json_object_has_member(properties, "emotions")) {
@@ -438,7 +627,7 @@ index 1551c94..88c1ba3 100644
  				} else {
  					html = teams_process_files_in_properties(properties, &html);
  					html = teams_process_cards_in_properties(properties, &html);
-@@ -1201,7 +1383,12 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+@@ -1264,20 +1578,43 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
  					imconv = purple_im_conversation_new(sa->account, modified_convbuddyname);
  				}
  				conv = PURPLE_CONVERSATION(imconv);
@@ -452,9 +641,22 @@ index 1551c94..88c1ba3 100644
  				teams_find_incoming_img(sa, conv, composetimestamp, from, &html);
  				
  				if (teams_is_user_self(sa, from)) {
-@@ -1215,6 +1402,14 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+ 					if (!g_str_has_prefix(html, "?OTR")) {
+ 						PurpleMessage *msg;
+-						
++
++						// webOS replies: our own reply from another device - stash the quote on the carbon
++						// conv (and strip the inline <quote> from the visible body).
++						teams_stash_webos_quote(conv, &html);
++						// Cache our OWN sent message too, so a later reply TO it can rebuild the <quote>.
++						teams_cache_quote_meta(sa, resource, html);
+ 						msg = purple_message_new_outgoing(modified_convbuddyname, html, PURPLE_MESSAGE_SEND | (is_whisper ? PURPLE_MESSAGE_WHISPER : 0));
+ 						purple_message_set_time(msg, composetimestamp);
+ 						purple_conversation_write_message(conv, msg);
+ 						purple_message_destroy(msg);
  					}
- 					
+-					
++
  				} else {
 +					// Stash the id on the exact conv serv_got_im uses (keyed by `from`); the earlier
 +					// stash was on modified_convbuddyname, which can differ from `from` in Teams, so the
@@ -464,10 +666,15 @@ index 1551c94..88c1ba3 100644
 +						rconv = purple_im_conversation_new(sa->account, from);
 +					}
 +					teams_stash_webos_msg_id(PURPLE_CONVERSATION(rconv), resource);
++					// webOS replies: stash the quoted-original on the same conv serv_got_im uses and strip
++					// the inline <quote> from the visible body so only the reply text shows.
++					teams_stash_webos_quote(PURPLE_CONVERSATION(rconv), &html);
++					// Cache this message's own text so a later reply TO it can rebuild the <quote> block.
++					teams_cache_quote_meta(sa, resource, html);
  					purple_serv_got_im(sa->pc, from, html, PURPLE_MESSAGE_RECV | (is_whisper ? PURPLE_MESSAGE_WHISPER : 0), composetimestamp);
  				}
  				g_free(html);
-@@ -2947,8 +3142,112 @@ teams_send_message(TeamsAccount *sa, const gchar *convname, const gchar *message
+@@ -3079,8 +3416,112 @@ teams_send_message(TeamsAccount *sa, const gchar *convname, const gchar *message
  }
  
  
@@ -581,11 +788,85 @@ index 1551c94..88c1ba3 100644
  #if PURPLE_VERSION_CHECK(3, 0, 0)
  PurpleMessage *msg)
  {
+@@ -3104,8 +3545,26 @@ const gchar *message, PurpleMessageFlags flags)
+ 			return -1;
+ 		}
+ 
+-	teams_send_message(sa, chatname, message);
++	// webOS replies: if the transport stashed a reply target on this chat conv, prepend the full Teams
++	// <quote> block (rebuilt from the cached original) so the sent message threads on other clients.
++	gchar *reply_to = (gchar *)purple_conversation_get_data(PURPLE_CONVERSATION(chatconv), "webos-reply-to");
++	gchar *outgoing = NULL;
++	if (reply_to != NULL && *reply_to) {
++		gchar *quote = teams_build_quote_block(sa, reply_to);
++		if (quote != NULL) {
++			outgoing = g_strconcat(quote, message, NULL);
++			g_free(quote);
++		}
++	}
++	if (reply_to != NULL) {
++		purple_conversation_set_data(PURPLE_CONVERSATION(chatconv), "webos-reply-to", NULL);
++		g_free(reply_to);
++	}
+ 
++	teams_send_message(sa, chatname, outgoing ? outgoing : message);
++	g_free(outgoing);
++
++	// local echo shows the clean reply body (the transport ignores this SEND echo anyway)
+ 	purple_serv_got_chat_in(pc, id, sa->username, PURPLE_MESSAGE_SEND, message, time(NULL));
+ 
+ 	return 1;
+@@ -3126,6 +3585,18 @@ const gchar *who, const gchar *message, PurpleMessageFlags flags)
+ 	TeamsAccount *sa = purple_connection_get_protocol_data(pc);
+ 	const gchar *convname;
+ 
++	// webOS replies: capture the reply target the transport stashed on this buddy's IM conv BEFORE `who`
++	// is rewritten below (the stash is keyed by the original recipient).
++	gchar *reply_to = NULL;
++	{
++		PurpleIMConversation *imc = purple_conversations_find_im_with_account(who, sa->account);
++		if (imc != NULL) {
++			reply_to = (gchar *)purple_conversation_get_data(PURPLE_CONVERSATION(imc), "webos-reply-to");
++			if (reply_to != NULL)
++				purple_conversation_set_data(PURPLE_CONVERSATION(imc), "webos-reply-to", NULL);
++		}
++	}
++
+ 	if (teams_is_user_self(sa, who)) {
+ 		// Fake internal app for self-messages
+ 		who = "48:notes";
+@@ -3147,11 +3618,23 @@ const gchar *who, const gchar *message, PurpleMessageFlags flags)
+ 
+ 	if (!convname) {
+ 		teams_initiate_chat(sa, who, TRUE, message);
++		g_free(reply_to);
+ 		return 0;
+ 	}
+-	
+-	teams_send_message(sa, convname, message);
+-	
++
++	gchar *outgoing = NULL;
++	if (reply_to != NULL && *reply_to) {
++		gchar *quote = teams_build_quote_block(sa, reply_to);
++		if (quote != NULL) {
++			outgoing = g_strconcat(quote, message, NULL);
++			g_free(quote);
++		}
++	}
++	g_free(reply_to);
++
++	teams_send_message(sa, convname, outgoing ? outgoing : message);
++	g_free(outgoing);
++
+ 	return 1;
+ }
+ 
 diff --git a/teams_messages.h b/teams_messages.h
-index de60299..e3d37cd 100644
+index b877bdc..714f03f 100644
 --- a/teams_messages.h
 +++ b/teams_messages.h
-@@ -69,4 +69,9 @@ void teams_mark_conv_seen(PurpleConversation *conv, PurpleConversationUpdateType
+@@ -71,4 +71,9 @@ void teams_mark_conv_seen(PurpleConversation *conv, PurpleConversationUpdateType
  
  void teams_gather_self_properties(TeamsAccount *sa);
  
@@ -595,6 +876,3 @@ index de60299..e3d37cd 100644
 +	const gchar *emoji, const gchar *peer, const gchar *removeFlag, gpointer user_data);
 +
  #endif /* TEAMS_MESSAGES_H */
--- 
-2.53.0
-
