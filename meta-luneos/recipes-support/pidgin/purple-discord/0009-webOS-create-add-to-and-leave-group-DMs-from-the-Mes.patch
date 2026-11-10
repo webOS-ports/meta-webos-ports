@@ -1,0 +1,475 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sat, 7 Nov 2026 17:26:15 +0100
+Subject: [PATCH] webOS: create, add to and leave group DMs from the Messaging
+ app
+
+* Create group DMs from the Messaging app
+
+The Messaging app can now start a group. The transport emits
+"webos-im-group-create" with the account, a name and the members'
+buddy names joined by "\x1f".
+
+A Discord group outside a server is a group DM. The handler resolves
+each member to a user id, as send_im does when it opens a DM, and
+POSTs the ids as "recipients" to /users/@me/channels. When that
+answers with a group DM and a name was given, it PATCHes the channel's
+name. Nothing else is needed for the app to see the group: the gateway
+sends CHANNEL_CREATE, which discord_got_group_dm already turns into a
+buddy list chat.
+
+It returns TRUE once the request is on its way. For an account that is
+not Discord's, no members, or a member the plug-in does not know it
+returns FALSE and creates nothing, rather than a group without someone
+the user picked.
+
+The member list splitting and the request body are in webos_helpers.c,
+with unit tests.
+
+* Add people to a group DM from the Messaging app
+
+The Messaging app can now add members to a group. The transport emits
+"webos-im-group-invite" with the account, the group's chat (its channel
+id) and the new members' buddy names joined by "\x1f".
+
+Only a group DM has members of its own to add. For one, the handler
+resolves each name to a user and PUTs it to
+/channels/{id}/recipients/{user}, the request discord_chat_invite makes
+and which now lives in a function both use. A member the plug-in does
+not know is skipped and logged. It returns TRUE when at least one
+request went out, and FALSE for an account that is not Discord's, a
+1:1 DM (Discord cannot turn one into a group) or a server channel:
+there, discord_chat_invite POSTs an invite link, which adds nobody.
+
+* Leave group DMs from the Messaging app and with /leave
+
+The Messaging app can now leave a group. The transport emits
+"webos-im-group-leave" with the account and the group's chat.
+
+For a group DM the handler sends DELETE /channels/{id}, which leaves
+it, and takes the group off the buddy list once Discord answers with
+the channel: the plug-in does not handle the gateway's CHANNEL_DELETE.
+For anything else it returns FALSE and does nothing. In a 1:1 DM the
+request would only close the DM, and a server channel cannot be left
+on its own; leaving the whole server is not what leaving a group
+means.
+
+/leave in a group DM now leaves it too; it used to do nothing. The
+commented-out body of discord_chat_leave_by_room_id stays as it is:
+libpurple calls chat_leave whenever a conversation is closed, which
+must not take the user out of the group.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ libdiscord.c               | 220 +++++++++++++++++++++++++++++++++++--
+ tests/test_webos_helpers.c |  49 +++++++++
+ webos_helpers.c            |  50 +++++++++
+ webos_helpers.h            |  12 ++
+ 4 files changed, 319 insertions(+), 12 deletions(-)
+
+diff --git a/libdiscord.c b/libdiscord.c
+index cf4af1c..c51b3e0 100644
+--- a/libdiscord.c
++++ b/libdiscord.c
+@@ -7027,6 +7027,27 @@ discord_got_login_fingerprint(DiscordAccount *da, JsonNode *node, gpointer user_
+ 
+ static gchar *discord_outgoing_content(const gchar *message);
+ 
++/* Add a user to a group DM: PUT /channels/{id}/recipients/{user}. */
++static void
++discord_group_dm_add_recipient(DiscordAccount *da, guint64 room_id, guint64 user_id)
++{
++	gchar *url = discord_webos_recipient_url(DISCORD_API_BASE, room_id, user_id);
++	if (url == NULL)
++		return;
++
++	JsonObject *data = json_object_new();
++	gchar *recipient = from_int(user_id);
++	json_object_set_string_member(data, "recipient", recipient);
++	g_free(recipient);
++	gchar *postdata = json_object_to_string(data);
++
++	discord_fetch_url_with_method(da, "PUT", url, postdata, NULL, NULL);
++
++	g_free(postdata);
++	json_object_unref(data);
++	g_free(url);
++}
++
+ /* webOS: the DiscordAccount behind a PurpleAccount the transport names in one of its process-wide
+  * signals, or NULL when the account is not one of ours or is not connected. The signals fire for
+  * every account of every prpl. */
+@@ -7176,6 +7197,179 @@ discord_webos_send_delete_cb(PurpleAccount *account, const char *chat, const cha
+ 	return TRUE;
+ }
+ 
++/* webOS: Discord's answer to creating a group DM. user_data is the name to give it (owned here, may
++ * be empty). The group itself reaches the buddy list, and the app, through the gateway's
++ * CHANNEL_CREATE (discord_got_group_dm); all that is left here is the name. */
++static void
++discord_webos_group_created_cb(DiscordAccount *da, JsonNode *node, gpointer user_data)
++{
++	gchar *name = user_data;
++	JsonObject *result = (node != NULL && JSON_NODE_HOLDS_OBJECT(node)) ? json_node_get_object(node) : NULL;
++	const gchar *channel_id = result ? json_object_get_string_member(result, "id") : NULL;
++
++	if (channel_id == NULL) {
++		const gchar *message = result ? json_object_get_string_member(result, "message") : NULL;
++		purple_debug_error("discord", "webos group create failed: %s\n", message ? message : "(no answer)");
++		g_free(name);
++		return;
++	}
++
++	/* One recipient can give a 1:1 DM rather than a group; that has no name to set. */
++	if (name != NULL && *name != '\0' && json_object_get_int_member(result, "type") == CHANNEL_GROUP_DM) {
++		gchar *url = discord_webos_channel_url(DISCORD_API_BASE, to_int(channel_id));
++
++		if (url != NULL) {
++			JsonObject *body = json_object_new();
++			json_object_set_string_member(body, "name", name);
++			gchar *postdata = json_object_to_string(body);
++
++			discord_fetch_url_with_method(da, "PATCH", url, postdata, NULL, NULL);
++
++			g_free(postdata);
++			json_object_unref(body);
++			g_free(url);
++		}
++	}
++
++	g_free(name);
++}
++
++/* webOS group create (SEND): "webos-im-group-create" (account, name, membersJoined) - the user made a
++ * new group in the Messaging app. Discord's groups without a server are group DMs, created with
++ * POST /users/@me/channels and the members' user ids; the members are buddy names, resolved as
++ * send_im does when it opens a DM. Returns TRUE once the request is on its way, FALSE for an account
++ * that is not Discord's or a member the plug-in does not know (no group is made then). */
++static gboolean
++discord_webos_group_create_cb(PurpleAccount *account, const char *name, const char *members_joined, void *data)
++{
++	(void) data;
++	DiscordAccount *da = discord_webos_account(account);
++	if (da == NULL)
++		return FALSE;
++
++	gchar **members = discord_webos_split_members(members_joined);
++	guint n_members = g_strv_length(members);
++	guint64 *ids = g_new0(guint64, n_members + 1);
++	gboolean ok = n_members > 0;
++
++	for (guint i = 0; ok && i < n_members; i++) {
++		DiscordUser *user = discord_get_user_fullname(da, members[i]);
++
++		if (user == NULL) {
++			purple_debug_warning("discord", "webos group create: unknown member %s\n", members[i]);
++			ok = FALSE;
++		} else {
++			ids[i] = user->id;
++		}
++	}
++
++	gchar *postdata = ok ? discord_webos_group_create_body(ids, n_members) : NULL;
++
++	if (postdata != NULL) {
++		discord_fetch_url(da, DISCORD_API_BASE "/users/@me/channels", postdata,
++				discord_webos_group_created_cb, g_strdup(name ? name : ""));
++	}
++
++	g_free(postdata);
++	g_free(ids);
++	g_strfreev(members);
++	return ok;
++}
++
++/* webOS group invite (SEND): "webos-im-group-invite" (account, chat, membersJoined) - the user added
++ * people to a group in the Messaging app. Only a group DM has members to add: a server channel's
++ * members are the server's, and a 1:1 DM cannot grow into a group, so both return FALSE. Members are
++ * buddy names; one the plug-in does not know is skipped. Returns TRUE when at least one request went
++ * out. */
++static gboolean
++discord_webos_group_invite_cb(PurpleAccount *account, const char *chat, const char *members_joined, void *data)
++{
++	(void) data;
++	DiscordAccount *da = discord_webos_account(account);
++	if (da == NULL)
++		return FALSE;
++
++	guint64 room_id = discord_webos_channel_for(da, chat, NULL);
++	if (room_id == 0 || !g_hash_table_contains_int64(da->group_dms, room_id)) {
++		purple_debug_warning("discord", "webos group invite: %s is not a group DM\n", chat ? chat : "(null)");
++		return FALSE;
++	}
++
++	gchar **members = discord_webos_split_members(members_joined);
++	gboolean sent = FALSE;
++
++	for (gchar **m = members; *m != NULL; m++) {
++		DiscordUser *user = discord_get_user_fullname(da, *m);
++
++		if (user == NULL) {
++			purple_debug_warning("discord", "webos group invite: unknown member %s\n", *m);
++			continue;
++		}
++
++		discord_group_dm_add_recipient(da, room_id, user->id);
++		sent = TRUE;
++	}
++
++	g_strfreev(members);
++	return sent;
++}
++
++/* webOS: Discord's answer to leaving a group DM: the channel. The plug-in has no CHANNEL_DELETE
++ * handling, so take the group off the buddy list here once Discord confirms. */
++static void
++discord_left_group_dm_cb(DiscordAccount *da, JsonNode *node, gpointer user_data)
++{
++	(void) user_data;
++	JsonObject *result = (node != NULL && JSON_NODE_HOLDS_OBJECT(node)) ? json_node_get_object(node) : NULL;
++	const gchar *channel_id = result ? json_object_get_string_member(result, "id") : NULL;
++
++	if (channel_id == NULL) {
++		const gchar *message = result ? json_object_get_string_member(result, "message") : NULL;
++		purple_debug_error("discord", "leaving group DM failed: %s\n", message ? message : "(no answer)");
++		return;
++	}
++
++	PurpleChat *chat = discord_find_chat(da->account, channel_id);
++	if (chat != NULL)
++		purple_blist_remove_chat(chat);
++}
++
++/* Leave a group DM: DELETE /channels/{id}. Returns FALSE, doing nothing, for any other channel - for a
++ * 1:1 DM that would only close it, and a server channel cannot be left at all. */
++static gboolean
++discord_leave_group_dm(DiscordAccount *da, guint64 room_id)
++{
++	if (room_id == 0 || !g_hash_table_contains_int64(da->group_dms, room_id))
++		return FALSE;
++
++	gchar *url = discord_webos_channel_url(DISCORD_API_BASE, room_id);
++	if (url == NULL)
++		return FALSE;
++
++	discord_fetch_url_with_method(da, "DELETE", url, NULL, discord_left_group_dm_cb, NULL);
++	g_free(url);
++	return TRUE;
++}
++
++/* webOS group leave (SEND): "webos-im-group-leave" (account, chat) - the user left a group in the
++ * Messaging app. For a group DM that is leaving it. A server channel returns FALSE: leaving the whole
++ * server is not what leaving a group means, and a channel alone cannot be left. */
++static gboolean
++discord_webos_group_leave_cb(PurpleAccount *account, const char *chat, void *data)
++{
++	(void) data;
++	DiscordAccount *da = discord_webos_account(account);
++	if (da == NULL)
++		return FALSE;
++
++	if (!discord_leave_group_dm(da, discord_webos_channel_for(da, chat, NULL))) {
++		purple_debug_warning("discord", "webos group leave: %s is not a group DM\n", chat ? chat : "(null)");
++		return FALSE;
++	}
++
++	return TRUE;
++}
++
+ /* Connect once (process-wide) to the transport's send-reaction signal. The signal lives on
+  * purple_conversations_get_handle(), so a single connect covers every Discord account in this process.
+  * Guarded so repeated logins don't double-connect. */
+@@ -7192,6 +7386,12 @@ discord_connect_send_reaction_once(void)
+ 			purple_get_core(), PURPLE_CALLBACK(discord_webos_send_edit_cb), NULL);
+ 	purple_signal_connect(purple_conversations_get_handle(), "webos-im-send-delete",
+ 			purple_get_core(), PURPLE_CALLBACK(discord_webos_send_delete_cb), NULL);
++	purple_signal_connect(purple_conversations_get_handle(), "webos-im-group-create",
++			purple_get_core(), PURPLE_CALLBACK(discord_webos_group_create_cb), NULL);
++	purple_signal_connect(purple_conversations_get_handle(), "webos-im-group-invite",
++			purple_get_core(), PURPLE_CALLBACK(discord_webos_group_invite_cb), NULL);
++	purple_signal_connect(purple_conversations_get_handle(), "webos-im-group-leave",
++			purple_get_core(), PURPLE_CALLBACK(discord_webos_group_leave_cb), NULL);
+ }
+ 
+ void
+@@ -8698,18 +8898,7 @@ discord_chat_invite(PurpleConnection *pc, int id, const char *message, const cha
+ 	}
+ 
+ 	if (g_hash_table_contains_int64(da->group_dms, room_id)) {
+-		JsonObject *data = json_object_new();
+-		gchar *recipient = from_int(user->id);
+-		json_object_set_string_member(data, "recipient", recipient);
+-		g_free(recipient);
+-		gchar *postdata = json_object_to_string(data);
+-
+-		gchar *url = g_strdup_printf("https://" DISCORD_API_SERVER "/api/" DISCORD_API_VERSION "/channels/%" G_GUINT64_FORMAT "/recipients/%" G_GUINT64_FORMAT, room_id, user->id);
+-		discord_fetch_url_with_method(da, "PUT", url, postdata, NULL, NULL);
+-		g_free(url);
+-
+-		g_free(postdata);
+-		json_object_unref(data);
++		discord_group_dm_add_recipient(da, room_id, user->id);
+ 
+ 	} else {
+ 		//TODO /channels/{channel.id}/invites
+@@ -11655,6 +11844,13 @@ discord_cmd_leave(PurpleConversation *conv, const gchar *cmd, gchar **args, gcha
+ 		return PURPLE_CMD_RET_FAILED;
+ 	}
+ 
++	/* An explicit /leave leaves a group DM. discord_chat_leave itself must not: libpurple calls it
++	 * whenever the conversation is closed. */
++	DiscordAccount *da = purple_connection_get_protocol_data(pc);
++	if (da != NULL && discord_leave_group_dm(da, discord_get_channel_id_from_conv(da, conv))) {
++		return PURPLE_CMD_RET_OK;
++	}
++
+ 	discord_chat_leave(pc, id);
+ 
+ 	return PURPLE_CMD_RET_OK;
+diff --git a/tests/test_webos_helpers.c b/tests/test_webos_helpers.c
+index 656fd8e..cb24c3f 100644
+--- a/tests/test_webos_helpers.c
++++ b/tests/test_webos_helpers.c
+@@ -64,6 +64,53 @@ test_urls(void)
+ 	CHECK_STR(discord_webos_message_url(BASE, 42, NULL), NULL);
+ 	CHECK_STR(discord_webos_message_url(BASE, 42, ""), NULL);
+ 	CHECK_STR(discord_webos_message_url(BASE, 42, "12/reactions"), NULL);
++
++	CHECK_STR(discord_webos_recipient_url(BASE, 42, 7), BASE "/channels/42/recipients/7");
++	CHECK_STR(discord_webos_recipient_url(BASE, 0, 7), NULL);
++	CHECK_STR(discord_webos_recipient_url(BASE, 42, 0), NULL);
++	CHECK_STR(discord_webos_recipient_url(NULL, 42, 7), NULL);
++}
++
++static void
++test_split_members(void)
++{
++	gchar **m = discord_webos_split_members("alice\x1f" "bob#1234\x1f\x1f" "carol");
++	CHECK(g_strv_length(m) == 3);
++	CHECK(g_strcmp0(m[0], "alice") == 0);
++	CHECK(g_strcmp0(m[1], "bob#1234") == 0);
++	CHECK(g_strcmp0(m[2], "carol") == 0);
++	g_strfreev(m);
++
++	m = discord_webos_split_members("solo");
++	CHECK(g_strv_length(m) == 1 && g_strcmp0(m[0], "solo") == 0);
++	g_strfreev(m);
++
++	m = discord_webos_split_members("");
++	CHECK(m != NULL && m[0] == NULL);
++	g_strfreev(m);
++
++	m = discord_webos_split_members("\x1f\x1f");
++	CHECK(m != NULL && m[0] == NULL);
++	g_strfreev(m);
++
++	m = discord_webos_split_members(NULL);
++	CHECK(m != NULL && m[0] == NULL);
++	g_strfreev(m);
++}
++
++static void
++test_group_create_body(void)
++{
++	const guint64 two[] = { G_GUINT64_CONSTANT(80351110224678912), 1 };
++	const guint64 big[] = { G_MAXUINT64 };
++	const guint64 zero[] = { 5, 0 };
++
++	CHECK_STR(discord_webos_group_create_body(two, 2), "{\"recipients\":[\"80351110224678912\",\"1\"]}");
++	CHECK_STR(discord_webos_group_create_body(two, 1), "{\"recipients\":[\"80351110224678912\"]}");
++	CHECK_STR(discord_webos_group_create_body(big, 1), "{\"recipients\":[\"18446744073709551615\"]}");
++	CHECK_STR(discord_webos_group_create_body(zero, 2), NULL);
++	CHECK_STR(discord_webos_group_create_body(two, 0), NULL);
++	CHECK_STR(discord_webos_group_create_body(NULL, 1), NULL);
+ }
+ 
+ int
+@@ -71,6 +118,8 @@ main(void)
+ {
+ 	test_snowflake();
+ 	test_urls();
++	test_split_members();
++	test_group_create_body();
+ 
+ 	if (failures) {
+ 		fprintf(stderr, "%d check(s) failed\n", failures);
+diff --git a/webos_helpers.c b/webos_helpers.c
+index f14a51b..49b2bd0 100644
+--- a/webos_helpers.c
++++ b/webos_helpers.c
+@@ -50,3 +50,53 @@ discord_webos_message_url(const gchar *api_base, guint64 channel_id, const gchar
+ 
+ 	return g_strdup_printf("%s/channels/%" G_GUINT64_FORMAT "/messages/%s", api_base, channel_id, message_id);
+ }
++
++gchar *
++discord_webos_recipient_url(const gchar *api_base, guint64 channel_id, guint64 user_id)
++{
++	if (api_base == NULL || channel_id == 0 || user_id == 0)
++		return NULL;
++
++	return g_strdup_printf("%s/channels/%" G_GUINT64_FORMAT "/recipients/%" G_GUINT64_FORMAT,
++			api_base, channel_id, user_id);
++}
++
++gchar **
++discord_webos_split_members(const gchar *joined)
++{
++	GPtrArray *out = g_ptr_array_new();
++
++	if (joined != NULL) {
++		gchar **parts = g_strsplit(joined, "\x1f", -1);
++
++		for (gchar **p = parts; *p != NULL; p++) {
++			if (**p != '\0')
++				g_ptr_array_add(out, g_strdup(*p));
++		}
++
++		g_strfreev(parts);
++	}
++
++	g_ptr_array_add(out, NULL);
++	return (gchar **) g_ptr_array_free(out, FALSE);
++}
++
++gchar *
++discord_webos_group_create_body(const guint64 *user_ids, gsize n_ids)
++{
++	if (user_ids == NULL || n_ids == 0)
++		return NULL;
++
++	GString *body = g_string_new("{\"recipients\":[");
++
++	for (gsize i = 0; i < n_ids; i++) {
++		if (user_ids[i] == 0) {
++			g_string_free(body, TRUE);
++			return NULL;
++		}
++		g_string_append_printf(body, "%s\"%" G_GUINT64_FORMAT "\"", i ? "," : "", user_ids[i]);
++	}
++
++	g_string_append(body, "]}");
++	return g_string_free(body, FALSE);
++}
+diff --git a/webos_helpers.h b/webos_helpers.h
+index 8c60757..547f007 100644
+--- a/webos_helpers.h
++++ b/webos_helpers.h
+@@ -35,4 +35,16 @@ gchar *discord_webos_channel_url(const gchar *api_base, guint64 channel_id);
+  * path). */
+ gchar *discord_webos_message_url(const gchar *api_base, guint64 channel_id, const gchar *message_id);
+ 
++/* <api_base>/channels/<channel_id>/recipients/<user_id>, or NULL for a 0 id. */
++gchar *discord_webos_recipient_url(const gchar *api_base, guint64 channel_id, guint64 user_id);
++
++/* The non-empty members of a "\x1f"-joined list, as a NULL-terminated vector (g_strfreev). Never
++ * NULL: no members gives an empty vector. */
++gchar **discord_webos_split_members(const gchar *joined);
++
++/* The JSON body that creates a group DM with these users:
++ * {"recipients":["<id>",...]}. Snowflakes are strings in Discord's JSON. NULL for no users or a 0
++ * id. */
++gchar *discord_webos_group_create_body(const guint64 *user_ids, gsize n_ids);
++
+ #endif /* DISCORD_WEBOS_HELPERS_H */
