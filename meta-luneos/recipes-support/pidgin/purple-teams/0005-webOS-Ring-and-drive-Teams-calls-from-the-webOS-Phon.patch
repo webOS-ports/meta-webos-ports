@@ -1,0 +1,1025 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 6 Nov 2026 10:13:53 +0100
+Subject: [PATCH] webOS: Ring and drive Teams calls from the webOS Phone app
+
+Add the webOS front end of the 1:1 Teams calls that teams_calling.c
+places and takes (upstream pull request #99), so the stock Phone app
+rings, shows and drives them:
+
+- teams_call_luna.c/.h: the com.palm.teams.call luna-service2 service
+  the Phone app's CallSynergizer talks to (callStateQuery, dial,
+  answer, disconnect, hangupAll, changeMedia; hold, swap, merge,
+  extract and DTMF answer true and do nothing). It registers as the
+  front end through teams_calling_set_state_cb(),
+  teams_calling_set_video_cb() and teams_calling_set_account_cbs(),
+  pushes the call's state and video to the subscribers, gives each
+  call a card id of its own, clears an ended call's card 1.5 s after
+  "disconnected", and tells audiod with CallStatusUpdate when a call
+  is active (with "video" for a video call) and when it is over.
+- teams_call_video.c/.h: the call's video as the Phone app sees it,
+  from the engine's video lines and the offers' video direction: the
+  line's incomingVideo/outgoingVideo/incomingVideoState and the
+  payload's videoURI and self-view fields. Our own camera's self-view
+  is reported while it sends, also before the far side's picture
+  comes and while that picture is hidden. tests/test_call_video.c
+  covers it; make check runs it.
+- libteams.c: register the service at plugin load, not at login. The
+  Phone app subscribes to callStateQuery once, when it starts at
+  boot, and does not retry a service that was not there. An account
+  binds itself through the account hooks when it signs in, which also
+  retry a registration that failed at load. Until the service is on
+  the bus no front end is registered, so an incoming call is then
+  announced as a message, as without a front end.
+- Makefile: with TEAMS_CALLING=1, build the two files into
+  libteams-personal.so with -DTEAMS_WEBOS_CALL and link luna-service2
+  after the objects; stop with an error if pkg-config does not find
+  luna-service2, rather than build a plug-in libpurple cannot load.
+
+This replaces the webOS parts of the old layer patches 0012, 0014,
+0026, 0027 and 0033, whose calling code is now in #99 (as are the SDP
+helpers 0034 added to teams_call_video.c).
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ Makefile                |  17 +-
+ libteams.c              |  11 ++
+ teams_call_luna.c       | 423 ++++++++++++++++++++++++++++++++++++++++
+ teams_call_luna.h       |  30 +++
+ teams_call_video.c      | 206 +++++++++++++++++++
+ teams_call_video.h      |  46 +++++
+ tests/test_call_video.c | 161 +++++++++++++++
+ 7 files changed, 892 insertions(+), 2 deletions(-)
+ create mode 100644 teams_call_luna.c
+ create mode 100644 teams_call_luna.h
+ create mode 100644 teams_call_video.c
+ create mode 100644 teams_call_video.h
+ create mode 100644 tests/test_call_video.c
+
+diff --git a/Makefile b/Makefile
+index acfb00d..6e15eaf 100644
+--- a/Makefile
++++ b/Makefile
+@@ -105,6 +105,14 @@ TEAMS_CALL_FILES += teams_call_pmedia.c
+ TEAMS_CALL_FLAGS += -DTEAMS_PURPLEMEDIA $(shell $(PKG_CONFIG) gstreamer-1.0 gstreamer-rtp-1.0 gio-2.0 gmodule-2.0 --cflags)
+ TEAMS_CALL_LIBS += $(shell $(PKG_CONFIG) gstreamer-1.0 gstreamer-rtp-1.0 gio-2.0 gmodule-2.0 --libs)
+ endif
++# webOS: the front end for the Phone app, the com.palm.teams.call service on luna-service2
++TEAMS_CALL_FILES += teams_call_luna.c teams_call_video.c
++TEAMS_CALL_FLAGS += -DTEAMS_WEBOS_CALL $(shell $(PKG_CONFIG) luna-service2 --cflags)
++TEAMS_LUNA_LIBS := $(shell $(PKG_CONFIG) luna-service2 --libs)
++ifeq ($(TEAMS_LUNA_LIBS),)
++$(error TEAMS_CALLING: luna-service2 not found by $(PKG_CONFIG))
++endif
++TEAMS_CALL_LIBS += $(TEAMS_LUNA_LIBS)
+ endif
+ 
+ 
+@@ -178,8 +186,13 @@ FAILNOPURPLE:
+ tests/test_call_sdp: tests/test_call_sdp.c teams_call_sdp.c
+ 	$(CC) $(CFLAGS) -I. -o $@ $^ $(LDFLAGS) $(shell $(PKG_CONFIG) glib-2.0 --cflags --libs)
+ 
+-check: tests/test_call_sdp
++# webOS: unit test of the Phone app's video fields (GLib only).
++tests/test_call_video: tests/test_call_video.c teams_call_video.c
++	$(CC) $(CFLAGS) -I. -o $@ $^ $(LDFLAGS) $(shell $(PKG_CONFIG) glib-2.0 --cflags --libs)
++
++check: tests/test_call_sdp tests/test_call_video
+ 	./tests/test_call_sdp
++	./tests/test_call_video
+ 
+ # Loopback test of the PurpleMedia engine (see docs/CALLING.md): needs libpurple built with
+ # voice and video, Farstream and GStreamer; silent (audiotestsrc into fakesink).
+@@ -194,5 +207,5 @@ tests/test_pmedia_novv: tests/test_pmedia_novv.c teams_call_pmedia.c teams_call_
+ 	$(CC) $(CFLAGS) -I. -o $@ $^ $(LDFLAGS) $(shell $(PKG_CONFIG) purple glib-2.0 gio-2.0 gmodule-2.0 gstreamer-1.0 gstreamer-rtp-1.0 --cflags --libs)
+ 
+ clean:
+-	rm -f $(TEAMS_TARGET) tests/test_call_sdp tests/test_pmedia_loopback tests/test_pmedia_novv
++	rm -f $(TEAMS_TARGET) tests/test_call_sdp tests/test_call_video tests/test_pmedia_loopback tests/test_pmedia_novv
+ 
+diff --git a/libteams.c b/libteams.c
+index 44dfb56..330e967 100644
+--- a/libteams.c
++++ b/libteams.c
+@@ -25,6 +25,9 @@
+ #ifdef TEAMS_CALLING
+ #include "teams_calling.h"
+ #endif
++#ifdef TEAMS_WEBOS_CALL
++#include "teams_call_luna.h"
++#endif
+ 
+ #ifdef ENABLE_TEAMS_PERSONAL
+ /* Personal/TFL: real-time message delivery via Trouter push does not work for
+@@ -1172,6 +1175,14 @@ plugin_load(PurplePlugin *plugin
+ 	
+ 	purple_signal_connect(purple_get_core(), "uri-handler", plugin, PURPLE_CALLBACK(teams_uri_handler), NULL);
+ 
++#ifdef TEAMS_WEBOS_CALL
++	/* webOS: put com.palm.teams.call on the bus at plugin load, not at login. The Phone app
++	 * subscribes to callStateQuery once, when it starts at boot, and does not retry a service
++	 * that was not there; a slow Teams login would leave incoming calls never ringing. The
++	 * front end binds the account through teams_calling_set_account_cbs() once it signs in. */
++	teams_call_luna_init();
++#endif
++
+ 	return TRUE;
+ }
+ 
+diff --git a/teams_call_luna.c b/teams_call_luna.c
+new file mode 100644
+index 0000000..a440b2a
+--- /dev/null
++++ b/teams_call_luna.c
+@@ -0,0 +1,423 @@
++/*
++ * Teams 1:1 calls - webOS front end, the com.palm.teams.call bridge to the Phone app. See
++ * teams_call_luna.h. Ported from the Telegram call-luna.cpp mediator, in C, driving
++ * teams_calling.c through its front-end hooks.
++ */
++
++#include "teams_call_luna.h"
++#include "teams_calling.h"
++#include "teams_call_video.h"
++
++#include <luna-service2/lunaservice.h>
++#include <glib.h>
++#include <string.h>
++
++/* One service per process, registered at plugin load; g_sa is the Teams account the Phone app's
++ * calls go to, the last one to sign in. LuneOS has a single bus, so the one handle serves the
++ * Phone app and reaches audiod. */
++static LSHandle      *g_sh      = NULL;
++static TeamsAccount  *g_sa      = NULL;
++
++/* Last state pushed, so a late subscriber gets the current picture in its first reply. */
++static gchar   *g_state    = NULL;
++static gchar   *g_peerAddr = NULL;
++static gchar   *g_peerName = NULL;
++static gchar   *g_cause    = NULL;
++static gboolean g_outgoing = FALSE;
++/* The call's id on the card. The Phone app remembers every call id it has seen end and ignores a
++ * later "disconnected" for it, so each call needs an id of its own, or the card of every call after
++ * the first stays up. From the clock, so a restarted service does not hand out an old one again. */
++static gint64   g_cardId   = 0;
++
++/* Whether audiod has been told about an active call, so it is told once each way. */
++static gboolean g_audioOn  = FALSE;
++
++/* The call's video as the Phone app sees it (teams_call_video.c), from the engine's video lines. */
++static TeamsCallVideo g_video = { .show_incoming = TRUE };
++
++static void audiod_report_active(void);
++static void teams_call_luna_set_audio(gboolean active);
++
++#define SUBKEY "callState"
++
++static void
++setstr(gchar **slot, const char *v)
++{
++	g_free(*slot);
++	*slot = g_strdup(v ? v : "");
++}
++
++/* Build the CallSynergizer callStateQuery payload. Fields MUST be flat (address/displayName
++ * directly on each call - CallSynergyContact.create() throws if address is missing) and carry
++ * transport = this mediator's PHONE account templateId ("com.palm.teams") so the Phone app
++ * treats it as the IM call it is, not a cellular number. Mirrors the Telegram mediator; the
++ * video fields are the ones the Signal connector sends (teams_call_video.c). */
++static gchar *
++build_payload(void)
++{
++	GString *p = g_string_new("{\"returnValue\":true,\"lines\":[");
++	if (g_state && *g_state) {
++		gchar *state = teams_call_json_quote(g_state);
++		gchar *addr = teams_call_json_quote(g_peerAddr);
++		gchar *name = teams_call_json_quote((g_peerName && *g_peerName) ? g_peerName : g_peerAddr);
++		gchar *cause = teams_call_json_quote(g_cause);
++
++		g_string_append_printf(p, "{\"state\":%s,", state);
++		if (g_strcmp0(g_state, "disconnected") == 0)
++			g_string_append_printf(p, "\"disconnectDetails\":{\"cause\":%s},", cause);
++		{
++			gchar *vf = teams_call_video_line_fields(&g_video);
++			g_string_append_printf(p, "%s,", vf);
++			g_free(vf);
++		}
++		g_string_append_printf(p,
++			"\"calls\":[{\"id\":\"teams-%" G_GINT64_FORMAT "\",\"origin\":\"%s\","
++			"\"transport\":\"com.palm.teams\",\"address\":%s,\"displayName\":%s}]}",
++			g_cardId, g_outgoing ? "outgoing" : "incoming", addr, name);
++		g_free(state); g_free(addr); g_free(name); g_free(cause);
++	}
++	g_string_append(p, "]");
++	if (g_state && *g_state) {
++		gchar *pf = teams_call_video_payload_fields(&g_video);
++		g_string_append(p, pf);
++		g_free(pf);
++	}
++	g_string_append(p, "}");
++	return g_string_free(p, FALSE);
++}
++
++/* A top-level string member of a JSON payload, or NULL. */
++static gchar *
++get_field(const char *json, const char *key)
++{
++	JsonParser *parser;
++	JsonNode *root;
++	gchar *ret = NULL;
++	if (!json) return NULL;
++	parser = json_parser_new();
++	if (json_parser_load_from_data(parser, json, -1, NULL) &&
++	    (root = json_parser_get_root(parser)) && JSON_NODE_HOLDS_OBJECT(root)) {
++		JsonObject *o = json_node_get_object(root);
++		JsonNode *n = json_object_get_member(o, key);
++		if (n && JSON_NODE_HOLDS_VALUE(n) && json_node_get_value_type(n) == G_TYPE_STRING)
++			ret = g_strdup(json_node_get_string(n));
++	}
++	g_object_unref(parser);
++	return ret;
++}
++
++/* ------------------------------------------------------------------- methods */
++
++static bool
++cb_call_state_query(LSHandle *sh, LSMessage *msg, void *ctx)
++{
++	LSError err; bool subscribed = FALSE; gchar *payload;
++	(void) ctx;
++	LSErrorInit(&err);
++	LSSubscriptionProcess(sh, msg, &subscribed, &err);
++	if (subscribed)
++		LSSubscriptionAdd(sh, SUBKEY, msg, &err);
++	payload = build_payload();
++	LSMessageReply(sh, msg, payload, &err);
++	g_free(payload);
++	if (LSErrorIsSet(&err)) { purple_debug_warning("teams", "callStateQuery: %s\n", err.message); LSErrorFree(&err); }
++	return TRUE;
++}
++
++static bool
++cb_dial(LSHandle *sh, LSMessage *msg, void *ctx)
++{
++	LSError err; gchar *addr; gboolean ok, video;
++	const char *payload = LSMessageGetPayload(msg);
++	(void) ctx;
++	LSErrorInit(&err);
++	addr = get_field(payload, "address");
++	/* {"address", "video": bool} as the Phone app sends it: a video call offers video too. */
++	video = teams_call_video_json_bool(payload, "video") == 1;
++	ok = g_sa && addr && *addr && teams_calling_dial(g_sa, addr, video);
++	teams_call_log("dial %s%s: %s", addr ? addr : "(null)", video ? " (video)" : "", ok ? "placed" : "failed");
++	LSMessageReply(sh, msg, ok ? "{\"returnValue\":true}" : "{\"returnValue\":false}", &err);
++	g_free(addr);
++	if (LSErrorIsSet(&err)) LSErrorFree(&err);
++	return TRUE;
++}
++
++static bool
++cb_answer(LSHandle *sh, LSMessage *msg, void *ctx)
++{
++	LSError err; (void) ctx;
++	LSErrorInit(&err);
++	if (g_sa) teams_calling_answer(g_sa);
++	LSMessageReply(sh, msg, "{\"returnValue\":true}", &err);
++	if (LSErrorIsSet(&err)) LSErrorFree(&err);
++	return TRUE;
++}
++
++static bool
++cb_disconnect(LSHandle *sh, LSMessage *msg, void *ctx)
++{
++	LSError err; (void) ctx;
++	LSErrorInit(&err);
++	if (g_sa) teams_calling_hangup(g_sa);
++	LSMessageReply(sh, msg, "{\"returnValue\":true}", &err);
++	if (LSErrorIsSet(&err)) LSErrorFree(&err);
++	return TRUE;
++}
++
++static void push_payload(void);
++
++/* changeMedia {"outgoingVideo":bool, "incomingVideo":bool}, as the Phone app sends it; each field
++ * optional. outgoingVideo turns our camera on or off (sent once our answer lets us send video);
++ * incomingVideo shows or hides the far side's picture, which keeps arriving. */
++static bool
++cb_change_media(LSHandle *sh, LSMessage *msg, void *ctx)
++{
++	LSError err; int out, in; gboolean ok = TRUE;
++	const char *payload = LSMessageGetPayload(msg);
++	(void) ctx;
++	LSErrorInit(&err);
++	if (!g_sa || !g_state || !*g_state) {
++		LSMessageReply(sh, msg, "{\"returnValue\":false,\"errorText\":\"no Teams call\"}", &err);
++		if (LSErrorIsSet(&err)) LSErrorFree(&err);
++		return TRUE;
++	}
++	out = teams_call_video_json_bool(payload, "outgoingVideo");
++	in = teams_call_video_json_bool(payload, "incomingVideo");
++	if (out >= 0) ok = teams_calling_set_camera(g_sa, out == 1);
++	teams_call_log("changeMedia outgoing %d incoming %d%s", out, in, ok ? "" : " (camera unavailable)");
++	if (in >= 0 && g_video.show_incoming != (in == 1)) {
++		g_video.show_incoming = in == 1;
++		push_payload();
++	}
++	LSMessageReply(sh, msg, ok ? "{\"returnValue\":true}" :
++	               "{\"returnValue\":false,\"errorText\":\"no camera for this call\"}", &err);
++	if (LSErrorIsSet(&err)) LSErrorFree(&err);
++	return TRUE;
++}
++
++static bool
++cb_noop(LSHandle *sh, LSMessage *msg, void *ctx)
++{
++	LSError err; (void) ctx;
++	LSErrorInit(&err);
++	LSMessageReply(sh, msg, "{\"returnValue\":true}", &err);
++	if (LSErrorIsSet(&err)) LSErrorFree(&err);
++	return TRUE;
++}
++
++static LSMethod g_methods[] = {
++	{ "callStateQuery",  cb_call_state_query, LUNA_METHOD_FLAGS_NONE },
++	{ "dial",            cb_dial,             LUNA_METHOD_FLAGS_NONE },
++	{ "answer",          cb_answer,           LUNA_METHOD_FLAGS_NONE },
++	{ "disconnect",      cb_disconnect,       LUNA_METHOD_FLAGS_NONE },
++	{ "hangupAll",       cb_disconnect,       LUNA_METHOD_FLAGS_NONE },
++	{ "hangupAllActive", cb_disconnect,       LUNA_METHOD_FLAGS_NONE },
++	{ "hold",            cb_noop,             LUNA_METHOD_FLAGS_NONE },
++	{ "swap",            cb_noop,             LUNA_METHOD_FLAGS_NONE },
++	{ "merge",           cb_noop,             LUNA_METHOD_FLAGS_NONE },
++	{ "extract",         cb_noop,             LUNA_METHOD_FLAGS_NONE },
++	{ "dtmf",            cb_noop,             LUNA_METHOD_FLAGS_NONE },
++	{ "dtmfEnd",         cb_noop,             LUNA_METHOD_FLAGS_NONE },
++	{ "changeMedia",     cb_change_media,     LUNA_METHOD_FLAGS_NONE },
++	{ NULL, NULL, LUNA_METHOD_FLAGS_NONE }
++};
++
++/* ------------------------------------------------------------- state push in */
++
++static void push_payload(void)
++{
++	gchar *payload;
++	LSError err;
++	if (!g_sh) return;
++	payload = build_payload();
++	LSErrorInit(&err);
++	if (!LSSubscriptionReply(g_sh, SUBKEY, payload, &err)) {
++		purple_debug_warning("teams", "pushState: %s\n", err.message);
++		LSErrorFree(&err);
++	}
++	g_free(payload);
++}
++
++/* The Phone app drops a call card only when a push stops listing that call. So an ended call is
++ * shown as "disconnected" for a moment and then the empty line list follows, as the WhatsApp
++ * connector does. A call that starts in the meantime has replaced the line, so the empty list is
++ * then not sent. */
++#define ENDED_CALL_HOLD_MS 1500
++static guint g_idlePush = 0;
++
++static gboolean
++push_idle(gpointer data)
++{
++	(void) data;
++	g_idlePush = 0;
++	if (!g_state || !*g_state)
++		push_payload();
++	return G_SOURCE_REMOVE;
++}
++
++/* teams_calling state callback: cache, push to the subscribers, and tell audiod when the call
++ * goes active or ends. */
++static void
++on_call_state(TeamsAccount *sa, const char *state, const char *peerAddress,
++              const char *peerName, gboolean isOutgoing, const char *cause)
++{
++	(void) sa;
++	/* Every call starts from idle: the state is cleared as soon as one ends. */
++	if ((!g_state || !*g_state) && state && *state) {
++		g_cardId = g_get_real_time();
++		teams_call_video_reset(&g_video);
++	}
++	setstr(&g_state, state);
++	setstr(&g_peerAddr, peerAddress);
++	setstr(&g_peerName, peerName);
++	setstr(&g_cause, cause);
++	g_outgoing = isOutgoing;
++	teams_call_log("state %s", *g_state ? g_state : "idle");
++
++	if (g_strcmp0(g_state, "active") == 0)      teams_call_luna_set_audio(TRUE);
++	else if (!*g_state || g_strcmp0(g_state, "disconnected") == 0) teams_call_luna_set_audio(FALSE);
++
++	push_payload();
++
++	/* The subscribers have seen the call end; a later callStateQuery gets no call, not this one,
++	 * and the card is cleared once the Phone app has shown it as ended. */
++	if (g_strcmp0(g_state, "disconnected") == 0) {
++		setstr(&g_state, NULL);
++		setstr(&g_peerAddr, NULL);
++		setstr(&g_peerName, NULL);
++		setstr(&g_cause, NULL);
++		teams_call_video_reset(&g_video);
++		if (!g_idlePush)
++			g_idlePush = g_timeout_add(ENDED_CALL_HOLD_MS, push_idle, NULL);
++	}
++}
++
++/* teams_calling video callback: the engine's video lines and the offers' video direction. */
++static void
++on_call_video(TeamsAccount *sa, const char *line)
++{
++	gboolean was_video = teams_call_video_active(&g_video), changed;
++	(void) sa;
++	if (!line || !*line) {
++		/* The engine stopped: no picture any more, the user's choice to show it stays. */
++		gboolean show = g_video.show_incoming;
++		changed = was_video || g_video.uri || g_video.preview;
++		teams_call_video_reset(&g_video);
++		g_video.show_incoming = show;
++	} else if (g_str_has_prefix(line, "OFFERED ")) {
++		changed = teams_call_video_set_offered(&g_video, !strcmp(line + 8, "1"));
++	} else {
++		changed = teams_call_video_engine_line(&g_video, line, NULL);
++	}
++	if (!changed || !g_state || !*g_state) return;
++	push_payload();
++	/* A voice call that turned into a video call (or back): tell audiod again. */
++	if (g_audioOn && was_video != teams_call_video_active(&g_video))
++		audiod_report_active();
++}
++
++/* --------------------------------------------------------------- init/shutdown */
++
++static gboolean luna_register(void);
++
++/* teams_calling account hook: an account signed in and can take and place calls. It becomes the
++ * account the Phone app's calls go to (the last one to sign in), and a registration that failed
++ * at plugin load is tried again. */
++static void
++on_account_connected(TeamsAccount *sa)
++{
++	g_sa = sa;
++	luna_register();
++}
++
++/* teams_calling account hook: the account is going away. teams_calling_close() has already
++ * ended its call and told on_call_state(); unbind it so nothing points at the freed account
++ * (the service stays registered for the process lifetime). */
++static void
++on_account_closing(TeamsAccount *sa)
++{
++	if (g_sa == sa) g_sa = NULL;
++}
++
++/* Put com.palm.teams.call on the bus and, once it is there, register as teams_calling's front
++ * end. Without the service there is no one to ring, so the hooks that make a front end present
++ * are left unset and an incoming call is announced as a message, as without a front end. */
++static gboolean
++luna_register(void)
++{
++	LSError err;
++	if (g_sh) return TRUE;   /* already registered */
++
++	LSErrorInit(&err);
++	if (!LSRegister("com.palm.teams.call", &g_sh, &err)) {
++		purple_debug_error("teams", "LSRegister com.palm.teams.call: %s\n", err.message);
++		LSErrorFree(&err);
++		g_sh = NULL;
++		return FALSE;
++	}
++	/* libpurple runs the default main context, so the service is attached to that. */
++	if (!LSRegisterCategory(g_sh, "/", g_methods, NULL, NULL, &err) ||
++	    !LSGmainContextAttach(g_sh, g_main_context_default(), &err)) {
++		purple_debug_error("teams", "com.palm.teams.call: %s\n", err.message);
++		LSErrorFree(&err);
++		LSErrorInit(&err);
++		if (!LSUnregister(g_sh, &err))
++			LSErrorFree(&err);
++		g_sh = NULL;
++		return FALSE;
++	}
++	teams_calling_set_state_cb(on_call_state);
++	teams_calling_set_video_cb(on_call_video);
++	purple_debug_info("teams", "com.palm.teams.call registered\n");
++	return TRUE;
++}
++
++gboolean
++teams_call_luna_init(void)
++{
++	teams_calling_set_account_cbs(on_account_connected, on_account_closing);
++	return luna_register();
++}
++
++/* --------------------------------------------------------------- call audio */
++
++static bool audiod_reply(LSHandle *sh, LSMessage *m, void *ctx) { (void)sh;(void)m;(void)ctx; return TRUE; }
++
++static void
++audiod_send(const char *uri, const char *payload)
++{
++	LSError err; LSMessageToken tok;
++	if (!g_sh) return;
++	LSErrorInit(&err);
++	if (!LSCallOneReply(g_sh, uri, payload, audiod_reply, NULL, &tok, &err)) {
++		purple_debug_warning("teams", "audiod %s: %s\n", uri, err.message);
++		LSErrorFree(&err);
++	}
++}
++
++/* The active call, as audiod is told it: "video" says whether the call has video. */
++static void
++audiod_report_active(void)
++{
++	gchar *p = g_strdup_printf("{\"lines\":[{\"state\":\"active\",\"calls\":[{\"id\":\"teams\","
++	                           "\"video\":%s,\"transport\":\"com.palm.teams\"}]}]}",
++	                           teams_call_video_active(&g_video) ? "true" : "false");
++	audiod_send("palm://com.palm.audio/phone/CallStatusUpdate", p);
++	g_free(p);
++}
++
++/* audiod keeps the active calls per sender; with one, it routes the call devices (the
++ * PulseAudio voipcall sink and webcall source the media engine uses) to the call's output, the
++ * earpiece unless the user picks another. The transport is this connector's own: a
++ * "com.palm.telephony" one would put audiod in carrier mode. An empty line list ends the call. */
++static void
++teams_call_luna_set_audio(gboolean active)
++{
++	if (active == g_audioOn) return;
++	g_audioOn = active;
++	teams_call_log("call audio %s", active ? "on" : "off");
++	if (active)
++		audiod_report_active();
++	else
++		audiod_send("palm://com.palm.audio/phone/CallStatusUpdate", "{\"lines\":[]}");
++}
+diff --git a/teams_call_luna.h b/teams_call_luna.h
+new file mode 100644
+index 0000000..03ae392
+--- /dev/null
++++ b/teams_call_luna.h
+@@ -0,0 +1,30 @@
++/*
++ * Teams 1:1 calls - webOS front end: the luna-service2 bridge to the stock Phone app
++ * (CallSynergizer). webOS Synergy Revival.
++ *
++ * Registers com.palm.teams.call (dial/answer/disconnect/changeMedia/callStateQuery), like the
++ * Telegram (com.palm.telegram.call) and WhatsApp mediators, so the stock dialer, in-call screen
++ * and call log drive Teams calls with no custom UI. Runs inside imlibpurpletransport on
++ * libpurple's GLib main loop. The signalling is teams_calling.c's and the media the teams_media
++ * engine's; this is their front end (teams_calling_set_state_cb, teams_calling_set_video_cb,
++ * teams_calling_set_account_cbs). It translates the webOS call contract to and from
++ * teams_calling_{dial,answer,hangup,set_camera}, pushes the call's state and video to
++ * callStateQuery subscribers and tells audiod about the call.
++ *
++ * webOS only: built into libteams-personal.so with TEAMS_CALLING=1 (see the Makefile), which
++ * then links luna-service2.
++ */
++
++#ifndef TEAMS_CALL_LUNA_H
++#define TEAMS_CALL_LUNA_H
++
++#include "libteams.h"
++
++/* Register the com.palm.teams.call service and, once it is on the bus, this file as
++ * teams_calling's front end. Called at plugin load, so the service is there before the Phone app
++ * subscribes at boot. An account binds itself when it signs in, through the account hooks, which
++ * also retry the registration if it failed at load. Idempotent. Returns FALSE (and logs) on an
++ * LS2 failure. */
++gboolean teams_call_luna_init(void);
++
++#endif /* TEAMS_CALL_LUNA_H */
+diff --git a/teams_call_video.c b/teams_call_video.c
+new file mode 100644
+index 0000000..7841f65
+--- /dev/null
++++ b/teams_call_video.c
+@@ -0,0 +1,206 @@
++/* Video in a 1:1 Teams call, as the Phone app sees it (see teams_call_video.h).
++ *
++ * The Phone app (SynergyTransport._applyVideo) reads, per line, incomingVideo, outgoingVideo,
++ * incomingVideoState ("unavailable", "available" or "streaming") and incomingVideoOrientation
++ * (quarter turns counter-clockwise), and from the payload videoURI with its size (the gst-shm
++ * socket its RemoteVideo reads) and the self-view's videoPreviewURI, size, orientation and
++ * mirroring. The preview is only read when there is a videoURI.
++ *
++ * Teams sends no "camera on" message in a 1:1 call that we know of: the far side's camera counts
++ * as on while its video arrives (the engine's PEERVIDEO), and the call as a video call when its
++ * offer has the far side sending on the m=video line. */
++
++#include "teams_call_video.h"
++#include <stdlib.h>
++#include <string.h>
++
++void
++teams_call_video_reset(TeamsCallVideo *v)
++{
++	g_free(v->uri);
++	g_free(v->preview);
++	memset(v, 0, sizeof *v);
++	v->show_incoming = TRUE;
++}
++
++/* Socket paths go into JSON unescaped: only absolute paths without quotes, backslashes or control
++ * characters are taken (the engine sends /tmp/teams-video and /tmp/teams-preview). */
++static gboolean
++path_ok(const char *p)
++{
++	const char *c;
++	if (!p || p[0] != '/' || strlen(p) >= 108)
++		return FALSE;
++	for (c = p; *c; c++)
++		if (*c == '"' || *c == '\\' || (unsigned char) *c < 0x20)
++			return FALSE;
++	return TRUE;
++}
++
++static gboolean
++dims_ok(long w, long h)
++{
++	return w > 0 && w <= 4096 && h > 0 && h <= 4096;
++}
++
++static gboolean
++set_flag(gboolean *slot, gboolean on)
++{
++	on = on != 0;
++	if (*slot == on)
++		return FALSE;
++	*slot = on;
++	return TRUE;
++}
++
++gboolean
++teams_call_video_set_offered(TeamsCallVideo *v, gboolean offered)
++{
++	return set_flag(&v->offered, offered);
++}
++
++/* "<word> <long>..." after the line's keyword: up to max numbers, returns how many were read. */
++static int
++numbers(const char *s, long *out, int max)
++{
++	int n = 0;
++	while (n < max && s && *s) {
++		char *end;
++		long val;
++		while (*s == ' ') s++;
++		if (!*s) break;
++		val = strtol(s, &end, 10);
++		if (end == s || (*end && *end != ' ')) return -1;
++		out[n++] = val;
++		s = end;
++	}
++	return n;
++}
++
++/* "VSHM <path> <w> <h>" / "VPREVIEW <path> <w> <h> <q> <m>": the path, then the numbers. */
++static gboolean
++path_and_numbers(const char *rest, gchar **path, long *out, int want)
++{
++	const char *sp = strchr(rest, ' ');
++	if (!sp || numbers(sp + 1, out, want) != want)
++		return FALSE;
++	*path = g_strndup(rest, (gsize) (sp - rest));
++	return TRUE;
++}
++
++gboolean
++teams_call_video_engine_line(TeamsCallVideo *v, const char *line, gboolean *known)
++{
++	long n[5];
++	gchar *path = NULL;
++	gboolean changed = FALSE;
++
++	if (known) *known = TRUE;
++	if (!line) {
++		if (known) *known = FALSE;
++		return FALSE;
++	}
++	if (g_str_has_prefix(line, "VSHM ")) {
++		if (path_and_numbers(line + 5, &path, n, 2) && path_ok(path) && dims_ok(n[0], n[1]) &&
++		    (g_strcmp0(v->uri, path) || v->width != n[0] || v->height != n[1])) {
++			g_free(v->uri);
++			v->uri = path;
++			path = NULL;
++			v->width = (int) n[0];
++			v->height = (int) n[1];
++			changed = TRUE;
++		}
++	} else if (g_str_has_prefix(line, "VPREVIEW ")) {
++		if (path_and_numbers(line + 9, &path, n, 4) && path_ok(path) && dims_ok(n[0], n[1]) &&
++		    n[2] >= 0 && n[2] <= 3) {
++			g_free(v->preview);
++			v->preview = path;
++			path = NULL;
++			v->preview_width = (int) n[0];
++			v->preview_height = (int) n[1];
++			v->preview_turns = (int) n[2];
++			v->preview_mirrored = n[3] != 0;
++			changed = TRUE;
++		}
++	} else if (g_str_has_prefix(line, "VTX ")) {
++		if (numbers(line + 4, n, 1) == 1)
++			changed = set_flag(&v->sending, n[0] != 0);
++	} else if (g_str_has_prefix(line, "PEERVIDEO ")) {
++		if (numbers(line + 10, n, 1) == 1)
++			changed = set_flag(&v->peer_camera, n[0] != 0);
++	} else if (!g_str_has_prefix(line, "VIDEOERR ")) {
++		if (known) *known = FALSE;
++	}
++	g_free(path);
++	return changed;
++}
++
++gboolean
++teams_call_video_active(const TeamsCallVideo *v)
++{
++	return v->offered || v->peer_camera || v->sending;
++}
++
++static const char *
++incoming_state(const TeamsCallVideo *v)
++{
++	if (v->show_incoming && v->peer_camera && v->uri)
++		return "streaming";
++	if (v->offered || v->peer_camera)
++		return "available";
++	return "unavailable";
++}
++
++gchar *
++teams_call_video_line_fields(const TeamsCallVideo *v)
++{
++	return g_strdup_printf("\"incomingVideo\":%s,\"outgoingVideo\":%s,"
++	                       "\"incomingVideoState\":\"%s\",\"incomingVideoOrientation\":0",
++	                       v->show_incoming && v->peer_camera ? "true" : "false",
++	                       v->sending ? "true" : "false", incoming_state(v));
++}
++
++gchar *
++teams_call_video_payload_fields(const TeamsCallVideo *v)
++{
++	GString *s = g_string_new(NULL);
++	if (v->uri && v->show_incoming)
++		g_string_append_printf(s, ",\"videoURI\":\"%s\",\"videoWidth\":%d,\"videoHeight\":%d",
++		                       v->uri, v->width, v->height);
++	/* Our own camera on its own: a call we place sends from the start, and the far side may
++	 * turn its camera on much later, or never. */
++	if (v->preview && v->sending)
++		g_string_append_printf(s, ",\"videoPreviewURI\":\"%s\",\"videoPreviewWidth\":%d,"
++		                          "\"videoPreviewHeight\":%d,\"videoPreviewOrientation\":%d,"
++		                          "\"videoPreviewMirrored\":%s",
++		                       v->preview, v->preview_width, v->preview_height, v->preview_turns,
++		                       v->preview_mirrored ? "true" : "false");
++	return g_string_free(s, FALSE);
++}
++
++int
++teams_call_video_json_bool(const char *payload, const char *key)
++{
++	gchar *needle;
++	const char *k, *c;
++	gsize nl;
++	if (!payload || !key)
++		return -1;
++	needle = g_strdup_printf("\"%s\"", key);
++	k = strstr(payload, needle);
++	nl = strlen(needle);
++	g_free(needle);
++	if (!k)
++		return -1;
++	c = k + nl;
++	while (*c == ' ' || *c == '\t' || *c == '\n' || *c == '\r') c++;
++	if (*c != ':')
++		return -1;
++	c++;
++	while (*c == ' ' || *c == '\t' || *c == '\n' || *c == '\r') c++;
++	if (!strncmp(c, "true", 4))
++		return 1;
++	if (!strncmp(c, "false", 5))
++		return 0;
++	return -1;
++}
+diff --git a/teams_call_video.h b/teams_call_video.h
+new file mode 100644
+index 0000000..2991ff2
+--- /dev/null
++++ b/teams_call_video.h
+@@ -0,0 +1,46 @@
++/* Video in a 1:1 Teams call, as the Phone app sees it: the state teams_call_luna.c keeps from the
++ * engine's video lines (teams_calling_set_video_cb) and the JSON fields it adds to
++ * callStateQuery. The SDP direction rules are teams_call_sdp.c's. GLib only, so
++ * tests/test_call_video.c runs it on its own. (The Phone app side is the one the Signal
++ * connector's call_video.c feeds.) */
++#ifndef TEAMS_CALL_VIDEO_H
++#define TEAMS_CALL_VIDEO_H
++
++#include <glib.h>
++
++typedef struct {
++	gboolean offered;        /* the far side offers to send video (its SDP's m=video) */
++	gboolean show_incoming;  /* the user wants the far side's picture (changeMedia incomingVideo) */
++	gboolean peer_camera;    /* the far side's video is arriving (engine: PEERVIDEO 1) */
++	gboolean sending;        /* our camera is sending (engine: VTX 1) */
++	gchar   *uri;            /* the far side's picture: gst-shm socket path, or NULL */
++	int      width, height;
++	gchar   *preview;        /* our camera's self-view socket, or NULL */
++	int      preview_width, preview_height, preview_turns;
++	gboolean preview_mirrored;
++} TeamsCallVideo;
++
++/* Back to a voice call with nothing known (frees the strings). */
++void teams_call_video_reset(TeamsCallVideo *v);
++
++/* Mark the call as one the far side offers video in (or not). Returns TRUE if that changed. */
++gboolean teams_call_video_set_offered(TeamsCallVideo *v, gboolean offered);
++
++/* Apply one of the engine's video lines (VSHM, VPREVIEW, VTX, PEERVIDEO, VIDEOERR). Returns TRUE
++ * if what the Phone app sees changed; *known (if not NULL) says whether it was a video line. */
++gboolean teams_call_video_engine_line(TeamsCallVideo *v, const char *line, gboolean *known);
++
++/* True if the call is a video call in either direction (for audiod's "video"). */
++gboolean teams_call_video_active(const TeamsCallVideo *v);
++
++/* The line's fields, without braces: "incomingVideo":..,"outgoingVideo":..,
++ * "incomingVideoState":"..","incomingVideoOrientation":0 */
++gchar *teams_call_video_line_fields(const TeamsCallVideo *v);
++
++/* The payload's fields, each preceded by a comma, or "" when there is no picture to show. */
++gchar *teams_call_video_payload_fields(const TeamsCallVideo *v);
++
++/* A boolean field of a flat JSON object: 1 true, 0 false, -1 absent or not a boolean. */
++int teams_call_video_json_bool(const char *payload, const char *key);
++
++#endif
+diff --git a/tests/test_call_video.c b/tests/test_call_video.c
+new file mode 100644
+index 0000000..bb80631
+--- /dev/null
++++ b/tests/test_call_video.c
+@@ -0,0 +1,161 @@
++/* Unit test for teams_call_video.c (GLib only): make check */
++#include "teams_call_video.h"
++#include <stdio.h>
++#include <string.h>
++
++static int failures;
++#define CHECK(c) do { if (!(c)) { failures++; fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); } } while (0)
++
++static gboolean has(const gchar *s, const char *sub) { return s && strstr(s, sub) != NULL; }
++
++static void test_voice_call(void)
++{
++	TeamsCallVideo v = {0};
++	gchar *l, *p;
++	teams_call_video_reset(&v);
++	CHECK(!teams_call_video_active(&v));
++	l = teams_call_video_line_fields(&v);
++	p = teams_call_video_payload_fields(&v);
++	CHECK(!strcmp(l, "\"incomingVideo\":false,\"outgoingVideo\":false,"
++	                 "\"incomingVideoState\":\"unavailable\",\"incomingVideoOrientation\":0"));
++	CHECK(!strcmp(p, ""));
++	g_free(l); g_free(p);
++	teams_call_video_reset(&v);
++}
++
++static void test_engine_lines(void)
++{
++	TeamsCallVideo v = {0};
++	gboolean known;
++	gchar *l, *p;
++	teams_call_video_reset(&v);
++
++	CHECK(teams_call_video_set_offered(&v, TRUE));
++	CHECK(!teams_call_video_set_offered(&v, TRUE));
++	l = teams_call_video_line_fields(&v);
++	CHECK(has(l, "\"incomingVideoState\":\"available\""));
++	g_free(l);
++
++	CHECK(teams_call_video_engine_line(&v, "VSHM /tmp/teams-video 640 480", &known) && known);
++	CHECK(!teams_call_video_engine_line(&v, "VSHM /tmp/teams-video 640 480", &known) && known);
++	CHECK(!strcmp(v.uri, "/tmp/teams-video") && v.width == 640 && v.height == 480);
++	/* not shown before the far side's video arrives */
++	l = teams_call_video_line_fields(&v);
++	CHECK(has(l, "\"incomingVideo\":false") && has(l, "\"available\""));
++	g_free(l);
++
++	CHECK(teams_call_video_engine_line(&v, "PEERVIDEO 1", &known) && known);
++	l = teams_call_video_line_fields(&v);
++	p = teams_call_video_payload_fields(&v);
++	CHECK(has(l, "\"incomingVideo\":true") && has(l, "\"streaming\""));
++	CHECK(!strcmp(p, ",\"videoURI\":\"/tmp/teams-video\",\"videoWidth\":640,\"videoHeight\":480"));
++	g_free(l); g_free(p);
++
++	CHECK(teams_call_video_engine_line(&v, "VPREVIEW /tmp/teams-preview 320 240 3 1", &known));
++	CHECK(v.preview_turns == 3 && v.preview_mirrored);
++	p = teams_call_video_payload_fields(&v);
++	CHECK(!has(p, "videoPreviewURI"));               /* only while our camera sends */
++	g_free(p);
++	CHECK(teams_call_video_engine_line(&v, "VTX 1", &known));
++	CHECK(!teams_call_video_engine_line(&v, "VTX 1", &known));
++	p = teams_call_video_payload_fields(&v);
++	CHECK(has(p, ",\"videoPreviewURI\":\"/tmp/teams-preview\",\"videoPreviewWidth\":320,"
++	             "\"videoPreviewHeight\":240,\"videoPreviewOrientation\":3,\"videoPreviewMirrored\":true"));
++	g_free(p);
++	l = teams_call_video_line_fields(&v);
++	CHECK(has(l, "\"outgoingVideo\":true"));
++	g_free(l);
++
++	/* the user hides the far side's picture: our own stays */
++	v.show_incoming = FALSE;
++	p = teams_call_video_payload_fields(&v);
++	CHECK(!has(p, "\"videoURI\"") && has(p, "\"videoPreviewURI\":\"/tmp/teams-preview\""));
++	g_free(p);
++	l = teams_call_video_line_fields(&v);
++	CHECK(has(l, "\"incomingVideo\":false") && has(l, "\"incomingVideoState\":\"available\""));
++	g_free(l);
++	v.show_incoming = TRUE;
++
++	CHECK(teams_call_video_engine_line(&v, "PEERVIDEO 0", &known));
++	CHECK(teams_call_video_engine_line(&v, "VTX 0", &known));
++	CHECK(teams_call_video_active(&v));             /* still offered */
++
++	/* VIDEOERR is a video line that changes nothing; others are not video lines */
++	CHECK(!teams_call_video_engine_line(&v, "VIDEOERR tx-camera", &known) && known);
++	CHECK(!teams_call_video_engine_line(&v, "SSRC 1234", &known) && !known);
++	CHECK(!teams_call_video_engine_line(&v, NULL, &known) && !known);
++	teams_call_video_reset(&v);
++	CHECK(!v.uri && !v.preview && !teams_call_video_active(&v) && v.show_incoming);
++}
++
++/* A call we place sends our camera before the far side's picture comes, if it ever does: the
++ * self-view is reported on its own. */
++static void test_self_view_first(void)
++{
++	TeamsCallVideo v = {0};
++	gboolean known;
++	gchar *p;
++	teams_call_video_reset(&v);
++	CHECK(teams_call_video_engine_line(&v, "VTX 1", &known));
++	CHECK(teams_call_video_engine_line(&v, "VPREVIEW /tmp/teams-preview.0 320 240 1 1", &known));
++	p = teams_call_video_payload_fields(&v);
++	CHECK(!strcmp(p, ",\"videoPreviewURI\":\"/tmp/teams-preview.0\",\"videoPreviewWidth\":320,"
++	                 "\"videoPreviewHeight\":240,\"videoPreviewOrientation\":1,\"videoPreviewMirrored\":true"));
++	g_free(p);
++	/* the far picture comes later and joins it */
++	CHECK(teams_call_video_engine_line(&v, "VSHM /tmp/teams-video.1 640 480", &known));
++	CHECK(teams_call_video_engine_line(&v, "PEERVIDEO 1", &known));
++	p = teams_call_video_payload_fields(&v);
++	CHECK(has(p, ",\"videoURI\":\"/tmp/teams-video.1\"") && has(p, "\"videoPreviewURI\""));
++	g_free(p);
++	/* our camera off: no self-view */
++	CHECK(teams_call_video_engine_line(&v, "VTX 0", &known));
++	p = teams_call_video_payload_fields(&v);
++	CHECK(!has(p, "videoPreviewURI") && has(p, "\"videoURI\""));
++	g_free(p);
++	teams_call_video_reset(&v);
++}
++
++static void test_bad_lines(void)
++{
++	TeamsCallVideo v = {0};
++	teams_call_video_reset(&v);
++	CHECK(!teams_call_video_engine_line(&v, "VSHM relative 640 480", NULL));
++	CHECK(!teams_call_video_engine_line(&v, "VSHM /tmp/a\"b 640 480", NULL));
++	CHECK(!teams_call_video_engine_line(&v, "VSHM /tmp/a 0 480", NULL));
++	CHECK(!teams_call_video_engine_line(&v, "VSHM /tmp/a 640", NULL));
++	CHECK(!teams_call_video_engine_line(&v, "VSHM /tmp/a 640x 480", NULL));
++	CHECK(!teams_call_video_engine_line(&v, "VSHM /tmp/a 99999 480", NULL));
++	CHECK(!teams_call_video_engine_line(&v, "VPREVIEW /tmp/p 320 240 4 0", NULL));
++	CHECK(!teams_call_video_engine_line(&v, "VPREVIEW /tmp/p 320 240 1", NULL));
++	CHECK(!teams_call_video_engine_line(&v, "VTX x", NULL));
++	CHECK(!teams_call_video_engine_line(&v, "VTX 1x", NULL));
++	CHECK(!teams_call_video_engine_line(&v, "PEERVIDEO ", NULL));
++	CHECK(!v.uri && !v.preview && !v.sending && !v.peer_camera);
++	teams_call_video_reset(&v);
++}
++
++static void test_json_bool(void)
++{
++	CHECK(teams_call_video_json_bool("{\"outgoingVideo\": true}", "outgoingVideo") == 1);
++	CHECK(teams_call_video_json_bool("{\"outgoingVideo\":false,\"incomingVideo\":true}", "outgoingVideo") == 0);
++	CHECK(teams_call_video_json_bool("{\"outgoingVideo\":false,\"incomingVideo\":true}", "incomingVideo") == 1);
++	CHECK(teams_call_video_json_bool("{\"outgoingVideo\":\"yes\"}", "outgoingVideo") == -1);
++	CHECK(teams_call_video_json_bool("{}", "outgoingVideo") == -1);
++	CHECK(teams_call_video_json_bool(NULL, "outgoingVideo") == -1);
++}
++
++int main(void)
++{
++	test_voice_call();
++	test_engine_lines();
++	test_self_view_first();
++	test_bad_lines();
++	test_json_bool();
++	if (failures) {
++		fprintf(stderr, "%d failure(s)\n", failures);
++		return 1;
++	}
++	printf("PASS test_call_video\n");
++	return 0;
++}

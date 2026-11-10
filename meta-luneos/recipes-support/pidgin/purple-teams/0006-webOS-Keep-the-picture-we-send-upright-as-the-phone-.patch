@@ -1,0 +1,428 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 10 Nov 2026 08:41:46 +0100
+Subject: [PATCH] webOS: Keep the picture we send upright as the phone turns
+
+Teams carries no rotation with the video (its SDP has no
+urn:3gpp:video-orientation), so the far side shows our picture as it
+comes, and it was turned upright only for a phone held upright: with the
+phone turned a quarter, Android showed us lying on our side.
+
+The Phone app sends how the phone is held in changeMedia as
+deviceOrientation (the shell's quarter turns, 0 top up, 1 left edge up,
+2 upside down, 3 right edge up). teams_call_luna.c reads it
+(teams_call_video_json_turns) and teams_calling_set_device_turns() hands
+it to the media engine as "TURN <0..3>". teams_media (luneos-synergy-
+connectors) turns what it sends by it; so does the PurpleMedia engine:
+its camera head gets a videoflip of its own (pmdevflip) on the send
+branch, turned the opposite way to the phone, as the front camera's
+picture is not mirrored (teams_video_send_direction; checked on calls to
+Android in all four positions with teams_media, which turns the same
+way). The size we send stays, so a picture turned sideways goes out
+upright with borders; the self-view is left as it is, for the Phone app
+turns that one with the screen. A camera head made later starts turned
+so.
+
+Once droidvenc runs, its answers to caps queries keep anything in front
+of it from being negotiated again, though what it takes never changes:
+in teams_media on sargo the first turn stopped the camera with
+not-negotiated. The size filter in front of the encoder (pmsendcaps) now
+answers CAPS and ACCEPT_CAPS for it.
+
+teams_video_send_direction() is tested in test_call_sdp,
+teams_call_video_json_turns() in test_call_video.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ teams_call_luna.c       | 14 ++++---
+ teams_call_pmedia.c     | 92 +++++++++++++++++++++++++++++++++++++----
+ teams_call_sdp.c        |  7 ++++
+ teams_call_sdp.h        |  9 ++++
+ teams_call_video.c      | 17 ++++++++
+ teams_call_video.h      |  5 +++
+ teams_calling.c         |  8 ++++
+ teams_calling.h         |  5 +++
+ tests/test_call_sdp.c   | 13 ++++++
+ tests/test_call_video.c | 15 +++++++
+ 10 files changed, 173 insertions(+), 12 deletions(-)
+
+diff --git a/teams_call_luna.c b/teams_call_luna.c
+index a440b2a..cc75055 100644
+--- a/teams_call_luna.c
++++ b/teams_call_luna.c
+@@ -166,13 +166,14 @@ cb_disconnect(LSHandle *sh, LSMessage *msg, void *ctx)
+ 
+ static void push_payload(void);
+ 
+-/* changeMedia {"outgoingVideo":bool, "incomingVideo":bool}, as the Phone app sends it; each field
+- * optional. outgoingVideo turns our camera on or off (sent once our answer lets us send video);
+- * incomingVideo shows or hides the far side's picture, which keeps arriving. */
++/* changeMedia {"outgoingVideo":bool, "incomingVideo":bool, "deviceOrientation":0..3}, as the
++ * Phone app sends it; each field optional. outgoingVideo turns our camera on or off (sent once
++ * our answer lets us send video); incomingVideo shows or hides the far side's picture, which
++ * keeps arriving; deviceOrientation is how the phone is held, for the picture we send. */
+ static bool
+ cb_change_media(LSHandle *sh, LSMessage *msg, void *ctx)
+ {
+-	LSError err; int out, in; gboolean ok = TRUE;
++	LSError err; int out, in, turns; gboolean ok = TRUE;
+ 	const char *payload = LSMessageGetPayload(msg);
+ 	(void) ctx;
+ 	LSErrorInit(&err);
+@@ -183,8 +184,11 @@ cb_change_media(LSHandle *sh, LSMessage *msg, void *ctx)
+ 	}
+ 	out = teams_call_video_json_bool(payload, "outgoingVideo");
+ 	in = teams_call_video_json_bool(payload, "incomingVideo");
++	turns = teams_call_video_json_turns(payload);
+ 	if (out >= 0) ok = teams_calling_set_camera(g_sa, out == 1);
+-	teams_call_log("changeMedia outgoing %d incoming %d%s", out, in, ok ? "" : " (camera unavailable)");
++	if (turns >= 0) teams_calling_set_device_turns(g_sa, turns);
++	teams_call_log("changeMedia outgoing %d incoming %d turns %d%s", out, in, turns,
++	               ok ? "" : " (camera unavailable)");
+ 	if (in >= 0 && g_video.show_incoming != (in == 1)) {
+ 		g_video.show_incoming = in == 1;
+ 		push_payload();
+diff --git a/teams_call_pmedia.c b/teams_call_pmedia.c
+index 9546d3e..de38590 100644
+--- a/teams_call_pmedia.c
++++ b/teams_call_pmedia.c
+@@ -137,7 +137,10 @@ typedef struct {
+ 	GstElement *venc;                 /* under lock: Farstream's droidvenc (a reference) */
+ 	gboolean    latency_due;          /* main loop: the pipeline's latency to be redistributed */
+ 	gint        frames_at_on;         /* main loop: tx_frames when the camera last went on */
++	gint        dev_turns;            /* atomic: the phone's quarter turns when the head was made */
+ 	gint        cam_failed;           /* atomic: 1 = our camera head posted an error (PmCamBin) */
++	GstElement *dev_flip;             /* main loop: the videoflip that turns what we send with the
++	                                   * phone (TURN), a reference, or NULL */
+ 	gchar      *cam_error;            /* under lock: that error's text */
+ } PmVideo;
+ 
+@@ -184,6 +187,7 @@ struct _TeamsPMedia {
+ 	gboolean       vrestarting;    /* VRESTART: VRESTARTED is due once its candidates are complete */
+ 	gboolean       cam_on;         /* VIDEO 1 (until VIDEO 0): a new video session sends too */
+ 	gint           cam_w, cam_h, cam_kbps;   /* what that VIDEO 1 asked for */
++	gint           dev_turns;      /* TURN: how the phone is held, the shell's quarter turns */
+ 	gchar         *vruf, *vrpw;
+ 	GList         *vrcands_held;
+ 	gboolean       vcreds_sent, vgathered, vpaired;
+@@ -887,6 +891,7 @@ pm_vx_unref(gpointer p)
+ 	if (vx->size_filter) gst_object_unref(vx->size_filter);
+ 	if (vx->cam) gst_object_unref(vx->cam);
+ 	if (vx->send_caps) gst_object_unref(vx->send_caps);
++	if (vx->dev_flip) gst_object_unref(vx->dev_flip);
+ 	if (vx->venc) gst_object_unref(vx->venc);
+ 	g_free(vx->shm_path);
+ 	g_free(vx->pv_path);
+@@ -1224,6 +1229,36 @@ pm_cam_bin_init(PmCamBin *b)
+ 	b->vx = NULL;
+ }
+ 
++/* Streaming thread: a caps query on its way from our camera head into Farstream's encoder.
++ * Once droidvenc runs it answers them so that nothing in front of it can be negotiated again:
++ * the phone turning (pmdevflip) changed the size into videoconvert, and the camera stopped with
++ * not-negotiated (teams_media on sargo, 10 Nov 2026). What we send never changes size, so the
++ * size filter answers for what is behind it with what it lets through. */
++static GstPadProbeReturn
++pm_probe_answer_caps(GstPad *pad, GstPadProbeInfo *info, gpointer u)
++{
++	GstQuery *q = GST_PAD_PROBE_INFO_QUERY(info);
++	GstCaps *fixed = NULL;
++	(void) pad;
++	if (GST_QUERY_TYPE(q) != GST_QUERY_CAPS && GST_QUERY_TYPE(q) != GST_QUERY_ACCEPT_CAPS)
++		return GST_PAD_PROBE_OK;
++	g_object_get(u, "caps", &fixed, NULL);
++	if (!fixed) return GST_PAD_PROBE_OK;
++	if (GST_QUERY_TYPE(q) == GST_QUERY_CAPS) {
++		GstCaps *filter = NULL, *res;
++		gst_query_parse_caps(q, &filter);
++		res = filter ? gst_caps_intersect_full(filter, fixed, GST_CAPS_INTERSECT_FIRST) : gst_caps_ref(fixed);
++		gst_query_set_caps_result(q, res);
++		gst_caps_unref(res);
++	} else {
++		GstCaps *c = NULL;
++		gst_query_parse_accept_caps(q, &c);
++		gst_query_set_accept_caps_result(q, c && gst_caps_can_intersect(c, fixed));
++	}
++	gst_caps_unref(fixed);
++	return GST_PAD_PROBE_HANDLED;
++}
++
+ static GstElement *
+ pm_make_vcam(PurpleMedia *media, const gchar *sid, const gchar *who)
+ {
+@@ -1232,6 +1267,7 @@ pm_make_vcam(PurpleMedia *media, const gchar *sid, const gchar *who)
+ 	gboolean test = g_getenv("TEAMS_PMEDIA_VSRC") != NULL;
+ 	const char *pv = g_getenv("TEAMS_PMEDIA_PREVIEW_SHM");
+ 	gint cw = test ? 0 : pm_camera_cw(), w = PM_VIDEO_W, h = PM_VIDEO_H, pw = PM_PREVIEW_W, ph = PM_PREVIEW_H;
++	gint pm_dev_turns = vx ? g_atomic_int_get(&vx->dev_turns) : 0;
+ 	gchar *desc, *head;
+ 	GstElement *bin, *e, *outer;
+ 	GError *err = NULL;
+@@ -1248,13 +1284,19 @@ pm_make_vcam(PurpleMedia *media, const gchar *sid, const gchar *who)
+ 	                      "pixel-aspect-ratio=1/1 ! queue leaky=downstream max-size-buffers=2 ! "
+ 	                      "videoflip video-direction=%s ! videoconvert ! videoscale",
+ 	                      PM_VIDEO_W, PM_VIDEO_H, direction[cw & 3]);
+-	desc = g_strdup_printf("%s ! capsfilter name=pmsendcaps caps=video/x-raw,format=NV12,width=%d,height=%d,"
+-	                       "pixel-aspect-ratio=1/1 ! tee name=pmvt "
+-	                       "pmvt. ! queue name=pmvout leaky=downstream max-size-buffers=2 "
++	/* What we send is turned once more with the phone (pmdevflip, TURN): Teams carries no
++	 * rotation, and the size we send stays (pm_camera_set), so a picture turned sideways comes
++	 * upright with borders. The self-view stays as the camera is held: the Phone app turns that
++	 * one with the screen. */
++	desc = g_strdup_printf("%s ! tee name=pmvt "
++	                       "pmvt. ! queue leaky=downstream max-size-buffers=2 ! "
++	                       "videoflip name=pmdevflip video-direction=%s ! videoconvert ! videoscale add-borders=true ! "
++	                       "capsfilter name=pmsendcaps caps=video/x-raw,format=NV12,width=%d,height=%d,"
++	                       "pixel-aspect-ratio=1/1 ! queue name=pmvout leaky=downstream max-size-buffers=2 "
+ 	                       "pmvt. ! queue leaky=downstream max-size-buffers=2 ! videoconvert ! videoscale ! "
+ 	                       "video/x-raw,format=I420,width=%d,height=%d,pixel-aspect-ratio=1/1 ! "
+ 	                       "queue leaky=downstream max-size-buffers=2 ! shmsink name=pmpreview",
+-	                       head, w, h, pw, ph);
++	                       head, teams_video_send_direction(pm_dev_turns), w, h, pw, ph);
+ 	g_free(head);
+ 	bin = gst_parse_bin_from_description(desc, FALSE, &err);
+ 	if (!bin) {
+@@ -1276,9 +1318,21 @@ pm_make_vcam(PurpleMedia *media, const gchar *sid, const gchar *who)
+ 			if (vx->cam) gst_object_unref(vx->cam);
+ 			vx->cam = e;
+ 		}
+-		if (vx && (e = gst_bin_get_by_name(GST_BIN(bin), "pmsendcaps"))) {
+-			if (vx->send_caps) gst_object_unref(vx->send_caps);
+-			vx->send_caps = e;
++		if (vx && (e = gst_bin_get_by_name(GST_BIN(bin), "pmdevflip"))) {
++			if (vx->dev_flip) gst_object_unref(vx->dev_flip);
++			vx->dev_flip = e;
++		}
++		if ((e = gst_bin_get_by_name(GST_BIN(bin), "pmsendcaps"))) {
++			/* the probe holds the element: the head owns it for as long as the probe can run */
++			p = gst_element_get_static_pad(e, "src");
++			gst_pad_add_probe(p, GST_PAD_PROBE_TYPE_QUERY_DOWNSTREAM, pm_probe_answer_caps, e, NULL);
++			gst_object_unref(p);
++			if (vx) {
++				if (vx->send_caps) gst_object_unref(vx->send_caps);
++				vx->send_caps = e;
++			} else {
++				gst_object_unref(e);
++			}
+ 		}
+ 		if ((e = gst_bin_get_by_name(GST_BIN(bin), "pmpreview"))) {
+ 			g_object_set(e, "socket-path", pv && *pv ? pv : PM_PREVIEW_SHM, "shm-size", (guint) PM_SHM_SIZE,
+@@ -1878,6 +1932,27 @@ pm_camera_set(TeamsPMedia *pm, gboolean on)
+ 	return TRUE;
+ }
+ 
++/* TURN: how the phone is held now (the shell's quarter turns). What we send follows it from the
++ * camera head's next frame; a head made later (a new video session) starts turned so. */
++static void
++pm_set_device_turns(TeamsPMedia *pm, gint turns)
++{
++	if (turns < 0 || turns > 3) {
++		pm_log("TURN %d: not a quarter turn", turns);
++		return;
++	}
++	if (turns == pm->dev_turns) return;
++	pm->dev_turns = turns;
++	if (pm->vx) {
++		g_atomic_int_set(&pm->vx->dev_turns, turns);
++		if (pm->vx->dev_flip)
++			gst_util_set_object_arg(G_OBJECT(pm->vx->dev_flip), "video-direction",
++			                        teams_video_send_direction(turns));
++	}
++	pm_log("the phone is held %d quarter turn(s) round: what we send is turned %s", turns,
++	       teams_video_send_direction(turns));
++}
++
+ /* ---- media signals ------------------------------------------------------------------------- */
+ 
+ static const char *
+@@ -2214,6 +2289,7 @@ pm_video_build(TeamsPMedia *pm, const char *rxkey, const char *ruf, const char *
+ 	pm->vx = g_new0(PmVideo, 1);
+ 	pm->vx->refs = 1;
+ 	pm->vx->tx_bps = (pm->cam_kbps > 0 ? pm->cam_kbps : PM_VIDEO_KBPS) * 1000;
++	pm->vx->dev_turns = pm->dev_turns;
+ 	g_mutex_init(&pm->vx->lock);
+ 	pm->peer_video = -1;
+ 	pm_use_video_elements(manager, send);
+@@ -2571,6 +2647,8 @@ pm_handle_line(TeamsPMedia *pm, gchar *line)
+ 			pm->cam_on = FALSE;
+ 			pm_camera_set(pm, FALSE);
+ 		}
++	} else if (!strcmp(t[0], "TURN") && n > 1) {
++		pm_set_device_turns(pm, (gint) g_ascii_strtoll(t[1], NULL, 10));
+ 	} else if (!strcmp(t[0], "STOP")) {
+ 		pm_stop_input(pm);
+ 		pm_end_media(pm);
+diff --git a/teams_call_sdp.c b/teams_call_sdp.c
+index 7c11a23..1400a0d 100644
+--- a/teams_call_sdp.c
++++ b/teams_call_sdp.c
+@@ -265,3 +265,10 @@ teams_sdp_video_ice_own(const char *sdp)
+ 	g_free(a); g_free(v); g_free(auf); g_free(vuf); g_free(vpw);
+ 	return r;
+ }
++
++const char *
++teams_video_send_direction(int device_turns)
++{
++	static const char *const direction[] = { "identity", "90r", "180", "90l" };
++	return direction[(4 - (device_turns & 3)) & 3];
++}
+diff --git a/teams_call_sdp.h b/teams_call_sdp.h
+index 9eabe3b..d00cd20 100644
+--- a/teams_call_sdp.h
++++ b/teams_call_sdp.h
+@@ -11,6 +11,15 @@
+  * (port 0). */
+ const char *teams_sdp_video_direction(const char *sdp);
+ 
++/* Teams carries no rotation with the video (its SDP has no urn:3gpp:video-orientation): the
++ * far side shows the picture as it comes. The videoflip direction that keeps our front camera's
++ * picture upright with the phone held device_turns quarter turns away from upright (the shell's
++ * 0 top up, 1 left edge up, 2 upside down, 3 right edge up), on top of the turn that makes it
++ * upright held upright. The front camera's picture is not mirrored, so it turns the opposite way
++ * to the phone: one quarter turn counter-clockwise for each the phone is turned (checked on a
++ * call to Android with teams_media, which turns it the same way). */
++const char *teams_video_send_direction(int device_turns);
++
+ /* Our answer's direction for the video m-line (RFC 3264 6.1), from the offer's direction, whether
+  * the engine has video at all and whether our camera is to send. */
+ const char *teams_video_answer_direction(const char *offer_dir, gboolean engine_video, gboolean camera);
+diff --git a/teams_call_video.c b/teams_call_video.c
+index 7841f65..a824014 100644
+--- a/teams_call_video.c
++++ b/teams_call_video.c
+@@ -204,3 +204,20 @@ teams_call_video_json_bool(const char *payload, const char *key)
+ 		return 0;
+ 	return -1;
+ }
++
++int
++teams_call_video_json_turns(const char *payload)
++{
++	const char *k, *c;
++	if (!payload || !(k = strstr(payload, "\"deviceOrientation\"")))
++		return -1;
++	c = k + strlen("\"deviceOrientation\"");
++	while (*c == ' ' || *c == '\t' || *c == '\n' || *c == '\r') c++;
++	if (*c != ':')
++		return -1;
++	c++;
++	while (*c == ' ' || *c == '\t' || *c == '\n' || *c == '\r') c++;
++	if (*c < '0' || *c > '3' || (c[1] >= '0' && c[1] <= '9') || c[1] == '.')
++		return -1;
++	return *c - '0';
++}
+diff --git a/teams_call_video.h b/teams_call_video.h
+index 2991ff2..bb51666 100644
+--- a/teams_call_video.h
++++ b/teams_call_video.h
+@@ -43,4 +43,9 @@ gchar *teams_call_video_payload_fields(const TeamsCallVideo *v);
+ /* A boolean field of a flat JSON object: 1 true, 0 false, -1 absent or not a boolean. */
+ int teams_call_video_json_bool(const char *payload, const char *key);
+ 
++/* changeMedia's deviceOrientation: how the phone is held, in the shell's quarter turns (0 top
++ * up, 1 left edge up, 2 upside down, 3 right edge up), or -1 when absent or not 0..3. */
++int teams_call_video_json_turns(const char *payload);
++
++
+ #endif
+diff --git a/teams_calling.c b/teams_calling.c
+index 961c3b6..39de24f 100644
+--- a/teams_calling.c
++++ b/teams_calling.c
+@@ -903,6 +903,14 @@ teams_calling_set_camera(TeamsAccount *sa, gboolean on)
+ 	return TRUE;
+ }
+ 
++gboolean
++teams_calling_set_device_turns(TeamsAccount *sa, int turns)
++{
++	TeamsMediaProc *mp = g_mproc;
++	if (!mp || !mp->call || mp->call->sa != sa || turns < 0 || turns > 3) return FALSE;
++	return media_send(mp, "TURN %d\n", turns);
++}
++
+ /* Build the SDP answer from our media params + the offer (SDES-GCM path; the offer supports both
+  * SDES a=crypto and DTLS, and our engine keys via SDES). Shape mirrors the web client's accepted
+  * answer: BUNDLE + mid:audio_0/video_1 + rtcp-mux + label, a=crypto instead of DTLS fingerprint.
+diff --git a/teams_calling.h b/teams_calling.h
+index 3be4eed..005d4c0 100644
+--- a/teams_calling.h
++++ b/teams_calling.h
+@@ -102,6 +102,11 @@ void teams_calling_set_video_cb(TeamsCallVideoCb cb);
+  * answer lets us send video; until then it is kept for the next answer. FALSE: no call. */
+ gboolean teams_calling_set_camera(TeamsAccount *sa, gboolean on);
+ 
++/* How the phone is held (changeMedia deviceOrientation, the shell's quarter turns 0..3), so the
++ * engine keeps the picture we send upright: Teams sends no rotation with it. FALSE when there is
++ * no call of this account's. */
++gboolean teams_calling_set_device_turns(TeamsAccount *sa, int turns);
++
+ /* Actions for the front end. Return FALSE if no such call / not
+  * possible. answer/dial spin up the media engine; reject/hangup tear down + POST control. */
+ gboolean teams_calling_answer(TeamsAccount *sa);
+diff --git a/tests/test_call_sdp.c b/tests/test_call_sdp.c
+index 1495d3f..e2e3dcd 100644
+--- a/tests/test_call_sdp.c
++++ b/tests/test_call_sdp.c
+@@ -206,6 +206,18 @@ static void test_sections(void)
+ 	CHECK(!teams_sdp_video_ice_own(NULL));
+ }
+ 
++/* The picture we send, kept upright as the phone turns: the front camera's picture turns the
++ * opposite way to the phone (shell quarter turns), as checked on a call. */
++static void test_send_direction(void)
++{
++	CHECK(!strcmp(teams_video_send_direction(0), "identity"));
++	CHECK(!strcmp(teams_video_send_direction(1), "90l"));
++	CHECK(!strcmp(teams_video_send_direction(2), "180"));
++	CHECK(!strcmp(teams_video_send_direction(3), "90r"));
++	CHECK(!strcmp(teams_video_send_direction(5), "90l"));
++	CHECK(!strcmp(teams_video_send_direction(-1), "90r"));
++}
++
+ int main(void)
+ {
+ 	test_ice_candidate();
+@@ -214,6 +226,7 @@ int main(void)
+ 	test_answer_direction();
+ 	test_needs_offer();
+ 	test_sections();
++	test_send_direction();
+ 	if (failures) {
+ 		fprintf(stderr, "%d failure(s)\n", failures);
+ 		return 1;
+diff --git a/tests/test_call_video.c b/tests/test_call_video.c
+index bb80631..b273006 100644
+--- a/tests/test_call_video.c
++++ b/tests/test_call_video.c
+@@ -145,6 +145,20 @@ static void test_json_bool(void)
+ 	CHECK(teams_call_video_json_bool(NULL, "outgoingVideo") == -1);
+ }
+ 
++static void test_json_turns(void)
++{
++	CHECK(teams_call_video_json_turns("{\"id\":\"x\",\"deviceOrientation\":0}") == 0);
++	CHECK(teams_call_video_json_turns("{\"deviceOrientation\": 3, \"id\":\"x\"}") == 3);
++	CHECK(teams_call_video_json_turns("{\"deviceOrientation\":1}") == 1);
++	CHECK(teams_call_video_json_turns("{\"deviceOrientation\":4}") == -1);
++	CHECK(teams_call_video_json_turns("{\"deviceOrientation\":12}") == -1);
++	CHECK(teams_call_video_json_turns("{\"deviceOrientation\":1.5}") == -1);
++	CHECK(teams_call_video_json_turns("{\"deviceOrientation\":-1}") == -1);
++	CHECK(teams_call_video_json_turns("{\"deviceOrientation\":\"1\"}") == -1);
++	CHECK(teams_call_video_json_turns("{\"outgoingVideo\":true}") == -1);
++	CHECK(teams_call_video_json_turns(NULL) == -1);
++}
++
+ int main(void)
+ {
+ 	test_voice_call();
+@@ -152,6 +166,7 @@ int main(void)
+ 	test_self_view_first();
+ 	test_bad_lines();
+ 	test_json_bool();
++	test_json_turns();
+ 	if (failures) {
+ 		fprintf(stderr, "%d failure(s)\n", failures);
+ 		return 1;
