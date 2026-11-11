@@ -135,8 +135,31 @@ do_configure() {
     gn --script-executable=${PYTHON} ${EXTRA_OEGN} gen ${OUT_DIR} --args="${GN_ARGS}"
 }
 
-# Unfortunately not using ninja-native
+# depot_tools/ninja is a link to ninja-native (webruntime-repo_151.inc).
 NINJA_OPTS = "${PARALLEL_MAKE} -C ${OUT_DIR}"
+
+# Ninja jobs for a Chromium/V8 compile, sized to the machine that runs it:
+# one job per CPU, but no more than MemAvailable allows at gib_per_job each.
+# Compile units, not CPUs, are what run a Chromium build out of memory, so a
+# fixed -j tuned for one workstation either thrashes a smaller builder or
+# leaves a bigger one idle. MemAvailable rather than MemTotal so that memory
+# something else is holding - a running VM, a reserved hugepage pool - is not
+# counted. The worker parses the recipe again for each task, so this is read
+# when do_compile starts, not when the cooker first parsed the recipe.
+# PARALLEL_MAKE is in BB_HASHEXCLUDE_COMMON, so a different result on another
+# machine does not change the task hash or invalidate shared sstate.
+def webruntime_ninja_jobs(d, gib_per_job):
+    import oe.utils
+    cpus = oe.utils.cpu_count()
+    try:
+        with open('/proc/meminfo') as f:
+            for line in f:
+                if line.startswith('MemAvailable:'):
+                    avail_gib = int(line.split()[1]) / (1024 * 1024)
+                    return max(1, min(cpus, int(avail_gib // gib_per_job)))
+    except (OSError, ValueError):
+        pass
+    return cpus
 # Use -v to see the commands executed by ninja
 NINJA_VERBOSE ?= ""
 NINJA = "${S}/depot_tools/ninja ${NINJA_VERBOSE} ${NINJA_OPTS}"
