@@ -54,10 +54,22 @@ command -v binder-list >/dev/null 2>&1 || exit 0
 slots=$(sed -n 's/^\[\(slot[0-9]\+\)\].*/\1/p' "$CONF" | sort -u)
 [ -n "$slots" ] || exit 0
 
+# An AIDL RIL (InterfaceType = aidl, written by luneos-device-config for a
+# vendor such as the BraX3's) registers android.hardware.radio.modem.IRadioModem
+# /slotN on /dev/binder rather than IRadio/slotN on /dev/hwbinder; waiting for
+# the HIDL name there gave up after the full timeout on every boot.
+DEV=/dev/hwbinder
+PATTERN='IRadio/slot[0-9]+'
+if grep -qiE '^[[:space:]]*InterfaceType[[:space:]]*=[[:space:]]*aidl' "$CONF"; then
+    DEV=$(sed -n 's/^[[:space:]]*Device[[:space:]]*=[[:space:]]*//p' "$CONF" | head -n 1)
+    [ -n "$DEV" ] || DEV=/dev/binder
+    PATTERN='radio\.modem\.IRadioModem/slot[0-9]+'
+fi
+
 i=0
 while [ "$i" -lt "$TIMEOUT" ]; do
-    have=$(binder-list -d /dev/hwbinder 2>/dev/null |
-           grep -oE 'IRadio/slot[0-9]+' | sed 's|.*/||' | sort -u)
+    have=$(binder-list -d "$DEV" 2>/dev/null |
+           grep -oE "$PATTERN" | sed 's|.*/||' | sort -u)
     missing=
     for s in $slots; do
         echo "$have" | grep -qx "$s" || missing="$missing $s"
