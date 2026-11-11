@@ -81,8 +81,9 @@ python3 tools/stage-tangorpro-workaround.py apply /path/to/mounted/luneos-rootfs
 
 The tool refuses the running `/`, symlinks that escape the supplied rootfs,
 different existing tablet rules, and startup hooks that differ from the pinned
-versions covered by the tests. In particular, it may reject the older public
-image: that requires inspection rather than assuming its hooks are compatible.
+versions covered by the tests. Inspection of the public archive confirmed that
+its stub hook and sleep stub match those fixtures exactly. A shared rootfs does
+not need a tangorpro display adaptation to use this separate per-device rule.
 It does not flash a device or produce a complete boot image.
 
 To undo this overlay before booting, use `remove` instead of `apply`. On an

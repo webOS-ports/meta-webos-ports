@@ -94,9 +94,9 @@ class WorkaroundTests(unittest.TestCase):
             dest.chmod(0o755)
         (self.runtime / "pre-start.sh").write_text(
             "#!/bin/sh\nrun-parts /var/lib/lxc/android/pre-start.d || true\n")
-        marker = self.root / "usr/share/luneos/adaptations/tangorpro/deviceinfo"
+        marker = self.root / "etc/luneos-release"
         marker.parent.mkdir(parents=True)
-        marker.write_text('deviceinfo_touch_rotate="0"\n')
+        marker.write_text("LuneOS\n")
         self.original = b"ORIGINAL VENDOR STORAGE PROXY\n"
         self.proxy = self.container / "vendor/bin/storageproxyd"
         self.proxy.write_bytes(self.original)
@@ -157,6 +157,11 @@ class WorkaroundTests(unittest.TestCase):
         self.assertEqual(target.stat().st_mode & 0o777, 0o644)
         stager.stage(self.root, "remove")
         self.assertFalse(target.exists())
+
+    def test_shared_rootfs_does_not_need_a_tangorpro_display_adaptation(self):
+        self.assertFalse((self.root / "usr/share/luneos/adaptations/tangorpro/deviceinfo").exists())
+        stager.stage(self.root, "apply")
+        self.assertTrue((self.root / stager.DEST).is_file())
 
     def test_unsupported_startup_hook_is_rejected_without_changes(self):
         (self.runtime / "pre-start.d/50-stub-services").write_text("#!/bin/sh\nexit 0\n")

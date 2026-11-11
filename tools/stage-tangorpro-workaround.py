@@ -25,9 +25,12 @@ def validate(root):
     root = root.resolve(strict=True)
     if not root.is_dir() or root == Path("/"):
         raise ValueError("Supply an offline LuneOS rootfs directory, never the running /")
-    marker = inside(root, "usr/share/luneos/adaptations/tangorpro/deviceinfo")
-    if not marker.is_file():
-        raise ValueError("This rootfs has no LuneOS tangorpro adaptation")
+    # The public shared Halium rootfs predates the tangorpro adaptation file,
+    # but already has the per-codename stub hook. The rule does not depend on
+    # luneos-device-config; identify the OS by its own release marker instead.
+    markers = [inside(root, "etc/luneos-release"), inside(root, "etc/webos-release")]
+    if not any(marker.is_file() for marker in markers):
+        raise ValueError("This rootfs has no LuneOS release marker")
     for relative, fixture in [
         ("var/lib/lxc/android/pre-start.d/50-stub-services", "50-stub-services"),
         ("var/lib/lxc/android/stubs/stub-sleep", "stub-sleep"),
