@@ -35,6 +35,10 @@
 OUT=/run/droid-audio
 mkdir -p "$OUT"
 CARD="$OUT/droid-card.pa"
+# The daemon's rate drop-in, written further down only when the card runs at
+# 48 kHz. Gone first, so no exit below can leave an earlier one in place.
+DAEMON="$OUT/daemon.conf"
+rm -f "$DAEMON"
 
 SRC=""
 for d in /android/vendor/etc /vendor/etc /android/system/etc /odm/etc; do
@@ -100,5 +104,22 @@ END { exit !found }
     RATE=" rate=48000"
 fi
 echo "load-module module-droid-card config=$OUT/audio_policy_configuration.xml$RATE" > "$CARD"
+
+# The daemon's own rate, to match. The webOS virtual sinks (pmedia, palerts,
+# ...) are null sinks opened at pulseaudio's default-sample-rate, 44.1 kHz, and
+# what plays into them reaches the card through pcm_output. With the card at
+# 48 kHz that put a 48 kHz stream through two conversions, 48 -> 44.1 -> 48, and
+# a 44.1 kHz one through a conversion it would have needed anyway. At 48 kHz the
+# virtual sinks pass 48 kHz audio straight through and 44.1 kHz audio is
+# converted once. Measured on the Titan Pocket (11 Nov 2026): pmedia moves from
+# 44100 to 48000 Hz, pcm_output stays at 48000.
+#
+# pulseaudio reads daemon.conf.d/*.conf after daemon.conf, and this package
+# links /etc/pulse/daemon.conf.d/50-droid-rate.conf to the file written here; a
+# link with nothing behind it is skipped, which leaves the default in place.
+# alternate-sample-rate goes to 44.1 kHz, so the pair still covers both families.
+if [ -n "$RATE" ]; then
+    printf 'default-sample-rate = 48000\nalternate-sample-rate = 44100\n' > "$DAEMON"
+fi
 
 exit 0
