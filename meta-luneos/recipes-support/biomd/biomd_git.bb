@@ -28,6 +28,7 @@ SRC_URI = " \
     file://0002-Makefile-allow-building-without-the-face-backend.patch \
     file://0003-fingerprint-accept-free-form-finger-names.patch \
     file://0004-fingerprint-add-an-AIDL-backend.patch \
+    file://0005-fingerprint-survive-a-restarted-Gatekeeper-HAL-in-th.patch \
     file://biomd-hal-wait.sh \
     file://10-hal-wait.conf \
 "
