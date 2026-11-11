@@ -23,7 +23,7 @@ ANY_OF_DISTRO_FEATURES = "vulkan opengl"
 
 DEPENDS = "virtual/gettext wayland wayland-native luna-service2 pixman freetype fontconfig openssl pango cairo icu webos-wayland-extensions libxkbcommon libexif dbus pciutils udev libcap alsa-lib virtual/egl elfutils-native libdrm atk gperf-native gconf libwebosi18n bison-native xorgproto nss nspr curl nspr-native nss-native pmloglib glib-2.0-native python3-six-native python3-beautifulsoup4-native python3-soupsieve-native python3-lxml-native python3-html5lib-native python3-webencodings-native"
 
-INC_PR = "r82"
+INC_PR = "r84"
 # Enable this in webos-local.conf or in recipe to build
 DEPLOY_CHROMEDRIVER ?= "false"
 DEPLOY_WAM_DEMO ?= "false"
@@ -226,6 +226,12 @@ do_install() {
 
     if ${DEPLOY_BROWSERSHELL}; then
         install_ls2_roles_acg ${BROWSERSHELL_APPLICATION}
+        # browser_shell runs as an app container and registers its app's
+        # name. Nothing registers or calls "browser-shell", which its role
+        # rightly does not allow, so leave that service file out and let
+        # do_configure_manifest list none.
+        rm ${D}${webos_sysbus_servicedir}/${BROWSERSHELL_APPLICATION}.service
+        rmdir ${D}${webos_sysbus_servicedir}
     else
         install_ls2_roles_acg ${APP_SHELL_RUNTIME}
     fi
